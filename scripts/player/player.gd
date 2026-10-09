@@ -12,11 +12,23 @@ const JUMP_VELOCITY := 4.2
 const MOUSE_SENSITIVITY := 0.0025
 const STAND_HEAD_Y := 1.65
 const CROUCH_HEAD_Y := 1.05
+const DOWNED_HEAD_Y := 0.35
+const CRAWL_SPEED := 0.6
+const REVIVE_RANGE := 2.5
+const HITBOX_MASK := 1 << 1
 const INTERACT_RANGE := 2.2
 ## Carried mass below this costs no speed; at MAX_LOAD_KG you are at the slowest.
 const FREE_LOAD_KG := 15.0
 const MAX_LOAD_KG := 60.0
 const MIN_LOAD_MULT := 0.55
+const BASE_FOV := 80.0
+## Aimed spread is this fraction of hip-fire spread; moving and jumping widen it.
+const ADS_SPREAD_MULT := 0.12
+const ADS_SPEED_MULT := 0.6
+## View model position (camera-local) at the hip; aiming puts the weapon's sight point
+## (VoxelArt.sight_point) here instead.
+const HIP_VIEW := Vector3(0.14, -0.16, -0.38)
+const ADS_EYE := Vector3(0.0, -0.012, -0.24)
 const BULKY_SPEED_MULT := 0.7
 const ITEM_MASK := 1 << 2
 ## Render layer for your own body and gear; your camera skips it.
@@ -35,8 +47,10 @@ const PLAYER_VARIANTS: Array[String] = ["multicam", "woodland", "desert", "urban
 var active_slot: StringName = &"primary"
 ## Owner-driven, replicated so others see the reload pose.
 var is_reloading := false
+var is_aiming := false
 var load_mult := 1.0
 var _focus: WorldItem
+var _revive_target: Node3D  # a downed body under the crosshair
 var _view_model_id: StringName = &""
 var _hud: Hud
 var _next_shot := 0.0         # owner-side fire-rate gate
@@ -55,6 +69,7 @@ func _enter_tree() -> void:
 func _ready() -> void:
 	inventory.changed.connect(_on_inventory_changed)
 	vitals.died.connect(_on_died)
+	vitals.went_down.connect(_on_went_down)
 	_add_voxel_viewer()
 	if is_multiplayer_authority():
 		camera.current = true
@@ -106,6 +121,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if captured else Input.MOUSE_MODE_CAPTURED
 	elif event.is_action_pressed(&"fire") and not captured:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	elif not vitals.is_up():
+		if event.is_action_pressed(&"give_up"):
+			_server_give_up.rpc_id(1)
+	elif event.is_action_pressed(&"interact") and _revive_target:
+		_server_revive.rpc_id(1, _revive_target.get_path())
 	elif event.is_action_pressed(&"interact") and _focus:
 		_server_interact.rpc_id(1, _focus.get_path())
 	elif event.is_action_pressed(&"drop"):
@@ -126,7 +146,10 @@ func _process(_delta: float) -> void:
 	# Runs on every peer: active_slot, inventory and head rotation are replicated.
 	model.look_pitch = head.rotation.x
 	model.reloading = is_reloading
-	if inventory.hands != &"" or (active_weapon() != null and active_slot == &"primary"):
+	CharacterModel.lay_down(self, model, not vitals.is_up())
+	if not vitals.is_up():
+		model.hold = CharacterModel.Hold.NONE
+	elif inventory.hands != &"" or (active_weapon() != null and active_slot == &"primary"):
 		model.hold = CharacterModel.Hold.BOTH
 	elif active_weapon() != null:
 		model.hold = CharacterModel.Hold.RIGHT
@@ -141,6 +164,7 @@ func _physics_process(delta: float) -> void:
 	_update_focus()
 	if is_reloading and _now() >= _busy_until:
 		is_reloading = false
+	_update_aim(delta)
 	_try_fire()
 	view_model.rotation.x = move_toward(view_model.rotation.x, -0.7 if is_reloading else 0.0, delta * 6.0)
 	_hud.update_status(self)
@@ -150,34 +174,69 @@ func _move(delta: float) -> void:
 	if not is_on_floor():
 		velocity += get_gravity() * delta
 	var captured := Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
-	var crouching := captured and Input.is_action_pressed(&"crouch")
+	var down := not vitals.is_up()
+	var crouching := captured and Input.is_action_pressed(&"crouch") and not down
 	var carrying := inventory.hands != &""
-	if captured and Input.is_action_just_pressed(&"jump") and is_on_floor() and not carrying and not crouching:
+	if captured and Input.is_action_just_pressed(&"jump") and is_on_floor() and not carrying and not crouching and not down:
 		velocity.y = JUMP_VELOCITY
 	var speed := WALK_SPEED
 	if crouching:
 		speed = CROUCH_SPEED
 	elif captured and Input.is_action_pressed(&"sprint") and not carrying:
 		speed = SPRINT_SPEED
+	if is_aiming:
+		speed = minf(speed, WALK_SPEED) * ADS_SPEED_MULT
+	if down:
+		speed = CRAWL_SPEED
 	speed *= load_mult
 	var input := Input.get_vector(&"move_left", &"move_right", &"move_forward", &"move_back") if captured else Vector2.ZERO
 	var target := (global_basis * Vector3(input.x, 0.0, input.y)).normalized() * speed
 	velocity.x = move_toward(velocity.x, target.x, ACCELERATION * delta)
 	velocity.z = move_toward(velocity.z, target.z, ACCELERATION * delta)
 	move_and_slide()
-	head.position.y = move_toward(head.position.y, CROUCH_HEAD_Y if crouching else STAND_HEAD_Y, 4.0 * delta)
+	var head_y := DOWNED_HEAD_Y if down else (CROUCH_HEAD_Y if crouching else STAND_HEAD_Y)
+	head.position.y = move_toward(head.position.y, head_y, 4.0 * delta)
 
 
 func _update_focus() -> void:
+	_focus = null
+	_revive_target = null
+	if not vitals.is_up():
+		_hud.set_prompt("")
+		return
 	var from := camera.global_position
-	var query := PhysicsRayQueryParameters3D.create(from, from - camera.global_basis.z * INTERACT_RANGE, ITEM_MASK | 1, [get_rid()])
+	var exclude: Array[RID] = [get_rid()]
+	for child in get_children():
+		if child is Area3D:
+			exclude.append(child.get_rid())
+	var query := PhysicsRayQueryParameters3D.create(from, from - camera.global_basis.z * REVIVE_RANGE, ITEM_MASK | HITBOX_MASK | 1, exclude)
+	query.collide_with_areas = true
 	var hit := get_world_3d().direct_space_state.intersect_ray(query)
-	_focus = hit.get("collider") as WorldItem
+	var collider: Object = hit.get("collider")
+	var other := Vitals.find_on(collider) if collider is Area3D else null
+	if other and other.downed:
+		_revive_target = other.get_parent()
+		var kit := _best_revive_kit()
+		_hud.set_prompt("[E] Revive (%s, %.0f s)" % [kit.name, kit.stats.revive_s] if kit else "Downed - you need an IFAK or trauma kit to revive")
+		return
+	if collider is WorldItem and from.distance_to(hit.position) <= INTERACT_RANGE:
+		_focus = collider
 	_hud.set_prompt(_focus.describe() if _focus else "")
 
 
+## The revive kit this player would use: the fastest one carried.
+func _best_revive_kit() -> ItemData:
+	var best: ItemData = null
+	for container in Inventory.CONTAINERS:
+		for entry: Dictionary in inventory.containers[container]:
+			var item := ItemDB.get_item(entry.id)
+			if item.stats.has("revive_hp") and (best == null or item.stats.revive_s < best.stats.revive_s):
+				best = item
+	return best
+
+
 func _try_fire() -> void:
-	if Input.mouse_mode != Input.MOUSE_MODE_CAPTURED or inventory.hands != &"":
+	if Input.mouse_mode != Input.MOUSE_MODE_CAPTURED or inventory.hands != &"" or not vitals.is_up():
 		return
 	var weapon := active_weapon()
 	if weapon == null or weapon.type != "weapon":
@@ -193,12 +252,50 @@ func _try_fire() -> void:
 			_hud.flash("Empty - R to reload" if inventory.spare_rounds(_ammo_of(weapon)) > 0 else "Out of ammo")
 		return
 	_next_shot = now + 60.0 / float(weapon.stats.get("rpm", 600))
-	_server_fire.rpc_id(1, camera.global_position, -camera.global_basis.z, active_slot)
+	_server_fire.rpc_id(1, camera.global_position, _spread_direction(weapon), active_slot)
+	_kick(weapon)
+
+
+func _update_aim(delta: float) -> void:
+	var weapon := active_weapon()
+	var captured := Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
+	is_aiming = captured and vitals.is_up() and weapon != null and weapon.type == "weapon" and inventory.hands == &"" \
+		and not is_reloading and Input.is_action_pressed(&"aim")
+	var fov := float(weapon.stats.get("ads_fov", 55)) if is_aiming else BASE_FOV
+	camera.fov = lerpf(camera.fov, fov, minf(delta * 12.0, 1.0))
+	var ads_view := ADS_EYE - VoxelArt.sight_point(VoxelArt.model_for(weapon)) if weapon else HIP_VIEW
+	view_model.position = view_model.position.lerp(ads_view if is_aiming else HIP_VIEW, minf(delta * 14.0, 1.0))
+
+
+## Shot direction inside the weapon's cone. Spread is computed on the shooter's machine
+## (co-op: the host trusts it) and widens when moving or airborne.
+func _spread_direction(weapon: ItemData) -> Vector3:
+	var spread := deg_to_rad(float(weapon.stats.get("spread_deg", 1.0)))
+	if is_aiming:
+		spread *= ADS_SPREAD_MULT
+	var horizontal := Vector2(velocity.x, velocity.z).length()
+	spread *= 1.0 + clampf(horizontal / WALK_SPEED, 0.0, 1.5)
+	if not is_on_floor():
+		spread *= 2.5
+	elif Input.is_action_pressed(&"crouch"):
+		spread *= 0.7
+	var forward := -camera.global_basis.z
+	var angle := randf() * TAU
+	var amount := sqrt(randf()) * spread  # uniform over the cone's disc
+	var offset := camera.global_basis.x * cos(angle) + camera.global_basis.y * sin(angle)
+	return (forward + offset * tan(amount)).normalized()
+
+
+## Recoil: the view kicks up and a little sideways; aiming halves it.
+func _kick(weapon: ItemData) -> void:
+	var kick := deg_to_rad(float(weapon.stats.get("recoil_deg", 0.6))) * (0.5 if is_aiming else 1.0)
+	head.rotation.x = clampf(head.rotation.x + kick, -1.5, 1.5)
+	rotate_y(randf_range(-0.35, 0.35) * kick)
 
 
 func _try_reload() -> void:
 	var weapon := active_weapon()
-	if weapon == null or weapon.type != "weapon" or _now() < _busy_until or inventory.hands != &"":
+	if weapon == null or weapon.type != "weapon" or _now() < _busy_until or inventory.hands != &"" or not vitals.is_up():
 		return
 	var full := ItemDB.get_item(_ammo_of(weapon)).magazine_rounds() if ItemDB.has_item(_ammo_of(weapon)) else 0
 	if inventory.rounds_in(active_slot) >= full:
@@ -252,7 +349,7 @@ func _from_owner() -> bool:
 
 @rpc("any_peer", "call_local", "reliable")
 func _server_fire(origin: Vector3, direction: Vector3, slot: StringName) -> void:
-	if not _from_owner() or vitals.health <= 0.0 or inventory.hands != &"":
+	if not _from_owner() or not vitals.is_up() or inventory.hands != &"":
 		return
 	var id: StringName = inventory.slots.get(slot, &"")
 	var weapon := ItemDB.get_item(id) if id != &"" else null
@@ -273,7 +370,7 @@ func _server_fire(origin: Vector3, direction: Vector3, slot: StringName) -> void
 
 @rpc("any_peer", "call_local", "reliable")
 func _server_reload(slot: StringName) -> void:
-	if not _from_owner() or _now() < _server_busy_until - 0.1:
+	if not _from_owner() or not vitals.is_up() or _now() < _server_busy_until - 0.1:
 		return
 	var id: StringName = inventory.slots.get(slot, &"")
 	if id == &"":
@@ -288,7 +385,7 @@ func _server_reload(slot: StringName) -> void:
 
 @rpc("any_peer", "call_local", "reliable")
 func _server_use_medical() -> void:
-	if not _from_owner() or vitals.health <= 0.0 or _now() < _server_busy_until - 0.1:
+	if not _from_owner() or not vitals.is_up() or _now() < _server_busy_until - 0.1:
 		return
 	if vitals.health >= vitals.max_health:
 		_client_message.rpc_id(name.to_int(), "Not injured")
@@ -319,7 +416,7 @@ func _server_use_medical() -> void:
 ## Inventory screen actions. `container`/`index` name a stowed entry; `slot` an equipped one.
 @rpc("any_peer", "call_local", "reliable")
 func _server_inventory_action(action: String, container: StringName, index: int, slot: StringName, target: StringName) -> void:
-	if not _from_owner():
+	if not _from_owner() or not vitals.is_up():
 		return
 	match action:
 		"drop_slot":
@@ -357,7 +454,7 @@ func _server_inventory_action(action: String, container: StringName, index: int,
 
 @rpc("any_peer", "call_local", "reliable")
 func _server_interact(path: NodePath) -> void:
-	if not _from_owner():
+	if not _from_owner() or not vitals.is_up():
 		return
 	var item := get_node_or_null(path) as WorldItem
 	if item == null or item.is_queued_for_deletion():
@@ -391,6 +488,54 @@ func _server_drop(slot: StringName) -> void:
 func _server_spawn_in_front(id: StringName, count := 1, state := {}) -> void:
 	var pos := global_position - global_basis.z * 0.9 + Vector3.UP * 1.0
 	CompoundLevel.current(self).server_spawn_dropped(id, count, pos, state)
+
+## Revives a downed body (a teammate, later a squadmate) with the fastest kit carried. The
+## kit is used up when the revive completes, if both are still there and in range.
+@rpc("any_peer", "call_local", "reliable")
+func _server_revive(path: NodePath) -> void:
+	if not _from_owner() or not vitals.is_up() or _now() < _server_busy_until - 0.1:
+		return
+	var target := get_node_or_null(path) as Node3D
+	var other := target.get_node_or_null(^"Vitals") as Vitals if target else null
+	if other == null or not other.downed or target == self:
+		return
+	if target.global_position.distance_to(global_position) > REVIVE_RANGE + 1.0:
+		return
+	var kit := _best_revive_kit()
+	if kit == null:
+		_client_message.rpc_id(name.to_int(), "You need an IFAK or trauma kit")
+		return
+	var seconds := float(kit.stats.revive_s)
+	_server_busy_until = _now() + seconds
+	_client_busy.rpc_id(name.to_int(), seconds, "Reviving...")
+	await get_tree().create_timer(seconds).timeout
+	if not is_inside_tree() or not is_instance_valid(target) or not other.downed or not vitals.is_up():
+		return
+	if target.global_position.distance_to(global_position) > REVIVE_RANGE + 1.0:
+		_client_message.rpc_id(name.to_int(), "Revive interrupted")
+		return
+	for container in Inventory.CONTAINERS:
+		var list: Array = inventory.containers[container]
+		for i in list.size():
+			if list[i].id == kit.id:
+				inventory.remove_entry(container, i)
+				other.server_revive(float(kit.stats.revive_hp))
+				return
+
+
+@rpc("any_peer", "call_local", "reliable")
+func _server_give_up() -> void:
+	if _from_owner():
+		vitals.server_give_up()
+
+
+func _on_went_down() -> void:
+	if not multiplayer.is_server():
+		return
+	var held := inventory.release_hands()  # you drop what you were carrying
+	if held != &"":
+		_server_spawn_in_front(held)
+
 
 func _on_died() -> void:
 	if not multiplayer.is_server():

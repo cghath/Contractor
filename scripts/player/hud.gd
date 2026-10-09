@@ -6,16 +6,23 @@ extends CanvasLayer
 ## Set by the owning Player before the HUD enters the tree.
 var player: Player
 var inventory_screen: InventoryScreen
+var _crosshair: Label
 var _prompt: Label
 var _status: Label
 var _ammo: Label
+var _downed: Label
 var _message: Label
 var _message_time := 0.0
 
 
 func _ready() -> void:
-	var crosshair := _label("+", Control.PRESET_CENTER)
-	crosshair.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_crosshair = _label("+", Control.PRESET_CENTER)
+	_crosshair.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_downed = _label("", Control.PRESET_CENTER)
+	_downed.position.y -= 80
+	_downed.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_downed.add_theme_font_size_override(&"font_size", 28)
+	_downed.add_theme_color_override(&"font_color", Color("ff6b5e"))
 	_prompt = _label("", Control.PRESET_CENTER)
 	_prompt.position.y += 40
 	_prompt.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -83,6 +90,11 @@ func update_status(player: Player) -> void:
 		_ammo.text = ""
 	if player.vitals.is_healing():
 		_status.text += "\nHealing..."
+	_crosshair.visible = not player.is_aiming and player.vitals.is_up()
+	if player.vitals.downed:
+		_downed.text = "DOWNED - bleeding out in %d s\nWait for a teammate to revive you, or press F to give up" % player.vitals.bleed_seconds
+	else:
+		_downed.text = ""
 
 
 func _label(text: String, preset: Control.LayoutPreset) -> Label:

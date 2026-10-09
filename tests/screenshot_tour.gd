@@ -51,6 +51,24 @@ func _ready() -> void:
 	player._hud.update_status(player)
 	await _shot("07_hud_inventory", Vector3(0, 1.65, 18), Vector3(0, 1.3, 12))
 	await _shot("10_reload_pose", Vector3(-0.85, 1.5, 28.1), Vector3(-0.5, 1.25, 27))
+	player._hud.toggle_detail()  # close the inventory screen
+	var downed: TargetDummy = level.get_node(^"Dummies/LightDummy")
+	downed.respawn_seconds = 999.0
+	downed.vitals.server_reset_health()
+	downed.vitals.server_damage(500.0)  # down, bleeding out
+	await _wait(60)
+	await _shot("11_downed_dummy", Vector3(-2.6, 1.3, 14.4), Vector3(-4, 0.2, 11.6))
+	# Aiming down the sights, through the player's own camera.
+	player.global_position = Vector3(1.2, 0.1, 17.5)
+	player.rotation.y = 0.15
+	player.head.rotation.x = -0.08
+	player.is_aiming = true
+	player.camera.fov = 50.0
+	player.view_model.position = Player.ADS_EYE - VoxelArt.sight_point(VoxelArt.model_for(ItemDB.get_item(&"m4a1")))
+	player.camera.current = true
+	await _wait(10)
+	await RenderingServer.frame_post_draw
+	get_viewport().get_texture().get_image().save_png("%s/12_aim_down_sights.png" % OUT_DIR)
 	print("Screenshots saved to %s" % ProjectSettings.globalize_path(OUT_DIR))
 	get_tree().quit()
 

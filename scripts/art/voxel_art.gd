@@ -100,6 +100,19 @@ static func hand_points(model: String) -> Dictionary:
 	return {"grip": (grip - centre) * VOXEL_SIZE, "support": (support - centre) * VOXEL_SIZE}
 
 
+## Top of the rear sight, in metres relative to the instance pivot (its centre). Aiming
+## puts this point just under the eye. Zero for non-weapons.
+static func sight_point(model: String) -> Vector3:
+	var spec := _spec(model)
+	var centre := Vector3(spec.size) * 0.5
+	match model.get_slice(":", 0):
+		"rifle":
+			return (Vector3(1.5, 13, spec.size.z * 0.62) - centre) * VOXEL_SIZE  # back of the optic
+		"pistol":
+			return (Vector3(1, 7, 9) - centre) * VOXEL_SIZE  # rear sight
+	return Vector3.ZERO
+
+
 static func mesh(model: String, variant: String) -> Mesh:
 	var key := "%s|%s" % [model, variant]
 	if not _meshes.has(key):

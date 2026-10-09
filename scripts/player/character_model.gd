@@ -36,6 +36,8 @@ var hold := Hold.NONE
 var look_pitch := 0.0
 ## While true the left hand works the magazine well instead of the support point.
 var reloading := false
+## Lying face down, head forward (see lay_down).
+var downed := false
 
 var torso: Node3D
 var head: Node3D
@@ -69,6 +71,16 @@ func _ready() -> void:
 	_leg_left = _part("leg", _root, HIP * Vector3(-1, 1, 1))
 	_leg_right = _part("leg", _root, HIP)
 	_last_position = global_position
+
+
+## Puts a body's model and its hitboxes (its direct Area3D children) in or out of the
+## downed pose, so shots hit where the body is lying.
+static func lay_down(body: Node3D, model: CharacterModel, is_downed: bool) -> void:
+	model.downed = is_downed
+	for child in body.get_children():
+		if child is Area3D:
+			child.rotation.x = -PI / 2 if is_downed else 0.0
+			child.position.y = 0.12 if is_downed else 0.0  # same lift as the model
 
 
 ## Hands go to `grip` (right) and `support` (left), given in `node`'s local space.
@@ -117,6 +129,10 @@ func _process(delta: float) -> void:
 	_leg_left.rotation.x = swing
 	_leg_right.rotation.x = -swing
 	_root.position.y = absf(sin(_phase)) * 0.03 * stride
+	# Downed: tip over around the feet onto the chest, raised by half the torso depth.
+	var lie := 1.0 if downed else 0.0
+	_root.rotation.x = lerpf(_root.rotation.x, -PI / 2 * lie, minf(delta * 6.0, 1.0))
+	_root.position.y += 0.12 * absf(_root.rotation.x) / (PI / 2)
 	torso.position.y = TORSO_PIVOT.y + sin(_time * 2.0) * 0.003  # breathing
 	head.rotation.x = clampf(look_pitch, -0.7, 0.7) * 0.8
 	hands_anchor.rotation.x = clampf(look_pitch, -0.8, 0.8) * 0.8

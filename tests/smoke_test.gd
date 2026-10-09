@@ -17,6 +17,7 @@ func _ready() -> void:
 	_test_ammo()
 	await _test_medical()
 	await _test_world_item_state()
+	await _test_downed()
 	print("SMOKE TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
 
@@ -295,3 +296,42 @@ func _test_world_item_state() -> void:
 	check(piece.collision_layer == 0, "ground armor isn't a hit target")
 	check(item.describe().contains("damaged: 2 hits"), "prompt says it's damaged")
 	item.queue_free()
+
+func _test_downed() -> void:
+	print("Downed, bleed-out and revive")
+	var vitals := Vitals.new()
+	add_child(vitals)
+	var events: Array[String] = []
+	vitals.went_down.connect(func() -> void: events.append("down"))
+	vitals.revived.connect(func() -> void: events.append("revived"))
+	vitals.died.connect(func() -> void: events.append("died"))
+	vitals.server_damage(150.0)
+	check(vitals.downed and vitals.health == 0.0 and events == ["down"], "0 HP puts you down, not dead")
+	check(vitals.bleed_seconds == int(Vitals.BLEED_OUT_S) and not vitals.is_up(), "bleeding out from %d s" % vitals.bleed_seconds)
+	vitals.server_heal_over_time(50.0, 0.1)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	check(vitals.health == 0.0, "healing doesn't work while down")
+	vitals.server_revive(25.0)
+	check(vitals.is_up() and vitals.health == 25.0 and events.back() == "revived", "revived with 25 HP")
+	vitals.server_damage(100.0)
+	vitals.server_damage(10.0)
+	check(not vitals.downed and vitals.health == 0.0 and events.back() == "died", "a hit while down finishes you")
+	vitals.server_reset_health()
+	vitals.server_damage(100.0)
+	vitals.server_give_up()
+	check(events.back() == "died", "giving up dies")
+	vitals.server_reset_health()
+	vitals.server_damage(100.0)
+	vitals._bleed_left = 0.05
+	await get_tree().create_timer(0.15).timeout
+	check(events.back() == "died" and not vitals.downed, "bleeding out dies")
+	var quick := Vitals.new()
+	quick.can_go_down = false
+	add_child(quick)
+	var died := [false]
+	quick.died.connect(func() -> void: died[0] = true)
+	quick.server_damage(200.0)
+	check(died[0] and not quick.downed, "can_go_down = false skips the downed state")
+	vitals.queue_free()
+	quick.queue_free()

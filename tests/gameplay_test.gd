@@ -25,6 +25,8 @@ func _ready() -> void:
 	await _test_medical()
 	await _test_inventory_actions()
 	await _test_drop_and_pickup_keep_state()
+	await _test_spread()
+	await _test_revive_and_downed()
 	GameState.delete_save()
 	print("GAMEPLAY TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
@@ -107,6 +109,52 @@ func _test_drop_and_pickup_keep_state() -> void:
 	check(inv.rounds_in(&"primary") == 25, "picked-up rifle still has 25")
 	check(inv.chips_in(&"helmet").size() == 1, "picked-up helmet still damaged")
 	check(GameState.dropped.is_empty(), "picked-up drops removed from the save")
+
+
+func _test_spread() -> void:
+	print("Spread and aiming")
+	var weapon := ItemDB.get_item(&"m4a1")
+	var forward := -player.camera.global_basis.z
+	var hip := 0.0
+	var aimed := 0.0
+	for i in 200:
+		player.is_aiming = false
+		hip = maxf(hip, rad_to_deg(forward.angle_to(player._spread_direction(weapon))))
+		player.is_aiming = true
+		aimed = maxf(aimed, rad_to_deg(forward.angle_to(player._spread_direction(weapon))))
+	player.is_aiming = false
+	check(hip > 0.3 and hip <= 1.2 * 2.5 + 0.01, "hip-fire stays inside the cone (max %.2f deg)" % hip)
+	check(aimed < hip * 0.3, "aiming tightens it (max %.2f deg)" % aimed)
+
+
+func _test_revive_and_downed() -> void:
+	print("Downed and revive (RPC)")
+	var dummy: TargetDummy = level.get_node(^"Dummies/MediumDummy")
+	dummy.respawn_seconds = 999.0  # don't get up on its own during the test
+	dummy.vitals.server_damage(500.0)
+	await _frames(2)
+	check(dummy.vitals.downed and dummy.model.downed, "dummy is down and lying down")
+	var hitbox: Area3D = dummy.get_node(^"Hitbox")
+	check(absf(hitbox.rotation.x + PI / 2) < 0.01, "its hitbox lies down with it")
+	player.global_position = dummy.global_position + Vector3(0, 0, -1.2)
+	await _frames(2)
+	player._server_revive.rpc_id(1, dummy.get_path())
+	check(player.inventory.count_of(&"ifak") == 0, "no kit, no revive")
+	player.inventory.take(&"ifak")
+	player._server_revive.rpc_id(1, dummy.get_path())
+	await _seconds(5.3)
+	check(dummy.vitals.is_up() and is_equal_approx(dummy.vitals.health, 25.0), "revived with an IFAK to 25 HP (%.0f)" % dummy.vitals.health)
+	check(player.inventory.count_of(&"ifak") == 0, "the IFAK was used")
+	player.inventory.take(&"hvt_case")
+	var rounds := player.inventory.rounds_in(&"primary")
+	player.vitals.server_damage(500.0)
+	await _frames(2)
+	check(player.vitals.downed and player.inventory.hands == &"", "player goes down and drops the HVT case")
+	player._server_fire.rpc_id(1, player.camera.global_position, -player.global_basis.z, &"primary")
+	check(player.inventory.rounds_in(&"primary") == rounds, "can't shoot while down")
+	player._server_give_up.rpc_id(1)
+	await _frames(2)
+	check(player.vitals.is_up() and player.vitals.health == player.vitals.max_health, "giving up respawns you at full health")
 
 
 func _world_item(id: StringName) -> WorldItem:

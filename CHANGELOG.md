@@ -31,18 +31,32 @@ that travels with the item.
   Use, move to another container, and Drop. Rounds loaded, part-used magazines and armor
   damage are shown on each item.
 - **HUD:** ammo counter (loaded / spare rounds) and reloading and healing indicators.
+- **Aiming down sights (hold RMB):** zooms to each weapon's aim FOV (M110 30°, pistol 65°),
+  lines the weapon's sight up under your eye, and cuts spread to 12% of hip fire. It also
+  halves recoil and slows movement.
+- **Spread and recoil:**
+  - Each weapon has a spread cone, which widens while moving (up to 2.5×) or in the air (2.5×) and tightens when crouched.
+  - Each shot kicks the view up and slightly sideways.
+  - Stats per weapon: `spread_deg`, `recoil_deg`, `ads_fov`.
+- **Downed and revive:**
+  - At 0 HP you go down instead of dying: you fall face down, can only crawl, can't shoot, and drop anything you're carrying in both hands.
+  - You bleed out after 60 s. Another hit while down, or giving up (F), kills you.
+  - Teammates revive you with E: a trauma kit takes 3 s and brings you back at 50 HP; an IFAK takes 5 s and brings you back at 25 HP. The kit is used up when the revive completes.
+  - Hitboxes lie down with the body, so shots land where you're lying.
+  - Dead bodies lie down too. Target dummies get back up on their own after a few seconds.
 - **Ground items:** the pickup prompt shows rounds and damage. Armor on the ground shows its chips.
 - **Tests:**
   - `tests/gameplay_test.tscn`: end-to-end checks of a hosted session through the real requests a client sends.
   - `tests/net_test.tscn`: a two-process ENet host and client.
   - `tools/run_tests.sh` runs every suite.
-  - The smoke test now has 80 checks.
+  - The smoke test now has 88 checks. The gameplay test covers spread, aiming, going down and reviving.
 
 ### Changed
 
 - Armor damage is now the item's own state, not the wearer's. A dropped plate or helmet
   keeps its holes. `Vitals` now only tracks health and healing.
 - `Inventory.unequip()` returns the item with its state. `take()` accepts state.
+- `Vitals` gained the downed state (`downed`, `bleed_seconds`, `server_revive`, `server_give_up`), replicated to all peers.
 
 ### Fixed
 

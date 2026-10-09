@@ -4,7 +4,10 @@ extends StaticBody3D
 ## GearRig as players, so whatever works on a dummy works on a squadmate later.
 
 @export var loadout: PackedStringArray
-@export var respawn_seconds := 3.0
+## Seconds a dummy stays down (or dead) before it gets back up on its own.
+@export var respawn_seconds := 4.0
+
+@onready var model: CharacterModel = $Model
 
 @onready var inventory: Inventory = $Inventory
 @onready var vitals: Vitals = $Vitals
@@ -17,12 +20,22 @@ func _ready() -> void:
 		for id in loadout:
 			inventory.take(StringName(id))
 	vitals.died.connect(_on_died)
+	vitals.went_down.connect(_on_died)  # down or dead, a dummy just gets back up later
 	vitals.changed.connect(_update_label)
 	_update_label()
 
 
+func _process(_delta: float) -> void:
+	CharacterModel.lay_down(self, model, not vitals.is_up())  # down or dead
+
+
 func _update_label() -> void:
-	var lines := PackedStringArray(["HP %d" % vitals.health])
+	var status := "HP %d" % vitals.health
+	if vitals.downed:
+		status = "DOWN %ds" % vitals.bleed_seconds
+	elif vitals.health <= 0.0:
+		status = "DEAD"
+	var lines := PackedStringArray([status])
 	var armor := gear.armor_summary("\n")
 	if armor != "":
 		lines.append(armor)
@@ -30,5 +43,8 @@ func _update_label() -> void:
 
 
 func _on_died() -> void:
+	if not multiplayer.is_server():
+		return
 	await get_tree().create_timer(respawn_seconds).timeout
-	vitals.server_reset_health()
+	if not vitals.is_up():
+		vitals.server_reset_health()

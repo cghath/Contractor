@@ -13,6 +13,7 @@ const KEYS := {
 	&"interact": [KEY_E],
 	&"reload": [KEY_R],
 	&"use_medical": [KEY_H],
+	&"give_up": [KEY_F],
 	&"drop": [KEY_G],
 	&"inventory": [KEY_TAB],
 	&"weapon_primary": [KEY_1],

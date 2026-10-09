@@ -87,9 +87,12 @@ include Voxel Tools.
 |---|---|
 | WASD / Space / Shift / Ctrl | Move, jump, sprint, crouch |
 | Mouse / LMB | Look, fire |
+| RMB (hold) | Aim down sights: zoom, much tighter spread, half recoil, slower movement |
 | E | Take / carry the item under the crosshair |
 | R | Reload (fullest spare magazine; a part-used one goes back in your pouch) |
 | H | Use a medical item (smallest kit that covers your injuries) |
+| E on a downed teammate | Revive with your fastest kit (trauma kit 3 s to 50 HP, IFAK 5 s to 25 HP) |
+| F while downed | Give up (die and respawn) |
 | G | Drop carried bulky item, otherwise drop active weapon |
 | 1 / 2 | Primary / sidearm |
 | Tab | Inventory screen: equip, stow, move between containers, use, drop |
@@ -176,8 +179,8 @@ There are three suites. Each prints PASSED or FAILED and exits with its failure 
 
 | Suite | Scene | What it covers |
 |---|---|---|
-| Smoke | `tests/smoke_test.tscn` | 80 checks of the core systems directly: item database, inventory rules, carrier tiers, item state (damage and ammo that travel with an item), ammo and reloading, healing, voxel armor and walls, ballistics, headshots, elbow IK |
-| Gameplay | `tests/gameplay_test.tscn` | Hosts a real session and drives the player through the same requests a client sends: fire, reload, heal, inventory-screen actions, drop and pick up |
+| Smoke | `tests/smoke_test.tscn` | 88 checks of the core systems directly: item database, inventory rules, carrier tiers, item state (damage and ammo that travel with an item), ammo and reloading, healing, downed/bleed-out/revive, voxel armor and walls, ballistics, headshots, elbow IK |
+| Gameplay | `tests/gameplay_test.tscn` | Hosts a real session and drives the player through the same requests a client sends: fire, reload, heal, inventory-screen actions, drop and pick up, spread and aiming, going down, reviving a downed body, giving up |
 | Network | `tests/net_test.tscn` | Two processes over ENet. The client fires, reloads, heals and drops through the host, and checks that the results replicate back |
 
 The gameplay and network tests use their own save zones and never touch your compound save.
@@ -213,10 +216,11 @@ a release:
 
 ## Known gaps (next up)
 
-- No recoil, spread or bullet drop yet: hitscan straight down the sight line.
+- Shots are hitscan, with no bullet drop or travel time. Spread is decided by the shooter's machine (fine for co-op, not cheat-proof).
 - Every inventory change, including each shot fired, re-sends the whole inventory snapshot. That's fine on a LAN; it needs a lighter path (for example, ammo only) before internet play.
 - Reloading and healing can't be cancelled, and taking damage doesn't interrupt them.
-- No bleeding or downed state yet. Death respawns you at the gate with all your gear (the squad and downed system comes in phase 3).
+- Death (bleeding out, giving up, or being shot while down) respawns you at the gate with all your gear. What dying should cost a player is an open design question.
+- Downed bodies keep an upright movement capsule, so others bump into an invisible standing body.
 - A vest or backpack can't be dropped while it still has things in it. Empty it from the inventory screen first.
 - The voxel world has no stream, so it's limited to `VoxelWorld.BOUNDS`. The voxel edit log grows with every bullet hole and is never compacted.
 - Player inventories aren't saved yet; only the zone's state is.
