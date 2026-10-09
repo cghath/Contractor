@@ -1,0 +1,15 @@
+{
+	"_note": "PLACEHOLDER objectives for the Phase 4 contract system. pay_share + salvage_share is negotiated per contract.",
+	"objectives": [
+		{"id": "extract_hvt", "name": "Extract HVT", "description": "Recover the HVT hard case and carry it to extraction (two-handed).",
+		 "requires_items": ["hvt_case"], "employer": "meridian", "target": "black_ridge", "escalation_minutes": 8},
+		{"id": "evac", "name": "Evacuate Survivors", "description": "Reach the survivors and escort them to the evac point.",
+		 "employer": "salvage_union", "target": "black_ridge", "escalation_minutes": 10},
+		{"id": "escort", "name": "Convoy Escort", "description": "Keep the supply truck alive from one zone to the next.",
+		 "employer": "meridian", "target": "black_ridge", "escalation_minutes": 12},
+		{"id": "sabotage", "name": "Sabotage Supply Line", "description": "Breach the depot and destroy the fuel store.",
+		 "requires_items": ["breaching_charge"], "employer": "meridian", "target": "black_ridge", "escalation_minutes": 6},
+		{"id": "salvage_run", "name": "Salvage Run", "description": "Strip a crash site and extract with as much as you can carry.",
+		 "employer": "salvage_union", "target": null, "escalation_minutes": 9}
+	]
+}

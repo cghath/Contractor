@@ -1,0 +1,18 @@
+{
+	"_note": "PLACEHOLDER: replace names, wants and fears with your own lore. Used from Phase 4.",
+	"reputation_tiers": [
+		{"id": "hostile", "min": -100},
+		{"id": "wary", "min": -30},
+		{"id": "neutral", "min": 0},
+		{"id": "trusted", "min": 30},
+		{"id": "allied", "min": 70}
+	],
+	"factions": [
+		{"id": "meridian", "name": "Meridian Logistics", "role": "employer",
+		 "wants": "Secure supply routes and recover lost cargo.", "fears": "Losing contracts to cheaper rivals.", "start_rep": 10},
+		{"id": "black_ridge", "name": "Black Ridge Militia", "role": "hostile",
+		 "wants": "Control the inland roads and tax every convoy.", "fears": "Outside contractors with air support.", "start_rep": -60},
+		{"id": "salvage_union", "name": "Coastal Salvage Union", "role": "neutral",
+		 "wants": "First claim on every wreck.", "fears": "Being caught between the other two.", "start_rep": 0}
+	]
+}

@@ -1,0 +1,104 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/player/player.gd" id="1_player"]
+[ext_resource type="Script" path="res://scripts/inventory/inventory.gd" id="2_inventory"]
+[ext_resource type="Script" path="res://scripts/combat/vitals.gd" id="3_vitals"]
+[ext_resource type="Script" path="res://scripts/combat/gear_rig.gd" id="4_gear"]
+[ext_resource type="Script" path="res://scripts/player/character_model.gd" id="5_model"]
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_move"]
+radius = 0.3
+height = 1.8
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_hitbox"]
+size = Vector3(0.36, 1.46, 0.24)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_head"]
+size = Vector3(0.22, 0.3, 0.24)
+
+[sub_resource type="SceneReplicationConfig" id="SceneReplicationConfig_owner"]
+properties/0/path = NodePath(".:position")
+properties/0/spawn = true
+properties/0/replication_mode = 1
+properties/1/path = NodePath(".:rotation")
+properties/1/spawn = true
+properties/1/replication_mode = 1
+properties/2/path = NodePath("Head:rotation")
+properties/2/spawn = true
+properties/2/replication_mode = 1
+properties/3/path = NodePath("Head:position")
+properties/3/spawn = true
+properties/3/replication_mode = 2
+properties/4/path = NodePath(".:active_slot")
+properties/4/spawn = true
+properties/4/replication_mode = 2
+
+[sub_resource type="SceneReplicationConfig" id="SceneReplicationConfig_server"]
+properties/0/path = NodePath("Vitals:health")
+properties/0/spawn = true
+properties/0/replication_mode = 2
+properties/1/path = NodePath("Vitals:plate_damage")
+properties/1/spawn = true
+properties/1/replication_mode = 2
+properties/2/path = NodePath("Inventory:net_state")
+properties/2/spawn = true
+properties/2/replication_mode = 2
+
+[node name="Player" type="CharacterBody3D"]
+collision_layer = 16
+collision_mask = 17
+script = ExtResource("1_player")
+
+[node name="Collision" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)
+shape = SubResource("CapsuleShape3D_move")
+
+[node name="Hitbox" type="Area3D" parent="."]
+collision_layer = 2
+collision_mask = 0
+monitoring = false
+
+[node name="Shape" type="CollisionShape3D" parent="Hitbox"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.73, 0)
+shape = SubResource("BoxShape3D_hitbox")
+
+[node name="HeadHitbox" type="Area3D" parent="."]
+collision_layer = 2
+collision_mask = 0
+monitoring = false
+metadata/damage_mult = 3.0
+
+[node name="Shape" type="CollisionShape3D" parent="HeadHitbox"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.61, 0)
+shape = SubResource("BoxShape3D_head")
+
+[node name="Model" type="Node3D" parent="."]
+script = ExtResource("5_model")
+
+[node name="Head" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.65, 0)
+
+[node name="Camera" type="Camera3D" parent="Head"]
+fov = 80.0
+near = 0.03
+
+[node name="ViewModel" type="Node3D" parent="Head/Camera"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.14, -0.16, -0.38)
+
+[node name="Inventory" type="Node" parent="."]
+script = ExtResource("2_inventory")
+
+[node name="Vitals" type="Node" parent="."]
+script = ExtResource("3_vitals")
+
+[node name="Gear" type="Node3D" parent="." node_paths=PackedStringArray("inventory", "vitals", "model")]
+script = ExtResource("4_gear")
+inventory = NodePath("../Inventory")
+vitals = NodePath("../Vitals")
+model = NodePath("../Model")
+
+[node name="Sync" type="MultiplayerSynchronizer" parent="."]
+replication_config = SubResource("SceneReplicationConfig_owner")
+
+[node name="ServerSync" type="MultiplayerSynchronizer" parent="."]
+replication_config = SubResource("SceneReplicationConfig_server")

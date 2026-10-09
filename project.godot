@@ -1,0 +1,39 @@
+; Engine configuration file.
+; Open with the Voxel Tools build of Godot 4.7.2 (see README.md), not the stock editor.
+
+config_version=5
+
+[application]
+
+config/name="Contractor"
+config/description="Tactical first-person co-op with physical inventory and voxel destruction."
+run/main_scene="res://scenes/main.tscn"
+config/features=PackedStringArray("4.7", "Forward Plus")
+config/icon="res://icon.svg"
+
+[autoload]
+
+Controls="*res://autoload/controls.gd"
+ItemDB="*res://autoload/item_db.gd"
+GameState="*res://autoload/game_state.gd"
+Net="*res://autoload/net.gd"
+
+[display]
+
+window/size/viewport_width=1600
+window/size/viewport_height=900
+
+[layer_names]
+
+3d_render/layer_1="world"
+3d_render/layer_2="local_player_only"
+3d_physics/layer_1="world"
+3d_physics/layer_2="hitboxes"
+3d_physics/layer_3="items"
+3d_physics/layer_4="armor"
+3d_physics/layer_5="movers"
+
+[physics]
+
+3d/physics_engine="Jolt Physics"
+common/physics_ticks_per_second=60

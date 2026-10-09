@@ -1,0 +1,57 @@
+{
+	"_units": "volume_l = litres, mass_kg = kilograms, capacity_l = storage added when worn. Plate *_vox sizes are 1 cm voxels.",
+	"items": [
+		{"id": "m4a1", "name": "M4A1 Carbine", "type": "weapon", "slot": "primary", "volume_l": 12.0, "mass_kg": 3.4, "tags": ["rifle", "5.56"],
+		 "stats": {"damage": 34, "rpm": 750, "auto": true, "ammo": "mag_556", "wall_carve_m": 0.12, "plate_wear": 1.0, "size_m": [0.07, 0.25, 0.84]}},
+		{"id": "mk18", "name": "Mk18 CQBR", "type": "weapon", "slot": "primary", "volume_l": 9.5, "mass_kg": 3.0, "tags": ["rifle", "5.56"],
+		 "stats": {"damage": 31, "rpm": 800, "auto": true, "ammo": "mag_556", "wall_carve_m": 0.11, "plate_wear": 0.9, "size_m": [0.07, 0.25, 0.68]}},
+		{"id": "m110", "name": "M110 DMR", "type": "weapon", "slot": "primary", "volume_l": 15.0, "mass_kg": 5.0, "tags": ["rifle", "7.62"],
+		 "stats": {"damage": 62, "rpm": 300, "auto": false, "ammo": "mag_762", "wall_carve_m": 0.18, "plate_wear": 1.6, "size_m": [0.07, 0.27, 1.03]}},
+		{"id": "m17", "name": "M17 Pistol", "type": "weapon", "slot": "sidearm", "volume_l": 1.2, "mass_kg": 0.9, "tags": ["pistol", "9mm"],
+		 "stats": {"damage": 22, "rpm": 400, "auto": false, "ammo": "mag_9mm", "wall_carve_m": 0.07, "plate_wear": 0.5, "size_m": [0.04, 0.14, 0.2]}},
+
+		{"id": "mag_556", "name": "5.56 Magazine (30)", "type": "ammo", "volume_l": 0.25, "mass_kg": 0.5, "stack": 10, "tags": ["5.56"], "stats": {"rounds": 30}},
+		{"id": "mag_762", "name": "7.62 Magazine (20)", "type": "ammo", "volume_l": 0.32, "mass_kg": 0.65, "stack": 10, "tags": ["7.62"], "stats": {"rounds": 20}},
+		{"id": "mag_9mm", "name": "9mm Magazine (17)", "type": "ammo", "volume_l": 0.08, "mass_kg": 0.25, "stack": 10, "tags": ["9mm"], "stats": {"rounds": 17}},
+
+		{"id": "plate_carrier_light", "name": "Low-Profile Carrier (Light)", "type": "armor", "slot": "vest", "volume_l": 5.0, "mass_kg": 1.2, "capacity_l": 3.0, "tags": ["vest", "light"],
+		 "stats": {"tier": "light", "plate_slots": ["plate_front"], "plate_depth": 0.14}},
+		{"id": "plate_carrier", "name": "Plate Carrier (Medium)", "type": "armor", "slot": "vest", "volume_l": 8.0, "mass_kg": 2.0, "capacity_l": 6.0, "tags": ["vest", "medium"],
+		 "stats": {"tier": "medium", "plate_slots": ["plate_front", "plate_back"], "plate_depth": 0.14}},
+		{"id": "plate_carrier_heavy", "name": "Assault Carrier (Heavy)", "type": "armor", "slot": "vest", "volume_l": 12.0, "mass_kg": 4.5, "capacity_l": 8.0, "tags": ["vest", "heavy"],
+		 "stats": {"tier": "heavy", "plate_slots": ["plate_front", "plate_back", "plate_left", "plate_right"], "plate_depth": 0.165, "side_plate_x": 0.245}},
+
+		{"id": "helmet_bump", "name": "Bump Helmet (Light)", "type": "armor", "slot": "helmet", "volume_l": 4.0, "mass_kg": 0.7, "tags": ["head", "light"],
+		 "stats": {"shape": "helmet", "tier": "light", "thickness_vox": 1, "chip_radius": 2.4, "color": "6e6a5a"}},
+		{"id": "helmet", "name": "Ballistic Helmet (Medium)", "type": "armor", "slot": "helmet", "volume_l": 6.0, "mass_kg": 1.4, "tags": ["head", "medium"],
+		 "stats": {"shape": "helmet", "tier": "medium", "thickness_vox": 2, "chip_radius": 1.6, "color": "7d7458"}},
+		{"id": "helmet_heavy", "name": "Assault Helmet + Visor (Heavy)", "type": "armor", "slot": "helmet", "volume_l": 9.0, "mass_kg": 3.4, "tags": ["head", "heavy"],
+		 "stats": {"shape": "helmet", "tier": "heavy", "thickness_vox": 2, "chip_radius": 1.2, "color": "3d4038"}},
+
+		{"id": "plate_pe_l3", "name": "PE Plate (L3, Light)", "type": "plate", "slot": "plate", "volume_l": 2.4, "mass_kg": 1.4, "tags": ["plate", "polyethylene", "light"],
+		 "stats": {"width_vox": 25, "height_vox": 30, "thickness_vox": 2, "chip_radius": 3.2, "color": "8e9186", "size_m": [0.25, 0.3, 0.025]}},
+		{"id": "plate_ceramic_l4", "name": "Ceramic Plate (L4, Medium)", "type": "plate", "slot": "plate", "volume_l": 2.2, "mass_kg": 2.9, "tags": ["plate", "ceramic", "medium"],
+		 "stats": {"width_vox": 25, "height_vox": 30, "thickness_vox": 2, "chip_radius": 2.6, "color": "4f5a45", "size_m": [0.25, 0.3, 0.03]}},
+		{"id": "plate_steel_l3", "name": "Steel Plate (L3, Heavy)", "type": "plate", "slot": "plate", "volume_l": 1.6, "mass_kg": 3.6, "tags": ["plate", "steel", "heavy"],
+		 "stats": {"width_vox": 25, "height_vox": 30, "thickness_vox": 1, "chip_radius": 1.2, "color": "4a4d50", "size_m": [0.25, 0.3, 0.02]}},
+		{"id": "plate_side", "name": "Side Plate (Steel)", "type": "plate", "slot": "side_plate", "volume_l": 0.6, "mass_kg": 1.1, "tags": ["plate", "steel", "side"],
+		 "stats": {"width_vox": 15, "height_vox": 20, "thickness_vox": 1, "chip_radius": 1.2, "color": "4a4d50", "size_m": [0.15, 0.2, 0.02]}},
+
+		{"id": "assault_pack", "name": "Assault Pack (24 L)", "type": "backpack", "slot": "backpack", "volume_l": 4.0, "mass_kg": 1.1, "capacity_l": 24.0, "tags": ["pack"]},
+		{"id": "ruck_45", "name": "Ruck (45 L)", "type": "backpack", "slot": "backpack", "volume_l": 7.0, "mass_kg": 2.2, "capacity_l": 45.0, "tags": ["pack"]},
+
+		{"id": "ifak", "name": "IFAK", "type": "medical", "volume_l": 0.8, "mass_kg": 0.4, "stack": 5, "tags": ["medical"]},
+		{"id": "tourniquet", "name": "Tourniquet", "type": "medical", "volume_l": 0.1, "mass_kg": 0.08, "stack": 10, "tags": ["medical"]},
+		{"id": "trauma_kit", "name": "Trauma Kit", "type": "medical", "volume_l": 4.0, "mass_kg": 2.0, "tags": ["medical", "revive"]},
+
+		{"id": "frag_grenade", "name": "Frag Grenade", "type": "utility", "volume_l": 0.3, "mass_kg": 0.4, "stack": 6, "tags": ["throwable", "explosive"]},
+		{"id": "smoke_grenade", "name": "Smoke Grenade", "type": "utility", "volume_l": 0.35, "mass_kg": 0.35, "stack": 6, "tags": ["throwable"]},
+		{"id": "breaching_charge", "name": "Breaching Charge", "type": "utility", "volume_l": 2.0, "mass_kg": 1.5, "stack": 3, "tags": ["explosive", "breach"]},
+
+		{"id": "electronics_salvage", "name": "Electronics Salvage", "type": "salvage", "volume_l": 0.5, "mass_kg": 0.3, "stack": 20, "tags": ["salvage"]},
+		{"id": "hvt_case", "name": "HVT Hard Case", "type": "objective", "volume_l": 30.0, "mass_kg": 12.0, "two_handed": true, "tags": ["objective"],
+		 "stats": {"size_m": [0.55, 0.4, 0.22]}},
+		{"id": "supply_crate", "name": "Supply Crate", "type": "objective", "volume_l": 60.0, "mass_kg": 25.0, "two_handed": true, "tags": ["salvage", "bulky"],
+		 "stats": {"size_m": [0.6, 0.4, 0.4]}}
+	]
+}

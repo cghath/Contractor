@@ -1,0 +1,17 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
+[ext_resource type="PackedScene" path="res://scenes/levels/compound.tscn" id="2_level"]
+[ext_resource type="Script" path="res://scripts/ui/menu.gd" id="3_menu"]
+
+[node name="Main" type="Node"]
+script = ExtResource("1_main")
+
+[node name="Compound" parent="." instance=ExtResource("2_level")]
+
+[node name="MenuCamera" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.866, 0.5, 0, -0.5, 0.866, 0, 14, 40)
+current = true
+
+[node name="Menu" type="CanvasLayer" parent="."]
+script = ExtResource("3_menu")

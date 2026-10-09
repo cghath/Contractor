@@ -1,0 +1,36 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/world/compound_level.gd" id="1_level"]
+[ext_resource type="Script" path="res://scripts/world/voxel_world.gd" id="2_voxel"]
+[ext_resource type="PackedScene" path="res://scenes/target_dummy.tscn" id="3_dummy"]
+
+[node name="Compound" type="Node3D"]
+script = ExtResource("1_level")
+
+[node name="VoxelWorld" type="Node3D" parent="."]
+script = ExtResource("2_voxel")
+
+[node name="Players" type="Node3D" parent="."]
+
+[node name="Items" type="Node3D" parent="."]
+
+[node name="PlayerSpawner" type="MultiplayerSpawner" parent="."]
+_spawnable_scenes = PackedStringArray("res://scenes/player.tscn")
+spawn_path = NodePath("../Players")
+
+[node name="ItemSpawner" type="MultiplayerSpawner" parent="."]
+spawn_path = NodePath("../Items")
+
+[node name="Dummies" type="Node3D" parent="."]
+
+[node name="LightDummy" parent="Dummies" instance=ExtResource("3_dummy")]
+transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, -4, 0, 12)
+loadout = PackedStringArray("plate_carrier_light", "plate_pe_l3", "helmet_bump")
+
+[node name="HeavyDummy" parent="Dummies" instance=ExtResource("3_dummy")]
+transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, 4, 0, 12)
+loadout = PackedStringArray("plate_carrier_heavy", "plate_steel_l3", "plate_steel_l3", "plate_side", "plate_side", "helmet_heavy")
+
+[node name="MediumDummy" parent="Dummies" instance=ExtResource("3_dummy")]
+transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, 0, 0, -8)
+loadout = PackedStringArray("plate_carrier", "plate_ceramic_l4", "plate_ceramic_l4", "helmet")
