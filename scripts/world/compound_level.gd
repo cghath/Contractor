@@ -31,6 +31,8 @@ const LOOT := [
 	{"uid": "c01_side_b", "id": "plate_side", "pos": Vector3(4.5, 0.5, 23)},
 	{"uid": "c01_ifak_a", "id": "ifak", "count": 2, "pos": Vector3(-6, 0.5, 4)},
 	{"uid": "c01_frag_a", "id": "frag_grenade", "count": 3, "pos": Vector3(6, 0.5, 4)},
+	{"uid": "c01_smoke_a", "id": "smoke_grenade", "count": 3, "pos": Vector3(7, 0.5, 4)},
+	{"uid": "c01_flash_a", "id": "flashbang", "count": 3, "pos": Vector3(8, 0.5, 4)},
 	{"uid": "c01_salvage_a", "id": "electronics_salvage", "count": 8, "pos": Vector3(3, 0.5, -10)},
 	{"uid": "c01_m110_a", "id": "m110", "pos": Vector3(-3, 0.5, -10)},
 	{"uid": "c01_hvt_case", "id": "hvt_case", "pos": Vector3(0, 0.5, -10)},
@@ -43,6 +45,7 @@ const LOOT := [
 @onready var voxel_world: VoxelWorld = $VoxelWorld
 
 var _spawn_index := 0
+var _throw_count := 0
 
 
 static func current(from: Node) -> CompoundLevel:
@@ -90,6 +93,65 @@ func show_impact(pos: Vector3, normal: Vector3, kind: String) -> void:
 	add_child(mark)
 	mark.global_position = pos + normal * 0.01
 	get_tree().create_timer(4.0).timeout.connect(mark.queue_free)
+
+
+## Host only. Throws a grenade on every peer; the host's copy detonates (see Grenade).
+func server_throw(id: StringName, origin: Vector3, velocity: Vector3) -> void:
+	_throw_count += 1
+	show_throw.rpc(_throw_count, String(id), origin, velocity)
+
+
+@rpc("authority", "call_local", "reliable")
+func show_throw(serial: int, id: String, origin: Vector3, velocity: Vector3) -> void:
+	var grenade := Grenade.new()
+	grenade.name = "Grenade%d" % serial
+	grenade.setup(StringName(id))
+	add_child(grenade)
+	grenade.global_position = origin
+	grenade.linear_velocity = velocity
+	grenade.angular_velocity = Vector3(randf_range(-8, 8), randf_range(-8, 8), randf_range(-8, 8))
+
+
+@rpc("authority", "call_local", "reliable")
+func show_explosion(pos: Vector3) -> void:
+	_burst(pos, Color(1.0, 0.6, 0.25), 3.2, 0.35)
+
+
+@rpc("authority", "call_local", "reliable")
+func show_flash(pos: Vector3) -> void:
+	_burst(pos, Color.WHITE, 1.0, 0.15)
+
+
+@rpc("authority", "call_local", "reliable")
+func spawn_smoke(pos: Vector3) -> void:
+	var cloud := SmokeCloud.new()
+	add_child(cloud)
+	cloud.global_position = pos
+
+
+func _burst(pos: Vector3, colour: Color, size: float, life: float) -> void:
+	var material := StandardMaterial3D.new()
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	material.albedo_color = colour
+	var sphere := SphereMesh.new()
+	sphere.radius = 0.5
+	sphere.height = 1.0
+	sphere.material = material
+	var ball := MeshInstance3D.new()
+	ball.mesh = sphere
+	var light := OmniLight3D.new()
+	light.light_color = colour
+	light.light_energy = 8.0
+	light.omni_range = 14.0
+	ball.add_child(light)
+	add_child(ball)
+	ball.global_position = pos + Vector3.UP * 0.3
+	var tween := ball.create_tween().set_parallel()
+	tween.tween_property(ball, "scale", Vector3.ONE * size, life)
+	tween.tween_property(material, "albedo_color:a", 0.0, life)
+	tween.tween_property(light, "light_energy", 0.0, life)
+	tween.chain().tween_callback(ball.queue_free)
 
 
 func _on_hosted() -> void:

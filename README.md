@@ -95,6 +95,8 @@ include Voxel Tools.
 | F while downed | Give up (die and respawn) |
 | G | Drop carried bulky item, otherwise drop active weapon |
 | 1 / 2 | Primary / sidearm |
+| T | Throw the selected grenade (frag, flashbang or smoke) |
+| 3 | Switch grenade type |
 | Tab | Inventory screen: equip, stow, move between containers, use, drop |
 | Esc | Close the inventory screen / release mouse |
 | F5 | Save zone (host) |

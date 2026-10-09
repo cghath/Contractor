@@ -27,6 +27,7 @@ func _ready() -> void:
 	await _test_drop_and_pickup_keep_state()
 	await _test_spread()
 	await _test_revive_and_downed()
+	await _test_throwables()
 	GameState.delete_save()
 	print("GAMEPLAY TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
@@ -155,6 +156,50 @@ func _test_revive_and_downed() -> void:
 	player._server_give_up.rpc_id(1)
 	await _frames(2)
 	check(player.vitals.is_up() and player.vitals.health == player.vitals.max_health, "giving up respawns you at full health")
+
+
+func _test_throwables() -> void:
+	print("Grenades")
+	var inv := player.inventory
+	for id: StringName in [&"frag_grenade", &"flashbang", &"smoke_grenade"]:
+		inv.take(id)
+	player.global_position = Vector3(0, 0.1, 18)
+	await _frames(2)
+	player._server_busy_until = 0.0
+	player._server_throw.rpc_id(1, player.camera.global_position, -player.global_basis.z, &"frag_grenade")
+	check(inv.count_of(&"frag_grenade") == 0, "throwing uses the grenade")
+	check(level.get_children().any(func(n: Node) -> bool: return n is Grenade), "a grenade is in flight")
+	await _seconds(3.8)
+	check(not level.get_children().any(func(n: Node) -> bool: return n is Grenade), "it went off after its fuse")
+
+	var light: TargetDummy = level.get_node(^"Dummies/LightDummy")
+	var medium: TargetDummy = level.get_node(^"Dummies/MediumDummy")
+	for d: TargetDummy in [light, medium]:
+		d.respawn_seconds = 999.0
+		d.vitals.server_reset_health()
+	var edits := GameState.voxel_edits.size()
+	Throwables.server_detonate(level, "frag", light.global_position + Vector3(1.0, 0.05, 0.0))
+	check(light.vitals.health < light.vitals.max_health, "frag hurts a dummy 1 m away (HP %.0f)" % light.vitals.health)
+	check(GameState.voxel_edits.size() == edits + 1, "frag leaves a crater in the voxels")
+	Throwables.server_detonate(level, "frag", Vector3(3, 0.2, -2.5))
+	check(is_equal_approx(medium.vitals.health, medium.vitals.max_health), "a wall shields the dummy inside the building")
+	for d: TargetDummy in [light, medium]:
+		d.vitals.server_reset_health()
+
+	var hud: Hud = player._hud
+	player.global_position = Vector3(0, 0.1, 18)
+	player.rotation = Vector3.ZERO
+	player.head.rotation = Vector3.ZERO
+	await _frames(2)
+	Throwables.server_detonate(level, "flash", player.global_position + Vector3(0, 0.3, -3))
+	await _frames(2)
+	check(hud._white_left > 3.0, "a flashbang in front of you whites out the screen (%.1f s)" % hud._white_left)
+
+	var smoke_at := Vector3(0, 0.1, 14)
+	Throwables.server_detonate(level, "smoke", smoke_at)
+	await _seconds(3.2)
+	check(SmokeCloud.blocks(smoke_at + Vector3(-8, 1.5, 0), smoke_at + Vector3(8, 1.5, 0)), "smoke blocks a sight line through it")
+	check(not SmokeCloud.blocks(smoke_at + Vector3(-8, 1.5, 12), smoke_at + Vector3(8, 1.5, 12)), "but not one well clear of it")
 
 
 func _world_item(id: StringName) -> WorldItem:

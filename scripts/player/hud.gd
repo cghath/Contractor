@@ -13,9 +13,16 @@ var _ammo: Label
 var _downed: Label
 var _message: Label
 var _message_time := 0.0
+var _white: ColorRect
+var _white_left := 0.0  # seconds of whiteout remaining
 
 
 func _ready() -> void:
+	_white = ColorRect.new()
+	_white.color = Color(1, 1, 1, 0)
+	_white.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_white)
+	_white.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_crosshair = _label("+", Control.PRESET_CENTER)
 	_crosshair.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_downed = _label("", Control.PRESET_CENTER)
@@ -46,6 +53,13 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	_message_time -= delta
 	_message.visible = _message_time > 0.0
+	_white_left = maxf(_white_left - delta, 0.0)
+	_white.color.a = clampf(_white_left / 1.5, 0.0, 1.0)
+
+
+## Flashbang: `amount` 0..1 sets how long the screen stays white (up to about 5 s).
+func whiteout(amount: float) -> void:
+	_white_left = maxf(_white_left, 0.5 + 4.5 * amount)
 
 
 func set_prompt(text: String) -> void:
@@ -88,6 +102,7 @@ func update_status(player: Player) -> void:
 		_ammo.text = "%s%s\n%d / %d" % [weapon.name, state, inv.rounds_in(player.active_slot), inv.spare_rounds(ammo)]
 	else:
 		_ammo.text = ""
+	_ammo.text += "\n%s x%d  [T] throw  [3] switch" % [ItemDB.get_item(player.throwable).name, inv.count_of(player.throwable)]
 	if player.vitals.is_healing():
 		_status.text += "\nHealing..."
 	_crosshair.visible = not player.is_aiming and player.vitals.is_up()

@@ -35,6 +35,10 @@ const ITEM_MASK := 1 << 2
 const LOCAL_ONLY_LAYER := 1 << 1
 ## Camo variants for players, picked from the peer id so every peer agrees.
 const PLAYER_VARIANTS: Array[String] = ["multicam", "woodland", "desert", "urban"]
+## Throwables in the order the next-throwable key cycles them.
+const THROWABLES: Array[StringName] = [&"frag_grenade", &"flashbang", &"smoke_grenade"]
+const THROW_SPEED := 15.0
+const THROW_BUSY_S := 0.7
 
 @onready var head: Node3D = $Head
 @onready var camera: Camera3D = $Head/Camera
@@ -57,6 +61,9 @@ var _next_shot := 0.0         # owner-side fire-rate gate
 var _busy_until := 0.0        # owner-side: reloading or using a medkit
 var _server_next_shot := 0.0  # host-side check
 var _server_busy_until := 0.0
+## Owner-side: the grenade type the throw key uses.
+var throwable: StringName = &"frag_grenade"
+var _shake := 0.0
 
 
 func _enter_tree() -> void:
@@ -67,6 +74,7 @@ func _enter_tree() -> void:
 
 
 func _ready() -> void:
+	add_to_group(&"combatants")
 	inventory.changed.connect(_on_inventory_changed)
 	vitals.died.connect(_on_died)
 	vitals.went_down.connect(_on_went_down)
@@ -140,9 +148,18 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed(&"weapon_sidearm"):
 		active_slot = &"sidearm"
 		_on_inventory_changed()
+	elif event.is_action_pressed(&"next_throwable"):
+		throwable = THROWABLES[(THROWABLES.find(throwable) + 1) % THROWABLES.size()]
+		_hud.flash("%s (%d)" % [ItemDB.get_item(throwable).name, inventory.count_of(throwable)])
+	elif event.is_action_pressed(&"throw"):
+		_try_throw()
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
+	if is_local():
+		_shake = move_toward(_shake, 0.0, delta * 1.5)
+		camera.h_offset = randf_range(-1.0, 1.0) * _shake * 0.08
+		camera.v_offset = randf_range(-1.0, 1.0) * _shake * 0.08
 	# Runs on every peer: active_slot, inventory and head rotation are replicated.
 	model.look_pitch = head.rotation.x
 	model.reloading = is_reloading
@@ -308,6 +325,16 @@ func _try_reload() -> void:
 	_server_reload.rpc_id(1, active_slot)
 
 
+func _try_throw() -> void:
+	if _now() < _busy_until or inventory.hands != &"" or not vitals.is_up():
+		return
+	if inventory.count_of(throwable) <= 0:
+		_hud.flash("No %s left" % ItemDB.get_item(throwable).name)
+		return
+	_busy_until = _now() + THROW_BUSY_S
+	_server_throw.rpc_id(1, camera.global_position, -camera.global_basis.z, throwable)
+
+
 static func _ammo_of(weapon: ItemData) -> StringName:
 	return StringName(weapon.stats.get("ammo", ""))
 
@@ -366,6 +393,20 @@ func _server_fire(origin: Vector3, direction: Vector3, slot: StringName) -> void
 	var result := Ballistics.fire(self, origin, direction.normalized(), weapon)
 	if result.result != "none":
 		CompoundLevel.current(self).show_impact.rpc(result.position, result.normal, result.result)
+
+
+@rpc("any_peer", "call_local", "reliable")
+func _server_throw(origin: Vector3, direction: Vector3, id: StringName) -> void:
+	if not _from_owner() or not vitals.is_up() or inventory.hands != &"" or _now() < _server_busy_until - 0.1:
+		return
+	var item := ItemDB.get_item(id)
+	if item == null or not item.stats.has("throwable") or not inventory.remove_one(id):
+		return
+	_server_busy_until = _now() + THROW_BUSY_S
+	if origin.distance_to(camera.global_position) > 1.0:
+		origin = camera.global_position
+	var dir := direction.normalized()
+	CompoundLevel.current(self).server_throw(id, origin + dir * 0.5, velocity + dir * THROW_SPEED + Vector3.UP * 2.0)
 
 
 @rpc("any_peer", "call_local", "reliable")
@@ -563,6 +604,21 @@ func _client_busy(seconds: float, text: String) -> void:
 	_busy_until = _now() + seconds
 	if _hud:
 		_hud.flash(text)
+
+
+## A flashbang went off in sight: the whiteout is strongest when you were looking at it.
+@rpc("any_peer", "call_local", "reliable")
+func _client_flashed(pos: Vector3, amount: float) -> void:
+	if multiplayer.get_remote_sender_id() != 1 or _hud == null:
+		return
+	var facing := (-camera.global_basis.z).dot((pos - camera.global_position).normalized())
+	_hud.whiteout(amount * (1.0 if facing > 0.3 else 0.35))
+
+
+@rpc("any_peer", "call_local", "reliable")
+func _client_shake(amount: float) -> void:
+	if multiplayer.get_remote_sender_id() == 1:
+		_shake = maxf(_shake, amount)
 
 
 @rpc("any_peer", "call_local", "reliable")

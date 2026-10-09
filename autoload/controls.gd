@@ -18,6 +18,8 @@ const KEYS := {
 	&"inventory": [KEY_TAB],
 	&"weapon_primary": [KEY_1],
 	&"weapon_sidearm": [KEY_2],
+	&"throw": [KEY_T],
+	&"next_throwable": [KEY_3],
 	&"pause": [KEY_ESCAPE],
 	&"quick_save": [KEY_F5],
 }

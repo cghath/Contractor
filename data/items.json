@@ -44,8 +44,12 @@
 		{"id": "tourniquet", "name": "Tourniquet", "type": "medical", "volume_l": 0.1, "mass_kg": 0.08, "stack": 10, "tags": ["medical"]},
 		{"id": "trauma_kit", "name": "Trauma Kit", "type": "medical", "volume_l": 4.0, "mass_kg": 2.0, "tags": ["medical", "revive"], "stats": {"heal": 70, "heal_s": 8.0, "use_s": 4.0, "revive_hp": 50, "revive_s": 3.0}},
 
-		{"id": "frag_grenade", "name": "Frag Grenade", "type": "utility", "volume_l": 0.3, "mass_kg": 0.4, "stack": 6, "tags": ["throwable", "explosive"]},
-		{"id": "smoke_grenade", "name": "Smoke Grenade", "type": "utility", "volume_l": 0.35, "mass_kg": 0.35, "stack": 6, "tags": ["throwable"]},
+		{"id": "frag_grenade", "name": "Frag Grenade", "type": "utility", "volume_l": 0.3, "mass_kg": 0.4, "stack": 6, "tags": ["throwable", "explosive"],
+		 "stats": {"throwable": "frag", "fuse_s": 3.5}},
+		{"id": "smoke_grenade", "name": "Smoke Grenade", "type": "utility", "volume_l": 0.35, "mass_kg": 0.35, "stack": 6, "tags": ["throwable"],
+		 "stats": {"throwable": "smoke", "fuse_s": 1.5}},
+		{"id": "flashbang", "name": "Flashbang", "type": "utility", "volume_l": 0.3, "mass_kg": 0.3, "stack": 6, "tags": ["throwable"],
+		 "stats": {"throwable": "flash", "fuse_s": 1.5}},
 		{"id": "breaching_charge", "name": "Breaching Charge", "type": "utility", "volume_l": 2.0, "mass_kg": 1.5, "stack": 3, "tags": ["explosive", "breach"]},
 
 		{"id": "electronics_salvage", "name": "Electronics Salvage", "type": "salvage", "volume_l": 0.5, "mass_kg": 0.3, "stack": 20, "tags": ["salvage"]},

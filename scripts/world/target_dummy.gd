@@ -16,6 +16,7 @@ extends StaticBody3D
 
 
 func _ready() -> void:
+	add_to_group(&"combatants")
 	if multiplayer.is_server():
 		for id in loadout:
 			inventory.take(StringName(id))
