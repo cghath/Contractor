@@ -16,6 +16,12 @@ that travels with the item.
 
 ### Added
 
+- **Grenades (T to throw, 3 to switch type):** frag, flashbang (new item) and smoke.
+  - Frag: up to 180 damage within 8 m, falling off with distance; walls shield you. It also blasts a crater in voxel walls.
+  - Flashbang: whites out the screen for up to 5 s, depending on distance and whether you were looking at it. AI soldiers will be stunned.
+  - Smoke: a 5 m cloud that lasts 30 s. It blocks the view, and will block AI line of sight.
+  - Every peer sees the grenade fly; the host detonates it. The compound has smokes and flashbangs next to the frags.
+
 - **Item state:** items carry state that goes wherever they go: rounds in a weapon or
   magazine, chips in a plate or helmet. It's kept while the item is worn, stowed, dropped,
   picked up by someone else, and saved with the zone.
