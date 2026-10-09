@@ -59,6 +59,11 @@ that travels with the item.
   keeps its holes. `Vitals` now only tracks health and healing.
 - `Inventory.unequip()` returns the item with its state. `take()` accepts state.
 - `Vitals` gained the downed state (`downed`, `bleed_seconds`, `server_revive`, `server_give_up`), replicated to all peers.
+- **Menu:**
+  - The host button is now "Play (host a session)", with a note that solo play means hosting.
+  - A failed join says that someone must be hosting at that address.
+  - Join retries 3 times, about 2.5 s each, so a second window started with the host still connects.
+  - Hosting on a busy port suggests joining instead.
 
 ### Fixed
 
