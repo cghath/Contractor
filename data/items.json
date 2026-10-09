@@ -2,13 +2,13 @@
 	"_units": "volume_l = litres, mass_kg = kilograms, capacity_l = storage added when worn. Plate *_vox sizes are 1 cm voxels.",
 	"items": [
 		{"id": "m4a1", "name": "M4A1 Carbine", "type": "weapon", "slot": "primary", "volume_l": 12.0, "mass_kg": 3.4, "tags": ["rifle", "5.56"],
-		 "stats": {"damage": 34, "rpm": 750, "auto": true, "ammo": "mag_556", "wall_carve_m": 0.12, "plate_wear": 1.0, "size_m": [0.07, 0.25, 0.84]}},
+		 "stats": {"damage": 34, "rpm": 750, "auto": true, "ammo": "mag_556", "reload_s": 2.4, "wall_carve_m": 0.12, "plate_wear": 1.0, "size_m": [0.07, 0.25, 0.84]}},
 		{"id": "mk18", "name": "Mk18 CQBR", "type": "weapon", "slot": "primary", "volume_l": 9.5, "mass_kg": 3.0, "tags": ["rifle", "5.56"],
-		 "stats": {"damage": 31, "rpm": 800, "auto": true, "ammo": "mag_556", "wall_carve_m": 0.11, "plate_wear": 0.9, "size_m": [0.07, 0.25, 0.68]}},
+		 "stats": {"damage": 31, "rpm": 800, "auto": true, "ammo": "mag_556", "reload_s": 2.3, "wall_carve_m": 0.11, "plate_wear": 0.9, "size_m": [0.07, 0.25, 0.68]}},
 		{"id": "m110", "name": "M110 DMR", "type": "weapon", "slot": "primary", "volume_l": 15.0, "mass_kg": 5.0, "tags": ["rifle", "7.62"],
-		 "stats": {"damage": 62, "rpm": 300, "auto": false, "ammo": "mag_762", "wall_carve_m": 0.18, "plate_wear": 1.6, "size_m": [0.07, 0.27, 1.03]}},
+		 "stats": {"damage": 62, "rpm": 300, "auto": false, "ammo": "mag_762", "reload_s": 2.8, "wall_carve_m": 0.18, "plate_wear": 1.6, "size_m": [0.07, 0.27, 1.03]}},
 		{"id": "m17", "name": "M17 Pistol", "type": "weapon", "slot": "sidearm", "volume_l": 1.2, "mass_kg": 0.9, "tags": ["pistol", "9mm"],
-		 "stats": {"damage": 22, "rpm": 400, "auto": false, "ammo": "mag_9mm", "wall_carve_m": 0.07, "plate_wear": 0.5, "size_m": [0.04, 0.14, 0.2]}},
+		 "stats": {"damage": 22, "rpm": 400, "auto": false, "ammo": "mag_9mm", "reload_s": 1.6, "wall_carve_m": 0.07, "plate_wear": 0.5, "size_m": [0.04, 0.14, 0.2]}},
 
 		{"id": "mag_556", "name": "5.56 Magazine (30)", "type": "ammo", "volume_l": 0.25, "mass_kg": 0.5, "stack": 10, "tags": ["5.56"], "stats": {"rounds": 30}},
 		{"id": "mag_762", "name": "7.62 Magazine (20)", "type": "ammo", "volume_l": 0.32, "mass_kg": 0.65, "stack": 10, "tags": ["7.62"], "stats": {"rounds": 20}},
@@ -40,9 +40,9 @@
 		{"id": "assault_pack", "name": "Assault Pack (24 L)", "type": "backpack", "slot": "backpack", "volume_l": 4.0, "mass_kg": 1.1, "capacity_l": 24.0, "tags": ["pack"]},
 		{"id": "ruck_45", "name": "Ruck (45 L)", "type": "backpack", "slot": "backpack", "volume_l": 7.0, "mass_kg": 2.2, "capacity_l": 45.0, "tags": ["pack"]},
 
-		{"id": "ifak", "name": "IFAK", "type": "medical", "volume_l": 0.8, "mass_kg": 0.4, "stack": 5, "tags": ["medical"]},
+		{"id": "ifak", "name": "IFAK", "type": "medical", "volume_l": 0.8, "mass_kg": 0.4, "stack": 5, "tags": ["medical"], "stats": {"heal": 35, "heal_s": 4.0, "use_s": 2.0}},
 		{"id": "tourniquet", "name": "Tourniquet", "type": "medical", "volume_l": 0.1, "mass_kg": 0.08, "stack": 10, "tags": ["medical"]},
-		{"id": "trauma_kit", "name": "Trauma Kit", "type": "medical", "volume_l": 4.0, "mass_kg": 2.0, "tags": ["medical", "revive"]},
+		{"id": "trauma_kit", "name": "Trauma Kit", "type": "medical", "volume_l": 4.0, "mass_kg": 2.0, "tags": ["medical", "revive"], "stats": {"heal": 70, "heal_s": 8.0, "use_s": 4.0}},
 
 		{"id": "frag_grenade", "name": "Frag Grenade", "type": "utility", "volume_l": 0.3, "mass_kg": 0.4, "stack": 6, "tags": ["throwable", "explosive"]},
 		{"id": "smoke_grenade", "name": "Smoke Grenade", "type": "utility", "volume_l": 0.35, "mass_kg": 0.35, "stack": 6, "tags": ["throwable"]},

@@ -21,6 +21,27 @@ var tags: PackedStringArray
 var stats: Dictionary
 
 
+## State a fresh copy of this item starts with: weapons come loaded, armor undamaged.
+## Items whose state equals this are interchangeable and can stack.
+func default_state() -> Dictionary:
+	match type:
+		"weapon":
+			var ammo := StringName(stats.get("ammo", ""))
+			return {"rounds": ItemDB.get_item(ammo).magazine_rounds()} if ItemDB.has_item(ammo) else {}
+		"plate":
+			return {"chips": []}
+		"ammo":
+			return {"rounds": magazine_rounds()}
+	if slot == &"helmet":
+		return {"chips": []}
+	return {}
+
+
+## Rounds in a full magazine (for ammo items), else 0.
+func magazine_rounds() -> int:
+	return int(stats.get("rounds", 0))
+
+
 static func from_dict(d: Dictionary) -> ItemData:
 	var item := ItemData.new()
 	item.id = StringName(d["id"])

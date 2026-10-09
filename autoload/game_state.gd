@@ -9,7 +9,7 @@ const SAVE_VERSION := 1
 var zone_id := "compound_01"
 ## Level-placed items that have been picked up (uid -> true).
 var looted: Dictionary = {}
-## Items players dropped (uid -> {"id", "count", "pos": [x, y, z]}).
+## Items players dropped (uid -> {"id", "count", "pos": [x, y, z], "state"}).
 var dropped: Dictionary = {}
 ## Ordered voxel edit log. Replayed on load and sent to late joiners.
 var voxel_edits: Array = []
@@ -28,8 +28,8 @@ func item_taken(uid: String) -> void:
 		looted[uid] = true
 
 
-func item_dropped(uid: String, id: StringName, count: int, pos: Vector3) -> void:
-	dropped[uid] = {"id": String(id), "count": count, "pos": [pos.x, pos.y, pos.z]}
+func item_dropped(uid: String, id: StringName, count: int, pos: Vector3, state := {}) -> void:
+	dropped[uid] = {"id": String(id), "count": count, "pos": [pos.x, pos.y, pos.z], "state": state}
 
 
 func save_path() -> String:
@@ -42,6 +42,7 @@ func save_zone() -> void:
 		if dropped.has(node.uid):
 			var p: Vector3 = node.global_position
 			dropped[node.uid]["pos"] = [p.x, p.y, p.z]
+			dropped[node.uid]["count"] = node.count
 	DirAccess.make_dir_recursive_absolute(SAVE_DIR)
 	var file := FileAccess.open(save_path(), FileAccess.WRITE)
 	if file == null:

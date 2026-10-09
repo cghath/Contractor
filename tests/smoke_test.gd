@@ -13,6 +13,10 @@ func _ready() -> void:
 	await _test_voxel_world()
 	await _test_ballistics()
 	await _test_hands()
+	_test_item_state()
+	_test_ammo()
+	await _test_medical()
+	await _test_world_item_state()
 	print("SMOKE TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
 
@@ -41,7 +45,7 @@ func _test_inventory() -> void:
 	check(inv.take(&"mag_556", 30) == 30, "pack takes 30 more mags")
 	check(inv.take(&"hvt_case") == 1 and inv.hands == &"hvt_case", "bulky case goes to hands")
 	check(inv.take(&"supply_crate") == 0, "can't carry two bulky items")
-	check(inv.unequip(&"vest") == &"", "can't drop a vest with plates in it")
+	check(inv.unequip(&"vest").is_empty(), "can't drop a vest with plates in it")
 	check(inv.total_mass() > 30.0, "mass adds up (%.1f kg)" % inv.total_mass())
 	var copy := Inventory.new()
 	copy.net_state = inv.net_state
@@ -67,13 +71,17 @@ func _test_inventory() -> void:
 	heavy.queue_free()
 
 
+## A piece of armor worn in an Inventory (chips are recorded as the item's state).
 func _armor(id: StringName, slot: StringName) -> VoxelArmor:
-	var vitals := Vitals.new()
-	add_child(vitals)
+	var inv := Inventory.new()
+	add_child(inv)
+	if slot != &"helmet":
+		inv.take(&"plate_carrier")
+	inv.take(id)
 	var piece := VoxelArmor.new()
-	vitals.add_child(piece)
-	piece.setup(ItemDB.get_item(id), slot, vitals, 1)
-	vitals.changed.connect(func() -> void: piece.apply_damage(vitals.plate_damage.get(slot, [])))
+	inv.add_child(piece)
+	piece.setup(ItemDB.get_item(id), slot, inv, 1)
+	inv.changed.connect(func() -> void: piece.apply_damage(inv.chips_in(slot)))
 	return piece
 
 
@@ -88,7 +96,8 @@ func _test_armor() -> void:
 	check(not plate.server_try_stop(front, Vector3.BACK, rifle), "second hit on the same spot goes through")
 	check(plate.server_try_stop(front + Vector3(0.08, 0.08, 0), Vector3.BACK, rifle), "hit elsewhere still stopped")
 	check(plate.server_try_stop(front + Vector3(-0.08, -0.1, 0), Vector3(0.5, 0.3, 1).normalized(), rifle), "angled hit stopped")
-	plate.vitals.queue_free()
+	check(plate.inventory.chips_in(&"plate_front").size() == 3, "chips recorded in the plate's item state")
+	plate.inventory.queue_free()
 
 	print("VoxelArmor: helmets")
 	for tier: Array in [[&"helmet_bump", "light"], [&"helmet", "medium"], [&"helmet_heavy", "heavy"]]:
@@ -104,7 +113,7 @@ func _test_armor() -> void:
 		var face := Vector3(0, -0.1 if tier[1] == "heavy" else 0.02, -size.z * 0.5)
 		var face_blocked := helmet.server_try_stop(face, Vector3.BACK, rifle)
 		check(face_blocked == (tier[1] == "heavy"), "%s: face %s" % [tier[1], "covered by the visor" if tier[1] == "heavy" else "left open"])
-		helmet.vitals.queue_free()
+		helmet.inventory.queue_free()
 	await get_tree().process_frame
 
 func _test_voxel_world() -> void:
@@ -194,3 +203,95 @@ func _test_hands() -> void:
 	await get_tree().process_frame
 	check(model.hand_error() < 0.0, "weapon back on the sling/holster")
 	dummy.queue_free()
+
+func _test_item_state() -> void:
+	print("Item state")
+	var inv := Inventory.new()
+	add_child(inv)
+	inv.take(&"plate_carrier")
+	inv.take(&"plate_ceramic_l4")
+	inv.add_chip(&"plate_front", [12, 15, 0, 2.6])
+	var removed := inv.unequip(&"plate_front")
+	check(removed.id == &"plate_ceramic_l4" and removed.state.chips.size() == 1, "unequipped plate keeps its chips")
+	var other := Inventory.new()
+	add_child(other)
+	other.take(&"plate_carrier")
+	other.take(removed.id, 1, removed.state)
+	check(other.chips_in(&"plate_front").size() == 1, "damage comes back when someone else picks it up")
+	other.take(&"assault_pack")
+	other.take(&"plate_ceramic_l4", 1, {"chips": [[1, 1, 0, 2.0]]})
+	check(other.chips_in(&"plate_back").size() == 1, "a damaged plate fills the free back pocket")
+	check(other.take(&"plate_ceramic_l4", 1, {"chips": [[2, 2, 0, 2.0]]}) == 1, "another damaged plate is stowed")
+	check(other.take(&"plate_ceramic_l4") == 1, "an undamaged one too")
+	var entries: Array = other.containers[&"vest"] + other.containers[&"pockets"] + other.containers[&"backpack"]
+	var plates := entries.filter(func(e: Dictionary) -> bool: return e.id == &"plate_ceramic_l4")
+	check(plates.size() == 2, "damaged and undamaged plates don't stack (%d entries)" % plates.size())
+	var mags := Inventory.new()
+	add_child(mags)
+	mags.take(&"plate_carrier")
+	mags.take(&"mag_556", 3)
+	check(mags.insert_entry(&"pockets", mags.remove_entry(&"vest", 0, 3)), "move 3 mags vest -> pockets")
+	check(mags.containers[&"pockets"][0].count == 3 and mags.containers[&"vest"].is_empty(), "moved as one stack")
+	check(not mags.insert_entry(&"pockets", {"id": &"plate_carrier", "count": 1}), "a carrier doesn't fit in a pocket")
+	var copy := Inventory.new()
+	copy.net_state = other.net_state
+	check(copy.chips_in(&"plate_front").size() == 1, "item state replicates in net_state")
+	copy.free()
+	for node in [inv, other, mags]:
+		node.queue_free()
+
+
+func _test_ammo() -> void:
+	print("Ammo and reloading")
+	var inv := Inventory.new()
+	add_child(inv)
+	inv.take(&"plate_carrier")
+	inv.take(&"m4a1")
+	check(inv.rounds_in(&"primary") == 30, "new rifle comes loaded with 30")
+	for i in 30:
+		inv.consume_round(&"primary")
+	check(inv.rounds_in(&"primary") == 0 and not inv.consume_round(&"primary"), "empty after 30, then won't fire")
+	check(inv.reload(&"primary") == -1, "no reload without magazines")
+	inv.take(&"mag_556", 2)
+	check(inv.spare_rounds(&"mag_556") == 60, "two spare mags = 60 rounds")
+	check(inv.reload(&"primary") == 30 and inv.spare_rounds(&"mag_556") == 30, "reload loads 30, empty mag discarded")
+	for i in 12:
+		inv.consume_round(&"primary")
+	check(inv.reload(&"primary") == 30, "tactical reload loads a full mag")
+	check(inv.spare_rounds(&"mag_556") == 18, "the 18-round mag went back into the vest")
+	check(inv.reload(&"primary") == -1, "won't swap a full mag for a partial one")
+	inv.take(&"m17")
+	check(inv.rounds_in(&"sidearm") == 17 and inv.reload(&"sidearm") == -1, "pistol uses its own ammo type")
+	inv.queue_free()
+
+
+func _test_medical() -> void:
+	print("Medical")
+	var vitals := Vitals.new()
+	add_child(vitals)
+	vitals.server_damage(60.0)
+	vitals.server_heal_over_time(35.0, 0.2)
+	check(vitals.is_healing(), "healing in progress")
+	var deadline := Time.get_ticks_msec() + 2000
+	while vitals.is_healing() and Time.get_ticks_msec() < deadline:
+		await get_tree().process_frame
+	check(is_equal_approx(vitals.health, 75.0), "IFAK-sized heal restored 35 HP (now %.1f)" % vitals.health)
+	vitals.server_heal_over_time(70.0, 0.1)
+	while vitals.is_healing() and Time.get_ticks_msec() < deadline + 2000:
+		await get_tree().process_frame
+	check(is_equal_approx(vitals.health, vitals.max_health), "healing caps at max health")
+	vitals.queue_free()
+
+
+func _test_world_item_state() -> void:
+	print("World items carry state")
+	var item := WorldItem.new()
+	item.item_id = &"helmet"
+	item.state = {"chips": [[17, 8, 0, 1.6], [10, 10, 2, 1.6]]}
+	add_child(item)
+	await get_tree().process_frame
+	var piece: VoxelArmor = item.find_children("*", "VoxelArmor", false, false)[0]
+	check(piece.integrity() < 1.0, "dropped helmet shows its damage on the ground (%.0f%%)" % (piece.integrity() * 100.0))
+	check(piece.collision_layer == 0, "ground armor isn't a hit target")
+	check(item.describe().contains("damaged: 2 hits"), "prompt says it's damaged")
+	item.queue_free()

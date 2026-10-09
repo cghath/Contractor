@@ -65,15 +65,15 @@ func next_spawn_point() -> Vector3:
 
 
 ## Host only.
-func spawn_item(id: StringName, count: int, pos: Vector3, uid: String) -> void:
-	item_spawner.spawn({"id": String(id), "count": count, "pos": pos, "uid": uid})
+func spawn_item(id: StringName, count: int, pos: Vector3, uid: String, state := {}) -> void:
+	item_spawner.spawn({"id": String(id), "count": count, "pos": pos, "uid": uid, "state": state})
 
 
 ## Host only. Spawns an item a player dropped and records it for saving.
-func server_spawn_dropped(id: StringName, count: int, pos: Vector3) -> void:
+func server_spawn_dropped(id: StringName, count: int, pos: Vector3, state := {}) -> void:
 	var uid := GameState.new_uid()
-	GameState.item_dropped(uid, id, count, pos)
-	spawn_item(id, count, pos, uid)
+	GameState.item_dropped(uid, id, count, pos, state)
+	spawn_item(id, count, pos, uid, state)
 
 
 @rpc("authority", "call_local", "unreliable")
@@ -100,7 +100,7 @@ func _on_hosted() -> void:
 			spawn_item(StringName(loot.id), loot.get("count", 1), loot.pos, loot.uid)
 	for uid: String in GameState.dropped:
 		var d: Dictionary = GameState.dropped[uid]
-		spawn_item(StringName(d.id), int(d.count), Vector3(d.pos[0], d.pos[1], d.pos[2]), uid)
+		spawn_item(StringName(d.id), int(d.count), Vector3(d.pos[0], d.pos[1], d.pos[2]), uid, d.get("state", {}))
 	_add_player(1)
 
 
@@ -128,6 +128,7 @@ func _make_item(data: Dictionary) -> Node:
 	var item := WorldItem.new()
 	item.item_id = StringName(data.id)
 	item.count = data.count
+	item.state = data.get("state", {})
 	item.uid = data.uid
 	item.name = data.uid
 	item.position = data.pos

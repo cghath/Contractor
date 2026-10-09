@@ -88,10 +88,12 @@ include Voxel Tools.
 | WASD / Space / Shift / Ctrl | Move, jump, sprint, crouch |
 | Mouse / LMB | Look, fire |
 | E | Take / carry the item under the crosshair |
+| R | Reload (fullest spare magazine; a part-used one goes back in your pouch) |
+| H | Use a medical item (smallest kit that covers your injuries) |
 | G | Drop carried bulky item, otherwise drop active weapon |
 | 1 / 2 | Primary / sidearm |
-| Tab | Inventory detail |
-| Esc | Release mouse |
+| Tab | Inventory screen: equip, stow, move between containers, use, drop |
+| Esc | Close the inventory screen / release mouse |
 | F5 | Save zone (host) |
 
 ## Design decisions (locked)
@@ -118,19 +120,20 @@ autoload/
   net.gd          ENet host/join, connection signals
 scripts/
   inventory/      ItemData, Inventory (slots + litre containers), WorldItem (pickup)
-  combat/         Vitals (health + armor damage), VoxelArmor (plates, helmets), GearRig (worn gear), Ballistics
+  combat/         Vitals (health, healing), VoxelArmor (plates, helmets), GearRig (worn gear), Ballistics
   player/         Player (FP controller + host requests), CharacterModel (procedural voxel soldier), Hud
   art/            VoxelArt: code-built voxel models (body parts, carriers, packs, rifles, pistol)
   world/          VoxelWorld (10 cm destructible structures), CompoundLevel, TargetDummy
-  ui/             Menu
+  ui/             Menu, InventoryScreen
 data/             items.json, factions.json (placeholder), missions.json (placeholder)
-tests/            smoke_test (headless), screenshot_tour
+tests/            smoke_test, gameplay_test, net_test (headless), screenshot_tour
+tools/            run_tests.sh
 ```
 
 **Who owns what in multiplayer:**
 
 - The owning peer simulates its own movement, which `Sync` replicates.
-- The host owns health, plate damage and inventory, which `ServerSync` replicates to everyone, including players who join late.
+- The host owns health and inventory, which `ServerSync` replicates to everyone, including players who join late. Item state (rounds loaded, armor chips) is part of the inventory, so it replicates the same way, and travels into the world when an item is dropped.
 - Clients never change shared state directly. They send requests like `_server_fire` and `_server_interact`, and the host validates them.
 - Voxel destruction is a log of edits kept by the host. Every peer builds the same base structures itself and then replays the log, so only small edit events go over the network. The same log is what gets saved.
 
@@ -139,7 +142,7 @@ tests/            smoke_test (headless), screenshot_tour
 - Plates and helmets are `VoxelArmor`: 1 cm voxels that are both the visual and the hit target.
 - A round is traced voxel by voxel along its path. If it meets material it's stopped, and a chip is carved there. If it reaches the empty interior (the head inside a helmet) or leaves through a hole, it carries on to whatever is behind.
 - Each chip punches a hole, spalls the surface around it, and scars a ring beyond that.
-- The mesh is rebuilt by replaying the full chip list, so everyone sees the same damage.
+- The mesh is rebuilt by replaying the full chip list, so everyone sees the same damage. The chip list is the item's own state, so a dropped plate keeps its holes, and so does whoever picks it up.
 - Tiers (stats in `data/items.json`):
 
   | Tier | Carrier | Plate pockets | Helmet | Plate |
@@ -163,23 +166,21 @@ tests/            smoke_test (headless), screenshot_tour
 
 ## Tests
 
-Run the smoke test from the project folder:
+Run every suite with one command (from Git Bash on Windows):
 
 ```bash
-godot.windows.editor.x86_64.exe --headless --path . res://tests/smoke_test.tscn
+GODOT="$HOME/Downloads/GodotVoxel_1.7/godot.windows.editor.x86_64.exe" tools/run_tests.sh
 ```
 
-It runs 54 checks covering:
+There are three suites. Each prints PASSED or FAILED and exits with its failure count.
 
-- the item database;
-- inventory rules and carrier tiers;
-- armor plates and helmets: chipping, punch-through, angled hits and face coverage;
-- voxel building and carving;
-- ballistics, including headshots;
-- the elbow IK hand placement.
+| Suite | Scene | What it covers |
+|---|---|---|
+| Smoke | `tests/smoke_test.tscn` | 80 checks of the core systems directly: item database, inventory rules, carrier tiers, item state (damage and ammo that travel with an item), ammo and reloading, healing, voxel armor and walls, ballistics, headshots, elbow IK |
+| Gameplay | `tests/gameplay_test.tscn` | Hosts a real session and drives the player through the same requests a client sends: fire, reload, heal, inventory-screen actions, drop and pick up |
+| Network | `tests/net_test.tscn` | Two processes over ENet. The client fires, reloads, heals and drops through the host, and checks that the results replicate back |
 
-The process exit code is the number of failures.
-
+The gameplay and network tests use their own save zones and never touch your compound save.
 To regenerate the screenshots in `screenshots/` (this opens a window for a few seconds):
 
 ```bash
@@ -212,17 +213,17 @@ a release:
 
 ## Known gaps (next up)
 
-- No ammo consumption or reloading yet. Weapons fire as long as one is equipped.
-- Plate damage belongs to whoever is wearing the plate, not to the plate itself. A plate you drop and pick up again comes back undamaged.
-- A vest or backpack can't be dropped while it still has things in it. There's no inventory screen for moving items between containers yet.
-- The voxel world has no stream, so it's limited to `VoxelWorld.BOUNDS`. Bigger zones will need a `VoxelStream`.
-- The voxel edit log grows with every bullet hole. Compact it before shipping.
+- No recoil, spread or bullet drop yet: hitscan straight down the sight line.
+- Every inventory change, including each shot fired, re-sends the whole inventory snapshot. That's fine on a LAN; it needs a lighter path (for example, ammo only) before internet play.
+- Reloading and healing can't be cancelled, and taking damage doesn't interrupt them.
+- No bleeding or downed state yet. Death respawns you at the gate with all your gear (the squad and downed system comes in phase 3).
+- A vest or backpack can't be dropped while it still has things in it. Empty it from the inventory screen first.
+- The voxel world has no stream, so it's limited to `VoxelWorld.BOUNDS`. The voxel edit log grows with every bullet hole and is never compacted.
 - Player inventories aren't saved yet; only the zone's state is.
-
 ## Revised roadmap
 
-1. **Foundation (done here):** gray-box compound, FP co-op player, volume inventory, voxel plates, destructible walls, zone save.
-2. **Inventory depth:** ammo and reloading, an inventory UI for moving items between containers, plate state that travels with the plate, medical items.
+1. **Foundation (v0.1.0):** gray-box compound, FP co-op player, volume inventory, voxel plates, destructible walls, zone save.
+2. **Inventory depth (done, unreleased):** ammo and reloading, an inventory screen, armor damage and ammo that travel with the item, medical items.
 3. **Squad prototype (early, highest risk):** one shared AI squadmate who carries their own gear, follows, takes cover, and can be downed and revived.
 4. **Mission loop:** contracts, reinforcement timer, extraction, salvage share, persistent zone graph.
 5. **Ground vehicles:** drivable, modular damage, cargo as a rolling stash. Aircraft as AI-flown transport and fire support.

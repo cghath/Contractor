@@ -46,9 +46,11 @@ func _ready() -> void:
 	await _shot("06_wall_damage", Vector3(-1.2, 1.6, -0.6), Vector3(-3, 1.5, -4))
 	player._hud.visible = true
 	player._hud.update_status(player)
-	player._hud.toggle_detail()
+	player._hud.toggle_detail()  # opens the inventory screen
+	await _wait(3)
 	player._hud.update_status(player)
 	await _shot("07_hud_inventory", Vector3(0, 1.65, 18), Vector3(0, 1.3, 12))
+	await _shot("10_reload_pose", Vector3(-0.85, 1.5, 28.1), Vector3(-0.5, 1.25, 27))
 	print("Screenshots saved to %s" % ProjectSettings.globalize_path(OUT_DIR))
 	get_tree().quit()
 
@@ -70,6 +72,8 @@ func _lineup() -> void:
 		add_child(dummy)
 		dummy.get_node(^"Label").visible = false
 		dummy.get_node(^"Model").hold = kits[i][2]
+		if i == 1:
+			dummy.get_node(^"Model").reloading = true  # show the reload pose
 
 
 func _gear_up() -> void:
@@ -78,6 +82,10 @@ func _gear_up() -> void:
 	player.inventory.take(&"mag_556", 8)
 	player.inventory.take(&"ifak", 2)
 	player.inventory.take(&"electronics_salvage", 6)
+	player.inventory.take(&"mag_556", 1, {"rounds": 12})
+	player.inventory.take(&"plate_pe_l3", 1, {"chips": [[12, 15, 0, 3.2], [6, 20, 0, 3.2]]})
+	for i in 4:
+		player.inventory.consume_round(&"primary")
 
 
 func _shoot_dummies() -> void:

@@ -34,6 +34,8 @@ enum Hold { NONE, BOTH, RIGHT }
 var hold := Hold.NONE
 ## Head pitch in radians (positive looks up), set by the owner each frame.
 var look_pitch := 0.0
+## While true the left hand works the magazine well instead of the support point.
+var reloading := false
 
 var torso: Node3D
 var head: Node3D
@@ -121,7 +123,11 @@ func _process(delta: float) -> void:
 
 	if is_instance_valid(_held):
 		_reach(0, torso.to_local(_held.to_global(_grip)))
-		_reach(1, torso.to_local(_held.to_global(_support)))
+		var support := _support
+		if reloading:
+			# Hand drops under the receiver and works the magazine.
+			support = _grip.lerp(_support, 0.35) + Vector3(0, -0.11 + sin(_time * 9.0) * 0.025, 0)
+		_reach(1, torso.to_local(_held.to_global(support)))
 	else:
 		# Free arms swing opposite the legs; forearms bend more on the forward swing.
 		for i in 2:

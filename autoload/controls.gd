@@ -11,6 +11,8 @@ const KEYS := {
 	&"sprint": [KEY_SHIFT],
 	&"crouch": [KEY_CTRL, KEY_C],
 	&"interact": [KEY_E],
+	&"reload": [KEY_R],
+	&"use_medical": [KEY_H],
 	&"drop": [KEY_G],
 	&"inventory": [KEY_TAB],
 	&"weapon_primary": [KEY_1],

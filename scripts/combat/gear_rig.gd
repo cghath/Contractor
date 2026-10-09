@@ -6,7 +6,6 @@ extends Node3D
 ## destructible 1 cm voxels that are also the hit targets.
 
 @export var inventory: Inventory
-@export var vitals: Vitals
 @export var model: CharacterModel
 ## Render layers for gear meshes. The local player's camera hides LOCAL_ONLY so your own
 ## kit doesn't block your view.
@@ -40,8 +39,8 @@ const HELD_POSES := {
 	&"sidearm": Vector3(0.02, -0.03, -0.45),
 }
 
-var _armor: Dictionary = {}      # slot -> VoxelArmor
-var _armor_ids: Dictionary = {}  # slot -> item id last worn; survives _clear()
+var _armor: Dictionary = {}        # slot -> VoxelArmor
+var _chip_counts: Dictionary = {}  # slot -> chips already applied to the mesh
 var _gear: Dictionary = {}    # key -> [item id, Node3D]
 var _held_key: StringName = &""  # which _gear entry is in the hands
 var _held_dirty := true
@@ -49,7 +48,6 @@ var _held_dirty := true
 
 func _ready() -> void:
 	inventory.changed.connect(_rebuild)
-	vitals.changed.connect(_refresh_plate_damage)
 	_rebuild()
 
 
@@ -105,15 +103,13 @@ func _rebuild() -> void:
 			_armor.erase(slot)
 			piece = null
 		if piece == null and id != &"":
-			if multiplayer.is_server() and _armor_ids.get(slot, &"") != id:
-				vitals.server_clear_plate(slot)  # damage belonged to the previous piece
 			piece = VoxelArmor.new()
 			(model.head if slot == &"helmet" else model.torso).add_child(piece)
-			piece.setup(ItemDB.get_item(id), slot, vitals, render_layers)
+			piece.setup(ItemDB.get_item(id), slot, inventory, render_layers)
 			_armor[slot] = piece
+			_chip_counts[slot] = 0
 		if piece:
 			piece.transform = armor_transform(slot, carrier)
-		_armor_ids[slot] = id
 	for slot: StringName in MOUNTS:
 		var mount: Array = MOUNTS[slot]
 		_set_gear(slot, inventory.slots[slot], mount[0], mount[1], mount[2])
@@ -171,9 +167,13 @@ func _put_in_hands(key: StringName) -> void:
 	model.set_held(node, points.grip, points.support)
 
 
+## Replays armor chips into the meshes, skipping pieces whose chip list hasn't grown.
 func _refresh_plate_damage() -> void:
 	for slot: StringName in _armor:
-		_armor[slot].apply_damage(vitals.plate_damage.get(slot, []))
+		var chips := inventory.chips_in(slot)
+		if chips.size() != _chip_counts.get(slot, -1):
+			_armor[slot].apply_damage(chips)
+			_chip_counts[slot] = chips.size()
 
 
 func _set_gear(key: StringName, id: StringName, mount: StringName, pos: Vector3, rot: Vector3) -> void:

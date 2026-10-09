@@ -20,12 +20,9 @@ size = Vector3(0.22, 0.3, 0.24)
 properties/0/path = NodePath("Vitals:health")
 properties/0/spawn = true
 properties/0/replication_mode = 2
-properties/1/path = NodePath("Vitals:plate_damage")
+properties/1/path = NodePath("Inventory:net_state")
 properties/1/spawn = true
 properties/1/replication_mode = 2
-properties/2/path = NodePath("Inventory:net_state")
-properties/2/spawn = true
-properties/2/replication_mode = 2
 
 [node name="TargetDummy" type="StaticBody3D"]
 collision_layer = 16
@@ -72,10 +69,9 @@ script = ExtResource("2_inventory")
 [node name="Vitals" type="Node" parent="."]
 script = ExtResource("3_vitals")
 
-[node name="Gear" type="Node3D" parent="." node_paths=PackedStringArray("inventory", "vitals", "model")]
+[node name="Gear" type="Node3D" parent="." node_paths=PackedStringArray("inventory", "model")]
 script = ExtResource("4_gear")
 inventory = NodePath("../Inventory")
-vitals = NodePath("../Vitals")
 model = NodePath("../Model")
 
 [node name="ServerSync" type="MultiplayerSynchronizer" parent="."]

@@ -11,6 +11,43 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+Phase 2, inventory depth: ammo, reloading, healing, an inventory screen, and item state
+that travels with the item.
+
+### Added
+
+- **Item state:** items carry state that goes wherever they go: rounds in a weapon or
+  magazine, chips in a plate or helmet. It's kept while the item is worn, stowed, dropped,
+  picked up by someone else, and saved with the zone.
+- **Ammo:** weapons come loaded and every shot uses a round. Firing an empty weapon tells
+  you to reload.
+- **Reloading (R):** loads the fullest compatible magazine you carry. A part-used magazine
+  goes back where the new one came from, and an empty one is discarded. Reload times are
+  per weapon (pistol 1.6 s, M110 2.8 s); you can't fire while reloading. Other players see
+  your left hand working the magazine.
+- **Medical items (H):** IFAK (+35 HP over 4 s) and trauma kit (+70 HP over 8 s). You get
+  the smallest kit that covers your injuries; using one keeps your hands busy for a moment.
+- **Inventory screen (Tab):** equipped slots and container contents, with Equip, Stow,
+  Use, move to another container, and Drop. Rounds loaded, part-used magazines and armor
+  damage are shown on each item.
+- **HUD:** ammo counter (loaded / spare rounds) and reloading and healing indicators.
+- **Ground items:** the pickup prompt shows rounds and damage. Armor on the ground shows its chips.
+- **Tests:**
+  - `tests/gameplay_test.tscn`: end-to-end checks of a hosted session through the real requests a client sends.
+  - `tests/net_test.tscn`: a two-process ENet host and client.
+  - `tools/run_tests.sh` runs every suite.
+  - The smoke test now has 80 checks.
+
+### Changed
+
+- Armor damage is now the item's own state, not the wearer's. A dropped plate or helmet
+  keeps its holes. `Vitals` now only tracks health and healing.
+- `Inventory.unequip()` returns the item with its state. `take()` accepts state.
+
+### Fixed
+
+- Armor lying on the ground no longer tries to set an empty node name.
+
 ## [0.1.0] - 2026-10-09
 
 First playable gray-box foundation: a co-op player can loot, gear up and shoot through

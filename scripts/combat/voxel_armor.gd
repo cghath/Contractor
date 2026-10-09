@@ -4,8 +4,9 @@ extends Area3D
 ## hit target. A round entering the piece is traced voxel by voxel along its path: if it
 ## meets material first, the armor stops it and a chip is carved there; if it reaches the
 ## empty interior (the head inside a helmet) or leaves through a hole, it carries on.
-## Chips live in Vitals.plate_damage[slot] as [x, y, z, radius] and the mesh is rebuilt
-## by replaying them, so every peer, including late joiners, sees the same damage.
+## Chips are part of the item's state ([x, y, z, radius] in Inventory.slot_state), so
+## they travel with the plate or helmet when it's dropped. The mesh is rebuilt by
+## replaying them, so every peer, including late joiners, sees the same damage.
 ##
 ## Shapes come from the item's stats: "shape": "plate" (width/height/thickness_vox) or
 ## "helmet" (tier light/medium/heavy). The strike face of a plate is -Z.
@@ -20,7 +21,7 @@ static var _material: StandardMaterial3D
 
 var item: ItemData
 var slot: StringName
-var vitals: Vitals
+var inventory: Inventory
 
 var _base: Dictionary
 var _buffer: VoxelBuffer
@@ -28,11 +29,12 @@ var _mesh_instance: MeshInstance3D
 var _removed := 0
 
 
-func setup(p_item: ItemData, p_slot: StringName, p_vitals: Vitals, render_layers: int) -> void:
+func setup(p_item: ItemData, p_slot: StringName, p_inventory: Inventory, render_layers: int) -> void:
 	item = p_item
 	slot = p_slot
-	vitals = p_vitals
-	name = String(slot)
+	inventory = p_inventory
+	if slot != &"":
+		name = String(slot)
 	_base = _get_base(item)
 	collision_layer = 1 << 3
 	collision_mask = 0
@@ -68,6 +70,12 @@ static func size_m(p_item: ItemData) -> Vector3:
 	return Vector3(_get_base(p_item).dims) * VOXEL_SIZE
 
 
+## Offset from a piece's pivot to the centre of its voxel grid, in metres.
+static func center_offset(p_item: ItemData) -> Vector3:
+	var base := _get_base(p_item)
+	return (Vector3(base.dims) * 0.5 - base.pivot) * VOXEL_SIZE
+
+
 ## Rebuilds from the undamaged shape and replays every chip.
 func apply_damage(chips: Array) -> void:
 	_buffer.copy_channel_from(_base.buffer, VoxelBuffer.CHANNEL_COLOR)
@@ -87,7 +95,7 @@ func server_try_stop(hit_position: Vector3, direction: Vector3, weapon: ItemData
 	if impact == MISS:
 		return false
 	var radius := float(item.stats.get("chip_radius", 1.5)) * float(weapon.stats.get("plate_wear", 1.0))
-	vitals.server_add_chip(slot, [impact.x, impact.y, impact.z, radius])
+	inventory.add_chip(slot, [impact.x, impact.y, impact.z, radius])
 	return true
 
 

@@ -6,6 +6,8 @@ extends RigidBody3D
 
 var item_id: StringName
 var count := 1
+## Item state that travels with it (rounds, armor chips); see ItemData.default_state.
+var state: Dictionary = {}
 ## Stable id for persistence (see GameState). Also used as the node name.
 var uid := ""
 
@@ -16,7 +18,7 @@ func _init() -> void:
 	var sync := MultiplayerSynchronizer.new()
 	sync.name = "Sync"
 	var config := SceneReplicationConfig.new()
-	for prop: NodePath in [^".:position", ^".:rotation", ^".:count"]:
+	for prop: NodePath in [^".:position", ^".:rotation", ^".:count", ^".:state"]:
 		config.add_property(prop)
 		config.property_set_spawn(prop, true)
 		config.property_set_replication_mode(prop, SceneReplicationConfig.REPLICATION_MODE_ON_CHANGE)
@@ -32,10 +34,14 @@ func _ready() -> void:
 	var is_armor := item.type == "plate" or item.slot == &"helmet"
 	var size := visual_size(item)
 	if is_armor:
+		# The real voxel piece (with any damage it carries), but not a hit target.
 		size = VoxelArmor.size_m(item)
-		var mesh := VoxelArmor.make_mesh_instance(item)
-		mesh.position = -size * 0.5  # centred on the body, like the collision box
-		add_child(mesh)
+		var piece := VoxelArmor.new()
+		add_child(piece)
+		piece.setup(item, &"", null, 1)
+		piece.collision_layer = 0
+		piece.position = -VoxelArmor.center_offset(item)  # centred, like the collision box
+		piece.apply_damage(state.get("chips", []))
 	elif art != "":
 		size = VoxelArt.size_m(art)
 		add_child(VoxelArt.instance(art, "multicam"))
@@ -60,7 +66,12 @@ func describe() -> String:
 	var item := ItemDB.get_item(item_id)
 	var verb := "Carry" if item.two_handed else "Take"
 	var amount := " x%d" % count if count > 1 else ""
-	return "[E] %s %s%s   %.1f L  %.1f kg" % [verb, item.name, amount, item.volume_l * count, item.mass_kg * count]
+	var detail := ""
+	if state.has("rounds"):
+		detail = "  [%d rds]" % int(state.rounds)
+	elif not state.get("chips", []).is_empty():
+		detail = "  [damaged: %d hits]" % state.chips.size()
+	return "[E] %s %s%s%s   %.1f L  %.1f kg" % [verb, item.name, amount, detail, item.volume_l * count, item.mass_kg * count]
 
 
 ## Placeholder box size: explicit `size_m` from item stats, else a cube of the item's volume.
