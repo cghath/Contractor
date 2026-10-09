@@ -3,23 +3,83 @@
 Tactical first-person co-op shooter with physical inventory and voxel destruction.
 Godot 4.7.2 + Zylann Voxel Tools 1.7, GDScript.
 
-## Opening the project
+**Version:** 0.1.0. See [CHANGELOG.md](CHANGELOG.md) for what changed in each version.
 
-Voxel Tools is compiled into a custom Godot build, so the stock editor **can't** open this project.
-Use:
+## Installation
 
+### Requirements
+
+- **Godot 4.7.2 with Voxel Tools 1.7 built in.** Voxel Tools is a C++ engine module, so the
+  project only opens in Zylann's custom editor build. The stock Godot editor (from
+  godotengine.org) will fail with errors about `VoxelTerrain`, `VoxelBuffer` and similar classes.
+- A GPU with Vulkan support (Forward+ renderer).
+- Git, to clone the repository.
+
+### 1. Get the code
+
+```bash
+git clone https://github.com/cghath/Contractor.git
 ```
-%USERPROFILE%\Downloads\GodotVoxel_1.7\godot.windows.editor.x86_64.exe
-```
 
-(From https://github.com/Zylann/godot_voxel/releases/tag/v1.7. Exports need the matching
-`godot.windows.template_release.x86_64.exe.zip` custom template from the same release.)
+The repository is private, so you need access to it on GitHub.
 
-## Testing co-op on one machine
+### 2. Get the Voxel Tools editor
 
-Debug → Customize Run Instances → enable multiple instances (2). Set the first instance's
-arguments to `-- --host` and the second's to `-- --join 127.0.0.1`. Press F5.
-Or use the menu: **Host co-op** in one window, **Join** in the other.
+Download the editor for your platform from the
+[Voxel Tools v1.7 release](https://github.com/Zylann/godot_voxel/releases/tag/v1.7):
+
+| Platform | File |
+|---|---|
+| Windows | `godot.windows.editor.x86_64.exe.zip` |
+| Linux | `godot.linuxbsd.editor.x86_64.zip` |
+| macOS | `godot.macos.editor.app.zip` |
+
+Unzip it anywhere outside the project folder. It's a self-contained Godot editor and needs no installer.
+
+Use the editor build, not `GodotVoxelExtension.zip` (the v1.7x GDExtension release). The
+project was built and tested against the module build, and the author says the GDExtension
+build has had less testing.
+
+### 3. Open the project
+
+1. Run the Voxel Tools editor you just unzipped.
+2. In the Project Manager, choose **Import**, then select `project.godot` in the cloned folder.
+3. The first open imports all assets. This takes a few seconds and creates the `.godot/` cache folder, which git ignores.
+4. Press **F5** to run. On the main menu, choose **Host co-op** to play.
+
+### 4. Play co-op
+
+- **On one machine:** Debug → Customize Run Instances → enable multiple instances (2). Set
+  the first instance's arguments to `-- --host` and the second's to `-- --join 127.0.0.1`.
+  Press F5.
+- **Over a network:** one player picks **Host co-op**. The others type the host's IP address
+  and pick **Join**. The host must allow **UDP port 24680** through their firewall. Over the
+  internet, the host's router also needs to forward that port.
+- **From the command line**, without the editor (`--path` is the project folder):
+
+  ```bash
+  godot.windows.editor.x86_64.exe --path . -- --host
+  ```
+
+  ```bash
+  godot.windows.editor.x86_64.exe --path . -- --join 192.168.1.20
+  ```
+
+### 5. Export a build (optional)
+
+Exports need the custom export templates from the same release:
+`godot.windows.template_release.x86_64.exe.zip` (or the Linux or macOS template). In the
+export preset, set it as the custom release template. The stock export templates don't
+include Voxel Tools.
+
+### Troubleshooting
+
+| Problem | Fix |
+|---|---|
+| Errors like `Unknown class VoxelTerrain` or `Could not find type "VoxelBuffer"` | You opened the project with the stock Godot editor. Use the Voxel Tools build. |
+| Walls appear, but bullets pass through them for the first second | Voxel collision builds in the background after the walls appear. This is expected. |
+| A client can't connect | Check that the host's firewall allows UDP 24680, and that you used the host's LAN address, not `127.0.0.1`. |
+| The compound comes back damaged after restarting | The host saves the zone on quit and with F5. Use **Reset compound save** on the main menu. |
 
 ## Controls
 
@@ -58,13 +118,13 @@ autoload/
   net.gd          ENet host/join, connection signals
 scripts/
   inventory/      ItemData, Inventory (slots + litre containers), WorldItem (pickup)
-  combat/         Vitals (health + plate damage), VoxelArmorPlate, GearRig (worn gear), Ballistics
+  combat/         Vitals (health + armor damage), VoxelArmor (plates, helmets), GearRig (worn gear), Ballistics
   player/         Player (FP controller + host requests), CharacterModel (procedural voxel soldier), Hud
-  art/            VoxelArt: code-built voxel models (body parts, helmet, vest, packs, rifles, pistol)
+  art/            VoxelArt: code-built voxel models (body parts, carriers, packs, rifles, pistol)
   world/          VoxelWorld (10 cm destructible structures), CompoundLevel, TargetDummy
   ui/             Menu
 data/             items.json, factions.json (placeholder), missions.json (placeholder)
-tests/            smoke_test (headless)
+tests/            smoke_test (headless), screenshot_tour
 ```
 
 **Who owns what in multiplayer:**
@@ -100,19 +160,55 @@ tests/            smoke_test (headless)
   - slim body and head boxes on the `hitboxes` layer that bullets hit (the head does ×3 damage, set by the `damage_mult` meta);
   - armor areas on the `armor` layer.
 - Bullets ignore the movement capsule, so a slim torso can wear plates without them being buried inside the capsule.
+
 ## Tests
 
-```
+Run the smoke test from the project folder:
+
+```bash
 godot.windows.editor.x86_64.exe --headless --path . res://tests/smoke_test.tscn
 ```
 
-The smoke test covers 30 checks across the item database, inventory rules, plate chipping, voxel building and carving, and armor penetration against a target dummy.
+It runs 54 checks covering:
+
+- the item database;
+- inventory rules and carrier tiers;
+- armor plates and helmets: chipping, punch-through, angled hits and face coverage;
+- voxel building and carving;
+- ballistics, including headshots;
+- the elbow IK hand placement.
+
+The process exit code is the number of failures.
 
 To regenerate the screenshots in `screenshots/` (this opens a window for a few seconds):
 
-```
+```bash
 godot.windows.editor.x86_64.exe --path . res://tests/screenshot_tour.tscn
 ```
+
+## Versioning and changelog
+
+Versions follow [Semantic Versioning](https://semver.org). While the version is 0.x, a minor
+bump (0.1 → 0.2) means a new playable milestone, and anything may change between versions.
+The current version is `config/version` in `project.godot`.
+
+Every change that affects the game or how to work on it gets a line in
+[CHANGELOG.md](CHANGELOG.md), under **Unreleased**, in the same commit as the change. To cut
+a release:
+
+1. In `CHANGELOG.md`, rename **Unreleased** to the new version and today's date, and add a
+   fresh empty **Unreleased** section above it.
+2. Update the comparison links at the bottom of `CHANGELOG.md`.
+3. Bump `config/version` in `project.godot` and the version line at the top of this README.
+4. Commit as `Release vX.Y.Z`, then tag and push:
+
+   ```bash
+   git tag -a vX.Y.Z -m "vX.Y.Z"
+   ```
+
+   ```bash
+   git push origin main --follow-tags
+   ```
 
 ## Known gaps (next up)
 
