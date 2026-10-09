@@ -45,6 +45,8 @@ that travels with the item.
   - Hitboxes lie down with the body, so shots land where you're lying.
   - Dead bodies lie down too. Target dummies get back up on their own after a few seconds.
 - **Ground items:** the pickup prompt shows rounds and damage. Armor on the ground shows its chips.
+- **Docs:** `docs/squad_design.md`, a proposal for the phase 3 squad AI (body/driver split,
+  navigation, utility intents, co-op command, inventory loop, permadeath), waiting for decisions.
 - **Tests:**
   - `tests/gameplay_test.tscn`: end-to-end checks of a hosted session through the real requests a client sends.
   - `tests/net_test.tscn`: a two-process ENet host and client.
