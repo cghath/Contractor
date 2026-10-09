@@ -3,8 +3,8 @@ extends CanvasLayer
 ## Minimal local HUD: crosshair, interact prompt, ammo, load/volume status, and the Tab
 ## inventory screen.
 
-## Set by the owning Player before the HUD enters the tree.
-var player: Player
+## Set by the owning Soldier before the HUD enters the tree.
+var player: Soldier
 var inventory_screen: InventoryScreen
 var _crosshair: Label
 var _prompt: Label
@@ -80,7 +80,7 @@ func toggle_detail() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if inventory_screen.visible else Input.MOUSE_MODE_CAPTURED
 
 
-func update_status(player: Player) -> void:
+func update_status(player: Soldier) -> void:
 	var inv := player.inventory
 	var weapon := player.active_weapon()
 	var lines := PackedStringArray()
@@ -95,6 +95,9 @@ func update_status(player: Player) -> void:
 		lines.append("Armor: " + armor)
 	if inv.hands != &"":
 		lines.append("Carrying %s (G to drop)" % ItemDB.get_item(inv.hands).name)
+	var squad := _squad_lines(player)
+	if squad != "":
+		lines.insert(0, squad)
 	_status.text = "\n".join(lines)
 	if weapon and weapon.type == "weapon":
 		var ammo := StringName(weapon.stats.get("ammo", ""))
@@ -110,6 +113,20 @@ func update_status(player: Player) -> void:
 		_downed.text = "DOWNED - bleeding out in %d s\nWait for a teammate to revive you, or press F to give up" % player.vitals.bleed_seconds
 	else:
 		_downed.text = ""
+
+
+## One line per AI squadmate on the player's side: what it's doing and its health.
+func _squad_lines(player: Soldier) -> String:
+	var level := CompoundLevel.current(player)
+	if level == null:
+		return ""
+	var lines := PackedStringArray()
+	for s: Soldier in level.ai.get_children():
+		if s.faction == player.faction:
+			lines.append("%s: %s (%d HP)" % [s.name, s.ai_status, s.vitals.health])
+	if lines.is_empty():
+		return ""
+	return "SQUAD  [Z] on me  [X] hold  [V] move there\n" + "\n".join(lines) + "\n"
 
 
 func _label(text: String, preset: Control.LayoutPreset) -> Label:

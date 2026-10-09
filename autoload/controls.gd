@@ -20,6 +20,9 @@ const KEYS := {
 	&"weapon_sidearm": [KEY_2],
 	&"throw": [KEY_T],
 	&"next_throwable": [KEY_3],
+	&"squad_follow": [KEY_Z],
+	&"squad_hold": [KEY_X],
+	&"squad_move": [KEY_V],
 	&"pause": [KEY_ESCAPE],
 	&"quick_save": [KEY_F5],
 }

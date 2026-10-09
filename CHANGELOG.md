@@ -16,6 +16,13 @@ that travels with the item.
 
 ### Added
 
+- **Squad AI (phase 3, first pass):** the player squad has 8 slots, and AI fills every slot players don't (7 squadmates for one player, 4 for four). See `docs/squad_design.md`.
+  - Orders from any player: Z on me, X hold, V move to the crosshair point. The last player to give an order leads.
+  - Everyone is paired into battle buddies. In a fight, soldiers take cover, crouch when not shooting, get pinned by close fire, and buddies take turns moving while the other covers. Frags go to enemies hiding behind cover.
+  - Downed friendlies (players too) get help, buddy first: in a fight, smoke and a drag to cover, then a revive or a guard; out of a fight, a revive, or the buddy carries them and follows the lead.
+  - Hostile fire teams (two guards, two on patrol) use the same body and AI.
+  - A runtime navmesh over the compound. The HUD lists each squadmate's status and health.
+  - `tests/squad_test.tscn`: roster scaling, navigation, following, a buddy carrying a buddy, a firefight and flashbang stun.
 - **Grenades (T to throw, 3 to switch type):** frag, flashbang (new item) and smoke.
   - Frag: up to 180 damage within 8 m, falling off with distance; walls shield you. It also blasts a crater in voxel walls.
   - Flashbang: whites out the screen for up to 5 s, depending on distance and whether you were looking at it. AI soldiers will be stunned.
@@ -60,6 +67,8 @@ that travels with the item.
   - The smoke test now has 88 checks. The gameplay test covers spread, aiming, going down and reviving.
 
 ### Changed
+
+- `Player` is now `Soldier` (`scenes/soldier.tscn`, `scripts/actors/soldier.gd`), the body both players and AI use. AI bodies have non-numeric names and are driven by the host.
 
 - Armor damage is now the item's own state, not the wearer's. A dropped plate or helmet
   keeps its holes. `Vitals` now only tracks health and healing.

@@ -17,6 +17,7 @@ run() {
 "$GODOT" --headless --path . --import >/dev/null 2>&1
 run smoke res://tests/smoke_test.tscn
 run gameplay res://tests/gameplay_test.tscn
+run squad res://tests/squad_test.tscn
 
 # Network: a host and a client talking over ENet on localhost.
 "$GODOT" --headless --path . res://tests/net_test.tscn -- --host >/dev/null 2>&1 &

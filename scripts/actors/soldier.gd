@@ -1,8 +1,12 @@
-class_name Player
+class_name Soldier
 extends CharacterBody3D
-## First-person co-op player. The owning peer simulates movement (replicated by Sync).
-## Anything that changes shared state (pickups, shots, drops) is a request to the host,
-## which validates it and lets ServerSync carry the result back to everyone.
+## A soldier body, driven either by a human or by AI.
+##
+## Human: the node is named after its peer id; that peer simulates movement (replicated by
+## Sync) and reads its own input. AI: the node has a non-numeric name, is owned by the host,
+## and a SquadAI child fills in the intent fields below instead of the keyboard.
+## Either way, anything that changes shared state (pickups, shots, drops, revives) is a
+## request to the host, which validates it and lets ServerSync carry the result back.
 
 const WALK_SPEED := 4.0
 const SPRINT_SPEED := 6.5
@@ -38,6 +42,10 @@ const PLAYER_VARIANTS: Array[String] = ["multicam", "woodland", "desert", "urban
 ## Throwables in the order the next-throwable key cycles them.
 const THROWABLES: Array[StringName] = [&"frag_grenade", &"flashbang", &"smoke_grenade"]
 const THROW_SPEED := 15.0
+## Speed while carrying or dragging a downed body.
+const CARRY_BODY_SPEED_MULT := 0.55
+## Physics layer of soldier bodies ("movers").
+const BODY_LAYER := 1 << 4
 const THROW_BUSY_S := 0.7
 
 @onready var head: Node3D = $Head
@@ -65,12 +73,73 @@ var _server_busy_until := 0.0
 var throwable: StringName = &"frag_grenade"
 var _shake := 0.0
 
+## "friendly" (players and their squad) or "hostile". Set before the body enters the tree.
+@export var faction := &"friendly"
+## Camo for AI bodies (players get theirs from the peer id). Set before entering the tree.
+@export var variant := ""
+## AI intent, written by SquadAI on the host each physics frame. move_input is like
+## Input.get_vector: x strafes right, y < 0 moves forward, in the body's own frame.
+var move_input := Vector2.ZERO
+var want_sprint := false
+var want_crouch := false
+var want_aim := false
+## Host only: who is dragging or carrying this body while it is down.
+var carried_by: Soldier
+## Host only: the downed body this one is dragging or carrying.
+var carrying: Soldier
+## Host only (AI): seconds left blinded by a flashbang.
+var stunned_s := 0.0
+## Host only (AI): 0..1, how pinned down rounds landing close have made this soldier.
+var suppression := 0.0
+## Host only (AI): where incoming fire last came from, and when.
+var threat_pos := Vector3.ZERO
+var threat_time := -1000.0
+## Host only. An AI soldier bled out or was killed; it's freed right after.
+signal died_for_good(soldier: Soldier)
+
+## Owner-side (human): position the host sent while someone drags or carries us.
+var carried_by_pos: Variant = null
+## Host only: the squadmate who has claimed this body while it is down.
+var care_by: Soldier
+## Host only: battle buddy. Buddies look after each other first and never bound at the same time.
+var buddy: Soldier
+## AI: what it's doing, in a few words (replicated for the squad HUD).
+var ai_status := ""
+
 
 func _enter_tree() -> void:
-	set_multiplayer_authority(name.to_int())
+	set_multiplayer_authority(owner_peer())
 	# Health, armor and inventory stay host-owned even though the owner drives the body.
 	$ServerSync.set_multiplayer_authority(1)
-	$Model.variant = PLAYER_VARIANTS[absi(name.to_int() - 1) % PLAYER_VARIANTS.size()]  # host gets the first
+	if is_ai():
+		$Model.variant = variant if variant != "" else "woodland"
+	else:
+		$Model.variant = PLAYER_VARIANTS[absi(name.to_int() - 1) % PLAYER_VARIANTS.size()]  # host gets the first
+
+
+## Human bodies are named after their peer id; AI bodies have any other name.
+func is_ai() -> bool:
+	return not String(name).is_valid_int()
+
+
+## The peer that drives this body: its player, or the host for AI.
+func owner_peer() -> int:
+	return 1 if is_ai() else name.to_int()
+
+
+## Host only. Rounds landing close (or a blast) make AI keep its head down; also tells it
+## roughly where the fire is coming from.
+func suppress(amount: float, from: Vector3) -> void:
+	suppression = minf(suppression + amount, 1.0)
+	threat_pos = from
+	threat_time = _now()
+
+
+## Host only. A flashbang went off in sight.
+func stun(seconds: float, from: Vector3) -> void:
+	stunned_s = maxf(stunned_s, seconds)
+	threat_pos = from
+	threat_time = _now()
 
 
 func _ready() -> void:
@@ -79,7 +148,7 @@ func _ready() -> void:
 	vitals.died.connect(_on_died)
 	vitals.went_down.connect(_on_went_down)
 	_add_voxel_viewer()
-	if is_multiplayer_authority():
+	if is_local():
 		camera.current = true
 		camera.cull_mask &= ~LOCAL_ONLY_LAYER
 		model.render_layers = LOCAL_ONLY_LAYER
@@ -89,11 +158,12 @@ func _ready() -> void:
 		add_child(_hud)
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	_on_inventory_changed()
-	print("[player] %s spawned on peer %d (local: %s)" % [name, multiplayer.get_unique_id(), is_local()])
+	print("[%s] %s spawned on peer %d (local: %s)" % ["ai" if is_ai() else "player", name, multiplayer.get_unique_id(), is_local()])
 
 
+## True for the human player on their own machine.
 func is_local() -> bool:
-	return is_multiplayer_authority()
+	return is_multiplayer_authority() and not is_ai()
 
 
 func active_weapon() -> ItemData:
@@ -103,7 +173,7 @@ func active_weapon() -> ItemData:
 
 func _add_voxel_viewer() -> void:
 	# Local player loads visuals and collision; the host also needs collision around
-	# remote players for movement checks and ballistics.
+	# remote players and AI for movement checks and ballistics.
 	if not is_local() and not multiplayer.is_server():
 		return
 	var viewer := VoxelViewer.new()
@@ -153,6 +223,21 @@ func _unhandled_input(event: InputEvent) -> void:
 		_hud.flash("%s (%d)" % [ItemDB.get_item(throwable).name, inventory.count_of(throwable)])
 	elif event.is_action_pressed(&"throw"):
 		_try_throw()
+	elif event.is_action_pressed(&"squad_follow"):
+		_server_squad_order.rpc_id(1, Squad.Order.FOLLOW, global_position)
+		_hud.flash("Squad: on me")
+	elif event.is_action_pressed(&"squad_hold"):
+		_server_squad_order.rpc_id(1, Squad.Order.HOLD, global_position)
+		_hud.flash("Squad: hold there")
+	elif event.is_action_pressed(&"squad_move"):
+		var from := camera.global_position
+		var hit := get_world_3d().direct_space_state.intersect_ray(
+			PhysicsRayQueryParameters3D.create(from, from - camera.global_basis.z * 150.0, 1, [get_rid()]))
+		if hit.is_empty():
+			_hud.flash("Look at a spot on the ground")
+		else:
+			_server_squad_order.rpc_id(1, Squad.Order.MOVE, hit.position)
+			_hud.flash("Squad: move there")
 
 
 func _process(delta: float) -> void:
@@ -175,7 +260,19 @@ func _process(delta: float) -> void:
 
 
 func _physics_process(delta: float) -> void:
+	if is_ai():
+		if multiplayer.is_server():
+			_ai_physics(delta)
+		return
 	if not is_local():
+		return
+	if not vitals.is_up() and carried_by_pos != null:
+		# Being dragged or carried: the host tells us where we are.
+		global_position = carried_by_pos
+		velocity = Vector3.ZERO
+		carried_by_pos = null
+		_update_focus()
+		_hud.update_status(self)
 		return
 	_move(delta)
 	_update_focus()
@@ -190,29 +287,97 @@ func _physics_process(delta: float) -> void:
 func _move(delta: float) -> void:
 	if not is_on_floor():
 		velocity += get_gravity() * delta
-	var captured := Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
+	var captured := is_ai() or Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
 	var down := not vitals.is_up()
-	var crouching := captured and Input.is_action_pressed(&"crouch") and not down
-	var carrying := inventory.hands != &""
-	if captured and Input.is_action_just_pressed(&"jump") and is_on_floor() and not carrying and not crouching and not down:
+	var crouching := captured and is_crouching() and not down
+	var burdened := inventory.hands != &"" or carrying != null
+	if not is_ai() and captured and Input.is_action_just_pressed(&"jump") and is_on_floor() and not burdened and not crouching and not down:
 		velocity.y = JUMP_VELOCITY
 	var speed := WALK_SPEED
 	if crouching:
 		speed = CROUCH_SPEED
-	elif captured and Input.is_action_pressed(&"sprint") and not carrying:
+	elif captured and (want_sprint if is_ai() else Input.is_action_pressed(&"sprint")) and not burdened:
 		speed = SPRINT_SPEED
 	if is_aiming:
 		speed = minf(speed, WALK_SPEED) * ADS_SPEED_MULT
 	if down:
 		speed = CRAWL_SPEED
 	speed *= load_mult
-	var input := Input.get_vector(&"move_left", &"move_right", &"move_forward", &"move_back") if captured else Vector2.ZERO
+	if carrying != null:
+		speed *= CARRY_BODY_SPEED_MULT
+	var input := Vector2.ZERO
+	if is_ai():
+		input = move_input.limit_length(1.0)
+	elif captured:
+		input = Input.get_vector(&"move_left", &"move_right", &"move_forward", &"move_back")
 	var target := (global_basis * Vector3(input.x, 0.0, input.y)).normalized() * speed
 	velocity.x = move_toward(velocity.x, target.x, ACCELERATION * delta)
 	velocity.z = move_toward(velocity.z, target.z, ACCELERATION * delta)
 	move_and_slide()
 	var head_y := DOWNED_HEAD_Y if down else (CROUCH_HEAD_Y if crouching else STAND_HEAD_Y)
 	head.position.y = move_toward(head.position.y, head_y, 4.0 * delta)
+
+
+func is_crouching() -> bool:
+	return want_crouch if is_ai() else Input.is_action_pressed(&"crouch")
+
+
+## Host only: an AI body moves from its intent, and a downed one follows whoever carries it.
+func _ai_physics(delta: float) -> void:
+	stunned_s = maxf(stunned_s - delta, 0.0)
+	suppression = move_toward(suppression, 0.0, delta * 0.25)
+	if is_reloading and _now() >= _busy_until:
+		is_reloading = false
+	if not vitals.is_up() and is_instance_valid(carried_by):
+		global_transform = carried_by.carry_transform()
+		velocity = Vector3.ZERO
+		return
+	is_aiming = want_aim and vitals.is_up() and not is_reloading and inventory.hands == &"" and carrying == null
+	_move(delta)
+	_update_carried()
+
+
+## Where a body this soldier carries goes: over the shoulder.
+func carry_transform() -> Transform3D:
+	return global_transform * Transform3D(Basis(Vector3.UP, PI * 0.5), Vector3(0.0, 0.55, 0.15))
+
+
+## Host only. Keeps a carried body (AI or human) with this soldier.
+func _update_carried() -> void:
+	if carrying == null:
+		return
+	if not is_instance_valid(carrying) or carrying.vitals.is_up() or carrying.carried_by != self or not vitals.is_up():
+		release_carried()
+		return
+	if not carrying.is_ai():
+		carrying._client_carried.rpc_id(carrying.owner_peer(), carry_transform().origin)
+
+
+## Host only. Picks up a downed body within reach.
+func server_pick_up_body(other: Soldier) -> bool:
+	if other == null or other == self or other.vitals.is_up() or not other.vitals.downed:
+		return false
+	if carrying != null or inventory.hands != &"" or not vitals.is_up():
+		return false
+	if other.global_position.distance_to(global_position) > REVIVE_RANGE:
+		return false
+	if is_instance_valid(other.carried_by) and other.carried_by != self:
+		return false
+	other.carried_by = self
+	other.collision_layer = 0  # a carried body mustn't shove its carrier around
+	carrying = other
+	return true
+
+
+## Host only. Puts down whoever this soldier carries.
+func release_carried() -> void:
+	if is_instance_valid(carrying) and carrying.carried_by == self:
+		carrying.carried_by = null
+		carrying.collision_layer = BODY_LAYER
+		if carrying.is_ai():
+			carrying.global_position = global_position - global_basis.z * 0.8
+			carrying.rotation = Vector3(0, rotation.y, 0)
+	carrying = null
 
 
 func _update_focus() -> void:
@@ -294,7 +459,7 @@ func _spread_direction(weapon: ItemData) -> Vector3:
 	spread *= 1.0 + clampf(horizontal / WALK_SPEED, 0.0, 1.5)
 	if not is_on_floor():
 		spread *= 2.5
-	elif Input.is_action_pressed(&"crouch"):
+	elif is_crouching():
 		spread *= 0.7
 	var forward := -camera.global_basis.z
 	var angle := randf() * TAU
@@ -371,7 +536,7 @@ func _update_view_model() -> void:
 # --- Host-side requests ---------------------------------------------------------------
 
 func _from_owner() -> bool:
-	return multiplayer.is_server() and multiplayer.get_remote_sender_id() == name.to_int()
+	return multiplayer.is_server() and multiplayer.get_remote_sender_id() == owner_peer()
 
 
 @rpc("any_peer", "call_local", "reliable")
@@ -393,6 +558,16 @@ func _server_fire(origin: Vector3, direction: Vector3, slot: StringName) -> void
 	var result := Ballistics.fire(self, origin, direction.normalized(), weapon)
 	if result.result != "none":
 		CompoundLevel.current(self).show_impact.rpc(result.position, result.normal, result.result)
+
+
+## Any player can order the friendly squad; that makes them its lead.
+@rpc("any_peer", "call_local", "reliable")
+func _server_squad_order(order: int, point: Vector3) -> void:
+	if not _from_owner() or is_ai() or not vitals.is_up():
+		return
+	var squad := CompoundLevel.current(self).squad_for(faction)
+	if squad:
+		squad.give_order(self, order, point)
 
 
 @rpc("any_peer", "call_local", "reliable")
@@ -429,7 +604,7 @@ func _server_use_medical() -> void:
 	if not _from_owner() or not vitals.is_up() or _now() < _server_busy_until - 0.1:
 		return
 	if vitals.health >= vitals.max_health:
-		_client_message.rpc_id(name.to_int(), "Not injured")
+		_client_message.rpc_id(owner_peer(), "Not injured")
 		return
 	# Smallest kit that covers the damage; otherwise the biggest one carried.
 	var missing := vitals.max_health - vitals.health
@@ -445,13 +620,13 @@ func _server_use_medical() -> void:
 			if better:
 				best = {"container": container, "index": i, "heal": heal, "item": item}
 	if best.is_empty():
-		_client_message.rpc_id(name.to_int(), "No medical supplies")
+		_client_message.rpc_id(owner_peer(), "No medical supplies")
 		return
 	inventory.remove_entry(best.container, best.index)
 	var item: ItemData = best.item
 	_server_busy_until = _now() + float(item.stats.get("use_s", 2.0))
 	vitals.server_heal_over_time(best.heal, float(item.stats.get("heal_s", 4.0)))
-	_client_busy.rpc_id(name.to_int(), float(item.stats.get("use_s", 2.0)), "Using %s" % item.name)
+	_client_busy.rpc_id(owner_peer(), float(item.stats.get("use_s", 2.0)), "Using %s" % item.name)
 
 
 ## Inventory screen actions. `container`/`index` name a stowed entry; `slot` an equipped one.
@@ -463,7 +638,7 @@ func _server_inventory_action(action: String, container: StringName, index: int,
 		"drop_slot":
 			var removed := inventory.unequip(slot)
 			if removed.is_empty():
-				_client_message.rpc_id(name.to_int(), "Empty it first")
+				_client_message.rpc_id(owner_peer(), "Empty it first")
 			else:
 				_server_spawn_in_front(removed.id, 1, removed.state)
 		"drop_entry":
@@ -478,10 +653,10 @@ func _server_inventory_action(action: String, container: StringName, index: int,
 			var entry := inventory.remove_entry(container, index, list[index].count)
 			if not inventory.insert_entry(target, entry):
 				inventory.insert_entry(container, entry)  # put it back
-				_client_message.rpc_id(name.to_int(), "Not enough room in %s" % target)
+				_client_message.rpc_id(owner_peer(), "Not enough room in %s" % target)
 		"equip_entry":
 			if not inventory.equip_entry(container, index):
-				_client_message.rpc_id(name.to_int(), "No free slot for that")
+				_client_message.rpc_id(owner_peer(), "No free slot for that")
 		"stow_slot":
 			var removed := inventory.unequip(slot)
 			if removed.is_empty():
@@ -490,7 +665,7 @@ func _server_inventory_action(action: String, container: StringName, index: int,
 				if inventory.insert_entry(c, {"id": removed.id, "count": 1, "state": removed.state}):
 					return
 			inventory.take(removed.id, 1, removed.state)  # no room: straight back on
-			_client_message.rpc_id(name.to_int(), "No room to stow that")
+			_client_message.rpc_id(owner_peer(), "No room to stow that")
 
 
 @rpc("any_peer", "call_local", "reliable")
@@ -504,13 +679,13 @@ func _server_interact(path: NodePath) -> void:
 		return
 	var taken := inventory.take(item.item_id, item.count, item.state)
 	if taken == 0:
-		_client_message.rpc_id(name.to_int(), "No room for %s" % ItemDB.get_item(item.item_id).name)
+		_client_message.rpc_id(owner_peer(), "No room for %s" % ItemDB.get_item(item.item_id).name)
 	elif taken >= item.count:
 		GameState.item_taken(item.uid)
 		item.queue_free()
 	else:
 		item.count -= taken
-		_client_message.rpc_id(name.to_int(), "Took %d, no room for the rest" % taken)
+		_client_message.rpc_id(owner_peer(), "Took %d, no room for the rest" % taken)
 
 
 @rpc("any_peer", "call_local", "reliable")
@@ -544,16 +719,16 @@ func _server_revive(path: NodePath) -> void:
 		return
 	var kit := _best_revive_kit()
 	if kit == null:
-		_client_message.rpc_id(name.to_int(), "You need an IFAK or trauma kit")
+		_client_message.rpc_id(owner_peer(), "You need an IFAK or trauma kit")
 		return
 	var seconds := float(kit.stats.revive_s)
 	_server_busy_until = _now() + seconds
-	_client_busy.rpc_id(name.to_int(), seconds, "Reviving...")
+	_client_busy.rpc_id(owner_peer(), seconds, "Reviving...")
 	await get_tree().create_timer(seconds).timeout
 	if not is_inside_tree() or not is_instance_valid(target) or not other.downed or not vitals.is_up():
 		return
 	if target.global_position.distance_to(global_position) > REVIVE_RANGE + 1.0:
-		_client_message.rpc_id(name.to_int(), "Revive interrupted")
+		_client_message.rpc_id(owner_peer(), "Revive interrupted")
 		return
 	for container in Inventory.CONTAINERS:
 		var list: Array = inventory.containers[container]
@@ -576,16 +751,51 @@ func _on_went_down() -> void:
 	var held := inventory.release_hands()  # you drop what you were carrying
 	if held != &"":
 		_server_spawn_in_front(held)
+	release_carried()  # ...and whoever you were carrying
 
 
+## Players respawn. AI is gone for good: its gear drops where it fell, lootable.
 func _on_died() -> void:
 	if not multiplayer.is_server():
 		return
+	release_carried()
+	if is_instance_valid(carried_by):
+		carried_by.release_carried()
 	var held := inventory.release_hands()
 	if held != &"":
 		_server_spawn_in_front(held)
+	if is_ai():
+		_server_drop_everything()
+		died_for_good.emit(self)
+		queue_free()
+		return
 	vitals.server_reset_health()
-	_client_respawn.rpc_id(name.to_int(), CompoundLevel.current(self).next_spawn_point())
+	_client_respawn.rpc_id(owner_peer(), CompoundLevel.current(self).next_spawn_point())
+
+
+func _server_drop_everything() -> void:
+	var level := CompoundLevel.current(self)
+	var spots := 0
+	for slot in Inventory.SLOTS:
+		if inventory.slots[slot] != &"":
+			level.server_spawn_dropped(inventory.slots[slot], 1, _drop_spot(spots), inventory.state_of(slot))
+			spots += 1
+	for container in Inventory.CONTAINERS:
+		for entry: Dictionary in inventory.containers[container]:
+			level.server_spawn_dropped(entry.id, entry.count, _drop_spot(spots), entry.get("state", {}))
+			spots += 1
+
+
+func _drop_spot(i: int) -> Vector3:
+	var angle := i * 2.4
+	return global_position + Vector3(cos(angle), 0.0, sin(angle)) * (0.4 + 0.08 * i) + Vector3.UP * 0.5
+
+
+## Owner-side (human): the host moves us while someone carries us.
+@rpc("any_peer", "call_local", "unreliable_ordered")
+func _client_carried(pos: Vector3) -> void:
+	if multiplayer.get_remote_sender_id() == 1:
+		carried_by_pos = pos
 
 
 @rpc("any_peer", "call_local", "reliable")

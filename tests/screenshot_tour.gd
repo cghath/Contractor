@@ -6,12 +6,13 @@ extends Node
 const OUT_DIR := "res://screenshots"
 
 var level: CompoundLevel
-var player: Player
+var player: Soldier
 var camera: Camera3D
 
 
 func _ready() -> void:
 	DirAccess.make_dir_recursive_absolute(OUT_DIR)
+	CompoundLevel.spawn_ai = false  # staged shots, no one moving around
 	add_child(load("res://scenes/main.tscn").instantiate())
 	await get_tree().process_frame
 	$Main/Menu.host()
@@ -64,7 +65,7 @@ func _ready() -> void:
 	player.head.rotation.x = -0.08
 	player.is_aiming = true
 	player.camera.fov = 50.0
-	player.view_model.position = Player.ADS_EYE - VoxelArt.sight_point(VoxelArt.model_for(ItemDB.get_item(&"m4a1")))
+	player.view_model.position = Soldier.ADS_EYE - VoxelArt.sight_point(VoxelArt.model_for(ItemDB.get_item(&"m4a1")))
 	player.camera.current = true
 	await _wait(10)
 	await RenderingServer.frame_post_draw

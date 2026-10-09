@@ -14,6 +14,7 @@ var level: CompoundLevel
 
 func _ready() -> void:
 	GameState.zone_id = "test_net"
+	CompoundLevel.spawn_ai = false
 	GameState.delete_save()
 	add_child(load("res://scenes/main.tscn").instantiate())  # main reads --host/--join
 	await get_tree().process_frame
@@ -28,7 +29,7 @@ func _ready() -> void:
 
 func _give_kit(id: int) -> void:
 	await get_tree().create_timer(0.5).timeout  # let the player spawn
-	var player: Player = level.players.get_node_or_null(str(id))
+	var player: Soldier = level.players.get_node_or_null(str(id))
 	for item in KIT:
 		player.inventory.take(item)
 	player.inventory.take(&"mag_556", 2)
@@ -45,7 +46,7 @@ func check(condition: bool, what: String) -> void:
 
 func _run_client() -> void:
 	var deadline := Time.get_ticks_msec() + 20000
-	var me: Player
+	var me: Soldier
 	while Time.get_ticks_msec() < deadline:
 		me = level.players.get_node_or_null(str(multiplayer.get_unique_id()))
 		if me and me.inventory.slots[&"primary"] == &"m4a1":

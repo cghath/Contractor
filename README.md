@@ -97,6 +97,7 @@ include Voxel Tools.
 | 1 / 2 | Primary / sidearm |
 | T | Throw the selected grenade (frag, flashbang or smoke) |
 | 3 | Switch grenade type |
+| Z / X / V | Squad: on me / hold there / move to the point under the crosshair (makes you the squad lead) |
 | Tab | Inventory screen: equip, stow, move between containers, use, drop |
 | Esc | Close the inventory screen / release mouse |
 | F5 | Save zone (host) |

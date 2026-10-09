@@ -12,11 +12,16 @@ script = ExtResource("2_voxel")
 
 [node name="Players" type="Node3D" parent="."]
 
+[node name="AI" type="Node3D" parent="."]
+
 [node name="Items" type="Node3D" parent="."]
 
 [node name="PlayerSpawner" type="MultiplayerSpawner" parent="."]
-_spawnable_scenes = PackedStringArray("res://scenes/player.tscn")
+_spawnable_scenes = PackedStringArray("res://scenes/soldier.tscn")
 spawn_path = NodePath("../Players")
+
+[node name="AISpawner" type="MultiplayerSpawner" parent="."]
+spawn_path = NodePath("../AI")
 
 [node name="ItemSpawner" type="MultiplayerSpawner" parent="."]
 spawn_path = NodePath("../Items")

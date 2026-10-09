@@ -76,6 +76,16 @@ func is_built() -> bool:
 	return _built
 
 
+## The base structures as boxes in metres, in this node's space (for navigation baking).
+func structure_boxes_m() -> Array[AABB]:
+	var boxes: Array[AABB] = []
+	for s: Array in _structures:
+		var begin := Vector3(s[0]) * VOXEL_SIZE
+		var end := Vector3(s[1] + Vector3i.ONE) * VOXEL_SIZE
+		boxes.append(AABB(begin, end - begin))
+	return boxes
+
+
 func _process(_delta: float) -> void:
 	if _built or _structures.is_empty():
 		return

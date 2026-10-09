@@ -28,6 +28,13 @@ static func body_point(n: Node3D) -> Vector3:
 	return n.global_position + Vector3.UP * (0.3 if vitals and not vitals.is_up() else 1.0)
 
 
+## Launch velocity that lands a throw on `to`; flight time grows with distance.
+static func lob_velocity(from: Vector3, to: Vector3) -> Vector3:
+	var gravity: float = ProjectSettings.get_setting("physics/3d/default_gravity")
+	var t := clampf(from.distance_to(to) / 12.0, 0.6, 1.6)
+	return (to - from) / t + Vector3.UP * 0.5 * gravity * t
+
+
 static func clear_line(world: World3D, from: Vector3, to: Vector3) -> bool:
 	var query := PhysicsRayQueryParameters3D.create(from, to, WORLD_MASK)
 	return world.direct_space_state.intersect_ray(query).is_empty()
@@ -76,8 +83,8 @@ static func _flash(level: CompoundLevel, pos: Vector3) -> void:
 		if d > FLASH_RADIUS or not clear_line(world, centre, eye):
 			continue
 		var amount := 1.0 - d / FLASH_RADIUS
-		if body is Player:
-			body._client_flashed.rpc_id(body.name.to_int(), pos, amount)
+		if body is Soldier and not body.is_ai():
+			body._client_flashed.rpc_id(body.owner_peer(), pos, amount)
 		elif body.has_method(&"stun"):
 			body.stun(1.5 + 3.5 * amount, pos)
 	level.show_flash.rpc(pos)
