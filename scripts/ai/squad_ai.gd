@@ -455,10 +455,10 @@ func _do_reload() -> void:
 	if body.inventory.rounds_in(body.active_slot) >= _mag_size(weapon):
 		_think_cd = 0.0
 		return
-	body._busy_until = Soldier._now() + float(weapon.stats.get("reload_s", 2.0))
+	body._busy_until = Soldier._now() + body.reload_seconds(weapon)
 	body.is_reloading = true
 	body._server_reload.rpc_id(1, body.active_slot)
-	_think_cd = float(weapon.stats.get("reload_s", 2.0))
+	_think_cd = body.reload_seconds(weapon)
 	_callout(&"reloading")
 
 
@@ -624,7 +624,7 @@ func _find_target() -> Soldier:
 
 func can_see(other: Soldier) -> bool:
 	var from := body.camera.global_position
-	var to := other.global_position + Vector3.UP * (1.0 if other.is_crouching() else 1.4)
+	var to := other.aim_point()  # follows stance: crouched and prone targets sit lower
 	if SmokeCloud.blocks(from, to):
 		return false
 	return Throwables.clear_line(body.get_world_3d(), from, to)
@@ -689,7 +689,7 @@ func _shoot() -> void:
 		return
 	var aim_at: Variant = null
 	if target != null:
-		aim_at = target.global_position + Vector3.UP * (0.95 if target.is_crouching() else 1.3)
+		aim_at = target.aim_point()
 	elif _buddy_bounding() and in_contact() and now - _last_contact < 5.0:
 		aim_at = body.threat_pos + Vector3.UP * 1.0  # covering fire while the buddy moves
 	elif intent == Intent.FIGHT:

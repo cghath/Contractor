@@ -58,8 +58,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion and captured and interaction.is_open():
 		interaction.move_cursor(event.relative)  # the menu has the mouse, not the view
 	elif event is InputEventMouseMotion and captured:
-		body.rotate_y(-event.relative.x * MOUSE_SENSITIVITY)
-		body.head.rotate_x(-event.relative.y * MOUSE_SENSITIVITY)
+		var turn := MOUSE_SENSITIVITY * body.vitals.turn_mult()  # concussion slows turning
+		body.rotate_y(-event.relative.x * turn)
+		body.head.rotate_x(-event.relative.y * turn)
 		body.head.rotation.x = clampf(body.head.rotation.x, -1.5, 1.5)
 	elif event.is_action_pressed(&"inventory") or (event.is_action_pressed(&"pause") and hud.is_inventory_open()):
 		hud.toggle_detail()
@@ -241,7 +242,7 @@ func _try_reload() -> void:
 	if body.inventory.spare_rounds(ammo) <= 0:
 		hud.flash("No spare magazines")
 		return
-	body._busy_until = now + float(weapon.stats.get("reload_s", 2.0))
+	body._busy_until = now + body.reload_seconds(weapon)
 	body.is_reloading = true
 	body._server_reload.rpc_id(1, body.active_slot)
 

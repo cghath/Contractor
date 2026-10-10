@@ -375,6 +375,22 @@ func _kick(weapon: ItemData) -> void:
 	rotate_y(randf_range(-0.35, 0.35) * kick)
 
 
+## How long reloading `weapon` takes this body: the weapon's time, slowed by wounds
+## (a broken arm).
+func reload_seconds(weapon: ItemData) -> float:
+	return float(weapon.stats.get("reload_s", 2.0)) * vitals.reload_mult()
+
+
+## Where to aim at this body: the middle of its chest hitbox, wherever its stance put it.
+func aim_point() -> Vector3:
+	for child in get_children():
+		if child is Area3D and child.get_meta(&"body_part", &"") == Vitals.CHEST:
+			for shape in child.get_children():
+				if shape is CollisionShape3D:
+					return (shape as CollisionShape3D).global_position
+	return global_position + Vector3.UP * (1.0 if is_crouching() else 1.3)
+
+
 static func _ammo_of(weapon: ItemData) -> StringName:
 	return StringName(weapon.stats.get("ammo", ""))
 
@@ -470,7 +486,7 @@ func _server_reload(slot: StringName) -> void:
 	var id: StringName = inventory.slots.get(slot, &"")
 	if id == &"":
 		return
-	var seconds := float(ItemDB.get_item(id).stats.get("reload_s", 2.0))
+	var seconds := reload_seconds(ItemDB.get_item(id))
 	_server_busy_until = _now() + seconds
 	# The new magazine goes in when the reload finishes, if the same weapon is still there.
 	await get_tree().create_timer(seconds).timeout

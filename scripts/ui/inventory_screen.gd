@@ -91,8 +91,9 @@ static func _detail(item: ItemData, state: Dictionary) -> String:
 		return "  [%d loaded]" % int(state.rounds)
 	if state.has("rounds") and int(state.rounds) < item.magazine_rounds():
 		return "  [%d/%d rds]" % [int(state.rounds), item.magazine_rounds()]
-	if not state.get("chips", []).is_empty():
-		return "  [damaged: %d hits]" % state.chips.size()
+	if item.is_voxel_armor():
+		var damage := ArmorRules.state_text(item, state)  # "3 cracks, 46%", "shattered"...
+		return "  [%s]" % damage if damage != "" else ""
 	return ""
 
 

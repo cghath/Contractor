@@ -116,7 +116,7 @@ func _test_actions_for() -> void:
 	check(_ids(player, dummy) == [&"revive", &"check_condition"], "downed dummy: Revive, Check condition (%s)" % [_ids(player, dummy)])
 	check(_ids(player, hostile) == [&"carry", &"drag", &"check_condition"], "downed enemy: no Revive (%s)" % [_ids(player, hostile)])
 	var report := InteractionMenu.perform(player, _action(player, alpha, &"check_condition"))
-	check(report.begins_with("Alpha: Down,") and report.contains("No wounds found"), "Check condition reads condition and wounds (%s)" % report.replace("\n", " | "))
+	check(report.begins_with("Alpha: " + alpha.vitals.condition_text()) and report.contains("\n"), "Check condition reads condition and wounds (%s)" % report.replace("\n", " | "))
 	hostile.vitals.server_reset_health()
 	dummy.vitals.server_reset_health()
 
@@ -141,7 +141,7 @@ func _test_revive() -> void:
 	await _frames(2)
 	InteractionMenu.perform(player, _action(player, alpha, &"revive"))
 	await _seconds(3.4)
-	check(alpha.vitals.is_up() and is_equal_approx(alpha.vitals.health, 50.0), "revived with the trauma kit (%.0f HP)" % alpha.vitals.health)
+	check(alpha.vitals.is_up() and alpha.vitals.blood_fraction() >= 0.6, "revived with the trauma kit (blood %.0f%%)" % (alpha.vitals.blood_fraction() * 100.0))
 	check(player.inventory.count_of(&"trauma_kit") == 0, "the kit was used")
 
 
@@ -247,6 +247,7 @@ func _test_give_item() -> void:
 
 func _test_self_actions() -> void:
 	print("Self-interaction")
+	player.vitals.server_reset_health()  # earlier checks left the player down
 	check(InteractionMenu.perform(player, _action(player, player, &"check_wounds")) == "No wounds found", "Check wounds: none")
 	player.vitals.server_damage(30.0)
 	check(InteractionMenu.perform(player, _action(player, player, &"check_wounds")) != "No wounds found", "Check wounds notices you're hurt")

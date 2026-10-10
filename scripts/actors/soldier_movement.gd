@@ -139,7 +139,7 @@ func step(delta: float) -> void:
 	if not body.is_on_floor():
 		body.velocity += body.get_gravity() * delta
 	var down := not body.vitals.is_up()
-	var burdened := body.inventory.hands != &"" or body.carrying != null
+	var burdened := body.inventory.hands != &"" or body.carry_speed_mult() < 1.0  # carry_mode reaches the owner; carrying is host-only
 	var input := Vector2.ZERO
 	var sprint := false
 	if down:
@@ -243,7 +243,7 @@ func is_prone() -> bool:
 ## Jumping only from a standing stance, on the ground, hands free and not down.
 func can_jump() -> bool:
 	return is_standing() and body.is_on_floor() and body.vitals.is_up() \
-		and body.inventory.hands == &"" and body.carrying == null
+		and body.inventory.hands == &"" and body.carry_speed_mult() >= 1.0
 
 
 ## Changes stance if there's room (a taller stance needs headroom). Unmounts the weapon.

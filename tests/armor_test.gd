@@ -274,13 +274,13 @@ func _test_ceramic() -> void:
 	var probe: Vitals = dummy.vitals
 	var plate_y: float = GearRig.plate_rest_position(&"plate_front").y
 	var shot := _fire_at(plate_y, ItemDB.get_item(&"m17"))
-	check(shot.result == "plate" and probe.health == probe.max_health, "the medium vest's aramid stops a pistol round behind the shattered plate (%s)" % shot.result)
+	check(shot.result == "plate" and not probe.wound_list().any(func(w: Dictionary) -> bool: return w.get("bleeding", false)), "the medium vest's aramid stops a pistol round behind the shattered plate (%s)" % shot.result)
 	var impact: Dictionary = _impacts(dummy).back() if not _impacts(dummy).is_empty() else {}
 	check(impact.get("part") == Vitals.CHEST and impact.get("round_class") == Vitals.PISTOL, "impact on the chest from a pistol round (%s)" % impact)
 	check(dummy.inventory.chips_in(&"plate_front").size() == 1, "the round still holed the shattered plate")
 	check(dummy.gear.armor_summary().contains("Front IV shattered"), "summary says so: %s" % dummy.gear.armor_summary())
 	var rifle := _fire_at(plate_y, ItemDB.get_item(&"m4a1"), 0.05)
-	check(rifle.result == "body" and probe.health < probe.max_health, "a 5.56 round goes through plate and aramid (%s)" % rifle.result)
+	check(rifle.result == "body" and not probe.wound_list().is_empty(), "a 5.56 round goes through plate and aramid (%s)" % rifle.result)
 	dummy.queue_free()
 	await get_tree().process_frame
 
@@ -400,12 +400,12 @@ func _test_soft_armor() -> void:
 	var dummy := await _dummy(["plate_carrier"])
 	var probe: Vitals = dummy.vitals
 	var pistol := _fire_at(1.3, ItemDB.get_item(&"m17"))
-	check(pistol.result == "plate" and probe.health == probe.max_health, "9mm to an unplated medium vest is stopped (%s)" % pistol.result)
+	check(pistol.result == "plate" and not probe.wound_list().any(func(w: Dictionary) -> bool: return w.get("bleeding", false)), "9mm to an unplated medium vest is stopped (%s)" % pistol.result)
 	var impact: Dictionary = _impacts(dummy).back() if not _impacts(dummy).is_empty() else {}
 	check(impact.get("part") == Vitals.CHEST and impact.get("energy_j", 0.0) > 400.0 and absf(impact.get("distance", 0.0) - 4.88) < 0.1,
 		"impact: chest, pistol, %.2f m, %.0f J" % [impact.get("distance", 0.0), impact.get("energy_j", 0.0)])
 	var rifle := _fire_at(1.3, ItemDB.get_item(&"m4a1"))
-	check(rifle.result == "body" and probe.health < probe.max_health, "5.56 goes through it (%s)" % rifle.result)
+	check(rifle.result == "body" and not probe.wound_list().is_empty(), "5.56 goes through it (%s)" % rifle.result)
 	dummy.queue_free()
 	var light_dummy := await _dummy(["plate_carrier_light"])
 	_shooter.position = Vector3(0, 1.3, 5)

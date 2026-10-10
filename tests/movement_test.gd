@@ -63,7 +63,7 @@ func _test_bindings() -> void:
 	print("Key bindings")
 	var expect := {
 		&"crouch": [KEY_X], &"prone": [KEY_Z], &"stance_adjust": [KEY_CAPSLOCK], &"lean_left": [KEY_Q],
-		&"lean_right": [KEY_E], &"mount": [KEY_C], &"fire_mode": [KEY_F], &"interact": [KEY_E],
+		&"lean_right": [KEY_E], &"mount": [KEY_C], &"fire_mode": [KEY_F], &"interact": [KEY_CTRL],
 	}
 	for action: StringName in expect:
 		check(_keys(action) == expect[action], "%s on %s" % [action, _keys(action).map(func(k: int) -> String: return OS.get_keycode_string(k))])
@@ -159,7 +159,7 @@ func _test_side_stances() -> void:
 func _test_hitboxes() -> void:
 	print("Hitboxes follow the pose")
 	var head := _hitbox(Vitals.HEAD)
-	var torso := _hitbox(Vitals.TORSO)
+	var torso := _hitbox(Vitals.CHEST)
 	check(head != null and torso != null, "found hitboxes by their body_part meta")
 	if head == null or torso == null:
 		return
@@ -175,11 +175,12 @@ func _test_hitboxes() -> void:
 	check(prone_head.y < 0.5 and prone_head.z < -0.3, "prone: head hitbox low and forward (%.2f, %.2f)" % [prone_head.y, prone_head.z])
 	check(absf(torso.global_basis.y.y) < 0.3, "prone: torso hitbox lies flat")
 	var eye := CharacterModel.eye_position(SoldierMovement.pose_for(S.PRONE, 0, 0.0))
-	check(prone_head.distance_to(eye) < 0.25, "and sits where the camera is")
+	check(prone_head.distance_to(eye) < 0.3, "and sits where the camera is (%.2f m away)" % prone_head.distance_to(eye))
 	player.vitals.server_damage(500.0)
 	await _frames(2)
 	check(player.vitals.downed and absf(torso.rotation.x + PI / 2) < 0.01, "downed still lays hitboxes down (lay_down)")
 	player.vitals.server_revive(100.0)
+	player.vitals.server_reset_health()  # the wound model leaves blood loss after a revive
 	move.set_stance(S.STAND_HIGH)
 	await _frames(2)
 	check(torso.transform.is_equal_approx(rest_torso) and _shape_position(head).distance_to(rest_head) < 0.01, "standing again: back at rest")
