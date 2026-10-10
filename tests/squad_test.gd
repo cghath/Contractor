@@ -150,6 +150,8 @@ func _test_buddy_carries_buddy() -> void:
 	check(_flat(bravo.global_position, player.global_position) < 11.0, "and carries him after the lead (%.1f m)" % _flat(bravo.global_position, player.global_position))
 	for id: StringName in kits:
 		charlie.inventory.take(id)
+	if kits.is_empty():
+		charlie.inventory.take(&"trauma_kit")  # only a trauma kit has the stopgap revive
 	await _seconds(6.0)
 	check(bravo.vitals.is_up() and bravo.carried_by == null, "handed a kit, Charlie revives him (Bravo: %s)" % bravo.vitals.condition_text())
 

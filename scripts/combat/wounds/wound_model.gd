@@ -45,8 +45,8 @@ const PAIN_FRAGMENT := Vector2(0.1, 0.25)
 const PAIN_GRAZE := Vector2(0.1, 0.2)
 ## Untreated fractures keep pain at least this high (a broken leg is heavy pain); a fracture
 ## adds nothing on top of the hit's own pain, so a limb hit alone stays under the knockout
-## threshold at full blood. A cracked rib keeps its floor and stamina penalty until wave 2's
-## morphine (or a respawn): nothing in the stopgap kit treats it.
+## threshold at full blood. A cracked rib keeps its floor until morphine; its stamina penalty
+## lasts until a respawn.
 const PAIN_FLOOR_LEG := 0.35
 const PAIN_FLOOR_ARM := 0.2
 const PAIN_FLOOR_RIB := 0.15
@@ -85,9 +85,63 @@ const RIB_STAMINA := 0.7
 const INJURY_BLOOD_WEIGHT := 0.3
 ## Untreated bleeding (L/min) that counts as the worst for injury().
 const INJURY_FULL_BLEED := 0.5
-## A stopgap kit is still worth using with untreated bleeding, an unsealed chest wound, or at
-## least this much pain it can take off (proposed).
-const KIT_PAIN_MIN := 0.1
+
+## --- Treatment (design doc "The kit", "Tourniquet", "Fractures", "Chest") ---
+## Kit item ids (data/items.json) the model knows how to apply.
+const TOURNIQUET := &"tourniquet"
+const PRESSURE_BANDAGE := &"pressure_bandage"
+const HEMOSTATIC_GAUZE := &"hemostatic_gauze"
+const CHEST_SEAL := &"chest_seal"
+const SPLINT := &"splint"
+const MORPHINE := &"morphine"
+const NPA := &"npa"
+## A tourniquet on a limb segment stops the bleeding on it and on every segment below it.
+const LIMB_BELOW := {
+	&"thigh_l": [&"thigh_l", &"shin_l"], &"shin_l": [&"shin_l"],
+	&"thigh_r": [&"thigh_r", &"shin_r"], &"shin_r": [&"shin_r"],
+	&"upper_arm_l": [&"upper_arm_l", &"forearm_l"], &"forearm_l": [&"forearm_l"],
+	&"upper_arm_r": [&"upper_arm_r", &"forearm_r"], &"forearm_r": [&"forearm_r"],
+}
+const LEG_PARTS: Array[StringName] = [&"thigh_l", &"thigh_r", &"shin_l", &"shin_r"]
+## A rushed tourniquet (under 2 s, or under fire) lets this share through (cuts bleeding by
+## only 70%, design doc); a second tourniquet beside it fixes that.
+const RUSHED_TOURNIQUET_LEAK := 0.3
+const MAX_TOURNIQUETS := 2
+## Pain a tourniquet adds while it's on, per limb segment that has one (proposed).
+const TOURNIQUET_PAIN := 0.1
+## A leg tourniquet forces a limp: no faster than this share of a jog, and no sprint
+## (proposed: the same walking pace as a broken leg).
+const TOURNIQUET_LEG_SPEED := 0.6
+## A splint eases a fracture's pain floor to these and leaves a splinted arm this much extra
+## sway (proposed). Walking and jogging come back; sprinting doesn't (can_sprint).
+const PAIN_FLOOR_SPLINTED_LEG := 0.15
+const PAIN_FLOOR_SPLINTED_ARM := 0.1
+const SPLINTED_ARM_SWAY := 0.3
+## Morphine takes this much off pain over MORPHINE_S (design doc). A second dose within
+## OVERDOSE_WINDOW_S risks an overdose (proposed: this chance of being knocked out for this
+## long; wave 3 adds heart-rate effects).
+const MORPHINE_RELIEF := 0.5
+const MORPHINE_S := 30.0
+const OVERDOSE_WINDOW_S := 600.0
+const OVERDOSE_CHANCE := 0.4
+const OVERDOSE_KO_S := Vector2(120.0, 300.0)
+## care_tasks() asks for morphine from this much pain it can take off (proposed), or for a
+## cracked rib (morphine is its only fix).
+const MORPHINE_FROM_PAIN := 0.4
+## Airway (proposed): an unconscious casualty without an NPA obstructs with this chance per
+## minute, then goes into cardiac arrest this long after unless an NPA goes in.
+const AIRWAY_BLOCK_PER_MIN := 0.1
+const AIRWAY_ARREST_S := 180.0
+## Bleeding the field kit can control. Internal (torso) bleeding waits for wave 3's surgery
+## kit, so care_tasks() never asks for an item for it.
+const FIXABLE_BLEEDS: Array[String] = ["arterial", "junctional", "venous", "muscle", "graze"]
+const BANDAGED_KINDS: Array[String] = ["venous", "muscle", "graze"]
+## The stopgap revive needs the bleeding controlled: less than this (L/min) the kit could
+## still stop.
+const REVIVE_MAX_BLEED := 0.05
+## Countdowns that clients run down between updates (to_net "t").
+const TIMERS: Array[String] = ["arrest_left", "concussion_left", "knockout_left", "winded_left", "stagger_left",
+	"treating_left", "morphine_left", "overdose_window_left"]
 
 ## Impact (shock) from rounds armor stopped (design doc table).
 const PLATE_IMPACT_PAIN := {&"pistol": 0.05, &"intermediate": 0.15, &"full_power": 0.3}
@@ -117,7 +171,9 @@ var blood := 1.0
 var pain_wounds := 0.0
 var impact := 0.0
 ## One Dictionary per wound: part, kind, rate (L/min at full blood), treated, name (vessel
-## or bone), and for chest wounds tension_in / arrest_in (seconds, -1 when not pending).
+## or bone), packed (an arterial or junctional bleed packed with gauze), tension (a chest
+## wound's tension pneumothorax has started), and for chest wounds tension_in / arrest_in
+## (seconds, -1 when not pending; host only).
 var wounds: Array[Dictionary] = []
 var unconscious := false
 var arrest := false
@@ -128,17 +184,25 @@ var knockout_left := 0.0
 var winded_left := 0.0
 var stagger_left := 0.0
 var rng := RandomNumberGenerator.new()
+## Tourniquets on limb segments: part -> {"count": n, "rushed": how many of them were rushed}.
+var tourniquets: Dictionary = {}
+## An NPA is in; an unconscious casualty's airway is obstructed.
+var npa := false
+var airway_blocked := false
+## Someone is applying a treatment to this body (seconds left).
+var treating_left := 0.0
+## Morphine relief still to come (seconds), and how long a new dose still risks an overdose.
+var morphine_left := 0.0
+var overdose_window_left := 0.0
+## Dice for the treatment rules (airway, overdose), apart from rng so the wound dice repeat.
+var care_rng := RandomNumberGenerator.new()
 
 var _time := 0.0
 var _last_concussion := -INF
 var _heart_arrest_in := -1.0
 var _wake_roll_in := WAKE_ROLL_S
-var _knockout_only := false     # out only because of a concussion knockout
-var _heal_left := 0.0           # stopgap treatment in progress (seconds)
-var _heal_pain_per_s := 0.0
-var _heal_queue: Array[Dictionary] = []   # wounds still to treat, in order
-var _heal_every := 0.0
-var _heal_next := 0.0
+var _knockout_only := false     # out only because of a knockout (concussion, overdose)
+var _airway_arrest_in := -1.0   # obstructed airway: seconds to cardiac arrest
 
 
 # --- Queries --------------------------------------------------------------------------
@@ -152,31 +216,71 @@ func shock() -> float:
 	return clampf((lost() - EFFECTS_FROM_LOST) / (UNCONSCIOUS_LOST - EFFECTS_FROM_LOST), 0.0, 1.0)
 
 
+## Wound and impact pain, at least the floor that fractures and an untreated cracked rib
+## keep, plus what tourniquets add while they're on.
 func pain() -> float:
 	var floor_pain := 0.0
 	for w in wounds:
-		if w.kind == "fracture" and not w.treated:
-			floor_pain = maxf(floor_pain, PAIN_FLOOR_LEG if w.name in BodyMap.LEG_BONES else PAIN_FLOOR_ARM)
-		elif w.kind == "rib":
+		if w.kind == "fracture":
+			var leg: bool = w.name in BodyMap.LEG_BONES
+			if w.treated:
+				floor_pain = maxf(floor_pain, PAIN_FLOOR_SPLINTED_LEG if leg else PAIN_FLOOR_SPLINTED_ARM)
+			else:
+				floor_pain = maxf(floor_pain, PAIN_FLOOR_LEG if leg else PAIN_FLOOR_ARM)
+		elif w.kind == "rib" and not w.treated:
 			floor_pain = maxf(floor_pain, PAIN_FLOOR_RIB)
-	return clampf(maxf(pain_wounds + impact, floor_pain), 0.0, 1.0)
+	return clampf(maxf(pain_wounds + impact, floor_pain) + TOURNIQUET_PAIN * tourniquets.size(), 0.0, 1.0)
 
 
 func knockout_threshold() -> float:
 	return lerpf(KNOCKOUT_PAIN_FULL, KNOCKOUT_PAIN_LOW, clampf(lost() / KNOCKOUT_PAIN_LOW_AT, 0.0, 1.0))
 
 
+## Untreated and with a bleed rate (tourniquets aside: see rate_now).
 static func is_bleeding(w: Dictionary) -> bool:
 	return float(w.rate) > 0.0 and not w.treated
 
 
-## Untreated bleeding in L/min at full blood (the wounds' own rates).
+## Share of bleeding that gets past the tourniquets above or on `part`: 1 with none, 0 under
+## a good one (or two rushed ones), RUSHED_TOURNIQUET_LEAK under a single rushed one.
+func tourniquet_factor(part: StringName, skip_segment: StringName = &"") -> float:
+	var factor := 1.0
+	for segment: StringName in tourniquets:
+		if segment != skip_segment and part in LIMB_BELOW.get(segment, []):
+			factor = minf(factor, _segment_factor(segment))
+	return factor
+
+
+## L/min at full blood this wound bleeds now: 0 once treated or under a good tourniquet.
+func rate_now(w: Dictionary) -> float:
+	return float(w.rate) * tourniquet_factor(w.part) if is_bleeding(w) else 0.0
+
+
+## Bleeding in L/min at full blood (the wounds' own rates, less what tourniquets hold back).
 func wound_bleed_rate() -> float:
 	var rate := 0.0
 	for w in wounds:
-		if is_bleeding(w):
-			rate += float(w.rate)
+		rate += rate_now(w)
 	return rate
+
+
+## Bleeding the field kit could still stop (L/min at full blood).
+func fixable_bleed_rate() -> float:
+	var rate := 0.0
+	for w in wounds:
+		if String(w.kind) in FIXABLE_BLEEDS:
+			rate += rate_now(w)
+	return rate
+
+
+## Bleeding is under control for the stopgap revive: what the kit could still stop is under
+## REVIVE_MAX_BLEED. (Internal bleeding can't be controlled in the field.)
+func bleeding_controlled() -> bool:
+	return fixable_bleed_rate() < REVIVE_MAX_BLEED
+
+
+func has_leg_tourniquet() -> bool:
+	return LEG_PARTS.any(func(p: StringName) -> bool: return tourniquets.has(p))
 
 
 ## The heart's output, 0 to 1: proportional to the blood left, nothing in arrest.
@@ -200,18 +304,22 @@ func has_kind(kind: String) -> bool:
 	return wounds.any(func(w: Dictionary) -> bool: return w.kind == kind)
 
 
+## Someone is applying a treatment to this body.
 func is_healing() -> bool:
-	return _heal_left > 0.0
+	return treating_left > 0.0
 
 
+## Not in arrest, under 40% lost, barely bleeding and breathing (an obstructed airway isn't).
 func is_stable() -> bool:
-	return not arrest and not dead and lost() < UNCONSCIOUS_LOST and bleed_rate() < STABLE_BLEED_L_MIN
+	return not arrest and not dead and lost() < UNCONSCIOUS_LOST and bleed_rate() < STABLE_BLEED_L_MIN and not airway_blocked
 
 
 func sway_mult() -> float:
 	var sway := 1.0 + BLOOD_SWAY * shock() + PAIN_SWAY * pain()
 	if has_fracture(BodyMap.ARM_BONES, true):
 		sway += BROKEN_ARM_SWAY
+	elif has_fracture(BodyMap.ARM_BONES, false):
+		sway += SPLINTED_ARM_SWAY
 	if concussion_left > 0.0:
 		sway += CONCUSSION_SWAY
 	if stagger_left > 0.0:
@@ -221,8 +329,12 @@ func sway_mult() -> float:
 
 func speed_mult() -> float:
 	var speed := 1.0 - BLOOD_SPEED * shock()
+	var leg := 1.0  # a broken leg or a leg tourniquet: walk only (they don't stack)
 	if has_fracture(BodyMap.LEG_BONES, true):
-		speed *= BROKEN_LEG_SPEED
+		leg = minf(leg, BROKEN_LEG_SPEED)
+	if has_leg_tourniquet():
+		leg = minf(leg, TOURNIQUET_LEG_SPEED)
+	speed *= leg
 	if stagger_left > 0.0:
 		speed *= STAGGER_SPEED
 	return speed
@@ -237,10 +349,11 @@ func stamina_mult() -> float:
 	return stamina
 
 
-## A splinted leg still can't sprint until the mission ends (design doc).
+## A splinted leg still can't sprint until the mission ends (design doc), nor a leg with a
+## tourniquet on.
 func can_sprint() -> bool:
 	return not unconscious and not dead and lost() < NO_SPRINT_LOST and winded_left <= 0.0 \
-		and not has_fracture(BodyMap.LEG_BONES, false)
+		and not has_fracture(BodyMap.LEG_BONES, false) and not has_leg_tourniquet()
 
 
 func reload_mult() -> float:
@@ -251,34 +364,195 @@ func turn_mult() -> float:
 	return CONCUSSION_TURN if concussion_left > 0.0 else 1.0
 
 
-## Pain a stopgap kit can take off: wound and impact pain, not the floor that untreated
-## fractures and cracked ribs keep (those wait for wave 2's splint and morphine).
+## Pain morphine can take off: wound and impact pain, not the floors that fractures keep
+## (or what tourniquets add).
 func reducible_pain() -> float:
 	return clampf(pain_wounds + impact, 0.0, 1.0)
 
 
-## What a stopgap kit (IFAK, trauma kit) can still fix, 0 to 1: the worse of untreated
-## bleeding (an unsealed chest wound counts as some) and reducible pain.
+## What the kit can still fix, 0 to 1: the worse of bleeding it could stop (an unsealed
+## chest wound counts as some) and pain morphine could take off (none while a dose would
+## risk an overdose).
 func treatable() -> float:
-	var bleed := wound_bleed_rate()
+	var bleed := fixable_bleed_rate()
 	for w in wounds:
 		if w.kind == "chest" and not w.treated:
-			bleed = maxf(bleed, CHEST_RATE)
-	return maxf(reducible_pain(), clampf(bleed / INJURY_FULL_BLEED, 0.0, 1.0))
+			bleed += CHEST_RATE
+	var pain_term := reducible_pain() if overdose_window_left <= 0.0 else 0.0
+	return maxf(pain_term, clampf(bleed / INJURY_FULL_BLEED, 0.0, 1.0))
 
 
-## Whether a stopgap kit would still do something (see treatable, KIT_PAIN_MIN).
-func kit_would_help() -> bool:
-	return wound_bleed_rate() > 0.0 or treatable() >= KIT_PAIN_MIN
-
-
-## 0 (fine) to 1: blood loss counts for up to INJURY_BLOOD_WEIGHT, what a kit can still fix
-## (treatable) for the rest. Fractures, cracked ribs and lost blood stay out of the kit term:
-## the stopgap kit fixes none of them, and AI that counted them would use up every kit it
-## carries. Blood loss alone stays under the 0.45 at which AI reaches for one.
+## 0 (fine) to 1: blood loss counts for up to INJURY_BLOOD_WEIGHT, what the kit can still fix
+## (treatable) for the rest. Splinted fractures, lost blood and internal bleeding stay out of
+## the kit term: the field kit fixes none of them, and AI that counted them would use up
+## everything it carries. Blood loss alone stays under the 0.45 at which AI treats itself.
 func injury() -> float:
 	var blood_term := clampf(lost() / UNCONSCIOUS_LOST, 0.0, 1.0)
 	return clampf(INJURY_BLOOD_WEIGHT * blood_term + (1.0 - INJURY_BLOOD_WEIGHT) * treatable(), 0.0, 1.0)
+
+
+# --- Treatment ------------------------------------------------------------------------
+
+## What still needs doing, most urgent first, in the casualty-care order: massive bleeding
+## (a tourniquet per limb segment, gauze for junctional bleeds), airway (an NPA for an
+## unconscious casualty), chest (a seal per open chest wound), other bleeding (bandages),
+## fractures (splints), pain (morphine, also for a cracked rib). One {"part", "kind", "item"}
+## per task. Only items that would help: wounds already handled (treated, under a good
+## tourniquet) are skipped, internal bleeding and a tension pneumothorax under a seal wait
+## for wave 3, and no second morphine dose is asked for while it would risk an overdose. In
+## cardiac arrest neither an NPA nor morphine does anything until the heart restarts.
+func care_tasks() -> Array[Dictionary]:
+	var tasks: Array[Dictionary] = []
+	var by_rate := wounds.duplicate()
+	by_rate.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return float(a.rate) > float(b.rate))
+	var tourniquet_parts := {}
+	for w: Dictionary in by_rate:
+		if rate_now(w) <= 0.0:
+			continue
+		if w.kind == "arterial" and LIMB_BELOW.has(w.part):
+			if not tourniquet_parts.has(w.part):
+				tourniquet_parts[w.part] = true
+				tasks.append(_task(w.part, "arterial", TOURNIQUET))
+		elif w.kind == "junctional" or w.kind == "arterial":
+			tasks.append(_task(w.part, w.kind, HEMOSTATIC_GAUZE))
+	if unconscious and not arrest and not npa:
+		tasks.append(_task(&"head", "airway", NPA))
+	for w: Dictionary in by_rate:
+		if w.kind == "chest" and not w.treated:
+			tasks.append(_task(w.part, "chest", CHEST_SEAL))
+	for w: Dictionary in by_rate:
+		if String(w.kind) in BANDAGED_KINDS and rate_now(w) > 0.0:
+			tasks.append(_task(w.part, w.kind, PRESSURE_BANDAGE))
+	for w: Dictionary in by_rate:
+		if w.kind == "fracture" and not w.treated:
+			tasks.append(_task(w.part, "fracture", SPLINT))
+	if not arrest and overdose_window_left <= 0.0 and (reducible_pain() >= MORPHINE_FROM_PAIN or _untreated_rib()):
+		tasks.append(_task(&"torso", "pain", MORPHINE))
+	return tasks
+
+
+## Why one `item` on `part` wouldn't help right now, or "" if it would.
+func treatment_problem(item: StringName, part: StringName) -> String:
+	if dead:
+		return "Too late"
+	match item:
+		TOURNIQUET:
+			if not LIMB_BELOW.has(part):
+				return "Tourniquets go on arms and legs"
+			if int(tourniquets.get(part, {}).get("count", 0)) >= MAX_TOURNIQUETS:
+				return "Already two tourniquets there"
+			for w in wounds:
+				if w.part in LIMB_BELOW[part] and rate_now(w) > 0.0:
+					return ""
+			return "Nothing bleeding there"
+		MORPHINE:
+			return "" if reducible_pain() > 0.0 or _untreated_rib() else "No pain morphine would ease"
+		NPA:
+			if not unconscious:
+				return "Only for an unconscious casualty"
+			return "Already has an NPA" if npa else ""
+		HEMOSTATIC_GAUZE:
+			if not _target_wound(item, part).is_empty():
+				return ""
+			for w in wounds:
+				if w.part == part and w.kind == "arterial" and is_bleeding(w):
+					return "Put a tourniquet on first"
+			return "Nothing to pack there"
+		PRESSURE_BANDAGE, CHEST_SEAL, SPLINT:
+			if not _target_wound(item, part).is_empty():
+				return ""
+			return {PRESSURE_BANDAGE: "Nothing a bandage fixes there", CHEST_SEAL: "No open chest wound there",
+				SPLINT: "No fracture there"}[item]
+	return "That doesn't treat anything"
+
+
+## Host only. One use of `item` on `part` (see treatment_problem); `rushed` is for a
+## tourniquet placed in a hurry or under fire. Returns whether it did anything.
+func apply_item(item: StringName, part: StringName, rushed := false) -> bool:
+	if treatment_problem(item, part) != "":
+		return false
+	match item:
+		TOURNIQUET:
+			var t: Dictionary = tourniquets.get(part, {"count": 0, "rushed": 0})
+			tourniquets[part] = {"count": int(t.count) + 1, "rushed": int(t.rushed) + (1 if rushed else 0)}
+		MORPHINE:
+			if overdose_window_left > 0.0 and care_rng.randf() < OVERDOSE_CHANCE:
+				knockout_left = maxf(knockout_left, care_rng.randf_range(OVERDOSE_KO_S.x, OVERDOSE_KO_S.y))
+			morphine_left += MORPHINE_S
+			overdose_window_left = OVERDOSE_WINDOW_S
+			for w in wounds:
+				if w.kind == "rib":
+					w.treated = true
+		NPA:
+			npa = true
+			airway_blocked = false
+			_airway_arrest_in = -1.0
+		_:
+			var w := _target_wound(item, part)
+			w.treated = true
+			if item == HEMOSTATIC_GAUZE:
+				w.packed = true
+			elif item == CHEST_SEAL:
+				w.tension_in = -1.0  # sealed in time: no tension pneumothorax starts (one under way runs on)
+	update_state(0.0)
+	return true
+
+
+## Why the tourniquets on `part` can't come off yet, or "" if they can: every arterial bleed
+## under them has to be packed first (or held by another good tourniquet).
+func removal_problem(part: StringName) -> String:
+	if not tourniquets.has(part):
+		return "No tourniquet there"
+	for w in wounds:
+		if w.kind == "arterial" and is_bleeding(w) and w.part in LIMB_BELOW[part] and tourniquet_factor(w.part, part) > 0.0:
+			return "Pack the wound first"
+	return ""
+
+
+## Host only. Takes the tourniquets off `part`; returns how many came off (0 if they can't).
+func remove_tourniquets(part: StringName) -> int:
+	if removal_problem(part) != "":
+		return 0
+	var count := int(tourniquets[part].count)
+	tourniquets.erase(part)
+	update_state(0.0)
+	return count
+
+
+func _task(part: StringName, kind: String, item: StringName) -> Dictionary:
+	return {"part": part, "kind": kind, "item": item}
+
+
+## The wound one bandage, gauze, seal or splint on `part` would treat (the worst), or {}.
+## Gauze packs a junctional bleed, or an arterial one under a tourniquet (so it can come off).
+func _target_wound(item: StringName, part: StringName) -> Dictionary:
+	var best := {}
+	for w in wounds:
+		if w.part != part or w.treated:
+			continue
+		var fits := false
+		match item:
+			PRESSURE_BANDAGE:
+				fits = String(w.kind) in BANDAGED_KINDS and is_bleeding(w)
+			HEMOSTATIC_GAUZE:
+				fits = is_bleeding(w) and (w.kind == "junctional" or (w.kind == "arterial" \
+					and (not LIMB_BELOW.has(part) or tourniquet_factor(part) < 1.0)))
+			CHEST_SEAL:
+				fits = w.kind == "chest"
+			SPLINT:
+				fits = w.kind == "fracture"
+		if fits and (best.is_empty() or rate_now(w) > rate_now(best) or (rate_now(w) == rate_now(best) and float(w.rate) > float(best.rate))):
+			best = w
+	return best
+
+
+func _untreated_rib() -> bool:
+	return wounds.any(func(w: Dictionary) -> bool: return w.kind == "rib" and not w.treated)
+
+
+func _segment_factor(segment: StringName) -> float:
+	var t: Dictionary = tourniquets[segment]
+	return 0.0 if int(t.count) >= MAX_TOURNIQUETS or int(t.count) > int(t.rushed) else RUSHED_TOURNIQUET_LEAK
 
 
 # --- Host-side changes ----------------------------------------------------------------
@@ -369,37 +643,22 @@ func kill() -> void:
 	dead = true
 	arrest = false
 	unconscious = false
-	_heal_left = 0.0
+	treating_left = 0.0
 
 
-## Starts stopgap treatment (IFAK or trauma kit until the wave 2 kit): stops bleeding wound
-## by wound, worst first, over `seconds`, and takes `pain_relief` off pain. Replaces one in
-## progress.
-func start_treatment(pain_relief: float, seconds: float) -> void:
-	seconds = maxf(seconds, 0.01)
-	_heal_left = seconds
-	_heal_pain_per_s = pain_relief / seconds
-	_heal_queue.clear()
-	for w in wounds:
-		if is_bleeding(w) or (w.kind == "chest" and not w.treated):
-			_heal_queue.append(w)
-	_heal_queue.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return float(a.rate) > float(b.rate))
-	_heal_every = seconds / maxf(_heal_queue.size(), 1)
-	_heal_next = _heal_every
-
-
-## Stopgap revive (IFAK or trauma kit): stops all bleeding, tops blood up to `min_blood`
-## (stopgap until IV in wave 3), ends arrest, caps pain at `pain_cap` and wakes the casualty.
+## Stopgap revive (trauma kit, until IV in wave 3; callers check bleeding_controlled first):
+## tops blood up to `min_blood`, restarts the heart, caps pain at `pain_cap` and wakes the
+## casualty. It stops no bleeding: that's the kit's job.
 func revive(min_blood: float, pain_cap: float) -> void:
 	if dead:
 		return
-	for w in wounds:
-		_stop_bleeding(w)
 	blood = maxf(blood, min_blood)
 	arrest = false
 	arrest_left = 0.0
 	_heart_arrest_in = -1.0
 	knockout_left = 0.0
+	airway_blocked = false
+	_airway_arrest_in = -1.0
 	var total := pain_wounds + impact
 	if total > pain_cap:
 		pain_wounds *= pain_cap / total
@@ -425,8 +684,13 @@ func reset() -> void:
 	_heart_arrest_in = -1.0
 	_wake_roll_in = WAKE_ROLL_S
 	_knockout_only = false
-	_heal_left = 0.0
-	_heal_queue.clear()
+	tourniquets.clear()
+	npa = false
+	airway_blocked = false
+	_airway_arrest_in = -1.0
+	treating_left = 0.0
+	morphine_left = 0.0
+	overdose_window_left = 0.0
 
 
 ## Host only: steps the simulation by `dt` seconds.
@@ -438,26 +702,34 @@ func advance(dt: float) -> void:
 	knockout_left = maxf(knockout_left - dt, 0.0)
 	winded_left = maxf(winded_left - dt, 0.0)
 	stagger_left = maxf(stagger_left - dt, 0.0)
+	treating_left = maxf(treating_left - dt, 0.0)
+	overdose_window_left = maxf(overdose_window_left - dt, 0.0)
 	pain_wounds = maxf(pain_wounds - PAIN_FADE_PER_S * dt, 0.0)
 	impact = maxf(impact - IMPACT_FADE_PER_S * dt, 0.0)
+	if morphine_left > 0.0:
+		var step := minf(dt, morphine_left)
+		morphine_left -= step
+		var relief := MORPHINE_RELIEF / MORPHINE_S * step
+		var from_wounds := minf(relief, pain_wounds)
+		pain_wounds -= from_wounds
+		impact = maxf(impact - (relief - from_wounds), 0.0)
 	# Bleeding, scaled by what the heart still pushes out.
 	blood = maxf(blood - bleed_rate() / 60.0 * dt / BLOOD_L, 0.0)
-	if _heal_left > 0.0:
-		_treat_step(dt)
 	if _heart_arrest_in >= 0.0:
 		_heart_arrest_in -= dt
 		if _heart_arrest_in <= 0.0:
 			_heart_arrest_in = -1.0
 			_start_arrest()
 	for w in wounds:
-		if w.kind != "chest" or w.treated:
+		if w.kind != "chest":
 			continue
-		if float(w.tension_in) >= 0.0:
+		if not w.treated and float(w.tension_in) >= 0.0:  # a seal stops this countdown...
 			w.tension_in = float(w.tension_in) - dt
 			if w.tension_in <= 0.0:
 				w.tension_in = -1.0
+				w.tension = true
 				w.arrest_in = TENSION_ARREST_S  # tension pneumothorax
-		elif float(w.arrest_in) >= 0.0:
+		elif float(w.arrest_in) >= 0.0:  # ...but not this one (the needle is wave 3)
 			w.arrest_in = float(w.arrest_in) - dt
 			if w.arrest_in <= 0.0:
 				w.arrest_in = -1.0
@@ -468,6 +740,7 @@ func advance(dt: float) -> void:
 			kill()  # no heart rate when the window ran out
 			return
 	update_state(dt)
+	_update_airway(dt)
 
 
 ## Re-evaluates consciousness and arrest from the current state; `dt` drives wake rolls.
@@ -482,7 +755,6 @@ func update_state(dt: float) -> void:
 		if not unconscious:
 			unconscious = true
 			_knockout_only = not other_cause
-			_heal_left = 0.0  # treatment stops when you go out
 		elif other_cause:
 			_knockout_only = false
 		_wake_roll_in = WAKE_ROLL_S
@@ -490,7 +762,7 @@ func update_state(dt: float) -> void:
 	if not unconscious:
 		return
 	if _knockout_only:
-		unconscious = false  # the concussion knockout passed
+		_wake()  # the knockout (concussion, overdose) passed
 		return
 	if not is_stable():
 		_wake_roll_in = WAKE_ROLL_S
@@ -499,23 +771,29 @@ func update_state(dt: float) -> void:
 	if _wake_roll_in <= 0.0:
 		_wake_roll_in = WAKE_ROLL_S
 		if rng.randf() < WAKE_CHANCE:
-			unconscious = false
+			_wake()
 
 
 # --- Replication ----------------------------------------------------------------------
 
 ## Compact state for Vitals.net_state. "t" holds countdowns, which clients run down locally.
+## Wounds are [part, kind, rate, treated, name, flags (1 packed, 2 tension)]; "q" holds the
+## tourniquets as {part: [count, rushed]}.
 func to_net() -> Dictionary:
 	var list: Array = []
 	for w in wounds:
-		list.append([String(w.part), w.kind, snappedf(float(w.rate), 0.001), 1 if w.treated else 0, String(w.name)])
-	var flags := (1 if unconscious else 0) | (2 if arrest else 0) | (4 if dead else 0) | (8 if is_healing() else 0)
+		var wound_flags := (1 if w.get("packed", false) else 0) | (2 if w.get("tension", false) else 0)
+		list.append([String(w.part), w.kind, snappedf(float(w.rate), 0.001), 1 if w.treated else 0, String(w.name), wound_flags])
+	var flags := (1 if unconscious else 0) | (2 if arrest else 0) | (4 if dead else 0) | (16 if npa else 0) | (32 if airway_blocked else 0)
 	var timers := {}
-	for key: String in ["arrest_left", "concussion_left", "knockout_left", "winded_left", "stagger_left"]:
+	for key: String in TIMERS:
 		if float(get(key)) > 0.0:
 			timers[key] = snappedf(float(get(key)), 0.1)
+	var tq := {}
+	for part: StringName in tourniquets:
+		tq[String(part)] = [int(tourniquets[part].count), int(tourniquets[part].rushed)]
 	return {"b": snappedf(blood, 0.001), "p": snappedf(pain_wounds, 0.01), "i": snappedf(impact, 0.01),
-		"f": flags, "w": list, "t": timers}
+		"f": flags, "w": list, "q": tq, "t": timers}
 
 
 ## Rebuilds this copy from a peer's net_state (clients).
@@ -527,19 +805,26 @@ func apply_net(state: Dictionary) -> void:
 	unconscious = flags & 1 != 0
 	arrest = flags & 2 != 0
 	dead = flags & 4 != 0
-	_heal_left = 1.0 if flags & 8 != 0 else 0.0
+	npa = flags & 16 != 0
+	airway_blocked = flags & 32 != 0
 	wounds.clear()
 	for entry: Array in state.get("w", []):
+		var wound_flags := int(entry[5]) if entry.size() > 5 else 0
 		wounds.append({"part": StringName(entry[0]), "kind": String(entry[1]), "rate": float(entry[2]),
-			"treated": int(entry[3]) != 0, "name": StringName(entry[4]), "tension_in": -1.0, "arrest_in": -1.0})
+			"treated": int(entry[3]) != 0, "name": StringName(entry[4]), "packed": wound_flags & 1 != 0,
+			"tension": wound_flags & 2 != 0, "tension_in": -1.0, "arrest_in": -1.0})
+	tourniquets.clear()
+	var tq: Dictionary = state.get("q", {})
+	for part: String in tq:
+		tourniquets[StringName(part)] = {"count": int(tq[part][0]), "rushed": int(tq[part][1])}
 	var timers: Dictionary = state.get("t", {})
-	for key: String in ["arrest_left", "concussion_left", "knockout_left", "winded_left", "stagger_left"]:
+	for key: String in TIMERS:
 		set(key, float(timers.get(key, 0.0)))
 
 
 ## Clients: runs the replicated countdowns down between updates.
 func tick_display(dt: float) -> void:
-	for key: String in ["arrest_left", "concussion_left", "knockout_left", "winded_left", "stagger_left"]:
+	for key: String in TIMERS:
 		set(key, maxf(float(get(key)) - dt, 0.0))
 
 
@@ -547,34 +832,36 @@ func tick_display(dt: float) -> void:
 
 func _add_wound(part: StringName, kind: String, rate: float, name: StringName = &"") -> Dictionary:
 	var w := {"part": part, "kind": kind, "rate": rate, "treated": false, "name": name,
-		"tension_in": -1.0, "arrest_in": -1.0}
+		"packed": false, "tension": false, "tension_in": -1.0, "arrest_in": -1.0}
 	wounds.append(w)
 	return w
 
 
-func _stop_bleeding(w: Dictionary) -> void:
-	if w.kind == "fracture":
-		w.rate = 0.0  # internal bleeding stopped; the bone still needs a splint
-	elif w.kind != "rib":
-		w.treated = true
-	if w.kind == "chest":
-		w.tension_in = -1.0  # sealed (stopgap: also relieves a tension pneumothorax)
-		w.arrest_in = -1.0
-	if w.kind == "heart":
-		_heart_arrest_in = -1.0
-
-
-func _treat_step(dt: float) -> void:
-	if unconscious:
-		_heal_left = 0.0
+## An unconscious casualty without an NPA can obstruct; an obstructed airway stops the heart
+## AIRWAY_ARREST_S later unless an NPA goes in. Waking (or a restarted heart) clears it.
+func _update_airway(dt: float) -> void:
+	if not unconscious:
+		airway_blocked = false
+		_airway_arrest_in = -1.0
 		return
-	var step := minf(dt, _heal_left)
-	pain_wounds = maxf(pain_wounds - _heal_pain_per_s * step, 0.0)
-	_heal_left -= step
-	_heal_next -= step
-	while not _heal_queue.is_empty() and (_heal_next <= 0.0001 or _heal_left <= 0.0):
-		_stop_bleeding(_heal_queue.pop_front())
-		_heal_next += _heal_every
+	if arrest or npa:
+		return
+	if not airway_blocked:
+		if care_rng.randf() < 1.0 - pow(1.0 - AIRWAY_BLOCK_PER_MIN, dt / 60.0):
+			airway_blocked = true
+			_airway_arrest_in = AIRWAY_ARREST_S
+		return
+	_airway_arrest_in -= dt
+	if _airway_arrest_in <= 0.0:
+		_airway_arrest_in = -1.0
+		_start_arrest()
+
+
+func _wake() -> void:
+	unconscious = false
+	_knockout_only = false
+	airway_blocked = false
+	_airway_arrest_in = -1.0
 
 
 func _start_arrest() -> void:
@@ -583,7 +870,7 @@ func _start_arrest() -> void:
 	arrest = true
 	arrest_left = ARREST_WINDOW_S
 	_heart_arrest_in = -1.0
-	_heal_left = 0.0
+	_airway_arrest_in = -1.0
 
 
 func _concuss() -> void:

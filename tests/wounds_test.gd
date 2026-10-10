@@ -1,7 +1,7 @@
 extends Node3D
 ## Headless checks for the wound model (Vitals, WoundModel, BodyMap): thresholds, bleeding,
 ## wound channels and cavitation, fractures, pain and knockout, organs, fragments, hitboxes,
-## impact, the stopgap revive and heal, and the replicated state.
+## impact, the stopgap revive, what the kit can fix, and the replicated state.
 ##   <voxel godot exe> --headless --path . res://tests/wounds_test.tscn
 ## Exits with the number of failures. Dice are seeded, so results repeat.
 
@@ -256,7 +256,7 @@ func _test_organs() -> void:
 		if _chest(sealed).tension_in >= 0.0:
 			break
 		sealed.rng.seed += 1
-	sealed.start_treatment(0.0, 1.0)
+	sealed.apply_item(WoundModel.CHEST_SEAL, Vitals.CHEST)
 	sealed.advance(1.0)
 	sealed.advance(300.0)
 	check(not sealed.arrest, "a treated (sealed) chest wound doesn't develop tension")
@@ -380,40 +380,32 @@ func _test_impact() -> void:
 
 
 func _test_stopgaps() -> void:
-	print("Stopgap revive and heal")
+	print("Stopgap revive")
 	var vitals := _vitals(29)
 	_shoot(vitals, Vitals.THIGH_R, Vector3(0.0578, 0.70, -0.11))
 	vitals.server_advance(240.0)
 	check(vitals.downed, "bled out to unconscious (%s, %.0f%%)" % [vitals.condition_text(), vitals.blood_fraction() * 100.0])
 	vitals.server_damage(30.0)
 	check(vitals.in_cardiac_arrest(), "and into arrest")
+	check(vitals.revive_problem() == "Stop the bleeding first", "no revive while the leg still bleeds (%s)" % vitals.revive_problem())
+	vitals.server_apply_treatment(WoundModel.TOURNIQUET, Vitals.THIGH_R)
+	check(vitals.revive_problem() == "", "a tourniquet controls it")
 	vitals.server_revive(25.0)
-	check(vitals.is_up() and not vitals.in_cardiac_arrest() and vitals.blood_fraction() >= Vitals.REVIVE_BLOOD - 0.001 and vitals.pain() <= 0.5 + 0.001,
-		"revive: up, out of arrest, %.0f%% blood, pain %.2f" % [vitals.blood_fraction() * 100.0, vitals.pain()])
-	check(vitals.wound_list().all(func(w: Dictionary) -> bool: return not w.bleeding) and vitals.bleed_rate() == 0.0, "and all bleeding stopped")
+	check(vitals.is_up() and not vitals.in_cardiac_arrest() and vitals.blood_fraction() >= Vitals.REVIVE_BLOOD - 0.001
+		and vitals.pain() <= Vitals.REVIVE_PAIN_CAP + WoundModel.TOURNIQUET_PAIN + 0.001,
+		"revive: up, out of arrest, %.0f%% blood, pain %.2f (with the tourniquet's)" % [vitals.blood_fraction() * 100.0, vitals.pain()])
+	check(vitals.wound_list().all(func(w: Dictionary) -> bool: return not w.bleeding) and vitals.bleed_rate() == 0.0, "and nothing bleeds")
 	vitals.server_reset_health()
-	check(vitals.is_up() and vitals.blood_fraction() == 1.0 and vitals.wound_list().is_empty() and vitals.condition_text() == "OK", "reset: fully restored")
-	# Heal over time: wound by wound, worst first.
-	_shoot(vitals, Vitals.THIGH_R, Vector3(0.0578, 0.70, -0.11), Vitals.PISTOL)
-	var pain := vitals.pain()
-	var bleeding := vitals.wound_list().filter(func(w: Dictionary) -> bool: return w.bleeding)
-	check(bleeding.size() >= 2 and vitals.is_up(), "%d bleeding wounds" % bleeding.size())
-	vitals.server_heal_over_time(35.0, 2.0)
-	vitals.server_advance(0.15 + 2.0 / bleeding.size())
-	var femoral_stopped := vitals.wound_list().any(func(w: Dictionary) -> bool: return w.name == &"femoral_r" and w.treated)
-	var still := vitals.wound_list().filter(func(w: Dictionary) -> bool: return w.bleeding).size()
-	check(femoral_stopped and still == bleeding.size() - 1, "the arterial bleed is stopped first (%d still bleeding)" % still)
-	vitals.server_advance(2.0)
-	check(vitals.bleed_rate() == 0.0 and not vitals.is_healing(), "then the rest")
-	# Down by 0.35, but not below a broken leg's pain floor (the kit doesn't splint).
-	check(vitals.pain() < maxf(pain - 0.34, WoundModel.PAIN_FLOOR_LEG + 0.001), "pain down by 0.35 (%.2f -> %.2f)" % [pain, vitals.pain()])
+	check(vitals.is_up() and vitals.blood_fraction() == 1.0 and vitals.wound_list().is_empty() and vitals.condition_text() == "OK"
+		and vitals.tourniquets().is_empty(), "reset: fully restored, tourniquet gone")
 	vitals.queue_free()
 
 
-## The stopgap kit fixes bleeding and pain, not fractures, ribs or lost blood, so injury()
-## (what AI heals on) and needs_treatment() (the "Not injured" check) leave those out.
+## The kit fixes bleeding, chest wounds and pain, not lost blood or internal bleeding, so
+## injury() (what AI treats itself on) and needs_treatment() (the "Nothing to treat" check)
+## leave those out.
 func _test_kit_economy() -> void:
-	print("Kits and what they can fix")
+	print("What the kit can fix")
 	var m := _model(41)
 	while not m.has_fracture(BodyMap.LEG_BONES, true):
 		m.add_hit(Vitals.THIGH_L, {"graze": false, "depth": 0.15, "vessels": [], "organs": [], "bones": [&"femur_l"]}, Vitals.FULL_POWER)
@@ -424,22 +416,17 @@ func _test_kit_economy() -> void:
 	m.update_state(0.0)
 	check(m.arrest, "broken leg and arm, bled into arrest")
 	m.revive(Vitals.REVIVE_BLOOD, Vitals.REVIVE_PAIN_CAP)
-	var before := m.injury()
-	m.start_treatment(0.35, 4.0)  # one IFAK
-	m.advance(4.1)
-	check(m.injury() < 0.45, "revived, broken leg and arm: one IFAK brings injury under the AI's heal mark (%.2f -> %.2f)" % [before, m.injury()])
-	m.start_treatment(0.7, 8.0)  # a trauma kit
-	m.advance(8.1)
-	check(not m.kit_would_help() and m.pain() >= WoundModel.PAIN_FLOOR_LEG, "then a kit has nothing left to fix (pain %.2f is the fracture's)" % m.pain())
-	var leg := _model(43)
-	while not leg.has_fracture(BodyMap.LEG_BONES, true):
-		leg.reset()
-		leg.add_hit(Vitals.THIGH_L, {"graze": false, "depth": 0.15, "vessels": [], "organs": [], "bones": [&"femur_l"]}, Vitals.PISTOL)
-	leg.blood = 0.73
-	leg.pain_wounds = 0.1
-	leg.start_treatment(0.0, 0.1)
-	leg.advance(0.2)
-	check(not leg.unconscious and leg.injury() < 0.45, "up with a broken leg (bleeding stopped) at 27%% lost: injury %.2f" % leg.injury())
+	for w in m.wounds.duplicate():
+		for item: StringName in [WoundModel.PRESSURE_BANDAGE, WoundModel.SPLINT]:
+			m.apply_item(item, w.part)
+	m.apply_item(WoundModel.MORPHINE, Vitals.TORSO)
+	m.advance(WoundModel.MORPHINE_S + 1.0)
+	check(m.injury() < 0.45, "revived, bandaged, splinted, morphine: under the AI's heal mark (%.2f)" % m.injury())
+	check(m.care_tasks().is_empty(), "then the kit has nothing left to fix (pain %.2f is the splints')" % m.pain())
+	var gut := _model(43)
+	gut.add_hit(Vitals.ABDOMEN, {"graze": false, "depth": 0.2, "vessels": [{"name": &"aorta", "kind": BodyMap.INTERNAL, "rate": 2.5, "share": 0.1}], "organs": [], "bones": []}, Vitals.PISTOL)
+	gut.pain_wounds = 0.1
+	check(gut.wound_bleed_rate() > 0.0 and gut.treatable() < 0.2 and gut.care_tasks().is_empty(), "internal bleeding: nothing in the kit fixes it, so nothing is asked for (treatable %.2f)" % gut.treatable())
 	var vitals := _vitals(47)
 	check(not vitals.needs_treatment(), "unhurt: not injured")
 	_shoot(vitals, Vitals.THIGH_R, Vector3(0.0578, 0.70, -0.11), Vitals.PISTOL)

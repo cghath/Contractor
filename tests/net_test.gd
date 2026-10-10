@@ -37,6 +37,8 @@ func _give_kit(id: int) -> void:
 	player.inventory.take(&"mag_556", 2)
 	player.inventory.take(&"ifak")
 	player.vitals.server_damage(40.0)
+	# A small fragment wound in the left forearm to treat (and maybe a fracture).
+	player.vitals.server_hit(Vitals.FOREARM_L, {"round_class": Vitals.FRAGMENT, "superficial": true})
 	print("[host] gave peer %d a kit" % id)
 
 
@@ -72,13 +74,24 @@ func _run_client() -> void:
 	me._server_reload.rpc_id(1, &"primary")
 	await _wait_for(func() -> bool: return me.inventory.rounds_in(&"primary") == 30, 5.0)
 	check(me.inventory.rounds_in(&"primary") == 30 and me.inventory.spare_rounds(&"mag_556") == 57, "reload over the network (30 loaded, 57 spare)")
-	# The host's K-style trauma (40): 24% of blood lost and 0.4 pain, replicated in net_state.
-	await _wait_for(func() -> bool: return me.vitals.pain() > 0.3, 3.0)
-	check(absf(me.vitals.blood_fraction() - 0.76) < 0.01 and absf(me.vitals.pain() - 0.4) < 0.02 and me.vitals.condition_text() == "Wounded",
-		"wound-model state replicated to the client (blood %.0f%%, pain %.2f, %s)" % [me.vitals.blood_fraction() * 100.0, me.vitals.pain(), me.vitals.condition_text()])
-	me._server_use_medical.rpc_id(1)
-	await _wait_for(func() -> bool: return me.vitals.pain() < 0.1, 6.0)
-	check(me.vitals.pain() < 0.1, "IFAK treatment replicated (pain 0.40 -> %.2f)" % me.vitals.pain())
+	# The host's K-style trauma (40): 24% of blood lost and 0.4 pain, plus a fragment wound in
+	# the left forearm, replicated in net_state.
+	await _wait_for(func() -> bool: return me.vitals.pain() > 0.45, 3.0)
+	var wounds := me.vitals.wound_list()
+	check(absf(me.vitals.blood_fraction() - 0.76) < 0.02 and me.vitals.pain() > 0.45 and me.vitals.is_up() and me.vitals.condition_text() == "Bleeding"
+		and not wounds.is_empty() and wounds[0].part == Vitals.FOREARM_L and wounds[0].kind == "muscle" and wounds[0].bleeding,
+		"wound-model state replicated to the client (blood %.0f%%, pain %.2f, %s, %s)" % [me.vitals.blood_fraction() * 100.0, me.vitals.pain(), me.vitals.condition_text(), wounds])
+	var tasks := me.vitals.care_needed()
+	check(not tasks.is_empty() and tasks[0].item == &"pressure_bandage" and me.inventory.medical_count(&"pressure_bandage") == 2,
+		"the client reads what it needs (%s) and that its IFAK holds 2 bandages" % [tasks])
+	if not tasks.is_empty():
+		me._server_treat.rpc_id(1, me.get_path(), tasks[0].item, tasks[0].part)  # rushed left at its default
+		await _wait_for(func() -> bool: return me.vitals.is_healing(), 2.0)
+		check(me.vitals.is_healing(), "the host started the treatment (replicated)")
+		await _wait_for(func() -> bool: return me.vitals.wound_list()[0].treated, 8.0)
+		check(me.vitals.wound_list()[0].treated and not me.vitals.wound_list()[0].bleeding and not me.vitals.is_healing(), "a remote treatment through the host: bandaged after 5 s")
+		await _wait_for(func() -> bool: return me.inventory.medical_count(&"pressure_bandage") == 1, 2.0)
+		check(me.inventory.medical_count(&"pressure_bandage") == 1 and me.inventory.count_of(&"ifak") == 1, "drawn from the IFAK, which stays with one bandage left")
 	me._server_inventory_action.rpc_id(1, "drop_slot", &"", -1, &"helmet", &"")
 	await _wait_for(func() -> bool: return me.inventory.slots[&"helmet"] == &"", 3.0)
 	await _wait_for(func() -> bool: return _dropped_helmet() != null, 3.0)

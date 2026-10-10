@@ -72,8 +72,9 @@ func _redraw() -> void:
 			var actions := []
 			if item.slot != &"":
 				actions.append(["Equip", _action.bind("equip_entry", container, i, &"", &"")])
-			if item.stats.has("heal"):
-				actions.append(["Use", func() -> void: player._server_use_medical.rpc_id(1)])
+			var use := _medical_use(item)
+			if use.is_valid():
+				actions.append(["Use", use])
 			for other in Inventory.CONTAINERS:
 				if other != container and inv.capacity(other) > 0.0:
 					actions.append(["> " + String(other).capitalize(), _action.bind("move_entry", container, i, &"", other)])
@@ -86,7 +87,22 @@ func _action(action: String, container: StringName, index: int, slot: StringName
 	player._server_inventory_action.rpc_id(1, action, container, index, slot, target)
 
 
+## Use for a medical entry, or an empty Callable: a kit treats your next need (like H); a
+## loose kit item goes on the first of your wounds it's needed for.
+func _medical_use(item: ItemData) -> Callable:
+	if Inventory.is_kit(item):
+		return func() -> void: player._server_use_medical.rpc_id(1)
+	if not item.stats.has("treat_s"):
+		return Callable()
+	for task in player.vitals.care_needed():
+		if task.item == item.id:
+			return func() -> void: player._server_treat.rpc_id(1, player.get_path(), item.id, task.part, false)
+	return Callable()
+
+
 static func _detail(item: ItemData, state: Dictionary) -> String:
+	if Inventory.is_kit(item):
+		return "  [%s]" % Inventory.kit_text(item, state)  # what's left in the kit
 	if state.has("rounds") and item.type == "weapon":
 		return "  [%d loaded]" % int(state.rounds)
 	if state.has("rounds") and int(state.rounds) < item.magazine_rounds():

@@ -62,17 +62,27 @@ func _test_firing_and_reload() -> void:
 func _test_medical() -> void:
 	print("Medical (RPC)")
 	player.inventory.take(&"ifak")
-	player.vitals.server_damage(50.0)
-	var pain := player.vitals.pain()
+	# A pistol round through the outside of the left thigh (rest pose): a plain muscle wound.
+	player.vitals.server_hit(Vitals.THIGH_L, {"round_class": Vitals.PISTOL, "position": player.global_transform * Vector3(-0.12, 0.7, -0.1),
+		"direction": player.global_basis * Vector3.BACK})
 	player._server_use_medical.rpc_id(1)
-	check(player.vitals.is_healing(), "IFAK applied")
-	check(player.inventory.count_of(&"ifak") == 0, "IFAK used up")
-	await _seconds(4.4)
-	check(player.vitals.pain() < pain - 0.34 and not player.vitals.is_healing(), "took 0.35 off pain over time (%.2f -> %.2f)" % [pain, player.vitals.pain()])
-	pain = player.vitals.pain()
-	player._server_use_medical.rpc_id(1)  # no more kits: nothing happens
-	check(not player.vitals.is_healing() and absf(player.vitals.pain() - pain) < 0.01, "nothing to use without a kit")
-	player.vitals.server_reset_health()  # the 30% blood lost would widen the spread checks below
+	check(player.vitals.is_healing() and absf(player._server_busy_until - Soldier._now() - 5.0) < 0.1, "H: a pressure bandage on yourself, 5 s")
+	await _seconds(5.3)
+	check(player.vitals.wound_list()[0].treated and not player.vitals.wound_list()[0].bleeding, "the bandage stopped the bleeding")
+	var kit := _entry(player.inventory, &"ifak")
+	check(int(Inventory.kit_contents(ItemDB.get_item(&"ifak"), kit.get("state", {})).get("pressure_bandage", 0)) == 1, "drawn from the IFAK: one bandage left (%s)" % Inventory.kit_text(ItemDB.get_item(&"ifak"), kit.get("state", {})))
+	player._server_use_medical.rpc_id(1)  # nothing in the IFAK for what's left (pain, if any)
+	check(not player.vitals.is_healing(), "nothing more an IFAK can do")
+	player.inventory.remove_one(&"ifak")
+	player.vitals.server_reset_health()  # blood lost would widen the spread checks below
+
+
+func _entry(inv: Inventory, id: StringName) -> Dictionary:
+	for container in Inventory.CONTAINERS:
+		for entry: Dictionary in inv.containers[container]:
+			if entry.id == id:
+				return entry
+	return {}
 
 
 func _test_inventory_actions() -> void:
@@ -145,13 +155,18 @@ func _test_revive_and_downed() -> void:
 	player.global_position = dummy.global_position + Vector3(0, 0, -1.2)
 	await _frames(2)
 	player._server_revive.rpc_id(1, dummy.get_path())
-	check(player.inventory.count_of(&"ifak") == 0, "no kit, no revive")
+	check(not dummy.vitals.is_healing(), "no kit, no revive")
 	player.inventory.take(&"ifak")
 	player._server_revive.rpc_id(1, dummy.get_path())
-	await _seconds(5.3)
+	check(not dummy.vitals.is_healing(), "an IFAK has no stopgap revive")
+	player.inventory.take(&"trauma_kit")
+	player._server_revive.rpc_id(1, dummy.get_path())
+	await _seconds(3.3)
 	check(dummy.vitals.is_up() and dummy.vitals.blood_fraction() >= Vitals.REVIVE_BLOOD - 0.001 and not dummy.vitals.in_cardiac_arrest(),
-		"revived with an IFAK out of cardiac arrest (%.0f%% blood)" % (dummy.vitals.blood_fraction() * 100.0))
-	check(player.inventory.count_of(&"ifak") == 0, "the IFAK was used")
+		"revived with a trauma kit out of cardiac arrest (%.0f%% blood)" % (dummy.vitals.blood_fraction() * 100.0))
+	check(player.inventory.count_of(&"trauma_kit") == 1 and player.inventory.revive_kit() == null, "the kit's stopgap revive was used; the kit stays")
+	player.inventory.remove_one(&"trauma_kit")
+	player.inventory.remove_one(&"ifak")
 	player.inventory.take(&"hvt_case")
 	var rounds := player.inventory.rounds_in(&"primary")
 	player.vitals.server_damage(500.0)

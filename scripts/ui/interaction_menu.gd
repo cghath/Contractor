@@ -29,6 +29,8 @@ const ENTRY_SIZE := Vector2(180.0, 26.0)
 const SUB_GAP_PX := 8.0
 ## Most stowed entries the Give item submenu lists.
 const MAX_GIVE_ENTRIES := 12
+## Most entries the Treat submenu lists (the most urgent first).
+const MAX_TREAT_ENTRIES := 12
 ## Height of an action point above a body's origin: standing, and lying down.
 const STANDING_POINT_Y := 1.3
 const DOWNED_POINT_Y := 0.3
@@ -44,29 +46,39 @@ const SELF := &"self"
 ## - needs: a condition (see _check) that hides the entry or greys it out with a reason.
 ## - request + with: the Soldier host-side request to send and its arguments: "target"
 ##   (the target's path), "none", "slot" (your active slot), "target_entry" (target path,
-##   container, index; used by submenu entries).
+##   container, index; used by submenu entries), "treatment" (target path, item, part,
+##   rushed) and "target_part" (target path, part).
 ## - show: a local readout instead of a request ("condition" or "wounds").
-## - submenu: a list built at runtime ("stowed_items") whose entries take the parent's
-##   request.
+## - submenu: a list built at runtime: "stowed_items" (entries take the parent's request) or
+##   "treatments" (entries carry their own request: see treatments).
 const ACTIONS := {
 	ITEM: [
 		{"id": &"pick_up", "label": "Pick up", "request": &"_server_interact", "with": &"target"},
 	],
 	DOWNED: [
-		{"id": &"revive", "label": "Revive", "needs": &"revive_kit", "request": &"_server_revive", "with": &"target"},
+		{"id": &"revive", "label": "Revive (stopgap)", "needs": &"revive_kit", "request": &"_server_revive", "with": &"target"},
+		{"id": &"treat", "label": "Treat", "needs": &"treatable", "submenu": &"treatments"},
 		{"id": &"carry", "label": "Carry", "needs": &"can_move_body", "request": &"_server_carry_body", "with": &"target"},
 		{"id": &"drag", "label": "Drag", "needs": &"can_move_body", "request": &"_server_drag_body", "with": &"target"},
 		{"id": &"check_condition", "label": "Check condition", "show": &"condition"},
 	],
 	SQUADMATE: [
 		{"id": &"give_item", "label": "Give item", "submenu": &"stowed_items", "request": &"_server_give_item", "with": &"target_entry"},
+		{"id": &"treat", "label": "Treat", "needs": &"treatable", "submenu": &"treatments"},
+		{"id": &"check_condition", "label": "Check wounds", "needs": &"wounded", "show": &"condition"},
 	],
 	SELF: [
 		{"id": &"check_wounds", "label": "Check wounds", "show": &"wounds"},
-		{"id": &"use_medical", "label": "Use medical", "needs": &"medical", "request": &"_server_use_medical", "with": &"none"},
+		{"id": &"treat", "label": "Treat yourself", "needs": &"treatable", "submenu": &"treatments"},
 		{"id": &"put_down", "label": "Put down", "needs": &"moving_body", "request": &"_server_release_body", "with": &"none"},
 		{"id": &"drop_held", "label": "Drop held item", "needs": &"held_item", "request": &"_server_drop", "with": &"slot"},
 	],
+}
+## Wound kinds in words, for Check wounds.
+const KIND_TEXT := {
+	"arterial": "arterial bleed", "junctional": "junctional bleed", "internal": "internal bleeding",
+	"venous": "venous bleed", "muscle": "muscle wound", "graze": "graze", "fracture": "broken bone",
+	"chest": "open chest wound", "heart": "heart wound", "rib": "cracked rib",
 }
 const _HIDE := "-"
 
@@ -137,7 +149,7 @@ static func actions_for(actor: Soldier, target: Node) -> Array[Dictionary]:
 		if def.has("submenu"):
 			action["items"] = _submenu(def, actor, target)
 			if action.items.is_empty() and why == "":
-				action["disabled"] = "Nothing stowed to give"
+				action["disabled"] = "Nothing stowed to give" if def.submenu == &"stowed_items" else "Nothing to treat"
 		out.append(action)
 	return out
 
@@ -146,17 +158,25 @@ static func actions_for(actor: Soldier, target: Node) -> Array[Dictionary]:
 static func _check(need: StringName, actor: Soldier, target: Node) -> String:
 	match need:
 		&"revive_kit":
-			if target is Soldier and (target as Soldier).faction != actor.faction:
+			if _is_enemy(actor, target):
 				return _HIDE  # no reviving the enemy
-			return "" if actor._best_revive_kit() != null else "Needs an IFAK or trauma kit"
+			if actor._best_revive_kit() == null:
+				return "Needs a trauma kit"
+			var vitals := Vitals.find_on(target)
+			return vitals.revive_problem() if vitals else _HIDE
+		&"treatable":
+			if _is_enemy(actor, target) or treatments(actor, target).is_empty():
+				return _HIDE
+			return ""
+		&"wounded":
+			var vitals := Vitals.find_on(target)
+			return "" if vitals and (not vitals.wound_list().is_empty() or vitals.condition_text() != "OK") else _HIDE
 		&"can_move_body":
 			if not target is Soldier:
 				return _HIDE  # dummies stay on their stands
 			if actor.carry_mode != &"":
 				return "You're already moving someone"
 			return "" if actor.inventory.hands == &"" else "Your hands are full"
-		&"medical":
-			return "" if _has_medical(actor) else "No medical supplies"
 		&"moving_body":
 			return "" if actor.carry_mode != &"" else _HIDE
 		&"held_item":
@@ -168,7 +188,7 @@ static func _label(def: Dictionary, actor: Soldier, _target: Node) -> String:
 	match def.id:
 		&"revive":
 			var kit := actor._best_revive_kit()
-			return "Revive (%s, %.0f s)" % [kit.name, float(kit.stats.revive_s)] if kit else "Revive"
+			return "Revive (stopgap, %s, %.0f s)" % [kit.name, float(kit.stats.get("revive_s", 3.0))] if kit else String(def.label)
 		&"put_down":
 			return "Put down" if actor.carry_mode == Soldier.CARRY else "Let go"
 		&"drop_held":
@@ -193,15 +213,50 @@ static func _submenu(def: Dictionary, actor: Soldier, target: Node) -> Array[Dic
 					var detail := " (%d rds)" % int(entry.state.rounds) if entry.has("state") and entry.state.has("rounds") else ""
 					items.append({"id": def.id, "label": item.name + detail, "request": def.request, "with": def.with,
 						"target": target, "container": container, "index": i, "disabled": ""})
+		&"treatments":
+			items = treatments(actor, target)
 	return items
 
 
-static func _has_medical(actor: Soldier) -> bool:
-	for container in Inventory.CONTAINERS:
-		for entry: Dictionary in actor.inventory.containers[container]:
-			if ItemDB.get_item(entry.id).stats.has("heal"):
-				return true
-	return false
+## What `actor` can do for `target`'s wounds (the Treat submenu), most urgent first: each
+## task on its care_needed() with the body part ("Tourniquet, left thigh"; a tourniquet also
+## as a quicker rushed entry), then packing an arterial bleed under a tourniquet with gauze,
+## and taking a tourniquet off once its wound is packed. Entries are greyed out with a
+## reason when you don't carry the item (loose or in a kit).
+static func treatments(actor: Soldier, target: Node) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	var vitals := Vitals.find_on(target)
+	if vitals == null or vitals.is_dead():
+		return out
+	for task in vitals.care_needed():
+		var item := ItemDB.get_item(task.item)
+		out.append(_treat_entry(actor, target, item, task.part, false, "%s, %s" % [item.name, Vitals.part_name(task.part)]))
+		if task.item == WoundModel.TOURNIQUET:
+			out.append(_treat_entry(actor, target, item, task.part, true,
+				"%s (rushed, %.1f s), %s" % [item.name, actor.treat_seconds(target, item, true), Vitals.part_name(task.part)]))
+	var gauze := ItemDB.get_item(WoundModel.HEMOSTATIC_GAUZE)
+	var packing := {}
+	for w in vitals.wound_list():
+		if w.kind == "arterial" and w.tourniquet and not w.treated and not packing.has(w.part) \
+				and vitals.treatment_problem(gauze.id, w.part) == "":
+			packing[w.part] = true
+			out.append(_treat_entry(actor, target, gauze, w.part, false, "%s (pack under tourniquet), %s" % [gauze.name, Vitals.part_name(w.part)]))
+	var tourniquets := vitals.tourniquets()
+	for part: StringName in tourniquets:
+		if vitals.removal_problem(part) == "":
+			out.append({"id": &"remove_tourniquet", "label": "Remove tourniquet, %s" % Vitals.part_name(part),
+				"request": &"_server_remove_tourniquet", "with": &"target_part", "target": target, "part": part, "disabled": ""})
+	return out.slice(0, MAX_TREAT_ENTRIES)
+
+
+static func _treat_entry(actor: Soldier, target: Node, item: ItemData, part: StringName, rushed: bool, label: String) -> Dictionary:
+	var have := actor.inventory.medical_count(item.id) > 0
+	return {"id": &"treat_item", "label": label, "request": &"_server_treat", "with": &"treatment", "target": target,
+		"item": item.id, "part": part, "rushed": rushed, "disabled": "" if have else "You have no %s" % item.name}
+
+
+static func _is_enemy(actor: Soldier, target: Node) -> bool:
+	return target is Soldier and (target as Soldier).faction != actor.faction
 
 
 # --- Doing it ------------------------------------------------------------------------------
@@ -232,6 +287,10 @@ static func perform(actor: Soldier, action: Dictionary) -> String:
 			actor.rpc_id(1, request, actor.active_slot)
 		&"target_entry":
 			actor.rpc_id(1, request, target.get_path(), action.container, action.index)
+		&"treatment":
+			actor.rpc_id(1, request, target.get_path(), action.item, action.part, action.rushed)
+		&"target_part":
+			actor.rpc_id(1, request, target.get_path(), action.part)
 		_:
 			actor.rpc_id(1, request)
 	return ""
@@ -245,29 +304,50 @@ static func condition_report(target: Node) -> String:
 	return "%s: %s\n%s" % [display_name(target), vitals.condition_text(), wound_report(vitals)]
 
 
-## One line per wound ("Left thigh: arterial, bleeding"), or "No wounds found".
+## One line per wound and what's been done for it ("Left thigh: arterial bleed, held by
+## tourniquet, packed"), then the tourniquets, airway and morphine; or "No wounds found".
 static func wound_report(vitals: Vitals) -> String:
-	var wounds := vitals.wound_list()
-	if wounds.is_empty():
-		return "No wounds found" if vitals.injury() <= 0.0 or not vitals.is_up() else "Hurt, no open wounds found"
 	var lines := PackedStringArray()
-	for wound in wounds:
-		lines.append("%s: %s%s" % [part_name(wound.get("part", &"")), wound.get("kind", "wound"),
-			", bleeding" if wound.get("bleeding", false) else ""])
+	for wound in vitals.wound_list():
+		lines.append("%s: %s%s" % [part_name(wound.get("part", &"")), KIND_TEXT.get(wound.get("kind", ""), "wound"), _wound_status(wound)])
+	var tourniquets := vitals.tourniquets()
+	for part: StringName in tourniquets:
+		var t: Dictionary = tourniquets[part]
+		var rushed := int(t.count) == 1 and int(t.rushed) == 1  # a lone rushed one lets some through
+		lines.append("%s on the %s%s" % ["Two tourniquets" if int(t.count) > 1 else "Tourniquet", Vitals.part_name(part),
+			" (rushed: still bleeding)" if rushed else ""])
+	if vitals.has_npa():
+		lines.append("NPA in")
+	elif vitals.airway_blocked():
+		lines.append("Airway blocked: needs an NPA")
+	if vitals.morphine_window_left() > 0.0:
+		var ago := WoundModel.OVERDOSE_WINDOW_S - vitals.morphine_window_left()
+		lines.append("Morphine given %d min ago" % floori(ago / 60.0))
+	if lines.is_empty():
+		return "No wounds found" if vitals.injury() <= 0.0 or not vitals.is_up() else "Hurt, no open wounds found"
 	return "\n".join(lines)
+
+
+## What's been done for one wound_list() entry, and whether it still bleeds.
+static func _wound_status(wound: Dictionary) -> String:
+	var done := PackedStringArray()
+	var kind := String(wound.get("kind", ""))
+	if wound.get("packed", false):
+		done.append("packed")
+	elif wound.get("treated", false):
+		done.append({"fracture": "splinted", "chest": "sealed", "rib": "morphine given"}.get(kind, "bandaged"))
+	if wound.get("tension", false):
+		done.append("tension pneumothorax")
+	if wound.get("bleeding", false):
+		done.append("bleeding (rushed tourniquet)" if wound.get("tourniquet", false) else "bleeding")
+	elif wound.get("tourniquet", false) and not wound.get("treated", false) and float(wound.get("rate", 0.0)) > 0.0:
+		done.append("held by tourniquet")
+	return ", " + ", ".join(done) if not done.is_empty() else ""
 
 
 ## "upper_arm_l" -> "Left upper arm".
 static func part_name(part: StringName) -> String:
-	var text := String(part)
-	var side := ""
-	if text.ends_with("_l"):
-		side = "left "
-	elif text.ends_with("_r"):
-		side = "right "
-	if side != "":
-		text = text.left(-2)
-	var words := side + text.replace("_", " ")
+	var words := Vitals.part_name(part)
 	return words.substr(0, 1).to_upper() + words.substr(1)
 
 

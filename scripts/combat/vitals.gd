@@ -16,7 +16,12 @@ extends Node
 ## Unconscious (downed) at 40% blood lost or when pain passes the knockout threshold;
 ## cardiac arrest at 50% lost, which starts a 10-minute window and ends in death unless
 ## the heart restarts. Until wave 3 (IV, CPR, defib) only the stopgap revive (server_revive,
-## an IFAK or trauma kit) does that. There is no giving up.
+## a trauma kit once the bleeding is controlled) does that. There is no giving up.
+##
+## Treatment (the "Treatment interface" section) is the design doc's kit: tourniquets,
+## bandages, gauze, vented chest seals, splints, morphine and NPAs, each applied by
+## server_apply_treatment. care_needed() lists what still needs doing in the casualty-care
+## order. Soldier._server_treat is the timed request that players and AI send.
 
 signal changed
 signal went_down
@@ -54,7 +59,7 @@ const ARREST_WINDOW_S := WoundModel.ARREST_WINDOW_S
 ## Host simulation step and the shortest gap between routine net_state updates.
 const SIM_STEP_S := 0.1
 const NET_INTERVAL_S := 0.5
-## Stopgap revive (IFAK or trauma kit) until IV in wave 3: blood back up to at least this
+## Stopgap revive (trauma kit) until IV in wave 3: blood back up to at least this
 ## share and pain capped at this.
 const REVIVE_BLOOD := 0.62
 const REVIVE_PAIN_CAP := 0.5
@@ -83,8 +88,13 @@ var net_state: Dictionary = {}:
 var rng: RandomNumberGenerator:
 	get:
 		return _model.rng
+## Host-side dice for the treatment rules: airway obstruction, morphine overdose.
+var care_rng: RandomNumberGenerator:
+	get:
+		return _model.care_rng
 
 var _model := WoundModel.new()
+var _last_hit_at := -1000.0   # host: when a round or impact last landed (Time seconds)
 var _net_dirty := false       # clients: net_state not yet applied to _model
 var _sim_left := 0.0          # host: time not yet simulated
 var _published := {}          # host: last published state without countdowns
@@ -92,6 +102,19 @@ var _published_at := -1000.0
 var _publish_pending := false  # host: a routine change held back by the rate limit
 var _shown_second := -1        # whole seconds of the arrest countdown last signalled
 var _died_sent := false
+
+
+## A body part in words: "upper_arm_l" -> "left upper arm", TORSO -> "torso".
+static func part_name(part: StringName) -> String:
+	var text := String(part)
+	var side := ""
+	if text.ends_with("_l"):
+		side = "left "
+	elif text.ends_with("_r"):
+		side = "right "
+	if side != "":
+		text = text.left(-2)
+	return side + text.replace("_", " ")
 
 
 ## The Vitals of whatever owns `node` (a body, or a hitbox/plate under it).
@@ -107,7 +130,7 @@ static func find_on(node: Object) -> Vitals:
 	return null
 
 
-## A stopgap treatment (server_heal_over_time) is in progress.
+## Someone (this unit or another) is applying a treatment to this unit right now.
 func is_healing() -> bool:
 	return _m().is_healing()
 
@@ -144,17 +167,16 @@ func pain() -> float:
 
 
 ## How hurt a conscious unit is, 0 (fine) to 1 (as bad as it gets while still up). AI uses it
-## to decide when to treat itself; the medical screen will show the details. Blood loss
-## counts a little; the rest is what a stopgap kit can still fix (untreated bleeding and
-## pain it can take off), so fractures and lost blood don't make AI burn through its kits.
+## to decide when to treat itself. Blood loss counts a little; the rest is what the kit can
+## still fix (bleeding it can stop, an unsealed chest wound, pain morphine can take off), so
+## splinted fractures and lost blood don't make AI burn through its kit.
 func injury() -> float:
 	return _m().injury() if is_up() else 1.0
 
 
-## Whether using a stopgap kit (IFAK, trauma kit) on this unit would still do something:
-## untreated bleeding, an unsealed chest wound, or pain a kit can take off.
+## Up, with something left on care_needed().
 func needs_treatment() -> bool:
-	return is_up() and _m().kit_would_help()
+	return is_up() and not care_needed().is_empty()
 
 
 ## Seconds until this unit dies without help (what's left of the cardiac-arrest window), or
@@ -200,73 +222,137 @@ func bleed_rate() -> float:
 
 ## The wounds this unit has, for self-interaction and treatment menus: one Dictionary per
 ## wound with "part" (a body part), "kind" ("arterial", "junctional", "internal", "venous",
-## "muscle", "graze", "fracture", "chest", "heart", "rib"), "bleeding" and "treated" (bools),
-## "rate" (L/min at full blood) and "name" (the vessel or bone, or empty).
+## "muscle", "graze", "fracture", "chest", "heart", "rib"), "bleeding" (bleeding now, so not
+## under a good tourniquet) and "treated" (bandaged, packed, sealed, splinted; a rib after
+## morphine), "rate" (L/min at full blood) and "name" (the vessel or bone, or empty). Also:
+## "limb" (the limb segment a tourniquet for it goes on: its own part, or empty off the
+## limbs), "tourniquet" (a tourniquet above or on it holds some of its bleeding),
+## "packed" (gauze in it) and "tension" (a chest wound's tension pneumothorax has started).
 func wound_list() -> Array[Dictionary]:
+	var m := _m()
 	var list: Array[Dictionary] = []
-	for w in _m().wounds:
-		list.append({"part": w.part, "kind": w.kind, "bleeding": WoundModel.is_bleeding(w),
-			"treated": w.treated, "rate": w.rate, "name": w.name})
+	for w in m.wounds:
+		list.append({"part": w.part, "kind": w.kind, "bleeding": m.rate_now(w) > 0.0,
+			"treated": w.treated, "rate": w.rate, "name": w.name,
+			"limb": w.part if WoundModel.LIMB_BELOW.has(w.part) else &"",
+			"tourniquet": m.tourniquet_factor(w.part) < 1.0, "packed": w.get("packed", false), "tension": w.get("tension", false)})
 	return list
 
 
 # --- Treatment interface (wave 2) -------------------------------------------------------
-# The kit work (W6) gives these their real effects and timings; AI casualty care (W7) and the
-# interaction menus build on the same calls. Until then they're a simple stand-in.
+# The design doc's kit ("The kit", "Tourniquet", "Fractures", "Chest"); the rules and numbers
+# are WoundModel's. Soldier._server_treat is the timed host request that uses an item up
+# and calls server_apply_treatment; AI casualty care and the interaction menus use the same
+# calls. Queries work on every peer.
 
-## Wound kinds, as wound_list() reports them, mapped to the item that treats them.
+## Wound kinds, as care_needed() reports them, mapped to the item that treats them.
 const TREATS := {
 	"arterial": &"tourniquet", "junctional": &"hemostatic_gauze", "venous": &"pressure_bandage",
 	"muscle": &"pressure_bandage", "graze": &"pressure_bandage", "chest": &"chest_seal",
-	"fracture": &"splint",
+	"fracture": &"splint", "airway": &"npa", "pain": &"morphine",
 }
-## Casualty-care order: stop massive bleeding first, then the chest, then the rest.
-const CARE_ORDER := ["arterial", "junctional", "chest", "venous", "muscle", "graze", "fracture", "pain"]
+## Casualty-care order: massive bleeding, airway, chest, other bleeding, fractures, pain.
+const CARE_ORDER := ["arterial", "junctional", "airway", "chest", "venous", "muscle", "graze", "fracture", "pain"]
 
 
 ## What still needs doing for this unit, most urgent first, in the casualty-care order: one
-## Dictionary per task with "part", "kind" and "item" (the item id that treats it). Pain
-## over 0.5 asks for morphine (kind "pain", part TORSO). Works on every peer.
+## Dictionary per task with "part", "kind" and "item" (the item id that treats it). A
+## tourniquet per limb segment with arterial bleeding (a second one beside a rushed one),
+## gauze per junctional bleed, an NPA (kind "airway", part HEAD) for an unconscious casualty,
+## a vented seal per open chest wound, a bandage per venous, muscle or graze wound, a splint
+## per fracture, morphine (kind "pain", part TORSO) for pain it can take off or a cracked
+## rib. Wounds already handled are left out, and so is anything no field item fixes
+## (internal bleeding, a tension pneumothorax already under way) and a second morphine dose
+## while it would risk an overdose.
 func care_needed() -> Array[Dictionary]:
-	var tasks: Array[Dictionary] = []
-	for w in wound_list():
-		var kind := String(w.kind)
-		var open := bool(w.bleeding) if kind != "fracture" else not bool(w.treated)
-		if open and TREATS.has(kind):
-			tasks.append({"part": w.part, "kind": kind, "item": TREATS[kind]})
-	if pain() > 0.5:
-		tasks.append({"part": TORSO, "kind": "pain", "item": &"morphine"})
-	tasks.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return CARE_ORDER.find(a.kind) < CARE_ORDER.find(b.kind))
-	return tasks
+	return _m().care_tasks()
 
 
-## Host only. Applies one use of `item_id` to `part` (a tourniquet on a thigh, a seal on the
-## chest, morphine anywhere). Returns whether it did anything. Stand-in: stops the bleeding
-## (or splints the fracture) of the first matching wound on that part; morphine takes 0.5
-## off pain.
-func server_apply_treatment(item_id: StringName, part: StringName) -> bool:
-	var model := _m()
-	if item_id == &"morphine":
-		if model.pain_wounds <= 0.0:
-			return false
-		model.pain_wounds = maxf(model.pain_wounds - 0.5, 0.0)
-		_after_change()
-		return true
-	for w: Dictionary in model.wounds:
-		if w.part != part or TREATS.get(String(w.kind), &"") != item_id:
-			continue
-		if w.kind == "fracture":
-			if w.treated:
-				continue
-			w.treated = true
-			w.rate = 0.0
-		elif not WoundModel.is_bleeding(w):
-			continue
-		else:
-			model._stop_bleeding(w)
-		_after_change()
-		return true
-	return false
+## Why one `item_id` on `part` wouldn't help this unit right now ("" if it would), for menus
+## and the host's checks: "Put a tourniquet on first", "No fracture there"...
+func treatment_problem(item_id: StringName, part: StringName) -> String:
+	return _m().treatment_problem(item_id, part)
+
+
+## Host only. Applies one use of `item_id` to `part`; returns whether it did anything.
+## - tourniquet (a limb segment): stops all bleeding on it and below, adds pain; on a leg, a
+##   limp (walk only, no sprint). `rushed` (placed in under 2 s or under fire) lets 30%
+##   through until a second tourniquet goes on beside it.
+## - pressure_bandage: a venous, muscle or graze wound. hemostatic_gauze: packs a junctional
+##   bleed, or an arterial one under a tourniquet so the tourniquet can come off.
+## - chest_seal (vented): closes an open chest wound, so no tension pneumothorax starts (one
+##   already under way runs on: the needle is wave 3).
+## - splint: walking and jogging back on a broken leg, a steadier arm and normal reloads, a
+##   lower pain floor; still no sprint until a respawn.
+## - morphine: 0.5 off pain over 30 s and a cracked rib's pain; a second dose within 10
+##   minutes may knock the casualty out (overdose).
+## - npa: an unconscious casualty's airway can't obstruct (and an obstructed one clears).
+func server_apply_treatment(item_id: StringName, part: StringName, rushed := false) -> bool:
+	if not _model.apply_item(item_id, part, rushed):
+		return false
+	_after_change(true)
+	return true
+
+
+## Why the tourniquets on `part` can't come off yet ("Pack the wound first"), or "".
+func removal_problem(part: StringName) -> String:
+	return _m().removal_problem(part)
+
+
+## Host only. Takes the tourniquets off `part` once its arterial bleeding is packed. Returns
+## how many came off.
+func server_remove_tourniquets(part: StringName) -> int:
+	var count := _model.remove_tourniquets(part)
+	if count > 0:
+		_after_change(true)
+	return count
+
+
+## Tourniquets on, as {part: {"count", "rushed"}}.
+func tourniquets() -> Dictionary:
+	return _m().tourniquets.duplicate(true)
+
+
+func has_npa() -> bool:
+	return _m().npa
+
+
+## An unconscious casualty's airway is obstructed (an NPA clears it).
+func airway_blocked() -> bool:
+	return _m().airway_blocked
+
+
+## Seconds until another morphine dose stops risking an overdose (0: none given lately).
+func morphine_window_left() -> float:
+	return _m().overdose_window_left
+
+
+## Why the stopgap revive can't be done on this unit, or "": it has to be down and alive,
+## with the bleeding controlled.
+func revive_problem() -> String:
+	var m := _m()
+	if m.dead:
+		return "Too late"
+	if not downed:
+		return "Not down"
+	return "" if m.bleeding_controlled() else "Stop the bleeding first"
+
+
+## Host only. Someone started applying a treatment that takes `seconds` (is_healing, replicated).
+func server_begin_treatment(seconds: float) -> void:
+	_model.treating_left = maxf(seconds, 0.0)
+	_publish(true)
+
+
+## Host only. The treatment in progress ended (done or interrupted).
+func server_end_treatment() -> void:
+	_model.treating_left = 0.0
+	_publish(true)
+
+
+## Host only. Seconds since a round or a stopped round's impact last landed on this unit.
+func seconds_since_hit() -> float:
+	return Time.get_ticks_msec() / 1000.0 - _last_hit_at
 
 
 ## A few words for squad reports and labels: "OK", "Wounded", "Bleeding", "Unconscious",
@@ -325,6 +411,7 @@ func server_hit(part: StringName, hit: Dictionary) -> void:
 	if hit.get("superficial", false):
 		channel.vessels = []
 		channel.organs = []
+	_last_hit_at = Time.get_ticks_msec() / 1000.0
 	_model.add_hit(part, channel, round_class)
 	_after_change()
 
@@ -334,6 +421,7 @@ func server_hit(part: StringName, hit: Dictionary) -> void:
 ## real). Head and face are helmet stops; anything else is a plate or vest. `energy_j` is
 ## the round's energy on arrival (Ballistics), or -1 if unknown.
 func server_impact(part: StringName, round_class: StringName, distance: float, energy_j := -1.0) -> void:
+	_last_hit_at = Time.get_ticks_msec() / 1000.0
 	_model.add_impact(part, round_class, distance, energy_j)
 	_after_change()
 
@@ -345,23 +433,14 @@ func server_damage(amount: float) -> void:
 	_after_change()
 
 
-## Host only. Stopgap revive with an IFAK or trauma kit until the wave 2 kit and wave 3 IV:
-## stops all bleeding, tops blood up to REVIVE_BLOOD, ends cardiac arrest, caps pain and
-## wakes the casualty. (The kit's revive_hp no longer matters.)
+## Host only. Stopgap revive (a trauma kit, until IV in wave 3): tops blood up to
+## REVIVE_BLOOD, ends cardiac arrest, caps pain and wakes the casualty. It stops no
+## bleeding: Soldier._server_revive checks revive_problem() (bleeding controlled) first;
+## tests and debug call it directly. (The argument is the old kit's HP and is ignored.)
 func server_revive(_hp: float) -> void:
 	if not downed or _model.dead:
 		return
 	_model.revive(REVIVE_BLOOD, REVIVE_PAIN_CAP)
-	_after_change(true)
-
-
-## Host only. Stopgap treatment with an IFAK or trauma kit: stops bleeding wound by wound
-## over `seconds` and takes amount/100 off pain. A new one replaces one in progress; going
-## unconscious stops it.
-func server_heal_over_time(amount: float, seconds: float) -> void:
-	if not is_up():
-		return
-	_model.start_treatment(amount * TRAUMA_PAIN_PER_DAMAGE, seconds)
 	_after_change(true)
 
 

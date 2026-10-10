@@ -1,5 +1,5 @@
 {
-	"_units": "volume_l = litres, mass_kg = kilograms, capacity_l = storage added when worn. Plate *_vox sizes are 1 cm voxels. Armor: rating = level on Ballistics.LEVELS; material = ceramic, steel, polyethylene or composite; plate fits = carrier tiers it fits. Carriers (aramid soft armor): soft_rating, soft_faces (front, back, side), soft_parts (chest, abdomen), spall_cover (neck, face, arms). Magazines name their round in data/rounds.json; muzzle_velocity_mps overrides the round's for that barrel.",
+	"_units": "volume_l = litres, mass_kg = kilograms, capacity_l = storage added when worn. Plate *_vox sizes are 1 cm voxels. Armor: rating = level on Ballistics.LEVELS; material = ceramic, steel, polyethylene or composite; plate fits = carrier tiers it fits. Carriers (aramid soft armor): soft_rating, soft_faces (front, back, side), soft_parts (chest, abdomen), spall_cover (neck, face, arms). Magazines name their round in data/rounds.json; muzzle_velocity_mps overrides the round's for that barrel. Medical: treats = wound kinds it fixes, treat_s = seconds to apply (self_mult on yourself), rushed_s / remove_s = a rushed tourniquet and taking one off. Kits (IFAK, trauma kit) hold contents (item id: count) and revives (stopgap revives until IV); an opened kit keeps what is left in its state.",
 	"items": [
 		{"id": "m4a1", "name": "M4A1 Carbine", "type": "weapon", "slot": "primary", "volume_l": 12.0, "mass_kg": 3.4, "tags": ["rifle", "5.56"],
 		 "stats": {"damage": 34, "rpm": 750, "auto": true, "fire_modes": ["semi", "auto"], "ammo": "mag_556", "reload_s": 2.4, "spread_deg": 1.2, "recoil_deg": 0.55, "ads_fov": 50, "wall_carve_m": 0.12, "plate_wear": 1.0, "muzzle_velocity_mps": 910, "size_m": [0.07, 0.25, 0.84]}},
@@ -43,15 +43,17 @@
 		{"id": "assault_pack", "name": "Assault Pack (24 L)", "type": "backpack", "slot": "backpack", "volume_l": 4.0, "mass_kg": 1.1, "capacity_l": 24.0, "tags": ["pack"]},
 		{"id": "ruck_45", "name": "Ruck (45 L)", "type": "backpack", "slot": "backpack", "volume_l": 7.0, "mass_kg": 2.2, "capacity_l": 45.0, "tags": ["pack"]},
 
-		{"id": "ifak", "name": "IFAK", "type": "medical", "volume_l": 0.8, "mass_kg": 0.4, "stack": 5, "tags": ["medical"], "stats": {"heal": 35, "heal_s": 4.0, "use_s": 2.0, "revive_hp": 25, "revive_s": 5.0}},
-		{"id": "tourniquet", "name": "Tourniquet", "type": "medical", "volume_l": 0.1, "mass_kg": 0.08, "stack": 10, "tags": ["medical"], "stats": {"treats": ["arterial"], "treat_s": 4.0, "self_mult": 1.5}},
-		{"id": "pressure_bandage", "name": "Pressure Bandage", "type": "medical", "volume_l": 0.1, "mass_kg": 0.06, "stack": 10, "tags": ["medical"], "stats": {"treats": ["venous", "muscle", "graze"], "treat_s": 5.0}},
-		{"id": "hemostatic_gauze", "name": "Hemostatic Gauze", "type": "medical", "volume_l": 0.1, "mass_kg": 0.05, "stack": 10, "tags": ["medical"], "stats": {"treats": ["junctional", "arterial"], "treat_s": 8.0}},
-		{"id": "chest_seal", "name": "Vented Chest Seal", "type": "medical", "volume_l": 0.1, "mass_kg": 0.04, "stack": 10, "tags": ["medical"], "stats": {"treats": ["chest"], "treat_s": 5.0}},
-		{"id": "splint", "name": "Splint", "type": "medical", "volume_l": 0.4, "mass_kg": 0.15, "stack": 5, "tags": ["medical"], "stats": {"treats": ["fracture"], "treat_s": 8.0}},
-		{"id": "morphine", "name": "Morphine Autoinjector", "type": "medical", "volume_l": 0.05, "mass_kg": 0.03, "stack": 10, "tags": ["medical"], "stats": {"treats": ["pain"], "treat_s": 2.0}},
-		{"id": "npa", "name": "NPA Airway", "type": "medical", "volume_l": 0.05, "mass_kg": 0.02, "stack": 10, "tags": ["medical"], "stats": {"treats": ["airway"], "treat_s": 3.0}},
-		{"id": "trauma_kit", "name": "Trauma Kit", "type": "medical", "volume_l": 4.0, "mass_kg": 2.0, "tags": ["medical", "revive"], "stats": {"heal": 70, "heal_s": 8.0, "use_s": 4.0, "revive_hp": 50, "revive_s": 3.0}},
+		{"id": "ifak", "name": "IFAK", "type": "medical", "volume_l": 0.8, "mass_kg": 0.4, "stack": 5, "tags": ["medical", "kit"],
+		 "stats": {"contents": {"tourniquet": 1, "pressure_bandage": 2, "hemostatic_gauze": 1, "chest_seal": 1}}},
+		{"id": "trauma_kit", "name": "Trauma Kit", "type": "medical", "volume_l": 4.0, "mass_kg": 2.0, "tags": ["medical", "kit", "revive"],
+		 "stats": {"contents": {"tourniquet": 2, "pressure_bandage": 4, "hemostatic_gauze": 2, "chest_seal": 2, "splint": 1, "morphine": 2, "npa": 1}, "revives": 1, "revive_s": 3.0}},
+		{"id": "tourniquet", "name": "Tourniquet", "type": "medical", "volume_l": 0.1, "mass_kg": 0.08, "stack": 10, "tags": ["medical"], "stats": {"short": "TQ", "treats": ["arterial"], "treat_s": 4.0, "self_mult": 1.5, "rushed_s": 1.5, "remove_s": 3.0}},
+		{"id": "pressure_bandage", "name": "Pressure Bandage", "type": "medical", "volume_l": 0.1, "mass_kg": 0.06, "stack": 10, "tags": ["medical"], "stats": {"short": "Bandage", "treats": ["venous", "muscle", "graze"], "treat_s": 5.0}},
+		{"id": "hemostatic_gauze", "name": "Hemostatic Gauze", "type": "medical", "volume_l": 0.1, "mass_kg": 0.05, "stack": 10, "tags": ["medical"], "stats": {"short": "Gauze", "treats": ["junctional", "arterial"], "treat_s": 8.0}},
+		{"id": "chest_seal", "name": "Vented Chest Seal", "type": "medical", "volume_l": 0.1, "mass_kg": 0.04, "stack": 10, "tags": ["medical"], "stats": {"short": "Seal", "treats": ["chest"], "treat_s": 5.0}},
+		{"id": "splint", "name": "Splint", "type": "medical", "volume_l": 0.4, "mass_kg": 0.15, "stack": 5, "tags": ["medical"], "stats": {"short": "Splint", "treats": ["fracture"], "treat_s": 8.0}},
+		{"id": "morphine", "name": "Morphine Autoinjector", "type": "medical", "volume_l": 0.05, "mass_kg": 0.03, "stack": 10, "tags": ["medical"], "stats": {"short": "Morphine", "treats": ["pain", "rib"], "treat_s": 2.0}},
+		{"id": "npa", "name": "NPA Airway", "type": "medical", "volume_l": 0.05, "mass_kg": 0.02, "stack": 10, "tags": ["medical"], "stats": {"short": "NPA", "treats": ["airway"], "treat_s": 3.0}},
 
 		{"id": "frag_grenade", "name": "Frag Grenade", "type": "utility", "volume_l": 0.3, "mass_kg": 0.4, "stack": 6, "tags": ["throwable", "explosive"],
 		 "stats": {"throwable": "frag", "fuse_s": 3.5}},

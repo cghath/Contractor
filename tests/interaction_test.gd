@@ -100,29 +100,32 @@ func _test_actions_for() -> void:
 	check(_ids(player, dummy).is_empty(), "a standing dummy offers nothing")
 	check(_ids(player, null).is_empty() and InteractionMenu.target_kind(player, null) == &"", "nothing offers nothing")
 
-	alpha.vitals.server_damage(500.0)
+	alpha.vitals.server_damage(70.0)  # 42% lost: unconscious, not in arrest
 	hostile.vitals.server_damage(500.0)
-	dummy.vitals.server_damage(500.0)
+	dummy.vitals.server_damage(500.0)  # cardiac arrest: nothing in the kit helps until the heart restarts
 	await _frames(2)
-	check(_ids(player, alpha) == [&"revive", &"carry", &"drag", &"check_condition"], "downed squadmate: Revive, Carry, Drag, Check condition (%s)" % [_ids(player, alpha)])
+	check(_ids(player, alpha) == [&"revive", &"treat", &"carry", &"drag", &"check_condition"], "downed squadmate: Revive, Treat, Carry, Drag, Check condition (%s)" % [_ids(player, alpha)])
 	var revive := _action(player, alpha, &"revive")
-	check(revive.disabled.contains("IFAK"), "Revive is greyed out without a kit (%s)" % revive.disabled)
+	check(revive.disabled.contains("trauma kit"), "Revive is greyed out without a trauma kit (%s)" % revive.disabled)
+	var treat := _action(player, alpha, &"treat")
+	check(treat.items.size() == 2 and treat.items[0].label == "NPA Airway, head" and treat.items[0].disabled.contains("NPA") and treat.items[1].label.begins_with("Morphine"),
+		"Treat lists what they need, greyed out without the item (%s: %s)" % [treat.items.map(func(e: Dictionary) -> String: return e.label), treat.items.map(func(e: Dictionary) -> String: return e.disabled)])
 	player.inventory.take(&"trauma_kit")
 	revive = _action(player, alpha, &"revive")
-	check(revive.disabled == "" and revive.label.contains("Trauma Kit"), "with a kit it names it (%s)" % revive.label)
+	check(revive.disabled == "" and revive.label.contains("Trauma Kit") and revive.label.contains("stopgap"), "with a trauma kit it names it, as a stopgap (%s)" % revive.label)
+	check(_action(player, alpha, &"treat").items[0].disabled == "", "and the trauma kit's NPA can go in")
 	player.inventory.take(&"hvt_case")
 	check(_action(player, alpha, &"carry").disabled.contains("hands"), "can't carry with your hands full")
 	player.inventory.release_hands()
-	check(_ids(player, dummy) == [&"revive", &"check_condition"], "downed dummy: Revive, Check condition (%s)" % [_ids(player, dummy)])
+	check(_ids(player, dummy) == [&"revive", &"check_condition"], "downed dummy in cardiac arrest: Revive, Check condition, nothing to treat (%s)" % [_ids(player, dummy)])
 	check(_ids(player, hostile) == [&"carry", &"drag", &"check_condition"], "downed enemy: no Revive (%s)" % [_ids(player, hostile)])
 	var report := InteractionMenu.perform(player, _action(player, alpha, &"check_condition"))
 	check(report.begins_with("Alpha: " + alpha.vitals.condition_text()) and report.contains("\n"), "Check condition reads condition and wounds (%s)" % report.replace("\n", " | "))
 	hostile.vitals.server_reset_health()
 	dummy.vitals.server_reset_health()
 
-	check(_ids(player, player) == [&"check_wounds", &"use_medical", &"drop_held"], "self: Check wounds, Use medical, Drop held item (%s)" % [_ids(player, player)])
+	check(_ids(player, player) == [&"check_wounds", &"drop_held"], "self, unhurt: Check wounds, Drop held item (%s)" % [_ids(player, player)])
 	check(_action(player, player, &"drop_held").label == "Drop M4A1 Carbine", "Drop names the active weapon (%s)" % _action(player, player, &"drop_held").label)
-	check(_action(player, player, &"use_medical").disabled == "", "Use medical is there with a trauma kit")
 
 
 func _test_pick_up() -> void:
@@ -142,7 +145,7 @@ func _test_revive() -> void:
 	InteractionMenu.perform(player, _action(player, alpha, &"revive"))
 	await _seconds(3.4)
 	check(alpha.vitals.is_up() and alpha.vitals.blood_fraction() >= 0.6, "revived with the trauma kit (blood %.0f%%)" % (alpha.vitals.blood_fraction() * 100.0))
-	check(player.inventory.count_of(&"trauma_kit") == 0, "the kit was used")
+	check(player.inventory.count_of(&"trauma_kit") == 1 and player._best_revive_kit() == null, "its stopgap revive was used (the kit and its contents stay)")
 
 
 func _test_carry_and_drag() -> void:
@@ -233,10 +236,11 @@ func _test_give_item() -> void:
 	bravo.inventory.strip()  # nothing but pockets
 	bravo.global_position = SPOT + Vector3(1.5, 0, 0)
 	player.inventory.take(&"trauma_kit")
+	var kits := player.inventory.count_of(&"trauma_kit")
 	await _frames(2)
 	var kit := _give_entry(bravo, &"trauma_kit")
 	InteractionMenu.perform(player, kit)
-	check(bravo.inventory.count_of(&"trauma_kit") == 0 and player.inventory.count_of(&"trauma_kit") == 1, "a trauma kit doesn't fit in Bravo's pockets: you keep it")
+	check(bravo.inventory.count_of(&"trauma_kit") == 0 and player.inventory.count_of(&"trauma_kit") == kits, "a trauma kit doesn't fit in Bravo's pockets: you keep it")
 	check(hud._message.text.contains("no room"), "and you're told why (%s)" % hud._message.text)
 	bravo.global_position = SPOT + Vector3(8.0, 0, 0)
 	await _frames(2)
@@ -251,10 +255,21 @@ func _test_self_actions() -> void:
 	check(InteractionMenu.perform(player, _action(player, player, &"check_wounds")) == "No wounds found", "Check wounds: none")
 	player.vitals.server_damage(30.0)
 	check(InteractionMenu.perform(player, _action(player, player, &"check_wounds")) != "No wounds found", "Check wounds notices you're hurt")
+	player.vitals.server_reset_health()
+	# A pistol round through the outside of the left thigh (rest pose): a plain muscle wound.
+	player.vitals.server_hit(Vitals.THIGH_L, {"round_class": Vitals.PISTOL, "position": player.global_transform * Vector3(-0.12, 0.7, -0.1),
+		"direction": player.global_basis * Vector3.BACK})
+	var report := InteractionMenu.perform(player, _action(player, player, &"check_wounds"))
+	check(report.begins_with("Left thigh: muscle wound, bleeding"), "Check wounds: %s" % report.replace("\n", " | "))
+	var treat := _action(player, player, &"treat")
+	check(treat.label == "Treat yourself" and treat.items[0].label == "Pressure Bandage, left thigh" and treat.items[0].disabled == "",
+		"Treat yourself lists the bandage, from your trauma kit (%s)" % [treat.items.map(func(e: Dictionary) -> String: return e.label)])
 	player._server_busy_until = 0.0
-	var kits := player.inventory.count_of(&"ifak") + player.inventory.count_of(&"trauma_kit")
-	InteractionMenu.perform(player, _action(player, player, &"use_medical"))
-	check(player.vitals.is_healing() and player.inventory.count_of(&"ifak") + player.inventory.count_of(&"trauma_kit") == kits - 1, "Use medical treats you")
+	InteractionMenu.perform(player, treat.items[0])
+	check(player.vitals.is_healing() and absf(player._server_busy_until - Soldier._now() - 5.0) < 0.1, "and puts it on (5 s)")
+	await _seconds(5.3)
+	report = InteractionMenu.perform(player, _action(player, player, &"check_wounds"))
+	check(report.begins_with("Left thigh: muscle wound, bandaged"), "Check wounds shows what's been done: %s" % report.replace("\n", " | "))
 	player.inventory.take(&"hvt_case")
 	var drop := _action(player, player, &"drop_held")
 	check(drop.label == "Drop HVT Hard Case", "Drop names what's in your hands (%s)" % drop.label)
