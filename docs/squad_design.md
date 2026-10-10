@@ -1,6 +1,6 @@
 # Squad AI: design proposal (phase 3)
 
-**Status:** decided 2026-10-09. Being built in the order below.
+**Status:** decided 2026-10-09, updated to the handoff 2026-10-10. Being built in the order below.
 **Written:** 2026-10-09, after phase 2 (inventory depth) and downed/revive landed.
 
 The roadmap calls this the make-or-break system. It's also where the codebase stops being
@@ -22,18 +22,24 @@ numbers you agree with or want changed.
 
 ## Decisions
 
-All recommendations were accepted, plus the open question in 6:
+Decided 2026-10-09, then overridden where Captain decided otherwise in
+[contractor_handoff.md](contractor_handoff.md) (2026-10-10). The handoff wins on any conflict.
 
 | # | Decision |
 |---|---|
-| 1 | Shared `Soldier` body with `PlayerInput` and `SquadAI` drivers |
+| 1 | Shared `Soldier` body with `PlayerInput` and `SquadAI` drivers (done) |
 | 2 | Runtime navmesh, rebaked locally on breaches; computed cover points |
-| 3 | Utility-scored intents with hysteresis; tuning in a data file |
-| 4 | One lead player (host by default, any player can take lead); orders go to the whole squad |
+| 3 | Utility-scored intents with hysteresis; tuning in a data file. Intents now also include **Throw** (frag, flashbang, smoke), **Carry**, **Drag** and **Treat** (handoff) |
+| 4 | One lead player (host by default, any player can take lead); orders through an Arma 3-style F1 to F12 command menu (handoff) |
 | 5 | Squadmates loot for themselves; a carry allowance for players that grows with relationship (2 L to 10 L); loadouts persist |
-| 6 | Permadeath on bleed-out. **Players who bleed out drop their backpack (with contents) where they fell** |
-| 7 | Start with 2 squadmates |
-| 8 | Phase 4 enemies use the same `Soldier` + AI stack |
+| 6 | AI squadmates only: permadeath on bleed-out, MIA (with a recovery mission) if left behind alive; helicopter extraction counts. **Players** respawn in the default kit and their old gear stays where they died, with a marker (handoff) |
+| 7 | **8 slots** as the target: two fire teams of four, one medic each, battle-buddy pairs. Start with 1 AI squadmate and scale up (handoff) |
+| 8 | Enemies use the same `Soldier` + AI stack, with buddy tactics modeled on LAMBS Danger and VCOM. Enemies ignore unconscious foes and only dead-check when clearing (handoff) |
+
+Downed friendlies (handoff): out of combat a buddy carries the casualty and follows the
+squad leader; a dead friendly's body is carried to exfil to recover it and its gear. In a
+firefight a squadmate may throw smoke, drag the casualty to cover, then treat them or keep
+them safe.
 
 ## Proposal (as reviewed)
 

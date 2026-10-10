@@ -1,7 +1,12 @@
 # Contractor
 
-Tactical first-person co-op shooter with physical inventory and voxel destruction.
-Godot 4.7.2 + Zylann Voxel Tools 1.7, GDScript.
+Near-future tactical first-person shooter: command an 8-slot squad (up to 4 players, AI
+fills the rest) through a persistent campaign, with physical inventory, a blood-and-wound
+medical model and voxel destruction. Godot 4.7.2 + Zylann Voxel Tools 1.7, GDScript.
+
+**Design authority:** [docs/contractor_handoff.md](docs/contractor_handoff.md) sums up
+Captain's decisions and working agreements. Where it disagrees with this README or
+`docs/squad_design.md`, the handoff wins.
 
 **Version:** 0.1.0. See [CHANGELOG.md](CHANGELOG.md) for what changed in each version.
 
@@ -65,9 +70,19 @@ build has had less testing.
   godot.windows.editor.x86_64.exe --path . -- --join 192.168.1.20
   ```
 
-### 5. Export a build (optional)
+### 5. Test builds
 
-Exports need the custom export templates from the same release:
+`tools/make_build.sh <label> ["what to test"]` leaves a playable build in
+`builds/<date>_<label>/`: the game as a small `contractor.pck`, a `play.bat` launcher and a
+`BUILD.txt` saying which commit it is and what to test. It needs no export templates; the
+launcher runs the pack with the Voxel Tools editor build (set `CONTRACTOR_GODOT` if it isn't
+in `Downloads\GodotVoxel_1.7`).
+
+```bash
+GODOT="$HOME/Downloads/GodotVoxel_1.7/godot.windows.editor.x86_64.exe" tools/make_build.sh death-rules
+```
+
+A standalone `.exe` export needs the custom export templates from the same release:
 `godot.windows.template_release.x86_64.exe.zip` (or the Linux or macOS template). In the
 export preset, set it as the custom release template. The stock export templates don't
 include Voxel Tools.
@@ -101,15 +116,22 @@ include Voxel Tools.
 
 ## Design decisions (locked)
 
+Updated 2026-10-10 to Captain's calls in [docs/contractor_handoff.md](docs/contractor_handoff.md),
+which has the full rules.
+
 | Area | Decision |
 |---|---|
 | Camera | First-person |
 | Multiplayer | Co-op from day one, listen server (host is authoritative), up to 4 players |
 | Voxels | World structures at 10 cm voxels; characters and gear as 1–2 cm voxel models |
-| Armor | Plates and helmets are runtime voxel objects; hits chip voxels, holes let rounds through. Light, medium and heavy tiers |
+| Armor | Plates and helmets are runtime voxel objects; hits chip voxels, holes let rounds through. Rounds and armor share an NIJ-named rating ladder (IIA to IV); ceramic cracks in zones, steel throws spall |
+| Medical | No hitpoints: 6 L of blood, wounds per body part, pain, unconsciousness at 40% lost, cardiac arrest at 50% with a 10-minute window |
 | Inventory | Volume budget in **litres** + visible gear; auto-stow, bulky items need two hands |
-| Squad | One shared AI squad; revivable, permadeath if bled out or left at extraction |
-| Missions | Simple reinforcement timer from the start; 3 factions; zone-graph world map |
+| Squad | 8 slots (two fire teams of four, a medic each, battle-buddy pairs); up to 4 players, AI fills the rest. Starts at 1 AI squadmate. AI tactics modeled on LAMBS Danger and VCOM |
+| Death | AI: permadeath on bleed-out, MIA if left behind alive. Players respawn in the default kit (M4, 2 spare mags + 90 rounds, 1 smoke, 1 frag); their old gear stays where they died, with a marker |
+| HUD | Minimal, like Arma with ACE: no health bar or ammo counter |
+| Missions | Contract zones and hot zones (several contracts, ends at extraction); cash economy; supports (resupply, transport, AAVs, extraction) called from the LHD or FOB |
+| World | 3 factions with shifting territory; day and night, weather, NVGs as gear |
 | Vehicles | Drivable ground vehicles (players or AI); aircraft AI-flown only |
 | Player-built faction | Late-game stretch goal |
 
@@ -220,7 +242,7 @@ a release:
 - Shots are hitscan, with no bullet drop or travel time. Spread is decided by the shooter's machine (fine for co-op, not cheat-proof).
 - Every inventory change, including each shot fired, re-sends the whole inventory snapshot. That's fine on a LAN; it needs a lighter path (for example, ammo only) before internet play.
 - Reloading and healing can't be cancelled, and taking damage doesn't interrupt them.
-- Death (bleeding out, giving up, or being shot while down) respawns you at the gate with all your gear. What dying should cost a player is an open design question.
+- The gear marker over a dead player's gear isn't sent to players who join later. The respawn kit lacks the handoff's 90 rounds until there's a loose-ammo item.
 - Downed bodies keep an upright movement capsule, so others bump into an invisible standing body.
 - A vest or backpack can't be dropped while it still has things in it. Empty it from the inventory screen first.
 - The voxel world has no stream, so it's limited to `VoxelWorld.BOUNDS`. The voxel edit log grows with every bullet hole and is never compacted.
@@ -229,7 +251,7 @@ a release:
 
 1. **Foundation (v0.1.0):** gray-box compound, FP co-op player, volume inventory, voxel plates, destructible walls, zone save.
 2. **Inventory depth (done, unreleased):** ammo and reloading, an inventory screen, armor damage and ammo that travel with the item, medical items.
-3. **Squad prototype (early, highest risk):** one shared AI squadmate who carries their own gear, follows, takes cover, and can be downed and revived. Downed and revive already exist. Decided in [docs/squad_design.md](docs/squad_design.md); step 1 (the shared `Soldier` body) is done.
+3. **Squad prototype (early, highest risk):** the wound model, then one AI squadmate scaling to the 8-slot squad with buddy pairs, throwables, carry/drag and treatment, the Arma-style command menu and the new controls. See the checklist in [docs/contractor_handoff.md](docs/contractor_handoff.md) and the design in [docs/squad_design.md](docs/squad_design.md). Step 1 (the shared `Soldier` body) is done.
 4. **Mission loop:** contracts, reinforcement timer, extraction, salvage share, persistent zone graph.
 5. **Ground vehicles:** drivable, modular damage, cargo as a rolling stash. Aircraft as AI-flown transport and fire support.
 6. **Factions:** territory, reputation tiers, dynamic events.

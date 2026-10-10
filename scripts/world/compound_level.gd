@@ -76,6 +76,15 @@ func server_spawn_dropped(id: StringName, count: int, pos: Vector3, state := {})
 	spawn_item(id, count, pos, uid, state)
 
 
+## Marks where a dead player's gear lies (the handoff's map marker, until there's a map).
+@rpc("authority", "call_local", "reliable")
+func show_gear_marker(pos: Vector3, text: String) -> void:
+	var marker := GearMarker.new()
+	marker.text = text
+	add_child(marker)
+	marker.global_position = pos + Vector3.UP * 1.6
+
+
 @rpc("authority", "call_local", "unreliable")
 func show_impact(pos: Vector3, normal: Vector3, kind: String) -> void:
 	var mark := MeshInstance3D.new()

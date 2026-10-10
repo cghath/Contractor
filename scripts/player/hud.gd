@@ -1,7 +1,6 @@
 class_name Hud
 extends CanvasLayer
-## Minimal local HUD: crosshair, interact prompt, ammo, load/volume status, and the Tab
-## inventory screen.
+## Minimal local HUD: crosshair, interact prompt, messages, and the Tab inventory screen.
 
 ## Set by the PlayerInput driver before the HUD enters the tree.
 var player: Soldier
@@ -9,7 +8,6 @@ var inventory_screen: InventoryScreen
 var _crosshair: Label
 var _prompt: Label
 var _status: Label
-var _ammo: Label
 var _downed: Label
 var _message: Label
 var _message_time := 0.0
@@ -29,12 +27,6 @@ func _ready() -> void:
 	_status = _label("", Control.PRESET_BOTTOM_LEFT)
 	_status.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	_status.position += Vector2(16, -16)
-	_ammo = _label("", Control.PRESET_BOTTOM_RIGHT)
-	_ammo.grow_horizontal = Control.GROW_DIRECTION_BEGIN
-	_ammo.grow_vertical = Control.GROW_DIRECTION_BEGIN
-	_ammo.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	_ammo.add_theme_font_size_override(&"font_size", 26)
-	_ammo.position += Vector2(-20, -16)
 	inventory_screen = InventoryScreen.new(player)
 	inventory_screen.visible = false
 	add_child(inventory_screen)
@@ -66,30 +58,11 @@ func toggle_detail() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if inventory_screen.visible else Input.MOUSE_MODE_CAPTURED
 
 
+## Minimal HUD, as in Arma with ACE: no health bar, ammo counter or load readout. Weight,
+## litres, rounds loaded and armor damage are on the inventory screen (Tab).
 func update_status(player: Soldier) -> void:
-	var inv := player.inventory
-	var weapon := player.active_weapon()
-	var lines := PackedStringArray()
-	lines.append("HP %d   Load %.1f kg  (speed x%.2f)" % [player.vitals.health, inv.total_mass(), player.load_mult])
-	var vols := PackedStringArray()
-	for c in Inventory.CONTAINERS:
-		if inv.capacity(c) > 0.0:
-			vols.append("%s %.1f/%.1f L" % [String(c).capitalize(), inv.used(c), inv.capacity(c)])
-	lines.append("   ".join(vols))
-	var armor := player.gear.armor_summary()
-	if armor != "":
-		lines.append("Armor: " + armor)
-	if inv.hands != &"":
-		lines.append("Carrying %s (G to drop)" % ItemDB.get_item(inv.hands).name)
-	_status.text = "\n".join(lines)
-	if weapon and weapon.type == "weapon":
-		var ammo := StringName(weapon.stats.get("ammo", ""))
-		var state := "   RELOADING" if player.is_reloading else ""
-		_ammo.text = "%s%s\n%d / %d" % [weapon.name, state, inv.rounds_in(player.active_slot), inv.spare_rounds(ammo)]
-	else:
-		_ammo.text = ""
-	if player.vitals.is_healing():
-		_status.text += "\nHealing..."
+	var hands := player.inventory.hands
+	_status.text = "Carrying %s (G to drop)" % ItemDB.get_item(hands).name if hands != &"" else ""
 	_crosshair.visible = not player.is_aiming and player.vitals.is_up()
 	if player.vitals.downed:
 		_downed.text = "DOWNED - bleeding out in %d s\nWait for a teammate to revive you, or press F to give up" % player.vitals.bleed_seconds

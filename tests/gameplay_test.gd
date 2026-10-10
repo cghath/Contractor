@@ -153,9 +153,19 @@ func _test_revive_and_downed() -> void:
 	check(player.vitals.downed and player.inventory.hands == &"", "player goes down and drops the HVT case")
 	player._server_fire.rpc_id(1, player.head.global_position, -player.global_basis.z, &"primary")
 	check(player.inventory.rounds_in(&"primary") == rounds, "can't shoot while down")
+	var death_spot := player.global_position
+	var had_vest: StringName = player.inventory.slots[&"vest"]
 	player._server_give_up.rpc_id(1)
 	await _frames(2)
 	check(player.vitals.is_up() and player.vitals.health == player.vitals.max_health, "giving up respawns you at full health")
+	var inv := player.inventory
+	check(inv.slots[&"primary"] == &"m4a1" and inv.count_of(&"mag_556") == 2 and inv.count_of(&"smoke_grenade") == 1 and inv.count_of(&"frag_grenade") == 1,
+		"respawned in the default kit: M4, 2 mags, smoke, frag")
+	check(inv.slots[&"vest"] == &"" and inv.slots[&"helmet"] == &"", "none of the old gear came along")
+	var left := _items_near(death_spot, 3.0)
+	check(had_vest != &"" and left.has(had_vest), "old gear left where you died (%s)" % [left])
+	var markers := level.get_children().filter(func(n: Node) -> bool: return n is GearMarker)
+	check(markers.size() == 1, "a marker shows where it lies")
 
 
 ## A host-owned body with no human driver goes through the same API squadmates will use.
@@ -187,7 +197,20 @@ func _test_ai_body() -> void:
 	bot.use_medical()
 	await _frames(2)
 	check(said.has("Not injured"), "host feedback comes back as a message signal (%s)" % [said])
-	bot.queue_free()
+	var spot := bot.global_position
+	bot.vitals.server_damage(500.0)
+	bot.vitals.server_give_up()
+	await _frames(2)
+	check(not is_instance_valid(bot), "an AI soldier's death is permanent: no respawn")
+	check(_items_near(spot, 3.0).has(&"m4a1"), "its gear stays where it died")
+
+
+func _items_near(pos: Vector3, radius: float) -> Array[StringName]:
+	var ids: Array[StringName] = []
+	for node in get_tree().get_nodes_in_group(WorldItem.GROUP):
+		if not node.is_queued_for_deletion() and (node as Node3D).global_position.distance_to(pos) <= radius:
+			ids.append(node.item_id)
+	return ids
 
 
 func _world_item(id: StringName) -> WorldItem:

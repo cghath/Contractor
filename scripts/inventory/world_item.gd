@@ -4,6 +4,8 @@ extends RigidBody3D
 ## replicated to every peer; only the host simulates physics, clients follow the synced
 ## transform.
 
+const GROUP := &"world_items"
+
 var item_id: StringName
 var count := 1
 ## Item state that travels with it (rounds, armor chips); see ItemData.default_state.
@@ -27,7 +29,7 @@ func _init() -> void:
 
 
 func _ready() -> void:
-	add_to_group(&"world_items")
+	add_to_group(GROUP)
 	freeze = not multiplayer.is_server()
 	var item := ItemDB.get_item(item_id)
 	var art := VoxelArt.model_for(item)

@@ -42,6 +42,10 @@ const ADS_SPEED_MULT := 0.6
 const MAX_PITCH := 1.5
 ## Name prefix for host-owned (AI-driven) bodies.
 const AI_PREFIX := "AI"
+## What a player respawns with (handoff): an M4 and 2 spare magazines, a smoke and a frag.
+## The handoff also lists 90 rounds; that waits on a loose-ammo item and on confirming
+## whether they're loose (an open item in the handoff).
+const DEFAULT_KIT: Array = [[&"m4a1", 1], [&"mag_556", 2], [&"smoke_grenade", 1], [&"frag_grenade", 1]]
 ## Camo variants for players, picked from the peer id so every peer agrees.
 const PLAYER_VARIANTS: Array[String] = ["multicam", "woodland", "desert", "urban"]
 
@@ -517,14 +521,33 @@ func _on_went_down() -> void:
 		_server_spawn_in_front(held)
 
 
+## Host only. A player's gear stays where they died, with a marker, and they respawn in the
+## default kit. An AI soldier's death is permanent; its gear stays too.
 func _on_died() -> void:
 	if not multiplayer.is_server():
 		return
-	var held := inventory.release_hands()
-	if held != &"":
-		_server_spawn_in_front(held)
+	var spot := global_position
+	_server_leave_gear(spot)
+	if is_ai():
+		queue_free()  # TODO(squad): keep the body so the squad can carry it to exfil
+		return
 	vitals.server_reset_health()
-	_client_respawn.rpc_id(owner_peer(), CompoundLevel.current(self).next_spawn_point())
+	for kit: Array in DEFAULT_KIT:
+		inventory.take(kit[0], kit[1])
+	var level := CompoundLevel.current(self)
+	level.show_gear_marker.rpc(spot, "Player %s's gear" % name)
+	_client_respawn.rpc_id(owner_peer(), level.next_spawn_point())
+
+
+## Host only. Lays everything this body carried on the ground around `spot`, in a loose
+## grid so the items don't spawn inside each other.
+func _server_leave_gear(spot: Vector3) -> void:
+	var level := CompoundLevel.current(self)
+	var entries := inventory.strip()
+	for i in entries.size():
+		var entry: Dictionary = entries[i]
+		var offset := Vector3((i % 4) * 0.4 - 0.6, 0.4 + (i / 12) * 0.45, ((i / 4) % 3) * 0.4 - 0.4)
+		level.server_spawn_dropped(entry.id, entry.count, spot + offset, entry.get("state", {}))
 
 
 @rpc("any_peer", "call_local", "reliable")

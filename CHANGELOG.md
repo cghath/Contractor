@@ -47,14 +47,27 @@ that travels with the item.
 - **Ground items:** the pickup prompt shows rounds and damage. Armor on the ground shows its chips.
 - **Docs:** `docs/squad_design.md`, the phase 3 squad AI design (body/driver split,
   navigation, utility intents, co-op command, inventory loop, permadeath), with the decisions made.
+- **Test builds:** `tools/make_build.sh <label>` leaves a playable build in
+  `builds/<date>_<label>/`: a small `contractor.pck`, a `play.bat` launcher that runs it with
+  the Voxel Tools Godot (no export templates needed) and a `BUILD.txt`.
+- `Inventory.strip()` empties a body's whole inventory into entries that keep their state.
 - **Tests:**
   - `tests/gameplay_test.tscn`: end-to-end checks of a hosted session through the real requests a client sends.
   - `tests/net_test.tscn`: a two-process ENet host and client.
   - `tools/run_tests.sh` runs every suite.
-  - The smoke test now has 88 checks. The gameplay test covers spread, aiming, going down and reviving, and a host-owned AI body driven through the same API.
+  - The smoke test now has 88 checks. The gameplay test covers spread, aiming, going down and reviving, and a host-owned AI body driven through the same API, and the new death rules.
 
 ### Changed
 
+- **Design authority:** `docs/contractor_handoff.md` (Captain's decisions, 2026-10-10) now
+  overrides the README's locked decisions and `docs/squad_design.md`. Both were updated to
+  match: 8-slot squad, wound model, minimal HUD, new death rules, new controls.
+- **Player death:** you respawn in the default kit (M4, 2 spare magazines, a smoke and a
+  frag). Everything you carried stays where you died, under a floating marker that clears
+  once the gear is picked up. Before, you respawned with all your gear.
+- **AI death is permanent:** a host-owned (AI) soldier that dies doesn't respawn; its gear stays where it fell.
+- **Minimal HUD:** no health, ammo, load or armor readout, as in Arma with ACE. Weight,
+  litres, rounds loaded and armor damage are on the inventory screen (Tab).
 - **Soldier body (squad AI step 1):** the player is split into a shared `Soldier` body and
   a `PlayerInput` driver.
   - `Soldier` (`scenes/soldier.tscn`) owns movement, gear, the owner-side actions (`trigger`, `reload`, `use_medical`, `interact`, `revive`, `drop`, `give_up`, `look`, `select_weapon`) and every host-side rule. Drivers set its controls (`move_input`, `want_sprint`, `want_crouch`, `want_aim`).

@@ -136,6 +136,26 @@ func unequip(slot: StringName) -> Dictionary:
 	return removed
 
 
+## Host only. Empties everything (slots, containers, hands) and returns it all as entries
+## ({"id", "count", "state"?}), so it can be left in the world.
+func strip() -> Array[Dictionary]:
+	var all: Array[Dictionary] = []
+	for slot in SLOTS:
+		if slots[slot] != &"":
+			var entry := {"id": slots[slot], "count": 1}
+			if not slot_state.get(slot, {}).is_empty():
+				entry.state = slot_state[slot].duplicate(true)
+			all.append(entry)
+	for container in CONTAINERS:
+		for entry: Dictionary in containers[container]:
+			all.append(entry.duplicate(true))
+	if hands != &"":
+		all.append({"id": hands, "count": 1})
+	_apply_state({})
+	_commit()
+	return all
+
+
 ## Host only. Takes up to `count` units out of a container entry and returns them as an
 ## entry ({"id", "count", "state"?}), or {} if the index is invalid.
 func remove_entry(container: StringName, index: int, count := 1) -> Dictionary:
