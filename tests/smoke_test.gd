@@ -315,8 +315,8 @@ func _test_hands() -> void:
 			[CharacterModel.Hold.BOTH, "rifle aimed down", -0.6], [CharacterModel.Hold.RIGHT, "pistol", 0.0]]:
 		model.hold = pose[0]
 		model.look_pitch = pose[2]
-		for i in 3:
-			await get_tree().process_frame
+		# A new weapon is drawn first (GearRig): the hand fetches it, then holds it up.
+		await get_tree().create_timer(CharacterModel.DRAW_S + CharacterModel.HAND_BLEND_S + 0.1).timeout
 		var error := model.hand_error()
 		check(error >= 0.0 and error < 0.015, "%s: palms on grip points (off by %.1f cm)" % [pose[1], error * 100.0])
 	model.hold = CharacterModel.Hold.NONE

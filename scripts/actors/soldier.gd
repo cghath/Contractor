@@ -349,6 +349,7 @@ func release_carried() -> void:
 	if is_instance_valid(carrying) and carrying.carried_by == self:
 		carrying.carried_by = null
 		carrying._client_lifted.rpc(false)
+		CharacterModel.server_carry(null, carrying, &"")  # the casualty's pose, for every peer
 		if carrying.is_ai():
 			if carry_mode != DRAG:  # a dragged body is already on the ground behind
 				carrying.global_position = global_position - global_basis.z * 0.8
@@ -581,6 +582,7 @@ func _server_use_medical() -> void:
 func _server_inventory_action(action: String, container: StringName, index: int, slot: StringName, target: StringName) -> void:
 	if not _from_owner() or not vitals.is_up():
 		return
+	model.server_inventory_action(inventory, action, container, index, slot, target)  # the hand's way
 	match action:
 		"drop_slot":
 			var removed := inventory.unequip(slot)
@@ -626,6 +628,8 @@ func _server_interact(path: NodePath) -> void:
 	if item.global_position.distance_to(global_position) > INTERACT_RANGE + 1.5:
 		return
 	var taken := inventory.take(item.item_id, item.count, item.state)
+	if taken > 0:
+		model.server_pick_up(item.global_position, item.item_id)  # the pickup animation
 	if taken == 0:
 		_client_message.rpc_id(owner_peer(), "No room for %s" % ItemDB.get_item(item.item_id).name)
 	elif taken >= item.count:
@@ -732,7 +736,7 @@ func _server_remove_tourniquet(path: NodePath, part: StringName) -> void:
 		return
 	var item := ItemDB.get_item(WoundModel.TOURNIQUET)
 	var label := "Removing tourniquet, %s..." % Vitals.part_name(part)
-	if not await _timed_care(target, other, float(item.stats.get("remove_s", 3.0)), label):
+	if not await _timed_care(target, other, float(item.stats.get("remove_s", 3.0)), label, part):
 		return
 	var count := other.server_remove_tourniquets(part)
 	if count <= 0:
@@ -766,7 +770,7 @@ func _treat(target: Node3D, item_id: StringName, part: StringName, rushed: bool)
 	rushed = rushed and tourniquet
 	var hurried := tourniquet and under_fire()
 	var label := "%s%s, %s..." % [item.name, " (rushed)" if rushed else "", Vitals.part_name(part)]
-	if not await _timed_care(target, other, treat_seconds(target, item, rushed), label):
+	if not await _timed_care(target, other, treat_seconds(target, item, rushed), label, part):
 		return
 	if inventory.medical_count(item_id) <= 0:
 		_client_message.rpc_id(owner_peer(), "You no longer have a %s" % item.name)
@@ -783,8 +787,8 @@ func _treat(target: Node3D, item_id: StringName, part: StringName, rushed: bool)
 ## Host only. Runs a timed treatment on `target`: this soldier is busy for `seconds` and the
 ## casualty shows as being treated. Returns false (and tells the treater) if it's
 ## interrupted: the treater went down or moved away, the casualty was moved, died or is out
-## of reach. True once the time is up.
-func _timed_care(target: Node3D, other: Vitals, seconds: float, label: String) -> bool:
+## of reach. True once the time is up. `part` is where the hands work (the animation).
+func _timed_care(target: Node3D, other: Vitals, seconds: float, label: String, part := &"") -> bool:
 	_treat_serial += 1
 	var serial := _treat_serial
 	var my_start := global_position
@@ -793,6 +797,7 @@ func _timed_care(target: Node3D, other: Vitals, seconds: float, label: String) -
 	_server_busy_until = _now() + seconds
 	other.server_begin_treatment(seconds)
 	_client_busy.rpc_id(owner_peer(), seconds, label)
+	var anim := model.server_treat(target, part, seconds)  # kneeling at the wound, for every peer
 	var end := _now() + seconds
 	while _now() < end:
 		await get_tree().create_timer(clampf(end - _now(), 0.01, TREAT_CHECK_S)).timeout
@@ -816,10 +821,12 @@ func _timed_care(target: Node3D, other: Vitals, seconds: float, label: String) -
 		if why != "":
 			if is_instance_valid(other):
 				other.server_end_treatment()
+			model.server_stop(anim)
 			_server_busy_until = _now()
 			_client_busy.rpc_id(owner_peer(), 0.0, "Treatment interrupted: %s" % why)
 			return false
 	other.server_end_treatment()
+	model.server_stop(anim)
 	return true
 
 
@@ -953,6 +960,7 @@ func _set_carry_mode(mode: StringName) -> void:
 	if carry_mode == mode:
 		return
 	carry_mode = mode
+	CharacterModel.server_carry(self, carrying, mode)  # both bodies' poses, for every peer
 	if not is_ai() and owner_peer() != multiplayer.get_unique_id():
 		_client_carry_mode.rpc_id(owner_peer(), mode)
 
@@ -1118,6 +1126,7 @@ func _server_loot_body(path: NodePath) -> void:
 	var other := _lootable(path)
 	if other == null:
 		return
+	model.server_loot(other, true)  # kneeling at the body
 	if not other.has_gear():
 		_client_message.rpc_id(owner_peer(), "Nothing left on %s" % other.display_name())
 		return
@@ -1210,6 +1219,7 @@ func _server_loot_item(path: NodePath, where: StringName, index: int, id: String
 	var other := _lootable(path)
 	if other == null:
 		return
+	model.server_loot(other)  # kneeling at the body
 	if _loot_id_at(other, where, index) != id:
 		_client_message.rpc_id(owner_peer(), "Nothing there any more")
 		return
