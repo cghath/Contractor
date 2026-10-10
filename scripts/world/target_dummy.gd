@@ -30,9 +30,23 @@ func _process(_delta: float) -> void:
 	CharacterModel.lay_down(self, model, not vitals.is_up())  # down or dead
 
 
+## The dummy is a test target, so its label shows what the wound model did: condition,
+## blood left and bleeding, pain, and the wounds by kind.
 func _update_label() -> void:
-	var status := vitals.condition_text()
-	var lines := PackedStringArray([status])
+	var lines := PackedStringArray([vitals.condition_text()])
+	var wounds := vitals.wound_list()
+	if not wounds.is_empty() or vitals.blood_fraction() < 1.0:
+		var bleed := vitals.bleed_rate()
+		lines.append("Blood %d%%%s  Pain %.1f" % [roundi(vitals.blood_fraction() * 100.0),
+			"  -%.2f L/min" % bleed if bleed > 0.0 else "", vitals.pain()])
+		var kinds := {}
+		for w in wounds:
+			kinds[w.kind] = int(kinds.get(w.kind, 0)) + 1
+		var names := PackedStringArray()
+		for kind: String in kinds:
+			names.append("%s x%d" % [kind, kinds[kind]] if kinds[kind] > 1 else kind)
+		if not names.is_empty():
+			lines.append(", ".join(names))
 	var armor := gear.armor_summary("\n")
 	if armor != "":
 		lines.append(armor)

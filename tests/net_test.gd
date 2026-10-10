@@ -68,9 +68,13 @@ func _run_client() -> void:
 	me._server_reload.rpc_id(1, &"primary")
 	await _wait_for(func() -> bool: return me.inventory.rounds_in(&"primary") == 30, 5.0)
 	check(me.inventory.rounds_in(&"primary") == 30 and me.inventory.spare_rounds(&"mag_556") == 57, "reload over the network (30 loaded, 57 spare)")
+	# The host's K-style trauma (40): 24% of blood lost and 0.4 pain, replicated in net_state.
+	await _wait_for(func() -> bool: return me.vitals.pain() > 0.3, 3.0)
+	check(absf(me.vitals.blood_fraction() - 0.76) < 0.01 and absf(me.vitals.pain() - 0.4) < 0.02 and me.vitals.condition_text() == "Wounded",
+		"wound-model state replicated to the client (blood %.0f%%, pain %.2f, %s)" % [me.vitals.blood_fraction() * 100.0, me.vitals.pain(), me.vitals.condition_text()])
 	me._server_use_medical.rpc_id(1)
-	await _wait_for(func() -> bool: return me.vitals.health >= 94.9, 6.0)
-	check(absf(me.vitals.health - 95.0) < 0.1, "IFAK heal replicated (60 -> %.0f HP)" % me.vitals.health)
+	await _wait_for(func() -> bool: return me.vitals.pain() < 0.1, 6.0)
+	check(me.vitals.pain() < 0.1, "IFAK treatment replicated (pain 0.40 -> %.2f)" % me.vitals.pain())
 	me._server_inventory_action.rpc_id(1, "drop_slot", &"", -1, &"helmet", &"")
 	await _wait_for(func() -> bool: return me.inventory.slots[&"helmet"] == &"", 3.0)
 	await _wait_for(func() -> bool: return _dropped_helmet() != null, 3.0)

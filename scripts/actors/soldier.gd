@@ -425,7 +425,7 @@ func _server_use_medical() -> void:
 		_client_message.rpc_id(owner_peer(), "Not injured")
 		return
 	# Smallest kit that covers the damage; otherwise the biggest one carried.
-	var missing := vitals.max_health - vitals.health
+	var missing := vitals.injury() * 100.0  # wound model: how much a kit has to cover
 	var best := {}
 	for container in Inventory.CONTAINERS:
 		var list: Array = inventory.containers[container]

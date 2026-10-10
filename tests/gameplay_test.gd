@@ -63,13 +63,16 @@ func _test_medical() -> void:
 	print("Medical (RPC)")
 	player.inventory.take(&"ifak")
 	player.vitals.server_damage(50.0)
+	var pain := player.vitals.pain()
 	player._server_use_medical.rpc_id(1)
 	check(player.vitals.is_healing(), "IFAK applied")
 	check(player.inventory.count_of(&"ifak") == 0, "IFAK used up")
 	await _seconds(4.4)
-	check(is_equal_approx(player.vitals.health, 85.0), "healed 35 over time (%.1f)" % player.vitals.health)
+	check(player.vitals.pain() < pain - 0.34 and not player.vitals.is_healing(), "took 0.35 off pain over time (%.2f -> %.2f)" % [pain, player.vitals.pain()])
+	pain = player.vitals.pain()
 	player._server_use_medical.rpc_id(1)  # no more kits: nothing happens
-	check(is_equal_approx(player.vitals.health, 85.0) and not player.vitals.is_healing(), "nothing to use without a kit")
+	check(not player.vitals.is_healing() and absf(player.vitals.pain() - pain) < 0.01, "nothing to use without a kit")
+	player.vitals.server_reset_health()  # the 30% blood lost would widen the spread checks below
 
 
 func _test_inventory_actions() -> void:
@@ -136,8 +139,9 @@ func _test_revive_and_downed() -> void:
 	dummy.vitals.server_damage(500.0)
 	await _frames(2)
 	check(dummy.vitals.downed and dummy.model.downed, "dummy is down and lying down")
-	var hitbox: Area3D = dummy.get_node(^"Hitbox")
-	check(absf(hitbox.rotation.x + PI / 2) < 0.01, "its hitbox lies down with it")
+	var hitboxes := dummy.get_children().filter(func(n: Node) -> bool: return n is Area3D)
+	check(hitboxes.size() == Vitals.BODY_PARTS.size() and hitboxes.all(func(h: Area3D) -> bool: return absf(h.rotation.x + PI / 2) < 0.01),
+		"all %d of its hitboxes lie down with it" % hitboxes.size())
 	player.global_position = dummy.global_position + Vector3(0, 0, -1.2)
 	await _frames(2)
 	player._server_revive.rpc_id(1, dummy.get_path())
@@ -145,7 +149,8 @@ func _test_revive_and_downed() -> void:
 	player.inventory.take(&"ifak")
 	player._server_revive.rpc_id(1, dummy.get_path())
 	await _seconds(5.3)
-	check(dummy.vitals.is_up() and is_equal_approx(dummy.vitals.health, 25.0), "revived with an IFAK to 25 HP (%.0f)" % dummy.vitals.health)
+	check(dummy.vitals.is_up() and dummy.vitals.blood_fraction() >= Vitals.REVIVE_BLOOD - 0.001 and not dummy.vitals.in_cardiac_arrest(),
+		"revived with an IFAK out of cardiac arrest (%.0f%% blood)" % (dummy.vitals.blood_fraction() * 100.0))
 	check(player.inventory.count_of(&"ifak") == 0, "the IFAK was used")
 	player.inventory.take(&"hvt_case")
 	var rounds := player.inventory.rounds_in(&"primary")
@@ -156,9 +161,11 @@ func _test_revive_and_downed() -> void:
 	check(player.inventory.rounds_in(&"primary") == rounds, "can't shoot while down")
 	var death_spot := player.global_position
 	var had_vest: StringName = player.inventory.slots[&"vest"]
-	player.vitals.server_damage(50.0)  # a hit while down kills
+	player.vitals.server_damage(50.0)
+	check(player.vitals.downed, "a hit while down is just another wound")
+	player.vitals.server_advance(Vitals.ARREST_WINDOW_S + 1.0)  # nobody revives: the arrest window runs out
 	await _frames(2)
-	check(player.vitals.is_up() and player.vitals.health == player.vitals.max_health, "dying respawns you at full health")
+	check(player.vitals.is_up() and player.vitals.blood_fraction() == 1.0 and player.vitals.wound_list().is_empty(), "dying respawns you unhurt")
 	var inv := player.inventory
 	check(inv.slots[&"primary"] == &"m4a1" and inv.count_of(&"mag_556") == 2 and inv.count_of(&"smoke_grenade") == 1 and inv.count_of(&"frag_grenade") == 1,
 		"respawned in the default kit: M4, 2 mags, smoke, frag")
@@ -191,10 +198,11 @@ func _test_throwables() -> void:
 		d.vitals.server_reset_health()
 	var edits := GameState.voxel_edits.size()
 	Throwables.server_detonate(level, "frag", light.global_position + Vector3(1.0, 0.05, 0.0))
-	check(light.vitals.health < light.vitals.max_health, "frag hurts a dummy 1 m away (HP %.0f)" % light.vitals.health)
+	var frag_wounds := light.vitals.wound_list().size()
+	check(frag_wounds >= 1 and frag_wounds <= Throwables.FRAG_MAX_WOUNDS, "frag wounds a dummy 1 m away (%d fragment wounds)" % frag_wounds)
 	check(GameState.voxel_edits.size() == edits + 1, "frag leaves a crater in the voxels")
 	Throwables.server_detonate(level, "frag", Vector3(3, 0.2, -2.5))
-	check(is_equal_approx(medium.vitals.health, medium.vitals.max_health), "a wall shields the dummy inside the building")
+	check(medium.vitals.wound_list().is_empty(), "a wall shields the dummy inside the building")
 	for d: TargetDummy in [light, medium]:
 		d.vitals.server_reset_health()
 

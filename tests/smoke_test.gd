@@ -158,10 +158,10 @@ func _test_ballistics() -> void:
 	var aim := Vector3(0, plate_y, 0) - shooter.position
 	var first := Ballistics.fire(shooter, shooter.position, aim.normalized(), rifle)
 	check(first.result == "plate", "first shot hits the plate (%s)" % first.result)
-	check(dummy.vitals.health == dummy.vitals.max_health, "plate protected the body")
+	check(dummy.vitals.wound_list().is_empty(), "plate protected the body")
 	var second := Ballistics.fire(shooter, shooter.position, aim.normalized(), rifle)
 	check(second.result == "body", "second shot through the hole hits the body (%s)" % second.result)
-	check(dummy.vitals.health < dummy.vitals.max_health, "body took damage (%d HP)" % dummy.vitals.health)
+	check(not dummy.vitals.wound_list().is_empty(), "body was wounded (%s)" % dummy.vitals.condition_text())
 	var low := Ballistics.fire(shooter, shooter.position, (Vector3(0, 0.45, 0) - shooter.position).normalized(), rifle)
 	check(low.result == "body", "shot below the plate hits the body")
 	dummy.queue_free()
@@ -174,11 +174,11 @@ func _test_ballistics() -> void:
 	await get_tree().physics_frame
 	shooter.position = Vector3(0, 1.73, -5)
 	var dome := Ballistics.fire(shooter, shooter.position, Vector3.BACK, rifle)
-	check(dome.result == "plate" and dummy.vitals.health == dummy.vitals.max_health, "helmet stopped a round to the forehead (%s)" % dome.result)
+	check(dome.result == "plate" and dummy.vitals.wound_list().is_empty() and dummy.vitals.is_up(), "helmet stopped a round to the forehead (%s)" % dome.result)
 	check(dummy.gear.armor_integrity(&"helmet") >= 0.0 and dummy.gear.armor_integrity(&"helmet") < 1.0, "helmet chipped to %.0f%%" % (dummy.gear.armor_integrity(&"helmet") * 100.0))
 	shooter.position = Vector3(0, 1.58, -5)
 	var face := Ballistics.fire(shooter, shooter.position, Vector3.BACK, rifle)
-	check(face.result == "body" and dummy.vitals.health <= 0.0, "shot to the face is a x3 headshot (%s, %d HP)" % [face.result, dummy.vitals.health])
+	check(face.result == "body" and dummy.vitals.is_dead(), "a rifle round through the face reaches the brain (%s, %s)" % [face.result, dummy.vitals.condition_text()])
 	dummy.queue_free()
 	shooter.queue_free()
 
@@ -270,17 +270,20 @@ func _test_medical() -> void:
 	print("Medical")
 	var vitals := Vitals.new()
 	add_child(vitals)
-	vitals.server_damage(60.0)
+	vitals.server_damage(20.0)
+	# A pistol round through the outside of the left thigh: a plain muscle wound.
+	vitals.server_hit(Vitals.THIGH_L, {"round_class": Vitals.PISTOL, "position": Vector3(-0.12, 0.7, -0.1), "direction": Vector3.BACK})
+	var wounds := vitals.wound_list()
+	check(wounds.size() == 1 and wounds[0].kind == "muscle" and wounds[0].bleeding, "a bleeding muscle wound (%s)" % [wounds])
+	var pain_before := vitals.pain()
 	vitals.server_heal_over_time(35.0, 0.2)
-	check(vitals.is_healing(), "healing in progress")
+	check(vitals.is_healing(), "treatment in progress")
 	var deadline := Time.get_ticks_msec() + 2000
 	while vitals.is_healing() and Time.get_ticks_msec() < deadline:
 		await get_tree().process_frame
-	check(is_equal_approx(vitals.health, 75.0), "IFAK-sized heal restored 35 HP (now %.1f)" % vitals.health)
-	vitals.server_heal_over_time(70.0, 0.1)
-	while vitals.is_healing() and Time.get_ticks_msec() < deadline + 2000:
-		await get_tree().process_frame
-	check(is_equal_approx(vitals.health, vitals.max_health), "healing caps at max health")
+	check(not vitals.wound_list()[0].bleeding and vitals.wound_list()[0].treated, "an IFAK stops the bleeding")
+	check(vitals.pain() <= pain_before - 0.34, "and takes 0.35 off pain (%.2f -> %.2f)" % [pain_before, vitals.pain()])
+	check(vitals.blood_fraction() <= 1.0 - 20.0 * Vitals.TRAUMA_BLOOD_PER_DAMAGE + 0.0001, "but puts no blood back (%.3f)" % vitals.blood_fraction())
 	vitals.queue_free()
 
 
@@ -298,30 +301,28 @@ func _test_world_item_state() -> void:
 	item.queue_free()
 
 func _test_downed() -> void:
-	print("Downed, bleed-out and revive")
+	print("Downed, cardiac arrest and revive")
 	var vitals := Vitals.new()
 	add_child(vitals)
 	var events: Array[String] = []
 	vitals.went_down.connect(func() -> void: events.append("down"))
 	vitals.revived.connect(func() -> void: events.append("revived"))
 	vitals.died.connect(func() -> void: events.append("died"))
-	vitals.server_damage(150.0)
-	check(vitals.downed and vitals.health == 0.0 and events == ["down"], "0 HP puts you down, not dead")
-	check(vitals.bleed_seconds == int(Vitals.BLEED_OUT_S) and not vitals.is_up(), "bleeding out from %d s" % vitals.bleed_seconds)
+	vitals.server_damage(40.0)
+	check(vitals.is_up() and events.is_empty(), "K once (24%% blood lost) keeps you up (%s)" % vitals.condition_text())
+	vitals.server_damage(40.0)
+	check(vitals.downed and not vitals.in_cardiac_arrest() and events == ["down"], "K twice (48%% lost) knocks you out (%s)" % vitals.condition_text())
+	check(vitals.seconds_to_death() < 0.0 and not vitals.is_up(), "unconscious, not dying yet")
 	vitals.server_heal_over_time(50.0, 0.1)
-	await get_tree().process_frame
-	await get_tree().process_frame
-	check(vitals.health == 0.0, "healing doesn't work while down")
+	check(not vitals.is_healing(), "no self-treatment while down")
 	vitals.server_revive(25.0)
-	check(vitals.is_up() and vitals.health == 25.0 and events.back() == "revived", "revived with 25 HP")
+	check(vitals.is_up() and vitals.blood_fraction() >= Vitals.REVIVE_BLOOD - 0.001 and events.back() == "revived", "revived (stopgap) with %.0f%% blood" % (vitals.blood_fraction() * 100.0))
 	vitals.server_damage(100.0)
+	check(vitals.in_cardiac_arrest() and absf(vitals.seconds_to_death() - Vitals.ARREST_WINDOW_S) < 1.0, "50%% lost: cardiac arrest, %d s window" % vitals.seconds_to_death())
 	vitals.server_damage(10.0)
-	check(not vitals.downed and vitals.health == 0.0 and events.back() == "died", "a hit while down finishes you")
-	vitals.server_reset_health()
-	vitals.server_damage(100.0)
-	vitals._bleed_left = 0.05
-	await get_tree().create_timer(0.15).timeout
-	check(events.back() == "died" and not vitals.downed, "bleeding out dies")
+	check(vitals.downed and not vitals.is_dead(), "a hit while down is just another wound")
+	vitals.server_advance(Vitals.ARREST_WINDOW_S + 1.0)
+	check(events.back() == "died" and vitals.is_dead() and not vitals.downed, "no heart rate when the window runs out: dead")
 	var quick := Vitals.new()
 	quick.can_go_down = false
 	add_child(quick)

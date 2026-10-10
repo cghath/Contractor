@@ -14,9 +14,41 @@ var _message: Label
 var _message_time := 0.0
 var _white: ColorRect
 var _white_left := 0.0  # seconds of whiteout remaining
+## Blood loss, concussion and unconsciousness drawn over the view (Vitals.vision).
+var _vision: ColorRect
+var _vision_material: ShaderMaterial
+
+
+## Fades colour, greys and closes in the edges, blurs and blacks out the screen.
+const VISION_SHADER := """
+shader_type canvas_item;
+uniform sampler2D screen : hint_screen_texture, filter_linear_mipmap;
+uniform float fade = 0.0;    // 15-30% blood lost: colour fades slightly
+uniform float tunnel = 0.0;  // 30-40%: grey edges close in
+uniform float blur = 0.0;    // concussion
+uniform float black = 0.0;   // unconscious
+void fragment() {
+	vec3 c = textureLod(screen, SCREEN_UV, blur * 2.5).rgb;
+	float grey = dot(c, vec3(0.299, 0.587, 0.114));
+	c = mix(c, vec3(grey), 0.35 * fade + 0.45 * tunnel);
+	float r = mix(0.75, 0.35, tunnel);
+	float edge = 1.0 - smoothstep(r - 0.25, r, distance(UV, vec2(0.5)));
+	c = mix(vec3(grey * 0.35), c, mix(1.0, edge, tunnel));
+	COLOR = vec4(mix(c, vec3(0.0), black), 1.0);
+}
+"""
 
 
 func _ready() -> void:
+	_vision = ColorRect.new()
+	_vision.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_vision_material = ShaderMaterial.new()
+	_vision_material.shader = Shader.new()
+	_vision_material.shader.code = VISION_SHADER
+	_vision.material = _vision_material
+	_vision.visible = false
+	add_child(_vision)
+	_vision.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_white = ColorRect.new()
 	_white.color = Color(1, 1, 1, 0)
 	_white.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -50,6 +82,19 @@ func _process(delta: float) -> void:
 	_message.visible = _message_time > 0.0
 	_white_left = maxf(_white_left - delta, 0.0)
 	_white.color.a = clampf(_white_left / 1.5, 0.0, 1.0)
+	_update_vision()
+
+
+## Draws what blood loss, concussion and being out do to the local player's view.
+func _update_vision() -> void:
+	if player == null:
+		return
+	var vision := player.vitals.vision()
+	var any := false
+	for key: String in vision:
+		_vision_material.set_shader_parameter(key, vision[key])
+		any = any or vision[key] > 0.0
+	_vision.visible = any
 
 
 ## Flashbang: `amount` 0..1 sets how long the screen stays white (up to about 5 s).
@@ -86,10 +131,17 @@ func update_status(player: Soldier) -> void:
 		lines.append("Carrying %s (Alt+G to drop)" % ItemDB.get_item(player.inventory.hands).name)
 	_status.text = "\n".join(lines)
 	_crosshair.visible = not player.is_aiming and player.vitals.is_up()
-	if player.vitals.downed:
-		_downed.text = "DOWNED - %d s to live\nWait for a teammate to revive you" % maxf(player.vitals.seconds_to_death(), 0.0)
-	else:
-		_downed.text = ""
+	_downed.text = downed_text(player.vitals)
+
+
+## The text over a downed player's black screen: no health, just what is happening.
+static func downed_text(vitals: Vitals) -> String:
+	if not vitals.downed:
+		return ""
+	if vitals.in_cardiac_arrest():
+		var s := ceili(maxf(vitals.seconds_to_death(), 0.0))
+		return "CARDIAC ARREST - %d:%02d\nWait for a teammate to revive you" % [s / 60, s % 60]
+	return "UNCONSCIOUS\nWait for a teammate to revive you"
 
 
 ## The squad by F-key number, with what each squadmate is doing. A ">" marks units

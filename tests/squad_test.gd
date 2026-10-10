@@ -145,7 +145,7 @@ func _test_buddy_carries_buddy() -> void:
 	for id: StringName in kits:
 		charlie.inventory.take(id)
 	await _seconds(6.0)
-	check(bravo.vitals.is_up() and bravo.carried_by == null, "handed a kit, Charlie revives him (Bravo HP %d)" % bravo.vitals.health)
+	check(bravo.vitals.is_up() and bravo.carried_by == null, "handed a kit, Charlie revives him (Bravo: %s)" % bravo.vitals.condition_text())
 
 
 func _test_contact() -> void:

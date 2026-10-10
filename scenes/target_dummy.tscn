@@ -10,28 +10,49 @@
 radius = 0.3
 height = 1.8
 
-[sub_resource type="BoxShape3D" id="BoxShape3D_hitbox"]
-size = Vector3(0.36, 1.46, 0.24)
+[sub_resource type="BoxShape3D" id="BoxShape3D_part_0"]
+size = Vector3(0.22, 0.12, 0.24)
 
-[sub_resource type="BoxShape3D" id="BoxShape3D_head"]
-size = Vector3(0.22, 0.3, 0.24)
+[sub_resource type="BoxShape3D" id="BoxShape3D_part_1"]
+size = Vector3(0.22, 0.12, 0.14)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_part_2"]
+size = Vector3(0.22, 0.12, 0.1)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_part_3"]
+size = Vector3(0.14, 0.08, 0.14)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_part_4"]
+size = Vector3(0.36, 0.26, 0.22)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_part_5"]
+size = Vector3(0.36, 0.18, 0.22)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_part_6"]
+size = Vector3(0.36, 0.14, 0.22)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_part_7"]
+size = Vector3(0.12, 0.32, 0.12)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_part_8"]
+size = Vector3(0.11, 0.32, 0.11)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_part_9"]
+size = Vector3(0.152, 0.39, 0.18)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_part_10"]
+size = Vector3(0.152, 0.47, 0.18)
 
 [sub_resource type="SceneReplicationConfig" id="SceneReplicationConfig_server"]
-properties/0/path = NodePath("Vitals:health")
+properties/0/path = NodePath("Inventory:net_state")
 properties/0/spawn = true
 properties/0/replication_mode = 2
-properties/1/path = NodePath("Inventory:net_state")
+properties/1/path = NodePath("Vitals:downed")
 properties/1/spawn = true
 properties/1/replication_mode = 2
-properties/2/path = NodePath("Vitals:downed")
+properties/2/path = NodePath("Vitals:net_state")
 properties/2/spawn = true
 properties/2/replication_mode = 2
-properties/3/path = NodePath("Vitals:bleed_seconds")
-properties/3/spawn = true
-properties/3/replication_mode = 2
-properties/4/path = NodePath("Vitals:net_state")
-properties/4/spawn = true
-properties/4/replication_mode = 2
 
 [node name="TargetDummy" type="StaticBody3D"]
 collision_layer = 16
@@ -42,16 +63,6 @@ script = ExtResource("1_dummy")
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)
 shape = SubResource("CapsuleShape3D_move")
 
-[node name="Hitbox" type="Area3D" parent="."]
-collision_layer = 2
-collision_mask = 0
-monitoring = false
-metadata/body_part = &"torso"
-
-[node name="Shape" type="CollisionShape3D" parent="Hitbox"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.73, 0)
-shape = SubResource("BoxShape3D_hitbox")
-
 [node name="HeadHitbox" type="Area3D" parent="."]
 collision_layer = 2
 collision_mask = 0
@@ -59,8 +70,142 @@ monitoring = false
 metadata/body_part = &"head"
 
 [node name="Shape" type="CollisionShape3D" parent="HeadHitbox"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.61, 0)
-shape = SubResource("BoxShape3D_head")
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.7, 0)
+shape = SubResource("BoxShape3D_part_0")
+
+[node name="Shape2" type="CollisionShape3D" parent="HeadHitbox"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.58, 0.05)
+shape = SubResource("BoxShape3D_part_1")
+
+[node name="FaceHitbox" type="Area3D" parent="."]
+collision_layer = 2
+collision_mask = 0
+monitoring = false
+metadata/body_part = &"face"
+
+[node name="Shape" type="CollisionShape3D" parent="FaceHitbox"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.58, -0.07)
+shape = SubResource("BoxShape3D_part_2")
+
+[node name="NeckHitbox" type="Area3D" parent="."]
+collision_layer = 2
+collision_mask = 0
+monitoring = false
+metadata/body_part = &"neck"
+
+[node name="Shape" type="CollisionShape3D" parent="NeckHitbox"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.48, 0)
+shape = SubResource("BoxShape3D_part_3")
+
+[node name="ChestHitbox" type="Area3D" parent="."]
+collision_layer = 2
+collision_mask = 0
+monitoring = false
+metadata/body_part = &"chest"
+
+[node name="Shape" type="CollisionShape3D" parent="ChestHitbox"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.31, 0)
+shape = SubResource("BoxShape3D_part_4")
+
+[node name="AbdomenHitbox" type="Area3D" parent="."]
+collision_layer = 2
+collision_mask = 0
+monitoring = false
+metadata/body_part = &"abdomen"
+
+[node name="Shape" type="CollisionShape3D" parent="AbdomenHitbox"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.09, 0)
+shape = SubResource("BoxShape3D_part_5")
+
+[node name="PelvisHitbox" type="Area3D" parent="."]
+collision_layer = 2
+collision_mask = 0
+monitoring = false
+metadata/body_part = &"pelvis"
+
+[node name="Shape" type="CollisionShape3D" parent="PelvisHitbox"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.93, 0)
+shape = SubResource("BoxShape3D_part_6")
+
+[node name="UpperArmLHitbox" type="Area3D" parent="."]
+collision_layer = 2
+collision_mask = 0
+monitoring = false
+metadata/body_part = &"upper_arm_l"
+
+[node name="Shape" type="CollisionShape3D" parent="UpperArmLHitbox"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.25, 1.26, 0)
+shape = SubResource("BoxShape3D_part_7")
+
+[node name="UpperArmRHitbox" type="Area3D" parent="."]
+collision_layer = 2
+collision_mask = 0
+monitoring = false
+metadata/body_part = &"upper_arm_r"
+
+[node name="Shape" type="CollisionShape3D" parent="UpperArmRHitbox"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.25, 1.26, 0)
+shape = SubResource("BoxShape3D_part_7")
+
+[node name="ForearmLHitbox" type="Area3D" parent="."]
+collision_layer = 2
+collision_mask = 0
+monitoring = false
+metadata/body_part = &"forearm_l"
+
+[node name="Shape" type="CollisionShape3D" parent="ForearmLHitbox"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.25, 0.94, 0)
+shape = SubResource("BoxShape3D_part_8")
+
+[node name="ForearmRHitbox" type="Area3D" parent="."]
+collision_layer = 2
+collision_mask = 0
+monitoring = false
+metadata/body_part = &"forearm_r"
+
+[node name="Shape" type="CollisionShape3D" parent="ForearmRHitbox"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.25, 0.94, 0)
+shape = SubResource("BoxShape3D_part_8")
+
+[node name="ThighLHitbox" type="Area3D" parent="."]
+collision_layer = 2
+collision_mask = 0
+monitoring = false
+metadata/body_part = &"thigh_l"
+
+[node name="Shape" type="CollisionShape3D" parent="ThighLHitbox"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.075, 0.665, -0.01)
+shape = SubResource("BoxShape3D_part_9")
+
+[node name="ThighRHitbox" type="Area3D" parent="."]
+collision_layer = 2
+collision_mask = 0
+monitoring = false
+metadata/body_part = &"thigh_r"
+
+[node name="Shape" type="CollisionShape3D" parent="ThighRHitbox"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.075, 0.665, -0.01)
+shape = SubResource("BoxShape3D_part_9")
+
+[node name="ShinLHitbox" type="Area3D" parent="."]
+collision_layer = 2
+collision_mask = 0
+monitoring = false
+metadata/body_part = &"shin_l"
+
+[node name="Shape" type="CollisionShape3D" parent="ShinLHitbox"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.075, 0.235, -0.01)
+shape = SubResource("BoxShape3D_part_10")
+
+[node name="ShinRHitbox" type="Area3D" parent="."]
+collision_layer = 2
+collision_mask = 0
+monitoring = false
+metadata/body_part = &"shin_r"
+
+[node name="Shape" type="CollisionShape3D" parent="ShinRHitbox"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.075, 0.235, -0.01)
+shape = SubResource("BoxShape3D_part_10")
 
 [node name="Model" type="Node3D" parent="."]
 script = ExtResource("5_model")

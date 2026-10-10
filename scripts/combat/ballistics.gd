@@ -48,10 +48,10 @@ static func _trace(shooter: CollisionObject3D, origin: Vector3, direction: Vecto
 			if VoxelArmor.soft_armor_stops(vitals.get_parent(), part, threat_level(weapon), round_class(weapon), distance, direction):
 				return _result("plate", hit)
 			vitals.server_hit(part, {
-				"damage": float(weapon.stats.get("damage", 10.0)),
 				"round_class": round_class(weapon),
 				"position": hit.position,
 				"direction": direction,
+				"hitbox": collider,  # the wound channel follows the hitbox's pose
 				"distance": distance,
 			})
 			return _result("body", hit)
