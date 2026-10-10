@@ -15,6 +15,8 @@ const LINEUP := [
 const SHOTS := [
 	["lineup", Vector3(2, 9, 30), Vector3(1, 1, -2)],
 	["helicopters", Vector3(-28, 5, 14), Vector3(-16, 2, 0)],
+	["uh60_side", Vector3(-13, 3, 9), Vector3(-24, 1.8, 0)],
+	["uh60_front", Vector3(-31, 3.5, -12), Vector3(-24, 1.8, 0)],
 	["ground", Vector3(24, 4, 12), Vector3(16, 1.5, -2)],
 	["armor", Vector3(48, 5, 13), Vector3(37, 1.5, -2)],
 ]

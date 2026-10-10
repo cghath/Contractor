@@ -40,6 +40,8 @@ const MODELS := {
 
 static var _meshes := {}  # "model|scheme" -> Mesh
 static var _sizes := {}   # model -> Vector3i canvas size
+static var _voxel := {}   # model -> voxel size in metres
+static var _rotors := {}  # model -> [[name, position_m, radius, chord, blades, axis]]
 static var _meshers := {}
 static var _material: StandardMaterial3D
 static var _blade_material: StandardMaterial3D
@@ -55,14 +57,16 @@ static func instance(model: String, scheme := "") -> Node3D:
 	hull.name = "Hull"
 	hull.mesh = mesh(model, scheme)
 	hull.material_override = _get_material()
-	hull.scale = Vector3.ONE * VOXEL_SIZE
+	var vs: float = _voxel[model]
+	hull.scale = Vector3.ONE * vs
 	var size: Vector3i = _sizes[model]
-	hull.position = Vector3(-size.x * 0.5, 0.0, -size.z * 0.5) * VOXEL_SIZE
+	hull.position = Vector3(-size.x * 0.5, 0.0, -size.z * 0.5) * vs
 	root.add_child(hull)
+	# Rotors drawn in metres on the canvas (z from the nose) move to the footprint centre.
+	for r: Array in _rotors.get(model, []):
+		var at: Vector3 = r[1]
+		_add_rotor(root, r[0], Vector3(at.x, at.y, at.z - size.z * vs * 0.5), r[2], r[3], r[4], r[5])
 	match model:
-		"uh60":
-			_add_rotor(root, "MainRotor", _vx(size, 23, 44, 58), 8.2, 0.53, 4, Vector3.UP)
-			_add_rotor(root, "TailRotor", _vx(size, 26, 41, 151), 1.7, 0.25, 4, Vector3.RIGHT)
 		"ah1z":
 			_add_rotor(root, "MainRotor", _vx(size, 30, 39, 58), 7.3, 0.58, 4, Vector3.UP)
 			_add_rotor(root, "TailRotor", _vx(size, 26, 35, 134), 1.4, 0.25, 4, Vector3.LEFT)
@@ -73,7 +77,7 @@ static func instance(model: String, scheme := "") -> Node3D:
 static func size_m(model: String) -> Vector3:
 	if not _sizes.has(model):
 		mesh(model, MODELS[model][0])
-	return Vector3(_sizes[model]) * VOXEL_SIZE
+	return Vector3(_sizes[model]) * float(_voxel[model])
 
 
 ## A static body with a box collider around the hull, for parking vehicles as props.
@@ -111,6 +115,8 @@ static func mesh(model: String, scheme: String) -> Mesh:
 	if not _meshes.has(key):
 		var canvas := _canvas_for(model)
 		_sizes[model] = canvas.size
+		_voxel[model] = canvas.vs
+		_rotors[model] = canvas.rotors
 		_meshes[key] = _get_mesher(scheme).build_mesh(canvas.buffer, [])
 	return _meshes[key]
 
@@ -145,7 +151,7 @@ static func _add_rotor(root: Node3D, rotor_name: String, at: Vector3, radius: fl
 	rotor.set_meta(&"axis", axis)
 	root.add_child(rotor)
 	# Blades lie in the plane perpendicular to the axis.
-	var basis := Basis.IDENTITY if axis == Vector3.UP else Basis(Vector3.FORWARD, PI * 0.5)
+	var basis := Basis(Quaternion(Vector3.UP, axis.normalized()))
 	for i in blades:
 		var blade := MeshInstance3D.new()
 		var box := BoxMesh.new()
@@ -183,6 +189,7 @@ static func _get_mesher(scheme: String) -> VoxelMesherCubes:
 		var mesher := VoxelMesherCubes.new()
 		mesher.palette = palette
 		mesher.color_mode = VoxelMesherCubes.COLOR_MESHER_PALETTE
+		mesher.greedy_meshing_enabled = false  # greedy quads leave hairline cracks at 5 cm
 		_meshers[scheme] = mesher
 	return _meshers[scheme]
 
@@ -202,12 +209,75 @@ static func _get_material() -> StandardMaterial3D:
 class Canvas:
 	var size: Vector3i
 	var buffer := VoxelBuffer.new()
+	## Voxel size in metres.
+	var vs := 0.1
+	## Rotors to add as separate nodes: [name, position_m, radius, chord, blades, axis].
+	var rotors: Array = []
 
-	func _init(p_size: Vector3i) -> void:
+	func _init(p_size: Vector3i, p_vs := 0.1) -> void:
 		size = p_size
+		vs = p_vs
 		buffer.set_channel_depth(VoxelBuffer.CHANNEL_COLOR, VoxelBuffer.DEPTH_8_BIT)
 		buffer.create(size.x + 2, size.y + 2, size.z + 2)
 		buffer.fill(VehicleArt.P.EMPTY, VoxelBuffer.CHANNEL_COLOR)
+
+	# Metre-space drawing: x is centred (negative = left), y up from the ground, z back from
+	# the nose. Everything below converts to voxels at this canvas's size.
+
+	func _vx(x: float) -> int:
+		return floori(x / vs + size.x * 0.5)
+
+	func _v(m: float) -> int:
+		return floori(m / vs)
+
+	func mbox(x0: float, y0: float, z0: float, x1: float, y1: float, z1: float, colour: int) -> void:
+		box(_vx(x0), _v(y0), _v(z0), maxi(_vx(x1), _vx(x0) + 1), maxi(_v(y1), _v(y0) + 1), maxi(_v(z1), _v(z0) + 1), colour)
+
+	## Rounded cross-sections along z, in metres. profile(z_m) -> Vector4(centre_x, centre_y,
+	## half_width, half_height). With `shell` > 0 only a skin that thick is filled (big hulls).
+	func mloft(z0: float, z1: float, profile: Callable, colour: int, squareness := 2.6, shell := 0.0) -> void:
+		for zi in range(_v(z0), _v(z1)):
+			var p: Vector4 = profile.call((zi + 0.5) * vs)
+			if p.z <= 0.0 or p.w <= 0.0:
+				continue
+			var inner_w := p.z - shell
+			var inner_h := p.w - shell
+			for xi in range(_vx(p.x - p.z), _vx(p.x + p.z) + 1):
+				var x := (xi + 0.5 - size.x * 0.5) * vs
+				var dx := absf((x - p.x) / p.z)
+				if dx > 1.0:
+					continue
+				for yi in range(_v(p.y - p.w), _v(p.y + p.w) + 1):
+					var y := (yi + 0.5) * vs
+					var dy := absf((y - p.y) / p.w)
+					if pow(dx, squareness) + pow(dy, squareness) > 1.0:
+						continue
+					if shell > 0.0 and inner_w > 0.0 and inner_h > 0.0 \
+							and pow(absf((x - p.x) / inner_w), squareness) + pow(absf((y - p.y) / inner_h), squareness) < 1.0:
+						continue
+					put(xi, yi, zi, colour)
+
+	## Wheel: a cylinder across x from x0 to x1 (metres), centre (cy, cz), radius r.
+	func mwheel(x0: float, x1: float, cy: float, cz: float, r: float, colour := VehicleArt.P.TIRE, hub := VehicleArt.P.METAL) -> void:
+		for xi in range(_vx(x0), maxi(_vx(x1), _vx(x0) + 1)):
+			for yi in range(_v(cy - r), _v(cy + r) + 1):
+				for zi in range(_v(cz - r), _v(cz + r) + 1):
+					var d := Vector2((yi + 0.5) * vs - cy, (zi + 0.5) * vs - cz).length()
+					if d <= r:
+						put(xi, yi, zi, hub if d <= r * 0.5 else colour)
+
+	func mskin(x0: float, y0: float, z0: float, x1: float, y1: float, z1: float, colour: int, match_colour := -1) -> void:
+		paint_skin(_vx(x0), _v(y0), _v(z0), _vx(x1), _v(y1), _v(z1), colour, match_colour)
+
+	## A straight bar between two points (struts, antennas), `thick` metres square.
+	func mbar(a: Vector3, b: Vector3, thick: float, colour: int) -> void:
+		var steps := maxi(ceili(a.distance_to(b) / (vs * 0.5)), 1)
+		for i in steps + 1:
+			var p := a.lerp(b, float(i) / steps)
+			mbox(p.x - thick * 0.5, p.y - thick * 0.5, p.z - thick * 0.5, p.x + thick * 0.5, p.y + thick * 0.5, p.z + thick * 0.5, colour)
+
+	func rotor(rotor_name: String, at_m: Vector3, radius: float, chord: float, blades: int, axis: Vector3) -> void:
+		rotors.append([rotor_name, at_m, radius, chord, blades, axis])
 
 	func inside(x: int, y: int, z: int) -> bool:
 		return x >= 0 and y >= 0 and z >= 0 and x < size.x and y < size.y and z < size.z
@@ -273,57 +343,107 @@ class Canvas:
 
 # --- Helicopters ------------------------------------------------------------------------
 
-## UH-60 Black Hawk: 15.3 m fuselage, 2.4 m wide, 4.4 m horizontal stabilator.
+## UH-60 Black Hawk at 5 cm voxels, drawn from its real dimensions: 15.3 m from nose to
+## tail rotor, 2.36 m wide cabin, two engines either side of the main transmission on the
+## roof, the tail boom kinked up into a swept pylon with the tail rotor canted on its right,
+## a low stabilator, forward main wheels on struts and a tail wheel.
 static func _uh60() -> Canvas:
-	var c := Canvas.new(Vector3i(46, 50, 158))
-	var cx := 23.0
-	# Fuselage: rounded nose, cockpit, cabin, then taper into the tail boom.
-	var fuselage := func(t: float) -> Vector4:
-		var z := t * 111.0
-		var hw := 11.5
-		var hh := 12.0
-		var cy := 18.0
-		if z < 24.0:
-			var k := sqrt(z / 24.0)
-			hw = lerpf(4.0, 11.5, k)
-			hh = lerpf(6.0, 12.0, k)
-			cy = lerpf(14.0, 18.0, k)
-		elif z > 82.0:
-			var k := (z - 82.0) / 30.0
-			hw = lerpf(11.5, 4.5, k)
-			hh = lerpf(12.0, 5.5, k)
-			cy = lerpf(18.0, 26.0, k)
-		return Vector4(cx, cy, hw, hh)
-	c.loft(0, 112, fuselage, P.PAINT)
-	c.loft(108, 150, func(t: float) -> Vector4: return Vector4(cx, lerpf(26.0, 28.0, t), lerpf(4.5, 2.2, t), lerpf(5.5, 3.0, t)), P.PAINT)
-	# Engine and transmission fairing on the roof, and the rotor mast.
-	c.loft(34, 96, func(t: float) -> Vector4: return Vector4(cx, 30.0, lerpf(8.0, 5.0, absf(t - 0.4)), lerpf(5.5, 3.5, absf(t - 0.4))), P.PAINT)
-	c.box(21, 34, 56, 25, 44, 60, P.METAL)
-	c.box(19, 30, 40, 27, 33, 44, P.BLACK)  # engine intakes
-	# Tail fin, swept back, with the tail rotor on its right.
-	for y in range(26, 46):
-		var back := int((y - 26) * 0.45)
-		c.box(22, y, 140 + back, 24, y + 1, 152 + back / 2, P.PAINT)
-	c.box(4, 27, 146, 42, 29, 156, P.PAINT)  # horizontal stabilator
-	# Cockpit glass, cabin windows and the sliding door outline.
-	c.paint_skin(0, 18, 3, 46, 30, 26, P.GLASS)
-	c.paint_skin(0, 16, 26, 46, 26, 34, P.GLASS)
-	c.paint_skin(0, 20, 42, 46, 26, 52, P.GLASS)
-	c.paint_skin(0, 20, 62, 46, 26, 74, P.GLASS)
-	c.paint_skin(0, 8, 40, 46, 9, 76, P.PAINT_DARK)
-	c.paint_skin(0, 8, 40, 46, 28, 41, P.PAINT_DARK)
-	c.paint_skin(0, 8, 75, 46, 28, 76, P.PAINT_DARK)
-	# Door guns (M240 on the window mounts), landing gear, lights and markings.
-	c.box(9, 20, 44, 11, 22, 52, P.GUN)
-	c.box(35, 20, 44, 37, 22, 52, P.GUN)
-	for side: int in [8, 34]:
-		c.box(side, 4, 32, side + 4, 8, 36, P.METAL)
-		c.wheel(side, side + 4, 3.0, 34.0, 3.0)
-	c.box(22, 20, 132, 24, 24, 134, P.METAL)
-	c.wheel(22, 24, 18.0, 133.0, 2.0)
-	c.box(10, 18, 30, 11, 20, 32, P.LIGHT_RED)
-	c.box(35, 18, 30, 36, 20, 32, P.LIGHT_GREEN)
-	c.paint_skin(0, 22, 90, 46, 28, 100, P.MARKING, P.PAINT)
+	var c := Canvas.new(Vector3i(96, 82, 314), 0.05)
+	var fuselage := func(z: float) -> Vector4:
+		var hw := 1.18
+		var bottom := 0.55
+		var top := 2.45
+		if z < 1.3:  # nose cone
+			var k := sqrt(z / 1.3)
+			hw = lerpf(0.35, 1.12, k)
+			bottom = lerpf(1.05, 0.6, k)
+			top = lerpf(1.45, 2.0, k)
+		elif z < 3.4:  # cockpit, windscreen rising to the roof
+			var k := clampf((z - 1.3) / 1.3, 0.0, 1.0)
+			hw = lerpf(1.12, 1.18, (z - 1.3) / 2.1)
+			bottom = lerpf(0.6, 0.55, (z - 1.3) / 2.1)
+			top = lerpf(2.0, 2.45, sqrt(k))
+		elif z > 7.6:  # aft cabin closing up into the boom
+			var k := clampf((z - 7.6) / 2.6, 0.0, 1.0)
+			hw = lerpf(1.18, 0.45, pow(k, 0.8))
+			bottom = lerpf(0.55, 1.6, k)
+			top = lerpf(2.45, 2.3, k)
+		return Vector4(0.0, (top + bottom) * 0.5, hw, (top - bottom) * 0.5)
+	c.mloft(0.0, 10.25, fuselage, P.PAINT, 3.4, 0.12)
+	var boom := func(z: float) -> Vector4:
+		var k := clampf((z - 10.1) / 4.3, 0.0, 1.0)
+		return Vector4(0.0, lerpf(1.95, 2.2, k), lerpf(0.45, 0.28, k), lerpf(0.38, 0.27, k))
+	c.mloft(10.1, 14.45, boom, P.PAINT, 2.2)
+	# Roof: transmission fairing, the two engine nacelles, intakes and IR exhaust suppressors.
+	var fairing := func(z: float) -> Vector4:
+		var k := clampf((z - 2.9) / 6.2, 0.0, 1.0)
+		var bump := sin(PI * k)
+		return Vector4(0.0, 2.45, 0.92 * minf(bump * 1.6, 1.0), 0.65 * minf(bump * 1.4, 1.0))
+	c.mloft(2.9, 9.1, fairing, P.PAINT, 2.8)
+	for side: float in [-1.0, 1.0]:
+		var nacelle := func(z: float) -> Vector4:
+			var k := clampf((z - 4.6) / 3.3, 0.0, 1.0)
+			return Vector4(side * 0.74, 2.78, 0.34 * (0.85 + 0.15 * sin(PI * k)), 0.33)
+		c.mloft(4.6, 7.95, nacelle, P.PAINT, 2.2)
+		c.mbox(side * 0.74 - 0.22, 2.58, 4.55, side * 0.74 + 0.22, 3.0, 4.65, P.BLACK)
+		c.mbox(minf(side * 0.72, side * 1.12), 2.6, 7.9, maxf(side * 0.72, side * 1.12), 2.98, 8.7, P.PAINT_DARK)
+		c.mbox(minf(side * 1.05, side * 1.14), 2.62, 8.0, maxf(side * 1.05, side * 1.14), 2.95, 8.65, P.BLACK)
+	# Rotor mast and hub; the blades are a separate node so they can turn.
+	var mast := func(_z: float) -> Vector4: return Vector4(0.0, 3.4, 0.2, 0.45)
+	c.mloft(4.85, 5.25, mast, P.METAL, 2.0)
+	c.mbox(-0.35, 3.7, 4.7, 0.35, 3.9, 5.4, P.BLACK)
+	c.rotor("MainRotor", Vector3(0.0, 3.92, 5.05), 8.18, 0.53, 4, Vector3.UP)
+	# Swept tail pylon, tail rotor canted 20 degrees on its right, stabilator low on the pylon.
+	var y := 2.05
+	while y < 4.3:
+		var front := 13.55 + (y - 2.05) * 0.5
+		var back := 14.95 + (y - 2.05) * 0.16
+		c.mbox(-0.12, y, front, 0.12, y + 0.05, back, P.PAINT)
+		y += 0.05
+	c.mbox(-0.1, 4.2, 14.6, 0.1, 4.32, 15.3, P.PAINT_DARK)
+	c.mbox(0.12, 3.55, 14.85, 0.32, 3.85, 15.1, P.METAL)
+	c.rotor("TailRotor", Vector3(0.36, 3.7, 14.98), 1.67, 0.25, 4, Vector3(cos(deg_to_rad(20.0)), sin(deg_to_rad(20.0)), 0.0))
+	c.mbox(-2.2, 1.92, 14.3, 2.2, 2.02, 15.35, P.PAINT)
+	c.mbox(-2.2, 1.92, 14.15, -1.6, 2.02, 14.3, P.PAINT)
+	c.mbox(1.6, 1.92, 14.15, 2.2, 2.02, 14.3, P.PAINT)
+	# Glass: windscreen and cockpit side windows, chin windows, gunner and cabin windows.
+	c.mskin(-1.25, 1.55, 0.9, 1.25, 2.47, 2.55, P.GLASS)
+	c.mskin(-1.25, 1.45, 2.55, 1.25, 2.38, 3.3, P.GLASS)
+	c.mskin(-0.95, 0.72, 0.5, 0.95, 1.3, 1.6, P.GLASS)
+	c.mbox(-0.04, 1.7, 0.95, 0.04, 2.5, 2.6, P.PAINT_DARK)  # windscreen centre post
+	for side: float in [-1.0, 1.0]:
+		var sx := side * 1.2
+		c.mbox(minf(sx, sx * 0.94), 1.4, 2.5, maxf(sx, sx * 0.94), 2.45, 2.6, P.PAINT_DARK)  # door frame
+		c.mbox(minf(sx, sx * 0.94), 1.4, 3.3, maxf(sx, sx * 0.94), 2.45, 3.4, P.PAINT_DARK)
+	c.mskin(-1.25, 1.55, 3.55, 1.25, 2.2, 4.15, P.GLASS)  # gunner's windows
+	c.mskin(-1.25, 1.6, 4.55, 1.25, 2.15, 5.35, P.GLASS)  # sliding door windows
+	c.mskin(-1.25, 1.6, 6.6, 1.25, 2.1, 7.3, P.GLASS)
+	# Sliding cabin door outline and the step under it.
+	c.mskin(-1.25, 0.6, 4.25, 1.25, 2.4, 4.32, P.PAINT_DARK, P.PAINT)
+	c.mskin(-1.25, 0.6, 5.95, 1.25, 2.4, 6.02, P.PAINT_DARK, P.PAINT)
+	c.mskin(-1.25, 2.33, 4.25, 1.25, 2.4, 6.0, P.PAINT_DARK, P.PAINT)
+	c.mbox(-1.28, 0.62, 4.35, 1.28, 0.68, 5.9, P.PAINT_DARK)
+	# M240 door guns on the gunner's window mounts.
+	for side: float in [-1.0, 1.0]:
+		var gx := side * 1.27
+		c.mbox(gx - 0.05, 1.78, 3.55, gx + 0.05, 1.93, 4.35, P.GUN)
+		c.mbox(gx - 0.025, 1.83, 2.9, gx + 0.025, 1.88, 3.55, P.GUN)
+		c.mbox(gx - 0.06, 1.64, 4.0, gx + 0.06, 1.78, 4.15, P.GUN)  # ammo box
+	# Main gear: wheels forward of the cabin on a strut and drag brace each side; tail wheel.
+	for side: float in [-1.0, 1.0]:
+		c.mbar(Vector3(side * 1.1, 0.95, 3.0), Vector3(side * 1.38, 0.32, 3.15), 0.1, P.METAL)
+		c.mbar(Vector3(side * 1.1, 0.75, 4.0), Vector3(side * 1.38, 0.32, 3.2), 0.08, P.METAL)
+		c.mwheel(minf(side * 1.28, side * 1.5), maxf(side * 1.28, side * 1.5), 0.31, 3.15, 0.31)
+	c.mbar(Vector3(0.0, 1.75, 13.0), Vector3(0.0, 0.25, 13.15), 0.08, P.METAL)
+	c.mwheel(-0.08, 0.08, 0.22, 13.15, 0.22)
+	# Wire cutters, antennas, nav lights, the anti-collision beacon and the boom's band.
+	c.mbox(-0.03, 2.45, 1.9, 0.03, 2.75, 2.0, P.METAL)
+	c.mbox(-0.03, 0.45, 1.2, 0.03, 0.6, 1.3, P.METAL)
+	c.mbar(Vector3(0.0, 2.3, 9.5), Vector3(0.0, 2.75, 10.1), 0.04, P.METAL)
+	c.mbox(-1.22, 1.9, 3.4, -1.15, 1.98, 3.5, P.LIGHT_RED)
+	c.mbox(1.15, 1.9, 3.4, 1.22, 1.98, 3.5, P.LIGHT_GREEN)
+	c.mbox(-0.05, 2.25, 11.0, 0.05, 2.32, 11.1, P.LIGHT_RED)
+	c.mskin(-0.6, 1.5, 11.8, 0.6, 2.6, 12.2, P.MARKING, P.PAINT)
 	return c
 
 
