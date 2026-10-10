@@ -68,7 +68,12 @@ const PARKED_VEHICLES := [
 	["aav7", "od", Vector3(12, 0, 34), 0.0],
 	["maxxpro", "desert", Vector3(18, 0, 34), 0.0],
 	["matv", "od", Vector3(24, 0, 34), 0.0],
-	["technical", "white", Vector3(30, 0, 34), 0.0],
+	["technical_dshk", "white", Vector3(30, 0, 34), 0.0],
+	["technical_zu23", "tan", Vector3(34, 0, 34), 0.0],
+	["technical_spg9", "white", Vector3(38, 0, 34), 0.0],
+	["technical_m40", "tan", Vector3(30, 0, 42), 0.0],
+	["technical_rockets", "white", Vector3(34, 0, 42), 0.0],
+	["technical_zpu", "red", Vector3(38, 0, 42), 0.0],
 	["bradley", "desert", Vector3(14, 0, 46), 0.0],
 	["abrams", "desert", Vector3(24, 0, 48), 0.0],
 ]

@@ -1,15 +1,13 @@
 class_name VehicleArt
 extends RefCounted
-## Voxel vehicle models built in code, at the same 10 cm voxel size as the world's walls:
+## Voxel vehicle models built in code at 5 cm voxels from their real dimensions:
 ## UH-60 Black Hawk, AH-1Z Viper, AAV-7, M2 Bradley, M1 Abrams, MRAPs (MaxxPro, M-ATV)
-## and a pickup technical.
+## and pickup technicals with the weapons common in the Middle East.
 ##
 ## Each model is a canvas of voxels filled with boxes and rounded cross-sections, then
 ## meshed once per model and paint scheme and cached. Rotors and gun mounts are separate
-## nodes so they can spin or turn later. Coordinates are voxels; front is -Z, up is +Y,
-## and the model's origin is the middle of its footprint on the ground.
-
-const VOXEL_SIZE := 0.1
+## nodes so they can spin. Shapes are drawn in metres (x centred, y up, z back from the
+## nose); in the game front is -Z and the origin is the middle of the footprint.
 
 enum P {
 	EMPTY, PAINT, PAINT_DARK, PAINT_LIGHT, GLASS, BLACK, METAL, TIRE, TRACK,
@@ -34,6 +32,12 @@ const MODELS := {
 	"maxxpro": ["desert", "od"],
 	"matv": ["desert", "od"],
 	"technical": ["white", "tan", "red"],
+	"technical_dshk": ["white", "tan", "red"],
+	"technical_zu23": ["tan", "white", "red"],
+	"technical_spg9": ["white", "tan", "red"],
+	"technical_m40": ["tan", "white", "red"],
+	"technical_rockets": ["white", "tan", "red"],
+	"technical_zpu": ["red", "white", "tan"],
 	"bradley": ["desert", "od"],
 	"abrams": ["desert", "od"],
 }
@@ -66,10 +70,6 @@ static func instance(model: String, scheme := "") -> Node3D:
 	for r: Array in _rotors.get(model, []):
 		var at: Vector3 = r[1]
 		_add_rotor(root, r[0], Vector3(at.x, at.y, at.z - size.z * vs * 0.5), r[2], r[3], r[4], r[5])
-	match model:
-		"ah1z":
-			_add_rotor(root, "MainRotor", _vx(size, 30, 39, 58), 7.3, 0.58, 4, Vector3.UP)
-			_add_rotor(root, "TailRotor", _vx(size, 26, 35, 134), 1.4, 0.25, 4, Vector3.LEFT)
 	return root
 
 
@@ -126,18 +126,15 @@ static func _canvas_for(model: String) -> Canvas:
 		"uh60": return _uh60()
 		"ah1z": return _ah1z()
 		"aav7": return _aav7()
-		"maxxpro": return _mrap(64, 25, 30, 11, true)
-		"matv": return _mrap(62, 25, 27, 16, false)
-		"technical": return _technical()
+		"maxxpro": return _maxxpro()
+		"matv": return _matv()
+		"technical": return _technical("dshk")
 		"bradley": return _bradley()
 		"abrams": return _abrams()
+	if model.begins_with("technical_"):
+		return _technical(model.trim_prefix("technical_"))
 	push_error("VehicleArt: unknown model '%s'" % model)
 	return Canvas.new(Vector3i.ONE)
-
-
-## Voxel coordinates on a canvas to metres relative to the model origin.
-static func _vx(size: Vector3i, x: float, y: float, z: float) -> Vector3:
-	return Vector3(x - size.x * 0.5, y, z - size.z * 0.5) * VOXEL_SIZE
 
 
 static func _add_rotor(root: Node3D, rotor_name: String, at: Vector3, radius: float, chord: float, blades: int, axis: Vector3) -> void:
@@ -447,242 +444,493 @@ static func _uh60() -> Canvas:
 	return c
 
 
-## AH-1Z Viper: 13.6 m fuselage only 1 m wide, tandem cockpit, stub wings with rocket pods
-## and Hellfires, chin gun, skids.
+
+
+## AH-1Z Viper: a narrow (about 1 m) fuselage with a stepped tandem canopy (gunner in front
+## and lower), the targeting sight ball on the nose, the three-barrel M197 chin turret,
+## engines high on either side of the transmission with upturned exhausts, stub wings
+## carrying rocket pods, Hellfire racks and wingtip Sidewinder rails, and skids.
 static func _ah1z() -> Canvas:
-	var c := Canvas.new(Vector3i(60, 44, 140))
-	var cx := 30.0
-	var fuselage := func(t: float) -> Vector4:
-		var z := t * 91.0
-		var hw := 5.5
-		var hh := 10.0
-		var cy := 17.0
-		if z < 20.0:
-			var k := sqrt(z / 20.0)
-			hw = lerpf(2.0, 5.5, k)
-			hh = lerpf(4.0, 10.0, k)
-			cy = lerpf(13.0, 17.0, k)
-		elif z > 72.0:
-			var k := (z - 72.0) / 20.0
-			hw = lerpf(5.5, 3.0, k)
-			hh = lerpf(10.0, 4.0, k)
-			cy = lerpf(17.0, 22.0, k)
-		return Vector4(cx, cy, hw, hh)
-	c.loft(0, 92, fuselage, P.PAINT)
-	c.loft(88, 136, func(t: float) -> Vector4: return Vector4(cx, lerpf(22.0, 24.0, t), lerpf(3.0, 1.6, t), lerpf(4.0, 2.4, t)), P.PAINT)
-	# Tandem canopy: a raised glass bubble over both seats.
-	c.loft(10, 48, func(t: float) -> Vector4: return Vector4(cx, 24.0, 5.0 * sin(PI * clampf(t * 1.05, 0.0, 1.0)) + 0.5, 6.0 * sin(PI * clampf(t, 0.0, 1.0))), P.GLASS)
-	c.box(29, 22, 26, 31, 31, 28, P.PAINT_DARK)  # frame between the cockpits
-	# Engines either side of the rotor mast, exhausts pointing up and out.
+	var c := Canvas.new(Vector3i(96, 88, 278), 0.05)
+	var fuselage := func(z: float) -> Vector4:
+		var hw := 0.48
+		var bottom := 0.75
+		var top := 1.95
+		if z < 1.5:
+			var k := sqrt(z / 1.5)
+			hw = lerpf(0.22, 0.48, k)
+			bottom = lerpf(1.0, 0.78, k)
+			top = lerpf(1.35, 1.7, k)
+		elif z < 3.4:
+			top = lerpf(1.7, 2.15, sqrt(clampf((z - 1.5) / 0.8, 0.0, 1.0)))  # gunner's canopy
+		elif z < 5.2:
+			top = lerpf(2.15, 2.45, sqrt(clampf((z - 3.4) / 0.6, 0.0, 1.0)))  # pilot sits higher
+			top = lerpf(top, 1.95, clampf((z - 4.7) / 0.5, 0.0, 1.0))
+		elif z > 8.9:
+			var k := clampf((z - 8.9) / 1.5, 0.0, 1.0)
+			hw = lerpf(0.48, 0.26, k)
+			bottom = lerpf(0.75, 1.55, k)
+			top = lerpf(1.95, 2.05, k)
+		return Vector4(0.0, (top + bottom) * 0.5, hw, (top - bottom) * 0.5)
+	c.mloft(0.25, 10.4, fuselage, P.PAINT, 3.0, 0.1)
+	var boom := func(z: float) -> Vector4:
+		var k := clampf((z - 10.3) / 3.0, 0.0, 1.0)
+		return Vector4(0.0, lerpf(1.8, 2.05, k), lerpf(0.26, 0.17, k), lerpf(0.26, 0.18, k))
+	c.mloft(10.3, 13.35, boom, P.PAINT, 2.2)
+	# Canopy glass with frames between the two cockpits.
+	c.mskin(-0.6, 1.55, 1.35, 0.6, 2.5, 5.0, P.GLASS)
+	c.mbox(-0.5, 1.6, 3.3, 0.5, 2.5, 3.42, P.PAINT_DARK)
+	c.mbox(-0.03, 1.9, 1.4, 0.03, 2.5, 5.0, P.PAINT_DARK)
+	# Targeting sight ball on the nose and the M197 turret under the chin.
+	var ball := func(z: float) -> Vector4:
+		var k := clampf((z - 0.0) / 0.55, 0.0, 1.0)
+		var r := 0.27 * sin(PI * k)
+		return Vector4(0.0, 1.2, r, r)
+	c.mloft(0.0, 0.55, ball, P.PAINT_DARK, 2.0)
+	c.mskin(-0.15, 1.05, 0.0, 0.15, 1.35, 0.12, P.GLASS)
+	c.mbox(-0.2, 0.45, 0.85, 0.2, 0.82, 1.35, P.PAINT_DARK)
+	for bx: float in [-0.06, 0.0, 0.06]:
+		c.mbox(bx - 0.025, 0.58, 0.05, bx + 0.025, 0.63, 0.9, P.GUN)
+	# Transmission fairing, engines with upturned exhausts, mast and rotors.
+	var fairing := func(z: float) -> Vector4:
+		var k := clampf((z - 4.4) / 3.2, 0.0, 1.0)
+		return Vector4(0.0, 1.95, 0.42 * minf(sin(PI * k) * 1.5, 1.0), 0.55 * minf(sin(PI * k) * 1.5, 1.0))
+	c.mloft(4.4, 7.6, fairing, P.PAINT, 2.6)
 	for side: float in [-1.0, 1.0]:
-		c.loft(46, 82, func(t: float) -> Vector4: return Vector4(cx + side * 6.0, 27.0, 3.5, 3.5), P.PAINT_DARK)
-		c.box(int(cx + side * 6.0) - 2, 28, 80, int(cx + side * 6.0) + 2, 32, 84, P.BLACK)
-	c.box(29, 30, 56, 32, 38, 60, P.METAL)
-	# Stub wings with a rocket pod and a Hellfire rack each side.
-	c.box(4, 14, 54, 56, 16, 66, P.PAINT)
-	for x0: int in [6, 48]:
-		c.loft(48, 70, func(t: float) -> Vector4: return Vector4(x0 + 3.0, 11.0, 3.0, 3.0), P.PAINT_DARK)
-		c.box(x0, 8, 48, x0 + 6, 9, 50, P.BLACK)
-	for x0: int in [16, 40]:
-		c.box(x0, 10, 52, x0 + 4, 14, 70, P.METAL)
-		c.box(x0, 8, 50, x0 + 4, 10, 68, P.PAINT_LIGHT)
-	# Chin turret with the 20 mm gun, skids, tail fin with the rotor on the left.
-	c.box(27, 4, 6, 33, 8, 12, P.BLACK)
-	c.box(29, 5, 0, 31, 7, 6, P.GUN)
-	for x0: int in [19, 39]:
-		c.box(x0, 0, 22, x0 + 2, 1, 80, P.METAL)
-		c.box(x0, 1, 30, x0 + 2, 8, 32, P.METAL)
-		c.box(x0, 1, 66, x0 + 2, 8, 68, P.METAL)
-	for y in range(22, 40):
-		var back := int((y - 22) * 0.5)
-		c.box(29, y, 126 + back, 31, y + 1, 136, P.PAINT)
-	c.box(18, 23, 118, 42, 25, 126, P.PAINT)
-	c.paint_skin(0, 18, 76, 60, 24, 84, P.MARKING, P.PAINT)
+		var nacelle := func(_z: float) -> Vector4: return Vector4(side * 0.56, 2.08, 0.3, 0.3)
+		c.mloft(5.0, 7.95, nacelle, P.PAINT, 2.2)
+		c.mbox(side * 0.56 - 0.18, 1.9, 4.95, side * 0.56 + 0.18, 2.26, 5.05, P.BLACK)
+		c.mbar(Vector3(side * 0.6, 2.15, 7.9), Vector3(side * 0.85, 2.6, 8.5), 0.26, P.PAINT_DARK)
+		c.mbox(side * 0.85 - 0.1, 2.58, 8.4, side * 0.85 + 0.1, 2.68, 8.6, P.BLACK)
+	var mast := func(_z: float) -> Vector4: return Vector4(0.0, 2.85, 0.16, 0.4)
+	c.mloft(5.6, 5.9, mast, P.METAL, 2.0)
+	c.rotor("MainRotor", Vector3(0.0, 3.3, 5.75), 7.3, 0.58, 4, Vector3.UP)
+	# Fin swept back, tail rotor on its right, horizontal stabiliser with end plates.
+	var y := 1.95
+	while y < 3.6:
+		c.mbox(-0.1, y, 12.45 + (y - 1.95) * 0.45, 0.1, y + 0.05, 13.55 + (y - 1.95) * 0.1, P.PAINT)
+		y += 0.05
+	c.rotor("TailRotor", Vector3(0.28, 3.0, 13.2), 1.45, 0.24, 4, Vector3.RIGHT)
+	c.mbox(0.1, 2.85, 13.05, 0.24, 3.15, 13.35, P.METAL)
+	c.mbox(-1.4, 1.92, 11.0, 1.4, 2.0, 11.65, P.PAINT)
+	c.mbox(-1.45, 1.75, 10.95, -1.35, 2.25, 11.7, P.PAINT)
+	c.mbox(1.35, 1.75, 10.95, 1.45, 2.25, 11.7, P.PAINT)
+	# Stub wings and stores: rocket pods inboard, Hellfire racks outboard, Sidewinder rails.
+	c.mbox(-2.2, 1.22, 5.35, 2.2, 1.34, 6.35, P.PAINT)
+	for side: float in [-1.0, 1.0]:
+		c.mbox(side * 1.1 - 0.05, 1.05, 5.5, side * 1.1 + 0.05, 1.22, 6.1, P.PAINT_DARK)
+		var pod := func(_z: float) -> Vector4: return Vector4(side * 1.1, 0.83, 0.22, 0.22)
+		c.mloft(4.6, 6.3, pod, P.PAINT_DARK, 2.0)
+		c.mbox(side * 1.1 - 0.16, 0.68, 4.58, side * 1.1 + 0.16, 0.98, 4.64, P.BLACK)
+		c.mbox(side * 1.85 - 0.25, 1.1, 5.3, side * 1.85 + 0.25, 1.22, 6.4, P.PAINT_DARK)
+		for hx: float in [-0.12, 0.12]:
+			for hy: float in [0.85, 1.02]:
+				c.mbox(side * 1.85 + hx - 0.05, hy, 4.9, side * 1.85 + hx + 0.05, hy + 0.1, 6.5, P.PAINT_LIGHT)
+		c.mbox(side * 2.25 - 0.04, 1.2, 5.0, side * 2.25 + 0.04, 1.3, 7.0, P.PAINT_LIGHT)
+	# Skids with curved toes and cross tubes.
+	for side: float in [-1.0, 1.0]:
+		c.mbar(Vector3(side * 0.95, 0.08, 2.5), Vector3(side * 0.95, 0.08, 8.6), 0.08, P.METAL)
+		c.mbar(Vector3(side * 0.95, 0.08, 2.5), Vector3(side * 0.95, 0.35, 2.0), 0.08, P.METAL)
+		for cz: float in [3.4, 7.3]:
+			c.mbar(Vector3(side * 0.95, 0.1, cz), Vector3(side * 0.42, 0.8, cz), 0.08, P.METAL)
+	c.mskin(-0.6, 1.0, 9.2, 0.6, 2.2, 9.6, P.MARKING, P.PAINT)
 	return c
 
 
 # --- Ground vehicles --------------------------------------------------------------------
 
-## AAV-7: 8.2 m tracked amphibious hull, sloped bow, up-gunned weapon station front right.
-static func _aav7() -> Canvas:
-	var c := Canvas.new(Vector3i(33, 34, 82))
-	for z in 82:
-		var top := 26
-		var bottom := 4
-		if z < 18:
-			top = 14 + int(z * 12.0 / 18.0)  # sloped bow plate
-			bottom = 4 + int((18 - z) * 6.0 / 18.0)
-		c.box(1, bottom, z, 32, top, z + 1, P.PAINT)
-	c.box(4, 26, 34, 29, 27, 76, P.PAINT_DARK)  # roof hatches
-	c.paint_skin(0, 24, 40, 33, 27, 74, P.PAINT_DARK, P.PAINT)
-	c.box(2, 4, 81, 31, 25, 82, P.PAINT_DARK)  # rear ramp
-	# Tracks and road wheels down each side.
-	for x0: int in [0, 27]:
-		c.box(x0, 0, 8, x0 + 6, 2, 78, P.TRACK)
-		c.box(x0, 10, 12, x0 + 6, 12, 76, P.TRACK)
-		for i in 6:
-			c.wheel(x0, x0 + 6, 5.5, 18.0 + i * 11.0, 5.0, P.TRACK, P.METAL)
-		c.wheel(x0, x0 + 6, 7.0, 9.0, 4.0, P.TRACK, P.METAL)
-		c.box(x0, 12, 6, x0 + 6, 14, 80, P.PAINT_DARK)  # track skirt
-	# Weapon station (Mk19 and M2) and commander's cupola.
-	c.box(19, 26, 18, 30, 33, 30, P.PAINT)
-	c.box(21, 28, 6, 22, 30, 18, P.GUN)
-	c.box(26, 28, 9, 27, 29, 18, P.GUN)
-	c.paint_skin(19, 30, 17, 30, 32, 19, P.GLASS)
-	c.box(5, 26, 28, 12, 30, 35, P.PAINT)
-	c.paint_skin(5, 28, 27, 12, 30, 29, P.GLASS)
-	c.box(2, 18, 2, 31, 19, 4, P.PAINT_DARK)  # trim vane folded on the bow
-	c.box(3, 20, 0, 6, 22, 2, P.METAL)
-	c.box(27, 20, 0, 30, 22, 2, P.METAL)
-	return c
-
-
-## MRAP: V-hull, armored cab and troop box, roof turret with gun shield, four big wheels.
-## `hood` is the bonnet length in voxels; `troop_box` gives the MaxxPro's tall rear module.
-static func _mrap(length: int, width: int, height: int, hood: int, troop_box: bool) -> Canvas:
-	var c := Canvas.new(Vector3i(width + 2, height + 7, length))
-	var x0 := 1
-	var x1 := width + 1
-	var floor_y := 9
-	# V-hull under the body.
-	for y in range(5, floor_y):
-		var inset := (floor_y - y) * 2
-		c.box(x0 + inset, y, 4, x1 - inset, y + 1, length - 4, P.PAINT_DARK)
-	# Bonnet, cab and the rear troop compartment.
-	c.box(x0 + 1, floor_y, 0, x1 - 1, floor_y + 9, hood, P.PAINT)
-	c.box(x0 + 2, floor_y + 9, 2, x1 - 2, floor_y + 10, hood - 1, P.PAINT_LIGHT)
-	c.box(x0 + 3, floor_y + 4, 0, x1 - 3, floor_y + 7, 1, P.BLACK)  # grille
-	var cab_top := height if troop_box else height - 2
-	c.box(x0, floor_y, hood, x1, cab_top, length - 1, P.PAINT)
-	c.box(x0 + 1, cab_top, hood + 2, x1 - 1, cab_top + 1, length - 3, P.PAINT_DARK)
-	# Thick armored glass: windscreen and side windows of the cab.
-	c.paint_skin(x0 + 2, floor_y + 11, hood, x1 - 2, cab_top - 3, hood + 1, P.GLASS)
-	c.paint_skin(x0, floor_y + 11, hood + 2, x1, cab_top - 3, hood + 18, P.GLASS)
-	if troop_box:
-		c.paint_skin(x0, floor_y + 13, hood + 24, x1, floor_y + 17, hood + 30, P.GLASS)
-		c.paint_skin(x0, floor_y + 13, hood + 34, x1, floor_y + 17, hood + 40, P.GLASS)
-	c.box(x0 + 3, floor_y + 1, length - 1, x1 - 3, cab_top - 2, length, P.PAINT_DARK)  # rear door
-	c.wheel(x0 + 7, x1 - 7, floor_y + 6.0, length - 0.5, 4.0)  # spare tyre on the door
-	# Roof turret: ring, gun shield and an M2.
-	var tz := hood + 14
-	c.box(x0 + 7, cab_top + 1, tz, x1 - 7, cab_top + 2, tz + 11, P.PAINT_DARK)
-	c.box(x0 + 6, cab_top + 2, tz, x1 - 6, cab_top + 6, tz + 1, P.PAINT)
-	c.box(x0 + 6, cab_top + 2, tz, x0 + 7, cab_top + 6, tz + 6, P.PAINT)
-	c.box(x1 - 7, cab_top + 2, tz, x1 - 6, cab_top + 6, tz + 6, P.PAINT)
-	c.paint_skin(x0 + 9, cab_top + 4, tz, x1 - 9, cab_top + 5, tz + 1, P.GLASS)
-	var gx := (x0 + x1) / 2
-	c.box(gx - 1, cab_top + 3, tz + 1, gx + 1, cab_top + 5, tz + 5, P.GUN)
-	c.box(gx, cab_top + 4, tz - 9, gx + 1, cab_top + 5, tz + 1, P.GUN)
-	# Wheels, mud flaps, mirrors and lights.
-	var r := 6.0
-	for wz: float in [hood - 2.0, length - 14.0]:
-		c.wheel(0, 5, r, wz, r)
-		c.wheel(width - 3, width + 2, r, wz, r)
-		c.box(0, int(r) + 6, int(wz) - 7, 5, int(r) + 7, int(wz) + 7, P.PAINT_DARK)
-		c.box(width - 3, int(r) + 6, int(wz) - 7, width + 2, int(r) + 7, int(wz) + 7, P.PAINT_DARK)
-	c.box(0, floor_y + 12, hood + 1, 1, floor_y + 15, hood + 2, P.BLACK)
-	c.box(x1, floor_y + 12, hood + 1, x1 + 1, floor_y + 15, hood + 2, P.BLACK)
-	c.box(x0 + 2, floor_y + 6, 0, x0 + 4, floor_y + 8, 1, P.PAINT_LIGHT)
-	c.box(x1 - 4, floor_y + 6, 0, x1 - 2, floor_y + 8, 1, P.PAINT_LIGHT)
-	return c
-
-
-## Tracks and road wheels down both sides of a tracked hull.
-static func _tracks(c: Canvas, width: int, z0: int, z1: int, wheels: int, radius: float, track_w: int) -> void:
-	for x0: int in [0, width - track_w]:
-		c.box(x0, 0, z0 + 2, x0 + track_w, 2, z1 - 2, P.TRACK)
-		c.box(x0, int(radius * 2.0), z0 + 4, x0 + track_w, int(radius * 2.0) + 2, z1 - 4, P.TRACK)
-		var step := float(z1 - z0 - 12) / maxf(wheels - 1, 1)
+## Tracks in metres: road wheels, drive sprocket and idler on each side.
+static func _mtracks(c: Canvas, inner: float, outer: float, z0: float, z1: float, wheels: int, r: float, sprocket_front: bool) -> void:
+	for side: float in [-1.0, 1.0]:
+		var x0 := minf(side * inner, side * outer)
+		var x1 := maxf(side * inner, side * outer)
+		c.mbox(x0, 0.0, z0 + r, x1, 0.08, z1 - r, P.TRACK)
+		c.mbox(x0, 2.0 * r + 0.18, z0 + r * 0.8, x1, 2.0 * r + 0.26, z1 - r * 0.8, P.TRACK)
+		var step := (z1 - z0 - 3.2 * r) / maxf(wheels - 1, 1)
 		for i in wheels:
-			c.wheel(x0, x0 + track_w, radius + 0.5, z0 + 6.0 + i * step, radius, P.TRACK, P.METAL)
-		c.wheel(x0, x0 + track_w, radius + 2.0, z0 + 3.0, radius * 0.7, P.TRACK, P.METAL)  # drive sprocket
-		c.wheel(x0, x0 + track_w, radius + 2.0, z1 - 3.0, radius * 0.7, P.TRACK, P.METAL)  # idler
+			c.mwheel(x0, x1, r + 0.04, z0 + 1.6 * r + i * step, r, P.TRACK, P.METAL)
+		var front_r := r * (0.85 if sprocket_front else 0.75)
+		var back_r := r * (0.75 if sprocket_front else 0.85)
+		c.mwheel(x0, x1, r + 0.22, z0 + front_r, front_r, P.TRACK, P.METAL)
+		c.mwheel(x0, x1, r + 0.18, z1 - back_r, back_r, P.TRACK, P.METAL)
 
 
-## M2A3 Bradley: 6.5 m hull, 25 mm Bushmaster and a TOW launcher box on the turret's left.
+## Hull cross-section of a tracked vehicle: slab sides, flat roof, sloped bow.
+static func _hull(c: Canvas, z0: float, z1: float, half_w: float, bottom: float, top: float, bow_len: float, bow_top: float, bow_bottom: float) -> void:
+	var z := z0
+	while z < z1:
+		var t := 0.0 if bow_len <= 0.0 else clampf((z - z0) / bow_len, 0.0, 1.0)
+		c.mbox(-half_w, lerpf(bow_bottom, bottom, t), z, half_w, lerpf(bow_top, top, t), z + c.vs, P.PAINT)
+		z += c.vs
+
+
+## AAV-7A1: 7.9 m slab-sided amphibious hull over wide tracks, steep bow with the bow plane,
+## upgunned weapon station (Mk19 and M2) front right, driver and commander cupolas front left,
+## and the big rear ramp.
+static func _aav7() -> Canvas:
+	var c := Canvas.new(Vector3i(68, 68, 160), 0.05)
+	_mtracks(c, 1.12, 1.62, 0.6, 7.6, 6, 0.3, true)
+	_hull(c, 0.0, 7.95, 1.12, 0.45, 2.6, 1.8, 1.45, 1.05)
+	_hull(c, 0.4, 7.9, 1.63, 1.12, 2.6, 1.4, 1.8, 1.25)  # sponsons over the tracks
+	c.mbox(-1.63, 0.95, 0.9, 1.63, 1.12, 7.7, P.PAINT_DARK)  # track skirt line
+	c.mskin(-1.4, 1.35, 0.0, 1.4, 2.4, 1.7, P.PAINT_DARK, P.PAINT)  # bow plane
+	c.mbox(-1.1, 0.55, 7.9, 1.1, 2.45, 7.98, P.PAINT_DARK)  # ramp
+	c.mbox(-0.08, 2.05, 7.95, 0.08, 2.35, 8.0, P.METAL)
+	# Roof cargo hatches.
+	c.mskin(-1.0, 2.55, 3.6, 1.0, 2.62, 7.0, P.PAINT_DARK, P.PAINT)
+	c.mbox(-0.95, 2.6, 3.65, -0.05, 2.62, 6.95, P.PAINT)
+	c.mbox(0.05, 2.6, 3.65, 0.95, 2.62, 6.95, P.PAINT)
+	# Weapon station front right with the Mk19 (thick) and M2 (long) guns.
+	c.mbox(0.25, 2.6, 1.6, 1.42, 3.22, 3.0, P.PAINT)
+	c.mbox(0.3, 3.22, 1.75, 1.35, 3.28, 2.85, P.PAINT_DARK)
+	c.mskin(0.3, 2.95, 1.55, 1.35, 3.15, 1.65, P.GLASS)
+	c.mbox(0.48, 2.78, 0.75, 0.62, 2.92, 1.6, P.GUN)
+	c.mbox(0.92, 2.8, 0.2, 0.98, 2.86, 1.6, P.GUN)
+	c.mbox(0.88, 2.76, 0.2, 1.02, 2.9, 0.3, P.GUN)
+	# Driver's and commander's cupolas with vision blocks.
+	c.mbox(-1.3, 2.6, 1.8, -0.55, 2.8, 2.5, P.PAINT)
+	c.mskin(-1.3, 2.62, 1.75, -0.55, 2.78, 1.85, P.GLASS)
+	c.mbox(-1.25, 2.6, 2.75, -0.6, 2.95, 3.35, P.PAINT)
+	c.mskin(-1.25, 2.75, 2.7, -0.6, 2.9, 3.4, P.GLASS)
+	# Headlights, tow hooks, exhaust grille on the right side.
+	c.mbox(-1.2, 1.55, 0.95, -0.95, 1.7, 1.05, P.PAINT_LIGHT)
+	c.mbox(0.95, 1.55, 0.95, 1.2, 1.7, 1.05, P.PAINT_LIGHT)
+	c.mskin(1.55, 1.7, 2.0, 1.7, 2.3, 3.0, P.BLACK)
+	return c
+
+
+## M2A3 Bradley: 6.5 m hull with a long sloped glacis, side armour tiles, six road wheels
+## and the rear ramp; turret with the 25 mm Bushmaster, the twin TOW box on its left, the
+## gunner's sight and the commander's independent viewer.
 static func _bradley() -> Canvas:
-	var c := Canvas.new(Vector3i(36, 34, 78))
-	_tracks(c, 36, 8, 74, 6, 4.0, 6)
-	for z in range(8, 74):
-		var top := 22
-		if z < 22:
-			top = 14 + int((z - 8) * 8.0 / 14.0)  # sloped glacis
-		c.box(5, 5, z, 31, top, z + 1, P.PAINT)
-	c.box(2, 10, 12, 34, 16, 72, P.PAINT_DARK)  # side armour skirts
-	c.box(8, 5, 73, 28, 21, 74, P.PAINT_DARK)  # rear ramp
-	c.box(7, 22, 14, 12, 24, 22, P.PAINT)  # driver's hatch
-	# Turret, set right of centre, with the gun forward and the TOW box on its left.
-	c.box(12, 22, 26, 30, 30, 46, P.PAINT)
-	c.box(13, 30, 30, 29, 31, 44, P.PAINT_DARK)
-	c.box(19, 25, 4, 21, 27, 26, P.GUN)  # 25 mm barrel
-	c.box(18, 24, 22, 22, 28, 26, P.PAINT_DARK)  # mantlet
-	c.box(8, 24, 28, 12, 30, 44, P.PAINT_LIGHT)  # TOW launcher
-	c.box(8, 25, 28, 12, 29, 29, P.BLACK)
-	c.paint_skin(24, 30, 32, 29, 32, 36, P.GLASS)  # commander's sight
-	c.box(28, 30, 40, 30, 33, 42, P.METAL)  # antenna base
+	var c := Canvas.new(Vector3i(74, 68, 132), 0.05)
+	_mtracks(c, 1.15, 1.6, 0.4, 6.5, 6, 0.3, true)
+	_hull(c, 0.0, 6.5, 1.6, 0.5, 1.95, 1.3, 1.05, 0.55)
+	c.mbox(-1.6, 0.5, 0.0, 1.6, 0.95, 0.15, P.PAINT)
+	# Side armour skirts with reactive tiles.
+	for side: float in [-1.0, 1.0]:
+		var x0 := minf(side * 1.6, side * 1.8)
+		var x1 := maxf(side * 1.6, side * 1.8)
+		var z := 0.7
+		var row := 0
+		while z < 6.2:
+			c.mbox(x0, 0.55, z, x1, 1.05, z + 0.5, P.PAINT if row % 2 == 0 else P.PAINT_DARK)
+			c.mbox(x0, 1.05, z, x1, 1.5, z + 0.5, P.PAINT_DARK if row % 2 == 0 else P.PAINT)
+			z += 0.5
+			row += 1
+	c.mbox(-1.2, 0.6, 6.45, 1.2, 1.9, 6.52, P.PAINT_DARK)  # ramp
+	c.mskin(0.35, 1.9, 1.2, 1.45, 2.0, 2.1, P.BLACK, P.PAINT)  # engine grille, front right
+	c.mbox(-1.35, 1.95, 1.3, -0.75, 2.1, 1.9, P.PAINT)  # driver's hatch
+	c.mskin(-1.35, 1.98, 1.25, -0.75, 2.08, 1.35, P.GLASS)
+	# Turret.
+	var z := 1.95
+	while z < 4.3:
+		var half := lerpf(0.75, 1.05, clampf((z - 1.95) / 0.6, 0.0, 1.0))
+		c.mbox(-half + 0.1, 1.95, z, half + 0.1, 2.65, z + c.vs, P.PAINT)
+		z += c.vs
+	c.mbox(-0.6, 2.65, 2.4, 0.8, 2.7, 4.0, P.PAINT_DARK)
+	c.mbox(0.05, 2.1, 1.75, 0.55, 2.55, 2.05, P.PAINT_DARK)  # mantlet
+	c.mbox(0.2, 2.27, 0.25, 0.3, 2.37, 1.8, P.GUN)  # 25 mm barrel
+	c.mbox(0.18, 2.25, 0.25, 0.32, 2.39, 0.4, P.GUN)
+	c.mbox(0.42, 2.25, 1.4, 0.48, 2.31, 1.8, P.GUN)  # coax M240
+	c.mbox(-1.42, 2.05, 2.0, -0.92, 2.6, 3.4, P.PAINT_LIGHT)  # TOW launcher
+	c.mbox(-1.38, 2.1, 1.98, -1.18, 2.3, 2.02, P.BLACK)
+	c.mbox(-1.15, 2.1, 1.98, -0.96, 2.3, 2.02, P.BLACK)
+	c.mbox(-0.55, 2.65, 2.2, -0.15, 2.95, 2.6, P.PAINT)  # gunner's sight
+	c.mskin(-0.55, 2.7, 2.15, -0.15, 2.9, 2.25, P.GLASS)
+	c.mbox(0.45, 2.7, 3.3, 0.85, 3.12, 3.7, P.PAINT)  # commander's viewer
+	c.mskin(0.45, 2.85, 3.25, 0.85, 3.05, 3.35, P.GLASS)
+	for side: float in [-1.0, 1.0]:
+		c.mbox(side * 0.95 - 0.12 + 0.1, 2.3, 2.0, side * 0.95 + 0.12 + 0.1, 2.5, 2.2, P.PAINT_DARK)  # smoke launchers
+	c.mbar(Vector3(0.9, 2.7, 4.1), Vector3(0.9, 3.35, 4.15), 0.03, P.METAL)  # antenna
 	return c
 
 
-## M1A2 Abrams: 7.9 m hull, wide flat turret with the 120 mm gun reaching past the bow.
+## M1A2 SEP Abrams: 7.9 m hull with a long shallow glacis, seven road wheels under side
+## skirts, the wide angular turret with bustle rack, the 120 mm gun with bore evacuator,
+## gunner's sight, commander's viewer and CROWS, and the engine deck grilles.
 static func _abrams() -> Canvas:
-	var c := Canvas.new(Vector3i(37, 30, 100))
-	_tracks(c, 37, 18, 98, 7, 4.0, 7)
-	for z in range(18, 98):
-		var top := 20
-		var bottom := 5
-		if z < 26:
-			top = 14 + int((z - 18) * 6.0 / 8.0)  # glacis
-			bottom = 5 + int((26 - z) * 0.5)
-		c.box(6, bottom, z, 31, top, z + 1, P.PAINT)
-	c.box(2, 9, 20, 35, 15, 92, P.PAINT_DARK)  # side skirts
-	c.box(8, 14, 96, 29, 19, 98, P.METAL)  # engine grille at the back
-	# Turret: wedge front, bustle at the back, commander's weapon station.
-	for z in range(36, 82):
-		var half := 15
-		if z < 46:
-			half = 9 + int((z - 36) * 0.6)
-		c.box(18 - half, 20, z, 19 + half, 27, z + 1, P.PAINT)
-	c.box(5, 20, 76, 32, 26, 86, P.PAINT_DARK)  # bustle rack
-	c.box(17, 22, 0, 20, 25, 38, P.PAINT)  # 120 mm gun tube
-	c.box(16, 21, 14, 21, 26, 20, P.PAINT)  # bore evacuator
-	c.box(16, 21, 34, 21, 26, 38, P.PAINT_DARK)  # mantlet
-	c.box(24, 27, 58, 29, 30, 64, P.PAINT_DARK)  # CROWS
-	c.box(26, 29, 50, 27, 30, 58, P.GUN)
-	c.paint_skin(9, 26, 46, 14, 28, 52, P.GLASS)  # gunner's sight
-	c.box(6, 27, 70, 7, 30, 71, P.METAL)  # antennas
-	c.box(31, 27, 70, 32, 30, 71, P.METAL)
+	var c := Canvas.new(Vector3i(76, 60, 198), 0.05)
+	var hz := 1.9  # the hull starts here; the gun reaches the front of the canvas
+	_mtracks(c, 1.2, 1.7, hz + 0.3, hz + 7.9, 7, 0.32, false)
+	_hull(c, hz, hz + 7.93, 1.7, 0.5, 1.5, 1.5, 0.95, 0.65)
+	for side: float in [-1.0, 1.0]:
+		var x0 := minf(side * 1.7, side * 1.83)
+		var x1 := maxf(side * 1.7, side * 1.83)
+		c.mbox(x0, 0.55, hz + 0.2, x1, 1.2, hz + 7.4, P.PAINT)
+		var z := hz + 0.2
+		while z < hz + 7.4:
+			c.mbox(x0, 0.55, z, x1, 1.2, z + 0.04, P.PAINT_DARK)
+			z += 1.0
+	c.mbox(-1.4, 1.3, hz + 6.4, 1.4, 1.52, hz + 7.9, P.PAINT_DARK)  # engine deck
+	var gz := hz + 6.5
+	while gz < hz + 7.85:
+		c.mbox(-1.3, 1.5, gz, 1.3, 1.53, gz + 0.05, P.BLACK)
+		gz += 0.15
+	c.mbox(-1.5, 0.6, hz + 7.9, 1.5, 1.45, hz + 7.95, P.METAL)  # exhaust grille
+	# Turret: wedge-shaped front, slab sides, bustle and its rack.
+	var z := hz + 1.3
+	while z < hz + 6.0:
+		var half := lerpf(0.7, 1.85, clampf((z - hz - 1.3) / 1.5, 0.0, 1.0))
+		var top := lerpf(2.15, 2.35, clampf((z - hz - 1.3) / 1.0, 0.0, 1.0))
+		c.mbox(-half, 1.5, z, half, top, z + c.vs, P.PAINT)
+		z += c.vs
+	c.mbox(-1.7, 1.6, hz + 6.0, 1.7, 2.25, hz + 6.9, P.PAINT_DARK)  # bustle rack
+	c.mbox(-1.6, 1.65, hz + 6.05, 1.6, 2.2, hz + 6.85, P.PAINT)
+	# 120 mm gun, mantlet, bore evacuator.
+	c.mbox(-0.48, 1.65, hz + 1.1, 0.48, 2.15, hz + 1.4, P.PAINT_DARK)
+	var tube := func(zz: float) -> Vector4:
+		var r := lerpf(0.11, 0.085, zz / (hz + 1.2))
+		if zz > 1.1 and zz < 1.55:
+			r = 0.14
+		return Vector4(0.0, 1.92, r, r)
+	c.mloft(0.0, hz + 1.2, tube, P.PAINT, 2.0)
+	c.mbox(-0.06, 2.0, 0.0, 0.06, 2.06, 0.12, P.METAL)  # muzzle reference sensor
+	# Sights and weapons on the roof.
+	c.mbox(0.85, 2.35, hz + 2.1, 1.3, 2.62, hz + 2.6, P.PAINT)  # gunner's primary sight
+	c.mskin(0.85, 2.4, hz + 2.05, 1.3, 2.58, hz + 2.15, P.GLASS)
+	c.mbox(-0.5, 2.35, hz + 2.7, -0.05, 2.85, hz + 3.15, P.PAINT)  # commander's viewer
+	c.mskin(-0.5, 2.5, hz + 2.65, -0.05, 2.75, hz + 2.75, P.GLASS)
+	c.mbox(0.3, 2.35, hz + 3.4, 1.0, 2.85, hz + 4.1, P.PAINT_DARK)  # CROWS
+	c.mbox(0.6, 2.6, hz + 2.3, 0.66, 2.66, hz + 3.4, P.GUN)
+	c.mbox(-1.35, 2.35, hz + 3.6, -0.7, 2.75, hz + 3.66, P.PAINT)  # loader's shield
+	c.mbox(-1.05, 2.5, hz + 2.9, -0.99, 2.56, hz + 3.6, P.GUN)
+	for side: float in [-1.0, 1.0]:
+		c.mbox(side * 1.45 - 0.15, 1.95, hz + 2.4, side * 1.45 + 0.15, 2.2, hz + 2.75, P.PAINT_DARK)  # smoke
+	c.mbar(Vector3(-1.2, 2.3, hz + 5.8), Vector3(-1.2, 3.0, hz + 5.85), 0.03, P.METAL)
+	c.mbar(Vector3(1.2, 2.3, hz + 5.8), Vector3(1.2, 3.0, hz + 5.85), 0.03, P.METAL)
 	return c
 
 
-## Pickup technical: Hilux-sized truck with a DShK on a pintle in the bed.
-static func _technical() -> Canvas:
-	var c := Canvas.new(Vector3i(18, 22, 53))
-	# Lower body, bonnet, cab and bed.
-	c.box(0, 3, 1, 18, 8, 52, P.PAINT)
-	c.box(1, 8, 1, 17, 10, 14, P.PAINT)
-	c.box(1, 8, 14, 17, 16, 29, P.PAINT)
-	c.box(2, 16, 16, 16, 17, 28, P.PAINT)
-	c.paint_skin(1, 10, 14, 17, 15, 15, P.GLASS)
-	c.paint_skin(0, 10, 16, 18, 15, 28, P.GLASS)
-	c.box(0, 8, 30, 1, 11, 52, P.PAINT)  # bed walls
-	c.box(17, 8, 30, 18, 11, 52, P.PAINT)
-	c.box(0, 8, 51, 18, 11, 52, P.PAINT)
-	c.box(1, 7, 30, 17, 8, 51, P.PAINT_DARK)  # bed floor
-	c.box(1, 3, 0, 17, 5, 1, P.METAL)  # bumpers
-	c.box(1, 3, 52, 17, 5, 53, P.METAL)
-	c.box(3, 6, 0, 15, 8, 1, P.BLACK)  # grille
-	c.box(1, 7, 0, 3, 8, 1, P.PAINT_LIGHT)
-	c.box(15, 7, 0, 17, 8, 1, P.PAINT_LIGHT)
-	c.paint_skin(0, 3, 20, 18, 5, 45, P.RUST, P.PAINT)
-	# Wheels.
-	for wz: float in [8.0, 42.0]:
-		c.wheel(0, 3, 3.5, wz, 3.5)
-		c.wheel(15, 18, 3.5, wz, 3.5)
-	# DShK on a pintle: post, gun body, long barrel over the cab, small shield.
-	c.box(8, 8, 37, 10, 15, 39, P.METAL)
-	c.box(7, 15, 35, 11, 17, 42, P.GUN)
-	c.box(8, 16, 15, 10, 17, 35, P.GUN)
-	c.box(8, 15, 15, 10, 18, 16, P.GUN)  # muzzle brake
-	c.box(5, 17, 34, 13, 21, 35, P.METAL)
-	c.box(7, 11, 44, 11, 13, 47, P.SEAT)  # ammo box
+## MaxxPro: 6.5 m MRAP with a short bonnet and big grille, one tall armoured cab-and-troop
+## box with small thick windows, a V-hull, 0.58 m radius wheels, rear door with a spare, and
+## a roof turret with the gun-protection kit and an M2.
+static func _maxxpro() -> Canvas:
+	var c := Canvas.new(Vector3i(54, 66, 130), 0.05)
+	var hw := 1.2
+	# V-hull, bonnet, cab and troop box.
+	var y := 0.45
+	while y < 0.95:
+		var inset := (0.95 - y) * 1.6
+		c.mbox(-hw + inset, y, 0.9, hw - inset, y + c.vs, 6.1, P.PAINT_DARK)
+		y += c.vs
+	c.mbox(-1.05, 0.95, 0.15, 1.05, 1.65, 1.15, P.PAINT)
+	c.mbox(-1.0, 1.65, 0.25, 1.0, 1.72, 1.1, P.PAINT_LIGHT)
+	c.mbox(-0.85, 1.0, 0.12, 0.85, 1.55, 0.17, P.BLACK)  # grille
+	var gx := -0.8
+	while gx < 0.85:
+		c.mbox(gx, 1.0, 0.1, gx + 0.05, 1.55, 0.15, P.PAINT_DARK)
+		gx += 0.15
+	c.mbox(-1.15, 0.7, 0.0, 1.15, 0.95, 0.25, P.PAINT_DARK)  # bumper
+	c.mbox(-hw, 0.95, 1.15, hw, 2.75, 6.35, P.PAINT)
+	c.mbox(-hw + 0.1, 2.75, 1.4, hw - 0.1, 2.8, 6.1, P.PAINT_DARK)
+	# Thick armoured glass: two windscreen panes, cab doors, troop windows.
+	c.mskin(-1.05, 1.8, 1.1, -0.06, 2.55, 1.2, P.GLASS)
+	c.mskin(0.06, 1.8, 1.1, 1.05, 2.55, 1.2, P.GLASS)
+	c.mskin(-1.25, 1.85, 1.4, 1.25, 2.5, 2.2, P.GLASS)
+	c.mskin(-1.25, 1.85, 2.45, 1.25, 2.5, 3.15, P.GLASS)
+	for wz: float in [3.8, 4.7, 5.6]:
+		c.mskin(-1.25, 1.95, wz, 1.25, 2.35, wz + 0.4, P.GLASS)
+	c.mskin(-1.25, 1.0, 1.35, 1.25, 2.6, 1.4, P.PAINT_DARK, P.PAINT)  # door seams
+	c.mskin(-1.25, 1.0, 3.2, 1.25, 2.6, 3.25, P.PAINT_DARK, P.PAINT)
+	c.mbox(-0.65, 1.05, 6.35, 0.65, 2.55, 6.42, P.PAINT_DARK)  # rear door
+	c.mwheel(-0.25, 0.25, 1.65, 6.48, 0.45)  # spare (tread facing back)
+	# Wheels and arches, mirrors, lights, steps.
+	for wz: float in [1.25, 5.05]:
+		for side: float in [-1.0, 1.0]:
+			c.mwheel(minf(side * 0.95, side * 1.3), maxf(side * 0.95, side * 1.3), 0.58, wz, 0.58)
+			c.mbox(minf(side * 1.0, side * 1.3), 1.15, wz - 0.7, maxf(side * 1.0, side * 1.3), 1.25, wz + 0.7, P.PAINT_DARK)
+	for side: float in [-1.0, 1.0]:
+		c.mbar(Vector3(side * 1.2, 2.2, 1.3), Vector3(side * 1.45, 2.25, 1.2), 0.04, P.METAL)
+		c.mbox(side * 1.4, 1.9, 1.12, side * 1.4 + side * 0.1, 2.3, 1.25, P.BLACK)
+		c.mbox(side * 0.85 - 0.12, 1.25, 0.12, side * 0.85 + 0.12, 1.4, 0.15, P.PAINT_LIGHT)
+		c.mbox(minf(side * 1.2, side * 1.32), 0.8, 1.9, maxf(side * 1.2, side * 1.32), 0.85, 2.4, P.METAL)
+	_turret(c, 0.0, 2.8, 2.7, 1.0)
+	return c
+
+
+## M-ATV: 6.2 m MRAP all-terrain vehicle with a long sloped bonnet and slatted grille, a
+## compact armoured cab with a raked windscreen, rear cargo bed, big flared wheel arches,
+## and the roof turret.
+static func _matv() -> Canvas:
+	var c := Canvas.new(Vector3i(54, 58, 126), 0.05)
+	var y := 0.4
+	while y < 0.9:
+		var inset := (0.9 - y) * 1.4
+		c.mbox(-1.15 + inset, y, 0.5, 1.15 - inset, y + c.vs, 6.0, P.PAINT_DARK)
+		y += c.vs
+	# Bonnet sloping down to the grille.
+	var z := 0.05
+	while z < 2.05:
+		var top := lerpf(1.3, 1.6, clampf(z / 1.4, 0.0, 1.0))
+		c.mbox(-1.05, 0.9, z, 1.05, top, z + c.vs, P.PAINT)
+		z += c.vs
+	var gx := -0.75
+	while gx < 0.8:
+		c.mbox(gx, 0.95, 0.0, gx + 0.06, 1.28, 0.06, P.BLACK)
+		gx += 0.12
+	c.mbox(-1.15, 0.65, 0.0, 1.15, 0.9, 0.2, P.PAINT_DARK)
+	# Cab with raked windscreen, then the cargo bed.
+	z = 2.0
+	while z < 4.35:
+		var top := lerpf(1.6, 2.35, clampf((z - 2.0) / 0.45, 0.0, 1.0))
+		c.mbox(-1.15, 0.9, z, 1.15, top, z + c.vs, P.PAINT)
+		z += c.vs
+	c.mskin(-1.05, 1.65, 2.0, -0.05, 2.3, 2.5, P.GLASS)
+	c.mskin(0.05, 1.65, 2.0, 1.05, 2.3, 2.5, P.GLASS)
+	c.mskin(-1.2, 1.7, 2.6, 1.2, 2.25, 3.3, P.GLASS)
+	c.mskin(-1.2, 1.7, 3.5, 1.2, 2.25, 4.1, P.GLASS)
+	c.mskin(-1.2, 0.95, 3.38, 1.2, 2.3, 3.43, P.PAINT_DARK, P.PAINT)
+	c.mbox(-1.15, 0.9, 4.35, 1.15, 1.25, 6.2, P.PAINT)
+	c.mbox(-1.15, 1.25, 4.35, -1.05, 1.65, 6.2, P.PAINT)
+	c.mbox(1.05, 1.25, 4.35, 1.15, 1.65, 6.2, P.PAINT)
+	c.mbox(-1.15, 1.25, 6.1, 1.15, 1.65, 6.2, P.PAINT)
+	c.mbox(-0.9, 1.25, 4.6, 0.9, 1.55, 5.6, P.SEAT)  # stowed kit in the bed
+	for wz: float in [1.0, 4.95]:
+		for side: float in [-1.0, 1.0]:
+			c.mwheel(minf(side * 0.9, side * 1.24), maxf(side * 0.9, side * 1.24), 0.56, wz, 0.56)
+			c.mbox(minf(side * 1.0, side * 1.25), 1.12, wz - 0.75, maxf(side * 1.0, side * 1.25), 1.22, wz + 0.75, P.PAINT_DARK)
+	for side: float in [-1.0, 1.0]:
+		c.mbar(Vector3(side * 1.15, 2.0, 2.2), Vector3(side * 1.4, 2.05, 2.1), 0.04, P.METAL)
+		c.mbox(side * 1.35, 1.75, 2.02, side * 1.35 + side * 0.1, 2.1, 2.15, P.BLACK)
+		c.mbox(side * 0.8 - 0.12, 1.1, 0.0, side * 0.8 + 0.12, 1.22, 0.05, P.PAINT_LIGHT)
+	_turret(c, 0.0, 2.35, 3.3, 0.9)
+	return c
+
+
+## Roof turret ring with the four-sided gun-protection kit and an M2, centred at (x, z).
+static func _turret(c: Canvas, x: float, roof: float, z: float, half: float) -> void:
+	c.mbox(x - half * 0.8, roof, z - half * 0.8, x + half * 0.8, roof + 0.1, z + half * 0.8, P.PAINT_DARK)
+	c.mbox(x - half, roof + 0.1, z - half, x + half, roof + 0.55, z - half + 0.05, P.PAINT)  # front shield
+	c.mskin(x - 0.25, roof + 0.3, z - half - 0.01, x + 0.25, roof + 0.5, z - half + 0.06, P.GLASS)
+	c.mbox(x - half, roof + 0.1, z - half, x - half + 0.05, roof + 0.5, z + half * 0.5, P.PAINT)
+	c.mbox(x + half - 0.05, roof + 0.1, z - half, x + half, roof + 0.5, z + half * 0.5, P.PAINT)
+	c.mbox(x - 0.1, roof + 0.25, z - half + 0.1, x + 0.1, roof + 0.42, z, P.GUN)
+	c.mbox(x - 0.03, roof + 0.31, z - half - 1.1, x + 0.03, roof + 0.37, z - half + 0.1, P.GUN)
+
+
+# --- Technicals -------------------------------------------------------------------------
+
+## The pickups technicals are built on: "hilux" (Toyota Hilux, 5.3 m) or "lc79" (Land
+## Cruiser 79 pickup, 5.2 m, boxier and taller with a flat dropside bed). Returns the bed
+## floor height.
+static func _pickup(c: Canvas, base: String) -> float:
+	var lc := base == "lc79"
+	var hood_end := 1.85 if lc else 1.7
+	var cab_end := 3.15 if lc else 3.0
+	var length := 5.2 if lc else 5.25
+	var roof := 1.95 if lc else 1.68
+	var hood_top := 1.22 if lc else 1.05
+	var bed := 0.95 if lc else 0.8
+	var r := 0.4 if lc else 0.37
+	var hw := 0.88
+	# Lower body along the whole length.
+	c.mbox(-hw, 0.45, 0.05, hw, bed, length, P.PAINT)
+	# Bonnet (sloping on the Hilux, flat on the Land Cruiser) and grille.
+	var z := 0.05
+	while z < hood_end:
+		var top := hood_top if lc else lerpf(0.95, hood_top, clampf(z / 0.8, 0.0, 1.0))
+		c.mbox(-hw + 0.03, bed, z, hw - 0.03, top, z + c.vs, P.PAINT)
+		z += c.vs
+	c.mbox(-0.7, 0.62, 0.0, 0.7, hood_top - 0.08, 0.06, P.BLACK)
+	if lc:
+		var gx := -0.65
+		while gx < 0.7:
+			c.mbox(gx, 0.65, -0.01, gx + 0.04, hood_top - 0.1, 0.05, P.METAL)
+			gx += 0.1
+	c.mbox(-0.85, 0.75, 0.0, -0.6, 0.9, 0.06, P.PAINT_LIGHT)
+	c.mbox(0.6, 0.75, 0.0, 0.85, 0.9, 0.06, P.PAINT_LIGHT)
+	c.mbox(-0.9, 0.4, -0.02, 0.9, 0.6, 0.12, P.METAL)  # bumper
+	# Cab with the windscreen raked (Hilux) or upright (Land Cruiser).
+	z = hood_end
+	var rake := 0.12 if lc else 0.42
+	while z < cab_end:
+		var top := lerpf(hood_top, roof, clampf((z - hood_end) / rake, 0.0, 1.0))
+		c.mbox(-hw, bed, z, hw, top, z + c.vs, P.PAINT)
+		z += c.vs
+	c.mskin(-0.8, hood_top + 0.05, hood_end - 0.01, 0.8, roof - 0.06, hood_end + rake + 0.05, P.GLASS)
+	c.mskin(-0.92, hood_top + 0.08, hood_end + rake + 0.1, 0.92, roof - 0.08, cab_end - 0.12, P.GLASS)
+	c.mskin(-0.92, bed + 0.05, hood_end + 0.62, 0.92, roof - 0.05, hood_end + 0.66, P.PAINT_DARK, P.PAINT)
+	c.mskin(-0.6, hood_top + 0.08, cab_end - 0.02, 0.6, roof - 0.12, cab_end + 0.02, P.GLASS)
+	# Bed: dropsides and tailgate.
+	var wall := bed + (0.5 if lc else 0.45)
+	c.mbox(-hw, bed, cab_end + 0.05, -hw + 0.05, wall, length, P.PAINT)
+	c.mbox(hw - 0.05, bed, cab_end + 0.05, hw, wall, length, P.PAINT)
+	c.mbox(-hw, bed, length - 0.05, hw, wall, length, P.PAINT)
+	c.mbox(-hw + 0.05, bed - 0.03, cab_end + 0.05, hw - 0.05, bed, length - 0.05, P.PAINT_DARK)
+	# Wheels, arches, mirrors, rust and dents.
+	var wb := 3.18 if lc else 3.08
+	for wz: float in [0.95, 0.95 + wb]:
+		for side: float in [-1.0, 1.0]:
+			c.mwheel(minf(side * 0.68, side * 0.92), maxf(side * 0.68, side * 0.92), r, wz, r)
+	for side: float in [-1.0, 1.0]:
+		c.mbox(minf(side * 0.9, side * 1.02), hood_top + 0.1, hood_end + 0.05, maxf(side * 0.9, side * 1.02), hood_top + 0.22, hood_end + 0.15, P.BLACK)
+	c.mskin(-1.0, 0.45, 1.6, 1.0, 0.6, length - 0.6, P.RUST, P.PAINT)
+	c.mskin(-1.0, 0.7, 3.6, 1.0, 0.85, 4.1, P.PAINT_DARK, P.PAINT)
+	return bed
+
+
+## A technical: a pickup plus the weapon fitted in its bed. Weapons seen across the Middle
+## East: DShK 12.7 mm, ZU-23-2 twin 23 mm cannon, SPG-9 73 mm and M40 106 mm recoilless
+## rifles, a Type 63 twelve-tube 107 mm rocket launcher, and the ZPU-2 twin 14.5 mm.
+static func _technical(weapon: String) -> Canvas:
+	var c := Canvas.new(Vector3i(42, 64, 108), 0.05)
+	var base := "lc79" if weapon in ["zu23", "rockets", "zpu"] else "hilux"
+	var bed := _pickup(c, base)
+	var mid := 4.15 if base == "lc79" else 4.1
+	match weapon:
+		"dshk":
+			c.mbar(Vector3(0, bed, mid), Vector3(0, bed + 0.95, mid), 0.07, P.METAL)  # pintle
+			c.mbox(-0.08, bed + 0.95, mid - 0.35, 0.08, bed + 1.1, mid + 0.25, P.GUN)  # receiver
+			c.mbox(-0.03, bed + 1.0, mid - 1.45, 0.03, bed + 1.06, mid - 0.35, P.GUN)  # barrel
+			c.mbox(-0.06, bed + 0.97, mid - 1.5, 0.06, bed + 1.09, mid - 1.4, P.GUN)  # muzzle brake
+			c.mbox(-0.06, bed + 0.98, mid - 1.0, 0.06, bed + 1.08, mid - 0.9, P.GUN)  # cooling fins
+			c.mbox(0.08, bed + 0.85, mid - 0.25, 0.25, bed + 1.0, mid, P.SEAT)  # ammo can
+			c.mbar(Vector3(0, bed + 0.95, mid + 0.25), Vector3(0, bed + 1.0, mid + 0.4), 0.05, P.GUN)  # spade grips
+		"zu23":
+			c.mbox(-0.72, bed, mid - 0.7, 0.72, bed + 0.3, mid + 0.8, P.PAINT_DARK)  # mount base
+			c.mbox(-0.45, bed + 0.3, mid - 0.4, 0.45, bed + 0.75, mid + 0.4, P.GUN)  # cradle
+			for bx: float in [-0.18, 0.18]:
+				c.mbox(bx - 0.08, bed + 0.72, mid - 0.45, bx + 0.08, bed + 0.92, mid + 0.35, P.GUN)  # receivers
+				c.mbar(Vector3(bx, bed + 0.85, mid - 0.45), Vector3(bx, bed + 1.15, mid - 2.5), 0.06, P.GUN)  # barrels
+				c.mbar(Vector3(bx, bed + 1.13, mid - 2.45), Vector3(bx, bed + 1.16, mid - 2.6), 0.1, P.GUN)  # flash hiders
+				c.mbox(bx + (0.08 if bx > 0 else -0.24), bed + 0.75, mid - 0.25, bx + (0.24 if bx > 0 else -0.08), bed + 1.0, mid + 0.15, P.PAINT_DARK)  # magazines
+			c.mbox(-0.55, bed + 0.3, mid + 0.4, -0.25, bed + 0.65, mid + 0.7, P.SEAT)  # gunner's seats
+			c.mbox(0.25, bed + 0.3, mid + 0.4, 0.55, bed + 0.65, mid + 0.7, P.SEAT)
+		"spg9":
+			for leg: Vector3 in [Vector3(-0.5, bed, mid + 0.3), Vector3(0.5, bed, mid + 0.3), Vector3(0, bed, mid - 0.6)]:
+				c.mbar(leg, Vector3(0, bed + 0.75, mid), 0.05, P.METAL)
+			var tube := func(_z: float) -> Vector4: return Vector4(0.0, bed + 0.85, 0.075, 0.075)
+			c.mloft(mid - 1.4, mid + 0.75, tube, P.GUN, 2.0)
+			var venturi := func(z: float) -> Vector4: return Vector4(0.0, bed + 0.85, lerpf(0.08, 0.12, (z - mid - 0.55) / 0.3), lerpf(0.08, 0.12, (z - mid - 0.55) / 0.3))
+			c.mloft(mid + 0.55, mid + 0.85, venturi, P.GUN, 2.0)
+			c.mbox(-0.2, bed + 0.75, mid - 0.4, 0.2, bed + 1.05, mid - 0.37, P.PAINT_DARK)  # shield
+			c.mbox(0.08, bed + 0.95, mid - 0.2, 0.16, bed + 1.05, mid, P.BLACK)  # sight
+		"m40":
+			c.mbar(Vector3(0, bed, mid), Vector3(0, bed + 0.7, mid), 0.12, P.METAL)
+			var tube := func(_z: float) -> Vector4: return Vector4(0.0, bed + 0.85, 0.09, 0.09)
+			c.mloft(mid - 2.6, mid + 0.6, tube, P.GUN, 2.0)
+			var breech := func(_z: float) -> Vector4: return Vector4(0.0, bed + 0.85, 0.14, 0.14)
+			c.mloft(mid + 0.35, mid + 0.85, breech, P.GUN, 2.0)
+			c.mbox(-0.025, bed + 0.98, mid - 1.0, 0.025, bed + 1.03, mid + 0.2, P.GUN)  # spotting rifle
+			c.mbox(0.12, bed + 0.85, mid - 0.1, 0.2, bed + 1.0, mid + 0.1, P.BLACK)  # sight
+		"rockets":
+			c.mbox(-0.4, bed, mid - 0.2, 0.4, bed + 0.45, mid + 0.4, P.PAINT_DARK)  # mount
+			# Twelve 107 mm tubes in three rows, tilted up 12 degrees.
+			var tilt := tan(deg_to_rad(12.0))
+			for row in 3:
+				for col in 4:
+					var x := -0.27 + col * 0.18
+					var y0 := bed + 0.55 + row * 0.15
+					c.mbar(Vector3(x, y0 + 0.5 * tilt, mid - 0.6), Vector3(x, y0 - 0.5 * tilt, mid + 0.45), 0.13, P.PAINT_DARK)
+					c.mbox(x - 0.04, y0 + 0.5 * tilt - 0.04, mid - 0.62, x + 0.04, y0 + 0.5 * tilt + 0.04, mid - 0.58, P.BLACK)
+		"zpu":
+			c.mbox(-0.6, bed, mid - 0.5, 0.6, bed + 0.35, mid + 0.6, P.PAINT_DARK)
+			c.mbox(-0.3, bed + 0.35, mid - 0.25, 0.3, bed + 0.7, mid + 0.35, P.GUN)
+			for bx: float in [-0.13, 0.13]:
+				c.mbar(Vector3(bx, bed + 0.8, mid - 0.2), Vector3(bx, bed + 0.95, mid - 2.1), 0.05, P.GUN)
+				c.mbar(Vector3(bx, bed + 0.94, mid - 2.05), Vector3(bx, bed + 0.95, mid - 2.2), 0.09, P.GUN)
+				c.mbox(bx - 0.06, bed + 0.7, mid - 0.25, bx + 0.06, bed + 0.88, mid + 0.3, P.GUN)
+			c.mbox(-0.65, bed + 0.35, mid + 0.35, -0.35, bed + 0.75, mid + 0.75, P.SEAT)
+			c.mbox(0.35, bed + 0.35, mid - 0.2, 0.65, bed + 0.6, mid + 0.2, P.PAINT_DARK)  # ammo boxes
 	return c

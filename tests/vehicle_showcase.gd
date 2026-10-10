@@ -1,29 +1,34 @@
 extends Node3D
 ## Lines up every vehicle model and saves screenshots. Needs a window (not --headless):
-##   <voxel godot exe> --path . res://tests/vehicle_showcase.tscn -- <output folder>
+##   <voxel godot exe> --path . res://tests/vehicle_showcase.tscn -- <output folder> [shot]
 
 const LINEUP := [
-	["uh60", "army", Vector3(-24, 0, 0)],
-	["ah1z", "marine_gray", Vector3(-8, 0, 0)],
-	["aav7", "od", Vector3(4, 0, -2)],
-	["maxxpro", "desert", Vector3(12, 0, -2)],
-	["matv", "od", Vector3(19, 0, -2)],
-	["technical", "white", Vector3(26, 0, -2)],
-	["bradley", "desert", Vector3(34, 0, -2)],
-	["abrams", "desert", Vector3(43, 0, -2)],
+	["uh60", "army", Vector3(-26, 0, 0)],
+	["ah1z", "marine_gray", Vector3(-9, 0, 0)],
+	["aav7", "od", Vector3(3, 0, -2)],
+	["bradley", "desert", Vector3(9, 0, -2)],
+	["abrams", "desert", Vector3(16, 0, -2)],
+	["maxxpro", "desert", Vector3(23, 0, -2)],
+	["matv", "od", Vector3(28, 0, -2)],
+	["technical_dshk", "white", Vector3(-6, 0, 14)],
+	["technical_zu23", "tan", Vector3(-2, 0, 14)],
+	["technical_spg9", "white", Vector3(2, 0, 14)],
+	["technical_m40", "tan", Vector3(6, 0, 14)],
+	["technical_rockets", "white", Vector3(10, 0, 14)],
+	["technical_zpu", "red", Vector3(14, 0, 14)],
 ]
 const SHOTS := [
-	["lineup", Vector3(2, 9, 30), Vector3(1, 1, -2)],
-	["helicopters", Vector3(-28, 5, 14), Vector3(-16, 2, 0)],
-	["uh60_side", Vector3(-13, 3, 9), Vector3(-24, 1.8, 0)],
-	["uh60_front", Vector3(-31, 3.5, -12), Vector3(-24, 1.8, 0)],
-	["ground", Vector3(24, 4, 12), Vector3(16, 1.5, -2)],
-	["armor", Vector3(48, 5, 13), Vector3(37, 1.5, -2)],
+	["helicopters", Vector3(-14, 4, 16), Vector3(-18, 2, 0)],
+	["ah1z", Vector3(-3, 2.5, 7), Vector3(-9, 1.6, 0)],
+	["armor", Vector3(22, 4.5, 10), Vector3(10, 1.4, -2)],
+	["mraps", Vector3(33, 3.5, 7), Vector3(25, 1.4, -2)],
+	["technicals", Vector3(4, 3.5, 22), Vector3(4, 1.0, 14)],
 ]
 
 
 func _ready() -> void:
-	var out := OS.get_cmdline_user_args()[0] if OS.get_cmdline_user_args().size() > 0 else "user://"
+	var args := OS.get_cmdline_user_args()
+	var out: String = args[0] if args.size() > 0 else "user://"
 	var env := Environment.new()
 	env.background_mode = Environment.BG_SKY
 	env.sky = Sky.new()
@@ -58,6 +63,8 @@ func _ready() -> void:
 	add_child(camera)
 	camera.current = true
 	for shot: Array in SHOTS:
+		if args.size() > 1 and args[1] != shot[0]:
+			continue
 		camera.look_at_from_position(shot[1], shot[2])
 		for i in 20:
 			await get_tree().process_frame
