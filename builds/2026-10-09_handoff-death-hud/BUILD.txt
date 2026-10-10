@@ -1,0 +1,11 @@
+Contractor test build: handoff-death-hud
+Built 2026-10-09 22:09 from branch handoff-groundwork, commit e104bf8
+
+Play: double-click play.bat, then click Play (host a session).
+
+What to test:
+1. Double-click play.bat, then click Play (host a session).
+2. The HUD has no health or ammo readout. Press Tab: the inventory screen shows rounds loaded, weight, litres and armor damage.
+3. Pick up some gear with E (carrier, helmet, rifle, magazines).
+4. Press K a few times (debug only: hurts you by 40) until you're downed, then press F to give up.
+5. You respawn at the gate with an M4, 2 magazines, a smoke and a frag. Your old gear lies where you died under a yellow marker, which disappears once you've picked it all up.
