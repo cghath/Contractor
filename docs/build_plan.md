@@ -57,7 +57,7 @@ authority on rules and numbers; this file only says who builds what, in which or
 
 ### Wave 0: preparation (integrator, before any agents)
 
-- [ ] **Design doc in this repo** (see Sources).
+- [x] **Design doc in this repo:** `docs/contractor_design_doc.md`, pushed to main by Noah.
 - [x] **Split `scripts/actors/soldier.gd`** into `soldier.gd` (state, spread and recoil,
   carrying, death, host-side requests), `soldier_movement.gd` (Movement node) and
   `player_input.gd` (PlayerInput node). No behaviour change; all suites pass.
