@@ -13,6 +13,12 @@ const SAVED_BODY := {"uid": "test_net_body_1", "label": "Player 9", "faction": "
 	"pos": [0.0, 0.1, 26.5], "rot_y": 0.0, "age_s": 30.0, "marker": true,
 	"gear": {"slots": {"primary": "m4a1", "vest": "plate_carrier", "helmet": "helmet"}, "slot_state": {"primary": {"rounds": 21}},
 		"containers": {"vest": [{"id": "mag_556", "count": 3}], "pockets": [], "backpack": []}, "hands": ""}}
+## Voxel edits in the same save: an impact mark on the main building's concrete and a bullet
+## hole in the shed's plank wall (voxel coordinates), which the late joiner gets in the log.
+const SAVED_EDITS := [{"op": "mark", "p": [-29.5, 13.5, -40.0], "n": [0.0, 0.0, 1.0], "m": 2},
+	{"op": "holes", "v": [175, 13, -71]}]
+## Where the host marks the perimeter wall's inner face once the client is in (live, by RPC).
+const LIVE_MARK := Vector3(6.0, 1.2, 19.7)
 
 var failures := 0
 var level: CompoundLevel
@@ -52,7 +58,7 @@ func _on_client_left(id: int) -> void:
 func _write_save_with_body() -> void:
 	DirAccess.make_dir_recursive_absolute(GameState.SAVE_DIR)
 	var file := FileAccess.open(GameState.save_path(), FileAccess.WRITE)
-	file.store_string(JSON.stringify({"version": GameState.SAVE_VERSION, "looted": [], "dropped": {}, "voxel_edits": [], "bodies": [SAVED_BODY]}))
+	file.store_string(JSON.stringify({"version": GameState.SAVE_VERSION, "looted": [], "dropped": {}, "voxel_edits": SAVED_EDITS, "bodies": [SAVED_BODY]}))
 	file.close()
 
 
@@ -67,6 +73,7 @@ func _give_kit(id: int) -> void:
 	player.vitals.server_damage(40.0)
 	# A small fragment wound in the left forearm to treat (and maybe a fracture).
 	player.vitals.server_hit(Vitals.FOREARM_L, {"round_class": Vitals.FRAGMENT, "superficial": true})
+	level.voxel_world.server_mark(LIVE_MARK, Vector3.FORWARD, VoxelWorld.Mat.CONCRETE)
 	print("[host] gave peer %d a kit" % id)
 
 
@@ -131,6 +138,7 @@ func _run_client() -> void:
 	await _wait_for(func() -> bool: return _dropped_helmet() != null, 3.0)
 	check(_dropped_helmet() != null, "dropped helmet spawned on the client")
 	await _check_saved_body(me)
+	await _check_world_edits()
 	# Knocked out, then gone: the host keeps this player's body (see _on_client_left).
 	me._server_debug_hurt.rpc_id(1, 140.0)
 	await _wait_for(func() -> bool: return me.vitals.downed, 3.0)
@@ -157,6 +165,19 @@ func _check_saved_body(me: Soldier) -> void:
 	await _wait_for(func() -> bool: return body.inventory.count_of(&"mag_556") == 0, 3.0)
 	check(body.inventory.count_of(&"mag_556") == 0 and me.inventory.count_of(&"mag_556") == mags + 3,
 		"looting its magazines over the network moves them onto the looter (%d -> %d)" % [mags, me.inventory.count_of(&"mag_556")])
+
+
+## Impact marks and bullet holes reach the client: the saved ones in the edit log sent on
+## join, the live one by RPC.
+func _check_world_edits() -> void:
+	var world := level.voxel_world
+	var saved := Vector3(-2.95, 1.35, -4.0)
+	await _wait_for(func() -> bool: return world.is_built() and world.marks_near(saved, 0.05) >= 1 and world.marks_near(LIVE_MARK, 0.05) >= 1, 10.0)
+	# (The three shots fired earlier marked the perimeter wall too.)
+	check(world.marks_near(saved, 0.05) == 1 and world.marks_near(LIVE_MARK, 0.05) == 1,
+		"impact marks replicate: the saved one on the building and the host's live one (%d marks in all)" % world.mark_count())
+	check(world.material_at(Vector3(17.55, 1.35, -7.05)) == VoxelWorld.Mat.EMPTY and world.material_at(Vector3(17.65, 1.35, -7.05)) == VoxelWorld.Mat.WOOD,
+		"and the saved bullet hole in the shed wall")
 
 
 func _dropped_helmet() -> WorldItem:

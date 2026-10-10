@@ -7,6 +7,24 @@ const PLAYER_SCENE := preload("res://scenes/soldier.tscn")
 const SPAWN_POINTS: Array[Vector3] = [Vector3(-3, 0.1, 24), Vector3(-1, 0.1, 24), Vector3(1, 0.1, 24), Vector3(3, 0.1, 24)]
 const COMPOUND_HALF := 20.0
 const WALL_THICKNESS := 0.3
+## Thin-walled outbuildings (see _build_structures), as [from, to (metres), material] boxes.
+## A wooden lean-to against the east wall, 10 cm plank walls with a doorway to the west and
+## a sheet-metal roof, and a sheet-metal shipping container by the west wall, open to the
+## east. Chunk edges of the navmesh (NavBuilder) stay clear of both openings.
+const SHED := [
+	[Vector3(16, 0, -11), Vector3(16.1, 2.4, -9.6), "wood"],
+	[Vector3(16, 0, -8.4), Vector3(16.1, 2.4, -7), "wood"],
+	[Vector3(16, 2.0, -9.6), Vector3(16.1, 2.4, -8.4), "wood"],
+	[Vector3(16.1, 0, -11), Vector3(19.7, 2.4, -10.9), "wood"],
+	[Vector3(16.1, 0, -7.1), Vector3(19.7, 2.4, -7), "wood"],
+	[Vector3(16, 2.4, -11), Vector3(19.7, 2.5, -7), "sheet_metal"],
+]
+const CONTAINER := [
+	[Vector3(-18.5, 0, 8), Vector3(-16.1, 2.5, 8.1), "sheet_metal"],
+	[Vector3(-18.5, 0, 13.9), Vector3(-16.1, 2.5, 14), "sheet_metal"],
+	[Vector3(-18.5, 0, 8.1), Vector3(-18.4, 2.5, 13.9), "sheet_metal"],
+	[Vector3(-18.5, 2.5, 8), Vector3(-16.1, 2.6, 14), "sheet_metal"],
+]
 
 ## Starting loot. Each uid is stable so a pickup stays picked up across saves.
 const LOOT := [
@@ -572,8 +590,11 @@ func _build_environment() -> void:
 	add_child(ground)
 
 
-## Voxel structures, in metres. Gray box only: a walled compound with a south gate, a
-## main building with a doorway, low cover and a couple of crates.
+## Voxel structures, in metres, each in its material (VoxelWorld.Mat): a concrete walled
+## compound with a south gate, a painted-concrete main building with a doorway, concrete
+## and sandbag low cover, wooden crates, a wooden lean-to shed with a sheet-metal roof
+## against the east wall, and a sheet-metal shipping container by the west wall. Rounds go
+## through the wood and the sheet metal; the concrete only takes small marks.
 func _build_structures() -> void:
 	var h := COMPOUND_HALF
 	var t := WALL_THICKNESS
@@ -592,8 +613,8 @@ func _build_structures() -> void:
 	voxel_world.add_box_m(Vector3(-5, 0, -4 - t), Vector3(-0.6, 3, -4), P)
 	voxel_world.add_box_m(Vector3(0.6, 0, -4 - t), Vector3(5, 3, -4), P)
 	voxel_world.add_box_m(Vector3(-0.6, 2.2, -4 - t), Vector3(0.6, 3, -4), P)
-	# Low cover.
-	voxel_world.add_box_m(Vector3(-9, 0, 6), Vector3(-6, 1.1, 6.4), C)
+	# Low cover: a sandbag wall and two concrete ones.
+	voxel_world.add_box_m(Vector3(-9, 0, 6), Vector3(-6, 1.1, 6.4), VoxelWorld.Mat.SANDBAG)
 	voxel_world.add_box_m(Vector3(6, 0, 3), Vector3(9, 1.1, 3.4), C)
 	voxel_world.add_box_m(Vector3(-1.5, 0, 10), Vector3(1.5, 1.1, 10.4), C)
 	# Crates.
@@ -601,3 +622,6 @@ func _build_structures() -> void:
 	voxel_world.add_box_m(Vector3(-13, 0, -11), Vector3(-12, 1, -10), W)
 	voxel_world.add_box_m(Vector3(-12, 0, -11), Vector3(-11, 1, -10), W)
 	voxel_world.add_box_m(Vector3(-12.5, 1, -11), Vector3(-11.5, 2, -10), W)
+	var S := VoxelWorld.Mat.SHEET_METAL
+	for box: Array in SHED + CONTAINER:
+		voxel_world.add_box_m(box[0], box[1], W if box[2] == "wood" else S)

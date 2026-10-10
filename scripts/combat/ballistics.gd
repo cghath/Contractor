@@ -4,7 +4,9 @@ extends RefCounted
 ## helmets): a piece either stops the round (and chips) or the round passes through it (a
 ## hole, or armor rated below the round) and carries on to whatever is behind it. A hitbox
 ## names its body part in a "body_part" meta (Vitals.HEAD, Vitals.TORSO...), and the hit goes
-## to Vitals.server_hit unless the vest's soft armor stops it there.
+## to Vitals.server_hit unless the vest's soft armor stops it there. Voxel structures go by
+## material (VoxelWorld.MATERIALS): wood and sheet metal let a round through with less
+## energy, concrete stops it with a small mark.
 ##
 ## Rounds come from res://data/rounds.json: threat level, round class and ACE3-style ballistic
 ## values (muzzle velocity, ballistic coefficient against G1 or G7 drag, bullet mass). A
@@ -13,7 +15,20 @@ extends RefCounted
 
 const RANGE := 300.0
 const MASK := (1 << 0) | (1 << 1) | (1 << 3)  # world, hitboxes, armor
-const MAX_PENETRATIONS := 4
+## How many things (armor pieces, walls) one round can pass through.
+const MAX_PENETRATIONS := 8
+## The world: a round that meets a voxel structure walks through it (VoxelWorld.trace_round,
+## by material): through wood and sheet metal it carves a hole and carries on with less
+## energy; concrete, steel or too much of anything stops it with a small surface mark.
+## Rounds without data in rounds.json count with this energy by class (J).
+const FALLBACK_ENERGY_J := {&"pistol": 550.0, &"intermediate": 1650.0, &"full_power": 3350.0}
+## A round slowed by walls wounds like a smaller one: below SPENT_PISTOL_J a rifle round makes
+## a pistol round's wound, and below SPENT_SUPERFICIAL_J any round only a superficial one.
+## Armor meets it as the same round from further out (equivalent_distance).
+const SPENT_PISTOL_J := 700.0
+const SPENT_SUPERFICIAL_J := 120.0
+## equivalent_distance looks no further out than this.
+const EQUIVALENT_MAX_M := 2000.0
 ## Rounds passing this close to an AI soldier suppress it.
 const SUPPRESS_RADIUS := 2.5
 ## The game's armor and threat ladder, weakest first (NIJ names in the game's own order).
@@ -50,6 +65,7 @@ static func _trace(shooter: CollisionObject3D, origin: Vector3, direction: Vecto
 		exclude.append_array(gear.armor_rids())  # ...or your own armor
 	var from := origin
 	var to := origin + direction * RANGE
+	var lost_j := 0.0  # energy lost in walls on the way
 	for i in MAX_PENETRATIONS:
 		var query := PhysicsRayQueryParameters3D.create(from, to, MASK, exclude)
 		query.collide_with_areas = true
@@ -57,8 +73,9 @@ static func _trace(shooter: CollisionObject3D, origin: Vector3, direction: Vecto
 		if hit.is_empty():
 			break
 		var collider: Object = hit.collider
+		var distance := origin.distance_to(hit.position)
 		if collider is VoxelArmor:
-			if collider.server_try_stop(hit.position, direction, weapon, origin.distance_to(hit.position)):
+			if collider.server_try_stop(hit.position, direction, weapon, equivalent_distance(weapon, distance, lost_j)):
 				return _result("plate", hit)
 			exclude.append(collider.get_rid())
 			from = hit.position
@@ -66,23 +83,75 @@ static func _trace(shooter: CollisionObject3D, origin: Vector3, direction: Vecto
 		var vitals := Vitals.find_on(collider)
 		if vitals:
 			var part: StringName = collider.get_meta(&"body_part", Vitals.TORSO) if collider is Node else Vitals.TORSO
-			var distance := origin.distance_to(hit.position)
+			var armor_distance := equivalent_distance(weapon, distance, lost_j)
+			var energy := energy_at(weapon, distance)
+			if energy >= 0.0 and lost_j > 0.0:
+				energy = maxf(energy - lost_j, 0.0)
 			# Soft armor (the vest's aramid) can stop a round where no plate covers the body.
-			if VoxelArmor.soft_armor_stops(vitals.get_parent(), part, threat_level_at(weapon, distance), round_class(weapon), distance, direction, hit.position, energy_at(weapon, distance)):
+			if VoxelArmor.soft_armor_stops(vitals.get_parent(), part, threat_level_at(weapon, armor_distance), round_class(weapon), armor_distance, direction, hit.position, energy):
 				return _result("plate", hit)
-			vitals.server_hit(part, {
+			var hit_info := {
 				"round_class": round_class(weapon),
 				"position": hit.position,
 				"direction": direction,
 				"hitbox": collider,  # the wound channel follows the hitbox's pose
 				"distance": distance,
-			})
+			}
+			if lost_j > 0.0:
+				_spend(hit_info, world_energy(weapon, distance) - lost_j)
+			vitals.server_hit(part, hit_info)
 			return _result("body", hit)
 		var world := VoxelWorld.find_on(collider)
-		if world:
-			world.server_carve(hit.position - hit.normal * 0.05, float(weapon.stats.get("wall_carve_m", 0.12)))
-		return _result("world", hit)
+		if world == null:
+			return _result("world", hit)  # the ground
+		var through := world.trace_round(hit.position, direction, world_energy(weapon, distance) - lost_j)
+		if through.stopped:
+			world.server_mark(hit.position, hit.normal, int(through.material))
+			return _result("world", hit)
+		world.server_holes(through.voxels)
+		lost_j += float(through.lost_j)
+		from = (through.exit as Vector3) + direction * 0.01
 	return {"result": "none", "position": to, "normal": Vector3.ZERO}
+
+
+## The round's energy (J) `distance` metres out for the world (energy_at, or by round class
+## from FALLBACK_ENERGY_J when the round has no data).
+static func world_energy(weapon: ItemData, distance: float) -> float:
+	var energy := energy_at(weapon, distance)
+	return energy if energy >= 0.0 else float(FALLBACK_ENERGY_J.get(round_class(weapon), 1650.0))
+
+
+## A round arriving with `energy_j` left after walls wounds like a smaller one.
+static func _spend(hit_info: Dictionary, energy_j: float) -> void:
+	if energy_j < SPENT_SUPERFICIAL_J:
+		hit_info["superficial"] = true
+	if energy_j < SPENT_PISTOL_J and hit_info.round_class in [Vitals.INTERMEDIATE, Vitals.FULL_POWER]:
+		hit_info["round_class"] = Vitals.PISTOL
+
+
+## How far out the same round, untouched, would arrive as slow as this one after losing
+## `lost_j` in walls `distance` metres out: what armor meets (threat level, impact). Just
+## `distance` when nothing was lost or the round has no data.
+static func equivalent_distance(weapon: ItemData, distance: float, lost_j: float) -> float:
+	if lost_j <= 0.0:
+		return distance
+	var mass := float(round_data(weapon).get("mass_g", 0.0)) / 1000.0
+	var energy := energy_at(weapon, distance)
+	if mass <= 0.0 or energy < 0.0:
+		return distance
+	var target := sqrt(2.0 * maxf(energy - lost_j, 0.0) / mass)
+	var data := round_data(weapon)
+	var v := muzzle_velocity(weapon)
+	var bc := float(data.get("bc", 0.0)) * BC_TO_SI
+	if bc <= 0.0:
+		return distance
+	var curve: Array[Vector2] = DRAG_G1 if String(data.get("drag", "G7")) == "G1" else DRAG_G7
+	var travelled := 0.0
+	while v > target and travelled < EQUIVALENT_MAX_M:
+		var half := v - _deceleration(v, bc, curve) * DRAG_STEP_M * 0.5
+		v = maxf(v - _deceleration(half, bc, curve) * DRAG_STEP_M, 0.0)
+		travelled += DRAG_STEP_M
+	return maxf(travelled, distance)
 
 
 ## The weapon's round class for wounds and impacts (Vitals.PISTOL...): the loaded round's

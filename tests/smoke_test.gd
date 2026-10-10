@@ -146,6 +146,106 @@ func _test_voxel_world() -> void:
 	viewer.queue_free()
 	world.queue_free()
 	await get_tree().process_frame
+	await _test_world_materials()
+
+
+## Materials: what a round does to each (VoxelWorld.trace_round), impact marks, blasts by
+## material, and the log replaying the same on a fresh world (as a save or a late joiner).
+func _test_world_materials() -> void:
+	print("VoxelWorld materials")
+	var boxes := [
+		[Vector3(0, 0, 0), Vector3(1, 1, 0.3), VoxelWorld.Mat.CONCRETE],
+		[Vector3(2, 0, 0), Vector3(3, 1, 0.1), VoxelWorld.Mat.WOOD],
+		[Vector3(4, 0, 0), Vector3(5, 1, 0.1), VoxelWorld.Mat.SHEET_METAL],
+		[Vector3(6, 0, 0), Vector3(7, 1, 1.5), VoxelWorld.Mat.WOOD],
+		[Vector3(8, 0, 0), Vector3(9, 1, 0.4), VoxelWorld.Mat.SANDBAG],
+	]
+	var world := _material_world(boxes)
+	var viewer := VoxelViewer.new()
+	viewer.view_distance = 160
+	add_child(viewer)
+	var deadline := Time.get_ticks_msec() + 15000
+	while not world.is_built() and Time.get_ticks_msec() < deadline:
+		await get_tree().process_frame
+	check(world.is_built(), "materials world built")
+	# The walls' collision comes a few frames after the voxels, block by block.
+	var space := world.get_world_3d()
+	var open := func(x: float) -> bool: return Throwables.clear_line(space, Vector3(x, 0.55, -2), Vector3(x, 0.55, 2))
+	while [0.55, 2.55, 4.55, 6.55, 8.55].any(open) and Time.get_ticks_msec() < deadline:
+		await get_tree().physics_frame
+	var m855 := 1650.0
+	var nine := 550.0
+	var m80 := 3350.0
+	var concrete := world.trace_round(Vector3(0.55, 0.55, 0.0), Vector3.BACK, m855 * 10.0)
+	check(concrete.stopped and concrete.material == VoxelWorld.Mat.CONCRETE and concrete.voxels.is_empty(), "concrete stops even a round ten times an M855")
+	var wood := world.trace_round(Vector3(2.55, 0.55, 0.0), Vector3.BACK, m855)
+	check(not wood.stopped and wood.voxels.size() == 1 and absf(float(wood.lost_j) - 250.0) < 5.0 and (wood.exit as Vector3).z >= 0.099,
+		"an M855 goes through a 10 cm wood wall (%d voxel, %.0f J lost, out at z %.2f)" % [wood.voxels.size(), wood.lost_j, (wood.exit as Vector3).z])
+	var pistol := world.trace_round(Vector3(2.55, 0.55, 0.0), Vector3.BACK, nine)
+	check(not pistol.stopped, "and so does a 9 mm (%.0f J lost)" % pistol.lost_j)
+	var slant := world.trace_round(Vector3(2.55, 0.55, 0.0), Vector3(0.6, 0, 0.8), m855)
+	check(not slant.stopped and float(slant.lost_j) > float(wood.lost_j) + 50.0, "at a slant it crosses more wood (%.0f J lost)" % slant.lost_j)
+	var sheet := world.trace_round(Vector3(4.55, 0.55, 0.0), Vector3.BACK, nine)
+	check(not sheet.stopped and absf(float(sheet.lost_j) - 150.0) < 5.0, "a 9 mm goes through sheet metal (%.0f J lost)" % sheet.lost_j)
+	var stack := world.trace_round(Vector3(6.55, 0.55, 0.0), Vector3.BACK, m855)
+	var stack_m80 := world.trace_round(Vector3(6.55, 0.55, 0.0), Vector3.BACK, m80)
+	check(stack.stopped and stack_m80.stopped and stack.voxels.is_empty(), "1.5 m of wood stops an M855 and an M80")
+	var sandbag := world.trace_round(Vector3(8.55, 0.55, 0.0), Vector3.BACK, m80)
+	check(sandbag.stopped and sandbag.material == VoxelWorld.Mat.SANDBAG, "40 cm of sandbags stops an M80")
+	check(not world.stops_round(Vector3(2.55, 0.55, -2), Vector3(2.55, 0.55, 2), m855) and world.stops_round(Vector3(0.55, 0.55, -2), Vector3(0.55, 0.55, 2), m855)
+		and not world.stops_round(Vector3(-2, 2, -2), Vector3(-2, 2, 2), m855), "stops_round: wood doesn't, concrete does, open air doesn't")
+
+	# Marks: small, persistent, no voxel carved; capped per voxel; gone with their voxel.
+	var tool := world.terrain.get_voxel_tool()
+	tool.channel = VoxelBuffer.CHANNEL_COLOR
+	world.server_mark(Vector3(0.55, 0.55, 0.0), Vector3.FORWARD, VoxelWorld.Mat.CONCRETE)
+	await get_tree().process_frame
+	check(world.mark_count() == 1 and tool.get_voxel(Vector3i(5, 5, 0)) == VoxelWorld.Mat.CONCRETE, "a mark on concrete, nothing carved")
+	check(GameState.voxel_edits.size() == 1 and GameState.voxel_edits[0].op == "mark", "the mark is in the edit log")
+	check(world._mark_mesh.multimesh.instance_count == 1, "and drawn")
+	for i in VoxelWorld.MARKS_PER_VOXEL + 3:
+		world.server_mark(Vector3(0.51 + 0.01 * i, 0.55, 0.0), Vector3.FORWARD, VoxelWorld.Mat.CONCRETE)
+	check(world.mark_count() == VoxelWorld.MARKS_PER_VOXEL, "at most %d marks per voxel (%d)" % [VoxelWorld.MARKS_PER_VOXEL, world.mark_count()])
+	world.server_mark(Vector3(0.25, 0.75, 0.0), Vector3.FORWARD, VoxelWorld.Mat.CONCRETE)
+	world.server_holes(wood.voxels)
+	check(tool.get_voxel(Vector3i(25, 5, 0)) == VoxelWorld.Mat.EMPTY and tool.get_voxel(Vector3i(26, 5, 0)) == VoxelWorld.Mat.WOOD, "a hole is just the voxel the round passed")
+	world.server_carve(Vector3(0.55, 0.55, 0.05), 0.12)
+	check(world.mark_count() == 1 and world.marks_near(Vector3(0.25, 0.75, 0.0), 0.02) == 1, "carving a voxel takes its marks with it (%d left)" % world.mark_count())
+
+	# Blasts by material: wood goes, concrete chips.
+	world.server_blast(Vector3(2.5, 0.5, -0.05), 0.45)
+	world.server_blast(Vector3(0.5, 0.25, -0.05), 0.45)
+	check(tool.get_voxel(Vector3i(28, 5, 0)) == VoxelWorld.Mat.EMPTY and tool.get_voxel(Vector3i(22, 3, 0)) == VoxelWorld.Mat.EMPTY, "a blast takes out wood across its radius")
+	check(tool.get_voxel(Vector3i(5, 2, 0)) == VoxelWorld.Mat.EMPTY and tool.get_voxel(Vector3i(8, 2, 0)) == VoxelWorld.Mat.CONCRETE
+		and tool.get_voxel(Vector3i(5, 2, 2)) == VoxelWorld.Mat.CONCRETE, "and only chips concrete near its centre")
+
+	# The log (through JSON, as saved) builds the same world again.
+	var edits: Variant = JSON.parse_string(JSON.stringify(GameState.voxel_edits))
+	var copy := _material_world(boxes)
+	while not copy.is_built() and Time.get_ticks_msec() < deadline + 15000:
+		await get_tree().process_frame
+	copy.load_edits(edits)
+	await get_tree().process_frame
+	var copy_tool := copy.terrain.get_voxel_tool()
+	copy_tool.channel = VoxelBuffer.CHANNEL_COLOR
+	var same := true
+	for v: Vector3i in [Vector3i(25, 5, 0), Vector3i(26, 5, 0), Vector3i(28, 5, 0), Vector3i(5, 2, 0), Vector3i(8, 2, 0), Vector3i(5, 5, 0), Vector3i(5, 5, 2)]:
+		same = same and copy_tool.get_voxel(v) == tool.get_voxel(v)
+	check(same and copy.mark_count() == world.mark_count() and copy._mark_mesh.multimesh.instance_count == world.mark_count(),
+		"the saved log replays the same holes, blasts and marks (%d marks)" % copy.mark_count())
+	GameState.voxel_edits.clear()
+	viewer.queue_free()
+	world.queue_free()
+	copy.queue_free()
+	await get_tree().process_frame
+
+
+func _material_world(boxes: Array) -> VoxelWorld:
+	var world := VoxelWorld.new()
+	add_child(world)
+	for box: Array in boxes:
+		world.add_box_m(box[0], box[1], box[2])
+	return world
 
 
 func _test_ballistics() -> void:

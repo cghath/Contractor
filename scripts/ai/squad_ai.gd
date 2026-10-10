@@ -72,6 +72,11 @@ const WAYPOINT_REACH := 0.45
 const REPATH_S := 1.0
 const COVER_RINGS: Array[float] = [2.0, 4.0, 6.0, 8.0, 10.0]
 const COVER_SEARCH_S := 1.0
+## Cover that only hides you (wood or sheet metal a rifle round goes through, see
+## VoxelWorld.MATERIALS) scores this much worse than cover that stops a round arriving with
+## SOFT_COVER_TEST_J (an M855 at close range), so AI picks concrete when it has the choice.
+const SOFT_COVER_PENALTY := 6.0
+const SOFT_COVER_TEST_J := 1650.0
 const ADVANCE_AFTER_S := 6.0
 const ADVANCE_STEP := 8.0
 const WORLD_MASK := 1
@@ -1381,6 +1386,8 @@ func find_cover(anchor: Vector3, leash: float) -> Variant:
 			if Vector2(q.x - p.x, q.z - p.z).length() > 0.6 or not _cover_protects(q) or _cover_taken(q):
 				continue
 			var score := _flat_distance(q) + q.distance_to(anchor) * 0.5
+			if not VoxelWorld.stops_round_in(body, body.threat_pos + Vector3.UP * 1.5, q + Vector3.UP * 0.9, SOFT_COVER_TEST_J):
+				score += SOFT_COVER_PENALTY  # only wood or sheet metal in the way: rounds come through
 			if Throwables.clear_line(world, q + Vector3.UP * 1.6, body.threat_pos + Vector3.UP * 1.2):
 				score -= 3.0  # low cover: you can stand up and return fire
 			score += maxf(0.0, 6.0 - q.distance_to(body.threat_pos)) * 2.0
