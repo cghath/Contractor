@@ -390,7 +390,8 @@ func _server_squad_command(cmd: String, point: Vector3, names: PackedStringArray
 			if who == "":
 				_client_message.rpc_id(owner_peer(), "Nobody selected has one")
 		_:
-			squad.command(self, cmd, point, names)  # formation, target, combat mode, team
+			if not squad.command(self, cmd, point, names):  # formation, target, combat mode, team
+				_client_message.rpc_id(owner_peer(), "Can't target that" if cmd.begins_with("target:") else "Order not given")
 
 
 @rpc("any_peer", "call_local", "reliable")

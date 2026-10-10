@@ -37,6 +37,7 @@ func _ready() -> void:
 	await _test_one_player()
 	_test_kits()
 	await _test_more_players()
+	await _test_stable_slots()
 	await _test_combat_modes()
 	await _test_target()
 	_test_team()
@@ -79,6 +80,13 @@ func _test_assignment() -> void:
 		check(ok and medics[0] >= 1 and medics[1] >= 1, "%d players %s: everyone gets their role, both teams keep a medic (%s)" % [picks.size(), picks, medics])
 	var kept := Roles.assign([&"medic", &"team_leader"], [7, -1])
 	check(kept.slots[0] == 7, "a player keeps the slot they already hold")
+	var two := Roles.assign([&"marksman", &"marksman"])
+	check(two.slots[0] == 5 and two.slots[1] == 6 and two.roles[6] == Roles.MARKSMAN, "two marksmen: the second takes team B's rifleman slot (%s)" % [two.slots])
+	var three := Roles.assign([&"marksman", &"marksman", &"rifleman"], [5, 6, -1], [&"marksman", &"marksman", &""])
+	check(three.slots[0] == 5 and three.slots[1] == 6 and three.roles[6] == Roles.MARKSMAN and three.slots[2] >= 0 and three.roles[three.slots[2]] == Roles.RIFLEMAN,
+		"a rifleman joining doesn't move the marksman out of the converted slot (%s)" % [three.slots])
+	var medic_kept := Roles.assign([&"rifleman"], [3], [&"rifleman"])
+	check(medic_kept.slots[0] != 3 and medic_kept.roles[3] == Roles.MEDIC, "a non-medic never keeps a medic slot")
 
 
 func _test_menu_picker() -> void:
@@ -161,6 +169,71 @@ func _test_more_players() -> void:
 	await _frames(2)
 	check(_squad().size() == 7 and _ai_in_role(Roles.MEDIC).size() == 2 and _ai_in_role(Roles.RIFLEMAN).size() == 1, "when they leave, AI fills their slots in the slots' roles")
 	_check_teams("back to 1 player")
+
+
+## Players who share a role keep their slots while others join and switch roles, and only
+## the AI in the slots that change hands are replaced.
+func _test_stable_slots() -> void:
+	print("Stable slots as players join and switch")
+	level.player_roles[2] = Roles.MARKSMAN
+	level.player_roles[3] = Roles.MARKSMAN
+	var g2 := _add_guest(2)
+	var g3 := _add_guest(3)
+	level.rebalance_squad()
+	await _frames(2)
+	var slot3 := g3.squad_slot
+	var team3 := g3.fire_team
+	check(g2.role == Roles.MARKSMAN and g3.role == Roles.MARKSMAN and slot3 >= 0, "two marksmen (slots %d, %d)" % [g2.squad_slot, slot3])
+	var before := _ai_by_slot()
+	var g4 := _add_guest(4)  # joined, pick not here yet
+	level.rebalance_squad()
+	await _frames(2)
+	check(g4.squad_slot == -1 and g4.fire_team == -1 and _ai_by_slot() == before, "a player whose pick hasn't arrived waits outside the squad; no AI is replaced")
+	level.player_roles[4] = Roles.RIFLEMAN
+	level.rebalance_squad()
+	await _frames(2)
+	var rifle_slot := g4.squad_slot
+	check(rifle_slot >= 0 and g4.role == Roles.RIFLEMAN, "the third player's pick arrives: rifleman (slot %d)" % rifle_slot)
+	check(g3.squad_slot == slot3 and g3.fire_team == team3 and g3.role == Roles.MARKSMAN, "the second marksman keeps slot %d and team %s (%d)" % [slot3, Roles.TEAMS[team3], g3.squad_slot])
+	check(_ai_changed(before, _ai_by_slot()) == [rifle_slot], "only the AI in the newcomer's slot is replaced (%s)" % [_ai_changed(before, _ai_by_slot())])
+	before = _ai_by_slot()
+	level.player_roles[4] = Roles.TEAM_LEADER
+	level.rebalance_squad()
+	await _frames(2)
+	var tl_slot := g4.squad_slot
+	check(g4.role == Roles.TEAM_LEADER and tl_slot != rifle_slot, "the third player switches to team leader (slot %d)" % tl_slot)
+	check(g3.squad_slot == slot3 and g3.fire_team == team3, "the second marksman still holds slot %d" % slot3)
+	var changed := _ai_changed(before, _ai_by_slot())
+	changed.sort()
+	var expected := [rifle_slot, tl_slot]
+	expected.sort()
+	check(changed == expected, "only the AI in the slots the newcomer left and took change (%s)" % [changed])
+	_check_teams("3 players")
+	for g: Soldier in [g2, g3, g4]:
+		g.queue_free()
+	for id in [2, 3, 4]:
+		level.player_roles.erase(id)
+	await _frames(1)
+	level.rebalance_squad()
+	await _frames(2)
+	check(_squad().size() == 7, "back to one player and 7 AI")
+
+
+## Slot -> AI instance id, for the friendly AI.
+func _ai_by_slot() -> Dictionary:
+	var out := {}
+	for s: Soldier in _squad():
+		out[s.squad_slot] = s.get_instance_id()
+	return out
+
+
+## Slots whose AI differs between two _ai_by_slot() snapshots.
+func _ai_changed(before: Dictionary, after: Dictionary) -> Array:
+	var out := []
+	for slot in Roles.slot_count():
+		if before.get(slot, 0) != after.get(slot, 0):
+			out.append(slot)
+	return out
 
 
 func _check_teams(when: String) -> void:
@@ -255,6 +328,14 @@ func _test_target() -> void:
 	var squad := level.squad_for(&"friendly")
 	var names := PackedStringArray([String(gunner.name)])
 	check(not squad.command(player, "target:%s" % _slot(0).name, Vector3.ZERO, names), "the host won't target a friendly")
+	var hidden := _spawn_test_hostile("HiddenTest", Vector3(3, 0.1, -8))  # inside the main building
+	await _frames(2)
+	check(not Squad.sees(player, hidden) and Squad.sees(player, far), "the main building hides HiddenTest from the player; FarTest is in sight")
+	check(not squad.command(player, "target:HiddenTest", Vector3.ZERO, names), "the host won't target an enemy the player can't see")
+	player._server_squad_command.rpc_id(1, "target:HiddenTest", Vector3.ZERO, names)
+	await _frames(1)
+	check(player._hud._message.text == "Can't target that" and SquadAI.of(gunner).focus == null, "a rejected order tells the player")
+	_free(hidden)
 	check(squad.command(player, "target:FarTest", Vector3.ZERO, names) and SquadAI.of(gunner).focus == far, "the host takes a target by name")
 	far.vitals.server_damage(500.0)
 	await _seconds(0.5)
@@ -330,6 +411,7 @@ func _test_callout_rules() -> void:
 	# Squadmates talk on their own too: start from a clean slate and only look at these two.
 	callouts._last_by_speaker.clear()
 	callouts._last_by_key.clear()
+	callouts._last_by_side_key.clear()
 	callouts._pending.clear()
 	callouts.sent.clear()
 	callouts.shown.clear()
@@ -365,6 +447,17 @@ func _test_callout_rules() -> void:
 	var guest := _add_guest(2)
 	check(callouts.recipients(first) == PackedInt32Array([1]), "players not connected (a fake peer 2) aren't sent anything")
 	guest.queue_free()
+	var other := _spawn_test_hostile("ChatterTest2", Vector3(-75, 0.1, -75))
+	var spotters: Array = _squad().slice(2, 5)  # three AI besides the two above
+	for s: Soldier in spotters:
+		callouts._last_by_speaker.erase(String(s.name))
+		callouts._last_by_key.erase("%s/contact" % s.name)
+	callouts._last_by_side_key.clear()
+	check(callouts.contact(spotters[0], hostile), "%s spots an enemy and calls the contact" % spotters[0].name)
+	check(not callouts.contact(spotters[1], hostile) and said.call(spotters[1], &"contact").is_empty(),
+		"a squadmate who spots the same enemy right after stays quiet")
+	check(callouts.contact(spotters[2], other), "a different enemy is still called")
+	_free(other)
 	_free(hostile)
 	check(Callouts.play(&"reloading", first) == null, "no audio file yet: Callouts.play stays silent")
 	var origin := Node3D.new()

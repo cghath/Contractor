@@ -90,10 +90,12 @@ static func buddy_slot(slot: int) -> int:
 
 
 ## Assigns players to slots. `choices` are the players' roles in priority order (host
-## first); `current` is each player's slot so far (-1 for none), kept when it still fits.
-## Returns {"slots": Array[int] (one per player), "roles": Array[StringName] (one per slot,
-## after any conversions)}.
-static func assign(choices: Array, current: Array = []) -> Dictionary:
+## first); `current` is each player's slot so far (-1 for none) and `current_roles` the role
+## they play in it now. A player keeps their slot when it is their pick's slot, or when they
+## hold a converted non-medic slot and their pick hasn't changed, so other players joining,
+## leaving or switching roles never move them. Returns {"slots": Array[int] (one per
+## player), "roles": Array[StringName] (one per slot, after any conversions)}.
+static func assign(choices: Array, current: Array = [], current_roles: Array = []) -> Dictionary:
 	var slots := layout()
 	var roles: Array[StringName] = []
 	for s: Dictionary in slots:
@@ -107,12 +109,18 @@ static func assign(choices: Array, current: Array = []) -> Dictionary:
 	var wants: Array[StringName] = []
 	for c: Variant in choices:
 		wants.append(StringName(c) if has(StringName(c)) else TEAM_LEADER)
-	# Players keep the slot they already hold when it still has their role.
+	# Players keep the slot they already hold when it is their role's slot, or a converted
+	# non-medic slot they still play the same role in. A medic slot is kept only by a medic.
 	for i in wants.size():
 		var held: int = current[i] if i < current.size() else -1
-		if held >= 0 and held < slots.size() and not taken[held] and slots[held].role == wants[i]:
+		if held < 0 or held >= slots.size() or taken[held]:
+			continue
+		var playing := StringName(current_roles[i]) if i < current_roles.size() else &""
+		var converted_kept: bool = playing == wants[i] and wants[i] != MEDIC and slots[held].role != MEDIC
+		if slots[held].role == wants[i] or converted_kept:
 			result[i] = held
 			taken[held] = true
+			roles[held] = wants[i]
 	# Then the first free slot with their role, on the team with fewer players.
 	for i in wants.size():
 		if result[i] >= 0:

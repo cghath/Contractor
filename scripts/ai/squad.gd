@@ -20,6 +20,8 @@ const COMBAT_MODES := {"safe": CombatMode.SAFE, "aware": CombatMode.AWARE, "comb
 const COLOR_TEAMS: Array[String] = ["red", "green", "blue", "yellow", "white"]
 ## Proposed: how far away a Target order can name an enemy.
 const TARGET_RANGE := 300.0
+## Heights on a soldier (m above their feet) checked for a line of sight to them.
+const SIGHT_HEIGHTS: Array[float] = [1.7, 1.4, 1.0, 0.5]
 ## Proposed: once any member is fired upon, the whole squad counts as engaged this long
 ## (units in Safe or Stealth hold fire until then).
 const ENGAGED_S := 20.0
@@ -124,13 +126,14 @@ func command(from: Soldier, cmd: String, _point: Vector3, names := PackedStringA
 
 
 ## Command menu "Target": the named units focus fire on the enemy called `enemy_name`
-## (they still need to see it), or pick their own targets again for "".
+## (they still need to see it), or pick their own targets again for "". The ordering player
+## must have a clear line to the enemy (the host checks, so a client can't name any hostile).
 func set_target(from: Soldier, enemy_name: String, names := PackedStringArray()) -> bool:
 	var enemy: Soldier = null
 	if enemy_name != "":
 		enemy = find_soldier(enemy_name)
 		if enemy == null or enemy.faction == faction or not enemy.vitals.is_up() \
-				or enemy.global_position.distance_to(from.global_position) > TARGET_RANGE:
+				or enemy.global_position.distance_to(from.global_position) > TARGET_RANGE or not sees(from, enemy):
 			return false
 	leader = from
 	for s in pick(names):
@@ -138,6 +141,16 @@ func set_target(from: Soldier, enemy_name: String, names := PackedStringArray())
 		if ai:
 			ai.focus = enemy
 	return true
+
+
+## True if nothing solid stands between `viewer`'s eyes and some part of `other` (feet to
+## head), as when the viewer puts the crosshair on them. Smoke doesn't count here.
+static func sees(viewer: Soldier, other: Soldier) -> bool:
+	var eyes := viewer.camera.global_position
+	for height: float in SIGHT_HEIGHTS:
+		if Throwables.clear_line(viewer.get_world_3d(), eyes, other.global_position + Vector3.UP * height):
+			return true
+	return false
 
 
 ## Command menu "Combat mode" for the named units.

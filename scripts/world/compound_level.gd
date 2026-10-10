@@ -50,8 +50,11 @@ static var player_role_kits := false
 ## (see rebalance_squad). AI squadmates are named by callsign, the first one free.
 const SQUAD_SIZE := 8
 const SQUAD_CALLSIGNS: Array[String] = ["Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel"]
-## Role for a joining player until their pick arrives (Roles.local_choice, sent on join).
+## A joining player stays out of the squad (AI keep every slot) until their pick arrives
+## (Roles.local_choice, sent on join); if it hasn't come within JOIN_ROLE_WAIT_S they take
+## DEFAULT_JOIN_ROLE.
 const DEFAULT_JOIN_ROLE := Roles.RIFLEMAN
+const JOIN_ROLE_WAIT_S := 5.0
 ## Two fire teams: a pair guarding the main building, and a pair patrolling the yard.
 const HOSTILES := [
 	{"name": "Hostile1", "pos": Vector3(-2.5, 0.1, -10), "buddy": "Hostile2", "guard": true},
@@ -252,12 +255,21 @@ func _spawn_ai() -> void:
 func rebalance_squad() -> void:
 	var humans: Array = players.get_children().filter(func(p: Node) -> bool: return p is Soldier and not p.is_queued_for_deletion())
 	humans.sort_custom(func(a: Node, b: Node) -> bool: return a.name.to_int() < b.name.to_int())
+	# A player whose pick hasn't arrived yet waits outside the squad (the AI keep their slots).
+	for h: Soldier in humans.filter(func(p: Soldier) -> bool: return not player_roles.has(p.name.to_int())):
+		h.squad_slot = -1
+		h.fire_team = -1
+		h.role = &""
+		h.buddy = null
+	humans = humans.filter(func(p: Soldier) -> bool: return player_roles.has(p.name.to_int()))
 	var choices: Array = []
 	var current: Array = []
+	var current_roles: Array = []
 	for h: Soldier in humans:
-		choices.append(player_roles.get(h.name.to_int(), DEFAULT_JOIN_ROLE))
+		choices.append(player_roles[h.name.to_int()])
 		current.append(h.squad_slot)
-	var plan := Roles.assign(choices, current)
+		current_roles.append(h.role)
+	var plan := Roles.assign(choices, current, current_roles)
 	var slot_roles: Array = plan.roles
 	var layout := Roles.layout()
 	var everyone := {}  # slot -> Soldier
@@ -379,6 +391,14 @@ func _on_peer_joined(id: int) -> void:
 		return
 	voxel_world.send_edit_log_to(id)
 	_add_player(id)
+	get_tree().create_timer(JOIN_ROLE_WAIT_S).timeout.connect(_on_join_role_timeout.bind(id))
+
+
+## Host: a joined player's pick never came; they play DEFAULT_JOIN_ROLE.
+func _on_join_role_timeout(id: int) -> void:
+	if players.get_node_or_null(str(id)) != null and not player_roles.has(id):
+		player_roles[id] = DEFAULT_JOIN_ROLE
+		rebalance_squad()
 
 
 func _on_peer_left(id: int) -> void:

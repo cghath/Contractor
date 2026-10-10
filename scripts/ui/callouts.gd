@@ -5,7 +5,7 @@ extends Node
 ##
 ## The host decides what is said: SquadAI and the level call say() (contact, reloading,
 ## man down, frag and smoke out, moving and covering while battle buddies bound). Each
-## speaker is rate-limited, and a line goes only to the players on the speaker's side, so
+## speaker is rate-limited, only the first spotter calls a given contact, and a line goes only to the players on the speaker's side, so
 ## hostile callouts are never shown. Each receiving peer shows it as a subtitle
 ## ("Bravo: Reloading!", see Subtitles) and plays res://audio/callouts/<id>.ogg from the
 ## speaker if that file exists (play()).
@@ -18,6 +18,9 @@ const AUDIO_DIR := "res://audio/callouts/"
 const SPEAKER_GAP_S := 2.0
 ## ...and doesn't repeat the same callout this soon.
 const REPEAT_GAP_S := 8.0
+## Proposed: once someone on a side calls a contact on an enemy, nobody else on that side
+## calls the same enemy this soon (the first spotter speaks, the rest stay quiet).
+const SQUAD_CONTACT_GAP_S := 6.0
 ## A line held back by the speaker gap is dropped if it can't be said within this long.
 const PENDING_S := 3.0
 ## Callouts that cut in on the speaker gap: man down and thrown grenades (they still
@@ -48,6 +51,7 @@ var sent: Array[Dictionary] = []
 var shown: Array[Dictionary] = []
 var _last_by_speaker := {}  # speaker node name -> time of their last line
 var _last_by_key := {}  # "speaker/key" -> time that callout was last said
+var _last_by_side_key := {}  # "faction/key" -> time someone on that side last said it
 var _pending := {}  # speaker node name -> the line waiting for the speaker gap
 
 
@@ -83,10 +87,12 @@ static func play(id: StringName, speaker: Node3D) -> AudioStreamPlayer3D:
 
 
 ## Host only. `speaker` says callout `id` (text from LINES unless given). `key` names what
-## counts as a repeat (default: the id). Returns true if it was said now. A line held back
-## by the speaker gap waits its turn (one per speaker, the newest wins) for up to
-## PENDING_S; a repeat, or a speaker who is down, says nothing.
-func say(speaker: Soldier, id: StringName, text := "", key := "") -> bool:
+## counts as a repeat (default: the id). A non-empty `side_key` is shared by the speaker's
+## whole side: once anyone says it, nobody on that side says it again for `side_gap`
+## seconds. Returns true if it was said now. A line held back by the speaker gap waits its
+## turn (one per speaker, the newest wins) for up to PENDING_S; a repeat, or a speaker who
+## is down, says nothing.
+func say(speaker: Soldier, id: StringName, text := "", key := "", side_key := "", side_gap := 0.0) -> bool:
 	if not multiplayer.is_server() or speaker == null or not is_instance_valid(speaker) or not speaker.vitals.is_up():
 		return false
 	var now := Soldier._now()
@@ -94,11 +100,15 @@ func say(speaker: Soldier, id: StringName, text := "", key := "") -> bool:
 	var repeat_key := "%s/%s" % [who, key if key != "" else String(id)]
 	if now - float(_last_by_key.get(repeat_key, -1000.0)) < REPEAT_GAP_S:
 		return false
+	var shared := "%s/%s" % [speaker.faction, side_key] if side_key != "" else ""
+	if shared != "" and now - float(_last_by_side_key.get(shared, -1000.0)) < side_gap:
+		return false
 	var line := text if text != "" else String(LINES.get(id, String(id)))
 	if id not in URGENT and now - float(_last_by_speaker.get(who, -1000.0)) < SPEAKER_GAP_S:
-		_pending[who] = {"speaker": speaker, "id": id, "line": line, "repeat_key": repeat_key, "until": now + PENDING_S}
+		_pending[who] = {"speaker": speaker, "id": id, "line": line, "repeat_key": repeat_key,
+			"shared": shared, "side_gap": side_gap, "until": now + PENDING_S}
 		return false
-	_send(speaker, id, line, repeat_key)
+	_send(speaker, id, line, repeat_key, shared)
 	return true
 
 
@@ -110,17 +120,20 @@ func _process(_delta: float) -> void:
 		var p: Dictionary = _pending[who]
 		var speaker: Soldier = p.speaker if is_instance_valid(p.speaker) else null
 		if now > float(p.until) or speaker == null or not speaker.vitals.is_up() \
-				or now - float(_last_by_key.get(p.repeat_key, -1000.0)) < REPEAT_GAP_S:
+				or now - float(_last_by_key.get(p.repeat_key, -1000.0)) < REPEAT_GAP_S \
+				or (p.shared != "" and now - float(_last_by_side_key.get(p.shared, -1000.0)) < float(p.side_gap)):
 			_pending.erase(who)
 		elif now - float(_last_by_speaker.get(who, -1000.0)) >= SPEAKER_GAP_S:
 			_pending.erase(who)
-			_send(speaker, p.id, p.line, p.repeat_key)
+			_send(speaker, p.id, p.line, p.repeat_key, p.shared)
 
 
-func _send(speaker: Soldier, id: StringName, line: String, repeat_key: String) -> void:
+func _send(speaker: Soldier, id: StringName, line: String, repeat_key: String, shared := "") -> void:
 	var now := Soldier._now()
 	var who := String(speaker.name)
 	_last_by_key[repeat_key] = now
+	if shared != "":
+		_last_by_side_key[shared] = now
 	_last_by_speaker[who] = now
 	var to := recipients(speaker)
 	sent.append({"speaker": who, "id": id, "text": line, "to": to, "time": now})
@@ -148,7 +161,8 @@ func recipients(speaker: Soldier) -> PackedInt32Array:
 
 
 ## Host only. "Contact, front, 80 m": direction and distance from the squad leader's view
-## (the speaker's own when there's no leader), as Arma calls them.
+## (the speaker's own when there's no leader), as Arma calls them. Only the first spotter
+## calls a given enemy; the rest of the side stays quiet for SQUAD_CONTACT_GAP_S.
 func contact(speaker: Soldier, enemy: Soldier) -> bool:
 	if enemy == null:
 		return false
@@ -156,7 +170,8 @@ func contact(speaker: Soldier, enemy: Soldier) -> bool:
 	var squad := level.squad_for(speaker.faction) if level else null
 	var from: Node3D = squad.leader if squad and is_instance_valid(squad.leader) else speaker
 	var distance := from.global_position.distance_to(enemy.global_position)
-	return say(speaker, &"contact", "Contact, %s, %d m" % [direction_word(from, enemy.global_position), round_distance(distance)])
+	return say(speaker, &"contact", "Contact, %s, %d m" % [direction_word(from, enemy.global_position), round_distance(distance)],
+		"", "contact/%s" % enemy.name, SQUAD_CONTACT_GAP_S)
 
 
 ## Host only. The casualty's battle buddy, or the nearest squadmate in range, calls
