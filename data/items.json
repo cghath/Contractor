@@ -1,5 +1,5 @@
 {
-	"_units": "volume_l = litres, mass_kg = kilograms, capacity_l = storage added when worn. Plate *_vox sizes are 1 cm voxels. Armor: rating = level on Ballistics.LEVELS; material = ceramic, steel, polyethylene or composite; plate fits = carrier tiers it fits. Carriers (aramid soft armor): soft_rating, soft_faces (front, back, side), soft_parts (chest, abdomen), spall_cover (neck, face, arms). Magazines name their round in data/rounds.json; muzzle_velocity_mps overrides the round's for that barrel.",
+	"_units": "volume_l = litres, mass_kg = kilograms, capacity_l = storage added when worn. Plate *_vox sizes are 1 cm voxels. Armor: rating = level on Ballistics.LEVELS; material = ceramic, steel, polyethylene or composite; plate fits = carrier tiers it fits. Carriers (aramid soft armor): soft_rating, soft_faces (front, back, side), soft_parts (chest, abdomen), spall_cover (neck, face, arms). Magazines name their round in data/rounds.json; muzzle_velocity_mps overrides the round's for that barrel. Ammo: magazines and loose rounds (stats.loose) of the same calibre go together; volume_l and mass_kg of loose rounds are per round (packed), a magazine's mass_kg is full and empty_mass_kg empty. Smoke grenades name their cloud colour in smoke_colour (SmokeCloud.COLOURS).",
 	"items": [
 		{"id": "m4a1", "name": "M4A1 Carbine", "type": "weapon", "slot": "primary", "volume_l": 12.0, "mass_kg": 3.4, "tags": ["rifle", "5.56"],
 		 "stats": {"damage": 34, "rpm": 750, "auto": true, "fire_modes": ["semi", "auto"], "ammo": "mag_556", "reload_s": 2.4, "spread_deg": 1.2, "recoil_deg": 0.55, "ads_fov": 50, "wall_carve_m": 0.12, "plate_wear": 1.0, "muzzle_velocity_mps": 910, "size_m": [0.07, 0.25, 0.84]}},
@@ -10,9 +10,12 @@
 		{"id": "m17", "name": "M17 Pistol", "type": "weapon", "slot": "sidearm", "volume_l": 1.2, "mass_kg": 0.9, "tags": ["pistol", "9mm"],
 		 "stats": {"damage": 22, "rpm": 400, "auto": false, "fire_modes": ["semi"], "ammo": "mag_9mm", "reload_s": 1.6, "spread_deg": 1.8, "recoil_deg": 1.1, "ads_fov": 65, "wall_carve_m": 0.07, "plate_wear": 0.5, "muzzle_velocity_mps": 370, "size_m": [0.04, 0.14, 0.2]}},
 
-		{"id": "mag_556", "name": "5.56 Magazine (30)", "type": "ammo", "volume_l": 0.25, "mass_kg": 0.5, "stack": 10, "tags": ["5.56"], "stats": {"rounds": 30, "round": "556_m855"}},
-		{"id": "mag_762", "name": "7.62 Magazine (20)", "type": "ammo", "volume_l": 0.32, "mass_kg": 0.65, "stack": 10, "tags": ["7.62"], "stats": {"rounds": 20, "round": "762x51_m80"}},
-		{"id": "mag_9mm", "name": "9mm Magazine (17)", "type": "ammo", "volume_l": 0.08, "mass_kg": 0.25, "stack": 10, "tags": ["9mm"], "stats": {"rounds": 17, "round": "9x19_fmj"}},
+		{"id": "mag_556", "name": "5.56 Magazine (30)", "type": "ammo", "volume_l": 0.25, "mass_kg": 0.5, "stack": 10, "tags": ["5.56"], "stats": {"rounds": 30, "round": "556_m855", "calibre": "5.56", "empty_mass_kg": 0.13}},
+		{"id": "mag_762", "name": "7.62 Magazine (20)", "type": "ammo", "volume_l": 0.32, "mass_kg": 0.65, "stack": 10, "tags": ["7.62"], "stats": {"rounds": 20, "round": "762x51_m80", "calibre": "7.62", "empty_mass_kg": 0.14}},
+		{"id": "mag_9mm", "name": "9mm Magazine (17)", "type": "ammo", "volume_l": 0.08, "mass_kg": 0.25, "stack": 10, "tags": ["9mm"], "stats": {"rounds": 17, "round": "9x19_fmj", "calibre": "9mm", "empty_mass_kg": 0.05}},
+		{"id": "rounds_556", "name": "5.56x45 Rounds", "type": "ammo", "volume_l": 0.006, "mass_kg": 0.0123, "stack": 100, "tags": ["5.56", "loose"], "stats": {"loose": true, "round": "556_m855", "calibre": "5.56"}},
+		{"id": "rounds_762", "name": "7.62x51 Rounds", "type": "ammo", "volume_l": 0.011, "mass_kg": 0.0254, "stack": 100, "tags": ["7.62", "loose"], "stats": {"loose": true, "round": "762x51_m80", "calibre": "7.62"}},
+		{"id": "rounds_9mm", "name": "9mm Rounds", "type": "ammo", "volume_l": 0.0035, "mass_kg": 0.0118, "stack": 100, "tags": ["9mm", "loose"], "stats": {"loose": true, "round": "9x19_fmj", "calibre": "9mm"}},
 
 		{"id": "plate_carrier_light", "name": "Low-Profile Carrier (Light)", "type": "armor", "slot": "vest", "volume_l": 5.0, "mass_kg": 1.2, "capacity_l": 3.0, "tags": ["vest", "light"],
 		 "stats": {"tier": "light", "plate_slots": ["plate_front"], "plate_depth": 0.14,
@@ -55,8 +58,16 @@
 
 		{"id": "frag_grenade", "name": "Frag Grenade", "type": "utility", "volume_l": 0.3, "mass_kg": 0.4, "stack": 6, "tags": ["throwable", "explosive"],
 		 "stats": {"throwable": "frag", "fuse_s": 3.5}},
-		{"id": "smoke_grenade", "name": "Smoke Grenade", "type": "utility", "volume_l": 0.35, "mass_kg": 0.35, "stack": 6, "tags": ["throwable"],
-		 "stats": {"throwable": "smoke", "fuse_s": 1.5}},
+		{"id": "smoke_grenade", "name": "Smoke Grenade", "type": "utility", "volume_l": 0.35, "mass_kg": 0.35, "stack": 6, "tags": ["throwable", "smoke"],
+		 "stats": {"throwable": "smoke", "fuse_s": 1.5, "smoke_colour": "white"}},
+		{"id": "smoke_green", "name": "Smoke Grenade (Green)", "type": "utility", "volume_l": 0.35, "mass_kg": 0.54, "stack": 6, "tags": ["throwable", "smoke"],
+		 "stats": {"throwable": "smoke", "fuse_s": 1.5, "smoke_colour": "green"}},
+		{"id": "smoke_yellow", "name": "Smoke Grenade (Yellow)", "type": "utility", "volume_l": 0.35, "mass_kg": 0.54, "stack": 6, "tags": ["throwable", "smoke"],
+		 "stats": {"throwable": "smoke", "fuse_s": 1.5, "smoke_colour": "yellow"}},
+		{"id": "smoke_blue", "name": "Smoke Grenade (Blue)", "type": "utility", "volume_l": 0.35, "mass_kg": 0.54, "stack": 6, "tags": ["throwable", "smoke"],
+		 "stats": {"throwable": "smoke", "fuse_s": 1.5, "smoke_colour": "blue"}},
+		{"id": "smoke_purple", "name": "Smoke Grenade (Purple)", "type": "utility", "volume_l": 0.35, "mass_kg": 0.54, "stack": 6, "tags": ["throwable", "smoke"],
+		 "stats": {"throwable": "smoke", "fuse_s": 1.5, "smoke_colour": "purple"}},
 		{"id": "flashbang", "name": "Flashbang", "type": "utility", "volume_l": 0.3, "mass_kg": 0.3, "stack": 6, "tags": ["throwable"],
 		 "stats": {"throwable": "flash", "fuse_s": 1.5}},
 		{"id": "breaching_charge", "name": "Breaching Charge", "type": "utility", "volume_l": 2.0, "mass_kg": 1.5, "stack": 3, "tags": ["explosive", "breach"]},

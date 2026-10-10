@@ -20,6 +20,8 @@ func setup(id: StringName) -> void:
 	angular_damp = 2.0
 	linear_damp = 0.2
 	var colour: Color = {"frag": Color("4b5a3a"), "smoke": Color("7a8a80"), "flash": Color("b8b8c0")}.get(kind, Color.GRAY)
+	if kind == "smoke" and item.stats.get("smoke_colour", "white") != "white":
+		colour = SmokeCloud.colour_value(SmokeCloud.colour_of(id)).darkened(0.25)  # coloured smokes show their colour
 	var material := StandardMaterial3D.new()
 	material.albedo_color = colour
 	var mesh := CylinderMesh.new()
@@ -42,5 +44,5 @@ func _physics_process(delta: float) -> void:
 	if _fuse > 0.0:
 		return
 	if multiplayer.is_server():
-		Throwables.server_detonate(CompoundLevel.current(self), kind, global_position)
+		Throwables.server_detonate(CompoundLevel.current(self), kind, global_position, item_id)
 	queue_free()

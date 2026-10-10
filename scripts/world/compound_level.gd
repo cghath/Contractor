@@ -33,6 +33,13 @@ const LOOT := [
 	{"uid": "c01_frag_a", "id": "frag_grenade", "count": 3, "pos": Vector3(6, 0.5, 4)},
 	{"uid": "c01_smoke_a", "id": "smoke_grenade", "count": 3, "pos": Vector3(7, 0.5, 4)},
 	{"uid": "c01_flash_a", "id": "flashbang", "count": 3, "pos": Vector3(8, 0.5, 4)},
+	{"uid": "c01_smoke_green", "id": "smoke_green", "count": 2, "pos": Vector3(7, 0.5, 5)},
+	{"uid": "c01_smoke_yellow", "id": "smoke_yellow", "count": 2, "pos": Vector3(8, 0.5, 5)},
+	{"uid": "c01_smoke_blue", "id": "smoke_blue", "count": 2, "pos": Vector3(9, 0.5, 5)},
+	{"uid": "c01_smoke_purple", "id": "smoke_purple", "count": 2, "pos": Vector3(9, 0.5, 4)},
+	{"uid": "c01_rounds_556_a", "id": "rounds_556", "count": 120, "pos": Vector3(-3, 0.5, 19.5)},
+	{"uid": "c01_rounds_9mm_a", "id": "rounds_9mm", "count": 51, "pos": Vector3(2, 0.5, 22.5)},
+	{"uid": "c01_rounds_762_a", "id": "rounds_762", "count": 60, "pos": Vector3(-4, 0.5, -10)},
 	{"uid": "c01_salvage_a", "id": "electronics_salvage", "count": 8, "pos": Vector3(3, 0.5, -10)},
 	{"uid": "c01_m110_a", "id": "m110", "pos": Vector3(-3, 0.5, -10)},
 	{"uid": "c01_hvt_case", "id": "hvt_case", "pos": Vector3(0, 0.5, -10)},
@@ -183,9 +190,11 @@ func show_flash(pos: Vector3) -> void:
 	_burst(pos, Color.WHITE, 1.0, 0.15)
 
 
+## A smoke cloud on every peer, in its colour (a name in SmokeCloud.COLOURS).
 @rpc("authority", "call_local", "reliable")
-func spawn_smoke(pos: Vector3) -> void:
+func spawn_smoke(pos: Vector3, colour: String) -> void:
 	var cloud := SmokeCloud.new()
+	cloud.colour = colour
 	add_child(cloud)
 	cloud.global_position = pos
 

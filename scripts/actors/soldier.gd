@@ -27,10 +27,13 @@ const BULKY_SPEED_MULT := 0.7
 const ITEM_MASK := 1 << 2
 ## Camo variants for players, picked from the peer id so every peer agrees.
 const PLAYER_VARIANTS: Array[String] = ["multicam", "woodland", "desert", "urban"]
-## What a player respawns with (handoff): an M4 and 2 spare magazines, a smoke and a frag.
-## The handoff also lists 90 rounds; that waits on a loose-ammo item and on confirming
-## whether they're loose (an open item in the handoff).
-const DEFAULT_KIT: Array = [[&"m4a1", 1], [&"mag_556", 2], [&"smoke_grenade", 1], [&"frag_grenade", 1]]
+## What a player respawns with (handoff): an M4 (loaded) and 2 spare magazines plus 90 loose
+## rounds (Captain confirmed they're loose), a smoke and a frag.
+const DEFAULT_KIT: Array = [[&"m4a1", 1], [&"mag_556", 2], [&"rounds_556", 90], [&"smoke_grenade", 1], [&"frag_grenade", 1]]
+## Loading magazines from loose rounds (_server_load_mags): seconds per round (proposed:
+## 1 s per 5 rounds), and how far you can move before it stops.
+const LOAD_ROUND_S := 0.2
+const LOAD_MOVE_M := 0.5
 const THROW_SPEED := 15.0
 ## Physics layer of soldier bodies ("movers").
 const BODY_LAYER := 1 << 4
@@ -59,6 +62,10 @@ var _next_shot := 0.0         # owner-side fire-rate gate
 var _busy_until := 0.0        # owner-side: reloading or using a medkit
 var _server_next_shot := 0.0  # host-side check
 var _server_busy_until := 0.0
+## Host only: loading magazines from loose rounds (_server_load_mags). Bumping _load_run
+## stops the one in progress.
+var loading_mags := false
+var _load_run := 0
 
 ## "friendly" (players and their squad) or "hostile". Set before the body enters the tree.
 @export var faction := &"friendly"
@@ -430,6 +437,7 @@ func _server_fire(origin: Vector3, direction: Vector3, slot: StringName) -> void
 		return
 	if not inventory.consume_round(slot):
 		return
+	stop_loading_mags("Stopped loading magazines")  # firing needs your hands
 	_server_next_shot = now + 60.0 / float(weapon.stats.get("rpm", 600))
 	if origin.distance_to(camera.global_position) > 1.0:
 		origin = camera.global_position  # don't trust a far-off muzzle
@@ -492,6 +500,60 @@ func _server_reload(slot: StringName) -> void:
 	await get_tree().create_timer(seconds).timeout
 	if is_inside_tree() and inventory.slots.get(slot, &"") == id:
 		inventory.reload(slot)
+
+
+## Loads the carried part-used and empty magazines of the same calibre from loose
+## `rounds_id` (inventory screen), fullest first: LOAD_ROUND_S per round, each round going
+## in as its time comes. Moving more than LOAD_MOVE_M, firing or going down stops it;
+## whatever went in so far stays loaded.
+@rpc("any_peer", "call_local", "reliable")
+func _server_load_mags(rounds_id: StringName) -> void:
+	if not _from_owner() or not vitals.is_up() or loading_mags or _now() < _server_busy_until - 0.1:
+		return
+	var item := ItemDB.get_item(rounds_id)
+	if not Inventory.is_loose_rounds(item) or inventory.count_of(rounds_id) <= 0:
+		_client_message.rpc_id(owner_peer(), "No loose rounds to load")
+		return
+	var total := inventory.loadable_rounds(rounds_id)
+	if total <= 0:
+		_client_message.rpc_id(owner_peer(), "No %s magazines to load" % Inventory.calibre_of(item))
+		return
+	_load_run += 1
+	var run := _load_run
+	loading_mags = true
+	var start := global_position
+	var started := _now()
+	var loaded := 0
+	_client_message.rpc_id(owner_peer(), "Loading magazines: %d rounds, %.0f s (moving or firing stops)" % [total, total * LOAD_ROUND_S])
+	while true:
+		await get_tree().create_timer(LOAD_ROUND_S).timeout
+		if not is_inside_tree() or run != _load_run:
+			return  # stopped: stop_loading_mags told the player why
+		if not vitals.is_up():
+			break
+		if Vector2(global_position.x - start.x, global_position.z - start.z).length() > LOAD_MOVE_M:
+			stop_loading_mags("Stopped loading magazines: you moved")
+			return
+		var due := mini(int((_now() - started) / LOAD_ROUND_S + 0.001), total) - loaded
+		if due > 0:
+			var n := inventory.load_rounds(rounds_id, due)
+			loaded += n
+			if n < due:
+				break  # out of rounds or magazines
+		if loaded >= total:
+			break
+	loading_mags = false
+	_client_message.rpc_id(owner_peer(), "Loaded %d rounds" % loaded)
+
+
+## Host only. Stops loading magazines, if this body is, and tells the player why.
+func stop_loading_mags(why: String) -> void:
+	if not loading_mags:
+		return
+	loading_mags = false
+	_load_run += 1
+	if why != "":
+		_client_message.rpc_id(owner_peer(), why)
 
 
 @rpc("any_peer", "call_local", "reliable")

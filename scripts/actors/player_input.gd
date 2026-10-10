@@ -13,8 +13,11 @@ const HIP_VIEW := Vector3(0.14, -0.16, -0.38)
 const ADS_EYE := Vector3(0.0, -0.012, -0.24)
 ## Render layer for your own body and gear; your camera skips it.
 const LOCAL_ONLY_LAYER := 1 << 1
-## Throwables in the order Shift+G cycles them.
-const THROWABLES: Array[StringName] = [&"frag_grenade", &"flashbang", &"smoke_grenade"]
+## Throwables in the order Shift+G cycles them (next_throwable): frag and flashbang always,
+## then each smoke colour you carry.
+const THROWABLES: Array[StringName] = [&"frag_grenade", &"flashbang", &"smoke_grenade", &"smoke_green", &"smoke_yellow", &"smoke_blue", &"smoke_purple"]
+## Always in the Shift+G cycle, carried or not (smokes only show up while you have one).
+const ALWAYS_CYCLED: Array[StringName] = [&"frag_grenade", &"flashbang"]
 
 @onready var body: Soldier = get_parent()
 
@@ -83,7 +86,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		if event is InputEventKey and event.alt_pressed:
 			body._server_drop.rpc_id(1, body.active_slot)
 		elif event is InputEventKey and event.shift_pressed:
-			throwable = THROWABLES[(THROWABLES.find(throwable) + 1) % THROWABLES.size()]
+			throwable = next_throwable(throwable, body.inventory)
 			hud.flash("%s (%d)" % [ItemDB.get_item(throwable).name, body.inventory.count_of(throwable)])
 		else:
 			_try_throw()
@@ -245,6 +248,17 @@ func _try_reload() -> void:
 	body._busy_until = now + body.reload_seconds(weapon)
 	body.is_reloading = true
 	body._server_reload.rpc_id(1, body.active_slot)
+
+
+## The grenade type after `current` in the Shift+G cycle: THROWABLES order, skipping smoke
+## colours `inventory` doesn't carry.
+static func next_throwable(current: StringName, inventory: Inventory) -> StringName:
+	var start := maxi(THROWABLES.find(current), 0)
+	for step in range(1, THROWABLES.size() + 1):
+		var id := THROWABLES[(start + step) % THROWABLES.size()]
+		if id in ALWAYS_CYCLED or inventory.count_of(id) > 0:
+			return id
+	return current
 
 
 func _try_throw() -> void:
