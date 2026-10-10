@@ -64,6 +64,7 @@ func _ready() -> void:
 	await _test_self_tourniquet()
 	await _test_engagement()
 	await _test_dead_bodies()
+	await _test_downed_player()
 	GameState.delete_save()
 	print("CASUALTY TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
@@ -457,6 +458,24 @@ func _test_dead_bodies() -> void:
 		"Loot puts his gear on the ground")
 	if is_instance_valid(bearer):
 		SquadAI.of(bearer).set_physics_process(true)
+
+
+func _test_downed_player() -> void:
+	print("A downed player")
+	_place(player, Vector3(-6, 0.1, 6))
+	await _seconds(3.0)
+	var tourniquets: int = _squad().reduce(func(n: int, s: Soldier) -> int: return n + s.inventory.count_of(&"tourniquet"), 0)
+	_shoot_femoral(player, 11)
+	var sim := 0.0
+	while not player.vitals.downed and sim < 400.0:
+		player.vitals.server_advance(1.0)
+		sim += 1.0
+	check(player.vitals.downed and _bleeding(player, "arterial"), "the lead bleeds out from a femoral hit (%s)" % player.vitals.condition_text())
+	var stopped := await _wait_until(func() -> bool: return not _bleeding(player, "arterial"), 30.0)
+	var used: int = tourniquets - _squad().reduce(func(n: int, s: Soldier) -> int: return n + s.inventory.count_of(&"tourniquet"), 0)
+	check(stopped and used >= 1 and is_instance_valid(player.care_by) and player.care_by.is_ai(),
+		"squadmates treat a downed player like anyone else (%s, by %s)" % [_wound_kinds(player), _name(player.care_by) if is_instance_valid(player.care_by) else "nobody"])
+	player.vitals.server_reset_health()
 
 
 # --- Helpers ----------------------------------------------------------------------

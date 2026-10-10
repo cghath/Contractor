@@ -164,7 +164,8 @@ func _test_ballistics() -> void:
 	var aim := Vector3(0, plate_y, 0) - shooter.position
 	var first := Ballistics.fire(shooter, shooter.position, aim.normalized(), rifle)
 	check(first.result == "plate", "first shot hits the plate (%s)" % first.result)
-	check(dummy.vitals.wound_list().is_empty(), "plate protected the body")
+	# A plate stop at 5 m can crack a rib (impact, a 50% roll); nothing may get through.
+	check(dummy.vitals.wound_list().all(func(w: Dictionary) -> bool: return w.kind == "rib"), "plate protected the body")
 	var second := Ballistics.fire(shooter, shooter.position, aim.normalized(), rifle)
 	check(second.result == "body", "second shot through the hole hits the body (%s)" % second.result)
 	check(not dummy.vitals.wound_list().is_empty(), "body was wounded (%s)" % dummy.vitals.condition_text())

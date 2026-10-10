@@ -1172,6 +1172,8 @@ func _maybe_call_medic() -> void:
 		return
 	if _has_heal() and missing.all(func(id: StringName) -> bool: return id in [&"pressure_bandage", &"hemostatic_gauze", &"chest_seal", &"tourniquet"]):
 		return  # the stopgap kit stops bleeding; no need to call anyone
+	if responder_for(body, missing) == null:
+		return  # nobody free carries any of it: no use shouting yet
 	wanted = missing
 	_medic_called_at = now
 	var callouts := Callouts.of(body)
