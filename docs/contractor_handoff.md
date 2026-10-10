@@ -36,18 +36,18 @@ Phase 3 (Squad prototype) is the next build step and carries most of these chang
 
 **Phase 3: Squad prototype**
 
-- [ ] Replace HP in `Vitals` with the blood and wound model: 6 L of blood, wounds per body part, pain, unconsciousness and cardiac arrest with a 10-minute window.
+- [x] Replace HP in `Vitals` with the blood and wound model: 6 L of blood, wounds per body part, pain, unconsciousness and cardiac arrest with a 10-minute window. (Wave 1.)
 - [ ] Turn the IFAK and trauma kit into the real kit items. Keep `_server_use_medical` so every treatment uses a real item.
 - [ ] Make permadeath on bleed-out and MIA when left behind alive apply to AI squadmates only.
-- [ ] Change player death: respawn in the default kit and leave the dead player's gear in the world with a map marker. Today players respawn at the gate with full gear.
-- [ ] Start with 1 AI squadmate and scale to the 8-slot squad: two fire teams of four, each with one medic and battle-buddy pairs.
+- [x] Change player death: respawn in the default kit and leave the dead player's gear in the world with a map marker. (A world marker until there's a map; the 90 loose rounds come in wave 2.)
+- [x] Start with 1 AI squadmate and scale to the 8-slot squad: two fire teams of four, each with one medic and battle-buddy pairs. (Noah's squad fills all slots; fire teams, medics and roles in wave 1.)
 - [ ] Add buddy pairing, a Throw intent (frag, flashbang, smoke), and Carry, Drag and treatment intents to `docs/squad_design.md` and the code.
-- [ ] Rebind: Alt+G drops (G throws grenades), Shift+G cycles grenade type, and 1 to 9 pick command-menu entries only while a menu is open.
-- [ ] Build the Arma 3-style F1 to F12 command interface, navigable with middle-mouse or 1 to 9.
-- [ ] Add the movement and stance keys: F fire mode, X crouch, Z prone, C weapon mount, Q and E lean, and Ctrl+WASD stance adjust.
-- [ ] Add ACE-style interaction: hold Left Windows for the radial menu on objects and people, and Ctrl+Left Windows for self-interaction.
-- [ ] Keep voxel chipping as the visual, and add armor ratings, ceramic crack zones and plate integrity.
-- [ ] Update `docs/squad_design.md` to name 8 slots as the target, and the README's locked decisions to match Captain's calls.
+- [x] Rebind: Alt+G drops (G throws grenades), Shift+G cycles grenade type, and 1 to 9 pick command-menu entries only while a menu is open.
+- [x] Build the Arma 3-style F1 to F12 command interface, navigable with middle-mouse or 1 to 9. (Mount and supports still to come.)
+- [x] Add the movement and stance keys: F fire mode, X crouch, Z prone, C weapon mount, Q and E lean, and Ctrl+WASD stance adjust. (Stance adjust is on Caps Lock + WASD, agreed 2026-10-10.)
+- [x] Add ACE-style interaction: hold Left Windows for the radial menu on objects and people, and Ctrl+Left Windows for self-interaction. (On Left Ctrl and Left Ctrl + Left Alt, agreed 2026-10-10.)
+- [x] Keep voxel chipping as the visual, and add armor ratings, ceramic crack zones and plate integrity. (Wave 1.)
+- [x] Update `docs/squad_design.md` to name 8 slots as the target, and the README's locked decisions to match Captain's calls.
 - [ ] Ai voice callouts preferred as well.
 
 **Later phases**

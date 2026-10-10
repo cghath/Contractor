@@ -71,6 +71,8 @@ authority on rules and numbers; this file only says who builds what, in which or
 
 ### Wave 1: phase 3 core (5 agents)
 
+**Status:** built and merged on `dev` 2026-10-10 (all nine suites pass); waiting for Captain's playtest.
+
 | # | Workstream | Owns |
 |---|---|---|
 | W1 | **Wound model:** 6 L of blood with bleeding scaled by heart output; simulated arteries and big veins, body map (brain, heart, lungs, arm and leg bones, tissue, chest cavity); wound channels with cavitation reach (pistol 2 cm, intermediate 5 cm, full-power 7 cm); fractures by round class; pain 0 to 1 with knockout thresholds and wake rolls; blood-loss effects (sway, stamina, speed, vision from 15% lost); unconscious at 40%, cardiac arrest at 50% with the 10-minute window; fragments as 3 to 8 small wounds (grenades switch to this); body-part hitboxes on soldiers and dummies; enemies ignore unconscious foes. Until wave 3 nothing can restart a heart, so arrest ends in death after the window | `vitals.gd` and new wound files, hitbox nodes, body-hit path in `ballistics.gd`, frag damage in `throwables.gd` |

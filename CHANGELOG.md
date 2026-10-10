@@ -11,6 +11,93 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Wave 1 of the build plan (phase 3 core)
+
+Built by five agents in parallel and merged on `dev`. See `docs/build_plan.md`.
+
+#### Added
+
+- **Wound model (no more hitpoints):**
+  - Hits make wounds on 14 body parts. Arteries and big veins bleed by how close the round
+    passed, so a femoral hit takes about 2 to 3 minutes to knock you out.
+  - Bones can break: a broken leg means no sprint and walking speed; a broken arm means
+    heavy sway and slow reloads.
+  - Heart hits stop the heart within seconds, lung hits open the chest (with a chance of
+    tension pneumothorax), and a head hit past the helmet is fatal.
+  - 6 L of blood. From 15% lost you sway more, recover stamina more slowly and move slower;
+    from 30% you can't sprint; at 40% you're unconscious. At 50% the heart stops and a
+    10-minute cardiac-arrest window starts.
+  - Pain from 0 to 1 can knock you out, more easily the more blood you've lost. Once
+    stable you have a chance to wake every 15 s.
+  - Blood loss fades and greys your vision, with tunnel vision from 30% lost. Unconscious
+    shows a black screen with UNCONSCIOUS or a cardiac-arrest countdown.
+  - Frag grenades cause 3 to 8 fragment wounds on exposed parts; walls, other bodies,
+    plates, helmets and vests stop them.
+  - Target dummy labels show condition, blood %, bleed rate, pain and wound types.
+- **Armor ratings:**
+  - Rounds and armor share an NIJ-named ladder (IIA to IV): armor stops what it's rated
+    for and nothing above it. Light and medium helmets no longer stop rifle rounds; the
+    heavy helmet stops rifle rounds up to M855 and 7.62x51 ball.
+  - Plates: PE III (light), steel III++ (medium), ceramic IV (heavy); names show the
+    rating. Plates only fit the right carrier (PE in the light carrier; steel and ceramic
+    in medium and heavy; side plates in heavy), with a message when they don't.
+  - Ceramic cracks around each hit; hits near earlier cracks get through more often, and
+    enough hits shatter the plate. Cracks stay with the plate and show when inspected.
+  - Steel doesn't crack but throws spall at the neck, face and arms; the medium carrier
+    covers the neck, the heavy one neck, face and arms.
+  - Vests are aramid soft armor that stop pistol rounds and fragments where they cover you,
+    even after the plate fails.
+  - Stopped rounds still hit: pain, stagger, getting winded, cracked ribs at close range,
+    concussions from helmet hits, and rarely a fatal helmet stop from a full-power rifle
+    within about 200 m.
+  - ACE3-style ballistics: rounds lose energy with range (M855 from far enough away is
+    stopped by a light plate).
+- **Stances and handling:**
+  - X crouch and Z prone (toggles); Caps Lock + W/S steps through three standing and
+    three crouching heights and prone; Caps Lock + A/D for side stances.
+  - Q/E lean: hold, double-tap to stay, tap to return; leaning stops short of walls.
+  - C rests the weapon on a surface for half the sway and recoil until you move.
+  - F fire mode: M4 and Mk18 have semi and auto and start on semi.
+  - Movement has weight: about 0.3 s to reach a jog or stop, roughly double under a heavy
+    load, with momentum into turns and a moment of sway after a hard stop.
+  - Sprinting uses stamina (about 15 s from full, less under load). No sprint or jump
+    while crouched or prone. Prone is steadiest, then crouched.
+  - Hitboxes follow the pose, so crouched and prone soldiers are lower targets.
+- **Interaction menus (ACE-style):** hold Left Ctrl for action points on items, downed
+  bodies and squadmates within about 3 m; hold Left Ctrl + Left Alt for yourself. Actions:
+  pick up, revive, carry (55% speed), drag (35%, the body slides behind you), check
+  condition, check your wounds, use medical, put down, drop held item, and give a stowed
+  item to a squadmate.
+- **Squad roles and fire teams:**
+  - Two fire teams of four (A and B), each with a medic. Roles: team leader, medic,
+    autorifleman, grenadier, marksman, rifleman, with starting kits for AI squadmates.
+  - Pick your role on the main menu; AI fills the rest.
+  - Command menu: Target (focus fire), Combat mode (Safe, Aware, Combat, Stealth) and Team
+    (fire teams and colour teams). F1-F8 follow squad slots; Shift+F-key adds.
+  - Squadmates call out subtitles: contacts with direction and distance, reloading, man
+    down, frag out, smoke out, moving and covering. Voice lines play once audio exists in
+    `audio/callouts/`.
+  - The HUD roster shows fire team, role and colour team.
+- **Tests:** new suites `wounds`, `armor`, `movement`, `interaction` and `roles`;
+  `tools/run_tests.sh` runs all nine by default.
+
+#### Changed
+
+- E leans right; picking up and reviving moved to the Left Ctrl menu. Ctrl and C no longer
+  crouch.
+- IFAK and trauma kit are stopgaps until the wave 2 kit: using one stops bleeding wound by
+  wound and takes off pain; reviving stops all bleeding, brings blood up to 62% and
+  restarts the heart.
+- The debug K key costs 24% of your blood and adds pain; two presses knock you out.
+- Squadmates no longer fire through you or each other, battle buddies don't move to new
+  cover at the same time, and AI aims at your chest wherever your stance puts it.
+- Downed bodies get a lying-down movement capsule (they used to block as an invisible
+  upright body).
+
+#### Fixed
+
+- `tools/run_tests.sh` exits non-zero when a suite fails.
+
 Phase 2, inventory depth: ammo, reloading, healing, an inventory screen, and item state
 that travels with the item.
 

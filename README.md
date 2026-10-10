@@ -101,41 +101,39 @@ include Voxel Tools.
 
 | Key | Action |
 |---|---|
-| WASD / Space / Shift / Ctrl | Move, jump, sprint, crouch |
+| WASD / Space / Shift | Move, jump, sprint (sprinting uses stamina) |
+| X / Z | Crouch / prone (toggles) |
+| Caps Lock (hold) + W / S | Step stance up or down: three standing heights, three crouching heights, prone |
+| Caps Lock (hold) + A / D | Side stance (prone rolls onto a side) |
+| Q / E | Lean left / right: hold to lean, double-tap to stay leaned, tap again to come back |
+| C | Rest the weapon on a wall, sill or the ground in front: half sway and recoil until you move |
+| F | Fire mode (M4 and Mk18: semi and auto; each weapon remembers its selector) |
 | Mouse / LMB | Look, fire |
 | RMB (hold) | Aim down sights: zoom, much tighter spread, half recoil, slower movement |
-| E | Take / carry the item under the crosshair |
+| Left Ctrl (hold) | Interaction menu: action points on items, downed bodies and squadmates within about 3 m; move the cursor onto one and let go to pick (pick up, revive, carry, drag, check condition, give item) |
+| Left Ctrl + Left Alt (hold) | Self-interaction: check wounds, use medical, put down a carried body, drop held item |
 | R | Reload (fullest spare magazine; a part-used one goes back in your pouch) |
-| H | Use a medical item (smallest kit that covers your injuries) |
-| E on a downed teammate | Revive with your fastest kit (trauma kit 3 s to 50 HP, IFAK 5 s to 25 HP) |
+| H | Use a medical item (until the wave 2 kit: stops bleeding wound by wound and takes off pain) |
 | G | Throw the selected grenade (frag, flashbang or smoke) |
 | Shift+G | Switch grenade type |
 | Alt+G | Drop carried bulky item, otherwise drop active weapon |
 | 1 / 2 | Primary / sidearm |
-| F1-F8 | Select squadmates by number (F1 is the first player) and open the command menu; press more F-keys to add units |
+| F1-F8 | Select squadmates by slot (fire team A is F1-F4, B is F5-F8) and open the command menu; Shift+F-key adds to the selection |
 | ~ | Select the whole squad and open the command menu |
 | In the command menu | 1-9 and 0 pick an entry, or scroll the mouse wheel and click the middle button; Backspace goes back, Esc closes |
 | Tab | Inventory screen: equip, stow, move between containers, use, drop |
 | Esc | Close the inventory screen / release mouse |
 | Home | Save zone (host) |
-| K | Debug builds only: hurt yourself by 40, to test going down and dying (once down, the next hit kills) |
+| K | Debug builds only: costs 24% of your blood and adds pain; two presses knock you out |
 
-The command menu follows Arma 3's layout: 1 Move (return to formation, move there, stop), 3 Engage (open fire,
-hold fire), 5 Status, 6 Action (throw smoke or frag at the crosshair), 8 Formation (wedge, file, line, staggered
-column) and 0 Support. Target, Mount, Combat mode, Team and the support calls are listed but not built yet.
+The command menu follows Arma 3's layout: 1 Move (return to formation, move there, stop), 2 Target (focus fire on
+the enemy under your crosshair), 3 Engage (open fire, hold fire), 5 Status, 6 Action (throw smoke or frag at the
+crosshair), 7 Combat mode (Safe, Aware, Combat, Stealth), 8 Formation (wedge, file, line, staggered column),
+9 Team (select fire team A or B, assign or select colour teams) and 0 Support. Mount and the support calls are
+listed but not built yet.
 
-**Decided, not built yet** (from the handoff, with changes agreed since):
-
-| Key | Action |
-|---|---|
-| F | Change fire mode |
-| X / Z / C | Crouch / prone / mount the weapon on a surface |
-| Q / E (hold, or double-tap to stay) | Lean left / right |
-| Caps Lock (hold) + W / S | Step stance up or down in fine steps (replaces the handoff's Ctrl+W/S) |
-| Caps Lock (hold) + A / D | Shift stance to the side (replaces the handoff's Ctrl+A/D) |
-| Left Ctrl (hold) | Interaction menu on objects and people (replaces Left Windows, which opens the Start menu) |
-| Left Ctrl + Left Alt (hold) | Self-interaction menu for your own body and gear (replaces Ctrl+Left Windows) |
-
+Pick your role (team leader, medic, autorifleman, grenadier, marksman, rifleman) on the main menu before hosting or
+joining; AI squadmates fill the other roles, keeping one medic in each fire team.
 
 ## Design decisions (locked)
 
@@ -168,16 +166,19 @@ autoload/
   net.gd          ENet host/join, connection signals
 scripts/
   inventory/      ItemData, Inventory (slots + litre containers), WorldItem (pickup)
-  combat/         Vitals (health, healing), VoxelArmor (plates, helmets), GearRig (worn gear), Ballistics, Grenade/Throwables/SmokeCloud
+  combat/         Vitals (the wound-model interface), wounds/ (WoundModel, BodyMap), VoxelArmor and ArmorRules (ratings,
+                  cracks, spall, soft armor), GearRig (worn gear), Ballistics (threat levels, energy by range),
+                  Grenade/Throwables/SmokeCloud
   actors/         Soldier: the shared body for players and AI (state, carrying, host-validated requests);
                   SoldierMovement (walking, crouching, speed costs); PlayerInput (human driver, camera, HUD)
-  ai/             SquadAI (utility intents, buddy tactics, casualty care), Squad (orders, formations)
+  ai/             SquadAI (utility intents, buddy tactics, casualty care), Squad (orders, formations, combat
+                  modes, teams), Roles (fire teams and role kits, data/roles.json)
   player/         CharacterModel (procedural voxel soldier), Hud
   art/            VoxelArt: code-built voxel models (body parts, carriers, packs, rifles, pistol)
   world/          VoxelWorld (10 cm destructible structures), CompoundLevel, NavBuilder, GearMarker, TargetDummy
-  ui/             Menu, InventoryScreen, CommandMenu
+  ui/             Menu (with role picker), InventoryScreen, CommandMenu, InteractionMenu, Callouts
 data/             items.json, factions.json (placeholder), missions.json (placeholder)
-tests/            smoke_test, gameplay_test, squad_test, net_test (headless), screenshot_tour
+tests/            smoke, gameplay, squad, net, wounds, armor, movement, interaction, roles (headless), screenshot_tour
 tools/            run_tests.sh, make_build.sh
 ```
 
@@ -268,10 +269,13 @@ a release:
 - Every inventory change, including each shot fired, re-sends the whole inventory snapshot. That's fine on a LAN; it needs a lighter path (for example, ammo only) before internet play.
 - Reloading and healing can't be cancelled, and taking damage doesn't interrupt them.
 - The gear marker over a dead player's gear isn't sent to players who join later. The respawn kit lacks the handoff's 90 rounds until there's a loose-ammo item.
-- Downed bodies keep an upright movement capsule, so others bump into an invisible standing body.
 - A vest or backpack can't be dropped while it still has things in it. Empty it from the inventory screen first.
 - The voxel world has no stream, so it's limited to `VoxelWorld.BOUNDS`. The voxel edit log grows with every bullet hole and is never compacted.
 - Player inventories aren't saved yet; only the zone's state is.
+- Medical is a stopgap until wave 2: IFAKs and trauma kits stop bleeding and revive, but there's no tourniquet, chest seal or splint yet, and only a revive puts blood back (until IV in wave 3). A broken leg stays broken until you die or respawn.
+- Players don't start in their role's kit yet (`CompoundLevel.player_role_kits` is off); they kit out from the compound's loot. Autoriflemen and grenadiers carry M4s until there are LMG and launcher items.
+- Squad AI doesn't use the new stances, leaning or mounting yet, and callouts have no voice audio (subtitles only).
+- A player who joins while someone is being carried sees that body as solid until it's put down.
 ## Revised roadmap
 
 1. **Foundation (v0.1.0):** gray-box compound, FP co-op player, volume inventory, voxel plates, destructible walls, zone save.
