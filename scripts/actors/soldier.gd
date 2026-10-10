@@ -227,6 +227,11 @@ func _ai_physics(delta: float) -> void:
 	_update_carried()
 
 
+## Speed multiplier for moving a downed body (1 when not carrying or dragging).
+func carry_speed_mult() -> float:
+	return 0.55 if carrying != null else 1.0
+
+
 ## Where a body this soldier carries goes: over the shoulder.
 func carry_transform() -> Transform3D:
 	return global_transform * Transform3D(Basis(Vector3.UP, PI * 0.5), Vector3(0.0, 0.55, 0.15))

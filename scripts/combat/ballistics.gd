@@ -10,6 +10,9 @@ const MASK := (1 << 0) | (1 << 1) | (1 << 3)  # world, hitboxes, armor
 const MAX_PENETRATIONS := 4
 ## Rounds passing this close to an AI soldier suppress it.
 const SUPPRESS_RADIUS := 2.5
+## The game's armor and threat ladder, weakest first (NIJ names in the game's own order).
+## FRAGMENT is below everything: any aramid layer stops it. ABOVE_IV defeats all body armor.
+const LEVELS: Array[StringName] = [&"FRAGMENT", &"IIA", &"II", &"IIIA", &"III", &"III+", &"III++", &"IV", &"ABOVE_IV"]
 
 
 ## Returns {"result": "none"|"plate"|"body"|"world", "position", "normal"} for effects.
@@ -42,7 +45,7 @@ static func _trace(shooter: CollisionObject3D, origin: Vector3, direction: Vecto
 			var part: StringName = collider.get_meta(&"body_part", Vitals.TORSO) if collider is Node else Vitals.TORSO
 			var distance := origin.distance_to(hit.position)
 			# Soft armor (the vest's aramid) can stop a round where no plate covers the body.
-			if VoxelArmor.soft_armor_stops(vitals.get_parent(), part, weapon, distance):
+			if VoxelArmor.soft_armor_stops(vitals.get_parent(), part, threat_level(weapon), round_class(weapon), distance, direction):
 				return _result("plate", hit)
 			vitals.server_hit(part, {
 				"damage": float(weapon.stats.get("damage", 10.0)),
@@ -70,6 +73,19 @@ static func round_class(weapon: ItemData) -> StringName:
 		"mag_762":
 			return Vitals.FULL_POWER
 	return Vitals.INTERMEDIATE
+
+
+## The round's threat level on the game's NIJ-named ladder (Ballistics.LEVELS). Armor rated at
+## or above it stops it. Placeholder by ammunition until the armor work sets it per round.
+static func threat_level(weapon: ItemData) -> StringName:
+	if weapon.stats.has("threat"):
+		return StringName(weapon.stats.threat)
+	match String(weapon.stats.get("ammo", "")):
+		"mag_9mm":
+			return &"IIA"
+		"mag_762":
+			return &"III+"
+	return &"III"
 
 
 static func _result(kind: String, hit: Dictionary) -> Dictionary:

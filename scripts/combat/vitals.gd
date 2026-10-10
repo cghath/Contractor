@@ -24,9 +24,26 @@ const PISTOL := &"pistol"
 const INTERMEDIATE := &"intermediate"
 const FULL_POWER := &"full_power"
 const FRAGMENT := &"fragment"
-## Body parts that hitboxes name in their "body_part" meta. The wound model adds more.
-const HEAD := &"head"
-const TORSO := &"torso"
+## Body parts that hitboxes name in their "body_part" meta. Today's two hitboxes use HEAD
+## and TORSO; the wound model splits the body into the rest. Armor (spall, soft armor) and
+## treatment use the same names.
+const HEAD := &"head"            # cranium: brain
+const FACE := &"face"
+const NECK := &"neck"
+const TORSO := &"torso"          # whole-torso fallback for hits with no finer part
+const CHEST := &"chest"          # heart, lungs, upper torso vessels
+const ABDOMEN := &"abdomen"
+const PELVIS := &"pelvis"
+const UPPER_ARM_L := &"upper_arm_l"
+const UPPER_ARM_R := &"upper_arm_r"
+const FOREARM_L := &"forearm_l"
+const FOREARM_R := &"forearm_r"
+const THIGH_L := &"thigh_l"
+const THIGH_R := &"thigh_r"
+const SHIN_L := &"shin_l"
+const SHIN_R := &"shin_r"
+const BODY_PARTS: Array[StringName] = [HEAD, FACE, NECK, CHEST, ABDOMEN, PELVIS, UPPER_ARM_L,
+	UPPER_ARM_R, FOREARM_L, FOREARM_R, THIGH_L, THIGH_R, SHIN_L, SHIN_R]
 ## HP stand-in for where a hit lands.
 const PART_DAMAGE_MULT := {HEAD: 3.0}
 
@@ -131,6 +148,23 @@ func stamina_mult() -> float:
 	return 1.0
 
 
+## False with a broken leg or heavy blood loss.
+func can_sprint() -> bool:
+	return true
+
+
+## Reload time multiplier (a broken arm slows reloads).
+func reload_mult() -> float:
+	return 1.0
+
+
+## The wounds this unit has, for self-interaction and treatment menus: one Dictionary per
+## wound with at least "part" (a body part), "kind" (e.g. "arterial", "muscle", "graze",
+## "fracture", "chest") and "bleeding" (bool). Empty until the wound model fills it.
+func wound_list() -> Array[Dictionary]:
+	return []
+
+
 ## A few words for squad reports and labels, e.g. "Unconscious, 45 s".
 func condition_text() -> String:
 	if is_dead():
@@ -148,8 +182,10 @@ func server_hit(part: StringName, hit: Dictionary) -> void:
 
 
 ## Host only. A round that armor stopped still lands on `part` (impact: pain, stagger,
-## concussion, cracked ribs by range). Nothing yet; the wound model adds it.
-func server_impact(_part: StringName, _round_class: StringName, _distance: float) -> void:
+## concussion, cracked ribs by range, a fatal head injury only where it would be real).
+## `energy_j` is the round's energy on arrival (Ballistics), or -1 if unknown.
+## Nothing yet; the wound model adds it.
+func server_impact(_part: StringName, _round_class: StringName, _distance: float, _energy_j := -1.0) -> void:
 	pass
 
 

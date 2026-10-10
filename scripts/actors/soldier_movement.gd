@@ -16,8 +16,6 @@ const STAND_HEAD_Y := 1.65
 const CROUCH_HEAD_Y := 1.05
 const DOWNED_HEAD_Y := 0.35
 const ADS_SPEED_MULT := 0.6
-## Speed while carrying or dragging a downed body.
-const CARRY_BODY_SPEED_MULT := 0.55
 
 @onready var body: Soldier = get_parent()
 
@@ -42,8 +40,7 @@ func step(delta: float) -> void:
 	if down:
 		speed = CRAWL_SPEED
 	speed *= body.load_mult * body.vitals.speed_mult()
-	if body.carrying != null:
-		speed *= CARRY_BODY_SPEED_MULT
+	speed *= body.carry_speed_mult()
 	var input := Vector2.ZERO
 	if body.is_ai():
 		input = body.move_input.limit_length(1.0)
