@@ -294,6 +294,37 @@ func _test_airway() -> void:
 		fixed.advance(1.0)
 	check(not fixed.arrest and not fixed.airway_blocked and fixed.unconscious, "and with it in, an hour unconscious without obstruction")
 	check(not fixed.care_tasks().any(func(task: Dictionary) -> bool: return task.kind == "airway"), "nothing more asked for the airway")
+	# Out only briefly (a concussion knockout): once the knockout is over, the obstruction
+	# alone doesn't keep them down; they clear it themselves and come round.
+	var brief := _model(7)
+	brief.knockout_left = 40.0  # the longest (a second concussion in the same fight)
+	brief.update_state(0.0)
+	_step(brief, 1.0)
+	brief.airway_blocked = true
+	_step(brief, 38.0)
+	check(brief.unconscious and brief.airway_blocked and brief.spo2 < WoundModel.SPO2_UNCONSCIOUS,
+		"obstructed early in a knockout, SpO2 falls under %.0f%% (%.0f%%)" % [WoundModel.SPO2_UNCONSCIOUS, brief.spo2])
+	_step(brief, 3.0)
+	check(brief.unconscious and not brief.airway_blocked and brief.unconscious_causes() == [&"spo2"],
+		"once the knockout is over the obstruction clears itself (%s, SpO2 %.0f%%)" % [brief.unconscious_causes(), brief.spo2])
+	var woke_at := -1.0
+	for s in 120:
+		_step(brief, 1.0)
+		if not brief.unconscious:
+			woke_at = 2.0 + s
+			break
+	check(woke_at > 0.0 and not brief.npa and not brief.arrest,
+		"and they come round without an NPA (%.0f s after the knockout)" % woke_at)
+	var long_out := _model(8)
+	long_out.pain_wounds = 0.95
+	long_out.update_state(0.0)
+	_step(long_out, 20.0)
+	long_out.airway_blocked = true
+	_step(long_out, 30.0)  # out 50 s, SpO2 under the line
+	long_out.pain_wounds = 0.0  # the pain has gone; only the obstruction is left
+	_step(long_out, 30.0)
+	check(long_out.unconscious and long_out.airway_blocked and long_out.unconscious_causes() == [&"spo2"],
+		"out longer than %.0f s, the obstruction stays until an NPA (%s)" % [WoundModel.AIRWAY_SELF_CLEAR_S, long_out.unconscious_causes()])
 	var awake := _model()
 	check(awake.treatment_problem(WoundModel.NPA, &"head") != "", "no NPA for someone awake")
 
@@ -357,8 +388,8 @@ func _test_treatment_wakes() -> void:
 	var airway := _vitals()
 	airway._model.pain_wounds = 0.95
 	airway.server_advance(0.1)
-	airway._model.airway_blocked = true  # it obstructed while the pain kept him out
-	airway.server_advance(30.0)
+	airway._model.airway_blocked = true  # it obstructed while the pain kept him out...
+	airway.server_advance(60.0)  # ...longer than a brief spell (AIRWAY_SELF_CLEAR_S)
 	airway.server_apply_treatment(&"morphine", Vitals.TORSO)
 	airway.server_advance(30.0)
 	check(airway.downed and airway.why_unconscious() == [&"spo2"] and not airway.in_cardiac_arrest(),

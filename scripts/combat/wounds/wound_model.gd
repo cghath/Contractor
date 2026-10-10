@@ -186,8 +186,11 @@ const MORPHINE_DEPRESSION_LEVEL := 3.0
 const MORPHINE_FROM_PAIN := 0.4
 const MORPHINE_ASK_MAX_LEVEL := 1.05
 ## Airway (proposed): an unconscious casualty without an NPA obstructs with this chance per
-## minute; SpO2 then falls toward SPO2_OBSTRUCTED until an NPA goes in.
+## minute; SpO2 then falls toward SPO2_OBSTRUCTED until an NPA goes in. Someone out for
+## less than AIRWAY_SELF_CLEAR_S (a short knockout, a brief faint from pain) stirs and clears
+## it themselves once the obstruction is all that keeps them out; out longer, only an NPA does.
 const AIRWAY_BLOCK_PER_MIN := 0.1
+const AIRWAY_SELF_CLEAR_S := 45.0
 ## Bleeding the field kit can control. Internal (torso) bleeding waits for wave 3's surgery
 ## kit, so care_tasks() never asks for an item for it.
 const FIXABLE_BLEEDS: Array[String] = ["arterial", "junctional", "venous", "muscle", "graze"]
@@ -261,6 +264,7 @@ var _last_concussion := -INF
 var _heart_arrest_in := -1.0
 var _spell_wake_s := 0.0        # how long the worst cause of this spell out takes to wake from
 var _low_spo2_s := 0.0          # time spent under SPO2_ARREST
+var _out_s := 0.0               # how long this spell out has lasted (host only)
 
 
 # --- Queries --------------------------------------------------------------------------
@@ -808,6 +812,7 @@ func reset() -> void:
 	wake_left = 0.0
 	_spell_wake_s = 0.0
 	_low_spo2_s = 0.0
+	_out_s = 0.0
 
 
 ## Host only: steps the simulation by `dt` seconds.
@@ -953,12 +958,20 @@ func _add_wound(part: StringName, kind: String, rate: float, name: StringName = 
 
 
 ## An unconscious casualty without an NPA can obstruct; then SpO2 falls (spo2_target) until
-## an NPA goes in, and low for long enough it stops the heart. Waking clears it.
+## an NPA goes in, and low for long enough it stops the heart. Waking clears it, and so does
+## a casualty out only briefly (AIRWAY_SELF_CLEAR_S) once nothing but the obstruction holds.
 func _update_airway(dt: float) -> void:
 	if not unconscious:
 		airway_blocked = false
+		_out_s = 0.0
 		return
-	if arrest or npa or airway_blocked:
+	_out_s += dt
+	if arrest or npa:
+		return
+	if airway_blocked:
+		var causes := unconscious_causes()
+		if _out_s < AIRWAY_SELF_CLEAR_S and causes.size() <= 1 and (causes.is_empty() or causes[0] == &"spo2"):
+			airway_blocked = false  # coming up, they cough and turn: SpO2 recovers, then they wake
 		return
 	if care_rng.randf() < 1.0 - pow(1.0 - AIRWAY_BLOCK_PER_MIN, dt / 60.0):
 		airway_blocked = true
@@ -998,6 +1011,7 @@ func _wake() -> void:
 	wake_left = 0.0
 	_spell_wake_s = 0.0
 	airway_blocked = false
+	_out_s = 0.0
 
 
 func _start_arrest() -> void:

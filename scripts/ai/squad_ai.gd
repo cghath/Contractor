@@ -1068,7 +1068,7 @@ func _revive_kit() -> StringName:
 ## bleeding only), with an item it carries and that hasn't failed TREAT_TRIES times, and not
 ## one the casualty is doing on themselves right now; {} for none.
 func _next_task(c: Soldier, under_fire: bool) -> Dictionary:
-	var conscious := c.vitals.is_up()
+	var conscious := c.vitals.is_up() or c.vitals.why_unconscious().has(&"pain")  # morphine wakes one out from pain
 	var their := SquadAI.of(c) if c != body else null
 	for task in plan_care(c.vitals.care_needed(), under_fire, conscious):
 		if their and their._treat_until >= 0.0 and their._treat_key == _task_key(c, task):
@@ -1086,7 +1086,7 @@ func _next_task(c: Soldier, under_fire: bool) -> Dictionary:
 ## Items this unit lacks for what `c` still needs once safe.
 func _missing_items(c: Soldier) -> Array[StringName]:
 	var out: Array[StringName] = []
-	for task in plan_care(c.vitals.care_needed(), false, c.vitals.is_up()):
+	for task in plan_care(c.vitals.care_needed(), false, c.vitals.is_up() or c.vitals.why_unconscious().has(&"pain")):
 		var item := StringName(task.item)
 		if body.inventory.count_of(item) <= 0 and item not in out:
 			out.append(item)
