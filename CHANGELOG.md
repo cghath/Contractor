@@ -82,8 +82,8 @@ that travels with the item.
   once the gear is picked up. Before, you respawned with all your gear.
 - **AI death is permanent:** an AI soldier that dies doesn't respawn; its gear stays where it fell.
 - **Planned keys** (README, "Decided, not built yet"): stance adjust moves to holding Caps
-  Lock + WASD and interaction to holding Left Ctrl, instead of the handoff's Ctrl+WASD and
-  Left Windows.
+  Lock + WASD, interaction to holding Left Ctrl and self-interaction to holding Left Ctrl +
+  Left Alt, instead of the handoff's Ctrl+WASD, Left Windows and Ctrl+Left Windows.
 - **No giving up:** a downed player can only wait for a revive or bleed out. F no longer
   does anything while down (it's reserved for fire mode); `Vitals.server_give_up` is gone.
 - **Minimal HUD:** no health, ammo, grenade count, load or armor readout, as in Arma with

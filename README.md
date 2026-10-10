@@ -134,7 +134,7 @@ column) and 0 Support. Target, Mount, Combat mode, Team and the support calls ar
 | Caps Lock (hold) + W / S | Step stance up or down in fine steps (replaces the handoff's Ctrl+W/S) |
 | Caps Lock (hold) + A / D | Shift stance to the side (replaces the handoff's Ctrl+A/D) |
 | Left Ctrl (hold) | Interaction menu on objects and people (replaces Left Windows, which opens the Start menu) |
-| Self-interaction | Still to decide (was Ctrl+Left Windows) |
+| Left Ctrl + Left Alt (hold) | Self-interaction menu for your own body and gear (replaces Ctrl+Left Windows) |
 
 
 ## Design decisions (locked)
