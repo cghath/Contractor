@@ -134,6 +134,40 @@ func _test_pick_up() -> void:
 	await _frames(2)
 	check(player.inventory.count_of(&"ifak") == before + 1, "Pick up takes the item")
 	check(not is_instance_valid(item) or item.is_queued_for_deletion(), "and it's gone from the world")
+	await _test_pick_up_face_down()
+
+
+## Captain's playtest: a steel plate that fell face first couldn't be picked up (it sank into
+## the ground, or through a crate). Plates and helmets dropped face first, on the ground and
+## on a crate, get an action point and Pick up takes them.
+func _test_pick_up_face_down() -> void:
+	print("Pick up armor that landed face first")
+	var kit := player.inventory.net_state.duplicate(true)  # put back afterwards
+	var owned := func(id: StringName) -> int:
+		return player.inventory.count_of(id) + player.inventory.slots.values().count(id)
+	for case: Array in [[&"plate_steel_l3", SPOT, Vector3(0, 2.0, -1.6)], [&"helmet", SPOT, Vector3(0.6, 2.0, -1.6)],
+			[&"plate_steel_l3", Vector3(-12.5, 0.1, -9.0), Vector3(-0.25, 3.0, -1.5)]]:
+		player.global_position = case[1]
+		player.velocity = Vector3.ZERO
+		var item := await _spawn_item(case[0], case[1] + case[2])
+		item.rotation_degrees = Vector3(180, 30, 0) if case[0] == &"helmet" else Vector3(-90, 30, 0)
+		for i in 120:
+			await get_tree().physics_frame
+		player.head.look_at(item.global_position)
+		await _frames(1)
+		var where := "on a crate" if case[1] != SPOT else "on the ground"
+		var face_down := item.global_basis.y.y < -0.9 if case[0] == &"helmet" else item.global_basis.z.y > 0.9
+		var point := InteractionMenu.collect_points(player, player.camera).filter(func(p: Dictionary) -> bool: return p.target == item)
+		check(face_down and not point.is_empty(), "%s lying face down %s gets an action point (at y %.3f)" % [case[0], where, item.global_position.y])
+		var before: int = owned.call(case[0])
+		if not point.is_empty():
+			InteractionMenu.perform(player, point[0].actions[0])
+		await _frames(2)
+		check(owned.call(case[0]) == before + 1, "...and Pick up takes it")
+		if is_instance_valid(item) and not item.is_queued_for_deletion():
+			item.queue_free()
+	player.inventory.net_state = kit
+	_place_player()
 
 
 ## Check condition and Check wounds show plain signs, never numbers (SpO2 and blood stay hidden).

@@ -45,6 +45,11 @@ func _ready() -> void:
 	await _test_playtest_knockouts()
 	_test_fit()
 	await _test_state_travels()
+	await _test_dents_and_holes()
+	await _test_oblique_dents()
+	_test_wear_through()
+	await _test_dropped_armor()
+	await _test_lying_flat()
 	print("ARMOR TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
 
@@ -81,6 +86,8 @@ func _piece(id: StringName, state := {}) -> VoxelArmor:
 	var piece := VoxelArmor.new()
 	inv.add_child(piece)
 	piece.setup(item, slot, inv, 1)
+	piece.apply_damage(inv.chips_in(slot), ArmorRules.is_shattered(inv.state_of(slot)))
+	inv.changed.connect(func() -> void: piece.apply_damage(inv.chips_in(slot), ArmorRules.is_shattered(inv.state_of(slot))))  # what GearRig does
 	return piece
 
 
@@ -105,6 +112,24 @@ func _dummy(loadout: Array) -> TargetDummy:
 ## Impacts the dummy's probe Vitals recorded ({"part", "round_class", "distance", "energy_j"}).
 func _impacts(dummy: TargetDummy) -> Array[Dictionary]:
 	return dummy.vitals.get(&"impacts")
+
+
+## A weapon whose round is at threat `level` (a Ballistics.LEVELS name), wearing armor by `wear`.
+func _gun_at(level: String, wear := 1.0) -> ItemData:
+	return ItemData.from_dict({"id": "test_gun_level_%s_%s" % [level, wear], "type": "weapon",
+		"stats": {"threat": level, "round_class": String(Vitals.INTERMEDIATE), "plate_wear": wear, "damage": 30}})
+
+
+## Lines of fire parallel to `direction` around `at` (an 11 x 11 grid, 1 cm apart) that meet
+## material in `piece`. A hole shows as a line that no longer does.
+func _solid_lines(piece: VoxelArmor, at: Vector3, direction: Vector3) -> Dictionary:
+	var across := Basis.looking_at(direction, Vector3.FORWARD if absf(direction.y) > 0.9 else Vector3.UP)
+	var lines := {}
+	for i in range(-5, 6):
+		for j in range(-5, 6):
+			if piece.trace(at + (across.x * i + across.y * j) * VoxelArmor.VOXEL_SIZE, direction) != VoxelArmor.MISS:
+				lines[Vector2i(i, j)] = true
+	return lines
 
 
 ## Hits the dummy's probe Vitals recorded ({"part", "hit"}).
@@ -661,4 +686,260 @@ func _test_state_travels() -> void:
 	check(summary.contains("Front IV 64% 2 cracks"), "armor summary: %s" % summary)
 	check(is_equal_approx(dummy.gear.armor_integrity(&"plate_front"), 0.64), "armor_integrity is the ceramic integrity")
 	dummy.queue_free()
+	await get_tree().process_frame
+
+
+# --- Dents and holes --------------------------------------------------------------------------
+
+## Captain's playtest: plates and helmets chipped through in one shot. A stopped round only
+## dents the strike face; only a round that gets through makes a hole.
+func _test_dents_and_holes() -> void:
+	print("Dents and holes: a stopped round never holes a plate or helmet")
+	for id: String in PIECE_RATINGS:
+		var item := ItemDB.get_item(StringName(id))
+		var thickness := int(item.stats.get("thickness_vox", 0))
+		var least := 2 if ArmorRules.material(item) in [ArmorRules.STEEL, ArmorRules.COMPOSITE] else 3
+		check(thickness >= least, "%s is %d voxels thick (at least %d)" % [id, thickness, least])
+		var rating := String(PIECE_RATINGS[id])
+		var above := String(Ballistics.LEVELS[Ballistics.level_index(StringName(rating)) + 1])
+		var shots: Array = []  # [where (ZERO: the middle of the strike face), direction, label]
+		if item.slot == &"helmet":
+			var size := VoxelArmor.size_m(item)
+			var top := Vector3(0.03, size.y - (0.2 if item.stats.get("tier") == "heavy" else 0.0) - 0.001, 0.02)
+			shots = [[Vector3.ZERO, Vector3.BACK, "front"], [top, Vector3.DOWN, "top"], [Vector3.ZERO, Vector3(0.35, -0.25, 1).normalized(), "angled"]]
+		else:
+			shots = [[Vector3(0, 0, -0.02), Vector3.BACK, "straight"], [Vector3(0.03, -0.04, -0.02), Vector3(0.4, -0.3, 1).normalized(), "angled"]]
+		var holed := PackedStringArray()
+		var sizes := PackedStringArray()
+		var dent_ok := true
+		var hole_ok := true
+		for shot: Array in shots:
+			for wear: float in [0.5, 1.0, 1.6]:
+				var piece := _piece(StringName(id))
+				var at: Vector3 = shot[0] if shot[0] != Vector3.ZERO else _front_of(piece)
+				var before := _solid_lines(piece, at, shot[1])
+				var stopped := piece.server_try_stop(at, shot[1], _gun_at(rating, wear), 10.0)
+				var after := _solid_lines(piece, at, shot[1])
+				var dent := piece.voxels_removed()
+				if not stopped or before.keys().any(func(k: Vector2i) -> bool: return not after.has(k)):
+					holed.append("%s x%.1f" % [shot[2], wear])
+				var through := _piece(StringName(id))
+				var passed := not through.server_try_stop(at, shot[1], _gun_at(above, wear), 10.0)
+				var hole := through.voxels_removed()
+				hole_ok = hole_ok and passed and through.trace(at, shot[1]) == VoxelArmor.MISS
+				dent_ok = dent_ok and dent >= 1 and dent <= 9 and hole >= dent * 2
+				sizes.append("%d/%d" % [dent, hole])
+				for p: VoxelArmor in [piece, through]:
+					p.inventory.queue_free()
+		check(holed.is_empty(), "%s: every stop leaves the lines of fire around it blocked (holed: %s)" % [id, ", ".join(holed)])
+		check(hole_ok, "%s: a round above its rating (%s) bores a hole the same line passes through" % [id, above])
+		check(dent_ok, "%s: a stop knocks out a few voxels, a penetration at least twice as many (dent/hole %s)" % [id, " ".join(sizes)])
+		await get_tree().process_frame
+	var plate := _piece(&"plate_steel_l3")
+	plate.server_try_stop(Vector3(0, 0, -0.02), Vector3.BACK, ItemDB.get_item(&"m4a1"), 10.0)
+	var chip: Array = plate.inventory.chips_in(&"plate_front")[0]
+	check(chip.size() == 8 and int(chip[4]) == VoxelArmor.DENT and is_equal_approx(float(chip[7]), 1.0),
+		"a stop is saved as a dent with its direction (%s)" % [chip])
+	plate.inventory.queue_free()
+	var legacy := _piece(&"plate_steel_l3", {"chips": [[12, 15, 0, 2.4]]})
+	legacy.apply_damage(legacy.inventory.chips_in(&"plate_front"))
+	check(legacy.trace(Vector3(0, 0, -0.02), Vector3.BACK) == VoxelArmor.MISS, "chips saved before dents existed are still holes")
+	legacy.inventory.queue_free()
+	await get_tree().process_frame
+
+
+## Oblique stops: a round 60 to 80 degrees off the face normal (a plate shot from the flank,
+## or lying flat on the ground and shot from standing height a few metres off) still only
+## dents the strike face. Checked along the round's own line and straight through the
+## piece's thickness, at every weapon wear up to the M110's 1.6.
+func _test_oblique_dents() -> void:
+	print("Oblique stops: no hole at 60 to 80 degrees off the normal")
+	for id: String in PIECE_RATINGS:
+		var item := ItemDB.get_item(StringName(id))
+		var rating := String(PIECE_RATINGS[id])
+		var size := VoxelArmor.size_m(item)
+		var holed := PackedStringArray()
+		var dented := 0
+		for degrees: float in [60.0, 70.0, 80.0]:
+			var a := deg_to_rad(degrees)
+			for wear: float in [0.5, 1.0, 1.6]:
+				for side: float in [1.0, -1.0]:
+					var piece := _piece(StringName(id))
+					var dir: Vector3
+					var at: Vector3
+					if item.slot == &"helmet":
+						dir = Vector3(sin(a) * side, -0.1, cos(a)).normalized()
+						at = _front_of(piece)
+					else:
+						dir = Vector3(sin(a) * 0.8 * side, -sin(a) * 0.6, cos(a))
+						at = Vector3(0.02 * side, 0.03, -size.z * 0.5 - 0.001)
+					var normal := Vector3.BACK
+					var before_line := _solid_lines(piece, at, dir)
+					var before_normal := _solid_lines(piece, at, normal)
+					var stopped := piece.server_try_stop(at, dir, _gun_at(rating, wear), 10.0)
+					var after_line := _solid_lines(piece, at, dir)
+					var after_normal := _solid_lines(piece, at, normal)
+					var lost := before_line.keys().any(func(k: Vector2i) -> bool: return not after_line.has(k)) \
+						or before_normal.keys().any(func(k: Vector2i) -> bool: return not after_normal.has(k))
+					if not stopped or lost:
+						holed.append("%.0f deg x%.1f%s" % [degrees, wear, "" if stopped else " (not stopped)"])
+					dented += piece.voxels_removed()
+					piece.inventory.queue_free()
+		check(holed.is_empty() and dented > 0, "%s: an oblique stop dents (%d voxels in all) but never holes it (holed: %s)" % [id, dented, ", ".join(holed)])
+		await get_tree().process_frame
+	# A plate lying flat, face up, shot from standing height (1.6 m) 3 and 5 m away.
+	for id: StringName in [&"plate_steel_l3", &"plate_side", &"plate_pe_l3", &"plate_ceramic_l4"]:
+		var item := ItemDB.get_item(id)
+		var holed := PackedStringArray()
+		for dist: float in [3.0, 5.0]:
+			for heading: Vector3 in [Vector3.BACK, Vector3.RIGHT]:
+				var piece := _piece(id)
+				piece.rotation = Vector3(PI * 0.5, 0, 0)  # strike face (-Z) up
+				var at := piece.global_transform * Vector3(0.01, 0.02, -VoxelArmor.size_m(item).z * 0.5 - 0.001)
+				var dir := (heading * dist + Vector3.DOWN * 1.6).normalized()
+				var before_line := _solid_lines(piece, at, dir)
+				var before_down := _solid_lines(piece, at, Vector3.DOWN)
+				var stopped := piece.server_try_stop(at, dir, _gun_at(String(ArmorRules.rating(item)), 1.6), 10.0)
+				var after_line := _solid_lines(piece, at, dir)
+				var after_down := _solid_lines(piece, at, Vector3.DOWN)
+				if not stopped or before_line.keys().any(func(k: Vector2i) -> bool: return not after_line.has(k)) \
+						or before_down.keys().any(func(k: Vector2i) -> bool: return not after_down.has(k)):
+					holed.append("%.0f m%s" % [dist, "" if stopped else " (not stopped)"])
+				piece.inventory.queue_free()
+		check(holed.is_empty(), "%s lying flat, shot from standing height with a 7.62: dented, not holed (holed: %s)" % [id, ", ".join(holed)])
+	await get_tree().process_frame
+
+
+## Repeated hits on one spot: steel, polyethylene and helmets wear through after their
+## "wear_hits", with no hole before that.
+func _test_wear_through() -> void:
+	print("Wearing through: repeated hits on one spot")
+	for id: StringName in [&"plate_pe_l3", &"plate_steel_l3", &"helmet"]:
+		var item := ItemDB.get_item(id)
+		var limit := int(item.stats.get("wear_hits", 0))
+		var piece := _piece(id)
+		var at := _front_of(piece) if id == &"helmet" else Vector3(0, 0, -0.02)
+		var gun := _gun_at(String(ArmorRules.rating(item)), 1.0)
+		var stops := 0
+		var sealed := true
+		while stops < limit + 2 and piece.server_try_stop(at, Vector3.BACK, gun, 10.0):
+			stops += 1
+			sealed = sealed and piece.trace(at, Vector3.BACK) != VoxelArmor.MISS
+		check(limit > 0 and stops == limit and sealed, "%s: %d hits on one spot stopped without a hole, the next goes through (%d)" % [id, limit, stops])
+		check(piece.trace(at, Vector3.BACK) == VoxelArmor.MISS, "%s: ...and leaves a hole" % id)
+		check(piece.server_try_stop(at + Vector3(0.05, 0.05, 0), Vector3.BACK, gun, 10.0), "%s: 7 cm away still stops" % id)
+		piece.inventory.queue_free()
+	check(int(ItemDB.get_item(&"plate_ceramic_l4").stats.get("wear_hits", 0)) == 0, "ceramic cracks instead of wearing through")
+
+
+# --- Armor on the ground ----------------------------------------------------------------------
+
+## Captain's playtest: plates, helmets and armor took no damage when not worn. Armor lying on
+## the ground is a target like worn armor, and keeps its damage when picked up.
+func _test_dropped_armor() -> void:
+	print("Armor on the ground takes hits")
+	var item := WorldItem.new()
+	item.item_id = &"plate_ceramic_l4"
+	item.uid = "test_armor_dropped" + OS.get_environment("CONTRACTOR_TEST_TAG")
+	item.position = Vector3(3, 1.0, 0)
+	add_child(item)
+	item.freeze = true  # no floor here
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	var m110 := ItemDB.get_item(&"m110")
+	_shooter.position = Vector3(3, 1.0, -5)
+	var stop := Ballistics.fire(_shooter, _shooter.position, Vector3.BACK, m110)
+	var piece: VoxelArmor = item.find_children("*", "VoxelArmor", false, false)[0]
+	check(stop.result == "plate", "a 7.62 round at a ceramic plate lying there is stopped (%s)" % stop.result)
+	check(item.state.get("chips", []).size() == 1 and ArmorRules.cracks(item.state).size() == 1 and ArmorRules.integrity(item.state) < 1.0,
+		"the hit is in the item's state: a dent, a crack, %.0f%% integrity" % (ArmorRules.integrity(item.state) * 100.0))
+	check(piece.voxels_removed() > 0, "and shows on the plate (%d voxels)" % piece.voxels_removed())
+	check(GameState.dropped.has(item.uid) and GameState.dropped[item.uid].state.get("chips", []).size() == 1 and GameState.is_looted(item.uid),
+		"saved with the zone: a level item comes back damaged, not new")
+	var copy := WorldItem.new()  # what another peer's copy does when Sync sets the state
+	copy.item_id = item.item_id
+	add_child(copy)
+	copy.freeze = true
+	await get_tree().process_frame
+	copy.state = item.state
+	var copy_piece: VoxelArmor = copy.find_children("*", "VoxelArmor", false, false)[0]
+	check(copy_piece.voxels_removed() == piece.voxels_removed(), "another peer's copy redraws the same damage when the state arrives")
+	copy.queue_free()
+	_shooter.position = Vector3(3.05, 1.05, -5)
+	var through := Ballistics.fire(_shooter, _shooter.position, Vector3.BACK, _gun_at("ABOVE_IV"))
+	var chips: Array = item.state.get("chips", [])
+	check(through.result == "none" and chips.size() == 2 and int(chips[1][4]) == VoxelArmor.HOLE,
+		"a round above its rating goes through and holes it (%s)" % through.result)
+	var helmet := WorldItem.new()
+	helmet.item_id = &"helmet"
+	helmet.position = Vector3(-3, 1.0, 0)
+	add_child(helmet)
+	helmet.freeze = true
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	_shooter.position = Vector3(-3, 1.0, -5)
+	var dome := Ballistics.fire(_shooter, _shooter.position, Vector3.BACK, ItemDB.get_item(&"m17"))
+	check(dome.result == "plate" and helmet.state.get("chips", []).size() == 1, "a helmet on the ground stops a 9mm and keeps the dent (%s)" % dome.result)
+	var other := Inventory.new()
+	add_child(other)
+	other.take(&"plate_carrier")
+	other.take(item.item_id, item.count, item.state)  # what picking it up does
+	other.take(helmet.item_id, helmet.count, helmet.state)
+	check(other.chips_in(&"plate_front").size() == 2 and ArmorRules.cracks(other.state_of(&"plate_front")).size() == 2
+		and other.chips_in(&"helmet").size() == 1, "picked up, the plate and helmet keep their hits")
+	for node: Node in [item, helmet, other]:
+		node.queue_free()
+	GameState.dropped.erase(item.uid)
+	GameState.looted.erase(item.uid)
+	await get_tree().process_frame
+
+
+## Captain's playtest: steel medium plates couldn't be picked up after landing face first.
+## A thin plate landing flat at speed sank below the floor's surface (the physics lets a
+## body sink a couple of centimetres) or dropped through a voxel surface, out of the
+## pickup's sight. Items now move with continuous collision, and their action point sits
+## above them as they lie.
+func _test_lying_flat() -> void:
+	print("Armor dropped face first lies on top of the floor, in sight")
+	var floor_body := StaticBody3D.new()
+	var shape := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = Vector3(24, 1, 4)
+	shape.shape = box
+	floor_body.add_child(shape)
+	floor_body.position = Vector3(0, -0.5, 30)  # top at y = 0
+	add_child(floor_body)
+	await get_tree().physics_frame
+	var ids: Array[StringName] = [&"plate_steel_l3", &"plate_side", &"plate_ceramic_l4", &"plate_pe_l3", &"helmet", &"helmet_bump", &"helmet_heavy"]
+	var items: Array[WorldItem] = []
+	for i in ids.size():
+		for drop in 2:
+			var item := WorldItem.new()
+			item.item_id = ids[i]
+			item.position = Vector3(-10.0 + i * 3.0 + drop * 1.2, 1.2 + drop * 0.6, 30)
+			# Face down: a plate's strike face (-Z), a helmet's dome. The second one tumbles.
+			var helmet := ItemDB.get_item(ids[i]).slot == &"helmet"
+			item.rotation_degrees = Vector3(180, 25, 0) if helmet else Vector3(-90, 25, 0)
+			add_child(item)
+			if drop == 1:
+				item.angular_velocity = Vector3(3, 0, -2)
+			items.append(item)
+	for f in 150:
+		await get_tree().physics_frame
+	var space := floor_body.get_world_3d().direct_space_state
+	var buried := PackedStringArray()
+	var hidden := PackedStringArray()
+	check(items.all(func(it: WorldItem) -> bool: return it.continuous_cd), "items move with continuous collision")
+	for item in items:
+		var top := item.action_point().y - WorldItem.ACTION_POINT_LIFT
+		if top < 0.0:
+			buried.append("%s %.3f" % [item.item_id, top])
+		var eye := item.global_position + Vector3(0, 1.6, 1.0)
+		if not space.intersect_ray(PhysicsRayQueryParameters3D.create(eye, item.action_point(), 1)).is_empty():
+			hidden.append(String(item.item_id))
+	check(buried.is_empty(), "none of %d plates and helmets dropped face first sank into the floor (%s)" % [items.size(), ", ".join(buried)])
+	check(hidden.is_empty(), "each one's action point is in sight from standing height (%s)" % ", ".join(hidden))
+	for item in items:
+		item.queue_free()
+	floor_body.queue_free()
 	await get_tree().process_frame
