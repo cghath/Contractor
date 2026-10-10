@@ -31,10 +31,21 @@ func _ready() -> void:
 	level = CompoundLevel.current(self)
 	if Net.is_hosting():
 		Net.peer_joined.connect(_give_kit)
-		Net.peer_left.connect(func(_id: int) -> void: get_tree().quit(0))
+		Net.peer_left.connect(_on_client_left)
 		get_tree().create_timer(60.0).timeout.connect(func() -> void: get_tree().quit(1))
 	else:
 		_run_client()
+
+
+## Host: the client left while down (it knocks itself out first), so its body stays behind
+## with its gear. The host's exit code says whether it did (run_tests.sh checks it).
+func _on_client_left(id: int) -> void:
+	await get_tree().process_frame
+	var left := level.bodies.get_children().filter(func(b: Node) -> bool:
+		return b is Soldier and (b as Soldier).display_name() == "Player %d" % id and (b as Soldier).vitals.is_dead() \
+			and (b as Soldier).inventory.slots[&"primary"] == &"m4a1")
+	print("[host] peer %d left while down: %s" % [id, "its body stayed, gear and all" if left.size() == 1 else "NO BODY"])
+	get_tree().quit(0 if left.size() == 1 else 1)
 
 
 ## Host: a zone save holding one body (SAVED_BODY), loaded when hosting starts.
@@ -113,6 +124,10 @@ func _run_client() -> void:
 	await _wait_for(func() -> bool: return _dropped_helmet() != null, 3.0)
 	check(_dropped_helmet() != null, "dropped helmet spawned on the client")
 	await _check_saved_body(me)
+	# Knocked out, then gone: the host keeps this player's body (see _on_client_left).
+	me._server_debug_hurt.rpc_id(1, 140.0)
+	await _wait_for(func() -> bool: return me.vitals.downed, 3.0)
+	check(me.vitals.downed, "knocked out before leaving (%s)" % me.vitals.condition_text())
 	_finish()
 
 

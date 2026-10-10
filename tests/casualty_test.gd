@@ -71,6 +71,8 @@ func _ready() -> void:
 	_test_no_revive()
 	await _test_medic_choice()
 	_test_medic_keeps_kit()
+	_test_medic_fights_only_close()
+	await _out_of_contact()
 	await _test_dead_check()
 	await _test_body_cap()
 	await _test_soak()
@@ -218,6 +220,60 @@ func _test_medic_keeps_kit() -> void:
 	check(not SquadAI.of(_ai("Echo"))._kept_for_squad(&"pressure_bandage", "venous"), "only medics keep their kit")
 	charlie.inventory.net_state = charlie_gear
 	player.inventory.net_state = player_gear
+
+
+## Staged in one frame (no brain runs in between): whom a medic on its way to a casualty
+## fights, when it holds back to suppress, and the squad covering it.
+func _test_medic_fights_only_close() -> void:
+	print("A medic going to a casualty")
+	var saved := _positions()
+	var golf := _ai("Golf")
+	var foxtrot := _ai("Foxtrot")
+	var echo := _ai("Echo")
+	var ai := SquadAI.of(golf)
+	var enemy := level.spawn_soldier({"name": "MedicTestHostile", "faction": "hostile", "variant": "urban", "pos": Vector3(10, 0.1, 75),
+		"loadout": [], "combat": 0.5, "discipline": 0.5, "guard": true})
+	SquadAI.of(enemy).set_physics_process(false)
+	_place(golf, Vector3(10, 0.1, 45))
+	_place(foxtrot, Vector3(10, 0.1, 53))
+	_place(echo, Vector3(12, 0.1, 43))
+	foxtrot.vitals.server_damage(65.0)
+	ai.intent = SquadAI.Intent.CASUALTY
+	ai.casualty = foxtrot
+	ai.care = SquadAI.Care.REACH
+	ai.target = enemy
+	check(ai._foe() == null, "an enemy 30 m off is left to the squad while it goes to the casualty")
+	_place(enemy, Vector3(10, 0.1, 50))
+	check(ai._foe() == enemy, "one within %.0f m is fought" % SquadAI.MEDIC_DEFEND_M)
+	_place(enemy, Vector3(10, 0.1, 75))
+	ai.care = SquadAI.Care.GUARD
+	check(ai._foe() == enemy, "guarding the casualty it fights as usual")
+	ai._start_reach()
+	var echo_ai := SquadAI.of(echo)
+	echo_ai._last_contact = Soldier._now()
+	check(echo_ai._medic_needs_cover(), "a squadmate in contact covers a medic out reaching a casualty")
+	# Pinned down, with the casualty lying in the open: suppress before going out.
+	golf.threat_pos = Vector3(10, 1.0, 68)
+	golf.suppression = 1.0
+	ai._smoke_used = true  # (nothing to throw: the smoke itself is the engagement's job)
+	ai._last_contact = Soldier._now()
+	ai._suppressing = false
+	ai._care_reach(true)
+	check(ai._suppressing and not ai._has_destination and ai.status_text() == "Covering Foxtrot",
+		"pinned with the casualty in the open, it holds and suppresses first (%s)" % ai.status_text())
+	golf.suppression = 0.0
+	ai._suppressing = false
+	ai._care_reach(true)
+	check(not ai._suppressing and ai._has_destination, "and goes as soon as it isn't pinned")
+	ai.target = null
+	ai._end_care()
+	ai.intent = SquadAI.Intent.FOLLOW
+	ai._last_contact = -1000.0
+	echo_ai._last_contact = -1000.0
+	golf.threat_time = -1000.0
+	foxtrot.vitals.server_reset_health()
+	enemy.queue_free()
+	_restore(saved)
 
 
 func _test_no_revive() -> void:
