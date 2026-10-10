@@ -210,6 +210,65 @@ func wound_list() -> Array[Dictionary]:
 	return list
 
 
+# --- Treatment interface (wave 2) -------------------------------------------------------
+# The kit work (W6) gives these their real effects and timings; AI casualty care (W7) and the
+# interaction menus build on the same calls. Until then they're a simple stand-in.
+
+## Wound kinds, as wound_list() reports them, mapped to the item that treats them.
+const TREATS := {
+	"arterial": &"tourniquet", "junctional": &"hemostatic_gauze", "venous": &"pressure_bandage",
+	"muscle": &"pressure_bandage", "graze": &"pressure_bandage", "chest": &"chest_seal",
+	"fracture": &"splint",
+}
+## Casualty-care order: stop massive bleeding first, then the chest, then the rest.
+const CARE_ORDER := ["arterial", "junctional", "chest", "venous", "muscle", "graze", "fracture", "pain"]
+
+
+## What still needs doing for this unit, most urgent first, in the casualty-care order: one
+## Dictionary per task with "part", "kind" and "item" (the item id that treats it). Pain
+## over 0.5 asks for morphine (kind "pain", part TORSO). Works on every peer.
+func care_needed() -> Array[Dictionary]:
+	var tasks: Array[Dictionary] = []
+	for w in wound_list():
+		var kind := String(w.kind)
+		var open := bool(w.bleeding) if kind != "fracture" else not bool(w.treated)
+		if open and TREATS.has(kind):
+			tasks.append({"part": w.part, "kind": kind, "item": TREATS[kind]})
+	if pain() > 0.5:
+		tasks.append({"part": TORSO, "kind": "pain", "item": &"morphine"})
+	tasks.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return CARE_ORDER.find(a.kind) < CARE_ORDER.find(b.kind))
+	return tasks
+
+
+## Host only. Applies one use of `item_id` to `part` (a tourniquet on a thigh, a seal on the
+## chest, morphine anywhere). Returns whether it did anything. Stand-in: stops the bleeding
+## (or splints the fracture) of the first matching wound on that part; morphine takes 0.5
+## off pain.
+func server_apply_treatment(item_id: StringName, part: StringName) -> bool:
+	var model := _m()
+	if item_id == &"morphine":
+		if model.pain_wounds <= 0.0:
+			return false
+		model.pain_wounds = maxf(model.pain_wounds - 0.5, 0.0)
+		_after_change()
+		return true
+	for w: Dictionary in model.wounds:
+		if w.part != part or TREATS.get(String(w.kind), &"") != item_id:
+			continue
+		if w.kind == "fracture":
+			if w.treated:
+				continue
+			w.treated = true
+			w.rate = 0.0
+		elif not WoundModel.is_bleeding(w):
+			continue
+		else:
+			model._stop_bleeding(w)
+		_after_change()
+		return true
+	return false
+
+
 ## A few words for squad reports and labels: "OK", "Wounded", "Bleeding", "Unconscious",
 ## "Cardiac arrest 7:42", "Dead".
 func condition_text() -> String:

@@ -635,6 +635,39 @@ func _server_revive(path: NodePath) -> void:
 				return
 
 
+## Treats `path` (this body or another within reach) with one `item_id` on `part`: takes the
+## item's "treat_s" time (longer on yourself for a tourniquet), uses the item up, then
+## Vitals.server_apply_treatment. Players (interaction menus) and AI (casualty care) both
+## call it. Stand-in until the kit work (W6) gives it the real rules.
+@rpc("any_peer", "call_local", "reliable")
+func _server_treat(path: NodePath, item_id: StringName, part: StringName) -> void:
+	if not _from_owner() or not vitals.is_up() or _now() < _server_busy_until - 0.1:
+		return
+	var target := get_node_or_null(path) as Node3D
+	var other := Vitals.find_on(target) if target else null
+	if other == null or target.global_position.distance_to(global_position) > REVIVE_RANGE + 1.0:
+		return
+	var item := ItemDB.get_item(item_id)
+	if item == null or inventory.count_of(item_id) <= 0:
+		_client_message.rpc_id(owner_peer(), "You have no %s" % (item.name if item else String(item_id)))
+		return
+	var seconds := float(item.stats.get("treat_s", 4.0))
+	if target == self:
+		seconds *= float(item.stats.get("self_mult", 1.0))
+	_server_busy_until = _now() + seconds
+	_client_busy.rpc_id(owner_peer(), seconds, "%s..." % item.name)
+	await get_tree().create_timer(seconds).timeout
+	if not is_inside_tree() or not is_instance_valid(target) or not vitals.is_up():
+		return
+	if target.global_position.distance_to(global_position) > REVIVE_RANGE + 1.0:
+		_client_message.rpc_id(owner_peer(), "Treatment interrupted")
+		return
+	if other.server_apply_treatment(item_id, part):
+		inventory.remove_one(item_id)
+	else:
+		_client_message.rpc_id(owner_peer(), "%s does nothing there" % item.name)
+
+
 ## Debug builds only: hurts this body, to test going down and dying without an enemy.
 @rpc("any_peer", "call_local", "reliable")
 func _server_debug_hurt(amount: float) -> void:

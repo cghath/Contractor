@@ -44,7 +44,13 @@
 		{"id": "ruck_45", "name": "Ruck (45 L)", "type": "backpack", "slot": "backpack", "volume_l": 7.0, "mass_kg": 2.2, "capacity_l": 45.0, "tags": ["pack"]},
 
 		{"id": "ifak", "name": "IFAK", "type": "medical", "volume_l": 0.8, "mass_kg": 0.4, "stack": 5, "tags": ["medical"], "stats": {"heal": 35, "heal_s": 4.0, "use_s": 2.0, "revive_hp": 25, "revive_s": 5.0}},
-		{"id": "tourniquet", "name": "Tourniquet", "type": "medical", "volume_l": 0.1, "mass_kg": 0.08, "stack": 10, "tags": ["medical"]},
+		{"id": "tourniquet", "name": "Tourniquet", "type": "medical", "volume_l": 0.1, "mass_kg": 0.08, "stack": 10, "tags": ["medical"], "stats": {"treats": ["arterial"], "treat_s": 4.0, "self_mult": 1.5}},
+		{"id": "pressure_bandage", "name": "Pressure Bandage", "type": "medical", "volume_l": 0.1, "mass_kg": 0.06, "stack": 10, "tags": ["medical"], "stats": {"treats": ["venous", "muscle", "graze"], "treat_s": 5.0}},
+		{"id": "hemostatic_gauze", "name": "Hemostatic Gauze", "type": "medical", "volume_l": 0.1, "mass_kg": 0.05, "stack": 10, "tags": ["medical"], "stats": {"treats": ["junctional", "arterial"], "treat_s": 8.0}},
+		{"id": "chest_seal", "name": "Vented Chest Seal", "type": "medical", "volume_l": 0.1, "mass_kg": 0.04, "stack": 10, "tags": ["medical"], "stats": {"treats": ["chest"], "treat_s": 5.0}},
+		{"id": "splint", "name": "Splint", "type": "medical", "volume_l": 0.4, "mass_kg": 0.15, "stack": 5, "tags": ["medical"], "stats": {"treats": ["fracture"], "treat_s": 8.0}},
+		{"id": "morphine", "name": "Morphine Autoinjector", "type": "medical", "volume_l": 0.05, "mass_kg": 0.03, "stack": 10, "tags": ["medical"], "stats": {"treats": ["pain"], "treat_s": 2.0}},
+		{"id": "npa", "name": "NPA Airway", "type": "medical", "volume_l": 0.05, "mass_kg": 0.02, "stack": 10, "tags": ["medical"], "stats": {"treats": ["airway"], "treat_s": 3.0}},
 		{"id": "trauma_kit", "name": "Trauma Kit", "type": "medical", "volume_l": 4.0, "mass_kg": 2.0, "tags": ["medical", "revive"], "stats": {"heal": 70, "heal_s": 8.0, "use_s": 4.0, "revive_hp": 50, "revive_s": 3.0}},
 
 		{"id": "frag_grenade", "name": "Frag Grenade", "type": "utility", "volume_l": 0.3, "mass_kg": 0.4, "stack": 6, "tags": ["throwable", "explosive"],
