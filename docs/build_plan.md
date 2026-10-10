@@ -30,8 +30,12 @@ authority on rules and numbers; this file only says who builds what, in which or
 - Don't push. Don't touch `builds/` or `export_presets.cfg`.
 - Run `--import` once in a fresh worktree before running tests (Godot's class cache).
 - Use the Voxel Tools build: `%USERPROFILE%\Downloads\GodotVoxel_1.7\godot.windows.editor.x86_64.exe`.
-- Art is placeholder: Noah's asset pack will replace characters, gear, weapons,
-  environment and vehicles, so keep models code-built and swappable.
+- Art belongs to Noah. His asset pack is voxel art generated in code at runtime, the same
+  way `scripts/art/voxel_art.gd` builds our soldiers: scripts such as
+  `scripts/vehicle_art.gd` fill a Voxel Tools `VoxelBuffer`. It covers characters and gear,
+  weapons, environment and vehicles, and mission types. Don't edit art scripts; call them.
+  Where Noah's script isn't in the repo yet, use a simple placeholder behind the same kind
+  of call so it can be swapped in one place.
 
 ## Waves
 
@@ -46,6 +50,9 @@ authority on rules and numbers; this file only says who builds what, in which or
   penalties), backed by today's HP for now. AI, HUD, dummies and tests switch to it, so
   W1 only changes what's behind it.
 - Create the `dev` branch.
+- **Asset pack in the repo:** Noah pushes his art scripts (to `dev` or a branch) as they're
+  ready, so later waves call them instead of building placeholders. Needed by wave 4
+  (mission types) and wave 5 (vehicles) at the latest.
 
 ### Wave 1: phase 3 core (5 agents)
 
@@ -87,7 +94,8 @@ Drivable ground vehicles for players and AI; AAVs from the LHD on the coast or t
 inland, commandable from the command menu; Blackhawk resupply (pallet at a grid or on
 green or yellow smoke) and transport (hot zones, green or blue smoke, loiters until it
 sees one, first call takes green); support calls with cost and cooldown; aircraft and
-AAVs can be destroyed with their cargo and passengers. Vehicle models from Noah's pack.
+AAVs can be destroyed with their cargo and passengers. Vehicle models come from Noah's
+`vehicle_art.gd`; damage can carve its voxel buffers the way armor does.
 
 ### Wave 6: phase 6, factions
 
@@ -97,8 +105,9 @@ what limits the allied-troop support menu (open in the handoff).
 
 ### Wave 7: art, world and weapons
 
-Importer for Noah's asset pack (voxel models, `.vox` preferred, feeding the existing
-meshing and destructible armor); day and night, weather, NVGs as gear; modular weapon
+Wiring in the rest of Noah's asset pack: his code-generated characters, gear, weapons
+and environment replace the placeholders, with armor still made of destructible voxels
+(no file importer is needed, since the pack builds `VoxelBuffer`s in code); day and night, weather, NVGs as gear; modular weapon
 attachments (optics, lights, lasers, suppressors, grips); optional assists for co-op
 newcomers.
 
