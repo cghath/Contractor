@@ -108,6 +108,15 @@ once volume is back above 60%); surgery kits (2, 3 or 5 uses, about 20 s per cla
 chest-wound closure with a 10% reopen chance); other damage: overpressure and blast lung,
 falls, concussion, burns and burn dressings, hypothermia and blankets, deafness.
 
+Standing rules for this wave (user, 2026-10-10):
+- **Remove the stand-in blood recovery** once IV/IO and fluids work: delete
+  `WoundModel.BLOOD_RECOVER_PER_MIN` and its line in `advance()`, so blood only comes back
+  through IV or IO. Update the tests that rely on it (`_trickle` in `medical_test.gd`, the
+  slow-recovery checks in `wounds_test.gd`, the README and CHANGELOG lines).
+- **No revive, ever.** Don't bring back a revive action, item or API. Epinephrine, CPR and the
+  defibrillator act through the wound model (restart the heart, clear a cause of
+  unconsciousness); a casualty still comes round only when their body lets them.
+
 ### Wave 4: phase 4, mission loop (5 agents)
 
 - **World scale:** contract zones of 2 to 4 km² and hot zones of 8 to 16 km² (hot-zone size
