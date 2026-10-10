@@ -79,7 +79,7 @@ include Voxel Tools.
 | Errors like `Unknown class VoxelTerrain` or `Could not find type "VoxelBuffer"` | You opened the project with the stock Godot editor. Use the Voxel Tools build. |
 | Walls appear, but bullets pass through them for the first second | Voxel collision builds in the background after the walls appear. This is expected. |
 | A client can't connect | Check that the host's firewall allows UDP 24680, and that you used the host's LAN address, not `127.0.0.1`. |
-| The compound comes back damaged after restarting | The host saves the zone on quit and with F5. Use **Reset compound save** on the main menu. |
+| The compound comes back damaged after restarting | The host saves the zone on quit and with Home. Use **Reset compound save** on the main menu. |
 
 ## Controls
 
@@ -93,14 +93,20 @@ include Voxel Tools.
 | H | Use a medical item (smallest kit that covers your injuries) |
 | E on a downed teammate | Revive with your fastest kit (trauma kit 3 s to 50 HP, IFAK 5 s to 25 HP) |
 | F while downed | Give up (die and respawn) |
-| G | Drop carried bulky item, otherwise drop active weapon |
+| G | Throw the selected grenade (frag, flashbang or smoke) |
+| Shift+G | Switch grenade type |
+| Alt+G | Drop carried bulky item, otherwise drop active weapon |
 | 1 / 2 | Primary / sidearm |
-| T | Throw the selected grenade (frag, flashbang or smoke) |
-| 3 | Switch grenade type |
-| Z / X / V | Squad: on me / hold there / move to the point under the crosshair (makes you the squad lead) |
+| F1-F8 | Select squadmates by number (F1 is the first player) and open the command menu; press more F-keys to add units |
+| ~ | Select the whole squad and open the command menu |
+| In the command menu | 1-9 and 0 pick an entry, or scroll the mouse wheel and click the middle button; Backspace goes back, Esc closes |
 | Tab | Inventory screen: equip, stow, move between containers, use, drop |
 | Esc | Close the inventory screen / release mouse |
-| F5 | Save zone (host) |
+| Home | Save zone (host) |
+
+The command menu follows Arma 3's layout: 1 Move (return to formation, move there, stop), 3 Engage (open fire,
+hold fire), 5 Status, 6 Action (throw smoke or frag at the crosshair), 8 Formation (wedge, file, line, staggered
+column) and 0 Support. Target, Mount, Combat mode, Team and the support calls are listed but not built yet.
 
 ## Design decisions (locked)
 

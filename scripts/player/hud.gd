@@ -6,6 +6,7 @@ extends CanvasLayer
 ## Set by the owning Soldier before the HUD enters the tree.
 var player: Soldier
 var inventory_screen: InventoryScreen
+var command_menu: CommandMenu
 var _crosshair: Label
 var _prompt: Label
 var _status: Label
@@ -45,6 +46,8 @@ func _ready() -> void:
 	inventory_screen = InventoryScreen.new(player)
 	inventory_screen.visible = false
 	add_child(inventory_screen)
+	command_menu = CommandMenu.new(player)
+	add_child(command_menu)
 	_message = _label("", Control.PRESET_CENTER_TOP)
 	_message.position.y += 60
 	_message.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -94,7 +97,7 @@ func update_status(player: Soldier) -> void:
 	if armor != "":
 		lines.append("Armor: " + armor)
 	if inv.hands != &"":
-		lines.append("Carrying %s (G to drop)" % ItemDB.get_item(inv.hands).name)
+		lines.append("Carrying %s (Alt+G to drop)" % ItemDB.get_item(inv.hands).name)
 	var squad := _squad_lines(player)
 	if squad != "":
 		lines.insert(0, squad)
@@ -105,7 +108,7 @@ func update_status(player: Soldier) -> void:
 		_ammo.text = "%s%s\n%d / %d" % [weapon.name, state, inv.rounds_in(player.active_slot), inv.spare_rounds(ammo)]
 	else:
 		_ammo.text = ""
-	_ammo.text += "\n%s x%d  [T] throw  [3] switch" % [ItemDB.get_item(player.throwable).name, inv.count_of(player.throwable)]
+	_ammo.text += "\n%s x%d  [G] throw  [Shift+G] switch" % [ItemDB.get_item(player.throwable).name, inv.count_of(player.throwable)]
 	if player.vitals.is_healing():
 		_status.text += "\nHealing..."
 	_crosshair.visible = not player.is_aiming and player.vitals.is_up()
@@ -115,18 +118,21 @@ func update_status(player: Soldier) -> void:
 		_downed.text = ""
 
 
-## One line per AI squadmate on the player's side: what it's doing and its health.
+## The squad by F-key number, with what each squadmate is doing and its health. A ">" marks
+## units selected in the command menu.
 func _squad_lines(player: Soldier) -> String:
-	var level := CompoundLevel.current(player)
-	if level == null:
+	var units := command_menu.roster()
+	if units.size() <= 1:
 		return ""
 	var lines := PackedStringArray()
-	for s: Soldier in level.ai.get_children():
-		if s.faction == player.faction:
-			lines.append("%s: %s (%d HP)" % [s.name, s.ai_status, s.vitals.health])
-	if lines.is_empty():
-		return ""
-	return "SQUAD  [Z] on me  [X] hold  [V] move there\n" + "\n".join(lines) + "\n"
+	for i in units.size():
+		var s := units[i]
+		var mark := ">" if String(s.name) in command_menu.selected and command_menu.is_open() else " "
+		if s.is_ai():
+			lines.append("%s F%d %s: %s (%d HP)" % [mark, i + 1, s.name, s.ai_status, s.vitals.health])
+		else:
+			lines.append("  F%d %s" % [i + 1, "You" if s == player else "Player %s" % s.name])
+	return "SQUAD  [F-keys] select  [~] all\n" + "\n".join(lines) + "\n"
 
 
 func _label(text: String, preset: Control.LayoutPreset) -> Label:

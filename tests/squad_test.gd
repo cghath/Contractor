@@ -29,6 +29,7 @@ func _ready() -> void:
 	_remove_hostiles()
 	await _frames(10)
 	await _test_roster()
+	_test_command_menu()
 	_test_navigation()
 	await _test_follow()
 	await _test_buddy_carries_buddy()
@@ -63,6 +64,53 @@ func _test_roster() -> void:
 	level.rebalance_squad()
 	await _frames(2)
 	check(_squad().size() == 7, "when they leave, AI fills the slot again (%d)" % _squad().size())
+
+
+func _test_command_menu() -> void:
+	print("Command menu")
+	var menu: CommandMenu = player._hud.command_menu
+	var squad := level.squad_for(&"friendly")
+	_press(menu, KEY_F3)  # F1 is you, F2 Alpha, F3 Bravo
+	check(menu.is_open() and menu.selected == PackedStringArray(["Bravo"]), "F3 selects Bravo and opens the menu")
+	_press(menu, KEY_1)
+	_press(menu, KEY_3)  # Move > Stop
+	check(SquadAI.of(_ai("Bravo")).order == Squad.Order.HOLD and SquadAI.of(_ai("Alpha")).order == Squad.Order.FOLLOW,
+		"1 Move > 3 Stop holds only Bravo")
+	check(not menu.is_open(), "the menu closes after an order")
+	_press(menu, KEY_QUOTELEFT)
+	check(menu.selected.size() == 7, "~ selects the whole squad")
+	for i in 7:
+		_scroll(menu, MOUSE_BUTTON_WHEEL_DOWN)  # down to 8 Formation
+	_scroll(menu, MOUSE_BUTTON_MIDDLE)
+	_scroll(menu, MOUSE_BUTTON_WHEEL_DOWN)
+	_scroll(menu, MOUSE_BUTTON_MIDDLE)  # File
+	check(squad.formation == "file", "scroll and middle click: Formation > File")
+	_press(menu, KEY_QUOTELEFT)
+	_press(menu, KEY_3)
+	_press(menu, KEY_2)  # Engage > Hold fire
+	check(SquadAI.of(_ai("Golf")).hold_fire, "Engage > Hold fire")
+	_press(menu, KEY_QUOTELEFT)
+	_press(menu, KEY_3)
+	_press(menu, KEY_1)  # Engage > Open fire
+	_press(menu, KEY_QUOTELEFT)
+	_press(menu, KEY_1)
+	_press(menu, KEY_1)  # Move > Return to formation
+	squad.formation = "wedge"
+	check(not SquadAI.of(_ai("Golf")).hold_fire and SquadAI.of(_ai("Bravo")).order == Squad.Order.FOLLOW, "and back to open fire, in formation")
+
+
+func _press(menu: CommandMenu, key: Key) -> void:
+	var ev := InputEventKey.new()
+	ev.physical_keycode = key
+	ev.pressed = true
+	menu.handle_input(ev)
+
+
+func _scroll(menu: CommandMenu, button: MouseButton) -> void:
+	var ev := InputEventMouseButton.new()
+	ev.button_index = button
+	ev.pressed = true
+	menu.handle_input(ev)
 
 
 func _test_navigation() -> void:

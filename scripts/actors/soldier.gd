@@ -195,6 +195,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		_hud.toggle_detail()
 	elif _hud.is_inventory_open():
 		return  # the inventory screen has the mouse
+	elif vitals.is_up() and _hud.command_menu.handle_input(event):
+		return  # F-keys, and 1-9 / wheel / middle click while the command menu is open
 	elif event.is_action_pressed(&"pause"):
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if captured else Input.MOUSE_MODE_CAPTURED
 	elif event.is_action_pressed(&"fire") and not captured:
@@ -206,8 +208,15 @@ func _unhandled_input(event: InputEvent) -> void:
 		_server_revive.rpc_id(1, _revive_target.get_path())
 	elif event.is_action_pressed(&"interact") and _focus:
 		_server_interact.rpc_id(1, _focus.get_path())
-	elif event.is_action_pressed(&"drop"):
-		_server_drop.rpc_id(1, active_slot)
+	elif event.is_action_pressed(&"grenade"):
+		# G throws, Shift+G switches grenade type, Alt+G drops what you're holding.
+		if event is InputEventKey and event.alt_pressed:
+			_server_drop.rpc_id(1, active_slot)
+		elif event is InputEventKey and event.shift_pressed:
+			throwable = THROWABLES[(THROWABLES.find(throwable) + 1) % THROWABLES.size()]
+			_hud.flash("%s (%d)" % [ItemDB.get_item(throwable).name, inventory.count_of(throwable)])
+		else:
+			_try_throw()
 	elif event.is_action_pressed(&"reload"):
 		_try_reload()
 	elif event.is_action_pressed(&"use_medical"):
@@ -218,26 +227,14 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed(&"weapon_sidearm"):
 		active_slot = &"sidearm"
 		_on_inventory_changed()
-	elif event.is_action_pressed(&"next_throwable"):
-		throwable = THROWABLES[(THROWABLES.find(throwable) + 1) % THROWABLES.size()]
-		_hud.flash("%s (%d)" % [ItemDB.get_item(throwable).name, inventory.count_of(throwable)])
-	elif event.is_action_pressed(&"throw"):
-		_try_throw()
-	elif event.is_action_pressed(&"squad_follow"):
-		_server_squad_order.rpc_id(1, Squad.Order.FOLLOW, global_position)
-		_hud.flash("Squad: on me")
-	elif event.is_action_pressed(&"squad_hold"):
-		_server_squad_order.rpc_id(1, Squad.Order.HOLD, global_position)
-		_hud.flash("Squad: hold there")
-	elif event.is_action_pressed(&"squad_move"):
-		var from := camera.global_position
-		var hit := get_world_3d().direct_space_state.intersect_ray(
-			PhysicsRayQueryParameters3D.create(from, from - camera.global_basis.z * 150.0, 1, [get_rid()]))
-		if hit.is_empty():
-			_hud.flash("Look at a spot on the ground")
-		else:
-			_server_squad_order.rpc_id(1, Squad.Order.MOVE, hit.position)
-			_hud.flash("Squad: move there")
+
+
+## Where the crosshair meets the world (up to 150 m), or null.
+func crosshair_ground() -> Variant:
+	var from := camera.global_position
+	var hit := get_world_3d().direct_space_state.intersect_ray(
+		PhysicsRayQueryParameters3D.create(from, from - camera.global_basis.z * 150.0, 1, [get_rid()]))
+	return null if hit.is_empty() else hit.position
 
 
 func _process(delta: float) -> void:
@@ -560,14 +557,32 @@ func _server_fire(origin: Vector3, direction: Vector3, slot: StringName) -> void
 		CompoundLevel.current(self).show_impact.rpc(result.position, result.normal, result.result)
 
 
-## Any player can order the friendly squad; that makes them its lead.
+## A command from the command menu (CommandMenu) for the named squadmates (all if empty).
+## Any player can command the friendly squad; that makes them its lead.
 @rpc("any_peer", "call_local", "reliable")
-func _server_squad_order(order: int, point: Vector3) -> void:
+func _server_squad_command(cmd: String, point: Vector3, names: PackedStringArray) -> void:
 	if not _from_owner() or is_ai() or not vitals.is_up():
 		return
 	var squad := CompoundLevel.current(self).squad_for(faction)
-	if squad:
-		squad.give_order(self, order, point)
+	if squad == null:
+		return
+	match cmd:
+		"follow":
+			squad.give_order(self, Squad.Order.FOLLOW, point, names)
+		"hold":
+			squad.give_order(self, Squad.Order.HOLD, point, names)
+		"move":
+			squad.give_order(self, Squad.Order.MOVE, point, names)
+		"open_fire", "hold_fire":
+			squad.set_hold_fire(self, cmd == "hold_fire", names)
+		"throw_smoke", "throw_frag":
+			var who := squad.order_throw(self, &"smoke_grenade" if cmd == "throw_smoke" else &"frag_grenade", point, names)
+			if who == "":
+				_client_message.rpc_id(owner_peer(), "Nobody selected has one")
+		_:
+			if cmd.begins_with("formation:"):
+				squad.leader = self
+				squad.formation = cmd.trim_prefix("formation:")
 
 
 @rpc("any_peer", "call_local", "reliable")

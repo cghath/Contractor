@@ -58,6 +58,10 @@ var buddy: Soldier:
 		return s.buddy if s else null
 var intent := Intent.FOLLOW
 var target: Soldier
+## This unit's standing order (friendlies), set from the command menu.
+var order := Squad.Order.FOLLOW
+## Command menu "Hold fire": don't shoot at all until told to open fire.
+var hold_fire := false
 var care := Care.NONE
 var casualty: Soldier
 ## True while moving to new cover in contact (the buddy holds and covers meanwhile).
@@ -139,11 +143,23 @@ func in_contact() -> bool:
 	return Soldier._now() - _last_contact < CONTACT_MEMORY_S
 
 
-func on_order(order: Squad.Order, point: Vector3) -> void:
+## An order from the command menu. `slot` and `count` spread a group of units around the
+## point so they don't all head for the same spot.
+func on_order(new_order: Squad.Order, point: Vector3, slot := 0, count := 1) -> void:
+	order = new_order
 	_hold_point = body.global_position
-	_move_point = point + _spread_offset()
+	var side := squad.leader.global_basis.x if squad and is_instance_valid(squad.leader) else body.global_basis.x
+	_move_point = point + side * (slot - (count - 1) / 2.0) * 1.5
 	_has_cover = false
 	_think_cd = 0.0
+
+
+## Command menu action: throw a grenade at a point. False if this unit can't.
+func order_throw(id: StringName, point: Vector3) -> bool:
+	if not body.vitals.is_up() or body.carrying != null:
+		return false
+	_aim_at(point)
+	return _throw(id, point)
 
 
 func status_text() -> String:
@@ -206,7 +222,7 @@ func _choose_intent() -> void:
 	var spare := body.inventory.spare_rounds(Soldier._ammo_of(weapon)) if weapon else 0
 
 	if body.faction == &"friendly":
-		match squad.order if squad else Squad.Order.FOLLOW:
+		match order:
 			Squad.Order.FOLLOW:
 				scores[Intent.FOLLOW] = 0.5
 			Squad.Order.HOLD:
@@ -297,7 +313,7 @@ func _fight_from_context() -> void:
 		if _advancing and _at_cover():
 			_advancing = false
 		return
-	match squad.order if squad else Squad.Order.FOLLOW:
+	match order:
 		Squad.Order.HOLD:
 			_fight(_hold_point, 4.0)
 		Squad.Order.MOVE:
@@ -571,7 +587,7 @@ func _shoot() -> void:
 	var now := Soldier._now()
 	var weapon := body.active_weapon()
 	if weapon == null or weapon.type != "weapon" or body.carrying != null or body.is_reloading \
-			or body.stunned_s > 0.0 or body.suppression >= PINNED or care == Care.TREAT:
+			or body.stunned_s > 0.0 or body.suppression >= PINNED or care == Care.TREAT or hold_fire:
 		return
 	var aim_at: Variant = null
 	if target != null:
@@ -686,13 +702,6 @@ func _stop() -> void:
 func _flat_distance(point: Vector3) -> float:
 	return Vector2(body.global_position.x - point.x, body.global_position.z - point.z).length()
 
-
-func _spread_offset() -> Vector3:
-	if squad == null:
-		return Vector3.ZERO
-	var i := squad.members().find(body)
-	var side := body.global_basis.x if squad.leader == null else squad.leader.global_basis.x
-	return side * (i - (squad.members().size() - 1) / 2.0) * 1.5
 
 
 static func _mag_size(weapon: ItemData) -> int:

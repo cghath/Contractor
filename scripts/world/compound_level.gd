@@ -244,7 +244,7 @@ func rebalance_squad() -> void:
 			continue
 		var i := SQUAD_CALLSIGNS.find(callsign)
 		var anchor: Node3D = squad.leader if is_instance_valid(squad.leader) else null
-		var pos := anchor.global_transform * Squad.FORMATION[i % Squad.FORMATION.size()] if anchor else SPAWN_POINTS[i % SPAWN_POINTS.size()] + Vector3(0, 0, 3)
+		var pos := anchor.global_transform * (Squad.FORMATIONS["wedge"][i % 7] as Vector3) if anchor else SPAWN_POINTS[i % SPAWN_POINTS.size()] + Vector3(0, 0, 3)
 		members.append(spawn_soldier({"name": callsign, "faction": "friendly", "variant": "multicam", "pos": pos,
 			"loadout": SQUAD_LOADOUT, "combat": 0.5 + 0.03 * (i % 5), "discipline": 0.6, "guard": false}))
 	members.sort_custom(func(a: Soldier, b: Soldier) -> bool: return SQUAD_CALLSIGNS.find(String(a.name)) < SQUAD_CALLSIGNS.find(String(b.name)))
