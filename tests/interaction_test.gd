@@ -189,6 +189,10 @@ func _test_signs() -> void:
 	report = InteractionMenu.condition_report(alpha)
 	check(report.contains("Breathing laboured") and report.contains("Blue lips") and not report.contains("%"),
 		"low SpO2 shows as laboured breathing and blue lips, no number (%s)" % report.replace("\n", " | "))
+	player.inventory.take(&"pulse_oximeter")
+	report = InteractionMenu.condition_report(alpha, player)
+	check(report.contains("Pulse oximeter: SpO2 8"), "with a pulse oximeter the number shows (%s)" % report.replace("\n", " | "))
+	player.inventory.remove_one(&"pulse_oximeter")
 	player.vitals._model.pain_wounds = 0.6
 	player.vitals.server_apply_treatment(&"morphine", Vitals.TORSO)
 	player.vitals.server_advance(WoundModel.MORPHINE_ABSORB_S)

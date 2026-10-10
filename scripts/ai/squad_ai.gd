@@ -108,15 +108,18 @@ const COVER_MEDIC_M := 30.0
 ## further than this from them; then they're carried after the squad like anyone who won't
 ## wake soon.
 const STAY_WITH_M := 20.0
-## The care order once safe, by care_needed() kind: massive bleeding, airway, chest, the
+## The care order once safe, by care_needed() kind: massive bleeding, airway, tension (the needle), chest, the
 ## other bleeding, circulation (IV or IO, a bag, a pressure bag), fractures, pain. Kinds not
 ## listed go just before pain.
-const CARE_RANK: Array[String] = ["arterial", "airway", "chest", "junctional", "venous", "internal", "muscle", "graze",
+const CARE_RANK: Array[String] = ["arterial", "airway", "tension", "chest", "junctional", "venous", "internal", "muscle", "graze",
 	"access", "fluids", "pressure", "fracture", "pain"]
 ## Proposed: seconds past an item's time before checking whether it worked.
 const TREAT_MARGIN_S := 0.4
 ## Proposed: tries at one task (same body, part and kind) that change nothing before giving up on it.
 const TREAT_TRIES := 2
+## Proposed: tries at a line ("access"): an IV in shock misses often, and each miss uses a
+## catheter, so a medic keeps going while it carries more.
+const ACCESS_TRIES := 4
 ## Proposed: morphine only for a conscious casualty in at least this much pain.
 const MORPHINE_PAIN := 0.5
 ## Proposed: a wounded unit calls "Medic!" at most this often, and counts as asking for that long.
@@ -1150,7 +1153,7 @@ func _next_task(c: Soldier, under_fire: bool) -> Dictionary:
 			continue
 		if c == body and _kept_for_squad(item, String(task.kind)):
 			continue
-		if int(_failures.get(_task_key(c, task), 0)) >= TREAT_TRIES:
+		if int(_failures.get(_task_key(c, task), 0)) >= (ACCESS_TRIES if String(task.kind) == "access" else TREAT_TRIES):
 			continue
 		var chosen := task.duplicate()
 		chosen.item = item

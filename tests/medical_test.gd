@@ -145,11 +145,28 @@ func _test_chest_seal() -> void:
 	w2.tension_in = 1.0
 	late.server_advance(2.0)
 	check(late.wound_list()[0].tension, "an unsealed one went to tension")
-	check(late.server_apply_treatment(&"chest_seal", Vitals.CHEST) and late.care_needed().is_empty(), "a seal still closes it (nothing more the kit can do)")
+	check(late.server_apply_treatment(&"chest_seal", Vitals.CHEST) and late.care_needed().map(func(t: Dictionary) -> StringName: return t.item) == [&"decompression_needle"],
+		"a seal still closes it; the needle is what's left (%s)" % [late.care_needed()])
+	check(late.has_tension() and late.signs().has("Trachea shifted, neck veins bulging") and late.signs().has("No breath sounds on the right"),
+		"a medic sees the tension: trachea shifted, no breath sounds on that side (%s)" % [late.signs()])
+	var needled := _vitals()
+	var w3 := _wound(needled, Vitals.CHEST, "chest", WoundModel.CHEST_RATE, &"lung_l")
+	w3.tension_in = 1.0
+	needled.server_advance(2.0)
+	var squeezed: float = needled.lung(&"lung_r").efficiency
+	check(squeezed <= 1.0 - WoundModel.TENSION_SHIFT + 0.001 and needled.lung(&"lung_l").collapse == 1.0,
+		"tension: that lung fully collapsed, the other pushed (%.2f)" % squeezed)
+	check(needled.treatment_problem(&"decompression_needle", Vitals.CHEST) == "" and needled.server_apply_treatment(&"decompression_needle", Vitals.CHEST),
+		"the needle goes in")
+	needled.server_advance(WoundModel.TENSION_ARREST_S + 30.0)
+	check(not needled.has_tension() and not needled.in_cardiac_arrest() and needled.lung(&"lung_r").efficiency == 1.0,
+		"and lets the air out: no arrest, the other lung free again")
+	check(needled.treatment_problem(&"decompression_needle", Vitals.CHEST) == "No tension pneumothorax", "no second needle without tension")
 	late.server_advance(WoundModel.TENSION_ARREST_S)
-	check(late.in_cardiac_arrest(), "but doesn't relieve the tension: cardiac arrest (the needle is wave 3)")
+	check(late.in_cardiac_arrest(), "without the needle: cardiac arrest")
 	v.queue_free()
 	late.queue_free()
+	needled.queue_free()
 
 
 func _test_splint() -> void:

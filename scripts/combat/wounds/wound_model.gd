@@ -87,7 +87,7 @@ const PAIN_KNOCKOUT_S := 3.0
 const WAKE_S := {&"knockout": 10.0, &"pain": 10.0, &"morphine": 15.0, &"spo2": 15.0, &"trauma": 20.0,
 	&"blood": 20.0, &"arrest": 20.0}
 
-## --- Breathing: SpO2 (hidden from players; a basic version until wave 3's per-lung model) ---
+## --- Breathing: SpO2 (hidden from players; a medic reads it on a pulse oximeter) ---
 ## Percent saturation. Proposed: out under SPO2_UNCONSCIOUS; cardiac arrest after
 ## SPO2_ARREST_S spent under SPO2_ARREST. The cues: laboured breathing and greying vision
 ## under SPO2_LABOURED, blue lips under SPO2_BLUE_LIPS.
@@ -98,14 +98,41 @@ const SPO2_UNCONSCIOUS := 85.0
 const SPO2_ARREST := 70.0
 const SPO2_ARREST_S := 120.0
 ## What pulls SpO2 down (proposed), as the level it heads for: points off per share of blood
-## lost past EFFECTS_FROM_LOST (less blood to carry oxygen: 90% at 40% lost), per open chest
-## wound without a seal, for a tension pneumothorax (sealed or not, until wave 3's needle),
-## and per dose of morphine in the blood past MORPHINE_DEPRESSION_LEVEL (slowed breathing).
-## An obstructed airway heads for SPO2_OBSTRUCTED; cardiac arrest for 0.
+## lost past EFFECTS_FROM_LOST (less blood to carry oxygen: 90% at 40% lost), per share of
+## lung efficiency lost (both lungs averaged: lung_efficiency), and per dose of morphine in
+## the blood past MORPHINE_DEPRESSION_LEVEL (slowed breathing). An obstructed airway heads
+## for SPO2_OBSTRUCTED; cardiac arrest for 0.
 const SPO2_BLOOD_DROP := 32.0
-const SPO2_OPEN_CHEST := 5.0
-const SPO2_TENSION := 24.0
+const SPO2_LUNG_DROP := 30.0
 const SPO2_PER_MORPHINE := 12.0
+
+## --- Breathing (design doc "Chest"; proposed values) ---
+## Each lung has an efficiency from 0 to 1: 1 less its collapse (pneumothorax) and the blood
+## in it (hemothorax). An unsealed chest wound lets its lung collapse to OPEN_CHEST_COLLAPSE
+## (at COLLAPSE_PER_S); a tension pneumothorax collapses it fully and pushes on the other lung
+## (TENSION_SHIFT off its efficiency) until a decompression needle lets the air out. Once
+## sealed, a lung re-expands over REEXPAND_S. Blood from a bleeding chest wound fills its
+## side's lung: HEMOTHORAX_L fills it (efficiency 0), at most FLUID_MAX, and stays there (no
+## chest drain in the field).
+const LUNGS: Array[StringName] = [&"lung_l", &"lung_r"]
+const OPEN_CHEST_COLLAPSE := 0.4
+const COLLAPSE_PER_S := 1.0 / 30.0
+const REEXPAND_S := 120.0
+const TENSION_SHIFT := 0.4
+const HEMOTHORAX_L := 1.5
+const FLUID_MAX := 0.8
+## Breaths per minute: RESP_NORMAL, faster with lost lung efficiency and blood loss (shock),
+## slower past MORPHINE_DEPRESSION_LEVEL; none in arrest. Hidden like SpO2: players see
+## "Breathing fast" over RESP_FAST and "Breathing slow" under RESP_SLOW.
+const RESP_NORMAL := 16.0
+const RESP_PER_LUNG := 24.0
+const RESP_PER_SHOCK := 10.0
+const RESP_PER_MORPHINE := 6.0
+const RESP_MIN := 4.0
+const RESP_FAST := 24.0
+const RESP_SLOW := 10.0
+## The decompression needle's own pain (proposed).
+const NEEDLE_PAIN := 0.05
 const SPO2_OBSTRUCTED := 40.0
 ## How fast SpO2 moves toward that level, in points per second (proposed).
 const SPO2_FALL_PER_S := 0.5
@@ -162,6 +189,7 @@ const MORPHINE := &"morphine"
 const NPA := &"npa"
 const IO_KIT := &"io_kit"
 const PRESSURE_BAG := &"pressure_bag"
+const NEEDLE := &"decompression_needle"
 ## IV catheters by item id: their gauge (design doc, "IV gauge sets the flow").
 const IV_GAUGES := {&"iv_10": 10, &"iv_12": 12, &"iv_14": 14, &"iv_16": 16, &"iv_18": 18, &"iv_20": 20}
 ## Fluid bags by item id: mL. Saline and blood work the same (design doc).
@@ -325,6 +353,9 @@ var access: Dictionary = {}
 var infusion: Dictionary = {}
 ## Host: what the last apply_item has to tell the treater ("Missed the vein"), or "".
 var care_note := ""
+## Per lung (LUNGS): how far it has collapsed and how full of blood it is, 0 to 1.
+var lung_collapse := {&"lung_l": 0.0, &"lung_r": 0.0}
+var lung_fluid := {&"lung_l": 0.0, &"lung_r": 0.0}
 
 var _time := 0.0
 var _last_concussion := -INF
@@ -471,15 +502,43 @@ func spo2_target() -> float:
 	if airway_blocked:
 		return SPO2_OBSTRUCTED
 	var target := SPO2_NORMAL - SPO2_BLOOD_DROP * maxf(lost() - EFFECTS_FROM_LOST, 0.0)
-	for w in wounds:
-		if w.kind != "chest":
-			continue
-		if w.get("tension", false):
-			target -= SPO2_TENSION
-		elif not w.treated:
-			target -= SPO2_OPEN_CHEST
+	target -= SPO2_LUNG_DROP * (1.0 - lung_efficiency())
 	target -= SPO2_PER_MORPHINE * maxf(morphine_level - MORPHINE_DEPRESSION_LEVEL, 0.0)
 	return clampf(target, 0.0, SPO2_NORMAL)
+
+
+## A tension pneumothorax runs on `lung`'s side (chest wounds are named for their lung).
+func _tension_on(lung: StringName) -> bool:
+	return wounds.any(func(w: Dictionary) -> bool: return w.kind == "chest" and w.name == lung and w.get("tension", false))
+
+
+## One lung's efficiency, 0 to 1: less what's collapsed and the blood in it, and less
+## TENSION_SHIFT while the other side is under tension.
+func lung_efficiency_of(lung: StringName) -> float:
+	var other: StringName = LUNGS[1] if lung == LUNGS[0] else LUNGS[0]
+	var eff := 1.0 - float(lung_collapse[lung]) - float(lung_fluid[lung])
+	if _tension_on(other):
+		eff -= TENSION_SHIFT
+	return clampf(eff, 0.0, 1.0)
+
+
+## Both lungs' efficiency averaged, 0 to 1 (1 healthy).
+func lung_efficiency() -> float:
+	return (lung_efficiency_of(LUNGS[0]) + lung_efficiency_of(LUNGS[1])) * 0.5
+
+
+## Breaths per minute now (hidden; see RESP_NORMAL).
+func respiratory_rate() -> float:
+	if arrest or dead:
+		return 0.0
+	var rate := RESP_NORMAL + RESP_PER_LUNG * (1.0 - lung_efficiency()) + RESP_PER_SHOCK * shock()
+	rate -= RESP_PER_MORPHINE * maxf(morphine_level - MORPHINE_DEPRESSION_LEVEL, 0.0)
+	return maxf(rate, RESP_MIN)
+
+
+## A tension pneumothorax is running on either side.
+func has_tension() -> bool:
+	return wounds.any(func(w: Dictionary) -> bool: return w.kind == "chest" and w.get("tension", false))
 
 
 ## Pain the morphine in the blood takes off now.
@@ -506,7 +565,7 @@ func morphine_room() -> bool:
 func breathing_laboured() -> bool:
 	if dead or arrest:
 		return false
-	if spo2 < SPO2_LABOURED:
+	if spo2 < SPO2_LABOURED or lung_efficiency() < 0.85:
 		return true
 	return wounds.any(func(w: Dictionary) -> bool: return w.kind == "chest" and (not w.treated or w.get("tension", false)))
 
@@ -683,8 +742,8 @@ func bag_options() -> Array[StringName]:
 ## {"part", "kind", "item"} per task; where several items do the job ("access", "fluids")
 ## "items" lists them all, best pick first, and "item" is the first. Only items that would
 ## help: wounds already handled (treated, under a good
-## tourniquet) are skipped, internal bleeding and a tension pneumothorax under a seal wait
-## for wave 3, and morphine only for pain still left once what's given has worked, while the
+## tourniquet) are skipped, internal bleeding waits for surgery, a tension pneumothorax
+## asks for the needle (kind "tension"), and morphine only for pain still left once what's given has worked, while the
 ## blood has room for a dose (morphine_room). In cardiac arrest neither an NPA nor morphine
 ## does anything until the heart restarts.
 func care_tasks() -> Array[Dictionary]:
@@ -703,6 +762,8 @@ func care_tasks() -> Array[Dictionary]:
 			tasks.append(_task(w.part, w.kind, HEMOSTATIC_GAUZE))
 	if unconscious and not arrest and not npa:
 		tasks.append(_task(&"head", "airway", NPA))
+	if has_tension():
+		tasks.append(_task(&"chest", "tension", NEEDLE))
 	for w: Dictionary in by_rate:
 		if w.kind == "chest" and not w.treated:
 			tasks.append(_task(w.part, "chest", CHEST_SEAL))
@@ -741,6 +802,8 @@ func treatment_problem(item: StringName, part: StringName) -> String:
 		if access.is_empty():
 			return "Needs IV or IO access first"
 		return "Already under a pressure bag" if access.pressure else ""
+	if item == NEEDLE:
+		return "" if has_tension() else "No tension pneumothorax"
 	match item:
 		TOURNIQUET:
 			if not LIMB_BELOW.has(part):
@@ -794,6 +857,14 @@ func apply_item(item: StringName, part: StringName, rushed := false) -> bool:
 			access = {"kind": "io", "gauge": 0, "part": IO_PART, "pressure": false}
 		PRESSURE_BAG:
 			access.pressure = true
+		NEEDLE:  # lets the air out: the tension and the arrest it was heading for stop
+			pain_wounds = minf(pain_wounds + NEEDLE_PAIN, 1.0)
+			for w in wounds:
+				if w.kind == "chest" and w.get("tension", false):
+					w.tension = false
+					w.arrest_in = -1.0
+					var lung := _lung_of(w)
+					lung_collapse[lung] = minf(float(lung_collapse[lung]), OPEN_CHEST_COLLAPSE)
 		_ when FLUID_BAGS.has(item):
 			var ml := int(FLUID_BAGS[item])
 			infusion = {"item": item, "ml": ml, "left": float(ml)}
@@ -1028,6 +1099,9 @@ func reset() -> void:
 	access = {}
 	infusion = {}
 	care_note = ""
+	for lung in LUNGS:
+		lung_collapse[lung] = 0.0
+		lung_fluid[lung] = 0.0
 	_spell_wake_s = 0.0
 	_low_spo2_s = 0.0
 	_out_s = 0.0
@@ -1068,8 +1142,9 @@ func advance(dt: float) -> void:
 			if w.tension_in <= 0.0:
 				w.tension_in = -1.0
 				w.tension = true
+				lung_collapse[_lung_of(w)] = 1.0
 				w.arrest_in = TENSION_ARREST_S  # tension pneumothorax
-		elif float(w.arrest_in) >= 0.0:  # ...but not this one (the needle is wave 3)
+		elif float(w.arrest_in) >= 0.0:  # ...but not this one: only the needle does
 			w.arrest_in = float(w.arrest_in) - dt
 			if w.arrest_in <= 0.0:
 				w.arrest_in = -1.0
@@ -1080,6 +1155,7 @@ func advance(dt: float) -> void:
 			kill()  # no heart rate when the window ran out
 			return
 	_update_airway(dt)
+	_advance_lungs(dt)
 	_advance_spo2(dt)
 	_advance_trauma(dt)
 	update_state(dt)
@@ -1119,7 +1195,8 @@ func update_state(dt: float) -> void:
 ## Wounds are [part, kind, rate, treated, name, flags (1 packed, 2 tension)]; "q" holds the
 ## tourniquets as {part: [count, rushed]}; "o" is SpO2, "m" and "d" morphine in the blood and
 ## still going in, "x" total trauma, "a" the line [kind, gauge, part, pressure] and "v" the
-## bag running [item, mL, mL left] (empty arrays for none). Flag 64 (coming round) only makes the start of the wake
+## bag running [item, mL, mL left] (empty arrays for none), "l" the lungs [left collapse,
+## left fluid, right collapse, right fluid]. Flag 64 (coming round) only makes the start of the wake
 ## countdown go out at once; clients read the countdown itself from "t". Flag 128: pain has
 ## been held over the knockout threshold long enough (pain_knocks_out).
 func to_net() -> Dictionary:
@@ -1140,7 +1217,9 @@ func to_net() -> Dictionary:
 		"f": flags, "w": list, "q": tq, "t": timers, "o": snappedf(spo2, 0.5), "m": snappedf(morphine_level, 0.01),
 		"d": snappedf(morphine_depot, 0.01), "x": snappedf(trauma_level, 0.01),
 		"a": [] if access.is_empty() else [access.kind, int(access.gauge), String(access.part), 1 if access.pressure else 0],
-		"v": [] if infusion.is_empty() else [String(infusion.item), int(infusion.ml), snappedf(float(infusion.left), 1.0)]}
+		"v": [] if infusion.is_empty() else [String(infusion.item), int(infusion.ml), snappedf(float(infusion.left), 1.0)],
+		"l": [snappedf(float(lung_collapse[LUNGS[0]]), 0.01), snappedf(float(lung_fluid[LUNGS[0]]), 0.01),
+			snappedf(float(lung_collapse[LUNGS[1]]), 0.01), snappedf(float(lung_fluid[LUNGS[1]]), 0.01)]}
 
 
 ## Rebuilds this copy from a peer's net_state (clients).
@@ -1156,6 +1235,10 @@ func apply_net(state: Dictionary) -> void:
 	access = {} if line.is_empty() else {"kind": String(line[0]), "gauge": int(line[1]), "part": StringName(line[2]), "pressure": int(line[3]) != 0}
 	var bag: Array = state.get("v", [])
 	infusion = {} if bag.is_empty() else {"item": StringName(bag[0]), "ml": int(bag[1]), "left": float(bag[2])}
+	var lungs: Array = state.get("l", [0.0, 0.0, 0.0, 0.0])
+	for i in LUNGS.size():
+		lung_collapse[LUNGS[i]] = float(lungs[i * 2])
+		lung_fluid[LUNGS[i]] = float(lungs[i * 2 + 1])
 	var flags := int(state.get("f", 0))
 	unconscious = flags & 1 != 0
 	arrest = flags & 2 != 0
@@ -1223,6 +1306,28 @@ func _advance_morphine(dt: float) -> void:
 		morphine_level += step
 	if morphine_level < 0.001 and morphine_depot <= 0.0:
 		morphine_level = 0.0
+
+
+## The lung a chest wound is on (its name), the right one if it doesn't say.
+func _lung_of(w: Dictionary) -> StringName:
+	return w.name if w.name in LUNGS else LUNGS[1]
+
+
+## Each lung heads for its collapse (tension: full; an unsealed chest wound: partial; else
+## re-expanding once sealed), and fills with the blood its chest wounds bleed (see LUNGS).
+func _advance_lungs(dt: float) -> void:
+	for lung in LUNGS:
+		var target := 0.0
+		for w in wounds:
+			if w.kind != "chest" or _lung_of(w) != lung:
+				continue
+			if w.get("tension", false):
+				target = 1.0
+			elif not w.treated:
+				target = maxf(target, OPEN_CHEST_COLLAPSE)
+			lung_fluid[lung] = minf(float(lung_fluid[lung]) + rate_now(w) * cardiac_output() / 60.0 * dt / HEMOTHORAX_L, FLUID_MAX)
+		var now := float(lung_collapse[lung])
+		lung_collapse[lung] = move_toward(now, target, (COLLAPSE_PER_S if target > now else 1.0 / REEXPAND_S) * dt)
 
 
 ## SpO2 moves toward spo2_target(); SPO2_ARREST_S under SPO2_ARREST stops the heart.

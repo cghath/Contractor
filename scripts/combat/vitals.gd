@@ -229,6 +229,30 @@ func spo2() -> float:
 	return _m().spo2
 
 
+## Both lungs' efficiency averaged, 0 (none) to 1 (healthy): collapse (pneumothorax), blood in
+## them (hemothorax) and the push from a tension pneumothorax on the other side.
+func lung_efficiency() -> float:
+	return _m().lung_efficiency()
+
+
+## One lung (&"lung_l", &"lung_r"): {"collapse", "fluid", "efficiency"}, each 0 to 1.
+func lung(which: StringName) -> Dictionary:
+	var m := _m()
+	return {"collapse": float(m.lung_collapse[which]), "fluid": float(m.lung_fluid[which]),
+		"efficiency": m.lung_efficiency_of(which)}
+
+
+## Breaths per minute (hidden; faster as the lungs or the blood fail, slow on too much
+## morphine, none in arrest).
+func respiratory_rate() -> float:
+	return _m().respiratory_rate()
+
+
+## A tension pneumothorax is running (the decompression needle relieves it).
+func has_tension() -> bool:
+	return _m().has_tension()
+
+
 ## Morphine in the blood, in doses (one autoinjector is 1 once it has gone in over 30 s);
 ## it halves about every 12 minutes. Pain relief follows it; from 2.5 the casualty is
 ## sedated (out), past 3 breathing slows.
@@ -276,8 +300,19 @@ func signs(on_self := false) -> PackedStringArray:
 		out.append("Unresponsive")
 	if m.breathing_laboured():
 		out.append("Breathing laboured")
+	var rate := m.respiratory_rate()
+	if not m.arrest and rate > WoundModel.RESP_FAST:
+		out.append("Breathing fast")
+	elif not m.arrest and rate < WoundModel.RESP_SLOW:
+		out.append("Breathing slow")
 	if not on_self and not m.arrest and m.spo2 < WoundModel.SPO2_BLUE_LIPS:
 		out.append("Blue lips")
+	if not on_self:
+		for which in WoundModel.LUNGS:
+			if float(m.lung_collapse[which]) >= 0.5:
+				out.append("No breath sounds on the %s" % ("left" if which == WoundModel.LUNGS[0] else "right"))
+		if m.has_tension():
+			out.append("Trachea shifted, neck veins bulging")
 	if m.morphine_level >= WoundModel.MORPHINE_PUPILS_LEVEL:
 		out.append("Drowsy (morphine)" if on_self else "Pinpoint pupils (morphine)")
 	if not m.access.is_empty():
@@ -318,12 +353,12 @@ func wound_list() -> Array[Dictionary]:
 const TREATS := {
 	"arterial": &"tourniquet", "junctional": &"hemostatic_gauze", "venous": &"pressure_bandage",
 	"muscle": &"pressure_bandage", "graze": &"pressure_bandage", "chest": &"chest_seal",
-	"fracture": &"splint", "airway": &"npa", "pain": &"morphine",
+	"fracture": &"splint", "airway": &"npa", "pain": &"morphine", "tension": &"decompression_needle",
 	"access": &"iv_18", "fluids": &"saline_500", "pressure": &"pressure_bag",  # the usual picks; see care_needed "items"
 }
-## Casualty-care order: massive bleeding, airway, chest, other bleeding, circulation (line,
+## Casualty-care order: massive bleeding, airway, tension (the needle), chest, other bleeding, circulation (line,
 ## bag, pressure bag), fractures, pain.
-const CARE_ORDER := ["arterial", "junctional", "airway", "chest", "venous", "muscle", "graze", "access", "fluids",
+const CARE_ORDER := ["arterial", "junctional", "airway", "tension", "chest", "venous", "muscle", "graze", "access", "fluids",
 	"pressure", "fracture", "pain"]
 
 
@@ -405,7 +440,7 @@ func treatment_problem(item_id: StringName, part: StringName) -> String:
 ## - pressure_bandage: a venous, muscle or graze wound. hemostatic_gauze: packs a junctional
 ##   bleed, or an arterial one under a tourniquet so the tourniquet can come off.
 ## - chest_seal (vented): closes an open chest wound, so no tension pneumothorax starts (one
-##   already under way runs on: the needle is wave 3).
+##   already under way runs on until the decompression needle).
 ## - splint: walking and jogging back on a broken leg, a steadier arm and normal reloads, a
 ##   lower pain floor; still no sprint until a respawn.
 ## - morphine: one dose into the blood over 30 s (morphine_level); relief follows the level

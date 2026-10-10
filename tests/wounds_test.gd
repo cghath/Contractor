@@ -599,11 +599,18 @@ func _test_spo2() -> void:
 	chest.pain_wounds = 0.0
 	_chest(chest).tension_in = -1.0
 	chest.advance(60.0)
-	check(absf(chest.spo2 - (WoundModel.SPO2_NORMAL - WoundModel.SPO2_OPEN_CHEST)) < 0.01 and chest.breathing_laboured() and not chest.unconscious,
-		"an open chest wound: %.0f%%, laboured, still up" % chest.spo2)
+	var side := _chest(chest).name as StringName
+	check(is_equal_approx(float(chest.lung_collapse[side]), WoundModel.OPEN_CHEST_COLLAPSE) and float(chest.lung_fluid[side]) > 0.05,
+		"an open chest wound: its lung partly collapses (%.2f) and fills with blood (%.2f)" % [chest.lung_collapse[side], chest.lung_fluid[side]])
+	check(absf(chest.spo2 - (WoundModel.SPO2_NORMAL - WoundModel.SPO2_LUNG_DROP * (1.0 - chest.lung_efficiency()))) < 0.01
+		and chest.spo2 < 92.0 and chest.breathing_laboured() and chest.respiratory_rate() > WoundModel.RESP_NORMAL and not chest.unconscious,
+		"SpO2 %.0f%%, laboured and fast breathing (%.0f/min), still up" % [chest.spo2, chest.respiratory_rate()])
 	chest.apply_item(WoundModel.CHEST_SEAL, Vitals.CHEST)
-	chest.advance(10.0)
-	check(absf(chest.spo2 - WoundModel.SPO2_NORMAL) < 0.01 and not chest.breathing_laboured(), "sealed: back to %.0f%%" % chest.spo2)
+	var fluid := float(chest.lung_fluid[side])
+	chest.advance(WoundModel.REEXPAND_S * 2.0)
+	check(float(chest.lung_collapse[side]) == 0.0 and float(chest.lung_fluid[side]) == fluid and not chest.breathing_laboured()
+		and is_equal_approx(chest.lung_efficiency(), 1.0 - fluid * 0.5) and absf(chest.spo2 - chest.spo2_target()) < 0.01,
+		"sealed: the lung re-expands, only the blood in it stays (lungs %.2f, SpO2 %.0f%%)" % [chest.lung_efficiency(), chest.spo2])
 	var tension := _model()
 	tension.add_hit(Vitals.CHEST, lung, Vitals.PISTOL)
 	tension.pain_wounds = 0.0

@@ -106,9 +106,10 @@ attachments (branch `fix3/inventory-molle`).
 
 **Status:** in progress, one workstream at a time (Captain). 1, IV and IO access, fluids,
 pressure bags and vein collapse, with the stand-in blood recovery removed: built on branch
-`w3/iv-fluids` 2026-10-10 (all 14 suites pass), waiting for Captain's playtest. Next: 2,
-breathing, per-lung efficiency, SpO2, the decompression needle and tension pneumothorax;
-3, drugs with heart rate, CPR and defib; 4, surgery kits, then the other damage types.
+`w3/iv-fluids` 2026-10-10 (all 14 suites pass). 2, breathing with per-lung efficiency,
+SpO2 from it, the decompression needle and the pulse oximeter: built on `w3/breathing`
+(on top of 1) 2026-10-10. Both wait for Captain's playtest. Next: 3, drugs with heart rate,
+CPR and defib; 4, surgery kits, then the other damage types.
 
 From the design doc: IV (gauges 10 to 20 with flow, placement time, pain and rarity) and IO
 access; saline and blood bags (250, 500, 1000 mL); pressure bags; vein collapse from 37%

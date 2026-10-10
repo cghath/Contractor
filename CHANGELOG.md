@@ -11,6 +11,32 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Wave 3, part 2: breathing, the decompression needle and the pulse oximeter
+
+#### Added
+
+- **Per-lung breathing.** Each lung has an efficiency from 0 to 1, lowered by collapse
+  (pneumothorax) and by blood in it (hemothorax). SpO2 now follows the two lungs, blood
+  loss and morphine, instead of fixed amounts per chest wound.
+  - An unsealed chest wound lets its lung collapse 40% over about 12 s. Once it's sealed
+    the lung re-expands over 2 minutes.
+  - While a chest wound bleeds, the blood fills that side's lung, and it stays there:
+    there's no chest drain in the field, so seal chest wounds early.
+  - A tension pneumothorax collapses its lung fully and squeezes the other one (40% off).
+- **Decompression needle** (medic, 5 s): relieves a tension pneumothorax at once, so the
+  cardiac arrest it was heading for doesn't happen. Treat menus and AI medics use it right
+  after the airway, before chest seals.
+- **Breathing rate** (hidden): faster as the lungs fail or blood is lost, slower on too
+  much morphine. Checking someone now shows "Breathing fast" or "Breathing slow", "No breath
+  sounds on the left/right" for a collapsed lung, and "Trachea shifted, neck veins bulging"
+  for a tension pneumothorax.
+- **Pulse oximeter:** carry one and Check condition (and Check wounds on yourself) reads
+  the SpO2, or "no reading" in cardiac arrest.
+- The medic's kit adds two needles, a pulse oximeter and a second IO kit. The gate loot has
+  two needles and an oximeter.
+- AI medics keep trying for a line up to 4 times (a missed IV uses a catheter) before
+  leaving it to someone else.
+
 ### Wave 3, part 1: IV and IO lines, fluids, pressure bags
 
 #### Added

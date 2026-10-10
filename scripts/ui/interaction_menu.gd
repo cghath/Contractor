@@ -31,6 +31,8 @@ const SUB_GAP_PX := 8.0
 const MAX_GIVE_ENTRIES := 12
 ## Most entries the Treat submenu lists (the most urgent first).
 const MAX_TREAT_ENTRIES := 12
+## Reads the SpO2 in Check condition and Check wounds while carried.
+const OXIMETER := &"pulse_oximeter"
 ## Most entries a dead body's Loot submenu lists (what's worn first, then each container).
 const MAX_LOOT_ENTRIES := 20
 ## Height of an action point above a body's origin: standing, and lying down.
@@ -332,9 +334,9 @@ static func perform(actor: Soldier, action: Dictionary) -> String:
 		return ""
 	match action.get("show", &""):
 		&"condition":
-			return condition_report(target)
+			return condition_report(target, actor)
 		&"wounds":
-			return wound_report(actor.vitals)
+			return wound_report(actor.vitals, true, has_oximeter(actor))
 	var request: StringName = action.get("request", &"")
 	if request == &"":
 		return ""
@@ -356,21 +358,31 @@ static func perform(actor: Soldier, action: Dictionary) -> String:
 	return ""
 
 
-## "Alpha: Unconscious" plus what someone checking them can see, for Check condition.
-static func condition_report(target: Node) -> String:
+## "Alpha: Unconscious" plus what someone checking them can see, for Check condition. An
+## `actor` carrying a pulse oximeter also reads the SpO2.
+static func condition_report(target: Node, actor: Soldier = null) -> String:
 	var vitals := target.get_node_or_null(^"Vitals") as Vitals
 	if vitals == null:
 		return ""
-	return "%s: %s\n%s" % [display_name(target), vitals.condition_text(), wound_report(vitals, false)]
+	return "%s: %s\n%s" % [display_name(target), vitals.condition_text(), wound_report(vitals, false, has_oximeter(actor))]
 
 
-## Plain signs first (Vitals.signs: "Unresponsive", "Breathing laboured", "Blue lips",
-## "Pinpoint pupils (morphine)"; on yourself, laboured breathing and drowsiness), then one
-## line per wound and what's been done for it ("Left thigh: arterial bleed, held by
-## tourniquet, packed"), then the tourniquets and airway; or "No wounds found". No numbers:
-## SpO2, blood and the morphine level stay hidden.
-static func wound_report(vitals: Vitals, on_self := true) -> String:
+## Carries a pulse oximeter (loose or in a kit).
+static func has_oximeter(actor: Soldier) -> bool:
+	return actor != null and actor.inventory.medical_count(OXIMETER) > 0
+
+
+## Plain signs first (Vitals.signs: "Unresponsive", "Breathing laboured", "Breathing fast",
+## "Blue lips", "No breath sounds on the left", "Pinpoint pupils (morphine)"; on yourself,
+## laboured or fast breathing and drowsiness), then one line per wound and what's been done
+## for it ("Left thigh: arterial bleed, held by tourniquet, packed"), then the tourniquets and
+## airway; or "No wounds found". No numbers: SpO2, blood and the morphine level stay hidden,
+## except that with a pulse oximeter (`oximeter`) the first line reads the SpO2.
+static func wound_report(vitals: Vitals, on_self := true, oximeter := false) -> String:
 	var signs := vitals.signs(on_self)
+	if oximeter:
+		var reading := "no reading" if vitals.in_cardiac_arrest() or vitals.is_dead() else "SpO2 %d%%" % roundi(vitals.spo2())
+		signs.insert(0, "Pulse oximeter: %s" % reading)
 	var lines := PackedStringArray()
 	for wound in vitals.wound_list():
 		lines.append("%s: %s%s" % [part_name(wound.get("part", &"")), KIND_TEXT.get(wound.get("kind", ""), "wound"), _wound_status(wound)])

@@ -55,6 +55,8 @@ const LOOT := [
 	{"uid": "c01_saline_a", "id": "saline_500", "count": 2, "pos": Vector3(-8, 0.5, 4)},
 	{"uid": "c01_blood_a", "id": "blood_1000", "pos": Vector3(-6, 0.5, 6)},
 	{"uid": "c01_pbag_a", "id": "pressure_bag", "pos": Vector3(-7, 0.5, 6)},
+	{"uid": "c01_needle_a", "id": "decompression_needle", "count": 2, "pos": Vector3(-8, 0.5, 6)},
+	{"uid": "c01_oximeter_a", "id": "pulse_oximeter", "pos": Vector3(-5, 0.5, 5)},
 	{"uid": "c01_frag_a", "id": "frag_grenade", "count": 3, "pos": Vector3(6, 0.5, 4)},
 	{"uid": "c01_smoke_a", "id": "smoke_grenade", "count": 3, "pos": Vector3(7, 0.5, 4)},
 	{"uid": "c01_flash_a", "id": "flashbang", "count": 3, "pos": Vector3(8, 0.5, 4)},

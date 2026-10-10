@@ -12,7 +12,7 @@ extends Node
 
 ## Proposed time limits for the engagement test (seconds).
 const TOURNIQUET_WITHIN_S := 25.0
-const TREATED_WITHIN_S := 60.0
+const TREATED_WITHIN_S := 90.0  # bleeding, airway, chest, then a line, a bag and a pressure bag
 ## Where the lead stands in the engagement: beside the formation's way to Delta at (-3, 15).
 const ENGAGEMENT_LEAD := Vector3(8, 0.1, 24)
 ## Delta bleeds down to this share of his blood (past the 40% lost that knocks you out), so
