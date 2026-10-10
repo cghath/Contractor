@@ -10,6 +10,11 @@ extends Node
 ## Proposed time limits for the engagement test (seconds).
 const TOURNIQUET_WITHIN_S := 25.0
 const TREATED_WITHIN_S := 60.0
+## Where the lead stands in the engagement: beside the formation's way to Delta at (-3, 15).
+const ENGAGEMENT_LEAD := Vector3(8, 0.1, 24)
+## Proposed: with a player standing on the direct route, the medic still reaches the casualty
+## within this long; a responder that can't get closer at all hands the casualty on.
+const BLOCKED_REACH_S := 15.0
 ## The soak: how many times the lead walks the route, at what pace, how much faster than
 ## real time it runs, and the least simulated time it must take (about two minutes a lap).
 const SOAK_LAPS := 2
@@ -216,8 +221,47 @@ func _test_dead_check() -> void:
 	_place(foxtrot, Vector3(-15, 0.1, -15 + SquadAI.DEAD_CHECK_M + 3.0))
 	await _frames(2)
 	check(ai._find_target() == null, "but not from further than %.0f m" % SquadAI.DEAD_CHECK_M)
-	hostile.queue_free()
 	foxtrot.vitals.server_reset_health()
+	_place(foxtrot, Vector3(40, 0.1, 60))
+	# In play: an advancing hostile keeps the body targeted and actually shoots it. The body
+	# is a stand-in friendly (a squadmate killed here would stay dead for the later tests).
+	var victim := level.spawn_soldier({"name": "CheckVictim", "faction": "friendly", "variant": "urban", "pos": Vector3(-11, 0.1, -15),
+		"loadout": [], "combat": 0.5, "discipline": 0.5, "guard": true})
+	await _frames(3)
+	SquadAI.of(victim).set_physics_process(false)
+	_place(victim, Vector3(-11, 0.1, -15))
+	victim.vitals.server_damage(500.0)
+	await _frames(2)
+	var wounds_before := victim.vitals.wound_list().size()
+	ai._dead_check = null
+	ai.target = null
+	ai.intent = SquadAI.Intent.FIGHT
+	ai._advancing = true
+	ai._advance_anchor = Vector3(-15, 0.1, -15)
+	ai._no_los_s = 0.0
+	ai._last_contact = Soldier._now()
+	hostile.threat_pos = victim.global_position
+	hostile.threat_time = Soldier._now()
+	var contact_at := ai._last_contact
+	check(victim.vitals.downed, "a stand-in body lies unconscious 4 m from an advancing hostile (%s)" % victim.vitals.condition_text())
+	ai._cover_cd = 1000.0  # stays where it stands, 4 m off, instead of looking for cover
+	ai.set_physics_process(true)
+	var spotted := await _wait_until(func() -> bool: return ai.target == victim, 3.0)
+	check(spotted, "an advancing hostile picks the unconscious body for a dead-check")
+	ai._advancing = false  # the advance ends (it reached cover, say): the dead-check goes on
+	await _seconds(SquadAI.SCAN_S * 3.0)
+	check(ai.target == victim or victim.vitals.is_dead(), "and keeps it targeted over the next scans (%s)" % _name(ai.target))
+	var shot := await _wait_until(func() -> bool:
+		return victim.vitals.is_dead() or victim.vitals.wound_list().size() >= wounds_before + 3, 12.0)
+	check(shot, "shooting it (%s, %d -> %d wounds)" % [victim.vitals.condition_text(), wounds_before, victim.vitals.wound_list().size()])
+	check(ai._last_contact <= contact_at + 0.01, "a dead-check doesn't count as contact")
+	ai.set_physics_process(false)
+	hostile.queue_free()
+	if is_instance_valid(victim):
+		if victim.vitals.is_dead():
+			victim.server_remove_body()
+		else:
+			victim.queue_free()
 	_restore(saved)
 	_place(player, Vector3(0, 0.1, 22))
 	_unfreeze()
@@ -326,9 +370,12 @@ func _test_self_tourniquet() -> void:
 	var alpha := _ai("Alpha")
 	var charlie := _ai("Charlie")
 	alpha.inventory.take(&"tourniquet")
-	var ifaks := 0
-	while alpha.inventory.remove_one(&"ifak"):
-		ifaks += 1  # no stopgap kit: what he can't do himself waits for the medic
+	# Nothing but the tourniquet: no stopgap kit and no bandages, so what he can't do himself
+	# (the seeded hit below always opens a vein too) waits for the medic.
+	var taken: Array[StringName] = []
+	for id: StringName in [&"ifak", &"pressure_bandage", &"hemostatic_gauze"]:
+		while alpha.inventory.remove_one(id):
+			taken.append(id)
 	var morphine_before := charlie.inventory.count_of(&"morphine")
 	var splints_before := charlie.inventory.count_of(&"splint")
 	var bandages_before := charlie.inventory.count_of(&"pressure_bandage")
@@ -347,17 +394,18 @@ func _test_self_tourniquet() -> void:
 		"under fire, he puts his own tourniquet on at once (%s, %s)" % [alpha.ai_status, statuses.keys()])
 	var needs := _kinds(alpha.vitals.care_needed())
 	var call := await _wait_until(func() -> bool: return _said(sent_from, "Alpha", &"medic"), 8.0)
-	check(call or not ("pain" in needs or "fracture" in needs), "and calls \"Medic!\" for what he can't fix himself (%s)" % [needs])
+	check("venous" in needs, "the seeded hit leaves a venous bleed he has no bandage for (%s)" % [needs])
+	check(call, "and he calls \"Medic!\" for what he can't fix himself (%s)" % [_lines(sent_from)])
 	_firing = false
 	var helped := await _wait_until(func() -> bool:
 		return alpha.vitals.care_needed().is_empty(), 40.0)
 	check(helped and (charlie.inventory.count_of(&"morphine") < morphine_before or charlie.inventory.count_of(&"splint") < splints_before
 		or charlie.inventory.count_of(&"pressure_bandage") < bandages_before),
 		"once it's quiet, his team's medic Charlie treats him (%s left; Charlie: %s)" % [_kinds(alpha.vitals.care_needed()), charlie.ai_status])
-	check(not call or (_said(sent_from, "Charlie", &"moving_to") and _said(sent_from, "Charlie", &"treating")),
+	check(_said(sent_from, "Charlie", &"moving_to") and _said(sent_from, "Charlie", &"treating"),
 		"Charlie answers: \"Moving to Alpha\", then \"Treating Alpha\" (%s)" % [_lines(sent_from)])
-	for k in ifaks:
-		alpha.inventory.take(&"ifak")
+	for id in taken:
+		alpha.inventory.take(id)
 	await _out_of_contact()
 	_hold_fire(false)
 
@@ -366,7 +414,9 @@ func _test_self_tourniquet() -> void:
 
 func _test_engagement() -> void:
 	print("Engagement: a squadmate down in the open under fire")
-	_place(player, Vector3(0, 0.1, 22))
+	# The lead stands off to the side, clear of the medic's way from the formation to Delta
+	# (a player in the way is _test_blocked_route's job).
+	_place(player, ENGAGEMENT_LEAD)
 	player.rotation.y = 0.0
 	await _seconds(3.0)
 	var delta := _ai("Delta")

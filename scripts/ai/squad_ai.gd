@@ -104,6 +104,20 @@ const MEDIC_CALL_S := 20.0
 const BEING_TREATED_M := 6.0
 ## Proposed: out of contact, squadmates recover friendly bodies within this range.
 const BODY_RECOVER_M := 60.0
+## Proposed: how much recovering a fallen friendly's body scores out of contact. Above
+## following, holding and moving (0.5) plus HYSTERESIS, so a squadmate who is following
+## switches to it; below fighting (0.7), a low-magazine reload (0.65) and casualty care.
+const BODY_RECOVER_SCORE := 0.63
+## Proposed: a responder whose distance to the casualty hasn't closed by REACH_PROGRESS_M in
+## REACH_STUCK_S (something the navmesh doesn't know about is in the way, such as a player)
+## sidesteps DETOUR_M for DETOUR_S, alternating sides. After REACH_GIVE_UP_S without getting
+## closer it hands the casualty on and leaves them to others for REACH_SKIP_S.
+const REACH_PROGRESS_M := 0.5
+const REACH_STUCK_S := 1.5
+const DETOUR_M := 1.8
+const DETOUR_S := 1.2
+const REACH_GIVE_UP_S := 12.0
+const REACH_SKIP_S := 20.0
 ## Proposed: while clearing or assaulting through a position, unconscious foes this close get
 ## dead-checked (shot); otherwise targeting skips them.
 const DEAD_CHECK_M := 8.0
@@ -187,6 +201,14 @@ var _controlled_at := -1.0  # when the casualty's bleeding was first seen contro
 var _asked_medic := false
 var _answered := false
 var _medic_called_at := -1000.0
+var _reach_best := INF  # closest this unit got to its casualty on the way (Care.REACH)
+var _reach_progress_at := 0.0  # when it last got REACH_PROGRESS_M closer
+var _detour := Vector3.ZERO  # a sidestep around something in the way
+var _detour_until := -1.0
+var _detour_next := -1.0  # no new sidestep before then (try the direct way in between)
+var _detour_side := 1.0
+var _skip := {}  # casualty instance id -> Soldier._now() until which this unit leaves them to others
+var _dead_check: Soldier  # an unconscious foe being dead-checked, kept until dead or out of range
 var _score := 0.0
 var _ready_done := false
 var _was_bounding := false
@@ -227,13 +249,13 @@ func _physics_process(delta: float) -> void:
 			var callouts := Callouts.of(body)
 			if callouts:
 				callouts.contact(body, target)
-	if target != null:
+	if target != null and target.vitals.is_up():
 		_last_contact = now
 		body.threat_pos = target.global_position
 		body.threat_time = now
 		_no_los_s = 0.0
 	else:
-		_no_los_s += delta
+		_no_los_s += delta  # a body being dead-checked is no contact
 	_think_cd -= delta
 	if _think_cd <= 0.0:
 		_think_cd = THINK_S
@@ -385,7 +407,7 @@ func _choose_intent() -> void:
 	if (care != Care.NONE and care != Care.BODY) or _candidate != null:
 		scores[Intent.CASUALTY] = 0.9
 	elif not contact and (care == Care.BODY or _find_body() != null):
-		scores[Intent.CASUALTY] = 0.55
+		scores[Intent.CASUALTY] = BODY_RECOVER_SCORE
 	_maybe_call_medic()
 	if fighting():
 		scores[Intent.FIGHT] = 0.7
@@ -494,8 +516,8 @@ func _fight_from_context() -> void:
 			_advance_anchor = body.global_position.move_toward(body.threat_pos, ADVANCE_STEP)
 			_has_cover = false
 			_no_los_s = 0.0
-		if target != null:
-			_advancing = false
+		if target != null and target.vitals.is_up():
+			_advancing = false  # a dead-check doesn't end the push through the position
 		_fight(_advance_anchor if _advancing else (_cover_point if _has_cover else body.global_position), 6.0)
 		if _advancing and _at_cover():
 			_advancing = false
@@ -664,10 +686,16 @@ static func medic_for(c: Soldier, wanted: Array[StringName]) -> Soldier:
 	return other.body if other else (team.body if team else null)
 
 
-## Up, set up, and not looking after anyone but `c` (a body being carried can be put down).
+## Up, set up, and not looking after anyone but `c` (a body being carried can be put down),
+## and not leaving `c` to others after failing to reach them (_give_up_casualty).
 func _free_for(c: Soldier) -> bool:
 	return _ready_done and body != null and body != c and body.vitals.is_up() and not body.is_queued_for_deletion() \
-		and (care == Care.NONE or care == Care.BODY or casualty == c)
+		and (care == Care.NONE or care == Care.BODY or casualty == c) and not _skipping(c)
+
+
+## This unit couldn't reach `c` lately and leaves them to others for now.
+func _skipping(c: Soldier) -> bool:
+	return c != null and Soldier._now() < float(_skip.get(c.get_instance_id(), -1.0))
 
 
 ## Carries at least one of `ids` (true for none asked).
@@ -827,7 +855,7 @@ func _take_casualty(c: Soldier) -> void:
 		_end_care()
 	casualty = c
 	c.care_by = body
-	care = Care.REACH
+	_start_reach()
 	_smoke_used = false
 	_has_cover = false
 	_controlled_at = -1.0
@@ -841,12 +869,23 @@ func _take_casualty(c: Soldier) -> void:
 		callouts.answer_casualty(body, c, false)
 
 
+## Sets off toward the casualty (Care.REACH), watching for progress from here.
+func _start_reach() -> void:
+	care = Care.REACH
+	_reach_best = INF
+	_reach_progress_at = Soldier._now()
+	_detour_until = -1.0
+	_detour_next = -1.0
+
+
 func _care_reach(contact: bool) -> void:
 	var d := _flat_distance(casualty.global_position)
 	if body.carrying == casualty:
 		care = Care.CARRY
 		return
-	_go(casualty.global_position, true)
+	if not _reach_progress(d):
+		return  # gave up: the next responder takes them
+	_go(_detour if Soldier._now() < _detour_until else casualty.global_position, true)
 	if contact and not _smoke_used and d <= SMOKE_RANGE_M and casualty.vitals.downed and not _sheltered(casualty):
 		_smoke_used = true
 		if body.inventory.count_of(&"smoke_grenade") > 0:
@@ -865,11 +904,50 @@ func _care_reach(contact: bool) -> void:
 	care = Care.TREAT
 
 
+## Watches the approach to the casualty `d` metres away. No closer for REACH_STUCK_S
+## (something the navmesh doesn't know about is in the way, such as a player) means a
+## sidestep, alternating sides, with a try at the direct way in between; no closer for
+## REACH_GIVE_UP_S means handing the casualty on. False once this unit gave up.
+func _reach_progress(d: float) -> bool:
+	var now := Soldier._now()
+	if d < _reach_best - REACH_PROGRESS_M or d <= CASUALTY_REACH:
+		_reach_best = d
+		_reach_progress_at = now
+		return true
+	if now - _reach_progress_at >= REACH_GIVE_UP_S:
+		_give_up_casualty()
+		return false
+	if now - _reach_progress_at >= REACH_STUCK_S and now >= _detour_next:
+		_detour_side = -_detour_side
+		_detour_until = now + DETOUR_S
+		_detour_next = now + DETOUR_S * 2.5
+		var to := casualty.global_position - body.global_position
+		to.y = 0.0
+		var side := Vector3(-to.z, 0.0, to.x).normalized() * _detour_side
+		var map := body.get_world_3d().navigation_map
+		_detour = NavigationServer3D.map_get_closest_point(map, body.global_position + side * DETOUR_M + to.normalized() * 0.3)
+	return true
+
+
+## Couldn't get to the casualty: lets go of them so the next responder (responder_for)
+## takes them, and leaves them to others for REACH_SKIP_S.
+func _give_up_casualty() -> void:
+	var now := Soldier._now()
+	for id: int in _skip.keys():
+		if float(_skip[id]) <= now:
+			_skip.erase(id)
+	if is_instance_valid(casualty):
+		_skip[casualty.get_instance_id()] = now + REACH_SKIP_S
+	_end_care()
+	_has_destination = false
+	_think_cd = 0.0
+
+
 func _care_treat(contact: bool) -> void:
 	if body.carrying == casualty:
 		body.release_carried()
 	if _flat_distance(casualty.global_position) > CASUALTY_REACH + 1.0:
-		care = Care.REACH  # a conscious casualty moved, or the body slid
+		_start_reach()  # a conscious casualty moved, or the body slid
 		return
 	_has_destination = false
 	body.want_crouch = true
@@ -896,10 +974,10 @@ func _care_treat(contact: bool) -> void:
 			_controlled_at = now
 	else:
 		_controlled_at = -1.0
-	if _can_revive():
-		# The stopgap revive (until IV): after the bleeding is controlled and they still
-		# haven't woken, or when there's nothing left to stop it with.
-		if _controlled_at < 0.0 or now - _controlled_at >= REVIVE_WAIT_S:
+	if _can_revive() and _controlled_at >= 0.0:
+		# The stopgap revive (until IV): only once the bleeding is controlled and they
+		# still haven't woken. Bleeding this unit can't stop waits for someone who can.
+		if now - _controlled_at >= REVIVE_WAIT_S:
 			_start_revive()
 		return
 	_want_medic()
@@ -920,7 +998,8 @@ func _care_carry(contact: bool) -> void:
 		else:
 			care = Care.GUARD
 		return
-	if not casualty.vitals.downed or not _next_task(casualty, false).is_empty() or _can_revive():
+	if not casualty.vitals.downed or not _next_task(casualty, false).is_empty() \
+			or (_can_revive() and _bleeding_controlled(casualty)):
 		care = Care.TREAT  # woke up, or there's something new to do (an item handed over)
 		return
 	var leader: Soldier = squad.leader if squad and is_instance_valid(squad.leader) else null
@@ -1015,8 +1094,8 @@ func _want_medic() -> void:
 	wanted = _missing_items(casualty)
 	if not _can_revive() and MEDIC_REVIVE_KIT not in wanted:
 		wanted.append(MEDIC_REVIVE_KIT)
-	wants_medic = true
-	if not _asked_medic:
+	wants_medic = not wanted.is_empty()  # a medic who lacks nothing has nobody to call
+	if wants_medic and not _asked_medic:
 		_asked_medic = true
 		var callouts := Callouts.of(body)
 		if callouts:
@@ -1181,9 +1260,13 @@ func _maybe_call_medic() -> void:
 		callouts.medic_call(body)
 
 
+## Carries a stopgap kit (an item with "heal") for _server_use_medical. A medic's trauma kit
+## doesn't count: it is kept for the stopgap revive.
 func _has_heal() -> bool:
 	for container in Inventory.CONTAINERS:
 		for entry: Dictionary in body.inventory.containers[container]:
+			if body.role == Roles.MEDIC and entry.id == MEDIC_REVIVE_KIT:
+				continue
 			if ItemDB.get_item(entry.id).stats.has("heal"):
 				return true
 	return false
@@ -1218,7 +1301,19 @@ func _find_target() -> Soldier:
 		if d < best_dist and can_see(s):
 			best = s
 			best_dist = d
-	return best if best != null else check
+	# A dead-check, once started, goes on until the body is dead, out of range or out of
+	# sight, even after the advance ends; only new ones need clearing.
+	if check != null:
+		_dead_check = check
+	elif _dead_check != null and not _dead_check_valid(_dead_check):
+		_dead_check = null
+	return best if best != null else _dead_check
+
+
+## Still worth dead-checking: unconscious (not dead), within DEAD_CHECK_M and in sight.
+func _dead_check_valid(s: Soldier) -> bool:
+	return is_instance_valid(s) and not s.is_queued_for_deletion() and not s.vitals.is_dead() and not s.vitals.is_up() \
+		and body.global_position.distance_to(s.global_position) <= DEAD_CHECK_M and can_see(s)
 
 
 ## Clearing or assaulting through a position (pushing toward the enemy, searching, or moving

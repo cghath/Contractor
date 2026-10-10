@@ -306,6 +306,9 @@ func _squad_ai() -> Array:
 
 
 func _remove_squadmate(s: Soldier) -> void:
+	if s.vitals.is_dead():
+		s.server_remove_body()  # a fallen squadmate's gear stays on the ground
+		return
 	s.release_carried()
 	if is_instance_valid(s.carried_by):
 		s.carried_by.release_carried()
