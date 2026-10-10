@@ -437,10 +437,11 @@ static func collect_points(actor: Soldier, camera: Camera3D) -> Array[Dictionary
 	return out
 
 
-## Where `node`'s action point sits in the world.
+## Where `node`'s action point sits in the world: just above an item as it lies (a plate
+## flat on the floor has its centre barely above it, so a point there could be out of sight).
 static func action_point(node: Node3D) -> Vector3:
 	if node is WorldItem:
-		return node.global_position
+		return (node as WorldItem).action_point()
 	var vitals := node.get_node_or_null(^"Vitals") as Vitals
 	var lying := vitals != null and not vitals.is_up()
 	return node.global_position + Vector3.UP * (DOWNED_POINT_Y if lying else STANDING_POINT_Y)

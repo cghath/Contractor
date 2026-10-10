@@ -93,8 +93,8 @@ func _test_armor() -> void:
 	check(is_equal_approx(plate.integrity(), 1.0), "new plate is intact")
 	var front := Vector3(0, 0, -0.01)  # strike face; rounds travel +Z into it
 	check(plate.server_try_stop(front, Vector3.BACK, rifle), "first hit stopped")
-	check(plate.integrity() < 1.0, "plate chipped to %.0f%%" % (plate.integrity() * 100.0))
-	check(not plate.server_try_stop(front, Vector3.BACK, rifle), "second hit on the same spot goes through")
+	check(plate.integrity() < 1.0, "plate dented to %.0f%%" % (plate.integrity() * 100.0))
+	check(plate.trace(front, Vector3.BACK) != VoxelArmor.MISS, "a stop dents the face but leaves no hole")
 	check(plate.server_try_stop(front + Vector3(0.08, 0.08, 0), Vector3.BACK, rifle), "hit elsewhere still stopped")
 	check(plate.server_try_stop(front + Vector3(-0.08, -0.1, 0), Vector3(0.5, 0.3, 1).normalized(), rifle), "angled hit stopped")
 	check(plate.inventory.chips_in(&"plate_front").size() == 3, "chips recorded in the plate's item state")
@@ -166,9 +166,16 @@ func _test_ballistics() -> void:
 	check(first.result == "plate", "first shot hits the plate (%s)" % first.result)
 	# A stopped round can still crack a rib (impact), but makes no wound of its own.
 	check(dummy.vitals.wound_list().all(func(w: Dictionary) -> bool: return w.kind == "rib"), "plate protected the body")
-	var second := Ballistics.fire(shooter, shooter.position, aim.normalized(), rifle)
-	check(second.result == "body", "second shot through the hole hits the body (%s)" % second.result)
+	var shots := 1
+	var through := first
+	while through.result == "plate" and shots < 10:
+		through = Ballistics.fire(shooter, shooter.position, aim.normalized(), rifle)
+		shots += 1
+	var wear_hits := int(ItemDB.get_item(&"plate_steel_l3").stats.wear_hits)
+	check(through.result == "body" and shots == wear_hits + 1, "steel takes %d hits on one spot before one gets through (%d)" % [wear_hits, shots])
 	check(not dummy.vitals.wound_list().is_empty(), "body was wounded (%s)" % dummy.vitals.condition_text())
+	var second := Ballistics.fire(shooter, shooter.position, aim.normalized(), rifle)
+	check(second.result == "body", "the next shot goes through the hole too (%s)" % second.result)
 	var low := Ballistics.fire(shooter, shooter.position, (Vector3(0, 0.45, 0) - shooter.position).normalized(), rifle)
 	check(low.result == "body", "shot below the plate hits the body")
 	dummy.queue_free()
@@ -316,7 +323,7 @@ func _test_world_item_state() -> void:
 	await get_tree().process_frame
 	var piece: VoxelArmor = item.find_children("*", "VoxelArmor", false, false)[0]
 	check(piece.integrity() < 1.0, "dropped helmet shows its damage on the ground (%.0f%%)" % (piece.integrity() * 100.0))
-	check(piece.collision_layer == 0, "ground armor isn't a hit target")
+	check(piece.collision_layer == 1 << 3, "ground armor is a hit target (armor layer)")
 	check(item.describe().contains("damaged: 2 hits"), "prompt says it's damaged")
 	item.queue_free()
 

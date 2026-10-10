@@ -130,6 +130,7 @@ func _run_client() -> void:
 	await _wait_for(func() -> bool: return me.inventory.slots[&"helmet"] == &"", 3.0)
 	await _wait_for(func() -> bool: return _dropped_helmet() != null, 3.0)
 	check(_dropped_helmet() != null, "dropped helmet spawned on the client")
+	await _shoot_dropped_helmet(me)
 	await _check_saved_body(me)
 	# Knocked out, then gone: the host keeps this player's body (see _on_client_left).
 	me._server_debug_hurt.rpc_id(1, 140.0)
@@ -157,6 +158,24 @@ func _check_saved_body(me: Soldier) -> void:
 	await _wait_for(func() -> bool: return body.inventory.count_of(&"mag_556") == 0, 3.0)
 	check(body.inventory.count_of(&"mag_556") == 0 and me.inventory.count_of(&"mag_556") == mags + 3,
 		"looting its magazines over the network moves them onto the looter (%d -> %d)" % [mags, me.inventory.count_of(&"mag_556")])
+
+
+## Armor on the ground is a target: a round the host resolves against the dropped helmet
+## damages it, and the damage reaches this client's copy.
+func _shoot_dropped_helmet(me: Soldier) -> void:
+	var helmet := _dropped_helmet()
+	if helmet == null:
+		return
+	await get_tree().create_timer(1.0).timeout  # settled on the host, synced here
+	for attempt in 3:
+		var eye := me.head.global_position
+		me._server_fire.rpc_id(1, eye, (helmet.global_position - eye).normalized(), &"primary")
+		await _wait_for(func() -> bool: return not helmet.state.get("chips", []).is_empty(), 1.0)
+		if not helmet.state.get("chips", []).is_empty():
+			break
+	var piece: VoxelArmor = helmet.find_children("*", "VoxelArmor", false, false).front()
+	check(helmet.state.get("chips", []).size() == 1 and piece and piece.voxels_removed() > 0,
+		"a round into the dropped helmet damages it, and the client sees it (%d voxels)" % (piece.voxels_removed() if piece else -1))
 
 
 func _dropped_helmet() -> WorldItem:

@@ -3,15 +3,17 @@ extends RefCounted
 ## How armor behaves, on top of the voxels (which stay the visible damage and still let a
 ## round through a hole). Every round has a threat level and every vest, plate and helmet a
 ## rating on the same ladder (Ballistics.LEVELS); armor stops a round when its rating is at
-## or above the round's level. Materials then fail in their own way:
+## or above the round's level. A stopped round only dents the strike face; holes come from
+## rounds that get through. Materials then fail in their own way:
 ##
 ## - Ceramic: each hit cracks a zone around it; a later hit inside cracked zones is less
 ##   likely to be stopped. Each hit also takes integrity by round class; at zero the plate
 ##   has shattered and stops nothing. Cracks and integrity are the plate's item state.
-## - Steel: doesn't crack (holes only, from the chips), but a stopped round throws spall that
-##   wounds the neck, face and arms where the vest doesn't cover them.
-## - Polyethylene: deforms; repeated hits in one spot let rounds through (the chips).
-## - Composite (helmets): rating and chips only.
+## - Steel: doesn't crack, but takes many hits in one spot before it wears through there
+##   (the item's "wear_hits"), and a stopped round throws spall that wounds the neck, face
+##   and arms where the vest doesn't cover them.
+## - Polyethylene: deforms; a few hits in one spot wear it through there ("wear_hits").
+## - Composite (helmets): rating, and wearing through after "wear_hits" in one spot.
 ##
 ## Vests are aramid soft armor: they stop fragments and rounds up to their own rating where
 ## they cover the body (light: chest front; medium: chest and abdomen front and back; heavy:
@@ -39,6 +41,11 @@ const CRACK_STOP_MULT := 0.7
 const INTEGRITY_LOSS := {
 	Vitals.FRAGMENT: 0.02, Vitals.PISTOL: 0.08, Vitals.INTERMEDIATE: 0.18, Vitals.FULL_POWER: 0.3,
 }
+## Wearing through: earlier hits (any chip) within this many voxels of a strike count as the
+## same spot (proposed: about a 5 cm group).
+const WEAR_RADIUS_VOX := 2.5
+## ...and no deeper along its line of fire than this (a dent digs at most a wall's thickness).
+const WEAR_DEPTH_VOX := 6.0
 
 ## Steel spall: wounds per stopped round (1 to this many), damage of each, and the body areas
 ## it can reach (a vest's "spall_cover" names the areas it protects).
@@ -118,11 +125,39 @@ static func integrity_loss(round_class: StringName) -> float:
 	return float(INTEGRITY_LOSS.get(round_class, INTEGRITY_LOSS[Vitals.INTERMEDIATE]))
 
 
+## Earlier hits (chips in `state`) on the same spot as `cell`: within WEAR_RADIUS_VOX of the
+## chip's line of fire (dents dig in, so depth doesn't count), or of the chip itself for
+## chips saved without a direction.
+static func hits_near(state: Dictionary, cell: Vector3i) -> int:
+	var n := 0
+	for chip: Array in state.get("chips", []):
+		var offset := Vector3(cell) - Vector3(float(chip[0]), float(chip[1]), float(chip[2]))
+		if chip.size() >= 8:
+			var dir := Vector3(float(chip[5]), float(chip[6]), float(chip[7]))
+			if not dir.is_zero_approx():
+				dir = dir.normalized()
+				var along := offset.dot(dir)
+				if absf(along) > WEAR_DEPTH_VOX:
+					continue  # the same line, but the far side of a helmet
+				offset -= dir * along
+		if offset.length() <= WEAR_RADIUS_VOX:
+			n += 1
+	return n
+
+
+## True if `item` has been hit in one spot so often that a round on `cell` gets through: at
+## least its "wear_hits" earlier hits there. Items without "wear_hits" (ceramic, which cracks
+## instead) never wear through.
+static func worn_through(item: ItemData, state: Dictionary, cell: Vector3i) -> bool:
+	var limit := int(item.stats.get("wear_hits", 0))
+	return limit > 0 and hits_near(state, cell) >= limit
+
+
 ## Host only. Whether the plate or helmet `item` (with item state `state`) stops a round of
 ## `threat` landing on voxel `cell` (where the round met material, not a hole). Rolls the
 ## ceramic crack chance.
 static func piece_stops(item: ItemData, state: Dictionary, cell: Vector3i, threat: StringName) -> bool:
-	if is_shattered(state) or not stops(rating(item), threat):
+	if is_shattered(state) or not stops(rating(item), threat) or worn_through(item, state, cell):
 		return false
 	if material(item) == CERAMIC:
 		return roll(ceramic_stop_chance(state, cell))

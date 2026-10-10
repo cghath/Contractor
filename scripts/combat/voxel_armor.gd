@@ -1,23 +1,42 @@
 class_name VoxelArmor
 extends Area3D
-## Wearable armor made of 1 cm voxels: plates and helmets. It is both the visual and the
-## hit target. A round entering the piece is traced voxel by voxel along its path: if it
-## reaches the empty interior (the head inside a helmet) or leaves through a hole, it carries
-## on. If it meets material, ArmorRules decide: the piece stops it when its rating is at or
-## above the round's threat level (and, for ceramic, the crack roll holds), else the round
-## goes through. Either way a chip is carved there. A stop still lands an impact on the
-## wearer (Vitals.server_impact), and a steel plate throws spall.
-## Chips are part of the item's state ([x, y, z, radius] in Inventory.slot_state), with a
-## ceramic plate's cracks and integrity, so they travel with the plate or helmet when it's
-## dropped. The mesh is rebuilt by replaying them, so every peer, including late joiners,
-## sees the same damage.
+## Armor made of 1 cm voxels: plates and helmets. It is both the visual and the hit target,
+## worn (in a GearRig) or lying on the ground (in a WorldItem). A round entering the piece is
+## traced voxel by voxel along its path: if it reaches the empty interior (the head inside a
+## helmet) or leaves through a hole, it carries on. If it meets material, ArmorRules decide:
+## the piece stops it when its rating is at or above the round's threat level (and, for
+## ceramic, the crack roll holds, and the spot isn't worn through), else the round goes
+## through. A stopped round leaves a small DENT on the strike face, a few voxels that never
+## open a hole; a round that gets through bores a HOLE through the wall it crossed, spalled
+## out around it. When someone wears the piece, a stop still lands an impact on them
+## (Vitals.server_impact), and a steel plate throws spall.
+## Chips are part of the item's state (see make_chip(); in Inventory.slot_state when worn, in
+## WorldItem.state on the ground), with a ceramic plate's cracks and integrity, so they
+## travel with the plate or helmet. The mesh is rebuilt by replaying them, so every peer,
+## including late joiners, sees the same damage.
 ##
 ## Shapes come from the item's stats: "shape": "plate" (width/height/thickness_vox) or
-## "helmet" (tier light/medium/heavy). The strike face of a plate is -Z.
+## "helmet" (tier light/medium/heavy). The strike face of a plate is -Z. "dent_radius" and
+## "chip_radius" (voxels, scaled by the weapon's "plate_wear") size a stop's dent and a
+## penetration's hole.
 
 const VOXEL_SIZE := 0.01
 enum { EMPTY, INTACT, SCARRED, INTERIOR, ACCENT, VISOR }
 const MISS := Vector3i(-1, -1, -1)
+## Chip kinds, a chip's fifth entry. Chips saved before kinds existed ([x, y, z, radius])
+## are holes, carved the old way.
+const HOLE := 0
+const DENT := 1
+## Smallest radius (voxels) a hole is bored with: wide enough that the line of fire that
+## made it passes through it again.
+const MIN_HOLE_RADIUS := 0.9
+## A dent scuffs (scars) the strike face this far (voxels) beyond what it removes.
+const DENT_SCAR_VOX := 0.75
+## A hole scars the surface this far (voxels) beyond its spalled-out rim.
+const HOLE_SCAR_VOX := 1.5
+## Defaults when an item's stats don't say.
+const DEFAULT_DENT_RADIUS := 1.0
+const DEFAULT_CHIP_RADIUS := 2.0
 
 static var _bases: Dictionary = {}    # item id -> {"buffer", "dims", "pivot", "solid"}
 static var _meshers: Dictionary = {}  # item id -> VoxelMesherCubes
@@ -31,6 +50,7 @@ var _base: Dictionary
 var _buffer: VoxelBuffer
 var _mesh_instance: MeshInstance3D
 var _removed := 0
+var _own_state: Dictionary = {}  # state of a piece that is neither worn nor in a WorldItem
 
 
 func setup(p_item: ItemData, p_slot: StringName, p_inventory: Inventory, render_layers: int) -> void:
@@ -86,7 +106,15 @@ func apply_damage(chips: Array, shattered := false) -> void:
 	_buffer.copy_channel_from(_base.buffer, VoxelBuffer.CHANNEL_COLOR)
 	_removed = 0
 	for chip: Array in chips:
-		_carve(Vector3i(int(chip[0]), int(chip[1]), int(chip[2])), float(chip[3]))
+		var cell := Vector3i(int(chip[0]), int(chip[1]), int(chip[2]))
+		if chip.size() >= 8:
+			var dir := Vector3(float(chip[5]), float(chip[6]), float(chip[7]))
+			if int(chip[4]) == DENT:
+				_dent(cell, float(chip[3]), dir)
+			else:
+				_bore(cell, float(chip[3]), dir)
+		else:
+			_carve(cell, float(chip[3]))
 	if shattered:
 		for x in _base.dims.x:
 			for y in _base.dims.y:
@@ -99,6 +127,11 @@ func apply_damage(chips: Array, shattered := false) -> void:
 ## Share of the piece's voxels still there, 1 (new) to 0.
 func integrity() -> float:
 	return 1.0 - float(_removed) / float(_base.solid) if _base.solid > 0 else 0.0
+
+
+## How many voxels the damage shown has knocked out.
+func voxels_removed() -> int:
+	return _removed
 
 
 ## Host only. Whether the soft armor `body` wears (the vest's aramid) stops a round of
@@ -125,27 +158,68 @@ static func soft_armor_stops(body: Node, part: StringName, threat: StringName, r
 
 
 ## Host only. Resolves a round from `weapon` entering the piece at `hit_position`, fired from
-## `distance` metres. Returns true if the armor stopped it. Records the chip (and a ceramic
-## plate's crack and integrity) in the item's state either way, and on a stop lands the
-## impact on the wearer and throws a steel plate's spall.
+## `distance` metres. Returns true if the armor stopped it. Records the chip (a dent for a
+## stop, a hole for a penetration) and a ceramic plate's crack and integrity in the item's
+## state either way, and on a stop lands the impact on the wearer and throws a steel plate's
+## spall. Works the same on a piece lying on the ground (no wearer, so no impact or spall).
 func server_try_stop(hit_position: Vector3, direction: Vector3, weapon: ItemData, distance := 0.0) -> bool:
 	var impact := trace(hit_position, direction)
 	if impact == MISS:
 		return false
-	var state: Dictionary = inventory.state_of(slot) if inventory else {}
+	var state := item_state()
 	var round_class := Ballistics.round_class(weapon)
 	var stopped := ArmorRules.piece_stops(item, state, impact, Ballistics.threat_level_at(weapon, distance))
-	var radius := float(item.stats.get("chip_radius", 1.5)) * float(weapon.stats.get("plate_wear", 1.0))
-	if inventory:
-		inventory.add_armor_hit(slot, [impact.x, impact.y, impact.z, radius], ArmorRules.hit_changes(item, state, impact, round_class))
+	var wear := float(weapon.stats.get("plate_wear", 1.0))
+	var radius: float
+	if stopped:
+		radius = float(item.stats.get("dent_radius", DEFAULT_DENT_RADIUS)) * wear
+	else:
+		radius = float(item.stats.get("chip_radius", DEFAULT_CHIP_RADIUS)) * wear
+	var local_dir := (global_basis.inverse() * direction).normalized()
+	_record_hit(make_chip(impact, radius, DENT if stopped else HOLE, local_dir), ArmorRules.hit_changes(item, state, impact, round_class))
 	if stopped:
 		_server_after_stop(hit_position, direction, weapon, distance, round_class)
 	return stopped
 
 
+## A chip as item state stores it: [x, y, z, radius, kind, dx, dy, dz], the voxel the round
+## met, the dent's or hole's radius in voxels, DENT or HOLE, and the round's direction in the
+## piece's own axes (rounded, so state stays small and compares by value).
+static func make_chip(cell: Vector3i, radius: float, kind: int, local_dir: Vector3) -> Array:
+	return [cell.x, cell.y, cell.z, snappedf(radius, 0.01), kind,
+		snappedf(local_dir.x, 0.01), snappedf(local_dir.y, 0.01), snappedf(local_dir.z, 0.01)]
+
+
+## The item state this piece shows: its slot's in the wearer's inventory, or the state of
+## the WorldItem it lies in.
+func item_state() -> Dictionary:
+	if inventory:
+		return inventory.state_of(slot)
+	var loose := get_parent() as WorldItem
+	return loose.state if loose else _own_state
+
+
 ## The wearer's body (a Soldier or TargetDummy), or null for a loose piece.
 func wearer() -> Node3D:
 	return inventory.get_parent() as Node3D if inventory else null
+
+
+## Host only. Records a hit where this piece's state lives: the wearer's inventory (which
+## replicates it and GearRig redraws), the WorldItem it lies in (which replicates, saves and
+## redraws it), or this piece alone.
+func _record_hit(new_chip: Array, changes: Dictionary) -> void:
+	if inventory:
+		inventory.add_armor_hit(slot, new_chip, changes)
+		return
+	var loose := get_parent() as WorldItem
+	if loose:
+		loose.server_add_armor_hit(new_chip, changes)
+		return
+	var chips: Array = _own_state.get("chips", []).duplicate()
+	chips.append(new_chip)
+	_own_state["chips"] = chips
+	_own_state.merge(changes, true)
+	apply_damage(chips, ArmorRules.is_shattered(_own_state))
 
 
 ## The body part behind the strike point: HEAD for a helmet, else the torso part (CHEST or
@@ -198,8 +272,100 @@ func trace(hit_position: Vector3, direction: Vector3) -> Vector3i:
 	return MISS
 
 
-## A hole of half the radius through everything, the surface around it spalled out to the
-## full radius, and a scarred ring beyond so damage reads at a glance.
+## A stopped round's mark: the strike-face voxels within `radius` of `center` (the voxel it
+## met) knocked out, and a scuffed ring just beyond. It never opens a hole: a voxel goes
+## only if the voxel behind it (one step along `dir`'s main axis) is solid and stays, and
+## never from the innermost layer of a helmet (next to the head space). Where nothing is
+## left behind, the round only scars the surface. Repeated stops on one spot dig in a layer
+## at a time; wearing right through is ArmorRules.worn_through's call, as a hole.
+func _dent(center: Vector3i, radius: float, dir: Vector3) -> void:
+	var axis := 0 if absf(dir.x) >= absf(dir.y) and absf(dir.x) >= absf(dir.z) else (1 if absf(dir.y) >= absf(dir.z) else 2)
+	var behind := Vector3i.ZERO
+	behind[axis] = 1 if dir[axis] >= 0.0 else -1
+	var reach := int(ceil(radius + DENT_SCAR_VOX))
+	var lo := (center - Vector3i.ONE * reach).max(Vector3i.ZERO)
+	var hi := (center + Vector3i.ONE * (reach + 1)).min(_base.dims)
+	var face: Array[Vector3i] = []   # solid voxels on the strike side, within the scar reach
+	var hit := {}                    # those within the dent radius
+	for x in range(lo.x, hi.x):
+		for y in range(lo.y, hi.y):
+			for z in range(lo.z, hi.z):
+				var c := Vector3i(x, y, z)
+				var offset := Vector3(c - center)
+				if not _is_solid(c) or offset.dot(dir) > 0.5:
+					continue
+				var d := offset.length()
+				if d <= radius:
+					hit[c] = true
+				if d <= radius + DENT_SCAR_VOX:
+					face.append(c)
+	for c: Vector3i in hit:
+		if _is_solid(c + behind) and not hit.has(c + behind) and not _touches_interior(c):
+			_remove(c)
+		elif _voxel_at(c) == INTACT:
+			_set_voxel(c, SCARRED)
+	for c in face:
+		if _voxel_at(c) == INTACT and _exposed(c):
+			_set_voxel(c, SCARRED)
+
+
+## A penetration: a hole of half `radius` (at least MIN_HOLE_RADIUS) bored along `dir` from
+## `center` through the wall the round crossed (to where it reached the head space or left
+## the piece, so a helmet's far side is untouched), the surface around it spalled out to
+## `radius`, and a scarred ring beyond so the damage reads at a glance.
+func _bore(center: Vector3i, radius: float, dir: Vector3) -> void:
+	var from := Vector3(center) + Vector3.ONE * 0.5
+	var t_end := 0.0
+	var max_t := float(_base.dims.x + _base.dims.y + _base.dims.z)
+	while t_end < max_t and _is_solid(_cell_at(from + dir * (t_end + 0.25))):
+		t_end += 0.25
+	var a := from - dir * 0.5
+	var b := from + dir * (t_end + 0.5)
+	var hole := maxf(radius * 0.5, MIN_HOLE_RADIUS)
+	var reach := int(ceil(radius + HOLE_SCAR_VOX))
+	var lo := (Vector3i(a.min(b).floor()) - Vector3i.ONE * reach).max(Vector3i.ZERO)
+	var hi := (Vector3i(a.max(b).floor()) + Vector3i.ONE * (reach + 1)).min(_base.dims)
+	for pass_index in 2:
+		for x in range(lo.x, hi.x):
+			for y in range(lo.y, hi.y):
+				for z in range(lo.z, hi.z):
+					var c := Vector3i(x, y, z)
+					if not _is_solid(c):
+						continue
+					var p := Vector3(c) + Vector3.ONE * 0.5
+					var d := p.distance_to(Geometry3D.get_closest_point_to_segment(p, a, b))
+					if pass_index == 0 and d <= hole:
+						_remove(c)
+					elif pass_index == 1 and d <= radius and _exposed(c):
+						_remove(c)
+					elif pass_index == 1 and d <= radius + HOLE_SCAR_VOX and _voxel_at(c) == INTACT:
+						_set_voxel(c, SCARRED)
+
+
+func _cell_at(p: Vector3) -> Vector3i:
+	return Vector3i(floori(p.x), floori(p.y), floori(p.z))
+
+
+## Inside the grid and material (not empty space or the head space inside a helmet).
+func _is_solid(c: Vector3i) -> bool:
+	if c.x < 0 or c.y < 0 or c.z < 0 or c.x >= _base.dims.x or c.y >= _base.dims.y or c.z >= _base.dims.z:
+		return false
+	var v := _voxel_at(c)
+	return v != EMPTY and v != INTERIOR
+
+
+func _touches_interior(c: Vector3i) -> bool:
+	for offset: Vector3i in [Vector3i.LEFT, Vector3i.RIGHT, Vector3i.UP, Vector3i.DOWN, Vector3i.FORWARD, Vector3i.BACK]:
+		var n := c + offset
+		if n.x >= 0 and n.y >= 0 and n.z >= 0 and n.x < _base.dims.x and n.y < _base.dims.y and n.z < _base.dims.z \
+				and _voxel_at(n) == INTERIOR:
+			return true
+	return false
+
+
+## Legacy chips ([x, y, z, radius], saved before chips had kinds): a hole of half the radius
+## through everything, the surface around it spalled out to the full radius, and a scarred
+## ring beyond.
 func _carve(center: Vector3i, radius: float) -> void:
 	var dims: Vector3i = _base.dims
 	var reach := int(ceil(radius + 1.5))
