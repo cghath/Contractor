@@ -5,6 +5,8 @@
 [ext_resource type="Script" path="res://scripts/combat/vitals.gd" id="3_vitals"]
 [ext_resource type="Script" path="res://scripts/combat/gear_rig.gd" id="4_gear"]
 [ext_resource type="Script" path="res://scripts/player/character_model.gd" id="5_model"]
+[ext_resource type="Script" path="res://scripts/actors/soldier_movement.gd" id="6_movement"]
+[ext_resource type="Script" path="res://scripts/actors/player_input.gd" id="7_input"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_move"]
 radius = 0.3
@@ -110,3 +112,9 @@ replication_config = SubResource("SceneReplicationConfig_owner")
 
 [node name="ServerSync" type="MultiplayerSynchronizer" parent="."]
 replication_config = SubResource("SceneReplicationConfig_server")
+
+[node name="Movement" type="Node" parent="."]
+script = ExtResource("6_movement")
+
+[node name="PlayerInput" type="Node" parent="."]
+script = ExtResource("7_input")

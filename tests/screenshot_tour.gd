@@ -65,7 +65,7 @@ func _ready() -> void:
 	player.head.rotation.x = -0.08
 	player.is_aiming = true
 	player.camera.fov = 50.0
-	player.view_model.position = Soldier.ADS_EYE - VoxelArt.sight_point(VoxelArt.model_for(ItemDB.get_item(&"m4a1")))
+	player.view_model.position = PlayerInput.ADS_EYE - VoxelArt.sight_point(VoxelArt.model_for(ItemDB.get_item(&"m4a1")))
 	player.camera.current = true
 	await _wait(10)
 	await RenderingServer.frame_post_draw
