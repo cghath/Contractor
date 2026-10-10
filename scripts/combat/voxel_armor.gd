@@ -90,6 +90,13 @@ func integrity() -> float:
 
 
 ## Host only. Returns true if the armor stopped the round (and records the chip).
+## Host only. Whether the soft armor `body` wears (the vest's aramid) stops `weapon`'s round
+## at `part`, where the round met no plate. If it does, the stop's impact goes to Vitals.
+## Nothing yet: the armor ratings work adds it.
+static func soft_armor_stops(_body: Node, _part: StringName, _weapon: ItemData, _distance: float) -> bool:
+	return false
+
+
 func server_try_stop(hit_position: Vector3, direction: Vector3, weapon: ItemData) -> bool:
 	var impact := trace(hit_position, direction)
 	if impact == MISS:

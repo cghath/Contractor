@@ -10,7 +10,7 @@ var player: Soldier
 
 
 func _ready() -> void:
-	GameState.zone_id = "test_gameplay"  # never touch a real save
+	GameState.zone_id = "test_gameplay" + OS.get_environment("CONTRACTOR_TEST_TAG")  # never touch a real save
 	CompoundLevel.spawn_ai = false  # squad AI has its own test
 	GameState.delete_save()
 	add_child(load("res://scenes/main.tscn").instantiate())

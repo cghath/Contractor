@@ -13,7 +13,7 @@ var level: CompoundLevel
 
 
 func _ready() -> void:
-	GameState.zone_id = "test_net"
+	GameState.zone_id = "test_net" + OS.get_environment("CONTRACTOR_TEST_TAG")
 	CompoundLevel.spawn_ai = false
 	GameState.delete_save()
 	add_child(load("res://scenes/main.tscn").instantiate())  # main reads --host/--join

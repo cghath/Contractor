@@ -10,7 +10,7 @@ var player: Soldier
 
 
 func _ready() -> void:
-	GameState.zone_id = "test_squad"  # never touch a real save
+	GameState.zone_id = "test_squad" + OS.get_environment("CONTRACTOR_TEST_TAG")  # never touch a real save
 	GameState.delete_save()
 	CompoundLevel.spawn_ai = true
 	get_tree().create_timer(180.0).timeout.connect(func() -> void:

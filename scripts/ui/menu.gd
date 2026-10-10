@@ -45,9 +45,9 @@ func host() -> void:
 	if err == OK:
 		hide()
 	elif err == ERR_ALREADY_IN_USE or err == ERR_CANT_CREATE:
-		_status.text = "Port %d is busy: is another copy of the game already hosting? Join it instead." % Net.DEFAULT_PORT
+		_status.text = "Port %d is busy: is another copy of the game already hosting? Join it instead." % Net.port()
 	else:
-		_status.text = "Could not host on port %d (%s)." % [Net.DEFAULT_PORT, error_string(err)]
+		_status.text = "Could not host on port %d (%s)." % [Net.port(), error_string(err)]
 
 
 func join(address: String) -> void:

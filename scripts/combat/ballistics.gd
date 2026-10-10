@@ -40,12 +40,16 @@ static func _trace(shooter: CollisionObject3D, origin: Vector3, direction: Vecto
 		var vitals := Vitals.find_on(collider)
 		if vitals:
 			var part: StringName = collider.get_meta(&"body_part", Vitals.TORSO) if collider is Node else Vitals.TORSO
+			var distance := origin.distance_to(hit.position)
+			# Soft armor (the vest's aramid) can stop a round where no plate covers the body.
+			if VoxelArmor.soft_armor_stops(vitals.get_parent(), part, weapon, distance):
+				return _result("plate", hit)
 			vitals.server_hit(part, {
 				"damage": float(weapon.stats.get("damage", 10.0)),
 				"round_class": round_class(weapon),
 				"position": hit.position,
 				"direction": direction,
-				"distance": origin.distance_to(hit.position),
+				"distance": distance,
 			})
 			return _result("body", hit)
 		var world := VoxelWorld.find_on(collider)

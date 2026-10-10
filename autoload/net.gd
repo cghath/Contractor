@@ -18,7 +18,7 @@ const ENET_TIMEOUT := [32, 5000, 30000]  # ENet defaults: limit, min ms, max ms
 
 
 func _ready() -> void:
-	hosted.connect(func() -> void: print("[net] hosting on port %d" % DEFAULT_PORT))
+	hosted.connect(func() -> void: print("[net] hosting on port %d" % Net.port()))
 	joined.connect(func() -> void: print("[net] joined as peer %d" % multiplayer.get_unique_id()))
 	peer_joined.connect(func(id: int) -> void: print("[net] peer %d connected" % id))
 	peer_left.connect(func(id: int) -> void: print("[net] peer %d left" % id))
@@ -30,7 +30,15 @@ func _ready() -> void:
 	multiplayer.server_disconnected.connect(_on_server_disconnected)
 
 
-func host(port := DEFAULT_PORT) -> Error:
+## The port to host and join on: DEFAULT_PORT, or CONTRACTOR_PORT from the environment
+## (parallel test runs use different ports).
+static func port() -> int:
+	var env := OS.get_environment("CONTRACTOR_PORT")
+	return env.to_int() if env.is_valid_int() else DEFAULT_PORT
+
+
+func host(on_port := -1) -> Error:
+	var port := on_port if on_port >= 0 else Net.port()
 	var peer := ENetMultiplayerPeer.new()
 	var err := peer.create_server(port, MAX_CLIENTS)
 	if err != OK:
@@ -40,7 +48,8 @@ func host(port := DEFAULT_PORT) -> Error:
 	return OK
 
 
-func join(address: String, port := DEFAULT_PORT) -> Error:
+func join(address: String, on_port := -1) -> Error:
+	var port := on_port if on_port >= 0 else Net.port()
 	var peer := ENetMultiplayerPeer.new()
 	var err := peer.create_client(address, port)
 	if err != OK:
