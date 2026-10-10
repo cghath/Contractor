@@ -37,11 +37,11 @@ Phase 3 (Squad prototype) is the next build step and carries most of these chang
 **Phase 3: Squad prototype**
 
 - [x] Replace HP in `Vitals` with the blood and wound model: 6 L of blood, wounds per body part, pain, unconsciousness and cardiac arrest with a 10-minute window. (Wave 1.)
-- [ ] Turn the IFAK and trauma kit into the real kit items. Keep `_server_use_medical` so every treatment uses a real item.
+- [x] Turn the IFAK and trauma kit into the real kit items. Keep `_server_use_medical` so every treatment uses a real item. (Wave 2. The stopgap revive is gone too: casualties come round when their body lets them.)
 - [ ] Make permadeath on bleed-out and MIA when left behind alive apply to AI squadmates only.
-- [x] Change player death: respawn in the default kit and leave the dead player's gear in the world with a map marker. (A world marker until there's a map; the 90 loose rounds come in wave 2.)
+- [x] Change player death: respawn in the default kit and leave the dead player's gear in the world with a map marker. (Wave 2: the body stays where they fell with all their gear on it and a world marker over it, until there's a map; the respawn kit has the 90 loose rounds.)
 - [x] Start with 1 AI squadmate and scale to the 8-slot squad: two fire teams of four, each with one medic and battle-buddy pairs. (Noah's squad fills all slots; fire teams, medics and roles in wave 1.)
-- [ ] Add buddy pairing, a Throw intent (frag, flashbang, smoke), and Carry, Drag and treatment intents to `docs/squad_design.md` and the code.
+- [ ] Add buddy pairing, a Throw intent (frag, flashbang, smoke), and Carry, Drag and treatment intents to `docs/squad_design.md` and the code. (In the code since wave 2; `docs/squad_design.md` still to update.)
 - [x] Rebind: Alt+G drops (G throws grenades), Shift+G cycles grenade type, and 1 to 9 pick command-menu entries only while a menu is open.
 - [x] Build the Arma 3-style F1 to F12 command interface, navigable with middle-mouse or 1 to 9. (Mount and supports still to come.)
 - [x] Add the movement and stance keys: F fire mode, X crouch, Z prone, C weapon mount, Q and E lean, and Ctrl+WASD stance adjust. (Stance adjust is on Caps Lock + WASD, agreed 2026-10-10.)
@@ -150,8 +150,8 @@ All keys below are Captain's calls, and all are rebindable. Keys not listed keep
 
 None of these block phase 3.
 
-- [ ] Confirm respawn ammo: read as 2 spare mags plus 90 loose rounds, not 90 rounds total.
-- [ ] Do AAVs deploy from the FOB in inland zones? Proposed: yes.
+- [x] Confirm respawn ammo: read as 2 spare mags plus 90 loose rounds, not 90 rounds total. (Confirmed 2026-10-10; built in wave 2.)
+- [x] Do AAVs deploy from the FOB in inland zones? Proposed: yes. (Yes, agreed 2026-10-10.)
 - [ ] Check whether X, Z and C clash with existing build bindings, and settle any clash with Captain.
 - [ ] Reputation tiers, allied troop types, and what limits the allied-troop support menu (phase 6).
 - [ ] The player-built faction: what it involves, and whether it replaces or sits beside contracts (stretch goal after phase 7).

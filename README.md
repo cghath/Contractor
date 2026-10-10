@@ -110,10 +110,10 @@ include Voxel Tools.
 | F | Fire mode (M4 and Mk18: semi and auto; each weapon remembers its selector) |
 | Mouse / LMB | Look, fire |
 | RMB (hold) | Aim down sights: zoom, much tighter spread, half recoil, slower movement |
-| Left Ctrl (hold) | Interaction menu: action points on items, downed bodies and squadmates within about 3 m; move the cursor onto one and let go to pick (pick up, revive, carry, drag, check condition, give item) |
+| Left Ctrl (hold) | Interaction menu: action points on items, downed bodies and squadmates within about 3 m; move the cursor onto one and let go to pick (pick up, treat, carry, drag, loot a body, check condition, give item) |
 | Left Ctrl + Left Alt (hold) | Self-interaction: check wounds, use medical, put down a carried body, drop held item |
 | R | Reload (fullest spare magazine; a part-used one goes back in your pouch) |
-| H | Use a medical item (until the wave 2 kit: stops bleeding wound by wound and takes off pain) |
+| H | Treat yourself: applies the next item you carry for your most urgent wound (tourniquet before bandage, and so on) |
 | G | Throw the selected grenade (frag, flashbang or smoke) |
 | Shift+G | Switch grenade type |
 | Alt+G | Drop carried bulky item, otherwise drop active weapon |
@@ -124,7 +124,7 @@ include Voxel Tools.
 | Tab | Inventory screen: equip, stow, move between containers, use, drop |
 | Esc | Close the inventory screen / release mouse |
 | Home | Save zone (host) |
-| K | Debug builds only: costs 24% of your blood and adds pain; two presses knock you out |
+| K | Debug builds only: costs 24% of your blood and adds pain; two presses knock you out (with no wound bleeding, blood creeps back at 1.5% a minute and you come round after a few minutes) |
 
 The command menu follows Arma 3's layout: 1 Move (return to formation, move there, stop), 2 Target (focus fire on
 the enemy under your crosshair), 3 Engage (open fire, hold fire), 5 Status, 6 Action (throw smoke or frag at the
@@ -224,13 +224,18 @@ Run every suite with one command (from Git Bash on Windows):
 GODOT="$HOME/Downloads/GodotVoxel_1.7/godot.windows.editor.x86_64.exe" tools/run_tests.sh
 ```
 
-There are three suites. Each prints PASSED or FAILED and exits with its failure count.
+There are twelve suites; `tools/run_tests.sh` runs them all (about 5 minutes), or name the
+ones you want (`tools/run_tests.sh wounds medical`). Each prints PASSED or FAILED and exits
+with its failure count. Set `CONTRACTOR_TEST_TAG` and `CONTRACTOR_PORT` when running two at once.
 
 | Suite | Scene | What it covers |
 |---|---|---|
-| Smoke | `tests/smoke_test.tscn` | 88 checks of the core systems directly: item database, inventory rules, carrier tiers, item state (damage and ammo that travel with an item), ammo and reloading, healing, downed/bleed-out/revive, voxel armor and walls, ballistics, headshots, elbow IK |
-| Gameplay | `tests/gameplay_test.tscn` | Hosts a real session and drives the player through the same requests a client sends: fire, reload, heal, inventory-screen actions, drop and pick up, spread and aiming, going down, reviving a downed body, dying and respawning |
-| Network | `tests/net_test.tscn` | Two processes over ENet. The client fires, reloads, heals and drops through the host, and checks that the results replicate back |
+| Smoke | `tests/smoke_test.tscn` | The core systems directly: item database, inventory rules, carrier tiers, item state, ammo and reloading, voxel armor and walls, ballistics, elbow IK |
+| Gameplay | `tests/gameplay_test.tscn` | Hosts a real session and drives the player through the same requests a client sends: fire, reload, treat, inventory-screen actions, drop and pick up, spread and aiming, going down, dying, leaving a body and respawning |
+| Network | `tests/net_test.tscn` | Two processes over ENet. The client fires, reloads, treats, loots and drops through the host, and checks that the results replicate back |
+| Squad, roles, interaction, movement | `tests/<name>_test.tscn` | Squad AI and commands, role kits, the Left Ctrl menus, stances, lean and mount |
+| Wounds, armor, medical | `tests/<name>_test.tscn` | The wound model and consciousness, armor ratings and voxel plates, the field kit and treatments |
+| Casualty, logistics | `tests/<name>_test.tscn` | AI casualty care, bodies and their save; loose ammo, magazines, coloured smoke and navigation |
 
 The gameplay and network tests use their own save zones and never touch your compound save.
 To regenerate the screenshots in `screenshots/` (this opens a window for a few seconds):
@@ -268,11 +273,12 @@ a release:
 - Shots are hitscan, with no bullet drop or travel time. Spread is decided by the shooter's machine (fine for co-op, not cheat-proof).
 - Every inventory change, including each shot fired, re-sends the whole inventory snapshot. That's fine on a LAN; it needs a lighter path (for example, ammo only) before internet play.
 - Reloading and healing can't be cancelled, and taking damage doesn't interrupt them.
-- The gear marker over a dead player's gear isn't sent to players who join later. The respawn kit lacks the handoff's 90 rounds until there's a loose-ammo item.
 - A vest or backpack can't be dropped while it still has things in it. Empty it from the inventory screen first.
 - The voxel world has no stream, so it's limited to `VoxelWorld.BOUNDS`. The voxel edit log grows with every bullet hole and is never compacted.
 - Player inventories aren't saved yet; only the zone's state is.
-- Medical is a stopgap until wave 2: IFAKs and trauma kits stop bleeding and revive, but there's no tourniquet, chest seal or splint yet, and only a revive puts blood back (until IV in wave 3). A broken leg stays broken until you die or respawn.
+- Medical depth is wave 3: no IV, blood bags, CPR, defibrillator, decompression needle or surgery yet. Until IV, blood only comes back slowly once every bleed has stopped, and heart wounds and internal torso bleeding have no field fix. SpO2 is a basic model (no per-lung efficiency or pulse oximeter), and there's no breathing sound yet.
+- Bodies: a zone reload respawns the full friendly squad alive while dead squadmates' saved bodies also come back, so their gear exists twice (AI persistence is wave 4; dead hostiles aren't respawned). Loot all can't move a carrier with its contents onto someone already wearing one; it falls back to piece by piece.
+- AI squadmates don't load magazines from loose rounds, and role kits carry no loose rounds.
 - Players don't start in their role's kit yet (`CompoundLevel.player_role_kits` is off); they kit out from the compound's loot. Autoriflemen and grenadiers carry M4s until there are LMG and launcher items.
 - Squad AI doesn't use the new stances, leaning or mounting yet, and callouts have no voice audio (subtitles only).
 - A player who joins while someone is being carried sees that body as solid until it's put down.

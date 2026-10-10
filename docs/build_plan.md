@@ -78,10 +78,18 @@ authority on rules and numbers; this file only says who builds what, in which or
 | W1 | **Wound model:** 6 L of blood with bleeding scaled by heart output; simulated arteries and big veins, body map (brain, heart, lungs, arm and leg bones, tissue, chest cavity); wound channels with cavitation reach (pistol 2 cm, intermediate 5 cm, full-power 7 cm); fractures by round class; pain 0 to 1 with knockout thresholds and wake rolls; blood-loss effects (sway, stamina, speed, vision from 15% lost); unconscious at 40%, cardiac arrest at 50% with the 10-minute window; fragments as 3 to 8 small wounds (grenades switch to this); body-part hitboxes on soldiers and dummies; enemies ignore unconscious foes. Until wave 3 nothing can restart a heart, so arrest ends in death after the window | `vitals.gd` and new wound files, hitbox nodes, body-hit path in `ballistics.gd`, frag damage in `throwables.gd` |
 | W2 | **Armor and ballistics:** the design doc's NIJ-named ladder for every round and armor piece; vest tiers (aramid, fragment and spall coverage); plate materials (ceramic crack zones of about 5 cm with -30% stop chance per earlier hit and an integrity that shatters; steel spall unless coated; polyethylene deforms); helmet ratings; the impact table (pain, stagger, winded, concussion chance, rib cracks by range, helmet stops fatal only where real); ACE3 ballistic values so energy and level change with range | `voxel_armor.gd`, armor path in `ballistics.gd`, armor and ammo stats in `items.json` |
 | W3 | **Movement and stance:** X crouch, Z prone, Caps Lock + W/S stance steps (three standing and three crouching heights), Caps Lock + A/D side stances, Q/E lean (hold, double-tap to stay), C weapon mount (about half sway and recoil, unmounts on move), F fire mode, momentum (jog in about 0.3 s unloaded, doubled with a heavy load) and settle sway; hitboxes follow stance | movement part of the soldier, `character_model.gd`, movement keys in `controls.gd` |
-| W4 | **Interaction menus**, ACE-style: hold Left Ctrl and look at an object, vehicle or person to show action points, radial menu, release to pick; Left Ctrl + Left Alt for your own body and gear (where you read your wounds). Pickup, revive, carry, drag and handing gear to a squadmate move into it; E becomes lean | new `scripts/ui/interaction_menu.gd`, input part of the soldier |
+| W4 | **Interaction menus**, ACE-style: hold Left Ctrl and look at an object, vehicle or person to show action points, radial menu, release to pick; Left Ctrl + Left Alt for your own body and gear (where you read your wounds). Pickup, revive (removed in wave 2), carry, drag and handing gear to a squadmate move into it; E becomes lean | new `scripts/ui/interaction_menu.gd`, input part of the soldier |
 | W5 | **Squad structure:** two fire teams of four, one medic each; roles (team leader, medic, autorifleman, grenadier, marksman, rifleman) with starting kits, players pick theirs and AI fills the rest; command menu Target, Mount, Combat mode and Team; AI callouts as subtitles with an audio hook | `squad.gd`, `command_menu.gd`, non-medical parts of `squad_ai.gd`, role kits |
 
 ### Wave 2: phase 3 finish (3 agents)
+
+**Status:** built and merged on `dev` 2026-10-10 (all twelve suites pass); waiting for Captain's playtest.
+Changed mid-wave on Captain's direction, by two more agents: the stopgap revive is removed
+(consciousness follows SpO2, pain, morphine level, blood loss and total trauma; blood creeps
+back slowly once every bleed stops, until IV), every dead soldier leaves a body with its gear
+on it (saved with the zone), and medics put the wounded first even in a firefight. Captain's
+wave 1 playtest fixes (knockouts, movement feel, armor voxels, world materials, animations)
+come next, before wave 3.
 
 | # | Workstream |
 |---|---|

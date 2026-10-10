@@ -247,11 +247,18 @@ func _test_morphine() -> void:
 	check(rib.pain() < 0.001 and rib.stamina_mult() < 1.0, "morphine is its fix (pain %.2f; still short of breath)" % rib.pain())
 
 
+## A bleed too small to matter for an hour or two, so blood doesn't creep back
+## (WoundModel.BLOOD_RECOVER_PER_MIN) and wake a casualty a test keeps out on blood loss.
+func _trickle(m: WoundModel) -> void:
+	m._add_wound(Vitals.SHIN_R, "graze", 0.0005)
+
+
 func _test_airway() -> void:
 	print("NPA and airway obstruction")
 	var m := _model(5)
 	m.care_rng.seed = 5
-	m.blood = 0.58  # unconscious, not bleeding
+	m.blood = 0.58  # unconscious
+	_trickle(m)
 	m.update_state(0.0)
 	check(m.unconscious and m.care_tasks().any(func(t: Dictionary) -> bool: return t.item == &"npa" and t.part == &"head"), "an unconscious casualty needs an NPA")
 	var t := 0.0
@@ -271,6 +278,7 @@ func _test_airway() -> void:
 		var c := _model(i)
 		c.care_rng.seed = 1000 + i
 		c.blood = 0.58
+		_trickle(c)
 		c.update_state(0.0)
 		for s in 60:
 			c.advance(1.0)
@@ -280,6 +288,7 @@ func _test_airway() -> void:
 	var fixed := _model(6)
 	fixed.care_rng.seed = 6
 	fixed.blood = 0.58
+	_trickle(fixed)
 	fixed.update_state(0.0)
 	for s in 7200:
 		if fixed.airway_blocked:
@@ -375,8 +384,8 @@ func _test_treatment_wakes() -> void:
 	treated.server_apply_treatment(&"tourniquet", Vitals.THIGH_L)
 	var blood := treated.blood_fraction()
 	treated.server_advance(30.0)
-	check(treated.downed and treated.blood_fraction() == blood and treated.why_unconscious() == [&"pain"],
-		"a tourniquet stops the slide; the pain still keeps him out (%s)" % [treated.why_unconscious()])
+	check(treated.downed and treated.blood_fraction() >= blood and treated.why_unconscious() == [&"pain"],
+		"a tourniquet stops the slide (blood only creeps back); the pain still keeps him out (%s)" % [treated.why_unconscious()])
 	treated.server_apply_treatment(&"morphine", Vitals.TORSO)
 	var t := 0.0
 	while treated.downed and t < 120.0:

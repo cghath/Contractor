@@ -11,6 +11,98 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Wave 2 of the build plan (phase 3 finish)
+
+Built by three agents in parallel (kit and treatment, AI casualty care, ammo and smokes),
+then finished by two more after Captain's direction mid-wave: no revive, bodies keep their
+gear, medics put the wounded first. Merged on `dev`. See `docs/build_plan.md`.
+
+#### Added
+
+- **Field kit on the wound model:**
+  - The IFAK and trauma kit are bags of real items. IFAK: 1 tourniquet, 2 pressure
+    bandages, 1 hemostatic gauze, 1 vented chest seal. Trauma kit: 2 tourniquets, 4
+    bandages, 2 gauze, 2 seals, 1 splint, 2 morphine, 1 NPA. Loose items are used first,
+    and the inventory screen shows what's left in each kit.
+  - Treat yourself (Left Ctrl + Left Alt) or others (Left Ctrl): a Treat submenu lists
+    what's needed in casualty-care order with the body part ("Tourniquet, left thigh"),
+    greyed out with a reason when you don't carry the item. H applies the next item for
+    your own most urgent wound.
+  - Times: tourniquet 4 s (6 s on yourself), bandage 5 s, gauze 8 s, chest seal 5 s, splint
+    8 s, morphine 2 s, NPA 3 s. Moving away, going down, or the casualty being moved
+    interrupts it without using the item.
+  - Tourniquet: stops all bleeding on that limb below it and adds pain; on a leg you limp.
+    A rushed one (1.5 s, or any put on under fire) only stops 70%; a second beside it fixes
+    that. Packing the wound with gauze lets you take it off again.
+  - Bandages fix venous, muscle and graze wounds; gauze packs junctional bleeds. A vented
+    chest seal stops tension pneumothorax from starting (it can't relieve one already
+    started). A splint lets you jog on a broken leg and steadies a broken arm.
+  - An unconscious casualty's airway can block; an NPA prevents or clears it. A short
+    spell out (under 45 s) clears its own airway.
+- **Consciousness follows the body (no dice):** you stay out while any cause holds: low
+  blood oxygen (SpO2 under 85), pain at the knockout threshold, 40% of your blood lost,
+  cardiac arrest, a concussion, morphine sedation, or too many serious wounds at once
+  (total trauma). About 10 to 20 s after the last cause clears you come round on your own.
+  - **SpO2** (hidden): falls with heavy blood loss, an unsealed chest wound, tension
+    pneumothorax, a blocked airway and too much morphine. Your vision greys and closes in;
+    a medic checking you sees laboured breathing and blue lips. About 2 minutes under 70%
+    stops the heart.
+  - **Morphine** is a level in the blood: a dose goes in over 30 s and halves every 12
+    minutes, and pain relief follows the level. Two doses are fine, three sedate, five or
+    more slow breathing dangerously.
+  - **Slow blood recovery** (Captain's stand-in until IV in wave 3): once every bleed has
+    stopped, internal ones too, the body makes back 1.5% of its blood a minute, so a
+    patched-up casualty past 40% lost comes round after a few minutes. Any bleeding stops it.
+  - Check condition shows plain signs: Unresponsive, Breathing laboured, Blue lips,
+    Pinpoint pupils (morphine).
+- **AI casualty care:** the fire team's medic answers first, then the battle buddy, then
+  the other medic ("Moving to Charlie", "Treating Charlie"). Medics put the wounded first
+  even in a firefight: smoke between a casualty in the open and the threat, drag to cover,
+  massive bleeding first, the rest once in cover; they fight back only at close range, and
+  the rest of the squad covers them. Afterwards they stay with an unconscious casualty or
+  carry them with the squad until they wake. A wounded squadmate puts its own tourniquet on
+  at once and calls "Medic!" for what it can't fix. A responder that can't reach a casualty
+  sidesteps and then hands them to someone else.
+- **Bodies keep their gear:** every dead player, squadmate and enemy leaves a body where they
+  fell with everything still on it; only something carried in both hands drops. Left Ctrl on
+  a body: Loot (take one thing), Loot all (what fits; the rest stays on the body), Carry,
+  Drag. Bodies and their gear are saved with the zone and appear for late joiners. Past 12
+  bodies the oldest goes and its gear drops where it lay.
+- **Ammo:** loose 5.56, 7.62x51 and 9mm rounds; magazines weigh what they hold; empties go
+  back in the pouch and stack. "Load magazines" on loose rounds (inventory screen) fills that
+  calibre's magazines, fullest first, at 5 rounds a second; moving or firing stops it.
+- **Coloured smoke:** green, yellow, blue and purple grenades (for the wave 5 supports);
+  Shift+G cycles through what you carry. Coloured smoke blocks AI sight like white.
+- Tests: medical, casualty (including a two-lap soak and an under-fire engagement) and
+  logistics suites, in the default run (12 suites).
+
+#### Changed
+
+- You respawn with an M4, 2 spare magazines and 90 loose rounds, a smoke and a frag. Your
+  body stays where you fell with your old gear, and the gear marker floats over it.
+- Medics carry a trauma kit and extra tourniquets, gauze, bandages, seals, splints, morphine
+  and NPAs; everyone else carries an IFAK.
+- A dead squadmate leaves the squad (no slot, no orders, not on the roster) and isn't
+  replaced this session.
+- Squad AI routes through breached walls: once a gap is big enough to fit through, the
+  navigation around it updates within a fraction of a second.
+- Enemies and squadmates leave unconscious foes alone, except a dead-check within about 8 m
+  while assaulting or searching a position.
+- Squadmates pass through each other (no more doorway jams); AI only throws a frag when its
+  arc is clear.
+- The zone save keeps full number precision, so armor damage comes back exactly.
+
+#### Removed
+
+- **The stopgap revive.** There's no Revive anywhere: casualties come round when their body
+  lets them. The 15% wake roll and the morphine overdose dice are gone too.
+
+#### Fixed
+
+- Dead players, squadmates and enemies no longer vanish or scatter their gear on the ground.
+  Players joining or changing roles no longer delete dead squadmates' bodies.
+- AI medics no longer get stuck behind a player standing on their route.
+
 ### Wave 1 of the build plan (phase 3 core)
 
 Built by five agents in parallel and merged on `dev`. See `docs/build_plan.md`.
