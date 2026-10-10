@@ -67,6 +67,18 @@ properties/5/replication_mode = 2
 properties/6/path = NodePath(".:ai_status")
 properties/6/spawn = true
 properties/6/replication_mode = 2
+properties/7/path = NodePath("Movement:stance")
+properties/7/spawn = true
+properties/7/replication_mode = 2
+properties/8/path = NodePath("Movement:side")
+properties/8/spawn = true
+properties/8/replication_mode = 2
+properties/9/path = NodePath("Movement:lean")
+properties/9/spawn = true
+properties/9/replication_mode = 2
+properties/10/path = NodePath("Movement:mounted")
+properties/10/spawn = true
+properties/10/replication_mode = 2
 
 [sub_resource type="SceneReplicationConfig" id="SceneReplicationConfig_server"]
 properties/0/path = NodePath("Inventory:net_state")

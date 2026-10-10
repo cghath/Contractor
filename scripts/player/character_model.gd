@@ -5,6 +5,10 @@ extends Node3D
 ## elbows: with nothing held they swing; when GearRig hands them something (set_held),
 ## two-bone IK puts the right hand on its grip point and the left on its support point.
 ## Gear mounts on `torso`, `head`, or `hands_anchor` (which pitches with aim).
+##
+## Stance comes in as a `pose` (see REST_POSE; SoldierMovement fills it in): the model
+## eases towards it, and pose_hitboxes / lay_down snap the body's hitboxes to the same pose
+## so shots land where the body is drawn.
 
 ## Joint positions in body space (feet at the origin, facing -Z).
 const TORSO_PIVOT := Vector3(0, 0.9, 0)
@@ -18,6 +22,29 @@ const FOREARM := 0.25                             # elbow to palm centre
 ## Elbows bend towards these (torso-local, before normalising): out, down and back.
 const POLE_RIGHT := Vector3(0.7, -1.0, 0.35)
 const MAX_SPEED := 6.5
+## Hip joint to sole: legs are one rigid part, so a lower stance splays them.
+const LEG_LENGTH := 0.9
+## The eyes, torso-local: hips to eye level (the camera follows this point).
+const EYE := Vector3(0, 0.75, 0)
+## Lowered hips: the front (left) leg reaches forward to the ground; the back (right) leg
+## kneels, angled back this fraction as far (its shin sinks into the ground like a knee).
+const BACK_LEG := 0.55
+## Prone: lifted by half the torso depth, and shifted back so the body lies centred on the
+## origin (feet behind, head in front) instead of tipping over the feet like a downed body.
+const PRONE_LIFT := 0.12
+const PRONE_SIDE_LIFT := 0.08                    # extra lift when rolled onto a side
+const PRONE_SHIFT := 1.0
+const PRONE_LEG_SPREAD := 0.12
+## Downed bodies tip over around the feet onto the chest (lay_down).
+const DOWNED_LIFT := 0.12
+## How fast the drawn body eases into a new pose (per second).
+const POSE_EASE := 8.0
+
+## A standing pose. hip: hips above the feet (lower bends the legs); hip_x, hip_z: hips shifted
+## sideways and back; pitch: upper body lean (negative leans forward); roll: upper body tilt
+## (positive leans left); prone: lying face down; prone_roll: rolled onto a side while
+## prone (positive rolls onto the left side).
+const REST_POSE := {"hip": 0.9, "hip_x": 0.0, "hip_z": 0.0, "pitch": 0.0, "roll": 0.0, "prone": false, "prone_roll": 0.0}
 
 enum Hold { NONE, BOTH, RIGHT }
 
@@ -36,8 +63,10 @@ var hold := Hold.NONE
 var look_pitch := 0.0
 ## While true the left hand works the magazine well instead of the support point.
 var reloading := false
-## Lying face down, head forward (see lay_down).
+## Lying face down, head forward (see lay_down). Overrides `pose`.
 var downed := false
+## The stance to show (keys as in REST_POSE). Set every frame by the body that owns it.
+var pose: Dictionary = REST_POSE.duplicate()
 
 var torso: Node3D
 var head: Node3D
@@ -54,6 +83,7 @@ var _last_position: Vector3
 var _speed := 0.0
 var _phase := 0.0
 var _time := 0.0
+var _shown: Dictionary = {}   # bone -> Transform3D, easing towards the pose
 
 
 func _ready() -> void:
@@ -71,16 +101,92 @@ func _ready() -> void:
 	_leg_left = _part("leg", _root, HIP * Vector3(-1, 1, 1))
 	_leg_right = _part("leg", _root, HIP)
 	_last_position = global_position
+	_shown = pose_bones(REST_POSE, false)
+	var body := get_parent()
+	if body:
+		for area in _posable_hitboxes(body):
+			_rest_of(area)  # recorded before anything moves them
 
 
-## Puts a body's model and its hitboxes (its direct Area3D children) in or out of the
-## downed pose, so shots hit where the body is lying.
+## Puts a body's model and its hitboxes in or out of the downed pose, so shots hit where
+## the body is lying. Hitboxes are the body's direct Area3D children with a "body_part"
+## meta; when not downed they follow the model's `pose` (crouch, prone, lean).
 static func lay_down(body: Node3D, model: CharacterModel, is_downed: bool) -> void:
 	model.downed = is_downed
-	for child in body.get_children():
-		if child is Area3D:
-			child.rotation.x = -PI / 2 if is_downed else 0.0
-			child.position.y = 0.12 if is_downed else 0.0  # same lift as the model
+	model.pose_hitboxes(body)
+
+
+## Snaps the body's hitboxes to this model's pose (or the downed pose): each follows the
+## bone it belongs to (upper body, head, pelvis, left or right leg), from its rest transform.
+func pose_hitboxes(body: Node3D) -> void:
+	var deltas := {}
+	if not downed:
+		var bones := pose_bones(pose, false)
+		var rest := rest_bones()
+		for key: String in ["torso", "head", "pelvis", "leg_l", "leg_r"]:
+			deltas[key] = transform * bones.root * bones[key] * (rest[key] as Transform3D).affine_inverse()
+	var lying := Transform3D(Basis(Vector3.RIGHT, -PI / 2), Vector3(0, DOWNED_LIFT, 0))
+	for area in _posable_hitboxes(body):
+		var rest_xform := _rest_of(area)
+		var target: Transform3D = lying * rest_xform if downed else deltas[_bone_of(area)] * rest_xform
+		if not area.transform.is_equal_approx(target):
+			area.transform = target
+
+
+## Model-space transforms for a pose: "root" (whole body), and root-local "torso", "head"
+## (kept level with the ground, like the drawn head), "pelvis", "leg_l" and "leg_r" (joint pivots).
+static func pose_bones(p: Dictionary, is_downed: bool) -> Dictionary:
+	if is_downed:
+		var rest := rest_bones()
+		rest["root"] = Transform3D(Basis(Vector3.RIGHT, -PI / 2), Vector3(0, DOWNED_LIFT, 0))
+		return rest
+	var hip: float = p.get("hip", HIP.y)
+	var hip_x: float = p.get("hip_x", 0.0)
+	var hip_z: float = p.get("hip_z", 0.0)
+	var root := Transform3D.IDENTITY
+	var spread := 0.0
+	if p.get("prone", false):
+		var roll: float = p.get("prone_roll", 0.0)
+		var lying := Basis(Vector3.BACK, roll) * Basis(Vector3.RIGHT, -PI / 2)
+		root = Transform3D(lying, Vector3(0, PRONE_LIFT + PRONE_SIDE_LIFT * absf(sin(roll)), PRONE_SHIFT))
+		spread = PRONE_LEG_SPREAD
+	var bend := acos(clampf(hip / LEG_LENGTH, 0.0, 1.0))
+	var roll_by: float = p.get("roll", 0.0)
+	var pitch_by: float = p.get("pitch", 0.0)
+	var torso_basis := Basis(Vector3.BACK, roll_by) * Basis(Vector3.RIGHT, pitch_by)
+	var torso := Transform3D(torso_basis, Vector3(hip_x, hip, hip_z))
+	return {
+		"root": root,
+		"torso": torso,
+		"head": torso * Transform3D(Basis(Vector3.RIGHT, -_upper_body_pitch(root.basis * torso_basis)), HEAD_PIVOT),
+		"pelvis": Transform3D(Basis(), Vector3(hip_x, hip, hip_z)),
+		"leg_l": Transform3D(Basis(Vector3.BACK, -spread) * Basis(Vector3.RIGHT, bend), Vector3(hip_x - HIP.x, hip, hip_z)),
+		"leg_r": Transform3D(Basis(Vector3.BACK, spread) * Basis(Vector3.RIGHT, -bend * BACK_LEG), Vector3(hip_x + HIP.x, hip, hip_z)),
+	}
+
+
+## The bones standing at rest (root-local, root at the origin).
+static func rest_bones() -> Dictionary:
+	return {
+		"root": Transform3D.IDENTITY,
+		"torso": Transform3D(Basis(), TORSO_PIVOT),
+		"head": Transform3D(Basis(), TORSO_PIVOT + HEAD_PIVOT),
+		"pelvis": Transform3D(Basis(), TORSO_PIVOT),
+		"leg_l": Transform3D(Basis(), HIP * Vector3(-1, 1, 1)),
+		"leg_r": Transform3D(Basis(), HIP),
+	}
+
+
+## How far an upper body with this (model-space) basis leans forward (negative) or back.
+static func _upper_body_pitch(torso_basis: Basis) -> float:
+	var up := torso_basis * Vector3.UP
+	return atan2(up.z, up.y)
+
+
+## Where the eyes are for a pose, in body space (the camera goes here).
+static func eye_position(p: Dictionary) -> Vector3:
+	var bones := pose_bones(p, false)
+	return bones.root * bones.torso * EYE
 
 
 ## Hands go to `grip` (right) and `support` (left), given in `node`'s local space.
@@ -114,6 +220,54 @@ func _part(model: String, parent: Node3D, pivot: Vector3) -> Node3D:
 	return node
 
 
+static func _posable_hitboxes(body: Node) -> Array[Area3D]:
+	var areas: Array[Area3D] = []
+	for child in body.get_children():
+		if child is Area3D and child.has_meta(&"body_part"):
+			areas.append(child)
+	return areas
+
+
+## A hitbox's transform with the body standing, recorded the first time it is seen.
+static func _rest_of(area: Area3D) -> Transform3D:
+	if not area.has_meta(&"pose_rest"):
+		area.set_meta(&"pose_rest", area.transform)
+	return area.get_meta(&"pose_rest")
+
+
+## Which bone a hitbox follows: by its body part, or for parts this doesn't know, by where
+## it sits at rest (above the neck: head; above the hips: upper body; below: the leg on its
+## side, or the pelvis on the centre line).
+static func _bone_of(area: Area3D) -> String:
+	if area.has_meta(&"pose_bone"):
+		return area.get_meta(&"pose_bone")
+	var part: StringName = area.get_meta(&"body_part", Vitals.TORSO)
+	var bone := "torso"
+	if part in [Vitals.HEAD, Vitals.FACE]:
+		bone = "head"
+	elif part == Vitals.PELVIS:
+		bone = "pelvis"
+	elif part in [Vitals.THIGH_L, Vitals.SHIN_L]:
+		bone = "leg_l"
+	elif part in [Vitals.THIGH_R, Vitals.SHIN_R]:
+		bone = "leg_r"
+	elif not part in [Vitals.NECK, Vitals.TORSO, Vitals.CHEST, Vitals.ABDOMEN,
+			Vitals.UPPER_ARM_L, Vitals.UPPER_ARM_R, Vitals.FOREARM_L, Vitals.FOREARM_R]:
+		var centre := Vector3.ZERO
+		var shapes := 0
+		for child in area.get_children():
+			if child is CollisionShape3D:
+				centre += child.position
+				shapes += 1
+		centre = _rest_of(area) * (centre / maxf(shapes, 1))
+		if centre.y < HIP.y - 0.05:
+			bone = "pelvis" if absf(centre.x) < 0.03 else ("leg_l" if centre.x < 0.0 else "leg_r")
+		elif centre.y > TORSO_PIVOT.y + HEAD_PIVOT.y + 0.05:
+			bone = "head"
+	area.set_meta(&"pose_bone", bone)
+	return bone
+
+
 func _process(delta: float) -> void:
 	# Speed from position change works the same for local, remote and AI bodies.
 	var moved := global_position - _last_position
@@ -124,18 +278,25 @@ func _process(delta: float) -> void:
 	_time += delta
 	_phase += delta * (2.0 + _speed * 1.6)
 
+	var target := pose_bones(pose, downed)
+	var blend := minf(delta * POSE_EASE, 1.0)
+	for key: String in target:
+		_shown[key] = (_shown[key] as Transform3D).interpolate_with(target[key], blend)
+	var prone: bool = pose.get("prone", false)
 	var stride := clampf(_speed / 4.0, 0.0, 1.0) * (0.55 + 0.25 * clampf((_speed - 4.0) / 2.5, 0.0, 1.0))
+	if downed:
+		stride = 0.0
+	elif prone:
+		stride *= 0.35  # crawling: small leg movements
 	var swing := sin(_phase) * stride
-	_leg_left.rotation.x = swing
-	_leg_right.rotation.x = -swing
-	_root.position.y = absf(sin(_phase)) * 0.03 * stride
-	# Downed: tip over around the feet onto the chest, raised by half the torso depth.
-	var lie := 1.0 if downed else 0.0
-	_root.rotation.x = lerpf(_root.rotation.x, -PI / 2 * lie, minf(delta * 6.0, 1.0))
-	_root.position.y += 0.12 * absf(_root.rotation.x) / (PI / 2)
-	torso.position.y = TORSO_PIVOT.y + sin(_time * 2.0) * 0.003  # breathing
-	head.rotation.x = clampf(look_pitch, -0.7, 0.7) * 0.8
-	hands_anchor.rotation.x = clampf(look_pitch, -0.8, 0.8) * 0.8
+	_root.transform = (_shown.root as Transform3D).translated(Vector3(0, absf(sin(_phase)) * 0.03 * stride, 0))
+	_leg_left.transform = (_shown.leg_l as Transform3D) * Transform3D(Basis(Vector3.RIGHT, swing), Vector3.ZERO)
+	_leg_right.transform = (_shown.leg_r as Transform3D) * Transform3D(Basis(Vector3.RIGHT, -swing), Vector3.ZERO)
+	torso.transform = (_shown.torso as Transform3D).translated_local(Vector3(0, sin(_time * 2.0) * 0.003, 0))  # breathing
+	# Head and weapon keep facing where the owner looks, whatever the upper body's lean.
+	var lean := 0.0 if downed else _upper_body_pitch((_shown.root as Transform3D).basis * (_shown.torso as Transform3D).basis)
+	head.rotation.x = clampf(look_pitch, -0.7, 0.7) * 0.8 - lean
+	hands_anchor.rotation.x = clampf(look_pitch, -0.8, 0.8) * 0.8 - lean
 
 	if is_instance_valid(_held):
 		_reach(0, torso.to_local(_held.to_global(_grip)))
