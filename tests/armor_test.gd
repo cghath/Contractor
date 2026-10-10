@@ -42,6 +42,7 @@ func _ready() -> void:
 	await _test_steel_spall()
 	await _test_soft_armor()
 	await _test_helmet_impact()
+	await _test_playtest_knockouts()
 	_test_fit()
 	await _test_state_travels()
 	print("ARMOR TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
@@ -303,17 +304,9 @@ func _test_steel_spall() -> void:
 			if piece.server_try_stop(piece.to_global(Vector3(spot.x, spot.y, -0.01)), Vector3.BACK, rifle, 12.0):
 				stopped += 1
 		check(stopped == spots.size(), "%s: steel stopped all %d rounds" % [tier[1], stopped])
-		var parts := {}
-		var fragments := true
-		for hit: Dictionary in _hits(dummy):
-			parts[hit.part] = true
-			fragments = fragments and hit.hit.get("round_class") == Vitals.FRAGMENT
 		if tier[1] == "medium":
-			var allowed := ARMS + [Vitals.FACE]
-			check(not parts.is_empty() and parts.keys().all(func(p: StringName) -> bool: return p in allowed),
-				"medium: spall wounds only face and arms, the collar covers the neck (%s)" % ", ".join(parts.keys()))
-			check(fragments and _hits(dummy).size() >= spots.size() and _hits(dummy).size() <= spots.size() * ArmorRules.SPALL_WOUNDS_MAX,
-				"medium: %d fragment wounds from %d stops" % [_hits(dummy).size(), spots.size()])
+			check(_hits(dummy).size() <= spots.size() and _hits(dummy).all(func(h: Dictionary) -> bool: return h.hit.get("round_class") == WoundModel.SPALL),
+				"medium: at most one spall wound per stop (%d from %d stops)" % [_hits(dummy).size(), spots.size()])
 		else:
 			check(_hits(dummy).is_empty(), "heavy: neck, face and arms covered, no spall wounds (%d)" % _hits(dummy).size())
 		var chest := 0
@@ -343,11 +336,34 @@ func _test_steel_spall() -> void:
 	check(ArmorRules.spall_parts(ItemDB.get_item(&"plate_carrier_heavy")).is_empty(), "heavy vest: nothing exposed")
 	var body := await _dummy(["plate_carrier_light"])
 	var parts := {}
-	for i in 30:
-		for part: StringName in ArmorRules.server_spall(body, body.vitals, body.global_position + Vector3.UP * 1.2, Vector3.BACK):
+	for i in 300:
+		for part: StringName in ArmorRules.server_spall(body, body.vitals, body.global_position + Vector3.UP * 1.2, Vector3.BACK, Vitals.FULL_POWER):
 			parts[part] = true
 	check(parts.has(Vitals.NECK) and parts.has(Vitals.FACE), "light vest: spall reaches the neck and face too (%s)" % ", ".join(parts.keys()))
 	body.queue_free()
+	# Spall is rare and minor (Captain's playtest): by round class, the share of stops that
+	# throw any at the wearer, never more than one wound, and that wound a scratch or a light one.
+	var medium := await _dummy(["plate_carrier"])
+	medium.respawn_seconds = 999.0
+	for round_class: StringName in [Vitals.PISTOL, Vitals.INTERMEDIATE, Vitals.FULL_POWER]:
+		var stops := 2000
+		var wounded := 0
+		var several := 0
+		var wrong := PackedStringArray()
+		for i in stops:
+			medium.vitals.server_reset_health()
+			var hit := ArmorRules.server_spall(medium, medium.vitals, medium.global_position + Vector3(0, 1.2, -0.15), Vector3.BACK, round_class)
+			var wounds := medium.vitals.wound_list()
+			wounded += 1 if not hit.is_empty() else 0
+			several += 1 if hit.size() > 1 or wounds.size() > 1 else 0
+			for w: Dictionary in wounds:
+				var minor: bool = (w.kind == "graze" and float(w.rate) == 0.0) or (w.kind == "muscle" and float(w.rate) <= WoundModel.SPALL_LIGHT_RATE)
+				if not minor or not (w.part in ARMS or w.part == Vitals.FACE):
+					wrong.append("%s %s" % [w.part, w.kind])
+		var expected := ArmorRules.spall_chance(round_class)
+		check(absf(wounded / float(stops) - expected) < 0.025 and several == 0 and wrong.is_empty() and medium.vitals.is_up(),
+			"medium vest, %s stops: %.1f%% throw spall at the wearer (expected %.0f%%), one wound at most, all minor %s" % [round_class, wounded * 100.0 / stops, expected * 100.0, wrong])
+	medium.queue_free()
 	await get_tree().process_frame
 
 
@@ -438,6 +454,116 @@ func _test_helmet_impact() -> void:
 	var stop := _fire_at(1.73, ItemDB.get_item(&"m110"))
 	check(stop.result == "plate" and _impacts(heavy).back().round_class == Vitals.FULL_POWER, "heavy helmet (III++) stops 7.62 ball, with a full-power impact")
 	heavy.queue_free()
+	await get_tree().process_frame
+
+
+# --- Captain's playtest: knockouts --------------------------------------------------------------
+
+## Fresh plates for a dummy wearing a carrier (puts back what the last trial holed).
+func _fresh_plates(dummy: TargetDummy, plate: StringName) -> void:
+	for slot: StringName in [&"plate_front", &"plate_back"]:
+		dummy.inventory.unequip(slot)
+		dummy.inventory.take(plate)
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+
+
+## A few words on what a body went through, for the log.
+func _vitals_text(v: Vitals) -> String:
+	var m: WoundModel = v._model
+	return "blood %.0f%%, pain %.2f (impact %.2f, wounds %.2f), trauma %.2f, %s, wounds %s" % [v.blood_fraction() * 100.0, v.pain(),
+		m.impact, m.pain_wounds, v.trauma_level(), "DOWN %s" % [v.why_unconscious()] if v.downed else "up",
+		v.wound_list().map(func(w: Dictionary) -> String: return "%s %s" % [w.part, w.kind])]
+
+
+## The playtest: a soldier in medium armor (medium carrier, steel III++ plates front and back,
+## the IIIA helmet) hit 2-3 times in the plates by M855 from the M4 and the Mk18 at 10-100 m
+## stays conscious and fighting, and so does one hit 6 times in quick succession (stagger and
+## winded are fine). The same rounds through an unarmored limb hurt but don't knock out.
+func _test_playtest_knockouts() -> void:
+	print("Playtest: plate hits and limb hits don't knock out")
+	var dummy := await _dummy(["plate_carrier", "plate_steel_l3", "plate_steel_l3", "helmet"])
+	dummy.respawn_seconds = 999.0
+	var plate_y: float = GearRig.plate_rest_position(&"plate_front").y
+	var spots: Array[Vector2] = [Vector2(-0.06, 0.07), Vector2(0.06, -0.05), Vector2(0.0, 0.1), Vector2(-0.06, -0.08), Vector2(0.07, 0.06), Vector2(0.0, -0.01)]
+	ArmorRules.seed_rng(424242)
+	for weapon_id: StringName in [&"m4a1", &"mk18"]:
+		var weapon := ItemDB.get_item(weapon_id)
+		for distance: float in [10.0, 50.0, 100.0]:
+			for hits: int in [2, 3, 6]:
+				var trials := 12
+				var up := 0
+				var stopped := true
+				var worst := 0.0
+				var worst_text := ""
+				var spall := 0
+				var ribs := 0
+				for t in trials:
+					dummy.vitals.server_reset_health()
+					dummy.vitals.rng.seed = 7000 + t
+					await _fresh_plates(dummy, &"plate_steel_l3")
+					var spall_before := _hits(dummy).size()
+					for n in hits:
+						var spot := spots[n]
+						_shooter.position = Vector3(spot.x, plate_y + spot.y, -distance)
+						var shot := Ballistics.fire(_shooter, _shooter.position, Vector3.BACK, weapon)
+						stopped = stopped and shot.result == "plate"
+						dummy.vitals.server_advance(0.15)  # a quick burst
+					dummy.vitals.server_advance(10.0)
+					up += 1 if dummy.vitals.is_up() else 0
+					spall += _hits(dummy).size() - spall_before
+					ribs += 1 if dummy.vitals.wound_list().any(func(w: Dictionary) -> bool: return w.kind == "rib") else 0
+					if dummy.vitals.pain() >= worst:
+						worst = dummy.vitals.pain()
+						worst_text = _vitals_text(dummy.vitals)
+				print("    %s %3d m, %d hits: %d of %d up, %d spall wounds, %d cracked ribs; worst: %s" % [weapon_id, distance, hits, up, trials, spall, ribs, worst_text])
+				check(stopped and up == trials and worst < WoundModel.KNOCKOUT_PAIN_FULL - 0.3,
+					"%s at %d m, %d plate hits: every one stays conscious (worst pain %.2f)" % [weapon.name, distance, hits, worst])
+	# Stagger and winded still come with a stop.
+	dummy.vitals.server_reset_health()
+	await _fresh_plates(dummy, &"plate_steel_l3")
+	_shooter.position = Vector3(0, plate_y, -30.0)
+	Ballistics.fire(_shooter, _shooter.position, Vector3.BACK, ItemDB.get_item(&"m4a1"))
+	check(dummy.vitals.speed_mult() < 1.0 and dummy.vitals.sway_mult() > 1.5, "a 5.56 plate stop still staggers")
+	dummy.vitals.server_reset_health()
+	Ballistics.fire(_shooter, _shooter.position + Vector3(0.05, 0.05, 0), Vector3.BACK, ItemDB.get_item(&"m110"))
+	check(dummy.vitals.stamina_mult() == 0.0 and dummy.vitals.is_up(), "a 7.62 plate stop winds you, still up")
+	dummy.queue_free()
+	await get_tree().process_frame
+
+	var bare := await _dummy([])
+	bare.respawn_seconds = 999.0
+	var targets := {Vitals.THIGH_L: Vector3(-0.09, 0.68, 0), Vitals.THIGH_R: Vector3(0.06, 0.6, 0), Vitals.UPPER_ARM_R: Vector3(0.26, 1.25, 0), Vitals.FOREARM_L: Vector3(-0.24, 0.95, 0)}
+	for weapon_id: StringName in [&"m4a1", &"mk18"]:
+		var weapon := ItemDB.get_item(weapon_id)
+		for distance: float in [10.0, 50.0, 100.0]:
+			var up := 0
+			var shots := 0
+			var hurt := true
+			var worst_text := ""
+			var worst := -1.0
+			for part: StringName in targets:
+				for t in 3:
+					bare.vitals.server_reset_health()
+					bare.vitals.rng.seed = 8000 + t
+					await get_tree().physics_frame
+					await get_tree().physics_frame
+					var aim: Vector3 = targets[part] + Vector3(0.01 * t, 0.02 * t, 0)
+					_shooter.position = Vector3(aim.x, aim.y, -distance)
+					var shot := Ballistics.fire(_shooter, _shooter.position, Vector3.BACK, weapon)
+					if shot.result != "body":
+						continue
+					shots += 1
+					hurt = hurt and bare.vitals.pain() >= WoundModel.PAIN_SEVERE.x * 0.99
+					bare.vitals.server_advance(10.0)
+					up += 1 if bare.vitals.is_up() else 0
+					if bare.vitals.pain() > worst:
+						worst = bare.vitals.pain()
+						worst_text = _vitals_text(bare.vitals)
+			print("    unarmored limb, %s %3d m: %d of %d up 10 s later; worst: %s" % [weapon_id, distance, up, shots, worst_text])
+			check(shots == targets.size() * 3 and up == shots and hurt,
+				"%s at %d m through an unarmored limb: hurts, nobody knocked out (%d of %d up)" % [weapon.name, distance, up, shots])
+	bare.queue_free()
 	await get_tree().process_frame
 
 

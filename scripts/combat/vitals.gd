@@ -14,8 +14,8 @@ extends Node
 ## item state, in Inventory.)
 ##
 ## Consciousness follows the body; there is no revive. Unconscious (downed) while any cause
-## holds (why_unconscious): SpO2 under 85%, pain at the knockout threshold, 40% of blood
-## lost, cardiac arrest, a concussion knockout, morphine sedation, or total trauma over its
+## holds (why_unconscious): SpO2 under 85%, pain held at the knockout threshold for 3 s, 40% of
+## blood lost, cardiac arrest, a concussion knockout, morphine sedation, or total trauma over its
 ## limit. Once every cause has stayed gone for a short time (10 to 20 s, wake_eta) the
 ## casualty comes round on their own. Cardiac arrest at 50% lost (or after SpO2 stays very
 ## low) starts a 10-minute window and ends in death: until wave 3 (IV, CPR, defib) nothing

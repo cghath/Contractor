@@ -238,6 +238,7 @@ func _test_medic_fights_only_close() -> void:
 	_place(foxtrot, Vector3(10, 0.1, 53))
 	_place(echo, Vector3(12, 0.1, 43))
 	foxtrot.vitals.server_damage(65.0)
+	foxtrot.vitals.server_advance(WoundModel.PAIN_KNOCKOUT_S + 0.1)  # the pain held long enough to knock him out
 	ai.intent = SquadAI.Intent.CASUALTY
 	ai.casualty = foxtrot
 	ai.care = SquadAI.Care.REACH
@@ -314,6 +315,7 @@ func _test_blocked_route() -> void:
 	player.rotation.y = 0.0
 	await _frames(2)
 	echo.vitals.server_damage(65.0)  # out cold from pain, with blood to spare and nothing bleeding
+	echo.vitals.server_advance(WoundModel.PAIN_KNOCKOUT_S + 0.1)  # the pain held long enough to knock him out
 	await _frames(2)
 	check(echo.vitals.downed and SquadAI.responder_for(echo) == golf, "Echo is down; his team's medic Golf answers (%s)" % _name(SquadAI.responder_for(echo)))
 	var golf_ai := SquadAI.of(golf)

@@ -325,7 +325,7 @@ func _test_airway() -> void:
 	check(woke_at > 0.0 and not brief.npa and not brief.arrest,
 		"and they come round without an NPA (%.0f s after the knockout)" % woke_at)
 	var long_out := _model(8)
-	long_out.pain_wounds = 0.95
+	long_out.pain_wounds = 0.98  # over the threshold the whole time, fading included
 	long_out.update_state(0.0)
 	_step(long_out, 20.0)
 	long_out.airway_blocked = true
@@ -395,8 +395,8 @@ func _test_treatment_wakes() -> void:
 		"morphine eases the pain and he comes round on his own %.0f s later (pain %.2f)" % [t, treated.pain()])
 	# An obstructed airway: out from low SpO2 until an NPA goes in.
 	var airway := _vitals()
-	airway._model.pain_wounds = 0.95
-	airway.server_advance(0.1)
+	airway._model.pain_wounds = 0.98  # over the threshold the whole minute, fading included
+	airway.server_advance(WoundModel.PAIN_KNOCKOUT_S + 0.1)  # held long enough to knock him out
 	airway._model.airway_blocked = true  # it obstructed while the pain kept him out...
 	airway.server_advance(60.0)  # ...longer than a brief spell (AIRWAY_SELF_CLEAR_S)
 	airway.server_apply_treatment(&"morphine", Vitals.TORSO)
@@ -667,6 +667,7 @@ func _test_wakes_in_session() -> void:
 	casualty.vitals._model.npa = true  # the airway is covered by the rules above
 	casualty.vitals._model.pain_wounds = 0.95
 	_wound(casualty.vitals, Vitals.THIGH_L, "arterial", 1.2, &"femoral_l")
+	casualty.vitals.server_advance(WoundModel.PAIN_KNOCKOUT_S + 0.1)  # pain held long enough to knock him out
 	await _frames(2)
 	check(casualty.vitals.downed and casualty.vitals.why_unconscious() == [&"pain"], "the casualty is out from the pain (%s)" % [casualty.vitals.why_unconscious()])
 	var woke := [false]

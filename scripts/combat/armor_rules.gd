@@ -8,8 +8,9 @@ extends RefCounted
 ## - Ceramic: each hit cracks a zone around it; a later hit inside cracked zones is less
 ##   likely to be stopped. Each hit also takes integrity by round class; at zero the plate
 ##   has shattered and stops nothing. Cracks and integrity are the plate's item state.
-## - Steel: doesn't crack (holes only, from the chips), but a stopped round throws spall that
-##   wounds the neck, face and arms where the vest doesn't cover them.
+## - Steel: doesn't crack (holes only, from the chips), but now and then a stopped round
+##   throws spall that scratches (rarely lightly wounds) the neck, face or arms where the
+##   vest doesn't cover them.
 ## - Polyethylene: deforms; repeated hits in one spot let rounds through (the chips).
 ## - Composite (helmets): rating and chips only.
 ##
@@ -40,10 +41,13 @@ const INTEGRITY_LOSS := {
 	Vitals.FRAGMENT: 0.02, Vitals.PISTOL: 0.08, Vitals.INTERMEDIATE: 0.18, Vitals.FULL_POWER: 0.3,
 }
 
-## Steel spall: wounds per stopped round (1 to this many), damage of each, and the body areas
-## it can reach (a vest's "spall_cover" names the areas it protects).
-const SPALL_WOUNDS_MAX := 2
-const SPALL_DAMAGE := 5.0
+## Steel spall (Captain's playtest call: rare and minor): the chance a stopped round throws
+## spall that reaches the wearer, by round class, and then exactly one wound (WoundModel's
+## SPALL class: a scratch, now and then a light wound) on a body area it can reach (a vest's
+## "spall_cover" names the areas it protects).
+const SPALL_CHANCE := {
+	Vitals.FRAGMENT: 0.0, Vitals.PISTOL: 0.05, Vitals.INTERMEDIATE: 0.1, Vitals.FULL_POWER: 0.2,
+}
 const SPALL_AREAS := {
 	&"neck": [Vitals.NECK],
 	&"face": [Vitals.FACE],
@@ -246,10 +250,16 @@ static func spall_parts(vest: ItemData) -> Array[StringName]:
 	return parts
 
 
-## Host only. Spall from a round a steel plate stopped at `position`: 1 to SPALL_WOUNDS_MAX
-## fragment wounds on the parts `body`'s vest leaves exposed (Vitals.server_hit with the
-## FRAGMENT class). Returns the parts hit.
-static func server_spall(body: Node3D, vitals: Vitals, position: Vector3, direction: Vector3) -> Array[StringName]:
+## Chance a stopped round of `round_class` throws spall that reaches the wearer.
+static func spall_chance(round_class: StringName) -> float:
+	return float(SPALL_CHANCE.get(round_class, SPALL_CHANCE[Vitals.INTERMEDIATE]))
+
+
+## Host only. Spall from a round of `round_class` a steel plate stopped at `position`: with
+## spall_chance, one spall wound (Vitals.server_hit with WoundModel.SPALL: a scratch, now and
+## then a light wound) on a part `body`'s vest leaves exposed. Returns the parts hit (none
+## or one).
+static func server_spall(body: Node3D, vitals: Vitals, position: Vector3, direction: Vector3, round_class := Vitals.INTERMEDIATE) -> Array[StringName]:
 	var hit: Array[StringName] = []
 	var vest := vest_of(body)
 	var covered: Array = vest.stats.get("spall_cover", []) if vest else []
@@ -257,21 +267,19 @@ static func server_spall(body: Node3D, vitals: Vitals, position: Vector3, direct
 	for area: StringName in SPALL_AREAS:
 		if not String(area) in covered:
 			areas.append(area)
-	if areas.is_empty() or vitals == null:
+	if areas.is_empty() or vitals == null or not roll(spall_chance(round_class)):
 		return hit
 	var rng := _get_rng()
-	for i in rng.randi_range(1, SPALL_WOUNDS_MAX):
-		var parts: Array = SPALL_AREAS[areas[rng.randi_range(0, areas.size() - 1)]]
-		var part: StringName = parts[rng.randi_range(0, parts.size() - 1)]
-		vitals.server_hit(part, {
-			"damage": SPALL_DAMAGE,
-			"round_class": Vitals.FRAGMENT,
-			"position": position,
-			"direction": -direction,  # spall sprays back off the strike face
-			"distance": 0.3,
-			"spall": true,
-		})
-		hit.append(part)
+	var parts: Array = SPALL_AREAS[areas[rng.randi_range(0, areas.size() - 1)]]
+	var part: StringName = parts[rng.randi_range(0, parts.size() - 1)]
+	vitals.server_hit(part, {
+		"round_class": WoundModel.SPALL,
+		"position": position,
+		"direction": -direction,  # spall sprays back off the strike face
+		"distance": 0.3,
+		"spall": true,
+	})
+	hit.append(part)
 	return hit
 
 
