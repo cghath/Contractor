@@ -1,2 +1,7 @@
+# Normalize line endings; Godot writes LF.
+* text=auto eol=lf
+*.png binary
+*.zip binary
+# Windows launchers need CRLF; packed builds are binary.
 *.bat text eol=crlf
 *.pck binary
