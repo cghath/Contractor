@@ -234,6 +234,8 @@ func _physics_process(delta: float) -> void:
 		if multiplayer.is_server():
 			_ai_physics(delta)
 		return
+	if multiplayer.is_server():
+		_update_carried()  # a player carrying or dragging someone: the host moves the casualty
 	if not is_local():
 		return
 	if not vitals.is_up() and carried_by_pos != null:
@@ -267,13 +269,22 @@ func _ai_physics(delta: float) -> void:
 	_update_carried()
 
 
-## Speed multiplier for moving a downed body (1 when not carrying or dragging).
+## Speed multiplier for moving a downed body (1 when not carrying or dragging). Reads
+## carry_mode, so it works on the owner's machine too.
 func carry_speed_mult() -> float:
-	return 0.55 if carrying != null else 1.0
+	match carry_mode:
+		CARRY:
+			return CARRY_SPEED_MULT
+		DRAG:
+			return DRAG_SPEED_MULT
+	return 1.0
 
 
-## Where a body this soldier carries goes: over the shoulder.
+## Where a body this soldier moves goes: over the shoulder when carried, on the ground
+## behind when dragged.
 func carry_transform() -> Transform3D:
+	if carry_mode == DRAG:
+		return global_transform * Transform3D(Basis(Vector3.UP, PI), DRAG_OFFSET)
 	return global_transform * Transform3D(Basis(Vector3.UP, PI * 0.5), Vector3(0.0, 0.55, 0.15))
 
 
@@ -288,31 +299,34 @@ func _update_carried() -> void:
 		carrying._client_carried.rpc_id(carrying.owner_peer(), carry_transform().origin)
 
 
-## Host only. Picks up a downed body within reach.
-func server_pick_up_body(other: Soldier) -> bool:
+## Host only. Picks up (CARRY) or takes hold of (DRAG) a downed body within `reach`.
+func server_pick_up_body(other: Soldier, mode := CARRY, reach := REVIVE_RANGE) -> bool:
 	if other == null or other == self or other.vitals.is_up() or not other.vitals.downed:
 		return false
 	if carrying != null or inventory.hands != &"" or not vitals.is_up():
 		return false
-	if other.global_position.distance_to(global_position) > REVIVE_RANGE:
+	if other.global_position.distance_to(global_position) > reach:
 		return false
 	if is_instance_valid(other.carried_by) and other.carried_by != self:
 		return false
 	other.carried_by = self
-	other.collision_layer = 0  # a carried body mustn't shove its carrier around
+	other._client_lifted.rpc(true)  # a moved body mustn't shove its carrier around
 	carrying = other
+	_set_carry_mode(mode)
 	return true
 
 
-## Host only. Puts down whoever this soldier carries.
+## Host only. Puts down whoever this soldier carries or drags.
 func release_carried() -> void:
 	if is_instance_valid(carrying) and carrying.carried_by == self:
 		carrying.carried_by = null
-		carrying.collision_layer = BODY_LAYER
+		carrying._client_lifted.rpc(false)
 		if carrying.is_ai():
-			carrying.global_position = global_position - global_basis.z * 0.8
+			if carry_mode != DRAG:  # a dragged body is already on the ground behind
+				carrying.global_position = global_position - global_basis.z * 0.8
 			carrying.rotation = Vector3(0, rotation.y, 0)
 	carrying = null
+	_set_carry_mode(&"")
 
 
 ## The revive kit this player would use: the fastest one carried.
@@ -604,6 +618,128 @@ func _server_revive(path: NodePath) -> void:
 func _server_debug_hurt(amount: float) -> void:
 	if _from_owner() and OS.is_debug_build():
 		vitals.server_damage(amount)
+
+
+# --- Interaction requests --------------------------------------------------------------
+# Sent by the interaction menu (InteractionMenu, hold Left Ctrl). Pick up and revive reuse
+# _server_interact and _server_revive above.
+
+## What this soldier is doing with a downed body: carrying it over the shoulder or dragging
+## it behind (empty for neither).
+const CARRY := &"carry"
+const DRAG := &"drag"
+## Speed while moving a downed body (proposed; Soldier.carry_speed_mult).
+const CARRY_SPEED_MULT := 0.55
+const DRAG_SPEED_MULT := 0.35
+## Where a dragged body lies, in the dragger's frame (+z is behind).
+const DRAG_OFFSET := Vector3(0.0, 0.0, 1.1)
+## How far (body to body) the host accepts an interaction: the menu's reach plus slack for lag.
+const INTERACT_REACH := 3.0
+const INTERACT_SLACK := 1.0
+
+## CARRY, DRAG or empty. Set by the host; the owner learns it through _client_carry_mode
+## (movement reads it for speed), so it's right on the host and the owner's machine.
+var carry_mode: StringName = &""
+
+
+## "Player 1" for a player, the callsign for an AI squadmate.
+func display_name() -> String:
+	return String(name) if is_ai() else "Player %s" % name
+
+
+@rpc("any_peer", "call_local", "reliable")
+func _server_carry_body(path: NodePath) -> void:
+	_server_move_body(path, CARRY)
+
+
+@rpc("any_peer", "call_local", "reliable")
+func _server_drag_body(path: NodePath) -> void:
+	_server_move_body(path, DRAG)
+
+
+## Puts down the body this soldier carries or drags.
+@rpc("any_peer", "call_local", "reliable")
+func _server_release_body() -> void:
+	if not _from_owner() or carrying == null:
+		return
+	if is_instance_valid(carrying) and carrying.care_by == self:
+		carrying.care_by = null
+	release_carried()
+
+
+## Hands one unit of a stowed entry to a standing squadmate, if it fits on them.
+@rpc("any_peer", "call_local", "reliable")
+func _server_give_item(path: NodePath, container: StringName, index: int) -> void:
+	if not _from_owner() or not vitals.is_up():
+		return
+	var other := get_node_or_null(path) as Soldier
+	if other == null or other == self or other.faction != faction or not other.vitals.is_up():
+		return
+	if other.global_position.distance_to(global_position) > INTERACT_REACH + INTERACT_SLACK:
+		_client_message.rpc_id(owner_peer(), "Too far away")
+		return
+	var list: Array = inventory.containers.get(container, [])
+	if index < 0 or index >= list.size():
+		return
+	var entry := inventory.remove_entry(container, index, 1)
+	var item := ItemDB.get_item(entry.id)
+	if other.inventory.take(entry.id, 1, entry.get("state", {})) == 0:
+		inventory.insert_entry(container, entry)  # put it back
+		_client_message.rpc_id(owner_peer(), "%s has no room for %s" % [other.display_name(), item.name])
+		return
+	_client_message.rpc_id(owner_peer(), "Gave %s to %s" % [item.name, other.display_name()])
+	if not other.is_ai():
+		other._client_message.rpc_id(other.owner_peer(), "%s gave you %s" % [display_name(), item.name])
+
+
+## Host side of carry and drag. Asking for the other mode on the body you already hold
+## switches between them.
+func _server_move_body(path: NodePath, mode: StringName) -> void:
+	if not _from_owner() or not vitals.is_up():
+		return
+	var other := get_node_or_null(path) as Soldier
+	if other == null or other == self or not other.vitals.downed:
+		return
+	if carrying == other:
+		_set_carry_mode(mode)
+		return
+	var why := ""
+	if carrying != null:
+		why = "You're already moving someone"
+	elif inventory.hands != &"":
+		why = "Your hands are full"
+	elif is_instance_valid(other.carried_by):
+		why = "Someone else has them"
+	elif other.global_position.distance_to(global_position) > INTERACT_REACH + INTERACT_SLACK:
+		why = "Too far away"
+	if why != "":
+		_client_message.rpc_id(owner_peer(), why)
+		return
+	if server_pick_up_body(other, mode, INTERACT_REACH + INTERACT_SLACK):
+		other.care_by = self  # squadmates leave this casualty to you
+		_client_message.rpc_id(owner_peer(), "%s %s (Ctrl+Alt: put down)" % ["Carrying" if mode == CARRY else "Dragging", other.display_name()])
+
+
+## Host only. Sets carry_mode and tells the owning player.
+func _set_carry_mode(mode: StringName) -> void:
+	if carry_mode == mode:
+		return
+	carry_mode = mode
+	if not is_ai() and owner_peer() != multiplayer.get_unique_id():
+		_client_carry_mode.rpc_id(owner_peer(), mode)
+
+
+@rpc("any_peer", "call_local", "reliable")
+func _client_carry_mode(mode: StringName) -> void:
+	if multiplayer.get_remote_sender_id() == 1:
+		carry_mode = mode
+
+
+## Every peer: a carried or dragged body stops colliding, so it doesn't shove whoever moves it.
+@rpc("any_peer", "call_local", "reliable")
+func _client_lifted(lifted: bool) -> void:
+	if multiplayer.get_remote_sender_id() == 1:
+		collision_layer = 0 if lifted else BODY_LAYER
 
 
 func _on_went_down() -> void:

@@ -19,10 +19,11 @@ const THROWABLES: Array[StringName] = [&"frag_grenade", &"flashbang", &"smoke_gr
 @onready var body: Soldier = get_parent()
 
 var hud: Hud
+## The ACE-style interaction menu (hold Left Ctrl; Left Ctrl + Left Alt for yourself).
+var interaction: InteractionMenu
 ## The grenade type G throws.
 var throwable: StringName = &"frag_grenade"
-var _focus: WorldItem
-var _revive_target: Node3D  # a downed body under the crosshair
+var _focus: Node3D  # an item or downed body under the crosshair, for the prompt
 var _view_model_id: StringName = &""
 var _shake := 0.0
 
@@ -42,6 +43,8 @@ func _ready() -> void:
 	hud = Hud.new()
 	hud.player = body
 	body.add_child(hud)
+	interaction = InteractionMenu.new(body)
+	hud.add_child(interaction)
 	body.loadout_changed.connect(_update_view_model)
 	_update_view_model()
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
@@ -52,7 +55,9 @@ func _ready() -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	var captured := _captured()
-	if event is InputEventMouseMotion and captured:
+	if event is InputEventMouseMotion and captured and interaction.is_open():
+		interaction.move_cursor(event.relative)  # the menu has the mouse, not the view
+	elif event is InputEventMouseMotion and captured:
 		body.rotate_y(-event.relative.x * MOUSE_SENSITIVITY)
 		body.head.rotate_x(-event.relative.y * MOUSE_SENSITIVITY)
 		body.head.rotation.x = clampf(body.head.rotation.x, -1.5, 1.5)
@@ -70,10 +75,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	elif not body.vitals.is_up():
 		return  # downed: no giving up (handoff); wait for a revive or bleed out
-	elif event.is_action_pressed(&"interact") and _revive_target:
-		body._server_revive.rpc_id(1, _revive_target.get_path())
-	elif event.is_action_pressed(&"interact") and _focus:
-		body._server_interact.rpc_id(1, _focus.get_path())
+	elif interaction.is_open() and event is InputEventMouseButton:
+		return  # clicks don't fire through the interaction menu
 	elif event.is_action_pressed(&"grenade"):
 		# G throws, Shift+G switches grenade type, Alt+G drops what you're holding.
 		if event is InputEventKey and event.alt_pressed:
@@ -94,6 +97,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _process(delta: float) -> void:
+	_update_interaction(delta)
 	_shake = move_toward(_shake, 0.0, delta * 1.5)
 	body.camera.h_offset = randf_range(-1.0, 1.0) * _shake * 0.08
 	body.camera.v_offset = randf_range(-1.0, 1.0) * _shake * 0.08
@@ -142,10 +146,11 @@ func _captured() -> bool:
 	return Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
 
 
+## The prompt for what's under the crosshair: an item, or a downed body. Everything you can
+## do with them is in the interaction menu (hold Left Ctrl).
 func _update_focus() -> void:
 	_focus = null
-	_revive_target = null
-	if not body.vitals.is_up():
+	if not body.vitals.is_up() or interaction.is_open():
 		hud.set_prompt("")
 		return
 	var camera := body.camera
@@ -155,23 +160,44 @@ func _update_focus() -> void:
 		if child is Area3D:
 			exclude.append(child.get_rid())
 	var mask := Soldier.ITEM_MASK | Soldier.HITBOX_MASK | 1
-	var query := PhysicsRayQueryParameters3D.create(from, from - camera.global_basis.z * Soldier.REVIVE_RANGE, mask, exclude)
+	var query := PhysicsRayQueryParameters3D.create(from, from - camera.global_basis.z * InteractionMenu.REACH, mask, exclude)
 	query.collide_with_areas = true
 	var hit := body.get_world_3d().direct_space_state.intersect_ray(query)
 	var collider: Object = hit.get("collider")
 	var other := Vitals.find_on(collider) if collider is Area3D else null
 	if other and other.downed:
-		_revive_target = other.get_parent()
-		var kit := body._best_revive_kit()
-		hud.set_prompt("[E] Revive (%s, %.0f s)" % [kit.name, kit.stats.revive_s] if kit else "Downed - you need an IFAK or trauma kit to revive")
-		return
-	if collider is WorldItem and from.distance_to(hit.position) <= Soldier.INTERACT_RANGE:
+		_focus = other.get_parent()
+		hud.set_prompt("[Ctrl] %s (down)" % InteractionMenu.display_name(_focus))
+	elif collider is WorldItem:
 		_focus = collider
-	hud.set_prompt(_focus.describe() if _focus else "")
+		hud.set_prompt("[Ctrl] %s" % (collider as WorldItem).describe())
+	else:
+		hud.set_prompt("")
+
+
+## Hold Left Ctrl for the interaction menu, Left Ctrl + Left Alt for yourself; letting go
+## performs the highlighted action. Going down or opening the inventory cancels it.
+func _update_interaction(delta: float) -> void:
+	var allowed := _captured() and body.vitals.is_up() and not hud.is_inventory_open()
+	if not allowed:
+		if interaction.is_open():
+			interaction.close()
+		return
+	if interaction.update_keys(Input.is_action_pressed(&"interact"), Input.is_action_pressed(&"self_interact"), delta):
+		var text := InteractionMenu.perform(body, interaction.chosen)
+		if text != "":
+			hud.flash(text)
+		return
+	match interaction.mode:
+		InteractionMenu.Mode.OBJECT:
+			interaction.set_points(InteractionMenu.collect_points(body, body.camera))
+		InteractionMenu.Mode.SELF:
+			interaction.refresh_self()
 
 
 func _try_fire() -> void:
-	if not _captured() or body.inventory.hands != &"" or not body.vitals.is_up():
+	if not _captured() or body.inventory.hands != &"" or not body.vitals.is_up() or interaction.is_open() \
+			or body.carry_mode == Soldier.CARRY:  # both hands on the casualty
 		return
 	var weapon := body.active_weapon()
 	if weapon == null or weapon.type != "weapon":

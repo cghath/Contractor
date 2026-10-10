@@ -17,7 +17,6 @@ const KEYS := {
 	&"lean_right": [KEY_E],
 	&"mount": [KEY_C],  # rest the weapon on a surface in front
 	&"fire_mode": [KEY_F],
-	&"interact": [KEY_E],
 	&"reload": [KEY_R],
 	&"use_medical": [KEY_H],
 	&"grenade": [KEY_G],  # throw; Shift+G switches type, Alt+G drops
@@ -32,6 +31,13 @@ const MOUSE := {
 	&"fire": MOUSE_BUTTON_LEFT,
 	&"aim": MOUSE_BUTTON_RIGHT,
 }
+## Keys that only count on the left of the keyboard: [action, key, needs Ctrl held].
+## Hold Left Ctrl for the interaction menu (InteractionMenu); add Left Alt while holding it
+## for self-interaction. (The design doc's Left Windows opens the Start menu.)
+const LEFT_KEYS := [
+	[&"interact", KEY_CTRL, false],
+	[&"self_interact", KEY_ALT, true],
+]
 
 
 func _enter_tree() -> void:
@@ -41,6 +47,13 @@ func _enter_tree() -> void:
 			var event := InputEventKey.new()
 			event.physical_keycode = key
 			InputMap.action_add_event(action, event)
+	for binding: Array in LEFT_KEYS:
+		_ensure(binding[0])
+		var event := InputEventKey.new()
+		event.physical_keycode = binding[1]
+		event.location = KEY_LOCATION_LEFT
+		event.ctrl_pressed = binding[2]
+		InputMap.action_add_event(binding[0], event)
 	for action: StringName in MOUSE:
 		_ensure(action)
 		var event := InputEventMouseButton.new()

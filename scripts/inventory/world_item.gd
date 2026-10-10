@@ -75,7 +75,7 @@ func describe() -> String:
 		var damage := ArmorRules.state_text(item, state)  # "3 cracks, 46%", "shattered"...
 		if damage != "":
 			detail = "  [%s]" % damage
-	return "[E] %s %s%s%s   %.1f L  %.1f kg" % [verb, item.name, amount, detail, item.volume_l * count, item.mass_kg * count]
+	return "%s %s%s%s   %.1f L  %.1f kg" % [verb, item.name, amount, detail, item.volume_l * count, item.mass_kg * count]
 
 
 ## Placeholder box size: explicit `size_m` from item stats, else a cube of the item's volume.
