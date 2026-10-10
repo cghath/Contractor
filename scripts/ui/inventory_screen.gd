@@ -1,7 +1,7 @@
 class_name InventoryScreen
 extends PanelContainer
 ## Tab inventory: what's equipped and what's in each container, with actions. Every button
-## is a request to the host (Player._server_inventory_action and friends); the screen
+## is a request to the host (Soldier._server_inventory_action and friends); the screen
 ## redraws when the replicated inventory changes, so it always shows the host's truth.
 
 const SLOT_NAMES := {
@@ -10,11 +10,11 @@ const SLOT_NAMES := {
 	&"plate_left": "Left plate", &"plate_right": "Right plate",
 }
 
-var player: Player
+var player: Soldier
 var _list: VBoxContainer
 
 
-func _init(p_player: Player) -> void:
+func _init(p_player: Soldier) -> void:
 	player = p_player
 
 

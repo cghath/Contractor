@@ -45,16 +45,21 @@ that travels with the item.
   - Hitboxes lie down with the body, so shots land where you're lying.
   - Dead bodies lie down too. Target dummies get back up on their own after a few seconds.
 - **Ground items:** the pickup prompt shows rounds and damage. Armor on the ground shows its chips.
-- **Docs:** `docs/squad_design.md`, a proposal for the phase 3 squad AI (body/driver split,
-  navigation, utility intents, co-op command, inventory loop, permadeath), waiting for decisions.
+- **Docs:** `docs/squad_design.md`, the phase 3 squad AI design (body/driver split,
+  navigation, utility intents, co-op command, inventory loop, permadeath), with the decisions made.
 - **Tests:**
   - `tests/gameplay_test.tscn`: end-to-end checks of a hosted session through the real requests a client sends.
   - `tests/net_test.tscn`: a two-process ENet host and client.
   - `tools/run_tests.sh` runs every suite.
-  - The smoke test now has 88 checks. The gameplay test covers spread, aiming, going down and reviving.
+  - The smoke test now has 88 checks. The gameplay test covers spread, aiming, going down and reviving, and a host-owned AI body driven through the same API.
 
 ### Changed
 
+- **Soldier body (squad AI step 1):** the player is split into a shared `Soldier` body and
+  a `PlayerInput` driver.
+  - `Soldier` (`scenes/soldier.tscn`) owns movement, gear, the owner-side actions (`trigger`, `reload`, `use_medical`, `interact`, `revive`, `drop`, `give_up`, `look`, `select_weapon`) and every host-side rule. Drivers set its controls (`move_input`, `want_sprint`, `want_crouch`, `want_aim`).
+  - `PlayerInput` handles the mouse and keys, the camera, the weapon view model, the crosshair target and the HUD. `scenes/player.tscn` inherits the soldier scene and adds it.
+  - Bodies named `AI...` are owned and simulated by the host, ready for squadmates and enemies. Host feedback reaches the driver as signals (`message`, `busy`, `respawned`).
 - Armor damage is now the item's own state, not the wearer's. A dropped plate or helmet
   keeps its holes. `Vitals` now only tracks health and healing.
 - `Inventory.unequip()` returns the item with its state. `take()` accepts state.

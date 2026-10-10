@@ -6,7 +6,8 @@ extends Node
 const OUT_DIR := "res://screenshots"
 
 var level: CompoundLevel
-var player: Player
+var player: Soldier
+var input: PlayerInput
 var camera: Camera3D
 
 
@@ -20,6 +21,8 @@ func _ready() -> void:
 		await get_tree().process_frame
 	player = level.players.get_node(^"1")
 	player.set_physics_process(false)
+	input = player.get_node(^"PlayerInput")
+	input.set_physics_process(false)
 	camera = Camera3D.new()
 	camera.fov = 75
 	add_child(camera)
@@ -32,7 +35,7 @@ func _ready() -> void:
 	_shoot_wall()
 	await _wait(40)
 
-	player._hud.visible = false
+	input.hud.visible = false
 	await _shot("00_soldier_lineup", Vector3(0.6, 1.35, 30.2), Vector3(0, 1.0, 27))
 	await _shot("00b_soldier_closeup", Vector3(-1.1, 1.55, 28.4), Vector3(-1.5, 1.3, 27))
 	await _shot("00c_heavy_kit", Vector3(0.95, 1.6, 28.3), Vector3(0.5, 1.3, 27))
@@ -44,14 +47,14 @@ func _ready() -> void:
 	await _shot("08_heavy_helmet_closeup", Vector3(4.3, 1.85, 12.75), Vector3(4, 1.68, 12))
 	await _shot("09_light_helmet_closeup", Vector3(-3.7, 1.85, 12.75), Vector3(-4, 1.68, 12))
 	await _shot("06_wall_damage", Vector3(-1.2, 1.6, -0.6), Vector3(-3, 1.5, -4))
-	player._hud.visible = true
-	player._hud.update_status(player)
-	player._hud.toggle_detail()  # opens the inventory screen
+	input.hud.visible = true
+	input.hud.update_status(player)
+	input.hud.toggle_detail()  # opens the inventory screen
 	await _wait(3)
-	player._hud.update_status(player)
+	input.hud.update_status(player)
 	await _shot("07_hud_inventory", Vector3(0, 1.65, 18), Vector3(0, 1.3, 12))
 	await _shot("10_reload_pose", Vector3(-0.85, 1.5, 28.1), Vector3(-0.5, 1.25, 27))
-	player._hud.toggle_detail()  # close the inventory screen
+	input.hud.toggle_detail()  # close the inventory screen
 	var downed: TargetDummy = level.get_node(^"Dummies/LightDummy")
 	downed.respawn_seconds = 999.0
 	downed.vitals.server_reset_health()
@@ -63,9 +66,9 @@ func _ready() -> void:
 	player.rotation.y = 0.15
 	player.head.rotation.x = -0.08
 	player.is_aiming = true
-	player.camera.fov = 50.0
-	player.view_model.position = Player.ADS_EYE - VoxelArt.sight_point(VoxelArt.model_for(ItemDB.get_item(&"m4a1")))
-	player.camera.current = true
+	input.camera.fov = 50.0
+	input.view_model.position = PlayerInput.ADS_EYE - VoxelArt.sight_point(VoxelArt.model_for(ItemDB.get_item(&"m4a1")))
+	input.camera.current = true
 	await _wait(10)
 	await RenderingServer.frame_post_draw
 	get_viewport().get_texture().get_image().save_png("%s/12_aim_down_sights.png" % OUT_DIR)

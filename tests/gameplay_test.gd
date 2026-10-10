@@ -6,7 +6,7 @@ extends Node
 
 var failures := 0
 var level: CompoundLevel
-var player: Player
+var player: Soldier
 
 
 func _ready() -> void:
@@ -27,6 +27,7 @@ func _ready() -> void:
 	await _test_drop_and_pickup_keep_state()
 	await _test_spread()
 	await _test_revive_and_downed()
+	await _test_ai_body()
 	GameState.delete_save()
 	print("GAMEPLAY TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
@@ -46,11 +47,11 @@ func _test_firing_and_reload() -> void:
 	inv.take(&"mag_556", 2)
 	var aim := -player.global_basis.z
 	for i in 3:
-		player._server_fire.rpc_id(1, player.camera.global_position, aim, &"primary")
+		player._server_fire.rpc_id(1, player.head.global_position, aim, &"primary")
 		await _seconds(0.12)
 	check(inv.rounds_in(&"primary") == 27, "3 shots fired: 27 left (%d)" % inv.rounds_in(&"primary"))
 	player._server_reload.rpc_id(1, &"primary")
-	player._server_fire.rpc_id(1, player.camera.global_position, aim, &"primary")
+	player._server_fire.rpc_id(1, player.head.global_position, aim, &"primary")
 	check(inv.rounds_in(&"primary") == 27, "can't fire mid-reload")
 	await _seconds(2.6)
 	check(inv.rounds_in(&"primary") == 30, "reload finished: 30 loaded")
@@ -114,14 +115,14 @@ func _test_drop_and_pickup_keep_state() -> void:
 func _test_spread() -> void:
 	print("Spread and aiming")
 	var weapon := ItemDB.get_item(&"m4a1")
-	var forward := -player.camera.global_basis.z
+	var forward := -player.head.global_basis.z
 	var hip := 0.0
 	var aimed := 0.0
 	for i in 200:
 		player.is_aiming = false
-		hip = maxf(hip, rad_to_deg(forward.angle_to(player._spread_direction(weapon))))
+		hip = maxf(hip, rad_to_deg(forward.angle_to(player.spread_direction(weapon))))
 		player.is_aiming = true
-		aimed = maxf(aimed, rad_to_deg(forward.angle_to(player._spread_direction(weapon))))
+		aimed = maxf(aimed, rad_to_deg(forward.angle_to(player.spread_direction(weapon))))
 	player.is_aiming = false
 	check(hip > 0.3 and hip <= 1.2 * 2.5 + 0.01, "hip-fire stays inside the cone (max %.2f deg)" % hip)
 	check(aimed < hip * 0.3, "aiming tightens it (max %.2f deg)" % aimed)
@@ -150,11 +151,43 @@ func _test_revive_and_downed() -> void:
 	player.vitals.server_damage(500.0)
 	await _frames(2)
 	check(player.vitals.downed and player.inventory.hands == &"", "player goes down and drops the HVT case")
-	player._server_fire.rpc_id(1, player.camera.global_position, -player.global_basis.z, &"primary")
+	player._server_fire.rpc_id(1, player.head.global_position, -player.global_basis.z, &"primary")
 	check(player.inventory.rounds_in(&"primary") == rounds, "can't shoot while down")
 	player._server_give_up.rpc_id(1)
 	await _frames(2)
 	check(player.vitals.is_up() and player.vitals.health == player.vitals.max_health, "giving up respawns you at full health")
+
+
+## A host-owned body with no human driver goes through the same API squadmates will use.
+func _test_ai_body() -> void:
+	print("AI-owned soldier body")
+	var bot: Soldier = load("res://scenes/soldier.tscn").instantiate()
+	bot.name = "AI_Test"
+	bot.position = Vector3(6, 0.1, 22)
+	level.players.add_child(bot, true)
+	await _frames(5)
+	check(bot.is_ai() and bot.owner_peer() == 1 and bot.is_multiplayer_authority(), "named AI_*: owned and simulated by the host")
+	check(bot.voxel_viewer != null and not bot.voxel_viewer.requires_visuals, "loads collision only, no visuals")
+	bot.inventory.take(&"m4a1")
+	bot.inventory.take(&"mag_556")
+	bot.trigger(true, true)
+	await _frames(2)
+	check(bot.inventory.rounds_in(&"primary") == 29, "trigger() fires through the host request (%d left)" % bot.inventory.rounds_in(&"primary"))
+	bot.reload()
+	check(bot.is_reloading, "reload() starts a reload")
+	await _seconds(2.6)
+	check(bot.inventory.rounds_in(&"primary") == 30, "and it finishes on the host")
+	var start := bot.global_position
+	bot.move_input = Vector2(0, -1)  # forward
+	await _seconds(0.5)
+	bot.move_input = Vector2.ZERO
+	check(bot.global_position.distance_to(start) > 1.0, "move_input walks it (%.2f m)" % bot.global_position.distance_to(start))
+	var said := []
+	bot.message.connect(func(text: String) -> void: said.append(text))
+	bot.use_medical()
+	await _frames(2)
+	check(said.has("Not injured"), "host feedback comes back as a message signal (%s)" % [said])
+	bot.queue_free()
 
 
 func _world_item(id: StringName) -> WorldItem:

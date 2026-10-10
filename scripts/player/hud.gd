@@ -3,8 +3,8 @@ extends CanvasLayer
 ## Minimal local HUD: crosshair, interact prompt, ammo, load/volume status, and the Tab
 ## inventory screen.
 
-## Set by the owning Player before the HUD enters the tree.
-var player: Player
+## Set by the PlayerInput driver before the HUD enters the tree.
+var player: Soldier
 var inventory_screen: InventoryScreen
 var _crosshair: Label
 var _prompt: Label
@@ -66,7 +66,7 @@ func toggle_detail() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if inventory_screen.visible else Input.MOUSE_MODE_CAPTURED
 
 
-func update_status(player: Player) -> void:
+func update_status(player: Soldier) -> void:
 	var inv := player.inventory
 	var weapon := player.active_weapon()
 	var lines := PackedStringArray()

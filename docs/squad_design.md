@@ -1,6 +1,6 @@
 # Squad AI: design proposal (phase 3)
 
-**Status:** proposal, waiting for decisions. Nothing here is built yet.
+**Status:** decided 2026-10-09. Being built in the order below.
 **Written:** 2026-10-09, after phase 2 (inventory depth) and downed/revive landed.
 
 The roadmap calls this the make-or-break system. It's also where the codebase stops being
@@ -20,7 +20,22 @@ numbers you agree with or want changed.
 | `Ballistics`, `VoxelArmor`, voxel walls | Cover can be destroyed, so the AI must cope with cover disappearing. |
 | Listen server, host authoritative | AI runs only on the host. Clients just see replicated bodies. |
 
-## Decisions needed
+## Decisions
+
+All recommendations were accepted, plus the open question in 6:
+
+| # | Decision |
+|---|---|
+| 1 | Shared `Soldier` body with `PlayerInput` and `SquadAI` drivers |
+| 2 | Runtime navmesh, rebaked locally on breaches; computed cover points |
+| 3 | Utility-scored intents with hysteresis; tuning in a data file |
+| 4 | One lead player (host by default, any player can take lead); orders go to the whole squad |
+| 5 | Squadmates loot for themselves; a carry allowance for players that grows with relationship (2 L to 10 L); loadouts persist |
+| 6 | Permadeath on bleed-out. **Players who bleed out drop their backpack (with contents) where they fell** |
+| 7 | Start with 2 squadmates |
+| 8 | Phase 4 enemies use the same `Soldier` + AI stack |
+
+## Proposal (as reviewed)
 
 ### 1. Body: a squadmate is a Player body without a human
 
@@ -127,7 +142,7 @@ come later, because it's the main payoff of decision 1.
 
 ## Proposed build order (once decided)
 
-1. Split `Player` into `Soldier`, `PlayerInput` and the AI driver. Pure refactor, verified by the existing three test suites.
+1. ~~Split `Player` into `Soldier`, `PlayerInput` and the AI driver. Pure refactor, verified by the existing three test suites.~~ Done: `scripts/soldier/soldier.gd`, `scripts/player/player_input.gd`, `scenes/soldier.tscn` (base) and `scenes/player.tscn` (inherits it, adds the camera and the driver). Bodies named `AI...` are host-owned.
 2. Runtime navmesh over the compound, with rebakes on breaches. Debug drawing.
 3. A squadmate that follows, holds and moves to a point, with commands on hotkeys.
 4. Cover sampling, plus Take cover and Engage against the target dummies, later moving ones.

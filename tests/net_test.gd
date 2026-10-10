@@ -28,7 +28,7 @@ func _ready() -> void:
 
 func _give_kit(id: int) -> void:
 	await get_tree().create_timer(0.5).timeout  # let the player spawn
-	var player: Player = level.players.get_node_or_null(str(id))
+	var player: Soldier = level.players.get_node_or_null(str(id))
 	for item in KIT:
 		player.inventory.take(item)
 	player.inventory.take(&"mag_556", 2)
@@ -45,7 +45,7 @@ func check(condition: bool, what: String) -> void:
 
 func _run_client() -> void:
 	var deadline := Time.get_ticks_msec() + 20000
-	var me: Player
+	var me: Soldier
 	while Time.get_ticks_msec() < deadline:
 		me = level.players.get_node_or_null(str(multiplayer.get_unique_id()))
 		if me and me.inventory.slots[&"primary"] == &"m4a1":
@@ -60,7 +60,7 @@ func _run_client() -> void:
 	var gear: GearRig = me.get_node(^"Gear")
 	check(gear.armor_integrity(&"plate_front") == 1.0 and gear.armor_integrity(&"helmet") == 1.0, "client built the worn voxel armor")
 	for i in 3:
-		me._server_fire.rpc_id(1, me.camera.global_position, -me.global_basis.z, &"primary")
+		me._server_fire.rpc_id(1, me.head.global_position, -me.global_basis.z, &"primary")
 		await get_tree().create_timer(0.15).timeout
 	await _wait_for(func() -> bool: return me.inventory.rounds_in(&"primary") == 27, 3.0)
 	check(me.inventory.rounds_in(&"primary") == 27, "3 shots: host's ammo count replicated back (27)")
