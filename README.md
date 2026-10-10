@@ -108,7 +108,6 @@ include Voxel Tools.
 | R | Reload (fullest spare magazine; a part-used one goes back in your pouch) |
 | H | Use a medical item (smallest kit that covers your injuries) |
 | E on a downed teammate | Revive with your fastest kit (trauma kit 3 s to 50 HP, IFAK 5 s to 25 HP) |
-| F while downed | Give up (die and respawn) |
 | G | Throw the selected grenade (frag, flashbang or smoke) |
 | Shift+G | Switch grenade type |
 | Alt+G | Drop carried bulky item, otherwise drop active weapon |
@@ -119,7 +118,7 @@ include Voxel Tools.
 | Tab | Inventory screen: equip, stow, move between containers, use, drop |
 | Esc | Close the inventory screen / release mouse |
 | Home | Save zone (host) |
-| K | Debug builds only: hurt yourself by 40, to test going down and dying |
+| K | Debug builds only: hurt yourself by 40, to test going down and dying (once down, the next hit kills) |
 
 The command menu follows Arma 3's layout: 1 Move (return to formation, move there, stop), 3 Engage (open fire,
 hold fire), 5 Status, 6 Action (throw smoke or frag at the crosshair), 8 Formation (wedge, file, line, staggered
@@ -215,7 +214,7 @@ There are three suites. Each prints PASSED or FAILED and exits with its failure 
 | Suite | Scene | What it covers |
 |---|---|---|
 | Smoke | `tests/smoke_test.tscn` | 88 checks of the core systems directly: item database, inventory rules, carrier tiers, item state (damage and ammo that travel with an item), ammo and reloading, healing, downed/bleed-out/revive, voxel armor and walls, ballistics, headshots, elbow IK |
-| Gameplay | `tests/gameplay_test.tscn` | Hosts a real session and drives the player through the same requests a client sends: fire, reload, heal, inventory-screen actions, drop and pick up, spread and aiming, going down, reviving a downed body, giving up |
+| Gameplay | `tests/gameplay_test.tscn` | Hosts a real session and drives the player through the same requests a client sends: fire, reload, heal, inventory-screen actions, drop and pick up, spread and aiming, going down, reviving a downed body, dying and respawning |
 | Network | `tests/net_test.tscn` | Two processes over ENet. The client fires, reloads, heals and drops through the host, and checks that the results replicate back |
 
 The gameplay and network tests use their own save zones and never touch your compound save.

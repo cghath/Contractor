@@ -87,7 +87,7 @@ func update_status(player: Soldier) -> void:
 	_status.text = "\n".join(lines)
 	_crosshair.visible = not player.is_aiming and player.vitals.is_up()
 	if player.vitals.downed:
-		_downed.text = "DOWNED - bleeding out in %d s\nWait for a teammate to revive you, or press F to give up" % player.vitals.bleed_seconds
+		_downed.text = "DOWNED - bleeding out in %d s\nWait for a teammate to revive you" % player.vitals.bleed_seconds
 	else:
 		_downed.text = ""
 

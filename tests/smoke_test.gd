@@ -319,10 +319,6 @@ func _test_downed() -> void:
 	check(not vitals.downed and vitals.health == 0.0 and events.back() == "died", "a hit while down finishes you")
 	vitals.server_reset_health()
 	vitals.server_damage(100.0)
-	vitals.server_give_up()
-	check(events.back() == "died", "giving up dies")
-	vitals.server_reset_health()
-	vitals.server_damage(100.0)
 	vitals._bleed_left = 0.05
 	await get_tree().create_timer(0.15).timeout
 	check(events.back() == "died" and not vitals.downed, "bleeding out dies")

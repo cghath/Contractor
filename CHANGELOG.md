@@ -53,7 +53,7 @@ that travels with the item.
   - Stats per weapon: `spread_deg`, `recoil_deg`, `ads_fov`.
 - **Downed and revive:**
   - At 0 HP you go down instead of dying: you fall face down, can only crawl, can't shoot, and drop anything you're carrying in both hands.
-  - You bleed out after 60 s. Another hit while down, or giving up (F), kills you.
+  - You bleed out after 60 s. Another hit while down kills you. There is no giving up.
   - Teammates revive you with E: a trauma kit takes 3 s and brings you back at 50 HP; an IFAK takes 5 s and brings you back at 25 HP. The kit is used up when the revive completes.
   - Hitboxes lie down with the body, so shots land where you're lying.
   - Dead bodies lie down too. Target dummies get back up on their own after a few seconds.
@@ -81,6 +81,8 @@ that travels with the item.
   frag). Everything you carried stays where you died, under a floating marker that clears
   once the gear is picked up. Before, you respawned with all your gear.
 - **AI death is permanent:** an AI soldier that dies doesn't respawn; its gear stays where it fell.
+- **No giving up:** a downed player can only wait for a revive or bleed out. F no longer
+  does anything while down (it's reserved for fire mode); `Vitals.server_give_up` is gone.
 - **Minimal HUD:** no health, ammo, grenade count, load or armor readout, as in Arma with
   ACE. The squad roster shows what each squadmate is doing, without health. Weight,
   litres, rounds loaded and armor damage are on the inventory screen (Tab).
@@ -90,7 +92,7 @@ that travels with the item.
 - Armor damage is now the item's own state, not the wearer's. A dropped plate or helmet
   keeps its holes. `Vitals` now only tracks health and healing.
 - `Inventory.unequip()` returns the item with its state. `take()` accepts state.
-- `Vitals` gained the downed state (`downed`, `bleed_seconds`, `server_revive`, `server_give_up`), replicated to all peers.
+- `Vitals` gained the downed state (`downed`, `bleed_seconds`, `server_revive`), replicated to all peers.
 - **Menu:**
   - The host button is now "Play (host a session)", with a note that solo play means hosting.
   - A failed join says that someone must be hosting at that address.

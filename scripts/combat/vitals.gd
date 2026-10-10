@@ -4,8 +4,8 @@ extends Node
 ## to every peer, including late joiners. (Armor damage is item state, in Inventory.)
 ##
 ## Reaching 0 HP puts you down, not dead: you bleed out over BLEED_OUT_S unless someone
-## revives you (server_revive). Taking another hit while down, giving up, or bleeding out
-## kills you (`died`).
+## revives you (server_revive). Taking another hit while down or bleeding out kills you
+## (`died`). There is no giving up.
 
 signal changed
 signal went_down
@@ -86,11 +86,6 @@ func server_revive(hp: float) -> void:
 	bleed_seconds = 0
 	health = clampf(hp, 1.0, max_health)
 	revived.emit()
-
-
-func server_give_up() -> void:
-	if downed:
-		_die()
 
 
 ## Restores `amount` health spread over `seconds`. A new heal replaces one in progress.

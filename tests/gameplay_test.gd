@@ -156,9 +156,9 @@ func _test_revive_and_downed() -> void:
 	check(player.inventory.rounds_in(&"primary") == rounds, "can't shoot while down")
 	var death_spot := player.global_position
 	var had_vest: StringName = player.inventory.slots[&"vest"]
-	player._server_give_up.rpc_id(1)
+	player.vitals.server_damage(50.0)  # a hit while down kills
 	await _frames(2)
-	check(player.vitals.is_up() and player.vitals.health == player.vitals.max_health, "giving up respawns you at full health")
+	check(player.vitals.is_up() and player.vitals.health == player.vitals.max_health, "dying respawns you at full health")
 	var inv := player.inventory
 	check(inv.slots[&"primary"] == &"m4a1" and inv.count_of(&"mag_556") == 2 and inv.count_of(&"smoke_grenade") == 1 and inv.count_of(&"frag_grenade") == 1,
 		"respawned in the default kit: M4, 2 mags, smoke, frag")

@@ -208,8 +208,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed(&"fire") and not captured:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	elif not vitals.is_up():
-		if event.is_action_pressed(&"give_up"):
-			_server_give_up.rpc_id(1)
+		return  # downed: no giving up (handoff); wait for a revive or bleed out
 	elif event.is_action_pressed(&"interact") and _revive_target:
 		_server_revive.rpc_id(1, _revive_target.get_path())
 	elif event.is_action_pressed(&"interact") and _focus:
@@ -765,12 +764,6 @@ func _server_revive(path: NodePath) -> void:
 func _server_debug_hurt(amount: float) -> void:
 	if _from_owner() and OS.is_debug_build():
 		vitals.server_damage(amount)
-
-
-@rpc("any_peer", "call_local", "reliable")
-func _server_give_up() -> void:
-	if _from_owner():
-		vitals.server_give_up()
 
 
 func _on_went_down() -> void:
