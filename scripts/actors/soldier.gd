@@ -289,6 +289,7 @@ func _spread_direction(weapon: ItemData) -> Vector3:
 		spread *= ADS_SPREAD_MULT
 	var horizontal := Vector2(velocity.x, velocity.z).length()
 	spread *= 1.0 + clampf(horizontal / SoldierMovement.WALK_SPEED, 0.0, 1.5)
+	spread *= vitals.sway_mult()  # wounds, blood loss and pain
 	if not is_on_floor():
 		spread *= 2.5
 	elif is_crouching():
@@ -415,7 +416,7 @@ func _server_reload(slot: StringName) -> void:
 func _server_use_medical() -> void:
 	if not _from_owner() or not vitals.is_up() or _now() < _server_busy_until - 0.1:
 		return
-	if vitals.health >= vitals.max_health:
+	if vitals.injury() <= 0.0:
 		_client_message.rpc_id(owner_peer(), "Not injured")
 		return
 	# Smallest kit that covers the damage; otherwise the biggest one carried.

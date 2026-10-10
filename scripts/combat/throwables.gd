@@ -57,7 +57,7 @@ static func _frag(level: CompoundLevel, pos: Vector3) -> void:
 	for n in combatants(level.get_tree()):
 		var body := n as Node3D
 		var vitals := body.get_node_or_null(^"Vitals") as Vitals
-		if vitals == null or vitals.health <= 0.0:
+		if vitals == null or vitals.is_dead():
 			continue
 		var target := body_point(body)
 		var d := centre.distance_to(target)
@@ -65,7 +65,8 @@ static func _frag(level: CompoundLevel, pos: Vector3) -> void:
 			continue
 		var amount := FRAG_DAMAGE * pow(1.0 - d / FRAG_RADIUS, 1.5)
 		if amount >= 1.0:
-			vitals.server_damage(amount)
+			vitals.server_hit(Vitals.TORSO, {"damage": amount, "round_class": Vitals.FRAGMENT,
+				"position": target, "direction": (target - centre).normalized(), "distance": d})
 		if body.has_method(&"suppress"):
 			body.suppress(0.8, pos)
 	level.voxel_world.server_carve(pos, FRAG_CARVE_M)

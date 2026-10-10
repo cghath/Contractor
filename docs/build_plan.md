@@ -57,14 +57,17 @@ authority on rules and numbers; this file only says who builds what, in which or
 
 ### Wave 0: preparation (integrator, before any agents)
 
-- **Design doc in this repo** (see Sources).
-- **Split `scripts/actors/soldier.gd`** (857 lines) into parts with no behaviour change:
-  movement, human input and camera, host-side requests, carrying. Verified by all suites.
-- **Wound-model interface stub:** the functions the rest of the game will call on
-  `Vitals` (conscious or not, blood, pain, arrest, per-part hits, movement and aim
-  penalties), backed by today's HP for now. AI, HUD, dummies and tests switch to it, so
-  W1 only changes what's behind it.
-- Create the `dev` branch.
+- [ ] **Design doc in this repo** (see Sources).
+- [x] **Split `scripts/actors/soldier.gd`** into `soldier.gd` (state, spread and recoil,
+  carrying, death, host-side requests), `soldier_movement.gd` (Movement node) and
+  `player_input.gd` (PlayerInput node). No behaviour change; all suites pass.
+- [x] **Wound-model interface** in `vitals.gd` ("Wound-model interface" section), backed by
+  HP: `is_unconscious`, `in_cardiac_arrest`, `is_dead`, `blood_fraction`, `pain`, `injury`,
+  `seconds_to_death`, `speed_mult`, `sway_mult`, `stamina_mult`, `condition_text`,
+  `server_hit(part, hit)`, `server_impact(part, round_class, distance)`, plus replicated
+  `net_state`. Hitboxes carry a `body_part` meta; `Ballistics.round_class(weapon)` gives the
+  round class. Ballistics, grenades, squad AI, HUD, command menu and dummies use it.
+- [x] Create the `dev` branch.
 
 ### Wave 1: phase 3 core (5 agents)
 

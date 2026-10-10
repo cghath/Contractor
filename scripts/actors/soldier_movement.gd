@@ -41,7 +41,7 @@ func step(delta: float) -> void:
 		speed = minf(speed, WALK_SPEED) * ADS_SPEED_MULT
 	if down:
 		speed = CRAWL_SPEED
-	speed *= body.load_mult
+	speed *= body.load_mult * body.vitals.speed_mult()
 	if body.carrying != null:
 		speed *= CARRY_BODY_SPEED_MULT
 	var input := Vector2.ZERO

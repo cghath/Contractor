@@ -109,7 +109,7 @@ func _physics_process(delta: float) -> void:
 		_stop()
 		if care != Care.NONE:
 			_end_care()
-		body.ai_status = "DOWN %d s" % body.vitals.bleed_seconds if body.vitals.downed else "Dead"
+		body.ai_status = body.vitals.condition_text()
 		return
 	_grenade_cd -= delta
 	_cover_cd -= delta
@@ -242,8 +242,8 @@ func _choose_intent() -> void:
 		scores[Intent.RELOAD] = 0.95
 	elif weapon and rounds < full * 0.35 and spare > 0 and target == null:
 		scores[Intent.RELOAD] = 0.65
-	if body.vitals.health < 55.0 and _has_heal() and not body.vitals.is_healing() and (not contact or _at_cover()):
-		scores[Intent.HEAL] = 0.6 + 0.3 * (1.0 - body.vitals.health / body.vitals.max_health)
+	if body.vitals.injury() > 0.45 and _has_heal() and not body.vitals.is_healing() and (not contact or _at_cover()):
+		scores[Intent.HEAL] = 0.6 + 0.3 * body.vitals.injury()
 
 	var best: Intent = intent
 	var best_score := -1.0

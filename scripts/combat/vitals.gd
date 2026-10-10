@@ -1,7 +1,13 @@
 class_name Vitals
 extends Node
-## Host-owned health. The owner's ServerSync replicates health, downed and bleed-out time
-## to every peer, including late joiners. (Armor damage is item state, in Inventory.)
+## Host-owned health. The owner's ServerSync replicates health, downed, bleed-out time and
+## net_state to every peer, including late joiners. (Armor damage is item state, in
+## Inventory.)
+##
+## Everything outside this file uses only the "wound-model interface" section below (plus
+## the signals, is_up, downed and find_on). The ACE3/KAT-style wound model from the design
+## doc (blood, wounds per body part, pain, unconsciousness, cardiac arrest) replaces the HP
+## behind that interface without changing its callers. Until then it's backed by HP:
 ##
 ## Reaching 0 HP puts you down, not dead: you bleed out over BLEED_OUT_S unless someone
 ## revives you (server_revive). Taking another hit while down or bleeding out kills you
@@ -13,6 +19,16 @@ signal revived
 signal died
 
 const BLEED_OUT_S := 60.0
+## Round classes for hits and impacts, as the design doc groups them.
+const PISTOL := &"pistol"
+const INTERMEDIATE := &"intermediate"
+const FULL_POWER := &"full_power"
+const FRAGMENT := &"fragment"
+## Body parts that hitboxes name in their "body_part" meta. The wound model adds more.
+const HEAD := &"head"
+const TORSO := &"torso"
+## HP stand-in for where a hit lands.
+const PART_DAMAGE_MULT := {HEAD: 3.0}
 
 @export var max_health := 100.0
 ## False skips the downed state and dies straight away.
@@ -30,6 +46,12 @@ var downed := false:
 var bleed_seconds := 0:
 	set(value):
 		bleed_seconds = value
+		changed.emit()
+
+## Replicated extra state for the wound model (host assigns a fresh Dictionary on change).
+var net_state: Dictionary = {}:
+	set(value):
+		net_state = value
 		changed.emit()
 
 var _bleed_left := 0.0     # host only
@@ -57,6 +79,78 @@ func is_healing() -> bool:
 ## Up and able to act (not down, not dead).
 func is_up() -> bool:
 	return health > 0.0 and not downed
+
+
+# --- Wound-model interface ----------------------------------------------------------------
+# Queries work on every peer (they read replicated state); server_* calls are host only.
+
+## Unconscious or in cardiac arrest: can't act; can be treated, revived, dragged and carried.
+func is_unconscious() -> bool:
+	return downed
+
+
+func in_cardiac_arrest() -> bool:
+	return false
+
+
+func is_dead() -> bool:
+	return health <= 0.0 and not downed
+
+
+## Share of blood volume left, 0 to 1.
+func blood_fraction() -> float:
+	return 1.0
+
+
+## Pain, 0 to 1.
+func pain() -> float:
+	return 0.0
+
+
+## How hurt a conscious unit is, 0 (fine) to 1 (as bad as it gets while still up). AI uses it
+## to decide when to treat itself; the medical screen will show the details.
+func injury() -> float:
+	return clampf(1.0 - health / max_health, 0.0, 1.0) if is_up() else 1.0
+
+
+## Seconds until this unit dies without help, or -1 if it isn't dying.
+func seconds_to_death() -> float:
+	return float(bleed_seconds) if downed else -1.0
+
+
+## Multipliers from wounds, blood loss and pain, applied by movement and aiming.
+func speed_mult() -> float:
+	return 1.0
+
+
+func sway_mult() -> float:
+	return 1.0
+
+
+func stamina_mult() -> float:
+	return 1.0
+
+
+## A few words for squad reports and labels, e.g. "Unconscious, 45 s".
+func condition_text() -> String:
+	if is_dead():
+		return "Dead"
+	if downed:
+		return "Down, %d s" % bleed_seconds
+	return "Injured" if injury() > 0.0 else "OK"
+
+
+## Host only. A round or fragment that got past armor reaches `part` (a hitbox's
+## "body_part" meta). `hit` keys: "damage" (the weapon's damage stat), "round_class",
+## "position" and "direction" (for the wound channel), "distance" (metres from the shooter).
+func server_hit(part: StringName, hit: Dictionary) -> void:
+	server_damage(float(hit.get("damage", 10.0)) * float(PART_DAMAGE_MULT.get(part, 1.0)))
+
+
+## Host only. A round that armor stopped still lands on `part` (impact: pain, stagger,
+## concussion, cracked ribs by range). Nothing yet; the wound model adds it.
+func server_impact(_part: StringName, _round_class: StringName, _distance: float) -> void:
+	pass
 
 
 func server_damage(amount: float) -> void:

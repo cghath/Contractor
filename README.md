@@ -169,7 +169,8 @@ autoload/
 scripts/
   inventory/      ItemData, Inventory (slots + litre containers), WorldItem (pickup)
   combat/         Vitals (health, healing), VoxelArmor (plates, helmets), GearRig (worn gear), Ballistics, Grenade/Throwables/SmokeCloud
-  actors/         Soldier: the shared body for players and AI (movement, input for humans, host-validated requests)
+  actors/         Soldier: the shared body for players and AI (state, carrying, host-validated requests);
+                  SoldierMovement (walking, crouching, speed costs); PlayerInput (human driver, camera, HUD)
   ai/             SquadAI (utility intents, buddy tactics, casualty care), Squad (orders, formations)
   player/         CharacterModel (procedural voxel soldier), Hud
   art/            VoxelArt: code-built voxel models (body parts, carriers, packs, rifles, pistol)

@@ -31,11 +31,7 @@ func _process(_delta: float) -> void:
 
 
 func _update_label() -> void:
-	var status := "HP %d" % vitals.health
-	if vitals.downed:
-		status = "DOWN %ds" % vitals.bleed_seconds
-	elif vitals.health <= 0.0:
-		status = "DEAD"
+	var status := vitals.condition_text()
 	var lines := PackedStringArray([status])
 	var armor := gear.armor_summary("\n")
 	if armor != "":

@@ -241,7 +241,7 @@ func _report() -> void:
 	var lines := PackedStringArray()
 	for s in roster():
 		if String(s.name) in selected:
-			lines.append("%s: %s (%d HP)" % [s.name, s.ai_status, s.vitals.health])
+			lines.append("%s: %s (%s)" % [s.name, s.ai_status, s.vitals.condition_text()])
 	player._hud.flash("\n".join(lines))
 
 

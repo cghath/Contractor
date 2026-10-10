@@ -81,6 +81,16 @@ that travels with the item.
   frag). Everything you carried stays where you died, under a floating marker that clears
   once the gear is picked up. Before, you respawned with all your gear.
 - **AI death is permanent:** an AI soldier that dies doesn't respawn; its gear stays where it fell.
+- **Soldier split (build plan wave 0):** `scripts/actors/soldier.gd` is now three parts so
+  parallel work doesn't collide: `soldier_movement.gd` (Movement node), `player_input.gd`
+  (PlayerInput node: the human driver, camera, view model, HUD) and the body with its
+  host-side requests. No behaviour change.
+- **Wound-model interface:** everything outside `Vitals` now goes through named calls
+  (`server_hit(part, hit)`, `server_impact`, `injury()`, `condition_text()`,
+  `seconds_to_death()`, `speed_mult()`, `sway_mult()` and others), backed by HP until the
+  wound model replaces it. Hitboxes name their body part in a `body_part` meta (was
+  `damage_mult`); `Vitals.net_state` is replicated for the wound model's extra state.
+  Squad reports and dummy labels show a condition instead of HP.
 - **Planned keys** (README, "Decided, not built yet"): stance adjust moves to holding Caps
   Lock + WASD, interaction to holding Left Ctrl and self-interaction to holding Left Ctrl +
   Left Alt, instead of the handoff's Ctrl+WASD, Left Windows and Ctrl+Left Windows.
