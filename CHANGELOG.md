@@ -241,6 +241,7 @@ that travels with the item.
 
 ### Added
 
+- **18 new voxel materials** for the worldspaces, with fixed colours from the faction pack's material registry: mud brick, stone, limestone, basalt, tuff, coral stone, brick, cinder block, plaster, roof tile, fibre cement, corrugated iron, thatch, tarp, glass, sandbag, HESCO and dirt berm. They are colours only for now; all materials still carve the same way.
 - **Squad AI (phase 3, first pass):** the player squad has 8 slots, and AI fills every slot players don't (7 squadmates for one player, 4 for four). See `docs/squad_design.md`.
   - Arma 3-style command menu: F1-F8 select squadmates by number (~ for all), then 1-9 / 0 or the mouse wheel and middle click pick orders: move (formation, move there, stop), engage (open / hold fire), status, action (throw smoke or frag at the crosshair), formation (wedge, file, line, staggered column) and a support menu (not built yet). Orders go to the selected units; the last player to give one leads.
   - Everyone is paired into battle buddies. In a fight, soldiers take cover, crouch when not shooting, get pinned by close fire, and buddies take turns moving while the other covers. Frags go to enemies hiding behind cover.

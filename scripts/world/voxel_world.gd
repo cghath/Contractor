@@ -24,11 +24,25 @@ const VOXEL_SIZE := 0.1
 ## World materials, set by the structure that places the voxels (add_box_m). PAINTED is
 ## painted concrete; STEEL is thick steel (stops rounds like concrete); SHEET_METAL is thin
 ## sheet (a container's walls, a roof); SANDBAG is filled sandbags or packed earth.
-## Append new ones at the end: saved structures and edits use these numbers.
-enum Mat { EMPTY, CONCRETE, PAINTED, WOOD, STEEL, SHEET_METAL, SANDBAG }
-## Index 0 must stay transparent: the cubes mesher treats it as empty.
-const PALETTE: Array[Color] = [Color(0, 0, 0, 0), Color("8a8577"), Color("5f6b58"), Color("8c6a46"), Color("4a4d50"),
-	Color("7b8a8c"), Color("a08d66")]
+## Append new materials at the end: edit logs and saves store these values.
+## MUD_BRICK to DIRT_BERM come from the faction pack's worldspace material registry (colours
+## only so far: without a MATERIALS entry they stop rounds like concrete).
+enum Mat {
+	EMPTY, CONCRETE, PAINTED, WOOD, STEEL,
+	MUD_BRICK, STONE, LIMESTONE, BASALT, TUFF, CORAL_STONE, BRICK, CINDER_BLOCK, PLASTER,
+	ROOF_TILE, FIBRE_CEMENT, CORRUGATED_IRON, THATCH, TARP, GLASS, SANDBAG, HESCO, DIRT_BERM,
+	SHEET_METAL,
+}
+## One colour per Mat, in the same order. Index 0 must stay transparent: the cubes mesher
+## treats it as empty.
+const PALETTE: Array[Color] = [
+	Color(0, 0, 0, 0), Color("8a8577"), Color("5f6b58"), Color("8c6a46"), Color("4a4d50"),
+	Color("a47e57"), Color("8f8676"), Color("d6caa8"), Color("4b4845"), Color("c48a6a"),
+	Color("cbbf9f"), Color("9c5a3c"), Color("9a978f"), Color("e3dccb"), Color("a4553b"),
+	Color("a5a49c"), Color("8b8e8c"), Color("b49a5e"), Color("3f6d8c"), Color("9fbcc4"),
+	Color("b8a378"), Color("a99a6c"), Color("8a6f4e"),
+	Color("7b8a8c"),
+]
 ## How each material takes fire (Ballistics walks a round through the voxels, trace_round):
 ## - "loss_j_per_m": energy a round loses per metre of it. INF stops every small-arms round:
 ##   no hole, only a small surface mark (server_mark). A round that runs out of energy inside
