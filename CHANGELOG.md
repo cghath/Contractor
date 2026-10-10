@@ -11,6 +11,52 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Captain's wave 1 playtest fixes
+
+Four of the five fixes, each built, reviewed and fixed by its own agent. The movement fix
+(sliding as if on ice) isn't finished and isn't in yet.
+
+#### Changed
+
+- **Knockouts:** getting hit in the plates no longer knocks you out. Stopped rounds bruise
+  (plate impact pain about halved and capped at 0.35 however many land), still stagger you,
+  and 7.62 still winds you. A medium-armor soldier hit 2-3 times, or 6 times in a burst,
+  stays conscious and fighting.
+  - Pain knocks you out only when it stays at the threshold for 3 seconds, not on a brief
+    spike. One rifle round through a limb hurts (pain 0.45-0.65, was 0.6-0.9) and often
+    breaks the bone, but doesn't knock a healthy soldier out. Pistol wounds 0.25-0.4.
+  - Steel spall is rare and minor: 5% of pistol, 10% of 5.56/7.62x39 and 20% of full-power
+    stops, one wound at most, usually a scratch. It used to be 1-2 wounds on every stop.
+  - Cracked ribs from plate stops are rarer and depend on range (5.56: 20% point blank,
+    none past 100 m).
+  - Two .308 helmet stops no longer knock you out on their own; it takes three, or the
+    concussion roll.
+- **Armor voxels:** plates and helmets are one voxel thicker (PE and ceramic plates 3 cm,
+  steel and side plates 2 cm, helmets 2-3 cm). A stopped round leaves a small dent of a few
+  voxels and never a hole; only a round that gets through makes one. Repeated hits on one
+  spot wear through: about 5 for steel, 3 for polyethylene and helmets.
+- **World materials:** wood and thin sheet metal can be shot through, hitting whoever is
+  behind with less energy (a thick stack of wood stops it). Concrete stops every small-arms
+  round with no hole and takes a small 5 cm crack mark instead, seen by every player, for
+  late joiners too, and saved with the zone. Frags chip concrete and blow holes in planks
+  and sheet metal. The compound now has concrete, sandbags, wooden crates, a wooden shed
+  with a sheet-metal roof and a shipping container. AI prefers concrete and sandbag cover.
+- **Animations:** fireman's carry (the casualty limp over your shoulders), drag (backing
+  away in a crouch holding the carrier straps, casualty on their back head first), pick up,
+  equip, stow and drop (hand to the slot), weapon draw, treating (kneeling, hands at the
+  wound) and looting. Every player sees them, including late joiners, and hit areas follow
+  the poses. In first person the view model drops out of the way. You can't fire while
+  dragging.
+
+#### Fixed
+
+- Plates, helmets and armor lying on the ground take damage: they dent, crack and lose
+  integrity like worn armor, and keep it when picked up.
+- Plates (especially thin steel ones) that landed face first could sink into the ground or
+  crates and couldn't be picked up.
+- The smoke suite's random "plate protected the body" failure.
+- Tests: new materials and animations suites (14 suites by default).
+
 ### Wave 2 of the build plan (phase 3 finish)
 
 Built by three agents in parallel (kit and treatment, AI casualty care, ammo and smokes),

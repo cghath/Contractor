@@ -87,9 +87,11 @@ authority on rules and numbers; this file only says who builds what, in which or
 Changed mid-wave on Captain's direction, by two more agents: the stopgap revive is removed
 (consciousness follows SpO2, pain, morphine level, blood loss and total trauma; blood creeps
 back slowly once every bleed stops, until IV), every dead soldier leaves a body with its gear
-on it (saved with the zone), and medics put the wounded first even in a firefight. Captain's
-wave 1 playtest fixes (knockouts, movement feel, armor voxels, world materials, animations)
-come next, before wave 3.
+on it (saved with the zone), and medics put the wounded first even in a firefight.
+
+Captain's wave 1 playtest fixes, merged on `dev` 2026-10-10 (all 14 suites pass): knockouts,
+armor voxels and pickup, world materials, action animations. Still open: **movement feel**
+(sliding on ice); branch `fix2/p2-movement` has unfinished, untested work to pick up.
 
 | # | Workstream |
 |---|---|

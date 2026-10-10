@@ -224,7 +224,7 @@ Run every suite with one command (from Git Bash on Windows):
 GODOT="$HOME/Downloads/GodotVoxel_1.7/godot.windows.editor.x86_64.exe" tools/run_tests.sh
 ```
 
-There are twelve suites; `tools/run_tests.sh` runs them all (about 5 minutes), or name the
+There are fourteen suites; `tools/run_tests.sh` runs them all (about 7 minutes), or name the
 ones you want (`tools/run_tests.sh wounds medical`). Each prints PASSED or FAILED and exits
 with its failure count. Set `CONTRACTOR_TEST_TAG` and `CONTRACTOR_PORT` when running two at once.
 
@@ -236,6 +236,7 @@ with its failure count. Set `CONTRACTOR_TEST_TAG` and `CONTRACTOR_PORT` when run
 | Squad, roles, interaction, movement | `tests/<name>_test.tscn` | Squad AI and commands, role kits, the Left Ctrl menus, stances, lean and mount |
 | Wounds, armor, medical | `tests/<name>_test.tscn` | The wound model and consciousness, armor ratings and voxel plates, the field kit and treatments |
 | Casualty, logistics | `tests/<name>_test.tscn` | AI casualty care, bodies and their save; loose ammo, magazines, coloured smoke and navigation |
+| Materials, animations | `tests/<name>_test.tscn` | Wood, sheet metal and concrete under fire, impact marks; carry, drag, pickup, equip, treat and loot poses |
 
 The gameplay and network tests use their own save zones and never touch your compound save.
 To regenerate the screenshots in `screenshots/` (this opens a window for a few seconds):
@@ -279,6 +280,9 @@ a release:
 - Medical depth is wave 3: no IV, blood bags, CPR, defibrillator, decompression needle or surgery yet. Until IV, blood only comes back slowly once every bleed has stopped, and heart wounds and internal torso bleeding have no field fix. SpO2 is a basic model (no per-lung efficiency or pulse oximeter), and there's no breathing sound yet.
 - Bodies: a zone reload respawns the full friendly squad alive while dead squadmates' saved bodies also come back, so their gear exists twice (AI persistence is wave 4; dead hostiles aren't respawned). Loot all can't move a carrier with its contents onto someone already wearing one; it falls back to piece by piece.
 - AI squadmates don't load magazines from loose rounds, and role kits carry no loose rounds.
+- Movement still slides a little when stopping and turning; Captain's fix for it is in progress (branch `fix2/p2-movement`, unfinished).
+- A bullet hole through wood or sheet metal is one whole 10 cm voxel per voxel crossed; concrete marks are small decals. No ricochets yet.
+- You can still fire during a pickup or equip animation. A dragged casualty eases back about 1 m when put down. An equip animation plays even when the action then fails.
 - Players don't start in their role's kit yet (`CompoundLevel.player_role_kits` is off); they kit out from the compound's loot. Autoriflemen and grenadiers carry M4s until there are LMG and launcher items.
 - Squad AI doesn't use the new stances, leaning or mounting yet, and callouts have no voice audio (subtitles only).
 - A player who joins while someone is being carried sees that body as solid until it's put down.
