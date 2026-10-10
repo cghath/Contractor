@@ -9,7 +9,14 @@ const KEYS := {
 	&"move_right": [KEY_D],
 	&"jump": [KEY_SPACE],
 	&"sprint": [KEY_SHIFT],
-	&"crouch": [KEY_CTRL, KEY_C],
+	# Movement and weapon handling (design doc "Controls and feel", keys agreed since).
+	&"crouch": [KEY_X],  # toggle
+	&"prone": [KEY_Z],  # toggle
+	&"stance_adjust": [KEY_CAPSLOCK],  # hold: W/S step stance up/down, A/D side stance
+	&"lean_left": [KEY_Q],  # hold to lean, double-tap to stay, tap to return
+	&"lean_right": [KEY_E],
+	&"mount": [KEY_C],  # rest the weapon on a surface in front
+	&"fire_mode": [KEY_F],
 	&"interact": [KEY_E],
 	&"reload": [KEY_R],
 	&"use_medical": [KEY_H],

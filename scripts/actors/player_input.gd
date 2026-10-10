@@ -105,6 +105,10 @@ func _physics_process(delta: float) -> void:
 	_update_aim(delta)
 	_try_fire()
 	body.view_model.rotation.x = move_toward(body.view_model.rotation.x, -0.7 if body.is_reloading else 0.0, delta * 6.0)
+	# Settle sway after a stop (W3, SoldierMovement.weapon_sway).
+	var sway := body.movement.weapon_sway()
+	body.view_model.rotation.y = sway.x
+	body.view_model.rotation.z = sway.y
 	hud.update_status(body)
 
 
@@ -172,8 +176,10 @@ func _try_fire() -> void:
 	var weapon := body.active_weapon()
 	if weapon == null or weapon.type != "weapon":
 		return
-	var auto: bool = weapon.stats.get("auto", false)
-	if not (Input.is_action_pressed(&"fire") if auto else Input.is_action_just_pressed(&"fire")):
+	# Fire mode (W3): F moves the selector; the trigger follows the mode.
+	if Input.is_action_just_pressed(&"fire_mode") and Soldier.fire_modes_of(weapon).size() > 1:
+		hud.flash(body.cycle_fire_mode().capitalize())
+	if not Soldier.trigger_fires(body.fire_mode(), Input.is_action_pressed(&"fire"), Input.is_action_just_pressed(&"fire")):
 		return
 	var now := Soldier._now()
 	if now < body._next_shot or now < body._busy_until:

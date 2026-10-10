@@ -9,7 +9,7 @@ extends CharacterBody3D
 ## request to the host, which validates it and lets ServerSync carry the result back.
 ##
 ## The body is split across child nodes so separate work doesn't collide:
-## - Movement (SoldierMovement): walking, crouching, jumping, speed costs.
+## - Movement (SoldierMovement): walking, stances, lean, weapon mount, stamina, speed costs.
 ## - PlayerInput: the human driver (input, camera, view model, crosshair target, HUD).
 ## - This file: shared state, weapon spread and recoil, carrying, death, and every
 ##   host-side request (the `_server_*` functions that players and AI both call).
@@ -70,6 +70,10 @@ var move_input := Vector2.ZERO
 var want_sprint := false
 var want_crouch := false
 var want_aim := false
+## AI stance intent: a SoldierMovement.Stance, or -1 to follow want_crouch.
+var want_stance := -1
+## Owner-side: fire-selector position per weapon, keyed "slot:item id" ("semi", "auto").
+var _fire_modes := {}
 ## Host only: who is dragging or carrying this body while it is down.
 var carried_by: Soldier
 ## Host only: the downed body this one is dragging or carrying.
@@ -151,6 +155,41 @@ func active_weapon() -> ItemData:
 	return ItemDB.get_item(id) if id != &"" else null
 
 
+## The fire modes a weapon's selector has, from its "fire_modes" stat ("semi", "auto").
+static func fire_modes_of(weapon: ItemData) -> PackedStringArray:
+	if weapon == null or weapon.type != "weapon":
+		return PackedStringArray()
+	if weapon.stats.has("fire_modes"):
+		return PackedStringArray(weapon.stats.fire_modes)
+	return PackedStringArray(["auto" if weapon.stats.get("auto", false) else "semi"])
+
+
+## Owner-side: the active weapon's fire mode (its first listed mode until changed).
+func fire_mode() -> String:
+	var weapon := active_weapon()
+	var modes := fire_modes_of(weapon)
+	if modes.is_empty():
+		return ""
+	var mode: String = _fire_modes.get("%s:%s" % [active_slot, weapon.id], modes[0])
+	return mode if mode in modes else modes[0]
+
+
+## Owner-side (F): moves the active weapon's selector to its next mode and returns it.
+func cycle_fire_mode() -> String:
+	var weapon := active_weapon()
+	var modes := fire_modes_of(weapon)
+	if modes.is_empty():
+		return ""
+	var mode := modes[(modes.find(fire_mode()) + 1) % modes.size()]
+	_fire_modes["%s:%s" % [active_slot, weapon.id]] = mode
+	return mode
+
+
+## Whether the trigger sends a shot this frame: auto fires while held, semi once per pull.
+static func trigger_fires(mode: String, held: bool, just_pressed: bool) -> bool:
+	return held if mode == "auto" else just_pressed
+
+
 func _add_voxel_viewer() -> void:
 	# Local player loads visuals and collision; the host also needs collision around
 	# remote players and AI for movement checks and ballistics.
@@ -178,6 +217,7 @@ func _process(_delta: float) -> void:
 	# Runs on every peer: active_slot, inventory and head rotation are replicated.
 	model.look_pitch = head.rotation.x
 	model.reloading = is_reloading
+	movement.apply_pose()  # model pose, hitbox pose and capsule from the replicated stance
 	CharacterModel.lay_down(self, model, not vitals.is_up())
 	if not vitals.is_up():
 		model.hold = CharacterModel.Hold.NONE
@@ -297,8 +337,8 @@ func _spread_direction(weapon: ItemData) -> Vector3:
 	spread *= vitals.sway_mult()  # wounds, blood loss and pain
 	if not is_on_floor():
 		spread *= 2.5
-	elif is_crouching():
-		spread *= 0.7
+	else:
+		spread *= movement.spread_mult()  # stance, mounted weapon, settle after a stop
 	var forward := -camera.global_basis.z
 	var angle := randf() * TAU
 	var amount := sqrt(randf()) * spread  # uniform over the cone's disc
@@ -309,6 +349,7 @@ func _spread_direction(weapon: ItemData) -> Vector3:
 ## Recoil: the view kicks up and a little sideways; aiming halves it.
 func _kick(weapon: ItemData) -> void:
 	var kick := deg_to_rad(float(weapon.stats.get("recoil_deg", 0.6))) * (0.5 if is_aiming else 1.0)
+	kick *= movement.recoil_mult()  # stance and mounted weapon
 	head.rotation.x = clampf(head.rotation.x + kick, -1.5, 1.5)
 	rotate_y(randf_range(-0.35, 0.35) * kick)
 
