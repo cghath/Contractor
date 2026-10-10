@@ -73,7 +73,7 @@ func describe() -> String:
 		detail = "  [%d rds]" % int(state.rounds)
 	elif not state.get("chips", []).is_empty():
 		detail = "  [damaged: %d hits]" % state.chips.size()
-	return "[E] %s %s%s%s   %.1f L  %.1f kg" % [verb, item.name, amount, detail, item.volume_l * count, item.mass_kg * count]
+	return "%s %s%s%s   %.1f L  %.1f kg" % [verb, item.name, amount, detail, item.volume_l * count, item.mass_kg * count]
 
 
 ## Placeholder box size: explicit `size_m` from item stats, else a cube of the item's volume.
