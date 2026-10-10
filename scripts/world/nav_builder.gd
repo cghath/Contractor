@@ -13,9 +13,10 @@ extends Node3D
 ## Emitted when a chunk's background rebake is in place (the map uses it a frame later).
 signal rebaked(chunk: Vector2i)
 
-## The baked area. Chunk edges (every CHUNK_M from AREA's corner, at x and z = ±6, ±18, ±30)
-## stay clear of the gate and the building doorway.
-const AREA := AABB(Vector3(-42, -1, -42), Vector3(84, 8, 84))
+## The baked area: the compound and a good way around it (formations behind a player at the
+## gate reach past 45 m). Chunk edges (every CHUNK_M from AREA's corner, at x and z = ±6,
+## ±18, ±30, ±42) stay clear of the gate and the building doorway.
+const AREA := AABB(Vector3(-54, -1, -54), Vector3(108, 8, 108))
 const CHUNK_M := 12.0
 ## Geometry this far beyond a chunk is baked with it, so its edges match its neighbours'.
 ## A multiple of the 0.25 m cell size, and more than the agent radius.
