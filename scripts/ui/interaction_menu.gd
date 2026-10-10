@@ -36,6 +36,7 @@ const DOWNED_POINT_Y := 0.3
 ## Target kinds, the keys of ACTIONS.
 const ITEM := &"item"
 const DOWNED := &"downed"
+const DEAD := &"dead"
 const SQUADMATE := &"squadmate"
 const SELF := &"self"
 
@@ -57,6 +58,11 @@ const ACTIONS := {
 		{"id": &"carry", "label": "Carry", "needs": &"can_move_body", "request": &"_server_carry_body", "with": &"target"},
 		{"id": &"drag", "label": "Drag", "needs": &"can_move_body", "request": &"_server_drag_body", "with": &"target"},
 		{"id": &"check_condition", "label": "Check condition", "show": &"condition"},
+	],
+	DEAD: [
+		{"id": &"loot", "label": "Loot", "request": &"_server_loot_body", "with": &"target"},
+		{"id": &"carry", "label": "Carry", "needs": &"can_move_body", "request": &"_server_carry_body", "with": &"target"},
+		{"id": &"drag", "label": "Drag", "needs": &"can_move_body", "request": &"_server_drag_body", "with": &"target"},
 	],
 	SQUADMATE: [
 		{"id": &"give_item", "label": "Give item", "submenu": &"stowed_items", "request": &"_server_give_item", "with": &"target_entry"},
@@ -113,6 +119,8 @@ static func target_kind(actor: Soldier, target: Node) -> StringName:
 		return &""
 	if vitals.downed:
 		return DOWNED
+	if vitals.is_dead() and target is Soldier:
+		return DEAD
 	if target is Soldier and vitals.is_up() and (target as Soldier).faction == actor.faction:
 		return SQUADMATE
 	return &""

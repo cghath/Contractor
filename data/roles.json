@@ -1,11 +1,12 @@
 {
-	"_notes": "Squad roles and starting kits (design doc, Roles: proposed). A kit is base_kit plus the role's kit, as [item id, count] pairs, taken in order (carrier before plates). 'weapon_note' says what stands in for a weapon the item list doesn't have yet. fire_teams lists each team's slots in order; slots pair into battle buddies (1st+2nd, 3rd+4th). Every team keeps exactly one medic slot.",
+	"_notes": "Squad roles and starting kits (design doc, Roles: proposed). A kit is base_kit plus the role's kit, as [item id, count] pairs, taken in order (carrier before plates). 'weapon_note' says what stands in for a weapon the item list doesn't have yet. fire_teams lists each team's slots in order; slots pair into battle buddies (1st+2nd, 3rd+4th). Every team keeps exactly one medic slot. Medical loadouts (design doc, The kit and Medics): the medic carries a trauma kit plus extra tourniquets, gauze, bandages, chest seals, splints, morphine and NPAs; everyone else carries an IFAK.",
 	"base_kit": [["plate_carrier", 1], ["plate_ceramic_l4", 2], ["helmet", 1], ["assault_pack", 1]],
 	"roles": {
 		"team_leader": {"name": "Team Leader", "short": "TL",
 			"kit": [["m4a1", 1], ["mag_556", 5], ["ifak", 1], ["frag_grenade", 1], ["smoke_grenade", 2]]},
 		"medic": {"name": "Medic", "short": "MED",
-			"kit": [["m4a1", 1], ["mag_556", 4], ["ifak", 4], ["trauma_kit", 1], ["tourniquet", 4], ["smoke_grenade", 2]]},
+			"kit": [["m4a1", 1], ["mag_556", 4], ["trauma_kit", 1], ["tourniquet", 4], ["hemostatic_gauze", 4], ["pressure_bandage", 6],
+				["chest_seal", 3], ["splint", 2], ["morphine", 4], ["npa", 2], ["smoke_grenade", 2]]},
 		"autorifleman": {"name": "Autorifleman", "short": "AR", "weapon_note": "M4A1 until there is an LMG item",
 			"kit": [["m4a1", 1], ["mag_556", 10], ["ifak", 1], ["frag_grenade", 1], ["smoke_grenade", 1]]},
 		"grenadier": {"name": "Grenadier", "short": "GR", "weapon_note": "M4A1 without an underbarrel launcher until there is one",

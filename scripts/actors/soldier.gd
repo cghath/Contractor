@@ -35,6 +35,11 @@ const THROW_SPEED := 15.0
 ## Physics layer of soldier bodies ("movers").
 const BODY_LAYER := 1 << 4
 const THROW_BUSY_S := 0.7
+## Dead AI bodies stay in the world in this group, lying, gear and all (lootable, carriable).
+const DEAD_GROUP := &"dead_bodies"
+## Proposed: at most this many dead bodies per zone; past it the oldest one goes (its gear
+## stays on the ground).
+const MAX_BODIES := 12
 
 @onready var head: Node3D = $Head
 @onready var camera: Camera3D = $Head/Camera
@@ -85,7 +90,8 @@ var suppression := 0.0
 ## Host only (AI): where incoming fire last came from, and when.
 var threat_pos := Vector3.ZERO
 var threat_time := -1000.0
-## Host only. An AI soldier bled out or was killed; it's freed right after.
+## Host only. An AI soldier bled out or was killed (permadeath: it never gets up again). Its
+## body stays in the world (DEAD_GROUP) until the body cap removes it.
 signal died_for_good(soldier: Soldier)
 ## The active weapon or the carried load changed (the view model follows it).
 signal loadout_changed
@@ -105,6 +111,10 @@ var role: StringName = &""
 var fire_team := -1
 var squad_slot := -1
 var color_team := ""
+## Host only: when this body died (Soldier._now()), for the body cap; -1 while alive.
+var died_at := -1.0
+## Host only (tests may lower it): the body cap in force.
+static var body_cap := MAX_BODIES
 
 
 func _enter_tree() -> void:
@@ -226,6 +236,8 @@ func _process(_delta: float) -> void:
 	model.reloading = is_reloading
 	movement.apply_pose()  # model pose, hitbox pose and capsule from the replicated stance
 	CharacterModel.lay_down(self, model, not vitals.is_up())
+	if collision_layer != 0 and is_ai() and vitals.is_dead():
+		collision_layer = 0  # a dead body lies where it fell and doesn't block anyone
 	if not vitals.is_up():
 		model.hold = CharacterModel.Hold.NONE
 	elif inventory.hands != &"" or (active_weapon() != null and active_slot == &"primary"):
@@ -307,8 +319,9 @@ func _update_carried() -> void:
 
 
 ## Host only. Picks up (CARRY) or takes hold of (DRAG) a downed body within `reach`.
+## Dead bodies can be carried and dragged too.
 func server_pick_up_body(other: Soldier, mode := CARRY, reach := REVIVE_RANGE) -> bool:
-	if other == null or other == self or other.vitals.is_up() or not other.vitals.downed:
+	if other == null or other == self or other.is_queued_for_deletion() or other.vitals.is_up():
 		return false
 	if carrying != null or inventory.hands != &"" or not vitals.is_up():
 		return false
@@ -753,8 +766,8 @@ func _server_move_body(path: NodePath, mode: StringName) -> void:
 	if not _from_owner() or not vitals.is_up():
 		return
 	var other := get_node_or_null(path) as Soldier
-	if other == null or other == self or not other.vitals.downed:
-		return
+	if other == null or other == self or other.vitals.is_up():
+		return  # a downed or a dead body
 	if carrying == other:
 		_set_carry_mode(mode)
 		return
@@ -794,7 +807,7 @@ func _client_carry_mode(mode: StringName) -> void:
 @rpc("any_peer", "call_local", "reliable")
 func _client_lifted(lifted: bool) -> void:
 	if multiplayer.get_remote_sender_id() == 1:
-		collision_layer = 0 if lifted else BODY_LAYER
+		collision_layer = 0 if lifted or vitals.is_dead() else BODY_LAYER
 
 
 func _on_went_down() -> void:
@@ -806,26 +819,79 @@ func _on_went_down() -> void:
 	release_carried()  # ...and whoever you were carrying
 
 
-## Everything the body carried stays where it fell, lootable. AI is gone for good. A player
-## respawns in the default kit, and a marker shows where their old gear lies (handoff).
+## AI is gone for good (permadeath), but its body stays: lying where it fell (or on the
+## shoulder of whoever carries it), not blocking anyone, keeping its gear for looting, until
+## the body cap removes it. A player respawns in the default kit; their gear stays where they
+## fell, with a marker (handoff).
 func _on_died() -> void:
 	if not multiplayer.is_server():
 		return
 	release_carried()
+	if is_ai():
+		_server_become_body()
+		died_for_good.emit(self)
+		return
 	if is_instance_valid(carried_by):
 		carried_by.release_carried()
 	var spot := global_position
 	_server_drop_everything()
-	if is_ai():
-		died_for_good.emit(self)
-		queue_free()
-		return
 	vitals.server_reset_health()
 	for kit: Array in DEFAULT_KIT:
 		inventory.take(kit[0], kit[1])
 	var level := CompoundLevel.current(self)
 	level.show_gear_marker.rpc(spot, "Player %s's gear" % name)
 	_client_respawn.rpc_id(owner_peer(), level.next_spawn_point())
+
+
+## Host only. A dead AI soldier becomes a body (DEAD_GROUP): whatever was in its hands drops,
+## the rest of its gear stays on it. Past the body cap the oldest body goes.
+func _server_become_body() -> void:
+	var held := inventory.release_hands()
+	if held != &"":
+		_server_spawn_in_front(held)
+	care_by = null
+	died_at = _now()
+	collision_layer = 0
+	add_to_group(DEAD_GROUP)
+	server_enforce_body_cap(get_tree())
+
+
+## Host only. Removes the oldest dead bodies past `body_cap` (bodies someone is carrying are
+## kept). A removed body's gear stays on the ground where it lay.
+static func server_enforce_body_cap(tree: SceneTree) -> void:
+	var bodies: Array = tree.get_nodes_in_group(DEAD_GROUP).filter(func(n: Node) -> bool: return n is Soldier and not n.is_queued_for_deletion())
+	bodies.sort_custom(func(a: Soldier, b: Soldier) -> bool: return a.died_at < b.died_at)
+	var extra := bodies.size() - body_cap
+	for b: Soldier in bodies:
+		if extra <= 0:
+			break
+		if is_instance_valid(b.carried_by):
+			continue
+		b.server_remove_body()
+		extra -= 1
+
+
+## Host only. Takes a dead body out of the world; its gear drops where it lay.
+func server_remove_body() -> void:
+	if is_instance_valid(carried_by):
+		carried_by.release_carried()
+	_server_drop_everything()
+	remove_from_group(DEAD_GROUP)
+	queue_free()
+
+
+## Strips a dead body (interaction menu "Loot"): its gear goes on the ground around it.
+@rpc("any_peer", "call_local", "reliable")
+func _server_loot_body(path: NodePath) -> void:
+	if not _from_owner() or not vitals.is_up():
+		return
+	var other := get_node_or_null(path) as Soldier
+	if other == null or other == self or other.is_queued_for_deletion() or not other.vitals.is_dead():
+		return
+	if other.global_position.distance_to(global_position) > INTERACT_REACH + INTERACT_SLACK:
+		_client_message.rpc_id(owner_peer(), "Too far away")
+		return
+	other._server_drop_everything()
 
 
 ## Host only. Empties the inventory onto the ground around this body, item state and all.

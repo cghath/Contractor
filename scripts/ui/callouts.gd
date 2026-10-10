@@ -4,7 +4,9 @@ extends Node
 ## the same node exists on every peer.
 ##
 ## The host decides what is said: SquadAI and the level call say() (contact, reloading,
-## man down, frag and smoke out, moving and covering while battle buddies bound). Each
+## man down, frag and smoke out, moving and covering while battle buddies bound, and the
+## medical lines: "Medic!", "Moving to Charlie", "Treating Charlie", "Need a medic on
+## Charlie", "Carrying Charlie"). Each
 ## speaker is rate-limited, only the first spotter calls a given contact, and a line goes only to the players on the speaker's side, so
 ## hostile callouts are never shown. Each receiving peer shows it as a subtitle
 ## ("Bravo: Reloading!", see Subtitles) and plays res://audio/callouts/<id>.ogg from the
@@ -25,7 +27,7 @@ const SQUAD_CONTACT_GAP_S := 6.0
 const PENDING_S := 3.0
 ## Callouts that cut in on the speaker gap: man down and thrown grenades (they still
 ## don't repeat within REPEAT_GAP_S).
-const URGENT: Array[StringName] = [&"man_down", &"frag_out", &"smoke_out"]
+const URGENT: Array[StringName] = [&"man_down", &"frag_out", &"smoke_out", &"medic"]
 ## How far from a casualty a squadmate notices them go down and calls it.
 const MAN_DOWN_RANGE := 40.0
 ## Subtitles: how long a line stays up, and how many show at once.
@@ -40,6 +42,7 @@ const LINES := {
 	&"flash_out": "Flashbang out!",
 	&"moving": "Moving!",
 	&"covering": "Covering!",
+	&"medic": "Medic!",
 }
 ## Callout ids for thrown items.
 const THROW_IDS := {&"frag_grenade": &"frag_out", &"smoke_grenade": &"smoke_out", &"flashbang": &"flash_out"}
@@ -181,6 +184,37 @@ func man_down(casualty: Soldier) -> bool:
 	if speaker == null:
 		return false
 	return say(speaker, &"man_down", "Man down! %s is down" % display_name(casualty), "man_down/%s" % casualty.name)
+
+
+## Host only. A wounded soldier who can't fix something themselves calls "Medic!".
+func medic_call(speaker: Soldier) -> bool:
+	return say(speaker, &"medic")
+
+
+## Host only. Whoever answers a casualty says so: "Moving to Charlie" on the way, "Treating
+## Charlie" once there.
+func answer_casualty(speaker: Soldier, casualty: Soldier, treating: bool) -> bool:
+	if casualty == null:
+		return false
+	var id := &"treating" if treating else &"moving_to"
+	var line := "%s %s" % ["Treating" if treating else "Moving to", display_name(casualty)]
+	return say(speaker, id, line, "%s/%s" % [id, casualty.name])
+
+
+## Host only. A buddy who has done what they can asks for the medic: "Need a medic on Charlie!".
+func need_medic(speaker: Soldier, casualty: Soldier) -> bool:
+	if casualty == null:
+		return false
+	return say(speaker, &"need_medic", "Need a medic on %s!" % display_name(casualty), "need_medic/%s" % casualty.name)
+
+
+## Host only. A squadmate picks up a casualty or a fallen friendly to carry them with the
+## squad: "Carrying Charlie" ("Carrying Charlie's body").
+func carrying(speaker: Soldier, other: Soldier, dead: bool) -> bool:
+	if other == null:
+		return false
+	var line := "Carrying %s%s" % [display_name(other), "'s body" if dead else ""]
+	return say(speaker, &"carrying", line, "carrying/%s" % other.name)
 
 
 ## Who sees `casualty` go down: their AI buddy if close, else the nearest AI on their side.
