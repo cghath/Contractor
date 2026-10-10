@@ -76,7 +76,8 @@ build has had less testing.
 `builds/<date>_<label>/`: the game as a small `contractor.pck`, a `play.bat` launcher and a
 `BUILD.txt` saying which commit it is and what to test. It needs no export templates; the
 launcher runs the pack with the Voxel Tools editor build (set `CONTRACTOR_GODOT` if it isn't
-in `Downloads\GodotVoxel_1.7`).
+in `Downloads\GodotVoxel_1.7`). `builds/` and `export_presets.cfg` are git-ignored; the
+script writes a minimal preset if there's none.
 
 ```bash
 GODOT="$HOME/Downloads/GodotVoxel_1.7/godot.windows.editor.x86_64.exe" tools/make_build.sh death-rules
@@ -94,7 +95,7 @@ include Voxel Tools.
 | Errors like `Unknown class VoxelTerrain` or `Could not find type "VoxelBuffer"` | You opened the project with the stock Godot editor. Use the Voxel Tools build. |
 | Walls appear, but bullets pass through them for the first second | Voxel collision builds in the background after the walls appear. This is expected. |
 | A client can't connect | Check that the host's firewall allows UDP 24680, and that you used the host's LAN address, not `127.0.0.1`. |
-| The compound comes back damaged after restarting | The host saves the zone on quit and with F5. Use **Reset compound save** on the main menu. |
+| The compound comes back damaged after restarting | The host saves the zone on quit and with Home. Use **Reset compound save** on the main menu. |
 
 ## Controls
 
@@ -108,12 +109,21 @@ include Voxel Tools.
 | H | Use a medical item (smallest kit that covers your injuries) |
 | E on a downed teammate | Revive with your fastest kit (trauma kit 3 s to 50 HP, IFAK 5 s to 25 HP) |
 | F while downed | Give up (die and respawn) |
-| G | Drop carried bulky item, otherwise drop active weapon |
+| G | Throw the selected grenade (frag, flashbang or smoke) |
+| Shift+G | Switch grenade type |
+| Alt+G | Drop carried bulky item, otherwise drop active weapon |
 | 1 / 2 | Primary / sidearm |
+| F1-F8 | Select squadmates by number (F1 is the first player) and open the command menu; press more F-keys to add units |
+| ~ | Select the whole squad and open the command menu |
+| In the command menu | 1-9 and 0 pick an entry, or scroll the mouse wheel and click the middle button; Backspace goes back, Esc closes |
 | Tab | Inventory screen: equip, stow, move between containers, use, drop |
 | Esc | Close the inventory screen / release mouse |
-| F5 | Save zone (host) |
+| Home | Save zone (host) |
 | K | Debug builds only: hurt yourself by 40, to test going down and dying |
+
+The command menu follows Arma 3's layout: 1 Move (return to formation, move there, stop), 3 Engage (open fire,
+hold fire), 5 Status, 6 Action (throw smoke or frag at the crosshair), 8 Formation (wedge, file, line, staggered
+column) and 0 Support. Target, Mount, Combat mode, Team and the support calls are listed but not built yet.
 
 ## Design decisions (locked)
 
@@ -146,15 +156,16 @@ autoload/
   net.gd          ENet host/join, connection signals
 scripts/
   inventory/      ItemData, Inventory (slots + litre containers), WorldItem (pickup)
-  combat/         Vitals (health, healing), VoxelArmor (plates, helmets), GearRig (worn gear), Ballistics
-  soldier/        Soldier: the shared body (movement, actions, host-validated requests) for players and AI
-  player/         PlayerInput (human driver: mouse/keys, camera, view model), CharacterModel (procedural voxel soldier), Hud
+  combat/         Vitals (health, healing), VoxelArmor (plates, helmets), GearRig (worn gear), Ballistics, Grenade/Throwables/SmokeCloud
+  actors/         Soldier: the shared body for players and AI (movement, input for humans, host-validated requests)
+  ai/             SquadAI (utility intents, buddy tactics, casualty care), Squad (orders, formations)
+  player/         CharacterModel (procedural voxel soldier), Hud
   art/            VoxelArt: code-built voxel models (body parts, carriers, packs, rifles, pistol)
-  world/          VoxelWorld (10 cm destructible structures), CompoundLevel, TargetDummy
-  ui/             Menu, InventoryScreen
+  world/          VoxelWorld (10 cm destructible structures), CompoundLevel, NavBuilder, GearMarker, TargetDummy
+  ui/             Menu, InventoryScreen, CommandMenu
 data/             items.json, factions.json (placeholder), missions.json (placeholder)
-tests/            smoke_test, gameplay_test, net_test (headless), screenshot_tour
-tools/            run_tests.sh
+tests/            smoke_test, gameplay_test, squad_test, net_test (headless), screenshot_tour
+tools/            run_tests.sh, make_build.sh
 ```
 
 **Who owns what in multiplayer:**

@@ -14,6 +14,7 @@ var level: CompoundLevel
 
 func _ready() -> void:
 	GameState.zone_id = "test_net"
+	CompoundLevel.spawn_ai = false
 	GameState.delete_save()
 	add_child(load("res://scenes/main.tscn").instantiate())  # main reads --host/--join
 	await get_tree().process_frame

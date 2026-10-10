@@ -14,12 +14,12 @@ const KEYS := {
 	&"reload": [KEY_R],
 	&"use_medical": [KEY_H],
 	&"give_up": [KEY_F],
-	&"drop": [KEY_G],
+	&"grenade": [KEY_G],  # throw; Shift+G switches type, Alt+G drops
 	&"inventory": [KEY_TAB],
 	&"weapon_primary": [KEY_1],
 	&"weapon_sidearm": [KEY_2],
 	&"pause": [KEY_ESCAPE],
-	&"quick_save": [KEY_F5],
+	&"quick_save": [KEY_HOME],  # F-keys are the squad command menu
 	&"debug_hurt": [KEY_K],  # debug builds only: hurt yourself to test going down and dying
 }
 const MOUSE := {

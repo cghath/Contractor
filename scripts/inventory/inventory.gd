@@ -173,6 +173,17 @@ func remove_entry(container: StringName, index: int, count := 1) -> Dictionary:
 	return removed
 
 
+## Host only. Removes one stowed unit of `id` from whichever container has it first.
+func remove_one(id: StringName) -> bool:
+	for container in CONTAINERS:
+		var list: Array = containers[container]
+		for i in list.size():
+			if list[i].id == id:
+				remove_entry(container, i)
+				return true
+	return false
+
+
 ## Host only. Puts a whole entry into `container` if it fits. Returns false otherwise.
 func insert_entry(container: StringName, entry: Dictionary) -> bool:
 	var item := ItemDB.get_item(entry.id)

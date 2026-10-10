@@ -4,6 +4,7 @@
 #   play.bat        double-click to play; runs the pack with the Voxel Tools build of Godot
 #   BUILD.txt       branch, commit and what to test
 # Usage: GODOT=<voxel godot exe> tools/make_build.sh <label> ["what to test"]
+# builds/ is git-ignored: builds stay on the machine that made them.
 # No export templates needed: the Voxel Tools editor binary runs the pack directly.
 set -eu
 cd "$(dirname "$0")/.."
@@ -12,6 +13,38 @@ label="${1:?usage: tools/make_build.sh <label> [\"what to test\"]}"
 notes="${2:-}"
 dir="builds/$(date +%Y-%m-%d)_${label}"
 mkdir -p "$dir"
+# The preset is git-ignored (local paths); write a minimal one if this checkout has none.
+if ! grep -q 'name="Windows Desktop"' export_presets.cfg 2>/dev/null; then
+	[ -f export_presets.cfg ] && { echo "export_presets.cfg has no \"Windows Desktop\" preset; add one or rename yours"; exit 1; }
+	cat > export_presets.cfg <<'CFG'
+[preset.0]
+
+name="Windows Desktop"
+platform="Windows Desktop"
+runnable=true
+dedicated_server=false
+custom_features=""
+export_filter="all_resources"
+include_filter="data/*.json"
+exclude_filter="tests/*, tools/*, screenshots/*, builds/*, docs/*"
+export_path=""
+patches=PackedStringArray()
+encryption_include_filters=""
+encryption_exclude_filters=""
+seed=0
+encrypt_pck=false
+encrypt_directory=false
+script_export_mode=2
+
+[preset.0.options]
+
+custom_template/debug=""
+custom_template/release=""
+debug/export_console_wrapper=1
+binary_format/embed_pck=false
+binary_format/architecture="x86_64"
+CFG
+fi
 "$GODOT" --headless --path . --export-pack "Windows Desktop" "$dir/contractor.pck" >/dev/null 2>&1
 [ -s "$dir/contractor.pck" ] || { echo "export failed"; exit 1; }
 cat > "$dir/play.bat" <<'BAT'

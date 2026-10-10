@@ -1,7 +1,23 @@
 # Squad AI: design proposal (phase 3)
 
-**Status:** decided 2026-10-09, updated to the handoff 2026-10-10. Being built in the order below.
+**Status:** first pass built on the `phase3-squad` branch (2026-10-09), following the
+recommendations below plus the direction Captain gave the same day, then updated to the
+handoff (2026-10-10). Decision 5 (inventory loop, relationship) and the roster are not
+built yet; AI permadeath and the player death rules are.
 **Written:** 2026-10-09, after phase 2 (inventory depth) and downed/revive landed.
+
+## What was built, and where it differs from the proposal
+
+| Decision | Built |
+|---|---|
+| 1. Body | `Soldier` (was `Player`) is the shared body. A human drives it from their own peer; for AI the host drives it through intent fields (`move_input`, `want_crouch`...) and the same host-validated requests players send. Human input still lives in `Soldier` itself rather than a separate `PlayerInput` node. |
+| 2. Navigation | `NavBuilder` bakes a navmesh at host start from the ground and the voxel structures' boxes. Cover points are sampled around an anchor, not along navmesh edges. Rebakes on breaches are not built. |
+| 3. Behaviour | `SquadAI`: utility-scored intents with hysteresis (Follow, Hold, Move to, Patrol, Investigate, Fight, Casualty, Reload, Heal). **Added at Captain's request:** battle-buddy pairs (buddies never move at the same time; one bounds while the other covers), suppression from near misses, frags thrown at hidden enemies, smoke for casualties, and flashbang stun. Take cover and Engage are one Fight intent with cover/bound/fire inside it. |
+| 4. Co-op command | Lead player (host by default). Arma 3-style command menu: F1 to F8 select squadmates (~ for all), 1 to 9 or the mouse wheel pick Move, Engage, Status, Action and Formation entries. Orders go to the selected units; the most recent order wins and makes the giver the lead. |
+| Downed friendlies (Captain) | In a fight: smoke between the casualty and the threat, drag them to cover, then revive with a kit or guard them. Out of a fight: revive with a kit, or pick them up and carry them while following the squad leader. Buddies look after each other first; the player is a casualty like anyone else. |
+| 7. Squad size | 8 slots. AI fills every slot players don't (one player: 7 AI; four players: 4), adding or removing squadmates as players join and leave. Everyone, players included, is paired into battle buddies. Squadmate stats (combat, discipline, experience) are only placeholders. |
+| 8. Enemies | Hostiles use the same body and `SquadAI` (patrol or guard, investigate, fight with buddies), without casualty care yet. |
+| 6. Permadeath | An AI that bleeds out or is killed drops its gear and is removed from the mission. A player respawns in the default kit, and their old gear stays where they died under a marker (handoff). The roster (dead vs MIA when left behind) isn't built yet. |
 
 The roadmap calls this the make-or-break system. It's also where the codebase stops being
 easy to change: navigation, the behaviour architecture, and how a shared squad works in
@@ -27,7 +43,7 @@ Decided 2026-10-09, then overridden where Captain decided otherwise in
 
 | # | Decision |
 |---|---|
-| 1 | Shared `Soldier` body with `PlayerInput` and `SquadAI` drivers (done) |
+| 1 | Shared `Soldier` body; `SquadAI` drives AI bodies through intent fields (done; human input stays inside `Soldier`) |
 | 2 | Runtime navmesh, rebaked locally on breaches; computed cover points |
 | 3 | Utility-scored intents with hysteresis; tuning in a data file. Intents now also include **Throw** (frag, flashbang, smoke), **Carry**, **Drag** and **Treat** (handoff) |
 | 4 | One lead player (host by default, any player can take lead); orders through an Arma 3-style F1 to F12 command menu (handoff) |
@@ -148,7 +164,7 @@ come later, because it's the main payoff of decision 1.
 
 ## Proposed build order (once decided)
 
-1. ~~Split `Player` into `Soldier`, `PlayerInput` and the AI driver. Pure refactor, verified by the existing three test suites.~~ Done: `scripts/soldier/soldier.gd`, `scripts/player/player_input.gd`, `scenes/soldier.tscn` (base) and `scenes/player.tscn` (inherits it, adds the camera and the driver). Bodies named `AI...` are host-owned.
+1. ~~Turn `Player` into a shared `Soldier` body with an AI driver.~~ Done: `scripts/actors/soldier.gd`, `scenes/soldier.tscn`, `scripts/ai/squad_ai.gd`. Bodies with non-numeric names are host-owned AI.
 2. Runtime navmesh over the compound, with rebakes on breaches. Debug drawing.
 3. A squadmate that follows, holds and moves to a point, with commands on hotkeys.
 4. Cover sampling, plus Take cover and Engage against the target dummies, later moving ones.

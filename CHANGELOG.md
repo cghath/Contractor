@@ -16,6 +16,19 @@ that travels with the item.
 
 ### Added
 
+- **Squad AI (phase 3, first pass):** the player squad has 8 slots, and AI fills every slot players don't (7 squadmates for one player, 4 for four). See `docs/squad_design.md`.
+  - Arma 3-style command menu: F1-F8 select squadmates by number (~ for all), then 1-9 / 0 or the mouse wheel and middle click pick orders: move (formation, move there, stop), engage (open / hold fire), status, action (throw smoke or frag at the crosshair), formation (wedge, file, line, staggered column) and a support menu (not built yet). Orders go to the selected units; the last player to give one leads.
+  - Everyone is paired into battle buddies. In a fight, soldiers take cover, crouch when not shooting, get pinned by close fire, and buddies take turns moving while the other covers. Frags go to enemies hiding behind cover.
+  - Downed friendlies (players too) get help, buddy first: in a fight, smoke and a drag to cover, then a revive or a guard; out of a fight, a revive, or the buddy carries them and follows the lead.
+  - Hostile fire teams (two guards, two on patrol) use the same body and AI.
+  - A runtime navmesh over the compound. The HUD lists each squadmate's status and health.
+  - `tests/squad_test.tscn`: roster scaling, navigation, following, a buddy carrying a buddy, a firefight and flashbang stun.
+- **Grenades (G to throw, Shift+G to switch type):** frag, flashbang (new item) and smoke.
+  - Frag: up to 180 damage within 8 m, falling off with distance; walls shield you. It also blasts a crater in voxel walls.
+  - Flashbang: whites out the screen for up to 5 s, depending on distance and whether you were looking at it. AI soldiers will be stunned.
+  - Smoke: a 5 m cloud that lasts 30 s. It blocks the view, and will block AI line of sight.
+  - Every peer sees the grenade fly; the host detonates it. The compound has smokes and flashbangs next to the frags.
+
 - **Item state:** items carry state that goes wherever they go: rounds in a weapon or
   magazine, chips in a plate or helmet. It's kept while the item is worn, stowed, dropped,
   picked up by someone else, and saved with the zone.
@@ -49,7 +62,8 @@ that travels with the item.
   navigation, utility intents, co-op command, inventory loop, permadeath), with the decisions made.
 - **Test builds:** `tools/make_build.sh <label>` leaves a playable build in
   `builds/<date>_<label>/`: a small `contractor.pck`, a `play.bat` launcher that runs it with
-  the Voxel Tools Godot (no export templates needed) and a `BUILD.txt`.
+  the Voxel Tools Godot (no export templates needed) and a `BUILD.txt`. Builds stay local
+  (`builds/` is git-ignored).
 - **Debug key K** (debug builds only, which includes test builds): hurts you by 40 so going down and dying can be tested solo.
 - `Inventory.strip()` empties a body's whole inventory into entries that keep their state.
 - **Tests:**
@@ -66,14 +80,13 @@ that travels with the item.
 - **Player death:** you respawn in the default kit (M4, 2 spare magazines, a smoke and a
   frag). Everything you carried stays where you died, under a floating marker that clears
   once the gear is picked up. Before, you respawned with all your gear.
-- **AI death is permanent:** a host-owned (AI) soldier that dies doesn't respawn; its gear stays where it fell.
-- **Minimal HUD:** no health, ammo, load or armor readout, as in Arma with ACE. Weight,
+- **AI death is permanent:** an AI soldier that dies doesn't respawn; its gear stays where it fell.
+- **Minimal HUD:** no health, ammo, grenade count, load or armor readout, as in Arma with
+  ACE. The squad roster shows what each squadmate is doing, without health. Weight,
   litres, rounds loaded and armor damage are on the inventory screen (Tab).
-- **Soldier body (squad AI step 1):** the player is split into a shared `Soldier` body and
-  a `PlayerInput` driver.
-  - `Soldier` (`scenes/soldier.tscn`) owns movement, gear, the owner-side actions (`trigger`, `reload`, `use_medical`, `interact`, `revive`, `drop`, `give_up`, `look`, `select_weapon`) and every host-side rule. Drivers set its controls (`move_input`, `want_sprint`, `want_crouch`, `want_aim`).
-  - `PlayerInput` handles the mouse and keys, the camera, the weapon view model, the crosshair target and the HUD. `scenes/player.tscn` inherits the soldier scene and adds it.
-  - Bodies named `AI...` are owned and simulated by the host, ready for squadmates and enemies. Host feedback reaches the driver as signals (`message`, `busy`, `respawned`).
+- Keys: G throws grenades (Shift+G switches type) and Alt+G drops; F-keys are the squad command menu, so saving the zone moved from F5 to Home.
+- `Player` is now `Soldier` (`scenes/soldier.tscn`, `scripts/actors/soldier.gd`), the body both players and AI use. AI bodies have non-numeric names and are driven by the host.
+
 - Armor damage is now the item's own state, not the wearer's. A dropped plate or helmet
   keeps its holes. `Vitals` now only tracks health and healing.
 - `Inventory.unequip()` returns the item with its state. `take()` accepts state.

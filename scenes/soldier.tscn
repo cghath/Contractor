@@ -1,6 +1,6 @@
 [gd_scene format=3]
 
-[ext_resource type="Script" path="res://scripts/soldier/soldier.gd" id="1_soldier"]
+[ext_resource type="Script" path="res://scripts/actors/soldier.gd" id="1_soldier"]
 [ext_resource type="Script" path="res://scripts/inventory/inventory.gd" id="2_inventory"]
 [ext_resource type="Script" path="res://scripts/combat/vitals.gd" id="3_vitals"]
 [ext_resource type="Script" path="res://scripts/combat/gear_rig.gd" id="4_gear"]
@@ -35,6 +35,9 @@ properties/4/replication_mode = 2
 properties/5/path = NodePath(".:is_reloading")
 properties/5/spawn = true
 properties/5/replication_mode = 2
+properties/6/path = NodePath(".:ai_status")
+properties/6/spawn = true
+properties/6/replication_mode = 2
 
 [sub_resource type="SceneReplicationConfig" id="SceneReplicationConfig_server"]
 properties/0/path = NodePath("Vitals:health")
@@ -83,6 +86,13 @@ script = ExtResource("5_model")
 
 [node name="Head" type="Node3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.65, 0)
+
+[node name="Camera" type="Camera3D" parent="Head"]
+fov = 80.0
+near = 0.03
+
+[node name="ViewModel" type="Node3D" parent="Head/Camera"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.14, -0.16, -0.38)
 
 [node name="Inventory" type="Node" parent="."]
 script = ExtResource("2_inventory")

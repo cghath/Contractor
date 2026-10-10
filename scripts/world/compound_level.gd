@@ -3,7 +3,7 @@ extends Node3D
 ## Gray-box hostile compound: flat ground, 10 cm voxel walls you can shoot through, loot,
 ## and armored target dummies. Owns player and item spawning for the session.
 
-const PLAYER_SCENE := preload("res://scenes/player.tscn")
+const PLAYER_SCENE := preload("res://scenes/soldier.tscn")
 const SPAWN_POINTS: Array[Vector3] = [Vector3(-3, 0.1, 24), Vector3(-1, 0.1, 24), Vector3(1, 0.1, 24), Vector3(3, 0.1, 24)]
 const COMPOUND_HALF := 20.0
 const WALL_THICKNESS := 0.3
@@ -31,27 +31,65 @@ const LOOT := [
 	{"uid": "c01_side_b", "id": "plate_side", "pos": Vector3(4.5, 0.5, 23)},
 	{"uid": "c01_ifak_a", "id": "ifak", "count": 2, "pos": Vector3(-6, 0.5, 4)},
 	{"uid": "c01_frag_a", "id": "frag_grenade", "count": 3, "pos": Vector3(6, 0.5, 4)},
+	{"uid": "c01_smoke_a", "id": "smoke_grenade", "count": 3, "pos": Vector3(7, 0.5, 4)},
+	{"uid": "c01_flash_a", "id": "flashbang", "count": 3, "pos": Vector3(8, 0.5, 4)},
 	{"uid": "c01_salvage_a", "id": "electronics_salvage", "count": 8, "pos": Vector3(3, 0.5, -10)},
 	{"uid": "c01_m110_a", "id": "m110", "pos": Vector3(-3, 0.5, -10)},
 	{"uid": "c01_hvt_case", "id": "hvt_case", "pos": Vector3(0, 0.5, -10)},
 	{"uid": "c01_crate_a", "id": "supply_crate", "pos": Vector3(12, 0.6, -12)},
 ]
 
+## Turn off to host a session without AI (the older test suites do).
+static var spawn_ai := true
+
+## The player squad has 8 slots; AI fills the ones players don't (see rebalance_squad).
+const SQUAD_SIZE := 8
+const SQUAD_CALLSIGNS: Array[String] = ["Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf"]
+const SQUAD_LOADOUT := ["plate_carrier", "plate_ceramic_l4", "plate_ceramic_l4", "helmet", "assault_pack", "m4a1",
+	"mag_556", "mag_556", "mag_556", "mag_556", "mag_556", "ifak", "trauma_kit", "frag_grenade", "smoke_grenade"]
+## Two fire teams: a pair guarding the main building, and a pair patrolling the yard.
+const HOSTILES := [
+	{"name": "Hostile1", "pos": Vector3(-2.5, 0.1, -10), "buddy": "Hostile2", "guard": true},
+	{"name": "Hostile2", "pos": Vector3(2.5, 0.1, -6.5), "buddy": "Hostile1", "guard": true},
+	{"name": "Hostile3", "pos": Vector3(-12, 0.1, -2), "buddy": "Hostile4", "guard": false},
+	{"name": "Hostile4", "pos": Vector3(-10, 0.1, -3), "buddy": "Hostile3", "guard": false},
+]
+const HOSTILE_LOADOUT := ["plate_carrier_light", "plate_pe_l3", "helmet_bump", "assault_pack", "mk18",
+	"mag_556", "mag_556", "mag_556", "mag_556", "ifak", "frag_grenade"]
+const HOSTILE_PATROL: Array[Vector3] = [Vector3(-12, 0, -2), Vector3(-12, 0, -16), Vector3(12, 0, -16), Vector3(12, 0, 0), Vector3(-4, 0, 2)]
+
 @onready var players: Node3D = $Players
+@onready var ai: Node3D = $AI
 @onready var items: Node3D = $Items
 @onready var item_spawner: MultiplayerSpawner = $ItemSpawner
+@onready var ai_spawner: MultiplayerSpawner = $AISpawner
 @onready var voxel_world: VoxelWorld = $VoxelWorld
 
 var _spawn_index := 0
+var _throw_count := 0
+var _squads := {}  # faction -> Squad
+var _ai_ready := false  # host: AI spawns once the voxel walls exist
 
 
 static func current(from: Node) -> CompoundLevel:
 	return from.get_tree().get_first_node_in_group(&"level") as CompoundLevel
 
 
+func squad_for(faction: StringName) -> Squad:
+	return _squads.get(faction)
+
+
 func _ready() -> void:
 	add_to_group(&"level")
 	item_spawner.spawn_function = _make_item
+	ai_spawner.spawn_function = _make_soldier
+	for faction: StringName in [&"friendly", &"hostile"]:
+		var squad := Squad.new()
+		squad.name = "%sSquad" % String(faction).capitalize()
+		squad.faction = faction
+		add_child(squad)
+		_squads[faction] = squad
+	_squads[&"hostile"].patrol = HOSTILE_PATROL
 	_build_environment()
 	_build_structures()
 	Net.hosted.connect(_on_hosted)
@@ -101,6 +139,65 @@ func show_impact(pos: Vector3, normal: Vector3, kind: String) -> void:
 	get_tree().create_timer(4.0).timeout.connect(mark.queue_free)
 
 
+## Host only. Throws a grenade on every peer; the host's copy detonates (see Grenade).
+func server_throw(id: StringName, origin: Vector3, velocity: Vector3) -> void:
+	_throw_count += 1
+	show_throw.rpc(_throw_count, String(id), origin, velocity)
+
+
+@rpc("authority", "call_local", "reliable")
+func show_throw(serial: int, id: String, origin: Vector3, velocity: Vector3) -> void:
+	var grenade := Grenade.new()
+	grenade.name = "Grenade%d" % serial
+	grenade.setup(StringName(id))
+	add_child(grenade)
+	grenade.global_position = origin
+	grenade.linear_velocity = velocity
+	grenade.angular_velocity = Vector3(randf_range(-8, 8), randf_range(-8, 8), randf_range(-8, 8))
+
+
+@rpc("authority", "call_local", "reliable")
+func show_explosion(pos: Vector3) -> void:
+	_burst(pos, Color(1.0, 0.6, 0.25), 3.2, 0.35)
+
+
+@rpc("authority", "call_local", "reliable")
+func show_flash(pos: Vector3) -> void:
+	_burst(pos, Color.WHITE, 1.0, 0.15)
+
+
+@rpc("authority", "call_local", "reliable")
+func spawn_smoke(pos: Vector3) -> void:
+	var cloud := SmokeCloud.new()
+	add_child(cloud)
+	cloud.global_position = pos
+
+
+func _burst(pos: Vector3, colour: Color, size: float, life: float) -> void:
+	var material := StandardMaterial3D.new()
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	material.albedo_color = colour
+	var sphere := SphereMesh.new()
+	sphere.radius = 0.5
+	sphere.height = 1.0
+	sphere.material = material
+	var ball := MeshInstance3D.new()
+	ball.mesh = sphere
+	var light := OmniLight3D.new()
+	light.light_color = colour
+	light.light_energy = 8.0
+	light.omni_range = 14.0
+	ball.add_child(light)
+	add_child(ball)
+	ball.global_position = pos + Vector3.UP * 0.3
+	var tween := ball.create_tween().set_parallel()
+	tween.tween_property(ball, "scale", Vector3.ONE * size, life)
+	tween.tween_property(material, "albedo_color:a", 0.0, life)
+	tween.tween_property(light, "light_energy", 0.0, life)
+	tween.chain().tween_callback(ball.queue_free)
+
+
 func _on_hosted() -> void:
 	GameState.load_zone()
 	voxel_world.load_edits(GameState.voxel_edits)
@@ -111,6 +208,92 @@ func _on_hosted() -> void:
 		var d: Dictionary = GameState.dropped[uid]
 		spawn_item(StringName(d.id), int(d.count), Vector3(d.pos[0], d.pos[1], d.pos[2]), uid, d.get("state", {}))
 	_add_player(1)
+	NavBuilder.build(self)
+	if spawn_ai:
+		# AI needs the walls' collision before it can tell what it can see.
+		if voxel_world.is_built():
+			_spawn_ai()
+		else:
+			voxel_world.structures_built.connect(_spawn_ai, CONNECT_ONE_SHOT)
+
+
+## Host only. Spawns the hostile fire teams and fills the player squad with AI.
+func _spawn_ai() -> void:
+	_ai_ready = true
+	var spawned := {}
+	for h: Dictionary in HOSTILES:
+		spawned[h.name] = spawn_soldier({"name": h.name, "faction": "hostile", "variant": "urban", "pos": h.pos,
+			"loadout": HOSTILE_LOADOUT, "combat": 0.45, "discipline": 0.5, "guard": h.guard})
+	for h: Dictionary in HOSTILES:
+		spawned[h.name].buddy = spawned[h.buddy]
+	rebalance_squad()
+
+
+## Host only. The player squad always has SQUAD_SIZE soldiers: AI fills every slot players
+## don't (one player gets 7 squadmates, four players get 4). Called whenever a player joins
+## or leaves. Then everyone, players included, is paired into battle buddies.
+func rebalance_squad() -> void:
+	if not _ai_ready:
+		return
+	var humans := players.get_children().filter(func(p: Node) -> bool: return not p.is_queued_for_deletion())
+	var squad := squad_for(&"friendly")
+	var members := _squad_ai_by_callsign()
+	var want := maxi(SQUAD_SIZE - humans.size(), 0)
+	while members.size() > want:
+		var leaving: Soldier = members.pop_back()  # a player takes this slot
+		leaving.release_carried()
+		if is_instance_valid(leaving.carried_by):
+			leaving.carried_by.release_carried()
+		leaving.queue_free()
+	var used := members.map(func(s: Soldier) -> String: return String(s.name))
+	for callsign: String in SQUAD_CALLSIGNS:
+		if members.size() >= want:
+			break
+		if callsign in used:
+			continue
+		var i := SQUAD_CALLSIGNS.find(callsign)
+		var anchor: Node3D = squad.leader if is_instance_valid(squad.leader) else null
+		var pos := anchor.global_transform * (Squad.FORMATIONS["wedge"][i % 7] as Vector3) if anchor else SPAWN_POINTS[i % SPAWN_POINTS.size()] + Vector3(0, 0, 3)
+		members.append(spawn_soldier({"name": callsign, "faction": "friendly", "variant": "multicam", "pos": pos,
+			"loadout": SQUAD_LOADOUT, "combat": 0.5 + 0.03 * (i % 5), "discipline": 0.6, "guard": false}))
+	members.sort_custom(func(a: Soldier, b: Soldier) -> bool: return SQUAD_CALLSIGNS.find(String(a.name)) < SQUAD_CALLSIGNS.find(String(b.name)))
+	# Battle buddies: players first (host, then joiners), then squadmates in callsign order.
+	humans.sort_custom(func(a: Node, b: Node) -> bool: return a.name.to_int() < b.name.to_int())
+	var everyone: Array = humans + members
+	for i in everyone.size():
+		var partner: Soldier = everyone[i ^ 1] if (i ^ 1) < everyone.size() else null
+		(everyone[i] as Soldier).buddy = partner
+
+
+func _squad_ai_by_callsign() -> Array:
+	var members := ai.get_children().filter(func(s: Node) -> bool: return s is Soldier and s.faction == &"friendly" and not s.is_queued_for_deletion())
+	members.sort_custom(func(a: Soldier, b: Soldier) -> bool: return SQUAD_CALLSIGNS.find(String(a.name)) < SQUAD_CALLSIGNS.find(String(b.name)))
+	return members
+
+
+## Host only. `data`: name, faction, variant, pos, loadout, and AI stats combat, discipline, guard.
+func spawn_soldier(data: Dictionary) -> Soldier:
+	return ai_spawner.spawn(data) as Soldier
+
+
+func _make_soldier(data: Dictionary) -> Node:
+	var soldier: Soldier = PLAYER_SCENE.instantiate()
+	soldier.name = data.name
+	soldier.faction = StringName(data.faction)
+	soldier.variant = data.variant
+	soldier.position = data.pos
+	if multiplayer.is_server():
+		var inventory: Inventory = soldier.get_node(^"Inventory")
+		for id: String in data.loadout:
+			inventory.take(StringName(id))
+		var brain := SquadAI.new()
+		brain.name = "SquadAI"
+		brain.squad = squad_for(soldier.faction)
+		brain.combat = data.combat
+		brain.discipline = data.discipline
+		brain.guard = data.guard
+		soldier.add_child(brain)
+	return soldier
 
 
 func _on_peer_joined(id: int) -> void:
@@ -124,6 +307,11 @@ func _on_peer_left(id: int) -> void:
 	var player := players.get_node_or_null(str(id))
 	if player:
 		player.queue_free()
+	if multiplayer.is_server():
+		var squad := squad_for(&"friendly")
+		if squad.leader == player:
+			squad.leader = players.get_node_or_null(^"1")
+		rebalance_squad()
 
 
 func _add_player(id: int) -> void:
@@ -131,6 +319,9 @@ func _add_player(id: int) -> void:
 	player.name = str(id)
 	player.position = next_spawn_point()
 	players.add_child(player, true)
+	if id == 1:
+		_squads[&"friendly"].leader = player  # the host leads until someone else gives an order
+	rebalance_squad()
 
 
 func _make_item(data: Dictionary) -> Node:

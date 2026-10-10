@@ -11,6 +11,7 @@ var player: Soldier
 
 func _ready() -> void:
 	GameState.zone_id = "test_gameplay"  # never touch a real save
+	CompoundLevel.spawn_ai = false  # squad AI has its own test
 	GameState.delete_save()
 	add_child(load("res://scenes/main.tscn").instantiate())
 	await get_tree().process_frame
@@ -27,7 +28,7 @@ func _ready() -> void:
 	await _test_drop_and_pickup_keep_state()
 	await _test_spread()
 	await _test_revive_and_downed()
-	await _test_ai_body()
+	await _test_throwables()
 	GameState.delete_save()
 	print("GAMEPLAY TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
@@ -120,9 +121,9 @@ func _test_spread() -> void:
 	var aimed := 0.0
 	for i in 200:
 		player.is_aiming = false
-		hip = maxf(hip, rad_to_deg(forward.angle_to(player.spread_direction(weapon))))
+		hip = maxf(hip, rad_to_deg(forward.angle_to(player._spread_direction(weapon))))
 		player.is_aiming = true
-		aimed = maxf(aimed, rad_to_deg(forward.angle_to(player.spread_direction(weapon))))
+		aimed = maxf(aimed, rad_to_deg(forward.angle_to(player._spread_direction(weapon))))
 	player.is_aiming = false
 	check(hip > 0.3 and hip <= 1.2 * 2.5 + 0.01, "hip-fire stays inside the cone (max %.2f deg)" % hip)
 	check(aimed < hip * 0.3, "aiming tightens it (max %.2f deg)" % aimed)
@@ -168,41 +169,49 @@ func _test_revive_and_downed() -> void:
 	check(markers.size() == 1, "a marker shows where it lies")
 
 
-## A host-owned body with no human driver goes through the same API squadmates will use.
-func _test_ai_body() -> void:
-	print("AI-owned soldier body")
-	var bot: Soldier = load("res://scenes/soldier.tscn").instantiate()
-	bot.name = "AI_Test"
-	bot.position = Vector3(6, 0.1, 22)
-	level.players.add_child(bot, true)
-	await _frames(5)
-	check(bot.is_ai() and bot.owner_peer() == 1 and bot.is_multiplayer_authority(), "named AI_*: owned and simulated by the host")
-	check(bot.voxel_viewer != null and not bot.voxel_viewer.requires_visuals, "loads collision only, no visuals")
-	bot.inventory.take(&"m4a1")
-	bot.inventory.take(&"mag_556")
-	bot.trigger(true, true)
+func _test_throwables() -> void:
+	print("Grenades")
+	var inv := player.inventory
+	inv.strip()  # start from empty pockets, not the respawn kit
+	for id: StringName in [&"frag_grenade", &"flashbang", &"smoke_grenade"]:
+		inv.take(id)
+	player.global_position = Vector3(0, 0.1, 18)
 	await _frames(2)
-	check(bot.inventory.rounds_in(&"primary") == 29, "trigger() fires through the host request (%d left)" % bot.inventory.rounds_in(&"primary"))
-	bot.reload()
-	check(bot.is_reloading, "reload() starts a reload")
-	await _seconds(2.6)
-	check(bot.inventory.rounds_in(&"primary") == 30, "and it finishes on the host")
-	var start := bot.global_position
-	bot.move_input = Vector2(0, -1)  # forward
-	await _seconds(0.5)
-	bot.move_input = Vector2.ZERO
-	check(bot.global_position.distance_to(start) > 1.0, "move_input walks it (%.2f m)" % bot.global_position.distance_to(start))
-	var said := []
-	bot.message.connect(func(text: String) -> void: said.append(text))
-	bot.use_medical()
+	player._server_busy_until = 0.0
+	player._server_throw.rpc_id(1, player.camera.global_position, -player.global_basis.z, &"frag_grenade")
+	check(inv.count_of(&"frag_grenade") == 0, "throwing uses the grenade")
+	check(level.get_children().any(func(n: Node) -> bool: return n is Grenade), "a grenade is in flight")
+	await _seconds(3.8)
+	check(not level.get_children().any(func(n: Node) -> bool: return n is Grenade), "it went off after its fuse")
+
+	var light: TargetDummy = level.get_node(^"Dummies/LightDummy")
+	var medium: TargetDummy = level.get_node(^"Dummies/MediumDummy")
+	for d: TargetDummy in [light, medium]:
+		d.respawn_seconds = 999.0
+		d.vitals.server_reset_health()
+	var edits := GameState.voxel_edits.size()
+	Throwables.server_detonate(level, "frag", light.global_position + Vector3(1.0, 0.05, 0.0))
+	check(light.vitals.health < light.vitals.max_health, "frag hurts a dummy 1 m away (HP %.0f)" % light.vitals.health)
+	check(GameState.voxel_edits.size() == edits + 1, "frag leaves a crater in the voxels")
+	Throwables.server_detonate(level, "frag", Vector3(3, 0.2, -2.5))
+	check(is_equal_approx(medium.vitals.health, medium.vitals.max_health), "a wall shields the dummy inside the building")
+	for d: TargetDummy in [light, medium]:
+		d.vitals.server_reset_health()
+
+	var hud: Hud = player._hud
+	player.global_position = Vector3(0, 0.1, 18)
+	player.rotation = Vector3.ZERO
+	player.head.rotation = Vector3.ZERO
 	await _frames(2)
-	check(said.has("Not injured"), "host feedback comes back as a message signal (%s)" % [said])
-	var spot := bot.global_position
-	bot.vitals.server_damage(500.0)
-	bot.vitals.server_give_up()
+	Throwables.server_detonate(level, "flash", player.global_position + Vector3(0, 0.3, -3))
 	await _frames(2)
-	check(not is_instance_valid(bot), "an AI soldier's death is permanent: no respawn")
-	check(_items_near(spot, 3.0).has(&"m4a1"), "its gear stays where it died")
+	check(hud._white_left > 3.0, "a flashbang in front of you whites out the screen (%.1f s)" % hud._white_left)
+
+	var smoke_at := Vector3(0, 0.1, 14)
+	Throwables.server_detonate(level, "smoke", smoke_at)
+	await _seconds(3.2)
+	check(SmokeCloud.blocks(smoke_at + Vector3(-8, 1.5, 0), smoke_at + Vector3(8, 1.5, 0)), "smoke blocks a sight line through it")
+	check(not SmokeCloud.blocks(smoke_at + Vector3(-8, 1.5, 12), smoke_at + Vector3(8, 1.5, 12)), "but not one well clear of it")
 
 
 func _items_near(pos: Vector3, radius: float) -> Array[StringName]:

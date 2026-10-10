@@ -8,10 +8,12 @@ extends RefCounted
 const RANGE := 300.0
 const MASK := (1 << 0) | (1 << 1) | (1 << 3)  # world, hitboxes, armor
 const MAX_PENETRATIONS := 4
+## Rounds passing this close to an AI soldier suppress it.
+const SUPPRESS_RADIUS := 2.5
 
 
 ## Returns {"result": "none"|"plate"|"body"|"world", "position", "normal"} for effects.
-static func fire(shooter: CollisionObject3D, origin: Vector3, direction: Vector3, weapon: ItemData) -> Dictionary:
+static func _trace(shooter: CollisionObject3D, origin: Vector3, direction: Vector3, weapon: ItemData) -> Dictionary:
 	var space := shooter.get_world_3d().direct_space_state
 	var exclude: Array[RID] = [shooter.get_rid()]
 	for child in shooter.get_children():
@@ -49,3 +51,23 @@ static func fire(shooter: CollisionObject3D, origin: Vector3, direction: Vector3
 
 static func _result(kind: String, hit: Dictionary) -> Dictionary:
 	return {"result": kind, "position": hit.position, "normal": hit.normal}
+
+
+## Returns {"result": "none"|"plate"|"body"|"world", "position", "normal"} for effects.
+## Rounds that pass close to AI soldiers on the other side suppress them.
+static func fire(shooter: CollisionObject3D, origin: Vector3, direction: Vector3, weapon: ItemData) -> Dictionary:
+	var result := _trace(shooter, origin, direction, weapon)
+	report_near_misses(shooter, origin, result.position)
+	return result
+
+
+static func report_near_misses(shooter: Node, from: Vector3, to: Vector3) -> void:
+	var faction: StringName = shooter.faction if shooter is Soldier else &""
+	for n in shooter.get_tree().get_nodes_in_group(&"combatants"):
+		var s := n as Soldier
+		if s == null or s == shooter or not s.is_ai() or s.faction == faction or not s.vitals.is_up():
+			continue
+		var chest := s.global_position + Vector3.UP * 1.2
+		var d := Geometry3D.get_closest_point_to_segment(chest, from, to).distance_to(chest)
+		if d < SUPPRESS_RADIUS:
+			s.suppress(0.12 + (SUPPRESS_RADIUS - d) * 0.08, from)
