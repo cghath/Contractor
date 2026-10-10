@@ -116,6 +116,10 @@ Standing rules for this wave (user, 2026-10-10):
 - **No revive, ever.** Don't bring back a revive action, item or API. Epinephrine, CPR and the
   defibrillator act through the wound model (restart the heart, clear a cause of
   unconsciousness); a casualty still comes round only when their body lets them.
+- **Epinephrine keeps its wake-up roll** (user, 2026-10-10), as the design doc says, and also
+  acts through the body (heart rate, part of CPR). The roll is a chance to come round sooner,
+  not a revive: it can't wake someone while a cause still holds (blood loss, low SpO2, pain
+  over the threshold, trauma, arrest).
 
 ### Wave 4: phase 4, mission loop (5 agents)
 
