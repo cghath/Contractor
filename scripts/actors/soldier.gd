@@ -421,7 +421,7 @@ func _server_reload(slot: StringName) -> void:
 func _server_use_medical() -> void:
 	if not _from_owner() or not vitals.is_up() or _now() < _server_busy_until - 0.1:
 		return
-	if vitals.injury() <= 0.0:
+	if not vitals.needs_treatment():
 		_client_message.rpc_id(owner_peer(), "Not injured")
 		return
 	# Smallest kit that covers the damage; otherwise the biggest one carried.

@@ -43,8 +43,10 @@ const PAIN_SEVERE := Vector2(0.6, 0.9)
 const PAIN_PISTOL := Vector2(0.3, 0.5)
 const PAIN_FRAGMENT := Vector2(0.1, 0.25)
 const PAIN_GRAZE := Vector2(0.1, 0.2)
-const PAIN_FRACTURE := 0.15
-## Untreated fractures keep pain at least this high (a broken leg is heavy pain).
+## Untreated fractures keep pain at least this high (a broken leg is heavy pain); a fracture
+## adds nothing on top of the hit's own pain, so a limb hit alone stays under the knockout
+## threshold at full blood. A cracked rib keeps its floor and stamina penalty until wave 2's
+## morphine (or a respawn): nothing in the stopgap kit treats it.
 const PAIN_FLOOR_LEG := 0.35
 const PAIN_FLOOR_ARM := 0.2
 const PAIN_FLOOR_RIB := 0.15
@@ -81,6 +83,11 @@ const CONCUSSION_TURN := 0.6
 const RIB_STAMINA := 0.7
 ## Share of injury() that blood loss makes up (see injury).
 const INJURY_BLOOD_WEIGHT := 0.3
+## Untreated bleeding (L/min) that counts as the worst for injury().
+const INJURY_FULL_BLEED := 0.5
+## A stopgap kit is still worth using with untreated bleeding, an unsealed chest wound, or at
+## least this much pain it can take off (proposed).
+const KIT_PAIN_MIN := 0.1
 
 ## Impact (shock) from rounds armor stopped (design doc table).
 const PLATE_IMPACT_PAIN := {&"pistol": 0.05, &"intermediate": 0.15, &"full_power": 0.3}
@@ -244,15 +251,34 @@ func turn_mult() -> float:
 	return CONCUSSION_TURN if concussion_left > 0.0 else 1.0
 
 
-## 0 (fine) to 1: blood loss counts for up to INJURY_BLOOD_WEIGHT, the worse of pain and
-## untreated wounds for the rest. A kit treats wounds and pain but puts no blood back, so
-## blood loss alone stays under the 0.45 at which AI reaches for one.
+## Pain a stopgap kit can take off: wound and impact pain, not the floor that untreated
+## fractures and cracked ribs keep (those wait for wave 2's splint and morphine).
+func reducible_pain() -> float:
+	return clampf(pain_wounds + impact, 0.0, 1.0)
+
+
+## What a stopgap kit (IFAK, trauma kit) can still fix, 0 to 1: the worse of untreated
+## bleeding (an unsealed chest wound counts as some) and reducible pain.
+func treatable() -> float:
+	var bleed := wound_bleed_rate()
+	for w in wounds:
+		if w.kind == "chest" and not w.treated:
+			bleed = maxf(bleed, CHEST_RATE)
+	return maxf(reducible_pain(), clampf(bleed / INJURY_FULL_BLEED, 0.0, 1.0))
+
+
+## Whether a stopgap kit would still do something (see treatable, KIT_PAIN_MIN).
+func kit_would_help() -> bool:
+	return wound_bleed_rate() > 0.0 or treatable() >= KIT_PAIN_MIN
+
+
+## 0 (fine) to 1: blood loss counts for up to INJURY_BLOOD_WEIGHT, what a kit can still fix
+## (treatable) for the rest. Fractures, cracked ribs and lost blood stay out of the kit term:
+## the stopgap kit fixes none of them, and AI that counted them would use up every kit it
+## carries. Blood loss alone stays under the 0.45 at which AI reaches for one.
 func injury() -> float:
-	var wound_term := clampf(wound_bleed_rate() / 0.5, 0.0, 1.0)
-	if has_fracture(BodyMap.LEG_BONES + BodyMap.ARM_BONES, true):
-		wound_term = minf(wound_term + 0.3, 1.0)
 	var blood_term := clampf(lost() / UNCONSCIOUS_LOST, 0.0, 1.0)
-	return clampf(INJURY_BLOOD_WEIGHT * blood_term + (1.0 - INJURY_BLOOD_WEIGHT) * maxf(pain(), wound_term), 0.0, 1.0)
+	return clampf(INJURY_BLOOD_WEIGHT * blood_term + (1.0 - INJURY_BLOOD_WEIGHT) * treatable(), 0.0, 1.0)
 
 
 # --- Host-side changes ----------------------------------------------------------------
@@ -297,7 +323,6 @@ func add_hit(part: StringName, channel: Dictionary, round_class: StringName) -> 
 			if has_fracture([bone], false) or rng.randf() >= float(FRACTURE_CHANCE.get(round_class, 0.5)):
 				continue
 			added.append(_add_wound(part, "fracture", FEMUR_RATE if bone.begins_with("femur") else 0.0, bone))
-			hit_pain += PAIN_FRACTURE
 	pain_wounds = minf(pain_wounds + hit_pain, 1.0)
 	update_state(0.0)
 	return added

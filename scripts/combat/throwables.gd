@@ -17,6 +17,10 @@ const FRAG_RADIUS := 8.0
 const FRAG_MIN_WOUNDS := 3
 const FRAG_MAX_WOUNDS := 8
 const FRAG_SURE_SHARE := 0.5
+## Of a blast's fragments on one body, only this many go deep enough to reach vessels,
+## organs or the chest cavity; the rest are superficial muscle wounds (they may still break
+## a bone). So a blast only sometimes makes one arterial or chest wound (design doc).
+const FRAG_DEEP_PER_BODY := 1
 ## What fragments can hit: world, hitboxes, armor.
 const FRAG_MASK := (1 << 0) | (1 << 1) | (1 << 3)
 const FRAG_CARVE_M := 0.45
@@ -78,7 +82,7 @@ static func _frag(level: CompoundLevel, pos: Vector3) -> void:
 
 
 ## Host only. Fragments from a blast at `centre`, `distance` metres from `body`: 3 to 8
-## small wounds over the hitboxes with a clear line to the blast. Anything in the way (a
+## small wounds over the hitboxes with a clear line to the blast, only one of them deep. Anything in the way (a
 ## wall, another body, a plate or helmet, the vest's aramid) stops them. Returns how many
 ## wounds it made.
 static func frag_body(body: Node3D, vitals: Vitals, centre: Vector3, distance: float) -> int:
@@ -95,6 +99,7 @@ static func frag_body(body: Node3D, vitals: Vitals, centre: Vector3, distance: f
 		return 0
 	var count := clampi(roundi(lerpf(FRAG_MIN_WOUNDS, FRAG_MAX_WOUNDS, closeness)) + randi_range(-1, 1), FRAG_MIN_WOUNDS, FRAG_MAX_WOUNDS)
 	var wounds := 0
+	var deep_left := FRAG_DEEP_PER_BODY
 	for i in count:
 		var hitbox := exposed[randi() % exposed.size()]
 		var part: StringName = hitbox.get_meta(&"body_part")
@@ -105,8 +110,10 @@ static func frag_body(body: Node3D, vitals: Vitals, centre: Vector3, distance: f
 			continue  # this one met armor or something else on the way
 		if VoxelArmor.soft_armor_stops(body, part, Ballistics.LEVELS[0], Vitals.FRAGMENT, distance, direction):
 			continue
+		# The deep one is whichever lands first: fragments arrive in random order.
 		vitals.server_hit(part, {"round_class": Vitals.FRAGMENT, "position": hit.position,
-			"direction": direction, "hitbox": hitbox, "distance": distance})
+			"direction": direction, "hitbox": hitbox, "distance": distance, "superficial": deep_left <= 0})
+		deep_left -= 1
 		wounds += 1
 	return wounds
 

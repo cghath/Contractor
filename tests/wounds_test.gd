@@ -20,7 +20,8 @@ func _ready() -> void:
 	_test_blood_loss_effects()
 	_test_impact()
 	_test_stopgaps()
-	_test_net_state()
+	_test_kit_economy()
+	await _test_net_state()
 	_test_hitboxes()
 	await _test_ballistics_routing()
 	await _test_fragments()
@@ -106,6 +107,14 @@ func _test_arterial_thigh() -> void:
 	var per_min := (before - vitals.blood_fraction()) * WoundModel.BLOOD_L
 	check(per_min < 1.2 * 0.62, "bleeding slows with the heart's output (%.2f L/min at %.0f%%)" % [per_min, before * 100.0])
 	vitals.queue_free()
+	# The hit itself (pain, a broken femur) rarely knocks you out at once: the blood does it.
+	var instant := 0
+	for i in 200:
+		var t := _vitals(1000 + i)
+		_shoot(t, Vitals.THIGH_R, Vector3(0.0578, 0.70, -0.11))
+		instant += 1 if t.downed else 0
+		t.free()
+	check(instant <= 10, "a femoral rifle hit knocks out at once only rarely (%d of 200)" % instant)
 
 
 func _test_cavitation() -> void:
@@ -396,7 +405,45 @@ func _test_stopgaps() -> void:
 	check(femoral_stopped and still == bleeding.size() - 1, "the arterial bleed is stopped first (%d still bleeding)" % still)
 	vitals.server_advance(2.0)
 	check(vitals.bleed_rate() == 0.0 and not vitals.is_healing(), "then the rest")
-	check(vitals.pain() < pain - 0.34, "pain down by 0.35 (%.2f -> %.2f)" % [pain, vitals.pain()])
+	# Down by 0.35, but not below a broken leg's pain floor (the kit doesn't splint).
+	check(vitals.pain() < maxf(pain - 0.34, WoundModel.PAIN_FLOOR_LEG + 0.001), "pain down by 0.35 (%.2f -> %.2f)" % [pain, vitals.pain()])
+	vitals.queue_free()
+
+
+## The stopgap kit fixes bleeding and pain, not fractures, ribs or lost blood, so injury()
+## (what AI heals on) and needs_treatment() (the "Not injured" check) leave those out.
+func _test_kit_economy() -> void:
+	print("Kits and what they can fix")
+	var m := _model(41)
+	while not m.has_fracture(BodyMap.LEG_BONES, true):
+		m.add_hit(Vitals.THIGH_L, {"graze": false, "depth": 0.15, "vessels": [], "organs": [], "bones": [&"femur_l"]}, Vitals.FULL_POWER)
+	while not m.has_fracture(BodyMap.ARM_BONES, true):
+		m.add_hit(Vitals.UPPER_ARM_R, {"graze": false, "depth": 0.1, "vessels": [], "organs": [], "bones": [&"humerus_r"]}, Vitals.FULL_POWER)
+	m.add_impact(Vitals.CHEST, Vitals.PISTOL, 5.0, -1.0)
+	m.blood = 0.49
+	m.update_state(0.0)
+	check(m.arrest, "broken leg and arm, bled into arrest")
+	m.revive(Vitals.REVIVE_BLOOD, Vitals.REVIVE_PAIN_CAP)
+	var before := m.injury()
+	m.start_treatment(0.35, 4.0)  # one IFAK
+	m.advance(4.1)
+	check(m.injury() < 0.45, "revived, broken leg and arm: one IFAK brings injury under the AI's heal mark (%.2f -> %.2f)" % [before, m.injury()])
+	m.start_treatment(0.7, 8.0)  # a trauma kit
+	m.advance(8.1)
+	check(not m.kit_would_help() and m.pain() >= WoundModel.PAIN_FLOOR_LEG, "then a kit has nothing left to fix (pain %.2f is the fracture's)" % m.pain())
+	var leg := _model(43)
+	while not leg.has_fracture(BodyMap.LEG_BONES, true):
+		leg.reset()
+		leg.add_hit(Vitals.THIGH_L, {"graze": false, "depth": 0.15, "vessels": [], "organs": [], "bones": [&"femur_l"]}, Vitals.PISTOL)
+	leg.blood = 0.73
+	leg.pain_wounds = 0.1
+	leg.start_treatment(0.0, 0.1)
+	leg.advance(0.2)
+	check(not leg.unconscious and leg.injury() < 0.45, "up with a broken leg (bleeding stopped) at 27%% lost: injury %.2f" % leg.injury())
+	var vitals := _vitals(47)
+	check(not vitals.needs_treatment(), "unhurt: not injured")
+	_shoot(vitals, Vitals.THIGH_R, Vector3(0.0578, 0.70, -0.11), Vitals.PISTOL)
+	check(vitals.needs_treatment(), "bleeding: needs treatment")
 	vitals.queue_free()
 
 
@@ -415,6 +462,8 @@ func _test_net_state() -> void:
 	var was_down := vitals.downed
 	vitals.server_damage(1.0)
 	check(vitals.downed != was_down or vitals.net_state == published, "a routine change waits for the next update (at most 2 Hz)")
+	await get_tree().create_timer(Vitals.NET_INTERVAL_S + 0.2).timeout
+	check(vitals.net_state != published, "and goes out once the interval has passed")
 	vitals.server_damage(40.0)
 	check(vitals.downed and int(vitals.net_state.f) & 1 != 0, "going unconscious publishes at once")
 	vitals.queue_free()
@@ -514,7 +563,7 @@ func _test_fragments() -> void:
 		if kinds.any(func(k: String) -> bool: return k in ["arterial", "junctional", "internal", "chest", "heart"]) or dummy.vitals.is_dead():
 			serious += 1
 	check(counts_ok and wounds_ok, "a close blast makes 3 to 8 fragment wounds (%d to %d over 30 blasts)" % [min_count, max_count])
-	check(serious > 0 and serious < 30, "sometimes one is arterial or a chest wound (%d of 30)" % serious)
+	check(serious >= 3 and serious <= 15, "sometimes one is arterial or a chest wound (%d of 30)" % serious)
 	dummy.vitals.server_reset_health()
 	await get_tree().process_frame
 	await get_tree().physics_frame

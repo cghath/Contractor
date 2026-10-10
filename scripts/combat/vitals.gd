@@ -89,6 +89,8 @@ var _net_dirty := false       # clients: net_state not yet applied to _model
 var _sim_left := 0.0          # host: time not yet simulated
 var _published := {}          # host: last published state without countdowns
 var _published_at := -1000.0
+var _publish_pending := false  # host: a routine change held back by the rate limit
+var _shown_second := -1        # whole seconds of the arrest countdown last signalled
 var _died_sent := false
 
 
@@ -142,10 +144,17 @@ func pain() -> float:
 
 
 ## How hurt a conscious unit is, 0 (fine) to 1 (as bad as it gets while still up). AI uses it
-## to decide when to treat itself; the medical screen will show the details. Blood loss,
-## pain and untreated wounds all count.
+## to decide when to treat itself; the medical screen will show the details. Blood loss
+## counts a little; the rest is what a stopgap kit can still fix (untreated bleeding and
+## pain it can take off), so fractures and lost blood don't make AI burn through its kits.
 func injury() -> float:
 	return _m().injury() if is_up() else 1.0
+
+
+## Whether using a stopgap kit (IFAK, trauma kit) on this unit would still do something:
+## untreated bleeding, an unsealed chest wound, or pain a kit can take off.
+func needs_treatment() -> bool:
+	return is_up() and _m().kit_would_help()
 
 
 ## Seconds until this unit dies without help (what's left of the cardiac-arrest window), or
@@ -236,8 +245,10 @@ func vision() -> Dictionary:
 ## Host only. A round or fragment that got past armor reaches `part` (a hitbox's
 ## "body_part" meta). `hit` keys: "round_class", "position" and "direction" (world space,
 ## for the wound channel), "hitbox" (the Area3D it entered, so the channel follows a posed
-## or lying body), "distance" (metres from the shooter). Without a position the channel
-## goes in at a random spot on the part. ("damage" is ignored: the wound model has none.)
+## or lying body), "distance" (metres from the shooter), "superficial" (a fragment that
+## stops short of vessels and organs: a small muscle wound, maybe a fracture). Without a
+## position the channel goes in at a random spot on the part. ("damage" is ignored: the
+## wound model has none.)
 func server_hit(part: StringName, hit: Dictionary) -> void:
 	if _m().dead:
 		return
@@ -252,6 +263,9 @@ func server_hit(part: StringName, hit: Dictionary) -> void:
 	if round_class == FRAGMENT:
 		depth = _model.rng.randf_range(BodyMap.FRAGMENT_DEPTH_M.x, BodyMap.FRAGMENT_DEPTH_M.y)
 	var channel := BodyMap.trace(part, channel_in[0], channel_in[1], round_class, depth)
+	if hit.get("superficial", false):
+		channel.vessels = []
+		channel.organs = []
 	_model.add_hit(part, channel, round_class)
 	_after_change()
 
@@ -315,9 +329,12 @@ func server_advance(seconds: float) -> void:
 # --- Host simulation and replication --------------------------------------------------
 
 func _process(delta: float) -> void:
+	_signal_countdown()
 	if not _is_host():
 		_m().tick_display(delta)
 		return
+	if _publish_pending and Time.get_ticks_msec() / 1000.0 - _published_at >= NET_INTERVAL_S:
+		_publish(false)
 	_sim_left += delta
 	if _sim_left < SIM_STEP_S:
 		return
@@ -363,14 +380,27 @@ func _publish(force: bool) -> void:
 	var key := state.duplicate()
 	key.erase("t")
 	if key == _published and not force:
+		_publish_pending = false
 		return
 	var now := Time.get_ticks_msec() / 1000.0
 	if not force and key.get("f") == _published.get("f") and now - _published_at < NET_INTERVAL_S:
+		_publish_pending = true  # sent from _process once the interval has passed
 		return
+	_publish_pending = false
 	_published = key
 	_published_at = now
 	net_state = state
 	_net_dirty = false
+
+
+## Emits `changed` each time the arrest countdown passes a whole second, so labels that
+## redraw on `changed` (condition_text) keep counting between net_state updates.
+func _signal_countdown() -> void:
+	var left := seconds_to_death()
+	var second := ceili(left) if left >= 0.0 else -1
+	if second != _shown_second:
+		_shown_second = second
+		changed.emit()
 
 
 ## The model to read: the host's own, or on a client the copy rebuilt from net_state.
