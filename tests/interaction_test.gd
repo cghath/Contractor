@@ -265,6 +265,8 @@ func _test_self_actions() -> void:
 
 func _test_menu() -> void:
 	print("Menu: keys, cursor and release")
+	var own := player.player_input.interaction
+	check(own != null and own.is_inside_tree() and not own.is_open(), "the local player has an interaction menu on the HUD")
 	var menu := InteractionMenu.new(player)
 	var screen := SubViewport.new()  # a real screen size (headless windows are 64 px)
 	screen.size = Vector2i(1280, 720)
@@ -302,6 +304,7 @@ func _test_menu() -> void:
 	check(menu.entry_rects().size() == 1, "the point under the cursor opens its menu")
 	menu.move_cursor(menu.entry_rects()[0].get_center() - menu.cursor)
 	check(menu.highlighted().get("id") == &"pick_up", "moving the mouse moves the cursor onto Pick up")
+	await _frames(2)  # draws with a point open
 	menu.set_cursor(Vector2(4, 4))
 	check(menu.highlighted().is_empty(), "nothing is highlighted over empty screen")
 	var held := player.inventory.count_of(&"smoke_grenade")
@@ -322,6 +325,7 @@ func _test_menu() -> void:
 	menu.set_cursor(centre + Vector2(-300, 0))
 	menu.set_cursor(menu.entry_rects()[0].get_center())
 	menu.set_cursor(menu.submenu_rects(0)[0].get_center())
+	await _frames(2)  # draws with a submenu open
 	var picked := menu.highlighted()
 	check(picked.get("container") != null and picked.get("target") == alpha, "a submenu entry is the item to give (%s)" % picked.get("label"))
 	menu.update_keys(false, false, 0.05)
