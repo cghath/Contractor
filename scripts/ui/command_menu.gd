@@ -114,7 +114,8 @@ func is_open() -> bool:
 
 
 ## The squad as numbered in the menu: by squad slot (fire team A, then B), so F1 is the
-## first slot. Anyone without a slot yet comes last, players first.
+## first slot. Anyone without a slot yet comes last, players first. A dead squadmate's body
+## isn't listed (it left the squad: Squad.members).
 func roster() -> Array[Soldier]:
 	var out: Array[Soldier] = []
 	var level := CompoundLevel.current(player)
@@ -124,7 +125,7 @@ func roster() -> Array[Soldier]:
 		if h is Soldier and not h.is_queued_for_deletion():
 			out.append(h as Soldier)
 	for s in level.ai.get_children():
-		if s is Soldier and s.faction == player.faction and not s.is_queued_for_deletion():
+		if s is Soldier and s.faction == player.faction and not s.is_queued_for_deletion() and not (s as Soldier).vitals.is_dead():
 			out.append(s as Soldier)
 	out.sort_custom(func(a: Soldier, b: Soldier) -> bool: return _roster_key(a) < _roster_key(b))
 	return out

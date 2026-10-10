@@ -7,6 +7,12 @@ extends Node
 ## exits when the client leaves.
 
 const KIT: Array[StringName] = [&"plate_carrier", &"plate_ceramic_l4", &"m4a1", &"helmet", &"assault_pack"]
+## A dead player's body in the zone save the host loads (as Soldier.body_record writes it), so
+## the client, joining late, finds it there with its gear.
+const SAVED_BODY := {"uid": "test_net_body_1", "label": "Player 9", "faction": "friendly", "variant": "desert", "role": "",
+	"pos": [0.0, 0.1, 26.5], "rot_y": 0.0, "age_s": 30.0, "marker": true,
+	"gear": {"slots": {"primary": "m4a1", "vest": "plate_carrier", "helmet": "helmet"}, "slot_state": {"primary": {"rounds": 21}},
+		"containers": {"vest": [{"id": "mag_556", "count": 3}], "pockets": [], "backpack": []}, "hands": ""}}
 
 var failures := 0
 var level: CompoundLevel
@@ -18,15 +24,36 @@ func _ready() -> void:
 	GameState.delete_save()
 	if "--join" in OS.get_cmdline_user_args():
 		Roles.local_choice = Roles.MARKSMAN  # the client's pick in the main menu, sent on join
+	else:
+		_write_save_with_body()
 	add_child(load("res://scenes/main.tscn").instantiate())  # main reads --host/--join
 	await get_tree().process_frame
 	level = CompoundLevel.current(self)
 	if Net.is_hosting():
 		Net.peer_joined.connect(_give_kit)
-		Net.peer_left.connect(func(_id: int) -> void: get_tree().quit(0))
+		Net.peer_left.connect(_on_client_left)
 		get_tree().create_timer(60.0).timeout.connect(func() -> void: get_tree().quit(1))
 	else:
 		_run_client()
+
+
+## Host: the client left while down (it knocks itself out first), so its body stays behind
+## with its gear. The host's exit code says whether it did (run_tests.sh checks it).
+func _on_client_left(id: int) -> void:
+	await get_tree().process_frame
+	var left := level.bodies.get_children().filter(func(b: Node) -> bool:
+		return b is Soldier and (b as Soldier).display_name() == "Player %d" % id and (b as Soldier).vitals.is_dead() \
+			and (b as Soldier).inventory.slots[&"primary"] == &"m4a1")
+	print("[host] peer %d left while down: %s" % [id, "its body stayed, gear and all" if left.size() == 1 else "NO BODY"])
+	get_tree().quit(0 if left.size() == 1 else 1)
+
+
+## Host: a zone save holding one body (SAVED_BODY), loaded when hosting starts.
+func _write_save_with_body() -> void:
+	DirAccess.make_dir_recursive_absolute(GameState.SAVE_DIR)
+	var file := FileAccess.open(GameState.save_path(), FileAccess.WRITE)
+	file.store_string(JSON.stringify({"version": GameState.SAVE_VERSION, "looted": [], "dropped": {}, "voxel_edits": [], "bodies": [SAVED_BODY]}))
+	file.close()
 
 
 func _give_kit(id: int) -> void:
@@ -103,7 +130,33 @@ func _run_client() -> void:
 	await _wait_for(func() -> bool: return me.inventory.slots[&"helmet"] == &"", 3.0)
 	await _wait_for(func() -> bool: return _dropped_helmet() != null, 3.0)
 	check(_dropped_helmet() != null, "dropped helmet spawned on the client")
+	await _check_saved_body(me)
+	# Knocked out, then gone: the host keeps this player's body (see _on_client_left).
+	me._server_debug_hurt.rpc_id(1, 140.0)
+	await _wait_for(func() -> bool: return me.vitals.downed, 3.0)
+	check(me.vitals.downed, "knocked out before leaving (%s)" % me.vitals.condition_text())
 	_finish()
+
+
+## The body from the host's zone save, seen by this late joiner, and looted over the network.
+func _check_saved_body(me: Soldier) -> void:
+	await _wait_for(func() -> bool: return level.bodies.get_child_count() > 0 and (level.bodies.get_child(0) as Soldier).inventory.slots[&"vest"] != &"", 3.0)
+	var body: Soldier = level.bodies.get_child(0) if level.bodies.get_child_count() > 0 else null
+	check(body != null and body.display_name() == "Player 9" and body.vitals.is_dead() and body.inventory.slots[&"vest"] == &"plate_carrier"
+		and body.inventory.rounds_in(&"primary") == 21 and body.inventory.count_of(&"mag_556") == 3,
+		"a body in the zone save is there for a late joiner, dead, with its gear (%s)" % [body.inventory.net_state if body else "none"])
+	if body == null:
+		return
+	var marker := body.get_children().filter(func(n: Node) -> bool: return n is GearMarker)
+	check(body.collision_layer == 0 and body.global_position.distance_to(Vector3(0, 0.1, 26.5)) < 0.5 and marker.size() == 1,
+		"lying where it was saved, with its gear marker")
+	me.global_position = body.global_position + Vector3(1.0, 0.0, 0.0)
+	await get_tree().create_timer(0.4).timeout  # the host sees us there
+	var mags := me.inventory.count_of(&"mag_556")
+	me._server_loot_item.rpc_id(1, body.get_path(), &"vest", 0, &"mag_556")
+	await _wait_for(func() -> bool: return body.inventory.count_of(&"mag_556") == 0, 3.0)
+	check(body.inventory.count_of(&"mag_556") == 0 and me.inventory.count_of(&"mag_556") == mags + 3,
+		"looting its magazines over the network moves them onto the looter (%d -> %d)" % [mags, me.inventory.count_of(&"mag_556")])
 
 
 func _dropped_helmet() -> WorldItem:

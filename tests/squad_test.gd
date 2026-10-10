@@ -35,6 +35,7 @@ func _ready() -> void:
 	await _test_buddy_carries_buddy()
 	await _test_contact()
 	_test_flash_stuns()
+	await _test_dead_leave_squad()
 	GameState.delete_save()
 	print("SQUAD TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
@@ -141,22 +142,16 @@ func _test_buddy_carries_buddy() -> void:
 	print("Downed buddy, out of contact")
 	var bravo := _ai("Bravo")
 	var charlie := _ai("Charlie")  # Bravo's battle buddy and team A's medic
-	var kits := _take_kits(charlie)
-	var golf_kits := _take_kits(_ai("Golf"))  # nobody has a trauma kit for the stopgap revive
-	bravo.vitals.server_damage(500.0)
+	bravo.vitals.server_damage(70.0)  # out cold, 42% of his blood lost: he won't wake soon
 	var picked := await _wait_until(func() -> bool: return bravo.carried_by == charlie, 20.0)
-	check(picked, "his buddy Charlie, the medic, has no trauma kit to revive him, so picks him up (%s)" % charlie.ai_status)
+	check(picked, "nothing left to treat and not waking, his buddy Charlie, the medic, picks him up (%s)" % charlie.ai_status)
 	_place(player, Vector3(-8, 0.1, 4))
-	await _seconds(6.0)
-	check(_flat(bravo.global_position, player.global_position) < 11.0, "and carries him after the lead (%.1f m)" % _flat(bravo.global_position, player.global_position))
-	for id: StringName in kits:
-		charlie.inventory.take(id)
-	if kits.is_empty():
-		charlie.inventory.take(&"trauma_kit")  # only a trauma kit has the stopgap revive
-	var revived := await _wait_until(func() -> bool: return bravo.vitals.is_up(), 10.0)
-	check(revived and bravo.carried_by == null, "handed a trauma kit, Charlie revives him (Bravo: %s)" % bravo.vitals.condition_text())
-	for id: StringName in golf_kits:
-		_ai("Golf").inventory.take(id)
+	var along := await _wait_until(func() -> bool: return _flat(bravo.global_position, player.global_position) < 11.0, 15.0)
+	check(along, "and carries him after the lead (%.1f m)" % _flat(bravo.global_position, player.global_position))
+	check(bravo.vitals.downed, "nobody revives him: he's still out (%s)" % bravo.vitals.condition_text())
+	bravo.vitals.server_reset_health()  # he comes round (the wound model decides when; the test stands in)
+	var down := await _wait_until(func() -> bool: return bravo.carried_by == null and SquadAI.of(charlie).casualty == null, 5.0)
+	check(down, "awake, he's put down and Charlie goes back to following (%s)" % charlie.ai_status)
 
 
 func _test_contact() -> void:
@@ -183,6 +178,24 @@ func _test_flash_stuns() -> void:
 	check(alpha.stunned_s > 1.0, "a flashbang stuns AI that sees it (%.1f s)" % alpha.stunned_s)
 
 
+func _test_dead_leave_squad() -> void:
+	print("A dead squadmate")
+	var squad := level.squad_for(&"friendly")
+	var foxtrot := _ai("Foxtrot")
+	var living := level._squad_ai().size()
+	foxtrot.vitals.server_hit(Vitals.HEAD, {"round_class": Vitals.INTERMEDIATE})
+	await _frames(2)
+	check(foxtrot not in squad.members() and foxtrot.squad_slot == -1, "leaves the squad: no member, no slot, no formation place")
+	var order_before := SquadAI.of(foxtrot).order
+	squad.give_order(player, Squad.Order.HOLD, player.global_position)
+	check(SquadAI.of(foxtrot).order == order_before and SquadAI.of(_ai("Golf")).order == Squad.Order.HOLD, "and takes no orders")
+	squad.give_order(player, Squad.Order.FOLLOW, player.global_position)
+	level.rebalance_squad()
+	await _frames(2)
+	check(is_instance_valid(foxtrot) and foxtrot.is_in_group(Soldier.DEAD_GROUP) and foxtrot.inventory.slots[&"primary"] != &""
+		and level._squad_ai().size() == living - 1, "a rebalance leaves his body and gear where they are and doesn't replace him (%d living)" % level._squad_ai().size())
+
+
 # --- Helpers --------------------------------------------------------------
 
 func _squad() -> Array:
@@ -198,14 +211,6 @@ func _remove_hostiles() -> void:
 	for s: Soldier in level.ai.get_children():
 		if s.faction == &"hostile":
 			s.queue_free()
-
-
-func _take_kits(s: Soldier) -> Array[StringName]:
-	var taken: Array[StringName] = []
-	for id: StringName in SquadAI.REVIVE_KITS:
-		while s.inventory.remove_one(id):
-			taken.append(id)
-	return taken
 
 
 func _place(s: Soldier, pos: Vector3) -> void:

@@ -1,8 +1,8 @@
 class_name SquadAI
 extends Node
 ## Host-only brain for an AI Soldier. It drives the body only through the body's intent
-## fields and the same host-validated requests a player sends (fire, reload, heal, revive),
-## so AI follows the same rules for ammo, reload time and revive time.
+## fields and the same host-validated requests a player sends (fire, reload, treat), so AI
+## follows the same rules for ammo, reload time and treatment time.
 ##
 ## Every THINK_S each intent scores itself 0..1 and the best one wins, with hysteresis so
 ## close scores don't flip back and forth. Fighting is one intent with fire-team tactics
@@ -23,25 +23,33 @@ extends Node
 ## Squadmates call out what they do (Callouts): contact, reloading, grenades, bounding.
 ##
 ## Casualty care on the wound model (design doc "Downed friendlies", "Medics" and "Fits the
-## squad decisions"), for both sides and for players like anyone else. It uses only the
-## treatment interface: Vitals.care_needed(), wound_list(), is_unconscious(), and the host
-## requests Soldier._server_treat (one item on one body part) and _server_revive (stopgap).
+## squad decisions"; Captain's playtest: medics put the wounded first, even in a firefight),
+## for both sides and for players like anyone else. It uses only the treatment interface:
+## Vitals.care_needed(), wound_list(), is_unconscious(), and the host request
+## Soldier._server_treat (one item on one body part). There is no revive: a casualty wakes on
+## their own when the wound model says so, and care keeps them alive and with the squad until then.
 ## - Who answers: the casualty's fire-team medic, otherwise their battle buddy, otherwise
 ##   the other medic (when the team's medic is down, busy or far), otherwise the nearest free
-##   squadmate (responder_for). They say "Moving to Charlie", then "Treating Charlie".
-## - Under fire: smoke between the casualty and the threat, drag them to cover, tourniquet
-##   for massive bleeding only, then guard them. Once safe: massive bleeding, airway (NPA),
-##   chest seal, bandages and gauze, splint, then morphine for a conscious casualty in heavy
-##   pain (plan_care), re-checking care_needed() between items until nothing is left.
-## - A casualty still unconscious once their bleeding is controlled gets the stopgap revive
-##   from a medic with a trauma kit (until IV in wave 3). Anyone else who can do no more asks
-##   for a medic ("Need a medic on Charlie") and carries the casualty after the squad leader;
-##   a free medic with what's missing takes over (medic_for).
+##   squadmate (responder_for), using what's in their IFAK. They say "Moving to Charlie",
+##   then "Treating Charlie". Casualty care outscores fighting: the responder goes at once.
+## - Under fire: smoke between a casualty in the open and the threat, drag them out of the
+##   line of fire to cover, and treat massive bleeding (a tourniquet) while either of you is
+##   still exposed. In cover, even mid-firefight, the rest follows in the care order: massive
+##   bleeding, airway (NPA), chest seal, bandages and gauze, splint, then morphine for a
+##   conscious casualty in pain (plan_care), re-checking care_needed() between items.
+## - A responder pinned down while the casualty lies in the open can't reach them alive yet:
+##   it smokes and puts suppressive fire on the threat first. Otherwise it fights only an
+##   enemy within MEDIC_DEFEND_M, and the rest of the squad covers it with fire on the threat.
+## - Afterwards it stays with an unconscious casualty and protects them (Care.GUARD), or out
+##   of contact carries them after the squad leader (dragging them to cover if contact comes)
+##   until they wake on their own. Anyone who lacks an item asks for a medic ("Need a medic
+##   on Charlie"); a free medic with what's missing takes over (medic_for).
 ## - Self-care: a conscious wounded unit tourniquets its own arterial bleed at once, even
 ##   under fire, and does the rest (bandages, seals, splints, morphine) out of contact or in
-##   cover. What it can't fix itself, it calls "Medic!" for.
-## - Dead friendlies stay where they fell; out of contact a squadmate (their buddy first)
-##   carries the body after the squad leader.
+##   cover. What it can't fix itself, it calls "Medic!" for. A medic doesn't use on itself
+##   an item nobody else on its side carries (massive bleeding aside).
+## - Dead friendlies (players' bodies too) stay where they fell; out of contact a squadmate
+##   (their buddy first) carries the body after the squad leader.
 ## - Unconscious foes are ignored, except for a dead-check while clearing or assaulting
 ##   through a position (DEAD_CHECK_M).
 
@@ -72,30 +80,36 @@ const GRENADE_COOLDOWN_S := 15.0
 ## Points checked along a frag's arc before throwing it (_lob_clear).
 const LOB_CHECKS := 10
 const CASUALTY_REACH := 1.6
-## The kits Soldier._server_revive (the stopgap revive) can use.
-const REVIVE_KITS: Array[StringName] = [&"trauma_kit"]  # only the trauma kit has the stopgap revive
-## AI uses the stopgap revive only as a medic with this kit (until IV in wave 3).
-const MEDIC_REVIVE_KIT := &"trauma_kit"
 ## Proposed: a fire team's medic further than this from a casualty counts as far, so the
 ## buddy or the other medic answers instead.
 const MEDIC_FAR_M := 40.0
 ## Proposed: under fire, smoke goes between a casualty in the open and the threat from this
 ## close to them.
 const SMOKE_RANGE_M := 25.0
+## The smoke a responder screens a casualty with (coloured smokes are kept for signalling).
+const SCREEN_SMOKE := &"smoke_grenade"
 ## Under fire only massive bleeding is treated (a tourniquet); the rest waits for cover.
 const UNDER_FIRE_KINDS: Array[String] = ["arterial"]
+## Massive bleeding: a medic treats this on itself even with the squad's only item for it.
+const MASSIVE_BLEED_KINDS: Array[String] = ["arterial", "junctional"]
+## Proposed: a unit looking after a casualty fights back only at an enemy this close (or
+## while guarding them); further off it leaves the fight to the squad.
+const MEDIC_DEFEND_M := 10.0
+## Proposed: squadmates in contact put covering fire on the threat while a squadmate this
+## close is out reaching or dragging a casualty.
+const COVER_MEDIC_M := 30.0
+## Proposed: an unconscious casualty knocked out with blood to spare (under the wound model's
+## UNCONSCIOUS_LOST) is watched where they lie until they wake, unless the squad leader is
+## further than this from them; then they're carried after the squad like anyone who won't
+## wake soon.
+const STAY_WITH_M := 20.0
 ## The care order once safe, by care_needed() kind: massive bleeding, airway, chest, the
 ## other bleeding, fractures, pain. Kinds not listed go just before pain.
 const CARE_RANK: Array[String] = ["arterial", "airway", "chest", "junctional", "venous", "internal", "muscle", "graze", "fracture", "pain"]
-## care_needed() kinds that are bleeding (the stopgap revive waits until none are left).
-const BLEED_KINDS: Array[String] = ["arterial", "junctional", "venous", "internal", "muscle", "graze", "chest"]
 ## Proposed: seconds past an item's time before checking whether it worked.
 const TREAT_MARGIN_S := 0.4
 ## Proposed: tries at one task (same body, part and kind) that change nothing before giving up on it.
 const TREAT_TRIES := 2
-## Proposed: an unconscious casualty whose bleeding is controlled gets this long to wake on
-## their own before the medic uses the stopgap revive.
-const REVIVE_WAIT_S := 6.0
 ## Proposed: morphine only for a conscious casualty in at least this much pain.
 const MORPHINE_PAIN := 0.5
 ## Proposed: a wounded unit calls "Medic!" at most this often, and counts as asking for that long.
@@ -160,8 +174,7 @@ var care := Care.NONE
 var casualty: Soldier
 ## Looking after a casualty and unable to do more: asks for a medic who has `wanted`.
 var wants_medic := false
-## Items (and MEDIC_REVIVE_KIT for the stopgap revive) this unit lacks for its casualty, or
-## for itself when it calls "Medic!".
+## Items this unit lacks for its casualty, or for itself when it calls "Medic!".
 var wanted: Array[StringName] = []
 ## True while moving to new cover in contact (the buddy holds and covers meanwhile).
 var bounding := false
@@ -191,13 +204,13 @@ var _advance_anchor := Vector3.ZERO
 var _advancing := false
 var _smoke_used := false
 var _candidate: Soldier  # a casualty this unit should answer (refreshed each think)
-var _treat_until := -1.0  # an item or a revive in progress until then
+var _treat_until := -1.0  # an item in progress until then
 var _treat_target: Soldier
 var _treat_key := ""
 var _treat_before := 0
-var _reviving := false
 var _failures := {}  # task key -> treatments that changed nothing
-var _controlled_at := -1.0  # when the casualty's bleeding was first seen controlled
+var _suppressing := false  # pinned while the casualty lies in the open: fire on the threat first
+var _cover_medic := false  # a squadmate nearby is out reaching or dragging a casualty (refreshed each think)
 var _asked_medic := false
 var _answered := false
 var _medic_called_at := -1000.0
@@ -275,6 +288,32 @@ func fighting() -> bool:
 	return in_contact() and (combat_mode != Squad.CombatMode.SAFE or engaged())
 
 
+## The enemy this unit fights right now: its target, except that a unit going to, moving or
+## treating a casualty leaves anyone further than MEDIC_DEFEND_M to the squad (guarding them,
+## it fights as usual). Null for none.
+func _foe() -> Soldier:
+	if target == null:
+		return null
+	if intent == Intent.CASUALTY and care in [Care.REACH, Care.DRAG, Care.TREAT, Care.CARRY] \
+			and body.global_position.distance_to(target.global_position) > MEDIC_DEFEND_M:
+		return null
+	return target
+
+
+## In contact, with a squadmate within COVER_MEDIC_M out reaching or dragging a casualty:
+## this unit puts covering fire on the threat while it has no target of its own.
+func _medic_needs_cover() -> bool:
+	if not in_contact() or intent == Intent.CASUALTY:
+		return false
+	for n in get_tree().get_nodes_in_group(&"combatants"):
+		var other := SquadAI.of(n)
+		if other and other != self and other.body != null and other.body.faction == body.faction and other.body.vitals.is_up() \
+				and other.intent == Intent.CASUALTY and other.care in [Care.REACH, Care.DRAG] \
+				and other.body.global_position.distance_to(body.global_position) <= COVER_MEDIC_M:
+			return true
+	return false
+
+
 ## This unit, or its squad, was fired upon recently.
 func engaged() -> bool:
 	return Soldier._now() - _fired_on_at < CONTACT_MEMORY_S or (squad != null and squad.is_engaged())
@@ -317,12 +356,12 @@ func status_text() -> String:
 		Intent.CASUALTY:
 			match care:
 				Care.REACH:
-					return "Going to %s" % who
+					return "Covering %s" % who if _suppressing else "Going to %s" % who
 				Care.DRAG:
 					return "Dragging %s to cover" % who
 				Care.TREAT:
-					if _reviving:
-						return "Reviving %s" % who
+					if _treat_until < 0.0 and is_instance_valid(casualty) and casualty.vitals.downed:
+						return "Watching over %s" % who
 					return "Treating %s" % who
 				Care.GUARD:
 					return "Guarding %s" % who
@@ -341,9 +380,9 @@ func status_text() -> String:
 		Intent.RELOAD:
 			return "Reloading"
 		Intent.HEAL:
-			if _being_treated():
-				return "Being treated"
-			return "Treating self" if _treat_target == body and _treat_until >= 0.0 else "Patching up"
+			if _treat_target == body and _treat_until >= 0.0:
+				return "Treating self"
+			return "Being treated" if _being_treated() else "Patching up"
 		Intent.HOLD:
 			return "Holding"
 		Intent.MOVE_TO:
@@ -409,6 +448,7 @@ func _choose_intent() -> void:
 	elif not contact and (care == Care.BODY or _find_body() != null):
 		scores[Intent.CASUALTY] = BODY_RECOVER_SCORE
 	_maybe_call_medic()
+	_cover_medic = _medic_needs_cover()
 	if fighting():
 		scores[Intent.FIGHT] = 0.7
 	if weapon and rounds == 0 and spare > 0:
@@ -443,7 +483,8 @@ func _act() -> void:
 	body.want_crouch = false
 	_was_bounding = bounding
 	bounding = false  # only _fight moves to cover
-	body.want_aim = target != null
+	_suppressing = false  # only _care_reach holds back to suppress
+	body.want_aim = _foe() != null
 	match intent:
 		Intent.FOLLOW:
 			if fighting():
@@ -698,12 +739,12 @@ func _skipping(c: Soldier) -> bool:
 	return c != null and Soldier._now() < float(_skip.get(c.get_instance_id(), -1.0))
 
 
-## Carries at least one of `ids` (true for none asked).
+## Carries at least one of `ids`, loose or in a kit (true for none asked).
 func _carries_any(ids: Array[StringName]) -> bool:
 	if ids.is_empty():
 		return true
 	for id in ids:
-		if body.inventory.count_of(id) > 0:
+		if body.inventory.medical_count(id) > 0:
 			return true
 	return false
 
@@ -829,7 +870,9 @@ func _do_care() -> void:
 		Care.TREAT:
 			_care_treat(contact)
 		Care.GUARD:
-			if not contact or not _next_task(casualty, true).is_empty():
+			# Stay with them and protect them; back to treating once it's quiet, or once
+			# there's something to do that cover allows.
+			if not contact or not _next_task(casualty, _care_exposed(contact)).is_empty():
 				care = Care.TREAT
 			else:
 				_fight(casualty.global_position, 3.0)
@@ -858,7 +901,6 @@ func _take_casualty(c: Soldier) -> void:
 	_start_reach()
 	_smoke_used = false
 	_has_cover = false
-	_controlled_at = -1.0
 	_asked_medic = false
 	_answered = false
 	wants_medic = false
@@ -878,23 +920,35 @@ func _start_reach() -> void:
 	_detour_next = -1.0
 
 
+## Going to the casualty, under fire as well. A casualty down in the open gets smoke between
+## them and the threat as soon as they're in throwing range. Pinned down meanwhile (the
+## casualty can't be reached alive yet), this unit holds, smokes and puts suppressive fire on
+## the threat first. At the casualty: one lying in the open is dragged to cover, otherwise
+## treatment starts.
 func _care_reach(contact: bool) -> void:
 	var d := _flat_distance(casualty.global_position)
 	if body.carrying == casualty:
 		care = Care.CARRY
 		return
+	var exposed := contact and casualty.vitals.downed and not _sheltered(casualty)
+	if exposed and not _smoke_used and d <= SMOKE_RANGE_M:
+		if body.inventory.count_of(SCREEN_SMOKE) <= 0:
+			_smoke_used = true  # nothing to screen them with
+		elif _throw(SCREEN_SMOKE, casualty.global_position + (body.threat_pos - casualty.global_position).normalized() * 4.0):
+			_smoke_used = true
+	if exposed and body.suppression >= PINNED and d > CASUALTY_REACH:
+		_suppressing = true
+		_reach_progress_at = Soldier._now()  # waiting here isn't being stuck
+		_has_destination = false
+		body.want_crouch = true
+		return
 	if not _reach_progress(d):
 		return  # gave up: the next responder takes them
 	_go(_detour if Soldier._now() < _detour_until else casualty.global_position, true)
-	if contact and not _smoke_used and d <= SMOKE_RANGE_M and casualty.vitals.downed and not _sheltered(casualty):
-		_smoke_used = true
-		if body.inventory.count_of(&"smoke_grenade") > 0:
-			var screen := casualty.global_position + (body.threat_pos - casualty.global_position).normalized() * 4.0
-			_throw(&"smoke_grenade", screen)
 	if d > CASUALTY_REACH:
 		return
 	_has_destination = false
-	if contact and casualty.vitals.downed and not _sheltered(casualty) and not is_instance_valid(casualty.carried_by):
+	if exposed and not is_instance_valid(casualty.carried_by):
 		var spot: Variant = find_cover(body.global_position, 10.0)
 		if spot != null and body.server_pick_up_body(casualty, Soldier.DRAG):
 			_cover_point = spot
@@ -911,7 +965,7 @@ func _care_reach(contact: bool) -> void:
 func _reach_progress(d: float) -> bool:
 	var now := Soldier._now()
 	if d < _reach_best - REACH_PROGRESS_M or d <= CASUALTY_REACH:
-		_reach_best = d
+		_reach_best = minf(d, _reach_best)
 		_reach_progress_at = now
 		return true
 	if now - _reach_progress_at >= REACH_GIVE_UP_S:
@@ -943,6 +997,11 @@ func _give_up_casualty() -> void:
 	_think_cd = 0.0
 
 
+## Beside the casualty: treats them item by item in the care order (only massive bleeding
+## while either of them is exposed to the threat). Once nothing more can be done: a conscious
+## casualty is left to it (or guarded until cover or quiet allows the rest); an unconscious one
+## is guarded in contact, otherwise watched over where they lie or carried after the squad
+## (_should_carry) until they wake on their own.
 func _care_treat(contact: bool) -> void:
 	if body.carrying == casualty:
 		body.release_carried()
@@ -954,38 +1013,47 @@ func _care_treat(contact: bool) -> void:
 	_face(casualty.global_position)
 	var now := Soldier._now()
 	if _treat_until >= 0.0 or now < body._busy_until:
-		return  # an item (or the revive) is going on
-	var task := _next_task(casualty, contact)
+		return  # an item is going on
+	var exposed := _care_exposed(contact)
+	var task := _next_task(casualty, exposed)
 	if not task.is_empty():
 		_start_treatment(casualty, task)
 		return
 	# Nothing more this unit can do for them now.
 	if not casualty.vitals.downed:
-		if contact and not _next_task(casualty, false).is_empty():
-			care = Care.GUARD  # the rest once it's quiet
+		if exposed and not _next_task(casualty, false).is_empty():
+			care = Care.GUARD  # the rest once in cover or quiet
 		else:
 			_end_care()  # conscious and patched up as far as this unit can
 		return
 	if contact:
 		care = Care.GUARD
 		return
-	if _bleeding_controlled(casualty):
-		if _controlled_at < 0.0:
-			_controlled_at = now
-	else:
-		_controlled_at = -1.0
-	if _can_revive() and _controlled_at >= 0.0:
-		# The stopgap revive (until IV): only once the bleeding is controlled and they
-		# still haven't woken. Bleeding this unit can't stop waits for someone who can.
-		if now - _controlled_at >= REVIVE_WAIT_S:
-			_start_revive()
-		return
 	_want_medic()
-	if _controlled_at >= 0.0 and now - _controlled_at < REVIVE_WAIT_S:
-		return  # give them a moment to come round before moving them
-	care = Care.CARRY
+	if _should_carry():
+		care = Care.CARRY
 
 
+## Treating `casualty` counts as under fire: in contact, with the casualty or this unit in
+## the open to the last known threat. Behind cover the whole care order goes on, even in a
+## firefight.
+func _care_exposed(contact: bool) -> bool:
+	return contact and (not _sheltered(casualty) or not _cover_protects(body.global_position))
+
+
+## An unconscious casualty with nothing left to treat goes with the squad: one who won't
+## wake soon (past the wound model's unconscious blood loss), or any once the squad leader is
+## more than STAY_WITH_M away. Otherwise they're watched over where they lie.
+func _should_carry() -> bool:
+	if 1.0 - casualty.vitals.blood_fraction() >= WoundModel.UNCONSCIOUS_LOST:
+		return true
+	var leader: Soldier = squad.leader if squad and is_instance_valid(squad.leader) else null
+	return leader != null and leader != casualty and leader.global_position.distance_to(casualty.global_position) > STAY_WITH_M
+
+
+## Carrying an unconscious casualty after the squad leader until they wake on their own. In
+## contact they're dragged to cover (or guarded where they lie); something new to treat, or
+## waking up, sends this unit back to treating them.
 func _care_carry(contact: bool) -> void:
 	if contact:
 		if body.carrying == casualty:
@@ -998,8 +1066,7 @@ func _care_carry(contact: bool) -> void:
 		else:
 			care = Care.GUARD
 		return
-	if not casualty.vitals.downed or not _next_task(casualty, false).is_empty() \
-			or (_can_revive() and _bleeding_controlled(casualty)):
+	if not casualty.vitals.downed or not _next_task(casualty, false).is_empty():
 		care = Care.TREAT  # woke up, or there's something new to do (an item handed over)
 		return
 	var leader: Soldier = squad.leader if squad and is_instance_valid(squad.leader) else null
@@ -1056,17 +1123,12 @@ func _end_care() -> void:
 	_has_cover = false
 	wants_medic = false
 	wanted.clear()
-	_reviving = false
-
-
-func _revive_kit() -> StringName:
-	var kit := body._best_revive_kit()  # a trauma kit with its stopgap revive left
-	return kit.id if kit else &""
 
 
 ## The next treatment this unit can give `c` now, in the care order (under fire: massive
-## bleeding only), with an item it carries and that hasn't failed TREAT_TRIES times, and not
-## one the casualty is doing on themselves right now; {} for none.
+## bleeding only), with an item it carries (loose or in a kit) that hasn't failed TREAT_TRIES
+## times, not one the casualty is doing on themselves right now, and (on itself) not one a
+## medic keeps for the squad (_kept_for_squad); {} for none.
 func _next_task(c: Soldier, under_fire: bool) -> Dictionary:
 	var conscious := c.vitals.is_up() or c.vitals.why_unconscious().has(&"pain")  # morphine wakes one out from pain
 	var their := SquadAI.of(c) if c != body else null
@@ -1075,7 +1137,10 @@ func _next_task(c: Soldier, under_fire: bool) -> Dictionary:
 			continue
 		if String(task.kind) == "pain" and c.vitals.pain() < MORPHINE_PAIN:
 			continue
-		if body.inventory.count_of(StringName(task.item)) <= 0:
+		var item := StringName(task.item)
+		if body.inventory.medical_count(item) <= 0:
+			continue
+		if c == body and _kept_for_squad(item, String(task.kind)):
 			continue
 		if int(_failures.get(_task_key(c, task), 0)) >= TREAT_TRIES:
 			continue
@@ -1083,41 +1148,41 @@ func _next_task(c: Soldier, under_fire: bool) -> Dictionary:
 	return {}
 
 
-## Items this unit lacks for what `c` still needs once safe.
+## Items this unit lacks (or, on itself, keeps for the squad) for what `c` still needs once safe.
 func _missing_items(c: Soldier) -> Array[StringName]:
 	var out: Array[StringName] = []
 	for task in plan_care(c.vitals.care_needed(), false, c.vitals.is_up() or c.vitals.why_unconscious().has(&"pain")):
 		var item := StringName(task.item)
-		if body.inventory.count_of(item) <= 0 and item not in out:
+		var lacks := body.inventory.medical_count(item) <= 0 or (c == body and _kept_for_squad(item, String(task.kind)))
+		if lacks and item not in out:
 			out.append(item)
 	return out
 
 
+## A medic keeps `item` for the squad instead of using it on itself while nobody else on its
+## side who is up carries one, unless it's for massive bleeding (a medic who bleeds out treats
+## nobody). What it keeps, it calls another medic for.
+func _kept_for_squad(item: StringName, kind: String) -> bool:
+	if body.role != Roles.MEDIC or kind in MASSIVE_BLEED_KINDS:
+		return false
+	for n in get_tree().get_nodes_in_group(&"combatants"):
+		var s := n as Soldier
+		if s and s != body and s.faction == body.faction and not s.is_queued_for_deletion() and s.vitals.is_up() \
+				and s.inventory.medical_count(item) > 0:
+			return false
+	return true
+
+
 ## Nothing more this unit can do for its unconscious casualty: asks for a medic who has
-## what's missing (or the trauma kit for the stopgap revive).
+## what's missing.
 func _want_medic() -> void:
 	wanted = _missing_items(casualty)
-	if not _can_revive() and MEDIC_REVIVE_KIT not in wanted:
-		wanted.append(MEDIC_REVIVE_KIT)
-	wants_medic = not wanted.is_empty()  # a medic who lacks nothing has nobody to call
+	wants_medic = not wanted.is_empty()  # one who lacks nothing has nobody to call
 	if wants_medic and not _asked_medic:
 		_asked_medic = true
 		var callouts := Callouts.of(body)
 		if callouts:
 			callouts.need_medic(body, casualty)
-
-
-## No bleeding left in what care_needed() lists.
-static func _bleeding_controlled(c: Soldier) -> bool:
-	for task in c.vitals.care_needed():
-		if String(task.kind) in BLEED_KINDS:
-			return false
-	return true
-
-
-## The stopgap revive is the medic's, with a trauma kit.
-func _can_revive() -> bool:
-	return body.role == Roles.MEDIC and body.inventory.count_of(MEDIC_REVIVE_KIT) > 0
 
 
 static func _task_key(c: Soldier, task: Dictionary) -> String:
@@ -1143,7 +1208,6 @@ func _start_treatment(target: Soldier, task: Dictionary) -> void:
 	_treat_key = _task_key(target, task)
 	_treat_before = _count_tasks(target, _treat_key)
 	_treat_until = Soldier._now() + seconds + TREAT_MARGIN_S
-	_reviving = false
 	body._server_treat.rpc_id(1, target.get_path(), StringName(task.item), StringName(task.part))
 	if target != body and not _answered:
 		_answered = true
@@ -1152,22 +1216,12 @@ func _start_treatment(target: Soldier, task: Dictionary) -> void:
 			callouts.answer_casualty(body, target, true)
 
 
-func _start_revive() -> void:
-	var kit := body._best_revive_kit()
-	_treat_target = casualty
-	_treat_key = ""
-	_treat_until = Soldier._now() + (float(kit.stats.revive_s) if kit else 3.0) + TREAT_MARGIN_S
-	_reviving = true
-	body._server_revive.rpc_id(1, casualty.get_path())
-
-
 ## A treatment's time is up: if the task is still there as often as before, it failed.
 func _finish_treatment() -> void:
 	if _treat_key != "" and is_instance_valid(_treat_target) and _count_tasks(_treat_target, _treat_key) >= _treat_before:
 		_failures[_treat_key] = int(_failures.get(_treat_key, 0)) + 1
 	_treat_until = -1.0
 	_treat_key = ""
-	_reviving = false
 	_think_cd = 0.0
 
 
@@ -1185,24 +1239,19 @@ func _face(point: Vector3) -> void:
 # --- Self-care ------------------------------------------------------------
 
 ## How much this unit wants to look after itself (0 for not at all): its own arterial bleed
-## at once (even under fire), the rest out of contact or in cover; staying still while a
-## squadmate treats it; or the stopgap kit (IFAK) when it has no item for the job.
+## at once (even under fire), the rest out of contact or in cover, or staying still while a
+## squadmate treats it.
 func _self_care_score() -> float:
 	if _treat_until >= 0.0 and _treat_target == body:
 		return 0.98  # finish what you started
 	if _being_treated():
 		return 0.92
 	var task := _self_task()
-	if not task.is_empty():
-		if String(task.kind) in UNDER_FIRE_KINDS:
-			return 0.97
-		return 0.75 if in_contact() else 0.62
-	if _has_heal() and not body.vitals.is_healing() and body.vitals.needs_treatment():
-		if _massive_bleeding(body):
-			return 0.96
-		if body.vitals.injury() > 0.45 and (not in_contact() or _at_cover()):
-			return 0.6 + 0.3 * body.vitals.injury()
-	return 0.0
+	if task.is_empty():
+		return 0.0
+	if String(task.kind) in UNDER_FIRE_KINDS:
+		return 0.97
+	return 0.75 if in_contact() else 0.62
 
 
 ## What this unit can do for itself right now (see _self_care_score), or {}.
@@ -1221,8 +1270,6 @@ func _do_self_care() -> void:
 	if not task.is_empty():
 		_start_treatment(body, task)
 		return
-	if _has_heal() and not body.vitals.is_healing() and body.vitals.needs_treatment():
-		body._server_use_medical.rpc_id(1)  # stopgap kit
 	_think_cd = 0.0
 
 
@@ -1236,15 +1283,8 @@ func _being_treated() -> bool:
 		and _flat_distance(carer.global_position) <= BEING_TREATED_M
 
 
-static func _massive_bleeding(c: Soldier) -> bool:
-	for task in c.vitals.care_needed():
-		if String(task.kind) in UNDER_FIRE_KINDS:
-			return true
-	return false
-
-
-## A conscious wounded unit that needs what it doesn't carry calls "Medic!" (at most every
-## MEDIC_CALL_S) and lists what it needs in `wanted`.
+## A conscious wounded unit that needs what it doesn't carry (or, a medic, keeps for the
+## squad) calls "Medic!" (at most every MEDIC_CALL_S) and lists what it needs in `wanted`.
 func _maybe_call_medic() -> void:
 	if care != Care.NONE and care != Care.BODY:
 		return
@@ -1254,8 +1294,6 @@ func _maybe_call_medic() -> void:
 	var missing := _missing_items(body)
 	if missing.is_empty():
 		return
-	if _has_heal() and missing.all(func(id: StringName) -> bool: return id in [&"pressure_bandage", &"hemostatic_gauze", &"chest_seal", &"tourniquet"]):
-		return  # the stopgap kit stops bleeding; no need to call anyone
 	if responder_for(body, missing) == null:
 		return  # nobody free carries any of it: no use shouting yet
 	wanted = missing
@@ -1263,12 +1301,6 @@ func _maybe_call_medic() -> void:
 	var callouts := Callouts.of(body)
 	if callouts:
 		callouts.medic_call(body)
-
-
-## Carries a stopgap kit (an item with "heal") for _server_use_medical. A medic's trauma kit
-## doesn't count: it is kept for the stopgap revive.
-func _has_heal() -> bool:
-	return not body.next_self_treatment().is_empty()
 
 
 # --- Perception -----------------------------------------------------------
@@ -1300,8 +1332,8 @@ func _find_target() -> Soldier:
 		if d < best_dist and can_see(s):
 			best = s
 			best_dist = d
-	# A dead-check, once started, goes on until the body is dead, out of range or out of
-	# sight, even after the advance ends; only new ones need clearing.
+	# A dead-check, once started, goes on until the body is dead or out of range, even after
+	# the advance ends; only new ones need clearing.
 	if check != null:
 		_dead_check = check
 	elif _dead_check != null and not _dead_check_valid(_dead_check):
@@ -1309,10 +1341,11 @@ func _find_target() -> Soldier:
 	return best if best != null else _dead_check
 
 
-## Still worth dead-checking: unconscious (not dead), within DEAD_CHECK_M and in sight.
+## Still worth dead-checking: unconscious (not dead) and within DEAD_CHECK_M. Kept while it
+## drops in and out of sight behind low cover: only death or distance ends it.
 func _dead_check_valid(s: Soldier) -> bool:
 	return is_instance_valid(s) and not s.is_queued_for_deletion() and not s.vitals.is_dead() and not s.vitals.is_up() \
-		and body.global_position.distance_to(s.global_position) <= DEAD_CHECK_M and can_see(s)
+		and body.global_position.distance_to(s.global_position) <= DEAD_CHECK_M
 
 
 ## Clearing or assaulting through a position (pushing toward the enemy, searching, or moving
@@ -1384,19 +1417,22 @@ func _shoot() -> void:
 	var now := Soldier._now()
 	var weapon := body.active_weapon()
 	if weapon == null or weapon.type != "weapon" or body.carrying != null or body.is_reloading \
-			or body.stunned_s > 0.0 or body.suppression >= PINNED or care == Care.TREAT or not weapons_free():
+			or body.stunned_s > 0.0 or (body.suppression >= PINNED and not _suppressing) or not weapons_free():
 		return
+	var foe := _foe()
 	var aim_at: Variant = null
-	if target != null:
-		aim_at = target.aim_point()
-	elif _buddy_bounding() and in_contact() and now - _last_contact < 5.0:
-		aim_at = body.threat_pos + Vector3.UP * 1.0  # covering fire while the buddy moves
+	if foe != null:
+		aim_at = foe.aim_point()
+	elif _suppressing:
+		aim_at = body.threat_pos + Vector3.UP * 1.0  # keep their heads down before going out to the casualty
+	elif intent != Intent.CASUALTY and (_buddy_bounding() or _cover_medic) and in_contact() and now - _last_contact < 5.0:
+		aim_at = body.threat_pos + Vector3.UP * 1.0  # covering fire while the buddy (or a medic) moves
 	elif intent == Intent.FIGHT:
 		_maybe_frag()
 	if aim_at == null:
 		return
 	var error := _aim_at(aim_at)
-	if body.want_crouch and _at_cover() and target != null:
+	if body.want_crouch and _at_cover() and foe != null:
 		body.want_crouch = false  # stand up to shoot over cover
 		return
 	if error > deg_to_rad(6.0) or now < _next_shot or now < _pause_until or now < body._busy_until:
@@ -1411,7 +1447,7 @@ func _shoot() -> void:
 	if _burst_left <= 0:
 		_pause_until = now + randf_range(0.5, 1.1) / lerpf(0.7, 1.3, combat)
 	var dir := body._spread_direction(weapon)
-	var extra := deg_to_rad((1.0 - combat) * 2.0 + body.suppression * 4.0 + (0.0 if target else 3.0))
+	var extra := deg_to_rad((1.0 - combat) * 2.0 + body.suppression * 4.0 + (0.0 if foe else 3.0))
 	dir = (dir + Vector3(randf_range(-1, 1), randf_range(-1, 1), randf_range(-1, 1)) * tan(extra) * 0.6).normalized()
 	body._server_fire.rpc_id(1, body.camera.global_position, dir, body.active_slot)
 
@@ -1436,7 +1472,7 @@ func _friendly_in_line(point: Vector3) -> bool:
 	var reach := from.distance_to(point)
 	for n in get_tree().get_nodes_in_group(&"combatants"):
 		var s := n as Soldier
-		if s == null or s == body or s.faction != body.faction or s.is_queued_for_deletion():
+		if s == null or s == body or s.faction != body.faction or s.is_queued_for_deletion() or s.vitals.is_dead():
 			continue
 		var chest := s.global_position + Vector3.UP * (1.1 if s.vitals.is_up() else 0.3)
 		if from.distance_to(chest) < reach and Geometry3D.get_closest_point_to_segment(chest, from, point).distance_to(chest) < FRIENDLY_CLEARANCE:
@@ -1532,11 +1568,12 @@ func _steer(delta: float) -> void:
 		dir = dir.normalized() if dir.length() > 0.05 else Vector3.ZERO
 	var local := body.global_basis.inverse() * dir
 	body.move_input = Vector2(local.x, local.z)
-	body.want_sprint = _run and not body.want_crouch and target == null and _may_sprint()
-	if target == null and dir != Vector3.ZERO and body.carrying == null:
+	var foe := _foe()
+	body.want_sprint = _run and not body.want_crouch and foe == null and _may_sprint()
+	if foe == null and dir != Vector3.ZERO and body.carrying == null:
 		body.rotation.y = lerp_angle(body.rotation.y, atan2(-dir.x, -dir.z), 1.0 - exp(-TURN_RATE * get_physics_process_delta_time()))
 		body.head.rotation.x = lerpf(body.head.rotation.x, 0.0, 0.1)
-	elif target == null and dir == Vector3.ZERO and in_contact():
+	elif foe == null and dir == Vector3.ZERO and in_contact() and not (intent == Intent.CASUALTY and care == Care.TREAT):
 		_aim_at(body.threat_pos + Vector3.UP * 1.2)
 
 
@@ -1574,4 +1611,4 @@ static func _mag_size(weapon: ItemData) -> int:
 func _name_of(s: Soldier) -> String:
 	if s == null or not is_instance_valid(s):
 		return "them"
-	return "the lead" if squad and s == squad.leader else String(s.name)
+	return "the lead" if squad and s == squad.leader else s.display_name()

@@ -25,6 +25,10 @@ const EFFECTS_FROM_LOST := 0.15   # blood-loss effects start here and reach full
 const NO_SPRINT_LOST := 0.30
 ## Cardiac arrest: the unit dies when this window runs out with no heart rate.
 const ARREST_WINDOW_S := 600.0
+## Proposed (user's call, until IV in wave 3): with every bleed stopped (internal ones too)
+## and the heart beating, the body makes back this share of blood volume per minute, so a
+## patched-up casualty past 40% lost comes round in time instead of staying out for good.
+const BLOOD_RECOVER_PER_MIN := 0.015
 
 ## Blood-loss effects at full strength (s = 1 at 40% lost; linear from 15%). These give the
 ## design doc's table: +60% sway, 64% stamina recovery and 88% speed at 30% lost.
@@ -830,6 +834,8 @@ func advance(dt: float) -> void:
 	_advance_morphine(dt)
 	# Bleeding, scaled by what the heart still pushes out.
 	blood = maxf(blood - bleed_rate() / 60.0 * dt / BLOOD_L, 0.0)
+	if blood < 1.0 and not arrest and wound_bleed_rate() <= 0.0:
+		blood = minf(blood + BLOOD_RECOVER_PER_MIN / 60.0 * dt, 1.0)  # slow recovery once nothing bleeds
 	if _heart_arrest_in >= 0.0:
 		_heart_arrest_in -= dt
 		if _heart_arrest_in <= 0.0:

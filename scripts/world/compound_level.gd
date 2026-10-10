@@ -78,6 +78,10 @@ const HOSTILE_PATROL: Array[Vector3] = [Vector3(-12, 0, -2), Vector3(-12, 0, -16
 @onready var items: Node3D = $Items
 @onready var item_spawner: MultiplayerSpawner = $ItemSpawner
 @onready var ai_spawner: MultiplayerSpawner = $AISpawner
+## Dead bodies that aren't an AI's own node: dead players' bodies and bodies restored from
+## the zone save (server_spawn_body). A dead AI's own node stays under AI.
+@onready var bodies: Node3D = $Bodies
+@onready var body_spawner: MultiplayerSpawner = $BodySpawner
 @onready var voxel_world: VoxelWorld = $VoxelWorld
 
 var _spawn_index := 0
@@ -87,6 +91,8 @@ var _ai_ready := false  # host: AI spawns once the voxel walls exist
 ## Host: the role each player picked, by peer id.
 var player_roles := {}
 var _kitted := {}  # host: peer ids that got their role kit
+## Host: squad slots whose AI squadmate died (permadeath): no new squadmate takes them.
+var _fallen_slots := {}
 ## AI callouts as subtitles (same node on every peer).
 var callouts: Callouts
 
@@ -103,6 +109,7 @@ func _ready() -> void:
 	add_to_group(&"level")
 	item_spawner.spawn_function = _make_item
 	ai_spawner.spawn_function = _make_soldier
+	body_spawner.spawn_function = _make_body
 	for faction: StringName in [&"friendly", &"hostile"]:
 		var squad := Squad.new()
 		squad.name = "%sSquad" % String(faction).capitalize()
@@ -138,13 +145,54 @@ func server_spawn_dropped(id: StringName, count: int, pos: Vector3, state := {})
 	spawn_item(id, count, pos, uid, state)
 
 
-## Marks where a dead player's gear lies (the handoff's map marker, until there's a map).
-@rpc("authority", "call_local", "reliable")
-func show_gear_marker(pos: Vector3, text: String) -> void:
-	var marker := GearMarker.new()
-	marker.text = text
-	add_child(marker)
-	marker.global_position = pos + Vector3.UP * 1.6
+## Host only. Leaves a dead body from `record` (Soldier.body_record): a Soldier with no brain,
+## dead from the start, lying at "pos" with everything in "gear" on it. A dead player's body
+## ("marker") carries a GearMarker (the handoff's gear marker, until there's a map), which
+## follows the body and goes once nothing is left on it. Like any body it's in
+## Soldier.DEAD_GROUP: lootable, carriable, saved with the zone, under the body cap. Bodies
+## spawn through BodySpawner, so late joiners get them too. Returns the body.
+func server_spawn_body(record: Dictionary) -> Soldier:
+	var uid := String(record.get("uid", ""))
+	if uid == "":
+		uid = GameState.new_uid()
+	var data := record.duplicate(true)
+	data.erase("gear")  # the gear replicates with the inventory (ServerSync), not in the spawn
+	data["uid"] = uid
+	data["name"] = ("Body_" + uid).validate_node_name()
+	var corpse := body_spawner.spawn(data) as Soldier
+	corpse.inventory.net_state = GameState.from_json(record.get("gear", {}))
+	corpse.vitals.server_kill()  # -> Soldier._on_died: it becomes a body (DEAD_GROUP, body cap)
+	corpse.died_at = Soldier._now() - float(record.get("age_s", 0.0))
+	return corpse
+
+
+func _make_body(data: Dictionary) -> Node:
+	var corpse: Soldier = PLAYER_SCENE.instantiate()
+	corpse.name = data.name
+	corpse.faction = StringName(data.get("faction", "friendly"))
+	corpse.variant = String(data.get("variant", "woodland"))
+	var p: Array = data.get("pos", [0.0, 0.1, 0.0])
+	corpse.position = Vector3(float(p[0]), float(p[1]), float(p[2]))
+	corpse.rotation.y = float(data.get("rot_y", 0.0))
+	corpse.role = StringName(data.get("role", ""))
+	corpse.body_label = String(data.get("label", ""))
+	corpse.body_uid = String(data.uid)
+	corpse.collision_layer = 0
+	if data.get("marker", false):
+		corpse.has_gear_marker = true
+		var marker := GearMarker.new()
+		marker.text = "%s's gear" % corpse.body_label
+		marker.position = Vector3.UP * GearMarker.HEIGHT
+		corpse.add_child(marker)
+	return corpse
+
+
+## Host only. Puts back the bodies the zone save holds (GameState.bodies), oldest first.
+func _restore_bodies() -> void:
+	var records := GameState.bodies.duplicate()
+	records.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return float(a.get("age_s", 0.0)) > float(b.get("age_s", 0.0)))
+	for record: Dictionary in records:
+		server_spawn_body(record)
 
 
 @rpc("authority", "call_local", "unreliable")
@@ -236,6 +284,11 @@ func _on_hosted() -> void:
 	player_roles[1] = Roles.local_choice  # the host's own pick from the main menu
 	_add_player(1)
 	NavBuilder.build(self)
+	# Bodies lie where they were, on the walls' collision.
+	if voxel_world.is_built():
+		_restore_bodies()
+	else:
+		voxel_world.structures_built.connect(_restore_bodies, CONNECT_ONE_SHOT)
 	if spawn_ai:
 		# AI needs the walls' collision before it can tell what it can see.
 		if voxel_world.is_built():
@@ -247,13 +300,24 @@ func _on_hosted() -> void:
 ## Host only. Spawns the hostile fire teams and fills the player squad with AI.
 func _spawn_ai() -> void:
 	_ai_ready = true
+	var hostiles := hostiles_to_spawn()
 	var spawned := {}
-	for h: Dictionary in HOSTILES:
+	for h: Dictionary in hostiles:
 		spawned[h.name] = spawn_soldier({"name": h.name, "faction": "hostile", "variant": "urban", "pos": h.pos,
 			"loadout": HOSTILE_LOADOUT, "combat": 0.45, "discipline": 0.5, "guard": h.guard, "mode": "aware"})
-	for h: Dictionary in HOSTILES:
-		spawned[h.name].buddy = spawned[h.buddy]
+	for h: Dictionary in hostiles:
+		spawned[h.name].buddy = spawned.get(h.buddy)  # null if the buddy's body is in the save
 	rebalance_squad()
+
+
+## The HOSTILES to spawn: all but those whose bodies the zone save holds (GameState.bodies).
+## A hostile killed before the save stays dead; its body and gear come back instead.
+func hostiles_to_spawn() -> Array:
+	var fallen := {}
+	for record: Dictionary in GameState.bodies:
+		if String(record.get("faction", "")) == "hostile":
+			fallen[String(record.get("label", ""))] = true
+	return HOSTILES.filter(func(h: Dictionary) -> bool: return not fallen.has(h.name))
 
 
 ## Host only. The player squad is SQUAD_SIZE slots in two fire teams of four, each with a
@@ -301,7 +365,7 @@ func rebalance_squad() -> void:
 			else:
 				everyone[s.squad_slot] = s
 		for slot in layout.size():
-			if not everyone.has(slot):
+			if not everyone.has(slot) and not _fallen_slots.has(slot):
 				var mate := _spawn_squadmate(slot, slot_roles[slot], int(layout[slot].team))
 				if mate:
 					everyone[slot] = mate
@@ -309,14 +373,17 @@ func rebalance_squad() -> void:
 		(everyone[slot] as Soldier).buddy = everyone.get(Roles.buddy_slot(slot))
 
 
-## Friendly AI squadmates still in the session.
+## Living friendly AI squadmates in the session. A dead squadmate's body is no member: it
+## keeps no slot and is never removed by rebalance_squad (it lies where it fell).
 func _squad_ai() -> Array:
-	return ai.get_children().filter(func(s: Node) -> bool: return s is Soldier and s.faction == &"friendly" and not s.is_queued_for_deletion())
+	return ai.get_children().filter(func(s: Node) -> bool: return s is Soldier and s.faction == &"friendly" \
+		and not s.is_queued_for_deletion() and not s.vitals.is_dead())
 
 
+## A squadmate whose slot a player took (or whose role changed) leaves the session. A dead one
+## never does: its body and gear stay where it fell.
 func _remove_squadmate(s: Soldier) -> void:
 	if s.vitals.is_dead():
-		s.server_remove_body()  # a fallen squadmate's gear stays on the ground
 		return
 	s.release_carried()
 	if is_instance_valid(s.carried_by):
@@ -324,17 +391,27 @@ func _remove_squadmate(s: Soldier) -> void:
 	s.queue_free()
 
 
-## Host only. A new AI squadmate in `slot`, named with the first free callsign, in its
+## Host only: a squadmate died (permadeath). Its body stays where it fell; it leaves the squad
+## (no slot, no orders) and nobody new takes its slot.
+func _on_died_for_good(s: Soldier) -> void:
+	if s.faction == &"friendly" and s.squad_slot >= 0:
+		_fallen_slots[s.squad_slot] = true
+		s.squad_slot = -1
+
+
+## Host only. A new AI squadmate in `slot`, named with the first callsign no other node holds
+## (dead squadmates' bodies keep theirs, so past the eighth it's "Alpha 2" and so on), in its
 ## role's kit, placed in formation behind the lead.
 func _spawn_squadmate(slot: int, role: StringName, team: int) -> Soldier:
 	var callsign := ""
-	for c in SQUAD_CALLSIGNS:
-		if ai.get_node_or_null(NodePath(c)) == null:  # queued-for-deletion bodies still hold their name
-			callsign = c
-			break
-	if callsign == "":
-		push_warning("CompoundLevel: no free callsign for squad slot %d" % slot)
-		return null
+	var lap := 1
+	while callsign == "":
+		for c in SQUAD_CALLSIGNS:
+			var candidate := c if lap == 1 else "%s %d" % [c, lap]
+			if ai.get_node_or_null(NodePath(candidate)) == null:  # queued-for-deletion bodies still hold their name
+				callsign = candidate
+				break
+		lap += 1
 	var squad := squad_for(&"friendly")
 	var anchor: Node3D = squad.leader if is_instance_valid(squad.leader) else null
 	var wedge: Array = Squad.FORMATIONS["wedge"]
@@ -375,6 +452,7 @@ func _make_soldier(data: Dictionary) -> Node:
 		brain.combat_mode = Squad.COMBAT_MODES.get(data.get("mode", "combat"), Squad.CombatMode.COMBAT)
 		soldier.add_child(brain)
 		soldier.get_node(^"Vitals").went_down.connect(_on_soldier_down.bind(soldier))
+		soldier.died_for_good.connect(_on_died_for_good)
 	return soldier
 
 
@@ -414,8 +492,10 @@ func _on_join_role_timeout(id: int) -> void:
 
 
 func _on_peer_left(id: int) -> void:
-	var player := players.get_node_or_null(str(id))
+	var player := players.get_node_or_null(str(id)) as Soldier
 	if player:
+		if multiplayer.is_server():
+			_server_player_leaves(player)
 		player.queue_free()
 	if multiplayer.is_server():
 		player_roles.erase(id)
@@ -424,6 +504,17 @@ func _on_peer_left(id: int) -> void:
 		if squad.leader == player:
 			squad.leader = players.get_node_or_null(^"1")
 		rebalance_squad()
+
+
+## Host only: a player leaves the session. Whoever they carry is put down, and anyone carrying
+## them lets go. One who leaves while down (unconscious) leaves their body behind, gear and
+## all, like a player who died; one who leaves on their feet takes their gear with them.
+func _server_player_leaves(player: Soldier) -> void:
+	player.release_carried()
+	if not player.vitals.is_up() and not player.vitals.is_dead():
+		player.server_leave_body()
+	elif is_instance_valid(player.carried_by):
+		player.carried_by.release_carried()
 
 
 func _add_player(id: int) -> void:

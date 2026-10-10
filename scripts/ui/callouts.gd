@@ -68,7 +68,7 @@ static func of(from: Node) -> Callouts:
 static func display_name(s: Soldier) -> String:
 	if s == null or not is_instance_valid(s):
 		return "Someone"
-	return String(s.name) if s.is_ai() else "Player %s" % s.name
+	return s.display_name()  # a dead player's body is still "Player 2"
 
 
 ## Plays res://audio/callouts/<id>.ogg from `speaker` if that file exists; silent (null)

@@ -1,11 +1,15 @@
 class_name GearMarker
 extends Label3D
-## Floating label over a dead player's gear, visible through walls. It removes itself once
-## nothing is left on the ground near it.
+## Floating label over a dead player's body, where all their gear still is, visible through
+## walls (the handoff's gear marker, until there's a map). It's a child of the body
+## (CompoundLevel.server_spawn_body), so it follows the body when it's carried or dragged and
+## goes with it; it removes itself once nothing is left on the body.
 
-const RADIUS := 3.0
+const GROUP := &"gear_markers"
+## Height above the body's origin.
+const HEIGHT := 1.6
 const CHECK_S := 1.0
-## Items reach clients a moment after the marker; don't judge before they've arrived.
+## The body's gear reaches clients a moment after the body; don't judge before it has arrived.
 const GRACE_S := 3.0
 
 var _age := 0.0
@@ -13,6 +17,7 @@ var _next_check := GRACE_S
 
 
 func _ready() -> void:
+	add_to_group(GROUP)
 	billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	no_depth_test = true
 	fixed_size = true
@@ -22,13 +27,16 @@ func _ready() -> void:
 	modulate = Color("ffd166")
 
 
+## The body this marks (its parent), or null.
+func body() -> Soldier:
+	return get_parent() as Soldier
+
+
 func _process(delta: float) -> void:
 	_age += delta
 	if _age < _next_check:
 		return
 	_next_check = _age + CHECK_S
-	var ground := global_position - Vector3.UP * 1.6
-	for item in get_tree().get_nodes_in_group(WorldItem.GROUP):
-		if (item as Node3D).global_position.distance_to(ground) <= RADIUS:
-			return
-	queue_free()
+	var marked := body()
+	if marked == null or not marked.has_gear():
+		queue_free()

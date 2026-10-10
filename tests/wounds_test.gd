@@ -408,10 +408,23 @@ func _test_consciousness() -> void:
 	print("Consciousness follows the body")
 	var blood := _model()
 	blood.npa = true
-	blood.blood = 0.59
+	blood.blood = 0.55
+	blood._add_wound(Vitals.THIGH_L, "muscle", 0.001)  # a trickle: still bleeding
 	blood.update_state(0.0)
-	_step(blood, 1800.0)
-	check(blood.unconscious and blood.unconscious_causes() == [&"blood"], "past 40%% lost he stays out (%s, 30 min later): no blood back until IV" % [blood.unconscious_causes()])
+	_step(blood, 600.0)
+	check(blood.unconscious and blood.unconscious_causes() == [&"blood"] and blood.blood < 0.55,
+		"past 40%% lost and still bleeding he stays out and gets no blood back (%s, %.1f%% left after 10 min)" % [blood.unconscious_causes(), blood.blood * 100.0])
+	blood.wounds.clear()  # every bleed stopped
+	var regained := blood.blood
+	_step(blood, 60.0)
+	check(is_equal_approx(blood.blood - regained, WoundModel.BLOOD_RECOVER_PER_MIN),
+		"with every bleed stopped blood comes back slowly (%.2f%% in a minute)" % ((blood.blood - regained) * 100.0))
+	var minutes := 0
+	while blood.unconscious and minutes < 30:
+		_step(blood, 60.0)
+		minutes += 1
+	check(not blood.unconscious and blood.lost() < WoundModel.UNCONSCIOUS_LOST,
+		"and once he is back under 40%% lost he comes round on his own (%d min)" % minutes)
 	var knocked := _model()
 	knocked.knockout_left = 8.0
 	knocked.update_state(0.0)
