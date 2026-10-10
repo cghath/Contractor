@@ -6,8 +6,10 @@ extends Node
 ## replicates to all peers so everyone can see what you are wearing.
 ##
 ## Items can carry state that travels with them: rounds in a weapon or magazine, chips in
-## a plate or helmet (see ItemData.default_state). Equipped items keep it in `slot_state`;
-## stowed entries carry an optional "state" key. Entries with state never stack.
+## a plate or helmet, a ceramic plate's cracks and integrity (see ItemData.default_state and
+## ArmorRules). Equipped items keep it in `slot_state`; stowed entries carry an optional
+## "state" key. Entries with state never stack. Plates only go into a carrier that takes
+## them (see fit_problem).
 
 signal changed
 
@@ -277,18 +279,56 @@ func reload(slot: StringName) -> int:
 ## Host only. Records a chip on the armor in `slot` (see VoxelArmor). The chip list lives
 ## in the item's state, so it travels with the plate or helmet when it is dropped.
 func add_chip(slot: StringName, chip: Array) -> void:
+	add_armor_hit(slot, chip, {})
+
+
+## Host only. Records a hit on the armor in `slot`: its chip, plus whatever else the hit
+## changed in the item's state (a ceramic plate's "cracks" and "integrity", see
+## ArmorRules.hit_changes), all in one update.
+func add_armor_hit(slot: StringName, chip: Array, changes: Dictionary) -> void:
 	if slots.get(slot, &"") == &"":
 		return
 	var state: Dictionary = slot_state.get(slot, {})
 	var chips: Array = state.get("chips", [])
 	chips.append(chip)
 	state["chips"] = chips
+	state.merge(changes, true)
 	slot_state[slot] = state
 	_commit()
 
 
 func chips_in(slot: StringName) -> Array:
 	return state_of(slot).get("chips", [])
+
+
+## Why the item in a container entry can't be worn right now (for messages), or "" if it can.
+func entry_fit_problem(container: StringName, index: int) -> String:
+	var list: Array = containers.get(container, [])
+	if index < 0 or index >= list.size():
+		return "Nothing there"
+	return fit_problem(ItemDB.get_item(list[index].id))
+
+
+## Why `item` can't go into a body slot right now ("" if it can): plates need a carrier that
+## takes them (light plates fit only the light carrier; medium and heavy plates only the
+## bigger ones) and a free pocket of the right kind.
+func fit_problem(item: ItemData) -> String:
+	if item.slot == &"":
+		return "%s isn't worn" % item.name
+	if not item.is_plate():
+		return "" if slots.get(item.slot, &"x") == &"" else "Already wearing a %s" % item.slot
+	if slots[&"vest"] == &"":
+		return "Put on a plate carrier first"
+	var carrier := ItemDB.get_item(slots[&"vest"])
+	if not ArmorRules.plate_fits(item, carrier):
+		return "%s doesn't fit the %s (fits %s)" % [item.name, carrier.name, ArmorRules.fits_text(item)]
+	var side := item.slot == &"side_plate"
+	var pockets := carrier_plate_slots().filter(func(s: StringName) -> bool: return (s == &"plate_left" or s == &"plate_right") == side)
+	if pockets.is_empty():
+		return "The %s has no %s pockets" % [carrier.name, "side plate" if side else "plate"]
+	if pockets.all(func(s: StringName) -> bool: return slots[s] != &""):
+		return "No free %s pocket" % ("side plate" if side else "plate")
+	return ""
 
 
 # --- Internals --------------------------------------------------------------------------
@@ -298,7 +338,9 @@ func _free_slot_for(item: ItemData) -> StringName:
 		&"":
 			return &""
 		&"plate", &"side_plate":
-			# Plates need a carrier, and only fit the pockets that carrier has.
+			# Plates need a carrier that takes them, and only fit the pockets it has.
+			if slots[&"vest"] == &"" or not ArmorRules.plate_fits(item, ItemDB.get_item(slots[&"vest"])):
+				return &""
 			for slot: StringName in carrier_plate_slots():
 				var is_side := slot == &"plate_left" or slot == &"plate_right"
 				if slots[slot] == &"" and is_side == (item.slot == &"side_plate"):

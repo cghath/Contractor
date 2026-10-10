@@ -43,7 +43,7 @@ func _ready() -> void:
 		piece.setup(item, &"", null, 1)
 		piece.collision_layer = 0
 		piece.position = -VoxelArmor.center_offset(item)  # centred, like the collision box
-		piece.apply_damage(state.get("chips", []))
+		piece.apply_damage(state.get("chips", []), ArmorRules.is_shattered(state))
 	elif art != "":
 		size = VoxelArt.size_m(art)
 		add_child(VoxelArt.instance(art, "multicam"))
@@ -71,8 +71,10 @@ func describe() -> String:
 	var detail := ""
 	if state.has("rounds"):
 		detail = "  [%d rds]" % int(state.rounds)
-	elif not state.get("chips", []).is_empty():
-		detail = "  [damaged: %d hits]" % state.chips.size()
+	elif item.is_voxel_armor():
+		var damage := ArmorRules.state_text(item, state)  # "3 cracks, 46%", "shattered"...
+		if damage != "":
+			detail = "  [%s]" % damage
 	return "[E] %s %s%s%s   %.1f L  %.1f kg" % [verb, item.name, amount, detail, item.volume_l * count, item.mass_kg * count]
 
 

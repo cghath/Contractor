@@ -473,8 +473,9 @@ func _server_inventory_action(action: String, container: StringName, index: int,
 				inventory.insert_entry(container, entry)  # put it back
 				_client_message.rpc_id(owner_peer(), "Not enough room in %s" % target)
 		"equip_entry":
+			var problem := inventory.entry_fit_problem(container, index)  # before equip_entry moves it
 			if not inventory.equip_entry(container, index):
-				_client_message.rpc_id(owner_peer(), "No free slot for that")
+				_client_message.rpc_id(owner_peer(), problem if problem != "" else "No free slot for that")
 		"stow_slot":
 			var removed := inventory.unequip(slot)
 			if removed.is_empty():

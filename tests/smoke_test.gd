@@ -101,18 +101,23 @@ func _test_armor() -> void:
 	plate.inventory.queue_free()
 
 	print("VoxelArmor: helmets")
-	for tier: Array in [[&"helmet_bump", "light"], [&"helmet", "medium"], [&"helmet_heavy", "heavy"]]:
+	var pistol := ItemDB.get_item(&"m17")
+	# Light (IIA) and medium (IIIA) helmets are rated for pistol rounds, the heavy (III++) for rifles.
+	for tier: Array in [[&"helmet_bump", "light", pistol], [&"helmet", "medium", pistol], [&"helmet_heavy", "heavy", rifle]]:
 		var helmet := _armor(tier[0], &"helmet")
+		var round: ItemData = tier[2]
 		var size := VoxelArmor.size_m(ItemDB.get_item(tier[0]))
 		var dome_front := Vector3(0, 0.08, -size.z * 0.5)
-		check(helmet.server_try_stop(dome_front, Vector3.BACK, rifle), "%s: front of the dome stops a round" % tier[1])
-		check(helmet.server_try_stop(Vector3(0.03, size.y - (0.2 if tier[1] == "heavy" else 0.0) - 0.001, 0.02), Vector3.DOWN, rifle), "%s: top stops a round" % tier[1])
+		check(helmet.server_try_stop(dome_front, Vector3.BACK, round), "%s: front of the dome stops a %s round" % [tier[1], round.name])
+		check(helmet.server_try_stop(Vector3(0.03, size.y - (0.2 if tier[1] == "heavy" else 0.0) - 0.001, 0.02), Vector3.DOWN, round), "%s: top stops a round" % tier[1])
+		if round == pistol:
+			check(not helmet.server_try_stop(Vector3(-0.05, 0.1, -size.z * 0.5 + 0.01), Vector3.BACK, rifle), "%s: a 5.56 round goes through" % tier[1])
 		var shots := 1
-		while helmet.server_try_stop(dome_front, Vector3.BACK, rifle) and shots < 12:
+		while helmet.server_try_stop(dome_front, Vector3.BACK, round) and shots < 12:
 			shots += 1
 		check(shots < 12, "%s: same spot punched through after %d hits" % [tier[1], shots + 1])
 		var face := Vector3(0, -0.1 if tier[1] == "heavy" else 0.02, -size.z * 0.5)
-		var face_blocked := helmet.server_try_stop(face, Vector3.BACK, rifle)
+		var face_blocked := helmet.server_try_stop(face, Vector3.BACK, round)
 		check(face_blocked == (tier[1] == "heavy"), "%s: face %s" % [tier[1], "covered by the visor" if tier[1] == "heavy" else "left open"])
 		helmet.inventory.queue_free()
 	await get_tree().process_frame
@@ -146,7 +151,8 @@ func _test_voxel_world() -> void:
 func _test_ballistics() -> void:
 	print("Ballistics")
 	var dummy: TargetDummy = load("res://scenes/target_dummy.tscn").instantiate()
-	dummy.loadout = PackedStringArray(["plate_carrier", "plate_steel_l3"])
+	# The heavy carrier covers neck, face and arms, so the steel plate's spall hurts nobody.
+	dummy.loadout = PackedStringArray(["plate_carrier_heavy", "plate_steel_l3"])
 	add_child(dummy)
 	var shooter := StaticBody3D.new()
 	var plate_y: float = GearRig.plate_rest_position(&"plate_front").y
@@ -173,8 +179,8 @@ func _test_ballistics() -> void:
 	await get_tree().physics_frame
 	await get_tree().physics_frame
 	shooter.position = Vector3(0, 1.73, -5)
-	var dome := Ballistics.fire(shooter, shooter.position, Vector3.BACK, rifle)
-	check(dome.result == "plate" and dummy.vitals.wound_list().is_empty() and dummy.vitals.is_up(), "helmet stopped a round to the forehead (%s)" % dome.result)
+	var dome := Ballistics.fire(shooter, shooter.position, Vector3.BACK, ItemDB.get_item(&"m17"))
+	check(dome.result == "plate" and dummy.vitals.wound_list().is_empty() and dummy.vitals.is_up(), "helmet stopped a pistol round to the forehead (%s)" % dome.result)
 	check(dummy.gear.armor_integrity(&"helmet") >= 0.0 and dummy.gear.armor_integrity(&"helmet") < 1.0, "helmet chipped to %.0f%%" % (dummy.gear.armor_integrity(&"helmet") * 100.0))
 	shooter.position = Vector3(0, 1.58, -5)
 	var face := Ballistics.fire(shooter, shooter.position, Vector3.BACK, rifle)

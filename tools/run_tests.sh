@@ -10,12 +10,12 @@ set -u
 cd "$(dirname "$0")/.."
 GODOT="${GODOT:-godot}"
 SUITES=("$@")
-[ ${#SUITES[@]} -eq 0 ] && SUITES=(smoke gameplay squad net wounds)
+[ ${#SUITES[@]} -eq 0 ] && SUITES=(smoke gameplay squad net wounds armor movement interaction roles)
 status=0
 
 run() {
 	local name="$1"; shift
-	if "$GODOT" --headless --path . "$@" 2>&1 | grep -E '\[FAIL\]|TEST (PASSED|FAILED)|SCRIPT ERROR'; then :; fi
+	"$GODOT" --headless --path . "$@" 2>&1 | grep -E '\[FAIL\]|TEST (PASSED|FAILED)|SCRIPT ERROR'
 	local code=${PIPESTATUS[0]}
 	[ "$code" -eq 0 ] || { echo "$name: exit $code"; status=1; }
 }

@@ -76,19 +76,36 @@ func armor_rids() -> Array[RID]:
 	return rids
 
 
-## Remaining fraction of an armor slot's material, or -1 if nothing is worn there.
+## Remaining fraction of an armor slot's protection, or -1 if nothing is worn there: a
+## ceramic plate's integrity (ArmorRules), otherwise the share of its voxels left.
 func armor_integrity(slot: StringName) -> float:
 	var piece: VoxelArmor = _armor.get(slot)
-	return piece.integrity() if piece else -1.0
+	if piece == null:
+		return -1.0
+	if ArmorRules.material(piece.item) == ArmorRules.CERAMIC:
+		return minf(ArmorRules.integrity(inventory.state_of(slot)), piece.integrity())
+	return piece.integrity()
 
 
-## "Front 87%  Back 100%  Helmet 92%" for HUDs and labels; "" with no armor.
+## "Front IV 64% 3 cracks  Back IV 100%  Helmet IIIA 92%" for HUDs and labels (rating, what's
+## left, a ceramic plate's cracks or "shattered"); "" with no armor.
 func armor_summary(separator := "  ") -> String:
 	var parts := PackedStringArray()
 	for slot: StringName in ARMOR_SLOTS:
 		var integrity := armor_integrity(slot)
-		if integrity >= 0.0:
-			parts.append("%s %d%%" % [ARMOR_SLOTS[slot], roundi(integrity * 100.0)])
+		if integrity < 0.0:
+			continue
+		var piece: VoxelArmor = _armor[slot]
+		var state := inventory.state_of(slot)
+		var text := "%s %s" % [ARMOR_SLOTS[slot], ArmorRules.rating(piece.item)]
+		if ArmorRules.is_shattered(state):
+			text += " shattered"
+		else:
+			text += " %d%%" % roundi(integrity * 100.0)
+			var cracks := ArmorRules.cracks(state).size()
+			if cracks > 0:
+				text += " %d crack%s" % [cracks, "" if cracks == 1 else "s"]
+		parts.append(text)
 	return separator.join(parts)
 
 
@@ -172,7 +189,7 @@ func _refresh_plate_damage() -> void:
 	for slot: StringName in _armor:
 		var chips := inventory.chips_in(slot)
 		if chips.size() != _chip_counts.get(slot, -1):
-			_armor[slot].apply_damage(chips)
+			_armor[slot].apply_damage(chips, ArmorRules.is_shattered(inventory.state_of(slot)))
 			_chip_counts[slot] = chips.size()
 
 
