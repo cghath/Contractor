@@ -45,6 +45,7 @@ func _ready() -> void:
 	_test_fit()
 	await _test_state_travels()
 	await _test_dents_and_holes()
+	await _test_oblique_dents()
 	_test_wear_through()
 	await _test_dropped_armor()
 	await _test_lying_flat()
@@ -118,13 +119,13 @@ func _gun_at(level: String, wear := 1.0) -> ItemData:
 		"stats": {"threat": level, "round_class": String(Vitals.INTERMEDIATE), "plate_wear": wear, "damage": 30}})
 
 
-## Lines of fire parallel to `direction` around `at` (a 9 x 9 grid, 1 cm apart) that meet
+## Lines of fire parallel to `direction` around `at` (an 11 x 11 grid, 1 cm apart) that meet
 ## material in `piece`. A hole shows as a line that no longer does.
 func _solid_lines(piece: VoxelArmor, at: Vector3, direction: Vector3) -> Dictionary:
 	var across := Basis.looking_at(direction, Vector3.FORWARD if absf(direction.y) > 0.9 else Vector3.UP)
 	var lines := {}
-	for i in range(-4, 5):
-		for j in range(-4, 5):
+	for i in range(-5, 6):
+		for j in range(-5, 6):
 			if piece.trace(at + (across.x * i + across.y * j) * VoxelArmor.VOXEL_SIZE, direction) != VoxelArmor.MISS:
 				lines[Vector2i(i, j)] = true
 	return lines
@@ -618,6 +619,68 @@ func _test_dents_and_holes() -> void:
 	legacy.apply_damage(legacy.inventory.chips_in(&"plate_front"))
 	check(legacy.trace(Vector3(0, 0, -0.02), Vector3.BACK) == VoxelArmor.MISS, "chips saved before dents existed are still holes")
 	legacy.inventory.queue_free()
+	await get_tree().process_frame
+
+
+## Oblique stops: a round 60 to 80 degrees off the face normal (a plate shot from the flank,
+## or lying flat on the ground and shot from standing height a few metres off) still only
+## dents the strike face. Checked along the round's own line and straight through the
+## piece's thickness, at every weapon wear up to the M110's 1.6.
+func _test_oblique_dents() -> void:
+	print("Oblique stops: no hole at 60 to 80 degrees off the normal")
+	for id: String in PIECE_RATINGS:
+		var item := ItemDB.get_item(StringName(id))
+		var rating := String(PIECE_RATINGS[id])
+		var size := VoxelArmor.size_m(item)
+		var holed := PackedStringArray()
+		var dented := 0
+		for degrees: float in [60.0, 70.0, 80.0]:
+			var a := deg_to_rad(degrees)
+			for wear: float in [0.5, 1.0, 1.6]:
+				for side: float in [1.0, -1.0]:
+					var piece := _piece(StringName(id))
+					var dir: Vector3
+					var at: Vector3
+					if item.slot == &"helmet":
+						dir = Vector3(sin(a) * side, -0.1, cos(a)).normalized()
+						at = _front_of(piece)
+					else:
+						dir = Vector3(sin(a) * 0.8 * side, -sin(a) * 0.6, cos(a))
+						at = Vector3(0.02 * side, 0.03, -size.z * 0.5 - 0.001)
+					var normal := Vector3.BACK
+					var before_line := _solid_lines(piece, at, dir)
+					var before_normal := _solid_lines(piece, at, normal)
+					var stopped := piece.server_try_stop(at, dir, _gun_at(rating, wear), 10.0)
+					var after_line := _solid_lines(piece, at, dir)
+					var after_normal := _solid_lines(piece, at, normal)
+					var lost := before_line.keys().any(func(k: Vector2i) -> bool: return not after_line.has(k)) \
+						or before_normal.keys().any(func(k: Vector2i) -> bool: return not after_normal.has(k))
+					if not stopped or lost:
+						holed.append("%.0f deg x%.1f%s" % [degrees, wear, "" if stopped else " (not stopped)"])
+					dented += piece.voxels_removed()
+					piece.inventory.queue_free()
+		check(holed.is_empty() and dented > 0, "%s: an oblique stop dents (%d voxels in all) but never holes it (holed: %s)" % [id, dented, ", ".join(holed)])
+		await get_tree().process_frame
+	# A plate lying flat, face up, shot from standing height (1.6 m) 3 and 5 m away.
+	for id: StringName in [&"plate_steel_l3", &"plate_side", &"plate_pe_l3", &"plate_ceramic_l4"]:
+		var item := ItemDB.get_item(id)
+		var holed := PackedStringArray()
+		for dist: float in [3.0, 5.0]:
+			for heading: Vector3 in [Vector3.BACK, Vector3.RIGHT]:
+				var piece := _piece(id)
+				piece.rotation = Vector3(PI * 0.5, 0, 0)  # strike face (-Z) up
+				var at := piece.global_transform * Vector3(0.01, 0.02, -VoxelArmor.size_m(item).z * 0.5 - 0.001)
+				var dir := (heading * dist + Vector3.DOWN * 1.6).normalized()
+				var before_line := _solid_lines(piece, at, dir)
+				var before_down := _solid_lines(piece, at, Vector3.DOWN)
+				var stopped := piece.server_try_stop(at, dir, _gun_at(String(ArmorRules.rating(item)), 1.6), 10.0)
+				var after_line := _solid_lines(piece, at, dir)
+				var after_down := _solid_lines(piece, at, Vector3.DOWN)
+				if not stopped or before_line.keys().any(func(k: Vector2i) -> bool: return not after_line.has(k)) \
+						or before_down.keys().any(func(k: Vector2i) -> bool: return not after_down.has(k)):
+					holed.append("%.0f m%s" % [dist, "" if stopped else " (not stopped)"])
+				piece.inventory.queue_free()
+		check(holed.is_empty(), "%s lying flat, shot from standing height with a 7.62: dented, not holed (holed: %s)" % [id, ", ".join(holed)])
 	await get_tree().process_frame
 
 

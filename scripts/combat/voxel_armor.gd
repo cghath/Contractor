@@ -29,7 +29,7 @@ const HOLE := 0
 const DENT := 1
 ## Smallest radius (voxels) a hole is bored with: wide enough that the line of fire that
 ## made it passes through it again.
-const MIN_HOLE_RADIUS := 0.9
+const MIN_HOLE_RADIUS := 1.0
 ## A dent scuffs (scars) the strike face this far (voxels) beyond what it removes.
 const DENT_SCAR_VOX := 0.75
 ## A hole scars the surface this far (voxels) beyond its spalled-out rim.
@@ -273,15 +273,16 @@ func trace(hit_position: Vector3, direction: Vector3) -> Vector3i:
 
 
 ## A stopped round's mark: the strike-face voxels within `radius` of `center` (the voxel it
-## met) knocked out, and a scuffed ring just beyond. It never opens a hole: a voxel goes
-## only if the voxel behind it (one step along `dir`'s main axis) is solid and stays, and
-## never from the innermost layer of a helmet (next to the head space). Where nothing is
-## left behind, the round only scars the surface. Repeated stops on one spot dig in a layer
-## at a time; wearing right through is ArmorRules.worn_through's call, as a hole.
+## met) knocked out, and a scuffed ring just beyond. It never opens a hole. "Behind" a voxel
+## is one step through the piece's thickness (_thickness_axis: a plate's Z, a helmet shell's
+## inward normal), on the side the round travels, whatever the round's angle; a voxel goes
+## only if nothing solid is in front of it that way (it is on the strike face), the voxel
+## behind it is solid and stays, and it isn't in the innermost layer of a helmet (next to the
+## head space). So every line through the thickness keeps material, and a plate's back layer
+## is never touched. Where nothing is left behind, the round only scars the surface.
+## Repeated stops on one spot dig in a layer at a time; wearing right through is
+## ArmorRules.worn_through's call, as a hole.
 func _dent(center: Vector3i, radius: float, dir: Vector3) -> void:
-	var axis := 0 if absf(dir.x) >= absf(dir.y) and absf(dir.x) >= absf(dir.z) else (1 if absf(dir.y) >= absf(dir.z) else 2)
-	var behind := Vector3i.ZERO
-	behind[axis] = 1 if dir[axis] >= 0.0 else -1
 	var reach := int(ceil(radius + DENT_SCAR_VOX))
 	var lo := (center - Vector3i.ONE * reach).max(Vector3i.ZERO)
 	var hi := (center + Vector3i.ONE * (reach + 1)).min(_base.dims)
@@ -299,14 +300,38 @@ func _dent(center: Vector3i, radius: float, dir: Vector3) -> void:
 					hit[c] = true
 				if d <= radius + DENT_SCAR_VOX:
 					face.append(c)
+	var removable := {}  # strike-face voxel -> the voxel behind it; decided on the piece as it was
 	for c: Vector3i in hit:
-		if _is_solid(c + behind) and not hit.has(c + behind) and not _touches_interior(c):
+		var axis := _thickness_axis(c)
+		if absf(dir[axis]) == 0.0:
+			continue
+		var behind := Vector3i.ZERO
+		behind[axis] = 1 if dir[axis] > 0.0 else -1
+		if not _is_solid(c - behind) and _is_solid(c + behind) and not _touches_interior(c):
+			removable[c] = c + behind
+	for c: Vector3i in hit:
+		# Goes only if what's behind it stays (on a helmet's curve, neighbours' axes differ).
+		if removable.has(c) and not removable.has(removable[c]):
 			_remove(c)
 		elif _voxel_at(c) == INTACT:
 			_set_voxel(c, SCARRED)
 	for c in face:
 		if _voxel_at(c) == INTACT and _exposed(c):
 			_set_voxel(c, SCARRED)
+
+
+## The axis (0 x, 1 y, 2 z) through the piece's thickness at voxel `c`: Z for a plate; for a
+## helmet the main axis of the shell's normal there (the superellipsoid's gradient, flat for
+## the ear covers below the dome's base; a visor is Z).
+func _thickness_axis(c: Vector3i) -> int:
+	if item == null or item.stats.get("shape", "plate") != "helmet":
+		return 2
+	var pivot: Vector3 = _base.pivot
+	var d := Vector3(c) + Vector3.ONE * 0.5 - pivot
+	var dims := Vector3(_base.dims)
+	var r := Vector3(dims.x * 0.5, maxf(dims.y - pivot.y, 1.0), dims.z * 0.5)
+	var n := Vector3(absf(d.x) / r.x, absf(d.y) / r.y if d.y >= 0.0 else 0.0, absf(d.z) / r.z)
+	return 0 if n.x >= n.y and n.x >= n.z else (1 if n.y >= n.z else 2)
 
 
 ## A penetration: a hole of half `radius` (at least MIN_HOLE_RADIUS) bored along `dir` from
