@@ -94,6 +94,13 @@ var care_by: Soldier
 var buddy: Soldier
 ## AI: what it's doing, in a few words (replicated for the squad HUD).
 var ai_status := ""
+## Squad structure, set by the host (CompoundLevel.rebalance_squad, Squad) and replicated by
+## ServerSync: role id (Roles), fire team (0 = A, 1 = B, -1 none), slot in the 8-slot squad
+## (-1 none) and Arma-style colour team ("" = white).
+var role: StringName = &""
+var fire_team := -1
+var squad_slot := -1
+var color_team := ""
 
 
 func _enter_tree() -> void:
@@ -383,9 +390,7 @@ func _server_squad_command(cmd: String, point: Vector3, names: PackedStringArray
 			if who == "":
 				_client_message.rpc_id(owner_peer(), "Nobody selected has one")
 		_:
-			if cmd.begins_with("formation:"):
-				squad.leader = self
-				squad.formation = cmd.trim_prefix("formation:")
+			squad.command(self, cmd, point, names)  # formation, target, combat mode, team
 
 
 @rpc("any_peer", "call_local", "reliable")

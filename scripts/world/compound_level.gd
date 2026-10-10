@@ -41,12 +41,17 @@ const LOOT := [
 
 ## Turn off to host a session without AI (the older test suites do).
 static var spawn_ai := true
+## Players start in their role's kit (Roles) the first time they spawn. Off for now: players
+## kit out from the gate loot as before and respawn in the handoff's default kit, and the
+## older suites expect an empty start. AI squadmates always get their role's kit.
+static var player_role_kits := false
 
-## The player squad has 8 slots; AI fills the ones players don't (see rebalance_squad).
+## The player squad has 8 slots in two fire teams (Roles); AI fills the ones players don't
+## (see rebalance_squad). AI squadmates are named by callsign, the first one free.
 const SQUAD_SIZE := 8
-const SQUAD_CALLSIGNS: Array[String] = ["Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf"]
-const SQUAD_LOADOUT := ["plate_carrier", "plate_ceramic_l4", "plate_ceramic_l4", "helmet", "assault_pack", "m4a1",
-	"mag_556", "mag_556", "mag_556", "mag_556", "mag_556", "ifak", "trauma_kit", "frag_grenade", "smoke_grenade"]
+const SQUAD_CALLSIGNS: Array[String] = ["Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel"]
+## Role for a joining player until their pick arrives (Roles.local_choice, sent on join).
+const DEFAULT_JOIN_ROLE := Roles.RIFLEMAN
 ## Two fire teams: a pair guarding the main building, and a pair patrolling the yard.
 const HOSTILES := [
 	{"name": "Hostile1", "pos": Vector3(-2.5, 0.1, -10), "buddy": "Hostile2", "guard": true},
@@ -69,6 +74,11 @@ var _spawn_index := 0
 var _throw_count := 0
 var _squads := {}  # faction -> Squad
 var _ai_ready := false  # host: AI spawns once the voxel walls exist
+## Host: the role each player picked, by peer id.
+var player_roles := {}
+var _kitted := {}  # host: peer ids that got their role kit
+## AI callouts as subtitles (same node on every peer).
+var callouts: Callouts
 
 
 static func current(from: Node) -> CompoundLevel:
@@ -90,9 +100,13 @@ func _ready() -> void:
 		add_child(squad)
 		_squads[faction] = squad
 	_squads[&"hostile"].patrol = HOSTILE_PATROL
+	callouts = Callouts.new()
+	callouts.name = "Callouts"
+	add_child(callouts)
 	_build_environment()
 	_build_structures()
 	Net.hosted.connect(_on_hosted)
+	Net.joined.connect(_on_joined)
 	Net.peer_joined.connect(_on_peer_joined)
 	Net.peer_left.connect(_on_peer_left)
 
@@ -207,6 +221,7 @@ func _on_hosted() -> void:
 	for uid: String in GameState.dropped:
 		var d: Dictionary = GameState.dropped[uid]
 		spawn_item(StringName(d.id), int(d.count), Vector3(d.pos[0], d.pos[1], d.pos[2]), uid, d.get("state", {}))
+	player_roles[1] = Roles.local_choice  # the host's own pick from the main menu
 	_add_player(1)
 	NavBuilder.build(self)
 	if spawn_ai:
@@ -223,55 +238,91 @@ func _spawn_ai() -> void:
 	var spawned := {}
 	for h: Dictionary in HOSTILES:
 		spawned[h.name] = spawn_soldier({"name": h.name, "faction": "hostile", "variant": "urban", "pos": h.pos,
-			"loadout": HOSTILE_LOADOUT, "combat": 0.45, "discipline": 0.5, "guard": h.guard})
+			"loadout": HOSTILE_LOADOUT, "combat": 0.45, "discipline": 0.5, "guard": h.guard, "mode": "aware"})
 	for h: Dictionary in HOSTILES:
 		spawned[h.name].buddy = spawned[h.buddy]
 	rebalance_squad()
 
 
-## Host only. The player squad always has SQUAD_SIZE soldiers: AI fills every slot players
-## don't (one player gets 7 squadmates, four players get 4). Called whenever a player joins
-## or leaves. Then everyone, players included, is paired into battle buddies.
+## Host only. The player squad is SQUAD_SIZE slots in two fire teams of four, each with a
+## medic (Roles). Players take the slot of the role they picked (Roles.assign); AI fills
+## every other slot with that slot's role and kit (one player gets 7 squadmates, four
+## players get 4). Called whenever a player joins, leaves or picks a role. Slots pair into
+## battle buddies, players included.
 func rebalance_squad() -> void:
-	if not _ai_ready:
-		return
-	var humans := players.get_children().filter(func(p: Node) -> bool: return not p.is_queued_for_deletion())
-	var squad := squad_for(&"friendly")
-	var members := _squad_ai_by_callsign()
-	var want := maxi(SQUAD_SIZE - humans.size(), 0)
-	while members.size() > want:
-		var leaving: Soldier = members.pop_back()  # a player takes this slot
-		leaving.release_carried()
-		if is_instance_valid(leaving.carried_by):
-			leaving.carried_by.release_carried()
-		leaving.queue_free()
-	var used := members.map(func(s: Soldier) -> String: return String(s.name))
-	for callsign: String in SQUAD_CALLSIGNS:
-		if members.size() >= want:
-			break
-		if callsign in used:
-			continue
-		var i := SQUAD_CALLSIGNS.find(callsign)
-		var anchor: Node3D = squad.leader if is_instance_valid(squad.leader) else null
-		var pos := anchor.global_transform * (Squad.FORMATIONS["wedge"][i % 7] as Vector3) if anchor else SPAWN_POINTS[i % SPAWN_POINTS.size()] + Vector3(0, 0, 3)
-		members.append(spawn_soldier({"name": callsign, "faction": "friendly", "variant": "multicam", "pos": pos,
-			"loadout": SQUAD_LOADOUT, "combat": 0.5 + 0.03 * (i % 5), "discipline": 0.6, "guard": false}))
-	members.sort_custom(func(a: Soldier, b: Soldier) -> bool: return SQUAD_CALLSIGNS.find(String(a.name)) < SQUAD_CALLSIGNS.find(String(b.name)))
-	# Battle buddies: players first (host, then joiners), then squadmates in callsign order.
+	var humans: Array = players.get_children().filter(func(p: Node) -> bool: return p is Soldier and not p.is_queued_for_deletion())
 	humans.sort_custom(func(a: Node, b: Node) -> bool: return a.name.to_int() < b.name.to_int())
-	var everyone: Array = humans + members
-	for i in everyone.size():
-		var partner: Soldier = everyone[i ^ 1] if (i ^ 1) < everyone.size() else null
-		(everyone[i] as Soldier).buddy = partner
+	var choices: Array = []
+	var current: Array = []
+	for h: Soldier in humans:
+		choices.append(player_roles.get(h.name.to_int(), DEFAULT_JOIN_ROLE))
+		current.append(h.squad_slot)
+	var plan := Roles.assign(choices, current)
+	var slot_roles: Array = plan.roles
+	var layout := Roles.layout()
+	var everyone := {}  # slot -> Soldier
+	for i in humans.size():
+		var h: Soldier = humans[i]
+		var slot: int = plan.slots[i]
+		h.squad_slot = slot
+		h.role = slot_roles[slot] if slot >= 0 else StringName(choices[i])
+		h.fire_team = int(layout[slot].team) if slot >= 0 else -1
+		if slot >= 0:
+			everyone[slot] = h
+		if player_role_kits and player_roles.has(h.name.to_int()) and not _kitted.has(h.name.to_int()):
+			_kitted[h.name.to_int()] = true
+			Roles.apply_kit(h.inventory, h.role)
+	if _ai_ready:
+		# Squadmates keep their slot unless a player took it; empty slots get a new one.
+		for s: Soldier in _squad_ai():
+			if s.squad_slot < 0 or everyone.has(s.squad_slot) or s.role != slot_roles[s.squad_slot]:
+				_remove_squadmate(s)
+			else:
+				everyone[s.squad_slot] = s
+		for slot in layout.size():
+			if not everyone.has(slot):
+				var mate := _spawn_squadmate(slot, slot_roles[slot], int(layout[slot].team))
+				if mate:
+					everyone[slot] = mate
+	for slot: int in everyone:
+		(everyone[slot] as Soldier).buddy = everyone.get(Roles.buddy_slot(slot))
 
 
-func _squad_ai_by_callsign() -> Array:
-	var members := ai.get_children().filter(func(s: Node) -> bool: return s is Soldier and s.faction == &"friendly" and not s.is_queued_for_deletion())
-	members.sort_custom(func(a: Soldier, b: Soldier) -> bool: return SQUAD_CALLSIGNS.find(String(a.name)) < SQUAD_CALLSIGNS.find(String(b.name)))
-	return members
+## Friendly AI squadmates still in the session.
+func _squad_ai() -> Array:
+	return ai.get_children().filter(func(s: Node) -> bool: return s is Soldier and s.faction == &"friendly" and not s.is_queued_for_deletion())
 
 
-## Host only. `data`: name, faction, variant, pos, loadout, and AI stats combat, discipline, guard.
+func _remove_squadmate(s: Soldier) -> void:
+	s.release_carried()
+	if is_instance_valid(s.carried_by):
+		s.carried_by.release_carried()
+	s.queue_free()
+
+
+## Host only. A new AI squadmate in `slot`, named with the first free callsign, in its
+## role's kit, placed in formation behind the lead.
+func _spawn_squadmate(slot: int, role: StringName, team: int) -> Soldier:
+	var callsign := ""
+	for c in SQUAD_CALLSIGNS:
+		if ai.get_node_or_null(NodePath(c)) == null:  # queued-for-deletion bodies still hold their name
+			callsign = c
+			break
+	if callsign == "":
+		push_warning("CompoundLevel: no free callsign for squad slot %d" % slot)
+		return null
+	var squad := squad_for(&"friendly")
+	var anchor: Node3D = squad.leader if is_instance_valid(squad.leader) else null
+	var wedge: Array = Squad.FORMATIONS["wedge"]
+	var pos := anchor.global_transform * (wedge[maxi(slot - 1, 0) % wedge.size()] as Vector3) if anchor \
+		else SPAWN_POINTS[slot % SPAWN_POINTS.size()] + Vector3(0, 0, 3)
+	return spawn_soldier({"name": callsign, "faction": "friendly", "variant": "multicam", "pos": pos, "loadout": [],
+		"role": String(role), "team": team, "slot": slot, "combat": 0.5 + 0.03 * (slot % 5), "discipline": 0.6, "guard": false})
+
+
+## Host only. `data`: name, faction, variant, pos, loadout, AI stats combat, discipline,
+## guard, and optionally role (its kit is added to the loadout), team, slot and mode
+## (a Squad.COMBAT_MODES name).
 func spawn_soldier(data: Dictionary) -> Soldier:
 	return ai_spawner.spawn(data) as Soldier
 
@@ -282,18 +333,45 @@ func _make_soldier(data: Dictionary) -> Node:
 	soldier.faction = StringName(data.faction)
 	soldier.variant = data.variant
 	soldier.position = data.pos
+	soldier.role = StringName(data.get("role", ""))
+	soldier.fire_team = int(data.get("team", -1))
+	soldier.squad_slot = int(data.get("slot", -1))
 	if multiplayer.is_server():
 		var inventory: Inventory = soldier.get_node(^"Inventory")
 		for id: String in data.loadout:
 			inventory.take(StringName(id))
+		if soldier.role != &"":
+			Roles.apply_kit(inventory, soldier.role)
 		var brain := SquadAI.new()
 		brain.name = "SquadAI"
 		brain.squad = squad_for(soldier.faction)
 		brain.combat = data.combat
 		brain.discipline = data.discipline
 		brain.guard = data.guard
+		brain.combat_mode = Squad.COMBAT_MODES.get(data.get("mode", "combat"), Squad.CombatMode.COMBAT)
 		soldier.add_child(brain)
+		soldier.get_node(^"Vitals").went_down.connect(_on_soldier_down.bind(soldier))
 	return soldier
+
+
+## Host only: a soldier went down; a squadmate who saw it calls it out.
+func _on_soldier_down(soldier: Soldier) -> void:
+	if is_instance_valid(soldier) and callouts:
+		callouts.man_down(soldier)
+
+
+## Client: tell the host which role this player picked in the main menu.
+func _on_joined() -> void:
+	request_role.rpc_id(1, String(Roles.local_choice))
+
+
+## A player picks their role (sent on join). The host gives them that role's slot.
+@rpc("any_peer", "call_local", "reliable")
+func request_role(role: String) -> void:
+	if not multiplayer.is_server() or not Roles.has(StringName(role)):
+		return
+	player_roles[multiplayer.get_remote_sender_id()] = StringName(role)
+	rebalance_squad()
 
 
 func _on_peer_joined(id: int) -> void:
@@ -308,6 +386,8 @@ func _on_peer_left(id: int) -> void:
 	if player:
 		player.queue_free()
 	if multiplayer.is_server():
+		player_roles.erase(id)
+		_kitted.erase(id)
 		var squad := squad_for(&"friendly")
 		if squad.leader == player:
 			squad.leader = players.get_node_or_null(^"1")
@@ -321,6 +401,7 @@ func _add_player(id: int) -> void:
 	players.add_child(player, true)
 	if id == 1:
 		_squads[&"friendly"].leader = player  # the host leads until someone else gives an order
+	(player as Soldier).vitals.went_down.connect(_on_soldier_down.bind(player))
 	rebalance_squad()
 
 

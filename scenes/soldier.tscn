@@ -57,6 +57,18 @@ properties/3/replication_mode = 2
 properties/4/path = NodePath("Vitals:net_state")
 properties/4/spawn = true
 properties/4/replication_mode = 2
+properties/5/path = NodePath(".:role")
+properties/5/spawn = true
+properties/5/replication_mode = 2
+properties/6/path = NodePath(".:fire_team")
+properties/6/spawn = true
+properties/6/replication_mode = 2
+properties/7/path = NodePath(".:squad_slot")
+properties/7/spawn = true
+properties/7/replication_mode = 2
+properties/8/path = NodePath(".:color_team")
+properties/8/spawn = true
+properties/8/replication_mode = 2
 
 [node name="Soldier" type="CharacterBody3D"]
 collision_layer = 16

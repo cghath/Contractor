@@ -16,6 +16,8 @@ func _ready() -> void:
 	GameState.zone_id = "test_net" + OS.get_environment("CONTRACTOR_TEST_TAG")
 	CompoundLevel.spawn_ai = false
 	GameState.delete_save()
+	if "--join" in OS.get_cmdline_user_args():
+		Roles.local_choice = Roles.MARKSMAN  # the client's pick in the main menu, sent on join
 	add_child(load("res://scenes/main.tscn").instantiate())  # main reads --host/--join
 	await get_tree().process_frame
 	level = CompoundLevel.current(self)
@@ -58,6 +60,8 @@ func _run_client() -> void:
 		_finish()
 		return
 	me.set_physics_process(false)
+	await _wait_for(func() -> bool: return me.role == Roles.MARKSMAN, 3.0)
+	check(me.role == Roles.MARKSMAN and me.fire_team == 1, "the role picked before joining reached the host: marksman, team B (%s, %d)" % [me.role, me.fire_team])
 	var gear: GearRig = me.get_node(^"Gear")
 	check(gear.armor_integrity(&"plate_front") == 1.0 and gear.armor_integrity(&"helmet") == 1.0, "client built the worn voxel armor")
 	for i in 3:

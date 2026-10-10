@@ -57,8 +57,9 @@ func _test_roster() -> void:
 	level.players.add_child(guest)
 	level.rebalance_squad()
 	await _frames(2)
-	check(_squad().size() == 6 and _ai("Golf") == null, "a second player takes the last slot (%d AI)" % _squad().size())
-	check(guest.buddy == _ai("Bravo") or guest.buddy == _ai("Alpha") or guest.buddy == player, "and gets a buddy")
+	check(_squad().size() == 6 and _ai("Foxtrot") == null and guest.role == Roles.RIFLEMAN,
+		"a second player (rifleman until their pick arrives) takes Foxtrot's rifleman slot (%d AI)" % _squad().size())
+	check(guest.buddy == _ai("Golf") and _ai("Golf").buddy == guest, "and pairs with that slot's buddy, Golf")
 	guest.queue_free()
 	await _frames(1)
 	level.rebalance_squad()
