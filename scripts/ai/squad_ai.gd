@@ -49,7 +49,7 @@ const WORLD_MASK := 1
 const TURN_RATE := 7.0
 const GRENADE_COOLDOWN_S := 15.0
 const CASUALTY_REACH := 1.6
-const REVIVE_KITS: Array[StringName] = [&"trauma_kit", &"ifak"]
+const REVIVE_KITS: Array[StringName] = [&"trauma_kit"]  # only the trauma kit has the stopgap revive
 ## Proposed: in Stealth, open fire unprovoked only at an enemy this close.
 const STEALTH_ENGAGE_M := 15.0
 ## Proposed: in Safe, only run to catch up from this far behind.
@@ -585,18 +585,12 @@ func _end_care() -> void:
 
 
 func _revive_kit() -> StringName:
-	for id in REVIVE_KITS:
-		if body.inventory.count_of(id) > 0:
-			return id
-	return &""
+	var kit := body._best_revive_kit()  # a trauma kit with its stopgap revive left
+	return kit.id if kit else &""
 
 
 func _has_heal() -> bool:
-	for container in Inventory.CONTAINERS:
-		for entry: Dictionary in body.inventory.containers[container]:
-			if ItemDB.get_item(entry.id).stats.has("heal"):
-				return true
-	return false
+	return not body.next_self_treatment().is_empty()
 
 
 # --- Perception -----------------------------------------------------------

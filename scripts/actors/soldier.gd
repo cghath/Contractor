@@ -336,15 +336,10 @@ func release_carried() -> void:
 	_set_carry_mode(&"")
 
 
-## The revive kit this player would use: the fastest one carried.
+## The kit this soldier would do the stopgap revive with: one that still has a revive (the
+## trauma kit), or null.
 func _best_revive_kit() -> ItemData:
-	var best: ItemData = null
-	for container in Inventory.CONTAINERS:
-		for entry: Dictionary in inventory.containers[container]:
-			var item := ItemDB.get_item(entry.id)
-			if item.stats.has("revive_hp") and (best == null or item.stats.revive_s < best.stats.revive_s):
-				best = item
-	return best
+	return inventory.revive_kit()
 
 
 ## Shot direction inside the weapon's cone. Spread is computed on the shooter's machine
@@ -494,34 +489,21 @@ func _server_reload(slot: StringName) -> void:
 		inventory.reload(slot)
 
 
+## H: treats yourself with the next item you carry from your own care_needed() (a
+## tourniquet before a bandage, and so on), through the same timed treatment as _server_treat.
 @rpc("any_peer", "call_local", "reliable")
 func _server_use_medical() -> void:
-	if not _from_owner() or not vitals.is_up() or _now() < _server_busy_until - 0.1:
+	if not _from_owner() or not vitals.is_up() or _is_busy():
 		return
-	if not vitals.needs_treatment():
-		_client_message.rpc_id(owner_peer(), "Not injured")
+	var tasks := vitals.care_needed()
+	if tasks.is_empty():
+		_client_message.rpc_id(owner_peer(), "Nothing to treat")
 		return
-	# Smallest kit that covers the damage; otherwise the biggest one carried.
-	var missing := vitals.injury() * 100.0  # wound model: how much a kit has to cover
-	var best := {}
-	for container in Inventory.CONTAINERS:
-		var list: Array = inventory.containers[container]
-		for i in list.size():
-			var item := ItemDB.get_item(list[i].id)
-			var heal := float(item.stats.get("heal", 0.0))
-			if heal <= 0.0:
-				continue
-			var better: bool = best.is_empty() or (heal >= missing and (best.heal < missing or heal < best.heal)) or (best.heal < missing and heal > best.heal)
-			if better:
-				best = {"container": container, "index": i, "heal": heal, "item": item}
-	if best.is_empty():
-		_client_message.rpc_id(owner_peer(), "No medical supplies")
+	var task := next_self_treatment()
+	if task.is_empty():
+		_client_message.rpc_id(owner_peer(), "You have no %s" % ItemDB.get_item(tasks[0].item).name)
 		return
-	inventory.remove_entry(best.container, best.index)
-	var item: ItemData = best.item
-	_server_busy_until = _now() + float(item.stats.get("use_s", 2.0))
-	vitals.server_heal_over_time(best.heal, float(item.stats.get("heal_s", 4.0)))
-	_client_busy.rpc_id(owner_peer(), float(item.stats.get("use_s", 2.0)), "Using %s" % item.name)
+	_treat(self, task.item, task.part, false)
 
 
 ## Inventory screen actions. `container`/`index` name a stowed entry; `slot` an equipped one.
@@ -601,71 +583,223 @@ func _server_spawn_in_front(id: StringName, count := 1, state := {}) -> void:
 	var pos := global_position - global_basis.z * 0.9 + Vector3.UP * 1.0
 	CompoundLevel.current(self).server_spawn_dropped(id, count, pos, state)
 
-## Revives a downed body (a teammate, later a squadmate) with the fastest kit carried. The
-## kit is used up when the revive completes, if both are still there and in range.
+
+# --- Medical requests -------------------------------------------------------------------
+# The design doc's kit (Vitals "Treatment interface"). Every treatment is timed on the host:
+# the treater is busy, and it's interrupted if the treater goes down or moves away, or the
+# casualty is moved or goes out of reach. The item is used up (loose first, then out of a
+# kit) only when it has done something. Players (H, the interaction menus) and AI send the
+# same requests.
+
+## Reach for treatment, body to body: the interaction menu's reach plus slack for lag.
+const TREAT_REACH := INTERACT_REACH + INTERACT_SLACK
+## Moving this far (the treater, or the casualty) interrupts a treatment (proposed).
+const TREAT_MOVE_M := 1.0
+## How often a treatment in progress checks for interruptions.
+const TREAT_CHECK_S := 0.1
+## Hit, or pinned by close fire (AI), this recently: under fire, so a tourniquet goes on
+## rushed (proposed).
+const UNDER_FIRE_S := 3.0
+const UNDER_FIRE_SUPPRESSION := 0.3
+
+var _treat_serial := 0  # host: bumps with each timed treatment
+
+
+## The first task on this body's own care_needed() that it carries the item for (loose or in
+## a kit), or {}. H (_server_use_medical) applies it; AI uses it to know it can treat itself.
+func next_self_treatment() -> Dictionary:
+	for task in vitals.care_needed():
+		if inventory.medical_count(task.item) > 0:
+			return task
+	return {}
+
+
+## How long one `item` takes this soldier on `target`: the item's treat_s, times its
+## self_mult on yourself (a tourniquet: 4 s, 6 s on yourself); a rushed tourniquet rushed_s.
+func treat_seconds(target: Node, item: ItemData, rushed := false) -> float:
+	if rushed and item.stats.has("rushed_s"):
+		return float(item.stats.rushed_s)
+	var seconds := float(item.stats.get("treat_s", 4.0))
+	if target == self:
+		seconds *= float(item.stats.get("self_mult", 1.0))
+	return seconds
+
+
+## Host only. Hit, or pinned down by close fire (AI), within the last UNDER_FIRE_S.
+func under_fire() -> bool:
+	return vitals.seconds_since_hit() < UNDER_FIRE_S \
+		or (_now() - threat_time < UNDER_FIRE_S and suppression >= UNDER_FIRE_SUPPRESSION)
+
+
+## Revives a downed body with the stopgap (blood back to 62%, heart restarted) until IV in
+## wave 3: needs a trauma kit with its revive left, and the casualty's bleeding controlled.
+## Timed like a treatment; the kit's revive is used up when it's done (the kit and the rest
+## of its contents stay).
 @rpc("any_peer", "call_local", "reliable")
 func _server_revive(path: NodePath) -> void:
-	if not _from_owner() or not vitals.is_up() or _now() < _server_busy_until - 0.1:
+	if not _from_owner() or not vitals.is_up() or _is_busy():
 		return
 	var target := get_node_or_null(path) as Node3D
 	var other := target.get_node_or_null(^"Vitals") as Vitals if target else null
 	if other == null or not other.downed or target == self:
 		return
-	if target.global_position.distance_to(global_position) > REVIVE_RANGE + 1.0:
+	if not _in_treat_reach(target):
+		_client_message.rpc_id(owner_peer(), "Too far away")
 		return
 	var kit := _best_revive_kit()
 	if kit == null:
-		_client_message.rpc_id(owner_peer(), "You need an IFAK or trauma kit")
+		_client_message.rpc_id(owner_peer(), "You need a trauma kit")
 		return
-	var seconds := float(kit.stats.revive_s)
-	_server_busy_until = _now() + seconds
-	_client_busy.rpc_id(owner_peer(), seconds, "Reviving...")
-	await get_tree().create_timer(seconds).timeout
-	if not is_inside_tree() or not is_instance_valid(target) or not other.downed or not vitals.is_up():
+	var why := other.revive_problem()
+	if why != "":
+		_client_message.rpc_id(owner_peer(), why)
 		return
-	if target.global_position.distance_to(global_position) > REVIVE_RANGE + 1.0:
-		_client_message.rpc_id(owner_peer(), "Revive interrupted")
+	if not await _timed_care(target, other, float(kit.stats.get("revive_s", 3.0)), "Reviving (stopgap)..."):
 		return
-	for container in Inventory.CONTAINERS:
-		var list: Array = inventory.containers[container]
-		for i in list.size():
-			if list[i].id == kit.id:
-				inventory.remove_entry(container, i)
-				other.server_revive(float(kit.stats.revive_hp))
-				return
+	why = other.revive_problem()
+	if why != "":
+		_client_message.rpc_id(owner_peer(), why)
+	elif inventory.take_kit_revive():
+		other.server_revive(0.0)
+	else:
+		_client_message.rpc_id(owner_peer(), "You need a trauma kit")
 
 
-## Treats `path` (this body or another within reach) with one `item_id` on `part`: takes the
-## item's "treat_s" time (longer on yourself for a tourniquet), uses the item up, then
-## Vitals.server_apply_treatment. Players (interaction menus) and AI (casualty care) both
-## call it. Stand-in until the kit work (W6) gives it the real rules.
+## Treats `path` (this body or another within reach) with one `item_id` on `part` (the
+## Vitals treatment interface): checks it would help and that you carry the item, takes the
+## item's time (longer on yourself for a tourniquet; `rushed` only for a tourniquet:
+## quicker, but it lets 30% through), then applies it and uses the item up. A tourniquet
+## placed while you're under fire goes on rushed whatever you asked for.
 @rpc("any_peer", "call_local", "reliable")
-func _server_treat(path: NodePath, item_id: StringName, part: StringName) -> void:
-	if not _from_owner() or not vitals.is_up() or _now() < _server_busy_until - 0.1:
+func _server_treat(path: NodePath, item_id: StringName, part: StringName, rushed := false) -> void:
+	if not _from_owner() or not vitals.is_up() or _is_busy():
+		return
+	_treat(get_node_or_null(path) as Node3D, item_id, part, rushed)
+
+
+## Takes the tourniquets off `part` of `path` once its arterial bleeding is packed (timed,
+## the tourniquet's remove_s). They go back in your kit if there's room, else on the ground.
+@rpc("any_peer", "call_local", "reliable")
+func _server_remove_tourniquet(path: NodePath, part: StringName) -> void:
+	if not _from_owner() or not vitals.is_up() or _is_busy():
 		return
 	var target := get_node_or_null(path) as Node3D
 	var other := Vitals.find_on(target) if target else null
-	if other == null or target.global_position.distance_to(global_position) > REVIVE_RANGE + 1.0:
+	if other == null or other.is_dead():
 		return
-	var item := ItemDB.get_item(item_id)
-	if item == null or inventory.count_of(item_id) <= 0:
-		_client_message.rpc_id(owner_peer(), "You have no %s" % (item.name if item else String(item_id)))
+	if not _in_treat_reach(target):
+		_client_message.rpc_id(owner_peer(), "Too far away")
 		return
-	var seconds := float(item.stats.get("treat_s", 4.0))
-	if target == self:
-		seconds *= float(item.stats.get("self_mult", 1.0))
-	_server_busy_until = _now() + seconds
-	_client_busy.rpc_id(owner_peer(), seconds, "%s..." % item.name)
-	await get_tree().create_timer(seconds).timeout
-	if not is_inside_tree() or not is_instance_valid(target) or not vitals.is_up():
+	var why := other.removal_problem(part)
+	if why != "":
+		_client_message.rpc_id(owner_peer(), why)
 		return
-	if target.global_position.distance_to(global_position) > REVIVE_RANGE + 1.0:
-		_client_message.rpc_id(owner_peer(), "Treatment interrupted")
+	var item := ItemDB.get_item(WoundModel.TOURNIQUET)
+	var label := "Removing tourniquet, %s..." % Vitals.part_name(part)
+	if not await _timed_care(target, other, float(item.stats.get("remove_s", 3.0)), label):
 		return
-	if other.server_apply_treatment(item_id, part):
-		inventory.remove_one(item_id)
+	var count := other.server_remove_tourniquets(part)
+	if count <= 0:
+		_client_message.rpc_id(owner_peer(), other.removal_problem(part))
+		return
+	var kept := inventory.take(WoundModel.TOURNIQUET, count)
+	if kept < count:
+		_server_spawn_in_front(WoundModel.TOURNIQUET, count - kept)
+	_client_message.rpc_id(owner_peer(), "Tourniquet off, %s" % Vitals.part_name(part))
+
+
+## Host side of a treatment (_server_treat, _server_use_medical).
+func _treat(target: Node3D, item_id: StringName, part: StringName, rushed: bool) -> void:
+	var other := Vitals.find_on(target) if target else null
+	if other == null or other.is_dead():
+		return
+	var item := ItemDB.get_item(item_id) if ItemDB.has_item(item_id) else null
+	var why := ""
+	if not _in_treat_reach(target):
+		why = "Too far away"
+	elif item == null or not item.stats.has("treat_s"):
+		why = "That doesn't treat anything"
+	elif inventory.medical_count(item_id) <= 0:
+		why = "You have no %s" % item.name
 	else:
-		_client_message.rpc_id(owner_peer(), "%s does nothing there" % item.name)
+		why = other.treatment_problem(item_id, part)
+	if why != "":
+		_client_message.rpc_id(owner_peer(), why)
+		return
+	var tourniquet := item_id == WoundModel.TOURNIQUET
+	rushed = rushed and tourniquet
+	var hurried := tourniquet and under_fire()
+	var label := "%s%s, %s..." % [item.name, " (rushed)" if rushed else "", Vitals.part_name(part)]
+	if not await _timed_care(target, other, treat_seconds(target, item, rushed), label):
+		return
+	if inventory.medical_count(item_id) <= 0:
+		_client_message.rpc_id(owner_peer(), "You no longer have a %s" % item.name)
+		return
+	rushed = rushed or (tourniquet and (hurried or under_fire()))
+	if not other.server_apply_treatment(item_id, part, rushed):
+		_client_message.rpc_id(owner_peer(), "%s does nothing there now" % item.name)
+		return
+	inventory.take_medical(item_id)
+	if rushed:
+		_client_message.rpc_id(owner_peer(), "Tourniquet on in a hurry: it may still bleed (a second one fixes it)")
+
+
+## Host only. Runs a timed treatment on `target`: this soldier is busy for `seconds` and the
+## casualty shows as being treated. Returns false (and tells the treater) if it's
+## interrupted: the treater went down or moved away, the casualty was moved, died or is out
+## of reach. True once the time is up.
+func _timed_care(target: Node3D, other: Vitals, seconds: float, label: String) -> bool:
+	_treat_serial += 1
+	var serial := _treat_serial
+	var my_start := global_position
+	var their_start := target.global_position
+	var carrier := _carrier_id(target)
+	_server_busy_until = _now() + seconds
+	other.server_begin_treatment(seconds)
+	_client_busy.rpc_id(owner_peer(), seconds, label)
+	var end := _now() + seconds
+	while _now() < end:
+		await get_tree().create_timer(clampf(end - _now(), 0.01, TREAT_CHECK_S)).timeout
+		if not is_inside_tree():
+			return false
+		var why := ""
+		if serial != _treat_serial:
+			why = "something else came first"
+		elif not vitals.is_up():
+			why = "you went down"
+		elif not is_instance_valid(target) or not is_instance_valid(other) or other.is_dead():
+			why = "the casualty is gone"
+		elif global_position.distance_to(my_start) > TREAT_MOVE_M:
+			why = "you moved"
+		elif target != self and _carrier_id(target) != carrier:
+			why = "they were moved"
+		elif target != self and carrier != get_instance_id() and target.global_position.distance_to(their_start) > TREAT_MOVE_M:
+			why = "they were moved"  # (a body you carry yourself moves with you: that's "you moved")
+		elif not _in_treat_reach(target):
+			why = "out of reach"
+		if why != "":
+			if is_instance_valid(other):
+				other.server_end_treatment()
+			_server_busy_until = _now()
+			_client_busy.rpc_id(owner_peer(), 0.0, "Treatment interrupted: %s" % why)
+			return false
+	other.server_end_treatment()
+	return true
+
+
+func _in_treat_reach(target: Node3D) -> bool:
+	return target == self or target.global_position.distance_to(global_position) <= TREAT_REACH
+
+
+## Who carries or drags `target` (an instance id, 0 for nobody), to notice it being moved.
+static func _carrier_id(target: Node) -> int:
+	if target is Soldier and is_instance_valid((target as Soldier).carried_by):
+		return (target as Soldier).carried_by.get_instance_id()
+	return 0
+
+
+func _is_busy() -> bool:
+	return _now() < _server_busy_until - 0.1
 
 
 ## Debug builds only: hurts this body, to test going down and dying without an enemy.

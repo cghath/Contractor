@@ -164,7 +164,8 @@ func _test_ballistics() -> void:
 	var aim := Vector3(0, plate_y, 0) - shooter.position
 	var first := Ballistics.fire(shooter, shooter.position, aim.normalized(), rifle)
 	check(first.result == "plate", "first shot hits the plate (%s)" % first.result)
-	check(dummy.vitals.wound_list().is_empty(), "plate protected the body")
+	# A stopped round can still crack a rib (impact), but makes no wound of its own.
+	check(dummy.vitals.wound_list().all(func(w: Dictionary) -> bool: return w.kind == "rib"), "plate protected the body")
 	var second := Ballistics.fire(shooter, shooter.position, aim.normalized(), rifle)
 	check(second.result == "body", "second shot through the hole hits the body (%s)" % second.result)
 	check(not dummy.vitals.wound_list().is_empty(), "body was wounded (%s)" % dummy.vitals.condition_text())
@@ -281,15 +282,14 @@ func _test_medical() -> void:
 	vitals.server_hit(Vitals.THIGH_L, {"round_class": Vitals.PISTOL, "position": Vector3(-0.12, 0.7, -0.1), "direction": Vector3.BACK})
 	var wounds := vitals.wound_list()
 	check(wounds.size() == 1 and wounds[0].kind == "muscle" and wounds[0].bleeding, "a bleeding muscle wound (%s)" % [wounds])
-	var pain_before := vitals.pain()
-	vitals.server_heal_over_time(35.0, 0.2)
-	check(vitals.is_healing(), "treatment in progress")
-	var deadline := Time.get_ticks_msec() + 2000
-	while vitals.is_healing() and Time.get_ticks_msec() < deadline:
-		await get_tree().process_frame
-	check(not vitals.wound_list()[0].bleeding and vitals.wound_list()[0].treated, "an IFAK stops the bleeding")
-	check(vitals.pain() <= pain_before - 0.34, "and takes 0.35 off pain (%.2f -> %.2f)" % [pain_before, vitals.pain()])
-	check(vitals.blood_fraction() <= 1.0 - 20.0 * Vitals.TRAUMA_BLOOD_PER_DAMAGE + 0.0001, "but puts no blood back (%.3f)" % vitals.blood_fraction())
+	var tasks := vitals.care_needed()
+	check(not tasks.is_empty() and tasks[0].item == &"pressure_bandage" and tasks[0].part == Vitals.THIGH_L, "care_needed asks for a pressure bandage on the left thigh (%s)" % [tasks])
+	var blood := vitals.blood_fraction()
+	check(vitals.server_apply_treatment(&"pressure_bandage", Vitals.THIGH_L), "a pressure bandage goes on")
+	check(not vitals.wound_list()[0].bleeding and vitals.wound_list()[0].treated, "and stops the bleeding")
+	check(not vitals.server_apply_treatment(&"pressure_bandage", Vitals.THIGH_L), "a second one has nothing to do")
+	check(not vitals.care_needed().any(func(t: Dictionary) -> bool: return t.item == &"pressure_bandage"), "and isn't asked for")
+	check(vitals.blood_fraction() >= blood - 0.0001 and vitals.blood_fraction() <= 1.0 - 20.0 * Vitals.TRAUMA_BLOOD_PER_DAMAGE + 0.0001, "but puts no blood back (%.3f)" % vitals.blood_fraction())
 	vitals.queue_free()
 
 
@@ -319,8 +319,7 @@ func _test_downed() -> void:
 	vitals.server_damage(40.0)
 	check(vitals.downed and not vitals.in_cardiac_arrest() and events == ["down"], "K twice (48%% lost) knocks you out (%s)" % vitals.condition_text())
 	check(vitals.seconds_to_death() < 0.0 and not vitals.is_up(), "unconscious, not dying yet")
-	vitals.server_heal_over_time(50.0, 0.1)
-	check(not vitals.is_healing(), "no self-treatment while down")
+	check(vitals.care_needed().any(func(t: Dictionary) -> bool: return t.item == &"npa" and t.kind == "airway"), "unconscious: care_needed asks for an NPA airway")
 	vitals.server_revive(25.0)
 	check(vitals.is_up() and vitals.blood_fraction() >= Vitals.REVIVE_BLOOD - 0.001 and events.back() == "revived", "revived (stopgap) with %.0f%% blood" % (vitals.blood_fraction() * 100.0))
 	vitals.server_damage(100.0)
