@@ -50,6 +50,7 @@ that travels with the item.
 - **Test builds:** `tools/make_build.sh <label>` leaves a playable build in
   `builds/<date>_<label>/`: a small `contractor.pck`, a `play.bat` launcher that runs it with
   the Voxel Tools Godot (no export templates needed) and a `BUILD.txt`.
+- **Debug key K** (debug builds only, which includes test builds): hurts you by 40 so going down and dying can be tested solo.
 - `Inventory.strip()` empties a body's whole inventory into entries that keep their state.
 - **Tests:**
   - `tests/gameplay_test.tscn`: end-to-end checks of a hosted session through the real requests a client sends.

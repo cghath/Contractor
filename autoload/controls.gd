@@ -20,6 +20,7 @@ const KEYS := {
 	&"weapon_sidearm": [KEY_2],
 	&"pause": [KEY_ESCAPE],
 	&"quick_save": [KEY_F5],
+	&"debug_hurt": [KEY_K],  # debug builds only: hurt yourself to test going down and dying
 }
 const MOUSE := {
 	&"fire": MOUSE_BUTTON_LEFT,

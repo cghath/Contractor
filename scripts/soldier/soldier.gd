@@ -260,6 +260,11 @@ func give_up() -> void:
 	_server_give_up.rpc_id(1)
 
 
+## Debug builds only: hurts this body, to test going down and dying without an enemy.
+func debug_hurt(amount: float) -> void:
+	_server_debug_hurt.rpc_id(1, amount)
+
+
 func is_busy() -> bool:
 	return _now() < _busy_until
 
@@ -505,6 +510,12 @@ func _server_revive(path: NodePath) -> void:
 				inventory.remove_entry(container, i)
 				other.server_revive(float(kit.stats.revive_hp))
 				return
+
+
+@rpc("any_peer", "call_local", "reliable")
+func _server_debug_hurt(amount: float) -> void:
+	if _from_owner() and OS.is_debug_build():
+		vitals.server_damage(amount)
 
 
 @rpc("any_peer", "call_local", "reliable")

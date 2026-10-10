@@ -67,6 +67,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if captured else Input.MOUSE_MODE_CAPTURED
 	elif event.is_action_pressed(&"fire") and not captured:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	elif event.is_action_pressed(&"debug_hurt") and OS.is_debug_build():
+		soldier.debug_hurt(40.0)
 	elif not soldier.vitals.is_up():
 		if event.is_action_pressed(&"give_up"):
 			soldier.give_up()

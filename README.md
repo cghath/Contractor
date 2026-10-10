@@ -113,6 +113,7 @@ include Voxel Tools.
 | Tab | Inventory screen: equip, stow, move between containers, use, drop |
 | Esc | Close the inventory screen / release mouse |
 | F5 | Save zone (host) |
+| K | Debug builds only: hurt yourself by 40, to test going down and dying |
 
 ## Design decisions (locked)
 
