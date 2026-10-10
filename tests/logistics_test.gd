@@ -35,6 +35,8 @@ func _ready() -> void:
 	_test_loose_rounds()
 	_test_empty_mags_kept()
 	await _test_loading()
+	_test_molle_rules()
+	await _test_molle_host()
 	await _test_respawn_kit()
 	await _test_smoke_colours()
 	await _test_breach_navigation()
@@ -166,6 +168,157 @@ func _test_loading() -> void:
 	check(inv.count_of(&"rounds_556") == 0 and _rounds_of(inv, &"mag_556") == [0, 7, 30], "all 25 loaded: one magazine topped up, 7 in the next (%s)" % [_rounds_of(inv, &"mag_556")])
 	check(absf(took - left * Soldier.LOAD_ROUND_S) < 0.35, "%d rounds took %.1f s (%.1f s a round)" % [left, took, Soldier.LOAD_ROUND_S])
 	check("Loaded" in player._hud._message.text, "done: \"%s\"" % player._hud._message.text)
+
+
+# --- MOLLE attachments --------------------------------------------------------------------
+
+func _test_molle_rules() -> void:
+	print("MOLLE attach points and pouches")
+	var light := ItemDB.get_item(&"plate_carrier_light")
+	var medium := ItemDB.get_item(&"plate_carrier")
+	var heavy := ItemDB.get_item(&"plate_carrier_heavy")
+	check(light.stats.molle.size() < medium.stats.molle.size() and medium.stats.molle.size() < heavy.stats.molle.size(),
+		"heavier carriers have more attach points (%d, %d, %d)" % [light.stats.molle.size(), medium.stats.molle.size(), heavy.stats.molle.size()])
+	for id: StringName in [&"pouch_mag_single", &"pouch_mag_double", &"pouch_pistol_mag", &"pouch_radio", &"pouch_binos", &"pouch_utility", &"pouch_sustainment", &"pouch_ifak", &"pouch_grenade", &"knife", &"radio", &"binoculars"]:
+		check(ItemDB.has_item(id) and ItemDB.get_item(id).mass_kg > 0.0, "%s exists with a mass" % id)
+	var inv := Inventory.new()
+	check(inv.take(&"pouch_mag_double") == 1 and inv.attachment_count() == 0, "with no carrier a pouch is just stowed")
+	inv.strip()
+	inv.take(&"plate_carrier")
+	var bare := inv.total_mass()
+	check(inv.take(&"pouch_mag_double", 2) == 2 and inv.attachment(&"mag_1").get("id") == &"pouch_mag_double" and inv.attachment(&"mag_2").get("id") == &"pouch_mag_double",
+		"mag pouches picked up go onto the carrier's mag points")
+	check(inv.take(&"knife") == 1 and inv.attachment(&"knife").get("id") == &"knife", "a knife goes on the knife point")
+	check(inv.take(&"pouch_radio") == 1 and inv.attachment(&"radio").get("id") == &"pouch_radio", "the radio pouch on the radio point")
+	check(inv.pouch_containers().size() == 3 and not inv.containers.has(Inventory.pouch_container(&"knife")), "pouches are containers, the knife isn't (%s)" % [inv.pouch_containers()])
+	check(inv.take(&"mag_556", 5) == 5, "5 magazines taken")
+	check(inv.units_in(&"molle:mag_1") == 2 and inv.units_in(&"molle:mag_2") == 2 and _count_in(inv, &"vest", &"mag_556") == 1,
+		"they fill the mag pouches first, 2 each, the 5th in the vest")
+	check(inv.take(&"radio") == 1 and inv.units_in(&"molle:radio") == 1, "the radio goes in its pouch")
+	check(inv.room_for(&"molle:radio", ItemDB.get_item(&"mag_556")) == 0 and inv.room_for(&"molle:mag_1", ItemDB.get_item(&"mag_556")) == 0,
+		"a radio pouch takes no magazines, a full mag pouch no more")
+	check(inv.attach_problem(ItemDB.get_item(&"pouch_mag_double"), &"radio") != "", "a mag pouch doesn't fit the (taken) radio point")
+	check(inv.attach_problem(ItemDB.get_item(&"pouch_radio"), &"utility_1") == "", "a radio pouch fits a utility point")
+	var expected := bare + 2 * 0.14 + 0.3 + 0.12 + 1.2 + 5 * 0.5
+	check(absf(inv.total_mass() - expected) < 0.01, "pouches and what's in them count in the mass (%.2f kg, expected %.2f)" % [inv.total_mass(), expected])
+	# Reloading pulls from the mag pouches first.
+	inv.take(&"m4a1")
+	for i in 30:
+		inv.consume_round(&"primary")
+	check(inv.reload(&"primary") == 30 and _rounds_in_container(inv, &"molle:mag_1") == [0, 30] and _count_in(inv, &"vest", &"mag_556") == 1,
+		"reload takes a full mag from the first mag pouch and puts the empty back there (%s)" % [_rounds_in_container(inv, &"molle:mag_1")])
+	check(inv.spare_rounds(&"mag_556") == 30 * 4, "spare rounds count the pouches (%d)" % inv.spare_rounds(&"mag_556"))
+	# Moving and detaching.
+	check(inv.move_attachment(&"radio", &"utility_1") and inv.attachment(&"radio").is_empty() and inv.units_in(&"molle:utility_1") == 1,
+		"the radio pouch moves to a utility point with the radio in it")
+	var pouch := inv.detach(&"mag_2")
+	check(pouch.get("id") == &"pouch_mag_double" and pouch.state.held.size() == 1 and int(pouch.state.held[0].count) == 2, "detached, a pouch keeps its magazines (%s)" % [pouch])
+	check(inv.spare_rounds(&"mag_556") == 30 * 2, "which no longer count as carried")
+	check(inv.attach(&"mag_3", pouch) and inv.units_in(&"molle:mag_3") == 2, "and brings them back when attached again")
+	# The vest keeps everything when it comes off (dropped, looted) and in the zone save.
+	check(inv.unequip(&"vest").is_empty(), "a carrier with things in its own pockets still won't come off")
+	inv.remove_entry(&"vest", 0, 1)  # the 5th magazine
+	var vest := inv.unequip(&"vest")
+	check(vest.get("id") == &"plate_carrier" and vest.state.molle.size() == 4, "the carrier comes off with its 4 attachments (%s)" % [vest.get("state", {}).get("molle", {}).keys()])
+	var saved: Variant = GameState.from_json(JSON.parse_string(JSON.stringify(vest.state)))
+	var other := Inventory.new()
+	check(other.take(&"plate_carrier", 1, saved) == 1 and other.attachment_count() == 4, "saved and loaded with the zone, then worn by someone else: still 4 attached")
+	check(other.spare_rounds(&"mag_556") == 30 * 3 and other.count_of(&"radio") == 1, "with the magazines and radio in its pouches (%d rds)" % other.spare_rounds(&"mag_556"))
+	other.take(&"m4a1")
+	for i in 30:
+		other.consume_round(&"primary")
+	check(other.reload(&"primary") == 30, "and those magazines reload a rifle")
+	var packed := Inventory.new()
+	packed.take(&"plate_carrier")
+	packed.take(&"ruck_45")
+	check(packed.take(&"plate_carrier", 1, saved) == 1 and Inventory.contents_mass(packed.containers[&"backpack"][0].state) > 2.0,
+		"stowed in a pack, a carrier keeps its pouches (and their mass)")
+	inv.free()
+	other.free()
+	packed.free()
+
+
+func _test_molle_host() -> void:
+	print("MOLLE through the host and the inventory screen")
+	var inv := player.inventory
+	inv.strip()
+	player.global_position = Vector3(0, 0.1, 18)
+	for id: StringName in [&"plate_carrier", &"m4a1", &"assault_pack"]:
+		inv.take(id)
+	inv.take(&"mag_556", 3)
+	inv.take(&"pouch_mag_double")
+	check(inv.attachment(&"mag_1").get("id") == &"pouch_mag_double" and _count_in(inv, &"vest", &"mag_556") == 3, "a mag pouch attached; the magazines stay in the vest")
+	inv.insert_entry(&"backpack", {"id": &"pouch_pistol_mag", "count": 1})
+	player._server_inventory_action.rpc_id(1, "attach", &"backpack", _index_in(inv, &"backpack", &"pouch_pistol_mag"), &"", &"radio")
+	check(inv.attachment(&"radio").is_empty() and _count_in(inv, &"backpack", &"pouch_pistol_mag") == 1, "the host refuses a pistol pouch on the radio point")
+	player._server_inventory_action.rpc_id(1, "attach", &"backpack", _index_in(inv, &"backpack", &"pouch_pistol_mag"), &"", &"utility_1")
+	check(inv.attachment(&"utility_1").get("id") == &"pouch_pistol_mag", "and puts it on a utility point")
+	player._server_inventory_action.rpc_id(1, "move_entry", &"vest", _index_in(inv, &"vest", &"mag_556"), &"", &"molle:mag_1")
+	check(inv.units_in(&"molle:mag_1") == 2 and _count_in(inv, &"vest", &"mag_556") == 1,
+		"moving 3 magazines into a double mag pouch moves the 2 that fit (%d in the pouch)" % inv.units_in(&"molle:mag_1"))
+	player._server_inventory_action.rpc_id(1, "move_entry", &"vest", _index_in(inv, &"vest", &"mag_556"), &"", &"molle:utility_1")
+	check(_count_in(inv, &"vest", &"mag_556") == 1 and inv.units_in(&"molle:utility_1") == 0, "a pistol pouch won't take rifle magazines")
+	player._server_inventory_action.rpc_id(1, "move_attachment", &"", -1, &"mag_1", &"mag_3")
+	check(inv.attachment(&"mag_1").is_empty() and inv.units_in(&"molle:mag_3") == 2, "an attached pouch moves points with its magazines")
+	player._server_inventory_action.rpc_id(1, "detach", &"", -1, &"utility_1", &"backpack")
+	check(inv.attachment(&"utility_1").is_empty() and _count_in(inv, &"backpack", &"pouch_pistol_mag") == 1, "detached into the backpack")
+	# The screen's drag and drop asks for the same actions.
+	var screen: InventoryScreen = player._hud.inventory_screen
+	screen.visible = true
+	await _frames(2)
+	var drop := screen.drop_action({"kind": "entry", "container": &"backpack", "index": _index_in(inv, &"backpack", &"pouch_pistol_mag"), "id": &"pouch_pistol_mag"}, {"kind": "point", "point": &"pistol_1"})
+	check(drop.is_valid(), "dragging a pouch onto an attach point is an action")
+	if drop.is_valid():
+		drop.call()
+	check(inv.attachment(&"pistol_1").get("id") == &"pouch_pistol_mag", "and it attaches it")
+	check(not screen.drop_action({"kind": "slot", "slot": &"primary", "id": &"m4a1"}, {"kind": "point", "point": &"mag_2"}).is_valid(), "a rifle can't be dropped on an attach point")
+	screen._set_view(InventoryScreen.View.MOLLE)
+	await _frames(2)
+	check(screen._point_tiles.size() == inv.attach_points().size(), "the MOLLE view lays out every attach point (%d)" % screen._point_tiles.size())
+	screen._set_view(InventoryScreen.View.LOADOUT)
+	screen.visible = false
+	# Dropping the carrier keeps its pouches; picking it up brings them back.
+	while not inv.containers[&"vest"].is_empty():
+		inv.remove_entry(&"vest", 0, int(inv.containers[&"vest"][0].count))
+	player._server_inventory_action.rpc_id(1, "drop_slot", &"", -1, &"vest", &"")
+	check(inv.slots[&"vest"] == &"" and inv.spare_rounds(&"mag_556") == 0, "the carrier dropped, with the magazines in its pouches")
+	await _frames(3)
+	var dropped: WorldItem = null
+	for node in get_tree().get_nodes_in_group(WorldItem.GROUP):
+		if node.item_id == &"plate_carrier" and not node.state.get("molle", {}).is_empty():
+			dropped = node
+	check(dropped != null and dropped.state.molle.size() == 2 and GameState.dropped.get(dropped.uid, {}).get("state", {}).has("molle"),
+		"it lies there with its 2 pouches, recorded for the zone save")
+	if dropped:
+		player._server_interact.rpc_id(1, dropped.get_path())
+		check(inv.slots[&"vest"] == &"plate_carrier" and inv.attachment_count() == 2 and inv.units_in(&"molle:mag_3") == 2, "picked up again, pouches, magazines and all")
+	inv.strip()
+
+
+func _count_in(inv: Inventory, container: StringName, id: StringName) -> int:
+	var n := 0
+	for entry: Dictionary in inv.containers.get(container, []):
+		if entry.id == id:
+			n += int(entry.count)
+	return n
+
+
+func _index_in(inv: Inventory, container: StringName, id: StringName) -> int:
+	var list: Array = inv.containers.get(container, [])
+	for i in list.size():
+		if list[i].id == id:
+			return i
+	return -1
+
+
+func _rounds_in_container(inv: Inventory, container: StringName) -> Array:
+	var rounds := []
+	for entry: Dictionary in inv.containers.get(container, []):
+		var full := ItemDB.get_item(entry.id).magazine_rounds()
+		for i in int(entry.count):
+			rounds.append(int(entry.get("state", {}).get("rounds", full)))
+	rounds.sort()
+	return rounds
 
 
 func _test_respawn_kit() -> void:

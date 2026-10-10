@@ -209,7 +209,7 @@ static func _submenu(def: Dictionary, actor: Soldier, target: Node) -> Array[Dic
 	var items: Array[Dictionary] = []
 	match def.submenu:
 		&"stowed_items":
-			for container in Inventory.CONTAINERS:
+			for container in actor.inventory.search_containers():  # pouches too
 				var list: Array = actor.inventory.containers[container]
 				for i in list.size():
 					if items.size() >= MAX_GIVE_ENTRIES:

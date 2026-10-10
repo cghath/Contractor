@@ -121,7 +121,7 @@ include Voxel Tools.
 | F1-F8 | Select squadmates by slot (fire team A is F1-F4, B is F5-F8) and open the command menu; Shift+F-key adds to the selection |
 | ~ | Select the whole squad and open the command menu |
 | In the command menu | 1-9 and 0 pick an entry, or scroll the mouse wheel and click the middle button; Backspace goes back, Esc closes |
-| Tab | Inventory screen: equip, stow, move between containers, use, drop |
+| Tab | Inventory screen (Star Citizen style): drag items between slots, pouches and containers, onto the soldier to equip or onto the ground panel to drop; right-click a tile for its actions (equip, attach, stow, use, load magazines, drop); double-click for the first. The MOLLE button (or clicking the carrier twice) shows the carrier's attach points for pouches, a knife or a radio |
 | Esc | Close the inventory screen / release mouse |
 | Home | Save zone (host) |
 | K | Debug builds only: costs 24% of your blood and adds pain; two presses knock you out (with no wound bleeding, blood creeps back at 1.5% a minute and you come round after a few minutes) |
@@ -165,7 +165,7 @@ autoload/
   game_state.gd   zone persistence: looted uids, dropped items, voxel edit log → user://saves/
   net.gd          ENet host/join, connection signals
 scripts/
-  inventory/      ItemData, Inventory (slots + litre containers), WorldItem (pickup)
+  inventory/      ItemData, Inventory (slots, litre containers, MOLLE pouches), WorldItem (pickup)
   combat/         Vitals (the wound-model interface), wounds/ (WoundModel, BodyMap), VoxelArmor and ArmorRules (ratings,
                   cracks, spall, soft armor), GearRig (worn gear), Ballistics (threat levels, energy by range),
                   Grenade/Throwables/SmokeCloud
@@ -176,7 +176,7 @@ scripts/
   player/         CharacterModel (procedural voxel soldier), Hud
   art/            VoxelArt: code-built voxel models (body parts, carriers, packs, rifles, pistol)
   world/          VoxelWorld (10 cm destructible structures), CompoundLevel, NavBuilder, GearMarker, TargetDummy
-  ui/             Menu (with role picker), InventoryScreen, CommandMenu, InteractionMenu, Callouts
+  ui/             Menu (with role picker), InventoryScreen and ItemIcons (item previews), CommandMenu, InteractionMenu, Callouts
 data/             items.json, factions.json (placeholder), missions.json (placeholder)
 tests/            smoke, gameplay, squad, net, wounds, armor, movement, interaction, roles (headless), screenshot_tour
 tools/            run_tests.sh, make_build.sh
@@ -274,7 +274,7 @@ a release:
 - Shots are hitscan, with no bullet drop or travel time. Spread is decided by the shooter's machine (fine for co-op, not cheat-proof).
 - Every inventory change, including each shot fired, re-sends the whole inventory snapshot. That's fine on a LAN; it needs a lighter path (for example, ammo only) before internet play.
 - Reloading and healing can't be cancelled, and taking damage doesn't interrupt them.
-- A vest or backpack can't be dropped while it still has things in it. Empty it from the inventory screen first.
+- A vest or backpack can't be dropped while it still has things in its own pockets (its MOLLE pouches and their contents go with it). Empty it from the inventory screen first.
 - The voxel world has no stream, so it's limited to `VoxelWorld.BOUNDS`. The voxel edit log grows with every bullet hole and is never compacted.
 - Player inventories aren't saved yet; only the zone's state is.
 - Medical depth is wave 3: no IV, blood bags, CPR, defibrillator, decompression needle or surgery yet. Until IV, blood only comes back slowly once every bleed has stopped, and heart wounds and internal torso bleeding have no field fix. SpO2 is a basic model (no per-lung efficiency or pulse oximeter), and there's no breathing sound yet.

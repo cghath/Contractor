@@ -13,6 +13,15 @@ extends Node
 ##
 ## Ammunition: magazines keep their rounds in state and go back in the pouch when they come
 ## out of the weapon, empty or not; loose rounds of the same calibre load them (load_rounds).
+##
+## MOLLE: a carrier has typed attach points (its stats' "molle"); pouches, a knife and the
+## like attach to points of a type they fit (their stats' "attach"). Attachments live in the
+## carrier's own state ({"molle": {point id: {"id", "held"?}}}), so they stay on the vest
+## when it's dropped, looted, saved with the zone or stowed. A pouch's contents ("held",
+## entries like a container's) are a container of their own while the vest is worn, named
+## pouch_container(point) ("molle:mag_1"), and come before the vest, pockets and backpack
+## in search_containers(): reloads pull from mag pouches first, and what a pouch accepts
+## goes into it first when picked up.
 
 signal changed
 
@@ -22,6 +31,12 @@ const WEAPON_SLOTS: Array[StringName] = [&"primary", &"sidearm"]
 ## Containers, in the order auto-stow fills them (and reloads search them).
 const CONTAINERS: Array[StringName] = [&"vest", &"pockets", &"backpack"]
 const POCKETS_L := 2.0
+## Pouch containers are named this plus the attach point's id.
+const MOLLE_PREFIX := "molle:"
+## Display names of attach point types.
+const POINT_TYPES := {
+	"mag": "Mag", "pistol": "Pistol mag", "knife": "Knife", "radio": "Radio", "medical": "Medical", "utility": "Utility",
+}
 
 ## Replicated snapshot. Always assign a fresh Dictionary so replication sees the change.
 var net_state: Dictionary = {}:
@@ -39,18 +54,58 @@ func _init() -> void:
 	_apply_state({})
 
 
+## Litres a container holds. A pouch counted in units (a mag pouch) reports 1; room_for
+## decides what fits.
 func capacity(container: StringName) -> float:
 	if container == &"pockets":
 		return POCKETS_L
+	if is_pouch_container(container):
+		var pouch := pouch_item(container)
+		if pouch == null:
+			return 0.0
+		var litres := float(pouch.stats.get("capacity_l", 0.0))
+		return litres if litres > 0.0 else 1.0
 	var id: StringName = slots.get(container, &"")
 	return ItemDB.get_item(id).capacity_l if id != &"" else 0.0
 
 
 func used(container: StringName) -> float:
 	var total := 0.0
-	for entry: Dictionary in containers[container]:
+	for entry: Dictionary in containers.get(container, []):
 		total += ItemDB.get_item(entry.id).volume_l * entry.count
 	return total
+
+
+## Units stowed in a container.
+func units_in(container: StringName) -> int:
+	var total := 0
+	for entry: Dictionary in containers.get(container, []):
+		total += int(entry.count)
+	return total
+
+
+## How many units of `item` fit in `container` now: by free litres, and for a pouch also by
+## what it accepts and how many units it takes.
+func room_for(container: StringName, item: ItemData) -> int:
+	if item == null:
+		return 0
+	if is_pouch_container(container):
+		var pouch := pouch_item(container)
+		if pouch == null or not pouch_accepts(pouch, item):
+			return 0
+		var room := 1000000
+		var max_units := int(pouch.stats.get("max_units", 0))
+		if max_units > 0:
+			room = maxi(max_units - units_in(container), 0)
+		var litres := float(pouch.stats.get("capacity_l", 0.0))
+		if litres > 0.0 and item.volume_l > 0.0:
+			room = mini(room, int(floor((litres - used(container)) / item.volume_l + 0.0001)))
+		return maxi(room, 0)
+	if capacity(container) <= 0.0:
+		return 0
+	if item.volume_l <= 0.0:
+		return 1000000
+	return maxi(int(floor(free_volume(container) / item.volume_l + 0.0001)), 0)
 
 
 func free_volume(container: StringName) -> float:
@@ -61,7 +116,7 @@ func total_mass() -> float:
 	var total := 0.0
 	for slot in SLOTS:
 		if slots[slot] != &"":
-			total += ItemDB.get_item(slots[slot]).mass_kg
+			total += ItemDB.get_item(slots[slot]).mass_kg + contents_mass(state_of(slot))  # a carrier's pouches
 	for container in CONTAINERS:
 		for entry: Dictionary in containers[container]:
 			total += entry_mass(entry)
@@ -79,13 +134,32 @@ static func entry_mass(entry: Dictionary) -> float:
 	if full > 0 and item.stats.has("empty_mass_kg") and entry.has("state"):
 		var empty := float(item.stats.empty_mass_kg)
 		each = empty + (item.mass_kg - empty) * clampf(float(entry.state.get("rounds", full)) / full, 0.0, 1.0)
+	if entry.has("state"):
+		each += contents_mass(entry.state)  # a stowed carrier's pouches, a pouch's contents
 	return each * entry.count
+
+
+## Mass of what an item's state carries: a carrier's attachments and their contents
+## ("molle"), a detached pouch's contents ("held").
+static func contents_mass(state: Dictionary) -> float:
+	var total := 0.0
+	var molle: Dictionary = state.get("molle", {})
+	for point: Variant in molle:
+		var att: Dictionary = molle[point]
+		var item := ItemDB.get_item(StringName(att.get("id", "")))
+		if item:
+			total += item.mass_kg
+		for entry: Dictionary in att.get("held", []):
+			total += entry_mass(entry)
+	for entry: Dictionary in state.get("held", []):
+		total += entry_mass(entry)
+	return total
 
 
 ## Units of `id` stowed across all containers.
 func count_of(id: StringName) -> int:
 	var total := 0
-	for container in CONTAINERS:
+	for container in search_containers():
 		for entry: Dictionary in containers[container]:
 			if entry.id == id:
 				total += entry.count
@@ -118,7 +192,14 @@ func take(id: StringName, count := 1, state := {}) -> int:
 		slots[slot] = id
 		slot_state[slot] = state.duplicate(true) if not state.is_empty() else item.default_state()
 		taken = 1
-	for container in CONTAINERS:
+	# Pouches and knives go onto free attach points of the worn carrier that they fit.
+	while taken < count and is_attachable(item):
+		var point := free_point_for(item)
+		if point == &"":
+			break
+		_set_attachment(point, id, state)
+		taken += 1
+	for container in stow_order(item):
 		if taken == count:
 			break
 		taken += _stow(container, item, count - taken, state)
@@ -193,7 +274,7 @@ func remove_entry(container: StringName, index: int, count := 1) -> Dictionary:
 
 ## Host only. Removes one stowed unit of `id` from whichever container has it first.
 func remove_one(id: StringName) -> bool:
-	for container in CONTAINERS:
+	for container in search_containers():
 		var list: Array = containers[container]
 		for i in list.size():
 			if list[i].id == id:
@@ -205,7 +286,7 @@ func remove_one(id: StringName) -> bool:
 ## Host only. Puts a whole entry into `container` if it fits. Returns false otherwise.
 func insert_entry(container: StringName, entry: Dictionary) -> bool:
 	var item := ItemDB.get_item(entry.id)
-	if capacity(container) <= 0.0 or item.volume_l * entry.count > free_volume(container) + 0.0001:
+	if item == null or room_for(container, item) < int(entry.count):
 		return false
 	_append(container, item, entry.count, entry.get("state", {}))
 	_commit()
@@ -239,7 +320,7 @@ func rounds_in(slot: StringName) -> int:
 func spare_rounds(ammo_id: StringName) -> int:
 	var total := 0
 	var full := ItemDB.get_item(ammo_id).magazine_rounds() if ItemDB.has_item(ammo_id) else 0
-	for container in CONTAINERS:
+	for container in search_containers():
 		for entry: Dictionary in containers[container]:
 			if entry.id == ammo_id:
 				total += int(entry.get("state", {}).get("rounds", full)) * entry.count
@@ -271,7 +352,7 @@ func reload(slot: StringName) -> int:
 	var best_container: StringName = &""
 	var best_index := -1
 	var best_rounds := rounds_in(slot)  # only worth it if the new mag has more
-	for container in CONTAINERS:
+	for container in search_containers():
 		var list: Array = containers[container]
 		for i in list.size():
 			if list[i].id == ammo_id:
@@ -310,7 +391,7 @@ func loadable_rounds(rounds_id: StringName) -> int:
 	if not is_loose_rounds(loose):
 		return 0
 	var room := 0
-	for container in CONTAINERS:
+	for container in search_containers():
 		for entry: Dictionary in containers[container]:
 			var item := ItemDB.get_item(entry.id)
 			if item.magazine_rounds() > 0 and not is_loose_rounds(item) and calibre_of(item) == calibre_of(loose):
@@ -352,7 +433,7 @@ func load_rounds(rounds_id: StringName, count := 1) -> int:
 ## {"container", "index", "rounds"}, or {} if every one is full.
 func _fullest_unfilled(calibre: String) -> Dictionary:
 	var best := {}
-	for container in CONTAINERS:
+	for container in search_containers():
 		var list: Array = containers[container]
 		for i in list.size():
 			var item := ItemDB.get_item(list[i].id)
@@ -369,8 +450,9 @@ func _fullest_unfilled(calibre: String) -> Dictionary:
 ## together) without committing. Returns how many it found.
 func _take_units(id: StringName, n: int) -> int:
 	var left := n
-	for c in range(CONTAINERS.size() - 1, -1, -1):
-		var list: Array = containers[CONTAINERS[c]]
+	var order := search_containers()
+	for c in range(order.size() - 1, -1, -1):
+		var list: Array = containers[order[c]]
 		for i in range(list.size() - 1, -1, -1):
 			if left <= 0:
 				return n
@@ -446,7 +528,7 @@ static func kit_text(item: ItemData, state: Dictionary) -> String:
 ## Units of the kit item `id` carried: loose, plus inside kits.
 func medical_count(id: StringName) -> int:
 	var total := count_of(id)
-	for container in CONTAINERS:
+	for container in search_containers():
 		for entry: Dictionary in containers[container]:
 			var item := ItemDB.get_item(entry.id)
 			if is_kit(item):
@@ -469,7 +551,7 @@ func _take_from_kit(what: String) -> bool:
 	var best_index := -1
 	var best_opened := false
 	var best_left := 0
-	for container in CONTAINERS:
+	for container in search_containers():
 		var list: Array = containers[container]
 		for i in list.size():
 			var item := ItemDB.get_item(list[i].id)
@@ -543,6 +625,214 @@ func fit_problem(item: ItemData) -> String:
 	return ""
 
 
+# --- MOLLE attachments ------------------------------------------------------------------
+
+static func pouch_container(point: StringName) -> StringName:
+	return StringName(MOLLE_PREFIX + String(point))
+
+
+static func is_pouch_container(container: StringName) -> bool:
+	return String(container).begins_with(MOLLE_PREFIX)
+
+
+static func point_of(container: StringName) -> StringName:
+	return StringName(String(container).trim_prefix(MOLLE_PREFIX))
+
+
+## Items that go on an attach point (pouches, a knife).
+static func is_attachable(item: ItemData) -> bool:
+	return item != null and not item.stats.get("attach", []).is_empty()
+
+
+## Attachable items that hold things.
+static func is_pouch(item: ItemData) -> bool:
+	return is_attachable(item) and (item.stats.has("accepts") or item.stats.has("max_units") or item.stats.has("capacity_l"))
+
+
+## Whether `pouch` takes `item`: what its "accepts" lists (item ids, "type:x", "tag:x";
+## anything when it has no list), no bigger than its "max_item_l", and never another
+## attachable or a carrier.
+static func pouch_accepts(pouch: ItemData, item: ItemData) -> bool:
+	if pouch == null or item == null or is_attachable(item) or item.slot == &"vest" or item.slot == &"backpack" or item.two_handed:
+		return false
+	if pouch.stats.has("max_item_l") and item.volume_l > float(pouch.stats.max_item_l) + 0.0001:
+		return false
+	var accepts: Array = pouch.stats.get("accepts", [])
+	if accepts.is_empty():
+		return true
+	for rule: String in accepts:
+		if rule == String(item.id) or (rule.begins_with("type:") and rule.substr(5) == item.type) \
+				or (rule.begins_with("tag:") and rule.substr(4) in item.tags):
+			return true
+	return false
+
+
+## The worn carrier's attach points (its stats' "molle"): [{"id", "type", "at", "face"}],
+## none without a carrier.
+func attach_points() -> Array:
+	var vest: StringName = slots.get(&"vest", &"")
+	return ItemDB.get_item(vest).stats.get("molle", []) if vest != &"" else []
+
+
+## The worn carrier's attach point `point` ({} if it has none).
+func attach_point(point: StringName) -> Dictionary:
+	for p: Dictionary in attach_points():
+		if p.id == String(point):
+			return p
+	return {}
+
+
+## What's on attach point `point` of the worn carrier: {"id", "held"?}, or {}.
+func attachment(point: StringName) -> Dictionary:
+	return slot_state.get(&"vest", {}).get("molle", {}).get(String(point), {})
+
+
+## The pouch on a pouch container's point, or null.
+func pouch_item(container: StringName) -> ItemData:
+	var att := attachment(point_of(container))
+	return ItemDB.get_item(StringName(att.get("id", ""))) if not att.is_empty() else null
+
+
+## Why `item` can't go on `point` of the worn carrier right now ("" if it can).
+func attach_problem(item: ItemData, point: StringName) -> String:
+	if slots[&"vest"] == &"":
+		return "Put on a plate carrier first"
+	if not is_attachable(item):
+		return "%s doesn't attach to a carrier" % item.name
+	var p := attach_point(point)
+	if p.is_empty():
+		return "The %s has no %s point" % [ItemDB.get_item(slots[&"vest"]).name, point]
+	if not attachment(point).is_empty():
+		return "Something is already on that point"
+	if not String(p.type) in item.stats.attach:
+		return "%s doesn't fit a %s point (fits %s)" % [item.name, POINT_TYPES.get(p.type, p.type), ", ".join(PackedStringArray(item.stats.attach.map(func(t: String) -> String: return POINT_TYPES.get(t, t))))]
+	return ""
+
+
+## The first free attach point of the worn carrier that `item` fits (its own point types
+## first: a mag pouch on a mag point before a utility one), or &"".
+func free_point_for(item: ItemData) -> StringName:
+	if not is_attachable(item):
+		return &""
+	for kind: String in item.stats.attach:
+		for p: Dictionary in attach_points():
+			if p.type == kind and attachment(StringName(p.id)).is_empty():
+				return StringName(p.id)
+	return &""
+
+
+## Pouch containers on the worn carrier, in attach point order.
+func pouch_containers() -> Array[StringName]:
+	var out: Array[StringName] = []
+	for p: Dictionary in attach_points():
+		var c := pouch_container(StringName(p.id))
+		if containers.has(c):
+			out.append(c)
+	return out
+
+
+## Every container, in the order reloads and other searches look: pouches first, then the
+## vest, pockets and backpack.
+func search_containers() -> Array[StringName]:
+	var out := pouch_containers()
+	out.append_array(CONTAINERS)
+	return out
+
+
+## Where `item` is stowed when it's picked up: pouches made for it (a mag pouch for a
+## magazine), then the vest, pockets and backpack, then general pouches.
+func stow_order(item: ItemData) -> Array[StringName]:
+	var made_for: Array[StringName] = []
+	var general: Array[StringName] = []
+	for c in pouch_containers():
+		var pouch := pouch_item(c)
+		if not pouch_accepts(pouch, item):
+			continue
+		if pouch.stats.has("accepts"):
+			made_for.append(c)
+		else:
+			general.append(c)
+	made_for.append_array(CONTAINERS)
+	made_for.append_array(general)
+	return made_for
+
+
+## Host only. Puts one unit of a stowed entry onto attach point `point` (or the first free
+## one it fits, for &""). A pouch's contents ("held" in its state) go on with it.
+func attach_entry(container: StringName, index: int, point: StringName = &"") -> bool:
+	var list: Array = containers.get(container, [])
+	if index < 0 or index >= list.size():
+		return false
+	var item := ItemDB.get_item(list[index].id)
+	if point == &"":
+		point = free_point_for(item)
+	if point == &"" or attach_problem(item, point) != "":
+		return false
+	var entry := remove_entry(container, index, 1)
+	_set_attachment(point, item.id, entry.get("state", {}))
+	_commit()
+	return true
+
+
+## Host only. Takes what's on `point` off the worn carrier and returns it as an entry
+## ({"id", "count": 1, "state"?: {"held": contents}}), or {}.
+func detach(point: StringName) -> Dictionary:
+	var att := attachment(point)
+	if att.is_empty():
+		return {}
+	var molle: Dictionary = slot_state[&"vest"]["molle"]
+	molle.erase(String(point))
+	var entry := {"id": StringName(att.id), "count": 1}
+	var held: Array = att.get("held", [])
+	if not held.is_empty():
+		entry.state = {"held": held.duplicate(true)}
+	_commit()
+	return entry
+
+
+## Host only. Puts an entry from detach() (or any attachable) onto `point`. False if it
+## doesn't go there.
+func attach(point: StringName, entry: Dictionary) -> bool:
+	var item := ItemDB.get_item(entry.get("id", &""))
+	if item == null or attach_problem(item, point) != "":
+		return false
+	_set_attachment(point, item.id, entry.get("state", {}))
+	_commit()
+	return true
+
+
+## Host only. Moves what's on attach point `from` to the free point `to`.
+func move_attachment(from: StringName, to: StringName) -> bool:
+	var att := attachment(from)
+	if att.is_empty() or from == to:
+		return false
+	var item := ItemDB.get_item(StringName(att.id))
+	if attach_problem(item, to) != "":
+		return false
+	var molle: Dictionary = slot_state[&"vest"]["molle"]
+	molle.erase(String(from))
+	molle[String(to)] = att
+	_commit()
+	return true
+
+
+## How many attachments the worn carrier has.
+func attachment_count() -> int:
+	return slot_state.get(&"vest", {}).get("molle", {}).size()
+
+
+## Sets what's on `point` (no checks, no commit). A pouch takes its contents from `state`.
+func _set_attachment(point: StringName, id: StringName, state: Dictionary) -> void:
+	var vest_state: Dictionary = slot_state.get(&"vest", {})
+	if not vest_state.has("molle"):
+		vest_state["molle"] = {}
+	slot_state[&"vest"] = vest_state
+	var att := {"id": id}
+	if is_pouch(ItemDB.get_item(id)):
+		att["held"] = state.get("held", []).duplicate(true)
+	vest_state["molle"][String(point)] = att
+
+
 # --- Internals --------------------------------------------------------------------------
 
 func _free_slot_for(item: ItemData) -> StringName:
@@ -572,10 +862,7 @@ func carrier_plate_slots() -> Array[StringName]:
 
 
 func _stow(container: StringName, item: ItemData, want: int, state: Dictionary) -> int:
-	var fit := want
-	if item.volume_l > 0.0:
-		fit = int(floor(free_volume(container) / item.volume_l + 0.0001))
-	var n := mini(fit, want)
+	var n := mini(room_for(container, item), want)
 	if n > 0:
 		_append(container, item, n, state)
 	return n
@@ -615,10 +902,13 @@ static func _state_stacks(item: ItemData) -> bool:
 
 
 func _commit() -> void:
+	var stowed := {}
+	for container in CONTAINERS:  # pouch contents travel in the carrier's state
+		stowed[container] = containers[container].duplicate(true)
 	net_state = {
 		"slots": slots.duplicate(),
 		"slot_state": slot_state.duplicate(true),
-		"containers": containers.duplicate(true),
+		"containers": stowed,
 		"hands": hands,
 	}
 
@@ -631,5 +921,14 @@ func _apply_state(state: Dictionary) -> void:
 	containers.clear()
 	for container in CONTAINERS:
 		containers[container] = state.get("containers", {}).get(container, []).duplicate(true)
+	# Each pouch on the worn carrier is a container: the very Array in the carrier's state,
+	# so what goes in or out of it is in the vest's state too.
+	var molle: Dictionary = slot_state.get(&"vest", {}).get("molle", {})
+	for point: Variant in molle:
+		var att: Dictionary = molle[point]
+		if is_pouch(ItemDB.get_item(StringName(att.get("id", "")))):
+			if not att.has("held"):
+				att["held"] = []
+			containers[pouch_container(StringName(point))] = att["held"]
 	hands = StringName(state.get("hands", &""))
 	changed.emit()

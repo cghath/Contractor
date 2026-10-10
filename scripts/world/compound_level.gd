@@ -47,6 +47,19 @@ const LOOT := [
 	{"uid": "c01_helmet_heavy", "id": "helmet_heavy", "pos": Vector3(5, 0.5, 22)},
 	{"uid": "c01_side_a", "id": "plate_side", "pos": Vector3(5.5, 0.5, 23)},
 	{"uid": "c01_side_b", "id": "plate_side", "pos": Vector3(4.5, 0.5, 23)},
+	# MOLLE pouches and what goes in them, west of the gate.
+	{"uid": "c01_pouch_mag_a", "id": "pouch_mag_double", "count": 3, "pos": Vector3(-8, 0.5, 21)},
+	{"uid": "c01_pouch_mag_b", "id": "pouch_mag_single", "count": 2, "pos": Vector3(-8, 0.5, 22)},
+	{"uid": "c01_pouch_pistol", "id": "pouch_pistol_mag", "pos": Vector3(-8, 0.5, 23)},
+	{"uid": "c01_pouch_ifak", "id": "pouch_ifak", "pos": Vector3(-8, 0.5, 24)},
+	{"uid": "c01_pouch_radio", "id": "pouch_radio", "pos": Vector3(-9, 0.5, 21)},
+	{"uid": "c01_radio", "id": "radio", "pos": Vector3(-9, 0.5, 22)},
+	{"uid": "c01_pouch_binos", "id": "pouch_binos", "pos": Vector3(-9, 0.5, 23)},
+	{"uid": "c01_binoculars", "id": "binoculars", "pos": Vector3(-9, 0.5, 24)},
+	{"uid": "c01_knife", "id": "knife", "pos": Vector3(-10, 0.5, 21)},
+	{"uid": "c01_pouch_sustain", "id": "pouch_sustainment", "pos": Vector3(-10, 0.5, 22)},
+	{"uid": "c01_pouch_gp", "id": "pouch_utility", "pos": Vector3(-10, 0.5, 23)},
+	{"uid": "c01_pouch_nade", "id": "pouch_grenade", "count": 2, "pos": Vector3(-10, 0.5, 24)},
 	{"uid": "c01_ifak_a", "id": "ifak", "count": 2, "pos": Vector3(-6, 0.5, 4)},
 	{"uid": "c01_frag_a", "id": "frag_grenade", "count": 3, "pos": Vector3(6, 0.5, 4)},
 	{"uid": "c01_smoke_a", "id": "smoke_grenade", "count": 3, "pos": Vector3(7, 0.5, 4)},
@@ -298,7 +311,7 @@ func _on_hosted() -> void:
 			spawn_item(StringName(loot.id), loot.get("count", 1), loot.pos, loot.uid)
 	for uid: String in GameState.dropped:
 		var d: Dictionary = GameState.dropped[uid]
-		spawn_item(StringName(d.id), int(d.count), Vector3(d.pos[0], d.pos[1], d.pos[2]), uid, d.get("state", {}))
+		spawn_item(StringName(d.id), int(d.count), Vector3(d.pos[0], d.pos[1], d.pos[2]), uid, GameState.from_json(d.get("state", {})))
 	player_roles[1] = Roles.local_choice  # the host's own pick from the main menu
 	_add_player(1)
 	NavBuilder.build(self)

@@ -119,11 +119,16 @@ func describe() -> String:
 	var detail := ""
 	if state.has("rounds"):
 		detail = "  [%d rds]" % int(state.rounds)
+	elif not state.get("molle", {}).is_empty():
+		detail = "  [%d attached]" % state.molle.size()  # a carrier keeps its pouches
+	elif not state.get("held", []).is_empty():
+		detail = "  [%d inside]" % state.held.reduce(func(a: int, e: Dictionary) -> int: return a + int(e.count), 0)
 	elif item.is_voxel_armor():
 		var damage := ArmorRules.state_text(item, state)  # "3 cracks, 46%", "shattered"...
 		if damage != "":
 			detail = "  [%s]" % damage
-	return "%s %s%s%s   %.1f L  %.1f kg" % [verb, item.name, amount, detail, item.volume_l * count, item.mass_kg * count]
+	var mass := Inventory.entry_mass({"id": item_id, "count": count, "state": state})
+	return "%s %s%s%s   %.1f L  %.1f kg" % [verb, item.name, amount, detail, item.volume_l * count, mass]
 
 
 ## Placeholder box size: explicit `size_m` from item stats, else a cube of the item's volume.

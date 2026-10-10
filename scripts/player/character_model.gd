@@ -595,6 +595,15 @@ func server_inventory_action(inventory: Inventory, action: String, container: St
 		"stow_slot":
 			from = SLOT_MOUNTS.get(slot, &"pouch")
 			to = &"pack" if inventory.slots.get(&"backpack", &"") != &"" and inventory.slots.get(&"vest", &"") == &"" else &"pouch"
+		"attach", "move_attachment":
+			from = CONTAINER_MOUNTS.get(container, &"pouch")
+			to = &"carrier"
+		"detach":
+			from = &"carrier"
+			to = CONTAINER_MOUNTS.get(target, &"pouch")
+		"drop_attachment":
+			from = &"carrier"
+			to = &"ground"
 		_:
 			return
 	server_play(EQUIP, EQUIP_S, Vector3.ZERO, from, to)

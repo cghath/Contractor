@@ -11,10 +11,57 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Captain's wave 2 playtest asks
+
+#### Added
+
+- **Inventory screen, Star Citizen style:** Tab opens a full-screen personal inventory. A
+  live 3D preview of your soldier and his kit sits in the middle (drag him to turn him), with
+  the equipment slots (helmet, carrier, backpack, plates, primary, sidearm) down both sides.
+  Containers are on the left as grids of item tiles (carrier pouches, vest, pockets,
+  backpack, hands, and what's on the ground within reach); the selected item's details and
+  actions are on the right. Every tile shows a preview image rendered at runtime from the
+  item's own voxel model (cached per item; a coloured tile where nothing renders) with its
+  name and a mass, count or condition readout.
+  - Drag tiles between containers, pouches and slots; onto the soldier to equip or attach;
+    onto the ground panel to drop; from the ground panel to pick up. Right-click a tile for
+    its actions (equip, attach, stow, use, load magazines, move, drop), double-click for the
+    first. Load magazines also has a button at the top of the containers when you have
+    loose rounds to load. Everything still goes through the host's requests.
+- **MOLLE attachments:** carriers have typed attach points (light 6, medium 9, heavy 12:
+  mag, pistol mag, knife, radio, medical and utility). New attachables: single and double
+  M4 mag pouches, double pistol mag pouch, radio pouch (and an AN/PRC-152 radio), binocular
+  pouch (and binoculars), GP utility pouch, sustainment pouch, IFAK pouch, grenade pouch and
+  a fixed-blade knife, all with mass. Pouches hold their contents (a double mag pouch two
+  rifle magazines, an IFAK pouch medical items, a sustainment pouch anything small).
+  - The MOLLE view (click the carrier twice, or the MOLLE button) closes in on the carrier
+    and lays its attach points down the sides with lines to where they sit; drag compatible
+    items onto them, or drag an attached pouch to another point.
+  - Attachments stay on the carrier: dropping, picking up, looting or stowing a vest keeps
+    its pouches and what's in them, and they're saved with the zone and replicate.
+  - Reloads take magazines from mag pouches first; magazines, grenades and medical items you
+    pick up go into the pouches made for them first. Pouches and their contents count in
+    your mass. Attached pouches show on the soldier as small boxes on the carrier.
+  - Role kits put three double mag pouches and an IFAK pouch on every carrier; the team
+    leader adds a radio and binoculars, the medic a sustainment pouch and a knife, the
+    grenadier grenade pouches, the marksman a pistol mag pouch and binoculars, the
+    autorifleman and rifleman a GP pouch (and the rifleman a knife). Pouches lie in the
+    compound loot west of the gate.
+- Tests: MOLLE rules (points, pouch capacity, reload from pouches, detach and re-attach,
+  mass, save round trip) and MOLLE through the host and the inventory screen (attach,
+  move, detach, drag and drop, drop and pick up a carrier with pouches) in the logistics
+  suite.
+
+#### Changed
+
+- Moving a stack into a container that can't take all of it moves as many as fit.
+- Dropped items saved with the zone come back with whole numbers and item ids restored
+  (like bodies already did).
+
 ### Captain's wave 2 playtest fixes
 
 From Captain's playtest of the wave 1 build. The Star Citizen-style inventory and MOLLE vest
-attachments Captain asked for at the same time are still in progress.
+attachments Captain asked for at the same time are under "Captain's wave 2 playtest asks" above.
 
 #### Changed
 

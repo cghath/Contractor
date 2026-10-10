@@ -52,6 +52,10 @@ var _held_dirty := true
 var _want_key: StringName = &""  # what should be in the hands
 var _clock := 0.0
 var _grab_at := -1.0             # _clock when a weapon being drawn reaches the hands
+var _pouches: Node3D             # MOLLE attachments on the carrier
+var _pouch_key := ""             # what _pouches shows
+
+static var _pouch_materials: Dictionary = {}  # colour -> StandardMaterial3D
 
 
 func _ready() -> void:
@@ -143,7 +147,84 @@ func _rebuild() -> void:
 	var held := inventory.hands
 	var held_size := WorldItem.visual_size(ItemDB.get_item(held)) if held != &"" else Vector3.ZERO
 	_set_gear(&"hands", held, &"torso", Vector3(0, 0.15, -0.15 - held_size.z * 0.5), Vector3.ZERO)
+	_set_pouches()
 	_refresh_plate_damage()
+
+
+## MOLLE attachments on the worn carrier, drawn as small boxes on its attach points (the
+## points' "at" and "face"); rebuilt only when what's attached changes.
+func _set_pouches() -> void:
+	var points := inventory.attach_points()
+	var key := String(inventory.slots[&"vest"])
+	for p: Dictionary in points:
+		var att := inventory.attachment(StringName(p.id))
+		if not att.is_empty():
+			key += "|%s=%s%s" % [p.id, att.id, "+" if not att.get("held", []).is_empty() else ""]
+	if key == _pouch_key:
+		return
+	_pouch_key = key
+	if _pouches:
+		_pouches.queue_free()
+		_pouches = null
+	if inventory.attachment_count() == 0:
+		return
+	_pouches = Node3D.new()
+	_pouches.name = "Pouches"
+	model.torso.add_child(_pouches)
+	var gear := Color(VoxelArt.VARIANTS.get(model.variant, VoxelArt.VARIANTS.multicam).gear).darkened(0.12)
+	for p: Dictionary in points:
+		var att := inventory.attachment(StringName(p.id))
+		if att.is_empty():
+			continue
+		var node := pouch_node(ItemDB.get_item(StringName(att.id)), gear, not att.get("held", []).is_empty(), render_layers)
+		node.transform = point_transform(p, WorldItem.visual_size(ItemDB.get_item(StringName(att.id))))
+		_pouches.add_child(node)
+
+
+## Torso-local transform of an attachment of `size` on attach point `p`: its back against the
+## carrier at "at", facing out of "face" (front, back, left or right).
+static func point_transform(p: Dictionary, size: Vector3) -> Transform3D:
+	var at: Array = p.get("at", [0, 0.3, -0.18])
+	var origin := Vector3(float(at[0]), float(at[1]), float(at[2]))
+	var basis := Basis.IDENTITY
+	match String(p.get("face", "front")):
+		"back": basis = Basis(Vector3.UP, PI)
+		"left": basis = Basis(Vector3.UP, PI / 2)
+		"right": basis = Basis(Vector3.UP, -PI / 2)
+	return Transform3D(basis, origin + basis * Vector3(0, 0, -size.z * 0.5))
+
+
+## A pouch (or knife) as small boxes: body and a darker flap, or a sheath and handle; a radio
+## shows its antenna. Front is -Z. Used on the soldier and for item previews.
+static func pouch_node(item: ItemData, colour: Color, full: bool, layers := 1) -> Node3D:
+	var root := Node3D.new()
+	var size := WorldItem.visual_size(item)
+	if item.id == &"knife" or item.stats.get("attach", []).has("knife") and not Inventory.is_pouch(item):
+		root.add_child(_part_box(Vector3(size.x, size.y * 0.62, size.z), Vector3(0, -size.y * 0.19, 0), colour.darkened(0.35), layers))
+		root.add_child(_part_box(Vector3(size.x * 0.7, size.y * 0.38, size.z * 0.8), Vector3(0, size.y * 0.31, 0), Color("26241f"), layers))
+		return root
+	root.add_child(_part_box(size, Vector3.ZERO, colour, layers))
+	root.add_child(_part_box(Vector3(size.x * 1.02, size.y * 0.28, size.z * 1.08), Vector3(0, size.y * 0.36, -size.z * 0.04), colour.darkened(0.25), layers))
+	if full and item.stats.get("accepts", []).has("radio"):
+		root.add_child(_part_box(Vector3(0.008, 0.16, 0.008), Vector3(size.x * 0.3, size.y * 0.5 + 0.08, 0), Color("1d1d1b"), layers))
+	return root
+
+
+static func _part_box(size: Vector3, pos: Vector3, colour: Color, layers: int) -> MeshInstance3D:
+	var mesh_instance := MeshInstance3D.new()
+	var box := BoxMesh.new()
+	box.size = size
+	var key := colour.to_html()
+	if not _pouch_materials.has(key):
+		var material := StandardMaterial3D.new()
+		material.albedo_color = colour
+		material.roughness = 0.95
+		_pouch_materials[key] = material
+	box.material = _pouch_materials[key]
+	mesh_instance.mesh = box
+	mesh_instance.position = pos
+	mesh_instance.layers = layers
+	return mesh_instance
 
 
 func _process(delta: float) -> void:
@@ -270,3 +351,7 @@ func _clear() -> void:
 	_gear.clear()
 	_held_key = &""
 	_held_dirty = true
+	if _pouches:
+		_pouches.queue_free()
+		_pouches = null
+	_pouch_key = ""

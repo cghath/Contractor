@@ -612,26 +612,82 @@ func _server_inventory_action(action: String, container: StringName, index: int,
 				var entry := inventory.remove_entry(container, index, list[index].count)
 				_server_spawn_in_front(entry.id, entry.count, entry.get("state", {}))
 		"move_entry":
+			# As much of the stack as fits goes (a mag pouch takes two of a stack of five).
 			var list: Array = inventory.containers.get(container, [])
-			if index < 0 or index >= list.size() or target == container:
+			if index < 0 or index >= list.size() or target == container or not inventory.containers.has(target):
 				return
-			var entry := inventory.remove_entry(container, index, list[index].count)
+			var item := ItemDB.get_item(list[index].id)
+			var n := mini(int(list[index].count), inventory.room_for(target, item))
+			if n <= 0:
+				var accepts := not Inventory.is_pouch_container(target) or Inventory.pouch_accepts(inventory.pouch_item(target), item)
+				_client_message.rpc_id(owner_peer(), ("Not enough room in %s" if accepts else "%s doesn't take that") % container_name(target))
+				return
+			var entry := inventory.remove_entry(container, index, n)
 			if not inventory.insert_entry(target, entry):
 				inventory.insert_entry(container, entry)  # put it back
-				_client_message.rpc_id(owner_peer(), "Not enough room in %s" % target)
+				_client_message.rpc_id(owner_peer(), "Not enough room in %s" % container_name(target))
 		"equip_entry":
 			var problem := inventory.entry_fit_problem(container, index)  # before equip_entry moves it
 			if not inventory.equip_entry(container, index):
 				_client_message.rpc_id(owner_peer(), problem if problem != "" else "No free slot for that")
 		"stow_slot":
+			# Into `target` if one is named (dragged onto a container), else the first with room.
 			var removed := inventory.unequip(slot)
 			if removed.is_empty():
 				return
-			for c in Inventory.CONTAINERS:
+			var order: Array[StringName] = []
+			if target != &"":
+				order.append(target)
+			order.append_array(Inventory.CONTAINERS)
+			for c in order:
 				if inventory.insert_entry(c, {"id": removed.id, "count": 1, "state": removed.state}):
 					return
 			inventory.take(removed.id, 1, removed.state)  # no room: straight back on
 			_client_message.rpc_id(owner_peer(), "No room to stow that")
+		# MOLLE: `target` (attach) and `slot` (detach, move, drop) name attach points of the
+		# worn carrier; a pouch's contents go with it.
+		"attach":
+			var list: Array = inventory.containers.get(container, [])
+			if index < 0 or index >= list.size():
+				return
+			var item := ItemDB.get_item(list[index].id)
+			var point := target if target != &"" else inventory.free_point_for(item)
+			var problem := inventory.attach_problem(item, point) if point != &"" else "No free point on the carrier fits %s" % item.name
+			if problem != "" or not inventory.attach_entry(container, index, point):
+				_client_message.rpc_id(owner_peer(), problem if problem != "" else "Can't attach that")
+		"detach":
+			var entry := inventory.detach(slot)
+			if entry.is_empty():
+				return
+			var order: Array[StringName] = []
+			if target != &"" and not Inventory.is_pouch_container(target):
+				order.append(target)
+			order.append_array(Inventory.CONTAINERS)
+			for c in order:
+				if inventory.insert_entry(c, entry):
+					return
+			inventory.attach(slot, entry)  # no room: back on the carrier
+			_client_message.rpc_id(owner_peer(), "No room to stow that")
+		"move_attachment":
+			var att := inventory.attachment(slot)
+			if att.is_empty():
+				return
+			var problem := inventory.attach_problem(ItemDB.get_item(StringName(att.id)), target)
+			if problem != "" or not inventory.move_attachment(slot, target):
+				_client_message.rpc_id(owner_peer(), problem if problem != "" else "Can't move that there")
+		"drop_attachment":
+			var entry := inventory.detach(slot)
+			if not entry.is_empty():
+				_server_spawn_in_front(entry.id, 1, entry.get("state", {}))
+
+
+## A container's name for messages and the inventory screen: "Vest", "Backpack", or a
+## pouch's ("Double M4 Mag Pouch").
+func container_name(container: StringName) -> String:
+	if Inventory.is_pouch_container(container):
+		var pouch := inventory.pouch_item(container)
+		return pouch.name if pouch else "that pouch"
+	return String(container).capitalize()
 
 
 @rpc("any_peer", "call_local", "reliable")
