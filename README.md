@@ -124,6 +124,19 @@ The command menu follows Arma 3's layout: 1 Move (return to formation, move ther
 hold fire), 5 Status, 6 Action (throw smoke or frag at the crosshair), 8 Formation (wedge, file, line, staggered
 column) and 0 Support. Target, Mount, Combat mode, Team and the support calls are listed but not built yet.
 
+**Decided, not built yet** (from the handoff, with changes agreed since):
+
+| Key | Action |
+|---|---|
+| F | Change fire mode |
+| X / Z / C | Crouch / prone / mount the weapon on a surface |
+| Q / E (hold, or double-tap to stay) | Lean left / right |
+| Caps Lock (hold) + W / S | Step stance up or down in fine steps (replaces the handoff's Ctrl+W/S) |
+| Caps Lock (hold) + A / D | Shift stance to the side (replaces the handoff's Ctrl+A/D) |
+| Left Ctrl (hold) | Interaction menu on objects and people (replaces Left Windows, which opens the Start menu) |
+| Self-interaction | Still to decide (was Ctrl+Left Windows) |
+
+
 ## Design decisions (locked)
 
 Updated 2026-10-10 to Captain's calls in [docs/contractor_handoff.md](docs/contractor_handoff.md),
