@@ -20,6 +20,8 @@ func _ready() -> void:
 	_test_organs()
 	_test_blood_loss_effects()
 	_test_impact()
+	_test_spall_wounds()
+	_test_limb_rifle_hits()
 	_test_consciousness()
 	_test_spo2()
 	_test_trauma()
@@ -177,23 +179,44 @@ func _test_fractures() -> void:
 	check(arm.reload_mult() > 1.0 and arm.sway_mult() > 2.0 and arm.can_sprint(), "broken arm: slow reloads and high sway (x%.1f)" % arm.sway_mult())
 
 
+## Sets a model's wound pain to `pain` and holds it long enough to knock out (PAIN_KNOCKOUT_S).
+func _hold_pain(m: WoundModel, pain: float) -> void:
+	m.pain_wounds = pain
+	_step(m, WoundModel.PAIN_KNOCKOUT_S + 0.1)
+
+
 func _test_pain_knockout() -> void:
 	print("Pain and knockout")
 	var m := _model()
+	m.npa = true
 	m.pain_wounds = 0.89
+	_step(m, 10.0)
+	check(not m.unconscious, "0.89 pain at full blood, held 10 s: still up")
+	m.reset()
+	m.npa = true
+	m.pain_wounds = 0.92
 	m.update_state(0.0)
-	check(not m.unconscious, "0.89 pain at full blood: still up")
-	m.pain_wounds = 0.9
-	m.update_state(0.0)
-	check(m.unconscious, "0.9 pain at full blood: knocked out")
+	check(not m.unconscious and m.unconscious_causes().is_empty(), "0.92 pain at full blood: a spike alone doesn't knock out")
+	_step(m, WoundModel.PAIN_KNOCKOUT_S - 0.3)
+	check(not m.unconscious, "still up %.1f s later" % (WoundModel.PAIN_KNOCKOUT_S - 0.3))
+	_step(m, 0.4)
+	check(m.unconscious and m.unconscious_causes() == [&"pain"], "held for %.0f s: knocked out (%s)" % [WoundModel.PAIN_KNOCKOUT_S, m.unconscious_causes()])
+	var dip := _model()
+	dip.npa = true
+	for i in 4:  # four spikes of 2 s with a moment under the threshold between them
+		dip.pain_wounds = 0.95
+		_step(dip, WoundModel.PAIN_KNOCKOUT_S - 1.0)
+		dip.pain_wounds = 0.5
+		_step(dip, 0.2)
+	check(not dip.unconscious, "spikes that drop under the threshold in between never add up")
 	m.reset()
 	m.blood = 0.7
 	m.pain_wounds = 0.59
-	m.update_state(0.0)
-	check(not m.unconscious and absf(m.knockout_threshold() - 0.6) < 0.001, "30% lost: the threshold is 0.6")
-	m.pain_wounds = 0.61
-	m.update_state(0.0)
-	check(m.unconscious, "0.61 pain at 30% lost: knocked out")
+	_step(m, 10.0)
+	check(not m.unconscious and absf(m.knockout_threshold() - 0.6) < 0.01, "30% lost: the threshold is 0.6")
+	m.pain_wounds = 0.65
+	_step(m, WoundModel.PAIN_KNOCKOUT_S + 0.1)
+	check(m.unconscious and m.unconscious_causes().has(&"pain"), "0.65 pain held at 30%% lost: knocked out (%s)" % [m.unconscious_causes()])
 	m.reset()
 	m.blood = 0.85
 	check(absf(m.knockout_threshold() - 0.75) < 0.001, "15%% lost: threshold %.2f" % m.knockout_threshold())
@@ -201,8 +224,7 @@ func _test_pain_knockout() -> void:
 	var pain_wake: float = WoundModel.WAKE_S[&"pain"]
 	m.reset()
 	m.npa = true
-	m.pain_wounds = 0.95
-	m.update_state(0.0)
+	_hold_pain(m, 0.95)
 	check(m.unconscious_causes() == [&"pain"], "out from pain alone (%s)" % [m.unconscious_causes()])
 	m.pain_wounds = 0.3
 	_step(m, pain_wake - 0.5)
@@ -213,20 +235,18 @@ func _test_pain_knockout() -> void:
 	for i in 100:
 		var t := _model(100 + i)
 		t.npa = true
-		t.pain_wounds = 0.95
-		t.update_state(0.0)
+		_hold_pain(t, 0.95)
 		t.pain_wounds = 0.3
 		_step(t, pain_wake + 0.3)
 		woke += 0 if t.unconscious else 1
 	check(woke == 100, "every one of 100 comes round on time: no wake roll (%d)" % woke)
 	var relapse := _model(5)
 	relapse.npa = true
-	relapse.pain_wounds = 0.95
-	relapse.update_state(0.0)
+	_hold_pain(relapse, 0.95)
 	relapse.pain_wounds = 0.3
 	_step(relapse, 5.0)
 	relapse.pain_wounds = 0.95
-	_step(relapse, 1.0)
+	_step(relapse, WoundModel.PAIN_KNOCKOUT_S + 0.1)
 	check(relapse.unconscious and relapse.wake_left == 0.0, "a cause coming back stops the countdown")
 	relapse.pain_wounds = 0.3
 	_step(relapse, pain_wake - 1.0)
@@ -334,13 +354,32 @@ func _test_impact() -> void:
 	var stack := _model()
 	stack.add_impact(Vitals.CHEST, Vitals.FULL_POWER, 300.0, -1.0)
 	stack.add_impact(Vitals.CHEST, Vitals.FULL_POWER, 300.0, -1.0)
-	check(is_equal_approx(stack.impact, 0.6), "impact stacks (%.2f)" % stack.impact)
+	var two_stops := minf(2.0 * WoundModel.PLATE_IMPACT_PAIN[Vitals.FULL_POWER], WoundModel.PLATE_IMPACT_MAX)
+	check(is_equal_approx(stack.impact, two_stops), "impact stacks (%.2f)" % stack.impact)
+	for i in 20:
+		stack.add_impact(Vitals.CHEST, Vitals.FULL_POWER, 10.0, -1.0)
+	stack.npa = true
+	_step(stack, 10.0)
+	check(stack.impact <= WoundModel.PLATE_IMPACT_MAX + 0.001 and not stack.unconscious,
+		"twenty .308 plate stops: impact capped at %.2f, still conscious (pain %.2f)" % [WoundModel.PLATE_IMPACT_MAX, stack.pain()])
+	check(WoundModel.PLATE_IMPACT_MAX + WoundModel.PAIN_FLOOR_RIB < WoundModel.KNOCKOUT_PAIN_FULL - 0.3, "plate impact can't come near the knockout threshold at full blood")
 	stack.advance(300.0)
 	check(stack.impact < 0.01, "and fades over about 5 minutes")
-	var two := _model(11)
-	two.add_impact(Vitals.HEAD, Vitals.FULL_POWER, 300.0, -1.0)
-	two.add_impact(Vitals.HEAD, Vitals.FULL_POWER, 300.0, -1.0)
-	check(two.unconscious and not two.dead, "two .308 helmet stops from far off: knocked out, alive (pain %.2f)" % two.pain())
+	# A helmet stop's impact isn't capped (design doc table): three .308 stops, out from the pain.
+	var helmets := _model(11)
+	for i in 3:
+		helmets.add_impact(Vitals.HEAD, Vitals.FULL_POWER, 300.0, -1.0)
+	helmets.knockout_left = 0.0  # leave out any concussion knockout: the pain alone
+	helmets.npa = true
+	_step(helmets, WoundModel.PAIN_KNOCKOUT_S + 0.1)
+	check(helmets.unconscious and helmets.unconscious_causes().has(&"pain") and not helmets.dead,
+		"three .308 helmet stops from far off: knocked out by the pain, alive (pain %.2f)" % helmets.pain())
+	# Plates on top of a helmet stop raise the impact only up to their cap.
+	var mixed := _model()
+	mixed.add_impact(Vitals.HEAD, Vitals.PISTOL, 300.0, -1.0)
+	mixed.add_impact(Vitals.CHEST, Vitals.INTERMEDIATE, 300.0, -1.0)
+	check(is_equal_approx(mixed.impact, WoundModel.HELMET_IMPACT_PAIN[Vitals.PISTOL] + WoundModel.PLATE_IMPACT_PAIN[Vitals.INTERMEDIATE]),
+		"a helmet and a plate stop add up under the cap (%.2f)" % mixed.impact)
 	# Concussion odds by class.
 	for round_class: StringName in WoundModel.CONCUSSION_CHANCE:
 		var concussed := 0
@@ -360,20 +399,27 @@ func _test_impact() -> void:
 	check(first <= WoundModel.CONCUSSION_KO_S.y + WoundModel.CONCUSSION_S and conc.concussion_left >= 2.0 * WoundModel.CONCUSSION_S,
 		"a second concussion in the same fight lasts twice as long (%.0f s, then %.0f s)" % [first, conc.concussion_left])
 	check(conc.turn_mult() < 1.0 and conc.sway_mult() > 1.5, "concussion: sway and slow turning")
-	# Cracked ribs only within range.
+	# Cracked ribs only within range, likelier close in.
 	for round_class: StringName in WoundModel.RIB_RANGE_M:
 		var reach: float = WoundModel.RIB_RANGE_M[round_class]
-		var inside := 0
+		var close_in := 0
+		var halfway := 0
 		var outside := 0
 		var m := _model(19)
-		for i in 200:
+		for i in 2000:
 			m.reset()
-			m.add_impact(Vitals.CHEST, round_class, reach - 1.0, -1.0)
-			inside += 1 if m.has_kind("rib") else 0
+			m.add_impact(Vitals.CHEST, round_class, 1.0, -1.0)
+			close_in += 1 if m.has_kind("rib") else 0
+			m.reset()
+			m.add_impact(Vitals.CHEST, round_class, reach * 0.5, -1.0)
+			halfway += 1 if m.has_kind("rib") else 0
 			m.reset()
 			m.add_impact(Vitals.CHEST, round_class, reach + 1.0, -1.0)
 			outside += 1 if m.has_kind("rib") else 0
-		check(inside > 0 and outside == 0, "%s: ribs crack within %d m (%d/200), never beyond" % [round_class, reach, inside])
+		var odds: float = WoundModel.RIB_CRACK_CHANCE[round_class]
+		check(absf(close_in / 2000.0 - odds) < 0.03 and absf(halfway / 2000.0 - odds * 0.5) < 0.03 and outside == 0,
+			"%s: ribs crack %.0f%% point-blank, %.0f%% at %d m, never beyond %d m" % [round_class, close_in / 20.0, halfway / 20.0, reach * 0.5, reach])
+	check(WoundModel.rib_crack_chance(Vitals.INTERMEDIATE, 50.0) <= 0.12, "a 5.56 plate stop at 50 m cracks a rib about one time in ten (%.0f%%)" % (WoundModel.rib_crack_chance(Vitals.INTERMEDIATE, 50.0) * 100.0))
 	var rib := _model()
 	rib.add_impact(Vitals.CHEST, Vitals.PISTOL, 5.0, -1.0)
 	while not rib.has_kind("rib"):
@@ -399,8 +445,85 @@ func _test_impact() -> void:
 	check(fatal.call(Vitals.CHEST, Vitals.FULL_POWER, 5.0, -1.0) == 0, "a plate stop alone never kills")
 	var through := _vitals()
 	through.server_impact(Vitals.CHEST, Vitals.FULL_POWER, 10.0, 3500.0)
-	check(through.wound_list().all(func(w: Dictionary) -> bool: return w.kind == "rib") and through.pain() > 0.25, "server_impact through Vitals (%s)" % through.condition_text())
+	check(through.wound_list().all(func(w: Dictionary) -> bool: return w.kind == "rib") and through.pain() >= WoundModel.PLATE_IMPACT_PAIN[Vitals.FULL_POWER] - 0.001,
+		"server_impact through Vitals (%s, pain %.2f)" % [through.condition_text(), through.pain()])
 	through.queue_free()
+
+
+## Steel spall (Captain's playtest): a scratch that doesn't bleed, now and then a light wound;
+## never a vessel, organ or bone, and never enough pain to matter.
+func _test_spall_wounds() -> void:
+	print("Spall wounds are minor")
+	var m := _model(29)
+	var scratches := 0
+	var light := 0
+	var other := 0
+	var max_pain := 0.0
+	var max_trauma := 0.0
+	for i in 1000:
+		m.reset()
+		var added := m.add_hit(Vitals.FOREARM_L, {"graze": false, "depth": 0.1, "vessels": [{"name": &"radial_l", "kind": BodyMap.ARTERIAL, "rate": 0.5, "share": 1.0}],
+			"organs": [], "bones": [&"forearm_bones_l"]}, WoundModel.SPALL)
+		max_pain = maxf(max_pain, m.pain())
+		max_trauma = maxf(max_trauma, m.trauma_level)
+		if added.size() != 1 or m.wounds.size() != 1:
+			other += 1
+		elif m.wounds[0].kind == "graze" and float(m.wounds[0].rate) == 0.0:
+			scratches += 1
+		elif m.wounds[0].kind == "muscle" and is_equal_approx(float(m.wounds[0].rate), WoundModel.SPALL_LIGHT_RATE):
+			light += 1
+		else:
+			other += 1
+	check(other == 0 and absf(light / 1000.0 - WoundModel.SPALL_LIGHT_CHANCE) < 0.04,
+		"one wound each, whatever the channel: %d scratches, %d light wounds, %d anything else" % [scratches, light, other])
+	check(max_pain <= WoundModel.PAIN_SPALL_LIGHT.y + 0.001 and max_trauma < 0.05, "at most %.2f pain and %.2f trauma" % [max_pain, max_trauma])
+	m.reset()
+	m.add_hit(Vitals.FACE, {"graze": false, "depth": 0.1, "vessels": [], "organs": [&"brain"], "bones": []}, WoundModel.SPALL)
+	check(not m.dead and m.wounds.size() == 1, "spall to the face never reaches the brain")
+
+
+## Captain's playtest: one rifle round through a limb hurts and slows, but doesn't knock a
+## healthy soldier out; the blood does that later if nobody stops it.
+func _test_limb_rifle_hits() -> void:
+	print("A rifle round through a limb")
+	var limbs: Array[StringName] = [Vitals.THIGH_L, Vitals.THIGH_R, Vitals.SHIN_L, Vitals.UPPER_ARM_L, Vitals.UPPER_ARM_R, Vitals.FOREARM_R]
+	var vitals := _vitals()
+	for round_class: StringName in [RIFLE, Vitals.FULL_POWER]:
+		var down := 0
+		var hurt := true
+		var slowed := 0
+		var max_pain := 0.0
+		var by_blood := 0
+		for i in 300:
+			vitals.server_reset_health()
+			vitals.rng.seed = 900 + i
+			var part: StringName = limbs[i % limbs.size()]
+			var box: Array = BodyMap.PART_BOXES[part][0]
+			var offset := Vector3((vitals.rng.randf() - 0.5) * box[1].x * 0.6, (vitals.rng.randf() - 0.5) * box[1].y * 0.8, -box[1].z * 0.5)
+			_shoot(vitals, part, box[0] + offset, round_class)
+			max_pain = maxf(max_pain, vitals.pain())
+			hurt = hurt and vitals.pain() >= WoundModel.PAIN_SEVERE.x * 0.99 and vitals.sway_mult() > 1.2
+			if vitals.speed_mult() < 1.0 or vitals.reload_mult() > 1.0:
+				slowed += 1
+			vitals.server_advance(30.0)
+			if vitals.downed:
+				down += 1
+				by_blood += 1 if vitals.why_unconscious().has(&"blood") else 0
+		check(down == 0, "%s: none of 300 knocked out within 30 s (%d down, %d from blood)" % [round_class, down, by_blood])
+		check(hurt and max_pain <= WoundModel.PAIN_SEVERE.y + 0.001, "%s: every one hurts (pain %.2f to %.2f, more sway)" % [round_class, WoundModel.PAIN_SEVERE.x, max_pain])
+		check(slowed > 100, "%s: most slow you down: a broken bone (%d of 300)" % [round_class, slowed])
+	# Two rifle wounds held are serious: most go down from the pain within a few seconds.
+	var two := 0
+	for i in 100:
+		vitals.server_reset_health()
+		vitals.rng.seed = 1300 + i
+		vitals._model.npa = true
+		_shoot(vitals, Vitals.THIGH_L, Vector3(-0.11, 0.62, -0.1))
+		_shoot(vitals, Vitals.UPPER_ARM_R, Vector3(0.28, 1.2, -0.06))
+		vitals.server_advance(WoundModel.PAIN_KNOCKOUT_S + 2.0)
+		two += 1 if vitals.downed else 0
+	check(two >= 50, "two rifle wounds: %d of 100 out from the pain within %.0f s" % [two, WoundModel.PAIN_KNOCKOUT_S + 2.0])
+	vitals.queue_free()
 
 
 ## Every cause of unconsciousness, as Vitals reports it, and coming round once they're gone.
@@ -446,7 +569,7 @@ func _test_consciousness() -> void:
 	vitals.woke.connect(func() -> void: woke[0] = true)
 	vitals._model.npa = true
 	vitals._model.pain_wounds = 0.95
-	vitals.server_advance(0.1)
+	vitals.server_advance(WoundModel.PAIN_KNOCKOUT_S + 0.1)
 	check(vitals.downed and vitals.why_unconscious() == [&"pain"] and vitals.wake_eta() < 0.0, "Vitals: down, why_unconscious %s, not coming round yet" % [vitals.why_unconscious()])
 	vitals._model.pain_wounds = 0.3
 	vitals.server_advance(0.2)

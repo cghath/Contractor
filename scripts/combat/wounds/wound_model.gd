@@ -6,9 +6,10 @@ extends RefCounted
 ## breathing decide when a soldier slows, goes unconscious, arrests or dies.
 ##
 ## Consciousness follows the body (there is no revive): a casualty is out while any cause in
-## unconscious_causes() holds (low SpO2, pain at the knockout threshold, 40% of blood lost,
-## cardiac arrest, a concussion knockout, morphine sedation, total trauma over its limit) and
-## comes round on their own once every cause has stayed gone for a short time (WAKE_S).
+## unconscious_causes() holds (low SpO2, pain held at the knockout threshold for a few
+## seconds, 40% of blood lost, cardiac arrest, a concussion knockout, morphine sedation, total
+## trauma over its limit) and comes round on their own once every cause has stayed gone for a
+## short time (WAKE_S).
 ## Treatment helps by removing causes: a tourniquet stops the slide, morphine eases pain, an
 ## NPA clears the airway so SpO2 recovers.
 ##
@@ -48,12 +49,23 @@ const MUSCLE_CLASS_MULT := {&"pistol": 0.7, &"intermediate": 1.0, &"full_power":
 ## Fracture chance when a bone is hit (design doc).
 const FRACTURE_CHANCE := {&"pistol": 0.25, &"intermediate": 0.70, &"full_power": 0.95, &"fragment": 0.20}
 
-## Pain added per hit, as [min, max] (design doc: arterial or rifle 0.6-0.9, graze 0.1-0.2;
-## pistol and fragment proposed).
-const PAIN_SEVERE := Vector2(0.6, 0.9)
-const PAIN_PISTOL := Vector2(0.3, 0.5)
+## Pain added per hit, as [min, max]. Captain's playtest call (overrides the design doc's
+## 0.6-0.9 for a rifle or arterial wound): one rifle round through a limb hurts but doesn't
+## knock a healthy soldier out, so a single severe wound stays well under the 0.9 threshold
+## at full blood and only knocks out with real blood loss (about 25% lost and more) or a
+## second serious wound. Graze 0.1-0.2 is the design doc's; pistol and fragment proposed.
+const PAIN_SEVERE := Vector2(0.45, 0.65)
+const PAIN_PISTOL := Vector2(0.25, 0.4)
 const PAIN_FRAGMENT := Vector2(0.1, 0.25)
 const PAIN_GRAZE := Vector2(0.1, 0.2)
+## Spall from a steel plate (round class SPALL, ArmorRules.server_spall): a scratch that
+## doesn't bleed, or with SPALL_LIGHT_CHANCE a light muscle wound. Never deeper: no vessels,
+## organs or bones.
+const SPALL := &"spall"
+const SPALL_LIGHT_CHANCE := 0.2
+const SPALL_LIGHT_RATE := 0.05
+const PAIN_SPALL_SCRATCH := Vector2(0.02, 0.05)
+const PAIN_SPALL_LIGHT := Vector2(0.08, 0.15)
 ## Untreated fractures keep pain at least this high (a broken leg is heavy pain); a fracture
 ## adds nothing on top of the hit's own pain, so a limb hit alone stays under the knockout
 ## threshold at full blood. A cracked rib keeps its floor until morphine; its stamina penalty
@@ -65,10 +77,13 @@ const PAIN_FLOOR_RIB := 0.15
 const PAIN_FADE_PER_S := 1.0 / 900.0
 const IMPACT_FADE_PER_S := 1.0 / 300.0
 ## Knockout: pain at or over the threshold, 0.9 at full blood falling linearly to 0.6 at
-## 30% lost; at 40% lost you're out regardless.
+## 30% lost; at 40% lost you're out regardless. Captain's playtest call: pain has to stay
+## at or over the threshold for PAIN_KNOCKOUT_S before it knocks anyone out (no instant
+## spike); dropping under it starts the count over.
 const KNOCKOUT_PAIN_FULL := 0.9
 const KNOCKOUT_PAIN_LOW := 0.6
 const KNOCKOUT_PAIN_LOW_AT := 0.30
+const PAIN_KNOCKOUT_S := 3.0
 ## Waking (proposed): once every cause of unconsciousness is gone, the casualty comes round
 ## after it has stayed gone this long, by the worst cause of this spell out (milder causes
 ## are quicker). No dice.
@@ -203,8 +218,13 @@ const BANDAGED_KINDS: Array[String] = ["venous", "muscle", "graze"]
 const TIMERS: Array[String] = ["arrest_left", "concussion_left", "knockout_left", "winded_left", "stagger_left",
 	"treating_left", "wake_left"]
 
-## Impact (shock) from rounds armor stopped (design doc table).
-const PLATE_IMPACT_PAIN := {&"pistol": 0.05, &"intermediate": 0.15, &"full_power": 0.3}
+## Impact (shock) from rounds armor stopped. Helmet values are the design doc's table. Plate
+## (torso) values are Captain's playtest call: a plate stop is a modest bruise, and plate
+## stops (with their cracked ribs) raise impact only up to PLATE_IMPACT_MAX, far under the
+## knockout threshold, so rounds stopped by plates never knock anyone out by themselves
+## however many land. Stagger and being winded still come with every stop.
+const PLATE_IMPACT_PAIN := {&"pistol": 0.03, &"intermediate": 0.08, &"full_power": 0.15}
+const PLATE_IMPACT_MAX := 0.35
 const HELMET_IMPACT_PAIN := {&"pistol": 0.15, &"intermediate": 0.3, &"full_power": 0.45}
 const CONCUSSION_CHANCE := {&"pistol": 0.1, &"intermediate": 0.4, &"full_power": 0.8}
 const STAGGER_S := 0.8            # intermediate plate stop: brief stagger
@@ -215,10 +235,13 @@ const CONCUSSION_KO_CHANCE := 0.5
 const CONCUSSION_KO_S := Vector2(5.0, 20.0)
 const CONCUSSION_S := 60.0
 const SAME_FIGHT_S := 600.0
-## Cracked rib from a plate stop, only within these ranges (design doc), at these odds (proposed).
+## Cracked rib from a plate stop, only within these ranges (design doc). The odds are these
+## at point-blank range and fall linearly to nothing at the range's end (proposed, retuned
+## after Captain's playtest: a 5.56 stop at 50 m cracks a rib about one time in ten).
+## A crack adds RIB_PAIN of impact (inside PLATE_IMPACT_MAX) and keeps PAIN_FLOOR_RIB.
 const RIB_RANGE_M := {&"pistol": 30.0, &"intermediate": 100.0, &"full_power": 200.0}
-const RIB_CRACK_CHANCE := {&"pistol": 0.3, &"intermediate": 0.5, &"full_power": 0.7}
-const RIB_PAIN := 0.1
+const RIB_CRACK_CHANCE := {&"pistol": 0.1, &"intermediate": 0.2, &"full_power": 0.4}
+const RIB_PAIN := 0.05
 ## A helmet stop is fatal only where it would be in real life: a full-power rifle round
 ## arriving with at least this energy (or, energy unknown, within this range), at these odds.
 const HELMET_FATAL_ENERGY_J := 2400.0
@@ -269,6 +292,7 @@ var _heart_arrest_in := -1.0
 var _spell_wake_s := 0.0        # how long the worst cause of this spell out takes to wake from
 var _low_spo2_s := 0.0          # time spent under SPO2_ARREST
 var _out_s := 0.0               # how long this spell out has lasted (host only)
+var _pain_over_s := 0.0         # how long pain has stayed at or over the knockout threshold
 
 
 # --- Queries --------------------------------------------------------------------------
@@ -301,6 +325,11 @@ func pain() -> float:
 
 func knockout_threshold() -> float:
 	return lerpf(KNOCKOUT_PAIN_FULL, KNOCKOUT_PAIN_LOW, clampf(lost() / KNOCKOUT_PAIN_LOW_AT, 0.0, 1.0))
+
+
+## Pain is at or over the knockout threshold and has stayed there for PAIN_KNOCKOUT_S.
+func pain_knocks_out() -> bool:
+	return pain() >= knockout_threshold() and _pain_over_s >= PAIN_KNOCKOUT_S - 0.001
 
 
 ## Untreated and with a bleed rate (tourniquets aside: see rate_now).
@@ -371,7 +400,8 @@ func is_healing() -> bool:
 
 
 ## Why the body is (or would be) unconscious right now, most serious first: &"arrest",
-## &"blood" (40% lost), &"spo2", &"pain", &"trauma", &"morphine" (sedation), &"knockout".
+## &"blood" (40% lost), &"spo2", &"pain" (held over the threshold: pain_knocks_out),
+## &"trauma", &"morphine" (sedation), &"knockout".
 ## Empty means nothing keeps it out (if it's still out, it's coming round: wake_left).
 func unconscious_causes() -> Array[StringName]:
 	var causes: Array[StringName] = []
@@ -383,7 +413,7 @@ func unconscious_causes() -> Array[StringName]:
 		causes.append(&"blood")
 	if spo2 < SPO2_UNCONSCIOUS:
 		causes.append(&"spo2")
-	if pain() >= knockout_threshold():
+	if pain_knocks_out():
 		causes.append(&"pain")
 	if trauma_level >= TRAUMA_UNCONSCIOUS:
 		causes.append(&"trauma")
@@ -702,9 +732,13 @@ func _segment_factor(segment: StringName) -> float:
 # --- Host-side changes ----------------------------------------------------------------
 
 ## A round or fragment reached `part` along `channel` (BodyMap.trace). Returns the new wounds.
+## Steel spall (round class SPALL) ignores the channel: a scratch or a light wound (add_spall).
 func add_hit(part: StringName, channel: Dictionary, round_class: StringName) -> Array[Dictionary]:
 	var added: Array[Dictionary] = []
 	if dead:
+		return added
+	if round_class == SPALL:
+		added.append(add_spall(part))
 		return added
 	var rifle := round_class == &"intermediate" or round_class == &"full_power"
 	if part == &"head" and round_class != &"fragment":
@@ -746,7 +780,24 @@ func add_hit(part: StringName, channel: Dictionary, round_class: StringName) -> 
 	return added
 
 
-## A round armor stopped still lands on `part` (design doc impact table).
+## Spall off a steel plate reaches `part`: usually a scratch that doesn't bleed, with
+## SPALL_LIGHT_CHANCE a light muscle wound (a bandage fixes it). Returns the wound.
+func add_spall(part: StringName) -> Dictionary:
+	var w: Dictionary
+	var pain_range := PAIN_SPALL_SCRATCH
+	if rng.randf() < SPALL_LIGHT_CHANCE:
+		w = _add_wound(part, "muscle", SPALL_LIGHT_RATE)
+		pain_range = PAIN_SPALL_LIGHT
+	else:
+		w = _add_wound(part, "graze", 0.0)
+	pain_wounds = minf(pain_wounds + rng.randf_range(pain_range.x, pain_range.y), 1.0)
+	update_state(0.0)
+	return w
+
+
+## A round armor stopped still lands on `part` (impact table above). Plate (torso) stops add
+## their impact only up to PLATE_IMPACT_MAX, a cracked rib's included; helmet stops add theirs
+## in full and can concuss (or, from a full-power round close enough, kill).
 func add_impact(part: StringName, round_class: StringName, distance: float, energy_j: float) -> void:
 	if dead:
 		return
@@ -760,18 +811,29 @@ func add_impact(part: StringName, round_class: StringName, distance: float, ener
 		if rng.randf() < float(CONCUSSION_CHANCE.get(round_class, 0.0)):
 			_concuss()
 	else:
-		impact += float(PLATE_IMPACT_PAIN.get(round_class, 0.0))
+		var added := float(PLATE_IMPACT_PAIN.get(round_class, 0.0))
 		if round_class == &"intermediate":
 			stagger_left = maxf(stagger_left, STAGGER_S)
 		elif round_class == &"full_power":
 			stagger_left = maxf(stagger_left, STAGGER_S)
 			winded_left = maxf(winded_left, WINDED_S)
-		if distance <= float(RIB_RANGE_M.get(round_class, -1.0)) and rng.randf() < float(RIB_CRACK_CHANCE.get(round_class, 0.0)):
+		var rib_chance := rib_crack_chance(round_class, distance)
+		if rib_chance > 0.0 and rng.randf() < rib_chance:
 			if not has_kind("rib"):
 				_add_wound(&"chest", "rib", 0.0, &"rib")
-			impact += RIB_PAIN
+			added += RIB_PAIN
+		impact = maxf(impact, minf(impact + added, PLATE_IMPACT_MAX))
 	impact = minf(impact, 1.0)
 	update_state(0.0)
+
+
+## Chance that a plate stop of `round_class` from `distance` metres cracks a rib: the
+## point-blank odds falling linearly to 0 at the end of the class's range.
+static func rib_crack_chance(round_class: StringName, distance: float) -> float:
+	var reach := float(RIB_RANGE_M.get(round_class, 0.0))
+	if reach <= 0.0 or distance > reach:
+		return 0.0
+	return float(RIB_CRACK_CHANCE.get(round_class, 0.0)) * clampf(1.0 - distance / reach, 0.0, 1.0)
 
 
 ## Generic trauma (the legacy damage call): pain and an immediate share of blood lost.
@@ -817,6 +879,7 @@ func reset() -> void:
 	_spell_wake_s = 0.0
 	_low_spo2_s = 0.0
 	_out_s = 0.0
+	_pain_over_s = 0.0
 
 
 ## Host only: steps the simulation by `dt` seconds.
@@ -868,13 +931,15 @@ func advance(dt: float) -> void:
 
 ## Re-evaluates consciousness and arrest from the current state. Out while any cause holds;
 ## once none does, the casualty comes round after WAKE_S of the worst cause this spell (the
-## countdown starts over if a cause comes back). `dt` runs that countdown.
+## countdown starts over if a cause comes back). `dt` runs that countdown, and the time pain
+## has stayed at or over the knockout threshold (pain_knocks_out).
 func update_state(dt: float) -> void:
 	if dead:
 		return
 	if not arrest and lost() >= ARREST_LOST:
 		_start_arrest()
 	trauma_level = maxf(trauma_level, trauma_target())  # new injuries count at once
+	_pain_over_s = _pain_over_s + dt if pain() >= knockout_threshold() else 0.0
 	var causes := unconscious_causes()
 	if not causes.is_empty():
 		unconscious = true
@@ -898,14 +963,15 @@ func update_state(dt: float) -> void:
 ## Wounds are [part, kind, rate, treated, name, flags (1 packed, 2 tension)]; "q" holds the
 ## tourniquets as {part: [count, rushed]}; "o" is SpO2, "m" and "d" morphine in the blood and
 ## still going in, "x" total trauma. Flag 64 (coming round) only makes the start of the wake
-## countdown go out at once; clients read the countdown itself from "t".
+## countdown go out at once; clients read the countdown itself from "t". Flag 128: pain has
+## been held over the knockout threshold long enough (pain_knocks_out).
 func to_net() -> Dictionary:
 	var list: Array = []
 	for w in wounds:
 		var wound_flags := (1 if w.get("packed", false) else 0) | (2 if w.get("tension", false) else 0)
 		list.append([String(w.part), w.kind, snappedf(float(w.rate), 0.001), 1 if w.treated else 0, String(w.name), wound_flags])
 	var flags := (1 if unconscious else 0) | (2 if arrest else 0) | (4 if dead else 0) | (16 if npa else 0) | (32 if airway_blocked else 0) \
-		| (64 if wake_left > 0.0 else 0)
+		| (64 if wake_left > 0.0 else 0) | (128 if _pain_over_s >= PAIN_KNOCKOUT_S - 0.001 else 0)
 	var timers := {}
 	for key: String in TIMERS:
 		if float(get(key)) > 0.0:
@@ -933,6 +999,7 @@ func apply_net(state: Dictionary) -> void:
 	dead = flags & 4 != 0
 	npa = flags & 16 != 0
 	airway_blocked = flags & 32 != 0
+	_pain_over_s = PAIN_KNOCKOUT_S if flags & 128 != 0 else 0.0
 	wounds.clear()
 	for entry: Array in state.get("w", []):
 		var wound_flags := int(entry[5]) if entry.size() > 5 else 0

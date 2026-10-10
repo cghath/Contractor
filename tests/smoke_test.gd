@@ -161,11 +161,16 @@ func _test_ballistics() -> void:
 	await get_tree().physics_frame
 	await get_tree().physics_frame
 	var rifle := ItemDB.get_item(&"m4a1")
+	dummy.vitals.rng.seed = 7  # the impact's dice (a cracked rib at 5 m is possible): repeatable
+	ArmorRules.seed_rng(7)
 	var aim := Vector3(0, plate_y, 0) - shooter.position
 	var first := Ballistics.fire(shooter, shooter.position, aim.normalized(), rifle)
 	check(first.result == "plate", "first shot hits the plate (%s)" % first.result)
 	# A stopped round can still crack a rib (impact), but makes no wound of its own.
-	check(dummy.vitals.wound_list().all(func(w: Dictionary) -> bool: return w.kind == "rib"), "plate protected the body")
+	dummy.vitals.server_advance(WoundModel.PAIN_KNOCKOUT_S + 1.0)
+	check(dummy.vitals.wound_list().all(func(w: Dictionary) -> bool: return w.kind == "rib") and dummy.vitals.bleed_rate() == 0.0
+		and dummy.vitals.is_up() and dummy.vitals.pain() <= WoundModel.PLATE_IMPACT_MAX + WoundModel.PAIN_FLOOR_RIB,
+		"plate protected the body (%s, pain %.2f)" % [dummy.vitals.condition_text(), dummy.vitals.pain()])
 	var second := Ballistics.fire(shooter, shooter.position, aim.normalized(), rifle)
 	check(second.result == "body", "second shot through the hole hits the body (%s)" % second.result)
 	check(not dummy.vitals.wound_list().is_empty(), "body was wounded (%s)" % dummy.vitals.condition_text())
@@ -180,8 +185,9 @@ func _test_ballistics() -> void:
 	await get_tree().physics_frame
 	await get_tree().physics_frame
 	shooter.position = Vector3(0, 1.73, -5)
+	dummy.vitals.rng.seed = 7  # a pistol helmet stop can concuss (10%): repeatable dice
 	var dome := Ballistics.fire(shooter, shooter.position, Vector3.BACK, ItemDB.get_item(&"m17"))
-	check(dome.result == "plate" and dummy.vitals.wound_list().is_empty() and dummy.vitals.is_up(), "helmet stopped a pistol round to the forehead (%s)" % dome.result)
+	check(dome.result == "plate" and dummy.vitals.wound_list().is_empty() and not dummy.vitals.is_dead(), "helmet stopped a pistol round to the forehead (%s)" % dome.result)
 	check(dummy.gear.armor_integrity(&"helmet") >= 0.0 and dummy.gear.armor_integrity(&"helmet") < 1.0, "helmet chipped to %.0f%%" % (dummy.gear.armor_integrity(&"helmet") * 100.0))
 	shooter.position = Vector3(0, 1.58, -5)
 	var face := Ballistics.fire(shooter, shooter.position, Vector3.BACK, rifle)
@@ -339,9 +345,9 @@ func _test_downed() -> void:
 	var knocked := Vitals.new()
 	add_child(knocked)
 	knocked.woke.connect(func() -> void: events.append("woke"))
-	knocked.server_impact(Vitals.HEAD, Vitals.FULL_POWER, 400.0)
-	knocked.server_impact(Vitals.HEAD, Vitals.FULL_POWER, 400.0)  # two helmet stops: knocked out by the pain
-	knocked.server_advance(1.0)
+	for i in 3:
+		knocked.server_impact(Vitals.HEAD, Vitals.FULL_POWER, 400.0)  # three helmet stops: knocked out by the pain
+	knocked.server_advance(WoundModel.PAIN_KNOCKOUT_S + 1.0)
 	knocked.server_apply_treatment(&"npa", Vitals.HEAD)
 	knocked.server_apply_treatment(&"morphine", Vitals.TORSO)
 	knocked.server_advance(WoundModel.MORPHINE_ABSORB_S + 25.0)

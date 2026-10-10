@@ -165,7 +165,7 @@ func _server_after_stop(hit_position: Vector3, direction: Vector3, weapon: ItemD
 		return
 	vitals.server_impact(part_behind(hit_position), round_class, distance, Ballistics.energy_at(weapon, distance))
 	if ArmorRules.material(item) == ArmorRules.STEEL and not bool(item.stats.get("spall_coated", false)):
-		ArmorRules.server_spall(body, vitals, hit_position, direction)
+		ArmorRules.server_spall(body, vitals, hit_position, direction, round_class)
 
 
 ## First solid voxel a round entering at `hit_position` meets, or MISS if it reaches the
