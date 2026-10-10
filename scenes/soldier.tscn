@@ -102,6 +102,12 @@ properties/5/replication_mode = 2
 properties/6/path = NodePath(".:color_team")
 properties/6/spawn = true
 properties/6/replication_mode = 2
+properties/7/path = NodePath("Model:carry_net")
+properties/7/spawn = true
+properties/7/replication_mode = 2
+properties/8/path = NodePath("Model:action_net")
+properties/8/spawn = true
+properties/8/replication_mode = 2
 
 [node name="Soldier" type="CharacterBody3D"]
 collision_layer = 16

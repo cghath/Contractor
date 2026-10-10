@@ -112,7 +112,8 @@ func _physics_process(delta: float) -> void:
 	_update_focus()
 	_update_aim(delta)
 	_try_fire()
-	body.view_model.rotation.x = move_toward(body.view_model.rotation.x, -0.7 if body.is_reloading else 0.0, delta * 6.0)
+	var tilt := minf(-0.7 if body.is_reloading else 0.0, -CharacterModel.VIEW_LOWER_PITCH * body.model.view_lower())
+	body.view_model.rotation.x = move_toward(body.view_model.rotation.x, tilt, delta * 6.0)
 	# Settle sway after a stop (W3, SoldierMovement.weapon_sway).
 	var sway := body.movement.weapon_sway()
 	body.view_model.rotation.y = sway.x
@@ -201,7 +202,7 @@ func _update_interaction(delta: float) -> void:
 
 func _try_fire() -> void:
 	if not _captured() or body.inventory.hands != &"" or not body.vitals.is_up() or interaction.is_open() \
-			or body.carry_mode == Soldier.CARRY:  # both hands on the casualty
+			or body.carry_mode != &"":  # both hands on the casualty (carrying, or dragging by the straps)
 		return
 	var weapon := body.active_weapon()
 	if weapon == null or weapon.type != "weapon":
@@ -230,7 +231,8 @@ func _update_aim(delta: float) -> void:
 	var fov := float(weapon.stats.get("ads_fov", 55)) if body.is_aiming else BASE_FOV
 	body.camera.fov = lerpf(body.camera.fov, fov, minf(delta * 12.0, 1.0))
 	var ads_view := ADS_EYE - VoxelArt.sight_point(VoxelArt.model_for(weapon)) if weapon else HIP_VIEW
-	body.view_model.position = body.view_model.position.lerp(ads_view if body.is_aiming else HIP_VIEW, minf(delta * 14.0, 1.0))
+	var lowered := CharacterModel.VIEW_LOWER_OFFSET * body.model.view_lower()  # ducks while the hands are busy
+	body.view_model.position = body.view_model.position.lerp((ads_view if body.is_aiming else HIP_VIEW) + lowered, minf(delta * 14.0, 1.0))
 
 
 func _try_reload() -> void:

@@ -4,6 +4,11 @@ extends Node3D
 ## mounted on the model's torso or head so it follows the animation; items without a
 ## voxel model yet fall back to a coloured box. Plates and helmets are VoxelArmor nodes:
 ## destructible 1 cm voxels that are also the hit targets.
+##
+## Hands: the weapon the model holds (CharacterModel.hold) is drawn from its sling or
+## holster (the hand goes to it first, CharacterModel.start_draw) and goes back there while
+## the hands are busy with a casualty or an action (CharacterModel.hands_busy). Both follow
+## replicated state, so every peer sees the same.
 
 @export var inventory: Inventory
 @export var model: CharacterModel
@@ -44,6 +49,9 @@ var _chip_counts: Dictionary = {}  # slot -> chips already applied to the mesh
 var _gear: Dictionary = {}    # key -> [item id, Node3D]
 var _held_key: StringName = &""  # which _gear entry is in the hands
 var _held_dirty := true
+var _want_key: StringName = &""  # what should be in the hands
+var _clock := 0.0
+var _grab_at := -1.0             # _clock when a weapon being drawn reaches the hands
 
 
 func _ready() -> void:
@@ -139,15 +147,35 @@ func _rebuild() -> void:
 	_refresh_plate_damage()
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
+	_clock += delta
 	var want := _wanted_in_hands()
+	if want != _want_key:
+		_want_key = want
+		_grab_at = -1.0
+		if want in MOUNTS and _gear.has(want) and want != _held_key:
+			# Drawn: what was held goes back first, the hand fetches the new one.
+			if _held_key != &"":
+				_put_in_hands(&"")
+			model.start_draw(_rest_grip(want))
+			_grab_at = _clock + CharacterModel.DRAW_S * CharacterModel.DRAW_GRAB
+	if _grab_at >= 0.0 and _clock < _grab_at:
+		return
+	_grab_at = -1.0
 	if want != _held_key or _held_dirty:
 		_put_in_hands(want)
+
+
+## True while a weapon is on its way from its sling or holster to the hands.
+func drawing() -> bool:
+	return _grab_at >= 0.0
 
 
 func _wanted_in_hands() -> StringName:
 	if inventory.hands != &"":
 		return &"hands"
+	if model.hands_busy():
+		return &""  # slung or holstered while the hands work
 	match model.hold:
 		CharacterModel.Hold.BOTH:
 			return &"primary" if _gear.has(&"primary") else &""
@@ -182,6 +210,15 @@ func _put_in_hands(key: StringName) -> void:
 	node.position = HELD_POSES[key]
 	node.rotation = Vector3.ZERO
 	model.set_held(node, points.grip, points.support)
+
+
+## Torso-local point where the right hand takes hold of the weapon in `key` on its rest
+## mount (its grip, or the mount itself).
+func _rest_grip(key: StringName) -> Vector3:
+	var rest: Array = MOUNTS[key]
+	var points := VoxelArt.hand_points(VoxelArt.model_for(ItemDB.get_item(_gear[key][0])))
+	var grip: Vector3 = points.get("grip", Vector3.ZERO)
+	return Transform3D(Basis.from_euler(rest[2]), rest[1]) * grip
 
 
 ## Replays armor chips into the meshes, skipping pieces whose chip list hasn't grown.

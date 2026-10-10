@@ -14,6 +14,10 @@ const SAVED_BODY := {"uid": "test_net_body_1", "label": "Player 9", "faction": "
 	"gear": {"slots": {"primary": "m4a1", "vest": "plate_carrier", "helmet": "helmet"}, "slot_state": {"primary": {"rounds": 21}},
 		"containers": {"vest": [{"id": "mag_556", "count": 3}], "pockets": [], "backpack": []}, "hands": ""}}
 
+## Two AI the host stages before the client joins: one dragging the other (_stage_drag).
+const DRAGGER := "Dragger"
+const DRAGGED := "Dragged"
+
 var failures := 0
 var level: CompoundLevel
 
@@ -33,6 +37,7 @@ func _ready() -> void:
 		Net.peer_joined.connect(_give_kit)
 		Net.peer_left.connect(_on_client_left)
 		get_tree().create_timer(60.0).timeout.connect(func() -> void: get_tree().quit(1))
+		_stage_drag()
 	else:
 		_run_client()
 
@@ -54,6 +59,23 @@ func _write_save_with_body() -> void:
 	var file := FileAccess.open(GameState.save_path(), FileAccess.WRITE)
 	file.store_string(JSON.stringify({"version": GameState.SAVE_VERSION, "looted": [], "dropped": {}, "voxel_edits": [], "bodies": [SAVED_BODY]}))
 	file.close()
+
+
+## Host, before anyone joins: an AI drags a downed one (DRAGGER, DRAGGED), so the late
+## joiner has to see the drag from the replicated state alone.
+func _stage_drag() -> void:
+	while not level.voxel_world.is_built():
+		await get_tree().process_frame
+	var make := func(callsign: String, pos: Vector3) -> Soldier:
+		var s := level.spawn_soldier({"name": callsign, "faction": "hostile", "variant": "woodland", "pos": pos,
+			"loadout": ["plate_carrier", "m4a1"], "combat": 0.5, "discipline": 0.5, "guard": true})
+		SquadAI.of(s).process_mode = Node.PROCESS_MODE_DISABLED
+		return s
+	var dragger: Soldier = make.call(DRAGGER, Vector3(12, 0.1, 30))
+	var dragged: Soldier = make.call(DRAGGED, Vector3(12, 0.1, 31.1))
+	await get_tree().create_timer(0.3).timeout
+	dragged.vitals.server_damage(500.0)
+	print("[host] staged a drag: %s" % dragger.server_pick_up_body(dragged, Soldier.DRAG, INF))
 
 
 func _give_kit(id: int) -> void:
@@ -92,6 +114,7 @@ func _run_client() -> void:
 	me.set_physics_process(false)
 	await _wait_for(func() -> bool: return me.role == Roles.MARKSMAN, 3.0)
 	check(me.role == Roles.MARKSMAN and me.fire_team == 1, "the role picked before joining reached the host: marksman, team B (%s, %d)" % [me.role, me.fire_team])
+	await _check_late_drag()
 	var gear: GearRig = me.get_node(^"Gear")
 	check(gear.armor_integrity(&"plate_front") == 1.0 and gear.armor_integrity(&"helmet") == 1.0, "client built the worn voxel armor")
 	for i in 3:
@@ -116,6 +139,7 @@ func _run_client() -> void:
 		me._server_treat.rpc_id(1, me.get_path(), tasks[0].item, tasks[0].part)  # rushed left at its default
 		await _wait_for(func() -> bool: return me.vitals.is_healing(), 2.0)
 		check(me.vitals.is_healing(), "the host started the treatment (replicated)")
+		check(me.model.action_shown() == CharacterModel.TREAT, "and its animation: hands at the wound (replicated action_net)")
 		await _wait_for(func() -> bool: return me.vitals.wound_list()[0].treated, 8.0)
 		check(me.vitals.wound_list()[0].treated and not me.vitals.wound_list()[0].bleeding and not me.vitals.is_healing(), "a remote treatment through the host: bandaged after 5 s")
 		await _wait_for(func() -> bool: return me.inventory.medical_count(&"pressure_bandage") == 1, 2.0)
@@ -157,6 +181,30 @@ func _check_saved_body(me: Soldier) -> void:
 	await _wait_for(func() -> bool: return body.inventory.count_of(&"mag_556") == 0, 3.0)
 	check(body.inventory.count_of(&"mag_556") == 0 and me.inventory.count_of(&"mag_556") == mags + 3,
 		"looting its magazines over the network moves them onto the looter (%d -> %d)" % [mags, me.inventory.count_of(&"mag_556")])
+
+
+## The drag the host staged before this client joined shows here: both poses from the
+## replicated carry_net (the host-only carried_by and carrying never reach a client).
+func _check_late_drag() -> void:
+	var find := func(callsign: String) -> Soldier:
+		for node in get_tree().get_nodes_in_group(&"combatants"):
+			if node is Soldier and String(node.name) == callsign:
+				return node
+		return null
+	await _wait_for(func() -> bool:
+		var d: Soldier = find.call(DRAGGED)
+		return d != null and d.model.carry_shown().get("mode") == CharacterModel.DRAGGED, 3.0)
+	var dragger: Soldier = find.call(DRAGGER)
+	var dragged: Soldier = find.call(DRAGGED)
+	check(dragger != null and dragged != null and dragger.model.carry_net.get("mode") == CharacterModel.DRAG
+		and dragged.model.carry_shown().get("mode") == CharacterModel.DRAGGED and dragged.carried_by == null,
+		"a late joiner sees a drag that started before it joined, from replicated state alone")
+	if dragger == null or dragged == null:
+		return
+	await get_tree().create_timer(0.6).timeout
+	var strap := dragged.model.torso.to_global(CharacterModel.STRAP_POINTS[0])
+	check(dragger.model.hand_position(true).distance_to(strap) < 0.08 and dragged.model.torso.global_basis.z.dot(Vector3.UP) < -0.6,
+		"drawn on the client: the casualty on its back, the dragger's hands on its straps")
 
 
 func _dropped_helmet() -> WorldItem:
