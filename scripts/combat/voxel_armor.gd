@@ -2,11 +2,15 @@ class_name VoxelArmor
 extends Area3D
 ## Wearable armor made of 1 cm voxels: plates and helmets. It is both the visual and the
 ## hit target. A round entering the piece is traced voxel by voxel along its path: if it
-## meets material first, the armor stops it and a chip is carved there; if it reaches the
-## empty interior (the head inside a helmet) or leaves through a hole, it carries on.
-## Chips are part of the item's state ([x, y, z, radius] in Inventory.slot_state), so
-## they travel with the plate or helmet when it's dropped. The mesh is rebuilt by
-## replaying them, so every peer, including late joiners, sees the same damage.
+## reaches the empty interior (the head inside a helmet) or leaves through a hole, it carries
+## on. If it meets material, ArmorRules decide: the piece stops it when its rating is at or
+## above the round's threat level (and, for ceramic, the crack roll holds), else the round
+## goes through. Either way a chip is carved there. A stop still lands an impact on the
+## wearer (Vitals.server_impact), and a steel plate throws spall.
+## Chips are part of the item's state ([x, y, z, radius] in Inventory.slot_state), with a
+## ceramic plate's cracks and integrity, so they travel with the plate or helmet when it's
+## dropped. The mesh is rebuilt by replaying them, so every peer, including late joiners,
+## sees the same damage.
 ##
 ## Shapes come from the item's stats: "shape": "plate" (width/height/thickness_vox) or
 ## "helmet" (tier light/medium/heavy). The strike face of a plate is -Z.
@@ -76,35 +80,92 @@ static func center_offset(p_item: ItemData) -> Vector3:
 	return (Vector3(base.dims) * 0.5 - base.pivot) * VOXEL_SIZE
 
 
-## Rebuilds from the undamaged shape and replays every chip.
-func apply_damage(chips: Array) -> void:
+## Rebuilds from the undamaged shape and replays every chip. A `shattered` plate shows its
+## whole face scarred.
+func apply_damage(chips: Array, shattered := false) -> void:
 	_buffer.copy_channel_from(_base.buffer, VoxelBuffer.CHANNEL_COLOR)
 	_removed = 0
 	for chip: Array in chips:
 		_carve(Vector3i(int(chip[0]), int(chip[1]), int(chip[2])), float(chip[3]))
+	if shattered:
+		for x in _base.dims.x:
+			for y in _base.dims.y:
+				for z in _base.dims.z:
+					if _voxel_at(Vector3i(x, y, z)) == INTACT:
+						_set_voxel(Vector3i(x, y, z), SCARRED)
 	_mesh_instance.mesh = _get_mesher(item).build_mesh(_buffer, [])
 
 
+## Share of the piece's voxels still there, 1 (new) to 0.
 func integrity() -> float:
 	return 1.0 - float(_removed) / float(_base.solid) if _base.solid > 0 else 0.0
 
 
-## Host only. Returns true if the armor stopped the round (and records the chip).
 ## Host only. Whether the soft armor `body` wears (the vest's aramid) stops a round of
 ## `threat` (a Ballistics.LEVELS entry) and `round_class` (Vitals.PISTOL...) at `part`, where
-## it met no plate. `direction` is the round's travel direction (front-only vests). If it
-## stops, the impact goes to Vitals.server_impact. Nothing yet: the armor work adds it.
-static func soft_armor_stops(_body: Node, _part: StringName, _threat: StringName, _round_class: StringName, _distance: float, _direction: Vector3) -> bool:
-	return false
+## it met no plate (or went through one). `direction` is the round's travel direction (a
+## light vest covers the front only). `position` (where it hit) splits a whole-torso hit
+## into chest, abdomen and pelvis; `energy_j` is passed on to the impact (-1 if unknown).
+## FRAGMENT threat is stopped by any aramid that covers the part. If it stops, the impact
+## goes to the wearer's Vitals.server_impact on the torso part hit.
+static func soft_armor_stops(body: Node, part: StringName, threat: StringName, round_class: StringName, distance: float, direction: Vector3, position := Vector3.INF, energy_j := -1.0) -> bool:
+	var body_3d := body as Node3D
+	var vest := ArmorRules.vest_of(body)
+	if body_3d == null or vest == null:
+		return false
+	var torso_part := ArmorRules.armor_part(body_3d, part, position)
+	if not ArmorRules.soft_covers(vest, torso_part, ArmorRules.facing(body_3d, direction)):
+		return false
+	if not ArmorRules.stops(ArmorRules.soft_rating(vest), threat):
+		return false
+	var vitals := Vitals.find_on(body)
+	if vitals:
+		vitals.server_impact(torso_part, round_class, distance, energy_j)
+	return true
 
 
-func server_try_stop(hit_position: Vector3, direction: Vector3, weapon: ItemData) -> bool:
+## Host only. Resolves a round from `weapon` entering the piece at `hit_position`, fired from
+## `distance` metres. Returns true if the armor stopped it. Records the chip (and a ceramic
+## plate's crack and integrity) in the item's state either way, and on a stop lands the
+## impact on the wearer and throws a steel plate's spall.
+func server_try_stop(hit_position: Vector3, direction: Vector3, weapon: ItemData, distance := 0.0) -> bool:
 	var impact := trace(hit_position, direction)
 	if impact == MISS:
 		return false
+	var state: Dictionary = inventory.state_of(slot) if inventory else {}
+	var round_class := Ballistics.round_class(weapon)
+	var stopped := ArmorRules.piece_stops(item, state, impact, Ballistics.threat_level_at(weapon, distance))
 	var radius := float(item.stats.get("chip_radius", 1.5)) * float(weapon.stats.get("plate_wear", 1.0))
-	inventory.add_chip(slot, [impact.x, impact.y, impact.z, radius])
-	return true
+	if inventory:
+		inventory.add_armor_hit(slot, [impact.x, impact.y, impact.z, radius], ArmorRules.hit_changes(item, state, impact, round_class))
+	if stopped:
+		_server_after_stop(hit_position, direction, weapon, distance, round_class)
+	return stopped
+
+
+## The wearer's body (a Soldier or TargetDummy), or null for a loose piece.
+func wearer() -> Node3D:
+	return inventory.get_parent() as Node3D if inventory else null
+
+
+## The body part behind the strike point: HEAD for a helmet, else the torso part (CHEST or
+## ABDOMEN) at that height.
+func part_behind(hit_position: Vector3) -> StringName:
+	if slot == &"helmet":
+		return Vitals.HEAD
+	var body := wearer()
+	var part: StringName = ArmorRules.torso_part_at(body, hit_position) if body else Vitals.CHEST
+	return Vitals.ABDOMEN if part == Vitals.ABDOMEN or part == Vitals.PELVIS else Vitals.CHEST
+
+
+func _server_after_stop(hit_position: Vector3, direction: Vector3, weapon: ItemData, distance: float, round_class: StringName) -> void:
+	var body := wearer()
+	var vitals: Vitals = Vitals.find_on(body) if body else null
+	if vitals == null:
+		return
+	vitals.server_impact(part_behind(hit_position), round_class, distance, Ballistics.energy_at(weapon, distance))
+	if ArmorRules.material(item) == ArmorRules.STEEL and not bool(item.stats.get("spall_coated", false)):
+		ArmorRules.server_spall(body, vitals, hit_position, direction)
 
 
 ## First solid voxel a round entering at `hit_position` meets, or MISS if it reaches the

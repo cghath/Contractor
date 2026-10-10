@@ -1,9 +1,15 @@
 class_name Ballistics
 extends RefCounted
 ## Host-side hit resolution for hitscan weapons. The ray walks through armor (plates and
-## helmets): a piece either stops the round (and chips) or the round passes through a hole
-## and carries on to whatever is behind it. A hitbox names its body part in a "body_part"
-## meta (Vitals.HEAD, Vitals.TORSO...), and the hit goes to Vitals.server_hit.
+## helmets): a piece either stops the round (and chips) or the round passes through it (a
+## hole, or armor rated below the round) and carries on to whatever is behind it. A hitbox
+## names its body part in a "body_part" meta (Vitals.HEAD, Vitals.TORSO...), and the hit goes
+## to Vitals.server_hit unless the vest's soft armor stops it there.
+##
+## Rounds come from res://data/rounds.json: threat level, round class and ACE3-style ballistic
+## values (muzzle velocity, ballistic coefficient against G1 or G7 drag, bullet mass). A
+## weapon fires the round its magazine names, so velocity_at() and energy_at() at any range
+## come from that data. Hitscan: no bullet drop or flight time yet.
 
 const RANGE := 300.0
 const MASK := (1 << 0) | (1 << 1) | (1 << 3)  # world, hitboxes, armor
@@ -13,6 +19,23 @@ const SUPPRESS_RADIUS := 2.5
 ## The game's armor and threat ladder, weakest first (NIJ names in the game's own order).
 ## FRAGMENT is below everything: any aramid layer stops it. ABOVE_IV defeats all body armor.
 const LEVELS: Array[StringName] = [&"FRAGMENT", &"IIA", &"II", &"IIIA", &"III", &"III+", &"III++", &"IV", &"ABOVE_IV"]
+const ROUNDS_PATH := "res://data/rounds.json"
+## Air at sea level, 15 C.
+const AIR_DENSITY := 1.225
+const SPEED_OF_SOUND := 340.0
+## 1 lb/in^2 in kg/m^2 (ballistic coefficients are quoted in lb/in^2).
+const BC_TO_SI := 703.07
+## Integration step for the drag model, metres.
+const DRAG_STEP_M := 5.0
+## Standard drag curves: [Mach, drag coefficient] (G1 flat-base and G7 boat-tail projectiles).
+const DRAG_G1: Array[Vector2] = [Vector2(0.0, 0.263), Vector2(0.5, 0.203), Vector2(0.7, 0.217),
+	Vector2(0.8, 0.255), Vector2(0.9, 0.342), Vector2(1.0, 0.481), Vector2(1.1, 0.590), Vector2(1.2, 0.630),
+	Vector2(1.35, 0.660), Vector2(1.5, 0.655), Vector2(2.0, 0.600), Vector2(2.5, 0.550), Vector2(3.0, 0.515), Vector2(4.0, 0.480)]
+const DRAG_G7: Array[Vector2] = [Vector2(0.0, 0.120), Vector2(0.7, 0.120), Vector2(0.8, 0.121),
+	Vector2(0.9, 0.129), Vector2(0.95, 0.146), Vector2(1.0, 0.380), Vector2(1.05, 0.404), Vector2(1.1, 0.401),
+	Vector2(1.2, 0.396), Vector2(1.5, 0.361), Vector2(2.0, 0.298), Vector2(2.5, 0.267), Vector2(3.0, 0.243), Vector2(4.0, 0.209)]
+
+static var _rounds: Dictionary = {}  # round id -> entry of rounds.json
 
 
 ## Returns {"result": "none"|"plate"|"body"|"world", "position", "normal"} for effects.
@@ -35,7 +58,7 @@ static func _trace(shooter: CollisionObject3D, origin: Vector3, direction: Vecto
 			break
 		var collider: Object = hit.collider
 		if collider is VoxelArmor:
-			if collider.server_try_stop(hit.position, direction, weapon):
+			if collider.server_try_stop(hit.position, direction, weapon, origin.distance_to(hit.position)):
 				return _result("plate", hit)
 			exclude.append(collider.get_rid())
 			from = hit.position
@@ -45,7 +68,7 @@ static func _trace(shooter: CollisionObject3D, origin: Vector3, direction: Vecto
 			var part: StringName = collider.get_meta(&"body_part", Vitals.TORSO) if collider is Node else Vitals.TORSO
 			var distance := origin.distance_to(hit.position)
 			# Soft armor (the vest's aramid) can stop a round where no plate covers the body.
-			if VoxelArmor.soft_armor_stops(vitals.get_parent(), part, threat_level(weapon), round_class(weapon), distance, direction):
+			if VoxelArmor.soft_armor_stops(vitals.get_parent(), part, threat_level_at(weapon, distance), round_class(weapon), distance, direction, hit.position, energy_at(weapon, distance)):
 				return _result("plate", hit)
 			vitals.server_hit(part, {
 				"damage": float(weapon.stats.get("damage", 10.0)),
@@ -62,30 +85,133 @@ static func _trace(shooter: CollisionObject3D, origin: Vector3, direction: Vecto
 	return {"result": "none", "position": to, "normal": Vector3.ZERO}
 
 
-## The weapon's round class for wounds and impacts (Vitals.PISTOL...): its "round_class"
-## stat if it has one, otherwise guessed from its ammunition.
+## The weapon's round class for wounds and impacts (Vitals.PISTOL...): the loaded round's
+## class (see round_data), or a "round_class" stat on the weapon that overrides it.
 static func round_class(weapon: ItemData) -> StringName:
 	if weapon.stats.has("round_class"):
 		return StringName(weapon.stats.round_class)
-	match String(weapon.stats.get("ammo", "")):
-		"mag_9mm":
-			return Vitals.PISTOL
-		"mag_762":
-			return Vitals.FULL_POWER
-	return Vitals.INTERMEDIATE
+	return StringName(round_data(weapon).get("class", Vitals.INTERMEDIATE))
 
 
-## The round's threat level on the game's NIJ-named ladder (Ballistics.LEVELS). Armor rated at
-## or above it stops it. Placeholder by ammunition until the armor work sets it per round.
+## The round's threat level at the muzzle on the game's NIJ-named ladder (Ballistics.LEVELS).
+## Armor rated at or above it stops it. A "threat" stat on the weapon overrides the round's.
 static func threat_level(weapon: ItemData) -> StringName:
 	if weapon.stats.has("threat"):
 		return StringName(weapon.stats.threat)
-	match String(weapon.stats.get("ammo", "")):
-		"mag_9mm":
-			return &"IIA"
-		"mag_762":
-			return &"III+"
-	return &"III"
+	return StringName(round_data(weapon).get("level", "III"))
+
+
+## The threat level `distance` metres out. A round whose data has "level_drop_mps" counts as
+## "level_drop_to" (default one ladder step lower) once it has slowed below that velocity (a
+## steel penetrator needs its speed).
+static func threat_level_at(weapon: ItemData, distance: float) -> StringName:
+	var level := threat_level(weapon)
+	var data := round_data(weapon)
+	if weapon.stats.has("threat") or not data.has("level_drop_mps"):
+		return level
+	if velocity_at(weapon, distance) < float(data.level_drop_mps):
+		if data.has("level_drop_to"):
+			return StringName(data.level_drop_to)
+		return LEVELS[maxi(level_index(level) - 1, 0)]
+	return level
+
+
+## Position of `level` on LEVELS (0 = FRAGMENT), or -1 for an unknown name.
+static func level_index(level: StringName) -> int:
+	return LEVELS.find(level)
+
+
+## The round data (an entry of data/rounds.json, with its "id") for a weapon (the round its
+## "round" stat names, else its magazine's round), a magazine item, a round id, or a round
+## Dictionary. {} if there is none.
+static func round_data(round_or_weapon: Variant) -> Dictionary:
+	_load_rounds()
+	if round_or_weapon is Dictionary:
+		return round_or_weapon
+	if round_or_weapon is String or round_or_weapon is StringName:
+		return _rounds.get(StringName(round_or_weapon), {})
+	var item := round_or_weapon as ItemData
+	if item == null:
+		return {}
+	if item.stats.has("round"):
+		return _rounds.get(StringName(item.stats.round), {})
+	var ammo := StringName(item.stats.get("ammo", ""))
+	if ItemDB.has_item(ammo):
+		return _rounds.get(StringName(ItemDB.get_item(ammo).stats.get("round", "")), {})
+	return {}
+
+
+## Every round id in data/rounds.json.
+static func round_ids() -> Array:
+	_load_rounds()
+	return _rounds.keys()
+
+
+## Muzzle velocity in m/s: a weapon's "muzzle_velocity_mps" (its barrel), else the round's.
+## 0 if unknown.
+static func muzzle_velocity(round_or_weapon: Variant) -> float:
+	var item := round_or_weapon as ItemData if round_or_weapon is ItemData else null
+	if item and item.stats.has("muzzle_velocity_mps"):
+		return float(item.stats.muzzle_velocity_mps)
+	return float(round_data(round_or_weapon).get("muzzle_mps", 0.0))
+
+
+## Velocity in m/s after `distance` metres of flight, from the round's ballistic coefficient
+## against its standard drag curve: dv/dx = -rho * v * Cd(Mach) * pi / (8 * BC). 0 if unknown.
+static func velocity_at(round_or_weapon: Variant, distance: float) -> float:
+	var data := round_data(round_or_weapon)
+	var v := muzzle_velocity(round_or_weapon)
+	var bc := float(data.get("bc", 0.0)) * BC_TO_SI
+	if v <= 0.0 or bc <= 0.0:
+		return v
+	var curve: Array[Vector2] = DRAG_G1 if String(data.get("drag", "G7")) == "G1" else DRAG_G7
+	var travelled := 0.0
+	while travelled < distance - 0.001 and v > 1.0:
+		var step := minf(DRAG_STEP_M, distance - travelled)
+		var half := v - _deceleration(v, bc, curve) * step * 0.5  # midpoint (RK2) step
+		v = maxf(v - _deceleration(half, bc, curve) * step, 0.0)
+		travelled += step
+	return v
+
+
+## Kinetic energy in joules on arrival `distance` metres out (0.5 m v^2), or -1 if unknown.
+static func energy_at(round_or_weapon: Variant, distance: float) -> float:
+	var mass := float(round_data(round_or_weapon).get("mass_g", 0.0)) / 1000.0
+	if mass <= 0.0:
+		return -1.0
+	var v := velocity_at(round_or_weapon, distance)
+	return 0.5 * mass * v * v
+
+
+## Velocity lost per metre travelled at speed `v` (m/s per m).
+static func _deceleration(v: float, bc_si: float, curve: Array[Vector2]) -> float:
+	return AIR_DENSITY * v * _drag_coefficient(v / SPEED_OF_SOUND, curve) * PI / (8.0 * bc_si)
+
+
+static func _drag_coefficient(mach: float, curve: Array[Vector2]) -> float:
+	if mach <= curve[0].x:
+		return curve[0].y
+	for i in range(1, curve.size()):
+		if mach <= curve[i].x:
+			var a := curve[i - 1]
+			var b := curve[i]
+			return lerpf(a.y, b.y, (mach - a.x) / (b.x - a.x))
+	return curve[curve.size() - 1].y
+
+
+static func _load_rounds() -> void:
+	if not _rounds.is_empty():
+		return
+	var file := FileAccess.open(ROUNDS_PATH, FileAccess.READ)
+	if file == null:
+		push_error("Ballistics: cannot open %s" % ROUNDS_PATH)
+		return
+	var parsed: Variant = JSON.parse_string(file.get_as_text())
+	if typeof(parsed) != TYPE_DICTIONARY or not parsed.has("rounds"):
+		push_error("Ballistics: %s is not a valid round file" % ROUNDS_PATH)
+		return
+	for entry: Dictionary in parsed.rounds:
+		_rounds[StringName(entry.id)] = entry
 
 
 static func _result(kind: String, hit: Dictionary) -> Dictionary:

@@ -22,7 +22,8 @@ var stats: Dictionary
 
 
 ## State a fresh copy of this item starts with: weapons come loaded, armor undamaged.
-## Items whose state equals this are interchangeable and can stack.
+## Items whose state equals this are interchangeable and can stack. A ceramic plate gains
+## "cracks" and "integrity" keys when first hit (missing means undamaged).
 func default_state() -> Dictionary:
 	match type:
 		"weapon":
@@ -35,6 +36,17 @@ func default_state() -> Dictionary:
 	if slot == &"helmet":
 		return {"chips": []}
 	return {}
+
+
+## Plates (front/back or side) go into a carrier's plate pockets.
+func is_plate() -> bool:
+	return type == "plate"
+
+
+## Plates and helmets are voxel armor whose state holds chips (and, on ceramic, "cracks"
+## and "integrity"; see ArmorRules).
+func is_voxel_armor() -> bool:
+	return type == "plate" or slot == &"helmet"
 
 
 ## Rounds in a full magazine (for ammo items), else 0.
