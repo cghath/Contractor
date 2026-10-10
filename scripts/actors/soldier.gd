@@ -588,7 +588,11 @@ func _server_use_medical() -> void:
 		return
 	var task := next_self_treatment()
 	if task.is_empty():
-		_client_message.rpc_id(owner_peer(), "You have no %s" % ItemDB.get_item(tasks[0].item).name)
+		var first := ItemDB.get_item(tasks[0].item)
+		if Vitals.needs_other_hands(first.id):
+			_client_message.rpc_id(owner_peer(), "You need someone to place a line")
+		else:
+			_client_message.rpc_id(owner_peer(), "You have no %s" % first.name)
 		return
 	_treat(self, task.item, task.part, false)
 
@@ -695,23 +699,31 @@ const UNDER_FIRE_SUPPRESSION := 0.3
 var _treat_serial := 0  # host: bumps with each timed treatment
 
 
-## The first task on this body's own care_needed() that it carries the item for (loose or in
-## a kit), or {}. H (_server_use_medical) applies it; AI uses it to know it can treat itself.
+## The first task on this body's own care_needed() that it carries an item for (loose or in
+## a kit; Vitals.pick_item, which becomes the task's "item") and can use on itself (not an IV
+## or IO), or {}. H (_server_use_medical) applies it; AI uses it to know it can treat itself.
 func next_self_treatment() -> Dictionary:
 	for task in vitals.care_needed():
-		if inventory.medical_count(task.item) > 0:
-			return task
+		var id := Vitals.pick_item(task, inventory)
+		if id != &"" and not Vitals.needs_other_hands(id):
+			var mine := task.duplicate()
+			mine.item = id
+			return mine
 	return {}
 
 
 ## How long one `item` takes this soldier on `target`: the item's treat_s, times its
-## self_mult on yourself (a tourniquet: 4 s, 6 s on yourself); a rushed tourniquet rushed_s.
+## self_mult on yourself (a tourniquet: 4 s, 6 s on yourself) and the casualty's
+## treat_time_mult (an IV in shock takes longer); a rushed tourniquet rushed_s.
 func treat_seconds(target: Node, item: ItemData, rushed := false) -> float:
 	if rushed and item.stats.has("rushed_s"):
 		return float(item.stats.rushed_s)
 	var seconds := float(item.stats.get("treat_s", 4.0))
 	if target == self:
 		seconds *= float(item.stats.get("self_mult", 1.0))
+	var other := Vitals.find_on(target) if target else null
+	if other:
+		seconds *= other.treat_time_mult(item.id)
 	return seconds
 
 
@@ -777,6 +789,8 @@ func _treat(target: Node3D, item_id: StringName, part: StringName, rushed: bool)
 		why = "That doesn't treat anything"
 	elif inventory.medical_count(item_id) <= 0:
 		why = "You have no %s" % item.name
+	elif target == self and Vitals.needs_other_hands(item_id):
+		why = "Someone else has to place that"
 	else:
 		why = other.treatment_problem(item_id, part)
 	if why != "":
@@ -796,6 +810,9 @@ func _treat(target: Node3D, item_id: StringName, part: StringName, rushed: bool)
 		_client_message.rpc_id(owner_peer(), "%s does nothing there now" % item.name)
 		return
 	inventory.take_medical(item_id)
+	var note := other.care_note()
+	if note != "":
+		_client_message.rpc_id(owner_peer(), note)
 	if rushed:
 		_client_message.rpc_id(owner_peer(), "Tourniquet on in a hurry: it may still bleed (a second one fixes it)")
 

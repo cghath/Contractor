@@ -33,6 +33,7 @@ func _ready() -> void:
 	_test_care_order()
 	_test_treatment_wakes()
 	_test_kits()
+	_test_iv_fluids()
 	await _start_session()
 	await _test_times()
 	await _test_completed_treatments()
@@ -247,18 +248,11 @@ func _test_morphine() -> void:
 	check(rib.pain() < 0.001 and rib.stamina_mult() < 1.0, "morphine is its fix (pain %.2f; still short of breath)" % rib.pain())
 
 
-## A bleed too small to matter for an hour or two, so blood doesn't creep back
-## (WoundModel.BLOOD_RECOVER_PER_MIN) and wake a casualty a test keeps out on blood loss.
-func _trickle(m: WoundModel) -> void:
-	m._add_wound(Vitals.SHIN_R, "graze", 0.0005)
-
-
 func _test_airway() -> void:
 	print("NPA and airway obstruction")
 	var m := _model(5)
 	m.care_rng.seed = 5
 	m.blood = 0.58  # unconscious
-	_trickle(m)
 	m.update_state(0.0)
 	check(m.unconscious and m.care_tasks().any(func(t: Dictionary) -> bool: return t.item == &"npa" and t.part == &"head"), "an unconscious casualty needs an NPA")
 	var t := 0.0
@@ -278,7 +272,6 @@ func _test_airway() -> void:
 		var c := _model(i)
 		c.care_rng.seed = 1000 + i
 		c.blood = 0.58
-		_trickle(c)
 		c.update_state(0.0)
 		for s in 60:
 			c.advance(1.0)
@@ -288,7 +281,6 @@ func _test_airway() -> void:
 	var fixed := _model(6)
 	fixed.care_rng.seed = 6
 	fixed.blood = 0.58
-	_trickle(fixed)
 	fixed.update_state(0.0)
 	for s in 7200:
 		if fixed.airway_blocked:
@@ -354,13 +346,13 @@ func _test_care_order() -> void:
 	v._model.update_state(0.0)
 	var items := v.care_needed().map(func(t: Dictionary) -> String: return "%s@%s" % [t.item, t.part])
 	var expected := ["tourniquet@thigh_l", "hemostatic_gauze@neck", "npa@head", "chest_seal@chest", "pressure_bandage@thigh_r",
-		"pressure_bandage@forearm_l", "pressure_bandage@shin_r", "splint@shin_l", "morphine@torso"]
-	check(items == expected, "massive bleeding, airway, chest, other bleeding, fractures, pain (%s)" % [items])
+		"pressure_bandage@forearm_l", "pressure_bandage@shin_r", "io_kit@forearm_l", "splint@shin_l", "morphine@torso"]
+	check(items == expected, "massive bleeding, airway, chest, other bleeding, a line (IO first in shock), fractures, pain (%s)" % [items])
 	v.server_apply_treatment(&"tourniquet", Vitals.THIGH_L)
 	v.server_apply_treatment(&"npa", Vitals.HEAD)
 	items = v.care_needed().map(func(t: Dictionary) -> String: return "%s@%s" % [t.item, t.part])
 	check(items.size() == expected.size() - 2 and items[0] == "hemostatic_gauze@neck", "handled ones drop out (%s)" % [items])
-	check(v.care_needed().all(func(t: Dictionary) -> bool: return Vitals.CARE_ORDER.has(t.kind) and Vitals.TREATS[t.kind] == t.item or t.kind == "pain"),
+	check(v.care_needed().all(func(t: Dictionary) -> bool: return Vitals.CARE_ORDER.has(t.kind) and (Vitals.TREATS[t.kind] == t.item or Vitals.TREATS[t.kind] in t.get("items", [])) or t.kind == "pain"),
 		"each task's kind maps to its item in TREATS and CARE_ORDER")
 	v.queue_free()
 
@@ -414,6 +406,95 @@ func _test_treatment_wakes() -> void:
 		"an NPA clears it: SpO2 recovers and he comes round %.0f s later" % t)
 	for v: Vitals in [treated, untreated, airway]:
 		v.queue_free()
+
+
+## IV and IO access, bags, pressure bags and collapsed veins (design doc, "IV gauge sets the flow").
+func _test_iv_fluids() -> void:
+	print("IV, IO and fluids")
+	var fine := _model()
+	fine.blood = 0.9
+	check(not fine.care_tasks().any(func(t: Dictionary) -> bool: return t.kind == "access"), "10% lost: no line asked for")
+	var m := _model()
+	m.blood = 0.8
+	var access := m.care_tasks().filter(func(t: Dictionary) -> bool: return t.kind == "access")
+	check(access.size() == 1 and access[0].item == &"iv_18" and access[0].part == &"forearm_l" and &"io_kit" in access[0].items,
+		"20%% lost: a line, the 18 gauge first, in the left forearm (%s)" % [access])
+	check(m.treatment_problem(&"saline_500", &"forearm_l") == "Needs IV or IO access first", "no bag without a line")
+	var pain := m.pain()
+	check(m.apply_item(&"iv_18", &"forearm_l") and m.access.kind == "iv" and int(m.access.gauge) == 18 and m.care_note == "",
+		"an 18 gauge goes in with good veins")
+	check(is_equal_approx(m.pain() - pain, 0.05), "and adds a little pain (+%.2f)" % (m.pain() - pain))
+	check(m.treatment_problem(&"iv_14", &"forearm_l") == "Already has a line in", "one line at a time")
+	var fluids := m.care_tasks().filter(func(t: Dictionary) -> bool: return t.kind == "fluids")
+	check(fluids.size() == 1 and fluids[0].item == &"blood_1000", "then a bag sized to what's missing (%s)" % [fluids])
+	m.apply_item(&"saline_500", &"forearm_l")
+	check(m.treatment_problem(&"blood_500", &"forearm_l") == "A bag is already running", "one bag at a time")
+	var before := m.blood
+	var t := 0.0
+	while not m.infusion.is_empty() and t < 900.0:
+		_step(m, 1.0)
+		t += 1.0
+	check(t >= 240.0 and t <= 300.0 and absf((m.blood - before) * WoundModel.BLOOD_L * 1000.0 - 500.0) < 2.0,
+		"500 mL through an 18 gauge in %.1f min (design doc: 4 to 5), all of it into the blood" % (t / 60.0))
+	var still := m.blood
+	_step(m, 600.0)
+	check(m.blood == still, "and nothing more comes back without a bag")
+	var big := _model()
+	big.blood = 0.7
+	big.apply_item(&"iv_14", &"forearm_l")
+	big.apply_item(&"blood_1000", &"forearm_l")
+	t = 0.0
+	while not big.infusion.is_empty() and t < 900.0:
+		_step(big, 1.0)
+		t += 1.0
+	check(t > 140.0 and t < 160.0, "a 14 gauge runs 1000 mL in %.1f min (3x the 18 gauge)" % (t / 60.0))
+	var full := _model()
+	full.blood = 0.95
+	full.apply_item(&"io_kit", WoundModel.IO_PART)
+	full.apply_item(&"saline_1000", WoundModel.IO_PART)
+	_step(full, 600.0)
+	check(full.blood == 1.0, "blood never goes past full")
+	var shock := _model()
+	shock.blood = 0.6
+	check(shock.veins_collapsed() and shock.care_tasks().any(func(t2: Dictionary) -> bool: return t2.kind == "access" and t2.item == &"io_kit"),
+		"40% lost: veins collapsed, IO is the first pick")
+	shock.apply_item(&"iv_16", &"forearm_l")
+	while shock.access.is_empty():  # a miss now and then; keep trying
+		shock.apply_item(&"iv_16", &"forearm_l")
+	shock.apply_item(&"saline_500", &"forearm_l")
+	check(is_equal_approx(shock.flow_mult(), 1.0), "collapsed veins halve a 16 gauge (%.2fx the 18 gauge rate)" % shock.flow_mult())
+	check(shock.care_tasks().any(func(t2: Dictionary) -> bool: return t2.kind == "pressure"), "and ask for a pressure bag")
+	shock.apply_item(WoundModel.PRESSURE_BAG, &"forearm_l")
+	check(is_equal_approx(shock.flow_mult(), 2.5) and not shock.care_tasks().any(func(t2: Dictionary) -> bool: return t2.kind == "pressure"),
+		"which brings it to 1.25x its gauge (%.2fx)" % shock.flow_mult())
+	var io := _model()
+	io.apply_item(&"io_kit", WoundModel.IO_PART)
+	check(io.access.part == WoundModel.IO_PART and is_equal_approx(io.flow_mult(), 1.0), "IO flows like an 18 gauge")
+	io.apply_item(WoundModel.PRESSURE_BAG, WoundModel.IO_PART)
+	check(is_equal_approx(io.flow_mult(), 2.0), "and like a 16 gauge under a pressure bag")
+	var missed := 0
+	var noted := true
+	for i in 400:
+		var c := _model(100 + i)
+		c.blood = 0.5
+		c.apply_item(&"iv_18", &"forearm_l")
+		if c.access.is_empty():
+			missed += 1
+			noted = noted and c.care_note == "Missed the vein"
+	check(noted, "a missed IV says so (and still uses the catheter: apply_item returns true)")
+	var arrest := _model()
+	arrest.blood = 0.5
+	check(absf(missed / 400.0 - WoundModel.IV_FAIL_MAX) < 0.07 and is_equal_approx(arrest.treat_time_mult(&"iv_18"), WoundModel.IV_SHOCK_TIME_MULT)
+		and arrest.treat_time_mult(&"io_kit") == 1.0,
+		"at 50%% lost an IV misses %.0f%% of the time and takes twice as long; IO always goes in" % (missed / 4.0))
+	var tq := _model()
+	tq.blood = 0.8
+	tq.tourniquets[&"upper_arm_l"] = {"count": 1, "rushed": 0}
+	check(tq.iv_part() == &"forearm_r", "a tourniquet on the left arm: the IV goes in the right")
+	var copy := _model()
+	copy.apply_net(shock.to_net())
+	check(copy.access == shock.access and int(copy.infusion.ml) == 500 and copy.infusion.item == &"saline_500",
+		"the line and the bag replicate (%s, %s)" % [copy.access, copy.infusion])
 
 
 func _test_kits() -> void:

@@ -11,7 +11,8 @@ extends RefCounted
 ## trauma over its limit) and comes round on their own once every cause has stayed gone for a
 ## short time (WAKE_S).
 ## Treatment helps by removing causes: a tourniquet stops the slide, morphine eases pain, an
-## NPA clears the airway so SpO2 recovers.
+## NPA clears the airway so SpO2 recovers, and blood comes back only through an IV or IO
+## line with a bag of saline or blood running.
 ##
 ## The host owns the real state and steps it (advance). Every other peer holds a copy
 ## rebuilt from to_net()/apply_net(), so every query works everywhere. Pure data: no nodes,
@@ -26,10 +27,6 @@ const EFFECTS_FROM_LOST := 0.15   # blood-loss effects start here and reach full
 const NO_SPRINT_LOST := 0.30
 ## Cardiac arrest: the unit dies when this window runs out with no heart rate.
 const ARREST_WINDOW_S := 600.0
-## Proposed (user's call, until IV in wave 3): with every bleed stopped (internal ones too)
-## and the heart beating, the body makes back this share of blood volume per minute, so a
-## patched-up casualty past 40% lost comes round in time instead of staying out for good.
-const BLOOD_RECOVER_PER_MIN := 0.015
 
 ## Blood-loss effects at full strength (s = 1 at 40% lost; linear from 15%). These give the
 ## design doc's table: +60% sway, 64% stamina recovery and 88% speed at 30% lost.
@@ -163,6 +160,41 @@ const CHEST_SEAL := &"chest_seal"
 const SPLINT := &"splint"
 const MORPHINE := &"morphine"
 const NPA := &"npa"
+const IO_KIT := &"io_kit"
+const PRESSURE_BAG := &"pressure_bag"
+## IV catheters by item id: their gauge (design doc, "IV gauge sets the flow").
+const IV_GAUGES := {&"iv_10": 10, &"iv_12": 12, &"iv_14": 14, &"iv_16": 16, &"iv_18": 18, &"iv_20": 20}
+## Fluid bags by item id: mL. Saline and blood work the same (design doc).
+const FLUID_BAGS := {&"saline_250": 250, &"saline_500": 500, &"saline_1000": 1000,
+	&"blood_250": 250, &"blood_500": 500, &"blood_1000": 1000}
+
+## Blood comes back only through IV or IO access plus a bag (design doc; proposed values).
+## One line at a time, one bag running on it at a time. A bag takes BAG_BASE_S through an
+## 18 gauge (the middle of the design doc's ranges); a gauge flows GAUGE_FLOW times that and
+## adds GAUGE_PAIN when placed. IO flows like an 18 gauge, or 2x under a pressure bag.
+const BAG_BASE_S := {250: 165.0, 500: 270.0, 1000: 450.0}
+const GAUGE_FLOW := {10: 5.0, 12: 4.0, 14: 3.0, 16: 2.0, 18: 1.0, 20: 0.6}
+const GAUGE_PAIN := {10: 0.2, 12: 0.15, 14: 0.12, 16: 0.08, 18: 0.05, 20: 0.02}
+const IO_PAIN := 0.1
+const PRESSURE_FLOW := 2.0
+## Veins collapse from this share lost (design doc): an IV then runs at COLLAPSED_FLOW of its
+## gauge rate, or COLLAPSED_PRESSURE_FLOW under a pressure bag.
+const VEIN_COLLAPSE_LOST := 0.37
+const COLLAPSED_FLOW := 0.5
+const COLLAPSED_PRESSURE_FLOW := 1.25
+## An IV in shock: from IV_HARD_FROM_LOST lost it takes longer to place (up to
+## IV_SHOCK_TIME_MULT times) and misses more often (up to IV_FAIL_MAX), both reached at
+## ARREST_LOST. A missed IV uses the catheter up. IO always goes in.
+const IV_HARD_FROM_LOST := 0.25
+const IV_SHOCK_TIME_MULT := 2.0
+const IV_FAIL_MAX := 0.6
+## Access and fluids are asked for (care_tasks) from this share lost.
+const FLUIDS_FROM_LOST := 0.15
+## Where lines go: an IV in a forearm (the right one if the left arm has a tourniquet), an
+## IO in the sternum.
+const IV_PART := &"forearm_l"
+const IV_PART_OTHER := &"forearm_r"
+const IO_PART := &"chest"
 ## A tourniquet on a limb segment stops the bleeding on it and on every segment below it.
 const LIMB_BELOW := {
 	&"thigh_l": [&"thigh_l", &"shin_l"], &"shin_l": [&"shin_l"],
@@ -284,8 +316,15 @@ var spo2 := SPO2_NORMAL
 var trauma_level := 0.0
 ## Unconscious with every cause gone: seconds until they come round (0 while a cause holds).
 var wake_left := 0.0
-## Dice for the treatment rules (airway), apart from rng so the wound dice repeat.
+## Dice for the treatment rules (airway, a missed IV), apart from rng so the wound dice repeat.
 var care_rng := RandomNumberGenerator.new()
+## The IV or IO line: {} for none, else "kind" ("iv" or "io"), "gauge" (an IV's; 0 for IO),
+## "part" and "pressure" (a pressure bag is on it).
+var access: Dictionary = {}
+## The bag running on the line: {} for none, else "item", "ml" (its size) and "left" (mL).
+var infusion: Dictionary = {}
+## Host: what the last apply_item has to tell the treater ("Missed the vein"), or "".
+var care_note := ""
 
 var _time := 0.0
 var _last_concussion := -INF
@@ -569,13 +608,81 @@ func injury() -> float:
 	return clampf(INJURY_BLOOD_WEIGHT * blood_term + (1.0 - INJURY_BLOOD_WEIGHT) * treatable(), 0.0, 1.0)
 
 
+# --- Lines and fluids -------------------------------------------------------------------
+
+func veins_collapsed() -> bool:
+	return lost() >= VEIN_COLLAPSE_LOST
+
+
+## The line's flow as a multiple of the 18 gauge rate (0 without a line): its gauge, then a
+## pressure bag (2x) or collapsed veins (an IV: half, or 1.25x under a pressure bag).
+func flow_mult() -> float:
+	if access.is_empty():
+		return 0.0
+	var pressure: bool = access.pressure
+	if access.kind == "io":
+		return PRESSURE_FLOW if pressure else 1.0
+	var gauge := float(GAUGE_FLOW.get(int(access.gauge), 1.0))
+	if veins_collapsed():
+		return gauge * (COLLAPSED_PRESSURE_FLOW if pressure else COLLAPSED_FLOW)
+	return gauge * (PRESSURE_FLOW if pressure else 1.0)
+
+
+## mL per second going in now (0 with no bag running).
+func infusion_rate() -> float:
+	if infusion.is_empty():
+		return 0.0
+	var ml := int(infusion.ml)
+	return float(ml) / float(BAG_BASE_S.get(ml, 270.0)) * flow_mult()
+
+
+## How hard an IV is to place now: 0 up to IV_HARD_FROM_LOST lost, 1 at ARREST_LOST.
+func iv_difficulty() -> float:
+	return clampf((lost() - IV_HARD_FROM_LOST) / (ARREST_LOST - IV_HARD_FROM_LOST), 0.0, 1.0)
+
+
+## Placement time multiplier for `item` on this body (an IV takes longer in shock).
+func treat_time_mult(item: StringName) -> float:
+	return 1.0 + (IV_SHOCK_TIME_MULT - 1.0) * iv_difficulty() if IV_GAUGES.has(item) else 1.0
+
+
+## The forearm an IV goes in: the left, unless a tourniquet is on that arm.
+func iv_part() -> StringName:
+	return IV_PART_OTHER if tourniquets.has(&"upper_arm_l") or tourniquets.has(IV_PART) else IV_PART
+
+
+## Items that would give this body a line, best pick first: in deep shock (veins collapsed
+## or arrest) IO, then the big bores; with time, the common 18 gauge first.
+func access_options() -> Array[StringName]:
+	var out: Array[StringName] = []
+	if veins_collapsed() or arrest:
+		out.assign([IO_KIT, &"iv_14", &"iv_12", &"iv_10", &"iv_16", &"iv_18", &"iv_20"])
+	else:
+		out.assign([&"iv_18", &"iv_16", &"iv_14", &"iv_20", &"iv_12", &"iv_10", IO_KIT])
+	return out
+
+
+## Bags, best pick first: the size closest to the blood still missing, blood before saline.
+func bag_options() -> Array[StringName]:
+	var need := lost() * BLOOD_L * 1000.0
+	var sizes := [1000, 500, 250] if need >= 900.0 else ([500, 1000, 250] if need >= 400.0 else [250, 500, 1000])
+	var out: Array[StringName] = []
+	for ml: int in sizes:
+		out.append(StringName("blood_%d" % ml))
+		out.append(StringName("saline_%d" % ml))
+	return out
+
+
 # --- Treatment ------------------------------------------------------------------------
 
 ## What still needs doing, most urgent first, in the casualty-care order: massive bleeding
 ## (a tourniquet per limb segment, gauze for junctional bleeds), airway (an NPA for an
 ## unconscious casualty), chest (a seal per open chest wound), other bleeding (bandages),
-## fractures (splints), pain (morphine, also for a cracked rib). One {"part", "kind", "item"}
-## per task. Only items that would help: wounds already handled (treated, under a good
+## circulation (from FLUIDS_FROM_LOST lost: IV or IO access, then a bag; a pressure bag once
+## veins collapse), fractures (splints), pain (morphine, also for a cracked rib). One
+## {"part", "kind", "item"} per task; where several items do the job ("access", "fluids")
+## "items" lists them all, best pick first, and "item" is the first. Only items that would
+## help: wounds already handled (treated, under a good
 ## tourniquet) are skipped, internal bleeding and a tension pneumothorax under a seal wait
 ## for wave 3, and morphine only for pain still left once what's given has worked, while the
 ## blood has room for a dose (morphine_room). In cardiac arrest neither an NPA nor morphine
@@ -602,6 +709,14 @@ func care_tasks() -> Array[Dictionary]:
 	for w: Dictionary in by_rate:
 		if String(w.kind) in BANDAGED_KINDS and rate_now(w) > 0.0:
 			tasks.append(_task(w.part, w.kind, PRESSURE_BANDAGE))
+	if access.is_empty():
+		if lost() >= FLUIDS_FROM_LOST:
+			tasks.append(_task(iv_part(), "access", &"", access_options()))
+	else:
+		if infusion.is_empty() and lost() >= FLUIDS_FROM_LOST:
+			tasks.append(_task(access.part, "fluids", &"", bag_options()))
+		if veins_collapsed() and not access.pressure:
+			tasks.append(_task(access.part, "pressure", PRESSURE_BAG))
 	for w: Dictionary in by_rate:
 		if w.kind == "fracture" and not w.treated:
 			tasks.append(_task(w.part, "fracture", SPLINT))
@@ -614,6 +729,18 @@ func care_tasks() -> Array[Dictionary]:
 func treatment_problem(item: StringName, part: StringName) -> String:
 	if dead:
 		return "Too late"
+	if item == IO_KIT or IV_GAUGES.has(item):
+		return "Already has a line in" if not access.is_empty() else ""
+	if FLUID_BAGS.has(item):
+		if access.is_empty():
+			return "Needs IV or IO access first"
+		if not infusion.is_empty():
+			return "A bag is already running"
+		return "No blood to replace" if lost() < 0.01 else ""
+	if item == PRESSURE_BAG:
+		if access.is_empty():
+			return "Needs IV or IO access first"
+		return "Already under a pressure bag" if access.pressure else ""
 	match item:
 		TOURNIQUET:
 			if not LIMB_BELOW.has(part):
@@ -646,11 +773,30 @@ func treatment_problem(item: StringName, part: StringName) -> String:
 
 
 ## Host only. One use of `item` on `part` (see treatment_problem); `rushed` is for a
-## tourniquet placed in a hurry or under fire. Returns whether it did anything.
+## tourniquet placed in a hurry or under fire. Returns whether the item was used: a missed
+## IV is (care_note says so). IV and IO pick their own place (iv_part, IO_PART).
 func apply_item(item: StringName, part: StringName, rushed := false) -> bool:
+	care_note = ""
 	if treatment_problem(item, part) != "":
 		return false
+	if IV_GAUGES.has(item):
+		var gauge := int(IV_GAUGES[item])
+		pain_wounds = minf(pain_wounds + float(GAUGE_PAIN[gauge]), 1.0)
+		if care_rng.randf() < IV_FAIL_MAX * iv_difficulty():
+			care_note = "Missed the vein"
+		else:
+			access = {"kind": "iv", "gauge": gauge, "part": iv_part(), "pressure": false}
+		update_state(0.0)
+		return true
 	match item:
+		IO_KIT:
+			pain_wounds = minf(pain_wounds + IO_PAIN, 1.0)
+			access = {"kind": "io", "gauge": 0, "part": IO_PART, "pressure": false}
+		PRESSURE_BAG:
+			access.pressure = true
+		_ when FLUID_BAGS.has(item):
+			var ml := int(FLUID_BAGS[item])
+			infusion = {"item": item, "ml": ml, "left": float(ml)}
 		TOURNIQUET:
 			var t: Dictionary = tourniquets.get(part, {"count": 0, "rushed": 0})
 			tourniquets[part] = {"count": int(t.count) + 1, "rushed": int(t.rushed) + (1 if rushed else 0)}
@@ -694,8 +840,10 @@ func remove_tourniquets(part: StringName) -> int:
 	return count
 
 
-func _task(part: StringName, kind: String, item: StringName) -> Dictionary:
-	return {"part": part, "kind": kind, "item": item}
+func _task(part: StringName, kind: String, item: StringName, options: Array[StringName] = []) -> Dictionary:
+	if options.is_empty():
+		return {"part": part, "kind": kind, "item": item}
+	return {"part": part, "kind": kind, "item": options[0], "items": options}
 
 
 ## The wound one bandage, gauze, seal or splint on `part` would treat (the worst), or {}.
@@ -877,6 +1025,9 @@ func reset() -> void:
 	spo2 = SPO2_NORMAL
 	trauma_level = 0.0
 	wake_left = 0.0
+	access = {}
+	infusion = {}
+	care_note = ""
 	_spell_wake_s = 0.0
 	_low_spo2_s = 0.0
 	_out_s = 0.0
@@ -898,8 +1049,12 @@ func advance(dt: float) -> void:
 	_advance_morphine(dt)
 	# Bleeding, scaled by what the heart still pushes out.
 	blood = maxf(blood - bleed_rate() / 60.0 * dt / BLOOD_L, 0.0)
-	if blood < 1.0 and not arrest and wound_bleed_rate() <= 0.0:
-		blood = minf(blood + BLOOD_RECOVER_PER_MIN / 60.0 * dt, 1.0)  # slow recovery once nothing bleeds
+	if not infusion.is_empty():  # the only way blood comes back
+		var ml := minf(float(infusion.left), infusion_rate() * dt)
+		infusion.left = float(infusion.left) - ml
+		blood = minf(blood + ml / 1000.0 / BLOOD_L, 1.0)
+		if float(infusion.left) <= 0.001:
+			infusion = {}
 	if _heart_arrest_in >= 0.0:
 		_heart_arrest_in -= dt
 		if _heart_arrest_in <= 0.0:
@@ -963,7 +1118,8 @@ func update_state(dt: float) -> void:
 ## Compact state for Vitals.net_state. "t" holds countdowns, which clients run down locally.
 ## Wounds are [part, kind, rate, treated, name, flags (1 packed, 2 tension)]; "q" holds the
 ## tourniquets as {part: [count, rushed]}; "o" is SpO2, "m" and "d" morphine in the blood and
-## still going in, "x" total trauma. Flag 64 (coming round) only makes the start of the wake
+## still going in, "x" total trauma, "a" the line [kind, gauge, part, pressure] and "v" the
+## bag running [item, mL, mL left] (empty arrays for none). Flag 64 (coming round) only makes the start of the wake
 ## countdown go out at once; clients read the countdown itself from "t". Flag 128: pain has
 ## been held over the knockout threshold long enough (pain_knocks_out).
 func to_net() -> Dictionary:
@@ -982,7 +1138,9 @@ func to_net() -> Dictionary:
 		tq[String(part)] = [int(tourniquets[part].count), int(tourniquets[part].rushed)]
 	return {"b": snappedf(blood, 0.001), "p": snappedf(pain_wounds, 0.01), "i": snappedf(impact, 0.01),
 		"f": flags, "w": list, "q": tq, "t": timers, "o": snappedf(spo2, 0.5), "m": snappedf(morphine_level, 0.01),
-		"d": snappedf(morphine_depot, 0.01), "x": snappedf(trauma_level, 0.01)}
+		"d": snappedf(morphine_depot, 0.01), "x": snappedf(trauma_level, 0.01),
+		"a": [] if access.is_empty() else [access.kind, int(access.gauge), String(access.part), 1 if access.pressure else 0],
+		"v": [] if infusion.is_empty() else [String(infusion.item), int(infusion.ml), snappedf(float(infusion.left), 1.0)]}
 
 
 ## Rebuilds this copy from a peer's net_state (clients).
@@ -994,6 +1152,10 @@ func apply_net(state: Dictionary) -> void:
 	morphine_level = float(state.get("m", 0.0))
 	morphine_depot = float(state.get("d", 0.0))
 	trauma_level = float(state.get("x", 0.0))
+	var line: Array = state.get("a", [])
+	access = {} if line.is_empty() else {"kind": String(line[0]), "gauge": int(line[1]), "part": StringName(line[2]), "pressure": int(line[3]) != 0}
+	var bag: Array = state.get("v", [])
+	infusion = {} if bag.is_empty() else {"item": StringName(bag[0]), "ml": int(bag[1]), "left": float(bag[2])}
 	var flags := int(state.get("f", 0))
 	unconscious = flags & 1 != 0
 	arrest = flags & 2 != 0

@@ -109,8 +109,10 @@ const COVER_MEDIC_M := 30.0
 ## wake soon.
 const STAY_WITH_M := 20.0
 ## The care order once safe, by care_needed() kind: massive bleeding, airway, chest, the
-## other bleeding, fractures, pain. Kinds not listed go just before pain.
-const CARE_RANK: Array[String] = ["arterial", "airway", "chest", "junctional", "venous", "internal", "muscle", "graze", "fracture", "pain"]
+## other bleeding, circulation (IV or IO, a bag, a pressure bag), fractures, pain. Kinds not
+## listed go just before pain.
+const CARE_RANK: Array[String] = ["arterial", "airway", "chest", "junctional", "venous", "internal", "muscle", "graze",
+	"access", "fluids", "pressure", "fracture", "pain"]
 ## Proposed: seconds past an item's time before checking whether it worked.
 const TREAT_MARGIN_S := 0.4
 ## Proposed: tries at one task (same body, part and kind) that change nothing before giving up on it.
@@ -1133,7 +1135,8 @@ func _end_care() -> void:
 ## The next treatment this unit can give `c` now, in the care order (under fire: massive
 ## bleeding only), with an item it carries (loose or in a kit) that hasn't failed TREAT_TRIES
 ## times, not one the casualty is doing on themselves right now, and (on itself) not one a
-## medic keeps for the squad (_kept_for_squad); {} for none.
+## medic keeps for the squad (_kept_for_squad), nor an IV or IO on itself; {} for none. Where
+## several items would do, the task's "item" becomes the first one carried (Vitals.pick_item).
 func _next_task(c: Soldier, under_fire: bool) -> Dictionary:
 	var conscious := c.vitals.is_up() or c.vitals.why_unconscious().has(&"pain")  # morphine wakes one out from pain
 	var their := SquadAI.of(c) if c != body else null
@@ -1142,14 +1145,16 @@ func _next_task(c: Soldier, under_fire: bool) -> Dictionary:
 			continue
 		if String(task.kind) == "pain" and c.vitals.pain() < MORPHINE_PAIN:
 			continue
-		var item := StringName(task.item)
-		if body.inventory.medical_count(item) <= 0:
+		var item := Vitals.pick_item(task, body.inventory)
+		if item == &"" or (c == body and Vitals.needs_other_hands(item)):
 			continue
 		if c == body and _kept_for_squad(item, String(task.kind)):
 			continue
 		if int(_failures.get(_task_key(c, task), 0)) >= TREAT_TRIES:
 			continue
-		return task
+		var chosen := task.duplicate()
+		chosen.item = item
+		return chosen
 	return {}
 
 
@@ -1157,10 +1162,13 @@ func _next_task(c: Soldier, under_fire: bool) -> Dictionary:
 func _missing_items(c: Soldier) -> Array[StringName]:
 	var out: Array[StringName] = []
 	for task in plan_care(c.vitals.care_needed(), false, c.vitals.is_up() or c.vitals.why_unconscious().has(&"pain")):
-		var item := StringName(task.item)
-		var lacks := body.inventory.medical_count(item) <= 0 or (c == body and _kept_for_squad(item, String(task.kind)))
-		if lacks and item not in out:
-			out.append(item)
+		var item := Vitals.pick_item(task, body.inventory)
+		var lacks := item == &"" or (c == body and (Vitals.needs_other_hands(item) or _kept_for_squad(item, String(task.kind))))
+		if not lacks:
+			continue
+		for option in Vitals.task_items(task):  # a medic carrying any of them will do
+			if option not in out:
+				out.append(option)
 	return out
 
 
@@ -1206,9 +1214,7 @@ static func _count_tasks(c: Soldier, key: String) -> int:
 ## the host request players use too.
 func _start_treatment(target: Soldier, task: Dictionary) -> void:
 	var item := ItemDB.get_item(StringName(task.item))
-	var seconds := float(item.stats.get("treat_s", 4.0)) if item else 4.0
-	if target == body and item:
-		seconds *= float(item.stats.get("self_mult", 1.0))
+	var seconds := body.treat_seconds(target, item) if item else 4.0
 	_treat_target = target
 	_treat_key = _task_key(target, task)
 	_treat_before = _count_tasks(target, _treat_key)

@@ -146,7 +146,7 @@ which has the full rules.
 | Multiplayer | Co-op from day one, listen server (host is authoritative), up to 4 players |
 | Voxels | World structures at 10 cm voxels; characters and gear as 1–2 cm voxel models |
 | Armor | Plates and helmets are runtime voxel objects; hits chip voxels, holes let rounds through, and every hit wears the piece's integrity down by durability. Rounds and armor share an NIJ-named rating ladder (IIA to IV); ceramic cracks in zones, steel throws spall |
-| Medical | No hitpoints: 6 L of blood, wounds per body part, pain, unconsciousness at 40% lost, cardiac arrest at 50% with a 10-minute window |
+| Medical | No hitpoints: 6 L of blood, wounds per body part, pain, unconsciousness at 40% lost, cardiac arrest at 50% with a 10-minute window. Blood comes back only through an IV or IO line with a saline or blood bag running |
 | Inventory | Volume budget in **litres** + visible gear; auto-stow, bulky items need two hands |
 | Squad | 8 slots (two fire teams of four, a medic each, battle-buddy pairs); up to 4 players, AI fills the rest. Starts at 1 AI squadmate. AI tactics modeled on LAMBS Danger and VCOM |
 | Death | AI: permadeath on bleed-out, MIA if left behind alive. Players respawn in the default kit (M4, 2 spare mags + 90 rounds, 1 smoke, 1 frag); their old gear stays where they died, with a marker |
@@ -277,7 +277,7 @@ a release:
 - A vest or backpack can't be dropped while it still has things in it. Empty it from the inventory screen first.
 - The voxel world has no stream, so it's limited to `VoxelWorld.BOUNDS`. The voxel edit log grows with every bullet hole and is never compacted.
 - Player inventories aren't saved yet; only the zone's state is.
-- Medical depth is wave 3: no IV, blood bags, CPR, defibrillator, decompression needle or surgery yet. Until IV, blood only comes back slowly once every bleed has stopped, and heart wounds and internal torso bleeding have no field fix. SpO2 is a basic model (no per-lung efficiency or pulse oximeter), and there's no breathing sound yet.
+- Medical depth is wave 3, in progress: IV and IO lines, saline and blood bags and pressure bags are in; CPR, defibrillator, drugs, decompression needle and surgery aren't yet, so nothing restarts a heart in cardiac arrest, and heart wounds and internal torso bleeding have no field fix. A line can't be taken out once placed. SpO2 is a basic model (no per-lung efficiency or pulse oximeter), and there's no breathing sound yet.
 - Bodies: a zone reload respawns the full friendly squad alive while dead squadmates' saved bodies also come back, so their gear exists twice (AI persistence is wave 4; dead hostiles aren't respawned). Loot all can't move a carrier with its contents onto someone already wearing one; it falls back to piece by piece.
 - AI squadmates don't load magazines from loose rounds, and role kits carry no loose rounds.
 - Bullet holes in wood and sheet metal are decals (a voxel only breaks out after many rounds), so you can't see through them; concrete marks are small decals. No ricochets yet.

@@ -542,16 +542,17 @@ func _test_consciousness() -> void:
 	check(blood.unconscious and blood.unconscious_causes() == [&"blood"] and blood.blood < 0.55,
 		"past 40%% lost and still bleeding he stays out and gets no blood back (%s, %.1f%% left after 10 min)" % [blood.unconscious_causes(), blood.blood * 100.0])
 	blood.wounds.clear()  # every bleed stopped
-	var regained := blood.blood
-	_step(blood, 60.0)
-	check(is_equal_approx(blood.blood - regained, WoundModel.BLOOD_RECOVER_PER_MIN),
-		"with every bleed stopped blood comes back slowly (%.2f%% in a minute)" % ((blood.blood - regained) * 100.0))
+	var held := blood.blood
+	_step(blood, 600.0)
+	check(blood.blood == held and blood.unconscious, "with every bleed stopped no blood comes back on its own (only IV or IO)")
+	blood.apply_item(WoundModel.IO_KIT, WoundModel.IO_PART)
+	blood.apply_item(&"blood_1000", WoundModel.IO_PART)
 	var minutes := 0
 	while blood.unconscious and minutes < 30:
 		_step(blood, 60.0)
 		minutes += 1
 	check(not blood.unconscious and blood.lost() < WoundModel.UNCONSCIOUS_LOST,
-		"and once he is back under 40%% lost he comes round on his own (%d min)" % minutes)
+		"a bag through an IO brings him back under 40%% lost and he comes round on his own (%d min)" % minutes)
 	var knocked := _model()
 	knocked.knockout_left = 8.0
 	knocked.update_state(0.0)
@@ -704,7 +705,7 @@ func _test_kit_economy() -> void:
 	m.apply_item(WoundModel.MORPHINE, Vitals.TORSO)
 	_step(m, 2.0 * WoundModel.MORPHINE_ABSORB_S + WoundModel.WAKE_S[&"pain"] + 1.0)  # the hits knocked him out: he comes round
 	check(m.injury() < 0.45, "broken leg and arm, 38%% lost; bandaged, splinted, two morphine: under the AI's heal mark (%.2f)" % m.injury())
-	check(m.care_tasks().is_empty(), "then the kit has nothing left to fix (pain %.2f, %s)" % [m.pain(), m.care_tasks()])
+	check(m.care_tasks().all(func(t: Dictionary) -> bool: return t.kind == "access"), "then the kit has nothing left to fix but a line for the blood (pain %.2f, %s)" % [m.pain(), m.care_tasks()])
 	var gut := _model(43)
 	gut.add_hit(Vitals.ABDOMEN, {"graze": false, "depth": 0.2, "vessels": [{"name": &"aorta", "kind": BodyMap.INTERNAL, "rate": 2.5, "share": 0.1}], "organs": [], "bones": []}, Vitals.PISTOL)
 	gut.pain_wounds = 0.1

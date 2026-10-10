@@ -94,10 +94,10 @@ func _action(action: String, container: StringName, index: int, slot: StringName
 func _medical_use(item: ItemData) -> Callable:
 	if Inventory.is_kit(item):
 		return func() -> void: player._server_use_medical.rpc_id(1)
-	if not item.stats.has("treat_s"):
+	if not item.stats.has("treat_s") or Vitals.needs_other_hands(item.id):
 		return Callable()
 	for task in player.vitals.care_needed():
-		if task.item == item.id:
+		if item.id in Vitals.task_items(task):
 			return func() -> void: player._server_treat.rpc_id(1, player.get_path(), item.id, task.part, false)
 	return Callable()
 

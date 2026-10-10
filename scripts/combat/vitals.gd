@@ -280,6 +280,12 @@ func signs(on_self := false) -> PackedStringArray:
 		out.append("Blue lips")
 	if m.morphine_level >= WoundModel.MORPHINE_PUPILS_LEVEL:
 		out.append("Drowsy (morphine)" if on_self else "Pinpoint pupils (morphine)")
+	if not m.access.is_empty():
+		var line := "IO line, sternum" if m.access.kind == "io" else "IV %dG, %s" % [int(m.access.gauge), part_name(m.access.part)]
+		out.append(line + (" (pressure bag)" if m.access.pressure else ""))
+	if not m.infusion.is_empty():
+		var item := ItemDB.get_item(m.infusion.item) if ItemDB.has_item(m.infusion.item) else null
+		out.append("%s running, %d mL left" % [item.name if item else "Bag", ceili(float(m.infusion.left))])
 	return out
 
 
@@ -313,9 +319,12 @@ const TREATS := {
 	"arterial": &"tourniquet", "junctional": &"hemostatic_gauze", "venous": &"pressure_bandage",
 	"muscle": &"pressure_bandage", "graze": &"pressure_bandage", "chest": &"chest_seal",
 	"fracture": &"splint", "airway": &"npa", "pain": &"morphine",
+	"access": &"iv_18", "fluids": &"saline_500", "pressure": &"pressure_bag",  # the usual picks; see care_needed "items"
 }
-## Casualty-care order: massive bleeding, airway, chest, other bleeding, fractures, pain.
-const CARE_ORDER := ["arterial", "junctional", "airway", "chest", "venous", "muscle", "graze", "fracture", "pain"]
+## Casualty-care order: massive bleeding, airway, chest, other bleeding, circulation (line,
+## bag, pressure bag), fractures, pain.
+const CARE_ORDER := ["arterial", "junctional", "airway", "chest", "venous", "muscle", "graze", "access", "fluids",
+	"pressure", "fracture", "pain"]
 
 
 ## What still needs doing for this unit, most urgent first, in the casualty-care order: one
@@ -324,12 +333,63 @@ const CARE_ORDER := ["arterial", "junctional", "airway", "chest", "venous", "mus
 ## gauze per junctional bleed, an NPA (kind "airway", part HEAD) for an unconscious casualty,
 ## a vented seal per open chest wound, a bandage per venous, muscle or graze wound, a splint
 ## per fracture, morphine (kind "pain", part TORSO) for pain still left once the morphine
-## already given has gone in, or a cracked rib. Wounds already handled are left out, and so
+## already given has gone in, or a cracked rib. From 15% blood lost: IV or IO access (kind
+## "access", on the forearm the IV goes in), then a bag (kind "fluids"), and a pressure bag
+## once veins collapse (kind "pressure"); "access" and "fluids" tasks list every item that
+## would do in "items", best pick first (pick_item). Wounds already handled are left out, and so
 ## is anything no field item fixes (internal bleeding, a tension pneumothorax already under
 ## way) and another morphine dose once the blood holds about one (a second one in would
 ## risk sedation).
 func care_needed() -> Array[Dictionary]:
 	return _m().care_tasks()
+
+
+## The item to use for `task` (a care_needed() entry) from what `inventory` holds, loose or in
+## a kit: the first of its "items" carried, or its "item"; &"" if none is carried.
+static func pick_item(task: Dictionary, inventory: Inventory) -> StringName:
+	for id: StringName in task_items(task):
+		if inventory.medical_count(id) > 0:
+			return id
+	return &""
+
+
+## Every item that would do for `task`, best pick first.
+static func task_items(task: Dictionary) -> Array[StringName]:
+	var out: Array[StringName] = []
+	out.assign(task.get("items", [task.item]))
+	return out
+
+
+## Items a treater can't use on themselves: an IV or IO needs someone else's hands.
+static func needs_other_hands(item_id: StringName) -> bool:
+	return item_id == WoundModel.IO_KIT or WoundModel.IV_GAUGES.has(item_id)
+
+
+## How many times its usual time `item_id` takes on this unit now (an IV in shock is slower).
+func treat_time_mult(item_id: StringName) -> float:
+	return _m().treat_time_mult(item_id)
+
+
+## The IV or IO line: {} for none, else "kind" ("iv" or "io"), "gauge" (an IV's), "part" and
+## "pressure" (under a pressure bag).
+func access() -> Dictionary:
+	return _m().access.duplicate()
+
+
+## The bag running on the line: {} for none, else "item", "ml" and "left" (mL), plus "rate"
+## (mL per second going in now).
+func infusion() -> Dictionary:
+	var m := _m()
+	if m.infusion.is_empty():
+		return {}
+	var out := m.infusion.duplicate()
+	out.rate = m.infusion_rate()
+	return out
+
+
+## Host: what the last treatment has to tell the treater ("Missed the vein"), or "".
+func care_note() -> String:
+	return _model.care_note
 
 
 ## Why one `item_id` on `part` wouldn't help this unit right now ("" if it would), for menus
@@ -354,6 +414,12 @@ func treatment_problem(item_id: StringName, part: StringName) -> String:
 ##   It also eases a cracked rib's pain.
 ## - npa: an unconscious casualty's airway can't obstruct (and an obstructed one clears, so
 ##   SpO2 recovers).
+## - iv_10 to iv_20: an IV line in a forearm; bigger bores flow faster and hurt more. In shock
+##   it can miss (the catheter is used up; care_note says so). io_kit: an IO line in the
+##   sternum, always. One line at a time.
+## - saline_* / blood_* (250, 500, 1000 mL): a bag on the line, going in over minutes; the
+##   only way blood comes back. pressure_bag: on the line, faster flow (and needed once
+##   veins collapse at 37% lost).
 func server_apply_treatment(item_id: StringName, part: StringName, rushed := false) -> bool:
 	if not _model.apply_item(item_id, part, rushed):
 		return false

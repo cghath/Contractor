@@ -11,6 +11,36 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Wave 3, part 1: IV and IO lines, fluids, pressure bags
+
+#### Added
+
+- **IV catheters** in 10, 12, 14, 16, 18 and 20 gauge. Bigger bores run fluid in faster
+  (5x down to 0.6x the 18 gauge), take longer to place (22 s down to 8 s), hurt more and are
+  rarer. An IV goes in the left forearm (the right if the left arm has a tourniquet).
+- **IO kit:** a sternal line in 5 s that always works, at the 18 gauge rate.
+- **Saline and blood bags** of 250, 500 and 1000 mL. They work the same; one bag runs at a
+  time and takes about 2.75, 4.5 or 7.5 minutes through an 18 gauge.
+- **Pressure bag:** doubles the flow of an IV with good veins or an IO. From 37% blood lost
+  the veins collapse: an IV then runs at half its rate, or 1.25x under a pressure bag.
+- **IVs in shock:** from 25% lost an IV takes longer to place (up to twice as long) and can
+  miss (up to 60% of the time at 50% lost), which uses up the catheter. In deep shock and
+  cardiac arrest, IO is the better pick.
+- Treat menus list a line from 15% blood lost, then a bag, then a pressure bag once veins
+  collapse, with one entry for each kind you carry. You can't put a line in yourself, but
+  you can hang a bag on your own line. Checking someone shows their line and bag.
+- AI medics put a line in (IO first when veins have collapsed), hang a bag and add a
+  pressure bag after bleeding control and before splints. A squadmate without the items
+  calls the medic for them.
+- The medic's kit adds three 18 gauge and one 14 gauge IVs, an IO kit, two 500 mL saline
+  bags, a 500 mL blood bag and a pressure bag. The gate loot has IVs (one rare 10 gauge),
+  an IO kit, saline, a 1000 mL blood bag and a pressure bag.
+
+#### Removed
+
+- **Slow blood recovery** (the stand-in until IV): blood no longer comes back on its own.
+  A casualty past 40% lost stays out until fluids bring them back under it.
+
 ### Captain's wave 2 playtest fixes
 
 From Captain's playtest of the wave 1 build. The Star Citizen-style inventory and MOLLE vest

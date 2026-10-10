@@ -277,6 +277,16 @@ static func treatments(actor: Soldier, target: Node) -> Array[Dictionary]:
 	if vitals == null or vitals.is_dead():
 		return out
 	for task in vitals.care_needed():
+		if task.has("items"):  # a line or a bag: one entry per kind you carry, or the usual pick greyed out
+			if target == actor and Vitals.needs_other_hands(task.item):
+				continue
+			var carried := Vitals.task_items(task).filter(func(id: StringName) -> bool: return actor.inventory.medical_count(id) > 0)
+			for id: StringName in (carried if not carried.is_empty() else [task.item]):
+				var option := ItemDB.get_item(id)
+				var part: StringName = WoundModel.IO_PART if id == WoundModel.IO_KIT else task.part
+				var where := "sternum" if id == WoundModel.IO_KIT else Vitals.part_name(part)
+				out.append(_treat_entry(actor, target, option, part, false, "%s, %s" % [option.name, where]))
+			continue
 		var item := ItemDB.get_item(task.item)
 		out.append(_treat_entry(actor, target, item, task.part, false, "%s, %s" % [item.name, Vitals.part_name(task.part)]))
 		if task.item == WoundModel.TOURNIQUET:
