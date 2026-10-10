@@ -248,12 +248,13 @@ func _test_item_state() -> void:
 	# A body's gear goes through the zone save as JSON (GameState.bodies) and comes back the same.
 	mags.take(&"m4a1")
 	mags.consume_round(&"primary")
-	mags.take(&"plate_ceramic_l4", 1, {"chips": [[3, 4, 0, 2.5]]})
+	mags.take(&"plate_ceramic_l4", 1, {"chips": [[3, 4, 0, 0.1 + 0.2]]})  # a float that needs 17 digits
 	var restored := Inventory.new()
-	restored.net_state = GameState.from_json(JSON.parse_string(JSON.stringify(mags.net_state)))
+	restored.net_state = GameState.from_json(JSON.parse_string(JSON.stringify(mags.net_state, "", true, true)))
 	check(restored.rounds_in(&"primary") == 29 and typeof(restored.state_of(&"primary").rounds) == TYPE_INT
 		and restored.chips_in(&"plate_front").size() == 1 and restored.count_of(&"mag_556") == 3,
 		"a body's gear survives the zone save's JSON: rounds, chips and stacks")
+	check(restored.state_of(&"plate_front") == mags.state_of(&"plate_front"), "plate state comes back exactly, at full precision (%s)" % [restored.state_of(&"plate_front")])
 	restored.insert_entry(&"pockets", {"id": &"mag_556", "count": 1})
 	check(restored.containers[&"pockets"].size() == 1 and restored.containers[&"pockets"][0].count == 4,
 		"and magazines stack again after loading (%s)" % [restored.containers[&"pockets"]])

@@ -146,7 +146,7 @@ func _check_saved_body(me: Soldier) -> void:
 	me.global_position = body.global_position + Vector3(1.0, 0.0, 0.0)
 	await get_tree().create_timer(0.4).timeout  # the host sees us there
 	var mags := me.inventory.count_of(&"mag_556")
-	me._server_loot_item.rpc_id(1, body.get_path(), &"vest", 0)
+	me._server_loot_item.rpc_id(1, body.get_path(), &"vest", 0, &"mag_556")
 	await _wait_for(func() -> bool: return body.inventory.count_of(&"mag_556") == 0, 3.0)
 	check(body.inventory.count_of(&"mag_556") == 0 and me.inventory.count_of(&"mag_556") == mags + 3,
 		"looting its magazines over the network moves them onto the looter (%d -> %d)" % [mags, me.inventory.count_of(&"mag_556")])

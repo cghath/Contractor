@@ -707,7 +707,8 @@ func _test_dead_bodies() -> void:
 	_place(player, Vector3(-8, 0.1, 4))
 	var along := await _wait_until(func() -> bool: return _flat(echo.global_position, player.global_position) < 12.0, 30.0)
 	check(along, "and carries it after the lead (%.1f m)" % _flat(echo.global_position, player.global_position))
-	check(SquadAI.of(echo) != null and echo.ai_status == "Dead", "the roster shows him dead (%s)" % echo.ai_status)
+	check(SquadAI.of(echo) != null and echo.ai_status == "Dead" and echo not in player._hud.command_menu.roster(),
+		"he shows as dead and has left the HUD roster, F-keys and Select all (%s)" % echo.ai_status)
 	if is_instance_valid(bearer):
 		SquadAI.of(bearer)._end_care()
 		SquadAI.of(bearer).set_physics_process(false)  # stop picking it up again while we loot
@@ -719,7 +720,13 @@ func _test_dead_bodies() -> void:
 	var mags_on := echo.inventory.count_of(&"mag_762")
 	var player_mags := player.inventory.count_of(&"mag_762")
 	var ground := _item_ids()
-	player._server_loot_item.rpc_id(1, echo.get_path(), mags[0], mags[1])
+	var echo_gear := _gear_of(echo)
+	var player_gear := _gear_of(player)
+	player._server_loot_item.rpc_id(1, echo.get_path(), mags[0], mags[1], &"m110")  # a stale pick: that's no rifle there
+	await _frames(3)
+	check(_gear_of(echo) == echo_gear and _gear_of(player) == player_gear,
+		"Loot > one entry that someone else took first (another item there now) moves nothing")
+	player._server_loot_item.rpc_id(1, echo.get_path(), mags[0], mags[1], &"mag_762")
 	await _frames(3)
 	check(mags[1] >= 0 and player.inventory.count_of(&"mag_762") > player_mags and echo.inventory.count_of(&"mag_762") < mags_on,
 		"Loot > one entry: his 7.62 magazines go into the looter's pouches (%d -> %d)" % [player_mags, player.inventory.count_of(&"mag_762")])
@@ -802,6 +809,15 @@ func _test_player_and_enemy_bodies() -> void:
 ## Bodies and what's on them are saved with the zone and come back on load.
 func _test_body_persistence() -> void:
 	print("Bodies in the zone save")
+	# Nothing moves around the save: whoever carries a body puts it down and the squad holds
+	# still, so every body lies where it's recorded.
+	for s: Soldier in _squad():
+		if SquadAI.of(s).care != SquadAI.Care.NONE:
+			SquadAI.of(s)._end_care()
+		s.release_carried()
+	_freeze()
+	await _seconds(1.0)  # bodies put down settle on the ground
+	check(_bodies().all(func(b: Soldier) -> bool: return not is_instance_valid(b.carried_by)), "nobody is carrying a body")
 	var before := {}
 	for b: Soldier in _bodies():
 		before[b.body_uid] = {"label": b.display_name(), "gear": _gear_of(b), "pos": b.global_position}
@@ -820,17 +836,25 @@ func _test_body_persistence() -> void:
 		after[b.body_uid] = {"label": b.display_name(), "gear": _gear_of(b), "pos": b.global_position}
 	check(after.keys().size() == before.keys().size() and before.keys().all(func(uid: String) -> bool: return after.has(uid)),
 		"every body is back (%d of %d)" % [after.size(), before.size()])
-	var same := true
+	var differ := PackedStringArray()
 	for uid: String in before:
 		if not after.has(uid) or after[uid].label != before[uid].label or after[uid].gear != before[uid].gear \
 				or _flat(after[uid].pos, before[uid].pos) > 0.3:
-			same = false
-			print("    %s: %s -> %s" % [uid, before[uid], after.get(uid)])
-	check(same, "where they lay, with the same gear (rounds, plates and kits included)")
+			differ.append("%s: %s -> %s" % [uid, before[uid], after.get(uid)])
+	# The differences go in the check's own line: run_tests.sh only shows [FAIL] lines.
+	check(differ.is_empty(), "where they lay, with the same gear (rounds, plates and kits included)%s"
+		% ("" if differ.is_empty() else ": " + " | ".join(differ)))
 	check(_bodies().all(func(b: Soldier) -> bool: return b.vitals.is_dead() and b.collision_layer == 0 and SquadAI.of(b) == null),
 		"dead, lying and brainless")
 	var markers := get_tree().get_nodes_in_group(GearMarker.GROUP).filter(func(m: Node) -> bool: return not m.is_queued_for_deletion())
 	check(markers.size() == 1 and "Player 1" in (markers[0] as GearMarker).text, "the dead player's body has its gear marker again")
+	# A hostile whose body is in the save isn't spawned again on load (no second set of his gear).
+	GameState.bodies.append({"uid": "test_hostile2", "label": "Hostile2", "faction": "hostile"})
+	var hostiles := level.hostiles_to_spawn().map(func(h: Dictionary) -> String: return h.name)
+	check(hostiles.size() == CompoundLevel.HOSTILES.size() - 1 and "Hostile2" not in hostiles,
+		"a hostile whose body the save holds stays dead on load (spawning %s)" % [hostiles])
+	GameState.bodies.pop_back()
+	_unfreeze()
 
 
 func _test_downed_player() -> void:

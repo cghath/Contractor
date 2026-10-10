@@ -62,7 +62,7 @@ func save_zone() -> void:
 		"dropped": dropped,
 		"voxel_edits": voxel_edits,
 		"bodies": bodies,
-	}))
+	}, "", true, true))  # full precision: item state (plate and helmet integrity) comes back exactly
 	print("Saved zone '%s' (%d looted, %d dropped, %d voxel edits, %d bodies)" % [zone_id, looted.size(), dropped.size(), voxel_edits.size(), bodies.size()])
 
 

@@ -1243,17 +1243,30 @@ func gear_entries() -> Array[Dictionary]:
 
 ## Interaction menu "Loot" > one item: takes one thing off a dead body into your own gear:
 ## what's in slot `where` (index -1), or the whole stowed entry `index` of container `where`
-## (as much of the stack as fits; the rest stays on the body).
+## (as much of the stack as fits; the rest stays on the body). `id` is the item the looter
+## picked: if someone else took it first and something else is there now, nothing moves.
 @rpc("any_peer", "call_local", "reliable")
-func _server_loot_item(path: NodePath, where: StringName, index: int) -> void:
+func _server_loot_item(path: NodePath, where: StringName, index: int, id: StringName) -> void:
 	var other := _lootable(path)
 	if other == null:
+		return
+	if _loot_id_at(other, where, index) != id:
+		_client_message.rpc_id(owner_peer(), "Nothing there any more")
 		return
 	var result := _loot_one(other, where, index)
 	if result.why != "":
 		_client_message.rpc_id(owner_peer(), result.why)
 	elif int(result.moved) > 0:
 		_client_message.rpc_id(owner_peer(), "Took %s%s" % [result.name, " x%d" % result.moved if int(result.moved) > 1 else ""])
+
+
+## The item in slot `where` (index < 0) or stowed entry `index` of container `where` on
+## `other`, or &"" if there's nothing there.
+static func _loot_id_at(other: Soldier, where: StringName, index: int) -> StringName:
+	if index < 0:
+		return other.inventory.slots.get(where, &"")
+	var list: Array = other.inventory.containers.get(where, [])
+	return list[index].id if index < list.size() else &""
 
 
 ## The dead body at `path` if this player may loot it now (up, the body in reach), else null.

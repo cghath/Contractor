@@ -51,7 +51,7 @@ const SELF := &"self"
 ##   (the target's path), "none", "slot" (your active slot), "target_entry" (target path,
 ##   container, index; used by submenu entries), "treatment" (target path, item, part,
 ##   rushed), "target_part" (target path, part) and "target_loot" (target path, a slot or
-##   container, and the entry's index or -1 for a slot).
+##   container, the entry's index or -1 for a slot, and the item id the host checks).
 ## - show: a local readout instead of a request ("condition" or "wounds").
 ## - submenu: a list built at runtime: "stowed_items" and "body_items" (what's on a dead body,
 ##   like the inventory screen; entries take the parent's request) or "treatments" (entries
@@ -241,7 +241,8 @@ static func _submenu(def: Dictionary, actor: Soldier, target: Node) -> Array[Dic
 ## What's on a dead body, as the Loot submenu lists it (like the inventory screen): what's
 ## worn ("Primary: M4A1 Carbine (30 rds)"), then each container's entries ("Vest: 5.56
 ## Magazine x4"). Each is {"label", "where" (a slot or container), "index" (-1 for a slot),
-## "disabled"}: a carrier or pack still holding things is greyed out until it's empty.
+## "item" (its id), "disabled"}: a carrier or pack still holding things is greyed out until
+## it's empty. Past MAX_LOOT_ENTRIES the last line counts the rest (greyed out).
 static func body_items(body: Soldier) -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	var inv := body.inventory
@@ -253,7 +254,7 @@ static func body_items(body: Soldier) -> Array[Dictionary]:
 		var full: bool = (slot == &"backpack" and not inv.containers[&"backpack"].is_empty()) \
 			or (slot == &"vest" and (not inv.containers[&"vest"].is_empty() or Inventory.PLATE_SLOTS.any(func(s: StringName) -> bool: return inv.slots[s] != &"")))
 		out.append({"label": "%s: %s%s" % [InventoryScreen.SLOT_NAMES.get(slot, String(slot)), item.name, _rounds_text(inv.state_of(slot))],
-			"where": slot, "index": -1, "disabled": "Take what's in it first" if full else ""})
+			"where": slot, "index": -1, "item": id, "disabled": "Take what's in it first" if full else ""})
 	for container in Inventory.CONTAINERS:
 		var list: Array = inv.containers[container]
 		for i in list.size():
@@ -261,8 +262,13 @@ static func body_items(body: Soldier) -> Array[Dictionary]:
 			var item := ItemDB.get_item(entry.id)
 			var count := " x%d" % int(entry.count) if int(entry.count) > 1 else ""
 			out.append({"label": "%s: %s%s%s" % [String(container).capitalize(), item.name, count, _rounds_text(entry.get("state", {}))],
-				"where": container, "index": i, "disabled": ""})
-	return out.slice(0, MAX_LOOT_ENTRIES)
+				"where": container, "index": i, "item": entry.id, "disabled": ""})
+	if out.size() > MAX_LOOT_ENTRIES:
+		# Too many to list: the last line says how many more there are (take some, or Loot all).
+		var more := out.size() - (MAX_LOOT_ENTRIES - 1)
+		out = out.slice(0, MAX_LOOT_ENTRIES - 1)
+		out.append({"label": "%d more..." % more, "where": &"", "index": -1, "item": &"", "disabled": "Take some first, or Loot all"})
+	return out
 
 
 static func _rounds_text(state: Dictionary) -> String:
@@ -343,7 +349,7 @@ static func perform(actor: Soldier, action: Dictionary) -> String:
 		&"target_part":
 			actor.rpc_id(1, request, target.get_path(), action.part)
 		&"target_loot":
-			actor.rpc_id(1, request, target.get_path(), action.where, action.index)
+			actor.rpc_id(1, request, target.get_path(), action.where, action.index, action.item)
 		_:
 			actor.rpc_id(1, request)
 	return ""

@@ -300,13 +300,24 @@ func _on_hosted() -> void:
 ## Host only. Spawns the hostile fire teams and fills the player squad with AI.
 func _spawn_ai() -> void:
 	_ai_ready = true
+	var hostiles := hostiles_to_spawn()
 	var spawned := {}
-	for h: Dictionary in HOSTILES:
+	for h: Dictionary in hostiles:
 		spawned[h.name] = spawn_soldier({"name": h.name, "faction": "hostile", "variant": "urban", "pos": h.pos,
 			"loadout": HOSTILE_LOADOUT, "combat": 0.45, "discipline": 0.5, "guard": h.guard, "mode": "aware"})
-	for h: Dictionary in HOSTILES:
-		spawned[h.name].buddy = spawned[h.buddy]
+	for h: Dictionary in hostiles:
+		spawned[h.name].buddy = spawned.get(h.buddy)  # null if the buddy's body is in the save
 	rebalance_squad()
+
+
+## The HOSTILES to spawn: all but those whose bodies the zone save holds (GameState.bodies).
+## A hostile killed before the save stays dead; its body and gear come back instead.
+func hostiles_to_spawn() -> Array:
+	var fallen := {}
+	for record: Dictionary in GameState.bodies:
+		if String(record.get("faction", "")) == "hostile":
+			fallen[String(record.get("label", ""))] = true
+	return HOSTILES.filter(func(h: Dictionary) -> bool: return not fallen.has(h.name))
 
 
 ## Host only. The player squad is SQUAD_SIZE slots in two fire teams of four, each with a
