@@ -10,7 +10,7 @@ set -u
 cd "$(dirname "$0")/.."
 GODOT="${GODOT:-godot}"
 SUITES=("$@")
-[ ${#SUITES[@]} -eq 0 ] && SUITES=(smoke gameplay squad net wounds armor movement interaction roles medical)
+[ ${#SUITES[@]} -eq 0 ] && SUITES=(smoke gameplay squad net wounds armor movement interaction roles medical logistics)
 status=0
 
 run() {

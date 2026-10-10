@@ -262,7 +262,7 @@ func _test_ammo() -> void:
 	check(inv.reload(&"primary") == -1, "no reload without magazines")
 	inv.take(&"mag_556", 2)
 	check(inv.spare_rounds(&"mag_556") == 60, "two spare mags = 60 rounds")
-	check(inv.reload(&"primary") == 30 and inv.spare_rounds(&"mag_556") == 30, "reload loads 30, empty mag discarded")
+	check(inv.reload(&"primary") == 30 and inv.spare_rounds(&"mag_556") == 30, "reload loads 30 (the empty mag goes back in the pouch)")
 	for i in 12:
 		inv.consume_round(&"primary")
 	check(inv.reload(&"primary") == 30, "tactical reload loads a full mag")

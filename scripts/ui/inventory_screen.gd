@@ -75,6 +75,8 @@ func _redraw() -> void:
 			var use := _medical_use(item)
 			if use.is_valid():
 				actions.append(["Use", use])
+			if Inventory.is_loose_rounds(item) and inv.loadable_rounds(item.id) > 0:
+				actions.append(["Load magazines", load_magazines.bind(item.id)])
 			for other in Inventory.CONTAINERS:
 				if other != container and inv.capacity(other) > 0.0:
 					actions.append(["> " + String(other).capitalize(), _action.bind("move_entry", container, i, &"", other)])
@@ -98,6 +100,12 @@ func _medical_use(item: ItemData) -> Callable:
 		if task.item == item.id:
 			return func() -> void: player._server_treat.rpc_id(1, player.get_path(), item.id, task.part, false)
 	return Callable()
+
+
+## "Load magazines" on a stack of loose rounds: the host fills the magazines of that
+## calibre, fullest first, as a timed action (Soldier._server_load_mags).
+func load_magazines(rounds_id: StringName) -> void:
+	player._server_load_mags.rpc_id(1, rounds_id)
 
 
 static func _detail(item: ItemData, state: Dictionary) -> String:

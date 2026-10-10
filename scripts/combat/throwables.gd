@@ -8,7 +8,8 @@ extends RefCounted
 ##   plus a crater in voxel walls.
 ## - Flashbang: blinds players by how close it is and whether they were looking at it,
 ##   and stuns AI soldiers.
-## - Smoke: a cloud that blocks AI line of sight (SmokeCloud.blocks) and the view.
+## - Smoke: a cloud that blocks AI line of sight (SmokeCloud.blocks) and the view, in the
+##   grenade's colour (white, green, yellow, blue, purple) on every peer.
 
 const FRAG_RADIUS := 8.0
 ## Fragment wounds on a body the blast reaches: from FRAG_MIN_WOUNDS at the edge of the
@@ -52,15 +53,16 @@ static func clear_line(world: World3D, from: Vector3, to: Vector3) -> bool:
 	return world.direct_space_state.intersect_ray(query).is_empty()
 
 
-## Host only.
-static func server_detonate(level: CompoundLevel, kind: String, pos: Vector3) -> void:
+## Host only. `item_id` is the grenade's item: a smoke grenade's cloud takes its
+## "smoke_colour" (white without one).
+static func server_detonate(level: CompoundLevel, kind: String, pos: Vector3, item_id: StringName = &"") -> void:
 	match kind:
 		"frag":
 			_frag(level, pos)
 		"flash":
 			_flash(level, pos)
 		"smoke":
-			level.spawn_smoke.rpc(pos)
+			level.spawn_smoke.rpc(pos, SmokeCloud.colour_of(item_id))
 
 
 static func _frag(level: CompoundLevel, pos: Vector3) -> void:
