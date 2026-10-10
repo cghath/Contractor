@@ -135,14 +135,17 @@ func update_status(player: Soldier) -> void:
 	_downed.text = downed_text(player.vitals)
 
 
-## The text over a downed player's black screen: no health, just what is happening.
+## The text over a downed player's black screen: no health, just what is happening. You
+## come round on your own once your body lets you (treatment helps); there is no revive.
 static func downed_text(vitals: Vitals) -> String:
 	if not vitals.downed:
 		return ""
 	if vitals.in_cardiac_arrest():
 		var s := ceili(maxf(vitals.seconds_to_death(), 0.0))
-		return "CARDIAC ARREST - %d:%02d\nWait for a teammate to revive you" % [floori(s / 60.0), s % 60]
-	return "UNCONSCIOUS\nWait for a teammate to revive you"
+		return "CARDIAC ARREST - %d:%02d\nYour heart has stopped" % [floori(s / 60.0), s % 60]
+	if vitals.wake_eta() > 0.0:
+		return "UNCONSCIOUS\nComing round..."
+	return "UNCONSCIOUS\nYour team can treat you; you'll come round when your body recovers"
 
 
 ## The squad by F-key number, with each member's fire team and role (and colour team), and

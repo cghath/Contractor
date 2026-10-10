@@ -509,7 +509,7 @@ func _test_callout_events() -> void:
 	var buddy_name := String(casualty.buddy.name) if is_instance_valid(casualty.buddy) else "?"
 	check(not down.is_empty() and down[-1].text == expected and down[-1].speaker == buddy_name,
 		"%s's buddy calls %s" % [casualty.name, expected])
-	casualty.vitals.server_revive(100.0)
+	casualty.vitals.server_reset_health()
 	var thrower := squad.order_throw(player, &"smoke_grenade", Vector3(0, 0, 4), PackedStringArray())
 	check(thrower != "" and _said(&"smoke_out").any(func(c: Dictionary) -> bool: return c.speaker == thrower), "%s throws smoke: Smoke out!" % thrower)
 	await _seconds(1.0)

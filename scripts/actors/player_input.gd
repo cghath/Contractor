@@ -78,7 +78,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed(&"fire") and not captured:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	elif not body.vitals.is_up():
-		return  # downed: no giving up (handoff); wait for a revive or bleed out
+		return  # downed: no giving up (handoff); you come round on your own, or the arrest window runs out
 	elif interaction.is_open() and event is InputEventMouseButton:
 		return  # clicks don't fire through the interaction menu
 	elif event.is_action_pressed(&"grenade"):

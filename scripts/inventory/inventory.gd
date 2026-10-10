@@ -412,14 +412,10 @@ func chips_in(slot: StringName) -> Array:
 
 
 # --- Medical kits -----------------------------------------------------------------------
-# An IFAK or trauma kit is a bag of kit items (its stats' "contents", item id -> count) and,
-# for the trauma kit, stopgap revives ("revives") until IV in wave 3. An untouched kit has
-# no state, so full kits stack; once something comes out, its state holds what's left
-# ({"contents", "revives"}) and it keeps its own entry, wherever it goes. Treatments draw
+# An IFAK or trauma kit is a bag of kit items (its stats' "contents", item id -> count). An
+# untouched kit has no state, so full kits stack; once something comes out, its state holds
+# what's left ({"contents"}) and it keeps its own entry, wherever it goes. Treatments draw
 # from loose items first, then from a kit.
-
-## What _take_from_kit takes for a stopgap revive (otherwise it's an item id).
-const REVIVE := "revives"
 
 
 ## Whether `item` is a bag of kit items (IFAK, trauma kit).
@@ -436,11 +432,6 @@ static func kit_contents(item: ItemData, state: Dictionary) -> Dictionary:
 	return counts
 
 
-## Stopgap revives left in a kit with `state`.
-static func kit_revives(item: ItemData, state: Dictionary) -> int:
-	return int(state.get("revives", item.stats.get("revives", 0)))
-
-
 ## What a kit holds, for the inventory screen: "TQ 1, Bandage 2, Gauze 1" ("empty" if nothing).
 static func kit_text(item: ItemData, state: Dictionary) -> String:
 	var parts := PackedStringArray()
@@ -449,9 +440,6 @@ static func kit_text(item: ItemData, state: Dictionary) -> String:
 		if int(contents[id]) > 0:
 			var inside := ItemDB.get_item(StringName(id))
 			parts.append("%s %d" % [inside.stats.get("short", inside.name) if inside else id, int(contents[id])])
-	var revives := kit_revives(item, state)
-	if revives > 0:
-		parts.append("revive %d" % revives)
 	return ", ".join(parts) if not parts.is_empty() else "empty"
 
 
@@ -474,23 +462,8 @@ func take_medical(id: StringName) -> bool:
 	return _take_from_kit(String(id))
 
 
-## A kit carried that still has a stopgap revive (the trauma kit), or null.
-func revive_kit() -> ItemData:
-	for container in CONTAINERS:
-		for entry: Dictionary in containers[container]:
-			var item := ItemDB.get_item(entry.id)
-			if is_kit(item) and kit_revives(item, entry.get("state", {})) > 0:
-				return item
-	return null
-
-
-## Host only. Uses up one stopgap revive from a kit. False if no kit has one.
-func take_kit_revive() -> bool:
-	return _take_from_kit(REVIVE)
-
-
-## Takes one `what` (an item id, or REVIVE) out of the best kit that has one: opened kits
-## first, then the one with the least left. A kit left empty is thrown away.
+## Takes one `what` (an item id) out of the best kit that has one: opened kits first, then
+## the one with the least left. A kit left empty is thrown away.
 func _take_from_kit(what: String) -> bool:
 	var best_container: StringName = &""
 	var best_index := -1
@@ -501,7 +474,7 @@ func _take_from_kit(what: String) -> bool:
 		for i in list.size():
 			var item := ItemDB.get_item(list[i].id)
 			var state: Dictionary = list[i].get("state", {})
-			if not is_kit(item) or _kit_has(item, state, what) <= 0:
+			if not is_kit(item) or int(kit_contents(item, state).get(what, 0)) <= 0:
 				continue
 			var opened: bool = list[i].has("state")
 			var left := _kit_left(item, state)
@@ -517,14 +490,8 @@ func _take_from_kit(what: String) -> bool:
 	var item := ItemDB.get_item(entry.id)
 	var old_state: Dictionary = entry.get("state", {})
 	var contents := kit_contents(item, old_state)
-	var revives := kit_revives(item, old_state)
-	if what == REVIVE:
-		revives -= 1
-	else:
-		contents[what] = int(contents[what]) - 1
+	contents[what] = int(contents[what]) - 1
 	var state := {"contents": contents}
-	if item.stats.has("revives"):
-		state["revives"] = revives
 	var empty := _kit_left(item, state) <= 0
 	if int(entry.count) > 1:
 		entry.count -= 1  # open one kit out of a stack
@@ -538,14 +505,9 @@ func _take_from_kit(what: String) -> bool:
 	return true
 
 
-## How many of `what` (an item id, or REVIVE) a kit with `state` holds.
-static func _kit_has(item: ItemData, state: Dictionary, what: String) -> int:
-	return kit_revives(item, state) if what == REVIVE else int(kit_contents(item, state).get(what, 0))
-
-
-## Everything left in a kit with `state` (items and revives).
+## Everything left in a kit with `state`.
 static func _kit_left(item: ItemData, state: Dictionary) -> int:
-	var left := kit_revives(item, state)
+	var left := 0
 	for n: Variant in kit_contents(item, state).values():
 		left += int(n)
 	return left

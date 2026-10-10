@@ -179,8 +179,7 @@ func _test_hitboxes() -> void:
 	player.vitals.server_damage(500.0)
 	await _frames(2)
 	check(player.vitals.downed and absf(torso.rotation.x + PI / 2) < 0.01, "downed still lays hitboxes down (lay_down)")
-	player.vitals.server_revive(100.0)
-	player.vitals.server_reset_health()  # the wound model leaves blood loss after a revive
+	player.vitals.server_reset_health()
 	move.set_stance(S.STAND_HIGH)
 	await _frames(2)
 	check(torso.transform.is_equal_approx(rest_torso) and _shape_position(head).distance_to(rest_head) < 0.01, "standing again: back at rest")

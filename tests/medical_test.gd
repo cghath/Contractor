@@ -1,10 +1,11 @@
 extends Node3D
 ## Headless checks for the kit and treatment (design doc "The kit", "Tourniquet", "Fractures",
 ## "Chest"): each item's effect, the rushed and second tourniquet, packing then taking a
-## tourniquet off, seals and tension, splints, morphine and overdose, NPAs and airway
-## obstruction, care_needed's order, kits as bags of items, the stopgap revive's conditions,
-## and, in a hosted session, the timed host requests (times on yourself and others,
-## interruptions, H, the Treat menu).
+## tourniquet off, seals and tension, splints, morphine as a level in the blood (relief,
+## sedation, slowed breathing), NPAs and airway obstruction, care_needed's order, treatment
+## waking a casualty (there is no revive), kits as bags of items, and, in a hosted session,
+## the timed host requests (times on yourself and others, interruptions, H, the Treat menu,
+## a casualty coming round once treated).
 ##   <voxel godot exe> --headless --path . res://tests/medical_test.tscn
 ## Exits with the number of failures. Rule dice are seeded, so results repeat.
 
@@ -30,7 +31,7 @@ func _ready() -> void:
 	_test_morphine()
 	_test_airway()
 	_test_care_order()
-	_test_revive_rules()
+	_test_treatment_wakes()
 	_test_kits()
 	await _start_session()
 	await _test_times()
@@ -38,7 +39,7 @@ func _ready() -> void:
 	await _test_interruptions()
 	await _test_use_medical()
 	await _test_menu_and_removal()
-	await _test_revive()
+	await _test_wakes_in_session()
 	await _test_splint_movement()
 	GameState.delete_save()
 	print("MEDICAL TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
@@ -169,7 +170,7 @@ func _test_splint() -> void:
 
 
 func _test_morphine() -> void:
-	print("Morphine")
+	print("Morphine: a level in the blood")
 	var m := _model(3)
 	m.pain_wounds = 0.95
 	m.update_state(0.0)
@@ -177,54 +178,73 @@ func _test_morphine() -> void:
 	var first := m.care_tasks().filter(func(t: Dictionary) -> bool: return t.kind == "pain")
 	check(not first.is_empty() and first[0].item == &"morphine", "high pain asks for morphine")
 	check(m.apply_item(WoundModel.MORPHINE, Vitals.TORSO), "a dose goes in")
-	m.advance(15.0)
-	var expected := 0.95 - 0.25 - 15.0 * WoundModel.PAIN_FADE_PER_S
-	check(absf(m.pain() - expected) < 0.01, "half of 0.5 off in 15 s (%.2f)" % m.pain())
-	m.advance(20.0)
-	expected = 0.95 - 0.5 - 35.0 * WoundModel.PAIN_FADE_PER_S
+	_step(m, 15.0)
+	check(absf(m.morphine_level - 0.5) < 0.02, "half of it in the blood after 15 s (%.2f)" % m.morphine_level)
+	var expected := 0.95 - 15.0 * WoundModel.PAIN_FADE_PER_S - WoundModel.MORPHINE_RELIEF * m.morphine_level
+	check(absf(m.pain() - expected) < 0.01, "relief follows the level: pain %.2f" % m.pain())
+	_step(m, 15.0)
+	check(m.morphine_level > 0.97 and m.morphine_level <= 1.0, "a whole dose in after 30 s (%.2f)" % m.morphine_level)
+	expected = 0.95 - 30.0 * WoundModel.PAIN_FADE_PER_S - WoundModel.MORPHINE_RELIEF * m.morphine_level
 	check(absf(m.pain() - expected) < 0.01, "0.5 off over 30 s (%.2f)" % m.pain())
-	check(not m.care_tasks().any(func(t: Dictionary) -> bool: return t.kind == "pain"), "no second dose asked for within 10 minutes")
+	check(m.care_tasks().any(func(t: Dictionary) -> bool: return t.kind == "pain"), "still %.2f to ease: a second dose is asked for" % m.pain_to_ease())
+	m.apply_item(WoundModel.MORPHINE, Vitals.TORSO)
+	check(not m.care_tasks().any(func(t: Dictionary) -> bool: return t.kind == "pain"), "no third: two doses in the blood is enough (%.2f)" % m.morphine_total())
+	_step(m, WoundModel.MORPHINE_ABSORB_S)
+	check(absf(m.morphine_relief() - WoundModel.MORPHINE_RELIEF_MAX) < 0.001 and m.morphine_level < WoundModel.MORPHINE_SEDATION_LEVEL and not m.unconscious,
+		"two doses: %.1f off pain, not sedated (level %.2f)" % [m.morphine_relief(), m.morphine_level])
+	# It wears off: half-life.
+	var d := _model()
+	d.pain_wounds = 0.6
+	d.apply_item(WoundModel.MORPHINE, Vitals.TORSO)
+	_step(d, WoundModel.MORPHINE_ABSORB_S)
+	var peak := d.morphine_level
+	_step(d, WoundModel.MORPHINE_HALF_LIFE_S)
+	check(absf(d.morphine_level - peak * 0.5) < 0.02, "the level halves in %.0f min (%.2f -> %.2f)" % [WoundModel.MORPHINE_HALF_LIFE_S / 60.0, peak, d.morphine_level])
+	check(absf(d.morphine_relief() - WoundModel.MORPHINE_RELIEF * d.morphine_level) < 0.001 and d.morphine_relief() < 0.3, "and the relief with it (%.2f)" % d.morphine_relief())
+	_step(d, 6.0 * WoundModel.MORPHINE_HALF_LIFE_S)
+	check(d.morphine_level < 0.02, "gone after a couple of hours (%.3f)" % d.morphine_level)
+	# Too much sedates; much more slows breathing and can stop the heart.
+	var sedated := _model()
+	sedated.npa = true
+	sedated.pain_wounds = 1.0
+	for i in 3:
+		sedated.apply_item(WoundModel.MORPHINE, Vitals.TORSO)
+	_step(sedated, 3.0 * WoundModel.MORPHINE_ABSORB_S)
+	check(sedated.unconscious and sedated.unconscious_causes() == [&"morphine"] and sedated.spo2 > WoundModel.SPO2_LABOURED,
+		"three doses at once: sedated (%s, level %.2f), breathing still fine" % [sedated.unconscious_causes(), sedated.morphine_level])
+	var t := 0.0
+	while sedated.unconscious and t < 900.0:
+		_step(sedated, 1.0)
+		t += 1.0
+	check(not sedated.unconscious and sedated.morphine_level < WoundModel.MORPHINE_SEDATION_LEVEL, "he comes round as it wears off (%.0f s later, level %.2f)" % [t, sedated.morphine_level])
+	var depressed := _model()
+	depressed.npa = true
+	depressed.pain_wounds = 1.0
+	for i in 5:
+		depressed.apply_item(WoundModel.MORPHINE, Vitals.TORSO)
+	_step(depressed, 5.0 * WoundModel.MORPHINE_ABSORB_S + 20.0)
+	check(depressed.spo2 < WoundModel.SPO2_BLUE_LIPS and depressed.unconscious_causes().has(&"spo2") and depressed.unconscious_causes().has(&"morphine"),
+		"five doses: breathing slows, SpO2 %.0f%% (%s)" % [depressed.spo2, depressed.unconscious_causes()])
+	var lethal := _model()
+	lethal.npa = true
+	lethal.pain_wounds = 1.0
+	for i in 7:
+		lethal.apply_item(WoundModel.MORPHINE, Vitals.TORSO)
+	t = 0.0
+	while not lethal.arrest and t < 900.0:
+		_step(lethal, 1.0)
+		t += 1.0
+	check(lethal.arrest, "seven: SpO2 stays under 70%% until the heart stops (%.0f s)" % t)
+	# A cracked rib: morphine is its fix.
 	var rib := _model(4)
 	rib.add_impact(Vitals.CHEST, Vitals.PISTOL, 5.0, -1.0)
 	while not rib.has_kind("rib"):
 		rib.reset()
 		rib.add_impact(Vitals.CHEST, Vitals.PISTOL, 5.0, -1.0)
 	rib.impact = 0.0
-	check(absf(rib.pain() - WoundModel.PAIN_FLOOR_RIB) < 0.001 and rib.care_tasks().any(func(t: Dictionary) -> bool: return t.item == &"morphine"), "a cracked rib's pain asks for morphine")
+	check(absf(rib.pain() - WoundModel.PAIN_FLOOR_RIB) < 0.001 and rib.care_tasks().any(func(task: Dictionary) -> bool: return task.item == &"morphine"), "a cracked rib's pain asks for morphine")
 	rib.apply_item(WoundModel.MORPHINE, Vitals.TORSO)
 	check(rib.pain() < 0.001 and rib.stamina_mult() < 1.0, "morphine is its fix (pain %.2f; still short of breath)" % rib.pain())
-	var overdoses := 0
-	var knocked: WoundModel = null
-	for i in 300:
-		var t := _model(10 + i)
-		t.care_rng.seed = 10 + i
-		t.pain_wounds = 0.6
-		t.apply_item(WoundModel.MORPHINE, Vitals.TORSO)
-		t.advance(60.0)
-		t.pain_wounds = 0.3
-		t.apply_item(WoundModel.MORPHINE, Vitals.TORSO)
-		if t.unconscious:
-			overdoses += 1
-			knocked = t
-	check(absf(overdoses / 300.0 - WoundModel.OVERDOSE_CHANCE) < 0.08, "a second dose within 10 min overdoses %.0f%% of the time" % (overdoses / 3.0))
-	if knocked:
-		knocked.npa = true
-		knocked.advance(WoundModel.OVERDOSE_KO_S.x - 5.0)
-		check(knocked.unconscious, "an overdose knocks you out for a while")
-		knocked.advance(WoundModel.OVERDOSE_KO_S.y)
-		check(not knocked.unconscious, "then you come round")
-	var safe := 0
-	for i in 100:
-		var t := _model(500 + i)
-		t.care_rng.seed = 500 + i
-		t.pain_wounds = 0.6
-		t.apply_item(WoundModel.MORPHINE, Vitals.TORSO)
-		t.advance(WoundModel.OVERDOSE_WINDOW_S + 1.0)
-		t.pain_wounds = 0.5
-		t.apply_item(WoundModel.MORPHINE, Vitals.TORSO)
-		if not t.unconscious:
-			safe += 1
-	check(safe == 100, "a dose after 10 minutes never overdoses (%d/100)" % safe)
 
 
 func _test_airway() -> void:
@@ -239,10 +259,13 @@ func _test_airway() -> void:
 		m.advance(1.0)
 		t += 1.0
 	check(m.airway_blocked and not m.arrest, "without one the airway obstructs (after %.0f s)" % t)
-	m.advance(WoundModel.AIRWAY_ARREST_S - 2.0)
+	var arrest_in := (m.spo2 - WoundModel.SPO2_ARREST) / WoundModel.SPO2_FALL_PER_S + WoundModel.SPO2_ARREST_S
+	_step(m, 30.0)
+	check(m.spo2 < WoundModel.SPO2_BLUE_LIPS and m.unconscious_causes().has(&"spo2"), "SpO2 falls (%.0f%%)" % m.spo2)
+	_step(m, arrest_in - 32.0)
 	check(not m.arrest, "the heart holds out a while")
-	m.advance(3.0)
-	check(m.arrest, "then cardiac arrest, %d s after the obstruction" % WoundModel.AIRWAY_ARREST_S)
+	_step(m, 3.0)
+	check(m.arrest, "then cardiac arrest, %.0f s after the obstruction (%.0f s under 70%%)" % [arrest_in, WoundModel.SPO2_ARREST_S])
 	var blocked := 0
 	for i in 400:
 		var c := _model(i)
@@ -262,11 +285,46 @@ func _test_airway() -> void:
 		if fixed.airway_blocked:
 			break
 		fixed.advance(1.0)
+	_step(fixed, 20.0)
+	var before := fixed.spo2
 	check(fixed.apply_item(WoundModel.NPA, &"head") and not fixed.airway_blocked, "an NPA clears an obstructed airway")
+	_step(fixed, 60.0)
+	check(fixed.spo2 > before and fixed.spo2 > 88.0, "SpO2 recovers (%.0f%% -> %.0f%%)" % [before, fixed.spo2])
 	for s in 3600:
 		fixed.advance(1.0)
 	check(not fixed.arrest and not fixed.airway_blocked and fixed.unconscious, "and with it in, an hour unconscious without obstruction")
 	check(not fixed.care_tasks().any(func(task: Dictionary) -> bool: return task.kind == "airway"), "nothing more asked for the airway")
+	# Out only briefly (a concussion knockout): once the knockout is over, the obstruction
+	# alone doesn't keep them down; they clear it themselves and come round.
+	var brief := _model(7)
+	brief.knockout_left = 40.0  # the longest (a second concussion in the same fight)
+	brief.update_state(0.0)
+	_step(brief, 1.0)
+	brief.airway_blocked = true
+	_step(brief, 38.0)
+	check(brief.unconscious and brief.airway_blocked and brief.spo2 < WoundModel.SPO2_UNCONSCIOUS,
+		"obstructed early in a knockout, SpO2 falls under %.0f%% (%.0f%%)" % [WoundModel.SPO2_UNCONSCIOUS, brief.spo2])
+	_step(brief, 3.0)
+	check(brief.unconscious and not brief.airway_blocked and brief.unconscious_causes() == [&"spo2"],
+		"once the knockout is over the obstruction clears itself (%s, SpO2 %.0f%%)" % [brief.unconscious_causes(), brief.spo2])
+	var woke_at := -1.0
+	for s in 120:
+		_step(brief, 1.0)
+		if not brief.unconscious:
+			woke_at = 2.0 + s
+			break
+	check(woke_at > 0.0 and not brief.npa and not brief.arrest,
+		"and they come round without an NPA (%.0f s after the knockout)" % woke_at)
+	var long_out := _model(8)
+	long_out.pain_wounds = 0.95
+	long_out.update_state(0.0)
+	_step(long_out, 20.0)
+	long_out.airway_blocked = true
+	_step(long_out, 30.0)  # out 50 s, SpO2 under the line
+	long_out.pain_wounds = 0.0  # the pain has gone; only the obstruction is left
+	_step(long_out, 30.0)
+	check(long_out.unconscious and long_out.airway_blocked and long_out.unconscious_causes() == [&"spo2"],
+		"out longer than %.0f s, the obstruction stays until an NPA (%s)" % [WoundModel.AIRWAY_SELF_CLEAR_S, long_out.unconscious_causes()])
 	var awake := _model()
 	check(awake.treatment_problem(WoundModel.NPA, &"head") != "", "no NPA for someone awake")
 
@@ -298,18 +356,55 @@ func _test_care_order() -> void:
 	v.queue_free()
 
 
-func _test_revive_rules() -> void:
-	print("Stopgap revive conditions")
-	var v := _vitals()
-	check(v.revive_problem() == "Not down", "not for someone up")
-	_wound(v, Vitals.THIGH_L, "arterial", 1.2, &"femoral_l")
-	v.server_damage(90.0)  # 54% lost: cardiac arrest
-	check(v.in_cardiac_arrest() and v.revive_problem() == "Stop the bleeding first", "not while the bleeding isn't controlled")
-	v.server_apply_treatment(&"tourniquet", Vitals.THIGH_L)
-	check(v.revive_problem() == "", "a tourniquet controls it")
-	v.server_revive(0.0)
-	check(v.is_up() and not v.in_cardiac_arrest() and v.blood_fraction() >= Vitals.REVIVE_BLOOD - 0.001, "revived: heart restarted, %.0f%% blood" % (v.blood_fraction() * 100.0))
-	v.queue_free()
+## No revive: treatment takes away what keeps a casualty out and they come round on their own.
+func _test_treatment_wakes() -> void:
+	print("Treatment wakes a casualty (no revive)")
+	# A femoral bleed and heavy pain: out from the pain before 40% lost.
+	var treated := _vitals()
+	var untreated := _vitals()
+	for v: Vitals in [treated, untreated]:
+		v._model.npa = true  # the airway is the next check's
+		v._model.pain_wounds = 0.8
+		_wound(v, Vitals.THIGH_L, "arterial", 1.2, &"femoral_l")
+		while not v.downed:
+			v.server_advance(1.0)
+	check(treated.downed and treated.why_unconscious() == [&"pain"] and treated.blood_fraction() > 0.6,
+		"bleeding out, the pain knocks him out first (%s, %.0f%% lost)" % [treated.why_unconscious(), 100.0 - treated.blood_fraction() * 100.0])
+	untreated.server_advance(600.0)
+	check(untreated.downed and untreated.why_unconscious().has(&"blood"), "left alone he slides past 40%% lost and stays out (%s)" % [untreated.why_unconscious()])
+	treated.server_apply_treatment(&"tourniquet", Vitals.THIGH_L)
+	var blood := treated.blood_fraction()
+	treated.server_advance(30.0)
+	check(treated.downed and treated.blood_fraction() == blood and treated.why_unconscious() == [&"pain"],
+		"a tourniquet stops the slide; the pain still keeps him out (%s)" % [treated.why_unconscious()])
+	treated.server_apply_treatment(&"morphine", Vitals.TORSO)
+	var t := 0.0
+	while treated.downed and t < 120.0:
+		treated.server_advance(1.0)
+		t += 1.0
+	check(treated.is_up() and t <= WoundModel.MORPHINE_ABSORB_S + WoundModel.WAKE_S[&"pain"] + 1.0,
+		"morphine eases the pain and he comes round on his own %.0f s later (pain %.2f)" % [t, treated.pain()])
+	# An obstructed airway: out from low SpO2 until an NPA goes in.
+	var airway := _vitals()
+	airway._model.pain_wounds = 0.95
+	airway.server_advance(0.1)
+	airway._model.airway_blocked = true  # it obstructed while the pain kept him out...
+	airway.server_advance(60.0)  # ...longer than a brief spell (AIRWAY_SELF_CLEAR_S)
+	airway.server_apply_treatment(&"morphine", Vitals.TORSO)
+	airway.server_advance(30.0)
+	check(airway.downed and airway.why_unconscious() == [&"spo2"] and not airway.in_cardiac_arrest(),
+		"morphine took the pain, but the blocked airway keeps him out (%s)" % [airway.why_unconscious()])
+	check(airway.signs().has("Blue lips") and airway.signs().has("Unresponsive") and airway.signs().has("Breathing laboured"),
+		"what a medic sees: %s" % [airway.signs()])
+	airway.server_apply_treatment(&"npa", Vitals.HEAD)
+	t = 0.0
+	while airway.downed and t < 120.0:
+		airway.server_advance(1.0)
+		t += 1.0
+	check(airway.is_up() and not airway.in_cardiac_arrest() and airway.spo2() >= WoundModel.SPO2_UNCONSCIOUS,
+		"an NPA clears it: SpO2 recovers and he comes round %.0f s later" % t)
+	for v: Vitals in [treated, untreated, airway]:
+		v.queue_free()
 
 
 func _test_kits() -> void:
@@ -317,7 +412,7 @@ func _test_kits() -> void:
 	var ifak := ItemDB.get_item(&"ifak")
 	var trauma := ItemDB.get_item(&"trauma_kit")
 	check(Inventory.kit_text(ifak, {}) == "TQ 1, Bandage 2, Gauze 1, Seal 1", "an IFAK: %s" % Inventory.kit_text(ifak, {}))
-	check(Inventory.kit_text(trauma, {}) == "TQ 2, Bandage 4, Gauze 2, Seal 2, Splint 1, Morphine 2, NPA 1, revive 1", "a trauma kit: %s" % Inventory.kit_text(trauma, {}))
+	check(Inventory.kit_text(trauma, {}) == "TQ 2, Bandage 4, Gauze 2, Seal 2, Splint 1, Morphine 2, NPA 1", "a trauma kit: %s" % Inventory.kit_text(trauma, {}))
 	var inv := Inventory.new()
 	add_child(inv)
 	inv.take(&"assault_pack")
@@ -341,8 +436,8 @@ func _test_kits() -> void:
 	check(inv.medical_count(&"pressure_bandage") == 4 and inv.medical_count(&"splint") == 1, "the trauma kit is still full")
 	check(InventoryScreen._detail(trauma, _states(inv, &"trauma_kit")[0]).contains("Bandage 4"), "the inventory screen shows what's in it (%s)" % InventoryScreen._detail(trauma, _states(inv, &"trauma_kit")[0]))
 	inv.take_medical(&"morphine")
-	check(inv.revive_kit() == trauma and inv.take_kit_revive() and inv.revive_kit() == null and inv.count_of(&"trauma_kit") == 1, "the trauma kit's stopgap revive is used once; the kit stays")
-	check(not inv.take_kit_revive() and not inv.take_medical(&"flashbang"), "nothing left to take is refused")
+	check(inv.medical_count(&"morphine") == 1 and inv.count_of(&"trauma_kit") == 1, "a morphine out of the trauma kit; the kit stays")
+	check(not inv.take_medical(&"flashbang"), "nothing left to take is refused")
 	var dropped := inv.strip()
 	var other := Inventory.new()
 	add_child(other)
@@ -350,7 +445,7 @@ func _test_kits() -> void:
 	for entry in dropped:
 		if entry.id == &"trauma_kit":
 			other.take(entry.id, entry.count, entry.get("state", {}))
-	check(other.medical_count(&"morphine") == 1 and other.medical_count(&"pressure_bandage") == 4 and other.revive_kit() == null, "an opened kit keeps what's left wherever it goes")
+	check(other.medical_count(&"morphine") == 1 and other.medical_count(&"pressure_bandage") == 4, "an opened kit keeps what's left wherever it goes")
 	inv.queue_free()
 	other.queue_free()
 
@@ -427,7 +522,7 @@ func _test_completed_treatments() -> void:
 	player.vitals._model.pain_wounds = 0.6
 	player._server_treat.rpc_id(1, player.get_path(), &"morphine", Vitals.TORSO)
 	await _seconds(2.2)
-	check(player.vitals.morphine_window_left() > 0.0 and player.inventory.medical_count(&"morphine") == 0, "morphine on yourself, used up")
+	check(player.vitals._model.morphine_total() > 0.9 and player.inventory.medical_count(&"morphine") == 0, "morphine on yourself, used up")
 	_reset(casualty)
 	_wound(casualty.vitals, Vitals.THIGH_L, "arterial", 1.2)
 	player.inventory.take(&"tourniquet", 2)
@@ -531,18 +626,14 @@ func _test_menu_and_removal() -> void:
 	check(labels.size() >= 3 and labels[0] == "Tourniquet, left thigh" and labels[1] == "Tourniquet (rushed, 1.5 s), left thigh" and labels[2] == "NPA Airway, head",
 		"Treat on a casualty: %s" % [labels])
 	check(treat.items[0].disabled == "You have no Tourniquet", "greyed out without the item (%s)" % treat.items[0].disabled)
-	var revive := _action(player, casualty, &"revive")
-	check(revive.disabled == "Needs a trauma kit", "the stopgap revive needs a trauma kit (%s)" % revive.disabled)
 	player.inventory.take(&"trauma_kit")
-	revive = _action(player, casualty, &"revive")
-	check(revive.label.contains("stopgap") and revive.disabled == "Stop the bleeding first", "and the bleeding controlled (%s: %s)" % [revive.label, revive.disabled])
+	check(_action(player, casualty, &"revive").is_empty(), "no Revive, even with a trauma kit: casualties come round on their own")
 	treat = _action(player, casualty, &"treat")
 	InteractionMenu.perform(player, treat.items[0])
 	await _seconds(4.2)
 	labels = _action(player, casualty, &"treat").items.map(func(e: Dictionary) -> String: return e.label)
 	check(labels.has("Hemostatic Gauze (pack under tourniquet), left thigh") and not labels.any(func(l: String) -> bool: return l.begins_with("Remove")),
 		"tourniquet on: packing offered, no removal yet (%s)" % [labels])
-	check(_action(player, casualty, &"revive").disabled == "", "now the revive is possible")
 	var pack: Dictionary = _action(player, casualty, &"treat").items.filter(func(e: Dictionary) -> bool: return e.label.begins_with("Hemostatic"))[0]
 	InteractionMenu.perform(player, pack)
 	await _seconds(8.2)
@@ -560,30 +651,30 @@ func _test_menu_and_removal() -> void:
 	player.inventory.remove_one(&"trauma_kit")
 
 
-func _test_revive() -> void:
-	print("Stopgap revive (host request)")
+## Through the real host requests: tourniquet and morphine, then the casualty comes round.
+func _test_wakes_in_session() -> void:
+	print("Treated through the host requests, a casualty comes round")
 	_restock()
+	casualty.vitals._model.npa = true  # the airway is covered by the rules above
+	casualty.vitals._model.pain_wounds = 0.95
 	_wound(casualty.vitals, Vitals.THIGH_L, "arterial", 1.2, &"femoral_l")
-	casualty.vitals.server_damage(90.0)  # 54% lost: cardiac arrest
 	await _frames(2)
-	check(casualty.vitals.in_cardiac_arrest(), "the casualty is in cardiac arrest")
-	player.inventory.take(&"ifak")
-	player._server_revive.rpc_id(1, casualty.get_path())
-	check(not casualty.vitals.is_healing(), "not with an IFAK")
+	check(casualty.vitals.downed and casualty.vitals.why_unconscious() == [&"pain"], "the casualty is out from the pain (%s)" % [casualty.vitals.why_unconscious()])
+	var woke := [false]
+	casualty.vitals.woke.connect(func() -> void: woke[0] = true, CONNECT_ONE_SHOT)
 	player.inventory.take(&"trauma_kit")
-	player._server_revive.rpc_id(1, casualty.get_path())
-	check(not casualty.vitals.is_healing(), "not while the leg bleeds")
-	casualty.vitals.server_apply_treatment(&"tourniquet", Vitals.THIGH_L)
-	player._server_revive.rpc_id(1, casualty.get_path())
-	check(casualty.vitals.is_healing(), "bleeding controlled: reviving")
-	await _seconds(3.3)
-	check(casualty.vitals.is_up() and not casualty.vitals.in_cardiac_arrest() and casualty.vitals.blood_fraction() >= Vitals.REVIVE_BLOOD - 0.001,
-		"heart restarted, blood back to %.0f%%" % (casualty.vitals.blood_fraction() * 100.0))
-	check(player.inventory.count_of(&"trauma_kit") == 1 and player._best_revive_kit() == null and player.inventory.medical_count(&"npa") == 1,
-		"the trauma kit's revive is used, the kit and its contents stay")
+	player._server_treat.rpc_id(1, casualty.get_path(), &"tourniquet", Vitals.THIGH_L)
+	await _seconds(4.2)
+	check(casualty.vitals.bleed_rate() == 0.0 and casualty.vitals.downed, "a tourniquet from the trauma kit: the bleeding stops, still out")
+	player._server_treat.rpc_id(1, casualty.get_path(), &"morphine", Vitals.TORSO)
+	await _seconds(2.2)
+	check(casualty.vitals.downed and casualty.vitals._model.morphine_total() > 0.9, "morphine in")
+	casualty.vitals.server_advance(WoundModel.MORPHINE_ABSORB_S + WoundModel.WAKE_S[&"pain"] + 1.0)
+	check(casualty.vitals.is_up() and woke[0], "and he comes round on his own (%s)" % casualty.vitals.condition_text())
+	check(player.inventory.count_of(&"trauma_kit") == 1 and player.inventory.medical_count(&"tourniquet") == 1 and player.inventory.medical_count(&"morphine") == 1,
+		"both came out of the trauma kit, which stays")
 	_reset(casualty)
 	player.inventory.remove_one(&"trauma_kit")
-	player.inventory.remove_one(&"ifak")
 
 
 func _test_splint_movement() -> void:
@@ -638,6 +729,14 @@ func _model(seed_value := 1) -> WoundModel:
 	m.rng.seed = seed_value
 	m.care_rng.seed = seed_value
 	return m
+
+
+## Runs a model for `seconds` in the host's 0.1 s steps.
+func _step(m: WoundModel, seconds: float) -> void:
+	while seconds > 0.0001:
+		var dt := minf(seconds, Vitals.SIM_STEP_S)
+		m.advance(dt)
+		seconds -= dt
 
 
 ## The player with only a carrier, a pack and a rifle: no medical items.

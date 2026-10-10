@@ -13,19 +13,25 @@ extends Node
 ## late joiners, and every query works on every peer from that state. (Armor damage is
 ## item state, in Inventory.)
 ##
-## Unconscious (downed) at 40% blood lost or when pain passes the knockout threshold;
-## cardiac arrest at 50% lost, which starts a 10-minute window and ends in death unless
-## the heart restarts. Until wave 3 (IV, CPR, defib) only the stopgap revive (server_revive,
-## a trauma kit once the bleeding is controlled) does that. There is no giving up.
+## Consciousness follows the body; there is no revive. Unconscious (downed) while any cause
+## holds (why_unconscious): SpO2 under 85%, pain at the knockout threshold, 40% of blood
+## lost, cardiac arrest, a concussion knockout, morphine sedation, or total trauma over its
+## limit. Once every cause has stayed gone for a short time (10 to 20 s, wake_eta) the
+## casualty comes round on their own. Cardiac arrest at 50% lost (or after SpO2 stays very
+## low) starts a 10-minute window and ends in death: until wave 3 (IV, CPR, defib) nothing
+## restarts a heart. There is no giving up.
 ##
 ## Treatment (the "Treatment interface" section) is the design doc's kit: tourniquets,
 ## bandages, gauze, vented chest seals, splints, morphine and NPAs, each applied by
 ## server_apply_treatment. care_needed() lists what still needs doing in the casualty-care
-## order. Soldier._server_treat is the timed request that players and AI send.
+## order. Soldier._server_treat is the timed request that players and AI send. Treatment
+## wakes casualties by removing causes: a tourniquet stops the slide toward 40% lost,
+## morphine eases pain, an NPA clears an obstructed airway so SpO2 recovers.
 
 signal changed
 signal went_down
-signal revived
+## Came round on their own (every cause of unconsciousness gone for long enough).
+signal woke
 signal died
 
 ## Round classes for hits and impacts, as the design doc groups them.
@@ -59,10 +65,6 @@ const ARREST_WINDOW_S := WoundModel.ARREST_WINDOW_S
 ## Host simulation step and the shortest gap between routine net_state updates.
 const SIM_STEP_S := 0.1
 const NET_INTERVAL_S := 0.5
-## Stopgap revive (trauma kit) until IV in wave 3: blood back up to at least this
-## share and pain capped at this.
-const REVIVE_BLOOD := 0.62
-const REVIVE_PAIN_CAP := 0.5
 ## Legacy damage (debug K key, old tests) as generic trauma: per point of damage, this much
 ## pain and this share of blood volume lost at once (K twice at 40 knocks you out).
 const TRAUMA_PAIN_PER_DAMAGE := 0.01
@@ -88,7 +90,7 @@ var net_state: Dictionary = {}:
 var rng: RandomNumberGenerator:
 	get:
 		return _model.rng
-## Host-side dice for the treatment rules: airway obstruction, morphine overdose.
+## Host-side dice for the treatment rules: airway obstruction.
 var care_rng: RandomNumberGenerator:
 	get:
 		return _model.care_rng
@@ -143,7 +145,7 @@ func is_up() -> bool:
 # --- Wound-model interface ----------------------------------------------------------------
 # Queries work on every peer (they read replicated state); server_* calls are host only.
 
-## Unconscious or in cardiac arrest: can't act; can be treated, revived, dragged and carried.
+## Unconscious or in cardiac arrest: can't act; can be treated, dragged and carried.
 func is_unconscious() -> bool:
 	return downed
 
@@ -220,6 +222,67 @@ func bleed_rate() -> float:
 	return _m().bleed_rate()
 
 
+## Oxygen saturation in percent (normal about 98). Hidden from players: they get laboured
+## breathing and greying vision (vision), a medic the cues in signs(). Under 85% you're out;
+## long enough under 70% stops the heart.
+func spo2() -> float:
+	return _m().spo2
+
+
+## Morphine in the blood, in doses (one autoinjector is 1 once it has gone in over 30 s);
+## it halves about every 12 minutes. Pain relief follows it; from 2.5 the casualty is
+## sedated (out), past 3 breathing slows.
+func morphine_level() -> float:
+	return _m().morphine_level
+
+
+## How badly hurt the body is overall: the wounds' severity added up (less for wounds dealt
+## with), fading slowly once they're treated. At 1 or more the casualty stays out.
+func trauma_level() -> float:
+	return _m().trauma_level
+
+
+## Why this unit is unconscious: the causes that hold now, most serious first, from
+## &"arrest", &"blood" (40% lost), &"spo2", &"pain", &"trauma", &"morphine" (sedation) and
+## &"knockout" (concussion). Empty when none holds (awake, or coming round: wake_eta).
+func why_unconscious() -> Array[StringName]:
+	if not downed:
+		var none: Array[StringName] = []
+		return none
+	return _m().unconscious_causes()
+
+
+## Seconds until an unconscious unit comes round, if nothing changes; -1 when awake or while
+## something still keeps them out.
+func wake_eta() -> float:
+	var m := _m()
+	return m.wake_left if downed and m.wake_left > 0.0 else -1.0
+
+
+## Laboured breathing: SpO2 low, or an open chest wound or tension pneumothorax.
+func breathing_laboured() -> bool:
+	return _m().breathing_laboured()
+
+
+## Plain cues someone checking this unit could see (no numbers): "Unresponsive",
+## "Breathing laboured", "Blue lips", "Pinpoint pupils (morphine)". `on_self` gives what you
+## notice checking yourself: laboured breathing, and drowsiness from morphine.
+func signs(on_self := false) -> PackedStringArray:
+	var m := _m()
+	var out := PackedStringArray()
+	if m.dead:
+		return out
+	if downed and not on_self:
+		out.append("Unresponsive")
+	if m.breathing_laboured():
+		out.append("Breathing laboured")
+	if not on_self and not m.arrest and m.spo2 < WoundModel.SPO2_BLUE_LIPS:
+		out.append("Blue lips")
+	if m.morphine_level >= WoundModel.MORPHINE_PUPILS_LEVEL:
+		out.append("Drowsy (morphine)" if on_self else "Pinpoint pupils (morphine)")
+	return out
+
+
 ## The wounds this unit has, for self-interaction and treatment menus: one Dictionary per
 ## wound with "part" (a body part), "kind" ("arterial", "junctional", "internal", "venous",
 ## "muscle", "graze", "fracture", "chest", "heart", "rib"), "bleeding" (bleeding now, so not
@@ -260,10 +323,11 @@ const CARE_ORDER := ["arterial", "junctional", "airway", "chest", "venous", "mus
 ## tourniquet per limb segment with arterial bleeding (a second one beside a rushed one),
 ## gauze per junctional bleed, an NPA (kind "airway", part HEAD) for an unconscious casualty,
 ## a vented seal per open chest wound, a bandage per venous, muscle or graze wound, a splint
-## per fracture, morphine (kind "pain", part TORSO) for pain it can take off or a cracked
-## rib. Wounds already handled are left out, and so is anything no field item fixes
-## (internal bleeding, a tension pneumothorax already under way) and a second morphine dose
-## while it would risk an overdose.
+## per fracture, morphine (kind "pain", part TORSO) for pain still left once the morphine
+## already given has gone in, or a cracked rib. Wounds already handled are left out, and so
+## is anything no field item fixes (internal bleeding, a tension pneumothorax already under
+## way) and another morphine dose once the blood holds about one (a second one in would
+## risk sedation).
 func care_needed() -> Array[Dictionary]:
 	return _m().care_tasks()
 
@@ -284,9 +348,12 @@ func treatment_problem(item_id: StringName, part: StringName) -> String:
 ##   already under way runs on: the needle is wave 3).
 ## - splint: walking and jogging back on a broken leg, a steadier arm and normal reloads, a
 ##   lower pain floor; still no sprint until a respawn.
-## - morphine: 0.5 off pain over 30 s and a cracked rib's pain; a second dose within 10
-##   minutes may knock the casualty out (overdose).
-## - npa: an unconscious casualty's airway can't obstruct (and an obstructed one clears).
+## - morphine: one dose into the blood over 30 s (morphine_level); relief follows the level
+##   (0.5 off per dose, at most 0.8) and fades as it wears off (half-life about 12 min).
+##   Too much sedates (out from 2.5 doses in the blood) and past 3 slows breathing (SpO2).
+##   It also eases a cracked rib's pain.
+## - npa: an unconscious casualty's airway can't obstruct (and an obstructed one clears, so
+##   SpO2 recovers).
 func server_apply_treatment(item_id: StringName, part: StringName, rushed := false) -> bool:
 	if not _model.apply_item(item_id, part, rushed):
 		return false
@@ -320,22 +387,6 @@ func has_npa() -> bool:
 ## An unconscious casualty's airway is obstructed (an NPA clears it).
 func airway_blocked() -> bool:
 	return _m().airway_blocked
-
-
-## Seconds until another morphine dose stops risking an overdose (0: none given lately).
-func morphine_window_left() -> float:
-	return _m().overdose_window_left
-
-
-## Why the stopgap revive can't be done on this unit, or "": it has to be down and alive,
-## with the bleeding controlled.
-func revive_problem() -> String:
-	var m := _m()
-	if m.dead:
-		return "Too late"
-	if not downed:
-		return "Not down"
-	return "" if m.bleeding_controlled() else "Stop the bleeding first"
 
 
 ## Host only. Someone started applying a treatment that takes `seconds` (is_healing, replicated).
@@ -373,15 +424,18 @@ func condition_text() -> String:
 	return "OK"
 
 
-## What blood loss, concussion and unconsciousness do to the view, for the local player's
-## HUD: "fade" (colour fading, 15-30% lost), "tunnel" (grey edges closing in, 30-40%),
-## "blur" (concussion) and "black" (out), each 0 to 1.
+## What blood loss, low oxygen, concussion and unconsciousness do to the view, for the local
+## player's HUD: "fade" (colour fading: 15-30% lost, or SpO2 falling under 94%), "tunnel"
+## (grey edges closing in: 30-40% lost, or SpO2 nearing 85%), "blur" (concussion) and
+## "black" (out), each 0 to 1.
 func vision() -> Dictionary:
 	var m := _m()
 	var lost := m.lost()
+	var hypoxia := clampf((WoundModel.SPO2_LABOURED - m.spo2) / (WoundModel.SPO2_LABOURED - WoundModel.SPO2_UNCONSCIOUS), 0.0, 1.0)
 	return {
-		"fade": clampf((lost - WoundModel.EFFECTS_FROM_LOST) / (WoundModel.NO_SPRINT_LOST - WoundModel.EFFECTS_FROM_LOST), 0.0, 1.0),
-		"tunnel": clampf((lost - WoundModel.NO_SPRINT_LOST) / (WoundModel.UNCONSCIOUS_LOST - WoundModel.NO_SPRINT_LOST), 0.0, 1.0),
+		"fade": maxf(clampf((lost - WoundModel.EFFECTS_FROM_LOST) / (WoundModel.NO_SPRINT_LOST - WoundModel.EFFECTS_FROM_LOST), 0.0, 1.0), hypoxia),
+		"tunnel": maxf(clampf((lost - WoundModel.NO_SPRINT_LOST) / (WoundModel.UNCONSCIOUS_LOST - WoundModel.NO_SPRINT_LOST), 0.0, 1.0),
+			clampf(hypoxia * 2.0 - 1.0, 0.0, 1.0)),
 		"blur": clampf(m.concussion_left / 20.0, 0.0, 1.0) if m.concussion_left > 0.0 else 0.0,
 		"black": 1.0 if downed or m.dead else 0.0,
 	}
@@ -433,18 +487,7 @@ func server_damage(amount: float) -> void:
 	_after_change()
 
 
-## Host only. Stopgap revive (a trauma kit, until IV in wave 3): tops blood up to
-## REVIVE_BLOOD, ends cardiac arrest, caps pain and wakes the casualty. It stops no
-## bleeding: Soldier._server_revive checks revive_problem() (bleeding controlled) first;
-## tests and debug call it directly. (The argument is the old kit's HP and is ignored.)
-func server_revive(_hp: float) -> void:
-	if not downed or _model.dead:
-		return
-	_model.revive(REVIVE_BLOOD, REVIVE_PAIN_CAP)
-	_after_change(true)
-
-
-## Host only. Back to full health (respawns, dummies getting back up).
+## Host only. Back to full health (respawns, dummies getting back up, tests setting up).
 func server_reset_health() -> void:
 	_model.reset()
 	_died_sent = false
@@ -505,7 +548,7 @@ func _after_change(force := false) -> void:
 		if downed:
 			went_down.emit()
 		else:
-			revived.emit()
+			woke.emit()
 		return
 	_publish(force)
 

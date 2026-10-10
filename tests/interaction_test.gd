@@ -1,7 +1,8 @@
 extends Node
 ## Headless checks for the ACE-style interaction menu (InteractionMenu) and the host
 ## requests behind it: what each kind of target offers, every action through its request
-## (pick up, revive, carry, drag, put down, give item, self actions), a human casualty
+## (pick up, carry, drag, put down, give item, self actions; no revive), the signs a check
+## shows, a human casualty
 ## carried and dragged, the key bindings, and the menu's cursor logic. Drives the API, not
 ## raw mouse input.
 ##   <voxel godot exe> --headless --path . res://tests/interaction_test.tscn
@@ -47,7 +48,7 @@ func _ready() -> void:
 	_test_key_bindings()
 	await _test_actions_for()
 	await _test_pick_up()
-	await _test_revive()
+	await _test_signs()
 	await _test_carry_and_drag()
 	await _test_human_casualty()
 	await _test_give_item()
@@ -104,21 +105,18 @@ func _test_actions_for() -> void:
 	hostile.vitals.server_damage(500.0)
 	dummy.vitals.server_damage(500.0)  # cardiac arrest: nothing in the kit helps until the heart restarts
 	await _frames(2)
-	check(_ids(player, alpha) == [&"revive", &"treat", &"carry", &"drag", &"check_condition"], "downed squadmate: Revive, Treat, Carry, Drag, Check condition (%s)" % [_ids(player, alpha)])
-	var revive := _action(player, alpha, &"revive")
-	check(revive.disabled.contains("trauma kit"), "Revive is greyed out without a trauma kit (%s)" % revive.disabled)
+	check(_ids(player, alpha) == [&"treat", &"carry", &"drag", &"check_condition"], "downed squadmate: Treat, Carry, Drag, Check condition; no Revive (%s)" % [_ids(player, alpha)])
 	var treat := _action(player, alpha, &"treat")
 	check(treat.items.size() == 2 and treat.items[0].label == "NPA Airway, head" and treat.items[0].disabled.contains("NPA") and treat.items[1].label.begins_with("Morphine"),
 		"Treat lists what they need, greyed out without the item (%s: %s)" % [treat.items.map(func(e: Dictionary) -> String: return e.label), treat.items.map(func(e: Dictionary) -> String: return e.disabled)])
 	player.inventory.take(&"trauma_kit")
-	revive = _action(player, alpha, &"revive")
-	check(revive.disabled == "" and revive.label.contains("Trauma Kit") and revive.label.contains("stopgap"), "with a trauma kit it names it, as a stopgap (%s)" % revive.label)
-	check(_action(player, alpha, &"treat").items[0].disabled == "", "and the trauma kit's NPA can go in")
+	check(not _ids(player, alpha).has(&"revive"), "a trauma kit adds no Revive either (%s)" % [_ids(player, alpha)])
+	check(_action(player, alpha, &"treat").items[0].disabled == "", "its NPA can go in")
 	player.inventory.take(&"hvt_case")
 	check(_action(player, alpha, &"carry").disabled.contains("hands"), "can't carry with your hands full")
 	player.inventory.release_hands()
-	check(_ids(player, dummy) == [&"revive", &"check_condition"], "downed dummy in cardiac arrest: Revive, Check condition, nothing to treat (%s)" % [_ids(player, dummy)])
-	check(_ids(player, hostile) == [&"carry", &"drag", &"check_condition"], "downed enemy: no Revive (%s)" % [_ids(player, hostile)])
+	check(_ids(player, dummy) == [&"check_condition"], "downed dummy in cardiac arrest: Check condition, nothing to treat (%s)" % [_ids(player, dummy)])
+	check(_ids(player, hostile) == [&"carry", &"drag", &"check_condition"], "downed enemy: Carry, Drag, Check condition (%s)" % [_ids(player, hostile)])
 	var report := InteractionMenu.perform(player, _action(player, alpha, &"check_condition"))
 	check(report.begins_with("Alpha: " + alpha.vitals.condition_text()) and report.contains("\n"), "Check condition reads condition and wounds (%s)" % report.replace("\n", " | "))
 	hostile.vitals.server_reset_health()
@@ -138,14 +136,29 @@ func _test_pick_up() -> void:
 	check(not is_instance_valid(item) or item.is_queued_for_deletion(), "and it's gone from the world")
 
 
-func _test_revive() -> void:
-	print("Revive (stopgap: kit revive request)")
+## Check condition and Check wounds show plain signs, never numbers (SpO2 and blood stay hidden).
+func _test_signs() -> void:
+	print("Signs on Check condition and Check wounds")
 	alpha.global_position = SPOT + Vector3(0, 0, -1.5)
 	await _frames(2)
-	InteractionMenu.perform(player, _action(player, alpha, &"revive"))
-	await _seconds(3.4)
-	check(alpha.vitals.is_up() and alpha.vitals.blood_fraction() >= 0.6, "revived with the trauma kit (blood %.0f%%)" % (alpha.vitals.blood_fraction() * 100.0))
-	check(player.inventory.count_of(&"trauma_kit") == 1 and player._best_revive_kit() == null, "its stopgap revive was used (the kit and its contents stay)")
+	var report := InteractionMenu.perform(player, _action(player, alpha, &"check_condition"))
+	check(report.contains("Unresponsive"), "an unconscious squadmate is unresponsive (%s)" % report.replace("\n", " | "))
+	alpha.vitals._model.spo2 = 80.0
+	alpha.vitals.server_advance(0.1)
+	report = InteractionMenu.condition_report(alpha)
+	check(report.contains("Breathing laboured") and report.contains("Blue lips") and not report.contains("%"),
+		"low SpO2 shows as laboured breathing and blue lips, no number (%s)" % report.replace("\n", " | "))
+	player.vitals._model.pain_wounds = 0.6
+	player.vitals.server_apply_treatment(&"morphine", Vitals.TORSO)
+	player.vitals.server_advance(WoundModel.MORPHINE_ABSORB_S)
+	var own := InteractionMenu.perform(player, _action(player, player, &"check_wounds"))
+	check(own.contains("Drowsy (morphine)") and not own.contains("Pinpoint"), "Check wounds on yourself: drowsy from the morphine (%s)" % own.replace("\n", " | "))
+	report = InteractionMenu.condition_report(player)
+	check(report.contains("Pinpoint pupils (morphine)") and not report.contains("Unresponsive"), "someone checking you sees pinpoint pupils (%s)" % report.replace("\n", " | "))
+	alpha.vitals.server_reset_health()
+	player.vitals.server_reset_health()
+	await _frames(2)
+	check(alpha.vitals.is_up() and not InteractionMenu.condition_report(alpha).contains("Unresponsive"), "reset for the next checks")
 
 
 func _test_carry_and_drag() -> void:
@@ -180,7 +193,7 @@ func _test_carry_and_drag() -> void:
 	player._server_drag_body.rpc_id(1, alpha.get_path())
 	check(player.carry_mode == Soldier.DRAG, "Drag takes hold of a body directly")
 	player.set_physics_process(true)  # the host keeps a player's casualty with them
-	alpha.vitals.server_revive(50.0)
+	alpha.vitals.server_reset_health()
 	await _frames(3)
 	player.set_physics_process(false)
 	_place_player()
@@ -192,7 +205,7 @@ func _test_carry_and_drag() -> void:
 	check(bravo.server_pick_up_body(alpha) and bravo.carry_mode == Soldier.CARRY, "AI casualty care still picks bodies up (server_pick_up_body)")
 	bravo.release_carried()
 	check(alpha.carried_by == null and bravo.carry_mode == &"", "and puts them down")
-	alpha.vitals.server_revive(50.0)
+	alpha.vitals.server_reset_health()
 
 
 func _test_human_casualty() -> void:
@@ -215,7 +228,7 @@ func _test_human_casualty() -> void:
 	check(bravo.carry_mode == Soldier.DRAG and pos is Vector3 and (pos as Vector3).distance_to(bravo.carry_transform().origin) < 0.05, "and dragged")
 	bravo._server_release_body.rpc_id(1)
 	check(player.carried_by == null and bravo.carrying == null and player.collision_layer == Soldier.BODY_LAYER, "and put down")
-	player.vitals.server_revive(100.0)
+	player.vitals.server_reset_health()
 	player.carried_by_pos = null
 	_place_player()
 
