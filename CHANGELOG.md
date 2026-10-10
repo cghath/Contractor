@@ -16,7 +16,7 @@ that travels with the item.
 
 ### Added
 
-- **Vehicle models (voxel, 10 cm voxels like the walls):** UH-60 Black Hawk, AH-1Z Viper (both with rotor nodes), AAV-7, MaxxPro and M-ATV MRAPs, and a pickup technical with a DShK, each with paint schemes (`scripts/art/vehicle_art.gd`). They are parked outside the compound gate as static props with collision; not driveable yet. `tests/vehicle_showcase.tscn` lines them up and saves screenshots.
+- **Vehicle models (voxel, 10 cm voxels like the walls):** UH-60 Black Hawk, AH-1Z Viper (both with rotor nodes), AAV-7, M2A3 Bradley, M1A2 Abrams, MaxxPro and M-ATV MRAPs, and a pickup technical with a DShK, each with paint schemes (`scripts/art/vehicle_art.gd`). They are parked outside the compound gate as static props with collision; not driveable yet. `tests/vehicle_showcase.tscn` lines them up and saves screenshots.
 
 - **Item state:** items carry state that goes wherever they go: rounds in a weapon or
   magazine, chips in a plate or helmet. It's kept while the item is worn, stowed, dropped,

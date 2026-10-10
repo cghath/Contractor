@@ -9,11 +9,14 @@ const LINEUP := [
 	["maxxpro", "desert", Vector3(12, 0, -2)],
 	["matv", "od", Vector3(19, 0, -2)],
 	["technical", "white", Vector3(26, 0, -2)],
+	["bradley", "desert", Vector3(34, 0, -2)],
+	["abrams", "desert", Vector3(43, 0, -2)],
 ]
 const SHOTS := [
 	["lineup", Vector3(2, 9, 30), Vector3(1, 1, -2)],
 	["helicopters", Vector3(-28, 5, 14), Vector3(-16, 2, 0)],
 	["ground", Vector3(24, 4, 12), Vector3(16, 1.5, -2)],
+	["armor", Vector3(48, 5, 13), Vector3(37, 1.5, -2)],
 ]
 
 

@@ -69,6 +69,8 @@ const PARKED_VEHICLES := [
 	["maxxpro", "desert", Vector3(18, 0, 34), 0.0],
 	["matv", "od", Vector3(24, 0, 34), 0.0],
 	["technical", "white", Vector3(30, 0, 34), 0.0],
+	["bradley", "desert", Vector3(14, 0, 46), 0.0],
+	["abrams", "desert", Vector3(24, 0, 48), 0.0],
 ]
 
 

@@ -1,7 +1,8 @@
 class_name VehicleArt
 extends RefCounted
 ## Voxel vehicle models built in code, at the same 10 cm voxel size as the world's walls:
-## UH-60 Black Hawk, AH-1Z Viper, AAV-7, MRAPs (MaxxPro, M-ATV) and a pickup technical.
+## UH-60 Black Hawk, AH-1Z Viper, AAV-7, M2 Bradley, M1 Abrams, MRAPs (MaxxPro, M-ATV)
+## and a pickup technical.
 ##
 ## Each model is a canvas of voxels filled with boxes and rounded cross-sections, then
 ## meshed once per model and paint scheme and cached. Rotors and gun mounts are separate
@@ -33,6 +34,8 @@ const MODELS := {
 	"maxxpro": ["desert", "od"],
 	"matv": ["desert", "od"],
 	"technical": ["white", "tan", "red"],
+	"bradley": ["desert", "od"],
+	"abrams": ["desert", "od"],
 }
 
 static var _meshes := {}  # "model|scheme" -> Mesh
@@ -120,6 +123,8 @@ static func _canvas_for(model: String) -> Canvas:
 		"maxxpro": return _mrap(64, 25, 30, 11, true)
 		"matv": return _mrap(62, 25, 27, 16, false)
 		"technical": return _technical()
+		"bradley": return _bradley()
+		"abrams": return _abrams()
 	push_error("VehicleArt: unknown model '%s'" % model)
 	return Canvas.new(Vector3i.ONE)
 
@@ -459,6 +464,73 @@ static func _mrap(length: int, width: int, height: int, hood: int, troop_box: bo
 	c.box(x1, floor_y + 12, hood + 1, x1 + 1, floor_y + 15, hood + 2, P.BLACK)
 	c.box(x0 + 2, floor_y + 6, 0, x0 + 4, floor_y + 8, 1, P.PAINT_LIGHT)
 	c.box(x1 - 4, floor_y + 6, 0, x1 - 2, floor_y + 8, 1, P.PAINT_LIGHT)
+	return c
+
+
+## Tracks and road wheels down both sides of a tracked hull.
+static func _tracks(c: Canvas, width: int, z0: int, z1: int, wheels: int, radius: float, track_w: int) -> void:
+	for x0: int in [0, width - track_w]:
+		c.box(x0, 0, z0 + 2, x0 + track_w, 2, z1 - 2, P.TRACK)
+		c.box(x0, int(radius * 2.0), z0 + 4, x0 + track_w, int(radius * 2.0) + 2, z1 - 4, P.TRACK)
+		var step := float(z1 - z0 - 12) / maxf(wheels - 1, 1)
+		for i in wheels:
+			c.wheel(x0, x0 + track_w, radius + 0.5, z0 + 6.0 + i * step, radius, P.TRACK, P.METAL)
+		c.wheel(x0, x0 + track_w, radius + 2.0, z0 + 3.0, radius * 0.7, P.TRACK, P.METAL)  # drive sprocket
+		c.wheel(x0, x0 + track_w, radius + 2.0, z1 - 3.0, radius * 0.7, P.TRACK, P.METAL)  # idler
+
+
+## M2A3 Bradley: 6.5 m hull, 25 mm Bushmaster and a TOW launcher box on the turret's left.
+static func _bradley() -> Canvas:
+	var c := Canvas.new(Vector3i(36, 34, 78))
+	_tracks(c, 36, 8, 74, 6, 4.0, 6)
+	for z in range(8, 74):
+		var top := 22
+		if z < 22:
+			top = 14 + int((z - 8) * 8.0 / 14.0)  # sloped glacis
+		c.box(5, 5, z, 31, top, z + 1, P.PAINT)
+	c.box(2, 10, 12, 34, 16, 72, P.PAINT_DARK)  # side armour skirts
+	c.box(8, 5, 73, 28, 21, 74, P.PAINT_DARK)  # rear ramp
+	c.box(7, 22, 14, 12, 24, 22, P.PAINT)  # driver's hatch
+	# Turret, set right of centre, with the gun forward and the TOW box on its left.
+	c.box(12, 22, 26, 30, 30, 46, P.PAINT)
+	c.box(13, 30, 30, 29, 31, 44, P.PAINT_DARK)
+	c.box(19, 25, 4, 21, 27, 26, P.GUN)  # 25 mm barrel
+	c.box(18, 24, 22, 22, 28, 26, P.PAINT_DARK)  # mantlet
+	c.box(8, 24, 28, 12, 30, 44, P.PAINT_LIGHT)  # TOW launcher
+	c.box(8, 25, 28, 12, 29, 29, P.BLACK)
+	c.paint_skin(24, 30, 32, 29, 32, 36, P.GLASS)  # commander's sight
+	c.box(28, 30, 40, 30, 33, 42, P.METAL)  # antenna base
+	return c
+
+
+## M1A2 Abrams: 7.9 m hull, wide flat turret with the 120 mm gun reaching past the bow.
+static func _abrams() -> Canvas:
+	var c := Canvas.new(Vector3i(37, 30, 100))
+	_tracks(c, 37, 18, 98, 7, 4.0, 7)
+	for z in range(18, 98):
+		var top := 20
+		var bottom := 5
+		if z < 26:
+			top = 14 + int((z - 18) * 6.0 / 8.0)  # glacis
+			bottom = 5 + int((26 - z) * 0.5)
+		c.box(6, bottom, z, 31, top, z + 1, P.PAINT)
+	c.box(2, 9, 20, 35, 15, 92, P.PAINT_DARK)  # side skirts
+	c.box(8, 14, 96, 29, 19, 98, P.METAL)  # engine grille at the back
+	# Turret: wedge front, bustle at the back, commander's weapon station.
+	for z in range(36, 82):
+		var half := 15
+		if z < 46:
+			half = 9 + int((z - 36) * 0.6)
+		c.box(18 - half, 20, z, 19 + half, 27, z + 1, P.PAINT)
+	c.box(5, 20, 76, 32, 26, 86, P.PAINT_DARK)  # bustle rack
+	c.box(17, 22, 0, 20, 25, 38, P.PAINT)  # 120 mm gun tube
+	c.box(16, 21, 14, 21, 26, 20, P.PAINT)  # bore evacuator
+	c.box(16, 21, 34, 21, 26, 38, P.PAINT_DARK)  # mantlet
+	c.box(24, 27, 58, 29, 30, 64, P.PAINT_DARK)  # CROWS
+	c.box(26, 29, 50, 27, 30, 58, P.GUN)
+	c.paint_skin(9, 26, 46, 14, 28, 52, P.GLASS)  # gunner's sight
+	c.box(6, 27, 70, 7, 30, 71, P.METAL)  # antennas
+	c.box(31, 27, 70, 32, 30, 71, P.METAL)
 	return c
 
 
