@@ -54,9 +54,30 @@ func _ready() -> void:
 	item_spawner.spawn_function = _make_item
 	_build_environment()
 	_build_structures()
+	_park_vehicles()
 	Net.hosted.connect(_on_hosted)
 	Net.peer_joined.connect(_on_peer_joined)
 	Net.peer_left.connect(_on_peer_left)
+
+
+## Parked vehicles outside the gate: static props with collision for now (not driveable).
+## Every peer builds the same ones, so nothing needs replicating.
+const PARKED_VEHICLES := [
+	["uh60", "army", Vector3(-32, 0, 34), 90.0],
+	["ah1z", "marine_gray", Vector3(-32, 0, 54), 90.0],
+	["aav7", "od", Vector3(12, 0, 34), 0.0],
+	["maxxpro", "desert", Vector3(18, 0, 34), 0.0],
+	["matv", "od", Vector3(24, 0, 34), 0.0],
+	["technical", "white", Vector3(30, 0, 34), 0.0],
+]
+
+
+func _park_vehicles() -> void:
+	for v: Array in PARKED_VEHICLES:
+		var prop := VehicleArt.prop(v[0], v[1])
+		prop.position = v[2]
+		prop.rotation_degrees.y = v[3]
+		add_child(prop)
 
 
 func next_spawn_point() -> Vector3:
