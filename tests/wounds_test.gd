@@ -362,7 +362,11 @@ func _test_impact() -> void:
 	_step(stack, 10.0)
 	check(stack.impact <= WoundModel.PLATE_IMPACT_MAX + 0.001 and not stack.unconscious,
 		"twenty .308 plate stops: impact capped at %.2f, still conscious (pain %.2f)" % [WoundModel.PLATE_IMPACT_MAX, stack.pain()])
-	check(WoundModel.PLATE_IMPACT_MAX + WoundModel.PAIN_FLOOR_RIB < WoundModel.KNOCKOUT_PAIN_FULL - 0.3, "plate impact can't come near the knockout threshold at full blood")
+	check(WoundModel.PLATE_IMPACT_MAX + WoundModel.PAIN_FLOOR_RIB < WoundModel.KNOCKOUT_PAIN_FULL, "plate impact stays under the knockout threshold at full blood")
+	var burst := _model()
+	for i in 6:
+		burst.add_impact(Vitals.CHEST, RIFLE, 300.0, -1.0)
+	check(burst.impact >= 0.6, "a burst of six 5.56 plate stops hurts (impact %.2f)" % burst.impact)
 	stack.advance(300.0)
 	check(stack.impact < 0.01, "and fades over about 5 minutes")
 	# A helmet stop's impact isn't capped (design doc table): three .308 stops, out from the pain.

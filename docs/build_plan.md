@@ -90,8 +90,11 @@ back slowly once every bleed stops, until IV), every dead soldier leaves a body 
 on it (saved with the zone), and medics put the wounded first even in a firefight.
 
 Captain's wave 1 playtest fixes, merged on `dev` 2026-10-10 (all 14 suites pass): knockouts,
-armor voxels and pickup, world materials, action animations. Still open: **movement feel**
-(sliding on ice); branch `fix2/p2-movement` has unfinished, untested work to pick up.
+armor voxels and pickup, world materials, action animations. The fifth, **movement feel**
+(sliding on ice), followed with Captain's wave 2 playtest fixes (plate wear and pain, calibre
+bullet holes, knees, Arma-style drag, the camera flip), merged on `dev` 2026-10-10. Still open
+from that playtest: the Star Citizen-style inventory with item previews, and MOLLE vest
+attachments (branch `fix3/inventory-molle`).
 
 | # | Workstream |
 |---|---|

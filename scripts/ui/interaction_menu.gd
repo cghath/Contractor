@@ -61,12 +61,14 @@ const ACTIONS := {
 		{"id": &"pick_up", "label": "Pick up", "request": &"_server_interact", "with": &"target"},
 	],
 	DOWNED: [
+		{"id": &"put_down", "label": "Put down", "needs": &"moving_body", "request": &"_server_release_body", "with": &"none"},
 		{"id": &"treat", "label": "Treat", "needs": &"treatable", "submenu": &"treatments"},
 		{"id": &"carry", "label": "Carry", "needs": &"can_move_body", "request": &"_server_carry_body", "with": &"target"},
 		{"id": &"drag", "label": "Drag", "needs": &"can_move_body", "request": &"_server_drag_body", "with": &"target"},
 		{"id": &"check_condition", "label": "Check condition", "show": &"condition"},
 	],
 	DEAD: [
+		{"id": &"put_down", "label": "Put down", "needs": &"moving_body", "request": &"_server_release_body", "with": &"none"},
 		{"id": &"loot", "label": "Loot", "needs": &"has_gear", "submenu": &"body_items", "request": &"_server_loot_item", "with": &"target_loot"},
 		{"id": &"loot_all", "label": "Loot all", "needs": &"has_gear", "request": &"_server_loot_body", "with": &"target"},
 		{"id": &"carry", "label": "Carry", "needs": &"can_move_body", "request": &"_server_carry_body", "with": &"target"},
@@ -194,7 +196,7 @@ static func _check(need: StringName, actor: Soldier, target: Node) -> String:
 static func _label(def: Dictionary, actor: Soldier, _target: Node) -> String:
 	match def.id:
 		&"put_down":
-			return "Put down" if actor.carry_mode == Soldier.CARRY else "Let go"
+			return "Put down" if actor.carry_mode == Soldier.CARRY else "Release"
 		&"drop_held":
 			var id := actor.inventory.hands
 			if id == &"" and actor.active_weapon() != null:

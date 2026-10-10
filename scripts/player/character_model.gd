@@ -1,7 +1,7 @@
 class_name CharacterModel
 extends Node3D
 ## Procedural voxel soldier (see VoxelArt): rigid body parts on joint pivots, animated in
-## code. Legs swing with movement speed and the head follows the look pitch. Arms have
+## code. Legs have knees and swing with movement speed; the head follows the look pitch. Arms have
 ## elbows: with nothing held they swing; when GearRig hands them something (set_held),
 ## two-bone IK puts the right hand on its grip point and the left on its support point.
 ## Gear mounts on `torso`, `head`, or `hands_anchor` (which pitches with aim).
@@ -29,13 +29,18 @@ const FOREARM := 0.25                             # elbow to palm centre
 ## Elbows bend towards these (torso-local, before normalising): out, down and back.
 const POLE_RIGHT := Vector3(0.7, -1.0, 0.35)
 const MAX_SPEED := 6.5
-## Hip joint to sole: legs are one rigid part, so a lower stance splays them.
+## Hip joint to sole. Legs have knees (THIGH above, the rest below): a lower stance bends
+## them, two-bone, with the feet placed under the hips (see _leg_angles).
 const LEG_LENGTH := 0.9
+const THIGH := 0.45
+## Lowered hips: how far forward the front (left) foot and back the back (right) foot sit,
+## per metre the hips have dropped. The back knee comes down to the ground in a kneel.
+const FRONT_FOOT := 0.55
+const BACK_FOOT := 0.85
+## Walking: how far a knee folds (radians, at full stride) as its leg swings through.
+const STEP_KNEE := 0.9
 ## The eyes, torso-local: hips to eye level (the camera follows this point).
 const EYE := Vector3(0, 0.75, 0)
-## Lowered hips: the front (left) leg reaches forward to the ground; the back (right) leg
-## kneels, angled back this fraction as far (its shin sinks into the ground like a knee).
-const BACK_LEG := 0.55
 ## Prone: lifted by half the torso depth, and shifted back so the body lies centred on the
 ## origin (feet behind, head in front) instead of tipping over the feet like a downed body.
 const PRONE_LIFT := 0.12
@@ -194,6 +199,8 @@ var _upper: Array[Node3D] = []    # [right, left]
 var _forearm: Array[Node3D] = []  # [right, left]
 var _leg_left: Node3D
 var _leg_right: Node3D
+var _shin_left: Node3D
+var _shin_right: Node3D
 var _held: Node3D
 var _grip := Vector3.ZERO     # right hand, in _held's local space
 var _support := Vector3.ZERO  # left hand, in _held's local space
@@ -230,8 +237,10 @@ func _ready() -> void:
 		var upper := _part("upper_arm", torso, SHOULDER * Vector3(side, 1, 1))
 		_upper.append(upper)
 		_forearm.append(_part("forearm", upper, Vector3(0, -UPPER_ARM, 0)))
-	_leg_left = _part("leg", _root, HIP * Vector3(-1, 1, 1))
-	_leg_right = _part("leg", _root, HIP)
+	_leg_left = _part("thigh", _root, HIP * Vector3(-1, 1, 1))
+	_leg_right = _part("thigh", _root, HIP)
+	_shin_left = _part("shin", _leg_left, Vector3(0, -THIGH, 0))
+	_shin_right = _part("shin", _leg_right, Vector3(0, -THIGH, 0))
 	_last_position = global_position
 	_shown = pose_bones(REST_POSE, false)
 	var body := get_parent()
@@ -252,10 +261,10 @@ static func lay_down(body: Node3D, model: CharacterModel, is_downed: bool) -> vo
 ## or carried and dragged): each follows the bone it belongs to (upper body, head, pelvis,
 ## left or right leg), from its rest transform.
 func pose_hitboxes(body: Node3D) -> void:
-	var bones := _target_bones(_carry_state())
-	var rest := rest_bones()
+	var bones := with_shins(_target_bones(_carry_state()))
+	var rest := with_shins(rest_bones())
 	var deltas := {}
-	for key: String in ["torso", "head", "pelvis", "leg_l", "leg_r"]:
+	for key: String in ["torso", "head", "pelvis", "leg_l", "leg_r", "shin_l", "shin_r"]:
 		deltas[key] = transform * (bones.root as Transform3D) * (bones[key] as Transform3D) * (rest[key] as Transform3D).affine_inverse()
 	for area in _posable_hitboxes(body):
 		var target: Transform3D = deltas[_bone_of(area)] * _rest_of(area)
@@ -263,8 +272,31 @@ func pose_hitboxes(body: Node3D) -> void:
 			area.transform = target
 
 
+## `bones` plus "shin_l" and "shin_r": each shin's pivot (the knee), root-local.
+static func with_shins(bones: Dictionary) -> Dictionary:
+	var out := bones.duplicate()
+	out["shin_l"] = (bones.leg_l as Transform3D) * (bones.knee_l as Transform3D)
+	out["shin_r"] = (bones.leg_r as Transform3D) * (bones.knee_r as Transform3D)
+	return out
+
+
+## Thigh swing (radians forward from straight down) and knee bend for a leg whose hip is
+## `hip` above the ground with the foot `foot` metres forward of it (negative: behind).
+## Two bones of equal length; the knee points forward.
+static func _leg_angles(hip: float, foot: float) -> Vector2:
+	var reach := minf(Vector2(foot, hip).length(), LEG_LENGTH - 0.0001)
+	var fold := acos(clampf(reach / LEG_LENGTH, 0.0, 1.0))
+	return Vector2(atan2(foot, hip) + fold, 2.0 * fold)
+
+
+## A knee bone: the shin's pivot THIGH down the thigh, folded back by `bend` radians.
+static func _knee(bend: float) -> Transform3D:
+	return Transform3D(Basis(Vector3.RIGHT, -bend), Vector3(0, -THIGH, 0))
+
+
 ## Model-space transforms for a pose: "root" (whole body), and root-local "torso", "head"
-## (kept level with the ground, like the drawn head), "pelvis", "leg_l" and "leg_r" (joint pivots).
+## (kept level with the ground, like the drawn head), "pelvis", "leg_l" and "leg_r" (joint pivots), and
+## "knee_l" and "knee_r" (each shin's pivot in its thigh's space).
 static func pose_bones(p: Dictionary, is_downed: bool) -> Dictionary:
 	if is_downed:
 		var rest := rest_bones()
@@ -281,7 +313,9 @@ static func pose_bones(p: Dictionary, is_downed: bool) -> Dictionary:
 		var lying := Basis(Vector3.BACK, roll) * Basis(Vector3.RIGHT, -PI / 2)
 		root = root * Transform3D(lying, Vector3(0, PRONE_LIFT + PRONE_SIDE_LIFT * absf(sin(roll)), PRONE_SHIFT))
 		spread = PRONE_LEG_SPREAD
-	var bend := acos(clampf(hip / LEG_LENGTH, 0.0, 1.0))
+	var drop := maxf(LEG_LENGTH - hip, 0.0)
+	var front := _leg_angles(hip, drop * FRONT_FOOT) if spread == 0.0 else Vector2.ZERO
+	var back := _leg_angles(hip, -drop * BACK_FOOT) if spread == 0.0 else Vector2.ZERO
 	var roll_by: float = p.get("roll", 0.0)
 	var pitch_by: float = p.get("pitch", 0.0)
 	var torso_basis := Basis(Vector3.BACK, roll_by) * Basis(Vector3.RIGHT, pitch_by)
@@ -291,8 +325,10 @@ static func pose_bones(p: Dictionary, is_downed: bool) -> Dictionary:
 		"torso": torso,
 		"head": torso * Transform3D(Basis(Vector3.RIGHT, -_upper_body_pitch(root.basis * torso_basis, yaw)), HEAD_PIVOT),
 		"pelvis": Transform3D(Basis(), Vector3(hip_x, hip, hip_z)),
-		"leg_l": Transform3D(Basis(Vector3.BACK, -spread) * Basis(Vector3.RIGHT, bend), Vector3(hip_x - HIP.x, hip, hip_z)),
-		"leg_r": Transform3D(Basis(Vector3.BACK, spread) * Basis(Vector3.RIGHT, -bend * BACK_LEG), Vector3(hip_x + HIP.x, hip, hip_z)),
+		"leg_l": Transform3D(Basis(Vector3.BACK, -spread) * Basis(Vector3.RIGHT, front.x), Vector3(hip_x - HIP.x, hip, hip_z)),
+		"leg_r": Transform3D(Basis(Vector3.BACK, spread) * Basis(Vector3.RIGHT, back.x), Vector3(hip_x + HIP.x, hip, hip_z)),
+		"knee_l": _knee(front.y),
+		"knee_r": _knee(back.y),
 	}
 
 
@@ -330,6 +366,8 @@ static func casualty_bones(mode: StringName) -> Dictionary:
 		"pelvis": Transform3D(Basis(), TORSO_PIVOT),
 		"leg_l": Transform3D(Basis(Vector3.BACK, -splay) * Basis(Vector3.RIGHT, legs), HIP * Vector3(-1, 1, 1)),
 		"leg_r": Transform3D(Basis(Vector3.BACK, splay) * Basis(Vector3.RIGHT, legs * 1.15), HIP),
+		"knee_l": _knee(legs * 0.6),
+		"knee_r": _knee(legs * 0.5 + 0.05),
 	}
 
 
@@ -350,6 +388,8 @@ static func rest_bones() -> Dictionary:
 		"pelvis": Transform3D(Basis(), TORSO_PIVOT),
 		"leg_l": Transform3D(Basis(), HIP * Vector3(-1, 1, 1)),
 		"leg_r": Transform3D(Basis(), HIP),
+		"knee_l": _knee(0.0),
+		"knee_r": _knee(0.0),
 	}
 
 
@@ -626,10 +666,14 @@ static func _bone_of(area: Area3D) -> String:
 		bone = "head"
 	elif part == Vitals.PELVIS:
 		bone = "pelvis"
-	elif part in [Vitals.THIGH_L, Vitals.SHIN_L]:
+	elif part == Vitals.THIGH_L:
 		bone = "leg_l"
-	elif part in [Vitals.THIGH_R, Vitals.SHIN_R]:
+	elif part == Vitals.THIGH_R:
 		bone = "leg_r"
+	elif part == Vitals.SHIN_L:
+		bone = "shin_l"
+	elif part == Vitals.SHIN_R:
+		bone = "shin_r"
 	elif not part in [Vitals.NECK, Vitals.TORSO, Vitals.CHEST, Vitals.ABDOMEN,
 			Vitals.UPPER_ARM_L, Vitals.UPPER_ARM_R, Vitals.FOREARM_L, Vitals.FOREARM_R]:
 		var centre := Vector3.ZERO
@@ -683,6 +727,9 @@ func _process(delta: float) -> void:
 	_root.transform = (_shown.root as Transform3D).translated(Vector3(0, absf(sin(_phase)) * 0.03 * stride, 0))
 	_leg_left.transform = (_shown.leg_l as Transform3D) * Transform3D(Basis(Vector3.RIGHT, swing), Vector3.ZERO)
 	_leg_right.transform = (_shown.leg_r as Transform3D) * Transform3D(Basis(Vector3.RIGHT, -swing), Vector3.ZERO)
+	# A knee folds as its leg swings through (forward), and straightens to take the weight.
+	_shin_left.transform = (_shown.knee_l as Transform3D) * Transform3D(Basis(Vector3.RIGHT, -STEP_KNEE * stride * maxf(cos(_phase), 0.0)), Vector3.ZERO)
+	_shin_right.transform = (_shown.knee_r as Transform3D) * Transform3D(Basis(Vector3.RIGHT, -STEP_KNEE * stride * maxf(-cos(_phase), 0.0)), Vector3.ZERO)
 	torso.transform = (_shown.torso as Transform3D).translated_local(Vector3(0, sin(_time * 2.0) * 0.003, 0))  # breathing
 	if casualty:
 		# Limp: the head hangs (carried) or lolls back (dragged) with the body.

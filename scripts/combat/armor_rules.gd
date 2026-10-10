@@ -4,7 +4,9 @@ extends RefCounted
 ## round through a hole). Every round has a threat level and every vest, plate and helmet a
 ## rating on the same ladder (Ballistics.LEVELS); armor stops a round when its rating is at
 ## or above the round's level. A stopped round only dents the strike face; holes come from
-## rounds that get through. Materials then fail in their own way:
+## rounds that get through. Every hit, stopped or not, also wears a piece's integrity down by
+## round class and the piece's "durability"; at zero it stops nothing. Materials then fail in
+## their own way:
 ##
 ## - Ceramic: each hit cracks a zone around it; a later hit inside cracked zones is less
 ##   likely to be stopped. Each hit also takes integrity by round class; at zero the plate
@@ -37,10 +39,16 @@ const FRONT_BACK_COS := 0.5
 ## per earlier hit inside it (0.7 = cut by 30% each).
 const CRACK_RADIUS_VOX := 5.0
 const CRACK_STOP_MULT := 0.7
-## Ceramic integrity (1 = new) each hit takes, by round class.
+## Integrity (1 = new) each hit takes from a plate or helmet, by round class, divided by the
+## piece's "durability" (Captain's balance pass: light PE and bump helmets wear fast, steel
+## lasts longest, ceramic in between). Every hit counts, stopped or not. At zero the piece
+## has failed (a ceramic plate shatters) and stops nothing.
 const INTEGRITY_LOSS := {
 	Vitals.FRAGMENT: 0.02, Vitals.PISTOL: 0.08, Vitals.INTERMEDIATE: 0.18, Vitals.FULL_POWER: 0.3,
 }
+## Below this integrity a steel, polyethylene or composite piece is failing: the chance it
+## stops a round it's rated for falls in step with what's left (ceramic has its cracks).
+const FAILING_BELOW := 0.3
 ## Wearing through: earlier hits (any chip) within this many voxels of a strike count as the
 ## same spot (proposed: about a 5 cm group).
 const WEAR_RADIUS_VOX := 2.5
@@ -96,7 +104,7 @@ static func material(item: ItemData) -> StringName:
 
 # --- Plate state (item state: "chips", plus "cracks" and "integrity" on ceramic) -----------
 
-## Remaining ceramic integrity, 1 (new) to 0 (shattered). Missing means undamaged.
+## Remaining integrity, 1 (new) to 0 (failed: shattered, for ceramic). Missing means undamaged.
 static func integrity(state: Dictionary) -> float:
 	return float(state.get("integrity", 1.0))
 
@@ -124,8 +132,10 @@ static func ceramic_stop_chance(state: Dictionary, cell: Vector3i) -> float:
 	return pow(CRACK_STOP_MULT, cracks_near(state, cell))
 
 
-static func integrity_loss(round_class: StringName) -> float:
-	return float(INTEGRITY_LOSS.get(round_class, INTEGRITY_LOSS[Vitals.INTERMEDIATE]))
+## Integrity a hit of `round_class` takes from `item` (its "durability" divides the base).
+static func integrity_loss(round_class: StringName, item: ItemData = null) -> float:
+	var base := float(INTEGRITY_LOSS.get(round_class, INTEGRITY_LOSS[Vitals.INTERMEDIATE]))
+	return base / maxf(float(item.stats.get("durability", 1.0)), 0.01) if item else base
 
 
 ## Earlier hits (chips in `state`) on the same spot as `cell`: within WEAR_RADIUS_VOX of the
@@ -164,25 +174,35 @@ static func piece_stops(item: ItemData, state: Dictionary, cell: Vector3i, threa
 		return false
 	if material(item) == CERAMIC:
 		return roll(ceramic_stop_chance(state, cell))
-	return true
+	var left := integrity(state)
+	return left >= FAILING_BELOW or roll(left / FAILING_BELOW)
 
 
-## The item-state keys a hit on `cell` changes (merged by Inventory.add_armor_hit): a ceramic
-## plate gains a crack there and loses integrity by round class. {} for other materials.
+## The item-state keys a hit on `cell` changes (merged by Inventory.add_armor_hit): every
+## piece loses integrity by round class and durability, and a ceramic plate gains a crack.
 static func hit_changes(item: ItemData, state: Dictionary, cell: Vector3i, round_class: StringName) -> Dictionary:
-	if material(item) != CERAMIC:
-		return {}
-	var list := cracks(state).duplicate()
-	list.append([cell.x, cell.y, cell.z])
-	return {"cracks": list, "integrity": maxf(integrity(state) - integrity_loss(round_class), 0.0)}
+	var changes := {"integrity": maxf(integrity(state) - integrity_loss(round_class, item), 0.0)}
+	if material(item) == CERAMIC:
+		var list := cracks(state).duplicate()
+		list.append([cell.x, cell.y, cell.z])
+		changes["cracks"] = list
+	return changes
+
+
+## The word for a piece at zero integrity: ceramic shatters, the rest are worn out.
+static func failed_text(item: ItemData) -> String:
+	return "shattered" if item and material(item) == CERAMIC else "worn out"
 
 
 ## A few words on a piece's damage for prompts and labels: "3 cracks, 46%", "shattered",
-## "damaged: 2 hits", or "" when it's undamaged.
+## "worn out", "2 hits, 64%", "damaged: 2 hits" (older saves), or "" when it's undamaged.
 static func state_text(item: ItemData, state: Dictionary) -> String:
+	if is_shattered(state):
+		return failed_text(item)
+	if item and material(item) != CERAMIC and state.has("integrity"):
+		var hits: int = state.get("chips", []).size()
+		return "%d hit%s, %d%%" % [hits, "" if hits == 1 else "s", roundi(integrity(state) * 100.0)]
 	if item and material(item) == CERAMIC and (state.has("integrity") or state.has("cracks")):
-		if is_shattered(state):
-			return "shattered"
 		var n := cracks(state).size()
 		return "%d crack%s, %d%%" % [n, "" if n == 1 else "s", roundi(integrity(state) * 100.0)]
 	var chips: Array = state.get("chips", [])

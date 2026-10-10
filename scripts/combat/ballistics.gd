@@ -18,7 +18,7 @@ const MASK := (1 << 0) | (1 << 1) | (1 << 3)  # world, hitboxes, armor
 ## How many things (armor pieces, walls) one round can pass through.
 const MAX_PENETRATIONS := 8
 ## The world: a round that meets a voxel structure walks through it (VoxelWorld.trace_round,
-## by material): through wood and sheet metal it carves a hole and carries on with less
+## by material): through wood and sheet metal it leaves calibre-sized bullet holes and carries on with less
 ## energy; concrete, steel or too much of anything stops it with a small surface mark.
 ## Rounds without data in rounds.json count with this energy by class (J).
 const FALLBACK_ENERGY_J := {&"pistol": 550.0, &"intermediate": 1650.0, &"full_power": 3350.0}
@@ -108,7 +108,7 @@ static func _trace(shooter: CollisionObject3D, origin: Vector3, direction: Vecto
 		if through.stopped:
 			world.server_mark(hit.position, hit.normal, int(through.material))
 			return _result("world", hit)
-		world.server_holes(through.voxels)
+		world.server_shot(hit.position, hit.normal, through.exit, through.exit_normal, calibre_m(weapon), through.voxels, int(through.material))
 		lost_j += float(through.lost_j)
 		from = (through.exit as Vector3) + direction * 0.01
 	return {"result": "none", "position": to, "normal": Vector3.ZERO}
@@ -208,6 +208,11 @@ static func round_data(round_or_weapon: Variant) -> Dictionary:
 	if ItemDB.has_item(ammo):
 		return _rounds.get(StringName(ItemDB.get_item(ammo).stats.get("round", "")), {})
 	return {}
+
+
+## The bullet's diameter in metres (rounds.json "calibre_mm"; 5.56 mm without data).
+static func calibre_m(round_or_weapon: Variant) -> float:
+	return float(round_data(round_or_weapon).get("calibre_mm", 5.7)) / 1000.0
 
 
 ## Every round id in data/rounds.json.

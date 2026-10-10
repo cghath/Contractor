@@ -216,6 +216,9 @@ func _test_carry_and_drag() -> void:
 	await _frames(3)
 	var local := player.global_transform.affine_inverse() * alpha.global_position
 	check(local.z > 0.8 and absf(local.y) < 0.2, "the body slides along behind you (%s)" % local)
+	check(is_equal_approx(player.view_yaw(), PI), "dragging, the view faces the casualty behind the body")
+	check(_ids(player, alpha).has(&"put_down") and _action(player, alpha, &"put_down").get("label") == "Release",
+		"looking at the body you drag offers Release (%s)" % [_ids(player, alpha)])
 	InteractionMenu.perform(player, _action(player, player, &"put_down"))
 	check(player.carrying == null and player.carry_mode == &"" and is_equal_approx(player.carry_speed_mult(), 1.0), "Let go releases it and your speed")
 	check(alpha.carried_by == null and alpha.collision_layer == Soldier.BODY_LAYER and alpha.care_by == null, "the body collides again")

@@ -5,7 +5,7 @@ extends Node3D
 ## network, and the same log is what gets saved.
 ##
 ## Every voxel has a material (Mat, MATERIALS): rounds go through wood and sheet metal
-## (carving a hole the size of the voxels they pass) and stop in concrete, steel or deep
+## (leaving calibre-sized bullet holes; a voxel breaks only after many rounds through it) and stop in concrete, steel or deep
 ## enough stacks, leaving only a small impact mark there (Ballistics, trace_round). Blasts
 ## take out each material within its own share of the radius (server_blast).
 ##
@@ -46,8 +46,9 @@ const PALETTE: Array[Color] = [
 ## How each material takes fire (Ballistics walks a round through the voxels, trace_round):
 ## - "loss_j_per_m": energy a round loses per metre of it. INF stops every small-arms round:
 ##   no hole, only a small surface mark (server_mark). A round that runs out of energy inside
-##   any material stops there with a mark too; one that gets through carves the voxels it
-##   passed (server_holes) and carries on with what it has left.
+##   any material stops there with a mark too; one that gets through leaves a bullet hole
+##   the size of its calibre where it went in and came out (server_shot) and carries on with
+##   what it has left. A voxel only breaks out once HOLES_TO_BREAK rounds have gone through it.
 ## - "blast": share of a blast's radius (server_blast) that takes this material out.
 ## - "mark": colour of the impact mark a stopped round leaves.
 ## Proposed values against data/rounds.json (M855 about 1650 J at the muzzle, 9 mm about
@@ -69,6 +70,17 @@ const MATERIALS := {
 const MARK_SIZE_M := 0.05
 const MARKS_PER_VOXEL := 6
 const MAX_MARKS := 8192
+## Bullet holes (Captain's playtest call: close to the calibre, not a whole 10 cm voxel): a
+## round through wood or sheet metal leaves a hole decal on the way in and out, a dark core
+## the round's diameter (HOLE_DECAL_SCALE times it across, the rest a splintered or bare-metal
+## rim), bigger on the way out of wood. At most HOLE_MARKS_PER_VOXEL show on one voxel face,
+## and the voxel breaks out after HOLES_TO_BREAK rounds through it.
+const HOLE_DECAL_SCALE := 2.5
+const HOLE_EXIT_SCALE := {Mat.WOOD: 1.6, Mat.SHEET_METAL: 1.15}
+const HOLE_MARKS_PER_VOXEL := 16
+const HOLES_TO_BREAK := {Mat.WOOD: 10, Mat.SHEET_METAL: 16}
+## Rim colour of a bullet hole by material (the core is near black).
+const HOLE_RIM := {Mat.WOOD: Color("c9a877"), Mat.SHEET_METAL: Color("b8bcc0")}
 ## trace_round: a round walks at most WALK_MAX_M through solid voxels (deeper counts as
 ## stopped), and looks SEEK_M past where the collider said it hit for the first solid voxel
 ## (the collider can lag a fresh hole by a frame or two).
@@ -105,6 +117,8 @@ var _mark_serial := 0
 var _mark_cells := {}  # surface voxel (Vector3i) -> Array of mark serials on it
 var _marks_dirty := false
 var _mark_mesh: MultiMeshInstance3D
+var _hole_mesh: MultiMeshInstance3D
+var _hole_hits := {}  # voxel (Vector3i) -> rounds that have gone through it (every peer)
 
 
 static func find_on(node: Object) -> VoxelWorld:
@@ -145,6 +159,8 @@ func _ready() -> void:
 	add_to_group(&"voxel_worlds")
 	_mark_mesh = _make_mark_mesh()
 	terrain.add_child(_mark_mesh)  # in the terrain's space: voxel units
+	_hole_mesh = _make_mark_mesh(_hole_texture(), "BulletHoles")
+	terrain.add_child(_hole_mesh)
 
 
 ## Adds a solid box, in metres, relative to this node. Call before structures are built.
@@ -216,6 +232,41 @@ func server_holes(voxels: Array) -> void:
 	_server_edit({"op": "holes", "v": flat})
 
 
+## Host only. A round went through wood or sheet metal: a bullet hole `calibre_m` across
+## where it went in (`entry`, facing `entry_normal`) and came out (`exit`, facing
+## `exit_normal`), and one more round through each of `voxels` (trace_round's), which break
+## out once they reach HOLES_TO_BREAK.
+func server_shot(entry: Vector3, entry_normal: Vector3, exit: Vector3, exit_normal: Vector3, calibre_m: float, voxels: Array, mat: int) -> void:
+	var a := terrain.to_local(entry)
+	var b := terrain.to_local(exit)
+	var basis := terrain.global_basis.inverse()
+	var an := (basis * entry_normal).normalized()
+	var bn := (basis * exit_normal).normalized()
+	var flat: Array = []
+	for v: Vector3i in voxels:
+		flat.append_array([v.x, v.y, v.z])
+	_server_edit({"op": "shot", "a": _snap3(a), "an": _snap3(an), "b": _snap3(b), "bn": _snap3(bn),
+		"d": snappedf(calibre_m, 0.0001), "m": mat, "v": flat})
+
+
+static func _snap3(v: Vector3) -> Array:
+	return [snappedf(v.x, 0.001), snappedf(v.y, 0.001), snappedf(v.z, 0.001)]
+
+
+## Rounds that have gone through the voxel at a world-space point (it breaks out at
+## HOLES_TO_BREAK).
+func holes_through(world_position: Vector3) -> int:
+	return int(_hole_hits.get(Vector3i(terrain.to_local(world_position).floor()), 0))
+
+
+## How many bullet hole decals there are (every peer has the same).
+func bullet_hole_count() -> int:
+	var count := 0
+	for serial: int in _marks:
+		count += 1 if _is_hole(_marks[serial]) else 0
+	return count
+
+
 ## Host only. A small impact mark (a crack or chip, nothing carved) where a round stopped on
 ## the surface at `world_position` facing `normal`, in `mat`'s colour. Returns false when the
 ## surface voxel there already has MARKS_PER_VOXEL marks (nothing is recorded).
@@ -273,11 +324,12 @@ static func loss_per_m(mat: int) -> float:
 ## - "material": the first solid voxel's material (Mat.EMPTY if none was found);
 ## - "voxels": the voxels it passed through (empty when stopped: a stop makes no hole);
 ## - "exit": where it came out (world space), past the last solid voxel;
+## - "exit_normal": the outward normal of the face it came out of (world space);
 ## - "lost_j": the energy it lost.
 ## A stretch of solid voxels ends at the first empty one; whatever is behind is a separate
 ## hit for the ray.
 func trace_round(entry: Vector3, direction: Vector3, energy_j: float) -> Dictionary:
-	var result := {"stopped": false, "material": Mat.EMPTY, "voxels": [], "exit": entry, "lost_j": 0.0}
+	var result := {"stopped": false, "material": Mat.EMPTY, "voxels": [], "exit": entry, "exit_normal": direction, "lost_j": 0.0}
 	var dir := terrain.global_basis.inverse() * direction
 	var units_per_m := dir.length()
 	if units_per_m <= 0.0:
@@ -310,6 +362,7 @@ func trace_round(entry: Vector3, direction: Vector3, energy_j: float) -> Diction
 	var inside := false
 	var t := 0.0
 	var passed: Array[Vector3i] = []
+	var crossed := Vector3.ZERO  # the face the walk last stepped through (voxel axes)
 	while t < max_t:
 		var t_next := minf(t_max.x, minf(t_max.y, t_max.z))
 		var mat := int(_tool.get_voxel(cell))
@@ -329,18 +382,22 @@ func trace_round(entry: Vector3, direction: Vector3, energy_j: float) -> Diction
 			# Out the far side (or nothing solid here: a hole the collider hasn't caught up with).
 			result.voxels = passed
 			result.exit = terrain.to_global(start + dir * t)
+			result.exit_normal = (terrain.global_basis * crossed).normalized() if not crossed.is_zero_approx() else direction.normalized()
 			result.lost_j = energy_j - remaining
 			return result
 		if t_max.x <= t_max.y and t_max.x <= t_max.z:
 			cell.x += step.x
+			crossed = Vector3(step.x, 0, 0)
 			t = t_max.x
 			t_max.x += t_delta.x
 		elif t_max.y <= t_max.z:
 			cell.y += step.y
+			crossed = Vector3(0, step.y, 0)
 			t = t_max.y
 			t_max.y += t_delta.y
 		else:
 			cell.z += step.z
+			crossed = Vector3(0, 0, step.z)
 			t = t_max.z
 			t_max.z += t_delta.z
 	result.stopped = true
@@ -430,10 +487,41 @@ func _apply(edit: Dictionary) -> void:
 				box = AABB(Vector3(cell), Vector3.ONE) if i == 0 else box.merge(AABB(Vector3(cell), Vector3.ONE))
 			if v.size() >= 3:
 				_carved(box)
+		"shot":
+			_apply_shot(edit)
 		"mark":
 			var p: Array = edit["p"]
 			var n: Array = edit["n"]
 			_add_mark(Vector3(p[0], p[1], p[2]), Vector3(n[0], n[1], n[2]), int(edit.get("m", Mat.CONCRETE)))
+
+
+## A round through wood or sheet metal (server_shot): hole decals in and out, and voxels
+## that have now had HOLES_TO_BREAK rounds through them break out.
+func _apply_shot(edit: Dictionary) -> void:
+	var mat := int(edit.get("m", Mat.WOOD))
+	var size := float(edit.get("d", 0.0057)) * HOLE_DECAL_SCALE
+	var a: Array = edit["a"]
+	var an: Array = edit["an"]
+	var b: Array = edit["b"]
+	var bn: Array = edit["bn"]
+	_add_hole(Vector3(a[0], a[1], a[2]), Vector3(an[0], an[1], an[2]), mat, size)
+	_add_hole(Vector3(b[0], b[1], b[2]), Vector3(bn[0], bn[1], bn[2]), mat, size * float(HOLE_EXIT_SCALE.get(mat, 1.0)))
+	var v: Array = edit["v"]
+	var box := AABB()
+	var broke := false
+	for i in range(0, v.size() - 2, 3):
+		var cell := Vector3i(int(v[i]), int(v[i + 1]), int(v[i + 2]))
+		var hits := int(_hole_hits.get(cell, 0)) + 1
+		var cell_mat := int(_tool.get_voxel(cell))
+		if hits >= int(HOLES_TO_BREAK.get(cell_mat, HOLES_TO_BREAK[Mat.WOOD])):
+			_hole_hits.erase(cell)
+			_tool.set_voxel(cell, Mat.EMPTY)
+			box = AABB(Vector3(cell), Vector3.ONE) if not broke else box.merge(AABB(Vector3(cell), Vector3.ONE))
+			broke = true
+		else:
+			_hole_hits[cell] = hits
+	if broke:
+		_carved(box)
 
 
 ## Takes out each material within its share of radius `r` around `centre` (voxel units).
@@ -477,11 +565,11 @@ static func _mark_cell(p: Vector3, n: Vector3) -> Vector3i:
 	return Vector3i((p - n * 0.5).floor())
 
 
-func _add_mark(p: Vector3, n: Vector3, mat: int) -> void:
+func _add_mark(p: Vector3, n: Vector3, mat: int, size_m := MARK_SIZE_M, hole := false) -> void:
 	n = n.normalized() if not n.is_zero_approx() else Vector3.UP
 	var cell := _mark_cell(p, n)
 	_mark_serial += 1
-	_marks[_mark_serial] = [p, n, mat, cell]
+	_marks[_mark_serial] = [p, n, mat, cell, size_m, hole]
 	if not _mark_cells.has(cell):
 		_mark_cells[cell] = []
 	(_mark_cells[cell] as Array).append(_mark_serial)
@@ -495,6 +583,15 @@ func _add_mark(p: Vector3, n: Vector3, mat: int) -> void:
 	_queue_mark_rebuild()
 
 
+## A bullet hole decal `size_m` across, unless that voxel face already shows
+## HOLE_MARKS_PER_VOXEL of them.
+func _add_hole(p: Vector3, n: Vector3, mat: int, size_m: float) -> void:
+	n = n.normalized() if not n.is_zero_approx() else Vector3.UP
+	if (_mark_cells.get(_mark_cell(p, n), []) as Array).size() >= HOLE_MARKS_PER_VOXEL:
+		return
+	_add_mark(p, n, mat, size_m, true)
+
+
 func _queue_mark_rebuild() -> void:
 	if not _marks_dirty:
 		_marks_dirty = true
@@ -502,15 +599,20 @@ func _queue_mark_rebuild() -> void:
 
 
 ## Every mark as a small quad flat on its surface, turned and sized by its position so every
-## peer draws it the same.
+## peer draws it the same: impact marks in one multimesh, bullet holes in the other.
 func _rebuild_marks() -> void:
 	_marks_dirty = false
+	var holes := bullet_hole_count()
 	var mm := _mark_mesh.multimesh
-	mm.instance_count = _marks.size()
-	var size := MARK_SIZE_M / VOXEL_SIZE
+	var hm := _hole_mesh.multimesh
+	mm.instance_count = _marks.size() - holes
+	hm.instance_count = holes
 	var i := 0
+	var j := 0
 	for serial: int in _marks:
 		var mark: Array = _marks[serial]
+		var hole := _is_hole(mark)
+		var size := float(mark[4]) / VOXEL_SIZE if mark.size() > 4 else MARK_SIZE_M / VOXEL_SIZE
 		var p: Vector3 = mark[0]
 		var n: Vector3 = mark[1]
 		var up := Vector3.UP if absf(n.y) < 0.95 else Vector3.RIGHT
@@ -518,17 +620,27 @@ func _rebuild_marks() -> void:
 		var basis := Basis(x, n.cross(x), n)
 		var h := absi(hash(Vector3i((p * 100.0).round())))
 		basis = basis.rotated(n, float(h % 628) / 100.0)
+		if hole:
+			basis = basis.scaled(Vector3.ONE * size * (0.9 + float(floori(h / 628.0) % 20) / 100.0))
+			hm.set_instance_transform(j, Transform3D(basis, p + n * 0.02))
+			hm.set_instance_color(j, HOLE_RIM.get(mark[2], Color("c9a877")))
+			j += 1
+			continue
 		basis = basis.scaled(Vector3.ONE * size * (0.7 + float(floori(h / 628.0) % 60) / 100.0))
 		mm.set_instance_transform(i, Transform3D(basis, p + n * 0.03))
 		mm.set_instance_color(i, (MATERIALS.get(mark[2], {}) as Dictionary).get("mark", Color("3b3935")))
 		i += 1
 
 
-func _make_mark_mesh() -> MultiMeshInstance3D:
+static func _is_hole(mark: Array) -> bool:
+	return mark.size() > 5 and bool(mark[5])
+
+
+func _make_mark_mesh(texture: Texture2D = null, node_name := "ImpactMarks") -> MultiMeshInstance3D:
 	var quad := QuadMesh.new()
 	quad.size = Vector2.ONE
 	var material := StandardMaterial3D.new()
-	material.albedo_texture = _crack_texture()
+	material.albedo_texture = texture if texture else _crack_texture()
 	material.vertex_color_use_as_albedo = true
 	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
 	material.alpha_scissor_threshold = 0.5
@@ -540,10 +652,33 @@ func _make_mark_mesh() -> MultiMeshInstance3D:
 	mm.use_colors = true
 	mm.mesh = quad
 	var node := MultiMeshInstance3D.new()
-	node.name = "ImpactMarks"
+	node.name = node_name
 	node.multimesh = mm
 	node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	return node
+
+
+## A bullet hole: a near-black core (the round's diameter: 1 / HOLE_DECAL_SCALE of the
+## texture across) inside a ragged rim the mark's colour tints (splinters for wood, bare
+## metal for sheet metal).
+static func _hole_texture() -> ImageTexture:
+	const S := 64
+	var image := Image.create(S, S, false, Image.FORMAT_RGBA8)
+	image.fill(Color(1, 1, 1, 0))
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 5560
+	var c := Vector2(S, S) * 0.5
+	var core := S / (2.0 * HOLE_DECAL_SCALE)
+	for y in S:
+		for x in S:
+			var p := Vector2(x + 0.5, y + 0.5)
+			var d := p.distance_to(c)
+			var ragged := core * 2.0 + rng.randf_range(-2.0, 3.0) + 3.0 * sin(atan2(p.y - c.y, p.x - c.x) * 5.0)
+			if d <= core:
+				image.set_pixel(x, y, Color(0.04, 0.04, 0.04))
+			elif d <= ragged:
+				image.set_pixel(x, y, Color.WHITE)
+	return ImageTexture.create_from_image(image)
 
 
 ## A small chip with hairline cracks running out of it (white on clear; each mark tints it).

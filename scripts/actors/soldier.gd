@@ -17,6 +17,9 @@ extends CharacterBody3D
 const REVIVE_RANGE := 2.5
 const HITBOX_MASK := 1 << 1
 const INTERACT_RANGE := 2.2
+## Furthest the view tilts up or down (about 83 degrees): stopping short of straight up
+## keeps the head's Euler angles unique, so the view can't flip over behind you.
+const MAX_PITCH := 1.45
 ## Carried mass below this costs no speed; at MAX_LOAD_KG you are at the slowest.
 const FREE_LOAD_KG := 15.0
 const MAX_LOAD_KG := 60.0
@@ -378,11 +381,24 @@ func _spread_direction(weapon: ItemData) -> Vector3:
 	return (forward + offset * tan(amount)).normalized()
 
 
+## Sets the view's up/down tilt, clamped to MAX_PITCH. The head only pitches and rolls
+## (lean); yaw belongs to the body (but see view_yaw), so the rotation is rebuilt rather than
+## rotated, which would let lean roll leak into yaw until the view swung round behind the body.
+func set_pitch(pitch: float) -> void:
+	head.rotation = Vector3(clampf(pitch, -MAX_PITCH, MAX_PITCH), view_yaw(), head.rotation.z)
+
+
+## The view's turn from the body's facing: dragging, the body walks away from the casualty
+## while the view (and the drawn dragger, CharacterModel.DRAG_POSE) faces it, Arma-style.
+func view_yaw() -> float:
+	return PI if carry_mode == DRAG else 0.0
+
+
 ## Recoil: the view kicks up and a little sideways; aiming halves it.
 func _kick(weapon: ItemData) -> void:
 	var kick := deg_to_rad(float(weapon.stats.get("recoil_deg", 0.6))) * (0.5 if is_aiming else 1.0)
 	kick *= movement.recoil_mult()  # stance and mounted weapon
-	head.rotation.x = clampf(head.rotation.x + kick, -1.5, 1.5)
+	set_pitch(head.rotation.x + kick)
 	rotate_y(randf_range(-0.35, 0.35) * kick)
 
 

@@ -56,6 +56,9 @@ func _ready() -> void:
 	set_process_unhandled_input(true)
 
 
+var _view_yaw := 0.0  # Soldier.view_yaw last applied
+
+
 func _unhandled_input(event: InputEvent) -> void:
 	var captured := _captured()
 	if event is InputEventMouseMotion and captured and interaction.is_open():
@@ -63,8 +66,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event is InputEventMouseMotion and captured:
 		var turn := MOUSE_SENSITIVITY * body.vitals.turn_mult()  # concussion slows turning
 		body.rotate_y(-event.relative.x * turn)
-		body.head.rotate_x(-event.relative.y * turn)
-		body.head.rotation.x = clampf(body.head.rotation.x, -1.5, 1.5)
+		body.set_pitch(body.head.rotation.x - event.relative.y * turn)
 	elif event.is_action_pressed(&"inventory") or (event.is_action_pressed(&"pause") and hud.is_inventory_open()):
 		hud.toggle_detail()
 	elif hud.is_inventory_open():
@@ -102,6 +104,12 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _process(delta: float) -> void:
 	_update_interaction(delta)
+	if body.view_yaw() != _view_yaw:
+		# Taking hold of a casualty to drag (or letting go): the body turns round under the
+		# view, so you keep looking where you were, at the casualty.
+		_view_yaw = body.view_yaw()
+		body.rotate_y(PI)
+		body.set_pitch(body.head.rotation.x)
 	_shake = move_toward(_shake, 0.0, delta * 1.5)
 	body.camera.h_offset = randf_range(-1.0, 1.0) * _shake * 0.08
 	body.camera.v_offset = randf_range(-1.0, 1.0) * _shake * 0.08

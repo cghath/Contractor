@@ -110,7 +110,7 @@ include Voxel Tools.
 | F | Fire mode (M4 and Mk18: semi and auto; each weapon remembers its selector) |
 | Mouse / LMB | Look, fire |
 | RMB (hold) | Aim down sights: zoom, much tighter spread, half recoil, slower movement |
-| Left Ctrl (hold) | Interaction menu: action points on items, downed bodies and squadmates within about 3 m; move the cursor onto one and let go to pick (pick up, treat, carry, drag, loot a body, check condition, give item) |
+| Left Ctrl (hold) | Interaction menu: action points on items, downed bodies and squadmates within about 3 m; move the cursor onto one and let go to pick (pick up, treat, carry, drag, loot a body, check condition, give item; Release or Put down on the body you're moving). Dragging, you face the casualty and back away with S |
 | Left Ctrl + Left Alt (hold) | Self-interaction: check wounds, use medical, put down a carried body, drop held item |
 | R | Reload (fullest spare magazine; a part-used one goes back in your pouch) |
 | H | Treat yourself: applies the next item you carry for your most urgent wound (tourniquet before bandage, and so on) |
@@ -145,7 +145,7 @@ which has the full rules.
 | Camera | First-person |
 | Multiplayer | Co-op from day one, listen server (host is authoritative), up to 4 players |
 | Voxels | World structures at 10 cm voxels; characters and gear as 1–2 cm voxel models |
-| Armor | Plates and helmets are runtime voxel objects; hits chip voxels, holes let rounds through. Rounds and armor share an NIJ-named rating ladder (IIA to IV); ceramic cracks in zones, steel throws spall |
+| Armor | Plates and helmets are runtime voxel objects; hits chip voxels, holes let rounds through, and every hit wears the piece's integrity down by durability. Rounds and armor share an NIJ-named rating ladder (IIA to IV); ceramic cracks in zones, steel throws spall |
 | Medical | No hitpoints: 6 L of blood, wounds per body part, pain, unconsciousness at 40% lost, cardiac arrest at 50% with a 10-minute window |
 | Inventory | Volume budget in **litres** + visible gear; auto-stow, bulky items need two hands |
 | Squad | 8 slots (two fire teams of four, a medic each, battle-buddy pairs); up to 4 players, AI fills the rest. Starts at 1 AI squadmate. AI tactics modeled on LAMBS Danger and VCOM |
@@ -280,8 +280,8 @@ a release:
 - Medical depth is wave 3: no IV, blood bags, CPR, defibrillator, decompression needle or surgery yet. Until IV, blood only comes back slowly once every bleed has stopped, and heart wounds and internal torso bleeding have no field fix. SpO2 is a basic model (no per-lung efficiency or pulse oximeter), and there's no breathing sound yet.
 - Bodies: a zone reload respawns the full friendly squad alive while dead squadmates' saved bodies also come back, so their gear exists twice (AI persistence is wave 4; dead hostiles aren't respawned). Loot all can't move a carrier with its contents onto someone already wearing one; it falls back to piece by piece.
 - AI squadmates don't load magazines from loose rounds, and role kits carry no loose rounds.
-- Movement still slides a little when stopping and turning; Captain's fix for it is in progress (branch `fix2/p2-movement`, unfinished).
-- A bullet hole through wood or sheet metal is one whole 10 cm voxel per voxel crossed; concrete marks are small decals. No ricochets yet.
+- Bullet holes in wood and sheet metal are decals (a voxel only breaks out after many rounds), so you can't see through them; concrete marks are small decals. No ricochets yet.
+- AI squadmates still use the older, looser movement momentum (the player's tighter grip got them stuck on door frames).
 - You can still fire during a pickup or equip animation. A dragged casualty eases back about 1 m when put down. An equip animation plays even when the action then fails.
 - Players don't start in their role's kit yet (`CompoundLevel.player_role_kits` is off); they kit out from the compound's loot. Autoriflemen and grenadiers carry M4s until there are LMG and launcher items.
 - Squad AI doesn't use the new stances, leaning or mounting yet, and callouts have no voice audio (subtitles only).

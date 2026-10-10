@@ -299,12 +299,28 @@ func _test_momentum() -> void:
 	player.load_mult = Soldier.MIN_LOAD_MULT  # a full load
 	var heavy := _time_to(4.0 * 0.95)
 	var heavy_stop := _time_to_stop()
+	var heavy_slide := _stop_distance(4.0)
+	player.load_mult = 1.0
+	var slide := _stop_distance(4.0)
+	var sprint_slide := _stop_distance(SoldierMovement.SPRINT_SPEED)
 	player.load_mult = saved
 	check(light > 0.2 and light < 0.4, "unloaded: a jog in %.2f s" % light)
-	check(light_stop > 0.2 and light_stop < 0.4, "unloaded: stops in %.2f s" % light_stop)
+	check(light_stop > 0.1 and light_stop < 0.25, "unloaded: stops in %.2f s" % light_stop)
 	check(heavy / light > 1.7 and heavy / light < 2.3 and heavy_stop / light_stop > 1.7, "a full load roughly doubles both (%.2f s, %.2f s)" % [heavy, heavy_stop])
+	check(slide > 0.2 and slide < 0.5 and sprint_slide < 0.9 and heavy_slide < 0.9,
+		"stops over a short distance, no ice (jog %.2f m, sprint %.2f m, loaded jog %.2f m)" % [slide, sprint_slide, heavy_slide])
 	var turned := move.next_velocity(Vector3(0, 0, -4), Vector3(4, 0, 0), 1.0 / 60.0)
 	check(turned.z < -3.0, "momentum carries into a turn (%.1f m/s still forward)" % -turned.z)
+	var drift := _turn_drift(Vector3(4, 0, 0))
+	check(drift > 0.05 and drift < 0.3, "a 90 degree turn drifts the old way only %.2f m" % drift)
+	var back := _turn_drift(Vector3(0, 0, 4))
+	check(back < 0.5, "turning right round brakes first (%.2f m on)" % back)
+	var v := Vector3(0, 0, -4)
+	var slowest := 4.0
+	for i in 30:
+		v = move.next_velocity(v, Vector3(0, 0, -4).rotated(Vector3.UP, deg_to_rad(30)), 1.0 / 120.0)
+		slowest = minf(slowest, v.length())
+	check(slowest > 3.4, "a gentle turn keeps its pace (%.1f m/s at the slowest)" % slowest)
 
 
 func _test_stamina() -> void:
@@ -453,6 +469,26 @@ func _time_to_stop() -> float:
 		v = move.next_velocity(v, Vector3.ZERO, 1.0 / 120.0)
 		t += 1.0 / 120.0
 	return t
+
+
+## Metres covered stopping from `speed` (m/s).
+func _stop_distance(speed: float) -> float:
+	var v := Vector3(0, 0, -speed)
+	var travelled := 0.0
+	for i in 600:
+		v = move.next_velocity(v, Vector3.ZERO, 1.0 / 120.0)
+		travelled += v.length() / 120.0
+	return travelled
+
+
+## Metres carried along the old heading (-z, at a jog) after turning to `target`.
+func _turn_drift(target: Vector3) -> float:
+	var v := Vector3(0, 0, -4)
+	var travelled := 0.0
+	for i in 600:
+		v = move.next_velocity(v, target, 1.0 / 120.0)
+		travelled += maxf(-v.z, 0.0) / 120.0
+	return travelled
 
 
 func _speed(body: Soldier) -> float:

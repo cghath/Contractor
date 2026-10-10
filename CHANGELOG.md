@@ -11,12 +11,60 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
-### Captain's wave 1 playtest fixes
+### Captain's wave 2 playtest fixes
 
-Four of the five fixes, each built, reviewed and fixed by its own agent. The movement fix
-(sliding as if on ice) isn't finished and isn't in yet.
+From Captain's playtest of the wave 1 build. The Star Citizen-style inventory and MOLLE vest
+attachments Captain asked for at the same time are still in progress.
 
 #### Changed
+
+- **Plate and helmet wear:** every hit, stopped or not, now wears a plate or helmet down by
+  round class and the piece's durability, and the HUD shows that integrity (it used to show
+  only the share of voxels knocked out, so a heavily dented plate still read 94%). A 5.56 round
+  takes about a quarter of a light PE plate (worn out in 4 hits), 18% of a heavy ceramic plate
+  (6) and 8% of a medium steel plate (13). Helmets: bump 30%, medium 23%, heavy 18% per hit.
+  Below 30% a steel, PE or composite piece starts letting rounds through, and at zero it stops
+  nothing ("worn out"; ceramic still shatters).
+- **Plate-stop pain:** a burst into the plates hurts. Each stop adds more impact (pistol 0.05,
+  5.56 0.12, 7.62 0.22), up to 0.7, which was 0.35. Six 5.56 stops in a row reach the cap.
+  That plus a cracked rib stays just under the knockout threshold at full blood, so plates
+  alone still never knock out a healthy soldier, but a wounded one who has lost blood can go
+  down.
+- **Bullet holes in wood and sheet metal** are now the size of the round: a dark core the
+  bullet's diameter (5.7 mm for 5.56, 7.8 mm for 7.62, 9 mm for 9 mm) in a splintered or
+  bare-metal rim, going in and coming out (bigger on the way out of wood), instead of a whole
+  10 cm voxel knocked out. A voxel breaks out only after 10 rounds through it (16 for sheet
+  metal). Every peer sees them, late joiners too, and they're saved with the zone. Old saves'
+  whole-voxel holes still load.
+- **Knees:** legs bend at the knee. Crouching and kneeling put the feet under the hips, with
+  the back knee down on the ground, and knees fold as the legs swing through when walking.
+  Shin hitboxes follow the shins.
+- **Dragging, Arma-style:** you face the casualty and crouch over them, and the view goes
+  down with you. You back away with S (strafing works, W doesn't walk onto them), and the
+  camera turns round with you when you take hold or let go. Looking at the body you drag (or
+  carry) offers **Release** (or Put down) in the Ctrl menu, as well as in the Ctrl+Alt menu.
+
+#### Fixed
+
+- Looking far up or down could tip the view past vertical, swing it round about 90 degrees
+  and leave you facing backwards, with mouse look or movement inverted. The cause was leaning
+  (and the stance tilt) leaking into the view's turn on every mouse move. The view now stops
+  at about 83 degrees up or down and can't turn away from the body.
+- AI squadmates keep the older, looser momentum. The player's tighter grip from the movement
+  fix left them stuck on door frames.
+
+### Captain's wave 1 playtest fixes
+
+All five fixes, each built, reviewed and fixed by its own agent. The movement fix (sliding
+as if on ice) came last, on `fix2/p2-movement`.
+
+#### Changed
+
+- **Movement feel:** no more sliding on ice. Stopping now takes about 0.2 s from a jog or a
+  sprint (0.4 m from a jog, under 0.9 m from a sprint; was 0.6 m and about 1.6 m), and
+  after a turn, or when the view swings round mid-run, the old heading is shed in 0.1 s
+  (about 0.2 m of drift on a 90 degree turn) while the new direction builds up over the
+  usual 0.3 s. Gentle turns keep their pace. A full load still doubles all of it.
 
 - **Knockouts:** getting hit in the plates no longer knocks you out. Stopped rounds bruise
   (plate impact pain about halved and capped at 0.35 however many land), still stagger you,

@@ -112,13 +112,14 @@ func _test_armor() -> void:
 		check(helmet.server_try_stop(Vector3(0.03, size.y - (0.2 if tier[1] == "heavy" else 0.0) - 0.001, 0.02), Vector3.DOWN, round), "%s: top stops a round" % tier[1])
 		if round == pistol:
 			check(not helmet.server_try_stop(Vector3(-0.05, 0.1, -size.z * 0.5 + 0.01), Vector3.BACK, rifle), "%s: a 5.56 round goes through" % tier[1])
+		# The visor first: every hit wears integrity down, and the punch-through below wears it out.
+		var face := Vector3(0, -0.1 if tier[1] == "heavy" else 0.02, -size.z * 0.5)
+		var face_blocked := helmet.server_try_stop(face, Vector3.BACK, round)
+		check(face_blocked == (tier[1] == "heavy"), "%s: face %s" % [tier[1], "covered by the visor" if tier[1] == "heavy" else "left open"])
 		var shots := 1
 		while helmet.server_try_stop(dome_front, Vector3.BACK, round) and shots < 12:
 			shots += 1
 		check(shots < 12, "%s: same spot punched through after %d hits" % [tier[1], shots + 1])
-		var face := Vector3(0, -0.1 if tier[1] == "heavy" else 0.02, -size.z * 0.5)
-		var face_blocked := helmet.server_try_stop(face, Vector3.BACK, round)
-		check(face_blocked == (tier[1] == "heavy"), "%s: face %s" % [tier[1], "covered by the visor" if tier[1] == "heavy" else "left open"])
 		helmet.inventory.queue_free()
 	await get_tree().process_frame
 

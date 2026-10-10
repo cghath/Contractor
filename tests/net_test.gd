@@ -14,9 +14,11 @@ const SAVED_BODY := {"uid": "test_net_body_1", "label": "Player 9", "faction": "
 	"gear": {"slots": {"primary": "m4a1", "vest": "plate_carrier", "helmet": "helmet"}, "slot_state": {"primary": {"rounds": 21}},
 		"containers": {"vest": [{"id": "mag_556", "count": 3}], "pockets": [], "backpack": []}, "hands": ""}}
 ## Voxel edits in the same save: an impact mark on the main building's concrete and a bullet
-## hole in the shed's plank wall (voxel coordinates), which the late joiner gets in the log.
+## hole in the shed's plank wall (voxel coordinates, an old save's whole-voxel hole), plus a
+## calibre-sized bullet hole through the next voxel, which the late joiner gets in the log.
 const SAVED_EDITS := [{"op": "mark", "p": [-29.5, 13.5, -40.0], "n": [0.0, 0.0, 1.0], "m": 2},
-	{"op": "holes", "v": [175, 13, -71]}]
+	{"op": "holes", "v": [175, 13, -71]},
+	{"op": "shot", "a": [177.5, 13.5, -70.0], "an": [0.0, 0.0, 1.0], "b": [177.5, 13.5, -71.0], "bn": [0.0, 0.0, -1.0], "d": 0.0057, "m": 3, "v": [177, 13, -71]}]
 ## Where the host marks the perimeter wall's inner face once the client is in (live, by RPC).
 const LIVE_MARK := Vector3(6.0, 1.2, 19.7)
 
@@ -221,6 +223,8 @@ func _check_world_edits() -> void:
 		"impact marks replicate: the saved one on the building and the host's live one (%d marks in all)" % world.mark_count())
 	check(world.material_at(Vector3(17.55, 1.35, -7.05)) == VoxelWorld.Mat.EMPTY and world.material_at(Vector3(17.65, 1.35, -7.05)) == VoxelWorld.Mat.WOOD,
 		"and the saved bullet hole in the shed wall")
+	check(world.bullet_hole_count() >= 2 and world.material_at(Vector3(17.75, 1.35, -7.05)) == VoxelWorld.Mat.WOOD and world.holes_through(Vector3(17.75, 1.35, -7.05)) == 1,
+		"and the saved calibre-sized one, in and out, the voxel still there (%d hole decals)" % world.bullet_hole_count())
 
 
 ## The drag the host staged before this client joined shows here: both poses from the

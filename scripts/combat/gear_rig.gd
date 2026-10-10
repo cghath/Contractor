@@ -84,15 +84,14 @@ func armor_rids() -> Array[RID]:
 	return rids
 
 
-## Remaining fraction of an armor slot's protection, or -1 if nothing is worn there: a
-## ceramic plate's integrity (ArmorRules), otherwise the share of its voxels left.
+## Remaining fraction of an armor slot's protection, or -1 if nothing is worn there: the
+## piece's integrity (ArmorRules, which every hit wears down), or the share of its voxels
+## left if that is lower.
 func armor_integrity(slot: StringName) -> float:
 	var piece: VoxelArmor = _armor.get(slot)
 	if piece == null:
 		return -1.0
-	if ArmorRules.material(piece.item) == ArmorRules.CERAMIC:
-		return minf(ArmorRules.integrity(inventory.state_of(slot)), piece.integrity())
-	return piece.integrity()
+	return minf(ArmorRules.integrity(inventory.state_of(slot)), piece.integrity())
 
 
 ## "Front IV 64% 3 cracks  Back IV 100%  Helmet IIIA 92%" for HUDs and labels (rating, what's
@@ -107,7 +106,7 @@ func armor_summary(separator := "  ") -> String:
 		var state := inventory.state_of(slot)
 		var text := "%s %s" % [ARMOR_SLOTS[slot], ArmorRules.rating(piece.item)]
 		if ArmorRules.is_shattered(state):
-			text += " shattered"
+			text += " " + ArmorRules.failed_text(piece.item)
 		else:
 			text += " %d%%" % roundi(integrity * 100.0)
 			var cracks := ArmorRules.cracks(state).size()

@@ -97,20 +97,27 @@ func _test_thin_walls() -> void:
 	await get_tree().physics_frame
 	await get_tree().physics_frame
 	var edits := GameState.voxel_edits.size()
+	var decals := world.bullet_hole_count()
 	var through := _fire(Vector3(17.05, 1.35, -3), Vector3(17.05, 1.35, -13), &"m4a1")
 	check(through.result == "body" and not outside.vitals.wound_list().is_empty(),
 		"an M4 round goes through both plank walls of the shed into a man behind it (%s, %s)" % [through.result, outside.vitals.condition_text()])
-	check(world.material_at(Vector3(17.05, 1.35, -7.05)) == VoxelWorld.Mat.EMPTY and world.material_at(Vector3(17.05, 1.35, -10.95)) == VoxelWorld.Mat.EMPTY,
-		"each wall has a bullet hole where it went through")
-	check(world.material_at(Vector3(17.25, 1.35, -7.05)) == VoxelWorld.Mat.WOOD and world.material_at(Vector3(17.05, 1.55, -7.05)) == VoxelWorld.Mat.WOOD,
-		"and only there: one voxel")
+	check(world.bullet_hole_count() == decals + 4, "a calibre-sized bullet hole in and out of each wall (%d)" % (world.bullet_hole_count() - decals))
+	check(world.material_at(Vector3(17.05, 1.35, -7.05)) == VoxelWorld.Mat.WOOD and world.material_at(Vector3(17.05, 1.35, -10.95)) == VoxelWorld.Mat.WOOD
+		and world.holes_through(Vector3(17.05, 1.35, -7.05)) == 1 and world.holes_through(Vector3(17.05, 1.35, -10.95)) == 1,
+		"no whole 10 cm voxel knocked out: the planks are still there, one round through each")
 	var ops := GameState.voxel_edits.slice(edits).map(func(e: Dictionary) -> String: return e.op)
-	check(ops == ["holes", "holes"], "two holes in the edit log (%s)" % [ops])
+	check(ops == ["shot", "shot"], "two shots in the edit log (%s)" % [ops])
+	var hole_size := float(GameState.voxel_edits[-1].d) * VoxelWorld.HOLE_DECAL_SCALE
+	check(absf(float(GameState.voxel_edits[-1].d) - 0.0057) < 0.0001 and hole_size < 0.02, "the hole's core is the 5.56's diameter (%.1f mm), the decal %.1f cm" % [float(GameState.voxel_edits[-1].d) * 1000.0, hole_size * 100.0])
+	for i in VoxelWorld.HOLES_TO_BREAK[VoxelWorld.Mat.WOOD] - 1:
+		_fire(Vector3(17.05, 1.35, -3), Vector3(17.05, 1.35, -6), &"m4a1")
+	check(world.material_at(Vector3(17.05, 1.35, -7.05)) == VoxelWorld.Mat.EMPTY and world.material_at(Vector3(17.25, 1.35, -7.05)) == VoxelWorld.Mat.WOOD,
+		"%d rounds through one plank break that voxel out, and only that one" % VoxelWorld.HOLES_TO_BREAK[VoxelWorld.Mat.WOOD])
 	var pistol := _fire(Vector3(18.65, 1.35, -3), Vector3(18.65, 1.35, -9), &"m17")
 	check(pistol.result == "body" and not inside.vitals.wound_list().is_empty(), "a 9 mm through one plank wall hits a man inside (%s)" % pistol.result)
 	var container := _fire(Vector3(-17.25, 1.35, 3), Vector3(-17.25, 1.35, 11), &"m17")
 	check(container.result == "body" and not boxed.vitals.wound_list().is_empty(), "a 9 mm through the container's sheet metal hits a man inside (%s)" % container.result)
-	check(world.material_at(Vector3(-17.25, 1.35, 8.05)) == VoxelWorld.Mat.EMPTY, "leaving a hole in the sheet metal")
+	check(world.material_at(Vector3(-17.25, 1.35, 8.05)) != VoxelWorld.Mat.EMPTY and world.holes_through(Vector3(-17.25, 1.35, 8.05)) == 1, "leaving a bullet hole in the sheet metal, not a missing voxel")
 	check(Throwables.clear_line(player.get_world_3d(), Vector3(17.3, 1.8, -3), Vector3(17.3, 1.8, -8)) == false, "the shed wall still blocks sight")
 	for d in [outside, inside, boxed]:
 		d.queue_free()
@@ -187,9 +194,10 @@ func _test_cover() -> void:
 func _test_saved() -> void:
 	print("Marks and holes are saved with the zone")
 	var marks := GameState.voxel_edits.filter(func(e: Dictionary) -> bool: return e.op == "mark").size()
-	var holes := GameState.voxel_edits.filter(func(e: Dictionary) -> bool: return e.op == "holes").size()
+	var holes := GameState.voxel_edits.filter(func(e: Dictionary) -> bool: return e.op == "shot").size()
 	GameState.save_zone()
 	GameState.load_zone()
 	var saved_marks := GameState.voxel_edits.filter(func(e: Dictionary) -> bool: return e.op == "mark").size()
-	var saved_holes := GameState.voxel_edits.filter(func(e: Dictionary) -> bool: return e.op == "holes").size()
+	var saved_holes := GameState.voxel_edits.filter(func(e: Dictionary) -> bool: return e.op == "shot").size()
+	check(holes > 0, "there are bullet holes to save (%d)" % holes)
 	check(marks > 0 and saved_marks == marks and saved_holes == holes, "the save holds %d marks and %d holes (%d, %d)" % [marks, holes, saved_marks, saved_holes])

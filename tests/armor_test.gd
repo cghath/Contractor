@@ -48,6 +48,7 @@ func _ready() -> void:
 	await _test_dents_and_holes()
 	await _test_oblique_dents()
 	_test_wear_through()
+	_test_integrity_balance()
 	await _test_dropped_armor()
 	await _test_lying_flat()
 	print("ARMOR TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
@@ -504,7 +505,7 @@ func _vitals_text(v: Vitals) -> String:
 ## The playtest: a soldier in medium armor (medium carrier, steel III++ plates front and back,
 ## the IIIA helmet) hit 2-3 times in the plates by M855 from the M4 and the Mk18 at 10-100 m
 ## stays conscious and fighting, and so does one hit 6 times in quick succession (stagger and
-## winded are fine). The same rounds through an unarmored limb hurt but don't knock out.
+## winded are fine). A burst hurts (Captain's wave 2 call), but stays under the threshold. The same rounds through an unarmored limb hurt but don't knock out.
 func _test_playtest_knockouts() -> void:
 	print("Playtest: plate hits and limb hits don't knock out")
 	var dummy := await _dummy(["plate_carrier", "plate_steel_l3", "plate_steel_l3", "helmet"])
@@ -542,7 +543,7 @@ func _test_playtest_knockouts() -> void:
 						worst = dummy.vitals.pain()
 						worst_text = _vitals_text(dummy.vitals)
 				print("    %s %3d m, %d hits: %d of %d up, %d spall wounds, %d cracked ribs; worst: %s" % [weapon_id, distance, hits, up, trials, spall, ribs, worst_text])
-				check(stopped and up == trials and worst < WoundModel.KNOCKOUT_PAIN_FULL - 0.3,
+				check(stopped and up == trials and worst < WoundModel.KNOCKOUT_PAIN_FULL,
 					"%s at %d m, %d plate hits: every one stays conscious (worst pain %.2f)" % [weapon.name, distance, hits, worst])
 	# Stagger and winded still come with a stop.
 	dummy.vitals.server_reset_health()
@@ -827,10 +828,38 @@ func _test_wear_through() -> void:
 			sealed = sealed and piece.trace(at, Vector3.BACK) != VoxelArmor.MISS
 		check(limit > 0 and stops == limit and sealed, "%s: %d hits on one spot stopped without a hole, the next goes through (%d)" % [id, limit, stops])
 		check(piece.trace(at, Vector3.BACK) == VoxelArmor.MISS, "%s: ...and leaves a hole" % id)
-		check(piece.server_try_stop(at + Vector3(0.05, 0.05, 0), Vector3.BACK, gun, 10.0), "%s: 7 cm away still stops" % id)
+		var away := piece.trace(at + Vector3(0.05, 0.05, 0), Vector3.BACK)
+		check(away != VoxelArmor.MISS and not ArmorRules.worn_through(item, piece.item_state(), away), "%s: 7 cm away isn't worn through" % id)
 		piece.inventory.queue_free()
 	check(int(ItemDB.get_item(&"plate_ceramic_l4").stats.get("wear_hits", 0)) == 0, "ceramic cracks instead of wearing through")
 
+
+
+## Captain's wave 2 balance pass: every hit wears a piece's integrity down by durability.
+## Light PE goes in a few rifle hits, steel lasts longest, ceramic in between; a worn-out
+## piece stops nothing.
+func _test_integrity_balance() -> void:
+	print("Integrity: every hit wears plates and helmets down")
+	var cell := Vector3i(12, 15, 0)
+	var light := ArmorRules.hit_changes(ItemDB.get_item(&"plate_pe_l3"), {}, cell, Vitals.INTERMEDIATE)
+	check(light.integrity < 0.8, "one 5.56 hit takes a light PE plate to %d%%" % roundi(light.integrity * 100.0))
+	var left := {}
+	for id: StringName in [&"plate_pe_l3", &"plate_ceramic_l4", &"plate_steel_l3", &"helmet_bump", &"helmet", &"helmet_heavy"]:
+		var item := ItemDB.get_item(id)
+		var state := {}
+		var hits := 0
+		while not ArmorRules.is_shattered(state) and hits < 50:
+			state.merge(ArmorRules.hit_changes(item, state, cell, Vitals.INTERMEDIATE), true)
+			hits += 1
+		left[id] = hits
+	check(left[&"plate_pe_l3"] <= 4 and left[&"plate_ceramic_l4"] > left[&"plate_pe_l3"] and left[&"plate_steel_l3"] > left[&"plate_ceramic_l4"],
+		"5.56 hits to wear out: light PE %d, heavy ceramic %d, medium steel %d" % [left[&"plate_pe_l3"], left[&"plate_ceramic_l4"], left[&"plate_steel_l3"]])
+	check(left[&"helmet_bump"] < left[&"helmet"] and left[&"helmet"] <= left[&"helmet_heavy"],
+		"helmets: bump %d, medium %d, heavy %d" % [left[&"helmet_bump"], left[&"helmet"], left[&"helmet_heavy"]])
+	var steel := ItemDB.get_item(&"plate_steel_l3")
+	check(not ArmorRules.piece_stops(steel, {"integrity": 0.0}, cell, &"IIIA"), "a worn-out steel plate stops nothing")
+	check(ArmorRules.state_text(steel, {"integrity": 0.0}) == "worn out" and ArmorRules.state_text(steel, {"chips": [[1, 1, 0, 1.0]], "integrity": 0.64}) == "1 hit, 64%",
+		"labels: %s, %s" % [ArmorRules.state_text(steel, {"integrity": 0.0}), ArmorRules.state_text(steel, {"chips": [[1, 1, 0, 1.0]], "integrity": 0.64})])
 
 # --- Armor on the ground ----------------------------------------------------------------------
 

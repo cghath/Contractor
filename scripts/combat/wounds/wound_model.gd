@@ -219,12 +219,13 @@ const TIMERS: Array[String] = ["arrest_left", "concussion_left", "knockout_left"
 	"treating_left", "wake_left"]
 
 ## Impact (shock) from rounds armor stopped. Helmet values are the design doc's table. Plate
-## (torso) values are Captain's playtest call: a plate stop is a modest bruise, and plate
-## stops (with their cracked ribs) raise impact only up to PLATE_IMPACT_MAX, far under the
-## knockout threshold, so rounds stopped by plates never knock anyone out by themselves
-## however many land. Stagger and being winded still come with every stop.
-const PLATE_IMPACT_PAIN := {&"pistol": 0.03, &"intermediate": 0.08, &"full_power": 0.15}
-const PLATE_IMPACT_MAX := 0.35
+## (torso) values are Captain's playtest calls: one or two stops are a bruise, but a burst
+## stacks up (six 5.56 stops reach the cap), and plate stops with their cracked ribs raise
+## impact up to PLATE_IMPACT_MAX. That plus a cracked rib's floor stays just under the
+## knockout threshold at full blood, so plates alone never knock a healthy soldier out, but
+## a wounded one who has lost blood can go down. Stagger and being winded come with every stop.
+const PLATE_IMPACT_PAIN := {&"pistol": 0.05, &"intermediate": 0.12, &"full_power": 0.22}
+const PLATE_IMPACT_MAX := 0.7
 const HELMET_IMPACT_PAIN := {&"pistol": 0.15, &"intermediate": 0.3, &"full_power": 0.45}
 const CONCUSSION_CHANCE := {&"pistol": 0.1, &"intermediate": 0.4, &"full_power": 0.8}
 const STAGGER_S := 0.8            # intermediate plate stop: brief stagger

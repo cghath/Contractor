@@ -203,6 +203,8 @@ static func _spec(model: String) -> Dictionary:
 		"upper_arm": return _upper_arm()
 		"forearm": return _forearm()
 		"leg": return _leg()
+		"thigh": return _thigh()
+		"shin": return _shin()
 		"vest": return _vest(arg)
 		"backpack": return _backpack(arg)
 		"rifle": return _rifle(arg)
@@ -268,6 +270,27 @@ static func _leg() -> Dictionary:
 		_b(0, 0, 0, 7, 1, 9, C.SOLE),
 		_b(1, 19, 0, 6, 25, 1, C.PAD),
 		_b(0, 27, 3, 1, 34, 7, C.CAMO_C), _b(6, 27, 3, 7, 34, 7, C.CAMO_C),
+	]}
+
+
+## The leg above the knee: 0.14 x 0.46 x 0.16 m, overlapping the knee by a voxel. Pivot at
+## the hip joint; the knee (CharacterModel.THIGH) is at the bottom, with the top of the knee pad.
+static func _thigh() -> Dictionary:
+	return {"size": Vector3i(7, 23, 9), "pivot": Vector3(3.5, 23, 5), "boxes": [
+		_b(0, 0, 1, 7, 23, 9, C.CAMO),
+		_b(1, 0, 0, 6, 2, 1, C.PAD),
+		_b(0, 5, 3, 1, 12, 7, C.CAMO_C), _b(6, 5, 3, 7, 12, 7, C.CAMO_C),
+	]}
+
+
+## The leg below the knee with the boot: 0.14 x 0.46 x 0.18 m, the bottom half of _leg.
+## Pivot at the knee.
+static func _shin() -> Dictionary:
+	return {"size": Vector3i(7, 23, 9), "pivot": Vector3(3.5, 23, 5), "boxes": [
+		_b(0, 6, 1, 7, 23, 9, C.CAMO),
+		_b(0, 0, 0, 7, 7, 9, C.BOOT),
+		_b(0, 0, 0, 7, 1, 9, C.SOLE),
+		_b(1, 19, 0, 6, 23, 1, C.PAD),
 	]}
 
 

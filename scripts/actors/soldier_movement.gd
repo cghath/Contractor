@@ -71,9 +71,16 @@ const ROLL_SPEED := 2.0             # rad/s
 const EYE_FORWARD := 0.1
 
 ## Momentum (proposed): an unloaded soldier reaches a jog in ACCEL_TIME and stops from one
-## in STOP_TIME; a full load adds HEAVY_TIME_MULT times as much (roughly doubles both).
+## (or from a sprint) in about STOP_TIME; drift across the way it now wants to go (the old
+## heading after a turn) is shed in GRIP_TIME. A full load adds HEAVY_TIME_MULT times as
+## much to all three (roughly doubles them).
 const ACCEL_TIME := 0.3
-const STOP_TIME := 0.3
+const STOP_TIME := 0.2
+const GRIP_TIME := 0.1
+## AI soldiers keep the older, looser momentum (a plain ease towards the wanted velocity, braking
+## over AI_STOP_TIME): their path following leans on sliding round corners, and the tight grip
+## left them stuck on door frames. The grip is for the player's feel.
+const AI_STOP_TIME := 0.3
 const HEAVY_TIME_MULT := 1.0
 const AIR_CONTROL := 0.3
 ## Settle sway after a stop: speed lost (m/s) builds it up to 1, then it fades.
@@ -159,6 +166,10 @@ func step(delta: float) -> void:
 		_read_keys(adjusting)
 		if not adjusting:  # Caps Lock + WASD changes stance instead of moving
 			input = Input.get_vector(&"move_left", &"move_right", &"move_forward", &"move_back")
+		if body.carry_mode == Soldier.DRAG:
+			# Dragging, the view faces the casualty behind the body: keys move relative to the
+			# view, and only away from the casualty (back) or to the sides, never onto it.
+			input = Vector2(-input.x, minf(-input.y, 0.0))
 		sprint = Input.is_action_pressed(&"sprint")
 		if Input.is_action_just_pressed(&"jump") and can_jump():
 			body.velocity.y = JUMP_VELOCITY
@@ -172,7 +183,7 @@ func step(delta: float) -> void:
 	update_stamina(delta, is_sprinting, input != Vector2.ZERO)
 	var target := (body.global_basis * Vector3(input.x, 0.0, input.y)).normalized() * top_speed(is_sprinting, down)
 	var before := Vector3(body.velocity.x, 0.0, body.velocity.z)
-	var after := next_velocity(before, target, delta, body.is_on_floor())
+	var after := next_velocity(before, target, delta, body.is_on_floor(), not body.is_ai())
 	body.velocity.x = after.x
 	body.velocity.z = after.z
 	body.move_and_slide()
@@ -359,6 +370,8 @@ func _update_head(delta: float, down: bool) -> void:
 	if not down:
 		var pose := pose_for(stance, side, lean)
 		target = CharacterModel.eye_position(pose)
+		if body.carry_mode == Soldier.DRAG and stance != Stance.PRONE:
+			target = CharacterModel.eye_position(CharacterModel.DRAG_POSE)  # crouched over the casualty
 		roll = pose.roll * CAMERA_ROLL if not pose.prone else pose.prone_roll * CAMERA_PRONE_ROLL - lean * 0.1
 	body.head.position = body.head.position.move_toward(target, HEAD_SPEED * delta)
 	body.head.rotation.z = move_toward(body.head.rotation.z, roll, ROLL_SPEED * delta)
@@ -417,15 +430,30 @@ func load_fraction() -> float:
 	return clampf((1.0 - body.load_mult * body.carry_speed_mult()) / (1.0 - Soldier.MIN_LOAD_MULT), 0.0, 1.0)
 
 
-## Horizontal velocity after one step towards `target`: the body speeds up and slows down
-## over ACCEL_TIME / STOP_TIME (longer under load), so momentum carries into turns and
-## stance changes.
-func next_velocity(current: Vector3, target: Vector3, delta: float, on_floor := true) -> Vector3:
-	var time := ACCEL_TIME if target.length() >= current.length() - 0.001 else STOP_TIME
-	var rate := WALK_SPEED / (time * (1.0 + HEAVY_TIME_MULT * load_fraction()))
-	if not on_floor:
-		rate *= AIR_CONTROL
-	return current.move_toward(target, rate * delta)
+## Horizontal velocity after one step towards `target` (all longer under load, much longer
+## in the air). Speed along the wanted direction builds over ACCEL_TIME and brakes over
+## STOP_TIME from any speed; speed across it (the old heading after a turn, or after the
+## view swings round) is shed over GRIP_TIME. So momentum carries a short way into stops,
+## turns and stance changes, without sliding. With `grip` off (AI), the older plain ease.
+func next_velocity(current: Vector3, target: Vector3, delta: float, on_floor := true, grip := true) -> Vector3:
+	var weight := (1.0 + HEAVY_TIME_MULT * load_fraction()) / (1.0 if on_floor else AIR_CONTROL)
+	if not grip:
+		var time := ACCEL_TIME if target.length() >= current.length() - 0.001 else AI_STOP_TIME
+		return current.move_toward(target, WALK_SPEED / (time * weight) * delta)
+	var brake := maxf(current.length(), WALK_SPEED) / (STOP_TIME * weight) * delta
+	var speed := target.length()
+	if speed < 0.001:
+		return current.move_toward(Vector3.ZERO, brake)
+	var dir := target / speed
+	var along := current.dot(dir)
+	var across := current - dir * along
+	if along < 0.0:  # turning back: brake the old way first
+		along = minf(along + brake, 0.0)
+	elif along > speed:
+		along = maxf(along - brake, speed)
+	else:
+		along = minf(along + WALK_SPEED / (ACCEL_TIME * weight) * delta, speed)
+	return dir * along + across.move_toward(Vector3.ZERO, WALK_SPEED / (GRIP_TIME * weight) * delta)
 
 
 func can_sprint() -> bool:
