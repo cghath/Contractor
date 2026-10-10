@@ -124,6 +124,7 @@ func _test_armor() -> void:
 
 func _test_voxel_world() -> void:
 	print("VoxelWorld")
+	check(VoxelWorld.PALETTE.size() == VoxelWorld.Mat.size(), "one palette colour per material")
 	var world := VoxelWorld.new()
 	add_child(world)
 	world.add_box_m(Vector3(0, 0, 0), Vector3(1, 1, 0.3), VoxelWorld.Mat.CONCRETE)

@@ -16,9 +16,22 @@ signal structures_built
 signal breached(area_m: AABB)
 
 const VOXEL_SIZE := 0.1
-enum Mat { EMPTY, CONCRETE, PAINTED, WOOD, STEEL }
-## Index 0 must stay transparent: the cubes mesher treats it as empty.
-const PALETTE: Array[Color] = [Color(0, 0, 0, 0), Color("8a8577"), Color("5f6b58"), Color("8c6a46"), Color("4a4d50")]
+## Append new materials at the end: edit logs and saves store these values.
+## MUD_BRICK onwards come from the faction pack's worldspace material registry.
+enum Mat {
+	EMPTY, CONCRETE, PAINTED, WOOD, STEEL,
+	MUD_BRICK, STONE, LIMESTONE, BASALT, TUFF, CORAL_STONE, BRICK, CINDER_BLOCK, PLASTER,
+	ROOF_TILE, FIBRE_CEMENT, CORRUGATED_IRON, THATCH, TARP, GLASS, SANDBAG, HESCO, DIRT_BERM,
+}
+## One colour per Mat, in the same order. Index 0 must stay transparent: the cubes mesher
+## treats it as empty.
+const PALETTE: Array[Color] = [
+	Color(0, 0, 0, 0), Color("8a8577"), Color("5f6b58"), Color("8c6a46"), Color("4a4d50"),
+	Color("a47e57"), Color("8f8676"), Color("d6caa8"), Color("4b4845"), Color("c48a6a"),
+	Color("cbbf9f"), Color("9c5a3c"), Color("9a978f"), Color("e3dccb"), Color("a4553b"),
+	Color("a5a49c"), Color("8b8e8c"), Color("b49a5e"), Color("3f6d8c"), Color("9fbcc4"),
+	Color("b8a378"), Color("a99a6c"), Color("8a6f4e"),
+]
 ## Edit area, in voxels.
 const BOUNDS := AABB(Vector3(-220, -8, -220), Vector3(440, 56, 440))
 ## Viewer range, in voxels. Must reach every corner of BOUNDS from anywhere players go.
