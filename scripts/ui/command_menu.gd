@@ -2,10 +2,16 @@ class_name CommandMenu
 extends PanelContainer
 ## Arma 3-style squad command menu, local to the player who opens it.
 ##
-## F2-F8 select squadmates by their number in the squad (F1 is you), ` (tilde) selects
-## them all; selecting opens the menu. In the menu, 1-9 and 0 pick an entry, or scroll the
+## F1-F8 select squadmates by their slot in the squad (fire team A is F1-F4, B is F5-F8;
+## players can't be ordered), Shift adds to the selection, ` (tilde) selects them all, and
+## Team > Select picks a fire team or colour team; selecting opens the menu. In the menu,
+## 1-9 and 0 pick an entry, or scroll the
 ## mouse wheel to highlight one and click the middle mouse button. Backspace goes back a
 ## level and Esc closes. Orders go to the host as Soldier._server_squad_command.
+##
+## Entries with "cmd" are orders ("point": at the spot under the crosshair, "aim": at the
+## enemy under it); entries with "select" change the selection (fire team or colour team)
+## and keep the menu open.
 
 const MENU := {
 	"title": "Command",
@@ -15,7 +21,10 @@ const MENU := {
 			{"key": "2", "label": "Move there", "cmd": "move", "point": true},
 			{"key": "3", "label": "Stop", "cmd": "hold"},
 		]},
-		{"key": "2", "label": "Target", "items": []},
+		{"key": "2", "label": "Target", "items": [
+			{"key": "1", "label": "Target that enemy", "cmd": "target", "aim": true},
+			{"key": "2", "label": "No target", "cmd": "target:"},
+		]},
 		{"key": "3", "label": "Engage", "items": [
 			{"key": "1", "label": "Open fire", "cmd": "open_fire"},
 			{"key": "2", "label": "Hold fire", "cmd": "hold_fire"},
@@ -28,14 +37,35 @@ const MENU := {
 			{"key": "1", "label": "Throw smoke there", "cmd": "throw_smoke", "point": true},
 			{"key": "2", "label": "Throw frag there", "cmd": "throw_frag", "point": true},
 		]},
-		{"key": "7", "label": "Combat mode", "items": []},
+		{"key": "7", "label": "Combat mode", "items": [
+			{"key": "1", "label": "Safe", "cmd": "mode:safe"},
+			{"key": "2", "label": "Aware", "cmd": "mode:aware"},
+			{"key": "3", "label": "Combat", "cmd": "mode:combat"},
+			{"key": "4", "label": "Stealth", "cmd": "mode:stealth"},
+		]},
 		{"key": "8", "label": "Formation", "items": [
 			{"key": "1", "label": "Wedge", "cmd": "formation:wedge"},
 			{"key": "2", "label": "File", "cmd": "formation:file"},
 			{"key": "3", "label": "Line", "cmd": "formation:line"},
 			{"key": "4", "label": "Staggered column", "cmd": "formation:staggered column"},
 		]},
-		{"key": "9", "label": "Team", "items": []},
+		{"key": "9", "label": "Team", "items": [
+			{"key": "1", "label": "Select fire team A", "select": "fire:0"},
+			{"key": "2", "label": "Select fire team B", "select": "fire:1"},
+			{"key": "3", "label": "Assign to team", "items": [
+				{"key": "1", "label": "Red", "cmd": "team:red"},
+				{"key": "2", "label": "Green", "cmd": "team:green"},
+				{"key": "3", "label": "Blue", "cmd": "team:blue"},
+				{"key": "4", "label": "Yellow", "cmd": "team:yellow"},
+				{"key": "5", "label": "White (no team)", "cmd": "team:white"},
+			]},
+			{"key": "4", "label": "Select team", "items": [
+				{"key": "1", "label": "Red", "select": "color:red"},
+				{"key": "2", "label": "Green", "select": "color:green"},
+				{"key": "3", "label": "Blue", "select": "color:blue"},
+				{"key": "4", "label": "Yellow", "select": "color:yellow"},
+			]},
+		]},
 		{"key": "0", "label": "Support", "items": [
 			{"key": "1", "label": "Helicopter transport", "cmd": ""},
 			{"key": "2", "label": "Resupply drop", "cmd": ""},
@@ -45,6 +75,8 @@ const MENU := {
 }
 const NUMBER_KEYS := {KEY_1: "1", KEY_2: "2", KEY_3: "3", KEY_4: "4", KEY_5: "5", KEY_6: "6", KEY_7: "7", KEY_8: "8", KEY_9: "9", KEY_0: "0"}
 const F_KEYS := [KEY_F1, KEY_F2, KEY_F3, KEY_F4, KEY_F5, KEY_F6, KEY_F7, KEY_F8, KEY_F9, KEY_F10, KEY_F11, KEY_F12]
+## How far "Target that enemy" looks under the crosshair.
+const AIM_RANGE := 300.0
 
 var player: Soldier
 ## Names of the selected squadmates.
@@ -81,21 +113,39 @@ func is_open() -> bool:
 	return visible
 
 
-## The squad as numbered in the menu: players first (you are 1 if you lead), then AI by callsign.
+## The squad as numbered in the menu: by squad slot (fire team A, then B), so F1 is the
+## first slot. Anyone without a slot yet comes last, players first.
 func roster() -> Array[Soldier]:
 	var out: Array[Soldier] = []
 	var level := CompoundLevel.current(player)
 	if level == null:
 		return out
-	var humans := level.players.get_children()
-	humans.sort_custom(func(a: Node, b: Node) -> bool: return a.name.to_int() < b.name.to_int())
-	for h in humans:
-		out.append(h as Soldier)
-	var ai := level.ai.get_children().filter(func(s: Node) -> bool: return s is Soldier and s.faction == player.faction and not s.is_queued_for_deletion())
-	ai.sort_custom(func(a: Node, b: Node) -> bool: return String(a.name) < String(b.name))
-	for s in ai:
-		out.append(s as Soldier)
+	for h in level.players.get_children():
+		if h is Soldier and not h.is_queued_for_deletion():
+			out.append(h as Soldier)
+	for s in level.ai.get_children():
+		if s is Soldier and s.faction == player.faction and not s.is_queued_for_deletion():
+			out.append(s as Soldier)
+	out.sort_custom(func(a: Soldier, b: Soldier) -> bool: return _roster_key(a) < _roster_key(b))
 	return out
+
+
+static func _roster_key(s: Soldier) -> String:
+	if s.squad_slot >= 0:
+		return "0%02d" % s.squad_slot
+	return ("1%06d" % s.name.to_int()) if not s.is_ai() else "2" + String(s.name)
+
+
+## "A, Team Leader" (plus the colour team if any): a squad member's place in the squad.
+static func unit_tag(s: Soldier) -> String:
+	var parts := PackedStringArray()
+	if s.fire_team >= 0 and s.fire_team < Roles.TEAMS.size():
+		parts.append(Roles.TEAMS[s.fire_team])
+	if s.role != &"":
+		parts.append(Roles.display_name(s.role))
+	if s.color_team != "":
+		parts.append(s.color_team.capitalize())
+	return ", ".join(parts)
 
 
 ## Returns true if the event was a command-menu input.
@@ -208,6 +258,9 @@ func _pick(i: int) -> void:
 		_highlight = 0
 		_redraw()
 		return
+	if item.has("select"):
+		_select_group(item["select"], item["label"])
+		return
 	var cmd: String = item.get("cmd", "")
 	if cmd == "":
 		player._hud.flash("%s isn't in this build yet" % item["label"])
@@ -223,9 +276,56 @@ func _pick(i: int) -> void:
 			player._hud.flash("Look at a spot on the ground")
 			return
 		point = hit
+	if item.get("aim", false):
+		var enemy := enemy_under_crosshair()
+		if enemy == null:
+			player._hud.flash("Look at an enemy")
+			return
+		cmd = "%s:%s" % [cmd, enemy.name]
 	player._server_squad_command.rpc_id(1, cmd, point, selected)
 	player._hud.flash("%s: %s" % [_names(), item["label"]])
 	close()
+
+
+## The living enemy under the crosshair (hitbox or body, up to AIM_RANGE), or null.
+func enemy_under_crosshair() -> Soldier:
+	var camera := player.camera
+	var from := camera.global_position
+	var exclude: Array[RID] = [player.get_rid()]
+	for child in player.get_children():
+		if child is Area3D:
+			exclude.append(child.get_rid())
+	var query := PhysicsRayQueryParameters3D.create(from, from - camera.global_basis.z * AIM_RANGE,
+		1 | Soldier.HITBOX_MASK | Soldier.BODY_LAYER, exclude)
+	query.collide_with_areas = true
+	var hit := player.get_world_3d().direct_space_state.intersect_ray(query)
+	var collider: Object = hit.get("collider")
+	var enemy: Soldier = collider as Soldier
+	if enemy == null and collider is Area3D:
+		var vitals := Vitals.find_on(collider)
+		enemy = vitals.get_parent() as Soldier if vitals else null
+	if enemy == null or enemy.faction == player.faction or not enemy.vitals.is_up():
+		return null
+	return enemy
+
+
+## Team menu: selects fire team "fire:<0|1>" or colour team "color:<colour>" (AI only).
+func _select_group(spec: String, label: String) -> void:
+	var parts := spec.split(":")
+	var names := PackedStringArray()
+	for s in roster():
+		if not s.is_ai():
+			continue
+		if (parts[0] == "fire" and s.fire_team == parts[1].to_int()) or (parts[0] == "color" and s.color_team == parts[1]):
+			names.append(String(s.name))
+	if names.is_empty():
+		player._hud.flash("Nobody to select: %s" % label)
+		return
+	selected = names
+	_stack = [MENU]
+	_highlight = 0
+	_redraw()
+	player._hud.flash("%s: %s" % [label.trim_prefix("Select "), ", ".join(names)])
 
 
 func _back() -> void:
@@ -241,7 +341,7 @@ func _report() -> void:
 	var lines := PackedStringArray()
 	for s in roster():
 		if String(s.name) in selected:
-			lines.append("%s: %s (%s)" % [s.name, s.ai_status, s.vitals.condition_text()])
+			lines.append("%s [%s]: %s (%s)" % [s.name, unit_tag(s), s.ai_status, s.vitals.condition_text()])
 	player._hud.flash("\n".join(lines))
 
 

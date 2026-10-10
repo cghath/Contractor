@@ -1,12 +1,14 @@
 class_name Menu
 extends CanvasLayer
-## Host / join screen. Hidden once a session starts.
+## Host / join screen, with the role picker. Hidden once a session starts.
 
 ## Joining retries for a few seconds, so a second window started at the same moment as the
 ## host (Debug > Customize Run Instances) still gets in.
 const JOIN_ATTEMPTS := 3
 const JOIN_RETRY_S := 1.0
 
+## Main-menu role picker (sets Roles.local_choice).
+var role_picker: OptionButton
 var _address: LineEdit
 var _status: Label
 var _join_address := ""
@@ -25,6 +27,7 @@ func _ready() -> void:
 	title.text = "CONTRACTOR v%s (gray box)" % ProjectSettings.get_setting("application/config/version", "dev")
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(title)
+	box.add_child(_role_picker())
 	box.add_child(_button("Play (host a session)", host))
 	box.add_child(_hint("Solo play is a session nobody else has joined."))
 	_address = LineEdit.new()
@@ -77,6 +80,24 @@ func _on_join_failed() -> void:
 func _reset_save() -> void:
 	GameState.delete_save()
 	_status.text = "Compound save deleted."
+
+
+## Your role in the squad (Roles), picked before hosting or joining; the host gets it on join.
+func _role_picker() -> Control:
+	var row := HBoxContainer.new()
+	var label := Label.new()
+	label.text = "Your role"
+	row.add_child(label)
+	role_picker = OptionButton.new()
+	role_picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	for role in Roles.ids():
+		role_picker.add_item(Roles.display_name(role))
+		role_picker.set_item_metadata(role_picker.item_count - 1, role)
+		if role == Roles.local_choice:
+			role_picker.select(role_picker.item_count - 1)
+	role_picker.item_selected.connect(func(index: int) -> void: Roles.local_choice = role_picker.get_item_metadata(index))
+	row.add_child(role_picker)
+	return row
 
 
 func _button(text: String, action: Callable) -> Button:

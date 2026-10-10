@@ -12,6 +12,15 @@ extends Node
 ## - Battle buddies never move at the same time: while one bounds to new cover, the other
 ##   holds and puts covering fire on the last known threat (bounding overwatch).
 ## - A frag goes to an enemy who stays hidden behind cover.
+## Command menu orders shape this: movement orders, hold fire, Target (focus fire on one
+## enemy) and Combat mode (Squad.CombatMode):
+## - Safe: walk with the weapon lowered and don't start a fight; return fire once the squad
+##   is fired upon.
+## - Aware: upright and alert; fight from cover on contact.
+## - Combat (default): as Aware, and crouch whenever halted.
+## - Stealth: always crouched, never sprint; open fire only when fired upon or an enemy is
+##   very close.
+## Squadmates call out what they do (Callouts): contact, reloading, grenades, bounding.
 ## Friendlies also look after downed friendlies, the player included, buddy first:
 ## - In a fight: pop smoke between the casualty and the threat, drag them into cover, then
 ##   revive them with a kit, or guard them if there's no kit.
@@ -41,6 +50,15 @@ const TURN_RATE := 7.0
 const GRENADE_COOLDOWN_S := 15.0
 const CASUALTY_REACH := 1.6
 const REVIVE_KITS: Array[StringName] = [&"trauma_kit", &"ifak"]
+## Proposed: in Stealth, open fire unprovoked only at an enemy this close.
+const STEALTH_ENGAGE_M := 15.0
+## Proposed: in Safe, only run to catch up from this far behind.
+const SAFE_CATCH_UP_M := 15.0
+## Suppression or injury rising this much in one frame means this unit was fired upon.
+const FIRED_ON_SUPPRESSION := 0.001
+const FIRED_ON_INJURY := 0.02
+## Proposed: don't shoot when a friendly is this close (metres) to the line of fire.
+const FRIENDLY_CLEARANCE := 0.7
 
 ## 0..1: aim error and reaction speed.
 @export var combat := 0.6
@@ -62,6 +80,10 @@ var target: Soldier
 var order := Squad.Order.FOLLOW
 ## Command menu "Hold fire": don't shoot at all until told to open fire.
 var hold_fire := false
+## Command menu "Combat mode": how this unit moves, fires and holds stance.
+var combat_mode := Squad.CombatMode.COMBAT
+## Command menu "Target": the enemy to focus fire on while it can be seen (null: free choice).
+var focus: Soldier
 var care := Care.NONE
 var casualty: Soldier
 ## True while moving to new cover in contact (the buddy holds and covers meanwhile).
@@ -94,6 +116,10 @@ var _smoke_used := false
 var _treat_started := -1.0
 var _score := 0.0
 var _ready_done := false
+var _was_bounding := false
+var _fired_on_at := -1000.0
+var _last_suppression := 0.0
+var _last_injury := 0.0
 
 
 static func of(s: Node) -> SquadAI:
@@ -113,6 +139,7 @@ func _physics_process(delta: float) -> void:
 		return
 	_grenade_cd -= delta
 	_cover_cd -= delta
+	_notice_fire(now)
 	if body.threat_time > _last_contact:
 		_last_contact = body.threat_time
 	_scan_cd -= delta
@@ -122,6 +149,9 @@ func _physics_process(delta: float) -> void:
 		target = _find_target()
 		if target != null and target != previous:
 			_next_shot = maxf(_next_shot, now + lerpf(0.9, 0.25, combat))  # reaction time
+			var callouts := Callouts.of(body)
+			if callouts:
+				callouts.contact(body, target)
 	if target != null:
 		_last_contact = now
 		body.threat_pos = target.global_position
@@ -141,6 +171,28 @@ func _physics_process(delta: float) -> void:
 
 func in_contact() -> bool:
 	return Soldier._now() - _last_contact < CONTACT_MEMORY_S
+
+
+## In contact and willing to fight: Safe units leave a contact alone until fired upon.
+func fighting() -> bool:
+	return in_contact() and (combat_mode != Squad.CombatMode.SAFE or engaged())
+
+
+## This unit, or its squad, was fired upon recently.
+func engaged() -> bool:
+	return Soldier._now() - _fired_on_at < CONTACT_MEMORY_S or (squad != null and squad.is_engaged())
+
+
+## Whether the orders and combat mode let this unit shoot at what it sees now.
+func weapons_free() -> bool:
+	if hold_fire:
+		return false
+	match combat_mode:
+		Squad.CombatMode.SAFE:
+			return engaged()
+		Squad.CombatMode.STEALTH:
+			return engaged() or (target != null and body.global_position.distance_to(target.global_position) <= STEALTH_ENGAGE_M)
+	return true
 
 
 ## An order from the command menu. `slot` and `count` spread a group of units around the
@@ -236,7 +288,7 @@ func _choose_intent() -> void:
 		scores[Intent.PATROL] = 0.3
 		if Soldier._now() - _last_contact < INVESTIGATE_MEMORY_S:
 			scores[Intent.INVESTIGATE] = 0.55
-	if contact:
+	if fighting():
 		scores[Intent.FIGHT] = 0.7
 	if weapon and rounds == 0 and spare > 0:
 		scores[Intent.RELOAD] = 0.95
@@ -265,15 +317,17 @@ func _choose_intent() -> void:
 
 func _act() -> void:
 	body.want_crouch = false
+	_was_bounding = bounding
+	bounding = false  # only _fight moves to cover
 	body.want_aim = target != null
 	match intent:
 		Intent.FOLLOW:
-			if in_contact():
+			if fighting():
 				_fight(squad.leader.global_position if squad and is_instance_valid(squad.leader) else body.global_position, 8.0)
 			else:
 				_go(squad.follow_point(body) if squad else body.global_position)
 		Intent.HOLD:
-			if in_contact():
+			if fighting():
 				_fight(_hold_point, 4.0)
 			else:
 				_go(_hold_point, false)
@@ -297,6 +351,41 @@ func _act() -> void:
 				_think_cd = 0.0
 		Intent.CASUALTY:
 			_do_care()
+	_apply_combat_mode()
+
+
+## Combat mode stance and weapon carry for the movement and fighting intents (reloading,
+## healing and casualty care keep their own stance).
+func _apply_combat_mode() -> void:
+	if intent in [Intent.RELOAD, Intent.HEAL, Intent.CASUALTY]:
+		return
+	var fight := intent == Intent.FIGHT or fighting()
+	match combat_mode:
+		Squad.CombatMode.SAFE:
+			if not fight:
+				body.want_aim = false  # weapon lowered
+				body.want_crouch = false
+		Squad.CombatMode.COMBAT:
+			if not fight and _halted():
+				body.want_crouch = true
+		Squad.CombatMode.STEALTH:
+			body.want_crouch = true
+
+
+## Standing still: no destination, or already there.
+func _halted() -> bool:
+	return not _has_destination or _flat_distance(_destination) <= ARRIVE + 0.3
+
+
+## Notices incoming fire (suppression or a wound) and tells the squad.
+func _notice_fire(now: float) -> void:
+	var injury := body.vitals.injury()
+	if body.suppression > _last_suppression + FIRED_ON_SUPPRESSION or injury > _last_injury + FIRED_ON_INJURY:
+		_fired_on_at = now
+		if squad:
+			squad.note_fired_on()
+	_last_suppression = body.suppression
+	_last_injury = injury
 
 
 func _fight_from_context() -> void:
@@ -331,11 +420,14 @@ func _fight(anchor: Vector3, leash: float) -> void:
 		if spot != null:
 			_cover_point = spot
 			_has_cover = true
-	if _has_cover and body.suppression < PINNED and body.stunned_s <= 0.0:
+	# Hold and cover while the buddy bounds, unless this unit was already moving.
+	if _has_cover and body.suppression < PINNED and body.stunned_s <= 0.0 and (_was_bounding or not _buddy_bounding()):
 		_go(_cover_point, true)
 	else:
 		_has_destination = false
 	bounding = _has_destination and not _at_cover()
+	if bounding and not _was_bounding and in_contact():
+		_call_bound()
 	# Keep your head down unless you're shooting.
 	var shooting := target != null and Soldier._now() >= _pause_until
 	body.want_crouch = body.suppression >= PINNED or body.stunned_s > 0.0 or (_at_cover() and not shooting)
@@ -367,6 +459,7 @@ func _do_reload() -> void:
 	body.is_reloading = true
 	body._server_reload.rpc_id(1, body.active_slot)
 	_think_cd = float(weapon.stats.get("reload_s", 2.0))
+	_callout(&"reloading")
 
 
 # --- Casualty care --------------------------------------------------------
@@ -511,6 +604,11 @@ func _has_heal() -> bool:
 func _find_target() -> Soldier:
 	if body.stunned_s > 0.0:
 		return null
+	if focus != null and (not is_instance_valid(focus) or focus.is_queued_for_deletion() or not focus.vitals.is_up()):
+		focus = null  # the target is down: pick freely again
+	if focus != null and focus.faction != body.faction and body.global_position.distance_to(focus.global_position) <= Squad.TARGET_RANGE \
+			and can_see(focus):
+		return focus
 	var best: Soldier = null
 	var best_dist := SIGHT_RANGE
 	for n in get_tree().get_nodes_in_group(&"combatants"):
@@ -587,7 +685,7 @@ func _shoot() -> void:
 	var now := Soldier._now()
 	var weapon := body.active_weapon()
 	if weapon == null or weapon.type != "weapon" or body.carrying != null or body.is_reloading \
-			or body.stunned_s > 0.0 or body.suppression >= PINNED or care == Care.TREAT or hold_fire:
+			or body.stunned_s > 0.0 or body.suppression >= PINNED or care == Care.TREAT or not weapons_free():
 		return
 	var aim_at: Variant = null
 	if target != null:
@@ -604,7 +702,7 @@ func _shoot() -> void:
 		return
 	if error > deg_to_rad(6.0) or now < _next_shot or now < _pause_until or now < body._busy_until:
 		return
-	if body.inventory.rounds_in(body.active_slot) <= 0:
+	if body.inventory.rounds_in(body.active_slot) <= 0 or _friendly_in_line(aim_at):
 		return
 	var auto: bool = weapon.stats.get("auto", false)
 	_next_shot = now + 60.0 / float(weapon.stats.get("rpm", 600)) * (1.0 if auto else 1.6)
@@ -632,6 +730,21 @@ func _aim_at(point: Vector3) -> float:
 	return (-body.camera.global_basis.z).angle_to(d.normalized())
 
 
+## Fire discipline: true if someone on this unit's side (standing or down) is in the line
+## of fire to `point`, closer than it.
+func _friendly_in_line(point: Vector3) -> bool:
+	var from := body.camera.global_position
+	var reach := from.distance_to(point)
+	for n in get_tree().get_nodes_in_group(&"combatants"):
+		var s := n as Soldier
+		if s == null or s == body or s.faction != body.faction or s.is_queued_for_deletion():
+			continue
+		var chest := s.global_position + Vector3.UP * (1.1 if s.vitals.is_up() else 0.3)
+		if from.distance_to(chest) < reach and Geometry3D.get_closest_point_to_segment(chest, from, point).distance_to(chest) < FRIENDLY_CLEARANCE:
+			return true
+	return false
+
+
 func _maybe_frag() -> void:
 	if _grenade_cd > 0.0 or _no_los_s < 4.0 or not in_contact():
 		return
@@ -652,7 +765,26 @@ func _throw(id: StringName, at: Vector3) -> bool:
 	body._busy_until = Soldier._now() + Soldier.THROW_BUSY_S
 	var from := body.camera.global_position + Vector3.UP * 0.2
 	CompoundLevel.current(body).server_throw(id, from, Throwables.lob_velocity(from, at))
+	if Callouts.THROW_IDS.has(id):
+		_callout(Callouts.THROW_IDS[id])
 	return true
+
+
+# --- Callouts -------------------------------------------------------------
+
+func _callout(id: StringName, text := "") -> void:
+	var callouts := Callouts.of(body)
+	if callouts:
+		callouts.say(body, id, text)
+
+
+## Bounding in contact: "Moving!", and the battle buddy answers "Covering!".
+func _call_bound() -> void:
+	_callout(&"moving")
+	var mate := buddy
+	var mate_ai := SquadAI.of(mate) if is_instance_valid(mate) and mate.vitals.is_up() else null
+	if mate_ai and not mate_ai.bounding:
+		mate_ai._callout(&"covering")
 
 
 # --- Steering -------------------------------------------------------------
@@ -682,12 +814,22 @@ func _steer(delta: float) -> void:
 		dir = dir.normalized() if dir.length() > 0.05 else Vector3.ZERO
 	var local := body.global_basis.inverse() * dir
 	body.move_input = Vector2(local.x, local.z)
-	body.want_sprint = _run and not body.want_crouch and target == null
+	body.want_sprint = _run and not body.want_crouch and target == null and _may_sprint()
 	if target == null and dir != Vector3.ZERO and body.carrying == null:
 		body.rotation.y = lerp_angle(body.rotation.y, atan2(-dir.x, -dir.z), 1.0 - exp(-TURN_RATE * get_physics_process_delta_time()))
 		body.head.rotation.x = lerpf(body.head.rotation.x, 0.0, 0.1)
 	elif target == null and dir == Vector3.ZERO and in_contact():
 		_aim_at(body.threat_pos + Vector3.UP * 1.2)
+
+
+## Safe units only run to catch up from far behind; Stealth units never sprint.
+func _may_sprint() -> bool:
+	match combat_mode:
+		Squad.CombatMode.SAFE:
+			return fighting() or _flat_distance(_destination) > SAFE_CATCH_UP_M
+		Squad.CombatMode.STEALTH:
+			return false
+	return true
 
 
 func _stop() -> void:

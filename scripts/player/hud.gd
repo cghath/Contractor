@@ -72,6 +72,7 @@ func _ready() -> void:
 	add_child(inventory_screen)
 	command_menu = CommandMenu.new(player)
 	add_child(command_menu)
+	add_child(Callouts.Subtitles.new())  # squadmates' callouts
 	_message = _label("", Control.PRESET_CENTER_TOP)
 	_message.position.y += 60
 	_message.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -144,8 +145,9 @@ static func downed_text(vitals: Vitals) -> String:
 	return "UNCONSCIOUS\nWait for a teammate to revive you"
 
 
-## The squad by F-key number, with what each squadmate is doing. A ">" marks units
-## selected in the command menu. No health: the handoff's HUD has no health readout.
+## The squad by F-key number, with each member's fire team and role (and colour team), and
+## what each squadmate is doing. A ">" marks units selected in the command menu. No health:
+## the handoff's HUD has no health readout.
 func _squad_lines(player: Soldier) -> String:
 	var units := command_menu.roster()
 	if units.size() <= 1:
@@ -154,10 +156,12 @@ func _squad_lines(player: Soldier) -> String:
 	for i in units.size():
 		var s := units[i]
 		var mark := ">" if String(s.name) in command_menu.selected and command_menu.is_open() else " "
+		var tag := CommandMenu.unit_tag(s)
+		tag = " [%s]" % tag if tag != "" else ""
 		if s.is_ai():
-			lines.append("%s F%d %s: %s" % [mark, i + 1, s.name, s.ai_status])
+			lines.append("%s F%d %s%s: %s" % [mark, i + 1, s.name, tag, s.ai_status])
 		else:
-			lines.append("  F%d %s" % [i + 1, "You" if s == player else "Player %s" % s.name])
+			lines.append("  F%d %s%s" % [i + 1, "You" if s == player else "Player %s" % s.name, tag])
 	return "SQUAD  [F-keys] select  [~] all\n" + "\n".join(lines) + "\n"
 
 
