@@ -79,6 +79,8 @@ const STAGGER_SPEED := 0.5
 const BROKEN_ARM_RELOAD := 1.6
 const CONCUSSION_TURN := 0.6
 const RIB_STAMINA := 0.7
+## Share of injury() that blood loss makes up (see injury).
+const INJURY_BLOOD_WEIGHT := 0.3
 
 ## Impact (shock) from rounds armor stopped (design doc table).
 const PLATE_IMPACT_PAIN := {&"pistol": 0.05, &"intermediate": 0.15, &"full_power": 0.3}
@@ -242,14 +244,15 @@ func turn_mult() -> float:
 	return CONCUSSION_TURN if concussion_left > 0.0 else 1.0
 
 
-## 0 (fine) to 1: blood loss counts for up to 0.4, the worse of pain and untreated wounds
-## for up to 0.6, so a kit (which treats wounds and pain, not blood) brings it down.
+## 0 (fine) to 1: blood loss counts for up to INJURY_BLOOD_WEIGHT, the worse of pain and
+## untreated wounds for the rest. A kit treats wounds and pain but puts no blood back, so
+## blood loss alone stays under the 0.45 at which AI reaches for one.
 func injury() -> float:
 	var wound_term := clampf(wound_bleed_rate() / 0.5, 0.0, 1.0)
 	if has_fracture(BodyMap.LEG_BONES + BodyMap.ARM_BONES, true):
 		wound_term = minf(wound_term + 0.3, 1.0)
 	var blood_term := clampf(lost() / UNCONSCIOUS_LOST, 0.0, 1.0)
-	return clampf(0.4 * blood_term + 0.6 * maxf(pain(), wound_term), 0.0, 1.0)
+	return clampf(INJURY_BLOOD_WEIGHT * blood_term + (1.0 - INJURY_BLOOD_WEIGHT) * maxf(pain(), wound_term), 0.0, 1.0)
 
 
 # --- Host-side changes ----------------------------------------------------------------

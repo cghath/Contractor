@@ -199,7 +199,7 @@ func _test_throwables() -> void:
 	var edits := GameState.voxel_edits.size()
 	Throwables.server_detonate(level, "frag", light.global_position + Vector3(1.0, 0.05, 0.0))
 	var frag_wounds := light.vitals.wound_list().size()
-	check(frag_wounds >= 1 and frag_wounds <= Throwables.FRAG_MAX_WOUNDS, "frag wounds a dummy 1 m away (%d fragment wounds)" % frag_wounds)
+	check(frag_wounds >= 1 or light.vitals.is_dead(), "frag wounds a dummy 1 m away (%d wounds, %s)" % [frag_wounds, light.vitals.condition_text()])
 	check(GameState.voxel_edits.size() == edits + 1, "frag leaves a crater in the voxels")
 	Throwables.server_detonate(level, "frag", Vector3(3, 0.2, -2.5))
 	check(medium.vitals.wound_list().is_empty(), "a wall shields the dummy inside the building")

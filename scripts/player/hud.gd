@@ -140,7 +140,7 @@ static func downed_text(vitals: Vitals) -> String:
 		return ""
 	if vitals.in_cardiac_arrest():
 		var s := ceili(maxf(vitals.seconds_to_death(), 0.0))
-		return "CARDIAC ARREST - %d:%02d\nWait for a teammate to revive you" % [s / 60, s % 60]
+		return "CARDIAC ARREST - %d:%02d\nWait for a teammate to revive you" % [floori(s / 60.0), s % 60]
 	return "UNCONSCIOUS\nWait for a teammate to revive you"
 
 

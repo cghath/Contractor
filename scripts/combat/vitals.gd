@@ -209,7 +209,7 @@ func condition_text() -> String:
 		return "Dead"
 	if m.arrest:
 		var s := ceili(maxf(m.arrest_left, 0.0))
-		return "Cardiac arrest %d:%02d" % [s / 60, s % 60]
+		return "Cardiac arrest %d:%02d" % [floori(s / 60.0), s % 60]
 	if downed:
 		return "Unconscious"
 	if m.wound_bleed_rate() > 0.0:

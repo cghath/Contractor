@@ -266,6 +266,9 @@ func _test_blood_loss_effects() -> void:
 	check(absf(m.sway_mult() - 2.0) < 0.01 and absf(m.stamina_mult() - 0.4) < 0.01 and absf(m.speed_mult() - 0.8) < 0.01, "just under 40%: +100% sway, 40% stamina, 80% speed")
 	m.pain_wounds = 0.5
 	check(m.sway_mult() > 2.2, "pain adds sway on top")
+	check(m.injury() > 0.45, "injury counts blood loss and pain (%.2f)" % m.injury())
+	m.pain_wounds = 0.0
+	check(m.injury() < 0.45, "blood loss alone stays under the AI's heal mark (%.2f): a kit can't fix it" % m.injury())
 	var vitals := _vitals()
 	vitals.server_damage(30.0)  # 18% lost
 	var early := vitals.vision()
