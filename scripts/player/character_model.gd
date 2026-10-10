@@ -117,13 +117,13 @@ static func lay_down(body: Node3D, model: CharacterModel, is_downed: bool) -> vo
 
 
 ## Snaps the body's hitboxes to this model's pose (or the downed pose): each follows the
-## bone it belongs to (upper body, pelvis, left or right leg), from its rest transform.
+## bone it belongs to (upper body, head, pelvis, left or right leg), from its rest transform.
 func pose_hitboxes(body: Node3D) -> void:
 	var deltas := {}
 	if not downed:
 		var bones := pose_bones(pose, false)
 		var rest := rest_bones()
-		for key: String in ["torso", "pelvis", "leg_l", "leg_r"]:
+		for key: String in ["torso", "head", "pelvis", "leg_l", "leg_r"]:
 			deltas[key] = transform * bones.root * bones[key] * (rest[key] as Transform3D).affine_inverse()
 	var lying := Transform3D(Basis(Vector3.RIGHT, -PI / 2), Vector3(0, DOWNED_LIFT, 0))
 	for area in _posable_hitboxes(body):
@@ -133,8 +133,8 @@ func pose_hitboxes(body: Node3D) -> void:
 			area.transform = target
 
 
-## Model-space transforms for a pose: "root" (whole body), and root-local "torso",
-## "pelvis", "leg_l" and "leg_r" (joint pivots).
+## Model-space transforms for a pose: "root" (whole body), and root-local "torso", "head"
+## (kept level with the ground, like the drawn head), "pelvis", "leg_l" and "leg_r" (joint pivots).
 static func pose_bones(p: Dictionary, is_downed: bool) -> Dictionary:
 	if is_downed:
 		var rest := rest_bones()
@@ -154,9 +154,11 @@ static func pose_bones(p: Dictionary, is_downed: bool) -> Dictionary:
 	var roll_by: float = p.get("roll", 0.0)
 	var pitch_by: float = p.get("pitch", 0.0)
 	var torso_basis := Basis(Vector3.BACK, roll_by) * Basis(Vector3.RIGHT, pitch_by)
+	var torso := Transform3D(torso_basis, Vector3(hip_x, hip, hip_z))
 	return {
 		"root": root,
-		"torso": Transform3D(torso_basis, Vector3(hip_x, hip, hip_z)),
+		"torso": torso,
+		"head": torso * Transform3D(Basis(Vector3.RIGHT, -_upper_body_pitch(root.basis * torso_basis)), HEAD_PIVOT),
 		"pelvis": Transform3D(Basis(), Vector3(hip_x, hip, hip_z)),
 		"leg_l": Transform3D(Basis(Vector3.BACK, -spread) * Basis(Vector3.RIGHT, bend), Vector3(hip_x - HIP.x, hip, hip_z)),
 		"leg_r": Transform3D(Basis(Vector3.BACK, spread) * Basis(Vector3.RIGHT, -bend * BACK_LEG), Vector3(hip_x + HIP.x, hip, hip_z)),
@@ -168,10 +170,17 @@ static func rest_bones() -> Dictionary:
 	return {
 		"root": Transform3D.IDENTITY,
 		"torso": Transform3D(Basis(), TORSO_PIVOT),
+		"head": Transform3D(Basis(), TORSO_PIVOT + HEAD_PIVOT),
 		"pelvis": Transform3D(Basis(), TORSO_PIVOT),
 		"leg_l": Transform3D(Basis(), HIP * Vector3(-1, 1, 1)),
 		"leg_r": Transform3D(Basis(), HIP),
 	}
+
+
+## How far an upper body with this (model-space) basis leans forward (negative) or back.
+static func _upper_body_pitch(torso_basis: Basis) -> float:
+	var up := torso_basis * Vector3.UP
+	return atan2(up.z, up.y)
 
 
 ## Where the eyes are for a pose, in body space (the camera goes here).
@@ -227,19 +236,22 @@ static func _rest_of(area: Area3D) -> Transform3D:
 
 
 ## Which bone a hitbox follows: by its body part, or for parts this doesn't know, by where
-## it sits at rest (above the hips: upper body; below: the leg on its side).
+## it sits at rest (above the neck: head; above the hips: upper body; below: the leg on its
+## side, or the pelvis on the centre line).
 static func _bone_of(area: Area3D) -> String:
 	if area.has_meta(&"pose_bone"):
 		return area.get_meta(&"pose_bone")
 	var part: StringName = area.get_meta(&"body_part", Vitals.TORSO)
 	var bone := "torso"
-	if part == Vitals.PELVIS:
+	if part in [Vitals.HEAD, Vitals.FACE]:
+		bone = "head"
+	elif part == Vitals.PELVIS:
 		bone = "pelvis"
 	elif part in [Vitals.THIGH_L, Vitals.SHIN_L]:
 		bone = "leg_l"
 	elif part in [Vitals.THIGH_R, Vitals.SHIN_R]:
 		bone = "leg_r"
-	elif not part in [Vitals.HEAD, Vitals.FACE, Vitals.NECK, Vitals.TORSO, Vitals.CHEST, Vitals.ABDOMEN,
+	elif not part in [Vitals.NECK, Vitals.TORSO, Vitals.CHEST, Vitals.ABDOMEN,
 			Vitals.UPPER_ARM_L, Vitals.UPPER_ARM_R, Vitals.FOREARM_L, Vitals.FOREARM_R]:
 		var centre := Vector3.ZERO
 		var shapes := 0
@@ -250,6 +262,8 @@ static func _bone_of(area: Area3D) -> String:
 		centre = _rest_of(area) * (centre / maxf(shapes, 1))
 		if centre.y < HIP.y - 0.05:
 			bone = "pelvis" if absf(centre.x) < 0.03 else ("leg_l" if centre.x < 0.0 else "leg_r")
+		elif centre.y > TORSO_PIVOT.y + HEAD_PIVOT.y + 0.05:
+			bone = "head"
 	area.set_meta(&"pose_bone", bone)
 	return bone
 
@@ -280,8 +294,7 @@ func _process(delta: float) -> void:
 	_leg_right.transform = (_shown.leg_r as Transform3D) * Transform3D(Basis(Vector3.RIGHT, -swing), Vector3.ZERO)
 	torso.transform = (_shown.torso as Transform3D).translated_local(Vector3(0, sin(_time * 2.0) * 0.003, 0))  # breathing
 	# Head and weapon keep facing where the owner looks, whatever the upper body's lean.
-	var up := (_shown.root as Transform3D).basis * (_shown.torso as Transform3D).basis * Vector3.UP
-	var lean := 0.0 if downed else atan2(up.z, up.y)
+	var lean := 0.0 if downed else _upper_body_pitch((_shown.root as Transform3D).basis * (_shown.torso as Transform3D).basis)
 	head.rotation.x = clampf(look_pitch, -0.7, 0.7) * 0.8 - lean
 	hands_anchor.rotation.x = clampf(look_pitch, -0.8, 0.8) * 0.8 - lean
 

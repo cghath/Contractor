@@ -122,7 +122,6 @@ var _winded := false
 var _before_prone: int = Stance.STAND_HIGH
 var _lean_held := 0       # the lean key held now
 var _lean_latched := 0    # double-tapped: stays leaned
-var _lean_ignore := 0     # a tap that ended a latched lean doesn't lean while held
 var _lean_last_tap := {-1: -10.0, 1: -10.0}
 var _collision: CollisionShape3D
 var _capsule: CapsuleShape3D
@@ -309,7 +308,6 @@ func press_lean(direction: int) -> void:
 	var now := Soldier._now()
 	if _lean_latched == direction:
 		_lean_latched = 0
-		_lean_ignore = direction
 		_lean_last_tap[direction] = -10.0
 		return
 	_lean_latched = 0
@@ -319,11 +317,10 @@ func press_lean(direction: int) -> void:
 	_lean_held = direction
 
 
+## A lean key came up: stop the held lean (a latched one stays).
 func release_lean(direction: int) -> void:
 	if _lean_held == direction:
 		_lean_held = 0
-	if _lean_ignore == direction:
-		_lean_ignore = 0
 
 
 ## The way the body is trying to lean: -1, 0 or 1.
@@ -486,7 +483,11 @@ func _read_keys(adjusting: bool) -> void:
 		elif not Input.is_action_pressed(action):
 			release_lean(direction)
 	if Input.is_action_just_pressed(&"mount"):
-		toggle_mount()
+		var was_mounted := mounted
+		if toggle_mount():
+			body.player_input.flash("Weapon rested")
+		elif not was_mounted and _has_weapon_up():
+			body.player_input.flash("Nothing to rest the weapon on")
 
 
 func _captured() -> bool:
