@@ -48,12 +48,13 @@ var patrol: Array[Vector3] = []
 var engaged_at := -1000.0
 
 
-## The squad's AI soldiers, in squad-slot order (then by name).
+## The squad's living AI soldiers, in squad-slot order (then by name). Dead bodies keep no
+## formation slot and take no orders.
 func members() -> Array[Soldier]:
 	var out: Array[Soldier] = []
 	for n in get_tree().get_nodes_in_group(&"combatants"):
 		var s := n as Soldier
-		if s and s.is_ai() and s.faction == faction and not s.is_queued_for_deletion():
+		if s and s.is_ai() and s.faction == faction and not s.is_queued_for_deletion() and not s.vitals.is_dead():
 			out.append(s)
 	out.sort_custom(func(a: Soldier, b: Soldier) -> bool:
 		if a.squad_slot != b.squad_slot:

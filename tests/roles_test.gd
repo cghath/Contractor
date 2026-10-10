@@ -120,7 +120,7 @@ func _test_kits() -> void:
 	check(marksman.inventory.slots[&"primary"] == &"m110" and marksman.inventory.count_of(&"mag_762") == 5 and marksman.inventory.slots[&"sidearm"] == &"m17",
 		"marksman: M110, 7.62 magazines and an M17")
 	var medic: Soldier = _ai_in_role(Roles.MEDIC)[0]
-	check(medic.inventory.count_of(&"ifak") >= 3 and medic.inventory.count_of(&"trauma_kit") == 1, "medic: extra IFAKs (%d) and a trauma kit" % medic.inventory.count_of(&"ifak"))
+	check(medic.inventory.count_of(&"tourniquet") >= 2 and medic.inventory.count_of(&"trauma_kit") == 1, "medic: extra tourniquets (%d) and a trauma kit" % medic.inventory.count_of(&"tourniquet"))
 	var rifleman: Soldier = _ai_in_role(Roles.RIFLEMAN)[0]
 	check(rifleman.inventory.count_of(&"trauma_kit") == 0, "others carry no trauma kit")
 	var grenadier: Soldier = _ai_in_role(Roles.GRENADIER)[0] if not _ai_in_role(Roles.GRENADIER).is_empty() else null

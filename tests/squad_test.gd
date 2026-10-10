@@ -140,11 +140,12 @@ func _test_follow() -> void:
 func _test_buddy_carries_buddy() -> void:
 	print("Downed buddy, out of contact")
 	var bravo := _ai("Bravo")
-	var charlie := _ai("Charlie")
+	var charlie := _ai("Charlie")  # Bravo's battle buddy and team A's medic
 	var kits := _take_kits(charlie)
+	var golf_kits := _take_kits(_ai("Golf"))  # nobody has a trauma kit for the stopgap revive
 	bravo.vitals.server_damage(500.0)
-	await _seconds(5.0)
-	check(bravo.carried_by == charlie, "his buddy Charlie picks him up (%s)" % charlie.ai_status)
+	var picked := await _wait_until(func() -> bool: return bravo.carried_by == charlie, 20.0)
+	check(picked, "his buddy Charlie, the medic, has no trauma kit to revive him, so picks him up (%s)" % charlie.ai_status)
 	_place(player, Vector3(-8, 0.1, 4))
 	await _seconds(6.0)
 	check(_flat(bravo.global_position, player.global_position) < 11.0, "and carries him after the lead (%.1f m)" % _flat(bravo.global_position, player.global_position))
@@ -152,8 +153,10 @@ func _test_buddy_carries_buddy() -> void:
 		charlie.inventory.take(id)
 	if kits.is_empty():
 		charlie.inventory.take(&"trauma_kit")  # only a trauma kit has the stopgap revive
-	await _seconds(6.0)
-	check(bravo.vitals.is_up() and bravo.carried_by == null, "handed a kit, Charlie revives him (Bravo: %s)" % bravo.vitals.condition_text())
+	var revived := await _wait_until(func() -> bool: return bravo.vitals.is_up(), 10.0)
+	check(revived and bravo.carried_by == null, "handed a trauma kit, Charlie revives him (Bravo: %s)" % bravo.vitals.condition_text())
+	for id: StringName in golf_kits:
+		_ai("Golf").inventory.take(id)
 
 
 func _test_contact() -> void:
@@ -212,6 +215,17 @@ func _place(s: Soldier, pos: Vector3) -> void:
 
 func _flat(a: Vector3, b: Vector3) -> float:
 	return Vector2(a.x - b.x, a.z - b.z).length()
+
+
+## Waits until `cond` holds or `timeout` seconds pass; returns whether it held.
+func _wait_until(cond: Callable, timeout: float) -> bool:
+	var left := timeout
+	while left > 0.0:
+		if cond.call():
+			return true
+		await _seconds(0.25)
+		left -= 0.25
+	return cond.call()
 
 
 func _frames(n: int) -> void:
