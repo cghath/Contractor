@@ -185,10 +185,12 @@ func _test_revive_and_downed() -> void:
 	check(inv.slots[&"primary"] == &"m4a1" and inv.count_of(&"mag_556") == 2 and inv.count_of(&"smoke_grenade") == 1 and inv.count_of(&"frag_grenade") == 1,
 		"respawned in the default kit: M4, 2 mags, smoke, frag")
 	check(inv.slots[&"vest"] == &"" and inv.slots[&"helmet"] == &"", "none of the old gear came along")
-	var left := _items_near(death_spot, 3.0)
-	check(had_vest != &"" and left.has(had_vest), "old gear left where you died (%s)" % [left])
-	var markers := level.get_children().filter(func(n: Node) -> bool: return n is GearMarker)
-	check(markers.size() == 1, "a marker shows where it lies")
+	var corpse: Soldier = level.bodies.get_child(level.bodies.get_child_count() - 1) if level.bodies.get_child_count() > 0 else null
+	check(corpse != null and corpse.vitals.is_dead() and corpse.global_position.distance_to(death_spot) < 0.5
+		and had_vest != &"" and corpse.inventory.slots[&"vest"] == had_vest and not _items_near(death_spot, 3.0).has(had_vest),
+		"your body stays where you died with your old gear still on it (%s)" % [corpse.inventory.slots if corpse else "no body"])
+	var markers := get_tree().get_nodes_in_group(GearMarker.GROUP)
+	check(markers.size() == 1 and (markers[0] as GearMarker).body() == corpse, "a marker shows where it lies")
 
 
 func _test_throwables() -> void:

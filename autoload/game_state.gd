@@ -13,6 +13,9 @@ var looted: Dictionary = {}
 var dropped: Dictionary = {}
 ## Ordered voxel edit log. Replayed on load and sent to late joiners.
 var voxel_edits: Array = []
+## Dead bodies lying in the zone with everything on them (Soldier.body_record), restored by
+## CompoundLevel on load. Rebuilt from the live bodies (Soldier.DEAD_GROUP) on every save.
+var bodies: Array = []
 
 
 func new_uid() -> String:
@@ -43,6 +46,11 @@ func save_zone() -> void:
 			var p: Vector3 = node.global_position
 			dropped[node.uid]["pos"] = [p.x, p.y, p.z]
 			dropped[node.uid]["count"] = node.count
+	# Bodies as they are now: moved, carried off or looted since they fell.
+	bodies = []
+	for node in get_tree().get_nodes_in_group(&"dead_bodies"):
+		if node.has_method(&"body_record") and not node.is_queued_for_deletion():
+			bodies.append(node.body_record())
 	DirAccess.make_dir_recursive_absolute(SAVE_DIR)
 	var file := FileAccess.open(save_path(), FileAccess.WRITE)
 	if file == null:
@@ -53,14 +61,16 @@ func save_zone() -> void:
 		"looted": looted.keys(),
 		"dropped": dropped,
 		"voxel_edits": voxel_edits,
+		"bodies": bodies,
 	}))
-	print("Saved zone '%s' (%d looted, %d dropped, %d voxel edits)" % [zone_id, looted.size(), dropped.size(), voxel_edits.size()])
+	print("Saved zone '%s' (%d looted, %d dropped, %d voxel edits, %d bodies)" % [zone_id, looted.size(), dropped.size(), voxel_edits.size(), bodies.size()])
 
 
 func load_zone() -> void:
 	looted.clear()
 	dropped.clear()
 	voxel_edits.clear()
+	bodies.clear()
 	if not FileAccess.file_exists(save_path()):
 		return
 	var data: Variant = JSON.parse_string(FileAccess.get_file_as_string(save_path()))
@@ -71,6 +81,26 @@ func load_zone() -> void:
 		looted[uid] = true
 	dropped = data["dropped"]
 	voxel_edits = data["voxel_edits"]
+	bodies = data.get("bodies", [])  # saves from before bodies were kept have none
+
+
+## A value read back from JSON as the game wrote it: whole numbers back to ints (JSON keeps
+## only floats, and item state compares and stacks by value) and item ids back to StringNames.
+## Anything else is returned as it is (a deep copy).
+static func from_json(value: Variant) -> Variant:
+	match typeof(value):
+		TYPE_FLOAT:
+			var f: float = value
+			return int(f) if f == floorf(f) and absf(f) < 1e15 else f
+		TYPE_ARRAY:
+			return (value as Array).map(func(v: Variant) -> Variant: return from_json(v))
+		TYPE_DICTIONARY:
+			var out := {}
+			for key: Variant in value:
+				var v: Variant = from_json(value[key])
+				out[key] = StringName(v) if key == "id" and typeof(v) == TYPE_STRING else v
+			return out
+	return value
 
 
 func delete_save() -> void:

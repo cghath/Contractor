@@ -38,10 +38,11 @@ const THROW_SPEED := 15.0
 ## Physics layer of soldier bodies ("movers").
 const BODY_LAYER := 1 << 4
 const THROW_BUSY_S := 0.7
-## Dead AI bodies stay in the world in this group, lying, gear and all (lootable, carriable).
+## Dead bodies (AI and players alike) stay in the world in this group (host only), lying,
+## gear and all: lootable, carriable, saved with the zone. See "Death and bodies".
 const DEAD_GROUP := &"dead_bodies"
 ## Proposed: at most this many dead bodies per zone; past it the oldest one goes (its gear
-## stays on the ground).
+## drops where it lay).
 const MAX_BODIES := 12
 
 @onready var head: Node3D = $Head
@@ -98,7 +99,7 @@ var suppression := 0.0
 var threat_pos := Vector3.ZERO
 var threat_time := -1000.0
 ## Host only. An AI soldier bled out or was killed (permadeath: it never gets up again). Its
-## body stays in the world (DEAD_GROUP) until the body cap removes it.
+## body stays in the world (DEAD_GROUP), gear and all, until the body cap removes it.
 signal died_for_good(soldier: Soldier)
 ## The active weapon or the carried load changed (the view model follows it).
 signal loadout_changed
@@ -906,8 +907,11 @@ const INTERACT_SLACK := 1.0
 var carry_mode: StringName = &""
 
 
-## "Player 1" for a player, the callsign for an AI squadmate.
+## "Player 1" for a player, the callsign for an AI squadmate, or a body's label (a dead
+## player's body is still "Player 1").
 func display_name() -> String:
+	if body_label != "":
+		return body_label
 	return String(name) if is_ai() else "Player %s" % name
 
 
@@ -1009,51 +1013,120 @@ func _client_lifted(lifted: bool) -> void:
 func _on_went_down() -> void:
 	if not multiplayer.is_server():
 		return
-	var held := inventory.release_hands()  # you drop what you were carrying
-	if held != &"":
-		_server_spawn_in_front(held)
+	_drop_held()  # you drop what you were carrying in your hands
 	release_carried()  # ...and whoever you were carrying
 
 
-## AI is gone for good (permadeath), but its body stays: lying where it fell (or on the
-## shoulder of whoever carries it), not blocking anyone, keeping its gear for looting, until
-## the body cap removes it. A player respawns in the default kit; their gear stays where they
-## fell, with a marker (handoff).
+# --- Death and bodies -------------------------------------------------------------------
+# Everyone who dies leaves a body where they fell: lying, not blocking anyone, with
+# everything they carried still on it (worn gear, weapons in their slots, backpack and
+# pouches). Only a two-handed carry drops. Bodies are Soldiers in DEAD_GROUP on the host:
+# lootable item by item or all at once (interaction menu), carriable and draggable, saved
+# with the zone (GameState.bodies) and kept until the body cap removes the oldest, whose gear
+# then drops where it lay.
+
+## The order "Loot all" hands worn gear over in (gear_entries): carrier and pack first, so
+## what goes in them can follow, then plates, helmet and weapons.
+const LOOT_SLOT_ORDER: Array[StringName] = [&"vest", &"backpack", &"plate_front", &"plate_back", &"plate_left",
+	&"plate_right", &"helmet", &"primary", &"sidearm"]
+
+## A body's name in menus, callouts and its gear marker ("Player 2") when it isn't the
+## node's own (a dead player's body, a body restored from a save). Set before entering the tree.
+var body_label := ""
+## Host: a body's stable id in the zone save. Set when it dies (or is restored).
+var body_uid := ""
+## A dead player's body carries a GearMarker (CompoundLevel.server_spawn_body).
+var has_gear_marker := false
+
+
+## AI dies for good (permadeath) and its own node stays as the body, on the shoulder of
+## whoever carries it if anyone does. A player leaves a body with all their gear where they
+## fell (server_leave_body, with a gear marker) and respawns in the default kit (handoff).
 func _on_died() -> void:
 	if not multiplayer.is_server():
 		return
 	release_carried()
+	_drop_held()
 	if is_ai():
 		_server_become_body()
 		died_for_good.emit(self)
 		return
-	if is_instance_valid(carried_by):
-		carried_by.release_carried()
-	var spot := global_position
-	_server_drop_everything()
+	var level := CompoundLevel.current(self)
+	server_leave_body()
+	inventory.strip()  # it's all on the body now
 	vitals.server_reset_health()
 	for kit: Array in DEFAULT_KIT:
 		inventory.take(kit[0], kit[1])
-	var level := CompoundLevel.current(self)
-	level.show_gear_marker.rpc(spot, "Player %s's gear" % name)
 	_client_respawn.rpc_id(owner_peer(), level.next_spawn_point())
 
 
-## Host only. A dead AI soldier becomes a body (DEAD_GROUP): whatever was in its hands drops,
-## the rest of its gear stays on it. Past the body cap the oldest body goes.
+## Host only. Leaves this player's body where it lies as a dead body node
+## (CompoundLevel.server_spawn_body) with everything this player carries and a gear marker. A
+## player who was carrying or dragging them goes on carrying the body. For a player who died,
+## or who leaves the session while down. Returns the body (null if there's no level).
+func server_leave_body() -> Soldier:
+	var carrier: Soldier = carried_by if is_instance_valid(carried_by) and carried_by.carrying == self else null
+	var mode := carrier.carry_mode if carrier else &""
+	if is_instance_valid(carried_by):
+		carried_by.release_carried()
+	var level := CompoundLevel.current(self)
+	if level == null:
+		return null
+	var record := body_record()
+	record["marker"] = true
+	var corpse := level.server_spawn_body(record)
+	if corpse and carrier and not carrier.is_ai() and carrier.vitals.is_up():
+		carrier.server_pick_up_body(corpse, mode, INF)
+	return corpse
+
+
+## Host only. What this body is, for CompoundLevel.server_spawn_body and the zone save:
+## "uid", "label" (whose it was), "faction", "variant", "role", "pos" ([x, y, z]), "rot_y",
+## "age_s" (seconds dead), "marker" (a dead player's: shows a GearMarker) and "gear" (an
+## Inventory.net_state: everything on it).
+func body_record() -> Dictionary:
+	var p := global_position
+	return {"uid": body_uid if body_uid != "" else GameState.new_uid(), "label": display_name(), "faction": String(faction),
+		"variant": model.variant, "role": String(role), "pos": [p.x, p.y, p.z], "rot_y": rotation.y,
+		"age_s": maxf(_now() - died_at, 0.0) if died_at >= 0.0 else 0.0, "marker": has_gear_marker,
+		"gear": inventory.net_state.duplicate(true)}
+
+
+## Host only. A dead soldier becomes a body (DEAD_GROUP), gear and all. Past the body cap the
+## oldest body goes.
 func _server_become_body() -> void:
-	var held := inventory.release_hands()
-	if held != &"":
-		_server_spawn_in_front(held)
 	care_by = null
 	died_at = _now()
+	if body_uid == "":
+		body_uid = GameState.new_uid()
 	collision_layer = 0
 	add_to_group(DEAD_GROUP)
 	server_enforce_body_cap(get_tree())
 
 
+## Host only. Drops whatever is in the hands (a two-handed carry) in front of the body.
+func _drop_held() -> void:
+	var held := inventory.release_hands()
+	if held != &"":
+		_server_spawn_in_front(held)
+
+
+## Whether anything is left on this body (worn, in a slot, stowed or in the hands). Works on
+## every peer (it reads the replicated inventory).
+func has_gear() -> bool:
+	if inventory.hands != &"":
+		return true
+	for slot in Inventory.SLOTS:
+		if inventory.slots[slot] != &"":
+			return true
+	for container in Inventory.CONTAINERS:
+		if not inventory.containers[container].is_empty():
+			return true
+	return false
+
+
 ## Host only. Removes the oldest dead bodies past `body_cap` (bodies someone is carrying are
-## kept). A removed body's gear stays on the ground where it lay.
+## kept). A removed body's gear drops where it lay, so nothing is lost.
 static func server_enforce_body_cap(tree: SceneTree) -> void:
 	var bodies: Array = tree.get_nodes_in_group(DEAD_GROUP).filter(func(n: Node) -> bool: return n is Soldier and not n.is_queued_for_deletion())
 	bodies.sort_custom(func(a: Soldier, b: Soldier) -> bool: return a.died_at < b.died_at)
@@ -1067,7 +1140,7 @@ static func server_enforce_body_cap(tree: SceneTree) -> void:
 		extra -= 1
 
 
-## Host only. Takes a dead body out of the world; its gear drops where it lay.
+## Host only. Takes a dead body out of the world (the body cap); its gear drops where it lay.
 func server_remove_body() -> void:
 	if is_instance_valid(carried_by):
 		carried_by.release_carried()
@@ -1076,21 +1149,161 @@ func server_remove_body() -> void:
 	queue_free()
 
 
-## Strips a dead body (interaction menu "Loot"): its gear goes on the ground around it.
+## Interaction menu "Loot all": everything on a dead body that fits goes into your own gear.
+## Worn gear goes first (a carrier or pack you lack is put on, so what was in it follows it),
+## then plates, weapons and the rest, then what was stowed. What doesn't fit stays on the
+## body; nothing goes on the ground.
 @rpc("any_peer", "call_local", "reliable")
 func _server_loot_body(path: NodePath) -> void:
-	if not _from_owner() or not vitals.is_up():
+	var other := _lootable(path)
+	if other == null:
 		return
+	if not other.has_gear():
+		_client_message.rpc_id(owner_peer(), "Nothing left on %s" % other.display_name())
+		return
+	var mine := inventory.net_state.duplicate(true)
+	var theirs := other.inventory.net_state.duplicate(true)
+	var entries := other.gear_entries()
+	var moved := _loot_all_at_once(other, entries)
+	if moved < 0:
+		# Something left behind no longer fits on the body (its carrier or pack came over
+		# without all that was in it): undo, and go item by item, which never strands anything.
+		inventory.net_state = mine
+		other.inventory.net_state = theirs
+		moved = 0
+		var progress := true
+		while progress:  # again while something moves (a pack emptied can come off next time)
+			progress = false
+			for where_index: Array in _loot_order(other):
+				if int(_loot_one(other, where_index[0], where_index[1]).moved) > 0:
+					moved += 1
+					progress = true
+	if not other.has_gear():
+		_client_message.rpc_id(owner_peer(), "Took everything from %s" % other.display_name())
+	elif moved > 0:
+		_client_message.rpc_id(owner_peer(), "Took what fits from %s (no room for the rest)" % other.display_name())
+	else:
+		_client_message.rpc_id(owner_peer(), "No room for anything on %s" % other.display_name())
+
+
+## Host only. Loot all in one go: everything on `other` (its gear_entries) goes into this
+## soldier's gear and what doesn't fit goes back on the body, in the same order (carriers
+## before what goes in them). Returns how many entries came over, or -1 if something couldn't
+## go back on the body (the caller undoes it all).
+func _loot_all_at_once(other: Soldier, entries: Array[Dictionary]) -> int:
+	other.inventory.strip()
+	var left: Array[Dictionary] = []
+	for entry in entries:
+		var taken := inventory.take(entry.id, int(entry.count), entry.get("state", {}))
+		if taken < int(entry.count):
+			var rest := entry.duplicate(true)
+			rest.count = int(entry.count) - taken
+			left.append(rest)
+	for entry in left:
+		if other.inventory.take(entry.id, int(entry.count), entry.get("state", {})) < int(entry.count):
+			return -1
+	return entries.size() - left.size()
+
+
+## Where everything on `other` is, as [slot or container, index] pairs (-1 for a slot), in
+## the order to take it piece by piece: what's stowed first (last entries first, so the
+## indices stay good), then weapons, helmet and plates, and carrier and pack last (they only
+## come off empty).
+static func _loot_order(other: Soldier) -> Array:
+	var out := []
+	for container in Inventory.CONTAINERS:
+		for i in range(other.inventory.containers[container].size() - 1, -1, -1):
+			out.append([container, i])
+	var slots := LOOT_SLOT_ORDER.duplicate()
+	slots.reverse()
+	for slot: StringName in slots:
+		if other.inventory.slots[slot] != &"":
+			out.append([slot, -1])
+	return out
+
+
+## Everything on this body as entries ({"id", "count", "state"?}), in the order to hand it
+## over: worn gear in LOOT_SLOT_ORDER (carrier and pack first, then plates, helmet and
+## weapons), then what's stowed, container by container.
+func gear_entries() -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	for slot in LOOT_SLOT_ORDER:
+		if inventory.slots[slot] != &"":
+			var entry := {"id": inventory.slots[slot], "count": 1}
+			if not inventory.state_of(slot).is_empty():
+				entry.state = inventory.state_of(slot).duplicate(true)
+			out.append(entry)
+	for container in Inventory.CONTAINERS:
+		for entry: Dictionary in inventory.containers[container]:
+			out.append(entry.duplicate(true))
+	if inventory.hands != &"":
+		out.append({"id": inventory.hands, "count": 1})
+	return out
+
+
+## Interaction menu "Loot" > one item: takes one thing off a dead body into your own gear:
+## what's in slot `where` (index -1), or the whole stowed entry `index` of container `where`
+## (as much of the stack as fits; the rest stays on the body).
+@rpc("any_peer", "call_local", "reliable")
+func _server_loot_item(path: NodePath, where: StringName, index: int) -> void:
+	var other := _lootable(path)
+	if other == null:
+		return
+	var result := _loot_one(other, where, index)
+	if result.why != "":
+		_client_message.rpc_id(owner_peer(), result.why)
+	elif int(result.moved) > 0:
+		_client_message.rpc_id(owner_peer(), "Took %s%s" % [result.name, " x%d" % result.moved if int(result.moved) > 1 else ""])
+
+
+## The dead body at `path` if this player may loot it now (up, the body in reach), else null.
+func _lootable(path: NodePath) -> Soldier:
+	if not _from_owner() or not vitals.is_up():
+		return null
 	var other := get_node_or_null(path) as Soldier
 	if other == null or other == self or other.is_queued_for_deletion() or not other.vitals.is_dead():
-		return
+		return null
 	if other.global_position.distance_to(global_position) > INTERACT_REACH + INTERACT_SLACK:
 		_client_message.rpc_id(owner_peer(), "Too far away")
-		return
-	other._server_drop_everything()
+		return null
+	return other
 
 
-## Host only. Empties the inventory onto the ground around this body, item state and all.
+## Host only. Moves one thing from `other`'s inventory into this soldier's: the item in slot
+## `where` (index < 0) or stowed entry `index` of container `where`. Whatever doesn't fit goes
+## straight back where it was. Returns {"moved" (units), "name", "why" ("" when it all moved,
+## otherwise the reason)}.
+func _loot_one(other: Soldier, where: StringName, index: int) -> Dictionary:
+	var inv := other.inventory
+	if index < 0:
+		var id: StringName = inv.slots.get(where, &"")
+		if id == &"":
+			return {"moved": 0, "name": "", "why": "Nothing there any more"}
+		var item_name := ItemDB.get_item(id).name
+		var removed := inv.unequip(where)
+		if removed.is_empty():
+			return {"moved": 0, "name": item_name, "why": "Take what's in the %s first" % item_name}
+		if inventory.take(removed.id, 1, removed.state) == 1:
+			return {"moved": 1, "name": item_name, "why": ""}
+		inv.take(removed.id, 1, removed.state)  # no room: back on the body
+		return {"moved": 0, "name": item_name, "why": "No room for %s" % item_name}
+	var list: Array = inv.containers.get(where, [])
+	if index >= list.size():
+		return {"moved": 0, "name": "", "why": "Nothing there any more"}
+	var entry := inv.remove_entry(where, index, int(list[index].count))
+	var entry_name := ItemDB.get_item(entry.id).name
+	var moved := inventory.take(entry.id, int(entry.count), entry.get("state", {}))
+	if moved < int(entry.count):
+		var rest := entry.duplicate(true)
+		rest.count = int(entry.count) - moved
+		inv.insert_entry(where, rest)  # it was just there, so it fits
+		var why := "No room for %s" % entry_name if moved == 0 else "Took %d %s, no room for the rest" % [moved, entry_name]
+		return {"moved": moved, "name": entry_name, "why": why}
+	return {"moved": moved, "name": entry_name, "why": ""}
+
+
+## Host only. Empties the inventory onto the ground around this body, item state and all
+## (only for a body the body cap removes).
 func _server_drop_everything() -> void:
 	var level := CompoundLevel.current(self)
 	var entries := inventory.strip()

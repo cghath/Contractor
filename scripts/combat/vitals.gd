@@ -444,6 +444,15 @@ func server_revive(_hp: float) -> void:
 	_after_change(true)
 
 
+## Host only. Dead at once, without a wound: the body a player leaves behind when they
+## respawn, or a body restored from a zone save (Soldier.server_leave_body).
+func server_kill() -> void:
+	if _model.dead:
+		return
+	_model.kill()
+	_after_change(true)
+
+
 ## Host only. Back to full health (respawns, dummies getting back up).
 func server_reset_health() -> void:
 	_model.reset()

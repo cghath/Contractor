@@ -31,6 +31,8 @@ const SUB_GAP_PX := 8.0
 const MAX_GIVE_ENTRIES := 12
 ## Most entries the Treat submenu lists (the most urgent first).
 const MAX_TREAT_ENTRIES := 12
+## Most entries a dead body's Loot submenu lists (what's worn first, then each container).
+const MAX_LOOT_ENTRIES := 20
 ## Height of an action point above a body's origin: standing, and lying down.
 const STANDING_POINT_Y := 1.3
 const DOWNED_POINT_Y := 0.3
@@ -48,10 +50,12 @@ const SELF := &"self"
 ## - request + with: the Soldier host-side request to send and its arguments: "target"
 ##   (the target's path), "none", "slot" (your active slot), "target_entry" (target path,
 ##   container, index; used by submenu entries), "treatment" (target path, item, part,
-##   rushed) and "target_part" (target path, part).
+##   rushed), "target_part" (target path, part) and "target_loot" (target path, a slot or
+##   container, and the entry's index or -1 for a slot).
 ## - show: a local readout instead of a request ("condition" or "wounds").
-## - submenu: a list built at runtime: "stowed_items" (entries take the parent's request) or
-##   "treatments" (entries carry their own request: see treatments).
+## - submenu: a list built at runtime: "stowed_items" and "body_items" (what's on a dead body,
+##   like the inventory screen; entries take the parent's request) or "treatments" (entries
+##   carry their own request: see treatments).
 const ACTIONS := {
 	ITEM: [
 		{"id": &"pick_up", "label": "Pick up", "request": &"_server_interact", "with": &"target"},
@@ -64,7 +68,8 @@ const ACTIONS := {
 		{"id": &"check_condition", "label": "Check condition", "show": &"condition"},
 	],
 	DEAD: [
-		{"id": &"loot", "label": "Loot", "request": &"_server_loot_body", "with": &"target"},
+		{"id": &"loot", "label": "Loot", "needs": &"has_gear", "submenu": &"body_items", "request": &"_server_loot_item", "with": &"target_loot"},
+		{"id": &"loot_all", "label": "Loot all", "needs": &"has_gear", "request": &"_server_loot_body", "with": &"target"},
 		{"id": &"carry", "label": "Carry", "needs": &"can_move_body", "request": &"_server_carry_body", "with": &"target"},
 		{"id": &"drag", "label": "Drag", "needs": &"can_move_body", "request": &"_server_drag_body", "with": &"target"},
 	],
@@ -157,7 +162,7 @@ static func actions_for(actor: Soldier, target: Node) -> Array[Dictionary]:
 		if def.has("submenu"):
 			action["items"] = _submenu(def, actor, target)
 			if action.items.is_empty() and why == "":
-				action["disabled"] = "Nothing stowed to give" if def.submenu == &"stowed_items" else "Nothing to treat"
+				action["disabled"] = {&"stowed_items": "Nothing stowed to give", &"body_items": "Nothing left on them"}.get(def.submenu, "Nothing to treat")
 		out.append(action)
 	return out
 
@@ -187,6 +192,8 @@ static func _check(need: StringName, actor: Soldier, target: Node) -> String:
 			return "" if actor.inventory.hands == &"" else "Your hands are full"
 		&"moving_body":
 			return "" if actor.carry_mode != &"" else _HIDE
+		&"has_gear":
+			return "" if target is Soldier and (target as Soldier).has_gear() else "Nothing left on them"
 		&"held_item":
 			return "" if actor.inventory.hands != &"" or actor.active_weapon() != null else _HIDE
 	return ""
@@ -223,7 +230,43 @@ static func _submenu(def: Dictionary, actor: Soldier, target: Node) -> Array[Dic
 						"target": target, "container": container, "index": i, "disabled": ""})
 		&"treatments":
 			items = treatments(actor, target)
+		&"body_items":
+			if target is Soldier:
+				for entry in body_items(target as Soldier):
+					entry.merge({"id": &"loot_item", "request": def.request, "with": def.with, "target": target})
+					items.append(entry)
 	return items
+
+
+## What's on a dead body, as the Loot submenu lists it (like the inventory screen): what's
+## worn ("Primary: M4A1 Carbine (30 rds)"), then each container's entries ("Vest: 5.56
+## Magazine x4"). Each is {"label", "where" (a slot or container), "index" (-1 for a slot),
+## "disabled"}: a carrier or pack still holding things is greyed out until it's empty.
+static func body_items(body: Soldier) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	var inv := body.inventory
+	for slot in Inventory.SLOTS:
+		var id: StringName = inv.slots[slot]
+		if id == &"":
+			continue
+		var item := ItemDB.get_item(id)
+		var full: bool = (slot == &"backpack" and not inv.containers[&"backpack"].is_empty()) \
+			or (slot == &"vest" and (not inv.containers[&"vest"].is_empty() or Inventory.PLATE_SLOTS.any(func(s: StringName) -> bool: return inv.slots[s] != &"")))
+		out.append({"label": "%s: %s%s" % [InventoryScreen.SLOT_NAMES.get(slot, String(slot)), item.name, _rounds_text(inv.state_of(slot))],
+			"where": slot, "index": -1, "disabled": "Take what's in it first" if full else ""})
+	for container in Inventory.CONTAINERS:
+		var list: Array = inv.containers[container]
+		for i in list.size():
+			var entry: Dictionary = list[i]
+			var item := ItemDB.get_item(entry.id)
+			var count := " x%d" % int(entry.count) if int(entry.count) > 1 else ""
+			out.append({"label": "%s: %s%s%s" % [String(container).capitalize(), item.name, count, _rounds_text(entry.get("state", {}))],
+				"where": container, "index": i, "disabled": ""})
+	return out.slice(0, MAX_LOOT_ENTRIES)
+
+
+static func _rounds_text(state: Dictionary) -> String:
+	return " (%d rds)" % int(state.rounds) if state.has("rounds") else ""
 
 
 ## What `actor` can do for `target`'s wounds (the Treat submenu), most urgent first: each
@@ -299,6 +342,8 @@ static func perform(actor: Soldier, action: Dictionary) -> String:
 			actor.rpc_id(1, request, target.get_path(), action.item, action.part, action.rushed)
 		&"target_part":
 			actor.rpc_id(1, request, target.get_path(), action.part)
+		&"target_loot":
+			actor.rpc_id(1, request, target.get_path(), action.where, action.index)
 		_:
 			actor.rpc_id(1, request)
 	return ""
