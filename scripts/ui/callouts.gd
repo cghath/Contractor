@@ -25,9 +25,9 @@ const REPEAT_GAP_S := 8.0
 const SQUAD_CONTACT_GAP_S := 6.0
 ## A line held back by the speaker gap is dropped if it can't be said within this long.
 const PENDING_S := 3.0
-## Callouts that cut in on the speaker gap: man down and thrown grenades (they still
-## don't repeat within REPEAT_GAP_S).
-const URGENT: Array[StringName] = [&"man_down", &"frag_out", &"smoke_out", &"medic"]
+## Callouts that cut in on the speaker gap: man down, thrown grenades and the medical calls
+## (they still don't repeat within REPEAT_GAP_S).
+const URGENT: Array[StringName] = [&"man_down", &"frag_out", &"smoke_out", &"medic", &"moving_to", &"treating", &"need_medic"]
 ## How far from a casualty a squadmate notices them go down and calls it.
 const MAN_DOWN_RANGE := 40.0
 ## Subtitles: how long a line stays up, and how many show at once.

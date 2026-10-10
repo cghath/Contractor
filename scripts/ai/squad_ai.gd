@@ -69,6 +69,8 @@ const ADVANCE_STEP := 8.0
 const WORLD_MASK := 1
 const TURN_RATE := 7.0
 const GRENADE_COOLDOWN_S := 15.0
+## Points checked along a frag's arc before throwing it (_lob_clear).
+const LOB_CHECKS := 10
 const CASUALTY_REACH := 1.6
 ## The kits Soldier._server_revive (the stopgap revive) can use.
 const REVIVE_KITS: Array[StringName] = [&"trauma_kit", &"ifak"]
@@ -340,6 +342,18 @@ func _setup() -> void:
 	_hold_point = body.global_position
 	_move_point = body.global_position
 	_ready_done = true
+	_pass_through_squadmates()
+
+
+## AI on the same side moves through each other (host only, where AI moves): squadmates
+## crowding a doorway or a casualty no longer wedge each other in. Players still bump into
+## AI and AI into players.
+func _pass_through_squadmates() -> void:
+	for n in get_tree().get_nodes_in_group(&"combatants"):
+		var other := n as Soldier
+		if other and other != body and other.is_ai() and other.faction == body.faction:
+			body.add_collision_exception_with(other)
+			other.add_collision_exception_with(body)
 
 
 # --- Intent selection -----------------------------------------------------
@@ -730,20 +744,26 @@ func _find_body() -> Soldier:
 
 func _bearer_for(dead: Soldier) -> Soldier:
 	var mate := SquadAI.of(dead.buddy) if is_instance_valid(dead.buddy) else null
-	if mate and mate.care == Care.NONE and mate._free_for(dead) and mate.body.carrying == null and not mate.in_contact():
+	if mate and mate._can_bear(dead):
 		return mate.body
 	var best: Soldier = null
 	var best_d := INF
 	for n in get_tree().get_nodes_in_group(&"combatants"):
 		var ai := SquadAI.of(n)
-		if ai == null or ai.care != Care.NONE or not ai._free_for(dead) or ai.body.faction != dead.faction \
-				or ai.body.carrying != null or ai.in_contact():
+		if ai == null or ai.body == null or ai.body.faction != dead.faction or not ai._can_bear(dead):
 			continue
 		var d := ai.body.global_position.distance_to(dead.global_position) * (1.0 if ai.body.role != Roles.MEDIC else 3.0)
 		if d < best_d:
 			best = ai.body
 			best_d = d
 	return best
+
+
+## Free to carry a body: not looking after anyone, not carrying, out of contact and not busy
+## with its own wounds.
+func _can_bear(dead: Soldier) -> bool:
+	return care == Care.NONE and _free_for(dead) and body.carrying == null and not in_contact() \
+		and _self_care_score() <= 0.0 and not asking_for_medic()
 
 
 func _do_care() -> void:
@@ -863,7 +883,10 @@ func _care_treat(contact: bool) -> void:
 		return
 	# Nothing more this unit can do for them now.
 	if not casualty.vitals.downed:
-		_end_care()  # conscious and patched up as far as this unit can
+		if contact and not _next_task(casualty, false).is_empty():
+			care = Care.GUARD  # the rest once it's quiet
+		else:
+			_end_care()  # conscious and patched up as far as this unit can
 		return
 	if contact:
 		care = Care.GUARD
@@ -958,11 +981,14 @@ func _end_care() -> void:
 
 
 ## The next treatment this unit can give `c` now, in the care order (under fire: massive
-## bleeding only), with an item it carries and that hasn't failed TREAT_TRIES times; {} for
-## none.
+## bleeding only), with an item it carries and that hasn't failed TREAT_TRIES times, and not
+## one the casualty is doing on themselves right now; {} for none.
 func _next_task(c: Soldier, under_fire: bool) -> Dictionary:
 	var conscious := c.vitals.is_up()
+	var their := SquadAI.of(c) if c != body else null
 	for task in plan_care(c.vitals.care_needed(), under_fire, conscious):
+		if their and their._treat_until >= 0.0 and their._treat_key == _task_key(c, task):
+			continue
 		if String(task.kind) == "pain" and c.vitals.pain() < MORPHINE_PAIN:
 			continue
 		if body.inventory.count_of(StringName(task.item)) <= 0:
@@ -1332,8 +1358,27 @@ func _maybe_frag() -> void:
 		var s := n as Soldier
 		if s and s != body and s.faction == body.faction and s.global_position.distance_to(body.threat_pos) < Throwables.FRAG_RADIUS + 1.0:
 			return  # friendlies too close to the blast
+	if not _lob_clear(body.camera.global_position + Vector3.UP * 0.2, body.threat_pos):
+		return  # it would hit a wall or roof on the way and bounce back
 	_grenade_cd = GRENADE_COOLDOWN_S
 	_throw(&"frag_grenade", body.threat_pos)
+
+
+## Whether a grenade lobbed from `from` (Throwables.lob_velocity) flies to `at` without
+## hitting anything on the way: a frag that clips a wall or a roof lands among your own.
+func _lob_clear(from: Vector3, at: Vector3) -> bool:
+	var gravity: float = ProjectSettings.get_setting("physics/3d/default_gravity")
+	var velocity := Throwables.lob_velocity(from, at)
+	var flight := clampf(from.distance_to(at) / 12.0, 0.6, 1.6)  # as lob_velocity times it
+	var world := body.get_world_3d()
+	var previous := from
+	for i in range(1, LOB_CHECKS + 1):
+		var t := flight * 0.9 * i / LOB_CHECKS  # the last tenth comes down onto the target
+		var point := from + velocity * t + Vector3.DOWN * 0.5 * gravity * t * t
+		if not Throwables.clear_line(world, previous, point):
+			return false
+		previous = point
+	return true
 
 
 func _throw(id: StringName, at: Vector3) -> bool:
