@@ -57,7 +57,6 @@ const ACTIONS := {
 		{"id": &"pick_up", "label": "Pick up", "request": &"_server_interact", "with": &"target"},
 	],
 	DOWNED: [
-		{"id": &"revive", "label": "Revive (stopgap)", "needs": &"revive_kit", "request": &"_server_revive", "with": &"target"},
 		{"id": &"treat", "label": "Treat", "needs": &"treatable", "submenu": &"treatments"},
 		{"id": &"carry", "label": "Carry", "needs": &"can_move_body", "request": &"_server_carry_body", "with": &"target"},
 		{"id": &"drag", "label": "Drag", "needs": &"can_move_body", "request": &"_server_drag_body", "with": &"target"},
@@ -165,13 +164,6 @@ static func actions_for(actor: Soldier, target: Node) -> Array[Dictionary]:
 ## "" if the condition is met, _HIDE to leave the entry out, or why it's greyed out.
 static func _check(need: StringName, actor: Soldier, target: Node) -> String:
 	match need:
-		&"revive_kit":
-			if _is_enemy(actor, target):
-				return _HIDE  # no reviving the enemy
-			if actor._best_revive_kit() == null:
-				return "Needs a trauma kit"
-			var vitals := Vitals.find_on(target)
-			return vitals.revive_problem() if vitals else _HIDE
 		&"treatable":
 			if _is_enemy(actor, target) or treatments(actor, target).is_empty():
 				return _HIDE
@@ -194,9 +186,6 @@ static func _check(need: StringName, actor: Soldier, target: Node) -> String:
 
 static func _label(def: Dictionary, actor: Soldier, _target: Node) -> String:
 	match def.id:
-		&"revive":
-			var kit := actor._best_revive_kit()
-			return "Revive (stopgap, %s, %.0f s)" % [kit.name, float(kit.stats.get("revive_s", 3.0))] if kit else String(def.label)
 		&"put_down":
 			return "Put down" if actor.carry_mode == Soldier.CARRY else "Let go"
 		&"drop_held":
@@ -304,17 +293,21 @@ static func perform(actor: Soldier, action: Dictionary) -> String:
 	return ""
 
 
-## "Alpha: Down, 42 s" plus the wounds found, for Check condition.
+## "Alpha: Unconscious" plus what someone checking them can see, for Check condition.
 static func condition_report(target: Node) -> String:
 	var vitals := target.get_node_or_null(^"Vitals") as Vitals
 	if vitals == null:
 		return ""
-	return "%s: %s\n%s" % [display_name(target), vitals.condition_text(), wound_report(vitals)]
+	return "%s: %s\n%s" % [display_name(target), vitals.condition_text(), wound_report(vitals, false)]
 
 
-## One line per wound and what's been done for it ("Left thigh: arterial bleed, held by
-## tourniquet, packed"), then the tourniquets, airway and morphine; or "No wounds found".
-static func wound_report(vitals: Vitals) -> String:
+## Plain signs first (Vitals.signs: "Unresponsive", "Breathing laboured", "Blue lips",
+## "Pinpoint pupils (morphine)"; on yourself, laboured breathing and drowsiness), then one
+## line per wound and what's been done for it ("Left thigh: arterial bleed, held by
+## tourniquet, packed"), then the tourniquets and airway; or "No wounds found". No numbers:
+## SpO2, blood and the morphine level stay hidden.
+static func wound_report(vitals: Vitals, on_self := true) -> String:
+	var signs := vitals.signs(on_self)
 	var lines := PackedStringArray()
 	for wound in vitals.wound_list():
 		lines.append("%s: %s%s" % [part_name(wound.get("part", &"")), KIND_TEXT.get(wound.get("kind", ""), "wound"), _wound_status(wound)])
@@ -328,12 +321,10 @@ static func wound_report(vitals: Vitals) -> String:
 		lines.append("NPA in")
 	elif vitals.airway_blocked():
 		lines.append("Airway blocked: needs an NPA")
-	if vitals.morphine_window_left() > 0.0:
-		var ago := WoundModel.OVERDOSE_WINDOW_S - vitals.morphine_window_left()
-		lines.append("Morphine given %d min ago" % floori(ago / 60.0))
 	if lines.is_empty():
-		return "No wounds found" if vitals.injury() <= 0.0 or not vitals.is_up() else "Hurt, no open wounds found"
-	return "\n".join(lines)
+		lines.append("No wounds found" if vitals.injury() <= 0.0 or not vitals.is_up() else "Hurt, no open wounds found")
+	signs.append_array(lines)
+	return "\n".join(signs)
 
 
 ## What's been done for one wound_list() entry, and whether it still bleeds.

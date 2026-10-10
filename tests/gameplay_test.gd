@@ -27,7 +27,7 @@ func _ready() -> void:
 	await _test_inventory_actions()
 	await _test_drop_and_pickup_keep_state()
 	await _test_spread()
-	await _test_revive_and_downed()
+	await _test_downed()
 	await _test_throwables()
 	GameState.delete_save()
 	print("GAMEPLAY TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
@@ -142,8 +142,8 @@ func _test_spread() -> void:
 	check(aimed < hip * 0.3, "aiming tightens it (max %.2f deg)" % aimed)
 
 
-func _test_revive_and_downed() -> void:
-	print("Downed and revive (RPC)")
+func _test_downed() -> void:
+	print("Downed (RPC); no revive")
 	var dummy: TargetDummy = level.get_node(^"Dummies/MediumDummy")
 	dummy.respawn_seconds = 999.0  # don't get up on its own during the test
 	dummy.vitals.server_damage(500.0)
@@ -153,20 +153,15 @@ func _test_revive_and_downed() -> void:
 	check(hitboxes.size() == Vitals.BODY_PARTS.size() and hitboxes.all(func(h: Area3D) -> bool: return absf(h.rotation.x + PI / 2) < 0.01),
 		"all %d of its hitboxes lie down with it" % hitboxes.size())
 	player.global_position = dummy.global_position + Vector3(0, 0, -1.2)
-	await _frames(2)
-	player._server_revive.rpc_id(1, dummy.get_path())
-	check(not dummy.vitals.is_healing(), "no kit, no revive")
-	player.inventory.take(&"ifak")
-	player._server_revive.rpc_id(1, dummy.get_path())
-	check(not dummy.vitals.is_healing(), "an IFAK has no stopgap revive")
 	player.inventory.take(&"trauma_kit")
-	player._server_revive.rpc_id(1, dummy.get_path())
-	await _seconds(3.3)
-	check(dummy.vitals.is_up() and dummy.vitals.blood_fraction() >= Vitals.REVIVE_BLOOD - 0.001 and not dummy.vitals.in_cardiac_arrest(),
-		"revived with a trauma kit out of cardiac arrest (%.0f%% blood)" % (dummy.vitals.blood_fraction() * 100.0))
-	check(player.inventory.count_of(&"trauma_kit") == 1 and player.inventory.revive_kit() == null, "the kit's stopgap revive was used; the kit stays")
+	await _frames(2)
+	check(not InteractionMenu.actions_for(player, dummy).any(func(a: Dictionary) -> bool: return a.id == &"revive"),
+		"no revive, even with a trauma kit at hand")
+	dummy.vitals.server_advance(5.0)
+	check(dummy.vitals.downed and dummy.vitals.in_cardiac_arrest() and dummy.vitals.why_unconscious().has(&"arrest"),
+		"in cardiac arrest nothing brings it round (%s)" % [dummy.vitals.why_unconscious()])
+	dummy.vitals.server_reset_health()
 	player.inventory.remove_one(&"trauma_kit")
-	player.inventory.remove_one(&"ifak")
 	player.inventory.take(&"hvt_case")
 	var rounds := player.inventory.rounds_in(&"primary")
 	player.vitals.server_damage(500.0)
@@ -178,7 +173,7 @@ func _test_revive_and_downed() -> void:
 	var had_vest: StringName = player.inventory.slots[&"vest"]
 	player.vitals.server_damage(50.0)
 	check(player.vitals.downed, "a hit while down is just another wound")
-	player.vitals.server_advance(Vitals.ARREST_WINDOW_S + 1.0)  # nobody revives: the arrest window runs out
+	player.vitals.server_advance(Vitals.ARREST_WINDOW_S + 1.0)  # nothing restarts a heart yet: the arrest window runs out
 	await _frames(2)
 	check(player.vitals.is_up() and player.vitals.blood_fraction() == 1.0 and player.vitals.wound_list().is_empty(), "dying respawns you unhurt")
 	var inv := player.inventory

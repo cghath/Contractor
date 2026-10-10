@@ -5,6 +5,13 @@ extends RefCounted
 ## from 0 to 1, fractures, chest wounds, concussion and impact. Blood loss, pain and
 ## breathing decide when a soldier slows, goes unconscious, arrests or dies.
 ##
+## Consciousness follows the body (there is no revive): a casualty is out while any cause in
+## unconscious_causes() holds (low SpO2, pain at the knockout threshold, 40% of blood lost,
+## cardiac arrest, a concussion knockout, morphine sedation, total trauma over its limit) and
+## comes round on their own once every cause has stayed gone for a short time (WAKE_S).
+## Treatment helps by removing causes: a tourniquet stops the slide, morphine eases pain, an
+## NPA clears the airway so SpO2 recovers.
+##
 ## The host owns the real state and steps it (advance). Every other peer holds a copy
 ## rebuilt from to_net()/apply_net(), so every query works everywhere. Pure data: no nodes,
 ## no signals (Vitals turns state changes into its signals). Values the design doc marks as
@@ -58,11 +65,53 @@ const IMPACT_FADE_PER_S := 1.0 / 300.0
 const KNOCKOUT_PAIN_FULL := 0.9
 const KNOCKOUT_PAIN_LOW := 0.6
 const KNOCKOUT_PAIN_LOW_AT := 0.30
-## Once stable, an unconscious casualty rolls to wake every 15 s at 15%.
-const WAKE_ROLL_S := 15.0
-const WAKE_CHANCE := 0.15
-## Stable means not in arrest, under 40% lost and bleeding less than this (L/min).
-const STABLE_BLEED_L_MIN := 0.05
+## Waking (proposed): once every cause of unconsciousness is gone, the casualty comes round
+## after it has stayed gone this long, by the worst cause of this spell out (milder causes
+## are quicker). No dice.
+const WAKE_S := {&"knockout": 10.0, &"pain": 10.0, &"morphine": 15.0, &"spo2": 15.0, &"trauma": 20.0,
+	&"blood": 20.0, &"arrest": 20.0}
+
+## --- Breathing: SpO2 (hidden from players; a basic version until wave 3's per-lung model) ---
+## Percent saturation. Proposed: out under SPO2_UNCONSCIOUS; cardiac arrest after
+## SPO2_ARREST_S spent under SPO2_ARREST. The cues: laboured breathing and greying vision
+## under SPO2_LABOURED, blue lips under SPO2_BLUE_LIPS.
+const SPO2_NORMAL := 98.0
+const SPO2_LABOURED := 94.0
+const SPO2_BLUE_LIPS := 88.0
+const SPO2_UNCONSCIOUS := 85.0
+const SPO2_ARREST := 70.0
+const SPO2_ARREST_S := 120.0
+## What pulls SpO2 down (proposed), as the level it heads for: points off per share of blood
+## lost past EFFECTS_FROM_LOST (less blood to carry oxygen: 90% at 40% lost), per open chest
+## wound without a seal, for a tension pneumothorax (sealed or not, until wave 3's needle),
+## and per dose of morphine in the blood past MORPHINE_DEPRESSION_LEVEL (slowed breathing).
+## An obstructed airway heads for SPO2_OBSTRUCTED; cardiac arrest for 0.
+const SPO2_BLOOD_DROP := 32.0
+const SPO2_OPEN_CHEST := 5.0
+const SPO2_TENSION := 24.0
+const SPO2_PER_MORPHINE := 12.0
+const SPO2_OBSTRUCTED := 40.0
+## How fast SpO2 moves toward that level, in points per second (proposed).
+const SPO2_FALL_PER_S := 0.5
+const SPO2_RISE_PER_S := 1.0
+
+## --- Total trauma (proposed): how badly hurt the body is overall ---
+## Each wound counts its kind's severity, scaled down for a partial bleed (its rate against
+## the reference rate, at least TRAUMA_MIN_SCALE). A wound that's been dealt with (bandaged,
+## packed, sealed, splinted, held by a good tourniquet) counts TRAUMA_HANDLED_SHARE of it. A
+## tension pneumothorax and a running concussion add their own. The level jumps up with new
+## injuries and fades toward the current sum at TRAUMA_FADE_PER_S. At TRAUMA_UNCONSCIOUS or
+## over the casualty stays out: one serious wound (an arterial thigh hit with a broken femur
+## is about 0.5, 0.6 with the vein) doesn't do it, two or three do.
+const TRAUMA_SEVERITY := {"arterial": 0.3, "junctional": 0.3, "internal": 0.3, "heart": 0.6, "chest": 0.25,
+	"fracture": 0.2, "venous": 0.12, "muscle": 0.12, "graze": 0.03, "rib": 0.05}
+const TRAUMA_REF_RATE := {"arterial": 1.2, "junctional": 0.8, "internal": 1.0, "venous": 0.4, "muscle": 0.25, "graze": 0.03}
+const TRAUMA_MIN_SCALE := 0.3
+const TRAUMA_HANDLED_SHARE := 0.4
+const TRAUMA_TENSION := 0.25
+const TRAUMA_CONCUSSION := 0.2
+const TRAUMA_UNCONSCIOUS := 1.0
+const TRAUMA_FADE_PER_S := 1.0 / 600.0
 
 ## Heart hit: cardiac arrest within seconds. Chest: without a seal, a 50% chance of tension
 ## pneumothorax 60-120 s later, then cardiac arrest about 90 s after.
@@ -117,31 +166,35 @@ const TOURNIQUET_LEG_SPEED := 0.6
 const PAIN_FLOOR_SPLINTED_LEG := 0.15
 const PAIN_FLOOR_SPLINTED_ARM := 0.1
 const SPLINTED_ARM_SWAY := 0.3
-## Morphine takes this much off pain over MORPHINE_S (design doc). A second dose within
-## OVERDOSE_WINDOW_S risks an overdose (proposed: this chance of being knocked out for this
-## long; wave 3 adds heart-rate effects).
+## Morphine is a level in the blood, in doses (proposed values). A dose goes in over
+## MORPHINE_ABSORB_S and the level halves every MORPHINE_HALF_LIFE_S. Pain relief follows
+## the level: MORPHINE_RELIEF off per dose in the blood (design doc: 0.5 off over 30 s), at
+## most MORPHINE_RELIEF_MAX. Pupils shrink from MORPHINE_PUPILS_LEVEL; from
+## MORPHINE_SEDATION_LEVEL the casualty is sedated (out); past MORPHINE_DEPRESSION_LEVEL
+## breathing slows and SpO2 falls (SPO2_PER_MORPHINE), which can end in cardiac arrest.
+## Wave 3 adds heart-rate effects.
+const MORPHINE_ABSORB_S := 30.0
+const MORPHINE_HALF_LIFE_S := 720.0
 const MORPHINE_RELIEF := 0.5
-const MORPHINE_S := 30.0
-const OVERDOSE_WINDOW_S := 600.0
-const OVERDOSE_CHANCE := 0.4
-const OVERDOSE_KO_S := Vector2(120.0, 300.0)
-## care_tasks() asks for morphine from this much pain it can take off (proposed), or for a
-## cracked rib (morphine is its only fix).
+const MORPHINE_RELIEF_MAX := 0.8
+const MORPHINE_PUPILS_LEVEL := 0.5
+const MORPHINE_SEDATION_LEVEL := 2.5
+const MORPHINE_DEPRESSION_LEVEL := 3.0
+## care_tasks() asks for morphine from this much pain still to ease once what's in the body
+## has worked (proposed), or for a cracked rib (morphine is its only fix), and only while
+## the blood holds at most MORPHINE_ASK_MAX_LEVEL doses (so one more stays under sedation).
 const MORPHINE_FROM_PAIN := 0.4
+const MORPHINE_ASK_MAX_LEVEL := 1.05
 ## Airway (proposed): an unconscious casualty without an NPA obstructs with this chance per
-## minute, then goes into cardiac arrest this long after unless an NPA goes in.
+## minute; SpO2 then falls toward SPO2_OBSTRUCTED until an NPA goes in.
 const AIRWAY_BLOCK_PER_MIN := 0.1
-const AIRWAY_ARREST_S := 180.0
 ## Bleeding the field kit can control. Internal (torso) bleeding waits for wave 3's surgery
 ## kit, so care_tasks() never asks for an item for it.
 const FIXABLE_BLEEDS: Array[String] = ["arterial", "junctional", "venous", "muscle", "graze"]
 const BANDAGED_KINDS: Array[String] = ["venous", "muscle", "graze"]
-## The stopgap revive needs the bleeding controlled: less than this (L/min) the kit could
-## still stop.
-const REVIVE_MAX_BLEED := 0.05
 ## Countdowns that clients run down between updates (to_net "t").
 const TIMERS: Array[String] = ["arrest_left", "concussion_left", "knockout_left", "winded_left", "stagger_left",
-	"treating_left", "morphine_left", "overdose_window_left"]
+	"treating_left", "wake_left"]
 
 ## Impact (shock) from rounds armor stopped (design doc table).
 const PLATE_IMPACT_PAIN := {&"pistol": 0.05, &"intermediate": 0.15, &"full_power": 0.3}
@@ -191,18 +244,23 @@ var npa := false
 var airway_blocked := false
 ## Someone is applying a treatment to this body (seconds left).
 var treating_left := 0.0
-## Morphine relief still to come (seconds), and how long a new dose still risks an overdose.
-var morphine_left := 0.0
-var overdose_window_left := 0.0
-## Dice for the treatment rules (airway, overdose), apart from rng so the wound dice repeat.
+## Morphine in the blood and still going in (doses).
+var morphine_level := 0.0
+var morphine_depot := 0.0
+## Oxygen saturation, percent.
+var spo2 := SPO2_NORMAL
+## Total trauma (see TRAUMA_SEVERITY).
+var trauma_level := 0.0
+## Unconscious with every cause gone: seconds until they come round (0 while a cause holds).
+var wake_left := 0.0
+## Dice for the treatment rules (airway), apart from rng so the wound dice repeat.
 var care_rng := RandomNumberGenerator.new()
 
 var _time := 0.0
 var _last_concussion := -INF
 var _heart_arrest_in := -1.0
-var _wake_roll_in := WAKE_ROLL_S
-var _knockout_only := false     # out only because of a knockout (concussion, overdose)
-var _airway_arrest_in := -1.0   # obstructed airway: seconds to cardiac arrest
+var _spell_wake_s := 0.0        # how long the worst cause of this spell out takes to wake from
+var _low_spo2_s := 0.0          # time spent under SPO2_ARREST
 
 
 # --- Queries --------------------------------------------------------------------------
@@ -216,8 +274,8 @@ func shock() -> float:
 	return clampf((lost() - EFFECTS_FROM_LOST) / (UNCONSCIOUS_LOST - EFFECTS_FROM_LOST), 0.0, 1.0)
 
 
-## Wound and impact pain, at least the floor that fractures and an untreated cracked rib
-## keep, plus what tourniquets add while they're on.
+## Wound and impact pain less what the morphine in the blood eases, at least the floor that
+## fractures and an untreated cracked rib keep, plus what tourniquets add while they're on.
 func pain() -> float:
 	var floor_pain := 0.0
 	for w in wounds:
@@ -229,7 +287,8 @@ func pain() -> float:
 				floor_pain = maxf(floor_pain, PAIN_FLOOR_LEG if leg else PAIN_FLOOR_ARM)
 		elif w.kind == "rib" and not w.treated:
 			floor_pain = maxf(floor_pain, PAIN_FLOOR_RIB)
-	return clampf(maxf(pain_wounds + impact, floor_pain) + TOURNIQUET_PAIN * tourniquets.size(), 0.0, 1.0)
+	var eased := maxf(reducible_pain() - morphine_relief(), 0.0)
+	return clampf(maxf(eased, floor_pain) + TOURNIQUET_PAIN * tourniquets.size(), 0.0, 1.0)
 
 
 func knockout_threshold() -> float:
@@ -273,12 +332,6 @@ func fixable_bleed_rate() -> float:
 	return rate
 
 
-## Bleeding is under control for the stopgap revive: what the kit could still stop is under
-## REVIVE_MAX_BLEED. (Internal bleeding can't be controlled in the field.)
-func bleeding_controlled() -> bool:
-	return fixable_bleed_rate() < REVIVE_MAX_BLEED
-
-
 func has_leg_tourniquet() -> bool:
 	return LEG_PARTS.any(func(p: StringName) -> bool: return tourniquets.has(p))
 
@@ -309,9 +362,95 @@ func is_healing() -> bool:
 	return treating_left > 0.0
 
 
-## Not in arrest, under 40% lost, barely bleeding and breathing (an obstructed airway isn't).
-func is_stable() -> bool:
-	return not arrest and not dead and lost() < UNCONSCIOUS_LOST and bleed_rate() < STABLE_BLEED_L_MIN and not airway_blocked
+## Why the body is (or would be) unconscious right now, most serious first: &"arrest",
+## &"blood" (40% lost), &"spo2", &"pain", &"trauma", &"morphine" (sedation), &"knockout".
+## Empty means nothing keeps it out (if it's still out, it's coming round: wake_left).
+func unconscious_causes() -> Array[StringName]:
+	var causes: Array[StringName] = []
+	if dead:
+		return causes
+	if arrest:
+		causes.append(&"arrest")
+	if lost() >= UNCONSCIOUS_LOST:
+		causes.append(&"blood")
+	if spo2 < SPO2_UNCONSCIOUS:
+		causes.append(&"spo2")
+	if pain() >= knockout_threshold():
+		causes.append(&"pain")
+	if trauma_level >= TRAUMA_UNCONSCIOUS:
+		causes.append(&"trauma")
+	if morphine_level >= MORPHINE_SEDATION_LEVEL:
+		causes.append(&"morphine")
+	if knockout_left > 0.0:
+		causes.append(&"knockout")
+	return causes
+
+
+## The SpO2 the body heads for now (see SPO2_BLOOD_DROP).
+func spo2_target() -> float:
+	if arrest or dead:
+		return 0.0
+	if airway_blocked:
+		return SPO2_OBSTRUCTED
+	var target := SPO2_NORMAL - SPO2_BLOOD_DROP * maxf(lost() - EFFECTS_FROM_LOST, 0.0)
+	for w in wounds:
+		if w.kind != "chest":
+			continue
+		if w.get("tension", false):
+			target -= SPO2_TENSION
+		elif not w.treated:
+			target -= SPO2_OPEN_CHEST
+	target -= SPO2_PER_MORPHINE * maxf(morphine_level - MORPHINE_DEPRESSION_LEVEL, 0.0)
+	return clampf(target, 0.0, SPO2_NORMAL)
+
+
+## Pain the morphine in the blood takes off now.
+func morphine_relief() -> float:
+	return minf(MORPHINE_RELIEF * morphine_level, MORPHINE_RELIEF_MAX)
+
+
+## Morphine in the blood plus what's still going in (doses).
+func morphine_total() -> float:
+	return morphine_level + morphine_depot
+
+
+## Wound and impact pain still left once all the morphine given so far has gone in.
+func pain_to_ease() -> float:
+	return maxf(reducible_pain() - minf(MORPHINE_RELIEF * morphine_total(), MORPHINE_RELIEF_MAX), 0.0)
+
+
+## Another morphine dose is worth giving: the blood holds at most MORPHINE_ASK_MAX_LEVEL.
+func morphine_room() -> bool:
+	return morphine_total() <= MORPHINE_ASK_MAX_LEVEL
+
+
+## Breathing is laboured: SpO2 low, an open chest wound or a tension pneumothorax.
+func breathing_laboured() -> bool:
+	if dead or arrest:
+		return false
+	if spo2 < SPO2_LABOURED:
+		return true
+	return wounds.any(func(w: Dictionary) -> bool: return w.kind == "chest" and (not w.treated or w.get("tension", false)))
+
+
+## What the wounds add up to now (see TRAUMA_SEVERITY); trauma_level heads for it.
+func trauma_target() -> float:
+	var total := 0.0
+	for w in wounds:
+		var kind := String(w.kind)
+		var severity := float(TRAUMA_SEVERITY.get(kind, 0.0))
+		var ref := float(TRAUMA_REF_RATE.get(kind, 0.0))
+		if ref > 0.0:
+			severity *= clampf(float(w.rate) / ref, TRAUMA_MIN_SCALE, 1.0)
+		var handled: bool = w.treated or (ref > 0.0 and float(w.rate) > 0.0 and rate_now(w) <= 0.0)
+		if handled:
+			severity *= TRAUMA_HANDLED_SHARE
+		total += severity
+		if w.get("tension", false):
+			total += TRAUMA_TENSION
+	if concussion_left > 0.0:
+		total += TRAUMA_CONCUSSION
+	return total
 
 
 func sway_mult() -> float:
@@ -371,14 +510,14 @@ func reducible_pain() -> float:
 
 
 ## What the kit can still fix, 0 to 1: the worse of bleeding it could stop (an unsealed
-## chest wound counts as some) and pain morphine could take off (none while a dose would
-## risk an overdose).
+## chest wound counts as some) and pain another morphine dose could take off (none while
+## the blood already holds enough: morphine_room).
 func treatable() -> float:
 	var bleed := fixable_bleed_rate()
 	for w in wounds:
 		if w.kind == "chest" and not w.treated:
 			bleed += CHEST_RATE
-	var pain_term := reducible_pain() if overdose_window_left <= 0.0 else 0.0
+	var pain_term := pain_to_ease() if morphine_room() else 0.0
 	return maxf(pain_term, clampf(bleed / INJURY_FULL_BLEED, 0.0, 1.0))
 
 
@@ -399,8 +538,9 @@ func injury() -> float:
 ## fractures (splints), pain (morphine, also for a cracked rib). One {"part", "kind", "item"}
 ## per task. Only items that would help: wounds already handled (treated, under a good
 ## tourniquet) are skipped, internal bleeding and a tension pneumothorax under a seal wait
-## for wave 3, and no second morphine dose is asked for while it would risk an overdose. In
-## cardiac arrest neither an NPA nor morphine does anything until the heart restarts.
+## for wave 3, and morphine only for pain still left once what's given has worked, while the
+## blood has room for a dose (morphine_room). In cardiac arrest neither an NPA nor morphine
+## does anything until the heart restarts.
 func care_tasks() -> Array[Dictionary]:
 	var tasks: Array[Dictionary] = []
 	var by_rate := wounds.duplicate()
@@ -426,7 +566,7 @@ func care_tasks() -> Array[Dictionary]:
 	for w: Dictionary in by_rate:
 		if w.kind == "fracture" and not w.treated:
 			tasks.append(_task(w.part, "fracture", SPLINT))
-	if not arrest and overdose_window_left <= 0.0 and (reducible_pain() >= MORPHINE_FROM_PAIN or _untreated_rib()):
+	if not arrest and morphine_room() and (pain_to_ease() >= MORPHINE_FROM_PAIN or _untreated_rib()):
 		tasks.append(_task(&"torso", "pain", MORPHINE))
 	return tasks
 
@@ -446,7 +586,7 @@ func treatment_problem(item: StringName, part: StringName) -> String:
 					return ""
 			return "Nothing bleeding there"
 		MORPHINE:
-			return "" if reducible_pain() > 0.0 or _untreated_rib() else "No pain morphine would ease"
+			return "" if pain_to_ease() > 0.0 or _untreated_rib() else "No pain morphine would ease"
 		NPA:
 			if not unconscious:
 				return "Only for an unconscious casualty"
@@ -476,17 +616,13 @@ func apply_item(item: StringName, part: StringName, rushed := false) -> bool:
 			var t: Dictionary = tourniquets.get(part, {"count": 0, "rushed": 0})
 			tourniquets[part] = {"count": int(t.count) + 1, "rushed": int(t.rushed) + (1 if rushed else 0)}
 		MORPHINE:
-			if overdose_window_left > 0.0 and care_rng.randf() < OVERDOSE_CHANCE:
-				knockout_left = maxf(knockout_left, care_rng.randf_range(OVERDOSE_KO_S.x, OVERDOSE_KO_S.y))
-			morphine_left += MORPHINE_S
-			overdose_window_left = OVERDOSE_WINDOW_S
+			morphine_depot += 1.0  # one dose, going in over MORPHINE_ABSORB_S
 			for w in wounds:
 				if w.kind == "rib":
 					w.treated = true
 		NPA:
 			npa = true
 			airway_blocked = false
-			_airway_arrest_in = -1.0
 		_:
 			var w := _target_wound(item, part)
 			w.treated = true
@@ -646,27 +782,6 @@ func kill() -> void:
 	treating_left = 0.0
 
 
-## Stopgap revive (trauma kit, until IV in wave 3; callers check bleeding_controlled first):
-## tops blood up to `min_blood`, restarts the heart, caps pain at `pain_cap` and wakes the
-## casualty. It stops no bleeding: that's the kit's job.
-func revive(min_blood: float, pain_cap: float) -> void:
-	if dead:
-		return
-	blood = maxf(blood, min_blood)
-	arrest = false
-	arrest_left = 0.0
-	_heart_arrest_in = -1.0
-	knockout_left = 0.0
-	airway_blocked = false
-	_airway_arrest_in = -1.0
-	var total := pain_wounds + impact
-	if total > pain_cap:
-		pain_wounds *= pain_cap / total
-		impact *= pain_cap / total
-	unconscious = false
-	_knockout_only = false
-
-
 func reset() -> void:
 	blood = 1.0
 	pain_wounds = 0.0
@@ -682,15 +797,17 @@ func reset() -> void:
 	stagger_left = 0.0
 	_last_concussion = -INF
 	_heart_arrest_in = -1.0
-	_wake_roll_in = WAKE_ROLL_S
-	_knockout_only = false
 	tourniquets.clear()
 	npa = false
 	airway_blocked = false
-	_airway_arrest_in = -1.0
 	treating_left = 0.0
-	morphine_left = 0.0
-	overdose_window_left = 0.0
+	morphine_level = 0.0
+	morphine_depot = 0.0
+	spo2 = SPO2_NORMAL
+	trauma_level = 0.0
+	wake_left = 0.0
+	_spell_wake_s = 0.0
+	_low_spo2_s = 0.0
 
 
 ## Host only: steps the simulation by `dt` seconds.
@@ -703,16 +820,9 @@ func advance(dt: float) -> void:
 	winded_left = maxf(winded_left - dt, 0.0)
 	stagger_left = maxf(stagger_left - dt, 0.0)
 	treating_left = maxf(treating_left - dt, 0.0)
-	overdose_window_left = maxf(overdose_window_left - dt, 0.0)
 	pain_wounds = maxf(pain_wounds - PAIN_FADE_PER_S * dt, 0.0)
 	impact = maxf(impact - IMPACT_FADE_PER_S * dt, 0.0)
-	if morphine_left > 0.0:
-		var step := minf(dt, morphine_left)
-		morphine_left -= step
-		var relief := MORPHINE_RELIEF / MORPHINE_S * step
-		var from_wounds := minf(relief, pain_wounds)
-		pain_wounds -= from_wounds
-		impact = maxf(impact - (relief - from_wounds), 0.0)
+	_advance_morphine(dt)
 	# Bleeding, scaled by what the heart still pushes out.
 	blood = maxf(blood - bleed_rate() / 60.0 * dt / BLOOD_L, 0.0)
 	if _heart_arrest_in >= 0.0:
@@ -739,52 +849,52 @@ func advance(dt: float) -> void:
 		if arrest_left <= 0.0:
 			kill()  # no heart rate when the window ran out
 			return
-	update_state(dt)
 	_update_airway(dt)
+	_advance_spo2(dt)
+	_advance_trauma(dt)
+	update_state(dt)
 
 
-## Re-evaluates consciousness and arrest from the current state; `dt` drives wake rolls.
+## Re-evaluates consciousness and arrest from the current state. Out while any cause holds;
+## once none does, the casualty comes round after WAKE_S of the worst cause this spell (the
+## countdown starts over if a cause comes back). `dt` runs that countdown.
 func update_state(dt: float) -> void:
 	if dead:
 		return
 	if not arrest and lost() >= ARREST_LOST:
 		_start_arrest()
-	var other_cause := arrest or lost() >= UNCONSCIOUS_LOST or pain() >= knockout_threshold()
-	var out := other_cause or knockout_left > 0.0
-	if out:
-		if not unconscious:
-			unconscious = true
-			_knockout_only = not other_cause
-		elif other_cause:
-			_knockout_only = false
-		_wake_roll_in = WAKE_ROLL_S
+	trauma_level = maxf(trauma_level, trauma_target())  # new injuries count at once
+	var causes := unconscious_causes()
+	if not causes.is_empty():
+		unconscious = true
+		wake_left = 0.0
+		for cause in causes:
+			_spell_wake_s = maxf(_spell_wake_s, float(WAKE_S[cause]))
 		return
 	if not unconscious:
 		return
-	if _knockout_only:
-		_wake()  # the knockout (concussion, overdose) passed
+	if wake_left <= 0.0:
+		wake_left = maxf(_spell_wake_s, 0.01)  # every cause just went: start coming round
 		return
-	if not is_stable():
-		_wake_roll_in = WAKE_ROLL_S
-		return
-	_wake_roll_in -= dt
-	if _wake_roll_in <= 0.0:
-		_wake_roll_in = WAKE_ROLL_S
-		if rng.randf() < WAKE_CHANCE:
-			_wake()
+	wake_left -= dt
+	if wake_left <= 0.0:
+		_wake()
 
 
 # --- Replication ----------------------------------------------------------------------
 
 ## Compact state for Vitals.net_state. "t" holds countdowns, which clients run down locally.
 ## Wounds are [part, kind, rate, treated, name, flags (1 packed, 2 tension)]; "q" holds the
-## tourniquets as {part: [count, rushed]}.
+## tourniquets as {part: [count, rushed]}; "o" is SpO2, "m" and "d" morphine in the blood and
+## still going in, "x" total trauma. Flag 64 (coming round) only makes the start of the wake
+## countdown go out at once; clients read the countdown itself from "t".
 func to_net() -> Dictionary:
 	var list: Array = []
 	for w in wounds:
 		var wound_flags := (1 if w.get("packed", false) else 0) | (2 if w.get("tension", false) else 0)
 		list.append([String(w.part), w.kind, snappedf(float(w.rate), 0.001), 1 if w.treated else 0, String(w.name), wound_flags])
-	var flags := (1 if unconscious else 0) | (2 if arrest else 0) | (4 if dead else 0) | (16 if npa else 0) | (32 if airway_blocked else 0)
+	var flags := (1 if unconscious else 0) | (2 if arrest else 0) | (4 if dead else 0) | (16 if npa else 0) | (32 if airway_blocked else 0) \
+		| (64 if wake_left > 0.0 else 0)
 	var timers := {}
 	for key: String in TIMERS:
 		if float(get(key)) > 0.0:
@@ -793,7 +903,8 @@ func to_net() -> Dictionary:
 	for part: StringName in tourniquets:
 		tq[String(part)] = [int(tourniquets[part].count), int(tourniquets[part].rushed)]
 	return {"b": snappedf(blood, 0.001), "p": snappedf(pain_wounds, 0.01), "i": snappedf(impact, 0.01),
-		"f": flags, "w": list, "q": tq, "t": timers}
+		"f": flags, "w": list, "q": tq, "t": timers, "o": snappedf(spo2, 0.5), "m": snappedf(morphine_level, 0.01),
+		"d": snappedf(morphine_depot, 0.01), "x": snappedf(trauma_level, 0.01)}
 
 
 ## Rebuilds this copy from a peer's net_state (clients).
@@ -801,6 +912,10 @@ func apply_net(state: Dictionary) -> void:
 	blood = float(state.get("b", 1.0))
 	pain_wounds = float(state.get("p", 0.0))
 	impact = float(state.get("i", 0.0))
+	spo2 = float(state.get("o", SPO2_NORMAL))
+	morphine_level = float(state.get("m", 0.0))
+	morphine_depot = float(state.get("d", 0.0))
+	trauma_level = float(state.get("x", 0.0))
 	var flags := int(state.get("f", 0))
 	unconscious = flags & 1 != 0
 	arrest = flags & 2 != 0
@@ -837,31 +952,52 @@ func _add_wound(part: StringName, kind: String, rate: float, name: StringName = 
 	return w
 
 
-## An unconscious casualty without an NPA can obstruct; an obstructed airway stops the heart
-## AIRWAY_ARREST_S later unless an NPA goes in. Waking (or a restarted heart) clears it.
+## An unconscious casualty without an NPA can obstruct; then SpO2 falls (spo2_target) until
+## an NPA goes in, and low for long enough it stops the heart. Waking clears it.
 func _update_airway(dt: float) -> void:
 	if not unconscious:
 		airway_blocked = false
-		_airway_arrest_in = -1.0
 		return
-	if arrest or npa:
+	if arrest or npa or airway_blocked:
 		return
-	if not airway_blocked:
-		if care_rng.randf() < 1.0 - pow(1.0 - AIRWAY_BLOCK_PER_MIN, dt / 60.0):
-			airway_blocked = true
-			_airway_arrest_in = AIRWAY_ARREST_S
+	if care_rng.randf() < 1.0 - pow(1.0 - AIRWAY_BLOCK_PER_MIN, dt / 60.0):
+		airway_blocked = true
+
+
+## Morphine goes in from the depot (a dose per MORPHINE_ABSORB_S) and the blood level halves
+## every MORPHINE_HALF_LIFE_S.
+func _advance_morphine(dt: float) -> void:
+	morphine_level *= pow(0.5, dt / MORPHINE_HALF_LIFE_S)
+	if morphine_depot > 0.0:
+		var step := minf(morphine_depot, dt / MORPHINE_ABSORB_S)
+		morphine_depot -= step
+		morphine_level += step
+	if morphine_level < 0.001 and morphine_depot <= 0.0:
+		morphine_level = 0.0
+
+
+## SpO2 moves toward spo2_target(); SPO2_ARREST_S under SPO2_ARREST stops the heart.
+func _advance_spo2(dt: float) -> void:
+	var target := spo2_target()
+	spo2 = move_toward(spo2, target, (SPO2_FALL_PER_S if target < spo2 else SPO2_RISE_PER_S) * dt)
+	if spo2 >= SPO2_ARREST or arrest:
+		_low_spo2_s = 0.0
 		return
-	_airway_arrest_in -= dt
-	if _airway_arrest_in <= 0.0:
-		_airway_arrest_in = -1.0
+	_low_spo2_s += dt
+	if _low_spo2_s >= SPO2_ARREST_S:
 		_start_arrest()
+
+
+## Total trauma fades toward what the wounds add up to now (update_state raises it at once).
+func _advance_trauma(dt: float) -> void:
+	trauma_level = move_toward(trauma_level, trauma_target(), TRAUMA_FADE_PER_S * dt)
 
 
 func _wake() -> void:
 	unconscious = false
-	_knockout_only = false
+	wake_left = 0.0
+	_spell_wake_s = 0.0
 	airway_blocked = false
-	_airway_arrest_in = -1.0
 
 
 func _start_arrest() -> void:
@@ -870,7 +1006,7 @@ func _start_arrest() -> void:
 	arrest = true
 	arrest_left = ARREST_WINDOW_S
 	_heart_arrest_in = -1.0
-	_airway_arrest_in = -1.0
+	_low_spo2_s = 0.0
 
 
 func _concuss() -> void:

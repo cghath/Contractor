@@ -5,7 +5,7 @@ extends CharacterBody3D
 ## Human: the node is named after its peer id; that peer simulates movement (replicated by
 ## Sync) and its PlayerInput child reads mouse and keys. AI: the node has a non-numeric
 ## name, is owned by the host, and a SquadAI child fills in the intent fields below.
-## Either way, anything that changes shared state (pickups, shots, drops, revives) is a
+## Either way, anything that changes shared state (pickups, shots, drops, treatments) is a
 ## request to the host, which validates it and lets ServerSync carry the result back.
 ##
 ## The body is split across child nodes so separate work doesn't collide:
@@ -356,10 +356,11 @@ func release_carried() -> void:
 	_set_carry_mode(&"")
 
 
-## The kit this soldier would do the stopgap revive with: one that still has a revive (the
-## trauma kit), or null.
+## Deprecated, always null: the stopgap revive is gone (casualties come round on their own
+## once the wound model lets them). Kept only so scripts/ai/squad_ai.gd still loads until
+## its revive use is removed; delete it then.
 func _best_revive_kit() -> ItemData:
-	return inventory.revive_kit()
+	return null
 
 
 ## Shot direction inside the weapon's cone. Spread is computed on the shooter's machine
@@ -706,38 +707,11 @@ func under_fire() -> bool:
 		or (_now() - threat_time < UNDER_FIRE_S and suppression >= UNDER_FIRE_SUPPRESSION)
 
 
-## Revives a downed body with the stopgap (blood back to 62%, heart restarted) until IV in
-## wave 3: needs a trauma kit with its revive left, and the casualty's bleeding controlled.
-## Timed like a treatment; the kit's revive is used up when it's done (the kit and the rest
-## of its contents stay).
+## Deprecated, does nothing: the stopgap revive is gone (see _best_revive_kit). Kept only so
+## scripts/ai/squad_ai.gd still loads until its revive use is removed; delete it then.
 @rpc("any_peer", "call_local", "reliable")
-func _server_revive(path: NodePath) -> void:
-	if not _from_owner() or not vitals.is_up() or _is_busy():
-		return
-	var target := get_node_or_null(path) as Node3D
-	var other := target.get_node_or_null(^"Vitals") as Vitals if target else null
-	if other == null or not other.downed or target == self:
-		return
-	if not _in_treat_reach(target):
-		_client_message.rpc_id(owner_peer(), "Too far away")
-		return
-	var kit := _best_revive_kit()
-	if kit == null:
-		_client_message.rpc_id(owner_peer(), "You need a trauma kit")
-		return
-	var why := other.revive_problem()
-	if why != "":
-		_client_message.rpc_id(owner_peer(), why)
-		return
-	if not await _timed_care(target, other, float(kit.stats.get("revive_s", 3.0)), "Reviving (stopgap)..."):
-		return
-	why = other.revive_problem()
-	if why != "":
-		_client_message.rpc_id(owner_peer(), why)
-	elif inventory.take_kit_revive():
-		other.server_revive(0.0)
-	else:
-		_client_message.rpc_id(owner_peer(), "You need a trauma kit")
+func _server_revive(_path: NodePath) -> void:
+	pass
 
 
 ## Treats `path` (this body or another within reach) with one `item_id` on `part` (the
@@ -885,8 +859,8 @@ func _server_debug_hurt(amount: float) -> void:
 
 
 # --- Interaction requests --------------------------------------------------------------
-# Sent by the interaction menu (InteractionMenu, hold Left Ctrl). Pick up and revive reuse
-# _server_interact and _server_revive above.
+# Sent by the interaction menu (InteractionMenu, hold Left Ctrl). Pick up reuses
+# _server_interact above; treatment is _server_treat.
 
 ## What this soldier is doing with a downed body: carrying it over the shoulder or dragging
 ## it behind (empty for neither).

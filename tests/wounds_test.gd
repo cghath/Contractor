@@ -1,7 +1,8 @@
 extends Node3D
 ## Headless checks for the wound model (Vitals, WoundModel, BodyMap): thresholds, bleeding,
 ## wound channels and cavitation, fractures, pain and knockout, organs, fragments, hitboxes,
-## impact, the stopgap revive, what the kit can fix, and the replicated state.
+## impact, consciousness (its causes, coming round on its own, SpO2, total trauma; there is
+## no revive), what the kit can fix, and the replicated state.
 ##   <voxel godot exe> --headless --path . res://tests/wounds_test.tscn
 ## Exits with the number of failures. Dice are seeded, so results repeat.
 
@@ -19,7 +20,10 @@ func _ready() -> void:
 	_test_organs()
 	_test_blood_loss_effects()
 	_test_impact()
-	_test_stopgaps()
+	_test_consciousness()
+	_test_spo2()
+	_test_trauma()
+	_test_no_revive()
 	_test_kit_economy()
 	await _test_net_state()
 	_test_hitboxes()
@@ -46,7 +50,16 @@ func _vitals(seed_value := 1) -> Vitals:
 func _model(seed_value := 1) -> WoundModel:
 	var m := WoundModel.new()
 	m.rng.seed = seed_value
+	m.care_rng.seed = seed_value  # airway dice too, so results repeat
 	return m
+
+
+## Runs a model for `seconds` in the host's 0.1 s steps.
+func _step(m: WoundModel, seconds: float) -> void:
+	while seconds > 0.0001:
+		var dt := minf(seconds, Vitals.SIM_STEP_S)
+		m.advance(dt)
+		seconds -= dt
 
 
 ## A rifle round straight through the front of a part at `pos` (rest pose).
@@ -184,31 +197,42 @@ func _test_pain_knockout() -> void:
 	m.reset()
 	m.blood = 0.85
 	check(absf(m.knockout_threshold() - 0.75) < 0.001, "15%% lost: threshold %.2f" % m.knockout_threshold())
-	# Wake rolls: once stable, every 15 s at 15%.
+	# No dice: once the pain is under the threshold they come round after WAKE_S[pain].
+	var pain_wake: float = WoundModel.WAKE_S[&"pain"]
 	m.reset()
+	m.npa = true
 	m.pain_wounds = 0.95
 	m.update_state(0.0)
+	check(m.unconscious_causes() == [&"pain"], "out from pain alone (%s)" % [m.unconscious_causes()])
 	m.pain_wounds = 0.3
-	m.advance(14.0)
-	check(m.unconscious, "no wake roll before 15 s")
+	_step(m, pain_wake - 0.5)
+	check(m.unconscious and m.wake_left > 0.0, "pain eased: coming round, not yet (%.1f s to go)" % m.wake_left)
+	_step(m, 1.0)
+	check(not m.unconscious, "awake %.0f s after the pain went under the threshold" % pain_wake)
 	var woke := 0
-	for i in 2000:
+	for i in 100:
 		var t := _model(100 + i)
+		t.npa = true
 		t.pain_wounds = 0.95
 		t.update_state(0.0)
 		t.pain_wounds = 0.3
-		t.advance(15.05)
-		if not t.unconscious:
-			woke += 1
-	check(absf(woke / 2000.0 - WoundModel.WAKE_CHANCE) < 0.03, "first roll wakes %.1f%% (15%% expected)" % (woke / 20.0))
-	var bleeding := _model(5)
-	bleeding.pain_wounds = 0.95
-	bleeding.wounds.append({"part": Vitals.CHEST, "kind": "muscle", "rate": 0.25, "treated": false, "name": &"", "tension_in": -1.0, "arrest_in": -1.0})
-	bleeding.update_state(0.0)
-	bleeding.pain_wounds = 0.3
-	for i in 40:
-		bleeding.advance(15.0)
-	check(bleeding.unconscious, "a bleeding casualty isn't stable and doesn't wake")
+		_step(t, pain_wake + 0.3)
+		woke += 0 if t.unconscious else 1
+	check(woke == 100, "every one of 100 comes round on time: no wake roll (%d)" % woke)
+	var relapse := _model(5)
+	relapse.npa = true
+	relapse.pain_wounds = 0.95
+	relapse.update_state(0.0)
+	relapse.pain_wounds = 0.3
+	_step(relapse, 5.0)
+	relapse.pain_wounds = 0.95
+	_step(relapse, 1.0)
+	check(relapse.unconscious and relapse.wake_left == 0.0, "a cause coming back stops the countdown")
+	relapse.pain_wounds = 0.3
+	_step(relapse, pain_wake - 1.0)
+	check(relapse.unconscious, "and it starts over once it's gone again")
+	_step(relapse, 2.0)
+	check(not relapse.unconscious, "then he comes round")
 	var fade := _model()
 	fade.pain_wounds = 0.9
 	fade.advance(450.0)
@@ -379,25 +403,144 @@ func _test_impact() -> void:
 	through.queue_free()
 
 
-func _test_stopgaps() -> void:
-	print("Stopgap revive")
-	var vitals := _vitals(29)
-	_shoot(vitals, Vitals.THIGH_R, Vector3(0.0578, 0.70, -0.11))
-	vitals.server_advance(240.0)
-	check(vitals.downed, "bled out to unconscious (%s, %.0f%%)" % [vitals.condition_text(), vitals.blood_fraction() * 100.0])
-	vitals.server_damage(30.0)
-	check(vitals.in_cardiac_arrest(), "and into arrest")
-	check(vitals.revive_problem() == "Stop the bleeding first", "no revive while the leg still bleeds (%s)" % vitals.revive_problem())
-	vitals.server_apply_treatment(WoundModel.TOURNIQUET, Vitals.THIGH_R)
-	check(vitals.revive_problem() == "", "a tourniquet controls it")
-	vitals.server_revive(25.0)
-	check(vitals.is_up() and not vitals.in_cardiac_arrest() and vitals.blood_fraction() >= Vitals.REVIVE_BLOOD - 0.001
-		and vitals.pain() <= Vitals.REVIVE_PAIN_CAP + WoundModel.TOURNIQUET_PAIN + 0.001,
-		"revive: up, out of arrest, %.0f%% blood, pain %.2f (with the tourniquet's)" % [vitals.blood_fraction() * 100.0, vitals.pain()])
-	check(vitals.wound_list().all(func(w: Dictionary) -> bool: return not w.bleeding) and vitals.bleed_rate() == 0.0, "and nothing bleeds")
+## Every cause of unconsciousness, as Vitals reports it, and coming round once they're gone.
+func _test_consciousness() -> void:
+	print("Consciousness follows the body")
+	var blood := _model()
+	blood.npa = true
+	blood.blood = 0.59
+	blood.update_state(0.0)
+	_step(blood, 1800.0)
+	check(blood.unconscious and blood.unconscious_causes() == [&"blood"], "past 40%% lost he stays out (%s, 30 min later): no blood back until IV" % [blood.unconscious_causes()])
+	var knocked := _model()
+	knocked.knockout_left = 8.0
+	knocked.update_state(0.0)
+	check(knocked.unconscious_causes() == [&"knockout"], "a concussion knockout is a cause")
+	_step(knocked, 8.0 + WoundModel.WAKE_S[&"knockout"] + 0.3)
+	check(not knocked.unconscious, "and passes (8 s, then %.0f s to come round)" % WoundModel.WAKE_S[&"knockout"])
+	var sedated := _model()
+	sedated.npa = true
+	sedated.morphine_level = WoundModel.MORPHINE_SEDATION_LEVEL + 0.1
+	sedated.update_state(0.0)
+	check(sedated.unconscious_causes() == [&"morphine"], "morphine over the sedation level is a cause")
+	var arrest := _model()
+	arrest.blood = 0.49
+	arrest.update_state(0.0)
+	check(arrest.unconscious_causes().has(&"arrest") and arrest.unconscious_causes().has(&"blood"), "cardiac arrest is a cause (%s)" % [arrest.unconscious_causes()])
+	# Through Vitals: why_unconscious and wake_eta, and the woke signal.
+	var vitals := _vitals()
+	var woke := [false]
+	vitals.woke.connect(func() -> void: woke[0] = true)
+	vitals._model.npa = true
+	vitals._model.pain_wounds = 0.95
+	vitals.server_advance(0.1)
+	check(vitals.downed and vitals.why_unconscious() == [&"pain"] and vitals.wake_eta() < 0.0, "Vitals: down, why_unconscious %s, not coming round yet" % [vitals.why_unconscious()])
+	vitals._model.pain_wounds = 0.3
+	vitals.server_advance(0.2)
+	check(vitals.downed and vitals.why_unconscious().is_empty() and vitals.wake_eta() > 0.0, "pain gone: nothing keeps him out, %.1f s to come round" % vitals.wake_eta())
+	vitals.server_advance(WoundModel.WAKE_S[&"pain"] + 0.3)
+	check(vitals.is_up() and woke[0] and vitals.why_unconscious().is_empty() and vitals.wake_eta() < 0.0, "he comes round on his own (woke)")
+	vitals.queue_free()
+
+
+func _test_spo2() -> void:
+	print("SpO2")
+	var lung := {"graze": false, "depth": 0.2, "vessels": [], "organs": [&"lung_l"], "bones": []}
+	var m := _model()
+	m.advance(60.0)
+	check(absf(m.spo2 - WoundModel.SPO2_NORMAL) < 0.01, "healthy: %.0f%%" % m.spo2)
+	m.blood = 0.6001
+	m.advance(60.0)
+	check(m.spo2 < WoundModel.SPO2_LABOURED and m.spo2 > WoundModel.SPO2_UNCONSCIOUS and m.breathing_laboured(),
+		"falls with blood loss: %.1f%% just under 40%% lost (breathing laboured)" % m.spo2)
+	var chest := _model()
+	chest.add_hit(Vitals.CHEST, lung, Vitals.PISTOL)
+	chest.pain_wounds = 0.0
+	_chest(chest).tension_in = -1.0
+	chest.advance(60.0)
+	check(absf(chest.spo2 - (WoundModel.SPO2_NORMAL - WoundModel.SPO2_OPEN_CHEST)) < 0.01 and chest.breathing_laboured() and not chest.unconscious,
+		"an open chest wound: %.0f%%, laboured, still up" % chest.spo2)
+	chest.apply_item(WoundModel.CHEST_SEAL, Vitals.CHEST)
+	chest.advance(10.0)
+	check(absf(chest.spo2 - WoundModel.SPO2_NORMAL) < 0.01 and not chest.breathing_laboured(), "sealed: back to %.0f%%" % chest.spo2)
+	var tension := _model()
+	tension.add_hit(Vitals.CHEST, lung, Vitals.PISTOL)
+	tension.pain_wounds = 0.0
+	tension.npa = true
+	_chest(tension).tension_in = 1.0
+	tension.advance(2.0)
+	tension.advance(40.0)
+	check(tension.unconscious and tension.unconscious_causes() == [&"spo2"] and tension.spo2 < WoundModel.SPO2_BLUE_LIPS,
+		"tension pneumothorax: SpO2 %.0f%%, out from it (%s)" % [tension.spo2, tension.unconscious_causes()])
+	# Long enough under 70% stops the heart.
+	var low := _model()
+	low.npa = true
+	low.spo2 = 60.0
+	low.morphine_level = 8.0  # deep breathing depression keeps it there
+	_step(low, WoundModel.SPO2_ARREST_S - 1.0)
+	check(not low.arrest and low.unconscious, "under 70%: out, the heart holds a while")
+	_step(low, 2.0)
+	check(low.arrest, "then cardiac arrest after %.0f s under 70%%" % WoundModel.SPO2_ARREST_S)
+	# Vision greys as SpO2 falls (hidden: no number for the player).
+	var vitals := _vitals()
+	vitals._model.spo2 = 90.0
+	var grey := vitals.vision()
+	check(grey.fade > 0.4 and grey.tunnel == 0.0, "SpO2 falling greys the view (fade %.2f)" % grey.fade)
+	vitals._model.spo2 = 85.5
+	check(vitals.vision().tunnel > 0.5, "and closes it in near 85%% (tunnel %.2f)" % vitals.vision().tunnel)
+	vitals.queue_free()
+
+
+func _test_trauma() -> void:
+	print("Total trauma")
+	var one := _model()
+	one.npa = true
+	one._add_wound(Vitals.THIGH_L, "arterial", 1.2, &"femoral_l")
+	one._add_wound(Vitals.THIGH_L, "fracture", WoundModel.FEMUR_RATE, &"femur_l")
+	one.update_state(0.0)
+	check(one.trauma_level > 0.3 and one.trauma_level < WoundModel.TRAUMA_UNCONSCIOUS and not one.unconscious,
+		"one serious wound (femoral bleed, broken femur): trauma %.2f, still up" % one.trauma_level)
+	var several := _model()
+	several.npa = true
+	several._add_wound(Vitals.THIGH_L, "arterial", 1.2, &"femoral_l")
+	several._add_wound(Vitals.THIGH_L, "fracture", WoundModel.FEMUR_RATE, &"femur_l")
+	several._add_wound(Vitals.THIGH_R, "arterial", 1.2, &"femoral_r")
+	several._add_wound(Vitals.CHEST, "chest", WoundModel.CHEST_RATE, &"lung_l")
+	several.update_state(0.0)
+	check(several.unconscious and several.unconscious_causes() == [&"trauma"],
+		"several serious wounds: trauma %.2f keeps him out (%s, pain %.2f)" % [several.trauma_level, several.unconscious_causes(), several.pain()])
+	for item_part: Array in [[WoundModel.TOURNIQUET, Vitals.THIGH_L], [WoundModel.TOURNIQUET, Vitals.THIGH_R],
+			[WoundModel.SPLINT, Vitals.THIGH_L], [WoundModel.CHEST_SEAL, Vitals.CHEST]]:
+		several.apply_item(item_part[0], item_part[1])
+	check(several.unconscious and several.trauma_target() < 0.6, "all treated: the trauma fades slowly from %.2f toward %.2f" % [several.trauma_level, several.trauma_target()])
+	var t := 0.0
+	while several.unconscious and t < 600.0:
+		_step(several, 1.0)
+		t += 1.0
+	check(not several.unconscious and t > WoundModel.WAKE_S[&"trauma"], "he comes round %.0f s after the last wound was treated (trauma %.2f)" % [t, several.trauma_level])
+	var frag := _model()
+	for i in 8:
+		frag._add_wound(Vitals.BODY_PARTS[2 + i], "muscle", WoundModel.MUSCLE_RATE * WoundModel.MUSCLE_CLASS_MULT[Vitals.FRAGMENT])
+	frag.update_state(0.0)
+	check(frag.trauma_level < 0.5, "eight small fragment wounds add up to less (%.2f)" % frag.trauma_level)
+
+
+## There is no revive anywhere: the API is gone and kits carry none.
+func _test_no_revive() -> void:
+	print("No revive")
+	var vitals := _vitals()
+	check(not vitals.has_method(&"server_revive") and not vitals.has_method(&"revive_problem") and not WoundModel.new().has_method(&"revive"),
+		"Vitals and WoundModel have no revive")
+	var inv := Inventory.new()
+	check(not inv.has_method(&"revive_kit") and not inv.has_method(&"take_kit_revive"), "Inventory has no kit revives")
+	inv.free()
+	var trauma_kit := ItemDB.get_item(&"trauma_kit")
+	check(not trauma_kit.stats.has("revives") and not trauma_kit.stats.has("revive_s") and not "revive" in trauma_kit.tags,
+		"the trauma kit is only a bag of treatment items")
+	vitals.server_damage(85.0)
 	vitals.server_reset_health()
 	check(vitals.is_up() and vitals.blood_fraction() == 1.0 and vitals.wound_list().is_empty() and vitals.condition_text() == "OK"
-		and vitals.tourniquets().is_empty(), "reset: fully restored, tourniquet gone")
+		and vitals.spo2() == WoundModel.SPO2_NORMAL and vitals.trauma_level() == 0.0, "reset (respawns, tests): fully restored")
 	vitals.queue_free()
 
 
@@ -412,17 +555,16 @@ func _test_kit_economy() -> void:
 	while not m.has_fracture(BodyMap.ARM_BONES, true):
 		m.add_hit(Vitals.UPPER_ARM_R, {"graze": false, "depth": 0.1, "vessels": [], "organs": [], "bones": [&"humerus_r"]}, Vitals.FULL_POWER)
 	m.add_impact(Vitals.CHEST, Vitals.PISTOL, 5.0, -1.0)
-	m.blood = 0.49
+	m.blood = 0.62
 	m.update_state(0.0)
-	check(m.arrest, "broken leg and arm, bled into arrest")
-	m.revive(Vitals.REVIVE_BLOOD, Vitals.REVIVE_PAIN_CAP)
 	for w in m.wounds.duplicate():
 		for item: StringName in [WoundModel.PRESSURE_BANDAGE, WoundModel.SPLINT]:
 			m.apply_item(item, w.part)
 	m.apply_item(WoundModel.MORPHINE, Vitals.TORSO)
-	m.advance(WoundModel.MORPHINE_S + 1.0)
-	check(m.injury() < 0.45, "revived, bandaged, splinted, morphine: under the AI's heal mark (%.2f)" % m.injury())
-	check(m.care_tasks().is_empty(), "then the kit has nothing left to fix (pain %.2f is the splints')" % m.pain())
+	m.apply_item(WoundModel.MORPHINE, Vitals.TORSO)
+	_step(m, 2.0 * WoundModel.MORPHINE_ABSORB_S + WoundModel.WAKE_S[&"pain"] + 1.0)  # the hits knocked him out: he comes round
+	check(m.injury() < 0.45, "broken leg and arm, 38%% lost; bandaged, splinted, two morphine: under the AI's heal mark (%.2f)" % m.injury())
+	check(m.care_tasks().is_empty(), "then the kit has nothing left to fix (pain %.2f, %s)" % [m.pain(), m.care_tasks()])
 	var gut := _model(43)
 	gut.add_hit(Vitals.ABDOMEN, {"graze": false, "depth": 0.2, "vessels": [{"name": &"aorta", "kind": BodyMap.INTERNAL, "rate": 2.5, "share": 0.1}], "organs": [], "bones": []}, Vitals.PISTOL)
 	gut.pain_wounds = 0.1
@@ -445,6 +587,15 @@ func _test_net_state() -> void:
 	check(absf(copy.blood - vitals.blood_fraction()) < 0.002 and copy.wounds.size() == vitals.wound_list().size() and copy.unconscious == vitals.downed,
 		"net_state rebuilds blood, wounds and consciousness (%d wounds, %.1f%%)" % [copy.wounds.size(), copy.blood * 100.0])
 	check(absf(copy.bleed_rate() - vitals.bleed_rate()) < 0.01 and absf(copy.pain() - vitals.pain()) < 0.01, "so a client's queries match the host's")
+	vitals.server_apply_treatment(WoundModel.MORPHINE, Vitals.TORSO)
+	vitals._model.add_hit(Vitals.CHEST, {"graze": false, "depth": 0.2, "vessels": [], "organs": [&"lung_l"], "bones": []}, Vitals.PISTOL)
+	vitals.server_advance(20.0)
+	copy.apply_net(vitals.net_state)
+	check(absf(copy.spo2 - vitals.spo2()) <= 0.25 and absf(copy.morphine_level - vitals.morphine_level()) < 0.006
+		and absf(copy.trauma_level - vitals.trauma_level()) < 0.006 and absf(copy.morphine_relief() - vitals._model.morphine_relief()) < 0.01,
+		"SpO2 %.1f%%, morphine %.2f and trauma %.2f replicate" % [copy.spo2, copy.morphine_level, copy.trauma_level])
+	check(copy.unconscious_causes() == vitals._model.unconscious_causes() and copy.breathing_laboured() == vitals.breathing_laboured()
+		and absf(copy.pain() - vitals.pain()) < 0.01, "so every peer works out the same causes, cues and pain (%s)" % [copy.unconscious_causes()])
 	var published := vitals.net_state
 	var was_down := vitals.downed
 	vitals.server_damage(1.0)

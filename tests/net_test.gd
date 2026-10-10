@@ -36,6 +36,7 @@ func _give_kit(id: int) -> void:
 		player.inventory.take(item)
 	player.inventory.take(&"mag_556", 2)
 	player.inventory.take(&"ifak")
+	player.inventory.take(&"morphine")
 	player.vitals.server_damage(40.0)
 	# A small fragment wound in the left forearm to treat (and maybe a fracture).
 	player.vitals.server_hit(Vitals.FOREARM_L, {"round_class": Vitals.FRAGMENT, "superficial": true})
@@ -92,6 +93,12 @@ func _run_client() -> void:
 		check(me.vitals.wound_list()[0].treated and not me.vitals.wound_list()[0].bleeding and not me.vitals.is_healing(), "a remote treatment through the host: bandaged after 5 s")
 		await _wait_for(func() -> bool: return me.inventory.medical_count(&"pressure_bandage") == 1, 2.0)
 		check(me.inventory.medical_count(&"pressure_bandage") == 1 and me.inventory.count_of(&"ifak") == 1, "drawn from the IFAK, which stays with one bandage left")
+	# The medical model's hidden values reach the client too, so its checks and cues match.
+	me._server_treat.rpc_id(1, me.get_path(), &"morphine", Vitals.TORSO)
+	await _wait_for(func() -> bool: return me.vitals.morphine_level() > 0.2, 12.0)
+	check(me.vitals.morphine_level() > 0.2 and me.inventory.count_of(&"morphine") == 0, "a morphine dose: the level in the blood replicates (%.2f)" % me.vitals.morphine_level())
+	check(me.vitals.spo2() < WoundModel.SPO2_NORMAL and me.vitals.spo2() > WoundModel.SPO2_LABOURED and me.vitals.trauma_level() > 0.0 and me.vitals.why_unconscious().is_empty(),
+		"SpO2 (%.1f%%, down a little with 24%% lost) and trauma (%.2f) replicate" % [me.vitals.spo2(), me.vitals.trauma_level()])
 	me._server_inventory_action.rpc_id(1, "drop_slot", &"", -1, &"helmet", &"")
 	await _wait_for(func() -> bool: return me.inventory.slots[&"helmet"] == &"", 3.0)
 	await _wait_for(func() -> bool: return _dropped_helmet() != null, 3.0)
