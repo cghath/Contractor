@@ -120,8 +120,8 @@ func _test_hiring() -> void:
 	check(pool.size() == Hiring.POOL_SIZE and pool == Hiring.draw_pool(SEED, 0), "a new campaign's board: %d contractors drawn from the seed" % pool.size())
 	check(Hiring.draw_pool(SEED, 0) == Hiring.draw_pool(SEED, 0) and Hiring.draw_pool(SEED, 1) != pool, "the same seed draws the same board; the next refresh another")
 	check(Roster.members(BaseHub.roster()).is_empty(), "no fixed starting squad")
-	if BaseEconomy.is_stub():
-		check(BaseEconomy.funds() == BaseEconomy.STUB_START_FUNDS, "a small budget to hire with ($%d)" % BaseEconomy.funds())
+	check(BaseEconomy.funds() == Economy.cash() and Economy.cash() == MissionRegistry.setting_i("start_cash", 150000),
+		"one bank: the base's funds are the economy's starting cash ($%d)" % BaseEconomy.funds())
 	var ok := pool.all(func(c: Dictionary) -> bool:
 		return Roles.has(StringName(c.role)) and int(c.demand) > 0 and int(c.fee) == int(c.demand) * Hiring.FEE_DAYS \
 			and Roster.SKILLS.all(func(s: String) -> bool: return float(c.skills[s]) > 0.0 and float(c.skills[s]) <= 1.0))
@@ -151,10 +151,11 @@ func _test_hiring() -> void:
 		_check_kit_pouches(m)
 	_check_identity(pool, m, cheapest)
 	check(Hiring.find(BaseHub.hiring(), String(cheapest.cid), 1).is_empty(), "and leave the board")
-	BaseHub.base()["stub_funds"] = 10
+	var cash := Economy.cash()
+	Economy.add_cash(10 - cash, "test: nearly broke")
 	var pricey := _cheapest(Hiring.pool(BaseHub.hiring(), 1))
 	check(BaseHub.server_hire(String(pricey.cid)) != "" and Roster.ids(BaseHub.roster()).size() == 1, "no cash, no hire")
-	BaseHub.base()["stub_funds"] = BaseEconomy.STUB_START_FUNDS
+	Economy.add_cash(cash - 10, "test: the cash back")
 	BaseHub.server_advance_days(Hiring.REFRESH_DAYS)
 	check(int(BaseHub.hiring().refresh) == 1 and Hiring.pool(BaseHub.hiring(), BaseHub.day()) == Hiring.draw_pool(SEED, 1),
 		"after %d days the board turns over (refresh 1, from the seed)" % Hiring.REFRESH_DAYS)
@@ -220,11 +221,15 @@ func _test_wages() -> void:
 	for i in 2:
 		BaseHub.server_hire(String(_cheapest(Hiring.pool(BaseHub.hiring(), BaseHub.day())).cid))
 	var daily := Roster.daily_wages(BaseHub.roster())
+	var week := MissionRegistry.setting_i("week_days", 7)
 	var funds := BaseEconomy.funds()
-	BaseHub.server_advance_days(BaseHub.WAGE_PERIOD_DAYS - 1)
-	check(daily > 0 and BaseEconomy.funds() == funds, "wages accrue during the week ($%d/day for two)" % daily)
+	var bill := Economy.weekly_bill()
+	check(daily > 0 and int(bill.wages) == daily * week, "one clock: the roster's wages are the economy's weekly bill ($%d for two)" % int(bill.wages))
+	BaseHub.server_advance_days(Economy.days_to_bill() - 1)
+	check(BaseEconomy.funds() == funds, "nothing is paid during the week")
 	BaseHub.server_advance_days(1)
-	check(BaseEconomy.funds() == funds - daily * BaseHub.WAGE_PERIOD_DAYS, "and are paid weekly ($%d)" % (daily * BaseHub.WAGE_PERIOD_DAYS))
+	check(BaseEconomy.funds() == funds - int(bill.total), "the week's bill is paid on its day, base upkeep with it ($%d)" % int(bill.total))
+	check(BaseHub.day() == Economy.day() and BaseHub.day() == MissionRegistry.setting_i("start_day", 1) + week, "the base's day is the economy's (day %d)" % BaseHub.day())
 
 
 func _test_growth() -> void:
@@ -305,7 +310,7 @@ func _test_respawn_pool() -> void:
 	BaseHub.server_count_respawn()
 	var dep := RosterDeployment.active(roster)
 	check(int(dep.respawns_bought) == 1 and BaseEconomy.funds() == funds - BaseEconomy.respawn_price(), "the fifth is bought ($%d)" % BaseEconomy.respawn_price())
-	BaseHub.base()["stub_funds"] = 0
+	Economy.add_cash(-Economy.cash(), "test: broke")
 	BaseHub.server_count_respawn()
 	check(int(dep.respawns_bought) == 2 and BaseEconomy.funds() == -BaseEconomy.respawn_price(), "with no cash it goes on credit")
 	RosterDeployment.begin(roster, [], RosterDeployment.HOT, "z", "", 1)
@@ -405,6 +410,7 @@ func _test_session() -> void:
 	await _test_deployment(client)
 	await _finish_client(client)
 	await _test_zone_deployment()
+	await _test_contract_loop()
 
 
 ## Starts a second process that joins the hub as a client and checks what it sees; returns
@@ -761,6 +767,145 @@ func _test_zone_deployment() -> void:
 	level = CompoundLevel.current(self)
 
 
+## Wave 4B part 1, the loop: accept on the board -> prep -> deploy -> the briefing in the zone
+## -> objectives live at its start -> extraction -> the debrief and the roster settled once
+## -> back at the base, on one bank and one clock. One squadmate left behind is MIA with a
+## recovery contract on the board; deploying on it, they wait where they were left, join the
+## player who finds them and come home recovered.
+func _test_contract_loop() -> void:
+	print("The loop: board, prep, briefing, extraction, debrief")
+	level = CompoundLevel.current(self)
+	if not level is BaseLevel:
+		check(false, "back at the base before the loop")
+		return
+	Contracts.auto_show_debrief = false
+	var offer := {}
+	for c: Dictionary in Contracts.board():
+		if c.source == "board" and c.zone_kind == "contract" and c.type == "clear_compound":
+			offer = c
+	if offer.is_empty():
+		offer = Contracts.board().filter(func(c: Dictionary) -> bool: return c.zone_kind == "contract")[0]
+	var cid := String(offer.cid)
+	var cash := Economy.cash()
+	check(Contracts.server_accept(cid, ContractGen.default_terms()) == "", "a contract is accepted on the board (%s, %s)" % [offer.title, ContractGen.clawback_text(offer)])
+	var advance := int(Contracts.contract(cid).deal.advance)
+	check(BaseEconomy.funds() == cash + advance,
+		"one bank: the advance is in the base's funds ($%s)" % DebriefCalc.money(advance))
+	check(String(BaseHub.prep_contract().get("cid", "")) == cid and not BaseHub.prep_contract().has("true_rating"),
+		"accepting it starts the prep at the base (the threat it hides stays hidden)")
+	var squad: Array = Roster.available_ids(BaseHub.roster()).slice(0, 2)
+	BaseHub._prep().squad = squad.duplicate()
+	var stay: String = squad[0]
+	var lost: String = squad[1]
+	var day0 := Economy.day()
+	var why := BaseHub.server_deploy()
+	var moved := await _wait_until(func() -> bool: return not CompoundLevel.current(self) is BaseLevel, 20.0)
+	level = CompoundLevel.current(self)
+	check(why == "" and moved and not Contracts.is_deployed(), "deploying takes the squad into the zone; the contract isn't live yet")
+	var briefing := MapNodes.briefing(level)
+	check(briefing != null and briefing.is_open() and String(briefing.contract.get("id", "")) == cid and not briefing.insertion_points().is_empty()
+		and not (briefing.contract.get("objectives", []) as Array).is_empty(),
+		"the briefing opens in the zone: the contract's objectives and insertion points (%d)" % (briefing.insertion_points().size() if briefing else 0))
+	var up := await _wait_until(func() -> bool: return squad.all(func(mid: String) -> bool: return _roster_soldier(mid) != null), 40.0)
+	check(up, "the picked squad is there")
+	if briefing == null or not up:
+		return
+	briefing.server_start(true)
+	await _frames(2)
+	var extraction := MapNodes.extraction(level)
+	check(Contracts.is_deployed() and not Contracts.objectives.for_contract(cid).is_empty() and extraction.is_active(),
+		"its start makes the contract live (objectives) and opens extraction")
+	for s: Node in level.ai.get_children():
+		if (s as Soldier).faction == &"hostile":
+			s.queue_free()
+	for o: Dictionary in Contracts.objectives.for_contract(cid):
+		if not o.optional:
+			Contracts.objectives.server_set_state(o.oid, Objectives.DONE)
+	var player: Soldier = level.players.get_node(^"1")
+	var s_stay := _roster_soldier(stay)
+	var s_lost := _roster_soldier(lost)
+	for s: Soldier in [s_stay, s_lost]:
+		SquadAI.of(s).process_mode = Node.PROCESS_MODE_DISABLED
+	s_stay.global_position = player.global_position + Vector3(1, 0, 1)
+	s_lost.global_position = player.global_position + Vector3(0, 0, -45)
+	var lost_at := s_lost.global_position
+	extraction.server_set_bring(String(s_lost.name), false)
+	extraction.countdown_s = 0.2
+	extraction.server_add_point(Vector2(player.global_position.x, player.global_position.z))
+	var cash_before := Economy.cash()
+	var bills := [0]  # weekly bills that fall due in the deployment's days
+	var on_week := func(_week: int, bill: Dictionary) -> void: bills[0] += int(bill.total) - int(bill.get("loan_taken", 0))
+	Economy.week_paid.connect(on_week)
+	check(extraction.server_confirm() == "", "the squad (one left behind by choice) confirms at the extraction point")
+	var home := await _wait_until(func() -> bool: return CompoundLevel.current(self) is BaseLevel, 20.0)
+	level = CompoundLevel.current(self)
+	var debrief := Contracts.last_debrief()
+	var line: Dictionary = (debrief.get("contracts", [{}]) as Array)[0] if not (debrief.get("contracts", []) as Array).is_empty() else {}
+	check(home and String(line.get("cid", "")) == cid and line.get("outcome") == "completed", "extraction ends it once: the debrief (%s) and back at the base" % line.get("outcome", "none"))
+	Economy.week_paid.disconnect(on_week)
+	check(Economy.cash() == cash_before + int(debrief.totals.paid_now) - bills[0] and int(line.get("pay", 0)) > 0,
+		"the pay lands in the one bank (+$%s)" % DebriefCalc.money(debrief.totals.paid_now))
+	check(Economy.day() == day0 + int(debrief.days) and BaseHub.day() == Economy.day(), "the days pass once, on one clock (%d -> %d)" % [day0, Economy.day()])
+	check(String(BaseHub.member(stay).status) != Roster.MIA and String(BaseHub.member(lost).status) == Roster.MIA,
+		"the roster is settled: one back, one MIA")
+	var recovery := {}
+	for c: Dictionary in Contracts.board():
+		if String(c.get("recover_mid", "")) == lost:
+			recovery = c
+	check(not recovery.is_empty() and int(recovery.base_pay) == 0, "a recovery contract for them is on the board (%s)" % recovery.get("title", "none"))
+	if recovery.is_empty() or not level is BaseLevel:
+		return
+	# The recovery: they wait where they were left and come home with whoever finds them.
+	print("A recovery contract")
+	var rid := String(recovery.cid)
+	check(Contracts.server_accept(rid, ContractGen.default_terms()) == "" and String(BaseHub.prep_contract().get("cid", "")) == rid,
+		"accepting it preps it")
+	BaseHub._prep().squad = [stay]
+	why = BaseHub.server_deploy()
+	moved = await _wait_until(func() -> bool: return not CompoundLevel.current(self) is BaseLevel, 20.0)
+	level = CompoundLevel.current(self)
+	briefing = MapNodes.briefing(level)
+	if why != "" or not moved or briefing == null or not briefing.is_open():
+		check(false, "deploying on the recovery contract opens its briefing (%s)" % why)
+		return
+	briefing.server_start(true)
+	var waiting := await _wait_until(func() -> bool: return _recovery_target(lost) != null, 10.0)
+	var target := _recovery_target(lost)
+	check(waiting and target.global_position.distance_to(lost_at) < 3.0 and target.person_name == String(BaseHub.member(lost).surname),
+		"%s waits where they were left, the same person" % BaseHub.member(lost).callsign)
+	if target == null:
+		return
+	for s: Node in level.ai.get_children():
+		if (s as Soldier).faction == &"hostile":
+			s.queue_free()
+	player = level.players.get_node(^"1")
+	player.global_position = target.global_position + Vector3(1.5, 0, 0)
+	var found := await _wait_until(func() -> bool: return target.has_meta(&"found"), 5.0)
+	check(found, "a player reaching them finds them: they join")
+	var mate := _roster_soldier(stay)
+	if mate:
+		SquadAI.of(mate).process_mode = Node.PROCESS_MODE_DISABLED
+		mate.global_position = player.global_position + Vector3(-1, 0, 1)
+	SquadAI.of(target).process_mode = Node.PROCESS_MODE_DISABLED
+	extraction = MapNodes.extraction(level)
+	extraction.countdown_s = 0.2
+	extraction.server_add_point(Vector2(player.global_position.x, player.global_position.z))
+	check(extraction.server_confirm() == "", "and extract with the squad")
+	home = await _wait_until(func() -> bool: return CompoundLevel.current(self) is BaseLevel, 20.0)
+	level = CompoundLevel.current(self)
+	check(home and String(BaseHub.member(lost).status) == Roster.READY and Contracts.history().any(func(h: Dictionary) -> bool: return h.cid == rid and h.outcome == "completed"),
+		"the recovery completes: %s is back on the roster" % BaseHub.member(lost).callsign)
+	Contracts.auto_show_debrief = true
+
+
+func _recovery_target(mid: String) -> Soldier:
+	for n: Node in level.ai.get_children():
+		var s := n as Soldier
+		if s and s.has_meta(&"recovery") and String(s.get_meta(&"roster_id")) == mid and not s.vitals.is_dead():
+			return s
+	return null
+
+
 ## The late joiner (another process): joins the deployed host with a plain Join and checks it
 ## is in the zone with everyone, then leaves.
 func _run_late_client() -> void:
@@ -834,9 +979,7 @@ func _roster_soldier(mid: String) -> Soldier:
 
 
 func _recovery_requested(mid: String) -> bool:
-	if not BaseEconomy.is_stub():
-		return true  # the economy's own contract board has it
-	return BaseHub.base().get("recovery_requests", []).any(func(r: Dictionary) -> bool: return String(r.get("mid", "")) == mid)
+	return Contracts.board().any(func(c: Dictionary) -> bool: return String(c.get("recover_mid", "")) == mid)
 
 
 # --- Helpers --------------------------------------------------------------------------------------

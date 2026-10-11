@@ -11,6 +11,48 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Wave 4B part 1: the mission loop wired end to end (Captain's side, 2026-10-11)
+
+#### Changed
+
+- **One bank:** the base runs on the `Economy` autoload (`BaseEconomy` is a thin adapter; the
+  stand-in cash is gone). The base terminal's shop is `Economy.server_buy` into the armory
+  stash (`purchase_sink`), salvage and what's brought out land in the stash (`stash_sink`), the
+  respawn price is `prices.json` "respawn".
+- **One clock:** `BaseHub.day()` is `Economy.day()`. Resting, deployments and travel move it
+  through `Economy.advance_days`; the roster's recovery and the hiring board follow
+  `day_advanced`; the roster's wages are the weekly bill (`Economy.wages_provider`) with base
+  upkeep and loans. A deployment's days pass once. Older saves give their base day way to the
+  economy's.
+- **Board -> base -> zone:** accepting a contract starts its prep at the base
+  (`BaseHub.begin_prep_contract`; "Prepare deployment" on the board and "Prep" on the base
+  screen pick another held one). Deploying takes the squad into the zone, where the briefing
+  opens for everyone on the zone's map; its start makes the contract live, moves the squad to
+  the insertion point and opens extraction.
+- **One end of a deployment:** extraction's report settles it once
+  (`BaseHub.end_deployment`, an `Extraction.END_GROUP` handler): the debrief (pay, clawback,
+  fines, reputation, days), then the roster (MIA, recovery contracts, gear home), then everyone
+  back at the base. People bring their own gear home; bodies carried in and items set down at
+  the point go to the stash.
+- **Clawback terms** (Captain): each contract states what a void does to the advance: kept
+  (none), prorated (the share of required objectives not done is given back) or returned
+  (full). Fixers' jobs keep it, the safe job returns it, the rest are rolled; a lenient client
+  pays less (`contracts.json` "clawback_terms", replacing `void_claws_back_advance`). Shown on
+  the board, in the briefing and in the debrief.
+- The board in a campaign has no debug deploy, end or reset buttons.
+
+#### Added
+
+- **Recovery contracts:** a squadmate left behind alive puts a recovery contract on the board
+  (`Contracts.server_add_recovery`: no pay, `recovery_offer_days`). Deployed on it, they wait
+  where they were left, join the player who reaches them (`BaseHub.FOUND_M`) and come home
+  recovered if they're inside the extraction point; anything else writes them off.
+- `Contracts.contract_accepted`, `contract_closed` (with `EXPIRED` for an offer that ran out),
+  `server_abandon_deployment` (a save made mid-deployment); objective templates may carry
+  their own site (`"params"`).
+- Tests: base "The loop" (board -> prep -> briefing -> extraction -> debrief -> base, and a
+  recovery end to end); contracts: clawback terms.
+
 ### Medical voxel wounds on the current dev (merge)
 
 #### Changed

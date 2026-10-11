@@ -185,6 +185,13 @@ Handoff for 4B, with the seams 4A left loose: [wave4b_handoff.md](wave4b_handoff
 person (name, nationality, hand, body) and every deployment spawns that person
 (`Names.person`, `Roster.identity`). Captain's answers to the 4B open questions are in
 [wave4b_handoff.md](wave4b_handoff.md).
+**4B is Captain's side** (2026-10-11), built in cghath's order, one part at a time with the full
+suites and an integrate after each. **Part 1, loop wiring (seams 1, 2, 6, 8, 9): done** on
+`feat/wave4b-loop`: one bank and one clock (Economy), board -> prep at the base -> deploy ->
+the briefing in the zone -> objectives live -> extraction -> the debrief and the roster settled
+once -> back at the base; respawns paid from the one bank; Captain's clawback terms per
+contract; an MIA squadmate's recovery contract (they wait where they were left). Next: part 2
+(missions in zones: seams 3, 4, 5, 7), then the hot zone.
 The full plan for everything after that (waves 5 to 8, backlog, open questions): [ChrisPlan_handoff.md](ChrisPlan_handoff.md).
 
 - **World scale:** contract zones of 2 to 4 km² and hot zones of 8 to 16 km² (hot-zone size

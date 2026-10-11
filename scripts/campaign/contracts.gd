@@ -35,6 +35,12 @@ signal deployment_started(deployment: Dictionary)
 signal debrief_ready(debrief: Dictionary)
 signal debrief_closed
 signal contract_voided(cid: String)
+## Host: an offer was accepted (the base starts its prep: BaseHub).
+signal contract_accepted(cid: String)
+## Host: a contract left the board or the held list for good, with its outcome (a held
+## contract's: completed, failed, voided, lapsed, aborted; an offer that ran out: EXPIRED).
+## BaseHub settles a recovery contract's squadmate on it.
+signal contract_closed(contract: Dictionary, outcome: String)
 
 const SECTION := &"contracts"
 const HISTORY_KEEP := 40
@@ -46,6 +52,10 @@ const DEPLOYED := "deployed"
 const VOIDED := "voided"
 const ABORTED := "aborted"
 const LAPSED := "lapsed"
+## An offer nobody took before it ran out (contract_closed).
+const EXPIRED := "expired"
+## A recovery contract's objective: the squadmate left behind, as an HVT to bring out.
+const MIA_HVT_PREFIX := "mia:"
 
 ## Show the debrief screen by itself when a debrief comes in (tests may turn it off).
 var auto_show_debrief := true
@@ -199,6 +209,8 @@ func new_full_campaign(campaign_seed := -1, start_cash := -1) -> void:
 func server_refresh_board() -> void:
 	var s := _s()
 	var today := Economy.day()
+	for c: Dictionary in (s.board as Array).filter(func(c: Dictionary) -> bool: return int(c.expires_day) < today):
+		contract_closed.emit(c, EXPIRED)
 	s.board = (s.board as Array).filter(func(c: Dictionary) -> bool: return int(c.expires_day) >= today)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash([int(s.seed), today, int(s.next_id)])
@@ -206,7 +218,7 @@ func server_refresh_board() -> void:
 	if not board.any(func(c: Dictionary) -> bool: return c.source == "safe"):
 		_add_offer(ContractGen.generate(rng, {"day": today, "source": "safe"}))
 	var board_size := MissionRegistry.setting_i("board_size", 6)
-	while board.filter(func(c: Dictionary) -> bool: return c.source != "fixer").size() < board_size:
+	while board.filter(func(c: Dictionary) -> bool: return c.source not in ["fixer", "recovery"]).size() < board_size:
 		_add_offer(ContractGen.generate(rng, {"day": today, "source": "board"}))
 	for fixer: Dictionary in MissionRegistry.fixers():
 		if Economy.reputation(String(fixer.faction)) >= int(fixer.min_rep) \
@@ -229,6 +241,32 @@ func _add_offer(c: Dictionary) -> Dictionary:
 	s.next_id = int(s.next_id) + 1
 	(s.board as Array).append(c)
 	return c
+
+
+## Host: a squadmate was left behind alive (BaseHub, settling a deployment). A recovery
+## contract for the zone goes on the board: the company's own job, so it pays nothing and
+## has no client; its one objective is to find them where they were left and bring them out
+## (DELIVER_HVT on MIA_HVT_PREFIX + member id at their position, which BaseHub completes when
+## they reach extraction). It runs "recovery_offer_days"; BaseHub recovers or writes them off
+## when it closes (contract_closed). `info`: {"mid", "name", "callsign", "role", "zone_id",
+## "day", "pos": [x, y, z]}. Returns its id.
+func server_add_recovery(info: Dictionary) -> String:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash([int(_s().seed), Economy.day(), int(_s().next_id), "recovery"])
+	var c := ContractGen.generate(rng, {"day": Economy.day(), "source": "safe", "type": "recover_hvt", "zone_id": String(info.get("zone_id", ""))})
+	var callsign := String(info.get("callsign", info.get("name", "?")))
+	var pos: Array = info.get("pos", [])
+	c.merge({"title": "Recover %s: %s" % [callsign, c.zone_name], "source": "recovery", "employer": "", "base_pay": 0,
+		"brief": "%s (%s) was left behind alive in %s. Find them where they were last seen and bring them out." % [
+			String(info.get("name", callsign)), String(info.get("role", "")), c.zone_name],
+		"recover_mid": String(info.get("mid", "")), "clawback": ContractGen.NO_CLAWBACK,
+		"expires_day": Economy.day() + MissionRegistry.setting_i("recovery_offer_days", 7),
+		"objectives": [{"kind": Objectives.DELIVER_HVT, "text": "Find %s and bring them out" % callsign,
+			"params": {"pos": pos if pos.size() == 3 else [0.0, 0.0, 0.0], "hvt": MIA_HVT_PREFIX + String(info.get("mid", ""))}}]}, true)
+	var added := _add_offer(c)
+	_notify_all("Recovery contract on the board: %s" % c.title)
+	_commit()
+	return added.cid
 
 
 ## Host: intel turned in opens a lead: a new, better-informed contract from `faction`
@@ -276,6 +314,7 @@ func server_accept(cid: String, terms: Dictionary, peer_id := 1) -> String:
 	_notify_all("Contract signed: %s. Advance $%s paid." % [c.title, DebriefCalc.money(deal.advance)])
 	_commit()
 	_save()
+	contract_accepted.emit(cid)
 	return ""
 
 
@@ -366,6 +405,21 @@ func server_start_deployment(cids: Array = [], zone_id := "", origin := Vector3.
 	_commit()
 	deployment_started.emit(s.deployment)
 	return ""
+
+
+## Host: a deployment that never ended (a campaign saved mid-deployment and loaded again,
+## everyone back at the base): its contracts are held again as before it, its objectives gone.
+func server_abandon_deployment() -> void:
+	var s := _s()
+	var dep: Dictionary = s.deployment
+	if dep.is_empty():
+		return
+	for c: Dictionary in s.held:
+		if c.cid in dep.get("cids", []) and c.state == DEPLOYED:
+			c.state = ACCEPTED
+	s.deployment = {}
+	objectives.server_clear()
+	_commit()
 
 
 ## Host: in a hot zone, a new contract comes in over the radio and the squad takes it on the
@@ -493,7 +547,9 @@ func server_end_deployment(report: Dictionary) -> Dictionary:
 	for c: Dictionary in deployed:
 		var result: Dictionary = (debrief.contracts as Array).filter(func(l: Dictionary) -> bool: return l.cid == c.cid)[0]
 		_close(c, String(result.outcome))
-	Economy.bank_items(report.get("items", []), "carried out")
+	# What came home goes to the base. In a campaign the people bring their own gear home
+	# (BaseHub), so the report says what else to bank ("bank": bodies and items set down).
+	Economy.bank_items(report.get("bank", report.get("items", [])), "carried out")
 	s.deployment = {}
 	s.debrief = debrief
 	objectives.server_clear()
@@ -791,6 +847,7 @@ func _close(c: Dictionary, outcome: String) -> void:
 	hist.append({"cid": c.cid, "title": c.title, "employer": c.employer, "outcome": outcome, "day": Economy.day()})
 	while hist.size() > HISTORY_KEEP:
 		hist.pop_front()
+	contract_closed.emit(c, outcome)
 
 
 func _find(list: Array, cid: String) -> Dictionary:

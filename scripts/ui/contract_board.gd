@@ -7,9 +7,10 @@ extends CanvasLayer
 ## cash, the day, loans and reputation. Every peer can open it (it shows the replicated
 ## state); what it does goes to the host (Contracts.accept and the other requests).
 ##
-## The host also gets the debug controls that stand in for the rest of the loop until wave
-## 4B joins it up: deploy on a held contract, end the deployment with everyone getting out
-## (a debrief), let days pass, reset the campaign. The base agent places the board in the hub.
+## The host also gets: in a campaign, "Prepare deployment" (the held contract goes into the
+## base's prep, BaseHub) and letting days pass; offline, the debug controls that stand in for
+## the rest of the loop: deploy on a held contract, end the deployment with everyone getting
+## out (a debrief), let days pass, reset the campaign.
 
 signal closed
 
@@ -87,7 +88,7 @@ func _ready() -> void:
 	_accept = _button(actions, "Accept contract", accept_selected)
 	_renegotiate = _button(actions, "Renegotiate", func() -> void: Contracts.renegotiate(_selected))
 	_abort = _button(actions, "Abort", func() -> void: Contracts.abort(_selected))
-	_deploy = _button(actions, "Deploy (debug)", _debug_deploy)
+	_deploy = _button(actions, "Prepare deployment" if BaseHub.campaign_running else "Deploy (debug)", _deploy_selected)
 	var bottom := HBoxContainer.new()
 	root.add_child(bottom)
 	_button(bottom, "Shop", func() -> void: get_tree().root.add_child(ShopScreen.new()))
@@ -96,8 +97,9 @@ func _ready() -> void:
 	bottom.add_child(_host_row)
 	_button(_host_row, "Wait a day", func() -> void: Economy.advance_days(1, "waiting at base"))
 	_button(_host_row, "Wait a week", func() -> void: Economy.advance_days(MissionRegistry.setting_i("week_days", 7), "waiting at base"))
-	_button(_host_row, "End deployment (debug)", _debug_extract)
-	_button(_host_row, "Reset campaign", func() -> void: Contracts.new_full_campaign())
+	if not BaseHub.campaign_running:  # a campaign deploys from the base and ends at extraction
+		_button(_host_row, "End deployment (debug)", _debug_extract)
+		_button(_host_row, "Reset campaign", func() -> void: Contracts.new_full_campaign())
 	_button(bottom, "Close", close)
 	_notice = Label.new()
 	_notice.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -156,7 +158,7 @@ func refresh() -> void:
 ## One offer in a line: rating, zone kind, title, employer, pay.
 static func offer_line(c: Dictionary) -> String:
 	var stars := "*".repeat(int(c.get("rated", 1))) + ".".repeat(5 - int(c.get("rated", 1)))
-	var tag: String = {"fixer": "FIXER %s: " % c.get("fixer", ""), "safe": "LOW RISK: ", "lead": ""}.get(String(c.get("source", "")), "")
+	var tag: String = {"fixer": "FIXER %s: " % c.get("fixer", ""), "safe": "LOW RISK: ", "lead": "", "recovery": "RECOVERY: "}.get(String(c.get("source", "")), "")
 	return "[%s] %s%s%s - %s - $%s" % [stars, "HOT ZONE " if c.get("zone_kind") == "hot" else "", tag, c.get("title", ""),
 		MissionRegistry.faction_name(String(c.get("employer", ""))), DebriefCalc.money(c.get("base_pay", 0))]
 
@@ -183,7 +185,7 @@ func _show_details() -> void:
 	lines.append("Client: %s   Target: %s" % [MissionRegistry.faction_name(String(c.employer)), MissionRegistry.faction_name(String(c.target))])
 	lines.append("Zone: %s (%s zone, %s)   %d day%s plus travel" % [c.zone_name, c.zone_kind, MissionRegistry.region(String(c.region)).get("name", c.region),
 		int(c.days), "" if int(c.days) == 1 else "s"])
-	lines.append("Difficulty %d/5   Intel accuracy %d%%" % [int(c.rated), roundi(float(c.intel_accuracy) * 100.0)])
+	lines.append("Difficulty %d/5   Intel accuracy %d%%   Terms: %s" % [int(c.rated), roundi(float(c.intel_accuracy) * 100.0), ContractGen.clawback_text(c)])
 	lines.append("Briefing: " + ContractGen.estimate_text(c))
 	if c.get("revealed", false) and c.has("true_rating"):
 		lines.append("ACTUAL THREAT: difficulty %d/5, %d fighters" % [int(c.true_rating), int(c.enemy_count)])
@@ -213,8 +215,8 @@ func _update_deal() -> void:
 	var t := terms()
 	var deal := ContractGen.deal(c, t)
 	var problem := ContractGen.terms_problem(t, rep)
-	_deal.text = "Points %d of %d.   Pay $%s: advance $%s now (kept if it fails), $%s on completion.   Salvage %d%%.   Support budget $%s.%s" % [
-		ContractGen.terms_cost(t), points, DebriefCalc.money(deal.pay_total), DebriefCalc.money(deal.advance), DebriefCalc.money(deal.completion),
+	_deal.text = "Points %d of %d.   Pay $%s: advance $%s now (kept if it fails; %s), $%s on completion.   Salvage %d%%.   Support budget $%s.%s" % [
+		ContractGen.terms_cost(t), points, DebriefCalc.money(deal.pay_total), DebriefCalc.money(deal.advance), ContractGen.clawback_text(c), DebriefCalc.money(deal.completion),
 		roundi(deal.salvage_share * 100.0), DebriefCalc.money(deal.support_budget), "\n" + problem if problem != "" else ""]
 	_accept.disabled = problem != ""
 
@@ -257,6 +259,15 @@ func header_text() -> String:
 
 func details_text() -> String:
 	return _details.text
+
+
+## In a campaign: the held contract goes into the base's prep (BaseHub); offline: the debug
+## deployment right here.
+func _deploy_selected() -> void:
+	if BaseHub.campaign_running:
+		BaseHub.request("prep", [_selected])
+	else:
+		_debug_deploy()
 
 
 func _debug_deploy() -> void:

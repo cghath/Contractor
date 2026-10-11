@@ -167,3 +167,42 @@ From the design doc ("Missions: contract zones and hot zones", decided unless ma
 5. **Role kits:** players do **not** deploy in their role kit (`player_role_kits` stays off).
 6. **Roster identity** (already on `dev` as 4B groundwork): a hire is one person, rolled at
    hiring and kept by the roster (`Names.person`, `Roster.identity`).
+
+## Progress (Captain's side)
+
+### Part 1, loop wiring (seams 1, 2, 6, 8, 9): done (2026-10-11, `feat/wave4b-loop`)
+
+- **One bank (1):** `BaseEconomy` is a thin adapter onto `Economy` (no stand-in cash):
+  `funds` = `Economy.cash()`, spending and charges go through its ledger, the shop's prices and
+  catalogue are `Prices`, the base terminal's purchases are `Economy.server_buy` with
+  `purchase_sink` putting them in the armory stash, salvage and what's brought out land there
+  through `stash_sink`, and an MIA squadmate opens a recovery contract
+  (`Contracts.server_add_recovery`). The respawn price is `prices.json` "respawn".
+- **One clock (8):** `BaseHub.day()` is `Economy.day()`; resting is `Economy.advance_days`;
+  the roster's recovery and the hiring board follow `Economy.day_advanced`; the roster's wages
+  are the weekly bill's (`Economy.wages_provider`), with upkeep and loans. A deployment's days
+  pass once, in the contract's debrief. Saves from before keep working (their base "day" gives
+  way to the economy's).
+- **Board -> base (2), with one change of order:** accepting a contract starts the prep at the
+  base (`BaseHub.begin_prep_contract`; the board's "Prepare deployment" and the base screen's
+  "Prep" pick another held one). Deploy takes the squad into the zone and **the briefing opens
+  there**, not at the base: the map draws the loaded level, so a briefing at the FOB would show
+  the FOB. Its start makes the contract live (`Contracts.server_start_deployment`); the
+  briefing's own flow moves the squad to the insertion point, opens extraction and starts the
+  reinforcement timer.
+- **One end (6):** `BaseHub.end_deployment(report)` (an `Extraction.END_GROUP` handler) turns
+  extraction's report into the debrief's (`Contracts.report_from_level` for who got out, HVTs,
+  and a "bank" list for bodies carried in and items set down: people bring their own gear
+  home), then `Contracts.server_end_deployment` (pay, clawback, fines, reputation, days), then
+  `BaseHub.server_end_deployment` (MIA, recovery contracts, gear home) and back to the base.
+- **Respawns (9):** `BaseHub.server_count_respawn` on the one bank (4 free / 8 in a hot zone).
+- **Clawback terms (Captain's answer 1):** every contract carries "clawback": "none",
+  "prorated" (the share of required objectives not done) or "full", shown on the board and
+  in the briefing; fixers' jobs are none, the safe job full, the rest rolled
+  (`contracts.json` "clawback_terms": weights and the lower pay of a lenient client).
+- **Recovery contracts:** a squadmate left behind alive gets a recovery contract on the board
+  (pays nothing, runs `recovery_offer_days`). Deployed on it, they wait where they were left,
+  join the player who reaches them, and count as brought out inside the extraction point;
+  completed brings them back, anything else (or the offer running out) writes them off.
+- Tests: the base suite's "The loop" runs board -> prep -> briefing -> extraction -> debrief
+  -> base and a recovery end to end; contracts suite for the clawback terms.

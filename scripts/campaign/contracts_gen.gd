@@ -17,6 +17,10 @@ extends RefCounted
 
 ## Keys only the host knows until the threat is revealed.
 const HIDDEN_KEYS := ["true_rating", "enemy_count", "quality", "threats", "understated"]
+## Clawback terms (Captain): what a voided contract gives back of its advance.
+const NO_CLAWBACK := "none"
+const PRORATED_CLAWBACK := "prorated"
+const FULL_CLAWBACK := "full"
 
 
 static func S(key: String) -> float:
@@ -126,6 +130,11 @@ static func generate(rng: RandomNumberGenerator, ctx: Dictionary) -> Dictionary:
 		pay_mult *= S("hot_zone_pay_mult")
 	if source == "lead":
 		pay_mult *= S("lead_pay_mult")
+	# What happens to the advance if the contract is voided (Captain): fixers are shady, the
+	# safe job strict, the rest rolled; a shady client pays less. Rolled on its own generator
+	# (seeded from the board's, which it leaves alone) so the boards stay as they were.
+	var clawback := clawback_term(rng, source)
+	pay_mult *= float(clawback_terms().get(clawback, {}).get("pay_mult", 1.0))
 	var step := maxi(MissionRegistry.setting_i("pay_round", 500), 1)
 	var base_pay := maxi(step, roundi(float(def.get("base_pay", 40000)) * pay_mult / step) * step)
 	var day := int(ctx.get("day", 1))
@@ -139,11 +148,60 @@ static func generate(rng: RandomNumberGenerator, ctx: Dictionary) -> Dictionary:
 		"threats_known": known, "intel_accuracy": snappedf(intel, 0.01),
 		"true_rating": true_rating, "enemy_count": enemy_count, "quality": snappedf(quality, 0.01),
 		"threats": threats, "understated": understated, "revealed": false, "renegotiated": false,
+		"clawback": clawback,
 		"base_pay": base_pay, "days": int(def.get("days", 1)) + (1 if hot else 0),
 		"objectives": (def.get("objectives", []) as Array).duplicate(true),
 		"offered_day": day, "expires_day": day + MissionRegistry.setting_i("offer_days", 5),
 		"state": "offered",
 	}
+
+
+## The clawback terms (data/contracts.json "clawback_terms"): {term: {"weight", "pay_mult"}}.
+static func clawback_terms() -> Dictionary:
+	return MissionRegistry.setting("clawback_terms", {"full": {"weight": 1.0, "pay_mult": 1.0}})
+
+
+## A contract's clawback term ("none", "prorated" or "full") for an offer from `source`:
+## fixers' jobs "none", the safe job "full", the rest rolled by weight. Leaves `rng` as it was.
+static func clawback_term(rng: RandomNumberGenerator, source: String) -> String:
+	var terms := clawback_terms()
+	if source == "fixer" and terms.has(NO_CLAWBACK):
+		return NO_CLAWBACK
+	if source == "safe" and terms.has(FULL_CLAWBACK):
+		return FULL_CLAWBACK
+	var roll := RandomNumberGenerator.new()
+	roll.seed = hash([rng.state, source])
+	var total := 0.0
+	for t: String in terms:
+		total += float(terms[t].get("weight", 0.0))
+	var pick := roll.randf() * total
+	for t: String in terms:
+		pick -= float(terms[t].get("weight", 0.0))
+		if pick <= 0.0:
+			return t
+	return FULL_CLAWBACK
+
+
+## What a voided contract gives back of its `advance` under its "clawback" term, with
+## `done` of its `required` objectives done: all of it ("full", and contracts from before the
+## terms), none, or the share not earned ("prorated").
+static func clawback_amount(contract: Dictionary, advance: int, done: int, required: int) -> int:
+	match String(contract.get("clawback", FULL_CLAWBACK)):
+		NO_CLAWBACK:
+			return 0
+		PRORATED_CLAWBACK:
+			return roundi(advance * (1.0 - float(done) / maxf(required, 1)))
+	return advance
+
+
+## The clawback term in words, for the board and the debrief.
+static func clawback_text(contract: Dictionary) -> String:
+	match String(contract.get("clawback", FULL_CLAWBACK)):
+		NO_CLAWBACK:
+			return "advance kept if voided"
+		PRORATED_CLAWBACK:
+			return "advance prorated if voided"
+	return "advance returned if voided"
 
 
 ## The contract as a client may see it: the truth stays on the host until it's revealed.

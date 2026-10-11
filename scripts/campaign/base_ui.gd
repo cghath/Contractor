@@ -89,8 +89,8 @@ func refresh() -> void:
 	if not visible or not is_node_ready():
 		return
 	var v := BaseHub.view
-	_header.text = "Day %d    Funds $%d%s    Wages $%d/day" % [int(v.get("day", 1)), int(v.get("funds", 0)),
-		" (stand-in economy)" if v.get("stub_economy", false) else "", int(v.get("daily_wages", 0))]
+	_header.text = "Day %d    Funds $%d    Wages $%d/day    Weekly bill $%d in %d day%s" % [int(v.get("day", 1)), int(v.get("funds", 0)),
+		int(v.get("daily_wages", 0)), int(v.get("weekly_bill", 0)), int(v.get("bill_in_days", 7)), "" if int(v.get("bill_in_days", 7)) == 1 else "s"]
 	var rows: VBoxContainer = _pages[page]
 	for child in rows.get_children():
 		child.queue_free()
@@ -120,8 +120,22 @@ func _build_squad(rows: VBoxContainer, v: Dictionary) -> void:
 		rows.add_child(_text("Deployed to %s (%s zone). Respawns used %d of %d free." % [dep.get("zone_id", "?"), dep.get("zone_kind", "contract"),
 			int(dep.get("respawns_used", 0)), int(dep.get("respawns_free", 0))]))
 		return
-	rows.add_child(_text("Contract: %s" % (String(contract.get("name", contract.get("title", ""))) if not contract.is_empty()
-		else "none accepted (Deploy goes to the test compound)")))
+	rows.add_child(_text("Contract: %s" % (String(contract.get("name", contract.get("title", ""))) + " (" + ContractGen.clawback_text(contract) + ")" if not contract.is_empty()
+		else "none in prep (Deploy goes to the test compound)")))
+	var board := Button.new()
+	board.text = "Contract board"
+	board.pressed.connect(func() -> void: Contracts.open_board())
+	rows.add_child(board)
+	if contract.is_empty():
+		for c: Dictionary in v.get("held", []):
+			var row := HBoxContainer.new()
+			row.add_child(_text("Held: %s (deploy by day %d)" % [c.title, int(c.deadline_day)]))
+			var prep_button := Button.new()
+			prep_button.text = "Prep"
+			prep_button.disabled = not multiplayer.is_server()  # the host preps
+			prep_button.pressed.connect(func() -> void: BaseHub.request("prep", [String(c.cid)]))
+			row.add_child(prep_button)
+			rows.add_child(row)
 	var debrief: Dictionary = roster.get("last_debrief", {})
 	if not debrief.is_empty():
 		rows.add_child(_text("Last deployment: %d back, %d MIA, %d KIA, %d respawns (%d bought)" % [debrief.get("extracted", []).size(),

@@ -7,9 +7,9 @@ extends RefCounted
 ## The result (JSON-safe, replicated to every peer):
 ## - "contracts": per contract {"cid", "title", "employer", "outcome" ("completed",
 ##   "failed", "voided", "lapsed", "aborted"), "advance" (paid at signing), "completion",
-##   "bonuses": [{"text", "amount"}], "pay" (completion + bonuses), "clawback" (a voided
-##   contract's advance taken back when "void_claws_back_advance" is on: Captain's "pays
-##   nothing"), "salvage_share", "objectives": [lines]};
+##   "bonuses": [{"text", "amount"}], "pay" (completion + bonuses), "clawback" (what a voided
+##   contract gives back of its advance under its own term, ContractGen.clawback_amount:
+##   all, none, or the share of required objectives not done), "salvage_share", "objectives": [lines]};
 ## - "civilians", "fines"; "rep": {faction: change}, "locals": change;
 ## - "salvage": {"share", "pool": [{"id", "count", "state", "value"}], "pool_value",
 ##   "budget", "picked": [pool indices], "spent"};
@@ -48,6 +48,7 @@ static func compute(contracts: Array, objectives: Array, civilians: int, report:
 					outcome = "lapsed"  # a hot zone's unfinished contracts lapse at extraction
 		var pay_total := int(deal.get("pay_total", 0))
 		var line := {"cid": c.cid, "title": c.get("title", ""), "employer": c.get("employer", ""), "outcome": outcome,
+			"clawback_term": String(c.get("clawback", ContractGen.FULL_CLAWBACK)),
 			"advance": int(deal.get("advance", 0)), "completion": 0, "bonuses": [], "pay": 0, "clawback": 0, "salvage_share": 0.0,
 			"objectives": mine.map(func(o: Dictionary) -> String: return Objectives.line(o))}
 		var employer := String(c.get("employer", ""))
@@ -67,8 +68,8 @@ static func compute(contracts: Array, objectives: Array, civilians: int, report:
 				_add(rep, employer, int(S.call("rep_fail")))
 			"voided":
 				_add(rep, employer, int(S.call("rep_fail")))
-				if bool(MissionRegistry.setting("void_claws_back_advance", true)):
-					line.clawback = line.advance
+				var done := required.filter(func(o: Dictionary) -> bool: return o.state == Objectives.DONE).size()
+				line.clawback = ContractGen.clawback_amount(c, line.advance, done, required.size())
 			"lapsed":
 				_add(rep, employer, int(S.call("rep_lapse")))
 			"aborted":
@@ -137,7 +138,7 @@ static func summary(debrief: Dictionary) -> PackedStringArray:
 		for b: Dictionary in c.bonuses:
 			out.append("  %s: $%s" % [b.text, money(b.amount)])
 		if int(c.get("clawback", 0)) > 0:
-			out.append("  Advance clawed back (voided): -$%s" % money(c.clawback))
+			out.append("  Advance clawed back (voided, %s): -$%s" % [c.get("clawback_term", "full"), money(c.clawback)])
 		for l: String in c.get("objectives", []):
 			out.append("    " + l)
 	var totals: Dictionary = debrief.get("totals", {})
