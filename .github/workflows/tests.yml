@@ -1,0 +1,56 @@
+# Runs the headless test suites (tools/run_tests.sh) on every push and pull request, one job
+# per suite so a failure names its suite. Uses the Linux editor of the Voxel Tools release the
+# README points at (Godot 4.7.2 + Voxel Tools 1.7, standard precision), cached between runs.
+name: Tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  VOXEL_RELEASE: v1.7
+  GODOT_ZIP: godot.linuxbsd.editor.x86_64.zip
+
+jobs:
+  suite:
+    name: ${{ matrix.suite }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [smoke, gameplay, squad, net, wounds, armor, movement, interaction, roles, medical, logistics, casualty, materials, animations, scavenge]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache the Voxel Tools editor
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: ~/godot-voxel
+          key: godot-voxel-${{ env.VOXEL_RELEASE }}-${{ env.GODOT_ZIP }}
+
+      - name: Download the Voxel Tools editor
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/godot-voxel
+          curl -sSfL -o /tmp/godot.zip "https://github.com/Zylann/godot_voxel/releases/download/${VOXEL_RELEASE}/${GODOT_ZIP}"
+          unzip -q /tmp/godot.zip -d ~/godot-voxel
+
+      - name: Find the editor binary
+        run: |
+          bin="$(find ~/godot-voxel -type f -name 'godot.linuxbsd.editor.x86_64*' | head -n1)"
+          test -n "$bin" || { echo "no editor binary in the release zip"; exit 1; }
+          chmod +x "$bin"
+          echo "GODOT=$bin" >> "$GITHUB_ENV"
+          "$bin" --version
+
+      - name: Run the ${{ matrix.suite }} suite
+        env:
+          CONTRACTOR_TEST_TAG: ci-${{ matrix.suite }}
+        run: tools/run_tests.sh ${{ matrix.suite }}

@@ -224,9 +224,13 @@ Run every suite with one command (from Git Bash on Windows):
 GODOT="$HOME/Downloads/GodotVoxel_1.7/godot.windows.editor.x86_64.exe" tools/run_tests.sh
 ```
 
-There are fourteen suites; `tools/run_tests.sh` runs them all (about 7 minutes), or name the
+There are fifteen suites; `tools/run_tests.sh` runs them all (about 8 minutes), or name the
 ones you want (`tools/run_tests.sh wounds medical`). Each prints PASSED or FAILED and exits
 with its failure count. Set `CONTRACTOR_TEST_TAG` and `CONTRACTOR_PORT` when running two at once.
+
+**CI.** GitHub Actions (`.github/workflows/tests.yml`) runs every suite on each push and pull
+request, one job per suite, on the Linux editor of the same Voxel Tools v1.7 release. A red
+suite on the Actions tab means that branch isn't ready for `dev`.
 
 | Suite | Scene | What it covers |
 |---|---|---|
@@ -237,6 +241,7 @@ with its failure count. Set `CONTRACTOR_TEST_TAG` and `CONTRACTOR_PORT` when run
 | Wounds, armor, medical | `tests/<name>_test.tscn` | The wound model and consciousness, armor ratings and voxel plates, the field kit and treatments |
 | Casualty, logistics | `tests/<name>_test.tscn` | AI casualty care, bodies and their save; loose ammo, magazines, coloured smoke and navigation |
 | Materials, animations | `tests/<name>_test.tscn` | Wood, sheet metal and concrete under fire, impact marks; carry, drag, pickup, equip, treat and loot poses |
+| Scavenge | `tests/scavenge_test.tscn` | What AI takes off a body (ammo for its own weapon, missing medical items and grenades, armor when calm, a rifle only when dry, the load limit), dead players' gear left alone, going to a body, one unit per body, orders and contact |
 
 The gameplay and network tests use their own save zones and never touch your compound save.
 To regenerate the screenshots in `screenshots/` (this opens a window for a few seconds):

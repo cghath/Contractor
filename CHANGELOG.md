@@ -47,6 +47,8 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   across the top, red tab).
 - A full IFAK pouch shows its red pull tabs.
 - A new scavenge test suite (31 checks), run by `tools/run_tests.sh`.
+- **CI:** GitHub Actions runs all fifteen suites on every push and pull request, one job per
+  suite, on the Linux editor of the Voxel Tools v1.7 release (`.github/workflows/tests.yml`).
 
 #### Changed
 

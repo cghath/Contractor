@@ -49,6 +49,7 @@ Phase 3 (Squad prototype) is the next build step and carries most of these chang
 - [x] Keep voxel chipping as the visual, and add armor ratings, ceramic crack zones and plate integrity. (Wave 1.)
 - [x] Update `docs/squad_design.md` to name 8 slots as the target, and the README's locked decisions to match Captain's calls.
 - [ ] Ai voice callouts preferred as well.
+- [ ] New character models: Stormworks-style soldiers built in voxels, at real human scale, on the same joints so animations and gear still fit (Captain, 2026-10-11; in progress, see [build_plan.md](build_plan.md) wave 7).
 
 **Later phases**
 

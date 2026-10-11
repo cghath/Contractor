@@ -227,6 +227,15 @@ replacing the placeholders, with armor still destructible voxels; day and night,
 NVGs as gear; modular weapon attachments (optics, lights, lasers, suppressors, grips);
 optional assists for co-op newcomers; controller support.
 
+**Character models (Captain, 2026-10-11): in progress on Captain's side, ahead of wave 7.**
+The soldier models are being rebuilt in a Stormworks style, still in voxels (the keep-voxels
+call of 2026-10-10 stands): Stormworks proportions, simple flat colours and faces, at real
+human scale. The joints and pivots stay where they are (`scripts/art/voxel_art.gd` body
+parts, `CharacterModel`'s THIGH and FOREARM), so the action animations, plates, helmets, the
+carrier's MOLLE pouches and held weapons still fit. It goes on its own branch, with
+screenshots, once the MOLLE inventory, AI scavenging and CI are on `dev`. cghath's agent:
+don't edit `voxel_art.gd` or the soldier's look meanwhile.
+
 ### Wave 8: player-built faction (design only)
 
 One agent writes a design proposal for the stretch goal, including the campaign-operation
