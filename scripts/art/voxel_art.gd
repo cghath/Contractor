@@ -97,7 +97,9 @@ static func hand_points(model: String) -> Dictionary:
 	match model.get_slice(":", 0):
 		"rifle":
 			grip = Vector3(1.5, 4, n * 0.68)     # pistol grip
-			support = Vector3(1.5, 6, n * 0.38)  # under the handguard
+			# Under the handguard, no further than 0.52 m from the butt: as far out as the
+			# arms reach with the support shoulder forward (CharacterModel.SUPPORT_REACH).
+			support = Vector3(1.5, 6, maxf(n * 0.42, n - 26.0))
 		"pistol":
 			grip = Vector3(1, 2.5, 7.5)
 			support = Vector3(-0.5, 2, 7.5)      # cupping the grip from the left
@@ -116,6 +118,16 @@ static func sight_point(model: String) -> Vector3:
 			return (Vector3(1.5, 13, spec.size.z * 0.62) - centre) * VOXEL_SIZE  # back of the optic
 		"pistol":
 			return (Vector3(1, 7, 9) - centre) * VOXEL_SIZE  # rear sight
+	return Vector3.ZERO
+
+
+## Centre of the butt pad, in metres relative to the instance pivot (its centre): the point
+## that goes into the shoulder pocket. Zero for weapons without a stock (and non-weapons).
+static func butt_point(model: String) -> Vector3:
+	var spec := _spec(model)
+	var centre := Vector3(spec.size) * 0.5
+	if model.get_slice(":", 0) == "rifle":
+		return (Vector3(1.5, 7.7, spec.size.z) - centre) * VOXEL_SIZE
 	return Vector3.ZERO
 
 

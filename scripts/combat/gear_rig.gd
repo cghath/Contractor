@@ -33,19 +33,33 @@ const HELMET_POSITION := Vector3(0, 0.2, 0)
 ## A tourniquet's band and the red of medical pull tabs, as drawn on the carrier.
 const TQ_BAND := Color("1b1b1a")
 const MED_RED := Color("b3261e")
-## Rest mounts: slot -> [mount, position, rotation]. The primary is slung muzzle-down on
-## the right of the chest; the sidearm sits in a hip holster.
-const MOUNTS := {
-	&"vest": [&"torso", Vector3(0, 0.17, 0), Vector3.ZERO],  # vest pivots sit at the cummerbund
-	&"primary": [&"torso", Vector3(0.2, 0.2, -0.17), Vector3(-PI / 2 + 0.25, 0, 0.2)],
-	&"sidearm": [&"torso", Vector3(0.22, 0.02, -0.02), Vector3(-PI / 2, 0, 0)],
-}
-## Weapon positions in the hands, relative to CharacterModel.hands_anchor (shoulder height,
-## pitches with aim). The arms reach for the weapon's VoxelArt.hand_points.
-const HELD_POSES := {
-	&"primary": Vector3(0.05, -0.04, -0.32),  # close enough for the left hand to reach an M110 handguard
-	&"sidearm": Vector3(0.02, -0.03, -0.45),
-}
+## Rest mounts, torso-local, for a right-handed shooter (rest_transform mirrors them for a
+## left-handed one): the vest at the cummerbund; the primary on its sling in the patrol
+## carry, diagonally across the front of the carrier clear of the pouches (stock up under the
+## firing-side armpit, muzzle down at the support-side thigh, optic facing out); the sidearm
+## in a thigh holster on the firing side.
+const MOUNTS := [&"vest", &"primary", &"sidearm"]
+const SLING_CENTRE := Vector3(0.02, 0.2, -0.25)
+const SLING_DIR := Vector3(-0.5, -0.866, 0.0)  # where the muzzle points: 30 degrees off vertical
+const HOLSTER := Vector3(0.22, 0.02, -0.02)
+## Held weapons, in CharacterModel.hands_anchor space (shoulder height, pitches with aim),
+## for a right-handed shooter (mirrored for a left-handed one):
+## - A rifle's butt (VoxelArt.butt_point) sits in the firing shoulder's pocket. Aiming, it
+##   points straight out, the optic under the (dipped) eye line. At the ready, the stock stays
+##   in the pocket and the muzzle dips READY_DIP and turns READY_TURN in across the body.
+## - A pistol is pushed out two-handed at the eye line aiming, and held low in front of the
+##   chest at the ready.
+## The arms reach for the weapon's VoxelArt.hand_points, the support shoulder brought forward
+## (CharacterModel.SUPPORT_REACH).
+const SHOULDER_POCKET := Vector3(0.09, 0.07, -0.11)
+const READY_POCKET := Vector3(0.11, 0.03, -0.11)
+const READY_DIP := 0.5
+const READY_TURN := 0.15
+const PISTOL_AIM := Vector3(0.0, 0.16, -0.44)
+const PISTOL_READY := Vector3(0.06, -0.12, -0.32)
+const PISTOL_READY_DIP := 0.45
+## How fast a held weapon moves between the ready and aiming (per second).
+const HOLD_EASE := 12.0
 
 var _armor: Dictionary = {}        # slot -> VoxelArmor
 var _chip_counts: Dictionary = {}  # slot -> chips already applied to the mesh
@@ -57,6 +71,7 @@ var _clock := 0.0
 var _grab_at := -1.0             # _clock when a weapon being drawn reaches the hands
 var _pouches: Node3D             # MOLLE attachments on the carrier
 var _pouch_key := ""             # what _pouches shows
+var _left_shown := false          # model.left_handed the rest mounts were placed for
 
 
 
@@ -143,14 +158,13 @@ func _rebuild() -> void:
 			if slot != &"helmet":  # a plate sits inside the carrier's pocket, under its fabric
 				piece.set_cover(Color(VoxelArt.VARIANTS.get(model.variant, VoxelArt.VARIANTS.multicam).gear) if carrier else Color(0, 0, 0, 0))
 	for slot: StringName in MOUNTS:
-		var mount: Array = MOUNTS[slot]
-		_set_gear(slot, inventory.slots[slot], mount[0], mount[1], mount[2])
+		_set_gear(slot, inventory.slots[slot], &"torso", rest_transform(slot))
 	var pack: StringName = inventory.slots[&"backpack"]
 	var pack_depth := VoxelArt.size_m(VoxelArt.model_for(ItemDB.get_item(pack))).z if pack != &"" else 0.0
-	_set_gear(&"backpack", pack, &"torso", Vector3(0, 0.3, 0.165 + pack_depth * 0.5), Vector3.ZERO)
+	_set_gear(&"backpack", pack, &"torso", Transform3D(Basis.IDENTITY, Vector3(0, 0.3, 0.165 + pack_depth * 0.5)))
 	var held := inventory.hands
 	var held_size := WorldItem.visual_size(ItemDB.get_item(held)) if held != &"" else Vector3.ZERO
-	_set_gear(&"hands", held, &"torso", Vector3(0, 0.15, -0.15 - held_size.z * 0.5), Vector3.ZERO)
+	_set_gear(&"hands", held, &"torso", Transform3D(Basis.IDENTITY, Vector3(0, 0.15, -0.15 - held_size.z * 0.5)))
 	_set_pouches()
 	_refresh_plate_damage()
 
@@ -239,6 +253,12 @@ static func _part_box(size: Vector3, pos: Vector3, colour: Color, layers: int) -
 
 func _process(delta: float) -> void:
 	_clock += delta
+	if model.left_handed != _left_shown:
+		_left_shown = model.left_handed  # the slung weapons move to the other side
+		for slot: StringName in MOUNTS:
+			if _gear.has(slot) and slot != _held_key:
+				(_gear[slot][1] as Node3D).transform = rest_transform(slot)
+		_held_dirty = true
 	var want := _wanted_in_hands()
 	if want != _want_key:
 		_want_key = want
@@ -254,6 +274,7 @@ func _process(delta: float) -> void:
 	_grab_at = -1.0
 	if want != _held_key or _held_dirty:
 		_put_in_hands(want)
+	_ease_held(delta)
 
 
 ## True while a weapon is on its way from its sling or holster to the hands.
@@ -277,11 +298,9 @@ func _wanted_in_hands() -> StringName:
 func _put_in_hands(key: StringName) -> void:
 	# Whatever was held goes back to its rest mount.
 	if _held_key in MOUNTS and _gear.has(_held_key):
-		var rest: Array = MOUNTS[_held_key]
 		var previous: Node3D = _gear[_held_key][1]
 		previous.reparent(model.torso, false)
-		previous.position = rest[1]
-		previous.rotation = rest[2]
+		previous.transform = rest_transform(_held_key)
 	_held_key = key
 	_held_dirty = false
 	model.clear_held()
@@ -291,24 +310,62 @@ func _put_in_hands(key: StringName) -> void:
 	if key == &"hands":
 		# Bulky item stays in front of the torso; palms press on its sides.
 		var half := WorldItem.visual_size(ItemDB.get_item(inventory.hands)).x * 0.5
-		model.set_held(node, Vector3(half, 0, 0), Vector3(-half, 0, 0))
+		model.set_held(node, Vector3(half, 0, 0), Vector3(-half, 0, 0), false)
 		return
 	var points := VoxelArt.hand_points(VoxelArt.model_for(ItemDB.get_item(_gear[key][0])))
 	if points.is_empty():
 		return
 	node.reparent(model.hands_anchor, false)
-	node.position = HELD_POSES[key]
-	node.rotation = Vector3.ZERO
+	node.transform = held_transform(VoxelArt.model_for(ItemDB.get_item(_gear[key][0])), model.aiming, model.left_handed)
 	model.set_held(node, points.grip, points.support)
 
 
-## Torso-local point where the right hand takes hold of the weapon in `key` on its rest
+## Torso-local point where the firing hand takes hold of the weapon in `key` on its rest
 ## mount (its grip, or the mount itself).
 func _rest_grip(key: StringName) -> Vector3:
-	var rest: Array = MOUNTS[key]
 	var points := VoxelArt.hand_points(VoxelArt.model_for(ItemDB.get_item(_gear[key][0])))
 	var grip: Vector3 = points.get("grip", Vector3.ZERO)
-	return Transform3D(Basis.from_euler(rest[2]), rest[1]) * grip
+	return rest_transform(key) * grip
+
+
+## Where `slot`'s item rests on the torso (MOUNTS), mirrored for a left-handed shooter.
+func rest_transform(slot: StringName) -> Transform3D:
+	var s := -1.0 if model.left_handed else 1.0
+	match slot:
+		&"vest":
+			return Transform3D(Basis.IDENTITY, Vector3(0, 0.17, 0))  # vest pivots sit at the cummerbund
+		&"primary":
+			var centre := SLING_CENTRE * Vector3(s, 1, 1)
+			var dir := SLING_DIR * Vector3(s, 1, 1)
+			return Transform3D(Basis.looking_at(dir, Vector3.FORWARD), centre)  # optic out, away from the chest
+		&"sidearm":
+			return Transform3D(Basis(Vector3.RIGHT, -PI / 2), HOLSTER * Vector3(s, 1, 1))
+	return Transform3D.IDENTITY
+
+
+## Where a held weapon (VoxelArt model `art`) sits in hands_anchor space, aiming or at the
+## ready, for the firing shoulder (see SHOULDER_POCKET).
+static func held_transform(art: String, aiming: bool, left: bool) -> Transform3D:
+	var s := -1.0 if left else 1.0
+	if art.begins_with("rifle"):
+		var basis := Basis.IDENTITY
+		var pocket := SHOULDER_POCKET
+		if not aiming:
+			basis = Basis(Vector3.UP, READY_TURN * s) * Basis(Vector3.RIGHT, -READY_DIP)
+			pocket = READY_POCKET
+		return Transform3D(basis, pocket * Vector3(s, 1, 1) - basis * VoxelArt.butt_point(art))
+	if aiming:
+		return Transform3D(Basis.IDENTITY, PISTOL_AIM)
+	return Transform3D(Basis(Vector3.RIGHT, -PISTOL_READY_DIP), PISTOL_READY * Vector3(s, 1, 1))
+
+
+## Moves the weapon in the hands towards where it sits now (raised to aim, or at the ready).
+func _ease_held(delta: float) -> void:
+	if _held_key == &"" or _held_key == &"hands" or not _gear.has(_held_key):
+		return
+	var node: Node3D = _gear[_held_key][1]
+	var goal := held_transform(VoxelArt.model_for(ItemDB.get_item(_gear[_held_key][0])), model.aiming, model.left_handed)
+	node.transform = node.transform.interpolate_with(goal, minf(delta * HOLD_EASE, 1.0))
 
 
 ## Replays armor chips into the meshes, skipping pieces whose chip list hasn't grown.
@@ -320,7 +377,7 @@ func _refresh_plate_damage() -> void:
 			_chip_counts[slot] = chips.size()
 
 
-func _set_gear(key: StringName, id: StringName, mount: StringName, pos: Vector3, rot: Vector3) -> void:
+func _set_gear(key: StringName, id: StringName, mount: StringName, at: Transform3D) -> void:
 	var current: Array = _gear.get(key, [&"", null])
 	if current[0] == id:
 		return
@@ -333,8 +390,7 @@ func _set_gear(key: StringName, id: StringName, mount: StringName, pos: Vector3,
 	var item := ItemDB.get_item(id)
 	var art := VoxelArt.model_for(item)
 	var node: Node3D = VoxelArt.instance(art, model.variant, render_layers) if art != "" else _box(item)
-	node.position = pos
-	node.rotation = rot
+	node.transform = at
 	(model.head if mount == &"head" else model.torso).add_child(node)
 	_gear[key] = [id, node]
 	_held_dirty = true  # a held node may have been replaced

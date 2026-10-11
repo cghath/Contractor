@@ -11,6 +11,37 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Weapon holds, and left- or right-handed shooters (Captain, 2026-10-11)
+
+#### Added
+
+- **Left-handed shooters:**
+  - **Players** pick "You shoot: Right-handed / Left-handed" on the main menu. The pick is
+    saved between sessions (`user://settings.cfg`) and sent to the host on join, like the role.
+  - **AI soldiers** are left-handed at the real rate for men, 11% (about 10.6% of people
+    overall, men about 1.23 times as likely as women; `scripts/actors/handedness.gd` has the
+    sources). Each roll is seeded by the soldier's name, so a callsign keeps its shoulder.
+  - **What mirrors:** the rifle shoulder, the firing and support hands, the sling, the
+    holster, the draw, and your first-person hip view.
+- **Everyone sees you shoulder your weapon:** aiming (`Soldier.is_aiming`) is replicated.
+
+#### Fixed
+
+- **Weapon holds (third person):**
+  - **Stock in the shoulder:** a rifle's butt sits in the firing shoulder's pocket. Aiming,
+    it points straight out and the head dips onto the optic.
+  - **At the ready,** the stock stays in the shoulder and the muzzle dips 30 degrees, in
+    across the body. Before, the rifle floated in front of the chest with its stock inside
+    the body.
+  - **Hands on the weapon:** the support shoulder comes forward as a shooter's does, and the
+    support hand takes the handguard within reach (up to 0.52 m from the butt). Both hands
+    land on the weapon in every hold.
+  - **Pistols** are pushed out two-handed at the eye line when aiming, and held low in front
+    of the chest at the ready.
+  - **Slung:** the rifle hangs diagonally across the front of the carrier, clear of the
+    pouches, with the stock under the firing-side armpit and the muzzle at the other thigh.
+    Before, it hung straight down beside the arm.
+
 ### Stormworks-style character models (Captain, 2026-10-11)
 
 #### Changed

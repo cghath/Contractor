@@ -139,6 +139,9 @@ var _squads := {}  # faction -> Squad
 var _ai_ready := false  # host: AI spawns once the voxel walls exist
 ## Host: the role each player picked, by peer id.
 var player_roles := {}
+## Host: each player's shooting shoulder (peer id -> true for left-handed), from their main-menu
+## pick (Handedness), sent on join like the role.
+var player_handed := {}
 var _kitted := {}  # host: peer ids that got their role kit
 ## Host: squad slots whose AI squadmate died (permadeath): no new squadmate takes them.
 var _fallen_slots := {}
@@ -339,6 +342,7 @@ func _on_hosted() -> void:
 		var d: Dictionary = GameState.dropped[uid]
 		spawn_item(StringName(d.id), int(d.count), Vector3(d.pos[0], d.pos[1], d.pos[2]), uid, GameState.from_json(d.get("state", {})))
 	player_roles[1] = Roles.local_choice  # the host's own pick from the main menu
+	player_handed[1] = Handedness.local_left()
 	_add_player(1)
 	NavBuilder.build(self)
 	# Bodies lie where they were, on the walls' collision.
@@ -494,6 +498,7 @@ func _make_soldier(data: Dictionary) -> Node:
 	soldier.role = StringName(data.get("role", ""))
 	soldier.fire_team = int(data.get("team", -1))
 	soldier.squad_slot = int(data.get("slot", -1))
+	soldier.left_handed = bool(data.get("left", Handedness.roll_ai(String(data.name))))  # LEFT_SHARE of AI
 	if multiplayer.is_server():
 		var inventory: Inventory = soldier.get_node(^"Inventory")
 		for id: String in data.loadout:
@@ -522,6 +527,7 @@ func _on_soldier_down(soldier: Soldier) -> void:
 ## Client: tell the host which role this player picked in the main menu.
 func _on_joined() -> void:
 	request_role.rpc_id(1, String(Roles.local_choice))
+	request_handedness.rpc_id(1, Handedness.local_left())
 
 
 ## A player picks their role (sent on join). The host gives them that role's slot.
@@ -531,6 +537,18 @@ func request_role(role: String) -> void:
 		return
 	player_roles[multiplayer.get_remote_sender_id()] = StringName(role)
 	rebalance_squad()
+
+
+## A player says which shoulder they shoot from (sent on join, from the main menu).
+@rpc("any_peer", "call_local", "reliable")
+func request_handedness(left: bool) -> void:
+	if not multiplayer.is_server():
+		return
+	var id := multiplayer.get_remote_sender_id()
+	player_handed[id] = left
+	var player := players.get_node_or_null(str(id)) as Soldier
+	if player:
+		player.left_handed = left
 
 
 func _on_peer_joined(id: int) -> void:
@@ -556,6 +574,7 @@ func _on_peer_left(id: int) -> void:
 		player.queue_free()
 	if multiplayer.is_server():
 		player_roles.erase(id)
+		player_handed.erase(id)
 		_kitted.erase(id)
 		var squad := squad_for(&"friendly")
 		if squad.leader == player:
@@ -578,6 +597,7 @@ func _add_player(id: int) -> void:
 	var player := PLAYER_SCENE.instantiate()
 	player.name = str(id)
 	player.position = next_spawn_point()
+	(player as Soldier).left_handed = bool(player_handed.get(id, false))
 	players.add_child(player, true)
 	if id == 1:
 		_squads[&"friendly"].leader = player  # the host leads until someone else gives an order
