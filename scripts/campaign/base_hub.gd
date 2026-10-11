@@ -133,6 +133,16 @@ func new_campaign(hiring_seed := -1) -> void:
 func load_or_new() -> void:
 	if not Campaign.load_campaign() or not base().has("day"):
 		new_campaign()
+	var dep := RosterDeployment.active(roster())
+	if not dep.is_empty():
+		# Saved mid-deployment and not ended: everyone who went is back as they left the base.
+		for mid: String in dep.squad:
+			var m := member(mid)
+			if not m.is_empty() and dep.get("fallen", {}).has(mid):
+				m["status"] = Roster.DEAD
+				m["gear"] = {}
+				Roster.add_history(m, day(), "Killed in action in %s" % dep.get("zone_id", "?"))
+		roster()["deployment"] = {}
 	_changed_all()
 
 
@@ -334,7 +344,7 @@ func _read_back_base() -> void:
 	for mid: String in gear:
 		server_store_member_gear(mid, gear[mid])
 	for p: Node in lvl.players.get_children():
-		if p is Soldier and not p.is_queued_for_deletion():
+		if p is Soldier and not p.is_queued_for_deletion() and _gear_applied.has(p.name.to_int()):
 			var main := Roster.main_character(roster(), player_key(p.name.to_int()))
 			main["gear"] = Roster.json_safe((p as Soldier).inventory.net_state.duplicate(true))
 
@@ -640,6 +650,11 @@ func server_end_deployment(extracted: Array, return_to_base := true) -> Dictiona
 	if return_to_base:
 		server_switch_level(BASE_SCENE, base_zone_id())
 	return report
+
+
+## Host: everyone goes back to the hub (after server_end_deployment(..., false) and a debrief).
+func server_return_to_base() -> void:
+	server_switch_level(BASE_SCENE, base_zone_id())
 
 
 ## Host (debug, and a stand-in for the map's extraction): ends the deployment with everyone
