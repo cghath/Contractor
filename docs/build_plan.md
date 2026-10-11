@@ -181,6 +181,7 @@ onto Captain's wave 3, reviewed and integrated (one join handshake for every lev
 suites pass. **4B next:** wire the loop end to end (board, prep, briefing, a zone,
 extraction, debrief, base), deployments into zones, and the hot zone.
 Handoff for 4B, with the seams 4A left loose: [wave4b_handoff.md](wave4b_handoff.md).
+The full plan for everything after that (waves 5 to 8, backlog, open questions): [ChrisPlan_handoff.md](ChrisPlan_handoff.md).
 
 - **World scale:** contract zones of 2 to 4 km² and hot zones of 8 to 16 km² (hot-zone size
   being confirmed). Today's voxel world is one bounded box, so this needs terrain plus
