@@ -169,13 +169,27 @@ static func _rasterize(spec: Dictionary, variant: String, salt: int) -> VoxelBuf
 		if colour == C.CAMO:
 			colour = _camo(Vector3(x, y, z) * cm, salt, variant)
 		buffer.set_voxel(colour, x + 1, y + 1, z + 1, VoxelBuffer.CHANNEL_COLOR)
+	# A run of one row (x, y), z0 to z1 exclusive, in one colour: the hidden middle of a loft.
+	var run := func(x: int, y: int, z0: int, z1: int, colour: int) -> void:
+		if x < 0 or y < 0 or x >= size.x or y >= size.y:
+			return
+		z0 = maxi(z0, 0)
+		z1 = mini(z1, size.z)
+		if z0 < z1:
+			buffer.fill_area(colour, Vector3i(x + 1, y + 1, z0 + 1), Vector3i(x + 2, y + 2, z1 + 1), VoxelBuffer.CHANNEL_COLOR)
 	for box: Variant in spec.boxes:
 		if box is Dictionary:
-			_fill_loft(box, put, s)
+			_fill_loft(box, put, s, run)
 			continue
 		var from := Vector3i((Vector3(box[0]) * s).round())  # corners may be fractional (_fb)
 		var to := Vector3i((Vector3(box[1]) * s).round())
 		var paint_only: bool = box.size() > 3 and box[3]  # _p: recolours, never adds
+		if not paint_only and box[2] != C.CAMO:  # one colour: fill it in one go
+			var lo := Vector3i(maxi(from.x, 0), maxi(from.y, 0), maxi(from.z, 0))
+			var hi := Vector3i(mini(to.x, size.x), mini(to.y, size.y), mini(to.z, size.z))
+			if lo.x < hi.x and lo.y < hi.y and lo.z < hi.z:
+				buffer.fill_area(box[2], lo + Vector3i.ONE, hi + Vector3i.ONE, VoxelBuffer.CHANNEL_COLOR)
+			continue
 		for x in range(from.x, to.x):
 			for y in range(from.y, to.y):
 				for z in range(from.z, to.z):
@@ -185,12 +199,20 @@ static func _rasterize(spec: Dictionary, variant: String, salt: int) -> VoxelBuf
 
 ## Fills a loft (_loft): at each voxel layer, a low-poly cross-section (a rectangle with its
 ## four corners cut at 45 degrees by "bevel", 0 square to 1 a diamond) whose half-width and
-## half-depth are interpolated between the keys, so the sides read as flat facets.
-static func _fill_loft(loft: Dictionary, put: Callable, s := 1) -> void:
+## half-depth are interpolated between the keys, so the sides read as flat facets. Works a
+## row (x) at a time: the row's z span comes straight from the cross-section, its outer
+## voxels go in one by one (camo worked out per voxel), and with `run` its hidden middle goes
+## in as one fill in the base colour, which keeps the 0.5 cm body quick to build.
+static func _fill_loft(loft: Dictionary, put: Callable, s := 1, run := Callable()) -> void:
 	var keys: Array = loft.keys
 	var centre: Vector2 = loft.centre * s
 	var bevel: float = loft.bevel
-	for y in range(int(keys[0][0]) * s, int(keys[keys.size() - 1][0]) * s):
+	var colour: int = loft.colour
+	var paint: bool = loft.paint
+	var y0 := int(keys[0][0]) * s
+	var y1 := int(keys[keys.size() - 1][0]) * s
+	const SHELL := 2  # outer voxels per side that get their own colour
+	for y in range(y0, y1):
 		var yc := (y + 0.5) / s
 		var i := 0
 		while i < keys.size() - 2 and yc > float(keys[i + 1][0]):
@@ -200,12 +222,26 @@ static func _fill_loft(loft: Dictionary, put: Callable, s := 1) -> void:
 		var hd := lerpf(keys[i][2], keys[i + 1][2], t) * s
 		if hw <= 0.0 or hd <= 0.0:
 			continue
+		var end_layer := y < y0 + SHELL or y >= y1 - SHELL
 		for x in range(int(floor(centre.x - hw)), int(ceil(centre.x + hw))):
-			for z in range(int(floor(centre.y - hd)), int(ceil(centre.y + hd))):
-				var dx := absf(x + 0.5 - centre.x) / hw
-				var dz := absf(z + 0.5 - centre.y) / hd
-				if dx <= 1.0 and dz <= 1.0 and dx + dz <= 2.0 - bevel:
-					put.call(x, y, z, loft.colour, loft.paint)
+			var dx := absf(x + 0.5 - centre.x) / hw
+			var m := minf(1.0, 2.0 - bevel - dx)  # how far out (in half-depths) the row reaches
+			if dx > 1.0 or m < 0.0:
+				continue
+			var za := int(ceil(centre.y - hd * m - 0.5))
+			var zb := int(floor(centre.y + hd * m - 0.5)) + 1  # exclusive
+			if za >= zb:
+				continue
+			var inner_x := absf(x + 0.5 - centre.x) <= hw - SHELL - 1.0
+			if paint or not run.is_valid() or end_layer or not inner_x or zb - za <= SHELL * 2:
+				for z in range(za, zb):
+					put.call(x, y, z, colour, paint)
+				continue
+			for z in range(za, za + SHELL):
+				put.call(x, y, z, colour, false)
+			for z in range(zb - SHELL, zb):
+				put.call(x, y, z, colour, false)
+			run.call(x, y, za + SHELL, zb - SHELL, C.CAMO_A if colour == C.CAMO else colour)
 
 
 ## Camouflage by variant, from a point in centimetres: woodland's organic blotches with
