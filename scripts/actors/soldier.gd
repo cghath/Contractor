@@ -840,7 +840,7 @@ func _treat(target: Node3D, item_id: StringName, part: StringName, rushed: bool)
 	rushed = rushed and tourniquet
 	var hurried := tourniquet and under_fire()
 	var label := "%s%s, %s..." % [item.name, " (rushed)" if rushed else "", Vitals.part_name(part)]
-	if not await _timed_care(target, other, treat_seconds(target, item, rushed), label, part):
+	if not await _timed_care(target, other, treat_seconds(target, item, rushed), label, part, item_id):
 		return
 	if not Vitals.has_item(inventory, item_id):
 		_client_message.rpc_id(owner_peer(), "You no longer have a %s" % item.name)
@@ -861,8 +861,9 @@ func _treat(target: Node3D, item_id: StringName, part: StringName, rushed: bool)
 ## Host only. Runs a timed treatment on `target`: this soldier is busy for `seconds` and the
 ## casualty shows as being treated. Returns false (and tells the treater) if it's
 ## interrupted: the treater went down or moved away, the casualty was moved, died or is out
-## of reach. True once the time is up. `part` is where the hands work (the animation).
-func _timed_care(target: Node3D, other: Vitals, seconds: float, label: String, part := &"") -> bool:
+## of reach. True once the time is up. `part` is where the hands work and `item` what with
+## (the animation's technique: CharacterModel.TECHNIQUES).
+func _timed_care(target: Node3D, other: Vitals, seconds: float, label: String, part := &"", item := &"") -> bool:
 	_treat_serial += 1
 	var serial := _treat_serial
 	var my_start := global_position
@@ -871,7 +872,7 @@ func _timed_care(target: Node3D, other: Vitals, seconds: float, label: String, p
 	_server_busy_until = _now() + seconds
 	other.server_begin_treatment(seconds)
 	_client_busy.rpc_id(owner_peer(), seconds, label)
-	var anim := model.server_treat(target, part, seconds)  # kneeling at the wound, for every peer
+	var anim := model.server_treat(target, part, seconds, item)  # kneeling at the wound, with the item's technique, for every peer
 	var end := _now() + seconds
 	while _now() < end:
 		await get_tree().create_timer(clampf(end - _now(), 0.01, TREAT_CHECK_S)).timeout

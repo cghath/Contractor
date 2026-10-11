@@ -104,7 +104,8 @@ attachments (branch `fix3/inventory-molle`).
 
 ### Wave 3: medical depth (6 parts)
 
-**Status:** in progress, one workstream at a time (Captain). 1, IV and IO access, fluids,
+**Status:** built (all six parts) 2026-10-11 by Captain's side, all 14 suites passing;
+waiting for Captain's playtest. One workstream at a time (Captain). 1, IV and IO access, fluids,
 pressure bags and vein collapse, with the stand-in blood recovery removed: built on branch
 `w3/iv-fluids` 2026-10-10 (all 14 suites pass). 2, breathing with per-lung efficiency,
 SpO2 from it, the decompression needle and the pulse oximeter: built on `w3/breathing`
@@ -113,7 +114,8 @@ adenosine, CPR and the defibrillator: built on `w3/heart` (on top of 2) 2026-10-
 surgery kits and the other damage (blast overpressure and blast lung, falls, burns,
 hypothermia, deafness): built on `w3/surgery` (on top of 3) 2026-10-11. All wait for
 Captain's playtest; Captain's local copy (Contractor-dev) follows each part. 5 (below):
-built on `w3/points` 2026-10-11. Next: 6.
+built on `w3/points` 2026-10-11, with blast lung toned down on Captain's call
+(`w3/blast-lung`). 6 (below): built on `w3/animations` 2026-10-11.
 
 Added by Captain (2026-10-11), placed here because they hang off the medical actions:
 - **5, body interaction points** (ACE3's medical rig): on another body, points on the left

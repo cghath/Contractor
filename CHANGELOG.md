@@ -11,6 +11,31 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Wave 3, part 6: medical technique animations
+
+#### Added
+
+- Every treatment has its own hand technique, on the action-animation system, for every
+  peer, on someone else and, where allowed, on yourself:
+  - **Bandages and burn dressings** wrap round the limb (ACE-style pressure wrapping) while
+    the other hand holds the end.
+  - **Gauze** is packed in while the other hand presses beside it.
+  - **Tourniquets** go on high and tight (12 cm above the wound, towards the trunk): strap
+    round, windlass turns, then into the clip.
+  - **Splints** are worked along the limb.
+  - **Chest seals** have their backing peeled, then go on and are smoothed out.
+  - **The decompression needle** goes in slowly at the second intercostal space.
+  - **Injectors** (morphine, epinephrine, atropine, adenosine) are wound up, jabbed home and
+    held.
+  - **IVs**, in an arm or a leg, go in along the vein with the skin stretched, then are
+    taped. The **IO** is pressed hard into the sternum.
+  - **CPR** is compressions 5 cm deep at about 110 a minute, hands stacked. The
+    **defibrillator** gets its pads on, then hands come off clear for the shock.
+  - **The surgery kit** is fine two-handed work.
+  - **Bags** are held up high with a hand at the line.
+  - **Blankets** are swept and tucked round the body, and **the NPA** goes in the nostril
+    with the head tilted.
+
 ### Wave 3, part 5: body interaction points
 
 #### Changed
