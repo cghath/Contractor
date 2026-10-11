@@ -429,6 +429,22 @@ func _test_shop() -> void:
 	var fixed := Economy.server_repair(&"plate_ceramic_l4", state)
 	check(fixed == ItemDB.get_item(&"plate_ceramic_l4").default_state() and Economy.cash() == cash - 384, "repaired, as new")
 	check(Prices.sell_price(&"m4a1") == 560 and Economy.server_sell(&"m4a1") == 560, "selling back fetches 40%")
+	# Every item in data/items.json has a price of its own; CPR (an action, not an item) isn't sold.
+	var unpriced: Array = ItemDB.all_ids().filter(func(id: StringName) -> bool: return not (Prices.data().items as Dictionary).has(String(id)))
+	check(unpriced.is_empty() and Prices.price_of(&"io_kit") == 150 and Prices.price_of(&"surgery_kit_5") == 900
+		and Prices.for_sale(&"pouch_mag_double") and Prices.for_sale(&"radio") and not Prices.for_sale(&"cpr"),
+		"every item priced (unpriced: %s); pouches, radio and kits sold, CPR not" % [unpriced])
+	# A carrier's MOLLE pouches and their contents are report entries of their own.
+	var inv := Inventory.new()
+	check(inv.take(&"plate_carrier") == 1 and inv.take(&"pouch_mag_double") == 1 and not inv.attachment(&"mag_1").is_empty()
+		and inv.take(&"mag_556", 2) == 2 and inv.units_in(Inventory.pouch_container(&"mag_1")) == 2, "a mag pouch on a carrier, two mags in it")
+	var flat := Contracts.inventory_items(inv)
+	var ids: Array = flat.map(func(e: Dictionary) -> String: return e.id)
+	var mags: int = flat.filter(func(e: Dictionary) -> bool: return e.id == "mag_556").reduce(func(n: int, e: Dictionary) -> int: return n + int(e.count), 0)
+	var carrier: Array = flat.filter(func(e: Dictionary) -> bool: return e.id == "plate_carrier")
+	check(ids.count("pouch_mag_double") == 1 and mags == 2 and carrier.size() == 1 and not (carrier[0].state as Dictionary).has("molle"),
+		"the report lists the carrier, its pouch and the mags in it once each (%s)" % [ids])
+	inv.free()
 	var cid := _make_offer("destroy_cache", "compound_01")
 	Contracts.server_accept(cid, {"pay_points": 0, "salvage_points": 0, "support_points": 1, "advance_share": 0.3})
 	cash = Economy.cash()

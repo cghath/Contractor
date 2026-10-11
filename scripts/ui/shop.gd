@@ -32,7 +32,7 @@ func _ready() -> void:
 	box.add_child(_cash)
 	_filter = OptionButton.new()
 	_filter.add_item("Everything")
-	for type: String in ["weapon", "ammo", "armor", "plate", "backpack", "medical", "utility"]:
+	for type: String in ["weapon", "ammo", "armor", "plate", "pouch", "backpack", "medical", "utility"]:
 		_filter.add_item(type.capitalize())
 		_filter.set_item_metadata(_filter.item_count - 1, type)
 	_filter.item_selected.connect(func(_i: int) -> void: refresh())

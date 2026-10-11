@@ -615,7 +615,7 @@ static func report_from_level(level: CompoundLevel, extracted: Array) -> Diction
 	for node in level.get_tree().get_nodes_in_group(WorldItem.GROUP):
 		var item := node as WorldItem
 		if item and not item.is_queued_for_deletion():
-			field.append({"id": String(item.item_id), "count": item.count, "state": item.state.duplicate(true)})
+			field.append_array(flatten_entry({"id": item.item_id, "count": item.count, "state": item.state}))
 	for node in level.get_tree().get_nodes_in_group(&"combatants") + level.get_tree().get_nodes_in_group(&"dead_bodies"):
 		var s := node as Soldier
 		if s == null or out.has(s) or s.is_queued_for_deletion():
@@ -628,18 +628,39 @@ static func report_from_level(level: CompoundLevel, extracted: Array) -> Diction
 	return {"items": items, "field_items": field, "extracted": names, "casualties": casualties}
 
 
-## Everything on a body: worn items, what's in its containers and what's in its hands.
+## Everything on a body: worn items (a carrier's MOLLE pouches and what's in them as entries
+## of their own, see flatten_entry), what's in its containers and what's in its hands.
 static func inventory_items(inv: Inventory) -> Array:
 	var items: Array = []
 	for slot: StringName in Inventory.SLOTS:
 		if inv.slots.get(slot, &"") != &"":
-			items.append({"id": String(inv.slots[slot]), "count": 1, "state": (inv.slot_state.get(slot, {}) as Dictionary).duplicate(true)})
+			items.append_array(flatten_entry({"id": inv.slots[slot], "count": 1, "state": inv.slot_state.get(slot, {})}))
+	# Pouch containers ("molle:...") are the worn carrier's state, already listed with it.
 	for container: StringName in Inventory.CONTAINERS:
 		for entry: Dictionary in inv.containers.get(container, []):
-			items.append({"id": String(entry.id), "count": int(entry.get("count", 1)), "state": (entry.get("state", {}) as Dictionary).duplicate(true)})
+			items.append_array(flatten_entry(entry))
 	if inv.hands != &"":
 		items.append({"id": String(inv.hands), "count": 1, "state": {}})
 	return items
+
+
+## One inventory or world entry ({"id", "count", "state"?}) as report entries: a carrier's
+## MOLLE attachments (its state's "molle") and a pouch's contents (its state's "held") come
+## out as entries of their own, so each is valued, can be a salvage pick and counts for an
+## objective (intel carried in a pouch). Copies; the entry is left as it was.
+static func flatten_entry(entry: Dictionary) -> Array:
+	var state: Dictionary = (entry.get("state", {}) as Dictionary).duplicate(true)
+	var molle: Dictionary = state.get("molle", {})
+	var held: Array = state.get("held", [])
+	state.erase("molle")
+	state.erase("held")
+	var out: Array = [{"id": String(entry.get("id", "")), "count": int(entry.get("count", 1)), "state": state}]
+	for point: Variant in molle:
+		var att: Dictionary = molle[point]
+		out.append_array(flatten_entry({"id": att.get("id", ""), "count": 1, "state": {"held": att.get("held", [])}}))
+	for inner: Dictionary in held:
+		out.append_array(flatten_entry(inner))
+	return out
 
 
 # --- Requests (any peer) -----------------------------------------------------------------
