@@ -11,6 +11,15 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Wave 4 groundwork (cghath, 2026-10-11)
+
+#### Added
+
+- `Campaign` autoload (`autoload/campaign.gd`): the host-owned campaign save
+  (`user://saves/campaign_01.json`) that the wave 4 mission loop keeps its money, contracts
+  and roster in, one section per part. `CompoundLevel.map_area()` gives the map its playable
+  area. Nothing uses either yet, so play is unchanged.
+
 ### AI scavenging, visible tourniquets and IFAKs, and looting MOLLE pouches (Captain, 2026-10-11)
 
 #### Added
