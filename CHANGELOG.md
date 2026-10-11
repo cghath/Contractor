@@ -17,18 +17,76 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 - **A female body for soldiers** (`scripts/art/voxel_art.gd`, `_head_f`, `_torso_f`,
   `_upper_arm_f`, `_forearm_f`, `_leg_f`, `_thigh_f`, `_shin_f`): the same Stormworks
-  low-poly style, on the same joints and pivots as the male parts, so animations, plates,
-  carriers, helmets, pouches and held weapons fit unchanged. Narrower shoulders and slimmer
-  deltoids and arms, a narrower waist over wider hips with a seat, a modest chest that stays
+  low-poly style, on the same frames and pivots as the male parts, so animations, plates,
+  carriers, helmets, pouches and held weapons fit. Her own proportions, loosely after real
+  averages: drawn at 93% of the male model (about 1.68 m to 1.80 m), with gear and hitboxes
+  scaling with her, and shoulder joints at 0.225 m inside her own deltoids so her arms don't
+  float (`CharacterModel.FEMALE_SCALE`, `FEMALE_SHOULDER_X`). Narrower shoulders and slimmer
+  deltoids and arms, a narrower waist over fuller hips (0.36 m) with a seat, a modest chest that stays
   inside the carriers' plate pockets, slimmer legs, smaller hands and boots, and a smaller
   head with a softer jaw, thin brows, lashes, lips and the hair in a low bun under the
-  helmet's rim.
+  helmet's rim, with hair framing the face.
 - **Choosing the body:** `CharacterModel.body` ("male", the default, or "female"),
   `Soldier.body`, and an optional `"body"` in `CompoundLevel.spawn_soldier` data (it rides
   the spawn data, so every peer builds the same body). `Soldier.body_record` saves it, so a
   dead soldier's body keeps it. `VoxelArt.body_part(part, body)` names the model
-  ("torso" or "torso_f"). Nothing picks the female body yet: no menu option and no AI mix.
+  ("torso" or "torso_f"). Players can't pick it yet (no menu option).
   Male models are unchanged, byte for byte.
+- **Who's a woman follows the force's norms** (`scripts/ai/demographics.gd`, Captain's call): an AI
+  soldier's chance follows their nationality and role. A medic is at their nation's overall
+  share and every other squad role at 0.3 of it, since women are fewer in combat arms. Overall
+  shares: US 17.7% (DoD 2023), Canada 16.3% (DND 2024), UK 11.9% (MOD 2024), Russia about 4%,
+  China about 4.5%. Iran (women only in medical posts) and insurgent cells: none in field
+  squads. The PMC follows each contractor's nation. A US rifleman is a woman about 5% of the
+  time, a US medic about 18%. Russian surnames take the feminine form (Ivanova).
+
+### AI soldiers have names, on name tapes (Captain, 2026-10-11)
+
+#### Added
+
+- **Names:** every AI soldier gets a surname and a nationality (`scripts/ai/names.gd`), and
+  is called by it everywhere a callsign used to show: callouts ("Martinez: Reloading!",
+  "Man down! Thomas is down"), the HUD squad list, the command menu, AI status lines and
+  the interaction menu. The node keeps its callsign (Alpha, Bravo...) inside the code.
+  - **Your PMC** hires US, UK and Canadian contractors (60/25/15). Each pool is that
+    country's most common surnames.
+  - **The insurgents** use regional surnames. Russian, Chinese and Iranian pools are ready
+    for the faction wave.
+  - **Names are stable and unique:** a callsign keeps its name, and no two soldiers on a
+    side share one. A recruit who replaces a fallen squadmate gets a name of their own.
+- **Name tapes:** the surname, in capitals, on a tan tape on the carrier's loop panel. It
+  replaces the flag patch there.
+
+### Weapon holds, and left- or right-handed shooters (Captain, 2026-10-11)
+
+#### Added
+
+- **Left-handed shooters:**
+  - **Players** pick "You shoot: Right-handed / Left-handed" on the main menu. The pick is
+    saved between sessions (`user://settings.cfg`) and sent to the host on join, like the role.
+  - **AI soldiers** are left-handed at the real rate for men, 11% (about 10.6% of people
+    overall, men about 1.23 times as likely as women; `scripts/actors/handedness.gd` has the
+    sources). Each roll is seeded by the soldier's name, so a callsign keeps its shoulder.
+  - **What mirrors:** the rifle shoulder, the firing and support hands, the sling, the
+    holster, the draw, and your first-person hip view.
+- **Everyone sees you shoulder your weapon:** aiming (`Soldier.is_aiming`) is replicated.
+
+#### Fixed
+
+- **Weapon holds (third person):**
+  - **Stock in the shoulder:** a rifle's butt sits in the firing shoulder's pocket. Aiming,
+    it points straight out and the head dips onto the optic.
+  - **At the ready,** the stock stays in the shoulder and the muzzle dips 30 degrees, in
+    across the body. Before, the rifle floated in front of the chest with its stock inside
+    the body.
+  - **Hands on the weapon:** the support shoulder comes forward as a shooter's does, and the
+    support hand takes the handguard within reach (up to 0.52 m from the butt). Both hands
+    land on the weapon in every hold.
+  - **Pistols** are pushed out two-handed at the eye line when aiming, and held low in front
+    of the chest at the ready.
+  - **Slung:** the rifle hangs diagonally across the front of the carrier, clear of the
+    pouches, with the stock under the firing-side armpit and the muzzle at the other thigh.
+    Before, it hung straight down beside the arm.
 
 ### Stormworks-style character models (Captain, 2026-10-11)
 
@@ -54,6 +112,16 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
     0.26 m, over the shoulder joints, and the trapezius runs flat in to the neck. The upper
     arms taper into them, so the arms hang out from under the shoulders and turn under them.
     The arms used to hang 4 cm clear of a narrow trunk, like separate columns.
+  - **Plate carriers less blocky:**
+    - **Shape:** the pockets have bevelled edges and a chamfered top, and the cummerbund takes
+      in at the waist.
+    - **Shoulders:** the shoulder straps are padded pads that arch over the deltoids, where
+      they used to be solid blocks.
+    - **Details:** PALS webbing rows across the front and back panels, seams round the plate
+      window, a loop panel with a flag patch at the top of the front, and a drag handle at the
+      top of the back.
+    - **Backpack straps:** a worn pack's padded straps come over the shoulders and down the
+      front edges of the plate pocket, with a sternum strap.
   - **Front pouches** sit on what's behind them: on the plate face (in the pocket's window),
     or on the cummerbund beside the pocket. They used to float 2 to 4 cm off it. The medium
     carrier's TQ holder moved out to the pocket's edge.

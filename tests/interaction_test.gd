@@ -128,7 +128,7 @@ func _test_actions_for() -> void:
 		"with an IO kit and an IV in the kit, one entry each, IO first in arrest (%s)" % [lines])
 	check(_ids(player, hostile) == [&"carry", &"drag", &"check_condition"], "downed enemy: Carry, Drag, Check condition (%s)" % [_ids(player, hostile)])
 	var report := InteractionMenu.perform(player, _action(player, alpha, &"check_condition"))
-	check(report.begins_with("Alpha: " + alpha.vitals.condition_text()) and report.contains("\n"), "Check condition reads condition and wounds (%s)" % report.replace("\n", " | "))
+	check(report.begins_with(alpha.display_name() + ": " + alpha.vitals.condition_text()) and report.contains("\n"), "Check condition reads condition and wounds (%s)" % report.replace("\n", " | "))
 	hostile.vitals.server_reset_health()
 	dummy.vitals.server_reset_health()
 

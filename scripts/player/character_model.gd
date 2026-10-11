@@ -33,6 +33,12 @@ const UPPER_ARM := 0.32                           # shoulder to elbow
 const FOREARM := 0.25                             # elbow to palm centre
 ## Elbows bend towards these (torso-local, before normalising): out, down and back.
 const POLE_RIGHT := Vector3(0.7, -1.0, 0.35)
+## Holding a weapon, the support shoulder comes this far forward and in (torso-local, for
+## the left shoulder of a right-handed shooter; mirrored), as a shooter's does, so the
+## support hand reaches the handguard.
+const SUPPORT_REACH := Vector3(0.08, -0.01, -0.14)
+## Shouldering a rifle, the head dips this much (radians) to bring the eye down to the optic.
+const AIM_HEAD_DIP := 0.14
 const MAX_SPEED := 6.5
 ## Hip joint to sole. Legs have knees (THIGH above, the rest below): a lower stance bends
 ## them, two-bone, with the feet placed under the hips (see _leg_angles).
@@ -208,6 +214,12 @@ const VIEW_LOWER_PITCH := 0.9
 var hold := Hold.NONE
 ## Head pitch in radians (positive looks up), set by the owner each frame.
 var look_pitch := 0.0
+## Shouldering the weapon (Soldier.is_aiming, replicated): GearRig raises it from the ready.
+var aiming := false
+## Shoots from the left shoulder (Soldier.left_handed): the hands and the weapon holds mirror.
+var left_handed := false
+## Text on the carrier's name tape (an AI's surname, upper case; "" for none). GearRig draws it.
+var name_tape := ""
 ## While true the left hand works the magazine well instead of the support point.
 var reloading := false
 ## Lying face down, head forward (see lay_down). Overrides `pose`.
@@ -251,6 +263,8 @@ var _reaching: Dictionary = {}   # the reaching pose for the current action ({} 
 var _server_n := 0            # host: action serials handed out
 var _draw_point := Vector3.ZERO  # torso-local: where the weapon being drawn sits
 var _draw_t := -1.0           # seconds into a weapon draw (< 0: none)
+var _held_weapon := false     # what's held is a weapon (set_held)
+var _aim_w := 0.0             # 0 at the ready .. 1 shouldered, eased
 var _attach := 0.0            # 0..1: how far the drawn casualty has moved onto its carrier
 var _attached := Transform3D.IDENTITY  # where its carrier holds it (world space)
 var _hand_source: Array[String] = ["", ""]
@@ -515,11 +529,15 @@ static func mount_for_item(item: ItemData) -> StringName:
 	return SLOT_MOUNTS.get(item.slot, &"pouch")
 
 
-## Hands go to `grip` (right) and `support` (left), given in `node`'s local space.
-func set_held(node: Node3D, grip: Vector3, support: Vector3) -> void:
+## The firing hand goes to `grip` and the other to `support`, given in `node`'s local space
+## (the right hand fires, or the left for a left-handed shooter). `weapon`: a weapon, held
+## shouldered or at the ready, so the support shoulder comes forward (SUPPORT_REACH); false
+## for a bulky item carried in both arms.
+func set_held(node: Node3D, grip: Vector3, support: Vector3, weapon := true) -> void:
 	_held = node
 	_grip = grip
 	_support = support
+	_held_weapon = weapon
 
 
 func clear_held() -> void:
@@ -535,8 +553,9 @@ func hand_position(right: bool) -> Vector3:
 func hand_error() -> float:
 	if not is_instance_valid(_held):
 		return -1.0
-	return maxf(hand_position(true).distance_to(_held.to_global(_grip)),
-		hand_position(false).distance_to(_held.to_global(_support)))
+	var lefty := left_handed and _held_weapon
+	return maxf(hand_position(not lefty).distance_to(_held.to_global(_grip)),
+		hand_position(lefty).distance_to(_held.to_global(_support)))
 
 
 # --- Actions: what peers see ------------------------------------------------------------
@@ -806,7 +825,8 @@ func _process(delta: float) -> void:
 	else:
 		# Head and weapon keep facing where the owner looks, whatever the upper body's lean.
 		var lean := 0.0 if downed else _upper_body_pitch((_shown.root as Transform3D).basis * (_shown.torso as Transform3D).basis, _yaw_shown)
-		head.rotation.x = clampf(look_pitch, -0.7, 0.7) * 0.8 - lean
+		_aim_w = move_toward(_aim_w, 1.0 if aiming and _held_weapon and is_instance_valid(_held) else 0.0, delta * 6.0)
+		head.rotation.x = clampf(look_pitch, -0.7, 0.7) * 0.8 - lean - AIM_HEAD_DIP * smoothstep(0.0, 1.0, _aim_w)
 		hands_anchor.rotation.x = clampf(look_pitch, -0.8, 0.8) * 0.8 - lean
 	_update_arms(delta, carry, swing)
 
@@ -920,6 +940,7 @@ func _update_attachment(delta: float, carry: Dictionary) -> void:
 ## swings free.
 func _update_arms(delta: float, carry: Dictionary, swing: float) -> void:
 	var goals := _arm_goals(carry)
+	_place_shoulders(delta)
 	for i in 2:
 		var key: String = goals[i][0]
 		var point: Variant = goals[i][1]
@@ -943,6 +964,19 @@ func _update_arms(delta: float, carry: Dictionary, swing: float) -> void:
 	_arms_posed = true
 
 
+## Shoulders: at SHOULDER, except that the support shoulder comes forward (SUPPORT_REACH)
+## while a weapon is in the hands. Eased, so the reach grows and settles with the draw.
+func _place_shoulders(delta: float) -> void:
+	var support := 0 if left_handed else 1
+	var reaching := is_instance_valid(_held) and _held_weapon and not downed
+	for i in 2:
+		var side := 1.0 if i == 0 else -1.0
+		var goal := shoulder() * Vector3(side, 1, 1)
+		if reaching and i == support:
+			goal += SUPPORT_REACH * Vector3(-side, 1, 1)
+		_upper[i].position = _upper[i].position.move_toward(goal, delta * 0.8)
+
+
 ## [[goal key, torso-local point or null to swing], ...] for the right and left hand.
 func _arm_goals(carry: Dictionary) -> Array:
 	var mode: StringName = carry.get("mode", &"")
@@ -961,7 +995,8 @@ func _arm_goals(carry: Dictionary) -> Array:
 		if not acting.is_empty():
 			return acting
 	if _draw_t >= 0.0 and _draw_t < DRAW_S * DRAW_GRAB:
-		return [["draw", _draw_point], held[1]]
+		# The firing hand fetches the weapon from its sling or holster.
+		return [held[0], ["draw", _draw_point]] if left_handed else [["draw", _draw_point], held[1]]
 	return held
 
 
@@ -973,7 +1008,9 @@ func _held_goals() -> Array:
 	if reloading:
 		# Hand drops under the receiver and works the magazine.
 		support = _grip.lerp(_support, 0.35) + Vector3(0, -0.11 + sin(_time * 9.0) * 0.025, 0)
-	return [[key, torso.to_local(_held.to_global(_grip))], [key, torso.to_local(_held.to_global(support))]]
+	var firing := [key, torso.to_local(_held.to_global(_grip))]
+	var other := [key, torso.to_local(_held.to_global(support))]
+	return [other, firing] if left_handed and _held_weapon else [firing, other]
 
 
 ## The hands for the current action, by phase; [] once its hand work is done.

@@ -260,7 +260,7 @@ func _test_medic_fights_only_close() -> void:
 	ai._last_contact = Soldier._now()
 	ai._suppressing = false
 	ai._care_reach(true)
-	check(ai._suppressing and not ai._has_destination and ai.status_text() == "Covering Foxtrot",
+	check(ai._suppressing and not ai._has_destination and ai.status_text() == "Covering " + ai.casualty.display_name(),
 		"pinned with the casualty in the open, it holds and suppresses first (%s)" % ai.status_text())
 	golf.suppression = 0.0
 	ai._suppressing = false
@@ -328,7 +328,7 @@ func _test_blocked_route() -> void:
 			and _flat(golf.global_position, echo.global_position) <= SquadAI.CASUALTY_REACH + 0.5, BLOCKED_REACH_S)
 	check(reached, "Golf gets round the player and reaches Echo in %.1f s (limit %.0f; %s)" % [Soldier._now() - start, BLOCKED_REACH_S, statuses.keys()])
 	# Knocked out by pain with blood to spare, and the lead close by: watched over where he lies.
-	var watched := await _wait_until(func() -> bool: return golf.ai_status == "Watching over Echo", 40.0)  # NPA, a line, a bag, then morphine
+	var watched := await _wait_until(func() -> bool: return golf.ai_status == "Watching over " + echo.display_name(), 40.0)  # NPA, a line, a bag, then morphine
 	await _seconds(2.0)
 	check(watched and golf_ai.casualty == echo and echo.carried_by == null and _flat(golf.global_position, echo.global_position) <= SquadAI.CASUALTY_REACH + 0.5,
 		"once his airway is seen to, Golf stays with him where he lies (%s, %s)" % [golf.ai_status, echo.vitals.wound_list().size()])

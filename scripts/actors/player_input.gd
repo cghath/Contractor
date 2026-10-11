@@ -267,9 +267,10 @@ func _update_aim(delta: float) -> void:
 		and body.inventory.hands == &"" and not body.is_reloading and Input.is_action_pressed(&"aim")
 	var fov := float(weapon.stats.get("ads_fov", 55)) if body.is_aiming else BASE_FOV
 	body.camera.fov = lerpf(body.camera.fov, fov, minf(delta * 12.0, 1.0))
-	var ads_view := ADS_EYE - VoxelArt.sight_point(VoxelArt.model_for(weapon)) if weapon else HIP_VIEW
+	var hip_view := HIP_VIEW * Vector3(-1.0 if body.left_handed else 1.0, 1, 1)  # off the firing shoulder
+	var ads_view := ADS_EYE - VoxelArt.sight_point(VoxelArt.model_for(weapon)) if weapon else hip_view
 	var lowered := CharacterModel.VIEW_LOWER_OFFSET * body.model.view_lower()  # ducks while the hands are busy
-	body.view_model.position = body.view_model.position.lerp((ads_view if body.is_aiming else HIP_VIEW) + lowered, minf(delta * 14.0, 1.0))
+	body.view_model.position = body.view_model.position.lerp((ads_view if body.is_aiming else hip_view) + lowered, minf(delta * 14.0, 1.0))
 
 
 func _try_reload() -> void:

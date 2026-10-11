@@ -79,6 +79,9 @@ properties/9/replication_mode = 2
 properties/10/path = NodePath("Movement:mounted")
 properties/10/spawn = true
 properties/10/replication_mode = 2
+properties/11/path = NodePath(".:is_aiming")
+properties/11/spawn = true
+properties/11/replication_mode = 2
 
 [sub_resource type="SceneReplicationConfig" id="SceneReplicationConfig_server"]
 properties/0/path = NodePath("Inventory:net_state")
@@ -108,6 +111,15 @@ properties/7/replication_mode = 2
 properties/8/path = NodePath("Model:action_net")
 properties/8/spawn = true
 properties/8/replication_mode = 2
+properties/9/path = NodePath(".:left_handed")
+properties/9/spawn = true
+properties/9/replication_mode = 2
+properties/10/path = NodePath(".:person_name")
+properties/10/spawn = true
+properties/10/replication_mode = 2
+properties/11/path = NodePath(".:nation")
+properties/11/spawn = true
+properties/11/replication_mode = 2
 
 [node name="Soldier" type="CharacterBody3D"]
 collision_layer = 16

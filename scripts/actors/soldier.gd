@@ -61,6 +61,8 @@ const MAX_BODIES := 12
 var active_slot: StringName = &"primary"
 ## Owner-driven, replicated so others see the reload pose.
 var is_reloading := false
+## Owner-driven (players: the aim key; AI: SquadAI), replicated so everyone sees the rifle
+## shouldered.
 var is_aiming := false
 var load_mult := 1.0
 ## The local player's HUD (null for everyone else). Lives on PlayerInput.
@@ -126,6 +128,13 @@ var role: StringName = &""
 var fire_team := -1
 var squad_slot := -1
 var color_team := ""
+## Shoots from the left shoulder (Handedness). Set by the host (a player's pick, an AI's roll)
+## and replicated by ServerSync; the model mirrors the weapon holds.
+var left_handed := false
+## An AI soldier's surname and nationality (Names), set by the host when it spawns and
+## replicated by ServerSync. display_name() shows the name; the node keeps its callsign.
+var person_name := ""
+var nation := ""
 ## Host only: when this body died (Soldier._now()), for the body cap; -1 while alive.
 var died_at := -1.0
 ## Host only (tests may lower it): the body cap in force.
@@ -250,6 +259,9 @@ func _process(_delta: float) -> void:
 	# Runs on every peer: active_slot, inventory and head rotation are replicated.
 	model.look_pitch = head.rotation.x
 	model.reloading = is_reloading
+	model.aiming = is_aiming
+	model.left_handed = left_handed
+	model.name_tape = person_name.to_upper()
 	movement.apply_pose()  # model pose, hitbox pose and capsule from the replicated stance
 	CharacterModel.lay_down(self, model, not vitals.is_up())
 	if collision_layer != 0 and is_ai() and vitals.is_dead():
@@ -1021,7 +1033,9 @@ var carry_mode: StringName = &""
 func display_name() -> String:
 	if body_label != "":
 		return body_label
-	return String(name) if is_ai() else "Player %s" % name
+	if is_ai():
+		return person_name if person_name != "" else String(name)
+	return "Player %s" % name
 
 
 @rpc("any_peer", "call_local", "reliable")

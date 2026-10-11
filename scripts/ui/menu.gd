@@ -28,6 +28,7 @@ func _ready() -> void:
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(title)
 	box.add_child(_role_picker())
+	box.add_child(_hand_picker())
 	box.add_child(_button("Play (host a session)", host))
 	box.add_child(_hint("Solo play is a session nobody else has joined."))
 	_address = LineEdit.new()
@@ -97,6 +98,22 @@ func _role_picker() -> Control:
 			role_picker.select(role_picker.item_count - 1)
 	role_picker.item_selected.connect(func(index: int) -> void: Roles.local_choice = role_picker.get_item_metadata(index))
 	row.add_child(role_picker)
+	return row
+
+
+## Which shoulder you shoot from (Handedness), saved between sessions; the host gets it on join.
+func _hand_picker() -> Control:
+	var row := HBoxContainer.new()
+	var label := Label.new()
+	label.text = "You shoot"
+	row.add_child(label)
+	var picker := OptionButton.new()
+	picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	picker.add_item("Right-handed")
+	picker.add_item("Left-handed")
+	picker.select(1 if Handedness.local_left() else 0)
+	picker.item_selected.connect(func(index: int) -> void: Handedness.set_local_left(index == 1))
+	row.add_child(picker)
 	return row
 
 

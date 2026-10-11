@@ -345,7 +345,7 @@ func _report() -> void:
 	var lines := PackedStringArray()
 	for s in roster():
 		if String(s.name) in selected:
-			lines.append("%s [%s]: %s (%s)" % [s.name, unit_tag(s), s.ai_status, s.vitals.condition_text()])
+			lines.append("%s [%s]: %s (%s)" % [s.display_name(), unit_tag(s), s.ai_status, s.vitals.condition_text()])
 	player._hud.flash("\n".join(lines))
 
 
@@ -354,7 +354,13 @@ func _names() -> String:
 	for s in roster():
 		if s.is_ai():
 			all += 1
-	return "All" if selected.size() == all else ", ".join(selected)
+	if selected.size() == all:
+		return "All"
+	var shown := PackedStringArray()
+	for s in roster():
+		if String(s.name) in selected:
+			shown.append(s.display_name())  # selection is by callsign; show their names
+	return ", ".join(shown)
 
 
 func _redraw() -> void:
