@@ -11,6 +11,13 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Medical voxel wounds on the current dev (merge)
+
+#### Changed
+
+- **World test:** the doorway shot aims at the pelvis; at 0.6 m on the man's centre line it
+  passed between his legs, which hits on the body's real shape (BodyVolume) now allow.
+
 ### A hired squadmate is one person (Captain, 2026-10-11; wave 4B groundwork)
 
 #### Changed
