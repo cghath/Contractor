@@ -1,0 +1,131 @@
+{
+	"_note": "PLACEHOLDER mission types, zones and contract settings for wave 4 (W10). Noah's mission types and the mission brainstorm doc replace mission_types (MissionRegistry reads them; MissionRegistry.register_type adds more at runtime). Every number in settings is Proposed and tunable.",
+
+	"mission_types": [
+		{"type": "clear_compound", "name": "Clear a compound", "brief": "Hostiles hold a walled compound. Clear it of every fighter.",
+		 "module": "compound", "base_pay": 42000, "days": 1, "enemy_count": [4, 12], "enemy_quality": [0.3, 0.7],
+		 "threat_pool": ["mg_nest", "sniper", "ied", "qrf"],
+		 "objectives": [
+			{"kind": "clear_area", "site": "compound", "text": "Clear the compound of hostiles"},
+			{"kind": "extract_item", "site": "intel", "text": "Bonus: bring out the hard case", "optional": true, "bonus_share": 0.1}
+		 ]},
+		{"type": "recover_hvt", "name": "Recover an HVT", "brief": "A person of interest is held in the compound. Bring them out alive.",
+		 "module": "compound", "base_pay": 55000, "days": 1, "enemy_count": [4, 10], "enemy_quality": [0.35, 0.75],
+		 "threat_pool": ["sniper", "qrf", "mortar"],
+		 "objectives": [
+			{"kind": "deliver_hvt", "site": "hvt", "text": "Capture the HVT and bring them to extraction alive"}
+		 ]},
+		{"type": "retrieve_intel", "name": "Retrieve intel", "brief": "A hard case of documents sits in the compound. Carry it out.",
+		 "module": "compound", "base_pay": 38000, "days": 1, "enemy_count": [3, 9], "enemy_quality": [0.3, 0.65],
+		 "threat_pool": ["ied", "mg_nest", "qrf"],
+		 "objectives": [
+			{"kind": "extract_item", "site": "intel", "text": "Carry the intel case out of the zone"}
+		 ]},
+		{"type": "destroy_cache", "name": "Destroy a cache", "brief": "A weapons cache is stacked in the compound. Blow it.",
+		 "module": "compound", "base_pay": 46000, "days": 1, "enemy_count": [4, 11], "enemy_quality": [0.3, 0.7],
+		 "threat_pool": ["mg_nest", "aa", "armor", "ied"],
+		 "objectives": [
+			{"kind": "destroy_cache", "site": "cache", "text": "Destroy the weapons cache (explosives or a placed charge)"}
+		 ]}
+	],
+
+	"modules": {
+		"compound": {"name": "Walled compound", "scene": "res://scenes/levels/compound.tscn",
+		 "sites": {
+			"compound": {"rect": [-20, -20, 40, 40]},
+			"intel": {"pos": [0, 0.5, -10], "items": ["hvt_case"], "tags": ["intel"]},
+			"hvt": {"pos": [0, 0.1, -8], "hvt": "hvt_compound"},
+			"cache": {"box": [[-13, 0, -11], [-11, 2, -10]], "cache": "cache_compound"}
+		 }}
+	},
+
+	"regions": [
+		{"region": "coast", "name": "Coast", "travel_days": 1, "base": "lhd"},
+		{"region": "inland", "name": "Inland", "travel_days": 2, "base": "fob"}
+	],
+
+	"zones": [
+		{"zone_id": "compound_01", "name": "Gray-box compound", "region": "coast", "kind": "contract", "modules": ["compound"]},
+		{"zone_id": "wadi_farm", "name": "Wadi farm", "region": "inland", "kind": "contract", "modules": ["compound"]},
+		{"zone_id": "harbour_yard", "name": "Harbour yard", "region": "coast", "kind": "contract", "modules": ["compound"]},
+		{"zone_id": "ridge_hot", "name": "Black Ridge hills", "region": "inland", "kind": "hot", "faction": "meridian", "modules": ["compound"]},
+		{"zone_id": "coast_hot", "name": "Salt flats", "region": "coast", "kind": "hot", "faction": "salvage_union", "modules": ["compound"]}
+	],
+
+	"fixers": [
+		{"fixer": "Halloran", "faction": "meridian", "min_rep": 20, "pay_mult": 1.6, "types": ["recover_hvt", "retrieve_intel"]},
+		{"fixer": "Mama Rook", "faction": "salvage_union", "min_rep": 15, "pay_mult": 1.5, "types": ["destroy_cache", "retrieve_intel"]}
+	],
+
+	"threats": {
+		"mg_nest": {"name": "MG nest", "weight": 0.5},
+		"sniper": {"name": "Sniper", "weight": 0.5},
+		"ied": {"name": "IEDs", "weight": 0.5},
+		"qrf": {"name": "QRF", "weight": 1.0},
+		"mortar": {"name": "Mortars", "weight": 1.0},
+		"aa": {"name": "AA", "weight": 1.0},
+		"armor": {"name": "Armor", "weight": 1.5}
+	},
+
+	"intel_items": ["hvt_case"],
+
+	"settings": {
+		"start_cash": 150000,
+		"start_day": 1,
+		"week_days": 7,
+		"board_size": 6,
+		"safe_offers": 1,
+		"safe_pay_mult": 0.7,
+		"hot_zone_chance": 0.25,
+		"hot_zone_pay_mult": 1.4,
+		"hot_zone_enemy_mult": 1.5,
+		"offer_days": 5,
+		"accept_window_days": 7,
+		"max_held": 4,
+		"difficulty_pay": [0, 0.6, 0.85, 1.1, 1.4, 1.8],
+		"pay_round": 500,
+		"intel_accuracy": [0.3, 0.95],
+		"fixer_intel_accuracy": [0.6, 0.95],
+		"lead_intel_accuracy": [0.8, 0.95],
+		"lead_pay_mult": 1.2,
+		"understate_chance_low_intel": 0.35,
+		"understate_chance_high_intel": 0.05,
+		"advance_share": 0.3,
+		"advance_min": 0.1,
+		"advance_max": 0.5,
+		"advance_step": 0.1,
+		"points_base": 4,
+		"points_per_tier": 1,
+		"pay_per_point": 0.1,
+		"salvage_base": 0.1,
+		"salvage_per_point": 0.1,
+		"salvage_max": 0.7,
+		"support_per_point": 5000,
+		"renegotiate_pay_per_step": 0.25,
+		"clean_bonus_share": 0.1,
+		"civilian_fine": 2500,
+		"civilian_rep_employer": -2,
+		"civilian_rep_locals": -4,
+		"civilian_void_at": 8,
+		"rep_success": 5,
+		"rep_target_on_success": -3,
+		"rep_fail": -6,
+		"rep_lapse": -3,
+		"rep_abort": -4,
+		"intel_sale_price": 6000,
+		"intel_sale_risk": 0.35,
+		"intel_sale_rep_client": -8,
+		"intel_sale_rep_buyer": 2,
+		"intel_lead_rep": 2,
+		"loan_amount": 50000,
+		"loan_interest": 0.1,
+		"loan_weeks": 8,
+		"loan_max": 150000,
+		"safety_floor_cash": 20000,
+		"clear_arm_timeout_s": 20.0,
+		"cache_destroyed_share": 0.4,
+		"charge_fuse_s": 5.0,
+		"charge_radius_m": 1.6,
+		"charge_reach_m": 3.0
+	}
+}

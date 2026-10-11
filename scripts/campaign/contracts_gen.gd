@@ -1,0 +1,221 @@
+class_name ContractGen
+extends RefCounted
+## Contract generation and the deal maths, pure (no campaign state): the board's offers from
+## a seed, the 1-5 difficulty rating, the briefing that sometimes understates the threat, and
+## MW5-style negotiation (wave 4, W10). Contracts (the autoload) owns the offers and calls this.
+##
+## A contract is a JSON-safe Dictionary:
+## - "cid" (given by Contracts), "type", "title", "brief", "source" ("board", "fixer",
+##   "safe" or "lead"), "fixer", "employer", "target" (faction ids);
+## - "zone_id", "zone_name", "zone_kind" ("contract" or "hot"), "region", "module";
+## - what the briefing says: "rated" (1-5), "enemy_est", "quality_est", "threats_known",
+##   "intel_accuracy" (0-1: how far to trust it);
+## - the truth, host only (public_view strips it until "revealed"): "true_rating",
+##   "enemy_count", "quality", "threats", "understated";
+## - "base_pay", "days", "objectives" (the type's templates), "offered_day", "expires_day",
+##   "state" ("offered", then Contracts' states), and once accepted "terms" and "deal".
+
+## Keys only the host knows until the threat is revealed.
+const HIDDEN_KEYS := ["true_rating", "enemy_count", "quality", "threats", "understated"]
+
+
+static func S(key: String) -> float:
+	return MissionRegistry.setting_f(key)
+
+
+## The 1-5 difficulty rating from enemy size and quality and the known threats (Proposed
+## formula): 4 average fighters with nothing else is a 1, each 6 more fighters, 0.4 of
+## quality and each threat's weight (armor 1.5, AA or mortars 1, an MG nest 0.5) add a step.
+static func rating(enemy_count: int, quality: float, threats: Array) -> int:
+	var score := (enemy_count - 4) / 6.0 + (quality - 0.3) * 2.5
+	for t: Variant in threats:
+		score += float(MissionRegistry.threat(String(t)).get("weight", 0.5))
+	return clampi(1 + floori(score), 1, 5)
+
+
+## The chance a briefing understates the threat: likelier on poor intel (Proposed: 35% at
+## no intel, 5% at perfect intel).
+static func understate_chance(intel_accuracy: float) -> float:
+	return lerpf(S("understate_chance_low_intel"), S("understate_chance_high_intel"), clampf(intel_accuracy, 0.0, 1.0))
+
+
+## The board for one day: `count` offers from `board_seed`, the same every time for the same
+## seed and inputs. `rep` is reputation by faction (fixers whose faction rep reaches their
+## "min_rep" add one special job each); the first SAFE_OFFERS are cheap low-risk work (the
+## safety floor).
+static func generate_board(board_seed: int, day: int, rep: Dictionary, count: int) -> Array:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = board_seed
+	var offers: Array = []
+	for i in mini(MissionRegistry.setting_i("safe_offers", 1), count):
+		offers.append(generate(rng, {"day": day, "source": "safe"}))
+	while offers.size() < count:
+		offers.append(generate(rng, {"day": day, "source": "board"}))
+	for fixer: Dictionary in MissionRegistry.fixers():
+		if int(rep.get(String(fixer.faction), 0)) >= int(fixer.min_rep):
+			offers.append(generate(rng, {"day": day, "source": "fixer", "fixer": fixer}))
+	return offers
+
+
+## One contract. `ctx`: "day", "source" ("board", "safe", "fixer", "lead"), and optionally
+## "fixer" (a fixers entry), "type", "zone_kind", "zone_id", "employer".
+static func generate(rng: RandomNumberGenerator, ctx: Dictionary) -> Dictionary:
+	var source: String = ctx.get("source", "board")
+	var fixer: Dictionary = ctx.get("fixer", {})
+	var safe := source == "safe"
+	# What kind of job, where.
+	var kind: String = ctx.get("zone_kind", "contract" if safe or source == "fixer" or rng.randf() >= S("hot_zone_chance") else "hot")
+	var type_ids: Array = fixer.get("types", MissionRegistry.types()) if ctx.get("type", "") == "" else [ctx.type]
+	type_ids = type_ids.filter(func(t: String) -> bool: return not MissionRegistry.type_def(t).is_empty())
+	if type_ids.is_empty():
+		type_ids = MissionRegistry.types()
+	var type_id: String = type_ids[rng.randi() % type_ids.size()]
+	var def := MissionRegistry.type_def(type_id)
+	var zone := MissionRegistry.zone(ctx.get("zone_id", ""))
+	if zone.is_empty():
+		var options := MissionRegistry.zones_for(def.module, kind)
+		if options.is_empty():
+			kind = "contract"
+			options = MissionRegistry.zones_for(def.module, kind)
+		zone = options[rng.randi() % options.size()] if not options.is_empty() else {"zone_id": "unknown", "name": "Unknown", "region": "", "kind": kind}
+	kind = String(zone.get("kind", kind))
+	var hot := kind == "hot"
+	# Who pays: the fixer's faction, the hot zone's faction, or any employer.
+	var employers := MissionRegistry.employers()
+	var employer: String = ctx.get("employer", "")
+	if employer == "":
+		employer = fixer.get("faction", zone.get("faction", employers[rng.randi() % employers.size()] if not employers.is_empty() else ""))
+	var enemies := MissionRegistry.enemies()
+	var target: String = enemies[rng.randi() % enemies.size()] if not enemies.is_empty() else ""
+	# The real force.
+	var count_range: Array = def.get("enemy_count", [4, 8])
+	var quality_range: Array = def.get("enemy_quality", [0.3, 0.6])
+	var enemy_count := int(count_range[0]) if safe else rng.randi_range(int(count_range[0]), int(count_range[1]))
+	var quality := float(quality_range[0]) if safe else rng.randf_range(float(quality_range[0]), float(quality_range[1]))
+	var threats: Array = []
+	if not safe:
+		var pool: Array = (def.get("threat_pool", []) as Array).duplicate()
+		var n := rng.randi_range(0, 2) + (1 if hot else 0)
+		while n > 0 and not pool.is_empty():
+			threats.append(pool.pop_at(rng.randi() % pool.size()))
+			n -= 1
+	if hot:
+		enemy_count = roundi(enemy_count * S("hot_zone_enemy_mult"))
+		quality = minf(quality + 0.1, 1.0)
+	var true_rating := rating(enemy_count, quality, threats)
+	# What the briefing says. Better intel is more often right.
+	var accuracy_range: Array = MissionRegistry.setting("lead_intel_accuracy" if source == "lead" else "fixer_intel_accuracy" if source == "fixer" else "intel_accuracy", [0.3, 0.95])
+	var intel := 0.95 if safe else rng.randf_range(float(accuracy_range[0]), float(accuracy_range[1]))
+	var understated := not safe and true_rating > 1 and rng.randf() < understate_chance(intel)
+	var est_count := enemy_count
+	var est_quality := quality
+	var known := threats.duplicate()
+	var rated := true_rating
+	if understated:
+		est_count = maxi(2, roundi(enemy_count * rng.randf_range(0.45, 0.75)))
+		est_quality = maxf(0.1, quality - rng.randf_range(0.1, 0.25))
+		if not known.is_empty():
+			known.resize(rng.randi_range(0, known.size() - 1))  # at least one threat goes unmentioned
+		rated = mini(rating(est_count, est_quality, known), true_rating - 1)
+	# Pay follows the rating the client gives.
+	var pay_mult := float((MissionRegistry.setting("difficulty_pay", [0, 1, 1, 1, 1, 1]) as Array)[rated])
+	pay_mult *= float(fixer.get("pay_mult", 1.0))
+	if safe:
+		pay_mult *= S("safe_pay_mult")
+	if hot:
+		pay_mult *= S("hot_zone_pay_mult")
+	if source == "lead":
+		pay_mult *= S("lead_pay_mult")
+	var step := maxi(MissionRegistry.setting_i("pay_round", 500), 1)
+	var base_pay := maxi(step, roundi(float(def.get("base_pay", 40000)) * pay_mult / step) * step)
+	var day := int(ctx.get("day", 1))
+	return {
+		"cid": "", "type": type_id, "title": "%s: %s" % [def.get("name", type_id), zone.get("name", "")],
+		"brief": def.get("brief", ""), "source": source, "fixer": fixer.get("fixer", ""),
+		"employer": employer, "target": target,
+		"zone_id": zone.get("zone_id", ""), "zone_name": zone.get("name", ""), "zone_kind": kind,
+		"region": zone.get("region", ""), "module": def.get("module", ""),
+		"rated": rated, "enemy_est": est_count, "quality_est": snappedf(est_quality, 0.01),
+		"threats_known": known, "intel_accuracy": snappedf(intel, 0.01),
+		"true_rating": true_rating, "enemy_count": enemy_count, "quality": snappedf(quality, 0.01),
+		"threats": threats, "understated": understated, "revealed": false, "renegotiated": false,
+		"base_pay": base_pay, "days": int(def.get("days", 1)) + (1 if hot else 0),
+		"objectives": (def.get("objectives", []) as Array).duplicate(true),
+		"offered_day": day, "expires_day": day + MissionRegistry.setting_i("offer_days", 5),
+		"state": "offered",
+	}
+
+
+## The contract as a client may see it: the truth stays on the host until it's revealed.
+static func public_view(contract: Dictionary) -> Dictionary:
+	var view := contract.duplicate(true)
+	if not contract.get("revealed", false):
+		for key: String in HIDDEN_KEYS:
+			view.erase(key)
+	return view
+
+
+## The briefing's estimate of the enemy in words, wider on poor intel.
+static func estimate_text(contract: Dictionary) -> String:
+	var est := int(contract.get("enemy_est", 0))
+	var spread := maxi(1, roundi(est * (1.0 - float(contract.get("intel_accuracy", 0.5)))))
+	var threats: Array = (contract.get("threats_known", []) as Array).map(func(t: Variant) -> String: return MissionRegistry.threat_name(String(t)))
+	return "%d-%d fighters, quality %d%%%s" % [maxi(est - spread, 1), est + spread, roundi(float(contract.get("quality_est", 0)) * 100.0),
+		(", known threats: " + ", ".join(threats)) if not threats.is_empty() else ", no known threats"]
+
+
+# --- Negotiation (MW5-style) -------------------------------------------------------------
+
+## Terms with nothing traded: the base pay, the base salvage share, no support budget and
+## the standard advance (30%).
+static func default_terms() -> Dictionary:
+	return {"pay_points": 0, "salvage_points": 0, "support_points": 0, "advance_share": S("advance_share")}
+
+
+## Negotiation points with a faction at reputation `rep`: a base, plus one per tier above
+## neutral (Proposed).
+static func max_points(rep: int) -> int:
+	var above := maxi(MissionRegistry.tier_index(rep) - MissionRegistry.neutral_tier(), 0)
+	return MissionRegistry.setting_i("points_base", 4) + above * MissionRegistry.setting_i("points_per_tier", 1)
+
+
+## Points the terms spend: one per pay, salvage or support step, and one per advance step
+## above the standard advance (a smaller advance gives none back).
+static func terms_cost(terms: Dictionary) -> int:
+	var advance_steps := maxi(0, ceili((float(terms.get("advance_share", S("advance_share"))) - S("advance_share")) / S("advance_step") - 0.001))
+	return int(terms.get("pay_points", 0)) + int(terms.get("salvage_points", 0)) + int(terms.get("support_points", 0)) + advance_steps
+
+
+## Why `terms` can't be offered with reputation `rep` ("" when they can).
+static func terms_problem(terms: Dictionary, rep: int) -> String:
+	for key: String in ["pay_points", "salvage_points", "support_points"]:
+		if int(terms.get(key, 0)) < 0:
+			return "Negative %s" % key
+	var advance := float(terms.get("advance_share", S("advance_share")))
+	if advance < S("advance_min") - 0.001 or advance > S("advance_max") + 0.001:
+		return "The advance must be %d-%d%%" % [roundi(S("advance_min") * 100), roundi(S("advance_max") * 100)]
+	if S("salvage_base") + int(terms.get("salvage_points", 0)) * S("salvage_per_point") > S("salvage_max") + 0.001:
+		return "Salvage share is capped at %d%%" % roundi(S("salvage_max") * 100)
+	if terms_cost(terms) > max_points(rep):
+		return "The client won't go that far (%d of %d points)" % [terms_cost(terms), max_points(rep)]
+	return ""
+
+
+## What `terms` make of a contract: the total pay, the advance paid on signing (kept even if
+## the contract fails), the completion pay, the salvage share and the support budget.
+static func deal(contract: Dictionary, terms: Dictionary) -> Dictionary:
+	var pay_total := roundi(int(contract.get("base_pay", 0)) * (1.0 + int(terms.get("pay_points", 0)) * S("pay_per_point")))
+	var advance_share := clampf(float(terms.get("advance_share", S("advance_share"))), S("advance_min"), S("advance_max"))
+	var advance := roundi(pay_total * advance_share)
+	return {
+		"pay_total": pay_total, "advance": advance, "completion": pay_total - advance, "advance_share": advance_share,
+		"salvage_share": minf(S("salvage_base") + int(terms.get("salvage_points", 0)) * S("salvage_per_point"), S("salvage_max")),
+		"support_budget": int(terms.get("support_points", 0)) * MissionRegistry.setting_i("support_per_point", 5000),
+	}
+
+
+## Extra completion pay for renegotiating an understated contract: a share of the base pay
+## per rating step the briefing was short.
+static func renegotiation_raise(contract: Dictionary) -> int:
+	var steps := maxi(int(contract.get("true_rating", 1)) - int(contract.get("rated", 1)), 0)
+	return roundi(int(contract.get("base_pay", 0)) * S("renegotiate_pay_per_step") * steps)

@@ -19,6 +19,8 @@ ItemDB="*res://autoload/item_db.gd"
 GameState="*res://autoload/game_state.gd"
 Net="*res://autoload/net.gd"
 Campaign="*res://autoload/campaign.gd"
+Economy="*res://scripts/campaign/economy.gd"
+Contracts="*res://scripts/campaign/contracts.gd"
 
 [display]
 

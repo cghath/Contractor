@@ -1,0 +1,30 @@
+{
+	"_note": "Proposed prices (dollars) for the base shop, salvage and repairs (wave 4, W10). An item without its own price uses its type's default. Tune freely.",
+	"sell_ratio": 0.4,
+	"default_by_type": {"weapon": 1500, "ammo": 40, "armor": 900, "plate": 700, "backpack": 250, "medical": 60,
+		"utility": 150, "objective": 0, "salvage": 300, "misc": 50},
+	"items": {
+		"m4a1": 1400, "mk18": 1700, "m110": 4200, "m17": 650,
+		"mag_556": 30, "mag_762": 45, "mag_9mm": 25, "rounds_556": 1, "rounds_762": 2, "rounds_9mm": 1,
+		"plate_carrier_light": 450, "plate_carrier": 900, "plate_carrier_heavy": 1600,
+		"helmet_bump": 180, "helmet": 750, "helmet_heavy": 1300,
+		"plate_pe_l3": 650, "plate_ceramic_l4": 900, "plate_steel_l3": 300, "plate_side": 250,
+		"assault_pack": 180, "ruck_45": 320,
+		"ifak": 220, "trauma_kit": 650, "tourniquet": 35, "pressure_bandage": 12, "hemostatic_gauze": 45,
+		"chest_seal": 30, "splint": 25, "morphine": 60, "npa": 15,
+		"iv_10": 40, "iv_12": 30, "iv_14": 20, "iv_16": 15, "iv_18": 10, "iv_20": 8, "io_access": 150,
+		"saline_250": 20, "saline_500": 30, "saline_1000": 45, "blood_250": 120, "blood_500": 220, "blood_1000": 400,
+		"pressure_bag": 90, "hypothermia_blanket": 40, "decompression_needle": 35, "pulse_oximeter": 80,
+		"epinephrine": 70, "atropine": 50, "adenosine": 90, "defibrillator": 2400,
+		"surgery_kit": 300, "surgery_kit_uncommon": 500, "surgery_kit_rare": 900, "surgical_clamp": 25, "burn_dressing": 30,
+		"ear_protection": 120,
+		"frag_grenade": 90, "smoke_grenade": 40, "smoke_green": 45, "smoke_yellow": 45, "smoke_blue": 45, "smoke_purple": 45,
+		"flashbang": 70, "breaching_charge": 400,
+		"electronics_salvage": 450, "hvt_case": 0, "supply_crate": 2500
+	},
+	"not_for_sale": ["hvt_case", "supply_crate", "electronics_salvage"],
+	"repair": {"share_per_integrity": 0.8, "per_chip": 12, "max_share": 0.8},
+	"supports": {"resupply": 8000, "transport": 6000, "aav": 12000, "extraction": 10000},
+	"weekly_upkeep": 4000,
+	"default_wage_bill": 10500
+}
