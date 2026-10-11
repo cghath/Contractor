@@ -154,12 +154,13 @@ static func _build(spec: Dictionary, variant: String, salt: int) -> Mesh:
 	return _get_mesher(variant).build_mesh(buffer, [])
 
 
-## Fills a loft (_loft): at each voxel layer, a rounded cross-section (a superellipse of
-## exponent "n") whose half-width and half-depth are interpolated between the keys.
+## Fills a loft (_loft): at each voxel layer, a low-poly cross-section (a rectangle with its
+## four corners cut at 45 degrees by "bevel", 0 square to 1 a diamond) whose half-width and
+## half-depth are interpolated between the keys, so the sides read as flat facets.
 static func _fill_loft(loft: Dictionary, put: Callable, s := 1) -> void:
 	var keys: Array = loft.keys
 	var centre: Vector2 = loft.centre * s
-	var n: float = loft.n
+	var bevel: float = loft.bevel
 	for y in range(int(keys[0][0]) * s, int(keys[keys.size() - 1][0]) * s):
 		var yc := (y + 0.5) / s
 		var i := 0
@@ -174,7 +175,7 @@ static func _fill_loft(loft: Dictionary, put: Callable, s := 1) -> void:
 			for z in range(int(floor(centre.y - hd)), int(ceil(centre.y + hd))):
 				var dx := absf(x + 0.5 - centre.x) / hw
 				var dz := absf(z + 0.5 - centre.y) / hd
-				if pow(dx, n) + pow(dz, n) <= 1.0:
+				if dx <= 1.0 and dz <= 1.0 and dx + dz <= 2.0 - bevel:
 					put.call(x, y, z, loft.colour, loft.paint)
 
 
@@ -294,19 +295,19 @@ static func _p(x0: int, y0: int, z0: int, x1: int, y1: int, z1: int, colour: int
 	return [Vector3i(x0, y0, z0), Vector3i(x1, y1, z1), colour, true]
 
 
-## Body parts are built from lofts in 1 cm voxels (BODY_VOXEL), so they read as rounded,
-## tapered shapes rather than stacked bricks. Every part keeps its old size and pivot (in
-## metres), so the joints, animations and gear fit as before.
+## Body parts are low-poly lofts (Stormworks): flat faces with 45-degree bevelled edges,
+## written in centimetres (BODY_VOXEL) and built in BODY_SUB finer voxels. Every part keeps
+## its joints (pivots), so the animations and gear fit as before.
 const BODY_VOXEL := 0.01
-## Built at half that (0.5 cm), so curves and bevels step finely.
+## Built at half that (0.5 cm), so the bevels step finely.
 const BODY_SUB := 2
 
 
-## A loft: a rounded body around the vertical line at (`cx`, `cz`), from `keys`, each
-## [y, half-width, half-depth] in voxels (bottom to top). `n` sets the cross-section: 2 is
-## an ellipse, higher is squarer. `paint` only recolours voxels already there.
-static func _loft(cx: float, cz: float, keys: Array, colour: int, n := 2.4, paint := false) -> Dictionary:
-	return {"centre": Vector2(cx, cz), "keys": keys, "colour": colour, "n": n, "paint": paint}
+## A loft: a low-poly body around the vertical line at (`cx`, `cz`), from `keys`, each
+## [y, half-width, half-depth] in voxels (bottom to top), straight between keys. `bevel`
+## cuts the corners (0 square, 1 a diamond). `paint` only recolours voxels already there.
+static func _loft(cx: float, cz: float, keys: Array, colour: int, bevel := 0.5, paint := false) -> Dictionary:
+	return {"centre": Vector2(cx, cz), "keys": keys, "colour": colour, "bevel": bevel, "paint": paint}
 
 
 ## Moves a part's lofts and boxes up by `dy` voxels (the shin and thigh stacked into a leg).
@@ -326,54 +327,54 @@ static func _shifted(parts: Array, dy: int) -> Array:
 	return out
 
 
-## 0.26 x 0.32 x 0.27 m including the neck (a little bigger than before, still inside the
-## helmets). Pivot at the base of the neck. A rounded Stormworks head that narrows to the
-## chin: eyes, brows, a nose, a mouth and ears on a plain face, hair as a cap.
+## 0.22 x 0.30 x 0.24 m including the neck. Pivot at the base of the neck. A boxy,
+## bevelled Stormworks head with a flat face: eyes, brows, a nose, a mouth and ears, hair as
+## a cap.
 static func _head() -> Dictionary:
 	var boxes := [
-		_loft(13, 14, [[0, 5.0, 5.0], [10, 5.5, 5.5]], C.SKIN_SHADE, 2.6),  # neck
-		_loft(13, 14, [[6, 6.5, 7.5], [9, 9.5, 10.5], [13, 11.2, 12.2], [19, 12.0, 13.0], [25, 12.0, 13.0],
-			[29, 10.5, 11.5], [31, 7.5, 8.5], [32, 4.0, 5.0]], C.SKIN, 3.2),
-		_p(0, 27, 0, 26, 32, 27, C.HAIR),   # cap
-		_p(0, 12, 19, 26, 32, 27, C.HAIR),  # back
-		_p(0, 22, 12, 26, 32, 27, C.HAIR),  # above the ears
-		_b(0, 15, 12, 2, 21, 17, C.SKIN_SHADE), _b(24, 15, 12, 26, 21, 17, C.SKIN_SHADE),  # ears
-		_p(8, 19, 0, 10, 22, 5, C.EYE), _p(16, 19, 0, 18, 22, 5, C.EYE),
-		_p(7, 23, 0, 11, 25, 5, C.HAIR), _p(15, 23, 0, 19, 25, 5, C.HAIR),  # brows
-		_b(12, 15, 0, 14, 19, 2, C.SKIN_SHADE),  # nose
-		_p(10, 11, 0, 16, 12, 5, C.MOUTH),
+		_loft(11, 12, [[0, 4.5, 4.5], [8, 5.0, 5.0]], C.SKIN_SHADE, 0.8),  # neck
+		_loft(11, 12, [[5, 7.0, 8.0], [9, 9.8, 10.8], [13, 10.6, 11.6], [26, 11.0, 12.0], [30, 9.0, 10.0]], C.SKIN, 0.5),
+		_p(0, 26, 0, 22, 30, 24, C.HAIR),   # cap
+		_p(0, 11, 17, 22, 30, 24, C.HAIR),  # back
+		_p(0, 20, 10, 22, 30, 24, C.HAIR),  # above the ears
+		_b(0, 14, 10, 1, 19, 15, C.SKIN_SHADE), _b(21, 14, 10, 22, 19, 15, C.SKIN_SHADE),  # ears
+		_p(6, 17, 0, 8, 20, 3, C.EYE), _p(14, 17, 0, 16, 20, 3, C.EYE),
+		_p(5, 21, 0, 9, 22, 3, C.HAIR), _p(13, 21, 0, 17, 22, 3, C.HAIR),  # brows
+		_b(10, 13, 0, 12, 17, 1, C.SKIN_SHADE),  # nose
+		_p(8, 10, 0, 14, 11, 3, C.MOUTH),
 	]
-	return {"size": Vector3i(26, 32, 27), "pivot": Vector3(13, 0, 14), "voxel": BODY_VOXEL, "sub": BODY_SUB, "boxes": boxes}
+	return {"size": Vector3i(22, 30, 24), "pivot": Vector3(11, 0, 12), "voxel": BODY_VOXEL, "sub": BODY_SUB, "boxes": boxes}
 
 
-## 0.38 x 0.56 x 0.22 m. Pivot at the hips. Narrower at the waist, broad at the chest,
-## sloping shoulders.
+## 0.38 x 0.66 x 0.22 m: the trunk from the crotch (0.10 m below the hip joints, where the
+## legs show from on a real body) to the base of the neck 0.56 m above them. Pivot at the
+## hips. Narrower at the waist, broad at the chest, sloping shoulders; the belt at the waist.
 static func _torso() -> Dictionary:
 	var boxes := [
-		_loft(19, 11, [[0, 15.0, 10.0], [8, 15.5, 10.5], [20, 15.8, 10.5], [36, 18.0, 11.0], [47, 19.0, 11.0],
-			[52, 17.5, 10.0], [55, 13.0, 8.5], [56, 10.0, 7.0]], C.CAMO, 4.0),
-		_p(0, 0, 0, 38, 6, 22, C.BELT),
-		_p(16, 0, 0, 22, 6, 3, C.METAL),
-		_p(13, 50, 0, 25, 56, 7, C.CAMO_C),  # collar
+		_loft(19, 11, [[0, 15.0, 9.5], [10, 16.0, 10.5], [22, 15.0, 10.0], [40, 18.0, 11.0], [56, 19.0, 11.0],
+			[62, 16.0, 9.0], [66, 10.0, 7.0]], C.CAMO, 0.45),
+		_p(0, 14, 0, 38, 20, 22, C.BELT),
+		_p(16, 14, 0, 22, 20, 3, C.METAL),
+		_p(13, 60, 0, 25, 66, 7, C.CAMO_C),  # collar
 	]
-	return {"size": Vector3i(38, 56, 22), "pivot": Vector3(19, 0, 11), "voxel": BODY_VOXEL, "sub": BODY_SUB, "boxes": boxes}
+	return {"size": Vector3i(38, 66, 22), "pivot": Vector3(19, 10, 11), "voxel": BODY_VOXEL, "sub": BODY_SUB, "boxes": boxes}
 
 
 ## 0.12 x 0.32 x 0.12 m. Pivot at the shoulder; the elbow is at the bottom.
 static func _upper_arm() -> Dictionary:
 	var boxes := [
-		_loft(6, 6, [[0, 4.5, 4.5], [14, 5.0, 5.0], [26, 5.8, 5.6], [30, 5.6, 5.5], [32, 4.0, 4.0]], C.CAMO, 3.4),
+		_loft(6, 6, [[0, 4.5, 4.5], [27, 5.6, 5.4], [32, 4.6, 4.6]], C.CAMO, 0.6),
 		_p(0, 14, 2, 2, 26, 10, C.PATCH), _p(10, 14, 2, 12, 26, 10, C.PATCH),
 	]
 	return {"size": Vector3i(12, 32, 12), "pivot": Vector3(6, 32, 6), "voxel": BODY_VOXEL, "sub": BODY_SUB, "boxes": boxes}
 
 
-## 0.11 x 0.32 x 0.11 m including the gloved mitten hand. Pivot at the elbow; the palm
-## centre is 0.25 m below it (CharacterModel.FOREARM).
+## 0.11 x 0.32 x 0.11 m including the gloved hand. Pivot at the elbow; the palm centre is
+## 0.25 m below it (CharacterModel.FOREARM).
 static func _forearm() -> Dictionary:
 	var boxes := [
-		_loft(5.5, 5.5, [[14, 4.0, 4.0], [24, 5.0, 5.0], [32, 5.2, 5.2]], C.CAMO, 3.4),
-		_loft(5.5, 5.5, [[0, 3.5, 2.6], [2, 4.6, 3.1], [6, 5.2, 3.3], [10, 4.6, 3.3], [12, 3.8, 3.4], [15, 4.1, 3.9]], C.GLOVE, 3.4),
+		_loft(5.5, 5.5, [[14, 4.0, 4.0], [32, 5.0, 5.0]], C.CAMO, 0.6),
+		_loft(5.5, 5.5, [[0, 3.6, 2.8], [6, 5.0, 3.3], [11, 4.2, 3.3], [15, 4.1, 3.9]], C.GLOVE, 0.6),
 		_p(0, 14, 0, 11, 17, 11, C.CAMO_A),  # cuff
 	]
 	return {"size": Vector3i(11, 32, 11), "pivot": Vector3(5.5, 32, 5.5), "voxel": BODY_VOXEL, "sub": BODY_SUB, "boxes": boxes}
@@ -387,7 +388,8 @@ static func _leg() -> Dictionary:
 
 
 ## The leg above the knee: 0.14 x 0.46 x 0.18 m. Pivot at the hip joint; the knee
-## (CharacterModel.THIGH) is at the bottom, with the top of the knee pad.
+## (CharacterModel.THIGH) is at the bottom, with the top of the knee pad. Its top 0.10 m is
+## inside the torso's hips.
 static func _thigh() -> Dictionary:
 	return {"size": Vector3i(14, 46, 18), "pivot": Vector3(7, 46, 10), "voxel": BODY_VOXEL, "sub": BODY_SUB, "boxes": _thigh_parts()}
 
@@ -399,7 +401,7 @@ static func _shin() -> Dictionary:
 
 static func _thigh_parts() -> Array:
 	return [
-		_loft(7, 10, [[0, 5.0, 5.5], [6, 5.5, 6.0], [20, 6.3, 7.0], [38, 7.0, 7.8], [46, 7.0, 7.8]], C.CAMO, 3.4),
+		_loft(7, 10, [[0, 5.0, 5.5], [24, 6.2, 7.0], [46, 7.0, 7.8]], C.CAMO, 0.55),
 		_b(2, 0, 3, 12, 4, 6, C.PAD),  # top of the knee pad
 		_p(0, 12, 6, 2, 26, 14, C.CAMO_C), _p(12, 12, 6, 14, 26, 14, C.CAMO_C),  # cargo pockets
 	]
@@ -407,9 +409,9 @@ static func _thigh_parts() -> Array:
 
 static func _shin_parts() -> Array:
 	return [
-		_loft(7, 10, [[12, 4.0, 4.5], [22, 5.0, 5.5], [34, 5.5, 6.0], [46, 5.0, 5.5]], C.CAMO, 3.4),
+		_loft(7, 10, [[12, 4.0, 4.5], [32, 5.4, 6.0], [46, 5.0, 5.5]], C.CAMO, 0.55),
 		_b(2, 36, 3, 12, 46, 6, C.PAD),  # knee pad
-		_loft(7, 9.5, [[0, 5.2, 8.5], [3, 5.2, 8.5], [8, 4.8, 7.5], [12, 4.4, 5.6], [15, 4.3, 5.0]], C.BOOT, 4.0),
+		_loft(7, 9.5, [[0, 5.2, 8.5], [4, 5.2, 8.5], [10, 4.6, 6.5], [15, 4.3, 5.0]], C.BOOT, 0.35),
 		_p(0, 0, 0, 14, 2, 18, C.SOLE),
 	]
 
@@ -435,7 +437,7 @@ static func _vest(tier: int) -> Dictionary:
 		boxes.append([Vector3i(x0, y0, z0) + o, Vector3i(x1, y1, z1) + o, colour, paint])
 	# Cummerbund round the torso (the light rig has none, only straps round the back).
 	if tier > 0:
-		boxes.append(_loft(o.x, o.z, [[o.y, hw, hd], [o.y + 22, hw, hd]], C.GEAR, 5.0))
+		boxes.append(_loft(o.x, o.z, [[o.y, hw, hd], [o.y + 22, hw, hd]], C.GEAR, 0.3))
 		for y in [5, 9, 13, 17]:  # MOLLE rows on the sides
 			at.call(-hw, y, -hd + 3, hw, y + 1, hd - 3, C.GEAR_DARK, true)
 		at.call(-hw, 0, -hd, hw, 2, hd, C.GEAR_DARK, true)  # bottom binding
