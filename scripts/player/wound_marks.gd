@@ -72,7 +72,7 @@ func _mark(bone: Node3D, local: Vector3, size: float, colour: Color) -> void:
 	node.layers = model.render_layers
 	node.position = local
 	node.name = "WoundMark"
-	bone.add_child(node)
+	bone.add_child(node, true)  # readable names (WoundMark, WoundMark2...), not @WoundMark@n
 	_marks.append(node)
 
 

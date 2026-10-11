@@ -707,7 +707,7 @@ func server_hit(part: StringName, hit: Dictionary) -> void:
 	if hit.has("position"):
 		# Where it went in, and out if it went through (the body ended before the channel
 		# did), in the rest pose: the wound marks on the model (CharacterModel) show them.
-		var exits := round_class != FRAGMENT and hit.has("channel_depth") and depth < BodyMap.CHANNEL_MAX_M - 0.001 and not channel.graze
+		var exits: bool = round_class != FRAGMENT and hit.has("channel_depth") and depth < BodyMap.CHANNEL_MAX_M - 0.001 and not channel.graze
 		for w: Dictionary in added:
 			w["at"] = channel.from
 			if exits:

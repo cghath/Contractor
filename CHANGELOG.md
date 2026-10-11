@@ -41,6 +41,7 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   ("at") and, when it went through, came out at ("out"), replicated with the wound list (to
   half a centimetre). `WoundMarks` (`scripts/player/wound_marks.gd`) draws an entry hole and a
   bigger exit hole on the bone of the part that was hit, and a dressing once it's treated.
+  The marks follow `Vitals.changed`, so they appear within `NET_INTERVAL_S` (0.5 s) of the hit.
 
 ### Scavenging review fixes
 

@@ -824,9 +824,14 @@ func _test_ballistics_routing() -> void:
 	var exit_hole: Variant = thigh_wounds[0].get("out") if not thigh_wounds.is_empty() else null
 	check(entry is Vector3 and exit_hole is Vector3 and absf(Vector3(entry).z - -0.07) < 0.02 and absf(Vector3(exit_hole).z - 0.07) < 0.03,
 		"a round through the thigh goes in at the front and out the back (%s, %s)" % [entry, exit_hole])
-	await get_tree().process_frame
+	# The marks redraw on Vitals.changed, which net_state sends at most every NET_INTERVAL_S.
 	var model: CharacterModel = dummy.get_node(^"Model")
-	var marks := model.part_node(Vitals.THIGH_R).get_children().filter(func(n: Node) -> bool: return n.name.begins_with("WoundMark"))
+	var marks := []
+	for i in 90:
+		await get_tree().process_frame
+		marks = model.part_node(Vitals.THIGH_R).get_children().filter(func(n: Node) -> bool: return n.name.begins_with("WoundMark") and not n.is_queued_for_deletion())
+		if marks.size() >= 2:
+			break
 	check(marks.size() == 2, "both holes are drawn on the thigh (%d marks)" % marks.size())
 	# Lying down, the channel still follows the part: a shot down into the back of the chest.
 	dummy.vitals.server_reset_health()
