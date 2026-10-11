@@ -11,6 +11,13 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### The mission brainstorm in the repo (Captain, 2026-10-11)
+
+#### Added
+
+- `docs/mission_brainstorm.md`: Captain's mission brainstorm (Oct 10), exported from claude.ai.
+  Wave 4B part 2 takes its mission types and debrief from it. The design doc and plans link it.
+
 ### Net test smoke check and the voxel smoke roadmap (Captain's side, 2026-10-11)
 
 #### Fixed

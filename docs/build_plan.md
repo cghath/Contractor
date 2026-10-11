@@ -51,8 +51,8 @@ authority on rules and numbers; this file only says who builds what, in which or
   `uh60`, `ah1z`, `aav7`, `bradley`, `abrams`, `maxxpro`, `matv` and six technicals. API:
   `instance(model, scheme)`, `prop(model, scheme)`, `size_m(model)`, `spin_rotors(node, delta)`.
   Integration is copying the file to `scripts/art/vehicle_art.gd`.
-- Still to export from claude.ai: the mission brainstorm doc (needed by wave 4) and the
-  Arma mod research doc (useful for waves 1 to 3).
+- The mission brainstorm is in [mission_brainstorm.md](mission_brainstorm.md) (exported 2026-10-11).
+  Still to export from claude.ai: the Arma mod research doc (useful for waves 1 to 3).
 - Keys agreed after the handoff: stance steps on Caps Lock + WASD, interaction on Left Ctrl,
   self-interaction on Left Ctrl + Left Alt, no giving up while downed.
 

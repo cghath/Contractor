@@ -163,7 +163,7 @@ operations) the design doc puts under it.
 - Check that X, Z and C don't clash with any older bindings.
 
 **Docs to export from claude.ai into `docs/`:**
-- The mission brainstorm doc, for 4B's mission types and the debrief.
+- ~~The mission brainstorm doc~~: in [mission_brainstorm.md](mission_brainstorm.md) since 2026-10-11.
 - The Arma mod research doc.
 
 **cghath's dropped wave 3 extras**, for Captain's side to take or leave. They're on cghath's
