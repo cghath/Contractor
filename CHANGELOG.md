@@ -44,6 +44,18 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 - **`tools/test_runner_check.sh` (new):** checks the runner against a fake engine: a pass
   passes; a failure, a script error with exit 0, a missing summary, a hang and a failed import
   fail. CI runs it as its own job, and the rerun-on-failure step has a timeout now.
+### A squadmate that gives up its slot leaves what it was handed (audit L1-03)
+
+#### Fixed
+
+- **Outside the campaign, an AI whose slot a player takes drops what it holds beyond the kit it
+  spawned with:** items players handed it, what it scavenged, an objective item, in a pile at
+  its feet with their state (part-used magazines, damaged armor). Its own kit goes with it, so
+  a join doesn't hand out free gear. Before, it all vanished. (In the campaign a roster member
+  already keeps everything.) Stacks unlike its starting kit go first, so a handed-over
+  7-round magazine is the one left, not one of its own full ones.
+- **Test:** roles suite (salvage and a part-used magazine left behind, no kit items).
+
 ### Medical: impact pain is eased by morphine (audit L3-01 check)
 
 #### Added

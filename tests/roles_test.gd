@@ -105,8 +105,21 @@ func _test_one_player() -> void:
 	check(_squad().size() == 7, "AI fills the other 7 slots (%d)" % _squad().size())
 	_check_teams("1 player")
 	check(_ai_in_role(Roles.MEDIC).size() == 1 and _ai_in_role(Roles.MEDIC)[0].fire_team == 1, "AI takes only team B's medic slot")
+	# Audit L1-03: the grenadier whose slot the player takes was handed salvage and a part-used
+	# magazine; they stay behind when it goes, its own kit goes with it.
+	var leaving: Soldier = _ai_in_role(Roles.GRENADIER).filter(func(s: Soldier) -> bool: return s.fire_team == 0)[0]
+	leaving.inventory.take(&"electronics_salvage", 3)
+	leaving.inventory.take(&"mag_556", 1, {"rounds": 7})
+	var spot := leaving.global_position
 	level.request_role.rpc_id(1, "grenadier")  # the same request a client sends on join
 	await _frames(3)
+	var near := get_tree().get_nodes_in_group(&"world_items").filter(func(w: Node) -> bool:
+		return not w.is_queued_for_deletion() and (w as Node3D).global_position.distance_to(spot) < 2.0)
+	var ids := near.map(func(w: Node) -> String: return "%s x%d" % [w.item_id, w.count])
+	var salvage := near.filter(func(w: Node) -> bool: return w.item_id == &"electronics_salvage")
+	var part_mag := near.filter(func(w: Node) -> bool: return w.item_id == &"mag_556" and int(w.state.get("rounds", -1)) == 7)
+	check(salvage.size() == 1 and salvage[0].count == 3 and part_mag.size() == 1 and near.size() == 2,
+		"the AI whose slot the player took leaves what it was handed (3 salvage, the 7-round magazine), not its kit (%s)" % [ids])
 	check(player.role == Roles.GRENADIER and player.fire_team == 0, "picking grenadier moves the player to that slot")
 	check(_ai_in_role(Roles.MEDIC).size() == 2 and _squad().size() == 7, "and an AI medic fills team A's medic slot again")
 	_check_teams("after the switch")

@@ -503,10 +503,63 @@ func _remove_squadmate(s: Soldier) -> void:
 	if s.vitals.is_dead():
 		return
 	BaseHub.server_squadmate_leaving(s)  # campaign: a roster member keeps their gear (wave 4)
+	if not s.has_meta(&"roster_id"):
+		_drop_extras(s)  # outside the campaign: what it was given or picked up stays here
 	s.release_carried()
 	if is_instance_valid(s.carried_by):
 		s.carried_by.release_carried()
 	s.queue_free()
+
+
+## Host only. A squadmate leaving its slot outside the campaign (a player took it) drops what it
+## holds beyond the kit it spawned with (meta "start_gear"): what players handed it, what it
+## scavenged, an objective item. Whole stacks with their state (part-used magazines, damaged
+## armor), in a pile at its feet. Its own kit goes with it, so a join doesn't hand out free
+## gear (audit L1-03: before, anything it had been given was lost).
+func _drop_extras(s: Soldier) -> void:
+	var inv := s.inventory
+	var start: Dictionary = s.get_meta(&"start_gear", {})
+	var now := Roster.gear_counts(inv.net_state)
+	var extra := {}
+	for id: String in now:
+		var n := int(now[id]) - int(start.get(id, 0))
+		if n > 0:
+			extra[id] = n
+	var pile: Array[Dictionary] = []
+	var take := func(entry: Dictionary) -> void:
+		if entry.is_empty():
+			return
+		pile.append(entry)
+		var counted := {}
+		Roster.count_entry(entry, counted)  # an entry's state may carry more (a carrier's pouches)
+		for id: String in counted:
+			if extra.has(id):
+				extra[id] = int(extra[id]) - int(counted[id])
+	# Stowed stacks: first the ones unlike anything in its starting kit (the 7-round magazine it
+	# was handed, not one of its own full ones), then any others still over.
+	var kit_states: Dictionary = s.get_meta(&"start_states", {})
+	for unlike_first: bool in [true, false]:
+		for c: StringName in inv.search_containers():
+			var i: int = (inv.containers.get(c, []) as Array).size() - 1
+			while i >= 0:
+				var e: Dictionary = inv.containers[c][i]
+				var id := String(e.id)
+				var like_kit: bool = (kit_states.get(id, []) as Array).has(e.get("state", {}))
+				if int(extra.get(id, 0)) > 0 and not (unlike_first and like_kit):
+					take.call(inv.remove_entry(c, i, int(extra[id])))
+				i -= 1
+	for slot: StringName in Inventory.SLOTS:
+		var id := String(inv.slots[slot])
+		if id != "" and int(extra.get(id, 0)) > 0:
+			var off := inv.unequip(slot)
+			if not off.is_empty():
+				take.call({"id": off.id, "count": 1, "state": off.state})
+	if inv.hands != &"" and int(extra.get(String(inv.hands), 0)) > 0:
+		take.call({"id": inv.release_hands(), "count": 1})
+	for i in pile.size():
+		var e: Dictionary = pile[i]
+		var at := s.global_position + Vector3(0.35 * (i % 3) - 0.35, 0.4, 0.35 * (i / 3))
+		server_spawn_dropped(StringName(e.id), int(e.get("count", 1)), at, e.get("state", {}))
 
 
 ## Host only: a squadmate died (permadeath). Its body stays where it fell; it leaves the squad
@@ -578,6 +631,16 @@ func _make_soldier(data: Dictionary) -> Node:
 			inventory.take(StringName(id))
 		if soldier.role != &"":
 			Roles.apply_kit(inventory, soldier.role)
+		# What it started with, so what it's handed or picks up later can be told apart
+		# (_drop_extras, when a player takes its slot).
+		soldier.set_meta(&"start_gear", Roster.gear_counts(inventory.net_state))
+		var states := {}
+		for c: StringName in inventory.search_containers():
+			for e: Dictionary in inventory.containers[c]:
+				if not states.has(String(e.id)):
+					states[String(e.id)] = []
+				states[String(e.id)].append(e.get("state", {}))
+		soldier.set_meta(&"start_states", states)
 		var brain := SquadAI.new()
 		brain.name = "SquadAI"
 		brain.squad = squad_for(soldier.faction)
