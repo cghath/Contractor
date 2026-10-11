@@ -11,7 +11,7 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
-### Wave 4 groundwork (cghath, 2026-10-11)
+### Wave 4 groundwork and a spall pain fix (cghath, 2026-10-11)
 
 #### Added
 
@@ -19,6 +19,13 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   (`user://saves/campaign_01.json`) that the wave 4 mission loop keeps its money, contracts
   and roster in, one section per part. `CompoundLevel.map_area()` gives the map its playable
   area. Nothing uses either yet, so play is unchanged.
+
+#### Fixed
+
+- Spall from a steel plate stop now counts its pain inside the plate stops' capped budget
+  (`PLATE_IMPACT_MAX`) instead of on top of it, so plate hits alone, spall included, never
+  knock a healthy soldier out. Six 5.56 plate stops at 50 m plus two face spall wounds could
+  reach 0.88 pain and drop someone (armor suite, "6 plate hits" check).
 
 ### AI scavenging, visible tourniquets and IFAKs, and looting MOLLE pouches (Captain, 2026-10-11)
 
