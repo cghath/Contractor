@@ -84,6 +84,18 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 - Tests: base "The loop" (board -> prep -> briefing -> extraction -> debrief -> base, and a
   recovery end to end); contracts: clawback terms.
 
+### Carriers fit the body that wears them (Captain, 2026-10-11)
+
+#### Changed
+
+- **Plate carriers are cinched to the wearer** (Captain: "make the plate carrier fit more like
+  it would irl"): the cummerbund is the wearer's own torso shape plus `CUMMERBUND_PAD` of
+  webbing and padding (1.5 cm medium, 2.5 cm heavy), so it takes in at the waist and lies on
+  the body instead of standing off it as a box; the light rig's straps lie on the body; the
+  heavy rig's side plate pockets reach in to the cummerbund (the plates stay where they were).
+  `VoxelArt._vest(tier, torso)` takes the wearer's torso spec (the male one by default), so
+  another body shape gets a carrier fitted to it.
+
 ### Medical voxel wounds on the current dev (merge)
 
 #### Changed
