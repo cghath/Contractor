@@ -3,10 +3,11 @@ extends Control
 ## ACE3-style interaction menu, local to the player (design doc "ACE-style interaction").
 ##
 ## Hold Left Ctrl (`interact`) and look at something within REACH: action points appear on
-## items, downed bodies and standing squadmates. Move the cursor onto one to open its radial
-## menu of actions, and let go of Left Ctrl to perform the highlighted one; letting go over
-## nothing cancels. Left Ctrl + Left Alt (`self_interact`) opens the same kind of menu on
-## your own body and gear. While the menu is open the mouse moves a cursor, not the view.
+## items, downed bodies, standing squadmates and people (civilians, HVTs, captives). Move
+## the cursor onto one to open its radial menu of actions, and let go of Left Ctrl to perform
+## the highlighted one; letting go over nothing cancels. Left Ctrl + Left Alt
+## (`self_interact`) opens the same kind of menu on your own body and gear. While the menu
+## is open the mouse moves a cursor, not the view.
 ##
 ## What each kind of target offers is data (ACTIONS) read by the pure actions_for, so later
 ## work (treatments) adds entries rather than code paths. Anything that changes shared state
@@ -212,12 +213,14 @@ static func actions_for(actor: Soldier, target: Node) -> Array[Dictionary]:
 
 
 ## `target` gets body interaction points (a region point each, and the waist): a squadmate,
-## down or up, or yourself. Enemies, the dead, dummies, items and the body you're carrying
+## down or up, yourself, or a civilian, HVT or captive (PERSON, down or up: the people
+## actions, zip-cuff, lead, search, sit on the waist point). Enemies (a downed one's single
+## point offers zip-cuff and search), the dead, dummies, items and the body you're carrying
 ## or dragging (its point offers Release / Put down first) keep a single point.
 static func has_regions(actor: Soldier, target: Node) -> bool:
 	if target is Soldier and target != actor and (target as Soldier).carried_by == actor:
 		return false
-	return target is Soldier and not _is_enemy(actor, target) and target_kind(actor, target) in [DOWNED, SQUADMATE, SELF]
+	return target is Soldier and not _is_enemy(actor, target) and target_kind(actor, target) in [DOWNED, SQUADMATE, SELF, PERSON]
 
 
 ## What the waist point offers: actions_for without Treat (treatments sit on the regions).

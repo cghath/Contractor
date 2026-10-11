@@ -450,7 +450,7 @@ func server_deliver(s: Soldier, by: Soldier, point: Node3D) -> void:
 func server_bank_intel(s: Soldier) -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	var inv := s.inventory
-	for container in Inventory.CONTAINERS:
+	for container in inv.search_containers():  # MOLLE pouches too
 		var list: Array = inv.containers[container]
 		for i in range(list.size() - 1, -1, -1):
 			if not is_intel(list[i].id):
@@ -668,7 +668,7 @@ func server_search(actor: Soldier, target: Soldier) -> String:
 	var found := PackedStringArray()
 	var left := 0
 	var inv := target.inventory
-	for container in Inventory.CONTAINERS:
+	for container in inv.search_containers():  # MOLLE pouches too
 		var list: Array = inv.containers[container]
 		for i in range(list.size() - 1, -1, -1):
 			if not is_intel(list[i].id):

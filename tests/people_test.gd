@@ -79,6 +79,7 @@ func _ready() -> void:
 	await _test_intel()
 	await _test_radio_report()
 	await _test_surrender()
+	await _test_scavenge_intel()
 	await _test_client()
 	await _test_compound_content()
 	GameState.delete_save()
@@ -309,6 +310,8 @@ func _test_hostile_hvt() -> void:
 	await _frames(2)
 	check(not downed.vitals.is_up() and not downed.vitals.is_dead() and Person.cuff_problem(player, downed) == "" and _ids(player, downed).has(&"cuff"),
 		"a downed hostile HVT can be cuffed from the front (the menu offers it on the body)")
+	check(InteractionMenu.has_regions(player, downed) and InteractionMenu.general_actions(player, downed).any(func(a: Dictionary) -> bool: return a.id == &"cuff"),
+		"on his waist point")
 	InteractionMenu.perform(player, _action(player, downed, &"cuff"))
 	await _wait_until(func() -> bool: return Person.is_cuffed(downed), 6.0)
 	check(Person.is_cuffed(downed), "and is")
@@ -323,6 +326,9 @@ func _test_friendly_hvt() -> void:
 	await _frames(3)
 	check(Person.leadable(hvt) and not Person.cuffable(hvt) and _ids(player, hvt).has(&"lead") and not _ids(player, hvt).has(&"cuff"),
 		"leadable, not cuffable")
+	var general := InteractionMenu.general_actions(player, hvt).map(func(a: Dictionary) -> StringName: return a.id)
+	check(InteractionMenu.has_regions(player, hvt) and &"lead" in general and &"cover" in general and not &"treat" in general,
+		"his body points: the people actions on the waist point, treatment on the regions (%s)" % [general])
 	InteractionMenu.perform(player, _action(player, hvt, &"lead"))
 	for step in 6:
 		_place(player, player.global_position + Vector3(0, 0, 2))
@@ -355,6 +361,7 @@ func _test_intel() -> void:
 	player._server_loot_item.rpc_id(1, officer.get_path(), where[0], where[1], &"intel_documents")
 	await _frames(3)
 	check(player.inventory.count_of(&"intel_documents") == 1, "looted from his body")
+	check(_into_pouch(player, &"intel_documents"), "and moved into a pouch on the player's carrier")
 	layer.server_place_intel(&"intel_laptop", Vector3(25, 0.5, -26), "test outpost", "test_people_laptop")
 	await _frames(3)
 	var laptop := _world_item("test_people_laptop")
@@ -406,6 +413,7 @@ func _test_surrender() -> void:
 	var quitter := _soldier("Quitter", &"hostile", Vector3(-35, 0.1, -30), CompoundLevel.HOSTILE_LOADOUT, true)
 	SquadAI.of(quitter).hold_fire = true
 	layer.server_give_intel(quitter, &"intel_documents", "Quitter")
+	check(_into_pouch(quitter, &"intel_documents"), "his documents are in a pouch on his carrier")
 	_place(player, Vector3(-35, 0.1, -20))
 	await _frames(3)
 	check(layer.surrender_reason(quitter) == "", "unhurt, he fights on")
@@ -431,9 +439,36 @@ func _test_surrender() -> void:
 	await _wait_until(func() -> bool: return Person.is_cuffed(quitter), 6.0)
 	check(Person.is_cuffed(quitter), "cuffed")
 	check(_ids(player, quitter).has(&"search"), "the menu offers Search for intel")
+	check(InteractionMenu.has_regions(player, quitter) and InteractionMenu.general_actions(player, quitter).any(func(a: Dictionary) -> bool: return a.id == &"search"),
+		"on his waist point")
 	InteractionMenu.perform(player, _action(player, quitter, &"search"))
 	await _frames(3)
 	check(player.inventory.count_of(&"intel_documents") == 1 and quitter.inventory.count_of(&"intel_documents") == 0, "searched: his documents are now the player's")
+
+
+## AI scavenging (Scavenge) takes intel off a body and keeps its intel id, so it banks as
+## the same piece (People.has_intel) when the squadmate carries it out.
+func _test_scavenge_intel() -> void:
+	print("Scavenged intel")
+	var body := _soldier("ScavOfficer", &"hostile", Vector3(30, 0.1, -50), CompoundLevel.HOSTILE_LOADOUT, false)
+	layer.server_give_intel(body, &"intel_phone", "officer (scavenge)")
+	var where := _where(body, &"intel_phone")
+	var intel_id := String(body.inventory.containers[where[0]][where[1]].get("state", {}).get("intel_id", "")) if int(where[1]) >= 0 else ""
+	body.vitals.server_kill()
+	var echo := _soldier("Echo", &"friendly", Vector3(31, 0.1, -50), ["plate_carrier", "m4a1", "mag_556"], false)
+	echo.inventory.take(&"mag_556", 6)  # a full basic load: the intel is what he wants
+	await _frames(3)
+	var pick := Scavenge.best_pick(echo, body, false)
+	check(pick.get("kind") == "intel" and pick.get("id") == &"intel_phone", "a squadmate scavenging the body picks the intel (%s)" % [pick])
+	check(Scavenge.apply(echo, body, pick) == 1 and echo.inventory.count_of(&"intel_phone") == 1 and body.inventory.count_of(&"intel_phone") == 0, "and takes it")
+	var mine := _where(echo, &"intel_phone")
+	var kept := String(echo.inventory.containers[mine[0]][mine[1]].get("state", {}).get("intel_id", "")) if int(mine[1]) >= 0 else ""
+	check(intel_id != "" and kept == intel_id, "with its intel id (%s)" % kept)
+	var banked := layer.server_bank_intel(echo)
+	check(banked.size() == 1 and banked[0].intel_id == intel_id and People.has_intel(intel_id), "it banks as that piece")
+	echo.queue_free()
+	body.queue_free()
+	await _frames(2)
 
 
 ## The compound's own content (PeopleLayer.COMPOUND, the main menu's checkbox) with its AI:
@@ -628,12 +663,38 @@ func _action(actor: Soldier, target: Node, id: StringName) -> Dictionary:
 
 ## [container, index] of the first stowed `id` on `s`.
 func _where(s: Soldier, id: StringName) -> Array:
-	for container in Inventory.CONTAINERS:
+	for container in s.inventory.search_containers():  # MOLLE pouches too
 		var list: Array = s.inventory.containers[container]
 		for i in list.size():
 			if list[i].id == id:
 				return [container, i]
 	return [&"", -1]
+
+
+## Hangs a GP pouch on a free utility point of `s`'s carrier (if none is there yet) and moves
+## the first stowed `id` into it. True if it ended up in a pouch.
+func _into_pouch(s: Soldier, id: StringName) -> bool:
+	var inv := s.inventory
+	var pouch := &""
+	for p: Dictionary in inv.attach_points():
+		if pouch != &"" or String(p.type) != "utility":
+			continue
+		var att := inv.attachment(StringName(p.id))
+		if att.is_empty():
+			if inv.attach(StringName(p.id), {"id": &"pouch_utility"}):
+				pouch = Inventory.pouch_container(StringName(p.id))
+		elif StringName(att.id) == &"pouch_utility":
+			pouch = Inventory.pouch_container(StringName(p.id))
+	var at := _where(s, id)
+	if pouch == &"" or int(at[1]) < 0:
+		return false
+	if at[0] == pouch:
+		return true
+	var entry := inv.remove_entry(at[0], at[1], 1)
+	if inv.insert_entry(pouch, entry):
+		return true
+	inv.insert_entry(at[0], entry)
+	return false
 
 
 func _world_item(uid: String) -> WorldItem:
