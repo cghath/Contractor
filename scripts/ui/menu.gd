@@ -44,6 +44,7 @@ func _ready() -> void:
 	# Wave 4 campaign (BaseHub): the company's FOB, its people and stash. Join (above) follows
 	# the host into whatever it plays, the campaign included.
 	box.add_child(_button("Campaign: host at the base (FOB)", _campaign_host))
+	box.add_child(_button("Host test zone (2 km, world scale)", host_test_zone))
 	_status = Label.new()
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD
 	box.add_child(_status)
@@ -67,6 +68,15 @@ func host_with_briefing() -> void:
 	host()
 	if Net.is_hosting():
 		Briefing.debug_open(self)
+
+
+## Debug entry: hosts the 2 km test zone (data/zones.json "test") instead of the compound.
+func host_test_zone() -> void:
+	BaseHub.cancel_session()  # never a leftover campaign
+	var main := get_parent()
+	if main and main.has_method(&"host_zone"):
+		GameState.zone_id = "zone_test"
+		main.host_zone(ZoneDef.get_def("test"))
 
 
 func join(address: String) -> void:

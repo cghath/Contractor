@@ -117,7 +117,7 @@ static func _frag(level: CompoundLevel, pos: Vector3) -> void:
 		frag_body(body, vitals, centre, d)
 		if body.has_method(&"suppress"):
 			body.suppress(0.8, pos)
-	level.voxel_world.server_blast(pos, FRAG_CARVE_M)  # by material: concrete only chips
+	level.server_blast(pos, FRAG_CARVE_M)  # by material: concrete only chips (every voxel world it reaches)
 	level.show_explosion.rpc(pos)
 	_shake_players(level, pos)
 

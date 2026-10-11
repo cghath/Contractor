@@ -133,7 +133,9 @@ const HOSTILE_PATROL: Array[Vector3] = [Vector3(-12, 0, -2), Vector3(-12, 0, -16
 ## the zone save (server_spawn_body). A dead AI's own node stays under AI.
 @onready var bodies: Node3D = $Bodies
 @onready var body_spawner: MultiplayerSpawner = $BodySpawner
-@onready var voxel_world: VoxelWorld = $VoxelWorld
+## The compound's voxel structures (null on a zone, whose modules each have their own: see
+## voxel_worlds()).
+@onready var voxel_world: VoxelWorld = get_node_or_null(^"VoxelWorld") as VoxelWorld
 
 var _spawn_index := 0
 var _throw_count := 0
@@ -196,7 +198,39 @@ func map_area() -> Rect2:
 
 func next_spawn_point() -> Vector3:
 	_spawn_index += 1
-	return SPAWN_POINTS[_spawn_index % SPAWN_POINTS.size()]
+	return spawn_point(_spawn_index)
+
+
+## The `index`th of the level's player spawn points (they repeat): the compound's gate.
+func spawn_point(index: int) -> Vector3:
+	return SPAWN_POINTS[posmod(index, SPAWN_POINTS.size())]
+
+
+# --- Level API shared with ZoneLevel (wave 4) -------------------------------------------------
+
+## What a joining client must load to play this level (LevelSwitch sends it on join).
+func level_info() -> Dictionary:
+	return {"level": "compound"}
+
+
+## `pos` moved onto the ground (the compound's ground is flat at 0; a zone's follows its terrain).
+func ground_point(pos: Vector3) -> Vector3:
+	return pos
+
+
+## Every voxel world in the level that is loaded now.
+func voxel_worlds() -> Array[VoxelWorld]:
+	var out: Array[VoxelWorld] = []
+	if voxel_world:
+		out.append(voxel_world)
+	return out
+
+
+## Host only. A blast (a frag) at a world-space point against the voxels around it
+## (VoxelWorld.server_blast on each loaded world it reaches).
+func server_blast(pos: Vector3, radius_m: float) -> void:
+	for world in voxel_worlds():
+		world.server_blast(pos, radius_m)
 
 
 ## Host only.
@@ -494,8 +528,8 @@ func _spawn_squadmate(slot: int, role: StringName, team: int) -> Soldier:
 	var anchor: Node3D = squad.leader if is_instance_valid(squad.leader) else null
 	var wedge: Array = Squad.FORMATIONS["wedge"]
 	var pos := anchor.global_transform * (wedge[maxi(slot - 1, 0) % wedge.size()] as Vector3) if anchor \
-		else SPAWN_POINTS[slot % SPAWN_POINTS.size()] + Vector3(0, 0, 3)
-	return spawn_soldier({"name": callsign, "faction": "friendly", "variant": "multicam", "pos": pos, "loadout": [],
+		else spawn_point(slot) + Vector3(0, 0, 3)
+	return spawn_soldier({"name": callsign, "faction": "friendly", "variant": "multicam", "pos": ground_point(pos), "loadout": [],
 		"role": String(role), "team": team, "slot": slot, "combat": 0.5 + 0.03 * (slot % 5), "discipline": 0.6, "guard": false})
 
 
@@ -657,32 +691,41 @@ func _build_environment() -> void:
 ## against the east wall, and a sheet-metal shipping container by the west wall. Rounds go
 ## through the wood and the sheet metal; the concrete only takes small marks.
 func _build_structures() -> void:
+	for box: Array in structure_boxes():
+		voxel_world.add_box_m(box[0], box[1], box[2])
+
+
+## The compound's structures as [from, to (metres), VoxelWorld.Mat] boxes, in build order
+## (see _build_structures). A zone places the same compound as a module (ZoneModules).
+static func structure_boxes() -> Array:
+	var out: Array = []
 	var h := COMPOUND_HALF
 	var t := WALL_THICKNESS
 	var C := VoxelWorld.Mat.CONCRETE
 	# Perimeter, with a 4 m gate in the south wall.
-	voxel_world.add_box_m(Vector3(-h, 0, -h), Vector3(h, 2.6, -h + t), C)
-	voxel_world.add_box_m(Vector3(-h, 0, -h), Vector3(-h + t, 2.6, h), C)
-	voxel_world.add_box_m(Vector3(h - t, 0, -h), Vector3(h, 2.6, h), C)
-	voxel_world.add_box_m(Vector3(-h, 0, h - t), Vector3(-2, 2.6, h), C)
-	voxel_world.add_box_m(Vector3(2, 0, h - t), Vector3(h, 2.6, h), C)
+	out.append([Vector3(-h, 0, -h), Vector3(h, 2.6, -h + t), C])
+	out.append([Vector3(-h, 0, -h), Vector3(-h + t, 2.6, h), C])
+	out.append([Vector3(h - t, 0, -h), Vector3(h, 2.6, h), C])
+	out.append([Vector3(-h, 0, h - t), Vector3(-2, 2.6, h), C])
+	out.append([Vector3(2, 0, h - t), Vector3(h, 2.6, h), C])
 	# Main building, 10 x 8 m, doorway in the south wall.
 	var P := VoxelWorld.Mat.PAINTED
-	voxel_world.add_box_m(Vector3(-5, 0, -12), Vector3(5, 3, -12 + t), P)
-	voxel_world.add_box_m(Vector3(-5, 0, -12), Vector3(-5 + t, 3, -4), P)
-	voxel_world.add_box_m(Vector3(5 - t, 0, -12), Vector3(5, 3, -4), P)
-	voxel_world.add_box_m(Vector3(-5, 0, -4 - t), Vector3(-0.6, 3, -4), P)
-	voxel_world.add_box_m(Vector3(0.6, 0, -4 - t), Vector3(5, 3, -4), P)
-	voxel_world.add_box_m(Vector3(-0.6, 2.2, -4 - t), Vector3(0.6, 3, -4), P)
+	out.append([Vector3(-5, 0, -12), Vector3(5, 3, -12 + t), P])
+	out.append([Vector3(-5, 0, -12), Vector3(-5 + t, 3, -4), P])
+	out.append([Vector3(5 - t, 0, -12), Vector3(5, 3, -4), P])
+	out.append([Vector3(-5, 0, -4 - t), Vector3(-0.6, 3, -4), P])
+	out.append([Vector3(0.6, 0, -4 - t), Vector3(5, 3, -4), P])
+	out.append([Vector3(-0.6, 2.2, -4 - t), Vector3(0.6, 3, -4), P])
 	# Low cover: a sandbag wall and two concrete ones.
-	voxel_world.add_box_m(Vector3(-9, 0, 6), Vector3(-6, 1.1, 6.4), VoxelWorld.Mat.SANDBAG)
-	voxel_world.add_box_m(Vector3(6, 0, 3), Vector3(9, 1.1, 3.4), C)
-	voxel_world.add_box_m(Vector3(-1.5, 0, 10), Vector3(1.5, 1.1, 10.4), C)
+	out.append([Vector3(-9, 0, 6), Vector3(-6, 1.1, 6.4), VoxelWorld.Mat.SANDBAG])
+	out.append([Vector3(6, 0, 3), Vector3(9, 1.1, 3.4), C])
+	out.append([Vector3(-1.5, 0, 10), Vector3(1.5, 1.1, 10.4), C])
 	# Crates.
 	var W := VoxelWorld.Mat.WOOD
-	voxel_world.add_box_m(Vector3(-13, 0, -11), Vector3(-12, 1, -10), W)
-	voxel_world.add_box_m(Vector3(-12, 0, -11), Vector3(-11, 1, -10), W)
-	voxel_world.add_box_m(Vector3(-12.5, 1, -11), Vector3(-11.5, 2, -10), W)
+	out.append([Vector3(-13, 0, -11), Vector3(-12, 1, -10), W])
+	out.append([Vector3(-12, 0, -11), Vector3(-11, 1, -10), W])
+	out.append([Vector3(-12.5, 1, -11), Vector3(-11.5, 2, -10), W])
 	var S := VoxelWorld.Mat.SHEET_METAL
 	for box: Array in SHED + CONTAINER:
-		voxel_world.add_box_m(box[0], box[1], W if box[2] == "wood" else S)
+		out.append([box[0], box[1], W if box[2] == "wood" else S])
+	return out
