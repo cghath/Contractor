@@ -128,7 +128,7 @@ include Voxel Tools.
 
 The command menu follows Arma 3's layout: 1 Move (return to formation, move there, stop), 2 Target (focus fire on
 the enemy under your crosshair), 3 Engage (open fire, hold fire), 5 Status, 6 Action (throw smoke or frag at the
-crosshair), 7 Combat mode (Safe, Aware, Combat, Stealth), 8 Formation (wedge, file, line, staggered column),
+crosshair; scavenge the body under the crosshair; scavenge freely or don't scavenge), 7 Combat mode (Safe, Aware, Combat, Stealth), 8 Formation (wedge, file, line, staggered column),
 9 Team (select fire team A or B, assign or select colour teams) and 0 Support. Mount and the support calls are
 listed but not built yet.
 
@@ -278,8 +278,9 @@ a release:
 - The voxel world has no stream, so it's limited to `VoxelWorld.BOUNDS`. The voxel edit log grows with every bullet hole and is never compacted.
 - Player inventories aren't saved yet; only the zone's state is.
 - Medical depth (wave 3, built): IV and IO lines, fluids, pressure bags, per-lung breathing, the decompression needle, heart rate, the four drugs, CPR, the defibrillator, surgery kits, blasts, falls, burns, hypothermia and deafness are in. Heart wounds have no field fix. Nothing sets a body on fire yet (burns come from close blasts), and deafness only muffles the sound bus (the game has no sounds yet). A line can't be taken out once placed. Breathing has no sound yet, and blood in a lung (hemothorax) has no field fix (no chest drain).
-- Bodies: a zone reload respawns the full friendly squad alive while dead squadmates' saved bodies also come back, so their gear exists twice (AI persistence is wave 4; dead hostiles aren't respawned). Loot all can't move a carrier with its contents onto someone already wearing one; it falls back to piece by piece.
-- AI squadmates don't load magazines from loose rounds, and role kits carry no loose rounds.
+- Bodies: a zone reload respawns the full friendly squad alive while dead squadmates' saved bodies also come back, so their gear exists twice (AI persistence is wave 4; dead hostiles aren't respawned). Loot all hands a carrier over with its pouches empty and their contents as separate items, so they land in the looter's own pouches.
+- AI squadmates don't load magazines from loose rounds, and role kits carry no loose rounds. Scavenging AI leaves loose rounds on bodies for the same reason.
+- AI scavenging is need-based and leaves a dead player's body alone; the order goes to the nearest selected squadmate, not to one you pick by name.
 - Bullet holes in wood and sheet metal are decals (a voxel only breaks out after many rounds), so you can't see through them; concrete marks are small decals. No ricochets yet.
 - AI squadmates still use the older, looser movement momentum (the player's tighter grip got them stuck on door frames).
 - You can still fire during a pickup or equip animation. A dragged casualty eases back about 1 m when put down. An equip animation plays even when the action then fails.

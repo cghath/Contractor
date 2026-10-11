@@ -52,8 +52,14 @@ extends Node
 ##   (their buddy first) carries the body after the squad leader.
 ## - Unconscious foes are ignored, except for a dead-check while clearing or assaulting
 ##   through a position (DEAD_CHECK_M).
+## - Scavenging (Scavenge): out of contact a unit short of ammunition, medical items, grenades
+##   or armor goes through a nearby dead body and takes what it needs, one item at a time,
+##   enemies and fallen AI squadmates alike (never a dead player's body: that gear waits for
+##   its player). One unit per body (Soldier.scavenged_by). Friendlies only while following,
+##   and within SCAVENGE_LEASH_M of the squad leader; the command menu orders one to a body
+##   or forbids it (scavenge_allowed).
 
-enum Intent { FOLLOW, HOLD, MOVE_TO, PATROL, INVESTIGATE, FIGHT, CASUALTY, RELOAD, HEAL }
+enum Intent { FOLLOW, HOLD, MOVE_TO, PATROL, INVESTIGATE, FIGHT, CASUALTY, RELOAD, HEAL, SCAVENGE }
 ## Casualty care: NONE, the living-casualty steps (REACH to GUARD and CARRY), or carrying a
 ## dead friendly's BODY.
 enum Care { NONE, REACH, DRAG, TREAT, GUARD, CARRY, BODY }
@@ -136,6 +142,24 @@ const BODY_RECOVER_M := 60.0
 ## following, holding and moving (0.5) plus HYSTERESIS, so a squadmate who is following
 ## switches to it; below fighting (0.7), a low-magazine reload (0.65) and casualty care.
 const BODY_RECOVER_SCORE := 0.63
+## Proposed: scavenging (Scavenge). Bodies within SCAVENGE_RANGE_M of the unit, and for
+## friendlies within SCAVENGE_LEASH_M of the squad leader, once SCAVENGE_CALM_S have passed
+## since the last contact (armor swaps wait ARMOR_CALM_S). A body is worth going to when what
+## it holds scores at least SCAVENGE_MIN (Scavenge.best_pick; about a third of a basic load
+## of ammo short); once there, the unit keeps taking things down to SCAVENGE_KEEP. Its score
+## runs from SCAVENGE_SCORE (above following plus HYSTERESIS) up by SCAVENGE_NEED_SCORE times
+## the need; an ordered unit scores SCAVENGE_ORDER_SCORE. A body done with is left alone for
+## SCAVENGE_SKIP_S.
+const SCAVENGE_RANGE_M := 30.0
+const SCAVENGE_LEASH_M := 40.0
+const SCAVENGE_CALM_S := 10.0
+const ARMOR_CALM_S := 30.0
+const SCAVENGE_MIN := 0.25
+const SCAVENGE_KEEP := 0.1
+const SCAVENGE_SCORE := 0.61
+const SCAVENGE_NEED_SCORE := 0.06
+const SCAVENGE_ORDER_SCORE := 0.68
+const SCAVENGE_SKIP_S := 60.0
 ## Proposed: a responder whose distance to the casualty hasn't closed by REACH_PROGRESS_M in
 ## REACH_STUCK_S (something the navmesh doesn't know about is in the way, such as a player)
 ## sidesteps DETOUR_M for DETOUR_S, alternating sides. After REACH_GIVE_UP_S without getting
@@ -192,6 +216,12 @@ var wants_medic := false
 var wanted: Array[StringName] = []
 ## True while moving to new cover in contact (the buddy holds and covers meanwhile).
 var bounding := false
+## Command menu "Scavenge freely" / "Don't scavenge" (friendlies).
+var scavenge_allowed := true
+## Command menu "Scavenge that body": the body to go through now (null: none ordered).
+var scavenge_order: Soldier
+## The body this unit is going through (SCAVENGE).
+var loot_body: Soldier
 
 var _path := PackedVector3Array()
 var _path_index := 0
@@ -242,6 +272,11 @@ var _was_bounding := false
 var _fired_on_at := -1000.0
 var _last_suppression := 0.0
 var _last_injury := 0.0
+var _loot_pick := {}  # the item being taken off loot_body until _loot_until
+var _loot_until := -1.0
+var _loot_score := 0.0  # what going through the chosen body scored
+var _loot_candidate: Soldier  # the body worth going through (refreshed each think)
+var _looted := {}  # body instance id -> Soldier._now() until which this unit leaves it alone
 
 
 static func of(s: Node) -> SquadAI:
@@ -393,6 +428,10 @@ func status_text() -> String:
 			return "Engaging" if target else ("In cover" if _at_cover() else "In contact")
 		Intent.RELOAD:
 			return "Reloading"
+		Intent.SCAVENGE:
+			var dead := loot_body if loot_body else _loot_candidate
+			var what := _name_of(dead) if dead and dead.faction == body.faction else "the body"
+			return "Searching %s" % what if _loot_until >= 0.0 else "Going to %s" % what
 		Intent.HEAL:
 			if _treat_target == body and _treat_until >= 0.0:
 				return "Treating self"
@@ -472,6 +511,9 @@ func _choose_intent() -> void:
 	var heal := _self_care_score()
 	if heal > 0.0:
 		scores[Intent.HEAL] = heal
+	var loot := _scavenge_score(contact)
+	if loot > 0.0:
+		scores[Intent.SCAVENGE] = loot
 
 	var best: Intent = intent
 	var best_score := -1.0
@@ -489,6 +531,8 @@ func _choose_intent() -> void:
 		_score = best_score
 		if intent != Intent.CASUALTY and care == Care.BODY:
 			_end_care()  # put the body down to fight
+		if intent != Intent.SCAVENGE and loot_body != null:
+			_end_scavenge()  # contact, a casualty, or something more pressing
 
 
 # --- Acting ---------------------------------------------------------------
@@ -526,13 +570,15 @@ func _act() -> void:
 			_do_self_care()
 		Intent.CASUALTY:
 			_do_care()
+		Intent.SCAVENGE:
+			_do_scavenge()
 	_apply_combat_mode()
 
 
 ## Combat mode stance and weapon carry for the movement and fighting intents (reloading,
 ## healing and casualty care keep their own stance).
 func _apply_combat_mode() -> void:
-	if intent in [Intent.RELOAD, Intent.HEAL, Intent.CASUALTY]:
+	if intent in [Intent.RELOAD, Intent.HEAL, Intent.CASUALTY, Intent.SCAVENGE]:
 		return
 	var fight := intent == Intent.FIGHT or fighting()
 	match combat_mode:
@@ -1113,6 +1159,14 @@ func _carry_body() -> void:
 		_end_care()
 		return
 	if body.carrying != casualty:
+		var looter := SquadAI.of(casualty.scavenged_by) if is_instance_valid(casualty.scavenged_by) else null
+		if looter and looter != self and looter.loot_body == casualty:
+			# Someone is cross-loading from the body: wait beside it until they're done.
+			if _flat_distance(casualty.global_position) > CASUALTY_REACH + 1.5:
+				_go(casualty.global_position, true)
+			else:
+				_has_destination = false
+			return
 		if _flat_distance(casualty.global_position) <= CASUALTY_REACH and body.server_pick_up_body(casualty, Soldier.CARRY):
 			_callouts_carrying(true)
 		else:
@@ -1143,6 +1197,121 @@ func _end_care() -> void:
 	_has_cover = false
 	wants_medic = false
 	wanted.clear()
+
+
+# --- Scavenging -------------------------------------------------------------
+
+## How much going through a body scores now (0: not now). Out of contact for
+## SCAVENGE_CALM_S, free (no casualty, nothing carried, no wounds to see to), and for a
+## friendly, following the squad and allowed to; an order skips the wait and the need.
+func _scavenge_score(contact: bool) -> float:
+	_loot_candidate = null
+	if contact or care != Care.NONE or body.carrying != null or _self_care_score() > 0.0 or asking_for_medic():
+		return 0.0
+	if is_instance_valid(scavenge_order) and _may_scavenge(scavenge_order, true):
+		_loot_candidate = scavenge_order
+		return SCAVENGE_ORDER_SCORE
+	scavenge_order = null
+	if body.faction == &"friendly" and (not scavenge_allowed or order != Squad.Order.FOLLOW):
+		return 0.0
+	if Soldier._now() - _last_contact < SCAVENGE_CALM_S:
+		return 0.0
+	if intent == Intent.SCAVENGE and loot_body != null and _may_scavenge(loot_body):
+		_loot_candidate = loot_body
+		return _loot_score  # carry on with this body
+	var best_value := 0.0
+	for n in get_tree().get_nodes_in_group(Soldier.DEAD_GROUP):
+		var dead := n as Soldier
+		if dead == null or not _may_scavenge(dead) or Soldier._now() < float(_looted.get(dead.get_instance_id(), -1.0)):
+			continue
+		var d := body.global_position.distance_to(dead.global_position)
+		if d > SCAVENGE_RANGE_M:
+			continue
+		var worth := Scavenge.value(body, dead, _calm_for_armor()) - d * 0.002  # nearer first
+		if worth >= SCAVENGE_MIN and worth > best_value:
+			best_value = worth
+			_loot_candidate = dead
+	if _loot_candidate == null:
+		return 0.0
+	_loot_score = SCAVENGE_SCORE + SCAVENGE_NEED_SCORE * minf(best_value, 1.0)
+	return _loot_score
+
+
+## Whether this unit may go through `dead`: a dead body nobody carries and nobody else is
+## going through, not a dead player's (their gear waits for them, under a gear marker),
+## and for a friendly within SCAVENGE_LEASH_M of the squad leader unless `ordered` to it.
+func _may_scavenge(dead: Soldier, ordered := false) -> bool:
+	if dead == null or not is_instance_valid(dead) or dead.is_queued_for_deletion() or dead == body \
+			or not dead.vitals.is_dead() or dead.has_gear_marker or not dead.has_gear() or is_instance_valid(dead.carried_by):
+		return false
+	var other := dead.scavenged_by
+	if is_instance_valid(other) and other != body and other.vitals.is_up() and SquadAI.of(other) and SquadAI.of(other).loot_body == dead:
+		return false
+	if body.faction == &"friendly" and squad and is_instance_valid(squad.leader) and squad.leader != body \
+			and dead.global_position.distance_to(squad.leader.global_position) > SCAVENGE_LEASH_M:
+		return false
+	return true
+
+
+## Long enough out of contact to swap armor (a plate takes several seconds with the carrier open).
+func _calm_for_armor() -> bool:
+	return Soldier._now() - _last_contact >= ARMOR_CALM_S
+
+
+## Goes to the body, kneels at it and takes one thing at a time (Scavenge.best_pick), each
+## taking its time; the item moves when that time is up. Done when nothing on it is worth
+## taking any more (or it's gone, or someone else carries it off).
+func _do_scavenge() -> void:
+	if loot_body != null and _loot_candidate != null and _loot_candidate == scavenge_order and loot_body != _loot_candidate:
+		_end_scavenge()  # ordered to another body
+	if loot_body == null:
+		if _loot_candidate == null:
+			_think_cd = 0.0
+			return
+		loot_body = _loot_candidate
+		loot_body.scavenged_by = body
+		_loot_pick = {}
+		_loot_until = -1.0
+		var callouts := Callouts.of(body)
+		if callouts:
+			callouts.scavenging(body, loot_body)
+	if not _may_scavenge(loot_body, loot_body == scavenge_order):
+		_end_scavenge()
+		_think_cd = 0.0
+		return
+	if _flat_distance(loot_body.global_position) > CASUALTY_REACH:
+		_go(loot_body.global_position, false)
+		return
+	_has_destination = false
+	body.want_crouch = true
+	body.want_aim = false
+	var now := Soldier._now()
+	if _loot_until >= 0.0:
+		if now < _loot_until:
+			return
+		Scavenge.apply(body, loot_body, _loot_pick)
+		_loot_until = -1.0
+		_loot_pick = {}
+	var ordered := scavenge_order == loot_body
+	var pick := Scavenge.best_pick(body, loot_body, _calm_for_armor(), 0.001 if ordered else SCAVENGE_KEEP)
+	if pick.is_empty():
+		_looted[loot_body.get_instance_id()] = now + SCAVENGE_SKIP_S
+		if ordered:
+			scavenge_order = null
+		_end_scavenge()
+		_think_cd = 0.0
+		return
+	_loot_pick = pick
+	_loot_until = now + float(pick.seconds)
+	body.model.server_loot(loot_body, float(pick.seconds) >= 3.0)
+
+
+func _end_scavenge() -> void:
+	if is_instance_valid(loot_body) and loot_body.scavenged_by == body:
+		loot_body.scavenged_by = null
+	loot_body = null
+	_loot_pick = {}
+	_loot_until = -1.0
 
 
 ## The next treatment this unit can give `c` now, in the care order (under fire: massive

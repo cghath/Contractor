@@ -35,7 +35,7 @@ const POCKETS_L := 2.0
 const MOLLE_PREFIX := "molle:"
 ## Display names of attach point types.
 const POINT_TYPES := {
-	"mag": "Mag", "pistol": "Pistol mag", "knife": "Knife", "radio": "Radio", "medical": "Medical", "utility": "Utility",
+	"mag": "Mag", "pistol": "Pistol mag", "knife": "Knife", "radio": "Radio", "medical": "Medical", "tq": "Tourniquet", "utility": "Utility",
 }
 
 ## Replicated snapshot. Always assign a fresh Dictionary so replication sees the change.
@@ -739,19 +739,24 @@ func search_containers() -> Array[StringName]:
 	return out
 
 
-## Where `item` is stowed when it's picked up: pouches made for it (a mag pouch for a
-## magazine), then the vest, pockets and backpack, then general pouches.
+## Where `item` is stowed when it's picked up: pouches made for it, the ones naming it first
+## (a tourniquet holder for a tourniquet, before an IFAK pouch that takes any medical item),
+## then the vest, pockets and backpack, then general pouches.
 func stow_order(item: ItemData) -> Array[StringName]:
 	var made_for: Array[StringName] = []
+	var by_type: Array[StringName] = []
 	var general: Array[StringName] = []
 	for c in pouch_containers():
 		var pouch := pouch_item(c)
 		if not pouch_accepts(pouch, item):
 			continue
-		if pouch.stats.has("accepts"):
+		if String(item.id) in pouch.stats.get("accepts", []):
 			made_for.append(c)
+		elif pouch.stats.has("accepts"):
+			by_type.append(c)
 		else:
 			general.append(c)
+	made_for.append_array(by_type)
 	made_for.append_array(CONTAINERS)
 	made_for.append_array(general)
 	return made_for

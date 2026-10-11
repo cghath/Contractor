@@ -532,13 +532,13 @@ func _test_self_tourniquet() -> void:
 	await _seconds(4.0)
 	var alpha := _ai("Alpha")
 	var charlie := _ai("Charlie")
-	alpha.inventory.take(&"tourniquet")
 	# Nothing but the tourniquet: no stopgap kit and no bandages, so what he can't do himself
 	# (the seeded hit below always opens a vein too) waits for the medic.
 	var taken: Array[StringName] = []
-	for id: StringName in [&"ifak", &"pressure_bandage", &"hemostatic_gauze"]:
+	for id: StringName in [&"tourniquet", &"ifak", &"pressure_bandage", &"hemostatic_gauze"]:
 		while alpha.inventory.remove_one(id):
 			taken.append(id)
+	alpha.inventory.take(&"tourniquet")  # just the one (the base kit's holder has another)
 	var morphine_before := charlie.inventory.count_of(&"morphine")
 	var splints_before := charlie.inventory.count_of(&"splint")
 	var bandages_before := charlie.inventory.count_of(&"pressure_bandage")
@@ -673,6 +673,8 @@ func _test_engagement() -> void:
 
 func _test_dead_bodies() -> void:
 	print("Dead friendlies")
+	# Bodies keep their gear here: nobody cross-loads from them (scavenge_test covers that).
+	level.squad_for(&"friendly").set_scavenge(player, false)
 	_firing = false
 	_place(player, Vector3(0, 0.1, 22))
 	await _out_of_contact()
@@ -756,12 +758,16 @@ func _test_dead_bodies() -> void:
 	var both_after := _items_in([second, player])
 	check(_items_of(second).size() > 0 and both_after == both_before and _new_items(ground_2, second.global_position, 10.0).is_empty(),
 		"with his pouches already full the looter takes what fits and the rest stays on the body, none on the ground (%d left)" % _items_of(second).size())
+	if both_after != both_before:
+		print("    before %s\n    after %s" % [both_before.filter(func(l: String) -> bool: return l not in both_after),
+			both_after.filter(func(l: String) -> bool: return l not in both_before)])
 	second.remove_from_group(Soldier.DEAD_GROUP)  # test cleanup: gone without dropping anything
 	second.queue_free()
 	check(_new_items(ground, echo.global_position, 10.0).is_empty(), "and nothing went on the ground (%s)" % [_new_items(ground, echo.global_position, 10.0)])
 	player.inventory.net_state = looter_gear
 	if is_instance_valid(bearer):
 		SquadAI.of(bearer).set_physics_process(true)
+	level.squad_for(&"friendly").set_scavenge(player, true)
 
 
 ## A dead player leaves a body with all their gear (only the hands item drops) and respawns;
@@ -894,9 +900,13 @@ func _gear_of(s: Soldier) -> Array:
 	var inv := s.inventory
 	for slot in Inventory.SLOTS:
 		if inv.slots[slot] != &"":
-			out.append("slot:%s=%s %s" % [slot, inv.slots[slot], JSON.stringify(GameState.from_json(inv.state_of(slot)), "", true)])
+			out.append("slot:%s=%s %s" % [slot, inv.slots[slot], JSON.stringify(GameState.from_json(_worn_state(inv, slot)), "", true)])
+	for p: Dictionary in inv.attach_points():
+		var att := inv.attachment(StringName(p.id))
+		if not att.is_empty():
+			out.append("molle:%s" % att.id)
 	var stowed := {}
-	for container in Inventory.CONTAINERS:
+	for container in inv.search_containers():
 		for entry: Dictionary in inv.containers[container]:
 			var key := "item:%s %s" % [entry.id, JSON.stringify(GameState.from_json(entry.get("state", {})), "", true)]
 			stowed[key] = int(stowed.get(key, 0)) + int(entry.count)
@@ -926,8 +936,12 @@ func _items_in(soldiers: Array) -> Array:
 		var inv := s.inventory
 		for slot in Inventory.SLOTS:
 			if inv.slots[slot] != &"":
-				add.call(inv.slots[slot], inv.state_of(slot), 1)
-		for container in Inventory.CONTAINERS:
+				add.call(inv.slots[slot], _worn_state(inv, slot), 1)
+		for p: Dictionary in inv.attach_points():
+			var att := inv.attachment(StringName(p.id))
+			if not att.is_empty():
+				add.call(StringName(att.id), {}, 1)
+		for container in inv.search_containers():
 			for entry: Dictionary in inv.containers[container]:
 				add.call(entry.id, entry.get("state", {}), int(entry.count))
 		if inv.hands != &"":
@@ -959,9 +973,17 @@ func _new_items(before: Dictionary, pos: Vector3, radius: float) -> Array:
 	return out
 
 
+## A worn item's state as the gear helpers compare it: a carrier's without its MOLLE (they
+## count what's on it and in its pouches on their own, whichever pouch it's in).
+static func _worn_state(inv: Inventory, slot: StringName) -> Dictionary:
+	var state := inv.state_of(slot).duplicate(true)
+	state.erase("molle")
+	return state
+
+
 ## [container, index] of the first stowed entry of `id` on `s`, or [&"", -1].
 func _entry_index(s: Soldier, id: StringName) -> Array:
-	for container in Inventory.CONTAINERS:
+	for container in s.inventory.search_containers():
 		var list: Array = s.inventory.containers[container]
 		for i in list.size():
 			if list[i].id == id:

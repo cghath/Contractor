@@ -111,6 +111,8 @@ signal loadout_changed
 var carried_by_pos: Variant = null
 ## Host only: the squadmate who has claimed this body while it is down.
 var care_by: Soldier
+## Host only: the AI going through this dead body's gear (SquadAI's SCAVENGE), one at a time.
+var scavenged_by: Soldier
 ## Host only: battle buddy. Buddies look after each other first and never bound at the same time.
 var buddy: Soldier
 ## AI: what it's doing, in a few words (replicated for the squad HUD).
@@ -489,6 +491,12 @@ func _server_squad_command(cmd: String, point: Vector3, names: PackedStringArray
 			var who := squad.order_throw(self, &"smoke_grenade" if cmd == "throw_smoke" else &"frag_grenade", point, names)
 			if who == "":
 				_client_message.rpc_id(owner_peer(), "Nobody selected has one")
+		"scavenge":
+			var why := squad.order_scavenge(self, point, names)
+			if why != "":
+				_client_message.rpc_id(owner_peer(), why)
+		"scavenge_on", "scavenge_off":
+			squad.set_scavenge(self, cmd == "scavenge_on", names)
 		_:
 			if not squad.command(self, cmd, point, names):  # formation, target, combat mode, team
 				_client_message.rpc_id(owner_peer(), "Can't target that" if cmd.begins_with("target:") else "Order not given")
@@ -1305,15 +1313,20 @@ func _loot_all_at_once(other: Soldier, entries: Array[Dictionary]) -> int:
 	return entries.size() - left.size()
 
 
-## Where everything on `other` is, as [slot or container, index] pairs (-1 for a slot), in
-## the order to take it piece by piece: what's stowed first (last entries first, so the
-## indices stay good), then weapons, helmet and plates, and carrier and pack last (they only
-## come off empty).
+## Where everything on `other` is, as [slot or container, index] pairs (-1 for a slot or an
+## attachment), in the order to take it piece by piece: what's stowed first, pouches
+## included (last entries first, so the indices stay good), then the emptied pouches and
+## whatever else is on the carrier's MOLLE, then weapons, helmet and plates, and carrier and
+## pack last (they only come off empty).
 static func _loot_order(other: Soldier) -> Array:
 	var out := []
-	for container in Inventory.CONTAINERS:
-		for i in range(other.inventory.containers[container].size() - 1, -1, -1):
+	var inv := other.inventory
+	for container in inv.search_containers():
+		for i in range(inv.containers[container].size() - 1, -1, -1):
 			out.append([container, i])
+	for p: Dictionary in inv.attach_points():
+		if not inv.attachment(StringName(p.id)).is_empty():
+			out.append([Inventory.pouch_container(StringName(p.id)), -1])
 	var slots := LOOT_SLOT_ORDER.duplicate()
 	slots.reverse()
 	for slot: StringName in slots:
@@ -1324,7 +1337,10 @@ static func _loot_order(other: Soldier) -> Array:
 
 ## Everything on this body as entries ({"id", "count", "state"?}), in the order to hand it
 ## over: worn gear in LOOT_SLOT_ORDER (carrier and pack first, then plates, helmet and
-## weapons), then what's stowed, container by container.
+## weapons), then what's stowed, pouches first. The carrier comes with its pouches on but
+## empty, and what was in them follows as entries of their own, so a looter who already
+## wears a carrier gets the magazines in his own pouches instead of buried in a spare
+## carrier, and one who puts this carrier on gets them back in its pouches.
 func gear_entries() -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	for slot in LOOT_SLOT_ORDER:
@@ -1332,7 +1348,14 @@ func gear_entries() -> Array[Dictionary]:
 			var entry := {"id": inventory.slots[slot], "count": 1}
 			if not inventory.state_of(slot).is_empty():
 				entry.state = inventory.state_of(slot).duplicate(true)
+				if slot == &"vest":
+					for att: Dictionary in entry.state.get("molle", {}).values():
+						if att.has("held"):
+							att.held = []
 			out.append(entry)
+	for container in inventory.pouch_containers():
+		for entry: Dictionary in inventory.containers[container]:
+			out.append(entry.duplicate(true))
 	for container in Inventory.CONTAINERS:
 		for entry: Dictionary in inventory.containers[container]:
 			out.append(entry.duplicate(true))
@@ -1364,6 +1387,8 @@ func _server_loot_item(path: NodePath, where: StringName, index: int, id: String
 ## The item in slot `where` (index < 0) or stowed entry `index` of container `where` on
 ## `other`, or &"" if there's nothing there.
 static func _loot_id_at(other: Soldier, where: StringName, index: int) -> StringName:
+	if index < 0 and Inventory.is_pouch_container(where):
+		return StringName(other.inventory.attachment(Inventory.point_of(where)).get("id", ""))
 	if index < 0:
 		return other.inventory.slots.get(where, &"")
 	var list: Array = other.inventory.containers.get(where, [])
@@ -1384,11 +1409,22 @@ func _lootable(path: NodePath) -> Soldier:
 
 
 ## Host only. Moves one thing from `other`'s inventory into this soldier's: the item in slot
-## `where` (index < 0) or stowed entry `index` of container `where`. Whatever doesn't fit goes
-## straight back where it was. Returns {"moved" (units), "name", "why" ("" when it all moved,
-## otherwise the reason)}.
+## `where` (index < 0), what's on the attach point of pouch container `where` (index < 0; a
+## pouch comes with what's in it), or stowed entry `index` of container `where` (pouches
+## too). Whatever doesn't fit goes straight back where it was. Returns {"moved" (units),
+## "name", "why" ("" when it all moved, otherwise the reason)}.
 func _loot_one(other: Soldier, where: StringName, index: int) -> Dictionary:
 	var inv := other.inventory
+	if index < 0 and Inventory.is_pouch_container(where):
+		var point := Inventory.point_of(where)
+		var detached := inv.detach(point)
+		if detached.is_empty():
+			return {"moved": 0, "name": "", "why": "Nothing there any more"}
+		var att_name := ItemDB.get_item(detached.id).name
+		if inventory.take(detached.id, 1, detached.get("state", {})) == 1:
+			return {"moved": 1, "name": att_name, "why": ""}
+		inv.attach(point, detached)  # no room: back on the carrier
+		return {"moved": 0, "name": att_name, "why": "No room for %s" % att_name}
 	if index < 0:
 		var id: StringName = inv.slots.get(where, &"")
 		if id == &"":

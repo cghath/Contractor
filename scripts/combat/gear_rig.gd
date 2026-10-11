@@ -30,6 +30,9 @@ const PLATE_HEIGHT := 0.33
 const SIDE_PLATE_HEIGHT := 0.28
 ## Where a helmet's pivot (the centre of its dome base) sits, head-local.
 const HELMET_POSITION := Vector3(0, 0.2, 0)
+## A tourniquet's band and the red of medical pull tabs, as drawn on the carrier.
+const TQ_BAND := Color("1b1b1a")
+const MED_RED := Color("b3261e")
 ## Rest mounts: slot -> [mount, position, rotation]. The primary is slung muzzle-down on
 ## the right of the chest; the sidearm sits in a hip holster.
 const MOUNTS := {
@@ -195,7 +198,9 @@ static func point_transform(p: Dictionary, size: Vector3) -> Transform3D:
 
 
 ## A pouch (or knife) as small boxes: body and a darker flap, or a sheath and handle; a radio
-## shows its antenna. Front is -Z. Used on the soldier and for item previews.
+## shows its antenna. A tourniquet holder is open-topped: the tourniquet in it shows (black
+## band, windlass rod across the top, red tab). A full IFAK pouch shows its red pull tabs, so
+## you can see who carries one. Front is -Z. Used on the soldier and for item previews.
 static func pouch_node(item: ItemData, colour: Color, full: bool, layers := 1) -> Node3D:
 	var root := Node3D.new()
 	var size := WorldItem.visual_size(item)
@@ -203,10 +208,21 @@ static func pouch_node(item: ItemData, colour: Color, full: bool, layers := 1) -
 		root.add_child(_part_box(Vector3(size.x, size.y * 0.62, size.z), Vector3(0, -size.y * 0.19, 0), colour.darkened(0.35), layers))
 		root.add_child(_part_box(Vector3(size.x * 0.7, size.y * 0.38, size.z * 0.8), Vector3(0, size.y * 0.31, 0), Color("26241f"), layers))
 		return root
+	var accepts: Array = item.stats.get("accepts", [])
+	if accepts.has("tourniquet"):
+		root.add_child(_part_box(Vector3(size.x, size.y * 0.6, size.z), Vector3(0, -size.y * 0.2, 0), colour, layers))
+		if full:
+			root.add_child(_part_box(Vector3(size.x * 0.8, size.y * 0.5, size.z * 0.75), Vector3(0, size.y * 0.25, 0), TQ_BAND, layers))
+			root.add_child(_part_box(Vector3(size.x * 1.9, 0.012, 0.012), Vector3(0, size.y * 0.5, -size.z * 0.1), TQ_BAND.lightened(0.15), layers))
+			root.add_child(_part_box(Vector3(0.016, 0.022, 0.006), Vector3(size.x * 0.25, size.y * 0.42, -size.z * 0.42), MED_RED, layers))
+		return root
 	root.add_child(_part_box(size, Vector3.ZERO, colour, layers))
 	root.add_child(_part_box(Vector3(size.x * 1.02, size.y * 0.28, size.z * 1.08), Vector3(0, size.y * 0.36, -size.z * 0.04), colour.darkened(0.25), layers))
-	if full and item.stats.get("accepts", []).has("radio"):
+	if full and accepts.has("radio"):
 		root.add_child(_part_box(Vector3(0.008, 0.16, 0.008), Vector3(size.x * 0.3, size.y * 0.5 + 0.08, 0), Color("1d1d1b"), layers))
+	if full and accepts.has("type:medical"):
+		for side in [-1.0, 1.0]:
+			root.add_child(_part_box(Vector3(0.018, 0.03, 0.008), Vector3(side * size.x * 0.32, size.y * 0.5 + 0.012, -size.z * 0.3), MED_RED, layers))
 	return root
 
 

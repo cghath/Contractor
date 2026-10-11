@@ -11,6 +11,60 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### AI scavenging, visible tourniquets and IFAKs, and looting MOLLE pouches (Captain, 2026-10-11)
+
+#### Added
+
+- **AI scavenging.** Out of contact, an AI soldier short of something goes through a nearby
+  dead body and takes what it needs, one item at a time, each pick taking its time (a pouch
+  1.5 s, a pack 4 s, a plate swap 8 s). Squadmates and enemies follow the same rules
+  (`scripts/ai/scavenge.gd`):
+  - **Ammunition first:** only magazines his own weapon takes, up to his role kit's basic
+    load. A marksman leaves 5.56 magazines alone.
+  - **Medical items** his kit lacks, counting what's left in his IFAK. Tourniquets, gauze,
+    chest seals and bandages come before the rest, and a loose item before a whole kit.
+  - **Then grenades and smokes, and anything else his kit lost** (a team leader's radio).
+    Intel, once it exists, always comes.
+  - **Armor only well out of contact:** a plate that clearly protects more than his own (his
+    is cracked through or rated lower) and fits his carrier, or a helmet. His old piece stays
+    on the body.
+  - **Another rifle only when his own has no rounds left anywhere** and the body's has some.
+    A dry M4 takes the MK18's magazines instead, since they fit.
+  - **Never past 35 kg of load** (armor swaps and intel aside), and never bulky items, spare
+    carriers or packs. The rest stays for players.
+  - **One soldier per body.** A squadmate about to carry a fallen friend's body waits while
+    someone cross-loads from it. A dead player's body is never touched: that gear waits for
+    its player under the gear marker.
+  - **Contact stops it** at once, and the item in progress stays on the body.
+  - **Command menu, 6 Action:** "Scavenge that body" sends the nearest selected squadmate to
+    the body under the crosshair. "Scavenge freely" and "Don't scavenge" switch it on or off.
+  - The HUD shows "Going to the body" and "Searching the body", and he calls out "Checking
+    the body".
+- **Tourniquet holder** (`pouch_tq`): an open-top MOLLE holder for one tourniquet, on a new
+  Tourniquet point on every carrier, on the front mag row on the support-hand side. Every
+  role's base kit now carries one with a tourniquet in it, on top of the one in the IFAK
+  (one on the kit, one in the kit). You can see the tourniquet in it (black band, windlass
+  across the top, red tab).
+- A full IFAK pouch shows its red pull tabs.
+- A new scavenge test suite (31 checks), run by `tools/run_tests.sh`.
+
+#### Changed
+
+- The IFAK pouch's Medical point moved from the back of the medium and heavy carriers, where
+  the pack hid it, to the right side. The utility pouch that was there went to the back. On
+  the medium and heavy carriers the knife moved up to the chest to make room for the
+  tourniquet.
+- A pouch that names an item (the tourniquet holder for a tourniquet) is filled before one
+  that takes the item's whole type (the IFAK pouch).
+
+#### Fixed
+
+- **Looting bodies with MOLLE pouches:** the Loot list now shows what's on the carrier and
+  in its pouches, and you can take those one by one. Before, magazines in pouches weren't
+  listed at all. Loot all hands a carrier over with its pouches empty and their contents as
+  separate items, so the magazines land in your own pouches instead of being buried in a
+  spare carrier in your pack.
+
 ### Captain's wave 3 playtest fix: letting go of a body
 
 #### Fixed

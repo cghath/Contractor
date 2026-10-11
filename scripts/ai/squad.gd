@@ -20,6 +20,8 @@ const COMBAT_MODES := {"safe": CombatMode.SAFE, "aware": CombatMode.AWARE, "comb
 const COLOR_TEAMS: Array[String] = ["red", "green", "blue", "yellow", "white"]
 ## Proposed: how far away a Target order can name an enemy.
 const TARGET_RANGE := 300.0
+## Proposed: "Scavenge that body" picks the body within this of the spot under the crosshair.
+const ORDER_BODY_M := 3.0
 ## Heights on a soldier (m above their feet) checked for a line of sight to them.
 const SIGHT_HEIGHTS: Array[float] = [1.7, 1.4, 1.0, 0.5]
 ## Proposed: once any member is fired upon, the whole squad counts as engaged this long
@@ -89,6 +91,44 @@ func set_hold_fire(from: Soldier, hold: bool, names := PackedStringArray()) -> v
 		var ai := SquadAI.of(s)
 		if ai:
 			ai.hold_fire = hold
+
+
+## Command menu "Scavenge freely" / "Don't scavenge" for the named units.
+func set_scavenge(from: Soldier, allowed: bool, names := PackedStringArray()) -> void:
+	leader = from
+	for s in pick(names):
+		var ai := SquadAI.of(s)
+		if ai:
+			ai.scavenge_allowed = allowed
+			if not allowed:
+				ai.scavenge_order = null
+
+
+## Command menu "Scavenge that body": the nearest named AI goes through the dead body within
+## ORDER_BODY_M of `point` for what it needs. Returns why nobody could ("" if someone went).
+func order_scavenge(from: Soldier, point: Vector3, names := PackedStringArray()) -> String:
+	leader = from
+	var dead: Soldier = null
+	var best := ORDER_BODY_M
+	for n in from.get_tree().get_nodes_in_group(Soldier.DEAD_GROUP):
+		var s := n as Soldier
+		if s and not s.is_queued_for_deletion() and s.global_position.distance_to(point) < best:
+			dead = s
+			best = s.global_position.distance_to(point)
+	if dead == null:
+		return "Look at a body"
+	if dead.has_gear_marker:
+		return "That's a player's gear: leave it for them"
+	if not dead.has_gear():
+		return "Nothing left on that body"
+	var units := pick(names).filter(func(s: Soldier) -> bool: return SquadAI.of(s) != null and s.vitals.is_up())
+	if units.is_empty():
+		return "Nobody selected can"
+	units.sort_custom(func(a: Soldier, b: Soldier) -> bool: return a.global_position.distance_to(point) < b.global_position.distance_to(point))
+	var ai := SquadAI.of(units[0])
+	ai.scavenge_order = dead
+	ai._think_cd = 0.0
+	return ""
 
 
 ## Command menu: the first named unit that has one throws a grenade at `point`.

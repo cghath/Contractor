@@ -217,6 +217,15 @@ func carrying(speaker: Soldier, other: Soldier, dead: bool) -> bool:
 	return say(speaker, &"carrying", line, "carrying/%s" % other.name)
 
 
+## Host only. A squadmate goes through a body for what he needs: "Checking Charlie's body"
+## (an enemy's: "Checking the body").
+func scavenging(speaker: Soldier, dead: Soldier) -> bool:
+	if dead == null:
+		return false
+	var line := "Checking %s's body" % display_name(dead) if dead.faction == speaker.faction else "Checking the body"
+	return say(speaker, &"scavenging", line, "scavenging/%s" % dead.name)
+
+
 ## Who sees `casualty` go down: their AI buddy if close, else the nearest AI on their side.
 func witness(casualty: Soldier) -> Soldier:
 	var buddy := casualty.buddy
