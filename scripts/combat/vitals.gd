@@ -533,6 +533,12 @@ func access() -> Dictionary:
 	return _m().access.duplicate()
 
 
+## An IV can go in `site` (WoundModel.IV_SITES: both forearms, both lower legs): no
+## tourniquet on or above it.
+func iv_site_ok(site: StringName) -> bool:
+	return _m().iv_site_ok(site)
+
+
 ## The bag running on the line: {} for none, else "item", "ml" and "left" (mL), plus "rate"
 ## (mL per second going in now).
 func infusion() -> Dictionary:

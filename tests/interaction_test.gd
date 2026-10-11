@@ -54,6 +54,7 @@ func _ready() -> void:
 	await _test_give_item()
 	await _test_self_actions()
 	await _test_menu()
+	await _test_body_points()
 	GameState.delete_save()
 	print("INTERACTION TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
@@ -359,7 +360,7 @@ func _test_menu() -> void:
 	menu.update_keys(true, false, 0.5)
 	check(menu.mode == InteractionMenu.Mode.SELF, "and stays on it, never the object menu, while Ctrl is held")
 	var rects := menu.entry_rects()
-	check(rects.size() == InteractionMenu.actions_for(player, player).size(), "your actions are around the centre")
+	check(rects.size() == InteractionMenu.general_actions(player, player).size(), "your general actions are around the waist point")
 	menu.set_cursor(rects[0].get_center())
 	check(menu.highlighted().get("id") == &"check_wounds", "the cursor highlights Check wounds")
 	check(menu.update_keys(false, false, 0.05) and menu.chosen.get("id") == &"check_wounds" and not menu.is_open(), "letting go picks it and closes")
@@ -410,6 +411,69 @@ func _test_menu() -> void:
 	check(picked.get("container") != null and picked.get("target") == alpha, "a submenu entry is the item to give (%s)" % picked.get("label"))
 	menu.update_keys(false, false, 0.05)
 	screen.queue_free()
+
+
+## Body interaction points (ACE3's medical rig): a point per region with that region's
+## treatments, a general point at the waist, the same layout on yourself; IVs in the legs too.
+func _test_body_points() -> void:
+	print("Body interaction points")
+	check(InteractionMenu.region_of(&"thigh_l") == &"leg_l" and InteractionMenu.region_of(&"forearm_r") == &"arm_r"
+		and InteractionMenu.region_of(&"neck") == &"head" and InteractionMenu.region_of(Vitals.TORSO) == &"chest", "body parts map to regions")
+	alpha.vitals.server_reset_health()
+	alpha.global_position = SPOT + Vector3(0, 0, -1.5)
+	alpha.vitals.server_damage(70.0)  # out cold, 42% lost: a line, a blanket, the airway
+	alpha.vitals._model._add_wound(&"thigh_l", "arterial", 1.2, &"femoral_l")
+	alpha.vitals._model.update_state(0.0)
+	alpha.vitals._after_change(true)
+	await _frames(2)
+	var general := InteractionMenu.general_actions(player, alpha)
+	check(not general.any(func(a: Dictionary) -> bool: return a.id == &"treat") and general.any(func(a: Dictionary) -> bool: return a.id == &"carry")
+		and general.any(func(a: Dictionary) -> bool: return a.id == &"check_condition"), "the waist point: carry, drag, check condition; no Treat")
+	var labels := func(region: StringName) -> Array: return InteractionMenu.region_actions(player, alpha, region).map(func(a: Dictionary) -> String: return a.label)
+	var leg: Array = labels.call(&"leg_l")
+	check(leg[0] == "Check left leg" and leg.has("Tourniquet, left thigh"), "the left leg: check it, and its tourniquet (%s)" % [leg])
+	check(not (labels.call(&"leg_r") as Array).any(func(l: String) -> bool: return l.begins_with("Tourniquet")), "not on the right leg")
+	check((labels.call(&"head") as Array).has("NPA Airway, head"), "the airway on the head")
+	player.inventory.take(&"iv_18")
+	player.inventory.take(&"io_kit")
+	check((labels.call(&"arm_l") as Array).has("IV Catheter (18G), left forearm") and (labels.call(&"leg_r") as Array).has("IV Catheter (18G), right shin")
+		and (labels.call(&"chest") as Array).has("IO Kit (Sternal), sternum"), "a line: an IV on each arm and lower leg, an IO on the chest")
+	alpha.vitals.server_apply_treatment(&"tourniquet", &"thigh_l")
+	check(not (labels.call(&"leg_l") as Array).any(func(l: String) -> bool: return l.begins_with("IV")), "no IV below a tourniquet")
+	for i in 20:  # in shock an IV can miss: try again, like a medic
+		if alpha.vitals.access().is_empty():
+			alpha.vitals.server_apply_treatment(&"iv_18", &"shin_r")
+	check(alpha.vitals.access().get("part") == &"shin_r", "an IV in the leg (%s)" % [alpha.vitals.access()])
+	var report := InteractionMenu.part_report(alpha, &"leg_l", player)
+	check(report.contains("Left thigh: arterial bleed") and report.contains("Tourniquet on the left thigh"), "checking the leg reads its wounds (%s)" % report.replace("\n", " | "))
+	check(InteractionMenu.part_report(alpha, &"leg_r", player).contains("IV 18G in the right shin"), "and the line in it")
+	_place_player()
+	player.head.rotation.x = -0.5
+	await _frames(3)
+	var points := InteractionMenu.collect_points(player, player.camera).filter(func(p: Dictionary) -> bool: return p.target == alpha)
+	var regions := points.map(func(p: Dictionary) -> StringName: return p.region)
+	check(regions.has(InteractionMenu.WAIST) and regions.has(&"leg_l") and regions.has(&"head") and regions.size() >= 5,
+		"a downed squadmate in front: a waist point and the body's points (%s)" % [regions])
+	check(not InteractionMenu.collect_points(player, player.camera).any(func(p: Dictionary) -> bool: return p.target == hostile and p.get("region", &"") != &""),
+		"an enemy keeps a single point")
+	var menu := InteractionMenu.new(player)
+	var screen := SubViewport.new()
+	screen.size = Vector2i(1280, 720)
+	add_child(screen)
+	screen.add_child(menu)
+	menu.update_keys(true, true, 0.05)
+	var own := menu.points.map(func(p: Dictionary) -> StringName: return p.region)
+	check(menu.mode == InteractionMenu.Mode.SELF and own.size() == 7 and own.has(InteractionMenu.WAIST) and own.has(&"arm_r"),
+		"self-interaction: the same layout on yourself (%s)" % [own])
+	check(menu.highlighted().is_empty() and menu.entry_rects().size() == InteractionMenu.general_actions(player, player).size(), "starting on the waist point")
+	var arm: Vector2 = menu.points.filter(func(p: Dictionary) -> bool: return p.region == &"arm_l")[0].screen
+	menu.set_cursor(arm)
+	check(menu.entry_rects().size() >= 1 and InteractionMenu.region_actions(player, player, &"arm_l")[0].label == "Check left arm", "moving onto your left arm opens its point")
+	menu.update_keys(false, false, 0.05)
+	screen.queue_free()
+	player.inventory.remove_one(&"iv_18")
+	player.inventory.remove_one(&"io_kit")
+	alpha.vitals.server_reset_health()
 
 
 # --- Helpers -------------------------------------------------------------------------------

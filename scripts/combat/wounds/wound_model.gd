@@ -218,10 +218,9 @@ const IV_SHOCK_TIME_MULT := 2.0
 const IV_FAIL_MAX := 0.6
 ## Access and fluids are asked for (care_tasks) from this share lost.
 const FLUIDS_FROM_LOST := 0.15
-## Where lines go: an IV in a forearm (the right one if the left arm has a tourniquet), an
-## IO in the sternum.
-const IV_PART := &"forearm_l"
-const IV_PART_OTHER := &"forearm_r"
+## Where lines go: an IV in a forearm or a lower leg (IV_SITES, best first; not below a
+## tourniquet), an IO in the sternum.
+const IV_SITES: Array[StringName] = [&"forearm_l", &"forearm_r", &"shin_l", &"shin_r"]
 const IO_PART := &"chest"
 ## A tourniquet on a limb segment stops the bleeding on it and on every segment below it.
 const LIMB_BELOW := {
@@ -878,9 +877,18 @@ func treat_time_mult(item: StringName) -> float:
 	return 1.0 + (IV_SHOCK_TIME_MULT - 1.0) * iv_difficulty() if IV_GAUGES.has(item) else 1.0
 
 
-## The forearm an IV goes in: the left, unless a tourniquet is on that arm.
+## Where an IV goes by default: the first of IV_SITES with no tourniquet on or above it (the
+## left forearm if every limb has one).
 func iv_part() -> StringName:
-	return IV_PART_OTHER if tourniquets.has(&"upper_arm_l") or tourniquets.has(IV_PART) else IV_PART
+	for site in IV_SITES:
+		if iv_site_ok(site):
+			return site
+	return IV_SITES[0]
+
+
+## An IV can go in `site` (one of IV_SITES): no tourniquet on or above it.
+func iv_site_ok(site: StringName) -> bool:
+	return site in IV_SITES and tourniquet_factor(site) >= 1.0
 
 
 ## Items that would give this body a line, best pick first: in deep shock (veins collapsed
@@ -1051,7 +1059,7 @@ func apply_item(item: StringName, part: StringName, rushed := false) -> bool:
 		if care_rng.randf() < IV_FAIL_MAX * iv_difficulty():
 			care_note = "Missed the vein"
 		else:
-			access = {"kind": "iv", "gauge": gauge, "part": iv_part(), "pressure": false}
+			access = {"kind": "iv", "gauge": gauge, "part": part if iv_site_ok(part) else iv_part(), "pressure": false}
 		update_state(0.0)
 		return true
 	match item:

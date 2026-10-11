@@ -11,6 +11,25 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Wave 3, part 5: body interaction points
+
+#### Changed
+
+- **ACE3-style body points.** Looking at a squadmate (down or standing) with Left Ctrl now
+  shows points on their head, chest, left and right arm and left and right leg. They sit on
+  the body's hitboxes, so they follow it standing or lying down. Each point offers a check
+  of that part, then the treatments that go there: a tourniquet on the leg it's for, the
+  NPA on the head, the IO, seals, needle, CPR and the defibrillator on the chest. A general
+  point at the waist has carry, drag, give item and check condition. Self-interaction
+  (Left Ctrl + Left Alt) lays the same points out like a body around the screen centre,
+  with check wounds and the rest at the waist. Enemies, the dead, dummies and items keep a
+  single point.
+- **IVs in the legs:** an IV can go in either forearm or either lower leg, offered on that
+  limb's point, but never below a tourniquet. The AI still picks the first free site,
+  left forearm first.
+- Checking a body part reads only its wounds, tourniquets and line, plus the airway on the
+  head and breathing and pulse on the chest (with a pulse oximeter, the SpO2 and pulse).
+
 ### Wave 3, part 4: surgery kits and the other damage
 
 #### Added
