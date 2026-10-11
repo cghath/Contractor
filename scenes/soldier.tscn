@@ -114,6 +114,12 @@ properties/8/replication_mode = 2
 properties/9/path = NodePath(".:left_handed")
 properties/9/spawn = true
 properties/9/replication_mode = 2
+properties/10/path = NodePath(".:person_name")
+properties/10/spawn = true
+properties/10/replication_mode = 2
+properties/11/path = NodePath(".:nation")
+properties/11/spawn = true
+properties/11/replication_mode = 2
 
 [node name="Soldier" type="CharacterBody3D"]
 collision_layer = 16

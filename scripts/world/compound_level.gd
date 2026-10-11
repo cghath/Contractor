@@ -489,6 +489,16 @@ func spawn_soldier(data: Dictionary) -> Soldier:
 	return ai_spawner.spawn(data) as Soldier
 
 
+## Host: the surnames already on `faction`'s side, the dead included (so a recruit replacing a
+## fallen squadmate gets a name of his own).
+func _names_on(faction: StringName) -> Dictionary:
+	var taken := {}
+	for s in ai.get_children():
+		if s is Soldier and s.faction == faction and s.person_name != "":
+			taken[s.person_name] = true
+	return taken
+
+
 func _make_soldier(data: Dictionary) -> Node:
 	var soldier: Soldier = PLAYER_SCENE.instantiate()
 	soldier.name = data.name
@@ -500,6 +510,9 @@ func _make_soldier(data: Dictionary) -> Node:
 	soldier.squad_slot = int(data.get("slot", -1))
 	soldier.left_handed = bool(data.get("left", Handedness.roll_ai(String(data.name))))  # LEFT_SHARE of AI
 	if multiplayer.is_server():
+		var who := Names.pick(soldier.faction, String(data.name), _names_on(soldier.faction))
+		soldier.person_name = String(data.get("person_name", who.name))
+		soldier.nation = String(data.get("nation", who.nation))
 		var inventory: Inventory = soldier.get_node(^"Inventory")
 		for id: String in data.loadout:
 			inventory.take(StringName(id))

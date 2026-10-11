@@ -11,6 +11,23 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### AI soldiers have names, on name tapes (Captain, 2026-10-11)
+
+#### Added
+
+- **Names:** every AI soldier gets a surname and a nationality (`scripts/ai/names.gd`), and
+  is called by it everywhere a callsign used to show: callouts ("Martinez: Reloading!",
+  "Man down! Thomas is down"), the HUD squad list, the command menu, AI status lines and
+  the interaction menu. The node keeps its callsign (Alpha, Bravo...) inside the code.
+  - **Your PMC** hires US, UK and Canadian contractors (60/25/15). Each pool is that
+    country's most common surnames.
+  - **The insurgents** use regional surnames. Russian, Chinese and Iranian pools are ready
+    for the faction wave.
+  - **Names are stable and unique:** a callsign keeps its name, and no two soldiers on a
+    side share one. A recruit who replaces a fallen squadmate gets a name of their own.
+- **Name tapes:** the surname, in capitals, on a tan tape on the carrier's loop panel. It
+  replaces the flag patch there.
+
 ### Weapon holds, and left- or right-handed shooters (Captain, 2026-10-11)
 
 #### Added

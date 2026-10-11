@@ -209,6 +209,8 @@ var look_pitch := 0.0
 var aiming := false
 ## Shoots from the left shoulder (Soldier.left_handed): the hands and the weapon holds mirror.
 var left_handed := false
+## Text on the carrier's name tape (an AI's surname, upper case; "" for none). GearRig draws it.
+var name_tape := ""
 ## While true the left hand works the magazine well instead of the support point.
 var reloading := false
 ## Lying face down, head forward (see lay_down). Overrides `pose`.

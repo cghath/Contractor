@@ -60,6 +60,12 @@ const PISTOL_READY := Vector3(0.06, -0.12, -0.32)
 const PISTOL_READY_DIP := 0.45
 ## How fast a held weapon moves between the ready and aiming (per second).
 const HOLD_EASE := 12.0
+## Name tape lettering: cap height in metres, and the ink.
+const TAPE_HEIGHT_M := 0.016
+const TAPE_INK := Color(0.1, 0.1, 0.08)
+## The tape: a strip of tan cloth on the loop panel, letters on it.
+const TAPE_SIZE := Vector3(0.12, 0.028, 0.004)
+const TAPE_CLOTH := Color("8f8a6c")
 
 var _armor: Dictionary = {}        # slot -> VoxelArmor
 var _chip_counts: Dictionary = {}  # slot -> chips already applied to the mesh
@@ -74,6 +80,8 @@ var _pouch_key := ""             # what _pouches shows
 var _left_shown := false          # model.left_handed the rest mounts were placed for
 var _straps: Node3D              # the pack's shoulder straps (torso-local)
 var _straps_for: StringName = &""  # the pack they were built for
+var _tape: Node3D                 # the name tape on the carrier's loop panel
+var _tape_key := ""              # carrier and text it shows
 
 
 
@@ -169,6 +177,7 @@ func _rebuild() -> void:
 	_set_gear(&"hands", held, &"torso", Transform3D(Basis.IDENTITY, Vector3(0, 0.15, -0.15 - held_size.z * 0.5)))
 	_set_pouches()
 	_set_pack_straps(pack)
+	_set_name_tape(carrier)
 	_refresh_plate_damage()
 
 
@@ -200,6 +209,37 @@ func _set_pouches() -> void:
 		var node := pouch_node(ItemDB.get_item(StringName(att.id)), gear, not att.get("held", []).is_empty(), render_layers)
 		node.transform = point_transform(p, WorldItem.visual_size(ItemDB.get_item(StringName(att.id))))
 		_pouches.add_child(node)
+
+
+## The name tape: the soldier's surname (CharacterModel.name_tape) in dark capitals on the
+## carrier's loop panel at the top of the plate pocket's front (VoxelArt._vest), TAPE_HEIGHT_M
+## tall. None without a carrier or a name. Rebuilt when either changes (see _process).
+func _set_name_tape(carrier: ItemData) -> void:
+	var key := "%s|%s" % [carrier.id if carrier else &"", model.name_tape]
+	if key == _tape_key:
+		return
+	_tape_key = key
+	if _tape:
+		_tape.queue_free()
+		_tape = null
+	if carrier == null or model.name_tape == "":
+		return
+	var front := float(carrier.stats.get("plate_depth", 0.14)) + 0.03  # the pocket's face
+	_tape = Node3D.new()
+	_tape.name = "NameTape"
+	_tape.position = Vector3(0, 0.17 + 0.265, -front)  # the loop panel
+	model.torso.add_child(_tape)
+	_tape.add_child(_part_box(TAPE_SIZE, Vector3(0, 0, -TAPE_SIZE.z * 0.5), TAPE_CLOTH, render_layers))
+	var letters := Label3D.new()
+	letters.text = model.name_tape
+	letters.font_size = 48
+	letters.pixel_size = TAPE_HEIGHT_M / 48.0
+	letters.outline_size = 0
+	letters.modulate = TAPE_INK
+	letters.double_sided = false
+	letters.layers = render_layers
+	letters.transform = Transform3D(Basis(Vector3.UP, PI), Vector3(0, 0, -TAPE_SIZE.z - 0.001))  # reads from the front
+	_tape.add_child(letters)
 
 
 ## A worn pack's padded shoulder straps: from the top of the pack, over each shoulder outside
@@ -292,6 +332,9 @@ static func _part_box(size: Vector3, pos: Vector3, colour: Color, layers: int) -
 
 func _process(delta: float) -> void:
 	_clock += delta
+	if not _tape_key.ends_with("|" + model.name_tape):  # the name arrives after the body is built
+		var vest: StringName = inventory.slots[&"vest"]
+		_set_name_tape(ItemDB.get_item(vest) if vest != &"" else null)
 	if model.left_handed != _left_shown:
 		_left_shown = model.left_handed  # the slung weapons move to the other side
 		for slot: StringName in MOUNTS:

@@ -507,7 +507,7 @@ static func _shin_parts() -> Array:
 ## the carrier's fabric) shows. Plates centre at torso y 0.33 (front and back, at the
 ## carrier's plate_depth) and 0.28 (sides, at side_plate_x), as GearRig.armor_transform puts
 ## them. Details: PALS webbing rows across the panels, seams round the window, a loop panel
-## with a flag patch at the top of the front, a drag handle at the top of the back, padded
+## for the name tape at the top of the front, a drag handle at the top of the back, padded
 ## shoulder pads that arch over the deltoids, and a cummerbund that takes in at the waist.
 static func _vest(tier: int) -> Dictionary:
 	var hw: int = [20, 21, 23][tier]       # half-width of the cummerbund, cm
@@ -553,8 +553,7 @@ static func _vest(tier: int) -> Dictionary:
 		for y in range(6, top_row + 1, 3):
 			at.call(-11, y, face, 11, y + 1, face + 1, C.GEAR_DARK)
 		if f < 0:
-			at.call(-7, 24, face, 7, 29, face + 1, C.GEAR_DARK)          # loop panel
-			at.call(-3, 25, face, 3, 28, face + 1, C.PATCH)              # flag patch on it
+			at.call(-7, 24, face, 7, 29, face + 1, C.GEAR_DARK)          # loop panel: GearRig puts the name tape on it
 		else:
 			at.call(-4, 32, z1, 4, 36, z1 + 2, C.GEAR_DARK)              # drag handle
 			at.call(-3, 33, z1, 3, 35, z1 + 2, C.EMPTY)

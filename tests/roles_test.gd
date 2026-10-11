@@ -387,9 +387,9 @@ func _test_roster() -> void:
 	var text := player._hud._squad_lines(player)
 	var lines := text.strip_edges().split("\n")
 	check(lines.size() == 9, "the HUD roster lists all 8 slots under its header (%d lines)" % lines.size())
-	check(text.contains("F1 %s [A, Team Leader]: " % _slot(0).name) and text.contains("F8 %s [B, Medic]: " % _slot(7).name), "lines show fire team and role")
+	check(text.contains("F1 %s [A, Team Leader]: " % _slot(0).display_name()) and text.contains("F8 %s [B, Medic]: " % _slot(7).display_name()), "lines show fire team and role")
 	check(text.contains("F3 You [A, Grenadier]"), "including your own")
-	check(text.contains("F2 %s [A, Autorifleman, Red]: " % _slot(1).name), "and colour teams")
+	check(text.contains("F2 %s [A, Autorifleman, Red]: " % _slot(1).display_name()), "and colour teams")
 	var health_shown := false
 	for line in lines:
 		health_shown = health_shown or line.contains("HP") or line.contains("%")
@@ -407,7 +407,7 @@ func _test_callout_rules() -> void:
 	print("Callouts: rules")
 	var first := _slot(0)
 	var second := _slot(1)
-	var line := "%s: Reloading!" % first.name
+	var line := "%s: Reloading!" % first.display_name()
 	# Squadmates talk on their own too: start from a clean slate and only look at these two.
 	callouts._last_by_speaker.clear()
 	callouts._last_by_key.clear()
@@ -420,7 +420,7 @@ func _test_callout_rules() -> void:
 	check(callouts.say(first, &"reloading"), "%s calls Reloading!" % first.name)
 	check(said.call(first, &"reloading")[0].to == PackedInt32Array([1]), "sent to the friendly player (peer 1)")
 	await _frames(1)
-	check(callouts.shown.any(func(c: Dictionary) -> bool: return c.speaker == String(first.name) and c.text == "Reloading!") and line in callouts.current_lines(),
+	check(callouts.shown.any(func(c: Dictionary) -> bool: return c.speaker == first.display_name() and c.text == "Reloading!") and line in callouts.current_lines(),
 		"and shown here as a subtitle")
 	await _frames(2)
 	var subtitles: Label = null
@@ -505,7 +505,7 @@ func _test_callout_events() -> void:
 	casualty.vitals.server_damage(500.0)
 	await _frames(2)
 	var down := _said(&"man_down")
-	var expected := "Man down! %s is down" % casualty.name
+	var expected := "Man down! %s is down" % casualty.display_name()
 	var buddy_name := String(casualty.buddy.name) if is_instance_valid(casualty.buddy) else "?"
 	check(not down.is_empty() and down[-1].text == expected and down[-1].speaker == buddy_name,
 		"%s's buddy calls %s" % [casualty.name, expected])
