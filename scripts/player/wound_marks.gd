@@ -261,7 +261,7 @@ func _spawn_drip() -> void:
 	var from := Vector3.ZERO
 	var lowest := INF
 	for hole: Dictionary in spot.holes:
-		var p: Vector3 = bone.global_transform * (Vector3(hole.head) + _outward(spot.part, hole.head) * 0.006 - BodyVolume.pivot_at(spot.part))
+		var p: Vector3 = bone.global_transform * (Vector3(hole.head) + _outward(spot.part, hole.head) * 0.006 - BodyVolume.pivot_at(spot.part, body))
 		if p.y < lowest:
 			lowest = p.y
 			from = p
@@ -277,7 +277,7 @@ func _spatter(spot: Dictionary) -> void:
 		return
 	var entry: Dictionary = spot.holes[0]
 	var exit: Dictionary = spot.holes[1]
-	var pivot := BodyVolume.pivot_at(spot.part)
+	var pivot := BodyVolume.pivot_at(spot.part, body)
 	var from: Vector3 = bone.global_transform * (Vector3(exit.at) - pivot)
 	var dir: Vector3 = (bone.global_basis * (Vector3(exit.at) - Vector3(entry.at))).normalized()
 	var floor_y := _floor_below(from)
@@ -376,7 +376,7 @@ func _redraw() -> void:
 		var bone := model.part_node(spot.part)
 		if bone == null:
 			continue
-		var pivot := BodyVolume.pivot_at(spot.part)
+		var pivot := BodyVolume.pivot_at(spot.part, body)
 		var cells: Array = per_bone.get(bone, [])
 		for hole: Dictionary in spot.holes:
 			for b: Array in hole.blood:

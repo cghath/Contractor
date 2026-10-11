@@ -20,10 +20,10 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   low-poly style, on the same frames and pivots as the male parts, so animations, plates,
   carriers, helmets, pouches and held weapons fit. Her own proportions, loosely after real
   averages: drawn at 93% of the male model (about 1.68 m to 1.80 m), with gear and hitboxes
-  scaling with her, and shoulder joints at 0.225 m inside her own deltoids so her arms don't
-  float (`CharacterModel.FEMALE_SCALE`, `FEMALE_SHOULDER_X`). Narrower shoulders and slimmer
-  deltoids and arms, a narrower waist over fuller hips (0.36 m) with a seat, a modest chest that stays
-  inside the carriers' plate pockets, slimmer legs, smaller hands and boots, and a smaller
+  scaling with her, and her own shoulder joints (`CharacterModel.FEMALE_SCALE`, `FEMALE_SHOULDER`; see
+  Changed below). Narrower shoulders and slimmer
+  deltoids and arms, a narrower waist over fuller hips (0.36 m) with a seat, a chest under a carrier that
+  rides forward over it (see Changed below), slimmer legs, smaller hands and boots, and a smaller
   head with a softer jaw, thin brows, lashes, lips and the hair in a low bun under the
   helmet's rim, with hair framing the face.
 - **Choosing the body:** `CharacterModel.body` ("male", the default, or "female"),
@@ -39,6 +39,24 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   China about 4.5%. Iran (women only in medical posts) and insurgent cells: none in field
   squads. The PMC follows each contractor's nation. A US rifleman is a woman about 5% of the
   time, a US medic about 18%. Russian surnames take the feminine form (Ivanova).
+
+#### Changed
+
+- **Her own shoulders** (Captain: "their own proper shoulder value"): `CharacterModel.FEMALE_SHOULDER`
+  (0.21 m out, 1.5 cm lower than his 0.25 m, replacing `FEMALE_SHOULDER_X` 0.225 m) and
+  `CharacterModel.shoulder_of(body)`. Her arms hang against a slightly narrower ribcage
+  without passing into it; rounded deltoids cap the joint and the shoulder line slopes down
+  from the neck instead of the male square shelf. The kneel/reach solver (`reach_pose`) uses
+  her shoulder too.
+- **Her chest higher and fuller** (Captain: "too low and too small"): two low-poly lobes high
+  on the chest, 0.135 m in front of the spine (the male chest: 0.11 m). Her carrier rides
+  `GearRig.FEMALE_CARRIER_FORWARD` (3 cm) further forward, as on a real woman, with its plates,
+  pouches, name tape, slung rifle, pack and pack straps (`GearRig.carrier_shift`); her back is
+  slimmer, so the back panel still lies against it.
+- **Medical voxel wounds on her body:** `BodyVolume.pivot_at(part, body)` puts her arm shapes
+  at her shoulders (hits were judged, and blood drawn, 2.5 cm off at the male joint); the
+  host builds both bodies' shapes at start (`BodyVolume.warm(["", "female"])`). Wounds test:
+  her upper arm is judged at her own shoulder.
 
 ### Medical voxel wounds on the current dev (merge)
 

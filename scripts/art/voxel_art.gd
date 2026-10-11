@@ -561,24 +561,29 @@ static func _head_f() -> Dictionary:
 
 
 ## The male torso's frame and pivot (hips), 0.66 m from the crotch to the base of the neck:
-## hips 0.36 m across (the male's: 0.32) over a 0.26 m waist, a narrower chest, and
-## deltoids flaring at 45 degrees to 0.235 m, 1 cm past her shoulder joints
-## (CharacterModel.FEMALE_SHOULDER_X; the male's: 0.26 over 0.25). The whole body is drawn at
-## CharacterModel.FEMALE_SCALE.
-## The chest is a low-poly bevelled shape whose front reaches the male chest's 0.11 m and no
-## further, so every carrier's plate pocket still clears it; the seat is a second shape at
-## the back of the hips (the frame runs 2 cm deeper behind for it).
+## hips 0.36 m across (the male's: 0.32) over a 0.26 m waist and a narrower ribcage her arms
+## hang against. Her shoulders (CharacterModel.FEMALE_SHOULDER, 0.21 m out and 1.5 cm lower
+## than his) are capped by rounded deltoids 1 cm past the joint, and from there the shoulder
+## line slopes down from the neck (the male's runs flat out to a square corner). The whole
+## body is drawn at CharacterModel.FEMALE_SCALE.
+## The bust is two low-poly lobes high on the chest, its fullest 0.135 m in front of the
+## spine, 2.5 cm deeper than the male chest: GearRig rides her carrier FEMALE_CARRIER_FORWARD
+## further forward, as a carrier sits on a real woman, so every plate pocket still clears it.
+## The frame runs 3 cm further forward for it, and as before 2 cm deeper behind for the seat.
 static func _torso_f() -> Dictionary:
 	var boxes := [
-		_loft(26, 11, [[0, 15.5, 9.8], [6, 18.0, 10.8], [14, 17.5, 10.5], [24, 13.0, 8.0], [30, 13.3, 8.0], [38, 15.5, 8.5],
-			[52, 17.5, 9.0], [57, 22.0, 9.0], [62, 23.5, 9.0], [64, 20.0, 8.0], [66, 9.0, 6.5]], C.CAMO, 0.45),
-		_loft(26, 6, [[37, 10.0, 1.0], [41, 12.0, 5.5], [46, 12.0, 6.0], [50, 10.5, 3.5], [53, 9.0, 0.0]], C.CAMO, 0.7),  # chest: a smooth underside and top
-		_loft(26, 14, [[2, 14.0, 5.5], [5, 15.5, 8.5], [14, 15.5, 8.5], [20, 13.0, 2.5]], C.CAMO, 0.6),  # seat
-		_p(0, 14, 0, 52, 20, 24, C.BELT),
-		_p(23, 14, 0, 29, 20, 3, C.METAL),
-		_p(20, 60, 0, 32, 66, 7, C.CAMO_C),  # collar
+		_loft(26, 14, [[0, 15.5, 9.8], [6, 18.0, 10.8], [14, 17.5, 10.5], [24, 13.0, 8.0], [30, 13.3, 8.0], [38, 14.8, 8.5],
+			[50, 16.3, 9.0], [55, 18.5, 9.0], [58.5, 21.5, 9.0], [60.5, 22.0, 8.8], [62.5, 18.5, 8.0], [64.5, 13.5, 7.2],
+			[66, 9.0, 6.5]], C.CAMO, 0.45),
+		_p(0, 14, 0, 52, 20, 27, C.BELT),
+		_p(23, 14, 0, 29, 20, 6, C.METAL),
+		_p(20, 60, 0, 32, 66, 10, C.CAMO_C),  # collar
 	]
-	return {"size": Vector3i(52, 66, 24), "pivot": Vector3(26, 10, 11), "voxel": BODY_VOXEL, "sub": BODY_SUB, "boxes": boxes}
+	for side: float in [-1.0, 1.0]:  # the bust: a short rounded underside, a long gentle top
+		boxes.append(_loft(26 + 6.5 * side, 7, [[40.5, 5.0, 1.0], [43, 6.8, 4.5], [46.5, 7.3, 6.5], [50, 7.0, 5.5],
+			[54, 6.0, 3.0], [57.5, 5.0, 0.5]], C.CAMO, 0.7))
+	boxes.append(_loft(26, 17, [[2, 14.0, 5.5], [5, 15.5, 8.5], [14, 15.5, 8.5], [20, 13.0, 2.5]], C.CAMO, 0.6))  # seat
+	return {"size": Vector3i(52, 66, 27), "pivot": Vector3(26, 10, 14), "voxel": BODY_VOXEL, "sub": BODY_SUB, "boxes": boxes}
 
 
 ## The male upper arm's frame and pivot (shoulder), slimmer: 0.10 m across at the biceps (the male's: 0.112).

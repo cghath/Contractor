@@ -883,6 +883,14 @@ func _test_body_volume() -> void:
 	check(BodyVolume.model_of(&"thigh_r", "female") == "thigh_f" and BodyVolume.model_of(&"chest", "female") == "torso_f"
 		and BodyVolume.model_of(&"thigh_r", "male") == "thigh" and BodyVolume.model_of(&"face", "") == "head",
 		"a body type picks its own part models (%s, %s)" % [BodyVolume.model_of(&"thigh_r", "female"), BodyVolume.model_of(&"chest", "female")])
+	# Her arms hang from her own shoulders (CharacterModel.FEMALE_SHOULDER): a round through
+	# the middle of her upper arm hits it, and one where a man's arm would be, past hers, misses.
+	BodyVolume.warm(["female"])
+	var her := CharacterModel.TORSO_PIVOT + CharacterModel.FEMALE_SHOULDER - Vector3(0, 0.1, 0.3)
+	check(BodyVolume.pivot_at(&"upper_arm_r", "female").is_equal_approx(CharacterModel.TORSO_PIVOT + CharacterModel.FEMALE_SHOULDER)
+		and not BodyVolume.march(&"upper_arm_r", her, back, "female").is_empty()
+		and BodyVolume.march(&"upper_arm_r", her + Vector3(0.085, 0, 0), back, "female").is_empty(),
+		"her upper arm is judged at her own shoulder")
 
 func _test_fragments() -> void:
 	print("Fragments")

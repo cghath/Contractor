@@ -23,9 +23,11 @@ const HEAD_PIVOT := Vector3(0, 0.56, 0)          # relative to torso
 const SHOULDER := Vector3(0.25, 0.52, 0)         # relative to torso, mirrored for the left
 ## A female soldier (body "female"), loosely after real averages (US adults: men about 175 cm,
 ## women about 162 cm): drawn at this scale, about 1.68 m to the male model's 1.80 m, with her
-## shoulder joints this far out (before scaling), 1 cm inside her deltoids as a man's are.
+## own shoulder joints (torso-local, before scaling, mirrored for the left): in to 0.21 m (the
+## male 0.25), where her arms hang against her ribcage without passing into it, and 1.5 cm
+## lower, so her shoulder line slopes down from the neck instead of the male square shelf.
 const FEMALE_SCALE := 0.93
-const FEMALE_SHOULDER_X := 0.225
+const FEMALE_SHOULDER := Vector3(0.21, 0.505, 0)
 const HIP := Vector3(0.075, 0.9, 0)              # mirrored for the left
 ## Held weapons pivot here (torso-local) when aiming up or down: about shoulder height.
 const HANDS_ANCHOR := Vector3(0, 0.5, 0)
@@ -207,7 +209,7 @@ const VIEW_LOWER_PITCH := 0.9
 @export var variant := "multicam"
 ## Body type (VoxelArt.BODIES): "male" or "female". A female soldier is drawn FEMALE_SCALE of
 ## the male's size (joints, gear and hitboxes scale with her) with her shoulder joints at
-## FEMALE_SHOULDER_X, under her own deltoids. Set before the node enters the tree.
+## FEMALE_SHOULDER, under her own deltoids. Set before the node enters the tree.
 @export_enum("male", "female") var body := "male"
 @export_flags_3d_render var render_layers := 1:
 	set(value):
@@ -290,10 +292,15 @@ func base_transform() -> Transform3D:
 	return Transform3D(Basis.from_scale(Vector3.ONE * body_scale()), Vector3.ZERO)
 
 
-## The right shoulder joint, torso-local (mirrored for the left): SHOULDER, or for a female
-## soldier FEMALE_SHOULDER_X out.
+## The right shoulder joint, torso-local (mirrored for the left), for this body.
 func shoulder() -> Vector3:
-	return Vector3(FEMALE_SHOULDER_X, SHOULDER.y, SHOULDER.z) if body == VoxelArt.FEMALE else SHOULDER
+	return shoulder_of(body)
+
+
+## The right shoulder joint, torso-local, for body type `body_type`: SHOULDER, or for a female
+## soldier FEMALE_SHOULDER.
+static func shoulder_of(body_type: String) -> Vector3:
+	return FEMALE_SHOULDER if body_type == VoxelArt.FEMALE else SHOULDER
 
 
 func _ready() -> void:
@@ -492,7 +499,8 @@ static func eye_position(p: Dictionary) -> Vector3:
 ## face it, bent at the hips, and the hips lowered (kneeling with `kneel`) only as far as it
 ## takes. Prone stays prone (the hands just reach). With `turn` false (treating yourself:
 ## the point is on your own body) it doesn't turn.
-static func reach_pose(base: Dictionary, point: Vector3, kneel: bool, turn := true) -> Dictionary:
+static func reach_pose(base: Dictionary, point: Vector3, kneel: bool, turn := true, body_type := "") -> Dictionary:
+	var sh := shoulder_of(body_type)
 	if base.get("prone", false):
 		return {}
 	var flat := Vector2(point.x, point.z)
@@ -507,9 +515,9 @@ static func reach_pose(base: Dictionary, point: Vector3, kneel: bool, turn := tr
 		for step in 27:
 			var bend := step * 0.05
 			var back := REACH_HIP_BACK * sin(bend)
-			var shoulder_up := hip + SHOULDER.y * cos(bend)
-			var shoulder_ahead := SHOULDER.y * sin(bend) - back
-			var lateral := SHOULDER.x - HAND_SPREAD
+			var shoulder_up := hip + sh.y * cos(bend)
+			var shoulder_ahead := sh.y * sin(bend) - back
+			var lateral := sh.x - HAND_SPREAD
 			var gap := Vector3(lateral, point.y - shoulder_up, ahead - shoulder_ahead).length() - ARM_REACH
 			if gap < best_gap:
 				best_gap = gap
@@ -984,7 +992,7 @@ func _update_action(delta: float) -> void:
 		if id in [PICK_UP, LOOT, TREAT]:
 			var kneel := bool(action_net.get("kneel", false))
 			# Treating without a kneel is treating yourself (server_treat): no turning to it.
-			_reaching = reach_pose(pose, action_net.get("at", Vector3.ZERO), kneel, id != TREAT or kneel)
+			_reaching = reach_pose(pose, action_net.get("at", Vector3.ZERO), kneel, id != TREAT or kneel, body)
 		return
 	_action_t += delta
 	var s := float(action_net.get("s", 0.0))

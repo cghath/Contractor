@@ -24,8 +24,8 @@ const LEAD_M := 0.3
 const REACH_M := 0.8
 ## The march samples every half built voxel.
 const STEP_SHARE := 0.5
-## Body types (CharacterModel.body; the art branch adds "female", whose parts are the same
-## models with this suffix, VoxelArt.body_part). Same joints, so the same pivots and boxes.
+## Body types (CharacterModel.body): "female" parts are the same models with this suffix
+## (VoxelArt.body_part), on the same joints but her own shoulders (CharacterModel.shoulder_of).
 const FEMALE := "female"
 const FEMALE_SUFFIX := "_f"
 
@@ -119,7 +119,7 @@ static func _grid(part: StringName, body := "") -> Dictionary:
 	if not _occupancy.has(model):
 		_occupancy[model] = VoxelArt.occupancy(model)
 	var occ: Dictionary = _occupancy[model]
-	var origin: Vector3 = pivot_at(part) - Vector3(occ.pivot)
+	var origin: Vector3 = pivot_at(part, body) - Vector3(occ.pivot)
 	var dims: Vector3i = occ.dims
 	var cell: float = occ.cell
 	var solid: PackedByteArray = occ.solid
@@ -148,9 +148,10 @@ static func warm(bodies: Array = [""]) -> void:
 			_grid(part, body)
 
 
-## Where the part's model pivot sits in the rest pose (CharacterModel's joints; arms hang
-## straight down).
-static func pivot_at(part: StringName) -> Vector3:
+## Where the part's model pivot sits in the rest pose (CharacterModel's joints for body type
+## `body`; arms hang straight down).
+static func pivot_at(part: StringName, body := "") -> Vector3:
+	var shoulder := CharacterModel.shoulder_of(body)
 	var side := -1.0 if String(part).ends_with("_l") else 1.0
 	var flip := Vector3(side, 1, 1)
 	match PART_MODELS[part]:
@@ -159,9 +160,9 @@ static func pivot_at(part: StringName) -> Vector3:
 		"torso":
 			return CharacterModel.TORSO_PIVOT
 		"upper_arm":
-			return CharacterModel.TORSO_PIVOT + CharacterModel.SHOULDER * flip
+			return CharacterModel.TORSO_PIVOT + shoulder * flip
 		"forearm":
-			return CharacterModel.TORSO_PIVOT + CharacterModel.SHOULDER * flip - Vector3(0, CharacterModel.UPPER_ARM, 0)
+			return CharacterModel.TORSO_PIVOT + shoulder * flip - Vector3(0, CharacterModel.UPPER_ARM, 0)
 		"thigh":
 			return CharacterModel.HIP * flip
 		"shin":
