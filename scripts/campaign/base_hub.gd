@@ -23,6 +23,18 @@ extends Node
 ## contracts). A non-campaign session (the compound as before, and every older suite) never
 ## sets campaign_running, so none of this touches it.
 ##
+## The loop (wave 4B, part 1): one bank and one clock, the Economy autoload's (the roster's
+## wages go into its weekly bill, the shop's purchases into the stash, days pass through
+## Economy.advance_days and the roster and hiring board follow day_advanced). A contract
+## accepted on the board starts the prep (begin_prep_contract); deploying takes the squad into
+## the contract's zone, where the briefing opens for everyone (on the zone's own map); its
+## start makes the contract's objectives live (Contracts.server_start_deployment) and the
+## briefing moves the squad in and opens extraction. Extraction's end (end_deployment, an
+## Extraction.END_GROUP handler) settles it once: the debrief (Contracts.server_end_deployment:
+## pay, clawback, reputation, days), then the roster (server_end_deployment: MIA and recovery
+## contracts, gear home), then back to the base. A squadmate left behind is waiting where they
+## were left when the squad deploys on their recovery contract, and joins whoever finds them.
+##
 ## Joining: the host decides which level a joining client plays in. LevelSwitch's handshake
 ## (SceneMultiplayer's authentication step, before anything replicates to the client) sends the
 ## host's level and whether a campaign is running, after a switch in progress (switch_pending);
@@ -45,9 +57,9 @@ const SQUAD_SIZE := CompoundLevel.SQUAD_SIZE
 ## The zone a deployment goes to when nothing says otherwise. A campaign's zone saves are its
 ## own (zone_save_id), apart from the plain session's and other campaigns'.
 const DEFAULT_ZONE_ID := "compound_01"
-## Proposed (design doc: "wages and upkeep are paid weekly, like MW5"): wages accrue daily
-## and are paid every WAGE_PERIOD_DAYS.
-const WAGE_PERIOD_DAYS := 7
+## A squadmate left behind (a recovery contract's) joins the squad when a player comes this
+## close (metres). Proposed.
+const FOUND_M := 4.0
 ## How often the host reads the stash back from the hub's world items.
 const STASH_POLL_S := 1.0
 ## Proposed: what a new company owns besides its hiring budget (enough to kit two players).
@@ -88,12 +100,17 @@ var _zone_before := ""     # host: GameState.zone_id before the campaign took ov
 
 func _ready() -> void:
 	rng.randomize()
+	add_to_group(Extraction.END_GROUP)  # end_deployment
 	Net.joined.connect(_on_joined)
 	Net.join_failed.connect(_on_join_failed)
 	Net.peer_joined.connect(_on_peer_joined)
 	Net.peer_left.connect(_on_peer_left)
 	Net.session_ended.connect(_on_session_ended)
 	Campaign.changed.connect(func(_name: StringName) -> void: _queue_broadcast())
+	Economy.changed.connect(_queue_broadcast)
+	Economy.day_advanced.connect(_on_day_advanced)
+	Contracts.contract_accepted.connect(_on_contract_accepted)
+	Contracts.contract_closed.connect(_on_contract_closed)
 
 
 # --- Campaign state -------------------------------------------------------------------------
@@ -110,8 +127,15 @@ func base() -> Dictionary:
 	return Campaign.section(&"base")
 
 
+## The campaign day: the economy's clock, the only one.
 func day() -> int:
-	return int(base().get("day", 1))
+	return Economy.day()
+
+
+## The base has a campaign loaded or started (a save from before the one clock kept its own
+## "day" here).
+func started() -> bool:
+	return base().has("started") or base().has("day")
 
 
 func member(mid: String) -> Dictionary:
@@ -125,13 +149,14 @@ func stash() -> Array:
 
 
 ## Host: a fresh campaign (the save for Campaign.campaign_id and its zone saves are deleted):
-## day 1, the starting stash, an empty roster and a hiring board drawn from `hiring_seed`
-## (random if negative).
+## a new economy and contract board (day 1, the starting cash), the starting stash, an empty
+## roster and a hiring board drawn from `hiring_seed` (random if negative).
 func new_campaign(hiring_seed := -1) -> void:
 	Campaign.reset_campaign()
 	_delete_zone_saves()
+	Contracts.new_full_campaign()
 	var b := base()
-	b["day"] = 1
+	b["started"] = true
 	b["stash"] = []
 	for pair: Array in STARTING_STASH:
 		var id := StringName(pair[0])
@@ -141,22 +166,28 @@ func new_campaign(hiring_seed := -1) -> void:
 		else:
 			BaseArmory.add(b.stash, id, int(pair[1]))
 	b["prep"] = _empty_prep()
-	b["wages_owed"] = 0
-	b["wage_days"] = 0
-	BaseEconomy.funds()  # the stand-in's starting budget, when there's no economy yet
 	var h := hiring()
 	h["seed"] = hiring_seed if hiring_seed >= 0 else randi()
 	h["refresh"] = 0
-	Hiring.redraw(h, 1)
+	Hiring.redraw(h, day())
 	Roster.members(roster())
 	Roster.players(roster())
+	_hook_economy(true)
 	_changed_all()
 
 
 ## Host: the saved campaign for Campaign.campaign_id, or a new one if there's none.
 func load_or_new() -> void:
-	if not Campaign.load_campaign() or not base().has("day"):
+	if not Campaign.load_campaign() or not started():
 		new_campaign()
+	elif base().has("day"):
+		# A save from before the one clock: the base's own day and wage count give way to the
+		# economy's (which a save that never had one starts, below).
+		for key: String in ["day", "wages_owed", "wage_days", "stub_funds", "stub_ledger", "recovery_requests"]:
+			base().erase(key)
+		base()["started"] = true
+	Contracts.ensure_campaign()
+	_hook_economy(true)
 	var dep := RosterDeployment.active(roster())
 	if not dep.is_empty():
 		# Saved mid-deployment and not ended: everyone who went is back as they left the base.
@@ -167,13 +198,14 @@ func load_or_new() -> void:
 				m["gear"] = {}
 				Roster.add_history(m, day(), "Killed in action in %s" % dep.get("zone_id", "?"))
 		roster()["deployment"] = {}
+		Contracts.server_abandon_deployment()
 	_changed_all()
 
 
 ## Host: saves the campaign (the hub's stash and people read back first). Never one that was
 ## never loaded or started (no "day"): that would write an empty campaign over the save.
 func server_save() -> void:
-	if not base().has("day"):
+	if not started():
 		push_warning("BaseHub: no campaign loaded; not saving over %s" % Campaign.save_path())
 		return
 	_read_back_base()
@@ -226,6 +258,30 @@ func begin_prep(contract: Dictionary, zone_kind := RosterDeployment.CONTRACT, zo
 	if (prep.squad as Array).is_empty():
 		prep["squad"] = RosterDeployment.auto_squad(roster(), SQUAD_SIZE - _player_count())
 	_changed(&"base")
+
+
+## Host: preps the held contract `cid` for the next deployment (the board: "Prepare
+## deployment", and a contract accepted with none in prep). The prep keeps its public view
+## (it goes out in the view; the real threat stays with Contracts). Returns "" or why not.
+func begin_prep_contract(cid: String) -> String:
+	var c := Contracts.contract(cid)
+	if c.is_empty() or c.get("state") != Contracts.ACCEPTED:
+		return "No such contract held"
+	if RosterDeployment.is_running(roster()):
+		return "A deployment is already running"
+	begin_prep(ContractGen.public_view(c), String(c.get("zone_kind", RosterDeployment.CONTRACT)), String(c.get("zone_id", "")))
+	return ""
+
+
+## The contract in prep ({} if none).
+func prep_contract() -> Dictionary:
+	return _prep().get("contract", {})
+
+
+func _on_contract_accepted(cid: String) -> void:
+	if campaign_running and multiplayer.is_server() and prep_contract().is_empty():
+		begin_prep_contract(cid)
+		note.emit("Prepping %s: pick the squad and kit up, then deploy" % String(Contracts.contract(cid).get("title", cid)))
 
 
 ## The member ids standing at the hub's muster line: everyone available, in hiring order.
@@ -281,6 +337,7 @@ func cancel_session() -> void:
 	if Net.is_hosting():
 		return
 	campaign_running = false
+	_hook_economy(false)
 	view = {}
 	_restore_zone_id()
 	var lvl := level()
@@ -343,8 +400,69 @@ func _do_switch() -> void:
 	fresh._on_hosted()
 	for id in multiplayer.get_peers():
 		fresh._on_peer_joined(id)
+	if not (fresh is BaseLevel) and RosterDeployment.is_running(roster()):
+		_open_briefing(fresh)
 	_queue_broadcast()
 	level_switched.emit(fresh)
+
+
+## Host: the squad arrived in the zone on a contract: the briefing opens for everyone on the
+## zone's map (the contract's objectives and what intel knows of the enemy; insertion points
+## from the zone). Its start (_on_briefing_started) makes the contract live.
+func _open_briefing(lvl: CompoundLevel) -> void:
+	var c: Dictionary = RosterDeployment.active(roster()).get("contract", {})
+	var briefing := MapNodes.briefing(lvl)
+	if c.is_empty() or briefing == null:
+		return
+	briefing.server_open(briefing_contract(String(c.get("cid", ""))), briefing_zone(lvl, c))
+	briefing.deployment_started.connect(_on_briefing_started.bind(String(c.get("cid", ""))), CONNECT_ONE_SHOT)
+
+
+## A held contract as the briefing shows it (Briefing's contract shape): its objectives on
+## the map and its brief; the enemy positions stay unknown until the zones place them.
+static func briefing_contract(cid: String) -> Dictionary:
+	var c := Contracts.contract(cid)
+	var objectives: Array = []
+	for o: Dictionary in Objectives.from_contract(c):
+		var p: Array = o.get("pos", [])
+		objectives.append({"id": String(o.oid), "title": String(o.text), "text": String(o.text),
+			"pos": [float(p[0]), float(p[2])] if p.size() == 3 else [0.0, 0.0], "radius": 6.0})
+	return {"id": cid, "title": String(c.get("title", "")), "type": String(c.get("type", "")), "employer": String(c.get("employer", "")),
+		"summary": "%s\n%s. Terms: %s." % [String(c.get("brief", "")), ContractGen.estimate_text(c), ContractGen.clawback_text(c)],
+		"difficulty": int(c.get("rated", 1)), "objectives": objectives, "known_enemies": []}
+
+
+## The zone as the briefing shows it: the level's own insertion and extraction points (a
+## generated zone), else the test compound's.
+static func briefing_zone(lvl: Node, c: Dictionary) -> Dictionary:
+	var zone := Briefing.DEBUG_ZONE.duplicate(true)
+	if lvl.has_method(&"insertion_points"):
+		var ins: Array = []
+		for p: Vector3 in lvl.call(&"insertion_points"):
+			ins.append({"id": "insertion_%d" % (ins.size() + 1), "name": "Insertion %d" % (ins.size() + 1), "pos": [p.x, p.z], "method": "foot"})
+		var lzs: Array = []
+		for p: Vector3 in lvl.call(&"extraction_points"):
+			lzs.append({"name": "LZ %d" % (lzs.size() + 1), "pos": [p.x, p.z], "radius": Extraction.RADIUS_M})
+		if not ins.is_empty():
+			zone.insertion_points = ins
+			zone.extraction_points = lzs
+	zone.id = String(c.get("zone_id", zone.id))
+	zone.name = String(c.get("zone_name", zone.name))
+	zone.kind = String(c.get("zone_kind", zone.kind))
+	return zone
+
+
+## Host: the briefing started (everyone ready): the contract goes live (its objectives), and
+## a recovery contract's squadmate is out there waiting. The briefing itself moves the squad
+## to the insertion point and opens extraction.
+func _on_briefing_started(_plan: Dictionary, cid: String) -> void:
+	if not deployment_running():
+		return
+	var why := Contracts.server_start_deployment([cid], String(Contracts.contract(cid).get("zone_id", "")))
+	if why != "":
+		push_warning("BaseHub: %s" % why)
+		return
+	_spawn_recovery_targets(level())
 
 
 ## Client: a level switch is coming: this player's own movement stops going out until the
@@ -409,12 +527,16 @@ func _read_back_base() -> void:
 
 
 func _process(delta: float) -> void:
-	if not campaign_running or not multiplayer.is_server() or not in_base() or switch_pending():
+	if not campaign_running or not multiplayer.is_server() or switch_pending():
 		return
 	_stash_poll -= delta
 	if _stash_poll > 0.0:
 		return
 	_stash_poll = STASH_POLL_S
+	if not in_base():
+		if RosterDeployment.is_running(roster()):
+			_check_recovery_targets()
+		return
 	var now := (level() as BaseLevel).server_collect_stash()
 	if now != Roster.json_safe(stash()):
 		base()["stash"] = now
@@ -507,6 +629,7 @@ func _on_peer_left(id: int) -> void:
 
 func _on_session_ended() -> void:
 	campaign_running = false
+	_hook_economy(false)
 	view = {}
 	_restore_zone_id()
 	_profiles.clear()
@@ -549,22 +672,31 @@ func _on_player_died(player: Soldier) -> void:
 	player._client_message.rpc_id(player.name.to_int(), text)
 
 
-## Host: counts one player respawn against the pool. Returns the line the player sees.
+## Host: counts one player respawn against the pool. Past the free ones each is bought, at a
+## price that rises with each (RosterDeployment.respawn_cost), paid from cash first, then from
+## the deployed contract's support budget (Captain), and what neither covers goes on credit.
+## Returns the line the player sees.
 func server_count_respawn() -> String:
-	var price := BaseEconomy.respawn_price()
-	var cost := RosterDeployment.respawn_cost(roster(), price)
-	var text := ""
+	var cost := RosterDeployment.respawn_cost(roster(), BaseEconomy.respawn_price(), Prices.respawn_rise())
 	if cost == 0:
-		text = "Respawn: %d free left" % RosterDeployment.count_respawn(roster(), false)
-	elif BaseEconomy.try_spend(cost, "Respawn"):
-		RosterDeployment.count_respawn(roster(), true)
-		text = "Respawn bought ($%d)" % cost
-	else:
-		BaseEconomy.charge(cost, "Respawn on credit")
-		RosterDeployment.count_respawn(roster(), true)
-		text = "No free respawns and no cash: $%d on credit" % cost
+		var left := RosterDeployment.count_respawn(roster(), false)
+		_changed(&"roster")
+		return "Respawn: %d free left" % left
+	var from_cash := clampi(Economy.cash(), 0, cost)
+	var cids: Array = Contracts.deployment().get("cids", [])
+	var from_budget := Contracts.server_draw_support(String(cids[0]), cost - from_cash) if not cids.is_empty() and cost > from_cash else 0
+	var on_credit := cost - from_cash - from_budget
+	if from_cash > 0:
+		BaseEconomy.charge(from_cash, "Respawn")
+	if on_credit > 0:
+		BaseEconomy.charge(on_credit, "Respawn on credit")
+	RosterDeployment.count_respawn(roster(), true)
 	_changed(&"roster")
-	return text
+	var parts := PackedStringArray()
+	for pair: Array in [[from_cash, "cash"], [from_budget, "support budget"], [on_credit, "on credit"]]:
+		if int(pair[0]) > 0:
+			parts.append("$%d %s" % [int(pair[0]), pair[1]])
+	return "Respawn bought: %s" % ", ".join(parts)
 
 
 # --- Deployments -------------------------------------------------------------------------------
@@ -666,6 +798,50 @@ func server_spawn_roster_squadmate(lvl: CompoundLevel, slot: int, role: StringNa
 	return s
 
 
+## Host: the squadmates the deployment's recovery contracts are about wait where they were
+## left (the objective's position), in their own gear, holding there until a player finds
+## them (_process: within FOUND_M), then following the squad. Outside the squad's slots.
+func _spawn_recovery_targets(lvl: CompoundLevel) -> void:
+	for cid: String in Contracts.deployment().get("cids", []):
+		var c := Contracts.contract(cid)
+		var mid := String(c.get("recover_mid", ""))
+		var m := member(mid)
+		if mid == "" or m.is_empty() or String(m.get("status", "")) != Roster.MIA or lvl.ai.get_node_or_null(NodePath(String(m.callsign))):
+			continue
+		var p: Array = (c.objectives[0] as Dictionary).get("params", {}).get("pos", [0.0, 0.0, 0.0])
+		var stats := Roster.ai_stats(m)
+		var data := {"name": String(m.callsign), "faction": "friendly", "variant": "multicam", "pos": Vector3(float(p[0]), float(p[1]) + 0.1, float(p[2])),
+			"loadout": [], "role": "", "team": 0, "slot": -1, "combat": stats.combat, "discipline": stats.discipline, "guard": true}
+		data.merge(Roster.identity(m))
+		var s := lvl.spawn_soldier(data)
+		s.role = StringName(m.get("role", Roles.RIFLEMAN))
+		s.set_meta(&"roster_id", mid)
+		s.set_meta(&"recovery", true)
+		s.inventory.net_state = GameState.from_json(m.get("gear", {}).duplicate(true))
+		var brain := SquadAI.of(s)
+		if brain:
+			brain.order = Squad.Order.HOLD  # where they stand (the brain takes its hold point there when it sets up)
+
+
+## Host: a waiting squadmate a player reached follows the squad from now on.
+func _check_recovery_targets() -> void:
+	var lvl := level()
+	if lvl == null:
+		return
+	for n: Node in lvl.ai.get_children():
+		var s := n as Soldier
+		if s == null or not s.has_meta(&"recovery") or s.has_meta(&"found") or s.vitals.is_dead():
+			continue
+		for p: Node in lvl.players.get_children():
+			if p is Soldier and (p as Soldier).global_position.distance_to(s.global_position) <= FOUND_M:
+				s.set_meta(&"found", true)
+				var brain := SquadAI.of(s)
+				if brain:
+					brain.on_order(Squad.Order.FOLLOW, s.global_position, 0, 1)
+				(p as Soldier)._client_message.rpc_id(p.name.to_int(), "Found %s: they're with you" % String(s.name))
+				break
+
+
 ## Host hook (CompoundLevel._remove_squadmate): a roster squadmate leaves the zone early (a
 ## player took the slot, or its role changed): they keep their gear and their wounds, and
 ## didn't deploy after all. Unhurt, they may come back for another slot (refilled shortly).
@@ -686,14 +862,57 @@ func server_squadmate_died(s: Soldier) -> void:
 		_changed(&"roster")
 
 
+## Host (Extraction.END_GROUP): the squad got out. The one end of a campaign deployment, in
+## order: the debrief on the contract (Contracts.server_end_deployment: pay, clawback, fines,
+## reputation, salvage, intel, and the days it took), then the roster (server_end_deployment:
+## who's back, MIA and recovery contracts, gear home), then everyone back at the base. A
+## recovery contract's squadmate counts as brought out when they're alive inside the point.
+func end_deployment(report: Dictionary) -> void:
+	if not campaign_running or not multiplayer.is_server() or not RosterDeployment.is_running(roster()):
+		return
+	var lvl := level()
+	var extracted: Array = []
+	for record: Dictionary in (report.get("players", []) as Array) + (report.get("squad", []) as Array):
+		var parent: Node = lvl.players if int(record.get("peer", 0)) != 0 else lvl.ai
+		var s := parent.get_node_or_null(NodePath(String(record.get("node", "")))) as Soldier
+		if s:
+			extracted.append(s)
+	var point: Array = report.get("point", {}).get("pos", [])
+	var hvts: Array = []
+	for h: Dictionary in report.get("hvts", []):
+		hvts.append({"hvt": String(h.get("hvt", h.get("name", ""))), "alive": bool(h.get("alive", true))})
+	for n: Node in lvl.ai.get_children():
+		var s := n as Soldier
+		if s and s.has_meta(&"recovery") and not s.vitals.is_dead() and point.size() == 2 \
+				and Vector2(s.global_position.x, s.global_position.z).distance_to(Vector2(float(point[0]), float(point[1]))) <= Extraction.RADIUS_M:
+			hvts.append({"hvt": Contracts.MIA_HVT_PREFIX + String(s.get_meta(&"roster_id")), "alive": true})
+			server_store_member_gear(String(s.get_meta(&"roster_id")), s.inventory.net_state)
+	var contract_ran := Contracts.is_deployed()
+	if contract_ran:
+		var debrief_report := Contracts.report_from_level(lvl, extracted)
+		debrief_report["hvts"] = hvts
+		# The people bring their own gear home; what else came out (bodies carried in, items set
+		# down at the point) goes to the stash.
+		var bank: Array = []
+		for body: Dictionary in report.get("bodies", []):
+			for entry: Dictionary in body.get("items", []):
+				bank.append_array(Contracts.flatten_entry(entry))
+		for entry: Dictionary in report.get("deposited", []):
+			bank.append_array(Contracts.flatten_entry(entry))
+		debrief_report["bank"] = bank
+		Contracts.server_end_deployment(debrief_report)
+	server_end_deployment(extracted, true, not contract_ran)
+
+
 ## Host (the map's extraction): the deployment ends. `extracted` are the soldiers who made it
 ## out (AI squadmates and players; players are always counted back). Every roster squadmate
 ## who deployed is settled (RosterDeployment.resolve): dead ones are lost with their gear on
 ## their body in the zone, those alive but not in `extracted` go MIA (a recovery contract is
-## requested), the rest come back with their gear, experience and wounds. Days pass, the zone
+## requested), the rest come back with their gear, experience and wounds. Days pass (with
+## `advance_days`: a contract's debrief has already moved the clock on for its days), the zone
 ## and the campaign are saved, and with `return_to_base` everyone goes back to the hub.
 ## Returns the debrief report ({} if no deployment was running).
-func server_end_deployment(extracted: Array, return_to_base := true) -> Dictionary:
+func server_end_deployment(extracted: Array, return_to_base := true, advance_days := true) -> Dictionary:
 	var dep := RosterDeployment.active(roster())
 	if dep.is_empty() or not multiplayer.is_server():
 		return {}
@@ -730,7 +949,8 @@ func server_end_deployment(extracted: Array, return_to_base := true) -> Dictiona
 		BaseEconomy.request_recovery_contract({"mid": mid, "name": m.name, "callsign": m.callsign, "role": m.role,
 			"zone_id": report.zone_id, "day": day(), "pos": m.get("mia_pos", [])})
 	GameState.save_zone()  # the zone keeps its bodies, loot and damage
-	server_advance_days(int(RosterDeployment.DAYS.get(report.zone_kind, 1)))
+	if advance_days:
+		server_advance_days(int(RosterDeployment.DAYS.get(report.zone_kind, 1)))
 	_changed_all()
 	Campaign.save_campaign()
 	deployment_ended.emit(report)
@@ -763,6 +983,25 @@ func server_extract_near(point: Vector3, radius := DEBUG_EXTRACT_M) -> Dictionar
 	return server_end_deployment(out)
 
 
+## Host (Contracts.contract_closed): a recovery contract that came off the board or the held
+## list settles its squadmate: brought out (completed), they're back; otherwise (failed,
+## voided, aborted, lapsed, or the offer ran out) they're lost. Any other contract in prep
+## leaves the prep.
+func _on_contract_closed(c: Dictionary, outcome: String) -> void:
+	if not started() or (multiplayer.has_multiplayer_peer() and not multiplayer.is_server()):
+		return
+	if String(prep_contract().get("cid", "")) == String(c.get("cid", "")):
+		_prep()["contract"] = {}
+		_changed(&"base")
+	var mid := String(c.get("recover_mid", ""))
+	if mid == "" or String(member(mid).get("status", "")) != Roster.MIA:
+		return
+	if outcome == "completed":
+		server_recover_member(mid)
+	else:
+		server_write_off_member(mid)
+
+
 ## Host (a recovery contract succeeded): the MIA member is back, with `sit_out_days` to recover.
 func server_recover_member(mid: String, sit_out_days := 0) -> bool:
 	var ok := RosterDeployment.recovered(roster(), mid, day(), sit_out_days)
@@ -779,23 +1018,55 @@ func server_write_off_member(mid: String) -> bool:
 
 # --- Days, hiring, medbay, shop -----------------------------------------------------------
 
-## Host: `days` campaign days pass: the wounded recover, the hiring board turns over every
-## Hiring.REFRESH_DAYS, wages accrue and are paid every WAGE_PERIOD_DAYS.
-func server_advance_days(days: int) -> void:
-	if days <= 0:
+## Host: `days` campaign days pass at the base (resting), on the economy's clock: the weekly
+## bill falls due on its day (the roster's wages in it), and the roster and hiring board
+## follow (_on_day_advanced).
+func server_advance_days(days: int, reason := "at the base") -> void:
+	if days > 0:
+		Economy.advance_days(days, reason)
+
+
+## Host (Economy.day_advanced): `days` days passed, whatever moved the clock (resting, a
+## deployment's debrief, travel): the wounded recover, the hiring board turns over every
+## Hiring.REFRESH_DAYS.
+func _on_day_advanced(today: int, days: int) -> void:
+	if not started() or (multiplayer.has_multiplayer_peer() and not multiplayer.is_server()):
 		return
-	var b := base()
-	b["day"] = day() + days
-	Roster.advance_days(roster(), days, day())
-	Hiring.refresh_if_due(hiring(), day())
-	b["wages_owed"] = int(b.get("wages_owed", 0)) + Roster.daily_wages(roster()) * days
-	b["wage_days"] = int(b.get("wage_days", 0)) + days
-	if int(b.wage_days) >= WAGE_PERIOD_DAYS:
-		BaseEconomy.pay_wages(int(b.wages_owed), int(b.wage_days))
-		b["wages_owed"] = 0
-		b["wage_days"] = 0
+	Roster.advance_days(roster(), days, today)
+	Hiring.refresh_if_due(hiring(), today)
 	_changed_all()
 	_refresh_muster()
+
+
+## Host (Economy.wages_provider): the roster's wages for a week.
+func _weekly_wages() -> int:
+	return Roster.daily_wages(roster()) * maxi(MissionRegistry.setting_i("week_days", 7), 1)
+
+
+## Host (Economy.purchase_sink and stash_sink): bought, salvaged or brought-out items go into
+## the stash (onto the armory counter at the hub).
+func _purchase_into_stash(id: StringName, count: int, _peer: int) -> bool:
+	if not started():
+		return false
+	server_add_to_stash(id, count)
+	return true
+
+
+func _bank_into_stash(items: Array) -> bool:
+	if not started():
+		return false
+	for entry: Dictionary in items:
+		if ItemDB.has_item(StringName(entry.get("id", ""))):
+			server_add_to_stash(StringName(entry.id), int(entry.get("count", 1)), entry.get("state", {}))
+	return true
+
+
+## Host: the base runs on the economy (the wage bill, the shop and the stash); off again
+## when the campaign session ends.
+func _hook_economy(on: bool) -> void:
+	Economy.wages_provider = _weekly_wages if on else Callable()
+	Economy.purchase_sink = _purchase_into_stash if on else Callable()
+	Economy.stash_sink = _bank_into_stash if on else Callable()
 
 
 ## Host: hires candidate `cid` off the board for their sign-on fee. Returns "" or why not.
@@ -853,16 +1124,16 @@ func server_medbay(who: String) -> String:
 	return ""
 
 
-## Host: buys `count` of `id` at the shop into the stash. Returns "" or why not.
-func server_buy(id: StringName, count := 1) -> String:
+## Host: buys `count` of `id` at the shop (Economy.server_buy) into the stash
+## (_purchase_into_stash). Returns "" or why not.
+func server_buy(id: StringName, count := 1, peer := 1) -> String:
 	if not ItemDB.has_item(id) or count <= 0:
 		return "Not for sale"
 	var price := BaseEconomy.item_price(id) * count
 	if price <= 0:
 		return "Not for sale"
-	if not BaseEconomy.try_spend(price, "Bought %d %s" % [count, ItemDB.get_item(id).name]):
+	if not Economy.server_buy(id, count, peer):
 		return "Not enough cash: $%d" % price
-	server_add_to_stash(id, count)
 	return ""
 
 
@@ -917,8 +1188,8 @@ func _refresh_muster() -> void:
 
 ## Any peer: asks the host to do something at the base. `action`: "hire" [cid], "release"
 ## [mid], "medbay" [mid or "player:<key>"], "pick" [mid, bool], "role" [mid, role], "buy"
-## [item id, count], "rest" [days], "deploy" [], "save" []; "deploy", "rest", "release" and
-## "save" only from the host. The answer comes back as `note`.
+## [item id, count], "rest" [days], "prep" [held contract id], "deploy" [], "save" []; "deploy",
+## "rest", "release", "prep" and "save" only from the host. The answer comes back as `note`.
 func request(action: String, args: Array = []) -> void:
 	_server_request.rpc_id(1, action, args)
 
@@ -930,10 +1201,10 @@ func _server_request(action: String, args: Array) -> void:
 	var sender := multiplayer.get_remote_sender_id()
 	var why := ""
 	var at_base := in_base() and not RosterDeployment.is_running(roster())
-	var needs: int = {"hire": 1, "release": 1, "medbay": 1, "pick": 2, "role": 2, "buy": 1}.get(action, 0)
+	var needs: int = {"hire": 1, "release": 1, "medbay": 1, "pick": 2, "role": 2, "buy": 1, "prep": 1}.get(action, 0)
 	if args.size() < needs:
 		why = "Bad request"
-	elif action in ["deploy", "rest", "release", "save"] and sender != 1:
+	elif action in ["deploy", "rest", "release", "save", "prep"] and sender != 1:
 		why = "Only the host can do that"  # the company's big decisions are the host's
 	elif action not in ["save"] and not at_base:
 		why = "Only at the base"
@@ -950,11 +1221,15 @@ func _server_request(action: String, args: Array) -> void:
 			"role":
 				why = server_set_role(String(args[0]), StringName(args[1]))
 			"buy":
-				why = server_buy(StringName(args[0]), int(args[1]) if args.size() > 1 else 1)
+				why = server_buy(StringName(args[0]), int(args[1]) if args.size() > 1 else 1, sender)
 			"rest":
 				server_advance_days(clampi(int(args[0]) if not args.is_empty() else 1, 1, 30))
 			"deploy":
 				why = server_deploy()
+			"prep":
+				why = begin_prep_contract(String(args[0]))
+				if why == "":
+					why = "Prepping %s" % String(prep_contract().get("title", ""))
 			"save":
 				server_save()
 				why = "Campaign saved"
@@ -973,17 +1248,19 @@ func _client_note(text: String) -> void:
 
 ## What the base screen shows (host side; clients get it whole through _client_view).
 func build_view() -> Dictionary:
-	var b := base()
 	var keys := {}
 	keys["1"] = player_key(1)
 	for peer in multiplayer.get_peers():
 		keys[str(peer)] = player_key(peer)
+	var held: Array = []
+	for c: Dictionary in Contracts.held():
+		if c.get("state") == Contracts.ACCEPTED:
+			held.append({"cid": String(c.cid), "title": String(c.get("title", "")), "deadline_day": int(c.get("deadline_day", 0))})
 	return {
-		"day": day(), "funds": BaseEconomy.funds(), "stub_economy": BaseEconomy.is_stub(),
+		"day": day(), "funds": BaseEconomy.funds(),
 		"roster": roster(), "hiring": {"pool": Hiring.pool(hiring(), day()), "refreshed_day": int(hiring().get("refreshed_day", 1))},
-		"stash": stash(), "prep": _prep(), "catalog": BaseEconomy.shop_catalog(),
-		"recovery_requests": b.get("recovery_requests", []), "wages_owed": int(b.get("wages_owed", 0)),
-		"wage_days": int(b.get("wage_days", 0)), "daily_wages": Roster.daily_wages(roster()),
+		"stash": stash(), "prep": _prep(), "catalog": BaseEconomy.shop_catalog(), "held": held,
+		"daily_wages": Roster.daily_wages(roster()), "bill_in_days": Economy.days_to_bill(), "weekly_bill": int(Economy.weekly_bill().total),
 		"players": keys, "in_base": in_base(),
 	}
 

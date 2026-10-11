@@ -126,12 +126,13 @@ static func mark_fallen(data: Dictionary, mid: String) -> void:
 		dep.fallen[mid] = true
 
 
-## What the next player respawn costs: 0 while free ones are left, else `price`.
-static func respawn_cost(data: Dictionary, price: int) -> int:
+## What the next player respawn costs: 0 while free ones are left, else `price`, rising by
+## `rise` of it with each one already bought (the mission brainstorm: "cost rises with each one").
+static func respawn_cost(data: Dictionary, price: int, rise := 0.0) -> int:
 	var dep := active(data)
 	if dep.is_empty():
 		return 0
-	return 0 if int(dep.respawns_used) < int(dep.respawns_free) else price
+	return 0 if int(dep.respawns_used) < int(dep.respawns_free) else roundi(price * (1.0 + rise * int(dep.get("respawns_bought", 0))))
 
 
 ## Counts a player respawn (`bought`: past the free ones). Returns the free ones left.

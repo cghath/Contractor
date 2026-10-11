@@ -21,6 +21,9 @@ const SAVED_EDITS := [{"op": "mark", "p": [-29.5, 13.5, -40.0], "n": [0.0, 0.0, 
 	{"op": "shot", "a": [177.5, 13.5, -70.0], "an": [0.0, 0.0, 1.0], "b": [177.5, 13.5, -71.0], "bn": [0.0, 0.0, -1.0], "d": 0.0057, "m": 3, "v": [177, 13, -71]}]
 ## Where the host marks the perimeter wall's inner face once the client is in (live, by RPC).
 const LIVE_MARK := Vector3(6.0, 1.2, 19.7)
+## How old the purple smoke the host throws before the client joins already is (spawn_smoke's
+## age): the client's copy must be at least this old.
+const SMOKE_AGE_S := 3.0
 
 ## Two AI the host stages before the client joins: one dragging the other (_stage_drag).
 const DRAGGER := "Dragger"
@@ -85,7 +88,9 @@ func _stage_drag() -> void:
 	dragged.vitals.server_damage(500.0)
 	print("[host] staged a drag: %s" % dragger.server_pick_up_body(dragged, Soldier.DRAG, INF))
 	# Smoke already out when the client joins (audit L2-01): it must see it too, as old as here.
-	level.spawn_smoke.rpc(Vector3(-12, 0.1, 30), "purple")
+	# It starts SMOKE_AGE_S old, so the check doesn't hang on how long the client takes to join
+	# (a quick join reached the client at 1.6 s, under the old 2 s mark, and failed).
+	level.spawn_smoke.rpc(Vector3(-12, 0.1, 30), "purple", SMOKE_AGE_S)
 
 
 func _give_kit(id: int) -> void:
@@ -120,7 +125,7 @@ func _run_client() -> void:
 	print("Client over ENet")
 	check(me != null and me.inventory.slots[&"primary"] == &"m4a1", "kit given by the host replicated to the client")
 	var smoke := SmokeCloud.clouds_of("purple")
-	check(smoke.size() == 1 and smoke[0].age > 2.0 and smoke[0].global_position.distance_to(Vector3(-12, 0.1, 30)) < 0.1,
+	check(smoke.size() == 1 and smoke[0].age >= SMOKE_AGE_S and smoke[0].global_position.distance_to(Vector3(-12, 0.1, 30)) < 0.1,
 		"smoke that went off before joining is here, as old as on the host (%s)" % ["%.1f s" % smoke[0].age if smoke.size() == 1 else "none"])
 	if me == null:
 		_finish()

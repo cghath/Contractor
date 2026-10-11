@@ -493,10 +493,12 @@ func rebalance_squad() -> void:
 
 
 ## Living friendly AI squadmates in the session. A dead squadmate's body is no member: it
-## keeps no slot and is never removed by rebalance_squad (it lies where it fell).
+## keeps no slot and is never removed by rebalance_squad (it lies where it fell). Nor is a
+## squadmate a recovery contract is about (BaseHub, meta "recovery"): found in the zone, they
+## come along outside the slots.
 func _squad_ai() -> Array:
 	return ai.get_children().filter(func(s: Node) -> bool: return s is Soldier and s.faction == &"friendly" \
-		and not s.is_queued_for_deletion() and not s.vitals.is_dead())
+		and not s.is_queued_for_deletion() and not s.vitals.is_dead() and not s.has_meta(&"recovery"))
 
 
 ## A squadmate whose slot a player took (or whose role changed) leaves the session. A dead one

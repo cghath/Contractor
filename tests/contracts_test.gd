@@ -91,12 +91,17 @@ func _test_generation() -> void:
 	check(a[0].source == "safe" and int(a[0].rated) == 1 and not a[0].understated and a[0].zone_kind == "contract",
 		"the first is a cheap low-risk job (safety floor): rated %d, $%d" % [a[0].rated, a[0].base_pay])
 	check(not a.any(func(o: Dictionary) -> bool: return o.source == "fixer"), "no fixer work at neutral standing")
+	check(a[0].clawback == ContractGen.FULL_CLAWBACK and a.all(func(o: Dictionary) -> bool: return String(o.get("clawback", "")) in ContractGen.clawback_terms()),
+		"every offer states its clawback term; the safe job's is full (strict)")
 	var friendly := rep.duplicate()
 	friendly["meridian"] = 25
 	var with_fixer := ContractGen.generate_board(1234, 1, friendly, 6)
 	var fixer_jobs := with_fixer.filter(func(o: Dictionary) -> bool: return o.source == "fixer")
 	check(fixer_jobs.size() == 1 and fixer_jobs[0].fixer == "Halloran" and fixer_jobs[0].employer == "meridian"
 		and fixer_jobs[0].type in ["recover_hvt", "retrieve_intel"], "at reputation 25 Meridian's fixer offers a special job (%s)" % [fixer_jobs.map(func(o: Dictionary) -> String: return o.title)])
+	check(not fixer_jobs.is_empty() and fixer_jobs[0].clawback == ContractGen.NO_CLAWBACK, "a fixer's job is shady: the advance is kept on a void")
+	var lenient: Dictionary = ContractGen.clawback_terms().get(ContractGen.NO_CLAWBACK, {})
+	check(float(lenient.get("pay_mult", 1.0)) < 1.0, "and a lenient client pays less (x%.2f)" % float(lenient.get("pay_mult", 1.0)))
 	# Many offers: every placeholder type turns up, hot zones are paid by the zone's faction.
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 77
@@ -334,6 +339,13 @@ func _test_debrief_totals() -> void:
 	check(voided.contracts[0].outcome == "voided" and voided.totals.completion == 0 and voided.totals.bonuses == 0 and voided.fines == 20000
 		and voided.contracts[0].clawback == 30000 and voided.totals.paid_now == -50000 and voided.totals.contract_value == -20000,
 		"voided: pays nothing (the $30,000 advance clawed back) and $20,000 in fines")
+	# Captain's clawback terms: what a voided contract gives back of its advance.
+	var two := [objs[0].merged({"state": "done"}, true), objs[0].merged({"oid": "T1_o3", "state": "active"}, true)]
+	var kept := DebriefCalc.compute([c.merged({"state": "voided", "clawback": ContractGen.NO_CLAWBACK}, true)], two, 8, report)
+	var half := DebriefCalc.compute([c.merged({"state": "voided", "clawback": ContractGen.PRORATED_CLAWBACK}, true)], two, 8, report)
+	var all_back := DebriefCalc.compute([c.merged({"state": "voided", "clawback": ContractGen.FULL_CLAWBACK}, true)], two, 8, report)
+	check(kept.contracts[0].clawback == 0 and half.contracts[0].clawback == 15000 and all_back.contracts[0].clawback == 30000,
+		"clawback terms on a void with 1 of 2 required objectives done: none keeps it all, prorated gives back $%d, full all" % half.contracts[0].clawback)
 	var honest_abort := DebriefCalc.compute([c.merged({"state": "aborted", "revealed": true, "understated": false}, true)], objs, 0, report)
 	var lied_abort := DebriefCalc.compute([c.merged({"state": "aborted", "revealed": true, "understated": true}, true)], objs, 0, report)
 	check(honest_abort.rep.get("meridian", 0) == -4 and lied_abort.rep.get("meridian", 0) == 0,

@@ -19,8 +19,8 @@ date), as with wave 3, so both sides never build the same thing twice.**
 | 0 Prep, 1 Phase 3 core, 2 Phase 3 finish | Done, on `dev` | Playtest fixes from Captain's two playtests are in |
 | 3 Medical depth | Done by Captain's side | cghath's own wave 3 was dropped (kept on a local branch only); its extras are listed under Backlog |
 | 4A Mission loop, first half | Done, on `dev` | World scale, contracts and economy, people, base hub and roster, map/briefing/extraction, one join handshake |
-| **4B** Wire the loop, hot zone | **Next** | [wave4b_handoff.md](wave4b_handoff.md) |
-| 5 Vehicles and supports | Planned below | Leaves out AH-1Z, MRAPs, Bradley, Abrams until Captain says who fields them |
+| **4B** Wire the loop, hot zone | **In progress, Captain's side**: part 1 (loop wiring) done | [wave4b_handoff.md](wave4b_handoff.md) |
+| 5 Vehicles and supports | Planned below | AH-1Z, MRAPs, Bradley, Abrams: the US and the close allies that operate them (Captain, 2026-10-11) |
 | 6 Factions | **Blocked on Captain** | Needs the decisions listed below |
 | 7 Art, world and weapons | Systems half planned below | Art waits for Captain's asset scripts; Stormworks-style characters in progress on Captain's side |
 | 8 Player-built faction | Design proposal only | |
@@ -69,8 +69,10 @@ date), as with wave 3, so both sides never build the same thing twice.**
 - Supports are lost with their cargo and passengers.
 - Weather and terrain decide what can fly or drive: storms ground helicopters, and AAVs
   can't work mountains.
-- **Left out for now (cghath):** AH-1Z, MRAPs (MaxxPro, M-ATV), Bradley, Abrams, until
-  Captain decides who fields them.
+- **Who fields the AH-1Z, MRAPs (MaxxPro, M-ATV), Bradley and Abrams (Captain, 2026-10-11):**
+  America, and close allies only where they really operate those American exports. In the
+  friendly set that is all four for the US; MRAPs for the UK (Mastiff and Ridgback, Cougar
+  family) and Canada (Cougar, RG-31); no AH-1Z, Bradley or Abrams for either.
 
 **Art:** Captain's `VehicleArt` from `noahgonzalez4506/Contractor-Assets-and-References`
 (`scripts/vehicle_art.gd`, 13 vehicles at 5 cm). Copy it to `scripts/art/vehicle_art.gd`.
@@ -97,7 +99,8 @@ V2 can run beside V1.
 3. What limits the allied-troop support menu.
 4. How the real-world faction set (being drafted in the vehicle-model thread) replaces the
    repo's three placeholder factions.
-5. Who fields the AH-1Z, MRAPs, Bradley and Abrams.
+5. ~~Who fields the AH-1Z, MRAPs, Bradley and Abrams.~~ Answered: the US and the close allies
+   that operate them (see wave 5).
 
 **Scope once decided (design doc):**
 - **Persistent world.** Damage is repaired and positions reoccupied over campaign time.
@@ -133,6 +136,7 @@ V2 can run beside V1.
 | S2 | **NVGs and lights** | NVGs as helmet-mounted gear: flip up or down, green image with grain, a battery, a gen/FOV value proposed. IR lasers and illuminators visible only through NVGs. Weapon lights and visible lasers that the AI can see |
 | S3 | **Weapon attachments** | Optics (red dot, magnified with a zoom), lights, lasers (visible and IR), suppressors (sound and AI hearing range, flash), grips (recoil, sway). Attachments live in the weapon's item state like its magazine, so they travel with it, save and replicate. Attach and detach in the inventory screen, using Captain's MOLLE-style attach points as the pattern |
 | S4 | **Assists and controller** | Optional, off by default, host-set for co-op newcomers: aim slowdown, wound hints, objective markers, a simpler interaction menu. A full gamepad layout for every control, with radial menus on the sticks |
+| S5 | **Voxel smoke (CS2-style)** | Captain, 2026-10-11: on the roadmap, "we'll tackle it when it's time". Smoke as a volume on a coarse voxel grid over the world: it spreads from the grenade cell by cell, flows through doors and windows, stops at walls and fills rooms, drifts with the wind and thins out. What a player sees and what blocks AI line of sight follow the real cloud (today: round puff clouds, `SmokeCloud.blocks` a sphere). Blasts push holes in it that refill; gunfire may part it briefly. Replicated as a seed and its events, so late joiners rebuild the same cloud. Coloured smokes keep their colour for the helicopter supports |
 
 ## Wave 8: player-built faction (design only)
 
@@ -162,7 +166,7 @@ operations) the design doc puts under it.
 - Check that X, Z and C don't clash with any older bindings.
 
 **Docs to export from claude.ai into `docs/`:**
-- The mission brainstorm doc, for 4B's mission types and the debrief.
+- ~~The mission brainstorm doc~~: in [mission_brainstorm.md](mission_brainstorm.md) since 2026-10-11.
 - The Arma mod research doc.
 
 **cghath's dropped wave 3 extras**, for Captain's side to take or leave. They're on cghath's
@@ -189,8 +193,10 @@ local branch `local/wave3-cghath` and never pushed:
    Today it's per deployment.
 3. Hot zone size: 8-16 km² (twice the area) or 16-32 km² (twice the width)?
 4. Where can the contract board be reached: only at the FOB, or also from the main menu?
-5. Who fields the AH-1Z, MRAPs, Bradley and Abrams?
-6. The wave 6 decisions above (tiers, allied troops, the support-menu limit, the faction set).
+5. ~~Who fields the AH-1Z, MRAPs, Bradley and Abrams?~~ The US, and close allies that operate
+   those exports (Captain, 2026-10-11).
+6. The wave 6 decisions above: the support-menu limit and the faction set. (Reputation tiers,
+   ripple, decay and allied troops are decided in [mission_brainstorm.md](mission_brainstorm.md).)
 7. Should players start in their role kit? `CompoundLevel.player_role_kits` is off; 4A's
    roster kits AI squadmates out.
 8. The M855 rule: does it count as level III beyond about 200 m?

@@ -51,8 +51,8 @@ authority on rules and numbers; this file only says who builds what, in which or
   `uh60`, `ah1z`, `aav7`, `bradley`, `abrams`, `maxxpro`, `matv` and six technicals. API:
   `instance(model, scheme)`, `prop(model, scheme)`, `size_m(model)`, `spin_rotors(node, delta)`.
   Integration is copying the file to `scripts/art/vehicle_art.gd`.
-- Still to export from claude.ai: the mission brainstorm doc (needed by wave 4) and the
-  Arma mod research doc (useful for waves 1 to 3).
+- The mission brainstorm is in [mission_brainstorm.md](mission_brainstorm.md) (exported 2026-10-11).
+  Still to export from claude.ai: the Arma mod research doc (useful for waves 1 to 3).
 - Keys agreed after the handoff: stance steps on Caps Lock + WASD, interaction on Left Ctrl,
   self-interaction on Left Ctrl + Left Alt, no giving up while downed.
 
@@ -113,7 +113,8 @@ attachments (branch `fix3/inventory-molle`).
   types when his pack and the mission brainstorm doc land.
 - **Wave 6 waits** for Captain's calls (reputation tiers, allied troop types, support-menu
   limits) and the faction set.
-- **Wave 5** leaves out the AH-1Z, MRAPs, Bradley and Abrams until Captain says who fields them.
+- **Wave 5:** the AH-1Z, MRAPs, Bradley and Abrams are fielded by the US and by close allies that
+  operate those exports (Captain, 2026-10-11: UK and Canada get MRAPs only).
 - **Wave 7** builds the systems (day and night, weather, NVGs, attachments, assists,
   controller); the art swap waits for Noah's character, gear, weapon and environment scripts.
 - **Noah's inventory and MOLLE work** (`fix3/inventory-molle`) is in progress on his side:
@@ -185,6 +186,13 @@ Handoff for 4B, with the seams 4A left loose: [wave4b_handoff.md](wave4b_handoff
 person (name, nationality, hand, body) and every deployment spawns that person
 (`Names.person`, `Roster.identity`). Captain's answers to the 4B open questions are in
 [wave4b_handoff.md](wave4b_handoff.md).
+**4B is Captain's side** (2026-10-11), built in cghath's order, one part at a time with the full
+suites and an integrate after each. **Part 1, loop wiring (seams 1, 2, 6, 8, 9): done** on
+`feat/wave4b-loop`: one bank and one clock (Economy), board -> prep at the base -> deploy ->
+the briefing in the zone -> objectives live -> extraction -> the debrief and the roster settled
+once -> back at the base; respawns paid from the one bank; Captain's clawback terms per
+contract; an MIA squadmate's recovery contract (they wait where they were left). Next: part 2
+(missions in zones: seams 3, 4, 5, 7), then the hot zone.
 The full plan for everything after that (waves 5 to 8, backlog, open questions): [ChrisPlan_handoff.md](ChrisPlan_handoff.md).
 
 - **World scale:** contract zones of 2 to 4 km² and hot zones of 8 to 16 km² (hot-zone size
@@ -219,8 +227,8 @@ tandem HEAT, HE/HEDP, thermobaric); AAVs from the LHD on the coast or the FOB in
 commandable; Blackhawk resupply (grid or green/yellow smoke), transport (hot zones,
 green/blue smoke, loiters until marked, first call takes green) and extraction (grid or
 purple smoke, lands within 100 m of an unsafe spot); support calls with cost and cooldown;
-aircraft and AAVs lost with their cargo and passengers. Still open: who fields the AH-1Z,
-MRAPs, Bradley and Abrams.
+aircraft and AAVs lost with their cargo and passengers. The AH-1Z, MRAPs, Bradley and Abrams: the US and
+close allies that operate them (UK and Canada: MRAPs).
 
 ### Wave 6: phase 6, factions
 

@@ -58,7 +58,10 @@ static func from_contract(contract: Dictionary, origin := Vector3.ZERO) -> Array
 	var templates: Array = contract.get("objectives", [])
 	for i in templates.size():
 		var t: Dictionary = templates[i]
-		var site := placed_site(MissionRegistry.site(module_id, String(t.get("site", ""))), origin)
+		# A template may carry its own site ("params", in level metres: a recovery contract's
+		# squadmate where they were left), else it names one of the module's.
+		var site: Dictionary = (t.params as Dictionary).duplicate(true) if t.has("params") \
+			else placed_site(MissionRegistry.site(module_id, String(t.get("site", ""))), origin)
 		var obj := {
 			"oid": "%s_o%d" % [contract.get("cid", "c"), i + 1], "cid": contract.get("cid", ""), "kind": t.get("kind", ""),
 			"text": t.get("text", ""), "state": ACTIVE, "optional": bool(t.get("optional", false)),
