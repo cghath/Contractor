@@ -30,6 +30,7 @@ func _ready() -> void:
 	box.add_child(_role_picker())
 	box.add_child(_button("Play (host a session)", host))
 	box.add_child(_hint("Solo play is a session nobody else has joined."))
+	box.add_child(_button("Play the test contract (briefing, extraction)", host_with_briefing))
 	_address = LineEdit.new()
 	_address.text = "127.0.0.1"
 	_address.placeholder_text = "Host address"
@@ -51,6 +52,14 @@ func host() -> void:
 		_status.text = "Port %d is busy: is another copy of the game already hosting? Join it instead." % Net.port()
 	else:
 		_status.text = "Could not host on port %d (%s)." % [Net.port(), error_string(err)]
+
+
+## Hosts the compound as a stand-in contract (W13 test path): the briefing on the map, then
+## insertion, the reinforcement timer and extraction (Briefing.debug_open).
+func host_with_briefing() -> void:
+	host()
+	if Net.is_hosting():
+		Briefing.debug_open(self)
 
 
 func join(address: String) -> void:
