@@ -1,6 +1,7 @@
 # Build plan: agent waves
 
-**Status:** agreed 2026-10-10, not started. Covers everything still open in
+**Status:** agreed 2026-10-10. Waves 1 to 3 are on `dev` (wave 3 since 2026-10-11); wave 4
+is next. Covers everything still open in
 [contractor_handoff.md](contractor_handoff.md). The handoff and the design doc stay the
 authority on rules and numbers; this file only says who builds what, in which order.
 
@@ -125,7 +126,7 @@ attachments (branch `fix3/inventory-molle`).
 ### Wave 3: medical depth (6 parts)
 
 **Status:** built (all six parts) 2026-10-11 by Captain's side, all 14 suites passing;
-waiting for Captain's playtest. One workstream at a time (Captain). 1, IV and IO access, fluids,
+merged to `dev` and pushed 2026-10-11 on Captain's go; waiting for Captain's playtest. One workstream at a time (Captain). 1, IV and IO access, fluids,
 pressure bags and vein collapse, with the stand-in blood recovery removed: built on branch
 `w3/iv-fluids` 2026-10-10 (all 14 suites pass). 2, breathing with per-lung efficiency,
 SpO2 from it, the decompression needle and the pulse oximeter: built on `w3/breathing`

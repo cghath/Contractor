@@ -19,7 +19,7 @@ This handoff sums up every decision Captain made up to 2026-10-10, for the peopl
 
 **Team:** Captain and Claude, plus a teammate and their Claude.
 
-**Where the build is:** Foundation (phase 1) is done and Inventory depth (phase 2) is done but unreleased. Squad prototype (phase 3) is next. The local `phase3-squad` branch already has throwables, 8-slot squad scaling, battle buddies and casualty care, committed locally but not pushed. Health in code is still HP-based.
+**Where the build is:** Foundation (phase 1) is done and Inventory depth (phase 2) is done but unreleased. Squad prototype (phase 3, waves 1 and 2) and medical depth (wave 3) are on `dev`, waiting for Captain's playtest; the open phase 3 items are ticked off below. Health is the blood and wound model, not HP. Mission loop (phase 4, wave 4) is next; see [build_plan.md](build_plan.md).
 
 ## Working agreements
 
@@ -55,7 +55,7 @@ Phase 3 (Squad prototype) is the next build step and carries most of these chang
 - [ ] Phase 4, Mission loop: contract zones, then hot zones (several contracts at once, ends at extraction), the cash economy, and loot tiers by zone.
 - [ ] Phase 5, Ground vehicles: the Blackhawk supports, AAVs, and the LHD on the coast or the FOB inland.
 - [ ] Phase 6, Factions: territory that shifts between missions, reputation tiers, and enemy technicals and light vehicles.
-- [ ] Medical depth when the roadmap reaches it: IV and IO with gauges, pressure bags, surgery kits, the four drugs, defib, and breathing simulation.
+- [x] Medical depth when the roadmap reaches it: IV and IO with gauges, pressure bags, surgery kits, the four drugs, defib, and breathing simulation. (Wave 3, on `dev` 2026-10-11, with body interaction points and treatment animations.)
 
 ## Decided rules by system
 
