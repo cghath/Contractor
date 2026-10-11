@@ -259,6 +259,12 @@ func _test_briefing_and_markers() -> void:
 	screen._unhandled_input(m)
 	await _frames(3)
 	check(screen.visible and screen.extraction_panel.visible and screen.view.texture() != null, "M opens the map with the extraction panel")
+	var slot_before := player.active_slot
+	var two := InputEventKey.new()
+	two.physical_keycode = KEY_2
+	two.pressed = true
+	player.player_input._unhandled_input(two)
+	check(player.active_slot == slot_before, "with the map open, the game's keys don't act behind it (2 doesn't switch weapons)")
 	await _test_map_mouse(screen.view)
 	screen._unhandled_input(m)
 	check(not screen.visible, "and M closes it")
