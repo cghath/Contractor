@@ -7,8 +7,9 @@ extends RefCounted
 ## The result (JSON-safe, replicated to every peer):
 ## - "contracts": per contract {"cid", "title", "employer", "outcome" ("completed",
 ##   "failed", "voided", "lapsed", "aborted"), "advance" (paid at signing), "completion",
-##   "bonuses": [{"text", "amount"}], "pay" (completion + bonuses), "salvage_share",
-##   "objectives": [lines]};
+##   "bonuses": [{"text", "amount"}], "pay" (completion + bonuses), "clawback" (a voided
+##   contract's advance taken back when "void_claws_back_advance" is on: Captain's "pays
+##   nothing"), "salvage_share", "objectives": [lines]};
 ## - "civilians", "fines"; "rep": {faction: change}, "locals": change;
 ## - "salvage": {"share", "pool": [{"id", "count", "state", "value"}], "pool_value",
 ##   "budget", "picked": [pool indices], "spent"};
@@ -16,7 +17,8 @@ extends RefCounted
 ## - "intel": [{"id", "count", "status": "pending"}] (intel among the items out);
 ## - "casualties": as the extraction report gave them;
 ## - "days": campaign days the deployment took (mission days plus travel);
-## - "totals": {"advance", "completion", "bonuses", "fines", "paid_now", "contract_value"}.
+## - "totals": {"advance", "completion", "bonuses", "fines", "clawback", "paid_now",
+##   "contract_value"} (paid_now = completion + bonuses - fines - clawback).
 
 
 ## `contracts`: the deployment's contracts (host copies, with "deal"); `objectives`: the
@@ -26,7 +28,7 @@ static func compute(contracts: Array, objectives: Array, civilians: int, report:
 	var S := func(key: String) -> float: return MissionRegistry.setting_f(key)
 	var lines: Array = []
 	var rep := {}
-	var totals := {"advance": 0, "completion": 0, "bonuses": 0, "fines": 0, "paid_now": 0, "contract_value": 0}
+	var totals := {"advance": 0, "completion": 0, "bonuses": 0, "fines": 0, "clawback": 0, "paid_now": 0, "contract_value": 0}
 	var best_share := 0.0
 	var days := 0
 	for c: Dictionary in contracts:
@@ -46,7 +48,7 @@ static func compute(contracts: Array, objectives: Array, civilians: int, report:
 					outcome = "lapsed"  # a hot zone's unfinished contracts lapse at extraction
 		var pay_total := int(deal.get("pay_total", 0))
 		var line := {"cid": c.cid, "title": c.get("title", ""), "employer": c.get("employer", ""), "outcome": outcome,
-			"advance": int(deal.get("advance", 0)), "completion": 0, "bonuses": [], "pay": 0, "salvage_share": 0.0,
+			"advance": int(deal.get("advance", 0)), "completion": 0, "bonuses": [], "pay": 0, "clawback": 0, "salvage_share": 0.0,
 			"objectives": mine.map(func(o: Dictionary) -> String: return Objectives.line(o))}
 		var employer := String(c.get("employer", ""))
 		match outcome:
@@ -61,23 +63,30 @@ static func compute(contracts: Array, objectives: Array, civilians: int, report:
 				best_share = maxf(best_share, line.salvage_share)
 				_add(rep, employer, int(S.call("rep_success")))
 				_add(rep, String(c.get("target", "")), int(S.call("rep_target_on_success")))
-			"failed", "voided":
+			"failed":
 				_add(rep, employer, int(S.call("rep_fail")))
+			"voided":
+				_add(rep, employer, int(S.call("rep_fail")))
+				if bool(MissionRegistry.setting("void_claws_back_advance", true)):
+					line.clawback = line.advance
 			"lapsed":
 				_add(rep, employer, int(S.call("rep_lapse")))
 			"aborted":
-				_add(rep, employer, 0 if c.get("revealed", false) else int(S.call("rep_abort")))
+				# Free only when the briefing was shown to have lied (revealed and understated).
+				var lied: bool = c.get("revealed", false) and c.get("understated", false)
+				_add(rep, employer, 0 if lied else int(S.call("rep_abort")))
 		for b: Dictionary in line.bonuses:
 			totals.bonuses += int(b.amount)
 		line.pay = line.completion + line.bonuses.reduce(func(acc: int, b: Dictionary) -> int: return acc + int(b.amount), 0)
 		totals.advance += line.advance
 		totals.completion += line.completion
+		totals.clawback += int(line.clawback)
 		if civilians > 0:
 			_add(rep, employer, civilians * int(S.call("civilian_rep_employer")))
 		days = maxi(days, int(c.get("days", 1)) + int(MissionRegistry.region(String(c.get("region", ""))).get("travel_days", 0)))
 		lines.append(line)
 	totals.fines = civilians * int(S.call("civilian_fine"))
-	totals.paid_now = totals.completion + totals.bonuses - totals.fines
+	totals.paid_now = totals.completion + totals.bonuses - totals.fines - totals.clawback
 	totals.contract_value = totals.advance + totals.paid_now
 	# Salvage: the share of what was left in the field the squad may claim, and all it carried.
 	var pool: Array = []
@@ -127,6 +136,8 @@ static func summary(debrief: Dictionary) -> PackedStringArray:
 		out.append("  Completion: $%s" % money(c.completion))
 		for b: Dictionary in c.bonuses:
 			out.append("  %s: $%s" % [b.text, money(b.amount)])
+		if int(c.get("clawback", 0)) > 0:
+			out.append("  Advance clawed back (voided): -$%s" % money(c.clawback))
 		for l: String in c.get("objectives", []):
 			out.append("    " + l)
 	var totals: Dictionary = debrief.get("totals", {})

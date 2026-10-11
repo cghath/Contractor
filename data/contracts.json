@@ -35,7 +35,7 @@
 			"compound": {"rect": [-20, -20, 40, 40]},
 			"intel": {"pos": [0, 0.5, -10], "items": ["hvt_case"], "tags": ["intel"]},
 			"hvt": {"pos": [0, 0.1, -8], "hvt": "hvt_compound"},
-			"cache": {"box": [[-13, 0, -11], [-11, 2, -10]], "cache": "cache_compound"}
+			"cache": {"box": [[-13, 0, -11], [-11, 2, -10]], "cache": "cache_compound", "voxels": 3000, "_voxels": "solid voxels in the box on the pristine module (the crate stack: three 1 m crates); the destroyed share is measured against this"}
 		 }}
 	},
 
@@ -107,6 +107,7 @@
 		"civilian_rep_employer": -2,
 		"civilian_rep_locals": -4,
 		"civilian_void_at": 8,
+		"void_claws_back_advance": true,
 		"rep_success": 5,
 		"rep_target_on_success": -3,
 		"rep_fail": -6,

@@ -243,6 +243,9 @@ func _test_reveal_renegotiate_abort() -> void:
 	employer = String(Contracts.contract(other).employer)
 	rep = Economy.reputation(employer)
 	cash = Economy.cash()
+	Contracts.server_reveal_threat(other)  # the world calls it on first contact, honest briefing or not
+	check(not Contracts.contract(other).get("revealed", false) and not Contracts._public().held[0].get("revealed", false),
+		"revealing an honest briefing changes nothing (no renegotiate, no free abort)")
 	Contracts.server_abort(other)
 	check(Economy.reputation(employer) == rep - 4 and Economy.cash() == cash, "aborting one that didn't: -4 reputation, advance still kept")
 
@@ -328,8 +331,13 @@ func _test_debrief_totals() -> void:
 	var hot := DebriefCalc.compute([c.merged({"zone_kind": "hot"}, true)], [objs[0].merged({"state": "failed"}, true)], 0, report)
 	check(hot.contracts[0].outcome == "lapsed" and hot.rep.get("meridian") == -3, "a hot-zone contract left unfinished lapses (-3)")
 	var voided := DebriefCalc.compute([c.merged({"state": "voided"}, true)], objs, 8, report)
-	check(voided.contracts[0].outcome == "voided" and voided.totals.completion == 0 and voided.totals.bonuses == 0 and voided.fines == 20000,
-		"voided: nothing more paid, $20,000 in fines")
+	check(voided.contracts[0].outcome == "voided" and voided.totals.completion == 0 and voided.totals.bonuses == 0 and voided.fines == 20000
+		and voided.contracts[0].clawback == 30000 and voided.totals.paid_now == -50000 and voided.totals.contract_value == -20000,
+		"voided: pays nothing (the $30,000 advance clawed back) and $20,000 in fines")
+	var honest_abort := DebriefCalc.compute([c.merged({"state": "aborted", "revealed": true, "understated": false}, true)], objs, 0, report)
+	var lied_abort := DebriefCalc.compute([c.merged({"state": "aborted", "revealed": true, "understated": true}, true)], objs, 0, report)
+	check(honest_abort.rep.get("meridian", 0) == -4 and lied_abort.rep.get("meridian", 0) == 0,
+		"aborting mid-deployment is free only when the briefing lied")
 	var summary := "\n".join(DebriefCalc.summary(d))
 	check(summary.contains("COMPLETED") and summary.contains("$70,000") and summary.contains("Paid now: $90,000"), "the summary reads right")
 
@@ -350,11 +358,12 @@ func _test_civilians_void() -> void:
 		and Contracts.objectives.for_contract(cid).all(func(o: Dictionary) -> bool: return o.state == "failed"), "the 8th voids the contract and fails its objectives")
 	Contracts.contract_voided.disconnect(on_void)
 	var employer := String(Contracts.contract(cid).employer)
+	var advance := int(Contracts.contract(cid).deal.advance)
 	var rep := Economy.reputation(employer)
 	var cash := Economy.cash()
 	var d := Contracts.server_end_deployment({})
-	check(d.contracts[0].outcome == "voided" and Economy.cash() == cash - 20000 and Economy.reputation(employer) == rep - 6 - 16 and Economy.locals() == -32,
-		"debrief: pays nothing, $20,000 in fines, -22 with the client, -32 with the locals")
+	check(d.contracts[0].outcome == "voided" and Economy.cash() == cash - 20000 - advance and Economy.reputation(employer) == rep - 6 - 16 and Economy.locals() == -32,
+		"debrief: pays nothing (advance $%d clawed back), $20,000 in fines, -22 with the client, -32 with the locals" % advance)
 	Contracts.server_finish_debrief()
 	check(Contracts.server_civilian_casualty() == 0, "no deployment, nothing counted")
 
@@ -387,6 +396,13 @@ func _test_save_reload() -> void:
 	var states := func(list: Array) -> Array: return list.map(func(o: Dictionary) -> String: return "%s=%s" % [o.oid, o.state])
 	check(Contracts.is_deployed() and states.call(Contracts.objectives.list) == states.call(objectives) and Contracts.objectives.list[0].state == "done",
 		"the deployment under way and its objectives back (one done)")
+	# The normal first-access path: a fresh start that loads the save through ensure_campaign.
+	Contracts.objectives.server_clear()
+	Campaign._sections = {}
+	Contracts._tried_load = false
+	Contracts.ensure_campaign()
+	check(Contracts.is_deployed() and Economy.cash() == int(econ.cash) and states.call(Contracts.objectives.list) == states.call(objectives)
+		and Contracts.objectives.list[0].state == "done", "loaded on first access (ensure_campaign): the deployment and its objectives back")
 	Contracts.server_end_deployment({})
 	Contracts.server_finish_debrief()
 
@@ -504,6 +520,11 @@ func _test_board_ui() -> void:
 
 func _test_live_objectives() -> void:
 	print("Objectives in the level (hot zone, three contracts)")
+	var site := MissionRegistry.site("compound", "cache")
+	var site_box := Objectives._box_of({"params": site})
+	await _wait_for(func() -> bool: return Objectives.solid_count(level.voxel_world, site_box) >= 0, 5.0)
+	var pristine := Objectives.solid_count(level.voxel_world, site_box)
+	check(pristine == int(site.voxels), "the cache site's authored voxel count matches the pristine crate stack (%d of %d)" % [pristine, int(site.voxels)])
 	Contracts.new_full_campaign(81, 200000)
 	var clear := _make_offer("clear_compound", "ridge_hot")
 	var cache := _make_offer("destroy_cache", "ridge_hot")
@@ -542,9 +563,10 @@ func _test_live_objectives() -> void:
 	await _seconds(MissionRegistry.setting_f("charge_fuse_s", 5.0) + 1.0)
 	check(Contracts.objectives.get_objective(cache_o.oid).state == "done" and level.voxel_world.material_at(Vector3(-12.5, 0.5, -10.5)) == VoxelWorld.Mat.EMPTY,
 		"the charge blew the cache apart: destroyed")
-	# A cache destroyed by voxel damage alone (the shed's plank wall standing in).
+	# A cache destroyed by voxel damage alone (the shed's plank wall standing in, its count authored here).
+	var wall := Objectives.solid_count(level.voxel_world, AABB(Vector3(16, 0, -11), Vector3(0.1, 2.4, 1.4)))
 	Contracts.objectives.server_add([{"oid": "test_cache", "cid": "", "kind": "destroy_cache", "text": "Blow the shed wall", "state": "active", "optional": true,
-		"bonus_share": 0.0, "progress": "", "params": {"box": [[16, 0, -11], [16.1, 2.4, -9.6]]}, "pos": [16, 1, -10]}])
+		"bonus_share": 0.0, "progress": "", "params": {"box": [[16, 0, -11], [16.1, 2.4, -9.6]], "voxels": wall}, "pos": [16, 1, -10]}])
 	await _seconds(0.8)
 	check(Contracts.objectives.get_objective("test_cache").state == "active", "a voxel cache stands until it's blown")
 	level.voxel_world.server_blast(Vector3(16.05, 1.2, -10.3), 1.6)
@@ -569,6 +591,21 @@ func _test_live_objectives() -> void:
 	check(d.contracts.size() == 3 and d.contracts.all(func(l: Dictionary) -> bool: return l.outcome == "completed") and Economy.cash() == cash + int(d.totals.paid_now)
 		and int(d.salvage.pool_value) > 0, "all three completed and paid ($%d); salvage pool $%d" % [int(d.totals.paid_now), int(d.salvage.pool_value)])
 	check(Contracts.objectives.list.is_empty() and (panel == null or panel.text() == ""), "after extraction the objective list clears")
+	Contracts.server_finish_debrief()
+	# The zone kept its damage: the next cache contract on this module finds the crates already blown.
+	level.voxel_world.server_blast(site_box.get_center(), 1.6)  # whatever the charge left standing
+	await _seconds(0.3)
+	var carved := Objectives.solid_count(level.voxel_world, site_box)
+	var again := _make_offer("destroy_cache", "compound_01")
+	Contracts.server_accept(again, ContractGen.default_terms())
+	Contracts.server_start_deployment([again])
+	await _seconds(1.5)
+	var again_o: Dictionary = Contracts.objectives.for_contract(again)[0]
+	check(carved >= 0 and carved < int(site.voxels) * 0.4 and again_o.state == "active",
+		"a cache site carved before deploying (%d of %d voxels left) doesn't count as destroyed by itself" % [carved, int(site.voxels)])
+	Contracts.server_cache_destroyed("cache_compound")
+	check(Contracts.objectives.get_objective(again_o.oid).state == "done", "the hook still completes it")
+	Contracts.server_end_deployment({})
 	Contracts.server_finish_debrief()
 
 
@@ -609,6 +646,17 @@ func _test_over_network() -> void:
 		Contracts.objectives.server_set_state(Contracts.objectives.list[0].oid, Objectives.DONE)
 		await _wait_for(func() -> bool: return _client_phase >= 2, 10.0)
 		Contracts.server_end_deployment(Contracts.report_from_level(level, [player]))
+		await _wait_for(func() -> bool: return _client_phase >= 3, 20.0)
+		await _seconds(0.5)
+		check(not Contracts.last_debrief().finished, "a client's Continue doesn't close the debrief for everyone (only the host's)")
+		Contracts.server_finish_debrief()
+		# A reset campaign numbers its debriefs from 1 again: the client must still show the first.
+		Contracts.new_full_campaign(92, 150000)
+		var again := _make_offer("retrieve_intel", "compound_01")
+		Contracts.server_accept(again, ContractGen.default_terms())
+		Contracts.server_start_deployment([again])
+		Contracts.server_end_deployment({"items": [{"id": "hvt_case", "count": 1}]})
+		check(int(Contracts.last_debrief().serial) == 1, "after a reset the debrief count starts over")
 		await _wait_for(func() -> bool: return _client_done, 20.0)
 		check(_client_done, "the client finished its checks")
 	if OS.is_process_running(pid):
@@ -664,6 +712,13 @@ func _run_client() -> void:
 	_remote_check.rpc_id(1, screen != null and text.contains("DEBRIEF") and text.contains(String(_go.title)) and text.contains("Paid now") and text.contains("SALVAGE"),
 		"the debrief appears on the client with the contract, the pay and the salvage")
 	_remote_check.rpc_id(1, Contracts.objectives.list.is_empty() and not Contracts.is_deployed(), "and the objectives clear")
+	var first_id := screen.get_instance_id() if screen else 0
+	Contracts.finish_debrief()  # a client asking to close it: the host ignores it
+	_remote_phase.rpc_id(1, 3)
+	await _wait_for(func() -> bool: return Contracts.debrief_screen() != null and Contracts.debrief_screen().get_instance_id() != first_id, 15.0)
+	var next := Contracts.debrief_screen()
+	_remote_check.rpc_id(1, next != null and next.get_instance_id() != first_id and next.text().contains("DEBRIEF"),
+		"after the host resets the campaign, its first debrief still opens on the client")
 	_remote_done.rpc_id(1)
 	await _seconds(0.5)
 	Net.leave()

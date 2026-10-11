@@ -23,7 +23,9 @@ extends Node
 ##    finish_debrief() banks the picks and closes it.
 ##
 ## Debug path on its own: Contracts.open_board() (the main menu's "Contract board" button)
-## runs the board, negotiation, shop, days and a stand-in deployment and debrief offline.
+## runs the board, negotiation, shop, days and a stand-in deployment and debrief offline. In
+## a session, End (DEBUG_BOARD_KEY) opens the board on any peer until the base hub places it;
+## its host-only controls stand in for deploying and extracting until wave 4B joins it up.
 
 signal changed
 ## A message for the local player.
@@ -36,6 +38,8 @@ signal contract_voided(cid: String)
 
 const SECTION := &"contracts"
 const HISTORY_KEEP := 40
+## In a session: opens the board (debug, until the base hub places it).
+const DEBUG_BOARD_KEY := KEY_END
 ## Contract states after "offered".
 const ACCEPTED := "accepted"
 const DEPLOYED := "deployed"
@@ -54,7 +58,7 @@ var _remote: Dictionary = {}  # clients: the host's public state
 var _dirty := false
 var _ensuring := false
 var _tried_load := false
-var _shown_debrief := -1
+var _shown_debrief := ""  # clients: "<campaign tag>:<serial>" of the last debrief shown
 var _debrief_screen: Node
 
 
@@ -160,6 +164,10 @@ func ensure_campaign() -> void:
 			and FileAccess.file_exists(Campaign.save_path()):
 		_tried_load = true
 		Campaign.load_campaign()
+		# _on_campaign_changed skips while ensuring: put a saved deployment's objectives back.
+		if not Campaign.section(SECTION).is_empty():
+			objectives.server_restore(Campaign.section(SECTION).get("objectives", []))
+			_commit()
 	if Campaign.section(Economy.SECTION).is_empty():
 		Economy.new_campaign()
 	if Campaign.section(SECTION).is_empty():
@@ -172,8 +180,8 @@ func ensure_campaign() -> void:
 func new_campaign(campaign_seed := -1) -> void:
 	var s := Campaign.section(SECTION)
 	s.clear()
-	s.merge({"seed": campaign_seed if campaign_seed >= 0 else randi(), "next_id": 1, "board": [], "held": [], "history": [],
-		"deployment": {}, "objectives": [], "debrief": {}, "debriefs": 0})
+	s.merge({"seed": campaign_seed if campaign_seed >= 0 else randi(), "tag": randi() % 1000000000, "next_id": 1, "board": [], "held": [],
+		"history": [], "deployment": {}, "objectives": [], "debrief": {}, "debriefs": 0})
 	objectives.server_clear()
 	server_refresh_board()
 
@@ -275,11 +283,10 @@ func server_accept(cid: String, terms: Dictionary, peer_id := 1) -> String:
 ## may now renegotiate or abort without the usual reputation hit.
 func server_reveal_threat(cid: String) -> void:
 	var c := _find(_s().held, cid)
-	if c.is_empty() or c.revealed:
-		return
+	if c.is_empty() or c.revealed or not c.understated:
+		return  # an honest briefing has nothing to reveal (and no free abort)
 	c.revealed = true
-	if c.understated:
-		_notify_all("The briefing lied: %s is a %d, not a %d. Renegotiate or abort." % [c.title, int(c.true_rating), int(c.rated)])
+	_notify_all("The briefing lied: %s is a %d, not a %d. Renegotiate or abort." % [c.title, int(c.true_rating), int(c.rated)])
 	_commit()
 
 
@@ -317,7 +324,7 @@ func server_abort(cid: String, peer_id := 1) -> String:
 	c.state = ABORTED
 	objectives.server_fail_contract(cid)
 	if not deployed:
-		var hit := 0 if c.revealed else MissionRegistry.setting_i("rep_abort", -4)
+		var hit := 0 if c.revealed and c.understated else MissionRegistry.setting_i("rep_abort", -4)
 		Economy.change_reputation(String(c.employer), hit, "aborted " + String(c.cid))
 		_close(c, ABORTED)
 	_notify_all("Aborted %s" % c.title)
@@ -470,12 +477,16 @@ func server_end_deployment(report: Dictionary) -> Dictionary:
 	debrief["extracted"] = report.get("extracted", [])
 	s.debriefs = int(s.get("debriefs", 0)) + 1
 	debrief["serial"] = s.debriefs
+	debrief["key"] = "%d:%d" % [int(s.get("tag", 0)), int(s.debriefs)]  # clients show each debrief once, across campaign resets
 	# Pay, fines and reputation.
 	for line: Dictionary in debrief.contracts:
 		if int(line.pay) > 0:
 			Economy.add_cash(int(line.pay), "Completion: %s" % line.title)
 	if int(debrief.fines) > 0:
 		Economy.add_cash(-int(debrief.fines), "Civilian fines (%d)" % int(debrief.civilians))
+	for line: Dictionary in debrief.contracts:
+		if int(line.clawback) > 0:
+			Economy.add_cash(-int(line.clawback), "Advance clawed back (voided): %s" % line.title)
 	for f: String in debrief.rep:
 		Economy.change_reputation(f, int(debrief.rep[f]), "debrief")
 	Economy.change_locals(int(debrief.locals))
@@ -700,7 +711,8 @@ func _handle(what: String, args: Array, peer: int) -> void:
 		"sell":
 			why = server_sell_intel(int(args[0]), String(args[1]))
 		"finish":
-			server_finish_debrief()
+			if peer == 1:  # only the host closes the debrief (it banks the picks and the intel)
+				server_finish_debrief()
 	if why != "" and what not in ["accept", "renegotiate", "abort"]:
 		_notify(peer, why)
 
@@ -825,6 +837,17 @@ func _on_peer_joined(id: int) -> void:
 		_sync.rpc_id(id, _public())
 
 
+## Debug: End opens the board in a session (any peer; the host gets its stand-in controls).
+func _unhandled_input(event: InputEvent) -> void:
+	var key := event as InputEventKey
+	if key == null or not key.pressed or key.echo or key.keycode != DEBUG_BOARD_KEY:
+		return
+	if CompoundLevel.current(self) == null or not get_tree().root.find_children("*", "ContractBoard", true, false).is_empty():
+		return
+	get_viewport().set_input_as_handled()
+	open_board()
+
+
 func _on_economy_changed() -> void:
 	if not _is_host():
 		return
@@ -848,8 +871,9 @@ func _sync(state: Dictionary) -> void:
 	_remote = state
 	changed.emit()
 	var d: Dictionary = state.get("debrief", {})
-	if not d.is_empty() and not d.get("finished", false) and int(d.get("serial", -1)) != _shown_debrief:
-		_shown_debrief = int(d.serial)
+	var key := String(d.get("key", str(d.get("serial", -1))))
+	if not d.is_empty() and not d.get("finished", false) and key != _shown_debrief:
+		_shown_debrief = key
 		debrief_ready.emit(d)
 
 

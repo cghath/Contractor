@@ -18,8 +18,14 @@ extends Node
 ## - DELIVER_HVT: server_hvt_delivered(hvt_id, alive) (the people agent's HVT calls it);
 ##   server_hvt_lost(hvt_id) fails it.
 ## - DESTROY_CACHE: the voxels in "box" ([[x, y, z], [x, y, z]] metres) are mostly gone
-##   (less than "cache_destroyed_share" left; frags and explosives carve them), or
-##   server_cache_destroyed(cache_id), or a charge placed with server_place_charge.
+##   (less than "cache_destroyed_share" of the site's authored "voxels" left; frags and
+##   explosives carve them), or server_cache_destroyed(cache_id), or a charge placed with
+##   server_place_charge. The share is measured against the authored count, never against
+##   what stands at deploy: a zone keeps its voxel damage, so a cache box already carved
+##   (blown on an earlier contract and saved) must not count as destroyed on the next one.
+##   With no "voxels" in the site, or a box already under the threshold when it is first
+##   read, the voxel check stays off and only the hook or a charge completes it (a world or
+##   4B pass that restores a zone rebuilds the cache).
 
 signal changed
 
@@ -40,7 +46,7 @@ var list: Array = []
 var _poll := 0.0
 var _armed := {}       # host: oid -> true once a CLEAR_AREA has seen a hostile (or timed out)
 var _first_poll := {}  # host: oid -> msec it was first checked
-var _cache_full := {}  # host: oid -> solid voxels in the cache box when first read
+var _cache_off := {}   # host: oid -> true when the voxel check is off (no baseline, or carved before deploy)
 
 
 ## Objectives from a contract's templates, placed at its module's sites. Sites are in the
@@ -144,7 +150,7 @@ func server_begin(objectives: Array) -> void:
 	list = objectives.duplicate(true)
 	_armed.clear()
 	_first_poll.clear()
-	_cache_full.clear()
+	_cache_off.clear()
 	_commit()
 
 
@@ -165,7 +171,7 @@ func server_restore(objectives: Array) -> void:
 	list = objectives.duplicate(true)
 	_armed.clear()
 	_first_poll.clear()
-	_cache_full.clear()
+	_cache_off.clear()
 	_commit(false)
 
 
@@ -319,23 +325,43 @@ func _check_clear(o: Dictionary) -> void:
 		server_set_state(o.oid, ACTIVE, "%d hostile%s left" % [left, "" if left == 1 else "s"])
 
 
-func _check_cache(o: Dictionary, world: VoxelWorld) -> void:
-	var box := _box_of(o)
+## Solid voxels in `box` (metres, level space), or -1 while that part of the world can't be
+## read yet. The authored "voxels" of a cache site is this count on the pristine module.
+static func solid_count(world: VoxelWorld, box: AABB) -> int:
 	var begin := Vector3i((world.to_local(box.position) / VoxelWorld.VOXEL_SIZE).round())
 	var end := Vector3i((world.to_local(box.end) / VoxelWorld.VOXEL_SIZE).round())
 	var size := (end - begin).abs()
 	if size.x * size.y * size.z <= 0 or not world.is_area_readable(AABB(Vector3(begin), Vector3(size))):
-		return
+		return -1
 	var solid := 0
 	for b: int in world.solid_voxels(begin, size):
 		solid += b
-	if not _cache_full.has(o.oid):
-		_cache_full[o.oid] = maxi(solid, 1)
-	var share := float(solid) / float(_cache_full[o.oid])
-	if share < MissionRegistry.setting_f("cache_destroyed_share", 0.4):
+	return solid
+
+
+func _check_cache(o: Dictionary, world: VoxelWorld) -> void:
+	if _cache_off.has(o.oid):
+		return
+	var full := int(o.params.get("voxels", 0))
+	if full <= 0:
+		_cache_off[o.oid] = true  # no authored baseline: the hook or a charge only
+		return
+	var solid := solid_count(world, _box_of(o))
+	if solid < 0:
+		return
+	var share := float(solid) / float(full)
+	var threshold := MissionRegistry.setting_f("cache_destroyed_share", 0.4)
+	if not _first_poll.has(o.oid):
+		_first_poll[o.oid] = Time.get_ticks_msec()
+		if share < threshold:
+			# Carved before this deployment (the zone kept its damage): the voxels can't tell.
+			_cache_off[o.oid] = true
+			print("[objectives] %s: the cache site is already %d%% gone; only a charge or the hook completes it" % [o.text, 100 - roundi(share * 100.0)])
+			return
+	if share < threshold:
 		server_set_state(o.oid, DONE)
 	elif share < 0.999 and o.progress != "charge set":
-		server_set_state(o.oid, ACTIVE, "%d%% intact" % roundi(share * 100.0))
+		server_set_state(o.oid, ACTIVE, "%d%% intact" % roundi(minf(share, 1.0) * 100.0))
 
 
 # --- Replication -------------------------------------------------------------------------
