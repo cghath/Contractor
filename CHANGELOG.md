@@ -11,6 +11,33 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Stormworks-style character models and hits on the body's real shape (Captain, 2026-10-11)
+
+#### Changed
+
+- **Soldiers rebuilt in a low-poly Stormworks style, still in voxels** (`scripts/art/voxel_art.gd`):
+  body parts are lofts with flat faces and 45-degree bevelled edges, written in centimetres
+  and built in 0.5 cm voxels, on the same joints as before, so animations, helmets, plates,
+  pouches and held weapons fit unchanged. The trunk now reaches down to the crotch (the hips
+  10 cm below the hip joints) with the belt at the waist, so the legs show from where they
+  do on a real body. A boxy head with a flat face: eyes, brows, nose, mouth and ears.
+- **Camouflage by faction:** MultiCam (soft brushed blotches, a few dark flecks), woodland
+  (blotches with black branches), desert (broad drifts) and urban (grey woodland),
+  domain-warped so the shapes flow.
+- **Plate carriers enclose their plates:** rebuilt in 1 cm voxels with a fabric pocket round
+  each plate and a lip over its edges. A plate in its pocket takes the carrier's fabric
+  colour (`VoxelArmor.cover`); chips and holes still show the plate under the torn cover.
+  The heavy carrier has side-plate pockets, a collar and a groin flap.
+
+#### Added
+
+- **Hits land on the body's real shape** (`scripts/combat/wounds/body_volume.gd`). A
+  hitbox box is now only the first test: the round is marched through that part's 0.5 cm
+  voxels (the character model, in the rest pose), so a round between the legs or past a
+  wrist that only crosses the box flies on, and one that hits enters where the body starts.
+  The wound channel runs as far as the body does along the round (a forearm short, a chest
+  the whole trunk) instead of to the edge of the box. Built once when hosting (about 0.7 s).
+
 ### Scavenging review fixes
 
 #### Fixed

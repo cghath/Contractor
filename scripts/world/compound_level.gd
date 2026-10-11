@@ -330,6 +330,7 @@ func _burst(pos: Vector3, colour: Color, size: float, life: float) -> void:
 
 
 func _on_hosted() -> void:
+	BodyVolume.warm()  # hits are judged on the host: build the body shapes before the first one
 	GameState.load_zone()
 	voxel_world.load_edits(GameState.voxel_edits)
 	for loot: Dictionary in LOOT:

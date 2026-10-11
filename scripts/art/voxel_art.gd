@@ -8,6 +8,8 @@ extends RefCounted
 ## A box is [from: Vector3i, to: Vector3i (exclusive), colour]; later boxes overwrite.
 
 const VOXEL_SIZE := 0.02
+## Fine gear (pouches, weapons, packs) and the body are built at 0.5 cm.
+const FINE_VOXEL := 0.005
 
 enum C {
 	EMPTY, CAMO, CAMO_A, CAMO_B, CAMO_C, CAMO_D, SKIN, SKIN_SHADE, HAIR, EYE, MOUTH,
@@ -43,6 +45,8 @@ static var _meshes: Dictionary = {}   # "model|variant" -> Mesh
 static var _material: StandardMaterial3D
 static var _noise_a: FastNoiseLite
 static var _noise_b: FastNoiseLite
+static var _box_meshes: Dictionary = {}     # "dims|colour" -> Mesh (bevel_box_mesh)
+static var _colour_meshers: Dictionary = {}  # colour -> VoxelMesherCubes
 
 
 ## A pivot node holding the model's mesh. The pivot is the model's centre unless the
@@ -123,6 +127,31 @@ static func mesh(model: String, variant: String) -> Mesh:
 
 
 static func _build(spec: Dictionary, variant: String, salt: int) -> Mesh:
+	return _get_mesher(variant).build_mesh(_rasterize(spec, variant, salt), [])
+
+
+## Which built voxels of `model` are solid, for hit tests (BodyVolume): {"dims" (built
+## voxels), "cell" (metres), "pivot" (metres from the grid's corner to the model's pivot),
+## "solid" (a PackedByteArray, 1 where solid, x fastest then y then z)}.
+static func occupancy(model: String) -> Dictionary:
+	var spec := _spec(model)
+	var s: int = spec.get("sub", 1)
+	var voxel: float = spec.get("voxel", VOXEL_SIZE)
+	var buffer := _rasterize(spec, "dummy", 0)  # dummy: plain colours, no camo noise to compute
+	var dims: Vector3i = spec.size * s
+	var solid := PackedByteArray()
+	solid.resize(dims.x * dims.y * dims.z)
+	for z in dims.z:
+		for y in dims.y:
+			for x in dims.x:
+				if buffer.get_voxel(x + 1, y + 1, z + 1, VoxelBuffer.CHANNEL_COLOR) != C.EMPTY:
+					solid[x + dims.x * (y + dims.y * z)] = 1
+	var pivot: Vector3 = spec.get("pivot", Vector3(spec.size) * 0.5)
+	return {"dims": dims, "cell": voxel / s, "pivot": pivot * voxel, "solid": solid}
+
+
+## The model's voxels in a buffer with 1 voxel of mesher padding per side.
+static func _rasterize(spec: Dictionary, variant: String, salt: int) -> VoxelBuffer:
 	## "sub": each voxel the spec is written in is built as sub x sub x sub smaller ones (the
 	## body: shapes written in 1 cm, built in 0.5 cm), so curves step finer.
 	var s: int = spec.get("sub", 1)
@@ -144,14 +173,14 @@ static func _build(spec: Dictionary, variant: String, salt: int) -> Mesh:
 		if box is Dictionary:
 			_fill_loft(box, put, s)
 			continue
-		var from: Vector3i = box[0] * s
-		var to: Vector3i = box[1] * s
+		var from := Vector3i((Vector3(box[0]) * s).round())  # corners may be fractional (_fb)
+		var to := Vector3i((Vector3(box[1]) * s).round())
 		var paint_only: bool = box.size() > 3 and box[3]  # _p: recolours, never adds
 		for x in range(from.x, to.x):
 			for y in range(from.y, to.y):
 				for z in range(from.z, to.z):
 					put.call(x, y, z, box[2], paint_only)
-	return _get_mesher(variant).build_mesh(buffer, [])
+	return buffer
 
 
 ## Fills a loft (_loft): at each voxel layer, a low-poly cross-section (a rectangle with its
@@ -479,42 +508,113 @@ static func _vest(tier: int) -> Dictionary:
 	return {"size": size, "pivot": Vector3(o), "voxel": BODY_VOXEL, "sub": BODY_SUB, "boxes": boxes}
 
 
-## 0.34 x 0.44 m; depth in voxels grows with capacity. Outer face is +Z.
+## 0.34 x 0.44 m; depth in voxels grows with capacity. Outer face is +Z. A low-poly pack
+## built at 0.5 cm: a bevelled main bag, a lid, a front pocket, straps.
 static func _backpack(depth: int) -> Dictionary:
 	var d := maxi(depth, 6)
-	return {"size": Vector3i(17, 22, d), "boxes": [
-		_b(0, 0, 0, 17, 20, d, C.PACK),
-		_b(0, 18, 0, 17, 22, d, C.PACK_DARK),
-		_b(2, 3, d - 1, 15, 10, d, C.PACK_DARK),
-		_b(4, 0, d - 1, 5, 18, d, C.PACK_DARK), _b(12, 0, d - 1, 13, 18, d, C.PACK_DARK),
-		_b(0, 2, 2, 1, 9, d - 2, C.PACK_DARK), _b(16, 2, 2, 17, 9, d - 2, C.PACK_DARK),
+	var body := (d - 1) * 0.5  # half-depth of the main bag; the front pocket fills the last voxel
+	return {"size": Vector3i(17, 22, d), "sub": 4, "boxes": [
+		_loft(8.5, body, [[0, 7.6, body - 0.4], [3, 8.5, body], [18, 8.5, body], [22, 7.4, body - 0.6]], C.PACK, 0.3),
+		_p(0, 18, 0, 17, 22, d, C.PACK_DARK),                               # lid
+		_loft(8.5, d - 1.6, [[3, 6.0, 1.4], [10.5, 6.4, 1.6]], C.PACK_DARK, 0.5),  # front pocket
+		_fb(3.6, 0.5, d - 1.2, 4.4, 18, d - 0.6, C.PACK_DARK), _fb(12.6, 0.5, d - 1.2, 13.4, 18, d - 0.6, C.PACK_DARK),
+		_fb(-0.1, 3, 2, 0.4, 3.6, d - 2, C.PACK_DARK), _fb(16.6, 3, 2, 17.1, 3.6, d - 2, C.PACK_DARK),
+		_fb(-0.1, 7, 2, 0.4, 7.6, d - 2, C.PACK_DARK), _fb(16.6, 7, 2, 17.1, 7.6, d - 2, C.PACK_DARK),
+		_fb(3, 4, 0, 5, 20, 0.6, C.PACK_DARK), _fb(12, 4, 0, 14, 20, 0.6, C.PACK_DARK),  # shoulder straps
 	]}
 
 
-## Rifle of `length` voxels, muzzle at z = 0.
+## A box with fractional corners in the spec's voxels (built at its "sub" resolution).
+static func _fb(x0: float, y0: float, z0: float, x1: float, y1: float, z1: float, colour: int) -> Array:
+	return [Vector3(x0, y0, z0), Vector3(x1, y1, z1), colour]
+
+
+## Rifle of `length` voxels, muzzle at z = 0, in a 2 cm frame built at 0.5 cm: muzzle
+## device, barrel, railed handguard, upper and lower receiver, optic, curved magazine,
+## angled pistol grip, buffer tube and stock. hand_points and sight_point read this frame
+## (pistol grip at 0.68, handguard underside at 0.38, the optic's back at 0.62).
 static func _rifle(length: int) -> Dictionary:
 	var n := maxi(length, 20)
-	var f := func(t: float) -> int: return int(n * t)
-	return {"size": Vector3i(3, 13, n), "boxes": [
-		_b(1, 8, 0, 2, 9, f.call(0.3), C.GUN),
-		_b(0, 7, f.call(0.15), 3, 10, f.call(0.45), C.GUN_LIGHT),
-		_b(0, 6, f.call(0.45), 3, 11, f.call(0.72), C.GUN),
-		_b(1, 11, f.call(0.5), 2, 13, f.call(0.64), C.GUN),
-		_b(1, 11, f.call(0.5), 2, 13, f.call(0.5) + 1, C.LENS),
-		_b(1, 2, f.call(0.5), 2, 6, f.call(0.57), C.GUN_LIGHT),
-		_b(1, 0, f.call(0.53), 2, 2, f.call(0.6), C.GUN_LIGHT),
-		_b(1, 2, f.call(0.66), 2, 6, f.call(0.7), C.GUN),
-		_b(1, 8, f.call(0.72), 2, 9, f.call(0.76), C.GUN),
-		_b(0, 6, f.call(0.76), 3, 10, n, C.GUN_LIGHT),
-		_b(1, 5, f.call(0.85), 2, 6, n, C.GUN_LIGHT),
+	var f := func(t: float) -> float: return n * t
+	return {"size": Vector3i(3, 13, n), "sub": 4, "boxes": [
+		_fb(1.25, 8.25, 0, 1.75, 8.75, f.call(0.3), C.GUN),                     # barrel
+		_fb(1.05, 7.95, 0, 1.95, 9.05, 1.5, C.GUN),                             # muzzle device
+		_fb(1.2, 8.75, f.call(0.13), 1.8, 9.9, f.call(0.15), C.GUN),            # gas block
+		_fb(0.6, 7.0, f.call(0.15), 2.4, 9.6, f.call(0.45), C.GUN_LIGHT),       # handguard
+		_fb(0.9, 9.6, f.call(0.15), 2.1, 9.95, f.call(0.74), C.GUN),            # top rail
+		_fb(0.6, 7.0, f.call(0.15), 0.85, 9.6, f.call(0.45), C.GUN),            # side rails
+		_fb(2.15, 7.0, f.call(0.15), 2.4, 9.6, f.call(0.45), C.GUN),
+		_fb(0.7, 7.0, f.call(0.45), 2.3, 9.6, f.call(0.74), C.GUN),             # upper receiver
+		_fb(0.75, 5.6, f.call(0.47), 2.25, 7.0, f.call(0.72), C.GUN),           # lower receiver
+		_fb(1.1, 9.95, f.call(0.53), 1.9, 10.6, f.call(0.61), C.GUN),           # optic mount
+		_fb(0.85, 10.6, f.call(0.5), 2.15, 13.0, f.call(0.64), C.GUN),          # optic
+		_fb(1.05, 10.9, f.call(0.5) - 0.01, 1.95, 12.7, f.call(0.5) + 0.3, C.LENS),
+		_fb(0.9, 4.2, f.call(0.5), 2.1, 5.6, f.call(0.575), C.GUN_LIGHT),       # magazine, curving forward
+		_fb(0.9, 2.8, f.call(0.49), 2.1, 4.2, f.call(0.565), C.GUN_LIGHT),
+		_fb(0.9, 1.4, f.call(0.475), 2.1, 2.8, f.call(0.55), C.GUN_LIGHT),
+		_fb(0.85, 1.0, f.call(0.47), 2.15, 1.4, f.call(0.55), C.GUN),
+		_fb(1.25, 4.6, f.call(0.6), 1.75, 5.0, f.call(0.66), C.GUN),            # trigger guard
+		_fb(0.9, 4.4, f.call(0.66), 2.1, 5.6, f.call(0.71), C.GUN),             # pistol grip, raked back
+		_fb(0.9, 3.0, f.call(0.67), 2.1, 4.4, f.call(0.72), C.GUN),
+		_fb(0.9, 1.6, f.call(0.68), 2.1, 3.0, f.call(0.735), C.GUN),
+		_fb(1.1, 7.6, f.call(0.74), 1.9, 8.8, f.call(0.82), C.GUN_LIGHT),       # buffer tube
+		_fb(0.8, 6.0, f.call(0.8), 2.2, 9.4, n, C.GUN_LIGHT),                   # stock
+		_fb(0.95, 9.4, f.call(0.82), 2.05, 9.8, f.call(0.95), C.GUN_LIGHT),     # cheek rest
+		_fb(0.8, 5.6, n - 0.5, 2.2, 9.8, n, C.GUN),                             # butt pad
 	]}
 
 
-## 0.04 x 0.14 x 0.20 m, muzzle at z = 0.
+## 0.04 x 0.14 x 0.20 m, muzzle at z = 0, built at 0.5 cm: slide, frame, raked grip,
+## trigger guard. hand_points: grip at (1, 2.5, 7.5); sight_point: rear sight (1, 7, 9).
 static func _pistol() -> Dictionary:
-	return {"size": Vector3i(2, 7, 10), "boxes": [
-		_b(0, 4, 0, 2, 7, 10, C.GUN),
-		_b(0, 3, 1, 2, 4, 9, C.GUN_LIGHT),
-		_b(0, 0, 6, 2, 4, 9, C.GUN_LIGHT),
-		_b(0, 2, 4, 2, 3, 6, C.GUN),
+	return {"size": Vector3i(2, 7, 10), "sub": 4, "boxes": [
+		_fb(0.15, 4.6, 0, 1.85, 6.8, 10, C.GUN),             # slide
+		_fb(0.4, 6.8, 0.3, 1.6, 7.0, 0.8, C.GUN),            # front sight
+		_fb(0.3, 6.8, 8.8, 1.7, 7.0, 9.4, C.GUN),            # rear sight
+		_fb(0.2, 3.6, 0.6, 1.8, 4.6, 9.2, C.GUN_LIGHT),      # frame
+		_fb(0.2, 2.4, 6.0, 1.8, 3.6, 9.2, C.GUN_LIGHT),      # grip, raked back
+		_fb(0.2, 1.2, 6.4, 1.8, 2.4, 9.5, C.GUN_LIGHT),
+		_fb(0.2, 0.0, 6.8, 1.8, 1.2, 9.8, C.GUN_LIGHT),
+		_fb(0.75, 2.6, 4.2, 1.25, 3.6, 4.5, C.GUN),          # trigger guard
+		_fb(0.75, 2.6, 4.2, 1.25, 2.9, 6.0, C.GUN),
 	]}
+
+
+## A box of `size` metres in 0.5 cm voxels (FINE_VOXEL) with its edges bevelled (1 cm,
+## less on thin boxes), in one colour: pouches and small gear. The mesh's origin is the
+## box's corner; fine_dims gives its size in voxels.
+static func bevel_box_mesh(size: Vector3, colour: Color) -> Mesh:
+	var dims := fine_dims(size)
+	var key := "%s|%s" % [dims, colour.to_html()]
+	if _box_meshes.has(key):
+		return _box_meshes[key]
+	var b := mini(2, mini(dims.x, mini(dims.y, dims.z)) / 3)
+	var buffer := VoxelBuffer.new()
+	buffer.set_channel_depth(VoxelBuffer.CHANNEL_COLOR, VoxelBuffer.DEPTH_8_BIT)
+	buffer.create(dims.x + 2, dims.y + 2, dims.z + 2)
+	buffer.fill(0, VoxelBuffer.CHANNEL_COLOR)
+	for x in dims.x:
+		var ex := mini(x, dims.x - 1 - x)
+		for y in dims.y:
+			var ey := mini(y, dims.y - 1 - y)
+			for z in dims.z:
+				var ez := mini(z, dims.z - 1 - z)
+				if ex + ey < b or ex + ez < b or ey + ez < b:
+					continue
+				buffer.set_voxel(1, x + 1, y + 1, z + 1, VoxelBuffer.CHANNEL_COLOR)
+	var ckey := colour.to_html()
+	if not _colour_meshers.has(ckey):
+		var palette := VoxelColorPalette.new()
+		palette.set_color(0, Color(0, 0, 0, 0))
+		palette.set_color(1, colour)
+		var mesher := VoxelMesherCubes.new()
+		mesher.palette = palette
+		mesher.color_mode = VoxelMesherCubes.COLOR_MESHER_PALETTE
+		_colour_meshers[ckey] = mesher
+	var mesh: Mesh = _colour_meshers[ckey].build_mesh(buffer, [])
+	_box_meshes[key] = mesh
+	return mesh
+
+
+static func fine_dims(size: Vector3) -> Vector3i:
+	return Vector3i(maxi(1, roundi(size.x / FINE_VOXEL)), maxi(1, roundi(size.y / FINE_VOXEL)), maxi(1, roundi(size.z / FINE_VOXEL)))

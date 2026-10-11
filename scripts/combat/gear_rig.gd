@@ -58,7 +58,6 @@ var _grab_at := -1.0             # _clock when a weapon being drawn reaches the 
 var _pouches: Node3D             # MOLLE attachments on the carrier
 var _pouch_key := ""             # what _pouches shows
 
-static var _pouch_materials: Dictionary = {}  # colour -> StandardMaterial3D
 
 
 func _ready() -> void:
@@ -229,18 +228,11 @@ static func pouch_node(item: ItemData, colour: Color, full: bool, layers := 1) -
 
 
 static func _part_box(size: Vector3, pos: Vector3, colour: Color, layers: int) -> MeshInstance3D:
-	var mesh_instance := MeshInstance3D.new()
-	var box := BoxMesh.new()
-	box.size = size
-	var key := colour.to_html()
-	if not _pouch_materials.has(key):
-		var material := StandardMaterial3D.new()
-		material.albedo_color = colour
-		material.roughness = 0.95
-		_pouch_materials[key] = material
-	box.material = _pouch_materials[key]
-	mesh_instance.mesh = box
-	mesh_instance.position = pos
+	var mesh_instance := MeshInstance3D.new()  # a bevelled box in 0.5 cm voxels, centred on `pos`
+	mesh_instance.mesh = VoxelArt.bevel_box_mesh(size, colour)
+	mesh_instance.material_override = VoxelArt._get_material()
+	mesh_instance.scale = Vector3.ONE * VoxelArt.FINE_VOXEL
+	mesh_instance.position = pos - Vector3(VoxelArt.fine_dims(size)) * VoxelArt.FINE_VOXEL * 0.5
 	mesh_instance.layers = layers
 	return mesh_instance
 
