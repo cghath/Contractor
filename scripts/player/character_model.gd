@@ -188,6 +188,9 @@ const VIEW_LOWER_PITCH := 0.9
 
 ## Colour scheme from VoxelArt.VARIANTS. Set before the node enters the tree.
 @export var variant := "multicam"
+## Body type (VoxelArt.BODIES): "male" or "female". Both share the joints, so poses,
+## gear and hitboxes are the same. Set before the node enters the tree.
+@export_enum("male", "female") var body := "male"
 @export_flags_3d_render var render_layers := 1:
 	set(value):
 		render_layers = value
@@ -675,7 +678,7 @@ static func _model_of(body: Node) -> CharacterModel:
 
 
 func _part(model: String, parent: Node3D, pivot: Vector3) -> Node3D:
-	var node := VoxelArt.instance(model, variant, render_layers)
+	var node := VoxelArt.instance(VoxelArt.body_part(model, body), variant, render_layers)
 	node.position = pivot
 	parent.add_child(node)
 	return node

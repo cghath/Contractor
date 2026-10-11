@@ -80,6 +80,8 @@ var _load_run := 0
 @export var faction := &"friendly"
 ## Camo for AI bodies (players get theirs from the peer id). Set before entering the tree.
 @export var variant := ""
+## Body type for this soldier's model (VoxelArt.BODIES; "" is male). Set before entering the tree.
+@export var body := ""
 ## AI intent, written by SquadAI on the host each physics frame. move_input is like
 ## Input.get_vector: x strafes right, y < 0 moves forward, in the body's own frame.
 var move_input := Vector2.ZERO
@@ -138,6 +140,7 @@ func _enter_tree() -> void:
 		$Model.variant = variant if variant != "" else "woodland"
 	else:
 		$Model.variant = PLAYER_VARIANTS[absi(name.to_int() - 1) % PLAYER_VARIANTS.size()]  # host gets the first
+	$Model.body = body if body != "" else VoxelArt.MALE
 
 
 ## Human bodies are named after their peer id; AI bodies have any other name.
@@ -1194,7 +1197,7 @@ func server_leave_body() -> Soldier:
 func body_record() -> Dictionary:
 	var p := global_position
 	return {"uid": body_uid if body_uid != "" else GameState.new_uid(), "label": display_name(), "faction": String(faction),
-		"variant": model.variant, "role": String(role), "pos": [p.x, p.y, p.z], "rot_y": rotation.y,
+		"variant": model.variant, "body": model.body, "role": String(role), "pos": [p.x, p.y, p.z], "rot_y": rotation.y,
 		"age_s": maxf(_now() - died_at, 0.0) if died_at >= 0.0 else 0.0, "marker": has_gear_marker,
 		"gear": inventory.net_state.duplicate(true)}
 

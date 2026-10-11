@@ -228,6 +228,7 @@ func _make_body(data: Dictionary) -> Node:
 	corpse.name = data.name
 	corpse.faction = StringName(data.get("faction", "friendly"))
 	corpse.variant = String(data.get("variant", "woodland"))
+	corpse.body = String(data.get("body", ""))
 	var p: Array = data.get("pos", [0.0, 0.1, 0.0])
 	corpse.position = Vector3(float(p[0]), float(p[1]), float(p[2]))
 	corpse.rotation.y = float(data.get("rot_y", 0.0))
@@ -478,7 +479,7 @@ func _spawn_squadmate(slot: int, role: StringName, team: int) -> Soldier:
 		"role": String(role), "team": team, "slot": slot, "combat": 0.5 + 0.03 * (slot % 5), "discipline": 0.6, "guard": false})
 
 
-## Host only. `data`: name, faction, variant, pos, loadout, AI stats combat, discipline,
+## Host only. `data`: name, faction, variant, optionally body (VoxelArt.BODIES), pos, loadout, AI stats combat, discipline,
 ## guard, and optionally role (its kit is added to the loadout), team, slot and mode
 ## (a Squad.COMBAT_MODES name).
 func spawn_soldier(data: Dictionary) -> Soldier:
@@ -490,6 +491,7 @@ func _make_soldier(data: Dictionary) -> Node:
 	soldier.name = data.name
 	soldier.faction = StringName(data.faction)
 	soldier.variant = data.variant
+	soldier.body = String(data.get("body", ""))
 	soldier.position = data.pos
 	soldier.role = StringName(data.get("role", ""))
 	soldier.fire_team = int(data.get("team", -1))

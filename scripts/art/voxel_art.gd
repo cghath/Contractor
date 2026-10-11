@@ -11,10 +11,18 @@ const VOXEL_SIZE := 0.02
 ## Fine gear (pouches, weapons, packs) and the body are built at 0.5 cm.
 const FINE_VOXEL := 0.005
 
+## Body types (CharacterModel.body). "male" is the default; a female soldier's parts are
+## the same names with FEMALE_SUFFIX added ("torso_f", "head_f", ...), built on the same joints
+## and pivots, so animations, plates, carriers, helmets and held weapons fit either.
+const MALE := "male"
+const FEMALE := "female"
+const BODIES: Array[String] = [MALE, FEMALE]
+const FEMALE_SUFFIX := "_f"
+
 enum C {
 	EMPTY, CAMO, CAMO_A, CAMO_B, CAMO_C, CAMO_D, SKIN, SKIN_SHADE, HAIR, EYE, MOUTH,
 	BOOT, SOLE, GLOVE, BELT, METAL, PAD, PATCH, GEAR, GEAR_DARK, PACK, PACK_DARK,
-	GUN, GUN_LIGHT, LENS,
+	GUN, GUN_LIGHT, LENS, LIP, LIP_SHADE,
 }
 
 const VARIANTS := {
@@ -54,7 +62,7 @@ static var _colour_meshers: Dictionary = {}  # colour -> VoxelMesherCubes
 static func instance(model: String, variant: String, layers := 1) -> Node3D:
 	var spec := _spec(model)
 	var pivot := Node3D.new()
-	pivot.name = model.get_slice(":", 0)
+	pivot.name = model.get_slice(":", 0).trim_suffix(FEMALE_SUFFIX)  # "torso_f" is still the torso
 	var mesh_instance := MeshInstance3D.new()
 	mesh_instance.mesh = mesh(model, variant)
 	mesh_instance.material_override = _get_material()
@@ -64,6 +72,12 @@ static func instance(model: String, variant: String, layers := 1) -> Node3D:
 	mesh_instance.position = -spec.get("pivot", Vector3(spec.size) * 0.5) * voxel
 	pivot.add_child(mesh_instance)
 	return pivot
+
+
+## The model name of body part `part` ("head", "torso", "upper_arm", "forearm", "leg",
+## "thigh", "shin") for a body type (BODIES; anything else builds the male part).
+static func body_part(part: String, body: String) -> String:
+	return part + FEMALE_SUFFIX if body == FEMALE else part
 
 
 static func size_m(model: String) -> Vector3:
@@ -310,6 +324,7 @@ static func _get_mesher(variant: String) -> VoxelMesherCubes:
 			C.GEAR: Color(v.gear), C.GEAR_DARK: Color(v.gear).darkened(0.25),
 			C.PACK: Color(v.pack), C.PACK_DARK: Color(v.pack).darkened(0.25),
 			C.GUN: Color("262626"), C.GUN_LIGHT: Color("3b3b37"), C.LENS: Color("3a6f8f"),
+			C.LIP: skin.lerp(Color("9a4a44"), 0.3).darkened(0.12), C.LIP_SHADE: skin.lerp(Color("9a4a44"), 0.2),
 		}
 		var palette := VoxelColorPalette.new()
 		for index: int in colours:
@@ -346,6 +361,13 @@ static func _spec(model: String) -> Dictionary:
 		"backpack": return _backpack(arg)
 		"rifle": return _rifle(arg)
 		"pistol": return _pistol()
+		"head_f": return _head_f()
+		"torso_f": return _torso_f()
+		"upper_arm_f": return _upper_arm_f()
+		"forearm_f": return _forearm_f()
+		"leg_f": return _leg_f()
+		"thigh_f": return _thigh_f()
+		"shin_f": return _shin_f()
 	push_error("VoxelArt: unknown model '%s'" % model)
 	return {"size": Vector3i.ONE, "boxes": []}
 
@@ -386,8 +408,9 @@ static func _shifted(parts: Array, dy: int) -> Array:
 			out.append(moved)
 		else:
 			var box: Array = part.duplicate()
-			box[0] = box[0] + Vector3i(0, dy, 0)
-			box[1] = box[1] + Vector3i(0, dy, 0)
+			var up: Variant = Vector3(0, dy, 0) if box[0] is Vector3 else Vector3i(0, dy, 0)  # _fb, _fp: fractional
+			box[0] = box[0] + up
+			box[1] = box[1] + up
 			out.append(box)
 	return out
 
@@ -483,6 +506,114 @@ static func _shin_parts() -> Array:
 		_loft(7, 10, [[12, 4.0, 4.5], [32, 5.4, 6.0], [46, 5.0, 5.5]], C.CAMO, 0.55),
 		_b(2, 36, 3, 12, 46, 6, C.PAD),  # knee pad
 		_loft(7, 9.5, [[0, 5.2, 8.5], [4, 5.2, 8.5], [10, 4.6, 6.5], [15, 4.3, 5.0]], C.BOOT, 0.35),
+		_p(0, 0, 0, 14, 2, 18, C.SOLE),
+	]
+
+
+# --- Female body (body_part(..., FEMALE)) -------------------------------------------
+# The same frames, joints and pivots as the male parts above, shaped within them: a smaller
+# head with a softer, longer jaw and the hair in a low bun under the helmet's rim; narrower
+# shoulders and slimmer deltoids and arms; a narrower waist over wider hips; a modest chest
+# that stays inside the plate carrier's pockets (no deeper at the front than the male chest,
+# 0.11 m, where the plates sit); slimmer thighs and calves, smaller hands and boots.
+
+
+## A paint box (_p) with fractional corners, in the spec's voxels (built at its "sub").
+static func _fp(x0: float, y0: float, z0: float, x1: float, y1: float, z1: float, colour: int) -> Array:
+	return [Vector3(x0, y0, z0), Vector3(x1, y1, z1), colour, true]
+
+
+## 0.20 x 0.29 x 0.22 m head on the male head's pivot (base of the neck), with a low bun
+## behind (the frame runs 6 cm deeper for it). The jaw is a longer 45-degree chamfer to a
+## narrower chin; the face above it is straight up, as on the male head. The bun sits below
+## the helmet's rim (head y 0.20), so every helmet still fits over the head.
+static func _head_f() -> Dictionary:
+	var boxes := [
+		_loft(11, 12, [[0, 4.0, 4.0], [8, 4.4, 4.4]], C.SKIN_SHADE, 0.8),  # neck
+		_loft(11, 12, [[6, 7.0, 8.0], [9, 10.0, 11.0], [27, 10.0, 11.0], [29, 8.0, 9.0]], C.SKIN, 0.55),
+		_loft(11, 25, [[11, 2.5, 2.0], [13, 3.5, 3.0], [17, 3.5, 3.0], [19, 2.5, 2.0]], C.HAIR, 0.6),  # bun
+		_p(0, 25, 0, 22, 30, 30, C.HAIR),   # cap, the hairline a little lower than the male's
+		_p(0, 9, 17, 22, 30, 30, C.HAIR),   # back, down to the nape, pulled back to the bun
+		_p(0, 19, 9, 22, 30, 30, C.HAIR),   # above the ears
+		_fp(7, 14.5, 23.5, 15, 15.5, 30, C.PAD),  # hair tie
+		_fb(0.5, 14, 10.5, 1, 18, 14, C.SKIN_SHADE), _fb(21, 14, 10.5, 21.5, 18, 14, C.SKIN_SHADE),  # ears
+		_fp(6.5, 17, 0, 8.5, 19.5, 3, C.EYE), _fp(13.5, 17, 0, 15.5, 19.5, 3, C.EYE),
+		_fp(6, 19, 0, 7, 19.5, 3, C.EYE), _fp(15, 19, 0, 16, 19.5, 3, C.EYE),  # lashes, at the outer corners
+		_fp(6, 21, 0, 8.5, 21.5, 3, C.HAIR), _fp(13.5, 21, 0, 16, 21.5, 3, C.HAIR),  # brows, thin
+		_fp(5.5, 20.5, 0, 6, 21, 3, C.HAIR), _fp(16, 20.5, 0, 16.5, 21, 3, C.HAIR),
+		_fb(10.5, 13.5, 0.5, 11.5, 16.5, 1, C.SKIN_SHADE),  # nose
+		_fp(9, 10.5, 0, 13, 11, 3, C.LIP), _fp(9.5, 10, 0, 12.5, 10.5, 3, C.LIP_SHADE),
+	]
+	return {"size": Vector3i(22, 30, 30), "pivot": Vector3(11, 0, 12), "voxel": BODY_VOXEL, "sub": BODY_SUB, "boxes": boxes}
+
+
+## The male torso's frame and pivot (hips), 0.66 m from the crotch to the base of the neck:
+## hips 0.34 m across (the male's: 0.32) over a 0.27 m waist, a narrower chest, and
+## deltoids flaring at 45 degrees to 0.235 m over the shoulder joints (the male's: 0.26).
+## The chest is a low-poly bevelled shape whose front reaches the male chest's 0.11 m and no
+## further, so every carrier's plate pocket still clears it; the seat is a second shape at
+## the back of the hips (the frame runs 2 cm deeper behind for it).
+static func _torso_f() -> Dictionary:
+	var boxes := [
+		_loft(26, 11, [[0, 14.8, 9.5], [6, 17.0, 10.5], [14, 17.0, 10.5], [26, 13.5, 9.0], [38, 15.5, 9.5],
+			[52, 17.5, 9.5], [57, 22.0, 9.0], [62, 23.5, 9.0], [64, 20.0, 8.0], [66, 9.0, 6.5]], C.CAMO, 0.45),
+		_loft(26, 6, [[38, 11.0, 2.0], [42, 12.5, 6.0], [47, 12.5, 6.0], [53, 10.0, 0.0]], C.CAMO, 0.7),  # chest
+		_loft(26, 14, [[2, 14.0, 5.5], [5, 15.5, 8.5], [14, 15.5, 8.5], [20, 13.0, 2.5]], C.CAMO, 0.6),  # seat
+		_p(0, 14, 0, 52, 20, 24, C.BELT),
+		_p(23, 14, 0, 29, 20, 3, C.METAL),
+		_p(20, 60, 0, 32, 66, 7, C.CAMO_C),  # collar
+	]
+	return {"size": Vector3i(52, 66, 24), "pivot": Vector3(26, 10, 11), "voxel": BODY_VOXEL, "sub": BODY_SUB, "boxes": boxes}
+
+
+## The male upper arm's frame and pivot (shoulder), slimmer: 0.10 m across at the biceps (the male's: 0.112).
+static func _upper_arm_f() -> Dictionary:
+	var boxes := [
+		_loft(6, 6, [[0, 4.0, 4.0], [22, 5.0, 4.9], [28, 4.8, 4.7], [32, 3.4, 3.4]], C.CAMO, 0.6),
+		_fp(0, 14, 2.5, 2.5, 26, 9.5, C.PATCH), _fp(9.5, 14, 2.5, 12, 26, 9.5, C.PATCH),
+	]
+	return {"size": Vector3i(12, 32, 12), "pivot": Vector3(6, 32, 6), "voxel": BODY_VOXEL, "sub": BODY_SUB, "boxes": boxes}
+
+
+## The male forearm's frame and pivot (elbow; palm centre 0.25 m below), slimmer, with a
+## smaller gloved hand.
+static func _forearm_f() -> Dictionary:
+	var boxes := [
+		_loft(5.5, 5.5, [[14, 3.8, 3.8], [32, 4.6, 4.6]], C.CAMO, 0.6),
+		_loft(5.5, 5.5, [[0, 3.2, 2.5], [6, 4.4, 2.9], [11, 3.8, 2.9], [15, 3.7, 3.5]], C.GLOVE, 0.6),
+		_p(0, 14, 0, 11, 17, 11, C.CAMO_A),  # cuff
+	]
+	return {"size": Vector3i(11, 32, 11), "pivot": Vector3(5.5, 32, 5.5), "voxel": BODY_VOXEL, "sub": BODY_SUB, "boxes": boxes}
+
+
+static func _leg_f() -> Dictionary:
+	var boxes := _shin_f_parts()
+	boxes.append_array(_shifted(_thigh_f_parts(), 44))
+	return {"size": Vector3i(14, 90, 18), "pivot": Vector3(7, 90, 10), "voxel": BODY_VOXEL, "sub": BODY_SUB, "boxes": boxes}
+
+
+static func _thigh_f() -> Dictionary:
+	return {"size": Vector3i(14, 46, 18), "pivot": Vector3(7, 46, 10), "voxel": BODY_VOXEL, "sub": BODY_SUB, "boxes": _thigh_f_parts()}
+
+
+static func _shin_f() -> Dictionary:
+	return {"size": Vector3i(14, 46, 18), "pivot": Vector3(7, 46, 10), "voxel": BODY_VOXEL, "sub": BODY_SUB, "boxes": _shin_f_parts()}
+
+
+## Slimmer at the knee, still full at the top (its top 0.10 m is inside the hips).
+static func _thigh_f_parts() -> Array:
+	return [
+		_loft(7, 10, [[0, 4.6, 5.2], [24, 6.2, 6.8], [36, 7.2, 7.3], [46, 7.6, 7.6]], C.CAMO, 0.55),
+		_fb(2.5, 0, 3.5, 11.5, 4, 6, C.PAD),  # top of the knee pad
+		_fp(0, 12, 6.5, 2.5, 26, 13.5, C.CAMO_C), _fp(11.5, 12, 6.5, 14, 26, 13.5, C.CAMO_C),  # cargo pockets
+	]
+
+
+static func _shin_f_parts() -> Array:
+	return [
+		_loft(7, 10, [[12, 3.7, 4.2], [32, 5.0, 5.4], [46, 4.6, 5.2]], C.CAMO, 0.55),
+		_fb(2.5, 36, 3.5, 11.5, 46, 6, C.PAD),  # knee pad
+		_loft(7, 9.5, [[0, 4.9, 8.2], [4, 4.9, 8.2], [10, 4.3, 6.2], [15, 4.0, 4.8]], C.BOOT, 0.35),
 		_p(0, 0, 0, 14, 2, 18, C.SOLE),
 	]
 

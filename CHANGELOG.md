@@ -11,6 +11,25 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Female soldier model, first attempt (Captain, 2026-10-11)
+
+#### Added
+
+- **A female body for soldiers** (`scripts/art/voxel_art.gd`, `_head_f`, `_torso_f`,
+  `_upper_arm_f`, `_forearm_f`, `_leg_f`, `_thigh_f`, `_shin_f`): the same Stormworks
+  low-poly style, on the same joints and pivots as the male parts, so animations, plates,
+  carriers, helmets, pouches and held weapons fit unchanged. Narrower shoulders and slimmer
+  deltoids and arms, a narrower waist over wider hips with a seat, a modest chest that stays
+  inside the carriers' plate pockets, slimmer legs, smaller hands and boots, and a smaller
+  head with a softer jaw, thin brows, lashes, lips and the hair in a low bun under the
+  helmet's rim.
+- **Choosing the body:** `CharacterModel.body` ("male", the default, or "female"),
+  `Soldier.body`, and an optional `"body"` in `CompoundLevel.spawn_soldier` data (it rides
+  the spawn data, so every peer builds the same body). `Soldier.body_record` saves it, so a
+  dead soldier's body keeps it. `VoxelArt.body_part(part, body)` names the model
+  ("torso" or "torso_f"). Nothing picks the female body yet: no menu option and no AI mix.
+  Male models are unchanged, byte for byte.
+
 ### Stormworks-style character models (Captain, 2026-10-11)
 
 #### Changed
