@@ -174,6 +174,7 @@ func _ready() -> void:
 	callouts = Callouts.new()
 	callouts.name = "Callouts"
 	add_child(callouts)
+	MapNodes.install(self)  # W13: map markers, briefing, extraction, reinforcement timer
 	_build_environment()
 	_build_structures()
 	Net.hosted.connect(_on_hosted)
@@ -187,9 +188,10 @@ func _ready() -> void:
 ## The playable area on the map, in metres on the ground plane (x along x, y along z): the
 ## map and its grid cover this (wave 4 interface; a world-scale zone level provides the same).
 func map_area() -> Rect2:
-	var b := VoxelWorld.BOUNDS
-	var s := VoxelWorld.VOXEL_SIZE
-	return Rect2(b.position.x * s, b.position.z * s, b.size.x * s, b.size.z * s)
+	# W13: the ground the squad and the AI move on (the navigation area, 108 m square), not
+	# just the voxel bounds (44 m): the gate, the spawn and the fields around are on the map.
+	var b := NavBuilder.AREA
+	return Rect2(b.position.x, b.position.z, b.size.x, b.size.z)
 
 
 func next_spawn_point() -> Vector3:
