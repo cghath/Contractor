@@ -30,10 +30,6 @@ const PLATE_HEIGHT := 0.33
 const SIDE_PLATE_HEIGHT := 0.28
 ## Where a helmet's pivot (the centre of its dome base) sits, head-local.
 const HELMET_POSITION := Vector3(0, 0.2, 0)
-## A female soldier's carrier (and the plates, pouches, name tape, slung rifle and pack on it)
-## rides this much further forward on her torso, over her bust (VoxelArt._torso_f), as a plate
-## carrier sits on a real woman; her back is slimmer, so the back panel still lies against it.
-const FEMALE_CARRIER_FORWARD := 0.03
 ## A tourniquet's band and the red of medical pull tabs, as drawn on the carrier.
 const TQ_BAND := Color("1b1b1a")
 const MED_RED := Color("b3261e")
@@ -175,14 +171,14 @@ func _rebuild() -> void:
 		if piece:
 			piece.transform = armor_transform(slot, carrier)
 			if slot != &"helmet":
-				piece.transform = piece.transform.translated(carrier_shift())
+				piece.transform = piece.transform.translated(carrier_offset(String(slot).trim_prefix("plate_")))
 			if slot != &"helmet":  # a plate sits inside the carrier's pocket, under its fabric
 				piece.set_cover(Color(VoxelArt.VARIANTS.get(model.variant, VoxelArt.VARIANTS.multicam).gear) if carrier else Color(0, 0, 0, 0))
 	for slot: StringName in MOUNTS:
 		_set_gear(slot, inventory.slots[slot], &"torso", rest_transform(slot))
 	var pack: StringName = inventory.slots[&"backpack"]
 	var pack_depth := VoxelArt.size_m(VoxelArt.model_for(ItemDB.get_item(pack))).z if pack != &"" else 0.0
-	_set_gear(&"backpack", pack, &"torso", Transform3D(Basis.IDENTITY, Vector3(0, 0.3, 0.165 + pack_depth * 0.5) + carrier_shift()))
+	_set_gear(&"backpack", pack, &"torso", Transform3D(Basis.IDENTITY, Vector3(0, 0.3, 0.165 + pack_depth * 0.5) + carrier_offset("back")))
 	var held := inventory.hands
 	var held_size := WorldItem.visual_size(ItemDB.get_item(held)) if held != &"" else Vector3.ZERO
 	_set_gear(&"hands", held, &"torso", Transform3D(Basis.IDENTITY, Vector3(0, 0.15, -0.15 - held_size.z * 0.5)))
@@ -218,7 +214,7 @@ func _set_pouches() -> void:
 		if att.is_empty():
 			continue
 		var node := pouch_node(ItemDB.get_item(StringName(att.id)), gear, not att.get("held", []).is_empty(), render_layers)
-		node.transform = point_transform(p, WorldItem.visual_size(ItemDB.get_item(StringName(att.id)))).translated(carrier_shift())
+		node.transform = point_transform(p, WorldItem.visual_size(ItemDB.get_item(StringName(att.id)))).translated(carrier_offset(String(p.get("face", "front"))))
 		_pouches.add_child(node)
 
 
@@ -238,7 +234,7 @@ func _set_name_tape(carrier: ItemData) -> void:
 	var front := float(carrier.stats.get("plate_depth", 0.14)) + 0.03  # the pocket's face
 	_tape = Node3D.new()
 	_tape.name = "NameTape"
-	_tape.position = Vector3(0, 0.17 + 0.265, -front) + carrier_shift()  # the loop panel
+	_tape.position = Vector3(0, 0.17 + 0.265, -front) + carrier_offset("front")  # the loop panel
 	model.torso.add_child(_tape)
 	_tape.add_child(_part_box(TAPE_SIZE, Vector3(0, 0, -TAPE_SIZE.z * 0.5), TAPE_CLOTH, render_layers))
 	var letters := Label3D.new()
@@ -267,15 +263,15 @@ func _set_pack_straps(pack: StringName) -> void:
 		return
 	_straps = Node3D.new()
 	_straps.name = "PackStraps"
-	_straps.position = carrier_shift()  # the pack and the carrier it runs over
 	model.torso.add_child(_straps)
 	var colour := Color(VoxelArt.VARIANTS.get(model.variant, VoxelArt.VARIANTS.multicam).gear).darkened(0.3)
 	for s: float in [-1.0, 1.0]:
 		var path: Array[Vector3] = [Vector3(0.12, 0.5, 0.17), Vector3(0.13, 0.585, 0.06), Vector3(0.13, 0.595, -0.06),
 			Vector3(0.155, 0.5, -0.17), Vector3(0.155, 0.34, -0.16)]
+		path.assign(path.map(_on_panels))
 		for i in path.size() - 1:
 			_straps.add_child(_strap(path[i] * Vector3(s, 1, 1), path[i + 1] * Vector3(s, 1, 1), 0.045, 0.015, colour))
-	_straps.add_child(_strap(Vector3(-0.155, 0.355, -0.215), Vector3(0.155, 0.355, -0.215), 0.02, 0.008, colour))  # sternum strap
+	_straps.add_child(_strap(_on_panels(Vector3(-0.155, 0.355, -0.215)), _on_panels(Vector3(0.155, 0.355, -0.215)), 0.02, 0.008, colour))  # sternum strap
 
 
 ## A strap of `width` and `thick` from `a` to `b` (torso-local), lying flat on the body: its
@@ -422,9 +418,25 @@ func _rest_grip(key: StringName) -> Vector3:
 	return rest_transform(key) * grip
 
 
-## How far this body's carrier rides forward of the male fit (FEMALE_CARRIER_FORWARD), torso-local.
-func carrier_shift() -> Vector3:
-	return Vector3(0, 0, -FEMALE_CARRIER_FORWARD) if model.body == VoxelArt.FEMALE else Vector3.ZERO
+## How far this body's carrier panel `face` ("front", "back", "left", "right") sits from the
+## male fit, torso-local: on a woman the fitted carrier (VoxelArt.fitted, "vest_f") rides out
+## over her bust at the front and in at her back and sides, and what is on a panel (plates,
+## pouches, name tape, sling, pack) goes with it.
+func carrier_offset(face: String) -> Vector3:
+	if model.body != VoxelArt.FEMALE:
+		return Vector3.ZERO
+	match face:
+		"front": return Vector3(0, 0, -VoxelArt.FEMALE_CARRIER_FRONT * 0.01)
+		"back": return Vector3(0, 0, -VoxelArt.FEMALE_CARRIER_BACK * 0.01)
+		"left": return Vector3(VoxelArt.FEMALE_CARRIER_SIDE * 0.01, 0, 0)
+		"right": return Vector3(-VoxelArt.FEMALE_CARRIER_SIDE * 0.01, 0, 0)
+	return Vector3.ZERO
+
+
+## A torso-local point on the carrier or pack, moved with its panel (carrier_offset): behind
+## the shoulders with the back, in front with the front.
+func _on_panels(p: Vector3) -> Vector3:
+	return p + (carrier_offset("back") if p.z > 0.1 else carrier_offset("front") if p.z < -0.1 else Vector3.ZERO)
 
 
 ## Where `slot`'s item rests on the torso (MOUNTS), mirrored for a left-handed shooter.
@@ -432,9 +444,9 @@ func rest_transform(slot: StringName) -> Transform3D:
 	var s := -1.0 if model.left_handed else 1.0
 	match slot:
 		&"vest":
-			return Transform3D(Basis.IDENTITY, Vector3(0, 0.17, 0) + carrier_shift())  # vest pivots sit at the cummerbund
+			return Transform3D(Basis.IDENTITY, Vector3(0, 0.17, 0))  # vest pivots sit at the cummerbund
 		&"primary":
-			var centre := SLING_CENTRE * Vector3(s, 1, 1) + carrier_shift()
+			var centre := SLING_CENTRE * Vector3(s, 1, 1) + carrier_offset("front")
 			var dir := SLING_DIR * Vector3(s, 1, 1)
 			# On its side: the top (optic) towards the support shoulder, across the sling line.
 			return Transform3D(Basis.looking_at(dir, Vector3(-0.866 * s, 0.5, 0.0)), centre)
@@ -491,7 +503,7 @@ func _set_gear(key: StringName, id: StringName, mount: StringName, at: Transform
 	if id == &"":
 		return
 	var item := ItemDB.get_item(id)
-	var art := VoxelArt.model_for(item)
+	var art := VoxelArt.fitted(VoxelArt.model_for(item), model.body)
 	var node: Node3D = VoxelArt.instance(art, model.variant, render_layers) if art != "" else _box(item)
 	node.transform = at
 	(model.head if mount == &"head" else model.torso).add_child(node)

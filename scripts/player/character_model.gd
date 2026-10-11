@@ -23,11 +23,11 @@ const HEAD_PIVOT := Vector3(0, 0.56, 0)          # relative to torso
 const SHOULDER := Vector3(0.25, 0.52, 0)         # relative to torso, mirrored for the left
 ## A female soldier (body "female"), loosely after real averages (US adults: men about 175 cm,
 ## women about 162 cm): drawn at this scale, about 1.68 m to the male model's 1.80 m, with her
-## own shoulder joints (torso-local, before scaling, mirrored for the left): in to 0.21 m (the
+## own shoulder joints (torso-local, before scaling, mirrored for the left): in to 0.20 m (the
 ## male 0.25), where her arms hang against her ribcage without passing into it, and 1.5 cm
 ## lower, so her shoulder line slopes down from the neck instead of the male square shelf.
 const FEMALE_SCALE := 0.93
-const FEMALE_SHOULDER := Vector3(0.21, 0.505, 0)
+const FEMALE_SHOULDER := Vector3(0.20, 0.505, 0)
 const HIP := Vector3(0.075, 0.9, 0)              # mirrored for the left
 ## Held weapons pivot here (torso-local) when aiming up or down: about shoulder height.
 const HANDS_ANCHOR := Vector3(0, 0.5, 0)

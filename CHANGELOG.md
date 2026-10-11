@@ -43,16 +43,21 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 #### Changed
 
 - **Her own shoulders** (Captain: "their own proper shoulder value"): `CharacterModel.FEMALE_SHOULDER`
-  (0.21 m out, 1.5 cm lower than his 0.25 m, replacing `FEMALE_SHOULDER_X` 0.225 m) and
-  `CharacterModel.shoulder_of(body)`. Her arms hang against a slightly narrower ribcage
-  without passing into it; rounded deltoids cap the joint and the shoulder line slopes down
-  from the neck instead of the male square shelf. The kneel/reach solver (`reach_pose`) uses
-  her shoulder too.
-- **Her chest higher and fuller** (Captain: "too low and too small"): two low-poly lobes high
-  on the chest, 0.135 m in front of the spine (the male chest: 0.11 m). Her carrier rides
-  `GearRig.FEMALE_CARRIER_FORWARD` (3 cm) further forward, as on a real woman, with its plates,
-  pouches, name tape, slung rifle, pack and pack straps (`GearRig.carrier_shift`); her back is
-  slimmer, so the back panel still lies against it.
+  (0.20 m out, 1.5 cm lower than his 0.25 m, replacing `FEMALE_SHOULDER_X` 0.225 m) and
+  `CharacterModel.shoulder_of(body)`. Her arms hang against a narrower ribcage without
+  passing into it; rounded deltoids cap the joint and the shoulder line slopes down from the
+  neck instead of the male square shelf. The kneel/reach solver (`reach_pose`) uses her
+  shoulder too.
+- **Her chest higher and fuller** (Captain: "too low and too small", then bigger still): two
+  low-poly lobes high on the chest, 0.15 m in front of the spine (the male chest: 0.11 m).
+- **Carriers fitted to her** (Captain: "make carrier fit more like they do irl, they are
+  flexible-ish"): she wears `VoxelArt._vest(tier, true)` ("vest_f:<tier>", `VoxelArt.fitted`):
+  the front panel rides `FEMALE_CARRIER_FRONT` (5 cm) further out over her bust, the back panel
+  sits `FEMALE_CARRIER_BACK` (2 cm) further in against her slimmer back, and the cummerbund
+  and side plate pockets `FEMALE_CARRIER_SIDE` (3 cm) further in at her sides; the shoulder pads
+  span the new depth. What sits on a panel goes with it (`GearRig.carrier_offset(face)`): the
+  plates, the MOLLE pouches by their face, the name tape and slung rifle (front), the pack
+  and the pack straps (back and front). Male carriers are unchanged, byte for byte.
 - **Medical voxel wounds on her body:** `BodyVolume.pivot_at(part, body)` puts her arm shapes
   at her shoulders (hits were judged, and blood drawn, 2.5 cm off at the male joint); the
   host builds both bodies' shapes at start (`BodyVolume.warm(["", "female"])`). Wounds test:
