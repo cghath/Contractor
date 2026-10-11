@@ -19,7 +19,7 @@ date), as with wave 3, so both sides never build the same thing twice.**
 | 0 Prep, 1 Phase 3 core, 2 Phase 3 finish | Done, on `dev` | Playtest fixes from Captain's two playtests are in |
 | 3 Medical depth | Done by Captain's side | cghath's own wave 3 was dropped (kept on a local branch only); its extras are listed under Backlog |
 | 4A Mission loop, first half | Done, on `dev` | World scale, contracts and economy, people, base hub and roster, map/briefing/extraction, one join handshake |
-| **4B** Wire the loop, hot zone | **Next** | [wave4b_handoff.md](wave4b_handoff.md) |
+| **4B** Wire the loop, hot zone | **In progress, Captain's side**: part 1 (loop wiring) done | [wave4b_handoff.md](wave4b_handoff.md) |
 | 5 Vehicles and supports | Planned below | Leaves out AH-1Z, MRAPs, Bradley, Abrams until Captain says who fields them |
 | 6 Factions | **Blocked on Captain** | Needs the decisions listed below |
 | 7 Art, world and weapons | Systems half planned below | Art waits for Captain's asset scripts; Stormworks-style characters in progress on Captain's side |
@@ -133,6 +133,7 @@ V2 can run beside V1.
 | S2 | **NVGs and lights** | NVGs as helmet-mounted gear: flip up or down, green image with grain, a battery, a gen/FOV value proposed. IR lasers and illuminators visible only through NVGs. Weapon lights and visible lasers that the AI can see |
 | S3 | **Weapon attachments** | Optics (red dot, magnified with a zoom), lights, lasers (visible and IR), suppressors (sound and AI hearing range, flash), grips (recoil, sway). Attachments live in the weapon's item state like its magazine, so they travel with it, save and replicate. Attach and detach in the inventory screen, using Captain's MOLLE-style attach points as the pattern |
 | S4 | **Assists and controller** | Optional, off by default, host-set for co-op newcomers: aim slowdown, wound hints, objective markers, a simpler interaction menu. A full gamepad layout for every control, with radial menus on the sticks |
+| S5 | **Voxel smoke (CS2-style)** | Captain, 2026-10-11: on the roadmap, "we'll tackle it when it's time". Smoke as a volume on a coarse voxel grid over the world: it spreads from the grenade cell by cell, flows through doors and windows, stops at walls and fills rooms, drifts with the wind and thins out. What a player sees and what blocks AI line of sight follow the real cloud (today: round puff clouds, `SmokeCloud.blocks` a sphere). Blasts push holes in it that refill; gunfire may part it briefly. Replicated as a seed and its events, so late joiners rebuild the same cloud. Coloured smokes keep their colour for the helicopter supports |
 
 ## Wave 8: player-built faction (design only)
 

@@ -11,6 +11,19 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Net test smoke check and the voxel smoke roadmap (Captain's side, 2026-10-11)
+
+#### Fixed
+
+- **Net test:** the purple smoke the host throws before the client joins now starts
+  `SMOKE_AGE_S` (3 s) old and the client checks its copy is at least that old. It used to
+  check for over 2 s and failed whenever the client joined quickly (1.6 s), though the copy
+  was right.
+
+#### Changed
+
+- `docs/ChrisPlan_handoff.md`: CS2-style voxel smoke on the roadmap (wave 7, S5).
+
 ### Wave 4B part 1: the mission loop wired end to end (Captain's side, 2026-10-11)
 
 #### Changed
