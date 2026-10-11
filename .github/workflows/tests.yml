@@ -17,6 +17,17 @@ env:
   GODOT_ZIP: godot.linuxbsd.editor.x86_64.zip
 
 jobs:
+  # The runner itself: a fake engine checks that script errors, missing summaries, hangs and a
+  # failed import fail (no Godot needed).
+  runner:
+    name: test runner
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check tools/run_tests.sh
+        run: bash tools/test_runner_check.sh
+
   suite:
     name: ${{ matrix.suite }}
     runs-on: ubuntu-latest
@@ -24,7 +35,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [smoke, gameplay, squad, net, wounds, armor, movement, interaction, roles, medical, logistics, casualty, materials, animations, scavenge]
+        suite: [smoke, gameplay, squad, net, wounds, armor, movement, interaction, roles, medical, logistics, casualty, materials, animations, scavenge, contracts, people, map, base, world]
     steps:
       - uses: actions/checkout@v4
 
@@ -62,7 +73,7 @@ jobs:
         env:
           CONTRACTOR_TEST_TAG: ci-${{ matrix.suite }}-again
         run: |
-          "$GODOT" --headless --path . "res://tests/${{ matrix.suite }}_test.tscn" > /tmp/out.txt 2>&1 || true
+          timeout -k 10 480 "$GODOT" --headless --path . "res://tests/${{ matrix.suite }}_test.tscn" > /tmp/out.txt 2>&1 || true
           tail -n 200 /tmp/out.txt
           grep -E '\[FAIL\]|SCRIPT ERROR|Parse Error|ERROR:|TEST (FAILED|PASSED)' /tmp/out.txt | head -n 10 | while IFS= read -r line; do
             echo "::error title=${{ matrix.suite }}::${line}"

@@ -1,0 +1,21 @@
+{
+	"_note": "Zone definitions (ZoneDef). size_m is the side of the square zone in metres (a multiple of 128); module positions are [x, z] in metres from the centre, snapped to the 12 m navigation grid; insertion and extraction are [x, z] candidates. PLACEHOLDER layout until the mission brainstorm doc and Noah's mission types land.",
+	"zones": {
+		"test": {
+			"name": "Test zone",
+			"size_m": 1920,
+			"seed": 4417,
+			"relief_m": 18,
+			"insertion_kit": true,
+			"modules": [
+				{"id": "compound", "type": "compound", "pos": [0, 0]},
+				{"id": "outpost_n", "type": "outpost", "pos": [288, -420]},
+				{"id": "village_e", "type": "village", "pos": [540, 216]},
+				{"id": "checkpoint_w", "type": "checkpoint", "pos": [-456, 96]},
+				{"id": "outpost_s", "type": "outpost", "pos": [-300, 540]}
+			],
+			"insertion": [[-120, 780], [780, -600]],
+			"extraction": [[-700, -700], [360, 720], [720, -120]]
+		}
+	}
+}

@@ -39,6 +39,96 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   China about 4.5%. Iran (women only in medical posts) and insurgent cells: none in field
   squads. The PMC follows each contractor's nation. A US rifleman is a woman about 5% of the
   time, a US medic about 18%. Russian surnames take the feminine form (Ivanova).
+### A hired squadmate is one person (Captain, 2026-10-11; wave 4B groundwork)
+
+#### Changed
+
+- **Hiring rolls the whole person once:** each contractor on the board has a first name,
+  a surname, a nationality (US, UK or Canada by weight), a shooting hand (11% left) and a body
+  type (`Names.person`), shown on the board and the roster ("Brandon Stewart, CA, right-handed").
+  The roster keeps it, and **every deployment spawns that same person**: their surname on the
+  name tape, their nationality and their hand (`Roster.identity`, merged into the spawn data by
+  `BaseHub.server_spawn_roster_squadmate`). Before, the board's name and the name tape were
+  rolled separately and didn't match. The body type is always male on `dev`; the female-model
+  branch decides it in `Names.body_for`.
+- **No two name tapes in the company match:** a new hire whose surname is taken gets another
+  from their nationality (`Roster.unique_surname`).
+- **Older saves:** a member hired before this keeps their roster name ("Dale Okafor" -> OKAFOR
+  on the tape) and gets a nationality and hand once, seeded by their callsign
+  (`Roster.ensure_identity`).
+- **Bodies keep the person:** a body's record saves and restores the name tape, nationality and
+  hand (`Soldier.body_record`, `CompoundLevel._make_body`).
+- **Tests:** the base suite checks the board, the hire, a clashing surname, an older save, the
+  deployed squad, a fallen squadmate's body and a second deployment.
+### The test runner can't pass a broken suite any more (audit L5-01)
+
+#### Fixed
+
+- **`tools/run_tests.sh`:** a suite passes only if it exits 0, prints its `<NAME> TEST PASSED` line
+  and logs no `SCRIPT ERROR`. Before, a script that failed to compile (a parse error) or crashed
+  mid-test could read as passed, or hang the run forever. Each process now has a timeout
+  (`SUITE_TIMEOUT`, default 480 s) and fails as hung past it; the import must succeed; the net
+  and world hosts are judged too, with their output kept.
+- **`tools/test_runner_check.sh` (new):** checks the runner against a fake engine: a pass
+  passes; a failure, a script error with exit 0, a missing summary, a hang and a failed import
+  fail. CI runs it as its own job, and the rerun-on-failure step has a timeout now.
+### A squadmate that gives up its slot leaves what it was handed (audit L1-03)
+
+#### Fixed
+
+- **Outside the campaign, an AI whose slot a player takes drops what it holds beyond the kit it
+  spawned with:** items players handed it, what it scavenged, an objective item, in a pile at
+  its feet with their state (part-used magazines, damaged armor). Its own kit goes with it, so
+  a join doesn't hand out free gear. Before, it all vanished. (In the campaign a roster member
+  already keeps everything.) Stacks unlike its starting kit go first, so a handed-over
+  7-round magazine is the one left, not one of its own full ones.
+- **Test:** roles suite (salvage and a part-used magazine left behind, no kit items).
+
+### Medical: impact pain is eased by morphine (audit L3-01 check)
+
+#### Added
+
+- **Medical test:** pain from a round stopped by armor (impact, no wound) asks for morphine,
+  a dose eases it well beyond its own fading, no second dose is asked for once there's nothing
+  left to ease, and light impact pain uses none. The audit's finding (a kit used up on impact
+  pain it couldn't treat) was about the old stopgap kit; wave 3's morphine already treats it.
+
+### Late joiners, bad input, reloads, sprinting, fire cadence and the menu (audit L2-01, L2-02, L3-02, L4-02, L6-01, L8-01, L10-01)
+
+#### Fixed
+
+- **Late joiners see smoke already out,** at its age (`CompoundLevel._send_smoke_to`); before,
+  the AI could hide in a cloud they couldn't see.
+- **Late joiners see a carried or dragged body as not solid,** from the replicated carry state.
+- **Bad coordinates are refused:** a shot, throw or squad order from a NaN or infinite point, or
+  with no direction, is turned down before a round or grenade is spent (`Soldier.usable_point`,
+  `usable_direction`); map markers, extraction points and reports check theirs too.
+- **A reload started before dying no longer finishes on the respawn rifle.**
+- **No sprint without room to stand tall:** under a low roof a low stance stays at walking
+  speed and uses no stamina.
+- **Shots bunched by the network still count:** the host's fire gate lets its schedule run up
+  to 0.15 s behind (`Soldier.FIRE_BUNCH_S`), so correctly paced shots aren't dropped under
+  jitter, while a flood still fires at the weapon's rate (2 at once at most after a pause).
+- **Main menu:** centred in the window, and it scrolls in a small window instead of running
+  off it.
+- **Tests:** gameplay (bad input with a control shot, reload across a death, fire cadence),
+  net (smoke and a dragged body for a late joiner), movement (no sprint under a low roof).
+
+### Saves can't lose progress (audit L1-01, L1-05)
+
+#### Fixed
+
+- **Partly taken loot stays partly taken:** taking some of a level-placed stack (no room for the
+  rest) now saves what's left; before, a reload brought back the full stack.
+- **Saves go through a checked temporary file** (`GameState.write_safely`): the zone and the
+  campaign are written to `<save>.tmp`, read back, then swapped in, with the previous save
+  kept as `<save>.bak`. A save that is cut off or unreadable loads its backup instead.
+- **A save is checked before it replaces anything** (`GameState.read_save`): a section of the
+  wrong type refuses the whole save; a single bad record (an unknown item, a position that
+  isn't three finite numbers, a count below 1, a broken body) is skipped with a warning and
+  the rest loads. Before, such a save could leave the host without a player.
+- **Tests:** the gameplay suite checks the partly taken stack across a reload, the backup, the
+  fallback from a cut-off save, bad records and a wrong-typed section.
 
 ### AI soldiers have names, on name tapes (Captain, 2026-10-11)
 
@@ -87,6 +177,27 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   - **Slung:** the rifle hangs diagonally across the front of the carrier, clear of the
     pouches, with the stock under the firing-side armpit and the muzzle at the other thigh.
     Before, it hung straight down beside the arm.
+  - **Bladed stance, no floating shoulder:** holding a rifle at the ready or aiming
+    (standing or crouched), the upper body turns 23 degrees (`CharacterModel.BLADE`, 0.4 rad)
+    about its own up axis, support shoulder forward, as a shooter stands; the head and the
+    weapon turn back by as much, so they still face where the soldier looks. The hitboxes,
+    plates and carrier turn with the body. The support shoulder joint now comes forward only
+    a little, inside the deltoid (`SUPPORT_REACH` 0.04 in, 0.06 forward). Before, it moved
+    14 cm forward and floated in front of the torso. The shoulder pockets turn with the
+    chest, so the stock stays in the shoulder and both hands stay on the weapon. Treating
+    yourself takes the wound from the squared-up body, and no longer turns you towards
+    your own arm.
+  - **Slung rifle lies flat:** on its sling the rifle now lies on its side against the
+    chest, ejection port out and the magazine pointing down towards the firing-side hip,
+    4 cm closer to the carrier. Before, the optic stuck straight out and the magazine
+    pointed into the chest.
+- **Net test:** the remote treatment check waits up to 1 s for the treat animation to
+  replicate (action_net comes on its own sync, after the vitals), instead of checking in the
+  same frame. It failed now and then under load.
+- **Tests after the dev merge:** the people, base and world suites looked soldiers up by
+  callsign where the game now shows the name on the tape (`display_name()`); they pass that
+  name in or read it. The map suite clears the compound's hostiles before its clients join:
+  an unarmoured client shot down while standing about left a body the extraction report counted.
 
 ### Stormworks-style character models (Captain, 2026-10-11)
 
@@ -126,6 +237,70 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
     or on the cummerbund beside the pocket. They used to float 2 to 4 cm off it. The medium
     carrier's TQ holder moved out to the pocket's edge.
 
+### Wave 4A of the build plan: the mission loop, first half (cghath, 2026-10-11)
+
+Five parts built in parallel, ported onto Captain's wave 3, reviewed, and integrated. The loop
+isn't wired end to end yet (wave 4B): each part has its own entry point on the main menu.
+Mission types are placeholders (clear a compound, recover an HVT, retrieve intel, destroy a
+cache) until Captain's mission types land. Values the design doc doesn't fix are "Proposed:".
+
+#### Added
+
+- **World scale.** A contract zone is a seeded 2-4 km2 terrain (rolling hills, haze, distant
+  terrain at lower detail) with hand-built voxel modules placed on it: the compound, small
+  outposts (HESCO ring, concrete bunker, wooden watchtower), a village block of four houses in
+  mixed materials, and a road checkpoint. Modules load as full 10 cm voxels within 260 m and
+  unload past 340 m; a stand-in shows them up to 2.5 km away. Each has its own loot, a hostile
+  garrison in buddy pairs, voxel edits and bodies, all saved with the zone. Shooting, armor,
+  frags, first aid and looting work inside modules. AI navigation bakes in the background
+  around players and soldiers in a fight. Main menu: **Host test zone (2 km, world scale)**,
+  or `--zone [id]`.
+- **Contracts and economy.** A seeded contract board (always one low-risk job; fixers'
+  special jobs at enough reputation), contract zones and hot zones, a 1-5 difficulty rating
+  that can understate the threat (more often with poor intel), MW5-style negotiation of pay,
+  salvage share, support budget and advance (30%, kept on failure), renegotiate or abort once
+  the real threat shows, up to 4 contracts held, lapsed contracts cost reputation. Cash with
+  a ledger, per-faction reputation (numbers only until wave 6), a campaign clock in days with
+  weekly wages and upkeep, and a safety-floor loan. Objectives (clear an area, carry an item
+  out, deliver an HVT, destroy a cache) shown in the HUD. A debrief: pay and bonuses, civilian
+  fines (the 8th casualty voids the contracts), MW5-style salvage picks, what was carried out
+  (MOLLE pouches and their contents counted), casualties, reputation, intel turned in or sold.
+  A shop for gear, repairs, medical supplies and support calls. Main menu: **Contract board
+  (offline)**.
+- **People.** Civilians who go about their routines, flee and hide from gunfire and never
+  fight; casualties caused by the squad count against the contract, others don't, and AI
+  won't shoot through a civilian. Hostile HVTs try to expose the squad and run until
+  zip-cuffed; friendly HVTs follow; captives can be led, stopped, sent to cover, searched and
+  carried (the waist body point). Intel (laptop, phone, documents) on officers and at sites,
+  counted once carried out; enemy positions reported by radio bank at once. Badly hurt,
+  isolated hostiles may surrender. A main menu checkbox puts people in the compound.
+- **Base hub and roster.** A walkable FOB with an armory (the company stash; carriers keep
+  their MOLLE pouches and contents), a motor pool (for wave 5), a medbay, a hiring board and a
+  shop terminal. Squadmates are persistent people: name, role, skills (aim, nerve, medical,
+  movement) that grow with experience along with their wage, their own gear, history and
+  injuries (broken bones, burns, blast lung, heavy blood loss mean days out; the medbay
+  shortens it for money). A rotating hiring pool; no fixed starting squad. Prep before a
+  deployment: kit up, assign squadmates and roles, buy supplies, deploy. An AI squadmate left
+  behind alive goes MIA; the respawn pool is 4 free in a contract zone, 8 in a hot zone, then
+  bought. Main menu: **Campaign: host at the base (FOB)**; Join follows the host there.
+- **Map, briefing, extraction.** **M** opens a map with an Arma-style grid and references,
+  zoom and pan, your squad's positions, shared markers and lines, intel enemy positions,
+  objectives and extraction points (every player and late joiner sees them). A briefing on
+  the map before a deployment: contract, objectives, known enemies, plan marks, insertion
+  point, supports (a list until wave 5), ready-up. Extraction at a landing zone, a grid
+  reference or a purple smoke, once every living player and the AI you bring are inside, the
+  host confirms and a 10 s countdown runs; it reports who and what got out. A reinforcement
+  timer sends hostile waves from beyond the map edge, sooner and bigger over time, with no
+  on-screen timer. Main menu: **Play the test contract (briefing, extraction)**.
+- `Campaign`, `Economy`, `Contracts` and `People` autoloads; one save per campaign.
+- Tests: world, contracts, people, base and map suites (20 in all, all in CI).
+
+#### Fixed
+
+- One join handshake for every kind of level: a client joining a hosted zone, a campaign at
+  the base or a deployment now loads the host's level before anything replicates.
+- A joining client's player starts at the gate or insertion point instead of the middle of the
+  level, and loading magazines right after joining no longer stops with "you moved".
 ### Scavenging review fixes
 
 #### Fixed

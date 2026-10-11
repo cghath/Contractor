@@ -71,6 +71,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		var turn := MOUSE_SENSITIVITY * body.vitals.turn_mult()  # concussion slows turning
 		body.rotate_y(-event.relative.x * turn)
 		body.set_pitch(body.head.rotation.x - event.relative.y * turn)
+	elif hud.map_screen and hud.map_screen.is_open():
+		return  # the map (M) has the mouse and the keys: no reloading or throwing behind it
 	elif event.is_action_pressed(&"inventory") or (event.is_action_pressed(&"pause") and hud.is_inventory_open()):
 		hud.toggle_detail()
 	elif hud.is_inventory_open():

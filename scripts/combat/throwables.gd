@@ -117,7 +117,7 @@ static func _frag(level: CompoundLevel, pos: Vector3) -> void:
 		frag_body(body, vitals, centre, d)
 		if body.has_method(&"suppress"):
 			body.suppress(0.8, pos)
-	level.voxel_world.server_blast(pos, FRAG_CARVE_M)  # by material: concrete only chips
+	level.server_blast(pos, FRAG_CARVE_M)  # by material: concrete only chips (every voxel world it reaches)
 	level.show_explosion.rpc(pos)
 	_shake_players(level, pos)
 
@@ -152,6 +152,7 @@ static func frag_body(body: Node3D, vitals: Vitals, centre: Vector3, distance: f
 		if VoxelArmor.soft_armor_stops(body, part, Ballistics.LEVELS[0], Vitals.FRAGMENT, distance, direction):
 			continue
 		# The deep one is whichever lands first: fragments arrive in random order.
+		Harm.note_hit(body, Harm.blast_source)  # whose grenade it was (people: civilian casualties)
 		vitals.server_hit(part, {"round_class": Vitals.FRAGMENT, "position": hit.position,
 			"direction": direction, "hitbox": hitbox, "distance": distance, "superficial": deep_left <= 0})
 		deep_left -= 1

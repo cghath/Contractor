@@ -5,6 +5,8 @@ extends RigidBody3D
 
 var item_id: StringName
 var kind := "frag"
+## Host only: who threw it (CompoundLevel.server_throw), so its fragments count against them (Harm).
+var thrower: Node
 var _fuse := 3.0
 
 
@@ -44,5 +46,9 @@ func _physics_process(delta: float) -> void:
 	if _fuse > 0.0:
 		return
 	if multiplayer.is_server():
+		Harm.blast_source = thrower if is_instance_valid(thrower) else null
 		Throwables.server_detonate(CompoundLevel.current(self), kind, global_position, item_id)
+		Harm.blast_source = null
+		if kind != "smoke":
+			PeopleLayer.server_noise(self, global_position, PeopleLayer.BLAST_HEARD_M)  # people nearby hear it
 	queue_free()

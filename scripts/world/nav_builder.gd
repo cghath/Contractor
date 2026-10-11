@@ -9,6 +9,10 @@ extends Node3D
 ## through), the chunks around the gap are rebaked in the background from the voxel world's
 ## actual solid voxels. Until a rebake finishes the old navmesh stays, so AI treats the gap
 ## as blocked. Bullet holes never open such a gap, so they never cause a rebake.
+##
+## A zone (ZoneNav) uses the same chunks on its own grid, baked in the background around the
+## players and AI as they move (the grid, the ground and the structures are virtual here:
+## _chunk_of, _box_of, _ground_source, _add_structures).
 
 ## Emitted when a chunk's background rebake is in place (the map uses it a frame later).
 signal rebaked(chunk: Vector2i)
@@ -75,11 +79,12 @@ func region_of(chunk: Vector2i) -> NavigationRegion3D:
 
 
 ## Host only. Rebakes, in the background, every chunk whose bake reaches `area_m` (an AABB in
-## the voxel world's space, metres), from the voxels as they are now.
-func rebake_area(area_m: AABB) -> void:
-	var area := level.voxel_world.global_transform * area_m
-	var lo := chunk_at(area.position - Vector3.ONE * BORDER_M)
-	var hi := chunk_at(area.end + Vector3.ONE * BORDER_M)
+## `world`'s space, metres; the compound's voxel world by default), from the voxels as they
+## are now.
+func rebake_area(area_m: AABB, world: VoxelWorld = null) -> void:
+	var area := (world if world else level.voxel_world).global_transform * area_m
+	var lo := _chunk_of(area.position - Vector3.ONE * BORDER_M)
+	var hi := _chunk_of(area.end + Vector3.ONE * BORDER_M)
 	for cz in range(lo.y, hi.y + 1):
 		for cx in range(lo.x, hi.x + 1):
 			var chunk := Vector2i(cx, cz)
@@ -105,7 +110,7 @@ func _request_rebake(chunk: Vector2i) -> void:
 		set_process(true)
 		return
 	_baking[chunk] = true
-	var mesh := _new_mesh(chunk)
+	var mesh := _mesh_for(chunk)
 	# Through a weak reference: the level may be gone by the time the bake finishes.
 	NavigationServer3D.bake_from_source_geometry_data_async(mesh, source, NavBuilder._bake_done.bind(weakref(self), chunk, mesh))
 
@@ -153,21 +158,39 @@ func _bake_from_boxes() -> void:
 
 ## A chunk's geometry from the voxels as they are now, or null if they aren't loaded.
 func _voxel_source(chunk: Vector2i) -> NavigationMeshSourceGeometryData3D:
+	var source := _ground_source(chunk)
+	return source if _add_structures(source, _bounds_of(chunk)) else null
+
+
+## Adds the structures inside `bounds` (world space) to `source`: the compound's voxels as they
+## are now. Returns false if they aren't loaded yet.
+func _add_structures(source: NavigationMeshSourceGeometryData3D, bounds: AABB) -> bool:
 	var world := level.voxel_world
-	var bounds := _bake_bounds(chunk)
 	var local := world.global_transform.affine_inverse() * bounds
 	var voxels := AABB(local.position / VoxelWorld.VOXEL_SIZE, local.size / VoxelWorld.VOXEL_SIZE)
 	if not world.is_area_readable(voxels):
-		return null
-	var source := _ground_source(chunk)
+		return false
 	for box in world.solid_boxes_m(local):
 		source.add_faces(_box_faces(box), world.global_transform)
-	return source
+	return true
+
+
+# The chunk grid this builder bakes: the compound's (AREA, CHUNK_M). ZoneNav has its own.
+func _chunk_of(pos: Vector3) -> Vector2i:
+	return chunk_at(pos)
+
+
+func _bounds_of(chunk: Vector2i) -> AABB:
+	return _bake_bounds(chunk)
+
+
+func _mesh_for(chunk: Vector2i) -> NavigationMesh:
+	return _new_mesh_in(_bounds_of(chunk))
 
 
 func _ground_source(chunk: Vector2i) -> NavigationMeshSourceGeometryData3D:
 	var source := NavigationMeshSourceGeometryData3D.new()
-	var b := _bake_bounds(chunk)
+	var b := _bounds_of(chunk)
 	var a := Vector3(b.position.x, 0, b.position.z)
 	var c := Vector3(b.end.x, 0, b.end.z)
 	source.add_faces(PackedVector3Array([
@@ -184,12 +207,17 @@ static func _bake_bounds(chunk: Vector2i) -> AABB:
 
 
 static func _new_mesh(chunk: Vector2i) -> NavigationMesh:
+	return _new_mesh_in(_bake_bounds(chunk))
+
+
+## A navigation mesh for the soldier, baking what's inside `bounds` (a chunk and its border).
+static func _new_mesh_in(bounds: AABB) -> NavigationMesh:
 	var nav := NavigationMesh.new()
 	nav.agent_radius = AGENT_RADIUS
 	nav.agent_height = AGENT_HEIGHT
 	nav.agent_max_climb = AGENT_MAX_CLIMB
 	# Tile-aligned chunks: bake the border too, then trim it so edges meet their neighbours'.
-	nav.filter_baking_aabb = _bake_bounds(chunk)
+	nav.filter_baking_aabb = bounds
 	nav.border_size = BORDER_M
 	nav.edge_max_error = 1.0
 	return nav
