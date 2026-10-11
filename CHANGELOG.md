@@ -66,6 +66,16 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
     0.26 m, over the shoulder joints, and the trapezius runs flat in to the neck. The upper
     arms taper into them, so the arms hang out from under the shoulders and turn under them.
     The arms used to hang 4 cm clear of a narrow trunk, like separate columns.
+  - **Plate carriers less blocky:**
+    - **Shape:** the pockets have bevelled edges and a chamfered top, and the cummerbund takes
+      in at the waist.
+    - **Shoulders:** the shoulder straps are padded pads that arch over the deltoids, where
+      they used to be solid blocks.
+    - **Details:** PALS webbing rows across the front and back panels, seams round the plate
+      window, a loop panel with a flag patch at the top of the front, and a drag handle at the
+      top of the back.
+    - **Backpack straps:** a worn pack's padded straps come over the shoulders and down the
+      front edges of the plate pocket, with a sternum strap.
   - **Front pouches** sit on what's behind them: on the plate face (in the pocket's window),
     or on the cummerbund beside the pocket. They used to float 2 to 4 cm off it. The medium
     carrier's TQ holder moved out to the pocket's edge.

@@ -72,6 +72,8 @@ var _grab_at := -1.0             # _clock when a weapon being drawn reaches the 
 var _pouches: Node3D             # MOLLE attachments on the carrier
 var _pouch_key := ""             # what _pouches shows
 var _left_shown := false          # model.left_handed the rest mounts were placed for
+var _straps: Node3D              # the pack's shoulder straps (torso-local)
+var _straps_for: StringName = &""  # the pack they were built for
 
 
 
@@ -166,6 +168,7 @@ func _rebuild() -> void:
 	var held_size := WorldItem.visual_size(ItemDB.get_item(held)) if held != &"" else Vector3.ZERO
 	_set_gear(&"hands", held, &"torso", Transform3D(Basis.IDENTITY, Vector3(0, 0.15, -0.15 - held_size.z * 0.5)))
 	_set_pouches()
+	_set_pack_straps(pack)
 	_refresh_plate_damage()
 
 
@@ -197,6 +200,42 @@ func _set_pouches() -> void:
 		var node := pouch_node(ItemDB.get_item(StringName(att.id)), gear, not att.get("held", []).is_empty(), render_layers)
 		node.transform = point_transform(p, WorldItem.visual_size(ItemDB.get_item(StringName(att.id))))
 		_pouches.add_child(node)
+
+
+## A worn pack's padded shoulder straps: from the top of the pack, over each shoulder outside
+## the carrier's pads, and down the front edges of the plate pocket, with a sternum strap
+## across under the ID panel, in front of the pouches. Rebuilt when the pack changes.
+func _set_pack_straps(pack: StringName) -> void:
+	if pack == _straps_for:
+		return
+	_straps_for = pack
+	if _straps:
+		_straps.queue_free()
+		_straps = null
+	if pack == &"":
+		return
+	_straps = Node3D.new()
+	_straps.name = "PackStraps"
+	model.torso.add_child(_straps)
+	var colour := Color(VoxelArt.VARIANTS.get(model.variant, VoxelArt.VARIANTS.multicam).gear).darkened(0.3)
+	for s: float in [-1.0, 1.0]:
+		var path: Array[Vector3] = [Vector3(0.12, 0.5, 0.17), Vector3(0.13, 0.585, 0.06), Vector3(0.13, 0.595, -0.06),
+			Vector3(0.155, 0.5, -0.17), Vector3(0.155, 0.34, -0.16)]
+		for i in path.size() - 1:
+			_straps.add_child(_strap(path[i] * Vector3(s, 1, 1), path[i + 1] * Vector3(s, 1, 1), 0.045, 0.015, colour))
+	_straps.add_child(_strap(Vector3(-0.155, 0.355, -0.215), Vector3(0.155, 0.355, -0.215), 0.02, 0.008, colour))  # sternum strap
+
+
+## A strap of `width` and `thick` from `a` to `b` (torso-local), lying flat on the body: its
+## face turned out from inside the upper chest.
+func _strap(a: Vector3, b: Vector3, width: float, thick: float, colour: Color) -> Node3D:
+	var holder := Node3D.new()
+	holder.add_child(_part_box(Vector3(width, (b - a).length() + thick, thick), Vector3.ZERO, colour, render_layers))
+	var y := (b - a).normalized()
+	var out := (a + b) * 0.5 - Vector3(0, 0.45, 0)
+	var z := (out - y * out.dot(y)).normalized()
+	holder.transform = Transform3D(Basis(y.cross(z), y, z), (a + b) * 0.5)
+	return holder
 
 
 ## Torso-local transform of an attachment of `size` on attach point `p`: its back against the
