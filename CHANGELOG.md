@@ -48,20 +48,40 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   passing into it; rounded deltoids cap the joint and the shoulder line slopes down from the
   neck instead of the male square shelf. The kneel/reach solver (`reach_pose`) uses her
   shoulder too.
-- **Her chest higher and fuller** (Captain: "too low and too small", then bigger still): two
-  low-poly lobes high on the chest, 0.15 m in front of the spine (the male chest: 0.11 m).
-- **Carriers fitted to her** (Captain: "make carrier fit more like they do irl, they are
-  flexible-ish"): she wears `VoxelArt._vest(tier, true)` ("vest_f:<tier>", `VoxelArt.fitted`):
-  the front panel rides `FEMALE_CARRIER_FRONT` (5 cm) further out over her bust, the back panel
-  sits `FEMALE_CARRIER_BACK` (2 cm) further in against her slimmer back, and the cummerbund
-  and side plate pockets `FEMALE_CARRIER_SIDE` (3 cm) further in at her sides; the shoulder pads
-  span the new depth. What sits on a panel goes with it (`GearRig.carrier_offset(face)`): the
-  plates, the MOLLE pouches by their face, the name tape and slung rifle (front), the pack
-  and the pack straps (back and front). Male carriers are unchanged, byte for byte.
+- **Her chest higher and fuller** (Captain: "too low and too small", then "reduce ... or make
+  the carrier fit like irl"): two low-poly lobes high on the chest, 0.135 m in front of the spine
+  (the male chest: 0.11 m).
+- **Carriers fitted to her like real ones** (Captain's photo refs: "the carrier conforms to the
+  body while the plate sits inside"): she wears `VoxelArt._vest(tier, torso_fc, true)`
+  ("vest_f:<tier>"): the cummerbund is her own torso shape plus padding, the back panel sits
+  `FEMALE_CARRIER_BACK` (2 cm) further in against her slimmer back, the heavy rig's side
+  pockets sit in at her sides (`carrier_side_inset`). The front panel ("vest_f_front:<tier>")
+  sits flat `FEMALE_CARRIER_FRONT_OUT` (1 cm) further out, padded inside down to her chest and
+  belly (no gap under it), with cummerbund wings from its edges round her sides to the rear
+  panel. Under a carrier her bust is held flat and pushed out to the sides ("torso_fc",
+  `CharacterModel.set_carrier_worn`, which GearRig calls). Everything on a panel goes with it
+  (`GearRig.carrier_fit(face)`): plates, MOLLE pouches by their face, name tape and slung rifle
+  (front), pack and pack straps. Male carriers are the same as `art/carrier-fit`'s.
+- **Her hips and waist** (Captain: "more natural instead of like a Mii"): one smooth curve,
+  widest at the hip joints (0.35 m) and easing in to a 0.27 m waist about 20 cm up (it pinched
+  from 0.35 to 0.26 m over 10 cm); the seat is broad and flatter across the hips, setting out
+  from the small of the back, instead of a ball.
 - **Medical voxel wounds on her body:** `BodyVolume.pivot_at(part, body)` puts her arm shapes
   at her shoulders (hits were judged, and blood drawn, 2.5 cm off at the male joint); the
   host builds both bodies' shapes at start (`BodyVolume.warm(["", "female"])`). Wounds test:
   her upper arm is judged at her own shoulder.
+
+### Carriers fit the body that wears them (Captain, 2026-10-11)
+
+#### Changed
+
+- **Plate carriers are cinched to the wearer** (Captain: "make the plate carrier fit more like
+  it would irl"): the cummerbund is the wearer's own torso shape plus `CUMMERBUND_PAD` of
+  webbing and padding (1.5 cm medium, 2.5 cm heavy), so it takes in at the waist and lies on
+  the body instead of standing off it as a box; the light rig's straps lie on the body; the
+  heavy rig's side plate pockets reach in to the cummerbund (the plates stay where they were).
+  `VoxelArt._vest(tier, torso)` takes the wearer's torso spec (the male one by default), so
+  another body shape gets a carrier fitted to it.
 
 ### Medical voxel wounds on the current dev (merge)
 

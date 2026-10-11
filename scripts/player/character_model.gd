@@ -280,6 +280,7 @@ var _hand_source: Array[String] = ["", ""]
 var _hand_from: Array[Vector3] = [Vector3.ZERO, Vector3.ZERO]
 var _hand_blend: Array[float] = [1.0, 1.0]
 var _arms_posed := false
+var _carrier_worn := false
 
 
 ## How big this body is drawn: FEMALE_SCALE for a female soldier, else 1.
@@ -290,6 +291,17 @@ func body_scale() -> float:
 ## The model's own transform when nothing moves it: its size (body_scale).
 func base_transform() -> Transform3D:
 	return Transform3D(Basis.from_scale(Vector3.ONE * body_scale()), Vector3.ZERO)
+
+
+## A plate carrier is on (or off) this body: a woman's torso is then the one held flat by it
+## ("torso_fc", her bust pressed flat and out to the sides, as a real carrier does) or her own.
+func set_carrier_worn(worn: bool) -> void:
+	if body != VoxelArt.FEMALE or torso == null or _carrier_worn == worn:
+		return
+	_carrier_worn = worn
+	var mesh := torso.get_child(0) as MeshInstance3D  # VoxelArt.instance's mesh, its first child
+	if mesh:
+		mesh.mesh = VoxelArt.mesh("torso_fc" if worn else VoxelArt.body_part("torso", body), variant)
 
 
 ## The right shoulder joint, torso-local (mirrored for the left), for this body.

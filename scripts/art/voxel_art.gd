@@ -18,12 +18,15 @@ const MALE := "male"
 const FEMALE := "female"
 const BODIES: Array[String] = [MALE, FEMALE]
 const FEMALE_SUFFIX := "_f"
-## A plate carrier fitted to a woman ("vest_f:<tier>", _vest): how far, in cm, its front panel
-## rides further out (over her bust), its back panel sits further in (her back is slimmer), and
-## its cummerbund and side pockets sit further in at her sides.
-const FEMALE_CARRIER_FRONT := 5
+## A plate carrier fitted to a woman ("vest_f:<tier>", _vest; GearRig.carrier_fit): it conforms to
+## her body with the plates inside, as a real one does (Captain): its front panel sits flat
+## FEMALE_CARRIER_FRONT_OUT cm further out, over her bust held flat beneath it ("torso_fc"), its
+## inside padded down to her chest and belly so it lies on her with no gap; its back panel sits
+## FEMALE_CARRIER_BACK cm further in (her back is slimmer). (FEMALE_CARRIER_TILT_DEG can lean the
+## front panel out from its top edge; flat, it is 0.)
+const FEMALE_CARRIER_FRONT_OUT := 1.0
+const FEMALE_CARRIER_TILT_DEG := 0.0
 const FEMALE_CARRIER_BACK := 2
-const FEMALE_CARRIER_SIDE := 3
 
 enum C {
 	EMPTY, CAMO, CAMO_A, CAMO_B, CAMO_C, CAMO_D, SKIN, SKIN_SHADE, HAIR, EYE, MOUTH,
@@ -382,12 +385,14 @@ static func _spec(model: String) -> Dictionary:
 		"thigh": return _thigh()
 		"shin": return _shin()
 		"vest": return _vest(arg)
-		"vest_f": return _vest(arg, true)
+		"vest_f": return _vest(arg, _torso_f(true), true)
+		"vest_f_front": return _vest(arg, _torso_f(true), true, true)
 		"backpack": return _backpack(arg)
 		"rifle": return _rifle(arg)
 		"pistol": return _pistol()
 		"head_f": return _head_f()
 		"torso_f": return _torso_f()
+		"torso_fc": return _torso_f(true)
 		"upper_arm_f": return _upper_arm_f()
 		"forearm_f": return _forearm_f()
 		"leg_f": return _leg_f()
@@ -413,6 +418,11 @@ static func _p(x0: int, y0: int, z0: int, x1: int, y1: int, z1: int, colour: int
 const BODY_VOXEL := 0.01
 ## Built at half that (0.5 cm), so the bevels step finely.
 const BODY_SUB := 2
+## Plate carriers (_vest): their mount's height over the torso pivot (GearRig.rest_transform
+## "vest", 0.17 m), and how much webbing and padding the cummerbund adds round the body, by
+## tier (light: none, it has straps).
+const CARRIER_MOUNT_CM := 17.0
+const CUMMERBUND_PAD: Array[float] = [0.0, 1.5, 2.5]
 
 
 ## A loft: a low-poly body around the vertical line at (`cx`, `cz`), from `keys`, each
@@ -574,18 +584,19 @@ static func _head_f() -> Dictionary:
 
 
 ## The male torso's frame and pivot (hips), 0.66 m from the crotch to the base of the neck:
-## hips 0.36 m across (the male's: 0.32) over a 0.26 m waist and a narrower ribcage her arms
+## hips 0.35 m across (the male's: 0.32), easing in to a 0.27 m waist about 20 cm up and a narrower ribcage her arms
 ## hang against. Her shoulders (CharacterModel.FEMALE_SHOULDER, 0.20 m out and 1.5 cm lower
 ## than his) are capped by rounded deltoids 1 cm past the joint, and from there the shoulder
 ## line slopes down from the neck (the male's runs flat out to a square corner). The whole
 ## body is drawn at CharacterModel.FEMALE_SCALE.
-## The bust is two low-poly lobes high on the chest, its fullest 0.15 m in front of the
-## spine, 4 cm deeper than the male chest: her fitted carrier ("vest_f", _vest) rides its
-## front panel FEMALE_CARRIER_FRONT further out over it, as a carrier sits on a real woman.
-## The frame runs 5 cm further forward for it, and as before 2 cm deeper behind for the seat.
-static func _torso_f() -> Dictionary:
+## The bust is two low-poly lobes high on the chest, its fullest 0.135 m in front of the
+## spine, 2.5 cm deeper than the male chest. Under a plate carrier (`carried`, "torso_fc") it
+## is held flat by it, as a real carrier does: no deeper than 0.118 m, and pushed out to the
+## sides; CharacterModel.set_carrier_worn swaps it in.
+## The frame runs 5 cm further forward, and as before 2 cm deeper behind for the seat.
+static func _torso_f(carried := false) -> Dictionary:
 	var boxes := [
-		_loft(26, 16, [[0, 15.5, 9.8], [6, 18.0, 10.8], [14, 17.5, 10.5], [24, 13.0, 8.0], [30, 13.3, 8.0], [38, 14.0, 8.5],
+		_loft(26, 16, [[0, 14.5, 9.0], [4, 16.8, 10.0], [9, 17.6, 10.2], [14, 17.0, 9.8], [19, 15.4, 9.0], [25, 13.8, 8.3], [30, 13.4, 8.2], [38, 14.0, 8.5],
 			[50, 15.3, 9.0], [55, 17.5, 9.0], [58.5, 20.5, 9.0], [60.5, 21.0, 8.8], [62.5, 17.8, 8.0], [64.5, 13.3, 7.2],
 			[66, 9.0, 6.5]], C.CAMO, 0.45),
 		_p(0, 14, 0, 52, 20, 29, C.BELT),
@@ -593,9 +604,15 @@ static func _torso_f() -> Dictionary:
 		_p(20, 60, 0, 32, 66, 12, C.CAMO_C),  # collar
 	]
 	for side: float in [-1.0, 1.0]:  # the bust: a short rounded underside, a long gentle top
-		boxes.append(_loft(26 + 6.2 * side, 8.5, [[40, 5.5, 1.0], [42.5, 7.2, 5.0], [46, 7.8, 7.5], [50, 7.4, 6.5],
-			[54, 6.4, 3.5], [58, 5.0, 0.5]], C.CAMO, 0.7))
-	boxes.append(_loft(26, 19, [[2, 14.0, 5.5], [5, 15.5, 8.5], [14, 15.5, 8.5], [20, 13.0, 2.5]], C.CAMO, 0.6))  # seat
+		if carried:  # held flat by the carrier, spread to the sides
+			boxes.append(_loft(26 + 7.5 * side, 8.7, [[40.5, 5.5, 1.0], [43, 7.5, 3.0], [46.5, 8.2, 4.5], [50, 7.9, 4.0],
+				[54, 6.8, 2.2], [57.5, 5.5, 0.5]], C.CAMO, 0.7))
+		else:
+			boxes.append(_loft(26 + 6.2 * side, 9.3, [[40.5, 5.2, 1.0], [43, 6.9, 4.3], [46.5, 7.4, 6.8], [50, 7.1, 5.8],
+				[54, 6.1, 3.2], [57.5, 5.0, 0.5]], C.CAMO, 0.7))
+	# The seat: broad and fairly flat across the hips, setting out from the small of the back
+	# and rounding under, not a ball (Captain's ref).
+	boxes.append(_loft(26, 18, [[1, 13.5, 6.0], [4, 15.5, 9.0], [9, 15.8, 9.6], [14, 14.8, 8.6], [19, 12.5, 5.0], [23, 10.0, 1.5]], C.CAMO, 0.5))  # seat
 	return {"size": Vector3i(52, 66, 29), "pivot": Vector3(26, 10, 16), "voxel": BODY_VOXEL, "sub": BODY_SUB, "boxes": boxes}
 
 
@@ -660,85 +677,164 @@ static func _shin_f_parts() -> Array:
 ## carrier's plate_depth) and 0.28 (sides, at side_plate_x), as GearRig.armor_transform puts
 ## them. Details: PALS webbing rows across the panels, seams round the window, a loop panel
 ## for the name tape at the top of the front, a drag handle at the top of the back, padded
-## shoulder pads that arch over the deltoids, and a cummerbund that takes in at the waist.
-## `female`: the same carrier adjusted to a woman, as a real one flexes and cinches: the front
-## panel rides FEMALE_CARRIER_FRONT further out over her bust, the back panel sits
-## FEMALE_CARRIER_BACK further in against her slimmer back, and the cummerbund and side plate
-## pockets FEMALE_CARRIER_SIDE further in at her sides (GearRig.carrier_offset moves the
-## plates, pouches, name tape, sling and pack with their panels). Model "vest_f:<tier>".
-static func _vest(tier: int, female := false) -> Dictionary:
-	var fe: int = FEMALE_CARRIER_FRONT if female else 0
+## shoulder pads that arch over the deltoids, and a cummerbund that wraps the waist.
+## The cummerbund (and the light rig's straps, and the heavy rig's side pockets) fit the body
+## that wears it, as a real one is cinched: its shape is the wearer's torso (`torso`, a torso
+## spec; the male torso by default) plus CUMMERBUND_PAD of webbing and padding.
+## `female`: fitted to a woman the way a real carrier sits on one ("vest_f:<tier>"): her torso
+## shapes the cummerbund, the back panel sits FEMALE_CARRIER_BACK further in against her
+## slimmer back, the heavy rig's side pockets sit in at her sides (carrier_side_inset), and the
+## front panel is built apart ("vest_f_front:<tier>", `front`: only it) so GearRig can hang it
+## from its top edge onto her chest (GearRig.carrier_fit).
+static func _vest(tier: int, torso := {}, female := false, front := false) -> Dictionary:
+	var body := torso if not torso.is_empty() else _torso_f() if female else _torso()
+	var pad: float = CUMMERBUND_PAD[tier]
 	var be: int = FEMALE_CARRIER_BACK if female else 0
-	var si: int = FEMALE_CARRIER_SIDE if female else 0
-	var hw: int = [20, 21, 23][tier] - si  # half-width of the cummerbund, cm
-	var hd: int = [12, 13, 15][tier]       # half-depth of the cummerbund
 	var depth: float = [14.0, 14.0, 16.5][tier]  # plate centre, front and back
 	var below: int = [0, 0, 8][tier]       # the heavy carrier's groin flap hangs below the mount
 	var half_x := 28
 	var half_z := int(depth) + 5
-	var size := Vector3i(half_x * 2, 42 + below, half_z * 2 + fe)
-	var o := Vector3i(half_x, below, half_z + fe)  # carrier-local (0, 0, 0) in voxels
+	var size := Vector3i(half_x * 2, 42 + below, half_z * 2)
+	var o := Vector3i(half_x, below, half_z)  # carrier-local (0, 0, 0) in voxels
 	var boxes := []
+	var front_boxes := [] if female else boxes  # the front panel's parts (a woman's: a model of their own)
 	var at := func(x0: int, y0: int, z0: int, x1: int, y1: int, z1: int, colour: int, paint := false) -> void:
 		boxes.append([Vector3i(x0, y0, z0) + o, Vector3i(x1, y1, z1) + o, colour, paint])
-	# Cummerbund round the torso, taken in over its bottom 8 cm to follow the waist (the light
-	# rig has none, only straps round the back). Its front at -hd - fe, its back at hd - be.
+	var at_front := func(x0: int, y0: int, z0: int, x1: int, y1: int, z1: int, colour: int, paint := false) -> void:
+		front_boxes.append([Vector3i(x0, y0, z0) + o, Vector3i(x1, y1, z1) + o, colour, paint])
+	# Cummerbund round the torso from the mount up 22 cm, the body's own shape plus the pad (the
+	# light rig has none, only straps round the back).
 	if tier > 0:
-		var cd := hd + (fe - be) * 0.5
-		boxes.append(_loft(o.x, o.z - (fe + be) * 0.5, [[o.y, hw - 2.0, cd - 1.5], [o.y + 8, hw, cd], [o.y + 22, hw, cd]], C.GEAR, 0.3))
+		var rows: Array = []
+		var hw := 0.0
+		var hd := 0.0
+		for y in range(0, 23, 2):
+			var at_y := _torso_at(body, y)
+			rows.append([o.y + y, at_y.x + pad, at_y.y + pad])
+			hw = maxf(hw, at_y.x + pad)
+			hd = maxf(hd, at_y.y + pad)
+		boxes.append(_loft(o.x, o.z, rows, C.GEAR, 0.3))
+		var w := ceili(hw)
+		var d := ceili(hd)
 		for y in [5, 9, 13, 17]:  # MOLLE rows on the sides
-			at.call(-hw, y, -hd - fe + 3, hw, y + 1, hd - be - 3, C.GEAR_DARK, true)
-		at.call(-hw, 0, -hd - fe, hw, 2, hd - be, C.GEAR_DARK, true)  # bottom binding
+			at.call(-w, y, -d + 3, w, y + 1, d - 3, C.GEAR_DARK, true)
+		at.call(-w, 0, -d, w, 2, d, C.GEAR_DARK, true)  # bottom binding
 	else:
-		at.call(-hw, 10, 8 - be, -hw + 3, 13, 13 - be, C.GEAR_DARK)
-		at.call(hw - 3, 10, 8 - be, hw, 13, 13 - be, C.GEAR_DARK)
-		at.call(-hw, 10, 11 - be, hw, 13, 13 - be, C.GEAR_DARK)  # back strap
+		var waist := _torso_at(body, 11.5)
+		var w := ceili(waist.x) + 1
+		var d := ceili(waist.y)
+		at.call(-w, 10, 8, -w + 3, 13, d + 2, C.GEAR_DARK)
+		at.call(w - 3, 10, 8, w, 13, d + 2, C.GEAR_DARK)
+		at.call(-w, 10, d, w, 13, d + 2, C.GEAR_DARK)  # back strap
 	# Plate pockets, front and (medium, heavy) back. The plate is 25 x 30 cm, y 1-31.
 	var faces := [-1] if tier == 0 else [-1, 1]
 	for f: int in faces:
+		var put: Callable = at_front if f < 0 else at
+		var list: Array = front_boxes if f < 0 else boxes
 		var inner := int(depth) - 3
 		var outer := int(depth) + 3
-		var shift := -fe if f < 0 else -be
+		var shift := 0 if f < 0 else -be
 		var z0 := (-outer if f < 0 else inner) + shift
 		var z1 := (-inner if f < 0 else outer) + shift
 		# The pocket: bevelled upright edges, its top chamfered in.
-		boxes.append(_loft(o.x, o.z + (z0 + z1) * 0.5, [[o.y, 14.0, 3.0], [o.y + 31, 14.0, 3.0], [o.y + 33, 13.0, 2.0]], C.GEAR, 0.35))
-		at.call(-13, 1, z0 + 1, 13, 32, z1 - 1, C.EMPTY)                 # the plate's room
+		list.append(_loft(o.x, o.z + (z0 + z1) * 0.5, [[o.y, 14.0, 3.0], [o.y + 31, 14.0, 3.0], [o.y + 33, 13.0, 2.0]], C.GEAR, 0.35))
+		put.call(-13, 1, z0 + 1, 13, 32, z1 - 1, C.EMPTY)                 # the plate's room
+		if f < 0 and female:
+			# The panel conforms to her (the plate stays inside): padding behind the pocket down
+			# to her chest and belly, so it lies on her with no gap under it, and cummerbund wings
+			# from its edges back round her sides to the rear panel.
+			var out := FEMALE_CARRIER_FRONT_OUT
+			for y in range(0, 33, 2):
+				var body_z := -roundi(_torso_front(body, y + 1.0) - out)  # her front, in the panel's frame
+				if body_z > z1:
+					put.call(-13, y, z1, 13, y + 2, body_z + 1, C.GEAR)
+			for y in range(0, 23, 2):
+				var side := _torso_at(body, y + 1.0)
+				var w := ceili(side.x + pad)
+				put.call(-w, y, z1, -12, y + 2, roundi(-side.y * 0.4 + out), C.GEAR)
+				put.call(12, y, z1, w, y + 2, roundi(-side.y * 0.4 + out), C.GEAR)
 		var face := z0 if f < 0 else z1 - 1
-		at.call(-11, 3, face, 11, 30, face + 1, C.EMPTY)                 # window: the plate shows
-		at.call(-14, 31, z0, 14, 33, z1, C.GEAR_DARK, true)              # top binding
-		at.call(-12, 2, face, 12, 3, face + 1, C.GEAR_DARK, true)        # seams round the window
-		at.call(-12, 2, face, -11, 30, face + 1, C.GEAR_DARK, true)
-		at.call(11, 2, face, 12, 30, face + 1, C.GEAR_DARK, true)
+		put.call(-11, 3, face, 11, 30, face + 1, C.EMPTY)                 # window: the plate shows
+		put.call(-14, 31, z0, 14, 33, z1, C.GEAR_DARK, true)              # top binding
+		put.call(-12, 2, face, 12, 3, face + 1, C.GEAR_DARK, true)        # seams round the window
+		put.call(-12, 2, face, -11, 30, face + 1, C.GEAR_DARK, true)
+		put.call(11, 2, face, 12, 30, face + 1, C.GEAR_DARK, true)
 		# PALS webbing across the panel, flush with the fabric (pouches thread through it).
 		var top_row := 21 if f < 0 else 27
 		for y in range(6, top_row + 1, 3):
-			at.call(-11, y, face, 11, y + 1, face + 1, C.GEAR_DARK)
+			put.call(-11, y, face, 11, y + 1, face + 1, C.GEAR_DARK)
 		if f < 0:
-			at.call(-7, 24, face, 7, 29, face + 1, C.GEAR_DARK)          # loop panel: GearRig puts the name tape on it
+			put.call(-7, 24, face, 7, 29, face + 1, C.GEAR_DARK)          # loop panel: GearRig puts the name tape on it
 		else:
-			at.call(-4, 32, z1, 4, 36, z1 + 2, C.GEAR_DARK)              # drag handle
-			at.call(-3, 33, z1, 3, 35, z1 + 2, C.EMPTY)
+			put.call(-4, 32, z1, 4, 36, z1 + 2, C.GEAR_DARK)              # drag handle
+			put.call(-3, 33, z1, 3, 35, z1 + 2, C.EMPTY)
 	# Padded shoulder pads, arching from the pockets' tops over the deltoids.
-	var pd := (fe - be) * 0.5  # the pads reach from the front pocket's top to the back's
 	for side: int in [-1, 1]:
-		boxes.append(_loft(o.x + 8.5 * side, o.z - (fe + be) * 0.5, [[o.y + 32, 2.5, 12.0 + pd], [o.y + 38, 2.5, 10.5 + pd], [o.y + 41, 2.5, 7.5 + pd]], C.GEAR, 0.6))
+		boxes.append(_loft(o.x + 8.5 * side, o.z - be * 0.5, [[o.y + 32, 2.5, 12.0 - be * 0.5], [o.y + 38, 2.5, 10.5 - be * 0.5],
+			[o.y + 41, 2.5, 7.5 - be * 0.5]], C.GEAR, 0.6))
 	if tier == 0:
+		var back := ceili(_torso_at(body, 23.0).y)
 		for side: int in [-1, 1]:  # straps cross the back
 			var sx0 := 6 if side > 0 else -11
-			at.call(sx0, 13, 11 - be, sx0 + 5, 33, 13 - be, C.GEAR_DARK)
-	# Heavy: side plate pockets (15 x 20 cm plates at x 24.5, y 1-21), collar and groin flap.
+			at.call(sx0, 13, back, sx0 + 5, 33, back + 2, C.GEAR_DARK)
+	# Heavy: side plate pockets (15 x 20 cm plates, y 1-21), collar and groin flap. Each pocket
+	# reaches in to the cummerbund (a slimmer body: a deeper pocket wall), its plate at x 24.5
+	# as GearRig puts it (side_plate_x); a woman's whole pocket sits carrier_side_inset further in.
 	if tier == 2:
+		var inside := mini(22, floori(_torso_at(body, 11.0).x + pad))
+		var inset := 22 - inside if female else 0
 		for side: int in [-1, 1]:
-			var x0 := 22 - si if side > 0 else -27 + si
-			at.call(x0, 0, -9, x0 + 5, 23, 9, C.GEAR)
-			at.call(x0 + 1, 1, -8, x0 + 4, 22, 8, C.EMPTY)
-			var face := x0 + 4 if side > 0 else x0
+			var x0 := inside if side > 0 else -27 + inset
+			var x1 := 27 - inset if side > 0 else -inside
+			at.call(x0, 0, -9, x1, 23, 9, C.GEAR)
+			var room := 23 - inset if side > 0 else -26 + inset
+			at.call(room, 1, -8, room + 3, 22, 8, C.EMPTY)
+			var face := 26 - inset if side > 0 else -27 + inset
 			at.call(face, 3, -6, face + 1, 20, 6, C.EMPTY)
-		at.call(-15, 33, -int(depth) - 2 - fe, 15, 39, -int(depth) + 3 - fe, C.GEAR_DARK)  # collar
-		at.call(-8, -below, -int(depth) - 3 - fe, 8, 0, -int(depth) + 2 - fe, C.GEAR)       # groin flap
-		at.call(-8, -below, -int(depth) - 3 - fe, 8, -below + 1, -int(depth) + 2 - fe, C.GEAR_DARK)
-	return {"size": size, "pivot": Vector3(o), "voxel": BODY_VOXEL, "sub": BODY_SUB, "boxes": boxes}
+		at_front.call(-15, 33, -int(depth) - 2, 15, 39, -int(depth) + 3, C.GEAR_DARK)  # collar
+		at_front.call(-8, -below, -int(depth) - 3, 8, 0, -int(depth) + 2, C.GEAR)       # groin flap
+		at_front.call(-8, -below, -int(depth) - 3, 8, -below + 1, -int(depth) + 2, C.GEAR_DARK)
+	return {"size": size, "pivot": Vector3(o), "voxel": BODY_VOXEL, "sub": BODY_SUB, "boxes": front_boxes if front else boxes}
+
+
+## How far a woman's heavy carrier's side pockets (and their plates) sit in from the male fit, cm
+## (0 for other tiers: they have none).
+static func carrier_side_inset(tier: int, body: String) -> float:
+	if tier != 2 or body != FEMALE:
+		return 0.0
+	return 22.0 - mini(22, floori(_torso_at(_torso_f(), 11.0).x + CUMMERBUND_PAD[tier]))
+
+
+## How far in front of the spine (cm) the torso spec `torso` reaches at carrier height `y` cm:
+## the furthest of its lofts there (the trunk, a bust).
+static func _torso_front(torso: Dictionary, y: float) -> float:
+	var fy := y + CARRIER_MOUNT_CM + float((torso.pivot as Vector3).y)
+	var pivot_z := float((torso.pivot as Vector3).z)
+	var front := 0.0
+	for part: Variant in torso.boxes:
+		if not part is Dictionary:
+			continue
+		var keys: Array = part.keys
+		for i in range(1, keys.size()):
+			if fy >= float(keys[i - 1][0]) and fy <= float(keys[i][0]):
+				var t := (fy - float(keys[i - 1][0])) / maxf(float(keys[i][0]) - float(keys[i - 1][0]), 0.001)
+				var hd := lerpf(float(keys[i - 1][2]), float(keys[i][2]), t)
+				front = maxf(front, pivot_z - ((part.centre as Vector2).y - hd))
+	return front
+
+
+## The torso spec `torso`'s half-width and half-depth (cm, x and y) at carrier height `y` cm
+## (above GearRig's mount, CARRIER_MOUNT_CM over the hips): its main loft at that height.
+static func _torso_at(torso: Dictionary, y: float) -> Vector2:
+	var keys: Array = (torso.boxes[0] as Dictionary).keys
+	var fy := y + CARRIER_MOUNT_CM + float((torso.pivot as Vector3).y)
+	for i in range(1, keys.size()):
+		if fy <= float(keys[i][0]):
+			var a: Array = keys[i - 1]
+			var b: Array = keys[i]
+			var t := clampf((fy - float(a[0])) / maxf(float(b[0]) - float(a[0]), 0.001), 0.0, 1.0)
+			return Vector2(lerpf(float(a[1]), float(b[1]), t), lerpf(float(a[2]), float(b[2]), t))
+	return Vector2(float(keys[-1][1]), float(keys[-1][2]))
 
 
 ## 0.34 x 0.44 m; depth in voxels grows with capacity. Outer face is +Z. A low-poly pack
