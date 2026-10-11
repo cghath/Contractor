@@ -189,7 +189,12 @@ func map_area() -> Rect2:
 
 func next_spawn_point() -> Vector3:
 	_spawn_index += 1
-	return SPAWN_POINTS[_spawn_index % SPAWN_POINTS.size()]
+	return spawn_point(_spawn_index)
+
+
+## The `index`th of the level's player spawn points (they repeat): the compound's gate.
+func spawn_point(index: int) -> Vector3:
+	return SPAWN_POINTS[posmod(index, SPAWN_POINTS.size())]
 
 
 # --- Level API shared with ZoneLevel (wave 4) -------------------------------------------------
@@ -502,7 +507,7 @@ func _spawn_squadmate(slot: int, role: StringName, team: int) -> Soldier:
 	var anchor: Node3D = squad.leader if is_instance_valid(squad.leader) else null
 	var wedge: Array = Squad.FORMATIONS["wedge"]
 	var pos := anchor.global_transform * (wedge[maxi(slot - 1, 0) % wedge.size()] as Vector3) if anchor \
-		else SPAWN_POINTS[slot % SPAWN_POINTS.size()] + Vector3(0, 0, 3)
+		else spawn_point(slot) + Vector3(0, 0, 3)
 	return spawn_soldier({"name": callsign, "faction": "friendly", "variant": "multicam", "pos": ground_point(pos), "loadout": [],
 		"role": String(role), "team": team, "slot": slot, "combat": 0.5 + 0.03 * (slot % 5), "discipline": 0.6, "guard": false})
 

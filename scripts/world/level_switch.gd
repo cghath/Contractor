@@ -41,6 +41,11 @@ func _on_auth_data(id: int, data: PackedByteArray) -> void:
 	if multiplayer.is_server():
 		return  # clients send nothing
 	var info: Variant = bytes_to_var(data)
+	# Generating a zone holds up this frame: past the short connecting timeout (Net.join) the
+	# host would drop us, so the normal timeouts apply from here.
+	var enet := multiplayer.multiplayer_peer as ENetMultiplayerPeer
+	if enet and enet.get_peer(MultiplayerPeer.TARGET_PEER_SERVER):
+		enet.get_peer(MultiplayerPeer.TARGET_PEER_SERVER).set_timeout(Net.ENET_TIMEOUT[0], Net.ENET_TIMEOUT[1], Net.ENET_TIMEOUT[2])
 	if typeof(info) == TYPE_DICTIONARY:
 		load_level(get_parent(), info)
 	(multiplayer as SceneMultiplayer).complete_auth(id)

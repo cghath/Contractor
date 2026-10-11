@@ -71,6 +71,10 @@ func _run_host(wait_for_client: bool) -> void:
 	add_child(main)
 	await get_tree().process_frame
 	main.host_zone(ZoneDef.get_def("test"))
+	check(multiplayer.multiplayer_peer is ENetMultiplayerPeer, "hosting on port %d" % Net.port())
+	if not multiplayer.multiplayer_peer is ENetMultiplayerPeer:
+		_finish()
+		return
 	(multiplayer.multiplayer_peer as ENetMultiplayerPeer).refuse_new_connections = true
 	level = CompoundLevel.current(self) as ZoneLevel
 	check(level != null, "hosting the test zone puts a ZoneLevel in place of the compound")
@@ -84,6 +88,7 @@ func _run_host(wait_for_client: bool) -> void:
 	await _test_streaming()
 	await _test_edits()
 	await _test_shot_in_module()
+	await _test_loot_and_care()
 	await _test_frag_and_body()
 	await _test_ai_path()
 	await _test_reload()
@@ -299,6 +304,42 @@ func _test_shot_in_module() -> void:
 var _victims: Array = []
 
 
+## A module's loot lies in it and is picked up for good; first aid works on a man in one.
+func _test_loot_and_care() -> void:
+	print("Loot and first aid in modules")
+	var m := level.get_module("village_e")
+	var item := level.items.get_node_or_null(^"village_e_ifak") as WorldItem
+	var spot := m.to_global(Vector3(1, 0, -9.5))
+	check(item != null and Vector2(item.global_position.x - spot.x, item.global_position.z - spot.z).length() < 0.6 \
+		and absf(item.global_position.y - m.global_position.y) < 0.6,
+		"the village's IFAK lies on the floor of its cinder-block house (%s)" % (m.to_local(item.global_position) if item else "missing"))
+	if item:
+		player.global_position = m.to_global(Vector3(1, 0.1, -8.6))
+		player._server_interact.rpc_id(1, item.get_path())
+		await get_tree().process_frame
+		check(GameState.is_looted("village_e_ifak") and Vitals.has_item(player.inventory, &"ifak"), "picked up from inside the house, it counts as looted (saved)")
+	var patient := level.spawn_soldier({"name": "Patient", "faction": "friendly", "variant": "multicam", "pos": m.to_global(Vector3(15.0, 0.1, -9.0)),
+		"loadout": [], "combat": 0.5, "discipline": 0.6, "guard": true})
+	SquadAI.of(patient).process_mode = Node.PROCESS_MODE_DISABLED
+	await get_tree().create_timer(0.3).timeout
+	patient.vitals.server_hit(Vitals.FOREARM_L, {"round_class": Vitals.FRAGMENT, "superficial": true})
+	var task := {}
+	for t: Dictionary in patient.vitals.care_needed():
+		if t.item == &"pressure_bandage":
+			task = t
+	check(not task.is_empty(), "a man hit in the brick house's back room needs a bandage (%s)" % [patient.vitals.care_needed()])
+	if task.is_empty():
+		return
+	player.inventory.take(&"pressure_bandage")
+	player.global_position = patient.global_position + Vector3(-0.8, 0, 0)
+	player._server_treat.rpc_id(1, patient.get_path(), &"pressure_bandage", task.part)
+	var part: StringName = task.part
+	var treated := await _wait_for(func() -> bool: return not patient.vitals.care_needed().any(
+		func(t: Dictionary) -> bool: return t.item == &"pressure_bandage" and t.part == part), 15.0)
+	check(treated, "the player bandages him there (%s)" % [patient.vitals.care_needed()])
+	patient.queue_free()
+
+
 ## A frag against a module wall is a blast in that module's log; a soldier killed in a module
 ## leaves a body that's saved with the zone.
 func _test_frag_and_body() -> void:
@@ -371,6 +412,8 @@ func _test_reload() -> void:
 		"the save gives back every module's log (%d edits: compound %d, village %d)" % [saved, level.edit_logs().get("compound", []).size(), level.edit_logs().get("village_e", []).size()])
 	var bodies := level.bodies.get_children().filter(func(b: Node) -> bool: return b is Soldier and (b as Soldier).display_name() == "ShackMan")
 	check(bodies.size() == 1 and (bodies[0] as Soldier).global_position.distance_to(_body_pos) < 0.6, "the body in the shack is back where it lay")
+	check(level.items.get_node_or_null(^"village_e_ifak") == null and level.items.get_node_or_null(^"village_e_mags") != null,
+		"the IFAK taken from the village stays taken; the rest of its loot is back")
 	var m := await _go_to_module("compound")
 	check(m.voxel_world.holes_through(m.to_global(SHED_WALL)) == 1 and m.voxel_world.marks_near(m.to_global(Vector3(-2.95, 1.35, -4.0)), 0.05) == 1,
 		"after the reload the compound module has its bullet holes and mark")
@@ -390,7 +433,14 @@ func _test_budget(mem_before: float) -> void:
 
 ## Host: once the client is in, a live mark on the compound module's gate wall.
 func _on_client_joined(id: int) -> void:
-	await get_tree().create_timer(1.0).timeout
+	await get_tree().create_timer(0.6).timeout
+	var ins := level.insertion_points()[0]
+	var client := level.players.get_node_or_null(str(id)) as Soldier
+	check(client != null and client.global_position.distance_to(ins) < 8.0,
+		"the late joiner's player is at the insertion point on the host too (%s)" % (client.global_position if client else "missing"))
+	check(not client or not level.get_module("compound").is_streamed() or level.get_module("compound").distance_to(player.global_position) <= ZoneLevel.STREAM_IN_M,
+		"and its arrival streamed in nothing at the zone's centre")
+	await get_tree().create_timer(0.4).timeout
 	var m := level.get_module("compound")
 	if not m.is_streamed():
 		player.global_position = level.ground_point(m.global_position + Vector3(0, 0, 30))
@@ -448,10 +498,13 @@ func _run_client(address: String) -> void:
 	var my_name := str(multiplayer.get_unique_id())
 	await _wait_for(func() -> bool: return level.players.get_node_or_null(my_name) != null, 10.0)
 	var me := level.players.get_node_or_null(my_name) as Soldier
-	check(me != null and me.is_local(), "the client's player spawned at the insertion point")
+	check(me != null and me.is_local(), "the client's player spawned")
 	if me == null:
 		_finish()
 		return
+	var ins := level.insertion_points()[0]
+	check(me.global_position.distance_to(ins) < 8.0, "at the insertion point, not the zone's centre (%.1f m from it)" % me.global_position.distance_to(ins))
+	await get_tree().create_timer(1.5).timeout  # the host checks it sees us there too
 	me.set_physics_process(false)
 	await _wait_for(func() -> bool: return level.streamed_modules().is_empty(), 3.0)
 	check(level.streamed_modules().is_empty(), "no module streamed in at the insertion point, far from them all (%s at %s)" % [

@@ -60,6 +60,7 @@ func _ready() -> void:
 		def = ZoneDef.get_def("test")
 	super._ready()
 	squad_for(&"hostile").patrol = []  # garrisons hold their ground
+	players.child_entered_tree.connect(_on_player_entered)
 
 
 # --- Level API --------------------------------------------------------------------------------
@@ -74,11 +75,16 @@ func map_area() -> Rect2:
 	return Rect2(-half, -half, terrain.size_m, terrain.size_m)
 
 
-func next_spawn_point() -> Vector3:
-	_spawn_index += 1
-	var p := insertion_points()[0]
-	var k := _spawn_index % 4
-	return ground_point(p + Vector3((k - 1.5) * SPAWN_SPREAD_M, 0, 0))
+## Around the default insertion point: eight spots, two rows of four SPAWN_SPREAD_M apart.
+func spawn_point(index: int) -> Vector3:
+	var k := posmod(index, 8)
+	return ground_point(insertion_points()[0] + Vector3((k % 4 - 1.5) * SPAWN_SPREAD_M, 0, (k / 4) * SPAWN_SPREAD_M))
+
+
+## Where player `id` starts: worked out the same on the host and on that player's own peer
+## (_on_player_entered), since the player, not the host, drives its position.
+func player_spawn(id: int) -> Vector3:
+	return spawn_point(posmod(id - 1, 8))
 
 
 ## `pos` on the terrain (0.1 m above it).
@@ -232,7 +238,7 @@ func _on_hosted() -> void:
 		_spawn_insertion_kit()
 	for uid: String in GameState.dropped:
 		var d: Dictionary = GameState.dropped[uid]
-		spawn_item(StringName(d.id), int(d.count), Vector3(d.pos[0], d.pos[1], d.pos[2]), uid, d.get("state", {}))
+		spawn_item(StringName(d.id), int(d.count), Vector3(d.pos[0], d.pos[1], d.pos[2]), uid, GameState.from_json(d.get("state", {})))
 	player_roles[1] = Roles.local_choice
 	_add_player(1)
 	nav = ZoneNav.build_zone(self)
@@ -288,6 +294,22 @@ func _spawn_garrison(module: ZoneModule) -> void:
 		var mate: Soldier = spawned[i ^ 1] if (i ^ 1) < spawned.size() else null
 		if spawned[i]:
 			(spawned[i] as Soldier).buddy = mate
+
+
+func _add_player(id: int) -> void:
+	super._add_player(id)
+	var player := players.get_node_or_null(str(id)) as Node3D
+	if player:
+		player.position = player_spawn(id)
+
+
+## A client's own player as it spawns there: the host's spawn doesn't carry its position (its
+## owner drives that, so it would start at the zone's centre), so it goes to the same spot
+## the host put it on (player_spawn).
+func _on_player_entered(node: Node) -> void:
+	var me := multiplayer.get_unique_id()
+	if not multiplayer.is_server() and node is Node3D and String(node.name) == str(me):
+		(node as Node3D).position = player_spawn(me)
 
 
 func _on_peer_joined(id: int) -> void:
