@@ -404,6 +404,23 @@ func _test_ai_body() -> void:
 	mover.want_stance = S.PRONE
 	await _seconds(1.5)
 	check(m.stance == S.PRONE and absf(_speed(mover) - SoldierMovement.PRONE_SPEED) < 0.05, "want_stance prone: crawls at %.2f m/s" % _speed(mover))
+	# Audit L4-02: no sprint where there's no room to stand up (low standing under a 1.68 m roof).
+	var low_roof := _box(mover.global_position + Vector3(0, 1.78, 0), Vector3(40, 0.2, 40))
+	mover.move_input = Vector2.ZERO
+	mover.want_crouch = false
+	mover.want_sprint = false
+	mover.want_stance = S.STAND_LOW
+	await _seconds(1.0)
+	var rested := m.stamina
+	mover.move_input = Vector2(0, -1)
+	mover.want_sprint = true
+	await _seconds(1.0)
+	check(m.stance == S.STAND_LOW and not m.is_sprinting and _speed(mover) < 4.0 and m.stamina >= rested,
+		"under a low roof it can't stand tall, so no sprint: no sprint speed, no stamina used (%.1f m/s)" % _speed(mover))
+	low_roof.free()
+	mover.want_stance = -1
+	await _seconds(1.0)
+	check(m.is_sprinting and _speed(mover) > 5.0, "out from under it, it sprints again (%.1f m/s)" % _speed(mover))
 	mover.want_stance = -1
 	mover.want_crouch = false
 	mover.want_sprint = false

@@ -350,11 +350,13 @@ func show_flash(pos: Vector3) -> void:
 	_burst(pos, Color.WHITE, 1.0, 0.15)
 
 
-## A smoke cloud on every peer, in its colour (a name in SmokeCloud.COLOURS).
+## A smoke cloud on every peer, in its colour (a name in SmokeCloud.COLOURS), `age` seconds
+## old (a late joiner gets the clouds already out: _send_smoke_to).
 @rpc("authority", "call_local", "reliable")
-func spawn_smoke(pos: Vector3, colour: String) -> void:
+func spawn_smoke(pos: Vector3, colour: String, age := 0.0) -> void:
 	var cloud := SmokeCloud.new()
 	cloud.colour = colour
+	cloud.age = age
 	add_child(cloud)
 	cloud.global_position = pos
 
@@ -626,8 +628,17 @@ func _on_peer_joined(id: int) -> void:
 	if not multiplayer.is_server():
 		return
 	voxel_world.send_edit_log_to(id)
+	_send_smoke_to(id)
 	_add_player(id)
 	get_tree().create_timer(JOIN_ROLE_WAIT_S).timeout.connect(_on_join_role_timeout.bind(id))
+
+
+## Host: the smoke clouds still out, to a player who just joined (audit L2-01: they missed the
+## one-time spawn, so the AI could hide in smoke they couldn't see).
+func _send_smoke_to(id: int) -> void:
+	for cloud in SmokeCloud.active:
+		if is_instance_valid(cloud) and is_ancestor_of(cloud) and not cloud.is_queued_for_deletion():
+			spawn_smoke.rpc_id(id, cloud.global_position, cloud.colour, cloud.age)
 
 
 ## Host: a joined player's pick never came; they play DEFAULT_JOIN_ROLE.

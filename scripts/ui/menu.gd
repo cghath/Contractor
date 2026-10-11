@@ -18,9 +18,17 @@ var _attempts_left := 0
 
 
 func _ready() -> void:
+	# Centred in the window, and scrollable when the window is too small for it (audit L8-01:
+	# the panel used to start at the centre and run off a small window).
+	var scroll := ScrollContainer.new()
+	add_child(scroll)
+	scroll.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	var centre := CenterContainer.new()
+	centre.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	centre.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.add_child(centre)
 	var panel := PanelContainer.new()
-	add_child(panel)
-	panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	centre.add_child(panel)
 	var box := VBoxContainer.new()
 	box.custom_minimum_size = Vector2(380, 0)
 	box.add_theme_constant_override(&"separation", 10)

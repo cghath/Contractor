@@ -44,6 +44,27 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 - **`tools/test_runner_check.sh` (new):** checks the runner against a fake engine: a pass
   passes; a failure, a script error with exit 0, a missing summary, a hang and a failed import
   fail. CI runs it as its own job, and the rerun-on-failure step has a timeout now.
+### Late joiners, bad input, reloads, sprinting, fire cadence and the menu (audit L2-01, L2-02, L3-02, L4-02, L6-01, L8-01, L10-01)
+
+#### Fixed
+
+- **Late joiners see smoke already out,** at its age (`CompoundLevel._send_smoke_to`); before,
+  the AI could hide in a cloud they couldn't see.
+- **Late joiners see a carried or dragged body as not solid,** from the replicated carry state.
+- **Bad coordinates are refused:** a shot, throw or squad order from a NaN or infinite point, or
+  with no direction, is turned down before a round or grenade is spent (`Soldier.usable_point`,
+  `usable_direction`); map markers, extraction points and reports check theirs too.
+- **A reload started before dying no longer finishes on the respawn rifle.**
+- **No sprint without room to stand tall:** under a low roof a low stance stays at walking
+  speed and uses no stamina.
+- **Shots bunched by the network still count:** the host's fire gate lets its schedule run up
+  to 0.15 s behind (`Soldier.FIRE_BUNCH_S`), so correctly paced shots aren't dropped under
+  jitter, while a flood still fires at the weapon's rate (2 at once at most after a pause).
+- **Main menu:** centred in the window, and it scrolls in a small window instead of running
+  off it.
+- **Tests:** gameplay (bad input with a control shot, reload across a death, fire cadence),
+  net (smoke and a dragged body for a late joiner), movement (no sprint under a low roof).
+
 ### Saves can't lose progress (audit L1-01, L1-05)
 
 #### Fixed

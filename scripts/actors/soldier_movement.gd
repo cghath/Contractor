@@ -186,13 +186,15 @@ func step(delta: float) -> void:
 	else:
 		_lean_held = 0  # keys released while the mouse was free
 	is_sprinting = sprint and input != Vector2.ZERO and not down and not burdened and is_standing() and can_sprint()
+	if is_sprinting and (stance != Stance.STAND_HIGH or side != 0):
+		side = 0
+		# Sprinting needs full height: no sprint (speed or stamina) where there's no room to
+		# stand up (audit L4-02: under a low roof it used to sprint from a low stance).
+		is_sprinting = set_stance(Stance.STAND_HIGH)
 	var exerting := is_sprinting or jumped or (input != Vector2.ZERO and load_fraction() >= EXTREME_LOAD)
 	if exerting and not _exerting:
 		body.report_exertion()  # a surgically closed chest wound may reopen
 	_exerting = exerting
-	if is_sprinting and (stance != Stance.STAND_HIGH or side != 0):
-		side = 0
-		set_stance(Stance.STAND_HIGH)
 	update_stamina(delta, is_sprinting, input != Vector2.ZERO)
 	var target := (body.global_basis * Vector3(input.x, 0.0, input.y)).normalized() * top_speed(is_sprinting, down)
 	var before := Vector3(body.velocity.x, 0.0, body.velocity.z)

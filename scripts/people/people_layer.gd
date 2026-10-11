@@ -573,7 +573,7 @@ func request(action: String, path: NodePath) -> void:
 ## A player reports the enemies around `point` by radio (command menu). Checked on the host.
 @rpc("any_peer", "call_local", "reliable")
 func request_report(point: Vector3) -> void:
-	if not multiplayer.is_server():
+	if not multiplayer.is_server() or not point.is_finite():
 		return
 	var actor := _sender()
 	if actor == null or not actor.vitals.is_up():

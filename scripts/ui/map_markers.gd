@@ -131,14 +131,22 @@ func server_clear(channel := "") -> void:
 
 @rpc("any_peer", "call_local", "reliable")
 func _server_add(kind: String, points: PackedVector2Array, text: String, colour: String, channel: String) -> void:
-	if multiplayer.is_server() and channel != "intel":  # intel comes from the game, not from players
+	if multiplayer.is_server() and channel != "intel" and _finite(points):  # intel comes from the game, not from players
 		server_add({"kind": kind, "points": points, "text": text, "colour": colour, "channel": channel, "author": _sender()})
 
 
 @rpc("any_peer", "call_local", "reliable")
 func _server_move(id: int, to: Vector2) -> void:
-	if multiplayer.is_server():
+	if multiplayer.is_server() and to.is_finite():
 		server_move(id, to)
+
+
+## Whether every point a player sent is finite (audit L6-01).
+static func _finite(points: PackedVector2Array) -> bool:
+	for p in points:
+		if not p.is_finite():
+			return false
+	return true
 
 
 @rpc("any_peer", "call_local", "reliable")

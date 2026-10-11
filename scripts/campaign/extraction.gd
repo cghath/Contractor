@@ -428,7 +428,7 @@ static func _source_text(source: String) -> String:
 
 @rpc("any_peer", "call_local", "reliable")
 func _server_point_at(pos: Vector2) -> void:
-	if multiplayer.is_server():
+	if multiplayer.is_server() and pos.is_finite():  # audit L6-01
 		server_add_point(pos, "grid")
 
 

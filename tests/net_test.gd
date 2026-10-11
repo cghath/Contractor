@@ -84,6 +84,8 @@ func _stage_drag() -> void:
 	await get_tree().create_timer(0.3).timeout
 	dragged.vitals.server_damage(500.0)
 	print("[host] staged a drag: %s" % dragger.server_pick_up_body(dragged, Soldier.DRAG, INF))
+	# Smoke already out when the client joins (audit L2-01): it must see it too, as old as here.
+	level.spawn_smoke.rpc(Vector3(-12, 0.1, 30), "purple")
 
 
 func _give_kit(id: int) -> void:
@@ -117,6 +119,9 @@ func _run_client() -> void:
 		await get_tree().process_frame
 	print("Client over ENet")
 	check(me != null and me.inventory.slots[&"primary"] == &"m4a1", "kit given by the host replicated to the client")
+	var smoke := SmokeCloud.clouds_of("purple")
+	check(smoke.size() == 1 and smoke[0].age > 2.0 and smoke[0].global_position.distance_to(Vector3(-12, 0.1, 30)) < 0.1,
+		"smoke that went off before joining is here, as old as on the host (%s)" % ["%.1f s" % smoke[0].age if smoke.size() == 1 else "none"])
 	if me == null:
 		_finish()
 		return
@@ -251,6 +256,7 @@ func _check_late_drag() -> void:
 	var strap := dragged.model.torso.to_global(CharacterModel.STRAP_POINTS[0])
 	check(dragger.model.hand_position(true).distance_to(strap) < 0.08 and dragged.model.torso.global_basis.z.dot(Vector3.UP) < -0.6,
 		"drawn on the client: the casualty on its back, the dragger's hands on its straps")
+	check(dragged.collision_layer == 0, "and the dragged body doesn't block (no collision) for a late joiner either (audit L2-02)")
 
 
 func _dropped_helmet() -> WorldItem:
