@@ -123,6 +123,7 @@ include Voxel Tools.
 | In the command menu | 1-9 and 0 pick an entry, or scroll the mouse wheel and click the middle button; Backspace goes back, Esc closes |
 | Tab | Inventory screen (Star Citizen style): drag items between slots, pouches and containers, onto the soldier to equip or onto the ground panel to drop; right-click a tile for its actions (equip, attach, stow, use, load magazines, drop); double-click for the first. The MOLLE button (or clicking the carrier twice) shows the carrier's attach points for pouches, a knife or a radio |
 | Esc | Close the inventory screen / release mouse |
+| M | Map: grid references under the cursor, zoom and pan, place and share markers and lines |
 | Home | Save zone (host) |
 | K | Debug builds only: costs 24% of your blood and adds pain; two presses knock you out (with no wound bleeding, blood creeps back at 1.5% a minute and you come round after a few minutes) |
 
@@ -224,7 +225,7 @@ Run every suite with one command (from Git Bash on Windows):
 GODOT="$HOME/Downloads/GodotVoxel_1.7/godot.windows.editor.x86_64.exe" tools/run_tests.sh
 ```
 
-There are fifteen suites; `tools/run_tests.sh` runs them all (about 8 minutes), or name the
+There are twenty suites; `tools/run_tests.sh` runs them all (about 12 minutes), or name the
 ones you want (`tools/run_tests.sh wounds medical`). Each prints PASSED or FAILED and exits
 with its failure count. Set `CONTRACTOR_TEST_TAG` and `CONTRACTOR_PORT` when running two at once.
 
@@ -241,6 +242,7 @@ suite on the Actions tab means that branch isn't ready for `dev`.
 | Wounds, armor, medical | `tests/<name>_test.tscn` | The wound model and consciousness, armor ratings and voxel plates, the field kit and treatments |
 | Casualty, logistics | `tests/<name>_test.tscn` | AI casualty care, bodies and their save; loose ammo, magazines, coloured smoke and navigation |
 | Materials, animations | `tests/<name>_test.tscn` | Wood, sheet metal and concrete under fire, impact marks; carry, drag, pickup, equip, treat and loot poses |
+| World, contracts, people, base, map | `tests/<name>_test.tscn` | Zones from a seed, module streaming, zone joins; the contract board, negotiation, objectives and debrief; civilians, HVTs and intel; the base hub, roster, hiring, prep and MIA; the map, briefing, extraction and reinforcements (several start client processes) |
 | Scavenge | `tests/scavenge_test.tscn` | What AI takes off a body (ammo for its own weapon, missing medical items and grenades, armor when calm, a rifle only when dry, the load limit), dead players' gear left alone, going to a body, one unit per body, orders and contact |
 
 The gameplay and network tests use their own save zones and never touch your compound save.
@@ -280,7 +282,8 @@ a release:
 - Every inventory change, including each shot fired, re-sends the whole inventory snapshot. That's fine on a LAN; it needs a lighter path (for example, ammo only) before internet play.
 - Reloading and healing can't be cancelled, and taking damage doesn't interrupt them.
 - A vest or backpack can't be dropped while it still has things in its own pockets (its MOLLE pouches and their contents go with it). Empty it from the inventory screen first.
-- The voxel world has no stream, so it's limited to `VoxelWorld.BOUNDS`. The voxel edit log grows with every bullet hole and is never compacted.
+- The mission loop (wave 4A) isn't wired end to end yet: the contract board, the campaign base, the test contract with briefing and extraction, and the test zone each start from their own main-menu entry. The contract board still deploys into the compound, not a zone. Mission types are placeholders. Zones have placeholder modules, plain box stand-ins at distance, no roads, vegetation or terrain textures, and rendering cost hasn't been measured with a display. AI navigation bakes near players and fighting AI only, so a long move order is walked in steps.
+- The voxel edit log grows with every bullet hole and is never compacted.
 - Player inventories aren't saved yet; only the zone's state is.
 - Medical depth (wave 3, built): IV and IO lines, fluids, pressure bags, per-lung breathing, the decompression needle, heart rate, the four drugs, CPR, the defibrillator, surgery kits, blasts, falls, burns, hypothermia and deafness are in. Heart wounds have no field fix. Nothing sets a body on fire yet (burns come from close blasts), and deafness only muffles the sound bus (the game has no sounds yet). A line can't be taken out once placed. Breathing has no sound yet, and blood in a lung (hemothorax) has no field fix (no chest drain).
 - Bodies: a zone reload respawns the full friendly squad alive while dead squadmates' saved bodies also come back, so their gear exists twice (AI persistence is wave 4; dead hostiles aren't respawned). Loot all hands a carrier over with its pouches empty and their contents as separate items, so they land in the looter's own pouches.
