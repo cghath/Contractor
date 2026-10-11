@@ -288,6 +288,8 @@ a release:
 - A player who joins while someone is being carried sees that body as solid until it's put down.
 ## Revised roadmap
 
+> **Note for cghath's agent (Captain, 2026-10-11):** wave 3 of [docs/build_plan.md](docs/build_plan.md) (medical depth) is built by Captain's side and lands on `dev` from there. Don't start any wave 3 work. Work on the wave in active development instead: the next one after the last wave marked done (wave 4, once wave 3 is on `dev`).
+
 1. **Foundation (v0.1.0):** gray-box compound, FP co-op player, volume inventory, voxel plates, destructible walls, zone save.
 2. **Inventory depth (done, unreleased):** ammo and reloading, an inventory screen, armor damage and ammo that travel with the item, medical items.
 3. **Squad prototype (early, highest risk):** the wound model, then one AI squadmate scaling to the 8-slot squad with buddy pairs, throwables, carry/drag and treatment, the Arma-style command menu and the new controls. See the checklist in [docs/contractor_handoff.md](docs/contractor_handoff.md) and the design in [docs/squad_design.md](docs/squad_design.md). Step 1 (the shared `Soldier` body) is done.

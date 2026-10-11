@@ -102,6 +102,26 @@ attachments (branch `fix3/inventory-molle`).
 | W7 | **AI casualty care on the wound model:** the real care order (under fire: smoke, drag, tourniquet; once safe: airway, seal, splint); medics carry the medic-only items; buddies carry casualties after the leader. Phase 3 passes when squadmates rarely die to bad pathing |
 | W8 | **Ammo and kit:** loose rounds and loading magazines; the respawn kit becomes M4, 2 spare mags + 90 loose rounds, 1 smoke, 1 frag; coloured smoke grenades (green, yellow, blue, purple) for the wave 5 supports |
 
+### Waves 3 to 7: how they run (user, 2026-10-11)
+
+- **Chained, a build per wave.** Waves 3, 4, 5 and the systems half of 7 run one after
+  another on the tests alone. After each wave the integrator pushes `dev` and leaves a dated
+  build; Captain playtests any of them when he can, and his feedback becomes fix passes.
+- **Wave 4** builds the mission loop with placeholder mission types (clear a compound,
+  recover an HVT, retrieve intel, destroy a cache) behind one registry, swapped for Noah's
+  types when his pack and the mission brainstorm doc land.
+- **Wave 6 waits** for Captain's calls (reputation tiers, allied troop types, support-menu
+  limits) and the faction set.
+- **Wave 5** leaves out the AH-1Z, MRAPs, Bradley and Abrams until Captain says who fields them.
+- **Wave 7** builds the systems (day and night, weather, NVGs, attachments, assists,
+  controller); the art swap waits for Noah's character, gear, weapon and environment scripts.
+- **Noah's inventory and MOLLE work** (`fix3/inventory-molle`) is in progress on his side:
+  agents leave the inventory screen's layout and the vest's containers alone.
+- **Wave 3 is Captain's side's (Captain, 2026-10-11).** Wave 3 (medical depth, all six
+  parts below) is built by Captain's side and lands on `dev` from there. cghath's agent:
+  don't start any wave 3 work. Work on the wave in active development instead, the next
+  one after the last wave marked done (wave 4 once wave 3 is on `dev`).
+
 ### Wave 3: medical depth (6 parts)
 
 **Status:** built (all six parts) 2026-10-11 by Captain's side, all 14 suites passing;
