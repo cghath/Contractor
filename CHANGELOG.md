@@ -28,6 +28,32 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   with every pouch loaded as a bare 8 L. An empty pouch still folds down to its own size.
 - **The medium carrier's knife no longer clips into the first mag pouch:** its point moved up
   2 cm, level with the heavy carrier's.
+- **The IFAK and radio pouches are no longer inside the upper arm.** Their side points on the
+  medium and heavy carriers moved 13 cm rearward, clear of the arm, the slung rifle and the
+  pack. With the arms hanging (downed, dead, unarmed, the inventory preview) the arm used to
+  hide the IFAK completely.
+- **A looter who goes down lets go of the body.** A squadmate sent to carry that body waited
+  beside it for good.
+- **An AI can't get stuck walking to a body.** With a player standing still between them, it
+  pushed into the player for good. Like a medic reaching a casualty, it now sidesteps after
+  1.5 s without getting closer and leaves the body for a while after 12 s.
+- **"Scavenge that body" works past 40 m from the leader.** The order went out, then was
+  quietly dropped by the leash that should only hold back scavenging on his own initiative.
+- **Drag and drop works in the inventory screen.** Pressing a tile rebuilt every tile, which
+  freed the one under the mouse, so Godot never started the drag. A click now only restyles
+  the selection.
+- **A right-click menu won't act on the wrong item.** If what it was opened on moves or goes
+  while it's open (a reload, loading magazines), choosing an action does nothing.
+- The scavenge tests now check that a looter lets go of the body, with two squadmates
+  wanting the same body, and that the leash spares an order.
+
+#### Changed
+
+- **Grenade and binocular pouches go on the chest, where they can be seen.** The medium
+  carrier has two new Chest points on the upper front; grenade and binocular pouches take them
+  first, a grenade pouch then a free mag point. Every back point sits inside the pack, so the
+  grenadier's grenades and the team leader's and marksman's binoculars were hidden. GP and
+  sustainment pouches stay on the back.
 
 ### Wave 4 groundwork and a spall pain fix (cghath, 2026-10-11)
 

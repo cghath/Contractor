@@ -294,6 +294,8 @@ func _physics_process(delta: float) -> void:
 		_stop()
 		if care != Care.NONE:
 			_end_care()
+		if loot_body != null:
+			_end_scavenge()  # let go of the body, so a bearer waiting on it isn't stuck
 		body.ai_status = body.vitals.condition_text()
 		return
 	_grenade_cd -= delta
@@ -1008,7 +1010,7 @@ func _care_reach(contact: bool) -> void:
 		_has_destination = false
 		body.want_crouch = true
 		return
-	if not _reach_progress(d):
+	if not _reach_progress(d, casualty.global_position, _give_up_casualty):
 		return  # gave up: the next responder takes them
 	_go(_detour if Soldier._now() < _detour_until else casualty.global_position, true)
 	if d > CASUALTY_REACH:
@@ -1024,24 +1026,25 @@ func _care_reach(contact: bool) -> void:
 	care = Care.TREAT
 
 
-## Watches the approach to the casualty `d` metres away. No closer for REACH_STUCK_S
-## (something the navmesh doesn't know about is in the way, such as a player) means a
-## sidestep, alternating sides, with a try at the direct way in between; no closer for
-## REACH_GIVE_UP_S means handing the casualty on. False once this unit gave up.
-func _reach_progress(d: float) -> bool:
+## Watches the approach to `target` (a casualty, or a body to scavenge) `d` metres away. No
+## closer for REACH_STUCK_S (something the navmesh doesn't know about is in the way, such as
+## a player) means a sidestep, alternating sides, with a try at the direct way in between;
+## no closer for REACH_GIVE_UP_S calls `give_up` (handing the casualty on, leaving the body).
+## False once this unit gave up.
+func _reach_progress(d: float, target: Vector3, give_up: Callable) -> bool:
 	var now := Soldier._now()
 	if d < _reach_best - REACH_PROGRESS_M or d <= CASUALTY_REACH:
 		_reach_best = minf(d, _reach_best)
 		_reach_progress_at = now
 		return true
 	if now - _reach_progress_at >= REACH_GIVE_UP_S:
-		_give_up_casualty()
+		give_up.call()
 		return false
 	if now - _reach_progress_at >= REACH_STUCK_S and now >= _detour_next:
 		_detour_side = -_detour_side
 		_detour_until = now + DETOUR_S
 		_detour_next = now + DETOUR_S * 2.5
-		var to := casualty.global_position - body.global_position
+		var to := target - body.global_position
 		to.y = 0.0
 		var side := Vector3(-to.z, 0.0, to.x).normalized() * _detour_side
 		var map := body.get_world_3d().navigation_map
@@ -1160,7 +1163,7 @@ func _carry_body() -> void:
 		return
 	if body.carrying != casualty:
 		var looter := SquadAI.of(casualty.scavenged_by) if is_instance_valid(casualty.scavenged_by) else null
-		if looter and looter != self and looter.loot_body == casualty:
+		if looter and looter != self and looter.loot_body == casualty and looter.body.vitals.is_up():
 			# Someone is cross-loading from the body: wait beside it until they're done.
 			if _flat_distance(casualty.global_position) > CASUALTY_REACH + 1.5:
 				_go(casualty.global_position, true)
@@ -1247,7 +1250,7 @@ func _may_scavenge(dead: Soldier, ordered := false) -> bool:
 	var other := dead.scavenged_by
 	if is_instance_valid(other) and other != body and other.vitals.is_up() and SquadAI.of(other) and SquadAI.of(other).loot_body == dead:
 		return false
-	if body.faction == &"friendly" and squad and is_instance_valid(squad.leader) and squad.leader != body \
+	if not ordered and body.faction == &"friendly" and squad and is_instance_valid(squad.leader) and squad.leader != body \
 			and dead.global_position.distance_to(squad.leader.global_position) > SCAVENGE_LEASH_M:
 		return false
 	return true
@@ -1272,6 +1275,9 @@ func _do_scavenge() -> void:
 		loot_body.scavenged_by = body
 		_loot_pick = {}
 		_loot_until = -1.0
+		_reach_best = INF
+		_reach_progress_at = Soldier._now()
+		_detour_until = -1.0
 		var callouts := Callouts.of(body)
 		if callouts:
 			callouts.scavenging(body, loot_body)
@@ -1279,8 +1285,10 @@ func _do_scavenge() -> void:
 		_end_scavenge()
 		_think_cd = 0.0
 		return
-	if _flat_distance(loot_body.global_position) > CASUALTY_REACH:
-		_go(loot_body.global_position, false)
+	var d := _flat_distance(loot_body.global_position)
+	if d > CASUALTY_REACH:
+		if _reach_progress(d, loot_body.global_position, _give_up_body):
+			_go(_detour if Soldier._now() < _detour_until else loot_body.global_position, false)
 		return
 	_has_destination = false
 	body.want_crouch = true
@@ -1304,6 +1312,18 @@ func _do_scavenge() -> void:
 	_loot_pick = pick
 	_loot_until = now + float(pick.seconds)
 	body.model.server_loot(loot_body, float(pick.seconds) >= 3.0)
+
+
+## Couldn't get to the body (a player standing in the way, say): leaves it for
+## SCAVENGE_SKIP_S, and an order to it lapses.
+func _give_up_body() -> void:
+	if is_instance_valid(loot_body):
+		_looted[loot_body.get_instance_id()] = Soldier._now() + SCAVENGE_SKIP_S
+		if scavenge_order == loot_body:
+			scavenge_order = null
+	_end_scavenge()
+	_has_destination = false
+	_think_cd = 0.0
 
 
 func _end_scavenge() -> void:

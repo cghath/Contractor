@@ -61,6 +61,10 @@ var _detail_box: VBoxContainer
 var _view_buttons: Dictionary = {}  # View -> Button
 var _menu: PopupMenu
 var _menu_actions: Array = []
+var _menu_src: Dictionary = {}  # the tile the open menu is for, to check it's still there
+## Tiles on screen with their sources, so a click can restyle the selection without
+## rebuilding them (rebuilding frees the pressed tile, and a drag can never start).
+var _tiles: Array = []  # [tile, src, empty]
 var _point_tiles: Dictionary = {}   # point id -> its tile (MOLLE view lines)
 var _yaw := 0.0
 var _turning := false
@@ -388,6 +392,7 @@ func _redraw() -> void:
 	if inv.slots[&"vest"] == &"" and view == View.MOLLE:
 		view = View.LOADOUT
 	_validate_selection()
+	_tiles.clear()
 	var mass := inv.total_mass()
 	_mass_label.text = "MASS  %.1f kg" % mass
 	_mass_bar.value = mass
@@ -753,10 +758,9 @@ func _tile(src: Dictionary, title: String, readout: String, id: StringName, plac
 	var tile := PanelContainer.new()
 	tile.custom_minimum_size = WIDE_TILE if wide else TILE
 	tile.mouse_filter = Control.MOUSE_FILTER_STOP
-	var chosen := _is_selected(src)
 	var empty := id == &""
-	var edge := COL_WARN if chosen else (COL_EDGE if not empty else Color(COL_EDGE, 0.6))
-	tile.add_theme_stylebox_override(&"panel", _box(COL_TILE if not empty else Color(COL_TILE, 0.5), edge, 2 if chosen else 1))
+	_style_tile(tile, _is_selected(src), empty)
+	_tiles.append([tile, src, empty])
 	var box: BoxContainer = HBoxContainer.new() if wide else VBoxContainer.new()
 	box.add_theme_constant_override(&"separation", 6 if wide else 1)
 	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -822,10 +826,15 @@ func _tile_input(event: InputEvent, src: Dictionary, tile: Control) -> void:
 			return
 		else:
 			selected = src
+			_restyle_tiles()
+			_redraw_details()
+			tile.accept_event()
+			return
 		_redraw()
 	elif mb.button_index == MOUSE_BUTTON_RIGHT:
 		selected = src
 		_redraw_details()
+		_menu_src = src.duplicate()
 		_open_menu(_actions_for(src))
 	tile.accept_event()
 
@@ -845,6 +854,9 @@ func _open_menu(actions: Array) -> void:
 
 
 func _on_menu(id: int) -> void:
+	if not _still_there(_menu_src):
+		_redraw()  # it moved or went while the menu was open: don't act on what's there now
+		return
 	if id >= 0 and id < _menu_actions.size():
 		_menu_actions[id][1].call()
 
@@ -955,6 +967,39 @@ static func _box(bg: Color, edge: Color, width: int) -> StyleBoxFlat:
 	box.content_margin_top = 4
 	box.content_margin_bottom = 4
 	return box
+
+
+func _style_tile(tile: PanelContainer, chosen: bool, empty: bool) -> void:
+	var edge := COL_WARN if chosen else (COL_EDGE if not empty else Color(COL_EDGE, 0.6))
+	tile.add_theme_stylebox_override(&"panel", _box(COL_TILE if not empty else Color(COL_TILE, 0.5), edge, 2 if chosen else 1))
+
+
+func _restyle_tiles() -> void:
+	for t: Array in _tiles:
+		if is_instance_valid(t[0]):
+			_style_tile(t[0], _is_selected(t[1]), t[2])
+	if _overlay:
+		_overlay.queue_redraw()  # the MOLLE view's line to the selected point
+
+
+## Whether what tile source `src` pointed at is still there (same item, same place).
+func _still_there(src: Dictionary) -> bool:
+	if src.is_empty():
+		return false
+	var inv := player.inventory
+	match String(src.kind):
+		"entry":
+			var list: Array = inv.containers.get(src.container, [])
+			return src.index < list.size() and list[src.index].id == src.get("id")
+		"slot":
+			return inv.slots.get(src.slot, &"") == src.get("id", inv.slots.get(src.slot, &""))
+		"point":
+			return StringName(inv.attachment(src.point).get("id", "")) == src.get("id", StringName(inv.attachment(src.point).get("id", "")))
+		"nearby":
+			return get_node_or_null(src.path) != null
+		"hands":
+			return inv.hands != &""
+	return true
 
 
 static func _clear(node: Node) -> void:

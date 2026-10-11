@@ -277,6 +277,16 @@ func _test_molle_host() -> void:
 		drop.call()
 	check(inv.attachment(&"pistol_1").get("id") == &"pouch_pistol_mag", "and it attaches it")
 	check(not screen.drop_action({"kind": "slot", "slot": &"primary", "id": &"m4a1"}, {"kind": "point", "point": &"mag_2"}).is_valid(), "a rifle can't be dropped on an attach point")
+	await _frames(2)
+	var pressed: Array = screen._tiles.filter(func(t: Array) -> bool: return t[1].kind == "slot" and t[1].slot == &"primary")[0]
+	var press := InputEventMouseButton.new()
+	press.button_index = MOUSE_BUTTON_LEFT
+	press.pressed = true
+	screen._tile_input(press, pressed[1], pressed[0])
+	check(is_instance_valid(pressed[0]) and pressed[0].is_inside_tree() and not pressed[0].is_queued_for_deletion() and screen._is_selected(pressed[1]),
+		"pressing a tile selects it and keeps it, so a drag can start from it")
+	screen._menu_src = {"kind": "entry", "container": &"backpack", "index": 99, "id": &"m4a1"}
+	check(not screen._still_there(screen._menu_src), "a menu for an entry that has gone does nothing")
 	screen._set_view(InventoryScreen.View.MOLLE)
 	await _frames(2)
 	check(screen._point_tiles.size() == inv.attach_points().size(), "the MOLLE view lays out every attach point (%d)" % screen._point_tiles.size())

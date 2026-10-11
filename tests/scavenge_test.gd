@@ -209,6 +209,10 @@ func _test_player_body() -> void:
 	check(not SquadAI.of(rifleman)._may_scavenge(dead), "a dead player's body (with its gear marker) is left for the player")
 	check(squad().order_scavenge(player, dead.global_position, PackedStringArray()) != "", "and the command menu won't send anyone to it")
 	dead.server_remove_body()
+	var far := _dead_hostile(player.global_position + Vector3(0, 0, -(SquadAI.SCAVENGE_LEASH_M + 10.0)))
+	check(not SquadAI.of(rifleman)._may_scavenge(far) and SquadAI.of(rifleman)._may_scavenge(far, true),
+		"a body past the leash: he won't wander to it, but an order sends him")
+	far.server_remove_body()
 
 
 # --- Behaviour ----------------------------------------------------------------------
@@ -216,28 +220,35 @@ func _test_player_body() -> void:
 func _test_goes_and_takes() -> void:
 	print("Going through a body")
 	var rifleman := _role(Roles.RIFLEMAN)
-	var ai := SquadAI.of(rifleman)
 	_strip_mags(rifleman, &"mag_556", 1)
+	# A second squadmate short of 5.56 too, so two want the same body.
+	var other: Soldier = _squad().filter(func(s: Soldier) -> bool: return s != rifleman and s.inventory.slots[&"primary"] == &"m4a1")[0]
+	var other_saved := other.inventory.net_state.duplicate(true)
+	_strip_mags(other, &"mag_556", 1)
 	var dead := _dead_hostile(player.global_position + Vector3(3, 0, -3))
 	var mags_before := rifleman.inventory.count_of(&"mag_556")
+	var other_before := other.inventory.count_of(&"mag_556")
 	var on_body := dead.inventory.count_of(&"mag_556")
 	var ground := _item_ids()
 	var statuses := {}
 	var claims := [0]
 	var watch := func() -> bool:
 		statuses[rifleman.ai_status] = true
+		statuses[other.ai_status] = true
 		var looters := _squad().filter(func(s: Soldier) -> bool: return SquadAI.of(s).loot_body == dead).size()
 		claims[0] = maxi(claims[0], looters)
-		return rifleman.inventory.count_of(&"mag_556") > mags_before and ai.loot_body == null
+		var took := rifleman.inventory.count_of(&"mag_556") > mags_before or other.inventory.count_of(&"mag_556") > other_before
+		return took and looters == 0
 	var done := await _wait_until(watch, 40.0)
-	check(done, "short of magazines, a rifleman goes to a dead enemy nearby and takes some (%d -> %d; %s)"
-		% [mags_before, rifleman.inventory.count_of(&"mag_556"), statuses.keys()])
-	check(statuses.has("Searching the body"), "the HUD shows him searching the body")
-	check(claims[0] <= 1, "one unit at a time on a body (%d)" % claims[0])
+	check(done, "short of magazines, a squadmate goes to a dead enemy nearby and takes some (%d -> %d, %d -> %d; %s)"
+		% [mags_before, rifleman.inventory.count_of(&"mag_556"), other_before, other.inventory.count_of(&"mag_556"), statuses.keys()])
+	check(statuses.has("Searching the body"), "the HUD shows the looter searching the body")
+	check(claims[0] <= 1, "two want it, one unit at a time on the body (%d)" % claims[0])
 	check(dead.inventory.count_of(&"mag_556") < on_body and _new_items(ground, dead.global_position, 10.0).is_empty(),
 		"what he took came off the body, nothing went on the ground")
 	check(dead.has_gear() and dead.inventory.slots[&"primary"] != &"", "the rest stays on the body for players (its rifle too)")
-	check(dead.scavenged_by == null or dead.scavenged_by != rifleman or ai.loot_body == null, "done, he lets go of it")
+	check(dead.scavenged_by == null, "done, he lets go of it (%s)" % [dead.scavenged_by])
+	other.inventory.net_state = other_saved
 	dead.server_remove_body()
 
 

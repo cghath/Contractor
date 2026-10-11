@@ -338,9 +338,9 @@ func _test_blocked_route() -> void:
 	# One that can't get closer at all gives up after REACH_GIVE_UP_S and hands him on.
 	_place(golf, Vector3(6, 0.1, 30))
 	golf_ai._take_casualty(echo)
-	golf_ai._reach_progress(12.0)
+	golf_ai._reach_progress(12.0, echo.global_position, golf_ai._give_up_casualty)
 	golf_ai._reach_progress_at -= SquadAI.REACH_GIVE_UP_S + 0.1
-	var kept := golf_ai._reach_progress(12.0)
+	var kept := golf_ai._reach_progress(12.0, echo.global_position, golf_ai._give_up_casualty)
 	check(not kept and golf_ai.casualty == null and echo.care_by != golf and golf_ai._skipping(echo),
 		"a responder stuck for %.0f s lets go of the casualty and leaves him to others for a while" % SquadAI.REACH_GIVE_UP_S)
 	var next := SquadAI.responder_for(echo)

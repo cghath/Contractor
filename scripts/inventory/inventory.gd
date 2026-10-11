@@ -35,7 +35,7 @@ const POCKETS_L := 2.0
 const MOLLE_PREFIX := "molle:"
 ## Display names of attach point types.
 const POINT_TYPES := {
-	"mag": "Mag", "pistol": "Pistol mag", "knife": "Knife", "radio": "Radio", "medical": "Medical", "tq": "Tourniquet", "utility": "Utility",
+	"mag": "Mag", "pistol": "Pistol mag", "knife": "Knife", "radio": "Radio", "medical": "Medical", "tq": "Tourniquet", "utility": "Utility", "chest": "Chest",
 }
 
 ## Replicated snapshot. Always assign a fresh Dictionary so replication sees the change.
