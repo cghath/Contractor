@@ -53,4 +53,17 @@ jobs:
       - name: Run the ${{ matrix.suite }} suite
         env:
           CONTRACTOR_TEST_TAG: ci-${{ matrix.suite }}
-        run: tools/run_tests.sh ${{ matrix.suite }}
+        run: bash tools/run_tests.sh ${{ matrix.suite }}
+
+      # On failure, run the suite again with its full output, keep the tail in the log and
+      # raise the failing checks and script errors as annotations (shown on the run page).
+      - name: Show why ${{ matrix.suite }} failed
+        if: failure() && matrix.suite != 'net'
+        env:
+          CONTRACTOR_TEST_TAG: ci-${{ matrix.suite }}-again
+        run: |
+          "$GODOT" --headless --path . "res://tests/${{ matrix.suite }}_test.tscn" > /tmp/out.txt 2>&1 || true
+          tail -n 200 /tmp/out.txt
+          grep -E '\[FAIL\]|SCRIPT ERROR|Parse Error|ERROR:|TEST (FAILED|PASSED)' /tmp/out.txt | head -n 10 | while IFS= read -r line; do
+            echo "::error title=${{ matrix.suite }}::${line}"
+          done
