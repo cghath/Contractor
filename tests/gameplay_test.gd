@@ -29,6 +29,10 @@ func _ready() -> void:
 	await _test_spread()
 	await _test_downed()
 	await _test_throwables()
+	await _test_bad_input()
+	await _test_reload_across_death()
+	await _test_fire_cadence()
+	await _test_saves()
 	GameState.delete_save()
 	print("GAMEPLAY TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
@@ -101,6 +105,138 @@ func _test_inventory_actions() -> void:
 	check(inv.slots[&"helmet"] == &"helmet", "and equipped again from the backpack")
 	player._server_inventory_action.rpc_id(1, "drop_slot", &"", -1, &"vest", &"")
 	check(inv.slots[&"vest"] == &"plate_carrier", "can't drop a carrier with mags in it")
+
+
+## Audit L6-01: a shot or throw from a non-finite point, or with no direction, is refused before
+## anything is spent, and makes nothing.
+func _test_bad_input() -> void:
+	print("Bad coordinates from a client")
+	await _seconds(1.0)  # past any throw or reload still keeping the hands busy
+	player.vitals.server_reset_health()  # the grenade tests may have knocked us down
+	await _frames(2)
+	player.inventory.strip()  # a clean kit: a loaded rifle, so a refused shot is a real refusal
+	player.inventory.take(&"m4a1")
+	player.inventory.take(&"mag_556", 2)
+	player.inventory.reload(&"primary")
+	player.inventory.take(&"smoke_grenade")
+	var rounds := player.inventory.rounds_in(&"primary")
+	var smokes := player.inventory.count_of(&"smoke_grenade")
+	var clouds := SmokeCloud.active.size()
+	var eye := player.camera.global_position
+	for origin: Vector3 in [Vector3(NAN, 0, 0), Vector3(INF, 0, 0), eye]:
+		var dir := Vector3.ZERO if origin == eye else Vector3.FORWARD
+		player._server_fire.rpc_id(1, origin, dir, &"primary")
+		player._server_throw.rpc_id(1, origin, dir, &"smoke_grenade")
+	player._server_squad_command.rpc_id(1, "move", Vector3(0, NAN, 0), PackedStringArray())
+	await _frames(3)
+	check(player.inventory.rounds_in(&"primary") == rounds and player.inventory.count_of(&"smoke_grenade") == smokes,
+		"NaN, infinite or zero-length shots and throws are refused before a round or grenade is spent (%d rounds, %d smokes)" % [rounds, smokes])
+	await _seconds(0.3)
+	player._server_fire.rpc_id(1, eye, -player.global_basis.z, &"primary")
+	await _frames(3)
+	check(player.inventory.rounds_in(&"primary") == rounds - 1, "while a normal shot right after still fires (%d rounds; up %s, hands '%s')" % [player.inventory.rounds_in(&"primary"), player.vitals.is_up(), player.inventory.hands])
+	await _seconds(4.0)  # past a smoke grenade's fuse
+	check(SmokeCloud.active.size() == clouds, "and no smoke goes off from them")
+
+
+## Audit L10-01: shots that reach the host bunched up (paced right when sent, delayed unevenly by
+## the network) all count, while the weapon's rate still holds: a flood fires no faster.
+func _test_fire_cadence() -> void:
+	print("Fire cadence under bunching")
+	player.inventory.strip()
+	player.inventory.take(&"m4a1")
+	player.inventory.take(&"mag_556", 2)
+	player.inventory.reload(&"primary")
+	var fire := func() -> void: player._server_fire.rpc_id(1, player.camera.global_position, -player.global_basis.z, &"primary")
+	await _seconds(1.0)
+	var start := player.inventory.rounds_in(&"primary")
+	for i in 2:
+		fire.call()
+	await _seconds(0.2)
+	for i in 2:
+		fire.call()
+	await _frames(2)
+	check(start - player.inventory.rounds_in(&"primary") == 4, "two pairs arriving bunched (0.1 s apart on average) all fire (%d of 4)" % (start - player.inventory.rounds_in(&"primary")))
+	await _seconds(1.0)
+	start = player.inventory.rounds_in(&"primary")
+	for i in 10:
+		fire.call()
+	await _frames(2)
+	var burst := start - player.inventory.rounds_in(&"primary")
+	var interval := 60.0 / float(ItemDB.get_item(&"m4a1").stats.rpm)
+	check(burst == 1 + int(Soldier.FIRE_BUNCH_S / interval), "ten in one instant after a pause: only %d fire (the bunching allowance, no more)" % burst)
+	await _seconds(1.0)
+	start = player.inventory.rounds_in(&"primary")
+	var t0 := Time.get_ticks_msec()
+	while Time.get_ticks_msec() - t0 < 1000:
+		fire.call()
+		await get_tree().process_frame
+	var flood := start - player.inventory.rounds_in(&"primary")
+	var most := int(1.0 / interval) + 1 + int(Soldier.FIRE_BUNCH_S / interval) + 1
+	check(flood >= int(1.0 / interval) - 1 and flood <= most, "a request every frame for a second fires at the weapon's rate (%d shots, at most %d)" % [flood, most])
+
+
+## Audit L3-02: a reload started before dying doesn't finish on the rifle you respawn with.
+func _test_reload_across_death() -> void:
+	print("Reload across a death")
+	await _seconds(1.0)
+	player.inventory.consume_round(&"primary")
+	player._server_reload.rpc_id(1, &"primary")
+	await _frames(2)
+	player.vitals.server_kill()  # respawns in the default kit, a fresh M4
+	await _frames(3)
+	player.inventory.consume_round(&"primary")
+	player.inventory.consume_round(&"primary")
+	var after := player.inventory.rounds_in(&"primary")
+	await _seconds(player.reload_seconds(ItemDB.get_item(&"m4a1")) + 0.5)
+	check(after > 0 and player.inventory.rounds_in(&"primary") == after, "the old reload didn't refill the new rifle (%d rounds, still %d)" % [after, player.inventory.rounds_in(&"primary")])
+
+
+## Audit L1-01 and L1-05: a level-placed stack partly taken saves what's left; a save goes through a
+## checked temporary file and keeps a backup; a broken save falls back to it; bad records are
+## skipped and a save with a wrong-typed section is refused, without touching the live state.
+func _test_saves() -> void:
+	print("Saves: partly taken loot, backup, bad records")
+	player.inventory.strip()
+	player.inventory.take(&"assault_pack")  # room for some magazines, not 200
+	var uid := "test_level_stack"
+	level.spawn_item(&"mag_556", 200, player.global_position + Vector3(0, 0.5, -0.6), uid)
+	await _frames(2)
+	var stack: WorldItem = null
+	for node in get_tree().get_nodes_in_group(&"world_items"):
+		if node.uid == uid:
+			stack = node
+	player._server_interact.rpc_id(1, stack.get_path())
+	await _frames(2)
+	var left := stack.count if is_instance_valid(stack) else -1
+	check(left > 0 and left < 200 and GameState.is_looted(uid) and int(GameState.dropped.get(uid, {}).get("count", -1)) == left,
+		"a level stack partly taken is saved with what's left (%d of 200)" % left)
+	GameState.save_zone()
+	GameState.save_zone()  # the first becomes the backup
+	var path := GameState.save_path()
+	check(FileAccess.file_exists(GameState.backup_path(path)) and not FileAccess.file_exists(path + ".tmp"), "saving keeps the previous save as a backup, no temporary file left")
+	GameState.load_zone()
+	check(int(GameState.dropped.get(uid, {}).get("count", -1)) == left, "and after a reload the stack is still %d, not 200" % left)
+	var f := FileAccess.open(path, FileAccess.WRITE)
+	f.store_string("{\"version\": 1, \"looted\": [")  # cut off mid-write
+	f.close()
+	GameState.load_zone()
+	check(int(GameState.dropped.get(uid, {}).get("count", -1)) == left, "a broken save loads its backup instead")
+	var bad := {"version": GameState.SAVE_VERSION, "looted": ["a"], "voxel_edits": [], "bodies": [{"uid": "b1", "pos": [0, 1]}],
+		"dropped": {"ok": {"id": "mag_556", "count": 2, "pos": [0, 1, 0]}, "unknown": {"id": "no_such_item", "count": 1, "pos": [0, 1, 0]},
+			"short_pos": {"id": "mag_556", "count": 1, "pos": [0, 1]}, "zero": {"id": "mag_556", "count": 0, "pos": [0, 1, 0]}}}
+	var test_path := "%s/%s_bad.json" % [GameState.SAVE_DIR, GameState.zone_id]
+	GameState.write_safely(test_path, JSON.stringify(bad))
+	var read := GameState.read_save(test_path)
+	check(read.get("dropped", {}).keys() == ["ok"] and (read.get("bodies", [1]) as Array).is_empty() and read.get("looted", {}).has("a"),
+		"bad records are skipped (unknown item, two-number position, zero count, broken body); the rest loads")
+	bad["dropped"] = []
+	GameState.write_safely(test_path, JSON.stringify(bad))
+	check(GameState.read_save(test_path).is_empty(), "a save whose section has the wrong type is refused")
+	for p: String in [test_path, GameState.backup_path(test_path)]:
+		DirAccess.remove_absolute(p)
+	if is_instance_valid(stack):
+		stack.queue_free()
 
 
 func _test_drop_and_pickup_keep_state() -> void:

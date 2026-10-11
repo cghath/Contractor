@@ -105,8 +105,21 @@ func _test_one_player() -> void:
 	check(_squad().size() == 7, "AI fills the other 7 slots (%d)" % _squad().size())
 	_check_teams("1 player")
 	check(_ai_in_role(Roles.MEDIC).size() == 1 and _ai_in_role(Roles.MEDIC)[0].fire_team == 1, "AI takes only team B's medic slot")
+	# Audit L1-03: the grenadier whose slot the player takes was handed salvage and a part-used
+	# magazine; they stay behind when it goes, its own kit goes with it.
+	var leaving: Soldier = _ai_in_role(Roles.GRENADIER).filter(func(s: Soldier) -> bool: return s.fire_team == 0)[0]
+	leaving.inventory.take(&"electronics_salvage", 3)
+	leaving.inventory.take(&"mag_556", 1, {"rounds": 7})
+	var spot := leaving.global_position
 	level.request_role.rpc_id(1, "grenadier")  # the same request a client sends on join
 	await _frames(3)
+	var near := get_tree().get_nodes_in_group(&"world_items").filter(func(w: Node) -> bool:
+		return not w.is_queued_for_deletion() and (w as Node3D).global_position.distance_to(spot) < 2.0)
+	var ids := near.map(func(w: Node) -> String: return "%s x%d" % [w.item_id, w.count])
+	var salvage := near.filter(func(w: Node) -> bool: return w.item_id == &"electronics_salvage")
+	var part_mag := near.filter(func(w: Node) -> bool: return w.item_id == &"mag_556" and int(w.state.get("rounds", -1)) == 7)
+	check(salvage.size() == 1 and salvage[0].count == 3 and part_mag.size() == 1 and near.size() == 2,
+		"the AI whose slot the player took leaves what it was handed (3 salvage, the 7-round magazine), not its kit (%s)" % [ids])
 	check(player.role == Roles.GRENADIER and player.fire_team == 0, "picking grenadier moves the player to that slot")
 	check(_ai_in_role(Roles.MEDIC).size() == 2 and _squad().size() == 7, "and an AI medic fills team A's medic slot again")
 	_check_teams("after the switch")
@@ -387,9 +400,9 @@ func _test_roster() -> void:
 	var text := player._hud._squad_lines(player)
 	var lines := text.strip_edges().split("\n")
 	check(lines.size() == 9, "the HUD roster lists all 8 slots under its header (%d lines)" % lines.size())
-	check(text.contains("F1 %s [A, Team Leader]: " % _slot(0).name) and text.contains("F8 %s [B, Medic]: " % _slot(7).name), "lines show fire team and role")
+	check(text.contains("F1 %s [A, Team Leader]: " % _slot(0).display_name()) and text.contains("F8 %s [B, Medic]: " % _slot(7).display_name()), "lines show fire team and role")
 	check(text.contains("F3 You [A, Grenadier]"), "including your own")
-	check(text.contains("F2 %s [A, Autorifleman, Red]: " % _slot(1).name), "and colour teams")
+	check(text.contains("F2 %s [A, Autorifleman, Red]: " % _slot(1).display_name()), "and colour teams")
 	var health_shown := false
 	for line in lines:
 		health_shown = health_shown or line.contains("HP") or line.contains("%")
@@ -407,7 +420,7 @@ func _test_callout_rules() -> void:
 	print("Callouts: rules")
 	var first := _slot(0)
 	var second := _slot(1)
-	var line := "%s: Reloading!" % first.name
+	var line := "%s: Reloading!" % first.display_name()
 	# Squadmates talk on their own too: start from a clean slate and only look at these two.
 	callouts._last_by_speaker.clear()
 	callouts._last_by_key.clear()
@@ -420,7 +433,7 @@ func _test_callout_rules() -> void:
 	check(callouts.say(first, &"reloading"), "%s calls Reloading!" % first.name)
 	check(said.call(first, &"reloading")[0].to == PackedInt32Array([1]), "sent to the friendly player (peer 1)")
 	await _frames(1)
-	check(callouts.shown.any(func(c: Dictionary) -> bool: return c.speaker == String(first.name) and c.text == "Reloading!") and line in callouts.current_lines(),
+	check(callouts.shown.any(func(c: Dictionary) -> bool: return c.speaker == first.display_name() and c.text == "Reloading!") and line in callouts.current_lines(),
 		"and shown here as a subtitle")
 	await _frames(2)
 	var subtitles: Label = null
@@ -505,7 +518,7 @@ func _test_callout_events() -> void:
 	casualty.vitals.server_damage(500.0)
 	await _frames(2)
 	var down := _said(&"man_down")
-	var expected := "Man down! %s is down" % casualty.name
+	var expected := "Man down! %s is down" % casualty.display_name()
 	var buddy_name := String(casualty.buddy.name) if is_instance_valid(casualty.buddy) else "?"
 	check(not down.is_empty() and down[-1].text == expected and down[-1].speaker == buddy_name,
 		"%s's buddy calls %s" % [casualty.name, expected])

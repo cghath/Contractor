@@ -41,6 +41,11 @@ const THROW_SPEED := 15.0
 ## Physics layer of soldier bodies ("movers").
 const BODY_LAYER := 1 << 4
 const THROW_BUSY_S := 0.7
+## Host: how far fire requests may arrive bunched together (network delay and jitter) and
+## still count, with the weapon's rate kept over time (audit L10-01: a fixed 30 ms tolerance
+## dropped correctly paced shots under 150 ms jitter). After a pause, at most
+## 1 + FIRE_BUNCH_S x rate shots land at once (2 at 750 rpm).
+const FIRE_BUNCH_S := 0.15
 ## Dead bodies (AI and players alike) stay in the world in this group (host only), lying,
 ## gear and all: lootable, carriable, saved with the zone. See "Death and bodies".
 const DEAD_GROUP := &"dead_bodies"
@@ -61,6 +66,8 @@ const MAX_BODIES := 12
 var active_slot: StringName = &"primary"
 ## Owner-driven, replicated so others see the reload pose.
 var is_reloading := false
+## Owner-driven (players: the aim key; AI: SquadAI), replicated so everyone sees the rifle
+## shouldered.
 var is_aiming := false
 var load_mult := 1.0
 ## The local player's HUD (null for everyone else). Lives on PlayerInput.
@@ -71,6 +78,7 @@ var _next_shot := 0.0         # owner-side fire-rate gate
 var _busy_until := 0.0        # owner-side: reloading or using a medkit
 var _server_next_shot := 0.0  # host-side check
 var _server_busy_until := 0.0
+var _reload_n := 0  # host: counts reloads and deaths; a reload finishes only if it's still the latest (audit L3-02)
 ## Host only: loading magazines from loose rounds (_server_load_mags). Bumping _load_run
 ## stops the one in progress.
 var loading_mags := false
@@ -124,10 +132,24 @@ var role: StringName = &""
 var fire_team := -1
 var squad_slot := -1
 var color_team := ""
+## Shoots from the left shoulder (Handedness). Set by the host (a player's pick, an AI's roll)
+## and replicated by ServerSync; the model mirrors the weapon holds.
+var left_handed := false
+## An AI soldier's surname and nationality (Names), set by the host when it spawns and
+## replicated by ServerSync. display_name() shows the name; the node keeps its callsign.
+var person_name := ""
+var nation := ""
+## Where the host put this body when it spawned (the level's _add_player), sent with the spawn
+## by ServerSync. A client's own player is placed there as it spawns: its position is the
+## owner's to replicate, so the host's spawn doesn't carry it and it would start at the
+## level's origin (and the host would see it jump there).
+var spawn_position := Vector3.ZERO
 ## Host only: when this body died (Soldier._now()), for the body cap; -1 while alive.
 var died_at := -1.0
 ## Host only (tests may lower it): the body cap in force.
 static var body_cap := MAX_BODIES
+## Host only. People (wave 4, PeopleLayer): a cuffed captive can be carried while conscious.
+var carriable_while_up := false
 
 
 func _enter_tree() -> void:
@@ -167,6 +189,8 @@ func stun(seconds: float, from: Vector3) -> void:
 
 func _ready() -> void:
 	add_to_group(&"combatants")
+	if is_local() and not multiplayer.is_server() and spawn_position != Vector3.ZERO:
+		position = spawn_position  # see spawn_position
 	inventory.changed.connect(_on_inventory_changed)
 	vitals.died.connect(_on_died)
 	vitals.went_down.connect(_on_went_down)
@@ -247,10 +271,18 @@ func _process(_delta: float) -> void:
 	# Runs on every peer: active_slot, inventory and head rotation are replicated.
 	model.look_pitch = head.rotation.x
 	model.reloading = is_reloading
+	model.aiming = is_aiming
+	model.left_handed = left_handed
+	model.name_tape = person_name.to_upper()
 	movement.apply_pose()  # model pose, hitbox pose and capsule from the replicated stance
 	CharacterModel.lay_down(self, model, not vitals.is_up())
 	if collision_layer != 0 and is_ai() and vitals.is_dead():
 		collision_layer = 0  # a dead body lies where it fell and doesn't block anyone
+	if collision_layer != 0 and not multiplayer.is_server() \
+			and StringName(model.carry_net.get("mode", &"")) in [CharacterModel.CARRIED, CharacterModel.DRAGGED]:
+		# Carried or dragged, from the replicated state: a player who joined after the lift
+		# missed the _client_lifted event and would see a solid body (audit L2-02).
+		collision_layer = 0
 	if not vitals.is_up():
 		model.hold = CharacterModel.Hold.NONE
 	elif inventory.hands != &"" or (active_weapon() != null and active_slot == &"primary"):
@@ -292,7 +324,7 @@ func _ai_physics(delta: float) -> void:
 	suppression = move_toward(suppression, 0.0, delta * 0.25)
 	if is_reloading and _now() >= _busy_until:
 		is_reloading = false
-	if not vitals.is_up() and is_instance_valid(carried_by):
+	if (not vitals.is_up() or carriable_while_up) and is_instance_valid(carried_by):
 		global_transform = carried_by.carry_transform()
 		velocity = Vector3.ZERO
 		return
@@ -324,7 +356,7 @@ func carry_transform() -> Transform3D:
 func _update_carried() -> void:
 	if carrying == null:
 		return
-	if not is_instance_valid(carrying) or carrying.vitals.is_up() or carrying.carried_by != self or not vitals.is_up():
+	if not is_instance_valid(carrying) or not _movable(carrying) or carrying.carried_by != self or not vitals.is_up():
 		release_carried()
 		return
 	if not carrying.is_ai():
@@ -334,7 +366,7 @@ func _update_carried() -> void:
 ## Host only. Picks up (CARRY) or takes hold of (DRAG) a downed body within `reach`.
 ## Dead bodies can be carried and dragged too.
 func server_pick_up_body(other: Soldier, mode := CARRY, reach := REVIVE_RANGE) -> bool:
-	if other == null or other == self or other.is_queued_for_deletion() or other.vitals.is_up():
+	if other == null or other == self or other.is_queued_for_deletion() or not _movable(other):
 		return false
 	if carrying != null or inventory.hands != &"" or not vitals.is_up():
 		return false
@@ -347,6 +379,11 @@ func server_pick_up_body(other: Soldier, mode := CARRY, reach := REVIVE_RANGE) -
 	carrying = other
 	_set_carry_mode(mode)
 	return true
+
+
+## A body that can be carried or dragged: down or dead, or a cuffed captive (People).
+static func _movable(other: Soldier) -> bool:
+	return not other.vitals.is_up() or other.carriable_while_up
 
 
 ## Host only. Puts down whoever this soldier carries or drags.
@@ -446,24 +483,39 @@ func _from_owner() -> bool:
 	return multiplayer.is_server() and multiplayer.get_remote_sender_id() == owner_peer()
 
 
+## Whether a point a client sent can be used: finite (audit L6-01: a NaN origin made broken
+## objects on every peer). A direction must also have a length.
+static func usable_point(p: Vector3) -> bool:
+	return p.is_finite()
+
+
+static func usable_direction(d: Vector3) -> bool:
+	return d.is_finite() and d.length_squared() > 0.000001
+
+
 @rpc("any_peer", "call_local", "reliable")
 func _server_fire(origin: Vector3, direction: Vector3, slot: StringName) -> void:
 	if not _from_owner() or not vitals.is_up() or inventory.hands != &"":
+		return
+	if not usable_point(origin) or not usable_direction(direction):
 		return
 	var id: StringName = inventory.slots.get(slot, &"")
 	var weapon := ItemDB.get_item(id) if id != &"" else null
 	if weapon == null or weapon.type != "weapon":
 		return
 	var now := _now()
-	if now < _server_next_shot - 0.03 or now < _server_busy_until - 0.1:  # tolerate jitter
+	if now < _server_next_shot or now < _server_busy_until - 0.1:
 		return
 	if not inventory.consume_round(slot):
 		return
 	stop_loading_mags("Stopped loading magazines")  # firing needs your hands
-	_server_next_shot = now + 60.0 / float(weapon.stats.get("rpm", 600))
+	# The weapon's rate holds over time, but shots the network delivered bunched up (paced
+	# right when sent) still count: the schedule may run up to FIRE_BUNCH_S behind now.
+	_server_next_shot = maxf(_server_next_shot, now - FIRE_BUNCH_S) + 60.0 / float(weapon.stats.get("rpm", 600))
 	if origin.distance_to(camera.global_position) > 1.0:
 		origin = camera.global_position  # don't trust a far-off muzzle
 	var result := Ballistics.fire(self, origin, direction.normalized(), weapon)
+	PeopleLayer.server_noise(self, origin)  # people nearby hear it (wave 4)
 	if result.result != "none":
 		CompoundLevel.current(self).show_impact.rpc(result.position, result.normal, result.result)
 	Throwables.server_gunfire(self)  # indoors, sustained fire muffles hearing
@@ -473,7 +525,7 @@ func _server_fire(origin: Vector3, direction: Vector3, slot: StringName) -> void
 ## Any player can command the friendly squad; that makes them its lead.
 @rpc("any_peer", "call_local", "reliable")
 func _server_squad_command(cmd: String, point: Vector3, names: PackedStringArray) -> void:
-	if not _from_owner() or is_ai() or not vitals.is_up():
+	if not _from_owner() or is_ai() or not vitals.is_up() or not usable_point(point):
 		return
 	var squad := CompoundLevel.current(self).squad_for(faction)
 	if squad == null:
@@ -504,7 +556,8 @@ func _server_squad_command(cmd: String, point: Vector3, names: PackedStringArray
 
 @rpc("any_peer", "call_local", "reliable")
 func _server_throw(origin: Vector3, direction: Vector3, id: StringName) -> void:
-	if not _from_owner() or not vitals.is_up() or inventory.hands != &"" or _now() < _server_busy_until - 0.1:
+	if not _from_owner() or not vitals.is_up() or inventory.hands != &"" or _now() < _server_busy_until - 0.1 \
+			or not usable_point(origin) or not usable_direction(direction):
 		return
 	var item := ItemDB.get_item(id)
 	if item == null or not item.stats.has("throwable") or not inventory.remove_one(id):
@@ -513,7 +566,8 @@ func _server_throw(origin: Vector3, direction: Vector3, id: StringName) -> void:
 	if origin.distance_to(camera.global_position) > 1.0:
 		origin = camera.global_position
 	var dir := direction.normalized()
-	CompoundLevel.current(self).server_throw(id, origin + dir * 0.5, velocity + dir * THROW_SPEED + Vector3.UP * 2.0)
+	var carried := velocity if velocity.is_finite() else Vector3.ZERO  # the owner replicates its own velocity
+	CompoundLevel.current(self).server_throw(id, origin + dir * 0.5, carried + dir * THROW_SPEED + Vector3.UP * 2.0, self)
 
 
 @rpc("any_peer", "call_local", "reliable")
@@ -525,9 +579,12 @@ func _server_reload(slot: StringName) -> void:
 		return
 	var seconds := reload_seconds(ItemDB.get_item(id))
 	_server_busy_until = _now() + seconds
-	# The new magazine goes in when the reload finishes, if the same weapon is still there.
+	_reload_n += 1
+	var n := _reload_n
+	# The new magazine goes in when the reload finishes, if the same weapon is still there and
+	# the soldier hasn't died since (a respawn's new rifle isn't the one being reloaded).
 	await get_tree().create_timer(seconds).timeout
-	if is_inside_tree() and inventory.slots.get(slot, &"") == id:
+	if is_inside_tree() and n == _reload_n and vitals.is_up() and inventory.slots.get(slot, &"") == id:
 		inventory.reload(slot)
 
 
@@ -759,6 +816,11 @@ func _server_interact(path: NodePath) -> void:
 		item.queue_free()
 	else:
 		item.count -= taken
+		if item.uid != "" and not GameState.dropped.has(item.uid):
+			# A level-placed stack, partly taken: from now on it saves like a dropped one, with
+			# what's left, so a reload doesn't bring back the full stack (audit L1-01).
+			GameState.item_taken(item.uid)
+			GameState.item_dropped(item.uid, item.item_id, item.count, item.global_position, item.state.duplicate(true))
 		_client_message.rpc_id(owner_peer(), "Took %d, no room for the rest" % taken)
 
 
@@ -1018,7 +1080,9 @@ var carry_mode: StringName = &""
 func display_name() -> String:
 	if body_label != "":
 		return body_label
-	return String(name) if is_ai() else "Player %s" % name
+	if is_ai():
+		return person_name if person_name != "" else String(name)
+	return "Player %s" % name
 
 
 @rpc("any_peer", "call_local", "reliable")
@@ -1072,8 +1136,8 @@ func _server_move_body(path: NodePath, mode: StringName) -> void:
 	if not _from_owner() or not vitals.is_up():
 		return
 	var other := get_node_or_null(path) as Soldier
-	if other == null or other == self or other.vitals.is_up():
-		return  # a downed or a dead body
+	if other == null or other == self or not _movable(other):
+		return  # a downed or a dead body (or a cuffed captive)
 	if carrying == other:
 		_set_carry_mode(mode)
 		return
@@ -1152,6 +1216,7 @@ var has_gear_marker := false
 func _on_died() -> void:
 	if not multiplayer.is_server():
 		return
+	_reload_n += 1  # a reload in progress dies with them
 	release_carried()
 	_drop_held()
 	if is_ai():
@@ -1188,13 +1253,16 @@ func server_leave_body() -> Soldier:
 
 
 ## Host only. What this body is, for CompoundLevel.server_spawn_body and the zone save:
-## "uid", "label" (whose it was), "faction", "variant", "role", "pos" ([x, y, z]), "rot_y",
+## "uid", "label" (whose it was), "faction", "variant", "person_name", "nation" and "left" (the
+## name tape, nationality and hand, so the body is the same person after a reload), "role",
+## "pos" ([x, y, z]), "rot_y",
 ## "age_s" (seconds dead), "marker" (a dead player's: shows a GearMarker) and "gear" (an
 ## Inventory.net_state: everything on it).
 func body_record() -> Dictionary:
 	var p := global_position
 	return {"uid": body_uid if body_uid != "" else GameState.new_uid(), "label": display_name(), "faction": String(faction),
-		"variant": model.variant, "role": String(role), "pos": [p.x, p.y, p.z], "rot_y": rotation.y,
+		"variant": model.variant, "person_name": person_name, "nation": nation, "left": left_handed,
+		"role": String(role), "pos": [p.x, p.y, p.z], "rot_y": rotation.y,
 		"age_s": maxf(_now() - died_at, 0.0) if died_at >= 0.0 else 0.0, "marker": has_gear_marker,
 		"gear": inventory.net_state.duplicate(true)}
 

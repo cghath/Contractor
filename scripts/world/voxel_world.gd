@@ -12,8 +12,10 @@ extends Node3D
 ## The host checks every carve for a breach, a gap a soldier now fits through, and reports
 ## it with `breached` so the navigation around it is rebaked (NavBuilder).
 ##
-## There is no voxel stream yet, so a block that unloads would come back without its
-## edits: keep BOUNDS small enough that viewers always cover all of it.
+## There is no voxel stream, so a block that unloads would come back without its edits: keep
+## the bounds small enough that viewers always cover all of it. A zone (ZoneLevel) holds
+## many small voxel worlds, one per module, and streams whole worlds in and out instead:
+## each one is rebuilt from its base structures and its own edit log (module_id, edit_sink).
 
 signal structures_built
 ## Host only. Carving opened a gap in a structure that a soldier fits through; `area_m` is
@@ -86,9 +88,11 @@ const HOLE_RIM := {Mat.WOOD: Color("c9a877"), Mat.SHEET_METAL: Color("b8bcc0")}
 ## (the collider can lag a fresh hole by a frame or two).
 const WALK_MAX_M := 4.0
 const SEEK_M := 0.25
-## Edit area, in voxels.
+## Edit area, in voxels (the compound's; a zone module sets its own `bounds`).
 const BOUNDS := AABB(Vector3(-220, -8, -220), Vector3(440, 56, 440))
-## Viewer range, in voxels. Must reach every corner of BOUNDS from anywhere players go.
+## Viewer range. A VoxelViewer's view_distance is in metres (measured: 64 loads a block 50 m
+## away on this 0.1-scaled terrain); the terrain's max_view_distance caps it in voxels. Must
+## reach every corner of the bounds from anywhere players go.
 const VIEW_DISTANCE := 640
 ## Breach detection (host, after every carve, see _check_breaches). A soldier (NavBuilder's
 ## agent: radius 0.25 m, height 1.75 m) fits through where a column that used to be wall
@@ -102,6 +106,16 @@ const BREACH_TOP := 18
 const BREACH_CHECK_S := 0.25
 
 var terrain: VoxelTerrain
+## Set before the node enters the tree: the edit area (voxels) and the terrain's view
+## distance cap (voxels). A zone module sets its own (ZoneModules.bounds_voxels).
+var bounds := BOUNDS
+var view_distance := VIEW_DISTANCE
+## A zone module's id (empty for the compound). With an edit_sink, the host's edits go to
+## the sink (the zone, which logs them per module and sends them to every peer) instead of
+## GameState.voxel_edits and this node's own RPC: a module may not exist on every peer.
+var module_id := ""
+## Host only: func(world: VoxelWorld, edit: Dictionary), which must apply the edit here too.
+var edit_sink := Callable()
 var _tool: VoxelTool
 var _structures: Array = []  # [begin: Vector3i, end: Vector3i, mat]
 var _structure_area := AABB()
@@ -150,8 +164,8 @@ func _ready() -> void:
 	material.vertex_color_is_srgb = true  # palette colours are authored in sRGB
 	material.roughness = 0.9
 	terrain.material_override = material
-	terrain.bounds = BOUNDS
-	terrain.max_view_distance = VIEW_DISTANCE
+	terrain.bounds = bounds
+	terrain.max_view_distance = view_distance
 	terrain.collision_layer = 1
 	add_child(terrain)
 	_tool = terrain.get_voxel_tool()
@@ -283,6 +297,9 @@ func server_mark(world_position: Vector3, normal: Vector3, mat: int) -> bool:
 
 
 func _server_edit(edit: Dictionary) -> void:
+	if edit_sink.is_valid():
+		edit_sink.call(self, edit)
+		return
 	GameState.voxel_edits.append(edit)
 	apply_edit.rpc(edit)
 
@@ -430,11 +447,32 @@ func stops_round(from: Vector3, to: Vector3, energy_j: float) -> bool:
 	return true
 
 
-## Host only. stops_round on the first VoxelWorld in `node`'s tree; true (anything in the
-## way stops it) when there is none.
+## Host only. stops_round across every voxel world on the line (a zone has one per module):
+## whether a round arriving with `energy_j` joules is stopped between the two points by voxels
+## it can't get through or by other world geometry (the ground, a module's proxy).
 static func stops_round_in(node: Node, from: Vector3, to: Vector3, energy_j: float) -> bool:
-	var world := node.get_tree().get_first_node_in_group(&"voxel_worlds") as VoxelWorld
-	return world.stops_round(from, to, energy_j) if world else true
+	var space := (node as Node3D).get_world_3d().direct_space_state if node is Node3D else null
+	if space == null:
+		var world := node.get_tree().get_first_node_in_group(&"voxel_worlds") as VoxelWorld
+		return world.stops_round(from, to, energy_j) if world else true
+	var direction := (to - from).normalized()
+	var energy := energy_j
+	var at := from
+	for i in 8:
+		var hit := space.intersect_ray(PhysicsRayQueryParameters3D.create(at, to, 1))
+		if hit.is_empty():
+			return false
+		var world := VoxelWorld.find_on(hit.collider)
+		if world == null:
+			return true  # the ground or other solid world geometry
+		var through := world.trace_round(hit.position, direction, energy)
+		if through.stopped:
+			return true
+		energy -= float(through.lost_j)
+		at = (through.exit as Vector3) + direction * 0.01
+		if (at - from).dot(direction) >= (to - from).length():
+			return false
+	return true
 
 
 ## Host only. Replays a saved edit log locally (the log itself is already in GameState).

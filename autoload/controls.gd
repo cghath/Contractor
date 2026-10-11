@@ -21,6 +21,7 @@ const KEYS := {
 	&"use_medical": [KEY_H],
 	&"grenade": [KEY_G],  # throw; Shift+G switches type, Alt+G drops; carrying or dragging a body, lets go
 	&"inventory": [KEY_TAB],
+	&"map": [KEY_M],  # the map (MapScreen): grid, markers, squad, extraction
 	&"weapon_primary": [KEY_1],
 	&"weapon_sidearm": [KEY_2],
 	&"pause": [KEY_ESCAPE],

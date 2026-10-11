@@ -553,8 +553,11 @@ func _run_client() -> void:
 	await _wait_for(func() -> bool: return me.inventory.count_of(&"rounds_556") == 0, 5.0)
 	_remote_check.rpc_id(1, me.inventory.spare_rounds(&"mag_556") == 10 and me.inventory.count_of(&"rounds_556") == 0,
 		"Load magazines from a client goes through the host and replicates back (%d in the magazine)" % me.inventory.spare_rounds(&"mag_556"))
-	await _wait_for(func() -> bool: return not SmokeCloud.clouds_of("green").is_empty() and not SmokeCloud.clouds_of("blue").is_empty(), 10.0)
-	var green := SmokeCloud.clouds_of("green")
+	# The green one set off for this check (an older green cloud from the host's own test may still
+	# be out: a late joiner sees that too, audit L2-01).
+	var here := func() -> Array: return SmokeCloud.clouds_of("green").filter(func(c: SmokeCloud) -> bool: return c.global_position.distance_to(Vector3(-6, 0.1, 8)) < 0.5)
+	await _wait_for(func() -> bool: return not here.call().is_empty() and not SmokeCloud.clouds_of("blue").is_empty(), 10.0)
+	var green: Array = here.call()
 	var blue := SmokeCloud.clouds_of("blue")
 	_remote_check.rpc_id(1, green.size() == 1 and _same_colour(green[0]._material.albedo_color, SmokeCloud.COLOURS["green"]), "the client sees the green smoke in green")
 	_remote_check.rpc_id(1, blue.size() == 1 and _same_colour(blue[0]._material.albedo_color, SmokeCloud.COLOURS["blue"]), "and the blue one in blue")

@@ -25,7 +25,8 @@ static var active: Array[SmokeCloud] = []
 var radius := 0.5
 ## A name in COLOURS. Set before the cloud enters the tree (CompoundLevel.spawn_smoke).
 var colour := "white"
-var _age := 0.0
+## Seconds since it went off. A late joiner's copy starts at the host's age (spawn_smoke).
+var age := 0.0
 var _material := StandardMaterial3D.new()
 var _puffs: Array[MeshInstance3D] = []
 var _offsets: Array[Vector3] = []
@@ -89,11 +90,11 @@ func _exit_tree() -> void:
 
 
 func _process(delta: float) -> void:
-	_age += delta
-	radius = MAX_RADIUS * clampf(_age / GROW_S, 0.1, 1.0)
-	_material.albedo_color.a = OPACITY * clampf((DURATION_S - _age) / FADE_S, 0.0, 1.0)
+	age += delta
+	radius = MAX_RADIUS * clampf(age / GROW_S, 0.1, 1.0)
+	_material.albedo_color.a = OPACITY * clampf((DURATION_S - age) / FADE_S, 0.0, 1.0)
 	for i in _puffs.size():
 		_puffs[i].position = _offsets[i] * radius + Vector3.UP * radius * 0.35
 		_puffs[i].scale = Vector3.ONE * radius * 1.1
-	if _age > DURATION_S:
+	if age > DURATION_S:
 		queue_free()

@@ -28,6 +28,17 @@ const UPPER_ARM := 0.32                           # shoulder to elbow
 const FOREARM := 0.25                             # elbow to palm centre
 ## Elbows bend towards these (torso-local, before normalising): out, down and back.
 const POLE_RIGHT := Vector3(0.7, -1.0, 0.35)
+## Holding a rifle two-handed (at the ready or aiming), the upper body blades: it turns this
+## far (radians) about its own up axis, support shoulder forward, as a shooter stands. The head
+## and the weapon (hands_anchor) turn back by as much, so they keep facing where the soldier
+## looks. See _bladed.
+const BLADE := 0.4
+## Holding a weapon, the support shoulder also comes this far forward and in (torso-local,
+## for the left shoulder of a right-handed shooter; mirrored), within the deltoid, so the
+## support hand reaches the handguard.
+const SUPPORT_REACH := Vector3(0.04, -0.01, -0.06)
+## Shouldering a rifle, the head dips this much (radians) to bring the eye down to the optic.
+const AIM_HEAD_DIP := 0.14
 const MAX_SPEED := 6.5
 ## Hip joint to sole. Legs have knees (THIGH above, the rest below): a lower stance bends
 ## them, two-bone, with the feet placed under the hips (see _leg_angles).
@@ -56,7 +67,8 @@ const POSE_EASE := 8.0
 ## sideways and back; pitch: upper body lean (negative leans forward); roll: upper body tilt
 ## (positive leans left); prone: lying face down; prone_roll: rolled onto a side while
 ## prone (positive rolls onto the left side). Optional: yaw, the whole body turned (radians,
-## positive turns left), used by actions.
+## positive turns left), used by actions; twist, the upper body turned about its own up axis
+## (radians, positive turns left), for the bladed rifle stance (_bladed).
 const REST_POSE := {"hip": 0.9, "hip_x": 0.0, "hip_z": 0.0, "pitch": 0.0, "roll": 0.0, "prone": false, "prone_roll": 0.0}
 
 enum Hold { NONE, BOTH, RIGHT }
@@ -199,6 +211,12 @@ const VIEW_LOWER_PITCH := 0.9
 var hold := Hold.NONE
 ## Head pitch in radians (positive looks up), set by the owner each frame.
 var look_pitch := 0.0
+## Shouldering the weapon (Soldier.is_aiming, replicated): GearRig raises it from the ready.
+var aiming := false
+## Shoots from the left shoulder (Soldier.left_handed): the hands and the weapon holds mirror.
+var left_handed := false
+## Text on the carrier's name tape (an AI's surname, upper case; "" for none). GearRig draws it.
+var name_tape := ""
 ## While true the left hand works the magazine well instead of the support point.
 var reloading := false
 ## Lying face down, head forward (see lay_down). Overrides `pose`.
@@ -235,6 +253,7 @@ var _phase := 0.0
 var _time := 0.0
 var _shown: Dictionary = {}   # bone -> Transform3D, easing towards the pose
 var _yaw_shown := 0.0         # the drawn body's turn (pose "yaw"), eased with the bones
+var _twist_shown := 0.0       # the drawn upper body's twist (pose "twist"), eased with the bones
 var _last_pose: Dictionary = {}  # the stance pose last aimed for, with its action applied
 var _action_n := -1           # action_net["n"] last seen
 var _action_t := 0.0          # seconds since that action started (local clock)
@@ -242,6 +261,8 @@ var _reaching: Dictionary = {}   # the reaching pose for the current action ({} 
 var _server_n := 0            # host: action serials handed out
 var _draw_point := Vector3.ZERO  # torso-local: where the weapon being drawn sits
 var _draw_t := -1.0           # seconds into a weapon draw (< 0: none)
+var _held_weapon := false     # what's held is a weapon (set_held)
+var _aim_w := 0.0             # 0 at the ready .. 1 shouldered, eased
 var _attach := 0.0            # 0..1: how far the drawn casualty has moved onto its carrier
 var _attached := Transform3D.IDENTITY  # where its carrier holds it (world space)
 var _hand_source: Array[String] = ["", ""]
@@ -349,12 +370,15 @@ static func pose_bones(p: Dictionary, is_downed: bool) -> Dictionary:
 	var back := _leg_angles(hip, -drop * BACK_FOOT) if spread == 0.0 else Vector2.ZERO
 	var roll_by: float = p.get("roll", 0.0)
 	var pitch_by: float = p.get("pitch", 0.0)
-	var torso_basis := Basis(Vector3.BACK, roll_by) * Basis(Vector3.RIGHT, pitch_by)
+	var twist: float = p.get("twist", 0.0)
+	var torso_basis := Basis(Vector3.BACK, roll_by) * Basis(Vector3.RIGHT, pitch_by) * Basis(Vector3.UP, twist)
 	var torso := Transform3D(torso_basis, Vector3(hip_x, hip, hip_z))
+	# The head turns back against the twist, so it faces the way the body does.
+	var head_basis := Basis(Vector3.UP, -twist) * Basis(Vector3.RIGHT, -_upper_body_pitch(root.basis * torso_basis, yaw))
 	return {
 		"root": root,
 		"torso": torso,
-		"head": torso * Transform3D(Basis(Vector3.RIGHT, -_upper_body_pitch(root.basis * torso_basis, yaw)), HEAD_PIVOT),
+		"head": torso * Transform3D(head_basis, HEAD_PIVOT),
 		"pelvis": Transform3D(Basis(), Vector3(hip_x, hip, hip_z)),
 		"leg_l": Transform3D(Basis(Vector3.BACK, -spread) * Basis(Vector3.RIGHT, front.x), Vector3(hip_x - HIP.x, hip, hip_z)),
 		"leg_r": Transform3D(Basis(Vector3.BACK, spread) * Basis(Vector3.RIGHT, back.x), Vector3(hip_x + HIP.x, hip, hip_z)),
@@ -440,12 +464,13 @@ static func eye_position(p: Dictionary) -> Vector3:
 
 ## The pose for reaching both hands to `point` (body space) from stance `base`: turned to
 ## face it, bent at the hips, and the hips lowered (kneeling with `kneel`) only as far as it
-## takes. Prone stays prone (the hands just reach).
-static func reach_pose(base: Dictionary, point: Vector3, kneel: bool) -> Dictionary:
+## takes. Prone stays prone (the hands just reach). With `turn` false (treating yourself:
+## the point is on your own body) it doesn't turn.
+static func reach_pose(base: Dictionary, point: Vector3, kneel: bool, turn := true) -> Dictionary:
 	if base.get("prone", false):
 		return {}
 	var flat := Vector2(point.x, point.z)
-	var turned := flat.length() > REACH_TURN_MIN
+	var turned := turn and flat.length() > REACH_TURN_MIN
 	var yaw := atan2(-point.x, -point.z) if turned else 0.0
 	var ahead := flat.length() if turned else -point.z  # how far in front, once turned
 	var top: float = KNEEL_HIP if kneel else maxf(float(base.get("hip", HIP.y)), REACH_MIN_HIP)
@@ -495,11 +520,15 @@ static func mount_for_item(item: ItemData) -> StringName:
 	return SLOT_MOUNTS.get(item.slot, &"pouch")
 
 
-## Hands go to `grip` (right) and `support` (left), given in `node`'s local space.
-func set_held(node: Node3D, grip: Vector3, support: Vector3) -> void:
+## The firing hand goes to `grip` and the other to `support`, given in `node`'s local space
+## (the right hand fires, or the left for a left-handed shooter). `weapon`: a weapon, held
+## shouldered or at the ready, so the support shoulder comes forward (SUPPORT_REACH); false
+## for a bulky item carried in both arms.
+func set_held(node: Node3D, grip: Vector3, support: Vector3, weapon := true) -> void:
 	_held = node
 	_grip = grip
 	_support = support
+	_held_weapon = weapon
 
 
 func clear_held() -> void:
@@ -515,8 +544,9 @@ func hand_position(right: bool) -> Vector3:
 func hand_error() -> float:
 	if not is_instance_valid(_held):
 		return -1.0
-	return maxf(hand_position(true).distance_to(_held.to_global(_grip)),
-		hand_position(false).distance_to(_held.to_global(_support)))
+	var lefty := left_handed and _held_weapon
+	return maxf(hand_position(not lefty).distance_to(_held.to_global(_grip)),
+		hand_position(lefty).distance_to(_held.to_global(_support)))
 
 
 # --- Actions: what peers see ------------------------------------------------------------
@@ -658,6 +688,8 @@ func server_treat(target: Node3D, part: StringName, seconds: float, item := &"")
 		at += (part_position(target, &"chest") - at).normalized() * TOURNIQUET_HIGH  # towards the trunk
 	elif tech == &"needle":
 		at += (part_position(target, &"head") - at).normalized() * NEEDLE_HIGH
+	if target == get_parent() and _part_bone(target, part) == "torso":
+		at = _unbladed(at)  # the hands leave the rifle, so the upper body squares up first
 	return server_play(TREAT, seconds, to_local(at), &"", &"", target != get_parent(), tech)
 
 
@@ -699,6 +731,27 @@ func part_node(part: StringName) -> Node3D:
 		Vitals.SHIN_R:
 			return _shin_right
 	return null
+
+
+## Which bone (see _bone_of) body part `part` of `body` follows; "torso" if it has no hitbox.
+static func _part_bone(body: Node3D, part: StringName) -> String:
+	for area in _posable_hitboxes(body):
+		if area.get_meta(&"body_part", &"") == part:
+			return _bone_of(area)
+	return "torso"
+
+
+## A point on this body's upper body (world space, as posed now) where it will be once the
+## bladed stance lets go (the upper body turned square again).
+func _unbladed(world: Vector3) -> Vector3:
+	if float(_last_pose.get("twist", 0.0)) == 0.0:
+		return world
+	var square := _last_pose.duplicate()
+	square.erase("twist")
+	var from := pose_bones(_last_pose, false)
+	var to := pose_bones(square, false)
+	var move := ((to.root as Transform3D) * (to.torso as Transform3D)) * ((from.root as Transform3D) * (from.torso as Transform3D)).affine_inverse()
+	return to_global(move * to_local(world))
 
 
 static func _model_of(body: Node) -> CharacterModel:
@@ -792,6 +845,8 @@ func _process(delta: float) -> void:
 		_shown[key] = (_shown[key] as Transform3D).interpolate_with(target[key], blend)
 	var target_yaw := 0.0 if casualty or downed else float(_last_pose.get("yaw", 0.0))
 	_yaw_shown = lerp_angle(_yaw_shown, target_yaw, blend)
+	var target_twist := 0.0 if casualty or downed else float(_last_pose.get("twist", 0.0))
+	_twist_shown = lerpf(_twist_shown, target_twist, blend)
 	var prone: bool = pose.get("prone", false)
 	var stride := clampf(_speed / 4.0, 0.0, 1.0) * (0.55 + 0.25 * clampf((_speed - 4.0) / 2.5, 0.0, 1.0))
 	if downed or casualty:
@@ -808,12 +863,16 @@ func _process(delta: float) -> void:
 	torso.transform = (_shown.torso as Transform3D).translated_local(Vector3(0, sin(_time * 2.0) * 0.003, 0))  # breathing
 	if casualty:
 		# Limp: the head hangs (carried) or lolls back (dragged) with the body.
-		head.rotation.x = -CARRY_HEAD_DROOP if mode == CARRIED else DRAG_HEAD_LOLL
-		hands_anchor.rotation.x = 0.0
+		head.rotation = Vector3(-CARRY_HEAD_DROOP if mode == CARRIED else DRAG_HEAD_LOLL, 0, 0)
+		hands_anchor.rotation = Vector3.ZERO
 	else:
-		# Head and weapon keep facing where the owner looks, whatever the upper body's lean.
+		# Head and weapon keep facing where the owner looks, whatever the upper body's lean
+		# and twist (rotation.y, applied outside the pitch: the turn the torso's twist undoes).
+		head.rotation.y = -_twist_shown
+		hands_anchor.rotation.y = -_twist_shown
 		var lean := 0.0 if downed else _upper_body_pitch((_shown.root as Transform3D).basis * (_shown.torso as Transform3D).basis, _yaw_shown)
-		head.rotation.x = clampf(look_pitch, -0.7, 0.7) * 0.8 - lean
+		_aim_w = move_toward(_aim_w, 1.0 if aiming and _held_weapon and is_instance_valid(_held) else 0.0, delta * 6.0)
+		head.rotation.x = clampf(look_pitch, -0.7, 0.7) * 0.8 - lean - AIM_HEAD_DIP * smoothstep(0.0, 1.0, _aim_w)
 		hands_anchor.rotation.x = clampf(look_pitch, -0.8, 0.8) * 0.8 - lean
 	_update_arms(delta, carry, swing)
 
@@ -826,8 +885,31 @@ func _target_bones(carry: Dictionary) -> Dictionary:
 		return casualty_bones(mode)
 	if downed:
 		return pose_bones(pose, true)
-	_last_pose = _action_pose(mode)
+	_last_pose = _bladed(_action_pose(mode), mode)
 	return pose_bones(_last_pose, false)
+
+
+## `p` with the bladed stance (twist, BLADE) while a rifle is held two-handed, at the ready or
+## aiming: standing or crouched, the hands free of carries and actions.
+func _bladed(p: Dictionary, mode: StringName) -> Dictionary:
+	if hold != Hold.BOTH or not _held_weapon or not is_instance_valid(_held) or downed \
+			or p.get("prone", false) or mode != &"" or _action_active():
+		return p
+	var out := p.duplicate()
+	out["twist"] = blade_twist(left_handed)
+	return out
+
+
+## The bladed stance's twist (radians about the torso's up axis): the support shoulder
+## forward, so a right-handed shooter (left shoulder forward) turns right (negative).
+static func blade_twist(left: bool) -> float:
+	return BLADE if left else -BLADE
+
+
+## The drawn upper body's twist now (eased; 0 unless bladed). GearRig keeps the rifle butt
+## on the chest with it.
+func twist_shown() -> float:
+	return _twist_shown
 
 
 ## The stance pose with the current action applied: the drag crouch (facing the
@@ -872,8 +954,11 @@ func _update_action(delta: float) -> void:
 		_action_n = n
 		_action_t = 0.0
 		_reaching = {}
-		if StringName(action_net.get("id", &"")) in [PICK_UP, LOOT, TREAT]:
-			_reaching = reach_pose(pose, action_net.get("at", Vector3.ZERO), bool(action_net.get("kneel", false)))
+		var id := StringName(action_net.get("id", &""))
+		if id in [PICK_UP, LOOT, TREAT]:
+			var kneel := bool(action_net.get("kneel", false))
+			# Treating without a kneel is treating yourself (server_treat): no turning to it.
+			_reaching = reach_pose(pose, action_net.get("at", Vector3.ZERO), kneel, id != TREAT or kneel)
 		return
 	_action_t += delta
 	var s := float(action_net.get("s", 0.0))
@@ -927,6 +1012,7 @@ func _update_attachment(delta: float, carry: Dictionary) -> void:
 ## swings free.
 func _update_arms(delta: float, carry: Dictionary, swing: float) -> void:
 	var goals := _arm_goals(carry)
+	_place_shoulders(delta)
 	for i in 2:
 		var key: String = goals[i][0]
 		var point: Variant = goals[i][1]
@@ -950,6 +1036,19 @@ func _update_arms(delta: float, carry: Dictionary, swing: float) -> void:
 	_arms_posed = true
 
 
+## Shoulders: at SHOULDER, except that the support shoulder comes forward (SUPPORT_REACH)
+## while a weapon is in the hands. Eased, so the reach grows and settles with the draw.
+func _place_shoulders(delta: float) -> void:
+	var support := 0 if left_handed else 1
+	var reaching := is_instance_valid(_held) and _held_weapon and not downed
+	for i in 2:
+		var side := 1.0 if i == 0 else -1.0
+		var goal := SHOULDER * Vector3(side, 1, 1)
+		if reaching and i == support:
+			goal += SUPPORT_REACH * Vector3(-side, 1, 1)
+		_upper[i].position = _upper[i].position.move_toward(goal, delta * 0.8)
+
+
 ## [[goal key, torso-local point or null to swing], ...] for the right and left hand.
 func _arm_goals(carry: Dictionary) -> Array:
 	var mode: StringName = carry.get("mode", &"")
@@ -968,7 +1067,8 @@ func _arm_goals(carry: Dictionary) -> Array:
 		if not acting.is_empty():
 			return acting
 	if _draw_t >= 0.0 and _draw_t < DRAW_S * DRAW_GRAB:
-		return [["draw", _draw_point], held[1]]
+		# The firing hand fetches the weapon from its sling or holster.
+		return [held[0], ["draw", _draw_point]] if left_handed else [["draw", _draw_point], held[1]]
 	return held
 
 
@@ -980,7 +1080,9 @@ func _held_goals() -> Array:
 	if reloading:
 		# Hand drops under the receiver and works the magazine.
 		support = _grip.lerp(_support, 0.35) + Vector3(0, -0.11 + sin(_time * 9.0) * 0.025, 0)
-	return [[key, torso.to_local(_held.to_global(_grip))], [key, torso.to_local(_held.to_global(support))]]
+	var firing := [key, torso.to_local(_held.to_global(_grip))]
+	var other := [key, torso.to_local(_held.to_global(support))]
+	return [other, firing] if left_handed and _held_weapon else [firing, other]
 
 
 ## The hands for the current action, by phase; [] once its hand work is done.

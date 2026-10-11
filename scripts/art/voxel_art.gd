@@ -97,7 +97,9 @@ static func hand_points(model: String) -> Dictionary:
 	match model.get_slice(":", 0):
 		"rifle":
 			grip = Vector3(1.5, 4, n * 0.68)     # pistol grip
-			support = Vector3(1.5, 6, n * 0.38)  # under the handguard
+			# Under the handguard, no further than 0.52 m from the butt: as far out as the
+			# arms reach with the support shoulder forward (CharacterModel.SUPPORT_REACH).
+			support = Vector3(1.5, 6, maxf(n * 0.42, n - 26.0))
 		"pistol":
 			grip = Vector3(1, 2.5, 7.5)
 			support = Vector3(-0.5, 2, 7.5)      # cupping the grip from the left
@@ -116,6 +118,16 @@ static func sight_point(model: String) -> Vector3:
 			return (Vector3(1.5, 13, spec.size.z * 0.62) - centre) * VOXEL_SIZE  # back of the optic
 		"pistol":
 			return (Vector3(1, 7, 9) - centre) * VOXEL_SIZE  # rear sight
+	return Vector3.ZERO
+
+
+## Centre of the butt pad, in metres relative to the instance pivot (its centre): the point
+## that goes into the shoulder pocket. Zero for weapons without a stock (and non-weapons).
+static func butt_point(model: String) -> Vector3:
+	var spec := _spec(model)
+	var centre := Vector3(spec.size) * 0.5
+	if model.get_slice(":", 0) == "rifle":
+		return (Vector3(1.5, 7.7, spec.size.z) - centre) * VOXEL_SIZE
 	return Vector3.ZERO
 
 
@@ -394,11 +406,12 @@ static func _shifted(parts: Array, dy: int) -> Array:
 
 ## 0.22 x 0.30 x 0.24 m including the neck. Pivot at the base of the neck. A boxy,
 ## bevelled Stormworks head with a flat face: eyes, brows, a nose, a mouth and ears, hair as
-## a cap.
+## a cap. The jaw is a 45-degree chamfer and the face above it is straight up: any other
+## slope steps unevenly at 0.5 cm and shows as bands across the chin.
 static func _head() -> Dictionary:
 	var boxes := [
 		_loft(11, 12, [[0, 4.5, 4.5], [8, 5.0, 5.0]], C.SKIN_SHADE, 0.8),  # neck
-		_loft(11, 12, [[5, 7.0, 8.0], [9, 9.8, 10.8], [13, 10.6, 11.6], [26, 11.0, 12.0], [30, 9.0, 10.0]], C.SKIN, 0.5),
+		_loft(11, 12, [[5, 8.0, 9.0], [8, 11.0, 12.0], [26, 11.0, 12.0], [30, 9.0, 10.0]], C.SKIN, 0.5),
 		_p(0, 26, 0, 22, 30, 24, C.HAIR),   # cap
 		_p(0, 11, 17, 22, 30, 24, C.HAIR),  # back
 		_p(0, 20, 10, 22, 30, 24, C.HAIR),  # above the ears
@@ -411,24 +424,29 @@ static func _head() -> Dictionary:
 	return {"size": Vector3i(22, 30, 24), "pivot": Vector3(11, 0, 12), "voxel": BODY_VOXEL, "sub": BODY_SUB, "boxes": boxes}
 
 
-## 0.38 x 0.66 x 0.22 m: the trunk from the crotch (0.10 m below the hip joints, where the
+## 0.52 x 0.66 x 0.22 m: the trunk from the crotch (0.10 m below the hip joints, where the
 ## legs show from on a real body) to the base of the neck 0.56 m above them. Pivot at the
-## hips. Narrower at the waist, broad at the chest, sloping shoulders; the belt at the waist.
+## hips. Narrower at the waist, broad at the chest; above the chest the deltoids flare out
+## at 45 degrees to 0.26 m, over the shoulder joints (CharacterModel.SHOULDER, 0.25 m out,
+## 0.52 m up), and the trapezius runs flat in to the neck. The upper arms' tops sit inside
+## the deltoids, so the arms hang out from under them and turn under them. The belt at the
+## waist.
 static func _torso() -> Dictionary:
 	var boxes := [
-		_loft(19, 11, [[0, 15.0, 9.5], [10, 16.0, 10.5], [22, 15.0, 10.0], [40, 18.0, 11.0], [56, 19.0, 11.0],
-			[62, 16.0, 9.0], [66, 10.0, 7.0]], C.CAMO, 0.45),
-		_p(0, 14, 0, 38, 20, 22, C.BELT),
-		_p(16, 14, 0, 22, 20, 3, C.METAL),
-		_p(13, 60, 0, 25, 66, 7, C.CAMO_C),  # collar
+		_loft(26, 11, [[0, 15.0, 9.5], [10, 16.0, 10.5], [22, 15.0, 10.0], [40, 18.0, 11.0], [53, 20.0, 11.0],
+			[58, 25.0, 10.5], [62, 26.0, 10.0], [64, 22.0, 8.5], [66, 10.0, 7.0]], C.CAMO, 0.45),
+		_p(0, 14, 0, 52, 20, 22, C.BELT),
+		_p(23, 14, 0, 29, 20, 3, C.METAL),
+		_p(20, 60, 0, 32, 66, 7, C.CAMO_C),  # collar
 	]
-	return {"size": Vector3i(38, 66, 22), "pivot": Vector3(19, 10, 11), "voxel": BODY_VOXEL, "sub": BODY_SUB, "boxes": boxes}
+	return {"size": Vector3i(52, 66, 22), "pivot": Vector3(26, 10, 11), "voxel": BODY_VOXEL, "sub": BODY_SUB, "boxes": boxes}
 
 
-## 0.12 x 0.32 x 0.12 m. Pivot at the shoulder; the elbow is at the bottom.
+## 0.12 x 0.32 x 0.12 m. Pivot at the shoulder; the elbow is at the bottom. It tapers into
+## the torso's deltoid at the top, so no square cap shows above the shoulder line.
 static func _upper_arm() -> Dictionary:
 	var boxes := [
-		_loft(6, 6, [[0, 4.5, 4.5], [27, 5.6, 5.4], [32, 4.6, 4.6]], C.CAMO, 0.6),
+		_loft(6, 6, [[0, 4.5, 4.5], [22, 5.6, 5.4], [28, 5.4, 5.2], [32, 3.6, 3.6]], C.CAMO, 0.6),
 		_p(0, 14, 2, 2, 26, 10, C.PATCH), _p(10, 14, 2, 12, 26, 10, C.PATCH),
 	]
 	return {"size": Vector3i(12, 32, 12), "pivot": Vector3(6, 32, 6), "voxel": BODY_VOXEL, "sub": BODY_SUB, "boxes": boxes}
@@ -481,13 +499,16 @@ static func _shin_parts() -> Array:
 	]
 
 
-## Plate carriers by tier (0 light, 1 medium, 2 heavy), in 1 cm voxels. The pivot is the
-## carrier's mount point on the torso (GearRig mounts it at torso height 0.17 m), so the
-## layout below is in carrier-local centimetres. Each plate the carrier takes sits in a
-## fabric pocket: the pocket wraps the plate's edges and back, and a 2 cm lip runs round its
-## face, leaving a window where the plate (the VoxelArmor, which GearRig colours as the
-## carrier's fabric) shows. Plates centre at torso y 0.33 (front and back, at the carrier's
-## plate_depth) and 0.28 (sides, at side_plate_x), as GearRig.armor_transform puts them.
+## Plate carriers by tier (0 light, 1 medium, 2 heavy), in 1 cm voxels built at 0.5 cm. The
+## pivot is the carrier's mount point on the torso (GearRig mounts it at torso height 0.17 m),
+## so the layout below is in carrier-local centimetres. Each plate the carrier takes sits in a
+## bevelled fabric pocket: the pocket wraps the plate's edges and back, and a 2 cm lip runs
+## round its face, leaving a window where the plate (the VoxelArmor, which GearRig colours as
+## the carrier's fabric) shows. Plates centre at torso y 0.33 (front and back, at the
+## carrier's plate_depth) and 0.28 (sides, at side_plate_x), as GearRig.armor_transform puts
+## them. Details: PALS webbing rows across the panels, seams round the window, a loop panel
+## for the name tape at the top of the front, a drag handle at the top of the back, padded
+## shoulder pads that arch over the deltoids, and a cummerbund that takes in at the waist.
 static func _vest(tier: int) -> Dictionary:
 	var hw: int = [20, 21, 23][tier]       # half-width of the cummerbund, cm
 	var hd: int = [12, 13, 15][tier]       # half-depth of the cummerbund
@@ -495,14 +516,15 @@ static func _vest(tier: int) -> Dictionary:
 	var below: int = [0, 0, 8][tier]       # the heavy carrier's groin flap hangs below the mount
 	var half_x := 28
 	var half_z := int(depth) + 5
-	var size := Vector3i(half_x * 2, 41 + below, half_z * 2)
+	var size := Vector3i(half_x * 2, 42 + below, half_z * 2)
 	var o := Vector3i(half_x, below, half_z)  # carrier-local (0, 0, 0) in voxels
 	var boxes := []
 	var at := func(x0: int, y0: int, z0: int, x1: int, y1: int, z1: int, colour: int, paint := false) -> void:
 		boxes.append([Vector3i(x0, y0, z0) + o, Vector3i(x1, y1, z1) + o, colour, paint])
-	# Cummerbund round the torso (the light rig has none, only straps round the back).
+	# Cummerbund round the torso, taken in over its bottom 8 cm to follow the waist (the light
+	# rig has none, only straps round the back).
 	if tier > 0:
-		boxes.append(_loft(o.x, o.z, [[o.y, hw, hd], [o.y + 22, hw, hd]], C.GEAR, 0.3))
+		boxes.append(_loft(o.x, o.z, [[o.y, hw - 2.0, hd - 1.5], [o.y + 8, hw, hd], [o.y + 22, hw, hd]], C.GEAR, 0.3))
 		for y in [5, 9, 13, 17]:  # MOLLE rows on the sides
 			at.call(-hw, y, -hd + 3, hw, y + 1, hd - 3, C.GEAR_DARK, true)
 		at.call(-hw, 0, -hd, hw, 2, hd, C.GEAR_DARK, true)  # bottom binding
@@ -517,19 +539,31 @@ static func _vest(tier: int) -> Dictionary:
 		var outer := int(depth) + 3
 		var z0 := -outer if f < 0 else inner
 		var z1 := -inner if f < 0 else outer
-		at.call(-14, 0, z0, 14, 33, z1, C.GEAR)                          # the pocket
+		# The pocket: bevelled upright edges, its top chamfered in.
+		boxes.append(_loft(o.x, o.z + (z0 + z1) * 0.5, [[o.y, 14.0, 3.0], [o.y + 31, 14.0, 3.0], [o.y + 33, 13.0, 2.0]], C.GEAR, 0.35))
 		at.call(-13, 1, z0 + 1, 13, 32, z1 - 1, C.EMPTY)                 # the plate's room
 		var face := z0 if f < 0 else z1 - 1
 		at.call(-11, 3, face, 11, 30, face + 1, C.EMPTY)                 # window: the plate shows
-		at.call(-14, 31, z0, 14, 33, z1, C.GEAR_DARK)                    # top binding
-		# Shoulder straps from the top of the pocket up over the shoulder.
-		for side: int in [-1, 1]:
-			var sx0 := 6 if side > 0 else -11
-			at.call(sx0, 31, -int(depth) if f < 0 else 0, sx0 + 5, 40, 0 if f < 0 else int(depth), C.GEAR)
+		at.call(-14, 31, z0, 14, 33, z1, C.GEAR_DARK, true)              # top binding
+		at.call(-12, 2, face, 12, 3, face + 1, C.GEAR_DARK, true)        # seams round the window
+		at.call(-12, 2, face, -11, 30, face + 1, C.GEAR_DARK, true)
+		at.call(11, 2, face, 12, 30, face + 1, C.GEAR_DARK, true)
+		# PALS webbing across the panel, flush with the fabric (pouches thread through it).
+		var top_row := 21 if f < 0 else 27
+		for y in range(6, top_row + 1, 3):
+			at.call(-11, y, face, 11, y + 1, face + 1, C.GEAR_DARK)
+		if f < 0:
+			at.call(-7, 24, face, 7, 29, face + 1, C.GEAR_DARK)          # loop panel: GearRig puts the name tape on it
+		else:
+			at.call(-4, 32, z1, 4, 36, z1 + 2, C.GEAR_DARK)              # drag handle
+			at.call(-3, 33, z1, 3, 35, z1 + 2, C.EMPTY)
+	# Padded shoulder pads, arching from the pockets' tops over the deltoids.
+	for side: int in [-1, 1]:
+		boxes.append(_loft(o.x + 8.5 * side, o.z, [[o.y + 32, 2.5, 12.0], [o.y + 38, 2.5, 10.5], [o.y + 41, 2.5, 7.5]], C.GEAR, 0.6))
 	if tier == 0:
 		for side: int in [-1, 1]:  # straps cross the back
 			var sx0 := 6 if side > 0 else -11
-			at.call(sx0, 13, 11, sx0 + 5, 40, 13, C.GEAR_DARK)
+			at.call(sx0, 13, 11, sx0 + 5, 33, 13, C.GEAR_DARK)
 	# Heavy: side plate pockets (15 x 20 cm plates at x 24.5, y 1-21), collar and groin flap.
 	if tier == 2:
 		for side: int in [-1, 1]:

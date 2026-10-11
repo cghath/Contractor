@@ -106,6 +106,7 @@ static func _trace(shooter: CollisionObject3D, origin: Vector3, direction: Vecto
 			}
 			if lost_j > 0.0:
 				_spend(hit_info, world_energy(weapon, distance) - lost_j)
+			Harm.note_hit(vitals.get_parent(), shooter)  # who hit whom (people: civilian casualties)
 			vitals.server_hit(part, hit_info)
 			return _result("body", hit)
 		var world := VoxelWorld.find_on(collider)

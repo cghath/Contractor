@@ -112,10 +112,12 @@ const SQUAD_CALLSIGNS: Array[String] = ["Alpha", "Bravo", "Charlie", "Delta", "E
 const DEFAULT_JOIN_ROLE := Roles.RIFLEMAN
 const JOIN_ROLE_WAIT_S := 5.0
 ## Two fire teams: a pair guarding the main building, and a pair patrolling the yard.
+## People (wave 4): "intel" is what an officer or squad leader ("rank") carries, looted from
+## his body (PeopleLayer.server_give_intel gives each its own intel id).
 const HOSTILES := [
-	{"name": "Hostile1", "pos": Vector3(-2.5, 0.1, -10), "buddy": "Hostile2", "guard": true},
+	{"name": "Hostile1", "pos": Vector3(-2.5, 0.1, -10), "buddy": "Hostile2", "guard": true, "rank": "officer", "intel": ["intel_phone", "intel_documents"]},
 	{"name": "Hostile2", "pos": Vector3(2.5, 0.1, -6.5), "buddy": "Hostile1", "guard": true},
-	{"name": "Hostile3", "pos": Vector3(-12, 0.1, -2), "buddy": "Hostile4", "guard": false},
+	{"name": "Hostile3", "pos": Vector3(-12, 0.1, -2), "buddy": "Hostile4", "guard": false, "rank": "squad leader", "intel": ["intel_documents"]},
 	{"name": "Hostile4", "pos": Vector3(-10, 0.1, -3), "buddy": "Hostile3", "guard": false},
 ]
 const HOSTILE_LOADOUT := ["plate_carrier_light", "plate_pe_l3", "helmet_bump", "assault_pack", "mk18",
@@ -131,19 +133,27 @@ const HOSTILE_PATROL: Array[Vector3] = [Vector3(-12, 0, -2), Vector3(-12, 0, -16
 ## the zone save (server_spawn_body). A dead AI's own node stays under AI.
 @onready var bodies: Node3D = $Bodies
 @onready var body_spawner: MultiplayerSpawner = $BodySpawner
-@onready var voxel_world: VoxelWorld = $VoxelWorld
+## The compound's voxel structures (null on a zone, whose modules each have their own: see
+## voxel_worlds()).
+@onready var voxel_world: VoxelWorld = get_node_or_null(^"VoxelWorld") as VoxelWorld
 
 var _spawn_index := 0
 var _throw_count := 0
+var _throwers := {}  # host: grenade serial -> who threw it (Harm: whose fragments hurt whom)
 var _squads := {}  # faction -> Squad
 var _ai_ready := false  # host: AI spawns once the voxel walls exist
 ## Host: the role each player picked, by peer id.
 var player_roles := {}
+## Host: each player's shooting shoulder (peer id -> true for left-handed), from their main-menu
+## pick (Handedness), sent on join like the role.
+var player_handed := {}
 var _kitted := {}  # host: peer ids that got their role kit
 ## Host: squad slots whose AI squadmate died (permadeath): no new squadmate takes them.
 var _fallen_slots := {}
 ## AI callouts as subtitles (same node on every peer).
 var callouts: Callouts
+## Civilians, HVTs and intel (wave 4, PeopleLayer; same node on every peer).
+var people: PeopleLayer
 
 
 static func current(from: Node) -> CompoundLevel:
@@ -169,25 +179,61 @@ func _ready() -> void:
 	callouts = Callouts.new()
 	callouts.name = "Callouts"
 	add_child(callouts)
+	MapNodes.install(self)  # W13: map markers, briefing, extraction, reinforcement timer
 	_build_environment()
 	_build_structures()
 	Net.hosted.connect(_on_hosted)
 	Net.joined.connect(_on_joined)
 	Net.peer_joined.connect(_on_peer_joined)
 	Net.peer_left.connect(_on_peer_left)
+	people = PeopleLayer.new()  # "People": civilians, HVTs, intel (wave 4)
+	add_child(people)
 
 
 ## The playable area on the map, in metres on the ground plane (x along x, y along z): the
 ## map and its grid cover this (wave 4 interface; a world-scale zone level provides the same).
 func map_area() -> Rect2:
-	var b := VoxelWorld.BOUNDS
-	var s := VoxelWorld.VOXEL_SIZE
-	return Rect2(b.position.x * s, b.position.z * s, b.size.x * s, b.size.z * s)
+	# W13: the ground the squad and the AI move on (the navigation area, 108 m square), not
+	# just the voxel bounds (44 m): the gate, the spawn and the fields around are on the map.
+	var b := NavBuilder.AREA
+	return Rect2(b.position.x, b.position.z, b.size.x, b.size.z)
 
 
 func next_spawn_point() -> Vector3:
 	_spawn_index += 1
-	return SPAWN_POINTS[_spawn_index % SPAWN_POINTS.size()]
+	return spawn_point(_spawn_index)
+
+
+## The `index`th of the level's player spawn points (they repeat): the compound's gate.
+func spawn_point(index: int) -> Vector3:
+	return SPAWN_POINTS[posmod(index, SPAWN_POINTS.size())]
+
+
+# --- Level API shared with ZoneLevel (wave 4) -------------------------------------------------
+
+## What a joining client must load to play this level (LevelSwitch sends it on join).
+func level_info() -> Dictionary:
+	return {"level": "compound"}
+
+
+## `pos` moved onto the ground (the compound's ground is flat at 0; a zone's follows its terrain).
+func ground_point(pos: Vector3) -> Vector3:
+	return pos
+
+
+## Every voxel world in the level that is loaded now.
+func voxel_worlds() -> Array[VoxelWorld]:
+	var out: Array[VoxelWorld] = []
+	if voxel_world:
+		out.append(voxel_world)
+	return out
+
+
+## Host only. A blast (a frag) at a world-space point against the voxels around it
+## (VoxelWorld.server_blast on each loaded world it reaches).
+func server_blast(pos: Vector3, radius_m: float) -> void:
+	for world in voxel_worlds():
+		world.server_blast(pos, radius_m)
 
 
 ## Host only.
@@ -233,6 +279,9 @@ func _make_body(data: Dictionary) -> Node:
 	corpse.rotation.y = float(data.get("rot_y", 0.0))
 	corpse.role = StringName(data.get("role", ""))
 	corpse.body_label = String(data.get("label", ""))
+	corpse.person_name = String(data.get("person_name", ""))  # the name tape (older saves: none)
+	corpse.nation = String(data.get("nation", ""))
+	corpse.left_handed = bool(data.get("left", false))
 	corpse.body_uid = String(data.uid)
 	corpse.collision_layer = 0
 	if data.get("marker", false):
@@ -269,8 +318,11 @@ func show_impact(pos: Vector3, normal: Vector3, kind: String) -> void:
 
 
 ## Host only. Throws a grenade on every peer; the host's copy detonates (see Grenade).
-func server_throw(id: StringName, origin: Vector3, velocity: Vector3) -> void:
+## `thrower` is noted on the host's copy (Grenade.thrower).
+func server_throw(id: StringName, origin: Vector3, velocity: Vector3, thrower: Node = null) -> void:
 	_throw_count += 1
+	if thrower:
+		_throwers[_throw_count] = thrower
 	show_throw.rpc(_throw_count, String(id), origin, velocity)
 
 
@@ -279,6 +331,9 @@ func show_throw(serial: int, id: String, origin: Vector3, velocity: Vector3) -> 
 	var grenade := Grenade.new()
 	grenade.name = "Grenade%d" % serial
 	grenade.setup(StringName(id))
+	if is_instance_valid(_throwers.get(serial)):
+		grenade.thrower = _throwers[serial]
+	_throwers.erase(serial)
 	add_child(grenade)
 	grenade.global_position = origin
 	grenade.linear_velocity = velocity
@@ -295,11 +350,13 @@ func show_flash(pos: Vector3) -> void:
 	_burst(pos, Color.WHITE, 1.0, 0.15)
 
 
-## A smoke cloud on every peer, in its colour (a name in SmokeCloud.COLOURS).
+## A smoke cloud on every peer, in its colour (a name in SmokeCloud.COLOURS), `age` seconds
+## old (a late joiner gets the clouds already out: _send_smoke_to).
 @rpc("authority", "call_local", "reliable")
-func spawn_smoke(pos: Vector3, colour: String) -> void:
+func spawn_smoke(pos: Vector3, colour: String, age := 0.0) -> void:
 	var cloud := SmokeCloud.new()
 	cloud.colour = colour
+	cloud.age = age
 	add_child(cloud)
 	cloud.global_position = pos
 
@@ -340,6 +397,7 @@ func _on_hosted() -> void:
 		var d: Dictionary = GameState.dropped[uid]
 		spawn_item(StringName(d.id), int(d.count), Vector3(d.pos[0], d.pos[1], d.pos[2]), uid, GameState.from_json(d.get("state", {})))
 	player_roles[1] = Roles.local_choice  # the host's own pick from the main menu
+	player_handed[1] = Handedness.local_left()
 	_add_player(1)
 	NavBuilder.build(self)
 	# Bodies lie where they were, on the walls' collision.
@@ -365,6 +423,8 @@ func _spawn_ai() -> void:
 			"loadout": HOSTILE_LOADOUT, "combat": 0.45, "discipline": 0.5, "guard": h.guard, "mode": "aware"})
 	for h: Dictionary in hostiles:
 		spawned[h.name].buddy = spawned.get(h.buddy)  # null if the buddy's body is in the save
+		for intel_id: String in h.get("intel", []):  # people (wave 4): officers' intel
+			people.server_give_intel(spawned[h.name], StringName(intel_id), "%s (%s)" % [h.name, h.get("rank", "")])
 	rebalance_squad()
 
 
@@ -443,16 +503,71 @@ func _squad_ai() -> Array:
 func _remove_squadmate(s: Soldier) -> void:
 	if s.vitals.is_dead():
 		return
+	BaseHub.server_squadmate_leaving(s)  # campaign: a roster member keeps their gear (wave 4)
+	if not s.has_meta(&"roster_id"):
+		_drop_extras(s)  # outside the campaign: what it was given or picked up stays here
 	s.release_carried()
 	if is_instance_valid(s.carried_by):
 		s.carried_by.release_carried()
 	s.queue_free()
 
 
+## Host only. A squadmate leaving its slot outside the campaign (a player took it) drops what it
+## holds beyond the kit it spawned with (meta "start_gear"): what players handed it, what it
+## scavenged, an objective item. Whole stacks with their state (part-used magazines, damaged
+## armor), in a pile at its feet. Its own kit goes with it, so a join doesn't hand out free
+## gear (audit L1-03: before, anything it had been given was lost).
+func _drop_extras(s: Soldier) -> void:
+	var inv := s.inventory
+	var start: Dictionary = s.get_meta(&"start_gear", {})
+	var now := Roster.gear_counts(inv.net_state)
+	var extra := {}
+	for id: String in now:
+		var n := int(now[id]) - int(start.get(id, 0))
+		if n > 0:
+			extra[id] = n
+	var pile: Array[Dictionary] = []
+	var take := func(entry: Dictionary) -> void:
+		if entry.is_empty():
+			return
+		pile.append(entry)
+		var counted := {}
+		Roster.count_entry(entry, counted)  # an entry's state may carry more (a carrier's pouches)
+		for id: String in counted:
+			if extra.has(id):
+				extra[id] = int(extra[id]) - int(counted[id])
+	# Stowed stacks: first the ones unlike anything in its starting kit (the 7-round magazine it
+	# was handed, not one of its own full ones), then any others still over.
+	var kit_states: Dictionary = s.get_meta(&"start_states", {})
+	for unlike_first: bool in [true, false]:
+		for c: StringName in inv.search_containers():
+			var i: int = (inv.containers.get(c, []) as Array).size() - 1
+			while i >= 0:
+				var e: Dictionary = inv.containers[c][i]
+				var id := String(e.id)
+				var like_kit: bool = (kit_states.get(id, []) as Array).has(e.get("state", {}))
+				if int(extra.get(id, 0)) > 0 and not (unlike_first and like_kit):
+					take.call(inv.remove_entry(c, i, int(extra[id])))
+				i -= 1
+	for slot: StringName in Inventory.SLOTS:
+		var id := String(inv.slots[slot])
+		if id != "" and int(extra.get(id, 0)) > 0:
+			var off := inv.unequip(slot)
+			if not off.is_empty():
+				take.call({"id": off.id, "count": 1, "state": off.state})
+	if inv.hands != &"" and int(extra.get(String(inv.hands), 0)) > 0:
+		take.call({"id": inv.release_hands(), "count": 1})
+	for i in pile.size():
+		var e: Dictionary = pile[i]
+		var at := s.global_position + Vector3(0.35 * (i % 3) - 0.35, 0.4, 0.35 * (i / 3))
+		server_spawn_dropped(StringName(e.id), int(e.get("count", 1)), at, e.get("state", {}))
+
+
 ## Host only: a squadmate died (permadeath). Its body stays where it fell; it leaves the squad
 ## (no slot, no orders) and nobody new takes its slot.
 func _on_died_for_good(s: Soldier) -> void:
 	if s.faction == &"friendly" and s.squad_slot >= 0:
+		BaseHub.server_squadmate_died(s)  # campaign: a roster member is lost (wave 4)
 		_fallen_slots[s.squad_slot] = true
 		s.squad_slot = -1
 
@@ -461,6 +576,8 @@ func _on_died_for_good(s: Soldier) -> void:
 ## (dead squadmates' bodies keep theirs, so past the eighth it's "Alpha 2" and so on), in its
 ## role's kit, placed in formation behind the lead.
 func _spawn_squadmate(slot: int, role: StringName, team: int) -> Soldier:
+	if BaseHub.campaign_squad():  # campaign: the company's own people, from the roster (wave 4)
+		return BaseHub.server_spawn_roster_squadmate(self, slot, role, team)
 	var callsign := ""
 	var lap := 1
 	while callsign == "":
@@ -474,8 +591,8 @@ func _spawn_squadmate(slot: int, role: StringName, team: int) -> Soldier:
 	var anchor: Node3D = squad.leader if is_instance_valid(squad.leader) else null
 	var wedge: Array = Squad.FORMATIONS["wedge"]
 	var pos := anchor.global_transform * (wedge[maxi(slot - 1, 0) % wedge.size()] as Vector3) if anchor \
-		else SPAWN_POINTS[slot % SPAWN_POINTS.size()] + Vector3(0, 0, 3)
-	return spawn_soldier({"name": callsign, "faction": "friendly", "variant": "multicam", "pos": pos, "loadout": [],
+		else spawn_point(slot) + Vector3(0, 0, 3)
+	return spawn_soldier({"name": callsign, "faction": "friendly", "variant": "multicam", "pos": ground_point(pos), "loadout": [],
 		"role": String(role), "team": team, "slot": slot, "combat": 0.5 + 0.03 * (slot % 5), "discipline": 0.6, "guard": false})
 
 
@@ -484,6 +601,16 @@ func _spawn_squadmate(slot: int, role: StringName, team: int) -> Soldier:
 ## (a Squad.COMBAT_MODES name).
 func spawn_soldier(data: Dictionary) -> Soldier:
 	return ai_spawner.spawn(data) as Soldier
+
+
+## Host: the surnames already on `faction`'s side, the dead included (so a recruit replacing a
+## fallen squadmate gets a name of his own).
+func _names_on(faction: StringName) -> Dictionary:
+	var taken := {}
+	for s in ai.get_children():
+		if s is Soldier and s.faction == faction and s.person_name != "":
+			taken[s.person_name] = true
+	return taken
 
 
 func _make_soldier(data: Dictionary) -> Node:
@@ -495,12 +622,26 @@ func _make_soldier(data: Dictionary) -> Node:
 	soldier.role = StringName(data.get("role", ""))
 	soldier.fire_team = int(data.get("team", -1))
 	soldier.squad_slot = int(data.get("slot", -1))
+	soldier.left_handed = bool(data.get("left", Handedness.roll_ai(String(data.name))))  # LEFT_SHARE of AI
 	if multiplayer.is_server():
+		var who := Names.pick(soldier.faction, String(data.name), _names_on(soldier.faction))
+		soldier.person_name = String(data.get("person_name", who.name))
+		soldier.nation = String(data.get("nation", who.nation))
 		var inventory: Inventory = soldier.get_node(^"Inventory")
 		for id: String in data.loadout:
 			inventory.take(StringName(id))
 		if soldier.role != &"":
 			Roles.apply_kit(inventory, soldier.role)
+		# What it started with, so what it's handed or picks up later can be told apart
+		# (_drop_extras, when a player takes its slot).
+		soldier.set_meta(&"start_gear", Roster.gear_counts(inventory.net_state))
+		var states := {}
+		for c: StringName in inventory.search_containers():
+			for e: Dictionary in inventory.containers[c]:
+				if not states.has(String(e.id)):
+					states[String(e.id)] = []
+				states[String(e.id)].append(e.get("state", {}))
+		soldier.set_meta(&"start_states", states)
 		var brain := SquadAI.new()
 		brain.name = "SquadAI"
 		brain.squad = squad_for(soldier.faction)
@@ -523,6 +664,7 @@ func _on_soldier_down(soldier: Soldier) -> void:
 ## Client: tell the host which role this player picked in the main menu.
 func _on_joined() -> void:
 	request_role.rpc_id(1, String(Roles.local_choice))
+	request_handedness.rpc_id(1, Handedness.local_left())
 
 
 ## A player picks their role (sent on join). The host gives them that role's slot.
@@ -534,12 +676,33 @@ func request_role(role: String) -> void:
 	rebalance_squad()
 
 
+## A player says which shoulder they shoot from (sent on join, from the main menu).
+@rpc("any_peer", "call_local", "reliable")
+func request_handedness(left: bool) -> void:
+	if not multiplayer.is_server():
+		return
+	var id := multiplayer.get_remote_sender_id()
+	player_handed[id] = left
+	var player := players.get_node_or_null(str(id)) as Soldier
+	if player:
+		player.left_handed = left
+
+
 func _on_peer_joined(id: int) -> void:
 	if not multiplayer.is_server():
 		return
 	voxel_world.send_edit_log_to(id)
+	_send_smoke_to(id)
 	_add_player(id)
 	get_tree().create_timer(JOIN_ROLE_WAIT_S).timeout.connect(_on_join_role_timeout.bind(id))
+
+
+## Host: the smoke clouds still out, to a player who just joined (audit L2-01: they missed the
+## one-time spawn, so the AI could hide in smoke they couldn't see).
+func _send_smoke_to(id: int) -> void:
+	for cloud in SmokeCloud.active:
+		if is_instance_valid(cloud) and is_ancestor_of(cloud) and not cloud.is_queued_for_deletion():
+			spawn_smoke.rpc_id(id, cloud.global_position, cloud.colour, cloud.age)
 
 
 ## Host: a joined player's pick never came; they play DEFAULT_JOIN_ROLE.
@@ -557,6 +720,7 @@ func _on_peer_left(id: int) -> void:
 		player.queue_free()
 	if multiplayer.is_server():
 		player_roles.erase(id)
+		player_handed.erase(id)
 		_kitted.erase(id)
 		var squad := squad_for(&"friendly")
 		if squad.leader == player:
@@ -579,10 +743,13 @@ func _add_player(id: int) -> void:
 	var player := PLAYER_SCENE.instantiate()
 	player.name = str(id)
 	player.position = next_spawn_point()
+	(player as Soldier).left_handed = bool(player_handed.get(id, false))
+	(player as Soldier).spawn_position = player.position  # a client's own player starts here too
 	players.add_child(player, true)
 	if id == 1:
 		_squads[&"friendly"].leader = player  # the host leads until someone else gives an order
 	(player as Soldier).vitals.went_down.connect(_on_soldier_down.bind(player))
+	BaseHub.server_player_added(self, player)  # campaign: their gear, the respawn pool (wave 4)
 	rebalance_squad()
 
 
@@ -636,32 +803,41 @@ func _build_environment() -> void:
 ## against the east wall, and a sheet-metal shipping container by the west wall. Rounds go
 ## through the wood and the sheet metal; the concrete only takes small marks.
 func _build_structures() -> void:
+	for box: Array in structure_boxes():
+		voxel_world.add_box_m(box[0], box[1], box[2])
+
+
+## The compound's structures as [from, to (metres), VoxelWorld.Mat] boxes, in build order
+## (see _build_structures). A zone places the same compound as a module (ZoneModules).
+static func structure_boxes() -> Array:
+	var out: Array = []
 	var h := COMPOUND_HALF
 	var t := WALL_THICKNESS
 	var C := VoxelWorld.Mat.CONCRETE
 	# Perimeter, with a 4 m gate in the south wall.
-	voxel_world.add_box_m(Vector3(-h, 0, -h), Vector3(h, 2.6, -h + t), C)
-	voxel_world.add_box_m(Vector3(-h, 0, -h), Vector3(-h + t, 2.6, h), C)
-	voxel_world.add_box_m(Vector3(h - t, 0, -h), Vector3(h, 2.6, h), C)
-	voxel_world.add_box_m(Vector3(-h, 0, h - t), Vector3(-2, 2.6, h), C)
-	voxel_world.add_box_m(Vector3(2, 0, h - t), Vector3(h, 2.6, h), C)
+	out.append([Vector3(-h, 0, -h), Vector3(h, 2.6, -h + t), C])
+	out.append([Vector3(-h, 0, -h), Vector3(-h + t, 2.6, h), C])
+	out.append([Vector3(h - t, 0, -h), Vector3(h, 2.6, h), C])
+	out.append([Vector3(-h, 0, h - t), Vector3(-2, 2.6, h), C])
+	out.append([Vector3(2, 0, h - t), Vector3(h, 2.6, h), C])
 	# Main building, 10 x 8 m, doorway in the south wall.
 	var P := VoxelWorld.Mat.PAINTED
-	voxel_world.add_box_m(Vector3(-5, 0, -12), Vector3(5, 3, -12 + t), P)
-	voxel_world.add_box_m(Vector3(-5, 0, -12), Vector3(-5 + t, 3, -4), P)
-	voxel_world.add_box_m(Vector3(5 - t, 0, -12), Vector3(5, 3, -4), P)
-	voxel_world.add_box_m(Vector3(-5, 0, -4 - t), Vector3(-0.6, 3, -4), P)
-	voxel_world.add_box_m(Vector3(0.6, 0, -4 - t), Vector3(5, 3, -4), P)
-	voxel_world.add_box_m(Vector3(-0.6, 2.2, -4 - t), Vector3(0.6, 3, -4), P)
+	out.append([Vector3(-5, 0, -12), Vector3(5, 3, -12 + t), P])
+	out.append([Vector3(-5, 0, -12), Vector3(-5 + t, 3, -4), P])
+	out.append([Vector3(5 - t, 0, -12), Vector3(5, 3, -4), P])
+	out.append([Vector3(-5, 0, -4 - t), Vector3(-0.6, 3, -4), P])
+	out.append([Vector3(0.6, 0, -4 - t), Vector3(5, 3, -4), P])
+	out.append([Vector3(-0.6, 2.2, -4 - t), Vector3(0.6, 3, -4), P])
 	# Low cover: a sandbag wall and two concrete ones.
-	voxel_world.add_box_m(Vector3(-9, 0, 6), Vector3(-6, 1.1, 6.4), VoxelWorld.Mat.SANDBAG)
-	voxel_world.add_box_m(Vector3(6, 0, 3), Vector3(9, 1.1, 3.4), C)
-	voxel_world.add_box_m(Vector3(-1.5, 0, 10), Vector3(1.5, 1.1, 10.4), C)
+	out.append([Vector3(-9, 0, 6), Vector3(-6, 1.1, 6.4), VoxelWorld.Mat.SANDBAG])
+	out.append([Vector3(6, 0, 3), Vector3(9, 1.1, 3.4), C])
+	out.append([Vector3(-1.5, 0, 10), Vector3(1.5, 1.1, 10.4), C])
 	# Crates.
 	var W := VoxelWorld.Mat.WOOD
-	voxel_world.add_box_m(Vector3(-13, 0, -11), Vector3(-12, 1, -10), W)
-	voxel_world.add_box_m(Vector3(-12, 0, -11), Vector3(-11, 1, -10), W)
-	voxel_world.add_box_m(Vector3(-12.5, 1, -11), Vector3(-11.5, 2, -10), W)
+	out.append([Vector3(-13, 0, -11), Vector3(-12, 1, -10), W])
+	out.append([Vector3(-12, 0, -11), Vector3(-11, 1, -10), W])
+	out.append([Vector3(-12.5, 1, -11), Vector3(-11.5, 2, -10), W])
 	var S := VoxelWorld.Mat.SHEET_METAL
 	for box: Array in SHED + CONTAINER:
-		voxel_world.add_box_m(box[0], box[1], W if box[2] == "wood" else S)
+		out.append([box[0], box[1], W if box[2] == "wood" else S])
+	return out
