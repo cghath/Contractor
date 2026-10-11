@@ -124,6 +124,11 @@ var role: StringName = &""
 var fire_team := -1
 var squad_slot := -1
 var color_team := ""
+## Where the host put this body when it spawned (the level's _add_player), sent with the spawn
+## by ServerSync. A client's own player is placed there as it spawns: its position is the
+## owner's to replicate, so the host's spawn doesn't carry it and it would start at the
+## level's origin (and the host would see it jump there).
+var spawn_position := Vector3.ZERO
 ## Host only: when this body died (Soldier._now()), for the body cap; -1 while alive.
 var died_at := -1.0
 ## Host only (tests may lower it): the body cap in force.
@@ -169,6 +174,8 @@ func stun(seconds: float, from: Vector3) -> void:
 
 func _ready() -> void:
 	add_to_group(&"combatants")
+	if is_local() and not multiplayer.is_server() and spawn_position != Vector3.ZERO:
+		position = spawn_position  # see spawn_position
 	inventory.changed.connect(_on_inventory_changed)
 	vitals.died.connect(_on_died)
 	vitals.went_down.connect(_on_went_down)

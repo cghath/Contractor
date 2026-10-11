@@ -53,6 +53,11 @@ func next_spawn_point() -> Vector3:
 	return BASE_SPAWNS[_spawn_index % BASE_SPAWNS.size()]
 
 
+## What a joining client loads to play here (LevelSwitch).
+func level_info() -> Dictionary:
+	return {"level": "base"}
+
+
 ## The map of the hub covers the FOB inside its HESCO perimeter.
 func map_area() -> Rect2:
 	return Rect2(-PERIMETER_HALF, -PERIMETER_HALF, PERIMETER_HALF * 2.0, PERIMETER_HALF * 2.0)

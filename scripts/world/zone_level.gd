@@ -301,6 +301,7 @@ func _add_player(id: int) -> void:
 	var player := players.get_node_or_null(str(id)) as Node3D
 	if player:
 		player.position = player_spawn(id)
+		(player as Soldier).spawn_position = player.position
 
 
 ## A client's own player as it spawns there: the host's spawn doesn't carry its position (its

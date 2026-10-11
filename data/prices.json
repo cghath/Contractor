@@ -1,5 +1,5 @@
 {
-	"_note": "Proposed prices (dollars) for the base shop, salvage and repairs (wave 4, W10). An item without its own price uses its type's default. Tune freely.",
+	"_note": "Proposed prices (dollars) for the base shop, salvage and repairs (wave 4, W10). An item without its own price uses its type's default. Intel (W11) is worth its intel_value in data/items.json (keep the two equal) and is found, never sold. Tune freely.",
 	"sell_ratio": 0.4,
 	"default_by_type": {"weapon": 1500, "ammo": 40, "armor": 900, "plate": 700, "backpack": 250, "medical": 60,
 		"utility": 150, "pouch": 30, "objective": 0, "salvage": 300, "misc": 50},
@@ -23,9 +23,10 @@
 		"knife": 80, "radio": 1800, "binoculars": 300,
 		"frag_grenade": 90, "smoke_grenade": 40, "smoke_green": 45, "smoke_yellow": 45, "smoke_blue": 45, "smoke_purple": 45,
 		"flashbang": 70, "breaching_charge": 400,
-		"electronics_salvage": 450, "hvt_case": 0, "supply_crate": 2500
+		"electronics_salvage": 450, "hvt_case": 0, "supply_crate": 2500,
+		"zip_cuffs": 5, "intel_laptop": 3000, "intel_phone": 1200, "intel_documents": 800
 	},
-	"not_for_sale": ["hvt_case", "supply_crate", "electronics_salvage", "cpr"],
+	"not_for_sale": ["hvt_case", "supply_crate", "electronics_salvage", "cpr", "intel_laptop", "intel_phone", "intel_documents"],
 	"repair": {"share_per_integrity": 0.8, "per_chip": 12, "max_share": 0.8},
 	"supports": {"resupply": 8000, "transport": 6000, "aav": 12000, "extraction": 10000},
 	"weekly_upkeep": 4000,

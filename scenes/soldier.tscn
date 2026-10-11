@@ -108,6 +108,9 @@ properties/7/replication_mode = 2
 properties/8/path = NodePath("Model:action_net")
 properties/8/spawn = true
 properties/8/replication_mode = 2
+properties/9/path = NodePath(".:spawn_position")
+properties/9/spawn = true
+properties/9/replication_mode = 0
 
 [node name="Soldier" type="CharacterBody3D"]
 collision_layer = 16

@@ -633,6 +633,7 @@ func _add_player(id: int) -> void:
 	var player := PLAYER_SCENE.instantiate()
 	player.name = str(id)
 	player.position = next_spawn_point()
+	(player as Soldier).spawn_position = player.position  # a client's own player starts here too
 	players.add_child(player, true)
 	if id == 1:
 		_squads[&"friendly"].leader = player  # the host leads until someone else gives an order

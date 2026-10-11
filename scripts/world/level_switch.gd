@@ -1,16 +1,27 @@
 class_name LevelSwitch
 extends Node
-## Which level a session plays, and the handshake that gets a joining client onto the same
-## one before anything replicates. Lives under Main (main.gd adds it).
+## Which level a session plays, and the one mechanism that changes it. Lives under Main
+## (main.gd adds it).
 ##
-## Uses SceneMultiplayer's authentication step: when a client connects, the host sends its
-## level's level_info() ({"level": "compound"} or {"level": "zone", "def": ...}); the client
-## swaps its level for that one (generating the zone from the definition) and only then
-## completes the connection, so the spawners and RPCs that follow find the same nodes.
+## A level is named by its level_info() (CompoundLevel and subclasses): {"level": "compound"},
+## {"level": "base"} (the campaign's hub, BaseLevel) or {"level": "zone", "def": ...} (ZoneLevel,
+## generated from the definition). load_level() makes a parent's level the one an info names;
+## everything that swaps levels goes through it: the main menu (main.host_zone, BaseHub's
+## prepare_session/cancel_session), a joining client (below) and BaseHub's switches for the
+## whole session (deploying from the base and coming back).
+##
+## Joining uses SceneMultiplayer's authentication step, the only handler of it: when a client
+## connects, the host sends its level's level_info() and whether a campaign is running (after a
+## level switch in progress, if any: BaseHub.switch_pending); the client swaps its level for
+## that one (generating a zone from its definition) and follows the campaign mode
+## (BaseHub.follow_host), and only then completes the connection, so the spawners and RPCs
+## that follow find the same nodes. Plain sessions, test zones, the campaign's base and a
+## deployment all join the same way, at the start or late.
 
 const LEVEL_SCENES := {
 	"compound": "res://scenes/levels/compound.tscn",
 	"zone": "res://scenes/levels/zone.tscn",
+	"base": "res://scenes/levels/base_fob.tscn",
 }
 ## Long enough for a client to generate a zone (about a second) while connecting.
 const AUTH_TIMEOUT_S := 30.0
@@ -25,52 +36,87 @@ func _ready() -> void:
 	mp.peer_authenticating.connect(_on_peer_authenticating)
 
 
-## The host tells each connecting client which level to load, then lets it in once the client
-## says it has.
+## The level_info() of a level scene (BaseHub's deployments name theirs by scene path); a zone
+## scene without a definition is the "test" zone.
+static func info_for_scene(scene_path: String) -> Dictionary:
+	for kind: String in LEVEL_SCENES:
+		if LEVEL_SCENES[kind] == scene_path:
+			return {"level": kind} if kind != "zone" else {"level": "zone", "def": ZoneDef.normalize(ZoneDef.get_def("test"))}
+	return {"level": "compound"}
+
+
+## The scene that plays `info`'s level.
+static func scene_for(info: Dictionary) -> String:
+	return LEVEL_SCENES.get(String(info.get("level", "compound")), LEVEL_SCENES.compound)
+
+
+## The host tells each connecting client which level to load and whether it's a campaign, then
+## lets it in once the client says it has. A level switch under way finishes first.
 func _on_peer_authenticating(id: int) -> void:
 	if not multiplayer.is_server():
 		return  # a client waits for the host's level (_on_auth_data)
-	var level := CompoundLevel.current(self)
-	var info := level.level_info() if level else {"level": "compound"}
+	if BaseHub.switch_pending():
+		await BaseHub.level_switched
 	var mp := multiplayer as SceneMultiplayer
-	mp.send_auth(id, var_to_bytes(info))
-	mp.complete_auth(id)
+	if not id in mp.get_authenticating_peers():
+		return  # gone meanwhile
+	var level := CompoundLevel.current(self)
+	var hello := {"info": level.level_info() if level else {"level": "compound"}, "campaign": BaseHub.campaign_running}
+	if mp.send_auth(id, var_to_bytes(hello)) == OK:
+		mp.complete_auth(id)
 
 
 func _on_auth_data(id: int, data: PackedByteArray) -> void:
 	if multiplayer.is_server():
-		return  # clients send nothing
-	var info: Variant = bytes_to_var(data)
-	# Generating a zone holds up this frame: past the short connecting timeout (Net.join) the
-	# host would drop us, so the normal timeouts apply from here.
+		return  # clients send nothing but their completion
+	# The host answered. Generating a zone holds up this frame: past the short connecting
+	# timeout (Net.join) the host would drop us, so the normal timeouts apply from here.
 	var enet := multiplayer.multiplayer_peer as ENetMultiplayerPeer
 	if enet and enet.get_peer(MultiplayerPeer.TARGET_PEER_SERVER):
 		enet.get_peer(MultiplayerPeer.TARGET_PEER_SERVER).set_timeout(Net.ENET_TIMEOUT[0], Net.ENET_TIMEOUT[1], Net.ENET_TIMEOUT[2])
-	if typeof(info) == TYPE_DICTIONARY:
-		load_level(get_parent(), info)
+	var hello: Variant = bytes_to_var(data)
+	if hello is Dictionary and hello.get("info") is Dictionary:
+		BaseHub.follow_host(bool(hello.get("campaign", false)))
+		load_level(get_parent(), hello.info)
 	(multiplayer as SceneMultiplayer).complete_auth(id)
 
 
-## Makes `main`'s level the one `info` names (level_info()), replacing the one there unless it
-## is already that level. Returns the level.
-static func load_level(main: Node, info: Dictionary) -> CompoundLevel:
+## Makes `parent`'s level the one `info` names (level_info()), replacing the one there unless
+## it is already that level (or always, with `fresh`). Returns the level.
+##
+## The old level stays in the tree to the end of the frame (a voxel world wants its world
+## while it shuts down), but it stops being the level at once: it leaves the "level" group
+## (CompoundLevel.current), gives up its name (the new one takes it, for RPC and replication
+## paths), stops processing, and it and everything in it let go of Net's signals (hosting
+## right after a swap would start it too).
+static func load_level(parent: Node, info: Dictionary, fresh := false) -> CompoundLevel:
 	var current: CompoundLevel = null
-	for child in main.get_children():
-		if child is CompoundLevel and not child.is_queued_for_deletion():
+	for child in parent.get_children():
+		if child is CompoundLevel and child.is_in_group(&"level") and not child.is_queued_for_deletion():
 			current = child
-	if current and current.level_info().hash() == info.hash():
+	if current and not fresh and current.level_info().hash() == info.hash():
 		return current
 	var kind := String(info.get("level", "compound"))
-	var scene: PackedScene = load(LEVEL_SCENES.get(kind, LEVEL_SCENES.compound))
-	var level := scene.instantiate() as CompoundLevel
+	var level := (load(scene_for(info)) as PackedScene).instantiate() as CompoundLevel
 	if level is ZoneLevel:
 		(level as ZoneLevel).configure(info.get("def", {}))
 	var index := 0
 	if current:
 		index = current.get_index()
-		main.remove_child(current)
-		current.free()  # now: queued, it would still answer Net.hosted and the rest this frame
-	main.add_child(level)
-	main.move_child(level, index)
+		_retire(current)
+	parent.add_child(level)
+	parent.move_child(level, index)
 	print("[level] now playing %s" % kind)
 	return level
+
+
+static func _retire(old: CompoundLevel) -> void:
+	for sig: Signal in [Net.hosted, Net.joined, Net.peer_joined, Net.peer_left, Net.session_ended]:
+		for c: Dictionary in sig.get_connections():
+			var target := (c.callable as Callable).get_object() as Node
+			if target and (target == old or old.is_ancestor_of(target)):
+				sig.disconnect(c.callable)
+	old.remove_from_group(&"level")
+	old.name = "%s_old_%d" % [old.name, old.get_instance_id()]
+	old.process_mode = Node.PROCESS_MODE_DISABLED
+	old.queue_free()

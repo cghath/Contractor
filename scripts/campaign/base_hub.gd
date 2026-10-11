@@ -13,7 +13,9 @@ extends Node
 ##   (server_spawn_roster_squadmate); server_end_deployment() settles who came back, who's
 ##   MIA and who died, then returns everyone to the hub.
 ## - Level switching for the whole session (server_switch_level): every peer swaps the level
-##   in place, players keep their gear across (their main character's, or their stand-in's).
+##   in place (LevelSwitch.load_level), players keep their gear across (their main
+##   character's, or their stand-in's). A deployment goes to the compound or to a zone
+##   (a ZoneLevel made from its definition: begin_prep's `level_info`).
 ##
 ## Entry points: the main menu's campaign button (prepare_session), begin_prep() (the
 ## contract board, when a contract is accepted), server_deploy(), server_end_deployment() (the
@@ -21,11 +23,12 @@ extends Node
 ## contracts). A non-campaign session (the compound as before, and every older suite) never
 ## sets campaign_running, so none of this touches it.
 ##
-## Joining: the host decides which level a joining client plays in. While a client connects
-## (SceneMultiplayer's authentication step, before anything replicates to it) the host sends
-## its current level and whether a campaign is running; the client swaps to that level first
-## (_on_auth). So a plain Join reaches a campaign host at the base or deployed, and a late
-## joiner sees the same level as everyone else.
+## Joining: the host decides which level a joining client plays in. LevelSwitch's handshake
+## (SceneMultiplayer's authentication step, before anything replicates to the client) sends the
+## host's level and whether a campaign is running, after a switch in progress (switch_pending);
+## the client follows the campaign mode (follow_host) and swaps to that level first. So a plain
+## Join reaches a campaign host at the base or deployed, and a late joiner sees the same level
+## as everyone else.
 
 ## The base screen's copy of the campaign changed (every peer).
 signal view_changed
@@ -57,8 +60,6 @@ const STARTING_STASH := [["plate_carrier", 2], ["plate_ceramic_l4", 4], ["helmet
 const DEBUG_EXTRACT_M := 60.0
 ## A level switch waits at most this long for clients to stop sending (server_switch_level).
 const SWITCH_WAIT_S := 1.0
-## How long a joining client may take to load the host's level before the host gives up on it.
-const AUTH_TIMEOUT_S := 15.0
 ## A roster squadmate removed this frame comes back for a free slot after this long (their
 ## body's name is taken until it's freed).
 const REFILL_RETRY_S := 0.2
@@ -78,7 +79,7 @@ var _gear_applied := {}  # host: peer ids whose gear is on their body in this le
 var _broadcast_queued := false
 var _stash_poll := 0.0
 var _ui: BaseUI
-var _switch_to := ""       # host: the level a switch is waiting to swap in
+var _switch_to := {}       # host: the level (level_info) a switch is waiting to swap in
 var _switch_zone := ""     # host: and the zone save it goes with ("" keeps GameState.zone_id)
 var _switch_waiting := {}  # host: peers not ready for it yet
 var _switch_serial := 0
@@ -93,11 +94,6 @@ func _ready() -> void:
 	Net.peer_left.connect(_on_peer_left)
 	Net.session_ended.connect(_on_session_ended)
 	Campaign.changed.connect(func(_name: StringName) -> void: _queue_broadcast())
-	var api := multiplayer as SceneMultiplayer
-	if api:
-		api.auth_callback = _on_auth
-		api.auth_timeout = AUTH_TIMEOUT_S
-		api.peer_authenticating.connect(_on_peer_authenticating)
 
 
 # --- Campaign state -------------------------------------------------------------------------
@@ -205,7 +201,7 @@ func _delete_zone_saves() -> void:
 
 
 static func _empty_prep() -> Dictionary:
-	return {"squad": [], "contract": {}, "zone_kind": RosterDeployment.CONTRACT, "zone_id": "", "scene": ""}
+	return {"squad": [], "contract": {}, "zone_kind": RosterDeployment.CONTRACT, "zone_id": "", "scene": "", "level": {}}
 
 
 func _prep() -> Dictionary:
@@ -216,14 +212,17 @@ func _prep() -> Dictionary:
 
 ## Host (the contract board): a contract was accepted; the prep phase at the base starts.
 ## `contract` is kept as it is and handed to the deployment; `zone_kind` is "contract" or
-## "hot"; `zone_id` and `scene` name the zone's save and level ("" for the test compound).
-## The squad pick starts from the default (RosterDeployment.auto_squad) if it's empty.
-func begin_prep(contract: Dictionary, zone_kind := RosterDeployment.CONTRACT, zone_id := "", scene := "") -> void:
+## "hot"; `zone_id` and `scene` name the zone's save and level ("" for the test compound);
+## `level_info`, a level_info() such as {"level": "zone", "def": ZoneDef.get_def(id)}, names
+## the level instead of `scene` (a zone needs its definition). The squad pick starts from the
+## default (RosterDeployment.auto_squad) if it's empty.
+func begin_prep(contract: Dictionary, zone_kind := RosterDeployment.CONTRACT, zone_id := "", scene := "", level_info := {}) -> void:
 	var prep := _prep()
 	prep["contract"] = contract.duplicate(true)
 	prep["zone_kind"] = zone_kind
 	prep["zone_id"] = zone_id
 	prep["scene"] = scene
+	prep["level"] = level_info.duplicate(true)
 	if (prep.squad as Array).is_empty():
 		prep["squad"] = RosterDeployment.auto_squad(roster(), SQUAD_SIZE - _player_count())
 	_changed(&"base")
@@ -264,7 +263,7 @@ func campaign_squad() -> bool:
 
 ## Main menu (before hosting): this session is the campaign. Loads the campaign save (or
 ## starts one) and swaps the level for the base hub. Clients don't call this: they follow the
-## host when they join (_on_auth). Undo with cancel_session (hosting failed).
+## host when they join (follow_host). Undo with cancel_session (hosting failed).
 func prepare_session() -> void:
 	if not campaign_running:
 		_zone_before = GameState.zone_id
@@ -272,7 +271,7 @@ func prepare_session() -> void:
 	load_or_new()
 	GameState.zone_id = base_zone_id()
 	if not in_base():
-		_swap_level(BASE_SCENE)
+		_swap_level({"level": "base"})
 
 
 ## This machine leaves campaign mode outside a session (hosting or joining failed, or a plain
@@ -285,8 +284,8 @@ func cancel_session() -> void:
 	view = {}
 	_restore_zone_id()
 	var lvl := level()
-	if lvl and lvl.scene_file_path != COMPOUND_SCENE:
-		_swap_level(COMPOUND_SCENE)
+	if lvl and String(lvl.level_info().get("level", "")) != "compound":
+		_swap_level({"level": "compound"})
 
 
 func _restore_zone_id() -> void:
@@ -295,13 +294,15 @@ func _restore_zone_id() -> void:
 		_zone_before = ""
 
 
-## Host: every peer swaps the running level for `scene_path`; the new level then starts as if
-## hosted, and every connected player is added back (with their role and their gear). With
+## Host: every peer swaps the running level for `level_info` (a level_info() Dictionary, or a
+## level scene's path: LevelSwitch.info_for_scene), with `zone_id` as its zone save ("" keeps
+## GameState.zone_id); the new level then starts as if hosted, and every connected player is
+## added back (with their role and their gear). With
 ## clients connected it first asks them to stop sending their own player's movement (which
 ## would otherwise reach the host for a level it no longer has) and swaps once they all say so,
 ## or after SWITCH_WAIT_S: watch `level_switched`. Alone, it swaps at once.
-func server_switch_level(scene_path: String, zone_id := "") -> void:
-	_switch_to = scene_path
+func server_switch_level(level_info: Variant, zone_id := "") -> void:
+	_switch_to = (level_info as Dictionary).duplicate(true) if level_info is Dictionary else LevelSwitch.info_for_scene(String(level_info))
 	_switch_zone = zone_id
 	_switch_waiting = {}
 	for id in multiplayer.get_peers():
@@ -313,21 +314,21 @@ func server_switch_level(scene_path: String, zone_id := "") -> void:
 	var serial := _switch_serial + 1
 	_switch_serial = serial
 	get_tree().create_timer(SWITCH_WAIT_S).timeout.connect(func() -> void:
-		if _switch_serial == serial and _switch_to != "":
+		if _switch_serial == serial and switch_pending():
 			_do_switch())
 
 
 ## Host: a level switch is waiting for clients.
 func switch_pending() -> bool:
-	return _switch_to != ""
+	return not _switch_to.is_empty()
 
 
 func _do_switch() -> void:
 	# What players picked up or dropped at the hub while the switch waited counts (the stash
 	# poll stops while it waits, and server_deploy read the hub back before it).
 	_read_back_base()
-	var scene_path := _switch_to
-	_switch_to = ""
+	var info := _switch_to
+	_switch_to = {}
 	if _switch_zone != "":
 		GameState.zone_id = _switch_zone  # the new level loads (or skips) its zone save
 	_switch_serial += 1
@@ -336,8 +337,8 @@ func _do_switch() -> void:
 	_gear_applied.clear()
 	if is_instance_valid(_ui):
 		_ui.close()
-	var fresh := _swap_level(scene_path)
-	_client_switch_level.rpc(scene_path)
+	var fresh := _swap_level(info)
+	_client_switch_level.rpc(info)
 	fresh.player_roles = roles
 	fresh._on_hosted()
 	for id in multiplayer.get_peers():
@@ -360,7 +361,7 @@ func _client_hold_sync() -> void:
 
 @rpc("any_peer", "call_remote", "reliable")
 func _server_switch_ready() -> void:
-	if not multiplayer.is_server() or _switch_to == "":
+	if not multiplayer.is_server() or not switch_pending():
 		return
 	_switch_waiting.erase(multiplayer.get_remote_sender_id())
 	if _switch_waiting.is_empty():
@@ -368,37 +369,22 @@ func _server_switch_ready() -> void:
 
 
 @rpc("authority", "call_remote", "reliable")
-func _client_switch_level(scene_path: String) -> void:
+func _client_switch_level(info: Dictionary) -> void:
 	campaign_running = true
 	if is_instance_valid(_ui):
 		_ui.close()
-	var fresh := _swap_level(scene_path)
+	var fresh := _swap_level(info)
 	level_switched.emit(fresh)
 
 
-## Replaces the running level with a new `scene_path` under the same parent (this peer only).
-func _swap_level(scene_path: String) -> CompoundLevel:
+## Replaces the running level with a new one playing `info` (level_info()) under the same
+## parent (this peer only; LevelSwitch.load_level retires the old one).
+func _swap_level(info: Dictionary) -> CompoundLevel:
 	var old := level()
 	if old == null:
 		push_error("BaseHub: no level to swap")
 		return null
-	var parent := old.get_parent()
-	var index := old.get_index()
-	# The old level stays in the tree to the end of the frame (the voxel terrain wants its world
-	# while it shuts down), but it gives up its name, the "level" group and Net's signals
-	# (hosting right after a swap would start it too).
-	for sig: Signal in [Net.hosted, Net.joined, Net.peer_joined, Net.peer_left]:
-		for c: Dictionary in sig.get_connections():
-			if (c.callable as Callable).get_object() == old:
-				sig.disconnect(c.callable)
-	old.remove_from_group(&"level")
-	old.name = "%s_old_%d" % [old.name, old.get_instance_id()]
-	old.process_mode = Node.PROCESS_MODE_DISABLED
-	old.queue_free()
-	var fresh: CompoundLevel = (load(scene_path) as PackedScene).instantiate()
-	parent.add_child(fresh)
-	parent.move_child(fresh, index)
-	return fresh
+	return LevelSwitch.load_level(old.get_parent(), info, true)
 
 
 ## Host (BaseLevel): the hub is built and its people stand at the muster line.
@@ -459,50 +445,12 @@ func _on_joined() -> void:
 	_server_hello.rpc_id(1, profile())
 
 
-## Host: a client is connecting (nothing replicates to it yet): it is told the level the
-## session plays in now and whether it's a campaign (after a switch in progress, if any), and
-## let in. The client loads that level first (_on_auth).
-func _on_peer_authenticating(id: int) -> void:
-	if not multiplayer.is_server():
-		return
-	if switch_pending():
-		await level_switched
-	var api := multiplayer as SceneMultiplayer
-	if not id in api.get_authenticating_peers():
-		return  # gone meanwhile
-	var lvl := level()
-	var hello := {"scene": lvl.scene_file_path if lvl else "", "level": String(lvl.name) if lvl else "", "campaign": campaign_running}
-	if api.send_auth(id, JSON.stringify(hello).to_utf8_buffer()) == OK:
-		api.complete_auth(id)
-
-
-## Client (connecting): the host's level and campaign state. This machine swaps to that level
-## before the host lets it in, so everything the host spawns finds its place here.
-func _on_auth(id: int, data: PackedByteArray) -> void:
-	var api := multiplayer as SceneMultiplayer
-	if multiplayer.is_server():
-		return  # clients send nothing but their completion
-	# The host answered: normal timeouts from here (loading the level may take a moment).
-	var enet := multiplayer.multiplayer_peer as ENetMultiplayerPeer
-	if enet:
-		enet.get_peer(MultiplayerPeer.TARGET_PEER_SERVER).set_timeout(Net.ENET_TIMEOUT[0], Net.ENET_TIMEOUT[1], Net.ENET_TIMEOUT[2])
-	var hello: Variant = JSON.parse_string(data.get_string_from_utf8())
-	if hello is Dictionary:
-		_follow_host(String(hello.get("scene", "")), String(hello.get("level", "")), bool(hello.get("campaign", false)))
-	api.complete_auth(id)
-
-
-## Client: plays in the host's level `scene_path` (its root named `level_name`), in campaign
-## mode or not as the host is.
-func _follow_host(scene_path: String, level_name: String, campaign: bool) -> void:
+## Client (connecting; LevelSwitch's handshake): the host's session is a campaign or not.
+## This machine follows it before it loads the host's level.
+func follow_host(campaign: bool) -> void:
 	campaign_running = campaign
 	if not campaign:
 		view = {}
-	var lvl := level()
-	if lvl == null or not scene_path.begins_with("res://scenes/levels/") or not ResourceLoader.exists(scene_path):
-		return
-	if lvl.scene_file_path != scene_path or String(lvl.name) != level_name:
-		_swap_level(scene_path)
 
 
 ## Client: the connection failed (the menu may try again): nothing of a campaign stays.
@@ -632,9 +580,14 @@ func server_deploy(options := {}) -> String:
 		return "A deployment is already running"
 	_read_back_base()
 	var prep := _prep()
+	var info: Dictionary = options.get("level", prep.get("level", {}))
 	var scene := String(options.get("scene", prep.get("scene", "")))
-	if scene == "":
-		scene = COMPOUND_SCENE
+	if not info.is_empty():
+		scene = LevelSwitch.scene_for(info)
+	else:
+		if scene == "":
+			scene = COMPOUND_SCENE
+		info = LevelSwitch.info_for_scene(scene)
 	var zone_kind := String(options.get("zone_kind", prep.get("zone_kind", RosterDeployment.CONTRACT)))
 	var zone_id := String(options.get("zone_id", prep.get("zone_id", "")))
 	if zone_id == "":
@@ -644,8 +597,9 @@ func server_deploy(options := {}) -> String:
 	var stand_ins := _pick_stand_ins(squad)
 	RosterDeployment.begin(roster(), squad, zone_kind, zone_id, scene, day(), prep.get("contract", {}), stand_ins)
 	prep["contract"] = {}
+	prep["level"] = {}
 	_changed_all()
-	server_switch_level(scene, zone_save_id(zone_id))
+	server_switch_level(info, zone_save_id(zone_id))
 	return ""
 
 
@@ -779,7 +733,7 @@ func server_end_deployment(extracted: Array, return_to_base := true) -> Dictiona
 	Campaign.save_campaign()
 	deployment_ended.emit(report)
 	if return_to_base:
-		server_switch_level(BASE_SCENE, base_zone_id())
+		server_switch_level({"level": "base"}, base_zone_id())
 	return report
 
 
@@ -792,7 +746,7 @@ static func _outcome_of(s: Soldier) -> Dictionary:
 
 ## Host: everyone goes back to the hub (after server_end_deployment(..., false) and a debrief).
 func server_return_to_base() -> void:
-	server_switch_level(BASE_SCENE, base_zone_id())
+	server_switch_level({"level": "base"}, base_zone_id())
 
 
 ## Host (debug, and a stand-in for the map's extraction): ends the deployment with everyone

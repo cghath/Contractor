@@ -52,8 +52,9 @@ func _ready() -> void:
 	_test_resolve()
 	_test_stand_ins()
 	await _test_session()
-	GameState.zone_id = BaseHub.zone_save_id(ZONE + tag)
-	GameState.delete_save()
+	for zone_id: String in [ZONE + tag, ZONE + "_wide" + tag]:
+		GameState.zone_id = BaseHub.zone_save_id(zone_id)
+		GameState.delete_save()
 	GameState.zone_id = "test_base" + tag
 	GameState.delete_save()
 	Campaign.reset_campaign()
@@ -377,6 +378,7 @@ func _test_session() -> void:
 	await _test_armory(base)
 	await _test_deployment(client)
 	await _finish_client(client)
+	await _test_zone_deployment()
 
 
 ## Starts a second process that joins the hub as a client and checks what it sees; returns
@@ -681,6 +683,42 @@ func _test_deployment(client: Dictionary) -> void:
 	check(Roster.gear_counts(BaseHub.member(a).gear) == Roster.gear_counts(Roster.json_safe(sa_home.inventory.net_state)) and gear_a.get("smoke_purple", 0) == 1,
 		"their gear survives a save and reload")
 	check(String(BaseHub.member(b).status) == Roster.MIA and String(BaseHub.member(c).status) == Roster.DEAD, "and so do MIA and KIA")
+
+
+## A deployment into a zone (a ZoneLevel generated from the definition the deployment names)
+## and back: the same switch as into the compound.
+func _test_zone_deployment() -> void:
+	print("Deployment into a zone")
+	level = CompoundLevel.current(self)
+	if not level is BaseLevel:
+		check(false, "back at the base before deploying into a zone")
+		return
+	var squad: Array = Roster.available_ids(BaseHub.roster()).slice(0, 1)
+	var def := ZoneDef.get_def("test")
+	var why := BaseHub.server_deploy({"level": {"level": "zone", "def": def}, "zone_id": ZONE + "_wide" + tag, "squad": squad})
+	var moved := await _wait_until(func() -> bool: return CompoundLevel.current(self) is ZoneLevel, 20.0)
+	var zone := CompoundLevel.current(self) as ZoneLevel
+	check(why == "" and moved and zone != null and int(zone.def.get("seed", -1)) == int(def.seed) and zone.modules().size() == (def.modules as Array).size(),
+		"deploying into a zone generates it from its definition (%s, %d modules)" % [String(def.get("name", "?")), zone.modules().size() if zone else 0])
+	if zone == null:
+		return
+	level = zone
+	check(get_tree().get_nodes_in_group(&"level").size() == 1, "and it is the session's one level")
+	var player := zone.players.get_node_or_null(^"1") as Soldier
+	var start := zone.insertion_points()[0]
+	check(player != null and Vector2(player.global_position.x - start.x, player.global_position.z - start.z).length() < 10.0,
+		"the host's player starts at the zone's insertion point")
+	var up := squad.is_empty() or await _wait_until(func() -> bool: return _roster_soldier(String(squad[0])) != null, 30.0)
+	check(up, "the picked squadmate deploys into the zone with them")
+	var out: Array = [player]
+	if not squad.is_empty() and _roster_soldier(String(squad[0])):
+		out.append(_roster_soldier(String(squad[0])))
+	var report := BaseHub.server_end_deployment(out)
+	check(report.get("zone_id", "") == ZONE + "_wide" + tag and (report.get("mia", []) as Array).is_empty(),
+		"extracting ends it with nobody left behind (%s back, %s MIA)" % [report.get("extracted", []), report.get("mia", [])])
+	var home := await _wait_until(func() -> bool: return CompoundLevel.current(self) is BaseLevel, 20.0)
+	check(home, "and everyone is back at the base")
+	level = CompoundLevel.current(self)
 
 
 ## The late joiner (another process): joins the deployed host with a plain Join and checks it
