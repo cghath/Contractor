@@ -625,6 +625,7 @@ func _test_spo2() -> void:
 	low.npa = true
 	low.spo2 = 60.0
 	low.morphine_level = 8.0  # deep breathing depression keeps it there
+	low.drug_level[WoundModel.ATROPINE] = 3.2  # and atropine the heart rate up: only the SpO2 counts here
 	_step(low, WoundModel.SPO2_ARREST_S - 1.0)
 	check(not low.arrest and low.unconscious, "under 70%: out, the heart holds a while")
 	_step(low, 2.0)

@@ -277,7 +277,7 @@ a release:
 - A vest or backpack can't be dropped while it still has things in it. Empty it from the inventory screen first.
 - The voxel world has no stream, so it's limited to `VoxelWorld.BOUNDS`. The voxel edit log grows with every bullet hole and is never compacted.
 - Player inventories aren't saved yet; only the zone's state is.
-- Medical depth is wave 3, in progress: IV and IO lines, fluids, pressure bags, per-lung breathing and the decompression needle are in; CPR, defibrillator, drugs and surgery aren't yet, so nothing restarts a heart in cardiac arrest, and heart wounds and internal torso bleeding have no field fix. A line can't be taken out once placed. Breathing has no sound yet, and blood in a lung (hemothorax) has no field fix (no chest drain).
+- Medical depth is wave 3, in progress: IV and IO lines, fluids, pressure bags, per-lung breathing, the decompression needle, heart rate, the four drugs, CPR and the defibrillator are in; surgery isn't yet, so heart wounds and internal torso bleeding have no field fix. A line can't be taken out once placed. Breathing has no sound yet, and blood in a lung (hemothorax) has no field fix (no chest drain).
 - Bodies: a zone reload respawns the full friendly squad alive while dead squadmates' saved bodies also come back, so their gear exists twice (AI persistence is wave 4; dead hostiles aren't respawned). Loot all can't move a carrier with its contents onto someone already wearing one; it falls back to piece by piece.
 - AI squadmates don't load magazines from loose rounds, and role kits carry no loose rounds.
 - Bullet holes in wood and sheet metal are decals (a voxel only breaks out after many rounds), so you can't see through them; concrete marks are small decals. No ricochets yet.

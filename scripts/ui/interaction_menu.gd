@@ -310,7 +310,7 @@ static func treatments(actor: Soldier, target: Node) -> Array[Dictionary]:
 
 
 static func _treat_entry(actor: Soldier, target: Node, item: ItemData, part: StringName, rushed: bool, label: String) -> Dictionary:
-	var have := actor.inventory.medical_count(item.id) > 0
+	var have := Vitals.has_item(actor.inventory, item.id)
 	return {"id": &"treat_item", "label": label, "request": &"_server_treat", "with": &"treatment", "target": target,
 		"item": item.id, "part": part, "rushed": rushed, "disabled": "" if have else "You have no %s" % item.name}
 
@@ -381,7 +381,8 @@ static func has_oximeter(actor: Soldier) -> bool:
 static func wound_report(vitals: Vitals, on_self := true, oximeter := false) -> String:
 	var signs := vitals.signs(on_self)
 	if oximeter:
-		var reading := "no reading" if vitals.in_cardiac_arrest() or vitals.is_dead() else "SpO2 %d%%" % roundi(vitals.spo2())
+		var reading := "no reading" if vitals.in_cardiac_arrest() or vitals.is_dead() \
+			else "SpO2 %d%%, pulse %d" % [roundi(vitals.spo2()), roundi(vitals.heart_rate())]
 		signs.insert(0, "Pulse oximeter: %s" % reading)
 	var lines := PackedStringArray()
 	for wound in vitals.wound_list():

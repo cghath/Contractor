@@ -787,10 +787,12 @@ func _treat(target: Node3D, item_id: StringName, part: StringName, rushed: bool)
 		why = "Too far away"
 	elif item == null or not item.stats.has("treat_s"):
 		why = "That doesn't treat anything"
-	elif inventory.medical_count(item_id) <= 0:
+	elif not Vitals.has_item(inventory, item_id):
 		why = "You have no %s" % item.name
 	elif target == self and Vitals.needs_other_hands(item_id):
 		why = "Someone else has to place that"
+	elif is_ai() and item.stats.get("medic_only", false) and role != Roles.MEDIC:
+		why = "Only a medic does that"
 	else:
 		why = other.treatment_problem(item_id, part)
 	if why != "":
@@ -802,14 +804,15 @@ func _treat(target: Node3D, item_id: StringName, part: StringName, rushed: bool)
 	var label := "%s%s, %s..." % [item.name, " (rushed)" if rushed else "", Vitals.part_name(part)]
 	if not await _timed_care(target, other, treat_seconds(target, item, rushed), label, part):
 		return
-	if inventory.medical_count(item_id) <= 0:
+	if not Vitals.has_item(inventory, item_id):
 		_client_message.rpc_id(owner_peer(), "You no longer have a %s" % item.name)
 		return
 	rushed = rushed or (tourniquet and (hurried or under_fire()))
 	if not other.server_apply_treatment(item_id, part, rushed):
 		_client_message.rpc_id(owner_peer(), "%s does nothing there now" % item.name)
 		return
-	inventory.take_medical(item_id)
+	if not item.stats.get("no_item", false) and not item.stats.get("reusable", false):
+		inventory.take_medical(item_id)
 	var note := other.care_note()
 	if note != "":
 		_client_message.rpc_id(owner_peer(), note)

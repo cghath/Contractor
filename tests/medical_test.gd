@@ -34,6 +34,7 @@ func _ready() -> void:
 	_test_treatment_wakes()
 	_test_kits()
 	_test_iv_fluids()
+	_test_heart()
 	await _start_session()
 	await _test_times()
 	await _test_completed_treatments()
@@ -512,6 +513,124 @@ func _test_iv_fluids() -> void:
 	copy.apply_net(shock.to_net())
 	check(copy.access == shock.access and int(copy.infusion.ml) == 500 and copy.infusion.item == &"saline_500",
 		"the line and the bag replicate (%s, %s)" % [copy.access, copy.infusion])
+
+
+## Heart rate, epinephrine, atropine and adenosine, and restarting a heart with CPR and the
+## defibrillator (design doc "Drugs", "Defibrillator", "Cardiac arrest").
+func _test_heart() -> void:
+	print("Heart rate, drugs, CPR and defib")
+	var calm := _model()
+	_step(calm, 30.0)
+	check(is_equal_approx(calm.heart_rate, WoundModel.HR_REST), "healthy: %.0f bpm" % calm.heart_rate)
+	var bled := _model()
+	bled.blood = 0.72
+	_step(bled, 60.0)
+	check(bled.heart_rate > 100.0, "blood loss speeds it up (%.0f bpm at 28%% lost)" % bled.heart_rate)
+	var epi := _model()
+	for i in 3:
+		epi.apply_item(WoundModel.EPINEPHRINE, &"torso")
+	_step(epi, 30.0)
+	var racing := epi.care_tasks().filter(func(t: Dictionary) -> bool: return t.kind == "racing")
+	check(epi.heart_rate > WoundModel.HR_RACING and racing.size() == 1 and racing[0].item == WoundModel.ADENOSINE,
+		"too much epinephrine: racing (%.0f bpm), adenosine asked for" % epi.heart_rate)
+	epi.apply_item(WoundModel.ADENOSINE, &"torso")
+	_step(epi, 20.0)
+	check(epi.heart_rate < WoundModel.HR_RACING and not epi.arrest, "adenosine slows it (%.0f bpm)" % epi.heart_rate)
+	var opiate := _model()
+	opiate.npa = true
+	opiate.morphine_level = 3.2
+	_step(opiate, 30.0)
+	var slow := opiate.care_tasks().filter(func(t: Dictionary) -> bool: return t.kind == "slow_heart")
+	check(opiate.heart_rate < WoundModel.HR_SLOW and slow.size() == 1 and slow[0].item == WoundModel.ATROPINE,
+		"a morphine overdose slows it (%.0f bpm), atropine asked for" % opiate.heart_rate)
+	opiate.apply_item(WoundModel.ATROPINE, &"torso")
+	_step(opiate, 20.0)
+	check(opiate.heart_rate > WoundModel.HR_SLOW, "atropine brings it up (%.0f bpm)" % opiate.heart_rate)
+	var overdose := _model()
+	for i in 8:
+		overdose.apply_item(WoundModel.EPINEPHRINE, &"torso")
+	var t := 0.0
+	while not overdose.arrest and t < 300.0:
+		_step(overdose, 1.0)
+		t += 1.0
+	check(overdose.arrest, "eight doses: racing past %.0f bpm long enough stops the heart (%.0f s)" % [WoundModel.HR_DEADLY_FAST, t])
+	var empty := _model()
+	empty.npa = true
+	empty.blood = 0.5
+	empty.update_state(0.0)
+	check(empty.arrest and empty.heart_rate == 0.0 and not empty.care_tasks().any(func(t2: Dictionary) -> bool: return t2.kind in ["cpr", "defib"]),
+		"arrest at 50%% lost: no CPR or shock asked for until blood is back")
+	check(empty.treatment_problem(WoundModel.CPR, &"chest").begins_with("Get blood back in first")
+		and empty.treatment_problem(WoundModel.DEFIBRILLATOR, &"chest").begins_with("Get blood back in first"), "and neither would do anything")
+	empty.blood = 0.65
+	var kinds: Array = empty.care_tasks().map(func(t2: Dictionary) -> String: return t2.kind)
+	check(kinds.has("epinephrine") and kinds.has("defib") and kinds.has("cpr") and kinds.find("epinephrine") < kinds.find("defib"),
+		"blood back over 60%%: epinephrine, shocks and CPR (%s)" % [kinds])
+	var shocks := 0
+	var cycles := 0
+	for i in 400:
+		var c := _model(500 + i)
+		c.npa = true
+		c.blood = 0.5
+		c.update_state(0.0)
+		c.blood = 0.65
+		c.apply_item(WoundModel.DEFIBRILLATOR, &"chest")
+		if not c.arrest:
+			shocks += 1
+		var p := _model(1500 + i)
+		p.npa = true
+		p.blood = 0.5
+		p.update_state(0.0)
+		p.blood = 0.65
+		p.apply_item(WoundModel.CPR, &"chest")
+		if not p.arrest:
+			cycles += 1
+	check(absf(shocks / 400.0 - WoundModel.DEFIB_RESTART_CHANCE) < 0.07 and absf(cycles / 400.0 - WoundModel.CPR_RESTART_CHANCE) < 0.05,
+		"a shock restarts it %.0f%% of the time, a CPR cycle %.0f%%" % [shocks / 4.0, cycles / 4.0])
+	var boosted := _model()
+	boosted.blood = 0.5
+	boosted.update_state(0.0)
+	boosted.blood = 0.65
+	boosted.drug_level[WoundModel.EPINEPHRINE] = 1.0
+	check(is_equal_approx(boosted.restart_chance(WoundModel.DEFIBRILLATOR), WoundModel.DEFIB_RESTART_CHANCE + WoundModel.EPI_RESTART_BONUS),
+		"epinephrine in the blood helps (%.0f%% a shock)" % (boosted.restart_chance(WoundModel.DEFIBRILLATOR) * 100.0))
+	var back := _model(7)
+	back.npa = true
+	back.blood = 0.5
+	back.update_state(0.0)
+	back.blood = 0.65
+	while back.arrest:
+		back.apply_item(WoundModel.DEFIBRILLATOR, &"chest")
+	check(back.care_note == "Pulse back" and is_equal_approx(back.heart_rate, WoundModel.HR_RESTART), "the heart beats again (%.0f bpm)" % back.heart_rate)
+	_step(back, WoundModel.WAKE_S[&"arrest"] + 5.0)
+	check(not back.arrest and not back.unconscious, "and with blood to spare he comes round on his own")
+	var knocked := _model()
+	knocked.knockout_left = 30.0
+	knocked.update_state(0.0)
+	check(knocked.care_tasks().any(func(t2: Dictionary) -> bool: return t2.kind == "wake" and t2.item == WoundModel.EPINEPHRINE),
+		"knocked out: epinephrine's wake-up roll is offered")
+	var woke := 0
+	for i in 400:
+		var k := _model(3000 + i)
+		k.knockout_left = 30.0
+		k.update_state(0.0)
+		k.apply_item(WoundModel.EPINEPHRINE, &"torso")
+		_step(k, WoundModel.EPI_WAKE_S + 0.5)
+		if not k.unconscious:
+			woke += 1
+	check(absf(woke / 400.0 - WoundModel.EPI_WAKE_CHANCE) < 0.07, "the roll wakes %.0f%% of them within seconds" % (woke / 4.0))
+	var held := _model(9)
+	held.npa = true
+	held.blood = 0.55
+	held.update_state(0.0)
+	for i in 5:
+		held.apply_item(WoundModel.EPINEPHRINE, &"torso")
+	_step(held, 10.0)
+	check(held.unconscious and held.unconscious_causes().has(&"blood") and held.care_note == "", "no revive: epinephrine can't wake someone out from blood loss")
+	var copy := _model()
+	copy.apply_net(epi.to_net())
+	check(absf(copy.heart_rate - epi.heart_rate) < 1.0 and copy.drug_total(WoundModel.EPINEPHRINE) > 0.0 and copy.drug_total(WoundModel.ADENOSINE) > 0.0,
+		"heart rate and drugs replicate")
 
 
 func _test_kits() -> void:

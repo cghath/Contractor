@@ -264,6 +264,54 @@ const MORPHINE_DEPRESSION_LEVEL := 3.0
 ## the blood holds at most MORPHINE_ASK_MAX_LEVEL doses (so one more stays under sedation).
 const MORPHINE_FROM_PAIN := 0.4
 const MORPHINE_ASK_MAX_LEVEL := 1.05
+
+## --- Heart rate and the other three drugs (design doc "Drugs", "Defibrillator"; proposed) ---
+## Heart rate (bpm) heads for a target at HR_CHANGE_PER_S: HR_REST, faster with blood loss
+## (shock) and pain, slower on morphine and low SpO2, and falling toward HR_DEEP_SHOCK as
+## loss nears ARREST_LOST; 0 in arrest. Each drug in the blood moves it by its HR_PER_DOSE.
+## Racing over HR_RACING or slower than HR_SLOW for HR_DANGER_S stops the heart. A medic
+## reads it as a pulse (no rhythms).
+const HR_REST := 75.0
+const HR_PER_SHOCK := 60.0
+const HR_PER_PAIN := 25.0
+const HR_PER_MORPHINE := -12.0
+const HR_PER_LOW_SPO2 := -0.5        # per SpO2 point under HR_SPO2_FROM
+const HR_SPO2_FROM := 80.0
+const HR_DEEP_SHOCK := 40.0
+const HR_DEEP_SHOCK_FROM := 0.40     # lost
+const HR_CHANGE_PER_S := 8.0
+const HR_RACING := 150.0
+const HR_SLOW := 45.0
+const HR_DEADLY_FAST := 200.0
+const HR_DEADLY_SLOW := 35.0
+const HR_DANGER_S := 60.0
+## Drugs other than morphine, by item id: one dose goes in over absorb_s, the level halves
+## every half_life_s, and each dose in the blood moves the heart rate by hr (bpm).
+const EPINEPHRINE := &"epinephrine"
+const ATROPINE := &"atropine"
+const ADENOSINE := &"adenosine"
+const DRUGS := {
+	&"epinephrine": {"absorb_s": 10.0, "half_life_s": 120.0, "hr": 30.0},
+	&"atropine": {"absorb_s": 10.0, "half_life_s": 600.0, "hr": 30.0},
+	&"adenosine": {"absorb_s": 2.0, "half_life_s": 120.0, "hr": -40.0},
+}
+## Epinephrine's wake-up roll (decided; build plan: a chance to come round sooner, never a
+## revive): given to someone out with no cause left but a concussion knockout (or already
+## coming round), EPI_WAKE_CHANCE that the knockout clears and they come round in EPI_WAKE_S.
+const EPI_WAKE_CHANCE := 0.5
+const EPI_WAKE_S := 2.0
+## Restarting a heart in arrest: CPR (a cycle of the "cpr" action) and the defibrillator do
+## nothing until blood is back to RESTART_MIN_BLOOD (design doc: above 60%). Then each CPR
+## cycle restarts it with CPR_RESTART_CHANCE and each shock with DEFIB_RESTART_CHANCE, plus
+## EPI_RESTART_BONUS per dose of epinephrine in the blood (up to one dose). A heart that
+## restarts beats at HR_RESTART.
+const CPR := &"cpr"
+const DEFIBRILLATOR := &"defibrillator"
+const RESTART_MIN_BLOOD := 0.6
+const CPR_RESTART_CHANCE := 0.08
+const DEFIB_RESTART_CHANCE := 0.35
+const EPI_RESTART_BONUS := 0.15
+const HR_RESTART := 60.0
 ## Airway (proposed): an unconscious casualty without an NPA obstructs with this chance per
 ## minute; SpO2 then falls toward SPO2_OBSTRUCTED until an NPA goes in. Someone out for
 ## less than AIRWAY_SELF_CLEAR_S (a short knockout, a brief faint from pain) stirs and clears
@@ -364,6 +412,12 @@ var _spell_wake_s := 0.0        # how long the worst cause of this spell out tak
 var _low_spo2_s := 0.0          # time spent under SPO2_ARREST
 var _out_s := 0.0               # how long this spell out has lasted (host only)
 var _pain_over_s := 0.0         # how long pain has stayed at or over the knockout threshold
+## Beats per minute (see HR_REST).
+var heart_rate := HR_REST
+## Other drugs (DRUGS ids): in the blood and still going in, in doses.
+var drug_level := {&"epinephrine": 0.0, &"atropine": 0.0, &"adenosine": 0.0}
+var drug_depot := {&"epinephrine": 0.0, &"atropine": 0.0, &"adenosine": 0.0}
+var _hr_danger_s := 0.0         # time spent racing or too slow (host only)
 
 
 # --- Queries --------------------------------------------------------------------------
@@ -539,6 +593,37 @@ func respiratory_rate() -> float:
 ## A tension pneumothorax is running on either side.
 func has_tension() -> bool:
 	return wounds.any(func(w: Dictionary) -> bool: return w.kind == "chest" and w.get("tension", false))
+
+
+## The heart rate the body heads for now (see HR_REST); 0 in arrest.
+func heart_rate_target() -> float:
+	if arrest or dead:
+		return 0.0
+	var target := HR_REST + HR_PER_SHOCK * shock() + HR_PER_PAIN * pain() + HR_PER_MORPHINE * morphine_level
+	target += HR_PER_LOW_SPO2 * maxf(HR_SPO2_FROM - spo2, 0.0)
+	var deep := clampf((lost() - HR_DEEP_SHOCK_FROM) / (ARREST_LOST - HR_DEEP_SHOCK_FROM), 0.0, 1.0)
+	target = lerpf(target, HR_DEEP_SHOCK, deep)
+	for id: StringName in DRUGS:
+		target += float(DRUGS[id].hr) * float(drug_level[id])
+	return clampf(target, 20.0, 220.0)
+
+
+## A drug (DRUGS id) in the blood plus what's still going in, in doses.
+func drug_total(id: StringName) -> float:
+	return float(drug_level[id]) + float(drug_depot[id])
+
+
+## Blood is back far enough for CPR or the defibrillator to restart the heart.
+func can_restart() -> bool:
+	return blood >= RESTART_MIN_BLOOD - 0.0001
+
+
+## Chance one CPR cycle (`item` CPR) or one shock (DEFIBRILLATOR) restarts the heart now.
+func restart_chance(item: StringName) -> float:
+	if not arrest or not can_restart():
+		return 0.0
+	var base := DEFIB_RESTART_CHANCE if item == DEFIBRILLATOR else CPR_RESTART_CHANCE
+	return base + EPI_RESTART_BONUS * minf(float(drug_level[EPINEPHRINE]), 1.0)
 
 
 ## Pain the morphine in the blood takes off now.
@@ -778,6 +863,18 @@ func care_tasks() -> Array[Dictionary]:
 			tasks.append(_task(access.part, "fluids", &"", bag_options()))
 		if veins_collapsed() and not access.pressure:
 			tasks.append(_task(access.part, "pressure", PRESSURE_BAG))
+	if arrest and can_restart():  # blood back: epinephrine, then shocks and CPR until it beats
+		if drug_total(EPINEPHRINE) < 0.5:
+			tasks.append(_task(&"torso", "epinephrine", EPINEPHRINE))
+		tasks.append(_task(&"chest", "defib", DEFIBRILLATOR))
+		tasks.append(_task(&"chest", "cpr", CPR))
+	elif not arrest and not dead:
+		if heart_rate > HR_RACING and drug_total(ADENOSINE) < 0.5:
+			tasks.append(_task(&"torso", "racing", ADENOSINE))
+		elif heart_rate < HR_SLOW and drug_total(ATROPINE) < 0.5:
+			tasks.append(_task(&"torso", "slow_heart", ATROPINE))
+		if unconscious and _epi_can_wake() and drug_total(EPINEPHRINE) < 0.5:
+			tasks.append(_task(&"torso", "wake", EPINEPHRINE))
 	for w: Dictionary in by_rate:
 		if w.kind == "fracture" and not w.treated:
 			tasks.append(_task(w.part, "fracture", SPLINT))
@@ -804,6 +901,12 @@ func treatment_problem(item: StringName, part: StringName) -> String:
 		return "Already under a pressure bag" if access.pressure else ""
 	if item == NEEDLE:
 		return "" if has_tension() else "No tension pneumothorax"
+	if item == CPR or item == DEFIBRILLATOR:
+		if not arrest:
+			return "The heart is beating"
+		return "" if can_restart() else "Get blood back in first: an empty heart can't restart"
+	if DRUGS.has(item):
+		return ""
 	match item:
 		TOURNIQUET:
 			if not LIMB_BELOW.has(part):
@@ -857,6 +960,22 @@ func apply_item(item: StringName, part: StringName, rushed := false) -> bool:
 			access = {"kind": "io", "gauge": 0, "part": IO_PART, "pressure": false}
 		PRESSURE_BAG:
 			access.pressure = true
+		CPR, DEFIBRILLATOR:  # a cycle or a shock: a chance the heart starts again
+			if care_rng.randf() < restart_chance(item):
+				_restart_heart()
+				care_note = "Pulse back"
+			else:
+				care_note = "Still no pulse"
+		_ when DRUGS.has(item):
+			drug_depot[item] = float(drug_depot[item]) + 1.0
+			if item == EPINEPHRINE and unconscious and not arrest and _epi_can_wake():
+				if care_rng.randf() < EPI_WAKE_CHANCE:
+					knockout_left = 0.0
+					_spell_wake_s = EPI_WAKE_S
+					wake_left = minf(wake_left, EPI_WAKE_S) if wake_left > 0.0 else 0.0
+					care_note = "Coming round"
+				else:
+					care_note = "No response"
 		NEEDLE:  # lets the air out: the tension and the arrest it was heading for stop
 			pain_wounds = minf(pain_wounds + NEEDLE_PAIN, 1.0)
 			for w in wounds:
@@ -1106,6 +1225,11 @@ func reset() -> void:
 	_low_spo2_s = 0.0
 	_out_s = 0.0
 	_pain_over_s = 0.0
+	heart_rate = HR_REST
+	_hr_danger_s = 0.0
+	for id: StringName in DRUGS:
+		drug_level[id] = 0.0
+		drug_depot[id] = 0.0
 
 
 ## Host only: steps the simulation by `dt` seconds.
@@ -1121,6 +1245,7 @@ func advance(dt: float) -> void:
 	pain_wounds = maxf(pain_wounds - PAIN_FADE_PER_S * dt, 0.0)
 	impact = maxf(impact - IMPACT_FADE_PER_S * dt, 0.0)
 	_advance_morphine(dt)
+	_advance_drugs(dt)
 	# Bleeding, scaled by what the heart still pushes out.
 	blood = maxf(blood - bleed_rate() / 60.0 * dt / BLOOD_L, 0.0)
 	if not infusion.is_empty():  # the only way blood comes back
@@ -1219,7 +1344,16 @@ func to_net() -> Dictionary:
 		"a": [] if access.is_empty() else [access.kind, int(access.gauge), String(access.part), 1 if access.pressure else 0],
 		"v": [] if infusion.is_empty() else [String(infusion.item), int(infusion.ml), snappedf(float(infusion.left), 1.0)],
 		"l": [snappedf(float(lung_collapse[LUNGS[0]]), 0.01), snappedf(float(lung_fluid[LUNGS[0]]), 0.01),
-			snappedf(float(lung_collapse[LUNGS[1]]), 0.01), snappedf(float(lung_fluid[LUNGS[1]]), 0.01)]}
+			snappedf(float(lung_collapse[LUNGS[1]]), 0.01), snappedf(float(lung_fluid[LUNGS[1]]), 0.01)],
+		"h": snappedf(heart_rate, 1.0), "g": _drugs_net()}
+
+
+func _drugs_net() -> Dictionary:
+	var out := {}
+	for id: StringName in DRUGS:
+		if drug_total(id) > 0.0:
+			out[String(id)] = [snappedf(float(drug_level[id]), 0.01), snappedf(float(drug_depot[id]), 0.01)]
+	return out
 
 
 ## Rebuilds this copy from a peer's net_state (clients).
@@ -1239,6 +1373,12 @@ func apply_net(state: Dictionary) -> void:
 	for i in LUNGS.size():
 		lung_collapse[LUNGS[i]] = float(lungs[i * 2])
 		lung_fluid[LUNGS[i]] = float(lungs[i * 2 + 1])
+	heart_rate = float(state.get("h", HR_REST))
+	var given: Dictionary = state.get("g", {})
+	for id: StringName in DRUGS:
+		var entry: Array = given.get(String(id), [0.0, 0.0])
+		drug_level[id] = float(entry[0])
+		drug_depot[id] = float(entry[1])
 	var flags := int(state.get("f", 0))
 	unconscious = flags & 1 != 0
 	arrest = flags & 2 != 0
@@ -1362,6 +1502,50 @@ func _start_arrest() -> void:
 	arrest_left = ARREST_WINDOW_S
 	_heart_arrest_in = -1.0
 	_low_spo2_s = 0.0
+	heart_rate = 0.0
+	_hr_danger_s = 0.0
+
+
+## CPR or a shock worked: the heart beats again (the casualty stays out until every cause of
+## unconsciousness is gone, as always).
+func _restart_heart() -> void:
+	arrest = false
+	arrest_left = 0.0
+	heart_rate = HR_RESTART
+	_hr_danger_s = 0.0
+	_low_spo2_s = 0.0
+
+
+## Epinephrine's wake-up roll can work: out with no cause left but a concussion knockout (or
+## already coming round).
+func _epi_can_wake() -> bool:
+	var causes := unconscious_causes()
+	return causes.is_empty() or causes == [&"knockout"]
+
+
+## Drugs go in from their depots and wear off (DRUGS); the heart rate heads for its target,
+## and racing or too slow for HR_DANGER_S stops the heart.
+func _advance_drugs(dt: float) -> void:
+	for id: StringName in DRUGS:
+		var d: Dictionary = DRUGS[id]
+		var level := float(drug_level[id]) * pow(0.5, dt / float(d.half_life_s))
+		var depot := float(drug_depot[id])
+		if depot > 0.0:
+			var step := minf(depot, dt / float(d.absorb_s))
+			depot -= step
+			level += step
+		drug_level[id] = 0.0 if level < 0.001 and depot <= 0.0 else level
+		drug_depot[id] = depot
+	if arrest:
+		heart_rate = 0.0
+		return
+	heart_rate = move_toward(heart_rate, heart_rate_target(), HR_CHANGE_PER_S * dt)
+	if heart_rate > HR_DEADLY_FAST or heart_rate < HR_DEADLY_SLOW:
+		_hr_danger_s += dt
+		if _hr_danger_s >= HR_DANGER_S:
+			_start_arrest()
+	else:
+		_hr_danger_s = 0.0
 
 
 func _concuss() -> void:

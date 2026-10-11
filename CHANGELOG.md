@@ -11,6 +11,33 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Wave 3, part 3: heart rate, drugs, CPR and the defibrillator
+
+#### Added
+
+- **Heart rate** (hidden, like SpO2). It sits at 75 bpm at rest. Blood loss and pain speed
+  it up, and morphine and very low SpO2 slow it. It sinks toward 40 bpm as blood loss nears
+  50%, and it's 0 in cardiac arrest. Racing over 200 bpm or slower than 35 bpm for a minute
+  stops the heart. Checking someone shows "Pulse racing", "Pulse fast and weak", "Pulse slow"
+  or "No pulse", and a pulse oximeter now also shows the pulse.
+- **Epinephrine** (medic, 2 s): +30 bpm per dose, wearing off over a few minutes. In
+  cardiac arrest it raises the chance that CPR and shocks restart the heart. It keeps its
+  wake-up roll: given to someone kept out only by a concussion knockout (or already coming
+  round), there's a 50% chance they come round in 2 s. It can't wake anyone while blood
+  loss, low SpO2, pain, trauma or arrest still holds them. There's no revive.
+- **Atropine** (2 s): raises a slow heart rate, for example after a morphine overdose.
+  **Adenosine** (2 s): slows a racing one, for example after too much epinephrine.
+- **CPR** (a 10 s cycle, no item needed) and the **defibrillator** (a 5 s shock; not used
+  up) restart a heart in cardiac arrest only once blood is back above 60%. Until then
+  they do nothing, so the line and bags come first. Each CPR cycle restarts it 8% of the
+  time and each shock 35%, plus 15% with epinephrine in the blood. Among the AI only
+  medics do CPR and shocks; players can always do them.
+- Treat menus and AI medics follow the order: line and bags, epinephrine, shocks, CPR, then
+  adenosine or atropine for a heart rate out of range. A medic keeps doing CPR and shocks
+  for as long as the 10-minute window lasts.
+- The medic's kit adds three epinephrine, two atropine, two adenosine and a defibrillator.
+  The gate loot has two epinephrine, one of each of the other two drugs and a defibrillator.
+
 ### Wave 3, part 2: breathing, the decompression needle and the pulse oximeter
 
 #### Added

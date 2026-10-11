@@ -253,6 +253,23 @@ func has_tension() -> bool:
 	return _m().has_tension()
 
 
+## Beats per minute (hidden; a medic feels it as a pulse, a pulse oximeter shows it); 0 in
+## cardiac arrest.
+func heart_rate() -> float:
+	return _m().heart_rate
+
+
+## A drug in the blood plus what's still going in, in doses: &"epinephrine", &"atropine",
+## &"adenosine" (morphine: morphine_level).
+func drug_total(id: StringName) -> float:
+	return _m().drug_total(id)
+
+
+## Blood is back far enough (60%) for CPR or the defibrillator to restart the heart.
+func can_restart_heart() -> bool:
+	return _m().can_restart()
+
+
 ## Morphine in the blood, in doses (one autoinjector is 1 once it has gone in over 30 s);
 ## it halves about every 12 minutes. Pain relief follows it; from 2.5 the casualty is
 ## sedated (out), past 3 breathing slows.
@@ -313,6 +330,16 @@ func signs(on_self := false) -> PackedStringArray:
 				out.append("No breath sounds on the %s" % ("left" if which == WoundModel.LUNGS[0] else "right"))
 		if m.has_tension():
 			out.append("Trachea shifted, neck veins bulging")
+		if m.arrest:
+			out.append("No pulse")
+		elif m.heart_rate > WoundModel.HR_RACING:
+			out.append("Pulse racing")
+		elif m.heart_rate > 110.0:
+			out.append("Pulse fast and weak" if m.shock() > 0.3 else "Pulse fast")
+		elif m.heart_rate < WoundModel.HR_SLOW:
+			out.append("Pulse slow")
+	elif m.heart_rate > 120.0:
+		out.append("Heart pounding")
 	if m.morphine_level >= WoundModel.MORPHINE_PUPILS_LEVEL:
 		out.append("Drowsy (morphine)" if on_self else "Pinpoint pupils (morphine)")
 	if not m.access.is_empty():
@@ -355,11 +382,14 @@ const TREATS := {
 	"muscle": &"pressure_bandage", "graze": &"pressure_bandage", "chest": &"chest_seal",
 	"fracture": &"splint", "airway": &"npa", "pain": &"morphine", "tension": &"decompression_needle",
 	"access": &"iv_18", "fluids": &"saline_500", "pressure": &"pressure_bag",  # the usual picks; see care_needed "items"
+	"epinephrine": &"epinephrine", "defib": &"defibrillator", "cpr": &"cpr", "racing": &"adenosine",
+	"slow_heart": &"atropine", "wake": &"epinephrine",
 }
 ## Casualty-care order: massive bleeding, airway, tension (the needle), chest, other bleeding, circulation (line,
-## bag, pressure bag), fractures, pain.
+## bag, pressure bag), restarting a heart (epinephrine, shocks, CPR), the heart rate
+## (adenosine, atropine), fractures, pain, then epinephrine's wake-up roll.
 const CARE_ORDER := ["arterial", "junctional", "airway", "tension", "chest", "venous", "muscle", "graze", "access", "fluids",
-	"pressure", "fracture", "pain"]
+	"pressure", "epinephrine", "defib", "cpr", "racing", "slow_heart", "fracture", "pain", "wake"]
 
 
 ## What still needs doing for this unit, most urgent first, in the casualty-care order: one
@@ -383,9 +413,15 @@ func care_needed() -> Array[Dictionary]:
 ## a kit: the first of its "items" carried, or its "item"; &"" if none is carried.
 static func pick_item(task: Dictionary, inventory: Inventory) -> StringName:
 	for id: StringName in task_items(task):
-		if inventory.medical_count(id) > 0:
+		if has_item(inventory, id):
 			return id
 	return &""
+
+
+## `inventory` holds `id` (loose or in a kit), or `id` needs no item (CPR: stats.no_item).
+static func has_item(inventory: Inventory, id: StringName) -> bool:
+	var item := ItemDB.get_item(id) if ItemDB.has_item(id) else null
+	return (item != null and item.stats.get("no_item", false)) or inventory.medical_count(id) > 0
 
 
 ## Every item that would do for `task`, best pick first.
@@ -395,9 +431,11 @@ static func task_items(task: Dictionary) -> Array[StringName]:
 	return out
 
 
-## Items a treater can't use on themselves: an IV or IO needs someone else's hands.
+## Items a treater can't use on themselves: an IV or IO, CPR and the defibrillator need
+## someone else's hands.
 static func needs_other_hands(item_id: StringName) -> bool:
-	return item_id == WoundModel.IO_KIT or WoundModel.IV_GAUGES.has(item_id)
+	return item_id == WoundModel.IO_KIT or WoundModel.IV_GAUGES.has(item_id) or item_id == WoundModel.CPR \
+		or item_id == WoundModel.DEFIBRILLATOR
 
 
 ## How many times its usual time `item_id` takes on this unit now (an IV in shock is slower).
@@ -455,6 +493,12 @@ func treatment_problem(item_id: StringName, part: StringName) -> String:
 ## - saline_* / blood_* (250, 500, 1000 mL): a bag on the line, going in over minutes; the
 ##   only way blood comes back. pressure_bag: on the line, faster flow (and needed once
 ##   veins collapse at 37% lost).
+## - decompression_needle: relieves a tension pneumothorax (and the arrest it was heading for).
+## - epinephrine, atropine, adenosine: a dose into the blood (heart rate up, up, down);
+##   epinephrine also helps CPR and shocks restart a heart, and has a wake-up roll for
+##   someone out with nothing but a concussion knockout keeping them out.
+## - cpr (hands only, a 10 s cycle) and defibrillator (a 5 s shock; not used up): a chance to
+##   restart a heart in arrest, once blood is back to 60%; care_note says whether it worked.
 func server_apply_treatment(item_id: StringName, part: StringName, rushed := false) -> bool:
 	if not _model.apply_item(item_id, part, rushed):
 		return false

@@ -109,10 +109,11 @@ const COVER_MEDIC_M := 30.0
 ## wake soon.
 const STAY_WITH_M := 20.0
 ## The care order once safe, by care_needed() kind: massive bleeding, airway, tension (the needle), chest, the
-## other bleeding, circulation (IV or IO, a bag, a pressure bag), fractures, pain. Kinds not
+## other bleeding, circulation (IV or IO, a bag, a pressure bag), restarting a heart
+## (epinephrine, shocks, CPR), the heart rate, fractures, pain, epinephrine's wake-up roll. Kinds not
 ## listed go just before pain.
 const CARE_RANK: Array[String] = ["arterial", "airway", "tension", "chest", "junctional", "venous", "internal", "muscle", "graze",
-	"access", "fluids", "pressure", "fracture", "pain"]
+	"access", "fluids", "pressure", "epinephrine", "defib", "cpr", "racing", "slow_heart", "fracture", "pain", "wake"]
 ## Proposed: seconds past an item's time before checking whether it worked.
 const TREAT_MARGIN_S := 0.4
 ## Proposed: tries at one task (same body, part and kind) that change nothing before giving up on it.
@@ -120,6 +121,8 @@ const TREAT_TRIES := 2
 ## Proposed: tries at a line ("access"): an IV in shock misses often, and each miss uses a
 ## catheter, so a medic keeps going while it carries more.
 const ACCESS_TRIES := 4
+## Restarting a heart (shocks, CPR cycles) goes on as long as the arrest window lasts.
+const RESTART_KINDS: Array[String] = ["defib", "cpr"]
 ## Proposed: morphine only for a conscious casualty in at least this much pain.
 const MORPHINE_PAIN := 0.5
 ## Proposed: a wounded unit calls "Medic!" at most this often, and counts as asking for that long.
@@ -754,9 +757,15 @@ func _carries_any(ids: Array[StringName]) -> bool:
 	if ids.is_empty():
 		return true
 	for id in ids:
-		if body.inventory.medical_count(id) > 0:
+		if Vitals.has_item(body.inventory, id) and _may_use(id):
 			return true
 	return false
+
+
+## This unit may use `id`: anything, except that CPR and the defibrillator (stats.medic_only)
+## are for medics among the AI.
+func _may_use(id: StringName) -> bool:
+	return body.role == Roles.MEDIC or not (ItemDB.has_item(id) and ItemDB.get_item(id).stats.get("medic_only", false))
 
 
 ## The casualty this unit should answer now, or null: one it is the responder for, or (a
@@ -1151,9 +1160,12 @@ func _next_task(c: Soldier, under_fire: bool) -> Dictionary:
 		var item := Vitals.pick_item(task, body.inventory)
 		if item == &"" or (c == body and Vitals.needs_other_hands(item)):
 			continue
+		if not _may_use(item):
+			continue  # CPR and shocks: players and medics only
 		if c == body and _kept_for_squad(item, String(task.kind)):
 			continue
-		if int(_failures.get(_task_key(c, task), 0)) >= (ACCESS_TRIES if String(task.kind) == "access" else TREAT_TRIES):
+		var kind := String(task.kind)
+		if kind not in RESTART_KINDS and int(_failures.get(_task_key(c, task), 0)) >= (ACCESS_TRIES if kind == "access" else TREAT_TRIES):
 			continue
 		var chosen := task.duplicate()
 		chosen.item = item
@@ -1166,7 +1178,7 @@ func _missing_items(c: Soldier) -> Array[StringName]:
 	var out: Array[StringName] = []
 	for task in plan_care(c.vitals.care_needed(), false, c.vitals.is_up() or c.vitals.why_unconscious().has(&"pain")):
 		var item := Vitals.pick_item(task, body.inventory)
-		var lacks := item == &"" or (c == body and (Vitals.needs_other_hands(item) or _kept_for_squad(item, String(task.kind))))
+		var lacks := item == &"" or not _may_use(item) or (c == body and (Vitals.needs_other_hands(item) or _kept_for_squad(item, String(task.kind))))
 		if not lacks:
 			continue
 		for option in Vitals.task_items(task):  # a medic carrying any of them will do

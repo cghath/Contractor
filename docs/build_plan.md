@@ -108,8 +108,9 @@ attachments (branch `fix3/inventory-molle`).
 pressure bags and vein collapse, with the stand-in blood recovery removed: built on branch
 `w3/iv-fluids` 2026-10-10 (all 14 suites pass). 2, breathing with per-lung efficiency,
 SpO2 from it, the decompression needle and the pulse oximeter: built on `w3/breathing`
-(on top of 1) 2026-10-10. Both wait for Captain's playtest. Next: 3, drugs with heart rate,
-CPR and defib; 4, surgery kits, then the other damage types.
+(on top of 1) 2026-10-10. 3, heart rate, epinephrine (with its wake-up roll), atropine,
+adenosine, CPR and the defibrillator: built on `w3/heart` (on top of 2) 2026-10-11. All
+three wait for Captain's playtest. Next: 4, surgery kits, then the other damage types.
 
 From the design doc: IV (gauges 10 to 20 with flow, placement time, pain and rarity) and IO
 access; saline and blood bags (250, 500, 1000 mL); pressure bags; vein collapse from 37%
