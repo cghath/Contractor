@@ -672,22 +672,31 @@ func _on_player_died(player: Soldier) -> void:
 	player._client_message.rpc_id(player.name.to_int(), text)
 
 
-## Host: counts one player respawn against the pool. Returns the line the player sees.
+## Host: counts one player respawn against the pool. Past the free ones each is bought, at a
+## price that rises with each (RosterDeployment.respawn_cost), paid from cash first, then from
+## the deployed contract's support budget (Captain), and what neither covers goes on credit.
+## Returns the line the player sees.
 func server_count_respawn() -> String:
-	var price := BaseEconomy.respawn_price()
-	var cost := RosterDeployment.respawn_cost(roster(), price)
-	var text := ""
+	var cost := RosterDeployment.respawn_cost(roster(), BaseEconomy.respawn_price(), Prices.respawn_rise())
 	if cost == 0:
-		text = "Respawn: %d free left" % RosterDeployment.count_respawn(roster(), false)
-	elif BaseEconomy.try_spend(cost, "Respawn"):
-		RosterDeployment.count_respawn(roster(), true)
-		text = "Respawn bought ($%d)" % cost
-	else:
-		BaseEconomy.charge(cost, "Respawn on credit")
-		RosterDeployment.count_respawn(roster(), true)
-		text = "No free respawns and no cash: $%d on credit" % cost
+		var left := RosterDeployment.count_respawn(roster(), false)
+		_changed(&"roster")
+		return "Respawn: %d free left" % left
+	var from_cash := clampi(Economy.cash(), 0, cost)
+	var cids: Array = Contracts.deployment().get("cids", [])
+	var from_budget := Contracts.server_draw_support(String(cids[0]), cost - from_cash) if not cids.is_empty() and cost > from_cash else 0
+	var on_credit := cost - from_cash - from_budget
+	if from_cash > 0:
+		BaseEconomy.charge(from_cash, "Respawn")
+	if on_credit > 0:
+		BaseEconomy.charge(on_credit, "Respawn on credit")
+	RosterDeployment.count_respawn(roster(), true)
 	_changed(&"roster")
-	return text
+	var parts := PackedStringArray()
+	for pair: Array in [[from_cash, "cash"], [from_budget, "support budget"], [on_credit, "on credit"]]:
+		if int(pair[0]) > 0:
+			parts.append("$%d %s" % [int(pair[0]), pair[1]])
+	return "Respawn bought: %s" % ", ".join(parts)
 
 
 # --- Deployments -------------------------------------------------------------------------------

@@ -113,7 +113,8 @@ attachments (branch `fix3/inventory-molle`).
   types when his pack and the mission brainstorm doc land.
 - **Wave 6 waits** for Captain's calls (reputation tiers, allied troop types, support-menu
   limits) and the faction set.
-- **Wave 5** leaves out the AH-1Z, MRAPs, Bradley and Abrams until Captain says who fields them.
+- **Wave 5:** the AH-1Z, MRAPs, Bradley and Abrams are fielded by the US and by close allies that
+  operate those exports (Captain, 2026-10-11: UK and Canada get MRAPs only).
 - **Wave 7** builds the systems (day and night, weather, NVGs, attachments, assists,
   controller); the art swap waits for Noah's character, gear, weapon and environment scripts.
 - **Noah's inventory and MOLLE work** (`fix3/inventory-molle`) is in progress on his side:
@@ -226,8 +227,8 @@ tandem HEAT, HE/HEDP, thermobaric); AAVs from the LHD on the coast or the FOB in
 commandable; Blackhawk resupply (grid or green/yellow smoke), transport (hot zones,
 green/blue smoke, loiters until marked, first call takes green) and extraction (grid or
 purple smoke, lands within 100 m of an unsafe spot); support calls with cost and cooldown;
-aircraft and AAVs lost with their cargo and passengers. Still open: who fields the AH-1Z,
-MRAPs, Bradley and Abrams.
+aircraft and AAVs lost with their cargo and passengers. The AH-1Z, MRAPs, Bradley and Abrams: the US and
+close allies that operate them (UK and Canada: MRAPs).
 
 ### Wave 6: phase 6, factions
 

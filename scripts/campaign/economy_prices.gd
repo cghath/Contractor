@@ -105,3 +105,8 @@ static func default_wage_bill() -> int:
 ## A player respawn past the deployment's free ones (RosterDeployment.FREE_RESPAWNS).
 static func respawn_price() -> int:
 	return int(data().get("respawn", 1000))
+
+
+## How much more each further bought respawn costs, as a share of respawn_price.
+static func respawn_rise() -> float:
+	return float(data().get("respawn_rise", 0.0))

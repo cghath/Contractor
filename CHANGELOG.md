@@ -11,6 +11,17 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Respawns paid cash first, then the support budget; who fields the US heavy kit (Captain, 2026-10-11)
+
+#### Changed
+
+- **Bought respawns** (past the deployment's free ones) cost more each time (`prices.json`
+  "respawn_rise": $1,000, $1,500, $2,000...) and are paid from **cash first, then the
+  deployed contract's support budget**, then on credit (`BaseHub.server_count_respawn`).
+- Plans: the AH-1Z, MRAPs, Bradley and Abrams are fielded by the US and by close allies that
+  operate those exports (the UK and Canada: MRAPs only). Reputation tiers, ripple, decay and
+  allied troops point at the mission brainstorm, where they're decided.
+
 ### The mission brainstorm in the repo (Captain, 2026-10-11)
 
 #### Added

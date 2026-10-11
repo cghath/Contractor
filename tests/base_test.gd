@@ -310,9 +310,24 @@ func _test_respawn_pool() -> void:
 	BaseHub.server_count_respawn()
 	var dep := RosterDeployment.active(roster)
 	check(int(dep.respawns_bought) == 1 and BaseEconomy.funds() == funds - BaseEconomy.respawn_price(), "the fifth is bought ($%d)" % BaseEconomy.respawn_price())
-	Economy.add_cash(-Economy.cash(), "test: broke")
+	var second := RosterDeployment.respawn_cost(roster, BaseEconomy.respawn_price(), Prices.respawn_rise())
+	check(second > BaseEconomy.respawn_price(), "each one bought costs more ($%d next)" % second)
+	# Cash first, then the deployed contract's support budget (Captain), then credit.
+	var offer: Dictionary = Contracts.board().filter(func(c: Dictionary) -> bool: return c.source != "recovery")[0]
+	var terms := ContractGen.default_terms()
+	terms["support_points"] = 1
+	var cid := String(offer.cid)
+	check(Contracts.server_accept(cid, terms) == "" and Contracts.server_start_deployment([cid]) == "", "(a contract with a support budget is deployed)")
+	var budget := Contracts.support_left(cid)
+	Economy.add_cash(500 - Economy.cash(), "test: $500 left")
 	BaseHub.server_count_respawn()
-	check(int(dep.respawns_bought) == 2 and BaseEconomy.funds() == -BaseEconomy.respawn_price(), "with no cash it goes on credit")
+	check(int(dep.respawns_bought) == 2 and BaseEconomy.funds() == 0 and Contracts.support_left(cid) == budget - (second - 500),
+		"short of cash: the $500 there, the rest from the support budget ($%d of $%d)" % [second - 500, budget])
+	Contracts.server_draw_support(cid, Contracts.support_left(cid))
+	var third := RosterDeployment.respawn_cost(roster, BaseEconomy.respawn_price(), Prices.respawn_rise())
+	BaseHub.server_count_respawn()
+	check(int(dep.respawns_bought) == 3 and BaseEconomy.funds() == -third, "with neither, it goes on credit ($%d)" % third)
+	Contracts.server_abandon_deployment()
 	RosterDeployment.begin(roster, [], RosterDeployment.HOT, "z", "", 1)
 	check(RosterDeployment.free_respawns_left(roster) == 8, "a hot zone: 8 free")
 	roster["deployment"] = {}

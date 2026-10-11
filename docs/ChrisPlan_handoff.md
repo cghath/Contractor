@@ -20,7 +20,7 @@ date), as with wave 3, so both sides never build the same thing twice.**
 | 3 Medical depth | Done by Captain's side | cghath's own wave 3 was dropped (kept on a local branch only); its extras are listed under Backlog |
 | 4A Mission loop, first half | Done, on `dev` | World scale, contracts and economy, people, base hub and roster, map/briefing/extraction, one join handshake |
 | **4B** Wire the loop, hot zone | **In progress, Captain's side**: part 1 (loop wiring) done | [wave4b_handoff.md](wave4b_handoff.md) |
-| 5 Vehicles and supports | Planned below | Leaves out AH-1Z, MRAPs, Bradley, Abrams until Captain says who fields them |
+| 5 Vehicles and supports | Planned below | AH-1Z, MRAPs, Bradley, Abrams: the US and the close allies that operate them (Captain, 2026-10-11) |
 | 6 Factions | **Blocked on Captain** | Needs the decisions listed below |
 | 7 Art, world and weapons | Systems half planned below | Art waits for Captain's asset scripts; Stormworks-style characters in progress on Captain's side |
 | 8 Player-built faction | Design proposal only | |
@@ -69,8 +69,10 @@ date), as with wave 3, so both sides never build the same thing twice.**
 - Supports are lost with their cargo and passengers.
 - Weather and terrain decide what can fly or drive: storms ground helicopters, and AAVs
   can't work mountains.
-- **Left out for now (cghath):** AH-1Z, MRAPs (MaxxPro, M-ATV), Bradley, Abrams, until
-  Captain decides who fields them.
+- **Who fields the AH-1Z, MRAPs (MaxxPro, M-ATV), Bradley and Abrams (Captain, 2026-10-11):**
+  America, and close allies only where they really operate those American exports. In the
+  friendly set that is all four for the US; MRAPs for the UK (Mastiff and Ridgback, Cougar
+  family) and Canada (Cougar, RG-31); no AH-1Z, Bradley or Abrams for either.
 
 **Art:** Captain's `VehicleArt` from `noahgonzalez4506/Contractor-Assets-and-References`
 (`scripts/vehicle_art.gd`, 13 vehicles at 5 cm). Copy it to `scripts/art/vehicle_art.gd`.
@@ -97,7 +99,8 @@ V2 can run beside V1.
 3. What limits the allied-troop support menu.
 4. How the real-world faction set (being drafted in the vehicle-model thread) replaces the
    repo's three placeholder factions.
-5. Who fields the AH-1Z, MRAPs, Bradley and Abrams.
+5. ~~Who fields the AH-1Z, MRAPs, Bradley and Abrams.~~ Answered: the US and the close allies
+   that operate them (see wave 5).
 
 **Scope once decided (design doc):**
 - **Persistent world.** Damage is repaired and positions reoccupied over campaign time.
@@ -190,8 +193,10 @@ local branch `local/wave3-cghath` and never pushed:
    Today it's per deployment.
 3. Hot zone size: 8-16 km² (twice the area) or 16-32 km² (twice the width)?
 4. Where can the contract board be reached: only at the FOB, or also from the main menu?
-5. Who fields the AH-1Z, MRAPs, Bradley and Abrams?
-6. The wave 6 decisions above (tiers, allied troops, the support-menu limit, the faction set).
+5. ~~Who fields the AH-1Z, MRAPs, Bradley and Abrams?~~ The US, and close allies that operate
+   those exports (Captain, 2026-10-11).
+6. The wave 6 decisions above: the support-menu limit and the faction set. (Reputation tiers,
+   ripple, decay and allied troops are decided in [mission_brainstorm.md](mission_brainstorm.md).)
 7. Should players start in their role kit? `CompoundLevel.player_role_kits` is off; 4A's
    roster kits AI squadmates out.
 8. The M855 rule: does it count as level III beyond about 200 m?
