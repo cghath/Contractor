@@ -62,6 +62,24 @@ static func march(part: StringName, point: Vector3, dir: Vector3) -> Dictionary:
 	return {"position": point + dir * entered, "depth": REACH_M - entered}
 
 
+## The skin under rest-pose `point` looking in along -`outward`: the first voxel of the
+## part's whole model (so a trail runs on from chest to belly), or null if there is none
+## within `reach` of `point` (off the end of a limb).
+static func surface(part: StringName, point: Vector3, outward: Vector3, reach := 0.05) -> Variant:
+	if not PART_MODELS.has(part):
+		return null
+	var grid := _grid(part)
+	var step: float = grid.cell * STEP_SHARE
+	var from := point + outward * reach
+	var t := 0.0
+	while t <= reach * 2.0:
+		var p := from - outward * t
+		if _solid(grid, grid.body, p):
+			return p
+		t += step
+	return null
+
+
 static func _solid(grid: Dictionary, cells: PackedByteArray, p: Vector3) -> bool:
 	var c := ((p - Vector3(grid.origin)) / float(grid.cell)).floor()
 	var dims: Vector3i = grid.dims

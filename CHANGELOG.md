@@ -42,6 +42,14 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   half a centimetre). `WoundMarks` (`scripts/player/wound_marks.gd`) draws an entry hole and a
   bigger exit hole on the bone of the part that was hit, and a dressing once it's treated.
   The marks follow `Vitals.changed`, so they appear within `NET_INTERVAL_S` (0.5 s) of the hit.
+- **Voxel blood.** Holes have a dark core and a torn red rim (ragged at an exit). While a
+  wound bleeds (its replicated rate; internal bleeding stays inside, a tourniquet slows it,
+  treatment stops it), blood soaks out round it and runs down the skin with gravity in 1 cm
+  voxels laid on the body shape (`BodyVolume.surface`), drips off the lowest point and
+  pools on the ground, spreading out as drops land. A round that goes through throws a spray
+  out of the exit onto the ground behind. Treated, the stain dries dark and a dressing wraps
+  the limb (a pad on the trunk or head). Cosmetic and local: no extra network traffic. One
+  MultiMesh per bone, and one each for drips and the pool.
 
 ### Scavenging review fixes
 

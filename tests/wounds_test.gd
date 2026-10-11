@@ -826,13 +826,19 @@ func _test_ballistics_routing() -> void:
 		"a round through the thigh goes in at the front and out the back (%s, %s)" % [entry, exit_hole])
 	# The marks redraw on Vitals.changed, which net_state sends at most every NET_INTERVAL_S.
 	var model: CharacterModel = dummy.get_node(^"Model")
-	var marks := []
+	var wound_marks: WoundMarks = model.get_node(^"WoundMarks")
 	for i in 90:
 		await get_tree().process_frame
-		marks = model.part_node(Vitals.THIGH_R).get_children().filter(func(n: Node) -> bool: return n.name.begins_with("WoundMark") and not n.is_queued_for_deletion())
-		if marks.size() >= 2:
+		if wound_marks.holes_on(Vitals.THIGH_R) >= 2:
 			break
-	check(marks.size() == 2, "both holes are drawn on the thigh (%d marks)" % marks.size())
+	var drawn: MultiMeshInstance3D = model.part_node(Vitals.THIGH_R).get_node_or_null(^"WoundMark")
+	check(wound_marks.holes_on(Vitals.THIGH_R) == 2 and drawn != null and drawn.multimesh.visible_instance_count >= 2,
+		"both holes are drawn on the thigh (%d holes, %d voxels)" % [wound_marks.holes_on(Vitals.THIGH_R), drawn.multimesh.visible_instance_count if drawn else 0])
+	# It bleeds: blood runs on the skin and pools on the ground under the leg.
+	for i in 120:
+		await get_tree().process_frame
+	check(wound_marks.blood_on(Vitals.THIGH_R) > 4 and wound_marks.pool_size() > 0,
+		"the thigh wound bleeds onto the skin and the ground (%d voxels on the leg, %d in the pool)" % [wound_marks.blood_on(Vitals.THIGH_R), wound_marks.pool_size()])
 	# Lying down, the channel still follows the part: a shot down into the back of the chest.
 	dummy.vitals.server_reset_health()
 	dummy.vitals.server_damage(70.0)
