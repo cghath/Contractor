@@ -737,6 +737,9 @@ func _test_net_state() -> void:
 	check(absf(copy.blood - vitals.blood_fraction()) < 0.002 and copy.wounds.size() == vitals.wound_list().size() and copy.unconscious == vitals.downed,
 		"net_state rebuilds blood, wounds and consciousness (%d wounds, %.1f%%)" % [copy.wounds.size(), copy.blood * 100.0])
 	check(absf(copy.bleed_rate() - vitals.bleed_rate()) < 0.01 and absf(copy.pain() - vitals.pain()) < 0.01, "so a client's queries match the host's")
+	var host_at: Variant = vitals.wound_list()[0].get("at")
+	check(host_at is Vector3 and copy.wounds[0].get("at") is Vector3 and Vector3(copy.wounds[0].at).distance_to(host_at) < 0.004,
+		"where a wound went in replicates, to half a centimetre (%s)" % [copy.wounds[0].get("at")])
 	vitals.server_apply_treatment(WoundModel.MORPHINE, Vitals.TORSO)
 	vitals._model.add_hit(Vitals.CHEST, {"graze": false, "depth": 0.2, "vessels": [], "organs": [&"lung_l"], "bones": []}, Vitals.PISTOL)
 	vitals.server_advance(20.0)
@@ -808,6 +811,23 @@ func _test_ballistics_routing() -> void:
 		if result.result != "body" or not hit:
 			wrong.append("%s (%s, %s)" % [part, result.result, dummy.vitals.wound_list().map(func(w: Dictionary) -> StringName: return w.part)])
 	check(wrong.is_empty(), "a shot at each of the 14 parts wounds that part %s" % wrong)
+	# A rifle round through the right thigh: in at the front of the leg, out the back, both
+	# drawn on the thigh.
+	dummy.vitals.server_reset_health()
+	await get_tree().process_frame
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	shooter.position = dummy.global_transform * Vector3(0.075, 0.65, -5)
+	Ballistics.fire(shooter, shooter.position, Vector3.BACK, rifle)
+	var thigh_wounds := dummy.vitals.wound_list()
+	var entry: Variant = thigh_wounds[0].get("at") if not thigh_wounds.is_empty() else null
+	var exit_hole: Variant = thigh_wounds[0].get("out") if not thigh_wounds.is_empty() else null
+	check(entry is Vector3 and exit_hole is Vector3 and absf(Vector3(entry).z - -0.07) < 0.02 and absf(Vector3(exit_hole).z - 0.07) < 0.03,
+		"a round through the thigh goes in at the front and out the back (%s, %s)" % [entry, exit_hole])
+	await get_tree().process_frame
+	var model: CharacterModel = dummy.get_node(^"Model")
+	var marks := model.part_node(Vitals.THIGH_R).get_children().filter(func(n: Node) -> bool: return n.name.begins_with("WoundMark"))
+	check(marks.size() == 2, "both holes are drawn on the thigh (%d marks)" % marks.size())
 	# Lying down, the channel still follows the part: a shot down into the back of the chest.
 	dummy.vitals.server_reset_health()
 	dummy.vitals.server_damage(70.0)

@@ -272,6 +272,12 @@ func _ready() -> void:
 	if body:
 		for area in _posable_hitboxes(body):
 			_rest_of(area)  # recorded before anything moves them
+		var vitals := body.get_node_or_null(^"Vitals") as Vitals
+		if vitals:
+			var marks := WoundMarks.new()
+			marks.name = "WoundMarks"
+			add_child(marks)
+			marks.setup(self, vitals)
 
 
 ## Puts a body's model and its hitboxes in or out of the downed pose, so shots hit where
@@ -666,6 +672,33 @@ static func part_position(body: Node3D, part: StringName) -> Vector3:
 	if body.has_method(&"aim_point"):
 		return body.call(&"aim_point")
 	return body.global_position + Vector3.UP * 0.3
+
+
+## The model's node (bone) for body part `part`, its origin at the part's joint
+## (BodyVolume.pivot_at in the rest pose), or null.
+func part_node(part: StringName) -> Node3D:
+	match part:
+		Vitals.HEAD, Vitals.FACE, Vitals.NECK:
+			return head
+		Vitals.CHEST, Vitals.ABDOMEN, Vitals.PELVIS, Vitals.TORSO:
+			return torso
+		Vitals.UPPER_ARM_R:
+			return _upper[0]
+		Vitals.UPPER_ARM_L:
+			return _upper[1]
+		Vitals.FOREARM_R:
+			return _forearm[0]
+		Vitals.FOREARM_L:
+			return _forearm[1]
+		Vitals.THIGH_L:
+			return _leg_left
+		Vitals.THIGH_R:
+			return _leg_right
+		Vitals.SHIN_L:
+			return _shin_left
+		Vitals.SHIN_R:
+			return _shin_right
+	return null
 
 
 static func _model_of(body: Node) -> CharacterModel:

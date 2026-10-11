@@ -37,6 +37,10 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   wrist that only crosses the box flies on, and one that hits enters where the body starts.
   The wound channel runs as far as the body does along the round (a forearm short, a chest
   the whole trunk) instead of to the edge of the box. Built once when hosting (about 0.7 s).
+- **Wounds show where they are.** Each wound keeps the rest-pose point a round went in at
+  ("at") and, when it went through, came out at ("out"), replicated with the wound list (to
+  half a centimetre). `WoundMarks` (`scripts/player/wound_marks.gd`) draws an entry hole and a
+  bigger exit hole on the bone of the part that was hit, and a dressing once it's treated.
 
 ### Scavenging review fixes
 

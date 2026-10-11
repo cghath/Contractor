@@ -283,8 +283,8 @@ func _test_ballistics() -> void:
 	check(not dummy.vitals.wound_list().is_empty(), "body was wounded (%s)" % dummy.vitals.condition_text())
 	var second := Ballistics.fire(shooter, shooter.position, aim.normalized(), rifle)
 	check(second.result == "body", "the next shot goes through the hole too (%s)" % second.result)
-	var low := Ballistics.fire(shooter, shooter.position, (Vector3(0, 0.45, 0) - shooter.position).normalized(), rifle)
-	check(low.result == "body", "shot below the plate hits the body")
+	var low := Ballistics.fire(shooter, shooter.position, (Vector3(0.075, 0.45, 0) - shooter.position).normalized(), rifle)  # the right knee (x 0 is between the legs)
+	check(low.result == "body", "shot below the plate hits the body (a leg)")
 	dummy.queue_free()
 
 	print("Ballistics: helmet and headshots")

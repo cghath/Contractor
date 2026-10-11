@@ -80,7 +80,7 @@ static func _grid(part: StringName) -> Dictionary:
 	if not _occupancy.has(model):
 		_occupancy[model] = VoxelArt.occupancy(model)
 	var occ: Dictionary = _occupancy[model]
-	var origin: Vector3 = _pivot_at(part) - Vector3(occ.pivot)
+	var origin: Vector3 = pivot_at(part) - Vector3(occ.pivot)
 	var dims: Vector3i = occ.dims
 	var cell: float = occ.cell
 	var body: PackedByteArray = occ.solid
@@ -109,7 +109,7 @@ static func warm() -> void:
 
 ## Where the part's model pivot sits in the rest pose (CharacterModel's joints; arms hang
 ## straight down).
-static func _pivot_at(part: StringName) -> Vector3:
+static func pivot_at(part: StringName) -> Vector3:
 	var side := -1.0 if String(part).ends_with("_l") else 1.0
 	var flip := Vector3(side, 1, 1)
 	match PART_MODELS[part]:
