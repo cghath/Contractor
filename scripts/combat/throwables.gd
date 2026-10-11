@@ -152,6 +152,7 @@ static func frag_body(body: Node3D, vitals: Vitals, centre: Vector3, distance: f
 		if VoxelArmor.soft_armor_stops(body, part, Ballistics.LEVELS[0], Vitals.FRAGMENT, distance, direction):
 			continue
 		# The deep one is whichever lands first: fragments arrive in random order.
+		Harm.note_hit(body, Harm.blast_source)  # whose grenade it was (people: civilian casualties)
 		vitals.server_hit(part, {"round_class": Vitals.FRAGMENT, "position": hit.position,
 			"direction": direction, "hitbox": hitbox, "distance": distance, "superficial": deep_left <= 0})
 		deep_left -= 1

@@ -11,7 +11,8 @@ extends PanelContainer
 ##
 ## Entries with "cmd" are orders ("point": at the spot under the crosshair, "aim": at the
 ## enemy under it); entries with "select" change the selection (fire team or colour team)
-## and keep the menu open.
+## and keep the menu open. Status > Report enemy position ("radio_report", people, wave 4)
+## reports the enemies under the crosshair by radio (PeopleLayer.request_report).
 
 const MENU := {
 	"title": "Command",
@@ -32,6 +33,7 @@ const MENU := {
 		{"key": "4", "label": "Mount", "items": []},
 		{"key": "5", "label": "Status", "items": [
 			{"key": "1", "label": "Report status", "cmd": "report"},
+			{"key": "2", "label": "Report enemy position (radio)", "cmd": "radio_report"},
 		]},
 		{"key": "6", "label": "Action", "items": [
 			{"key": "1", "label": "Throw smoke there", "cmd": "throw_smoke", "point": true},
@@ -273,6 +275,9 @@ func _pick(i: int) -> void:
 		_report()
 		close()
 		return
+	if cmd == "radio_report":
+		_radio_report()
+		return
 	var point := player.global_position
 	if item.get("point", false):
 		var hit: Variant = player.crosshair_ground()
@@ -308,9 +313,23 @@ func enemy_under_crosshair() -> Soldier:
 	if enemy == null and collider is Area3D:
 		var vitals := Vitals.find_on(collider)
 		enemy = vitals.get_parent() as Soldier if vitals else null
-	if enemy == null or enemy.faction == player.faction or not enemy.vitals.is_up():
+	if enemy == null or enemy.faction == player.faction or not enemy.vitals.is_up() or Person.is_noncombatant(enemy):
 		return null
 	return enemy
+
+
+## Status > Report enemy position: the enemies around the one under the crosshair (or the spot
+## it's on) go to the host as a radio report (PeopleLayer.request_report: banked as intel).
+func _radio_report() -> void:
+	var enemy := enemy_under_crosshair()
+	var point: Variant = enemy.global_position if enemy else player.crosshair_ground()
+	if point == null:
+		player._hud.flash("Look at the enemy position")
+		return
+	var layer := PeopleLayer.find(player)
+	if layer:
+		layer.request_report.rpc_id(1, point)
+	close()
 
 
 ## Team menu: selects fire team "fire:<0|1>" or colour team "color:<colour>" (AI only).

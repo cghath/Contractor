@@ -19,6 +19,7 @@ ItemDB="*res://autoload/item_db.gd"
 GameState="*res://autoload/game_state.gd"
 Net="*res://autoload/net.gd"
 Campaign="*res://autoload/campaign.gd"
+People="*res://scripts/people/people.gd"
 
 [display]
 
