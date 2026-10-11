@@ -537,25 +537,28 @@ static func _head_f() -> Dictionary:
 		_p(0, 19, 9, 22, 30, 30, C.HAIR),   # above the ears
 		_fp(7, 14.5, 23.5, 15, 15.5, 30, C.PAD),  # hair tie
 		_fb(0.5, 14, 10.5, 1, 18, 14, C.SKIN_SHADE), _fb(21, 14, 10.5, 21.5, 18, 14, C.SKIN_SHADE),  # ears
-		_fp(6.5, 17, 0, 8.5, 19.5, 3, C.EYE), _fp(13.5, 17, 0, 15.5, 19.5, 3, C.EYE),
+		_fp(6.5, 16.5, 0, 8.5, 19.5, 3, C.EYE), _fp(13.5, 16.5, 0, 15.5, 19.5, 3, C.EYE),
 		_fp(6, 19, 0, 7, 19.5, 3, C.EYE), _fp(15, 19, 0, 16, 19.5, 3, C.EYE),  # lashes, at the outer corners
 		_fp(6, 21, 0, 8.5, 21.5, 3, C.HAIR), _fp(13.5, 21, 0, 16, 21.5, 3, C.HAIR),  # brows, thin
 		_fp(5.5, 20.5, 0, 6, 21, 3, C.HAIR), _fp(16, 20.5, 0, 16.5, 21, 3, C.HAIR),
 		_fb(10.5, 13.5, 0.5, 11.5, 16.5, 1, C.SKIN_SHADE),  # nose
-		_fp(9, 10.5, 0, 13, 11, 3, C.LIP), _fp(9.5, 10, 0, 12.5, 10.5, 3, C.LIP_SHADE),
+		_fp(9, 10.5, 0, 13, 11.5, 3, C.LIP), _fp(9.5, 9.5, 0, 12.5, 10.5, 3, C.LIP_SHADE),  # fuller lips
+		_p(0, 17, 0, 2, 27, 6, C.HAIR), _p(20, 17, 0, 22, 27, 6, C.HAIR),  # hair framing the face under the helmet
 	]
 	return {"size": Vector3i(22, 30, 30), "pivot": Vector3(11, 0, 12), "voxel": BODY_VOXEL, "sub": BODY_SUB, "boxes": boxes}
 
 
 ## The male torso's frame and pivot (hips), 0.66 m from the crotch to the base of the neck:
-## hips 0.34 m across (the male's: 0.32) over a 0.27 m waist, a narrower chest, and
-## deltoids flaring at 45 degrees to 0.235 m over the shoulder joints (the male's: 0.26).
+## hips 0.36 m across (the male's: 0.32) over a 0.26 m waist, a narrower chest, and
+## deltoids flaring at 45 degrees to 0.235 m, 1 cm past her shoulder joints
+## (CharacterModel.FEMALE_SHOULDER_X; the male's: 0.26 over 0.25). The whole body is drawn at
+## CharacterModel.FEMALE_SCALE.
 ## The chest is a low-poly bevelled shape whose front reaches the male chest's 0.11 m and no
 ## further, so every carrier's plate pocket still clears it; the seat is a second shape at
 ## the back of the hips (the frame runs 2 cm deeper behind for it).
 static func _torso_f() -> Dictionary:
 	var boxes := [
-		_loft(26, 11, [[0, 14.8, 9.5], [6, 17.0, 10.5], [14, 17.0, 10.5], [24, 13.5, 8.0], [30, 13.8, 8.0], [38, 15.5, 8.5],
+		_loft(26, 11, [[0, 15.5, 9.8], [6, 18.0, 10.8], [14, 17.5, 10.5], [24, 13.0, 8.0], [30, 13.3, 8.0], [38, 15.5, 8.5],
 			[52, 17.5, 9.0], [57, 22.0, 9.0], [62, 23.5, 9.0], [64, 20.0, 8.0], [66, 9.0, 6.5]], C.CAMO, 0.45),
 		_loft(26, 6, [[37, 10.0, 1.0], [41, 12.0, 5.5], [46, 12.0, 6.0], [50, 10.5, 3.5], [53, 9.0, 0.0]], C.CAMO, 0.7),  # chest: a smooth underside and top
 		_loft(26, 14, [[2, 14.0, 5.5], [5, 15.5, 8.5], [14, 15.5, 8.5], [20, 13.0, 2.5]], C.CAMO, 0.6),  # seat

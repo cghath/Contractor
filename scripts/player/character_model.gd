@@ -21,6 +21,11 @@ extends Node3D
 const TORSO_PIVOT := Vector3(0, 0.9, 0)
 const HEAD_PIVOT := Vector3(0, 0.56, 0)          # relative to torso
 const SHOULDER := Vector3(0.25, 0.52, 0)         # relative to torso, mirrored for the left
+## A female soldier (body "female"), loosely after real averages (US adults: men about 175 cm,
+## women about 162 cm): drawn at this scale, about 1.68 m to the male model's 1.80 m, with her
+## shoulder joints this far out (before scaling), 1 cm inside her deltoids as a man's are.
+const FEMALE_SCALE := 0.93
+const FEMALE_SHOULDER_X := 0.225
 const HIP := Vector3(0.075, 0.9, 0)              # mirrored for the left
 ## Held weapons pivot here (torso-local) when aiming up or down: about shoulder height.
 const HANDS_ANCHOR := Vector3(0, 0.5, 0)
@@ -188,8 +193,9 @@ const VIEW_LOWER_PITCH := 0.9
 
 ## Colour scheme from VoxelArt.VARIANTS. Set before the node enters the tree.
 @export var variant := "multicam"
-## Body type (VoxelArt.BODIES): "male" or "female". Both share the joints, so poses,
-## gear and hitboxes are the same. Set before the node enters the tree.
+## Body type (VoxelArt.BODIES): "male" or "female". A female soldier is drawn FEMALE_SCALE of
+## the male's size (joints, gear and hitboxes scale with her) with her shoulder joints at
+## FEMALE_SHOULDER_X, under her own deltoids. Set before the node enters the tree.
 @export_enum("male", "female") var body := "male"
 @export_flags_3d_render var render_layers := 1:
 	set(value):
@@ -253,7 +259,24 @@ var _hand_blend: Array[float] = [1.0, 1.0]
 var _arms_posed := false
 
 
+## How big this body is drawn: FEMALE_SCALE for a female soldier, else 1.
+func body_scale() -> float:
+	return FEMALE_SCALE if body == VoxelArt.FEMALE else 1.0
+
+
+## The model's own transform when nothing moves it: its size (body_scale).
+func base_transform() -> Transform3D:
+	return Transform3D(Basis.from_scale(Vector3.ONE * body_scale()), Vector3.ZERO)
+
+
+## The right shoulder joint, torso-local (mirrored for the left): SHOULDER, or for a female
+## soldier FEMALE_SHOULDER_X out.
+func shoulder() -> Vector3:
+	return Vector3(FEMALE_SHOULDER_X, SHOULDER.y, SHOULDER.z) if body == VoxelArt.FEMALE else SHOULDER
+
+
 func _ready() -> void:
+	transform = base_transform()
 	_root = Node3D.new()
 	add_child(_root)
 	torso = _part("torso", _root, TORSO_PIVOT)
@@ -262,7 +285,7 @@ func _ready() -> void:
 	hands_anchor.position = HANDS_ANCHOR
 	torso.add_child(hands_anchor)
 	for side in [1.0, -1.0]:
-		var upper := _part("upper_arm", torso, SHOULDER * Vector3(side, 1, 1))
+		var upper := _part("upper_arm", torso, shoulder() * Vector3(side, 1, 1))
 		_upper.append(upper)
 		_forearm.append(_part("forearm", upper, Vector3(0, -UPPER_ARM, 0)))
 	_leg_left = _part("thigh", _root, HIP * Vector3(-1, 1, 1))
@@ -886,11 +909,11 @@ func _update_attachment(delta: float, carry: Dictionary) -> void:
 		_attached = frame.orthonormalized()
 	_attach = move_toward(_attach, 1.0 if on else 0.0, delta / ATTACH_S)
 	if _attach <= 0.0 or parent == null:
-		if transform != Transform3D.IDENTITY:
-			transform = Transform3D.IDENTITY
+		if transform != base_transform():
+			transform = base_transform()
 		return
 	var held := parent.global_transform.affine_inverse() * _attached
-	transform = Transform3D.IDENTITY.interpolate_with(held, smoothstep(0.0, 1.0, _attach))
+	transform = base_transform().interpolate_with(held * Transform3D(Basis.from_scale(Vector3.ONE * body_scale()), Vector3.ZERO), smoothstep(0.0, 1.0, _attach))
 
 
 ## Arms: each hand goes to its goal (blending from where it was when the goal changes), or
