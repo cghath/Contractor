@@ -44,6 +44,8 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   the selection.
 - **A right-click menu won't act on the wrong item.** If what it was opened on moves or goes
   while it's open (a reload, loading magazines), choosing an action does nothing.
+- The logistics test's breach check waits (up to 3 s) for the navigation map to take the
+  rebaked chunks, instead of a fixed 3 frames that a slower machine (CI) can miss.
 - The scavenge tests now check that a looter lets go of the body, with two squadmates
   wanting the same body, and that the leash spares an order.
 

@@ -468,7 +468,9 @@ func _test_breach_navigation() -> void:
 	check(absf(_path_length(map, inside, outside) - before) < 0.01, "until the rebake is done, AI treats the gap as blocked")
 	await _wait_for(func() -> bool: return not rebaked.is_empty() and not nav.is_rebaking(), 6.0)
 	var took_ms := (Time.get_ticks_usec() - started) / 1000.0
-	await _physics_frames(3)
+	# The navigation map takes the new chunk meshes on a later physics sync; a slower machine
+	# (CI) needs more than a few frames, so wait for the shorter path, up to 3 s.
+	await _wait_for(func() -> bool: return _path_length(map, inside, outside) < 5.5, 3.0)
 	check(not rebaked.is_empty(), "the breach rebaked %d chunk(s) in the background (done after %.0f ms)" % [rebaked.size(), took_ms])
 	check(rebaked.all(func(c: Vector2i) -> bool: return NavBuilder.chunk_aabb(c).grow(NavBuilder.BORDER_M + 1.0).has_point(Vector3(-4.85, 0, -8))), "only the chunks around the gap (%s)" % [rebaked])
 	var path := NavigationServer3D.map_get_path(map, inside, outside, true)
