@@ -29,6 +29,7 @@ func _ready() -> void:
 	await _test_spread()
 	await _test_downed()
 	await _test_throwables()
+	await _test_saves()
 	GameState.delete_save()
 	print("GAMEPLAY TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
@@ -101,6 +102,53 @@ func _test_inventory_actions() -> void:
 	check(inv.slots[&"helmet"] == &"helmet", "and equipped again from the backpack")
 	player._server_inventory_action.rpc_id(1, "drop_slot", &"", -1, &"vest", &"")
 	check(inv.slots[&"vest"] == &"plate_carrier", "can't drop a carrier with mags in it")
+
+
+## Audit L1-01 and L1-05: a level-placed stack partly taken saves what's left; a save goes through a
+## checked temporary file and keeps a backup; a broken save falls back to it; bad records are
+## skipped and a save with a wrong-typed section is refused, without touching the live state.
+func _test_saves() -> void:
+	print("Saves: partly taken loot, backup, bad records")
+	player.inventory.strip()
+	player.inventory.take(&"assault_pack")  # room for some magazines, not 200
+	var uid := "test_level_stack"
+	level.spawn_item(&"mag_556", 200, player.global_position + Vector3(0, 0.5, -0.6), uid)
+	await _frames(2)
+	var stack: WorldItem = null
+	for node in get_tree().get_nodes_in_group(&"world_items"):
+		if node.uid == uid:
+			stack = node
+	player._server_interact.rpc_id(1, stack.get_path())
+	await _frames(2)
+	var left := stack.count if is_instance_valid(stack) else -1
+	check(left > 0 and left < 200 and GameState.is_looted(uid) and int(GameState.dropped.get(uid, {}).get("count", -1)) == left,
+		"a level stack partly taken is saved with what's left (%d of 200)" % left)
+	GameState.save_zone()
+	GameState.save_zone()  # the first becomes the backup
+	var path := GameState.save_path()
+	check(FileAccess.file_exists(GameState.backup_path(path)) and not FileAccess.file_exists(path + ".tmp"), "saving keeps the previous save as a backup, no temporary file left")
+	GameState.load_zone()
+	check(int(GameState.dropped.get(uid, {}).get("count", -1)) == left, "and after a reload the stack is still %d, not 200" % left)
+	var f := FileAccess.open(path, FileAccess.WRITE)
+	f.store_string("{\"version\": 1, \"looted\": [")  # cut off mid-write
+	f.close()
+	GameState.load_zone()
+	check(int(GameState.dropped.get(uid, {}).get("count", -1)) == left, "a broken save loads its backup instead")
+	var bad := {"version": GameState.SAVE_VERSION, "looted": ["a"], "voxel_edits": [], "bodies": [{"uid": "b1", "pos": [0, 1]}],
+		"dropped": {"ok": {"id": "mag_556", "count": 2, "pos": [0, 1, 0]}, "unknown": {"id": "no_such_item", "count": 1, "pos": [0, 1, 0]},
+			"short_pos": {"id": "mag_556", "count": 1, "pos": [0, 1]}, "zero": {"id": "mag_556", "count": 0, "pos": [0, 1, 0]}}}
+	var test_path := "%s/%s_bad.json" % [GameState.SAVE_DIR, GameState.zone_id]
+	GameState.write_safely(test_path, JSON.stringify(bad))
+	var read := GameState.read_save(test_path)
+	check(read.get("dropped", {}).keys() == ["ok"] and (read.get("bodies", [1]) as Array).is_empty() and read.get("looted", {}).has("a"),
+		"bad records are skipped (unknown item, two-number position, zero count, broken body); the rest loads")
+	bad["dropped"] = []
+	GameState.write_safely(test_path, JSON.stringify(bad))
+	check(GameState.read_save(test_path).is_empty(), "a save whose section has the wrong type is refused")
+	for p: String in [test_path, GameState.backup_path(test_path)]:
+		DirAccess.remove_absolute(p)
+	if is_instance_valid(stack):
+		stack.queue_free()
 
 
 func _test_drop_and_pickup_keep_state() -> void:

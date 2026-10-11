@@ -786,6 +786,11 @@ func _server_interact(path: NodePath) -> void:
 		item.queue_free()
 	else:
 		item.count -= taken
+		if item.uid != "" and not GameState.dropped.has(item.uid):
+			# A level-placed stack, partly taken: from now on it saves like a dropped one, with
+			# what's left, so a reload doesn't bring back the full stack (audit L1-01).
+			GameState.item_taken(item.uid)
+			GameState.item_dropped(item.uid, item.item_id, item.count, item.global_position, item.state.duplicate(true))
 		_client_message.rpc_id(owner_peer(), "Took %d, no room for the rest" % taken)
 
 

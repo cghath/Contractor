@@ -44,6 +44,21 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 - **`tools/test_runner_check.sh` (new):** checks the runner against a fake engine: a pass
   passes; a failure, a script error with exit 0, a missing summary, a hang and a failed import
   fail. CI runs it as its own job, and the rerun-on-failure step has a timeout now.
+### Saves can't lose progress (audit L1-01, L1-05)
+
+#### Fixed
+
+- **Partly taken loot stays partly taken:** taking some of a level-placed stack (no room for the
+  rest) now saves what's left; before, a reload brought back the full stack.
+- **Saves go through a checked temporary file** (`GameState.write_safely`): the zone and the
+  campaign are written to `<save>.tmp`, read back, then swapped in, with the previous save
+  kept as `<save>.bak`. A save that is cut off or unreadable loads its backup instead.
+- **A save is checked before it replaces anything** (`GameState.read_save`): a section of the
+  wrong type refuses the whole save; a single bad record (an unknown item, a position that
+  isn't three finite numbers, a count below 1, a broken body) is skipped with a warning and
+  the rest loads. Before, such a save could leave the host without a player.
+- **Tests:** the gameplay suite checks the partly taken stack across a reload, the backup, the
+  fallback from a cut-off save, bad records and a wrong-typed section.
 
 ### AI soldiers have names, on name tapes (Captain, 2026-10-11)
 
