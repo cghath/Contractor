@@ -148,6 +148,8 @@ func _run_client() -> void:
 		me._server_treat.rpc_id(1, me.get_path(), tasks[0].item, tasks[0].part)  # rushed left at its default
 		await _wait_for(func() -> bool: return me.vitals.is_healing(), 2.0)
 		check(me.vitals.is_healing(), "the host started the treatment (replicated)")
+		# action_net arrives on its own sync, possibly a frame or two after net_state.
+		await _wait_for(func() -> bool: return me.model.action_shown() == CharacterModel.TREAT, 1.0)
 		check(me.model.action_shown() == CharacterModel.TREAT, "and its animation: hands at the wound (replicated action_net)")
 		await _wait_for(func() -> bool: return me.vitals.wound_list()[0].treated, 8.0)
 		check(me.vitals.wound_list()[0].treated and not me.vitals.wound_list()[0].bleeding and not me.vitals.is_healing(), "a remote treatment through the host: bandaged after 5 s")

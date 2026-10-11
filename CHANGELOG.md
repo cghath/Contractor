@@ -58,6 +58,23 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   - **Slung:** the rifle hangs diagonally across the front of the carrier, clear of the
     pouches, with the stock under the firing-side armpit and the muzzle at the other thigh.
     Before, it hung straight down beside the arm.
+  - **Bladed stance, no floating shoulder:** holding a rifle at the ready or aiming
+    (standing or crouched), the upper body turns 23 degrees (`CharacterModel.BLADE`, 0.4 rad)
+    about its own up axis, support shoulder forward, as a shooter stands; the head and the
+    weapon turn back by as much, so they still face where the soldier looks. The hitboxes,
+    plates and carrier turn with the body. The support shoulder joint now comes forward only
+    a little, inside the deltoid (`SUPPORT_REACH` 0.04 in, 0.06 forward). Before, it moved
+    14 cm forward and floated in front of the torso. The shoulder pockets turn with the
+    chest, so the stock stays in the shoulder and both hands stay on the weapon. Treating
+    yourself takes the wound from the squared-up body, and no longer turns you towards
+    your own arm.
+  - **Slung rifle lies flat:** on its sling the rifle now lies on its side against the
+    chest, ejection port out and the magazine pointing down towards the firing-side hip,
+    4 cm closer to the carrier. Before, the optic stuck straight out and the magazine
+    pointed into the chest.
+- **Net test:** the remote treatment check waits up to 1 s for the treat animation to
+  replicate (action_net comes on its own sync, after the vitals), instead of checking in the
+  same frame. It failed now and then under load.
 
 ### Stormworks-style character models (Captain, 2026-10-11)
 

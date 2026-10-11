@@ -36,10 +36,11 @@ const MED_RED := Color("b3261e")
 ## Rest mounts, torso-local, for a right-handed shooter (rest_transform mirrors them for a
 ## left-handed one): the vest at the cummerbund; the primary on its sling in the patrol
 ## carry, diagonally across the front of the carrier clear of the pouches (stock up under the
-## firing-side armpit, muzzle down at the support-side thigh, optic facing out); the sidearm
-## in a thigh holster on the firing side.
+## firing-side armpit, muzzle down at the support-side thigh), lying flat on its side against
+## the chest: ejection port out, magazine down towards the firing-side hip. The sidearm is in
+## a thigh holster on the firing side.
 const MOUNTS := [&"vest", &"primary", &"sidearm"]
-const SLING_CENTRE := Vector3(0.02, 0.2, -0.25)
+const SLING_CENTRE := Vector3(0.02, 0.2, -0.21)
 const SLING_DIR := Vector3(-0.5, -0.866, 0.0)  # where the muzzle points: 30 degrees off vertical
 const HOLSTER := Vector3(0.22, 0.02, -0.02)
 ## Held weapons, in CharacterModel.hands_anchor space (shoulder height, pitches with aim),
@@ -51,6 +52,10 @@ const HOLSTER := Vector3(0.22, 0.02, -0.02)
 ##   chest at the ready.
 ## The arms reach for the weapon's VoxelArt.hand_points, the support shoulder brought forward
 ## (CharacterModel.SUPPORT_REACH).
+## The pockets are spots on the chest: torso-local, from hands_anchor's origin, as if the
+## upper body faced the view. A rifle held two-handed blades the upper body
+## (CharacterModel.BLADE) while hands_anchor turns back to the view, so held_transform turns
+## the pocket with the twist and the butt stays on the same spot of the chest.
 const SHOULDER_POCKET := Vector3(0.09, 0.07, -0.11)
 const READY_POCKET := Vector3(0.11, 0.03, -0.11)
 const READY_DIP := 0.5
@@ -398,7 +403,7 @@ func _put_in_hands(key: StringName) -> void:
 	if points.is_empty():
 		return
 	node.reparent(model.hands_anchor, false)
-	node.transform = held_transform(VoxelArt.model_for(ItemDB.get_item(_gear[key][0])), model.aiming, model.left_handed)
+	node.transform = held_transform(VoxelArt.model_for(ItemDB.get_item(_gear[key][0])), model.aiming, model.left_handed, model.twist_shown())
 	model.set_held(node, points.grip, points.support)
 
 
@@ -419,23 +424,27 @@ func rest_transform(slot: StringName) -> Transform3D:
 		&"primary":
 			var centre := SLING_CENTRE * Vector3(s, 1, 1)
 			var dir := SLING_DIR * Vector3(s, 1, 1)
-			return Transform3D(Basis.looking_at(dir, Vector3.FORWARD), centre)  # optic out, away from the chest
+			# On its side: the top (optic) towards the support shoulder, across the sling line.
+			return Transform3D(Basis.looking_at(dir, Vector3(-0.866 * s, 0.5, 0.0)), centre)
 		&"sidearm":
 			return Transform3D(Basis(Vector3.RIGHT, -PI / 2), HOLSTER * Vector3(s, 1, 1))
 	return Transform3D.IDENTITY
 
 
 ## Where a held weapon (VoxelArt model `art`) sits in hands_anchor space, aiming or at the
-## ready, for the firing shoulder (see SHOULDER_POCKET).
-static func held_transform(art: String, aiming: bool, left: bool) -> Transform3D:
+## ready, for the firing shoulder (see SHOULDER_POCKET), the upper body twisted by `twist`
+## (CharacterModel.twist_shown; NAN: fully bladed).
+static func held_transform(art: String, aiming: bool, left: bool, twist := NAN) -> Transform3D:
 	var s := -1.0 if left else 1.0
+	if is_nan(twist):
+		twist = CharacterModel.blade_twist(left)
 	if art.begins_with("rifle"):
 		var basis := Basis.IDENTITY
 		var pocket := SHOULDER_POCKET
 		if not aiming:
 			basis = Basis(Vector3.UP, READY_TURN * s) * Basis(Vector3.RIGHT, -READY_DIP)
 			pocket = READY_POCKET
-		return Transform3D(basis, pocket * Vector3(s, 1, 1) - basis * VoxelArt.butt_point(art))
+		return Transform3D(basis, Basis(Vector3.UP, twist) * (pocket * Vector3(s, 1, 1)) - basis * VoxelArt.butt_point(art))
 	if aiming:
 		return Transform3D(Basis.IDENTITY, PISTOL_AIM)
 	return Transform3D(Basis(Vector3.RIGHT, -PISTOL_READY_DIP), PISTOL_READY * Vector3(s, 1, 1))
@@ -446,7 +455,7 @@ func _ease_held(delta: float) -> void:
 	if _held_key == &"" or _held_key == &"hands" or not _gear.has(_held_key):
 		return
 	var node: Node3D = _gear[_held_key][1]
-	var goal := held_transform(VoxelArt.model_for(ItemDB.get_item(_gear[_held_key][0])), model.aiming, model.left_handed)
+	var goal := held_transform(VoxelArt.model_for(ItemDB.get_item(_gear[_held_key][0])), model.aiming, model.left_handed, model.twist_shown())
 	node.transform = node.transform.interpolate_with(goal, minf(delta * HOLD_EASE, 1.0))
 
 
