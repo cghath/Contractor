@@ -36,6 +36,10 @@ func _ready() -> void:
 	box.add_child(_address)
 	box.add_child(_button("Join someone's session", func() -> void: join(_address.text)))
 	box.add_child(_button("Reset compound save", _reset_save))
+	# Wave 4 campaign (BaseHub): the company's FOB, its people and stash. Join this way only a
+	# host who is at the base.
+	box.add_child(_button("Campaign: host at the base (FOB)", _campaign_host))
+	box.add_child(_button("Campaign: join a host at the base", _campaign_join))
 	_status = Label.new()
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD
 	box.add_child(_status)
@@ -75,6 +79,16 @@ func _on_join_failed() -> void:
 		_try_join()
 		return
 	_status.text = "Could not connect to %s.\nJoin needs another copy of the game hosting at that address. To play on your own, use Play (host a session)." % _join_address
+
+
+func _campaign_host() -> void:
+	BaseHub.prepare_session(true)
+	host()
+
+
+func _campaign_join() -> void:
+	BaseHub.prepare_session(false)
+	join(_address.text)
 
 
 func _reset_save() -> void:

@@ -67,6 +67,12 @@ const DOWNED := &"downed"
 const DEAD := &"dead"
 const SQUADMATE := &"squadmate"
 const SELF := &"self"
+## Anything else in the INTERACTABLES group (base terminals, wave 4): it lists its own
+## actions through interaction_actions(actor) -> Array[Dictionary] ({"id", "label",
+## "disabled", "call": a local Callable perform runs}) and may place its point with
+## action_point().
+const OBJECT := &"object"
+const INTERACTABLES := &"interactables"
 
 ## Actions per target kind, in menu order. Keys:
 ## - id, label: what it is and what the menu shows (some labels get details, see _label).
@@ -157,6 +163,8 @@ static func target_kind(actor: Soldier, target: Node) -> StringName:
 		return SELF
 	if target is WorldItem:
 		return ITEM
+	if target.is_in_group(INTERACTABLES) and target.has_method(&"interaction_actions"):
+		return OBJECT
 	var vitals := target.get_node_or_null(^"Vitals") as Vitals
 	if vitals == null:
 		return &""
@@ -176,6 +184,13 @@ static func actions_for(actor: Soldier, target: Node) -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	var kind := target_kind(actor, target)
 	if kind == &"":
+		return out
+	if kind == OBJECT:
+		for def: Dictionary in target.call(&"interaction_actions", actor):
+			var action := def.duplicate()
+			action["target"] = target
+			action["disabled"] = String(def.get("disabled", ""))
+			out.append(action)
 		return out
 	for def: Dictionary in ACTIONS[kind]:
 		var why := _check(def.get("needs", &""), actor, target)
@@ -441,6 +456,9 @@ static func perform(actor: Soldier, action: Dictionary) -> String:
 	var target: Node = action.get("target")
 	if target == null or not is_instance_valid(target) or target.is_queued_for_deletion():
 		return ""
+	if action.has("call"):
+		(action.call as Callable).call()  # an interactable's own local action (OBJECT)
+		return ""
 	match action.get("show", &""):
 		&"condition":
 			return condition_report(target, actor)
@@ -602,7 +620,8 @@ static func _single_points(actor: Soldier, camera: Camera3D) -> Array[Dictionary
 	var eye := camera.global_position
 	var forward := -camera.global_basis.z
 	var tree := actor.get_tree()
-	var candidates: Array = tree.get_nodes_in_group(WorldItem.GROUP) + tree.get_nodes_in_group(&"combatants")
+	var candidates: Array = tree.get_nodes_in_group(WorldItem.GROUP) + tree.get_nodes_in_group(&"combatants") \
+		+ tree.get_nodes_in_group(INTERACTABLES)
 	for node: Node in candidates:
 		if node == actor or not node is Node3D or node.is_queued_for_deletion():
 			continue
@@ -627,6 +646,8 @@ static func _single_points(actor: Soldier, camera: Camera3D) -> Array[Dictionary
 static func action_point(node: Node3D) -> Vector3:
 	if node is WorldItem:
 		return (node as WorldItem).action_point()
+	if node.has_method(&"action_point"):
+		return node.call(&"action_point")
 	var vitals := node.get_node_or_null(^"Vitals") as Vitals
 	var lying := vitals != null and not vitals.is_up()
 	return node.global_position + Vector3.UP * (DOWNED_POINT_Y if lying else STANDING_POINT_Y)
