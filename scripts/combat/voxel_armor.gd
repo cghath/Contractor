@@ -43,6 +43,10 @@ static var _meshers: Dictionary = {}  # item id -> VoxelMesherCubes
 static var _material: StandardMaterial3D
 
 var item: ItemData
+## The carrier's fabric over a plate in its pocket (alpha 0: none, the bare plate shows).
+## The intact surface takes this colour, so the plate reads as enclosed; chips and holes
+## show the plate under the torn cover.
+var cover := Color(0, 0, 0, 0)
 var slot: StringName
 var inventory: Inventory
 
@@ -90,6 +94,15 @@ static func make_mesh_instance(p_item: ItemData, render_layers := 1) -> MeshInst
 	return mesh_instance
 
 
+## Covers the plate with carrier fabric of `colour` (alpha 0 to show the bare plate).
+func set_cover(colour: Color) -> void:
+	if colour == cover:
+		return
+	cover = colour
+	if _mesh_instance:
+		_mesh_instance.mesh = _get_mesher(item, cover).build_mesh(_buffer, [])
+
+
 static func size_m(p_item: ItemData) -> Vector3:
 	return Vector3(_get_base(p_item).dims) * VOXEL_SIZE
 
@@ -121,7 +134,7 @@ func apply_damage(chips: Array, shattered := false) -> void:
 				for z in _base.dims.z:
 					if _voxel_at(Vector3i(x, y, z)) == INTACT:
 						_set_voxel(Vector3i(x, y, z), SCARRED)
-	_mesh_instance.mesh = _get_mesher(item).build_mesh(_buffer, [])
+	_mesh_instance.mesh = _get_mesher(item, cover).build_mesh(_buffer, [])
 
 
 ## Share of the piece's voxels still there, 1 (new) to 0.
@@ -510,9 +523,10 @@ static func _superellipse(v: Vector3) -> float:
 	return pow(absf(v.x), 4.0) + pow(absf(v.y), 4.0) + pow(absf(v.z), 4.0)
 
 
-static func _get_mesher(p_item: ItemData) -> VoxelMesherCubes:
-	if not _meshers.has(p_item.id):
-		var colour := Color(p_item.stats.get("color", "4f5a45"))
+static func _get_mesher(p_item: ItemData, p_cover := Color(0, 0, 0, 0)) -> VoxelMesherCubes:
+	var key := String(p_item.id) + (p_cover.to_html(false) if p_cover.a > 0.0 else "")
+	if not _meshers.has(key):
+		var colour := p_cover if p_cover.a > 0.0 else Color(p_item.stats.get("color", "4f5a45"))
 		var palette := VoxelColorPalette.new()
 		palette.set_color(EMPTY, Color(0, 0, 0, 0))
 		palette.set_color(INTACT, colour)
@@ -523,8 +537,8 @@ static func _get_mesher(p_item: ItemData) -> VoxelMesherCubes:
 		var mesher := VoxelMesherCubes.new()
 		mesher.palette = palette
 		mesher.color_mode = VoxelMesherCubes.COLOR_MESHER_PALETTE
-		_meshers[p_item.id] = mesher
-	return _meshers[p_item.id]
+		_meshers[key] = mesher
+	return _meshers[key]
 
 
 static func _get_material() -> StandardMaterial3D:

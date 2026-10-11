@@ -141,6 +141,8 @@ func _rebuild() -> void:
 			_chip_counts[slot] = 0
 		if piece:
 			piece.transform = armor_transform(slot, carrier)
+			if slot != &"helmet":  # a plate sits inside the carrier's pocket, under its fabric
+				piece.set_cover(Color(VoxelArt.VARIANTS.get(model.variant, VoxelArt.VARIANTS.multicam).gear) if carrier else Color(0, 0, 0, 0))
 	for slot: StringName in MOUNTS:
 		var mount: Array = MOUNTS[slot]
 		_set_gear(slot, inventory.slots[slot], mount[0], mount[1], mount[2])
