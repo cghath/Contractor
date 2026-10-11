@@ -112,10 +112,12 @@ const SQUAD_CALLSIGNS: Array[String] = ["Alpha", "Bravo", "Charlie", "Delta", "E
 const DEFAULT_JOIN_ROLE := Roles.RIFLEMAN
 const JOIN_ROLE_WAIT_S := 5.0
 ## Two fire teams: a pair guarding the main building, and a pair patrolling the yard.
+## People (wave 4): "intel" is what an officer or squad leader ("rank") carries, looted from
+## his body (PeopleLayer.server_give_intel gives each its own intel id).
 const HOSTILES := [
-	{"name": "Hostile1", "pos": Vector3(-2.5, 0.1, -10), "buddy": "Hostile2", "guard": true},
+	{"name": "Hostile1", "pos": Vector3(-2.5, 0.1, -10), "buddy": "Hostile2", "guard": true, "rank": "officer", "intel": ["intel_phone", "intel_documents"]},
 	{"name": "Hostile2", "pos": Vector3(2.5, 0.1, -6.5), "buddy": "Hostile1", "guard": true},
-	{"name": "Hostile3", "pos": Vector3(-12, 0.1, -2), "buddy": "Hostile4", "guard": false},
+	{"name": "Hostile3", "pos": Vector3(-12, 0.1, -2), "buddy": "Hostile4", "guard": false, "rank": "squad leader", "intel": ["intel_documents"]},
 	{"name": "Hostile4", "pos": Vector3(-10, 0.1, -3), "buddy": "Hostile3", "guard": false},
 ]
 const HOSTILE_LOADOUT := ["plate_carrier_light", "plate_pe_l3", "helmet_bump", "assault_pack", "mk18",
@@ -135,6 +137,7 @@ const HOSTILE_PATROL: Array[Vector3] = [Vector3(-12, 0, -2), Vector3(-12, 0, -16
 
 var _spawn_index := 0
 var _throw_count := 0
+var _throwers := {}  # host: grenade serial -> who threw it (Harm: whose fragments hurt whom)
 var _squads := {}  # faction -> Squad
 var _ai_ready := false  # host: AI spawns once the voxel walls exist
 ## Host: the role each player picked, by peer id.
@@ -144,6 +147,8 @@ var _kitted := {}  # host: peer ids that got their role kit
 var _fallen_slots := {}
 ## AI callouts as subtitles (same node on every peer).
 var callouts: Callouts
+## Civilians, HVTs and intel (wave 4, PeopleLayer; same node on every peer).
+var people: PeopleLayer
 
 
 static func current(from: Node) -> CompoundLevel:
@@ -175,6 +180,8 @@ func _ready() -> void:
 	Net.joined.connect(_on_joined)
 	Net.peer_joined.connect(_on_peer_joined)
 	Net.peer_left.connect(_on_peer_left)
+	people = PeopleLayer.new()  # "People": civilians, HVTs, intel (wave 4)
+	add_child(people)
 
 
 ## The playable area on the map, in metres on the ground plane (x along x, y along z): the
@@ -269,8 +276,11 @@ func show_impact(pos: Vector3, normal: Vector3, kind: String) -> void:
 
 
 ## Host only. Throws a grenade on every peer; the host's copy detonates (see Grenade).
-func server_throw(id: StringName, origin: Vector3, velocity: Vector3) -> void:
+## `thrower` is noted on the host's copy (Grenade.thrower).
+func server_throw(id: StringName, origin: Vector3, velocity: Vector3, thrower: Node = null) -> void:
 	_throw_count += 1
+	if thrower:
+		_throwers[_throw_count] = thrower
 	show_throw.rpc(_throw_count, String(id), origin, velocity)
 
 
@@ -279,6 +289,9 @@ func show_throw(serial: int, id: String, origin: Vector3, velocity: Vector3) -> 
 	var grenade := Grenade.new()
 	grenade.name = "Grenade%d" % serial
 	grenade.setup(StringName(id))
+	if is_instance_valid(_throwers.get(serial)):
+		grenade.thrower = _throwers[serial]
+	_throwers.erase(serial)
 	add_child(grenade)
 	grenade.global_position = origin
 	grenade.linear_velocity = velocity
@@ -364,6 +377,8 @@ func _spawn_ai() -> void:
 			"loadout": HOSTILE_LOADOUT, "combat": 0.45, "discipline": 0.5, "guard": h.guard, "mode": "aware"})
 	for h: Dictionary in hostiles:
 		spawned[h.name].buddy = spawned.get(h.buddy)  # null if the buddy's body is in the save
+		for intel_id: String in h.get("intel", []):  # people (wave 4): officers' intel
+			people.server_give_intel(spawned[h.name], StringName(intel_id), "%s (%s)" % [h.name, h.get("rank", "")])
 	rebalance_squad()
 
 

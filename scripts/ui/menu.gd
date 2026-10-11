@@ -9,6 +9,8 @@ const JOIN_RETRY_S := 1.0
 
 ## Main-menu role picker (sets Roles.local_choice).
 var role_picker: OptionButton
+## People (wave 4): civilians, HVTs and intel in the compound when you host (PeopleLayer.populate).
+var people_toggle: CheckBox
 var _address: LineEdit
 var _status: Label
 var _join_address := ""
@@ -28,6 +30,7 @@ func _ready() -> void:
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(title)
 	box.add_child(_role_picker())
+	box.add_child(_people_toggle())
 	box.add_child(_button("Play (host a session)", host))
 	box.add_child(_hint("Solo play is a session nobody else has joined."))
 	_address = LineEdit.new()
@@ -99,6 +102,18 @@ func _role_picker() -> Control:
 	role_picker.item_selected.connect(func(index: int) -> void: Roles.local_choice = role_picker.get_item_metadata(index))
 	row.add_child(role_picker)
 	return row
+
+
+## People (wave 4): host with the compound's civilians, HVTs and intel, and hostiles who may
+## surrender (PeopleLayer.populate and surrender_enabled). Off: the compound as before.
+func _people_toggle() -> CheckBox:
+	people_toggle = CheckBox.new()
+	people_toggle.text = "Civilians, HVTs and intel (wave 4 test)"
+	people_toggle.button_pressed = PeopleLayer.populate
+	people_toggle.toggled.connect(func(on: bool) -> void:
+		PeopleLayer.populate = on
+		PeopleLayer.surrender_enabled = on)
+	return people_toggle
 
 
 func _button(text: String, action: Callable) -> Button:

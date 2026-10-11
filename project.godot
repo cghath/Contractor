@@ -21,6 +21,7 @@ Net="*res://autoload/net.gd"
 Campaign="*res://autoload/campaign.gd"
 Economy="*res://scripts/campaign/economy.gd"
 Contracts="*res://scripts/campaign/contracts.gd"
+People="*res://scripts/people/people.gd"
 
 [display]
 

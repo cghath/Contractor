@@ -3,10 +3,11 @@ extends Control
 ## ACE3-style interaction menu, local to the player (design doc "ACE-style interaction").
 ##
 ## Hold Left Ctrl (`interact`) and look at something within REACH: action points appear on
-## items, downed bodies and standing squadmates. Move the cursor onto one to open its radial
-## menu of actions, and let go of Left Ctrl to perform the highlighted one; letting go over
-## nothing cancels. Left Ctrl + Left Alt (`self_interact`) opens the same kind of menu on
-## your own body and gear. While the menu is open the mouse moves a cursor, not the view.
+## items, downed bodies, standing squadmates and people (civilians, HVTs, captives). Move
+## the cursor onto one to open its radial menu of actions, and let go of Left Ctrl to perform
+## the highlighted one; letting go over nothing cancels. Left Ctrl + Left Alt
+## (`self_interact`) opens the same kind of menu on your own body and gear. While the menu
+## is open the mouse moves a cursor, not the view.
 ##
 ## What each kind of target offers is data (ACTIONS) read by the pure actions_for, so later
 ## work (treatments) adds entries rather than code paths. Anything that changes shared state
@@ -67,6 +68,8 @@ const DOWNED := &"downed"
 const DEAD := &"dead"
 const SQUADMATE := &"squadmate"
 const SELF := &"self"
+## A civilian, an HVT or a hostile who gave up, standing (people, wave 4: Person).
+const PERSON := &"person"
 
 ## Actions per target kind, in menu order. Keys:
 ## - id, label: what it is and what the menu shows (some labels get details, see _label).
@@ -80,6 +83,8 @@ const SELF := &"self"
 ## - submenu: a list built at runtime: "stowed_items" and "body_items" (what's on a dead body,
 ##   like the inventory screen; entries take the parent's request) or "treatments" (entries
 ##   carry their own request: see treatments).
+## - people: a people action (PeopleLayer.request: "cuff", "lead", "stop", "cover", "search")
+##   on the target, instead of a Soldier request; its conditions are Person.MENU_NEEDS.
 const ACTIONS := {
 	ITEM: [
 		{"id": &"pick_up", "label": "Pick up", "request": &"_server_interact", "with": &"target"},
@@ -90,6 +95,8 @@ const ACTIONS := {
 		{"id": &"carry", "label": "Carry", "needs": &"can_move_body", "request": &"_server_carry_body", "with": &"target"},
 		{"id": &"drag", "label": "Drag", "needs": &"can_move_body", "request": &"_server_drag_body", "with": &"target"},
 		{"id": &"check_condition", "label": "Check condition", "show": &"condition"},
+		{"id": &"cuff", "label": "Zip-cuff", "needs": &"cuffable", "people": &"cuff"},
+		{"id": &"search", "label": "Search for intel", "needs": &"searchable", "people": &"search"},
 	],
 	DEAD: [
 		{"id": &"put_down", "label": "Put down", "needs": &"moving_body", "request": &"_server_release_body", "with": &"none"},
@@ -100,6 +107,16 @@ const ACTIONS := {
 	],
 	SQUADMATE: [
 		{"id": &"give_item", "label": "Give item", "submenu": &"stowed_items", "request": &"_server_give_item", "with": &"target_entry"},
+		{"id": &"treat", "label": "Treat", "needs": &"treatable", "submenu": &"treatments"},
+		{"id": &"check_condition", "label": "Check wounds", "needs": &"wounded", "show": &"condition"},
+	],
+	PERSON: [
+		{"id": &"cuff", "label": "Zip-cuff", "needs": &"cuffable", "people": &"cuff"},
+		{"id": &"lead", "label": "Follow me", "needs": &"leadable", "people": &"lead"},
+		{"id": &"stop", "label": "Stop", "needs": &"led", "people": &"stop"},
+		{"id": &"cover", "label": "Get in cover", "needs": &"leadable", "people": &"cover"},
+		{"id": &"search", "label": "Search for intel", "needs": &"searchable", "people": &"search"},
+		{"id": &"carry", "label": "Carry", "needs": &"carriable_person", "request": &"_server_carry_body", "with": &"target"},
 		{"id": &"treat", "label": "Treat", "needs": &"treatable", "submenu": &"treatments"},
 		{"id": &"check_condition", "label": "Check wounds", "needs": &"wounded", "show": &"condition"},
 	],
@@ -164,6 +181,8 @@ static func target_kind(actor: Soldier, target: Node) -> StringName:
 		return DOWNED
 	if vitals.is_dead() and target is Soldier:
 		return DEAD
+	if target is Soldier and vitals.is_up() and Person.is_person(target):
+		return PERSON
 	if target is Soldier and vitals.is_up() and (target as Soldier).faction == actor.faction:
 		return SQUADMATE
 	return &""
@@ -194,12 +213,14 @@ static func actions_for(actor: Soldier, target: Node) -> Array[Dictionary]:
 
 
 ## `target` gets body interaction points (a region point each, and the waist): a squadmate,
-## down or up, or yourself. Enemies, the dead, dummies, items and the body you're carrying
+## down or up, yourself, or a civilian, HVT or captive (PERSON, down or up: the people
+## actions, zip-cuff, lead, search, sit on the waist point). Enemies (a downed one's single
+## point offers zip-cuff and search), the dead, dummies, items and the body you're carrying
 ## or dragging (its point offers Release / Put down first) keep a single point.
 static func has_regions(actor: Soldier, target: Node) -> bool:
 	if target is Soldier and target != actor and (target as Soldier).carried_by == actor:
 		return false
-	return target is Soldier and not _is_enemy(actor, target) and target_kind(actor, target) in [DOWNED, SQUADMATE, SELF]
+	return target is Soldier and not _is_enemy(actor, target) and target_kind(actor, target) in [DOWNED, SQUADMATE, SELF, PERSON]
 
 
 ## What the waist point offers: actions_for without Treat (treatments sit on the regions).
@@ -279,6 +300,8 @@ static func _check(need: StringName, actor: Soldier, target: Node) -> String:
 			return "" if target is Soldier and (target as Soldier).has_gear() else "Nothing left on them"
 		&"held_item":
 			return "" if actor.inventory.hands != &"" or actor.active_weapon() != null else _HIDE
+	if need in Person.MENU_NEEDS:
+		return Person.menu_check(need, actor, target)  # people (wave 4)
 	return ""
 
 
@@ -424,8 +447,9 @@ static func _treat_entry(actor: Soldier, target: Node, item: ItemData, part: Str
 		"item": item.id, "part": part, "rushed": rushed, "disabled": "" if have else "You have no %s" % item.name}
 
 
+## Someone on another side who still counts as an enemy (civilians, HVTs and captives don't).
 static func _is_enemy(actor: Soldier, target: Node) -> bool:
-	return target is Soldier and (target as Soldier).faction != actor.faction
+	return target is Soldier and (target as Soldier).faction != actor.faction and not Person.is_noncombatant(target)
 
 
 # --- Doing it ------------------------------------------------------------------------------
@@ -448,6 +472,11 @@ static func perform(actor: Soldier, action: Dictionary) -> String:
 			return wound_report(actor.vitals, true, has_oximeter(actor))
 		&"part":
 			return part_report(target, action.region, actor)
+	if action.has("people"):
+		var layer := PeopleLayer.find(actor)
+		if layer:
+			layer.request.rpc_id(1, String(action.people), target.get_path())
+		return ""
 	var request: StringName = action.get("request", &"")
 	if request == &"":
 		return ""
