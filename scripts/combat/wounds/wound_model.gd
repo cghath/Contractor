@@ -1600,7 +1600,8 @@ func to_net() -> Dictionary:
 	for w in wounds:
 		var wound_flags := (1 if w.get("packed", false) else 0) | (2 if w.get("tension", false) else 0) \
 			| (4 if w.get("clamped", false) else 0) | (8 if w.get("closed", false) else 0) | (16 if w.get("pneumo", false) else 0)
-		list.append([String(w.part), w.kind, snappedf(float(w.rate), 0.001), 1 if w.treated else 0, String(w.name), wound_flags])
+		list.append([String(w.part), w.kind, snappedf(float(w.rate), 0.001), 1 if w.treated else 0, String(w.name), wound_flags,
+			_half_cm(w.get("at")), _half_cm(w.get("out"))])
 	var flags := (1 if unconscious else 0) | (2 if arrest else 0) | (4 if dead else 0) | (16 if npa else 0) | (32 if airway_blocked else 0) \
 		| (64 if wake_left > 0.0 else 0) | (128 if _pain_over_s >= PAIN_KNOCKOUT_S - 0.001 else 0) \
 		| (256 if hypothermic() else 0) | (512 if blast_lung else 0) | (1024 if blanket else 0)
@@ -1627,6 +1628,14 @@ func _drugs_net() -> Dictionary:
 		if drug_total(id) > 0.0:
 			out[String(id)] = [snappedf(float(drug_level[id]), 0.01), snappedf(float(drug_depot[id]), 0.01)]
 	return out
+
+
+## A rest-pose point as whole half-centimetres for net_state, or [] for none.
+static func _half_cm(p: Variant) -> Array:
+	if not p is Vector3:
+		return []
+	var v: Vector3 = p
+	return [roundi(v.x * 200.0), roundi(v.y * 200.0), roundi(v.z * 200.0)]
 
 
 ## Rebuilds this copy from a peer's net_state (clients).
@@ -1673,6 +1682,11 @@ func apply_net(state: Dictionary) -> void:
 			"treated": int(entry[3]) != 0, "name": StringName(entry[4]), "packed": wound_flags & 1 != 0,
 			"tension": wound_flags & 2 != 0, "clamped": wound_flags & 4 != 0, "closed": wound_flags & 8 != 0, "pneumo": wound_flags & 16 != 0,
 			"tension_in": -1.0, "arrest_in": -1.0})
+		if entry.size() > 7:
+			for i: int in [6, 7]:
+				var p: Array = entry[i]
+				if p.size() == 3:
+					wounds[-1]["at" if i == 6 else "out"] = Vector3(p[0], p[1], p[2]) * 0.005
 	tourniquets.clear()
 	var tq: Dictionary = state.get("q", {})
 	for part: String in tq:

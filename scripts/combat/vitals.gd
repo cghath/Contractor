@@ -439,7 +439,8 @@ func signs(on_self := false) -> PackedStringArray:
 ## "limb" (the limb segment a tourniquet for it goes on: its own part, or empty off the
 ## limbs), "tourniquet" (a tourniquet above or on it holds some of its bleeding),
 ## "packed" (gauze in it), "tension" (a chest wound's tension pneumothorax has started),
-## "clamped" (a surgical clamp holds it) and "closed" (a chest wound closed by surgery).
+## "clamped" (a surgical clamp holds it) and "closed" (a chest wound closed by surgery). "at" and
+## "out": where the round went in and came out (rest pose; null if unknown or it stayed in).
 func wound_list() -> Array[Dictionary]:
 	var m := _m()
 	var list: Array[Dictionary] = []
@@ -448,7 +449,8 @@ func wound_list() -> Array[Dictionary]:
 			"treated": w.treated, "rate": w.rate, "name": w.name,
 			"limb": w.part if WoundModel.LIMB_BELOW.has(w.part) else &"",
 			"tourniquet": m.tourniquet_factor(w.part) < 1.0, "packed": w.get("packed", false), "tension": w.get("tension", false),
-			"clamped": w.get("clamped", false), "closed": w.get("closed", false), "pneumo": w.get("pneumo", false)})
+			"clamped": w.get("clamped", false), "closed": w.get("closed", false), "pneumo": w.get("pneumo", false),
+			"at": w.get("at"), "out": w.get("out")})
 	return list
 
 
@@ -693,7 +695,7 @@ func server_hit(part: StringName, hit: Dictionary) -> void:
 		part = BodyMap.part_at(entry) if hit.has("position") else TORSO_PARTS[_model.rng.randi() % TORSO_PARTS.size()]
 		if not hit.has("position"):
 			channel_in = BodyMap.random_channel(part, _model.rng)
-	var depth := BodyMap.CHANNEL_MAX_M
+	var depth := minf(BodyMap.CHANNEL_MAX_M, float(hit.get("channel_depth", BodyMap.CHANNEL_MAX_M)))
 	if round_class == FRAGMENT:
 		depth = _model.rng.randf_range(BodyMap.FRAGMENT_DEPTH_M.x, BodyMap.FRAGMENT_DEPTH_M.y)
 	var channel := BodyMap.trace(part, channel_in[0], channel_in[1], round_class, depth)
@@ -701,7 +703,15 @@ func server_hit(part: StringName, hit: Dictionary) -> void:
 		channel.vessels = []
 		channel.organs = []
 	_last_hit_at = Time.get_ticks_msec() / 1000.0
-	_model.add_hit(part, channel, round_class)
+	var added := _model.add_hit(part, channel, round_class)
+	if hit.has("position"):
+		# Where it went in, and out if it went through (the body ended before the channel
+		# did), in the rest pose: the wound marks on the model (CharacterModel) show them.
+		var exits: bool = round_class != FRAGMENT and hit.has("channel_depth") and depth < BodyMap.CHANNEL_MAX_M - 0.001 and not channel.graze
+		for w: Dictionary in added:
+			w["at"] = channel.from
+			if exits:
+				w["out"] = channel.to
 	_after_change()
 
 

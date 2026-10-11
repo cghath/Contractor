@@ -294,7 +294,9 @@ func _test_shot_in_module() -> void:
 	SquadAI.of(brick).process_mode = Node.PROCESS_MODE_DISABLED
 	await get_tree().create_timer(0.3).timeout
 	var stopped := _fire(m.to_global(Vector3(11.0, 1.3, 2.0)), m.to_global(Vector3(11.0, 1.3, -9.0)), &"m4a1")
-	var through_door := _fire(m.to_global(Vector3(11.0, 0.6, 2.0)), m.to_global(Vector3(11.0, 0.6, -9.0)), &"m4a1")
+	# Low, at the pelvis, under the plate (at 0.6 m on his centre line it would pass between his legs:
+	# hits land on the body's real shape, BodyVolume).
+	var through_door := _fire(m.to_global(Vector3(11.0, 0.95, 2.0)), m.to_global(Vector3(11.0, 0.95, -9.0)), &"m4a1")
 	check(through_door.result == "body" and not brick.vitals.wound_list().is_empty(),
 		"through the brick house's doorway a round reaches the man inside (%s)" % through_door.result)
 	check(stopped.result in ["body", "plate"], "and a chest-high round finds him through the doorway too (%s)" % stopped.result)

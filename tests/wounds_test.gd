@@ -29,6 +29,7 @@ func _ready() -> void:
 	_test_kit_economy()
 	await _test_net_state()
 	_test_hitboxes()
+	_test_body_volume()
 	await _test_ballistics_routing()
 	await _test_fragments()
 	print("WOUNDS TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
@@ -736,6 +737,9 @@ func _test_net_state() -> void:
 	check(absf(copy.blood - vitals.blood_fraction()) < 0.002 and copy.wounds.size() == vitals.wound_list().size() and copy.unconscious == vitals.downed,
 		"net_state rebuilds blood, wounds and consciousness (%d wounds, %.1f%%)" % [copy.wounds.size(), copy.blood * 100.0])
 	check(absf(copy.bleed_rate() - vitals.bleed_rate()) < 0.01 and absf(copy.pain() - vitals.pain()) < 0.01, "so a client's queries match the host's")
+	var host_at: Variant = vitals.wound_list()[0].get("at")
+	check(host_at is Vector3 and copy.wounds[0].get("at") is Vector3 and Vector3(copy.wounds[0].at).distance_to(host_at) < 0.004,
+		"where a wound went in replicates, to half a centimetre (%s)" % [copy.wounds[0].get("at")])
 	vitals.server_apply_treatment(WoundModel.MORPHINE, Vitals.TORSO)
 	vitals._model.add_hit(Vitals.CHEST, {"graze": false, "depth": 0.2, "vessels": [], "organs": [&"lung_l"], "bones": []}, Vitals.PISTOL)
 	vitals.server_advance(20.0)
@@ -807,6 +811,34 @@ func _test_ballistics_routing() -> void:
 		if result.result != "body" or not hit:
 			wrong.append("%s (%s, %s)" % [part, result.result, dummy.vitals.wound_list().map(func(w: Dictionary) -> StringName: return w.part)])
 	check(wrong.is_empty(), "a shot at each of the 14 parts wounds that part %s" % wrong)
+	# A rifle round through the right thigh: in at the front of the leg, out the back, both
+	# drawn on the thigh.
+	dummy.vitals.server_reset_health()
+	await get_tree().process_frame
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	shooter.position = dummy.global_transform * Vector3(0.075, 0.65, -5)
+	Ballistics.fire(shooter, shooter.position, Vector3.BACK, rifle)
+	var thigh_wounds := dummy.vitals.wound_list()
+	var entry: Variant = thigh_wounds[0].get("at") if not thigh_wounds.is_empty() else null
+	var exit_hole: Variant = thigh_wounds[0].get("out") if not thigh_wounds.is_empty() else null
+	check(entry is Vector3 and exit_hole is Vector3 and absf(Vector3(entry).z - -0.07) < 0.02 and absf(Vector3(exit_hole).z - 0.07) < 0.03,
+		"a round through the thigh goes in at the front and out the back (%s, %s)" % [entry, exit_hole])
+	# The marks redraw on Vitals.changed, which net_state sends at most every NET_INTERVAL_S.
+	var model: CharacterModel = dummy.get_node(^"Model")
+	var wound_marks: WoundMarks = model.get_node(^"WoundMarks")
+	for i in 90:
+		await get_tree().process_frame
+		if wound_marks.holes_on(Vitals.THIGH_R) >= 2:
+			break
+	var drawn: MultiMeshInstance3D = model.part_node(Vitals.THIGH_R).get_node_or_null(^"WoundMark")
+	check(wound_marks.holes_on(Vitals.THIGH_R) == 2 and drawn != null and drawn.multimesh.visible_instance_count >= 2,
+		"both holes are drawn on the thigh (%d holes, %d voxels)" % [wound_marks.holes_on(Vitals.THIGH_R), drawn.multimesh.visible_instance_count if drawn else 0])
+	# It bleeds: blood runs on the skin and pools on the ground under the leg.
+	for i in 120:
+		await get_tree().process_frame
+	check(wound_marks.blood_on(Vitals.THIGH_R) > 4 and wound_marks.pool_size() > 0,
+		"the thigh wound bleeds onto the skin and the ground (%d voxels on the leg, %d in the pool)" % [wound_marks.blood_on(Vitals.THIGH_R), wound_marks.pool_size()])
 	# Lying down, the channel still follows the part: a shot down into the back of the chest.
 	dummy.vitals.server_reset_health()
 	dummy.vitals.server_damage(70.0)
@@ -819,10 +851,38 @@ func _test_ballistics_routing() -> void:
 	var down := Ballistics.fire(shooter, shooter.position, Vector3.DOWN, rifle)
 	var parts := dummy.vitals.wound_list().map(func(w: Dictionary) -> StringName: return w.part)
 	check(down.result == "body" and Vitals.CHEST in parts, "a downed body's hitboxes lie with it: shot in the back hits the chest (%s)" % [parts])
+	# Between the legs: through both thigh boxes, past the body (BodyVolume).
+	dummy.vitals.server_reset_health()
+	await get_tree().process_frame
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	shooter.position = dummy.global_transform * Vector3(0, 0.6, -5)
+	var gap := Ballistics.fire(shooter, shooter.position, Vector3.BACK, rifle)
+	check(gap.result != "body" and dummy.vitals.wound_list().is_empty(), "a round between the legs crosses the thigh boxes but misses the body (%s)" % gap.result)
 	shooter.queue_free()
 	dummy.queue_free()
 	await get_tree().process_frame
 
+
+func _test_body_volume() -> void:
+	print("Hits on the body's real shape (BodyVolume)")
+	var started := Time.get_ticks_msec()
+	BodyVolume.warm()
+	var took := Time.get_ticks_msec() - started
+	check(took < 5000, "the body shapes build at level start in %d ms" % took)
+	var back := Vector3.BACK
+	check(BodyVolume.march(&"thigh_r", Vector3(0.0, 0.6, -0.3), back).is_empty() and BodyVolume.march(&"thigh_l", Vector3(0.0, 0.6, -0.3), back).is_empty(),
+		"straight between the legs: no thigh")
+	var thigh := BodyVolume.march(&"thigh_r", Vector3(0.075, 0.65, -0.3), back)
+	check(not thigh.is_empty() and absf(thigh.position.z - -0.07) < 0.02 and thigh.depth > 0.10 and thigh.depth < 0.18,
+		"through the middle of the thigh: in at the skin, about its depth of body (%s)" % [thigh])
+	check(BodyVolume.march(&"forearm_r", Vector3(0.302, 0.80, -0.3), back).is_empty(), "past the edge of the hand, inside its box: a miss")
+	var chest := BodyVolume.march(&"chest", Vector3(0.0, 1.31, -0.3), back)
+	check(not chest.is_empty() and chest.depth > 0.18, "front to back through the chest: the whole trunk (%s)" % [chest])
+	# Each body type is judged on its own shape (the art branch's female parts are "<part>_f").
+	check(BodyVolume.model_of(&"thigh_r", "female") == "thigh_f" and BodyVolume.model_of(&"chest", "female") == "torso_f"
+		and BodyVolume.model_of(&"thigh_r", "male") == "thigh" and BodyVolume.model_of(&"face", "") == "head",
+		"a body type picks its own part models (%s, %s)" % [BodyVolume.model_of(&"thigh_r", "female"), BodyVolume.model_of(&"chest", "female")])
 
 func _test_fragments() -> void:
 	print("Fragments")

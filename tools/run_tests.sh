@@ -48,6 +48,11 @@ judge() {
 	fi
 	if [ -n "$why" ]; then
 		echo "$name: $why"
+		echo "  last lines of its output:"
+		tail -n 40 "$log" | sed "s/^/  | /"
+		if [ -n "${GITHUB_ACTIONS:-}" ]; then  # job logs need repo admin rights; annotations don't
+			tail -n 12 "$log" | while IFS= read -r line; do echo "::error title=$name::$line"; done
+		fi
 		status=1
 	fi
 }
