@@ -28,6 +28,16 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   each plate and a lip over its edges. A plate in its pocket takes the carrier's fabric
   colour (`VoxelArmor.cover`); chips and holes still show the plate under the torn cover.
   The heavy carrier has side-plate pockets, a collar and a groin flap.
+- **Captain's first look:**
+  - **Chin:** the jaw is now a 45-degree chamfer under a straight face. Uneven slopes stepped
+    unevenly at 0.5 cm and showed as bands across the chin and face.
+  - **Shoulders:** the torso has deltoids. Above the chest they flare out at 45 degrees to
+    0.26 m, over the shoulder joints, and the trapezius runs flat in to the neck. The upper
+    arms taper into them, so the arms hang out from under the shoulders and turn under them.
+    The arms used to hang 4 cm clear of a narrow trunk, like separate columns.
+  - **Front pouches** sit on what's behind them: on the plate face (in the pocket's window),
+    or on the cummerbund beside the pocket. They used to float 2 to 4 cm off it. The medium
+    carrier's TQ holder moved out to the pocket's edge.
 
 ### Scavenging review fixes
 

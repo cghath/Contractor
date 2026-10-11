@@ -394,11 +394,12 @@ static func _shifted(parts: Array, dy: int) -> Array:
 
 ## 0.22 x 0.30 x 0.24 m including the neck. Pivot at the base of the neck. A boxy,
 ## bevelled Stormworks head with a flat face: eyes, brows, a nose, a mouth and ears, hair as
-## a cap.
+## a cap. The jaw is a 45-degree chamfer and the face above it is straight up: any other
+## slope steps unevenly at 0.5 cm and shows as bands across the chin.
 static func _head() -> Dictionary:
 	var boxes := [
 		_loft(11, 12, [[0, 4.5, 4.5], [8, 5.0, 5.0]], C.SKIN_SHADE, 0.8),  # neck
-		_loft(11, 12, [[5, 7.0, 8.0], [9, 9.8, 10.8], [13, 10.6, 11.6], [26, 11.0, 12.0], [30, 9.0, 10.0]], C.SKIN, 0.5),
+		_loft(11, 12, [[5, 8.0, 9.0], [8, 11.0, 12.0], [26, 11.0, 12.0], [30, 9.0, 10.0]], C.SKIN, 0.5),
 		_p(0, 26, 0, 22, 30, 24, C.HAIR),   # cap
 		_p(0, 11, 17, 22, 30, 24, C.HAIR),  # back
 		_p(0, 20, 10, 22, 30, 24, C.HAIR),  # above the ears
@@ -411,24 +412,29 @@ static func _head() -> Dictionary:
 	return {"size": Vector3i(22, 30, 24), "pivot": Vector3(11, 0, 12), "voxel": BODY_VOXEL, "sub": BODY_SUB, "boxes": boxes}
 
 
-## 0.38 x 0.66 x 0.22 m: the trunk from the crotch (0.10 m below the hip joints, where the
+## 0.52 x 0.66 x 0.22 m: the trunk from the crotch (0.10 m below the hip joints, where the
 ## legs show from on a real body) to the base of the neck 0.56 m above them. Pivot at the
-## hips. Narrower at the waist, broad at the chest, sloping shoulders; the belt at the waist.
+## hips. Narrower at the waist, broad at the chest; above the chest the deltoids flare out
+## at 45 degrees to 0.26 m, over the shoulder joints (CharacterModel.SHOULDER, 0.25 m out,
+## 0.52 m up), and the trapezius runs flat in to the neck. The upper arms' tops sit inside
+## the deltoids, so the arms hang out from under them and turn under them. The belt at the
+## waist.
 static func _torso() -> Dictionary:
 	var boxes := [
-		_loft(19, 11, [[0, 15.0, 9.5], [10, 16.0, 10.5], [22, 15.0, 10.0], [40, 18.0, 11.0], [56, 19.0, 11.0],
-			[62, 16.0, 9.0], [66, 10.0, 7.0]], C.CAMO, 0.45),
-		_p(0, 14, 0, 38, 20, 22, C.BELT),
-		_p(16, 14, 0, 22, 20, 3, C.METAL),
-		_p(13, 60, 0, 25, 66, 7, C.CAMO_C),  # collar
+		_loft(26, 11, [[0, 15.0, 9.5], [10, 16.0, 10.5], [22, 15.0, 10.0], [40, 18.0, 11.0], [53, 20.0, 11.0],
+			[58, 25.0, 10.5], [62, 26.0, 10.0], [64, 22.0, 8.5], [66, 10.0, 7.0]], C.CAMO, 0.45),
+		_p(0, 14, 0, 52, 20, 22, C.BELT),
+		_p(23, 14, 0, 29, 20, 3, C.METAL),
+		_p(20, 60, 0, 32, 66, 7, C.CAMO_C),  # collar
 	]
-	return {"size": Vector3i(38, 66, 22), "pivot": Vector3(19, 10, 11), "voxel": BODY_VOXEL, "sub": BODY_SUB, "boxes": boxes}
+	return {"size": Vector3i(52, 66, 22), "pivot": Vector3(26, 10, 11), "voxel": BODY_VOXEL, "sub": BODY_SUB, "boxes": boxes}
 
 
-## 0.12 x 0.32 x 0.12 m. Pivot at the shoulder; the elbow is at the bottom.
+## 0.12 x 0.32 x 0.12 m. Pivot at the shoulder; the elbow is at the bottom. It tapers into
+## the torso's deltoid at the top, so no square cap shows above the shoulder line.
 static func _upper_arm() -> Dictionary:
 	var boxes := [
-		_loft(6, 6, [[0, 4.5, 4.5], [27, 5.6, 5.4], [32, 4.6, 4.6]], C.CAMO, 0.6),
+		_loft(6, 6, [[0, 4.5, 4.5], [22, 5.6, 5.4], [28, 5.4, 5.2], [32, 3.6, 3.6]], C.CAMO, 0.6),
 		_p(0, 14, 2, 2, 26, 10, C.PATCH), _p(10, 14, 2, 12, 26, 10, C.PATCH),
 	]
 	return {"size": Vector3i(12, 32, 12), "pivot": Vector3(6, 32, 6), "voxel": BODY_VOXEL, "sub": BODY_SUB, "boxes": boxes}
