@@ -278,7 +278,7 @@ func _test_edits() -> void:
 func _test_shot_in_module() -> void:
 	print("Shooting soldiers in modules")
 	var m := await _go_to_module("village_e", Vector3(-14, 0, 30))
-	var victim := level.spawn_soldier({"name": "ShackMan", "faction": "hostile", "variant": "urban", "pos": m.to_global(Vector3(-12.5, 0.1, 9.0)),
+	var victim := level.spawn_soldier({"name": "ShackMan", "person_name": "ShackMan", "faction": "hostile", "variant": "urban", "pos": m.to_global(Vector3(-12.5, 0.1, 9.0)),
 		"loadout": [], "combat": 0.5, "discipline": 0.5, "guard": true})
 	SquadAI.of(victim).process_mode = Node.PROCESS_MODE_DISABLED
 	await get_tree().create_timer(0.3).timeout

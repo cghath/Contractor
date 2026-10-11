@@ -219,6 +219,10 @@ func _test_briefing_and_markers() -> void:
 	check(hq > 0 and line > 0 and markers.markers[line].points.size() == 3, "the host places a marker and draws a line")
 	check(markers.server_add({"kind": "line", "points": PackedVector2Array([Vector2(1, 1)])}) == 0 and markers.server_add({"kind": "blob", "points": PackedVector2Array([Vector2(1, 1)])}) == 0,
 		"a one-point line or an unknown kind is refused")
+	# No live hostiles while the clients stand about in the open: this part is about the map, and
+	# an unarmoured client shot down here leaves a body that the extraction report then counts.
+	_remove_hostiles()
+	await _frames(2)
 	# Client A joins during the briefing.
 	_spawn_client("A")
 	var a1 := await _wait_report("a1")

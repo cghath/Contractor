@@ -640,6 +640,7 @@ func _test_deployment(client: Dictionary) -> void:
 	# A picks up a frag; C is killed; B wanders off; the rest extract by the player.
 	var frags := sa.inventory.count_of(&"frag_grenade") + sa.inventory.take(&"frag_grenade", 1)
 	var sc := _roster_soldier(c)
+	var label_c := sc.display_name()  # the body is labelled with the name on the tape
 	sc.vitals.server_kill()
 	await _frames(2)
 	var sb := _roster_soldier(b)
@@ -656,7 +657,7 @@ func _test_deployment(client: Dictionary) -> void:
 	var zone_save: Variant = JSON.parse_string(FileAccess.get_file_as_string("%s/%s.json" % [GameState.SAVE_DIR, BaseHub.zone_save_id(ZONE + tag)]))
 	var zone_bodies: Array = zone_save.get("bodies", []) if zone_save is Dictionary else []
 	check(String(BaseHub.member(c).status) == Roster.DEAD and (BaseHub.member(c).gear as Dictionary).is_empty()
-		and zone_bodies.any(func(r: Dictionary) -> bool: return String(r.get("label", "")) == callsign_c and not (r.get("gear", {}) as Dictionary).is_empty()),
+		and zone_bodies.any(func(r: Dictionary) -> bool: return String(r.get("label", "")) == label_c and not (r.get("gear", {}) as Dictionary).is_empty()),
 		"the dead one is lost, gear and all on the body saved in the zone")
 	check(int(BaseHub.member(a).wage) > wage_a and int(BaseHub.member(a).missions) >= 1, "the one who came back earns more ($%d -> $%d)" % [wage_a, int(BaseHub.member(a).wage)])
 	check(BaseHub.day() == day + 1, "a day passed")

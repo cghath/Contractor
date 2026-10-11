@@ -75,6 +75,10 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 - **Net test:** the remote treatment check waits up to 1 s for the treat animation to
   replicate (action_net comes on its own sync, after the vitals), instead of checking in the
   same frame. It failed now and then under load.
+- **Tests after the dev merge:** the people, base and world suites looked soldiers up by
+  callsign where the game now shows the name on the tape (`display_name()`); they pass that
+  name in or read it. The map suite clears the compound's hostiles before its clients join:
+  an unarmoured client shot down while standing about left a body the extraction report counted.
 
 ### Stormworks-style character models (Captain, 2026-10-11)
 
