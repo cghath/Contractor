@@ -112,6 +112,8 @@ func _test_inventory_actions() -> void:
 func _test_bad_input() -> void:
 	print("Bad coordinates from a client")
 	await _seconds(1.0)  # past any throw or reload still keeping the hands busy
+	player.vitals.server_reset_health()  # the grenade tests may have knocked us down
+	await _frames(2)
 	player.inventory.strip()  # a clean kit: a loaded rifle, so a refused shot is a real refusal
 	player.inventory.take(&"m4a1")
 	player.inventory.take(&"mag_556", 2)
@@ -132,7 +134,7 @@ func _test_bad_input() -> void:
 	await _seconds(0.3)
 	player._server_fire.rpc_id(1, eye, -player.global_basis.z, &"primary")
 	await _frames(3)
-	check(player.inventory.rounds_in(&"primary") == rounds - 1, "while a normal shot right after still fires (%d rounds)" % player.inventory.rounds_in(&"primary"))
+	check(player.inventory.rounds_in(&"primary") == rounds - 1, "while a normal shot right after still fires (%d rounds; up %s, hands '%s')" % [player.inventory.rounds_in(&"primary"), player.vitals.is_up(), player.inventory.hands])
 	await _seconds(4.0)  # past a smoke grenade's fuse
 	check(SmokeCloud.active.size() == clouds, "and no smoke goes off from them")
 
