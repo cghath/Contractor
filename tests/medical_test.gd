@@ -677,12 +677,59 @@ func _test_surgery_and_damage() -> void:
 		b.add_blast(0.0, WoundModel.BLAST_RADIUS)
 		if b.blast_lung:
 			lungs += 1
-	check(absf(lungs / 400.0 - WoundModel.BLAST_LUNG_CHANCE) < 0.05, "blast lung %.0f%% of the time at the centre" % (lungs / 4.0))
+	check(absf(lungs / 400.0 - WoundModel.BLAST_LUNG_CHANCE) < 0.06, "blast lung %.0f%% of the time at the centre" % (lungs / 4.0))
+	var outside := 0
+	for i in 200:
+		var b := _model(5500 + i)
+		b.add_blast(WoundModel.BLAST_LUNG_RADIUS + 0.2, WoundModel.BLAST_RADIUS)
+		if b.blast_lung:
+			outside += 1
+	check(outside == 0, "never past %.0f m outdoors" % WoundModel.BLAST_LUNG_RADIUS)
 	var lung := _model()
 	lung.npa = true
 	lung.blast_lung = true
 	_step(lung, 300.0)
-	check(lung.lung_efficiency() < 0.6 and lung.spo2 < 90.0, "blast lung fills both lungs slowly (%.2f, SpO2 %.0f%%)" % [lung.lung_efficiency(), lung.spo2])
+	var rested := lung.spo2
+	_step(lung, 1800.0)
+	check(lung.stamina_mult() < 1.0 and rested < WoundModel.SPO2_NORMAL - 2.0 and absf(lung.spo2 - rested) < 0.5 and lung.spo2 > WoundModel.SPO2_LABOURED - 4.0
+		and not lung.unconscious, "blast lung: short of breath (SpO2 %.0f%%), then it holds steady at rest for half an hour" % lung.spo2)
+	var pushed := _model(8)
+	pushed.npa = true
+	pushed.blast_lung = true
+	_step(pushed, 300.0)
+	for i in 8:
+		pushed.exert()
+		if pushed.has_tension():  # a lung gave way: the medic needles it at once
+			pushed.apply_item(WoundModel.NEEDLE, &"chest")
+		_step(pushed, 15.0)
+	check(pushed.spo2 < rested - 1.0, "sprinting and heavy loads make it worse (SpO2 %.0f%% against %.0f%% resting)" % [pushed.spo2, rested])
+	_step(pushed, WoundModel.BLAST_LUNG_RECOVER_S + 600.0)
+	check(absf(pushed.spo2 - rested) < 1.0 and not pushed.dead, "and rest brings it back to the steady level (%.0f%%)" % pushed.spo2)
+	var drowned := _model()
+	drowned.npa = true
+	drowned.blast_lung = true
+	drowned.blood = 0.98  # a little lost: the bag goes up, then runs on past full
+	drowned.apply_item(WoundModel.IO_KIT, WoundModel.IO_PART)
+	drowned.apply_item(&"saline_1000", WoundModel.IO_PART)
+	_step(drowned, 600.0)
+	check(drowned.blast_strain > 0.1 and drowned.spo2 < rested - 1.0, "fluid the body doesn't need goes into the lungs (SpO2 %.0f%%)" % drowned.spo2)
+	var collapsed := 0
+	for i in 400:
+		var c := _model(9000 + i)
+		c.blast_lung = true
+		if c.exert() > 0 and c.has_tension():
+			collapsed += 1
+	check(absf(collapsed / 400.0 - WoundModel.BLAST_PNEUMO_CHANCE) < 0.03, "exertion collapses a lung %.1f%% of the time" % (collapsed / 4.0))
+	var popped := _model()
+	popped.blast_lung = true
+	popped.care_rng.seed = 1
+	while popped.exert() == 0:
+		pass
+	check(popped.has_tension() and popped.care_tasks().any(func(t: Dictionary) -> bool: return t.kind == "tension")
+		and not popped.care_tasks().any(func(t: Dictionary) -> bool: return t.kind == "chest"), "a closed tension pneumothorax: the needle, nothing to seal")
+	popped.apply_item(WoundModel.NEEDLE, &"chest")
+	_step(popped, WoundModel.TENSION_ARREST_S + 30.0)
+	check(not popped.has_tension() and not popped.arrest, "and the needle fixes it")
 	var low := _model()
 	low.add_fall(2.5)
 	check(low.wounds.is_empty() and low.pain() == 0.0, "a fall under 3 m: nothing")

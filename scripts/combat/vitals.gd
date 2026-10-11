@@ -448,7 +448,7 @@ func wound_list() -> Array[Dictionary]:
 			"treated": w.treated, "rate": w.rate, "name": w.name,
 			"limb": w.part if WoundModel.LIMB_BELOW.has(w.part) else &"",
 			"tourniquet": m.tourniquet_factor(w.part) < 1.0, "packed": w.get("packed", false), "tension": w.get("tension", false),
-			"clamped": w.get("clamped", false), "closed": w.get("closed", false)})
+			"clamped": w.get("clamped", false), "closed": w.get("closed", false), "pneumo": w.get("pneumo", false)})
 	return list
 
 

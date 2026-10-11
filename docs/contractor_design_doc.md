@@ -228,7 +228,7 @@ That gives morphine and epinephrine a real cost: too much of either pushes the h
 | Source | Effect | Treatment |
 | --- | --- | --- |
 | Fragments (grenades, shells, IEDs) | 3 to 8 small wounds across the body, sometimes one arterial or chest wound | Same items as bullets; the work is the number of wounds |
-| Overpressure (about 5 m from a frag, doubled indoors or against a wall) | Ringing ears and muffled audio for 20 to 60 s, a concussion check, a small chance of blast lung | Time; blast lung acts like a slow chest injury and needs evacuation |
+| Overpressure (about 5 m from a frag, doubled indoors or against a wall) | Ringing ears and muffled audio for 20 to 60 s, a concussion check; within about 3 m (6 m indoors) a chance of blast lung, toned down (Captain, 2026-10-11): it takes some SpO2 and stamina and then holds steady while the casualty rests, worsens with sprinting, heavy loads or more IV fluid than the body needs, and can collapse a lung | Time and rest; the decompression needle for a collapsed lung. Never a death timer you can't answer |
 | Thrown by a big charge, or a fall | No damage under about 3 m; 3 to 6 m gives leg pain and a 30 to 70% fracture chance; above about 10 m likely fatal | As fractures |
 | Concussion (helmet stops a round, with a chance by round class from Impact damage below, or a blast in range) | Possible knockout for 5 to 20 s, then 60 s of blur, sway and slow turning; a second one in the same fight lasts twice as long | Nothing in the field; it has to pass |
 | Unprotected head hit past the helmet | Fatal | None |

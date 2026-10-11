@@ -597,9 +597,10 @@ func _server_fell(height: float) -> void:
 
 
 ## Owner side (SoldierMovement): started to sprint, jumped, or set off under an extreme load.
-## Only matters (and is only sent) while a chest wound is closed by surgery: it may reopen.
+## Only matters (and is only sent) while a chest wound is closed by surgery (it may reopen)
+## or with blast lung (it strains, and a lung may give way).
 func report_exertion() -> void:
-	if not vitals.has_closed_chest():
+	if not vitals.has_closed_chest() and not vitals.has_blast_lung():
 		return
 	if multiplayer.is_server():
 		vitals.server_exert()

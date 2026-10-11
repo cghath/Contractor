@@ -230,7 +230,7 @@ static func part_report(target: Node, region: StringName, actor: Soldier = null)
 	var lines := PackedStringArray()
 	for wound in vitals.wound_list():
 		if region_of(wound.part) == region:
-			lines.append("%s: %s%s" % [part_name(wound.part), KIND_TEXT.get(wound.kind, "wound"), _wound_status(wound)])
+			lines.append("%s: %s%s" % [part_name(wound.part), _kind_text(wound), _wound_status(wound)])
 	var tourniquets := vitals.tourniquets()
 	for part: StringName in tourniquets:
 		if region_of(part) == region:
@@ -483,7 +483,7 @@ static func wound_report(vitals: Vitals, on_self := true, oximeter := false) -> 
 		signs.insert(0, "Pulse oximeter: %s" % reading)
 	var lines := PackedStringArray()
 	for wound in vitals.wound_list():
-		lines.append("%s: %s%s" % [part_name(wound.get("part", &"")), KIND_TEXT.get(wound.get("kind", ""), "wound"), _wound_status(wound)])
+		lines.append("%s: %s%s" % [part_name(wound.get("part", &"")), _kind_text(wound), _wound_status(wound)])
 	var tourniquets := vitals.tourniquets()
 	for part: StringName in tourniquets:
 		var t: Dictionary = tourniquets[part]
@@ -500,11 +500,20 @@ static func wound_report(vitals: Vitals, on_self := true, oximeter := false) -> 
 	return "\n".join(signs)
 
 
+## One wound_list() entry's kind in words (a lung that blast lung collapsed is no open wound).
+static func _kind_text(wound: Dictionary) -> String:
+	if wound.get("pneumo", false):
+		return "collapsed lung"
+	return KIND_TEXT.get(String(wound.get("kind", "")), "wound")
+
+
 ## What's been done for one wound_list() entry, and whether it still bleeds.
 static func _wound_status(wound: Dictionary) -> String:
 	var done := PackedStringArray()
 	var kind := String(wound.get("kind", ""))
-	if wound.get("clamped", false):
+	if wound.get("pneumo", false):
+		pass  # nothing to seal: the needle is its fix
+	elif wound.get("clamped", false):
 		done.append("clamped")
 	elif wound.get("closed", false):
 		done.append("closed by surgery")

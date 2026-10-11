@@ -41,9 +41,13 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   to reopen each time the casualty sprints, jumps or sets off under an extreme load, which
   brings back the open wound and its tension risk.
 - **Blast overpressure** within 5 m of a frag (10 m indoors): ears ringing for 20 to 60 s,
-  a concussion check, some bruising and a small chance of **blast lung**. Blast lung slowly
-  fills both lungs and has no field fix: it needs evacuation. Within 2 m the blast also
-  burns.
+  a concussion check, and some bruising. Within 3 m (6 m indoors) there's a chance of
+  **blast lung** (toned down on Captain's call, 2026-10-11, so it's never a death timer you
+  can't answer). It takes some SpO2 and stamina, then holds steady while the casualty
+  rests. Sprinting, jumping, an extreme load or IV fluid the body doesn't need make it
+  worse, and the strain eases off over about 20 minutes of rest. Exertion can also
+  collapse a lung, a closed tension pneumothorax that the decompression needle fixes.
+  Within 2 m the blast also burns.
 - **Falls:** nothing under 3 m. From 3 to 6 m, leg pain and a 30 to 70% chance of a broken
   leg. Above 6 m the fall is more and more likely to be fatal (90% from 10 m).
 - **Burns:** pain by the share of the body burned. Over 20% they also lose fluid like

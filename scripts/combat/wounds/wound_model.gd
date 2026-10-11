@@ -338,15 +338,30 @@ const CHEST_REOPEN_CHANCE := 0.1
 
 ## --- Other damage (design doc "Other damage"; proposed values) ---
 ## Overpressure from a blast within BLAST_RADIUS (doubled indoors): deafness for 20 to 60 s by
-## closeness, a concussion check (BLAST_CONCUSSION_CHANCE at the centre) and a small chance of
-## blast lung, which slowly fills both lungs (BLAST_LUNG_FLUID_PER_S up to BLAST_LUNG_MAX) and
-## has no field fix. Close blasts (within BURN_RADIUS) also burn.
+## closeness, a concussion check (BLAST_CONCUSSION_CHANCE at the centre) and, within
+## BLAST_LUNG_RADIUS (doubled indoors too), a chance of blast lung. Close blasts (within
+## BURN_RADIUS) also burn.
 const BLAST_RADIUS := 5.0
 const BLAST_DEAF_S := Vector2(20.0, 60.0)
 const BLAST_CONCUSSION_CHANCE := 0.5
-const BLAST_LUNG_CHANCE := 0.15
+## Blast lung (Captain, 2026-10-11: "tone it down"; never a death timer you can't answer):
+## both lungs fill with fluid toward BLAST_LUNG_REST (some SpO2 off, BLAST_LUNG_STAMINA of the
+## stamina), and there it stays while the casualty rests. Strain makes it worse: each exertion
+## (sprint, jump, extreme load: exert) adds BLAST_LUNG_EXERT, and fluid run into blood that's
+## already full (BLAST_LUNG_FULL_BLOOD) adds BLAST_LUNG_OVERFILL per litre; strain fades over
+## BLAST_LUNG_RECOVER_S of rest. Each exertion may also collapse a lung (BLAST_PNEUMO_CHANCE):
+## a tension pneumothorax the decompression needle fixes.
+const BLAST_LUNG_RADIUS := 3.0
+const BLAST_LUNG_CHANCE := 0.3
+const BLAST_LUNG_REST := 0.15
+const BLAST_LUNG_MAX := 0.6
 const BLAST_LUNG_FLUID_PER_S := 0.002
-const BLAST_LUNG_MAX := 0.5
+const BLAST_LUNG_STAMINA := 0.7
+const BLAST_LUNG_EXERT := 0.05
+const BLAST_LUNG_OVERFILL := 0.5
+const BLAST_LUNG_FULL_BLOOD := 0.97
+const BLAST_LUNG_RECOVER_S := 1200.0
+const BLAST_PNEUMO_CHANCE := 0.05
 const BLAST_IMPACT := 0.25
 const BURN_RADIUS := 2.0
 const BLAST_BURN := Vector2(0.05, 0.25)    # share of the body burned at the edge / the centre
@@ -476,8 +491,11 @@ var _hr_danger_s := 0.0         # time spent racing or too slow (host only)
 ## Hearing muffled (seconds left), and the indoor gunfire noise level building toward it.
 var deaf_left := 0.0
 var noise := 0.0
-## Blast lung: both lungs slowly fill (see BLAST_LUNG_CHANCE).
+## Blast lung, and the strain that makes it worse (see BLAST_LUNG_REST).
 var blast_lung := false
+var blast_strain := 0.0
+## Fluid blast lung puts in both lungs (on top of their own lung_fluid), 0 to BLAST_LUNG_MAX.
+var blast_fluid := 0.0
 ## Share of the body burned (0 to 1), and burn dressings on.
 var burn := 0.0
 var burn_dressings := 0
@@ -657,7 +675,7 @@ func _tension_on(lung: StringName) -> bool:
 ## TENSION_SHIFT while the other side is under tension.
 func lung_efficiency_of(lung: StringName) -> float:
 	var other: StringName = LUNGS[1] if lung == LUNGS[0] else LUNGS[0]
-	var eff := 1.0 - float(lung_collapse[lung]) - float(lung_fluid[lung])
+	var eff := 1.0 - float(lung_collapse[lung]) - float(lung_fluid[lung]) - blast_fluid
 	if _tension_on(other):
 		eff -= TENSION_SHIFT
 	return clampf(eff, 0.0, 1.0)
@@ -794,6 +812,8 @@ func stamina_mult() -> float:
 	var stamina := 1.0 - BLOOD_STAMINA * shock()
 	if has_kind("rib"):
 		stamina *= RIB_STAMINA
+	if blast_lung:
+		stamina *= BLAST_LUNG_STAMINA
 	return stamina
 
 
@@ -1168,7 +1188,8 @@ func _clamp_target(part: StringName) -> Dictionary:
 
 ## Host only. The casualty exerted themselves (sprinted, jumped, moved under an extreme
 ## load): each chest wound closed with a clamp reopens with CHEST_REOPEN_CHANCE, open again
-## with its tension risk. Returns how many reopened.
+## with its tension risk; blast lung strains (BLAST_LUNG_EXERT) and may collapse a lung
+## (BLAST_PNEUMO_CHANCE). Returns how many chest wounds reopened or lungs collapsed.
 func exert() -> int:
 	var reopened := 0
 	for w in wounds:
@@ -1177,6 +1198,18 @@ func exert() -> int:
 			w.closed = false
 			if rng.randf() < TENSION_CHANCE:
 				w.tension_in = rng.randf_range(TENSION_DELAY_S.x, TENSION_DELAY_S.y)
+			reopened += 1
+	if blast_lung and not dead:
+		blast_strain = minf(blast_strain + BLAST_LUNG_EXERT, BLAST_LUNG_MAX - BLAST_LUNG_REST)
+		var lung: StringName = LUNGS[care_rng.randi() % LUNGS.size()]
+		if care_rng.randf() < BLAST_PNEUMO_CHANCE and not _tension_on(lung):
+			# A lung gives way: a closed tension pneumothorax (no wound to seal; the needle fixes it).
+			var w := _add_wound(&"chest", "chest", 0.0, lung)
+			w.treated = true
+			w.pneumo = true
+			w.tension = true
+			w.arrest_in = TENSION_ARREST_S
+			lung_collapse[lung] = 1.0
 			reopened += 1
 	if reopened > 0:
 		update_state(0.0)
@@ -1194,7 +1227,8 @@ func add_blast(distance: float, radius: float, ear_pro := false) -> void:
 	impact = minf(impact + BLAST_IMPACT * closeness, 1.0)
 	if rng.randf() < BLAST_CONCUSSION_CHANCE * closeness:
 		_concuss()
-	if rng.randf() < BLAST_LUNG_CHANCE * closeness:
+	var lung_reach := BLAST_LUNG_RADIUS * radius / BLAST_RADIUS  # doubled indoors with the rest
+	if distance < lung_reach and rng.randf() < BLAST_LUNG_CHANCE * (1.0 - distance / lung_reach):
 		blast_lung = true
 	if distance < BURN_RADIUS:
 		burn = minf(burn + lerpf(BLAST_BURN.x, BLAST_BURN.y, 1.0 - distance / BURN_RADIUS), 1.0)
@@ -1446,6 +1480,8 @@ func reset() -> void:
 	deaf_left = 0.0
 	noise = 0.0
 	blast_lung = false
+	blast_strain = 0.0
+	blast_fluid = 0.0
 	burn = 0.0
 	burn_dressings = 0
 	still_s = 0.0
@@ -1478,6 +1514,8 @@ func advance(dt: float) -> void:
 	if not infusion.is_empty():  # the only way blood comes back
 		var ml := minf(float(infusion.left), infusion_rate() * dt)
 		infusion.left = float(infusion.left) - ml
+		if blast_lung and blood >= BLAST_LUNG_FULL_BLOOD:  # more fluid than the body needs: into the lungs
+			blast_strain = minf(blast_strain + BLAST_LUNG_OVERFILL * ml / 1000.0, BLAST_LUNG_MAX - BLAST_LUNG_REST)
 		blood = minf(blood + ml / 1000.0 / BLOOD_L, 1.0)
 		if float(infusion.left) <= 0.001:
 			infusion = {}
@@ -1507,9 +1545,9 @@ func advance(dt: float) -> void:
 			kill()  # no heart rate when the window ran out
 			return
 	_update_airway(dt)
-	if blast_lung:  # no field fix: both lungs slowly fill
-		for lung in LUNGS:
-			lung_fluid[lung] = minf(float(lung_fluid[lung]) + BLAST_LUNG_FLUID_PER_S * dt, maxf(float(lung_fluid[lung]), BLAST_LUNG_MAX))
+	if blast_lung:  # fills toward the resting level plus the strain; rest eases the strain off
+		blast_strain = move_toward(blast_strain, 0.0, (BLAST_LUNG_MAX - BLAST_LUNG_REST) / BLAST_LUNG_RECOVER_S * dt)
+		blast_fluid = move_toward(blast_fluid, BLAST_LUNG_REST + blast_strain, BLAST_LUNG_FLUID_PER_S * dt)
 	_advance_lungs(dt)
 	_advance_spo2(dt)
 	_advance_trauma(dt)
@@ -1558,7 +1596,7 @@ func to_net() -> Dictionary:
 	var list: Array = []
 	for w in wounds:
 		var wound_flags := (1 if w.get("packed", false) else 0) | (2 if w.get("tension", false) else 0) \
-			| (4 if w.get("clamped", false) else 0) | (8 if w.get("closed", false) else 0)
+			| (4 if w.get("clamped", false) else 0) | (8 if w.get("closed", false) else 0) | (16 if w.get("pneumo", false) else 0)
 		list.append([String(w.part), w.kind, snappedf(float(w.rate), 0.001), 1 if w.treated else 0, String(w.name), wound_flags])
 	var flags := (1 if unconscious else 0) | (2 if arrest else 0) | (4 if dead else 0) | (16 if npa else 0) | (32 if airway_blocked else 0) \
 		| (64 if wake_left > 0.0 else 0) | (128 if _pain_over_s >= PAIN_KNOCKOUT_S - 0.001 else 0) \
@@ -1577,7 +1615,7 @@ func to_net() -> Dictionary:
 		"v": [] if infusion.is_empty() else [String(infusion.item), int(infusion.ml), snappedf(float(infusion.left), 1.0)],
 		"l": [snappedf(float(lung_collapse[LUNGS[0]]), 0.01), snappedf(float(lung_fluid[LUNGS[0]]), 0.01),
 			snappedf(float(lung_collapse[LUNGS[1]]), 0.01), snappedf(float(lung_fluid[LUNGS[1]]), 0.01)],
-		"h": snappedf(heart_rate, 1.0), "g": _drugs_net(), "u": [snappedf(burn, 0.01), burn_dressings]}
+		"h": snappedf(heart_rate, 1.0), "g": _drugs_net(), "u": [snappedf(burn, 0.01), burn_dressings, snappedf(blast_fluid, 0.01)]}
 
 
 func _drugs_net() -> Dictionary:
@@ -1624,12 +1662,13 @@ func apply_net(state: Dictionary) -> void:
 	var burns: Array = state.get("u", [0.0, 0])
 	burn = float(burns[0])
 	burn_dressings = int(burns[1])
+	blast_fluid = float(burns[2]) if burns.size() > 2 else 0.0
 	wounds.clear()
 	for entry: Array in state.get("w", []):
 		var wound_flags := int(entry[5]) if entry.size() > 5 else 0
 		wounds.append({"part": StringName(entry[0]), "kind": String(entry[1]), "rate": float(entry[2]),
 			"treated": int(entry[3]) != 0, "name": StringName(entry[4]), "packed": wound_flags & 1 != 0,
-			"tension": wound_flags & 2 != 0, "clamped": wound_flags & 4 != 0, "closed": wound_flags & 8 != 0,
+			"tension": wound_flags & 2 != 0, "clamped": wound_flags & 4 != 0, "closed": wound_flags & 8 != 0, "pneumo": wound_flags & 16 != 0,
 			"tension_in": -1.0, "arrest_in": -1.0})
 	tourniquets.clear()
 	var tq: Dictionary = state.get("q", {})
