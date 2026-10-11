@@ -87,6 +87,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		return  # downed: no giving up (handoff); you come round on your own, or the arrest window runs out
 	elif interaction.is_open() and event is InputEventMouseButton:
 		return  # clicks don't fire through the interaction menu
+	elif event.is_action_pressed(&"grenade") and body.carry_mode != &"":
+		# Hands full with a casualty: G lets go of them (Release / Put down) instead of throwing.
+		body._server_release_body.rpc_id(1)
+		flash("Let go" if body.carry_mode == Soldier.DRAG else "Put down")
 	elif event.is_action_pressed(&"grenade"):
 		# G throws, Shift+G switches grenade type, Alt+G drops what you're holding.
 		if event is InputEventKey and event.alt_pressed:

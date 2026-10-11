@@ -114,7 +114,7 @@ include Voxel Tools.
 | Left Ctrl + Left Alt (hold) | Self-interaction: the same body points on yourself (check and treat each part), and at the waist: check wounds, put down a carried body, drop held item |
 | R | Reload (fullest spare magazine; a part-used one goes back in your pouch) |
 | H | Treat yourself: applies the next item you carry for your most urgent wound (tourniquet before bandage, and so on) |
-| G | Throw the selected grenade (frag, flashbang or smoke) |
+| G | Throw the selected grenade (frag, flashbang or smoke). Carrying or dragging a body: let go of it |
 | Shift+G | Switch grenade type |
 | Alt+G | Drop carried bulky item, otherwise drop active weapon |
 | 1 / 2 | Primary / sidearm |

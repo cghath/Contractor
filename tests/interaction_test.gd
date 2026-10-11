@@ -233,10 +233,35 @@ func _test_carry_and_drag() -> void:
 	check(is_equal_approx(player.view_yaw(), PI), "dragging, the view faces the casualty behind the body")
 	check(_ids(player, alpha).has(&"put_down") and _action(player, alpha, &"put_down").get("label") == "Release",
 		"looking at the body you drag offers Release (%s)" % [_ids(player, alpha)])
+	player.head.rotation.x = -0.6  # looking down at the casualty you're dragging
+	await _frames(2)
+	var dragged := InteractionMenu.collect_points(player, player.camera).filter(func(p: Dictionary) -> bool: return p.target == alpha)
+	player.head.rotation.x = 0.0
+	check(dragged.size() == 1 and dragged[0].get("region", &"") == &"" and dragged[0].actions[0].id == &"put_down" and dragged[0].actions[0].label == "Release",
+		"Left Ctrl on the body you drag: one point, Release first (%s)" % [dragged.map(func(p: Dictionary) -> Array: return p.actions.map(func(a: Dictionary) -> String: return a.label))])
+	check(InteractionMenu.general_actions(player, player).any(func(a: Dictionary) -> bool: return a.id == &"put_down" and a.label == "Release"),
+		"and on yourself (Left Ctrl + Left Alt), Release at the waist")
 	InteractionMenu.perform(player, _action(player, player, &"put_down"))
 	check(player.carrying == null and player.carry_mode == &"" and is_equal_approx(player.carry_speed_mult(), 1.0), "Let go releases it and your speed")
 	check(alpha.carried_by == null and alpha.collision_layer == Soldier.BODY_LAYER and alpha.care_by == null, "the body collides again")
 	check(alpha.global_position.distance_to(player.global_position) > 0.8, "and stays where you dragged it")
+	# G lets go too, dragging or carrying (your hands are full: nothing to throw).
+	for mode: StringName in [Soldier.DRAG, Soldier.CARRY]:
+		_place_player()
+		alpha.global_position = SPOT + Vector3(0, 0, -1.2)
+		await _frames(2)
+		if mode == Soldier.DRAG:
+			player._server_drag_body.rpc_id(1, alpha.get_path())
+		else:
+			player._server_carry_body.rpc_id(1, alpha.get_path())
+		var held := player.carry_mode == mode
+		var g := InputEventAction.new()
+		g.action = &"grenade"
+		g.pressed = true
+		player.player_input._unhandled_input(g)
+		await _frames(2)
+		check(held and player.carrying == null and player.carry_mode == &"" and alpha.carried_by == null,
+			"G lets go of a body you're %s" % ("dragging" if mode == Soldier.DRAG else "carrying"))
 
 	_place_player()
 	alpha.global_position = SPOT + Vector3(0, 0, -1.5)

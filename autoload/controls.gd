@@ -19,7 +19,7 @@ const KEYS := {
 	&"fire_mode": [KEY_F],
 	&"reload": [KEY_R],
 	&"use_medical": [KEY_H],
-	&"grenade": [KEY_G],  # throw; Shift+G switches type, Alt+G drops
+	&"grenade": [KEY_G],  # throw; Shift+G switches type, Alt+G drops; carrying or dragging a body, lets go
 	&"inventory": [KEY_TAB],
 	&"weapon_primary": [KEY_1],
 	&"weapon_sidearm": [KEY_2],

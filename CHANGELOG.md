@@ -11,6 +11,15 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Captain's wave 3 playtest fix: letting go of a body
+
+#### Fixed
+
+- **No way to release a body you were dragging** (it only showed on self-interaction):
+  Left Ctrl on the body you're dragging or carrying now shows its point with Release (or
+  Put down) first, and **G** lets go of it too, since your hands are full and there's
+  nothing to throw. Release also stays on your own waist point (Left Ctrl + Left Alt).
+
 ### Wave 3, part 6: medical technique animations
 
 #### Added
