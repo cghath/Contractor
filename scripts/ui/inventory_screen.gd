@@ -610,7 +610,7 @@ func _actions_for(src: Dictionary) -> Array:
 			if Inventory.is_loose_rounds(item) and inv.loadable_rounds(item.id) > 0:
 				out.append(["Load magazines", load_magazines.bind(item.id)])
 			for other in inv.search_containers():
-				if other != c and inv.room_for(other, item) > 0:
+				if other != c and inv.room_for(other, item, list[i].get("state", {})) > 0:
 					out.append(["> " + player.container_name(other), _action.bind("move_entry", c, i, &"", other)])
 			out.append(["Drop", _action.bind("drop_entry", c, i, &"", &"")])
 		"slot":

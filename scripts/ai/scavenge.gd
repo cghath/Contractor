@@ -59,6 +59,7 @@ static func needs(s: Soldier) -> Dictionary:
 	var inv := s.inventory
 	var kit := _basic_kit(s)
 	var out := {}
+	var med := {}  # medical item id -> basic load, summed over every kit source
 	for slot: StringName in Inventory.WEAPON_SLOTS:
 		var weapon_id: StringName = inv.slots[slot]
 		if weapon_id == &"":
@@ -80,18 +81,22 @@ static func needs(s: Soldier) -> Dictionary:
 			continue
 		if Inventory.is_kit(item):
 			# What a kit holds counts item by item: a soldier whose IFAK is used up wants its
-			# contents, whether they come loose or in another kit.
+			# contents, whether they come loose or in another kit. Summed with the loose ones
+			# (a TQ in the holder plus one in the IFAK is a basic load of 2), since
+			# medical_count counts both.
 			var contents := Inventory.kit_contents(item, {})
 			for inside: String in contents:
-				_add_med(out, inv, StringName(inside), int(contents[inside]) * int(kit[id]))
+				med[StringName(inside)] = int(med.get(StringName(inside), 0)) + int(contents[inside]) * int(kit[id])
 		elif item.type == "medical":
-			_add_med(out, inv, id, int(kit[id]))
+			med[id] = int(med.get(id, 0)) + int(kit[id])
 		elif item.stats.has("throwable"):
 			var have_g := inv.count_of(id)
 			if have_g < int(kit[id]):
 				_add(out, id, "grenade", int(kit[id]) - have_g, float(int(kit[id]) - have_g) / int(kit[id]), W_GRENADE)
 		elif item.type in ["utility", "medical"] and not Inventory.is_attachable(item) and inv.count_of(id) < int(kit[id]):
 			_add(out, id, "other", int(kit[id]) - inv.count_of(id), 1.0, W_OTHER)
+	for id: StringName in med:
+		_add_med(out, inv, id, int(med[id]))
 	return out
 
 
@@ -232,6 +237,8 @@ static func _weapon_pick(s: Soldier, dead: Soldier) -> Dictionary:
 	var mine: StringName = s.inventory.slots[&"primary"]
 	if mine != &"" and _rounds_for(s.inventory, &"primary") > 0:
 		return {}
+	if mine != &"" and dead.inventory.spare_rounds(StringName(ItemDB.get_item(mine).stats.get("ammo", ""))) > 0:
+		return {}  # his own rifle takes the body's magazines: those come instead (a dry M4 and an MK18)
 	if _rounds_for(dead.inventory, &"primary") <= 0:
 		return {}
 	return {"kind": "weapon", "id": theirs, "where": &"primary", "index": -1, "into": &"primary", "count": 1,
@@ -330,6 +337,7 @@ static func _swap(s: Soldier, dead: Soldier, pick: Dictionary) -> bool:
 	var mine := s.inventory
 	var before_theirs := theirs.net_state.duplicate(true)
 	var before_mine := mine.net_state.duplicate(true)
+	var slot_before := s.active_slot
 	var taken := {}
 	if int(pick.index) < 0:
 		if theirs.slots.get(pick.where, &"") != pick.id:
@@ -347,5 +355,11 @@ static func _swap(s: Soldier, dead: Soldier, pick: Dictionary) -> bool:
 			or (not old.is_empty() and theirs.take(old.id, 1, old.get("state", {})) != 1):
 		theirs.net_state = before_theirs
 		mine.net_state = before_mine
+		if s.active_slot != slot_before:
+			s.select_weapon(slot_before)
 		return false
+	# Unequipping his own rifle switched him to the sidearm; the AI never selects a weapon
+	# itself, so bring up the one he just took.
+	if pick.into in Inventory.WEAPON_SLOTS and s.active_slot != pick.into:
+		s.select_weapon(pick.into)
 	return true

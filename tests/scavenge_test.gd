@@ -91,6 +91,9 @@ func _test_medical_and_grenades() -> void:
 	var dead := _dead_hostile(Vector3(-30, 0.1, -60))
 	dead.inventory.take(&"tourniquet", 2)
 	var saved := rifleman.inventory.net_state.duplicate(true)
+	rifleman.inventory.take_medical(&"tourniquet")
+	check(int(Scavenge.needs(rifleman).get(&"tourniquet", {}).get("want", 0)) == 1,
+		"one of his two tourniquets used (holder and IFAK both count), he wants one more (%s)" % [Scavenge.needs(rifleman).get(&"tourniquet")])
 	while rifleman.inventory.medical_count(&"tourniquet") > 0:
 		rifleman.inventory.take_medical(&"tourniquet")
 	while rifleman.inventory.remove_one(&"frag_grenade"):
@@ -137,6 +140,9 @@ func _test_weapon_swap() -> void:
 	_dry(rifleman, &"mag_556")
 	pick = Scavenge.best_pick(rifleman, dead, false)
 	check(pick.get("id") == &"mag_556", "a dry M4 takes the body's 5.56 magazines (the MK18's fit it) rather than its rifle (%s)" % [pick.get("id", "nothing")])
+	_part_use(dead, &"mag_556", 10)
+	pick = Scavenge.best_pick(rifleman, dead, false)
+	check(pick.get("id") == &"mag_556", "even when the body's magazines are part used (%s)" % [pick.get("id", "nothing")])
 	rifleman.inventory.net_state = saved
 	var m_saved := marksman.inventory.net_state.duplicate(true)
 	_dry(marksman, &"mag_762")
@@ -145,10 +151,22 @@ func _test_weapon_swap() -> void:
 	var mine: StringName = marksman.inventory.slots[&"primary"]
 	check(Scavenge.apply(marksman, dead, pick) == 1 and marksman.inventory.slots[&"primary"] == &"mk18" and dead.inventory.slots[&"primary"] == mine,
 		"and leaves his empty one on the body (%s, body has %s)" % [marksman.inventory.slots[&"primary"], dead.inventory.slots[&"primary"]])
+	check(marksman.active_slot == &"primary", "and fights with it, not his sidearm (%s)" % marksman.active_slot)
 	pick = Scavenge.best_pick(marksman, dead, false)
 	check(pick.get("id") == &"mag_556", "then its magazines (%s)" % [pick.get("id", "nothing")])
 	marksman.inventory.net_state = m_saved
 	dead.server_remove_body()
+
+
+## Leaves `rounds` in each `mag` stowed on `s`.
+func _part_use(s: Soldier, mag: StringName, rounds: int) -> void:
+	for container in s.inventory.search_containers():
+		for entry: Dictionary in s.inventory.containers[container]:
+			if entry.id == mag:
+				var state: Dictionary = entry.get("state", {}).duplicate(true)
+				state.rounds = rounds
+				entry["state"] = state
+	s.inventory._commit()
 
 
 ## Empties `s`'s primary and takes away its magazines (`mag`).

@@ -72,7 +72,7 @@ func capacity(container: StringName) -> float:
 func used(container: StringName) -> float:
 	var total := 0.0
 	for entry: Dictionary in containers.get(container, []):
-		total += ItemDB.get_item(entry.id).volume_l * entry.count
+		total += entry_volume(entry)
 	return total
 
 
@@ -85,10 +85,12 @@ func units_in(container: StringName) -> int:
 
 
 ## How many units of `item` fit in `container` now: by free litres, and for a pouch also by
-## what it accepts and how many units it takes.
-func room_for(container: StringName, item: ItemData) -> int:
+## what it accepts and how many units it takes. `state`: the unit's own state, so a pouch
+## or carrier going in takes the room its contents fill (unit_volume).
+func room_for(container: StringName, item: ItemData, state := {}) -> int:
 	if item == null:
 		return 0
+	var each := unit_volume(item, state)
 	if is_pouch_container(container):
 		var pouch := pouch_item(container)
 		if pouch == null or not pouch_accepts(pouch, item):
@@ -98,14 +100,40 @@ func room_for(container: StringName, item: ItemData) -> int:
 		if max_units > 0:
 			room = maxi(max_units - units_in(container), 0)
 		var litres := float(pouch.stats.get("capacity_l", 0.0))
-		if litres > 0.0 and item.volume_l > 0.0:
-			room = mini(room, int(floor((litres - used(container)) / item.volume_l + 0.0001)))
+		if litres > 0.0 and each > 0.0:
+			room = mini(room, int(floor((litres - used(container)) / each + 0.0001)))
 		return maxi(room, 0)
 	if capacity(container) <= 0.0:
 		return 0
-	if item.volume_l <= 0.0:
+	if each <= 0.0:
 		return 1000000
-	return maxi(int(floor(free_volume(container) / item.volume_l + 0.0001)), 0)
+	return maxi(int(floor(free_volume(container) / each + 0.0001)), 0)
+
+
+## Litres one unit of `item` takes up stowed, with its state: a pouch is as big as what it
+## holds (an empty one folds down to its own volume_l), a carrier adds its pouches.
+static func unit_volume(item: ItemData, state := {}) -> float:
+	var each := maxf(item.volume_l, held_volume(state.get("held", [])))
+	var molle: Dictionary = state.get("molle", {})
+	for point: Variant in molle:
+		var att: Dictionary = molle[point]
+		var pouch := ItemDB.get_item(StringName(att.get("id", "")))
+		if pouch:
+			each += maxf(pouch.volume_l, held_volume(att.get("held", [])))
+	return each
+
+
+## Litres of a container entry ({"id", "count", "state"?}).
+static func entry_volume(entry: Dictionary) -> float:
+	var item := ItemDB.get_item(entry.id)
+	return unit_volume(item, entry.get("state", {})) * int(entry.count) if item else 0.0
+
+
+static func held_volume(held: Array) -> float:
+	var total := 0.0
+	for entry: Dictionary in held:
+		total += entry_volume(entry)
+	return total
 
 
 func free_volume(container: StringName) -> float:
@@ -286,7 +314,7 @@ func remove_one(id: StringName) -> bool:
 ## Host only. Puts a whole entry into `container` if it fits. Returns false otherwise.
 func insert_entry(container: StringName, entry: Dictionary) -> bool:
 	var item := ItemDB.get_item(entry.id)
-	if item == null or room_for(container, item) < int(entry.count):
+	if item == null or room_for(container, item, entry.get("state", {})) < int(entry.count):
 		return false
 	_append(container, item, entry.count, entry.get("state", {}))
 	_commit()
@@ -867,7 +895,7 @@ func carrier_plate_slots() -> Array[StringName]:
 
 
 func _stow(container: StringName, item: ItemData, want: int, state: Dictionary) -> int:
-	var n := mini(room_for(container, item), want)
+	var n := mini(room_for(container, item, state), want)
 	if n > 0:
 		_append(container, item, n, state)
 	return n

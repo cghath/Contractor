@@ -214,12 +214,17 @@ func _test_molle_rules() -> void:
 	var pouch := inv.detach(&"mag_2")
 	check(pouch.get("id") == &"pouch_mag_double" and pouch.state.held.size() == 1 and int(pouch.state.held[0].count) == 2, "detached, a pouch keeps its magazines (%s)" % [pouch])
 	check(inv.spare_rounds(&"mag_556") == 30 * 2, "which no longer count as carried")
+	var full_sustain := Inventory.unit_volume(ItemDB.get_item(&"pouch_sustainment"), {"held": [{"id": &"mag_556", "count": 8}]})
+	check(is_equal_approx(full_sustain, 2.0) and is_equal_approx(Inventory.unit_volume(ItemDB.get_item(&"pouch_sustainment")), 1.0),
+		"stowed, a full pouch takes the room its contents fill, an empty one folds down (%.2f L)" % full_sustain)
 	check(inv.attach(&"mag_3", pouch) and inv.units_in(&"molle:mag_3") == 2, "and brings them back when attached again")
 	# The vest keeps everything when it comes off (dropped, looted) and in the zone save.
 	check(inv.unequip(&"vest").is_empty(), "a carrier with things in its own pockets still won't come off")
 	inv.remove_entry(&"vest", 0, 1)  # the 5th magazine
 	var vest := inv.unequip(&"vest")
 	check(vest.get("id") == &"plate_carrier" and vest.state.molle.size() == 4, "the carrier comes off with its 4 attachments (%s)" % [vest.get("state", {}).get("molle", {}).keys()])
+	check(Inventory.unit_volume(ItemDB.get_item(&"plate_carrier"), vest.state) > ItemDB.get_item(&"plate_carrier").volume_l,
+		"stowed, it takes more room than a bare carrier (%.2f L)" % Inventory.unit_volume(ItemDB.get_item(&"plate_carrier"), vest.state))
 	var saved: Variant = GameState.from_json(JSON.parse_string(JSON.stringify(vest.state)))
 	var other := Inventory.new()
 	check(other.take(&"plate_carrier", 1, saved) == 1 and other.attachment_count() == 4, "saved and loaded with the zone, then worn by someone else: still 4 attached")

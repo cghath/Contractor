@@ -11,6 +11,24 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Scavenging review fixes
+
+#### Fixed
+
+- **An AI that picks up a rifle from a body now fights with it.** Unequipping his own dry
+  rifle switched him to his sidearm, and nothing switched him back: a marksman kept firing
+  9mm with a loaded MK18 on his back.
+- **Medical restock counts the whole basic load.** A tourniquet in the holder and one in the
+  IFAK are a basic load of two. Each was compared on its own against everything he carried,
+  so a rifleman down to one tourniquet wanted none.
+- **A dry M4 takes the body's 5.56 magazines, even part-used ones, instead of the MK18**, as
+  the scavenging rules say. Part-used magazines scored lower than the rifle swap.
+- **A stowed pouch or carrier takes the room its contents fill.** Only the empty pouch or
+  carrier counted, so a full sustainment pouch (2 L) went into a pack as 1 L, and a carrier
+  with every pouch loaded as a bare 8 L. An empty pouch still folds down to its own size.
+- **The medium carrier's knife no longer clips into the first mag pouch:** its point moved up
+  2 cm, level with the heavy carrier's.
+
 ### AI scavenging, visible tourniquets and IFAKs, and looting MOLLE pouches (Captain, 2026-10-11)
 
 #### Added

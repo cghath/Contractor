@@ -667,7 +667,7 @@ func _server_inventory_action(action: String, container: StringName, index: int,
 			if index < 0 or index >= list.size() or target == container or not inventory.containers.has(target):
 				return
 			var item := ItemDB.get_item(list[index].id)
-			var n := mini(int(list[index].count), inventory.room_for(target, item))
+			var n := mini(int(list[index].count), inventory.room_for(target, item, list[index].get("state", {})))
 			if n <= 0:
 				var accepts := not Inventory.is_pouch_container(target) or Inventory.pouch_accepts(inventory.pouch_item(target), item)
 				_client_message.rpc_id(owner_peer(), ("Not enough room in %s" if accepts else "%s doesn't take that") % container_name(target))
