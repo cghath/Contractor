@@ -18,6 +18,7 @@ Controls="*res://autoload/controls.gd"
 ItemDB="*res://autoload/item_db.gd"
 GameState="*res://autoload/game_state.gd"
 Net="*res://autoload/net.gd"
+Campaign="*res://autoload/campaign.gd"
 
 [display]
 

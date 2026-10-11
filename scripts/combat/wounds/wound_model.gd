@@ -57,7 +57,7 @@ const PAIN_FRAGMENT := Vector2(0.1, 0.25)
 const PAIN_GRAZE := Vector2(0.1, 0.2)
 ## Spall from a steel plate (round class SPALL, ArmorRules.server_spall): a scratch that
 ## doesn't bleed, or with SPALL_LIGHT_CHANCE a light muscle wound. Never deeper: no vessels,
-## organs or bones.
+## organs or bones. Its pain counts as plate impact (inside PLATE_IMPACT_MAX).
 const SPALL := &"spall"
 const SPALL_LIGHT_CHANCE := 0.2
 const SPALL_LIGHT_RATE := 0.05
@@ -1381,7 +1381,10 @@ func add_spall(part: StringName) -> Dictionary:
 		pain_range = PAIN_SPALL_LIGHT
 	else:
 		w = _add_wound(part, "graze", 0.0)
-	pain_wounds = minf(pain_wounds + rng.randf_range(pain_range.x, pain_range.y), 1.0)
+	# Spall comes from a plate stop, so its pain shares the plate stops' capped budget
+	# (PLATE_IMPACT_MAX): plates alone, spall included, never knock a healthy soldier out.
+	var added := rng.randf_range(pain_range.x, pain_range.y)
+	impact = maxf(impact, minf(impact + added, PLATE_IMPACT_MAX))
 	update_state(0.0)
 	return w
 

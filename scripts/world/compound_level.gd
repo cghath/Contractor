@@ -177,6 +177,14 @@ func _ready() -> void:
 	Net.peer_left.connect(_on_peer_left)
 
 
+## The playable area on the map, in metres on the ground plane (x along x, y along z): the
+## map and its grid cover this (wave 4 interface; a world-scale zone level provides the same).
+func map_area() -> Rect2:
+	var b := VoxelWorld.BOUNDS
+	var s := VoxelWorld.VOXEL_SIZE
+	return Rect2(b.position.x * s, b.position.z * s, b.size.x * s, b.size.z * s)
+
+
 func next_spawn_point() -> Vector3:
 	_spawn_index += 1
 	return SPAWN_POINTS[_spawn_index % SPAWN_POINTS.size()]
