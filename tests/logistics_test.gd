@@ -214,12 +214,17 @@ func _test_molle_rules() -> void:
 	var pouch := inv.detach(&"mag_2")
 	check(pouch.get("id") == &"pouch_mag_double" and pouch.state.held.size() == 1 and int(pouch.state.held[0].count) == 2, "detached, a pouch keeps its magazines (%s)" % [pouch])
 	check(inv.spare_rounds(&"mag_556") == 30 * 2, "which no longer count as carried")
+	var full_sustain := Inventory.unit_volume(ItemDB.get_item(&"pouch_sustainment"), {"held": [{"id": &"mag_556", "count": 8}]})
+	check(is_equal_approx(full_sustain, 2.0) and is_equal_approx(Inventory.unit_volume(ItemDB.get_item(&"pouch_sustainment")), 1.0),
+		"stowed, a full pouch takes the room its contents fill, an empty one folds down (%.2f L)" % full_sustain)
 	check(inv.attach(&"mag_3", pouch) and inv.units_in(&"molle:mag_3") == 2, "and brings them back when attached again")
 	# The vest keeps everything when it comes off (dropped, looted) and in the zone save.
 	check(inv.unequip(&"vest").is_empty(), "a carrier with things in its own pockets still won't come off")
 	inv.remove_entry(&"vest", 0, 1)  # the 5th magazine
 	var vest := inv.unequip(&"vest")
 	check(vest.get("id") == &"plate_carrier" and vest.state.molle.size() == 4, "the carrier comes off with its 4 attachments (%s)" % [vest.get("state", {}).get("molle", {}).keys()])
+	check(Inventory.unit_volume(ItemDB.get_item(&"plate_carrier"), vest.state) > ItemDB.get_item(&"plate_carrier").volume_l,
+		"stowed, it takes more room than a bare carrier (%.2f L)" % Inventory.unit_volume(ItemDB.get_item(&"plate_carrier"), vest.state))
 	var saved: Variant = GameState.from_json(JSON.parse_string(JSON.stringify(vest.state)))
 	var other := Inventory.new()
 	check(other.take(&"plate_carrier", 1, saved) == 1 and other.attachment_count() == 4, "saved and loaded with the zone, then worn by someone else: still 4 attached")
@@ -272,6 +277,16 @@ func _test_molle_host() -> void:
 		drop.call()
 	check(inv.attachment(&"pistol_1").get("id") == &"pouch_pistol_mag", "and it attaches it")
 	check(not screen.drop_action({"kind": "slot", "slot": &"primary", "id": &"m4a1"}, {"kind": "point", "point": &"mag_2"}).is_valid(), "a rifle can't be dropped on an attach point")
+	await _frames(2)
+	var pressed: Array = screen._tiles.filter(func(t: Array) -> bool: return t[1].kind == "slot" and t[1].slot == &"primary")[0]
+	var press := InputEventMouseButton.new()
+	press.button_index = MOUSE_BUTTON_LEFT
+	press.pressed = true
+	screen._tile_input(press, pressed[1], pressed[0])
+	check(is_instance_valid(pressed[0]) and pressed[0].is_inside_tree() and not pressed[0].is_queued_for_deletion() and screen._is_selected(pressed[1]),
+		"pressing a tile selects it and keeps it, so a drag can start from it")
+	screen._menu_src = {"kind": "entry", "container": &"backpack", "index": 99, "id": &"m4a1"}
+	check(not screen._still_there(screen._menu_src), "a menu for an entry that has gone does nothing")
 	screen._set_view(InventoryScreen.View.MOLLE)
 	await _frames(2)
 	check(screen._point_tiles.size() == inv.attach_points().size(), "the MOLLE view lays out every attach point (%d)" % screen._point_tiles.size())
@@ -453,7 +468,9 @@ func _test_breach_navigation() -> void:
 	check(absf(_path_length(map, inside, outside) - before) < 0.01, "until the rebake is done, AI treats the gap as blocked")
 	await _wait_for(func() -> bool: return not rebaked.is_empty() and not nav.is_rebaking(), 6.0)
 	var took_ms := (Time.get_ticks_usec() - started) / 1000.0
-	await _physics_frames(3)
+	# The navigation map takes the new chunk meshes on a later physics sync; a slower machine
+	# (CI) needs more than a few frames, so wait for the shorter path, up to 3 s.
+	await _wait_for(func() -> bool: return _path_length(map, inside, outside) < 5.5, 3.0)
 	check(not rebaked.is_empty(), "the breach rebaked %d chunk(s) in the background (done after %.0f ms)" % [rebaked.size(), took_ms])
 	check(rebaked.all(func(c: Vector2i) -> bool: return NavBuilder.chunk_aabb(c).grow(NavBuilder.BORDER_M + 1.0).has_point(Vector3(-4.85, 0, -8))), "only the chunks around the gap (%s)" % [rebaked])
 	var path := NavigationServer3D.map_get_path(map, inside, outside, true)

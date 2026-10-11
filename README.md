@@ -243,7 +243,7 @@ suite on the Actions tab means that branch isn't ready for `dev`.
 | Casualty, logistics | `tests/<name>_test.tscn` | AI casualty care, bodies and their save; loose ammo, magazines, coloured smoke and navigation |
 | Materials, animations | `tests/<name>_test.tscn` | Wood, sheet metal and concrete under fire, impact marks; carry, drag, pickup, equip, treat and loot poses |
 | World, contracts, people, base, map | `tests/<name>_test.tscn` | Zones from a seed, module streaming, zone joins; the contract board, negotiation, objectives and debrief; civilians, HVTs and intel; the base hub, roster, hiring, prep and MIA; the map, briefing, extraction and reinforcements (several start client processes) |
-| Scavenge | `tests/scavenge_test.tscn` | What AI takes off a body (ammo for its own weapon, missing medical items and grenades, armor when calm, a rifle only when dry, the load limit), dead players' gear left alone, going to a body, one unit per body, orders and contact |
+| Scavenge | `tests/scavenge_test.tscn` | What AI takes off a body (ammo for its own weapon, missing medical items and grenades, armor when calm, a rifle only when dry, the load limit), dead players' gear left alone, going to a body, one unit per body with two wanting it, letting go when done, the leash sparing an order, orders and contact |
 
 The gameplay and network tests use their own save zones and never touch your compound save.
 To regenerate the screenshots in `screenshots/` (this opens a window for a few seconds):
