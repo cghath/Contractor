@@ -29,6 +29,7 @@ func _ready() -> void:
 	_test_chest_seal()
 	_test_splint()
 	_test_morphine()
+	_test_impact_pain()
 	_test_airway()
 	_test_care_order()
 	_test_treatment_wakes()
@@ -187,6 +188,27 @@ func _test_splint() -> void:
 	v.server_apply_treatment(&"splint", Vitals.UPPER_ARM_R)
 	check(v.reload_mult() == 1.0 and v.sway_mult() < broken and v.sway_mult() > 1.0, "splinted arm: normal reloads, less sway (%.2f -> %.2f)" % [broken, v.sway_mult()])
 	v.queue_free()
+
+
+## Audit L3-01: pain from a round stopped by armor (impact, no wound) is eased by morphine like
+## wound pain, and no dose is asked for (or used up) once there's none left for it to ease.
+func _test_impact_pain() -> void:
+	print("Impact pain and morphine")
+	var m := _model(5)
+	m.impact = 0.7  # impact only: no wound, no fracture, no rib
+	m.update_state(0.0)
+	var asks := func(model: WoundModel) -> bool: return model.care_tasks().any(func(t: Dictionary) -> bool: return t.kind == "pain")
+	check(m.wounds.is_empty() and asks.call(m), "impact pain alone asks for morphine (pain %.2f)" % m.pain())
+	var before := m.pain()
+	m.apply_item(WoundModel.MORPHINE, Vitals.TORSO)
+	_step(m, WoundModel.MORPHINE_ABSORB_S)
+	var faded := WoundModel.MORPHINE_ABSORB_S * WoundModel.IMPACT_FADE_PER_S
+	check(m.pain() < before - faded - 0.3, "and the dose eases it, beyond its own fading (%.2f -> %.2f)" % [before, m.pain()])
+	check(not asks.call(m), "with nothing left to ease, no second dose is asked for (%.2f to ease)" % m.pain_to_ease())
+	var low := _model(6)
+	low.impact = WoundModel.MORPHINE_FROM_PAIN - 0.1
+	low.update_state(0.0)
+	check(not asks.call(low), "light impact pain uses no morphine (%.2f)" % low.pain())
 
 
 func _test_morphine() -> void:

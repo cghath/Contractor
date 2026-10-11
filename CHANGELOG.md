@@ -44,6 +44,15 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 - **`tools/test_runner_check.sh` (new):** checks the runner against a fake engine: a pass
   passes; a failure, a script error with exit 0, a missing summary, a hang and a failed import
   fail. CI runs it as its own job, and the rerun-on-failure step has a timeout now.
+### Medical: impact pain is eased by morphine (audit L3-01 check)
+
+#### Added
+
+- **Medical test:** pain from a round stopped by armor (impact, no wound) asks for morphine,
+  a dose eases it well beyond its own fading, no second dose is asked for once there's nothing
+  left to ease, and light impact pain uses none. The audit's finding (a kit used up on impact
+  pain it couldn't treat) was about the old stopgap kit; wave 3's morphine already treats it.
+
 ### Late joiners, bad input, reloads, sprinting, fire cadence and the menu (audit L2-01, L2-02, L3-02, L4-02, L6-01, L8-01, L10-01)
 
 #### Fixed
