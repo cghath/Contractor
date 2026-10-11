@@ -2,7 +2,7 @@
 # Runs the headless test suites. Set GODOT to the Voxel Tools editor executable, e.g.
 #   GODOT="$HOME/Downloads/GodotVoxel_1.7/godot.windows.editor.x86_64.exe" tools/run_tests.sh
 # With arguments, runs only those suites:  tools/run_tests.sh smoke gameplay
-# Suites are tests/<name>_test.tscn; "net" is the two-process host/client test.
+# Suites are tests/<name>_test.tscn; "net" and "world" are two-process host/client tests.
 # Parallel runs (separate worktrees) should set CONTRACTOR_TEST_TAG (keeps test saves apart)
 # and CONTRACTOR_PORT (keeps the net test's port apart).
 # Exits non-zero if any suite fails.
@@ -10,7 +10,7 @@ set -u
 cd "$(dirname "$0")/.."
 GODOT="${GODOT:-godot}"
 SUITES=("$@")
-[ ${#SUITES[@]} -eq 0 ] && SUITES=(smoke gameplay squad net wounds armor movement interaction roles medical logistics casualty materials animations scavenge)
+[ ${#SUITES[@]} -eq 0 ] && SUITES=(smoke gameplay squad net wounds armor movement interaction roles medical logistics casualty materials animations scavenge world)
 status=0
 
 run() {
@@ -29,6 +29,17 @@ for suite in "${SUITES[@]}"; do
 		sleep 4
 		run net res://tests/net_test.tscn -- --join 127.0.0.1
 		wait "$host" || { echo "net host: failed"; status=1; }
+	elif [ "$suite" = world ]; then
+		# A zone: the host runs its own checks first (refusing connections), then lets the
+		# client in; the client keeps trying to join until then. Both report their checks.
+		log="$(mktemp)"
+		"$GODOT" --headless --path . res://tests/world_test.tscn -- --world-host >"$log" 2>&1 &
+		host=$!
+		sleep 4
+		run world res://tests/world_test.tscn -- --world-join 127.0.0.1
+		wait "$host" || { echo "world host: failed"; status=1; }
+		grep -E '\[FAIL\]|TEST (PASSED|FAILED)|SCRIPT ERROR' "$log" | sed 's/^/[world host] /'
+		rm -f "$log"
 	else
 		run "$suite" "res://tests/${suite}_test.tscn"
 	fi

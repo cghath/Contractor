@@ -36,6 +36,7 @@ func _ready() -> void:
 	box.add_child(_address)
 	box.add_child(_button("Join someone's session", func() -> void: join(_address.text)))
 	box.add_child(_button("Reset compound save", _reset_save))
+	box.add_child(_button("Host test zone (2 km, world scale)", host_test_zone))
 	_status = Label.new()
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD
 	box.add_child(_status)
@@ -51,6 +52,14 @@ func host() -> void:
 		_status.text = "Port %d is busy: is another copy of the game already hosting? Join it instead." % Net.port()
 	else:
 		_status.text = "Could not host on port %d (%s)." % [Net.port(), error_string(err)]
+
+
+## Debug entry: hosts the 2 km test zone (data/zones.json "test") instead of the compound.
+func host_test_zone() -> void:
+	var main := get_parent()
+	if main and main.has_method(&"host_zone"):
+		GameState.zone_id = "zone_test"
+		main.host_zone(ZoneDef.get_def("test"))
 
 
 func join(address: String) -> void:
