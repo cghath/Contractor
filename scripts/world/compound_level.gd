@@ -462,7 +462,7 @@ func _on_died_for_good(s: Soldier) -> void:
 ## (dead squadmates' bodies keep theirs, so past the eighth it's "Alpha 2" and so on), in its
 ## role's kit, placed in formation behind the lead.
 func _spawn_squadmate(slot: int, role: StringName, team: int) -> Soldier:
-	if BaseHub.deployment_running():  # campaign deployment: the company's own people (wave 4)
+	if BaseHub.campaign_squad():  # campaign: the company's own people, from the roster (wave 4)
 		return BaseHub.server_spawn_roster_squadmate(self, slot, role, team)
 	var callsign := ""
 	var lap := 1

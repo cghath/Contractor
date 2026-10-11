@@ -14,6 +14,10 @@ extends Node
 const SEED := 4242
 ## Items the test stash holds besides the starting stash.
 const EXTRA_STASH := [["m17", 1], ["burn_dressing", 3]]
+## The client's log line once its hub checks are done (the host goes on then).
+const CLIENT_HUB_DONE := "HUB CHECKS DONE"
+## ...and once it has looked at the zone (the host extracts then).
+const CLIENT_ZONE_DONE := "ZONE CHECKS DONE"
 
 var failures := 0
 var tag := OS.get_environment("CONTRACTOR_TEST_TAG")
@@ -213,6 +217,15 @@ func _test_resolve() -> void:
 	check(not RosterDeployment.is_running(roster), "the deployment is over")
 	check(RosterDeployment.recovered(roster, ids[1], 3, 4) and Roster.status_text(mia) == "Recovering (4 d)", "a recovery brings the MIA one home, to recover")
 	check(not Roster.is_available(dead) and not RosterDeployment.recovered(roster, ids[2], 3), "the dead stay dead")
+	# Players: their outcome lands on their main character, or on the squadmate standing in.
+	RosterDeployment.begin(roster, [], RosterDeployment.CONTRACT, "zone_x", "", 3, {}, {"p2": ids[0]})
+	var broken := [{"part": &"thigh_l", "kind": "fracture", "name": "femur"}]
+	RosterDeployment.resolve(roster, {"players": {"p1": {"gear": gear, "wounds": broken, "blood": 0.9},
+		"p2": {"gear": gear, "wounds": broken, "blood": 0.9}}}, rng, 3)
+	var p1 := Roster.main_character(roster, "p1")
+	check(int(p1.sit_out_days) == Roster.FRACTURE_DAYS and Roster.main_recovering(roster, "p1") and Roster.gear_counts(p1.gear).has("m4a1"),
+		"a badly hurt player's main character sits out %d days, keeping what they carried" % int(p1.sit_out_days))
+	check(not Roster.main_recovering(roster, "p2") and int(back.sit_out_days) == Roster.FRACTURE_DAYS, "a stand-in's wounds are the stand-in's")
 
 
 func _test_stand_ins() -> void:
@@ -260,17 +273,21 @@ func _test_session() -> void:
 	var s0 := base.muster_soldier(ids[0])
 	check(s0 != null and String(s0.name) == String(member0.callsign) and Roster.gear_counts(Roster.json_safe(s0.inventory.net_state)) == Roster.gear_counts(member0.gear),
 		"each in their own gear, by callsign (%s)" % member0.callsign)
-	await _run_joining_client(ids, stash_counts)
+	_test_terminals(base)
+	var client := await _start_client(ids, stash_counts)
 	await _test_armory(base)
-	await _test_deployment()
+	await _test_deployment(client)
+	await _finish_client(client)
 
 
-## Starts a second process that joins the hub as a client and checks what it sees.
-func _run_joining_client(ids: Array, stash_counts: Dictionary) -> void:
+## Starts a second process that joins the hub as a client and checks what it sees; returns
+## once it has checked the hub (it then stays to follow the deployment): {"pid", "log"}.
+func _start_client(ids: Array, stash_counts: Dictionary) -> Dictionary:
 	print("A client in the hub")
 	var callsigns: Array = ids.map(func(mid: String) -> String: return String(BaseHub.member(mid).callsign))
 	var hire := _cheapest(Hiring.pool(BaseHub.hiring(), BaseHub.day()))
-	var expect := {"callsigns": callsigns, "stash": stash_counts, "cid": String(hire.cid), "hire_callsign": String(hire.callsign)}
+	var expect := {"callsigns": callsigns, "stash": stash_counts, "cid": String(hire.cid), "hire_callsign": String(hire.callsign),
+		"back": callsigns[0], "dead": callsigns[2]}
 	var log_path := ProjectSettings.globalize_path("user://base_test_client%s.log" % tag)
 	if FileAccess.file_exists(log_path):
 		DirAccess.remove_absolute(log_path)
@@ -280,17 +297,32 @@ func _run_joining_client(ids: Array, stash_counts: Dictionary) -> void:
 	check(pid > 0, "a client process starts")
 	var deadline := Time.get_ticks_msec() + 120000
 	while pid > 0 and OS.is_process_running(pid) and Time.get_ticks_msec() < deadline:
-		await get_tree().create_timer(0.25).timeout
+		if FileAccess.file_exists(log_path) and FileAccess.get_file_as_string(log_path).contains(CLIENT_HUB_DONE):
+			break
+		await _seconds(0.25)
+	check(Roster.ids(BaseHub.roster()).size() == ids.size() + 1, "the host hired who the client asked for (%d on the books)" % Roster.ids(BaseHub.roster()).size())
+	return {"pid": pid, "log": log_path}
+
+
+## Waits for the client to finish following the deployment and prints what it checked.
+func _finish_client(client: Dictionary) -> void:
+	print("The client, through the deployment")
+	var pid: int = client.pid
+	var deadline := Time.get_ticks_msec() + 120000
+	while pid > 0 and OS.is_process_running(pid) and Time.get_ticks_msec() < deadline:
+		await _seconds(0.25)
+	if pid > 0 and OS.is_process_running(pid):
+		OS.kill(pid)
 	var code := OS.get_process_exit_code(pid) if pid > 0 else -1
-	if FileAccess.file_exists(log_path):
-		for line in FileAccess.get_file_as_string(log_path).split("\n"):
-			if line.strip_edges() != "":
+	if FileAccess.file_exists(client.log):
+		for line in FileAccess.get_file_as_string(client.log).split("\n"):
+			if line.strip_edges() != "" and line.strip_edges() not in [CLIENT_HUB_DONE, CLIENT_ZONE_DONE]:
 				print("  (client) " + line.strip_edges())
 	check(code == 0, "the client's checks pass (exit %d)" % code)
-	check(Roster.ids(BaseHub.roster()).size() == ids.size() + 1, "the host hired who the client asked for (%d on the books)" % Roster.ids(BaseHub.roster()).size())
 
 
-## Client process: joins the hub and checks the roster, the stash and a request through the host.
+## Client process: joins the hub and checks the roster, the stash and a request through the
+## host, then follows the host into the zone and back.
 func _run_client() -> void:
 	var args := OS.get_cmdline_user_args()
 	var expect: Dictionary = JSON.parse_string(Marshalls.base64_to_utf8(args[args.find("--expect") + 1]))
@@ -325,10 +357,53 @@ func _run_client() -> void:
 	var hired := await _wait_until(func() -> bool:
 		return BaseHub.view.get("roster", {}).get("members", {}).values().any(func(m: Dictionary) -> bool: return String(m.callsign).begins_with(String(expect.hire_callsign))), 10.0)
 	check(hired, "a hire asked from the client goes through the host and comes back (%s)" % expect.hire_callsign)
+	_say(CLIENT_HUB_DONE)
+	# The host deploys: the session moves to the zone, then back.
+	var deployed := await _wait_until(func() -> bool:
+		var l := CompoundLevel.current(self)
+		return l != null and not l is BaseLevel, 120.0)
+	check(deployed, "the client follows the host into the zone")
+	level = CompoundLevel.current(self)
+	var squad_ok := await _wait_until(func() -> bool:
+		return expect.callsigns.all(func(c: String) -> bool: return level.ai.get_node_or_null(NodePath(c)) != null), 60.0)
+	check(squad_ok, "and sees the squad there as the roster's people")
+	var mine := await _wait_until(func() -> bool: return level.players.get_node_or_null(str(multiplayer.get_unique_id())) != null, 30.0)
+	check(mine, "with its own player in the zone")
+	if not squad_ok:
+		_say("    zone AI: %s" % ", ".join(PackedStringArray(level.ai.get_children().map(func(n: Node) -> String: return String(n.name)))))
+	_say(CLIENT_ZONE_DONE)
+	var home := await _wait_until(func() -> bool: return CompoundLevel.current(self) is BaseLevel, 180.0)
+	check(home, "and comes back to the base with everyone")
+	level = CompoundLevel.current(self)
+	var back := await _wait_until(func() -> bool:
+		return level.ai.get_node_or_null(NodePath(String(expect.back))) != null and level.ai.get_node_or_null(NodePath(String(expect.dead))) == null, 30.0)
+	check(back, "where %s is back at the muster line and %s isn't" % [expect.back, expect.dead])
 	_say("CLIENT %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	_log.close()
 	Net.leave()
 	get_tree().quit(failures)
+
+
+## The terminals open the base screen through the interaction menu, and every page draws.
+func _test_terminals(base: BaseLevel) -> void:
+	print("Terminals and the base screen")
+	var player: Soldier = level.players.get_node(^"1")
+	var board: BaseTerminal = base.get_node_or_null(^"Terminal_hiring")
+	var actions := InteractionMenu.actions_for(player, board) if board else []
+	check(actions.size() == 1 and String(actions[0].label) == "Use Hiring board" and actions[0].has("call"), "the hiring board offers Use in the interaction menu")
+	if actions.is_empty():
+		return
+	InteractionMenu.perform(player, actions[0])
+	var ui: BaseUI = BaseHub._ui
+	check(ui != null and ui.is_open() and ui.page == "hiring", "and opens the base screen on the hiring page")
+	var drawn := true
+	for p in BaseUI.PAGES:
+		ui.open(p)
+		drawn = drawn and ui._pages[p].get_child_count() > 0
+	check(drawn, "every page draws (%s)" % ", ".join(PackedStringArray(BaseUI.PAGES)))
+	var pool: Dictionary = InteractionMenu.actions_for(player, base.get_node(^"Terminal_motor_pool"))[0]
+	check(String(pool.disabled) != "", "the motor pool waits for wave 5's vehicles")
+	ui.close()
 
 
 func _test_armory(base: BaseLevel) -> void:
@@ -362,7 +437,7 @@ func _test_armory(base: BaseLevel) -> void:
 	check(BaseArmory.counts(BaseHub.stash()) == saved and saved.get("m17", 0) == 1, "the stash survives a save and reload")
 
 
-func _test_deployment() -> void:
+func _test_deployment(client: Dictionary) -> void:
 	print("Deployment")
 	var base := level as BaseLevel
 	var ids := Roster.ids(BaseHub.roster())
@@ -384,6 +459,7 @@ func _test_deployment() -> void:
 	var day := BaseHub.day()
 	var why := BaseHub.server_deploy({"zone_id": "test_base_zone" + tag})
 	check(why == "" and RosterDeployment.is_running(BaseHub.roster()), "deploy starts the deployment")
+	await _wait_until(func() -> bool: return not CompoundLevel.current(self) is BaseLevel, 10.0)
 	level = CompoundLevel.current(self)
 	check(level != null and not level is BaseLevel, "and the session moves to the zone")
 	var up := await _wait_until(func() -> bool: return squad.all(func(mid: String) -> bool: return _roster_soldier(mid) != null), 40.0)
@@ -414,6 +490,8 @@ func _test_deployment() -> void:
 	sb.global_position = player.global_position + Vector3(0, 0, -45)
 	SquadAI.of(sa).process_mode = Node.PROCESS_MODE_DISABLED
 	sa.global_position = player.global_position + Vector3(1, 0, 1)
+	var zone_seen := await _wait_client_line(client, CLIENT_ZONE_DONE, 60.0)
+	check(zone_seen, "the client has seen the zone")
 	var report := BaseHub.server_extract_near(player.global_position, 20.0)
 	check(report.get("extracted", []) == [a] and report.get("mia", []) == [b] and report.get("dead", []) == [c],
 		"extraction: %s back, %s MIA, %s killed" % [callsign_a, callsign_b, callsign_c])
@@ -425,6 +503,7 @@ func _test_deployment() -> void:
 		"the dead one is lost, gear and all on the body saved in the zone")
 	check(int(BaseHub.member(a).wage) > wage_a and int(BaseHub.member(a).missions) >= 1, "the one who came back earns more ($%d -> $%d)" % [wage_a, int(BaseHub.member(a).wage)])
 	check(BaseHub.day() == day + 1, "a day passed")
+	await _wait_until(func() -> bool: return CompoundLevel.current(self) is BaseLevel, 10.0)
 	level = CompoundLevel.current(self)
 	check(level is BaseLevel, "everyone is back at the base")
 	base = level as BaseLevel
@@ -439,6 +518,15 @@ func _test_deployment() -> void:
 	check(Roster.gear_counts(BaseHub.member(a).gear) == Roster.gear_counts(Roster.json_safe(sa_home.inventory.net_state)) and gear_a.get("smoke_purple", 0) == 1,
 		"their gear survives a save and reload")
 	check(String(BaseHub.member(b).status) == Roster.MIA and String(BaseHub.member(c).status) == Roster.DEAD, "and so do MIA and KIA")
+
+
+## Waits until the client's log has `line` (or it has exited, or `timeout` passes).
+func _wait_client_line(client: Dictionary, line: String, timeout: float) -> bool:
+	var pid: int = client.get("pid", -1)
+	return await _wait_until(func() -> bool:
+		if pid <= 0 or not OS.is_process_running(pid):
+			return false
+		return FileAccess.file_exists(client.log) and FileAccess.get_file_as_string(client.log).contains(line), timeout)
 
 
 func _roster_soldier(mid: String) -> Soldier:
