@@ -407,7 +407,11 @@ static func wound_report(vitals: Vitals, on_self := true, oximeter := false) -> 
 static func _wound_status(wound: Dictionary) -> String:
 	var done := PackedStringArray()
 	var kind := String(wound.get("kind", ""))
-	if wound.get("packed", false):
+	if wound.get("clamped", false):
+		done.append("clamped")
+	elif wound.get("closed", false):
+		done.append("closed by surgery")
+	elif wound.get("packed", false):
 		done.append("packed")
 	elif wound.get("treated", false):
 		done.append({"fracture": "splinted", "chest": "sealed", "rib": "morphine given"}.get(kind, "bandaged"))

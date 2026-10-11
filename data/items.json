@@ -78,6 +78,13 @@
 		{"id": "adenosine", "name": "Adenosine Syringe", "type": "medical", "volume_l": 0.05, "mass_kg": 0.03, "stack": 10, "tags": ["medical", "drug"], "stats": {"short": "Adenosine", "treats": ["racing"], "treat_s": 2.0}},
 		{"id": "defibrillator", "name": "Defibrillator (AED)", "type": "medical", "volume_l": 3.0, "mass_kg": 1.5, "stack": 1, "tags": ["medical", "tool"], "stats": {"short": "Defib", "treats": ["defib"], "treat_s": 5.0, "reusable": true, "medic_only": true}},
 		{"id": "cpr", "name": "CPR", "type": "medical", "volume_l": 0.0, "mass_kg": 0.0, "stack": 1, "tags": ["medical", "action"], "stats": {"short": "CPR", "treats": ["cpr"], "treat_s": 10.0, "no_item": true, "medic_only": true}},
+		{"id": "surgical_clamp", "name": "Hemostat Clamp (Surgery Kit)", "type": "medical", "volume_l": 0.1, "mass_kg": 0.1, "stack": 5, "tags": ["medical"], "stats": {"short": "Clamp", "treats": ["internal", "junctional", "arterial", "chest"], "treat_s": 20.0, "medic_only": true}},
+		{"id": "surgery_kit_2", "name": "Surgery Kit (2 uses)", "type": "medical", "volume_l": 1.0, "mass_kg": 0.6, "stack": 1, "tags": ["medical", "kit", "common"], "stats": {"contents": {"surgical_clamp": 2}}},
+		{"id": "surgery_kit_3", "name": "Surgery Kit (3 uses)", "type": "medical", "volume_l": 1.2, "mass_kg": 0.7, "stack": 1, "tags": ["medical", "kit", "uncommon"], "stats": {"contents": {"surgical_clamp": 3}}},
+		{"id": "surgery_kit_5", "name": "Surgery Kit (5 uses)", "type": "medical", "volume_l": 1.6, "mass_kg": 0.9, "stack": 1, "tags": ["medical", "kit", "rare"], "stats": {"contents": {"surgical_clamp": 5}}},
+		{"id": "burn_dressing", "name": "Burn Dressing", "type": "medical", "volume_l": 0.2, "mass_kg": 0.1, "stack": 10, "tags": ["medical"], "stats": {"short": "Burn dressing", "treats": ["burn"], "treat_s": 5.0}},
+		{"id": "hypothermia_blanket", "name": "Hypothermia Blanket", "type": "medical", "volume_l": 0.5, "mass_kg": 0.3, "stack": 5, "tags": ["medical"], "stats": {"short": "Blanket", "treats": ["hypothermia"], "treat_s": 5.0}},
+		{"id": "ear_protection", "name": "Electronic Ear Protection", "type": "utility", "volume_l": 0.4, "mass_kg": 0.3, "stack": 1, "tags": ["hearing"]},
 
 		{"id": "frag_grenade", "name": "Frag Grenade", "type": "utility", "volume_l": 0.3, "mass_kg": 0.4, "stack": 6, "tags": ["throwable", "explosive"],
 		 "stats": {"throwable": "frag", "fuse_s": 3.5}},

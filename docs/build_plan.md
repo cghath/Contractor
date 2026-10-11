@@ -102,15 +102,30 @@ attachments (branch `fix3/inventory-molle`).
 | W7 | **AI casualty care on the wound model:** the real care order (under fire: smoke, drag, tourniquet; once safe: airway, seal, splint); medics carry the medic-only items; buddies carry casualties after the leader. Phase 3 passes when squadmates rarely die to bad pathing |
 | W8 | **Ammo and kit:** loose rounds and loading magazines; the respawn kit becomes M4, 2 spare mags + 90 loose rounds, 1 smoke, 1 frag; coloured smoke grenades (green, yellow, blue, purple) for the wave 5 supports |
 
-### Wave 3: medical depth (4 agents)
+### Wave 3: medical depth (6 parts)
 
 **Status:** in progress, one workstream at a time (Captain). 1, IV and IO access, fluids,
 pressure bags and vein collapse, with the stand-in blood recovery removed: built on branch
 `w3/iv-fluids` 2026-10-10 (all 14 suites pass). 2, breathing with per-lung efficiency,
 SpO2 from it, the decompression needle and the pulse oximeter: built on `w3/breathing`
 (on top of 1) 2026-10-10. 3, heart rate, epinephrine (with its wake-up roll), atropine,
-adenosine, CPR and the defibrillator: built on `w3/heart` (on top of 2) 2026-10-11. All
-three wait for Captain's playtest. Next: 4, surgery kits, then the other damage types.
+adenosine, CPR and the defibrillator: built on `w3/heart` (on top of 2) 2026-10-11. 4,
+surgery kits and the other damage (blast overpressure and blast lung, falls, burns,
+hypothermia, deafness): built on `w3/surgery` (on top of 3) 2026-10-11. All wait for
+Captain's playtest; Captain's local copy (Contractor-dev) follows each part. Next: 5, then 6.
+
+Added by Captain (2026-10-11), placed here because they hang off the medical actions:
+- **5, body interaction points** (ACE3's medical rig): on another body, points on the left
+  leg, right leg, left arm, right arm, chest and head, plus one general point at the centre
+  of the waist (inventory search, carry, drag, check condition). Each treatment is offered
+  on the point for its body part; self-interaction uses the same layout. IVs also go in a
+  leg (new IV sites besides the forearms). Tests for the points.
+- **6, medical technique animations**, on the action-animation system (commit aa41287:
+  code-driven poses in `character_model.gd`, so this is wave 3 work, not Noah's art in wave
+  7): IV in the arm and the leg (reference: Arma Reforger's IV animation), IO, bandaging
+  others and yourself with ACE-style pressure and elastic wrapping, tourniquets (high and
+  tight, windlass turns), splints, chest seals, needle decompression, injectors, CPR, defib
+  and the surgery kit, with self-treatment variants where self-treatment is allowed.
 
 From the design doc: IV (gauges 10 to 20 with flow, placement time, pain and rarity) and IO
 access; saline and blood bags (250, 500, 1000 mL); pressure bags; vein collapse from 37%

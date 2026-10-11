@@ -464,6 +464,7 @@ func _server_fire(origin: Vector3, direction: Vector3, slot: StringName) -> void
 	var result := Ballistics.fire(self, origin, direction.normalized(), weapon)
 	if result.result != "none":
 		CompoundLevel.current(self).show_impact.rpc(result.position, result.normal, result.result)
+	Throwables.server_gunfire(self)  # indoors, sustained fire muffles hearing
 
 
 ## A command from the command menu (CommandMenu) for the named squadmates (all if empty).
@@ -574,6 +575,42 @@ func stop_loading_mags(why: String) -> void:
 	_load_run += 1
 	if why != "":
 		_client_message.rpc_id(owner_peer(), why)
+
+
+## The highest fall the host believes from a client (anything higher is still fatal).
+const MAX_REPORTED_FALL_M := 60.0
+
+
+## Owner side (SoldierMovement): landed after dropping `height` metres. The host applies it
+## (Vitals.server_fall: nothing under 3 m).
+func report_fall(height: float) -> void:
+	if multiplayer.is_server():
+		vitals.server_fall(height)
+	else:
+		_server_fell.rpc_id(1, height)
+
+
+@rpc("any_peer", "call_local", "reliable")
+func _server_fell(height: float) -> void:
+	if _from_owner():
+		vitals.server_fall(clampf(height, 0.0, MAX_REPORTED_FALL_M))
+
+
+## Owner side (SoldierMovement): started to sprint, jumped, or set off under an extreme load.
+## Only matters (and is only sent) while a chest wound is closed by surgery: it may reopen.
+func report_exertion() -> void:
+	if not vitals.has_closed_chest():
+		return
+	if multiplayer.is_server():
+		vitals.server_exert()
+	else:
+		_server_exert.rpc_id(1)
+
+
+@rpc("any_peer", "call_local", "reliable")
+func _server_exert() -> void:
+	if _from_owner():
+		vitals.server_exert()
 
 
 ## H: treats yourself with the next item you carry from your own care_needed() (a

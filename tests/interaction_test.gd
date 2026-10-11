@@ -107,8 +107,9 @@ func _test_actions_for() -> void:
 	await _frames(2)
 	check(_ids(player, alpha) == [&"treat", &"carry", &"drag", &"check_condition"], "downed squadmate: Treat, Carry, Drag, Check condition; no Revive (%s)" % [_ids(player, alpha)])
 	var treat := _action(player, alpha, &"treat")
-	check(treat.items.size() == 3 and treat.items[0].label == "NPA Airway, head" and treat.items[0].disabled.contains("NPA")
-		and treat.items[1].label == "IO Kit (Sternal), sternum" and treat.items[2].label.begins_with("Morphine"),
+	check(treat.items.size() == 4 and treat.items[0].label == "NPA Airway, head" and treat.items[0].disabled.contains("NPA")
+		and treat.items[1].label == "IO Kit (Sternal), sternum" and treat.items[2].label == "Hypothermia Blanket, torso"
+		and treat.items[3].label.begins_with("Morphine"),
 		"Treat lists what they need, greyed out without the item (%s: %s)" % [treat.items.map(func(e: Dictionary) -> String: return e.label), treat.items.map(func(e: Dictionary) -> String: return e.disabled)])
 	player.inventory.take(&"trauma_kit")
 	check(not _ids(player, alpha).has(&"revive"), "a trauma kit adds no Revive either (%s)" % [_ids(player, alpha)])
@@ -117,12 +118,13 @@ func _test_actions_for() -> void:
 	check(_action(player, alpha, &"carry").disabled.contains("hands"), "can't carry with your hands full")
 	player.inventory.release_hands()
 	check(_ids(player, dummy) == [&"treat", &"check_condition"]
-		and _action(player, dummy, &"treat").items.all(func(e: Dictionary) -> bool: return e.item == WoundModel.IO_KIT or WoundModel.IV_GAUGES.has(e.item)),
-		"downed dummy in cardiac arrest: Check condition, and Treat offers only a line (%s)" % [_ids(player, dummy)])
+		and _action(player, dummy, &"treat").items.all(func(e: Dictionary) -> bool: return e.item in [WoundModel.IO_KIT, WoundModel.BLANKET] or WoundModel.IV_GAUGES.has(e.item)),
+		"downed dummy in cardiac arrest: Check condition, and Treat offers only a line and a blanket (%s)" % [_ids(player, dummy)])
 	player.inventory.take(&"iv_18")
 	player.inventory.take(&"io_kit")
 	var lines: Array = _action(player, dummy, &"treat").items.map(func(e: Dictionary) -> String: return e.label)
-	check(lines == ["IO Kit (Sternal), sternum", "IV Catheter (18G), left forearm"], "with an IO kit and an IV in the kit, one entry each, IO first in arrest (%s)" % [lines])
+	check(lines == ["IO Kit (Sternal), sternum", "IV Catheter (18G), left forearm", "Hypothermia Blanket, torso"],
+		"with an IO kit and an IV in the kit, one entry each, IO first in arrest (%s)" % [lines])
 	check(_ids(player, hostile) == [&"carry", &"drag", &"check_condition"], "downed enemy: Carry, Drag, Check condition (%s)" % [_ids(player, hostile)])
 	var report := InteractionMenu.perform(player, _action(player, alpha, &"check_condition"))
 	check(report.begins_with("Alpha: " + alpha.vitals.condition_text()) and report.contains("\n"), "Check condition reads condition and wounds (%s)" % report.replace("\n", " | "))
@@ -242,7 +244,8 @@ func _test_carry_and_drag() -> void:
 	check(player.carry_mode == Soldier.DRAG, "Drag takes hold of a body directly")
 	player.set_physics_process(true)  # the host keeps a player's casualty with them
 	alpha.vitals.server_reset_health()
-	await _frames(3)
+	for i in 3:  # physics frames: the host's update runs in the player's physics step
+		await get_tree().physics_frame
 	player.set_physics_process(false)
 	_place_player()
 	check(player.carrying == null and player.carry_mode == &"", "a body that gets up is let go (host update for players)")

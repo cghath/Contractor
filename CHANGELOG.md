@@ -11,6 +11,42 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Wave 3, part 4: surgery kits and the other damage
+
+#### Added
+
+- **Surgery kits** with 2, 3 or 5 uses (common, uncommon, rare). One use is a hemostat
+  clamp (about 20 s, players and medics only). It is the only fix for internal bleeding
+  from the torso arteries and veins, and it also works on junctional and arterial bleeds.
+  It can close a chest wound in place of a seal, but a closed chest wound has a 10% chance
+  to reopen each time the casualty sprints, jumps or sets off under an extreme load, which
+  brings back the open wound and its tension risk.
+- **Blast overpressure** within 5 m of a frag (10 m indoors): ears ringing for 20 to 60 s,
+  a concussion check, some bruising and a small chance of **blast lung**. Blast lung slowly
+  fills both lungs and has no field fix: it needs evacuation. Within 2 m the blast also
+  burns.
+- **Falls:** nothing under 3 m. From 3 to 6 m, leg pain and a 30 to 70% chance of a broken
+  leg. Above 6 m the fall is more and more likely to be fatal (90% from 10 m).
+- **Burns:** pain by the share of the body burned. Over 20% they also lose fluid like
+  bleeding, which IV fluids replace. **Burn dressings** (5 s) take some pain off, one per
+  10% of the body burned.
+- **Hypothermia:** 30% or more blood lost and lying still for 5 minutes makes bleeding 25%
+  faster. A **hypothermia blanket** (5 s) stops it, and medics put one on after the bags.
+- **Deafness:** blasts, flashbangs (3 to 6 s) and sustained gunfire indoors (30 s, after
+  about ten shots close by) muffle hearing through a low-pass on the sound bus, with an
+  "Ears ringing" note. **Electronic ear protection** (carried) stops flashbang and gunfire
+  deafness and halves a blast's.
+- Checking someone shows "Coughing blood" (blast lung), "Shivering, skin cold", "Burns over
+  about N% of the body" and, on yourself, "Ears ringing". Clamped and surgically closed
+  wounds say so.
+- The medic's kit adds a 3-use surgery kit, two burn dressings and a blanket. The gate loot
+  has a 2-use and a 5-use surgery kit, burn dressings, blankets and ear protection.
+
+#### Fixed
+
+- The interaction test waited 3 process frames for the host's carry update, which runs in
+  the physics step, so it sometimes failed on a fast machine. It now waits physics frames.
+
 ### Wave 3, part 3: heart rate, drugs, CPR and the defibrillator
 
 #### Added

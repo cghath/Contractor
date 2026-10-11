@@ -318,13 +318,69 @@ const HR_RESTART := 60.0
 ## it themselves once the obstruction is all that keeps them out; out longer, only an NPA does.
 const AIRWAY_BLOCK_PER_MIN := 0.1
 const AIRWAY_SELF_CLEAR_S := 45.0
-## Bleeding the field kit can control. Internal (torso) bleeding waits for wave 3's surgery
-## kit, so care_tasks() never asks for an item for it.
+## Bleeding the everyday kit (IFAK) can control. Internal (torso) bleeding only stops under a
+## surgery kit's clamp (players and medics), so it stays out of injury() (what AI treats
+## itself for).
 const FIXABLE_BLEEDS: Array[String] = ["arterial", "junctional", "venous", "muscle", "graze"]
 const BANDAGED_KINDS: Array[String] = ["venous", "muscle", "graze"]
 ## Countdowns that clients run down between updates (to_net "t").
 const TIMERS: Array[String] = ["arrest_left", "concussion_left", "knockout_left", "winded_left", "stagger_left",
-	"treating_left", "wake_left"]
+	"treating_left", "wake_left", "deaf_left"]
+
+## --- Surgery kit (design doc "Surgery kit"; proposed values) ---
+## One use of a kit is a SURGICAL_CLAMP (kits hold 2, 3 or 5): about 20 s, players and medics
+## only. It clamps an internal (torso) artery or vein, or a junctional or arterial bleed, or
+## closes a chest wound in place of a seal. A closed chest wound reopens with CHEST_REOPEN_CHANCE
+## each time the casualty exerts themselves (sprints, jumps, moves under an extreme load:
+## exert), which brings back the open wound and its tension risk.
+const SURGICAL_CLAMP := &"surgical_clamp"
+const CLAMPED_KINDS: Array[String] = ["internal", "junctional", "arterial"]
+const CHEST_REOPEN_CHANCE := 0.1
+
+## --- Other damage (design doc "Other damage"; proposed values) ---
+## Overpressure from a blast within BLAST_RADIUS (doubled indoors): deafness for 20 to 60 s by
+## closeness, a concussion check (BLAST_CONCUSSION_CHANCE at the centre) and a small chance of
+## blast lung, which slowly fills both lungs (BLAST_LUNG_FLUID_PER_S up to BLAST_LUNG_MAX) and
+## has no field fix. Close blasts (within BURN_RADIUS) also burn.
+const BLAST_RADIUS := 5.0
+const BLAST_DEAF_S := Vector2(20.0, 60.0)
+const BLAST_CONCUSSION_CHANCE := 0.5
+const BLAST_LUNG_CHANCE := 0.15
+const BLAST_LUNG_FLUID_PER_S := 0.002
+const BLAST_LUNG_MAX := 0.5
+const BLAST_IMPACT := 0.25
+const BURN_RADIUS := 2.0
+const BLAST_BURN := Vector2(0.05, 0.25)    # share of the body burned at the edge / the centre
+## Falls: nothing under FALL_SAFE_M; to FALL_HARD_M, leg pain and a fracture chance rising
+## from 30% to 70%; above FALL_FATAL_M likely fatal (the chance rises to FALL_FATAL_CHANCE
+## between FALL_HARD_M and FALL_FATAL_M).
+const FALL_SAFE_M := 3.0
+const FALL_HARD_M := 6.0
+const FALL_FATAL_M := 10.0
+const FALL_FRACTURE_CHANCE := Vector2(0.3, 0.7)
+const FALL_PAIN := Vector2(0.2, 0.5)
+const FALL_FATAL_CHANCE := 0.9
+## Burns, as a share of the body: pain BURN_PAIN per share (eased BURN_DRESSING_PAIN per
+## dressing, up to the burned share / BURN_PER_DRESSING dressings); over BURN_FLUID_FROM, fluid
+## loss like bleeding at BURN_FLUID_RATE L/min per share past it. IV fluids replace it.
+const BURN_DRESSING := &"burn_dressing"
+const BURN_PAIN := 1.2
+const BURN_DRESSING_PAIN := 0.15
+const BURN_PER_DRESSING := 0.1
+const BURN_FLUID_FROM := 0.2
+const BURN_FLUID_RATE := 0.5
+## Hypothermia: HYPOTHERMIA_LOST or more lost and lying still for HYPOTHERMIA_STILL_S: bleeding
+## HYPOTHERMIA_BLEED times faster, until a blanket goes on.
+const BLANKET := &"hypothermia_blanket"
+const HYPOTHERMIA_LOST := 0.3
+const HYPOTHERMIA_STILL_S := 300.0
+const HYPOTHERMIA_BLEED := 1.25
+## Indoor gunfire: each shot heard indoors close by adds 1 to a noise level that fades
+## NOISE_FADE_PER_S; past NOISE_DEAF, muffled hearing for NOISE_DEAF_S. Flashbangs deafen for
+## 3 to 6 s. Electronic ear protection prevents both and halves blast deafness.
+const NOISE_FADE_PER_S := 1.0
+const NOISE_DEAF := 10.0
+const NOISE_DEAF_S := 30.0
 
 ## Impact (shock) from rounds armor stopped. Helmet values are the design doc's table. Plate
 ## (torso) values are Captain's playtest calls: one or two stops are a bruise, but a burst
@@ -418,6 +474,17 @@ var heart_rate := HR_REST
 var drug_level := {&"epinephrine": 0.0, &"atropine": 0.0, &"adenosine": 0.0}
 var drug_depot := {&"epinephrine": 0.0, &"atropine": 0.0, &"adenosine": 0.0}
 var _hr_danger_s := 0.0         # time spent racing or too slow (host only)
+## Hearing muffled (seconds left), and the indoor gunfire noise level building toward it.
+var deaf_left := 0.0
+var noise := 0.0
+## Blast lung: both lungs slowly fill (see BLAST_LUNG_CHANCE).
+var blast_lung := false
+## Share of the body burned (0 to 1), and burn dressings on.
+var burn := 0.0
+var burn_dressings := 0
+## Seconds lying still (host: Vitals reports movement), and a hypothermia blanket is on.
+var still_s := 0.0
+var blanket := false
 
 
 # --- Queries --------------------------------------------------------------------------
@@ -503,9 +570,30 @@ func cardiac_output() -> float:
 	return 0.0 if arrest or dead else blood
 
 
-## Blood actually leaving the body now, in L/min.
+## Blood actually leaving the body now, in L/min: the wounds by what the heart pushes out
+## (faster when hypothermic), plus fluid lost to burns.
 func bleed_rate() -> float:
-	return wound_bleed_rate() * cardiac_output()
+	return wound_bleed_rate() * cardiac_output() * (HYPOTHERMIA_BLEED if hypothermic() else 1.0) + burn_fluid_rate()
+
+
+## Fluid lost to burns over BURN_FLUID_FROM of the body, in L/min.
+func burn_fluid_rate() -> float:
+	return maxf(burn - BURN_FLUID_FROM, 0.0) * BURN_FLUID_RATE if not dead else 0.0
+
+
+## Pain from burns still undressed.
+func burn_pain() -> float:
+	return maxf(BURN_PAIN * burn - BURN_DRESSING_PAIN * burn_dressings, 0.0)
+
+
+## Burn dressings that would still help (one per BURN_PER_DRESSING of the body burned).
+func burn_dressings_needed() -> int:
+	return maxi(ceili(burn / BURN_PER_DRESSING - 0.001) - burn_dressings, 0)
+
+
+## Lost HYPOTHERMIA_LOST or more and lying still for HYPOTHERMIA_STILL_S, with no blanket.
+func hypothermic() -> bool:
+	return not blanket and not dead and lost() >= HYPOTHERMIA_LOST and still_s >= HYPOTHERMIA_STILL_S
 
 
 func has_fracture(bones: Array, untreated_only: bool) -> bool:
@@ -725,10 +813,10 @@ func turn_mult() -> float:
 	return CONCUSSION_TURN if concussion_left > 0.0 else 1.0
 
 
-## Pain morphine can take off: wound and impact pain, not the floors that fractures keep
-## (or what tourniquets add).
+## Pain morphine can take off: wound, impact and undressed burn pain, not the floors that
+## fractures keep (or what tourniquets add).
 func reducible_pain() -> float:
-	return clampf(pain_wounds + impact, 0.0, 1.0)
+	return clampf(pain_wounds + impact + burn_pain(), 0.0, 1.0)
 
 
 ## What the kit can still fix, 0 to 1: the worse of bleeding it could stop (an unsealed
@@ -844,14 +932,16 @@ func care_tasks() -> Array[Dictionary]:
 				tourniquet_parts[w.part] = true
 				tasks.append(_task(w.part, "arterial", TOURNIQUET))
 		elif w.kind == "junctional" or w.kind == "arterial":
-			tasks.append(_task(w.part, w.kind, HEMOSTATIC_GAUZE))
+			tasks.append(_task(w.part, w.kind, &"", _options(HEMOSTATIC_GAUZE, SURGICAL_CLAMP)))
+		elif w.kind == "internal":
+			tasks.append(_task(w.part, "internal", SURGICAL_CLAMP))
 	if unconscious and not arrest and not npa:
 		tasks.append(_task(&"head", "airway", NPA))
 	if has_tension():
 		tasks.append(_task(&"chest", "tension", NEEDLE))
 	for w: Dictionary in by_rate:
 		if w.kind == "chest" and not w.treated:
-			tasks.append(_task(w.part, "chest", CHEST_SEAL))
+			tasks.append(_task(w.part, "chest", &"", _options(CHEST_SEAL, SURGICAL_CLAMP)))
 	for w: Dictionary in by_rate:
 		if String(w.kind) in BANDAGED_KINDS and rate_now(w) > 0.0:
 			tasks.append(_task(w.part, w.kind, PRESSURE_BANDAGE))
@@ -863,6 +953,8 @@ func care_tasks() -> Array[Dictionary]:
 			tasks.append(_task(access.part, "fluids", &"", bag_options()))
 		if veins_collapsed() and not access.pressure:
 			tasks.append(_task(access.part, "pressure", PRESSURE_BAG))
+	if not blanket and lost() >= HYPOTHERMIA_LOST and (unconscious or still_s >= HYPOTHERMIA_STILL_S * 0.5):
+		tasks.append(_task(&"torso", "hypothermia", BLANKET))
 	if arrest and can_restart():  # blood back: epinephrine, then shocks and CPR until it beats
 		if drug_total(EPINEPHRINE) < 0.5:
 			tasks.append(_task(&"torso", "epinephrine", EPINEPHRINE))
@@ -878,6 +970,8 @@ func care_tasks() -> Array[Dictionary]:
 	for w: Dictionary in by_rate:
 		if w.kind == "fracture" and not w.treated:
 			tasks.append(_task(w.part, "fracture", SPLINT))
+	if burn_dressings_needed() > 0:
+		tasks.append(_task(&"torso", "burn", BURN_DRESSING))
 	if not arrest and morphine_room() and (pain_to_ease() >= MORPHINE_FROM_PAIN or _untreated_rib()):
 		tasks.append(_task(&"torso", "pain", MORPHINE))
 	return tasks
@@ -907,6 +1001,12 @@ func treatment_problem(item: StringName, part: StringName) -> String:
 		return "" if can_restart() else "Get blood back in first: an empty heart can't restart"
 	if DRUGS.has(item):
 		return ""
+	if item == SURGICAL_CLAMP:
+		return "" if not _clamp_target(part).is_empty() else "Nothing to clamp or close there"
+	if item == BURN_DRESSING:
+		return "" if burn_dressings_needed() > 0 else "No burns left to dress"
+	if item == BLANKET:
+		return "Already wrapped in a blanket" if blanket else ""
 	match item:
 		TOURNIQUET:
 			if not LIMB_BELOW.has(part):
@@ -960,6 +1060,18 @@ func apply_item(item: StringName, part: StringName, rushed := false) -> bool:
 			access = {"kind": "io", "gauge": 0, "part": IO_PART, "pressure": false}
 		PRESSURE_BAG:
 			access.pressure = true
+		SURGICAL_CLAMP:  # hemostats on the worst bleed there, or the chest wound closed
+			var w := _clamp_target(part)
+			w.treated = true
+			if w.kind == "chest":
+				w.closed = true
+				w.tension_in = -1.0
+			else:
+				w.clamped = true
+		BURN_DRESSING:
+			burn_dressings += 1
+		BLANKET:
+			blanket = true
 		CPR, DEFIBRILLATOR:  # a cycle or a shock: a chance the heart starts again
 			if care_rng.randf() < restart_chance(item):
 				_restart_heart()
@@ -1028,6 +1140,104 @@ func remove_tourniquets(part: StringName) -> int:
 	tourniquets.erase(part)
 	update_state(0.0)
 	return count
+
+
+## What one surgical clamp on `part` would do: the worst bleeding internal, junctional or
+## arterial wound there, else an open chest wound to close; {} for nothing.
+func _clamp_target(part: StringName) -> Dictionary:
+	var best := {}
+	for w in wounds:
+		if w.part == part and String(w.kind) in CLAMPED_KINDS and is_bleeding(w) \
+				and (best.is_empty() or float(w.rate) > float(best.rate)):
+			best = w
+	if not best.is_empty():
+		return best
+	for w in wounds:
+		if w.part == part and w.kind == "chest" and not w.treated:
+			return w
+	return {}
+
+
+## Host only. The casualty exerted themselves (sprinted, jumped, moved under an extreme
+## load): each chest wound closed with a clamp reopens with CHEST_REOPEN_CHANCE, open again
+## with its tension risk. Returns how many reopened.
+func exert() -> int:
+	var reopened := 0
+	for w in wounds:
+		if w.kind == "chest" and w.get("closed", false) and w.treated and care_rng.randf() < CHEST_REOPEN_CHANCE:
+			w.treated = false
+			w.closed = false
+			if rng.randf() < TENSION_CHANCE:
+				w.tension_in = rng.randf_range(TENSION_DELAY_S.x, TENSION_DELAY_S.y)
+			reopened += 1
+	if reopened > 0:
+		update_state(0.0)
+	return reopened
+
+
+## Host only. A blast `distance` metres away within `radius` (BLAST_RADIUS, doubled indoors):
+## overpressure (deafness, a concussion check, a chance of blast lung, some impact) and, up
+## close, burns. `ear_pro` (electronic ear protection) halves the deafness.
+func add_blast(distance: float, radius: float, ear_pro := false) -> void:
+	if dead or distance > radius:
+		return
+	var closeness := clampf(1.0 - distance / radius, 0.0, 1.0)
+	deaf_left = maxf(deaf_left, lerpf(BLAST_DEAF_S.x, BLAST_DEAF_S.y, closeness) * (0.5 if ear_pro else 1.0))
+	impact = minf(impact + BLAST_IMPACT * closeness, 1.0)
+	if rng.randf() < BLAST_CONCUSSION_CHANCE * closeness:
+		_concuss()
+	if rng.randf() < BLAST_LUNG_CHANCE * closeness:
+		blast_lung = true
+	if distance < BURN_RADIUS:
+		burn = minf(burn + lerpf(BLAST_BURN.x, BLAST_BURN.y, 1.0 - distance / BURN_RADIUS), 1.0)
+	update_state(0.0)
+
+
+## Host only. A fall (or being thrown) from `height` metres: see FALL_SAFE_M.
+func add_fall(height: float) -> void:
+	if dead or height < FALL_SAFE_M:
+		return
+	if height > FALL_HARD_M:
+		var fatal := FALL_FATAL_CHANCE * clampf((height - FALL_HARD_M) / (FALL_FATAL_M - FALL_HARD_M), 0.0, 1.0)
+		if rng.randf() < fatal:
+			kill()
+			return
+	var t := clampf((height - FALL_SAFE_M) / (FALL_HARD_M - FALL_SAFE_M), 0.0, 1.0)
+	pain_wounds = minf(pain_wounds + lerpf(FALL_PAIN.x, FALL_PAIN.y, t), 1.0)
+	if rng.randf() < lerpf(FALL_FRACTURE_CHANCE.x, FALL_FRACTURE_CHANCE.y, t):
+		var bone: StringName = BodyMap.LEG_BONES[rng.randi() % BodyMap.LEG_BONES.size()]
+		if not has_fracture([bone], false):
+			_add_wound(BodyMap.BONES[bone][3], "fracture", FEMUR_RATE if String(bone).begins_with("femur") else 0.0, bone)
+	update_state(0.0)
+
+
+## Host only. Burns over `share` of the body (fire, burning vehicles).
+func add_burn(share: float) -> void:
+	if dead:
+		return
+	burn = clampf(burn + share, 0.0, 1.0)
+	update_state(0.0)
+
+
+## Host only. A shot fired indoors close by (`amount` 1 per shot); past NOISE_DEAF the hearing
+## is muffled for NOISE_DEAF_S. Nothing with ear protection.
+func add_noise(amount: float, ear_pro := false) -> void:
+	if dead or ear_pro:
+		return
+	noise += amount
+	if noise >= NOISE_DEAF:
+		deaf_left = maxf(deaf_left, NOISE_DEAF_S)
+
+
+## Host only. A flashbang's ringing ears for `seconds` (none with ear protection).
+func deafen(seconds: float, ear_pro := false) -> void:
+	if not dead and not ear_pro:
+		deaf_left = maxf(deaf_left, seconds)
+
+
+func _options(a: StringName, b: StringName) -> Array[StringName]:
+	var out: Array[StringName] = [a, b]
+	return out
 
 
 func _task(part: StringName, kind: String, item: StringName, options: Array[StringName] = []) -> Dictionary:
@@ -1225,6 +1435,13 @@ func reset() -> void:
 	_low_spo2_s = 0.0
 	_out_s = 0.0
 	_pain_over_s = 0.0
+	deaf_left = 0.0
+	noise = 0.0
+	blast_lung = false
+	burn = 0.0
+	burn_dressings = 0
+	still_s = 0.0
+	blanket = false
 	heart_rate = HR_REST
 	_hr_danger_s = 0.0
 	for id: StringName in DRUGS:
@@ -1241,6 +1458,8 @@ func advance(dt: float) -> void:
 	knockout_left = maxf(knockout_left - dt, 0.0)
 	winded_left = maxf(winded_left - dt, 0.0)
 	stagger_left = maxf(stagger_left - dt, 0.0)
+	deaf_left = maxf(deaf_left - dt, 0.0)
+	noise = maxf(noise - NOISE_FADE_PER_S * dt, 0.0)
 	treating_left = maxf(treating_left - dt, 0.0)
 	pain_wounds = maxf(pain_wounds - PAIN_FADE_PER_S * dt, 0.0)
 	impact = maxf(impact - IMPACT_FADE_PER_S * dt, 0.0)
@@ -1280,6 +1499,9 @@ func advance(dt: float) -> void:
 			kill()  # no heart rate when the window ran out
 			return
 	_update_airway(dt)
+	if blast_lung:  # no field fix: both lungs slowly fill
+		for lung in LUNGS:
+			lung_fluid[lung] = minf(float(lung_fluid[lung]) + BLAST_LUNG_FLUID_PER_S * dt, maxf(float(lung_fluid[lung]), BLAST_LUNG_MAX))
 	_advance_lungs(dt)
 	_advance_spo2(dt)
 	_advance_trauma(dt)
@@ -1327,10 +1549,12 @@ func update_state(dt: float) -> void:
 func to_net() -> Dictionary:
 	var list: Array = []
 	for w in wounds:
-		var wound_flags := (1 if w.get("packed", false) else 0) | (2 if w.get("tension", false) else 0)
+		var wound_flags := (1 if w.get("packed", false) else 0) | (2 if w.get("tension", false) else 0) \
+			| (4 if w.get("clamped", false) else 0) | (8 if w.get("closed", false) else 0)
 		list.append([String(w.part), w.kind, snappedf(float(w.rate), 0.001), 1 if w.treated else 0, String(w.name), wound_flags])
 	var flags := (1 if unconscious else 0) | (2 if arrest else 0) | (4 if dead else 0) | (16 if npa else 0) | (32 if airway_blocked else 0) \
-		| (64 if wake_left > 0.0 else 0) | (128 if _pain_over_s >= PAIN_KNOCKOUT_S - 0.001 else 0)
+		| (64 if wake_left > 0.0 else 0) | (128 if _pain_over_s >= PAIN_KNOCKOUT_S - 0.001 else 0) \
+		| (256 if hypothermic() else 0) | (512 if blast_lung else 0) | (1024 if blanket else 0)
 	var timers := {}
 	for key: String in TIMERS:
 		if float(get(key)) > 0.0:
@@ -1345,7 +1569,7 @@ func to_net() -> Dictionary:
 		"v": [] if infusion.is_empty() else [String(infusion.item), int(infusion.ml), snappedf(float(infusion.left), 1.0)],
 		"l": [snappedf(float(lung_collapse[LUNGS[0]]), 0.01), snappedf(float(lung_fluid[LUNGS[0]]), 0.01),
 			snappedf(float(lung_collapse[LUNGS[1]]), 0.01), snappedf(float(lung_fluid[LUNGS[1]]), 0.01)],
-		"h": snappedf(heart_rate, 1.0), "g": _drugs_net()}
+		"h": snappedf(heart_rate, 1.0), "g": _drugs_net(), "u": [snappedf(burn, 0.01), burn_dressings]}
 
 
 func _drugs_net() -> Dictionary:
@@ -1386,12 +1610,19 @@ func apply_net(state: Dictionary) -> void:
 	npa = flags & 16 != 0
 	airway_blocked = flags & 32 != 0
 	_pain_over_s = PAIN_KNOCKOUT_S if flags & 128 != 0 else 0.0
+	blast_lung = flags & 512 != 0
+	blanket = flags & 1024 != 0
+	still_s = HYPOTHERMIA_STILL_S if flags & 256 != 0 else 0.0  # clients only need hypothermic()
+	var burns: Array = state.get("u", [0.0, 0])
+	burn = float(burns[0])
+	burn_dressings = int(burns[1])
 	wounds.clear()
 	for entry: Array in state.get("w", []):
 		var wound_flags := int(entry[5]) if entry.size() > 5 else 0
 		wounds.append({"part": StringName(entry[0]), "kind": String(entry[1]), "rate": float(entry[2]),
 			"treated": int(entry[3]) != 0, "name": StringName(entry[4]), "packed": wound_flags & 1 != 0,
-			"tension": wound_flags & 2 != 0, "tension_in": -1.0, "arrest_in": -1.0})
+			"tension": wound_flags & 2 != 0, "clamped": wound_flags & 4 != 0, "closed": wound_flags & 8 != 0,
+			"tension_in": -1.0, "arrest_in": -1.0})
 	tourniquets.clear()
 	var tq: Dictionary = state.get("q", {})
 	for part: String in tq:

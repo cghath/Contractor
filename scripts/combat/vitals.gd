@@ -65,6 +65,8 @@ const ARREST_WINDOW_S := WoundModel.ARREST_WINDOW_S
 ## Host simulation step and the shortest gap between routine net_state updates.
 const SIM_STEP_S := 0.1
 const NET_INTERVAL_S := 0.5
+## Moving slower than this (m/s) counts as lying still, for hypothermia.
+const STILL_SPEED := 0.3
 ## Legacy damage (debug K key, old tests) as generic trauma: per point of damage, this much
 ## pain and this share of blood volume lost at once (K twice at 40 knocks you out).
 const TRAUMA_PAIN_PER_DAMAGE := 0.01
@@ -98,6 +100,7 @@ var care_rng: RandomNumberGenerator:
 var _model := WoundModel.new()
 var _last_hit_at := -1000.0   # host: when a round or impact last landed (Time seconds)
 var _net_dirty := false       # clients: net_state not yet applied to _model
+var _last_pos := Vector3.INF  # host: where the body was last step (_track_stillness)
 var _sim_left := 0.0          # host: time not yet simulated
 var _published := {}          # host: last published state without countdowns
 var _published_at := -1000.0
@@ -270,6 +273,72 @@ func can_restart_heart() -> bool:
 	return _m().can_restart()
 
 
+## Seconds of muffled hearing left (blasts, flashbangs, indoor gunfire); 0 when fine.
+func deaf_left() -> float:
+	return _m().deaf_left
+
+
+## Share of the body burned, 0 to 1.
+func burn_share() -> float:
+	return _m().burn
+
+
+## Lying still after heavy blood loss with no blanket: bleeding faster.
+func hypothermic() -> bool:
+	return _m().hypothermic()
+
+
+## Blast lung: both lungs slowly fill (no field fix; needs evacuation).
+func has_blast_lung() -> bool:
+	return _m().blast_lung
+
+
+## A chest wound closed by surgery could reopen if the unit exerts themselves.
+func has_closed_chest() -> bool:
+	return _m().wounds.any(func(w: Dictionary) -> bool: return w.kind == "chest" and w.get("closed", false))
+
+
+## Host only. The unit exerted themselves (sprint, jump, moving under an extreme load): a
+## surgically closed chest wound may reopen. Returns whether one did.
+func server_exert() -> bool:
+	if _model.exert() <= 0:
+		return false
+	_after_change(true)
+	return true
+
+
+## Host only. A blast `distance` metres away (radius already doubled indoors); see
+## WoundModel.add_blast.
+func server_blast(distance: float, radius: float, ear_pro := false) -> void:
+	_model.add_blast(distance, radius, ear_pro)
+	_last_hit_at = Time.get_ticks_msec() / 1000.0
+	_after_change(true)
+
+
+## Host only. A fall from `height` metres (see WoundModel.add_fall).
+func server_fall(height: float) -> void:
+	_model.add_fall(height)
+	_after_change(true)
+
+
+## Host only. Burns over `share` of the body.
+func server_burn(share: float) -> void:
+	_model.add_burn(share)
+	_after_change(true)
+
+
+## Host only. A shot fired indoors close by (see WoundModel.add_noise).
+func server_noise(amount: float, ear_pro := false) -> void:
+	_model.add_noise(amount, ear_pro)
+	_publish(true)
+
+
+## Host only. A flashbang's ringing ears for `seconds` (none with ear protection).
+func server_deafen(seconds: float, ear_pro := false) -> void:
+	_model.deafen(seconds, ear_pro)
+	_publish(true)
+
+
 ## Morphine in the blood, in doses (one autoinjector is 1 once it has gone in over 30 s);
 ## it halves about every 12 minutes. Pain relief follows it; from 2.5 the casualty is
 ## sedated (out), past 3 breathing slows.
@@ -317,6 +386,17 @@ func signs(on_self := false) -> PackedStringArray:
 		out.append("Unresponsive")
 	if m.breathing_laboured():
 		out.append("Breathing laboured")
+	if m.blast_lung:
+		out.append("Coughing blood")
+	if m.hypothermic():
+		out.append("Shivering, skin cold")
+	elif m.blanket:
+		out.append("Wrapped in a blanket")
+	if m.burn > 0.0:
+		var dressed := " (%d dressed)" % m.burn_dressings if m.burn_dressings > 0 else ""
+		out.append("Burns over about %d%% of the body%s" % [roundi(m.burn * 100.0 / 5.0) * 5, dressed])
+	if on_self and m.deaf_left > 0.0:
+		out.append("Ears ringing")
 	var rate := m.respiratory_rate()
 	if not m.arrest and rate > WoundModel.RESP_FAST:
 		out.append("Breathing fast")
@@ -358,7 +438,8 @@ func signs(on_self := false) -> PackedStringArray:
 ## morphine), "rate" (L/min at full blood) and "name" (the vessel or bone, or empty). Also:
 ## "limb" (the limb segment a tourniquet for it goes on: its own part, or empty off the
 ## limbs), "tourniquet" (a tourniquet above or on it holds some of its bleeding),
-## "packed" (gauze in it) and "tension" (a chest wound's tension pneumothorax has started).
+## "packed" (gauze in it), "tension" (a chest wound's tension pneumothorax has started),
+## "clamped" (a surgical clamp holds it) and "closed" (a chest wound closed by surgery).
 func wound_list() -> Array[Dictionary]:
 	var m := _m()
 	var list: Array[Dictionary] = []
@@ -366,7 +447,8 @@ func wound_list() -> Array[Dictionary]:
 		list.append({"part": w.part, "kind": w.kind, "bleeding": m.rate_now(w) > 0.0,
 			"treated": w.treated, "rate": w.rate, "name": w.name,
 			"limb": w.part if WoundModel.LIMB_BELOW.has(w.part) else &"",
-			"tourniquet": m.tourniquet_factor(w.part) < 1.0, "packed": w.get("packed", false), "tension": w.get("tension", false)})
+			"tourniquet": m.tourniquet_factor(w.part) < 1.0, "packed": w.get("packed", false), "tension": w.get("tension", false),
+			"clamped": w.get("clamped", false), "closed": w.get("closed", false)})
 	return list
 
 
@@ -383,13 +465,15 @@ const TREATS := {
 	"fracture": &"splint", "airway": &"npa", "pain": &"morphine", "tension": &"decompression_needle",
 	"access": &"iv_18", "fluids": &"saline_500", "pressure": &"pressure_bag",  # the usual picks; see care_needed "items"
 	"epinephrine": &"epinephrine", "defib": &"defibrillator", "cpr": &"cpr", "racing": &"adenosine",
-	"slow_heart": &"atropine", "wake": &"epinephrine",
+	"slow_heart": &"atropine", "wake": &"epinephrine", "internal": &"surgical_clamp", "hypothermia": &"hypothermia_blanket",
+	"burn": &"burn_dressing",
 }
-## Casualty-care order: massive bleeding, airway, tension (the needle), chest, other bleeding, circulation (line,
-## bag, pressure bag), restarting a heart (epinephrine, shocks, CPR), the heart rate
-## (adenosine, atropine), fractures, pain, then epinephrine's wake-up roll.
-const CARE_ORDER := ["arterial", "junctional", "airway", "tension", "chest", "venous", "muscle", "graze", "access", "fluids",
-	"pressure", "epinephrine", "defib", "cpr", "racing", "slow_heart", "fracture", "pain", "wake"]
+## Casualty-care order: massive bleeding (internal bleeding under a surgical clamp), airway,
+## tension (the needle), chest, other bleeding, circulation (line, bag, pressure bag),
+## hypothermia (a blanket), restarting a heart (epinephrine, shocks, CPR), the heart rate
+## (adenosine, atropine), fractures, burns, pain, then epinephrine's wake-up roll.
+const CARE_ORDER := ["arterial", "junctional", "internal", "airway", "tension", "chest", "venous", "muscle", "graze", "access", "fluids",
+	"pressure", "hypothermia", "epinephrine", "defib", "cpr", "racing", "slow_heart", "fracture", "burn", "pain", "wake"]
 
 
 ## What still needs doing for this unit, most urgent first, in the casualty-care order: one
@@ -677,8 +761,20 @@ func _process(delta: float) -> void:
 	_sim_left = 0.0
 	if _model.dead:
 		return
+	_track_stillness(step)
 	_model.advance(step)
 	_after_change()
+
+
+## Host: how long the body has lain or stood still (hypothermia), from how far it moved.
+func _track_stillness(step: float) -> void:
+	var body := get_parent() as Node3D
+	if body == null or not body.is_inside_tree():
+		return
+	var pos := body.global_position
+	var moved := Vector2(pos.x - _last_pos.x, pos.z - _last_pos.z).length()
+	_last_pos = pos
+	_model.still_s = _model.still_s + step if moved < STILL_SPEED * step else 0.0
 
 
 ## Turns model changes into signals and replication.

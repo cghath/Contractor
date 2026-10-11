@@ -717,7 +717,7 @@ func _test_kit_economy() -> void:
 	var gut := _model(43)
 	gut.add_hit(Vitals.ABDOMEN, {"graze": false, "depth": 0.2, "vessels": [{"name": &"aorta", "kind": BodyMap.INTERNAL, "rate": 2.5, "share": 0.1}], "organs": [], "bones": []}, Vitals.PISTOL)
 	gut.pain_wounds = 0.1
-	check(gut.wound_bleed_rate() > 0.0 and gut.treatable() < 0.2 and gut.care_tasks().is_empty(), "internal bleeding: nothing in the kit fixes it, so nothing is asked for (treatable %.2f)" % gut.treatable())
+	check(gut.wound_bleed_rate() > 0.0 and gut.treatable() < 0.2 and gut.care_tasks().map(func(t: Dictionary) -> String: return t.kind) == ["internal"], "internal bleeding: nothing in the IFAK fixes it, only a surgery kit's clamp (treatable %.2f)" % gut.treatable())
 	var vitals := _vitals(47)
 	check(not vitals.needs_treatment(), "unhurt: not injured")
 	_shoot(vitals, Vitals.THIGH_R, Vector3(0.0578, 0.70, -0.11), Vitals.PISTOL)

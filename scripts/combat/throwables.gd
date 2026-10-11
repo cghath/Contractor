@@ -3,11 +3,13 @@ extends RefCounted
 ## Host-side grenade effects. Every peer simulates the flying grenade (see Grenade) for looks;
 ## only the host's copy detonates, and the effects reach everyone through CompoundLevel RPCs.
 ##
-## - Frag: 3 to 8 small fragment wounds (fewer chances further out) spread over the body
-##   parts each combatant has exposed to the blast (walls, other bodies and armor shield),
-##   plus a crater in voxel walls.
+## - Frag: overpressure within 5 m (10 m indoors: deafness, a concussion check, maybe blast
+##   lung; burns within 2 m), then 3 to 8 small fragment wounds (fewer chances further out)
+##   spread over the body parts each combatant has exposed to the blast (walls, other bodies
+##   and armor shield), plus a crater in voxel walls.
 ## - Flashbang: blinds players by how close it is and whether they were looking at it,
-##   and stuns AI soldiers.
+##   stuns AI soldiers, and deafens everyone close for 3 to 6 s.
+## Electronic ear protection (carried) stops flashbang and gunfire deafness and halves a blast's.
 ## - Smoke: a cloud that blocks AI line of sight (SmokeCloud.blocks) and the view, in the
 ##   grenade's colour (white, green, yellow, blue, purple) on every peer.
 
@@ -28,6 +30,40 @@ const FRAG_CARVE_M := 0.45
 const FLASH_RADIUS := 15.0
 const SHAKE_RADIUS := 30.0
 const WORLD_MASK := 1
+## Overpressure reaches WoundModel.BLAST_RADIUS, BLAST_INDOOR_MULT times that indoors (a
+## ceiling within INDOOR_CEILING_M overhead). A flashbang deafens for FLASH_DEAF_S by closeness.
+const BLAST_INDOOR_MULT := 2.0
+const INDOOR_CEILING_M := 4.0
+const FLASH_DEAF_S := Vector2(3.0, 6.0)
+## Gunfire indoors: everyone within GUNFIRE_NOISE_M of the shooter, indoors too, hears it.
+const GUNFIRE_NOISE_M := 8.0
+const EAR_PROTECTION := &"ear_protection"
+
+
+## Under a roof: something solid within INDOOR_CEILING_M straight overhead.
+static func indoors(world: World3D, pos: Vector3) -> bool:
+	return not clear_line(world, pos + Vector3.UP * 0.3, pos + Vector3.UP * INDOOR_CEILING_M)
+
+
+## Carries electronic ear protection (it works from the kit: no slot for it yet).
+static func has_ear_pro(body: Node) -> bool:
+	var inventory: Inventory = body.get(&"inventory") as Inventory
+	return inventory != null and inventory.count_of(EAR_PROTECTION) > 0
+
+
+## Host only. `shooter` fired a shot: indoors, everyone close by (indoors too) hears it in a
+## closed room (Vitals.server_noise; sustained fire muffles hearing).
+static func server_gunfire(shooter: Node3D) -> void:
+	var world := shooter.get_world_3d()
+	if not indoors(world, shooter.global_position):
+		return
+	for n in combatants(shooter.get_tree()):
+		var body := n as Node3D
+		var vitals := body.get_node_or_null(^"Vitals") as Vitals
+		if vitals == null or vitals.is_dead() or body.global_position.distance_to(shooter.global_position) > GUNFIRE_NOISE_M:
+			continue
+		if body == shooter or indoors(world, body.global_position):
+			vitals.server_noise(1.0, has_ear_pro(body))
 
 
 ## Everything a grenade can affect: players, dummies and AI soldiers.
@@ -67,13 +103,16 @@ static func server_detonate(level: CompoundLevel, kind: String, pos: Vector3, it
 
 static func _frag(level: CompoundLevel, pos: Vector3) -> void:
 	var centre := pos + Vector3.UP * 0.25
+	var blast_radius := WoundModel.BLAST_RADIUS * (BLAST_INDOOR_MULT if indoors(level.get_world_3d(), centre) else 1.0)
 	for n in combatants(level.get_tree()):
 		var body := n as Node3D
 		var vitals := body.get_node_or_null(^"Vitals") as Vitals
 		if vitals == null or vitals.is_dead():
 			continue
 		var d := centre.distance_to(body_point(body))
-		if d > FRAG_RADIUS:
+		if d <= blast_radius:
+			vitals.server_blast(d, blast_radius, has_ear_pro(body))  # overpressure (and burns up close)
+		if d > FRAG_RADIUS or vitals.is_dead():
 			continue
 		frag_body(body, vitals, centre, d)
 		if body.has_method(&"suppress"):
@@ -142,6 +181,9 @@ static func _flash(level: CompoundLevel, pos: Vector3) -> void:
 		var body := n as Node3D
 		var eye := body.global_position + Vector3.UP * 1.6
 		var d := centre.distance_to(eye)
+		var vitals := body.get_node_or_null(^"Vitals") as Vitals
+		if vitals and d <= FLASH_RADIUS:  # the bang deafens with or without a line of sight
+			vitals.server_deafen(lerpf(FLASH_DEAF_S.x, FLASH_DEAF_S.y, 1.0 - d / FLASH_RADIUS), has_ear_pro(body))
 		if d > FLASH_RADIUS or not clear_line(world, centre, eye):
 			continue
 		var amount := 1.0 - d / FLASH_RADIUS
