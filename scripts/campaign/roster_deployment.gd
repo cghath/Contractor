@@ -82,8 +82,8 @@ static func auto_squad(data: Dictionary, size: int, exclude: Array = []) -> Arra
 
 
 ## The member who fills a squad slot of `role` now: one of the deployment's squad not in the
-## zone already (`present`: member id -> true), who hasn't died or gone missing this
-## deployment. Their own role first; a medic slot takes anyone rather than stay empty, other
+## zone already (`present`: member id -> true), who hasn't died, gone missing or been wounded
+## out of it (stepped out hurt: Roster.is_available) this deployment. Their own role first; a medic slot takes anyone rather than stay empty, other
 ## slots prefer a non-medic. "" if nobody is left.
 static func member_for_slot(data: Dictionary, role: StringName, present: Dictionary) -> String:
 	var dep := active(data)
@@ -92,7 +92,7 @@ static func member_for_slot(data: Dictionary, role: StringName, present: Diction
 	var free: Array[String] = []
 	for mid: Variant in dep.squad:
 		var m := Roster.get_member(data, String(mid))
-		if not m.is_empty() and String(m.status) == Roster.READY and not present.has(String(mid)) and not dep.get("fallen", {}).has(String(mid)):
+		if not m.is_empty() and Roster.is_available(m) and not present.has(String(mid)) and not dep.get("fallen", {}).has(String(mid)):
 			free.append(String(mid))
 	for mid in free:
 		if StringName(Roster.get_member(data, mid).role) == role:

@@ -6,10 +6,12 @@ extends Node
 ## line, a second process joining it as a client (it must see the same roster and stash, and
 ## hire through the host), the armory round trip, a deployment into the compound with the
 ## roster's own people in their own gear, extraction with one MIA and one killed, back to the
-## hub, and a save and reload. Exits with the number of failures.
+## hub, and a save and reload. A second client joins late, mid-deployment, with a plain
+## Join: it must land in the zone with the squad. Exits with the number of failures.
 ##
-## The client is this scene again with `-- --join 127.0.0.1 --expect <base64 JSON>`; it writes
-## its checks to a log the host prints.
+## The client is this scene again with `-- --join 127.0.0.1 --expect <base64 JSON>` (the late
+## joiner `-- --late --expect ...`: it joins through the menu); it writes its checks to a log
+## the host prints.
 
 const SEED := 4242
 ## Items the test stash holds besides the starting stash.
@@ -18,6 +20,8 @@ const EXTRA_STASH := [["m17", 1], ["burn_dressing", 3]]
 const CLIENT_HUB_DONE := "HUB CHECKS DONE"
 ## ...and once it has looked at the zone (the host extracts then).
 const CLIENT_ZONE_DONE := "ZONE CHECKS DONE"
+## The zone the test deploys to (its save is the campaign's: BaseHub.zone_save_id).
+const ZONE := "test_base_zone"
 
 var failures := 0
 var tag := OS.get_environment("CONTRACTOR_TEST_TAG")
@@ -31,11 +35,15 @@ func _ready() -> void:
 	get_tree().create_timer(600.0).timeout.connect(func() -> void:
 		_say("BASE TEST FAILED (timed out)")
 		get_tree().quit(99))
+	if "--late" in OS.get_cmdline_user_args():
+		await _run_late_client()
+		return
 	if "--join" in OS.get_cmdline_user_args():
 		await _run_client()
 		return
 	GameState.delete_save()
 	Campaign.reset_campaign()
+	_test_stash_and_saves()
 	_test_hiring()
 	_test_wages()
 	_test_growth()
@@ -44,7 +52,7 @@ func _ready() -> void:
 	_test_resolve()
 	_test_stand_ins()
 	await _test_session()
-	GameState.zone_id = "test_base_zone" + tag
+	GameState.zone_id = BaseHub.zone_save_id(ZONE + tag)
 	GameState.delete_save()
 	GameState.zone_id = "test_base" + tag
 	GameState.delete_save()
@@ -68,6 +76,41 @@ func _say(text: String) -> void:
 
 
 # --- The rules -------------------------------------------------------------------------------
+
+func _test_stash_and_saves() -> void:
+	print("The stash and the saves")
+	var stash: Array = []
+	var plate := ItemDB.get_item(&"plate_ceramic_l4")
+	BaseArmory.add(stash, &"plate_ceramic_l4", 1, plate.default_state())
+	BaseArmory.add(stash, &"plate_ceramic_l4", 2)
+	BaseArmory.add(stash, &"m4a1", 1, ItemDB.get_item(&"m4a1").default_state())
+	BaseArmory.add(stash, &"m4a1", 1)
+	check(stash.size() == 2 and stash.all(func(e: Dictionary) -> bool: return not e.has("state")) and BaseArmory.count_of(stash, &"plate_ceramic_l4") == 3,
+		"items in their default state stack with plain ones (as in an inventory)")
+	BaseArmory.add(stash, &"plate_ceramic_l4", 1, {"chips": [[1, 2]]})
+	check(stash.size() == 3 and BaseArmory.count_of(stash, &"plate_ceramic_l4") == 4, "a damaged plate keeps its own entry")
+	# A campaign never loaded is never saved (it would wipe the real save).
+	Campaign.reset_campaign()
+	BaseHub.server_save()
+	check(not FileAccess.file_exists(Campaign.save_path()), "no campaign loaded: nothing is saved over the save")
+	BaseHub.new_campaign(SEED)
+	check(BaseHub.zone_save_id("compound_01") != "compound_01" and BaseHub.base_zone_id().begins_with(Campaign.campaign_id),
+		"the campaign's zone saves are its own (%s)" % BaseHub.zone_save_id("compound_01"))
+	GameState.zone_id = BaseHub.zone_save_id("old_zone")
+	GameState.save_zone()
+	var path := GameState.save_path()
+	BaseHub.new_campaign(SEED)
+	check(not FileAccess.file_exists(path), "and a new campaign starts with none")
+	GameState.zone_id = "test_base" + tag
+	# Requests the host refuses.
+	BaseHub.campaign_running = true
+	var notes: Array = []
+	var on_note := func(text: String) -> void: notes.append(text)
+	BaseHub.note.connect(on_note)
+	BaseHub.request("pick", ["x"])
+	BaseHub.note.disconnect(on_note)
+	BaseHub.campaign_running = false
+	check(notes == ["Bad request"], "a request short of its arguments is refused (%s)" % ", ".join(PackedStringArray(notes)))
 
 func _test_hiring() -> void:
 	print("Hiring")
@@ -314,7 +357,7 @@ func _test_session() -> void:
 	var ids := Roster.ids(BaseHub.roster())
 	add_child(load("res://scenes/main.tscn").instantiate())
 	await get_tree().process_frame
-	BaseHub.prepare_session(true)
+	BaseHub.prepare_session()
 	$Main/Menu.host()
 	level = CompoundLevel.current(self)
 	check(level is BaseLevel, "the campaign starts at the base hub")
@@ -386,9 +429,9 @@ func _run_client() -> void:
 	Campaign.campaign_id = "test_base_client" + tag  # a client never saves, but keep apart anyway
 	BaseHub.local_profile = "client_profile"
 	add_child(load("res://scenes/main.tscn").instantiate())
-	await get_tree().process_frame
-	BaseHub.prepare_session(false)
-	$Main/Menu.join("127.0.0.1")
+	await get_tree().process_frame  # Main joined (--join on the command line): a plain Join, the host says where it is
+	var followed := await _wait_until(func() -> bool: return CompoundLevel.current(self) is BaseLevel and BaseHub.campaign_running, 30.0)
+	check(followed, "a plain Join follows the host to the base, in campaign mode")
 	level = CompoundLevel.current(self)
 	var got := await _wait_until(func() -> bool: return BaseHub.view.get("roster", {}).get("members", {}).size() == expect.callsigns.size(), 30.0)
 	var members: Dictionary = BaseHub.view.get("roster", {}).get("members", {})
@@ -566,7 +609,7 @@ func _test_deployment(client: Dictionary) -> void:
 		BaseHub.server_pick(mid, true)
 	var wage_a := int(BaseHub.member(a).wage)
 	var day := BaseHub.day()
-	var why := BaseHub.server_deploy({"zone_id": "test_base_zone" + tag})
+	var why := BaseHub.server_deploy({"zone_id": ZONE + tag})
 	check(why == "" and RosterDeployment.is_running(BaseHub.roster()), "deploy starts the deployment")
 	await _wait_until(func() -> bool: return not CompoundLevel.current(self) is BaseLevel, 10.0)
 	level = CompoundLevel.current(self)
@@ -576,12 +619,15 @@ func _test_deployment(client: Dictionary) -> void:
 	for s: Node in level.ai.get_children():
 		if (s as Soldier).faction == &"hostile":
 			s.queue_free()
+	if up:
+		await _late_joiner(squad.map(func(mid: String) -> String: return String(BaseHub.member(mid).callsign)))
+		up = await _wait_until(func() -> bool: return squad.all(func(mid: String) -> bool: return _roster_soldier(mid) != null) and _friendly_ai() == 3, 20.0)
+		check(up, "after the late joiner leaves, the squad is the three picked again (%d)" % _friendly_ai())
 	var sa := _roster_soldier(a)
 	if not up or sa == null:
 		return
 	check(String(sa.name) == callsign_a and sa.inventory.count_of(&"smoke_purple") == 1, "%s carries the smoke handed over at the base" % callsign_a)
-	check(level.ai.get_children().filter(func(n: Node) -> bool: return (n as Soldier).faction == &"friendly" and not n.is_queued_for_deletion()).size() == 3,
-		"only the three picked deploy: nobody else fills the other slots")
+	check(_friendly_ai() == 3, "only the three picked deploy: nobody else fills the other slots")
 	check(is_equal_approx(SquadAI.of(sa).combat, Roster.ai_stats(BaseHub.member(a)).combat), "their aim skill drives the AI (combat %.2f)" % SquadAI.of(sa).combat)
 	player = level.players.get_node(^"1")
 	check(player.inventory.slots[&"vest"] == &"plate_carrier" and player.inventory.slots[&"helmet"] == &"helmet", "the player deploys in the kit from the armory")
@@ -605,7 +651,7 @@ func _test_deployment(client: Dictionary) -> void:
 	check(report.get("extracted", []) == [a] and report.get("mia", []) == [b] and report.get("dead", []) == [c],
 		"extraction: %s back, %s MIA, %s killed" % [callsign_a, callsign_b, callsign_c])
 	check(String(BaseHub.member(b).status) == Roster.MIA and _recovery_requested(b), "the one left behind is MIA and a recovery contract is requested")
-	var zone_save: Variant = JSON.parse_string(FileAccess.get_file_as_string("%s/test_base_zone%s.json" % [GameState.SAVE_DIR, tag]))
+	var zone_save: Variant = JSON.parse_string(FileAccess.get_file_as_string("%s/%s.json" % [GameState.SAVE_DIR, BaseHub.zone_save_id(ZONE + tag)]))
 	var zone_bodies: Array = zone_save.get("bodies", []) if zone_save is Dictionary else []
 	check(String(BaseHub.member(c).status) == Roster.DEAD and (BaseHub.member(c).gear as Dictionary).is_empty()
 		and zone_bodies.any(func(r: Dictionary) -> bool: return String(r.get("label", "")) == callsign_c and not (r.get("gear", {}) as Dictionary).is_empty()),
@@ -637,6 +683,35 @@ func _test_deployment(client: Dictionary) -> void:
 	check(String(BaseHub.member(b).status) == Roster.MIA and String(BaseHub.member(c).status) == Roster.DEAD, "and so do MIA and KIA")
 
 
+## The late joiner (another process): joins the deployed host with a plain Join and checks it
+## is in the zone with everyone, then leaves.
+func _run_late_client() -> void:
+	var args := OS.get_cmdline_user_args()
+	var expect: Dictionary = JSON.parse_string(Marshalls.base64_to_utf8(args[args.find("--expect") + 1]))
+	_log = FileAccess.open(args[args.find("--log") + 1], FileAccess.WRITE)
+	Campaign.campaign_id = "test_base_late" + tag
+	BaseHub.local_profile = "late_profile"
+	add_child(load("res://scenes/main.tscn").instantiate())
+	await get_tree().process_frame
+	$Main/Menu.join("127.0.0.1")
+	var in_zone := await _wait_until(func() -> bool: return BaseHub.campaign_running and CompoundLevel.current(self) != null 		and multiplayer.multiplayer_peer.get_connection_status() == MultiplayerPeer.CONNECTION_CONNECTED, 30.0)
+	level = CompoundLevel.current(self)
+	check(in_zone and level != null and not level is BaseLevel, "the late joiner is in the zone, in campaign mode")
+	var mine := await _wait_until(func() -> bool: return level.players.get_node_or_null(str(multiplayer.get_unique_id())) != null, 30.0)
+	check(mine, "with its own player")
+	var squad_ok := await _wait_until(func() -> bool:
+		return expect.callsigns.all(func(c: String) -> bool: return level.ai.get_node_or_null(NodePath(c)) != null), 30.0)
+	check(squad_ok, "and the roster's people: %s" % ", ".join(PackedStringArray(expect.callsigns)))
+	var host_seen := await _wait_until(func() -> bool: return level.players.get_node_or_null(^"1") != null, 10.0)
+	check(host_seen, "and the host's player")
+	var view_ok := await _wait_until(func() -> bool: return not BaseHub.view.is_empty() and not bool(BaseHub.view.get("in_base", true)), 10.0)
+	check(view_ok, "the base screen's copy says the session is deployed")
+	_say("CLIENT %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
+	_log.close()
+	Net.leave()
+	get_tree().quit(failures)
+
+
 ## Waits until the client's log has `line` (or it has exited, or `timeout` passes).
 func _wait_client_line(client: Dictionary, line: String, timeout: float) -> bool:
 	var pid: int = client.get("pid", -1)
@@ -644,6 +719,32 @@ func _wait_client_line(client: Dictionary, line: String, timeout: float) -> bool
 		if pid <= 0 or not OS.is_process_running(pid):
 			return false
 		return FileAccess.file_exists(client.log) and FileAccess.get_file_as_string(client.log).contains(line), timeout)
+
+
+## Living friendly AI in the zone.
+func _friendly_ai() -> int:
+	return level.ai.get_children().filter(func(n: Node) -> bool:
+		return (n as Soldier).faction == &"friendly" and not n.is_queued_for_deletion() and not (n as Soldier).vitals.is_dead()).size()
+
+
+## A second client joins mid-deployment with a plain Join (it never saw the base): it must
+## land in the zone, in campaign mode, with its own player and the roster's people, then it
+## leaves. A squadmate whose slot it took steps out and comes back when it's gone.
+func _late_joiner(callsigns: Array) -> void:
+	print("A late joiner, mid-deployment")
+	var log_path := ProjectSettings.globalize_path("user://base_test_late%s.log" % tag)
+	if FileAccess.file_exists(log_path):
+		DirAccess.remove_absolute(log_path)
+	var args := ["--headless", "--path", ProjectSettings.globalize_path("res://"), "res://tests/base_test.tscn", "--", "--late",
+		"--expect", Marshalls.utf8_to_base64(JSON.stringify({"callsigns": callsigns})), "--log", log_path]
+	var pid := OS.create_process(OS.get_executable_path(), args)
+	check(pid > 0, "a late client process starts")
+	var added: Array[String] = []
+	var on_added := func(n: Node) -> void: added.append(String(n.name))
+	level.players.child_entered_tree.connect(on_added)
+	await _finish_client({"pid": pid, "log": log_path})
+	level.players.child_entered_tree.disconnect(on_added)
+	check(added.size() == 1 and added[0] != "1", "the host added the late joiner's player in the zone (%s)" % ", ".join(PackedStringArray(added)))
 
 
 func _roster_soldier(mid: String) -> Soldier:

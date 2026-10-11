@@ -18,13 +18,17 @@ const OVERFLOW_COLUMNS := 12
 
 
 ## Equal entries stack: same item and same state (plain items, magazines holding the same
-## rounds). Like Inventory, any other item with state (a carrier with its MOLLE pouches and
-## what's in them, a detached pouch with its contents, a damaged plate) keeps its own entry,
-## so it lies as its own item and comes back exactly as it went in.
+## rounds). As in Inventory._append, an item in its default state (an undamaged plate or
+## helmet, a full weapon) counts as plain. Any other item with state (a carrier with its MOLLE
+## pouches and what's in them, a detached pouch with its contents, a damaged plate) keeps its
+## own entry, so it lies as its own item and comes back exactly as it went in.
 static func add(stash: Array, id: StringName, count := 1, state := {}) -> void:
 	if count <= 0 or not ItemDB.has_item(id):
 		return
-	var stacks := state.is_empty() or ItemDB.get_item(id).type == "ammo"  # as Inventory._state_stacks
+	var item := ItemDB.get_item(id)
+	if not state.is_empty() and item.type != "ammo" and _same_state(state, item.default_state()):
+		state = {}
+	var stacks := state.is_empty() or item.type == "ammo"  # as Inventory._state_stacks
 	for entry: Dictionary in stash:
 		if stacks and String(entry.id) == String(id) and _same_state(entry.get("state", {}), state):
 			entry["count"] = int(entry.count) + count

@@ -15,11 +15,17 @@ extends Node
 ## - Level switching for the whole session (server_switch_level): every peer swaps the level
 ##   in place, players keep their gear across (their main character's, or their stand-in's).
 ##
-## Entry points: the main menu's campaign buttons (prepare_session), begin_prep() (the
+## Entry points: the main menu's campaign button (prepare_session), begin_prep() (the
 ## contract board, when a contract is accepted), server_deploy(), server_end_deployment() (the
 ## map's extraction), server_recover_member() / server_write_off_member() (recovery
 ## contracts). A non-campaign session (the compound as before, and every older suite) never
 ## sets campaign_running, so none of this touches it.
+##
+## Joining: the host decides which level a joining client plays in. While a client connects
+## (SceneMultiplayer's authentication step, before anything replicates to it) the host sends
+## its current level and whether a campaign is running; the client swaps to that level first
+## (_on_auth). So a plain Join reaches a campaign host at the base or deployed, and a late
+## joiner sees the same level as everyone else.
 
 ## The base screen's copy of the campaign changed (every peer).
 signal view_changed
@@ -33,7 +39,8 @@ signal level_switched(new_level: CompoundLevel)
 const BASE_SCENE := "res://scenes/levels/base_fob.tscn"
 const COMPOUND_SCENE := "res://scenes/levels/compound.tscn"
 const SQUAD_SIZE := CompoundLevel.SQUAD_SIZE
-## The zone a deployment goes to when nothing says otherwise.
+## The zone a deployment goes to when nothing says otherwise. A campaign's zone saves are its
+## own (zone_save_id), apart from the plain session's and other campaigns'.
 const DEFAULT_ZONE_ID := "compound_01"
 ## Proposed (design doc: "wages and upkeep are paid weekly, like MW5"): wages accrue daily
 ## and are paid every WAGE_PERIOD_DAYS.
@@ -50,6 +57,11 @@ const STARTING_STASH := [["plate_carrier", 2], ["plate_ceramic_l4", 4], ["helmet
 const DEBUG_EXTRACT_M := 60.0
 ## A level switch waits at most this long for clients to stop sending (server_switch_level).
 const SWITCH_WAIT_S := 1.0
+## How long a joining client may take to load the host's level before the host gives up on it.
+const AUTH_TIMEOUT_S := 15.0
+## A roster squadmate removed this frame comes back for a free slot after this long (their
+## body's name is taken until it's freed).
+const REFILL_RETRY_S := 0.2
 
 ## A campaign session is running (the hub or a deployment). Set on every peer.
 var campaign_running := false
@@ -70,15 +82,22 @@ var _switch_to := ""       # host: the level a switch is waiting to swap in
 var _switch_zone := ""     # host: and the zone save it goes with ("" keeps GameState.zone_id)
 var _switch_waiting := {}  # host: peers not ready for it yet
 var _switch_serial := 0
+var _zone_before := ""     # host: GameState.zone_id before the campaign took over (restored after)
 
 
 func _ready() -> void:
 	rng.randomize()
 	Net.joined.connect(_on_joined)
+	Net.join_failed.connect(_on_join_failed)
 	Net.peer_joined.connect(_on_peer_joined)
 	Net.peer_left.connect(_on_peer_left)
 	Net.session_ended.connect(_on_session_ended)
 	Campaign.changed.connect(func(_name: StringName) -> void: _queue_broadcast())
+	var api := multiplayer as SceneMultiplayer
+	if api:
+		api.auth_callback = _on_auth
+		api.auth_timeout = AUTH_TIMEOUT_S
+		api.peer_authenticating.connect(_on_peer_authenticating)
 
 
 # --- Campaign state -------------------------------------------------------------------------
@@ -109,10 +128,12 @@ func stash() -> Array:
 	return base()["stash"]
 
 
-## Host: a fresh campaign (the save for Campaign.campaign_id is deleted): day 1, the starting
-## stash, an empty roster and a hiring board drawn from `hiring_seed` (random if negative).
+## Host: a fresh campaign (the save for Campaign.campaign_id and its zone saves are deleted):
+## day 1, the starting stash, an empty roster and a hiring board drawn from `hiring_seed`
+## (random if negative).
 func new_campaign(hiring_seed := -1) -> void:
 	Campaign.reset_campaign()
+	_delete_zone_saves()
 	var b := base()
 	b["day"] = 1
 	b["stash"] = []
@@ -153,14 +174,34 @@ func load_or_new() -> void:
 	_changed_all()
 
 
-## Host: saves the campaign (the hub's stash and people read back first).
+## Host: saves the campaign (the hub's stash and people read back first). Never one that was
+## never loaded or started (no "day"): that would write an empty campaign over the save.
 func server_save() -> void:
+	if not base().has("day"):
+		push_warning("BaseHub: no campaign loaded; not saving over %s" % Campaign.save_path())
+		return
 	_read_back_base()
 	Campaign.save_campaign()
 
 
+## The zone save (GameState.zone_id) of the campaign's zone `zone_id`: each campaign keeps its
+## own zones, apart from the plain session's ("compound_01") and other campaigns'.
+func zone_save_id(zone_id: String) -> String:
+	return "%s__%s" % [Campaign.campaign_id, zone_id]
+
+
 func base_zone_id() -> String:
-	return "fob_" + Campaign.campaign_id
+	return zone_save_id("fob")
+
+
+## Deletes every zone save of the current campaign (zone_save_id).
+func _delete_zone_saves() -> void:
+	var prefix := zone_save_id("")
+	if not DirAccess.dir_exists_absolute(GameState.SAVE_DIR):
+		return
+	for file in DirAccess.get_files_at(GameState.SAVE_DIR):
+		if file.begins_with(prefix) and file.ends_with(".json"):
+			DirAccess.remove_absolute("%s/%s" % [GameState.SAVE_DIR, file])
 
 
 static func _empty_prep() -> Dictionary:
@@ -221,15 +262,37 @@ func campaign_squad() -> bool:
 	return campaign_running and multiplayer.is_server()
 
 
-## Main menu (before hosting or joining): this session is the campaign. Swaps the level for
-## the base hub; the host loads the campaign save (or starts one).
-func prepare_session(as_host: bool) -> void:
+## Main menu (before hosting): this session is the campaign. Loads the campaign save (or
+## starts one) and swaps the level for the base hub. Clients don't call this: they follow the
+## host when they join (_on_auth). Undo with cancel_session (hosting failed).
+func prepare_session() -> void:
+	if not campaign_running:
+		_zone_before = GameState.zone_id
 	campaign_running = true
-	if as_host:
-		load_or_new()
-		GameState.zone_id = base_zone_id()
+	load_or_new()
+	GameState.zone_id = base_zone_id()
 	if not in_base():
 		_swap_level(BASE_SCENE)
+
+
+## This machine leaves campaign mode outside a session (hosting or joining failed, or a plain
+## session starts): back to the plain compound and its zone save, with nothing of the
+## campaign left to save.
+func cancel_session() -> void:
+	if Net.is_hosting():
+		return
+	campaign_running = false
+	view = {}
+	_restore_zone_id()
+	var lvl := level()
+	if lvl and lvl.scene_file_path != COMPOUND_SCENE:
+		_swap_level(COMPOUND_SCENE)
+
+
+func _restore_zone_id() -> void:
+	if _zone_before != "":
+		GameState.zone_id = _zone_before
+		_zone_before = ""
 
 
 ## Host: every peer swaps the running level for `scene_path`; the new level then starts as if
@@ -260,6 +323,9 @@ func switch_pending() -> bool:
 
 
 func _do_switch() -> void:
+	# What players picked up or dropped at the hub while the switch waited counts (the stash
+	# poll stops while it waits, and server_deploy read the hub back before it).
+	_read_back_base()
 	var scene_path := _switch_to
 	_switch_to = ""
 	if _switch_zone != "":
@@ -357,7 +423,7 @@ func _read_back_base() -> void:
 
 
 func _process(delta: float) -> void:
-	if not campaign_running or not multiplayer.is_server() or not in_base():
+	if not campaign_running or not multiplayer.is_server() or not in_base() or switch_pending():
 		return
 	_stash_poll -= delta
 	if _stash_poll > 0.0:
@@ -391,6 +457,58 @@ func _player_count() -> int:
 
 func _on_joined() -> void:
 	_server_hello.rpc_id(1, profile())
+
+
+## Host: a client is connecting (nothing replicates to it yet): it is told the level the
+## session plays in now and whether it's a campaign (after a switch in progress, if any), and
+## let in. The client loads that level first (_on_auth).
+func _on_peer_authenticating(id: int) -> void:
+	if not multiplayer.is_server():
+		return
+	if switch_pending():
+		await level_switched
+	var api := multiplayer as SceneMultiplayer
+	if not id in api.get_authenticating_peers():
+		return  # gone meanwhile
+	var lvl := level()
+	var hello := {"scene": lvl.scene_file_path if lvl else "", "level": String(lvl.name) if lvl else "", "campaign": campaign_running}
+	if api.send_auth(id, JSON.stringify(hello).to_utf8_buffer()) == OK:
+		api.complete_auth(id)
+
+
+## Client (connecting): the host's level and campaign state. This machine swaps to that level
+## before the host lets it in, so everything the host spawns finds its place here.
+func _on_auth(id: int, data: PackedByteArray) -> void:
+	var api := multiplayer as SceneMultiplayer
+	if multiplayer.is_server():
+		return  # clients send nothing but their completion
+	# The host answered: normal timeouts from here (loading the level may take a moment).
+	var enet := multiplayer.multiplayer_peer as ENetMultiplayerPeer
+	if enet:
+		enet.get_peer(MultiplayerPeer.TARGET_PEER_SERVER).set_timeout(Net.ENET_TIMEOUT[0], Net.ENET_TIMEOUT[1], Net.ENET_TIMEOUT[2])
+	var hello: Variant = JSON.parse_string(data.get_string_from_utf8())
+	if hello is Dictionary:
+		_follow_host(String(hello.get("scene", "")), String(hello.get("level", "")), bool(hello.get("campaign", false)))
+	api.complete_auth(id)
+
+
+## Client: plays in the host's level `scene_path` (its root named `level_name`), in campaign
+## mode or not as the host is.
+func _follow_host(scene_path: String, level_name: String, campaign: bool) -> void:
+	campaign_running = campaign
+	if not campaign:
+		view = {}
+	var lvl := level()
+	if lvl == null or not scene_path.begins_with("res://scenes/levels/") or not ResourceLoader.exists(scene_path):
+		return
+	if lvl.scene_file_path != scene_path or String(lvl.name) != level_name:
+		_swap_level(scene_path)
+
+
+## Client: the connection failed (the menu may try again): nothing of a campaign stays.
+func _on_join_failed() -> void:
+	if campaign_running:
+		cancel_session()
 
 
 ## A client says which profile it plays (sent on join).
@@ -442,6 +560,7 @@ func _on_peer_left(id: int) -> void:
 func _on_session_ended() -> void:
 	campaign_running = false
 	view = {}
+	_restore_zone_id()
 	_profiles.clear()
 	_gear_applied.clear()
 
@@ -526,7 +645,7 @@ func server_deploy(options := {}) -> String:
 	RosterDeployment.begin(roster(), squad, zone_kind, zone_id, scene, day(), prep.get("contract", {}), stand_ins)
 	prep["contract"] = {}
 	_changed_all()
-	server_switch_level(scene, zone_id)
+	server_switch_level(scene, zone_save_id(zone_id))
 	return ""
 
 
@@ -558,17 +677,23 @@ func _pick_stand_ins(squad: Array) -> Dictionary:
 ## the body's name, their own gear and no role kit on top, their skills as AI stats. Null when
 ## nobody is left to fill it.
 func server_spawn_roster_squadmate(lvl: CompoundLevel, slot: int, role: StringName, team: int) -> Soldier:
+	# Who's in the zone already, and who was just removed (rebalance_squad: their body keeps
+	# its name, the callsign, until it's freed at the end of the frame).
 	var present := {}
+	var leaving := false
 	for n: Node in lvl.ai.get_children():
 		var s := n as Soldier
-		if s and s.has_meta(&"roster_id") and not s.is_queued_for_deletion() and not s.vitals.is_dead():
+		if s and s.has_meta(&"roster_id") and not s.vitals.is_dead():
 			present[String(s.get_meta(&"roster_id"))] = true
+			leaving = leaving or s.is_queued_for_deletion()
 	var mid := RosterDeployment.member_for_slot(roster(), role, present)
-	if mid == "":
+	if mid == "" or lvl.ai.get_node_or_null(NodePath(String(member(mid).callsign))) != null:
+		if leaving:  # one just removed may fill it once they're gone
+			get_tree().create_timer(REFILL_RETRY_S).timeout.connect(func() -> void:
+				if is_instance_valid(lvl) and lvl == level() and RosterDeployment.is_running(roster()):
+					lvl.rebalance_squad())
 		return null
 	var m := member(mid)
-	if lvl.ai.get_node_or_null(NodePath(String(m.callsign))) != null:
-		return null  # a node by that name is still there (freed this frame)
 	var squad := lvl.squad_for(&"friendly")
 	var anchor: Node3D = squad.leader if squad and is_instance_valid(squad.leader) else null
 	var wedge: Array = Squad.FORMATIONS["wedge"]
@@ -586,12 +711,14 @@ func server_spawn_roster_squadmate(lvl: CompoundLevel, slot: int, role: StringNa
 
 
 ## Host hook (CompoundLevel._remove_squadmate): a roster squadmate leaves the zone early (a
-## player took the slot): they keep their gear and didn't deploy after all.
+## player took the slot, or its role changed): they keep their gear and their wounds, and
+## didn't deploy after all. Unhurt, they may come back for another slot (refilled shortly).
 func server_squadmate_leaving(s: Soldier) -> void:
 	if not s.has_meta(&"roster_id") or not RosterDeployment.is_running(roster()):
 		return
 	var mid := String(s.get_meta(&"roster_id"))
 	server_store_member_gear(mid, s.inventory.net_state)
+	Roster.injure(member(mid), Roster.assess_outcome(_outcome_of(s)), day())
 	RosterDeployment.unmark_spawned(roster(), mid)
 	_changed(&"roster")
 
@@ -834,7 +961,8 @@ func _refresh_muster() -> void:
 
 ## Any peer: asks the host to do something at the base. `action`: "hire" [cid], "release"
 ## [mid], "medbay" [mid or "player:<key>"], "pick" [mid, bool], "role" [mid, role], "buy"
-## [item id, count], "rest" [days], "deploy" [], "save" []. The answer comes back as `note`.
+## [item id, count], "rest" [days], "deploy" [], "save" []; "deploy", "rest", "release" and
+## "save" only from the host. The answer comes back as `note`.
 func request(action: String, args: Array = []) -> void:
 	_server_request.rpc_id(1, action, args)
 
@@ -846,7 +974,12 @@ func _server_request(action: String, args: Array) -> void:
 	var sender := multiplayer.get_remote_sender_id()
 	var why := ""
 	var at_base := in_base() and not RosterDeployment.is_running(roster())
-	if action not in ["save"] and not at_base:
+	var needs: int = {"hire": 1, "release": 1, "medbay": 1, "pick": 2, "role": 2, "buy": 1}.get(action, 0)
+	if args.size() < needs:
+		why = "Bad request"
+	elif action in ["deploy", "rest", "release", "save"] and sender != 1:
+		why = "Only the host can do that"  # the company's big decisions are the host's
+	elif action not in ["save"] and not at_base:
 		why = "Only at the base"
 	else:
 		match action:
@@ -865,7 +998,7 @@ func _server_request(action: String, args: Array) -> void:
 			"rest":
 				server_advance_days(clampi(int(args[0]) if not args.is_empty() else 1, 1, 30))
 			"deploy":
-				why = "Only the host deploys" if sender != 1 else server_deploy()
+				why = server_deploy()
 			"save":
 				server_save()
 				why = "Campaign saved"

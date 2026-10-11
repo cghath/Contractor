@@ -28,7 +28,7 @@ func _ready() -> void:
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(title)
 	box.add_child(_role_picker())
-	box.add_child(_button("Play (host a session)", host))
+	box.add_child(_button("Play (host a session)", _plain_host))
 	box.add_child(_hint("Solo play is a session nobody else has joined."))
 	_address = LineEdit.new()
 	_address.text = "127.0.0.1"
@@ -36,10 +36,9 @@ func _ready() -> void:
 	box.add_child(_address)
 	box.add_child(_button("Join someone's session", func() -> void: join(_address.text)))
 	box.add_child(_button("Reset compound save", _reset_save))
-	# Wave 4 campaign (BaseHub): the company's FOB, its people and stash. Join this way only a
-	# host who is at the base.
+	# Wave 4 campaign (BaseHub): the company's FOB, its people and stash. Join (above) follows
+	# the host into whatever it plays, the campaign included.
 	box.add_child(_button("Campaign: host at the base (FOB)", _campaign_host))
-	box.add_child(_button("Campaign: join a host at the base", _campaign_join))
 	_status = Label.new()
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD
 	box.add_child(_status)
@@ -81,14 +80,16 @@ func _on_join_failed() -> void:
 	_status.text = "Could not connect to %s.\nJoin needs another copy of the game hosting at that address. To play on your own, use Play (host a session)." % _join_address
 
 
-func _campaign_host() -> void:
-	BaseHub.prepare_session(true)
+func _plain_host() -> void:
+	BaseHub.cancel_session()  # never a leftover campaign
 	host()
 
 
-func _campaign_join() -> void:
-	BaseHub.prepare_session(false)
-	join(_address.text)
+func _campaign_host() -> void:
+	BaseHub.prepare_session()
+	host()
+	if not Net.is_hosting():
+		BaseHub.cancel_session()
 
 
 func _reset_save() -> void:
