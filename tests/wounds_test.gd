@@ -879,6 +879,10 @@ func _test_body_volume() -> void:
 	check(BodyVolume.march(&"forearm_r", Vector3(0.302, 0.80, -0.3), back).is_empty(), "past the edge of the hand, inside its box: a miss")
 	var chest := BodyVolume.march(&"chest", Vector3(0.0, 1.31, -0.3), back)
 	check(not chest.is_empty() and chest.depth > 0.18, "front to back through the chest: the whole trunk (%s)" % [chest])
+	# Each body type is judged on its own shape (the art branch's female parts are "<part>_f").
+	check(BodyVolume.model_of(&"thigh_r", "female") == "thigh_f" and BodyVolume.model_of(&"chest", "female") == "torso_f"
+		and BodyVolume.model_of(&"thigh_r", "male") == "thigh" and BodyVolume.model_of(&"face", "") == "head",
+		"a body type picks its own part models (%s, %s)" % [BodyVolume.model_of(&"thigh_r", "female"), BodyVolume.model_of(&"chest", "female")])
 
 func _test_fragments() -> void:
 	print("Fragments")

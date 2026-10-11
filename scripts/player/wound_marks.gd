@@ -33,12 +33,13 @@ const MAX_DRIPS := 40
 const DRIP_SIZE := 0.008
 const POOL_CELL := 0.025
 const POOL_HEIGHT := 0.006
-const MAX_POOL := 160
+const MAX_POOL := 400
 ## Drops thrown out of an exit wound when the round goes through.
 const SPATTER_DROPS := 14
 
 var model: CharacterModel
 var vitals: Vitals
+var body := ""  # the body type (BodyVolume.body_of): blood lies on that body's shape
 var _key := ""
 var _spots: Dictionary = {}  # spot key -> spot state (see _new_spot)
 var _bone_meshes: Dictionary = {}  # bone -> MultiMeshInstance3D
@@ -48,6 +49,7 @@ var _drip_timer := 0.0
 var _drip_mesh: MultiMeshInstance3D
 var _pool: Dictionary = {}  # Vector2i -> {"y", "amount"}
 var _pool_mesh: MultiMeshInstance3D
+var _pool_centre: Variant = null  # the cell the first drip landed in: the pool spreads out from it
 var _pool_dirty := false
 static var _material: StandardMaterial3D
 
@@ -55,6 +57,7 @@ static var _material: StandardMaterial3D
 func setup(p_model: CharacterModel, p_vitals: Vitals) -> void:
 	model = p_model
 	vitals = p_vitals
+	body = BodyVolume.body_of(p_model)
 	vitals.changed.connect(_rebuild)
 	set_process(false)
 	_rebuild()
@@ -113,7 +116,7 @@ func _new_spot(part: StringName, at: Vector3, out: Variant) -> Dictionary:
 
 func _new_hole(part: StringName, at: Vector3, exit: bool, rng: RandomNumberGenerator) -> Dictionary:
 	var n := _outward(part, at)
-	var skin: Variant = BodyVolume.surface(part, at, n)
+	var skin: Variant = BodyVolume.surface(part, at, n, 0.05, body)
 	var p: Vector3 = skin if skin is Vector3 else at
 	var hole := {"at": p, "n": n, "exit": exit, "head": p, "trail": 0, "done": false,
 		"marks": [], "blood": []}
@@ -133,7 +136,7 @@ func _on_skin(part: StringName, p: Vector3, n: Vector3, radius: float, angle: fl
 	var u := n.cross(Vector3.UP if absf(n.y) < 0.9 else Vector3.RIGHT).normalized()
 	var v := n.cross(u)
 	var q := p + (u * cos(angle) + v * sin(angle)) * radius
-	return BodyVolume.surface(part, q, _outward(part, q))
+	return BodyVolume.surface(part, q, _outward(part, q), 0.05, body)
 
 
 ## Outward from the middle of the part's segment (limbs round their axis, the trunk round
@@ -235,7 +238,7 @@ func _extend_trail(part: StringName, hole: Dictionary, down: Vector3, rng: Rando
 		return null
 	along = along.normalized()
 	var side := along.cross(n)
-	var next: Variant = BodyVolume.surface(part, head + along * CELL + side * CELL * rng.randf_range(-0.5, 0.5), n)
+	var next: Variant = BodyVolume.surface(part, head + along * CELL + side * CELL * rng.randf_range(-0.5, 0.5), n, 0.05, body)
 	if not next is Vector3:
 		hole.done = true  # off the end of the part: it drips from here
 		return null
@@ -284,16 +287,16 @@ func _spatter(spot: Dictionary) -> void:
 			break
 		var spread := Vector3(rng.randf_range(-0.35, 0.35), rng.randf_range(-0.2, 0.35), rng.randf_range(-0.35, 0.35))
 		var speed := rng.randf_range(0.8, 2.6)
-		_drips.append({"pos": from, "vel": (dir + spread).normalized() * speed, "floor": floor_y})
+		_drips.append({"pos": from, "vel": (dir + spread).normalized() * speed, "floor": floor_y, "speck": true})
 	set_process(true)
 
 
 ## The ground under world point `from` (2.5 m down at most), ignoring this body.
 func _floor_below(from: Vector3) -> float:
 	var query := PhysicsRayQueryParameters3D.create(from, from + Vector3.DOWN * 2.5)
-	var body := model.get_parent() as CollisionObject3D
-	if body:
-		query.exclude = [body.get_rid()]
+	var own := model.get_parent() as CollisionObject3D
+	if own:
+		query.exclude = [own.get_rid()]
 	var hit := get_world_3d().direct_space_state.intersect_ray(query)
 	return hit.position.y if not hit.is_empty() else from.y - 2.5
 
@@ -311,7 +314,7 @@ func _move_drips(delta: float) -> void:
 			landed.append(d)
 	for d: Dictionary in landed:
 		_drips.erase(d)
-		_add_pool(Vector3(d.pos.x, d.floor, d.pos.z))
+		_add_pool(Vector3(d.pos.x, d.floor, d.pos.z), d.get("speck", false))
 	if _drip_mesh == null:
 		_drip_mesh = _world_multimesh("Drips", MAX_DRIPS)
 	var mm := _drip_mesh.multimesh
@@ -321,20 +324,30 @@ func _move_drips(delta: float) -> void:
 	mm.visible_instance_count = _drips.size()
 
 
-## A drop landing on the ground: it adds to the pool cell there, and a full cell spills
-## into a neighbour, so the pool spreads out from under the wound.
-func _add_pool(at: Vector3) -> void:
+## A drop landing on the ground. A drip adds to the pool cell there, and a full cell spills
+## on outward (away from where the first drip landed), so the pool spreads out from under
+## the body and shows past it. A drop of spatter only leaves a speck.
+func _add_pool(at: Vector3, speck := false) -> void:
 	var cell := Vector2i(roundi(at.x / POOL_CELL), roundi(at.z / POOL_CELL))
-	for i in 6:
+	if not speck and _pool_centre == null:
+		_pool_centre = cell
+	for i in (1 if speck else 16):
 		if not _pool.has(cell):
 			if _pool.size() >= MAX_POOL:
 				return
 			_pool[cell] = {"y": at.y, "amount": 0}
-		if _pool[cell].amount < 3:
+		if _pool[cell].amount < (1 if speck else 2):
 			_pool[cell].amount += 1
 			_pool_dirty = true
 			return
-		cell += [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN][randi() % 4]
+		if speck:
+			return
+		var centre: Vector2i = _pool_centre
+		var outward: Array[Vector2i] = []
+		for step: Vector2i in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
+			if Vector2(cell + step - centre).length() >= Vector2(cell - centre).length():
+				outward.append(step)
+		cell += outward[randi() % outward.size()]
 
 
 func _redraw_pool() -> void:
@@ -346,8 +359,8 @@ func _redraw_pool() -> void:
 	for cell: Vector2i in _pool:
 		var c: Dictionary = _pool[cell]
 		# A lone drop is a speck; a cell that keeps getting blood fills out into the pool.
-		var h: float = POOL_HEIGHT * (0.5 + 0.25 * c.amount)
-		var w: float = POOL_CELL * [0.0, 0.45, 0.8, 1.0][mini(c.amount, 3)]
+		var h: float = POOL_HEIGHT * (0.5 + 0.4 * c.amount)
+		var w: float = POOL_CELL * [0.0, 0.45, 1.0][mini(c.amount, 2)]
 		var pos := Vector3(cell.x * POOL_CELL, c.y + h * 0.5, cell.y * POOL_CELL)
 		mm.set_instance_transform(i, Transform3D(Basis.from_scale(Vector3(w, h, w)), pos))
 		mm.set_instance_color(i, BLOOD_COLOUR if c.amount > 1 else FRESH_COLOUR)
@@ -404,7 +417,7 @@ func _dressing(part: StringName, hole: Dictionary, pivot: Vector3) -> Array:
 		var lo := mid
 		var hi := mid
 		for dir: Vector3 in [Vector3.RIGHT, Vector3.LEFT, Vector3.BACK, Vector3.FORWARD]:
-			var s: Variant = BodyVolume.surface(part, mid + dir * 0.12, dir, 0.12)
+			var s: Variant = BodyVolume.surface(part, mid + dir * 0.12, dir, 0.12, body)
 			if s is Vector3:
 				lo = lo.min(s)
 				hi = hi.max(s)

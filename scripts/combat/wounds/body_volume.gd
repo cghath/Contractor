@@ -24,19 +24,23 @@ const LEAD_M := 0.3
 const REACH_M := 0.8
 ## The march samples every half built voxel.
 const STEP_SHARE := 0.5
+## Body types (CharacterModel.body; the art branch adds "female", whose parts are the same
+## models with this suffix, VoxelArt.body_part). Same joints, so the same pivots and boxes.
+const FEMALE := "female"
+const FEMALE_SUFFIX := "_f"
 
-static var _grids: Dictionary = {}  # part -> {"origin", "cell", "dims", "entry", "body"}
+static var _grids: Dictionary = {}  # "part/body" -> {"origin", "cell", "dims", "entry", "body"}
 static var _occupancy: Dictionary = {}  # model -> VoxelArt.occupancy
 
 
 ## Where a round on `direction` that touched `hitbox` (part `part`) at world `position`
 ## really meets the body: {"position" (world), "depth" (metres of body it crosses before it
 ## leaves the part's segment)}, or {} if it misses the body inside the box.
-static func entry(hitbox: Node3D, part: StringName, position: Vector3, direction: Vector3) -> Dictionary:
+static func entry(hitbox: Node3D, part: StringName, position: Vector3, direction: Vector3, body := "") -> Dictionary:
 	if not PART_MODELS.has(part) or hitbox == null or not hitbox.is_inside_tree():
 		return {"position": position, "depth": BodyMap.CHANNEL_MAX_M}
 	var to_rest := hitbox.global_transform.affine_inverse()
-	var hit := march(part, to_rest * position, (to_rest.basis * direction).normalized())
+	var hit := march(part, to_rest * position, (to_rest.basis * direction).normalized(), body)
 	if hit.is_empty():
 		return {}
 	return {"position": hitbox.global_transform * Vector3(hit.position), "depth": hit.depth}
@@ -44,8 +48,8 @@ static func entry(hitbox: Node3D, part: StringName, position: Vector3, direction
 
 ## The same in the rest pose: the first voxel of `part` on the ray through `point` along
 ## `dir`, and how far the body (the part's whole segment) goes on from there.
-static func march(part: StringName, point: Vector3, dir: Vector3) -> Dictionary:
-	var grid := _grid(part)
+static func march(part: StringName, point: Vector3, dir: Vector3, body := "") -> Dictionary:
+	var grid := _grid(part, body)
 	var step: float = grid.cell * STEP_SHARE
 	var t := -LEAD_M
 	var entered := -1.0
@@ -62,13 +66,29 @@ static func march(part: StringName, point: Vector3, dir: Vector3) -> Dictionary:
 	return {"position": point + dir * entered, "depth": REACH_M - entered}
 
 
+## The voxel model a body part is built from, for a body type ("" or "male": the male
+## parts; "female": the female ones).
+static func model_of(part: StringName, body := "") -> String:
+	return String(PART_MODELS[part]) + (FEMALE_SUFFIX if body == FEMALE else "")
+
+
+## The body type of the soldier `node` belongs to (its CharacterModel.body; "" before the
+## art branch adds body types).
+static func body_of(node: Node) -> String:
+	var model: Node = node if node is CharacterModel else null
+	while node and model == null:
+		model = node.get_node_or_null(^"Model") as CharacterModel
+		node = node.get_parent()
+	return String(model.get("body")) if model and model.get("body") != null else ""
+
+
 ## The skin under rest-pose `point` looking in along -`outward`: the first voxel of the
 ## part's whole model (so a trail runs on from chest to belly), or null if there is none
 ## within `reach` of `point` (off the end of a limb).
-static func surface(part: StringName, point: Vector3, outward: Vector3, reach := 0.05) -> Variant:
+static func surface(part: StringName, point: Vector3, outward: Vector3, reach := 0.05, body := "") -> Variant:
 	if not PART_MODELS.has(part):
 		return null
-	var grid := _grid(part)
+	var grid := _grid(part, body)
 	var step: float = grid.cell * STEP_SHARE
 	var from := point + outward * reach
 	var t := 0.0
@@ -91,21 +111,22 @@ static func _solid(grid: Dictionary, cells: PackedByteArray, p: Vector3) -> bool
 ## A part's grid, built on first use: "body" is every voxel of its model (the channel runs
 ## through the whole torso or head, BodyMap.SEGMENTS), "entry" only those in this part (a
 ## torso or head voxel counts for a part inside that part's BodyMap.PART_BOXES).
-static func _grid(part: StringName) -> Dictionary:
-	if _grids.has(part):
-		return _grids[part]
-	var model: String = PART_MODELS[part]
+static func _grid(part: StringName, body := "") -> Dictionary:
+	var key := "%s/%s" % [part, body if body == FEMALE else ""]
+	if _grids.has(key):
+		return _grids[key]
+	var model: String = model_of(part, body)
 	if not _occupancy.has(model):
 		_occupancy[model] = VoxelArt.occupancy(model)
 	var occ: Dictionary = _occupancy[model]
 	var origin: Vector3 = pivot_at(part) - Vector3(occ.pivot)
 	var dims: Vector3i = occ.dims
 	var cell: float = occ.cell
-	var body: PackedByteArray = occ.solid
-	var entry_cells := body
+	var solid: PackedByteArray = occ.solid
+	var entry_cells := solid
 	if BodyMap.segment_of(part) != part:  # torso or head: only this part's share
 		entry_cells = PackedByteArray()
-		entry_cells.resize(body.size())
+		entry_cells.resize(solid.size())
 		for box: Array in BodyMap.PART_BOXES[part]:
 			var lo := ((Vector3(box[0]) - Vector3(box[1]) * 0.5 - origin) / cell).floor()
 			var hi := ((Vector3(box[0]) + Vector3(box[1]) * 0.5 - origin) / cell).ceil()
@@ -113,16 +134,18 @@ static func _grid(part: StringName) -> Dictionary:
 				for y in range(maxi(int(lo.y), 0), mini(int(hi.y), dims.y)):
 					for x in range(maxi(int(lo.x), 0), mini(int(hi.x), dims.x)):
 						var i := x + dims.x * (y + dims.y * z)
-						entry_cells[i] = body[i]
-	var grid := {"origin": origin, "cell": cell, "dims": dims, "entry": entry_cells, "body": body}
-	_grids[part] = grid
+						entry_cells[i] = solid[i]
+	var grid := {"origin": origin, "cell": cell, "dims": dims, "entry": entry_cells, "body": solid}
+	_grids[key] = grid
 	return grid
 
 
-## Builds every part's grid now (host, at level start) so the first hit doesn't hitch.
-static func warm() -> void:
-	for part: StringName in PART_MODELS:
-		_grid(part)
+## Builds every part's grid now (host, at level start) so the first hit doesn't hitch, for each
+## body type in `bodies`.
+static func warm(bodies: Array = [""]) -> void:
+	for body: String in bodies:
+		for part: StringName in PART_MODELS:
+			_grid(part, body)
 
 
 ## Where the part's model pivot sits in the rest pose (CharacterModel's joints; arms hang

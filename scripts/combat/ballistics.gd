@@ -84,7 +84,7 @@ static func _trace(shooter: CollisionObject3D, origin: Vector3, direction: Vecto
 		if vitals:
 			var part: StringName = collider.get_meta(&"body_part", Vitals.TORSO) if collider is Node else Vitals.TORSO
 			# The box is only the first test: the round must meet the body inside it (BodyVolume).
-			var body_hit := BodyVolume.entry(collider as Node3D, part, hit.position, direction)
+			var body_hit := BodyVolume.entry(collider as Node3D, part, hit.position, direction, BodyVolume.body_of(collider))
 			if body_hit.is_empty():
 				exclude.append(collider.get_rid())  # through the box, past the body: it flies on
 				from = hit.position

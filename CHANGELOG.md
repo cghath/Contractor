@@ -49,7 +49,12 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   pools on the ground, spreading out as drops land. A round that goes through throws a spray
   out of the exit onto the ground behind. Treated, the stain dries dark and a dressing wraps
   the limb (a pad on the trunk or head). Cosmetic and local: no extra network traffic. One
-  MultiMesh per bone, and one each for drips and the pool.
+  MultiMesh per bone, and one each for drips and the pool. The pool spills outward from
+  where the first drip landed, so it shows past a body lying in it; spatter leaves specks.
+- **Body types for hit shapes and blood.** `BodyVolume` keeps a shape per body type
+  (`body_of` reads `CharacterModel.body`; `model_of` names the female parts "<part>_f"), so
+  hits and blood follow the female body from the `art/female-model` side project once it
+  merges. Male only until then.
 
 ### Scavenging review fixes
 
