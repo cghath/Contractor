@@ -114,6 +114,70 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
     or on the cummerbund beside the pocket. They used to float 2 to 4 cm off it. The medium
     carrier's TQ holder moved out to the pocket's edge.
 
+### Wave 4A of the build plan: the mission loop, first half (cghath, 2026-10-11)
+
+Five parts built in parallel, ported onto Captain's wave 3, reviewed, and integrated. The loop
+isn't wired end to end yet (wave 4B): each part has its own entry point on the main menu.
+Mission types are placeholders (clear a compound, recover an HVT, retrieve intel, destroy a
+cache) until Captain's mission types land. Values the design doc doesn't fix are "Proposed:".
+
+#### Added
+
+- **World scale.** A contract zone is a seeded 2-4 km2 terrain (rolling hills, haze, distant
+  terrain at lower detail) with hand-built voxel modules placed on it: the compound, small
+  outposts (HESCO ring, concrete bunker, wooden watchtower), a village block of four houses in
+  mixed materials, and a road checkpoint. Modules load as full 10 cm voxels within 260 m and
+  unload past 340 m; a stand-in shows them up to 2.5 km away. Each has its own loot, a hostile
+  garrison in buddy pairs, voxel edits and bodies, all saved with the zone. Shooting, armor,
+  frags, first aid and looting work inside modules. AI navigation bakes in the background
+  around players and soldiers in a fight. Main menu: **Host test zone (2 km, world scale)**,
+  or `--zone [id]`.
+- **Contracts and economy.** A seeded contract board (always one low-risk job; fixers'
+  special jobs at enough reputation), contract zones and hot zones, a 1-5 difficulty rating
+  that can understate the threat (more often with poor intel), MW5-style negotiation of pay,
+  salvage share, support budget and advance (30%, kept on failure), renegotiate or abort once
+  the real threat shows, up to 4 contracts held, lapsed contracts cost reputation. Cash with
+  a ledger, per-faction reputation (numbers only until wave 6), a campaign clock in days with
+  weekly wages and upkeep, and a safety-floor loan. Objectives (clear an area, carry an item
+  out, deliver an HVT, destroy a cache) shown in the HUD. A debrief: pay and bonuses, civilian
+  fines (the 8th casualty voids the contracts), MW5-style salvage picks, what was carried out
+  (MOLLE pouches and their contents counted), casualties, reputation, intel turned in or sold.
+  A shop for gear, repairs, medical supplies and support calls. Main menu: **Contract board
+  (offline)**.
+- **People.** Civilians who go about their routines, flee and hide from gunfire and never
+  fight; casualties caused by the squad count against the contract, others don't, and AI
+  won't shoot through a civilian. Hostile HVTs try to expose the squad and run until
+  zip-cuffed; friendly HVTs follow; captives can be led, stopped, sent to cover, searched and
+  carried (the waist body point). Intel (laptop, phone, documents) on officers and at sites,
+  counted once carried out; enemy positions reported by radio bank at once. Badly hurt,
+  isolated hostiles may surrender. A main menu checkbox puts people in the compound.
+- **Base hub and roster.** A walkable FOB with an armory (the company stash; carriers keep
+  their MOLLE pouches and contents), a motor pool (for wave 5), a medbay, a hiring board and a
+  shop terminal. Squadmates are persistent people: name, role, skills (aim, nerve, medical,
+  movement) that grow with experience along with their wage, their own gear, history and
+  injuries (broken bones, burns, blast lung, heavy blood loss mean days out; the medbay
+  shortens it for money). A rotating hiring pool; no fixed starting squad. Prep before a
+  deployment: kit up, assign squadmates and roles, buy supplies, deploy. An AI squadmate left
+  behind alive goes MIA; the respawn pool is 4 free in a contract zone, 8 in a hot zone, then
+  bought. Main menu: **Campaign: host at the base (FOB)**; Join follows the host there.
+- **Map, briefing, extraction.** **M** opens a map with an Arma-style grid and references,
+  zoom and pan, your squad's positions, shared markers and lines, intel enemy positions,
+  objectives and extraction points (every player and late joiner sees them). A briefing on
+  the map before a deployment: contract, objectives, known enemies, plan marks, insertion
+  point, supports (a list until wave 5), ready-up. Extraction at a landing zone, a grid
+  reference or a purple smoke, once every living player and the AI you bring are inside, the
+  host confirms and a 10 s countdown runs; it reports who and what got out. A reinforcement
+  timer sends hostile waves from beyond the map edge, sooner and bigger over time, with no
+  on-screen timer. Main menu: **Play the test contract (briefing, extraction)**.
+- `Campaign`, `Economy`, `Contracts` and `People` autoloads; one save per campaign.
+- Tests: world, contracts, people, base and map suites (20 in all, all in CI).
+
+#### Fixed
+
+- One join handshake for every kind of level: a client joining a hosted zone, a campaign at
+  the base or a deployment now loads the host's level before anything replicates.
+- A joining client's player starts at the gate or insertion point instead of the middle of the
+  level, and loading magazines right after joining no longer stops with "you moved".
 ### Scavenging review fixes
 
 #### Fixed

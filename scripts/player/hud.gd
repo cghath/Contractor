@@ -6,6 +6,8 @@ extends CanvasLayer
 var player: Soldier
 var inventory_screen: InventoryScreen
 var command_menu: CommandMenu
+## The map (M) and briefing (MapScreen).
+var map_screen: MapScreen
 var _crosshair: Label
 var _prompt: Label
 var _status: Label
@@ -73,9 +75,14 @@ func _ready() -> void:
 	command_menu = CommandMenu.new(player)
 	add_child(command_menu)
 	add_child(Callouts.Subtitles.new())  # squadmates' callouts
+	add_child(ObjectivesPanel.new())  # the deployment's objectives (wave 4, Contracts)
 	_message = _label("", Control.PRESET_CENTER_TOP)
 	_message.position.y += 60
 	_message.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	# The map (M) and the briefing, over everything else (W13).
+	map_screen = MapScreen.new(player)
+	add_child(map_screen)
+	move_child(_message, -1)  # messages stay readable over the map
 
 
 func _process(delta: float) -> void:

@@ -133,10 +133,17 @@ var left_handed := false
 ## replicated by ServerSync. display_name() shows the name; the node keeps its callsign.
 var person_name := ""
 var nation := ""
+## Where the host put this body when it spawned (the level's _add_player), sent with the spawn
+## by ServerSync. A client's own player is placed there as it spawns: its position is the
+## owner's to replicate, so the host's spawn doesn't carry it and it would start at the
+## level's origin (and the host would see it jump there).
+var spawn_position := Vector3.ZERO
 ## Host only: when this body died (Soldier._now()), for the body cap; -1 while alive.
 var died_at := -1.0
 ## Host only (tests may lower it): the body cap in force.
 static var body_cap := MAX_BODIES
+## Host only. People (wave 4, PeopleLayer): a cuffed captive can be carried while conscious.
+var carriable_while_up := false
 
 
 func _enter_tree() -> void:
@@ -176,6 +183,8 @@ func stun(seconds: float, from: Vector3) -> void:
 
 func _ready() -> void:
 	add_to_group(&"combatants")
+	if is_local() and not multiplayer.is_server() and spawn_position != Vector3.ZERO:
+		position = spawn_position  # see spawn_position
 	inventory.changed.connect(_on_inventory_changed)
 	vitals.died.connect(_on_died)
 	vitals.went_down.connect(_on_went_down)
@@ -304,7 +313,7 @@ func _ai_physics(delta: float) -> void:
 	suppression = move_toward(suppression, 0.0, delta * 0.25)
 	if is_reloading and _now() >= _busy_until:
 		is_reloading = false
-	if not vitals.is_up() and is_instance_valid(carried_by):
+	if (not vitals.is_up() or carriable_while_up) and is_instance_valid(carried_by):
 		global_transform = carried_by.carry_transform()
 		velocity = Vector3.ZERO
 		return
@@ -336,7 +345,7 @@ func carry_transform() -> Transform3D:
 func _update_carried() -> void:
 	if carrying == null:
 		return
-	if not is_instance_valid(carrying) or carrying.vitals.is_up() or carrying.carried_by != self or not vitals.is_up():
+	if not is_instance_valid(carrying) or not _movable(carrying) or carrying.carried_by != self or not vitals.is_up():
 		release_carried()
 		return
 	if not carrying.is_ai():
@@ -346,7 +355,7 @@ func _update_carried() -> void:
 ## Host only. Picks up (CARRY) or takes hold of (DRAG) a downed body within `reach`.
 ## Dead bodies can be carried and dragged too.
 func server_pick_up_body(other: Soldier, mode := CARRY, reach := REVIVE_RANGE) -> bool:
-	if other == null or other == self or other.is_queued_for_deletion() or other.vitals.is_up():
+	if other == null or other == self or other.is_queued_for_deletion() or not _movable(other):
 		return false
 	if carrying != null or inventory.hands != &"" or not vitals.is_up():
 		return false
@@ -359,6 +368,11 @@ func server_pick_up_body(other: Soldier, mode := CARRY, reach := REVIVE_RANGE) -
 	carrying = other
 	_set_carry_mode(mode)
 	return true
+
+
+## A body that can be carried or dragged: down or dead, or a cuffed captive (People).
+static func _movable(other: Soldier) -> bool:
+	return not other.vitals.is_up() or other.carriable_while_up
 
 
 ## Host only. Puts down whoever this soldier carries or drags.
@@ -476,6 +490,7 @@ func _server_fire(origin: Vector3, direction: Vector3, slot: StringName) -> void
 	if origin.distance_to(camera.global_position) > 1.0:
 		origin = camera.global_position  # don't trust a far-off muzzle
 	var result := Ballistics.fire(self, origin, direction.normalized(), weapon)
+	PeopleLayer.server_noise(self, origin)  # people nearby hear it (wave 4)
 	if result.result != "none":
 		CompoundLevel.current(self).show_impact.rpc(result.position, result.normal, result.result)
 	Throwables.server_gunfire(self)  # indoors, sustained fire muffles hearing
@@ -525,7 +540,7 @@ func _server_throw(origin: Vector3, direction: Vector3, id: StringName) -> void:
 	if origin.distance_to(camera.global_position) > 1.0:
 		origin = camera.global_position
 	var dir := direction.normalized()
-	CompoundLevel.current(self).server_throw(id, origin + dir * 0.5, velocity + dir * THROW_SPEED + Vector3.UP * 2.0)
+	CompoundLevel.current(self).server_throw(id, origin + dir * 0.5, velocity + dir * THROW_SPEED + Vector3.UP * 2.0, self)
 
 
 @rpc("any_peer", "call_local", "reliable")
@@ -1086,8 +1101,8 @@ func _server_move_body(path: NodePath, mode: StringName) -> void:
 	if not _from_owner() or not vitals.is_up():
 		return
 	var other := get_node_or_null(path) as Soldier
-	if other == null or other == self or other.vitals.is_up():
-		return  # a downed or a dead body
+	if other == null or other == self or not _movable(other):
+		return  # a downed or a dead body (or a cuffed captive)
 	if carrying == other:
 		_set_carry_mode(mode)
 		return

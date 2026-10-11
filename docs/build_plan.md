@@ -175,6 +175,14 @@ Standing rules for this wave (user, 2026-10-10):
 
 ### Wave 4: phase 4, mission loop (5 agents)
 
+**Status (4A):** the five parts (world scale, contracts and economy, people, base hub and
+roster, map/briefing/extraction/reinforcements) built 2026-10-10/11 on cghath's side, ported
+onto Captain's wave 3, reviewed and integrated (one join handshake for every level): all 20
+suites pass. **4B next:** wire the loop end to end (board, prep, briefing, a zone,
+extraction, debrief, base), deployments into zones, and the hot zone.
+Handoff for 4B, with the seams 4A left loose: [wave4b_handoff.md](wave4b_handoff.md).
+The full plan for everything after that (waves 5 to 8, backlog, open questions): [ChrisPlan_handoff.md](ChrisPlan_handoff.md).
+
 - **World scale:** contract zones of 2 to 4 km² and hot zones of 8 to 16 km² (hot-zone size
   being confirmed). Today's voxel world is one bounded box, so this needs terrain plus
   streamed voxel modules (compounds, blocks, outposts) placed on it. The riskiest item in

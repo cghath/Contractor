@@ -1526,8 +1526,8 @@ func _find_target() -> Soldier:
 		return null
 	if focus != null and (not is_instance_valid(focus) or focus.is_queued_for_deletion() or not focus.vitals.is_up()):
 		focus = null  # the target is down: pick freely again
-	if focus != null and focus.faction != body.faction and body.global_position.distance_to(focus.global_position) <= Squad.TARGET_RANGE \
-			and can_see(focus):
+	if focus != null and focus.faction != body.faction and not Person.is_noncombatant(focus) \
+			and body.global_position.distance_to(focus.global_position) <= Squad.TARGET_RANGE and can_see(focus):
 		return focus
 	var best: Soldier = null
 	var best_dist := SIGHT_RANGE
@@ -1538,6 +1538,8 @@ func _find_target() -> Soldier:
 		var s := n as Soldier
 		if s == null or s.faction == body.faction or s.vitals.is_dead() or s.is_queued_for_deletion():
 			continue
+		if Person.is_noncombatant(s):
+			continue  # civilians, HVTs and hostiles who gave up are never targets (people, wave 4)
 		var d := body.global_position.distance_to(s.global_position)
 		if not s.vitals.is_up():
 			# Unconscious foes are left alone, except for a dead-check while clearing.
@@ -1683,14 +1685,17 @@ func _aim_at(point: Vector3) -> float:
 	return (-body.camera.global_basis.z).angle_to(d.normalized())
 
 
-## Fire discipline: true if someone on this unit's side (standing or down) is in the line
-## of fire to `point`, closer than it.
+## Fire discipline: true if someone on this unit's side, or a civilian, HVT or captive
+## (Person.is_noncombatant; people, wave 4), standing or down, is in the line of fire to
+## `point`, closer than it.
 func _friendly_in_line(point: Vector3) -> bool:
 	var from := body.camera.global_position
 	var reach := from.distance_to(point)
 	for n in get_tree().get_nodes_in_group(&"combatants"):
 		var s := n as Soldier
-		if s == null or s == body or s.faction != body.faction or s.is_queued_for_deletion() or s.vitals.is_dead():
+		if s == null or s == body or s.is_queued_for_deletion() or s.vitals.is_dead():
+			continue
+		if s.faction != body.faction and not Person.is_noncombatant(s):
 			continue
 		var chest := s.global_position + Vector3.UP * (1.1 if s.vitals.is_up() else 0.3)
 		if from.distance_to(chest) < reach and Geometry3D.get_closest_point_to_segment(chest, from, point).distance_to(chest) < FRIENDLY_CLEARANCE:
@@ -1706,8 +1711,9 @@ func _maybe_frag() -> void:
 		return
 	for n in get_tree().get_nodes_in_group(&"combatants"):
 		var s := n as Soldier
-		if s and s != body and s.faction == body.faction and s.global_position.distance_to(body.threat_pos) < Throwables.FRAG_RADIUS + 1.0:
-			return  # friendlies too close to the blast
+		if s and s != body and (s.faction == body.faction or Person.is_noncombatant(s)) \
+				and s.global_position.distance_to(body.threat_pos) < Throwables.FRAG_RADIUS + 1.0:
+			return  # friendlies (or civilians, people wave 4) too close to the blast
 	if not _lob_clear(body.camera.global_position + Vector3.UP * 0.2, body.threat_pos):
 		return  # it would hit a wall or roof on the way and bounce back
 	_grenade_cd = GRENADE_COOLDOWN_S
@@ -1736,7 +1742,7 @@ func _throw(id: StringName, at: Vector3) -> bool:
 		return false
 	body._busy_until = Soldier._now() + Soldier.THROW_BUSY_S
 	var from := body.camera.global_position + Vector3.UP * 0.2
-	CompoundLevel.current(body).server_throw(id, from, Throwables.lob_velocity(from, at))
+	CompoundLevel.current(body).server_throw(id, from, Throwables.lob_velocity(from, at), body)
 	if Callouts.THROW_IDS.has(id):
 		_callout(Callouts.THROW_IDS[id])
 	return true
