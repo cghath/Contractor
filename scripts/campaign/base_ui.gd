@@ -172,8 +172,8 @@ func _build_roster(rows: VBoxContainer, v: Dictionary) -> void:
 	for mid: String in ids:
 		var m: Dictionary = members[mid]
 		var row := HBoxContainer.new()
-		row.add_child(_text("%s \"%s\"  %s  %s  missions %d  $%d/day  %s" % [m.name, m.callsign, Roles.short_name(StringName(m.role)),
-			Roster.status_text(m), int(m.get("missions", 0)), int(m.get("wage", 0)), _skills_text(m)], 640))
+		row.add_child(_text("%s \"%s\"  %s  %s  %s  missions %d  $%d/day  %s" % [m.name, m.callsign, Roster.person_text(m), Roles.short_name(StringName(m.role)),
+			Roster.status_text(m), int(m.get("missions", 0)), int(m.get("wage", 0)), _skills_text(m)], 700))
 		row.add_child(_text("%d items" % _item_total(m.get("gear", {})), 80))
 		if Roster.is_available(m):
 			row.add_child(_button("Let go", func() -> void: BaseHub.request("release", [mid])))
@@ -192,8 +192,8 @@ func _build_hiring(rows: VBoxContainer, v: Dictionary) -> void:
 	for c: Dictionary in pool:
 		var row := HBoxContainer.new()
 		var veteran := " (veteran)" if int(c.get("missions", 0)) >= 10 else ""
-		row.add_child(_text("%s \"%s\"  %s%s  missions %d  %s  asks $%d/day" % [c.name, c.callsign, Roles.display_name(StringName(c.role)),
-			veteran, int(c.missions), _skills_text(c), int(c.demand)], 700))
+		row.add_child(_text("%s \"%s\"  %s  %s%s  missions %d  %s  asks $%d/day" % [c.name, c.callsign, Roster.person_text(c), Roles.display_name(StringName(c.role)),
+			veteran, int(c.missions), _skills_text(c), int(c.demand)], 760))
 		var cid := String(c.cid)
 		row.add_child(_button("Hire ($%d)" % int(c.fee), func() -> void: BaseHub.request("hire", [cid])))
 		rows.add_child(row)

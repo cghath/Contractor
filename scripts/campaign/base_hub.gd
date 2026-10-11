@@ -654,8 +654,10 @@ func server_spawn_roster_squadmate(lvl: CompoundLevel, slot: int, role: StringNa
 	var pos: Vector3 = anchor.global_transform * (wedge[maxi(slot - 1, 0) % wedge.size()] as Vector3) if anchor \
 		else lvl.next_spawn_point() + Vector3(0, 0, 3)
 	var stats := Roster.ai_stats(m)
-	var s := lvl.spawn_soldier({"name": String(m.callsign), "faction": "friendly", "variant": "multicam", "pos": pos, "loadout": [],
-		"role": "", "team": team, "slot": slot, "combat": stats.combat, "discipline": stats.discipline, "guard": false})
+	var data := {"name": String(m.callsign), "faction": "friendly", "variant": "multicam", "pos": pos, "loadout": [],
+		"role": "", "team": team, "slot": slot, "combat": stats.combat, "discipline": stats.discipline, "guard": false}
+	data.merge(Roster.identity(m))  # the same person every deployment: name tape, nationality, hand, body
+	var s := lvl.spawn_soldier(data)
 	s.role = role
 	s.set_meta(&"roster_id", mid)
 	s.inventory.net_state = GameState.from_json(m.get("gear", {}).duplicate(true))

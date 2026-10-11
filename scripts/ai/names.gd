@@ -88,3 +88,59 @@ static func pick(faction: StringName, callsign: String, taken: Dictionary) -> Di
 		if not taken.has(surname):
 			return {"nation": nation, "name": surname}
 	return {"nation": String(nations[0][0]), "name": callsign}  # every name tried was taken
+
+
+# --- Whole people (the company's hires) ---------------------------------------------------
+
+## Body types (CharacterModel.body; VoxelArt on the female-model branch uses the same strings).
+const MALE := "male"
+const FEMALE := "female"
+## Given names for hired contractors, by nationality and body: common given names of people
+## of service age in each country (US SSA, ONS England and Wales, Canadian lists, 1985-2000).
+const FIRST := {
+	"US": {MALE: ["Michael", "Christopher", "Matthew", "Joshua", "David", "James", "Daniel", "Robert", "John",
+		"Joseph", "Andrew", "Ryan", "Brandon", "Jason", "Justin", "William", "Jonathan", "Brian", "Anthony",
+		"Kevin", "Eric", "Tyler", "Kyle", "Adam", "Nicholas", "Marcus", "Luis", "Carlos", "Jose", "Derek"],
+		FEMALE: ["Jessica", "Ashley", "Jennifer", "Amanda", "Sarah", "Stephanie", "Nicole", "Heather", "Elizabeth",
+		"Megan", "Melissa", "Lauren", "Rachel", "Amber", "Danielle", "Brittany", "Samantha", "Maria", "Vanessa", "Kayla"]},
+	"UK": {MALE: ["James", "Daniel", "Thomas", "Matthew", "Christopher", "Adam", "Luke", "Michael", "Ryan", "Jack",
+		"Andrew", "David", "Benjamin", "Liam", "Joshua", "Robert", "Craig", "Lee", "Mark", "Scott", "Jamie",
+		"Callum", "Connor", "Gareth", "Rhys", "Owen", "Stuart", "Dean", "Ross", "Ashley"],
+		FEMALE: ["Sarah", "Laura", "Emma", "Rebecca", "Gemma", "Claire", "Charlotte", "Amy", "Hannah", "Lauren",
+		"Sophie", "Jessica", "Katie", "Rachel", "Emily", "Chloe", "Natalie", "Victoria", "Jodie", "Kirsty"]},
+	"CA": {MALE: ["Michael", "Matthew", "Ryan", "Andrew", "Kevin", "Justin", "Tyler", "Daniel", "Jonathan", "Kyle",
+		"Jordan", "Brandon", "Mathieu", "Alexandre", "Maxime", "Luc", "Jean-Philippe", "Patrick", "Sean", "Eric",
+		"Mark", "Dylan", "Nathan", "Cody", "Marc-Andre", "Simon", "Olivier", "Travis", "Derek", "Shane"],
+		FEMALE: ["Jessica", "Ashley", "Sarah", "Amanda", "Stephanie", "Jennifer", "Emily", "Samantha", "Melissa",
+		"Megan", "Laura", "Julie", "Caroline", "Marie-Eve", "Catherine", "Vanessa", "Kayla", "Brittany", "Chelsea", "Kristen"]},
+}
+
+
+## A whole person for `faction`, drawn from `rng` (the hiring board's): {"first", "surname",
+## "nation", "left", "body"}. The surname avoids `taken` where it can (Roster.add_member makes
+## it unique in the company in the end). `role` (Roles) is for the body type.
+static func person(rng: RandomNumberGenerator, faction: StringName, role: StringName, taken := {}) -> Dictionary:
+	var nations: Array = NATIONS.get(faction, NATIONS[&"friendly"])
+	var nation: String = nations[nations.size() - 1][0]
+	var roll := rng.randf()
+	for entry: Array in nations:
+		roll -= float(entry[1])
+		if roll <= 0.0:
+			nation = entry[0]
+			break
+	var pool: Array = POOLS[nation]
+	var surname: String = pool[rng.randi_range(0, pool.size() - 1)]
+	for attempt in 20:
+		if not taken.has(surname):
+			break
+		surname = pool[rng.randi_range(0, pool.size() - 1)]
+	var body := body_for(nation, role, rng)
+	var firsts: Array = (FIRST.get(nation, FIRST["US"]) as Dictionary)[body]
+	return {"first": String(firsts[rng.randi_range(0, firsts.size() - 1)]), "surname": surname, "nation": nation,
+		"left": rng.randf() < Handedness.LEFT_SHARE, "body": body}
+
+
+## The body type of a hire from `nation` in `role`. Always MALE here; the female-model branch
+## decides it by its Demographics instead (this is the one place it changes).
+static func body_for(_nation: String, _role: StringName, _rng: RandomNumberGenerator) -> String:
+	return MALE

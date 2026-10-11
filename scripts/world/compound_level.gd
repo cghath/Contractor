@@ -279,6 +279,9 @@ func _make_body(data: Dictionary) -> Node:
 	corpse.rotation.y = float(data.get("rot_y", 0.0))
 	corpse.role = StringName(data.get("role", ""))
 	corpse.body_label = String(data.get("label", ""))
+	corpse.person_name = String(data.get("person_name", ""))  # the name tape (older saves: none)
+	corpse.nation = String(data.get("nation", ""))
+	corpse.left_handed = bool(data.get("left", false))
 	corpse.body_uid = String(data.uid)
 	corpse.collision_layer = 0
 	if data.get("marker", false):

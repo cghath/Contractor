@@ -11,6 +11,28 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### A hired squadmate is one person (Captain, 2026-10-11; wave 4B groundwork)
+
+#### Changed
+
+- **Hiring rolls the whole person once:** each contractor on the board has a first name,
+  a surname, a nationality (US, UK or Canada by weight), a shooting hand (11% left) and a body
+  type (`Names.person`), shown on the board and the roster ("Brandon Stewart, CA, right-handed").
+  The roster keeps it, and **every deployment spawns that same person**: their surname on the
+  name tape, their nationality and their hand (`Roster.identity`, merged into the spawn data by
+  `BaseHub.server_spawn_roster_squadmate`). Before, the board's name and the name tape were
+  rolled separately and didn't match. The body type is always male on `dev`; the female-model
+  branch decides it in `Names.body_for`.
+- **No two name tapes in the company match:** a new hire whose surname is taken gets another
+  from their nationality (`Roster.unique_surname`).
+- **Older saves:** a member hired before this keeps their roster name ("Dale Okafor" -> OKAFOR
+  on the tape) and gets a nationality and hand once, seeded by their callsign
+  (`Roster.ensure_identity`).
+- **Bodies keep the person:** a body's record saves and restores the name tape, nationality and
+  hand (`Soldier.body_record`, `CompoundLevel._make_body`).
+- **Tests:** the base suite checks the board, the hire, a clashing surname, an older save, the
+  deployed squad, a fallen squadmate's body and a second deployment.
+
 ### AI soldiers have names, on name tapes (Captain, 2026-10-11)
 
 #### Added

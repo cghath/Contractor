@@ -152,3 +152,18 @@ From the design doc ("Missions: contract zones and hot zones", decided unless ma
 3. Hot zone size: 8-16 km² (twice the area) or 16-32 km² (twice the width)?
 4. Should the contract board stay reachable anywhere but the base (a laptop at the FOB only,
    or also from the main menu offline as now)?
+
+### Captain's answers (2026-10-11)
+
+1. **Voided contract and the advance:** each contract states its clawback term on the board,
+   the advance follows it on a void: **none** (keep it all), **prorated** (keep the share of
+   objectives done) or **full** (give it all back). Strict clients use full; shady clients use
+   none but pay less. This replaces the single `void_claws_back_advance` flag. Later (not 4B):
+   adjust it by intent, collateral against deliberate.
+2. **The 8-casualty void** counts **across the deployment** (as today).
+3. **Hot zone size:** 8-16 km² for now, **10-20 km² at most**.
+4. **The contract board:** at the FOB, on the LHD, and **in the field with a field radio**
+   (builds on `Contracts.server_radio_contract`).
+5. **Role kits:** players do **not** deploy in their role kit (`player_role_kits` stays off).
+6. **Roster identity** (already on `dev` as 4B groundwork): a hire is one person, rolled at
+   hiring and kept by the roster (`Names.person`, `Roster.identity`).

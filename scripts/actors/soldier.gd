@@ -1217,13 +1217,16 @@ func server_leave_body() -> Soldier:
 
 
 ## Host only. What this body is, for CompoundLevel.server_spawn_body and the zone save:
-## "uid", "label" (whose it was), "faction", "variant", "role", "pos" ([x, y, z]), "rot_y",
+## "uid", "label" (whose it was), "faction", "variant", "person_name", "nation" and "left" (the
+## name tape, nationality and hand, so the body is the same person after a reload), "role",
+## "pos" ([x, y, z]), "rot_y",
 ## "age_s" (seconds dead), "marker" (a dead player's: shows a GearMarker) and "gear" (an
 ## Inventory.net_state: everything on it).
 func body_record() -> Dictionary:
 	var p := global_position
 	return {"uid": body_uid if body_uid != "" else GameState.new_uid(), "label": display_name(), "faction": String(faction),
-		"variant": model.variant, "role": String(role), "pos": [p.x, p.y, p.z], "rot_y": rotation.y,
+		"variant": model.variant, "person_name": person_name, "nation": nation, "left": left_handed,
+		"role": String(role), "pos": [p.x, p.y, p.z], "rot_y": rotation.y,
 		"age_s": maxf(_now() - died_at, 0.0) if died_at >= 0.0 else 0.0, "marker": has_gear_marker,
 		"gear": inventory.net_state.duplicate(true)}
 

@@ -149,6 +149,7 @@ func _test_hiring() -> void:
 		and Roster.gear_counts(m.gear).size() > 3, "they join with their role, skills, wage and their role's kit as their own gear")
 	if not m.is_empty():
 		_check_kit_pouches(m)
+	_check_identity(pool, m, cheapest)
 	check(Hiring.find(BaseHub.hiring(), String(cheapest.cid), 1).is_empty(), "and leave the board")
 	BaseHub.base()["stub_funds"] = 10
 	var pricey := _cheapest(Hiring.pool(BaseHub.hiring(), 1))
@@ -157,6 +158,31 @@ func _test_hiring() -> void:
 	BaseHub.server_advance_days(Hiring.REFRESH_DAYS)
 	check(int(BaseHub.hiring().refresh) == 1 and Hiring.pool(BaseHub.hiring(), BaseHub.day()) == Hiring.draw_pool(SEED, 1),
 		"after %d days the board turns over (refresh 1, from the seed)" % Hiring.REFRESH_DAYS)
+
+
+## Roster identity (Captain, 2026-10-11): each contractor on the board is a whole person, rolled
+## once; the hire keeps them; a second with the same surname gets another; an older save's
+## member keeps their roster name and gets the rest filled in once.
+func _check_identity(pool: Array, m: Dictionary, hired: Dictionary) -> void:
+	var people := true
+	for c: Dictionary in pool:
+		people = people and Names.POOLS.has(String(c.get("nation", ""))) and String(c.get("surname", "")) != "" \
+			and String(c.name) == "%s %s" % [c.first, c.surname] and c.get("left") is bool and String(c.get("body", "")) == Names.MALE
+	check(people,
+		"each contractor on the board is a person: first name, surname, nationality, hand, body")
+	check(not m.is_empty() and m.surname == hired.surname and m.nation == hired.nation and m.left == hired.left and m.name == hired.name,
+		"the hire is the person on the board (%s, %s)" % [m.get("name", "?"), Roster.person_text(m)])
+	var data := {"members": {"m0001": m.duplicate(true)}, "next_id": 2}
+	var twin := hired.duplicate(true)
+	var mid := Roster.add_member(data, twin, 1)
+	var second: Dictionary = Roster.get_member(data, mid)
+	check(second.surname != m.surname and second.name == "%s %s" % [second.first, second.surname], "a second hire with the same surname gets another (%s)" % second.surname)
+	var old := {"name": "Dale Okafor", "callsign": "Viper", "role": "rifleman"}
+	check(Roster.ensure_identity(old) and old.surname == "Okafor" and old.first == "Dale" and old.name == "Dale Okafor"
+		and Names.POOLS.has(String(old.nation)) and old.left == Handedness.roll_ai("Viper") and not Roster.ensure_identity(old),
+		"an older save's member keeps their roster name and is filled in once (%s)" % Roster.person_text(old))
+	var spawn := Roster.identity(old)
+	check(spawn == {"person_name": "Okafor", "nation": old.nation, "left": old.left, "body": Names.MALE}, "and spawns as that person (%s)" % [spawn])
 
 
 ## A hire's own gear is their role's kit as dev's role kits wear it: the kit's pouches on the
@@ -630,6 +656,14 @@ func _test_deployment(client: Dictionary) -> void:
 		return
 	check(String(sa.name) == callsign_a and sa.inventory.count_of(&"smoke_purple") == 1, "%s carries the smoke handed over at the base" % callsign_a)
 	check(_friendly_ai() == 3, "only the three picked deploy: nobody else fills the other slots")
+	var as_people := true
+	var tapes: PackedStringArray = []
+	for mid: String in squad:
+		var s := _roster_soldier(mid)
+		var m := BaseHub.member(mid)
+		as_people = as_people and s != null and s.person_name == String(m.surname) and s.nation == String(m.nation) and s.left_handed == bool(m.left)
+		tapes.append(String(m.surname))
+	check(as_people, "each squadmate deploys as their roster person: the name tape, nationality and hand (%s)" % ", ".join(tapes))
 	check(is_equal_approx(SquadAI.of(sa).combat, Roster.ai_stats(BaseHub.member(a)).combat), "their aim skill drives the AI (combat %.2f)" % SquadAI.of(sa).combat)
 	player = level.players.get_node(^"1")
 	check(player.inventory.slots[&"vest"] == &"plate_carrier" and player.inventory.slots[&"helmet"] == &"helmet", "the player deploys in the kit from the armory")
@@ -641,6 +675,7 @@ func _test_deployment(client: Dictionary) -> void:
 	var frags := sa.inventory.count_of(&"frag_grenade") + sa.inventory.take(&"frag_grenade", 1)
 	var sc := _roster_soldier(c)
 	var label_c := sc.display_name()  # the body is labelled with the name on the tape
+	var surname_c := String(BaseHub.member(c).surname)
 	sc.vitals.server_kill()
 	await _frames(2)
 	var sb := _roster_soldier(b)
@@ -659,6 +694,8 @@ func _test_deployment(client: Dictionary) -> void:
 	check(String(BaseHub.member(c).status) == Roster.DEAD and (BaseHub.member(c).gear as Dictionary).is_empty()
 		and zone_bodies.any(func(r: Dictionary) -> bool: return String(r.get("label", "")) == label_c and not (r.get("gear", {}) as Dictionary).is_empty()),
 		"the dead one is lost, gear and all on the body saved in the zone")
+	check(zone_bodies.any(func(r: Dictionary) -> bool: return String(r.get("person_name", "")) == surname_c and r.get("nation", "") == BaseHub.member(c).nation),
+		"their body keeps their name tape and nationality (%s)" % surname_c)
 	check(int(BaseHub.member(a).wage) > wage_a and int(BaseHub.member(a).missions) >= 1, "the one who came back earns more ($%d -> $%d)" % [wage_a, int(BaseHub.member(a).wage)])
 	check(BaseHub.day() == day + 1, "a day passed")
 	await _wait_until(func() -> bool: return CompoundLevel.current(self) is BaseLevel, 10.0)
@@ -714,6 +751,8 @@ func _test_zone_deployment() -> void:
 	var out: Array = [player]
 	if not squad.is_empty() and _roster_soldier(String(squad[0])):
 		out.append(_roster_soldier(String(squad[0])))
+		check(_roster_soldier(String(squad[0])).person_name == String(BaseHub.member(String(squad[0])).surname),
+			"another deployment, the same person (%s)" % BaseHub.member(String(squad[0])).surname)
 	var report := BaseHub.server_end_deployment(out)
 	check(report.get("zone_id", "") == ZONE + "_wide" + tag and (report.get("mia", []) as Array).is_empty(),
 		"extracting ends it with nobody left behind (%s back, %s MIA)" % [report.get("extracted", []), report.get("mia", [])])

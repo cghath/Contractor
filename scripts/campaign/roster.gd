@@ -7,7 +7,10 @@ extends RefCounted
 ##
 ## The section:
 ## - "members": member id (String) -> member, a JSON-safe Dictionary:
-##   "mid" (its id), "name", "callsign" (unique in the company: the AI body's node name),
+##   "mid" (its id), "name" ("first surname"), "callsign" (unique in the company: the AI body's
+##   node name), the person ("first", "surname" (on the name tape, unique in the company),
+##   "nation" (Names), "left" (shoots left-handed), "body" (Names.MALE or FEMALE): rolled once
+##   at hiring, the same in every deployment, Roster.identity),
 ##   "role" (a Roles id), "skills" ({aim, nerve, medical, movement}, 0..1), "xp", "missions",
 ##   "wage" (cash per day), "wage_factor" (what they haggled at hiring: wage = wage_for x it),
 ##   "gear" (an Inventory.net_state: their own kit, which deploys with them; the carrier's
@@ -111,6 +114,8 @@ static func add_member(data: Dictionary, person: Dictionary, day: int) -> String
 	var member := person.duplicate(true)
 	member["mid"] = mid
 	member["callsign"] = unique_callsign(data, String(person.get("callsign", "Recruit")))
+	ensure_identity(member)
+	unique_surname(member, surnames(data))
 	for key: String in ["xp", "missions", "sit_out_days"]:
 		member[key] = int(member.get(key, 0))
 	member["status"] = READY
@@ -128,6 +133,69 @@ static func add_member(data: Dictionary, person: Dictionary, day: int) -> String
 	members(data)[mid] = member
 	add_history(member, day, "Hired as %s" % Roles.display_name(StringName(member.role)))
 	return mid
+
+
+## The surnames the company's members carry (the dead included), as a set.
+static func surnames(data: Dictionary) -> Dictionary:
+	var out := {}
+	for m: Dictionary in members(data).values():
+		var surname := String(m.get("surname", ""))
+		if surname == "":
+			var parts := String(m.get("name", "")).split(" ", false)
+			surname = parts[parts.size() - 1] if not parts.is_empty() else ""
+		if surname != "":
+			out[surname] = true
+	return out
+
+
+## Fills in `member`'s person where it's missing, once: a hire from the board already has it
+## (Hiring.candidate); one from a save older than that keeps the name on their roster entry
+## ("Dale Okafor": first "Dale", surname "Okafor") and gets a nationality and shooting hand
+## seeded by their callsign. Returns whether anything changed.
+static func ensure_identity(member: Dictionary) -> bool:
+	if member.has("surname") and member.has("nation") and member.has("left") and member.has("body"):
+		return false
+	if not member.has("surname"):
+		var parts := String(member.get("name", "")).strip_edges().split(" ", false)
+		member["surname"] = parts[parts.size() - 1] if not parts.is_empty() else String(member.get("callsign", "Recruit"))
+		member["first"] = " ".join(parts.slice(0, parts.size() - 1)) if parts.size() > 1 else ""
+	if not member.has("nation"):
+		member["nation"] = String(Names.pick(&"friendly", String(member.get("callsign", "")), {}).nation)
+	if not member.has("left"):
+		member["left"] = Handedness.roll_ai(String(member.get("callsign", "")))
+	if not member.has("body"):
+		member["body"] = Names.MALE
+	return true
+
+
+## A new hire whose surname another member already carries (`taken`, surnames()) gets another
+## from their own nationality, so no two name tapes in the company match.
+static func unique_surname(member: Dictionary, taken: Dictionary) -> void:
+	if not taken.has(String(member.surname)):
+		return
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(["surname", String(member.callsign), String(member.surname)])
+	var pool: Array = Names.POOLS.get(String(member.nation), Names.US)
+	for attempt in 50:
+		member["surname"] = pool[rng.randi_range(0, pool.size() - 1)]
+		if not taken.has(String(member.surname)):
+			break
+	member["name"] = ("%s %s" % [member.get("first", ""), member.surname]).strip_edges()
+
+
+## A member's or candidate's person for the base screens: "US, left-handed".
+static func person_text(m: Dictionary) -> String:
+	if not m.has("nation"):
+		return ""
+	return "%s, %s" % [String(m.nation), "left-handed" if bool(m.get("left", false)) else "right-handed"]
+
+
+## What a member's AI body spawns with (CompoundLevel.spawn_soldier data): the same person in
+## every deployment.
+static func identity(member: Dictionary) -> Dictionary:
+	ensure_identity(member)
+	return {"person_name": String(member.surname), "nation": String(member.nation), "left": bool(member.left),
+		"body": String(member.body)}
 
 
 ## `wanted`, or "wanted 2", "wanted 3"... whichever no member holds yet.

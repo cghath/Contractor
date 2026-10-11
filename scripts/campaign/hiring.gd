@@ -77,6 +77,8 @@ static func draw_pool(seed_value: int, refresh: int) -> Array:
 
 ## One contractor on the board, drawn from `rng`: name, callsign, role, skills, missions
 ## done (their experience), the wage they ask ("demand", also "wage") and the sign-on fee.
+## The person (first name, surname, nationality, shooting hand and body, Names.person) comes
+## from a second generator seeded by `rng`'s state, so the rest of the board draws as before.
 static func candidate(rng: RandomNumberGenerator) -> Dictionary:
 	var missions := _missions(rng)
 	var role := _role(rng)
@@ -92,6 +94,10 @@ static func candidate(rng: RandomNumberGenerator) -> Dictionary:
 		"callsign": Roster.CALLSIGNS[rng.randi() % Roster.CALLSIGNS.size()],
 		"role": role, "skills": skills, "missions": missions, "xp": missions * Roster.XP_PER_MISSION, "wage_factor": factor,
 	}
+	var who_rng := RandomNumberGenerator.new()
+	who_rng.seed = hash(["person", rng.state])
+	person.merge(Names.person(who_rng, &"friendly", StringName(role)), true)
+	person["name"] = "%s %s" % [person.first, person.surname]
 	var demand := Roster.wage_of(person)
 	person["demand"] = demand
 	person["wage"] = demand
