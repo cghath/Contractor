@@ -21,9 +21,12 @@ extends Node
 ##   "bodies_left": [{"uid", "label", "faction", "role"}] (squad and player bodies not brought),
 ##   "hvts": [{"name", "alive", "faction", ...hvt_record()}], "deposited": [item] (items set
 ##   down inside the point, which wave 5's helicopter lifts), "items": {item id: count} (all
-##   of it together: carried, on bodies, deposited), "objectives": [map objectives at the end].
+##   of it together: carried, on bodies, deposited, and what's on a carrier's MOLLE points and
+##   in its pouches), "objectives": [map objectives at the end].
 ##   A soldier is {"name", "node", "peer" (players; 0 for AI), "role", "slot", "downed",
-##   "condition", "items"}; an item is {"id", "count", "where", "state"?}.
+##   "condition", "items"}; an item is {"id", "count", "where", "state"?}. A carrier's pouches
+##   and their contents stay in its state ("molle"), as the inventory keeps them, so the vest
+##   entry is the whole rig; "items" counts them too (totals_of).
 
 signal changed
 ## Host only: the deployment ended at extraction (see the class doc for the report).
@@ -365,9 +368,27 @@ static func items_of(inventory: Inventory) -> Array:
 	return out
 
 
+## Item counts in a list of item entries ({item id: count}), with what a carrier has on its
+## MOLLE points and in its pouches (a worn or stowed vest's "molle" state, a loose pouch's
+## "held").
+static func totals_of(items: Array) -> Dictionary:
+	var totals := {}
+	_add_totals(totals, items)
+	return totals
+
+
 static func _add_totals(totals: Dictionary, items: Array) -> void:
 	for entry: Dictionary in items:
-		totals[entry.id] = int(totals.get(entry.id, 0)) + int(entry.count)
+		var id := String(entry.get("id", ""))
+		if id != "":
+			totals[id] = int(totals.get(id, 0)) + int(entry.get("count", 1))
+		var state: Dictionary = entry.get("state", {})
+		var molle: Dictionary = state.get("molle", {})
+		for point: Variant in molle:
+			var att: Dictionary = molle[point]
+			_add_totals(totals, [{"id": att.get("id", ""), "count": 1}])
+			_add_totals(totals, att.get("held", []))
+		_add_totals(totals, state.get("held", []))
 
 
 func _soldier_record(s: Soldier) -> Dictionary:

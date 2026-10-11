@@ -470,6 +470,13 @@ func _test_extraction() -> void:
 	var lz := Vector2(0, 34)
 	_place(player, Vector3(lz.x, 0.1, lz.y))
 	player.inventory.take(&"hvt_case")
+	# A tourniquet holder with a tourniquet in it on the host's carrier (MOLLE).
+	if player.inventory.slots[&"vest"] == &"":
+		player.inventory.take(&"plate_carrier_light")
+	var tq_point := player.inventory.free_point_for(ItemDB.get_item(&"pouch_tq"))
+	if tq_point != &"":
+		player.inventory.attach(tq_point, {"id": &"pouch_tq", "count": 1})
+		player.inventory.take(&"tourniquet")
 	var mates := MapNodes.squad_ai(level)
 	var golf: Soldier = mates.back()  # the last slot's squadmate (Golf) stays out west
 	var i := 0
@@ -516,6 +523,18 @@ func _test_extraction() -> void:
 		"items out: the HVT case in the host's hands, the salvage set down in the LZ, the body's vest (%s)" % [items])
 	check(report.players[0].items.any(func(e: Dictionary) -> bool: return e.id == "hvt_case" and e.where == "hands") if not report.get("players", []).is_empty() else false,
 		"the case is listed in the host's hands")
+	# MOLLE: the pouches on the host's carrier and what's in them count, once each.
+	var host_totals := Extraction.totals_of(report.players[0].items) if not report.get("players", []).is_empty() else {}
+	var in_pouches := {}
+	var pouch_ids := {}
+	for c: StringName in player.inventory.pouch_containers():
+		pouch_ids[String(player.inventory.pouch_item(c).id)] = true
+		for e: Dictionary in player.inventory.containers[c]:
+			in_pouches[String(e.id)] = true
+	var counted := in_pouches.keys().all(func(id: String) -> bool: return int(host_totals.get(id, 0)) == player.inventory.count_of(StringName(id)))
+	counted = counted and pouch_ids.keys().all(func(id: String) -> bool: return int(host_totals.get(id, 0)) >= 1)
+	check(not in_pouches.is_empty() and counted and in_pouches.has("tourniquet"),
+		"the host's MOLLE pouches and their contents are in the report, once each (%s in %s)" % [in_pouches.keys(), pouch_ids.keys()])
 	var bodies: Array = report.get("bodies", [])
 	check(bodies.size() == 1 and bodies[0].label == "Hostile9" and bodies[0].items.size() >= 2, "the body brought along, with its gear (%s)" % [bodies])
 	var hvts: Array = report.get("hvts", [])
