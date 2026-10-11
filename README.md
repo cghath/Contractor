@@ -110,11 +110,11 @@ include Voxel Tools.
 | F | Fire mode (M4 and Mk18: semi and auto; each weapon remembers its selector) |
 | Mouse / LMB | Look, fire |
 | RMB (hold) | Aim down sights: zoom, much tighter spread, half recoil, slower movement |
-| Left Ctrl (hold) | Interaction menu: action points on items, downed bodies and squadmates within about 3 m; move the cursor onto one and let go to pick (pick up, treat, carry, drag, loot a body, check condition, give item; Release or Put down on the body you're moving). Dragging, you face the casualty and back away with S |
-| Left Ctrl + Left Alt (hold) | Self-interaction: check wounds, use medical, put down a carried body, drop held item |
+| Left Ctrl (hold) | Interaction menu: action points on items, downed bodies and squadmates within about 3 m; move the cursor onto one and let go to pick (pick up, carry, drag, loot a body, check condition, give item; Release or Put down on the body you're moving). A squadmate's body has ACE-style points on the head, chest, each arm and each leg, each with that part's check and treatments, plus a general point at the waist. Dragging, you face the casualty and back away with S |
+| Left Ctrl + Left Alt (hold) | Self-interaction: the same body points on yourself (check and treat each part), and at the waist: check wounds, put down a carried body, drop held item |
 | R | Reload (fullest spare magazine; a part-used one goes back in your pouch) |
 | H | Treat yourself: applies the next item you carry for your most urgent wound (tourniquet before bandage, and so on) |
-| G | Throw the selected grenade (frag, flashbang or smoke) |
+| G | Throw the selected grenade (frag, flashbang or smoke). Carrying or dragging a body: let go of it |
 | Shift+G | Switch grenade type |
 | Alt+G | Drop carried bulky item, otherwise drop active weapon |
 | 1 / 2 | Primary / sidearm |
@@ -146,7 +146,7 @@ which has the full rules.
 | Multiplayer | Co-op from day one, listen server (host is authoritative), up to 4 players |
 | Voxels | World structures at 10 cm voxels; characters and gear as 1–2 cm voxel models |
 | Armor | Plates and helmets are runtime voxel objects; hits chip voxels, holes let rounds through, and every hit wears the piece's integrity down by durability. Rounds and armor share an NIJ-named rating ladder (IIA to IV); ceramic cracks in zones, steel throws spall |
-| Medical | No hitpoints: 6 L of blood, wounds per body part, pain, unconsciousness at 40% lost, cardiac arrest at 50% with a 10-minute window |
+| Medical | No hitpoints: 6 L of blood, wounds per body part, pain, unconsciousness at 40% lost, cardiac arrest at 50% with a 10-minute window. Blood comes back only through an IV or IO line with a saline or blood bag running |
 | Inventory | Volume budget in **litres** + visible gear; auto-stow, bulky items need two hands |
 | Squad | 8 slots (two fire teams of four, a medic each, battle-buddy pairs); up to 4 players, AI fills the rest. Starts at 1 AI squadmate. AI tactics modeled on LAMBS Danger and VCOM |
 | Death | AI: permadeath on bleed-out, MIA if left behind alive. Players respawn in the default kit (M4, 2 spare mags + 90 rounds, 1 smoke, 1 frag); their old gear stays where they died, with a marker |
@@ -277,7 +277,7 @@ a release:
 - A vest or backpack can't be dropped while it still has things in its own pockets (its MOLLE pouches and their contents go with it). Empty it from the inventory screen first.
 - The voxel world has no stream, so it's limited to `VoxelWorld.BOUNDS`. The voxel edit log grows with every bullet hole and is never compacted.
 - Player inventories aren't saved yet; only the zone's state is.
-- Medical depth is wave 3: no IV, blood bags, CPR, defibrillator, decompression needle or surgery yet. Until IV, blood only comes back slowly once every bleed has stopped, and heart wounds and internal torso bleeding have no field fix. SpO2 is a basic model (no per-lung efficiency or pulse oximeter), and there's no breathing sound yet.
+- Medical depth (wave 3, built): IV and IO lines, fluids, pressure bags, per-lung breathing, the decompression needle, heart rate, the four drugs, CPR, the defibrillator, surgery kits, blasts, falls, burns, hypothermia and deafness are in. Heart wounds have no field fix. Nothing sets a body on fire yet (burns come from close blasts), and deafness only muffles the sound bus (the game has no sounds yet). A line can't be taken out once placed. Breathing has no sound yet, and blood in a lung (hemothorax) has no field fix (no chest drain).
 - Bodies: a zone reload respawns the full friendly squad alive while dead squadmates' saved bodies also come back, so their gear exists twice (AI persistence is wave 4; dead hostiles aren't respawned). Loot all can't move a carrier with its contents onto someone already wearing one; it falls back to piece by piece.
 - AI squadmates don't load magazines from loose rounds, and role kits carry no loose rounds.
 - Bullet holes in wood and sheet metal are decals (a voxel only breaks out after many rounds), so you can't see through them; concrete marks are small decals. No ricochets yet.
@@ -288,9 +288,12 @@ a release:
 - A player who joins while someone is being carried sees that body as solid until it's put down.
 ## Revised roadmap
 
+> **Note for cghath's agent (Captain, 2026-10-11):** wave 3 of [docs/build_plan.md](docs/build_plan.md) (medical depth) is built by Captain's side and lands on `dev` from there. Don't start any wave 3 work. Work on the wave in active development instead: the next one after the last wave marked done (wave 4, once wave 3 is on `dev`).
+
 1. **Foundation (v0.1.0):** gray-box compound, FP co-op player, volume inventory, voxel plates, destructible walls, zone save.
 2. **Inventory depth (done, unreleased):** ammo and reloading, an inventory screen, armor damage and ammo that travel with the item, medical items.
 3. **Squad prototype (early, highest risk):** the wound model, then one AI squadmate scaling to the 8-slot squad with buddy pairs, throwables, carry/drag and treatment, the Arma-style command menu and the new controls. See the checklist in [docs/contractor_handoff.md](docs/contractor_handoff.md) and the design in [docs/squad_design.md](docs/squad_design.md). Step 1 (the shared `Soldier` body) is done.
+   - **Medical depth (build plan wave 3):** IV and IO, fluids, breathing, heart rate and drugs, CPR and defib, surgery kits and the other damage types are built; ACE3-style body interaction points (head, chest, each arm and leg, and a general point at the waist; IVs in the legs as well) and a technique animation for every treatment are in too. Wave 3 is built and waiting for playtest.
 4. **Mission loop:** contracts, reinforcement timer, extraction, salvage share, persistent zone graph.
 5. **Ground vehicles:** drivable, modular damage, cargo as a rolling stash. Aircraft as AI-flown transport and fire support.
 6. **Factions:** territory, reputation tiers, dynamic events.

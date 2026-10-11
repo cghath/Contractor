@@ -31,11 +31,35 @@ const SUB_GAP_PX := 8.0
 const MAX_GIVE_ENTRIES := 12
 ## Most entries the Treat submenu lists (the most urgent first).
 const MAX_TREAT_ENTRIES := 12
+## Reads the SpO2 in Check condition and Check wounds while carried.
+const OXIMETER := &"pulse_oximeter"
 ## Most entries a dead body's Loot submenu lists (what's worn first, then each container).
 const MAX_LOOT_ENTRIES := 20
 ## Height of an action point above a body's origin: standing, and lying down.
 const STANDING_POINT_Y := 1.3
 const DOWNED_POINT_Y := 0.3
+
+## Body interaction points (ACE3's medical rig; Captain, 2026-10-11). A body you can treat
+## (a downed or standing squadmate, or yourself) gets a point per region, offering that
+## region's treatments and a check of it, plus a general point at the waist (WAIST) with
+## everything else (carry, drag, give, check condition). Other targets keep one point.
+const WAIST := &"waist"
+const REGIONS: Array[StringName] = [&"head", &"chest", &"arm_l", &"arm_r", &"leg_l", &"leg_r"]
+## Body parts (BodyMap, plus Vitals.TORSO for whole-body treatments) in each region.
+const REGION_PARTS := {
+	&"head": [&"head", &"face", &"neck"], &"chest": [&"chest", &"abdomen", &"pelvis", &"torso"],
+	&"arm_l": [&"upper_arm_l", &"forearm_l"], &"arm_r": [&"upper_arm_r", &"forearm_r"],
+	&"leg_l": [&"thigh_l", &"shin_l"], &"leg_r": [&"thigh_r", &"shin_r"],
+}
+const REGION_NAMES := {&"head": "head", &"chest": "chest", &"arm_l": "left arm", &"arm_r": "right arm",
+	&"leg_l": "left leg", &"leg_r": "right leg", &"waist": "waist"}
+## The hitbox each region's point sits on (it follows the pose, standing or lying).
+const REGION_ANCHORS := {&"head": &"head", &"chest": &"chest", &"arm_l": &"forearm_l", &"arm_r": &"forearm_r",
+	&"leg_l": &"thigh_l", &"leg_r": &"thigh_r", &"waist": &"pelvis"}
+## Self-interaction lays the points out like a body around the screen centre (your left on
+## the left), in pixels.
+const SELF_LAYOUT := {&"head": Vector2(0, -170), &"chest": Vector2(0, -95), &"arm_l": Vector2(-135, -60),
+	&"arm_r": Vector2(135, -60), &"waist": Vector2(0, -10), &"leg_l": Vector2(-55, 110), &"leg_r": Vector2(55, 110)}
 
 ## Target kinds, the keys of ACTIONS.
 const ITEM := &"item"
@@ -109,6 +133,7 @@ var points: Array[Dictionary] = []
 ## Set when update_keys reports the keys let go: the action to perform ({} for none).
 var chosen: Dictionary = {}
 var _open_target: Node        # whose actions are showing
+var _open_region := &""       # and which of its points (a region, WAIST, or &"" for a single point)
 var _expanded := -1           # the ring entry whose submenu is showing
 var _held_s := -1.0           # how long Left Ctrl has been held (< 0: not held)
 
@@ -166,6 +191,70 @@ static func actions_for(actor: Soldier, target: Node) -> Array[Dictionary]:
 				action["disabled"] = {&"stowed_items": "Nothing stowed to give", &"body_items": "Nothing left on them"}.get(def.submenu, "Nothing to treat")
 		out.append(action)
 	return out
+
+
+## `target` gets body interaction points (a region point each, and the waist): a squadmate,
+## down or up, or yourself. Enemies, the dead, dummies, items and the body you're carrying
+## or dragging (its point offers Release / Put down first) keep a single point.
+static func has_regions(actor: Soldier, target: Node) -> bool:
+	if target is Soldier and target != actor and (target as Soldier).carried_by == actor:
+		return false
+	return target is Soldier and not _is_enemy(actor, target) and target_kind(actor, target) in [DOWNED, SQUADMATE, SELF]
+
+
+## What the waist point offers: actions_for without Treat (treatments sit on the regions).
+static func general_actions(actor: Soldier, target: Node) -> Array[Dictionary]:
+	return actions_for(actor, target).filter(func(a: Dictionary) -> bool: return a.id != &"treat")
+
+
+## What a region point offers: a check of that region, then its treatments (entries as in
+## treatments, each with its own request).
+static func region_actions(actor: Soldier, target: Node, region: StringName) -> Array[Dictionary]:
+	var out: Array[Dictionary] = [{"id": &"check_part", "label": "Check %s" % REGION_NAMES[region], "show": &"part",
+		"target": target, "region": region, "disabled": ""}]
+	out.append_array(treatments(actor, target, region))
+	return out
+
+
+## The region a body part (or Vitals.TORSO) belongs to.
+static func region_of(part: StringName) -> StringName:
+	for region: StringName in REGIONS:
+		if part in REGION_PARTS[region]:
+			return region
+	return &"chest"
+
+
+## What checking one region shows: its wounds and what's been done for them, tourniquets
+## and a line there, the airway on the head, breathing and pulse on the chest.
+static func part_report(target: Node, region: StringName, actor: Soldier = null) -> String:
+	var vitals := Vitals.find_on(target)
+	if vitals == null:
+		return ""
+	var lines := PackedStringArray()
+	for wound in vitals.wound_list():
+		if region_of(wound.part) == region:
+			lines.append("%s: %s%s" % [part_name(wound.part), _kind_text(wound), _wound_status(wound)])
+	var tourniquets := vitals.tourniquets()
+	for part: StringName in tourniquets:
+		if region_of(part) == region:
+			lines.append("%s on the %s" % ["Two tourniquets" if int(tourniquets[part].count) > 1 else "Tourniquet", Vitals.part_name(part)])
+	var line := vitals.access()
+	if not line.is_empty() and region_of(line.part) == region:
+		lines.append("IO line in" if line.kind == "io" else "IV %dG in the %s" % [int(line.gauge), Vitals.part_name(line.part)])
+	if region == &"head":
+		if vitals.has_npa():
+			lines.append("NPA in")
+		elif vitals.airway_blocked():
+			lines.append("Airway blocked: needs an NPA")
+	elif region == &"chest":
+		for sign in vitals.signs(target == actor):
+			if sign.contains("reath") or sign.contains("ulse") or sign.contains("Trachea") or sign.contains("Coughing"):
+				lines.append(sign)
+		if has_oximeter(actor) and target != actor:
+			lines.append("Pulse oximeter: %s" % ("no reading" if vitals.in_cardiac_arrest() else "SpO2 %d%%, pulse %d" % [roundi(vitals.spo2()), roundi(vitals.heart_rate())]))
+	if lines.is_empty():
+		lines.append("Nothing found on the %s" % REGION_NAMES[region])
+	return "%s, %s:\n%s" % [display_name(target), REGION_NAMES[region], "\n".join(lines)]
 
 
 ## "" if the condition is met, _HIDE to leave the entry out, or why it's greyed out.
@@ -270,13 +359,34 @@ static func _rounds_text(state: Dictionary) -> String:
 ## task on its care_needed() with the body part ("Tourniquet, left thigh"; a tourniquet also
 ## as a quicker rushed entry), then packing an arterial bleed under a tourniquet with gauze,
 ## and taking a tourniquet off once its wound is packed. Entries are greyed out with a
-## reason when you don't carry the item (loose or in a kit).
-static func treatments(actor: Soldier, target: Node) -> Array[Dictionary]:
+## reason when you don't carry the item (loose or in a kit). With a `region` (REGIONS), only
+## what goes on that region's parts; an IV is then offered at each IV site in it (both
+## forearms and both lower legs, not below a tourniquet), an IO on the chest.
+static func treatments(actor: Soldier, target: Node, region := &"") -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	var vitals := Vitals.find_on(target)
 	if vitals == null or vitals.is_dead():
 		return out
+	var here := func(part: StringName) -> bool: return region == &"" or region_of(part) == region
 	for task in vitals.care_needed():
+		if task.has("items"):  # a line, a bag, a seal or a clamp: one entry per kind you carry, or the usual pick greyed out
+			if target == actor and Vitals.needs_other_hands(task.item):
+				continue
+			var carried := Vitals.task_items(task).filter(func(id: StringName) -> bool: return Vitals.has_item(actor.inventory, id))
+			for id: StringName in (carried if not carried.is_empty() else [task.item]):
+				var option := ItemDB.get_item(id)
+				var sites: Array = [task.part]
+				if id == WoundModel.IO_KIT:
+					sites = [WoundModel.IO_PART]
+				elif WoundModel.IV_GAUGES.has(id) and region != &"":
+					sites = WoundModel.IV_SITES.filter(func(s: StringName) -> bool: return vitals.iv_site_ok(s))
+				for part: StringName in sites:
+					if here.call(part):
+						var where := "sternum" if id == WoundModel.IO_KIT else Vitals.part_name(part)
+						out.append(_treat_entry(actor, target, option, part, false, "%s, %s" % [option.name, where]))
+			continue
+		if not here.call(task.part):
+			continue
 		var item := ItemDB.get_item(task.item)
 		out.append(_treat_entry(actor, target, item, task.part, false, "%s, %s" % [item.name, Vitals.part_name(task.part)]))
 		if task.item == WoundModel.TOURNIQUET:
@@ -285,20 +395,20 @@ static func treatments(actor: Soldier, target: Node) -> Array[Dictionary]:
 	var gauze := ItemDB.get_item(WoundModel.HEMOSTATIC_GAUZE)
 	var packing := {}
 	for w in vitals.wound_list():
-		if w.kind == "arterial" and w.tourniquet and not w.treated and not packing.has(w.part) \
+		if w.kind == "arterial" and w.tourniquet and not w.treated and not packing.has(w.part) and here.call(w.part) \
 				and vitals.treatment_problem(gauze.id, w.part) == "":
 			packing[w.part] = true
 			out.append(_treat_entry(actor, target, gauze, w.part, false, "%s (pack under tourniquet), %s" % [gauze.name, Vitals.part_name(w.part)]))
 	var tourniquets := vitals.tourniquets()
 	for part: StringName in tourniquets:
-		if vitals.removal_problem(part) == "":
+		if vitals.removal_problem(part) == "" and here.call(part):
 			out.append({"id": &"remove_tourniquet", "label": "Remove tourniquet, %s" % Vitals.part_name(part),
 				"request": &"_server_remove_tourniquet", "with": &"target_part", "target": target, "part": part, "disabled": ""})
 	return out.slice(0, MAX_TREAT_ENTRIES)
 
 
 static func _treat_entry(actor: Soldier, target: Node, item: ItemData, part: StringName, rushed: bool, label: String) -> Dictionary:
-	var have := actor.inventory.medical_count(item.id) > 0
+	var have := Vitals.has_item(actor.inventory, item.id)
 	return {"id": &"treat_item", "label": label, "request": &"_server_treat", "with": &"treatment", "target": target,
 		"item": item.id, "part": part, "rushed": rushed, "disabled": "" if have else "You have no %s" % item.name}
 
@@ -322,9 +432,11 @@ static func perform(actor: Soldier, action: Dictionary) -> String:
 		return ""
 	match action.get("show", &""):
 		&"condition":
-			return condition_report(target)
+			return condition_report(target, actor)
 		&"wounds":
-			return wound_report(actor.vitals)
+			return wound_report(actor.vitals, true, has_oximeter(actor))
+		&"part":
+			return part_report(target, action.region, actor)
 	var request: StringName = action.get("request", &"")
 	if request == &"":
 		return ""
@@ -346,24 +458,35 @@ static func perform(actor: Soldier, action: Dictionary) -> String:
 	return ""
 
 
-## "Alpha: Unconscious" plus what someone checking them can see, for Check condition.
-static func condition_report(target: Node) -> String:
+## "Alpha: Unconscious" plus what someone checking them can see, for Check condition. An
+## `actor` carrying a pulse oximeter also reads the SpO2.
+static func condition_report(target: Node, actor: Soldier = null) -> String:
 	var vitals := target.get_node_or_null(^"Vitals") as Vitals
 	if vitals == null:
 		return ""
-	return "%s: %s\n%s" % [display_name(target), vitals.condition_text(), wound_report(vitals, false)]
+	return "%s: %s\n%s" % [display_name(target), vitals.condition_text(), wound_report(vitals, false, has_oximeter(actor))]
 
 
-## Plain signs first (Vitals.signs: "Unresponsive", "Breathing laboured", "Blue lips",
-## "Pinpoint pupils (morphine)"; on yourself, laboured breathing and drowsiness), then one
-## line per wound and what's been done for it ("Left thigh: arterial bleed, held by
-## tourniquet, packed"), then the tourniquets and airway; or "No wounds found". No numbers:
-## SpO2, blood and the morphine level stay hidden.
-static func wound_report(vitals: Vitals, on_self := true) -> String:
+## Carries a pulse oximeter (loose or in a kit).
+static func has_oximeter(actor: Soldier) -> bool:
+	return actor != null and actor.inventory.medical_count(OXIMETER) > 0
+
+
+## Plain signs first (Vitals.signs: "Unresponsive", "Breathing laboured", "Breathing fast",
+## "Blue lips", "No breath sounds on the left", "Pinpoint pupils (morphine)"; on yourself,
+## laboured or fast breathing and drowsiness), then one line per wound and what's been done
+## for it ("Left thigh: arterial bleed, held by tourniquet, packed"), then the tourniquets and
+## airway; or "No wounds found". No numbers: SpO2, blood and the morphine level stay hidden,
+## except that with a pulse oximeter (`oximeter`) the first line reads the SpO2.
+static func wound_report(vitals: Vitals, on_self := true, oximeter := false) -> String:
 	var signs := vitals.signs(on_self)
+	if oximeter:
+		var reading := "no reading" if vitals.in_cardiac_arrest() or vitals.is_dead() \
+			else "SpO2 %d%%, pulse %d" % [roundi(vitals.spo2()), roundi(vitals.heart_rate())]
+		signs.insert(0, "Pulse oximeter: %s" % reading)
 	var lines := PackedStringArray()
 	for wound in vitals.wound_list():
-		lines.append("%s: %s%s" % [part_name(wound.get("part", &"")), KIND_TEXT.get(wound.get("kind", ""), "wound"), _wound_status(wound)])
+		lines.append("%s: %s%s" % [part_name(wound.get("part", &"")), _kind_text(wound), _wound_status(wound)])
 	var tourniquets := vitals.tourniquets()
 	for part: StringName in tourniquets:
 		var t: Dictionary = tourniquets[part]
@@ -380,11 +503,24 @@ static func wound_report(vitals: Vitals, on_self := true) -> String:
 	return "\n".join(signs)
 
 
+## One wound_list() entry's kind in words (a lung that blast lung collapsed is no open wound).
+static func _kind_text(wound: Dictionary) -> String:
+	if wound.get("pneumo", false):
+		return "collapsed lung"
+	return KIND_TEXT.get(String(wound.get("kind", "")), "wound")
+
+
 ## What's been done for one wound_list() entry, and whether it still bleeds.
 static func _wound_status(wound: Dictionary) -> String:
 	var done := PackedStringArray()
 	var kind := String(wound.get("kind", ""))
-	if wound.get("packed", false):
+	if wound.get("pneumo", false):
+		pass  # nothing to seal: the needle is its fix
+	elif wound.get("clamped", false):
+		done.append("clamped")
+	elif wound.get("closed", false):
+		done.append("closed by surgery")
+	elif wound.get("packed", false):
 		done.append("packed")
 	elif wound.get("treated", false):
 		done.append({"fracture": "splinted", "chest": "sealed", "rib": "morphine given"}.get(kind, "bandaged"))
@@ -414,8 +550,43 @@ static func display_name(target: Node) -> String:
 # --- Finding action points ---------------------------------------------------------------
 
 ## Action points `actor` can see through `camera`: everything within REACH, in front, in
-## sight and with at least one action.
+## sight and with at least one action. A body with regions (has_regions) gets its waist point
+## (WAIST: the general actions) and a point per region on its hitboxes ("region" says which);
+## anything else one point (region &"").
 static func collect_points(actor: Soldier, camera: Camera3D) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	for point in _single_points(actor, camera):
+		var node: Node3D = point.target
+		if not has_regions(actor, node):
+			out.append(point)
+			continue
+		var general := general_actions(actor, node)
+		if not general.is_empty():
+			out.append({"target": node, "region": WAIST, "screen": point.screen, "actions": general})
+		for region in REGIONS:
+			var at: Variant = part_anchor(node, REGION_ANCHORS[region])
+			if at == null or camera.is_position_behind(at) or (at as Vector3).distance_to(camera.global_position) > REACH + 0.6:
+				continue
+			out.append({"target": node, "region": region, "screen": camera.unproject_position(at),
+				"actions": region_actions(actor, node, region)})
+	return out
+
+
+## Where a body's hitbox for `part` is in the world (it follows the pose), or null if it has none.
+static func part_anchor(node: Node, part: StringName) -> Variant:
+	for child in node.get_children():
+		var hitbox := child as Area3D
+		if hitbox == null or hitbox.get_meta(&"body_part", &"") != part:
+			continue
+		for shape in hitbox.get_children():
+			if shape is CollisionShape3D:
+				return (shape as CollisionShape3D).global_position
+		return hitbox.global_position
+	return null
+
+
+## One point per target (its action_point), as before body regions.
+static func _single_points(actor: Soldier, camera: Camera3D) -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	var eye := camera.global_position
 	var forward := -camera.global_basis.z
@@ -424,8 +595,9 @@ static func collect_points(actor: Soldier, camera: Camera3D) -> Array[Dictionary
 	for node: Node in candidates:
 		if node == actor or not node is Node3D or node.is_queued_for_deletion():
 			continue
-		if node is Soldier and is_instance_valid((node as Soldier).carried_by):
-			continue  # on someone's shoulder or being dragged
+		var mover: Node = (node as Soldier).carried_by if node is Soldier else null
+		if is_instance_valid(mover) and mover != actor:
+			continue  # on someone else's shoulder or being dragged by them (yours: Release / Put down)
 		var at := action_point(node as Node3D)
 		var to := at - eye
 		if to.length() > REACH or forward.angle_to(to) > deg_to_rad(VIEW_CONE_DEG) or camera.is_position_behind(at):
@@ -489,18 +661,24 @@ func open_object() -> void:
 	queue_redraw()
 
 
-## Opens the menu on your own body and gear, already showing its actions.
+## Opens the menu on your own body and gear: the waist point (your general actions) is open,
+## with a point per region laid out like a body around it (SELF_LAYOUT).
 func open_self() -> void:
 	mode = Mode.SELF
-	cursor = _centre()
 	_open_target = player
+	_open_region = WAIST
 	_expanded = -1
 	refresh_self()
+	cursor = _open_point().get("screen", _centre())
 
 
-## Rebuilds the self actions (what you carry can change while the menu is open).
+## Rebuilds the self points (what you carry and your wounds can change while it's open).
 func refresh_self() -> void:
-	points = [{"target": player, "screen": _centre(), "actions": actions_for(player, player)}]
+	var centre := _centre()
+	points = [{"target": player, "region": WAIST, "screen": centre + SELF_LAYOUT[WAIST], "actions": general_actions(player, player)}]
+	for region in REGIONS:
+		points.append({"target": player, "region": region, "screen": centre + SELF_LAYOUT[region],
+			"actions": region_actions(player, player, region)})
 	queue_redraw()
 
 
@@ -573,7 +751,7 @@ func _open_point() -> Dictionary:
 	if _open_target == null:
 		return {}
 	for p in points:
-		if p.target == _open_target:
+		if p.target == _open_target and p.get("region", &"") == _open_region:
 			return p
 	return {}
 
@@ -592,16 +770,17 @@ func _update_hover() -> void:
 				_expanded = i if actions[i].has("items") and not actions[i].items.is_empty() else -1
 				return
 	# Over an action point: open it (the nearest one wins).
-	var best: Node = null
+	var best := {}
 	var best_d := POINT_HOVER_PX
 	for p in points:
 		var screen: Vector2 = p.screen
 		var d := screen.distance_to(cursor)
 		if d <= best_d:
-			best = p.target
+			best = p
 			best_d = d
-	if best != null and best != _open_target:
-		_open_target = best
+	if not best.is_empty() and (best.target != _open_target or best.get("region", &"") != _open_region):
+		_open_target = best.target
+		_open_region = best.get("region", &"")
 		_expanded = -1
 
 
@@ -647,9 +826,12 @@ func _draw() -> void:
 	var font_size := 15
 	var lit := highlighted()
 	for p in points:
-		var open: bool = p.target == _open_target
+		var open: bool = p.target == _open_target and p.get("region", &"") == _open_region
 		draw_circle(p.screen, 6.0 if open else 4.5, COLOUR_HIGHLIGHT if open else COLOUR_POINT)
 		draw_arc(p.screen, 9.0, 0.0, TAU, 20, Color(0, 0, 0, 0.6), 1.5)
+		var region: StringName = p.get("region", &"")
+		if region != &"" and not open:  # name the body points so they read like ACE's
+			draw_string(font, p.screen + Vector2(11, 5), REGION_NAMES[region].capitalize(), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, COLOUR_POINT)
 	var point := _open_point()
 	if not point.is_empty():
 		var actions: Array = point.actions

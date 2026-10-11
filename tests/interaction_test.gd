@@ -54,6 +54,7 @@ func _ready() -> void:
 	await _test_give_item()
 	await _test_self_actions()
 	await _test_menu()
+	await _test_body_points()
 	GameState.delete_save()
 	print("INTERACTION TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
@@ -103,11 +104,13 @@ func _test_actions_for() -> void:
 
 	alpha.vitals.server_damage(70.0)  # 42% lost: unconscious, not in arrest
 	hostile.vitals.server_damage(500.0)
-	dummy.vitals.server_damage(500.0)  # cardiac arrest: nothing in the kit helps until the heart restarts
+	dummy.vitals.server_damage(500.0)  # cardiac arrest: only a line and fluids help until the heart restarts
 	await _frames(2)
 	check(_ids(player, alpha) == [&"treat", &"carry", &"drag", &"check_condition"], "downed squadmate: Treat, Carry, Drag, Check condition; no Revive (%s)" % [_ids(player, alpha)])
 	var treat := _action(player, alpha, &"treat")
-	check(treat.items.size() == 2 and treat.items[0].label == "NPA Airway, head" and treat.items[0].disabled.contains("NPA") and treat.items[1].label.begins_with("Morphine"),
+	check(treat.items.size() == 4 and treat.items[0].label == "NPA Airway, head" and treat.items[0].disabled.contains("NPA")
+		and treat.items[1].label == "IO Kit (Sternal), sternum" and treat.items[2].label == "Hypothermia Blanket, torso"
+		and treat.items[3].label.begins_with("Morphine"),
 		"Treat lists what they need, greyed out without the item (%s: %s)" % [treat.items.map(func(e: Dictionary) -> String: return e.label), treat.items.map(func(e: Dictionary) -> String: return e.disabled)])
 	player.inventory.take(&"trauma_kit")
 	check(not _ids(player, alpha).has(&"revive"), "a trauma kit adds no Revive either (%s)" % [_ids(player, alpha)])
@@ -115,7 +118,14 @@ func _test_actions_for() -> void:
 	player.inventory.take(&"hvt_case")
 	check(_action(player, alpha, &"carry").disabled.contains("hands"), "can't carry with your hands full")
 	player.inventory.release_hands()
-	check(_ids(player, dummy) == [&"check_condition"], "downed dummy in cardiac arrest: Check condition, nothing to treat (%s)" % [_ids(player, dummy)])
+	check(_ids(player, dummy) == [&"treat", &"check_condition"]
+		and _action(player, dummy, &"treat").items.all(func(e: Dictionary) -> bool: return e.item in [WoundModel.IO_KIT, WoundModel.BLANKET] or WoundModel.IV_GAUGES.has(e.item)),
+		"downed dummy in cardiac arrest: Check condition, and Treat offers only a line and a blanket (%s)" % [_ids(player, dummy)])
+	player.inventory.take(&"iv_18")
+	player.inventory.take(&"io_kit")
+	var lines: Array = _action(player, dummy, &"treat").items.map(func(e: Dictionary) -> String: return e.label)
+	check(lines == ["IO Kit (Sternal), sternum", "IV Catheter (18G), left forearm", "Hypothermia Blanket, torso"],
+		"with an IO kit and an IV in the kit, one entry each, IO first in arrest (%s)" % [lines])
 	check(_ids(player, hostile) == [&"carry", &"drag", &"check_condition"], "downed enemy: Carry, Drag, Check condition (%s)" % [_ids(player, hostile)])
 	var report := InteractionMenu.perform(player, _action(player, alpha, &"check_condition"))
 	check(report.begins_with("Alpha: " + alpha.vitals.condition_text()) and report.contains("\n"), "Check condition reads condition and wounds (%s)" % report.replace("\n", " | "))
@@ -182,6 +192,10 @@ func _test_signs() -> void:
 	report = InteractionMenu.condition_report(alpha)
 	check(report.contains("Breathing laboured") and report.contains("Blue lips") and not report.contains("%"),
 		"low SpO2 shows as laboured breathing and blue lips, no number (%s)" % report.replace("\n", " | "))
+	player.inventory.take(&"pulse_oximeter")
+	report = InteractionMenu.condition_report(alpha, player)
+	check(report.contains("Pulse oximeter: SpO2 8"), "with a pulse oximeter the number shows (%s)" % report.replace("\n", " | "))
+	player.inventory.remove_one(&"pulse_oximeter")
 	player.vitals._model.pain_wounds = 0.6
 	player.vitals.server_apply_treatment(&"morphine", Vitals.TORSO)
 	player.vitals.server_advance(WoundModel.MORPHINE_ABSORB_S)
@@ -219,10 +233,35 @@ func _test_carry_and_drag() -> void:
 	check(is_equal_approx(player.view_yaw(), PI), "dragging, the view faces the casualty behind the body")
 	check(_ids(player, alpha).has(&"put_down") and _action(player, alpha, &"put_down").get("label") == "Release",
 		"looking at the body you drag offers Release (%s)" % [_ids(player, alpha)])
+	player.head.rotation.x = -0.6  # looking down at the casualty you're dragging
+	await _frames(2)
+	var dragged := InteractionMenu.collect_points(player, player.camera).filter(func(p: Dictionary) -> bool: return p.target == alpha)
+	player.head.rotation.x = 0.0
+	check(dragged.size() == 1 and dragged[0].get("region", &"") == &"" and dragged[0].actions[0].id == &"put_down" and dragged[0].actions[0].label == "Release",
+		"Left Ctrl on the body you drag: one point, Release first (%s)" % [dragged.map(func(p: Dictionary) -> Array: return p.actions.map(func(a: Dictionary) -> String: return a.label))])
+	check(InteractionMenu.general_actions(player, player).any(func(a: Dictionary) -> bool: return a.id == &"put_down" and a.label == "Release"),
+		"and on yourself (Left Ctrl + Left Alt), Release at the waist")
 	InteractionMenu.perform(player, _action(player, player, &"put_down"))
 	check(player.carrying == null and player.carry_mode == &"" and is_equal_approx(player.carry_speed_mult(), 1.0), "Let go releases it and your speed")
 	check(alpha.carried_by == null and alpha.collision_layer == Soldier.BODY_LAYER and alpha.care_by == null, "the body collides again")
 	check(alpha.global_position.distance_to(player.global_position) > 0.8, "and stays where you dragged it")
+	# G lets go too, dragging or carrying (your hands are full: nothing to throw).
+	for mode: StringName in [Soldier.DRAG, Soldier.CARRY]:
+		_place_player()
+		alpha.global_position = SPOT + Vector3(0, 0, -1.2)
+		await _frames(2)
+		if mode == Soldier.DRAG:
+			player._server_drag_body.rpc_id(1, alpha.get_path())
+		else:
+			player._server_carry_body.rpc_id(1, alpha.get_path())
+		var held := player.carry_mode == mode
+		var g := InputEventAction.new()
+		g.action = &"grenade"
+		g.pressed = true
+		player.player_input._unhandled_input(g)
+		await _frames(2)
+		check(held and player.carrying == null and player.carry_mode == &"" and alpha.carried_by == null,
+			"G lets go of a body you're %s" % ("dragging" if mode == Soldier.DRAG else "carrying"))
 
 	_place_player()
 	alpha.global_position = SPOT + Vector3(0, 0, -1.5)
@@ -231,7 +270,8 @@ func _test_carry_and_drag() -> void:
 	check(player.carry_mode == Soldier.DRAG, "Drag takes hold of a body directly")
 	player.set_physics_process(true)  # the host keeps a player's casualty with them
 	alpha.vitals.server_reset_health()
-	await _frames(3)
+	for i in 3:  # physics frames: the host's update runs in the player's physics step
+		await get_tree().physics_frame
 	player.set_physics_process(false)
 	_place_player()
 	check(player.carrying == null and player.carry_mode == &"", "a body that gets up is let go (host update for players)")
@@ -345,7 +385,7 @@ func _test_menu() -> void:
 	menu.update_keys(true, false, 0.5)
 	check(menu.mode == InteractionMenu.Mode.SELF, "and stays on it, never the object menu, while Ctrl is held")
 	var rects := menu.entry_rects()
-	check(rects.size() == InteractionMenu.actions_for(player, player).size(), "your actions are around the centre")
+	check(rects.size() == InteractionMenu.general_actions(player, player).size(), "your general actions are around the waist point")
 	menu.set_cursor(rects[0].get_center())
 	check(menu.highlighted().get("id") == &"check_wounds", "the cursor highlights Check wounds")
 	check(menu.update_keys(false, false, 0.05) and menu.chosen.get("id") == &"check_wounds" and not menu.is_open(), "letting go picks it and closes")
@@ -396,6 +436,69 @@ func _test_menu() -> void:
 	check(picked.get("container") != null and picked.get("target") == alpha, "a submenu entry is the item to give (%s)" % picked.get("label"))
 	menu.update_keys(false, false, 0.05)
 	screen.queue_free()
+
+
+## Body interaction points (ACE3's medical rig): a point per region with that region's
+## treatments, a general point at the waist, the same layout on yourself; IVs in the legs too.
+func _test_body_points() -> void:
+	print("Body interaction points")
+	check(InteractionMenu.region_of(&"thigh_l") == &"leg_l" and InteractionMenu.region_of(&"forearm_r") == &"arm_r"
+		and InteractionMenu.region_of(&"neck") == &"head" and InteractionMenu.region_of(Vitals.TORSO) == &"chest", "body parts map to regions")
+	alpha.vitals.server_reset_health()
+	alpha.global_position = SPOT + Vector3(0, 0, -1.5)
+	alpha.vitals.server_damage(70.0)  # out cold, 42% lost: a line, a blanket, the airway
+	alpha.vitals._model._add_wound(&"thigh_l", "arterial", 1.2, &"femoral_l")
+	alpha.vitals._model.update_state(0.0)
+	alpha.vitals._after_change(true)
+	await _frames(2)
+	var general := InteractionMenu.general_actions(player, alpha)
+	check(not general.any(func(a: Dictionary) -> bool: return a.id == &"treat") and general.any(func(a: Dictionary) -> bool: return a.id == &"carry")
+		and general.any(func(a: Dictionary) -> bool: return a.id == &"check_condition"), "the waist point: carry, drag, check condition; no Treat")
+	var labels := func(region: StringName) -> Array: return InteractionMenu.region_actions(player, alpha, region).map(func(a: Dictionary) -> String: return a.label)
+	var leg: Array = labels.call(&"leg_l")
+	check(leg[0] == "Check left leg" and leg.has("Tourniquet, left thigh"), "the left leg: check it, and its tourniquet (%s)" % [leg])
+	check(not (labels.call(&"leg_r") as Array).any(func(l: String) -> bool: return l.begins_with("Tourniquet")), "not on the right leg")
+	check((labels.call(&"head") as Array).has("NPA Airway, head"), "the airway on the head")
+	player.inventory.take(&"iv_18")
+	player.inventory.take(&"io_kit")
+	check((labels.call(&"arm_l") as Array).has("IV Catheter (18G), left forearm") and (labels.call(&"leg_r") as Array).has("IV Catheter (18G), right shin")
+		and (labels.call(&"chest") as Array).has("IO Kit (Sternal), sternum"), "a line: an IV on each arm and lower leg, an IO on the chest")
+	alpha.vitals.server_apply_treatment(&"tourniquet", &"thigh_l")
+	check(not (labels.call(&"leg_l") as Array).any(func(l: String) -> bool: return l.begins_with("IV")), "no IV below a tourniquet")
+	for i in 20:  # in shock an IV can miss: try again, like a medic
+		if alpha.vitals.access().is_empty():
+			alpha.vitals.server_apply_treatment(&"iv_18", &"shin_r")
+	check(alpha.vitals.access().get("part") == &"shin_r", "an IV in the leg (%s)" % [alpha.vitals.access()])
+	var report := InteractionMenu.part_report(alpha, &"leg_l", player)
+	check(report.contains("Left thigh: arterial bleed") and report.contains("Tourniquet on the left thigh"), "checking the leg reads its wounds (%s)" % report.replace("\n", " | "))
+	check(InteractionMenu.part_report(alpha, &"leg_r", player).contains("IV 18G in the right shin"), "and the line in it")
+	_place_player()
+	player.head.rotation.x = -0.5
+	await _frames(3)
+	var points := InteractionMenu.collect_points(player, player.camera).filter(func(p: Dictionary) -> bool: return p.target == alpha)
+	var regions := points.map(func(p: Dictionary) -> StringName: return p.region)
+	check(regions.has(InteractionMenu.WAIST) and regions.has(&"leg_l") and regions.has(&"head") and regions.size() >= 5,
+		"a downed squadmate in front: a waist point and the body's points (%s)" % [regions])
+	check(not InteractionMenu.collect_points(player, player.camera).any(func(p: Dictionary) -> bool: return p.target == hostile and p.get("region", &"") != &""),
+		"an enemy keeps a single point")
+	var menu := InteractionMenu.new(player)
+	var screen := SubViewport.new()
+	screen.size = Vector2i(1280, 720)
+	add_child(screen)
+	screen.add_child(menu)
+	menu.update_keys(true, true, 0.05)
+	var own := menu.points.map(func(p: Dictionary) -> StringName: return p.region)
+	check(menu.mode == InteractionMenu.Mode.SELF and own.size() == 7 and own.has(InteractionMenu.WAIST) and own.has(&"arm_r"),
+		"self-interaction: the same layout on yourself (%s)" % [own])
+	check(menu.highlighted().is_empty() and menu.entry_rects().size() == InteractionMenu.general_actions(player, player).size(), "starting on the waist point")
+	var arm: Vector2 = menu.points.filter(func(p: Dictionary) -> bool: return p.region == &"arm_l")[0].screen
+	menu.set_cursor(arm)
+	check(menu.entry_rects().size() >= 1 and InteractionMenu.region_actions(player, player, &"arm_l")[0].label == "Check left arm", "moving onto your left arm opens its point")
+	menu.update_keys(false, false, 0.05)
+	screen.queue_free()
+	player.inventory.remove_one(&"iv_18")
+	player.inventory.remove_one(&"io_kit")
+	alpha.vitals.server_reset_health()
 
 
 # --- Helpers -------------------------------------------------------------------------------

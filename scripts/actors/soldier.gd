@@ -464,6 +464,7 @@ func _server_fire(origin: Vector3, direction: Vector3, slot: StringName) -> void
 	var result := Ballistics.fire(self, origin, direction.normalized(), weapon)
 	if result.result != "none":
 		CompoundLevel.current(self).show_impact.rpc(result.position, result.normal, result.result)
+	Throwables.server_gunfire(self)  # indoors, sustained fire muffles hearing
 
 
 ## A command from the command menu (CommandMenu) for the named squadmates (all if empty).
@@ -576,6 +577,43 @@ func stop_loading_mags(why: String) -> void:
 		_client_message.rpc_id(owner_peer(), why)
 
 
+## The highest fall the host believes from a client (anything higher is still fatal).
+const MAX_REPORTED_FALL_M := 60.0
+
+
+## Owner side (SoldierMovement): landed after dropping `height` metres. The host applies it
+## (Vitals.server_fall: nothing under 3 m).
+func report_fall(height: float) -> void:
+	if multiplayer.is_server():
+		vitals.server_fall(height)
+	else:
+		_server_fell.rpc_id(1, height)
+
+
+@rpc("any_peer", "call_local", "reliable")
+func _server_fell(height: float) -> void:
+	if _from_owner():
+		vitals.server_fall(clampf(height, 0.0, MAX_REPORTED_FALL_M))
+
+
+## Owner side (SoldierMovement): started to sprint, jumped, or set off under an extreme load.
+## Only matters (and is only sent) while a chest wound is closed by surgery (it may reopen)
+## or with blast lung (it strains, and a lung may give way).
+func report_exertion() -> void:
+	if not vitals.has_closed_chest() and not vitals.has_blast_lung():
+		return
+	if multiplayer.is_server():
+		vitals.server_exert()
+	else:
+		_server_exert.rpc_id(1)
+
+
+@rpc("any_peer", "call_local", "reliable")
+func _server_exert() -> void:
+	if _from_owner():
+		vitals.server_exert()
+
+
 ## H: treats yourself with the next item you carry from your own care_needed() (a
 ## tourniquet before a bandage, and so on), through the same timed treatment as _server_treat.
 @rpc("any_peer", "call_local", "reliable")
@@ -588,7 +626,11 @@ func _server_use_medical() -> void:
 		return
 	var task := next_self_treatment()
 	if task.is_empty():
-		_client_message.rpc_id(owner_peer(), "You have no %s" % ItemDB.get_item(tasks[0].item).name)
+		var first := ItemDB.get_item(tasks[0].item)
+		if Vitals.needs_other_hands(first.id):
+			_client_message.rpc_id(owner_peer(), "You need someone to place a line")
+		else:
+			_client_message.rpc_id(owner_peer(), "You have no %s" % first.name)
 		return
 	_treat(self, task.item, task.part, false)
 
@@ -751,23 +793,31 @@ const UNDER_FIRE_SUPPRESSION := 0.3
 var _treat_serial := 0  # host: bumps with each timed treatment
 
 
-## The first task on this body's own care_needed() that it carries the item for (loose or in
-## a kit), or {}. H (_server_use_medical) applies it; AI uses it to know it can treat itself.
+## The first task on this body's own care_needed() that it carries an item for (loose or in
+## a kit; Vitals.pick_item, which becomes the task's "item") and can use on itself (not an IV
+## or IO), or {}. H (_server_use_medical) applies it; AI uses it to know it can treat itself.
 func next_self_treatment() -> Dictionary:
 	for task in vitals.care_needed():
-		if inventory.medical_count(task.item) > 0:
-			return task
+		var id := Vitals.pick_item(task, inventory)
+		if id != &"" and not Vitals.needs_other_hands(id):
+			var mine := task.duplicate()
+			mine.item = id
+			return mine
 	return {}
 
 
 ## How long one `item` takes this soldier on `target`: the item's treat_s, times its
-## self_mult on yourself (a tourniquet: 4 s, 6 s on yourself); a rushed tourniquet rushed_s.
+## self_mult on yourself (a tourniquet: 4 s, 6 s on yourself) and the casualty's
+## treat_time_mult (an IV in shock takes longer); a rushed tourniquet rushed_s.
 func treat_seconds(target: Node, item: ItemData, rushed := false) -> float:
 	if rushed and item.stats.has("rushed_s"):
 		return float(item.stats.rushed_s)
 	var seconds := float(item.stats.get("treat_s", 4.0))
 	if target == self:
 		seconds *= float(item.stats.get("self_mult", 1.0))
+	var other := Vitals.find_on(target) if target else null
+	if other:
+		seconds *= other.treat_time_mult(item.id)
 	return seconds
 
 
@@ -831,8 +881,12 @@ func _treat(target: Node3D, item_id: StringName, part: StringName, rushed: bool)
 		why = "Too far away"
 	elif item == null or not item.stats.has("treat_s"):
 		why = "That doesn't treat anything"
-	elif inventory.medical_count(item_id) <= 0:
+	elif not Vitals.has_item(inventory, item_id):
 		why = "You have no %s" % item.name
+	elif target == self and Vitals.needs_other_hands(item_id):
+		why = "Someone else has to place that"
+	elif is_ai() and item.stats.get("medic_only", false) and role != Roles.MEDIC:
+		why = "Only a medic does that"
 	else:
 		why = other.treatment_problem(item_id, part)
 	if why != "":
@@ -842,16 +896,20 @@ func _treat(target: Node3D, item_id: StringName, part: StringName, rushed: bool)
 	rushed = rushed and tourniquet
 	var hurried := tourniquet and under_fire()
 	var label := "%s%s, %s..." % [item.name, " (rushed)" if rushed else "", Vitals.part_name(part)]
-	if not await _timed_care(target, other, treat_seconds(target, item, rushed), label, part):
+	if not await _timed_care(target, other, treat_seconds(target, item, rushed), label, part, item_id):
 		return
-	if inventory.medical_count(item_id) <= 0:
+	if not Vitals.has_item(inventory, item_id):
 		_client_message.rpc_id(owner_peer(), "You no longer have a %s" % item.name)
 		return
 	rushed = rushed or (tourniquet and (hurried or under_fire()))
 	if not other.server_apply_treatment(item_id, part, rushed):
 		_client_message.rpc_id(owner_peer(), "%s does nothing there now" % item.name)
 		return
-	inventory.take_medical(item_id)
+	if not item.stats.get("no_item", false) and not item.stats.get("reusable", false):
+		inventory.take_medical(item_id)
+	var note := other.care_note()
+	if note != "":
+		_client_message.rpc_id(owner_peer(), note)
 	if rushed:
 		_client_message.rpc_id(owner_peer(), "Tourniquet on in a hurry: it may still bleed (a second one fixes it)")
 
@@ -859,8 +917,9 @@ func _treat(target: Node3D, item_id: StringName, part: StringName, rushed: bool)
 ## Host only. Runs a timed treatment on `target`: this soldier is busy for `seconds` and the
 ## casualty shows as being treated. Returns false (and tells the treater) if it's
 ## interrupted: the treater went down or moved away, the casualty was moved, died or is out
-## of reach. True once the time is up. `part` is where the hands work (the animation).
-func _timed_care(target: Node3D, other: Vitals, seconds: float, label: String, part := &"") -> bool:
+## of reach. True once the time is up. `part` is where the hands work and `item` what with
+## (the animation's technique: CharacterModel.TECHNIQUES).
+func _timed_care(target: Node3D, other: Vitals, seconds: float, label: String, part := &"", item := &"") -> bool:
 	_treat_serial += 1
 	var serial := _treat_serial
 	var my_start := global_position
@@ -869,7 +928,7 @@ func _timed_care(target: Node3D, other: Vitals, seconds: float, label: String, p
 	_server_busy_until = _now() + seconds
 	other.server_begin_treatment(seconds)
 	_client_busy.rpc_id(owner_peer(), seconds, label)
-	var anim := model.server_treat(target, part, seconds)  # kneeling at the wound, for every peer
+	var anim := model.server_treat(target, part, seconds, item)  # kneeling at the wound, with the item's technique, for every peer
 	var end := _now() + seconds
 	while _now() < end:
 		await get_tree().create_timer(clampf(end - _now(), 0.01, TREAT_CHECK_S)).timeout

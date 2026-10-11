@@ -103,6 +103,30 @@ const ARM_REACH := UPPER_ARM + FOREARM - 0.03
 const HAND_REACH := 0.62
 ## Both hands at work (treating, looting) sit this far either side of the target.
 const HAND_SPREAD := 0.07
+## Treatment technique per item (action_net "tech"; _treat_goals plays it): how the hands
+## work for that treatment, on someone else or (where allowed) yourself. Anything else: WORK.
+const WORK := &"work"
+const TECHNIQUES := {
+	&"pressure_bandage": &"wrap", &"burn_dressing": &"wrap", &"hemostatic_gauze": &"pack",
+	&"tourniquet": &"tourniquet", &"splint": &"splint", &"chest_seal": &"seal", &"decompression_needle": &"needle",
+	&"morphine": &"inject", &"epinephrine": &"inject", &"atropine": &"inject", &"adenosine": &"inject",
+	&"iv_10": &"iv", &"iv_12": &"iv", &"iv_14": &"iv", &"iv_16": &"iv", &"iv_18": &"iv", &"iv_20": &"iv",
+	&"io_kit": &"io", &"cpr": &"cpr", &"defibrillator": &"defib", &"surgical_clamp": &"clamp",
+	&"saline_250": &"fluids", &"saline_500": &"fluids", &"saline_1000": &"fluids",
+	&"blood_250": &"fluids", &"blood_500": &"fluids", &"blood_1000": &"fluids", &"pressure_bag": &"fluids",
+	&"hypothermia_blanket": &"blanket", &"npa": &"npa",
+}
+## Technique numbers (proposed): a bandage wraps round the limb WRAP_RADIUS out at WRAP_HZ
+## turns a second; a tourniquet goes on TOURNIQUET_HIGH m above the wound (high and tight)
+## and its windlass turns at WINDLASS_HZ; a needle goes in NEEDLE_HIGH m up the chest (second
+## intercostal space); CPR compresses COMPRESSION_M deep at CPR_HZ (about 110 a minute).
+const WRAP_RADIUS := 0.06
+const WRAP_HZ := 1.1
+const TOURNIQUET_HIGH := 0.12
+const WINDLASS_HZ := 1.6
+const NEEDLE_HIGH := 0.1
+const COMPRESSION_M := 0.05
+const CPR_HZ := 1.85
 ## Pose easing while acting (faster than stance changes, so a 0.6 s pickup reads).
 const ACTION_EASE := 14.0
 ## Kneeling (treating, looting): hips this high. Reaching goes no lower than REACH_MIN_HIP.
@@ -187,8 +211,9 @@ var carry_net: Dictionary = {}
 ## Replicated (the body's ServerSync; set on the host by server_play, server_stop): the
 ## hand action now, {} for none: "id" (PICK_UP, EQUIP, LOOT, TREAT), "n" (bumps with each
 ## action, which restarts the clip on every peer), "s" (seconds), "at" (body-space point the
-## hands work at), "from" and "to" (MOUNT_POINTS keys the right hand goes to in turn) and
-## "kneel". The host clears a finished clip, so late joiners don't replay it.
+## hands work at), "from" and "to" (MOUNT_POINTS keys the right hand goes to in turn),
+## "kneel" and, treating, "tech" (TECHNIQUES). The host clears a finished clip, so late
+## joiners don't replay it.
 var action_net: Dictionary = {}
 
 var torso: Node3D
@@ -551,9 +576,9 @@ static func server_carry(carrier: Node, casualty: Node, mode: StringName) -> voi
 
 ## Host only. Starts hand action `id` for every peer (see action_net); returns its serial
 ## (for server_stop). `at` is a body-space point (reach_point keeps it within reach).
-func server_play(id: StringName, seconds: float, at := Vector3.ZERO, from := &"", to := &"", kneel := false) -> int:
+func server_play(id: StringName, seconds: float, at := Vector3.ZERO, from := &"", to := &"", kneel := false, tech := &"") -> int:
 	_server_n += 1
-	action_net = {"id": id, "n": _server_n, "s": seconds, "at": reach_point(at), "from": from, "to": to, "kneel": kneel}
+	action_net = {"id": id, "n": _server_n, "s": seconds, "at": reach_point(at), "from": from, "to": to, "kneel": kneel, "tech": tech}
 	return _server_n
 
 
@@ -616,10 +641,18 @@ func server_loot(body: Node3D, all := false) -> void:
 	server_play(LOOT, LOOT_ALL_S if all else LOOT_S, to_local(point), &"", &"pouch", true)
 
 
-## Host only. Treating `part` of `target` (this body or another) for `seconds`: kneeling
-## beside another (not yourself), hands working at the wound. Returns the serial to stop it with.
-func server_treat(target: Node3D, part: StringName, seconds: float) -> int:
-	return server_play(TREAT, seconds, to_local(part_position(target, part)), &"", &"", target != get_parent())
+## Host only. Treating `part` of `target` (this body or another) for `seconds` with `item`:
+## kneeling beside another (not yourself), hands working at the wound with that item's
+## technique (TECHNIQUES): a tourniquet high and tight above the wound, a needle up at the
+## second intercostal space. Returns the serial to stop it with.
+func server_treat(target: Node3D, part: StringName, seconds: float, item := &"") -> int:
+	var tech: StringName = TECHNIQUES.get(item, WORK)
+	var at := part_position(target, part)
+	if tech == &"tourniquet":
+		at += (part_position(target, &"chest") - at).normalized() * TOURNIQUET_HIGH  # towards the trunk
+	elif tech == &"needle":
+		at += (part_position(target, &"head") - at).normalized() * NEEDLE_HIGH
+	return server_play(TREAT, seconds, to_local(at), &"", &"", target != get_parent(), tech)
 
 
 ## Where body part `part` of `body` is now (world space): its hitbox, else the chest, else
@@ -942,9 +975,88 @@ func _action_goals(held: Array) -> Array:
 			if to != null:
 				return [["stow", to], ["work", at - spread]]
 		TREAT:
-			var busy := Vector3(sin(_time * 7.0) * 0.025, sin(_time * 5.3) * 0.02, cos(_time * 6.1) * 0.02)
-			return [["work", at + spread + busy], ["work", at - spread - busy * 0.7]]
+			return _treat_goals(StringName(action_net.get("tech", WORK)), at, t, s)
 	return []
+
+
+## The hands for treating with technique `tech` at `at` (torso space), `t` seconds into a
+## clip `s` long: [[key, point], [key, point]] for the right and left hand. The key changes
+## between phases so the hand blends to the next point.
+func _treat_goals(tech: StringName, at: Vector3, t: float, s: float) -> Array:
+	var phase := clampf(t / maxf(s, 0.01), 0.0, 1.0)
+	# Axes at the wound: out from the treater's chest (`out`), and two across it (`u`, `v`).
+	var out := (at - HANDS_ANCHOR).normalized()
+	var u := out.cross(Vector3.UP)
+	if u.length_squared() < 0.01:
+		u = out.cross(Vector3.FORWARD)
+	u = u.normalized()
+	var v := out.cross(u).normalized()
+	var spread := Vector3(HAND_SPREAD, 0, 0)
+	match tech:
+		&"wrap":  # the right hand takes the bandage round and round the limb; the left holds the end
+			var turn := TAU * WRAP_HZ * t
+			return [["wrap", at + (u * cos(turn) + v * sin(turn)) * WRAP_RADIUS], ["hold", at - u * 0.04]]
+		&"pack":  # gauze stuffed in, finger by finger, the other hand pressing beside it
+			var push := 0.02 + 0.03 * absf(sin(t * 6.0))
+			return [["pack", at + out * push], ["press", at - u * 0.05]]
+		&"tourniquet":
+			if phase < 0.35:  # strap round the limb, high and tight, and pulled snug
+				var lap := TAU * phase / 0.35
+				return [["strap", at + (u * cos(lap) + v * sin(lap)) * 0.07], ["strap", at - u * 0.05]]
+			if phase < 0.8:  # windlass turns, the other hand steadying the strap
+				var turn := TAU * WINDLASS_HZ * t
+				return [["windlass", at + u * 0.05 + (u * cos(turn) + v * sin(turn)) * 0.035], ["steady", at - u * 0.04]]
+			return [["clip", at + v * 0.05], ["steady", at - u * 0.04]]  # into the clip
+		&"splint":  # the splint along the limb, both hands working down it
+			var slide := sin(t * 2.0) * 0.1
+			return [["splint", at + v * slide + u * 0.03], ["splint", at - v * slide - u * 0.03]]
+		&"seal":
+			if phase < 0.3:  # peel the backing in front of you
+				var mid := HANDS_ANCHOR + Vector3(0, -0.15, -0.3)
+				return [["peel", mid + spread], ["peel", mid - spread]]
+			var smooth := 0.02 + 0.06 * (phase - 0.3) / 0.7  # on, smoothed out from the middle
+			return [["seal", at + u * smooth], ["seal", at - u * smooth]]
+		&"needle":  # straight in at the second intercostal space, slowly, the other hand steadying
+			var depth := clampf(phase / 0.6, 0.0, 1.0)
+			return [["needle", at + out * lerpf(0.15, 0.01, depth)], ["steady", at - v * 0.06]]
+		&"inject":  # wind up, jab into the thigh, hold, away
+			if phase < 0.3:
+				return [["ready", at + out * 0.2], ["rest", at - u * 0.08]]
+			if phase < 0.9:
+				return [["jab", at], ["rest", at - u * 0.08]]
+			return [["away", at + out * 0.15], ["rest", at - u * 0.08]]
+		&"iv":  # one hand stretches the skin; the catheter slides in along the vein, then taped
+			if phase < 0.2:
+				return [["iv_aim", at + out * 0.08], ["skin", at - v * 0.08]]
+			if phase < 0.7:
+				var slide := (phase - 0.2) / 0.5
+				return [["iv_in", at + out * lerpf(0.04, 0.0, slide) + v * lerpf(0.04, -0.01, slide)], ["skin", at - v * 0.08]]
+			var dab := sin(t * 9.0) * 0.01
+			return [["tape", at + u * (0.03 + dab)], ["tape", at - u * (0.03 - dab)]]
+		&"io":  # the driver pressed hard onto the sternum, the other hand steadying
+			return [["io", at + out * (0.02 + 0.01 * sin(t * 20.0))], ["steady", at - v * 0.07]]
+		&"cpr":  # heel of the hand on the sternum, the other on top, about 110 a minute
+			var depth := COMPRESSION_M * (0.5 + 0.5 * sin(TAU * CPR_HZ * t))
+			var press := at + out * (0.03 + COMPRESSION_M - depth)
+			return [["cpr", press], ["cpr", press + out * 0.03]]
+		&"defib":
+			if phase < 0.45:  # pads on: upper right chest, lower left ribs
+				return [["pad", at + v * 0.1 + u * 0.08], ["pad", at - v * 0.1 - u * 0.1]]
+			var clear := HANDS_ANCHOR + Vector3(0, 0.05, -0.15)  # hands off and clear for the shock
+			return [["clear", clear + spread], ["clear", clear - spread]]
+		&"clamp":  # fine work close together
+			var fine := Vector3(sin(_time * 11.0), cos(_time * 9.0), sin(_time * 13.0)) * 0.008
+			return [["clamp", at + u * 0.025 + fine], ["clamp", at - u * 0.025 - fine]]
+		&"fluids":  # the bag held up high, the other hand at the line
+			return [["bag", HANDS_ANCHOR + Vector3(0.2, 0.45, -0.3)], ["line", at]]
+		&"blanket":  # wide sweeps tucking it round the body
+			var sweep := sin(t * 2.5) * 0.25
+			return [["blanket", at + u * (0.15 + sweep)], ["blanket", at - u * (0.15 - sweep)]]
+		&"npa":  # into the nostril, the other hand tilting the head
+			var depth := clampf(phase / 0.7, 0.0, 1.0)
+			return [["npa", at + out * lerpf(0.08, 0.01, depth)], ["tilt", at - v * 0.07]]
+	var busy := Vector3(sin(_time * 7.0) * 0.025, sin(_time * 5.3) * 0.02, cos(_time * 6.1) * 0.02)
+	return [["work", at + spread + busy], ["work", at - spread - busy * 0.7]]
 
 
 ## A limp arm of a casualty: hanging straight down (carried), or trailing on the ground

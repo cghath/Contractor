@@ -542,16 +542,17 @@ func _test_consciousness() -> void:
 	check(blood.unconscious and blood.unconscious_causes() == [&"blood"] and blood.blood < 0.55,
 		"past 40%% lost and still bleeding he stays out and gets no blood back (%s, %.1f%% left after 10 min)" % [blood.unconscious_causes(), blood.blood * 100.0])
 	blood.wounds.clear()  # every bleed stopped
-	var regained := blood.blood
-	_step(blood, 60.0)
-	check(is_equal_approx(blood.blood - regained, WoundModel.BLOOD_RECOVER_PER_MIN),
-		"with every bleed stopped blood comes back slowly (%.2f%% in a minute)" % ((blood.blood - regained) * 100.0))
+	var held := blood.blood
+	_step(blood, 600.0)
+	check(blood.blood == held and blood.unconscious, "with every bleed stopped no blood comes back on its own (only IV or IO)")
+	blood.apply_item(WoundModel.IO_KIT, WoundModel.IO_PART)
+	blood.apply_item(&"blood_1000", WoundModel.IO_PART)
 	var minutes := 0
 	while blood.unconscious and minutes < 30:
 		_step(blood, 60.0)
 		minutes += 1
 	check(not blood.unconscious and blood.lost() < WoundModel.UNCONSCIOUS_LOST,
-		"and once he is back under 40%% lost he comes round on his own (%d min)" % minutes)
+		"a bag through an IO brings him back under 40%% lost and he comes round on his own (%d min)" % minutes)
 	var knocked := _model()
 	knocked.knockout_left = 8.0
 	knocked.update_state(0.0)
@@ -598,11 +599,18 @@ func _test_spo2() -> void:
 	chest.pain_wounds = 0.0
 	_chest(chest).tension_in = -1.0
 	chest.advance(60.0)
-	check(absf(chest.spo2 - (WoundModel.SPO2_NORMAL - WoundModel.SPO2_OPEN_CHEST)) < 0.01 and chest.breathing_laboured() and not chest.unconscious,
-		"an open chest wound: %.0f%%, laboured, still up" % chest.spo2)
+	var side := _chest(chest).name as StringName
+	check(is_equal_approx(float(chest.lung_collapse[side]), WoundModel.OPEN_CHEST_COLLAPSE) and float(chest.lung_fluid[side]) > 0.05,
+		"an open chest wound: its lung partly collapses (%.2f) and fills with blood (%.2f)" % [chest.lung_collapse[side], chest.lung_fluid[side]])
+	check(absf(chest.spo2 - (WoundModel.SPO2_NORMAL - WoundModel.SPO2_LUNG_DROP * (1.0 - chest.lung_efficiency()))) < 0.01
+		and chest.spo2 < 92.0 and chest.breathing_laboured() and chest.respiratory_rate() > WoundModel.RESP_NORMAL and not chest.unconscious,
+		"SpO2 %.0f%%, laboured and fast breathing (%.0f/min), still up" % [chest.spo2, chest.respiratory_rate()])
 	chest.apply_item(WoundModel.CHEST_SEAL, Vitals.CHEST)
-	chest.advance(10.0)
-	check(absf(chest.spo2 - WoundModel.SPO2_NORMAL) < 0.01 and not chest.breathing_laboured(), "sealed: back to %.0f%%" % chest.spo2)
+	var fluid := float(chest.lung_fluid[side])
+	chest.advance(WoundModel.REEXPAND_S * 2.0)
+	check(float(chest.lung_collapse[side]) == 0.0 and float(chest.lung_fluid[side]) == fluid and not chest.breathing_laboured()
+		and is_equal_approx(chest.lung_efficiency(), 1.0 - fluid * 0.5) and absf(chest.spo2 - chest.spo2_target()) < 0.01,
+		"sealed: the lung re-expands, only the blood in it stays (lungs %.2f, SpO2 %.0f%%)" % [chest.lung_efficiency(), chest.spo2])
 	var tension := _model()
 	tension.add_hit(Vitals.CHEST, lung, Vitals.PISTOL)
 	tension.pain_wounds = 0.0
@@ -617,6 +625,7 @@ func _test_spo2() -> void:
 	low.npa = true
 	low.spo2 = 60.0
 	low.morphine_level = 8.0  # deep breathing depression keeps it there
+	low.drug_level[WoundModel.ATROPINE] = 3.2  # and atropine the heart rate up: only the SpO2 counts here
 	_step(low, WoundModel.SPO2_ARREST_S - 1.0)
 	check(not low.arrest and low.unconscious, "under 70%: out, the heart holds a while")
 	_step(low, 2.0)
@@ -704,11 +713,11 @@ func _test_kit_economy() -> void:
 	m.apply_item(WoundModel.MORPHINE, Vitals.TORSO)
 	_step(m, 2.0 * WoundModel.MORPHINE_ABSORB_S + WoundModel.WAKE_S[&"pain"] + 1.0)  # the hits knocked him out: he comes round
 	check(m.injury() < 0.45, "broken leg and arm, 38%% lost; bandaged, splinted, two morphine: under the AI's heal mark (%.2f)" % m.injury())
-	check(m.care_tasks().is_empty(), "then the kit has nothing left to fix (pain %.2f, %s)" % [m.pain(), m.care_tasks()])
+	check(m.care_tasks().all(func(t: Dictionary) -> bool: return t.kind == "access"), "then the kit has nothing left to fix but a line for the blood (pain %.2f, %s)" % [m.pain(), m.care_tasks()])
 	var gut := _model(43)
 	gut.add_hit(Vitals.ABDOMEN, {"graze": false, "depth": 0.2, "vessels": [{"name": &"aorta", "kind": BodyMap.INTERNAL, "rate": 2.5, "share": 0.1}], "organs": [], "bones": []}, Vitals.PISTOL)
 	gut.pain_wounds = 0.1
-	check(gut.wound_bleed_rate() > 0.0 and gut.treatable() < 0.2 and gut.care_tasks().is_empty(), "internal bleeding: nothing in the kit fixes it, so nothing is asked for (treatable %.2f)" % gut.treatable())
+	check(gut.wound_bleed_rate() > 0.0 and gut.treatable() < 0.2 and gut.care_tasks().map(func(t: Dictionary) -> String: return t.kind) == ["internal"], "internal bleeding: nothing in the IFAK fixes it, only a surgery kit's clamp (treatable %.2f)" % gut.treatable())
 	var vitals := _vitals(47)
 	check(not vitals.needs_treatment(), "unhurt: not injured")
 	_shoot(vitals, Vitals.THIGH_R, Vector3(0.0578, 0.70, -0.11), Vitals.PISTOL)

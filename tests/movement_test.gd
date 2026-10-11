@@ -46,6 +46,7 @@ func _ready() -> void:
 	await _test_mount()
 	_test_fire_modes()
 	await _test_momentum()
+	await _test_falls()
 	await _test_stamina()
 	await _test_ai_body()
 	GameState.delete_save()
@@ -321,6 +322,30 @@ func _test_momentum() -> void:
 		v = move.next_velocity(v, Vector3(0, 0, -4).rotated(Vector3.UP, deg_to_rad(30)), 1.0 / 120.0)
 		slowest = minf(slowest, v.length())
 	check(slowest > 3.4, "a gentle turn keeps its pace (%.1f m/s at the slowest)" % slowest)
+
+
+## Falls (design doc "Other damage"): the owner reports the drop on landing, the host applies it.
+func _test_falls() -> void:
+	print("Falls")
+	player.vitals.server_reset_health()
+	await _drop(2.0)
+	check(player.vitals.pain() == 0.0 and player.vitals.wound_list().is_empty(), "a 2 m drop: nothing")
+	await _drop(5.0)
+	check(player.vitals.pain() >= WoundModel.FALL_PAIN.x, "a 5 m drop hurts the legs (pain %.2f, %s)" % [player.vitals.pain(), player.vitals.wound_list().map(func(w: Dictionary) -> String: return w.kind)])
+	player.vitals.server_reset_health()
+	player.global_position = SPOT
+	await _frames(2)
+
+
+## Puts the player `height` metres up over SPOT and steps them until they land.
+func _drop(height: float) -> void:
+	player.global_position = SPOT + Vector3.UP * height
+	player.velocity = Vector3.ZERO
+	for i in 300:
+		await get_tree().physics_frame
+		move.step(get_physics_process_delta_time())
+		if player.is_on_floor() and i > 2:
+			break
 
 
 func _test_stamina() -> void:

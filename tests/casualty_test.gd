@@ -12,7 +12,7 @@ extends Node
 
 ## Proposed time limits for the engagement test (seconds).
 const TOURNIQUET_WITHIN_S := 25.0
-const TREATED_WITHIN_S := 60.0
+const TREATED_WITHIN_S := 90.0  # bleeding, airway, chest, then a line, a bag and a pressure bag
 ## Where the lead stands in the engagement: beside the formation's way to Delta at (-3, 15).
 const ENGAGEMENT_LEAD := Vector3(8, 0.1, 24)
 ## Delta bleeds down to this share of his blood (past the 40% lost that knocks you out), so
@@ -328,7 +328,7 @@ func _test_blocked_route() -> void:
 			and _flat(golf.global_position, echo.global_position) <= SquadAI.CASUALTY_REACH + 0.5, BLOCKED_REACH_S)
 	check(reached, "Golf gets round the player and reaches Echo in %.1f s (limit %.0f; %s)" % [Soldier._now() - start, BLOCKED_REACH_S, statuses.keys()])
 	# Knocked out by pain with blood to spare, and the lead close by: watched over where he lies.
-	var watched := await _wait_until(func() -> bool: return golf.ai_status == "Watching over Echo", 15.0)  # NPA, then morphine
+	var watched := await _wait_until(func() -> bool: return golf.ai_status == "Watching over Echo", 40.0)  # NPA, a line, a bag, then morphine
 	await _seconds(2.0)
 	check(watched and golf_ai.casualty == echo and echo.carried_by == null and _flat(golf.global_position, echo.global_position) <= SquadAI.CASUALTY_REACH + 0.5,
 		"once his airway is seen to, Golf stays with him where he lies (%s, %s)" % [golf.ai_status, echo.vitals.wound_list().size()])

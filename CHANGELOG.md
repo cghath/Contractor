@@ -11,6 +11,182 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Captain's wave 3 playtest fix: letting go of a body
+
+#### Fixed
+
+- **No way to release a body you were dragging** (it only showed on self-interaction):
+  Left Ctrl on the body you're dragging or carrying now shows its point with Release (or
+  Put down) first, and **G** lets go of it too, since your hands are full and there's
+  nothing to throw. Release also stays on your own waist point (Left Ctrl + Left Alt).
+
+### Wave 3, part 6: medical technique animations
+
+#### Added
+
+- Every treatment has its own hand technique, on the action-animation system, for every
+  peer, on someone else and, where allowed, on yourself:
+  - **Bandages and burn dressings** wrap round the limb (ACE-style pressure wrapping) while
+    the other hand holds the end.
+  - **Gauze** is packed in while the other hand presses beside it.
+  - **Tourniquets** go on high and tight (12 cm above the wound, towards the trunk): strap
+    round, windlass turns, then into the clip.
+  - **Splints** are worked along the limb.
+  - **Chest seals** have their backing peeled, then go on and are smoothed out.
+  - **The decompression needle** goes in slowly at the second intercostal space.
+  - **Injectors** (morphine, epinephrine, atropine, adenosine) are wound up, jabbed home and
+    held.
+  - **IVs**, in an arm or a leg, go in along the vein with the skin stretched, then are
+    taped. The **IO** is pressed hard into the sternum.
+  - **CPR** is compressions 5 cm deep at about 110 a minute, hands stacked. The
+    **defibrillator** gets its pads on, then hands come off clear for the shock.
+  - **The surgery kit** is fine two-handed work.
+  - **Bags** are held up high with a hand at the line.
+  - **Blankets** are swept and tucked round the body, and **the NPA** goes in the nostril
+    with the head tilted.
+
+### Wave 3, part 5: body interaction points
+
+#### Changed
+
+- **ACE3-style body points.** Looking at a squadmate (down or standing) with Left Ctrl now
+  shows points on their head, chest, left and right arm and left and right leg. They sit on
+  the body's hitboxes, so they follow it standing or lying down. Each point offers a check
+  of that part, then the treatments that go there: a tourniquet on the leg it's for, the
+  NPA on the head, the IO, seals, needle, CPR and the defibrillator on the chest. A general
+  point at the waist has carry, drag, give item and check condition. Self-interaction
+  (Left Ctrl + Left Alt) lays the same points out like a body around the screen centre,
+  with check wounds and the rest at the waist. Enemies, the dead, dummies and items keep a
+  single point.
+- **IVs in the legs:** an IV can go in either forearm or either lower leg, offered on that
+  limb's point, but never below a tourniquet. The AI still picks the first free site,
+  left forearm first.
+- Checking a body part reads only its wounds, tourniquets and line, plus the airway on the
+  head and breathing and pulse on the chest (with a pulse oximeter, the SpO2 and pulse).
+
+### Wave 3, part 4: surgery kits and the other damage
+
+#### Added
+
+- **Surgery kits** with 2, 3 or 5 uses (common, uncommon, rare). One use is a hemostat
+  clamp (about 20 s, players and medics only). It is the only fix for internal bleeding
+  from the torso arteries and veins, and it also works on junctional and arterial bleeds.
+  It can close a chest wound in place of a seal, but a closed chest wound has a 10% chance
+  to reopen each time the casualty sprints, jumps or sets off under an extreme load, which
+  brings back the open wound and its tension risk.
+- **Blast overpressure** within 5 m of a frag (10 m indoors): ears ringing for 20 to 60 s,
+  a concussion check, and some bruising. Within 3 m (6 m indoors) there's a chance of
+  **blast lung** (toned down on Captain's call, 2026-10-11, so it's never a death timer you
+  can't answer). It takes some SpO2 and stamina, then holds steady while the casualty
+  rests. Sprinting, jumping, an extreme load or IV fluid the body doesn't need make it
+  worse, and the strain eases off over about 20 minutes of rest. Exertion can also
+  collapse a lung, a closed tension pneumothorax that the decompression needle fixes.
+  Within 2 m the blast also burns.
+- **Falls:** nothing under 3 m. From 3 to 6 m, leg pain and a 30 to 70% chance of a broken
+  leg. Above 6 m the fall is more and more likely to be fatal (90% from 10 m).
+- **Burns:** pain by the share of the body burned. Over 20% they also lose fluid like
+  bleeding, which IV fluids replace. **Burn dressings** (5 s) take some pain off, one per
+  10% of the body burned.
+- **Hypothermia:** 30% or more blood lost and lying still for 5 minutes makes bleeding 25%
+  faster. A **hypothermia blanket** (5 s) stops it, and medics put one on after the bags.
+- **Deafness:** blasts, flashbangs (3 to 6 s) and sustained gunfire indoors (30 s, after
+  about ten shots close by) muffle hearing through a low-pass on the sound bus, with an
+  "Ears ringing" note. **Electronic ear protection** (carried) stops flashbang and gunfire
+  deafness and halves a blast's.
+- Checking someone shows "Coughing blood" (blast lung), "Shivering, skin cold", "Burns over
+  about N% of the body" and, on yourself, "Ears ringing". Clamped and surgically closed
+  wounds say so.
+- The medic's kit adds a 3-use surgery kit, two burn dressings and a blanket. The gate loot
+  has a 2-use and a 5-use surgery kit, burn dressings, blankets and ear protection.
+
+#### Fixed
+
+- The interaction test waited 3 process frames for the host's carry update, which runs in
+  the physics step, so it sometimes failed on a fast machine. It now waits physics frames.
+
+### Wave 3, part 3: heart rate, drugs, CPR and the defibrillator
+
+#### Added
+
+- **Heart rate** (hidden, like SpO2). It sits at 75 bpm at rest. Blood loss and pain speed
+  it up, and morphine and very low SpO2 slow it. It sinks toward 40 bpm as blood loss nears
+  50%, and it's 0 in cardiac arrest. Racing over 200 bpm or slower than 35 bpm for a minute
+  stops the heart. Checking someone shows "Pulse racing", "Pulse fast and weak", "Pulse slow"
+  or "No pulse", and a pulse oximeter now also shows the pulse.
+- **Epinephrine** (medic, 2 s): +30 bpm per dose, wearing off over a few minutes. In
+  cardiac arrest it raises the chance that CPR and shocks restart the heart. It keeps its
+  wake-up roll: given to someone kept out only by a concussion knockout (or already coming
+  round), there's a 50% chance they come round in 2 s. It can't wake anyone while blood
+  loss, low SpO2, pain, trauma or arrest still holds them. There's no revive.
+- **Atropine** (2 s): raises a slow heart rate, for example after a morphine overdose.
+  **Adenosine** (2 s): slows a racing one, for example after too much epinephrine.
+- **CPR** (a 10 s cycle, no item needed) and the **defibrillator** (a 5 s shock; not used
+  up) restart a heart in cardiac arrest only once blood is back above 60%. Until then
+  they do nothing, so the line and bags come first. Each CPR cycle restarts it 8% of the
+  time and each shock 35%, plus 15% with epinephrine in the blood. Among the AI only
+  medics do CPR and shocks; players can always do them.
+- Treat menus and AI medics follow the order: line and bags, epinephrine, shocks, CPR, then
+  adenosine or atropine for a heart rate out of range. A medic keeps doing CPR and shocks
+  for as long as the 10-minute window lasts.
+- The medic's kit adds three epinephrine, two atropine, two adenosine and a defibrillator.
+  The gate loot has two epinephrine, one of each of the other two drugs and a defibrillator.
+
+### Wave 3, part 2: breathing, the decompression needle and the pulse oximeter
+
+#### Added
+
+- **Per-lung breathing.** Each lung has an efficiency from 0 to 1, lowered by collapse
+  (pneumothorax) and by blood in it (hemothorax). SpO2 now follows the two lungs, blood
+  loss and morphine, instead of fixed amounts per chest wound.
+  - An unsealed chest wound lets its lung collapse 40% over about 12 s. Once it's sealed
+    the lung re-expands over 2 minutes.
+  - While a chest wound bleeds, the blood fills that side's lung, and it stays there:
+    there's no chest drain in the field, so seal chest wounds early.
+  - A tension pneumothorax collapses its lung fully and squeezes the other one (40% off).
+- **Decompression needle** (medic, 5 s): relieves a tension pneumothorax at once, so the
+  cardiac arrest it was heading for doesn't happen. Treat menus and AI medics use it right
+  after the airway, before chest seals.
+- **Breathing rate** (hidden): faster as the lungs fail or blood is lost, slower on too
+  much morphine. Checking someone now shows "Breathing fast" or "Breathing slow", "No breath
+  sounds on the left/right" for a collapsed lung, and "Trachea shifted, neck veins bulging"
+  for a tension pneumothorax.
+- **Pulse oximeter:** carry one and Check condition (and Check wounds on yourself) reads
+  the SpO2, or "no reading" in cardiac arrest.
+- The medic's kit adds two needles, a pulse oximeter and a second IO kit. The gate loot has
+  two needles and an oximeter.
+- AI medics keep trying for a line up to 4 times (a missed IV uses a catheter) before
+  leaving it to someone else.
+
+### Wave 3, part 1: IV and IO lines, fluids, pressure bags
+
+#### Added
+
+- **IV catheters** in 10, 12, 14, 16, 18 and 20 gauge. Bigger bores run fluid in faster
+  (5x down to 0.6x the 18 gauge), take longer to place (22 s down to 8 s), hurt more and are
+  rarer. An IV goes in the left forearm (the right if the left arm has a tourniquet).
+- **IO kit:** a sternal line in 5 s that always works, at the 18 gauge rate.
+- **Saline and blood bags** of 250, 500 and 1000 mL. They work the same; one bag runs at a
+  time and takes about 2.75, 4.5 or 7.5 minutes through an 18 gauge.
+- **Pressure bag:** doubles the flow of an IV with good veins or an IO. From 37% blood lost
+  the veins collapse: an IV then runs at half its rate, or 1.25x under a pressure bag.
+- **IVs in shock:** from 25% lost an IV takes longer to place (up to twice as long) and can
+  miss (up to 60% of the time at 50% lost), which uses up the catheter. In deep shock and
+  cardiac arrest, IO is the better pick.
+- Treat menus list a line from 15% blood lost, then a bag, then a pressure bag once veins
+  collapse, with one entry for each kind you carry. You can't put a line in yourself, but
+  you can hang a bag on your own line. Checking someone shows their line and bag.
+- AI medics put a line in (IO first when veins have collapsed), hang a bag and add a
+  pressure bag after bleeding control and before splints. A squadmate without the items
+  calls the medic for them.
+- The medic's kit adds three 18 gauge and one 14 gauge IVs, an IO kit, two 500 mL saline
+  bags, a 500 mL blood bag and a pressure bag. The gate loot has IVs (one rare 10 gauge),
+  an IO kit, saline, a 1000 mL blood bag and a pressure bag.
+
+#### Removed
+
+- **Slow blood recovery** (the stand-in until IV): blood no longer comes back on its own.
+  A casualty past 40% lost stays out until fluids bring them back under it.
+
 ### Captain's wave 2 playtest asks
 
 #### Added

@@ -29,6 +29,10 @@ var throwable: StringName = &"frag_grenade"
 var _focus: Node3D  # an item or downed body under the crosshair, for the prompt
 var _view_model_id: StringName = &""
 var _shake := 0.0
+var _deaf := false
+## Muffled hearing: everything through a low-pass this low, and quieter.
+const DEAF_CUTOFF_HZ := 600.0
+const DEAF_VOLUME_DB := -12.0
 
 
 func _ready() -> void:
@@ -83,6 +87,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		return  # downed: no giving up (handoff); you come round on your own, or the arrest window runs out
 	elif interaction.is_open() and event is InputEventMouseButton:
 		return  # clicks don't fire through the interaction menu
+	elif event.is_action_pressed(&"grenade") and body.carry_mode != &"":
+		# Hands full with a casualty: G lets go of them (Release / Put down) instead of throwing.
+		body._server_release_body.rpc_id(1)
+		flash("Let go" if body.carry_mode == Soldier.DRAG else "Put down")
 	elif event.is_action_pressed(&"grenade"):
 		# G throws, Shift+G switches grenade type, Alt+G drops what you're holding.
 		if event is InputEventKey and event.alt_pressed:
@@ -113,6 +121,27 @@ func _process(delta: float) -> void:
 	_shake = move_toward(_shake, 0.0, delta * 1.5)
 	body.camera.h_offset = randf_range(-1.0, 1.0) * _shake * 0.08
 	body.camera.v_offset = randf_range(-1.0, 1.0) * _shake * 0.08
+	_update_hearing()
+
+
+## Muffled hearing (blasts, flashbangs, indoor gunfire): a low-pass on the master bus while
+## Vitals.deaf_left() runs, and a note when it starts.
+func _update_hearing() -> void:
+	if not body.is_local():
+		return
+	var deaf := body.vitals.deaf_left() > 0.0
+	if deaf == _deaf:
+		return
+	_deaf = deaf
+	var bus := AudioServer.get_bus_index(&"Master")
+	if AudioServer.get_bus_effect_count(bus) == 0 or not AudioServer.get_bus_effect(bus, 0) is AudioEffectLowPassFilter:
+		var filter := AudioEffectLowPassFilter.new()
+		filter.cutoff_hz = DEAF_CUTOFF_HZ
+		AudioServer.add_bus_effect(bus, filter, 0)
+	AudioServer.set_bus_effect_enabled(bus, 0, deaf)
+	AudioServer.set_bus_volume_db(bus, DEAF_VOLUME_DB if deaf else 0.0)
+	if deaf:
+		flash("Ears ringing")
 
 
 ## Runs after the body has moved this frame (children process after their parent).

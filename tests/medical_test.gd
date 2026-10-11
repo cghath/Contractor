@@ -33,6 +33,9 @@ func _ready() -> void:
 	_test_care_order()
 	_test_treatment_wakes()
 	_test_kits()
+	_test_iv_fluids()
+	_test_heart()
+	_test_surgery_and_damage()
 	await _start_session()
 	await _test_times()
 	await _test_completed_treatments()
@@ -125,7 +128,7 @@ func _test_bandage_and_gauze() -> void:
 	check(v.server_apply_treatment(&"hemostatic_gauze", Vitals.NECK) and v.bleed_rate() == 0.0 and v.wound_list()[0].packed, "gauze packs it")
 	v.server_reset_health()
 	_wound(v, Vitals.ABDOMEN, "internal", 1.5, &"aorta")
-	check(v.care_needed().is_empty(), "internal bleeding: care_needed asks for nothing (wave 3's surgery kit)")
+	check(v.care_needed().map(func(t: Dictionary) -> StringName: return t.item) == [&"surgical_clamp"], "internal bleeding: only a surgery kit's clamp")
 	check(v.treatment_problem(&"pressure_bandage", Vitals.ABDOMEN) != "" and v.treatment_problem(&"hemostatic_gauze", Vitals.ABDOMEN) != "", "and neither a bandage nor gauze helps")
 	v.queue_free()
 
@@ -144,11 +147,28 @@ func _test_chest_seal() -> void:
 	w2.tension_in = 1.0
 	late.server_advance(2.0)
 	check(late.wound_list()[0].tension, "an unsealed one went to tension")
-	check(late.server_apply_treatment(&"chest_seal", Vitals.CHEST) and late.care_needed().is_empty(), "a seal still closes it (nothing more the kit can do)")
+	check(late.server_apply_treatment(&"chest_seal", Vitals.CHEST) and late.care_needed().map(func(t: Dictionary) -> StringName: return t.item) == [&"decompression_needle"],
+		"a seal still closes it; the needle is what's left (%s)" % [late.care_needed()])
+	check(late.has_tension() and late.signs().has("Trachea shifted, neck veins bulging") and late.signs().has("No breath sounds on the right"),
+		"a medic sees the tension: trachea shifted, no breath sounds on that side (%s)" % [late.signs()])
+	var needled := _vitals()
+	var w3 := _wound(needled, Vitals.CHEST, "chest", WoundModel.CHEST_RATE, &"lung_l")
+	w3.tension_in = 1.0
+	needled.server_advance(2.0)
+	var squeezed: float = needled.lung(&"lung_r").efficiency
+	check(squeezed <= 1.0 - WoundModel.TENSION_SHIFT + 0.001 and needled.lung(&"lung_l").collapse == 1.0,
+		"tension: that lung fully collapsed, the other pushed (%.2f)" % squeezed)
+	check(needled.treatment_problem(&"decompression_needle", Vitals.CHEST) == "" and needled.server_apply_treatment(&"decompression_needle", Vitals.CHEST),
+		"the needle goes in")
+	needled.server_advance(WoundModel.TENSION_ARREST_S + 30.0)
+	check(not needled.has_tension() and not needled.in_cardiac_arrest() and needled.lung(&"lung_r").efficiency == 1.0,
+		"and lets the air out: no arrest, the other lung free again")
+	check(needled.treatment_problem(&"decompression_needle", Vitals.CHEST) == "No tension pneumothorax", "no second needle without tension")
 	late.server_advance(WoundModel.TENSION_ARREST_S)
-	check(late.in_cardiac_arrest(), "but doesn't relieve the tension: cardiac arrest (the needle is wave 3)")
+	check(late.in_cardiac_arrest(), "without the needle: cardiac arrest")
 	v.queue_free()
 	late.queue_free()
+	needled.queue_free()
 
 
 func _test_splint() -> void:
@@ -247,18 +267,11 @@ func _test_morphine() -> void:
 	check(rib.pain() < 0.001 and rib.stamina_mult() < 1.0, "morphine is its fix (pain %.2f; still short of breath)" % rib.pain())
 
 
-## A bleed too small to matter for an hour or two, so blood doesn't creep back
-## (WoundModel.BLOOD_RECOVER_PER_MIN) and wake a casualty a test keeps out on blood loss.
-func _trickle(m: WoundModel) -> void:
-	m._add_wound(Vitals.SHIN_R, "graze", 0.0005)
-
-
 func _test_airway() -> void:
 	print("NPA and airway obstruction")
 	var m := _model(5)
 	m.care_rng.seed = 5
 	m.blood = 0.58  # unconscious
-	_trickle(m)
 	m.update_state(0.0)
 	check(m.unconscious and m.care_tasks().any(func(t: Dictionary) -> bool: return t.item == &"npa" and t.part == &"head"), "an unconscious casualty needs an NPA")
 	var t := 0.0
@@ -278,7 +291,6 @@ func _test_airway() -> void:
 		var c := _model(i)
 		c.care_rng.seed = 1000 + i
 		c.blood = 0.58
-		_trickle(c)
 		c.update_state(0.0)
 		for s in 60:
 			c.advance(1.0)
@@ -288,7 +300,6 @@ func _test_airway() -> void:
 	var fixed := _model(6)
 	fixed.care_rng.seed = 6
 	fixed.blood = 0.58
-	_trickle(fixed)
 	fixed.update_state(0.0)
 	for s in 7200:
 		if fixed.airway_blocked:
@@ -353,14 +364,14 @@ func _test_care_order() -> void:
 	v._model.blood = 0.58  # unconscious: the airway too
 	v._model.update_state(0.0)
 	var items := v.care_needed().map(func(t: Dictionary) -> String: return "%s@%s" % [t.item, t.part])
-	var expected := ["tourniquet@thigh_l", "hemostatic_gauze@neck", "npa@head", "chest_seal@chest", "pressure_bandage@thigh_r",
-		"pressure_bandage@forearm_l", "pressure_bandage@shin_r", "splint@shin_l", "morphine@torso"]
-	check(items == expected, "massive bleeding, airway, chest, other bleeding, fractures, pain (%s)" % [items])
+	var expected := ["tourniquet@thigh_l", "surgical_clamp@abdomen", "hemostatic_gauze@neck", "npa@head", "chest_seal@chest", "pressure_bandage@thigh_r",
+		"pressure_bandage@forearm_l", "pressure_bandage@shin_r", "io_kit@forearm_l", "hypothermia_blanket@torso", "splint@shin_l", "morphine@torso"]
+	check(items == expected, "massive bleeding (internal: a clamp), airway, chest, other bleeding, a line (IO first in shock), a blanket, fractures, pain (%s)" % [items])
 	v.server_apply_treatment(&"tourniquet", Vitals.THIGH_L)
 	v.server_apply_treatment(&"npa", Vitals.HEAD)
 	items = v.care_needed().map(func(t: Dictionary) -> String: return "%s@%s" % [t.item, t.part])
-	check(items.size() == expected.size() - 2 and items[0] == "hemostatic_gauze@neck", "handled ones drop out (%s)" % [items])
-	check(v.care_needed().all(func(t: Dictionary) -> bool: return Vitals.CARE_ORDER.has(t.kind) and Vitals.TREATS[t.kind] == t.item or t.kind == "pain"),
+	check(items.size() == expected.size() - 2 and items[0] == "surgical_clamp@abdomen", "handled ones drop out (%s)" % [items])
+	check(v.care_needed().all(func(t: Dictionary) -> bool: return Vitals.CARE_ORDER.has(t.kind) and (Vitals.TREATS[t.kind] == t.item or Vitals.TREATS[t.kind] in t.get("items", [])) or t.kind == "pain"),
 		"each task's kind maps to its item in TREATS and CARE_ORDER")
 	v.queue_free()
 
@@ -414,6 +425,364 @@ func _test_treatment_wakes() -> void:
 		"an NPA clears it: SpO2 recovers and he comes round %.0f s later" % t)
 	for v: Vitals in [treated, untreated, airway]:
 		v.queue_free()
+
+
+## IV and IO access, bags, pressure bags and collapsed veins (design doc, "IV gauge sets the flow").
+func _test_iv_fluids() -> void:
+	print("IV, IO and fluids")
+	var fine := _model()
+	fine.blood = 0.9
+	check(not fine.care_tasks().any(func(t: Dictionary) -> bool: return t.kind == "access"), "10% lost: no line asked for")
+	var m := _model()
+	m.blood = 0.8
+	var access := m.care_tasks().filter(func(t: Dictionary) -> bool: return t.kind == "access")
+	check(access.size() == 1 and access[0].item == &"iv_18" and access[0].part == &"forearm_l" and &"io_kit" in access[0].items,
+		"20%% lost: a line, the 18 gauge first, in the left forearm (%s)" % [access])
+	check(m.treatment_problem(&"saline_500", &"forearm_l") == "Needs IV or IO access first", "no bag without a line")
+	var pain := m.pain()
+	check(m.apply_item(&"iv_18", &"forearm_l") and m.access.kind == "iv" and int(m.access.gauge) == 18 and m.care_note == "",
+		"an 18 gauge goes in with good veins")
+	check(is_equal_approx(m.pain() - pain, 0.05), "and adds a little pain (+%.2f)" % (m.pain() - pain))
+	check(m.treatment_problem(&"iv_14", &"forearm_l") == "Already has a line in", "one line at a time")
+	var fluids := m.care_tasks().filter(func(t: Dictionary) -> bool: return t.kind == "fluids")
+	check(fluids.size() == 1 and fluids[0].item == &"blood_1000", "then a bag sized to what's missing (%s)" % [fluids])
+	m.apply_item(&"saline_500", &"forearm_l")
+	check(m.treatment_problem(&"blood_500", &"forearm_l") == "A bag is already running", "one bag at a time")
+	var before := m.blood
+	var t := 0.0
+	while not m.infusion.is_empty() and t < 900.0:
+		_step(m, 1.0)
+		t += 1.0
+	check(t >= 240.0 and t <= 300.0 and absf((m.blood - before) * WoundModel.BLOOD_L * 1000.0 - 500.0) < 2.0,
+		"500 mL through an 18 gauge in %.1f min (design doc: 4 to 5), all of it into the blood" % (t / 60.0))
+	var still := m.blood
+	_step(m, 600.0)
+	check(m.blood == still, "and nothing more comes back without a bag")
+	var big := _model()
+	big.blood = 0.7
+	big.apply_item(&"iv_14", &"forearm_l")
+	big.apply_item(&"blood_1000", &"forearm_l")
+	t = 0.0
+	while not big.infusion.is_empty() and t < 900.0:
+		_step(big, 1.0)
+		t += 1.0
+	check(t > 140.0 and t < 160.0, "a 14 gauge runs 1000 mL in %.1f min (3x the 18 gauge)" % (t / 60.0))
+	var full := _model()
+	full.blood = 0.95
+	full.apply_item(&"io_kit", WoundModel.IO_PART)
+	full.apply_item(&"saline_1000", WoundModel.IO_PART)
+	_step(full, 600.0)
+	check(full.blood == 1.0, "blood never goes past full")
+	var shock := _model()
+	shock.blood = 0.6
+	check(shock.veins_collapsed() and shock.care_tasks().any(func(t2: Dictionary) -> bool: return t2.kind == "access" and t2.item == &"io_kit"),
+		"40% lost: veins collapsed, IO is the first pick")
+	shock.apply_item(&"iv_16", &"forearm_l")
+	while shock.access.is_empty():  # a miss now and then; keep trying
+		shock.apply_item(&"iv_16", &"forearm_l")
+	shock.apply_item(&"saline_500", &"forearm_l")
+	check(is_equal_approx(shock.flow_mult(), 1.0), "collapsed veins halve a 16 gauge (%.2fx the 18 gauge rate)" % shock.flow_mult())
+	check(shock.care_tasks().any(func(t2: Dictionary) -> bool: return t2.kind == "pressure"), "and ask for a pressure bag")
+	shock.apply_item(WoundModel.PRESSURE_BAG, &"forearm_l")
+	check(is_equal_approx(shock.flow_mult(), 2.5) and not shock.care_tasks().any(func(t2: Dictionary) -> bool: return t2.kind == "pressure"),
+		"which brings it to 1.25x its gauge (%.2fx)" % shock.flow_mult())
+	var io := _model()
+	io.apply_item(&"io_kit", WoundModel.IO_PART)
+	check(io.access.part == WoundModel.IO_PART and is_equal_approx(io.flow_mult(), 1.0), "IO flows like an 18 gauge")
+	io.apply_item(WoundModel.PRESSURE_BAG, WoundModel.IO_PART)
+	check(is_equal_approx(io.flow_mult(), 2.0), "and like a 16 gauge under a pressure bag")
+	var missed := 0
+	var noted := true
+	for i in 400:
+		var c := _model(100 + i)
+		c.blood = 0.5
+		c.apply_item(&"iv_18", &"forearm_l")
+		if c.access.is_empty():
+			missed += 1
+			noted = noted and c.care_note == "Missed the vein"
+	check(noted, "a missed IV says so (and still uses the catheter: apply_item returns true)")
+	var arrest := _model()
+	arrest.blood = 0.5
+	check(absf(missed / 400.0 - WoundModel.IV_FAIL_MAX) < 0.07 and is_equal_approx(arrest.treat_time_mult(&"iv_18"), WoundModel.IV_SHOCK_TIME_MULT)
+		and arrest.treat_time_mult(&"io_kit") == 1.0,
+		"at 50%% lost an IV misses %.0f%% of the time and takes twice as long; IO always goes in" % (missed / 4.0))
+	var tq := _model()
+	tq.blood = 0.8
+	tq.tourniquets[&"upper_arm_l"] = {"count": 1, "rushed": 0}
+	check(tq.iv_part() == &"forearm_r", "a tourniquet on the left arm: the IV goes in the right")
+	var copy := _model()
+	copy.apply_net(shock.to_net())
+	check(copy.access == shock.access and int(copy.infusion.ml) == 500 and copy.infusion.item == &"saline_500",
+		"the line and the bag replicate (%s, %s)" % [copy.access, copy.infusion])
+
+
+## Heart rate, epinephrine, atropine and adenosine, and restarting a heart with CPR and the
+## defibrillator (design doc "Drugs", "Defibrillator", "Cardiac arrest").
+func _test_heart() -> void:
+	print("Heart rate, drugs, CPR and defib")
+	var calm := _model()
+	_step(calm, 30.0)
+	check(is_equal_approx(calm.heart_rate, WoundModel.HR_REST), "healthy: %.0f bpm" % calm.heart_rate)
+	var bled := _model()
+	bled.blood = 0.72
+	_step(bled, 60.0)
+	check(bled.heart_rate > 100.0, "blood loss speeds it up (%.0f bpm at 28%% lost)" % bled.heart_rate)
+	var epi := _model()
+	for i in 3:
+		epi.apply_item(WoundModel.EPINEPHRINE, &"torso")
+	_step(epi, 30.0)
+	var racing := epi.care_tasks().filter(func(t: Dictionary) -> bool: return t.kind == "racing")
+	check(epi.heart_rate > WoundModel.HR_RACING and racing.size() == 1 and racing[0].item == WoundModel.ADENOSINE,
+		"too much epinephrine: racing (%.0f bpm), adenosine asked for" % epi.heart_rate)
+	epi.apply_item(WoundModel.ADENOSINE, &"torso")
+	_step(epi, 20.0)
+	check(epi.heart_rate < WoundModel.HR_RACING and not epi.arrest, "adenosine slows it (%.0f bpm)" % epi.heart_rate)
+	var opiate := _model()
+	opiate.npa = true
+	opiate.morphine_level = 3.2
+	_step(opiate, 30.0)
+	var slow := opiate.care_tasks().filter(func(t: Dictionary) -> bool: return t.kind == "slow_heart")
+	check(opiate.heart_rate < WoundModel.HR_SLOW and slow.size() == 1 and slow[0].item == WoundModel.ATROPINE,
+		"a morphine overdose slows it (%.0f bpm), atropine asked for" % opiate.heart_rate)
+	opiate.apply_item(WoundModel.ATROPINE, &"torso")
+	_step(opiate, 20.0)
+	check(opiate.heart_rate > WoundModel.HR_SLOW, "atropine brings it up (%.0f bpm)" % opiate.heart_rate)
+	var overdose := _model()
+	for i in 8:
+		overdose.apply_item(WoundModel.EPINEPHRINE, &"torso")
+	var t := 0.0
+	while not overdose.arrest and t < 300.0:
+		_step(overdose, 1.0)
+		t += 1.0
+	check(overdose.arrest, "eight doses: racing past %.0f bpm long enough stops the heart (%.0f s)" % [WoundModel.HR_DEADLY_FAST, t])
+	var empty := _model()
+	empty.npa = true
+	empty.blood = 0.5
+	empty.update_state(0.0)
+	check(empty.arrest and empty.heart_rate == 0.0 and not empty.care_tasks().any(func(t2: Dictionary) -> bool: return t2.kind in ["cpr", "defib"]),
+		"arrest at 50%% lost: no CPR or shock asked for until blood is back")
+	check(empty.treatment_problem(WoundModel.CPR, &"chest").begins_with("Get blood back in first")
+		and empty.treatment_problem(WoundModel.DEFIBRILLATOR, &"chest").begins_with("Get blood back in first"), "and neither would do anything")
+	empty.blood = 0.65
+	var kinds: Array = empty.care_tasks().map(func(t2: Dictionary) -> String: return t2.kind)
+	check(kinds.has("epinephrine") and kinds.has("defib") and kinds.has("cpr") and kinds.find("epinephrine") < kinds.find("defib"),
+		"blood back over 60%%: epinephrine, shocks and CPR (%s)" % [kinds])
+	var shocks := 0
+	var cycles := 0
+	for i in 400:
+		var c := _model(500 + i)
+		c.npa = true
+		c.blood = 0.5
+		c.update_state(0.0)
+		c.blood = 0.65
+		c.apply_item(WoundModel.DEFIBRILLATOR, &"chest")
+		if not c.arrest:
+			shocks += 1
+		var p := _model(1500 + i)
+		p.npa = true
+		p.blood = 0.5
+		p.update_state(0.0)
+		p.blood = 0.65
+		p.apply_item(WoundModel.CPR, &"chest")
+		if not p.arrest:
+			cycles += 1
+	check(absf(shocks / 400.0 - WoundModel.DEFIB_RESTART_CHANCE) < 0.07 and absf(cycles / 400.0 - WoundModel.CPR_RESTART_CHANCE) < 0.05,
+		"a shock restarts it %.0f%% of the time, a CPR cycle %.0f%%" % [shocks / 4.0, cycles / 4.0])
+	var boosted := _model()
+	boosted.blood = 0.5
+	boosted.update_state(0.0)
+	boosted.blood = 0.65
+	boosted.drug_level[WoundModel.EPINEPHRINE] = 1.0
+	check(is_equal_approx(boosted.restart_chance(WoundModel.DEFIBRILLATOR), WoundModel.DEFIB_RESTART_CHANCE + WoundModel.EPI_RESTART_BONUS),
+		"epinephrine in the blood helps (%.0f%% a shock)" % (boosted.restart_chance(WoundModel.DEFIBRILLATOR) * 100.0))
+	var back := _model(7)
+	back.npa = true
+	back.blood = 0.5
+	back.update_state(0.0)
+	back.blood = 0.65
+	while back.arrest:
+		back.apply_item(WoundModel.DEFIBRILLATOR, &"chest")
+	check(back.care_note == "Pulse back" and is_equal_approx(back.heart_rate, WoundModel.HR_RESTART), "the heart beats again (%.0f bpm)" % back.heart_rate)
+	_step(back, WoundModel.WAKE_S[&"arrest"] + 5.0)
+	check(not back.arrest and not back.unconscious, "and with blood to spare he comes round on his own")
+	var knocked := _model()
+	knocked.knockout_left = 30.0
+	knocked.update_state(0.0)
+	check(knocked.care_tasks().any(func(t2: Dictionary) -> bool: return t2.kind == "wake" and t2.item == WoundModel.EPINEPHRINE),
+		"knocked out: epinephrine's wake-up roll is offered")
+	var woke := 0
+	for i in 400:
+		var k := _model(3000 + i)
+		k.knockout_left = 30.0
+		k.update_state(0.0)
+		k.apply_item(WoundModel.EPINEPHRINE, &"torso")
+		_step(k, WoundModel.EPI_WAKE_S + 0.5)
+		if not k.unconscious:
+			woke += 1
+	check(absf(woke / 400.0 - WoundModel.EPI_WAKE_CHANCE) < 0.07, "the roll wakes %.0f%% of them within seconds" % (woke / 4.0))
+	var held := _model(9)
+	held.npa = true
+	held.blood = 0.55
+	held.update_state(0.0)
+	for i in 5:
+		held.apply_item(WoundModel.EPINEPHRINE, &"torso")
+	_step(held, 10.0)
+	check(held.unconscious and held.unconscious_causes().has(&"blood") and held.care_note == "", "no revive: epinephrine can't wake someone out from blood loss")
+	var copy := _model()
+	copy.apply_net(epi.to_net())
+	check(absf(copy.heart_rate - epi.heart_rate) < 1.0 and copy.drug_total(WoundModel.EPINEPHRINE) > 0.0 and copy.drug_total(WoundModel.ADENOSINE) > 0.0,
+		"heart rate and drugs replicate")
+
+
+## The surgery kit and the other damage: blasts, falls, burns, hypothermia and deafness
+## (design doc "Surgery kit", "Other damage").
+func _test_surgery_and_damage() -> void:
+	print("Surgery kit and other damage")
+	var inside := _model()
+	var renal := inside._add_wound(Vitals.ABDOMEN, "internal", 0.8, &"renal_l")
+	inside.update_state(0.0)
+	var tasks := inside.care_tasks().filter(func(t: Dictionary) -> bool: return t.kind == "internal")
+	check(tasks.size() == 1 and tasks[0].item == WoundModel.SURGICAL_CLAMP, "internal bleeding asks for a surgery kit's clamp")
+	check(inside.apply_item(WoundModel.SURGICAL_CLAMP, Vitals.ABDOMEN) and renal.treated and renal.clamped and inside.wound_bleed_rate() == 0.0,
+		"and the clamp stops it")
+	var neck := _model()
+	neck._add_wound(Vitals.NECK, "junctional", 0.8, &"jugular_l")
+	var junction := neck.care_tasks()[0]
+	check(junction.item == WoundModel.HEMOSTATIC_GAUZE and WoundModel.SURGICAL_CLAMP in junction.items, "a junctional bleed: gauze, or a clamp")
+	var chest := _model()
+	chest.npa = true
+	var open := chest._add_wound(Vitals.CHEST, "chest", WoundModel.CHEST_RATE, &"lung_l")
+	check(WoundModel.SURGICAL_CLAMP in chest.care_tasks().filter(func(t: Dictionary) -> bool: return t.kind == "chest")[0].items,
+		"a chest wound: a seal, or closing it with the surgery kit")
+	chest.apply_item(WoundModel.SURGICAL_CLAMP, Vitals.CHEST)
+	check(open.treated and open.closed, "closed by surgery")
+	var reopened := 0
+	for i in 400:
+		var c := _model(4000 + i)
+		var w := c._add_wound(Vitals.CHEST, "chest", WoundModel.CHEST_RATE, &"lung_l")
+		c.apply_item(WoundModel.SURGICAL_CLAMP, Vitals.CHEST)
+		if c.exert() > 0 and not w.treated and not w.closed:
+			reopened += 1
+	check(absf(reopened / 400.0 - WoundModel.CHEST_REOPEN_CHANCE) < 0.04, "sprinting or jumping reopens it %.0f%% of the time" % (reopened / 4.0))
+	var blast := _model()
+	blast.add_blast(1.0, WoundModel.BLAST_RADIUS)
+	check(blast.deaf_left > 40.0 and blast.burn > 0.0 and blast.impact > 0.0,
+		"a blast 1 m away: ears ringing %.0f s, burns over %.0f%%, bruising" % [blast.deaf_left, blast.burn * 100.0])
+	var muffled := _model()
+	muffled.add_blast(1.0, WoundModel.BLAST_RADIUS, true)
+	check(is_equal_approx(muffled.deaf_left, blast.deaf_left * 0.5), "ear protection halves the deafness")
+	var lungs := 0
+	for i in 400:
+		var b := _model(5000 + i)
+		b.add_blast(0.0, WoundModel.BLAST_RADIUS)
+		if b.blast_lung:
+			lungs += 1
+	check(absf(lungs / 400.0 - WoundModel.BLAST_LUNG_CHANCE) < 0.06, "blast lung %.0f%% of the time at the centre" % (lungs / 4.0))
+	var outside := 0
+	for i in 200:
+		var b := _model(5500 + i)
+		b.add_blast(WoundModel.BLAST_LUNG_RADIUS + 0.2, WoundModel.BLAST_RADIUS)
+		if b.blast_lung:
+			outside += 1
+	check(outside == 0, "never past %.0f m outdoors" % WoundModel.BLAST_LUNG_RADIUS)
+	var lung := _model()
+	lung.npa = true
+	lung.blast_lung = true
+	_step(lung, 300.0)
+	var rested := lung.spo2
+	_step(lung, 1800.0)
+	check(lung.stamina_mult() < 1.0 and rested < WoundModel.SPO2_NORMAL - 2.0 and absf(lung.spo2 - rested) < 0.5 and lung.spo2 > WoundModel.SPO2_LABOURED - 4.0
+		and not lung.unconscious, "blast lung: short of breath (SpO2 %.0f%%), then it holds steady at rest for half an hour" % lung.spo2)
+	var pushed := _model(8)
+	pushed.npa = true
+	pushed.blast_lung = true
+	_step(pushed, 300.0)
+	for i in 8:
+		pushed.exert()
+		if pushed.has_tension():  # a lung gave way: the medic needles it at once
+			pushed.apply_item(WoundModel.NEEDLE, &"chest")
+		_step(pushed, 15.0)
+	check(pushed.spo2 < rested - 1.0, "sprinting and heavy loads make it worse (SpO2 %.0f%% against %.0f%% resting)" % [pushed.spo2, rested])
+	_step(pushed, WoundModel.BLAST_LUNG_RECOVER_S + 600.0)
+	check(absf(pushed.spo2 - rested) < 1.0 and not pushed.dead, "and rest brings it back to the steady level (%.0f%%)" % pushed.spo2)
+	var drowned := _model()
+	drowned.npa = true
+	drowned.blast_lung = true
+	drowned.blood = 0.98  # a little lost: the bag goes up, then runs on past full
+	drowned.apply_item(WoundModel.IO_KIT, WoundModel.IO_PART)
+	drowned.apply_item(&"saline_1000", WoundModel.IO_PART)
+	_step(drowned, 600.0)
+	check(drowned.blast_strain > 0.1 and drowned.spo2 < rested - 1.0, "fluid the body doesn't need goes into the lungs (SpO2 %.0f%%)" % drowned.spo2)
+	var collapsed := 0
+	for i in 400:
+		var c := _model(9000 + i)
+		c.blast_lung = true
+		if c.exert() > 0 and c.has_tension():
+			collapsed += 1
+	check(absf(collapsed / 400.0 - WoundModel.BLAST_PNEUMO_CHANCE) < 0.03, "exertion collapses a lung %.1f%% of the time" % (collapsed / 4.0))
+	var popped := _model()
+	popped.blast_lung = true
+	popped.care_rng.seed = 1
+	while popped.exert() == 0:
+		pass
+	check(popped.has_tension() and popped.care_tasks().any(func(t: Dictionary) -> bool: return t.kind == "tension")
+		and not popped.care_tasks().any(func(t: Dictionary) -> bool: return t.kind == "chest"), "a closed tension pneumothorax: the needle, nothing to seal")
+	popped.apply_item(WoundModel.NEEDLE, &"chest")
+	_step(popped, WoundModel.TENSION_ARREST_S + 30.0)
+	check(not popped.has_tension() and not popped.arrest, "and the needle fixes it")
+	var low := _model()
+	low.add_fall(2.5)
+	check(low.wounds.is_empty() and low.pain() == 0.0, "a fall under 3 m: nothing")
+	var broken := 0
+	var killed := 0
+	for i in 400:
+		var f := _model(6000 + i)
+		f.add_fall(5.0)
+		if f.has_fracture(BodyMap.LEG_BONES, false):
+			broken += 1
+		var h := _model(7000 + i)
+		h.add_fall(12.0)
+		if h.dead:
+			killed += 1
+	check(broken > 180 and broken < 280, "5 m: leg pain and a broken leg %.0f%% of the time" % (broken / 4.0))
+	check(killed > 330, "12 m: fatal %.0f%% of the time" % (killed / 4.0))
+	var burned := _model()
+	burned.add_burn(0.4)
+	_step(burned, 60.0)
+	var dressings := burned.care_tasks().filter(func(t: Dictionary) -> bool: return t.kind == "burn")
+	check(burned.lost() > 0.01 and dressings.size() == 1 and burned.burn_dressings_needed() == 4,
+		"burns over 40%%: fluid loss (%.1f%% in a minute) and four burn dressings asked for" % (burned.lost() * 100.0))
+	var hurt := burned.burn_pain()
+	burned.apply_item(WoundModel.BURN_DRESSING, &"torso")
+	check(burned.burn_pain() < hurt and burned.burn_dressings_needed() == 3, "a dressing takes off some pain")
+	var cold := _model()
+	cold.blood = 0.65
+	cold._add_wound(Vitals.THIGH_L, "muscle", 0.25)
+	var warm_rate := cold.bleed_rate()
+	cold.still_s = WoundModel.HYPOTHERMIA_STILL_S + 1.0
+	check(cold.hypothermic() and is_equal_approx(cold.bleed_rate(), warm_rate * WoundModel.HYPOTHERMIA_BLEED)
+		and cold.care_tasks().any(func(t: Dictionary) -> bool: return t.kind == "hypothermia"),
+		"35%% lost and lying still 5 min: hypothermic, bleeding faster, a blanket asked for")
+	cold.apply_item(WoundModel.BLANKET, &"torso")
+	check(not cold.hypothermic() and is_equal_approx(cold.bleed_rate(), warm_rate), "the blanket stops it")
+	var loud := _model()
+	for i in 9:
+		loud.add_noise(1.0)
+	check(loud.deaf_left == 0.0, "a few shots indoors: fine")
+	loud.add_noise(1.0)
+	check(is_equal_approx(loud.deaf_left, WoundModel.NOISE_DEAF_S), "sustained indoor fire: muffled for %.0f s" % loud.deaf_left)
+	var guarded := _model()
+	for i in 20:
+		guarded.add_noise(1.0, true)
+	guarded.deafen(5.0, true)
+	check(guarded.deaf_left == 0.0, "ear protection: no deafness from gunfire or a flashbang")
+	var copy := _model()
+	burned.blanket = true
+	copy.apply_net(burned.to_net())
+	var clamped := _model()
+	clamped.apply_net(inside.to_net())
+	check(is_equal_approx(copy.burn, burned.burn) and copy.burn_dressings == 1 and copy.blanket and clamped.wounds[0].clamped,
+		"burns, dressings, the blanket and clamps replicate")
 
 
 func _test_kits() -> void:

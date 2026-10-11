@@ -65,6 +65,8 @@ const ARREST_WINDOW_S := WoundModel.ARREST_WINDOW_S
 ## Host simulation step and the shortest gap between routine net_state updates.
 const SIM_STEP_S := 0.1
 const NET_INTERVAL_S := 0.5
+## Moving slower than this (m/s) counts as lying still, for hypothermia.
+const STILL_SPEED := 0.3
 ## Legacy damage (debug K key, old tests) as generic trauma: per point of damage, this much
 ## pain and this share of blood volume lost at once (K twice at 40 knocks you out).
 const TRAUMA_PAIN_PER_DAMAGE := 0.01
@@ -98,6 +100,7 @@ var care_rng: RandomNumberGenerator:
 var _model := WoundModel.new()
 var _last_hit_at := -1000.0   # host: when a round or impact last landed (Time seconds)
 var _net_dirty := false       # clients: net_state not yet applied to _model
+var _last_pos := Vector3.INF  # host: where the body was last step (_track_stillness)
 var _sim_left := 0.0          # host: time not yet simulated
 var _published := {}          # host: last published state without countdowns
 var _published_at := -1000.0
@@ -229,6 +232,113 @@ func spo2() -> float:
 	return _m().spo2
 
 
+## Both lungs' efficiency averaged, 0 (none) to 1 (healthy): collapse (pneumothorax), blood in
+## them (hemothorax) and the push from a tension pneumothorax on the other side.
+func lung_efficiency() -> float:
+	return _m().lung_efficiency()
+
+
+## One lung (&"lung_l", &"lung_r"): {"collapse", "fluid", "efficiency"}, each 0 to 1.
+func lung(which: StringName) -> Dictionary:
+	var m := _m()
+	return {"collapse": float(m.lung_collapse[which]), "fluid": float(m.lung_fluid[which]),
+		"efficiency": m.lung_efficiency_of(which)}
+
+
+## Breaths per minute (hidden; faster as the lungs or the blood fail, slow on too much
+## morphine, none in arrest).
+func respiratory_rate() -> float:
+	return _m().respiratory_rate()
+
+
+## A tension pneumothorax is running (the decompression needle relieves it).
+func has_tension() -> bool:
+	return _m().has_tension()
+
+
+## Beats per minute (hidden; a medic feels it as a pulse, a pulse oximeter shows it); 0 in
+## cardiac arrest.
+func heart_rate() -> float:
+	return _m().heart_rate
+
+
+## A drug in the blood plus what's still going in, in doses: &"epinephrine", &"atropine",
+## &"adenosine" (morphine: morphine_level).
+func drug_total(id: StringName) -> float:
+	return _m().drug_total(id)
+
+
+## Blood is back far enough (60%) for CPR or the defibrillator to restart the heart.
+func can_restart_heart() -> bool:
+	return _m().can_restart()
+
+
+## Seconds of muffled hearing left (blasts, flashbangs, indoor gunfire); 0 when fine.
+func deaf_left() -> float:
+	return _m().deaf_left
+
+
+## Share of the body burned, 0 to 1.
+func burn_share() -> float:
+	return _m().burn
+
+
+## Lying still after heavy blood loss with no blanket: bleeding faster.
+func hypothermic() -> bool:
+	return _m().hypothermic()
+
+
+## Blast lung: both lungs slowly fill (no field fix; needs evacuation).
+func has_blast_lung() -> bool:
+	return _m().blast_lung
+
+
+## A chest wound closed by surgery could reopen if the unit exerts themselves.
+func has_closed_chest() -> bool:
+	return _m().wounds.any(func(w: Dictionary) -> bool: return w.kind == "chest" and w.get("closed", false))
+
+
+## Host only. The unit exerted themselves (sprint, jump, moving under an extreme load): a
+## surgically closed chest wound may reopen. Returns whether one did.
+func server_exert() -> bool:
+	if _model.exert() <= 0:
+		return false
+	_after_change(true)
+	return true
+
+
+## Host only. A blast `distance` metres away (radius already doubled indoors); see
+## WoundModel.add_blast.
+func server_blast(distance: float, radius: float, ear_pro := false) -> void:
+	_model.add_blast(distance, radius, ear_pro)
+	_last_hit_at = Time.get_ticks_msec() / 1000.0
+	_after_change(true)
+
+
+## Host only. A fall from `height` metres (see WoundModel.add_fall).
+func server_fall(height: float) -> void:
+	_model.add_fall(height)
+	_after_change(true)
+
+
+## Host only. Burns over `share` of the body.
+func server_burn(share: float) -> void:
+	_model.add_burn(share)
+	_after_change(true)
+
+
+## Host only. A shot fired indoors close by (see WoundModel.add_noise).
+func server_noise(amount: float, ear_pro := false) -> void:
+	_model.add_noise(amount, ear_pro)
+	_publish(true)
+
+
+## Host only. A flashbang's ringing ears for `seconds` (none with ear protection).
+func server_deafen(seconds: float, ear_pro := false) -> void:
+	_model.deafen(seconds, ear_pro)
+	_publish(true)
+
+
 ## Morphine in the blood, in doses (one autoinjector is 1 once it has gone in over 30 s);
 ## it halves about every 12 minutes. Pain relief follows it; from 2.5 the casualty is
 ## sedated (out), past 3 breathing slows.
@@ -276,10 +386,48 @@ func signs(on_self := false) -> PackedStringArray:
 		out.append("Unresponsive")
 	if m.breathing_laboured():
 		out.append("Breathing laboured")
+	if m.blast_lung:
+		out.append("Coughing blood")
+	if m.hypothermic():
+		out.append("Shivering, skin cold")
+	elif m.blanket:
+		out.append("Wrapped in a blanket")
+	if m.burn > 0.0:
+		var dressed := " (%d dressed)" % m.burn_dressings if m.burn_dressings > 0 else ""
+		out.append("Burns over about %d%% of the body%s" % [roundi(m.burn * 100.0 / 5.0) * 5, dressed])
+	if on_self and m.deaf_left > 0.0:
+		out.append("Ears ringing")
+	var rate := m.respiratory_rate()
+	if not m.arrest and rate > WoundModel.RESP_FAST:
+		out.append("Breathing fast")
+	elif not m.arrest and rate < WoundModel.RESP_SLOW:
+		out.append("Breathing slow")
 	if not on_self and not m.arrest and m.spo2 < WoundModel.SPO2_BLUE_LIPS:
 		out.append("Blue lips")
+	if not on_self:
+		for which in WoundModel.LUNGS:
+			if float(m.lung_collapse[which]) >= 0.5:
+				out.append("No breath sounds on the %s" % ("left" if which == WoundModel.LUNGS[0] else "right"))
+		if m.has_tension():
+			out.append("Trachea shifted, neck veins bulging")
+		if m.arrest:
+			out.append("No pulse")
+		elif m.heart_rate > WoundModel.HR_RACING:
+			out.append("Pulse racing")
+		elif m.heart_rate > 110.0:
+			out.append("Pulse fast and weak" if m.shock() > 0.3 else "Pulse fast")
+		elif m.heart_rate < WoundModel.HR_SLOW:
+			out.append("Pulse slow")
+	elif m.heart_rate > 120.0:
+		out.append("Heart pounding")
 	if m.morphine_level >= WoundModel.MORPHINE_PUPILS_LEVEL:
 		out.append("Drowsy (morphine)" if on_self else "Pinpoint pupils (morphine)")
+	if not m.access.is_empty():
+		var line := "IO line, sternum" if m.access.kind == "io" else "IV %dG, %s" % [int(m.access.gauge), part_name(m.access.part)]
+		out.append(line + (" (pressure bag)" if m.access.pressure else ""))
+	if not m.infusion.is_empty():
+		var item := ItemDB.get_item(m.infusion.item) if ItemDB.has_item(m.infusion.item) else null
+		out.append("%s running, %d mL left" % [item.name if item else "Bag", ceili(float(m.infusion.left))])
 	return out
 
 
@@ -290,7 +438,8 @@ func signs(on_self := false) -> PackedStringArray:
 ## morphine), "rate" (L/min at full blood) and "name" (the vessel or bone, or empty). Also:
 ## "limb" (the limb segment a tourniquet for it goes on: its own part, or empty off the
 ## limbs), "tourniquet" (a tourniquet above or on it holds some of its bleeding),
-## "packed" (gauze in it) and "tension" (a chest wound's tension pneumothorax has started).
+## "packed" (gauze in it), "tension" (a chest wound's tension pneumothorax has started),
+## "clamped" (a surgical clamp holds it) and "closed" (a chest wound closed by surgery).
 func wound_list() -> Array[Dictionary]:
 	var m := _m()
 	var list: Array[Dictionary] = []
@@ -298,7 +447,8 @@ func wound_list() -> Array[Dictionary]:
 		list.append({"part": w.part, "kind": w.kind, "bleeding": m.rate_now(w) > 0.0,
 			"treated": w.treated, "rate": w.rate, "name": w.name,
 			"limb": w.part if WoundModel.LIMB_BELOW.has(w.part) else &"",
-			"tourniquet": m.tourniquet_factor(w.part) < 1.0, "packed": w.get("packed", false), "tension": w.get("tension", false)})
+			"tourniquet": m.tourniquet_factor(w.part) < 1.0, "packed": w.get("packed", false), "tension": w.get("tension", false),
+			"clamped": w.get("clamped", false), "closed": w.get("closed", false), "pneumo": w.get("pneumo", false)})
 	return list
 
 
@@ -312,10 +462,18 @@ func wound_list() -> Array[Dictionary]:
 const TREATS := {
 	"arterial": &"tourniquet", "junctional": &"hemostatic_gauze", "venous": &"pressure_bandage",
 	"muscle": &"pressure_bandage", "graze": &"pressure_bandage", "chest": &"chest_seal",
-	"fracture": &"splint", "airway": &"npa", "pain": &"morphine",
+	"fracture": &"splint", "airway": &"npa", "pain": &"morphine", "tension": &"decompression_needle",
+	"access": &"iv_18", "fluids": &"saline_500", "pressure": &"pressure_bag",  # the usual picks; see care_needed "items"
+	"epinephrine": &"epinephrine", "defib": &"defibrillator", "cpr": &"cpr", "racing": &"adenosine",
+	"slow_heart": &"atropine", "wake": &"epinephrine", "internal": &"surgical_clamp", "hypothermia": &"hypothermia_blanket",
+	"burn": &"burn_dressing",
 }
-## Casualty-care order: massive bleeding, airway, chest, other bleeding, fractures, pain.
-const CARE_ORDER := ["arterial", "junctional", "airway", "chest", "venous", "muscle", "graze", "fracture", "pain"]
+## Casualty-care order: massive bleeding (internal bleeding under a surgical clamp), airway,
+## tension (the needle), chest, other bleeding, circulation (line, bag, pressure bag),
+## hypothermia (a blanket), restarting a heart (epinephrine, shocks, CPR), the heart rate
+## (adenosine, atropine), fractures, burns, pain, then epinephrine's wake-up roll.
+const CARE_ORDER := ["arterial", "junctional", "internal", "airway", "tension", "chest", "venous", "muscle", "graze", "access", "fluids",
+	"pressure", "hypothermia", "epinephrine", "defib", "cpr", "racing", "slow_heart", "fracture", "burn", "pain", "wake"]
 
 
 ## What still needs doing for this unit, most urgent first, in the casualty-care order: one
@@ -324,12 +482,77 @@ const CARE_ORDER := ["arterial", "junctional", "airway", "chest", "venous", "mus
 ## gauze per junctional bleed, an NPA (kind "airway", part HEAD) for an unconscious casualty,
 ## a vented seal per open chest wound, a bandage per venous, muscle or graze wound, a splint
 ## per fracture, morphine (kind "pain", part TORSO) for pain still left once the morphine
-## already given has gone in, or a cracked rib. Wounds already handled are left out, and so
+## already given has gone in, or a cracked rib. From 15% blood lost: IV or IO access (kind
+## "access", on the forearm the IV goes in), then a bag (kind "fluids"), and a pressure bag
+## once veins collapse (kind "pressure"); "access" and "fluids" tasks list every item that
+## would do in "items", best pick first (pick_item). Wounds already handled are left out, and so
 ## is anything no field item fixes (internal bleeding, a tension pneumothorax already under
 ## way) and another morphine dose once the blood holds about one (a second one in would
 ## risk sedation).
 func care_needed() -> Array[Dictionary]:
 	return _m().care_tasks()
+
+
+## The item to use for `task` (a care_needed() entry) from what `inventory` holds, loose or in
+## a kit: the first of its "items" carried, or its "item"; &"" if none is carried.
+static func pick_item(task: Dictionary, inventory: Inventory) -> StringName:
+	for id: StringName in task_items(task):
+		if has_item(inventory, id):
+			return id
+	return &""
+
+
+## `inventory` holds `id` (loose or in a kit), or `id` needs no item (CPR: stats.no_item).
+static func has_item(inventory: Inventory, id: StringName) -> bool:
+	var item := ItemDB.get_item(id) if ItemDB.has_item(id) else null
+	return (item != null and item.stats.get("no_item", false)) or inventory.medical_count(id) > 0
+
+
+## Every item that would do for `task`, best pick first.
+static func task_items(task: Dictionary) -> Array[StringName]:
+	var out: Array[StringName] = []
+	out.assign(task.get("items", [task.item]))
+	return out
+
+
+## Items a treater can't use on themselves: an IV or IO, CPR and the defibrillator need
+## someone else's hands.
+static func needs_other_hands(item_id: StringName) -> bool:
+	return item_id == WoundModel.IO_KIT or WoundModel.IV_GAUGES.has(item_id) or item_id == WoundModel.CPR \
+		or item_id == WoundModel.DEFIBRILLATOR
+
+
+## How many times its usual time `item_id` takes on this unit now (an IV in shock is slower).
+func treat_time_mult(item_id: StringName) -> float:
+	return _m().treat_time_mult(item_id)
+
+
+## The IV or IO line: {} for none, else "kind" ("iv" or "io"), "gauge" (an IV's), "part" and
+## "pressure" (under a pressure bag).
+func access() -> Dictionary:
+	return _m().access.duplicate()
+
+
+## An IV can go in `site` (WoundModel.IV_SITES: both forearms, both lower legs): no
+## tourniquet on or above it.
+func iv_site_ok(site: StringName) -> bool:
+	return _m().iv_site_ok(site)
+
+
+## The bag running on the line: {} for none, else "item", "ml" and "left" (mL), plus "rate"
+## (mL per second going in now).
+func infusion() -> Dictionary:
+	var m := _m()
+	if m.infusion.is_empty():
+		return {}
+	var out := m.infusion.duplicate()
+	out.rate = m.infusion_rate()
+	return out
+
+
+## Host: what the last treatment has to tell the treater ("Missed the vein"), or "".
+func care_note() -> String:
+	return _model.care_note
 
 
 ## Why one `item_id` on `part` wouldn't help this unit right now ("" if it would), for menus
@@ -345,7 +568,7 @@ func treatment_problem(item_id: StringName, part: StringName) -> String:
 ## - pressure_bandage: a venous, muscle or graze wound. hemostatic_gauze: packs a junctional
 ##   bleed, or an arterial one under a tourniquet so the tourniquet can come off.
 ## - chest_seal (vented): closes an open chest wound, so no tension pneumothorax starts (one
-##   already under way runs on: the needle is wave 3).
+##   already under way runs on until the decompression needle).
 ## - splint: walking and jogging back on a broken leg, a steadier arm and normal reloads, a
 ##   lower pain floor; still no sprint until a respawn.
 ## - morphine: one dose into the blood over 30 s (morphine_level); relief follows the level
@@ -354,6 +577,18 @@ func treatment_problem(item_id: StringName, part: StringName) -> String:
 ##   It also eases a cracked rib's pain.
 ## - npa: an unconscious casualty's airway can't obstruct (and an obstructed one clears, so
 ##   SpO2 recovers).
+## - iv_10 to iv_20: an IV line in a forearm; bigger bores flow faster and hurt more. In shock
+##   it can miss (the catheter is used up; care_note says so). io_kit: an IO line in the
+##   sternum, always. One line at a time.
+## - saline_* / blood_* (250, 500, 1000 mL): a bag on the line, going in over minutes; the
+##   only way blood comes back. pressure_bag: on the line, faster flow (and needed once
+##   veins collapse at 37% lost).
+## - decompression_needle: relieves a tension pneumothorax (and the arrest it was heading for).
+## - epinephrine, atropine, adenosine: a dose into the blood (heart rate up, up, down);
+##   epinephrine also helps CPR and shocks restart a heart, and has a wake-up roll for
+##   someone out with nothing but a concussion knockout keeping them out.
+## - cpr (hands only, a 10 s cycle) and defibrillator (a 5 s shock; not used up): a chance to
+##   restart a heart in arrest, once blood is back to 60%; care_note says whether it worked.
 func server_apply_treatment(item_id: StringName, part: StringName, rushed := false) -> bool:
 	if not _model.apply_item(item_id, part, rushed):
 		return false
@@ -532,8 +767,20 @@ func _process(delta: float) -> void:
 	_sim_left = 0.0
 	if _model.dead:
 		return
+	_track_stillness(step)
 	_model.advance(step)
 	_after_change()
+
+
+## Host: how long the body has lain or stood still (hypothermia), from how far it moved.
+func _track_stillness(step: float) -> void:
+	var body := get_parent() as Node3D
+	if body == null or not body.is_inside_tree():
+		return
+	var pos := body.global_position
+	var moved := Vector2(pos.x - _last_pos.x, pos.z - _last_pos.z).length()
+	_last_pos = pos
+	_model.still_s = _model.still_s + step if moved < STILL_SPEED * step else 0.0
 
 
 ## Turns model changes into signals and replication.

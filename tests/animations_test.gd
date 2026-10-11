@@ -55,6 +55,7 @@ func _ready() -> void:
 	await _test_pick_up()
 	await _test_equip_and_draw()
 	await _test_treat()
+	await _test_techniques()
 	await _test_loot()
 	await _test_dummy()
 	GameState.delete_save()
@@ -334,6 +335,74 @@ func _test_treat() -> void:
 	check(stopped, "an interrupted treatment stops the clip")
 	_place_player()
 	player.vitals.server_reset_health()
+	alpha.vitals.server_reset_health()
+
+
+## Each treatment's own technique (CharacterModel.TECHNIQUES, _treat_goals): wrapping,
+## tourniquets high and tight with windlass turns, needles, injectors, CPR and the rest.
+func _test_techniques() -> void:
+	print("Treatment techniques")
+	var missing := []
+	for id: StringName in [&"pressure_bandage", &"hemostatic_gauze", &"tourniquet", &"splint", &"chest_seal", &"decompression_needle",
+			&"morphine", &"epinephrine", &"atropine", &"adenosine", &"iv_18", &"iv_10", &"io_kit", &"cpr", &"defibrillator",
+			&"surgical_clamp", &"saline_500", &"blood_1000", &"pressure_bag", &"burn_dressing", &"hypothermia_blanket", &"npa"]:
+		if not CharacterModel.TECHNIQUES.has(id):
+			missing.append(id)
+	check(missing.is_empty(), "every treatment has its technique (missing %s)" % [missing])
+	var m := player.model
+	var at := Vector3(0.0, 0.2, -0.5)
+	var radii := []
+	var angles := []
+	for i in 6:
+		var hand: Vector3 = m._treat_goals(&"wrap", at, i * 0.15, 6.0)[0][1]
+		radii.append(snappedf(hand.distance_to(at), 0.001))
+		angles.append(hand)
+	check(radii.all(func(r: float) -> bool: return absf(r - CharacterModel.WRAP_RADIUS) < 0.002) and angles[0].distance_to(angles[2]) > 0.03,
+		"a bandage: the right hand wraps round the limb (%s)" % [radii])
+	var depths := []
+	for i in 12:
+		var t := i / (CharacterModel.CPR_HZ * 12.0)
+		var hand: Vector3 = m._treat_goals(&"cpr", at, t, 10.0)[0][1]
+		depths.append(hand.distance_to(CharacterModel.HANDS_ANCHOR))
+	check(absf((depths.max() - depths.min()) - CharacterModel.COMPRESSION_M) < 0.01, "CPR: compressions %.1f cm deep at %.0f a minute"
+		% [(depths.max() - depths.min()) * 100.0, CharacterModel.CPR_HZ * 60.0])
+	var jab: Vector3 = m._treat_goals(&"inject", at, 1.0, 2.0)[0][1]
+	var ready: Vector3 = m._treat_goals(&"inject", at, 0.2, 2.0)[0][1]
+	check(jab.distance_to(at) < 0.001 and ready.distance_to(at) > 0.15, "an injector: wound up, then jabbed home")
+	var strap: Vector3 = m._treat_goals(&"tourniquet", at, 0.5, 6.0)[0][1]
+	var turn_a: Vector3 = m._treat_goals(&"tourniquet", at, 3.0, 6.0)[0][1]
+	var turn_b: Vector3 = m._treat_goals(&"tourniquet", at, 3.0 + 0.25 / CharacterModel.WINDLASS_HZ, 6.0)[0][1]
+	var clip: Vector3 = m._treat_goals(&"tourniquet", at, 5.5, 6.0)[0][1]
+	check(strap.distance_to(at) > 0.05 and turn_a.distance_to(turn_b) > 0.03 and clip.distance_to(turn_a) > 0.01,
+		"a tourniquet: strap round, windlass turns, into the clip")
+	var needle_in: Vector3 = m._treat_goals(&"needle", at, 4.0, 5.0)[0][1]
+	var needle_start: Vector3 = m._treat_goals(&"needle", at, 0.0, 5.0)[0][1]
+	check(needle_start.distance_to(at) > 0.1 and needle_in.distance_to(at) < 0.02, "a needle: slowly in")
+	var bag: Vector3 = m._treat_goals(&"fluids", at, 1.0, 3.0)[0][1]
+	check(bag.y > at.y + 0.3, "a bag held up high")
+	var pads: Vector3 = m._treat_goals(&"defib", at, 1.0, 5.0)[0][1]
+	var clear: Vector3 = m._treat_goals(&"defib", at, 4.0, 5.0)[0][1]
+	check(pads.distance_to(at) < 0.2 and clear.distance_to(at) > 0.2, "defib: pads on, then hands clear for the shock")
+	# In the scene: a tourniquet on Alpha's thigh goes on high, above the wound, and says which technique.
+	_down(alpha)
+	_place(alpha, SPOT + Vector3(0, 0, -1.5))
+	_place_player()
+	await _seconds(0.3)
+	_beside(CharacterModel.part_position(alpha, &"thigh_l"))
+	await _seconds(0.3)
+	player.model.server_treat(alpha, &"thigh_l", 2.0, &"tourniquet")
+	var high: Vector3 = player.to_global(player.model.action_net.get("at", Vector3.ZERO))
+	var wound := CharacterModel.part_position(alpha, &"thigh_l")
+	var chest := CharacterModel.part_position(alpha, &"chest")
+	check(player.model.action_net.get("tech") == &"tourniquet" and high.distance_to(chest) < wound.distance_to(chest) - 0.05,
+		"high and tight: %.0f cm nearer the trunk than the wound" % ((wound.distance_to(chest) - high.distance_to(chest)) * 100.0))
+	await _seconds(0.5)
+	check(player.model.action_shown() == CharacterModel.TREAT, "and it plays")
+	player.model.action_net = {}
+	# On yourself: an injector into your own thigh, standing.
+	player.model.server_treat(player, &"thigh_l", 2.0, &"morphine")
+	check(player.model.action_net.get("tech") == &"inject" and player.model.action_net.get("kneel") == false, "an injector on yourself: standing, own thigh")
+	player.model.action_net = {}
 	alpha.vitals.server_reset_health()
 
 

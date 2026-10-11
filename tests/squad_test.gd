@@ -13,7 +13,7 @@ func _ready() -> void:
 	GameState.zone_id = "test_squad" + OS.get_environment("CONTRACTOR_TEST_TAG")  # never touch a real save
 	GameState.delete_save()
 	CompoundLevel.spawn_ai = true
-	get_tree().create_timer(180.0).timeout.connect(func() -> void:
+	get_tree().create_timer(240.0).timeout.connect(func() -> void:
 		print("SQUAD TEST FAILED (timed out)")
 		get_tree().quit(99))
 	add_child(load("res://scenes/main.tscn").instantiate())
@@ -143,8 +143,10 @@ func _test_buddy_carries_buddy() -> void:
 	var bravo := _ai("Bravo")
 	var charlie := _ai("Charlie")  # Bravo's battle buddy and team A's medic
 	bravo.vitals.server_damage(70.0)  # out cold, 42% of his blood lost: he won't wake soon
-	var picked := await _wait_until(func() -> bool: return bravo.carried_by == charlie, 20.0)
+	var picked := await _wait_until(func() -> bool: return bravo.carried_by == charlie, 45.0)  # NPA, then a line, a bag, a pressure bag
 	check(picked, "nothing left to treat and not waking, his buddy Charlie, the medic, picks him up (%s)" % charlie.ai_status)
+	check(bravo.vitals.access().get("kind", "") == "io" and bravo.vitals.access().pressure and not bravo.vitals.infusion().is_empty(),
+		"first an IO line (veins collapsed), a pressure bag and a bag running (%s, %s)" % [bravo.vitals.access(), bravo.vitals.infusion()])
 	_place(player, Vector3(-8, 0.1, 4))
 	var along := await _wait_until(func() -> bool: return _flat(bravo.global_position, player.global_position) < 11.0, 15.0)
 	check(along, "and carries him after the lead (%.1f m)" % _flat(bravo.global_position, player.global_position))

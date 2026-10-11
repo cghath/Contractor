@@ -98,6 +98,10 @@ const HEAVY_STAMINA_MULT := 1.0
 const STAMINA_REGEN_S := 10.0
 const STAMINA_REGEN_MOVING := 0.5
 const STAMINA_RESUME := 0.2
+## Moving with load_fraction() at or over this counts as exertion (surgery kit reopening).
+const EXTREME_LOAD := 0.9
+## A height change this big in one physics step is the game moving the body, not a fall.
+const TELEPORT_M := 2.0
 
 ## Weapon mount (C): a surface ahead at weapon height, or just under the muzzle (a sill,
 ## a wall top, the ground when prone). Halves sway and recoil (proposed).
@@ -126,6 +130,9 @@ var is_sprinting := false
 var settle := 0.0
 
 var _winded := false
+var _exerting := false    # sprinting, jumping or moving under an extreme load (report_exertion)
+var _air_top := -INF      # highest point since leaving the ground (_track_fall)
+var _last_y := 0.0
 var _before_prone: int = Stance.STAND_HIGH
 var _lean_held := 0       # the lean key held now
 var _lean_latched := 0    # double-tapped: stays leaned
@@ -146,6 +153,7 @@ func step(delta: float) -> void:
 	if not body.is_on_floor():
 		body.velocity += body.get_gravity() * delta
 	var down := not body.vitals.is_up()
+	var jumped := false
 	var burdened := body.inventory.hands != &"" or body.carry_speed_mult() < 1.0  # carry_mode reaches the owner; carrying is host-only
 	var input := Vector2.ZERO
 	var sprint := false
@@ -174,9 +182,14 @@ func step(delta: float) -> void:
 		if Input.is_action_just_pressed(&"jump") and can_jump():
 			body.velocity.y = JUMP_VELOCITY
 			mounted = false
+			jumped = true
 	else:
 		_lean_held = 0  # keys released while the mouse was free
 	is_sprinting = sprint and input != Vector2.ZERO and not down and not burdened and is_standing() and can_sprint()
+	var exerting := is_sprinting or jumped or (input != Vector2.ZERO and load_fraction() >= EXTREME_LOAD)
+	if exerting and not _exerting:
+		body.report_exertion()  # a surgically closed chest wound may reopen
+	_exerting = exerting
 	if is_sprinting and (stance != Stance.STAND_HIGH or side != 0):
 		side = 0
 		set_stance(Stance.STAND_HIGH)
@@ -187,12 +200,28 @@ func step(delta: float) -> void:
 	body.velocity.x = after.x
 	body.velocity.z = after.z
 	body.move_and_slide()
+	_track_fall()
 	if target.length() < before.length():
 		settle = minf(settle + maxf(before.length() - after.length(), 0.0) * SETTLE_GAIN, 1.0)
 	settle = move_toward(settle, 0.0, delta * SETTLE_DECAY)
 	if mounted and (input != Vector2.ZERO or after.length() > MOUNT_MAX_SPEED or not body.is_on_floor() or not _has_weapon_up()):
 		mounted = false
 	update_pose(delta)
+
+
+## Owner-side: the highest point since leaving the ground; on landing, a drop of
+## WoundModel.FALL_SAFE_M or more goes to the host (Soldier.report_fall).
+func _track_fall() -> void:
+	var y := body.global_position.y
+	if absf(y - _last_y) > TELEPORT_M:
+		_air_top = -INF  # moved by the game (respawn, placed), not by falling
+	_last_y = y
+	if not body.is_on_floor():
+		_air_top = y if is_inf(_air_top) else maxf(_air_top, y)
+		return
+	if not is_inf(_air_top) and _air_top - y >= WoundModel.FALL_SAFE_M:
+		body.report_fall(_air_top - y)
+	_air_top = -INF
 
 
 ## Owner-side: eases the lean and moves the camera (head) to the stance's eye point.
