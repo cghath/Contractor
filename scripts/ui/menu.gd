@@ -36,6 +36,7 @@ func _ready() -> void:
 	box.add_child(_address)
 	box.add_child(_button("Join someone's session", func() -> void: join(_address.text)))
 	box.add_child(_button("Reset compound save", _reset_save))
+	box.add_child(_button("Contract board (offline)", func() -> void: Contracts.open_board()))  # wave 4 economy, on its own
 	_status = Label.new()
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD
 	box.add_child(_status)

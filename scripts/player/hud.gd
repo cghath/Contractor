@@ -73,6 +73,7 @@ func _ready() -> void:
 	command_menu = CommandMenu.new(player)
 	add_child(command_menu)
 	add_child(Callouts.Subtitles.new())  # squadmates' callouts
+	add_child(ObjectivesPanel.new())  # the deployment's objectives (wave 4, Contracts)
 	_message = _label("", Control.PRESET_CENTER_TOP)
 	_message.position.y += 60
 	_message.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
