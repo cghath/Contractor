@@ -459,6 +459,7 @@ func _squad_ai() -> Array:
 func _remove_squadmate(s: Soldier) -> void:
 	if s.vitals.is_dead():
 		return
+	BaseHub.server_squadmate_leaving(s)  # campaign: a roster member keeps their gear (wave 4)
 	s.release_carried()
 	if is_instance_valid(s.carried_by):
 		s.carried_by.release_carried()
@@ -469,6 +470,7 @@ func _remove_squadmate(s: Soldier) -> void:
 ## (no slot, no orders) and nobody new takes its slot.
 func _on_died_for_good(s: Soldier) -> void:
 	if s.faction == &"friendly" and s.squad_slot >= 0:
+		BaseHub.server_squadmate_died(s)  # campaign: a roster member is lost (wave 4)
 		_fallen_slots[s.squad_slot] = true
 		s.squad_slot = -1
 
@@ -477,6 +479,8 @@ func _on_died_for_good(s: Soldier) -> void:
 ## (dead squadmates' bodies keep theirs, so past the eighth it's "Alpha 2" and so on), in its
 ## role's kit, placed in formation behind the lead.
 func _spawn_squadmate(slot: int, role: StringName, team: int) -> Soldier:
+	if BaseHub.campaign_squad():  # campaign: the company's own people, from the roster (wave 4)
+		return BaseHub.server_spawn_roster_squadmate(self, slot, role, team)
 	var callsign := ""
 	var lap := 1
 	while callsign == "":
@@ -599,6 +603,7 @@ func _add_player(id: int) -> void:
 	if id == 1:
 		_squads[&"friendly"].leader = player  # the host leads until someone else gives an order
 	(player as Soldier).vitals.went_down.connect(_on_soldier_down.bind(player))
+	BaseHub.server_player_added(self, player)  # campaign: their gear, the respawn pool (wave 4)
 	rebalance_squad()
 
 

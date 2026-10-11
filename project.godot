@@ -22,6 +22,7 @@ Campaign="*res://autoload/campaign.gd"
 Economy="*res://scripts/campaign/economy.gd"
 Contracts="*res://scripts/campaign/contracts.gd"
 People="*res://scripts/people/people.gd"
+BaseHub="*res://scripts/campaign/base_hub.gd"
 
 [display]
 

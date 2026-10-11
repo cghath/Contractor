@@ -31,7 +31,7 @@ func _ready() -> void:
 	box.add_child(title)
 	box.add_child(_role_picker())
 	box.add_child(_people_toggle())
-	box.add_child(_button("Play (host a session)", host))
+	box.add_child(_button("Play (host a session)", _plain_host))
 	box.add_child(_hint("Solo play is a session nobody else has joined."))
 	box.add_child(_button("Play the test contract (briefing, extraction)", host_with_briefing))
 	_address = LineEdit.new()
@@ -41,6 +41,9 @@ func _ready() -> void:
 	box.add_child(_button("Join someone's session", func() -> void: join(_address.text)))
 	box.add_child(_button("Reset compound save", _reset_save))
 	box.add_child(_button("Contract board (offline)", func() -> void: Contracts.open_board()))  # wave 4 economy, on its own
+	# Wave 4 campaign (BaseHub): the company's FOB, its people and stash. Join (above) follows
+	# the host into whatever it plays, the campaign included.
+	box.add_child(_button("Campaign: host at the base (FOB)", _campaign_host))
 	_status = Label.new()
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD
 	box.add_child(_status)
@@ -88,6 +91,18 @@ func _on_join_failed() -> void:
 		_try_join()
 		return
 	_status.text = "Could not connect to %s.\nJoin needs another copy of the game hosting at that address. To play on your own, use Play (host a session)." % _join_address
+
+
+func _plain_host() -> void:
+	BaseHub.cancel_session()  # never a leftover campaign
+	host()
+
+
+func _campaign_host() -> void:
+	BaseHub.prepare_session()
+	host()
+	if not Net.is_hosting():
+		BaseHub.cancel_session()
 
 
 func _reset_save() -> void:

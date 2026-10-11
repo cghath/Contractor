@@ -1,0 +1,31 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/campaign/base_level.gd" id="1_level"]
+[ext_resource type="Script" path="res://scripts/world/voxel_world.gd" id="2_voxel"]
+
+[node name="Base" type="Node3D"]
+script = ExtResource("1_level")
+
+[node name="VoxelWorld" type="Node3D" parent="."]
+script = ExtResource("2_voxel")
+
+[node name="Players" type="Node3D" parent="."]
+
+[node name="AI" type="Node3D" parent="."]
+
+[node name="Items" type="Node3D" parent="."]
+
+[node name="Bodies" type="Node3D" parent="."]
+
+[node name="PlayerSpawner" type="MultiplayerSpawner" parent="."]
+_spawnable_scenes = PackedStringArray("res://scenes/soldier.tscn")
+spawn_path = NodePath("../Players")
+
+[node name="AISpawner" type="MultiplayerSpawner" parent="."]
+spawn_path = NodePath("../AI")
+
+[node name="ItemSpawner" type="MultiplayerSpawner" parent="."]
+spawn_path = NodePath("../Items")
+
+[node name="BodySpawner" type="MultiplayerSpawner" parent="."]
+spawn_path = NodePath("../Bodies")
