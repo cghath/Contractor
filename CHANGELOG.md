@@ -32,6 +32,18 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   hand (`Soldier.body_record`, `CompoundLevel._make_body`).
 - **Tests:** the base suite checks the board, the hire, a clashing surname, an older save, the
   deployed squad, a fallen squadmate's body and a second deployment.
+### The test runner can't pass a broken suite any more (audit L5-01)
+
+#### Fixed
+
+- **`tools/run_tests.sh`:** a suite passes only if it exits 0, prints its `<NAME> TEST PASSED` line
+  and logs no `SCRIPT ERROR`. Before, a script that failed to compile (a parse error) or crashed
+  mid-test could read as passed, or hang the run forever. Each process now has a timeout
+  (`SUITE_TIMEOUT`, default 480 s) and fails as hung past it; the import must succeed; the net
+  and world hosts are judged too, with their output kept.
+- **`tools/test_runner_check.sh` (new):** checks the runner against a fake engine: a pass
+  passes; a failure, a script error with exit 0, a missing summary, a hang and a failed import
+  fail. CI runs it as its own job, and the rerun-on-failure step has a timeout now.
 
 ### AI soldiers have names, on name tapes (Captain, 2026-10-11)
 

@@ -228,6 +228,9 @@ GODOT="$HOME/Downloads/GodotVoxel_1.7/godot.windows.editor.x86_64.exe" tools/run
 There are twenty suites; `tools/run_tests.sh` runs them all (about 12 minutes), or name the
 ones you want (`tools/run_tests.sh wounds medical`). Each prints PASSED or FAILED and exits
 with its failure count. Set `CONTRACTOR_TEST_TAG` and `CONTRACTOR_PORT` when running two at once.
+A suite only passes if it exits 0, prints its `<NAME> TEST PASSED` line and logs no `SCRIPT ERROR`;
+one that runs past `SUITE_TIMEOUT` seconds (default 480) is killed and fails as hung.
+`tools/test_runner_check.sh` checks those rules with a fake engine (CI runs it too).
 
 **CI.** GitHub Actions (`.github/workflows/tests.yml`) runs every suite on each push and pull
 request, one job per suite, on the Linux editor of the same Voxel Tools v1.7 release. A red
