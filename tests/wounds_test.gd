@@ -29,7 +29,6 @@ func _ready() -> void:
 	_test_kit_economy()
 	await _test_net_state()
 	_test_hitboxes()
-	_test_body_volume()
 	await _test_ballistics_routing()
 	await _test_fragments()
 	print("WOUNDS TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
@@ -820,34 +819,10 @@ func _test_ballistics_routing() -> void:
 	var down := Ballistics.fire(shooter, shooter.position, Vector3.DOWN, rifle)
 	var parts := dummy.vitals.wound_list().map(func(w: Dictionary) -> StringName: return w.part)
 	check(down.result == "body" and Vitals.CHEST in parts, "a downed body's hitboxes lie with it: shot in the back hits the chest (%s)" % [parts])
-	# Between the legs: through both thigh boxes, past the body (BodyVolume).
-	dummy.vitals.server_reset_health()
-	await get_tree().process_frame
-	await get_tree().physics_frame
-	await get_tree().physics_frame
-	shooter.position = dummy.global_transform * Vector3(0, 0.6, -5)
-	var gap := Ballistics.fire(shooter, shooter.position, Vector3.BACK, rifle)
-	check(gap.result != "body" and dummy.vitals.wound_list().is_empty(), "a round between the legs crosses the thigh boxes but misses the body (%s)" % gap.result)
 	shooter.queue_free()
 	dummy.queue_free()
 	await get_tree().process_frame
 
-
-func _test_body_volume() -> void:
-	print("Hits on the body's real shape (BodyVolume)")
-	var started := Time.get_ticks_msec()
-	BodyVolume.warm()
-	var took := Time.get_ticks_msec() - started
-	check(took < 5000, "the body shapes build at level start in %d ms" % took)
-	var back := Vector3.BACK
-	check(BodyVolume.march(&"thigh_r", Vector3(0.0, 0.6, -0.3), back).is_empty() and BodyVolume.march(&"thigh_l", Vector3(0.0, 0.6, -0.3), back).is_empty(),
-		"straight between the legs: no thigh")
-	var thigh := BodyVolume.march(&"thigh_r", Vector3(0.075, 0.65, -0.3), back)
-	check(not thigh.is_empty() and absf(thigh.position.z - -0.07) < 0.02 and thigh.depth > 0.10 and thigh.depth < 0.18,
-		"through the middle of the thigh: in at the skin, about its depth of body (%s)" % [thigh])
-	check(BodyVolume.march(&"forearm_r", Vector3(0.302, 0.80, -0.3), back).is_empty(), "past the edge of the hand, inside its box: a miss")
-	var chest := BodyVolume.march(&"chest", Vector3(0.0, 1.31, -0.3), back)
-	check(not chest.is_empty() and chest.depth > 0.18, "front to back through the chest: the whole trunk (%s)" % [chest])
 
 func _test_fragments() -> void:
 	print("Fragments")

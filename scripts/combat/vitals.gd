@@ -693,7 +693,7 @@ func server_hit(part: StringName, hit: Dictionary) -> void:
 		part = BodyMap.part_at(entry) if hit.has("position") else TORSO_PARTS[_model.rng.randi() % TORSO_PARTS.size()]
 		if not hit.has("position"):
 			channel_in = BodyMap.random_channel(part, _model.rng)
-	var depth := minf(BodyMap.CHANNEL_MAX_M, float(hit.get("channel_depth", BodyMap.CHANNEL_MAX_M)))
+	var depth := BodyMap.CHANNEL_MAX_M
 	if round_class == FRAGMENT:
 		depth = _model.rng.randf_range(BodyMap.FRAGMENT_DEPTH_M.x, BodyMap.FRAGMENT_DEPTH_M.y)
 	var channel := BodyMap.trace(part, channel_in[0], channel_in[1], round_class, depth)

@@ -83,25 +83,18 @@ static func _trace(shooter: CollisionObject3D, origin: Vector3, direction: Vecto
 		var vitals := Vitals.find_on(collider)
 		if vitals:
 			var part: StringName = collider.get_meta(&"body_part", Vitals.TORSO) if collider is Node else Vitals.TORSO
-			# The box is only the first test: the round must meet the body inside it (BodyVolume).
-			var body_hit := BodyVolume.entry(collider as Node3D, part, hit.position, direction)
-			if body_hit.is_empty():
-				exclude.append(collider.get_rid())  # through the box, past the body: it flies on
-				from = hit.position
-				continue
 			var armor_distance := equivalent_distance(weapon, distance, lost_j)
 			var energy := energy_at(weapon, distance)
 			if energy >= 0.0 and lost_j > 0.0:
 				energy = maxf(energy - lost_j, 0.0)
 			# Soft armor (the vest's aramid) can stop a round where no plate covers the body.
-			if VoxelArmor.soft_armor_stops(vitals.get_parent(), part, threat_level_at(weapon, armor_distance), round_class(weapon), armor_distance, direction, body_hit.position, energy):
+			if VoxelArmor.soft_armor_stops(vitals.get_parent(), part, threat_level_at(weapon, armor_distance), round_class(weapon), armor_distance, direction, hit.position, energy):
 				return _result("plate", hit)
 			var hit_info := {
 				"round_class": round_class(weapon),
-				"position": body_hit.position,
+				"position": hit.position,
 				"direction": direction,
 				"hitbox": collider,  # the wound channel follows the hitbox's pose
-				"channel_depth": body_hit.depth,  # how much body the round crosses
 				"distance": distance,
 			}
 			if lost_j > 0.0:
