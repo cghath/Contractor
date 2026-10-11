@@ -53,6 +53,11 @@ func next_spawn_point() -> Vector3:
 	return BASE_SPAWNS[_spawn_index % BASE_SPAWNS.size()]
 
 
+## The map of the hub covers the FOB inside its HESCO perimeter.
+func map_area() -> Rect2:
+	return Rect2(-PERIMETER_HALF, -PERIMETER_HALF, PERIMETER_HALF * 2.0, PERIMETER_HALF * 2.0)
+
+
 ## Host: the hub comes up with the stash, the host's player and the muster line. No zone save
 ## (the hub's state is the campaign's), no hostiles.
 func _on_hosted() -> void:

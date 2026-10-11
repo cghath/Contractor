@@ -17,12 +17,16 @@ const OVERFLOW_ORIGIN := Vector2(-15.0, -6.0)
 const OVERFLOW_COLUMNS := 12
 
 
-## Equal entries stack: same item and same state (plain items, full magazines...).
+## Equal entries stack: same item and same state (plain items, magazines holding the same
+## rounds). Like Inventory, any other item with state (a carrier with its MOLLE pouches and
+## what's in them, a detached pouch with its contents, a damaged plate) keeps its own entry,
+## so it lies as its own item and comes back exactly as it went in.
 static func add(stash: Array, id: StringName, count := 1, state := {}) -> void:
 	if count <= 0 or not ItemDB.has_item(id):
 		return
+	var stacks := state.is_empty() or ItemDB.get_item(id).type == "ammo"  # as Inventory._state_stacks
 	for entry: Dictionary in stash:
-		if String(entry.id) == String(id) and _same_state(entry.get("state", {}), state):
+		if stacks and String(entry.id) == String(id) and _same_state(entry.get("state", {}), state):
 			entry["count"] = int(entry.count) + count
 			return
 	var entry := {"id": String(id), "count": count}
@@ -63,6 +67,30 @@ static func counts(stash: Array) -> Dictionary:
 	for entry: Dictionary in stash:
 		out[String(entry.id)] = int(out.get(String(entry.id), 0)) + int(entry.count)
 	return out
+
+
+## {item id (String): count} of what's on and in the stash's items rather than lying loose:
+## pouches on carriers and their contents, a detached pouch's contents (Roster.count_state).
+static func contents_counts(stash: Array) -> Dictionary:
+	var out := {}
+	for entry: Dictionary in stash:
+		Roster.count_state(entry.get("state", {}), int(entry.count), out)
+	return out
+
+
+## The state of a `carrier` set up the way every role's kit wears it: the base kit's MOLLE
+## pouches (Roles.kit with no role: the mag pouches, the IFAK pouch, the tourniquet holder) on
+## their points, empty. JSON-safe, for a stash entry. {} if it isn't a carrier with points.
+static func kitted_carrier_state(carrier: StringName) -> Dictionary:
+	var inv := Inventory.new()
+	inv.take(carrier)
+	if inv.slots[&"vest"] == carrier:
+		for pair: Array in Roles.kit(&""):
+			if Inventory.is_attachable(ItemDB.get_item(StringName(pair[0]))):
+				inv.take(StringName(pair[0]), int(pair[1]))
+	var state: Dictionary = Roster.json_safe(inv.state_of(&"vest"))
+	inv.free()
+	return state
 
 
 ## The stash as world items describe it: [{"id", "count", "state"?}], stacked.

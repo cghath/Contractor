@@ -41,8 +41,10 @@ const WAGE_PERIOD_DAYS := 7
 ## How often the host reads the stash back from the hub's world items.
 const STASH_POLL_S := 1.0
 ## Proposed: what a new company owns besides its hiring budget (enough to kit two players).
+## Its carriers come with the base kit's MOLLE pouches on (BaseArmory.kitted_carrier_state),
+## so magazines and the tourniquet go into them when picked up.
 const STARTING_STASH := [["plate_carrier", 2], ["plate_ceramic_l4", 4], ["helmet", 2], ["assault_pack", 2], ["m4a1", 2],
-	["mag_556", 12], ["ifak", 4], ["smoke_grenade", 2], ["frag_grenade", 2]]
+	["mag_556", 12], ["ifak", 4], ["tourniquet", 2], ["smoke_grenade", 2], ["frag_grenade", 2]]
 ## Debug builds: End extracts everyone within this many metres of the host (until the map's
 ## extraction calls server_end_deployment).
 const DEBUG_EXTRACT_M := 60.0
@@ -115,7 +117,12 @@ func new_campaign(hiring_seed := -1) -> void:
 	b["day"] = 1
 	b["stash"] = []
 	for pair: Array in STARTING_STASH:
-		BaseArmory.add(b.stash, StringName(pair[0]), int(pair[1]))
+		var id := StringName(pair[0])
+		if ItemDB.get_item(id).slot == &"vest":
+			for i in int(pair[1]):
+				BaseArmory.add(b.stash, id, 1, BaseArmory.kitted_carrier_state(id))
+		else:
+			BaseArmory.add(b.stash, id, int(pair[1]))
 	b["prep"] = _empty_prep()
 	b["wages_owed"] = 0
 	b["wage_days"] = 0
@@ -626,17 +633,14 @@ func server_end_deployment(extracted: Array, return_to_base := true) -> Dictiona
 		if dep.get("fallen", {}).has(mid) or s == null or s.vitals.is_dead():
 			o["state"] = RosterDeployment.KILLED
 		else:
+			o = _outcome_of(s)
 			o["state"] = RosterDeployment.EXTRACTED if made_it.has(s.get_instance_id()) else RosterDeployment.LEFT_BEHIND
-			o["gear"] = s.inventory.net_state.duplicate(true)
-			o["wounds"] = s.vitals.wound_list()
-			o["blood"] = s.vitals.blood_fraction()
 			o["pos"] = [s.global_position.x, s.global_position.y, s.global_position.z]
 		outcomes.members[mid] = o
 	for n: Node in lvl.players.get_children():
 		var p := n as Soldier
 		if p and not p.is_queued_for_deletion():
-			outcomes.players[player_key(p.name.to_int())] = {"gear": p.inventory.net_state.duplicate(true),
-				"wounds": p.vitals.wound_list(), "blood": p.vitals.blood_fraction()}
+			outcomes.players[player_key(p.name.to_int())] = _outcome_of(p)
 	var report := RosterDeployment.resolve(roster(), outcomes, rng, day())
 	for mid: String in report.mia:
 		var m := member(mid)
@@ -650,6 +654,13 @@ func server_end_deployment(extracted: Array, return_to_base := true) -> Dictiona
 	if return_to_base:
 		server_switch_level(BASE_SCENE, base_zone_id())
 	return report
+
+
+## What a soldier brings back (RosterDeployment.resolve's outcome): their gear (the carrier's
+## pouches and what's in them travel in its state) and their body's state at the end.
+static func _outcome_of(s: Soldier) -> Dictionary:
+	return {"gear": s.inventory.net_state.duplicate(true), "wounds": s.vitals.wound_list(), "blood": s.vitals.blood_fraction(),
+		"burn": s.vitals.burn_share(), "blast_lung": s.vitals.has_blast_lung()}
 
 
 ## Host: everyone goes back to the hub (after server_end_deployment(..., false) and a debrief).

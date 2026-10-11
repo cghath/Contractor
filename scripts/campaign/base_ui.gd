@@ -253,6 +253,15 @@ func _build_armory(rows: VBoxContainer, v: Dictionary) -> void:
 	for id: String in ids:
 		var item := ItemDB.get_item(StringName(id))
 		rows.add_child(_text("%s x%d" % [item.name if item else id, int(counts[id])]))
+	# Pouches on the stash's carriers and what's in them come with the carrier.
+	var inside := BaseArmory.contents_counts(v.get("stash", []))
+	if not inside.is_empty():
+		rows.add_child(_heading("On the carriers and in their pouches"))
+		var inside_ids := inside.keys()
+		inside_ids.sort()
+		for id: String in inside_ids:
+			var item := ItemDB.get_item(StringName(id))
+			rows.add_child(_text("%s x%d" % [item.name if item else id, int(inside[id])]))
 
 
 # --- Bits ------------------------------------------------------------------------------------

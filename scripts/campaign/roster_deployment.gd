@@ -152,9 +152,11 @@ static func free_respawns_left(data: Dictionary) -> int:
 
 ## Ends the deployment at extraction. `outcomes`:
 ## - "members": member id -> {"state": EXTRACTED, LEFT_BEHIND or KILLED, "gear" (their
-##   Inventory.net_state now), "wounds" (Vitals.wound_list()), "blood" (Vitals.blood_fraction()),
-##   "pos" ([x, y, z])}, for the AI squadmates who deployed.
-## - "players": player key -> {"gear", "wounds", "blood"}, for the players there at the end.
+##   Inventory.net_state now, carrier pouches and all), "wounds" (Vitals.wound_list()), "blood"
+##   (Vitals.blood_fraction()), "burn" (Vitals.burn_share()), "blast_lung"
+##   (Vitals.has_blast_lung()), "pos" ([x, y, z])}, for the AI squadmates who deployed.
+## - "players": player key -> {"gear", "wounds", "blood", "burn", "blast_lung"}, for the
+##   players there at the end.
 ## The dead are lost with their gear (it lies on the body in the zone); those left behind
 ## alive go MIA, gear and all; those who extracted come back with what they carry, a mission
 ## more experience, and any serious wounds as days to sit out. A player's outcome lands on
@@ -199,7 +201,7 @@ static func resolve(data: Dictionary, outcomes: Dictionary, rng: RandomNumberGen
 			var main := Roster.main_character(data, key)
 			main["gear"] = Roster.json_safe(o.get("gear", {}))
 			main["missions"] = int(main.get("missions", 0)) + 1
-			var hurt := Roster.assess_injuries(o.get("wounds", []), float(o.get("blood", 1.0)))
+			var hurt := Roster.assess_outcome(o)
 			Roster.injure(main, hurt, day)
 			if int(hurt.days) > 0:
 				report.injured[String(main.name)] = int(hurt.days)
@@ -212,7 +214,7 @@ static func resolve(data: Dictionary, outcomes: Dictionary, rng: RandomNumberGen
 static func _came_back(m: Dictionary, o: Dictionary, rng: RandomNumberGenerator, day: int, what: String, report: Dictionary) -> void:
 	m["gear"] = Roster.json_safe(o.get("gear", m.get("gear", {})))
 	Roster.after_mission(m, rng, day, what)
-	var hurt := Roster.assess_injuries(o.get("wounds", []), float(o.get("blood", 1.0)))
+	var hurt := Roster.assess_outcome(o)
 	Roster.injure(m, hurt, day)
 	if int(hurt.days) > 0:
 		report.injured[String(m.callsign)] = int(hurt.days)

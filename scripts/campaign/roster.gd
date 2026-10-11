@@ -10,7 +10,8 @@ extends RefCounted
 ##   "mid" (its id), "name", "callsign" (unique in the company: the AI body's node name),
 ##   "role" (a Roles id), "skills" ({aim, nerve, medical, movement}, 0..1), "xp", "missions",
 ##   "wage" (cash per day), "wage_factor" (what they haggled at hiring: wage = wage_for x it),
-##   "gear" (an Inventory.net_state: their own kit, which deploys with them), "status"
+##   "gear" (an Inventory.net_state: their own kit, which deploys with them; the carrier's
+##   MOLLE pouches and what's in them ride in its slot state), "status"
 ##   (READY, MIA or DEAD), "sit_out_days" (days left recovering), "injuries" (words),
 ##   "history" ([{"day", "text"}]), "hired_day", "medbay" (treated this spell already),
 ##   "mia_zone" (where an MIA one was left).
@@ -49,8 +50,10 @@ const SURGERY_DAYS := 10       # a clamped or internal torso bleed, a heart or c
 const HEAVY_BLOOD_DAYS := 6    # HEAVY_BLOOD_LOST or more of the blood lost
 const MODERATE_BLOOD_DAYS := 2 # MODERATE_BLOOD_LOST or more
 const RIB_DAYS := 3
-const BURN_DAYS := 4
+const BURN_DAYS := 4           # burns over SERIOUS_BURN of the body (Vitals.burn_share)
+const BLAST_LUNG_DAYS := 4     # Vitals.has_blast_lung
 const EXTRA_INJURY_DAYS := 2
+const SERIOUS_BURN := 0.1
 const HEAVY_BLOOD_LOST := 0.3
 const MODERATE_BLOOD_LOST := 0.2
 ## Proposed: the medbay halves what's left of a recovery (rounded up, at least a day) for
@@ -221,16 +224,18 @@ static func after_mission(member: Dictionary, rng: RandomNumberGenerator, day: i
 
 # --- Injuries and recovery --------------------------------------------------------------
 
-## The serious injuries in a body's wounds (Vitals.wound_list()) and blood (Vitals.blood_fraction()),
-## and the days they sit out: {"days": int, "injuries": Array[String]}. Minor wounds (grazes,
-## treated muscle wounds, light blood loss) cost nothing.
-static func assess_injuries(wounds: Array, blood_fraction: float) -> Dictionary:
+## The serious injuries in a body's wounds (Vitals.wound_list()), blood (Vitals.blood_fraction()),
+## burns (Vitals.burn_share()) and blast lung (Vitals.has_blast_lung()), and the days they sit
+## out: {"days": int, "injuries": Array[String]}. Minor wounds (grazes, muscle and venous
+## wounds, light blood loss, small burns) cost nothing.
+static func assess_injuries(wounds: Array, blood_fraction: float, burn := 0.0, blast_lung := false) -> Dictionary:
 	var found: Array = []  # [days, words]
 	for w: Dictionary in wounds:
 		var where := Vitals.part_name(StringName(w.get("part", &"")))
 		match String(w.get("kind", "")):
 			"fracture":
-				found.append([FRACTURE_DAYS, "broken %s" % (String(w.get("name", "")) if String(w.get("name", "")) != "" else "bone")])
+				var bone := String(w.get("name", ""))  # a BodyMap.BONES id ("tibia_l")
+				found.append([FRACTURE_DAYS, "broken %s" % (Vitals.part_name(StringName(bone)).replace(" bones", "") if bone != "" else "bone")])
 			"internal", "heart", "chest":
 				found.append([SURGERY_DAYS, "surgery (%s)" % where])
 			"arterial", "junctional":
@@ -238,8 +243,10 @@ static func assess_injuries(wounds: Array, blood_fraction: float) -> Dictionary:
 					found.append([SURGERY_DAYS, "surgery (%s)" % where])
 			"rib":
 				found.append([RIB_DAYS, "cracked rib"])
-			"burn", "blast_lung":
-				found.append([BURN_DAYS, "burns" if String(w.kind) == "burn" else "blast lung"])
+	if burn >= SERIOUS_BURN:
+		found.append([BURN_DAYS, "burns"])
+	if blast_lung:
+		found.append([BLAST_LUNG_DAYS, "blast lung"])
 	var lost := 1.0 - blood_fraction
 	if lost >= HEAVY_BLOOD_LOST:
 		found.append([HEAVY_BLOOD_DAYS, "heavy blood loss"])
@@ -253,6 +260,12 @@ static func assess_injuries(wounds: Array, blood_fraction: float) -> Dictionary:
 		if String(found[i][1]) not in words:
 			words.append(String(found[i][1]))
 	return {"days": days, "injuries": words}
+
+
+## assess_injuries for an outcome as BaseHub records one: {"wounds", "blood", "burn",
+## "blast_lung"} (the last two may be missing).
+static func assess_outcome(o: Dictionary) -> Dictionary:
+	return assess_injuries(o.get("wounds", []), float(o.get("blood", 1.0)), float(o.get("burn", 0.0)), bool(o.get("blast_lung", false)))
 
 
 ## Puts a body's injuries on a member or main character: they sit out the days (the longer
@@ -356,17 +369,46 @@ static func json_safe(value: Variant) -> Variant:
 	return value
 
 
-## Every item in an Inventory.net_state, as {item id (String): count}.
+## Every item in an Inventory.net_state, as {item id (String): count}: what's worn and stowed,
+## and what's on a carrier's MOLLE points and in its pouches (worn or stowed), since pouch
+## contents travel in the carrier's state (Inventory, "MOLLE").
 static func gear_counts(gear: Dictionary) -> Dictionary:
 	var out := {}
+	var slot_state: Dictionary = gear.get("slot_state", {})
 	for slot: Variant in gear.get("slots", {}):
 		var id := String(gear.slots[slot])
 		if id != "":
 			out[id] = int(out.get(id, 0)) + 1
+			count_state(slot_state.get(slot, {}), 1, out)
 	for container: Variant in gear.get("containers", {}):
 		for entry: Dictionary in gear.containers[container]:
-			out[String(entry.id)] = int(out.get(String(entry.id), 0)) + int(entry.get("count", 1))
+			count_entry(entry, out)
 	var hands := String(gear.get("hands", ""))
 	if hands != "":
 		out[hands] = int(out.get(hands, 0)) + 1
 	return out
+
+
+## Adds an entry ({"id", "count", "state"?}) and whatever its state carries to `out`
+## ({item id (String): count}).
+static func count_entry(entry: Dictionary, out: Dictionary) -> void:
+	var n := int(entry.get("count", 1))
+	out[String(entry.id)] = int(out.get(String(entry.id), 0)) + n
+	count_state(entry.get("state", {}), n, out)
+
+
+## Adds what an item's state carries, `n` times over, to `out`: a carrier's attachments and
+## their contents ("molle"), a detached pouch's contents ("held").
+static func count_state(state: Dictionary, n: int, out: Dictionary) -> void:
+	var held: Array = state.get("held", []).duplicate()
+	var molle: Dictionary = state.get("molle", {})
+	for point: Variant in molle:
+		var att: Dictionary = molle[point]
+		if String(att.get("id", "")) != "":
+			out[String(att.id)] = int(out.get(String(att.id), 0)) + n
+		held.append_array(att.get("held", []))
+	for entry: Dictionary in held:
+		var inside := {}
+		count_entry(entry, inside)
+		for id: String in inside:
+			out[id] = int(out.get(id, 0)) + int(inside[id]) * n

@@ -23,10 +23,13 @@ const ECONOMY_PATH := ^"/root/Economy"
 const STUB_START_FUNDS := 5000
 const STUB_RESPAWN_PRICE := 1000
 ## Stand-in shop prices, by item type, and for a few items by id (per unit).
+## Types priced 0 aren't sold (objectives, salvage), nor is an action that isn't an item
+## (its stats' "no_item": CPR).
 const STUB_PRICE_BY_TYPE := {"weapon": 1500, "plate": 650, "armor": 700, "backpack": 300, "ammo": 40, "medical": 60,
-	"utility": 120, "objective": 0}
+	"utility": 120, "pouch": 50, "objective": 0, "salvage": 0}
 const STUB_PRICE_BY_ID := {"rounds_556": 1, "rounds_762": 2, "rounds_9mm": 1, "frag_grenade": 150, "flashbang": 120,
-	"smoke_grenade": 60, "helmet": 450, "helmet_bump": 250, "helmet_heavy": 800, "defibrillator": 900, "surgery_kit": 400}
+	"smoke_grenade": 60, "helmet": 450, "helmet_bump": 250, "helmet_heavy": 800, "defibrillator": 900,
+	"surgery_kit_2": 300, "surgery_kit_3": 400, "surgery_kit_5": 600, "surgical_clamp": 120, "radio": 400, "binoculars": 250}
 
 
 static func _economy(method: StringName) -> Node:
@@ -101,10 +104,12 @@ static func item_price(id: StringName) -> int:
 	var e := _economy(&"item_price")
 	if e:
 		return int(e.call(&"item_price", id))
+	var item := ItemDB.get_item(id)
+	if item == null or item.stats.get("no_item", false):
+		return 0
 	if STUB_PRICE_BY_ID.has(String(id)):
 		return int(STUB_PRICE_BY_ID[String(id)])
-	var item := ItemDB.get_item(id)
-	return int(STUB_PRICE_BY_TYPE.get(item.type, 100)) if item else 0
+	return int(STUB_PRICE_BY_TYPE.get(item.type, 100))
 
 
 ## What the shop terminal sells: [{"id", "price"}].

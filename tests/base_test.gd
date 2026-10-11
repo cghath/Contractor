@@ -103,6 +103,8 @@ func _test_hiring() -> void:
 	check(why == "" and ids.size() == 1 and BaseEconomy.funds() == funds - int(cheapest.fee), "hiring %s costs the $%d fee" % [cheapest.name, int(cheapest.fee)])
 	check(not m.is_empty() and m.callsign == cheapest.callsign and m.role == cheapest.role and int(m.wage) == int(cheapest.demand)
 		and Roster.gear_counts(m.gear).size() > 3, "they join with their role, skills, wage and their role's kit as their own gear")
+	if not m.is_empty():
+		_check_kit_pouches(m)
 	check(Hiring.find(BaseHub.hiring(), String(cheapest.cid), 1).is_empty(), "and leave the board")
 	BaseHub.base()["stub_funds"] = 10
 	var pricey := _cheapest(Hiring.pool(BaseHub.hiring(), 1))
@@ -111,6 +113,35 @@ func _test_hiring() -> void:
 	BaseHub.server_advance_days(Hiring.REFRESH_DAYS)
 	check(int(BaseHub.hiring().refresh) == 1 and Hiring.pool(BaseHub.hiring(), BaseHub.day()) == Hiring.draw_pool(SEED, 1),
 		"after %d days the board turns over (refresh 1, from the seed)" % Hiring.REFRESH_DAYS)
+
+
+## A hire's own gear is their role's kit as dev's role kits wear it: the kit's pouches on the
+## carrier's MOLLE points, magazines and the tourniquet in them (in the carrier's state), and
+## every kit item counted, pouch contents included.
+func _check_kit_pouches(m: Dictionary) -> void:
+	var kit := Roles.kit(StringName(m.role))
+	var want := {}
+	var want_pouches := {}
+	for pair: Array in kit:
+		want[String(pair[0])] = int(want.get(String(pair[0]), 0)) + int(pair[1])
+		if Inventory.is_attachable(ItemDB.get_item(pair[0])):
+			want_pouches[String(pair[0])] = int(want_pouches.get(String(pair[0]), 0)) + int(pair[1])
+	var molle: Dictionary = m.gear.get("slot_state", {}).get("vest", {}).get("molle", {})
+	var on := {}
+	var mags_in_pouches := 0
+	var tq_held := false
+	for point: String in molle:
+		var att: Dictionary = molle[point]
+		on[String(att.id)] = int(on.get(String(att.id), 0)) + 1
+		for entry: Dictionary in att.get("held", []):
+			if String(entry.id).begins_with("mag_"):
+				mags_in_pouches += int(entry.count)
+			tq_held = tq_held or (String(att.id) == "pouch_tq" and String(entry.id) == "tourniquet")
+	check(on == want_pouches and mags_in_pouches > 0 and tq_held,
+		"their carrier wears the kit's pouches (%d), with magazines (%d) and a tourniquet in them" % [molle.size(), mags_in_pouches])
+	var counts := Roster.gear_counts(m.gear)
+	var missing := want.keys().filter(func(id: String) -> bool: return int(counts.get(id, 0)) < int(want[id]))
+	check(missing.is_empty(), "and all of the kit is counted, pouch contents too%s" % ("" if missing.is_empty() else " (short: %s)" % ", ".join(PackedStringArray(missing))))
 
 
 func _test_wages() -> void:
@@ -145,12 +176,33 @@ func _test_growth() -> void:
 
 func _test_injuries_and_medbay() -> void:
 	print("Injuries and the medbay")
-	var leg := {"part": &"shin_l", "kind": "fracture", "name": "tibia"}
+	var leg := {"part": &"shin_l", "kind": "fracture", "name": &"tibia_l"}  # as Vitals.wound_list() gives it
 	var a := Roster.assess_injuries([leg], 1.0)
-	check(int(a.days) == Roster.FRACTURE_DAYS and "broken tibia" in a.injuries, "a broken leg sits out %d days" % int(a.days))
+	check(int(a.days) == Roster.FRACTURE_DAYS and "broken left tibia" in a.injuries, "a broken leg sits out %d days (%s)" % [int(a.days), ", ".join(PackedStringArray(a.injuries))])
 	var b := Roster.assess_injuries([leg, {"part": &"thigh_r", "kind": "arterial", "clamped": true}], 0.62)
 	check(int(b.days) == Roster.FRACTURE_DAYS + 2 * Roster.EXTRA_INJURY_DAYS, "with surgery and heavy blood loss: %d days" % int(b.days))
 	check(int(Roster.assess_injuries([{"part": &"forearm_l", "kind": "graze"}], 0.95).days) == 0, "a graze and a little blood cost nothing")
+	var blast := Roster.assess_outcome({"wounds": [], "blood": 1.0, "burn": 0.25, "blast_lung": true})
+	check(int(blast.days) == maxi(Roster.BURN_DAYS, Roster.BLAST_LUNG_DAYS) + Roster.EXTRA_INJURY_DAYS and "burns" in blast.injuries
+		and "blast lung" in blast.injuries and int(Roster.assess_outcome({"burn": 0.05}).days) == 0,
+		"burns over %d%% of the body and blast lung sit out %d days; a small burn nothing" % [roundi(Roster.SERIOUS_BURN * 100.0), int(blast.days)])
+	# The wound model's own output, read the way extraction reads it (BaseHub._outcome_of).
+	var broken := {}
+	for i in 20:
+		var v := Vitals.new()
+		add_child(v)
+		v.rng.seed = i + 1
+		v.care_rng.seed = i + 1
+		v.server_burn(0.3)
+		v.server_fall(4.5)
+		var o := {"wounds": v.wound_list(), "blood": v.blood_fraction(), "burn": v.burn_share(), "blast_lung": v.has_blast_lung()}
+		v.queue_free()
+		if o.wounds.any(func(w: Dictionary) -> bool: return String(w.kind) == "fracture"):
+			broken = Roster.assess_outcome(o)
+			break
+	check(not broken.is_empty() and int(broken.days) == Roster.FRACTURE_DAYS + Roster.EXTRA_INJURY_DAYS and "burns" in broken.injuries
+		and (broken.injuries as Array).any(func(t: String) -> bool: return t.begins_with("broken left ") or t.begins_with("broken right ")),
+		"a fall that breaks a leg and 30%% burns, from Vitals: %s" % ", ".join(PackedStringArray(broken.get("injuries", []))))
 	BaseHub.new_campaign(SEED)
 	BaseHub.server_hire(String(_cheapest(Hiring.pool(BaseHub.hiring(), 1)).cid))
 	var mid := Roster.ids(BaseHub.roster())[0]
@@ -242,6 +294,8 @@ func _test_stand_ins() -> void:
 	var free := BaseHub.member(String(picks.get(BaseHub.profile(), "")))
 	check(not free.is_empty() and free.mid != mid and BaseEconomy.funds() == funds and int(free.missions) <= 2,
 		"with nobody free, a rookie is provided free (%s)" % free.get("callsign", "none"))
+	if not free.is_empty():
+		_check_kit_pouches(free)
 
 
 # --- A real session -----------------------------------------------------------------------------
@@ -265,6 +319,8 @@ func _test_session() -> void:
 	level = CompoundLevel.current(self)
 	check(level is BaseLevel, "the campaign starts at the base hub")
 	var base := level as BaseLevel
+	check(base.map_area().size.x == BaseLevel.PERIMETER_HALF * 2.0 and base.map_area().has_point(Vector2(BaseLevel.DELIVERY.x, BaseLevel.DELIVERY.z)),
+		"the hub's map covers the FOB (%.0f m across)" % base.map_area().size.x)
 	var up := await _wait_until(func() -> bool: return ids.all(func(mid: String) -> bool: return base.muster_soldier(mid) != null), 30.0)
 	check(up, "the company's people stand at the muster line")
 	var stash_counts := BaseArmory.counts(BaseHub.stash())
@@ -431,10 +487,63 @@ func _test_armory(base: BaseLevel) -> void:
 	await _frames(3)
 	check(why == "" and BaseArmory.counts(base.server_collect_stash()).get("pressure_bandage", 0) >= 4
 		and BaseEconomy.funds() == funds - 4 * BaseEconomy.item_price(&"pressure_bandage"), "the shop delivers to the armory for its price")
+	check(BaseEconomy.item_price(&"cpr") == 0 and BaseHub.server_buy(&"cpr") != "" and BaseEconomy.item_price(&"surgery_kit_3") > 0,
+		"the shop sells surgery kits but not CPR")
+	await _test_armory_molle(base, player)
 	BaseHub.server_save()
 	var saved := BaseArmory.counts(BaseHub.stash())
+	var saved_inside := BaseArmory.contents_counts(BaseHub.stash())
 	Campaign.load_campaign()
 	check(BaseArmory.counts(BaseHub.stash()) == saved and saved.get("m17", 0) == 1, "the stash survives a save and reload")
+	check(BaseArmory.contents_counts(BaseHub.stash()) == saved_inside and int(saved_inside.get("mag_556", 0)) >= 2,
+		"and so do the carriers' pouches and the magazines in them (%d)" % int(saved_inside.get("mag_556", 0)))
+
+
+## The stash and dev's MOLLE inventory: a carrier from the stash comes with its pouches,
+## magazines picked up go into them, and dropped back in the base the carrier keeps its pouches
+## and what's in them (in its state) in the stash.
+func _test_armory_molle(base: BaseLevel, player: Soldier) -> void:
+	var carrier: WorldItem = null
+	var mags: WorldItem = null
+	for n: Node in level.items.get_children():
+		var item := n as WorldItem
+		if item and item.item_id == &"plate_carrier" and not item.state.get("molle", {}).is_empty():
+			carrier = item
+		elif item and item.item_id == &"mag_556" and item.state.is_empty():
+			mags = item
+	var base_pouches := 0
+	for p: Array in Roles.kit(&""):
+		if Inventory.is_attachable(ItemDB.get_item(p[0])):
+			base_pouches += int(p[1])
+	check(carrier != null and carrier.state.molle.size() == base_pouches, "the stash's carriers come with the base kit's %d pouches" % base_pouches)
+	if carrier == null or mags == null:
+		return
+	player.inventory.strip()
+	player.global_position = carrier.global_position + Vector3(0.6, 0, 0)
+	player._server_interact.rpc_id(1, carrier.get_path())
+	await _frames(3)
+	player.global_position = mags.global_position + Vector3(0.6, 0, 0)
+	player._server_interact.rpc_id(1, mags.get_path())
+	await _frames(3)
+	var in_pouches := 0
+	for c in player.inventory.pouch_containers():
+		for e: Dictionary in player.inventory.containers[c]:
+			if e.id == &"mag_556":
+				in_pouches += int(e.count)
+	check(player.inventory.slots[&"vest"] == &"plate_carrier" and player.inventory.attachment_count() == base_pouches and in_pouches >= 2,
+		"kitting up: the carrier's pouches come on with it and take the magazines (%d)" % in_pouches)
+	# Back into the stash: what's loose in the vest first, then the carrier with its pouches.
+	while not player.inventory.containers[&"vest"].is_empty():
+		player._server_inventory_action.rpc_id(1, "drop_entry", &"vest", 0, &"", &"")
+		await _frames(1)
+	player._server_inventory_action.rpc_id(1, "drop_slot", &"", -1, &"vest", &"")
+	await _frames(3)
+	var stash := base.server_collect_stash()
+	var dropped := stash.filter(func(e: Dictionary) -> bool:
+		return String(e.id) == "plate_carrier" and Roster.gear_counts({"containers": {"x": [e]}}).get("mag_556", 0) == in_pouches)
+	check(player.inventory.slots[&"vest"] == &"" and dropped.size() == 1, "dropped in the base, the carrier is stash again with its pouches and magazines")
+	await _seconds(BaseHub.STASH_POLL_S + 0.3)
+	check(int(BaseArmory.contents_counts(BaseHub.stash()).get("mag_556", 0)) == in_pouches, "the campaign's stash keeps them in the carrier's state")
 
 
 func _test_deployment(client: Dictionary) -> void:
@@ -512,6 +621,14 @@ func _test_deployment(client: Dictionary) -> void:
 	check(back and sa_home.inventory.count_of(&"smoke_purple") == 1 and sa_home.inventory.count_of(&"frag_grenade") == frags,
 		"%s's gear came home with them (the smoke, and the frag picked up in the zone)" % callsign_a)
 	check(base.muster_soldier(b) == null and base.muster_soldier(c) == null, "the MIA and the dead aren't at the muster line")
+	var pouched := 0
+	if sa_home:
+		for pc in sa_home.inventory.pouch_containers():
+			pouched += sa_home.inventory.containers[pc].size()
+	check(sa_home != null and sa_home.inventory.attachment_count() > 0 and pouched > 0,
+		"%s's carrier came home with its pouches and what's in them (%d entries)" % [callsign_a, pouched])
+	var home_inside := BaseArmory.contents_counts(base.server_collect_stash())
+	check(int(home_inside.get("mag_556", 0)) >= 2, "the stash's carriers lie in the armory again with their pouches and magazines (%d)" % int(home_inside.get("mag_556", 0)))
 	var gear_a := Roster.gear_counts(BaseHub.member(a).gear)
 	BaseHub.server_save()
 	Campaign.load_campaign()
