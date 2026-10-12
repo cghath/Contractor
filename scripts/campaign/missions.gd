@@ -149,7 +149,8 @@ static func zones() -> Array:
 
 
 ## The layout (ZoneDef) of a zone: its "def" ({"seed", "size_m", "types", "count"}: made by
-## ZoneDef.generate, the same every time; or a data/zones.json id), {} if it has none.
+## ZoneDef.generate, the same every time; with "layout": "hot", ZoneDef.generate_hot's
+## structure of HQ, outposts, QRF bases and the rest; or a data/zones.json id), {} if it has none.
 static func zone_def(zone_id: String) -> Dictionary:
 	if _zone_defs.has(zone_id):
 		return _zone_defs[zone_id]
@@ -161,6 +162,8 @@ static func zone_def(zone_id: String) -> Dictionary:
 	var def := {}
 	if spec is String:
 		def = ZoneDef.get_def(spec)
+	elif spec is Dictionary and String(spec.get("layout", "")) == "hot":
+		def = ZoneDef.generate_hot(int(spec.get("seed", hash(zone_id))), float(spec.get("size_m", ZoneDef.HOT_SIZE_M)))
 	elif spec is Dictionary:
 		def = ZoneDef.generate(int(spec.get("seed", hash(zone_id))), float(spec.get("size_m", 1920.0)),
 			spec.get("types", ["compound", "outpost", "village", "checkpoint"]), int(spec.get("count", 5)))

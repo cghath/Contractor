@@ -43,6 +43,9 @@ const GARRISON_STATS := {"combat": 0.45, "discipline": 0.5, "mode": "aware"}
 ## this far out round a post, a man's width (EXTRA_POST_CLEAR_M) from walls and each other.
 const EXTRA_POST_RINGS_M: Array[float] = [1.3, 2.4, 3.5]
 const EXTRA_POST_CLEAR_M := 0.4
+## One man in this many of a garrison (its first, then every RADIO_EVERY-th) carries the
+## site's handheld radio ("enemy_radio"; looted, RadioChatter). Proposed.
+const RADIO_EVERY := 4
 
 ## The zone definition (ZoneDef), set before the node enters the tree (configure()).
 var def: Dictionary = {}
@@ -72,6 +75,13 @@ func _ready() -> void:
 		def = ZoneDef.get_def("test")
 	super._ready()
 	squad_for(&"hostile").patrol = []  # garrisons hold their ground
+	if String(def.get("kind", "")) == "hot":
+		add_child(Alert.new())  # the enemy's alert: what they see, hear and report (4B part 3)
+		add_child(Pressure.new())  # what the squad has done here, long term
+		add_child(EnemyResponse.new())  # patrols, QRF waves, hunters: the enemy's answer
+		add_child(RadioChatter.new())  # what a looted enemy radio lets the squad hear
+		if DevTools.on():
+			add_child(HotZoneDebug.new())  # playtests: PgUp readout, PgDn skips the enemy's clock
 	Contracts.contract_live.connect(_on_contract_live)
 	players.child_entered_tree.connect(_on_player_entered)
 
@@ -283,6 +293,9 @@ func _spawn_ai() -> void:
 	for module in _modules:
 		if module.is_ready():
 			_spawn_garrison(module)
+	var response := get_node_or_null(^"EnemyResponse") as EnemyResponse
+	if response:
+		response.server_start()  # hot zones: the roaming patrols set out
 
 
 ## How many hostiles hold module `module_id`: the true enemy count (Contracts.enemy_force)
@@ -327,23 +340,53 @@ func _spawn_garrison(module: ZoneModule) -> void:
 	if spots.is_empty():
 		return
 	var taken: Array[Vector3] = []
+	var alert := get_node_or_null(^"Alert") as Alert  # hot zones: relaxed until something happens
 	for i in range(from, want):
 		var callsign := _garrison_callsign(module, i)
 		if fallen.has(callsign) or ai.get_node_or_null(NodePath(callsign)) != null:
 			continue
 		var pos := module.to_global(spots[i]) if i < spots.size() else _extra_post(module.to_global(spots[i % spots.size()]), taken)
 		taken.append(pos)
-		spawn_soldier({"name": callsign, "faction": "hostile", "variant": "urban", "pos": pos,
-			"loadout": HOSTILE_LOADOUT, "combat": GARRISON_STATS.combat, "discipline": GARRISON_STATS.discipline, "guard": true,
-			"mode": GARRISON_STATS.mode})
+		var s := spawn_soldier({"name": callsign, "faction": "hostile", "variant": "urban", "pos": pos,
+			"loadout": HOSTILE_LOADOUT + ["enemy_radio"] if i % RADIO_EVERY == 0 else HOSTILE_LOADOUT, "combat": GARRISON_STATS.combat, "discipline": GARRISON_STATS.discipline, "guard": true,
+			"mode": alert.mode_at(pos) if alert else GARRISON_STATS.mode})
+		if s:
+			s.rotation.y = post_yaw(module, pos)
 	for i in want:
 		var me := ai.get_node_or_null(NodePath(_garrison_callsign(module, i))) as Soldier
 		if me and (me.buddy == null or not is_instance_valid(me.buddy)):
 			me.buddy = ai.get_node_or_null(NodePath(_garrison_callsign(module, i ^ 1))) as Soldier
 
 
+## The way a garrison post at `pos` faces (rotation.y): out of its site, away from the module's
+## middle (Captain 2026-10-12: gate guards face the entrance, tower guards look out).
+static func post_yaw(module: ZoneModule, pos: Vector3) -> float:
+	var d := pos - module.global_position
+	if Vector2(d.x, d.z).length() < 0.5:
+		return 0.0
+	return atan2(-d.x, -d.z)
+
+
 func _garrison_callsign(module: ZoneModule, i: int) -> String:
 	return ("%s_H%d" % [module.module_id, i + 1]).validate_node_name()
+
+
+## Host: module `module_id`'s garrison still up (spawned and alive).
+func garrison_alive(module_id: String) -> int:
+	var prefix := ("%s_H" % module_id).validate_node_name()
+	var count := 0
+	for n in ai.get_children():
+		var s := n as Soldier
+		if s and String(s.name).begins_with(prefix) and not s.is_queued_for_deletion() and s.vitals.is_up() \
+				and not s.is_in_group(Soldier.DEAD_GROUP):
+			count += 1
+	return count
+
+
+## Host: a site taken out (4B part 3): its garrison spawned and none of it is left standing. A
+## site nobody has been near yet (never garrisoned) is still up.
+func site_down(module_id: String) -> bool:
+	return int(_garrisoned.get(module_id, 0)) > 0 and garrison_alive(module_id) == 0
 
 
 ## Host: a clear spot for an extra garrison post beside the post at `post` (world): the first

@@ -11,6 +11,10 @@ extends Node
 const SPOT := Vector3(0, 0.1, 20)
 ## How close a palm must get to its target (metres).
 const HAND_TOLERANCE := 0.06
+## How far the looted body's ragdoll is moved from its capsule (_test_loot).
+const SLID := Vector3(-6.0, 0, 0)
+## How far the downed body's ragdoll is moved before it's revived (_test_stand_where_it_lay).
+const ROLLED := Vector3(2.5, 0, 2.0)
 
 var failures := 0
 var level: CompoundLevel
@@ -23,6 +27,8 @@ var hostile: Soldier  # becomes a dead body to loot
 func _ready() -> void:
 	GameState.zone_id = "test_animations" + OS.get_environment("CONTRACTOR_TEST_TAG")  # never touch a real save
 	CompoundLevel.spawn_ai = false
+	Handedness._left = false  # right-handed whatever this machine's settings say (never saved)
+	Handedness._loaded = true
 	GameState.delete_save()
 	get_tree().create_timer(150.0).timeout.connect(func() -> void:
 		print("ANIMATIONS TEST FAILED (timed out)")
@@ -57,6 +63,7 @@ func _ready() -> void:
 	await _test_treat()
 	await _test_techniques()
 	await _test_loot()
+	await _test_stand_where_it_lay()
 	await _test_dummy()
 	GameState.delete_save()
 	print("ANIMATIONS TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
@@ -414,6 +421,18 @@ func _test_loot() -> void:
 	check(hostile.vitals.is_dead(), "a dead body with gear")
 	_place(hostile, SPOT + Vector3(-1.0, 0, -0.8))
 	await _settled(hostile)
+	# Placed before its ragdoll's first physics step: the parts still go with it (they stayed
+	# behind once, and the body later stood up metres from where it was put).
+	var placed_at: Vector3 = (hostile.ragdoll.parts["torso"] as Node3D).global_position if is_instance_valid(hostile.ragdoll) else Vector3.INF
+	check(_flat(placed_at, hostile.global_position) < 1.5, "the body put somewhere takes its ragdoll along (%.1f m)" % _flat(placed_at, hostile.global_position))
+	# A ragdoll can slide or roll metres from the capsule, which stays where it fell (this
+	# flaked when it did by chance): put it 6 m off, and loot it where it lies.
+	check(is_instance_valid(hostile.ragdoll) and hostile.ragdoll.frozen, "it lies as a ragdoll, at rest")
+	for part: Node3D in hostile.ragdoll.parts.values():
+		part.global_position += SLID
+	hostile.ragdoll._send(true)
+	await _frames(3)
+	check(_flat(hostile.aim_point(), hostile.global_position) > 4.5, "it lies %.1f m from where it fell" % _flat(hostile.aim_point(), hostile.global_position))
 	_place_player()
 	await _seconds(0.3)
 	_beside(hostile.aim_point())
@@ -421,6 +440,8 @@ func _test_loot() -> void:
 	var rest_y := player.model.torso.global_position.y
 	var index := _entry_of(hostile, &"mag_556")
 	player._server_loot_item.rpc_id(1, hostile.get_path(), index.get("container", &"vest"), int(index.get("index", 0)), &"mag_556")
+	if player.model.action_net.is_empty():
+		print("  (refused: '%s')" % player.player_input.hud._message.text)
 	check(player.model.action_net.get("id") == CharacterModel.LOOT and player.model.action_net.get("kneel") == true, "looting: kneeling at the body")
 	var at: Vector3 = player.to_global(player.model.action_net.get("at", Vector3.ZERO))
 	var seen := {"best": INF, "low": rest_y}
@@ -435,6 +456,41 @@ func _test_loot() -> void:
 	check(player.model.action_net.get("id") == CharacterModel.LOOT and is_equal_approx(float(player.model.action_net.get("s")), CharacterModel.LOOT_ALL_S),
 		"Loot all: a longer clip")
 	await _seconds(2.0)
+
+
+## A downed body whose ragdoll slid or rolled off stands up where it lay, not back where it fell
+## (Soldier._stand_where_ragdoll_lay, Ragdoll.rest_spot), and a following peer's ragdoll finds
+## the same spot.
+func _test_stand_where_it_lay() -> void:
+	print("Standing up where the ragdoll lay")
+	_place(bravo, SPOT + Vector3(3.0, 0, 0))
+	await _frames(2)
+	_down(bravo)
+	await _settled(bravo)
+	check(not bravo.vitals.is_up() and not bravo.vitals.is_dead() and is_instance_valid(bravo.ragdoll) and bravo.ragdoll.frozen,
+		"a downed body lies as a ragdoll, at rest")
+	var fell := bravo.global_position
+	for part: Node3D in bravo.ragdoll.parts.values():
+		part.global_position += ROLLED
+	bravo.ragdoll._send(true)
+	await _frames(3)
+	var lay: Vector3 = (bravo.ragdoll.parts["torso"] as Node3D).global_position
+	check(_flat(lay, fell) > 2.5, "its hips lie %.1f m from where it fell" % _flat(lay, fell))
+	var host_spot: Variant = bravo.ragdoll.rest_spot()
+	var follower := Ragdoll.follow(bravo)  # what another peer builds from the replicated pose
+	var peer_spot: Variant = follower.rest_spot()
+	follower.free()
+	check(host_spot != null and peer_spot != null and (host_spot as Transform3D).origin.distance_to((peer_spot as Transform3D).origin) < 0.05,
+		"a following peer's ragdoll stands it up at the same spot")
+	bravo.vitals.server_reset_health()
+	await _frames(3)
+	check(bravo.vitals.is_up() and not is_instance_valid(bravo.ragdoll), "revived: the ragdoll goes")
+	check(_flat(bravo.global_position, lay) < 0.5, "and it stands up where it lay (%.2f m from its hips, %.1f m from where it fell)"
+		% [_flat(bravo.global_position, lay), _flat(bravo.global_position, fell)])
+	await _seconds(0.5)
+	check(_flat(bravo.global_position, lay) < 0.5 and absf(bravo.global_position.y - fell.y) < 0.3 and bravo.rotation.is_finite(),
+		"on the ground, and stays there (%.2f m, %.2f m up)" % [_flat(bravo.global_position, lay), bravo.global_position.y - fell.y])
+	_place(bravo, SPOT + Vector3(3.0, 0, 0))
 
 
 func _test_dummy() -> void:

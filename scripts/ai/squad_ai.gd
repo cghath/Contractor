@@ -208,6 +208,26 @@ const FIRED_ON_SUPPRESSION := 0.001
 const FIRED_ON_INJURY := 0.02
 ## Proposed: don't shoot when a friendly is this close (metres) to the line of fire.
 const FRIENDLY_CLEARANCE := 0.7
+## Proposed (Captain, 2026-10-12: the squad seemed a bit unintelligent): the friendly squad's
+## senses and habits. A squadmate hears an enemy shot within HEAR_SHOT_M (a suppressed one
+## within HEAR_SUPPRESSED_M) and takes contact toward the shooter, placed up to
+## HEARD_ERROR_PER_100M metres off for every 100 m away; contact one squadmate sees reaches
+## the others within SHARE_CONTACT_M (as if called out).
+const HEAR_SHOT_M := 200.0
+const HEAR_SUPPRESSED_M := 40.0
+const HEARD_ERROR_PER_100M := 6.0
+const SHARE_CONTACT_M := 80.0
+## Friendlies see this far (hostiles SIGHT_RANGE) and stay in contact this long after the last
+## sign of the enemy (hostiles CONTACT_MEMORY_S).
+const SQUAD_SIGHT_RANGE := 120.0
+const SQUAD_CONTACT_MEMORY_S := 20.0
+## The lead still for LEAD_HALT_S (moved less than LEAD_MOVED_M): squadmates take a spot beside
+## something solid within HALT_COVER_M of their slot, and watch outward.
+const LEAD_HALT_S := 1.5
+const LEAD_MOVED_M := 1.0
+const HALT_COVER_M := 2.0
+## Pinned in the open: a squadmate crawls (crouched) to cover within this far instead of freezing.
+const PINNED_COVER_M := 6.0
 
 ## 0..1: aim error and reaction speed.
 @export var combat := 0.6
@@ -314,6 +334,9 @@ var _loot_until := -1.0
 var _loot_score := 0.0  # what going through the chosen body scored
 var _loot_candidate: Soldier  # the body worth going through (refreshed each think)
 var _looted := {}  # body instance id -> Soldier._now() until which this unit leaves it alone
+var _lead_last := Vector3.INF  # where the lead stood when last seen moving (_lead_halted)
+var _lead_still_s := 0.0
+var _halt_spot: Variant = null  # where this unit waits while the lead is halted (null: its slot)
 
 
 static func of(s: Node) -> SquadAI:
@@ -355,11 +378,15 @@ func _physics_process(delta: float) -> void:
 			var callouts := Callouts.of(body)
 			if callouts:
 				callouts.contact(body, target)
+			if body.faction == &"hostile":
+				Alert.server_sighting(body, target.global_position)  # hot zones: he'll radio it in (4B part 3)
 	if target != null and target.vitals.is_up():
 		_last_contact = now
 		body.threat_pos = target.global_position
 		body.threat_time = now
 		_no_los_s = 0.0
+		if _scan_cd == SCAN_S:
+			_share_contact(target.global_position, now)  # once a scan, not every frame
 	else:
 		_no_los_s += delta  # a body being dead-checked is no contact
 	_think_cd -= delta
@@ -384,7 +411,46 @@ func _briefing_open() -> bool:
 
 
 func in_contact() -> bool:
-	return Soldier._now() - _last_contact < CONTACT_MEMORY_S
+	return Soldier._now() - _last_contact < _contact_memory()
+
+
+func _friendly() -> bool:
+	return body != null and body.faction == &"friendly"
+
+
+func _contact_memory() -> float:
+	return SQUAD_CONTACT_MEMORY_S if _friendly() else CONTACT_MEMORY_S
+
+
+## Host: `shooter` fired from `origin`; squadmates of the friendly squad within earshot take
+## contact toward it (a rough bearing: further off, further out), unless they had fresher
+## contact of their own this last second.
+static func server_heard_shot(shooter: Soldier, origin: Vector3, suppressed: bool) -> void:
+	if shooter == null or shooter.faction == &"friendly" or not shooter.is_inside_tree():
+		return
+	var reach := HEAR_SUPPRESSED_M if suppressed else HEAR_SHOT_M
+	var now := Soldier._now()
+	for n in shooter.get_tree().get_nodes_in_group(&"combatants"):
+		var s := n as Soldier
+		if s == null or s == shooter or not s.is_ai() or s.faction != &"friendly" or not s.vitals.is_up() or SquadAI.of(s) == null:
+			continue
+		var d := s.global_position.distance_to(origin)
+		if d > reach or now - s.threat_time < 1.0:
+			continue
+		var error := HEARD_ERROR_PER_100M * d / 100.0
+		s.threat_pos = origin + Vector3(randf_range(-error, error), 0.0, randf_range(-error, error))
+		s.threat_time = now
+
+
+## Contact this unit sees reaches its squadmates nearby (friendly squad).
+func _share_contact(point: Vector3, now: float) -> void:
+	if squad == null or not _friendly():
+		return
+	for s in squad.members():
+		if s != body and s.vitals.is_up() and s.threat_time < now \
+				and s.global_position.distance_to(body.global_position) <= SHARE_CONTACT_M:
+			s.threat_pos = point
+			s.threat_time = now
 
 
 ## In contact and willing to fight: Safe units leave a contact alone until fired upon.
@@ -610,9 +676,13 @@ func _act() -> void:
 	match intent:
 		Intent.FOLLOW:
 			if fighting():
+				_halt_spot = null
 				_fight(squad.leader.global_position if squad and is_instance_valid(squad.leader) else body.global_position, 8.0)
 			else:
-				_go(squad.follow_point(body) if squad else body.global_position)
+				var spot := _follow_spot()
+				_go(spot)
+				if _halt_spot != null and _flat_distance(spot) <= ARRIVE + 0.3:
+					_face(body.global_position + _outward(spot))  # halted: watch out from the lead
 		Intent.HOLD:
 			if fighting():
 				_fight(_hold_point, 4.0)
@@ -700,16 +770,27 @@ func _fight_from_context() -> void:
 
 ## Fight from cover near `anchor`, within `leash` metres of it. Buddies take turns moving.
 func _fight(anchor: Vector3, leash: float) -> void:
+	# Pinned in the open, a squadmate crawls to the nearest cover rather than freezing there
+	# (friendly squad; enemies still go to ground where they are).
+	var crawl := _friendly() and body.suppression >= PINNED and body.stunned_s <= 0.0 and not _at_cover()
+	if crawl:
+		anchor = body.global_position
+		leash = PINNED_COVER_M
 	var cover_ok := _has_cover and _cover_point.distance_to(anchor) <= leash + 1.0 and _cover_protects(_cover_point)
-	if not cover_ok and _cover_cd <= 0.0 and not _buddy_bounding() and body.suppression < PINNED and body.stunned_s <= 0.0:
+	if not cover_ok and _cover_cd <= 0.0 and (crawl or (not _buddy_bounding() and body.suppression < PINNED)) and body.stunned_s <= 0.0:
 		_cover_cd = COVER_SEARCH_S
 		var spot: Variant = find_cover(anchor, leash)
 		if spot != null:
 			_cover_point = spot
 			_has_cover = true
-	# Hold and cover while the buddy bounds, unless this unit was already moving.
-	if _has_cover and body.suppression < PINNED and body.stunned_s <= 0.0 and (_was_bounding or not _buddy_bounding()):
-		_go(_cover_point, true)
+	if crawl and _has_cover:
+		_go(_cover_point, false)  # crouched (want_crouch below), never sprinting
+	elif _has_cover and body.suppression < PINNED and body.stunned_s <= 0.0 and (_was_bounding or not _buddy_bounding()):
+		_go(_cover_point, true)  # hold and cover while the buddy bounds, unless already moving
+	elif _friendly() and not _has_cover and not crawl and body.stunned_s <= 0.0 and body.suppression < PINNED and _flat_distance(anchor) > leash:
+		# No cover found: don't stand in the open far from the lead (or the post); get back in.
+		var back := Vector3(body.global_position.x - anchor.x, 0.0, body.global_position.z - anchor.z).normalized()
+		_go(anchor + back * leash * 0.5, true)
 	else:
 		_has_destination = false
 	bounding = _has_destination and not _at_cover()
@@ -718,6 +799,86 @@ func _fight(anchor: Vector3, leash: float) -> void:
 	# Keep your head down unless you're shooting.
 	var shooting := target != null and Soldier._now() >= _pause_until
 	body.want_crouch = body.suppression >= PINNED or body.stunned_s > 0.0 or (_at_cover() and not shooting)
+
+
+## Following out of contact: the formation slot; with the lead halted (friendly squad, not in
+## Safe), a spot beside something solid near the slot, found once per halt.
+func _follow_spot() -> Vector3:
+	var slot := squad.follow_point(body) if squad else body.global_position
+	if not _friendly() or combat_mode == Squad.CombatMode.SAFE or not _lead_halted():
+		_halt_spot = null
+		return slot
+	if _halt_spot == null:
+		var found: Variant = _find_halt_spot(slot)
+		_halt_spot = found if found != null else slot  # nothing solid near: wait at the slot
+	return _halt_spot
+
+
+## Whether the lead has stood still (within LEAD_MOVED_M) for LEAD_HALT_S. Call once a frame.
+func _lead_halted() -> bool:
+	if squad == null or not is_instance_valid(squad.leader):
+		return false
+	var at := squad.leader.global_position
+	if _lead_last == Vector3.INF or at.distance_to(_lead_last) > LEAD_MOVED_M:
+		_lead_last = at
+		_lead_still_s = 0.0
+		return false
+	_lead_still_s += get_physics_process_delta_time()
+	return _lead_still_s >= LEAD_HALT_S
+
+
+## Flat direction from the lead out through `point` (where a halted squadmate watches).
+func _outward(point: Vector3) -> Vector3:
+	var lead := squad.leader.global_position if squad and is_instance_valid(squad.leader) else body.global_position
+	var out := Vector3(point.x - lead.x, 0.0, point.z - lead.z)
+	if out.length() < 0.3:
+		out = -body.global_basis.z
+		out.y = 0.0
+	return out.normalized()
+
+
+## Near `slot` (within HALT_COVER_M, on the navmesh, not someone else's spot): best with
+## something solid in front of it facing out from the lead, else something beside it. Null if
+## there's nothing solid near.
+func _find_halt_spot(slot: Vector3) -> Variant:
+	var map := body.get_world_3d().navigation_map
+	var world := body.get_world_3d()
+	var out := _outward(slot)
+	var candidates: Array[Vector3] = [slot]
+	for ring in [HALT_COVER_M * 0.6, HALT_COVER_M]:
+		for k in 8:
+			var angle := TAU * k / 8.0
+			candidates.append(slot + Vector3(cos(angle), 0.0, sin(angle)) * ring)
+	var best: Variant = null
+	var best_score := INF
+	for p in candidates:
+		var q := NavigationServer3D.map_get_closest_point(map, p)
+		if Vector2(q.x - p.x, q.z - p.z).length() > 0.6 or _halt_spot_taken(q):
+			continue
+		var eye := q + Vector3.UP * 0.9
+		var score := INF
+		if not Throwables.clear_line(world, eye, eye + out * 1.5):
+			score = 0.0  # something to crouch behind, facing out
+		else:
+			for side in [out.cross(Vector3.UP), -out.cross(Vector3.UP), -out]:
+				if not Throwables.clear_line(world, eye, eye + (side as Vector3) * 0.8):
+					score = 2.0  # against a wall at least
+					break
+		if score == INF:
+			continue
+		score += Vector2(q.x - slot.x, q.z - slot.z).length()
+		if score < best_score:
+			best = q
+			best_score = score
+	return best
+
+
+func _halt_spot_taken(point: Vector3) -> bool:
+	for n in get_tree().get_nodes_in_group(&"combatants"):
+		var other := SquadAI.of(n)
+		if other and other != self and other._halt_spot != null and (other._halt_spot as Vector3).distance_to(point) < 1.2:
+			return true
+	return false
 
 
 func _patrol() -> void:
@@ -810,7 +971,7 @@ static func responder_for(c: Soldier, wanted: Array[StringName] = []) -> Soldier
 		var ai := SquadAI.of(n)
 		if ai == null or not ai._free_for(c) or not ai._cares_for(c) or not ai._carries_any(wanted):
 			continue
-		var d := ai.body.global_position.distance_to(c.global_position)
+		var d := ai.body.global_position.distance_to(c.body_point())
 		if ai.escorting == c:
 			return ai.body  # an HVT's escorts see to him first (a medic is pulled in as well)
 		if ai.body.role == Roles.MEDIC:
@@ -845,7 +1006,7 @@ static func medic_for(c: Soldier, wanted: Array[StringName]) -> Soldier:
 		if ai == null or ai.body.role != Roles.MEDIC or not ai._cares_for(c) or not ai._free_for(c) \
 				or c.care_by == ai.body or wanted.is_empty() or not ai._carries_any(wanted):
 			continue
-		var d := ai.body.global_position.distance_to(c.global_position)
+		var d := ai.body.global_position.distance_to(c.body_point())
 		if c.fire_team >= 0 and ai.body.fire_team == c.fire_team:
 			team = ai
 			team_d = d
@@ -965,7 +1126,7 @@ func _bearer_for(dead: Soldier) -> Soldier:
 		var ai := SquadAI.of(n)
 		if ai == null or ai.body == null or ai.body.faction != dead.faction or not ai._can_bear(dead):
 			continue
-		var d := ai.body.global_position.distance_to(dead.global_position) * (1.0 if ai.body.role != Roles.MEDIC else 3.0)
+		var d := ai.body.global_position.distance_to(dead.body_point()) * (1.0 if ai.body.role != Roles.MEDIC else 3.0)
 		if d < best_d:
 			best = ai.body
 			best_d = d
@@ -1019,7 +1180,7 @@ func _do_care() -> void:
 			if not contact or not _next_task(casualty, _care_exposed(contact)).is_empty():
 				care = Care.TREAT
 			else:
-				_fight(casualty.global_position, 3.0)
+				_fight(casualty.body_point(), 3.0)
 		Care.CARRY:
 			_care_carry(contact)
 
@@ -1078,7 +1239,7 @@ func _start_reach() -> void:
 ## the threat first. At the casualty: one lying in the open is dragged to cover, otherwise
 ## treatment starts.
 func _care_reach(contact: bool) -> void:
-	var d := _flat_distance(casualty.global_position)
+	var d := _flat_distance(casualty.body_point())
 	if body.carrying == casualty:
 		care = Care.CARRY
 		return
@@ -1086,7 +1247,7 @@ func _care_reach(contact: bool) -> void:
 	if exposed and not _smoke_used and d <= SMOKE_RANGE_M:
 		if body.inventory.count_of(SCREEN_SMOKE) <= 0:
 			_smoke_used = true  # nothing to screen them with
-		elif _throw(SCREEN_SMOKE, casualty.global_position + (body.threat_pos - casualty.global_position).normalized() * 4.0):
+		elif _throw(SCREEN_SMOKE, casualty.body_point() + (body.threat_pos - casualty.body_point()).normalized() * 4.0):
 			_smoke_used = true
 	if exposed and body.suppression >= PINNED and d > CASUALTY_REACH:
 		_suppressing = true
@@ -1094,9 +1255,9 @@ func _care_reach(contact: bool) -> void:
 		_has_destination = false
 		body.want_crouch = true
 		return
-	if not _reach_progress(d, casualty.global_position, _give_up_casualty):
+	if not _reach_progress(d, casualty.body_point(), _give_up_casualty):
 		return  # gave up: the next responder takes them
-	_go(_detour if Soldier._now() < _detour_until else casualty.global_position, true)
+	_go(_detour if Soldier._now() < _detour_until else casualty.body_point(), true)
 	if d > CASUALTY_REACH:
 		return
 	_has_destination = false
@@ -1158,12 +1319,12 @@ func _give_up_casualty() -> void:
 func _care_treat(contact: bool) -> void:
 	if body.carrying == casualty:
 		body.release_carried()
-	if _flat_distance(casualty.global_position) > CASUALTY_REACH + 1.0:
+	if _flat_distance(casualty.body_point()) > CASUALTY_REACH + 1.0:
 		_start_reach()  # a conscious casualty moved, or the body slid
 		return
 	_has_destination = false
 	body.want_crouch = true
-	_face(casualty.global_position)
+	_face(casualty.body_point())
 	var now := Soldier._now()
 	if _treat_until >= 0.0 or now < body._busy_until:
 		return  # an item is going on
@@ -1203,7 +1364,7 @@ func _should_carry() -> bool:
 	if 1.0 - casualty.vitals.blood_fraction() >= WoundModel.UNCONSCIOUS_LOST:
 		return true
 	var leader: Soldier = squad.leader if squad and is_instance_valid(squad.leader) else null
-	return leader != null and leader != casualty and leader.global_position.distance_to(casualty.global_position) > STAY_WITH_M
+	return leader != null and leader != casualty and leader.global_position.distance_to(casualty.body_point()) > STAY_WITH_M
 
 
 ## Carrying an unconscious casualty after the squad leader until they wake on their own. In
@@ -1233,10 +1394,10 @@ func _care_carry(contact: bool) -> void:
 		body.want_crouch = true
 		return
 	if body.carrying != casualty:
-		if _flat_distance(casualty.global_position) <= CASUALTY_REACH and body.server_pick_up_body(casualty, Soldier.CARRY):
+		if _flat_distance(casualty.body_point()) <= CASUALTY_REACH and body.server_pick_up_body(casualty, Soldier.CARRY):
 			_callouts_carrying(false)
 		else:
-			_go(casualty.global_position, true)
+			_go(casualty.body_point(), true)
 		return
 	_go(squad.follow_point(body))
 
@@ -1251,15 +1412,15 @@ func _carry_body() -> void:
 		var looter := SquadAI.of(casualty.scavenged_by) if is_instance_valid(casualty.scavenged_by) else null
 		if looter and looter != self and looter.loot_body == casualty and looter.body.vitals.is_up():
 			# Someone is cross-loading from the body: wait beside it until they're done.
-			if _flat_distance(casualty.global_position) > CASUALTY_REACH + 1.5:
-				_go(casualty.global_position, true)
+			if _flat_distance(casualty.body_point()) > CASUALTY_REACH + 1.5:
+				_go(casualty.body_point(), true)
 			else:
 				_has_destination = false
 			return
-		if _flat_distance(casualty.global_position) <= CASUALTY_REACH and body.server_pick_up_body(casualty, Soldier.CARRY):
+		if _flat_distance(casualty.body_point()) <= CASUALTY_REACH and body.server_pick_up_body(casualty, Soldier.CARRY):
 			_callouts_carrying(true)
 		else:
-			_go(casualty.global_position, true)
+			_go(casualty.body_point(), true)
 		return
 	_go(squad.follow_point(body))
 
@@ -1480,10 +1641,10 @@ func _do_scavenge() -> void:
 		_end_scavenge()
 		_think_cd = 0.0
 		return
-	var d := _flat_distance(loot_body.global_position)
+	var d := _flat_distance(loot_body.body_point())
 	if d > CASUALTY_REACH:
-		if _reach_progress(d, loot_body.global_position, _give_up_body):
-			_go(_detour if Soldier._now() < _detour_until else loot_body.global_position, false)
+		if _reach_progress(d, loot_body.body_point(), _give_up_body):
+			_go(_detour if Soldier._now() < _detour_until else loot_body.body_point(), false)
 		return
 	_has_destination = false
 	body.want_crouch = true
@@ -1725,7 +1886,7 @@ func _find_target() -> Soldier:
 			and body.global_position.distance_to(focus.global_position) <= Squad.TARGET_RANGE and can_see(focus):
 		return focus
 	var best: Soldier = null
-	var best_dist := SIGHT_RANGE
+	var best_dist := SQUAD_SIGHT_RANGE if _friendly() else SIGHT_RANGE
 	var check: Soldier = null
 	var check_dist := DEAD_CHECK_M
 	var clearing := _clearing()

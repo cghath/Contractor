@@ -425,6 +425,7 @@ func _test_session() -> void:
 	await _test_deployment(client)
 	await _finish_client(client)
 	await _test_zone_deployment()
+	await _test_revert()
 	await _test_contract_loop()
 
 
@@ -1032,3 +1033,27 @@ func _frames(n: int) -> void:
 
 func _seconds(s: float) -> void:
 	await get_tree().create_timer(s).timeout
+
+
+## The Escape menu's "Return to Base (revert)" (Captain, 2026-10-12): back to just before the
+## deployment, as if it never happened.
+func _test_revert() -> void:
+	print("Return to Base (revert)")
+	level = CompoundLevel.current(self)
+	if not level is BaseLevel:
+		check(false, "at the base before reverting a deployment")
+		return
+	var cash_before := Economy.cash()
+	var day_before := BaseHub.day()
+	var squad: Array = Roster.available_ids(BaseHub.roster()).slice(0, 1)
+	var why := BaseHub.server_deploy({"level": {"level": "zone", "def": ZoneDef.get_def("test")}, "zone_id": ZONE + "_revert" + tag, "squad": squad})
+	var moved := await _wait_until(func() -> bool: return CompoundLevel.current(self) is ZoneLevel, 20.0)
+	check(why == "" and moved and RosterDeployment.is_running(BaseHub.roster()), "deployed into a zone")
+	Economy.spend(1234, "test: money spent out there")
+	var undo := BaseHub.server_revert_deployment()
+	var home := await _wait_until(func() -> bool: return CompoundLevel.current(self) is BaseLevel, 20.0)
+	check(undo == "" and home and not RosterDeployment.is_running(BaseHub.roster()), "reverting brings everyone back to the base, no deployment running")
+	check(Economy.cash() == cash_before and BaseHub.day() == day_before,
+		"and the campaign is as it was before deploying (cash %d, day %d)" % [Economy.cash(), BaseHub.day()])
+	check(BaseHub.server_revert_deployment() != "", "with nothing to revert at the base, it says why")
+	level = CompoundLevel.current(self)

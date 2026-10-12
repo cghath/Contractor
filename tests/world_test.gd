@@ -132,6 +132,7 @@ func _test_generation(mem_before: float) -> void:
 	var gen := ZoneDef.generate(1234)
 	check(ZoneDef.generate(1234).hash() == gen.hash() and gen.modules.size() == 5 and gen.insertion.size() == 2 and gen.extraction.size() == 3,
 		"a zone generated from a seed is the same every time (%d modules, %d insertion points, %d extraction candidates)" % [gen.modules.size(), gen.insertion.size(), gen.extraction.size()])
+	_test_hot_layout()
 	var ins := level.insertion_points()[0]
 	check(player.global_position.distance_to(ins) < 5.0 and absf(player.global_position.y - t.height_at(player.global_position.x, player.global_position.z) - 0.1) < 0.05,
 		"the player starts at the insertion point, on the ground (%s)" % player.global_position)
@@ -534,3 +535,32 @@ func _finish() -> void:
 	if multiplayer.is_server():
 		GameState.delete_save()
 	get_tree().quit(failures)
+
+
+## 4B part 3: a hot zone's layout (Captain: 16 km²): the enemy's structure, roads and patrols,
+## insertion points well clear of every site, the same from the same seed.
+func _test_hot_layout() -> void:
+	print("Hot zone layout")
+	for seed in [4409, 5503, 77, 1234]:
+		var hot := ZoneDef.generate_hot(seed)
+		var count := func(type: String) -> int: return (hot.modules as Array).filter(func(m: Dictionary) -> bool: return m.type == type).size()
+		var sites: Array[Vector2] = []
+		for m: Dictionary in hot.modules:
+			sites.append(Vector2(m.pos[0], m.pos[1]))
+		var spaced := true
+		for i in sites.size():
+			for j in range(i + 1, sites.size()):
+				spaced = spaced and sites[i].distance_to(sites[j]) >= ZoneDef.MIN_SPACING_M - ZoneDef.GRID_M
+		var clear := (hot.insertion as Array).all(func(p: Array) -> bool: return ZoneDef._clearance(Vector2(p[0], p[1]), sites) >= ZoneDef.HOT_INSERTION_CLEAR_M)
+		var first_best := (hot.insertion as Array).size() < 2 or ZoneDef._clearance(Vector2(hot.insertion[0][0], hot.insertion[0][1]), sites) \
+			>= ZoneDef._clearance(Vector2(hot.insertion[1][0], hot.insertion[1][1]), sites)
+		check(is_equal_approx(float(hot.size_m), 4096.0) and hot.kind == "hot" and count.call("hq") == 1 and count.call("comms") == 1
+			and count.call("qrf_base") >= 1 and count.call("outpost") >= 3 and count.call("checkpoint") >= 2 and count.call("village") >= 2,
+			"seed %d: a 16 km² hot zone: an HQ, a comms site, %d QRF bases, %d outposts, %d checkpoints, %d villages" % [seed,
+			count.call("qrf_base"), count.call("outpost"), count.call("checkpoint"), count.call("village")])
+		check(spaced and clear and first_best and (hot.insertion as Array).size() == 3 and (hot.extraction as Array).size() == 3,
+			"seed %d: sites spaced out, 3 insertion points %d m clear of every site (the default the furthest), 3 extractions" % [seed, int(ZoneDef.HOT_INSERTION_CLEAR_M)])
+		check((hot.roads as Array).size() == count.call("outpost") and (hot.patrols as Array).size() >= 2
+			and ZoneDef.generate_hot(seed).hash() == hot.hash(), "seed %d: roads to every outpost, %d patrol routes, the same every time" % [seed, (hot.patrols as Array).size()])
+	var spec := MissionRegistry.zone_def("ridge_hot")
+	check(spec.get("kind", "") == "hot" and is_equal_approx(float(spec.size_m), 4096.0), "the campaign's hot zones are 16 km² hot layouts")

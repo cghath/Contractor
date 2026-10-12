@@ -11,6 +11,17 @@
 # can still exit 0, or never exit at all). Each process gets SUITE_TIMEOUT seconds (default
 # 480); one that runs past it is killed and fails as hung. The import must succeed too.
 # Exits non-zero if any suite fails. tools/test_runner_check.sh checks these rules.
+#
+# Every run's logs are kept (Captain, 2026-10-12) in their own folder outside the repo, which
+# nothing here ever deletes, all under one parent: CONTRACTOR_TEST_LOGS (default:
+# Contractor-test-logs beside the main checkout, shared by every worktree, e.g.
+# B:\Contractor-test-logs). Each run gets a number (run_counter.txt there, counting up forever,
+# unique across worktrees) and a folder by date:
+#   <parent>/<date>/R<number>-<time>-<PASS|FAIL>-<branch>-<sha>/
+# (RUNNING while it runs; a folder left RUNNING was killed). Inside: every suite's log and
+# summary.txt (run id, suites, each verdict and [FAIL] line). index.txt at the top lists every
+# run, one line each. On CI (GITHUB_ACTIONS) nothing is kept unless CONTRACTOR_TEST_LOGS is set;
+# CONTRACTOR_TEST_LOGS=none keeps nothing.
 set -u
 cd "$(dirname "$0")/.."
 GODOT="${GODOT:-godot}"
@@ -19,7 +30,48 @@ SUITES=("$@")
 [ ${#SUITES[@]} -eq 0 ] && SUITES=(smoke gameplay squad net wounds armor movement interaction roles medical logistics casualty materials animations scavenge contracts people map base world missions vehicles antiarmor)
 status=0
 logs="$(mktemp -d)"
-trap 'rm -rf "$logs"' EXIT
+keep_root="${CONTRACTOR_TEST_LOGS:-}"
+if [ -z "$keep_root" ] && [ -z "${GITHUB_ACTIONS:-}" ]; then
+	# One parent for every worktree (beside the main checkout), so run numbers are unique
+	# across them; a copy outside git keeps its own beside its folder.
+	common="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
+	if [ -n "$common" ]; then keep_root="$(cd "$common/../.." && pwd)/Contractor-test-logs"; else keep_root="$(cd .. && pwd)/Contractor-test-logs"; fi
+fi
+keep=""
+run_id=""
+if [ -n "$keep_root" ] && [ "$keep_root" != none ] && mkdir -p "$keep_root"; then
+	n=$(( $(cat "$keep_root/run_counter.txt" 2>/dev/null || echo 0) + 1 ))
+	echo "$n" >"$keep_root/run_counter.txt"
+	run_id="$(printf 'R%04d' "$n")"
+	branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null | tr '/' '-')"
+	sha="$(git rev-parse --short HEAD 2>/dev/null || echo nogit)"
+	run_tail="${branch:-nobranch}-$sha"
+	run_day="$keep_root/$(date +%Y-%m-%d)"
+	run_time="$(date +%H%M%S)"
+	keep="$run_day/$run_id-$run_time-RUNNING-$run_tail"
+	mkdir -p "$keep" || keep=""
+fi
+# The temp folder goes; the kept copy never does. The run's folder is renamed PASS or FAIL.
+keep_logs() {
+	if [ -n "$keep" ]; then
+		cp "$logs"/*.log "$keep"/ 2>/dev/null
+		local verdict=PASS
+		[ "$status" -ne 0 ] && verdict=FAIL
+		note "result: $verdict"
+		local done_dir="$run_day/$run_id-$run_time-$verdict-$run_tail"
+		mv "$keep" "$done_dir" 2>/dev/null && keep="$done_dir"
+		echo "$run_id $(date +%Y-%m-%d) $run_time $verdict $run_tail suites: ${SUITES[*]}" >>"$keep_root/index.txt"
+		echo "run $run_id: $verdict, logs kept in $keep"
+	fi
+	rm -rf "$logs"
+}
+trap keep_logs EXIT
+# One line per verdict in the kept folder's summary.txt.
+note() {
+	[ -n "$keep" ] && echo "$1" >>"$keep/summary.txt"
+}
+note "run $run_id, $(date '+%Y-%m-%d %H:%M:%S'), ${run_tail:-}"
+note "suites: ${SUITES[*]}  (port ${CONTRACTOR_PORT:-default}, timeout ${SUITE_TIMEOUT}s)"
 
 # Runs the engine with "$@" under the timeout, output to log file $1. Returns the exit code
 # (124 or 137: timed out).
@@ -46,6 +98,12 @@ judge() {
 	elif [ -n "$summary" ] && ! grep -q "$summary" "$log"; then
 		why="no \"$summary\" line: the test never finished"
 	fi
+	if [ -z "$why" ]; then
+		note "$name: passed"
+	else
+		note "$name: FAILED: $why"
+	fi
+	grep -E '\[FAIL\]' "$log" | sed "s/^/  $name /" | while IFS= read -r line; do note "$line"; done
 	if [ -n "$why" ]; then
 		echo "$name: $why"
 		echo "  last lines of its output:"
@@ -59,6 +117,8 @@ judge() {
 
 if ! engine "$logs/import.log" --import; then
 	echo "import: failed"
+	note "import: FAILED"
+	status=1
 	grep -E 'SCRIPT ERROR|ERROR' "$logs/import.log" | head -20
 	exit 1
 fi

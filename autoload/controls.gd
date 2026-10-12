@@ -27,7 +27,7 @@ const KEYS := {
 	&"weapon_launcher": [KEY_3],  # the anti-armour launcher (wave 5, Launchers)
 	&"pause": [KEY_ESCAPE],
 	&"quick_save": [KEY_HOME],  # F-keys are the squad command menu
-	&"debug_hurt": [KEY_K],  # debug builds only: hurt yourself to test going down and dying
+	&"debug_hurt": [KEY_K],  # dev tools only (DevTools.on): hurt yourself to test going down and dying
 }
 const MOUSE := {
 	&"fire": MOUSE_BUTTON_LEFT,

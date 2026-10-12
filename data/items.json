@@ -102,6 +102,8 @@
 		 "stats": {"short": "Knife", "attach": ["knife", "utility"], "size_m": [0.04, 0.27, 0.025]}},
 		{"id": "radio", "name": "AN/PRC-152 Radio", "type": "utility", "volume_l": 0.5, "mass_kg": 1.2, "tags": ["radio"],
 		 "stats": {"short": "Radio", "size_m": [0.07, 0.2, 0.05]}},
+		{"id": "enemy_radio", "name": "Enemy Handheld Radio", "type": "utility", "volume_l": 0.4, "mass_kg": 0.6, "tags": ["radio", "enemy_radio"],
+		 "stats": {"short": "E-Radio", "size_m": [0.06, 0.18, 0.04]}},
 		{"id": "binoculars", "name": "Binoculars", "type": "utility", "volume_l": 0.7, "mass_kg": 0.65, "tags": ["optic"],
 		 "stats": {"short": "Binos", "size_m": [0.12, 0.06, 0.15]}},
 

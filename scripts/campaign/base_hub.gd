@@ -67,7 +67,7 @@ const STASH_POLL_S := 1.0
 ## so magazines and the tourniquet go into them when picked up.
 const STARTING_STASH := [["plate_carrier", 2], ["plate_ceramic_l4", 4], ["helmet", 2], ["assault_pack", 2], ["m4a1", 2],
 	["mag_556", 12], ["ifak", 4], ["tourniquet", 2], ["smoke_grenade", 2], ["frag_grenade", 2]]
-## Debug builds: End extracts everyone within this many metres of the host (until the map's
+## Debug builds: Shift+End extracts everyone within this many metres of the host (until the map's
 ## extraction calls server_end_deployment).
 const DEBUG_EXTRACT_M := 60.0
 ## A level switch waits at most this long for clients to stop sending (server_switch_level).
@@ -88,6 +88,9 @@ var rng := RandomNumberGenerator.new()
 
 var _profiles := {}      # host: peer id -> player key
 var _gear_applied := {}  # host: peer ids whose gear is on their body in this level
+## Host: the campaign as it stood just before the running deployment left the base (server_deploy),
+## so the Escape menu's "Return to Base (revert)" can put everything back (Captain, 2026-10-12).
+var _before_deploy := {}
 var _broadcast_queued := false
 var _stash_poll := 0.0
 var _ui: BaseUI
@@ -747,6 +750,7 @@ func server_deploy(options := {}) -> String:
 	var zone_id := String(options.get("zone_id", prep.get("zone_id", "")))
 	if zone_id == "":
 		zone_id = DEFAULT_ZONE_ID
+	_before_deploy = Campaign.snapshot()  # before anything of the deployment is written
 	var squad: Array = options.get("squad", prep.get("squad", []))
 	squad = squad.slice(0, maxi(SQUAD_SIZE - _player_count(), 0))
 	var stand_ins := _pick_stand_ins(squad)
@@ -989,6 +993,24 @@ func server_end_deployment(extracted: Array, return_to_base := true, advance_day
 static func _outcome_of(s: Soldier) -> Dictionary:
 	return {"gear": s.inventory.net_state.duplicate(true), "wounds": s.vitals.wound_list(), "blood": s.vitals.blood_fraction(),
 		"burn": s.vitals.burn_share(), "blast_lung": s.vitals.has_blast_lung()}
+
+
+## Host (the Escape menu's "Return to Base (revert)", Captain 2026-10-12): back to just before the
+## running deployment: the campaign as it was when it left the base (cash, roster and their gear,
+## held contracts, the stash, the day), the deployment and its objectives gone, everyone at the
+## base. The zone keeps no trace either (it saves only when a deployment ends). Returns why not,
+## or "".
+func server_revert_deployment() -> String:
+	if not multiplayer.is_server():
+		return "Only the host can do that"
+	if not RosterDeployment.is_running(roster()) or _before_deploy.is_empty():
+		return "No deployment to revert"
+	Campaign.restore(_before_deploy)
+	_before_deploy = {}
+	Contracts.objectives.server_clear()
+	_changed_all()
+	server_switch_level({"level": "base"}, base_zone_id())
+	return ""
 
 
 ## Host: everyone goes back to the hub (after server_end_deployment(..., false) and a debrief).
@@ -1344,8 +1366,8 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed(&"quick_save"):
 		server_save()
 		note.emit("Campaign saved")
-	elif OS.is_debug_build() and event is InputEventKey and event.pressed and not event.echo \
-			and (event as InputEventKey).physical_keycode == KEY_END and deployment_running():
+	elif DevTools.on() and event is InputEventKey and event.pressed and not event.echo \
+			and (event as InputEventKey).physical_keycode == KEY_END and (event as InputEventKey).shift_pressed and deployment_running():
 		var me := level().players.get_node_or_null(^"1") as Node3D
 		if me:
 			server_extract_near(me.global_position)

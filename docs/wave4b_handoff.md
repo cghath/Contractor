@@ -289,3 +289,18 @@ vehicle QRFs and helicopter or AAV insertion.
   "method" field (foot now; helicopter and AAV in wave 5); the first point out of sight of the
   nearest outpost. AI hold while the briefing is open (on dev).
 - **The base hub stays as it is** until wave 5 makes it the first friendly FOB.
+
+**Stage 4 as built (2026-10-12).** Numbers are Proposed.
+- `RadioChatter` (`scripts/campaign/radio_chatter.gd`, hot zones, host): a new item
+  `enemy_radio` (tags `radio`, `enemy_radio`; not in the shop, priced $250 for selling) goes to one man in four of
+  every garrison (`ZoneLevel.RADIO_EVERY`). While a player or squad AI not dead carries one, the
+  squad hears the enemy net as subtitles (Callouts, speaker "Enemy radio"): reports ("Outpost 2:
+  shots heard, to the north."), the zone standing to or down, and 60% of QRF waves setting out.
+  Compass words only, north is -Z; 85% of lines are caught, one per 5 s.
+- The switch: a body or missed check-in reported after the radio was taken changes frequency
+  300-600 s later ("go to alternate. Out."). The radios held then are stale; one more radio
+  taken off a body listens in again (dropping a stale set and picking it up again also does:
+  kept forgiving). Patrol moves aren't heard yet (EnemyResponse has no hook for it).
+- Radio contracts: `Contracts.radio_contract_problem()` ("" or a reason) gates
+  `server_radio_contract`: hot zone and a field radio in the squad (tagged `radio`, not
+  `enemy_radio`: a looted set can't reach the employer). No board UI calls it yet.

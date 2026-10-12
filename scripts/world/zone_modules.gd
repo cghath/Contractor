@@ -12,8 +12,11 @@ extends RefCounted
 
 ## Types: "compound" (the test compound, as CompoundLevel builds it), "outpost" (a HESCO
 ## ring with a bunker and a watchtower), "village" (four houses in mixed materials) and
-## "checkpoint" (a road checkpoint: barriers, a booth, a sandbag nest).
-const TYPES: Array[String] = ["compound", "outpost", "village", "checkpoint"]
+## "checkpoint" (a road checkpoint: barriers, a booth, a sandbag nest). Hot zones (4B part 3)
+## add "hq" (the enemy HQ: a HESCO-walled base with a command building, barracks and
+## watchtowers), "qrf_base" (barracks and a vehicle shed: its QRF answers alarms) and "comms" (a
+## radio mast on a steel lattice behind HESCO: destroyed, enemy reports slow down).
+const TYPES: Array[String] = ["compound", "outpost", "village", "checkpoint", "hq", "qrf_base", "comms"]
 
 ## Half the footprint in metres (x, z): the pad under it and its voxel bounds.
 const HALF := {
@@ -21,6 +24,9 @@ const HALF := {
 	"outpost": Vector2(11.0, 11.0),
 	"village": Vector2(20.0, 14.0),
 	"checkpoint": Vector2(14.0, 10.0),
+	"hq": Vector2(22.0, 22.0),
+	"qrf_base": Vector2(17.0, 13.0),
+	"comms": Vector2(9.0, 9.0),
 }
 ## Voxel bounds reach this far above the ground (m) and this far below it.
 const TOP_M := 4.8
@@ -35,6 +41,9 @@ const POINTS := {
 	"outpost": {"objective": [Vector3(-5.5, 0, -6)], "cache": [Vector3(2.5, 0, -0.5)], "intel": [Vector3(-4.5, 0, -6.5)], "aa": [Vector3(-6, 0, 2.5)]},
 	"village": {"objective": [Vector3(15.5, 0, -10)], "cache": [Vector3(-14.8, 0, 10.2)], "intel": [Vector3(1, 0, -9.5)]},
 	"checkpoint": {"objective": [Vector3(9, 0, 5)], "cache": [Vector3(5.6, 0, 5.2)], "intel": [Vector3(9.2, 0, 4.6)]},
+	"hq": {"objective": [Vector3(-11, 0, -12)], "cache": [Vector3(9, 0, 9)], "intel": [Vector3(-5, 0, -12.5)], "aa": [Vector3(-11, 0, 9)]},
+	"qrf_base": {"objective": [Vector3(-8, 0, -6)], "cache": [Vector3(9, 0, 5)], "intel": [Vector3(-11, 0, -7)]},
+	"comms": {"objective": [Vector3(-4.5, 0, -4.5)], "cache": [Vector3(2.1, 0, -3.4)], "intel": [Vector3(-4.5, 0, -4.5)], "comms": [Vector3(2.1, 0, -3.4)]},
 }
 
 ## Hostile garrison (m from the origin): they hold where they stand (guards), in pairs.
@@ -43,6 +52,10 @@ const GARRISON := {
 	"outpost": [Vector3(-5.5, 0.1, -6), Vector3(6, 0.1, -2), Vector3(-4, 0.1, 7.2), Vector3(4, 0.1, 7.2)],
 	"village": [Vector3(-15, 0.1, -10), Vector3(1, 0.1, -10), Vector3(15.5, 0.1, -10), Vector3(-13.5, 0.1, 9)],
 	"checkpoint": [Vector3(9, 0.1, 5), Vector3(-10, 0.1, 6.5), Vector3(2, 0.1, -5), Vector3(-2, 0.1, -5)],
+	"hq": [Vector3(-11, 0.1, -12), Vector3(-5, 0.1, -12), Vector3(10, 0.1, -13), Vector3(12, 0.1, -12), Vector3(-3.4, 0.1, 15.0), Vector3(3.4, 0.1, 15.0),
+		Vector3(-16.4, 3.2, 16.4), Vector3(16.4, 3.2, -16.4)],
+	"qrf_base": [Vector3(-8, 0.1, -6), Vector3(-10, 0.1, -5), Vector3(6, 0.1, -5), Vector3(9, 0.1, -5), Vector3(-3, 0.1, 8), Vector3(3, 0.1, 8)],
+	"comms": [Vector3(-4.5, 0.1, -4.5), Vector3(4, 0.1, 2), Vector3(-2.5, 0.1, 4.5), Vector3(2.5, 0.1, 4.5)],
 }
 
 ## Loot lying in each module (m from the origin; uids are made unique per module).
@@ -67,6 +80,21 @@ const LOOT := {
 		{"uid": "rounds", "id": "rounds_762", "count": 40, "pos": Vector3(-10, 0.5, 7)},
 		{"uid": "smoke", "id": "smoke_grenade", "count": 2, "pos": Vector3(9, 0.5, 5.2)},
 	],
+	"hq": [
+		{"uid": "mags", "id": "mag_556", "count": 4, "pos": Vector3(-12, 0.5, -13)},
+		{"uid": "rounds", "id": "rounds_762", "count": 60, "pos": Vector3(10, 0.5, -14)},
+		{"uid": "ifak", "id": "ifak", "pos": Vector3(12, 0.5, -14)},
+		{"uid": "frags", "id": "frag_grenade", "count": 3, "pos": Vector3(-4, 0.5, -14)},
+		{"uid": "salvage", "id": "electronics_salvage", "count": 5, "pos": Vector3(-6, 0.5, -14)},
+	],
+	"qrf_base": [
+		{"uid": "rounds", "id": "rounds_556", "count": 90, "pos": Vector3(-11, 0.5, -7.5)},
+		{"uid": "smoke", "id": "smoke_grenade", "count": 3, "pos": Vector3(-6, 0.5, -7.5)},
+		{"uid": "ifak", "id": "ifak", "pos": Vector3(-9, 0.5, -7.5)},
+	],
+	"comms": [
+		{"uid": "salvage", "id": "electronics_salvage", "count": 6, "pos": Vector3(-4.5, 0.5, -5)},
+	],
 }
 
 static var _cache := {}
@@ -90,6 +118,12 @@ static func boxes(type: String) -> Array:
 				_cache[type] = _village()
 			"checkpoint":
 				_cache[type] = _checkpoint()
+			"hq":
+				_cache[type] = _hq()
+			"qrf_base":
+				_cache[type] = _qrf_base()
+			"comms":
+				_cache[type] = _comms()
 			_:
 				push_error("ZoneModules: unknown type %s" % type)
 				return []
@@ -237,6 +271,105 @@ static func _checkpoint() -> Array:
 	# A weapons cache by the booth (a raid target).
 	_crates(out, Vector3(4.6, 0, 4.6))
 	return out
+
+
+## The enemy HQ (hot zones): a HESCO wall 40 m square with a gate to the south, a concrete
+## command building (two rooms: the commander's office and the radio room with the intel),
+## a plank barracks, watchtowers at two corners, sandbags at the gate, a weapons cache in the
+## east yard and an AA site in the west yard.
+static func _hq() -> Array:
+	var out: Array = []
+	var M := VoxelWorld.Mat
+	var H := M.HESCO
+	out.append([Vector3(-20, 0, -20), Vector3(20, 2.2, -19), H])
+	out.append([Vector3(-20, 0, -19), Vector3(-19, 2.2, 20), H])
+	out.append([Vector3(19, 0, -19), Vector3(20, 2.2, 20), H])
+	out.append([Vector3(-19, 0, 19), Vector3(-2.0, 2.2, 20), H])
+	out.append([Vector3(2.0, 0, 19), Vector3(19, 2.2, 20), H])
+	# Command building, 13 x 7 m: office (west) and radio room (east), a doorway between.
+	_room(out, Vector2(-15, -16), Vector2(-2, -9), 2.8, 0.3, M.CONCRETE, [["s", -12.6, -11.4], ["s", -5.6, -4.4]], M.CONCRETE, 0.3,
+		[["n", -10.5, -9.5], ["e", -14.5, -13.5]])
+	out.append([Vector3(-8.65, 0, -15.7), Vector3(-8.35, 2.8, -13.1), M.CONCRETE])
+	out.append([Vector3(-8.65, 0, -11.9), Vector3(-8.35, 2.8, -9.3), M.CONCRETE])
+	out.append([Vector3(-8.65, 2.1, -13.1), Vector3(-8.35, 2.8, -11.9), M.CONCRETE])
+	# Barracks, 10 x 5 m, plank walls and a sheet-metal roof.
+	_room(out, Vector2(4, -16), Vector2(14, -11), 2.5, 0.15, M.WOOD, [["s", 8.4, 9.6]], M.SHEET_METAL, 0.1,
+		[["n", 6.5, 7.5], ["n", 10.5, 11.5]])
+	# Watchtowers in the north-east and south-west corners.
+	_tower(out, Vector2(15.2, -17.6), ["n", "e"])
+	_tower(out, Vector2(-17.6, 15.2), ["s", "w"])
+	# Sandbags inside the gate, the cache and the AA site.
+	out.append([Vector3(-5.0, 0, 15.6), Vector3(-2.4, 1.1, 16.0), M.SANDBAG])
+	out.append([Vector3(2.4, 0, 15.6), Vector3(5.0, 1.1, 16.0), M.SANDBAG])
+	_crates(out, Vector3(8.0, 0, 8.4))
+	_aa_site(out, Vector2(-11.0, 9.0))
+	return out
+
+
+## A QRF base (hot zones): a HESCO enclosure 30 x 22 m, gate to the south, a cinder-block
+## barracks, an open vehicle shed (posts and a sheet-metal roof: vehicles park here from wave 5)
+## and the QRF's ammunition crates.
+static func _qrf_base() -> Array:
+	var out: Array = []
+	var M := VoxelWorld.Mat
+	var H := M.HESCO
+	out.append([Vector3(-15, 0, -11), Vector3(15, 2.0, -10), H])
+	out.append([Vector3(-15, 0, -10), Vector3(-14, 2.0, 11), H])
+	out.append([Vector3(14, 0, -10), Vector3(15, 2.0, 11), H])
+	out.append([Vector3(-14, 0, 10), Vector3(-2.5, 2.0, 11), H])
+	out.append([Vector3(2.5, 0, 10), Vector3(14, 2.0, 11), H])
+	_room(out, Vector2(-13, -9), Vector2(-3, -3), 2.6, 0.2, M.CINDER_BLOCK, [["s", -8.6, -7.4]], M.SHEET_METAL, 0.1,
+		[["n", -10.5, -9.5], ["n", -5.5, -4.5], ["e", -7.5, -6.5]])
+	for p: Vector2 in [Vector2(2.0, -9.0), Vector2(12.8, -9.0), Vector2(2.0, -2.2), Vector2(12.8, -2.2)]:
+		out.append([Vector3(p.x, 0, p.y), Vector3(p.x + 0.2, 3.0, p.y + 0.2), M.STEEL])
+	out.append([Vector3(2.0, 3.0, -9.0), Vector3(13.0, 3.1, -2.0), M.SHEET_METAL])
+	_crates(out, Vector3(8.0, 0, 4.4))
+	return out
+
+
+## A comms site (hot zones): a HESCO ring 14 m across with a gap to the south, a sheet-metal
+## generator shed and a radio mast: a steel lattice 4.4 m tall with a dish. Steel shrugs off
+## grenades: it takes a placed charge. Destroyed, the zone's reports slow down (Alert).
+static func _comms() -> Array:
+	var out: Array = []
+	var M := VoxelWorld.Mat
+	var H := M.HESCO
+	out.append([Vector3(-7, 0, -7), Vector3(7, 2.0, -6), H])
+	out.append([Vector3(-7, 0, -6), Vector3(-6, 2.0, 7), H])
+	out.append([Vector3(6, 0, -6), Vector3(7, 2.0, 7), H])
+	out.append([Vector3(-6, 0, 6), Vector3(-1.5, 2.0, 7), H])
+	out.append([Vector3(1.5, 0, 6), Vector3(6, 2.0, 7), H])
+	_room(out, Vector2(-5.8, -5.8), Vector2(-2.8, -2.8), 2.2, 0.1, M.SHEET_METAL, [["e", -4.9, -3.9]], M.SHEET_METAL, 0.1)
+	# The mast: four steel legs, cross braces, a platform and a dish.
+	var T := M.STEEL
+	for p: Vector2 in [Vector2(1.4, -4.1), Vector2(2.6, -4.1), Vector2(1.4, -2.9), Vector2(2.6, -2.9)]:
+		out.append([Vector3(p.x, 0, p.y), Vector3(p.x + 0.15, 4.2, p.y + 0.15), T])
+	for y: float in [1.4, 2.8]:
+		out.append([Vector3(1.4, y, -4.1), Vector3(2.75, y + 0.1, -2.75), T])
+	out.append([Vector3(1.3, 4.2, -4.2), Vector3(2.9, 4.3, -2.6), T])
+	out.append([Vector3(1.8, 4.3, -3.6), Vector3(2.4, 4.6, -3.4), T])
+	return out
+
+
+## A wooden watchtower with its low corner at `c` (x, z): four posts, a plank floor at 3 m and a
+## sandbag parapet on each side in `faces` ("n" -z, "s" +z, "w" -x, "e" +x): the sides that look
+## out of the site (a corner tower: its two outer sides, Captain 2026-10-12).
+static func _tower(out: Array, c: Vector2, faces: Array) -> void:
+	var W := VoxelWorld.Mat.WOOD
+	var S := VoxelWorld.Mat.SANDBAG
+	for p: Vector2 in [c, c + Vector2(2.4, 0), c + Vector2(0, 2.4), c + Vector2(2.4, 2.4)]:
+		out.append([Vector3(p.x, 0, p.y), Vector3(p.x + 0.2, 3.0, p.y + 0.2), W])
+	out.append([Vector3(c.x, 3.0, c.y), Vector3(c.x + 2.6, 3.1, c.y + 2.6), W])
+	for side: String in faces:
+		match side:
+			"n":
+				out.append([Vector3(c.x, 3.1, c.y), Vector3(c.x + 2.6, 3.8, c.y + 0.3), S])
+			"s":
+				out.append([Vector3(c.x, 3.1, c.y + 2.3), Vector3(c.x + 2.6, 3.8, c.y + 2.6), S])
+			"w":
+				out.append([Vector3(c.x, 3.1, c.y), Vector3(c.x + 0.3, 3.8, c.y + 2.6), S])
+			"e":
+				out.append([Vector3(c.x + 2.3, 3.1, c.y), Vector3(c.x + 2.6, 3.8, c.y + 2.6), S])
 
 
 ## A weapons cache: two wooden crates (1 x 1 x 1.2 m) side by side along x from `corner` (their

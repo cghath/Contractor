@@ -14,7 +14,8 @@ extends Node3D
 ## Every other peer builds the same parts as static colliders that follow ragdoll_net, so a
 ## player (who drives their own movement) walks over bodies on their own machine too.
 ## Soldier._update_ragdoll starts and stops it: a body down and not carried has one;
-## carried or dragged it hasn't (putting it down drops it again), nor once it's back up.
+## carried or dragged it hasn't (putting it down drops it again), nor once it's back up. When
+## it goes, the body stands where it lay (rest_spot), not where it fell.
 ## Arms are parts too (upper arm and forearm), with shoulder and elbow limits.
 
 ## Layer 6 ("ragdolls"): the parts. They meet the world and each other; living soldiers meet
@@ -82,6 +83,7 @@ static func start(soldier: Soldier) -> Ragdoll:
 	r.global_transform = Transform3D.IDENTITY
 	var start_bones: Dictionary = part_bones(soldier.model) if soldier.model.ragdolled() else r._drawn_bones()
 	r._build(start_bones)
+	r._root_last = soldier.global_transform  # parts built where the body is: carried along from here, even before the first step
 	var push := soldier.velocity if soldier.velocity.is_finite() else Vector3.ZERO
 	for p: RigidBody3D in r.parts.values():
 		p.linear_velocity = push
@@ -98,6 +100,80 @@ static func follow(soldier: Soldier) -> Ragdoll:
 	r.global_transform = Transform3D.IDENTITY
 	r._build(part_bones(soldier.model))
 	return r
+
+
+## Proposed: where a body stands up from its ragdoll (rest_spot): ground found by a ray from this
+## far above the hips down to this far below them, walkable up to MAX_SLOPE_Y (normal's y), and
+## tried at the hips, then on rings of these radii (metres) round them if a wall is in the way.
+const GROUND_ABOVE := 0.6
+const GROUND_BELOW := 2.5
+const MAX_SLOPE_Y := 0.6
+const SPOT_RINGS: Array[float] = [0.35, 0.7]
+const SPOT_DIRECTIONS := 8
+
+
+## Where the body stands up from the ragdoll as it lies now (host and following peers alike, from
+## the parts): on the ground under its hips, clear of walls for a standing capsule, facing the
+## way it gets up (chest down: towards its head; on its back: towards its feet). Null when no
+## safe ground is near, so the body stays where it fell.
+func rest_spot() -> Variant:
+	if not is_instance_valid(body) or body.model == null or not parts.has("torso") or not body.is_inside_tree():
+		return null
+	if simulated:
+		_carry_along()  # the body put somewhere this frame (a restore, a script) takes the parts along first
+	var torso := parts["torso"] as Node3D
+	var hips := torso.global_position  # the torso part's pivot is the pelvis (rest_bones)
+	var space := body.get_world_3d().direct_space_state
+	var candidates: Array[Vector3] = [hips]
+	for radius in SPOT_RINGS:
+		for i in SPOT_DIRECTIONS:
+			var angle := TAU * i / SPOT_DIRECTIONS
+			candidates.append(hips + Vector3(cos(angle), 0.0, sin(angle)) * radius)
+	for c in candidates:
+		var ground: Variant = _ground_below(space, c, hips)
+		if ground != null:
+			return Transform3D(Basis(Vector3.UP, _stand_yaw(torso)), ground)
+	return null
+
+
+## Ground under `at` that a standing body fits on, reachable from `hips` without passing a wall;
+## null if none.
+func _ground_below(space: PhysicsDirectSpaceState3D, at: Vector3, hips: Vector3) -> Variant:
+	var down := PhysicsRayQueryParameters3D.create(at + Vector3.UP * GROUND_ABOVE, at + Vector3.DOWN * GROUND_BELOW, SoldierMovement.WORLD_MASK)
+	var hit := space.intersect_ray(down)
+	if hit.is_empty() or (hit.normal as Vector3).y < MAX_SLOPE_Y:
+		return null
+	var ground: Vector3 = hit.position
+	if at != hips:
+		var from := hips + Vector3.UP * 0.3
+		var across := PhysicsRayQueryParameters3D.create(from, Vector3(ground.x, from.y, ground.z), SoldierMovement.WORLD_MASK)
+		if not space.intersect_ray(across).is_empty():
+			return null  # a wall between where it lies and there
+	var margin := SoldierMovement.ROOM_MARGIN
+	var shape := CapsuleShape3D.new()
+	shape.radius = SoldierMovement.CAPSULE_RADIUS - margin
+	shape.height = SoldierMovement.STANCE_CAPSULE[SoldierMovement.Stance.STAND_HIGH] - margin * 2.0
+	var query := PhysicsShapeQueryParameters3D.new()
+	query.shape = shape
+	query.transform = Transform3D(Basis(), ground + Vector3.UP * (margin * 2.0 + shape.height * 0.5))
+	query.collision_mask = SoldierMovement.WORLD_MASK
+	query.exclude = [body.get_rid()]
+	return ground if space.intersect_shape(query, 1).is_empty() else null
+
+
+## The body's yaw getting up, from the torso as it lies: chest down, it pushes up facing its
+## head; on its back or side, it sits up facing its feet; slumped upright, it faces where its
+## chest does.
+func _stand_yaw(torso: Node3D) -> float:
+	var to_model := body.model.transform.basis.orthonormalized().inverse()  # the soldier's axes in model space
+	var up := torso.global_basis * (to_model * Vector3.UP)
+	var chest := torso.global_basis * (to_model * Vector3.FORWARD)
+	var face := Vector3(up.x, 0.0, up.z) * (1.0 if chest.y < 0.0 else -1.0)
+	if face.length() < 0.3:
+		face = Vector3(chest.x, 0.0, chest.z)
+	if face.length() < 0.1:
+		return body.rotation.y
+	return atan2(-face.x, -face.z)
 
 
 ## Stops it (the host clears ragdoll_net) and frees the parts.

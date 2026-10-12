@@ -28,10 +28,12 @@ func _ready() -> void:
 		player.inventory.take(id)
 	_remove_hostiles()
 	await _frames(10)
+	_clear_contact()  # anyone glimpsed before they were removed (friendlies see 120 m)
 	await _test_roster()
 	_test_command_menu()
 	_test_navigation()
 	await _test_follow()
+	await _test_senses()
 	await _test_buddy_carries_buddy()
 	await _test_contact()
 	_test_flash_stuns()
@@ -136,6 +138,76 @@ func _test_follow() -> void:
 	for s: Soldier in far:
 		print("    %s at %s, slot %s, %s" % [s.name, s.global_position, squad.follow_point(s), s.ai_status])
 	check(far.is_empty(), "the whole squad follows the lead through the gate into formation (%d not there)" % far.size())
+
+
+## The squad's senses and habits (Captain, 2026-10-12: they seemed a bit unintelligent):
+## halted with the lead they take spots beside something solid and watch outward; they hear
+## enemy fire they can't see; contact one sees reaches the rest; pinned in the open, one
+## crawls to cover instead of freezing.
+func _test_senses() -> void:
+	print("Senses and habits")
+	var squad := level.squad_for(&"friendly")
+	# The lead has stood still since "Following": everyone has a halt spot near their slot.
+	var spots := _squad().filter(func(s: Soldier) -> bool:
+		var ai := SquadAI.of(s)
+		return ai._halt_spot != null and _flat(ai._halt_spot, squad.follow_point(s)) <= SquadAI.HALT_COVER_M + 0.7)
+	check(spots.size() == _squad().size(), "halted with the lead, each takes a spot by its slot (%d of %d)" % [spots.size(), _squad().size()])
+	await _seconds(1.5)
+	var out := _squad().filter(func(s: Soldier) -> bool:
+		var ai := SquadAI.of(s)
+		if ai._halt_spot == null or _flat(s.global_position, ai._halt_spot) > SquadAI.ARRIVE + 0.3:
+			return true  # still getting there: not judged
+		var away := Vector3(s.global_position.x - player.global_position.x, 0, s.global_position.z - player.global_position.z).normalized()
+		return (-s.global_basis.z).dot(away) > 0.5)
+	check(out.size() >= _squad().size() - 1, "and watches outward from the lead (%d of %d)" % [out.size(), _squad().size()])
+	# Hearing: a hostile shot 60 m off, out of sight, puts the squad in contact toward it;
+	# a suppressed one that far doesn't.
+	var shooter := level.spawn_soldier({"name": "HeardHostile", "faction": "hostile", "variant": "urban",
+		"pos": player.global_position + Vector3(0, 0, -60), "loadout": [], "combat": 0.5, "discipline": 0.5, "guard": true})
+	await _frames(2)
+	SquadAI.of(shooter).process_mode = Node.PROCESS_MODE_DISABLED
+	var alpha := _ai("Alpha")
+	var before := alpha.threat_time
+	SquadAI.server_heard_shot(shooter, shooter.global_position, true)
+	check(alpha.threat_time == before, "a suppressed shot 60 m off goes unheard")
+	SquadAI.server_heard_shot(shooter, shooter.global_position, false)
+	var off := _flat(alpha.threat_pos, shooter.global_position)
+	check(alpha.threat_time > before and off <= SquadAI.HEARD_ERROR_PER_100M * 0.85, "a plain one is heard: contact toward it (%.1f m off)" % off)
+	await _frames(2)
+	check(SquadAI.of(alpha).in_contact(), "and Alpha is in contact (%s)" % alpha.ai_status)
+	shooter.queue_free()
+	_clear_contact()
+	# Shared contact: what one squadmate sees, the rest nearby know about.
+	var bravo := _ai("Bravo")
+	SquadAI.of(alpha)._share_contact(player.global_position + Vector3(0, 0, -40), Soldier._now())
+	check(bravo.threat_time >= Soldier._now() - 0.1 and _flat(bravo.threat_pos, player.global_position + Vector3(0, 0, -40)) < 0.1,
+		"contact Alpha sees reaches Bravo")
+	_clear_contact()
+	# Pinned in the open: crawl to cover rather than freeze.
+	var echo := _ai("Echo")
+	var ai := SquadAI.of(echo)
+	var threat := echo.global_position + Vector3(0, 0, -15)
+	ai._has_cover = false
+	var reached := await _wait_until(func() -> bool:
+		echo.suppression = 1.0
+		echo.threat_pos = threat
+		echo.threat_time = Soldier._now()
+		return ai._has_cover and ai._at_cover(), 6.0)
+	check(reached and ai._cover_protects(ai._cover_point), "pinned in the open, Echo crawls to cover (%s, %.1f m off)" % [echo.ai_status, _flat(echo.global_position, ai._cover_point)])
+	echo.suppression = 0.0
+	_clear_contact()
+	await _seconds(1.0)
+
+
+## Everyone out of contact again (between staged checks).
+func _clear_contact() -> void:
+	for s: Soldier in _squad():
+		s.threat_time = -1000.0
+		var ai := SquadAI.of(s)
+		ai._last_contact = -1000.0
+		ai._fired_on_at = -1000.0
+		ai.target = null
+	level.squad_for(&"friendly").engaged_at = -1000.0
 
 
 func _test_buddy_carries_buddy() -> void:

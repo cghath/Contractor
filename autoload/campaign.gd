@@ -27,6 +27,24 @@ func section(section_name: StringName) -> Dictionary:
 	return _sections[key]
 
 
+## Host: a deep copy of every section, to put back later with restore().
+func snapshot() -> Dictionary:
+	return _sections.duplicate(true)
+
+
+## Host: every section back as it was in `snap` (from snapshot()), in place, so whoever holds
+## a section Dictionary sees the old state; sections made since are emptied.
+func restore(snap: Dictionary) -> void:
+	for key: String in _sections:
+		if not snap.has(key):
+			(_sections[key] as Dictionary).clear()
+	for key: String in snap:
+		var s := section(StringName(key))
+		s.clear()
+		s.merge((snap[key] as Dictionary).duplicate(true))
+		changed.emit(StringName(key))
+
+
 ## Host: a section changed (it saves with the rest on save_campaign).
 func mark_changed(section_name: StringName) -> void:
 	changed.emit(section_name)
