@@ -251,5 +251,41 @@ priority (escorts treat him until a medic takes over). See CHANGELOG.
 Started while cghath's side starts wave 5. Size: 16 km² (4,096 m square). The base hub stays
 as it is through part 3; wave 5 makes it the first friendly FOB (see the wave 5 note in
 `ChrisPlan_handoff.md`). QRF bases stay on foot until wave 5's vehicles; part 3 leaves hooks for
-vehicle QRFs and helicopter or AAV insertion. Open: layout, alert level and radio chatter,
-pressure over time and hunter teams, radio contracts.
+vehicle QRFs and helicopter or AAV insertion.
+
+**Captain's part 3 decisions (2026-10-12).** Numbers are Proposed.
+
+- **Layout:** one enemy HQ, 3-6 outposts, road checkpoints, roaming patrols, 1-2 QRF bases
+  (on foot until wave 5's vehicles).
+- **Alert (realistic: the enemy knows only what its people see, hear and report):**
+  - Local first: the unit that sees or hears reacts at once; the zone learns only when it
+    radios in (15-60 s by quality, longer under fire). Killed before reporting, nobody knows.
+  - Sound: unsuppressed rifle fire heard to about 400-800 m (terrain and buildings), suppressed
+    about 50-100 m, explosions about 1-1.5 km. Hearing gives a rough direction, not who.
+  - Check-ins every 15-20 min per post and patrol; a missed one gets a call, then a look.
+    Bodies and blown sites are found by passing patrols and reported.
+  - The enemy works from a last known position with an uncertainty circle that grows with
+    time; searches and hunter teams go there.
+  - Comms: destroying the comms site slows or stops reports; a jammer stops a unit reporting.
+  - States per area and for the zone: Normal, Suspicious (stand-to, a patrol goes to look),
+    Alerted (posts manned, checkpoints closed, QRF on standby, patrols doubled), Engaged (QRF
+    launches to the reported position). Cooldown is slow: Engaged to Alerted after about 20
+    min without contact, Alerted to Suspicious after 1-2 hours; a zone you were loud in stays
+    twitchy for the deployment.
+  - No meter on screen: players read it from behaviour and from **looted enemy radio chatter,
+    which is in part 3** (hear the zone's alert and sometimes patrol or QRF moves until they
+    switch frequencies).
+- **Pressure (long term, from what the squad does, not the clock):** firefights +2 each (more if
+  long), kills +0.5, a patrol wiped out or not reporting +3, explosions +1, objectives +5, an
+  outpost or checkpoint destroyed +8, an alarm raised +3; quiet: -1 per 10 min; time only +1
+  per 30 min. At 10: bigger QRF waves, patrols in pairs. At 20: a second QRF, checkpoints
+  closed. At 35: hunter teams (4-6 good troops to the last known position: track, flank,
+  smoke). At 50+: more hunters, the HQ reinforces its sites. A destroyed QRF base removes its
+  waves; a destroyed comms site halves pressure gain; dead officers make hunters less
+  coordinated. Generic hunters here; named Nemesis-style hunters with wave 6. Staying longer
+  pays more (decided).
+- **Radio contracts need a field radio item** in the squad (the board in the field).
+- **Insertion:** on foot from 2-3 edge points picked in the briefing; each point keeps a
+  "method" field (foot now; helicopter and AAV in wave 5); the first point out of sight of the
+  nearest outpost. AI hold while the briefing is open (on dev).
+- **The base hub stays as it is** until wave 5 makes it the first friendly FOB.
