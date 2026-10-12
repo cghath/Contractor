@@ -121,6 +121,14 @@ func _marker(at: Vector2) -> int:
 		"channel": "field", "author": 1})
 
 
+## The last round's smoke goes (it would still be out for half a minute).
+func _clear_smoke() -> void:
+	for cloud in SmokeCloud.active.duplicate():
+		if is_instance_valid(cloud):
+			cloud.queue_free()
+	await get_tree().process_frame
+
+
 func _smoke(at: Vector3, colour: String) -> void:
 	level.spawn_smoke.rpc(_ground(at), colour)
 
@@ -301,7 +309,7 @@ func _test_landing_zone() -> void:
 	var f := LandingZone.find(level, by_wall)
 	check(f.ok and float(f.moved_m) >= 5.0 and float(f.moved_m) <= 100.0 and LandingZone.check(level, f.spot).ok,
 		"the nearest safe spot is %.0f m off, within 100 m" % float(f.moved_m))
-	var ramp_top := _ground(RAMP_AT)
+	var ramp_top := _ground(RAMP_AT) + Vector3.UP * (17.0 * sin(deg_to_rad(22.0)))  # its low edge at the ground
 	_wall(ramp_top, Vector3(34, 2, 34), 22.0, true)
 	await get_tree().physics_frame
 	var steep := LandingZone.check(level, RAMP_AT)
@@ -498,6 +506,7 @@ func _test_smoke_calls() -> void:
 
 func _test_first_takes_green() -> void:
 	print("Green smoke: the first call takes it")
+	await _clear_smoke()
 	sup.server_reset_limits()
 	_regroup()
 	check(_call("support:resupply:smoke") == "" and _call("support:transport:smoke") == "", "resupply, then transport, on smoke")
@@ -615,6 +624,7 @@ func _test_shot_down() -> void:
 	await _wait_for(func() -> bool: return mates.all(func(m: Soldier) -> bool: return _aboard(m, t)), 40.0)
 	check(mates.all(func(m: Soldier) -> bool: return _aboard(m, t)), "two AI aboard")
 	t.heli.cargo_hold.take(&"frag_grenade", 3)
+	player.global_position = _ground(HOME + Vector3(0, 0, 100))  # stays behind: it goes once everyone near is in
 	_marker(Vector2(-300.0, -200.0))
 	check(_call("support:transport:dest") == "", "off to a destination")
 	await _wait_for(func() -> bool: return t.phase == HeliCall.Phase.CARRY and t.heli.height_agl() > 25.0, 40.0)
@@ -650,6 +660,7 @@ func _test_shot_down() -> void:
 # --- The client's part (host side) -------------------------------------------------------------
 
 func _stage_for_client() -> void:
+	await _clear_smoke()
 	sup.server_reset_limits()
 	_regroup()
 	MapNodes.extraction(level).server_begin({})
@@ -740,12 +751,12 @@ func _run_client(address: String) -> void:
 		_finish()
 		return
 	var first := heli.global_position
-	await _wait_for(func() -> bool: return not is_instance_valid(heli) or heli.is_landed(), FLY_S)
+	await _wait_for(func() -> bool: return not is_instance_valid(mine[0]) or (mine[0] as Helicopter).is_landed(), FLY_S)
 	check(is_instance_valid(heli) and heli.is_landed() and heli.global_position.distance_to(first) > 100.0, "it flew in and landed (seen on the client)")
 	if is_instance_valid(heli):
 		check(_flat(heli.global_position, spot) <= 100.0 and heli.height_agl() < 1.0, "at the spot the client picked (%.0f m off)" % _flat(heli.global_position, spot))
 	await _wait_for(func() -> bool: return sup.heard_line("Pallet's down"), 10.0)
 	check(sup.heard_line("Mule 1-1: Inbound") and sup.heard_line("Pallet's down"), "the client heard the radio: inbound, pallet's down")
-	await _wait_for(func() -> bool: return not is_instance_valid(heli) or heli.is_queued_for_deletion(), FLY_S)
-	check(not is_instance_valid(heli), "and it left: gone on the client too")
+	await _wait_for(func() -> bool: return not is_instance_valid(mine[0]) or (mine[0] as Node).is_queued_for_deletion(), FLY_S)  # (an Array: a freed capture is an error)
+	check(not is_instance_valid(mine[0]), "and it left: gone on the client too")
 	_finish()

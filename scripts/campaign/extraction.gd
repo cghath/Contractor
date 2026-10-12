@@ -11,7 +11,8 @@ extends Node
 ## uses that). Then a countdown runs (COUNTDOWN_S); anyone needed stepping out stops it.
 ## At the end the host builds the report of who and what got out and hands it to the
 ## economy (END_GROUP) and to deployment_ended. State replicates to every peer and late
-## joiners.
+## joiners. Wave 5b: a called extraction helicopter (HeliCall) lands at a point and, with the
+## squad aboard, ends the deployment by lifting off (server_ride_out): what's aboard is out.
 ##
 ## The report (Dictionary, JSON-safe):
 ##   "contract_id", "zone_id", "point" ({"name", "pos": [x, z], "source"}), "duration_s",

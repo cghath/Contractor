@@ -576,26 +576,30 @@ func _load_people(hvts: bool) -> void:
 	var extraction := MapNodes.extraction(sup)
 	if hvts and extraction:
 		point = extraction.point_by_id(point_id)
+	var everyone: Array = []
 	for parent: Node in [lvl.players, lvl.ai, lvl.bodies]:
-		for n in parent.get_children():
-			var s := n as Soldier
-			if s == null or s.is_queued_for_deletion() or Vehicle.ride_of(s) != null:
-				continue
-			var hvt := Person.is_hvt(s)
-			if not hvt and s.faction != &"friendly":
-				continue
-			if is_instance_valid(s.carried_by):
-				if _by_door(s.carried_by.global_position, LOAD_REACH_M + 1.0):
-					heli.server_enter(s)
-				continue
-			if not s.vitals.is_up():
-				if _by_door(s.body_point(), LOAD_REACH_M):
-					heli.server_enter(s)
-				continue
-			if hvt and hvts and not s.vitals.is_dead() and (Person.leadable(s) or Person.is_cuffed(s)):
-				var near := s.global_position.distance_to(heli.global_position) <= HVT_REACH_M
-				if near or (not point.is_empty() and Extraction.inside(point, s.global_position)):
-					heli.server_enter(s)
+		everyone.append_array(parent.get_children())
+	if lvl.people:
+		everyone.append_array(lvl.people.people())  # civilians and HVTs live under People
+	for n: Node in everyone:
+		var s := n as Soldier
+		if s == null or s.is_queued_for_deletion() or Vehicle.ride_of(s) != null:
+			continue
+		var hvt := Person.is_hvt(s)
+		if not hvt and s.faction != &"friendly":
+			continue
+		if is_instance_valid(s.carried_by):
+			if _by_door(s.carried_by.global_position, LOAD_REACH_M + 1.0):
+				heli.server_enter(s)
+			continue
+		if not s.vitals.is_up():
+			if _by_door(s.body_point(), LOAD_REACH_M):
+				heli.server_enter(s)
+			continue
+		if hvt and hvts and not s.vitals.is_dead() and (Person.leadable(s) or Person.is_cuffed(s)):
+			var near := s.global_position.distance_to(heli.global_position) <= HVT_REACH_M
+			if near or (not point.is_empty() and Extraction.inside(point, s.global_position)):
+				heli.server_enter(s)
 
 
 ## Extraction: items set down inside the point go into the hold (whole stacks that fit).
