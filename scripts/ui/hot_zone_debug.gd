@@ -67,7 +67,13 @@ func _process(delta: float) -> void:
 
 ## The readout: zone and area states, the last known position, pressure, the enemy's moves.
 func text() -> String:
-	var alert := Alert.of(self)
+	return readout(self)
+
+
+## The readout for the level `from` is in ("" outside a hot zone), for this overlay and the
+## session log's dumps (SessionLog.state_text), whether or not the dev tools are on.
+static func readout(from: Node) -> String:
+	var alert := Alert.of(from)
 	if alert == null:
 		return ""
 	var lines: Array[String] = ["HOT ZONE (debug; PgUp hide, PgDn +%d min)" % int(SKIP_S / 60.0)]
@@ -80,12 +86,12 @@ func text() -> String:
 	var lk := alert.last_known()
 	lines.append("Last known: %s" % ("none" if lk.is_empty() else "(%.0f, %.0f) +/- %.0f m" % [lk.pos.x, lk.pos.z, lk.radius]))
 	lines.append("Reports: %d heard, %d on the way" % [alert.reports.size(), alert._pending.size()])
-	var pressure := Pressure.of(self)
+	var pressure := Pressure.of(from)
 	if pressure:
 		var last: Dictionary = pressure.history.back() if not pressure.history.is_empty() else {}
 		lines.append("Pressure: %.1f (tier %d)%s" % [pressure.points, pressure.tier(),
 			"  last: %s %+.1f" % [last.why, last.gain] if not last.is_empty() else ""])
-	var response := EnemyResponse.of(self)
+	var response := EnemyResponse.of(from)
 	if response:
 		var out := response.patrols.filter(func(r: Dictionary) -> bool: return not r.pending and not r.lost).size()
 		var looking := response.patrols.filter(func(r: Dictionary) -> bool: return float(r.looking_until) > response.now()).size()
@@ -93,7 +99,8 @@ func text() -> String:
 		lines.append("Patrols out: %d (%d looking)  checkpoints %s" % [out, looking, "closed" if response.checkpoints_closed else "open"])
 		lines.append("QRF launches: %d%s  hunter teams: %d  HQ pairs: %d  coordination %.1f" % [response.qrf_launches.size(), turnout,
 			response.hunters.size(), response.reinforcement_pairs.size(), response.coordination()])
-	var chatter := level_node(&"RadioChatter")
+	var lvl := CompoundLevel.current(from) if from.is_inside_tree() else null
+	var chatter := lvl.get_node_or_null(^"RadioChatter") if lvl else null
 	if chatter:
 		lines.append("Enemy radio: %s" % ("listening" if chatter.get(&"tuned") else "not tuned in"))
 	return "\n".join(lines)

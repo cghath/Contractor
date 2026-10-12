@@ -75,14 +75,43 @@ Today's dev keys:
 New dev keys: put them behind `DevTools.on()`, list them here, and keep them off F1-F12 (the
 squad command menu) and the game's keys (`autoload/controls.gd`).
 
+## Session logs: automatic in every playtest (`SessionLog`, built)
+
+Every run that isn't headless (a playtest: the editor or any build, dev tools or not) opens a
+numbered session, **P<number>**, from the same counter and in the same parent as the test runs:
+
+```
+<parent>/2026-10-12/P0047-071530-RUNNING-B0046-dev-983b844/
+  session.log                every engine and script error and warning (with its script
+                             backtrace), everything the game prints, slow frames (0.5 s+),
+                             host/join/peers/disconnects, zone changes, every message the
+                             player was shown ("Too far away", "Took ..."), and the verdict
+  dump-01-error.txt          a state dump the first time each kind of issue happens: why,
+  dump-01-error.png          every soldier (where, condition, the AI's intent, status, target,
+                             combat mode, carrying, hands), the hot zone's readout, the last
+                             200 log lines; and a screenshot (at most 20 per session)
+```
+
+- **Anything unexpected** counts: an engine or script error, a warning, or an anomaly the game
+  notices (today: a soldier whose position isn't a number, or who fell out of the world). Call
+  `SessionLog.anomaly(key, text)` for new ones; `SessionLog.note(text)` adds a plain line.
+- On quit the folder becomes **PASS** (nothing unexpected) or **FAIL**, with a line in
+  `index.txt`. A folder still **RUNNING** means the game crashed or was killed.
+- The pause menu shows the session number: send it with a playtest report ("P0047").
+- **Where:** `CONTRACTOR_TEST_LOGS` if set; else the first `Contractor-test-logs` going up from
+  the game (builds under `B:\Contractor\builds` find `B:\Contractor-test-logs`); else
+  `user://session-logs` (a friend's machine).
+- **Off** when headless (the suites) or running a `-s` script. `CONTRACTOR_SESSION_LOG=0` turns
+  it off, `=1` on. Suite: `session_log`.
+
 ## Planned (Captain's side, first after 4B part 3: don't build these twice)
 
 1. **Bug-report key:** in a playtest, one key saves a numbered folder (P....) with a screenshot,
    a note typed there, a state dump (every soldier's position; each AI's intent, target, combat
    mode and why; alert and pressure; the player's inventory and wounds; zone id and seed) and
    the last minutes of the log.
-2. **Session logs:** every exported build writes a numbered log per session to the same parent;
-   the pause menu shows the session number. Script errors and AI warnings land there.
+2. ~~**Session logs**~~: built, see "Session logs" above. The bug-report key should reuse
+   `SessionLog.state_text()` for its dump and save into the session's folder.
 3. **AI debug overlay (dev tools):** over each AI its intent, target, combat mode and alert state,
    and a line to where it's going.
 4. Later: **replay** a bug report (it saves a `Campaign.snapshot`; a headless test loads it,

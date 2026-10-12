@@ -11,6 +11,22 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Session logs (Captain's side, 2026-10-12)
+
+#### Added
+
+- **Session logs** (`SessionLog` autoload): every playtest (editor or build) writes a numbered
+  session (P<number>) beside the test runs: every error and warning with its backtrace, what
+  the game prints, slow frames, network events, zone changes and every message the player was
+  shown. The first time each kind of issue happens (an error, a warning, a soldier fallen out
+  of the world) it saves a state dump (every soldier, the AI's intent and target, the hot
+  zone, the last log lines) and a screenshot. The folder ends PASS or FAIL; one that crashed
+  stays RUNNING. The pause menu shows the session number. New suite `session_log`.
+
+#### Changed
+
+- `HotZoneDebug.readout(from)`: the hot-zone readout without the overlay, for the dumps.
+
 ### Wave 4B part 3: the hot zone; debugging rules (Captain's side, 2026-10-12)
 
 #### Added
