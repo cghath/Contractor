@@ -329,7 +329,8 @@ func _build_cell(cell: Vector2i) -> void:
 		node.material_override = _material
 		node.visibility_range_end = float(ranges[key])
 		node.visibility_range_end_margin = 20.0
-		node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF if key == Kind.SCRUB else GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+		var scrub: bool = key is int and key == Kind.SCRUB  # keys mix Kind values and "trunk"/"crown" names
+		node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF if scrub else GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 		add_child(node)
 
 
