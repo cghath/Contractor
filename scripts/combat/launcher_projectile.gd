@@ -37,6 +37,7 @@ const SENSOR_STEP_M := 0.5
 const GRAVITY := 9.8
 
 static var _drops := {}  # drop_at's answers: "warhead|range" -> {"drop", "time"}
+static var _puff_mesh: SphereMesh  # the smoke trail's puffs share it
 
 var id := 0
 var warhead: StringName
@@ -60,6 +61,10 @@ var max_height := 0.0  # highest it got above its launch point (tests)
 var line_from := Vector3.ZERO  # NLAW: the predicted line of sight
 var line_dir := Vector3.FORWARD
 var line_s := 0.0
+## Host only: the vehicle whose collision box it is flying through without meeting the hull
+## (an open pickup bed, over a hatch), and every vehicle it has flown through so (tests).
+var inside: Vehicle
+var passed: Array = []
 var _speed := 0.0
 var _last_aim := Vector3.ZERO
 var _visual: Node3D
@@ -180,9 +185,7 @@ func server_step(delta: float) -> Dictionary:
 		hit = _nlaw_sensor(space, from, to)
 		top = not hit.is_empty()
 	if hit.is_empty():
-		var query := PhysicsRayQueryParameters3D.create(from, to, Warheads.MASK, exclude)
-		query.collide_with_areas = true
-		hit = space.intersect_ray(query)
+		hit = _trace(space, from, to)
 	var dir := (to - from).normalized() if to != from else velocity.normalized()
 	if not hit.is_empty():
 		var flown := travelled + from.distance_to(hit.position)
@@ -195,11 +198,54 @@ func server_step(delta: float) -> Dictionary:
 		return {"hit": hit.collider, "position": hit.position, "normal": hit.normal, "direction": Vector3.DOWN if top and String(data.get("guidance", "")) == "nlaw" else dir, "top_attack": top}
 	travelled += from.distance_to(to)
 	global_position = to
+	if is_instance_valid(inside) and not Launchers.hull_box(inside).grow(0.5).has_point(to):
+		inside = null  # out the other side
 	max_height = maxf(max_height, to.y - launch_pos.y)
 	_face_and_trail(delta)
 	if age >= float(data.get("max_s", 10.0)):
 		return {"expired": true, "position": to, "direction": dir}
 	return {}
+
+
+## Host only. What the step from `from` to `to` meets first ({} for nothing). A vehicle's
+## collision box counts only where its hull's 5 cm voxels are, within Vehicle.PROBE_M of the
+## box's face (Vehicle.server_take_hit's own probe, as Ballistics does): a rocket through an
+## open pickup bed or over a hatch flies on, and while it is inside that box the hull's
+## voxels are what it can meet there (the bed's far side, the cab).
+func _trace(space: PhysicsDirectSpaceState3D, from: Vector3, to: Vector3) -> Dictionary:
+	var dir := (to - from).normalized()
+	if dir == Vector3.ZERO:
+		return {}
+	var start := from
+	for i in 4:
+		var query := PhysicsRayQueryParameters3D.create(start, to, Warheads.MASK, exclude)
+		query.collide_with_areas = true
+		var hit := space.intersect_ray(query)
+		if is_instance_valid(inside):
+			var met := hull_hit(inside, start, dir, start.distance_to(hit.position if not hit.is_empty() else to))
+			if not met.is_empty():
+				return met
+		if hit.is_empty():
+			return {}
+		var v := Vehicle.find_on(hit.collider)
+		if v == null or v.hull == null or not hull_hit(v, hit.position, dir, Vehicle.PROBE_M).is_empty():
+			return hit  # (a vehicle without voxels is its box)
+		inside = v  # only its box: it flies on (a ray from inside the box doesn't meet it)
+		if not v in passed:
+			passed.append(v)
+		start = hit.position + dir * 0.01
+	return {}
+
+
+## Where a line from `from` along `dir` meets vehicle `v`'s hull voxels within `reach` metres,
+## as a ray hit on the vehicle ({"collider", "position", "normal"}), or {}.
+static func hull_hit(v: Vehicle, from: Vector3, dir: Vector3, reach: float) -> Dictionary:
+	if v.hull == null or reach <= 0.0:
+		return {}
+	var found := v.hull.first_solid(v.to_local(from), (v.global_basis.inverse() * dir).normalized(), reach)
+	if not found.hit:
+		return {}
+	return {"collider": v, "position": v.to_global(found.local), "normal": -dir}
 
 
 # --- Javelin --------------------------------------------------------------------------------
@@ -362,16 +408,20 @@ func _face_and_trail(delta: float) -> void:
 	if _trail_cd > 0.0 or not is_inside_tree():
 		return
 	_trail_cd = 0.04
+	if _puff_mesh == null:
+		_puff_mesh = SphereMesh.new()  # one mesh for every puff; each fades its own material
+		_puff_mesh.radius = 0.12
+		_puff_mesh.height = 0.24
+		_puff_mesh.radial_segments = 8
+		_puff_mesh.rings = 4
 	var puff := MeshInstance3D.new()
-	var s := SphereMesh.new()
-	s.radius = 0.12
-	s.height = 0.24
 	var mat := StandardMaterial3D.new()
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	mat.albedo_color = Color(0.85, 0.85, 0.82, 0.5) if motor_burning() else Color(0.7, 0.7, 0.68, 0.25)
-	s.material = mat
-	puff.mesh = s
+	puff.mesh = _puff_mesh
+	puff.material_override = mat
+	puff.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	get_parent().add_child(puff)
 	puff.global_position = global_position
 	var tween := puff.create_tween().set_parallel()

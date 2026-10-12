@@ -25,6 +25,7 @@ var modes := {}
 var seeking: Node3D
 var lock_t := 0.0
 var locked: Node3D
+var _drawn := false
 
 
 func _init(s: Soldier) -> void:
@@ -148,7 +149,9 @@ func _physics_process(delta: float) -> void:
 			if seeker and lock_t >= float(item.stats.get("lock_s", 2.5)) and locked != found:
 				locked = found
 				_flash("Lock")
-	queue_redraw()
+	if item != null or _drawn:
+		queue_redraw()  # (nothing to draw, every frame, without a launcher up)
+	_drawn = item != null
 
 
 ## The vehicle (not a wreck) nearest the middle of `s`'s view within Launchers.LOCK_CONE_DEG

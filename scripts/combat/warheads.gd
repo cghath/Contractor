@@ -7,8 +7,10 @@ extends RefCounted
 ##
 ## - A vehicle (layer 7): Vehicle.server_take_hit with the kind (TOP_ATTACK for a Javelin's
 ##   dive or an NLAW's overfly, on the roof), the penetration and the blast. V1 decides what
-##   the hull does with it; a hit it doesn't stop (penetrated) carries on into the cabin as
-##   the residual jet: whoever it meets dies, and spall wounds the crew around it.
+##   the hull does with it (zones, carving, fire, and the spall that wounds the crew round the
+##   hole: Vehicle._spall); a hit it doesn't stop (penetrated) carries on into the cabin as the
+##   residual jet, and whoever it meets on its line dies. A round reaches a hull only where
+##   its voxels are (LauncherProjectile._trace): through an open bed it flies on.
 ## - A structure (VoxelWorld): a shaped charge bores a small deep hole (the jet walks the
 ##   voxels, its penetration spent per metre by material: JET_MATERIAL_MM_PER_M) and comes out
 ##   the far side into whoever is behind; HE and HEDP blow a crater (VoxelWorld.server_blast,
@@ -62,6 +64,10 @@ const JET_MATERIAL_MM_PER_M := {
 }
 const JET_RADIUS_M := 0.1
 const JET_MAX_M := 4.0
+## Proposed: a top-attack hit on a vehicle (a Javelin's dive, an NLAW's overfly fired from its
+## sensor at the box's top) looks this far down for the hull's voxels (Vehicle's "probe_m"):
+## an NLAW's jet over an open bed carries down to its floor.
+const TOP_PROBE_M := 3.0
 ## Proposed: past a wall or hull it goes through, the jet carries on JET_BEHIND_M (whoever it
 ## meets dies) and throws spall within SPALL_M in a SPALL_CONE_DEG cone: SPALL_WOUNDS
 ## fragment wounds on whoever it reaches.
@@ -161,17 +167,30 @@ static func server_burst(level: CompoundLevel, id: StringName, pos: Vector3, dir
 	var pen := float(d.get("penetration_mm", 0.0))
 	var skip: Array = []  # bodies already dealt with (the one hit directly)
 	var vehicle := Vehicle.find_on(collider) if collider else null
+	var missed := false
 	if vehicle:
 		out.vehicle = vehicle
 		var hit := {"kind": Vehicle.TOP_ATTACK if top_attack else kind, "position": pos, "direction": dir, "shooter": shooter,
 			"penetration_mm": pen, "blast_kg": float(d.get("blast_kg", 0.0)), "warhead": String(id), "warhead_kind": kind,
-			"calibre_mm": float(d.get("calibre_mm", 0.0)), "top_attack": top_attack}
+			"calibre_mm": float(d.get("calibre_mm", 0.0)), "top_attack": top_attack,
+			"probe_m": TOP_PROBE_M if top_attack else Vehicle.PROBE_M}
 		out.vehicle_hit = hit
 		var result: Dictionary = vehicle.server_take_hit(hit)
 		out.vehicle_result = result
-		if pen > 0.0 and not bool(result.get("stopped", true)):
+		missed = bool(result.get("missed", false))
+		if missed:
+			# It met only the box (an overfly's jet down into an open bed): no armour in the way,
+			# the jet goes on into whoever is under it.
+			out.vehicle = null
+			if pen > 0.0:
+				out.through = true
+				_jet_behind(level, pos, dir, shooter, [], out, false)
+		elif pen > 0.0 and (bool(result.get("penetrated", false)) or not bool(result.get("stopped", true))):
+			# Through the armour: the jet kills whoever is on its line. The spall inside is
+			# the vehicle's (Vehicle._spall, V1), so the jet throws none of its own here.
 			out.through = true
-			_jet_behind(level, pos + dir * 0.05, dir, shooter, _rids_of(vehicle), out)
+			var at: Vector3 = result.get("position", pos)
+			_jet_behind(level, at + dir * 0.05, dir, shooter, _rids_of(vehicle), out, false)
 	else:
 		var body := body_of(collider)
 		if body and body.get_node_or_null(^"Vitals"):
@@ -189,7 +208,7 @@ static func server_burst(level: CompoundLevel, id: StringName, pos: Vector3, dir
 				_jet_behind(level, jet.exit, dir, shooter, [], out)
 	# The blast: a crater by kind (the burst sits just outside what it hit), people around.
 	var centre := pos - dir * 0.08
-	var jet_on_hull := (kind == Vehicle.HEAT or kind == Vehicle.TANDEM_HEAT) and pen > 0.0 and vehicle != null
+	var jet_on_hull := (kind == Vehicle.HEAT or kind == Vehicle.TANDEM_HEAT) and pen > 0.0 and vehicle != null and not missed
 	if not jet_on_hull:  # a shaped charge on a hull spends itself on the hull (V1 carves it)
 		level.server_blast(centre, crater_radius(id) * (1.5 if kind == Vehicle.THERMOBARIC and Throwables.indoors(level.get_world_3d(), centre) else 1.0))
 	var hurt := server_people(level, centre, d, shooter, skip)
@@ -284,12 +303,21 @@ static func server_people(level: CompoundLevel, centre: Vector3, d: Dictionary, 
 	return hurt
 
 
-## Every soldier aboard a vehicle (Vehicle.occupants), as a set.
+## Every soldier inside a vehicle's hull (Vehicle.occupants in seats that aren't "open"), as a
+## set: the hull keeps a blast outside off them (a hit on the vehicle itself is the vehicle's:
+## Vehicle.server_take_hit's spall and crew blast). Riders in an open seat (a pickup bed, a
+## gunner's hatch) take it like anyone, their fragments stopped only where the hull's voxels
+## are (Vehicle.blocks_fragment), as a grenade's are.
 static func vehicle_occupants(tree: SceneTree) -> Dictionary:
 	var out := {}
-	for v in tree.get_nodes_in_group(Vehicle.GROUP):
-		if v is Vehicle:
-			for o in (v as Vehicle).occupants():
+	for n in tree.get_nodes_in_group(Vehicle.GROUP):
+		var v := n as Vehicle
+		if v == null:
+			continue
+		var defs: Array = v.spec.get("seats", [])
+		for o in v.occupants():
+			var seat := v.seat_of(o)
+			if seat < 0 or seat >= defs.size() or not bool((defs[seat] as Dictionary).get("open", false)):
 				out[o] = true
 	return out
 
@@ -331,10 +359,20 @@ static func frag_body(body: Node3D, vitals: Vitals, centre: Vector3, distance: f
 	return made
 
 
+## The first thing a fragment from `from` to `to` meets. A vehicle's box stops it only where
+## the hull's voxels are (Vehicle.blocks_fragment, as Throwables' fragments): an open bed or a
+## hatch lets it by.
 static func _first_hit(space: PhysicsDirectSpaceState3D, from: Vector3, to: Vector3, mask := FRAG_MASK) -> Dictionary:
-	var query := PhysicsRayQueryParameters3D.create(from, to, mask)
-	query.collide_with_areas = true
-	return space.intersect_ray(query)
+	var exclude: Array[RID] = []
+	for i in 4:
+		var query := PhysicsRayQueryParameters3D.create(from, to, mask, exclude)
+		query.collide_with_areas = true
+		var hit := space.intersect_ray(query)
+		var vehicle := Vehicle.find_on(hit.get("collider")) if not hit.is_empty() else null
+		if vehicle == null or vehicle.hull == null or vehicle.blocks_fragment(hit.position, to):
+			return hit
+		exclude.append(vehicle.get_rid())
+	return {}
 
 
 ## A point in a hitbox's first box shape: its centre plus `jitter` (fractions of its size).
@@ -409,9 +447,10 @@ static func _bore(terrain: Node3D, p: Vector3, dir: Vector3, seen: Dictionary) -
 
 
 ## Host only. The jet carries on past what it went through, from `from` along `dir`: the first
-## body on its line (within JET_BEHIND_M) dies, and spall wounds whoever is in the cone just
-## behind. `exclude` are colliders it has already gone through. Adds them to out.hurt.
-static func _jet_behind(level: CompoundLevel, from: Vector3, dir: Vector3, shooter: Node, exclude: Array[RID], out: Dictionary) -> void:
+## body on its line (within JET_BEHIND_M) dies, and (with `spall`: a wall, not a vehicle hull,
+## whose spall Vehicle._spall throws) spall wounds whoever is in the cone just behind.
+## `exclude` are colliders it has already gone through. Adds them to out.hurt.
+static func _jet_behind(level: CompoundLevel, from: Vector3, dir: Vector3, shooter: Node, exclude: Array[RID], out: Dictionary, spall := true) -> void:
 	var space := level.get_world_3d().direct_space_state
 	var query := PhysicsRayQueryParameters3D.create(from, from + dir * JET_BEHIND_M, (1 << 0) | (1 << 1) | (1 << 3), exclude)
 	query.collide_with_areas = true
@@ -422,6 +461,8 @@ static func _jet_behind(level: CompoundLevel, from: Vector3, dir: Vector3, shoot
 		if struck and struck.get_node_or_null(^"Vitals"):
 			_direct_hit(struck, hit.collider, hit.position, dir, shooter)
 			out.hurt.append(struck)
+	if not spall:
+		return
 	var cone := cos(deg_to_rad(SPALL_CONE_DEG))
 	for n in Throwables.combatants(level.get_tree()):
 		var body := n as Node3D
@@ -481,7 +522,7 @@ static func server_backblast(level: CompoundLevel, shooter: Node3D, rear: Vector
 	if reflect_m <= 0.0:
 		return out  # a soft launch: safe from an enclosure (Javelin, NLAW)
 	var space := world.direct_space_state
-	var wall := space.intersect_ray(PhysicsRayQueryParameters3D.create(rear, rear + back * reflect_m, WORLD_MASK))
+	var wall := space.intersect_ray(PhysicsRayQueryParameters3D.create(rear, rear + back * reflect_m, WORLD_MASK | Vehicle.LAYER))  # a wall, or a vehicle's hull
 	var shooter_vitals := shooter.get_node_or_null(^"Vitals") as Vitals
 	if not wall.is_empty() and shooter_vitals and not shooter_vitals.is_dead():
 		var w := rear.distance_to(wall.position)
