@@ -240,7 +240,7 @@ the first friendly FOB. Details: [ChrisPlan_handoff.md](ChrisPlan_handoff.md#bas
 **Wave 5 starts on cghath's side while Captain's side finishes 4B part 3 (2026-10-12):** the base
 hub stays exactly as it is until wave 5 makes it the first friendly FOB, and the hot-zone files
 are Captain's side's for now. Read the note at the top of "Wave 5" in [ChrisPlan_handoff.md](ChrisPlan_handoff.md).
-**Status (2026-10-12):** 5a done on cghath's side (all 23 suites pass: R0001 on cghath's machine): V1 vehicle core and V2 anti-armour (see
+**Status (2026-10-12):** 5a done on cghath's side (all 24 suites pass with Captain's session logs merged: R0002 on cghath's machine): V1 vehicle core and V2 anti-armour (see
 CHANGELOG). 5b next: V3 helicopter supports, V4 AAVs, LHD and motor pool. The friendly-FOB
 conversion of the base hub waits for a decision (cghath, with Captain); V4 leaves the base hub files alone.
 
