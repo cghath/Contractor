@@ -47,6 +47,25 @@ GODOT="..." CONTRACTOR_PORT=24790 tools/run_tests.sh missions world             
 - Use your own `CONTRACTOR_PORT` (the game and other runs use 24680; two on one port looks
   like a hang) and one run at a time per machine.
 
+### Which suites to run, and when CI does the rest (Captain, 2026-10-13)
+
+A full local run takes 15-22 minutes and CI runs every suite on every push anyway (one job per
+suite, in parallel), so:
+
+1. **While working:** run the suites your change touches, plus `smoke`. A change to shared code
+   (`soldier.gd`, `squad_ai.gd`, an autoload, `character_model.gd`) reaches further than it
+   looks (the squad AI change of 2026-10-12 broke roles and casualty): add those suites.
+2. **Push your work branch** to GitHub (no need to ask) and let CI run everything on it.
+3. **Move `dev` forward only when the branch's CI is green**, on Captain's go: a fast-forward,
+   or a merge you've tested. `dev` never goes red.
+4. **A green CI run on the branch is "the full suite"** wherever a rule asks for one (cite the
+   commit). Still run the full suite locally before merging the other side's work into yours
+   and before exporting a test build.
+
+Reading CI without `gh`: `curl -s "https://api.github.com/repos/cghath/Contractor/actions/runs?branch=<branch>&per_page=1"`
+(status, conclusion); a failing job's last lines are its check run's `/annotations`. The
+unauthenticated API allows 60 calls an hour: poll every few minutes, not in a tight loop.
+
 ### Scripts and builds: do the same by hand until they're wired in
 
 Take the next number from `run_counter.txt`, make
