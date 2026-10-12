@@ -28,12 +28,12 @@ extends Node
 ## (install(), from CompoundLevel._ready), which also adds the support origin (Lhd) and the
 ## motor pool's level node (MotorPoolNode).
 ##
-## Dev tools (DevTools.on()): Insert calls an AAV to you anywhere (the vehicle range, the test
+## Dev tools (DevTools.on()): ] (right bracket, by its place on the keyboard) calls an AAV to you anywhere (the vehicle range, the test
 ## zone, any zone) without paying.
 
 const NODE_NAME := "AavSupport"
 const DATA_PATH := "res://data/ground_supports.json"
-const DEV_KEY := KEY_INSERT
+const DEV_KEY := KEY_BRACKETRIGHT  # Insert is Captain's bug-report key, Delete his AI overlay
 ## The AAV's orders (every peer reads them; "" when none is out).
 const INBOUND := "inbound"
 const MOVE := "move"
@@ -219,7 +219,7 @@ func server_move(by: Soldier, point: Vector3) -> String:
 	_legs.clear()
 	_leg = {}
 	if wet:
-		vehicle.server_follow_path(PackedVector3Array([Vector3(point.x, ZoneTerrain.SEA_LEVEL_M, point.z)]))
+		vehicle.server_follow_path(PackedVector3Array([Vector3(point.x, terrain.sea_level, point.z)]))
 	else:
 		vehicle.server_drive_to(point)
 	_set_order(MOVE)
@@ -754,7 +754,7 @@ func _tell(who: Soldier, text: String) -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	var key := event as InputEventKey
-	if key == null or not key.pressed or key.echo or key.keycode != DEV_KEY or not DevTools.on():
+	if key == null or not key.pressed or key.echo or key.physical_keycode != DEV_KEY or not DevTools.on():
 		return
 	get_viewport().set_input_as_handled()
 	request_dev_call.rpc_id(1)

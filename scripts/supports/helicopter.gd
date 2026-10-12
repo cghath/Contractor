@@ -370,6 +370,11 @@ func _physics_process(delta: float) -> void:
 	super._physics_process(delta)
 
 
+## Nobody sits in the pilot seats: the engines run while the rotors turn (Sfx's engine sound).
+func engine_running() -> bool:
+	return (_rpm if multiplayer.is_server() else float(net_flight.get("rpm", 0.0))) > 1.0
+
+
 func _process(delta: float) -> void:
 	super._process(delta)
 	var rpm := _rpm if multiplayer.is_server() else float(net_flight.get("rpm", 0.0))

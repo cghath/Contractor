@@ -11,6 +11,81 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Triage cards and bleeding HUD (2026-10-12)
+
+#### Added
+
+- **Triage cards**: the medical menu has none / minimal (green) / delayed (yellow) / immediate (red) / expectant (black) buttons for the casualty (host request `Soldier._server_set_triage`, reach-checked to `body_point()`, replicated in `net_state` "tg"; shown in Check condition). AI responders take immediate before delayed (and uncarded) before minimal, expectant last. Also: a small body silhouette in the HUD corner while you have an untreated bleed, fracture or tourniquet.
+
+### Sound (Captain's side, 2026-10-12)
+
+#### Added
+
+- **Sound** (`Sfx` autoload, `data/sounds.json`, docs/sound.md): generated, stylised sounds for
+  gunshots (near and far, suppressed), bullet cracks passing close, impacts (dirt, plate,
+  body), explosions, flashbangs, reloads, throws and footsteps; heard from each player's own
+  position, delayed by distance, within the ranges the AI hears. Real recordings in
+  `res://audio/sfx/` override any sound. `tools/export_sounds.gd` writes them as WAV files.
+  New suite `sound`.
+
+### Session-log event lines and a movement-test fix (2026-10-12)
+
+#### Added
+
+- **Session logs now record casualties, care and returns to base**: a soldier going down or
+  dying (who, cause, body part, who hit them and from how far; `Vitals.last_cause`), every
+  treatment (`Soldier._treat` / `_timed_care`: treater, patient, item, part, done / interrupted
+  / refused and why) and Return to Base / revert (`BaseHub`).
+
+#### Fixed
+
+- **Movement suite flake** (stand-up after the ragdoll): the test put the body back before the
+  ragdoll had finished standing it up where it lay, so the walls were built round the wrong spot.
+
+### Bug-report key and AI overlay (2026-10-12)
+
+#### Added
+
+- **Bug-report key (Insert, any build)**: a note panel (Enter saves, Esc cancels) writes
+  `report-<n>.txt` and `report-<n>.png` into the session's folder: the note, time, zone and
+  seed, `SessionLog.state_text` (every soldier, the AI's intents) with the player's inventory
+  and wounds, and the last log lines. `BugReport.save(note, node)` is the callable the tests use.
+  The pause menu shows the key. `SessionLog.state_text` now includes the local player's
+  inventory and wounds.
+- **AI debug overlay (Delete, dev tools, host)**: labels over AI within 80 m (the nearest 16)
+  with intent, status, target, combat mode and suppression, and a line to where each is heading
+  (`SquadAI.destination()`), refreshed 4 times a second.
+
+### Medical menu, slice 1 (Captain's side, 2026-10-12)
+
+#### Added
+
+- **Medical menu on H** (`MedicalMenu`, `scripts/ui/medical_menu.gd`; inspired by ACE3's): opens
+  on the person you look at within treatment reach (measured to `Soldier.body_point()`), else
+  on yourself. A body diagram of the 14 parts, clickable, coloured by state (bleeding by
+  severity, untreated, treated) with TQ, splint, dressing, seal and IV/IO markers; the chosen
+  part's injuries in words and every medical item you carry, greyed out with the reason when
+  it can't be used there now; choosing one sends the same `_server_treat` request as the
+  interaction menu's Treat (and Remove tourniquet its own). Signs in words (numbers only with
+  a pulse oximeter). An activity log, local to the treater for now (what you chose, and the
+  changes seen while the menu was open). H or Escape closes it; while open it has the mouse
+  and the keys. Reads replicated state only, so it works on clients. Test: medical suite
+  "Medical menu (H)".
+
+#### Changed
+
+- **Quick-treat moves to Shift+H** (`quick_treat`, `Controls.SHIFT_KEYS`), same behaviour as the
+  old H. The `use_medical` action is now `medical_menu`.
+
+### Terrain presets (2026-10-12)
+
+#### Added
+
+- **Terrain presets** (`data/terrain_presets.json`, `docs/terrain_presets.md`): coastal_lowland (with a sea along
+  one seeded side), salt_flats, desert_wadi (carved riverbeds), rocky_ridge, scrubland, temperate. Chosen by the def's
+  `terrain`, name hints or region, and carried in the def. `ZoneScatter`: seeded rocks, scrub and trees by zone
+  area (MultiMesh; large rocks and trees have collision and nav boxes).
+
 ### Wave 5a: vehicles and anti-armour (cghath's side, 2026-10-12)
 
 #### Added

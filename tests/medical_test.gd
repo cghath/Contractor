@@ -43,6 +43,8 @@ func _ready() -> void:
 	await _test_interruptions()
 	await _test_use_medical()
 	await _test_menu_and_removal()
+	await _test_medical_menu()
+	await _test_bleed_hud()
 	await _test_wakes_in_session()
 	await _test_splint_movement()
 	GameState.delete_save()
@@ -1049,6 +1051,124 @@ func _test_menu_and_removal() -> void:
 	check(player.inventory.medical_count(&"tourniquet") == tourniquets + 1, "and goes back in your kit")
 	_reset(casualty)
 	player.inventory.remove_one(&"trauma_kit")
+
+
+## H: the medical menu (MedicalMenu) on the casualty you look at, else yourself; Shift+H
+## still quick-treats yourself.
+func _test_medical_menu() -> void:
+	print("Medical menu (H): diagram, items with reasons, treating from it; Shift+H quick-treat")
+	_restock()
+	_place_player()
+	_wound(casualty.vitals, Vitals.THIGH_L, "arterial", 1.2, &"femoral_l")
+	casualty.vitals.server_damage(70.0)  # down
+	await _frames(2)
+	var thigh := MedicalMenu.part_state(casualty.vitals, Vitals.THIGH_L)
+	check(thigh.state == MedicalMenu.BLEEDING and thigh.severity == 3 and MedicalMenu.state_color(thigh) == MedicalMenu.BLEED_COLORS[3],
+		"a bleeding thigh artery: the left thigh shows severe bleeding (%s)" % [thigh])
+	var chest := MedicalMenu.part_state(casualty.vitals, Vitals.CHEST)
+	check(chest.state == MedicalMenu.OK and MedicalMenu.state_color(chest) == MedicalMenu.STATE_COLORS[MedicalMenu.OK], "an unhurt chest shows plain (%s)" % [chest])
+	var input := player.player_input
+	var menu := input.medical_menu
+	input._unhandled_input(_key(KEY_H, false))
+	check(menu.is_open() and menu.target == casualty and menu.part == Vitals.THIGH_L,
+		"H opens it on the casualty in front, at the left thigh (%s, %s)" % [menu.target, menu.part])
+	player.inventory.take(&"trauma_kit")
+	player.inventory.take(&"iv_18")
+	menu.refresh()
+	var shown := {}
+	for row in menu.options:
+		if row.has("item"):
+			shown[row.item] = true
+	var carried := MedicalMenu.medical_ids().filter(func(id: StringName) -> bool: return Vitals.has_item(player.inventory, id))
+	check(shown.size() == carried.size() and carried.all(func(id: StringName) -> bool: return shown.has(id)),
+		"every medical item you carry is listed (%s)" % [shown.keys()])
+	var rows := {}
+	for row in menu.options:
+		if row.has("item") and not row.rushed:
+			rows[row.item] = row
+	check(menu.options[0].item == &"tourniquet" and rows[&"tourniquet"].disabled == "", "the tourniquet is usable, top of the list (%s)" % menu.options[0].label)
+	check(rows[&"splint"].disabled == casualty.vitals.treatment_problem(&"splint", Vitals.THIGH_L) and rows[&"splint"].disabled != "",
+		"the splint greyed out: %s" % rows[&"splint"].disabled)
+	check(rows[&"iv_18"].disabled == "An IV goes in a forearm or lower leg", "the IV greyed out: %s" % rows[&"iv_18"].disabled)
+	check(not shown.has(&"saline_500"), "nothing you don't carry")
+	menu.choose(menu.options.find(rows[&"tourniquet"]))
+	var tq := ItemDB.get_item(&"tourniquet")
+	check(casualty.vitals.is_healing() and absf(player._server_busy_until - Soldier._now() - player.treat_seconds(casualty, tq)) < 0.05,
+		"choosing the tourniquet starts the same timed treatment (%.1f s)" % player.treat_seconds(casualty, tq))
+	await _seconds(4.3)
+	menu.refresh()
+	thigh = MedicalMenu.part_state(casualty.vitals, Vitals.THIGH_L)
+	check(thigh.markers.has(MedicalMenu.TOURNIQUET) and thigh.state != MedicalMenu.BLEEDING, "then the thigh shows a tourniquet, no bleeding (%s)" % [thigh])
+	check(Array(menu.log_lines).any(func(l: String) -> bool: return l.contains("You: Tourniquet (")) \
+		and Array(menu.log_lines).any(func(l: String) -> bool: return l.ends_with("Left thigh: TQ on")), "the activity log has both (%s)" % [menu.log_lines])
+	# Triage card: set from the menu through the host, replicated, shown in Check condition.
+	menu.set_triage(Vitals.TRIAGE_IMMEDIATE)
+	await _frames(3)
+	check(casualty.vitals.triage() == Vitals.TRIAGE_IMMEDIATE and casualty.vitals.net_state.get("tg") == "immediate",
+		"the menu puts a red triage card on him, replicated in net_state (%s)" % casualty.vitals.triage())
+	check(InteractionMenu.condition_report(casualty, player).contains("Immediate (red)"), "Check condition shows the card")
+	check(menu.triage_at(menu._triage_rect(2).get_center()) == Vitals.TRIAGE_DELAYED, "the triage buttons are hit-tested")
+	player.global_position += Vector3(30, 0, 0)
+	player._server_set_triage.rpc_id(1, casualty.get_path(), Vitals.TRIAGE_MINIMAL)
+	await _frames(3)
+	check(casualty.vitals.triage() == Vitals.TRIAGE_IMMEDIATE, "out of reach the card doesn't change")
+	_place_player()
+	_reset(casualty)
+	check(casualty.vitals.triage() == Vitals.TRIAGE_NONE, "a fresh life has no card")
+	menu._unhandled_input(_key(KEY_H, false))
+	check(not menu.is_open(), "H closes it")
+	_reset(casualty)
+	_wound(player.vitals, Vitals.FOREARM_R, "muscle", 0.25)
+	player._server_busy_until = 0.0
+	input._unhandled_input(_key(KEY_H, true))
+	var bandage := ItemDB.get_item(&"pressure_bandage")
+	check(not menu.is_open() and player.vitals.is_healing() and absf(player._server_busy_until - Soldier._now() - player.treat_seconds(player, bandage)) < 0.05,
+		"Shift+H quick-treats yourself (a bandage), no menu")
+	await _seconds(player.treat_seconds(player, bandage) + 0.2)
+	check(player.vitals.bleed_rate() == 0.0, "and the bandage is on")
+	player.rotation.y = PI  # nobody in front
+	input._unhandled_input(_key(KEY_H, false))
+	check(menu.is_open() and menu.target == player, "H with nobody in front: on yourself")
+	menu._unhandled_input(_key(KEY_ESCAPE, false))
+	check(not menu.is_open(), "Escape closes it")
+	_place_player()
+	_reset(player)
+	player.inventory.remove_one(&"trauma_kit")
+	player.inventory.remove_one(&"iv_18")
+
+
+## The corner silhouette: shows while the player bleeds untreated, highlights the part, goes when treated.
+func _test_bleed_hud() -> void:
+	print("HUD silhouette while bleeding")
+	_place_player()
+	_reset(player)
+	_restock()
+	player.inventory.take(&"pressure_bandage")
+	player._server_busy_until = 0.0
+	var sil: Control
+	for c in player.player_input.hud.get_children():
+		if c is Hud.BleedSilhouette:
+			sil = c
+	check(sil != null, "the HUD has the silhouette")
+	await _frames(2)
+	check(not sil.visible, "hidden with nothing to show")
+	_wound(player.vitals, Vitals.THIGH_L, "muscle", 0.25)
+	await _frames(2)
+	check(sil.visible and sil.parts.size() == 1 and sil.parts[0] == Vitals.THIGH_L, "a bleeding thigh shows it, highlighting the left thigh (%s, %s)" % [sil.visible, sil.parts])
+	player._server_treat.rpc_id(1, player.get_path(), &"pressure_bandage", Vitals.THIGH_L)
+	await _seconds(player.treat_seconds(player, ItemDB.get_item(&"pressure_bandage")) + 0.3)
+	await _frames(2)
+	check(player.vitals.bleed_rate() == 0.0 and not sil.visible, "treated, it disappears (%s, bleed %.2f, %s)" % [sil.parts, player.vitals.bleed_rate(), player.vitals.wound_list()])
+	_reset(player)
+	player.inventory.remove_one(&"pressure_bandage")
+
+
+func _key(key: Key, shift: bool) -> InputEventKey:
+	var event := InputEventKey.new()
+	event.physical_keycode = key
+	event.pressed = true
+	event.shift_pressed = shift
+	return event
 
 
 ## Through the real host requests: tourniquet and morphine, then the casualty comes round.

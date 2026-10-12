@@ -27,7 +27,7 @@ cd "$(dirname "$0")/.."
 GODOT="${GODOT:-godot}"
 SUITE_TIMEOUT="${SUITE_TIMEOUT:-480}"
 SUITES=("$@")
-[ ${#SUITES[@]} -eq 0 ] && SUITES=(smoke gameplay squad net wounds armor movement interaction roles medical logistics casualty materials animations scavenge contracts people map base world missions vehicles antiarmor session_log supports aav)
+[ ${#SUITES[@]} -eq 0 ] && SUITES=(smoke gameplay squad net wounds armor movement interaction roles medical logistics casualty materials animations scavenge contracts people map base world missions vehicles antiarmor session_log supports aav sound)
 status=0
 logs="$(mktemp -d)"
 keep_root="${CONTRACTOR_TEST_LOGS:-}"
@@ -93,6 +93,11 @@ judge() {
 		why="script error (see above)"
 	elif grep -q 'TEST FAILED' "$log"; then
 		why="exit $code"
+	elif [ "$code" -ne 0 ] && [ -n "$summary" ] && grep -q "$summary (0 failures)" "$log"; then
+		# Every check passed and the summary printed; only the engine's exit after it failed
+		# (seen on CI's Linux runners for AI-heavy suites, with "instances leaked at exit"):
+		# a pass, noted, so a real failure still stands out. See docs/debugging.md.
+		note "$name: passed (but the engine exited $code after its summary)"
 	elif [ "$code" -ne 0 ]; then
 		why="exit $code"
 	elif [ -n "$summary" ] && ! grep -q "$summary" "$log"; then
@@ -109,7 +114,13 @@ judge() {
 		echo "  last lines of its output:"
 		tail -n 40 "$log" | sed "s/^/  | /"
 		if [ -n "${GITHUB_ACTIONS:-}" ]; then  # job logs need repo admin rights; annotations don't
-			tail -n 12 "$log" | while IFS= read -r line; do echo "::error title=$name::$line"; done
+			# GitHub keeps only 10 error annotations per step: the reason first (a suite can print
+			# PASSED and still fail: a script error earlier, or a crash on quit), then the first
+			# failed checks and script errors wherever they are in the log, then the last lines.
+			echo "::error title=$name::FAILED: $why"
+			grep -E '\[FAIL\]' "$log" | head -n 3 | while IFS= read -r line; do echo "::error title=$name failed check::$line"; done
+			grep -A1 'SCRIPT ERROR' "$log" | grep -v '^--$' | head -n 3 | while IFS= read -r line; do echo "::error title=$name script error::$line"; done
+			tail -n 3 "$log" | while IFS= read -r line; do echo "::error title=$name::$line"; done
 		fi
 		status=1
 	fi

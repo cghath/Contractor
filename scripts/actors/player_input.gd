@@ -30,6 +30,8 @@ const ALWAYS_CYCLED: Array[StringName] = [&"frag_grenade", &"flashbang"]
 var hud: Hud
 ## The ACE-style interaction menu (hold Left Ctrl; Left Ctrl + Left Alt for yourself).
 var interaction: InteractionMenu
+## The medical menu (H: MedicalMenu); Shift+H quick-treats yourself.
+var medical_menu: MedicalMenu
 ## The grenade type G throws.
 var throwable: StringName = &"frag_grenade"
 var _focus: Node3D  # an item or downed body under the crosshair, for the prompt
@@ -40,6 +42,8 @@ var _deaf := false
 var placing := false
 ## The Escape menu (PauseMenu), on the local player only.
 var pause_menu: PauseMenu
+## The bug-report note panel (Insert), on the local player only.
+var bug_report: BugReport
 var _ghost: Node3D
 ## Muffled hearing: everything through a low-pass this low, and quieter.
 const DEAF_CUTOFF_HZ := 600.0
@@ -63,8 +67,14 @@ func _ready() -> void:
 	body.add_child(hud)
 	pause_menu = PauseMenu.new()
 	body.add_child(pause_menu)
+	bug_report = BugReport.new()
+	body.add_child(bug_report)
+	if DevTools.on() and multiplayer.is_server():
+		body.add_child(AiOverlay.new())
 	interaction = InteractionMenu.new(body)
 	hud.add_child(interaction)
+	medical_menu = MedicalMenu.new(body)
+	hud.add_child(medical_menu)
 	hud.add_child(LauncherSight.new(body))  # anti-armour launchers: sight, lock, fire (wave 5)
 	body.loadout_changed.connect(_update_view_model)
 	_update_view_model()
@@ -79,8 +89,10 @@ var _view_yaw := 0.0  # Soldier.view_yaw last applied
 
 func _unhandled_input(event: InputEvent) -> void:
 	var captured := _captured()
-	if pause_menu.is_open():
+	if pause_menu.is_open() or bug_report.is_open():
 		return  # the Escape menu has the mouse (it closes itself on Escape)
+	elif medical_menu.is_open():
+		return  # the medical menu has the mouse and the keys (it closes itself on H or Escape)
 	elif event is InputEventMouseMotion and captured and interaction.is_open():
 		interaction.move_cursor(event.relative)  # the menu has the mouse, not the view
 	elif event is InputEventMouseMotion and captured:
@@ -126,8 +138,10 @@ func _unhandled_input(event: InputEvent) -> void:
 			_try_throw()
 	elif event.is_action_pressed(&"reload"):
 		_try_reload()
-	elif event.is_action_pressed(&"use_medical"):
+	elif event.is_action_pressed(&"quick_treat"):  # before H: H alone also matches with Shift held
 		body._server_use_medical.rpc_id(1)
+	elif event.is_action_pressed(&"medical_menu"):
+		medical_menu.open(MedicalMenu.looked_at(body, body.camera))
 	elif event.is_action_pressed(&"weapon_primary"):
 		body.select_weapon(&"primary")
 	elif event.is_action_pressed(&"weapon_sidearm"):
@@ -195,9 +209,11 @@ func crosshair_ground() -> Variant:
 
 
 func flash(text: String) -> void:
-	SessionLog.note("shown to the player: " + text)
 	if hud:
+		SessionLog.note("shown to the player: " + text)
 		hud.flash(text)
+	elif body and body.is_ai():  # an AI's own messages (what it's treating, why it can't): no screen, but worth a line
+		SessionLog.note("%s (AI): %s" % [body.display_name(), text])
 
 
 ## A flashbang went off in sight: the whiteout is strongest when you were looking at it.

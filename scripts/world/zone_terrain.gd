@@ -10,12 +10,9 @@ extends Node3D
 ## them. Heights fade to 0 at the zone's edge, where a flat apron carries the ground on to
 ## the horizon and an invisible wall keeps everyone in.
 ##
-## Coast (wave 5b, V4; optional): a zone definition with "coast" ({"side": "north"|"south"|
-## "east"|"west", "shore_m"}) has the sea along that side: the ground falls below SEA_LEVEL_M
-## shore_m in from that edge (the shoreline wanders a little), down a gentle beach and on to a
-## seabed, with a water surface over it. water_height() says where there is water;
-## shore_distance() how far a point is inland (negative: out to sea). The navigation leaves the
-## seabed out. Without "coast" nothing here changes.
+## The preset's sea is also the coast of wave 5b (V4: the LHD offshore, AAVs swimming in):
+## has_coast(), shore_distance(), water_height(), seaward() and shore_point() at the end answer
+## for it, so every zone with a sea gets the LHD, and every other zone the FOB.
 
 ## Grid spacing (m). Proposed: 4 m keeps a 2 km zone at 513 x 513 heights.
 const CELL_M := 4.0
@@ -37,28 +34,16 @@ const PAD_MARGIN_M := 6.0
 const PAD_BLEND_M := 40.0
 ## The apron around the zone (m beyond the edge) and the invisible wall's height.
 const APRON_M := 6000.0
+## The water reaches this far past the shoreline strip so the beach is covered (m).
+const SEA_MARGIN_M := 40.0
+## Ground this far below the water is left out of the navigation mesh (m).
+const NAV_WATER_M := 0.9
 const WALL_HEIGHT_M := 400.0
 ## Ground colours: grass, dry grass, bare earth on slopes and on pads, rock on steep ground.
 const GRASS := Color("5f6a3c")
 const DRY := Color("7d7748")
 const EARTH := Color("7f6d4f")
 const ROCK := Color("6f6a60")
-## Coast (Proposed): the sea's surface height, the beach (from the waterline up to BEACH_TOP_M
-## over BEACH_M), the seabed falling SHELF_SLOPE metres a metre out to SEA_DEPTH_M, the land
-## rising back into the hills over COAST_BLEND_M beyond the beach (staying clear of the sea for
-## the first half of it), how far the shoreline wanders, water counted up to WATER_REACH_M
-## inland of the shoreline, and the default shoreline distance from the coast's edge.
-const SEA_LEVEL_M := 0.0
-const BEACH_M := 40.0
-const BEACH_TOP_M := 1.5
-const SHELF_SLOPE := 0.08
-const SEA_DEPTH_M := 14.0
-const COAST_BLEND_M := 160.0
-const SHORE_WANDER_M := 18.0
-const WATER_REACH_M := 30.0
-const DEFAULT_SHORE_M := 360.0
-const SEA := Color(0.16, 0.33, 0.42, 0.88)
-const SAND := Color("b8a77a")
 
 var size_m := 2048.0
 var seed_value := 0
@@ -71,9 +56,26 @@ var min_height := 0.0
 var max_height := 0.0
 ## Flat pads: [Rect2 (x, z in metres), height].
 var pads: Array = []
-## Coast: the side the sea is on ("" for none) and the shoreline's distance from that edge.
-var coast_side := ""
-var shore_m := 0.0
+
+## The terrain preset (TerrainPresets) and what it gives: ground colours, the sea (side 0 north
+## (-z), 1 south, 2 west, 3 east, -1 none; the water reaches sea_m in from that edge, its
+## surface at sea_level, the seabed at the edge sea_depth below), riverbed depth.
+var preset_id := "plain"
+var preset := {}
+var sea_side := -1
+var sea_m := 0.0
+var sea_level := 0.0
+var sea_depth := 7.0
+var w_depth := 8.0
+var c_grass := GRASS
+var c_dry := DRY
+var c_earth := EARTH
+var c_rock := ROCK
+var c_sand := Color("c2b583")
+var c_apron := GRASS
+var sand_below_m := -1000.0
+var rock_above_m := 1.0e9
+var _bed := PackedByteArray()  # riverbed weight (0..255) per height
 
 var _half := 0.0
 var _visuals_built := false
@@ -82,29 +84,67 @@ var _lod0 := {}  # Vector2i chunk -> its finest MeshInstance3D
 var _lod1 := {}  # Vector2i chunk -> its middle MeshInstance3D
 
 
-## Builds the heights from the zone definition (ZoneDef): seed, size, relief, and a pad
-## under each module footprint and landing zone (`flat`: Array of Rect2).
+## Builds the heights from the zone definition (ZoneDef): seed, size, relief, terrain preset
+## (TerrainPresets), sea, and a pad under each module footprint and landing zone (`flat`:
+## Array of Rect2).
 func generate(def: Dictionary, flat: Array) -> void:
 	seed_value = int(def.get("seed", 0))
 	size_m = float(def.get("size_m", 2048.0))
-	relief_m = float(def.get("relief_m", 18.0))
+	preset_id = String(def.get("terrain", "plain"))
+	preset = TerrainPresets.get_preset(preset_id)
+	var land: Dictionary = preset.get("land", {})
+	relief_m = float(def.get("relief_m", 18.0)) * float(land.get("relief_scale", 1.0))
 	_half = size_m * 0.5
 	points = int(round(size_m / CELL_M)) + 1
+	_read_palette()
+	var sea: Dictionary = preset.get("sea", {})
+	sea_side = int(def.get("sea_side", -1)) if not sea.is_empty() else -1
+	sea_m = float(def.get("sea_m", 0.0)) if sea_side >= 0 else 0.0
+	sea_level = float(sea.get("level", 0.0))
+	sea_depth = float(sea.get("depth_m", 7.0))
+	var wavelength := float(land.get("wavelength_m", 650.0))
+	var ridge := float(land.get("ridge", 0.0))
+	var flatten := float(land.get("flatten", 1.0))
+	var offset := float(land.get("offset_m", 0.0))
 	var noise := FastNoiseLite.new()
 	noise.seed = seed_value
 	noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
 	noise.fractal_type = FastNoiseLite.FRACTAL_FBM
-	noise.fractal_octaves = 4
-	noise.fractal_gain = 0.42
-	noise.frequency = 1.0 / 650.0
+	noise.fractal_octaves = int(land.get("octaves", 4))
+	noise.fractal_gain = float(land.get("gain", 0.42))
+	noise.frequency = 1.0 / wavelength
+	var ridged := FastNoiseLite.new()
+	ridged.seed = seed_value + 1
+	ridged.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+	ridged.fractal_type = FastNoiseLite.FRACTAL_FBM
+	ridged.fractal_octaves = 3
+	ridged.frequency = 1.3 / wavelength
+	var wadis := _wadi_lines(preset.get("wadi", {}))
 	heights.resize(points * points)
+	_bed.resize(points * points)
 	for j in points:
 		var z := j * CELL_M - _half
 		for i in points:
 			var x := i * CELL_M - _half
 			var edge := minf(minf(x + _half, _half - x), minf(z + _half, _half - z))
-			heights[i + j * points] = noise.get_noise_2d(x, z) * relief_m * smoothstep(0.0, EDGE_FADE_M, edge)
-	_apply_coast(def.get("coast", {}))
+			var n := noise.get_noise_2d(x, z)
+			if ridge > 0.0:
+				n = lerpf(n, 1.4 * (1.0 - 2.0 * absf(ridged.get_noise_2d(x, z))) - 0.7, ridge)
+			if flatten != 1.0:
+				n = signf(n) * pow(absf(n), flatten)
+			var h := n * relief_m + offset
+			var carve := 0.0
+			for w: Dictionary in wadis:
+				carve = maxf(carve, _wadi_weight(w, x, z))
+			if carve > 0.0:
+				h -= carve * float(w_depth)
+			var fade := smoothstep(0.0, EDGE_FADE_M, edge)
+			h *= fade
+			if sea_side >= 0:
+				var d: float = [z + _half, _half - z, x + _half, _half - x][sea_side]
+				h = lerpf(h, sea_level - sea_depth, 1.0 - smoothstep(0.0, sea_m, d))
+			heights[i + j * points] = h
+			_bed[i + j * points] = int(carve * 255.0)
 	pads.clear()
 	for rect: Rect2 in flat:
 		_flatten(rect)
@@ -113,85 +153,53 @@ func generate(def: Dictionary, flat: Array) -> void:
 	for h in heights:
 		min_height = minf(min_height, h)
 		max_height = maxf(max_height, h)
+	_measure_shore()  # wave 5b (V4): the coast the LHD and AAVs use, from the sea above
 
 
-# --- Coast (wave 5b) -----------------------------------------------------------------------
-
-## The sea along one side (def "coast"); nothing without one.
-func _apply_coast(coast: Variant) -> void:
-	coast_side = ""
-	if not coast is Dictionary or not String((coast as Dictionary).get("side", "")) in ["north", "south", "east", "west"]:
-		return
-	coast_side = String(coast.side)
-	shore_m = clampf(float(coast.get("shore_m", DEFAULT_SHORE_M)), 60.0, size_m * 0.5)
-	for j in points:
-		for i in points:
-			var x := i * CELL_M - _half
-			var z := j * CELL_M - _half
-			heights[i + j * points] = coast_height(shore_distance(x, z), heights[i + j * points])
-
-
-## The ground at `t` metres inland of the shoreline (negative: out to sea), where the hills
-## alone would be `land` high.
-func coast_height(t: float, land: float) -> float:
-	if t <= 0.0:
-		return maxf(t * SHELF_SLOPE, -SEA_DEPTH_M) + SEA_LEVEL_M
-	if t <= BEACH_M:
-		return SEA_LEVEL_M + BEACH_TOP_M * t / BEACH_M
-	var w := smoothstep(0.0, COAST_BLEND_M, t - BEACH_M)
-	var floor_h := SEA_LEVEL_M + BEACH_TOP_M - (BEACH_TOP_M + 2.0 * relief_m) * smoothstep(0.5, 1.0, w)
-	return maxf(lerpf(SEA_LEVEL_M + BEACH_TOP_M, land, w), floor_h)
+## The dry riverbeds of a preset's "wadi": `count` lines across the zone (seeded), each a
+## direction, a sideways offset and a meander noise.
+func _wadi_lines(spec: Dictionary) -> Array:
+	var out: Array = []
+	if spec.is_empty():
+		return out
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed_value ^ 0x3AD1
+	w_depth = float(spec.get("depth_m", 8.0))
+	for k in int(spec.get("count", 1)):
+		var angle := rng.randf() * PI
+		var meander := FastNoiseLite.new()
+		meander.seed = seed_value + 10 + k
+		meander.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+		meander.frequency = 1.0 / 520.0
+		out.append({"dir": Vector2.from_angle(angle), "offset": rng.randf_range(-0.3, 0.3) * size_m,
+			"width": float(spec.get("width_m", 50.0)), "meander": float(spec.get("meander_m", 120.0)), "noise": meander})
+	return out
 
 
-func has_coast() -> bool:
-	return coast_side != ""
+## 0 to 1: how deep in the riverbed `w` the point (x, z) is.
+func _wadi_weight(w: Dictionary, x: float, z: float) -> float:
+	var dir: Vector2 = w.dir
+	var along := x * dir.x + z * dir.y
+	var side := -x * dir.y + z * dir.x - float(w.offset) - (w.noise as FastNoiseLite).get_noise_1d(along) * float(w.meander)
+	var width := float(w.width)
+	var d := absf(side)
+	if d >= width * 1.6:
+		return 0.0
+	# A flat-ish floor, banks easing up to the land.
+	return 1.0 - smoothstep(width * 0.3, width * 1.6, d)
 
 
-## How far (x, z) is inland of the shoreline (m; negative out to sea). INF without a coast.
-func shore_distance(x: float, z: float) -> float:
-	if coast_side == "":
-		return INF
-	var from_edge := 0.0
-	var along := 0.0
-	match coast_side:
-		"south":
-			from_edge = _half - z
-			along = x
-		"north":
-			from_edge = z + _half
-			along = x
-		"east":
-			from_edge = _half - x
-			along = z
-		_:
-			from_edge = x + _half
-			along = z
-	var wander := SHORE_WANDER_M * (0.65 * sin(along / 170.0 + float(seed_value % 97)) + 0.35 * sin(along / 63.0 + float(seed_value % 13)))
-	return from_edge - shore_m - wander
-
-
-## The water's surface at (x, z): SEA_LEVEL_M on the sea side of the shoreline, -INF where
-## there is no water (inland, or a zone without a coast).
-func water_height(x: float, z: float) -> float:
-	return SEA_LEVEL_M if shore_distance(x, z) < WATER_REACH_M else -INF
-
-
-## Out to sea from the shoreline (the coast's side): a unit vector on the ground plane, or
-## ZERO without a coast.
-func seaward() -> Vector3:
-	return {"south": Vector3(0, 0, 1), "north": Vector3(0, 0, -1), "east": Vector3(1, 0, 0), "west": Vector3(-1, 0, 0)}.get(coast_side, Vector3.ZERO)
-
-
-## The point `t` metres inland of the shoreline (negative: out to sea) level with `pos` along
-## the coast, on the ground or the water.
-func shore_point(pos: Vector3, t: float) -> Vector3:
-	if coast_side == "":
-		return pos
-	var out := seaward()
-	var p := Vector3(pos.x, 0.0, pos.z)
-	for i in 4:  # the shoreline wanders, but slowly: a few steps settle it
-		p -= out * (t - shore_distance(p.x, p.z))
-	return Vector3(p.x, maxf(height_at(p.x, p.z), water_height(p.x, p.z)), p.z)
+func _read_palette() -> void:
+	var p: Dictionary = preset.get("palette", {})
+	c_grass = Color(String(p.get("grass", "5f6a3c")))
+	c_dry = Color(String(p.get("dry", "7d7748")))
+	c_earth = Color(String(p.get("earth", "7f6d4f")))
+	c_rock = Color(String(p.get("rock", "6f6a60")))
+	c_sand = Color(String(p.get("sand", "c2b583")))
+	c_apron = Color(String(p.get("apron", String(p.get("grass", "5f6a3c")))))
+	var g: Dictionary = preset.get("ground", {})
+	sand_below_m = float(g.get("sand_below_m", -1000.0))
+	rock_above_m = float(g.get("rock_above_m", 1.0e9))
 
 
 ## The height of the noise ground (before pads) is what a pad takes: the grid's height at
@@ -274,7 +282,6 @@ func checksum() -> int:
 ## The ground's triangles inside `area` (x, z in metres), world space, for navigation.
 func triangles_in(area: Rect2) -> PackedVector3Array:
 	var faces := PackedVector3Array()
-	var seabed := PackedVector3Array()
 	var lo := _grid_index(area.position)
 	var hi := _grid_index(area.end) + Vector2i.ONE
 	for j in range(maxi(lo.y, 0), mini(hi.y, points - 1)):
@@ -283,11 +290,10 @@ func triangles_in(area: Rect2) -> PackedVector3Array:
 			var b := _vertex(i + 1, j)
 			var c := _vertex(i + 1, j + 1)
 			var d := _vertex(i, j + 1)
-			if coast_side != "" and maxf(maxf(a.y, b.y), maxf(c.y, d.y)) < SEA_LEVEL_M - 0.3 and shore_distance(a.x, a.z) < 0.0:
-				seabed.append_array([a, b, d, b, c, d])  # nobody walks there (wave 5b coast)
-				continue
+			if sea_side >= 0 and maxf(maxf(a.y, b.y), maxf(c.y, d.y)) < sea_level - NAV_WATER_M:
+				continue  # too deep to walk: not part of the navigation mesh
 			faces.append_array([a, b, d, b, c, d])  # clockwise seen from above: facing up
-	return faces if not faces.is_empty() else seabed  # all at sea: on its own, joined to no land
+	return faces
 
 
 func _vertex(i: int, j: int) -> Vector3:
@@ -375,8 +381,8 @@ func build_visuals() -> void:
 					node.visibility_range_begin = 0.0  # until the finest level is built
 					_lod1[Vector2i(cx, cz)] = node
 	add_child(_apron(_material))
-	if coast_side != "":
-		add_child(_sea())
+	if sea_side >= 0:
+		add_child(_water())
 	set_process(true)
 
 
@@ -491,14 +497,20 @@ func _ground_colour(i: int, j: int, n: Vector3) -> Color:
 	var p := Vector2(v_x(i), v_x(j))
 	for pad: Array in pads:
 		if (pad[0] as Rect2).grow(-1.0).has_point(p):
-			return EARTH
-	if coast_side != "" and _h(i, j) < SEA_LEVEL_M + BEACH_TOP_M + 0.3 and shore_distance(p.x, p.y) < BEACH_M + 20.0:
-		return SAND  # the beach and the seabed (wave 5b coast)
+			return c_earth
 	var steep := clampf((1.0 - n.y) * 12.0, 0.0, 1.0)
 	var patch := float(absi(hash(Vector2i(i / 3, j / 3) + Vector2i(seed_value, 0))) % 1000) / 1000.0
-	var colour := GRASS.lerp(DRY, patch * 0.6)
-	colour = colour.lerp(EARTH, steep)
-	return colour.lerp(ROCK, clampf((1.0 - n.y) * 30.0 - 2.0, 0.0, 1.0))
+	var colour := c_grass.lerp(c_dry, patch * 0.6)
+	var h := _h(i, j)
+	# Rock on the high ground; sand in riverbeds and on the beach.
+	colour = colour.lerp(c_rock, clampf((h - rock_above_m) / 8.0, 0.0, 0.8))
+	colour = colour.lerp(c_earth, steep)
+	colour = colour.lerp(c_rock, clampf((1.0 - n.y) * 30.0 - 2.0, 0.0, 1.0))
+	if _bed.size() == heights.size():
+		colour = colour.lerp(c_sand, clampf(float(_bed[i + j * points]) / 255.0 * 1.6 - 0.3, 0.0, 0.85) * (1.0 - steep))
+	if sea_side >= 0 and sand_below_m > -100.0 and sea_edge_distance(p.x, p.y) < sea_m + SEA_MARGIN_M + 40.0:
+		colour = colour.lerp(c_sand, smoothstep(sea_level + sand_below_m, sea_level, h) * (1.0 - steep * 0.5))
+	return colour
 
 
 func v_x(i: int) -> float:
@@ -514,18 +526,18 @@ func _apron(material: Material) -> MeshInstance3D:
 		[Vector2(-o, -o), Vector2(o, -h)], [Vector2(-o, h), Vector2(o, o)],
 		[Vector2(-o, -h), Vector2(-h, h)], [Vector2(h, -h), Vector2(o, h)],
 	]
-	var sea_quad: int = {"north": 0, "south": 1, "west": 2, "east": 3}.get(coast_side, -1)
 	for k in quads.size():
-		var a: Vector2 = quads[k][0]
-		var b: Vector2 = quads[k][1]
-		var y := -0.02 if k != sea_quad else SEA_LEVEL_M - SEA_DEPTH_M  # the coast's side lies under the sea
+		var q: Array = quads[k]
+		var a: Vector2 = q[0]
+		var b: Vector2 = q[1]
+		var y := (sea_level - sea_depth) if k == sea_side else -0.02  # the seabed beyond a sea
 		verts.append_array([Vector3(a.x, y, a.y), Vector3(b.x, y, b.y), Vector3(b.x, y, a.y),
 			Vector3(a.x, y, a.y), Vector3(a.x, y, b.y), Vector3(b.x, y, b.y)])
 	var normals := PackedVector3Array()
 	var colours := PackedColorArray()
 	for v in verts:
 		normals.append(Vector3.UP)
-		colours.append(GRASS)
+		colours.append(c_apron)
 	var arrays := []
 	arrays.resize(Mesh.ARRAY_MAX)
 	arrays[Mesh.ARRAY_VERTEX] = verts
@@ -541,33 +553,139 @@ func _apron(material: Material) -> MeshInstance3D:
 	return node
 
 
-## The sea's surface (wave 5b coast): one flat sheet at SEA_LEVEL_M from beyond the coast's
-## edge to a little inland of the furthest the shoreline wanders (the land there is above it).
-func _sea() -> MeshInstance3D:
+# --- Sea -------------------------------------------------------------------------------------
+
+## Distance from the sea side's edge to (x, z), or INF with no sea.
+func sea_edge_distance(x: float, z: float) -> float:
+	if sea_side < 0:
+		return INF
+	return [z + _half, _half - z, x + _half, _half - x][sea_side]
+
+
+## How deep the water is at (x, z): 0 on dry ground or with no sea. Only the sea strip (the
+## water reaches sea_m in from the edge, plus a margin for the shore) holds water.
+func sea_depth_at(x: float, z: float) -> float:
+	if sea_side < 0 or sea_edge_distance(x, z) > sea_m + SEA_MARGIN_M:
+		return 0.0
+	return maxf(sea_level - height_at(x, z), 0.0)
+
+
+## The strip the water covers (x, z in metres), an empty Rect2 with no sea.
+func sea_rect() -> Rect2:
+	if sea_side < 0:
+		return Rect2()
+	var reach := sea_m + SEA_MARGIN_M
+	var h := _half
+	return [Rect2(-h, -h, size_m, reach), Rect2(-h, h - reach, size_m, reach), Rect2(-h, -h, reach, size_m), Rect2(h - reach, -h, reach, size_m)][sea_side]
+
+
+## The water: a flat translucent plane over the shoreline strip, and one over the apron beyond
+## the sea's edge (which is lowered to the seabed's height there).
+func _water() -> MeshInstance3D:
+	var r := sea_rect()
 	var o := _half + APRON_M
-	var inner := _half - shore_m - SHORE_WANDER_M - WATER_REACH_M  # from the centre, toward the sea
-	var rect: Rect2
-	match coast_side:
-		"south":
-			rect = Rect2(-o, inner, 2.0 * o, o - inner)
-		"north":
-			rect = Rect2(-o, -o, 2.0 * o, o - inner)
-		"east":
-			rect = Rect2(inner, -o, o - inner, 2.0 * o)
-		_:
-			rect = Rect2(-o, -o, o - inner, 2.0 * o)
-	var plane := PlaneMesh.new()
-	plane.size = rect.size
+	var h := _half
+	var outer: Rect2 = [Rect2(-o, -o, 2.0 * o, o - h), Rect2(-o, h, 2.0 * o, o - h), Rect2(-o, -h, o - h, size_m), Rect2(h, -h, o - h, size_m)][sea_side]
+	var verts := PackedVector3Array()
+	for q: Rect2 in [r, outer]:
+		var a := q.position
+		var b := q.end
+		var y := sea_level
+		verts.append_array([Vector3(a.x, y, a.y), Vector3(b.x, y, a.y), Vector3(b.x, y, b.y),
+			Vector3(a.x, y, a.y), Vector3(b.x, y, b.y), Vector3(a.x, y, b.y)])
+	var normals := PackedVector3Array()
+	for v in verts:
+		normals.append(Vector3.UP)
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = verts
+	arrays[Mesh.ARRAY_NORMAL] = normals
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 	var material := StandardMaterial3D.new()
-	material.albedo_color = SEA
+	material.albedo_color = Color(0.13, 0.33, 0.40, 0.82)
 	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	material.roughness = 0.15
-	material.metallic_specular = 0.7
-	material.cull_mode = BaseMaterial3D.CULL_DISABLED
-	plane.material = material
+	material.roughness = 0.12
+	material.metallic_specular = 0.8
 	var node := MeshInstance3D.new()
 	node.name = "Sea"
-	node.mesh = plane
-	node.position = Vector3(rect.get_center().x, SEA_LEVEL_M, rect.get_center().y)
+	node.mesh = mesh
+	node.material_override = material
 	node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	return node
+
+
+# --- The coast (wave 5b, V4): the sea above, as the LHD and the AAVs see it ------------------
+
+## The sea's side by name ("north" -z, "south" +z, "west" -x, "east" +x; "" with no sea).
+const SEA_SIDES: Array[String] = ["north", "south", "west", "east"]
+
+var coast_side := ""
+## The shoreline nearest the sea's edge: how far in from that edge the water ends at its
+## narrowest (m; the LHD lies inside it).
+var shore_m := 0.0
+var _shore := PackedFloat32Array()  # per grid line along the coast: the shoreline's distance from the edge
+
+
+## The shoreline along the coast: walking in from the sea's edge on each grid line, the first
+## ground at or above the water (between grid points, where the ground crosses it), else the
+## water's inner edge (sea_m + SEA_MARGIN_M). After the pads, so it is the ground as built.
+func _measure_shore() -> void:
+	coast_side = SEA_SIDES[sea_side] if sea_side >= 0 else ""
+	_shore = PackedFloat32Array()
+	shore_m = 0.0
+	if sea_side < 0:
+		return
+	var reach := sea_m + SEA_MARGIN_M
+	_shore.resize(points)
+	shore_m = reach
+	for k in points:
+		var line := reach
+		var prev := sea_level - sea_depth
+		for s in points:
+			var d := s * CELL_M
+			if d > reach:
+				break
+			var h: float = [_h(k, s), _h(k, points - 1 - s), _h(s, k), _h(points - 1 - s, k)][sea_side]
+			if h >= sea_level:
+				line = 0.0 if s == 0 else d - CELL_M * (h - sea_level) / maxf(h - prev, 0.001)
+				break
+			prev = h
+		_shore[k] = line
+		shore_m = minf(shore_m, line)
+
+
+func has_coast() -> bool:
+	return sea_side >= 0
+
+
+## How far (x, z) is inland of the shoreline (m; negative out to sea). INF with no sea.
+func shore_distance(x: float, z: float) -> float:
+	if sea_side < 0 or _shore.is_empty():
+		return INF
+	var along := x if sea_side <= 1 else z
+	var g := clampf((along + _half) / CELL_M, 0.0, points - 1.0)
+	var k := mini(floori(g), points - 2)
+	return sea_edge_distance(x, z) - lerpf(_shore[k], _shore[k + 1], g - k)
+
+
+## The water's surface at (x, z): sea_level over the sea strip (where the Sea mesh is, and on
+## out past the zone's edge), -INF where there is no water. Below the ground it's dry land.
+func water_height(x: float, z: float) -> float:
+	return sea_level if sea_side >= 0 and sea_edge_distance(x, z) <= sea_m + SEA_MARGIN_M else -INF
+
+
+## Out to sea (a unit vector on the ground plane), ZERO with no sea.
+func seaward() -> Vector3:
+	return [Vector3(0, 0, -1), Vector3(0, 0, 1), Vector3(-1, 0, 0), Vector3(1, 0, 0)][sea_side] if sea_side >= 0 else Vector3.ZERO
+
+
+## The point `t` metres inland of the shoreline (negative: out to sea) level with `pos` along
+## the coast, on the ground or the water.
+func shore_point(pos: Vector3, t: float) -> Vector3:
+	if sea_side < 0:
+		return pos
+	var out := seaward()
+	var p := Vector3(pos.x, 0.0, pos.z)
+	p -= out * (t - shore_distance(p.x, p.z))  # the shoreline is a function of the along-coast position: one step
+	return Vector3(p.x, maxf(height_at(p.x, p.z), water_height(p.x, p.z)), p.z)

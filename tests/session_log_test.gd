@@ -87,6 +87,9 @@ func _test_issues() -> void:
 		"loadout": ["m4a1"], "combat": 0.5, "discipline": 0.5, "guard": true})
 	SquadAI.of(faller).process_mode = Node.PROCESS_MODE_DISABLED
 	await _frames(5)
+	faller.player_input.flash("probe AI message")  # an AI's own message (what it treats): no screen
+	check(("%s (AI): probe AI message" % faller.display_name()) in _log() and not "shown to the player: probe AI message" in _log(),
+		"an AI's message is logged as the AI's, never as shown to the player")
 	faller.global_position = Vector3(5, -300, 30)
 	await _seconds(SessionLog.CHECK_S * 2.5)
 	check(("!! ANOMALY: %s fell out of the world" % faller.display_name()) in _log() and SessionLog.anomalies >= 1, "a soldier out of the world is an anomaly")
@@ -98,10 +101,67 @@ func _test_issues() -> void:
 		check(line.size() == 1 and "at (5.0, -" in line[0] and SquadAI.Intent.keys().any(func(k: String) -> bool: return (k + ":") in line[0]),
 			"the dump has the soldier: where, and the AI's intent (%s)" % [line])
 		check("Player 1 (friendly" in state or "player 1" in state, "and the player")
+	# Casualties and care (host side lines).
+	var victim := level.spawn_soldier({"name": "Victim", "faction": "friendly", "variant": "multicam", "pos": player.global_position + Vector3(0.6, 0, 0),
+		"loadout": ["m4a1"], "combat": 0.5, "discipline": 0.5, "guard": true})
+	SquadAI.of(victim).process_mode = Node.PROCESS_MODE_DISABLED
+	await _frames(5)
+	victim.vitals.server_hit(Vitals.THIGH_L, {"round_class": Vitals.PISTOL, "distance": 12.0})
+	await _frames(2)
+	player.inventory.take(&"tourniquet")
+	await player._treat(victim, &"tourniquet", Vitals.THIGH_L, true)
+	var care := _log()
+	check(("%s treats %s: tourniquet on" % [player.display_name(), victim.display_name()]) in care and ", done" in care, "a treatment is logged: who, whom, item, part, done")
+	await player._treat(victim, &"morphine", Vitals.THIGH_L, false)  # none carried
+	check(("%s treats %s: morphine on" % [player.display_name(), victim.display_name()]) in _log() and "refused: " in _log(), "a refused treatment says why")
+	var dying := level.spawn_soldier({"name": "Dying", "faction": "enemy", "variant": "multicam", "pos": player.global_position + Vector3(-2, 0, 0),
+		"loadout": ["m4a1"], "combat": 0.5, "discipline": 0.5, "guard": true})
+	SquadAI.of(dying).process_mode = Node.PROCESS_MODE_DISABLED
+	await _frames(5)
+	Harm.note_hit(dying, player)
+	dying.vitals.server_hit(Vitals.HEAD, {"round_class": Vitals.FULL_POWER, "distance": 42.0})
+	await _frames(3)
+	var gone_down := _log()
+	check(("%s died (enemy): round (full_power), head, by %s (friendly) at 42 m" % [dying.display_name(), player.display_name()]) in gone_down
+		or ("%s went down (enemy): round (full_power), head, by %s (friendly) at 42 m" % [dying.display_name(), player.display_name()]) in gone_down,
+		"a soldier going down or dying is logged: who, cause, body part, attacker, distance")
+	victim.queue_free()
+	dying.queue_free()
+	await _test_bug_report(player, level, faller)
 	SessionLog.finish()
 	check("-FAIL-" in SessionLog.folder.get_file() and DirAccess.dir_exists_absolute(SessionLog.folder), "something unexpected: the folder ends FAIL")
 	check(_index().contains("P0043 ") and _index().contains(" FAIL "), "and index.txt says so")
 	faller.queue_free()
+
+
+func _test_bug_report(player: Soldier, level: CompoundLevel, faller: Soldier) -> void:
+	print("The bug-report key and the AI overlay")
+	player.vitals.server_hit(Vitals.FOREARM_L, {"round_class": Vitals.FRAGMENT, "superficial": true})
+	var n := BugReport.save("probe: the door sticks", player)
+	var report := SessionLog.folder.path_join("report-1.txt")
+	check(n == 1 and FileAccess.file_exists(report), "report-1.txt is saved in the session folder")
+	var text := FileAccess.get_file_as_string(report)
+	check("Note: probe: the door sticks" in text and "Time: " in text and "Zone: " in text, "it has the note, the time and the zone")
+	check("Soldiers (" in text and "Why: bug report: probe: the door sticks" in text and ("%s (friendly" % faller.display_name()) in text, "and the soldiers list")
+	check("  inventory:" in text and "  wounds (" in text and "forearm" in text.to_lower(), "and the player's inventory and wounds")
+	check("bug report 1: probe: the door sticks" in _log(), "the log says so")
+	check(BugReport.save("second", player) == 2 and FileAccess.file_exists(SessionLog.folder.path_join("report-2.txt")), "the next report is report-2")
+	var scout := level.spawn_soldier({"name": "Scout", "faction": "friendly", "variant": "multicam", "pos": player.global_position + Vector3(0, 0.1, 8),
+		"loadout": ["m4a1"], "combat": 0.5, "discipline": 0.5, "guard": true})
+	await _frames(5)
+	var overlay := AiOverlay.new()
+	add_child(overlay)
+	check(overlay.labels.is_empty(), "the overlay shows nothing until it is switched on")
+	overlay.set_shown(true)
+	overlay.refresh()
+	var label: Label3D = overlay.labels.get(scout)
+	check(label != null and SquadAI.Intent.keys()[SquadAI.of(scout).intent] in label.text and "suppr" in label.text,
+		"it has a label with the intent over a nearby AI (%s)" % [label.text if label else "none"])
+	check(not overlay.labels.has(faller), "and none over one far away")
+	overlay.set_shown(false)
+	check(overlay.labels.is_empty(), "switched off, the labels go")
+	overlay.queue_free()
+	scout.queue_free()
 
 
 func _probe_error() -> void:

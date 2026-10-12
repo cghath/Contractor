@@ -467,6 +467,11 @@ func driver() -> Soldier:
 	return occupant(_first_seat(DRIVER))
 
 
+## Whether its engine runs (Sfx's engine sound, every peer): someone drives. Helicopter: its rotors turn.
+func engine_running() -> bool:
+	return driver() != null
+
+
 func gunner() -> Soldier:
 	var g: Dictionary = spec.get("gun", {})
 	return occupant(int(g.get("seat", -1))) if not g.is_empty() and g.has("weapon") else null

@@ -399,7 +399,7 @@ func _test_lhd() -> void:
 	var ins := level.insertion_points()[0]
 	check(t.water_height(ins.x, ins.z) == -INF and t.shore_distance(ins.x, ins.z) > 50.0, "the insertion point is dry land, %.0f m inland" % t.shore_distance(ins.x, ins.z))
 	var beach := t.shore_point(ins, 0.0)
-	check(absf(t.height_at(beach.x, beach.z) - ZoneTerrain.SEA_LEVEL_M) < 0.6 and t.height_at(beach.x, beach.z + 80.0 * t.seaward().z) < -3.0,
+	check(absf(t.height_at(beach.x, beach.z) - t.sea_level) < 0.6 and t.height_at(beach.x + 80.0 * t.seaward().x, beach.z + 80.0 * t.seaward().z) < t.sea_level - 3.0,
 		"a beach at the waterline, the seabed falling away beyond it")
 	var deck := lhd.deck()
 	check(Supports.origin_for(level, &"lhd").origin.is_equal_approx(deck.global_position) and Supports.origin_for(level).origin.is_equal_approx(deck.global_position),
@@ -409,7 +409,7 @@ func _test_lhd() -> void:
 	var nav := level.terrain.triangles_in(Rect2(beach.x - 30.0, beach.z - 200.0, 60.0, 400.0))
 	var under := 0
 	for v in nav:
-		if v.y < ZoneTerrain.SEA_LEVEL_M - 2.0:
+		if v.y < t.sea_level - 2.0:
 			under += 1
 	check(under == 0 and nav.size() > 0, "nobody walks on the seabed: the navigation leaves it out")
 

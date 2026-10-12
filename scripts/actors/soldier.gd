@@ -348,7 +348,8 @@ func _update_ragdoll() -> void:
 		ragdoll = Ragdoll.start(self) if multiplayer.is_server() else Ragdoll.follow(self)
 		collision_layer = 0
 	elif not want and is_instance_valid(ragdoll):
-		var spot: Variant = ragdoll.rest_spot() if is_ai() or is_multiplayer_authority() else null
+		# Not right after a respawn: the player is at the spawn point, not getting up where they lay.
+		var spot: Variant = ragdoll.rest_spot() if (is_ai() or is_multiplayer_authority()) and _now() >= _respawned_until else null
 		ragdoll.stop()
 		ragdoll = null
 		_stand_where_ragdoll_lay(spot)
@@ -583,6 +584,10 @@ func _server_fire(origin: Vector3, direction: Vector3, slot: StringName) -> void
 	if origin.distance_to(camera.global_position) > 1.0:
 		origin = camera.global_position  # don't trust a far-off muzzle
 	var result := Ballistics.fire(self, origin, direction.normalized(), weapon)
+	var suppressed := bool(weapon.stats.get("suppressed", false))
+	var round_end: Variant = result.get("position")
+	Sfx.server_shot(origin, round_end if round_end is Vector3 else origin + direction.normalized() * 400.0,
+		"suppressed" if suppressed else ("pistol" if weapon.slot == &"sidearm" else "rifle"))  # every peer hears it (Sfx)
 	PeopleLayer.server_noise(self, origin)  # people nearby hear it (wave 4)
 	if faction != &"hostile":
 		Alert.server_noise(self, origin, Alert.SHOT, bool(weapon.stats.get("suppressed", false)))  # hot zones: the enemy hears it (4B part 3)
@@ -647,6 +652,7 @@ func _server_throw(origin: Vector3, direction: Vector3, id: StringName) -> void:
 	if item == null or not item.stats.has("throwable") or not inventory.remove_one(id):
 		return
 	_server_busy_until = _now() + THROW_BUSY_S
+	Sfx.server_play(&"throw", global_position + Vector3.UP * 1.4)
 	if origin.distance_to(camera.global_position) > 1.0:
 		origin = camera.global_position
 	var dir := direction.normalized()
@@ -663,6 +669,7 @@ func _server_reload(slot: StringName) -> void:
 		return
 	var seconds := reload_seconds(ItemDB.get_item(id))
 	_server_busy_until = _now() + seconds
+	Sfx.server_play(&"reload", global_position + Vector3.UP)
 	_reload_n += 1
 	var n := _reload_n
 	# The new magazine goes in when the reload finishes, if the same weapon is still there and
@@ -763,7 +770,7 @@ func _server_exert() -> void:
 		vitals.server_exert()
 
 
-## H: treats yourself with the next item you carry from your own care_needed() (a
+## Shift+H (quick-treat): treats yourself with the next item you carry from your own care_needed() (a
 ## tourniquet before a bandage, and so on), through the same timed treatment as _server_treat.
 @rpc("any_peer", "call_local", "reliable")
 func _server_use_medical() -> void:
@@ -993,6 +1000,21 @@ func _server_treat(path: NodePath, item_id: StringName, part: StringName, rushed
 	_treat(get_node_or_null(path) as Node3D, item_id, part, rushed)
 
 
+## Puts a triage card (Vitals.TRIAGE_*) on `path` (a casualty within reach, or yourself).
+@rpc("any_peer", "call_local", "reliable")
+func _server_set_triage(path: NodePath, card: StringName) -> void:
+	if not _from_owner() or not vitals.is_up():
+		return
+	var target := get_node_or_null(path) as Node3D
+	var other := Vitals.find_on(target) if target else null
+	if other == null or other.is_dead() or not Vitals.TRIAGE_CARDS.has(card):
+		return
+	if not _in_treat_reach(target):
+		_client_message.rpc_id(owner_peer(), "Too far away")
+		return
+	other.server_set_triage(card)
+
+
 ## Takes the tourniquets off `part` of `path` once its arterial bleeding is packed (timed,
 ## the tourniquet's remove_s). They go back in your kit if there's room, else on the ground.
 @rpc("any_peer", "call_local", "reliable")
@@ -1024,6 +1046,16 @@ func _server_remove_tourniquet(path: NodePath, part: StringName) -> void:
 	_client_message.rpc_id(owner_peer(), "Tourniquet off, %s" % Vitals.part_name(part))
 
 
+## Host: a line in the session log for a treatment (SessionLog): who treats whom, with what, on
+## which part, and how it went (`outcome`: "done", "interrupted: why", "refused: why").
+func _log_care(target: Node, item_id: StringName, part: StringName, outcome: String) -> void:
+	if SessionLog.session_id == "":
+		return
+	var patient := (target as Soldier).display_name() if target is Soldier else (String(target.name) if target else "nobody")
+	SessionLog.note("%s treats %s: %s%s, %s" % [display_name(), "themself" if target == self else patient,
+		String(item_id) if item_id != &"" else "care", (" on " + Vitals.part_name(part)) if part != &"" else "", outcome])
+
+
 ## Host side of a treatment (_server_treat, _server_use_medical).
 func _treat(target: Node3D, item_id: StringName, part: StringName, rushed: bool) -> void:
 	var other := Vitals.find_on(target) if target else null
@@ -1044,6 +1076,7 @@ func _treat(target: Node3D, item_id: StringName, part: StringName, rushed: bool)
 	else:
 		why = other.treatment_problem(item_id, part)
 	if why != "":
+		_log_care(target, item_id, part, "refused: " + why)
 		_client_message.rpc_id(owner_peer(), why)
 		return
 	var tourniquet := item_id == WoundModel.TOURNIQUET
@@ -1053,14 +1086,17 @@ func _treat(target: Node3D, item_id: StringName, part: StringName, rushed: bool)
 	if not await _timed_care(target, other, treat_seconds(target, item, rushed), label, part, item_id):
 		return
 	if not Vitals.has_item(inventory, item_id):
+		_log_care(target, item_id, part, "refused: no longer carrying it")
 		_client_message.rpc_id(owner_peer(), "You no longer have a %s" % item.name)
 		return
 	rushed = rushed or (tourniquet and (hurried or under_fire()))
 	if not other.server_apply_treatment(item_id, part, rushed):
+		_log_care(target, item_id, part, "refused: does nothing there now")
 		_client_message.rpc_id(owner_peer(), "%s does nothing there now" % item.name)
 		return
 	if not item.stats.get("no_item", false) and not item.stats.get("reusable", false):
 		inventory.take_medical(item_id)
+	_log_care(target, item_id, part, "done")
 	var note := other.care_note()
 	if note != "":
 		_client_message.rpc_id(owner_peer(), note)
@@ -1106,6 +1142,7 @@ func _timed_care(target: Node3D, other: Vitals, seconds: float, label: String, p
 		if why != "":
 			if is_instance_valid(other):
 				other.server_end_treatment()
+			_log_care(target, item, part, "interrupted: " + why)
 			model.server_stop(anim)
 			_server_busy_until = _now()
 			_client_busy.rpc_id(owner_peer(), 0.0, "Treatment interrupted: %s" % why)
@@ -1279,9 +1316,36 @@ func _client_lifted(lifted: bool) -> void:
 		collision_layer = 0 if lifted or vitals.is_dead() else BODY_LAYER
 
 
+## Host: a line in the session log when this soldier goes down or dies (`what`): who, why (what
+## last hurt them, or bleed-out / arrest when nothing recent did), where on the body, and who
+## did it (Harm.last) from how far. Does nothing without a session (SessionLog).
+func _log_casualty(what: String) -> void:
+	if SessionLog.session_id == "":
+		return
+	var c: Dictionary = vitals.last_cause
+	var recent := not c.is_empty() and vitals.seconds_since_hit() < 3.0
+	var cause := String(c.get("cause", "")) if recent else ("cardiac arrest" if vitals.in_cardiac_arrest() else "bleed-out")
+	if not recent and what == "went down":
+		cause = "out: " + ", ".join(vitals.why_unconscious())
+	var line := "%s %s (%s): %s" % [display_name(), what, faction, cause]
+	if recent and c.has("part"):
+		line += ", " + String(c.part)
+	var by := Harm.last(self)
+	if String(by.get("name", "")) != "" and _now() - float(by.get("at", -1000.0)) < 900.0:
+		line += ", %s %s (%s)" % ["by" if recent else "last hit by", by.name, by.faction]
+		var dist := float(c.get("distance", -1.0)) if recent else -1.0
+		var who := get_node_or_null(NodePath(String(by.get("path", "")))) as Node3D
+		if dist < 0.0 and who != null:
+			dist = global_position.distance_to(who.global_position)
+		if dist >= 0.0:
+			line += " at %.0f m" % dist
+	SessionLog.note(line)
+
+
 func _on_went_down() -> void:
 	if not multiplayer.is_server():
 		return
+	_log_casualty("went down")
 	_drop_held()  # you drop what you were carrying in your hands
 	release_carried()  # ...and whoever you were carrying
 
@@ -1306,6 +1370,12 @@ var body_label := ""
 var body_uid := ""
 ## A dead player's body carries a GearMarker (CompoundLevel.server_spawn_body).
 var has_gear_marker := false
+## A player's respawn (_client_respawn) puts them at a spawn point; until this time the ragdoll
+## going doesn't stand them up where it lay (Captain, 2026-10-12: respawned where he'd died).
+var _respawned_until := -1.0
+## How long after a respawn the ragdoll's spot is ignored (the vitals reset and the respawn can
+## reach a client in either order).
+const RESPAWN_HOLD_S := 2.0
 
 
 ## AI dies for good (permadeath) and its own node stays as the body, on the shoulder of
@@ -1314,6 +1384,7 @@ var has_gear_marker := false
 func _on_died() -> void:
 	if not multiplayer.is_server():
 		return
+	_log_casualty("died")
 	_reload_n += 1  # a reload in progress dies with them
 	release_carried()
 	_drop_held()
@@ -1648,6 +1719,7 @@ func _client_carried(pos: Vector3) -> void:
 func _client_respawn(pos: Vector3) -> void:
 	if multiplayer.get_remote_sender_id() != 1:
 		return
+	_respawned_until = _now() + RESPAWN_HOLD_S
 	global_position = pos
 	velocity = Vector3.ZERO
 	player_input.flash("You were killed. Respawned.")

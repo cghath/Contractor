@@ -523,6 +523,11 @@ func order_throw(id: StringName, point: Vector3) -> bool:
 	return _throw(id, point)
 
 
+## Where it is heading (the destination it is walking to), or Vector3.INF if nowhere (debug overlay).
+func destination() -> Vector3:
+	return _destination if _has_destination else Vector3.INF
+
+
 func status_text() -> String:
 	var who := _name_of(casualty)
 	match intent:
@@ -969,7 +974,7 @@ static func responder_for(c: Soldier, wanted: Array[StringName] = []) -> Soldier
 	var near_d := INF
 	for n in c.get_tree().get_nodes_in_group(&"combatants"):
 		var ai := SquadAI.of(n)
-		if ai == null or not ai._free_for(c) or not ai._cares_for(c) or not ai._carries_any(wanted):
+		if ai == null or ai.body == null or not ai._free_for(c) or not ai._cares_for(c) or not ai._carries_any(wanted):
 			continue
 		var d := ai.body.global_position.distance_to(c.body_point())
 		if ai.escorting == c:
@@ -1003,7 +1008,7 @@ static func medic_for(c: Soldier, wanted: Array[StringName]) -> Soldier:
 	var other_d := INF
 	for n in c.get_tree().get_nodes_in_group(&"combatants"):
 		var ai := SquadAI.of(n)
-		if ai == null or ai.body.role != Roles.MEDIC or not ai._cares_for(c) or not ai._free_for(c) \
+		if ai == null or ai.body == null or ai.body.role != Roles.MEDIC or not ai._cares_for(c) or not ai._free_for(c) \
 				or c.care_by == ai.body or wanted.is_empty() or not ai._carries_any(wanted):
 			continue
 		var d := ai.body.global_position.distance_to(c.body_point())
@@ -1053,6 +1058,7 @@ func _may_use(id: StringName) -> bool:
 func _find_casualty() -> Soldier:
 	var best: Soldier = null
 	var best_d := INF
+	var best_tier := 99
 	for n in get_tree().get_nodes_in_group(&"combatants"):
 		var s := n as Soldier
 		if s == null or s == body or not _cares_for(s) or not needs_help(s):
@@ -1079,10 +1085,25 @@ func _find_casualty() -> Soldier:
 			d *= 0.5
 		if hvt and body.role == Roles.MEDIC:
 			d *= HVT_MEDIC_PULL
-		if d < best_d:
+		var tier := triage_tier(s)
+		if tier < best_tier or (tier == best_tier and d < best_d):
 			best = s
 			best_d = d
+			best_tier = tier
 	return best
+
+
+## How soon a triage card (Vitals.triage) puts a casualty in line: immediate first, then
+## delayed and uncarded alike (the usual order), then minimal, expectant last.
+static func triage_tier(s: Soldier) -> int:
+	match s.vitals.triage():
+		Vitals.TRIAGE_IMMEDIATE:
+			return 0
+		Vitals.TRIAGE_MINIMAL:
+			return 2
+		Vitals.TRIAGE_EXPECTANT:
+			return 3
+	return 1
 
 
 ## Who is really looking after `s`: a player who took hold of them, or an AI whose casualty

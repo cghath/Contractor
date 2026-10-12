@@ -529,7 +529,8 @@ static func condition_report(target: Node, actor: Soldier = null) -> String:
 	var vitals := target.get_node_or_null(^"Vitals") as Vitals
 	if vitals == null:
 		return ""
-	return "%s: %s\n%s" % [display_name(target), vitals.condition_text(), wound_report(vitals, false, has_oximeter(actor))]
+	var card := "" if vitals.triage() == Vitals.TRIAGE_NONE else " [%s]" % String(Vitals.TRIAGE_TEXT[vitals.triage()])
+	return "%s: %s%s\n%s" % [display_name(target), vitals.condition_text(), card, wound_report(vitals, false, has_oximeter(actor))]
 
 
 ## Carries a pulse oximeter (loose or in a kit).

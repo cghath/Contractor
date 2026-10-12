@@ -75,6 +75,19 @@ const TRAUMA_BLOOD_PER_DAMAGE := 0.006
 ## False skips the downed state and dies straight away.
 @export var can_go_down := true
 
+## Triage card (a carer sets it on a casualty; replicated in net_state under "tg").
+const TRIAGE_NONE := &"none"
+const TRIAGE_MINIMAL := &"minimal"      # green
+const TRIAGE_DELAYED := &"delayed"      # yellow
+const TRIAGE_IMMEDIATE := &"immediate"  # red
+const TRIAGE_EXPECTANT := &"expectant"  # black
+const TRIAGE_CARDS: Array[StringName] = [TRIAGE_NONE, TRIAGE_MINIMAL, TRIAGE_DELAYED, TRIAGE_IMMEDIATE, TRIAGE_EXPECTANT]
+const TRIAGE_TEXT := {TRIAGE_NONE: "No card", TRIAGE_MINIMAL: "Minimal (green)", TRIAGE_DELAYED: "Delayed (yellow)",
+	TRIAGE_IMMEDIATE: "Immediate (red)", TRIAGE_EXPECTANT: "Expectant (black)"}
+const TRIAGE_COLORS := {TRIAGE_NONE: Color(0.55, 0.57, 0.6), TRIAGE_MINIMAL: Color(0.3, 0.75, 0.35), TRIAGE_DELAYED: Color(0.95, 0.85, 0.2),
+	TRIAGE_IMMEDIATE: Color(0.9, 0.2, 0.15), TRIAGE_EXPECTANT: Color(0.05, 0.05, 0.05)}
+var _triage: StringName = TRIAGE_NONE
+
 ## Unconscious or in cardiac arrest (replicated at once).
 var downed := false:
 	set(value):
@@ -99,6 +112,8 @@ var care_rng: RandomNumberGenerator:
 
 var _model := WoundModel.new()
 var _last_hit_at := -1000.0   # host: when a round or impact last landed (Time seconds)
+## Host: what last hurt this body ({"cause", "part", "distance"}), for the session log (SessionLog) and nothing else.
+var last_cause := {}
 var _net_dirty := false       # clients: net_state not yet applied to _model
 var _last_pos := Vector3.INF  # host: where the body was last step (_track_stillness)
 var _sim_left := 0.0          # host: time not yet simulated
@@ -312,18 +327,21 @@ func server_exert() -> bool:
 func server_blast(distance: float, radius: float, ear_pro := false) -> void:
 	_model.add_blast(distance, radius, ear_pro)
 	_last_hit_at = Time.get_ticks_msec() / 1000.0
+	last_cause = {"cause": "blast", "distance": distance}
 	_after_change(true)
 
 
 ## Host only. A fall from `height` metres (see WoundModel.add_fall).
 func server_fall(height: float) -> void:
 	_model.add_fall(height)
+	last_cause = {"cause": "fall (%.1f m)" % height}
 	_after_change(true)
 
 
 ## Host only. Burns over `share` of the body.
 func server_burn(share: float) -> void:
 	_model.add_burn(share)
+	last_cause = {"cause": "burn"}
 	_after_change(true)
 
 
@@ -704,6 +722,7 @@ func server_hit(part: StringName, hit: Dictionary) -> void:
 		channel.organs = []
 	_last_hit_at = Time.get_ticks_msec() / 1000.0
 	var added := _model.add_hit(part, channel, round_class)
+	last_cause = {"cause": "fragment" if round_class == FRAGMENT else "round (%s)" % round_class, "part": part, "distance": float(hit.get("distance", -1.0))}
 	if hit.has("position"):
 		# Where it went in, and out if it went through (the body ended before the channel
 		# did), in the rest pose: the wound marks on the model (CharacterModel) show them.
@@ -722,6 +741,7 @@ func server_hit(part: StringName, hit: Dictionary) -> void:
 func server_impact(part: StringName, round_class: StringName, distance: float, energy_j := -1.0) -> void:
 	_last_hit_at = Time.get_ticks_msec() / 1000.0
 	_model.add_impact(part, round_class, distance, energy_j)
+	last_cause = {"cause": "round stopped by armor (%s)" % round_class, "part": part, "distance": distance}
 	_after_change()
 
 
@@ -729,6 +749,7 @@ func server_impact(part: StringName, round_class: StringName, distance: float, e
 ## amount/100 pain and loses amount * 0.6% of blood volume at once.
 func server_damage(amount: float) -> void:
 	_model.add_trauma(amount * TRAUMA_PAIN_PER_DAMAGE, amount * TRAUMA_BLOOD_PER_DAMAGE)
+	last_cause = {"cause": "trauma (%.0f damage)" % amount}
 	_after_change()
 
 
@@ -744,11 +765,28 @@ func server_kill() -> void:
 ## Host only. Back to full health (respawns, dummies getting back up, tests setting up).
 func server_reset_health() -> void:
 	_model.reset()
+	_triage = TRIAGE_NONE
 	_died_sent = false
 	_sim_left = 0.0
 	if downed:
 		downed = false
 	_publish(true)
+
+
+## The triage card on this casualty (TRIAGE_*), on every peer.
+func triage() -> StringName:
+	if _is_host():
+		return _triage
+	return StringName(net_state.get("tg", TRIAGE_NONE))
+
+
+## Host only. Puts `card` (a TRIAGE_* id) on this casualty.
+func server_set_triage(card: StringName) -> void:
+	if not TRIAGE_CARDS.has(card) or _model.dead:
+		return
+	_triage = card
+	_publish(true)
+	changed.emit()
 
 
 ## Host only. Fast-forwards the simulation by `seconds` (tests).
@@ -824,6 +862,7 @@ func _after_change(force := false) -> void:
 ## as a change (clients run them down themselves).
 func _publish(force: bool) -> void:
 	var state := _model.to_net()
+	state["tg"] = String(_triage)
 	var key := state.duplicate()
 	key.erase("t")
 	if key == _published and not force:

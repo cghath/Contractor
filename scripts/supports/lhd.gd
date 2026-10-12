@@ -70,8 +70,11 @@ func _place_ship(terrain: ZoneTerrain, coast: Dictionary) -> void:
 	var along := Vector3(absf(out.z), 0.0, absf(out.x))  # x along a north or south coast, z along an east or west one
 	var from_edge := clampf(float(coast.get("lhd_m", terrain.shore_m * 0.5)), beam, terrain.shore_m - beam)
 	var at := out * (half - from_edge) + along * clampf(float(coast.get("lhd_along_m", 0.0)), -half + length * 0.5, half - length * 0.5)
-	transform = Transform3D(Basis.looking_at(along, Vector3.UP), Vector3(at.x, ZoneTerrain.SEA_LEVEL_M, at.z))
-	add_child(LhdArt.build(length, beam, float(data.get("deck_m", LhdArt.DECK_M)), float(data.get("draft_m", LhdArt.DRAFT_M))))
+	transform = Transform3D(Basis.looking_at(along, Vector3.UP), Vector3(at.x, terrain.sea_level, at.z))
+	# A shallow preset sea (TerrainPresets "sea" depth_m): the hull stops short of the seabed under its keel.
+	var depth := terrain.sea_level - terrain.height_at(at.x, at.z)
+	var draft := clampf(depth - 0.5, 1.0, float(data.get("draft_m", LhdArt.DRAFT_M)))
+	add_child(LhdArt.build(length, beam, float(data.get("deck_m", LhdArt.DECK_M)), draft))
 
 
 func _place_fob(level: Node, def: Dictionary) -> void:
@@ -143,14 +146,14 @@ func launch_transform() -> Transform3D:
 	var at := stern + Vector3(astern.x, 0.0, astern.z).normalized() * gap
 	var terrain := _terrain()
 	var shore := -terrain.seaward() if terrain else -global_basis.x
-	return Transform3D(Basis.looking_at(shore, Vector3.UP), Vector3(at.x, ZoneTerrain.SEA_LEVEL_M - 1.2, at.z))
+	return Transform3D(Basis.looking_at(shore, Vector3.UP), Vector3(at.x, _sea_level() - 1.2, at.z))
 
 
 ## Where an AAV going home heads for: astern of the LHD on the water, or the FOB's road.
 func dock_point(from: Vector3) -> Vector3:
 	if is_ship():
 		var t := launch_transform()
-		return Vector3(t.origin.x, ZoneTerrain.SEA_LEVEL_M, t.origin.z)
+		return Vector3(t.origin.x, _sea_level(), t.origin.z)
 	return edge_point(from)
 
 
@@ -168,6 +171,12 @@ func approach_point(from: Vector3) -> Vector3:
 ## The flight deck's marker (helicopters start there), or this node inland.
 func deck() -> Node3D:
 	return get_node(^"LHD/Deck") as Node3D if is_ship() else self
+
+
+## The water's surface (the zone's sea level; 0 inland).
+func _sea_level() -> float:
+	var terrain := _terrain()
+	return terrain.sea_level if terrain else 0.0
 
 
 func _terrain() -> ZoneTerrain:
