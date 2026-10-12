@@ -38,6 +38,7 @@ window/size/viewport_height=900
 3d_physics/layer_3="items"
 3d_physics/layer_4="armor"
 3d_physics/layer_5="movers"
+3d_physics/layer_6="ragdolls"
 
 [physics]
 

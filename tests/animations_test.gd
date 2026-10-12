@@ -297,6 +297,7 @@ func _test_treat() -> void:
 	_down(alpha)
 	alpha.vitals.server_hit(Vitals.FOREARM_L, {"round_class": Vitals.FRAGMENT, "superficial": true})
 	_place(alpha, SPOT + Vector3(0, 0, -1.5))
+	await _settled(alpha)  # he falls as a ragdoll: treat him where he comes to rest
 	_place_player()
 	await _seconds(0.3)
 	var task := _task_with(alpha, &"pressure_bandage")
@@ -412,6 +413,7 @@ func _test_loot() -> void:
 	await _frames(3)
 	check(hostile.vitals.is_dead(), "a dead body with gear")
 	_place(hostile, SPOT + Vector3(-1.0, 0, -0.8))
+	await _settled(hostile)
 	_place_player()
 	await _seconds(0.3)
 	_beside(hostile.aim_point())
@@ -560,3 +562,11 @@ func _frames(n: int) -> void:
 
 func _seconds(s: float) -> void:
 	await get_tree().create_timer(s).timeout
+
+
+## Until `s`'s ragdoll has come to rest (Ragdoll.frozen), at most 10 s.
+func _settled(s: Soldier) -> void:
+	var left := 10.0
+	while left > 0.0 and not (is_instance_valid(s.ragdoll) and s.ragdoll.frozen):
+		await _seconds(0.1)
+		left -= 0.1

@@ -47,6 +47,13 @@ const DOWNED_CAPSULE_Z := -0.85     # a downed body lies forward of its feet
 ## Headroom check before standing taller: shrink the test capsule by this much.
 const ROOM_MARGIN := 0.05
 const WORLD_MASK := 1
+## What a standing (or crouching, or prone) body's capsule meets: the world, other soldiers and
+## bodies lying as ragdolls.
+const UP_MASK := WORLD_MASK | Soldier.BODY_LAYER | Ragdoll.LAYER
+## Proposed: a lying body (or a pile) up to this high above the feet is stepped over, rising
+## at this speed (m/s).
+const BODY_STEP_M := 0.75
+const BODY_CLIMB_SPEED := 2.4
 
 ## Side stances (Caps Lock + A/D): hips shift and the upper body tilts out; prone rolls
 ## onto a side. Slower to move in.
@@ -202,6 +209,8 @@ func step(delta: float) -> void:
 	body.velocity.x = after.x
 	body.velocity.z = after.z
 	body.move_and_slide()
+	if not down and target != Vector3.ZERO:
+		_climb_bodies()
 	_track_fall()
 	if target.length() < before.length():
 		settle = minf(settle + maxf(before.length() - after.length(), 0.0) * SETTLE_GAIN, 1.0)
@@ -232,6 +241,19 @@ func update_pose(delta: float) -> void:
 	_update_head(delta, not body.vitals.is_up())
 
 
+## Walking into a body lying on the ground (a ragdoll part, Ragdoll) low enough to step on:
+## up and over it, as over a pile, instead of stopping or passing through.
+func _climb_bodies() -> void:
+	var feet := body.global_position.y
+	for i in body.get_slide_collision_count():
+		var hit := body.get_slide_collision(i)
+		if Ragdoll.body_of(hit.get_collider()) == null:
+			continue
+		if hit.get_position().y - feet < BODY_STEP_M and hit.get_normal().y < 0.7:
+			body.velocity.y = maxf(body.velocity.y, BODY_CLIMB_SPEED)
+			return
+
+
 ## Every peer, every frame (from the body): the model, hitbox pose and capsule follow the
 ## replicated stance.
 func apply_pose() -> void:
@@ -240,6 +262,10 @@ func apply_pose() -> void:
 	if key == _shape_key:
 		return
 	_shape_key = key
+	# A downed or dead body's capsule only meets the world: other bodies can't shove it (its
+	# own move_and_slide pushed it out of anyone who walked into it); lying bodies meet each
+	# other as ragdolls (Ragdoll). The living meet bodies lying there too, and step over them.
+	body.collision_mask = WORLD_MASK if key == -1 else UP_MASK
 	if key == -1 or key == Stance.PRONE:
 		_capsule.radius = LYING_RADIUS
 		_capsule.height = LYING_LENGTH

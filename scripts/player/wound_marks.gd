@@ -36,6 +36,14 @@ const POOL_HEIGHT := 0.006
 const MAX_POOL := 400
 ## Drops thrown out of an exit wound when the round goes through.
 const SPATTER_DROPS := 14
+## What a drop can land on: the world, hitboxes, items, armour and bodies. On anything but the
+## world it sticks to that (Charges.rider_of) and rides along. A pool spills only over ground
+## within POOL_STEP of its cell.
+const LAND_MASK := (1 << 0) | (1 << 1) | (1 << 2) | (1 << 3) | (1 << 4) | Ragdoll.LAYER
+const WORLD_MASK := 1
+const POOL_STEP := 0.15
+const MAX_STUCK_HOLDERS := 24
+const MAX_STUCK_CELLS := 48
 
 var model: CharacterModel
 var vitals: Vitals
@@ -51,6 +59,9 @@ var _pool: Dictionary = {}  # Vector2i -> {"y", "amount"}
 var _pool_mesh: MultiMeshInstance3D
 var _pool_centre: Variant = null  # the cell the first drip landed in: the pool spreads out from it
 var _pool_dirty := false
+var _stuck: Dictionary = {}  # holder instance id -> {"inst" (a MultiMeshInstance3D on the holder), "count"}
+var _own_rids_cache: Array[RID] = []
+var _own_rids_children := -1
 static var _material: StandardMaterial3D
 
 
@@ -306,15 +317,24 @@ func _move_drips(delta: float) -> void:
 		if _drip_mesh and _drip_mesh.multimesh.visible_instance_count != 0:
 			_drip_mesh.multimesh.visible_instance_count = 0
 		return
-	var landed: Array[Dictionary] = []
+	var space := get_world_3d().direct_space_state if is_inside_tree() else null
+	var landed: Array = []  # [drop, hit] (hit empty: it reached its floor)
 	for d: Dictionary in _drips:
+		var was: Vector3 = d.pos
 		d.vel += Vector3.DOWN * 9.8 * delta
 		d.pos += d.vel * delta
-		if d.pos.y <= d.floor:
-			landed.append(d)
-	for d: Dictionary in landed:
+		var hit := _surface_between(space, was, d.pos) if space else {}
+		if not hit.is_empty() or d.pos.y <= d.floor:
+			landed.append([d, hit])
+	for pair: Array in landed:
+		var d: Dictionary = pair[0]
+		var hit: Dictionary = pair[1]
 		_drips.erase(d)
-		_add_pool(Vector3(d.pos.x, d.floor, d.pos.z), d.get("speck", false))
+		var rider: Node3D = Charges.rider_of(hit.collider) if not hit.is_empty() and hit.collider is Node else null
+		if rider:
+			_stick(rider, hit.position, d.get("speck", false))
+		else:
+			_add_pool(Vector3(d.pos.x, hit.position.y if not hit.is_empty() else d.floor, d.pos.z), d.get("speck", false))
 	if _drip_mesh == null:
 		_drip_mesh = _world_multimesh("Drips", MAX_DRIPS)
 	var mm := _drip_mesh.multimesh
@@ -322,6 +342,77 @@ func _move_drips(delta: float) -> void:
 		mm.set_instance_transform(i, Transform3D(Basis.from_scale(Vector3(1, 1.6, 1) * DRIP_SIZE), _drips[i].pos))
 		mm.set_instance_color(i, FRESH_COLOUR)
 	mm.visible_instance_count = _drips.size()
+
+
+## The first thing a drop moving from `from` to `to` hits ({} for none): the world, another
+## person (a hitbox or a body), an item or armour. Never this body.
+func _surface_between(space: PhysicsDirectSpaceState3D, from: Vector3, to: Vector3) -> Dictionary:
+	if from.is_equal_approx(to):
+		return {}
+	var query := PhysicsRayQueryParameters3D.create(from, to, LAND_MASK, _own_rids())
+	query.collide_with_areas = true
+	return space.intersect_ray(query)
+
+
+## This body's own collision (its capsule, hitboxes and armour): blood never lands on it.
+func _own_rids() -> Array[RID]:
+	var own := model.get_parent() as CollisionObject3D
+	if own == null:
+		return []
+	if _own_rids_cache.is_empty() or _own_rids_children != own.get_child_count():
+		_own_rids_cache = [own.get_rid()]
+		for n: Node in own.find_children("*", "CollisionObject3D", true, false):
+			_own_rids_cache.append((n as CollisionObject3D).get_rid())
+		_own_rids_children = own.get_child_count()
+	return _own_rids_cache
+
+
+## A drop landing on something that moves (a person, an item, later a vehicle) stays on it, in
+## its own space (on a person, on the nearest part), so it goes wherever that goes.
+func _stick(rider: Node3D, at: Vector3, speck: bool) -> void:
+	var holder := rider
+	var soldier := rider as Soldier if rider is Soldier else Ragdoll.body_of(rider)
+	if soldier == null and rider.get_parent() is Soldier:
+		soldier = rider.get_parent() as Soldier
+	if soldier and soldier.model:
+		var best := INF
+		for part: StringName in BodyMap.PART_BOXES:
+			var bone := soldier.model.part_node(part)
+			if bone and bone.global_position.distance_squared_to(at) < best:
+				best = bone.global_position.distance_squared_to(at)
+				holder = bone
+	var key := holder.get_instance_id()
+	var mark: Dictionary = _stuck.get(key, {})
+	if mark.is_empty() or not is_instance_valid(mark.inst):
+		if _stuck.size() >= MAX_STUCK_HOLDERS:
+			return
+		var inst := _multimesh_instance(MAX_STUCK_CELLS)
+		inst.name = "BloodOn"
+		holder.add_child(inst, true)
+		mark = {"inst": inst, "count": 0}
+		_stuck[key] = mark
+	var i: int = mark.count
+	if i >= MAX_STUCK_CELLS:
+		return
+	var local: Vector3 = (mark.inst as Node3D).global_transform.affine_inverse() * at
+	var size := POOL_CELL * (0.45 if speck else 0.8)
+	var mm: MultiMesh = (mark.inst as MultiMeshInstance3D).multimesh
+	mm.set_instance_transform(i, Transform3D(Basis.from_scale(Vector3(size, POOL_HEIGHT, size)), local))
+	mm.set_instance_color(i, FRESH_COLOUR if speck else BLOOD_COLOUR)
+	mark.count = i + 1
+	mm.visible_instance_count = mark.count
+
+
+## The ground (the world only) under pool cell `cell` within POOL_STEP of height `y`, or null
+## (past an edge or up a wall).
+func _ground_at(cell: Vector2i, y: float) -> Variant:
+	if not is_inside_tree():
+		return y
+	var x := cell.x * POOL_CELL
+	var z := cell.y * POOL_CELL
+	var query := PhysicsRayQueryParameters3D.create(Vector3(x, y + POOL_STEP, z), Vector3(x, y - POOL_STEP, z), WORLD_MASK)
+	var hit := get_world_3d().direct_space_state.intersect_ray(query)
+	return hit.position.y if not hit.is_empty() else null
 
 
 ## A drop landing on the ground. A drip adds to the pool cell there, and a full cell spills
@@ -335,7 +426,12 @@ func _add_pool(at: Vector3, speck := false) -> void:
 		if not _pool.has(cell):
 			if _pool.size() >= MAX_POOL:
 				return
-			_pool[cell] = {"y": at.y, "amount": 0}
+			# A spilled cell lies on its own ground; past an edge the spill stops rather than
+			# hang in the air.
+			var ground: Variant = at.y if i == 0 else _ground_at(cell, at.y)
+			if ground == null:
+				return
+			_pool[cell] = {"y": float(ground), "amount": 0}
 		if _pool[cell].amount < (1 if speck else 2):
 			_pool[cell].amount += 1
 			_pool_dirty = true

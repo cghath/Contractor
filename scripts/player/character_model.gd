@@ -244,6 +244,11 @@ var carry_net: Dictionary = {}
 ## "kneel" and, treating, "tech" (TECHNIQUES). The host clears a finished clip, so late
 ## joiners don't replay it.
 var action_net: Dictionary = {}
+## Replicated (the body's ServerSync; set on the host by Ragdoll): a downed or dead AI body's
+## ragdoll pose, RAGDOLL_BONES in order, each its origin and rotation (a quaternion) in model
+## space, or empty for none. While set, the lying body is drawn (and its hitboxes posed) from
+## it instead of the fixed downed pose.
+var ragdoll_net := PackedFloat32Array()
 
 var torso: Node3D
 var head: Node3D
@@ -886,7 +891,8 @@ func _process(delta: float) -> void:
 
 	var target := _target_bones(carry)
 	var acting := mode != &"" or _action_active()
-	var blend := minf(delta * (ACTION_EASE if acting else POSE_EASE), 1.0)
+	var limp := downed and not casualty and ragdolled()  # the physics moves it: no easing
+	var blend := 1.0 if limp else minf(delta * (ACTION_EASE if acting else POSE_EASE), 1.0)
 	for key: String in target:
 		_shown[key] = (_shown[key] as Transform3D).interpolate_with(target[key], blend)
 	var target_yaw := 0.0 if casualty or downed else float(_last_pose.get("yaw", 0.0))
@@ -911,6 +917,9 @@ func _process(delta: float) -> void:
 		# Limp: the head hangs (carried) or lolls back (dragged) with the body.
 		head.rotation = Vector3(-CARRY_HEAD_DROOP if mode == CARRIED else DRAG_HEAD_LOLL, 0, 0)
 		hands_anchor.rotation = Vector3.ZERO
+	elif limp:
+		head.transform = (_shown.torso as Transform3D).affine_inverse() * (_shown.head as Transform3D)
+		hands_anchor.rotation = Vector3.ZERO
 	else:
 		# Head and weapon keep facing where the owner looks, whatever the upper body's lean
 		# and twist (rotation.y, applied outside the pitch: the turn the torso's twist undoes).
@@ -923,12 +932,46 @@ func _process(delta: float) -> void:
 	_update_arms(delta, carry, swing)
 
 
+## The bones a ragdoll pose stands in for, in RAGDOLL_BONES order (the pelvis rides the torso).
+const RAGDOLL_BONES: Array[String] = ["torso", "head", "leg_l", "leg_r", "shin_l", "shin_r"]
+
+
+## Whether the body lies as a ragdoll (ragdoll_net holds a pose).
+func ragdolled() -> bool:
+	return ragdoll_net.size() == RAGDOLL_BONES.size() * 7
+
+
+## Model-space bone transforms (keys as pose_bones) from ragdoll_net.
+func ragdoll_bones() -> Dictionary:
+	var t := {}
+	for i in RAGDOLL_BONES.size():
+		var o := i * 7
+		var q := Quaternion(ragdoll_net[o + 3], ragdoll_net[o + 4], ragdoll_net[o + 5], ragdoll_net[o + 6]).normalized()
+		t[RAGDOLL_BONES[i]] = Transform3D(Basis(q), Vector3(ragdoll_net[o], ragdoll_net[o + 1], ragdoll_net[o + 2]))
+	return {"root": Transform3D.IDENTITY, "torso": t.torso, "head": t.head, "pelvis": t.torso,
+		"leg_l": t.leg_l, "leg_r": t.leg_r,
+		"knee_l": (t.leg_l as Transform3D).affine_inverse() * t.shin_l,
+		"knee_r": (t.leg_r as Transform3D).affine_inverse() * t.shin_r}
+
+
+## Packs model-space bone transforms (RAGDOLL_BONES keys) into ragdoll_net's layout.
+static func pack_ragdoll(bones: Dictionary) -> PackedFloat32Array:
+	var out := PackedFloat32Array()
+	for key in RAGDOLL_BONES:
+		var t: Transform3D = bones[key]
+		var q := t.basis.orthonormalized().get_rotation_quaternion()
+		out.append_array(PackedFloat32Array([t.origin.x, t.origin.y, t.origin.z, q.x, q.y, q.z, q.w]))
+	return out
+
+
 ## The bones the drawn body is heading for: a casualty's, lying down, or the stance with
 ## whatever the hands are doing applied.
 func _target_bones(carry: Dictionary) -> Dictionary:
 	var mode: StringName = carry.get("mode", &"")
 	if mode == CARRIED or mode == DRAGGED:
 		return casualty_bones(mode)
+	if downed and ragdolled():
+		return ragdoll_bones()
 	if downed:
 		return pose_bones(pose, true)
 	_last_pose = _bladed(_action_pose(mode), mode)

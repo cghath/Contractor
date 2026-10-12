@@ -123,6 +123,9 @@ properties/11/replication_mode = 2
 properties/12/path = NodePath(".:spawn_position")
 properties/12/spawn = true
 properties/12/replication_mode = 0
+properties/13/path = NodePath("Model:ragdoll_net")
+properties/13/spawn = true
+properties/13/replication_mode = 2
 
 [node name="Soldier" type="CharacterBody3D"]
 collision_layer = 16

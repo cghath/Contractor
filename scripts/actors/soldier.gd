@@ -104,6 +104,8 @@ var _fire_modes := {}
 var carried_by: Soldier
 ## Host only: the downed body this one is dragging or carrying.
 var carrying: Soldier
+## Every peer: this body's ragdoll while it lies as one (_update_ragdoll), else null.
+var ragdoll: Ragdoll
 ## Host only (AI): seconds left blinded by a flashbang.
 var stunned_s := 0.0
 ## Host only (AI): 0..1, how pinned down rounds landing close have made this soldier.
@@ -278,6 +280,7 @@ func _process(_delta: float) -> void:
 	model.left_handed = left_handed
 	model.name_tape = person_name.to_upper()
 	movement.apply_pose()  # model pose, hitbox pose and capsule from the replicated stance
+	_update_ragdoll()
 	CharacterModel.lay_down(self, model, not vitals.is_up())
 	if collision_layer != 0 and is_ai() and vitals.is_dead():
 		collision_layer = 0  # a dead body lies where it fell and doesn't block anyone
@@ -321,6 +324,29 @@ func is_crouching() -> bool:
 	return movement.is_crouching()
 
 
+## Every peer: an AI body that's down (or dead) and not carried or dragged lies as a ragdoll
+## (Ragdoll): the host simulates it, the others follow its replicated pose with colliders of
+## their own. Its capsule stands aside meanwhile (layer 0); back up, carried or dragged, the
+## ragdoll goes.
+func _update_ragdoll() -> void:
+	var want: bool
+	if multiplayer.is_server():
+		var lifted := is_instance_valid(carried_by) \
+			or StringName(model.carry_net.get("mode", &"")) in [CharacterModel.CARRIED, CharacterModel.DRAGGED]
+		want = Ragdoll.enabled and is_ai() and not vitals.is_up() and not lifted
+	else:
+		want = model.ragdolled() and not vitals.is_up()
+	if want and not is_instance_valid(ragdoll):
+		ragdoll = Ragdoll.start(self) if multiplayer.is_server() else Ragdoll.follow(self)
+		collision_layer = 0
+	elif not want and is_instance_valid(ragdoll):
+		ragdoll.stop()
+		ragdoll = null
+		if vitals.is_up() or (not vitals.is_dead() and not is_instance_valid(carried_by) \
+				and not StringName(model.carry_net.get("mode", &"")) in [CharacterModel.CARRIED, CharacterModel.DRAGGED]):
+			collision_layer = BODY_LAYER
+
+
 ## Host only: an AI body moves from its intent, and a downed one follows whoever carries it.
 func _ai_physics(delta: float) -> void:
 	stunned_s = maxf(stunned_s - delta, 0.0)
@@ -331,6 +357,9 @@ func _ai_physics(delta: float) -> void:
 		global_transform = carried_by.carry_transform()
 		velocity = Vector3.ZERO
 		return
+	if is_instance_valid(ragdoll):
+		velocity = Vector3.ZERO
+		return  # the ragdoll holds the body: the capsule stays where it fell
 	is_aiming = want_aim and vitals.is_up() and not is_reloading and inventory.hands == &"" and carrying == null
 	movement.step(delta)
 	_update_carried()
@@ -1230,8 +1259,11 @@ func _on_died() -> void:
 	server_leave_body()
 	inventory.strip()  # it's all on the body now
 	vitals.server_reset_health()
-	for kit: Array in DEFAULT_KIT:
-		inventory.take(kit[0], kit[1])
+	if CompoundLevel.player_role_kits and role != &"":
+		Roles.apply_kit(inventory, role)  # the clean test sessions: back in your role's kit
+	else:
+		for kit: Array in DEFAULT_KIT:
+			inventory.take(kit[0], kit[1])
 	_client_respawn.rpc_id(owner_peer(), level.next_spawn_point())
 
 
@@ -1259,7 +1291,8 @@ func server_leave_body() -> Soldier:
 ## "uid", "label" (whose it was), "faction", "variant", "person_name", "nation" and "left" (the
 ## name tape, nationality and hand, so the body is the same person after a reload), "role",
 ## "pos" ([x, y, z]), "rot_y",
-## "age_s" (seconds dead), "marker" (a dead player's: shows a GearMarker) and "gear" (an
+## "age_s" (seconds dead), "marker" (a dead player's: shows a GearMarker), "ragdoll" (its ragdoll pose,
+## CharacterModel.ragdoll_net, or empty) and "gear" (an
 ## Inventory.net_state: everything on it).
 func body_record() -> Dictionary:
 	var p := global_position
@@ -1267,7 +1300,7 @@ func body_record() -> Dictionary:
 		"variant": model.variant, "body": model.body, "person_name": person_name, "nation": nation, "left": left_handed,
 		"role": String(role), "pos": [p.x, p.y, p.z], "rot_y": rotation.y,
 		"age_s": maxf(_now() - died_at, 0.0) if died_at >= 0.0 else 0.0, "marker": has_gear_marker,
-		"gear": inventory.net_state.duplicate(true)}
+		"gear": inventory.net_state.duplicate(true), "ragdoll": Array(model.ragdoll_net)}
 
 
 ## Host only. A dead soldier becomes a body (DEAD_GROUP), gear and all. Past the body cap the

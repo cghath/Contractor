@@ -83,6 +83,7 @@ func _ready() -> void:
 	await _test_player_and_enemy_bodies()
 	await _test_body_persistence()
 	await _test_downed_player()
+	await _test_ragdolls()
 	GameState.delete_save()
 	print("CASUALTY TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
@@ -1108,3 +1109,57 @@ func _frames(n: int) -> void:
 
 func _seconds(s: float) -> void:
 	await get_tree().create_timer(s).timeout
+
+
+## Captain: bodies that fall on each other rest on each other (ragdolls), nothing shoves a body
+## lying there, and the living step over them.
+func _test_ragdolls() -> void:
+	print("Ragdolls")
+	var spot := Vector3(25, 0.1, 40)
+	var first := level.spawn_soldier({"name": "RagdollA", "faction": "hostile", "variant": "urban", "pos": spot,
+		"loadout": [], "combat": 0.5, "discipline": 0.5, "guard": true})
+	SquadAI.of(first).process_mode = Node.PROCESS_MODE_DISABLED
+	await _frames(2)
+	first.vitals.server_hit(Vitals.HEAD, {"round_class": Vitals.INTERMEDIATE})
+	var settled := await _wait_until(func() -> bool: return is_instance_valid(first.ragdoll) and first.ragdoll.frozen, 10.0)
+	check(settled and first.model.ragdolled(), "a dead body falls as a ragdoll and settles")
+	check(first.collision_layer == 0, "its capsule stands aside")
+	var torso_a: Node3D = first.ragdoll.parts["torso"]
+	check(torso_a.global_position.y < spot.y + 0.4, "lying on the ground (torso %.2f m up)" % (torso_a.global_position.y - spot.y))
+	var chest := first.get_node(^"ChestHitbox") as Node3D
+	var gap := (chest.global_transform * Vector3(0, 1.31, 0.11)).distance_to(torso_a.global_transform * Vector3(0, 0.41, 0.11))
+	check(gap < 0.1,
+		"its hitboxes lie with it (the chest %.2f m off its torso part)" % gap)
+	# A second one goes down right over the first: he comes to rest on top, not inside.
+	var over := Vector3(torso_a.global_position.x, spot.y, torso_a.global_position.z + 0.3)
+	var second := level.spawn_soldier({"name": "RagdollB", "faction": "hostile", "variant": "urban", "pos": over,
+		"loadout": [], "combat": 0.5, "discipline": 0.5, "guard": true})
+	SquadAI.of(second).process_mode = Node.PROCESS_MODE_DISABLED
+	await _frames(2)
+	second.vitals.server_hit(Vitals.HEAD, {"round_class": Vitals.INTERMEDIATE})
+	settled = await _wait_until(func() -> bool: return is_instance_valid(second.ragdoll) and second.ragdoll.frozen, 10.0)
+	check(settled, "the second body settles too")
+	var top := -INF
+	for p: Node3D in second.ragdoll.parts.values():
+		top = maxf(top, p.global_position.y)
+	var torso_b: Node3D = second.ragdoll.parts["torso"]
+	var lowest_on_a := INF
+	for p: Node3D in first.ragdoll.parts.values():
+		lowest_on_a = minf(lowest_on_a, p.global_position.y)
+	check(top > torso_a.global_position.y + 0.1, "and rests on the first (his highest part %.2f m above the first's torso)" % (top - torso_a.global_position.y))
+	check(torso_a.global_position.distance_to(torso_b.global_position) > 0.2, "not inside him (torsos %.2f m apart)" % torso_a.global_position.distance_to(torso_b.global_position))
+	# Walking into the pile: the first body doesn't move.
+	var before := torso_a.global_transform
+	var walker := level.spawn_soldier({"name": "RagdollWalker", "faction": "hostile", "variant": "urban", "pos": spot + Vector3(-2.5, 0, 0),
+		"loadout": [], "combat": 0.5, "discipline": 0.5, "guard": true})
+	SquadAI.of(walker).process_mode = Node.PROCESS_MODE_DISABLED
+	walker.move_input = Vector2(0, -1)
+	walker.look_at(spot + Vector3(2.5, 0, 0) + Vector3(0, walker.global_position.y - spot.y, 0), Vector3.UP)
+	await _seconds(2.5)
+	walker.move_input = Vector2.ZERO
+	check(torso_a.global_transform.origin.distance_to(before.origin) < 0.02, "walking into a body doesn't shove it")
+	check(walker.global_position.x > spot.x - 0.5, "the walker went on over the bodies (x %.2f, the pile at %.2f)" % [walker.global_position.x, spot.x])
+	for s: Soldier in [first, second, walker]:
+		if is_instance_valid(s):
+			s.queue_free()
+	await _frames(2)
