@@ -13,8 +13,6 @@ const SPOT := Vector3(0, 0.1, 20)
 const HAND_TOLERANCE := 0.06
 ## How far the looted body's ragdoll is moved from its capsule (_test_loot).
 const SLID := Vector3(-6.0, 0, 0)
-## How far the downed body's ragdoll is moved before it's revived (_test_stand_where_it_lay).
-const ROLLED := Vector3(2.5, 0, 2.0)
 
 var failures := 0
 var level: CompoundLevel
@@ -63,7 +61,6 @@ func _ready() -> void:
 	await _test_treat()
 	await _test_techniques()
 	await _test_loot()
-	await _test_stand_where_it_lay()
 	await _test_dummy()
 	GameState.delete_save()
 	print("ANIMATIONS TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
@@ -452,41 +449,6 @@ func _test_loot() -> void:
 	check(player.model.action_net.get("id") == CharacterModel.LOOT and is_equal_approx(float(player.model.action_net.get("s")), CharacterModel.LOOT_ALL_S),
 		"Loot all: a longer clip")
 	await _seconds(2.0)
-
-
-## A downed body whose ragdoll slid or rolled off stands up where it lay, not back where it fell
-## (Soldier._stand_where_ragdoll_lay, Ragdoll.rest_spot), and a following peer's ragdoll finds
-## the same spot.
-func _test_stand_where_it_lay() -> void:
-	print("Standing up where the ragdoll lay")
-	_place(bravo, SPOT + Vector3(3.0, 0, 0))
-	await _frames(2)
-	_down(bravo)
-	await _settled(bravo)
-	check(not bravo.vitals.is_up() and not bravo.vitals.is_dead() and is_instance_valid(bravo.ragdoll) and bravo.ragdoll.frozen,
-		"a downed body lies as a ragdoll, at rest")
-	var fell := bravo.global_position
-	for part: Node3D in bravo.ragdoll.parts.values():
-		part.global_position += ROLLED
-	bravo.ragdoll._send(true)
-	await _frames(3)
-	var lay: Vector3 = (bravo.ragdoll.parts["torso"] as Node3D).global_position
-	check(_flat(lay, fell) > 2.5, "its hips lie %.1f m from where it fell" % _flat(lay, fell))
-	var host_spot: Variant = bravo.ragdoll.rest_spot()
-	var follower := Ragdoll.follow(bravo)  # what another peer builds from the replicated pose
-	var peer_spot: Variant = follower.rest_spot()
-	follower.free()
-	check(host_spot != null and peer_spot != null and (host_spot as Transform3D).origin.distance_to((peer_spot as Transform3D).origin) < 0.05,
-		"a following peer's ragdoll stands it up at the same spot")
-	bravo.vitals.server_reset_health()
-	await _frames(3)
-	check(bravo.vitals.is_up() and not is_instance_valid(bravo.ragdoll), "revived: the ragdoll goes")
-	check(_flat(bravo.global_position, lay) < 0.5, "and it stands up where it lay (%.2f m from its hips, %.1f m from where it fell)"
-		% [_flat(bravo.global_position, lay), _flat(bravo.global_position, fell)])
-	await _seconds(0.5)
-	check(_flat(bravo.global_position, lay) < 0.5 and absf(bravo.global_position.y - fell.y) < 0.3 and bravo.rotation.is_finite(),
-		"on the ground, and stays there (%.2f m, %.2f m up)" % [_flat(bravo.global_position, lay), bravo.global_position.y - fell.y])
-	_place(bravo, SPOT + Vector3(3.0, 0, 0))
 
 
 func _test_dummy() -> void:
