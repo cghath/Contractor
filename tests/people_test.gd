@@ -45,13 +45,13 @@ func _ready() -> void:
 	CompoundLevel.spawn_ai = false  # we place everyone by hand
 	PeopleLayer.populate = false
 	PeopleLayer.surrender_enabled = false
-	if "--join" in OS.get_cmdline_user_args():
+	if "--people-join" in OS.get_cmdline_user_args():
 		_run_client()
 		return
 	GameState.delete_save()
 	Campaign.reset_campaign()
 	People.reset_all()
-	get_tree().create_timer(300.0).timeout.connect(func() -> void:
+	get_tree().create_timer(420.0).timeout.connect(func() -> void:
 		print("PEOPLE TEST FAILED (timed out)")
 		get_tree().quit(99))
 	add_child(load("res://scenes/main.tscn").instantiate())
@@ -514,14 +514,15 @@ func _test_client() -> void:
 	expect = {"civilian": "CivKeep", "cuffed_hvt": "HvtTestCommander", "captive": "Quitter", "friendly_hvt": "HvtTestEngineer",
 		"casualties": People.casualty_count(), "intel": People.intel.size(), "delivered": "hvt_test_commander",
 		"point": "TestExtraction", "intel_uid": "test_people_docs"}
-	Net.peer_joined.connect(func(id: int) -> void: _expect.rpc_id(id, expect), CONNECT_ONE_SHOT)
+	# The client asks for these once it has joined (_ask_expect): a push on peer_joined was lost
+	# when the client's first join attempts timed out while it was still building its world.
 	var log_path := OS.get_user_data_dir().path_join("people_client%s.log" % OS.get_environment("CONTRACTOR_TEST_TAG"))
 	DirAccess.remove_absolute(log_path)
 	var args := ["--headless", "--log-file", log_path, "--path", ProjectSettings.globalize_path("res://"), "res://tests/people_test.tscn",
-		"--", "--join", "127.0.0.1"]
+		"--", "--people-join"]  # not main's --join: the client joins by itself (_join_host)
 	var pid := OS.create_process(OS.get_executable_path(), args)
 	check(pid > 0, "started the client process")
-	await _wait_until(func() -> bool: return _client_live, 60.0)
+	await _wait_until(func() -> bool: return _client_live, 120.0)
 	check(_client_live, "the client checked what it found on joining")
 	if _client_live:
 		# Live changes once the client is in: a new casualty, and an order to the friendly HVT.
@@ -533,7 +534,7 @@ func _test_client() -> void:
 		var engineer := layer.persons.get_node(^"HvtTestEngineer") as Soldier
 		layer.server_lead(player, engineer)
 		_live_done.rpc(People.casualty_count())
-	await _wait_until(func() -> bool: return _client_failures >= 0, 30.0)
+	await _wait_until(func() -> bool: return _client_failures >= 0, 45.0)
 	for line in _client_lines:
 		print("    client: %s" % line)
 	check(_client_failures == 0, "everything replicated to the client (%d client failures)" % _client_failures)
@@ -557,6 +558,13 @@ func _expect(data: Dictionary) -> void:
 	expect = data
 
 
+## Client -> host, once joined: send me what to check (the host answers the asker).
+@rpc("any_peer", "call_remote", "reliable")
+func _ask_expect() -> void:
+	if multiplayer.is_server() and not expect.is_empty():
+		_expect.rpc_id(multiplayer.get_remote_sender_id(), expect)
+
+
 @rpc("any_peer", "call_remote", "reliable")
 func _client_checked() -> void:
 	_client_live = true
@@ -574,20 +582,36 @@ func _client_report(count: int, lines: PackedStringArray) -> void:
 
 
 func _run_client() -> void:
-	get_tree().create_timer(90.0).timeout.connect(func() -> void: get_tree().quit(99))
-	add_child(load("res://scenes/main.tscn").instantiate())  # main reads --join
+	get_tree().create_timer(240.0).timeout.connect(func() -> void: get_tree().quit(99))
+	var main: Node = load("res://scenes/main.tscn").instantiate()
+	add_child(main)
+	# This test joins by itself (_join_host), not through the menu's few short tries (two
+	# joiners replaced each other's connection), and a dropped attempt must not reload the
+	# scene from under it (Main reloads on session_ended).
+	if Net.session_ended.is_connected(Callable(main, &"_on_session_ended")):
+		Net.session_ended.disconnect(Callable(main, &"_on_session_ended"))
 	await get_tree().process_frame
-	level = CompoundLevel.current(self)
-	layer = level.people
 	var lines := PackedStringArray()
 	var note := func(ok: bool, what: String) -> void:
 		lines.append("[%s] %s" % ["ok" if ok else "FAIL", what])
 		if not ok:
 			failures += 1
+	# Under load the menu's few short join attempts (Menu.JOIN_ATTEMPTS) can all time out while
+	# this process is still building its world: keep joining until it's in, then ask for the
+	# expectations (as the world suite does).
+	var joined := await _join_host("127.0.0.1", 90.0)
+	level = CompoundLevel.current(self)
+	layer = level.people
+	if joined:
+		var asked_until := Time.get_ticks_msec() + 60000
+		while expect.is_empty() and Time.get_ticks_msec() < asked_until:
+			_ask_expect.rpc_id(1)
+			await _wait_until(func() -> bool: return not expect.is_empty(), 3.0)
 	await _wait_until(func() -> bool: return not expect.is_empty() and layer.persons.get_node_or_null(NodePath(String(expect.civilian))) != null \
-		and People.casualty_count() == int(expect.casualties) and not layer.states.is_empty(), 30.0)
+		and People.casualty_count() == int(expect.casualties) and not layer.states.is_empty(), 60.0)
 	if expect.is_empty():
-		note.call(false, "the host's expectations arrived")
+		note.call(false, "the host's expectations arrived (joined: %s, connection %d)" % [joined,
+			multiplayer.multiplayer_peer.get_connection_status() if multiplayer.multiplayer_peer else -1])
 	else:
 		var civ := layer.persons.get_node_or_null(NodePath(String(expect.civilian))) as Soldier
 		var hvt := layer.persons.get_node_or_null(NodePath(String(expect.cuffed_hvt))) as Soldier
@@ -786,6 +810,20 @@ func _place(s: Soldier, pos: Vector3) -> void:
 
 func _flat(a: Vector3, b: Vector3) -> float:
 	return Vector2(a.x - b.x, a.z - b.z).length()
+
+
+## Client: joins the host at `address`, joining again whenever an attempt has failed, until it
+## is in or `seconds` pass. Whether it joined.
+func _join_host(address: String, seconds: float) -> bool:
+	var joined := [false]
+	Net.joined.connect(func() -> void: joined[0] = true)
+	var deadline := Time.get_ticks_msec() + int(seconds * 1000)
+	while not (joined[0] or 1 in multiplayer.get_peers()) and Time.get_ticks_msec() < deadline:  # (or in already)
+		var peer := multiplayer.multiplayer_peer
+		if not (peer is ENetMultiplayerPeer) or peer.get_connection_status() == MultiplayerPeer.CONNECTION_DISCONNECTED:
+			Net.join(address)
+		await get_tree().create_timer(2.0).timeout
+	return joined[0] or 1 in multiplayer.get_peers()
 
 
 func _wait_until(cond: Callable, timeout: float) -> bool:

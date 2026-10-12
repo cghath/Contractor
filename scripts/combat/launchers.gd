@@ -200,7 +200,7 @@ func request_fire(origin: Vector3, dir: Vector3, mode: String, target_path: Node
 		return
 	var target: Node3D = null
 	if not target_path.is_empty():
-		target = level.get_node_or_null(target_path) as Node3D
+		target = Vehicle.find_on(level.get_node_or_null(target_path))  # only ever a vehicle (a lock, a lead)
 	var why := server_fire(actor, origin, dir, mode, target)
 	if why != "" and not actor.is_ai():
 		actor._client_message.rpc_id(actor.owner_peer(), why)
@@ -232,6 +232,8 @@ func server_fire(s: Soldier, origin: Vector3, dir: Vector3, mode := "", target: 
 		return "Not the host"
 	if s == null or not s.vitals.is_up() or s.inventory.hands != &"" or s.carry_mode != &"":
 		return "Can't fire now"
+	if is_instance_valid(s.vehicle):
+		return "Get out to fire it"  # riding: the seat's gun instead (as Soldier._server_fire)
 	if not Soldier.usable_point(origin) or not Soldier.usable_direction(dir):
 		return "Can't fire now"
 	var item := launcher_of(s)
@@ -401,23 +403,29 @@ func _server_end(p: LauncherProjectile, res: Dictionary) -> void:
 	var burst := {}
 	var pos: Vector3 = res.position
 	var dir: Vector3 = res.get("direction", p.velocity.normalized())
+	# Whoever fired it may have left (a player who quit) while it flew: a freed shooter must
+	# never reach a typed Node argument.
+	var shooter: Node = null
+	if is_instance_valid(p.shooter):
+		shooter = p.shooter
+	var collider: Object = res.get("hit") if is_instance_valid(res.get("hit")) else null
 	if res.has("dud"):
 		how = "dud"  # inside its arming distance: no fuse, just a heavy rocket
-		var body := Warheads.body_of(res.hit)
+		var body := Warheads.body_of(collider)
 		var vitals := body.get_node_or_null(^"Vitals") as Vitals if body else null
 		if vitals and not vitals.is_dead():
-			Harm.note_hit(body, p.shooter)
-			var part: StringName = (res.hit as Node).get_meta(&"body_part", Vitals.CHEST) if res.hit is Node else Vitals.CHEST
+			Harm.note_hit(body, shooter)
+			var part: StringName = (collider as Node).get_meta(&"body_part", Vitals.CHEST) if collider is Node else Vitals.CHEST
 			vitals.server_hit(part, {"round_class": Vitals.FULL_POWER, "position": pos, "direction": dir, "distance": p.travelled})
 	elif res.has("expired"):
 		if p.data.get("self_destruct", false):
-			burst = Warheads.server_burst(lvl, p.warhead, pos, dir, null, p.shooter)
+			burst = Warheads.server_burst(lvl, p.warhead, pos, dir, null, shooter)
 		else:
 			how = "lost"
 	else:
-		burst = Warheads.server_burst(lvl, p.warhead, pos, dir, res.hit, p.shooter, bool(res.get("top_attack", false)))
+		burst = Warheads.server_burst(lvl, p.warhead, pos, dir, collider, shooter, bool(res.get("top_attack", false)))
 	results[p.id] = {"how": how, "position": pos, "direction": dir, "top_attack": bool(res.get("top_attack", false)),
-		"max_height": p.max_height, "burst": burst, "shooter": p.shooter, "flown": p.travelled}
+		"max_height": p.max_height, "burst": burst, "shooter": shooter, "flown": p.travelled, "passed": p.passed.duplicate()}
 	while results.size() > RESULTS_KEPT:
 		results.erase(results.keys()[0])
 	print("[launchers] round %d (%s) %s at (%.1f, %.1f, %.1f) after %.0f m" % [p.id, warhead_name(p.warhead), how, pos.x, pos.y, pos.z, p.travelled])

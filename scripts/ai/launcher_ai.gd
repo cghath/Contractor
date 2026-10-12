@@ -122,6 +122,14 @@ static func vehicle_near_line(tree: SceneTree, from: Vector3, to: Vector3, reach
 	return best
 
 
+## A vehicle still worth a rocket: there, not a wreck, not already burning (lost).
+static func worth_a_rocket(v: Variant) -> bool:  # untyped: it may have been freed
+	if not is_instance_valid(v) or not v is Vehicle:
+		return false
+	var vehicle := v as Vehicle
+	return not vehicle.is_queued_for_deletion() and not vehicle.wrecked and not vehicle.is_burning()
+
+
 ## Which side a faction is on: the player's vehicles ("player") are the friendly side.
 static func side_of(faction: StringName) -> StringName:
 	return &"friendly" if faction == &"player" else faction
@@ -134,6 +142,9 @@ static func think(ai: SquadAI) -> bool:
 		return false
 	var st := _state(body)
 	var now := Soldier._now()
+	if is_instance_valid(body.vehicle):
+		st.why = "riding in a vehicle"  # out first (Launchers.server_fire refuses from a seat)
+		return _stand_down(body, st)
 	if body.carrying != null or body.stunned_s > 0.0 or body.suppression >= SquadAI.PINNED or not ai.weapons_free() \
 			or ai.intent in [SquadAI.Intent.CASUALTY, SquadAI.Intent.HEAL, SquadAI.Intent.SCAVENGE, SquadAI.Intent.RELOAD]:
 		st.why = "busy, pinned or holding fire (intent %d)" % ai.intent
@@ -160,7 +171,7 @@ static func think(ai: SquadAI) -> bool:
 		st.called_at = -1.0
 		st.warned = false
 		body.select_weapon(Launchers.SLOT)
-	if now - st.since > ENGAGE_MAX_S or (st.kind == "vehicle" and (not is_instance_valid(st.target) or (st.target as Vehicle).wrecked)):
+	if now - st.since > ENGAGE_MAX_S or (st.kind == "vehicle" and not worth_a_rocket(st.target)):
 		st.cooldown_until = now + COOLDOWN_S * 0.5
 		return _stand_down(body, st)
 	var aim := _aim_point(body, st)
@@ -261,7 +272,7 @@ static func choose(ai: SquadAI, item: ItemData, st: State) -> Dictionary:
 	var best_d := reach
 	for n in body.get_tree().get_nodes_in_group(Vehicle.GROUP):
 		var v := n as Vehicle
-		if v == null or v.wrecked or side_of(v.faction) == side_of(body.faction):
+		if not worth_a_rocket(v) or side_of(v.faction) == side_of(body.faction):
 			continue
 		var c := Launchers.hull_box(v).get_center()
 		var d := eye.distance_to(c)
@@ -375,7 +386,7 @@ static func wall_behind(body: Soldier, item: ItemData) -> bool:
 	var back := body.camera.global_basis.z
 	var length := float((item.stats.get("size_m", [0, 0, 1.0]) as Array)[2])
 	var rear := body.camera.global_position + back * (length * 0.5 + 0.05)
-	var query := PhysicsRayQueryParameters3D.create(rear, rear + back * reflect_m, 1, [body.get_rid()])
+	var query := PhysicsRayQueryParameters3D.create(rear, rear + back * reflect_m, 1 | Vehicle.LAYER, [body.get_rid()])  # a wall or a hull
 	return not body.get_world_3d().direct_space_state.intersect_ray(query).is_empty()
 
 
