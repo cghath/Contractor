@@ -126,7 +126,7 @@ const HAND_SPREAD := 0.07
 ## work for that treatment, on someone else or (where allowed) yourself. Anything else: WORK.
 const WORK := &"work"
 const TECHNIQUES := {
-	&"pressure_bandage": &"wrap", &"burn_dressing": &"wrap", &"hemostatic_gauze": &"pack",
+	&"pressure_bandage": &"wrap", &"burn_dressing": &"wrap", &"pelvic_binder": &"wrap", &"hemostatic_gauze": &"pack",
 	&"tourniquet": &"tourniquet", &"splint": &"splint", &"chest_seal": &"seal", &"decompression_needle": &"needle",
 	&"morphine": &"inject", &"epinephrine": &"inject", &"atropine": &"inject", &"adenosine": &"inject",
 	&"iv_10": &"iv", &"iv_12": &"iv", &"iv_14": &"iv", &"iv_16": &"iv", &"iv_18": &"iv", &"iv_20": &"iv",

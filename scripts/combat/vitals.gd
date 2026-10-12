@@ -211,8 +211,20 @@ func speed_mult() -> float:
 	return _m().speed_mult()
 
 
-func sway_mult() -> float:
-	return _m().sway_mult()
+## `rifle`: a shouldered weapon in hand (a broken collarbone only hurts then).
+func sway_mult(rifle := false) -> float:
+	return _m().sway_mult(rifle)
+
+
+## How fast aiming down sights moves (a broken collarbone, rifles only).
+func aim_mult(rifle := false) -> float:
+	return _m().aim_mult(rifle)
+
+
+## False with a broken pelvis: no standing or walking, crawl or be carried (a binder only
+## stops the bleeding).
+func can_stand() -> bool:
+	return _m().can_stand()
 
 
 ## Stamina recovery multiplier (0 while winded).
@@ -468,6 +480,7 @@ func wound_list() -> Array[Dictionary]:
 			"limb": w.part if WoundModel.LIMB_BELOW.has(w.part) else &"",
 			"tourniquet": m.tourniquet_factor(w.part) < 1.0, "packed": w.get("packed", false), "tension": w.get("tension", false),
 			"clamped": w.get("clamped", false), "closed": w.get("closed", false), "pneumo": w.get("pneumo", false),
+			"open": w.get("open", false), "bandaged": m.open_bandaged(w),
 			"at": w.get("at"), "out": w.get("out")})
 	return list
 
@@ -482,7 +495,7 @@ func wound_list() -> Array[Dictionary]:
 const TREATS := {
 	"arterial": &"tourniquet", "junctional": &"hemostatic_gauze", "venous": &"pressure_bandage",
 	"muscle": &"pressure_bandage", "graze": &"pressure_bandage", "chest": &"chest_seal",
-	"fracture": &"splint", "airway": &"npa", "pain": &"morphine", "tension": &"decompression_needle",
+	"fracture": &"splint", "pelvis": &"pelvic_binder", "airway": &"npa", "pain": &"morphine", "tension": &"decompression_needle",
 	"access": &"iv_18", "fluids": &"saline_500", "pressure": &"pressure_bag",  # the usual picks; see care_needed "items"
 	"epinephrine": &"epinephrine", "defib": &"defibrillator", "cpr": &"cpr", "racing": &"adenosine",
 	"slow_heart": &"atropine", "wake": &"epinephrine", "internal": &"surgical_clamp", "hypothermia": &"hypothermia_blanket",
@@ -492,7 +505,7 @@ const TREATS := {
 ## tension (the needle), chest, other bleeding, circulation (line, bag, pressure bag),
 ## hypothermia (a blanket), restarting a heart (epinephrine, shocks, CPR), the heart rate
 ## (adenosine, atropine), fractures, burns, pain, then epinephrine's wake-up roll.
-const CARE_ORDER := ["arterial", "junctional", "internal", "airway", "tension", "chest", "venous", "muscle", "graze", "access", "fluids",
+const CARE_ORDER := ["arterial", "junctional", "internal", "pelvis", "airway", "tension", "chest", "venous", "muscle", "graze", "access", "fluids",
 	"pressure", "hypothermia", "epinephrine", "defib", "cpr", "racing", "slow_heart", "fracture", "burn", "pain", "wake"]
 
 
@@ -829,10 +842,13 @@ func _track_stillness(step: float) -> void:
 	var moved := Vector2(pos.x - _last_pos.x, pos.z - _last_pos.z).length()
 	_last_pos = pos
 	_model.still_s = _model.still_s + step if moved < STILL_SPEED * step else 0.0
+	if not downed and moved / step < 10.0:  # a carried body, or a teleport, isn't moving on its own leg
+		_model.add_leg_strain(moved, moved / step)  # moving on a broken leg can open the break
 
 
 ## Turns model changes into signals and replication.
 func _after_change(force := false) -> void:
+	_log_open_breaks()
 	if _model.dead:
 		if _died_sent:
 			return
@@ -855,6 +871,14 @@ func _after_change(force := false) -> void:
 			woke.emit()
 		return
 	_publish(force)
+
+
+## Host: a session-log line for each break that went open (SessionLog does nothing without a session).
+func _log_open_breaks() -> void:
+	for line: String in _model.take_open_events():
+		if SessionLog.session_id != "":
+			var body := get_parent()
+			SessionLog.note("%s: %s" % [body.display_name() if body != null and body.has_method(&"display_name") else "someone", line])
 
 
 ## Publishes net_state when it changed: at once when forced or when consciousness, arrest or
