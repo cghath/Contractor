@@ -214,6 +214,45 @@ static func worst_part(vitals: Vitals) -> StringName:
 	return &"chest"
 
 
+## Draws the body diagram on `ci` at `origin`, `k` times full size: each part coloured by state, the
+## `selected` part outlined, markers written when big enough. With `only` (non-empty) just those
+## parts are coloured, the rest drawn faint (the HUD silhouette).
+static func draw_diagram(ci: CanvasItem, vitals: Vitals, origin: Vector2, k: float, selected: StringName = &"",
+		only: Array[StringName] = []) -> void:
+	var font := ThemeDB.fallback_font
+	for p: StringName in PART_RECTS:
+		var r: Rect2 = PART_RECTS[p]
+		r = Rect2(origin + r.position * k, r.size * k)
+		var state := part_state(vitals, p)
+		var faint := not only.is_empty() and not only.has(p)
+		var fill := state_color(state)
+		if faint:
+			fill = Color(0.55, 0.57, 0.6, 0.3)
+		ci.draw_rect(r, fill)
+		ci.draw_rect(r, Color.WHITE if p == selected else Color(0.15, 0.15, 0.15, 0.4 if faint else 1.0), false, 3.0 if p == selected else 1.0)
+		var y := r.position.y + 13.0 * k
+		for m: StringName in state.markers:
+			if m == TOURNIQUET:
+				ci.draw_rect(Rect2(r.position.x - 2.0 * k, r.position.y + 4.0 * k, r.size.x + 4.0 * k, 5.0 * k), Color(0.05, 0.05, 0.05))
+			if k >= 0.9:
+				ci.draw_string(font, Vector2(r.position.x + 2, y + 8), MARKER_TEXT[m], HORIZONTAL_ALIGNMENT_LEFT, r.size.x, 11, Color.WHITE)
+				y += 12.0
+
+
+## The parts the HUD silhouette highlights: an untreated bleed, an unsplinted fracture, a tourniquet.
+static func hud_parts(vitals: Vitals) -> Array[StringName]:
+	var out: Array[StringName] = []
+	for p: StringName in PART_RECTS:
+		var state := part_state(vitals, p)
+		var fracture := false
+		for w in vitals.wound_list():
+			if w.part == p and String(w.kind) == "fracture" and not w.treated:
+				fracture = true
+		if state.state == BLEEDING or state.markers.has(TOURNIQUET) or fracture:
+			out.append(p)
+	return out
+
+
 ## One part's state: "state" (OK, BLEEDING, UNTREATED, TREATED), "severity" (0, or 1..3 while
 ## bleeding) and "markers" (TOURNIQUET, SPLINT, DRESSING, SEAL, IV, IO).
 static func part_state(vitals: Vitals, p: StringName) -> Dictionary:
@@ -446,18 +485,7 @@ func _draw() -> void:
 	draw_string(font, top + Vector2(PANEL_SIZE.x - 210, 32), "H / Esc to close", HORIZONTAL_ALIGNMENT_RIGHT, 190, 14, Color(0.7, 0.7, 0.7))
 	# Body diagram.
 	var origin := _figure_origin()
-	for p: StringName in PART_RECTS:
-		var r: Rect2 = PART_RECTS[p]
-		r.position += origin
-		var state := part_state(vitals, p)
-		draw_rect(r, state_color(state))
-		draw_rect(r, Color.WHITE if p == part else Color(0.15, 0.15, 0.15), false, 3.0 if p == part else 1.0)
-		var y := r.position.y + 13.0
-		for m: StringName in state.markers:
-			if m == TOURNIQUET:
-				draw_rect(Rect2(r.position.x - 2, r.position.y + 4, r.size.x + 4, 5), Color(0.05, 0.05, 0.05))
-			draw_string(font, Vector2(r.position.x + 2, y + 8), MARKER_TEXT[m], HORIZONTAL_ALIGNMENT_LEFT, r.size.x, 11, Color.WHITE)
-			y += 12.0
+	draw_diagram(self, vitals, origin, 1.0, part)
 	draw_string(font, origin + Vector2(30, FIGURE_SIZE.y + 22), "R", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.7, 0.7, 0.7))
 	draw_string(font, origin + Vector2(180, FIGURE_SIZE.y + 22), "L", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.7, 0.7, 0.7))
 	draw_string(font, origin + Vector2(0, FIGURE_SIZE.y + 44), "Red: bleeding  Amber: untreated  Green: treated", HORIZONTAL_ALIGNMENT_LEFT, 250, 11, Color(0.7, 0.7, 0.7))

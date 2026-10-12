@@ -44,6 +44,7 @@ func _ready() -> void:
 	await _test_use_medical()
 	await _test_menu_and_removal()
 	await _test_medical_menu()
+	await _test_bleed_hud()
 	await _test_wakes_in_session()
 	await _test_splint_movement()
 	GameState.delete_save()
@@ -1134,6 +1135,32 @@ func _test_medical_menu() -> void:
 	_reset(player)
 	player.inventory.remove_one(&"trauma_kit")
 	player.inventory.remove_one(&"iv_18")
+
+
+## The corner silhouette: shows while the player bleeds untreated, highlights the part, goes when treated.
+func _test_bleed_hud() -> void:
+	print("HUD silhouette while bleeding")
+	_place_player()
+	_reset(player)
+	_restock()
+	player.inventory.take(&"pressure_bandage")
+	player._server_busy_until = 0.0
+	var sil: Control
+	for c in player.player_input.hud.get_children():
+		if c is Hud.BleedSilhouette:
+			sil = c
+	check(sil != null, "the HUD has the silhouette")
+	await _frames(2)
+	check(not sil.visible, "hidden with nothing to show")
+	_wound(player.vitals, Vitals.THIGH_L, "muscle", 0.25)
+	await _frames(2)
+	check(sil.visible and sil.parts.size() == 1 and sil.parts[0] == Vitals.THIGH_L, "a bleeding thigh shows it, highlighting the left thigh (%s, %s)" % [sil.visible, sil.parts])
+	player._server_treat.rpc_id(1, player.get_path(), &"pressure_bandage", Vitals.THIGH_L)
+	await _seconds(player.treat_seconds(player, ItemDB.get_item(&"pressure_bandage")) + 0.3)
+	await _frames(2)
+	check(player.vitals.bleed_rate() == 0.0 and not sil.visible, "treated, it disappears (%s, bleed %.2f, %s)" % [sil.parts, player.vitals.bleed_rate(), player.vitals.wound_list()])
+	_reset(player)
+	player.inventory.remove_one(&"pressure_bandage")
 
 
 func _key(key: Key, shift: bool) -> InputEventKey:
