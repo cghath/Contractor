@@ -213,6 +213,7 @@ func _ready() -> void:
 	add_child(Charges.new())  # "Charges": placed explosives (wave 4B)
 	add_child(VehicleLayer.new())  # "Vehicles": vehicles and wrecks (wave 5)
 	add_child(Launchers.new())  # "Launchers": anti-armour rockets and missiles in flight (wave 5)
+	add_child(HeliSupports.new())  # "HeliSupports": Black Hawk resupply, transport, extraction (wave 5b V3)
 
 
 ## The playable area on the map, in metres on the ground plane (x along x, y along z): the

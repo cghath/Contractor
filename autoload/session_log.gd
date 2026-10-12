@@ -310,6 +310,10 @@ func state_text(reason: String) -> String:
 	if readout != "":
 		lines.append("")
 		lines.append(readout)
+	var helicopters := HeliSupports.readout(self)  # wave 5b: each helicopter support's state
+	if helicopters != "":
+		lines.append("")
+		lines.append(helicopters)
 	lines.append("")
 	lines.append("Last %d log lines:" % _tail.size())
 	_mutex.lock()
