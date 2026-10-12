@@ -11,6 +11,11 @@ const BASE_FOV := 80.0
 ## (VoxelArt.sight_point) here instead.
 const HIP_VIEW := Vector3(0.14, -0.16, -0.38)
 const ADS_EYE := Vector3(0.0, -0.012, -0.24)
+## Proposed: where each first-person forearm's elbow sits from its hand, in view space (a
+## right-handed shooter's; x mirrors for a left-handed one): the firing elbow low and out
+## behind the grip, the support elbow under and behind the handguard.
+const VIEW_FIRING_ELBOW := Vector3(0.09, -0.12, 0.2)
+const VIEW_SUPPORT_ELBOW := Vector3(-0.07, -0.15, 0.2)
 ## Render layer for your own body and gear; your camera skips it.
 const LOCAL_ONLY_LAYER := 1 << 1
 ## Throwables in the order Shift+G cycles them (next_throwable): frag and flashbang always,
@@ -325,17 +330,37 @@ func _try_throw() -> void:
 	body._server_throw.rpc_id(1, body.camera.global_position, -body.camera.global_basis.z, throwable)
 
 
-## First-person weapon: the same voxel model others see, parented to the camera.
+## First-person weapon: the same voxel model others see, parented to the camera, with the
+## player's own forearms and hands on it (the body itself is hidden from its own camera): the
+## firing hand on the grip, the other on the support point, mirrored for a left-handed shooter.
 func _update_view_model() -> void:
 	var weapon := body.active_weapon()
 	var id: StringName = weapon.id if weapon and body.inventory.hands == &"" else &""
-	if id == _view_model_id:
+	var key := StringName("%s|%s|%s|%s" % [id, body.left_handed, body.model.variant, body.model.body])
+	if key == _view_model_id:
 		return
-	_view_model_id = id
+	_view_model_id = key
 	for child in body.view_model.get_children():
 		child.queue_free()
-	if id != &"":
-		body.view_model.add_child(VoxelArt.instance(VoxelArt.model_for(weapon), body.model.variant))
+	if id == &"":
+		return
+	var model := VoxelArt.model_for(weapon)
+	body.view_model.add_child(VoxelArt.instance(model, body.model.variant))
+	var points := VoxelArt.hand_points(model)
+	if points.is_empty():
+		return
+	var side := -1.0 if body.left_handed else 1.0  # the firing hand's side
+	for hand: Array in [[points.grip, VIEW_FIRING_ELBOW], [points.support, VIEW_SUPPORT_ELBOW]]:
+		var palm: Vector3 = hand[0]
+		var elbow: Vector3 = palm + (hand[1] as Vector3) * Vector3(side, 1, 1)
+		var forearm := VoxelArt.instance(VoxelArt.body_part("forearm", body.model.body), body.model.variant)
+		forearm.name = "ViewForearm"
+		# The forearm's pivot is the elbow and its palm FOREARM down its -y: point -y at the palm.
+		var up := (elbow - palm).normalized()
+		var across := up.cross(Vector3.BACK).normalized() if absf(up.dot(Vector3.BACK)) < 0.95 else Vector3.RIGHT
+		var basis := Basis(across, up, across.cross(up)).orthonormalized()
+		forearm.transform = Transform3D(basis.scaled(Vector3.ONE * palm.distance_to(elbow) / CharacterModel.FOREARM), elbow)
+		body.view_model.add_child(forearm)
 
 
 # --- Placing a charge (Charges: like Arma Reforger's explosives) --------------------------
