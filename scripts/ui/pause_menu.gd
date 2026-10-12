@@ -36,6 +36,12 @@ func _ready() -> void:
 	title.text = "Paused (the game keeps running)"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(title)
+	if SessionLog.session_id != "":  # playtests: which session log to send with a report
+		var session := Label.new()
+		session.text = "Session %s (logged)" % SessionLog.session_id
+		session.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		session.modulate = Color(1, 1, 1, 0.6)
+		box.add_child(session)
 	box.add_child(_button("Resume", close))
 	_base_button = _button("Return to Base (revert)", _ask_return_to_base)
 	box.add_child(_base_button)

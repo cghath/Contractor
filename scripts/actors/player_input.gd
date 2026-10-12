@@ -195,6 +195,7 @@ func crosshair_ground() -> Variant:
 
 
 func flash(text: String) -> void:
+	SessionLog.note("shown to the player: " + text)
 	if hud:
 		hud.flash(text)
 

@@ -14,6 +14,7 @@ config/icon="res://icon.svg"
 
 [autoload]
 
+SessionLog="*res://autoload/session_log.gd"
 Controls="*res://autoload/controls.gd"
 ItemDB="*res://autoload/item_db.gd"
 GameState="*res://autoload/game_state.gd"
