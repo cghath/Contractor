@@ -523,12 +523,13 @@ func _test_callout_events() -> void:
 	var casualty: Soldier = _squad().filter(func(s: Soldier) -> bool: return s != loader and is_instance_valid(s.buddy) \
 		and s.buddy.is_ai() and s.buddy.vitals.is_up()).front()
 	casualty.vitals.server_damage(500.0)
-	await _frames(2)
-	var down := _said(&"man_down")
 	var expected := "Man down! %s is down" % casualty.display_name()
+	# The call comes when Vitals reports them down (its own 10 Hz tick), not on the next frame.
+	await _wait_for(func() -> bool: return _said(&"man_down").any(func(c: Dictionary) -> bool: return c.text == expected), 5.0)
+	var down := _said(&"man_down")
 	var buddy_name := String(casualty.buddy.name) if is_instance_valid(casualty.buddy) else "?"
 	check(not down.is_empty() and down[-1].text == expected and down[-1].speaker == buddy_name,
-		"%s's buddy calls %s" % [casualty.name, expected])
+		"%s's buddy calls %s (heard: %s)" % [casualty.name, expected, down.map(func(c: Dictionary) -> String: return "%s: %s" % [c.speaker, c.text])])
 	casualty.vitals.server_reset_health()
 	var thrower := squad.order_throw(player, &"smoke_grenade", Vector3(0, 0, 4), PackedStringArray())
 	check(thrower != "" and _said(&"smoke_out").any(func(c: Dictionary) -> bool: return c.speaker == thrower), "%s throws smoke: Smoke out!" % thrower)

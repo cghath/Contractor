@@ -110,6 +110,10 @@ judge() {
 		tail -n 40 "$log" | sed "s/^/  | /"
 		if [ -n "${GITHUB_ACTIONS:-}" ]; then  # job logs need repo admin rights; annotations don't
 			tail -n 12 "$log" | while IFS= read -r line; do echo "::error title=$name::$line"; done
+			# Why it failed (a suite can print PASSED and still fail: a script error earlier, or
+			# a crash on quit), and the first script errors wherever they are in the log.
+			grep -A1 'SCRIPT ERROR' "$log" | grep -v '^--$' | head -n 6 | while IFS= read -r line; do echo "::error title=$name script error::$line"; done
+			echo "::error title=$name::FAILED: $why"
 		fi
 		status=1
 	fi

@@ -47,7 +47,7 @@ GODOT="..." CONTRACTOR_PORT=24790 tools/run_tests.sh missions world             
 - Use your own `CONTRACTOR_PORT` (the game and other runs use 24680; two on one port looks
   like a hang) and one run at a time per machine.
 
-### Which suites to run, and when CI does the rest (Captain, 2026-10-13)
+### Which suites to run, and when CI does the rest (Captain, 2026-10-12)
 
 A full local run takes 15-22 minutes and CI runs every suite on every push anyway (one job per
 suite, in parallel), so:

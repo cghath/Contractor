@@ -5,7 +5,7 @@
   name, under one parent outside the repo, and nothing deletes them. Run suites only through
   `tools/run_tests.sh` with your own `CONTRACTOR_PORT`, cite run numbers when you report
   results, and put test-only controls behind `DevTools.on()`.
-- **Testing and pushing: CI is the full check (Captain's rule, 2026-10-13).** Locally, run the
+- **Testing and pushing: CI is the full check (Captain's rule, 2026-10-12).** Locally, run the
   suites your change touches plus `smoke`. Push your work branch to GitHub (allowed without
   asking) and let CI run every suite on it; move `dev` forward (fast-forward, or a merge you've
   tested) only once that branch's CI is green, so `dev` never goes red. A green CI run on the
