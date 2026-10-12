@@ -11,6 +11,15 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Terrain presets (2026-10-12)
+
+#### Added
+
+- **Terrain presets** (`data/terrain_presets.json`, `docs/terrain_presets.md`): coastal_lowland (with a sea along
+  one seeded side), salt_flats, desert_wadi (carved riverbeds), rocky_ridge, scrubland, temperate. Chosen by the def's
+  `terrain`, name hints or region, and carried in the def. `ZoneScatter`: seeded rocks, scrub and trees by zone
+  area (MultiMesh; large rocks and trees have collision and nav boxes).
+
 ### Wave 5a: vehicles and anti-armour (cghath's side, 2026-10-12)
 
 #### Added
