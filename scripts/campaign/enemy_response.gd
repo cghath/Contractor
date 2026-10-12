@@ -350,6 +350,7 @@ func _launch_qrf() -> void:
 		if not gate.is_finite():
 			continue
 		var soldiers := reinforcements.server_send(gate, 1 if tier >= 1 else 0)
+		VehicleQrf.server_mount(level, m, gate, lkp, soldiers)  # wave 5b (V4): some QRFs ride in a technical
 		qrf_launches.append({"from": m.module_id, "at": now(), "soldiers": soldiers})
 		_last_qrf = now()
 

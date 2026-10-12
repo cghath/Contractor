@@ -96,6 +96,8 @@ const STEER_FALLOFF_MS := 8.0
 ## Rolling resistance and engine braking with the throttle off (m/s2).
 const ROLL_DECEL := 0.3
 const ENGINE_BRAKE := 0.5
+## The steepest grade the drive holds on top of its acceleration (degrees, Proposed, wave 5b).
+const CLIMB_DEG := 35.0
 ## Tracked turn controller: reaches the commanded turn rate in about this long (s).
 const TRACK_TURN_TIME_S := 0.35
 ## Rolling the other way while still moving faster than this (m/s) brakes first.
@@ -887,9 +889,11 @@ func _drive_step(delta: float) -> void:
 	if kind == HELICOPTER:
 		throttle = 0.0
 		brake = true
+	var wet := AavWater.depth(self)  # wave 5b: in the sea on a coastal zone (V4)
+	throttle = AavWater.throttle(self, wet, throttle)
 	var still := linear_velocity.length() < SLEEP_SPEED and angular_velocity.length() < SLEEP_SPEED and throttle == 0.0
 	_still_s = _still_s + delta if still else 0.0
-	if _still_s > SLEEP_S and brake:
+	if _still_s > SLEEP_S and brake and wet <= 0.0:
 		if not sleeping:
 			sleeping = true
 		return
@@ -898,6 +902,8 @@ func _drive_step(delta: float) -> void:
 			return
 		sleeping = false
 	_wheel_forces(delta, throttle, steer, brake)
+	if wet > 0.0:
+		AavWater.step(self, delta, wet, throttle, steer, brake)  # buoyancy, drag, waterjets
 
 
 ## Suspension, grip, drive and brakes at each wheel (host).
@@ -926,6 +932,10 @@ func _wheel_forces(delta: float, throttle: float, steer: float, brake: bool) -> 
 		var top := top_speed(throttle < 0.0)
 		var curve := sqrt(clampf(1.0 - absf(v_fwd) / maxf(top, 0.1), 0.0, 1.0))
 		drive = throttle * mass * float(spec.get("accel_ms2", 2.0)) * curve
+		# Wave 5b: uphill the engine gears down and holds the grade (up to CLIMB_DEG; the tyres'
+		# or tracks' grip still limits it), so a hill doesn't stall it at accel_ms2's slope.
+		var grade := clampf(forward.y * signf(throttle), 0.0, sin(deg_to_rad(CLIMB_DEG)))
+		drive += signf(throttle) * mass * g * grade * minf(absf(throttle) * 1.5, 1.0)
 	var brake_force := mass * float(spec.get("brake_ms2", 6.0)) if brake else 0.0
 	var wheels_ok := zone_health(ZONE_WHEELS)
 	var grip := GRIP * (lerpf(0.55, 1.0, wheels_ok) if wheels_ok > 0.0 else 0.4)
@@ -1529,6 +1539,9 @@ func request_enter(index: int) -> void:
 func request_exit() -> void:
 	var actor := _sender()
 	if multiplayer.is_server() and actor and seat_of(actor) >= 0:
+		if AavWater.afloat(self) and not is_burning():
+			_tell(actor, "Not in open water")  # wave 5b: an AAV swimming
+			return
 		server_exit(actor)
 
 

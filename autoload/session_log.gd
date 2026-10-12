@@ -314,6 +314,10 @@ func state_text(reason: String) -> String:
 	if helicopters != "":
 		lines.append("")
 		lines.append(helicopters)
+	var vehicles := AavSupport.state_text(self)  # wave 5b: every vehicle, the AAV support
+	if vehicles != "":
+		lines.append("")
+		lines.append(vehicles)
 	lines.append("")
 	lines.append("Last %d log lines:" % _tail.size())
 	_mutex.lock()

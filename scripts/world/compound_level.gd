@@ -214,6 +214,7 @@ func _ready() -> void:
 	add_child(VehicleLayer.new())  # "Vehicles": vehicles and wrecks (wave 5)
 	add_child(Launchers.new())  # "Launchers": anti-armour rockets and missiles in flight (wave 5)
 	add_child(HeliSupports.new())  # "HeliSupports": Black Hawk resupply, transport, extraction (wave 5b V3)
+	AavSupport.install(self)  # wave 5b (V4): the LHD or FOB origin, the AAV support, the motor pool
 
 
 ## The playable area on the map, in metres on the ground plane (x along x, y along z): the
@@ -530,7 +531,7 @@ func rebalance_squad() -> void:
 ## come along outside the slots.
 func _squad_ai() -> Array:
 	return ai.get_children().filter(func(s: Node) -> bool: return s is Soldier and s.faction == &"friendly" \
-		and not s.is_queued_for_deletion() and not s.vitals.is_dead() and not s.has_meta(&"recovery"))
+		and not s.is_queued_for_deletion() and not s.vitals.is_dead() and not s.has_meta(&"recovery") and not s.has_meta(&"vehicle_crew"))  # wave 5b: an AAV's crew
 
 
 ## A squadmate whose slot a player took (or whose role changed) leaves the session. A dead one
