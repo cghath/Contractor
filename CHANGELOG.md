@@ -11,6 +11,27 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Medical menu, slice 1 (Captain's side, 2026-10-12)
+
+#### Added
+
+- **Medical menu on H** (`MedicalMenu`, `scripts/ui/medical_menu.gd`; inspired by ACE3's): opens
+  on the person you look at within treatment reach (measured to `Soldier.body_point()`), else
+  on yourself. A body diagram of the 14 parts, clickable, coloured by state (bleeding by
+  severity, untreated, treated) with TQ, splint, dressing, seal and IV/IO markers; the chosen
+  part's injuries in words and every medical item you carry, greyed out with the reason when
+  it can't be used there now; choosing one sends the same `_server_treat` request as the
+  interaction menu's Treat (and Remove tourniquet its own). Signs in words (numbers only with
+  a pulse oximeter). An activity log, local to the treater for now (what you chose, and the
+  changes seen while the menu was open). H or Escape closes it; while open it has the mouse
+  and the keys. Reads replicated state only, so it works on clients. Test: medical suite
+  "Medical menu (H)".
+
+#### Changed
+
+- **Quick-treat moves to Shift+H** (`quick_treat`, `Controls.SHIFT_KEYS`), same behaviour as the
+  old H. The `use_medical` action is now `medical_menu`.
+
 ### Wave 5a: vehicles and anti-armour (cghath's side, 2026-10-12)
 
 #### Added
