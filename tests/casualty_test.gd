@@ -1205,9 +1205,10 @@ func _test_ragdolls() -> void:
 		lowest_on_a = minf(lowest_on_a, p.global_position.y)
 	check(top > torso_a.global_position.y + 0.1, "and rests on the first (his highest part %.2f m above the first's torso)" % (top - torso_a.global_position.y))
 	check(torso_a.global_position.distance_to(torso_b.global_position) > 0.2, "not inside him (torsos %.2f m apart)" % torso_a.global_position.distance_to(torso_b.global_position))
-	# Walking into the pile: the first body doesn't move.
+	# Walking into the pile: the first body doesn't move. (The walker is one of ours: a hostile
+	# one was shot by the squad 25-30 m off mid-walk and lay down short of the pile, R0160.)
 	var before := torso_a.global_transform
-	var walker := level.spawn_soldier({"name": "RagdollWalker", "faction": "hostile", "variant": "urban", "pos": spot + Vector3(-2.5, 0, 0),
+	var walker := level.spawn_soldier({"name": "RagdollWalker", "faction": "friendly", "variant": "urban", "pos": spot + Vector3(-2.5, 0, 0),
 		"loadout": [], "combat": 0.5, "discipline": 0.5, "guard": true})
 	SquadAI.of(walker).process_mode = Node.PROCESS_MODE_DISABLED
 	walker.move_input = Vector2(0, -1)
@@ -1215,7 +1216,14 @@ func _test_ragdolls() -> void:
 	# (Until he's past the pile, up to 6 s: a walk of 3 m takes about 2 s. A fixed 2.5 s hid
 	# soldiers stuck at the pile's edge, R0142.)
 	var started := Time.get_ticks_msec()
-	var past := await _wait_until(func() -> bool: return walker.global_position.x > spot.x + 0.5, 6.0)
+	var trail: Array[String] = []  # every 0.5 s: x, height over the ground, on the floor or not
+	var past := false
+	for tick in 13:
+		trail.append("%.2f/%.2f%s" % [walker.global_position.x, walker.global_position.y - spot.y, "" if walker.is_on_floor() else "^"])
+		past = walker.global_position.x > spot.x + 0.5
+		if past:
+			break
+		await _seconds(0.5)
 	var took := (Time.get_ticks_msec() - started) / 1000.0
 	# What he's against now (each: a body part or not, its name, the contact's height over his
 	# feet and its normal's y): a stuck walker says why.
@@ -1227,7 +1235,9 @@ func _test_ragdolls() -> void:
 			collider.name if collider != null else "?", hit.get_position().y - walker.global_position.y, hit.get_normal().y])
 	walker.move_input = Vector2.ZERO
 	check(torso_a.global_transform.origin.distance_to(before.origin) < 0.02, "walking into a body doesn't shove it")
-	check(past, "the walker went on over the bodies (x %.2f, the pile at %.2f, %.1f s; against: %s)" % [walker.global_position.x, spot.x, took, ", ".join(against) if not against.is_empty() else "nothing"])
+	check(past, "the walker went on over the bodies (x %.2f, the pile at %.2f, %.1f s; against: %s)%s" % [walker.global_position.x, spot.x, took,
+		", ".join(against) if not against.is_empty() else "nothing", "" if past else "; x/height (^ in the air): %s; he's %s%s, last hurt by %s" % [" ".join(trail),
+		walker.vitals.condition_text(), " (a ragdoll)" if is_instance_valid(walker.ragdoll) else "", walker.vitals.last_cause]])
 	for s: Soldier in [first, second, walker]:
 		if is_instance_valid(s):
 			s.queue_free()
