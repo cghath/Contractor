@@ -343,7 +343,8 @@ func step(delta: float) -> void:
 				_rechecked = true
 		Phase.LEAVING:
 			var area: Rect2 = level().map_area()
-			if _flat(heli.global_position, exit) < EXIT_M or not area.grow(-40.0).has_point(Vector2(heli.global_position.x, heli.global_position.z)):
+			var at_wall := level() is ZoneLevel and not area.grow(-40.0).has_point(Vector2(heli.global_position.x, heli.global_position.z))
+			if _flat(heli.global_position, exit) < EXIT_M or at_wall:  # (a zone's edge is a wall; a small map's isn't)
 				heli.queue_free()
 				phase = Phase.GONE
 
