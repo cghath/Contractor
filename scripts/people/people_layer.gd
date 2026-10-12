@@ -254,10 +254,11 @@ func server_contract_content(objectives: Array) -> void:
 
 
 ## Host only. Civilians in every module of a world-scale zone that has them (contracts.json
-## "civilians"), each with a name of their own in the zone, walking their routine. One the
-## zone save holds the body of stays dead.
+## "civilians"), each with a real name of their own in the zone (the region's people:
+## Names.mission_person), the same every time, walking their routine. One the zone save holds
+## the body of stays dead.
 func _spawn_civilians() -> void:
-	var names: Array = MissionRegistry.data().get("civilian_names", ["Civilian"])
+	var nation := Names.region_nation(String(MissionRegistry.zone(GameState.zone_id).get("region", "")))
 	var used := {}
 	var fallen := {}
 	for record: Dictionary in GameState.bodies:
@@ -267,12 +268,9 @@ func _spawn_civilians() -> void:
 		var list: Array = MissionRegistry.module(module.type).get("civilians", [])
 		for i in list.size():
 			var data: Dictionary = list[i]
-			var k := absi(hash([module.module_id, i]))
-			var who := String(names[k % names.size()])
-			for step in names.size():
-				who = String(names[(k + step) % names.size()])
-				if not used.has(who):
-					break
+			var rng := RandomNumberGenerator.new()
+			rng.seed = hash(["civilian", module.module_id, i])
+			var who := Names.mission_person(rng, "civilian", nation, Names.MALE, used)
 			used[who] = true
 			var label := "Civilian (%s)" % who
 			if fallen.has(label):

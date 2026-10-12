@@ -141,7 +141,7 @@ static func generate(rng: RandomNumberGenerator, ctx: Dictionary) -> Dictionary:
 	var step := maxi(MissionRegistry.setting_i("pay_round", 500), 1)
 	var base_pay := maxi(step, roundi(float(def.get("base_pay", 40000)) * pay_mult / step) * step)
 	var day := int(ctx.get("day", 1))
-	var mission := mission_target(rng, def, String(zone.get("zone_id", "")))
+	var mission := mission_target(rng, def, String(zone.get("zone_id", "")), target)
 	var limit_min := int(def.get("time_limit_min", 0))
 	return {
 		"cid": "", "type": type_id, "title": "%s%s: %s" % [def.get("name", type_id), mission.title_extra, zone.get("name", "")],
@@ -165,10 +165,10 @@ static func generate(rng: RandomNumberGenerator, ctx: Dictionary) -> Dictionary:
 ## module (one of the zone layout's modules of a type `def` plays in, else the type's first
 ## module type with no module id), each template's site (a list picks one the module has; an
 ## optional one whose site the module lacks is left out), {name} and {module} filled in, a
-## person's name for an HVT or hostage, and the time limit on the required ones. Picked on a
+## person's real name for an HVT (from the `target` faction's nation) or a hostage (Names.mission_person), and the time limit on the required ones. Picked on a
 ## generator of its own (seeded from `rng`, which it leaves alone) so the boards stay as they
 ## were. {"module", "module_id", "objectives", "title_extra"}.
-static func mission_target(rng: RandomNumberGenerator, def: Dictionary, zone_id: String) -> Dictionary:
+static func mission_target(rng: RandomNumberGenerator, def: Dictionary, zone_id: String, target := "") -> Dictionary:
 	var pick := RandomNumberGenerator.new()
 	pick.seed = hash([rng.state, "mission"])
 	var allowed := MissionRegistry.type_modules(def)
@@ -202,8 +202,7 @@ static func mission_target(rng: RandomNumberGenerator, def: Dictionary, zone_id:
 		var name := String(site.get("name", ""))
 		if not person.is_empty():
 			if person_name == "":
-				var names: Array = MissionRegistry.data().get("hostage_names" if friendly else "hvt_names", ["Unknown"])
-				person_name = String(names[pick.randi() % names.size()])
+				person_name = Names.mission_person(pick, "hostage" if friendly else "hvt", Names.faction_nation(target))
 			name = person_name
 		if site.has("person"):
 			o["person"] = {"name": person_name, "label": "%s (%s)" % ["Hostage" if friendly else "HVT", person_name]}

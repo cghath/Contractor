@@ -154,3 +154,66 @@ static func person(rng: RandomNumberGenerator, faction: StringName, role: String
 ## (Demographics: a medic at the nation's overall share, other roles less).
 static func body_for(nation: String, role: StringName, rng: RandomNumberGenerator) -> String:
 	return FEMALE if rng.randf() < Demographics.female_chance(nation, role) else MALE
+
+
+# --- The people a mission puts in a zone (wave 4B) -----------------------------------------
+
+## Given names of the people in the zones (HVTs, hostages, civilians), by nationality and
+## body, for the nations FIRST doesn't cover: "insurgent" is the region's own people (common
+## Arabic, Pashto and Dari names), and the regional factions' nations (wave 6).
+const LOCAL_FIRST := {
+	"insurgent": {MALE: ["Ahmad", "Mohammad", "Abdullah", "Mahmoud", "Hamid", "Karim", "Omar", "Yusuf", "Tariq",
+		"Bilal", "Idris", "Farid", "Nasir", "Rahim", "Jamal", "Khalid", "Walid", "Haroun", "Sami", "Zaid",
+		"Qasim", "Rashid", "Hakim", "Faisal", "Gul", "Najib", "Wahid", "Shafiq", "Aziz", "Saber"],
+		FEMALE: ["Fatima", "Samira", "Leila", "Mariam", "Huda", "Rania", "Nadia", "Salma", "Amina", "Zainab",
+		"Farah", "Layla", "Noor", "Hana", "Shirin", "Malalai", "Parwana", "Zahra", "Soraya", "Yasmin"]},
+	"RU": {MALE: ["Aleksandr", "Dmitry", "Sergei", "Andrei", "Alexei", "Ivan", "Mikhail", "Nikolai", "Pavel", "Viktor"],
+		FEMALE: ["Anna", "Elena", "Olga", "Natalia", "Tatiana", "Irina", "Svetlana", "Maria", "Yulia", "Ekaterina"]},
+	"CN": {MALE: ["Wei", "Jun", "Lei", "Tao", "Jie", "Peng", "Hao", "Bo", "Gang", "Ming"],
+		FEMALE: ["Fang", "Jing", "Li", "Min", "Yan", "Hong", "Xia", "Mei", "Lan", "Ying"]},
+	"IR": {MALE: ["Ali", "Reza", "Hossein", "Mehdi", "Hamid", "Saeed", "Amir", "Javad", "Majid", "Davood"],
+		FEMALE: ["Maryam", "Zahra", "Fatemeh", "Sara", "Narges", "Leila", "Shirin", "Parisa", "Azadeh", "Mina"]},
+}
+## Hostages come from anywhere: aid workers, engineers and journalists from the allied
+## countries, and people of the region itself.
+const HOSTAGE_NATIONS := [["US", 0.3], ["UK", 0.2], ["CA", 0.15], ["insurgent", 0.35]]
+
+
+## The nationality a faction's people are from (data/factions.json "nation"; the early game's
+## hostiles are insurgents).
+static func faction_nation(faction_id: String) -> String:
+	return String(MissionRegistry.faction(faction_id).get("nation", "insurgent"))
+
+
+## The nationality of a region's own people (data/contracts.json regions' "nation").
+static func region_nation(region_id: String) -> String:
+	return String(MissionRegistry.region(region_id).get("nation", "insurgent"))
+
+
+## A whole name ("Qasim Rahimi") for someone a mission puts in a zone, drawn from `rng`: an
+## HVT ("hvt") of `nation` (the target faction's), a hostage ("hostage") of any of
+## HOSTAGE_NATIONS, a civilian ("civilian") of `nation` (the region's). `body` is MALE or
+## FEMALE (people bodies are male for now). Not one of `taken` where it can help it.
+static func mission_person(rng: RandomNumberGenerator, who: String, nation := "insurgent", body := MALE, taken := {}) -> String:
+	var name := ""
+	for attempt in 20:
+		var n := nation
+		if who == "hostage":
+			var roll := rng.randf()
+			n = HOSTAGE_NATIONS[HOSTAGE_NATIONS.size() - 1][0]
+			for entry: Array in HOSTAGE_NATIONS:
+				roll -= float(entry[1])
+				if roll <= 0.0:
+					n = entry[0]
+					break
+		if not POOLS.has(n):
+			n = "insurgent"
+		var pool: Array = POOLS[n]
+		var surname := String(pool[rng.randi_range(0, pool.size() - 1)])
+		if body == FEMALE:
+			surname = feminine(surname, n)
+		var firsts: Array = ((FIRST.get(n, LOCAL_FIRST.get(n, LOCAL_FIRST["insurgent"])) as Dictionary)[body])
+		name = "%s %s" % [firsts[rng.randi_range(0, firsts.size() - 1)], surname]
+		if not taken.has(name):
+			break
+	return name

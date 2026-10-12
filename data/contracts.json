@@ -88,14 +88,11 @@
 		 ]}
 	},
 
-	"_names": "Placeholder names for the people a mission puts in the zone (HVTs, hostages, civilians).",
-	"hvt_names": ["Rahimi", "Darwish", "Karimov", "Saleh", "Haqqani", "Nazari", "Tarkhan", "Volkan"],
-	"hostage_names": ["Haddad", "Mercer", "Okafor", "Lindqvist", "Petrov", "Aziz"],
-	"civilian_names": ["Farid", "Samira", "Omar", "Leila", "Yusuf", "Mariam", "Tariq", "Huda", "Karim", "Rania", "Hamid", "Nadia", "Bilal", "Salma", "Idris", "Amina"],
+	"_names": "The people a mission puts in a zone have real names (Names.mission_person): HVTs from the target faction's nation (factions.json \"nation\"), hostages from mixed nationalities, civilians from the region's own people (regions' \"nation\").",
 
 	"regions": [
-		{"region": "coast", "name": "Coast", "travel_days": 1, "base": "lhd"},
-		{"region": "inland", "name": "Inland", "travel_days": 2, "base": "fob"}
+		{"region": "coast", "name": "Coast", "nation": "insurgent", "travel_days": 1, "base": "lhd"},
+		{"region": "inland", "name": "Inland", "nation": "insurgent", "travel_days": 2, "base": "fob"}
 	],
 
 	"_zones": "Every zone is a generated world-scale zone (ZoneDef.generate from \"def\": seed, size_m, types, count), the same layout every visit so the persistent world holds (zone saves are per zone id). \"modules\" (the module types it holds) is filled in from the layout. Contract zones are 2-4 km² (1536 m or 1920 m a side). Hot zones stay at contract-zone size until wave 4B part 3 makes them 8-16 km².",

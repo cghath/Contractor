@@ -105,6 +105,18 @@ func _test_generation() -> void:
 	check(not phone.is_empty() and phone[0].params.intel_ids == ["%s:intel_phone" % oa[0].params.hvt] and oa[0].params.person.intel[0].intel_id == phone[0].params.intel_ids[0],
 		"the bonus phone is the one that HVT carries")
 	check(String(oa[0].params.person.label).begins_with("HVT (") and String(a.title).begins_with("HVT capture"), "they have a name (%s)" % oa[0].params.person.label)
+	var hvt_name := String(oa[0].params.person.name).split(" ")
+	check(hvt_name.size() == 2 and hvt_name[1] in Names.INSURGENT and hvt_name[0] in Names.LOCAL_FIRST["insurgent"][Names.MALE],
+		"a real name from the target faction's people (%s)" % oa[0].params.person.name)
+	var nations := {}
+	var rng2 := RandomNumberGenerator.new()
+	rng2.seed = 7
+	for i in 60:
+		var surname := Names.mission_person(rng2, "hostage").split(" ")[1]
+		for n: String in ["US", "UK", "CA", "insurgent"]:
+			if surname in Names.POOLS[n]:
+				nations[n] = true
+	check(nations.size() >= 3, "hostages come from mixed nationalities (%s)" % [nations.keys()])
 
 
 # --- A deployment in the zone ---------------------------------------------------------------
@@ -163,6 +175,13 @@ func _test_deployment() -> void:
 	check(laptop != null and laptop.item_id == &"intel_laptop", "the laptop is placed")
 	var civilians := people.people().filter(func(s: Soldier) -> bool: return Person.is_civilian(s))
 	var points := get_tree().get_nodes_in_group(DeliveryPoint.GROUP)
+	var civ_names := {}
+	var civ_real := true
+	for s: Soldier in civilians:
+		var n := s.display_name().trim_prefix("Civilian (").trim_suffix(")")
+		civ_real = civ_real and n.split(" ").size() == 2 and n.split(" ")[1] in Names.INSURGENT
+		civ_names[n] = true
+	check(civ_real and civ_names.size() == civilians.size(), "civilians have real names of the region, none twice (%s)" % [civ_names.keys()])
 	check(civilians.size() >= 3 and points.size() == level.extraction_points().size(),
 		"civilians go about their day in the zone's modules (%d) and every landing zone takes deliveries (%d)" % [civilians.size(), points.size()])
 	for s: Soldier in [hvt, hostage]:
