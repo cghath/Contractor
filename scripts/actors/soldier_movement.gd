@@ -54,6 +54,10 @@ const UP_MASK := WORLD_MASK | Soldier.BODY_LAYER | Ragdoll.LAYER | Vehicle.LAYER
 ## at this speed (m/s).
 const BODY_STEP_M := 0.75
 const BODY_CLIMB_SPEED := 2.4
+## Proposed: a step up onto a body clears the contact by this much, and moves on at least
+## this far (so a slow walk still gets its feet past the edge).
+const BODY_STEP_MARGIN := 0.04
+const BODY_STEP_AHEAD_M := 0.05
 
 ## Side stances (Caps Lock + A/D): hips shift and the upper body tilts out; prone rolls
 ## onto a side. Slower to move in.
@@ -212,7 +216,7 @@ func step(delta: float) -> void:
 	body.velocity.z = after.z
 	body.move_and_slide()
 	if not down and target != Vector3.ZERO:
-		_climb_bodies()
+		_climb_bodies(Vector3(after.x, 0.0, after.z), delta)
 	_track_fall()
 	if target.length() < before.length():
 		settle = minf(settle + maxf(before.length() - after.length(), 0.0) * SETTLE_GAIN, 1.0)
@@ -244,16 +248,33 @@ func update_pose(delta: float) -> void:
 
 
 ## Walking into a body lying on the ground (a ragdoll part, Ragdoll) low enough to step on:
-## up and over it, as over a pile, instead of stopping or passing through.
-func _climb_bodies() -> void:
+## up and over it, as over a pile, instead of stopping or passing through. A stair step: up
+## by the contact's height, then on by this step's move, when both are clear. (Only lifting
+## the velocity, as before, stuck soldiers at a pile's edge: the bump had stopped them and in
+## the air they had AIR_CONTROL to get going again, so they hopped in place; R0142.)
+## `motion`: the horizontal velocity this step wanted, over `delta` seconds.
+func _climb_bodies(motion: Vector3, delta: float) -> void:
 	var feet := body.global_position.y
 	for i in body.get_slide_collision_count():
 		var hit := body.get_slide_collision(i)
 		if Ragdoll.body_of(hit.get_collider()) == null:
 			continue
-		if hit.get_position().y - feet < BODY_STEP_M and hit.get_normal().y < 0.7:
-			body.velocity.y = maxf(body.velocity.y, BODY_CLIMB_SPEED)
-			return
+		var rise := hit.get_position().y - feet
+		if rise >= BODY_STEP_M or hit.get_normal().y >= 0.7:
+			continue
+		var up := Vector3(0.0, minf(rise + BODY_STEP_MARGIN, BODY_STEP_M), 0.0)
+		var ahead := motion * delta
+		if ahead.length() < BODY_STEP_AHEAD_M:
+			ahead = motion.normalized() * BODY_STEP_AHEAD_M
+		var from := body.global_transform
+		if not body.test_move(from, up) and not body.test_move(from.translated(up), ahead):
+			body.global_position += up + ahead
+			body.velocity.x = motion.x  # the bump doesn't cost the walk its speed
+			body.velocity.z = motion.z
+			body.velocity.y = maxf(body.velocity.y, 0.0)
+		else:
+			body.velocity.y = maxf(body.velocity.y, BODY_CLIMB_SPEED)  # no room: try a hop
+		return
 
 
 ## Every peer, every frame (from the body): the model, hitbox pose and capsule follow the
