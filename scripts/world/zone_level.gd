@@ -347,13 +347,24 @@ func _spawn_garrison(module: ZoneModule) -> void:
 			continue
 		var pos := module.to_global(spots[i]) if i < spots.size() else _extra_post(module.to_global(spots[i % spots.size()]), taken)
 		taken.append(pos)
-		spawn_soldier({"name": callsign, "faction": "hostile", "variant": "urban", "pos": pos,
+		var s := spawn_soldier({"name": callsign, "faction": "hostile", "variant": "urban", "pos": pos,
 			"loadout": HOSTILE_LOADOUT + ["enemy_radio"] if i % RADIO_EVERY == 0 else HOSTILE_LOADOUT, "combat": GARRISON_STATS.combat, "discipline": GARRISON_STATS.discipline, "guard": true,
 			"mode": alert.mode_at(pos) if alert else GARRISON_STATS.mode})
+		if s:
+			s.rotation.y = post_yaw(module, pos)
 	for i in want:
 		var me := ai.get_node_or_null(NodePath(_garrison_callsign(module, i))) as Soldier
 		if me and (me.buddy == null or not is_instance_valid(me.buddy)):
 			me.buddy = ai.get_node_or_null(NodePath(_garrison_callsign(module, i ^ 1))) as Soldier
+
+
+## The way a garrison post at `pos` faces (rotation.y): out of its site, away from the module's
+## middle (Captain 2026-10-12: gate guards face the entrance, tower guards look out).
+static func post_yaw(module: ZoneModule, pos: Vector3) -> float:
+	var d := pos - module.global_position
+	if Vector2(d.x, d.z).length() < 0.5:
+		return 0.0
+	return atan2(-d.x, -d.z)
 
 
 func _garrison_callsign(module: ZoneModule, i: int) -> String:

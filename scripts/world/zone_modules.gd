@@ -52,7 +52,7 @@ const GARRISON := {
 	"outpost": [Vector3(-5.5, 0.1, -6), Vector3(6, 0.1, -2), Vector3(-4, 0.1, 7.2), Vector3(4, 0.1, 7.2)],
 	"village": [Vector3(-15, 0.1, -10), Vector3(1, 0.1, -10), Vector3(15.5, 0.1, -10), Vector3(-13.5, 0.1, 9)],
 	"checkpoint": [Vector3(9, 0.1, 5), Vector3(-10, 0.1, 6.5), Vector3(2, 0.1, -5), Vector3(-2, 0.1, -5)],
-	"hq": [Vector3(-11, 0.1, -12), Vector3(-5, 0.1, -12), Vector3(10, 0.1, -13), Vector3(12, 0.1, -12), Vector3(-3, 0.1, 16), Vector3(3, 0.1, 16),
+	"hq": [Vector3(-11, 0.1, -12), Vector3(-5, 0.1, -12), Vector3(10, 0.1, -13), Vector3(12, 0.1, -12), Vector3(-3.4, 0.1, 15.0), Vector3(3.4, 0.1, 15.0),
 		Vector3(-16.4, 3.2, 16.4), Vector3(16.4, 3.2, -16.4)],
 	"qrf_base": [Vector3(-8, 0.1, -6), Vector3(-10, 0.1, -5), Vector3(6, 0.1, -5), Vector3(9, 0.1, -5), Vector3(-3, 0.1, 8), Vector3(3, 0.1, 8)],
 	"comms": [Vector3(-4.5, 0.1, -4.5), Vector3(4, 0.1, 2), Vector3(-2.5, 0.1, 4.5), Vector3(2.5, 0.1, 4.5)],
@@ -296,8 +296,8 @@ static func _hq() -> Array:
 	_room(out, Vector2(4, -16), Vector2(14, -11), 2.5, 0.15, M.WOOD, [["s", 8.4, 9.6]], M.SHEET_METAL, 0.1,
 		[["n", 6.5, 7.5], ["n", 10.5, 11.5]])
 	# Watchtowers in the north-east and south-west corners.
-	_tower(out, Vector2(15.2, -17.6))
-	_tower(out, Vector2(-17.6, 15.2))
+	_tower(out, Vector2(15.2, -17.6), ["n", "e"])
+	_tower(out, Vector2(-17.6, 15.2), ["s", "w"])
 	# Sandbags inside the gate, the cache and the AA site.
 	out.append([Vector3(-5.0, 0, 15.6), Vector3(-2.4, 1.1, 16.0), M.SANDBAG])
 	out.append([Vector3(2.4, 0, 15.6), Vector3(5.0, 1.1, 16.0), M.SANDBAG])
@@ -352,13 +352,24 @@ static func _comms() -> Array:
 
 
 ## A wooden watchtower with its low corner at `c` (x, z): four posts, a plank floor at 3 m and a
-## sandbag parapet on its outer side.
-static func _tower(out: Array, c: Vector2) -> void:
+## sandbag parapet on each side in `faces` ("n" -z, "s" +z, "w" -x, "e" +x): the sides that look
+## out of the site (a corner tower: its two outer sides, Captain 2026-10-12).
+static func _tower(out: Array, c: Vector2, faces: Array) -> void:
 	var W := VoxelWorld.Mat.WOOD
+	var S := VoxelWorld.Mat.SANDBAG
 	for p: Vector2 in [c, c + Vector2(2.4, 0), c + Vector2(0, 2.4), c + Vector2(2.4, 2.4)]:
 		out.append([Vector3(p.x, 0, p.y), Vector3(p.x + 0.2, 3.0, p.y + 0.2), W])
 	out.append([Vector3(c.x, 3.0, c.y), Vector3(c.x + 2.6, 3.1, c.y + 2.6), W])
-	out.append([Vector3(c.x, 3.1, c.y), Vector3(c.x + 2.6, 3.8, c.y + 0.3), VoxelWorld.Mat.SANDBAG])
+	for side: String in faces:
+		match side:
+			"n":
+				out.append([Vector3(c.x, 3.1, c.y), Vector3(c.x + 2.6, 3.8, c.y + 0.3), S])
+			"s":
+				out.append([Vector3(c.x, 3.1, c.y + 2.3), Vector3(c.x + 2.6, 3.8, c.y + 2.6), S])
+			"w":
+				out.append([Vector3(c.x, 3.1, c.y), Vector3(c.x + 0.3, 3.8, c.y + 2.6), S])
+			"e":
+				out.append([Vector3(c.x + 2.3, 3.1, c.y), Vector3(c.x + 2.6, 3.8, c.y + 2.6), S])
 
 
 ## A weapons cache: two wooden crates (1 x 1 x 1.2 m) side by side along x from `corner` (their

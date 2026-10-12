@@ -48,6 +48,7 @@ func _ready() -> void:
 	await _test_enemy_response()
 	await _test_radio_chatter()
 	await _test_field_radio()
+	await _test_hq_posts()
 	_finish()
 
 
@@ -793,6 +794,33 @@ func _test_field_radio() -> void:
 	Contracts.server_end_deployment({})
 	Contracts.server_finish_debrief()
 	await _frames(2)
+
+
+## Captain (2026-10-12): the HQ's corner towers have their parapets on their outer sides, and
+## garrison posts face out of their site: the gate guards stand behind the sandbags, facing the gate.
+func _test_hq_posts() -> void:
+	print("HQ posts")
+	var towers := {"ne": Vector2(15.2, -17.6), "sw": Vector2(-17.6, 15.2)}
+	var outer := {"ne": [AABB(Vector3(15.2, 3.1, -17.6), Vector3(2.6, 0.7, 0.3)), AABB(Vector3(17.5, 3.1, -17.6), Vector3(0.3, 0.7, 2.6))],
+		"sw": [AABB(Vector3(-17.6, 3.1, 17.5), Vector3(2.6, 0.7, 0.3)), AABB(Vector3(-17.6, 3.1, 15.2), Vector3(0.3, 0.7, 2.6))]}
+	# The inner sides, short of the corners where the outer parapets end.
+	var inner := {"ne": [AABB(Vector3(15.55, 3.1, -15.3), Vector3(1.9, 0.7, 0.3)), AABB(Vector3(15.2, 3.1, -17.25), Vector3(0.3, 0.7, 1.9))],
+		"sw": [AABB(Vector3(-17.25, 3.1, 15.2), Vector3(1.9, 0.7, 0.3)), AABB(Vector3(-15.3, 3.1, 15.55), Vector3(0.3, 0.7, 1.9))]}
+	var ok := true
+	for k: String in towers:
+		for box: AABB in outer[k]:
+			ok = ok and ZoneModules.solid_voxels_in("hq", box.grow(-0.05)) > 0
+		for box: AABB in inner[k]:
+			ok = ok and ZoneModules.solid_voxels_in("hq", box.grow(-0.05)) == 0
+	check(ok, "the HQ's corner towers: parapets on their two outer sides, none facing in")
+	var hq: ZoneModule = level.modules().filter(func(m: ZoneModule) -> bool: return m.type == "hq")[0]
+	var gate := [ZoneModules.GARRISON.hq[4], ZoneModules.GARRISON.hq[5]]
+	var facing := true
+	for p: Vector3 in gate:
+		var yaw := ZoneLevel.post_yaw(hq, hq.to_global(p))
+		var forward := Vector3(-sin(yaw), 0.0, -cos(yaw))
+		facing = facing and forward.dot(Vector3(0, 0, 1)) > 0.7 and p.z < 15.6  # the gate is south (+z); sandbags from z 15.6
+	check(facing, "the gate guards stand behind the sandbags, facing the gate")
 
 
 ## Back to calm: the alert's areas and the pressure points reset (no check-ins come due).
