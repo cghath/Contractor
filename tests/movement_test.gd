@@ -177,6 +177,7 @@ func _test_hitboxes() -> void:
 	check(absf(torso.global_basis.y.y) < 0.3, "prone: torso hitbox lies flat")
 	var eye := CharacterModel.eye_position(SoldierMovement.pose_for(S.PRONE, 0, 0.0))
 	check(prone_head.distance_to(eye) < 0.3, "and sits where the camera is (%.2f m away)" % prone_head.distance_to(eye))
+	var stood := player.global_transform
 	player.vitals.server_damage(500.0)
 	# A ragdoll now: it falls from the pose it was drawn in, so wait until it has come to rest.
 	var left := 10.0
@@ -185,6 +186,11 @@ func _test_hitboxes() -> void:
 		left -= 0.1
 	check(player.vitals.downed and absf(torso.global_basis.y.y) < 0.35, "downed still lays hitboxes down (lying flat with the body, a ragdoll now: up %.2f)" % torso.global_basis.y.y)
 	player.vitals.server_reset_health()
+	await _frames(2)
+	# Up again, the body stands where its ragdoll lay (Soldier._stand_where_ragdoll_lay): back
+	# to where it stood, which the later checks build their walls round.
+	player.global_transform = stood
+	player.velocity = Vector3.ZERO
 	move.set_stance(S.STAND_HIGH)
 	await _frames(2)
 	check(torso.transform.is_equal_approx(rest_torso) and _shape_position(head).distance_to(rest_head) < 0.01, "standing again: back at rest")

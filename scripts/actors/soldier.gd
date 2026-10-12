@@ -340,11 +340,29 @@ func _update_ragdoll() -> void:
 		ragdoll = Ragdoll.start(self) if multiplayer.is_server() else Ragdoll.follow(self)
 		collision_layer = 0
 	elif not want and is_instance_valid(ragdoll):
+		var spot: Variant = ragdoll.rest_spot() if is_ai() or is_multiplayer_authority() else null
 		ragdoll.stop()
 		ragdoll = null
+		_stand_where_ragdoll_lay(spot)
 		if vitals.is_up() or (not vitals.is_dead() and not is_instance_valid(carried_by) \
 				and not StringName(model.carry_net.get("mode", &"")) in [CharacterModel.CARRIED, CharacterModel.DRAGGED]):
 			collision_layer = BODY_LAYER
+
+
+## The ragdoll gone (back up, or lifted), the body is where it lay, not where it fell (it can
+## slide or roll metres from the capsule): `spot` is Ragdoll.rest_spot, null to stay put (no safe
+## ground near, or not ours to move). Whoever owns the body's position moves it: the host an AI's,
+## a player's own machine theirs (the host's copy follows the sync). Other peers move an AI at
+## once too, from the same pose, so it doesn't stand up where it fell until the host's position
+## arrives. A player keeps their own view's facing; an AI faces the way it got up.
+func _stand_where_ragdoll_lay(spot: Variant) -> void:
+	if spot == null:
+		return
+	var t: Transform3D = spot
+	global_position = t.origin
+	velocity = Vector3.ZERO
+	if is_ai():
+		rotation = Vector3(0.0, t.basis.get_euler().y, 0.0)
 
 
 
@@ -360,7 +378,7 @@ func _ai_physics(delta: float) -> void:
 		return
 	if is_instance_valid(ragdoll):
 		velocity = Vector3.ZERO
-		return  # the ragdoll holds the body: the capsule stays where it fell
+		return  # the ragdoll holds the body: the capsule stays where it fell until it goes (_update_ragdoll)
 	is_aiming = want_aim and vitals.is_up() and not is_reloading and inventory.hands == &"" and carrying == null
 	movement.step(delta)
 	_update_carried()
