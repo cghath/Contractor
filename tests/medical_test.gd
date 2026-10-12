@@ -1100,6 +1100,20 @@ func _test_medical_menu() -> void:
 	check(thigh.markers.has(MedicalMenu.TOURNIQUET) and thigh.state != MedicalMenu.BLEEDING, "then the thigh shows a tourniquet, no bleeding (%s)" % [thigh])
 	check(Array(menu.log_lines).any(func(l: String) -> bool: return l.contains("You: Tourniquet (")) \
 		and Array(menu.log_lines).any(func(l: String) -> bool: return l.ends_with("Left thigh: TQ on")), "the activity log has both (%s)" % [menu.log_lines])
+	# Triage card: set from the menu through the host, replicated, shown in Check condition.
+	menu.set_triage(Vitals.TRIAGE_IMMEDIATE)
+	await _frames(3)
+	check(casualty.vitals.triage() == Vitals.TRIAGE_IMMEDIATE and casualty.vitals.net_state.get("tg") == "immediate",
+		"the menu puts a red triage card on him, replicated in net_state (%s)" % casualty.vitals.triage())
+	check(InteractionMenu.condition_report(casualty, player).contains("Immediate (red)"), "Check condition shows the card")
+	check(menu.triage_at(menu._triage_rect(2).get_center()) == Vitals.TRIAGE_DELAYED, "the triage buttons are hit-tested")
+	player.global_position += Vector3(30, 0, 0)
+	player._server_set_triage.rpc_id(1, casualty.get_path(), Vitals.TRIAGE_MINIMAL)
+	await _frames(3)
+	check(casualty.vitals.triage() == Vitals.TRIAGE_IMMEDIATE, "out of reach the card doesn't change")
+	_place_player()
+	_reset(casualty)
+	check(casualty.vitals.triage() == Vitals.TRIAGE_NONE, "a fresh life has no card")
 	menu._unhandled_input(_key(KEY_H, false))
 	check(not menu.is_open(), "H closes it")
 	_reset(casualty)

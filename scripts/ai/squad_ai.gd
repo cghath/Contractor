@@ -1058,6 +1058,7 @@ func _may_use(id: StringName) -> bool:
 func _find_casualty() -> Soldier:
 	var best: Soldier = null
 	var best_d := INF
+	var best_tier := 99
 	for n in get_tree().get_nodes_in_group(&"combatants"):
 		var s := n as Soldier
 		if s == null or s == body or not _cares_for(s) or not needs_help(s):
@@ -1084,10 +1085,25 @@ func _find_casualty() -> Soldier:
 			d *= 0.5
 		if hvt and body.role == Roles.MEDIC:
 			d *= HVT_MEDIC_PULL
-		if d < best_d:
+		var tier := triage_tier(s)
+		if tier < best_tier or (tier == best_tier and d < best_d):
 			best = s
 			best_d = d
+			best_tier = tier
 	return best
+
+
+## How soon a triage card (Vitals.triage) puts a casualty in line: immediate first, then
+## delayed and uncarded alike (the usual order), then minimal, expectant last.
+static func triage_tier(s: Soldier) -> int:
+	match s.vitals.triage():
+		Vitals.TRIAGE_IMMEDIATE:
+			return 0
+		Vitals.TRIAGE_MINIMAL:
+			return 2
+		Vitals.TRIAGE_EXPECTANT:
+			return 3
+	return 1
 
 
 ## Who is really looking after `s`: a player who took hold of them, or an AI whose casualty

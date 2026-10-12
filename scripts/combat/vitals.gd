@@ -75,6 +75,19 @@ const TRAUMA_BLOOD_PER_DAMAGE := 0.006
 ## False skips the downed state and dies straight away.
 @export var can_go_down := true
 
+## Triage card (a carer sets it on a casualty; replicated in net_state under "tg").
+const TRIAGE_NONE := &"none"
+const TRIAGE_MINIMAL := &"minimal"      # green
+const TRIAGE_DELAYED := &"delayed"      # yellow
+const TRIAGE_IMMEDIATE := &"immediate"  # red
+const TRIAGE_EXPECTANT := &"expectant"  # black
+const TRIAGE_CARDS: Array[StringName] = [TRIAGE_NONE, TRIAGE_MINIMAL, TRIAGE_DELAYED, TRIAGE_IMMEDIATE, TRIAGE_EXPECTANT]
+const TRIAGE_TEXT := {TRIAGE_NONE: "No card", TRIAGE_MINIMAL: "Minimal (green)", TRIAGE_DELAYED: "Delayed (yellow)",
+	TRIAGE_IMMEDIATE: "Immediate (red)", TRIAGE_EXPECTANT: "Expectant (black)"}
+const TRIAGE_COLORS := {TRIAGE_NONE: Color(0.55, 0.57, 0.6), TRIAGE_MINIMAL: Color(0.3, 0.75, 0.35), TRIAGE_DELAYED: Color(0.95, 0.85, 0.2),
+	TRIAGE_IMMEDIATE: Color(0.9, 0.2, 0.15), TRIAGE_EXPECTANT: Color(0.05, 0.05, 0.05)}
+var _triage: StringName = TRIAGE_NONE
+
 ## Unconscious or in cardiac arrest (replicated at once).
 var downed := false:
 	set(value):
@@ -752,11 +765,28 @@ func server_kill() -> void:
 ## Host only. Back to full health (respawns, dummies getting back up, tests setting up).
 func server_reset_health() -> void:
 	_model.reset()
+	_triage = TRIAGE_NONE
 	_died_sent = false
 	_sim_left = 0.0
 	if downed:
 		downed = false
 	_publish(true)
+
+
+## The triage card on this casualty (TRIAGE_*), on every peer.
+func triage() -> StringName:
+	if _is_host():
+		return _triage
+	return StringName(net_state.get("tg", TRIAGE_NONE))
+
+
+## Host only. Puts `card` (a TRIAGE_* id) on this casualty.
+func server_set_triage(card: StringName) -> void:
+	if not TRIAGE_CARDS.has(card) or _model.dead:
+		return
+	_triage = card
+	_publish(true)
+	changed.emit()
 
 
 ## Host only. Fast-forwards the simulation by `seconds` (tests).
@@ -832,6 +862,7 @@ func _after_change(force := false) -> void:
 ## as a change (clients run them down themselves).
 func _publish(force: bool) -> void:
 	var state := _model.to_net()
+	state["tg"] = String(_triage)
 	var key := state.duplicate()
 	key.erase("t")
 	if key == _published and not force:
