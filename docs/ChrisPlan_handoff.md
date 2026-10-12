@@ -19,8 +19,8 @@ date), as with wave 3, so both sides never build the same thing twice.**
 | 0 Prep, 1 Phase 3 core, 2 Phase 3 finish | Done, on `dev` | Playtest fixes from Captain's two playtests are in |
 | 3 Medical depth | Done by Captain's side | cghath's own wave 3 was dropped (kept on a local branch only); its extras are listed under Backlog |
 | 4A Mission loop, first half | Done, on `dev` | World scale, contracts and economy, people, base hub and roster, map/briefing/extraction, one join handshake |
-| **4B** Wire the loop, hot zone | **In progress, Captain's side**: part 1 (loop wiring) done | [wave4b_handoff.md](wave4b_handoff.md) |
-| 5 Vehicles and supports | Planned below | AH-1Z, MRAPs, Bradley, Abrams: the US and the close allies that operate them (Captain, 2026-10-11) |
+| **4B** Wire the loop, hot zone | **In progress, Captain's side**: parts 1 and 2 on `dev`; part 3 (hot zone) in progress | [wave4b_handoff.md](wave4b_handoff.md) |
+| 5 Vehicles and supports | **Starting on cghath's side (2026-10-12)**, see the note under Wave 5: the base hub stays as is until wave 5 makes it the first friendly FOB | AH-1Z, MRAPs, Bradley, Abrams: the US and the close allies that operate them (Captain, 2026-10-11) |
 | 6 Factions | **Blocked on Captain** | Needs the decisions listed below |
 | 7 Art, world and weapons | Systems half planned below | Art waits for Captain's asset scripts; Stormworks-style characters in progress on Captain's side |
 | 8 Player-built faction | Design proposal only | |
@@ -54,6 +54,28 @@ date), as with wave 3, so both sides never build the same thing twice.**
   Windows build too before blaming the engine (the spall check was a real bug).
 
 ## Wave 5: vehicles and supports (proposed 4 workstreams)
+
+> **For cghath's agent, starting wave 5 while Captain's side finishes 4B part 3 (Captain, 2026-10-12):**
+> - **The base hub stays as it is for now.** `BaseHub` / `BaseLevel` (today's "FOB" base scene)
+>   keeps working unchanged through 4B part 3. **Wave 5 turns it into the first friendly
+>   FOB** (Captain: the players don't build a FOB; inland the squad deploys from a friendly
+>   faction's FOB with the company's portable container modules; the LHD is the only base we
+>   own; replacement troops fly in from the LHD at a cost). Design: "Bases: the LHD and
+>   friendly FOBs" below. Don't rework the base hub before wave 5 picks it up, and coordinate
+>   with Captain's side before changing `base_hub.gd`, `base_level.gd` or `base_economy.gd`.
+> - **4B part 3 (the hot zone) is Captain's side's, in progress now.** Its files: new hot-zone
+>   scripts, `ZoneDef` hot layouts (4,096 m square, 16 km², Captain), alert level, enemy
+>   pressure, radio contracts (`Contracts.server_radio_contract`), `data/zones.json` hot
+>   entries. Please leave those to Captain's side; QRF bases are on foot until wave 5's
+>   vehicles, and the hooks for vehicle QRFs and helicopter/AAV insertion will be left for
+>   wave 5 to fill.
+> - **Since your last pull (on `dev`):** ragdolls for downed and dead bodies (`Ragdoll`, layer 6
+>   "ragdolls"; a vehicle should collide with layer 6 and can call `Ragdoll.unfreeze()`), a
+>   downed body never moves itself, first-person arms, plain-clothes civilians, intel fog on
+>   briefings, clean test sessions, the item catalogue plan (vehicle parts, fuel and
+>   launchers are wave 5 rows) and the bases design. See `CHANGELOG.md` [Unreleased].
+> - **Running suites:** set `CONTRACTOR_PORT` (two runs, or a running game, on the default
+>   24680 clash and look like hangs).
 
 **Decided (design doc and handoff):**
 - Aircraft are AI-flown only. Ground vehicles can be driven by players or AI.

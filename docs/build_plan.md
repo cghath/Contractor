@@ -237,6 +237,9 @@ Bases (Captain, 2026-10-11): no player-built FOB. Inland the squad deploys from 
 faction's FOB with the company's portable container modules (built and upgraded on the LHD,
 the only base we own); replacement troops fly in from the LHD at a cost. The 4A base hub becomes
 the first friendly FOB. Details: [ChrisPlan_handoff.md](ChrisPlan_handoff.md#bases-the-lhd-and-friendly-fobs).
+**Wave 5 starts on cghath's side while Captain's side finishes 4B part 3 (2026-10-12):** the base
+hub stays exactly as it is until wave 5 makes it the first friendly FOB, and the hot-zone files
+are Captain's side's for now. Read the note at the top of "Wave 5" in [ChrisPlan_handoff.md](ChrisPlan_handoff.md).
 
 ### Wave 6: phase 6, factions
 

@@ -161,7 +161,7 @@ From the design doc ("Missions: contract zones and hot zones", decided unless ma
    none but pay less. This replaces the single `void_claws_back_advance` flag. Later (not 4B):
    adjust it by intent, collateral against deliberate.
 2. **The 8-casualty void** counts **across the deployment** (as today).
-3. **Hot zone size:** 8-16 km² for now, **10-20 km² at most**.
+3. **Hot zone size:** 8-16 km² for now, **10-20 km² at most**. **Update (2026-10-12): start at 16 km²** (a 4,096 m square; sides are multiples of 128 m).
 4. **The contract board:** at the FOB, on the LHD, and **in the field with a field radio**
    (builds on `Contracts.server_radio_contract`).
 5. **Role kits:** players do **not** deploy in their role kit (`player_role_kits` stays off).
@@ -245,3 +245,11 @@ capture works without them (an uncuffed captive bolts when left alone; lootable 
 are on the ChrisPlan backlog); real names for HVTs, hostages and civilians; suicide bombers and
 VBIEDs go in wave 6. Up to 2 AI squadmates escort an HVT (command menu), and a wounded HVT is a medical
 priority (escorts treat him until a medic takes over). See CHANGELOG.
+
+### Part 3, the hot zone: in progress (Captain's side, 2026-10-12)
+
+Started while cghath's side starts wave 5. Size: 16 km² (4,096 m square). The base hub stays
+as it is through part 3; wave 5 makes it the first friendly FOB (see the wave 5 note in
+`ChrisPlan_handoff.md`). QRF bases stay on foot until wave 5's vehicles; part 3 leaves hooks for
+vehicle QRFs and helicopter or AAV insertion. Open: layout, alert level and radio chatter,
+pressure over time and hunter teams, radio contracts.
