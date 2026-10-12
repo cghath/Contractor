@@ -258,7 +258,7 @@ func _update_interaction(delta: float) -> void:
 
 func _try_fire() -> void:
 	if not _captured() or placing or body.inventory.hands != &"" or not body.vitals.is_up() or interaction.is_open() \
-			or body.carry_mode != &"":  # both hands on the casualty (carrying, or dragging by the straps)
+			or body.carry_mode != &"" or is_instance_valid(body.vehicle):  # both hands on the casualty; or riding (the seat's gun fires: Vehicle)
 		return
 	var weapon := body.active_weapon()
 	if weapon == null or weapon.type != "weapon":

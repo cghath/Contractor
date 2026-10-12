@@ -16,6 +16,9 @@ var voxel_edits: Array = []
 ## Dead bodies lying in the zone with everything on them (Soldier.body_record), restored by
 ## CompoundLevel on load. Rebuilt from the live bodies (Soldier.DEAD_GROUP) on every save.
 var bodies: Array = []
+## Vehicles in the zone, wrecks included (Vehicle.to_save), put back by VehicleLayer on load
+## (wave 5). Rebuilt from the live vehicles (group "vehicles") on every save.
+var vehicles: Array = []
 
 
 func new_uid() -> String:
@@ -51,16 +54,22 @@ func save_zone() -> void:
 	for node in get_tree().get_nodes_in_group(&"dead_bodies"):
 		if node.has_method(&"body_record") and not node.is_queued_for_deletion():
 			bodies.append(node.body_record())
+	# Vehicles as they are now: where they stopped, their damage and cargo, wrecks (wave 5).
+	vehicles = []
+	for node in get_tree().get_nodes_in_group(&"vehicles"):
+		if node.has_method(&"to_save") and not node.is_queued_for_deletion():
+			vehicles.append(node.to_save())
 	var text := JSON.stringify({
 		"version": SAVE_VERSION,
 		"looted": looted.keys(),
 		"dropped": dropped,
 		"voxel_edits": voxel_edits,
 		"bodies": bodies,
+		"vehicles": vehicles,
 	}, "", true, true)  # full precision: item state (plate and helmet integrity) comes back exactly
 	if not write_safely(save_path(), text):
 		return
-	print("Saved zone '%s' (%d looted, %d dropped, %d voxel edits, %d bodies)" % [zone_id, looted.size(), dropped.size(), voxel_edits.size(), bodies.size()])
+	print("Saved zone '%s' (%d looted, %d dropped, %d voxel edits, %d bodies, %d vehicles)" % [zone_id, looted.size(), dropped.size(), voxel_edits.size(), bodies.size(), vehicles.size()])
 
 
 func load_zone() -> void:
@@ -68,6 +77,7 @@ func load_zone() -> void:
 	dropped.clear()
 	voxel_edits.clear()
 	bodies.clear()
+	vehicles.clear()
 	var zone := read_save(save_path())
 	if zone.is_empty() and FileAccess.file_exists(save_path()) and FileAccess.file_exists(backup_path(save_path())):
 		zone = read_save(backup_path(save_path()))
@@ -79,6 +89,7 @@ func load_zone() -> void:
 	dropped = zone.dropped
 	voxel_edits = zone.voxel_edits
 	bodies = zone.bodies
+	vehicles = zone.get("vehicles", [])
 
 
 ## The previous good save, kept beside `path` by write_safely.
@@ -112,8 +123,8 @@ static func write_safely(path: String, text: String) -> bool:
 	return true
 
 
-## A zone save at `path`, checked (audit L1-05): {"looted", "dropped", "voxel_edits", "bodies"}
-## ready to use, or {} when it's missing, unreadable, the wrong version or the wrong shape.
+## A zone save at `path`, checked (audit L1-05): {"looted", "dropped", "voxel_edits", "bodies",
+## "vehicles"} ready to use, or {} when it's missing, unreadable, the wrong version or the wrong shape.
 ## Single records that make no sense (an unknown item, a position that isn't three finite
 ## numbers, a count below 1) are dropped with a warning; the rest of the zone still loads.
 static func read_save(path: String) -> Dictionary:
@@ -127,11 +138,12 @@ static func read_save(path: String) -> Dictionary:
 	var dropped_in: Variant = data.get("dropped", {})
 	var edits_in: Variant = data.get("voxel_edits", [])
 	var bodies_in: Variant = data.get("bodies", [])  # saves from before bodies were kept have none
+	var vehicles_in: Variant = data.get("vehicles", [])  # nor vehicles before wave 5
 	if typeof(looted_in) != TYPE_ARRAY or typeof(dropped_in) != TYPE_DICTIONARY or typeof(edits_in) != TYPE_ARRAY \
-			or typeof(bodies_in) != TYPE_ARRAY:
+			or typeof(bodies_in) != TYPE_ARRAY or typeof(vehicles_in) != TYPE_ARRAY:
 		push_warning("GameState: ignoring save %s: a section has the wrong type" % path)
 		return {}
-	var out := {"looted": {}, "dropped": {}, "voxel_edits": edits_in, "bodies": []}
+	var out := {"looted": {}, "dropped": {}, "voxel_edits": edits_in, "bodies": [], "vehicles": []}
 	for uid: Variant in looted_in:
 		if typeof(uid) == TYPE_STRING:
 			out.looted[uid] = true
@@ -147,6 +159,12 @@ static func read_save(path: String) -> Dictionary:
 			out.bodies.append(b)
 		else:
 			push_warning("GameState: %s: skipping a bad body record" % path)
+	for v: Variant in vehicles_in:
+		if typeof(v) == TYPE_DICTIONARY and _finite_pos(v.get("pos")) and typeof(v.get("id")) == TYPE_STRING \
+				and VehicleSpecs.has_model(String(v.get("model", ""))):
+			out.vehicles.append(v)
+		else:
+			push_warning("GameState: %s: skipping a bad vehicle record" % path)
 	return out
 
 

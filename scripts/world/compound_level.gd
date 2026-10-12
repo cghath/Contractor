@@ -211,6 +211,7 @@ func _ready() -> void:
 	people = PeopleLayer.new()  # "People": civilians, HVTs, intel (wave 4)
 	add_child(people)
 	add_child(Charges.new())  # "Charges": placed explosives (wave 4B)
+	add_child(VehicleLayer.new())  # "Vehicles": vehicles and wrecks (wave 5)
 
 
 ## The playable area on the map, in metres on the ground plane (x along x, y along z): the

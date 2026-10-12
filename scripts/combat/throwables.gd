@@ -24,8 +24,8 @@ const FRAG_SURE_SHARE := 0.5
 ## organs or the chest cavity; the rest are superficial muscle wounds (they may still break
 ## a bone). So a blast only sometimes makes one arterial or chest wound (design doc).
 const FRAG_DEEP_PER_BODY := 1
-## What fragments can hit: world, hitboxes, armor.
-const FRAG_MASK := (1 << 0) | (1 << 1) | (1 << 3)
+## What fragments can hit: world, hitboxes, armor, vehicles' hulls (wave 5: they shield the crew).
+const FRAG_MASK := (1 << 0) | (1 << 1) | (1 << 3) | Vehicle.LAYER
 const FRAG_CARVE_M := 0.45
 const FLASH_RADIUS := 15.0
 const SHAKE_RADIUS := 30.0

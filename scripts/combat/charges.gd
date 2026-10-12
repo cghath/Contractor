@@ -20,8 +20,9 @@ extends Node
 const PLACE_REACH_M := 2.5
 ## Placed this far off the surface (half the block's thickness and a little).
 const SURFACE_OFFSET_M := 0.03
-## What a charge can go on: world (voxels, terrain), hitboxes (people), movers (bodies), armor.
-const PLACE_MASK := (1 << 0) | (1 << 1) | (1 << 3) | (1 << 4)
+## What a charge can go on: world (voxels, terrain), hitboxes (people), movers (bodies), armor,
+## vehicles (wave 5: it rides the hull and calls Vehicle.server_explosion).
+const PLACE_MASK := (1 << 0) | (1 << 1) | (1 << 3) | (1 << 4) | Vehicle.LAYER
 const ITEM := &"breaching_charge"
 ## The block's size (m): a 2 kg demolition block.
 const SIZE := Vector3(0.22, 0.06, 0.14)

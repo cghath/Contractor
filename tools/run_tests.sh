@@ -2,7 +2,7 @@
 # Runs the headless test suites. Set GODOT to the Voxel Tools editor executable, e.g.
 #   GODOT="$HOME/Downloads/GodotVoxel_1.7/godot.windows.editor.x86_64.exe" tools/run_tests.sh
 # With arguments, runs only those suites:  tools/run_tests.sh smoke gameplay
-# Suites are tests/<name>_test.tscn; "net" and "world" are two-process host/client tests.
+# Suites are tests/<name>_test.tscn; "net", "world" and "vehicles" are two-process host/client tests.
 # Parallel runs (separate worktrees) should set CONTRACTOR_TEST_TAG (keeps test saves apart)
 # and CONTRACTOR_PORT (keeps the net test's port apart).
 #
@@ -16,7 +16,7 @@ cd "$(dirname "$0")/.."
 GODOT="${GODOT:-godot}"
 SUITE_TIMEOUT="${SUITE_TIMEOUT:-480}"
 SUITES=("$@")
-[ ${#SUITES[@]} -eq 0 ] && SUITES=(smoke gameplay squad net wounds armor movement interaction roles medical logistics casualty materials animations scavenge contracts people map base world missions)
+[ ${#SUITES[@]} -eq 0 ] && SUITES=(smoke gameplay squad net wounds armor movement interaction roles medical logistics casualty materials animations scavenge contracts people map base world missions vehicles)
 status=0
 logs="$(mktemp -d)"
 trap 'rm -rf "$logs"' EXIT
@@ -63,13 +63,13 @@ if ! engine "$logs/import.log" --import; then
 	exit 1
 fi
 for suite in "${SUITES[@]}"; do
-	if [ "$suite" = net ] || [ "$suite" = world ]; then
+	if [ "$suite" = net ] || [ "$suite" = world ] || [ "$suite" = vehicles ]; then
 		# Two processes over ENet on localhost. net: the client prints the summary, the host
-		# exits when the client leaves. world: the host runs its own checks first (refusing
-		# connections), then lets the client in; both print a summary.
+		# exits when the client leaves. world and vehicles: the host runs its own checks first
+		# (refusing connections), then lets the client in; both print a summary.
 		summary="$(echo "$suite" | tr '[:lower:]' '[:upper:]') TEST PASSED"
 		host_arg="--host"; join_arg="--join"; host_summary=""
-		if [ "$suite" = world ]; then host_arg="--world-host"; join_arg="--world-join"; host_summary="$summary"; fi
+		if [ "$suite" != net ]; then host_arg="--$suite-host"; join_arg="--$suite-join"; host_summary="$summary"; fi
 		engine "$logs/$suite-host.log" "res://tests/${suite}_test.tscn" -- "$host_arg" &
 		host=$!
 		sleep 4
