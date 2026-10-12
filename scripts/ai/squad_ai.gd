@@ -1990,6 +1990,8 @@ func _buddy_bounding() -> bool:
 # --- Shooting -------------------------------------------------------------
 
 func _shoot() -> void:
+	if LauncherAI.think(self):
+		return  # the launcher has them: vehicles, a group behind cover, an order (wave 5)
 	var now := Soldier._now()
 	var weapon := body.active_weapon()
 	if weapon == null or weapon.type != "weapon" or body.carrying != null or body.is_reloading \

@@ -47,9 +47,9 @@ const DOWNED_CAPSULE_Z := -0.85     # a downed body lies forward of its feet
 ## Headroom check before standing taller: shrink the test capsule by this much.
 const ROOM_MARGIN := 0.05
 const WORLD_MASK := 1
-## What a standing (or crouching, or prone) body's capsule meets: the world, other soldiers and
-## bodies lying as ragdolls.
-const UP_MASK := WORLD_MASK | Soldier.BODY_LAYER | Ragdoll.LAYER
+## What a standing (or crouching, or prone) body's capsule meets: the world, other soldiers,
+## bodies lying as ragdolls and vehicles' hulls (wave 5: Vehicle.LAYER).
+const UP_MASK := WORLD_MASK | Soldier.BODY_LAYER | Ragdoll.LAYER | Vehicle.LAYER
 ## Proposed: a lying body (or a pile) up to this high above the feet is stepped over, rising
 ## at this speed (m/s).
 const BODY_STEP_M := 0.75

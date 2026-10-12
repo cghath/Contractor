@@ -22,6 +22,7 @@ const LEVEL_SCENES := {
 	"compound": "res://scenes/levels/compound.tscn",
 	"zone": "res://scenes/levels/zone.tscn",
 	"base": "res://scenes/levels/base_fob.tscn",
+	"range": "res://scenes/levels/vehicle_range.tscn",  # wave 5: the vehicle range (VehicleRange)
 }
 ## Long enough for a client to generate a zone (about a second) while connecting.
 const AUTH_TIMEOUT_S := 30.0

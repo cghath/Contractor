@@ -30,7 +30,10 @@ const MENU := {
 			{"key": "1", "label": "Open fire", "cmd": "open_fire"},
 			{"key": "2", "label": "Hold fire", "cmd": "hold_fire"},
 		]},
-		{"key": "4", "label": "Mount", "items": []},
+		{"key": "4", "label": "Mount", "items": [  # wave 5 (VehicleLayer); the full set is V4's
+			{"key": "1", "label": "Get in that vehicle", "cmd": "mount", "point": true},
+			{"key": "2", "label": "Get out", "cmd": "dismount"},
+		]},
 		{"key": "5", "label": "Status", "items": [
 			{"key": "1", "label": "Report status", "cmd": "report"},
 			{"key": "2", "label": "Report enemy position (radio)", "cmd": "radio_report"},
@@ -43,6 +46,7 @@ const MENU := {
 			{"key": "5", "label": "Don't scavenge", "cmd": "scavenge_off"},
 			{"key": "6", "label": "Escort that HVT", "cmd": "escort", "hvt": true},
 			{"key": "7", "label": "Stop escorting", "cmd": "escort:"},
+			{"key": "8", "label": "Fire launcher there", "cmd": "fire_launcher", "point": true},
 		]},
 		{"key": "7", "label": "Combat mode", "items": [
 			{"key": "1", "label": "Safe", "cmd": "mode:safe"},

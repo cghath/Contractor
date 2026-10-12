@@ -25,9 +25,10 @@ extends Node
 
 signal changed
 
-const SLOTS: Array[StringName] = [&"primary", &"sidearm", &"helmet", &"vest", &"backpack", &"plate_front", &"plate_back", &"plate_left", &"plate_right"]
+## "launcher" (wave 5): an anti-armour launcher slung on the back (Launchers.SLOT; key 3).
+const SLOTS: Array[StringName] = [&"primary", &"sidearm", &"helmet", &"vest", &"backpack", &"plate_front", &"plate_back", &"plate_left", &"plate_right", &"launcher"]
 const PLATE_SLOTS: Array[StringName] = [&"plate_front", &"plate_back", &"plate_left", &"plate_right"]
-const WEAPON_SLOTS: Array[StringName] = [&"primary", &"sidearm"]
+const WEAPON_SLOTS: Array[StringName] = [&"primary", &"sidearm", &"launcher"]
 ## Containers, in the order auto-stow fills them (and reloads search them).
 const CONTAINERS: Array[StringName] = [&"vest", &"pockets", &"backpack"]
 const POCKETS_L := 2.0
@@ -196,6 +197,14 @@ func count_of(id: StringName) -> int:
 
 func state_of(slot: StringName) -> Dictionary:
 	return slot_state.get(slot, {})
+
+
+## Host only. Replaces the state of the item in `slot` (a launcher's loaded round, wave 5).
+func set_slot_state(slot: StringName, state: Dictionary) -> void:
+	if slots.get(slot, &"") == &"":
+		return
+	slot_state[slot] = state.duplicate(true)
+	_commit()
 
 
 ## Host only. Takes up to `count` units, equipping into a free slot first and then

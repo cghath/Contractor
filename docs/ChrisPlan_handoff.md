@@ -135,6 +135,11 @@ desert, white, tan, red.
 | V4 | **AAVs, LHD and FOB.** The LHD offshore on coastal zones, the FOB inland (4A's base hub is the FOB scene); AAVs deploying from them, commandable from the command menu (move, hold, follow, dismount), amphibious on coastal maps; motor pool at the base (4A placeholder) holding the company's vehicles between deployments | `scripts/supports/aav*.gd`, the base motor pool, zone coast or inland flag in `ZoneDef` | An AAV drives in from the LHD, takes orders, carries the squad, swims; the motor pool keeps a damaged vehicle's state |
 
 **Order:** V1 first, or with a vehicle-body stub agreed up front, because V3 and V4 sit on it.
+
+**Status (2026-10-12):** V1 and V2 are done (wave 5a, cghath's side; CHANGELOG). The Vehicle API is in
+`scripts/vehicles/vehicle.gd`; `VehicleLayer` holds a level's vehicles. V3 and V4 (5b) are next. The
+friendly-FOB conversion of the base hub is on hold until cghath and Captain decide; until then
+nobody changes `base_hub.gd`, `base_level.gd` or `base_economy.gd` for wave 5.
 V2 can run beside V1.
 
 ## Wave 6: factions (blocked)

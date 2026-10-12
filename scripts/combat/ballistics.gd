@@ -14,7 +14,7 @@ extends RefCounted
 ## come from that data. Hitscan: no bullet drop or flight time yet.
 
 const RANGE := 300.0
-const MASK := (1 << 0) | (1 << 1) | (1 << 3)  # world, hitboxes, armor
+const MASK := (1 << 0) | (1 << 1) | (1 << 3) | Vehicle.LAYER  # world, hitboxes, armor, vehicles (wave 5)
 ## How many things (armor pieces, walls) one round can pass through.
 const MAX_PENETRATIONS := 8
 ## The world: a round that meets a voxel structure walks through it (VoxelWorld.trace_round,
@@ -63,6 +63,9 @@ static func _trace(shooter: CollisionObject3D, origin: Vector3, direction: Vecto
 	var gear := shooter.get_node_or_null(^"Gear") as GearRig
 	if gear:
 		exclude.append_array(gear.armor_rids())  # ...or your own armor
+	var ride := Vehicle.ride_of(shooter)
+	if ride:
+		exclude.append(ride.get_rid())  # ...or the vehicle you ride in (a mounted gun)
 	var from := origin
 	var to := origin + direction * RANGE
 	var lost_j := 0.0  # energy lost in walls on the way
@@ -79,6 +82,23 @@ static func _trace(shooter: CollisionObject3D, origin: Vector3, direction: Vecto
 				return _result("plate", hit)
 			exclude.append(collider.get_rid())
 			from = hit.position
+			continue
+		var vehicle := Vehicle.find_on(collider)
+		if vehicle:
+			# Vehicles (wave 5): the hull's armour decides (Vehicle.server_take_hit). A round that
+			# only met a collision box flies on; one that goes through carries on into the cabin
+			# with what it has left (the crew's hitboxes are in there).
+			var took := vehicle.server_take_hit({"kind": Vehicle.KINETIC, "round": StringName(round_data(weapon).get("id", "")),
+				"energy_j": world_energy(weapon, distance) - lost_j, "level": threat_level_at(weapon, equivalent_distance(weapon, distance, lost_j)),
+				"position": hit.position, "direction": direction, "shooter": shooter})
+			if took.get("missed", false):
+				from = hit.position + direction * 0.01  # inside the box now: the ray carries on past it
+				continue
+			if took.stopped:
+				return {"result": "vehicle", "position": took.position, "normal": hit.normal}
+			lost_j += float(took.get("lost_j", 0.0))
+			# On from inside the box (where it met the hull, never short of the box's face).
+			from = hit.position + direction * maxf((took.position - hit.position).dot(direction), 0.0) + direction * 0.01
 			continue
 		var vitals := Vitals.find_on(collider)
 		if vitals:
