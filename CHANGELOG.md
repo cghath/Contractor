@@ -15,6 +15,18 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 #### Added
 
+- **HVT escorts** (Captain): command menu Action > "Escort that HVT" (look at him) puts the
+  nearest of the selected squadmates on him, at most two (`Squad.order_escort`, SquadAI
+  `Intent.ESCORT`); "Stop escorting" or any movement order takes them off. The first leads
+  him along with the squad (waiting when he lags), the other stays close behind him; in
+  contact both fight from beside him, between him and the threat. If he bolts they react
+  after 0.6-1.6 s by skill (slower suppressed, not while pinned or blinded), run him down
+  with weapons lowered and grab him within reach with a 55-80% chance per try; a fast
+  enough runner still gets away. Downed, they carry him with the squad.
+- **A wounded HVT is a medical priority**: one in the squad's hands (escorted, captive,
+  hostage, down, carried) is a casualty for the squad's AI; his escorts treat him first
+  with what they carry, and a free medic is pulled to him ahead of other casualties and
+  takes over. Proposed numbers.
 - **Garrisons sized from the true force** (Captain): a deployed contract's target module holds
   the contract's true enemy count (`ZoneLevel.garrison_size`, from `Contracts.enemy_force`), so
   an understated briefing really bites; other modules keep their 4. Extra posts stand beside

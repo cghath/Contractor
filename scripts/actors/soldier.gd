@@ -554,7 +554,7 @@ func _server_squad_command(cmd: String, point: Vector3, names: PackedStringArray
 			squad.set_scavenge(self, cmd == "scavenge_on", names)
 		_:
 			if not squad.command(self, cmd, point, names):  # formation, target, combat mode, team
-				_client_message.rpc_id(owner_peer(), "Can't target that" if cmd.begins_with("target:") else "Order not given")
+				_client_message.rpc_id(owner_peer(), "Can't target that" if cmd.begins_with("target:") else ("Can't escort that" if cmd.begins_with("escort:") else "Order not given"))
 
 
 @rpc("any_peer", "call_local", "reliable")

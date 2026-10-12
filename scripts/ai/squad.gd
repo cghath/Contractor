@@ -159,11 +159,44 @@ func command(from: Soldier, cmd: String, _point: Vector3, names := PackedStringA
 			return true
 		"target":
 			return set_target(from, arg, names)
+		"escort":
+			return order_escort(from, arg, names)
 		"mode":
 			return COMBAT_MODES.has(arg) and set_combat_mode(from, COMBAT_MODES[arg], names)
 		"team":
 			return assign_color(from, arg, names)
 	return false
+
+
+## Command menu "Escort that HVT" (Captain, 2026-10-11): the named units nearest HVT
+## `hvt_name` escort him (SquadAI escort), at most SquadAI.ESCORTS_MAX with whoever escorts
+## him already; "" takes the named units off escort. The ordering player must see him within
+## TARGET_RANGE. False if nobody took it on.
+func order_escort(from: Soldier, hvt_name: String, names := PackedStringArray()) -> bool:
+	leader = from
+	var units := pick(names)
+	if hvt_name == "":
+		for s in units:
+			var ai := SquadAI.of(s)
+			if ai:
+				ai.set_escort(null)
+		return true
+	var hvt := find_soldier(hvt_name)
+	if hvt == null or not Person.is_hvt(hvt) or hvt.vitals.is_dead() or hvt.global_position.distance_to(from.global_position) > TARGET_RANGE or not sees(from, hvt):
+		return false
+	var current := SquadAI.escorts_of(hvt)
+	units.sort_custom(func(a: Soldier, b: Soldier) -> bool: return a.global_position.distance_to(hvt.global_position) < b.global_position.distance_to(hvt.global_position))
+	var next := 0 if current.is_empty() else current[current.size() - 1].escort_order + 1
+	var given := 0
+	for s in units:
+		var ai := SquadAI.of(s)
+		if ai == null or not s.vitals.is_up() or ai in current:
+			continue
+		if current.size() + given >= SquadAI.ESCORTS_MAX:
+			break
+		ai.set_escort(hvt, next + given)
+		given += 1
+	return given > 0 or not current.is_empty()
 
 
 ## Command menu "Target": the named units focus fire on the enemy called `enemy_name`

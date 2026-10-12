@@ -59,7 +59,7 @@ extends Node
 ##   and within SCAVENGE_LEASH_M of the squad leader; the command menu orders one to a body
 ##   or forbids it (scavenge_allowed).
 
-enum Intent { FOLLOW, HOLD, MOVE_TO, PATROL, INVESTIGATE, FIGHT, CASUALTY, RELOAD, HEAL, SCAVENGE }
+enum Intent { FOLLOW, HOLD, MOVE_TO, PATROL, INVESTIGATE, FIGHT, CASUALTY, RELOAD, HEAL, SCAVENGE, ESCORT }
 ## Casualty care: NONE, the living-casualty steps (REACH to GUARD and CARRY), or carrying a
 ## dead friendly's BODY.
 enum Care { NONE, REACH, DRAG, TREAT, GUARD, CARRY, BODY }
@@ -142,6 +142,32 @@ const BODY_RECOVER_M := 60.0
 ## following, holding and moving (0.5) plus HYSTERESIS, so a squadmate who is following
 ## switches to it; below fighting (0.7), a low-magazine reload (0.65) and casualty care.
 const BODY_RECOVER_SCORE := 0.63
+## HVT escort (Captain, 2026-10-11; Squad.order_escort): up to ESCORTS_MAX squadmates keep an
+## HVT with the squad while it follows the player. The first escort leads him (he follows it
+## to its formation spot); the other keeps ESCORT_GUARD_M from him, behind him; in contact
+## both fight within ESCORT_LEASH_M of a spot between him and the threat. Escorting scores
+## ESCORT_SCORE: above fighting (0.7), below casualty care, a dry-magazine reload and their
+## own bleeding. They take no other casualty, body or loot meanwhile. Not godlike: if he bolts
+## they react after ESCORT_REACT_S (unskilled .. skilled; slower when suppressed, not at all
+## while pinned or blinded), and a grab within GRAB_M works with GRAB_CHANCE plus GRAB_SKILL
+## times their combat skill, again every GRAB_RETRY_S. A wounded HVT is a medical priority:
+## his escorts treat him with what they carry, and a free medic is pulled to him (distance
+## times HVT_MEDIC_PULL) and takes over. Proposed numbers.
+const ESCORTS_MAX := 2
+const ESCORT_SCORE := 0.75
+const ESCORT_GUARD_M := 1.8
+## The escort leading him waits for him beyond this.
+const ESCORT_WAIT_M := 4.0
+const ESCORT_LEASH_M := 3.0
+const ESCORT_REACT_S := Vector2(1.6, 0.6)
+const ESCORT_SUPPRESSED_S := 1.0
+const GRAB_M := 1.6
+const GRAB_CHANCE := 0.55
+const GRAB_SKILL := 0.25
+const GRAB_RETRY_S := 1.5
+const HVT_MEDIC_PULL := 0.25
+## What makes a conscious HVT a casualty to see to: bleeding, airway and chest.
+const HVT_CARE_KINDS: Array[String] = ["arterial", "junctional", "venous", "internal", "airway", "tension", "chest"]
 ## Proposed: scavenging (Scavenge). Bodies within SCAVENGE_RANGE_M of the unit, and for
 ## friendlies within SCAVENGE_LEASH_M of the squad leader, once SCAVENGE_CALM_S have passed
 ## since the last contact (armor swaps wait ARMOR_CALM_S). A body is worth going to when what
@@ -222,6 +248,15 @@ var scavenge_allowed := true
 var scavenge_order: Soldier
 ## The body this unit is going through (SCAVENGE).
 var loot_body: Soldier
+## The HVT this unit escorts (Squad.order_escort), or null; escort_order: lower leads him.
+var escorting: Soldier
+var escort_order := 0
+## Host: grabs that held a bolting HVT (tests read it).
+var grabs := 0
+## Scales the grab chance (tests).
+var grab_scale := 1.0
+var _react_at := -1.0  # when this escort reacts to its HVT bolting (-1: he isn't)
+var _grab_next := 0.0
 
 var _path := PackedVector3Array()
 var _path_index := 0
@@ -341,10 +376,12 @@ func fighting() -> bool:
 
 ## The enemy this unit fights right now: its target, except that a unit going to, moving or
 ## treating a casualty leaves anyone further than MEDIC_DEFEND_M to the squad (guarding them,
-## it fights as usual). Null for none.
+## it fights as usual), and an escort running down its bolting HVT leaves everyone. Null for none.
 func _foe() -> Soldier:
 	if target == null:
 		return null
+	if intent == Intent.ESCORT and _react_at >= 0.0 and Soldier._now() >= _react_at:
+		return null  # running down a bolting HVT: weapon down, flat out
 	if intent == Intent.CASUALTY and care in [Care.REACH, Care.DRAG, Care.TREAT, Care.CARRY] \
 			and body.global_position.distance_to(target.global_position) > MEDIC_DEFEND_M:
 		return null
@@ -386,6 +423,7 @@ func weapons_free() -> bool:
 ## point so they don't all head for the same spot.
 func on_order(new_order: Squad.Order, point: Vector3, slot := 0, count := 1) -> void:
 	order = new_order
+	set_escort(null)  # a movement order takes them off the escort
 	_hold_point = body.global_position
 	var side := squad.leader.global_basis.x if squad and is_instance_valid(squad.leader) else body.global_basis.x
 	_move_point = point + side * (slot - (count - 1) / 2.0) * 1.5
@@ -440,6 +478,8 @@ func status_text() -> String:
 			return "Being treated" if _being_treated() else "Patching up"
 		Intent.HOLD:
 			return "Holding"
+		Intent.ESCORT:
+			return ("Going after %s" if _react_at >= 0.0 else "Escorting %s") % _name_of(escorting)
 		Intent.MOVE_TO:
 			return "Moving" if body.global_position.distance_to(_move_point) > ARRIVE + 0.5 else "In position"
 		Intent.PATROL:
@@ -491,6 +531,10 @@ func _choose_intent() -> void:
 			Squad.Order.MOVE:
 				# Disciplined soldiers keep moving under fire a little longer.
 				scores[Intent.MOVE_TO] = 0.5 + (0.25 * discipline if contact else 0.0)
+		if escort_valid():
+			scores[Intent.ESCORT] = ESCORT_SCORE
+		elif escorting != null:
+			set_escort(null)
 	else:
 		scores[Intent.PATROL] = 0.3
 		if Soldier._now() - _last_contact < INVESTIGATE_MEMORY_S:
@@ -574,6 +618,8 @@ func _act() -> void:
 			_do_care()
 		Intent.SCAVENGE:
 			_do_scavenge()
+		Intent.ESCORT:
+			_do_escort()
 	_apply_combat_mode()
 
 
@@ -694,6 +740,8 @@ static func needs_help(s: Soldier) -> bool:
 		return false
 	if s.vitals.downed:
 		return true
+	if Person.is_hvt(s):
+		return s.vitals.care_needed().any(func(t: Dictionary) -> bool: return String(t.kind) in HVT_CARE_KINDS)
 	var ai := SquadAI.of(s)
 	return ai != null and ai.asking_for_medic()
 
@@ -742,9 +790,11 @@ static func responder_for(c: Soldier, wanted: Array[StringName] = []) -> Soldier
 	var near_d := INF
 	for n in c.get_tree().get_nodes_in_group(&"combatants"):
 		var ai := SquadAI.of(n)
-		if ai == null or not ai._free_for(c) or ai.body.faction != c.faction or not ai._carries_any(wanted):
+		if ai == null or not ai._free_for(c) or not ai._cares_for(c) or not ai._carries_any(wanted):
 			continue
 		var d := ai.body.global_position.distance_to(c.global_position)
+		if ai.escorting == c:
+			return ai.body  # an HVT's escorts see to him first (a medic is pulled in as well)
 		if ai.body.role == Roles.MEDIC:
 			if c.fire_team >= 0 and ai.body.fire_team == c.fire_team and d <= MEDIC_FAR_M:
 				team_medic = ai
@@ -774,7 +824,7 @@ static func medic_for(c: Soldier, wanted: Array[StringName]) -> Soldier:
 	var other_d := INF
 	for n in c.get_tree().get_nodes_in_group(&"combatants"):
 		var ai := SquadAI.of(n)
-		if ai == null or ai.body.role != Roles.MEDIC or ai.body.faction != c.faction or not ai._free_for(c) \
+		if ai == null or ai.body.role != Roles.MEDIC or not ai._cares_for(c) or not ai._free_for(c) \
 				or c.care_by == ai.body or wanted.is_empty() or not ai._carries_any(wanted):
 			continue
 		var d := ai.body.global_position.distance_to(c.global_position)
@@ -793,7 +843,8 @@ static func medic_for(c: Soldier, wanted: Array[StringName]) -> Soldier:
 ## and not leaving `c` to others after failing to reach them (_give_up_casualty).
 func _free_for(c: Soldier) -> bool:
 	return _ready_done and body != null and body != c and body.vitals.is_up() and not body.is_queued_for_deletion() \
-		and (care == Care.NONE or care == Care.BODY or casualty == c) and not _skipping(c)
+		and (care == Care.NONE or care == Care.BODY or casualty == c) and not _skipping(c) \
+		and (not escort_valid() or c == escorting)
 
 
 ## This unit couldn't reach `c` lately and leaves them to others for now.
@@ -825,14 +876,19 @@ func _find_casualty() -> Soldier:
 	var best_d := INF
 	for n in get_tree().get_nodes_in_group(&"combatants"):
 		var s := n as Soldier
-		if s == null or s == body or s.faction != body.faction or not needs_help(s):
+		if s == null or s == body or not _cares_for(s) or not needs_help(s):
 			continue
 		var carer := _carer_of(s)
 		if carer == body:
 			return s
+		var hvt := Person.is_hvt(s)
+		if hvt and not s.vitals.downed and _next_task(s, false).is_empty():
+			continue  # nothing this unit can do for a conscious HVT
 		if carer != null:
 			var carer_ai := SquadAI.of(carer)
-			if carer_ai == null or not carer_ai.wants_medic or medic_for(s, carer_ai.wanted) != body:
+			if hvt and _takes_over_hvt(s, carer):
+				pass  # a medic takes a wounded HVT over from whoever has him
+			elif carer_ai == null or not carer_ai.wants_medic or medic_for(s, carer_ai.wanted) != body:
 				continue  # someone is on it
 		else:
 			var ai := SquadAI.of(s)
@@ -842,6 +898,8 @@ func _find_casualty() -> Soldier:
 		var d := body.global_position.distance_to(s.global_position)
 		if body.role == Roles.MEDIC and s.fire_team == body.fire_team:
 			d *= 0.5
+		if hvt and body.role == Roles.MEDIC:
+			d *= HVT_MEDIC_PULL
 		if d < best_d:
 			best = s
 			best_d = d
@@ -956,8 +1014,16 @@ func _may_take(c: Soldier) -> bool:
 	var carer := _carer_of(c)
 	if carer == null or carer == body:
 		return true
+	if Person.is_hvt(c) and _takes_over_hvt(c, carer):
+		return true
 	var carer_ai := SquadAI.of(carer)
 	return carer_ai != null and carer_ai.wants_medic and medic_for(c, carer_ai.wanted) == body
+
+
+## This unit (a free medic) takes wounded HVT `c` over from `carer`, who isn't a medic: the
+## escorts' care is a stopgap until a medic is there.
+func _takes_over_hvt(c: Soldier, carer: Soldier) -> bool:
+	return body.role == Roles.MEDIC and carer != body and carer.role != Roles.MEDIC and _free_for(c) and _cares_for(c)
 
 
 ## Takes `c` on (from nobody, or from a carer who asked for a medic).
@@ -1114,6 +1180,8 @@ func _care_exposed(contact: bool) -> bool:
 ## wake soon (past the wound model's unconscious blood loss), or any once the squad leader is
 ## more than STAY_WITH_M away. Otherwise they're watched over where they lie.
 func _should_carry() -> bool:
+	if Person.is_hvt(casualty):
+		return true  # an HVT goes with the squad, not left lying
 	if 1.0 - casualty.vitals.blood_fraction() >= WoundModel.UNCONSCIOUS_LOST:
 		return true
 	var leader: Soldier = squad.leader if squad and is_instance_valid(squad.leader) else null
@@ -1202,6 +1270,115 @@ func _end_care() -> void:
 	wanted.clear()
 
 
+# --- HVT escort ---------------------------------------------------------------
+
+## Escorts HVT `h` (Squad.order_escort); null stops.
+func set_escort(h: Soldier, order_index := 0) -> void:
+	escorting = h
+	escort_order = order_index
+	_react_at = -1.0
+	if h != null:
+		if loot_body != null:
+			_end_scavenge()
+		_think_cd = 0.0
+
+
+## The HVT this unit escorts is still there to escort: alive and not delivered.
+func escort_valid() -> bool:
+	if not is_instance_valid(escorting) or escorting.is_queued_for_deletion() or escorting.vitals.is_dead():
+		return false
+	return not bool(Person.state(escorting).get("delivered", false))
+
+
+## The AI escorting HVT `h`, up, in the order they were given it (the first leads him).
+static func escorts_of(h: Soldier) -> Array[SquadAI]:
+	var out: Array[SquadAI] = []
+	if h == null or not h.is_inside_tree():
+		return out
+	for n in h.get_tree().get_nodes_in_group(&"combatants"):
+		var ai := SquadAI.of(n)
+		if ai and ai.escorting == h and ai.body != null and ai.body.vitals.is_up() and not ai.body.is_queued_for_deletion():
+			out.append(ai)
+	out.sort_custom(func(a: SquadAI, b: SquadAI) -> bool: return a.escort_order < b.escort_order)
+	return out
+
+
+## An HVT the players' side holds or guards: a hostage or friendly HVT, a captive, one who is
+## down, or one escorted or carried by the squad. A hostile HVT still running free is not.
+static func in_our_hands(h: Soldier, faction: StringName) -> bool:
+	if faction != &"friendly" or not Person.is_hvt(h) or h.vitals.is_dead():
+		return false
+	if Person.side_of(h) == Person.FRIENDLY or Person.is_captive(h) or not h.vitals.is_up():
+		return true
+	if is_instance_valid(h.carried_by) and h.carried_by.faction == faction:
+		return true
+	return not escorts_of(h).is_empty()
+
+
+## Someone this unit looks after medically: its own side, or an HVT in its side's hands.
+func _cares_for(s: Soldier) -> bool:
+	return s.faction == body.faction or in_our_hands(s, body.faction)
+
+
+func _do_escort() -> void:
+	var h := escorting
+	var now := Soldier._now()
+	if Person.side_of(h) == Person.HOSTILE and not Person.is_captive(h) and h.vitals.is_up() and not is_instance_valid(h.carried_by):
+		_chase(h, now)
+		return
+	_react_at = -1.0
+	var layer := PeopleLayer.find(body)
+	var st := Person.state(h)
+	var escorts := escorts_of(h)
+	var handler := not escorts.is_empty() and escorts[0] == self
+	if handler and layer and Person.leadable(h) and String(st.get("order", "")) in ["", "follow"]:
+		var led := String(st.get("led_by", ""))
+		var leader := layer.get_parent().get_node_or_null(NodePath(led)) as Soldier if led != "" else null
+		if leader == null or not leader.vitals.is_up() or (leader.is_ai() and leader != body):
+			layer.server_lead(body, h)
+	var anchor := h.global_position
+	if fighting():
+		var to_threat := body.threat_pos - anchor
+		to_threat.y = 0.0
+		_fight(anchor + (to_threat.normalized() * ESCORT_GUARD_M if to_threat.length() > 0.5 else Vector3.ZERO), ESCORT_LEASH_M)
+		return
+	if handler and layer and String(Person.state(h).get("led_by", "")) == layer.key_of(body):
+		if _flat_distance(anchor) > ESCORT_WAIT_M:
+			_has_destination = false  # let him catch up
+		else:
+			_go(squad.follow_point(body) if squad else body.global_position)  # he follows this unit
+		return
+	var ref := squad.leader.global_position if squad and is_instance_valid(squad.leader) else body.global_position
+	var back := anchor - ref
+	back.y = 0.0
+	var spot := anchor + (back.normalized() if back.length() > 0.3 else Vector3.BACK) * ESCORT_GUARD_M
+	if _flat_distance(spot) > ARRIVE + 0.5:
+		_go(spot, _flat_distance(spot) > RUN_DISTANCE)
+	else:
+		_has_destination = false
+
+
+## Its HVT bolted: after a reaction time, run him down and grab him (he gives up again).
+func _chase(h: Soldier, now: float) -> void:
+	if _react_at < 0.0:
+		_react_at = now + lerpf(ESCORT_REACT_S.x, ESCORT_REACT_S.y, combat) + (ESCORT_SUPPRESSED_S if body.suppression >= SUPPRESSED else 0.0)
+	if now < _react_at or body.suppression >= PINNED or body.stunned_s > 0.0:
+		_has_destination = false
+		return
+	_go(h.global_position, true)
+	if _flat_distance(h.global_position) > GRAB_M or now < _grab_next:
+		return
+	_grab_next = now + GRAB_RETRY_S
+	if randf() >= minf((GRAB_CHANCE + GRAB_SKILL * combat) * grab_scale, 1.0):
+		return  # he twisted free
+	var layer := PeopleLayer.find(body)
+	if layer:
+		layer.server_surrender(h, "grabbed by %s" % body.display_name())
+		grabs += 1
+		_react_at = -1.0
+		_think_cd = 0.0
+
+
 # --- Scavenging -------------------------------------------------------------
 
 ## How much going through a body scores now (0: not now). Out of contact for
@@ -1209,7 +1386,7 @@ func _end_care() -> void:
 ## friendly, following the squad and allowed to; an order skips the wait and the need.
 func _scavenge_score(contact: bool) -> float:
 	_loot_candidate = null
-	if contact or care != Care.NONE or body.carrying != null or _self_care_score() > 0.0 or asking_for_medic():
+	if contact or care != Care.NONE or body.carrying != null or _self_care_score() > 0.0 or asking_for_medic() or escort_valid():
 		return 0.0
 	if is_instance_valid(scavenge_order) and _may_scavenge(scavenge_order, true):
 		_loot_candidate = scavenge_order

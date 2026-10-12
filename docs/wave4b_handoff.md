@@ -243,5 +243,5 @@ Captain's answers (2026-10-11), built on `feat/wave4b-followups`: target garriso
 contract's true enemy count (other modules 4); zip cuffs stay a base-shop buy, but an HVT
 capture works without them (an uncuffed captive bolts when left alone; lootable cuffs in zones
 are on the ChrisPlan backlog); real names for HVTs, hostages and civilians; suicide bombers and
-VBIEDs go in wave 6. Next (Captain): up to 2 AI squadmates escorting an HVT, and a wounded HVT
-as a medical priority (escorts treat him until a medic takes over). See CHANGELOG.
+VBIEDs go in wave 6. Up to 2 AI squadmates escort an HVT (command menu), and a wounded HVT is a medical
+priority (escorts treat him until a medic takes over). See CHANGELOG.

@@ -10,7 +10,7 @@ extends PanelContainer
 ## level and Esc closes. Orders go to the host as Soldier._server_squad_command.
 ##
 ## Entries with "cmd" are orders ("point": at the spot under the crosshair, "aim": at the
-## enemy under it); entries with "select" change the selection (fire team or colour team)
+## enemy under it; "hvt": at the HVT under it); entries with "select" change the selection (fire team or colour team)
 ## and keep the menu open. Status > Report enemy position ("radio_report", people, wave 4)
 ## reports the enemies under the crosshair by radio (PeopleLayer.request_report).
 
@@ -41,6 +41,8 @@ const MENU := {
 			{"key": "3", "label": "Scavenge that body", "cmd": "scavenge", "point": true},
 			{"key": "4", "label": "Scavenge freely", "cmd": "scavenge_on"},
 			{"key": "5", "label": "Don't scavenge", "cmd": "scavenge_off"},
+			{"key": "6", "label": "Escort that HVT", "cmd": "escort", "hvt": true},
+			{"key": "7", "label": "Stop escorting", "cmd": "escort:"},
 		]},
 		{"key": "7", "label": "Combat mode", "items": [
 			{"key": "1", "label": "Safe", "cmd": "mode:safe"},
@@ -291,6 +293,12 @@ func _pick(i: int) -> void:
 			player._hud.flash("Look at an enemy")
 			return
 		cmd = "%s:%s" % [cmd, enemy.name]
+	if item.get("hvt", false):
+		var hvt := soldier_under_crosshair()
+		if hvt == null or not Person.is_hvt(hvt) or hvt.vitals.is_dead():
+			player._hud.flash("Look at the HVT")
+			return
+		cmd = "%s:%s" % [cmd, hvt.name]
 	player._server_squad_command.rpc_id(1, cmd, point, selected)
 	player._hud.flash("%s: %s" % [_names(), item["label"]])
 	close()
@@ -298,6 +306,14 @@ func _pick(i: int) -> void:
 
 ## The living enemy under the crosshair (hitbox or body, up to AIM_RANGE), or null.
 func enemy_under_crosshair() -> Soldier:
+	var enemy := soldier_under_crosshair()
+	if enemy == null or enemy.faction == player.faction or not enemy.vitals.is_up() or Person.is_noncombatant(enemy):
+		return null
+	return enemy
+
+
+## Whoever is under the crosshair (hitbox or body, up to AIM_RANGE), or null.
+func soldier_under_crosshair() -> Soldier:
 	var camera := player.camera
 	var from := camera.global_position
 	var exclude: Array[RID] = [player.get_rid()]
@@ -313,8 +329,6 @@ func enemy_under_crosshair() -> Soldier:
 	if enemy == null and collider is Area3D:
 		var vitals := Vitals.find_on(collider)
 		enemy = vitals.get_parent() as Soldier if vitals else null
-	if enemy == null or enemy.faction == player.faction or not enemy.vitals.is_up() or Person.is_noncombatant(enemy):
-		return null
 	return enemy
 
 

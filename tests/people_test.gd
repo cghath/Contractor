@@ -80,6 +80,7 @@ func _ready() -> void:
 	await _test_radio_report()
 	await _test_surrender()
 	await _test_scavenge_intel()
+	await _test_escort()
 	await _test_client()
 	await _test_compound_content()
 	GameState.delete_save()
@@ -621,6 +622,80 @@ func _run_client() -> void:
 	await get_tree().create_timer(1.0).timeout
 	Net.leave()
 	get_tree().quit(failures)
+
+
+## Up to two AI squadmates escort an HVT (Captain, 2026-10-11): ordered from the command menu,
+## they keep him with the squad, go after him when he bolts (not at once), and a wounded HVT
+## is treated by them until a medic, pulled to him first, takes over.
+func _test_escort() -> void:
+	print("HVT escort")
+	for n in layer.people():
+		if Person.is_hvt(n) and not n.vitals.is_up():
+			n.queue_free()  # an earlier check's downed captive HVT would draw the medic
+	await _frames(2)
+	var at := Vector3(-40, 0.1, 30)
+	_place(player, at + Vector3(0, 0, 6))
+	var e1 := _squadmate("Esc1", Roles.RIFLEMAN, at + Vector3(1.5, 0, 2))
+	var e2 := _squadmate("Esc2", Roles.RIFLEMAN, at + Vector3(-1.5, 0, 2))
+	var medic := _squadmate("EscMedic", Roles.MEDIC, at + Vector3(0, 0, 25))
+	var hvt := _person({"name": "HvtTestCourier", "kind": "hvt", "side": "hostile", "hvt_id": "hvt_test_courier",
+		"label": "HVT (the Courier)", "pos": at})
+	var brain := _brain(hvt) as HvtAI
+	await _frames(3)
+	layer.server_surrender(hvt, "test")
+	var squad := level.squad_for(&"friendly")
+	check(squad.order_escort(player, String(hvt.name), PackedStringArray(["Esc1", "Esc2", "EscMedic"])), "Escort that HVT: ordered")
+	var escorts := SquadAI.escorts_of(hvt)
+	check(escorts.size() == 2 and SquadAI.of(medic).escorting == null, "the two nearest take him; no more than two (%s)" % [escorts.map(func(a: SquadAI) -> String: return a.body.name)])
+	await _wait_until(func() -> bool: return String(Person.state(hvt).get("led_by", "")) == layer.key_of(escorts[0].body), 4.0)
+	check(String(Person.state(hvt).get("led_by", "")) == layer.key_of(escorts[0].body) and not Person.is_cuffed(hvt), "the first escort leads him, uncuffed")
+	# The squad moves on: he comes along with his escorts.
+	_place(player, at + Vector3(0, 0, 18))
+	await _wait_until(func() -> bool: return _flat(hvt.global_position, player.global_position) < 9.0 and escorts.all(func(a: SquadAI) -> bool: return _flat(a.body.global_position, hvt.global_position) < HvtAI.WATCH_M), 15.0)
+	check(_flat(hvt.global_position, player.global_position) < 9.0 and escorts.all(func(a: SquadAI) -> bool: return _flat(a.body.global_position, hvt.global_position) < HvtAI.WATCH_M),
+		"the squad moves on and he comes along, his escorts close (%.1f m from the player; escorts %s m)" % [_flat(hvt.global_position, player.global_position), escorts.map(func(a: SquadAI) -> String: return "%.1f %s" % [_flat(a.body.global_position, hvt.global_position), a.body.ai_status])])
+	check(brain.watched() and brain.bolts == 0, "watched all the way: he stays")
+	# He bolts anyway: they go after him, not at once.
+	# One of his men close by: he runs to him (and isn't cornered while he's up); the escorts hold fire.
+	var refuge := _soldier("CourierGuard", &"hostile", hvt.global_position + Vector3(10, 0, 0), [], false)
+	for a in escorts:
+		a.grab_scale = 10.0
+		a.hold_fire = true
+	layer.server_take_back_surrender(hvt)
+	brain.spotted = player
+	brain.spotted_pos = player.global_position
+	brain.spotted_at = Soldier._now()
+	await _frames(2)
+	check(escorts.all(func(a: SquadAI) -> bool: return a.grabs == 0 and (a._react_at < 0.0 or a._react_at > Soldier._now())) and not Person.is_captive(hvt),
+		"he bolts: his escorts take a moment to react (nobody has him the instant he moves)")
+	await _seconds(SquadAI.ESCORT_REACT_S.x + 0.3)
+	check(escorts.all(func(a: SquadAI) -> bool: return a.body.ai_status.begins_with("Going after")), "then they go after him, weapons down (%s)" % [escorts.map(func(a: SquadAI) -> String: return a.body.ai_status)])
+	# A footrace can go either way (he may get away); within reach, they grab him.
+	_place(hvt, escorts[0].body.global_position + Vector3(0.8, 0, 0))
+	await _wait_until(func() -> bool: return escorts.any(func(a: SquadAI) -> bool: return a.grabs > 0), 4.0)
+	check(escorts.any(func(a: SquadAI) -> bool: return a.grabs > 0) and Person.is_captive(hvt), "caught up with, he's grabbed: he gives up again")
+	refuge.queue_free()
+	for a in escorts:
+		a.hold_fire = false
+	# Wounded: the escorts see to him, a medic is pulled to him and takes over.
+	hvt.vitals.server_damage(70.0)
+	await _wait_until(func() -> bool: return not hvt.vitals.is_up(), 3.0)
+	await _wait_until(func() -> bool: return is_instance_valid(hvt.care_by), 6.0)
+	var first: Soldier = hvt.care_by
+	check(first == e1 or first == e2, "down: an escort is on him first (%s)" % (first.name if first else "nobody"))
+	await _wait_until(func() -> bool: return hvt.care_by == medic, 25.0)
+	check(hvt.care_by == medic and SquadAI.of(medic).casualty == hvt, "the medic is pulled to him and takes over (%s; medic: %s, intent %d, care %d, %.1f m, candidate %s, free %s, cares %s)" % [hvt.care_by.name if hvt.care_by else "nobody", medic.ai_status, SquadAI.of(medic).intent, SquadAI.of(medic).care, medic.global_position.distance_to(hvt.global_position), SquadAI.of(medic)._find_casualty(), SquadAI.of(medic)._free_for(hvt), SquadAI.of(medic)._cares_for(hvt)])
+	check(escorts.all(func(a: SquadAI) -> bool: return a.escorting == hvt), "his escorts stay on him")
+	squad.give_order(player, Squad.Order.FOLLOW, player.global_position, PackedStringArray(["Esc1"]))
+	check(SquadAI.of(e1).escorting == null and SquadAI.of(e2).escorting == hvt, "a movement order takes a squadmate off the escort")
+	for s: Soldier in [e1, e2, medic, hvt]:
+		s.queue_free()
+	await _frames(3)
+
+
+func _squadmate(callsign: String, role: StringName, pos: Vector3) -> Soldier:
+	return level.spawn_soldier({"name": callsign, "person_name": callsign, "faction": "friendly", "variant": "multicam", "pos": pos,
+		"loadout": [], "role": String(role), "team": 0, "combat": 0.6, "discipline": 0.6, "guard": false})
 
 
 # --- Helpers -------------------------------------------------------------------------------
