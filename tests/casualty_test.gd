@@ -465,6 +465,7 @@ func _test_body_cap() -> void:
 
 func _test_soak() -> void:
 	print("Soak: the squad follows the lead around and through the compound")
+	_clear_contact()
 	var map := player.get_world_3d().navigation_map
 	var waypoints: Array[Vector3] = [Vector3(0, 0, 22), Vector3(0, 0, 14), Vector3(-12, 0, 8), Vector3(-14, 0, -14), Vector3(0, 0, -16),
 		Vector3(14, 0, -14), Vector3(14, 0, 8), Vector3(0, 0, 0), Vector3(0, 0, -8), Vector3(0, 0, 2), Vector3(0, 0, 23),
@@ -528,6 +529,7 @@ func _test_soak() -> void:
 
 func _test_self_tourniquet() -> void:
 	print("Self-tourniquet under fire, then the medic")
+	_clear_contact()
 	_place(player, Vector3(0, 0.1, 24))
 	player.rotation.y = 0.0
 	await _seconds(4.0)
@@ -584,6 +586,7 @@ func _test_self_tourniquet() -> void:
 
 func _test_engagement() -> void:
 	print("Engagement: a squadmate down in the open under fire")
+	_clear_contact()
 	# The lead stands off to the side, clear of the medic's way from the formation to Delta
 	# (a player in the way is _test_blocked_route's job).
 	_place(player, ENGAGEMENT_LEAD)
@@ -636,6 +639,10 @@ func _test_engagement() -> void:
 	check(golf.inventory.count_of(&"smoke_grenade") < counts[&"smoke_grenade"] and _said(sent_from, "Golf", &"smoke_out"), "Golf throws smoke between him and the threat")
 	check(seen.drag, "and drags him out of the line of fire")
 	check(not other_open_at_tq.is_empty() and other_open_at_tq[0] > 0, "massive bleeding first: his other wounds wait for the tourniquet (%s open)" % [other_open_at_tq])
+	# Read now: the callout log keeps only its last Callouts.LOG_SIZE lines, and the squad's
+	# chatter through the rest of the scene pushes these early ones out.
+	var called := _said(sent_from, "Golf", &"moving_to") and _said(sent_from, "Golf", &"treating")
+	var called_lines := _lines(sent_from)
 	await _seconds(2.0)
 	_firing = false
 	var treated := await _wait_until(func() -> bool:
@@ -646,7 +653,7 @@ func _test_engagement() -> void:
 		delta.vitals.condition_text(), _kinds(delta.vitals.care_needed()), golf.ai_status])
 	check(golf.inventory.medical_count(&"pressure_bandage") < counts[&"pressure_bandage"] and golf.inventory.medical_count(&"npa") < counts[&"npa"],
 		"through _server_treat: Golf's bandages and an NPA were used on him")
-	check(_said(sent_from, "Golf", &"moving_to") and _said(sent_from, "Golf", &"treating"), "Golf calls it: \"Moving to Delta\", \"Treating Delta\" (%s)" % [_lines(sent_from)])
+	check(called, "Golf calls it: \"Moving to Delta\", \"Treating Delta\" (%s)" % [called_lines])
 	await _out_of_contact()
 	_hold_fire(false)
 	# Nobody revives him: past 40% of his blood lost he stays out, and the squad takes him along.
@@ -1053,9 +1060,23 @@ func _hold_fire(hold: bool) -> void:
 ## Waits until no squadmate is in contact any more.
 func _out_of_contact() -> void:
 	_firing = false
-	var quiet := await _wait_until(func() -> bool: return not _squad().any(func(s: Soldier) -> bool: return SquadAI.of(s).in_contact()), 20.0)
+	var quiet := await _wait_until(func() -> bool: return not _squad().any(func(s: Soldier) -> bool: return SquadAI.of(s).in_contact()),
+		SquadAI.SQUAD_CONTACT_MEMORY_S + 5.0)
 	if not quiet:
 		print("    still in contact: %s" % [_squad().filter(func(s: Soldier) -> bool: return SquadAI.of(s).in_contact()).map(func(s: Soldier) -> String: return "%s (%s)" % [s.name, s.ai_status])])
+
+
+## Everyone out of contact at once, between staged scenes: the squad now hears gunfire and
+## remembers contact SQUAD_CONTACT_MEMORY_S, so one scene's shooting would carry into the next.
+func _clear_contact() -> void:
+	_firing = false
+	for s: Soldier in _squad():
+		s.threat_time = -1000.0
+		var ai := SquadAI.of(s)
+		ai._last_contact = -1000.0
+		ai._fired_on_at = -1000.0
+		ai.target = null
+	level.squad_for(&"friendly").engaged_at = -1000.0
 
 
 func _unfreeze() -> void:

@@ -264,7 +264,7 @@ func _test_combat_modes() -> void:
 	_place(player, Vector3(0, 0.1, 40))
 	player.rotation = Vector3.ZERO
 	# The removed hostiles were seen at the start: wait for that contact to fade, then settle.
-	await _wait_for(func() -> bool: return _squad().all(func(s: Soldier) -> bool: return not SquadAI.of(s).in_contact()), 12.0)
+	await _wait_for(func() -> bool: return _squad().all(func(s: Soldier) -> bool: return not SquadAI.of(s).in_contact()), SquadAI.SQUAD_CONTACT_MEMORY_S + 4.0)
 	await _seconds(7.0)
 	check(_squad().all(func(s: Soldier) -> bool: return SquadAI.of(s).combat_mode == Squad.CombatMode.COMBAT), "Combat is the default")
 	check(_count(func(s: Soldier) -> bool: return s.want_crouch) == 7, "in Combat, halted squadmates crouch (%d of 7)" % _count(func(s: Soldier) -> bool: return s.want_crouch))
