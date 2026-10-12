@@ -73,6 +73,7 @@ const REPORT_AGAIN_S := 300.0
 const SAY_RADIUS_M := 30.0
 const SAY_GAP_S := 3.0
 const SURRENDER_LINES: Array[String] = ["Don't shoot! I give up!", "Okay, okay! I surrender!"]
+const BOLT_LINES: Array[String] = ["Now!", "You won't take me!", "Run!"]
 
 ## The compound's placeholder content (populate): civilians on routines around the buildings
 ## and outside the gate, a hostile HVT in the main building, a friendly HVT (a hostage) in the
@@ -640,6 +641,16 @@ func server_surrender(s: Soldier, why := "") -> void:
 	server_set_state(s, changes)
 	server_say(s, SURRENDER_LINES[_rng.randi() % SURRENDER_LINES.size()])
 	print("[people] %s surrendered (%s)" % [s.display_name(), why])
+
+
+## Host only. An uncuffed HVT who gave up takes it back and runs (HvtAI's babysitting): no
+## longer a captive, led or under orders. He has to be cornered again.
+func server_take_back_surrender(s: Soldier) -> void:
+	if not Person.is_hvt(s) or Person.is_cuffed(s) or not bool(state_of(s).get("surrendered", false)):
+		return
+	server_set_state(s, {"surrendered": false, "led_by": "", "order": ""})
+	server_say(s, BOLT_LINES[_rng.randi() % BOLT_LINES.size()])
+	print("[people] %s took his surrender back and ran" % s.display_name())
 
 
 # --- Requests (interaction menu, command menu) ---------------------------------------------

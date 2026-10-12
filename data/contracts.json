@@ -10,7 +10,7 @@
 			{"kind": "destroy_cache", "site": ["aa", "cache"], "text": "Destroy the {name}"},
 			{"kind": "clear_area", "site": "area", "text": "Bonus: leave no fighter standing in the {module}", "optional": true, "bonus_share": 0.1}
 		 ]},
-		{"type": "hvt_capture", "name": "HVT capture", "brief": "A hostile HVT is at a site in the zone. Take them alive and bring them to extraction: they run, shout and fight back until zip-cuffed (bring cuffs from the base). They bleed out like anyone. On the clock.",
+		{"type": "hvt_capture", "name": "HVT capture", "brief": "A hostile HVT is at a site in the zone. Take them alive and bring them to extraction: they run, shout and fight back until cornered or zip-cuffed. Cuffs from the base shop keep them; an uncuffed captive left alone bolts, so someone stays close. They bleed out like anyone. On the clock.",
 		 "modules": ["compound", "village", "outpost"], "base_pay": 55000, "days": 1, "enemy_count": [4, 10], "enemy_quality": [0.35, 0.75],
 		 "threat_pool": ["sniper", "qrf", "mortar"], "time_limit_min": 90,
 		 "objectives": [

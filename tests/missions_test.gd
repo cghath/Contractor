@@ -42,6 +42,7 @@ func _ready() -> void:
 	await _test_deployment()
 	await _test_charges()
 	await _test_failures()
+	await _test_no_cuffs()
 	_finish()
 
 
@@ -313,6 +314,53 @@ func _test_failures() -> void:
 	Contracts.objectives.get_objective(hostage_o.oid).params.time_limit_s = 1.0
 	await _seconds(1.5)
 	check(Contracts.objectives.get_objective(hostage_o.oid).state == Objectives.FAILED, "and fails when it runs out")
+	Contracts.server_end_deployment({})
+	Contracts.server_finish_debrief()
+
+
+# --- A capture without zip cuffs -------------------------------------------------------------
+
+func _test_no_cuffs() -> void:
+	print("An HVT taken without zip cuffs")
+	var cid := _add(_offer("hvt_capture"))
+	Contracts.server_accept(cid, ContractGen.default_terms())
+	Contracts.server_start_deployment([], ZONE)
+	await _frames(5)
+	var o: Dictionary = Contracts.objectives.for_contract(cid)[0]
+	var people := level.people
+	var hvt := people.hvt(String(o.params.hvt))
+	if hvt == null:
+		check(false, "the HVT is there")
+		return
+	var brain := hvt.get_node(^"PersonAI") as HvtAI
+	while player.inventory.count_of(Person.ZIP_CUFFS) > 0:
+		player.inventory.remove_one(Person.ZIP_CUFFS)
+	var spot := level.extraction_points()[0] + Vector3(30, 0, 0)  # clear of the landing zone
+	_place(hvt, spot)
+	_place(player, spot + Vector3(1.5, 0, 0))
+	people.server_surrender(hvt, "test")
+	check(people.server_lead(player, hvt).ends_with("follows you") and not Person.is_cuffed(hvt), "he gave up: with no cuffs on him, he still follows when led")
+	await _seconds(3.0)
+	check(brain.bolts == 0 and Person.is_captive(hvt), "watched (someone within %.0f m), he stays" % HvtAI.WATCH_M)
+	# Left alone: he takes it back and runs.
+	people.server_order(player, hvt, "stop")
+	_place(player, spot + Vector3(40, 0, 0))
+	brain.bolt_scale = 100.0
+	await _wait_for(func() -> bool: return brain.bolts > 0, HvtAI.BOLT_GRACE_S + HvtAI.BOLT_CHECK_S * 2 + 1.0)
+	check(brain.bolts == 1 and not Person.is_captive(hvt) and String(Person.state(hvt).get("led_by", "")) == "",
+		"left alone, the uncuffed HVT takes his surrender back and bolts (bolts %d, watched %s, uncuffed captive %s, will %.2f, %.1f m, mode %d)" % [brain.bolts, brain.watched(), brain.uncuffed_captive(), brain.bolt_will(), hvt.global_position.distance_to(player.global_position), brain.mode])
+	brain.bolt_scale = 1.0
+	# Cornered again, led to the landing zone uncuffed: captured.
+	people.server_surrender(hvt, "test")
+	brain.process_mode = Node.PROCESS_MODE_DISABLED  # the walk is ours
+	people.server_lead(player, hvt)
+	var lz := level.extraction_points()[0]
+	_place(player, lz + Vector3(1, 0, 0))
+	_place(hvt, lz)
+	await _wait_for(func() -> bool: return Contracts.objectives.get_objective(o.oid).state == Objectives.DONE, 3.0)
+	var delivered: Array = People.deliveries.filter(func(d: Dictionary) -> bool: return d.hvt_id == String(o.params.hvt))
+	check(Contracts.objectives.get_objective(o.oid).state == Objectives.DONE and delivered.size() == 1 and not bool(delivered[0].cuffed),
+		"brought in uncuffed: captured all the same")
 	Contracts.server_end_deployment({})
 	Contracts.server_finish_debrief()
 
