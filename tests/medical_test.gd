@@ -45,6 +45,7 @@ func _ready() -> void:
 	await _test_use_medical()
 	await _test_menu_and_removal()
 	await _test_medical_menu()
+	await _test_menu_prefers_living()
 	await _test_bleed_hud()
 	await _test_wakes_in_session()
 	await _test_splint_movement()
@@ -1184,6 +1185,43 @@ func _test_medical_menu() -> void:
 	_reset(player)
 	player.inventory.remove_one(&"trauma_kit")
 	player.inventory.remove_one(&"iv_18")
+
+
+## Captain's playtest P0164: a body nearer the crosshair than the casualty took the H menu,
+## and every item said "Too late". The living come first; a body alone is still checkable.
+func _test_menu_prefers_living() -> void:
+	print("Medical menu: the living before a body nearer the crosshair")
+	_place_player()
+	_wound(casualty.vitals, Vitals.THIGH_L, "arterial", 1.2, &"femoral_l")
+	casualty.vitals.server_damage(70.0)  # down
+	var body := _spawn_ai("MenuBody", SPOT + Vector3(0.7, 0, -1.0))
+	await _frames(2)
+	body.vitals.server_kill()
+	var start := Time.get_ticks_msec()
+	while not (is_instance_valid(body.ragdoll) and body.ragdoll.frozen) and Time.get_ticks_msec() - start < 8000:
+		await get_tree().physics_frame
+	var aim := body.body_point()
+	player.look_at(Vector3(aim.x, player.global_position.y, aim.z), Vector3.UP)
+	await _frames(1)
+	var eye0 := player.camera.global_position
+	player.head.rotation.x = atan2(aim.y - eye0.y, Vector2(aim.x - eye0.x, aim.z - eye0.z).length())  # looking down at it
+	await _frames(2)
+	var eye := player.camera.global_position
+	var forward := -player.camera.global_basis.z
+	var body_angle := rad_to_deg(forward.angle_to(body.body_point() - eye))
+	var casualty_angle := rad_to_deg(forward.angle_to(casualty.body_point() - eye))
+	check(body_angle < casualty_angle and casualty_angle < InteractionMenu.VIEW_CONE_DEG,
+		"(set up: both in view, the body nearer the crosshair, %.0f against %.0f degrees)" % [body_angle, casualty_angle])
+	check(MedicalMenu.looked_at(player, player.camera) == casualty, "H goes to the living casualty, not the body")
+	check(body.vitals.treatment_problem(&"bandage", Vitals.THIGH_L) == "Already dead", "and a body's items say \"Already dead\"")
+	_reset(casualty)
+	casualty.global_position = SPOT + Vector3(0, 0, 30)  # out of reach: the body alone
+	await _frames(3)
+	check(MedicalMenu.looked_at(player, player.camera) == body, "with nobody alive in reach, the body (to check it)")
+	casualty.global_position = SPOT + Vector3(0, 0, -1.5)
+	body.queue_free()
+	_place_player()
+	await _frames(2)
 
 
 ## The corner silhouette: shows while the player bleeds untreated, highlights the part, goes when treated.

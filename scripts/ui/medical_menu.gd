@@ -179,12 +179,17 @@ func _gui_input(event: InputEvent) -> void:
 # --- What it shows (static: tests and other views use these) -------------------------------
 
 ## The person `actor` looks at within treatment reach (Soldier._in_treat_reach: to the body,
-## Soldier.body_point, where a ragdoll lies), or null. Nearest the middle of the view first.
+## Soldier.body_point, where a ragdoll lies), or null. Nearest the middle of the view first,
+## the living before the dead: a body nearer the crosshair than the casualty used to take the
+## menu, and every item said "Too late" (Captain's playtest P0164). A body alone in view is
+## still picked, to check it.
 static func looked_at(actor: Soldier, camera: Camera3D) -> Node3D:
 	var eye := camera.global_position
 	var forward := -camera.global_basis.z
 	var best: Node3D = null
 	var best_angle := deg_to_rad(InteractionMenu.VIEW_CONE_DEG)
+	var dead_best: Node3D = null
+	var dead_angle := best_angle
 	for node: Node in actor.get_tree().get_nodes_in_group(&"combatants"):
 		if node == actor or not node is Soldier or node.is_queued_for_deletion() or Vitals.find_on(node) == null:
 			continue
@@ -196,10 +201,15 @@ static func looked_at(actor: Soldier, camera: Camera3D) -> Node3D:
 		var at := s.body_point() if is_instance_valid(s.ragdoll) else InteractionMenu.action_point(s)
 		var angle := forward.angle_to(at - eye)
 		var ray := PhysicsRayQueryParameters3D.create(eye, at, 1, [actor.get_rid(), s.get_rid()])  # a wall between, not their own capsule
-		if angle < best_angle and actor.get_world_3d().direct_space_state.intersect_ray(ray).is_empty():
-			best = s
-			best_angle = angle
-	return best
+		var dead := s.vitals.is_dead()
+		if angle < (dead_angle if dead else best_angle) and actor.get_world_3d().direct_space_state.intersect_ray(ray).is_empty():
+			if dead:
+				dead_best = s
+				dead_angle = angle
+			else:
+				best = s
+				best_angle = angle
+	return best if best != null else dead_best
 
 
 ## The part to show first: the most urgent task's, else the worst-looking one, else the chest.

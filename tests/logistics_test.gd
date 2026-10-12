@@ -199,6 +199,21 @@ func _test_molle_rules() -> void:
 		"a radio pouch takes no magazines, a full mag pouch no more")
 	check(inv.attach_problem(ItemDB.get_item(&"pouch_mag_double"), &"radio") != "", "a mag pouch doesn't fit the (taken) radio point")
 	check(inv.attach_problem(ItemDB.get_item(&"pouch_radio"), &"utility_1") == "", "a radio pouch fits a utility point")
+	# Captain's playtest P0164: chest points take the radio, IFAK and GP pouches too; and
+	# "no free point" says why.
+	var chest_points := inv.attach_points().filter(func(p: Dictionary) -> bool: return p.type == "chest")
+	check(not chest_points.is_empty() and [&"pouch_radio", &"pouch_ifak", &"pouch_utility"].all(func(id: StringName) -> bool:
+			return inv.attach_problem(ItemDB.get_item(id), StringName(chest_points[0].id)) == ""),
+		"the Medium carrier's chest points take a radio, IFAK or GP pouch")
+	var ifak_point := inv.attach_point(inv.free_point_for(ItemDB.get_item(&"pouch_ifak")))
+	check(ifak_point.get("type") == "medical", "but an IFAK pouch still goes on its medical point first (%s)" % [ifak_point.get("type")])
+	var light_inv := Inventory.new()
+	check(light_inv.no_point_problem(ItemDB.get_item(&"pouch_ifak")) == "Put on a plate carrier first", "no carrier: \"%s\"" % light_inv.no_point_problem(ItemDB.get_item(&"pouch_ifak")))
+	light_inv.take(&"plate_carrier_light")
+	light_inv.take(&"pouch_utility")
+	var why := light_inv.no_point_problem(ItemDB.get_item(&"pouch_ifak"))
+	check(why.begins_with("Every ") and why.contains("taken") and why.contains("Low-Profile"), "its points taken: \"%s\"" % why)
+	light_inv.free()
 	var expected := bare + 2 * 0.14 + 0.3 + 0.12 + 1.2 + 5 * 0.5
 	check(absf(inv.total_mass() - expected) < 0.01, "pouches and what's in them count in the mass (%.2f kg, expected %.2f)" % [inv.total_mass(), expected])
 	# Reloading pulls from the mag pouches first.
@@ -290,6 +305,20 @@ func _test_molle_host() -> void:
 	screen._set_view(InventoryScreen.View.MOLLE)
 	await _frames(2)
 	check(screen._point_tiles.size() == inv.attach_points().size(), "the MOLLE view lays out every attach point (%d)" % screen._point_tiles.size())
+	# A pouch held: the free points it fits light up, the rest dim (P0164).
+	screen._mark_points(&"pouch_ifak")
+	var lit := []
+	var wrong := []
+	for p: Dictionary in inv.attach_points():
+		var fits: bool = p.type in ["medical", "utility", "chest"] and inv.attachment(StringName(p.id)).is_empty()
+		var tint: Color = screen._point_tiles[String(p.id)].modulate
+		if fits:
+			lit.append(p.id)
+		if (tint == InventoryScreen.FITS_TINT) != fits or (not fits and not is_equal_approx(tint.a, InventoryScreen.DIMMED_ALPHA)):
+			wrong.append(p.id)
+	check(not lit.is_empty() and wrong.is_empty(), "an IFAK pouch held: %s light up, the rest dim (wrong: %s)" % [lit, wrong])
+	screen._mark_points(&"")
+	check(screen._point_tiles.values().all(func(t: Control) -> bool: return t.modulate == Color.WHITE), "nothing held: all plain")
 	screen._set_view(InventoryScreen.View.LOADOUT)
 	screen.visible = false
 	# Dropping the carrier keeps its pouches; picking it up brings them back.

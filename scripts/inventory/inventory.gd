@@ -746,6 +746,24 @@ func attach_problem(item: ItemData, point: StringName) -> String:
 	return ""
 
 
+## Why `item` has no free point on the worn carrier (free_point_for found none): no carrier,
+## a carrier without a point of its types, or those points all taken ("" if one is free).
+## (Captain's playtest P0164: "No free point on the carrier" didn't say which.)
+func no_point_problem(item: ItemData) -> String:
+	if slots[&"vest"] == &"":
+		return "Put on a plate carrier first"
+	if not is_attachable(item):
+		return "%s doesn't attach to a carrier" % item.name
+	if free_point_for(item) != &"":
+		return ""
+	var carrier := ItemDB.get_item(slots[&"vest"]).name
+	var types := " or ".join(PackedStringArray(item.stats.attach.map(func(t: String) -> String: return POINT_TYPES.get(t, t))))
+	var fitting := attach_points().filter(func(p: Dictionary) -> bool: return String(p.type) in item.stats.attach)
+	if fitting.is_empty():
+		return "The %s has no %s point for the %s" % [carrier, types, item.name]
+	return "Every %s point on the %s is taken (%d)" % [types, carrier, fitting.size()]
+
+
 ## The first free attach point of the worn carrier that `item` fits (its own point types
 ## first: a mag pouch on a mag point before a utility one), or &"".
 func free_point_for(item: ItemData) -> StringName:

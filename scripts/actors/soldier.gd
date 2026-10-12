@@ -846,7 +846,7 @@ func _server_inventory_action(action: String, container: StringName, index: int,
 				return
 			var item := ItemDB.get_item(list[index].id)
 			var point := target if target != &"" else inventory.free_point_for(item)
-			var problem := inventory.attach_problem(item, point) if point != &"" else "No free point on the carrier fits %s" % item.name
+			var problem := inventory.attach_problem(item, point) if point != &"" else inventory.no_point_problem(item)
 			if problem != "" or not inventory.attach_entry(container, index, point):
 				_client_message.rpc_id(owner_peer(), problem if problem != "" else "Can't attach that")
 		"detach":

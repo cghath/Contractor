@@ -36,6 +36,9 @@ const COL_EDGE := Color(0.17, 0.32, 0.38)
 const COL_ACCENT := Color(0.33, 0.85, 0.95)
 const COL_TEXT := Color(0.82, 0.9, 0.92)
 const COL_MUTED := Color(0.5, 0.62, 0.67)
+## Attach points while a pouch is selected or dragged: the free ones it fits, and the rest.
+const FITS_TINT := Color(0.6, 1.0, 0.65)
+const DIMMED_ALPHA := 0.35
 const COL_WARN := Color(0.95, 0.7, 0.3)
 
 enum View { LOADOUT, MOLLE }
@@ -499,6 +502,31 @@ func _redraw_doll_tiles() -> void:
 		var tile := _point_tile(p)
 		_point_tiles[String(p.id)] = tile
 		_right_slots.add_child(tile)
+	_mark_points(StringName(selected.get("id", &"")))
+
+
+## While a pouch (or knife) is selected or dragged, the free points it fits light up and the
+## rest dim; anything else, all plain. (Captain's playtest P0164: four tries at Chest points
+## nothing he held fitted.)
+func _mark_points(id: StringName) -> void:
+	var item := ItemDB.get_item(id) if id != &"" else null
+	var attachable := Inventory.is_attachable(item)
+	var inv := player.inventory
+	for p: Dictionary in inv.attach_points():
+		var tile: Control = _point_tiles.get(String(p.id))
+		if tile == null or not is_instance_valid(tile):
+			continue
+		if not attachable:
+			tile.modulate = Color.WHITE
+		elif String(p.type) in item.stats.attach and inv.attachment(StringName(p.id)).is_empty():
+			tile.modulate = FITS_TINT
+		else:
+			tile.modulate = Color(1, 1, 1, DIMMED_ALPHA)
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_DRAG_END and visible:
+		_mark_points(StringName(selected.get("id", &"")))  # back to what the selection shows
 
 
 func _slot_tile(slot: StringName) -> Control:
@@ -678,6 +706,7 @@ func _get_drag(_at: Vector2, src: Dictionary, tile: Control) -> Variant:
 	var preview := _icon(src.id, 56)
 	preview.modulate.a = 0.85
 	tile.set_drag_preview(preview)
+	_mark_points(StringName(src.id))
 	return {"inventory_drag": src}
 
 

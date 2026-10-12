@@ -1116,7 +1116,7 @@ func care_tasks() -> Array[Dictionary]:
 ## Why one `item` on `part` wouldn't help right now, or "" if it would.
 func treatment_problem(item: StringName, part: StringName) -> String:
 	if dead:
-		return "Too late"
+		return "Already dead"
 	if item == IO_KIT or IV_GAUGES.has(item):
 		return "Already has a line in" if not access.is_empty() else ""
 	if FLUID_BAGS.has(item):
