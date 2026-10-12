@@ -1021,6 +1021,16 @@ func _server_remove_tourniquet(path: NodePath, part: StringName) -> void:
 	_client_message.rpc_id(owner_peer(), "Tourniquet off, %s" % Vitals.part_name(part))
 
 
+## Host: a line in the session log for a treatment (SessionLog): who treats whom, with what, on
+## which part, and how it went (`outcome`: "done", "interrupted: why", "refused: why").
+func _log_care(target: Node, item_id: StringName, part: StringName, outcome: String) -> void:
+	if SessionLog.session_id == "":
+		return
+	var patient := (target as Soldier).display_name() if target is Soldier else (String(target.name) if target else "nobody")
+	SessionLog.note("%s treats %s: %s%s, %s" % [display_name(), "themself" if target == self else patient,
+		String(item_id) if item_id != &"" else "care", (" on " + Vitals.part_name(part)) if part != &"" else "", outcome])
+
+
 ## Host side of a treatment (_server_treat, _server_use_medical).
 func _treat(target: Node3D, item_id: StringName, part: StringName, rushed: bool) -> void:
 	var other := Vitals.find_on(target) if target else null
@@ -1041,6 +1051,7 @@ func _treat(target: Node3D, item_id: StringName, part: StringName, rushed: bool)
 	else:
 		why = other.treatment_problem(item_id, part)
 	if why != "":
+		_log_care(target, item_id, part, "refused: " + why)
 		_client_message.rpc_id(owner_peer(), why)
 		return
 	var tourniquet := item_id == WoundModel.TOURNIQUET
@@ -1050,14 +1061,17 @@ func _treat(target: Node3D, item_id: StringName, part: StringName, rushed: bool)
 	if not await _timed_care(target, other, treat_seconds(target, item, rushed), label, part, item_id):
 		return
 	if not Vitals.has_item(inventory, item_id):
+		_log_care(target, item_id, part, "refused: no longer carrying it")
 		_client_message.rpc_id(owner_peer(), "You no longer have a %s" % item.name)
 		return
 	rushed = rushed or (tourniquet and (hurried or under_fire()))
 	if not other.server_apply_treatment(item_id, part, rushed):
+		_log_care(target, item_id, part, "refused: does nothing there now")
 		_client_message.rpc_id(owner_peer(), "%s does nothing there now" % item.name)
 		return
 	if not item.stats.get("no_item", false) and not item.stats.get("reusable", false):
 		inventory.take_medical(item_id)
+	_log_care(target, item_id, part, "done")
 	var note := other.care_note()
 	if note != "":
 		_client_message.rpc_id(owner_peer(), note)
@@ -1103,6 +1117,7 @@ func _timed_care(target: Node3D, other: Vitals, seconds: float, label: String, p
 		if why != "":
 			if is_instance_valid(other):
 				other.server_end_treatment()
+			_log_care(target, item, part, "interrupted: " + why)
 			model.server_stop(anim)
 			_server_busy_until = _now()
 			_client_busy.rpc_id(owner_peer(), 0.0, "Treatment interrupted: %s" % why)
@@ -1276,9 +1291,36 @@ func _client_lifted(lifted: bool) -> void:
 		collision_layer = 0 if lifted or vitals.is_dead() else BODY_LAYER
 
 
+## Host: a line in the session log when this soldier goes down or dies (`what`): who, why (what
+## last hurt them, or bleed-out / arrest when nothing recent did), where on the body, and who
+## did it (Harm.last) from how far. Does nothing without a session (SessionLog).
+func _log_casualty(what: String) -> void:
+	if SessionLog.session_id == "":
+		return
+	var c: Dictionary = vitals.last_cause
+	var recent := not c.is_empty() and vitals.seconds_since_hit() < 3.0
+	var cause := String(c.get("cause", "")) if recent else ("cardiac arrest" if vitals.in_cardiac_arrest() else "bleed-out")
+	if not recent and what == "went down":
+		cause = "out: " + ", ".join(vitals.why_unconscious())
+	var line := "%s %s (%s): %s" % [display_name(), what, faction, cause]
+	if recent and c.has("part"):
+		line += ", " + String(c.part)
+	var by := Harm.last(self)
+	if String(by.get("name", "")) != "" and _now() - float(by.get("at", -1000.0)) < 900.0:
+		line += ", %s %s (%s)" % ["by" if recent else "last hit by", by.name, by.faction]
+		var dist := float(c.get("distance", -1.0)) if recent else -1.0
+		var who := get_node_or_null(NodePath(String(by.get("path", "")))) as Node3D
+		if dist < 0.0 and who != null:
+			dist = global_position.distance_to(who.global_position)
+		if dist >= 0.0:
+			line += " at %.0f m" % dist
+	SessionLog.note(line)
+
+
 func _on_went_down() -> void:
 	if not multiplayer.is_server():
 		return
+	_log_casualty("went down")
 	_drop_held()  # you drop what you were carrying in your hands
 	release_carried()  # ...and whoever you were carrying
 
@@ -1317,6 +1359,7 @@ const RESPAWN_HOLD_S := 2.0
 func _on_died() -> void:
 	if not multiplayer.is_server():
 		return
+	_log_casualty("died")
 	_reload_n += 1  # a reload in progress dies with them
 	release_carried()
 	_drop_held()

@@ -1005,6 +1005,7 @@ func server_revert_deployment() -> String:
 		return "Only the host can do that"
 	if not RosterDeployment.is_running(roster()) or _before_deploy.is_empty():
 		return "No deployment to revert"
+	SessionLog.note("Return to Base (revert): the deployment is undone, the campaign is back as it was at the base")
 	Campaign.restore(_before_deploy)
 	_before_deploy = {}
 	Contracts.objectives.server_clear()
@@ -1015,6 +1016,7 @@ func server_revert_deployment() -> String:
 
 ## Host: everyone goes back to the hub (after server_end_deployment(..., false) and a debrief).
 func server_return_to_base() -> void:
+	SessionLog.note("Return to Base: everyone goes back to the hub")
 	server_switch_level({"level": "base"}, base_zone_id())
 
 
