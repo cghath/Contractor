@@ -80,9 +80,36 @@ func _ready() -> void:
 	_message.position.y += 60
 	_message.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	# The map (M) and the briefing, over everything else (W13).
+	add_child(BleedSilhouette.new(player))
 	map_screen = MapScreen.new(player)
 	add_child(map_screen)
 	move_child(_message, -1)  # messages stay readable over the map
+
+
+## A small body silhouette in the top-left corner while the local player has an untreated bleed,
+## an unsplinted fracture or a tourniquet on: those parts coloured, hidden when nothing to show.
+class BleedSilhouette extends Control:
+	const SCALE := 0.22
+	var player: Soldier
+	var parts: Array[StringName] = []
+
+	func _init(p: Soldier = null) -> void:
+		player = p
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+		position = Vector2(16, 16)
+		size = MedicalMenu.FIGURE_SIZE * SCALE
+		visible = false
+
+	func _process(_delta: float) -> void:
+		var was := parts
+		parts = MedicalMenu.hud_parts(player.vitals) if player != null and player.vitals.is_up() else ([] as Array[StringName])
+		visible = not parts.is_empty()
+		if parts != was:
+			queue_redraw()
+
+	func _draw() -> void:
+		if player != null:
+			MedicalMenu.draw_diagram(self, player.vitals, Vector2.ZERO, SCALE, &"", parts)
 
 
 func _process(delta: float) -> void:

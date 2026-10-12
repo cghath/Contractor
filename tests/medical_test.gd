@@ -44,6 +44,7 @@ func _ready() -> void:
 	await _test_use_medical()
 	await _test_menu_and_removal()
 	await _test_medical_menu()
+	await _test_bleed_hud()
 	await _test_wakes_in_session()
 	await _test_splint_movement()
 	GameState.delete_save()
@@ -1100,6 +1101,20 @@ func _test_medical_menu() -> void:
 	check(thigh.markers.has(MedicalMenu.TOURNIQUET) and thigh.state != MedicalMenu.BLEEDING, "then the thigh shows a tourniquet, no bleeding (%s)" % [thigh])
 	check(Array(menu.log_lines).any(func(l: String) -> bool: return l.contains("You: Tourniquet (")) \
 		and Array(menu.log_lines).any(func(l: String) -> bool: return l.ends_with("Left thigh: TQ on")), "the activity log has both (%s)" % [menu.log_lines])
+	# Triage card: set from the menu through the host, replicated, shown in Check condition.
+	menu.set_triage(Vitals.TRIAGE_IMMEDIATE)
+	await _frames(3)
+	check(casualty.vitals.triage() == Vitals.TRIAGE_IMMEDIATE and casualty.vitals.net_state.get("tg") == "immediate",
+		"the menu puts a red triage card on him, replicated in net_state (%s)" % casualty.vitals.triage())
+	check(InteractionMenu.condition_report(casualty, player).contains("Immediate (red)"), "Check condition shows the card")
+	check(menu.triage_at(menu._triage_rect(2).get_center()) == Vitals.TRIAGE_DELAYED, "the triage buttons are hit-tested")
+	player.global_position += Vector3(30, 0, 0)
+	player._server_set_triage.rpc_id(1, casualty.get_path(), Vitals.TRIAGE_MINIMAL)
+	await _frames(3)
+	check(casualty.vitals.triage() == Vitals.TRIAGE_IMMEDIATE, "out of reach the card doesn't change")
+	_place_player()
+	_reset(casualty)
+	check(casualty.vitals.triage() == Vitals.TRIAGE_NONE, "a fresh life has no card")
 	menu._unhandled_input(_key(KEY_H, false))
 	check(not menu.is_open(), "H closes it")
 	_reset(casualty)
@@ -1120,6 +1135,32 @@ func _test_medical_menu() -> void:
 	_reset(player)
 	player.inventory.remove_one(&"trauma_kit")
 	player.inventory.remove_one(&"iv_18")
+
+
+## The corner silhouette: shows while the player bleeds untreated, highlights the part, goes when treated.
+func _test_bleed_hud() -> void:
+	print("HUD silhouette while bleeding")
+	_place_player()
+	_reset(player)
+	_restock()
+	player.inventory.take(&"pressure_bandage")
+	player._server_busy_until = 0.0
+	var sil: Control
+	for c in player.player_input.hud.get_children():
+		if c is Hud.BleedSilhouette:
+			sil = c
+	check(sil != null, "the HUD has the silhouette")
+	await _frames(2)
+	check(not sil.visible, "hidden with nothing to show")
+	_wound(player.vitals, Vitals.THIGH_L, "muscle", 0.25)
+	await _frames(2)
+	check(sil.visible and sil.parts.size() == 1 and sil.parts[0] == Vitals.THIGH_L, "a bleeding thigh shows it, highlighting the left thigh (%s, %s)" % [sil.visible, sil.parts])
+	player._server_treat.rpc_id(1, player.get_path(), &"pressure_bandage", Vitals.THIGH_L)
+	await _seconds(player.treat_seconds(player, ItemDB.get_item(&"pressure_bandage")) + 0.3)
+	await _frames(2)
+	check(player.vitals.bleed_rate() == 0.0 and not sil.visible, "treated, it disappears (%s, bleed %.2f, %s)" % [sil.parts, player.vitals.bleed_rate(), player.vitals.wound_list()])
+	_reset(player)
+	player.inventory.remove_one(&"pressure_bandage")
 
 
 func _key(key: Key, shift: bool) -> InputEventKey:

@@ -996,6 +996,21 @@ func _server_treat(path: NodePath, item_id: StringName, part: StringName, rushed
 	_treat(get_node_or_null(path) as Node3D, item_id, part, rushed)
 
 
+## Puts a triage card (Vitals.TRIAGE_*) on `path` (a casualty within reach, or yourself).
+@rpc("any_peer", "call_local", "reliable")
+func _server_set_triage(path: NodePath, card: StringName) -> void:
+	if not _from_owner() or not vitals.is_up():
+		return
+	var target := get_node_or_null(path) as Node3D
+	var other := Vitals.find_on(target) if target else null
+	if other == null or other.is_dead() or not Vitals.TRIAGE_CARDS.has(card):
+		return
+	if not _in_treat_reach(target):
+		_client_message.rpc_id(owner_peer(), "Too far away")
+		return
+	other.server_set_triage(card)
+
+
 ## Takes the tourniquets off `part` of `path` once its arterial bleeding is packed (timed,
 ## the tourniquet's remove_s). They go back in your kit if there's room, else on the ground.
 @rpc("any_peer", "call_local", "reliable")

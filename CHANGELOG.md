@@ -11,6 +11,12 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Triage cards and bleeding HUD (2026-10-12)
+
+#### Added
+
+- **Triage cards**: the medical menu has none / minimal (green) / delayed (yellow) / immediate (red) / expectant (black) buttons for the casualty (host request `Soldier._server_set_triage`, reach-checked to `body_point()`, replicated in `net_state` "tg"; shown in Check condition). AI responders take immediate before delayed (and uncarded) before minimal, expectant last. Also: a small body silhouette in the HUD corner while you have an untreated bleed, fracture or tourniquet.
+
 ### Sound (Captain's side, 2026-10-12)
 
 #### Added

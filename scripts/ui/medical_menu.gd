@@ -120,6 +120,13 @@ func choose(index: int) -> String:
 	return text
 
 
+## Puts triage card `card` on the casualty (host checks reach); logs it.
+func set_triage(card: StringName) -> void:
+	if is_instance_valid(target) and actor.vitals.is_up():
+		actor.rpc_id(1, &"_server_set_triage", target.get_path(), card)
+		_add_log("You: triage %s" % String(Vitals.TRIAGE_TEXT.get(card, card)).to_lower())
+
+
 func _process(delta: float) -> void:
 	if not visible:
 		return
@@ -159,6 +166,8 @@ func _gui_input(event: InputEvent) -> void:
 		var p := part_at(event.position)
 		if p != &"":
 			select_part(p)
+		elif triage_at(event.position) != &"":
+			set_triage(triage_at(event.position))
 		else:
 			var text := choose(_row_at(event.position))
 			if text != "" and actor.player_input:
@@ -203,6 +212,45 @@ static func worst_part(vitals: Vitals) -> StringName:
 		if part_state(vitals, p).state != OK:
 			return p
 	return &"chest"
+
+
+## Draws the body diagram on `ci` at `origin`, `k` times full size: each part coloured by state, the
+## `selected` part outlined, markers written when big enough. With `only` (non-empty) just those
+## parts are coloured, the rest drawn faint (the HUD silhouette).
+static func draw_diagram(ci: CanvasItem, vitals: Vitals, origin: Vector2, k: float, selected: StringName = &"",
+		only: Array[StringName] = []) -> void:
+	var font := ThemeDB.fallback_font
+	for p: StringName in PART_RECTS:
+		var r: Rect2 = PART_RECTS[p]
+		r = Rect2(origin + r.position * k, r.size * k)
+		var state := part_state(vitals, p)
+		var faint := not only.is_empty() and not only.has(p)
+		var fill := state_color(state)
+		if faint:
+			fill = Color(0.55, 0.57, 0.6, 0.3)
+		ci.draw_rect(r, fill)
+		ci.draw_rect(r, Color.WHITE if p == selected else Color(0.15, 0.15, 0.15, 0.4 if faint else 1.0), false, 3.0 if p == selected else 1.0)
+		var y := r.position.y + 13.0 * k
+		for m: StringName in state.markers:
+			if m == TOURNIQUET:
+				ci.draw_rect(Rect2(r.position.x - 2.0 * k, r.position.y + 4.0 * k, r.size.x + 4.0 * k, 5.0 * k), Color(0.05, 0.05, 0.05))
+			if k >= 0.9:
+				ci.draw_string(font, Vector2(r.position.x + 2, y + 8), MARKER_TEXT[m], HORIZONTAL_ALIGNMENT_LEFT, r.size.x, 11, Color.WHITE)
+				y += 12.0
+
+
+## The parts the HUD silhouette highlights: an untreated bleed, an unsplinted fracture, a tourniquet.
+static func hud_parts(vitals: Vitals) -> Array[StringName]:
+	var out: Array[StringName] = []
+	for p: StringName in PART_RECTS:
+		var state := part_state(vitals, p)
+		var fracture := false
+		for w in vitals.wound_list():
+			if w.part == p and String(w.kind) == "fracture" and not w.treated:
+				fracture = true
+		if state.state == BLEEDING or state.markers.has(TOURNIQUET) or fracture:
+			out.append(p)
+	return out
 
 
 ## One part's state: "state" (OK, BLEEDING, UNTREATED, TREATED), "severity" (0, or 1..3 while
@@ -401,6 +449,19 @@ func _row_rect(i: int) -> Rect2:
 	return Rect2(_rows_origin() + Vector2(0, i * ROW_H), Vector2(400, ROW_H - 2))
 
 
+## The triage card buttons along the panel's foot (Vitals.TRIAGE_CARDS, in order).
+func _triage_rect(i: int) -> Rect2:
+	return Rect2(_panel().position + Vector2(290 + i * 84, PANEL_SIZE.y - 44), Vector2(80, 28))
+
+
+## The triage card button under `pos`, or &"".
+func triage_at(pos: Vector2) -> StringName:
+	for i in Vitals.TRIAGE_CARDS.size():
+		if _triage_rect(i).has_point(pos):
+			return Vitals.TRIAGE_CARDS[i]
+	return &""
+
+
 func _row_at(pos: Vector2) -> int:
 	for i in options.size():
 		if _row_rect(i).has_point(pos):
@@ -424,18 +485,7 @@ func _draw() -> void:
 	draw_string(font, top + Vector2(PANEL_SIZE.x - 210, 32), "H / Esc to close", HORIZONTAL_ALIGNMENT_RIGHT, 190, 14, Color(0.7, 0.7, 0.7))
 	# Body diagram.
 	var origin := _figure_origin()
-	for p: StringName in PART_RECTS:
-		var r: Rect2 = PART_RECTS[p]
-		r.position += origin
-		var state := part_state(vitals, p)
-		draw_rect(r, state_color(state))
-		draw_rect(r, Color.WHITE if p == part else Color(0.15, 0.15, 0.15), false, 3.0 if p == part else 1.0)
-		var y := r.position.y + 13.0
-		for m: StringName in state.markers:
-			if m == TOURNIQUET:
-				draw_rect(Rect2(r.position.x - 2, r.position.y + 4, r.size.x + 4, 5), Color(0.05, 0.05, 0.05))
-			draw_string(font, Vector2(r.position.x + 2, y + 8), MARKER_TEXT[m], HORIZONTAL_ALIGNMENT_LEFT, r.size.x, 11, Color.WHITE)
-			y += 12.0
+	draw_diagram(self, vitals, origin, 1.0, part)
 	draw_string(font, origin + Vector2(30, FIGURE_SIZE.y + 22), "R", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.7, 0.7, 0.7))
 	draw_string(font, origin + Vector2(180, FIGURE_SIZE.y + 22), "L", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.7, 0.7, 0.7))
 	draw_string(font, origin + Vector2(0, FIGURE_SIZE.y + 44), "Red: bleeding  Amber: untreated  Green: treated", HORIZONTAL_ALIGNMENT_LEFT, 250, 11, Color(0.7, 0.7, 0.7))
@@ -448,7 +498,7 @@ func _draw() -> void:
 		draw_string(font, _rows_origin() + Vector2(0, 16), "You carry no medical items", HORIZONTAL_ALIGNMENT_LEFT, 400, 14, Color(0.6, 0.6, 0.6))
 	for i in options.size():
 		var rect := _row_rect(i)
-		if rect.end.y > panel.end.y - 8:
+		if rect.end.y > panel.end.y - 52:
 			break
 		var entry := options[i]
 		var greyed := String(entry.disabled) != ""
@@ -457,6 +507,15 @@ func _draw() -> void:
 		var text: String = entry.label + ("  -  " + String(entry.disabled) if greyed else "")
 		draw_string(font, rect.position + Vector2(6, 16), text, HORIZONTAL_ALIGNMENT_LEFT, rect.size.x - 8, 13,
 			Color(0.5, 0.5, 0.5) if greyed else Color.WHITE)
+	# Triage card buttons.
+	var card := vitals.triage()
+	for i in Vitals.TRIAGE_CARDS.size():
+		var id: StringName = Vitals.TRIAGE_CARDS[i]
+		var tr := _triage_rect(i)
+		draw_rect(tr, Vitals.TRIAGE_COLORS[id].darkened(0.0 if id == card else 0.55))
+		draw_rect(tr, Color.WHITE if id == card else Color(0.15, 0.15, 0.15), false, 3.0 if id == card else 1.0)
+		draw_string(font, tr.position + Vector2(4, 19), id.capitalize(), HORIZONTAL_ALIGNMENT_CENTER, tr.size.x - 8, 12,
+			Color.BLACK if id in [Vitals.TRIAGE_MINIMAL, Vitals.TRIAGE_DELAYED] else Color.WHITE)
 	# Signs (numbers only with a pulse oximeter) and the activity log.
 	var right := top + Vector2(720, 70)
 	draw_string(font, right, "Signs", HORIZONTAL_ALIGNMENT_LEFT, 340, 16)
