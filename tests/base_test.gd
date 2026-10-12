@@ -272,7 +272,7 @@ func _test_injuries_and_medbay() -> void:
 		v.server_fall(4.5)
 		var o := {"wounds": v.wound_list(), "blood": v.blood_fraction(), "burn": v.burn_share(), "blast_lung": v.has_blast_lung()}
 		v.queue_free()
-		if o.wounds.any(func(w: Dictionary) -> bool: return String(w.kind) == "fracture"):
+		if o.wounds.any(func(w: Dictionary) -> bool: return String(w.kind) == "fracture" and StringName(w.name) in BodyMap.LEG_BONES):  # a leg, not the pelvis a fall can break too
 			broken = Roster.assess_outcome(o)
 			break
 	check(not broken.is_empty() and int(broken.days) == Roster.FRACTURE_DAYS + Roster.EXTRA_INJURY_DAYS and "burns" in broken.injuries
