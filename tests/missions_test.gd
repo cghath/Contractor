@@ -122,7 +122,27 @@ func _test_deployment() -> void:
 	var marker: Array = briefing.objectives[0].pos
 	check(module != null and module.distance_to(Vector3(float(marker[0]), 0, float(marker[1]))) <= 0.5 and not (briefing.known_enemies as Array).is_empty(),
 		"the briefing marks the raid at its module (%s) and what intel knows of the enemy there" % raid.module_id)
+	# The raid's module streamed in (its first garrison out) before the briefing; the true force
+	# is bigger than its own four posts.
+	raid.enemy_count = 10
+	CompoundLevel.spawn_ai = true
+	level._ai_ready = true
+	level._spawn_garrison(module)
+	var first := _garrison(module).size()
 	check(Contracts.server_start_deployment([], ZONE) == "" and Contracts.deployment().cids.size() == 4, "deployed on all four (a hot zone)")
+	CompoundLevel.spawn_ai = false
+	var garrison := _garrison(module)
+	var apart := true
+	for i in garrison.size():
+		for j in range(i + 1, garrison.size()):
+			apart = apart and garrison[i].global_position.distance_to(garrison[j].global_position) > 0.7
+	var targeted: Array = Contracts.deployment().cids.map(func(cid: String) -> String: return String(Contracts.contract(cid).module_id))
+	var other := level.modules().filter(func(m: ZoneModule) -> bool: return not m.module_id in targeted)[0] as ZoneModule
+	check(first == 4 and garrison.size() == 10 and apart and level.garrison_size(module.module_id) == 10 and level.garrison_size(other.module_id) == 4,
+		"the raid's module holds the true count: 4 posts, topped up on deployment, none on top of another; other modules keep 4 (%d)" % garrison.size())
+	check(garrison.all(func(s: Soldier) -> bool: return s.buddy != null), "each with a buddy")
+	for s: Soldier in garrison:
+		s.queue_free()  # the rest of this suite runs without AI
 	var placed := true
 	for o: Dictionary in Contracts.objectives.list:
 		var m := level.get_module(String(o.params.get("module_id", "")))
@@ -293,6 +313,18 @@ func _offer(type: String) -> Dictionary:
 
 func _add(c: Dictionary) -> String:
 	return Contracts.server_add_offer(c)
+
+
+## A module's garrison soldiers (callsigns "<module id>_H<n>"), their brains off.
+func _garrison(module: ZoneModule) -> Array[Soldier]:
+	var out: Array[Soldier] = []
+	for n in level.ai.get_children():
+		var s := n as Soldier
+		if s and String(s.name).begins_with(("%s_H" % module.module_id).validate_node_name()) and not s.is_queued_for_deletion():
+			if SquadAI.of(s):
+				SquadAI.of(s).process_mode = Node.PROCESS_MODE_DISABLED
+			out.append(s)
+	return out
 
 
 func _item(uid: String) -> WorldItem:

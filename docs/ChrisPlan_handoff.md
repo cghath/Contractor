@@ -113,6 +113,12 @@ V2 can run beside V1.
 - **Enemies.**
   - Gear by region: Chinese, Russian, Iranian, insurgent.
   - Technicals and light vehicles, using Captain's technical models.
+  - **Suicide bombers and VBIEDs** (Captain, 2026-10-11: "where it fits best in the roadmap").
+    Insurgent behaviour, so it belongs here. A bomber on foot is a hostile carrying a placed
+    charge that rides him (`Charges` already sticks to and rides people and moving bodies); his
+    AI closes on the squad and sets it off, with tells (bulky clothes, ignoring shouts to stop).
+    VBIEDs are technicals or civilian cars carrying charges, so they need wave 5 V1 (vehicle
+    core) first. Counterplay: spot him, shout, shoot early, disable the vehicle.
   - Rival contractor teams.
   - Bounty hunters with a heat meter, and named, Nemesis-style hunter squads that remember the
     squad.
@@ -147,6 +153,9 @@ operations) the design doc puts under it.
 ## Backlog (small, any time)
 
 **From Captain's playtests and the reviews:**
+- **Zip cuffs lootable in zones** (Captain, 2026-10-11). They stay a base-shop buy, but some
+  should also turn up as loot in zones (checkpoints, outposts, on hostile soldiers' bodies), so
+  a squad that forgot them can still find a pair. See `ZoneModules.LOOT` and the hostile loadouts.
 - You can fire during a pickup or equip animation.
 - A dragged casualty eases back about 1 m when put down.
 - An equip animation plays even when the action then fails.

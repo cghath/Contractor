@@ -38,6 +38,11 @@ const REINFORCE_TRIES := 32
 const SPAWN_SPREAD_M := 2.0
 ## Hostile garrisons: kit and stats (the compound's hostiles').
 const GARRISON_STATS := {"combat": 0.45, "discipline": 0.5, "mode": "aware"}
+## A contract's target module holds its true enemy count (Captain, 2026-10-11; garrison_size).
+## Posts past the module's own (ZoneModules.GARRISON) go beside them: the first clear spot
+## this far out round a post, a man's width (EXTRA_POST_CLEAR_M) from walls and each other.
+const EXTRA_POST_RINGS_M: Array[float] = [1.3, 2.4, 3.5]
+const EXTRA_POST_CLEAR_M := 0.4
 
 ## The zone definition (ZoneDef), set before the node enters the tree (configure()).
 var def: Dictionary = {}
@@ -53,7 +58,7 @@ var _by_id := {}  # module id -> ZoneModule
 ## Every module's voxel edit log (module id -> Array of edits), on every peer. On the host its
 ## entries are the same dictionaries as in GameState.voxel_edits.
 var _logs := {}
-var _garrisoned := {}  # host: module ids whose garrison has spawned
+var _garrisoned := {}  # host: module id -> how many of its garrison posts have spawned
 var _next_stream := 0.0
 
 
@@ -67,6 +72,7 @@ func _ready() -> void:
 		def = ZoneDef.get_def("test")
 	super._ready()
 	squad_for(&"hostile").patrol = []  # garrisons hold their ground
+	Contracts.contract_live.connect(_on_contract_live)
 	players.child_entered_tree.connect(_on_player_entered)
 
 
@@ -277,30 +283,88 @@ func _spawn_ai() -> void:
 			_spawn_garrison(module)
 
 
-## Host only. A module's hostiles (ZoneModules.GARRISON), all but those whose bodies the zone
-## save holds, in buddy pairs, holding their ground.
-func _spawn_garrison(module: ZoneModule) -> void:
-	if _garrisoned.has(module.module_id) or not _ai_ready or not spawn_ai:
+## How many hostiles hold module `module_id`: the true enemy count (Contracts.enemy_force)
+## of a deployed contract that targets it (the most, if several do), else the module's own
+## posts (ZoneModules.GARRISON: 4). An understated briefing really bites.
+func garrison_size(module_id: String) -> int:
+	var module := get_module(module_id)
+	var n: int = (ZoneModules.GARRISON.get(module.type, []) as Array).size() if module else 0
+	var target := -1
+	for cid: String in Contracts.deployment().get("cids", []):
+		if String(Contracts.contract(cid).get("module_id", "")) == module_id:
+			target = maxi(target, int(Contracts.enemy_force(cid).get("count", 0)))
+	return target if target >= 0 else n
+
+
+## Host: a contract went live; its target module may already hold its first garrison (it
+## streamed in before the briefing), so it's topped up to the true count.
+func _on_contract_live(cid: String, _objectives: Array) -> void:
+	if not multiplayer.is_server():
 		return
-	_garrisoned[module.module_id] = true
+	var module := get_module(String(Contracts.contract(cid).get("module_id", "")))
+	if module and _garrisoned.has(module.module_id):
+		_spawn_garrison(module)
+
+
+## Host only. A module's hostiles (garrison_size of them: the module's posts, then extra posts
+## beside them), all but those whose bodies the zone save holds, in buddy pairs, holding their
+## ground. Called again it tops the garrison up to garrison_size (never takes anyone away).
+func _spawn_garrison(module: ZoneModule) -> void:
+	if not _ai_ready or not spawn_ai:
+		return
+	var from := int(_garrisoned.get(module.module_id, 0))
+	var want := garrison_size(module.module_id)
+	if _garrisoned.has(module.module_id) and from >= want:
+		return
+	_garrisoned[module.module_id] = maxi(from, want)
 	var fallen := {}
 	for record: Dictionary in GameState.bodies:
 		if String(record.get("faction", "")) == "hostile":
 			fallen[String(record.get("label", ""))] = true
-	var spawned: Array = []
 	var spots: Array = ZoneModules.GARRISON.get(module.type, [])
-	for i in spots.size():
-		var callsign := ("%s_H%d" % [module.module_id, i + 1]).validate_node_name()
+	if spots.is_empty():
+		return
+	var taken: Array[Vector3] = []
+	for i in range(from, want):
+		var callsign := _garrison_callsign(module, i)
 		if fallen.has(callsign) or ai.get_node_or_null(NodePath(callsign)) != null:
-			spawned.append(null)
 			continue
-		spawned.append(spawn_soldier({"name": callsign, "faction": "hostile", "variant": "urban", "pos": module.to_global(spots[i]),
+		var pos := module.to_global(spots[i]) if i < spots.size() else _extra_post(module.to_global(spots[i % spots.size()]), taken)
+		taken.append(pos)
+		spawn_soldier({"name": callsign, "faction": "hostile", "variant": "urban", "pos": pos,
 			"loadout": HOSTILE_LOADOUT, "combat": GARRISON_STATS.combat, "discipline": GARRISON_STATS.discipline, "guard": true,
-			"mode": GARRISON_STATS.mode}))
-	for i in spawned.size():
-		var mate: Soldier = spawned[i ^ 1] if (i ^ 1) < spawned.size() else null
-		if spawned[i]:
-			(spawned[i] as Soldier).buddy = mate
+			"mode": GARRISON_STATS.mode})
+	for i in want:
+		var me := ai.get_node_or_null(NodePath(_garrison_callsign(module, i))) as Soldier
+		if me and (me.buddy == null or not is_instance_valid(me.buddy)):
+			me.buddy = ai.get_node_or_null(NodePath(_garrison_callsign(module, i ^ 1))) as Soldier
+
+
+func _garrison_callsign(module: ZoneModule, i: int) -> String:
+	return ("%s_H%d" % [module.module_id, i + 1]).validate_node_name()
+
+
+## Host: a clear spot for an extra garrison post beside the post at `post` (world): the first
+## of EXTRA_POST_RINGS_M round it with room for a man (no wall, nobody already put in `taken`),
+## else the post itself nudged aside.
+func _extra_post(post: Vector3, taken: Array[Vector3]) -> Vector3:
+	var space := get_world_3d().direct_space_state
+	var shape := CapsuleShape3D.new()
+	shape.radius = EXTRA_POST_CLEAR_M
+	shape.height = 1.6
+	var query := PhysicsShapeQueryParameters3D.new()
+	query.shape = shape
+	var start := absi(hash(post)) % 8
+	for r in EXTRA_POST_RINGS_M:
+		for k in 8:
+			var a := TAU * float((start + k) % 8) / 8.0
+			var p := post + Vector3(cos(a), 0.0, sin(a)) * r
+			if taken.any(func(t: Vector3) -> bool: return t.distance_to(p) < EXTRA_POST_CLEAR_M * 2.5):
+				continue
+			query.transform = Transform3D(Basis.IDENTITY, p + Vector3.UP * 1.0)
+			if space.intersect_shape(query, 1).is_empty():
+				return p
+	return post + Vector3(0.9, 0.0, 0.9 * float(taken.size() % 3))
 
 
 func _add_player(id: int) -> void:
