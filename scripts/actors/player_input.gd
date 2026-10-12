@@ -61,6 +61,7 @@ func _ready() -> void:
 	body.add_child(hud)
 	interaction = InteractionMenu.new(body)
 	hud.add_child(interaction)
+	hud.add_child(LauncherSight.new(body))  # anti-armour launchers: sight, lock, fire (wave 5)
 	body.loadout_changed.connect(_update_view_model)
 	_update_view_model()
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
@@ -125,6 +126,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		body.select_weapon(&"primary")
 	elif event.is_action_pressed(&"weapon_sidearm"):
 		body.select_weapon(&"sidearm")
+	elif event.is_action_pressed(&"weapon_launcher") and body.inventory.slots.get(Launchers.SLOT, &"") != &"":
+		body.select_weapon(Launchers.SLOT)
 
 
 func _process(delta: float) -> void:
@@ -261,6 +264,9 @@ func _try_fire() -> void:
 			or body.carry_mode != &"" or is_instance_valid(body.vehicle):  # both hands on the casualty; or riding (the seat's gun fires: Vehicle)
 		return
 	var weapon := body.active_weapon()
+	if Launchers.is_launcher(weapon):
+		LauncherSight.of(body).try_fire()  # its own fire path (wave 5)
+		return
 	if weapon == null or weapon.type != "weapon":
 		return
 	# Fire mode (W3): F moves the selector; the trigger follows the mode.
@@ -282,12 +288,12 @@ func _try_fire() -> void:
 
 func _update_aim(delta: float) -> void:
 	var weapon := body.active_weapon()
-	body.is_aiming = _captured() and body.vitals.is_up() and weapon != null and weapon.type == "weapon" \
+	body.is_aiming = _captured() and body.vitals.is_up() and weapon != null and (weapon.type == "weapon" or Launchers.is_launcher(weapon)) \
 		and body.inventory.hands == &"" and not body.is_reloading and Input.is_action_pressed(&"aim")
 	var fov := float(weapon.stats.get("ads_fov", 55)) if body.is_aiming else BASE_FOV
 	body.camera.fov = lerpf(body.camera.fov, fov, minf(delta * 12.0, 1.0))
 	var hip_view := HIP_VIEW * Vector3(-1.0 if body.left_handed else 1.0, 1, 1)  # off the firing shoulder
-	var ads_view := ADS_EYE - VoxelArt.sight_point(VoxelArt.model_for(weapon)) if weapon else hip_view
+	var ads_view := ADS_EYE - VoxelArt.sight_point(VoxelArt.model_for(weapon)) if weapon and not Launchers.is_launcher(weapon) else hip_view
 	var lowered := CharacterModel.VIEW_LOWER_OFFSET * body.model.view_lower()  # ducks while the hands are busy
 	body.view_model.position = body.view_model.position.lerp((ads_view if body.is_aiming else hip_view) + lowered, minf(delta * 14.0, 1.0))
 
@@ -295,6 +301,9 @@ func _update_aim(delta: float) -> void:
 func _try_reload() -> void:
 	var weapon := body.active_weapon()
 	var now := Soldier._now()
+	if Launchers.is_launcher(weapon):
+		LauncherSight.of(body).try_reload()  # load or swap its round (wave 5)
+		return
 	if weapon == null or weapon.type != "weapon" or now < body._busy_until or body.inventory.hands != &"" or not body.vitals.is_up():
 		return
 	var ammo := Soldier._ammo_of(weapon)
@@ -343,6 +352,9 @@ func _update_view_model() -> void:
 	for child in body.view_model.get_children():
 		child.queue_free()
 	if id == &"":
+		return
+	if Launchers.is_launcher(weapon):
+		body.view_model.add_child(LauncherSight.view_node(weapon))  # placeholder launcher (wave 5)
 		return
 	var model := VoxelArt.model_for(weapon)
 	body.view_model.add_child(VoxelArt.instance(model, body.model.variant))

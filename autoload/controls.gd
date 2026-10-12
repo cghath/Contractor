@@ -24,6 +24,7 @@ const KEYS := {
 	&"map": [KEY_M],  # the map (MapScreen): grid, markers, squad, extraction
 	&"weapon_primary": [KEY_1],
 	&"weapon_sidearm": [KEY_2],
+	&"weapon_launcher": [KEY_3],  # the anti-armour launcher (wave 5, Launchers)
 	&"pause": [KEY_ESCAPE],
 	&"quick_save": [KEY_HOME],  # F-keys are the squad command menu
 	&"debug_hurt": [KEY_K],  # debug builds only: hurt yourself to test going down and dying
