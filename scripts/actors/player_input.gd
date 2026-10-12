@@ -14,8 +14,9 @@ const ADS_EYE := Vector3(0.0, -0.012, -0.24)
 ## Render layer for your own body and gear; your camera skips it.
 const LOCAL_ONLY_LAYER := 1 << 1
 ## Throwables in the order Shift+G cycles them (next_throwable): frag and flashbang always,
-## then each smoke colour you carry.
-const THROWABLES: Array[StringName] = [&"frag_grenade", &"flashbang", &"smoke_grenade", &"smoke_green", &"smoke_yellow", &"smoke_blue", &"smoke_purple"]
+## then each smoke colour you carry, then the breaching charge if you carry one (G with it
+## picked places it: Charges).
+const THROWABLES: Array[StringName] = [&"frag_grenade", &"flashbang", &"smoke_grenade", &"smoke_green", &"smoke_yellow", &"smoke_blue", &"smoke_purple", Charges.ITEM]
 ## Always in the Shift+G cycle, carried or not (smokes only show up while you have one).
 const ALWAYS_CYCLED: Array[StringName] = [&"frag_grenade", &"flashbang"]
 
@@ -30,6 +31,9 @@ var _focus: Node3D  # an item or downed body under the crosshair, for the prompt
 var _view_model_id: StringName = &""
 var _shake := 0.0
 var _deaf := false
+## Placing a breaching charge (Charges): the ghost follows the view until Fire commits it.
+var placing := false
+var _ghost: Node3D
 ## Muffled hearing: everything through a low-pass this low, and quieter.
 const DEAF_CUTOFF_HZ := 600.0
 const DEAF_VOLUME_DB := -12.0
@@ -89,6 +93,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		return  # downed: no giving up (handoff); you come round on your own, or the arrest window runs out
 	elif interaction.is_open() and event is InputEventMouseButton:
 		return  # clicks don't fire through the interaction menu
+	elif placing and event.is_action_pressed(&"fire"):
+		_commit_charge()  # Fire puts the charge where the ghost sits
+	elif placing and (event.is_action_pressed(&"aim") or (event.is_action_pressed(&"grenade") and not (event is InputEventKey and (event.shift_pressed or event.alt_pressed)))):
+		_stop_placing("Charge put away")
 	elif event.is_action_pressed(&"grenade") and body.carry_mode != &"":
 		# Hands full with a casualty: G lets go of them (Release / Put down) instead of throwing.
 		body._server_release_body.rpc_id(1)
@@ -100,6 +108,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		elif event is InputEventKey and event.shift_pressed:
 			throwable = next_throwable(throwable, body.inventory)
 			hud.flash("%s (%d)" % [ItemDB.get_item(throwable).name, body.inventory.count_of(throwable)])
+		elif throwable == Charges.ITEM:
+			_start_placing()
 		else:
 			_try_throw()
 	elif event.is_action_pressed(&"reload"):
@@ -114,6 +124,8 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _process(delta: float) -> void:
 	_update_interaction(delta)
+	if placing:
+		_update_ghost()
 	if body.view_yaw() != _view_yaw:
 		# Taking hold of a casualty to drag (or letting go): the body turns round under the
 		# view, so you keep looking where you were, at the casualty.
@@ -240,7 +252,7 @@ func _update_interaction(delta: float) -> void:
 
 
 func _try_fire() -> void:
-	if not _captured() or body.inventory.hands != &"" or not body.vitals.is_up() or interaction.is_open() \
+	if not _captured() or placing or body.inventory.hands != &"" or not body.vitals.is_up() or interaction.is_open() \
 			or body.carry_mode != &"":  # both hands on the casualty (carrying, or dragging by the straps)
 		return
 	var weapon := body.active_weapon()
@@ -324,3 +336,54 @@ func _update_view_model() -> void:
 		child.queue_free()
 	if id != &"":
 		body.view_model.add_child(VoxelArt.instance(VoxelArt.model_for(weapon), body.model.variant))
+
+
+# --- Placing a charge (Charges: like Arma Reforger's explosives) --------------------------
+
+func _start_placing() -> void:
+	if Soldier._now() < body._busy_until or body.inventory.hands != &"" or body.carry_mode != &"":
+		return
+	if body.inventory.count_of(Charges.ITEM) <= 0:
+		hud.flash("No %s left" % ItemDB.get_item(Charges.ITEM).name)
+		return
+	placing = true
+	_ghost = Charges.make_visual(true)
+	_ghost.name = "ChargeGhost"
+	body.get_parent().add_child(_ghost)
+	_update_ghost()
+	hud.flash("Place the charge: Fire to set it, G to put it away")
+
+
+func _stop_placing(note := "") -> void:
+	placing = false
+	if is_instance_valid(_ghost):
+		_ghost.queue_free()
+	_ghost = null
+	if note != "":
+		hud.flash(note)
+
+
+## The ghost sits where the charge would go, lined up with the surface: green where it can
+## go, red (in front of you) where it can't.
+func _update_ghost() -> void:
+	if not body.vitals.is_up() or body.inventory.count_of(Charges.ITEM) <= 0 or body.inventory.hands != &"" or body.carry_mode != &"":
+		_stop_placing()
+		return
+	var dir := -body.camera.global_basis.z
+	var spot := Charges.placement(body, body.camera.global_position, dir)
+	_ghost.global_transform = Charges.surface_transform(spot.pos, spot.normal, dir)
+	var block := _ghost.get_node(^"Block") as MeshInstance3D
+	var material := (block.mesh as BoxMesh).material as StandardMaterial3D
+	material.albedo_color = Color(0.4, 1.0, 0.4, 0.45) if spot.ok else Color(1.0, 0.3, 0.3, 0.35)
+
+
+func _commit_charge() -> void:
+	var dir := -body.camera.global_basis.z
+	if not Charges.placement(body, body.camera.global_position, dir).ok:
+		hud.flash("Nothing to place it on here")
+		return
+	var charges := Charges.of(body)
+	if charges:
+		charges.request_place.rpc_id(1, body.camera.global_position, dir)
+	body._busy_until = Soldier._now() + Soldier.THROW_BUSY_S
+	_stop_placing()

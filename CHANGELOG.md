@@ -11,6 +11,53 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Wave 4B part 2: missions in zones (Captain's side, 2026-10-11)
+
+#### Added
+
+- **Captain's first four mission types** (`data/contracts.json`, from
+  `docs/mission_brainstorm.md`): **raid** (destroy a weapons cache or an AA gun; bonus: leave
+  no fighter standing), **HVT capture** (a hostile HVT taken alive to extraction, 90 min clock;
+  bonus: their phone), **hostage rescue** (a friendly hostage brought out, 75 min clock; bonus:
+  clear the guards) and **intel grab** (a laptop or hard case carried out; bonus: the
+  documents). They replace the four placeholders. Pay, enemy ranges and the clocks are Proposed.
+- **Contracts in the generated zones** (seam 3): every contract zone is a world-scale
+  `ZoneDef` generated from a fixed seed (`MissionRegistry.zone_def`), the same layout every
+  visit, and a contract targets one of its modules (`module_id`); its objectives sit at that
+  module's sites (`contracts.json` "modules": sites for the compound, outpost, village and
+  checkpoint) wherever it stands in the zone (`Contracts.module_origin`). Accepting one deploys
+  into its zone. A cache's voxel count can be `"auto"` (`ZoneModules.solid_voxels_in`).
+- **New module art for raids**: an AA emplacement in the outpost (sandbag ring, twin-barrel
+  steel gun: a grenade barely chips it) and crate caches in the village's plank shack and by
+  the checkpoint's booth.
+- **People reach the contract** (seam 5): when a contract goes live (`Contracts.contract_live`)
+  the people layer puts its HVT or hostage (named, carrying their own intel), its intel pieces
+  (each with its own intel id: only that piece counts), civilians going about their day in the
+  zone's modules, and a delivery point at each landing zone. The People ledger feeds the
+  contracts: deliveries, intel carried out (banked mid-zone), civilian casualties (once per
+  civilian; the 8th voids), and a dead HVT or hostage (`People.hvt_lost`) fails its objective.
+  An HVT brought to a landing zone the squad picked counts too.
+- **Timed objectives**: "time_limit_min" on a mission type; the HUD shows the minutes left and
+  the objective fails when the clock runs out.
+- **Breaching charges, placed like Arma Reforger's** (Captain): Shift+G to the charge, G holds
+  it up as a ghost lined up with the surface you look at (2.5 m), Fire sets it, G or RMB puts it
+  away. It sticks to anything: the world, a person (it rides their body part) or a moving body
+  (vehicles from wave 5 get `server_explosion`), the hook for suicide bombers on foot and in
+  vehicles later. After the fuse (Proposed 10 s): a frag blast and a breaching carve; a raid
+  target within 1 m is destroyed (`Charges`, `Objectives.server_charge_blast`).
+- **Reinforcements sized from the true force** (seam 7): `Contracts.reinforcement_tuning`
+  (first wave sooner and waves bigger the higher the true rating, living hostiles capped at
+  the true count plus 8, the waves' skill from the true quality), started with the contract.
+  In a zone they come in at the terrain's edge nearest the squad but at least 350 m out
+  (`ZoneLevel.reinforcement_edge`).
+- **The briefing** marks objectives at their module and what intel knows of the enemy there.
+- `missions` test suite (21 suites now).
+
+#### Changed
+
+- The contracts test registers its own compound-clearing type for the clear-area checks.
+- `breaching_charge` fuse 5 s -> 10 s (Proposed).
+
 ### Female soldiers (Captain, 2026-10-11)
 
 #### Added

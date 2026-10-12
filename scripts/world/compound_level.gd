@@ -188,6 +188,7 @@ func _ready() -> void:
 	Net.peer_left.connect(_on_peer_left)
 	people = PeopleLayer.new()  # "People": civilians, HVTs, intel (wave 4)
 	add_child(people)
+	add_child(Charges.new())  # "Charges": placed explosives (wave 4B)
 
 
 ## The playable area on the map, in metres on the ground plane (x along x, y along z): the

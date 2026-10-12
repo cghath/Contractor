@@ -27,6 +27,13 @@ const STREAM_CHECK_S := 0.25
 ## Haze: about 50% at 1 km, 25% at 2 km.
 const FOG_DENSITY := 0.0007
 const FOG_COLOUR := Color(0.70, 0.74, 0.78)
+## Reinforcements (Reinforcements.edge_point): they come in this far inside the zone's edge
+## (there is no ground beyond it), at the spot of REINFORCE_TRIES round the edge nearest the
+## players but at least REINFORCE_MIN_M from every one of them (the furthest if none is).
+## Proposed.
+const REINFORCE_INSET_M := 40.0
+const REINFORCE_MIN_M := 350.0
+const REINFORCE_TRIES := 32
 ## Players insert this far apart around the insertion point.
 const SPAWN_SPREAD_M := 2.0
 ## Hostile garrisons: kit and stats (the compound's hostiles').
@@ -430,3 +437,26 @@ func soldiers_for_navigation() -> Array[Soldier]:
 			if s and not s.is_queued_for_deletion() and not s.vitals.is_dead():
 				out.append(s)
 	return out
+
+
+## Where a reinforcement wave comes in (Reinforcements.edge_point): on the zone's edge, inside
+## the terrain, near the players (`players`: their x, z) but out of their sight. A world point.
+func reinforcement_edge(players: Array[Vector2]) -> Vector3:
+	var area := map_area().grow(-REINFORCE_INSET_M)
+	var best := area.get_center()
+	var best_score := INF
+	var far := best
+	var far_d := -1.0
+	for i in REINFORCE_TRIES:
+		var spot := Reinforcements._perimeter_point(area, (float(i) + randf()) / REINFORCE_TRIES)
+		var d := INF
+		for p in players:
+			d = minf(d, spot.distance_to(p))
+		if d > far_d:
+			far_d = d
+			far = spot
+		if d >= REINFORCE_MIN_M and d < best_score:
+			best_score = d
+			best = spot
+	var at := best if best_score < INF else far
+	return ground_point(Vector3(at.x, 0.0, at.y))

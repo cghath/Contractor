@@ -33,6 +33,11 @@ static var populate := false
 ## Let badly hurt, isolated hostiles surrender (proposed; optional in the spec). Off by default
 ## for the same reason; the main menu's checkbox turns it on with populate.
 static var surrender_enabled := false
+## Put a contract's people and intel in the level when it goes live (Contracts.contract_live):
+## its HVT or hostage, the intel it places, civilians in the zone's modules and delivery
+## points at the zone's landing zones. On by default; a test that drives objectives by hand
+## turns it off.
+static var contract_people := true
 
 const TICK_S := 0.25
 const SURRENDER_CHECK_S := 1.0
@@ -115,6 +120,7 @@ var _reported := {}  # enemy name -> when they were last reported
 var _report_serial := 0
 var _cuffing := {}  # target instance id -> true while being cuffed
 var _rng := RandomNumberGenerator.new()
+var _zone_people := false  # host: the zone's civilians and delivery points are out
 
 
 ## The people layer of the level `from` is in (or null).
@@ -141,6 +147,7 @@ func _ready() -> void:
 	add_child(spawner)
 	_rng.seed = 4511
 	Net.hosted.connect(_on_hosted)
+	Contracts.contract_live.connect(_on_contract_live)
 	Net.peer_joined.connect(_on_peer_joined)
 
 
@@ -202,6 +209,95 @@ func server_populate(content: Dictionary) -> void:
 			lvl.spawn_item(StringName(data.id), int(data.get("count", 1)), data.pos, data.uid)
 	for data: Dictionary in content.get("points", []):
 		server_add_point(data.pos, float(data.get("radius", DeliveryPoint.DEFAULT_RADIUS)), String(data.get("label", "Extraction")), String(data.get("name", "")))
+
+
+# --- Host: a contract's people (wave 4B) ---------------------------------------------------
+
+func _on_contract_live(_cid: String, objectives: Array) -> void:
+	if multiplayer.is_server() and contract_people and is_inside_tree():
+		server_contract_content(objectives)
+
+
+## Host only. What a contract's objectives need in the level (Objectives.from_contract's
+## params): the HVT or hostage of each DELIVER_HVT (with the intel they carry), each intel
+## piece an EXTRACT_ITEM placed; and the first time in a world-scale zone, civilians going
+## about their day in its modules and a delivery point at each landing zone (HVTs brought
+## there are delivered, intel carried there is banked).
+func server_contract_content(objectives: Array) -> void:
+	var lvl := level as CompoundLevel
+	for o: Dictionary in objectives:
+		var p: Dictionary = o.get("params", {})
+		var at: Array = p.get("pos", [])
+		if at.size() != 3:
+			continue
+		var pos := Vector3(float(at[0]), float(at[1]), float(at[2]))
+		if o.kind == Objectives.DELIVER_HVT and p.has("person") and p.has("hvt"):
+			var hvt_id := String(p.hvt)
+			if hvt(hvt_id) != null or People.is_delivered(hvt_id):
+				continue
+			var person: Dictionary = p.person
+			var s := server_spawn_person({"name": ("Person_" + hvt_id).validate_node_name(), "kind": "hvt",
+				"side": String(person.get("side", Person.HOSTILE)), "label": String(person.get("label", "HVT")), "pos": pos, "hvt_id": hvt_id})
+			for carried: Dictionary in person.get("intel", []):
+				s.inventory.take(StringName(carried.id), 1, {"intel_id": String(carried.intel_id), "source": "HVT %s" % s.display_name()})
+		elif o.kind == Objectives.EXTRACT_ITEM and p.has("place") and lvl:
+			for intel_id: String in p.get("intel_ids", []):
+				if not GameState.is_looted(intel_id):
+					lvl.spawn_item(StringName(p.place), 1, pos, intel_id, {"intel_id": intel_id, "source": String(o.get("text", ""))})
+	if not _zone_people and level.has_method(&"modules"):
+		_zone_people = true
+		_spawn_civilians()
+		var n := 0
+		for lz: Vector3 in level.call(&"extraction_points"):
+			n += 1
+			server_add_point(lz, Extraction.RADIUS_M, "LZ %d" % n, "LZ%d" % n)
+
+
+## Host only. Civilians in every module of a world-scale zone that has them (contracts.json
+## "civilians"), each with a name of their own in the zone, walking their routine. One the
+## zone save holds the body of stays dead.
+func _spawn_civilians() -> void:
+	var names: Array = MissionRegistry.data().get("civilian_names", ["Civilian"])
+	var used := {}
+	var fallen := {}
+	for record: Dictionary in GameState.bodies:
+		fallen[String(record.get("label", ""))] = true
+	for m: Node in level.call(&"modules"):
+		var module := m as ZoneModule
+		var list: Array = MissionRegistry.module(module.type).get("civilians", [])
+		for i in list.size():
+			var data: Dictionary = list[i]
+			var k := absi(hash([module.module_id, i]))
+			var who := String(names[k % names.size()])
+			for step in names.size():
+				who = String(names[(k + step) % names.size()])
+				if not used.has(who):
+					break
+			used[who] = true
+			var label := "Civilian (%s)" % who
+			if fallen.has(label):
+				continue
+			var routine: Array = []
+			for q: Array in data.get("routine", []):
+				routine.append(module.to_global(Vector3(float(q[0]), float(q[1]), float(q[2]))))
+			var at: Array = data.get("pos", [0, 0.1, 0])
+			server_spawn_person({"name": ("Civ_%s_%d" % [module.module_id, i]).validate_node_name(), "kind": "civilian", "side": "neutral",
+				"label": label, "pos": module.to_global(Vector3(float(at[0]), float(at[1]), float(at[2]))), "routine": routine})
+
+
+## Host only. HVTs getting out at an extraction point centred on `centre` (x, z) within
+## `radius`, or carried by one of `extracted`, not delivered yet: [{"hvt", "alive"}] for the
+## debrief (an extraction point the squad picked, which isn't a delivery point).
+func hvts_out(centre: Vector2, radius: float, extracted: Array) -> Array:
+	var out: Array = []
+	for s in people():
+		var st := state_of(s)
+		if Person.kind_of(s) != Person.HVT or bool(st.get("delivered", false)):
+			continue
+		var inside := Vector2(s.global_position.x, s.global_position.z).distance_to(centre) <= radius
+		if inside or (is_instance_valid(s.carried_by) and s.carried_by in extracted):
+			out.append({"hvt": String(st.get("hvt_id", s.name)), "alive": not s.vitals.is_dead()})
+	return out
 
 
 ## Host only. A civilian or HVT. `data`: "name" (node name), "kind" ("civilian" or "hvt"),
@@ -319,9 +415,15 @@ func _on_peer_joined(id: int) -> void:
 
 # --- Host: casualties ----------------------------------------------------------------------
 
-## A civilian died: a casualty for us if our side hurt them last (Harm).
+## A person died: an HVT or hostage not yet brought in is lost (their objective fails); a
+## civilian is a casualty for us if our side hurt them last (Harm).
 func _on_person_died(s: Soldier) -> void:
-	if not is_instance_valid(s) or not Person.is_civilian(s):
+	if not is_instance_valid(s):
+		return
+	var st := state_of(s)
+	if Person.kind_of(s) == Person.HVT and not bool(st.get("delivered", false)):
+		People.server_hvt_lost(String(st.get("hvt_id", s.name)), s.display_name())
+	if not Person.is_civilian(s):
 		return
 	var harm := Harm.last(s)
 	if String(harm.get("faction", "")) == "friendly":

@@ -17,7 +17,11 @@ extends Node
 ##   "first_pairs", "pairs_every", "max_pairs": a wave is first_pairs buddy pairs, one more
 ##   pair every pairs_every waves, at most max_pairs;
 ##   "max_alive": no wave grows living hostiles past this (a wave that would is cut down);
-##   "offmap_m": how far beyond the map's edge they appear.
+##   "offmap_m": how far beyond the map's edge they appear (a level with its own
+##   reinforcement_edge(players) picks the spot instead: a world-scale zone has no ground
+##   beyond its edge);
+##   "combat", "combat_step", "combat_max": the waves' skill, rising by a step a wave (a
+##   contract sets it from its true quality: Contracts.reinforcement_tuning).
 
 ## Host: a wave arrived (`index` from 0, the soldiers spawned).
 signal wave_spawned(index: int, soldiers: Array)
@@ -32,6 +36,9 @@ const DEFAULTS := {
 	"max_pairs": 4,
 	"max_alive": 20,
 	"offmap_m": 15.0,
+	"combat": 0.4,
+	"combat_step": 0.03,
+	"combat_max": 0.65,
 }
 ## Hostile kit when the level has none of its own (CompoundLevel.HOSTILE_LOADOUT).
 const LOADOUT := ["plate_carrier_light", "plate_pe_l3", "helmet_bump", "assault_pack", "mk18",
@@ -157,7 +164,7 @@ func _send_wave(index: int) -> void:
 		var offset := across * PAIR_SPACING_M * (i - (size - 1) / 2.0)
 		var s: Soldier = level.call(&"spawn_soldier", {"name": "R%d_%d" % [index + 1, i + 1], "faction": "hostile",
 			"variant": "urban", "pos": _on_ground(edge + offset), "loadout": loadout if loadout is Array else LOADOUT,
-			"combat": minf(0.4 + 0.03 * index, 0.65), "discipline": 0.5, "guard": false, "mode": "aware"})
+			"combat": minf(float(params.combat) + float(params.combat_step) * index, float(params.combat_max)), "discipline": 0.5, "guard": false, "mode": "aware"})
 		if s == null:
 			continue
 		var brain := SquadAI.of(s)
@@ -176,6 +183,11 @@ func _send_wave(index: int) -> void:
 ## A spot beyond the map's edge (offmap_m out), out of the players' way: of EDGE_TRIES spots
 ## around the edge, the one furthest from the nearest player.
 func edge_point(level: Node) -> Vector3:
+	if level.has_method(&"reinforcement_edge"):
+		var at: Array[Vector2] = []
+		for p: Soldier in MapNodes.players(self):
+			at.append(Vector2(p.global_position.x, p.global_position.z))
+		return _on_ground(level.call(&"reinforcement_edge", at))
 	var area: Rect2 = level.call(&"map_area")
 	var out := float(params.get("offmap_m", DEFAULTS.offmap_m))
 	var grown := area.grow(out)

@@ -19,13 +19,17 @@ extends Node
 ##   server_hvt_lost(hvt_id) fails it.
 ## - DESTROY_CACHE: the voxels in "box" ([[x, y, z], [x, y, z]] metres) are mostly gone
 ##   (less than "cache_destroyed_share" of the site's authored "voxels" left; frags and
-##   explosives carve them), or server_cache_destroyed(cache_id), or a charge placed with
-##   server_place_charge. The share is measured against the authored count, never against
+##   explosives carve them; a steel AA gun barely chips), or server_cache_destroyed(cache_id),
+##   or a breaching charge going off within "charge_kill_m" of its box (Charges, placed by
+##   players anywhere, or server_place_charge). The share is measured against the authored count, never against
 ##   what stands at deploy: a zone keeps its voxel damage, so a cache box already carved
 ##   (blown on an earlier contract and saved) must not count as destroyed on the next one.
 ##   With no "voxels" in the site, or a box already under the threshold when it is first
 ##   read, the voxel check stays off and only the hook or a charge completes it (a world or
 ##   4B pass that restores a zone rebuilds the cache).
+## - Any kind with "time_limit_s" (hostage rescue, HVT capture): fails when the clock, started
+##   when the objective goes live, runs out; DELIVER_HVT and EXTRACT_ITEM show the minutes left.
+## In a world-scale zone a cache's voxels are its module's ("module_id": world_of).
 
 signal changed
 
@@ -47,28 +51,63 @@ var _poll := 0.0
 var _armed := {}       # host: oid -> true once a CLEAR_AREA has seen a hostile (or timed out)
 var _first_poll := {}  # host: oid -> msec it was first checked
 var _cache_off := {}   # host: oid -> true when the voxel check is off (no baseline, or carved before deploy)
+var _started := {}     # host: oid -> time (s) its clock started (timed objectives)
 
 
-## Objectives from a contract's templates, placed at its module's sites. Sites are in the
-## module's own metres; `origin` is where the module sits in the level (a streamed module in
-## a world-scale zone), added to every position, rect and box.
+## Objectives from a contract's templates, placed at its target module's sites. Sites are in
+## the module's own metres; `origin` is where the module sits in the level (a module of a
+## world-scale zone: Contracts.module_origin), added to every position, rect and box. What a
+## mission puts in the zone goes in "params" for whoever spawns it (PeopleLayer):
+## - DELIVER_HVT: "hvt" is the site's HVT id made the contract's own (hvt_id), "person" who
+##   they are ("side", "label", "intel" carried, each with its intel id);
+## - EXTRACT_ITEM with a "place"d item: "items" is it and "intel_ids" the one the mission
+##   gives it (only that piece counts); with "of_hvt": the item the HVT carries;
+## - "module_id": the module (its voxel world holds a cache); "time_limit_s" from the type.
 static func from_contract(contract: Dictionary, origin := Vector3.ZERO) -> Array:
 	var out: Array = []
-	var module_id := String(contract.get("module", ""))
+	var module_type := String(contract.get("module", ""))
 	var templates: Array = contract.get("objectives", [])
+	var uid := String(contract.get("uid", contract.get("cid", "")))
 	for i in templates.size():
 		var t: Dictionary = templates[i]
+		var oid := "%s_o%d" % [contract.get("cid", "c"), i + 1]
 		# A template may carry its own site ("params", in level metres: a recovery contract's
 		# squadmate where they were left), else it names one of the module's.
 		var site: Dictionary = (t.params as Dictionary).duplicate(true) if t.has("params") \
-			else placed_site(MissionRegistry.site(module_id, String(t.get("site", ""))), origin)
+			else placed_site(MissionRegistry.site(module_type, String(t.get("site", ""))), origin)
+		if not t.has("params"):
+			if site.has("hvt"):
+				site.hvt = hvt_id(String(site.hvt), uid)
+				var person: Dictionary = (site.get("person", {}) as Dictionary).duplicate(true)
+				person.merge(t.get("person", {}), true)
+				var carried: Array = []
+				for item: Variant in person.get("intel", []):
+					carried.append({"id": String(item), "intel_id": "%s:%s" % [site.hvt, String(item)]})
+				person["intel"] = carried
+				site["person"] = person
+			if site.has("of_hvt"):
+				var of_id := hvt_id(String(MissionRegistry.site(module_type, String(site.of_hvt)).get("hvt", "")), uid)
+				site["intel_ids"] = (site.get("items", []) as Array).map(func(item: Variant) -> String: return "%s:%s" % [of_id, String(item)])
+			if site.has("place"):
+				site["items"] = [String(site.place)]
+				site["intel_ids"] = ["intel_%s_o%d" % [uid, i + 1]]
+			if contract.has("module_id"):
+				site["module_id"] = String(contract.module_id)
+		if t.has("time_limit_s"):
+			site["time_limit_s"] = float(t.time_limit_s)
 		var obj := {
-			"oid": "%s_o%d" % [contract.get("cid", "c"), i + 1], "cid": contract.get("cid", ""), "kind": t.get("kind", ""),
+			"oid": oid, "cid": contract.get("cid", ""), "kind": t.get("kind", ""),
 			"text": t.get("text", ""), "state": ACTIVE, "optional": bool(t.get("optional", false)),
 			"bonus_share": float(t.get("bonus_share", 0.0)), "progress": "", "params": site, "pos": site_pos(site),
 		}
 		out.append(obj)
 	return out
+
+
+## A site's HVT id made a contract's own (each contract has its own person); `uid` "" keeps it.
+static func hvt_id(base: String, uid: String) -> String:
+	return base if uid == "" or base == "" else "%s_%s" % [base, uid]
+
 
 
 ## A site moved by `origin` (metres).
@@ -154,6 +193,7 @@ func server_begin(objectives: Array) -> void:
 	_armed.clear()
 	_first_poll.clear()
 	_cache_off.clear()
+	_started.clear()
 	_commit()
 
 
@@ -175,6 +215,7 @@ func server_restore(objectives: Array) -> void:
 	_armed.clear()
 	_first_poll.clear()
 	_cache_off.clear()
+	_started.clear()
 	_commit(false)
 
 
@@ -204,9 +245,19 @@ func server_items_out(items: Array) -> void:
 		if o.kind != EXTRACT_ITEM:
 			continue
 		for entry: Dictionary in items:
-			if item_matches(o.params, StringName(entry.get("id", ""))):
+			if entry_matches(o.params, entry):
 				server_set_state(o.oid, DONE)
 				break
+
+
+## Whether a carried-out entry ({"id", "count", "state"}) counts for an EXTRACT_ITEM's `params`:
+## its item matches, and when the objective names "intel_ids" (a piece the mission placed) the
+## entry is that piece (its state's "intel_id").
+static func entry_matches(params: Dictionary, entry: Dictionary) -> bool:
+	if not item_matches(params, StringName(entry.get("id", ""))):
+		return false
+	var ids: Array = params.get("intel_ids", [])
+	return ids.is_empty() or String((entry.get("state", {}) as Dictionary).get("intel_id", "")) in ids
 
 
 static func item_matches(params: Dictionary, item_id: StringName) -> bool:
@@ -242,10 +293,10 @@ func server_cache_destroyed(cache_id: String) -> void:
 			server_set_state(o.oid, DONE)
 
 
-## Host: `soldier` places a breaching charge on the cache of objective `oid`: it must carry
-## one and stand within "charge_reach_m" of the cache. After "charge_fuse_s" the charge goes
-## off (a frag blast plus a wide carve) and the cache counts as destroyed. Returns whether
-## the charge was placed.
+## Host: `soldier` sets a breaching charge against the cache of objective `oid` (a helper for
+## the AI and tests; players place theirs freely, Charges): they must carry one and stand
+## within "charge_reach_m" of the cache. It goes off after "charge_fuse_s" (Charges) and the
+## cache counts as destroyed (server_charge_blast). Returns whether the charge was placed.
 func server_place_charge(soldier: Soldier, oid: String) -> bool:
 	var o := get_objective(oid)
 	if o.is_empty() or o.kind != DESTROY_CACHE or o.state != ACTIVE or soldier == null:
@@ -253,22 +304,27 @@ func server_place_charge(soldier: Soldier, oid: String) -> bool:
 	var box := _box_of(o)
 	var centre := box.get_center()
 	var reach := MissionRegistry.setting_f("charge_reach_m", 3.0) + box.size.length() * 0.5
-	if soldier.global_position.distance_to(centre) > reach or not soldier.inventory.remove_one(CHARGE_ITEM):
+	var charges := Charges.of(self)
+	if charges == null or soldier.global_position.distance_to(centre) > reach or soldier.inventory.count_of(CHARGE_ITEM) <= 0:
+		return false
+	if charges.server_place_at(soldier, Transform3D(Basis.IDENTITY, centre)) == "":
 		return false
 	o.progress = "charge set"
 	_commit()
-	get_tree().create_timer(MissionRegistry.setting_f("charge_fuse_s", 5.0)).timeout.connect(_detonate.bind(oid, centre))
 	return true
 
 
-func _detonate(oid: String, centre: Vector3) -> void:
-	var level := CompoundLevel.current(self)
-	if level:
-		Throwables.server_detonate(level, "frag", centre)
-		level.voxel_world.server_blast(centre, MissionRegistry.setting_f("charge_radius_m", 1.6))
-	var o := get_objective(oid)
-	if not o.is_empty() and o.state == ACTIVE:
-		server_set_state(oid, DONE)
+## Host (Charges): a charge went off at `pos`. A cache or AA site within "charge_kill_m" of it
+## is destroyed.
+func server_charge_blast(pos: Vector3) -> void:
+	var kill := MissionRegistry.setting_f("charge_kill_m", 1.0)
+	for o: Dictionary in active():
+		if o.kind != DESTROY_CACHE:
+			continue
+		var box := _box_of(o)
+		var nearest := pos.clamp(box.position, box.end)
+		if nearest.distance_to(pos) <= kill:
+			server_set_state(o.oid, DONE)
 
 
 static func _box_of(o: Dictionary) -> AABB:
@@ -285,18 +341,50 @@ func _process(delta: float) -> void:
 	if _poll > 0.0:
 		return
 	_poll = POLL_S
-	# Any level in the "level" group with a voxel_world will do (the compound, a zone level).
 	var level := get_tree().get_first_node_in_group(&"level")
 	if level == null:
 		return
-	var world := level.get(&"voxel_world") as VoxelWorld
 	for o: Dictionary in active():
 		match o.kind:
 			CLEAR_AREA:
 				_check_clear(o)
 			DESTROY_CACHE:
+				var world := world_of(level, o)
 				if world:
 					_check_cache(o, world)
+		if (o.params as Dictionary).has("time_limit_s") and o.state == ACTIVE:
+			_check_clock(o)
+
+
+## The voxel world an objective's site is in: its zone module's while that is streamed in
+## (null while it isn't), else the level's own (the compound).
+static func world_of(level: Node, o: Dictionary) -> VoxelWorld:
+	var module_id := String((o.params as Dictionary).get("module_id", ""))
+	if module_id != "" and level.has_method(&"get_module"):
+		var m: Node = level.call(&"get_module", module_id)
+		return m.get(&"voxel_world") as VoxelWorld if m else null
+	return level.get(&"voxel_world") as VoxelWorld
+
+
+## Seconds left on an objective's clock (INF without one). Host.
+func time_left(oid: String) -> float:
+	var o := get_objective(oid)
+	if o.is_empty() or not (o.params as Dictionary).has("time_limit_s"):
+		return INF
+	var started := float(_started.get(oid, Time.get_ticks_msec() / 1000.0))
+	return float(o.params.time_limit_s) - (Time.get_ticks_msec() / 1000.0 - started)
+
+
+## The clock of a timed objective (hostage, HVT): whole minutes left as its readout (a kind
+## with a readout of its own keeps that), and it fails when the time runs out.
+func _check_clock(o: Dictionary) -> void:
+	if not _started.has(o.oid):
+		_started[o.oid] = Time.get_ticks_msec() / 1000.0
+	var left := time_left(o.oid)
+	if left <= 0.0:
+		server_set_state(o.oid, FAILED, "time ran out")
+	elif o.kind in [DELIVER_HVT, EXTRACT_ITEM]:
+		server_set_state(o.oid, ACTIVE, "%d min left" % ceili(left / 60.0))
 
 
 ## Hostiles still standing in a CLEAR_AREA's rect.

@@ -26,6 +26,7 @@ func _ready() -> void:
 	GameState.zone_id = "test_contracts" + tag  # never touch a real save
 	Campaign.campaign_id = "test_contracts_campaign" + tag  # not the zone save's name: both live in user://saves
 	CompoundLevel.spawn_ai = false
+	PeopleLayer.contract_people = false  # the objectives are driven by hand here
 	Contracts.auto_show_debrief = joining
 	if joining:
 		Contracts.autosave = false  # the host's save file is the same one
@@ -38,6 +39,7 @@ func _ready() -> void:
 		await _run_client()
 		return
 	_test_generation()
+	_register_clear_compound()
 	_test_rating_and_understatement()
 	_test_negotiation()
 	_test_reveal_renegotiate_abort()
@@ -85,9 +87,9 @@ func _test_generation() -> void:
 		var zone := MissionRegistry.zone(o.zone_id)
 		var def := MissionRegistry.type_def(o.type)
 		valid = valid and int(o.rated) >= 1 and int(o.rated) <= 5 and int(o.true_rating) >= int(o.rated) and int(o.base_pay) > 0 \
-			and not (o.objectives as Array).is_empty() and def.module == o.module and o.module in zone.modules \
+			and not (o.objectives as Array).is_empty() and o.module in MissionRegistry.type_modules(def) and o.module in zone.modules and String(o.module_id) != "" \
 			and o.employer in MissionRegistry.employers() and o.target in MissionRegistry.enemies() and o.zone_kind == zone.kind
-	check(valid, "every offer is sound: rating 1-5, the briefing never overstates, pay, objectives, a zone holding its module")
+	check(valid, "every offer is sound: rating 1-5, the briefing never overstates, pay, objectives, a target module in the zone's layout")
 	check(a[0].source == "safe" and int(a[0].rated) == 1 and not a[0].understated and a[0].zone_kind == "contract",
 		"the first is a cheap low-risk job (safety floor): rated %d, $%d" % [a[0].rated, a[0].base_pay])
 	check(not a.any(func(o: Dictionary) -> bool: return o.source == "fixer"), "no fixer work at neutral standing")
@@ -98,7 +100,7 @@ func _test_generation() -> void:
 	var with_fixer := ContractGen.generate_board(1234, 1, friendly, 6)
 	var fixer_jobs := with_fixer.filter(func(o: Dictionary) -> bool: return o.source == "fixer")
 	check(fixer_jobs.size() == 1 and fixer_jobs[0].fixer == "Halloran" and fixer_jobs[0].employer == "meridian"
-		and fixer_jobs[0].type in ["recover_hvt", "retrieve_intel"], "at reputation 25 Meridian's fixer offers a special job (%s)" % [fixer_jobs.map(func(o: Dictionary) -> String: return o.title)])
+		and fixer_jobs[0].type in ["hvt_capture", "intel_grab"], "at reputation 25 Meridian's fixer offers a special job (%s)" % [fixer_jobs.map(func(o: Dictionary) -> String: return o.title)])
 	check(not fixer_jobs.is_empty() and fixer_jobs[0].clawback == ContractGen.NO_CLAWBACK, "a fixer's job is shady: the advance is kept on a void")
 	var lenient: Dictionary = ContractGen.clawback_terms().get(ContractGen.NO_CLAWBACK, {})
 	check(float(lenient.get("pay_mult", 1.0)) < 1.0, "and a lenient client pays less (x%.2f)" % float(lenient.get("pay_mult", 1.0)))
@@ -114,8 +116,8 @@ func _test_generation() -> void:
 		if o.zone_kind == "hot":
 			hot += 1
 			hot_ok = hot_ok and o.employer == MissionRegistry.zone(o.zone_id).faction
-	check(seen.keys().size() == 4 and seen.has("clear_compound") and seen.has("recover_hvt") and seen.has("retrieve_intel") and seen.has("destroy_cache"),
-		"all four placeholder mission types come up (%s)" % [seen.keys()])
+	check(seen.keys().size() == 4 and seen.has("raid") and seen.has("hvt_capture") and seen.has("hostage_rescue") and seen.has("intel_grab"),
+		"Captain's first four mission types come up (%s)" % [seen.keys()])
 	check(hot > 30 and hot < 130 and hot_ok, "hot-zone contracts come up (%d of 300), each from the zone's own faction" % hot)
 	# A mission type added at runtime (Noah's types drop in the same way).
 	MissionRegistry.register_type({"type": "test_rescue", "name": "Hostage rescue", "module": "compound", "base_pay": 60000, "days": 1,
@@ -226,7 +228,7 @@ func _test_negotiation() -> void:
 func _test_reveal_renegotiate_abort() -> void:
 	print("Understated threats: renegotiate or abort")
 	Contracts.new_full_campaign(43, 100000)
-	var cid := _make_offer("destroy_cache", "compound_01", {"understated": true, "rated": 2, "true_rating": 4, "enemy_est": 5, "enemy_count": 12})
+	var cid := _make_offer("raid", "compound_01", {"understated": true, "rated": 2, "true_rating": 4, "enemy_est": 5, "enemy_count": 12})
 	Contracts.server_accept(cid, ContractGen.default_terms())
 	check(Contracts.server_renegotiate(cid) != "", "no renegotiating before the lie shows")
 	check(not Contracts._public().held[0].has("true_rating"), "the truth isn't in what clients get yet")
@@ -243,7 +245,7 @@ func _test_reveal_renegotiate_abort() -> void:
 	var cash := Economy.cash()
 	check(Contracts.server_abort(cid) == "" and Economy.reputation(employer) == rep and Economy.cash() == cash and Contracts.history().back().outcome == "aborted",
 		"aborting a contract that lied: advance kept, no reputation lost")
-	var other := _make_offer("retrieve_intel", "compound_01")
+	var other := _make_offer("intel_grab", "compound_01")
 	Contracts.server_accept(other, ContractGen.default_terms())
 	employer = String(Contracts.contract(other).employer)
 	rep = Economy.reputation(employer)
@@ -383,7 +385,7 @@ func _test_civilians_void() -> void:
 func _test_save_reload() -> void:
 	print("Saving and reloading the campaign")
 	Contracts.new_full_campaign(31, 120000)
-	var cid := _make_offer("recover_hvt", "wadi_farm")
+	var cid := _make_offer("hvt_capture", "wadi_farm")
 	Contracts.server_accept(cid, {"pay_points": 1, "salvage_points": 1, "support_points": 0, "advance_share": 0.4})
 	Economy.change_reputation("salvage_union", 7)
 	Economy.server_take_loan()
@@ -457,7 +459,7 @@ func _test_shop() -> void:
 	check(ids.count("pouch_mag_double") == 1 and mags == 2 and carrier.size() == 1 and not (carrier[0].state as Dictionary).has("molle"),
 		"the report lists the carrier, its pouch and the mags in it once each (%s)" % [ids])
 	inv.free()
-	var cid := _make_offer("destroy_cache", "compound_01")
+	var cid := _make_offer("raid", "compound_01")
 	Contracts.server_accept(cid, {"pay_points": 0, "salvage_points": 0, "support_points": 1, "advance_share": 0.3})
 	cash = Economy.cash()
 	check(Economy.server_pay_support("resupply", cid) and Contracts.support_left(cid) == 0 and Economy.cash() == cash - 3000,
@@ -468,7 +470,7 @@ func _test_intel_and_salvage() -> void:
 	print("Intel, leads and salvage picks")
 	Contracts.new_full_campaign(61, 100000)
 	Economy.take_unbanked()
-	var cid := _make_offer("retrieve_intel", "harbour_yard")
+	var cid := _make_offer("intel_grab", "harbour_yard")
 	Contracts.server_accept(cid, {"pay_points": 0, "salvage_points": 4, "support_points": 0, "advance_share": 0.3})
 	Contracts.server_start_deployment([cid])
 	var cash := Economy.cash()
@@ -495,7 +497,7 @@ func _test_intel_and_salvage() -> void:
 		and not inbox.any(func(e: Dictionary) -> bool: return e.id == "m4a1") and d.finished, "closing the debrief banks what was carried out and the salvage picked")
 	check(deal.outcome == "completed", "the contract closed as completed")
 	# Turning intel in opens leads.
-	var second := _make_offer("retrieve_intel", "compound_01")
+	var second := _make_offer("intel_grab", "compound_01")
 	Contracts.server_accept(second, ContractGen.default_terms())
 	Contracts.server_start_deployment([second])
 	Contracts.server_end_deployment({"items": [{"id": "hvt_case", "count": 2}]})
@@ -555,28 +557,28 @@ func _test_live_objectives() -> void:
 	check(pristine == int(site.voxels), "the cache site's authored voxel count matches the pristine crate stack (%d of %d)" % [pristine, int(site.voxels)])
 	Contracts.new_full_campaign(81, 200000)
 	var clear := _make_offer("clear_compound", "ridge_hot")
-	var cache := _make_offer("destroy_cache", "ridge_hot")
-	var hvt := _make_offer("recover_hvt", "ridge_hot")
+	var cache := _make_offer("raid", "ridge_hot")
+	var hvt := _make_offer("hvt_capture", "ridge_hot")
 	for cid: String in [clear, cache, hvt]:
 		Contracts.server_accept(cid, ContractGen.default_terms())
 	var h1 := _hostile("TestHostile1", Vector3(-6, 0.1, -14))
 	var h2 := _hostile("TestHostile2", Vector3(8, 0.1, 0))
-	check(Contracts.server_start_deployment([], "ridge_hot") == "" and Contracts.deployment().cids.size() == 3 and Contracts.objectives.list.size() == 4,
-		"a hot zone deploys on all three contracts at once (4 objectives)")
+	check(Contracts.server_start_deployment([], "ridge_hot") == "" and Contracts.deployment().cids.size() == 3 and Contracts.objectives.list.size() == 6,
+		"a hot zone deploys on all three contracts at once (6 objectives, 3 of them bonuses)")
 	await _seconds(1.2)
 	var clear_o: Dictionary = Contracts.objectives.for_contract(clear)[0]
 	check(clear_o.state == "active" and clear_o.progress == "2 hostiles left", "clear the compound: 2 hostiles left")
 	var panel := _panel()
 	check(panel != null and panel.text().contains("OBJECTIVES") and panel.text().contains("[ ] Clear the compound of hostiles (2 hostiles left)"),
 		"the HUD lists the objectives")
-	check(Contracts.objectives.markers().size() == 4 and Contracts.objectives.markers()[0].pos is Vector3, "and the map gets markers")
+	check(Contracts.objectives.markers().size() == 6 and Contracts.objectives.markers()[0].pos is Vector3, "and the map gets markers")
 	h1.vitals.server_kill()
 	h2.vitals.server_kill()
 	await _seconds(1.2)
 	check(Contracts.objectives.for_contract(clear)[0].state == "done", "both down: cleared")
 	Contracts.server_items_banked([{"id": "hvt_case", "count": 1}])
 	check(Contracts.objectives.for_contract(clear)[1].state == "done", "the bonus case sent out mid-zone counts")
-	Contracts.server_hvt_delivered("hvt_compound")
+	Contracts.server_hvt_delivered(String(Contracts.objectives.for_contract(hvt)[0].params.hvt))
 	check(Contracts.objectives.for_contract(hvt)[0].state == "done", "the HVT delivered (the people agent's call)")
 	# A charge placed on the cache.
 	var cache_o: Dictionary = Contracts.objectives.for_contract(cache)[0]
@@ -624,7 +626,7 @@ func _test_live_objectives() -> void:
 	level.voxel_world.server_blast(site_box.get_center(), 1.6)  # whatever the charge left standing
 	await _seconds(0.3)
 	var carved := Objectives.solid_count(level.voxel_world, site_box)
-	var again := _make_offer("destroy_cache", "compound_01")
+	var again := _make_offer("raid", "compound_01")
 	Contracts.server_accept(again, ContractGen.default_terms())
 	Contracts.server_start_deployment([again])
 	await _seconds(1.5)
@@ -680,7 +682,7 @@ func _test_over_network() -> void:
 		Contracts.server_finish_debrief()
 		# A reset campaign numbers its debriefs from 1 again: the client must still show the first.
 		Contracts.new_full_campaign(92, 150000)
-		var again := _make_offer("retrieve_intel", "compound_01")
+		var again := _make_offer("intel_grab", "compound_01")
 		Contracts.server_accept(again, ContractGen.default_terms())
 		Contracts.server_start_deployment([again])
 		Contracts.server_end_deployment({"items": [{"id": "hvt_case", "count": 1}]})
@@ -791,6 +793,12 @@ func _make_offer(type_id: String, zone_id: String, overrides := {}) -> String:
 	rng.seed = 500 + _made
 	_made += 1
 	var c := ContractGen.generate(rng, {"day": Economy.day(), "source": "board", "type": type_id, "zone_id": zone_id})
+	# Played in this test's compound level: the objectives go on the compound module.
+	var def := MissionRegistry.type_def(type_id).duplicate(true)
+	def["modules"] = ["compound"]
+	c.objectives = ContractGen.mission_target(rng, def, "").objectives
+	c.module = "compound"
+	c.module_id = ""
 	c.understated = false
 	c.true_rating = c.rated
 	c.enemy_count = c.enemy_est
@@ -811,3 +819,12 @@ func _frames(n: int) -> void:
 
 func _seconds(s: float) -> void:
 	await get_tree().create_timer(s).timeout
+
+
+## The clear-an-area checks use a compound-clearing type of their own (Captain's first four
+## mission types have no clear-only job; compound assault comes later).
+func _register_clear_compound() -> void:
+	MissionRegistry.register_type({"type": "clear_compound", "name": "Clear a compound", "brief": "Clear the compound.", "module": "compound",
+		"base_pay": 42000, "days": 1, "enemy_count": [4, 12], "enemy_quality": [0.3, 0.7], "threat_pool": ["mg_nest", "sniper", "ied", "qrf"],
+		"objectives": [{"kind": "clear_area", "site": "compound", "text": "Clear the compound of hostiles"},
+			{"kind": "extract_item", "site": "intel", "text": "Bonus: bring out the hard case", "optional": true, "bonus_share": 0.1}]})

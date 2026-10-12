@@ -41,6 +41,9 @@ signal contract_accepted(cid: String)
 ## contract's: completed, failed, voided, lapsed, aborted; an offer that ran out: EXPIRED).
 ## BaseHub settles a recovery contract's squadmate on it.
 signal contract_closed(contract: Dictionary, outcome: String)
+## Host: a contract's objectives went live in the zone (the deployment started, or a radio
+## contract came in): PeopleLayer puts what they need there (the HVT, the hostage, intel).
+signal contract_live(cid: String, objectives: Array)
 
 const SECTION := &"contracts"
 const HISTORY_KEEP := 40
@@ -83,6 +86,7 @@ func _ready() -> void:
 	Economy.day_advanced.connect(_on_day_advanced)
 	Economy.changed.connect(_on_economy_changed)
 	Campaign.changed.connect(_on_campaign_changed)
+	_connect_people.call_deferred()  # People is the next autoload
 	debrief_ready.connect(func(_d: Dictionary) -> void:
 		if auto_show_debrief:
 			show_debrief())
@@ -140,7 +144,7 @@ func briefing(cid: String) -> Dictionary:
 		return {}
 	var out := ContractGen.public_view(c)
 	out["estimate"] = ContractGen.estimate_text(c)
-	out["objective_markers"] = Objectives.from_contract(c).map(func(o: Dictionary) -> Dictionary:
+	out["objective_markers"] = Objectives.from_contract(c, module_origin(c)).map(func(o: Dictionary) -> Dictionary:
 		return {"text": o.text, "kind": o.kind, "pos": o.pos, "optional": o.optional})
 	return out
 
@@ -160,6 +164,79 @@ func enemy_force(cid: String) -> Dictionary:
 ## Support budget left on a held contract (negotiated; supports draw on it before cash).
 func support_left(cid: String) -> int:
 	return int(contract(cid).get("support_left", 0))
+
+
+## Where a contract's target module sits in the running level: its zone module's origin (a
+## world-scale zone, by the contract's "module_id"), else `fallback` (the test compound sits
+## at the origin).
+func module_origin(c: Dictionary, fallback := Vector3.ZERO) -> Vector3:
+	var module_id := String(c.get("module_id", ""))
+	var lvl := CompoundLevel.current(self) if is_inside_tree() else null
+	if module_id != "" and lvl and lvl.has_method(&"get_module"):
+		var m := lvl.call(&"get_module", module_id) as Node3D
+		if m:
+			return m.position
+	return fallback
+
+
+## Host: the reinforcement timer's tuning (Reinforcements) for a contract, from its true force
+## (enemy_force: what the briefing may have understated). Proposed, in contracts.json
+## settings: the first wave comes sooner and the waves grow bigger the higher the true rating,
+## living hostiles are capped at the true count plus "reinforcement_alive_extra", and the
+## waves fight at the true quality. {} for an unknown contract.
+func reinforcement_tuning(cid: String) -> Dictionary:
+	var force := enemy_force(cid)
+	if force.is_empty():
+		return {}
+	var t := clampf((int(force.rating) - 1) / 4.0, 0.0, 1.0)
+	var first: Array = MissionRegistry.setting("reinforcement_first_wave_s", [420, 240])
+	var pairs: Array = MissionRegistry.setting("reinforcement_max_pairs", [2, 4])
+	var quality := float(force.quality)
+	return {"first_wave_s": lerpf(float(first[0]), float(first[1]), t), "max_pairs": roundi(lerpf(float(pairs[0]), float(pairs[1]), t)),
+		"first_pairs": 2 if int(force.count) >= 9 else 1,
+		"max_alive": mini(int(force.count) + MissionRegistry.setting_i("reinforcement_alive_extra", 8), MissionRegistry.setting_i("reinforcement_alive_max", 30)),
+		"combat": quality, "combat_max": minf(quality + 0.2, 0.9)}
+
+
+# --- Host: people in the zone (the People ledger) ----------------------------------------
+
+func _connect_people() -> void:
+	People.civilian_casualty.connect(_on_civilian_casualty)
+	People.hvt_delivered.connect(_on_hvt_delivered)
+	People.hvt_lost.connect(_on_hvt_lost)
+	People.intel_banked.connect(_on_intel_banked)
+
+
+## A civilian our side hurt or killed: the first event for each civilian counts once (fines,
+## and the 8th voids the deployment's contracts).
+func _on_civilian_casualty(event: Dictionary) -> void:
+	var dep: Dictionary = _s().deployment if _is_host() else {}
+	if dep.is_empty():
+		return
+	var seen: Array = dep.get("casualty_uids", [])
+	if String(event.get("uid", "")) in seen:
+		return
+	seen.append(String(event.get("uid", "")))
+	dep["casualty_uids"] = seen
+	server_civilian_casualty(event)
+
+
+func _on_hvt_delivered(event: Dictionary) -> void:
+	if _is_host() and is_deployed():
+		server_hvt_delivered(String(event.get("hvt_id", "")), bool(event.get("alive", true)))
+
+
+func _on_hvt_lost(event: Dictionary) -> void:
+	if _is_host() and is_deployed():
+		server_hvt_lost(String(event.get("hvt_id", "")))
+
+
+## Intel carried into an extraction point is out: it counts for "carry it out" objectives
+## (its own piece, by intel id), banks and shows in the debrief.
+func _on_intel_banked(entry: Dictionary) -> void:
+	if not _is_host() or not is_deployed() or String(entry.get("how", "")) != "carried" or String(entry.get("item", "")) == "":
+		return
+	server_items_banked([{"id": String(entry.item), "count": 1, "state": {"intel_id": String(entry.get("intel_id", "")), "source": String(entry.get("source", ""))}}])
 
 
 # --- Host: campaign ----------------------------------------------------------------------
@@ -238,6 +315,7 @@ func server_add_offer(c: Dictionary) -> String:
 func _add_offer(c: Dictionary) -> Dictionary:
 	var s := _s()
 	c.cid = "K%04d" % int(s.next_id)
+	c.uid = "%d-%s" % [int(s.get("tag", 0)), c.cid]  # unique across campaigns: the people and intel it places
 	s.next_id = int(s.next_id) + 1
 	(s.board as Array).append(c)
 	return c
@@ -253,10 +331,10 @@ func _add_offer(c: Dictionary) -> Dictionary:
 func server_add_recovery(info: Dictionary) -> String:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash([int(_s().seed), Economy.day(), int(_s().next_id), "recovery"])
-	var c := ContractGen.generate(rng, {"day": Economy.day(), "source": "safe", "type": "recover_hvt", "zone_id": String(info.get("zone_id", ""))})
+	var c := ContractGen.generate(rng, {"day": Economy.day(), "source": "safe", "type": "hostage_rescue", "zone_id": String(info.get("zone_id", ""))})
 	var callsign := String(info.get("callsign", info.get("name", "?")))
 	var pos: Array = info.get("pos", [])
-	c.merge({"title": "Recover %s: %s" % [callsign, c.zone_name], "source": "recovery", "employer": "", "base_pay": 0,
+	c.merge({"title": "Recover %s: %s" % [callsign, c.zone_name], "source": "recovery", "type": "recovery", "module_id": "", "employer": "", "base_pay": 0,
 		"brief": "%s (%s) was left behind alive in %s. Find them where they were last seen and bring them out." % [
 			String(info.get("name", callsign)), String(info.get("role", "")), c.zone_name],
 		"recover_mid": String(info.get("mid", "")), "clawback": ContractGen.NO_CLAWBACK,
@@ -274,7 +352,7 @@ func server_add_recovery(info: Dictionary) -> String:
 func server_open_lead(faction: String) -> String:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash([int(_s().seed), Economy.day(), int(_s().next_id), "lead"])
-	var lead_types := ["destroy_cache", "recover_hvt", "retrieve_intel"].filter(func(t: String) -> bool: return not MissionRegistry.type_def(t).is_empty())
+	var lead_types := ["raid", "hvt_capture", "intel_grab"].filter(func(t: String) -> bool: return not MissionRegistry.type_def(t).is_empty())
 	var ctx := {"day": Economy.day(), "source": "lead", "employer": faction, "zone_kind": "contract"}
 	if not lead_types.is_empty():
 		ctx["type"] = lead_types[rng.randi() % lead_types.size()]
@@ -375,9 +453,10 @@ func server_abort(cid: String, peer_id := 1) -> String:
 
 ## Host: deploys on held contracts. `cids` empty: every held contract for `zone_id` (or for
 ## the first held contract's zone when that's "" too). A contract zone takes one contract; a
-## hot zone all of that zone's. `origin` is where the zone's module sits in the level (the
-## objectives' positions are module-local; the test compound sits at the origin). Returns ""
-## or why not.
+## hot zone all of that zone's. Each contract's objectives sit at its target module in the
+## running level (module_origin; `origin` when the level has no such module: the test
+## compound sits at the origin). contract_live tells the people layer what to put there.
+## Returns "" or why not.
 func server_start_deployment(cids: Array = [], zone_id := "", origin := Vector3.ZERO) -> String:
 	var s := _s()
 	if not (s.deployment as Dictionary).is_empty():
@@ -394,9 +473,13 @@ func server_start_deployment(cids: Array = [], zone_id := "", origin := Vector3.
 	if first.zone_kind != "hot":
 		ready = [first]
 	var list: Array = []
+	var live := {}
 	for c: Dictionary in ready:
 		c.state = DEPLOYED
-		list.append_array(Objectives.from_contract(c, origin))
+		live[c.cid] = Objectives.from_contract(c, module_origin(c, origin))
+		list.append_array(live[c.cid])
+	if _is_host():
+		People.reset_deployment()  # a new deployment's casualties, intel and deliveries
 	s.deployment = {"zone_id": zone_id, "zone_name": first.zone_name, "zone_kind": first.zone_kind, "region": first.region,
 		"module": first.module, "cids": ready.map(func(c: Dictionary) -> String: return c.cid), "start_day": Economy.day(),
 		"civilians": 0, "banked": [], "origin": [origin.x, origin.y, origin.z]}
@@ -404,6 +487,8 @@ func server_start_deployment(cids: Array = [], zone_id := "", origin := Vector3.
 	_notify_all("Deploying to %s" % first.zone_name)
 	_commit()
 	deployment_started.emit(s.deployment)
+	for cid: String in live:
+		contract_live.emit(cid, live[cid])
 	return ""
 
 
@@ -438,8 +523,10 @@ func server_radio_contract(type_id := "") -> String:
 	c.state = DEPLOYED
 	(dep.cids as Array).append(c.cid)
 	var o: Array = dep.get("origin", [0, 0, 0])
-	objectives.server_add(Objectives.from_contract(c, Vector3(float(o[0]), float(o[1]), float(o[2]))))
+	var added := Objectives.from_contract(c, module_origin(c, Vector3(float(o[0]), float(o[1]), float(o[2]))))
+	objectives.server_add(added)
 	_commit()
+	contract_live.emit(c.cid, added)
 	return c.cid
 
 

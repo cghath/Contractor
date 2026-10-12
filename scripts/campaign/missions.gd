@@ -7,10 +7,13 @@ extends RefCounted
 ## runtime with register_type, and the generator, objectives and debrief use them as they are.
 ##
 ## A mission type ("type") names:
-## - "module": the hand-built area it needs (a zone lists the modules it holds);
+## - "modules": the module types it can play in (a zone's generated layout holds them; a
+##   contract picks one of the zone's modules of those types as its target);
 ## - "objectives": templates, each {"kind" (an Objectives kind), "site" (a named site of the
-##   module, which gives positions, items, the HVT or the cache), "text", "optional",
+##   module, or a list to pick from, which gives positions, items, the HVT or the cache),
+##   "text" ({name}: the site's or person's name, {module}: the module's), "optional",
 ##   "bonus_share" (share of the pay an optional one adds)};
+## - "time_limit_min" (optional): the required objectives fail when it runs out;
 ## - "base_pay", "days" (campaign days it takes);
 ## - the drivers of its difficulty: "enemy_count" and "enemy_quality" ranges and the
 ##   "threat_pool" it may bring (ids in "threats", each with a rating weight).
@@ -23,6 +26,8 @@ const FACTIONS_PATH := "res://data/factions.json"
 static var _data: Dictionary = {}
 static var _factions: Dictionary = {}
 static var _extra_types: Array = []  # register_type
+static var _zones: Array = []  # zones(), with their layouts' module types filled in
+static var _zone_defs := {}  # zone id -> ZoneDef
 
 
 ## The whole contracts file (loaded once).
@@ -36,6 +41,8 @@ static func data() -> Dictionary:
 static func reload() -> void:
 	_data = {}
 	_factions = {}
+	_zones = []
+	_zone_defs = {}
 
 
 ## Adds a mission type at runtime (same shape as the file's); one with the same "type" id
@@ -89,18 +96,79 @@ static func setting_i(key: String, default := 0) -> int:
 	return int(setting(key, default))
 
 
-static func module(module_id: String) -> Dictionary:
-	return (data().get("modules", {}) as Dictionary).get(module_id, {})
+## A module type's entry ("name", "sites", "civilians").
+static func module(module_type: String) -> Dictionary:
+	return (data().get("modules", {}) as Dictionary).get(module_type, {})
 
 
-## A named site in a module: {"rect": [x, z, w, d]} (metres), {"pos": [x, y, z]},
-## {"box": [[x, y, z], [x, y, z]]}, plus "items"/"tags" (intel), "hvt" or "cache" ids.
-static func site(module_id: String, site_id: String) -> Dictionary:
-	return (module(module_id).get("sites", {}) as Dictionary).get(site_id, {})
+## A module type's name in words ("outpost").
+static func module_name(module_type: String) -> String:
+	return String(module(module_type).get("name", module_type))
 
 
+## A named site in a module type: {"rect": [x, z, w, d]} (metres), {"pos": [x, y, z]},
+## {"box": [[x, y, z], [x, y, z]]}, plus "items"/"tags" (intel), "place", "hvt" and "person",
+## "of_hvt", "cache" ids, "name". A cache whose "voxels" is "auto" gets its count from the
+## module's pristine boxes (ZoneModules.solid_voxels_in). A copy.
+static func site(module_type: String, site_id: String) -> Dictionary:
+	var s: Dictionary = ((module(module_type).get("sites", {}) as Dictionary).get(site_id, {}) as Dictionary).duplicate(true)
+	if s.has("box") and typeof(s.get("voxels")) == TYPE_STRING:
+		var a: Array = s.box[0]
+		var b: Array = s.box[1]
+		var lo := Vector3(float(a[0]), float(a[1]), float(a[2]))
+		var hi := Vector3(float(b[0]), float(b[1]), float(b[2]))
+		s.voxels = ZoneModules.solid_voxels_in(module_type, AABB(lo.min(hi), (hi - lo).abs())) if ZoneModules.has_type(module_type) else 0
+	return s
+
+
+static func has_site(module_type: String, site_id: String) -> bool:
+	return (module(module_type).get("sites", {}) as Dictionary).has(site_id)
+
+
+## The module types a mission type can play in ("modules", or an older single "module").
+static func type_modules(def: Dictionary) -> Array:
+	if def.has("modules"):
+		return def.modules
+	return [def.module] if def.has("module") else []
+
+
+## Every zone, with "modules" (the module types its layout holds) filled in from its layout.
 static func zones() -> Array:
-	return data().get("zones", [])
+	if _zones.is_empty():
+		for z: Dictionary in data().get("zones", []):
+			var entry := z.duplicate(true)
+			var def := zone_def(String(z.zone_id))
+			if not def.is_empty():
+				var types: Array = []
+				for m: Dictionary in def.modules:
+					if not String(m.type) in types:
+						types.append(String(m.type))
+				entry["modules"] = types
+			_zones.append(entry)
+	return _zones
+
+
+## The layout (ZoneDef) of a zone: its "def" ({"seed", "size_m", "types", "count"}: made by
+## ZoneDef.generate, the same every time; or a data/zones.json id), {} if it has none.
+static func zone_def(zone_id: String) -> Dictionary:
+	if _zone_defs.has(zone_id):
+		return _zone_defs[zone_id]
+	var raw: Dictionary = {}
+	for z: Dictionary in data().get("zones", []):
+		if z.zone_id == zone_id:
+			raw = z
+	var spec: Variant = raw.get("def", null)
+	var def := {}
+	if spec is String:
+		def = ZoneDef.get_def(spec)
+	elif spec is Dictionary:
+		def = ZoneDef.generate(int(spec.get("seed", hash(zone_id))), float(spec.get("size_m", 1920.0)),
+			spec.get("types", ["compound", "outpost", "village", "checkpoint"]), int(spec.get("count", 5)))
+	if not def.is_empty():
+		def["id"] = zone_id
+		def["name"] = String(raw.get("name", zone_id))
+	_zone_defs[zone_id] = def
+	return def
 
 
 static func zone(zone_id: String) -> Dictionary:
@@ -110,9 +178,11 @@ static func zone(zone_id: String) -> Dictionary:
 	return {}
 
 
-## Zones of `kind` ("contract" or "hot") that hold `module_id`.
-static func zones_for(module_id: String, kind: String) -> Array:
-	return zones().filter(func(z: Dictionary) -> bool: return z.get("kind") == kind and module_id in z.get("modules", []))
+## Zones of `kind` ("contract" or "hot") that hold any of `module_types` (one type or a list).
+static func zones_for(module_types: Variant, kind: String) -> Array:
+	var wanted: Array = module_types if module_types is Array else [module_types]
+	return zones().filter(func(z: Dictionary) -> bool:
+		return z.get("kind") == kind and wanted.any(func(t: Variant) -> bool: return t in z.get("modules", [])))
 
 
 static func region(region_id: String) -> Dictionary:

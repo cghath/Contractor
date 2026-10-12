@@ -114,8 +114,8 @@ include Voxel Tools.
 | Left Ctrl + Left Alt (hold) | Self-interaction: the same body points on yourself (check and treat each part), and at the waist: check wounds, put down a carried body, drop held item |
 | R | Reload (fullest spare magazine; a part-used one goes back in your pouch) |
 | H | Treat yourself: applies the next item you carry for your most urgent wound (tourniquet before bandage, and so on) |
-| G | Throw the selected grenade (frag, flashbang or smoke). Carrying or dragging a body: let go of it |
-| Shift+G | Switch grenade type |
+| G | Throw the selected grenade (frag, flashbang or smoke). With the breaching charge selected: hold it up to place it (a ghost on the surface you look at, within 2.5 m; Fire sets it there, G or RMB puts it away). It sticks to whatever it's on, a person or a vehicle too, and goes off after 10 s. Carrying or dragging a body: let go of it |
+| Shift+G | Switch grenade type (the breaching charge comes last, when you carry one) |
 | Alt+G | Drop carried bulky item, otherwise drop active weapon |
 | 1 / 2 | Primary / sidearm |
 | F1-F8 | Select squadmates by slot (fire team A is F1-F4, B is F5-F8) and open the command menu; Shift+F-key adds to the selection |

@@ -262,14 +262,18 @@ func begin_prep(contract: Dictionary, zone_kind := RosterDeployment.CONTRACT, zo
 
 ## Host: preps the held contract `cid` for the next deployment (the board: "Prepare
 ## deployment", and a contract accepted with none in prep). The prep keeps its public view
-## (it goes out in the view; the real threat stays with Contracts). Returns "" or why not.
+## (it goes out in the view; the real threat stays with Contracts) and deploys into the
+## contract zone's generated layout (MissionRegistry.zone_def). Returns "" or why not.
 func begin_prep_contract(cid: String) -> String:
 	var c := Contracts.contract(cid)
 	if c.is_empty() or c.get("state") != Contracts.ACCEPTED:
 		return "No such contract held"
 	if RosterDeployment.is_running(roster()):
 		return "A deployment is already running"
-	begin_prep(ContractGen.public_view(c), String(c.get("zone_kind", RosterDeployment.CONTRACT)), String(c.get("zone_id", "")))
+	var zone_id := String(c.get("zone_id", ""))
+	var layout := MissionRegistry.zone_def(zone_id)
+	begin_prep(ContractGen.public_view(c), String(c.get("zone_kind", RosterDeployment.CONTRACT)), zone_id, "",
+		{"level": "zone", "def": layout} if not layout.is_empty() else {})
 	return ""
 
 
@@ -419,17 +423,26 @@ func _open_briefing(lvl: CompoundLevel) -> void:
 
 
 ## A held contract as the briefing shows it (Briefing's contract shape): its objectives on
-## the map and its brief; the enemy positions stay unknown until the zones place them.
+## the map (at its target module) and its brief; what intel knows of the enemy.
 static func briefing_contract(cid: String) -> Dictionary:
 	var c := Contracts.contract(cid)
 	var objectives: Array = []
-	for o: Dictionary in Objectives.from_contract(c):
+	for o: Dictionary in Objectives.from_contract(c, Contracts.module_origin(c)):
 		var p: Array = o.get("pos", [])
 		objectives.append({"id": String(o.oid), "title": String(o.text), "text": String(o.text),
 			"pos": [float(p[0]), float(p[2])] if p.size() == 3 else [0.0, 0.0], "radius": 6.0})
 	return {"id": cid, "title": String(c.get("title", "")), "type": String(c.get("type", "")), "employer": String(c.get("employer", "")),
 		"summary": "%s\n%s. Terms: %s." % [String(c.get("brief", "")), ContractGen.estimate_text(c), ContractGen.clawback_text(c)],
-		"difficulty": int(c.get("rated", 1)), "objectives": objectives, "known_enemies": []}
+		"difficulty": int(c.get("rated", 1)), "objectives": objectives, "known_enemies": known_enemies(c)}
+
+
+## What intel knows of the enemy, for the briefing's map: the target module held, with the
+## briefing's estimate (which may understate it). Empty for a contract with no target module.
+static func known_enemies(c: Dictionary) -> Array:
+	if String(c.get("module_id", "")) == "":
+		return []
+	var at := Contracts.module_origin(c)
+	return [{"pos": [at.x, at.z], "text": "Hostiles at the %s: %s" % [String(c.get("module_name", "site")), ContractGen.estimate_text(c)]}]
 
 
 ## The zone as the briefing shows it: the level's own insertion and extraction points (a
@@ -463,6 +476,16 @@ func _on_briefing_started(_plan: Dictionary, cid: String) -> void:
 		push_warning("BaseHub: %s" % why)
 		return
 	_spawn_recovery_targets(level())
+	_size_reinforcements.call_deferred(cid)  # after the briefing's own flow started the timer
+
+
+## Host: the reinforcement timer sized from the contract's true force (seam 7).
+func _size_reinforcements(cid: String) -> void:
+	var lvl := level()
+	var reinforcements := MapNodes.reinforcements(lvl) if lvl else null
+	var tuning := Contracts.reinforcement_tuning(cid)
+	if reinforcements and not tuning.is_empty():
+		reinforcements.server_start(tuning)
 
 
 ## Client: a level switch is coming: this player's own movement stops going out until the
@@ -881,6 +904,8 @@ func end_deployment(report: Dictionary) -> void:
 	var hvts: Array = []
 	for h: Dictionary in report.get("hvts", []):
 		hvts.append({"hvt": String(h.get("hvt", h.get("name", ""))), "alive": bool(h.get("alive", true))})
+	if lvl.people and point.size() == 2:  # people: an HVT or hostage brought to a point the squad picked
+		hvts.append_array(lvl.people.hvts_out(Vector2(float(point[0]), float(point[1])), Extraction.RADIUS_M, extracted))
 	for n: Node in lvl.ai.get_children():
 		var s := n as Soldier
 		if s and s.has_meta(&"recovery") and not s.vitals.is_dead() and point.size() == 2 \

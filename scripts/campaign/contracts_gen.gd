@@ -7,12 +7,15 @@ extends RefCounted
 ## A contract is a JSON-safe Dictionary:
 ## - "cid" (given by Contracts), "type", "title", "brief", "source" ("board", "fixer",
 ##   "safe" or "lead"), "fixer", "employer", "target" (faction ids);
-## - "zone_id", "zone_name", "zone_kind" ("contract" or "hot"), "region", "module";
+## - "zone_id", "zone_name", "zone_kind" ("contract" or "hot"), "region"; where in the zone:
+##   "module" (the target module's type), "module_id" (its id in the zone's layout, "" if the
+##   zone has none), "module_name";
 ## - what the briefing says: "rated" (1-5), "enemy_est", "quality_est", "threats_known",
 ##   "intel_accuracy" (0-1: how far to trust it);
 ## - the truth, host only (public_view strips it until "revealed"): "true_rating",
 ##   "enemy_count", "quality", "threats", "understated";
-## - "base_pay", "days", "objectives" (the type's templates), "offered_day", "expires_day",
+## - "base_pay", "days", "objectives" (the type's templates, resolved for the target module:
+##   mission_target), "offered_day", "expires_day",
 ##   "state" ("offered", then Contracts' states), and once accepted "terms" and "deal".
 
 ## Keys only the host knows until the threat is revealed.
@@ -77,10 +80,10 @@ static func generate(rng: RandomNumberGenerator, ctx: Dictionary) -> Dictionary:
 	var def := MissionRegistry.type_def(type_id)
 	var zone := MissionRegistry.zone(ctx.get("zone_id", ""))
 	if zone.is_empty():
-		var options := MissionRegistry.zones_for(def.module, kind)
+		var options := MissionRegistry.zones_for(MissionRegistry.type_modules(def), kind)
 		if options.is_empty():
 			kind = "contract"
-			options = MissionRegistry.zones_for(def.module, kind)
+			options = MissionRegistry.zones_for(MissionRegistry.type_modules(def), kind)
 		zone = options[rng.randi() % options.size()] if not options.is_empty() else {"zone_id": "unknown", "name": "Unknown", "region": "", "kind": kind}
 	kind = String(zone.get("kind", kind))
 	var hot := kind == "hot"
@@ -138,22 +141,79 @@ static func generate(rng: RandomNumberGenerator, ctx: Dictionary) -> Dictionary:
 	var step := maxi(MissionRegistry.setting_i("pay_round", 500), 1)
 	var base_pay := maxi(step, roundi(float(def.get("base_pay", 40000)) * pay_mult / step) * step)
 	var day := int(ctx.get("day", 1))
+	var mission := mission_target(rng, def, String(zone.get("zone_id", "")))
+	var limit_min := int(def.get("time_limit_min", 0))
 	return {
-		"cid": "", "type": type_id, "title": "%s: %s" % [def.get("name", type_id), zone.get("name", "")],
-		"brief": def.get("brief", ""), "source": source, "fixer": fixer.get("fixer", ""),
+		"cid": "", "type": type_id, "title": "%s%s: %s" % [def.get("name", type_id), mission.title_extra, zone.get("name", "")],
+		"brief": String(def.get("brief", "")) + (" Time limit: %d min." % limit_min if limit_min > 0 else ""), "source": source, "fixer": fixer.get("fixer", ""),
 		"employer": employer, "target": target,
 		"zone_id": zone.get("zone_id", ""), "zone_name": zone.get("name", ""), "zone_kind": kind,
-		"region": zone.get("region", ""), "module": def.get("module", ""),
+		"region": zone.get("region", ""), "module": mission.module, "module_id": mission.module_id, "module_name": MissionRegistry.module_name(mission.module),
 		"rated": rated, "enemy_est": est_count, "quality_est": snappedf(est_quality, 0.01),
 		"threats_known": known, "intel_accuracy": snappedf(intel, 0.01),
 		"true_rating": true_rating, "enemy_count": enemy_count, "quality": snappedf(quality, 0.01),
 		"threats": threats, "understated": understated, "revealed": false, "renegotiated": false,
 		"clawback": clawback,
 		"base_pay": base_pay, "days": int(def.get("days", 1)) + (1 if hot else 0),
-		"objectives": (def.get("objectives", []) as Array).duplicate(true),
+		"objectives": mission.objectives,
 		"offered_day": day, "expires_day": day + MissionRegistry.setting_i("offer_days", 5),
 		"state": "offered",
 	}
+
+
+## Where a contract of type `def` plays in zone `zone_id` and its objectives there: the target
+## module (one of the zone layout's modules of a type `def` plays in, else the type's first
+## module type with no module id), each template's site (a list picks one the module has; an
+## optional one whose site the module lacks is left out), {name} and {module} filled in, a
+## person's name for an HVT or hostage, and the time limit on the required ones. Picked on a
+## generator of its own (seeded from `rng`, which it leaves alone) so the boards stay as they
+## were. {"module", "module_id", "objectives", "title_extra"}.
+static func mission_target(rng: RandomNumberGenerator, def: Dictionary, zone_id: String) -> Dictionary:
+	var pick := RandomNumberGenerator.new()
+	pick.seed = hash([rng.state, "mission"])
+	var allowed := MissionRegistry.type_modules(def)
+	var module_type: String = String(allowed[0]) if not allowed.is_empty() else ""
+	var module_id := ""
+	var options: Array = (MissionRegistry.zone_def(zone_id).get("modules", []) as Array).filter(
+		func(m: Dictionary) -> bool: return String(m.type) in allowed)
+	if not options.is_empty():
+		var m: Dictionary = options[pick.randi() % options.size()]
+		module_type = String(m.type)
+		module_id = String(m.id)
+	var limit_s := float(def.get("time_limit_min", 0.0)) * 60.0
+	var person_name := ""
+	var title_extra := ""
+	var objectives: Array = []
+	for t: Dictionary in def.get("objectives", []):
+		var o := t.duplicate(true)
+		var listed: Array = t.site if t.get("site") is Array else [String(t.get("site", ""))]
+		var choices := listed.filter(func(s: Variant) -> bool: return MissionRegistry.has_site(module_type, String(s)))
+		if choices.is_empty():
+			if bool(t.get("optional", false)) and not t.has("params"):
+				continue
+			choices = [listed[0] if not listed.is_empty() else ""]
+		var site_id := String(choices[pick.randi() % choices.size()])
+		o.site = site_id
+		var site := MissionRegistry.site(module_type, site_id)
+		var person: Dictionary = site.get("person", {})
+		if site.has("of_hvt"):
+			person = MissionRegistry.site(module_type, String(site.of_hvt)).get("person", {})
+		var friendly := String(person.get("side", "")) == "friendly"
+		var name := String(site.get("name", ""))
+		if not person.is_empty():
+			if person_name == "":
+				var names: Array = MissionRegistry.data().get("hostage_names" if friendly else "hvt_names", ["Unknown"])
+				person_name = String(names[pick.randi() % names.size()])
+			name = person_name
+		if site.has("person"):
+			o["person"] = {"name": person_name, "label": "%s (%s)" % ["Hostage" if friendly else "HVT", person_name]}
+		if t.get("site") is Array and title_extra == "":
+			title_extra = " (%s)" % name
+		o.text = String(t.get("text", "")).replace("{name}", name).replace("{module}", MissionRegistry.module_name(module_type))
+		if limit_s > 0.0 and not bool(t.get("optional", false)):
+			o["time_limit_s"] = limit_s
+		objectives.append(o)
+	return {"module": module_type, "module_id": module_id, "objectives": objectives, "title_extra": title_extra}
 
 
 ## The clawback terms (data/contracts.json "clawback_terms"): {term: {"weight", "pay_mult"}}.

@@ -206,3 +206,39 @@ From the design doc ("Missions: contract zones and hot zones", decided unless ma
   completed brings them back, anything else (or the offer running out) writes them off.
 - Tests: the base suite's "The loop" runs board -> prep -> briefing -> extraction -> debrief
   -> base and a recovery end to end; contracts suite for the clawback terms.
+
+### Part 2, missions in zones (seams 3, 4, 5, 7): done (2026-10-11, `feat/wave4b-missions`)
+
+Built from `docs/mission_brainstorm.md` ("First mission types to build": raid, HVT capture,
+hostage rescue, intel grab). Details in CHANGELOG "Wave 4B part 2".
+
+- **Mission types:** the four placeholders are replaced by Captain's first four. A type lists
+  the module types it plays in; a contract picks one of its zone's modules as its target
+  (`module_id`) and each objective a site of it (a raid picks the AA gun or the cache). HVT
+  capture and hostage rescue run on a forgiving clock (90 and 75 min, Proposed).
+- **Zones (3):** every contract zone is a generated `ZoneDef` (`contracts.json` "def": seed,
+  size; `MissionRegistry.zone_def`), the same layout every visit. Accepting a contract preps it
+  with that level, and its objectives sit at the target module's sites wherever the module
+  stands (`Contracts.module_origin`, per contract, also for radio contracts). Every module type
+  has sites (`contracts.json` "modules"); the outpost got an AA emplacement, the village and
+  checkpoint crate caches. Hot zones use the same at contract-zone size until part 3.
+- **Insertion and extraction (4):** part 1 already feeds the briefing the zone's insertion
+  points and landing zones and moves the squad to the chosen one; part 2 makes each landing
+  zone a delivery point (HVTs delivered, intel banked as soon as they're there).
+- **People (5):** `Contracts.contract_live` -> `PeopleLayer.server_contract_content`: the HVT or
+  hostage, intel pieces with their own ids, civilians in the zone's modules. The People ledger
+  feeds `Contracts` (deliveries, intel carried out, civilian casualties once each, a dead HVT
+  via the new `People.hvt_lost`); `People.reset_deployment` at each deployment's start.
+- **Reinforcements (7):** `Contracts.reinforcement_tuning(cid)` from the true force, applied
+  when the contract goes live; waves enter at the zone's edge nearest the squad but 350 m out.
+- **Breaching charges** (Captain, mid-part): placed like Arma Reforger's with a ghost, on any
+  surface, riding people and moving bodies (`scripts/combat/charges.gd`). Suicide bombers on
+  foot and VBIEDs (Captain: "that allows suicide bombers on foot and in vehicles in the ME")
+  are an AI behaviour for later: the charge side is ready.
+- Tests: new `missions` suite (generation, a four-contract deployment in a zone, deliveries,
+  intel ids, a civilian counted once, a raid by charge, charges on the ground and riding a
+  person, a dead HVT, the clock, reinforcement sizing and the edge, the briefing's markers).
+
+Open for Captain: the garrisons are still 4 per module (the contract's enemy count sizes only
+the reinforcements); HVT capture needs zip cuffs bought at the base (no kit drop); names for
+HVTs, hostages and civilians are placeholders in `contracts.json`.

@@ -27,13 +27,14 @@ const TOP_M := 4.8
 const BELOW_M := 0.8
 
 ## Named points (m from the origin, on the ground): "objective" (where a mission's target
-## goes: an HVT room, a document table), "cache" (something to destroy or recover) and
-## "intel".
+## goes: an HVT room, a document table), "cache" (something to destroy or recover: the crate
+## stack), "intel" and "aa" (the outpost's AA emplacement). The mission sites built on them
+## are in data/contracts.json "modules" (MissionRegistry.site).
 const POINTS := {
 	"compound": {"objective": [Vector3(0, 0, -8)], "cache": [Vector3(-12, 0, -9)], "intel": [Vector3(18, 0, -9)]},
-	"outpost": {"objective": [Vector3(-5.5, 0, -6)], "cache": [Vector3(2.5, 0, -0.5)], "intel": [Vector3(-4.5, 0, -6.5)]},
-	"village": {"objective": [Vector3(15.5, 0, -10)], "cache": [Vector3(-13.5, 0, 9)], "intel": [Vector3(1, 0, -9.5)]},
-	"checkpoint": {"objective": [Vector3(9, 0, 5)], "cache": [Vector3(-10, 0, 6.5)], "intel": [Vector3(9.2, 0, 4.6)]},
+	"outpost": {"objective": [Vector3(-5.5, 0, -6)], "cache": [Vector3(2.5, 0, -0.5)], "intel": [Vector3(-4.5, 0, -6.5)], "aa": [Vector3(-6, 0, 2.5)]},
+	"village": {"objective": [Vector3(15.5, 0, -10)], "cache": [Vector3(-14.8, 0, 10.2)], "intel": [Vector3(1, 0, -9.5)]},
+	"checkpoint": {"objective": [Vector3(9, 0, 5)], "cache": [Vector3(5.6, 0, 5.2)], "intel": [Vector3(9.2, 0, 4.6)]},
 }
 
 ## Hostile garrison (m from the origin): they hold where they stand (guards), in pairs.
@@ -69,6 +70,7 @@ const LOOT := {
 }
 
 static var _cache := {}
+static var _counts := {}  # solid_voxels_in
 
 
 static func has_type(type: String) -> bool:
@@ -186,6 +188,9 @@ static func _outpost() -> Array:
 	out.append([Vector3(2.5, 0, 5.6), Vector3(5.5, 1.1, 6.0), VoxelWorld.Mat.SANDBAG])
 	out.append([Vector3(1.5, 0, -2.2), Vector3(3.5, 1.0, -1.2), W])
 	out.append([Vector3(2.0, 1.0, -2.2), Vector3(3.0, 2.0, -1.2), W])
+	# An AA emplacement in the west yard (a raid target): a low sandbag ring round a twin-barrel
+	# gun on a steel mount. Steel shrugs off grenades: it takes a placed charge.
+	_aa_site(out, Vector2(-6.0, 2.5))
 	return out
 
 
@@ -208,6 +213,8 @@ static func _village() -> Array:
 	_room(out, Vector2(-16, 7), Vector2(-11, 11), 2.3, 0.1, M.WOOD, [["e", 8.4, 9.6]], M.SHEET_METAL, 0.1,
 		[["n", -14.5, -13.5]])
 	out.append([Vector3(-9, 0, 1.8), Vector3(-3, 1.2, 2.2), M.STONE])
+	# A weapons cache in the plank shack (a raid target): three crates against its back wall.
+	_crates(out, Vector3(-15.8, 0, 9.6))
 	return out
 
 
@@ -227,4 +234,63 @@ static func _checkpoint() -> Array:
 	out.append([Vector3(-8.5, 0, 5), Vector3(-8, 1.1, 8), S])
 	out.append([Vector3(1, 0.9, -0.1), Vector3(7, 1.05, 0.05), VoxelWorld.Mat.WOOD])
 	out.append([Vector3(7, 0, -0.2), Vector3(7.3, 1.1, 0.1), VoxelWorld.Mat.WOOD])
+	# A weapons cache by the booth (a raid target).
+	_crates(out, Vector3(4.6, 0, 4.6))
 	return out
+
+
+## A weapons cache: two wooden crates (1 x 1 x 1.2 m) side by side along x from `corner` (their
+## low corner), and a third on the first. Its box is `corner` to `corner` + (2, 2, 1.2).
+static func _crates(out: Array, corner: Vector3) -> void:
+	var W := VoxelWorld.Mat.WOOD
+	var crate := Vector3(1.0, 1.0, 1.2)
+	out.append([corner, corner + crate, W])
+	out.append([corner + Vector3(1, 0, 0), corner + Vector3(1, 0, 0) + crate, W])
+	out.append([corner + Vector3(0, 1, 0), corner + Vector3(0, 1, 0) + crate, W])
+
+
+## An AA emplacement centred on `c` (x, z): a 3.6 m sandbag ring 0.8 m high, open to the east,
+## round a twin-barrel gun on a steel mount (barrels to the north). The gun fills (-0.5, 0, -1.3)
+## to (0.5, 1.3, 0.4) from the centre.
+static func _aa_site(out: Array, c: Vector2) -> void:
+	var S := VoxelWorld.Mat.SANDBAG
+	var at := Vector3(c.x, 0, c.y)
+	for b: Array in [[Vector3(-1.8, 0, -1.8), Vector3(1.8, 0.8, -1.4)], [Vector3(-1.8, 0, 1.4), Vector3(1.8, 0.8, 1.8)],
+			[Vector3(-1.8, 0, -1.4), Vector3(-1.4, 0.8, 1.4)], [Vector3(1.4, 0, -1.4), Vector3(1.8, 0.8, -0.6)],
+			[Vector3(1.4, 0, 0.6), Vector3(1.8, 0.8, 1.4)]]:
+		out.append([at + (b[0] as Vector3), at + (b[1] as Vector3), S])
+	var T := VoxelWorld.Mat.STEEL
+	out.append([at + Vector3(-0.3, 0, -0.3), at + Vector3(0.3, 0.9, 0.3), T])
+	out.append([at + Vector3(-0.5, 0.9, -0.4), at + Vector3(0.5, 1.3, 0.4), T])
+	out.append([at + Vector3(-0.25, 1.05, -1.3), at + Vector3(-0.15, 1.15, -0.4), T])
+	out.append([at + Vector3(0.15, 1.05, -1.3), at + Vector3(0.25, 1.15, -0.4), T])
+
+
+## Solid voxels of a module type's pristine structure inside `box` (metres from its origin),
+## counted the way Objectives.solid_count reads them from the built world: the authored
+## "voxels" of a cache site on a zone module. Cached per type and box.
+static func solid_voxels_in(type: String, box: AABB) -> int:
+	var key := "%s|%s" % [type, box]
+	if _counts.has(key):
+		return _counts[key]
+	var s := VoxelWorld.VOXEL_SIZE
+	var begin := Vector3i((box.position / s).round())
+	var end := Vector3i((box.end / s).round())
+	var cells: Array = []  # [lo, hi) per structure box, in voxels
+	for b: Array in boxes(type):
+		var a := Vector3i(((b[0] as Vector3) / s).round())
+		var c := Vector3i(((b[1] as Vector3) / s).round())
+		if int(b[2]) != VoxelWorld.Mat.EMPTY:
+			cells.append([a.min(c), a.max(c)])
+	var solid := 0
+	for x in range(begin.x, end.x):
+		for y in range(begin.y, end.y):
+			for z in range(begin.z, end.z):
+				for k: Array in cells:
+					var lo: Vector3i = k[0]
+					var hi: Vector3i = k[1]
+					if x >= lo.x and x < hi.x and y >= lo.y and y < hi.y and z >= lo.z and z < hi.z:
+						solid += 1
+						break
+	_counts[key] = solid
+	return solid

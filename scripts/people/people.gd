@@ -19,6 +19,8 @@ extends Node
 signal civilian_casualty(event: Dictionary)
 signal intel_banked(entry: Dictionary)
 signal hvt_delivered(event: Dictionary)
+## An HVT (or hostage) died: their objective fails. {"hvt_id", "name", "zone", "time"}.
+signal hvt_lost(event: Dictionary)
 ## The ledger changed (every peer, after a replicated update too).
 signal changed
 
@@ -159,6 +161,15 @@ func server_hvt_delivered(event: Dictionary) -> bool:
 	_tell(&"on_hvt_delivered", e)
 	_after_change()
 	return true
+
+
+## Host only. HVT `hvt_id` died before being brought in (PeopleLayer): the objective hook.
+func server_hvt_lost(hvt_id: String, hvt_name := "") -> void:
+	if not multiplayer.is_server() or is_delivered(hvt_id):
+		return
+	var e := {"hvt_id": hvt_id, "name": hvt_name, "zone": GameState.zone_id, "time": int(Time.get_unix_time_from_system())}
+	print("[people] HVT lost: %s" % hvt_id)
+	hvt_lost.emit(e)
 
 
 ## Host only. A new deployment: clears casualties, intel and deliveries (the archive stays).

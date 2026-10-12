@@ -10,7 +10,7 @@ extends Node
 
 ## The briefing's stand-in contract and zone for this test.
 const CONTRACT := {
-	"id": "test_contract", "title": "Test: recover the case", "type": "recover_hvt", "difficulty": 3,
+	"id": "test_contract", "title": "Test: recover the case", "type": "hvt_capture", "difficulty": 3,
 	"summary": "A test contract.",
 	"objectives": [{"id": "case", "title": "Recover the case", "pos": [0.0, -10.0], "radius": 4.0}],
 	"known_enemies": [{"pos": [0.0, -8.0], "text": "Guards"}, {"pos": [-11.0, -2.0], "text": "Patrol"}],
