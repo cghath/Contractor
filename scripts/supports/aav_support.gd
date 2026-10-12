@@ -263,12 +263,12 @@ func server_mount(by: Soldier, names: PackedStringArray) -> String:
 		for s: Soldier in squad.pick(names):
 			if not s.is_ai() or not s.vitals.is_up() or s.has_meta(&"vehicle_crew") or Vehicle.ride_of(s) == vehicle:
 				continue
-			if s.global_position.distance_to(ramp()) <= BOARD_REACH_M and _board(s):
+			if _flat(s.global_position).distance_to(_flat(ramp())) <= BOARD_REACH_M and _board(s):
 				sent += 1
 				continue
-			squad.give_order(by, Squad.Order.MOVE, ramp(), PackedStringArray([String(s.name)]))
-			_boarding[s.get_instance_id()] = {"soldier": s, "until": Soldier._now() + timeout}
+			_boarding[s.get_instance_id()] = {"soldier": s, "until": Soldier._now() + timeout, "by": by}
 			sent += 1
+	_board_step()
 	_tell(by, "%sPlayers: get in at the ramp (Left Ctrl)" % ("Squad mounting the AAV. " if sent > 0 else ""))
 	return ""
 
@@ -453,7 +453,8 @@ func _physics_process(delta: float) -> void:
 			_follow_step()
 		RETURN:
 			_return_step()
-	_slope_check()
+	if is_instance_valid(vehicle) and is_out():
+		_slope_check()
 
 
 func _ai_done() -> bool:
@@ -551,6 +552,7 @@ func _slope_check() -> void:
 		_leg = {}
 		_set_order(HOLD)
 		_tell(caller, "The AAV can't climb that (%d°): holding" % roundi(slope))
+		print("[aav] too steep ahead (%.0f°)" % slope)
 
 
 func _go_home(origin: Lhd) -> void:
@@ -633,9 +635,42 @@ func _board_step() -> void:
 				or Soldier._now() > float(b.until) or Vehicle.ride_of(s) != null:
 			_boarding.erase(id)
 			continue
-		if s.global_position.distance_to(ramp()) <= BOARD_REACH_M:
+		if _flat(s.global_position).distance_to(_flat(ramp())) <= BOARD_REACH_M:
 			_boarding.erase(id)
 			_board(s)
+			continue
+		# The navigation doesn't know the hull: one ahead of the ramp walks round its side first.
+		var next := board_waypoint(s.global_position)
+		var going: Vector3 = b.get("going", Vector3.INF)
+		if not going.is_finite() or _flat(next).distance_to(_flat(going)) > 1.0 or Soldier._now() >= float(b.get("next_at", 0.0)):
+			b["going"] = next
+			b["next_at"] = Soldier._now() + 4.0
+			var lvl := level() as CompoundLevel
+			var squad := lvl.squad_for(s.faction) if lvl else null
+			var by: Soldier = b.get("by") if is_instance_valid(b.get("by")) else s
+			if squad:
+				squad.give_order(by, Squad.Order.MOVE, next, PackedStringArray([String(s.name)]))
+
+
+## Where someone at `from` walks next to reach the ramp: straight to it from behind the hull,
+## else to the rear corner on their side, else (ahead of the hull) to the middle of their side.
+func board_waypoint(from: Vector3) -> Vector3:
+	var v := current()
+	if v == null:
+		return from
+	var size := VehicleArt.size_m(v.model)
+	var local := v.to_local(from)
+	var side := signf(local.x) if absf(local.x) > 0.1 else 1.0
+	var out: Vector3
+	if local.z > size.z * 0.5 - 0.5:
+		out = v.to_local(ramp()) + Vector3(0, 0, 0.8)
+	elif local.z > -0.5 and absf(local.x) > size.x * 0.5 + 0.8:
+		out = Vector3(side * (size.x * 0.5 + 1.4), 0.0, size.z * 0.5 + 1.2)
+	else:
+		out = Vector3(side * (size.x * 0.5 + 1.6), 0.0, 0.5)
+	var at := v.to_global(Vector3(out.x, 0.0, out.z))
+	var lvl := level()
+	return lvl.call(&"ground_point", at) if lvl.has_method(&"ground_point") else Vector3(at.x, v.global_position.y, at.z)
 
 
 ## Host (tests): squadmates still walking to the ramp.
@@ -650,6 +685,8 @@ func _set_order(o: String) -> void:
 		return
 	order = o
 	if multiplayer.is_server():
+		var at := vehicle.global_position if is_instance_valid(vehicle) else Vector3.ZERO
+		print("[aav] %s at (%.0f, %.1f, %.0f)" % [order_text(), at.x, at.y, at.z])
 		_broadcast()
 
 

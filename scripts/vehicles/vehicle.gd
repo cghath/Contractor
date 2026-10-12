@@ -96,6 +96,8 @@ const STEER_FALLOFF_MS := 8.0
 ## Rolling resistance and engine braking with the throttle off (m/s2).
 const ROLL_DECEL := 0.3
 const ENGINE_BRAKE := 0.5
+## The steepest grade the drive holds on top of its acceleration (degrees, Proposed, wave 5b).
+const CLIMB_DEG := 35.0
 ## Tracked turn controller: reaches the commanded turn rate in about this long (s).
 const TRACK_TURN_TIME_S := 0.35
 ## Rolling the other way while still moving faster than this (m/s) brakes first.
@@ -930,6 +932,10 @@ func _wheel_forces(delta: float, throttle: float, steer: float, brake: bool) -> 
 		var top := top_speed(throttle < 0.0)
 		var curve := sqrt(clampf(1.0 - absf(v_fwd) / maxf(top, 0.1), 0.0, 1.0))
 		drive = throttle * mass * float(spec.get("accel_ms2", 2.0)) * curve
+		# Wave 5b: uphill the engine gears down and holds the grade (up to CLIMB_DEG; the tyres'
+		# or tracks' grip still limits it), so a hill doesn't stall it at accel_ms2's slope.
+		var grade := clampf(forward.y * signf(throttle), 0.0, sin(deg_to_rad(CLIMB_DEG)))
+		drive += signf(throttle) * mass * g * grade * minf(absf(throttle) * 1.5, 1.0)
 	var brake_force := mass * float(spec.get("brake_ms2", 6.0)) if brake else 0.0
 	var wheels_ok := zone_health(ZONE_WHEELS)
 	var grip := GRIP * (lerpf(0.55, 1.0, wheels_ok) if wheels_ok > 0.0 else 0.4)

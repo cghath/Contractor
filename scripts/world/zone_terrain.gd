@@ -274,6 +274,7 @@ func checksum() -> int:
 ## The ground's triangles inside `area` (x, z in metres), world space, for navigation.
 func triangles_in(area: Rect2) -> PackedVector3Array:
 	var faces := PackedVector3Array()
+	var seabed := PackedVector3Array()
 	var lo := _grid_index(area.position)
 	var hi := _grid_index(area.end) + Vector2i.ONE
 	for j in range(maxi(lo.y, 0), mini(hi.y, points - 1)):
@@ -283,9 +284,10 @@ func triangles_in(area: Rect2) -> PackedVector3Array:
 			var c := _vertex(i + 1, j + 1)
 			var d := _vertex(i, j + 1)
 			if coast_side != "" and maxf(maxf(a.y, b.y), maxf(c.y, d.y)) < SEA_LEVEL_M - 0.3 and shore_distance(a.x, a.z) < 0.0:
-				continue  # the seabed: nobody walks there (wave 5b coast)
+				seabed.append_array([a, b, d, b, c, d])  # nobody walks there (wave 5b coast)
+				continue
 			faces.append_array([a, b, d, b, c, d])  # clockwise seen from above: facing up
-	return faces
+	return faces if not faces.is_empty() else seabed  # all at sea: on its own, joined to no land
 
 
 func _vertex(i: int, j: int) -> Vector3:
