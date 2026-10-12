@@ -7,7 +7,8 @@ extends RefCounted
 ## The rules (proposed):
 ## - Anyone with a launcher fires it at an enemy vehicle in sight, between MIN_RANGE_M and
 ##   the launcher's reach (VEHICLE_RANGE_M; a Javelin's lock range), leading a moving one and
-##   aiming over the round's drop.
+##   aiming over the round's drop. Never closer than MIN_RANGE_M (or the round's arming
+##   distance and a little, a Javelin's 25 m) when it comes to the shot.
 ## - Hostiles also fire at a group behind cover: at least GROUP_MIN enemies within GROUP_M of
 ##   the one they're fighting, at least half of them behind something solid within COVER_NEAR_M
 ##   in front of them (the rocket goes into the cover). Never at a single soldier, and never
@@ -188,7 +189,7 @@ static func think(ai: SquadAI) -> bool:
 		st.why = "aiming"
 		return true
 	# Too close now (they moved up since choosing)? It wouldn't arm, and the blast is theirs.
-	if eye.distance_to(_target_point(st)) < MIN_RANGE_M:
+	if eye.distance_to(_target_point(st)) < maxf(MIN_RANGE_M, float(Warheads.data(w).get("arming_m", 0.0)) + 2.0):
 		st.cooldown_until = now + COOLDOWN_S * 0.3
 		st.why = "too close for a rocket"
 		if st.kind == "order":
@@ -310,7 +311,8 @@ static func group_behind_cover(ai: SquadAI) -> Dictionary:
 			covered += 1
 			if cover_point == null or eye.distance_to(hit.position) < eye.distance_to(cover_point):
 				cover_point = hit.position
-	if members < GROUP_MIN or covered * 2 < members or cover_point == null or _friend_near(body, cover_point):
+	if members < GROUP_MIN or covered * 2 < members or cover_point == null or eye.distance_to(cover_point) < MIN_RANGE_M \
+			or _friend_near(body, cover_point):
 		return {}
 	return {"kind": "group", "point": cover_point}
 

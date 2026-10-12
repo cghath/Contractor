@@ -485,19 +485,23 @@ func _test_ai() -> void:
 		n.queue_free()
 	await _frames(3)
 	print("AI: a group behind cover")
-	# Over 20 m off (LauncherAI.MIN_RANGE_M), with no cover close enough to move to, and the
-	# north wall over 2 m behind (no reflected backblast).
-	var grenadier := _soldier("RpgGunner2", &"hostile", Vector3(12, 0.1, -17),["assault_pack", "rpg7", "og7v_round", "og7v_round"], true)
-	var up := _soldier("Standing", &"friendly", Vector3(7.5, 0.1, 4.2), [], false)
-	var low1 := _soldier("Crouched1", &"friendly", Vector3(6.6, 0.1, 3.9), [], false)
-	var low2 := _soldier("Crouched2", &"friendly", Vector3(8.4, 0.1, 3.9), [], false)
+	# In the open north-east of the compound: a low wall (a plain world body, 1.1 m high) with a
+	# group behind it, two crouched behind it and one standing; an insurgent with his rifle about
+	# 29 m off (over LauncherAI.MIN_RANGE_M even after a step or two).
+	var cover := _cover_box(Vector3(27, 0, -46.4), Vector3(33, 1.1, -46.0))
+	var grenadier := _soldier("RpgGunner2", &"hostile", Vector3(30, 0.1, -75),
+		["plate_carrier_light", "assault_pack", "mk18", "mag_556", "mag_556", "rpg7", "og7v_round", "og7v_round"], true)
+	var up := _soldier("Standing", &"friendly", Vector3(30, 0.1, -45.2), [], false)
+	var low1 := _soldier("Crouched1", &"friendly", Vector3(29.1, 0.1, -45.5), [], false)
+	var low2 := _soldier("Crouched2", &"friendly", Vector3(30.9, 0.1, -45.5), [], false)
 	low1.want_crouch = true
 	low2.want_crouch = true
 	await _wait_until(func() -> bool: return fired_by.call(grenadier) > 0, 30.0)
 	var shot: Array = launchers.results.values().filter(func(r: Dictionary) -> bool: return r.shooter == grenadier)
 	var at: Vector3 = shot[0].position if not shot.is_empty() else Vector3.INF
-	check(not shot.is_empty() and at.z > 2.5 and at.z < 4.5 and absf(at.x - 7.5) < 3.0,
-		"a hostile fires at a group behind the low wall, into the cover (%s; %s)" % [at, LauncherAI.status(grenadier)])
+	check(not shot.is_empty() and at.z > -46.7 and at.z < -45.0 and absf(at.x - 30.0) < 3.0,
+		"a hostile fires at a group behind the low wall, into the cover (%s; %s; he's at %s)" % [at, LauncherAI.status(grenadier), grenadier.global_position])
+	cover.queue_free()
 	for n in [grenadier, up, low1, low2]:
 		n.queue_free()
 	await _frames(3)
@@ -668,6 +672,20 @@ func _shot(launcher: StringName, w: StringName, at: Vector3, aim: Vector3, mode 
 	r["id"] = id
 	await _frames(2)
 	return r
+
+
+## A plain box of world (layer 1) from `from` to `to` (metres): cover away from the voxels.
+func _cover_box(from: Vector3, to: Vector3) -> StaticBody3D:
+	var body := StaticBody3D.new()
+	body.collision_layer = 1
+	var shape := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = to - from
+	shape.shape = box
+	body.add_child(shape)
+	level.add_child(body)
+	body.global_position = (from + to) * 0.5
+	return body
 
 
 func _stub(pos: Vector3) -> StubVehicle:
