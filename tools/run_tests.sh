@@ -116,10 +116,11 @@ judge() {
 		if [ -n "${GITHUB_ACTIONS:-}" ]; then  # job logs need repo admin rights; annotations don't
 			# GitHub keeps only 10 error annotations per step: the reason first (a suite can print
 			# PASSED and still fail: a script error earlier, or a crash on quit), then the first
-			# script errors wherever they are in the log, then the last lines.
+			# failed checks and script errors wherever they are in the log, then the last lines.
 			echo "::error title=$name::FAILED: $why"
+			grep -E '\[FAIL\]' "$log" | head -n 3 | while IFS= read -r line; do echo "::error title=$name failed check::$line"; done
 			grep -A1 'SCRIPT ERROR' "$log" | grep -v '^--$' | head -n 3 | while IFS= read -r line; do echo "::error title=$name script error::$line"; done
-			tail -n 6 "$log" | while IFS= read -r line; do echo "::error title=$name::$line"; done
+			tail -n 3 "$log" | while IFS= read -r line; do echo "::error title=$name::$line"; done
 		fi
 		status=1
 	fi
