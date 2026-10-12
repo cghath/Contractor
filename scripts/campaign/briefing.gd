@@ -39,6 +39,8 @@ const SUPPORTS := {
 }
 ## Proposed: players arriving at an insertion point stand this far apart.
 const INSERT_SPACING_M := 2.0
+## An insertion point's method when a Black Hawk flies the squad in (wave 5b, hot zones).
+const HELI := "heli"
 
 ## The compound's stand-in contract and zone, for the debug path (Menu: briefing test).
 const DEBUG_CONTRACT := {
@@ -189,7 +191,7 @@ func server_open(p_contract: Dictionary, p_zone: Dictionary) -> void:
 	if not multiplayer.is_server():
 		return
 	contract = p_contract.duplicate(true)
-	zone = p_zone.duplicate(true)
+	zone = Briefing.with_heli_insertion(p_zone)
 	phase = Phase.BRIEFING
 	ready_peers = {}
 	supports = []
@@ -263,12 +265,30 @@ func server_start(force := false) -> bool:
 	return true
 
 
-## The briefing's own flow (auto_flow): squad to the insertion point, extraction, reinforcements.
+## A copy of `p_zone` where a hot zone's insertion points can also be reached by helicopter
+## (wave 5b: a "heli" point beside each one on foot; HeliSupports.server_insert flies the squad in).
+static func with_heli_insertion(p_zone: Dictionary) -> Dictionary:
+	var out := p_zone.duplicate(true)
+	if String(out.get("kind", "contract")) != "hot":
+		return out
+	var points: Array = []
+	for point: Dictionary in out.get("insertion_points", []):
+		points.append(point)
+		if String(point.get("method", "foot")) == "foot":
+			points.append(point.merged({"id": "%s_heli" % point.get("id", ""), "name": "%s by helicopter" % point.get("name", ""), "method": HELI}, true))
+	out["insertion_points"] = points
+	return out
+
+
+## The briefing's own flow (auto_flow): squad to the insertion point (flown in for a "heli"
+## one), extraction, reinforcements.
 func _default_flow() -> void:
 	var point := insertion()
 	var p: Array = point.get("pos", [])
 	if p.size() >= 2:
-		server_move_squad_to(Vector2(float(p[0]), float(p[1])))
+		var at := Vector2(float(p[0]), float(p[1]))
+		if String(point.get("method", "foot")) != HELI or not HeliSupports.server_insert(self, at):
+			server_move_squad_to(at)
 	var extraction := MapNodes.extraction(self)
 	if extraction:
 		extraction.server_begin(plan)
