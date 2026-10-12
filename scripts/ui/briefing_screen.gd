@@ -87,7 +87,7 @@ func show_briefing(briefing: Briefing) -> void:
 		child.queue_free()
 	for id: String in briefing.available_supports():
 		var box := CheckBox.new()
-		box.text = String(Briefing.SUPPORTS[id].name)
+		box.text = briefing.support_name(id)  # wave 5b: motor pool vehicles too
 		box.set_pressed_no_signal(id in briefing.supports)
 		box.toggled.connect(func(on: bool) -> void: briefing.request_support(id, on))
 		_supports.add_child(box)

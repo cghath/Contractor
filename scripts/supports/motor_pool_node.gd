@@ -1,0 +1,165 @@
+class_name MotorPoolNode
+extends Node
+## The motor pool in a level (wave 5b, V4): one node, "MotorPool", in every level on every peer
+## (AavSupport.install), so its RPCs land at the same path everywhere.
+## - Deployments (host): the briefing's picked supports "pool:<id>" (Briefing.available_supports
+##   offers each vehicle the pool can send) arrive at the insertion point when it starts
+##   (MotorPool.server_bring); when the squad extracts, each pool vehicle within "return_reach_m"
+##   of the extraction point goes home with its state (MotorPool.server_return), and one
+##   destroyed or left further out is gone from the pool (it stays in the zone, saved with it).
+##   The debug extraction (BaseHub, Shift+End) counts the same, by the players' positions.
+## - Every peer: the pool as the screens show it (pool: MotorPool.view()), sent to every
+##   client whenever it changes and to a late joiner; repairs requested from the base's motor
+##   pool terminal (request_repair: the host checks the sender and that this is the base).
+
+const NODE_NAME := "MotorPool"
+
+## Every peer: MotorPool.view() as the host last sent it.
+var pool: Array = []
+var _handled := false  # host: this deployment's vehicles were settled
+
+
+func _init() -> void:
+	name = NODE_NAME
+
+
+## The level's motor pool node (or null).
+static func of(from: Node) -> MotorPoolNode:
+	var lvl := CompoundLevel.current(from) if from and from.is_inside_tree() else null
+	return lvl.get_node_or_null(NodePath(NODE_NAME)) as MotorPoolNode if lvl else null
+
+
+func _ready() -> void:
+	Net.peer_joined.connect(_on_peer_joined)
+	Campaign.changed.connect(_on_campaign_changed)
+	var lvl := get_parent()
+	var briefing := lvl.get_node_or_null(^"Briefing") as Briefing
+	if briefing:
+		briefing.deployment_started.connect(_on_deployment_started)
+	var extraction := lvl.get_node_or_null(^"Extraction") as Extraction
+	if extraction:
+		extraction.deployment_ended.connect(_on_extracted)
+	BaseHub.deployment_ended.connect(_on_base_deployment_ended)
+	if multiplayer.is_server() and MotorPool.in_use():
+		pool = MotorPool.view()
+
+
+# --- Deployments (host) ----------------------------------------------------------------------------
+
+## Host: the briefing's start: each picked pool vehicle comes to the insertion point.
+func _on_deployment_started(plan: Dictionary) -> void:
+	if not multiplayer.is_server():
+		return
+	_handled = false
+	var p: Array = plan.get("insertion", {}).get("pos", [])
+	if p.size() < 2:
+		return
+	var at := Vector3(float(p[0]), 0.0, float(p[1]))
+	var i := 0
+	for id: Variant in plan.get("supports", []):
+		if String(id).begins_with(Briefing.POOL_PREFIX):
+			if server_bring_near(String(id).trim_prefix(Briefing.POOL_PREFIX), at, i) != null:
+				i += 1
+
+
+## Host: pool vehicle `id` arrives `bring_offset_m` behind `at` (away from the zone's middle),
+## the `index`th side by side, facing in. Returns it or null.
+func server_bring_near(id: String, at: Vector3, index := 0) -> Vehicle:
+	var lvl := get_parent()
+	var inward := -Vector3(at.x, 0.0, at.z).normalized() if Vector2(at.x, at.z).length() > 1.0 else Vector3.FORWARD
+	var across := inward.cross(Vector3.UP)
+	var offset := float(AavSupport.data().get("motor_pool", {}).get("bring_offset_m", 14.0))
+	var spot := at - inward * offset + across * float((index + 1) / 2) * 7.0 * (1.0 if index % 2 == 0 else -1.0)
+	if lvl.has_method(&"ground_point"):
+		spot = lvl.call(&"ground_point", spot)
+	return MotorPool.server_bring(id, lvl, Transform3D(Basis.looking_at(inward, Vector3.UP), spot + Vector3.UP * 0.2))
+
+
+## Host: the squad extracted at `report.point`: pool vehicles near it go home.
+func _on_extracted(report: Dictionary) -> void:
+	var p: Array = report.get("point", {}).get("pos", [])
+	if p.size() >= 2:
+		server_settle([Vector3(float(p[0]), 0.0, float(p[1]))])
+
+
+## Host: the debug extraction (BaseHub) ends a deployment without Extraction: what's near a
+## player goes home.
+func _on_base_deployment_ended(_report: Dictionary) -> void:
+	if not multiplayer.is_server() or _handled or not is_inside_tree():
+		return
+	var at: Array[Vector3] = []
+	for s: Soldier in MapNodes.players(self):
+		at.append(s.global_position)
+	server_settle(at)
+
+
+## Host: each pool vehicle in this level within return_reach_m of any of `points` goes home;
+## the rest (destroyed, or left behind) leave the pool. Returns how many went home.
+func server_settle(points: Array) -> int:
+	if not multiplayer.is_server():
+		return 0
+	_handled = true
+	var reach := float(AavSupport.data().get("motor_pool", {}).get("return_reach_m", 60.0))
+	var layer := VehicleLayer.of(self)
+	var home := 0
+	if layer == null:
+		return 0
+	for v in layer.vehicles():
+		var id := MotorPool.pool_id(v)
+		if id == "":
+			continue
+		var near := false
+		for q: Vector3 in points:
+			near = near or Vector2(v.global_position.x - q.x, v.global_position.z - q.z).length() <= reach
+		if near and MotorPool.server_return(v):
+			home += 1
+		else:
+			MotorPool.remove(id)
+			v.remove_meta(&"no_save")  # it stays where it was left: the zone keeps it
+			v.remove_meta(&"pool_id")
+	return home
+
+
+# --- The pool on every peer ------------------------------------------------------------------------
+
+func _on_campaign_changed(section_name: StringName) -> void:
+	if section_name == MotorPool.SECTION and multiplayer.has_multiplayer_peer() and multiplayer.is_server() and is_inside_tree():
+		_send.call_deferred()
+
+
+func _send() -> void:
+	if not is_inside_tree() or not multiplayer.is_server():
+		return
+	pool = MotorPool.view()
+	_client_pool.rpc(pool)
+
+
+func _on_peer_joined(id: int) -> void:
+	if multiplayer.is_server() and is_inside_tree() and MotorPool.in_use():
+		_client_pool.rpc_id(id, MotorPool.view())
+
+
+@rpc("authority", "call_remote", "reliable")
+func _client_pool(view: Array) -> void:
+	pool = view
+
+
+## Asks the host to service pool vehicle `id` (the base's motor pool terminal).
+func request_repair(id: String) -> void:
+	_server_repair.rpc_id(1, id)
+
+
+@rpc("any_peer", "call_local", "reliable")
+func _server_repair(id: String) -> void:
+	if not multiplayer.is_server():
+		return
+	var sender := multiplayer.get_remote_sender_id()
+	if sender == 0:
+		sender = multiplayer.get_unique_id()
+	var lvl := get_parent() as CompoundLevel
+	var who := lvl.players.get_node_or_null(str(sender)) as Soldier if lvl else null
+	if who == null or not who.vitals.is_up() or MotorPool.entry(id).is_empty():
+		return
+	var why := "Repairs are done at the base's motor pool" if not lvl is BaseLevel else MotorPool.server_repair(id)
+	var e := MotorPool.entry(id)
+	who._client_message.rpc_id(sender, why if why != "" else "%s: in the workshop until day %d" % [String(e.name), int(e.ready_day)])

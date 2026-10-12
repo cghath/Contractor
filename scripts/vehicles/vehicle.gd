@@ -887,9 +887,11 @@ func _drive_step(delta: float) -> void:
 	if kind == HELICOPTER:
 		throttle = 0.0
 		brake = true
+	var wet := AavWater.depth(self)  # wave 5b: in the sea on a coastal zone (V4)
+	throttle = AavWater.throttle(self, wet, throttle)
 	var still := linear_velocity.length() < SLEEP_SPEED and angular_velocity.length() < SLEEP_SPEED and throttle == 0.0
 	_still_s = _still_s + delta if still else 0.0
-	if _still_s > SLEEP_S and brake:
+	if _still_s > SLEEP_S and brake and wet <= 0.0:
 		if not sleeping:
 			sleeping = true
 		return
@@ -898,6 +900,8 @@ func _drive_step(delta: float) -> void:
 			return
 		sleeping = false
 	_wheel_forces(delta, throttle, steer, brake)
+	if wet > 0.0:
+		AavWater.step(self, delta, wet, throttle, steer, brake)  # buoyancy, drag, waterjets
 
 
 ## Suspension, grip, drive and brakes at each wheel (host).
@@ -1529,6 +1533,9 @@ func request_enter(index: int) -> void:
 func request_exit() -> void:
 	var actor := _sender()
 	if multiplayer.is_server() and actor and seat_of(actor) >= 0:
+		if AavWater.afloat(self) and not is_burning():
+			_tell(actor, "Not in open water")  # wave 5b: an AAV swimming
+			return
 		server_exit(actor)
 
 

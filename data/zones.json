@@ -16,6 +16,20 @@
 			],
 			"insertion": [[-120, 780], [780, -600]],
 			"extraction": [[-700, -700], [360, 720], [720, -120]]
+		},
+		"coast": {
+			"_note": "Wave 5b (V4): a contract zone on the coast. \"coast\": the sea along the south side, the shoreline shore_m in from that edge (ZoneTerrain); the company's LHD lies offshore lhd_m from that edge, lhd_along_m along it (Lhd). Proposed layout, for the AAV support's tests and the debug path (--zone coast).",
+			"name": "Coast test zone",
+			"size_m": 1536,
+			"seed": 7712,
+			"relief_m": 14,
+			"coast": {"side": "south", "shore_m": 300, "lhd_m": 150, "lhd_along_m": 0},
+			"modules": [
+				{"id": "compound", "type": "compound", "pos": [120, -360]},
+				{"id": "village_w", "type": "village", "pos": [-480, -240]}
+			],
+			"insertion": [[-200, 340], [400, 200]],
+			"extraction": [[300, 320], [-520, -560]]
 		}
 	}
 }
