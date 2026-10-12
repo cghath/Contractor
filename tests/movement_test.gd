@@ -178,7 +178,11 @@ func _test_hitboxes() -> void:
 	var eye := CharacterModel.eye_position(SoldierMovement.pose_for(S.PRONE, 0, 0.0))
 	check(prone_head.distance_to(eye) < 0.3, "and sits where the camera is (%.2f m away)" % prone_head.distance_to(eye))
 	player.vitals.server_damage(500.0)
-	await _frames(2)
+	# A ragdoll now: it falls from the pose it was drawn in, so wait until it has come to rest.
+	var left := 10.0
+	while left > 0.0 and not (is_instance_valid(player.ragdoll) and player.ragdoll.frozen):
+		await _seconds(0.1)
+		left -= 0.1
 	check(player.vitals.downed and absf(torso.global_basis.y.y) < 0.35, "downed still lays hitboxes down (lying flat with the body, a ragdoll now: up %.2f)" % torso.global_basis.y.y)
 	player.vitals.server_reset_health()
 	move.set_stance(S.STAND_HIGH)
