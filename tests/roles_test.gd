@@ -507,7 +507,10 @@ func _test_callout_events() -> void:
 	var answered: Array = answer.call()
 	check(not answered.is_empty(), "and the mover's battle buddy answers Covering! (%s)" % (answered[0].speaker if not answered.is_empty() else _log()))
 	_free(hostile)
-	await _seconds(Callouts.REPEAT_GAP_S)  # the contact fades before they may shoot again
+	# The contact fades before they may shoot again: squad contact lasts SQUAD_CONTACT_MEMORY_S
+	# (20 s), and a squadmate still in contact keeps talking, which can crowd out Reloading!.
+	await _wait_for(func() -> bool: return _squad().all(func(s: Soldier) -> bool: return not SquadAI.of(s).in_contact()), SquadAI.SQUAD_CONTACT_MEMORY_S + 4.0)
+	await _seconds(Callouts.REPEAT_GAP_S)
 	_set_hold_fire(false)
 	var loader := _slot(6)
 	while loader.inventory.consume_round(loader.active_slot):
@@ -515,7 +518,10 @@ func _test_callout_events() -> void:
 	var reloaded := func() -> bool: return _said(&"reloading").any(func(c: Dictionary) -> bool: return c.speaker == String(loader.name))
 	await _wait_for(reloaded, 8.0)
 	check(reloaded.call(), "an empty magazine: %s calls Reloading! (%s, %s)" % [loader.name, loader.ai_status, SquadAI.of(loader).intent])
-	var casualty := _slot(4)
+	# Any AI squadmate with an AI buddy who is up (the fake players earlier hold some slots, so
+	# a fixed slot may not be an AI any more).
+	var casualty: Soldier = _squad().filter(func(s: Soldier) -> bool: return s != loader and is_instance_valid(s.buddy) \
+		and s.buddy.is_ai() and s.buddy.vitals.is_up()).front()
 	casualty.vitals.server_damage(500.0)
 	await _frames(2)
 	var down := _said(&"man_down")
