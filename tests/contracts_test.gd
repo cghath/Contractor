@@ -146,6 +146,7 @@ func _test_rating_and_understatement() -> void:
 	var consistent := true
 	var low := [0, 0]   # intel under 0.5: [understated, count]
 	var high := [0, 0]  # intel over 0.75
+	var fog := [[0, 0], [0, 0]]  # honest briefings, [poor intel, good intel]: [count off, count]
 	for i in 4000:
 		var o := ContractGen.generate(rng, {"day": 1, "source": "board"})
 		if int(o.true_rating) <= 1:
@@ -163,7 +164,19 @@ func _test_rating_and_understatement() -> void:
 			consistent = consistent and int(o.rated) < int(o.true_rating) and int(o.enemy_est) < int(o.enemy_count) \
 				and (o.threats_known as Array).size() <= (o.threats as Array).size() and float(o.quality_est) < float(o.quality)
 		else:
-			consistent = consistent and int(o.rated) == int(o.true_rating) and int(o.enemy_est) == int(o.enemy_count) and o.threats_known == o.threats
+			# Honest, but intel is never spot on (Captain): off by no more than its accuracy allows.
+			var miss := 1.0 - float(o.intel_accuracy)
+			var off := absi(int(o.enemy_est) - int(o.enemy_count))
+			consistent = consistent and int(o.rated) == int(o.true_rating) \
+				and off <= ceili(int(o.enemy_count) * ContractGen.INTEL_COUNT_ERROR * miss) + 1 \
+				and absf(float(o.quality_est) - float(o.quality)) <= ContractGen.INTEL_QUALITY_ERROR * miss + 0.011
+			if not bucket.is_empty():
+				var f: Array = fog[0] if is_same(bucket, low) else fog[1]
+				f[0] += 1 if off > 0 else 0
+				f[1] += 1
+	check(fog[0][1] > 0 and float(fog[0][0]) / fog[0][1] > 0.5 and float(fog[1][0]) / maxf(fog[1][1], 1) < float(fog[0][0]) / fog[0][1],
+		"intel is never spot on: poor intel gets the count wrong more often than good intel (%d%% vs %d%% of honest briefings)" % [
+			roundi(100.0 * fog[0][0] / maxf(fog[0][1], 1)), roundi(100.0 * fog[1][0] / maxf(fog[1][1], 1))])
 	var rate := float(understated) / n
 	expected /= n
 	check(absf(rate - expected) < 0.03 and expected > 0.1 and expected < 0.3,
@@ -171,7 +184,7 @@ func _test_rating_and_understatement() -> void:
 	var low_rate := float(low[0]) / maxi(low[1], 1)
 	var high_rate := float(high[0]) / maxi(high[1], 1)
 	check(low_rate > high_rate + 0.08, "poor intel lies more often than good intel (%.0f%% vs %.0f%%)" % [low_rate * 100.0, high_rate * 100.0])
-	check(consistent, "an understated briefing rates lower and reports fewer fighters, lower quality, no more threats; an honest one tells the truth")
+	check(consistent, "an understated briefing rates lower and reports fewer fighters, lower quality, no more threats; an honest one is off by no more than its intel allows")
 	var some := ContractGen.generate(rng, {"day": 1, "source": "board"})
 	var view := ContractGen.public_view(some)
 	check(not view.has("true_rating") and not view.has("enemy_count") and not view.has("understated") and view.has("rated") and view.has("enemy_est"),

@@ -20,6 +20,12 @@ extends RefCounted
 
 ## Keys only the host knows until the threat is revealed.
 const HIDDEN_KEYS := ["true_rating", "enemy_count", "quality", "threats", "understated"]
+## Proposed: how far off intel can be at no accuracy (_intel_fog): the share of the count, and
+## the quality (0-1) either way.
+const INTEL_COUNT_ERROR := 0.7
+const INTEL_QUALITY_ERROR := 0.35
+## Below this accuracy the briefing gives the enemy's quality in words, not a figure.
+const INTEL_QUALITY_WORDS_BELOW := 0.6
 ## Clawback terms (Captain): what a voided contract gives back of its advance.
 const NO_CLAWBACK := "none"
 const PRORATED_CLAWBACK := "prorated"
@@ -38,6 +44,29 @@ static func rating(enemy_count: int, quality: float, threats: Array) -> int:
 	for t: Variant in threats:
 		score += float(MissionRegistry.threat(String(t)).get("weight", 0.5))
 	return clampi(1 + floori(score), 1, 5)
+
+
+## What intel of accuracy `intel` (0-1) makes of the truth (Proposed): {"count", "quality",
+## "threats"}. The count is off by up to INTEL_COUNT_ERROR * (1 - intel) of it either way
+## (about ±50% at 30% intel, ±4% at 95%), the quality by up to INTEL_QUALITY_ERROR *
+## (1 - intel); each real threat goes unreported with a chance of (1 - intel) / 2, and one that
+## isn't there gets reported with a chance of (1 - intel) / 4. Errors near zero are likelier
+## than the full amount. Leaves `rng` as it was.
+static func _intel_fog(rng: RandomNumberGenerator, intel: float, count: int, quality: float, threats: Array, pool: Array) -> Dictionary:
+	var roll := RandomNumberGenerator.new()
+	roll.seed = hash([rng.state, "intel"])
+	var miss := clampf(1.0 - intel, 0.0, 1.0)
+	var spread := func() -> float: return roll.randf() + roll.randf() - 1.0  # -1..1, peaked at 0
+	var est_count := maxi(1, roundi(count * (1.0 + spread.call() * INTEL_COUNT_ERROR * miss)))
+	var est_quality := clampf(quality + spread.call() * INTEL_QUALITY_ERROR * miss, 0.05, 1.0)
+	var known: Array = []
+	for t: Variant in threats:
+		if roll.randf() >= miss * 0.5:
+			known.append(t)
+	var absent := pool.filter(func(t: Variant) -> bool: return t not in threats)
+	if not absent.is_empty() and roll.randf() < miss * 0.25:
+		known.append(absent[roll.randi() % absent.size()])
+	return {"count": est_count, "quality": snappedf(est_quality, 0.01), "threats": known}
 
 
 ## The chance a briefing understates the threat: likelier on poor intel (Proposed: 35% at
@@ -114,13 +143,18 @@ static func generate(rng: RandomNumberGenerator, ctx: Dictionary) -> Dictionary:
 	var accuracy_range: Array = MissionRegistry.setting("lead_intel_accuracy" if source == "lead" else "fixer_intel_accuracy" if source == "fixer" else "intel_accuracy", [0.3, 0.95])
 	var intel := 0.95 if safe else rng.randf_range(float(accuracy_range[0]), float(accuracy_range[1]))
 	var understated := not safe and true_rating > 1 and rng.randf() < understate_chance(intel)
-	var est_count := enemy_count
-	var est_quality := quality
-	var known := threats.duplicate()
+	# Intel is never spot on (Captain): the count, the quality and the threats are off by up to
+	# what the intel's accuracy allows. Rolled on its own generator (seeded from the board's,
+	# which it leaves alone) so the boards stay as they were.
+	var fog := _intel_fog(rng, intel, enemy_count, quality, threats, def.get("threat_pool", []) as Array)
+	var est_count: int = fog.count
+	var est_quality: float = fog.quality
+	var known: Array = fog.threats
 	var rated := true_rating
 	if understated:
 		est_count = maxi(2, roundi(enemy_count * rng.randf_range(0.45, 0.75)))
 		est_quality = maxf(0.1, quality - rng.randf_range(0.1, 0.25))
+		known = threats.duplicate()  # the client's lowball, not the fog
 		if not known.is_empty():
 			known.resize(rng.randi_range(0, known.size() - 1))  # at least one threat goes unmentioned
 		rated = mini(rating(est_count, est_quality, known), true_rating - 1)
@@ -277,8 +311,22 @@ static func estimate_text(contract: Dictionary) -> String:
 	var est := int(contract.get("enemy_est", 0))
 	var spread := maxi(1, roundi(est * (1.0 - float(contract.get("intel_accuracy", 0.5)))))
 	var threats: Array = (contract.get("threats_known", []) as Array).map(func(t: Variant) -> String: return MissionRegistry.threat_name(String(t)))
-	return "%d-%d fighters, quality %d%%%s" % [maxi(est - spread, 1), est + spread, roundi(float(contract.get("quality_est", 0)) * 100.0),
-		(", known threats: " + ", ".join(threats)) if not threats.is_empty() else ", no known threats"]
+	var q := float(contract.get("quality_est", 0))
+	var quality := ("quality %d%%" % roundi(q * 100.0)) if float(contract.get("intel_accuracy", 0.5)) >= INTEL_QUALITY_WORDS_BELOW \
+		else "looks " + quality_word(q)
+	return "%d-%d fighters, %s%s" % [maxi(est - spread, 1), est + spread, quality,
+		(", reported threats: " + ", ".join(threats)) if not threats.is_empty() else ", no reported threats"]
+
+
+## A rough word for an enemy quality (0-1), for a briefing on poor intel.
+static func quality_word(q: float) -> String:
+	if q < 0.3:
+		return "poorly trained"
+	if q < 0.55:
+		return "trained"
+	if q < 0.8:
+		return "well trained"
+	return "elite"
 
 
 # --- Negotiation (MW5-style) -------------------------------------------------------------
