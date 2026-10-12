@@ -47,6 +47,12 @@ var _streams := {}  # id -> Array[AudioStream]
 var _pool: Array[AudioStreamPlayer3D] = []
 var _next := 0
 var _steps := {}  # soldier instance id -> {"pos": Vector3, "walked": float}
+var _engines := {}  # vehicle instance id -> {"player", "pos", "speed", "id"}
+
+## A sound under a roof this close above it plays through the room bus (reverb).
+const ROOF_M := 8.0
+## Engines: heard within their sound's range_m; pitch rises with speed (m/s) up to this.
+const ENGINE_TOP_SPEED := 20.0
 
 
 func _ready() -> void:
@@ -54,6 +60,15 @@ func _ready() -> void:
 	_load_defs()
 	_ensure_bus(&"SFX")
 	_ensure_bus(&"Voice")
+	_ensure_bus(&"SFX_Room")
+	var room := AudioServer.get_bus_index(&"SFX_Room")
+	if AudioServer.get_bus_effect_count(room) == 0:
+		var reverb := AudioEffectReverb.new()  # indoors: a small hard room
+		reverb.room_size = 0.35
+		reverb.damping = 0.4
+		reverb.wet = 0.3
+		reverb.dry = 0.85
+		AudioServer.add_bus_effect(room, reverb)
 	for i in POOL_SIZE:
 		var p := AudioStreamPlayer3D.new()
 		p.bus = &"SFX"
@@ -168,6 +183,7 @@ func _start(id: StringName, pos: Vector3, volume_db: float) -> void:
 	p.stop()
 	p.stream = options[randi() % options.size()]
 	p.global_position = pos
+	p.bus = &"SFX_Room" if under_roof(pos) else &"SFX"
 	p.unit_size = float(def.get("unit_size", 10.0))
 	p.max_distance = float(def.get("range_m", 100.0))
 	p.volume_db = float(def.get("volume_db", 0.0)) + volume_db
@@ -193,7 +209,7 @@ func heard_since(since: float) -> Array[StringName]:
 
 # --- Footsteps (every peer, no network) -------------------------------------------------------
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	var ear: Variant = listener()
 	if ear == null:
 		return
@@ -214,10 +230,103 @@ func _process(_delta: float) -> void:
 			var stride := _stride(s)
 			if e.walked >= stride:
 				e.walked = float(e.walked) - stride
-				play_at(&"step", pos, -8.0 if s.is_crouching() else 0.0)
+				play_at(&"step_hard" if hard_ground(s) else &"step", pos, -8.0 if s.is_crouching() else 0.0)
 		_steps[key] = e
+	_update_engines(ear, delta)
 	if _steps.size() > 256:
 		_steps.clear()
+
+
+## Whether `pos` is under a roof (world geometry within ROOF_M above): indoors, with reverb.
+func under_roof(pos: Vector3) -> bool:
+	var space := _space()
+	if space == null:
+		return false
+	var q := PhysicsRayQueryParameters3D.create(pos + Vector3.UP * 0.6, pos + Vector3.UP * ROOF_M, SoldierMovement.WORLD_MASK)
+	return not space.intersect_ray(q).is_empty()
+
+
+## Whether `s` stands on something built (a voxel structure, a module, a vehicle): a hard step.
+func hard_ground(s: Soldier) -> bool:
+	var space := _space()
+	if space == null:
+		return false
+	var q := PhysicsRayQueryParameters3D.create(s.global_position + Vector3.UP * 0.3, s.global_position + Vector3.DOWN * 0.5, SoldierMovement.WORLD_MASK)
+	q.exclude = [s.get_rid()]
+	var hit := space.intersect_ray(q)
+	var node: Node = hit.get("collider") as Node
+	while node:
+		if node is VoxelWorld or node is ZoneModule or node is Vehicle:
+			return true
+		if node is ZoneTerrain:
+			return false
+		node = node.get_parent()
+	return false
+
+
+func _space() -> PhysicsDirectSpaceState3D:
+	var world := get_viewport().find_world_3d() if is_inside_tree() else null
+	return world.direct_space_state if world else null
+
+
+## The engine sound for vehicle `v`: engine_<class> (data/vehicles.json "class"), else by kind.
+func engine_id(v: Vehicle) -> StringName:
+	var id := "engine_" + String(v.spec.get("class", ""))
+	if defs.has(id):
+		return StringName(id)
+	return &"engine_ifv" if v.kind == Vehicle.TRACKED else &"engine_mrap"
+
+
+## Engines run while someone drives and the vehicle isn't wrecked, within the sound's range of
+## the listener; pitch and volume rise with speed, measured from movement (every peer).
+func _update_engines(ear: Vector3, delta: float) -> void:
+	var alive := {}
+	for n in get_tree().get_nodes_in_group(Vehicle.GROUP):
+		var v := n as Vehicle
+		if v == null or not v.is_inside_tree():
+			continue
+		var key := v.get_instance_id()
+		var id := engine_id(v)
+		var def: Dictionary = defs.get(String(id), {})
+		var running := not v.wrecked and v.driver() != null and v.global_position.distance_to(ear) <= float(def.get("range_m", 200.0))
+		if not running:
+			continue
+		var e: Dictionary = _engines.get(key, {})
+		if e.is_empty():
+			var options := streams(id)
+			if options.is_empty():
+				continue
+			var p := AudioStreamPlayer3D.new()
+			p.stream = options[0]
+			p.bus = &"SFX"
+			p.unit_size = float(def.get("unit_size", 12.0))
+			p.max_distance = float(def.get("range_m", 200.0))
+			p.attenuation_model = AudioStreamPlayer3D.ATTENUATION_INVERSE_DISTANCE
+			add_child(p)
+			p.global_position = v.global_position
+			if enabled:
+				p.play()
+			_remember(id, v.global_position)
+			e = {"player": p, "pos": v.global_position, "speed": 0.0, "id": id}
+			_engines[key] = e
+		var pos := v.global_position
+		e.speed = lerpf(float(e.speed), pos.distance_to(e.pos) / maxf(delta, 0.001), 0.1)
+		e.pos = pos
+		var effort := clampf(float(e.speed) / ENGINE_TOP_SPEED, 0.0, 1.0)
+		var player: AudioStreamPlayer3D = e.player
+		player.global_position = pos
+		player.pitch_scale = 0.8 + effort * 0.8
+		player.volume_db = float(def.get("volume_db", 0.0)) + effort * 5.0
+		alive[key] = true
+	for key in _engines.keys():
+		if not alive.has(key):
+			(_engines[key].player as Node).queue_free()
+			_engines.erase(key)
+
+
+## The engine sound playing for `v` (tests), or {}.
+func engine_of(v: Vehicle) -> Dictionary:
+	return _engines.get(v.get_instance_id(), {})
 
 
 static func _stride(s: Soldier) -> float:

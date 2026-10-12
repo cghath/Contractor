@@ -18,7 +18,10 @@ const MIX_RATE := 22050
 static func make(recipe: Dictionary, seed_value: int) -> AudioStreamWAV:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed_value
-	var length := float(recipe.get("length", 0.5)) * rng.randf_range(0.92, 1.08)
+	var looped := bool(recipe.get("loop", false))  # an engine: exactly "length" s, loops seamlessly
+	var length := float(recipe.get("length", 0.5)) * (1.0 if looped else rng.randf_range(0.92, 1.08))
+	var hum: Dictionary = recipe.get("hum", {})  # {"hz", "harmonics": [amp, ...], "amp", "wobble"}: a steady engine note
+	var hum_hz := float(hum.get("hz", 0.0))
 	var n := int(length * MIX_RATE)
 	var samples := PackedFloat32Array()
 	samples.resize(n)
@@ -47,6 +50,11 @@ static func make(recipe: Dictionary, seed_value: int) -> AudioStreamWAV:
 			v += lp * 3.0 * float(tail.amp) * rise * exp(-t * float(tail.decay))
 		if ring_hz > 0.0:
 			v += sin(TAU * ring_hz * t) * float(ring.amp) * exp(-t * float(ring.decay))
+		if hum_hz > 0.0:  # whole-number hz over a whole-second loop: the waveform meets itself at the seam
+			var harmonics: Array = hum.get("harmonics", [1.0])
+			var wobble := 1.0 + float(hum.get("wobble", 0.0)) * sin(TAU * float(hum.get("wobble_hz", 4.0)) * t)  # cylinder beat, rotor thump
+			for k in harmonics.size():
+				v += sin(TAU * hum_hz * (k + 1) * t) * float(harmonics[k]) * float(hum.get("amp", 1.0)) * wobble
 		for c: Array in clicks:
 			var dt := t - float(c[0])
 			if dt >= 0.0 and dt < 0.02:
@@ -68,7 +76,7 @@ static func make(recipe: Dictionary, seed_value: int) -> AudioStreamWAV:
 	bytes.resize(n * 2)
 	for i in n:
 		var s := tanh(samples[i] * gain * 1.4) / tanh(1.4)  # soft saturation: punch without clipping
-		if i > n - 200:
+		if i > n - 200 and not looped:
 			s *= float(n - i) / 200.0  # no click at the end
 		bytes.encode_s16(i * 2, int(clampf(s, -1.0, 1.0) * 32767.0))
 	var wav := AudioStreamWAV.new()
@@ -76,4 +84,8 @@ static func make(recipe: Dictionary, seed_value: int) -> AudioStreamWAV:
 	wav.mix_rate = MIX_RATE
 	wav.stereo = false
 	wav.data = bytes
+	if looped:
+		wav.loop_mode = AudioStreamWAV.LOOP_FORWARD
+		wav.loop_begin = 0
+		wav.loop_end = n
 	return wav

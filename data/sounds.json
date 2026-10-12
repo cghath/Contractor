@@ -29,6 +29,18 @@
 			"synth": {"length": 1.2, "peak": 0.6, "clicks": [[0.02, 0.8], [0.4, 0.6], [0.95, 1.0], [1.02, 0.7]], "ring": {"amp": 0.05, "hz": 3200, "decay": 6}, "highpass": 0.3}},
 		"step": {"range_m": 40, "unit_size": 2, "volume_db": -12, "pitch_spread": 0.18,
 			"synth": {"length": 0.14, "peak": 0.6, "crack": {"amp": 0.25, "decay": 120}, "tail": {"amp": 1.0, "decay": 32, "lowpass": 0.09}}},
+		"step_hard": {"range_m": 40, "unit_size": 2, "volume_db": -10, "pitch_spread": 0.15,
+			"synth": {"length": 0.12, "peak": 0.6, "crack": {"amp": 0.7, "decay": 140}, "tail": {"amp": 0.6, "decay": 45, "lowpass": 0.2}, "highpass": 0.35}},
+		"engine_mrap": {"range_m": 220, "unit_size": 12, "volume_db": -4, "engine": true,
+			"synth": {"length": 1.0, "loop": true, "peak": 0.7, "hum": {"hz": 31, "harmonics": [1.0, 0.65, 0.45, 0.3, 0.2], "amp": 0.6, "wobble": 0.3, "wobble_hz": 7}, "tail": {"amp": 0.5, "decay": 0, "lowpass": 0.05}}},
+		"engine_soft": {"range_m": 160, "unit_size": 8, "volume_db": -6, "engine": true,
+			"synth": {"length": 1.0, "loop": true, "peak": 0.6, "hum": {"hz": 47, "harmonics": [1.0, 0.5, 0.35, 0.2], "amp": 0.6, "wobble": 0.2, "wobble_hz": 9}, "tail": {"amp": 0.35, "decay": 0, "lowpass": 0.08}}},
+		"engine_ifv": {"range_m": 300, "unit_size": 16, "volume_db": -2, "engine": true,
+			"synth": {"length": 1.0, "loop": true, "peak": 0.75, "hum": {"hz": 24, "harmonics": [1.0, 0.75, 0.55, 0.4, 0.3, 0.2], "amp": 0.6, "wobble": 0.35, "wobble_hz": 6}, "tail": {"amp": 0.6, "decay": 0, "lowpass": 0.04}, "clicks": [[0.0, 0.35], [0.125, 0.3], [0.25, 0.35], [0.375, 0.3], [0.5, 0.35], [0.625, 0.3], [0.75, 0.35], [0.875, 0.3]]}},
+		"engine_mbt": {"range_m": 350, "unit_size": 18, "volume_db": -2, "engine": true,
+			"synth": {"length": 1.0, "loop": true, "peak": 0.75, "hum": {"hz": 440, "harmonics": [0.5, 0.25, 0.1], "amp": 0.35, "wobble": 0.05, "wobble_hz": 2}, "tail": {"amp": 1.0, "decay": 0, "lowpass": 0.03}, "clicks": [[0.0, 0.3], [0.125, 0.25], [0.25, 0.3], [0.375, 0.25], [0.5, 0.3], [0.625, 0.25], [0.75, 0.3], [0.875, 0.25]]}},
+		"engine_aircraft": {"range_m": 600, "unit_size": 40, "volume_db": 0, "engine": true,
+			"synth": {"length": 1.0, "loop": true, "peak": 0.85, "hum": {"hz": 60, "harmonics": [1.0, 0.4, 0.2], "amp": 0.5, "wobble": 0.95, "wobble_hz": 5}, "tail": {"amp": 0.7, "decay": 0, "lowpass": 0.06}}},
 		"throw": {"range_m": 15, "unit_size": 2, "volume_db": -10,
 			"synth": {"length": 0.3, "peak": 0.5, "tail": {"amp": 1.0, "decay": 10, "lowpass": 0.3, "attack": 0.08}, "highpass": 0.4}}
 	}

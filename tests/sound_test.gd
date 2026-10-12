@@ -45,7 +45,22 @@ func _test_streams() -> void:
 	var b := (Sfx.streams(&"shot_rifle")[1] as AudioStreamWAV).data
 	check(a != b, "variants differ, so repeats don't sound identical")
 	check(Sfx.synth(Sfx.defs["step"].synth, 42).data == Sfx.synth(Sfx.defs["step"].synth, 42).data, "the same seed makes the same sound")
-	check(AudioServer.get_bus_index(&"SFX") >= 0 and AudioServer.get_bus_index(&"Voice") >= 0, "SFX and Voice buses exist")
+	check(AudioServer.get_bus_index(&"SFX") >= 0 and AudioServer.get_bus_index(&"Voice") >= 0 and AudioServer.get_bus_index(&"SFX_Room") >= 0,
+		"SFX, Voice and room (reverb) buses exist")
+	var engine := Sfx.streams(&"engine_mbt")[0] as AudioStreamWAV
+	check(engine.loop_mode == AudioStreamWAV.LOOP_FORWARD and engine.loop_end == SfxSynth.MIX_RATE, "an engine loops seamlessly (exactly 1 s)")
+	var tank := Vehicle.new()
+	tank.spec = {"class": "mbt"}
+	tank.kind = Vehicle.TRACKED
+	var truck := Vehicle.new()
+	truck.spec = {"class": "unknown"}
+	truck.kind = Vehicle.WHEELED
+	var heli := Vehicle.new()
+	heli.spec = {"class": "aircraft"}
+	check(Sfx.engine_id(tank) == &"engine_mbt" and Sfx.engine_id(truck) == &"engine_mrap" and Sfx.engine_id(heli) == &"engine_aircraft",
+		"each vehicle class has its own engine (tank turbine, MRAP diesel, rotor)")
+	for v: Vehicle in [tank, truck, heli]:
+		v.free()
 
 
 func _test_distance() -> void:
@@ -101,6 +116,7 @@ func _test_in_level() -> void:
 	player._server_reload.rpc_id(1, &"primary")
 	await _frames(3)
 	check(&"reload" in Sfx.heard_since(t), "a reload is heard")
+	check(not Sfx.under_roof(Vector3(0, 0.1, 30)), "in the open: no reverb")
 	var walker := level.spawn_soldier({"name": "Walker", "faction": "friendly", "variant": "multicam", "pos": Vector3(4, 0.1, 20),
 		"loadout": [], "combat": 0.5, "discipline": 0.5, "guard": true})
 	SquadAI.of(walker).process_mode = Node.PROCESS_MODE_DISABLED

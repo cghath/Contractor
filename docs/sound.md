@@ -18,7 +18,8 @@ our world** rather than photo-real; a real recording can replace any of them lat
   listener from a shooter more than 25 m away.
 - **Ranges follow the AI's hearing:** a rifle shot 220 m (SquadAI.HEAR_SHOT_M is 200), a
   suppressed one 45 m (HEAR_SUPPRESSED_M 40). What the player hears, the AI hears.
-- **Buses:** `SFX` and `Voice` (callouts) send to `Master`, whose low-pass is deafness.
+- **Buses:** `SFX`, `SFX_Room` (a sound under a roof: reverb) and `Voice` (callouts) send to
+  `Master`, whose low-pass is deafness.
 
 ## What plays where
 
@@ -28,7 +29,8 @@ our world** rather than photo-real; a real recording can replace any of them lat
 | `impact_dirt`, `impact_plate` (plates, vehicles), `impact_body` | `CompoundLevel.show_impact` (already on every peer) |
 | `explosion` (+ `_far`), `flashbang` | `CompoundLevel.show_explosion` / `show_flash` |
 | `reload`, `throw` | `Soldier._server_reload` / `_server_throw` -> `Sfx.server_play` |
-| `step` | every peer, from how each soldier moves (no network); quieter crouched |
+| `step`, `step_hard` | every peer, from how each soldier moves (no network); hard on structures and vehicles; quieter crouched |
+| `engine_mrap`, `engine_soft`, `engine_ifv`, `engine_mbt`, `engine_aircraft` | every peer: loops while someone drives; pitch and volume rise with speed; picked by the vehicle's `class` in data/vehicles.json |
 
 ## Adding or changing a sound
 
