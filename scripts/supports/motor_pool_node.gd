@@ -10,9 +10,14 @@ extends Node
 ##   The debug extraction (BaseHub, Shift+End) counts the same, by the players' positions.
 ## - Every peer: the pool as the screens show it (pool: MotorPool.view()), sent to every
 ##   client whenever it changes and to a late joiner; repairs requested from the base's motor
-##   pool terminal (request_repair: the host checks the sender and that this is the base).
+##   pool terminal (request_repair: the host checks the sender and that they're at the
+##   terminal, which only the base has).
 
 const NODE_NAME := "MotorPool"
+## How far (flat, feet to the terminal's foot) the host accepts a repair request from: the
+## interaction menu's reach plus the slack the host allows other interactions for lag, and the
+## desk's half depth.
+const REPAIR_REACH_M := Soldier.INTERACT_REACH + Soldier.INTERACT_SLACK + 0.5
 
 ## Every peer: MotorPool.view() as the host last sent it.
 var pool: Array = []
@@ -40,8 +45,11 @@ func _ready() -> void:
 	if extraction:
 		extraction.deployment_ended.connect(_on_extracted)
 	BaseHub.deployment_ended.connect(_on_base_deployment_ended)
-	if multiplayer.is_server() and MotorPool.in_use():
-		pool = MotorPool.view()
+	Economy.day_advanced.connect(_on_day_advanced)
+	if multiplayer.is_server():
+		MotorPool.server_reconcile(get_parent())  # nothing of this level's is out yet
+		if MotorPool.in_use():
+			pool = MotorPool.view()
 
 
 # --- Deployments (host) ----------------------------------------------------------------------------
@@ -83,14 +91,24 @@ func _on_extracted(report: Dictionary) -> void:
 
 
 ## Host: the debug extraction (BaseHub) ends a deployment without Extraction: what's near a
-## player goes home.
+## player goes home. BaseHub has saved the zone and the campaign by now, so they're saved again
+## when anything changed: a vehicle left behind stays in the zone, and the pool's record.
 func _on_base_deployment_ended(_report: Dictionary) -> void:
-	if not multiplayer.is_server() or _handled or not is_inside_tree():
+	if not multiplayer.is_server() or _handled or not is_inside_tree() or CompoundLevel.current(self) != get_parent():
 		return
 	var at: Array[Vector3] = []
 	for s: Soldier in MapNodes.players(self):
 		at.append(s.global_position)
-	server_settle(at)
+	var layer := VehicleLayer.of(self)
+	var brought := 0
+	for v in (layer.vehicles() if layer else []):
+		if MotorPool.pool_id(v) != "":
+			brought += 1
+	var home := server_settle(at)
+	if brought > home:
+		GameState.save_zone()
+	if brought > 0 and BaseHub.campaign_running:
+		Campaign.save_campaign()
 
 
 ## Host: each pool vehicle in this level within return_reach_m of any of `points` goes home;
@@ -127,9 +145,17 @@ func _on_campaign_changed(section_name: StringName) -> void:
 		_send.call_deferred()
 
 
+## A day passing can bring a vehicle out of the workshop (MotorPool.problem reads the day).
+func _on_day_advanced(_day: int, _days: int) -> void:
+	_on_campaign_changed(MotorPool.SECTION)
+
+
 func _send() -> void:
-	if not is_inside_tree() or not multiplayer.is_server():
+	if not is_inside_tree() or not multiplayer.is_server() or CompoundLevel.current(self) != get_parent():
 		return
+	MotorPool.server_reconcile(get_parent())  # (a campaign loaded mid-deployment: what's out isn't)
+	if not MotorPool.in_use():
+		return  # no pool started: don't start one (view() would)
 	pool = MotorPool.view()
 	_client_pool.rpc(pool)
 
@@ -149,6 +175,17 @@ func request_repair(id: String) -> void:
 	_server_repair.rpc_id(1, id)
 
 
+## The motor pool terminal (BaseTerminal, kind motor_pool: the base has one) in this level within
+## `who`'s reach (the interaction menu's, plus slack for lag), or null.
+func terminal_near(who: Soldier) -> BaseTerminal:
+	for n in get_tree().get_nodes_in_group(BaseTerminal.GROUP):
+		var t := n as BaseTerminal
+		if t and t.kind == &"motor_pool" and get_parent().is_ancestor_of(t) \
+				and Vector2(t.global_position.x - who.global_position.x, t.global_position.z - who.global_position.z).length() <= REPAIR_REACH_M:
+			return t
+	return null
+
+
 @rpc("any_peer", "call_local", "reliable")
 func _server_repair(id: String) -> void:
 	if not multiplayer.is_server():
@@ -160,6 +197,7 @@ func _server_repair(id: String) -> void:
 	var who := lvl.players.get_node_or_null(str(sender)) as Soldier if lvl else null
 	if who == null or not who.vitals.is_up() or MotorPool.entry(id).is_empty():
 		return
-	var why := "Repairs are done at the base's motor pool" if not lvl is BaseLevel else MotorPool.server_repair(id)
+	var terminal := terminal_near(who)
+	var why := "Repairs are done at the base's motor pool" if terminal == null else MotorPool.server_repair(id)
 	var e := MotorPool.entry(id)
 	who._client_message.rpc_id(sender, why if why != "" else "%s: in the workshop until day %d" % [String(e.name), int(e.ready_day)])

@@ -286,7 +286,7 @@ func _debug_extract() -> void:
 		var out: Array = []
 		for node in level.get_tree().get_nodes_in_group(&"combatants"):
 			var s := node as Soldier
-			if s and s.faction == &"friendly" and not s.vitals.is_dead():
+			if s and s.faction == &"friendly" and not s.vitals.is_dead() and not s.has_meta(&"vehicle_crew"):  # (wave 5b: not a support's crew)
 				out.append(s)
 		report = Contracts.report_from_level(level, out)
 	Contracts.server_end_deployment(report)

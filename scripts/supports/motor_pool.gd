@@ -11,6 +11,8 @@ extends RefCounted
 ##   it (Vehicle id "pool_<id>", meta "pool_id"); it's out until it comes back.
 ## - server_return(vehicle): it extracted with the squad: its record takes the vehicle's state
 ##   now (damage, fuel, cargo) and it's home. Destroyed, or left behind: removed (remove()).
+## - server_reconcile(level): one marked out whose vehicle no longer exists (the campaign was saved
+##   mid-deployment and loaded again) is home as it left, like the roster's people.
 ## - repair_quote(id) / server_repair(id): the workshop fixes every hit zone, the battery and
 ##   the hull and fills the tank, for money (Economy) and days (it can't deploy until ready_day).
 ## A new campaign starts with data/ground_supports.json "motor_pool" "start" (Proposed: one
@@ -130,6 +132,34 @@ static func server_bring(id: String, level: Node, xform: Transform3D) -> Vehicle
 	Campaign.mark_changed(SECTION)
 	print("[motor pool] %s (%s) brought to %s" % [e.name, id, GameState.zone_id])
 	return v
+
+
+## Host: every vehicle marked out on a deployment that isn't in the game any more comes home as
+## it left (out cleared; its record is the one it left with). A brought vehicle never outlives
+## its session (meta no_save keeps it out of the zone save), so after a campaign saved
+## mid-deployment is loaded again, or a deployment that ended without an extraction, nothing
+## would ever clear it: the same rule as the roster's, "everyone who went is back as they left
+## the base" (BaseHub.load_or_new). `level` is the level playing now (a level being swapped out
+## stays in the tree to the end of the frame: its vehicles don't count). Returns how many came
+## home. Doesn't start a pool.
+static func server_reconcile(level: Node) -> int:
+	var vehicles: Array = Campaign.section(SECTION).get("vehicles", [])
+	if level == null or not level.is_inside_tree() or vehicles.is_empty():
+		return 0
+	var live := {}
+	for n in level.get_tree().get_nodes_in_group(Vehicle.GROUP):
+		var v := n as Vehicle
+		if v and level.is_ancestor_of(v) and not v.is_queued_for_deletion() and pool_id(v) != "":
+			live[pool_id(v)] = true
+	var home := 0
+	for e: Dictionary in vehicles:
+		if String(e.get("out", "")) != "" and not live.has(String(e.id)):
+			print("[motor pool] %s (%s) was out in %s and isn't there any more: back as it left" % [e.name, e.id, e.out])
+			e.out = ""
+			home += 1
+	if home > 0:
+		Campaign.mark_changed(SECTION)
+	return home
 
 
 ## The pool id of a vehicle brought from the pool ("" for any other).

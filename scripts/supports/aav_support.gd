@@ -423,8 +423,9 @@ func _spawn(origin: Lhd, toward: Vector3, layer: VehicleLayer) -> Vehicle:
 				"combat": 0.55, "discipline": 0.7, "guard": false})
 			if crew == null:
 				continue
+			# Not a squadmate (no squad orders, no slot: Squad.members() and CompoundLevel._squad_ai
+			# skip it), but still a combatant: enemies see it, medics and friendly-fire checks too.
 			crew.set_meta(&"vehicle_crew", v.vehicle_id)
-			crew.remove_from_group(&"combatants")  # not a squadmate: no squad orders, no slot
 			v.server_enter(crew, i)
 	AavGunner.attach(v)
 	v.destroyed.connect(_on_destroyed)

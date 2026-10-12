@@ -232,11 +232,13 @@ func _test_inland() -> void:
 	level.terrain.heights = saved
 	check(why.begins_with("Too steep") and support.current() == null and Economy.cash() == cash, "refused on a steep slope on its way: %s" % why)
 	check(support.route_slope_deg(player.global_position, player.global_position + Vector3(30, 0, 0)) < 31.0, "the ground there is fine again")
-	# Paid, from the FOB's edge.
-	why = support.server_call(player)
+	# Paid, from the FOB's edge: called as the command menu does (Support > AAV > Call), through
+	# Soldier._server_squad_command and Supports.server_command.
+	player._server_squad_command.rpc_id(1, "support:aav_call", player.global_position, PackedStringArray())
+	await _frames(1)
 	var v := support.current()
-	check(why == "" and v != null and Economy.cash() == cash - Prices.support_price("aav"),
-		"called: paid $%s (cash %d -> %d)" % [Prices.support_price("aav"), cash, Economy.cash()])
+	check(v != null and Economy.cash() == cash - Prices.support_price("aav"),
+		"called through the command menu (support:aav_call): paid $%s (cash %d -> %d)" % [Prices.support_price("aav"), cash, Economy.cash()])
 	if v == null:
 		return
 	check(_flat(v.global_position, origin.edge_point(player.global_position)) < 6.0, "it comes in from the FOB's edge level with the caller")
@@ -461,19 +463,51 @@ func _test_motor_pool() -> void:
 		"left behind: out of the pool, it stays in the zone")
 	if is_instance_valid(again):
 		again.queue_free()
+	# Saved mid-deployment (Quit, a quick save) and loaded again: the deployment is abandoned and
+	# the vehicle never comes back into a zone, so it's home as it left, like the roster's people.
+	var kept := MotorPool.add("matv", "", {"zones": {"engine": 0.6}, "fuel": 120.0})
+	var out_v := MotorPool.server_bring(kept, level, Transform3D(Basis(), level.ground_point(at + Vector3(0, 0, 20))))
+	Campaign.save_campaign()
+	Campaign.load_campaign()
+	await _frames(3)
+	check(out_v != null and MotorPool.problem(kept) == "Out on a deployment", "loaded while it's still in the zone: still out")
+	if is_instance_valid(out_v):
+		out_v.queue_free()
+	await _frames(2)
+	Campaign.load_campaign()  # (the save still has it out)
+	await _frames(3)
+	var back := MotorPool.entry(kept)
+	check(MotorPool.problem(kept) == "" and absf(float(back.record.zones.engine) - 0.6) < 0.01 and absf(float(back.record.fuel) - 120.0) < 1.0,
+		"saved out on a deployment and loaded with it gone: home as it left (%s)" % MotorPool.problem(kept))
+	MotorPool.remove(kept)
 	# The workshop.
 	var hurt := MotorPool.add("matv", "", {"zones": {"hull": 0.5, "engine": 0.2, "wheels": 1.0, "fuel": 1.0}, "fuel": 50.0, "battery": true})
 	var quote := MotorPool.repair_quote(hurt)
 	var cash := Economy.cash()
 	var day := Economy.day()
-	var why := MotorPool.server_repair(hurt)
+	# Booked at the base's motor pool terminal (its interaction menu entry: request_repair), only
+	# from within reach of it.
+	var desk := BaseTerminal.new(&"motor_pool")
+	level.add_child(desk)
+	desk.global_position = level.ground_point(player.global_position + Vector3(12, 0, 0))
+	node.request_repair(hurt)
+	await _frames(2)
+	check(Economy.cash() == cash and int(MotorPool.entry(hurt).ready_day) == 0, "not booked from 12 m away from the motor pool terminal")
+	desk.global_position = level.ground_point(player.global_position + Vector3(2, 0, 0))
+	node.request_repair(hurt)
+	await _frames(2)
+	desk.queue_free()
+	var why := "" if Economy.cash() == cash - int(quote.cost) else "not booked at the terminal"
 	var fixed := MotorPool.entry(hurt)
 	check(int(quote.cost) > 0 and int(quote.days) >= 1 and why == "" and Economy.cash() == cash - int(quote.cost),
 		"serviced for $%d and %d days" % [int(quote.cost), int(quote.days)])
 	check(float(fixed.record.zones.engine) == 1.0 and float(fixed.record.zones.hull) == 1.0 and float(fixed.record.fuel) == 300.0
 		and MotorPool.problem(hurt).begins_with("In the workshop"), "whole and fuelled, in the workshop until day %d" % int(fixed.ready_day))
 	Economy.advance_days(int(quote.days))
-	check(MotorPool.problem(hurt) == "" and Economy.day() == day + int(quote.days), "ready again %d days later" % int(quote.days))
+	await _frames(2)
+	var shown: Array = node.pool.filter(func(e: Dictionary) -> bool: return String(e.id) == hurt)
+	check(MotorPool.problem(hurt) == "" and Economy.day() == day + int(quote.days) and shown.size() == 1 and String(shown[0].problem) == "",
+		"ready again %d days later (and the terminal's list says so)" % int(quote.days))
 	check(MotorPool.server_repair(hurt) == "Nothing to repair", "nothing more to fix")
 	Economy.spend(Economy.cash() - 10, "test: broke")
 	MotorPool.entry(hurt)
@@ -578,9 +612,9 @@ func _test_commands() -> void:
 	why = support.server_move(player, level.ground_point(v.global_position + Vector3(-160, 0, 0)))
 	await _seconds(4.0)
 	var going := Vector2(v.linear_velocity.x, v.linear_velocity.z).length()
-	why = support.server_hold(player)
+	player._server_squad_command.rpc_id(1, "support:aav_hold", player.global_position, PackedStringArray())  # the menu's Hold
 	var held := await _wait_for(func() -> bool: return Vector2(v.linear_velocity.x, v.linear_velocity.z).length() < 0.4, 10.0)
-	check(going > 2.0 and held and support.order == AavSupport.HOLD and not v.ai.active, "hold: under way at %.1f m/s, it stops" % going)
+	check(going > 2.0 and held and support.order == AavSupport.HOLD and not v.ai.active, "hold (support:aav_hold from the command menu): under way at %.1f m/s, it stops" % going)
 	# Dismount.
 	why = support.server_dismount(player)
 	await _frames(3)
@@ -616,8 +650,12 @@ func _client_turn() -> void:
 	check(ready and _client_id != 0, "the client joined and saw the AAV")
 	if not ready or v == null:
 		return
-	support.server_hold(player)
+	support.server_follow(player)
 	_your_turn_rpc.rpc_id(_client_id)
+	var held := await _wait_for(func() -> bool:
+		var c := level.players.get_node_or_null(str(_client_id)) as Soldier
+		return c != null and support.order == AavSupport.HOLD and support.caller == c, 20.0)
+	check(held, "the client's command menu holds it (support:aav_hold over the RPC)")
 	var sat := await _wait_for(func() -> bool:
 		var p := level.players.get_node_or_null(str(_client_id)) as Soldier
 		return p != null and v.seat_of(p) >= 0, 40.0)
@@ -783,6 +821,7 @@ func _run_client(address: String) -> void:
 	if not _your_turn:
 		_finish()
 		return
+	player._server_squad_command.rpc_id(1, "support:aav_hold", player.global_position, PackedStringArray())  # its command menu: Support > AAV > Hold
 	await _seconds(1.0)
 	var ramp := support.ramp()
 	player.set_physics_process(false)
