@@ -239,6 +239,9 @@ hostage rescue, intel grab). Details in CHANGELOG "Wave 4B part 2".
   intel ids, a civilian counted once, a raid by charge, charges on the ground and riding a
   person, a dead HVT, the clock, reinforcement sizing and the edge, the briefing's markers).
 
-Open for Captain: the garrisons are still 4 per module (the contract's enemy count sizes only
-the reinforcements); HVT capture needs zip cuffs bought at the base (no kit drop); names for
-HVTs, hostages and civilians are placeholders in `contracts.json`.
+Captain's answers (2026-10-11), built on `feat/wave4b-followups`: target garrisons = the
+contract's true enemy count (other modules 4); zip cuffs stay a base-shop buy, but an HVT
+capture works without them (an uncuffed captive bolts when left alone; lootable cuffs in zones
+are on the ChrisPlan backlog); real names for HVTs, hostages and civilians; suicide bombers and
+VBIEDs go in wave 6. Next (Captain): up to 2 AI squadmates escorting an HVT, and a wounded HVT
+as a medical priority (escorts treat him until a medic takes over). See CHANGELOG.

@@ -11,6 +11,34 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Wave 4B part 2 follow-ups (Captain's side, 2026-10-11)
+
+#### Added
+
+- **Garrisons sized from the true force** (Captain): a deployed contract's target module holds
+  the contract's true enemy count (`ZoneLevel.garrison_size`, from `Contracts.enemy_force`), so
+  an understated briefing really bites; other modules keep their 4. Extra posts stand beside
+  the module's own at the first clear spot (a capsule check, `_extra_post`); a module that
+  streamed in before the briefing is topped up when the contract goes live.
+- **HVT capture without zip cuffs** (Captain: cuffs stay a base-shop buy, but the job must be
+  doable without them): a hostile HVT who gave up (or was downed and carried) follows when led
+  and counts when brought in uncuffed. An uncuffed one needs babysitting (`HvtAI._check_bolt`):
+  nobody from the squad up and not pinned within 6 m for 4 s, and every 2 s he may take his
+  surrender back and run (`PeopleLayer.server_take_back_surrender`), the odds climbing to 0.6
+  over 12 s alone; a fight around him gives a small chance even when watched; the more it
+  hurts the less he tries, and badly hurt he stays put. Cuffed HVTs never bolt. Proposed numbers.
+- **Real names** for HVTs, hostages and civilians (`Names.mission_person`): HVTs from the
+  target faction's nation (`factions.json` "nation"), hostages from mixed nationalities (US,
+  UK, Canada and the region), civilians from the region's own people (`contracts.json` regions'
+  "nation"); given names for the region and the wave 6 nations.
+
+#### Changed
+
+- The HVT capture brief explains the no-cuffs option. The placeholder name lists in
+  `contracts.json` are gone.
+- `docs/ChrisPlan_handoff.md`: suicide bombers and VBIEDs in wave 6 (VBIEDs after wave 5 V1);
+  backlog: zip cuffs lootable in zones.
+
 ### Wave 4B part 2: missions in zones (Captain's side, 2026-10-11)
 
 #### Added
