@@ -87,6 +87,9 @@ func _test_issues() -> void:
 		"loadout": ["m4a1"], "combat": 0.5, "discipline": 0.5, "guard": true})
 	SquadAI.of(faller).process_mode = Node.PROCESS_MODE_DISABLED
 	await _frames(5)
+	faller.player_input.flash("probe AI message")  # an AI's own message (what it treats): no screen
+	check(("%s (AI): probe AI message" % faller.display_name()) in _log() and not "shown to the player: probe AI message" in _log(),
+		"an AI's message is logged as the AI's, never as shown to the player")
 	faller.global_position = Vector3(5, -300, 30)
 	await _seconds(SessionLog.CHECK_S * 2.5)
 	check(("!! ANOMALY: %s fell out of the world" % faller.display_name()) in _log() and SessionLog.anomalies >= 1, "a soldier out of the world is an anomaly")

@@ -192,9 +192,11 @@ func crosshair_ground() -> Variant:
 
 
 func flash(text: String) -> void:
-	SessionLog.note("shown to the player: " + text)
 	if hud:
+		SessionLog.note("shown to the player: " + text)
 		hud.flash(text)
+	elif body and body.is_ai():  # an AI's own messages (what it's treating, why it can't): no screen, but worth a line
+		SessionLog.note("%s (AI): %s" % [body.display_name(), text])
 
 
 ## A flashbang went off in sight: the whiteout is strongest when you were looking at it.
