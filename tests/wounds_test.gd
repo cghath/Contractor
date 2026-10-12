@@ -24,6 +24,7 @@ func _ready() -> void:
 	_test_blood_loss_effects()
 	_test_impact()
 	_test_spall_wounds()
+	_test_brain_fragment()
 	_test_limb_rifle_hits()
 	_test_consciousness()
 	_test_spo2()
@@ -676,6 +677,36 @@ func _test_spall_wounds() -> void:
 	m.reset()
 	m.add_hit(Vitals.FACE, {"graze": false, "depth": 0.1, "vessels": [], "organs": [&"brain"], "bones": []}, WoundModel.SPALL)
 	check(not m.dead and m.wounds.size() == 1, "spall to the face never reaches the brain")
+
+
+## A fragment into the brain (vehicle spall, a grenade) is a recorded "brain" wound: out at
+## once, and dead later with BRAIN_FRAGMENT_FATAL_CHANCE. A bullet there still kills at once.
+## (It used to kill at once with no wound: antiarmor's M-ATV commander, R0146.)
+func _test_brain_fragment() -> void:
+	print("A fragment into the brain")
+	var brain := {"graze": false, "depth": 0.1, "vessels": [], "organs": [&"brain"], "bones": []}
+	var m := _model()
+	m.add_hit(Vitals.FACE, brain.duplicate(true), &"intermediate")
+	check(m.dead, "a bullet into the brain kills at once")
+	var fatal := 0
+	var runs := 400
+	var all_recorded := true
+	var all_out := true
+	for i in runs:
+		m = _model(i + 1)
+		var added := m.add_hit(Vitals.FACE, brain.duplicate(true), &"fragment")
+		_step(m, 0.2)
+		if m.dead or added.size() != 1 or added[0].kind != "brain" or m.wounds.size() != 1:
+			all_recorded = false
+		if not m.unconscious:
+			all_out = false
+		_step(m, WoundModel.BRAIN_ARREST_S.y + 1.0)
+		if m.arrest or m.dead:
+			fatal += 1
+	check(all_recorded, "a fragment there is one \"brain\" wound, not an instant death")
+	check(all_out, "and he's out at once")
+	check(absf(float(fatal) / runs - WoundModel.BRAIN_FRAGMENT_FATAL_CHANCE) < 0.08,
+		"and his heart stops within %.0f s in %d of %d (%.0f%% proposed)" % [WoundModel.BRAIN_ARREST_S.y, fatal, runs, WoundModel.BRAIN_FRAGMENT_FATAL_CHANCE * 100.0])
 
 
 ## Captain's playtest: one rifle round through a limb hurts and slows, but doesn't knock a

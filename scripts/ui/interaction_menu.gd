@@ -138,7 +138,7 @@ const ACTIONS := {
 const KIND_TEXT := {
 	"arterial": "arterial bleed", "junctional": "junctional bleed", "internal": "internal bleeding",
 	"venous": "venous bleed", "muscle": "muscle wound", "graze": "graze", "fracture": "broken bone",
-	"chest": "open chest wound", "heart": "heart wound", "rib": "cracked rib",
+	"chest": "open chest wound", "heart": "heart wound", "rib": "cracked rib", "brain": "brain wound",
 }
 const _HIDE := "-"
 

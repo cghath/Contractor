@@ -186,7 +186,7 @@ const SPO2_RISE_PER_S := 1.0
 ## over the casualty stays out: one serious wound (an arterial thigh hit with a broken femur
 ## is about 0.5, 0.6 with the vein) doesn't do it, two or three do.
 const TRAUMA_SEVERITY := {"arterial": 0.3, "junctional": 0.3, "internal": 0.3, "heart": 0.6, "chest": 0.25,
-	"fracture": 0.2, "venous": 0.12, "muscle": 0.12, "graze": 0.03, "rib": 0.05}
+	"fracture": 0.2, "venous": 0.12, "muscle": 0.12, "graze": 0.03, "rib": 0.05, "brain": 1.0}
 const TRAUMA_REF_RATE := {"arterial": 1.2, "junctional": 0.8, "internal": 1.0, "venous": 0.4, "muscle": 0.25, "graze": 0.03}
 const TRAUMA_MIN_SCALE := 0.3
 const TRAUMA_HANDLED_SHARE := 0.4
@@ -198,6 +198,12 @@ const TRAUMA_FADE_PER_S := 1.0 / 600.0
 ## Heart hit: cardiac arrest within seconds. Chest: without a seal, a 50% chance of tension
 ## pneumothorax 60-120 s later, then cardiac arrest about 90 s after.
 const HEART_ARREST_S := Vector2(2.0, 6.0)
+## Proposed: a fragment into the brain (through the face; a bullet there kills at once) is a
+## "brain" wound: out at once (TRAUMA_SEVERITY 1.0, nothing in the field kit treats it), and
+## with BRAIN_FRAGMENT_FATAL_CHANCE cardiac arrest BRAIN_ARREST_S later; else he lives, out
+## until the base. Before, it killed at once with no wound recorded: a death with no cause.
+const BRAIN_FRAGMENT_FATAL_CHANCE := 0.6
+const BRAIN_ARREST_S := Vector2(20.0, 60.0)
 const TENSION_CHANCE := 0.5
 const TENSION_DELAY_S := Vector2(60.0, 120.0)
 const TENSION_ARREST_S := 90.0
@@ -1446,7 +1452,14 @@ func add_hit(part: StringName, channel: Dictionary, round_class: StringName) -> 
 		kill()  # an unprotected head hit past the helmet is fatal
 		return added
 	if &"brain" in channel.organs:
-		kill()
+		if round_class != &"fragment":
+			kill()
+			return added
+		added.append(_add_wound(part, "brain", 0.0, &"brain"))
+		if rng.randf() < BRAIN_FRAGMENT_FATAL_CHANCE and _heart_arrest_in < 0.0 and not arrest:
+			_heart_arrest_in = rng.randf_range(BRAIN_ARREST_S.x, BRAIN_ARREST_S.y)  # (the heart's countdown)
+		pain_wounds = minf(pain_wounds + rng.randf_range(PAIN_SEVERE.x, PAIN_SEVERE.y), 1.0)
+		update_state(0.0)
 		return added
 	var hit_pain := 0.0
 	if channel.graze:

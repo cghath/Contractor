@@ -463,7 +463,7 @@ func signs(on_self := false) -> PackedStringArray:
 
 ## The wounds this unit has, for self-interaction and treatment menus: one Dictionary per
 ## wound with "part" (a body part), "kind" ("arterial", "junctional", "internal", "venous",
-## "muscle", "graze", "fracture", "chest", "heart", "rib"), "bleeding" (bleeding now, so not
+## "muscle", "graze", "fracture", "chest", "heart", "rib", "brain"), "bleeding" (bleeding now, so not
 ## under a good tourniquet) and "treated" (bandaged, packed, sealed, splinted; a rib after
 ## morphine), "rate" (L/min at full blood) and "name" (the vessel or bone, or empty). Also:
 ## "limb" (the limb segment a tourniquet for it goes on: its own part, or empty off the
