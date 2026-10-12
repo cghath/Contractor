@@ -17,7 +17,8 @@ extends Node
 ## contract zone unless it's on the coast and data says so (Proposed: "contract_coast"); in
 ## mountains (Captain: AAVs can't work mountains: the zone's "terrain": "mountain", hills of
 ## "mountain_relief_m", or ground steeper than "max_slope_deg" on its way); when the company
-## can't pay. On the way it stops below ground too steep to climb. Destroyed, it's lost with its
+## can't pay. On the way it stops below ground too steep to climb, and holds if it gets nowhere
+## for STUCK_S (going home, it's simply gone). Destroyed, it's lost with its
 ## cargo and whoever is aboard (V1's fire) and not refunded, and no other comes for the rest of
 ## the op (Captain). Numbers in data/ground_supports.json "aav" (Proposed).
 ##
@@ -45,6 +46,8 @@ const BOARD_REACH_M := 3.5
 const TICK_S := 0.25
 ## On its way, the ground under it this much steeper than max_slope_deg stops it.
 const SLOPE_STOP_MARGIN_DEG := 4.0
+## Getting nowhere (under 3 m) this long while under way, it gives up (Proposed).
+const STUCK_S := 45.0
 
 static var _data := {}
 
@@ -69,7 +72,9 @@ var _legs: Array = []
 var _leg: Dictionary = {}
 var _target := Vector3.INF
 var _tick := 0.0
-var _boarding := {}  # host: soldier instance id -> {"soldier", "until"}
+var _boarding := {}  # host: soldier instance id -> {"soldier", "until", "by", "going", "next_at"}
+var _progress_pos := Vector3.ZERO
+var _progress_at := 0.0
 
 
 ## The numbers (data/ground_supports.json), read once.
@@ -456,6 +461,29 @@ func _physics_process(delta: float) -> void:
 			_return_step()
 	if is_instance_valid(vehicle) and is_out():
 		_slope_check()
+	if is_instance_valid(vehicle) and is_out():
+		_stuck_check()
+
+
+## Getting nowhere for STUCK_S while it should be moving: going home it's gone anyway;
+## otherwise it holds and says so.
+func _stuck_check() -> void:
+	var now := Soldier._now()
+	if _ai_done() or order == HOLD or vehicle.global_position.distance_to(_progress_pos) > 3.0:
+		_progress_pos = vehicle.global_position
+		_progress_at = now
+		return
+	if now - _progress_at < STUCK_S:
+		return
+	print("[aav] stuck at (%.0f, %.0f) %s" % [vehicle.global_position.x, vehicle.global_position.z, order_text()])
+	if order == RETURN:
+		_go_home(Lhd.of(self))
+		return
+	vehicle.server_stop()
+	_legs.clear()
+	_leg = {}
+	_set_order(HOLD)
+	_tell(caller, "The AAV is stuck: holding")
 
 
 func _ai_done() -> bool:
