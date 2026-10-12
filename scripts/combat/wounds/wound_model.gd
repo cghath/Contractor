@@ -45,6 +45,42 @@ const HEART_RATE := 2.0     # proposed
 const MUSCLE_CLASS_MULT := {&"pistol": 0.7, &"intermediate": 1.0, &"full_power": 1.2, &"fragment": 0.4}
 ## Fracture chance when a bone is hit (design doc).
 const FRACTURE_CHANCE := {&"pistol": 0.25, &"intermediate": 0.70, &"full_power": 0.95, &"fragment": 0.20}
+## --- Bone sim (Captain's picks, 2026-10-12; all proposed). No spine injuries at all. ---
+## A bullet or fragment break is open (the bone through the skin) with this chance by round
+## class, plus OPEN_FEMUR_BONUS for a femur; a fall's break is mostly closed. An open break
+## bleeds on top of the bone (a venous-ish "open" wound beside it: a bandage or gauze, apart
+## from the splint). Moving on an unsplinted broken leg can open a closed one.
+const OPEN_FRACTURE_CHANCE := {&"pistol": 0.2, &"intermediate": 0.45, &"full_power": 0.65, &"fragment": 0.3}
+const OPEN_FEMUR_BONUS := 0.15
+const OPEN_FALL_CHANCE := 0.1
+const OPEN_BLEED_RATE := 0.12          # L/min at full blood, an open break's own bleed
+const OPEN_FEMUR_BLEED_RATE := 0.25    # an open femur is worse
+## Moving faster than OPEN_BREAK_MIN_SPEED (m/s) on an unsplinted broken leg opens a closed
+## break with OPEN_BREAK_PER_M chance per metre (about 45% over 100 m) and, for a femur,
+## adds FEMUR_STRAIN_PER_M to its internal bleed per metre, up to FEMUR_STRAIN_MAX.
+const OPEN_BREAK_MIN_SPEED := 1.2
+const OPEN_BREAK_PER_M := 0.006
+const FEMUR_STRAIN_PER_M := 0.0006
+const FEMUR_STRAIN_MAX := 0.15
+## A broken pelvis bleeds inside heavily (above a femur's FEMUR_RATE), can't walk or stand
+## (crawl at PELVIS_SPEED of the prone pace, or be carried) but can still shoot. The binder
+## leaves PELVIS_BINDER_LEAK of the bleed and doesn't give the legs back until the mission ends.
+## A fall breaks it with FALL_PELVIS_SHARE of the fractures it causes, a blast near enough
+## with BLAST_PELVIS_CHANCE at the centre.
+const PELVIS_RATE := 0.15
+const PELVIS_BINDER_LEAK := 0.2
+const PELVIS_SPEED := 0.5
+const FALL_PELVIS_SHARE := 0.2
+const BLAST_PELVIS_CHANCE := 0.1
+## A collarbone break: rifle-type weapons sway CLAVICLE_RIFLE_SWAY more (shouldering hurts) and
+## aim down sights at CLAVICLE_AIM_SPEED of the pace; a sling (the splint) leaves
+## CLAVICLE_SLING_SWAY. Pistols are unaffected. A broken hand counts as a broken arm (hand
+## bones are in BodyMap.ARM_BONES): slow reloads and sway, eased by a splint.
+const CLAVICLE_RIFLE_SWAY := 0.8
+const CLAVICLE_SLING_SWAY := 0.25
+const CLAVICLE_AIM_SPEED := 0.7
+## A bullet through the chest without a plate stopping it cracks a rib with this chance.
+const RIB_BULLET_CHANCE := {&"pistol": 0.15, &"intermediate": 0.35, &"full_power": 0.5, &"fragment": 0.1}
 
 ## Pain added per hit, as [min, max]. Captain's playtest call (overrides the design doc's
 ## 0.6-0.9 for a rifle or arterial wound): one rifle round through a limb hurts but doesn't
@@ -70,6 +106,9 @@ const PAIN_SPALL_LIGHT := Vector2(0.08, 0.15)
 const PAIN_FLOOR_LEG := 0.35
 const PAIN_FLOOR_ARM := 0.2
 const PAIN_FLOOR_RIB := 0.15
+const PAIN_FLOOR_PELVIS := 0.4          # a binder eases it to PAIN_FLOOR_PELVIS_BOUND
+const PAIN_FLOOR_PELVIS_BOUND := 0.2
+const PAIN_FLOOR_CLAVICLE := 0.25       # a sling eases it to PAIN_FLOOR_SPLINTED_ARM
 ## Pain fades over about 15 minutes, impact over about 5.
 const PAIN_FADE_PER_S := 1.0 / 900.0
 const IMPACT_FADE_PER_S := 1.0 / 300.0
@@ -185,6 +224,7 @@ const PRESSURE_BANDAGE := &"pressure_bandage"
 const HEMOSTATIC_GAUZE := &"hemostatic_gauze"
 const CHEST_SEAL := &"chest_seal"
 const SPLINT := &"splint"
+const PELVIC_BINDER := &"pelvic_binder"    # SAM pelvic sling style: treats a broken pelvis
 const MORPHINE := &"morphine"
 const NPA := &"npa"
 const IO_KIT := &"io_kit"
@@ -446,6 +486,12 @@ var knockout_left := 0.0
 var winded_left := 0.0
 var stagger_left := 0.0
 var rng := RandomNumberGenerator.new()
+## Dice for the bone sim (open breaks, bullet ribs, pelvis from falls and blasts), apart from
+## rng so the older wound dice repeat. Tests seed it.
+var bone_rng := RandomNumberGenerator.new()
+## Host: lines for the session log about breaks that went open ("right thigh: open fracture
+## (moving on it)"), taken by Vitals (take_open_events).
+var open_events: Array[String] = []
 ## Tourniquets on limb segments: part -> {"count": n, "rushed": how many of them were rushed}.
 var tourniquets: Dictionary = {}
 ## An NPA is in; an unconscious casualty's airway is obstructed.
@@ -522,8 +568,12 @@ func pain() -> float:
 	for w in wounds:
 		if w.kind == "fracture":
 			var leg: bool = w.name in BodyMap.LEG_BONES
-			if w.treated:
+			if w.name == BodyMap.PELVIS_BONE:
+				floor_pain = maxf(floor_pain, PAIN_FLOOR_PELVIS_BOUND if w.treated else PAIN_FLOOR_PELVIS)
+			elif w.treated:
 				floor_pain = maxf(floor_pain, PAIN_FLOOR_SPLINTED_LEG if leg else PAIN_FLOOR_SPLINTED_ARM)
+			elif w.name in BodyMap.CLAVICLE_BONES:
+				floor_pain = maxf(floor_pain, PAIN_FLOOR_CLAVICLE)
 			else:
 				floor_pain = maxf(floor_pain, PAIN_FLOOR_LEG if leg else PAIN_FLOOR_ARM)
 		elif w.kind == "rib" and not w.treated:
@@ -558,6 +608,8 @@ func tourniquet_factor(part: StringName, skip_segment: StringName = &"") -> floa
 
 ## L/min at full blood this wound bleeds now: 0 once treated or under a good tourniquet.
 func rate_now(w: Dictionary) -> float:
+	if w.kind == "fracture" and w.name == BodyMap.PELVIS_BONE and w.treated:
+		return float(w.rate) * PELVIS_BINDER_LEAK  # a binder cuts the bleed, it doesn't stop it
 	return float(w.rate) * tourniquet_factor(w.part) if is_bleeding(w) else 0.0
 
 
@@ -618,6 +670,32 @@ func has_fracture(bones: Array, untreated_only: bool) -> bool:
 		if w.kind == "fracture" and w.name in bones and not (untreated_only and w.treated):
 			return true
 	return false
+
+
+## A broken pelvis (binder or not): no walking or standing until the mission ends.
+func pelvis_broken() -> bool:
+	return has_fracture([BodyMap.PELVIS_BONE], false)
+
+
+## An open break's own bleed (the "venous" wound named after its bone, see _open_break).
+static func is_open_wound(w: Dictionary) -> bool:
+	return w.kind == "venous" and BodyMap.BONES.has(w.name)
+
+
+## The bleed of fracture `w`'s open break, or {} (closed, or no such bleed).
+func open_wound_of(w: Dictionary) -> Dictionary:
+	if not w.get("open", false):
+		return {}
+	for o in wounds:
+		if is_open_wound(o) and o.name == w.name:
+			return o
+	return {}
+
+
+## Whether fracture `w` is open and its open wound is dressed (bandage or gauze).
+func open_bandaged(w: Dictionary) -> bool:
+	var o := open_wound_of(w)
+	return not o.is_empty() and o.treated
 
 
 func has_kind(kind: String) -> bool:
@@ -780,8 +858,15 @@ func trauma_target() -> float:
 	return total
 
 
-func sway_mult() -> float:
+## `rifle`: the weapon in hand is shouldered (a rifle, not a pistol): a broken collarbone only
+## matters then.
+func sway_mult(rifle := false) -> float:
 	var sway := 1.0 + BLOOD_SWAY * shock() + PAIN_SWAY * pain()
+	if rifle:
+		if has_fracture(BodyMap.CLAVICLE_BONES, true):
+			sway += CLAVICLE_RIFLE_SWAY
+		elif has_fracture(BodyMap.CLAVICLE_BONES, false):
+			sway += CLAVICLE_SLING_SWAY
 	if has_fracture(BodyMap.ARM_BONES, true):
 		sway += BROKEN_ARM_SWAY
 	elif has_fracture(BodyMap.ARM_BONES, false):
@@ -800,6 +885,8 @@ func speed_mult() -> float:
 		leg = minf(leg, BROKEN_LEG_SPEED)
 	if has_leg_tourniquet():
 		leg = minf(leg, TOURNIQUET_LEG_SPEED)
+	if pelvis_broken():
+		leg = minf(leg, PELVIS_SPEED)
 	speed *= leg
 	if stagger_left > 0.0:
 		speed *= STAGGER_SPEED
@@ -821,7 +908,18 @@ func stamina_mult() -> float:
 ## tourniquet on.
 func can_sprint() -> bool:
 	return not unconscious and not dead and lost() < NO_SPRINT_LOST and winded_left <= 0.0 \
-		and not has_fracture(BodyMap.LEG_BONES, false) and not has_leg_tourniquet()
+		and not has_fracture(BodyMap.LEG_BONES, false) and not has_leg_tourniquet() and not pelvis_broken()
+
+
+## Standing and walking upright: not with a broken pelvis (crawl, or be carried).
+func can_stand() -> bool:
+	return not pelvis_broken()
+
+
+## Aiming down sights moves at this share of the usual pace: slower with an unsplinted
+## broken collarbone and a rifle (pistols unaffected).
+func aim_mult(rifle: bool) -> float:
+	return CLAVICLE_AIM_SPEED if rifle and has_fracture(BodyMap.CLAVICLE_BONES, true) else 1.0
 
 
 func reload_mult() -> float:
@@ -963,6 +1061,8 @@ func care_tasks() -> Array[Dictionary]:
 			tasks.append(_task(w.part, w.kind, &"", _options(HEMOSTATIC_GAUZE, SURGICAL_CLAMP)))
 		elif w.kind == "internal":
 			tasks.append(_task(w.part, "internal", SURGICAL_CLAMP))
+		elif w.kind == "fracture" and w.name == BodyMap.PELVIS_BONE and not w.treated:
+			tasks.append(_task(w.part, "pelvis", PELVIC_BINDER))  # heavy internal bleeding: first things first
 	if unconscious and not arrest and not npa:
 		tasks.append(_task(&"head", "airway", NPA))
 	if has_tension():
@@ -971,7 +1071,9 @@ func care_tasks() -> Array[Dictionary]:
 		if w.kind == "chest" and not w.treated:
 			tasks.append(_task(w.part, "chest", &"", _options(CHEST_SEAL, SURGICAL_CLAMP)))
 	for w: Dictionary in by_rate:
-		if String(w.kind) in BANDAGED_KINDS and rate_now(w) > 0.0:
+		if is_open_wound(w) and rate_now(w) > 0.0:  # an open break: bandage or gauze, apart from its splint
+			tasks.append(_task(w.part, w.kind, &"", _options(PRESSURE_BANDAGE, HEMOSTATIC_GAUZE)))
+		elif String(w.kind) in BANDAGED_KINDS and rate_now(w) > 0.0:
 			tasks.append(_task(w.part, w.kind, PRESSURE_BANDAGE))
 	if access.is_empty():
 		if lost() >= FLUIDS_FROM_LOST:
@@ -1058,6 +1160,8 @@ func treatment_problem(item: StringName, part: StringName) -> String:
 				if w.part == part and w.kind == "arterial" and is_bleeding(w):
 					return "Put a tourniquet on first"
 			return "Nothing to pack there"
+		PELVIC_BINDER:
+			return "" if not _target_wound(item, part).is_empty() else "No broken pelvis"
 		PRESSURE_BANDAGE, CHEST_SEAL, SPLINT:
 			if not _target_wound(item, part).is_empty():
 				return ""
@@ -1230,8 +1334,10 @@ func add_blast(distance: float, radius: float, ear_pro := false) -> void:
 	var lung_reach := BLAST_LUNG_RADIUS * radius / BLAST_RADIUS  # doubled indoors with the rest
 	if distance < lung_reach and rng.randf() < BLAST_LUNG_CHANCE * (1.0 - distance / lung_reach):
 		blast_lung = true
+	if bone_rng.randf() < BLAST_PELVIS_CHANCE * closeness * closeness and not pelvis_broken():
+		_add_fracture(&"pelvis", BodyMap.PELVIS_BONE)  # thrown or crushed by the blast
 	if distance < BURN_RADIUS:
-		burn = minf(burn + lerpf(BLAST_BURN.x, BLAST_BURN.y, 1.0 - distance / BURN_RADIUS), 1.0)
+		burn =minf(burn + lerpf(BLAST_BURN.x, BLAST_BURN.y, 1.0 - distance / BURN_RADIUS), 1.0)
 	update_state(0.0)
 
 
@@ -1248,8 +1354,10 @@ func add_fall(height: float) -> void:
 	pain_wounds = minf(pain_wounds + lerpf(FALL_PAIN.x, FALL_PAIN.y, t), 1.0)
 	if rng.randf() < lerpf(FALL_FRACTURE_CHANCE.x, FALL_FRACTURE_CHANCE.y, t):
 		var bone: StringName = BodyMap.LEG_BONES[rng.randi() % BodyMap.LEG_BONES.size()]
+		if bone_rng.randf() < FALL_PELVIS_SHARE:
+			bone = BodyMap.PELVIS_BONE
 		if not has_fracture([bone], false):
-			_add_wound(BodyMap.BONES[bone][3], "fracture", FEMUR_RATE if String(bone).begins_with("femur") else 0.0, bone)
+			_add_fracture(BodyMap.BONES[bone][3], bone, OPEN_FALL_CHANCE)
 	update_state(0.0)
 
 
@@ -1300,12 +1408,14 @@ func _target_wound(item: StringName, part: StringName) -> Dictionary:
 			PRESSURE_BANDAGE:
 				fits = String(w.kind) in BANDAGED_KINDS and is_bleeding(w)
 			HEMOSTATIC_GAUZE:
-				fits = is_bleeding(w) and (w.kind == "junctional" or (w.kind == "arterial" \
+				fits = is_bleeding(w) and (w.kind == "junctional" or is_open_wound(w) or (w.kind == "arterial" \
 					and (not LIMB_BELOW.has(part) or tourniquet_factor(part) < 1.0)))
 			CHEST_SEAL:
 				fits = w.kind == "chest"
 			SPLINT:
-				fits = w.kind == "fracture"
+				fits = w.kind == "fracture" and w.name != BodyMap.PELVIS_BONE
+			PELVIC_BINDER:
+				fits = w.kind == "fracture" and w.name == BodyMap.PELVIS_BONE
 		if fits and (best.is_empty() or rate_now(w) > rate_now(best) or (rate_now(w) == rate_now(best) and float(w.rate) > float(best.rate))):
 			best = w
 	return best
@@ -1365,7 +1475,14 @@ func add_hit(part: StringName, channel: Dictionary, round_class: StringName) -> 
 		for bone: StringName in channel.bones:
 			if has_fracture([bone], false) or rng.randf() >= float(FRACTURE_CHANCE.get(round_class, 0.5)):
 				continue
-			added.append(_add_wound(part, "fracture", FEMUR_RATE if bone.begins_with("femur") else 0.0, bone))
+			var open_chance := float(OPEN_FRACTURE_CHANCE.get(round_class, 0.3)) + (OPEN_FEMUR_BONUS if bone.begins_with("femur") else 0.0)
+			added.append(_add_fracture(part, bone, open_chance))
+			if added[-1].get("open", false):
+				added.append(open_wound_of(added[-1]))
+		# A bullet through the chest with no plate to stop it can crack a rib (bullets only: a
+		# plate stop cracks them in add_impact).
+		if part == &"chest" and not has_kind("rib") and bone_rng.randf() < float(RIB_BULLET_CHANCE.get(round_class, 0.0)):
+			added.append(_add_wound(&"chest", "rib", 0.0, &"rib"))
 	pain_wounds = minf(pain_wounds + hit_pain, 1.0)
 	update_state(0.0)
 	return added
@@ -1451,6 +1568,7 @@ func reset() -> void:
 	pain_wounds = 0.0
 	impact = 0.0
 	wounds.clear()
+	open_events.clear()
 	unconscious = false
 	arrest = false
 	dead = false
@@ -1588,7 +1706,7 @@ func update_state(dt: float) -> void:
 # --- Replication ----------------------------------------------------------------------
 
 ## Compact state for Vitals.net_state. "t" holds countdowns, which clients run down locally.
-## Wounds are [part, kind, rate, treated, name, flags (1 packed, 2 tension)]; "q" holds the
+## Wounds are [part, kind, rate, treated, name, flags (1 packed, 2 tension, 4 clamped, 8 closed, 16 pneumo, 32 open break)]; "q" holds the
 ## tourniquets as {part: [count, rushed]}; "o" is SpO2, "m" and "d" morphine in the blood and
 ## still going in, "x" total trauma, "a" the line [kind, gauge, part, pressure] and "v" the
 ## bag running [item, mL, mL left] (empty arrays for none), "l" the lungs [left collapse,
@@ -1599,7 +1717,7 @@ func to_net() -> Dictionary:
 	var list: Array = []
 	for w in wounds:
 		var wound_flags := (1 if w.get("packed", false) else 0) | (2 if w.get("tension", false) else 0) \
-			| (4 if w.get("clamped", false) else 0) | (8 if w.get("closed", false) else 0) | (16 if w.get("pneumo", false) else 0)
+			| (4 if w.get("clamped", false) else 0) | (8 if w.get("closed", false) else 0) | (16 if w.get("pneumo", false) else 0) | (32 if w.get("open", false) else 0)
 		list.append([String(w.part), w.kind, snappedf(float(w.rate), 0.001), 1 if w.treated else 0, String(w.name), wound_flags,
 			_half_cm(w.get("at")), _half_cm(w.get("out"))])
 	var flags := (1 if unconscious else 0) | (2 if arrest else 0) | (4 if dead else 0) | (16 if npa else 0) | (32 if airway_blocked else 0) \
@@ -1680,7 +1798,7 @@ func apply_net(state: Dictionary) -> void:
 		var wound_flags := int(entry[5]) if entry.size() > 5 else 0
 		wounds.append({"part": StringName(entry[0]), "kind": String(entry[1]), "rate": float(entry[2]),
 			"treated": int(entry[3]) != 0, "name": StringName(entry[4]), "packed": wound_flags & 1 != 0,
-			"tension": wound_flags & 2 != 0, "clamped": wound_flags & 4 != 0, "closed": wound_flags & 8 != 0, "pneumo": wound_flags & 16 != 0,
+			"tension": wound_flags & 2 != 0, "clamped": wound_flags & 4 != 0, "closed": wound_flags & 8 != 0, "pneumo": wound_flags & 16 != 0, "open": wound_flags & 32 != 0,
 			"tension_in": -1.0, "arrest_in": -1.0})
 		if entry.size() > 7:
 			for i: int in [6, 7]:
@@ -1709,6 +1827,49 @@ func _add_wound(part: StringName, kind: String, rate: float, name: StringName = 
 		"packed": false, "tension": false, "tension_in": -1.0, "arrest_in": -1.0}
 	wounds.append(w)
 	return w
+
+
+## A new fracture of `bone` on `part`: the femur bleeds inside (FEMUR_RATE), the pelvis heavily
+## (PELVIS_RATE); a limb bone goes open with `open_chance` (_open_break).
+func _add_fracture(part: StringName, bone: StringName, open_chance := 0.0) -> Dictionary:
+	var rate := PELVIS_RATE if bone == BodyMap.PELVIS_BONE else (FEMUR_RATE if String(bone).begins_with("femur") else 0.0)
+	var w := _add_wound(part, "fracture", rate, bone)
+	if open_chance > 0.0 and (bone in BodyMap.LEG_BONES or bone in BodyMap.ARM_BONES) and bone_rng.randf() < open_chance:
+		_open_break(w, "from the hit")
+	return w
+
+
+## Fracture `w` breaks the skin: it bleeds on its own (OPEN_BLEED_RATE, more for a femur) as
+## a "venous" wound named after its bone, which a bandage or gauze treats, while the splint
+## treats the bone. `why` goes to open_events (the session log).
+func _open_break(w: Dictionary, why: String) -> void:
+	w["open"] = true
+	var femur := String(w.name).begins_with("femur")
+	_add_wound(w.part, "venous", OPEN_FEMUR_BLEED_RATE if femur else OPEN_BLEED_RATE, w.name)
+	open_events.append("open fracture, %s (%s)" % [w.part, why])
+
+
+## Host only. Metres moved at `speed` (m/s): on an unsplinted broken leg, moving faster than a
+## slow walk can turn a closed break open and strain a femur's internal bleed (see
+## OPEN_BREAK_PER_M).
+func add_leg_strain(metres: float, speed: float) -> void:
+	if dead or metres <= 0.0 or speed < OPEN_BREAK_MIN_SPEED:
+		return
+	for w in wounds.duplicate():
+		if w.kind != "fracture" or w.treated or not w.name in BodyMap.LEG_BONES:
+			continue
+		if String(w.name).begins_with("femur"):
+			w.rate = minf(float(w.rate) + FEMUR_STRAIN_PER_M * metres, maxf(FEMUR_STRAIN_MAX, float(w.rate)))
+		if not w.get("open", false) and bone_rng.randf() < 1.0 - pow(1.0 - OPEN_BREAK_PER_M, metres):
+			_open_break(w, "moving on it")
+	update_state(0.0)
+
+
+## Host: the session-log lines about breaks that went open since the last call.
+func take_open_events() -> Array[String]:
+	var out := open_events.duplicate()
+	open_events.clear()
+	return out
 
 
 ## An unconscious casualty without an NPA can obstruct; then SpO2 falls (spo2_target) until
