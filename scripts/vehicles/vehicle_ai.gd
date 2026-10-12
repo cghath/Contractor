@@ -40,6 +40,9 @@ var path := PackedVector3Array()
 var index := 0
 ## Why it stopped last ("arrived", "blocked", "stopped"), for tests and the HUD.
 var status := "idle"
+## The cruise speed asked for (m/s), or -1: CRUISE_SHARE of the vehicle's top speed (capped
+## at CRUISE_MAX_MS). Never more than the vehicle can do.
+var cruise_ms := -1.0
 var _stuck_s := 0.0
 var _backoff_s := 0.0
 var _backoff_steer := 0.0
@@ -50,8 +53,8 @@ func _init(p_vehicle: Vehicle = null) -> void:
 	name = "AI"
 
 
-## Drives to `point` and stops there.
-func drive_to(point: Vector3) -> void:
+## Drives to `point` and stops there, at `speed_ms` (m/s; -1: the usual cruise).
+func drive_to(point: Vector3, speed_ms := -1.0) -> void:
 	var p := PackedVector3Array()
 	var map := vehicle.get_world_3d().navigation_map
 	if NavigationServer3D.map_get_iteration_id(map) > 0:
@@ -62,12 +65,14 @@ func drive_to(point: Vector3) -> void:
 		p.remove_at(0)  # where it is now
 		if p[p.size() - 1].distance_to(point) > 0.5:
 			p.append(point)
-	follow(p)
+	follow(p, speed_ms)
 
 
-## Drives through `points` in order and stops at the last.
-func follow(points: PackedVector3Array) -> void:
+## Drives through `points` in order and stops at the last, at `speed_ms` (m/s; -1: the usual
+## cruise).
+func follow(points: PackedVector3Array, speed_ms := -1.0) -> void:
 	path = points.duplicate()
+	cruise_ms = speed_ms
 	index = 0
 	active = not path.is_empty()
 	status = "driving" if active else "idle"
@@ -117,7 +122,7 @@ func _physics_process(delta: float) -> void:
 	var to2 := Vector2(to.x, to.z).normalized()
 	var angle := rad_to_deg(fwd2.angle_to(to2))  # positive: the target is to the right
 	var steer := clampf(angle / FULL_STEER_DEG, -1.0, 1.0)
-	var cruise := minf(vehicle.top_speed() * CRUISE_SHARE, CRUISE_MAX_MS)
+	var cruise := minf(vehicle.top_speed() * CRUISE_SHARE, CRUISE_MAX_MS) if cruise_ms <= 0.0 else minf(cruise_ms, vehicle.top_speed())
 	var want := cruise
 	if absf(angle) > TURN_SLOW_DEG:
 		want = cruise * TURN_SPEED_SHARE

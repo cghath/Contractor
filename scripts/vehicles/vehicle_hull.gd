@@ -74,6 +74,8 @@ func _ready() -> void:
 	add_child(art)
 	_hull_mesh = art.get_node_or_null(^"Hull") as MeshInstance3D
 	_material = (VehicleArt._get_material() as StandardMaterial3D).duplicate()
+	if _wrecked:
+		_material.albedo_color = WRECK_TINT  # set_wrecked came before the tree (a saved wreck)
 	if _hull_mesh:
 		_hull_mesh.material_override = _material
 	VehicleHull.prewarm(model)

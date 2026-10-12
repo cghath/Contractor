@@ -326,6 +326,10 @@ func _restore_bodies() -> void:
 	records.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return float(a.get("age_s", 0.0)) > float(b.get("age_s", 0.0)))
 	for record: Dictionary in records:
 		server_spawn_body(record)
+	# Wave 5: the zone's vehicles and wrecks too (GameState.vehicles), bodies back in their seats.
+	var vehicles := get_node_or_null(^"Vehicles") as VehicleLayer
+	if vehicles:
+		vehicles.server_restore()
 
 
 @rpc("authority", "call_local", "unreliable")

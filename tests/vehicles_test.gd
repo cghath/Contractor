@@ -164,6 +164,8 @@ func _run_host(wait_for_client: bool) -> void:
 		await _test_charge()
 	if _want("rounds"):
 		await _test_rounds()
+	if _want("fragments"):
+		await _test_fragments()
 	if _want("damage_effects"):
 		await _test_damage_effects()
 	if _want("carving_budget"):
@@ -341,9 +343,36 @@ func _test_seats() -> void:
 	await get_tree().process_frame
 	check(v.seat_kind(v.seat_of(hurt)) == Vehicle.PASSENGER and player.carrying == null and not is_instance_valid(hurt.ragdoll),
 		"Load casualty: in a passenger seat, no ragdoll")
+	hurt.vitals.server_kill()
+	for i in 4:
+		await get_tree().physics_frame
+	check(hurt.vitals.is_dead() and v.seat_kind(v.seat_of(hurt)) == Vehicle.PASSENGER and not is_instance_valid(hurt.ragdoll),
+		"a casualty who dies on the way rides on in the seat (not put out by the road)")
 	v.request_pull_out(v.seat_of(hurt))
 	check(v.seat_of(hurt) < 0, "Pull out: out again")
 	hurt.queue_free()
+	# The dead are carried home too: a body loaded already dead stays in its seat.
+	var fallen := _soldier("friendly", v.global_position + Vector3(0.5, 0.1, 4.6), "Fallen")
+	fallen.vitals.server_kill()
+	await _wait_for(func() -> bool: return fallen.is_in_group(Soldier.DEAD_GROUP), 3.0)
+	await get_tree().physics_frame
+	var rear_door: VehicleActionPoint = null
+	for p in v.get_children():
+		var ap := p as VehicleActionPoint
+		if ap and ap.kind == VehicleActionPoint.DOOR and (rear_door == null
+				or ap.global_position.distance_to(player.global_position) < rear_door.global_position.distance_to(player.global_position)):
+			rear_door = ap
+	check(player.server_pick_up_body(fallen, Soldier.CARRY), "carrying a dead body to the rear door")
+	var load_entry := _entry(InteractionMenu.actions_for(player, rear_door), "Load casualty") if rear_door else {}
+	check(not load_entry.is_empty() and String(load_entry.disabled) == "", "the door offers Load casualty for the dead too")
+	v.request_load_body(-1)
+	for i in 6:
+		await get_tree().physics_frame
+	check(fallen.vitals.is_dead() and v.seat_kind(v.seat_of(fallen)) == Vehicle.PASSENGER and player.carrying == null,
+		"the dead body rides in a passenger seat, and stays there")
+	v.request_pull_out(v.seat_of(fallen))
+	check(v.seat_of(fallen) < 0, "and is pulled out again")
+	fallen.queue_free()
 	# Helicopters: seats, but pilots are AI only (aircraft are AI-flown).
 	var heli := layer.server_spawn("uh60", Transform3D(Basis(), Vector3(30, 0, 40)), "", &"player", "test_heli")
 	await get_tree().physics_frame
@@ -579,6 +608,39 @@ func _test_rounds() -> void:
 	shooter.queue_free()
 
 
+## Grenade fragments meet a vehicle's hull where its voxels are: an open pickup bed lets them in
+## to the riders, an MRAP's armoured cab keeps them out.
+func _test_fragments() -> void:
+	print("Fragments against hulls")
+	var tech := _vehicle("range_technical")
+	var mrap := _vehicle("range_maxxpro")
+	await _reset(tech, Vector3(4, 0, 6))
+	await _reset(mrap, Vector3(-4, 0, 6))
+	var space := tech.get_world_3d().direct_space_state
+	var in_bed := tech.global_transform * Vector3(0.55, 1.0, 1.4)
+	var hit := Throwables._first_hit(space, tech.global_transform * Vector3(0.55, 3.2, 1.4), in_bed)
+	check(Vehicle.find_on(hit.get("collider")) == null, "a fragment falling into the technical's open bed isn't stopped by its collision box (%s)" % hit.get("collider"))
+	var in_cab := mrap.global_transform * Vector3(0.0, 1.5, 0.0)
+	hit = Throwables._first_hit(space, in_cab + Vector3(-4.0, 0, 0), in_cab)
+	check(Vehicle.find_on(hit.get("collider")) == mrap, "the MaxxPro's side stops one")
+	var bed_rider := _soldier("friendly", tech.global_position + Vector3(2.5, 0.1, 1.0), "BedFrag")
+	var cab_rider := _soldier("friendly", mrap.global_position + Vector3(3, 0.1, 0), "CabFrag")
+	await get_tree().physics_frame
+	tech.server_enter(bed_rider, 2)
+	mrap.server_enter(cab_rider, 2)
+	await get_tree().process_frame
+	await get_tree().physics_frame
+	var above := (bed_rider.get_node(^"ChestHitbox/Shape") as Node3D).global_position + Vector3(0.3, 2.0, 0.8)
+	var bed_wounds := Throwables.frag_body(bed_rider, bed_rider.vitals, above, 2.2)
+	var beside := (cab_rider.get_node(^"ChestHitbox/Shape") as Node3D).global_position + Vector3(-2.0, 0, 0)
+	var cab_wounds := Throwables.frag_body(cab_rider, cab_rider.vitals, beside, 2.0)
+	check(bed_wounds > 0 and cab_wounds == 0, "a grenade over the bed wounds its rider (%d), one beside the MaxxPro nobody inside (%d)" % [bed_wounds, cab_wounds])
+	tech.server_exit(bed_rider)
+	mrap.server_exit(cab_rider)
+	bed_rider.queue_free()
+	cab_rider.queue_free()
+
+
 func _test_damage_effects() -> void:
 	print("Engine and wheel damage")
 	var v := _vehicle("range_matv")
@@ -762,23 +824,42 @@ func _test_save_reload() -> void:
 	var mrap_engine := mrap.zone_health(Vehicle.ZONE_ENGINE)
 	mrap.cargo_hold.take(&"jerrycan", 2)
 	var mrap_cargo := mrap.cargo_hold.count_of(&"jerrycan")
+	# A body riding in the MaxxPro when the zone is left.
+	var kia := _soldier("friendly", mrap.global_position + Vector3(3, 0.1, 0), "KIA")
+	kia.vitals.server_kill()
+	await _wait_for(func() -> bool: return kia.is_in_group(Soldier.DEAD_GROUP), 3.0)
+	mrap.server_enter(kia, -1)
+	var kia_seat := mrap.seat_of(kia)
+	var kia_uid := kia.body_uid
+	check(kia_seat >= 0 and kia_uid != "", "a dead body rides in the MaxxPro's seat %d" % kia_seat)
 	GameState.save_zone()
 	var saved := GameState.read_save(GameState.save_path())
 	check((saved.get("vehicles", []) as Array).size() == layer.vehicles().size(), "the save holds every vehicle (%d)" % (saved.get("vehicles", []) as Array).size())
-	for v in layer.vehicles():
-		layer.remove_child(v)
-		v.queue_free()
-	await get_tree().process_frame
-	GameState.load_zone()
-	layer._restore()
+	# Leave the zone and come back as a campaign does (BaseHub._do_switch): a fresh level whose
+	# own _on_hosted loads the zone save. Net.hosted isn't emitted; nothing is restored by hand.
+	level = LevelSwitch.load_level(main, level.level_info(), true) as VehicleRange
+	level._on_hosted()
+	layer = level.get_node(^"Vehicles") as VehicleLayer
+	await _wait_for(func() -> bool: return level.players.get_node_or_null(^"1") != null, 5.0)
+	player = level.players.get_node(^"1")
+	player.set_physics_process(false)
+	await _wait_for(func() -> bool: return level.voxel_world.is_built() and layer.vehicles().size() >= VehicleRange.PARKED.size(), 30.0)
+	await _wait_for(func() -> bool: return _seated_uid("range_maxxpro", kia_seat) == kia_uid, 10.0)
 	await get_tree().physics_frame
+	check(layer.vehicles().size() == (saved.get("vehicles", []) as Array).size(),
+		"after leaving and coming back every vehicle is there again (%d)" % layer.vehicles().size())
 	var back := _vehicle("range_technical")
 	check(back != null and back.wrecked and back.freeze and back.global_position.distance_to(wreck_pos) < 0.05 and back.net_carves.size() == carves,
 		"the wreck comes back where it burned, a wreck, with its damage (%d marks)" % (back.net_carves.size() if back else -1))
 	var mrap_back := _vehicle("range_maxxpro")
 	check(mrap_back != null and is_equal_approx(mrap_back.zone_health(Vehicle.ZONE_ENGINE), mrap_engine) and mrap_back.cargo_hold.count_of(&"jerrycan") == mrap_cargo,
 		"the MaxxPro's engine damage (%.0f%%) and cargo come back too" % (mrap_engine * 100.0))
+	check(_seated_uid("range_maxxpro", kia_seat) == kia_uid, "the dead body is back in its seat")
 	check(layer.server_place_parked(VehicleRange.PARKED).is_empty(), "parking the range again adds nothing the save already holds")
+	if mrap_back and mrap_back.occupant(kia_seat):
+		var body := mrap_back.occupant(kia_seat)
+		mrap_back.server_exit(body)
+		body.queue_free()
 	await _wait_for(func() -> bool: return VehicleHull.pending() == 0, 10.0)
 	await _seconds(0.8)
 	if back:
@@ -786,6 +867,13 @@ func _test_save_reload() -> void:
 		player.global_position = back.global_position + Vector3(0, 0.1, -3.2)
 		check(VehicleService.finish(back, player, "salvage", &"", &"") != "" and back.salvaged
 			and VehicleService.finish(back, player, "salvage", &"", &"") == "Nothing left to salvage", "the wreck yields parts once (%s)" % salvage_job)
+
+
+## The body uid of the dead riding in seat `seat` of vehicle `id` ("" if none).
+func _seated_uid(id: String, seat: int) -> String:
+	var v := _vehicle(id)
+	var s := v.occupant(seat) if v and seat >= 0 else null
+	return s.body_uid if s and s.vitals.is_dead() else ""
 
 
 func _test_ai_driver() -> void:
@@ -859,6 +947,32 @@ func _test_ragdoll_and_run_over() -> void:
 	await _drive(v, 0.0, 0.0, true, 2.5)
 	v.server_exit(player)
 	walker.queue_free()
+	# A soldier standing in the way of one moving at a crawl: shoved aside, unhurt, not driven through.
+	await _reset(v, Vector3(-30, 0, -40), 90.0)
+	v.server_enter(player, 0)
+	var stander := _soldier("hostile", v.global_position + (-v.global_basis.z) * 6.0 + Vector3(0, 0.1, 0), "Stander")
+	await get_tree().physics_frame
+	var stand_pain := stander.vitals.pain()
+	var stand_x := stander.global_position.x
+	var inside := 0
+	var crawl_top := 0.0
+	var half := VehicleArt.size_m(v.model) * 0.5
+	end = Time.get_ticks_msec() + 12000
+	while Time.get_ticks_msec() < end and v.global_position.x > stand_x - half.z - 2.0:
+		v.request_drive(0.5 if v.forward_speed() < 1.6 else 0.0, 0.0, false)
+		crawl_top = maxf(crawl_top, v.forward_speed())
+		var at := v.to_local(stander.global_position)
+		if absf(at.x) < half.x - 0.2 and absf(at.z) < half.z - 0.2:
+			inside += 1
+		await get_tree().physics_frame
+	var off := absf(v.to_local(stander.global_position).x)
+	check(v.global_position.x <= stand_x - half.z - 2.0 and crawl_top < Vehicle.RUN_OVER_MIN_MS,
+		"the M-ATV crawls on past where he stood (%.1f m/s at most)" % crawl_top)
+	check(inside == 0 and off > half.x and is_equal_approx(stander.vitals.pain(), stand_pain) and stander.vitals.is_up(),
+		"a soldier standing in its way is shoved aside, clear of its side (%.2f m off the centreline), unhurt, never inside the hull (%d frames)" % [off, inside])
+	await _drive(v, 0.0, 0.0, true, 1.5)
+	v.server_exit(player)
+	stander.queue_free()
 	await _reset(v, Vector3(-12, 0, 6))
 
 

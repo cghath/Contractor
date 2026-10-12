@@ -4,7 +4,10 @@ extends Node
 ## (CompoundLevel._ready adds it), so vehicles spawn and their RPCs land at the same paths
 ## everywhere. The host spawns vehicles through its MultiplayerSpawner (late joiners get them
 ## with their state), saves them with the zone (GameState.vehicles: wrecks stay where they
-## burned) and puts them back when the zone is hosted again.
+## burned) and puts them back when the zone is hosted again: server_restore(), which the level
+## calls from its own hosting path (CompoundLevel._restore_bodies, after the zone save is loaded
+## and its bodies are back), whether it was hosted from the menu or switched to by BaseHub.
+## (Not from Net.hosted: a campaign level switch never emits it.)
 ##
 ## Hooks for other work:
 ## - server_spawn(): any vehicle anywhere (V3's helicopters, V4's AAVs and motor pool).
@@ -37,7 +40,6 @@ func _ready() -> void:
 	spawner.spawn_path = NodePath("..")
 	spawner.spawn_function = _make
 	add_child(spawner)
-	Net.hosted.connect(_on_hosted)
 
 
 ## The vehicles node of the level `from` is in (or null).
@@ -91,18 +93,22 @@ func _make(data: Dictionary) -> Node:
 
 ## Host (zones, the range): parks vehicles. Each entry: {"id" (stable within the zone),
 ## "model", "scheme"?, "faction"?, "pos" (Vector3 or [x, y, z]), "yaw" (degrees)?, "cargo"
-## ([[item id, count], ...])?, "fuel"?}. An id the zone save already holds is left to the save
-## (_restore puts it back as it was). Returns the vehicles placed now.
+## ([[item id, count], ...])?, "fuel"?}. An id the zone save already holds comes back as the
+## save has it (where it was left, its damage and cargo, a wreck), not freshly parked. Call it
+## after GameState.load_zone. Returns the vehicles parked fresh now.
 func server_place_parked(entries: Array) -> Array[Vehicle]:
 	var out: Array[Vehicle] = []
 	if not multiplayer.is_server():
 		return out
 	var saved := {}
 	for r: Dictionary in GameState.vehicles:
-		saved[String(r.get("id", ""))] = true
+		saved[String(r.get("id", ""))] = r
 	for e: Dictionary in entries:
 		var id := String(e.get("id", ""))
-		if id != "" and (saved.has(id) or find(id) != null):
+		if id != "" and find(id) != null:
+			continue
+		if id != "" and saved.has(id):
+			_restore_record(saved[id])
 			continue
 		var p: Variant = e.get("pos", Vector3.ZERO)
 		var pos: Vector3 = p if p is Vector3 else VehicleSpecs.vec(p)
@@ -123,19 +129,27 @@ func records() -> Array:
 	return vehicles().map(func(v: Vehicle) -> Dictionary: return v.to_save())
 
 
-func _on_hosted() -> void:
-	_restore.call_deferred()  # after the level has loaded the zone save (its own _on_hosted)
-
-
-## Host: the vehicles in the zone save, back where they were, as they were.
-func _restore() -> void:
+## Host: the vehicles in the zone save (GameState.vehicles, loaded by the level), back where
+## they were, as they were; and the bodies that rode in them back in their seats (call it once
+## the zone's bodies are restored). A vehicle already here is left alone, so calling it again
+## (or after server_place_parked) adds nothing twice.
+func server_restore() -> void:
 	if not multiplayer.is_server():
 		return
 	for record: Dictionary in GameState.vehicles:
-		var id := String(record.get("id", ""))
-		if id == "" or find(id) != null or not VehicleSpecs.has_model(String(record.get("model", ""))):
-			continue
-		server_spawn(String(record.model), Transform3D.IDENTITY, String(record.get("scheme", "")), StringName(String(record.get("faction", "player"))), id, record)
+		_restore_record(record)
+	for v in vehicles():
+		v.server_seat_saved_bodies()
+
+
+func _restore_record(record: Dictionary) -> Vehicle:
+	var id := String(record.get("id", ""))
+	if id == "" or not VehicleSpecs.has_model(String(record.get("model", ""))):
+		return null
+	var have := find(id)
+	if have:
+		return have
+	return server_spawn(String(record.model), Transform3D.IDENTITY, String(record.get("scheme", "")), StringName(String(record.get("faction", "player"))), id, record)
 
 
 # --- AI squadmates in and out (command menu: Mount) ------------------------------------------

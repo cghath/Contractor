@@ -43,7 +43,8 @@ extends RigidBody3D
 ## (SoldierMovement.UP_MASK) meet it. A vehicle meets the world, other vehicles and ragdolls
 ## (layer 6: it unfreezes a settled body before it reaches it, so the body is pushed, not driven
 ## into like a wall). Not the living (layer 5): a soldier's capsule is kinematic, so a 12 t
-## truck would stop dead against it; run-overs are found by a shape query instead.
+## truck would stop dead against it; a shape query ahead of the hull finds soldiers in the way
+## instead: pushed aside at any speed (_push_aside), run over at speed (_run_over).
 const LAYER := 1 << 6
 const MASK := 1 | Ragdoll.LAYER | LAYER  # world, ragdolls, vehicles
 const GROUP := &"vehicles"
@@ -138,6 +139,15 @@ const RUN_OVER_MIN_MS := 2.5
 const RUN_OVER_TRAUMA := 6.0
 const RUN_OVER_FALL_MULT := 1.5
 const RUN_OVER_COOLDOWN_S := 1.5
+## Soldiers standing in the way (Proposed): at any speed a soldier the hull is about to drive
+## into or is overlapping is pushed out sideways, at PUSH_MIN_MS or the vehicle's speed times
+## PUSH_SPEED_MULT, whichever is more, to PUSH_CLEAR_M beyond the hull's side. A player's own
+## peer moves them (Soldier positions are their owners'); the host sends the push at most every
+## PUSH_SEND_S.
+const PUSH_MIN_MS := 1.5
+const PUSH_SPEED_MULT := 1.5
+const PUSH_CLEAR_M := 0.45
+const PUSH_SEND_S := 0.1
 ## How far ahead of the hull (s of travel, plus a margin) a settled ragdoll is woken.
 const RAGDOLL_LOOKAHEAD_S := 0.2
 const RAGDOLL_MARGIN_M := 0.4
@@ -226,6 +236,7 @@ var _leak := 0.0             # litres a second
 var _fire_tick := 0.0
 var _gun_next := 0.0
 var _run_over_at := {}          # soldier instance id -> time last run over
+var _pushed_at := {}             # host: player soldier instance id -> time last sent a push
 var _blocked_s := 0.0            # host: driven but held still against a body
 var _ridden := {}                # host: ragdoll part -> time its collision exception ends
 var _jobs := {}              # actor instance id -> timed job
@@ -240,6 +251,8 @@ var _last_sent := {}
 var _gun_local_next := 0.0
 var _spawn_xform := Transform3D.IDENTITY
 var _died_calls := {}        # host: occupant instance id -> its bound died callable
+var _bodies := {}            # host: instance ids of bodies loaded into seats (down or dead): they ride on if they die
+var _saved_bodies := {}      # host: seat index -> body uid from the zone save, seated again once the bodies are back
 
 
 ## A new vehicle of `model` (VehicleArt.MODELS, with numbers in data/vehicles.json), ready
@@ -537,8 +550,9 @@ func level() -> CompoundLevel:
 # --- Seats (host) ---------------------------------------------------------------------------
 
 ## Host: put `soldier` in seat `index` (-1: the first free one, a passenger seat first). Bodies
-## (down or dead) go only into passenger seats; pilot seats take AI only. Returns whether it
-## worked.
+## (down or dead) go only into passenger seats and ride there (dead too) until they're pulled
+## out, the vehicle burns out, or it's left with them aboard (the zone save keeps them seated);
+## pilot seats take AI only. Returns whether it worked.
 func server_enter(soldier: Node, index := -1) -> bool:
 	var s := soldier as Soldier
 	if not multiplayer.is_server() or s == null or not is_instance_valid(s) or s.is_queued_for_deletion() or wrecked or is_burning():
@@ -562,6 +576,8 @@ func server_enter(soldier: Node, index := -1) -> bool:
 		s.carried_by.release_carried()
 	s.release_carried()
 	_seat_nodes[index] = s
+	if body:
+		_bodies[s.get_instance_id()] = true  # a casualty or the dead, carried home: stays seated if they die
 	s.vehicle = self
 	s.velocity = Vector3.ZERO
 	s.collision_layer = 0
@@ -606,6 +622,7 @@ func server_exit(soldier: Node) -> void:
 		return
 	var spot := exit_spot(index, s)
 	_seat_nodes[index] = null
+	_bodies.erase(s.get_instance_id())
 	_release(s)
 	_forget_death(s)
 	if Person.is_person(s):
@@ -722,18 +739,24 @@ func _forget_death(s: Soldier) -> void:
 		s.vitals.died.disconnect(call)
 
 
-## Host: an occupant died. An AI's body is put out beside the vehicle; a player's body (left
-## where they died, inside) goes out beside it too and the player (who respawns) leaves the seat.
+## Host: an occupant died. A casualty loaded as a body rides on, dead (their comrades are taking
+## them home). Anyone else who dies in a seat is put out: an AI's body beside the vehicle; a
+## player's body (left where they died, inside) goes out beside it too and the player (who
+## respawns) leaves the seat.
 func _on_occupant_died(s: Soldier) -> void:
 	if not multiplayer.is_server() or seat_of(s) < 0:
 		return
 	var index := seat_of(s)
+	if s.is_ai() and _bodies.has(s.get_instance_id()):
+		_publish_state(true)
+		return
 	if s.is_ai():
 		server_exit(s)
 		return
 	var seat_pos := (global_transform * _seat_local[index]).origin
 	var spot := exit_spot(index, s)
 	_seat_nodes[index] = null
+	_bodies.erase(s.get_instance_id())
 	_release(s)
 	_forget_death(s)
 	var lvl := level()
@@ -820,8 +843,8 @@ func _server_step(delta: float) -> void:
 		if s == null and _seat_nodes[i] != null:
 			_seat_nodes[i] = null  # gone (left the session)
 			_publish_state(true)
-		elif s and s.is_ai() and s.vitals.is_dead():
-			server_exit(s)
+		elif s and s.is_ai() and s.vitals.is_dead() and not _bodies.has(s.get_instance_id()):
+			server_exit(s)  # died aboard unseen by _on_occupant_died; loaded bodies ride on
 	if not freeze:
 		_drive_step(delta)
 		_wake_bodies_ahead()
@@ -981,9 +1004,60 @@ func _wake_bodies_ahead() -> void:
 		var s := collider as Soldier
 		if s == null or seat_of(s) >= 0 or Vehicle.ride_of(s) != null or not s.vitals.is_up():
 			continue
-		if (s.global_position - global_position).dot(dir) < size.z * 0.3:
-			continue  # beside or behind: not in its path
-		_run_over(s, speed)
+		var local := to_local(s.global_position)
+		if local.y > size.y - 0.3:
+			continue  # standing on the roof or the deck: it carries them
+		var along := (s.global_position - global_position).dot(dir)
+		if along >= size.z * 0.3:
+			_run_over(s, speed)  # in its path: hit at speed
+		if s.vitals.is_up() and along > -size.z * 0.5:  # not one it's pulling away from
+			_push_aside(s, local, size, maxf(speed, 0.5))
+
+
+## Host: `s` (at `local` in the vehicle's frame) is in the hull's way or inside its footprint:
+## pushed out sideways (toward the side it's nearer) until clear of the hull, at a walk or the
+## vehicle's speed. Slow vehicles shove soldiers aside instead of driving through them.
+func _push_aside(s: Soldier, local: Vector3, size: Vector3, speed: float) -> void:
+	var half_x := size.x * 0.5 + PUSH_CLEAR_M
+	var half_z := size.z * 0.5 + PUSH_CLEAR_M
+	if absf(local.x) >= half_x or absf(local.z) >= half_z + speed * RAGDOLL_LOOKAHEAD_S:
+		return  # clear of it
+	var side := signf(local.x) if absf(local.x) > 0.05 else (1.0 if s.get_instance_id() % 2 == 0 else -1.0)
+	var need := half_x - absf(local.x)
+	var rate := maxf(PUSH_MIN_MS, speed * PUSH_SPEED_MULT)
+	var axis := global_basis.x * side
+	axis = Vector3(axis.x, 0.0, axis.z).normalized()
+	if s.is_ai():
+		Vehicle.shove(s, axis * minf(need, rate * get_physics_process_delta_time()))
+		return
+	var now := Soldier._now()
+	if now - float(_pushed_at.get(s.get_instance_id(), -100.0)) < PUSH_SEND_S:
+		return
+	_pushed_at[s.get_instance_id()] = now
+	var lvl := level()
+	if lvl:
+		_client_push.rpc_id(s.owner_peer(), lvl.get_path_to(s), axis * minf(need, rate * PUSH_SEND_S))
+
+
+## The owner of a player in a vehicle's way moves them aside by `offset` (their position is
+## theirs to send).
+@rpc("authority", "call_local", "unreliable_ordered")
+func _client_push(path: NodePath, offset: Vector3) -> void:
+	var lvl := level()
+	var s := lvl.get_node_or_null(path) as Soldier if lvl else null
+	if s and s.is_multiplayer_authority() and not is_instance_valid(s.vehicle):
+		Vehicle.shove(s, offset)
+
+
+## Moves `s` by `offset` unless a wall (the world) is in the way.
+static func shove(s: Soldier, offset: Vector3) -> void:
+	var from := s.global_position + Vector3.UP * 0.9
+	var reach := offset.length() + 0.35
+	if reach <= 0.35:
+		return
+	var q := PhysicsRayQueryParameters3D.create(from, from + offset.normalized() * reach, 1, [s.get_rid()])
+	if s.get_world_3d().direct_space_state.intersect_ray(q).is_empty():
+		s.global_position += offset
 
 
 ## Host: `s` was hit by the vehicle at `speed` m/s: blunt trauma through the wound model.
@@ -1192,6 +1266,17 @@ func server_take_hit(hit: Dictionary) -> Dictionary:
 	return out
 
 
+## Whether a fragment (Throwables) that met this vehicle's collision box at `at`, flying on to
+## `to`, meets the hull's voxels on the way: an open pickup bed or a gunner's hatch lets it by,
+## as it does a round (server_take_hit's probe).
+func blocks_fragment(at: Vector3, to: Vector3) -> bool:
+	var dir := to - at
+	if dir.length_squared() < 0.000001:
+		return true
+	var reach := minf(dir.length(), VehicleArt.size_m(model).length())
+	return bool(hull.first_solid(to_local(at), (global_basis.inverse() * dir.normalized()).normalized(), reach).hit)
+
+
 ## Host: a charge that rode this vehicle went off at `pos` (Charges' hook): a 2 kg block's blast.
 func server_explosion(pos: Vector3, _kind: String = "") -> void:
 	server_take_hit({"kind": HE, "position": pos, "direction": (global_transform * center_of_mass - pos).normalized(), "blast_kg": 2.0, "shooter": null})
@@ -1368,15 +1453,16 @@ func _update_fire_fx() -> void:
 
 ## Host: the AI drives to `point` (a navmesh path where there is one, else straight), stops
 ## there and avoids obvious obstacles. A player in the driver's seat keeps control.
-func server_drive_to(point: Vector3) -> void:
+## `speed_kmh` -1: its usual cruise (VehicleAI.CRUISE_SHARE of top speed).
+func server_drive_to(point: Vector3, speed_kmh := -1.0) -> void:
 	_ensure_ai()
-	ai.drive_to(point)
+	ai.drive_to(point, speed_kmh / 3.6 if speed_kmh > 0.0 else -1.0)
 
 
-## Host: the AI follows `points` in order and stops at the last.
-func server_follow_path(points: PackedVector3Array) -> void:
+## Host: the AI follows `points` in order and stops at the last (`speed_kmh` as above).
+func server_follow_path(points: PackedVector3Array, speed_kmh := -1.0) -> void:
 	_ensure_ai()
-	ai.follow(points)
+	ai.follow(points, speed_kmh / 3.6 if speed_kmh > 0.0 else -1.0)
 
 
 ## Host: the AI stops and holds the brakes.
@@ -1794,7 +1880,39 @@ func to_save() -> Dictionary:
 	return {"id": vehicle_id, "model": model, "scheme": scheme, "faction": String(faction), "wrecked": wrecked,
 		"pos": [p.x, p.y, p.z], "rot": [q.x, q.y, q.z, q.w], "zones": zones_out, "fuel": fuel, "burning": burning_s,
 		"battery": battery_ok, "salvaged": salvaged, "leak": _leak, "carves": net_carves.duplicate(true),
-		"cargo": cargo_hold.net_state.duplicate(true) if cargo_hold else {}}
+		"cargo": cargo_hold.net_state.duplicate(true) if cargo_hold else {}, "bodies": _body_uids()}
+
+
+## Host: the dead riding in seats, by seat (as text), by their body uid (Soldier.body_record:
+## the zone save keeps the bodies themselves; from_save and server_seat_saved_bodies put them back).
+func _body_uids() -> Dictionary:
+	var out := {}
+	for i in _seat_nodes.size():
+		var s := occupant(i)
+		if s and s.vitals.is_dead() and s.is_in_group(Soldier.DEAD_GROUP) and s.body_uid != "":
+			out[str(i)] = s.body_uid
+	for i: int in _saved_bodies:
+		if occupant(i) == null:
+			out[str(i)] = _saved_bodies[i]  # not back in their seat yet: still theirs
+	return out
+
+
+## Host: the bodies the zone save had riding in this vehicle go back to their seats (once the
+## zone's bodies are restored: VehicleLayer.server_restore). One not found is forgotten.
+func server_seat_saved_bodies() -> void:
+	if not multiplayer.is_server() or _saved_bodies.is_empty():
+		return
+	var by_uid := {}
+	for n in get_tree().get_nodes_in_group(Soldier.DEAD_GROUP):
+		var b := n as Soldier
+		if b and not b.is_queued_for_deletion() and b.body_uid != "" and Vehicle.ride_of(b) == null:
+			by_uid[b.body_uid] = b
+	var wanted := _saved_bodies.duplicate()
+	_saved_bodies.clear()
+	for i: int in wanted:
+		var b: Soldier = by_uid.get(String(wanted[i]))
+		if b and not wrecked:
+			server_enter(b, i)
 
 
 func from_save(data: Dictionary) -> void:
@@ -1824,6 +1942,12 @@ func from_save(data: Dictionary) -> void:
 	net_carves = (GameState.from_json(data.get("carves", [])) as Array) if data.has("carves") else []
 	if cargo_hold and data.get("cargo") is Dictionary and not (data.cargo as Dictionary).is_empty():
 		cargo_hold.net_state = GameState.from_json(data.cargo)
+	_saved_bodies.clear()
+	var bodies_in: Variant = data.get("bodies", {})
+	if bodies_in is Dictionary:
+		for k: Variant in bodies_in:
+			if String(k).is_valid_int() and int(String(k)) >= 0 and int(String(k)) < _seat_nodes.size():
+				_saved_bodies[int(String(k))] = String(bodies_in[k])
 	if hull:
 		hull.set_wrecked(wrecked)
 	_publish_state(true)

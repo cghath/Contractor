@@ -161,9 +161,18 @@ static func frag_body(body: Node3D, vitals: Vitals, centre: Vector3, distance: f
 
 
 static func _first_hit(space: PhysicsDirectSpaceState3D, from: Vector3, to: Vector3) -> Dictionary:
-	var query := PhysicsRayQueryParameters3D.create(from, to, FRAG_MASK)
-	query.collide_with_areas = true
-	return space.intersect_ray(query)
+	var exclude: Array[RID] = []
+	for i in 4:
+		var query := PhysicsRayQueryParameters3D.create(from, to, FRAG_MASK, exclude)
+		query.collide_with_areas = true
+		var hit := space.intersect_ray(query)
+		# Wave 5: a vehicle's box stops fragments only where its hull's voxels are (not through an
+		# open pickup bed or a gunner's hatch).
+		var vehicle := Vehicle.find_on(hit.get("collider")) if not hit.is_empty() else null
+		if vehicle == null or vehicle.blocks_fragment(hit.position, to):
+			return hit
+		exclude.append(vehicle.get_rid())
+	return {}
 
 
 ## A point in a hitbox's first box shape: its centre plus `jitter` (fractions of its size).
