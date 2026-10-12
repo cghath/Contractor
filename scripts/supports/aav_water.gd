@@ -85,6 +85,14 @@ static func swim_ms(v: Vehicle) -> float:
 	return float(a.get("swim_kmh", SWIM_KMH)) / 3.6
 
 
+## The body's own linear damping (1/s): its linear_damp, plus the project's default when combined.
+static func body_damping(v: RigidBody3D) -> float:
+	var own := v.linear_damp
+	if v.linear_damp_mode == RigidBody3D.DAMP_MODE_COMBINE:
+		own += float(ProjectSettings.get_setting("physics/3d/default_linear_damp", 0.1))
+	return own
+
+
 ## The hull as one box in the vehicle's frame: its collision boxes' bounds (cached).
 static func hull_box(v: Vehicle) -> AABB:
 	if v.has_meta(&"water_hull"):
@@ -131,15 +139,18 @@ static func step(v: Vehicle, delta: float, wet: float, throttle_in: float, steer
 	var swim := swim_ms(v)
 	var drag_long := JET_ACCEL / maxf(swim, 0.5) if amph else DRAG_LONG
 	var force := -fwd * v_long * drag_long - side * vel.dot(side) * DRAG_LAT - Vector3.UP * vel.y * DRAG_HEAVE
+	var jets := Vector3.ZERO
 	if amph and k > 0.3:
-		# Waterjets: ahead or astern on the throttle; the brake reverses them to stop.
+		# Waterjets: ahead or astern on the throttle; the brake reverses them to stop. They also
+		# make up for the body's own damping (Godot's), so full ahead is swim speed.
 		var push := clampf(throttle_in, -1.0, 1.0)
 		if push < 0.0:
 			push *= ASTERN_SHARE
 		if brake and absf(v_long) > 0.2:
 			push = -signf(v_long) * ASTERN_SHARE
 		force += fwd * push * JET_ACCEL
-	v.apply_central_force(force * v.mass * k)
+		jets = fwd * push * swim * body_damping(v)
+	v.apply_central_force((force * k + jets) * v.mass)
 	# Roll and pitch damped; yaw steered by the jets (amphibious) or damped.
 	var size := box.size
 	var inertia := v.mass * (size.x * size.x + size.z * size.z) / 12.0

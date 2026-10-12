@@ -191,7 +191,8 @@ func server_call(by: Soldier, dev := false) -> String:
 	_legs.clear()
 	if origin.is_ship():
 		var terrain := _terrain()
-		_legs.append({"swim": [terrain.shore_point(to, -float(_cfg.get("beach_out_m", 40.0))), terrain.shore_point(to, float(_cfg.get("beach_in_m", 25.0)))]})
+		_legs.append({"swim": [origin.approach_point(v.global_position), terrain.shore_point(to, -float(_cfg.get("beach_out_m", 40.0))),
+			terrain.shore_point(to, float(_cfg.get("beach_in_m", 25.0)))]})
 	_legs.append({"caller": true})
 	_next_leg()
 	_tell(by, "AAV on its way from the %s" % ("LHD" if origin.is_ship() else "FOB"))
@@ -319,9 +320,9 @@ func server_return(by: Soldier) -> String:
 		var dock := origin.dock_point(pos)
 		if AavWater.depth(vehicle) <= 0.0 and terrain.shore_distance(pos.x, pos.z) > 0.0:
 			_legs.append({"drive": terrain.shore_point(pos, float(_cfg.get("beach_in_m", 25.0)))})
-			_legs.append({"swim": [terrain.shore_point(pos, -float(_cfg.get("beach_out_m", 40.0))), dock]})
+			_legs.append({"swim": [terrain.shore_point(pos, -float(_cfg.get("beach_out_m", 40.0))), origin.approach_point(pos), dock]})
 		else:
-			_legs.append({"swim": [dock]})
+			_legs.append({"swim": [origin.approach_point(pos), dock]})
 	else:
 		_legs.append({"drive": origin.dock_point(pos)})
 	_set_order(RETURN)

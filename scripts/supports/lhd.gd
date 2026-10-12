@@ -17,6 +17,8 @@ extends Node3D
 
 const NODE_NAME := "SupportOrigin"
 const SIDES := ["north", "south", "east", "west"]
+## Swimming round the ship, an AAV keeps this far off its side (m, Proposed).
+const CLEAR_M := 25.0
 
 ## &"lhd" or &"fob".
 var kind := &"fob"
@@ -150,6 +152,17 @@ func dock_point(from: Vector3) -> Vector3:
 		var t := launch_transform()
 		return Vector3(t.origin.x, ZoneTerrain.SEA_LEVEL_M, t.origin.z)
 	return edge_point(from)
+
+
+## The LHD: a point on the water CLEAR_M shoreward of the stern's launch point, clear of the
+## ship's side, so an AAV swims round the hull rather than into it (out, and back in). Inland:
+## dock_point.
+func approach_point(from: Vector3) -> Vector3:
+	if not is_ship():
+		return dock_point(from)
+	var terrain := _terrain()
+	var shoreward := -terrain.seaward() if terrain else -global_basis.x
+	return dock_point(from) + shoreward * (float(AavSupport.data().get("lhd", {}).get("beam_m", LhdArt.BEAM_M)) * 0.5 + CLEAR_M)
 
 
 ## The flight deck's marker (helicopters start there), or this node inland.

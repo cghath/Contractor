@@ -23,7 +23,7 @@
 			"size_m": 1536,
 			"seed": 7712,
 			"relief_m": 14,
-			"coast": {"side": "south", "shore_m": 300, "lhd_m": 150, "lhd_along_m": 0},
+			"coast": {"side": "south", "shore_m": 300, "lhd_m": 180, "lhd_along_m": 0},
 			"modules": [
 				{"id": "compound", "type": "compound", "pos": [120, -360]},
 				{"id": "village_w", "type": "village", "pos": [-480, -240]}

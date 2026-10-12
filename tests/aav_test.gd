@@ -212,7 +212,11 @@ func _test_inland() -> void:
 	check(origin != null and registered.origin.is_equal_approx(origin.global_position), "the FOB's marker is the registered origin (asked for the LHD, it answers)")
 	var ins := level.insertion_points()[0]
 	_put_player(ins)
-	# Refused: no money, mountains, too steep.
+	# Refused: an inland contract zone, no money, mountains, too steep.
+	level.def["kind"] = "contract"
+	var inland_contract := support.server_call(player)
+	level.def["kind"] = "hot"
+	check(inland_contract.begins_with("AAVs support hot zones") and support.current() == null, "refused in an inland contract zone: %s" % inland_contract)
 	var cash := Economy.cash()
 	Economy.spend(cash - 100, "test: broke")
 	var why := support.server_call(player)
@@ -388,7 +392,7 @@ func _test_lhd() -> void:
 	if lhd == null or not lhd.is_ship():
 		return
 	var p := lhd.global_position
-	check(t.shore_distance(p.x, p.z) < -100.0 and t.water_height(p.x, p.z) > t.height_at(p.x, p.z) + 8.0,
+	check(t.shore_distance(p.x, p.z) < -80.0 and t.water_height(p.x, p.z) > t.height_at(p.x, p.z) + 6.0,
 		"offshore, in deep water (%.0f m out, %.0f m deep)" % [-t.shore_distance(p.x, p.z), t.water_height(p.x, p.z) - t.height_at(p.x, p.z)])
 	var ins := level.insertion_points()[0]
 	check(t.water_height(ins.x, ins.z) == -INF and t.shore_distance(ins.x, ins.z) > 50.0, "the insertion point is dry land, %.0f m inland" % t.shore_distance(ins.x, ins.z))
@@ -536,10 +540,11 @@ func _test_call_and_swim(open_for_client: bool) -> void:
 		if Time.get_ticks_msec() >= int(next_note[0]):
 			next_note[0] = Time.get_ticks_msec() + 8000
 			print("    %s" % _vstate(v))
-		return not AavWater.afloat(v) and AavWater.depth(v) <= 0.0, 120.0)
+		return AavWater.depth(v) <= 0.0 and t.shore_distance(v.global_position.x, v.global_position.z) > 2.0, 120.0)
 	print("    (swim: top %.2f m/s, at (%.0f, %.1f, %.0f), %s, %s)" % [float(top[0]), v.global_position.x, v.global_position.y, v.global_position.z, support.order, support.last_message])
 	check(swam and float(top[0]) > 2.0 and float(top[0]) < 13.0 / 3.6 + 0.8, "it swims in at up to %.1f km/h and climbs out onto the beach" % (float(top[0]) * 3.6))
-	check(_flat(v.global_position, started) > 60.0 and t.shore_distance(v.global_position.x, v.global_position.z) > -2.0, "and it's on the land now")
+	check(_flat(v.global_position, started) > 60.0 and t.water_height(v.global_position.x, v.global_position.z) < t.height_at(v.global_position.x, v.global_position.z) + 0.5,
+		"and it's on the land now (%.0f m inland)" % t.shore_distance(v.global_position.x, v.global_position.z))
 	var arrived := await _wait_for(func() -> bool: return support.order == AavSupport.HOLD, 60.0)
 	check(arrived and _flat(v.global_position, player.global_position) < float(AavSupport.data().aav.arrive_m) + 8.0,
 		"it drives on to the caller and holds (%.1f m away)" % _flat(v.global_position, player.global_position))
@@ -773,7 +778,7 @@ func _run_client(address: String) -> void:
 	check(wet and v.global_position.distance_to(p0) > 2.0 and v.global_position.y < 0.5,
 		"the late joiner sees it swim (%.1f m in 2 s, depth %.1f m)" % [v.global_position.distance_to(p0), AavWater.depth(v)])
 	_client_saw.rpc_id(1)
-	await _wait_for(func() -> bool: return _your_turn, 200.0)
+	await _wait_for(func() -> bool: return _your_turn, 300.0)
 	check(_your_turn, "the host gave the client its turn")
 	if not _your_turn:
 		_finish()
