@@ -70,11 +70,12 @@ func _test_generation() -> void:
 	var zones_ok := true
 	for z: Dictionary in MissionRegistry.zones():
 		var layout := MissionRegistry.zone_def(String(z.zone_id))
-		zones_ok = zones_ok and not layout.is_empty() and (layout.modules as Array).size() >= 4 and (z.modules as Array).size() == 4
+		var hot := String(z.get("kind", "")) == "hot"
+		zones_ok = zones_ok and not layout.is_empty() and (layout.modules as Array).size() >= 4 and (z.modules as Array).size() == (6 if hot else 4)
 		zones_ok = zones_ok and layout == MissionRegistry.zone_def(String(z.zone_id))
 		var size := float(layout.get("size_m", 0))
-		zones_ok = zones_ok and size * size >= 2.0e6 and size * size <= 4.0e6
-	check(zones_ok, "every zone is a generated layout holding all four module types, the same every time, 2-4 km²")
+		zones_ok = zones_ok and (is_equal_approx(size, ZoneDef.HOT_SIZE_M) if hot else size * size >= 2.0e6 and size * size <= 4.0e6)
+	check(zones_ok, "every zone is a generated layout, the same every time: contract zones 2-4 km² with all four module types, hot zones 16 km² with the enemy's structure too")
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 4242
 	var sites := {}
@@ -151,8 +152,10 @@ func _test_deployment() -> void:
 			apart = apart and garrison[i].global_position.distance_to(garrison[j].global_position) > 0.7
 	var targeted: Array = Contracts.deployment().cids.map(func(cid: String) -> String: return String(Contracts.contract(cid).module_id))
 	var other := level.modules().filter(func(m: ZoneModule) -> bool: return not m.module_id in targeted)[0] as ZoneModule
-	check(first == 4 and garrison.size() == 10 and apart and level.garrison_size(module.module_id) == 10 and level.garrison_size(other.module_id) == 4,
-		"the raid's module holds the true count: 4 posts, topped up on deployment, none on top of another; other modules keep 4 (%d)" % garrison.size())
+	var posts := (ZoneModules.GARRISON[module.type] as Array).size()
+	var other_posts := (ZoneModules.GARRISON[other.type] as Array).size()
+	check(first == posts and garrison.size() == 10 and apart and level.garrison_size(module.module_id) == 10 and level.garrison_size(other.module_id) == other_posts,
+		"the raid's module (%s) holds the true count: its %d posts, topped up on deployment, none on top of another; other modules keep their own posts (%d)" % [module.type, posts, garrison.size()])
 	check(garrison.all(func(s: Soldier) -> bool: return s.buddy != null), "each with a buddy")
 	for s: Soldier in garrison:
 		s.queue_free()  # the rest of this suite runs without AI

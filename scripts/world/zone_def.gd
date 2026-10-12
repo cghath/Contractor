@@ -21,6 +21,19 @@ const MIN_SIZE_M := 512.0
 const MIN_SPACING_M := 260.0
 const EDGE_KEEP_M := 200.0
 const INSERTION_CLEAR_M := 350.0
+## Hot zones (4B part 3, Captain 2026-10-12: 16 km², a 4096 m square; generate_hot). Proposed:
+## how far the HQ sits from the centre at most, the ring round it the comms site and QRF bases
+## sit in, how many of each kind, and how far insertion points keep from any site (out of
+## sight of the nearest outpost).
+const HOT_SIZE_M := 4096.0
+const HOT_HQ_REACH_M := 600.0
+const HOT_RING_M := Vector2(450.0, 1100.0)
+const HOT_OUTPOSTS := Vector2i(3, 6)
+const HOT_QRF_BASES := Vector2i(1, 2)
+const HOT_CHECKPOINTS := Vector2i(2, 4)
+const HOT_VILLAGES := Vector2i(2, 3)
+const HOT_INSERTION_CLEAR_M := 700.0
+const HOT_PATROLS := Vector2i(2, 4)
 
 static var _defs := {}
 
@@ -117,3 +130,108 @@ static func generate(seed: int, size_m := 1920.0, types: Array = ["compound", "o
 		return out
 	return normalize({"id": "generated_%d" % seed, "name": "Zone %d" % seed, "seed": seed, "size_m": size,
 		"relief_m": 18.0, "modules": modules, "insertion": edge_points.call(2), "extraction": edge_points.call(3)})
+
+
+## A hot zone made from a seed (4B part 3): a `size_m` square (HOT_SIZE_M: 16 km²) holding the
+## enemy's structure: one HQ near the centre; a comms site and HOT_QRF_BASES QRF bases in a
+## ring round it; HOT_OUTPOSTS outposts spread out; HOT_CHECKPOINTS road checkpoints part way
+## along the "roads" from the HQ to the outposts; HOT_VILLAGES villages (people live there).
+## Three insertion points at the edges, HOT_INSERTION_CLEAR_M from any site, the default (first)
+## the one furthest from them; three extraction candidates; "roads" ([[x, z], [x, z]] pairs,
+## HQ to each outpost) and "patrols" (routes, [[x, z], ...], between nearby sites) for the
+## enemy's roaming patrols. "kind": "hot". The same seed gives the same zone.
+static func generate_hot(seed: int, size_m := HOT_SIZE_M) -> Dictionary:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed
+	var size := maxf(ceilf(size_m / SIZE_STEP_M) * SIZE_STEP_M, MIN_SIZE_M)
+	var half := size * 0.5
+	var reach := half - EDGE_KEEP_M
+	var modules: Array = []
+	var placed: Array[Vector2] = []
+	var place := func(type: String, at: Vector2) -> bool:
+		var p := Vector2(snappedf(clampf(at.x, -reach, reach), GRID_M), snappedf(clampf(at.y, -reach, reach), GRID_M))
+		if placed.any(func(q: Vector2) -> bool: return q.distance_to(p) < MIN_SPACING_M):
+			return false
+		placed.append(p)
+		modules.append({"id": "%s_%d" % [type, modules.size()], "type": type, "pos": [p.x, p.y]})
+		return true
+	var around := func(type: String, centre: Vector2, ring: Vector2) -> Variant:
+		for attempt in 200:
+			var p := centre + Vector2.from_angle(rng.randf() * TAU) * rng.randf_range(ring.x, ring.y)
+			if place.call(type, p):
+				return Vector2(modules.back().pos[0], modules.back().pos[1])
+		return null
+	var hq: Vector2 = around.call("hq", Vector2.ZERO, Vector2(0.0, HOT_HQ_REACH_M))
+	around.call("comms", hq, HOT_RING_M)
+	for i in rng.randi_range(HOT_QRF_BASES.x, HOT_QRF_BASES.y):
+		around.call("qrf_base", hq, HOT_RING_M)
+	var outposts: Array[Vector2] = []
+	for i in rng.randi_range(HOT_OUTPOSTS.x, HOT_OUTPOSTS.y):
+		var p: Variant = around.call("outpost", hq, Vector2(HOT_RING_M.y * 0.8, reach))
+		if p != null:
+			outposts.append(p)
+	var roads: Array = []
+	for p in outposts:
+		roads.append([[hq.x, hq.y], [p.x, p.y]])
+	# Checkpoints part way along the roads (the first ones), off to the side a little.
+	var checkpoints := rng.randi_range(HOT_CHECKPOINTS.x, HOT_CHECKPOINTS.y)
+	var order := range(outposts.size())
+	for i in order.size():
+		if checkpoints <= 0:
+			break
+		var o: Vector2 = outposts[order[i]]
+		for attempt in 20:
+			var at := hq.lerp(o, rng.randf_range(0.4, 0.7)) + Vector2(rng.randf_range(-30, 30), rng.randf_range(-30, 30))
+			if place.call("checkpoint", at):
+				checkpoints -= 1
+				break
+	for i in rng.randi_range(HOT_VILLAGES.x, HOT_VILLAGES.y):
+		for attempt in 200:
+			if place.call("village", Vector2(rng.randf_range(-reach, reach), rng.randf_range(-reach, reach))):
+				break
+	# Patrols walk between neighbouring sites: each from a site to its two nearest, and back.
+	var patrols: Array = []
+	var sites := modules.filter(func(m: Dictionary) -> bool: return m.type != "village")
+	for i in rng.randi_range(HOT_PATROLS.x, HOT_PATROLS.y):
+		if sites.size() < 3:
+			break
+		var a: Dictionary = sites[rng.randi() % sites.size()]
+		var pa := Vector2(a.pos[0], a.pos[1])
+		var near := sites.filter(func(m: Dictionary) -> bool: return m != a)
+		near.sort_custom(func(m: Dictionary, n: Dictionary) -> bool:
+			return pa.distance_to(Vector2(m.pos[0], m.pos[1])) < pa.distance_to(Vector2(n.pos[0], n.pos[1])))
+		var route: Array = [[pa.x, pa.y]]
+		for m: Dictionary in near.slice(0, 2):
+			route.append([float(m.pos[0]), float(m.pos[1])])
+		patrols.append(route)
+	var edge_points := func(n: int, clear: float) -> Array:
+		var out: Array = []
+		for attempt in 400:
+			if out.size() >= n:
+				break
+			var side := rng.randi_range(0, 3)
+			var along := rng.randf_range(-reach, reach)
+			var inset := half - 90.0
+			var p: Vector2 = [Vector2(along, -inset), Vector2(along, inset), Vector2(-inset, along), Vector2(inset, along)][side]
+			if placed.any(func(q: Vector2) -> bool: return q.distance_to(p) < clear):
+				continue
+			out.append([snappedf(p.x, 1.0), snappedf(p.y, 1.0)])
+		return out
+	var insertion: Array = edge_points.call(3, HOT_INSERTION_CLEAR_M)
+	# The default insertion is the one furthest from every site.
+	insertion.sort_custom(func(a: Array, b: Array) -> bool:
+		return _clearance(Vector2(a[0], a[1]), placed) > _clearance(Vector2(b[0], b[1]), placed))
+	var def := normalize({"id": "hot_%d" % seed, "name": "Hot zone %d" % seed, "seed": seed, "size_m": size,
+		"relief_m": 24.0, "modules": modules, "insertion": insertion, "extraction": edge_points.call(3, INSERTION_CLEAR_M)})
+	def["kind"] = "hot"
+	def["roads"] = roads
+	def["patrols"] = patrols
+	return def
+
+
+## How far `p` is from the nearest of `sites`.
+static func _clearance(p: Vector2, sites: Array[Vector2]) -> float:
+	var best := INF
+	for q in sites:
+		best = minf(best, p.distance_to(q))
+	return best
