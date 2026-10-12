@@ -6,6 +6,7 @@
 			"size_m": 1920,
 			"seed": 4417,
 			"relief_m": 18,
+			"terrain": "plain",
 			"insertion_kit": true,
 			"modules": [
 				{"id": "compound", "type": "compound", "pos": [0, 0]},

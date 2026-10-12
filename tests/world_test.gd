@@ -133,6 +133,7 @@ func _test_generation(mem_before: float) -> void:
 	check(ZoneDef.generate(1234).hash() == gen.hash() and gen.modules.size() == 5 and gen.insertion.size() == 2 and gen.extraction.size() == 3,
 		"a zone generated from a seed is the same every time (%d modules, %d insertion points, %d extraction candidates)" % [gen.modules.size(), gen.insertion.size(), gen.extraction.size()])
 	_test_hot_layout()
+	_test_presets()
 	var ins := level.insertion_points()[0]
 	check(player.global_position.distance_to(ins) < 5.0 and absf(player.global_position.y - t.height_at(player.global_position.x, player.global_position.z) - 0.1) < 0.05,
 		"the player starts at the insertion point, on the ground (%s)" % player.global_position)
@@ -564,3 +565,113 @@ func _test_hot_layout() -> void:
 			and ZoneDef.generate_hot(seed).hash() == hot.hash(), "seed %d: roads to every outpost, %d patrol routes, the same every time" % [seed, (hot.patrols as Array).size()])
 	var spec := MissionRegistry.zone_def("ridge_hot")
 	check(spec.get("kind", "") == "hot" and is_equal_approx(float(spec.size_m), 4096.0), "the campaign's hot zones are 16 km² hot layouts")
+
+
+# --- Terrain presets ----------------------------------------------------------------------------
+
+func _preset_terrain(def: Dictionary) -> ZoneTerrain:
+	var flat: Array = []
+	for m: Dictionary in def.modules:
+		var half: Vector2 = ZoneModules.HALF.get(String(m.type), Vector2(20, 20))
+		var p := Vector2(float(m.pos[0]), float(m.pos[1]))
+		flat.append(Rect2(p - half, half * 2.0))
+	for p: Array in def.extraction:
+		flat.append(Rect2(float(p[0]) - 12.0, float(p[1]) - 12.0, 24.0, 24.0))
+	for p: Array in def.insertion:
+		flat.append(Rect2(float(p[0]) - 8.0, float(p[1]) - 8.0, 16.0, 16.0))
+	var t := ZoneTerrain.new()
+	t.generate(def, flat)
+	return t
+
+
+func _test_presets() -> void:
+	# Which preset a zone gets: explicit, name, region, default.
+	var pick := func(d: Dictionary) -> String: return TerrainPresets.choose(d)
+	check(pick.call({"name": "Salt flats", "region": "coast"}) == "salt_flats"
+		and pick.call({"name": "Black Ridge hills", "region": "inland"}) == "rocky_ridge"
+		and pick.call({"name": "Wadi farm", "region": "inland"}) == "desert_wadi"
+		and pick.call({"name": "Gray-box compound", "region": "coast"}) == "coastal_lowland"
+		and pick.call({"name": "Harbour yard", "region": "coast"}) == "coastal_lowland"
+		and pick.call({"name": "Somewhere", "region": "inland"}) == "desert_wadi"
+		and pick.call({"name": "Somewhere", "region": "coast", "terrain": "scrubland"}) == "scrubland"
+		and pick.call({"name": "Somewhere"}) == "temperate",
+		"terrain preset by zone: explicit, then name hints, then the region's default, then temperate")
+	var expect := {"compound_01": "coastal_lowland", "wadi_farm": "desert_wadi", "harbour_yard": "coastal_lowland", "ridge_hot": "rocky_ridge", "coast_hot": "salt_flats"}
+	var mapped := true
+	for id: String in expect:
+		mapped = mapped and String(MissionRegistry.zone_def(id).get("terrain", "")) == expect[id]
+	check(mapped, "the campaign's zones map to their presets (%s)" % [expect.keys().map(func(id: String) -> String: return "%s=%s" % [id, MissionRegistry.zone_def(id).get("terrain", "")])])
+	check(String(ZoneDef.get_def("test").terrain) == "plain" and ZoneDef.normalize(ZoneDef.generate(5)).terrain == "temperate",
+		"the test zone keeps the plain terrain; a generated zone with no name or region is temperate")
+	# Every preset: same seed and preset, same ground and scatter; pads flat; scatter off the pads.
+	var by_relief := {}
+	for id: String in TerrainPresets.ids():
+		var def := ZoneDef.generate(777, 1536.0).merged({"terrain": id}, true)
+		def = ZoneDef.normalize(def)
+		var a := _preset_terrain(def)
+		var b := _preset_terrain(def)
+		var other := _preset_terrain(ZoneDef.normalize(def.merged({"seed": 778}, true)))
+		var sa := ZoneScatter.new()
+		sa.generate(a, def)
+		var sb := ZoneScatter.new()
+		sb.generate(b, def)
+		check(a.checksum() == b.checksum() and a.checksum() != other.checksum() and sa.checksum() == sb.checksum(),
+			"preset %s: the same seed gives the same ground and scatter (%d items), another seed other ground" % [id, sa.total()])
+		var flat_ok := true
+		for pad: Array in a.pads:
+			var r: Rect2 = (pad[0] as Rect2).grow(-ZoneTerrain.PAD_MARGIN_M)  # the footprint: the margin's edge is off the grid
+			for p in [r.position, r.end, Vector2(r.position.x, r.end.y), Vector2(r.end.x, r.position.y), r.get_center()]:
+				flat_ok = flat_ok and absf(a.height_at(p.x, p.y) - float(pad[1])) < 0.01
+		check(flat_ok, "preset %s: every pad stays flat" % id)
+		var clear := true
+		var dry := true
+		for item in sa.items:
+			var p := Vector2(item.pos.x, item.pos.z)
+			for pad: Array in a.pads:
+				clear = clear and not (pad[0] as Rect2).has_point(p)
+			dry = dry and (a.sea_side < 0 or a.height_at(p.x, p.y) > a.sea_level)
+		check(clear and dry, "preset %s: no scatter on a pad or in the water" % id)
+		var want: Dictionary = a.preset.get("scatter", {})
+		check(want.is_empty() or sa.counts[ZoneScatter.Kind.SCRUB] + sa.counts[ZoneScatter.Kind.ROCK] > 0, "preset %s: has its scatter (%s)" % [id, sa.counts])
+		by_relief[id] = a.max_height - a.min_height
+		if id == "coastal_lowland":
+			var water := a.sea_side >= 0 and a.min_height < -3.0 and a.sea_depth_at(a.sea_rect().get_center().x, a.sea_rect().get_center().y) >= 0.0
+			var far := Vector2(-a.sea_rect().get_center().x, -a.sea_rect().get_center().y) * 1.0
+			check(water and a.sea_depth_at(far.x, far.y) == 0.0 and a.sea_rect().size.x > 0.0,
+				"coastal_lowland: sea below 0 along one side (side %d, %.0f m wide), dry ground opposite" % [a.sea_side, a.sea_m])
+		sa.free()
+		sb.free()
+		a.free()
+		b.free()
+		other.free()
+	check(float(by_relief.salt_flats) < float(by_relief.rocky_ridge) * 0.25 and float(by_relief.rocky_ridge) > 25.0,
+		"salt flats are flat, the ridge is not (relief %.1f m against %.1f m)" % [by_relief.salt_flats, by_relief.rocky_ridge])
+	# A bigger zone gets more scatter; roads and a hot zone's pads stay clear.
+	var small := ZoneDef.normalize(ZoneDef.generate(31, 1536.0).merged({"terrain": "desert_wadi"}, true))
+	var big := ZoneDef.normalize(ZoneDef.generate(31, 1920.0).merged({"terrain": "desert_wadi"}, true))
+	var ts := _preset_terrain(small)
+	var tb := _preset_terrain(big)
+	var ss := ZoneScatter.new()
+	ss.generate(ts, small)
+	var sb2 := ZoneScatter.new()
+	sb2.generate(tb, big)
+	check(sb2.total() > ss.total() * 1.3, "scatter grows with the zone's area (%d items in 1536 m, %d in 1920 m)" % [ss.total(), sb2.total()])
+	var hot := ZoneDef.generate_hot(4409)
+	hot["name"] = "Black Ridge hills"
+	hot.erase("terrain")
+	hot = ZoneDef.normalize(hot)
+	var th := _preset_terrain(hot)
+	var sh := ZoneScatter.new()
+	sh.generate(th, hot)
+	var off_roads := true
+	for item in sh.items:
+		for road: Array in hot.roads:
+			off_roads = off_roads and Geometry2D.get_closest_point_to_segment(Vector2(item.pos.x, item.pos.z), Vector2(road[0][0], road[0][1]), Vector2(road[1][0], road[1][1])).distance_to(Vector2(item.pos.x, item.pos.z)) >= ZoneScatter.ROAD_KEEP_M - 0.01
+	check(hot.terrain == "rocky_ridge" and off_roads and sh.total() > 1500 and sh.total() < 14000 and th.max_slope_deg() < 42.0,
+		"hot zone on the ridge preset: %d scatter items off the roads, steepest %.0f degrees" % [sh.total(), th.max_slope_deg()])
+	ss.free()
+	sb2.free()
+	sh.free()
+	ts.free()
+	tb.free()
+	th.free()

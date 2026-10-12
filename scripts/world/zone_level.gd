@@ -50,6 +50,7 @@ const RADIO_EVERY := 4
 ## The zone definition (ZoneDef), set before the node enters the tree (configure()).
 var def: Dictionary = {}
 var terrain: ZoneTerrain
+var scatter: ZoneScatter  # rocks, scrub and trees on it
 ## Host only: the navigation (null on clients).
 var nav: ZoneNav
 ## How long generating the zone took on this peer (ms): terrain heights, collision and,
@@ -206,6 +207,11 @@ func _build_environment() -> void:
 	add_child(terrain)
 	terrain.generate(def, _flat_areas())
 	terrain.build_collision()
+	scatter = ZoneScatter.new()
+	scatter.name = "Scatter"
+	add_child(scatter)
+	scatter.generate(terrain, def)
+	scatter.build_collision()
 	var holder := Node3D.new()
 	holder.name = "Modules"
 	add_child(holder)
@@ -219,8 +225,10 @@ func _build_environment() -> void:
 		_by_id[module.module_id] = module
 	if DisplayServer.get_name() != "headless":
 		terrain.build_visuals()
+		scatter.build_visuals()
 		var at := insertion_points()[0]
 		terrain.build_near(at, 16)
+		scatter.build_near(at, 4)
 	generate_ms = (Time.get_ticks_usec() - started) / 1000.0
 	print("[zone] '%s' (%d m, seed %d, %d modules) generated in %.0f ms" % [def.get("id", ""), int(terrain.size_m), terrain.seed_value, _modules.size(), generate_ms])
 

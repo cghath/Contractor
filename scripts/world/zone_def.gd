@@ -7,6 +7,8 @@ extends RefCounted
 ##   "modules": [{"id", "type" (ZoneModules.TYPES), "pos": [x, z]}] (snapped to GRID_M),
 ##   "insertion": [[x, z], ...] (where players can insert; the first is the default),
 ##   "extraction": [[x, z], ...] (extraction candidates).
+##   "terrain" (a preset id from data/terrain_presets.json: the def's own, else chosen from its
+##   "name" and "region"), "sea_side" and "sea_m" (normalize fills them in).
 ## Coordinates are metres from the zone's centre. Hand-made ones live in data/zones.json;
 ## generate() makes one from a seed (for contracts).
 
@@ -34,6 +36,9 @@ const HOT_CHECKPOINTS := Vector2i(2, 4)
 const HOT_VILLAGES := Vector2i(2, 3)
 const HOT_INSERTION_CLEAR_M := 700.0
 const HOT_PATROLS := Vector2i(2, 4)
+## A shoreline (_choose_sea) is at least this wide and keeps this far from any pad (m).
+const SEA_MIN_M := 80.0
+const SEA_PAD_KEEP_M := 60.0
 
 static var _defs := {}
 
@@ -92,7 +97,47 @@ static func normalize(def: Dictionary) -> Dictionary:
 		out[key] = points
 	if (out.insertion as Array).is_empty():
 		out.insertion = [[0.0, half - 80.0]]
+	out["terrain"] = TerrainPresets.choose(out)
+	_choose_sea(out)
 	return out
+
+
+## The shoreline of a preset with a sea (TerrainPresets "sea"): a side picked by the seed from
+## those where no module, insertion or extraction point would stand in the water. "sea_side"
+## (0 north -z, 1 south +z, 2 west -x, 3 east +x; -1 = no sea) and "sea_m" (how far in from the
+## edge the water reaches: shortened to keep clear of the nearest pad, SEA_MIN_M at least).
+static func _choose_sea(def: Dictionary) -> void:
+	def["sea_side"] = -1
+	def["sea_m"] = 0.0
+	var sea: Dictionary = TerrainPresets.get_preset(String(def.terrain)).get("sea", {})
+	if sea.is_empty():
+		return
+	var half := float(def.size_m) * 0.5
+	var pads: Array[Rect2] = []
+	for m: Dictionary in def.modules:
+		var h: Vector2 = ZoneModules.HALF.get(String(m.type), Vector2(20, 20))
+		var p := Vector2(float(m.pos[0]), float(m.pos[1]))
+		pads.append(Rect2(p - h, h * 2.0))
+	for key in ["extraction", "insertion"]:
+		var r := 12.0 if key == "extraction" else 8.0
+		for p: Array in def[key]:
+			pads.append(Rect2(float(p[0]) - r, float(p[1]) - r, r * 2.0, r * 2.0))
+	var width := float(sea.get("width_m", 180.0))
+	var options: Array = []
+	for side in 4:
+		var clear := INF
+		for r in pads:
+			clear = minf(clear, [r.position.y + half, half - r.end.y, r.position.x + half, half - r.end.x][side])
+		var reach := minf(width, clear - SEA_PAD_KEEP_M)
+		if reach >= SEA_MIN_M:
+			options.append([side, reach])
+	if options.is_empty():
+		return
+	var rng := RandomNumberGenerator.new()
+	rng.seed = int(def.seed) ^ 0x5EA
+	var pick: Array = options[rng.randi() % options.size()]
+	def["sea_side"] = int(pick[0])
+	def["sea_m"] = float(pick[1])
 
 
 ## A zone made from a seed: `count` modules of `types` spread over a `size_m` square, two

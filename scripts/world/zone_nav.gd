@@ -74,6 +74,8 @@ func _ground_source(chunk: Vector2i) -> NavigationMeshSourceGeometryData3D:
 	var source := NavigationMeshSourceGeometryData3D.new()
 	var b := _bounds_of(chunk)
 	source.add_faces(zone.terrain.triangles_in(Rect2(b.position.x, b.position.z, b.size.x, b.size.z).grow(ZoneTerrain.CELL_M)), Transform3D.IDENTITY)
+	for box in zone.scatter.boxes_in(Rect2(b.position.x, b.position.z, b.size.x, b.size.z)):
+		source.add_faces(_box_faces(box), Transform3D.IDENTITY)
 	return source
 
 

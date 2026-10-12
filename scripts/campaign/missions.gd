@@ -170,6 +170,13 @@ static func zone_def(zone_id: String) -> Dictionary:
 	if not def.is_empty():
 		def["id"] = zone_id
 		def["name"] = String(raw.get("name", zone_id))
+		def["region"] = String(raw.get("region", ""))
+		if not spec is String:
+			def.erase("terrain")  # generate() already chose one before it knew the name and region
+			var named: Variant = raw.get("terrain", spec.get("terrain", "") if spec is Dictionary else "")
+			if String(named) != "":
+				def["terrain"] = String(named)
+		def = ZoneDef.normalize(def)  # the terrain preset follows the name and region
 	_zone_defs[zone_id] = def
 	return def
 
