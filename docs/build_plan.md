@@ -240,9 +240,10 @@ the first friendly FOB. Details: [ChrisPlan_handoff.md](ChrisPlan_handoff.md#bas
 **Wave 5 starts on cghath's side while Captain's side finishes 4B part 3 (2026-10-12):** the base
 hub stays exactly as it is until wave 5 makes it the first friendly FOB, and the hot-zone files
 are Captain's side's for now. Read the note at the top of "Wave 5" in [ChrisPlan_handoff.md](ChrisPlan_handoff.md).
-**Status (2026-10-12):** 5a done on cghath's side (all 24 suites pass with Captain's session logs merged: R0002 on cghath's machine): V1 vehicle core and V2 anti-armour (see
-CHANGELOG). 5b next: V3 helicopter supports, V4 AAVs, LHD and motor pool. The friendly-FOB
-conversion of the base hub waits for a decision (cghath, with Captain); V4 leaves the base hub files alone.
+**Status (2026-10-12):** wave 5 done on cghath's side: 5a (V1 vehicle core, V2 anti-armour) and 5b
+(V3 helicopter supports, V4 AAVs, the LHD, the motor pool, vehicle QRFs); see CHANGELOG. Still
+open: the friendly-FOB conversion of the base hub (a decision for cghath and Captain; nothing in
+`base_hub.gd`, `base_level.gd` or `base_economy.gd` changed for wave 5).
 
 **Debugging tools (Captain, 2026-10-12): Captain's side, first after 4B part 3.** Every run of
 anything keeps numbered logs under one parent, `B:\Contractor-test-logs` (tests already do:

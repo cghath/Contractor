@@ -11,6 +11,75 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Wave 5b: helicopter supports, AAVs, the LHD, the motor pool (cghath's side, 2026-10-12)
+
+#### Added
+
+- **Support menu** (command menu, 0): helicopter transport, resupply and extraction, and an AAV
+  submenu. `Supports` (`scripts/supports/supports.gd`) is the seam: support commands, where
+  supports launch from (the LHD, the friendly FOB's side, else the map edge), and a can-fly
+  check for weather later.
+- **AI-flown UH-60 Black Hawks** (`Helicopter`, a `Vehicle`): take off, cruise about 90 m above
+  the ground following the terrain, approach, flare, land and leave by their origin. Rotors
+  turn and the engine sounds; smooth for clients and late joiners. 7.62x54R and launchers hurt
+  them; a rotor, engine or crew kill brings one down, and it crashes and burns with everyone
+  and everything aboard. A support lost is gone for the rest of the op (Captain).
+- **Calls**: at your map marker, at the spot you look at, or on smoke of the right colour
+  (resupply green or yellow, transport green or blue, extraction purple). Without a mark it
+  comes in and loiters near the squad, keeping away from fire, until it sees its smoke.
+  Supports cost money (the contract's support budget first, then cash), have cooldowns, one of
+  each kind at a time.
+- **Landing safety**: a spot too steep (over 15°, the design doc), built up, blocked or with
+  people on it lands at the nearest safe spot within 100 m (Captain); enemy fire never moves it.
+- **Resupply** sets down a supply pallet: magazines and rounds for the squad's weapons, medical
+  items, grenades and smoke (`data/supports.json`).
+- **Transport** (hot zones only) picks up the squad (players through Left Ctrl, AI ordered in,
+  the downed loaded) and flies it to the caller's map marker. Hot-zone briefings offer each
+  insertion point by Black Hawk: the squad starts aboard and is flown in.
+- **Helicopter extraction** is extraction's ride: its landing spot is the extraction point; the
+  squad, the AI brought along, the downed, cuffed or friendly HVTs and the items set down in the
+  point go aboard, and lifting off ends the deployment with what's aboard in the report. The
+  countdown extraction still works without it.
+- **The LHD** lies offshore on every zone whose terrain preset has a sea (a placeholder ship,
+  never attacked); supports start from its deck. Inland they come from the friendly FOB's side
+  of the map. New preset `amphibious_coast` and test zone `coast`.
+- **Amphibious vehicles**: the AAV-7 floats, swims at 13 km/h on its waterjets, steers and drives
+  up the beach. Other vehicles flood and stall past their fording depth.
+- **The AAV support** (Support, AAV): an AAV and its AI crew from the LHD (it swims ashore) or the
+  FOB (it drives in) for $12,000. Orders: move there, hold, follow me, squad get in, dismount,
+  return to base. Its gunner fires the M2. Hot zones and coastal contract zones; refused in
+  mountains, on ground too steep, or when the company can't pay. One at a time; lost with
+  everyone and everything aboard, and no other comes that op.
+- **Motor pool**: the company's own vehicles between deployments (campaign section
+  `motor_pool`), starting with one M-ATV. Pick them on the briefing to bring them; ones that
+  extract with the squad come home with their damage, fuel and cargo; ones left behind are
+  lost. The base's motor pool sign lists them and books repairs (money and days). The base hub
+  itself is unchanged: the friendly-FOB conversion waits for a decision.
+- **Vehicle QRFs** in hot zones (Captain's hook): some QRF waves ride in technicals, get out short
+  of the contact and leave the gunner on the DShK.
+- **State dumps** list each vehicle (driver, passengers, damage, fuel, AI order) and each support.
+- **Dev tools**: with `--dev`, outside a deployment, helicopter calls are free and transport flies
+  outside hot zones; `]` calls an AAV to you anywhere, free.
+- **Tests**: `supports` and `aav` suites (host and client).
+
+#### Changed
+
+- Vehicles hold grades up to 35° within their grip (an AAV-7 used to stall on 8°).
+
+#### Fixed
+
+- A navigation chunk that is all sea no longer errors (an empty triangle list).
+- The `antiarmor` M-ATV spall check is deterministic; the `missions` charge check follows how the
+  man actually moved on rocky ground; the `aav` swim check samples deep water only.
+
+#### Known gaps
+
+- The helicopter crew is simulated (no crew bodies after a crash); no rotor wash, door guns or
+  autorotation. Typed grid references only as a command argument (`grid:<ref>`).
+- On Captain's `coastal_lowland` sea the LHD sits about 50 m off the beach in shallow water; a
+  wider, deeper sea would suit it (Captain's call). AAVs there are untested beyond the test zone.
+- Players can walk on the seabed; the map doesn't draw the sea.
+
 ### Triage cards and bleeding HUD (2026-10-12)
 
 #### Added
