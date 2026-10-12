@@ -27,6 +27,16 @@ const POOL_SIZE := 40
 ## (scaled by stance in _stride).
 const STEP_RANGE_M := 40.0
 const STRIDE_M := 0.8
+## Proposed (Captain's playtest P0164: a squad's steps sounded like a crowd, or physics
+## glitching): no steps under this speed (m/s; a soldier standing still jitters a little every
+## frame, and that used to add up to steps; measured over STEP_WINDOW_S, or STEP_FRAME_M in one
+## frame); of everyone but you, only the STEP_VOICES nearest walking are heard, this much
+## quieter than your own.
+const STEP_MIN_SPEED := 0.5
+const STEP_WINDOW_S := 0.25
+const STEP_FRAME_M := 0.03
+const STEP_VOICES := 3
+const STEP_OTHERS_DB := -3.0
 ## A round passing within this distance of the listener cracks (when fired from further
 ## than CRACK_MIN_SHOOTER_M, so you don't hear your own rounds crack).
 const CRACK_PASS_M := 6.0
@@ -229,28 +239,54 @@ func _process(delta: float) -> void:
 	var ear: Variant = listener()
 	if ear == null:
 		return
+	var walking: Array = []  # [distance, soldier, stepped now]: everyone else walking
 	for n in get_tree().get_nodes_in_group(&"combatants"):
 		var s := n as Soldier
 		if s == null or not s.is_inside_tree():
 			continue
 		var key := s.get_instance_id()
 		var pos := s.global_position
-		var e: Dictionary = _steps.get(key, {"pos": pos, "walked": 0.0})
+		# (A random start in the stride, so a squad setting off together doesn't step in unison.)
+		var e: Dictionary = _steps.get(key, {"pos": pos, "walked": randf() * _stride(s), "anchor": pos, "since": 0.0, "walking": false})
 		var moved := Vector2(pos.x - e.pos.x, pos.z - e.pos.z).length()
 		e.pos = pos
+		# Walking or not: the ground covered over STEP_WINDOW_S (whatever the frame rate; standing
+		# jitter goes back and forth and covers none), or a big move in one frame.
+		e.since = float(e.since) + delta
+		if e.since >= STEP_WINDOW_S:
+			var a: Vector3 = e.anchor
+			e.walking = Vector2(pos.x - a.x, pos.z - a.z).length() / float(e.since) >= STEP_MIN_SPEED
+			e.anchor = pos
+			e.since = 0.0
+		var dist: float = pos.distance_to(ear)
 		if moved > 2.0 or not s.vitals.is_up() or is_instance_valid(s.carried_by) or is_instance_valid(s.vehicle) \
-				or pos.distance_to(ear) > STEP_RANGE_M:
+				or dist > STEP_RANGE_M:
 			e.walked = 0.0  # a teleport, down, carried, riding or too far: no step
-		else:
+		elif e.walking or moved >= STEP_FRAME_M:
 			e.walked = float(e.walked) + moved
 			var stride := _stride(s)
-			if e.walked >= stride:
+			var stepped := float(e.walked) >= stride
+			if stepped:
 				e.walked = float(e.walked) - stride
-				play_at(&"step_hard" if hard_ground(s) else &"step", pos, -8.0 if s.is_crouching() else 0.0)
+			if s.is_local():
+				if stepped:
+					_step(s, 0.0)  # your own: always
+			else:
+				walking.append([dist, s, stepped])
 		_steps[key] = e
+	# Of everyone else walking, only the STEP_VOICES nearest are heard (a squad walking around
+	# you sounds like a few men near you, not a crowd).
+	walking.sort_custom(func(a: Array, b: Array) -> bool: return a[0] < b[0])
+	for i in mini(walking.size(), STEP_VOICES):
+		if walking[i][2]:
+			_step(walking[i][1], STEP_OTHERS_DB)
 	_update_engines(ear, delta)
 	if _steps.size() > 256:
 		_steps.clear()
+
+
+func _step(s: Soldier, volume_db: float) -> void:
+	play_at(&"step_hard" if hard_ground(s) else &"step", s.global_position, volume_db + (-8.0 if s.is_crouching() else 0.0))
 
 
 ## Whether `pos` is under a roof (world geometry within ROOF_M above): indoors, with reverb.

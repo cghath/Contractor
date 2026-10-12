@@ -132,7 +132,46 @@ func _test_in_level() -> void:
 	walker.global_position += Vector3(0, 0, -30)
 	await _frames(3)
 	check(not &"step" in Sfx.heard_after(t), "a teleport isn't a step")
+	# Standing still, jittering a few mm every frame (as a soldier at rest does): no steps
+	# (Captain's playtest P0164: steps like physics glitching).
+	await _frames(3)
+	t = Sfx.heard_count()
+	var rest := walker.global_position
+	var until := _now() + 1.5
+	var flip := 1.0
+	while _now() < until:
+		flip = -flip
+		walker.global_position = rest + Vector3(0.004 * flip, 0, 0.003 * flip)
+		await get_tree().process_frame
+	check(not &"step" in Sfx.heard_after(t), "standing still, jittering: no footsteps (%d)" % Sfx.heard_after(t).count(&"step"))
 	walker.queue_free()
+	# A squad of six walking around you: only the three nearest are heard (it sounded like a
+	# crowd, P0164).
+	var squad: Array[Soldier] = []
+	for i in 6:
+		var s := level.spawn_soldier({"name": "Stepper%d" % i, "faction": "friendly", "variant": "multicam",
+			"pos": Vector3(1.5 + i * 0.9, 0.1, 18), "loadout": [], "combat": 0.5, "discipline": 0.5, "guard": true})
+		SquadAI.of(s).process_mode = Node.PROCESS_MODE_DISABLED
+		s.set_physics_process(false)
+		squad.append(s)
+	await _frames(3)
+	t = Sfx.heard_count()
+	for f in 120:  # 2 s at 3 m/s
+		for s in squad:
+			s.global_position += Vector3(0, 0, 0.05)
+		await get_tree().physics_frame
+	var heard_from := {}
+	for h in Sfx.history:
+		if int(h.n) > t and h.id == &"step":
+			var nearest := 0
+			for i in squad.size():
+				if absf((h.pos as Vector3).x - squad[i].global_position.x) < absf((h.pos as Vector3).x - squad[nearest].global_position.x):  # (side by side in x)
+					nearest = i
+			heard_from[nearest] = true
+	check(heard_from.size() >= 1 and heard_from.size() <= Sfx.STEP_VOICES and heard_from.keys().all(func(i: int) -> bool: return i < Sfx.STEP_VOICES),
+		"six walking around you: the %d nearest are heard (heard: %s)" % [Sfx.STEP_VOICES, heard_from.keys()])
+	for s in squad:
+		s.queue_free()
 
 
 func _now() -> float:
