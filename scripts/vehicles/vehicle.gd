@@ -176,6 +176,10 @@ const SALVAGE_S := 20.0
 static var local_input := true
 ## Hits roll for fires (VehicleDamage.FIRE_CHANCE); tests that need a vehicle to stay whole turn it off.
 static var fire_rolls := true
+## Where spall fragments land (_spall), picked by spall_rng (random; a test seeds it for a
+## repeatable pass: the first, deep fragment through the face can reach the brain and kill).
+const SPALL_PARTS: Array[StringName] = [Vitals.CHEST, Vitals.ABDOMEN, Vitals.THIGH_L, Vitals.THIGH_R, Vitals.UPPER_ARM_L, Vitals.UPPER_ARM_R, Vitals.FACE, Vitals.NECK]
+static var spall_rng := _random_rng()
 
 signal seats_changed
 signal damaged(zone: StringName, hit: Dictionary)
@@ -1350,6 +1354,12 @@ func _apply_damage(zone: Dictionary, res: Dictionary, at: Vector3, hit: Dictiona
 	_publish_state(true)
 
 
+static func _random_rng() -> RandomNumberGenerator:
+	var rng := RandomNumberGenerator.new()
+	rng.randomize()
+	return rng
+
+
 ## Host: a jet through the armour throws spall at everyone near its hole inside: fragment
 ## wounds through the wound model (3 to 6 each, closer more).
 func _spall(at: Vector3, shooter: Variant) -> void:
@@ -1360,7 +1370,7 @@ func _spall(at: Vector3, shooter: Variant) -> void:
 		var n := clampi(roundi(lerpf(6.0, 3.0, d / VehicleDamage.SPALL_RADIUS_M)), 3, 6)
 		Harm.note_hit(s, shooter as Node if is_instance_valid(shooter) else null)
 		for i in n:
-			var part: StringName = [Vitals.CHEST, Vitals.ABDOMEN, Vitals.THIGH_L, Vitals.THIGH_R, Vitals.UPPER_ARM_L, Vitals.UPPER_ARM_R, Vitals.FACE, Vitals.NECK][randi() % 8]
+			var part: StringName = SPALL_PARTS[spall_rng.randi() % SPALL_PARTS.size()]
 			s.vitals.server_hit(part, {"round_class": Vitals.FRAGMENT, "superficial": i > 0})
 
 

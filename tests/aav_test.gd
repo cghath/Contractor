@@ -21,6 +21,8 @@ extends Node
 
 const HOT_ZONE := "ridge_hot"
 const COAST_ZONE := "coast"
+## Water this deep (m) is deep for an AAV: its tracks can't reach the bottom.
+const DEEP_M := 4.0
 
 var failures := 0
 var main: Node
@@ -569,7 +571,9 @@ func _test_call_and_swim(open_for_client: bool) -> void:
 	var started := v.global_position
 	var next_note := [Time.get_ticks_msec()]
 	var swam := await _wait_for(func() -> bool:
-		if AavWater.afloat(v):
+		# Its swim speed: afloat in deep water (where its tracks can't reach the bottom: in the
+		# shallows they drive too, faster on a long gentle beach such as the preset sea's).
+		if AavWater.afloat(v) and t.sea_level - t.height_at(v.global_position.x, v.global_position.z) > DEEP_M:
 			top[0] = maxf(float(top[0]), Vector2(v.linear_velocity.x, v.linear_velocity.z).length())
 		if Time.get_ticks_msec() >= int(next_note[0]):
 			next_note[0] = Time.get_ticks_msec() + 8000
