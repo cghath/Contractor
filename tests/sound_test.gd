@@ -77,15 +77,15 @@ func _test_distance() -> void:
 func _test_crack() -> void:
 	print("Cracks")
 	Sfx.listener_override = Vector3.ZERO
-	var t := _now()
+	var t := Sfx.heard_count()
 	Sfx.hear_shot(Vector3(1, 1, 120), Vector3(1, 1, -120), "rifle")
-	check(&"crack" in Sfx.heard_since(t) and &"shot_rifle_far" in Sfx.heard_since(t), "a round passing 1.4 m from a distant shooter cracks")
-	t = _now()
+	check(&"crack" in Sfx.heard_after(t) and &"shot_rifle_far" in Sfx.heard_after(t), "a round passing 1.4 m from a distant shooter cracks")
+	t = Sfx.heard_count()
 	Sfx.hear_shot(Vector3(30, 1, 120), Vector3(30, 1, -120), "rifle")
-	check(not &"crack" in Sfx.heard_since(t), "one passing 30 m off doesn't")
-	t = _now()
+	check(not &"crack" in Sfx.heard_after(t), "one passing 30 m off doesn't")
+	t = Sfx.heard_count()
 	Sfx.hear_shot(Vector3(0, 1.5, 0.2), Vector3(0, 1.5, -200), "rifle")
-	check(not &"crack" in Sfx.heard_since(t), "your own round doesn't crack at you")
+	check(not &"crack" in Sfx.heard_after(t), "your own round doesn't crack at you")
 
 
 func _test_in_level() -> void:
@@ -106,32 +106,32 @@ func _test_in_level() -> void:
 	player.inventory.take(&"m4a1")
 	player.inventory.take(&"mag_556", 2)
 	await _frames(3)
-	var t := _now()
+	var t := Sfx.heard_count()
 	player._server_fire.rpc_id(1, player.camera.global_position, Vector3(0, -0.4, -1).normalized(), &"primary")
 	await _frames(3)
-	var heard := Sfx.heard_since(t)
+	var heard := Sfx.heard_after(t)
 	check(&"shot_rifle" in heard, "firing: the shot is heard (%s)" % [heard])
 	check(heard.any(func(id: StringName) -> bool: return String(id).begins_with("impact_")), "and where it lands")
-	t = _now()
+	t = Sfx.heard_count()
 	player._server_reload.rpc_id(1, &"primary")
 	await _frames(3)
-	check(&"reload" in Sfx.heard_since(t), "a reload is heard")
+	check(&"reload" in Sfx.heard_after(t), "a reload is heard")
 	check(not Sfx.under_roof(Vector3(0, 0.1, 30)), "in the open: no reverb")
 	var walker := level.spawn_soldier({"name": "Walker", "faction": "friendly", "variant": "multicam", "pos": Vector3(4, 0.1, 20),
 		"loadout": [], "combat": 0.5, "discipline": 0.5, "guard": true})
 	SquadAI.of(walker).process_mode = Node.PROCESS_MODE_DISABLED
 	walker.set_physics_process(false)
 	await _frames(3)
-	t = _now()
+	t = Sfx.heard_count()
 	for i in 40:
 		walker.global_position += Vector3(0, 0, -0.1)  # 4 m at walking pace
 		await get_tree().process_frame
-	var steps := Sfx.heard_since(t).filter(func(id: StringName) -> bool: return id == &"step").size()
+	var steps := Sfx.heard_after(t).filter(func(id: StringName) -> bool: return id == &"step").size()
 	check(steps >= 3 and steps <= 7, "a soldier walking 4 m: footsteps (%d)" % steps)
-	t = _now()
+	t = Sfx.heard_count()
 	walker.global_position += Vector3(0, 0, -30)
 	await _frames(3)
-	check(not &"step" in Sfx.heard_since(t), "a teleport isn't a step")
+	check(not &"step" in Sfx.heard_after(t), "a teleport isn't a step")
 	walker.queue_free()
 
 

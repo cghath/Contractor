@@ -48,6 +48,7 @@ var _pool: Array[AudioStreamPlayer3D] = []
 var _next := 0
 var _steps := {}  # soldier instance id -> {"pos": Vector3, "walked": float}
 var _engines := {}  # vehicle instance id -> {"player", "pos", "speed", "id"}
+var _heard := 0  # sounds played so far (history "n")
 
 ## A sound under a roof this close above it plays through the room bus (reverb).
 const ROOF_M := 8.0
@@ -193,9 +194,24 @@ func _start(id: StringName, pos: Vector3, volume_db: float) -> void:
 
 
 func _remember(id: StringName, pos: Vector3) -> void:
-	history.append({"id": id, "pos": pos, "time": Time.get_ticks_msec() / 1000.0})
+	_heard += 1
+	history.append({"id": id, "pos": pos, "time": Time.get_ticks_msec() / 1000.0, "n": _heard})
 	if history.size() > HISTORY_SIZE:
 		history.pop_front()
+
+
+## How many sounds this peer has played so far (tests: heard_after).
+func heard_count() -> int:
+	return _heard
+
+
+## The ids heard after the `count`th sound (heard_count), for tests: exact, unlike times.
+func heard_after(count: int) -> Array[StringName]:
+	var out: Array[StringName] = []
+	for h in history:
+		if int(h.n) > count:
+			out.append(h.id)
+	return out
 
 
 ## The ids heard since `since` (seconds, Time ticks), for tests.

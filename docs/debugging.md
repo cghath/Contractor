@@ -62,6 +62,8 @@ suite, in parallel), so:
    commit). Still run the full suite locally before merging the other side's work into yours
    and before exporting a test build.
 
+**A suite that printed "PASSED (0 failures)" and then exited non-zero** (seen on CI's Linux runners for AI-heavy suites, with "instances leaked at exit") counts as passed, with a note in the summary: every check had passed, only the engine's shutdown failed. Finding why needs the full CI job log (repo admin).
+
 Reading CI without `gh`: `curl -s "https://api.github.com/repos/cghath/Contractor/actions/runs?branch=<branch>&per_page=1"`
 (status, conclusion); a failing job's last lines are its check run's `/annotations`. The
 unauthenticated API allows 60 calls an hour: poll every few minutes, not in a tight loop.

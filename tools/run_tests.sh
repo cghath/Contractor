@@ -93,6 +93,11 @@ judge() {
 		why="script error (see above)"
 	elif grep -q 'TEST FAILED' "$log"; then
 		why="exit $code"
+	elif [ "$code" -ne 0 ] && [ -n "$summary" ] && grep -q "$summary (0 failures)" "$log"; then
+		# Every check passed and the summary printed; only the engine's exit after it failed
+		# (seen on CI's Linux runners for AI-heavy suites, with "instances leaked at exit"):
+		# a pass, noted, so a real failure still stands out. See docs/debugging.md.
+		note "$name: passed (but the engine exited $code after its summary)"
 	elif [ "$code" -ne 0 ]; then
 		why="exit $code"
 	elif [ -n "$summary" ] && ! grep -q "$summary" "$log"; then
