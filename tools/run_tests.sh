@@ -27,7 +27,7 @@ cd "$(dirname "$0")/.."
 GODOT="${GODOT:-godot}"
 SUITE_TIMEOUT="${SUITE_TIMEOUT:-480}"
 SUITES=("$@")
-[ ${#SUITES[@]} -eq 0 ] && SUITES=(smoke gameplay squad net wounds armor movement interaction roles medical logistics casualty materials animations scavenge contracts people map base world missions vehicles antiarmor session_log)
+[ ${#SUITES[@]} -eq 0 ] && SUITES=(smoke gameplay squad net wounds armor movement interaction roles medical logistics casualty materials animations scavenge contracts people map base world missions vehicles antiarmor session_log sound)
 status=0
 logs="$(mktemp -d)"
 keep_root="${CONTRACTOR_TEST_LOGS:-}"

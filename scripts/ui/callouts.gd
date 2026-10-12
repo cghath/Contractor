@@ -82,6 +82,7 @@ static func play(id: StringName, speaker: Node3D) -> AudioStreamPlayer3D:
 		return null
 	var audio := AudioStreamPlayer3D.new()
 	audio.stream = stream
+	audio.bus = &"Voice"  # Sfx makes the bus
 	speaker.add_child(audio)
 	audio.position = Vector3.UP * 1.6
 	audio.finished.connect(audio.queue_free)

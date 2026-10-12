@@ -11,6 +11,17 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Sound (Captain's side, 2026-10-12)
+
+#### Added
+
+- **Sound** (`Sfx` autoload, `data/sounds.json`, docs/sound.md): generated, stylised sounds for
+  gunshots (near and far, suppressed), bullet cracks passing close, impacts (dirt, plate,
+  body), explosions, flashbangs, reloads, throws and footsteps; heard from each player's own
+  position, delayed by distance, within the ranges the AI hears. Real recordings in
+  `res://audio/sfx/` override any sound. `tools/export_sounds.gd` writes them as WAV files.
+  New suite `sound`.
+
 ### Wave 5a: vehicles and anti-armour (cghath's side, 2026-10-12)
 
 #### Added

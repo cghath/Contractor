@@ -584,6 +584,10 @@ func _server_fire(origin: Vector3, direction: Vector3, slot: StringName) -> void
 	if origin.distance_to(camera.global_position) > 1.0:
 		origin = camera.global_position  # don't trust a far-off muzzle
 	var result := Ballistics.fire(self, origin, direction.normalized(), weapon)
+	var suppressed := bool(weapon.stats.get("suppressed", false))
+	var round_end: Variant = result.get("position")
+	Sfx.server_shot(origin, round_end if round_end is Vector3 else origin + direction.normalized() * 400.0,
+		"suppressed" if suppressed else ("pistol" if weapon.slot == &"sidearm" else "rifle"))  # every peer hears it (Sfx)
 	PeopleLayer.server_noise(self, origin)  # people nearby hear it (wave 4)
 	if faction != &"hostile":
 		Alert.server_noise(self, origin, Alert.SHOT, bool(weapon.stats.get("suppressed", false)))  # hot zones: the enemy hears it (4B part 3)
@@ -644,6 +648,7 @@ func _server_throw(origin: Vector3, direction: Vector3, id: StringName) -> void:
 	if item == null or not item.stats.has("throwable") or not inventory.remove_one(id):
 		return
 	_server_busy_until = _now() + THROW_BUSY_S
+	Sfx.server_play(&"throw", global_position + Vector3.UP * 1.4)
 	if origin.distance_to(camera.global_position) > 1.0:
 		origin = camera.global_position
 	var dir := direction.normalized()
@@ -660,6 +665,7 @@ func _server_reload(slot: StringName) -> void:
 		return
 	var seconds := reload_seconds(ItemDB.get_item(id))
 	_server_busy_until = _now() + seconds
+	Sfx.server_play(&"reload", global_position + Vector3.UP)
 	_reload_n += 1
 	var n := _reload_n
 	# The new magazine goes in when the reload finishes, if the same weapon is still there and

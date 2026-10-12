@@ -335,6 +335,7 @@ func _restore_bodies() -> void:
 
 @rpc("authority", "call_local", "unreliable")
 func show_impact(pos: Vector3, normal: Vector3, kind: String) -> void:
+	Sfx.play_at({"plate": &"impact_plate", "vehicle": &"impact_plate", "body": &"impact_body"}.get(kind, &"impact_dirt"), pos)
 	var mark := MeshInstance3D.new()
 	var sphere := SphereMesh.new()
 	sphere.radius = 0.025
@@ -375,11 +376,13 @@ func show_throw(serial: int, id: String, origin: Vector3, velocity: Vector3) -> 
 @rpc("authority", "call_local", "reliable")
 func show_explosion(pos: Vector3) -> void:
 	_burst(pos, Color(1.0, 0.6, 0.25), 3.2, 0.35)
+	Sfx.play_at(&"explosion", pos)
 
 
 @rpc("authority", "call_local", "reliable")
 func show_flash(pos: Vector3) -> void:
 	_burst(pos, Color.WHITE, 1.0, 0.15)
+	Sfx.play_at(&"flashbang", pos)
 
 
 ## A smoke cloud on every peer, in its colour (a name in SmokeCloud.COLOURS), `age` seconds
