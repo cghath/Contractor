@@ -58,8 +58,8 @@ const VARIANTS := {
 }
 ## Plain clothes (civilians, HVTs and hostages: PersonLook.outfit) instead of a uniform:
 ## "civ:<shirt>:<trousers>:<skin>:<shoes>" in hex. The torso, arms and head take the shirt,
-## the legs the trousers; hands are bare, there's no unit patch, and the cloth is a flat
-## colour with soft folds. Each part builds from only the colours it shows (_civ_part), so
+## the legs the trousers; hands are bare, and the cloth is one flat colour: no pattern, unit
+## patch, knee pads or belt (Captain). Each part builds from only the colours it shows (_civ_part), so
 ## people sharing a shirt share the torso mesh.
 const CIV_PREFIX := "civ:"
 
@@ -72,9 +72,9 @@ static func spec(variant: String) -> Dictionary:
 		var f := variant.split(":")
 		if f.size() >= 4:
 			var cloth := Color(f[1])
-			return {"camo": [cloth, cloth.darkened(0.08), cloth.lightened(0.05), cloth.darkened(0.16)],
+			return {"camo": [cloth, cloth, cloth, cloth],
 				"skin": f[2] if variant.begins_with("civp:") else f[3], "hair": "241a12", "patch": cloth,
-				"gear": "5a5148", "pack": "5a5148", "glove": f[2] if variant.begins_with("civp:") else f[3],
+				"gear": "5a5148", "pack": "5a5148", "pad": cloth, "belt": cloth, "glove": f[2] if variant.begins_with("civp:") else f[3],
 				"boot": f[3] if variant.begins_with("civp:") else f[4]}
 	return VARIANTS["multicam"]
 
@@ -348,12 +348,7 @@ static func _camo(p: Vector3, salt: int, variant: String) -> int:
 			if a < -0.32:
 				return C.CAMO_C
 			return C.CAMO_A
-		"plain":  # plain clothes: a flat colour with soft folds
-			var fold := _noise_a.get_noise_3dv(Vector3(q.x, q.y * 0.4, q.z) * 0.12)
-			if fold > 0.5:
-				return C.CAMO_B
-			if fold < -0.6:
-				return C.CAMO_C
+		"plain":  # plain clothes: one flat colour, no pattern (Captain: nothing remotely military)
 			return C.CAMO_A
 		"desert":
 			var a := _noise_a.get_noise_3dv(q * 0.06)
@@ -387,7 +382,7 @@ static func _get_mesher(variant: String) -> VoxelMesherCubes:
 			C.SKIN: skin, C.SKIN_SHADE: skin.darkened(0.15), C.HAIR: Color(v.hair),
 			C.EYE: Color("1c1c1c"), C.MOUTH: skin.darkened(0.35),
 			C.BOOT: Color(v.get("boot", "3a3027")), C.SOLE: Color("1e1a17"), C.GLOVE: Color(v.get("glove", "2f2f2a")),
-			C.BELT: Color("3d3a2e"), C.METAL: Color("8c8c84"), C.PAD: Color("2b2b27"),
+			C.BELT: Color(v.get("belt", "3d3a2e")), C.METAL: Color("8c8c84"), C.PAD: Color(v.get("pad", "2b2b27")),
 			C.PATCH: Color(v.patch),
 			C.GEAR: Color(v.gear), C.GEAR_DARK: Color(v.gear).darkened(0.25),
 			C.PACK: Color(v.pack), C.PACK_DARK: Color(v.pack).darkened(0.25),
