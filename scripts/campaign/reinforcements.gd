@@ -22,6 +22,12 @@ extends Node
 ##   beyond its edge);
 ##   "combat", "combat_step", "combat_max": the waves' skill, rising by a step a wave (a
 ##   contract sets it from its true quality: Contracts.reinforcement_tuning).
+##
+## Hot zones (4B part 3): `driven`, the timer sends nothing; the zone's EnemyResponse launches
+## each wave from a QRF base (server_send) when the alert reaches ENGAGED, and the waves head
+## for `aim` (the enemy's last known position), not for where the players really are.
+## max_alive then counts only the waves' own living soldiers (a hot zone's garrisons and
+## patrols are many).
 
 ## Host: a wave arrived (`index` from 0, the soldiers spawned).
 signal wave_spawned(index: int, soldiers: Array)
@@ -60,6 +66,10 @@ var waves_sent := 0
 var params: Dictionary = DEFAULTS.duplicate()
 ## Every wave: {"index", "at_s", "size", "edge" (Vector3 where it came in), "squad", "soldiers"}.
 var waves: Array[Dictionary] = []
+## Hot zones: waves come only from server_send, never on the timer.
+var driven := false
+## Where waves head (returns a Vector3, or Vector3.INF for "stay put"); unset: the players.
+var aim := Callable()
 
 var _next_at := 0.0
 var _retarget := 0.0
@@ -110,17 +120,18 @@ static func wave_size(index: int, p: Dictionary = DEFAULTS) -> int:
 
 
 func _physics_process(delta: float) -> void:
-	if running and multiplayer.is_server():
+	if (running or driven) and multiplayer.is_server():
 		server_advance(delta)
 
 
 ## Host only. Runs the clock forward `seconds` (every physics frame; tests jump it), sending
-## each wave that falls due and pointing the waves at the players now and then.
+## each wave that falls due (not when `driven`) and pointing the waves at their aim now and then.
 func server_advance(seconds: float) -> void:
-	if not running:
+	if not running and not driven:
 		return
-	elapsed += seconds
-	while running and elapsed >= _next_at:
+	if running:
+		elapsed += seconds
+	while running and not driven and elapsed >= _next_at:
 		_send_wave(waves_sent)
 		waves_sent += 1
 		_next_at = wave_time(waves_sent, params)
@@ -140,13 +151,36 @@ func hostiles_alive() -> int:
 	return count
 
 
-func _send_wave(index: int) -> void:
+## Living soldiers the max_alive cap counts: every hostile, or (driven) the waves' own.
+func capped_alive() -> int:
+	if not driven:
+		return hostiles_alive()
+	var count := 0
+	for wave: Dictionary in waves:
+		for s: Variant in wave.soldiers:
+			if is_instance_valid(s) and not (s as Soldier).vitals.is_dead():
+				count += 1
+	return count
+
+
+## Host only (hot zones: EnemyResponse). Sends the next wave now from `origin` (a QRF base's
+## gate), `extra_pairs` buddy pairs bigger than its turn; returns its soldiers.
+func server_send(origin: Vector3, extra_pairs := 0) -> Array:
+	if not multiplayer.is_server():
+		return []
+	var index := waves_sent
+	waves_sent += 1
+	_send_wave(index, origin, extra_pairs)
+	return waves.back().soldiers if not waves.is_empty() and int(waves.back().index) == index else []
+
+
+func _send_wave(index: int, origin := Vector3.INF, extra_pairs := 0) -> void:
 	var level := MapNodes.level_of(self)
 	if level == null or not level.has_method(&"spawn_soldier"):
 		return
-	var size := mini(wave_size(index, params), maxi(int(params.max_alive) - hostiles_alive(), 0))
+	var size := mini(wave_size(index, params) + 2 * extra_pairs, maxi(int(params.max_alive) - capped_alive(), 0))
 	size -= size % 2  # whole buddy pairs
-	var edge := edge_point(level)
+	var edge := origin if origin.is_finite() else edge_point(level)
 	var record := {"index": index, "at_s": elapsed, "size": size, "edge": edge, "squad": null, "soldiers": []}
 	waves.append(record)
 	if size <= 0:
@@ -223,9 +257,14 @@ static func _perimeter_point(rect: Rect2, t: float) -> Vector2:
 	return Vector2(rect.position.x, rect.end.y - d)
 
 
-## A wave's patrol leads from where it came in to the players and round them.
+## A wave's patrol leads from where it came in to its aim (the players, or in a hot zone the
+## last known position) and round it.
 func _route(squad: Squad, level: Node, from: Vector3) -> void:
 	var centre := _players_centre(level)
+	if aim.is_valid():
+		centre = aim.call()
+		if not centre.is_finite():
+			return  # nothing to go on: they keep the route they have
 	var route: Array[Vector3] = []
 	var half := centre.lerp(from, 0.5)
 	route.append(_on_ground(half))

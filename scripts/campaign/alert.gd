@@ -57,6 +57,8 @@ const COMMS_DOWN_SHARE := 0.5
 signal reported(report: Dictionary)
 ## Host: an area's state (or "zone"'s) changed.
 signal state_changed(area: String, state: int)
+## Host: a shot or a blast went off at `pos`, heard or not (Pressure counts the squad's blasts).
+signal noise(kind: StringName, pos: Vector3, source: Node)
 
 var zone_state := State.NORMAL
 var areas := {}           # area id -> {"state", "contact" (last contact time), "since"}
@@ -65,6 +67,7 @@ var reports: Array = []   # every report received, oldest first
 var comms_down := false
 var level: Node3D
 var _pending: Array = []  # {"by": Soldier, "report": Dictionary, "due": float}
+var _overdue: Array = []  # wiped patrols' missed check-ins: {"report", "due"}
 var _last_report := {}    # "<name>|<kind>" -> time
 var _check_ins := {}      # module id -> next check-in time
 var _seen_bodies := {}    # body instance id -> true
@@ -104,6 +107,7 @@ static func server_noise(source: Node, pos: Vector3, kind: StringName, suppresse
 	var alert := of(source)
 	if alert == null or not alert.multiplayer.is_server():
 		return
+	alert.noise.emit(kind, pos, source)
 	var heard := BLAST_HEARD_M if kind == BLAST else (SUPPRESSED_HEARD_M if suppressed else SHOT_HEARD_M)
 	for s: Soldier in alert._hostiles():
 		if s != source and s.global_position.distance_to(pos) <= heard:
@@ -153,6 +157,10 @@ func _tick(force_scan: bool) -> void:
 		elif t >= float(p.due):
 			_pending.erase(p)
 			_receive(p.report)
+	for o: Dictionary in _overdue.duplicate():
+		if t >= float(o.due):
+			_overdue.erase(o)
+			_receive(o.report)
 	_scan -= get_process_delta_time()
 	if _scan > 0.0 and not force_scan:
 		return
@@ -219,8 +227,8 @@ func _cool_down(t: float) -> void:
 		var worst := State.NORMAL
 		for k: String in areas:
 			worst = maxi(worst, int(areas[k].state))
-		if worst != zone_state:
-			zone_state = maxi(worst, State.SUSPICIOUS)
+		if worst < zone_state and maxi(worst, State.SUSPICIOUS) != zone_state:
+			zone_state = maxi(worst, State.SUSPICIOUS)  # cooling only lowers: the zone rises by reports alone
 			state_changed.emit("zone", zone_state)
 		_apply_modes("")
 
@@ -256,7 +264,8 @@ func _check_in() -> void:
 		if t < float(_check_ins[m.module_id]):
 			continue
 		_check_ins[m.module_id] = t + randf_range(CHECK_IN_S.x, CHECK_IN_S.y)
-		var garrison := _hostiles().filter(func(s: Soldier) -> bool: return String(s.name).begins_with(m.module_id))
+		var prefix := ("%s_H" % m.module_id).validate_node_name()  # not outpost_10's men for outpost_1
+		var garrison := _hostiles().filter(func(s: Soldier) -> bool: return String(s.name).begins_with(prefix))
 		var had := level.get(&"_garrisoned") as Dictionary
 		if garrison.is_empty() and had != null and int(had.get(m.module_id, 0)) > 0:
 			var pos: Vector3 = m.global_position
@@ -282,6 +291,21 @@ func _check_comms() -> void:
 			(Vector3(box[1][0], box[1][1], box[1][2]) - Vector3(box[0][0], box[0][1], box[0][2])).abs()))
 		if left >= 0 and full > 0 and float(left) / full < COMMS_DOWN_SHARE:
 			comms_down = true
+
+
+## Host: `area` goes to at least ALERTED without the zone hearing of it (checkpoints closed
+## under pressure: EnemyResponse): its hostiles man their posts in combat mode.
+func server_stand_to(area: String) -> void:
+	if state_of(area) < State.ALERTED:
+		_raise(area, State.ALERTED, false, false)
+
+
+## Host: a roaming patrol last seen at `pos` stopped answering (wiped out): it misses its next
+## check-in, `after_s` from now, and the net hears of it CHECK_IN_CALL_S after that.
+## On this alert's clock (advance() brings it due).
+func server_overdue(pos: Vector3, after_s: float) -> void:
+	_overdue.append({"due": now() + after_s + CHECK_IN_CALL_S,
+		"report": {"kind": &"missed_checkin", "pos": pos, "area": area_of(pos), "by": "", "patrol": true}})
 
 
 # --- Queries ------------------------------------------------------------------------------------

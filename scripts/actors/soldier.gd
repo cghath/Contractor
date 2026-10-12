@@ -1130,6 +1130,20 @@ func _server_drag_body(path: NodePath) -> void:
 	_server_move_body(path, DRAG)
 
 
+## This player radios the employer on his field radio for a new contract (hot zones, 4B part 3:
+## Contracts.server_radio_contract); he's told what came in, or why nothing can.
+@rpc("any_peer", "call_local", "reliable")
+func _server_radio_contract() -> void:
+	if not multiplayer.is_server() or not _from_owner() or not vitals.is_up():
+		return
+	var why := Contracts.radio_contract_problem()
+	var cid := Contracts.server_radio_contract() if why == "" else ""
+	var text := why
+	if why == "":
+		text = "New contract: %s" % String(Contracts.contract(cid).get("title", cid)) if cid != "" else "Nothing came in"
+	_client_message.rpc_id(owner_peer(), text)
+
+
 ## Puts down the body this soldier carries or drags.
 @rpc("any_peer", "call_local", "reliable")
 func _server_release_body() -> void:

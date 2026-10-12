@@ -507,12 +507,26 @@ func server_abandon_deployment() -> void:
 	_commit()
 
 
-## Host: in a hot zone, a new contract comes in over the radio and the squad takes it on the
-## spot (standard terms, advance paid); its objectives join the deployment. Returns its id.
-func server_radio_contract(type_id := "") -> String:
+## Why no radio contract can come in now ("" if one can): only in a hot zone, and only with a
+## field radio in the squad (Captain 2026-10-12): a player or squad AI carrying an item tagged
+## "radio" that isn't an enemy handheld (RadioChatter.has_field_radio; a looted enemy set
+## can't reach the employer).
+func radio_contract_problem() -> String:
 	var dep: Dictionary = _s().deployment
 	if dep.is_empty() or dep.zone_kind != "hot":
+		return "Radio contracts come in only in a hot zone"
+	if not RadioChatter.has_field_radio(self):
+		return "No field radio in the squad"
+	return ""
+
+
+## Host: in a hot zone, a new contract comes in over the radio and the squad takes it on the
+## spot (standard terms, advance paid); its objectives join the deployment. Returns its id, or
+## "" when radio_contract_problem() says no.
+func server_radio_contract(type_id := "") -> String:
+	if radio_contract_problem() != "":
 		return ""
+	var dep: Dictionary = _s().deployment
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash([int(_s().seed), Economy.day(), int(_s().next_id), "radio"])
 	var employer := String(MissionRegistry.zone(dep.zone_id).get("faction", ""))
@@ -1005,7 +1019,7 @@ func _on_peer_joined(id: int) -> void:
 ## Debug: End opens the board in a session (any peer; the host gets its stand-in controls).
 func _unhandled_input(event: InputEvent) -> void:
 	var key := event as InputEventKey
-	if key == null or not key.pressed or key.echo or key.keycode != DEBUG_BOARD_KEY:
+	if key == null or not key.pressed or key.echo or key.keycode != DEBUG_BOARD_KEY or key.shift_pressed:
 		return
 	if CompoundLevel.current(self) == null or not get_tree().root.find_children("*", "ContractBoard", true, false).is_empty():
 		return

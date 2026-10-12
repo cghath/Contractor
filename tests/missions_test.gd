@@ -44,6 +44,10 @@ func _ready() -> void:
 	await _test_failures()
 	await _test_no_cuffs()
 	await _test_alert()
+	await _test_pressure()
+	await _test_enemy_response()
+	await _test_radio_chatter()
+	await _test_field_radio()
 	_finish()
 
 
@@ -480,3 +484,369 @@ func _test_alert() -> void:
 		if is_instance_valid(s):
 			s.queue_free()
 	await _frames(2)
+
+
+
+# --- Pressure, the enemy's answer, looted radios (4B part 3) ---------------------------------
+
+## Captain: pressure builds from what the squad does, not from the clock; tiers bring the enemy's
+## answer.
+func _test_pressure() -> void:
+	print("Pressure")
+	var pressure := Pressure.of(level)
+	var alert := Alert.of(level)
+	check(pressure != null, "a hot zone keeps a pressure count")
+	if pressure == null or alert == null:
+		return
+	_clear_waves()
+	await _frames(2)
+	_calm()
+	var before := level.ai.get_children()
+	var t := pressure.now()
+	pressure.note_contact(true, t)
+	pressure.note_contact(true, t + 30.0)
+	check(is_equal_approx(pressure.points, Pressure.GAINS.firefight), "contact starts a firefight: +2 once, not per shot (%.1f)" % pressure.points)
+	for k in range(60, int(Pressure.FIREFIGHT_LONG_S) + 1, 60):  # contact kept up, never a gap
+		pressure.note_contact(true, t + k)
+	check(is_equal_approx(pressure.points, 3.0), "a long firefight: +1 more per 3 minutes it lasts (%.1f)" % pressure.points)
+	pressure.note_contact(true, t + Pressure.FIREFIGHT_LONG_S + Pressure.FIREFIGHT_GAP_S + 1.0)
+	check(is_equal_approx(pressure.points, 5.0), "contact again after a quiet spell is a new firefight (%.1f)" % pressure.points)
+	var p0 := pressure.points
+	var foe := level.spawn_soldier({"name": "PressureFoe", "faction": "hostile", "variant": "urban",
+		"pos": level.ground_point(player.global_position + Vector3(0, 0, 60)), "loadout": [], "combat": 0.5, "discipline": 0.5, "guard": true, "mode": "safe"})
+	SquadAI.of(foe).process_mode = Node.PROCESS_MODE_DISABLED
+	_kill(foe)
+	pressure.server_tick()
+	check(foe.vitals.is_dead() and is_equal_approx(pressure.points - p0, Pressure.GAINS.kill), "a hostile killed: +0.5 (%.1f)" % (pressure.points - p0))
+	p0 = pressure.points
+	Alert.server_noise(player, player.global_position + Vector3(5, 0, 0), Alert.BLAST)
+	check(is_equal_approx(pressure.points - p0, Pressure.GAINS.explosion), "an explosion of ours: +1 (%.1f)" % (pressure.points - p0))
+	var site: ZoneModule = level.modules().filter(func(m: ZoneModule) -> bool: return m.type == "outpost")[0]
+	p0 = pressure.points
+	alert._receive({"kind": &"body", "pos": site.global_position, "area": site.module_id, "by": ""})
+	check(alert.zone_state == Alert.State.ALERTED and is_equal_approx(pressure.points - p0, Pressure.GAINS.alarm),
+		"the zone alerted (an alarm raised): +3 (%.1f)" % (pressure.points - p0))
+	p0 = pressure.points
+	alert.advance(Pressure.QUIET_S + 1.0)
+	pressure.server_tick()
+	check(is_equal_approx(pressure.points - p0, -Pressure.QUIET_LOSS), "10 quiet minutes: -1 (%.1f)" % (pressure.points - p0))
+	alert.comms_down = true
+	p0 = pressure.points
+	pressure.server_add("explosion")
+	check(is_equal_approx(pressure.points - p0, Pressure.GAINS.explosion * Pressure.COMMS_DOWN_GAIN), "with the comms site down every gain is halved (%.1f)" % (pressure.points - p0))
+	alert.comms_down = false
+	pressure.points = 9.9
+	var below := pressure.tier()
+	pressure.points = 10.0
+	check(below == 0 and pressure.tier() == 1, "tier 1 from 10 points")
+	pressure.points = 0.0
+	pressure._tier = 0
+	var tiers := []
+	var on_tier := func(tier: int) -> void: tiers.append(tier)
+	pressure.tier_changed.connect(on_tier)
+	for i in 10:
+		pressure.server_add("objective")
+	pressure.tier_changed.disconnect(on_tier)
+	check(tiers == [1, 2, 3, 4] and pressure.tier() == 4, "objectives done climb the tiers at 10, 20, 35 and 50 (%s)" % [tiers])
+	_free_new(before)
+	_calm()
+	await _frames(2)
+
+
+## Captain: patrols, checkpoints, the QRF from its bases, hunters at tier 3.
+func _test_enemy_response() -> void:
+	print("Enemy response")
+	var er := EnemyResponse.of(level)
+	var alert := Alert.of(level)
+	var pressure := Pressure.of(level)
+	check(er != null and er.reinforcements != null and er.reinforcements.driven, "a hot zone has an enemy response, driving its reinforcements (no timer waves)")
+	if er == null or alert == null or pressure == null or er.reinforcements == null:
+		return
+	_clear_waves()
+	_calm()
+	er._last_qrf = -INF
+	er._last_hunter = -INF
+	var before := level.ai.get_children()
+	CompoundLevel.spawn_ai = true
+	level._ai_ready = true
+	er.server_start()
+	var routes: Array = level.def.get("patrols", [])
+	var out := er.patrols.filter(func(r: Dictionary) -> bool: return not r.pending)
+	check(not routes.is_empty() and er.patrols.size() == routes.size() and not out.is_empty()
+		and out.all(func(r: Dictionary) -> bool: return r.soldiers.size() == EnemyResponse.PATROL_SIZE and (r.squad as Squad).patrol.size() >= 2),
+		"roaming patrols set out: a pair on each route (%d routes, %d patrols, %d out)" % [routes.size(), er.patrols.size(), out.size()])
+	var unseen := true
+	for r: Dictionary in out:
+		for s: Soldier in r.soldiers:
+			unseen = unseen and Vector2(s.global_position.x - player.global_position.x, s.global_position.z - player.global_position.z).length() >= EnemyResponse.SPAWN_UNSEEN_M - 5.0
+	check(unseen, "out of sight: none spawns within %.0f m of a player" % EnemyResponse.SPAWN_UNSEEN_M)
+	er.server_tick()
+	check(not er.checkpoints_closed, "calm and under tier 2, the checkpoints stay open")
+	pressure.server_add("objective", 4.0)
+	var checkpoints := level.modules().filter(func(m: ZoneModule) -> bool: return m.type == "checkpoint")
+	check(pressure.tier() == 2 and er.checkpoints_closed and not checkpoints.is_empty()
+		and checkpoints.all(func(m: ZoneModule) -> bool: return alert.state_of(m.module_id) >= Alert.State.ALERTED) and alert.zone_state == Alert.State.NORMAL,
+		"tier 2: checkpoints closed, their posts stood to (the zone itself still calm)")
+	var twins := er.patrols.filter(func(r: Dictionary) -> bool: return r.second and not r.pending)
+	check(not twins.is_empty() and twins.all(func(r: Dictionary) -> bool:
+			return r.soldiers.size() == EnemyResponse.PATROL_SIZE and String((r.soldiers[0] as Soldier).name).begins_with("P%dB_" % int(r.k))),
+		"tier 1 and up: patrols go in pairs, a second team walking each route the other way (%d)" % twins.size())
+	var rec: Dictionary = out[0]
+	var p0 := pressure.points
+	for s: Soldier in rec.soldiers:
+		_kill(s)
+	er.server_tick()
+	check(rec.lost and is_equal_approx(pressure.points - p0, Pressure.GAINS.patrol_lost), "a patrol wiped out: lost, +3 pressure (%.1f)" % (pressure.points - p0))
+	var heard := alert.reports.size()
+	alert.advance(Alert.CHECK_IN_S.y + Alert.CHECK_IN_CALL_S + 1.0)
+	check(alert.reports.size() > heard and alert.reports.back().kind == &"missed_checkin" and alert.reports.back().get("patrol", false),
+		"the wiped patrol misses its check-in: the net hears of it (on the alert's clock)")
+	# A patrol goes to look at what was reported.
+	var looker: Dictionary = {}
+	for r: Dictionary in er.patrols:
+		if not r.pending and not r.lost and not er._living(r.soldiers).is_empty():
+			looker = r
+			break
+	if not looker.is_empty():
+		for r: Dictionary in er.patrols:
+			r.looking_until = -INF
+		var spot := (er._living(looker.soldiers)[0] as Soldier).global_position + Vector3(40, 0, 0)
+		alert._receive({"kind": &"shot", "pos": spot, "area": alert.area_of(spot), "by": ""})
+		var looking := er.patrols.filter(func(r: Dictionary) -> bool: return float(r.looking_until) > er.now())
+		check(looking.size() == 1 and (looking[0].squad as Squad).patrol.size() == 1 + EnemyResponse.LOOK_POINTS
+			and Vector2((looking[0].squad as Squad).patrol[0].x - spot.x, (looking[0].squad as Squad).patrol[0].z - spot.z).length() < 2.0,
+			"shots reported: the nearest patrol goes to look")
+		alert.advance(EnemyResponse.LOOK_S + 1.0)
+		er.server_tick()
+		check(float(looking[0].looking_until) == -INF and (looking[0].squad as Squad).patrol == looking[0].walk, "after a look it goes back to its route")
+	# The QRF.
+	_calm()
+	er._zone_was = Alert.State.NORMAL
+	er._qrf_due = INF
+	var lk := level.ground_point(player.global_position + Vector3(0, 0, -20))
+	var bases := level.modules().filter(func(m: ZoneModule) -> bool: return m.type == "qrf_base")
+	bases.sort_custom(func(a: ZoneModule, b: ZoneModule) -> bool: return a.global_position.distance_to(lk) < b.global_position.distance_to(lk))
+	var contact := {"kind": &"contact", "pos": lk, "area": alert.area_of(lk), "by": ""}
+	var n := er.qrf_launches.size()
+	alert._receive(contact)
+	check(er.qrf_launches.size() == n and er._qrf_due < INF, "caught cold (calm straight to engaged): the QRF turns out first, nothing launched yet")
+	alert.advance(EnemyResponse.QRF_TURNOUT_S + 1.0)
+	er.server_tick()
+	var launch: Dictionary = er.qrf_launches.back() if er.qrf_launches.size() > n else {}
+	check(alert.zone_state == Alert.State.ENGAGED and er.qrf_launches.size() == n + 1 and not bases.is_empty()
+		and String(launch.get("from", "")) == (bases[0] as ZoneModule).module_id and not (launch.get("soldiers", []) as Array).is_empty(),
+		"engaged: the QRF launches from the nearest QRF base (%s, %d men)" % [launch.get("from", "none"), (launch.get("soldiers", []) as Array).size()])
+	var wave: Dictionary = er.reinforcements.waves.back() if not er.reinforcements.waves.is_empty() else {}
+	var squad := wave.get("squad") as Squad
+	check(squad != null and squad.patrol.any(func(p: Vector3) -> bool: return Vector2(p.x - lk.x, p.z - lk.z).length() < 2.0),
+		"the wave heads for the enemy's last known position")
+	if bases.is_empty():
+		await _end_response(er, before)
+		return
+	var first: ZoneModule = bases[0]
+	level._spawn_garrison(first)
+	var g := _garrison(first)
+	for s in g:
+		_kill(s)
+	check(not g.is_empty() and level.site_down(first.module_id), "the nearest QRF base's garrison killed: the site is down")
+	pressure.points = 0.0
+	pressure._tier = 0
+	er._last_qrf = -INF
+	n = er.qrf_launches.size()
+	alert.zone_state = Alert.State.ALERTED  # on standby: an alerted zone's QRF goes at once
+	er._zone_was = Alert.State.ALERTED
+	alert._receive(contact)
+	if bases.size() >= 2:
+		check(er.qrf_launches.size() == n + 1 and String(er.qrf_launches.back().from) == (bases[1] as ZoneModule).module_id,
+			"on standby the next QRF goes at once, from the other base, none from the dead one")
+	for m: ZoneModule in bases.slice(1):
+		level._spawn_garrison(m)
+		for s in _garrison(m):
+			_kill(s)
+	pressure.points = 0.0
+	pressure._tier = 0
+	er._last_qrf = -INF
+	n = er.qrf_launches.size()
+	alert._receive(contact)
+	check(er.qrf_launches.size() == n, "every QRF base taken out: no QRF waves")
+	pressure.server_add("objective", 4.0)
+	er._last_qrf = -INF
+	alert._receive(contact)
+	check(pressure.tier() >= 2 and er.qrf_launches.size() == n, "not even at tier 2: the HQ doesn't stand in for dead QRF bases")
+	er.server_tick()
+	check(is_equal_approx(er.coordination(), maxf(1.0 - EnemyResponse.OFFICER_LOSS * bases.size(), EnemyResponse.MIN_COORDINATION)),
+		"each QRF base's officer killed costs the enemy coordination (%.1f)" % er.coordination())
+	# Hunters.
+	pressure.points = 0.0
+	pressure._tier = 0
+	er._last_hunter = -INF
+	pressure.server_add("objective", 7.0)
+	var team: Dictionary = er.hunters[0] if er.hunters.size() == 1 else {}
+	var hunters: Array = team.get("soldiers", [])
+	var hsquad := team.get("squad") as Squad
+	check(pressure.tier() == 3 and er.hunters.size() == 1 and hunters.size() >= EnemyResponse.HUNTER_SIZE.x and hunters.size() <= EnemyResponse.HUNTER_SIZE.y,
+		"tier 3: a hunter team of 4 to 6 sets out (%d)" % hunters.size())
+	check(hsquad != null and hsquad.patrol.any(func(p: Vector3) -> bool: return Vector2(p.x - lk.x, p.z - lk.z).length() < 2.0)
+		and hunters.all(func(s: Soldier) -> bool: return s.inventory.count_of(EnemyResponse.SMOKE) > 0),
+		"the hunters head for the last known position, carrying smoke")
+	await _end_response(er, before)
+
+
+func _end_response(er: EnemyResponse, before: Array) -> void:
+	_free_new(before)
+	er.patrols.clear()
+	er.hunters.clear()
+	er.reinforcement_pairs.clear()
+	er._started = false
+	for c in er.get_children():
+		if c is Squad:
+			c.queue_free()
+	CompoundLevel.spawn_ai = false
+	_calm()
+	await _frames(3)
+
+
+## Captain: no meter; a looted enemy radio lets the squad hear the enemy's net until it switches.
+func _test_radio_chatter() -> void:
+	print("Enemy radio chatter")
+	var rc := RadioChatter.of(level)
+	var alert := Alert.of(level)
+	check(rc != null, "a hot zone has enemy radio chatter")
+	if rc == null or alert == null:
+		return
+	_calm()
+	_drop_all(player, &"enemy_radio")
+	rc.server_tick()
+	check(not rc.tuned, "without an enemy radio the squad hears nothing of the enemy's net")
+	var site: ZoneModule = level.modules().filter(func(m: ZoneModule) -> bool: return m.type == "outpost")[0]
+	check(player.inventory.take(&"enemy_radio") == 1, "an enemy radio taken off a body")
+	rc.server_tick()
+	check(rc.tuned and not rc.lines.is_empty() and String(rc.lines.back().text).contains("radio check"), "taken: the squad is on the enemy's net")
+	var n := rc.lines.size()
+	var shot := {"kind": &"shot", "pos": site.global_position + Vector3(0, 0, -200), "area": site.module_id, "by": "test"}
+	for i in 4:
+		alert._receive(shot)
+		await _frames(1)  # lines raised by a state change come after the report
+		alert.advance(RadioChatter.LINE_GAP_S + 0.1)
+		rc.server_tick()
+	var shots := rc.lines.slice(n).filter(func(l: Dictionary) -> bool: return String(l.text).contains("shots heard, to the north"))
+	check(not shots.is_empty() and String(shots[0].text).begins_with(rc._callsign(site.module_id)),
+		"chatter flows: reports reach the squad, vague (%s)" % (shots[0].text if not shots.is_empty() else "nothing"))
+	var callouts := Callouts.of(level)
+	check(callouts != null and callouts.shown.any(func(l: Dictionary) -> bool: return String(l.speaker) == RadioChatter.SPEAKER),
+		"it shows as subtitles from the enemy radio")
+	alert._receive({"kind": &"body", "pos": site.global_position, "area": site.module_id, "by": ""})
+	await _frames(1)
+	alert.advance(RadioChatter.FREQ_SWITCH_S.y + 1.0)
+	rc.server_tick()
+	for i in RadioChatter.QUEUE_MAX + 1:
+		alert.advance(RadioChatter.LINE_GAP_S + 0.1)
+		rc.server_tick()
+	check(not rc.tuned and String(rc.lines.back().text).contains("go to alternate"), "a body found: minutes later the enemy changes frequency (%s)" % rc.lines.back().text)
+	var after := rc.lines.size()
+	alert._receive(shot)
+	await _frames(1)
+	for i in 2:
+		alert.advance(RadioChatter.LINE_GAP_S + 0.1)
+		rc.server_tick()
+	check(rc.lines.size() == after, "after the switch the old radio hears nothing")
+	player.inventory.take(&"enemy_radio")
+	rc.server_tick()
+	check(rc.tuned, "another radio taken listens in again")
+	_drop_all(player, &"enemy_radio")
+	rc.server_tick()
+	_calm()
+	await _frames(2)
+
+
+## Captain: radio contracts need the squad's own field radio.
+func _test_field_radio() -> void:
+	print("Radio contracts and the field radio")
+	check(Contracts.radio_contract_problem() == "Radio contracts come in only in a hot zone", "no radio contracts outside a hot zone deployment")
+	var cid := _add(_offer("raid"))
+	Contracts.server_accept(cid, ContractGen.default_terms())
+	check(Contracts.server_start_deployment([], ZONE) == "", "deployed to the hot zone")
+	await _frames(5)
+	var had := player.inventory.count_of(&"radio")
+	_drop_all(player, &"radio")
+	player.inventory.take(&"enemy_radio")
+	check(Contracts.radio_contract_problem() == "No field radio in the squad" and Contracts.server_radio_contract() == "",
+		"a looted enemy set can't reach the employer: no radio contract without a field radio")
+	player.inventory.take(&"radio")
+	var cids := (Contracts.deployment().cids as Array).size()
+	check(Contracts.radio_contract_problem() == "" and Contracts.server_radio_contract() != "" and (Contracts.deployment().cids as Array).size() == cids + 1,
+		"with the field radio along, a radio contract comes in and joins the deployment")
+	check(InteractionMenu._check(&"field_radio", player, player) == "", "the player sees 'Radio for a contract' in his own menu")
+	player._server_radio_contract.rpc_id(1)
+	await _frames(2)
+	check((Contracts.deployment().cids as Array).size() == cids + 2, "and using it brings in another")
+	var debug := level.get_node_or_null(^"HotZoneDebug") as HotZoneDebug
+	if debug:
+		var t := Alert.of(level).now()
+		debug.skip(HotZoneDebug.SKIP_S)
+		check(debug.text().begins_with("HOT ZONE") and Alert.of(level).now() >= t + HotZoneDebug.SKIP_S - 0.1,
+			"debug builds: the hot zone readout, and Page Down skips the enemy's clock")
+	_drop_all(player, &"enemy_radio")
+	_drop_all(player, &"radio")
+	if had > 0:
+		player.inventory.take(&"radio", had)
+	Contracts.server_end_deployment({})
+	Contracts.server_finish_debrief()
+	await _frames(2)
+
+
+## Back to calm: the alert's areas and the pressure points reset (no check-ins come due).
+func _calm() -> void:
+	var alert := Alert.of(level)
+	var pressure := Pressure.of(level)
+	if alert:
+		alert.areas = {}
+		alert.zone_state = Alert.State.NORMAL
+		alert.lkp = {}
+		alert._pending.clear()
+		alert._overdue.clear()
+		alert.comms_down = false
+		for m: ZoneModule in level.modules():
+			alert._check_ins[m.module_id] = INF
+	if pressure:
+		var t := pressure.now()
+		pressure.points = 0.0
+		pressure._tier = 0
+		pressure._zone_state = Alert.State.NORMAL
+		pressure._start = t
+		pressure._last_quiet = t
+		pressure._last_gain = t
+		pressure._times_paid = 0
+		pressure._contact_last = -INF
+		pressure._long_paid = 0
+
+
+## The reinforcement waves' soldiers gone (the alert test launched a QRF).
+func _clear_waves() -> void:
+	var reinforcements := MapNodes.reinforcements(level)
+	if reinforcements == null:
+		return
+	for wave: Dictionary in reinforcements.waves:
+		for s: Variant in wave.soldiers:
+			if is_instance_valid(s):
+				(s as Node).queue_free()
+
+
+## Every hostile spawned since `before` (level.ai's children then) gone.
+func _free_new(before: Array) -> void:
+	for n in level.ai.get_children():
+		var s := n as Soldier
+		if s and s.faction == &"hostile" and not before.has(s) and not s.is_queued_for_deletion():
+			s.queue_free()
+
+
+func _kill(s: Soldier) -> void:
+	for i in 5:
+		if s.vitals.is_dead():
+			return
+		s.vitals.server_hit(Vitals.HEAD, {"round_class": Vitals.INTERMEDIATE})
+
+
+func _drop_all(s: Soldier, id: StringName) -> void:
+	while s.inventory.count_of(id) > 0:
+		s.inventory.remove_one(id)

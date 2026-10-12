@@ -131,6 +131,7 @@ const ACTIONS := {
 		{"id": &"treat", "label": "Treat yourself", "needs": &"treatable", "submenu": &"treatments"},
 		{"id": &"put_down", "label": "Put down", "needs": &"moving_body", "request": &"_server_release_body", "with": &"none"},
 		{"id": &"drop_held", "label": "Drop held item", "needs": &"held_item", "request": &"_server_drop", "with": &"slot"},
+		{"id": &"radio_contract", "label": "Radio for a contract", "needs": &"field_radio", "request": &"_server_radio_contract", "with": &"none"},
 	],
 }
 ## Wound kinds in words, for Check wounds.
@@ -315,6 +316,12 @@ static func _check(need: StringName, actor: Soldier, target: Node) -> String:
 			return "" if target is Soldier and (target as Soldier).has_gear() else "Nothing left on them"
 		&"held_item":
 			return "" if actor.inventory.hands != &"" or actor.active_weapon() != null else _HIDE
+		&"field_radio":  # your own field radio (not a looted enemy set), in a hot zone
+			var lvl := CompoundLevel.current(actor)
+			var def: Variant = lvl.get(&"def") if lvl else null
+			if not (def is Dictionary and String(def.get("kind", "")) == "hot"):
+				return _HIDE
+			return "" if RadioChatter.carried(actor, "radio", "enemy_radio") > 0 else "You have no field radio"
 	if need in Person.MENU_NEEDS:
 		return Person.menu_check(need, actor, target)  # people (wave 4)
 	return ""

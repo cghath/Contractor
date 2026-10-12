@@ -67,7 +67,7 @@ const STASH_POLL_S := 1.0
 ## so magazines and the tourniquet go into them when picked up.
 const STARTING_STASH := [["plate_carrier", 2], ["plate_ceramic_l4", 4], ["helmet", 2], ["assault_pack", 2], ["m4a1", 2],
 	["mag_556", 12], ["ifak", 4], ["tourniquet", 2], ["smoke_grenade", 2], ["frag_grenade", 2]]
-## Debug builds: End extracts everyone within this many metres of the host (until the map's
+## Debug builds: Shift+End extracts everyone within this many metres of the host (until the map's
 ## extraction calls server_end_deployment).
 const DEBUG_EXTRACT_M := 60.0
 ## A level switch waits at most this long for clients to stop sending (server_switch_level).
@@ -1367,7 +1367,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		server_save()
 		note.emit("Campaign saved")
 	elif OS.is_debug_build() and event is InputEventKey and event.pressed and not event.echo \
-			and (event as InputEventKey).physical_keycode == KEY_END and deployment_running():
+			and (event as InputEventKey).physical_keycode == KEY_END and (event as InputEventKey).shift_pressed and deployment_running():
 		var me := level().players.get_node_or_null(^"1") as Node3D
 		if me:
 			server_extract_near(me.global_position)
