@@ -113,7 +113,8 @@ include Voxel Tools.
 | Left Ctrl (hold) | Interaction menu: action points on items, downed bodies and squadmates within about 3 m; move the cursor onto one and let go to pick (pick up, carry, drag, loot a body, check condition, give item; Release or Put down on the body you're moving). A squadmate's body has ACE-style points on the head, chest, each arm and each leg, each with that part's check and treatments, plus a general point at the waist. Dragging, you face the casualty and back away with S |
 | Left Ctrl + Left Alt (hold) | Self-interaction: the same body points on yourself (check and treat each part), and at the waist: check wounds, put down a carried body, drop held item |
 | R | Reload (fullest spare magazine; a part-used one goes back in your pouch) |
-| H | Treat yourself: applies the next item you carry for your most urgent wound (tourniquet before bandage, and so on) |
+| H | Medical menu on the person you look at within reach, else yourself: body diagram, injuries per part, every medical item you carry (greyed with the reason when it can't be used), signs, activity log. H or Esc closes |
+| Shift+H | Quick-treat yourself: applies the next item you carry for your most urgent wound (tourniquet before bandage, and so on) |
 | G | Throw the selected grenade (frag, flashbang or smoke). With the breaching charge selected: hold it up to place it (a ghost on the surface you look at, within 2.5 m; Fire sets it there, G or RMB puts it away). It sticks to whatever it's on, a person or a vehicle too, and goes off after 10 s. Carrying or dragging a body: let go of it |
 | Shift+G | Switch grenade type (the breaching charge comes last, when you carry one) |
 | Alt+G | Drop carried bulky item, otherwise drop active weapon |
