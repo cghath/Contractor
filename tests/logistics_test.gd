@@ -211,7 +211,10 @@ func _test_molle_rules() -> void:
 	var light_inv := Inventory.new()
 	check(light_inv.no_point_problem(ItemDB.get_item(&"pouch_ifak")) == "Put on a plate carrier first", "no carrier: \"%s\"" % light_inv.no_point_problem(ItemDB.get_item(&"pouch_ifak")))
 	light_inv.take(&"plate_carrier_light")
-	light_inv.take(&"pouch_utility", 2)  # its utility point, then the shared front-left spot
+	light_inv.take(&"pouch_utility")
+	check(light_inv.attachment(&"utility_1").get("id") == &"pouch_utility" and light_inv.attachment(&"radio").is_empty(),
+		"a GP pouch takes utility_1, leaving the shared radio spot")
+	light_inv.take(&"pouch_utility")  # then the shared front-left spot
 	var why := light_inv.no_point_problem(ItemDB.get_item(&"pouch_ifak"))
 	check(why.begins_with("Every ") and why.contains("taken") and why.contains("Low-Profile"), "its points taken: \"%s\"" % why)
 	light_inv.free()
