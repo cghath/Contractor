@@ -1366,7 +1366,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed(&"quick_save"):
 		server_save()
 		note.emit("Campaign saved")
-	elif OS.is_debug_build() and event is InputEventKey and event.pressed and not event.echo \
+	elif DevTools.on() and event is InputEventKey and event.pressed and not event.echo \
 			and (event as InputEventKey).physical_keycode == KEY_END and (event as InputEventKey).shift_pressed and deployment_running():
 		var me := level().players.get_node_or_null(^"1") as Node3D
 		if me:

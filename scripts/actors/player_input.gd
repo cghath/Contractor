@@ -94,7 +94,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		return  # the inventory screen has the mouse
 	elif body.vitals.is_up() and hud.command_menu.handle_input(event):
 		return  # F-keys, and 1-9 / wheel / middle click while the command menu is open
-	elif event.is_action_pressed(&"debug_hurt") and OS.is_debug_build():
+	elif event.is_action_pressed(&"debug_hurt") and DevTools.on():
 		body._server_debug_hurt.rpc_id(1, 40.0)
 	elif event.is_action_pressed(&"pause"):
 		pause_menu.open()  # Escape: resume, return to base, main menu, quit

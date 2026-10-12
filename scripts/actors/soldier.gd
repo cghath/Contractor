@@ -1084,7 +1084,7 @@ func _is_busy() -> bool:
 ## Debug builds only: hurts this body, to test going down and dying without an enemy.
 @rpc("any_peer", "call_local", "reliable")
 func _server_debug_hurt(amount: float) -> void:
-	if _from_owner() and OS.is_debug_build():
+	if _from_owner() and DevTools.on():
 		vitals.server_damage(amount)
 
 

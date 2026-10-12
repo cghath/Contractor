@@ -1,9 +1,10 @@
 class_name HotZoneDebug
 extends CanvasLayer
-## Debug builds only, on the host, in a hot zone (4B part 3): a readout of what the enemy knows
-## and how hard it's pushing, for playtests. Release builds show nothing (Captain: no meter on
-## screen). Page Up shows or hides it; Page Down skips the enemy's clock SKIP_S forward
-## (reports come due, check-ins, cooldowns, pressure's quiet and time, the QRF's turnout).
+## Dev tools only (DevTools.on: debug builds, or a build started with --dev), on the host, in a
+## hot zone (4B part 3): a readout of what the enemy knows and how hard it's pushing, for
+## playtests. A normal build shows nothing (Captain: no meter on screen). Page Up shows or hides
+## it; Page Down skips the enemy's clock SKIP_S forward (reports come due, check-ins, cooldowns,
+## pressure's quiet and time, the QRF's turnout).
 
 const SKIP_S := 300.0
 const REFRESH_S := 0.5
