@@ -1,7 +1,7 @@
 class_name SoldierMovement
 extends Node
 ## How a Soldier body moves and stands: walking with momentum, sprinting and stamina,
-## jumping, crawling while down, stances (three standing heights, three crouching, prone,
+## jumping, stances (three standing heights, three crouching, prone,
 ## each with side stances), leaning, mounting the weapon on a surface, the settle sway after
 ## a stop, and the speed costs of load, aiming and carrying.
 ##
@@ -19,7 +19,7 @@ const WALK_SPEED := 4.0      # a jog: the normal standing pace
 const SPRINT_SPEED := 6.5
 const CROUCH_SPEED := 2.0
 const PRONE_SPEED := 0.8     # crawling
-const CRAWL_SPEED := 0.6     # downed
+const CRAWL_SPEED := 0.6     # a body moving while down (nothing moves one now; kept for the speed table)
 const JUMP_VELOCITY := 4.2
 const STAND_HEAD_Y := 1.65
 const CROUCH_HEAD_Y := 1.0
@@ -168,8 +168,8 @@ func step(delta: float) -> void:
 		_lean_held = 0
 		_lean_latched = 0
 		mounted = false
-		if not body.is_ai() and _captured():
-			input = Input.get_vector(&"move_left", &"move_right", &"move_forward", &"move_back")
+		# Down means unconscious (Vitals): no moving at all until someone treats, drags or carries
+		# them, or they come round (Captain, 2026-10-11: no crawling while down).
 	elif body.is_ai():
 		var want: int = body.want_stance if body.want_stance >= 0 else (Stance.CROUCH_MID if body.want_crouch else Stance.STAND_HIGH)
 		if want != stance:

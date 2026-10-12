@@ -932,8 +932,10 @@ func _process(delta: float) -> void:
 	_update_arms(delta, carry, swing)
 
 
-## The bones a ragdoll pose stands in for, in RAGDOLL_BONES order (the pelvis rides the torso).
-const RAGDOLL_BONES: Array[String] = ["torso", "head", "leg_l", "leg_r", "shin_l", "shin_r"]
+## The parts a ragdoll pose holds, in order: the bones it stands in for (the pelvis rides the
+## torso), then the arms (upper arm and forearm, right first, like _upper and _forearm).
+const RAGDOLL_BONES: Array[String] = ["torso", "head", "leg_l", "leg_r", "shin_l", "shin_r",
+	"arm_r", "arm_l", "fore_r", "fore_l"]
 
 
 ## Whether the body lies as a ragdoll (ragdoll_net holds a pose).
@@ -941,13 +943,19 @@ func ragdolled() -> bool:
 	return ragdoll_net.size() == RAGDOLL_BONES.size() * 7
 
 
-## Model-space bone transforms (keys as pose_bones) from ragdoll_net.
-func ragdoll_bones() -> Dictionary:
+## Each ragdoll part's model-space transform (RAGDOLL_BONES keys), from ragdoll_net.
+func ragdoll_parts() -> Dictionary:
 	var t := {}
 	for i in RAGDOLL_BONES.size():
 		var o := i * 7
 		var q := Quaternion(ragdoll_net[o + 3], ragdoll_net[o + 4], ragdoll_net[o + 5], ragdoll_net[o + 6]).normalized()
 		t[RAGDOLL_BONES[i]] = Transform3D(Basis(q), Vector3(ragdoll_net[o], ragdoll_net[o + 1], ragdoll_net[o + 2]))
+	return t
+
+
+## Model-space bone transforms (keys as pose_bones) from ragdoll_net.
+func ragdoll_bones() -> Dictionary:
+	var t := ragdoll_parts()
 	return {"root": Transform3D.IDENTITY, "torso": t.torso, "head": t.head, "pelvis": t.torso,
 		"leg_l": t.leg_l, "leg_r": t.leg_r,
 		"knee_l": (t.leg_l as Transform3D).affine_inverse() * t.shin_l,
@@ -1100,6 +1108,17 @@ func _update_attachment(delta: float, carry: Dictionary) -> void:
 ## Arms: each hand goes to its goal (blending from where it was when the goal changes), or
 ## swings free.
 func _update_arms(delta: float, carry: Dictionary, swing: float) -> void:
+	var mode: StringName = carry.get("mode", &"")
+	if downed and ragdolled() and mode != CARRIED and mode != DRAGGED:
+		# Lying as a ragdoll: the arms are its parts (in model space; the torso's root is identity).
+		var parts := ragdoll_parts()
+		var torso_t := torso.transform
+		for i in 2:
+			var side := "r" if i == 0 else "l"
+			var arm: Transform3D = parts["arm_" + side]
+			_upper[i].transform = torso_t.affine_inverse() * arm
+			_forearm[i].transform = arm.affine_inverse() * (parts["fore_" + side] as Transform3D)
+		return
 	var goals := _arm_goals(carry)
 	_place_shoulders(delta)
 	for i in 2:

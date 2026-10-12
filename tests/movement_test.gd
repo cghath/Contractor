@@ -179,7 +179,7 @@ func _test_hitboxes() -> void:
 	check(prone_head.distance_to(eye) < 0.3, "and sits where the camera is (%.2f m away)" % prone_head.distance_to(eye))
 	player.vitals.server_damage(500.0)
 	await _frames(2)
-	check(player.vitals.downed and absf(torso.rotation.x + PI / 2) < 0.01, "downed still lays hitboxes down (lay_down)")
+	check(player.vitals.downed and absf(torso.global_basis.y.y) < 0.35, "downed still lays hitboxes down (lying flat with the body, a ragdoll now: up %.2f)" % torso.global_basis.y.y)
 	player.vitals.server_reset_health()
 	move.set_stance(S.STAND_HIGH)
 	await _frames(2)

@@ -324,8 +324,8 @@ func is_crouching() -> bool:
 	return movement.is_crouching()
 
 
-## Every peer: an AI body that's down (or dead) and not carried or dragged lies as a ragdoll
-## (Ragdoll): the host simulates it, the others follow its replicated pose with colliders of
+## Every peer: a body that's down (unconscious) or dead and not carried or dragged lies as a
+## ragdoll (Ragdoll): the host simulates it, the others follow its replicated pose with colliders of
 ## their own. Its capsule stands aside meanwhile (layer 0); back up, carried or dragged, the
 ## ragdoll goes.
 func _update_ragdoll() -> void:
@@ -333,7 +333,7 @@ func _update_ragdoll() -> void:
 	if multiplayer.is_server():
 		var lifted := is_instance_valid(carried_by) \
 			or StringName(model.carry_net.get("mode", &"")) in [CharacterModel.CARRIED, CharacterModel.DRAGGED]
-		want = Ragdoll.enabled and is_ai() and not vitals.is_up() and not lifted
+		want = Ragdoll.enabled and not vitals.is_up() and not lifted
 	else:
 		want = model.ragdolled() and not vitals.is_up()
 	if want and not is_instance_valid(ragdoll):
@@ -345,6 +345,7 @@ func _update_ragdoll() -> void:
 		if vitals.is_up() or (not vitals.is_dead() and not is_instance_valid(carried_by) \
 				and not StringName(model.carry_net.get("mode", &"")) in [CharacterModel.CARRIED, CharacterModel.DRAGGED]):
 			collision_layer = BODY_LAYER
+
 
 
 ## Host only: an AI body moves from its intent, and a downed one follows whoever carries it.

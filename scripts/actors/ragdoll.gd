@@ -1,11 +1,11 @@
 class_name Ragdoll
 extends Node3D
-## A downed or dead AI body falling and lying as a ragdoll (Captain, 2026-10-11): bodies that
-## go down beside or on top of each other rest on one another instead of clipping through,
-## and the living walk over a pile instead of through it.
+## A downed (unconscious) or dead body, AI or player, falling and lying as a ragdoll (Captain,
+## 2026-10-11): bodies that go down beside or on top of each other rest on one another instead of
+## clipping through, and the living walk over a pile instead of through it.
 ##
-## The host simulates it: a rigid body per bone (torso, head, both thighs and shins: the
-## bones CharacterModel draws and poses hitboxes from), joined with anatomical limits, starting
+## The host simulates it: a rigid body per part (torso, head, thighs, shins, upper arms and
+## forearms: the parts CharacterModel draws), joined with anatomical limits, starting
 ## from the pose the body is drawn in as it goes down. Each step it writes the bones to the
 ## model's replicated ragdoll_net, which every peer draws the body from (and poses its
 ## hitboxes from, so shots, wounds, blood and charges follow it). Once it has settled it
@@ -13,9 +13,9 @@ extends Node3D
 ##
 ## Every other peer builds the same parts as static colliders that follow ragdoll_net, so a
 ## player (who drives their own movement) walks over bodies on their own machine too.
-## Soldier._update_ragdoll starts and stops it: an AI body down and not carried has one;
+## Soldier._update_ragdoll starts and stops it: a body down and not carried has one;
 ## carried or dragged it hasn't (putting it down drops it again), nor once it's back up.
-## Arms keep the model's own limp swing (proposed: arm parts later).
+## Arms are parts too (upper arm and forearm), with shoulder and elbow limits.
 
 ## Layer 6 ("ragdolls"): the parts. They meet the world and each other; living soldiers meet
 ## them (SoldierMovement.UP_MASK) and step up over them.
@@ -31,16 +31,25 @@ const PARTS := {
 	"leg_r": {"mass": 10.0, "box": Vector3(0.15, 0.45, 0.15), "at": Vector3(0, -0.225, 0)},
 	"shin_l": {"mass": 5.0, "box": Vector3(0.12, 0.47, 0.13), "at": Vector3(0, -0.235, 0.015)},
 	"shin_r": {"mass": 5.0, "box": Vector3(0.12, 0.47, 0.13), "at": Vector3(0, -0.235, 0.015)},
+	"arm_r": {"mass": 2.5, "box": Vector3(0.1, 0.32, 0.1), "at": Vector3(0, -0.16, 0)},
+	"arm_l": {"mass": 2.5, "box": Vector3(0.1, 0.32, 0.1), "at": Vector3(0, -0.16, 0)},
+	"fore_r": {"mass": 1.8, "box": Vector3(0.09, 0.3, 0.09), "at": Vector3(0, -0.14, 0)},
+	"fore_l": {"mass": 1.8, "box": Vector3(0.09, 0.3, 0.09), "at": Vector3(0, -0.14, 0)},
 }
-## Joints: [parent, child, the child's pivot in the parent's frame at rest, angular limits
-## (radians, lower/upper about x, y, z, measured from rest)]. Thighs swing forward on +x, knees
-## bend on -x (CharacterModel's pose_bones and _knee).
+## Joints: [parent, child, angular limits (radians, lower and upper about x, y, z, measured from
+## rest, where each child lines up with its parent)]. Thighs swing forward on +x, knees bend on
+## -x (CharacterModel's pose_bones and _knee); arms swing on x, a right arm lifts out on +z (a
+## left on -z), elbows bend on +x.
 const JOINTS := [
-	["torso", "head", CharacterModel.HEAD_PIVOT, Vector3(-0.6, -0.8, -0.4), Vector3(0.7, 0.8, 0.4)],
-	["torso", "leg_l", Vector3(-CharacterModel.HIP.x, 0, 0), Vector3(-0.5, -0.3, -0.6), Vector3(1.8, 0.3, 0.6)],
-	["torso", "leg_r", Vector3(CharacterModel.HIP.x, 0, 0), Vector3(-0.5, -0.3, -0.6), Vector3(1.8, 0.3, 0.6)],
-	["leg_l", "shin_l", Vector3(0, -CharacterModel.THIGH, 0), Vector3(-2.4, -0.05, -0.05), Vector3(0.0, 0.05, 0.05)],
-	["leg_r", "shin_r", Vector3(0, -CharacterModel.THIGH, 0), Vector3(-2.4, -0.05, -0.05), Vector3(0.0, 0.05, 0.05)],
+	["torso", "head", Vector3(-0.6, -0.8, -0.4), Vector3(0.7, 0.8, 0.4)],
+	["torso", "leg_l", Vector3(-0.5, -0.3, -0.6), Vector3(1.8, 0.3, 0.6)],
+	["torso", "leg_r", Vector3(-0.5, -0.3, -0.6), Vector3(1.8, 0.3, 0.6)],
+	["leg_l", "shin_l", Vector3(-2.4, -0.05, -0.05), Vector3(0.0, 0.05, 0.05)],
+	["leg_r", "shin_r", Vector3(-2.4, -0.05, -0.05), Vector3(0.0, 0.05, 0.05)],
+	["torso", "arm_r", Vector3(-2.2, -0.9, -0.15), Vector3(2.6, 0.9, 1.6)],
+	["torso", "arm_l", Vector3(-2.2, -0.9, -1.6), Vector3(2.6, 0.9, 0.15)],
+	["arm_r", "fore_r", Vector3(0.0, -0.6, -0.05), Vector3(2.5, 0.6, 0.05)],
+	["arm_l", "fore_l", Vector3(0.0, -0.6, -0.05), Vector3(2.5, 0.6, 0.05)],
 ]
 ## Settled: every part slower than this (m/s, rad/s) for SETTLE_S, or SETTLE_MAX_S after it fell.
 const SETTLE_SPEED := 0.08
@@ -104,7 +113,9 @@ func _drawn_bones() -> Dictionary:
 	var inv := m.global_transform.affine_inverse()
 	return {"torso": inv * m.torso.global_transform, "head": inv * m.head.global_transform,
 		"leg_l": inv * m.part_node(Vitals.THIGH_L).global_transform, "leg_r": inv * m.part_node(Vitals.THIGH_R).global_transform,
-		"shin_l": inv * m.part_node(Vitals.SHIN_L).global_transform, "shin_r": inv * m.part_node(Vitals.SHIN_R).global_transform}
+		"shin_l": inv * m.part_node(Vitals.SHIN_L).global_transform, "shin_r": inv * m.part_node(Vitals.SHIN_R).global_transform,
+		"arm_r": inv * m.part_node(Vitals.UPPER_ARM_R).global_transform, "arm_l": inv * m.part_node(Vitals.UPPER_ARM_L).global_transform,
+		"fore_r": inv * m.part_node(Vitals.FOREARM_R).global_transform, "fore_l": inv * m.part_node(Vitals.FOREARM_L).global_transform}
 
 
 func _build(bones: Dictionary) -> void:
@@ -156,8 +167,8 @@ func _build(bones: Dictionary) -> void:
 		# The joint's frame is the child's rest place on the parent, so its limits are measured
 		# from the rest pose, whatever pose the body falls from.
 		joint.global_transform = Transform3D(parent.global_basis, child.global_position)
-		var lo: Vector3 = j[3]
-		var hi: Vector3 = j[4]
+		var lo: Vector3 = j[2]
+		var hi: Vector3 = j[3]
 		for axis in 3:
 			var setter := [&"set_flag_x", &"set_flag_y", &"set_flag_z"][axis] as StringName
 			var param := [&"set_param_x", &"set_param_y", &"set_param_z"][axis] as StringName
@@ -270,9 +281,7 @@ func _follow() -> void:
 
 ## The model's ragdoll_net as one model-space transform per part (RAGDOLL_BONES keys).
 static func part_bones(m: CharacterModel) -> Dictionary:
-	var b := m.ragdoll_bones()
-	return {"torso": b.torso, "head": b.head, "leg_l": b.leg_l, "leg_r": b.leg_r,
-		"shin_l": (b.leg_l as Transform3D) * (b.knee_l as Transform3D), "shin_r": (b.leg_r as Transform3D) * (b.knee_r as Transform3D)}
+	return m.ragdoll_parts()
 
 
 ## The body a ragdoll part belongs to (or null): for anything that hit one.
