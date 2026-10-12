@@ -17,8 +17,9 @@ extends Node
 ##   extraction purple; the first call takes a smoke both want). A mark given while one is on
 ##   its way (or loitering) redirects it, free;
 ## - paid with Economy.server_pay_support(kind, contract id): the deployment's support budget
-##   first, then cash (refused if it can't be paid). Free with DevTools.on() outside a
-##   deployment (the vehicle range, the test zone): the dev way to call each one;
+##   first, then cash (refused if it can't be paid). With DevTools.on() outside a deployment
+##   (the vehicle range, the test zone) every call is free and transport flies anywhere, not
+##   just in hot zones: the dev way to try each one;
 ## - one of each kind at a time.
 ## "cancel" sends that support home (a transport with people aboard first lands them).
 ##
@@ -161,7 +162,7 @@ func server_call(kind: String, caller: Soldier, arg: String, point: Vector3) -> 
 		return "No helicopter left for %s: it was lost this op" % kind
 	if not Supports.can_fly(lvl):
 		return "Helicopters are grounded: the weather won't let them fly"
-	if kind == "transport" and not Supports.is_hot_zone(lvl):
+	if kind == "transport" and not Supports.is_hot_zone(lvl) and not _free():  # dev sessions: anywhere, to try it
 		return "Helicopter transport flies in hot zones only"
 	var extraction := MapNodes.extraction(self)
 	if kind == "extraction" and (extraction == null or not extraction.is_active()) and not _free():

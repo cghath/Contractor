@@ -30,6 +30,12 @@ extends RefCounted
 
 enum Phase { INBOUND, LOITER, GROUND, TAKEOFF, CARRY, LIFTING, ENDED, LEAVING, GONE, LOST }
 
+## Helicopters out at once start this far apart (m), and loiter this much wider and higher
+## each (by kind: LANE), so they keep out of each other's way.
+const SPAWN_SPACING_M := 70.0
+const LANE := {"resupply": 0, "transport": 1, "insertion": 1, "extraction": 2}
+const LANE_RADIUS_M := 45.0
+const LANE_AGL_M := 15.0
 ## Smoke: seen this far away (m), in the helicopter's line of sight; looked for this often.
 const SMOKE_SEE_M := 1500.0
 const SMOKE_CHECK_S := 0.5
@@ -172,7 +178,11 @@ func server_launch() -> bool:
 		dist = maxf(dist - HeliSupports.SPAWN_INSET_M, 200.0)
 	elif on_edge:
 		dist = maxf(dist, HeliSupports.MIN_INBOUND_M)
-	var start := toward + dir * dist
+	var start := toward + dir * dist + Vector3(-dir.z, 0.0, dir.x) * SPAWN_SPACING_M * float(sup.calls.size())
+	if lvl is ZoneLevel:  # inside the zone's edge (its invisible wall)
+		var area: Rect2 = lvl.map_area().grow(-HeliSupports.SPAWN_INSET_M)
+		start.x = clampf(start.x, area.position.x, area.end.x)
+		start.z = clampf(start.z, area.position.y, area.end.y)
 	start.y = LandingZone.terrain_y(lvl, start) + Helicopter.CRUISE_AGL_M
 	exit = Vector3(start.x, start.y, start.z)
 	heli = layer.server_spawn(HeliSupports.MODEL, Transform3D(Basis.looking_at(-dir, Vector3.UP), start), "", &"player") as Helicopter
@@ -266,7 +276,7 @@ func server_set_destination(where: Dictionary) -> String:
 
 ## Sends it home. Returns "" or why not.
 func server_cancel() -> String:
-	if _players_aboard() > 0 and heli.is_airborne():
+	if not heli.occupants().is_empty() and heli.is_airborne():
 		return "Not with people aboard: give it a destination"
 	sup.server_radio(kind, "Copy, returning to base")
 	if phase == Phase.GROUND:
@@ -372,12 +382,13 @@ func _step_inbound() -> void:
 
 func _land_on_smoke(cloud: SmokeCloud) -> void:
 	var at := level().ground_point(cloud.global_position)
-	sup.claimed[cloud.get_instance_id()] = self
 	mark = {"pos": at, "from": "smoke"}
 	if not _choose_lz(at):
 		sup.server_radio(kind, "I see %s, but there's no LZ within %d m of it" % [cloud.colour, roundi(LandingZone.SEARCH_M)])
+		_smoke_failed[cloud.get_instance_id()] = true
 		mark = {}
 		return
+	sup.claimed[cloud.get_instance_id()] = self
 	_rechecked = false
 	phase = Phase.INBOUND
 	heli.server_land_at(lz)
@@ -386,6 +397,7 @@ func _land_on_smoke(cloud: SmokeCloud) -> void:
 
 func _step_carry() -> void:
 	if heli.is_landed():
+		stage = "drop"
 		_on_landed()
 		return
 	if _check <= 0.0 and _flat(heli.global_position, dest_lz) < DEST_SMOKE_M + SMOKE_SEE_M * 0.5:
@@ -705,19 +717,40 @@ func _seen_smoke(colours: Array, near: Variant = null, within := INF) -> SmokeCl
 		if not is_instance_valid(cloud) or cloud.is_queued_for_deletion() or not cloud.is_inside_tree():
 			continue
 		var id := cloud.get_instance_id()
-		if sup.claimed.has(id) or _smoke_failed.has(id):
+		var mine := cloud.colour in colours
+		if (mine and (sup.claimed.has(id) or _smoke_failed.has(id))) or (not mine and (cloud.colour == "white" or _wrong_seen.has(id))):
 			continue
 		var at := cloud.global_position
-		if from.distance_to(at) > SMOKE_SEE_M or (near != null and _flat(at, near as Vector3) > within):
+		if from.distance_to(at) > SMOKE_SEE_M or (near != null and _flat(at, near as Vector3) > within) or not _sees(at):
 			continue
-		if not _sees(at):
-			continue
-		if cloud.colour in colours:
-			return cloud
-		if cloud.colour != "white" and not _wrong_seen.has(id):
+		if not mine:
 			_wrong_seen[id] = true
 			sup.server_radio(kind, "I see %s. Not my smoke: I land on %s" % [cloud.colour, " or ".join(colours)])
+		elif near != null or not _earlier_wants(cloud.colour):
+			return cloud
 	return null
+
+
+## Whether a call made before this one is still looking for a smoke of `colour` (the first
+## call takes a smoke both want: Captain's "first call takes green").
+func _earlier_wants(colour: String) -> bool:
+	for c in sup.calls:
+		if c == self:
+			return false
+		if not c.is_over() and c.mark.is_empty() and (c.phase == Phase.INBOUND or c.phase == Phase.LOITER) \
+				and colour in HeliSupports.smoke_colours(c._smoke_kind()) and is_instance_valid(c.heli) and c._sees_any(colour):
+			return true
+	return false
+
+
+## Whether this helicopter can see an unclaimed smoke of `colour` now.
+func _sees_any(colour: String) -> bool:
+	for cloud: SmokeCloud in SmokeCloud.clouds_of(colour):
+		var id := cloud.get_instance_id()
+		if not sup.claimed.has(id) and not _smoke_failed.has(id) and heli.global_position.distance_to(cloud.global_position) <= SMOKE_SEE_M \
+				and _sees(cloud.global_position):
+			return true
+	return false
 
 
 func _sees(at: Vector3) -> bool:
@@ -740,7 +773,8 @@ func _by_door(pos: Vector3, reach: float) -> bool:
 
 func _update_orbit() -> void:
 	_orbit_next = LOITER_UPDATE_S
-	heli.server_orbit(_loiter_centre(), LOITER_RADIUS_M, LOITER_AGL_M, Helicopter.LOITER_KMH)
+	var lane := float(LANE.get(kind, 0))
+	heli.server_orbit(_loiter_centre(), LOITER_RADIUS_M + lane * LANE_RADIUS_M, LOITER_AGL_M + lane * LANE_AGL_M, Helicopter.LOITER_KMH)
 
 
 ## Round the players, kept away from where it took fire lately, inside the map.

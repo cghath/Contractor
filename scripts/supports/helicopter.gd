@@ -227,9 +227,9 @@ static func eta_s(metres: float) -> float:
 
 # --- Orders (host) ----------------------------------------------------------------------------
 
-## Host: in the air at `xform` (a support arriving: rotors up to speed), moving `speed_kmh`
+## Host: in the air where it is (a support arriving: rotors up to speed), moving `speed_kmh`
 ## along its nose.
-func server_start_airborne(speed_kmh := CRUISE_KMH) -> void:
+func server_start_airborne(speed_kmh := CRUISE_KMH * 0.5) -> void:
 	freeze = false
 	gravity_scale = 0.0
 	_rpm = ROTOR_RPM
@@ -468,10 +468,11 @@ func _fall(delta: float) -> void:
 ## The velocity heads for `desired`, accelerations limited; the tilt follows what it took.
 func _steer(desired: Vector3, delta: float) -> void:
 	var dv := desired - linear_velocity
-	var dv_h := Vector3(dv.x, 0.0, dv.z).limit_length(ACCEL_MS2 * pace * delta)
-	var dv_y := clampf(dv.y, -VERTICAL_ACCEL_MS2 * pace * delta, VERTICAL_ACCEL_MS2 * pace * delta)
+	var p2 := pace * pace  # speeds go with pace, accelerations with its square
+	var dv_h := Vector3(dv.x, 0.0, dv.z).limit_length(ACCEL_MS2 * p2 * delta)
+	var dv_y := clampf(dv.y, -VERTICAL_ACCEL_MS2 * p2 * delta, VERTICAL_ACCEL_MS2 * p2 * delta)
 	linear_velocity += dv_h + Vector3(0.0, dv_y, 0.0)
-	_accel = _accel.lerp(dv_h / maxf(delta, 0.001) / pace, minf(delta * 4.0, 1.0))
+	_accel = _accel.lerp(dv_h / maxf(delta, 0.001) / p2, minf(delta * 4.0 * pace, 1.0))
 
 
 ## Turns toward the attitude the rotor's thrust gives: tilted into the acceleration (and the
