@@ -64,6 +64,7 @@ func _ready() -> void:
 	await _test_techniques()
 	await _test_loot()
 	await _test_stand_where_it_lay()
+	await _test_respawn_not_where_it_lay()
 	await _test_dummy()
 	GameState.delete_save()
 	print("ANIMATIONS TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
@@ -491,6 +492,31 @@ func _test_stand_where_it_lay() -> void:
 	check(_flat(bravo.global_position, lay) < 0.5 and absf(bravo.global_position.y - fell.y) < 0.3 and bravo.rotation.is_finite(),
 		"on the ground, and stays there (%.2f m, %.2f m up)" % [_flat(bravo.global_position, lay), bravo.global_position.y - fell.y])
 	_place(bravo, SPOT + Vector3(3.0, 0, 0))
+
+
+## A player who dies while lying as a ragdoll respawns at a spawn point, not where the ragdoll lay
+## (Captain, 2026-10-12: the revive's stand-up overrode the respawn; Soldier._respawned_until).
+func _test_respawn_not_where_it_lay() -> void:
+	print("Respawning, not standing up where the ragdoll lay")
+	_place(player, SPOT + Vector3(8.0, 0, -6.0))
+	await _frames(2)
+	_down(player)
+	await _settled(player)
+	check(not player.vitals.is_up() and is_instance_valid(player.ragdoll), "a downed player lies as a ragdoll")
+	for part: Node3D in player.ragdoll.parts.values():
+		part.global_position += Vector3(3.0, 0, -3.0)
+	player.ragdoll._send(true)
+	await _frames(3)
+	var lay: Vector3 = (player.ragdoll.parts["torso"] as Node3D).global_position
+	player.vitals.server_hit(Vitals.HEAD, {"round_class": Vitals.INTERMEDIATE})  # dies: a body is left, the player respawns
+	await _frames(5)
+	var spawn_gap: float = CompoundLevel.SPAWN_POINTS.map(func(p: Vector3) -> float: return _flat(p, player.global_position)).min()
+	check(player.vitals.is_up() and not is_instance_valid(player.ragdoll), "respawned: up, no ragdoll")
+	check(spawn_gap < 0.5 and _flat(player.global_position, lay) > 5.0,
+		"at a spawn point (%.2f m off), not where the ragdoll lay (%.1f m away)" % [spawn_gap, _flat(player.global_position, lay)])
+	await _seconds(2.5)  # past Soldier.RESPAWN_HOLD_S
+	check(_flat(player.global_position, lay) > 5.0, "and still there once the hold is over")
+	_place_player()
 
 
 func _test_dummy() -> void:

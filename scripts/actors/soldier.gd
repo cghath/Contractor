@@ -340,7 +340,8 @@ func _update_ragdoll() -> void:
 		ragdoll = Ragdoll.start(self) if multiplayer.is_server() else Ragdoll.follow(self)
 		collision_layer = 0
 	elif not want and is_instance_valid(ragdoll):
-		var spot: Variant = ragdoll.rest_spot() if is_ai() or is_multiplayer_authority() else null
+		# Not right after a respawn: the player is at the spawn point, not getting up where they lay.
+		var spot: Variant = ragdoll.rest_spot() if (is_ai() or is_multiplayer_authority()) and _now() >= _respawned_until else null
 		ragdoll.stop()
 		ragdoll = null
 		_stand_where_ragdoll_lay(spot)
@@ -1283,6 +1284,12 @@ var body_label := ""
 var body_uid := ""
 ## A dead player's body carries a GearMarker (CompoundLevel.server_spawn_body).
 var has_gear_marker := false
+## A player's respawn (_client_respawn) puts them at a spawn point; until this time the ragdoll
+## going doesn't stand them up where it lay (Captain, 2026-10-12: respawned where he'd died).
+var _respawned_until := -1.0
+## How long after a respawn the ragdoll's spot is ignored (the vitals reset and the respawn can
+## reach a client in either order).
+const RESPAWN_HOLD_S := 2.0
 
 
 ## AI dies for good (permadeath) and its own node stays as the body, on the shoulder of
@@ -1625,6 +1632,7 @@ func _client_carried(pos: Vector3) -> void:
 func _client_respawn(pos: Vector3) -> void:
 	if multiplayer.get_remote_sender_id() != 1:
 		return
+	_respawned_until = _now() + RESPAWN_HOLD_S
 	global_position = pos
 	velocity = Vector3.ZERO
 	player_input.flash("You were killed. Respawned.")
