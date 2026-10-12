@@ -263,6 +263,25 @@ surgical team, a fuel allocation, quartermaster discounts.
 cost: the hire plus the flight, more for a hot LZ, and it takes time (the next lift). Bodies and
 casualties go back the same way.
 
+**Armory and storage (Captain, 2026-10-12): a refactor of today's floor stash.** Today
+(`BaseArmory`) every item lies loose on the armory floor and spills into the yard. Instead:
+- **Physical and organised:** every kind of item has its own place that makes sense: weapons
+  on racks, plates, carriers and helmets on shelves, ammunition by calibre, grenades and
+  explosives in their own crates, medical on its own shelves, pouches and small kit in
+  lockers. A few visible props per area, not every item lying out.
+- **Plus an ACE3-style Virtual Arsenal:** a menu on the storage that lists everything there and
+  kits you out from it (and takes gear back), drawing only on what the company really owns.
+- **Capacity is physical:** when the armory is full, buy storage containers to extend it, or
+  upgrade it.
+- **At friendly FOBs:** the VA works on the storage the host assigns us. At low reputation that
+  storage is **pallets with hard boxes**, like a CIF issue point, for plate carriers, helmets and
+  other kit, while weapons, ammunition and grenades go in their **own mini armory**: lockable
+  crates like Halo's armory crates. Better storage comes with reputation and our own armory
+  container module.
+Timing (Proposed): designed now; built as a wave 5 workstream with the FOB and the container
+modules (the base hub becomes the first friendly FOB then), so it isn't built twice. Captain's
+side can take it after 4B part 3, coordinated with cghath since the base files are shared.
+
 **Materials:** containers, steel, electronics and generators build and upgrade modules (on the
 LHD); sandbags, HESCO, wire and camo nets fortify our space and help in FOB defence. Waves:
 modules and FOB deployment with wave 5 (they need lift and cargo; the 4A base hub becomes the

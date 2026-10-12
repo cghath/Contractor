@@ -241,6 +241,38 @@ the first friendly FOB. Details: [ChrisPlan_handoff.md](ChrisPlan_handoff.md#bas
 hub stays exactly as it is until wave 5 makes it the first friendly FOB, and the hot-zone files
 are Captain's side's for now. Read the note at the top of "Wave 5" in [ChrisPlan_handoff.md](ChrisPlan_handoff.md).
 
+**Debugging tools (Captain, 2026-10-12): Captain's side, first after 4B part 3.** Every run of
+anything keeps numbered logs under one parent, `B:\Contractor-test-logs` (tests already do:
+`tools/run_tests.sh`). First, together:
+1. **Bug-report key:** one key in a playtest saves a numbered folder (P0001...): a screenshot,
+   a note typed there, a state dump (everyone's position, each AI's intent, target and why, the
+   alert and pressure, the player's inventory and wounds, the zone seed) and the last minutes
+   of the log.
+2. **Session logs:** every exported build writes a numbered log per session to the same parent;
+   the pause menu shows the session number.
+3. **AI debug overlay (debug builds):** over each AI its intent, target, combat mode and alert
+   state, and a line to where it's going (the hot-zone readout, generalised).
+Then: **replay** (the bug report also saves a `Campaign.snapshot`, loadable in a headless test
+that reproduces the bug and stays as a regression test); a **test history page** (pass/fail
+per suite over time from `index.txt`, flaky suites flagged); **performance lines** in session
+logs (frame time, AI count, navigation bake time, modules streamed in, once a minute).
+
+**Medical menu (Captain, 2026-10-12): Captain's side, next after the debugging tools.** An ACE3-style
+medical menu on H (on the person you look at, else yourself): a body diagram coloured by
+bleeding with tourniquet, splint and dressing icons, the injuries per part, vitals, treatment
+tabs listing only what you carry (with the reason when something can't be used), an activity
+log, and a triage card the squad AI respects; a small HUD body silhouette shows while you
+bleed. Today's one-press quick-treat moves to Shift+H. A view over `Vitals` and the AI's care
+plans (`SquadAI.plan_care`): no new medicine.
+
+**Terrain visual pass (Captain, 2026-10-12): Captain's side, after 4B part 3, in parallel with
+wave 5.** The zones' ground (`ZoneTerrain`) gets its first look: ground colours by height and
+slope, low-poly voxel-style trees and bushes to match the Stormworks characters, rocks for
+cover, and the hot zones' generated roads made visible. Foliage that blocks the AI's sight is
+the gameplay half. Ahead of wave 7's environment assets, which replace the placeholders as
+they land. Terrain files (`scripts/world/zone_terrain.gd`, new vegetation scripts) are Captain's
+side's meanwhile; cghath's agent: vehicles driving on it is yours, its look is ours.
+
 ### Wave 6: phase 6, factions
 
 Persistent world (repairs, reoccupation, simulated operations between missions that move
