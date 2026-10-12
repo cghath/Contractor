@@ -67,6 +67,8 @@ Today's dev keys:
 | Key | What |
 |---|---|
 | K | hurt yourself (going down, dying) |
+| Insert | bug report (any build): note panel, saves report-<n>.txt and .png in the session folder |
+| Delete | host: labels over AI within 80 m (intent, status, target, mode, suppression) and a line to where each is heading |
 | Shift+End | during a deployment, extract everyone near you at once |
 | End | open the contract board (any build) |
 | Page Up | hot zones: show/hide the enemy readout (alert per area, last known position, reports, pressure and tier, patrols, QRF, hunters, coordination, enemy radio) |
@@ -106,13 +108,13 @@ numbered session, **P<number>**, from the same counter and in the same parent as
 
 ## Planned (Captain's side, first after 4B part 3: don't build these twice)
 
-1. **Bug-report key:** in a playtest, one key saves a numbered folder (P....) with a screenshot,
+1. ~~**Bug-report key**~~: built (Insert; `BugReport`, saves report-<n>.txt/.png in the session folder; the log tail is in the state text). Original spec: in a playtest, one key saves a numbered folder (P....) with a screenshot,
    a note typed there, a state dump (every soldier's position; each AI's intent, target, combat
    mode and why; alert and pressure; the player's inventory and wounds; zone id and seed) and
    the last minutes of the log.
 2. ~~**Session logs**~~: built, see "Session logs" above. The bug-report key should reuse
    `SessionLog.state_text()` for its dump and save into the session's folder.
-3. **AI debug overlay (dev tools):** over each AI its intent, target, combat mode and alert state,
+3. ~~**AI debug overlay**~~: built (Delete, `AiOverlay`; intent, status, target, mode, suppression, line to its destination; no alert state yet). Original spec: over each AI its intent, target, combat mode and alert state,
    and a line to where it's going.
 4. Later: **replay** a bug report (it saves a `Campaign.snapshot`; a headless test loads it,
    reproduces the bug and stays as a regression test), a **test history page** (pass/fail per

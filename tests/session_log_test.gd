@@ -101,10 +101,41 @@ func _test_issues() -> void:
 		check(line.size() == 1 and "at (5.0, -" in line[0] and SquadAI.Intent.keys().any(func(k: String) -> bool: return (k + ":") in line[0]),
 			"the dump has the soldier: where, and the AI's intent (%s)" % [line])
 		check("Player 1 (friendly" in state or "player 1" in state, "and the player")
+	await _test_bug_report(player, level, faller)
 	SessionLog.finish()
 	check("-FAIL-" in SessionLog.folder.get_file() and DirAccess.dir_exists_absolute(SessionLog.folder), "something unexpected: the folder ends FAIL")
 	check(_index().contains("P0043 ") and _index().contains(" FAIL "), "and index.txt says so")
 	faller.queue_free()
+
+
+func _test_bug_report(player: Soldier, level: CompoundLevel, faller: Soldier) -> void:
+	print("The bug-report key and the AI overlay")
+	player.vitals.server_hit(Vitals.FOREARM_L, {"round_class": Vitals.FRAGMENT, "superficial": true})
+	var n := BugReport.save("probe: the door sticks", player)
+	var report := SessionLog.folder.path_join("report-1.txt")
+	check(n == 1 and FileAccess.file_exists(report), "report-1.txt is saved in the session folder")
+	var text := FileAccess.get_file_as_string(report)
+	check("Note: probe: the door sticks" in text and "Time: " in text and "Zone: " in text, "it has the note, the time and the zone")
+	check("Soldiers (" in text and "Why: bug report: probe: the door sticks" in text and ("%s (friendly" % faller.display_name()) in text, "and the soldiers list")
+	check("  inventory:" in text and "  wounds (" in text and "forearm" in text.to_lower(), "and the player's inventory and wounds")
+	check("bug report 1: probe: the door sticks" in _log(), "the log says so")
+	check(BugReport.save("second", player) == 2 and FileAccess.file_exists(SessionLog.folder.path_join("report-2.txt")), "the next report is report-2")
+	var scout := level.spawn_soldier({"name": "Scout", "faction": "friendly", "variant": "multicam", "pos": player.global_position + Vector3(0, 0.1, 8),
+		"loadout": ["m4a1"], "combat": 0.5, "discipline": 0.5, "guard": true})
+	await _frames(5)
+	var overlay := AiOverlay.new()
+	add_child(overlay)
+	check(overlay.labels.is_empty(), "the overlay shows nothing until it is switched on")
+	overlay.set_shown(true)
+	overlay.refresh()
+	var label: Label3D = overlay.labels.get(scout)
+	check(label != null and SquadAI.Intent.keys()[SquadAI.of(scout).intent] in label.text and "suppr" in label.text,
+		"it has a label with the intent over a nearby AI (%s)" % [label.text if label else "none"])
+	check(not overlay.labels.has(faller), "and none over one far away")
+	overlay.set_shown(false)
+	check(overlay.labels.is_empty(), "switched off, the labels go")
+	overlay.queue_free()
+	scout.queue_free()
 
 
 func _probe_error() -> void:

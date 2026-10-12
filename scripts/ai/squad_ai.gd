@@ -523,6 +523,11 @@ func order_throw(id: StringName, point: Vector3) -> bool:
 	return _throw(id, point)
 
 
+## Where it is heading (the destination it is walking to), or Vector3.INF if nowhere (debug overlay).
+func destination() -> Vector3:
+	return _destination if _has_destination else Vector3.INF
+
+
 func status_text() -> String:
 	var who := _name_of(casualty)
 	match intent:

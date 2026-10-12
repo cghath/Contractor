@@ -11,6 +11,20 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Bug-report key and AI overlay (2026-10-12)
+
+#### Added
+
+- **Bug-report key (Insert, any build)**: a note panel (Enter saves, Esc cancels) writes
+  `report-<n>.txt` and `report-<n>.png` into the session's folder: the note, time, zone and
+  seed, `SessionLog.state_text` (every soldier, the AI's intents) with the player's inventory
+  and wounds, and the last log lines. `BugReport.save(note, node)` is the callable the tests use.
+  The pause menu shows the key. `SessionLog.state_text` now includes the local player's
+  inventory and wounds.
+- **AI debug overlay (Delete, dev tools, host)**: labels over AI within 80 m (the nearest 16)
+  with intent, status, target, combat mode and suppression, and a line to where each is heading
+  (`SquadAI.destination()`), refreshed 4 times a second.
+
 ### Wave 5a: vehicles and anti-armour (cghath's side, 2026-10-12)
 
 #### Added
