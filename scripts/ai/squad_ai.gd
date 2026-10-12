@@ -974,7 +974,7 @@ static func responder_for(c: Soldier, wanted: Array[StringName] = []) -> Soldier
 	var near_d := INF
 	for n in c.get_tree().get_nodes_in_group(&"combatants"):
 		var ai := SquadAI.of(n)
-		if ai == null or not ai._free_for(c) or not ai._cares_for(c) or not ai._carries_any(wanted):
+		if ai == null or ai.body == null or not ai._free_for(c) or not ai._cares_for(c) or not ai._carries_any(wanted):
 			continue
 		var d := ai.body.global_position.distance_to(c.body_point())
 		if ai.escorting == c:
@@ -1008,7 +1008,7 @@ static func medic_for(c: Soldier, wanted: Array[StringName]) -> Soldier:
 	var other_d := INF
 	for n in c.get_tree().get_nodes_in_group(&"combatants"):
 		var ai := SquadAI.of(n)
-		if ai == null or ai.body.role != Roles.MEDIC or not ai._cares_for(c) or not ai._free_for(c) \
+		if ai == null or ai.body == null or ai.body.role != Roles.MEDIC or not ai._cares_for(c) or not ai._free_for(c) \
 				or c.care_by == ai.body or wanted.is_empty() or not ai._carries_any(wanted):
 			continue
 		var d := ai.body.global_position.distance_to(c.body_point())
