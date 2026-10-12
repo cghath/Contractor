@@ -189,6 +189,7 @@ func _detonate(id: String) -> void:
 	Throwables.server_detonate(lvl, "frag", pos)
 	lvl.server_blast(pos, MissionRegistry.setting_f("charge_radius_m", 1.6))
 	PeopleLayer.server_noise(lvl, pos, PeopleLayer.BLAST_HEARD_M)
+	Alert.server_noise(lvl, pos, Alert.BLAST)
 	if rides and rides != level and is_instance_valid(rides):
 		var owner_body: Node = rides.get_parent() if rides is Area3D else rides
 		if owner_body.has_method(&"server_explosion"):

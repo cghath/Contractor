@@ -72,6 +72,8 @@ func _ready() -> void:
 		def = ZoneDef.get_def("test")
 	super._ready()
 	squad_for(&"hostile").patrol = []  # garrisons hold their ground
+	if String(def.get("kind", "")) == "hot":
+		add_child(Alert.new())  # the enemy's alert: what they see, hear and report (4B part 3)
 	Contracts.contract_live.connect(_on_contract_live)
 	players.child_entered_tree.connect(_on_player_entered)
 
@@ -327,6 +329,7 @@ func _spawn_garrison(module: ZoneModule) -> void:
 	if spots.is_empty():
 		return
 	var taken: Array[Vector3] = []
+	var alert := get_node_or_null(^"Alert") as Alert  # hot zones: relaxed until something happens
 	for i in range(from, want):
 		var callsign := _garrison_callsign(module, i)
 		if fallen.has(callsign) or ai.get_node_or_null(NodePath(callsign)) != null:
@@ -335,7 +338,7 @@ func _spawn_garrison(module: ZoneModule) -> void:
 		taken.append(pos)
 		spawn_soldier({"name": callsign, "faction": "hostile", "variant": "urban", "pos": pos,
 			"loadout": HOSTILE_LOADOUT, "combat": GARRISON_STATS.combat, "discipline": GARRISON_STATS.discipline, "guard": true,
-			"mode": GARRISON_STATS.mode})
+			"mode": alert.mode_at(pos) if alert else GARRISON_STATS.mode})
 	for i in want:
 		var me := ai.get_node_or_null(NodePath(_garrison_callsign(module, i))) as Soldier
 		if me and (me.buddy == null or not is_instance_valid(me.buddy)):

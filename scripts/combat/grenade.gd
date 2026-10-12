@@ -51,4 +51,5 @@ func _physics_process(delta: float) -> void:
 		Harm.blast_source = null
 		if kind != "smoke":
 			PeopleLayer.server_noise(self, global_position, PeopleLayer.BLAST_HEARD_M)  # people nearby hear it
+			Alert.server_noise(self, global_position, Alert.BLAST)
 	queue_free()

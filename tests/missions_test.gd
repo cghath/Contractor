@@ -43,6 +43,7 @@ func _ready() -> void:
 	await _test_charges()
 	await _test_failures()
 	await _test_no_cuffs()
+	await _test_alert()
 	_finish()
 
 
@@ -428,3 +429,54 @@ func _frames(n: int) -> void:
 
 func _seconds(s: float) -> void:
 	await get_tree().create_timer(s).timeout
+
+
+# --- The hot zone's alert (4B part 3) --------------------------------------------------------
+
+## Captain: the enemy knows only what its people see, hear and report, with radio delays.
+func _test_alert() -> void:
+	print("Alert")
+	var alert := Alert.of(level)
+	check(alert != null and alert.zone_state == Alert.State.NORMAL, "a hot zone has an alert, calm to start")
+	if alert == null:
+		return
+	var site: ZoneModule = level.modules().filter(func(m: ZoneModule) -> bool: return m.type == "outpost")[0]
+	var spawn := func(n: String, at: Vector3) -> Soldier:
+		var s := level.spawn_soldier({"name": "%s_A%s" % [site.module_id, n], "faction": "hostile", "variant": "urban",
+			"pos": level.ground_point(at), "loadout": [], "combat": 0.5, "discipline": 0.5, "guard": true, "mode": alert.mode_at(at)})
+		SquadAI.of(s).process_mode = Node.PROCESS_MODE_DISABLED
+		return s
+	var a: Soldier = spawn.call("1", site.global_position)
+	var b: Soldier = spawn.call("2", site.global_position + Vector3(4, 0, 0))
+	await _frames(3)
+	check(SquadAI.of(a).combat_mode == Squad.CombatMode.SAFE, "a calm site's guards are relaxed (safe)")
+	var far := site.global_position + Vector3(250, 0, 0)
+	Alert.server_noise(player, far, Alert.SHOT, true)
+	check(alert._pending.is_empty(), "a suppressed shot 250 m off isn't heard")
+	Alert.server_noise(player, far, Alert.SHOT)
+	check(alert._pending.size() == 2 and alert.state_of(site.module_id) == Alert.State.SUSPICIOUS and alert.zone_state == Alert.State.NORMAL,
+		"an unsuppressed one is: the site stands to at once (suspicious), the zone doesn't know yet")
+	check(SquadAI.of(a).combat_mode == Squad.CombatMode.AWARE, "its guards are aware")
+	b.vitals.server_hit(Vitals.HEAD, {"round_class": Vitals.INTERMEDIATE})
+	alert.advance(70.0)
+	check(alert.reports.size() == 1 and String(alert.reports[0].by) == String(a.name) and alert.zone_state == Alert.State.SUSPICIOUS,
+		"after the radio delay one report reaches the net (the man killed first never sent his): the zone is suspicious")
+	check(not alert.last_known().is_empty() and (alert.last_known().pos as Vector3).distance_to(far) < 1.0, "the enemy's last known position is the noise")
+	Alert.server_sighting(a, player.global_position)
+	alert.advance(70.0)
+	check(alert.zone_state == Alert.State.ENGAGED and SquadAI.of(a).combat_mode == Squad.CombatMode.COMBAT, "a sighting reported: engaged, guards in combat mode")
+	var r0 := float(alert.last_known().radius)
+	alert.advance(60.0)
+	check(float(alert.last_known().radius) > r0, "the last known position gets less certain with time (%.0f m -> %.0f m)" % [r0, float(alert.last_known().radius)])
+	alert.advance(Alert.ENGAGED_COOL_S + 10.0)
+	check(alert.state_of(site.module_id) == Alert.State.ALERTED, "20 minutes without contact: back to alerted, not calm")
+	alert.advance(Alert.ALERTED_COOL_S + 10.0)
+	check(alert.state_of(site.module_id) == Alert.State.SUSPICIOUS and alert.zone_state >= Alert.State.SUSPICIOUS, "hours later only suspicious: a loud zone stays twitchy")
+	# A fallen comrade found by his own.
+	alert.advance(Alert.SCAN_S + 0.1)
+	alert.advance(70.0)
+	check(alert.reports.any(func(r: Dictionary) -> bool: return r.kind == &"body"), "the body is found and reported")
+	for s: Soldier in [a, b]:
+		if is_instance_valid(s):
+			s.queue_free()
+	await _frames(2)

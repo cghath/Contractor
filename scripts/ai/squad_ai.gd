@@ -355,6 +355,8 @@ func _physics_process(delta: float) -> void:
 			var callouts := Callouts.of(body)
 			if callouts:
 				callouts.contact(body, target)
+			if body.faction == &"hostile":
+				Alert.server_sighting(body, target.global_position)  # hot zones: he'll radio it in (4B part 3)
 	if target != null and target.vitals.is_up():
 		_last_contact = now
 		body.threat_pos = target.global_position
