@@ -7,8 +7,8 @@ extends Node3D
 ## - Civilians and HVTs are Soldier bodies in the "civilian" faction (Person.FACTION): the
 ##   same hitboxes, wound model, carrying, bodies and replication as everyone else, with no
 ##   weapons. They spawn through this node's spawner (so late joiners get them) and the host
-##   drives each with a CivilianAI, or HvtAI for an HVT, named BRAIN. Their looks are
-##   placeholders behind PersonLook.dress.
+##   drives each with a CivilianAI, or HvtAI for an HVT, named BRAIN. What they wear is
+##   PersonLook.outfit, picked on the host and sent with the spawn ("look").
 ## - Who each person is and what they're doing (kind, side, HVT id, cuffed, surrendered, who
 ##   leads them, their order, delivered) is `states`, decided by the host and sent to every
 ##   peer and late joiner by RPC. Person reads it.
@@ -306,6 +306,10 @@ func hvts_out(centre: Vector2, radius: float, extracted: Array) -> Array:
 func server_spawn_person(data: Dictionary) -> Soldier:
 	var d := data.duplicate(true)
 	d["type"] = "person"
+	if not d.has("look"):  # what they wear, picked once here and sent with the spawn (PersonLook)
+		var site: Variant = level.call(&"module_at", d.pos) if level and level.has_method(&"module_at") else null
+		d["look"] = PersonLook.outfit(StringName(d.get("kind", Person.CIVILIAN)), StringName(d.get("side", Person.NEUTRAL)),
+			{"name": String(d.name), "site": String(site.type) if site else ""})
 	var s := spawner.spawn(d) as Soldier
 	var kind := StringName(d.get("kind", Person.CIVILIAN))
 	var st := {"kind": String(kind), "side": String(d.get("side", Person.NEUTRAL)), "uid": "%s_%s" % [GameState.zone_id, d.name],
@@ -337,11 +341,10 @@ func _make(data: Dictionary) -> Node:
 	var side := StringName(data.get("side", Person.NEUTRAL))
 	s.name = data.name
 	s.faction = Person.FACTION
-	s.variant = PersonLook.variant_for(kind, side)
+	s.variant = String(data.get("look", "")) if data.has("look") else PersonLook.outfit(kind, side, {"name": String(data.name)})
 	s.position = data.pos
 	s.rotation.y = float(data.get("rot_y", 0.0))
 	s.body_label = String(data.get("label", ""))
-	PersonLook.dress(s, kind, side)
 	if multiplayer.is_server():
 		var inventory: Inventory = s.get_node(^"Inventory")
 		for id: String in data.get("loadout", []):

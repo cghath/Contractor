@@ -176,7 +176,7 @@ func _rebuild() -> void:
 			if slot != &"helmet":
 				piece.transform = carrier_fit(String(slot).trim_prefix("plate_")) * piece.transform
 			if slot != &"helmet":  # a plate sits inside the carrier's pocket, under its fabric
-				piece.set_cover(Color(VoxelArt.VARIANTS.get(model.variant, VoxelArt.VARIANTS.multicam).gear) if carrier else Color(0, 0, 0, 0))
+				piece.set_cover(Color(VoxelArt.spec(model.variant).gear) if carrier else Color(0, 0, 0, 0))
 	for slot: StringName in MOUNTS:
 		_set_gear(slot, inventory.slots[slot], &"torso", rest_transform(slot))
 	_fit_front_panel(carrier)
@@ -212,7 +212,7 @@ func _set_pouches() -> void:
 	_pouches = Node3D.new()
 	_pouches.name = "Pouches"
 	model.torso.add_child(_pouches)
-	var gear := Color(VoxelArt.VARIANTS.get(model.variant, VoxelArt.VARIANTS.multicam).gear).darkened(0.12)
+	var gear := Color(VoxelArt.spec(model.variant).gear).darkened(0.12)
 	for p: Dictionary in points:
 		var att := inventory.attachment(StringName(p.id))
 		if att.is_empty():
@@ -268,7 +268,7 @@ func _set_pack_straps(pack: StringName) -> void:
 	_straps = Node3D.new()
 	_straps.name = "PackStraps"
 	model.torso.add_child(_straps)
-	var colour := Color(VoxelArt.VARIANTS.get(model.variant, VoxelArt.VARIANTS.multicam).gear).darkened(0.3)
+	var colour := Color(VoxelArt.spec(model.variant).gear).darkened(0.3)
 	for s: float in [-1.0, 1.0]:
 		var path: Array[Vector3] = [Vector3(0.12, 0.5, 0.17), Vector3(0.13, 0.585, 0.06), Vector3(0.13, 0.595, -0.06),
 			Vector3(0.155, 0.5, -0.17), Vector3(0.155, 0.34, -0.16)]

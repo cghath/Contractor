@@ -56,6 +56,38 @@ const VARIANTS := {
 		"patch": "222222", "gear": "8a7a58", "pack": "7a6c4e",
 	},
 }
+## Plain clothes (civilians, HVTs and hostages: PersonLook.outfit) instead of a uniform:
+## "civ:<shirt>:<trousers>:<skin>:<shoes>" in hex. The torso, arms and head take the shirt,
+## the legs the trousers; hands are bare, there's no unit patch, and the cloth is a flat
+## colour with soft folds. Each part builds from only the colours it shows (_civ_part), so
+## people sharing a shirt share the torso mesh.
+const CIV_PREFIX := "civ:"
+
+
+## A colour scheme's colours: a VARIANTS entry, or a plain-clothes scheme built from its name.
+static func spec(variant: String) -> Dictionary:
+	if VARIANTS.has(variant):
+		return VARIANTS[variant]
+	if variant.begins_with(CIV_PREFIX) or variant.begins_with("civp:"):
+		var f := variant.split(":")
+		if f.size() >= 4:
+			var cloth := Color(f[1])
+			return {"camo": [cloth, cloth.darkened(0.08), cloth.lightened(0.05), cloth.darkened(0.16)],
+				"skin": f[2] if variant.begins_with("civp:") else f[3], "hair": "241a12", "patch": cloth,
+				"gear": "5a5148", "pack": "5a5148", "glove": f[2] if variant.begins_with("civp:") else f[3],
+				"boot": f[3] if variant.begins_with("civp:") else f[4]}
+	return VARIANTS["multicam"]
+
+
+## The scheme one body part of a plain-clothes person builds with: "civp:<cloth>:<skin>:<shoes>",
+## the cloth the trousers on the legs and the shirt everywhere else.
+static func _civ_part(model: String, variant: String) -> String:
+	var f := variant.split(":")
+	if f.size() < 5:
+		return variant
+	var part := model.get_slice(":", 0)
+	var legs := part.begins_with("thigh") or part.begins_with("shin") or part.begins_with("leg")
+	return "civp:%s:%s:%s" % [f[2] if legs else f[1], f[3], f[4]]
 
 static var _meshers: Dictionary = {}  # variant -> VoxelMesherCubes
 static var _meshes: Dictionary = {}   # "model|variant" -> Mesh
@@ -161,6 +193,8 @@ static func butt_point(model: String) -> Vector3:
 
 
 static func mesh(model: String, variant: String) -> Mesh:
+	if variant.begins_with(CIV_PREFIX):
+		variant = _civ_part(model, variant)
 	var key := "%s|%s" % [model, variant]
 	if not _meshes.has(key):
 		_meshes[key] = _build(_spec(model), variant, model.hash())
@@ -303,7 +337,7 @@ static func _camo(p: Vector3, salt: int, variant: String) -> int:
 	p += Vector3(float(salt % 997), float(salt % 389), 0.0)
 	var warp := Vector3(_noise_b.get_noise_3dv(p * 0.05), _noise_b.get_noise_3dv(p * 0.05 + Vector3(31, 0, 0)), 0.0) * 6.0
 	var q := p + warp
-	match variant:
+	match "plain" if variant.begins_with("civp:") else variant:
 		"multicam":
 			var brush := Vector3(q.x, q.y * 0.6, q.z)  # MultiCam's shapes run up and down
 			if _noise_b.get_noise_3dv(q * 0.2) > 0.78:
@@ -312,6 +346,13 @@ static func _camo(p: Vector3, salt: int, variant: String) -> int:
 			if a > 0.3:
 				return C.CAMO_B
 			if a < -0.32:
+				return C.CAMO_C
+			return C.CAMO_A
+		"plain":  # plain clothes: a flat colour with soft folds
+			var fold := _noise_a.get_noise_3dv(Vector3(q.x, q.y * 0.4, q.z) * 0.12)
+			if fold > 0.5:
+				return C.CAMO_B
+			if fold < -0.6:
 				return C.CAMO_C
 			return C.CAMO_A
 		"desert":
@@ -338,14 +379,14 @@ static func _camo(p: Vector3, salt: int, variant: String) -> int:
 
 static func _get_mesher(variant: String) -> VoxelMesherCubes:
 	if not _meshers.has(variant):
-		var v: Dictionary = VARIANTS.get(variant, VARIANTS["multicam"])
+		var v: Dictionary = spec(variant)
 		var skin := Color(v.skin)
 		var colours := {
 			C.EMPTY: Color(0, 0, 0, 0),
 			C.CAMO_A: Color(v.camo[0]), C.CAMO_B: Color(v.camo[1]), C.CAMO_C: Color(v.camo[2]), C.CAMO_D: Color(v.camo[3]),
 			C.SKIN: skin, C.SKIN_SHADE: skin.darkened(0.15), C.HAIR: Color(v.hair),
 			C.EYE: Color("1c1c1c"), C.MOUTH: skin.darkened(0.35),
-			C.BOOT: Color("3a3027"), C.SOLE: Color("1e1a17"), C.GLOVE: Color("2f2f2a"),
+			C.BOOT: Color(v.get("boot", "3a3027")), C.SOLE: Color("1e1a17"), C.GLOVE: Color(v.get("glove", "2f2f2a")),
 			C.BELT: Color("3d3a2e"), C.METAL: Color("8c8c84"), C.PAD: Color("2b2b27"),
 			C.PATCH: Color(v.patch),
 			C.GEAR: Color(v.gear), C.GEAR_DARK: Color(v.gear).darkened(0.25),
