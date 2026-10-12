@@ -18,7 +18,7 @@ const KEYS := {
 	&"mount": [KEY_C],  # rest the weapon on a surface in front
 	&"fire_mode": [KEY_F],
 	&"reload": [KEY_R],
-	&"use_medical": [KEY_H],
+	&"medical_menu": [KEY_H],  # the medical menu (MedicalMenu); Shift+H quick-treats yourself (SHIFT_KEYS)
 	&"grenade": [KEY_G],  # throw; Shift+G switches type, Alt+G drops; carrying or dragging a body, lets go
 	&"inventory": [KEY_TAB],
 	&"map": [KEY_M],  # the map (MapScreen): grid, markers, squad, extraction
@@ -28,6 +28,11 @@ const KEYS := {
 	&"pause": [KEY_ESCAPE],
 	&"quick_save": [KEY_HOME],  # F-keys are the squad command menu
 	&"debug_hurt": [KEY_K],  # dev tools only (DevTools.on): hurt yourself to test going down and dying
+}
+## Keys pressed with Shift held. An action without Shift still matches with it held, so
+## PlayerInput checks these first.
+const SHIFT_KEYS := {
+	&"quick_treat": KEY_H,  # treat yourself with the next item you carry (Soldier._server_use_medical)
 }
 const MOUSE := {
 	&"fire": MOUSE_BUTTON_LEFT,
@@ -49,6 +54,12 @@ func _enter_tree() -> void:
 			var event := InputEventKey.new()
 			event.physical_keycode = key
 			InputMap.action_add_event(action, event)
+	for action: StringName in SHIFT_KEYS:
+		_ensure(action)
+		var shifted := InputEventKey.new()
+		shifted.physical_keycode = SHIFT_KEYS[action]
+		shifted.shift_pressed = true
+		InputMap.action_add_event(action, shifted)
 	for binding: Array in LEFT_KEYS:
 		_ensure(binding[0])
 		var event := InputEventKey.new()

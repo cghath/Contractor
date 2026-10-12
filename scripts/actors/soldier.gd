@@ -766,7 +766,7 @@ func _server_exert() -> void:
 		vitals.server_exert()
 
 
-## H: treats yourself with the next item you carry from your own care_needed() (a
+## Shift+H (quick-treat): treats yourself with the next item you carry from your own care_needed() (a
 ## tourniquet before a bandage, and so on), through the same timed treatment as _server_treat.
 @rpc("any_peer", "call_local", "reliable")
 func _server_use_medical() -> void:
