@@ -211,6 +211,7 @@ func _ready() -> void:
 	people = PeopleLayer.new()  # "People": civilians, HVTs, intel (wave 4)
 	add_child(people)
 	add_child(Charges.new())  # "Charges": placed explosives (wave 4B)
+	add_child(Launchers.new())  # "Launchers": anti-armour rockets and missiles in flight (wave 5)
 
 
 ## The playable area on the map, in metres on the ground plane (x along x, y along z): the
@@ -674,6 +675,9 @@ func _make_soldier(data: Dictionary) -> Node:
 		var inventory: Inventory = soldier.get_node(^"Inventory")
 		for id: String in data.loadout:
 			inventory.take(StringName(id))
+		if soldier.faction == &"hostile" and data.loadout == HOSTILE_LOADOUT:
+			for id: StringName in LauncherAI.insurgent_kit(self):  # wave 5: some carry an RPG-7
+				inventory.take(id)
 		if soldier.role != &"":
 			Roles.apply_kit(inventory, soldier.role)
 		# What it started with, so what it's handed or picks up later can be told apart

@@ -2,7 +2,7 @@
 	"_note": "Proposed prices (dollars) for the base shop, salvage and repairs (wave 4, W10). An item without its own price uses its type's default. Intel (W11) is worth its intel_value in data/items.json (keep the two equal) and is found, never sold. Tune freely.",
 	"sell_ratio": 0.4,
 	"default_by_type": {"weapon": 1500, "ammo": 40, "armor": 900, "plate": 700, "backpack": 250, "medical": 60,
-		"utility": 150, "pouch": 30, "objective": 0, "salvage": 300, "misc": 50},
+		"utility": 150, "pouch": 30, "objective": 0, "salvage": 300, "misc": 50, "launcher": 2000},
 	"items": {
 		"m4a1": 1400, "mk18": 1700, "m110": 4200, "m17": 650,
 		"mag_556": 30, "mag_762": 45, "mag_9mm": 25, "rounds_556": 1, "rounds_762": 2, "rounds_9mm": 1,
@@ -24,9 +24,13 @@
 		"frag_grenade": 90, "smoke_grenade": 40, "smoke_green": 45, "smoke_yellow": 45, "smoke_blue": 45, "smoke_purple": 45,
 		"flashbang": 70, "breaching_charge": 400,
 		"electronics_salvage": 450, "hvt_case": 0, "supply_crate": 2500,
-		"zip_cuffs": 5, "intel_laptop": 3000, "intel_phone": 1200, "intel_documents": 800
+		"zip_cuffs": 5, "intel_laptop": 3000, "intel_phone": 1200, "intel_documents": 800,
+		"at4": 1800, "nlaw": 4000, "maaws": 3500, "smaw": 3000, "javelin_clu": 15000, "rpg7": 900,
+		"ffv551_round": 450, "ffv441_round": 350, "ffv502_round": 400, "smaw_hedp_round": 500, "smaw_ne_round": 600,
+		"javelin_missile": 12000, "pg7v_round": 300, "og7v_round": 250
 	},
-	"not_for_sale": ["hvt_case", "supply_crate", "electronics_salvage", "cpr", "intel_laptop", "intel_phone", "intel_documents"],
+	"_launchers": "Wave 5 (V2) launchers and rounds, proposed: AT4 1800, NLAW 4000, rounds 200-600, Javelin missile 12000 (catalogue plan); the RPG-7 and its rounds are loot, sell-only. The Javelin is buyable until wave 6 gates it behind reputation.",
+	"not_for_sale": ["hvt_case", "supply_crate", "electronics_salvage", "cpr", "intel_laptop", "intel_phone", "intel_documents", "rpg7", "pg7v_round", "og7v_round"],
 	"repair": {"share_per_integrity": 0.8, "per_chip": 12, "max_share": 0.8},
 	"supports": {"resupply": 8000, "transport": 6000, "aav": 12000, "extraction": 10000},
 	"respawn": 1000,

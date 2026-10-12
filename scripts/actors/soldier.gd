@@ -291,6 +291,8 @@ func _process(_delta: float) -> void:
 		collision_layer = 0
 	if not vitals.is_up():
 		model.hold = CharacterModel.Hold.NONE
+	elif inventory.hands == &"" and active_slot == Launchers.SLOT and active_weapon() != null:
+		model.hold = CharacterModel.Hold.NONE  # the launcher on the shoulder is LauncherRig's (wave 5)
 	elif inventory.hands != &"" or (active_weapon() != null and active_slot == &"primary"):
 		model.hold = CharacterModel.Hold.BOTH
 	elif active_weapon() != null:
@@ -582,6 +584,9 @@ func _server_squad_command(cmd: String, point: Vector3, names: PackedStringArray
 				_client_message.rpc_id(owner_peer(), why)
 		"scavenge_on", "scavenge_off":
 			squad.set_scavenge(self, cmd == "scavenge_on", names)
+		"fire_launcher":  # wave 5: a squadmate with a launcher fires at the vehicle there, or the spot
+			if LauncherAI.order_squad(squad, self, point, names) == "":
+				_client_message.rpc_id(owner_peer(), "Nobody selected has a loaded launcher or rounds")
 		_:
 			if not squad.command(self, cmd, point, names):  # formation, target, combat mode, team
 				_client_message.rpc_id(owner_peer(), "Can't target that" if cmd.begins_with("target:") else ("Can't escort that" if cmd.begins_with("escort:") else "Order not given"))

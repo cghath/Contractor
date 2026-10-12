@@ -43,6 +43,7 @@ const MENU := {
 			{"key": "5", "label": "Don't scavenge", "cmd": "scavenge_off"},
 			{"key": "6", "label": "Escort that HVT", "cmd": "escort", "hvt": true},
 			{"key": "7", "label": "Stop escorting", "cmd": "escort:"},
+			{"key": "8", "label": "Fire launcher there", "cmd": "fire_launcher", "point": true},
 		]},
 		{"key": "7", "label": "Combat mode", "items": [
 			{"key": "1", "label": "Safe", "cmd": "mode:safe"},
