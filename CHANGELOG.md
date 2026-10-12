@@ -11,6 +11,50 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Wave 4B part 3: the hot zone; debugging rules (Captain's side, 2026-10-12)
+
+#### Added
+
+- **Hot zones** (16 km², `ZoneDef.generate_hot`): one enemy HQ, a comms site, 1-2 QRF bases,
+  outposts, road checkpoints, villages, roaming patrol routes; campaign zones `ridge_hot` and
+  `coast_hot`.
+- **The enemy's alert** (`Alert`): the enemy only knows what its people see, hear and radio in,
+  with report delays (a man killed first never reports), sound ranges (suppressed much
+  shorter), check-ins, bodies found, a last known position that grows less certain; areas and
+  the zone go normal, suspicious, alerted, engaged and cool down slowly. No meter on screen.
+- **Pressure** (`Pressure`): points from what the squad does (firefights, kills, our blasts,
+  wiped patrols, objectives, sites taken out, alarms; quiet decay; +1 per 30 min), halved with
+  the comms mast down; tiers at 10/20/35/50.
+- **The enemy's response** (`EnemyResponse`): roaming patrols (one goes to look at a report),
+  patrols doubled and checkpoints closed when alerted or under pressure, the QRF from the
+  nearest living QRF base when engaged (at once on standby, after a turnout if caught cold; a
+  second at tier 2; none with every base gone), hunter teams at tier 3 (flank, track, smoke;
+  fewer with officers dead), the HQ reinforcing its sites at tier 4. Nothing spawns in the
+  squad's sight.
+- **Looted enemy radio chatter** (`RadioChatter`): carry an enemy handheld radio to hear the
+  enemy's net, until they switch frequencies.
+- **Radio contracts** need a field radio (PRC-152) in the squad: "Radio for a contract" in your
+  own menu.
+- **Escape menu**: Resume, Return to Base (revert: back to just before deploying), Return to
+  main menu, Quit.
+- **Dev tools** (`DevTools.on()`: debug builds or `--dev`): hot-zone readout (Page Up), enemy
+  clock skip (Page Down); test builds ship "Contractor (dev tools).bat".
+- **Debugging rules** (Captain, `docs/debugging.md`, `CLAUDE.md`): every run keeps numbered
+  logs by date with PASS/FAIL in the name; `tools/run_tests.sh` keeps them in
+  `Contractor-test-logs` beside the main checkout.
+
+#### Changed
+
+- Hot zones drive reinforcement waves from the enemy's alert (no timer); waves head for the
+  last known position.
+- Debug instant extraction moved to Shift+End (End alone opens the board); K and Shift+End
+  work behind `DevTools.on()`.
+
+#### Fixed
+
+- The HQ's watchtowers faced inward and garrison men faced anywhere: towers have parapets on
+  their outer sides, posts face out, gate guards stand behind the sandbags facing the gate.
+
 ### Ragdolls, clean test sessions, clothing, intel fog (Captain's side, 2026-10-11 late)
 
 #### Added

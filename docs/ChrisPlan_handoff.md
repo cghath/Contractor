@@ -63,6 +63,23 @@ date), as with wave 3, so both sides never build the same thing twice.**
 >   controls go behind `DevTools.on()` (debug builds or `--dev`), not `OS.is_debug_build()`.
 >   The bug-report key, session logs and AI overlay are Captain's side's next: please don't
 >   build them, but give wave 5's systems lines in them when they land.
+> - **4B part 3 is on `dev` (2026-10-12).** It touched these shared files lightly (all additions;
+>   merging your wave 5 work over them should be routine):
+>   - `reinforcements.gd`: `driven` (no timer waves: a hot zone's `EnemyResponse` launches them
+>     from QRF bases with `server_send(origin, extra_pairs)`), `aim` (where waves head: the
+>     enemy's last known position), `capped_alive()`. Contract zones behave as before. **The
+>     hook for vehicle QRFs:** `EnemyResponse._launch_qrf` picks the base and calls
+>     `server_send`; a vehicle QRF can be sent from there.
+>   - `base_hub.gd`: `server_revert_deployment` (Escape menu "Return to Base (revert)",
+>     `Campaign.snapshot()` taken in `server_deploy`); the debug instant extraction is now
+>     **Shift+End** behind `DevTools.on()` (End alone opens the board).
+>   - `soldier.gd` (`_server_radio_contract`, `DevTools.on()` for the debug hurt), `player_input.gd`
+>     (K behind `DevTools.on()`), `interaction_menu.gd` ("Radio for a contract" in your own menu),
+>     `contracts.gd` (`radio_contract_problem()`), `squad_ai.gd`/`grenade.gd`/`charges.gd` (one
+>     `Alert` call each), `items.json`/`prices.json` (`enemy_radio`), `tools/run_tests.sh` (logs kept).
+>   - New, ours: `alert.gd`, `pressure.gd`, `enemy_response.gd`, `radio_chatter.gd`, `pause_menu.gd`,
+>     `hot_zone_debug.gd`, `dev_tools.gd`, the hot-zone parts of `zone_def.gd`, `zone_level.gd`,
+>     `zone_modules.gd` (HQ, QRF base, comms modules).
 > - **The base hub stays as it is for now.** `BaseHub` / `BaseLevel` (today's "FOB" base scene)
 >   keeps working unchanged through 4B part 3. **Wave 5 turns it into the first friendly
 >   FOB** (Captain: the players don't build a FOB; inland the squad deploys from a friendly
