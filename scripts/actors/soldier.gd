@@ -340,11 +340,29 @@ func _update_ragdoll() -> void:
 		ragdoll = Ragdoll.start(self) if multiplayer.is_server() else Ragdoll.follow(self)
 		collision_layer = 0
 	elif not want and is_instance_valid(ragdoll):
+		var spot: Variant = ragdoll.rest_spot() if is_ai() or is_multiplayer_authority() else null
 		ragdoll.stop()
 		ragdoll = null
+		_stand_where_ragdoll_lay(spot)
 		if vitals.is_up() or (not vitals.is_dead() and not is_instance_valid(carried_by) \
 				and not StringName(model.carry_net.get("mode", &"")) in [CharacterModel.CARRIED, CharacterModel.DRAGGED]):
 			collision_layer = BODY_LAYER
+
+
+## The ragdoll gone (back up, or lifted), the body is where it lay, not where it fell (it can
+## slide or roll metres from the capsule): `spot` is Ragdoll.rest_spot, null to stay put (no safe
+## ground near, or not ours to move). Whoever owns the body's position moves it: the host an AI's,
+## a player's own machine theirs (the host's copy follows the sync). Other peers move an AI at
+## once too, from the same pose, so it doesn't stand up where it fell until the host's position
+## arrives. A player keeps their own view's facing; an AI faces the way it got up.
+func _stand_where_ragdoll_lay(spot: Variant) -> void:
+	if spot == null:
+		return
+	var t: Transform3D = spot
+	global_position = t.origin
+	velocity = Vector3.ZERO
+	if is_ai():
+		rotation = Vector3(0.0, t.basis.get_euler().y, 0.0)
 
 
 
@@ -360,7 +378,7 @@ func _ai_physics(delta: float) -> void:
 		return
 	if is_instance_valid(ragdoll):
 		velocity = Vector3.ZERO
-		return  # the ragdoll holds the body: the capsule stays where it fell
+		return  # the ragdoll holds the body: the capsule stays where it fell until it goes (_update_ragdoll)
 	is_aiming = want_aim and vitals.is_up() and not is_reloading and inventory.hands == &"" and carrying == null
 	movement.step(delta)
 	_update_carried()
@@ -403,7 +421,7 @@ func server_pick_up_body(other: Soldier, mode := CARRY, reach := REVIVE_RANGE) -
 		return false
 	if carrying != null or inventory.hands != &"" or not vitals.is_up():
 		return false
-	if other.global_position.distance_to(global_position) > reach:
+	if other.body_point().distance_to(global_position) > reach:
 		return false
 	if is_instance_valid(other.carried_by) and other.carried_by != self:
 		return false
@@ -488,6 +506,12 @@ func aim_point() -> Vector3:
 				if shape is CollisionShape3D:
 					return (shape as CollisionShape3D).global_position
 	return global_position + Vector3.UP * (1.0 if is_crouching() else 1.3)
+
+
+## Where this soldier is, for reach checks: while it lies as a ragdoll, the ragdoll's chest
+## (it can slide or roll metres from the capsule, which stays where it fell), else its origin.
+func body_point() -> Vector3:
+	return aim_point() if is_instance_valid(ragdoll) else global_position
 
 
 static func _ammo_of(weapon: ItemData) -> StringName:
@@ -1067,7 +1091,7 @@ func _timed_care(target: Node3D, other: Vitals, seconds: float, label: String, p
 
 
 func _in_treat_reach(target: Node3D) -> bool:
-	return target == self or target.global_position.distance_to(global_position) <= TREAT_REACH
+	return target == self or ((target as Soldier).body_point() if target is Soldier else target.global_position).distance_to(global_position) <= TREAT_REACH
 
 
 ## Who carries or drags `target` (an instance id, 0 for nobody), to notice it being moved.
@@ -1197,7 +1221,7 @@ func _server_move_body(path: NodePath, mode: StringName) -> void:
 		why = "Your hands are full"
 	elif is_instance_valid(other.carried_by):
 		why = "Someone else has them"
-	elif other.global_position.distance_to(global_position) > INTERACT_REACH + INTERACT_SLACK:
+	elif other.body_point().distance_to(global_position) > INTERACT_REACH + INTERACT_SLACK:
 		why = "Too far away"
 	if why != "":
 		_client_message.rpc_id(owner_peer(), why)
@@ -1523,7 +1547,7 @@ func _lootable(path: NodePath) -> Soldier:
 	var other := get_node_or_null(path) as Soldier
 	if other == null or other == self or other.is_queued_for_deletion() or not other.vitals.is_dead():
 		return null
-	if other.global_position.distance_to(global_position) > INTERACT_REACH + INTERACT_SLACK:
+	if other.body_point().distance_to(global_position) > INTERACT_REACH + INTERACT_SLACK:
 		_client_message.rpc_id(owner_peer(), "Too far away")
 		return null
 	return other

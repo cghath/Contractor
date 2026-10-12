@@ -812,7 +812,7 @@ static func responder_for(c: Soldier, wanted: Array[StringName] = []) -> Soldier
 		var ai := SquadAI.of(n)
 		if ai == null or not ai._free_for(c) or not ai._cares_for(c) or not ai._carries_any(wanted):
 			continue
-		var d := ai.body.global_position.distance_to(c.global_position)
+		var d := ai.body.global_position.distance_to(c.body_point())
 		if ai.escorting == c:
 			return ai.body  # an HVT's escorts see to him first (a medic is pulled in as well)
 		if ai.body.role == Roles.MEDIC:
@@ -847,7 +847,7 @@ static func medic_for(c: Soldier, wanted: Array[StringName]) -> Soldier:
 		if ai == null or ai.body.role != Roles.MEDIC or not ai._cares_for(c) or not ai._free_for(c) \
 				or c.care_by == ai.body or wanted.is_empty() or not ai._carries_any(wanted):
 			continue
-		var d := ai.body.global_position.distance_to(c.global_position)
+		var d := ai.body.global_position.distance_to(c.body_point())
 		if c.fire_team >= 0 and ai.body.fire_team == c.fire_team:
 			team = ai
 			team_d = d
@@ -967,7 +967,7 @@ func _bearer_for(dead: Soldier) -> Soldier:
 		var ai := SquadAI.of(n)
 		if ai == null or ai.body == null or ai.body.faction != dead.faction or not ai._can_bear(dead):
 			continue
-		var d := ai.body.global_position.distance_to(dead.global_position) * (1.0 if ai.body.role != Roles.MEDIC else 3.0)
+		var d := ai.body.global_position.distance_to(dead.body_point()) * (1.0 if ai.body.role != Roles.MEDIC else 3.0)
 		if d < best_d:
 			best = ai.body
 			best_d = d
@@ -1021,7 +1021,7 @@ func _do_care() -> void:
 			if not contact or not _next_task(casualty, _care_exposed(contact)).is_empty():
 				care = Care.TREAT
 			else:
-				_fight(casualty.global_position, 3.0)
+				_fight(casualty.body_point(), 3.0)
 		Care.CARRY:
 			_care_carry(contact)
 
@@ -1080,7 +1080,7 @@ func _start_reach() -> void:
 ## the threat first. At the casualty: one lying in the open is dragged to cover, otherwise
 ## treatment starts.
 func _care_reach(contact: bool) -> void:
-	var d := _flat_distance(casualty.global_position)
+	var d := _flat_distance(casualty.body_point())
 	if body.carrying == casualty:
 		care = Care.CARRY
 		return
@@ -1088,7 +1088,7 @@ func _care_reach(contact: bool) -> void:
 	if exposed and not _smoke_used and d <= SMOKE_RANGE_M:
 		if body.inventory.count_of(SCREEN_SMOKE) <= 0:
 			_smoke_used = true  # nothing to screen them with
-		elif _throw(SCREEN_SMOKE, casualty.global_position + (body.threat_pos - casualty.global_position).normalized() * 4.0):
+		elif _throw(SCREEN_SMOKE, casualty.body_point() + (body.threat_pos - casualty.body_point()).normalized() * 4.0):
 			_smoke_used = true
 	if exposed and body.suppression >= PINNED and d > CASUALTY_REACH:
 		_suppressing = true
@@ -1096,9 +1096,9 @@ func _care_reach(contact: bool) -> void:
 		_has_destination = false
 		body.want_crouch = true
 		return
-	if not _reach_progress(d, casualty.global_position, _give_up_casualty):
+	if not _reach_progress(d, casualty.body_point(), _give_up_casualty):
 		return  # gave up: the next responder takes them
-	_go(_detour if Soldier._now() < _detour_until else casualty.global_position, true)
+	_go(_detour if Soldier._now() < _detour_until else casualty.body_point(), true)
 	if d > CASUALTY_REACH:
 		return
 	_has_destination = false
@@ -1160,12 +1160,12 @@ func _give_up_casualty() -> void:
 func _care_treat(contact: bool) -> void:
 	if body.carrying == casualty:
 		body.release_carried()
-	if _flat_distance(casualty.global_position) > CASUALTY_REACH + 1.0:
+	if _flat_distance(casualty.body_point()) > CASUALTY_REACH + 1.0:
 		_start_reach()  # a conscious casualty moved, or the body slid
 		return
 	_has_destination = false
 	body.want_crouch = true
-	_face(casualty.global_position)
+	_face(casualty.body_point())
 	var now := Soldier._now()
 	if _treat_until >= 0.0 or now < body._busy_until:
 		return  # an item is going on
@@ -1205,7 +1205,7 @@ func _should_carry() -> bool:
 	if 1.0 - casualty.vitals.blood_fraction() >= WoundModel.UNCONSCIOUS_LOST:
 		return true
 	var leader: Soldier = squad.leader if squad and is_instance_valid(squad.leader) else null
-	return leader != null and leader != casualty and leader.global_position.distance_to(casualty.global_position) > STAY_WITH_M
+	return leader != null and leader != casualty and leader.global_position.distance_to(casualty.body_point()) > STAY_WITH_M
 
 
 ## Carrying an unconscious casualty after the squad leader until they wake on their own. In
@@ -1235,10 +1235,10 @@ func _care_carry(contact: bool) -> void:
 		body.want_crouch = true
 		return
 	if body.carrying != casualty:
-		if _flat_distance(casualty.global_position) <= CASUALTY_REACH and body.server_pick_up_body(casualty, Soldier.CARRY):
+		if _flat_distance(casualty.body_point()) <= CASUALTY_REACH and body.server_pick_up_body(casualty, Soldier.CARRY):
 			_callouts_carrying(false)
 		else:
-			_go(casualty.global_position, true)
+			_go(casualty.body_point(), true)
 		return
 	_go(squad.follow_point(body))
 
@@ -1253,15 +1253,15 @@ func _carry_body() -> void:
 		var looter := SquadAI.of(casualty.scavenged_by) if is_instance_valid(casualty.scavenged_by) else null
 		if looter and looter != self and looter.loot_body == casualty and looter.body.vitals.is_up():
 			# Someone is cross-loading from the body: wait beside it until they're done.
-			if _flat_distance(casualty.global_position) > CASUALTY_REACH + 1.5:
-				_go(casualty.global_position, true)
+			if _flat_distance(casualty.body_point()) > CASUALTY_REACH + 1.5:
+				_go(casualty.body_point(), true)
 			else:
 				_has_destination = false
 			return
-		if _flat_distance(casualty.global_position) <= CASUALTY_REACH and body.server_pick_up_body(casualty, Soldier.CARRY):
+		if _flat_distance(casualty.body_point()) <= CASUALTY_REACH and body.server_pick_up_body(casualty, Soldier.CARRY):
 			_callouts_carrying(true)
 		else:
-			_go(casualty.global_position, true)
+			_go(casualty.body_point(), true)
 		return
 	_go(squad.follow_point(body))
 
@@ -1482,10 +1482,10 @@ func _do_scavenge() -> void:
 		_end_scavenge()
 		_think_cd = 0.0
 		return
-	var d := _flat_distance(loot_body.global_position)
+	var d := _flat_distance(loot_body.body_point())
 	if d > CASUALTY_REACH:
-		if _reach_progress(d, loot_body.global_position, _give_up_body):
-			_go(_detour if Soldier._now() < _detour_until else loot_body.global_position, false)
+		if _reach_progress(d, loot_body.body_point(), _give_up_body):
+			_go(_detour if Soldier._now() < _detour_until else loot_body.body_point(), false)
 		return
 	_has_destination = false
 	body.want_crouch = true
