@@ -158,6 +158,10 @@ func _run_host(wait_for_client: bool) -> void:
 		await _test_seats()
 	if _want("cargo"):
 		await _test_cargo()
+	if _want("interaction"):
+		await _test_interaction()
+	if _want("charge"):
+		await _test_charge()
 	if _want("rounds"):
 		await _test_rounds()
 	if _want("damage_effects"):
@@ -397,6 +401,103 @@ static func _hold_index(hold: VehicleCargo, id: StringName) -> int:
 		if list[i].id == id:
 			return i
 	return -1
+
+
+## The entry of `actions` (or of any submenu in them) whose label starts with `label`, or {}.
+static func _entry(actions: Array, label: String) -> Dictionary:
+	for a: Dictionary in actions:
+		if String(a.label).begins_with(label):
+			return a
+		for sub: Dictionary in a.get("items", []):
+			if String(sub.label).begins_with(label):
+				return sub
+	return {}
+
+
+func _test_interaction() -> void:
+	print("Left Ctrl: the vehicle's action points")
+	var v := _vehicle("range_maxxpro")
+	await _reset(v, Vector3(-4, 0, 6))
+	var door := v.get_node(^"Point0") as VehicleActionPoint
+	player.global_position = v.global_transform * Vector3(-2.6, 0.1, -1.0)
+	var to := door.global_position - (player.global_position + Vector3.UP * 1.6)
+	player.rotation.y = atan2(-to.x, -to.z)
+	player.set_pitch(atan2(to.y, Vector2(to.x, to.z).length()))
+	await get_tree().process_frame
+	await get_tree().physics_frame
+	var points := InteractionMenu.collect_points(player, player.camera)
+	check(points.any(func(p: Dictionary) -> bool: return p.target == door), "looking at the driver's door shows its action point")
+	check(InteractionMenu.target_kind(player, door) == InteractionMenu.OBJECT, "an interactable, like the base's terminals")
+	var acts := InteractionMenu.actions_for(player, door)
+	var get_in := _entry(acts, "Get in as driver")
+	check(not get_in.is_empty() and String(get_in.disabled) == "" and not _entry(acts, "Check vehicle").is_empty(),
+		"the door offers Get in as driver and Check vehicle (%s)" % [acts.map(func(a: Dictionary) -> String: return a.label)])
+	InteractionMenu.perform(player, get_in)
+	check(v.seat_of(player) == 0, "picking it seats the player through the host request")
+	var seat_point := v.get_node(^"Seat0") as VehicleActionPoint
+	acts = InteractionMenu.actions_for(player, seat_point)
+	check(not _entry(acts, "Get out").is_empty() and not _entry(acts, "Commander").is_empty(), "inside, the seat's point offers Get out and Move to (%s)" % [acts.map(func(a: Dictionary) -> String: return a.label)])
+	check(InteractionMenu.actions_for(player, door).is_empty(), "and the doors offer nothing to someone inside")
+	InteractionMenu.perform(player, _entry(acts, "Commander"))
+	check(v.seat_of(player) == 1, "Move to > Commander")
+	InteractionMenu.perform(player, _entry(InteractionMenu.actions_for(player, v.get_node(^"Seat1")), "Get out"))
+	check(v.seat_of(player) < 0, "Get out")
+	var cargo := v.get_node(^"Point3") as VehicleActionPoint
+	player.global_position = cargo.global_position + Vector3(0, -1.5, 0.8)
+	player.inventory.take(&"ruck_45")
+	player.inventory.take(&"engine_parts")
+	await get_tree().physics_frame
+	acts = InteractionMenu.actions_for(player, cargo)
+	var load := _entry(acts, "Engine Parts")
+	check(not load.is_empty() and not _entry(acts, "Cargo (").is_empty(), "the cargo point lists the hold and what you can load (%s)" % [acts.map(func(a: Dictionary) -> String: return a.label)])
+	InteractionMenu.perform(player, load)
+	check(v.cargo_hold.count_of(&"engine_parts") == 1 and player.inventory.count_of(&"engine_parts") == 0, "Load > Engine Parts puts them in the hold")
+	acts = InteractionMenu.actions_for(player, cargo)
+	InteractionMenu.perform(player, _entry((_entry(acts, "Cargo (").get("items", []) as Array), "Engine Parts"))
+	check(v.cargo_hold.count_of(&"engine_parts") == 0 and player.inventory.count_of(&"engine_parts") == 1, "Cargo > Engine Parts takes them out again")
+	var service := v.get_node(^"Point4") as VehicleActionPoint
+	player.global_position = service.global_position + Vector3(0, -1.6, -0.8)
+	v.server_set_zone(Vehicle.ZONE_ENGINE, 0.3)
+	await get_tree().physics_frame
+	acts = InteractionMenu.actions_for(player, service)
+	var fix := _entry(acts, "Engine Parts: engine")
+	check(not fix.is_empty(), "the service point offers to fit the engine parts you carry (%s)" % [acts.map(func(a: Dictionary) -> String: return a.label)])
+	InteractionMenu.perform(player, fix)
+	check(v.job_left(player) > 55.0, "a timed job (%.0f s)" % v.job_left(player))
+	player.global_position += Vector3(0, 0, -3)
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	check(v.job_left(player) == 0.0, "walking off stops it")
+	player.inventory.strip()
+	player.inventory.take(&"m4a1")
+	v.server_set_zone(Vehicle.ZONE_ENGINE, 1.0)
+
+
+func _test_charge() -> void:
+	print("A charge on a vehicle")
+	# Its own technical: the range's is needed whole by the checks after this one.
+	var v := layer.server_spawn("technical_dshk", Transform3D(Basis(), Vector3(-25, 0, 32)), "", &"player", "test_charge_target")
+	for i in 3:
+		await get_tree().physics_frame
+	var charges := Charges.of(level)
+	var side := v.global_transform * Vector3(-1.5, 0.9, -0.3)
+	player.global_position = side + Vector3(-0.2, -0.9, 0)
+	player.inventory.take(Charges.ITEM)
+	await get_tree().physics_frame
+	var eye := side + Vector3(0, 0.5, 0)
+	var spot := Charges.placement(player, eye, (v.global_transform * Vector3(-0.9, 0.9, -0.3) - eye).normalized())
+	check(spot.ok and spot.target == v, "a breaching charge can be placed on the technical's door (it rides the vehicle)")
+	var hull_before := v.zone_health(Vehicle.ZONE_HULL)
+	var scorched := func() -> int: return v.net_carves.filter(func(op: Array) -> bool: return int(op[4]) == VehicleHull.SCORCH).size()
+	var scorches_before: int = scorched.call()
+	var id := charges.server_place_at(player, Charges.surface_transform(spot.pos, spot.normal, Vector3.RIGHT), spot.target)
+	player.global_position += Vector3(-15, 0, 0)
+	await get_tree().physics_frame
+	charges._detonate(id)
+	check(v.zone_health(Vehicle.ZONE_HULL) < hull_before and int(scorched.call()) > scorches_before,
+		"it goes off on the vehicle: Vehicle.server_explosion damages and scorches it (hull %.0f%%)" % (v.zone_health(Vehicle.ZONE_HULL) * 100.0))
+	v.queue_free()
+	await get_tree().physics_frame
 
 
 ## Fires `weapon` from `from` at `to` as `shooter`: Ballistics' result.
