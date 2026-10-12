@@ -69,7 +69,7 @@ func _ready() -> void:
 	GameState.zone_id = "test_antiarmor" + tag  # never touch a real save
 	CompoundLevel.spawn_ai = false
 	PeopleLayer.populate = false
-	if "--join" in OS.get_cmdline_user_args():
+	if "--antiarmor-join" in OS.get_cmdline_user_args():
 		_run_client()
 		return
 	GameState.delete_save()
@@ -749,10 +749,10 @@ func _test_client() -> void:
 	var log_path := OS.get_user_data_dir().path_join("antiarmor_client%s.log" % OS.get_environment("CONTRACTOR_TEST_TAG"))
 	DirAccess.remove_absolute(log_path)
 	var args := ["--headless", "--log-file", log_path, "--path", ProjectSettings.globalize_path("res://"), "res://tests/antiarmor_test.tscn",
-		"--", "--join", "127.0.0.1"]
+		"--", "--antiarmor-join"]  # not main's --join: the client joins by itself (_join_host)
 	var pid := OS.create_process(OS.get_executable_path(), args)
 	check(pid > 0, "started the client process")
-	await _wait_until(func() -> bool: return _client_ready, 150.0)
+	await _wait_until(func() -> bool: return _client_ready, 120.0)
 	check(_client_ready, "the client checked the crater it found on joining")
 	if _client_ready:
 		# Live: a round it watches fly and burst (an OG-7V lobbed high: it self-destructs).
@@ -775,7 +775,7 @@ func _test_client() -> void:
 			them.inventory.take(&"at4")
 			await _wait_until(func() -> bool: return launchers.results.values().any(func(x: Dictionary) -> bool: return x.shooter == them), 20.0)
 			check(launchers.results.values().any(func(x: Dictionary) -> bool: return x.shooter == them), "the client fired an AT4 through the host")
-	await _wait_until(func() -> bool: return _client_failures >= 0, 60.0)
+	await _wait_until(func() -> bool: return _client_failures >= 0, 45.0)
 	for line in _client_lines:
 		print("    client: %s" % line)
 	check(_client_failures == 0, "everything replicated to the client (%d client failures)" % _client_failures)
@@ -823,7 +823,13 @@ func _client_report(count: int, lines: PackedStringArray) -> void:
 
 func _run_client() -> void:
 	get_tree().create_timer(200.0).timeout.connect(func() -> void: get_tree().quit(99))
-	add_child(load("res://scenes/main.tscn").instantiate())  # main reads --join
+	var main: Node = load("res://scenes/main.tscn").instantiate()
+	add_child(main)
+	# This test joins by itself (_join_host), not through the menu's few short tries (two
+	# joiners replaced each other's connection), and a dropped attempt must not reload the
+	# scene from under it (Main reloads on session_ended).
+	if Net.session_ended.is_connected(Callable(main, &"_on_session_ended")):
+		Net.session_ended.disconnect(Callable(main, &"_on_session_ended"))
 	await get_tree().process_frame
 	var lines := PackedStringArray()
 	var note := func(ok: bool, what: String) -> void:
@@ -832,7 +838,7 @@ func _run_client() -> void:
 			failures += 1
 	# The menu's few short join attempts can all time out while this process builds its world
 	# under load: keep joining until it's in, then ask the host what to check.
-	var joined := await _join_host("127.0.0.1", 120.0)
+	var joined := await _join_host("127.0.0.1", 90.0)
 	var asked_until := Time.get_ticks_msec() + 40000
 	while joined and expect.is_empty() and Time.get_ticks_msec() < asked_until:
 		_ask_expect.rpc_id(1)
