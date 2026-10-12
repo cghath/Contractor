@@ -11,6 +11,76 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Wave 5a: vehicles and anti-armour (cghath's side, 2026-10-12)
+
+#### Added
+
+- **Captain's vehicle models in the game**: `VehicleArt` (14 voxel models at 5 cm: UH-60,
+  AH-1Z, AAV-7, MaxxPro, M-ATV, Bradley, Abrams, seven technicals) copied from his asset
+  repo to `scripts/art/vehicle_art.gd`. Physics layer 7 is "vehicles".
+- **Vehicles** (`Vehicle`, `scripts/vehicles/`, numbers in `data/vehicles.json`): host-simulated
+  Jolt bodies with raycast suspension; wheeled ones steer with the front wheels, tracked ones
+  skid-steer. Clients send throttle, steer and brake and see smooth replicated movement.
+  Fuel, an empty tank, jerrycans.
+- **Seats**: per model (M-ATV 4 + gunner, MaxxPro 6 + gunner, technical cab, bed and gunner,
+  AAV-7 3 + 21, Bradley 3 + 6, Abrams 4; the UH-60's seats wait for the helicopter supports).
+  Get in, switch seats and get out through Left Ctrl action points (doors, ramp, cargo,
+  service). Squadmates take "Get in that vehicle" and "Get out" (command menu: Mount). A downed
+  or dead body can be loaded into a seat and pulled out again.
+- **Cargo**: each vehicle carries an inventory with litre and kg limits, loaded and unloaded
+  through Left Ctrl; it feeds the mounted guns' belts (.50 M2 on the MRAPs, DShK on the
+  technical).
+- **Vehicle damage**: hit zones (hull, engine, wheels or tracks, fuel, crew, cargo) with armour
+  by class. Small arms bounce off armoured vehicles; 7.62x54R and up penetrate or disable them
+  (Captain's rule); a technical's doors stop nothing; IFVs and tanks stop .50 on most faces.
+  A round that gets through carries on into the people inside. Engine hits slow then stop a
+  vehicle, wheel and track hits cripple it, fuel hits leak and can start a fire. Hits carve
+  holes and scorch into the vehicle's own 5 cm hull.
+- **Fire and wrecks**: a burning vehicle kills whoever stays aboard and destroys its cargo,
+  then becomes a blackened wreck that can be salvaged for parts. Vehicles and wrecks are saved
+  with the zone and come back when the campaign returns to it.
+- **Field service**: timed repairs with a repair kit, spare wheel, track links, engine parts or
+  a battery.
+- **AI drivers**: `server_drive_to` and `server_follow_path` on the navmesh, with stuck
+  recovery.
+- **Bodies and vehicles**: a vehicle wakes a settled ragdoll ahead of it and pushes standing
+  soldiers aside; running someone over is blunt trauma through the wound model.
+- **Vehicle range**: a main-menu debug level with an M-ATV, MaxxPro, technical and AAV-7, and
+  `VehicleLayer.server_place_parked` so zones can park vehicles.
+- **Anti-armour launchers** on a new launcher slot (key 3): AT4, RPG-7 (PG-7V HEAT, OG-7V frag),
+  Javelin (hold aim 2.5 s to lock; top attack climbs and dives onto the roof, or direct attack),
+  MAAWS (HEAT, HE, HEDP), NLAW (flies over and fires down, or direct), SMAW (HEDP, thermobaric).
+  Rounds fly as host-simulated projectiles with motors, drop, arming distance and
+  self-destruct, seen by every player. Data in `data/warheads.json`.
+- **Warheads by round type**: shaped charges penetrate armour by mm (V1 decides what that does
+  to the vehicle) and the jet kills whoever is in line inside; HE and HEDP blow craters in
+  walls, HEAT bores a narrow hole, thermobaric clears rooms; fragments and overpressure wound
+  people through the wound model; a direct hit is lethal.
+- **Backblast**: a cone behind the tube, lethal close in and injuring further out; a wall or a
+  vehicle right behind reflects it onto the shooter, and a small room fills with it. Javelin
+  and NLAW soft-launch.
+- **AI launchers**: insurgents sometimes carry an RPG-7 and use it on vehicles and groups behind
+  cover, never on a lone soldier in the open ("Backblast clear!"); a squadmate with a launcher
+  fires on order (command menu: Action, "Fire launcher there").
+- **Items**: launchers and rounds (RPG-7 and its rounds loot and sell-only), jerrycan, spare
+  wheel, track links, repair kit, vehicle battery, engine parts, .50 and 12.7x108 belts.
+- **Tests**: `vehicles` (host and client) and `antiarmor` suites, including launchers against
+  the real vehicles.
+
+#### Fixed
+
+- The `people` suite's client sometimes never reported: the host pushed its checklist when
+  the client first connected, and a connect that timed out while the client was still
+  building its world lost it. The client now asks once it has joined.
+
+#### Known gaps
+
+- The launcher slot has no tile on the inventory screen yet (that screen's layout is Captain's
+  side's); key 3 and Alt+G work.
+- No AI gunners or turret rotation yet; no crash damage between vehicles or against walls;
+  grenades and charges don't damage vehicles except a charge placed on one.
+- Structure edits are lost when a VoxelWorld block unloads far from every viewer.
+
 ### Ragdolls, clean test sessions, clothing, intel fog (Captain's side, 2026-10-11 late)
 
 #### Added
