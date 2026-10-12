@@ -150,6 +150,103 @@ One agent writes a proposal for Captain: what building your own faction involves
 replaces or sits beside contracts, and the campaign-operation tier (multi-deployment
 operations) the design doc puts under it.
 
+## Item catalogue plan
+
+Asked for by Captain (2026-10-11): "add loot items and misc as well to our roadmap". What the game buys, sells, finds and carries, and the wave each kind arrives in, so every item
+has a place before it's built. **Everything here is Proposed** unless it names Captain or a
+decision; prices are proposals against `data/prices.json` (sell back at `sell_ratio` 0.4) and
+tune freely. "Loot" means found in zones; "contract zones" means loot capped at medium tier
+(decided).
+
+**Rules every new item follows (Proposed):**
+- An item has a `type` in `items.json` and either its own price or its type's
+  `default_by_type` in `prices.json`.
+- **Buyable** is in the base shop's catalogue. **Sell-only** is in `not_for_sale` with a price
+  (what it fetches). **Mission-only** is `not_for_sale` at price 0: it can't be bought or sold,
+  only delivered.
+- Loot tiers low, medium and high per item. Contract zones roll up to medium; hot zones and the
+  rival PMC roll up to high.
+- Loot goes in `ZoneModules.LOOT` (by module), the hostile loadouts (bodies) and cache crates.
+- New items carry the tags AI scavenging reads (calibre, medical, grenade, armor), so the
+  need-based rules (decided) pick them up without new code.
+- Worn or damaged gear sells by condition, the way repairs already price it.
+
+| Category | Have now | To add (examples) | Buy / sell | Price band | Where it drops | Wave |
+|---|---|---|---|---|---|---|
+| **Weapons** | M4A1, Mk18, M110, M17 | M249 LMG and an M320 underbarrel (the AR and grenadier stand-ins in `roles.json`), a breaching shotgun. Enemy guns by region: AKM, AK-74M, RPK, PKM, SVD, QBZ-95, Makarov. Allied: L85A3, C8 | Own guns buyable; allied guns buyable by reputation (decided); enemy guns loot, sell-only | 600-4500 (M17 650 to M110 4200); enemy guns sell for 200-600 | Enemy bodies (what they carry), outpost and HQ racks, caches | LMG and underbarrel: next (4B follow-up or backlog). Enemy and allied guns: 6 |
+| **Launchers** | None | AT4, RPG-7 with PG-7V and OG-7V, Javelin, MAAWS, NLAW, SMAW (decided list) | AT4, MAAWS, NLAW, SMAW buyable; Javelin by reputation; RPG-7 and its rounds loot, sell-only | AT4 1800, NLAW 4000, rounds 200-600, Javelin missile 12000 (support-call scale) | Insurgent bodies and caches (RPG-7), QRF bases, armour crews | 5 (V2) |
+| **Attachments, optics** | None | Red dot, magnified optic, light, visible and IR laser, suppressor, grip | Buyable, sellable; they stay on the weapon | 150-1500 (red dot 400, suppressor 900, magnified 1200) | Fitted to enemy weapons, mostly hot zone and rival PMC | 7 (S3) |
+| **Ammo, magazines** | 5.56, 7.62x51, 9mm mags and loose rounds | 7.62x39, 5.45x39, 7.62x54R (it matters against vehicles), 40 mm, 12 ga, M249 belt boxes | Own calibres buyable; enemy calibres loot, sell-only | Loose 1-3 a round, mags 25-60, belt box 150 | Everywhere; bodies carry their weapon's calibre | 40 mm, belts: with the LMG and M320. Enemy calibres: 6 (7.62x54R with 5) |
+| **Armor, carriers, packs** | Three carriers, three helmets, four plates, ten pouches, two packs | Chest rig (no armor, more pouches), 60 L ruck, enemy carriers and helmets (Russian, Chinese, insurgent rigs), allied armor by reputation | Buyable, sell by condition; enemy armor loot, sell-only | Existing 15-1600; heavy enemy armor sells for up to 600 | Bodies (AI takes armor only when calm, decided), outposts. No ceramic IV or heavy helmet in contract-zone loot | Chest rig, ruck: any time. Enemy and allied: 6 |
+| **Medical** | 38 items (wave 3) | Nothing required | Buyable, sellable | Existing 8-2400 | IFAKs at compounds and villages; trauma kits, fluids at outposts and HQ medbays; blood and big IVs rare (decided rarity) | Done; loot spread any time |
+| **Explosives, throwables** | Frag, five smokes, flashbang, breaching charge, zip cuffs | Demo block and det cord for sabotage (bridge, fuel depot, vehicle park), thermite, claymore, 40 mm HE and smoke, chem lights. Enemy IEDs: disarm or destroy, never sold | Buyable, sellable; IEDs mission-only | 40-600 (demo block 500, thermite 250) | Zip cuffs as loot at checkpoints, outposts and hostile bodies (Captain, backlog item above); grenades on bodies and in caches | Demo and thermite with the sabotage mission type; IEDs and bombers: 6 |
+| **Comms, nav, sight** | Radio, binoculars, ear protection | Field radio (the contract board in the field, Captain), enemy radio (hear zone chatter, decided), GPS, compass, rangefinder, IR strobe, NVGs by generation, recon quadcopter and FPV drone (decided), jammer (heavy, decided) | Own gear buyable; enemy radio loot-only (zone-bound, goes quiet when they switch) | GPS 400, NVG 3000-9000 by generation, quadcopter 2500, FPV 800 each, jammer 6000 | Enemy radios on squad leaders and at comms sites; NVGs on hot-zone and rival PMC bodies | Field radio: 4B. Enemy radio: hot zone (4B part 3). NVGs, IR: 7 (S2). Drones, jammer: 6 with enemy drones |
+| **Food, water** | None | MRE, water bottle, canteen, hydration bladder | Buyable, sellable, cheap | 5-20 | Villages, outposts, packs on bodies | **Deferred** (Captain: food and water simulation not a priority). Weight and trade value only until LRRP fatigue wants them |
+| **Intel** | Laptop 3000, phone 1200, documents 800 | Hard drive, USB stick, marked map, SIM card, officer ID, LRRP camera photos (count once carried out, decided) | Never in the shop; banks as leads, or sells to other factions at `intel_sale_price` with the risk (decided) | Existing; drive 1500, map 600 | Squad leaders, officers, outposts, checkpoints, intel objectives (decided) | Now (4B); camera with LRRP |
+| **Salvage, valuables** | Electronics salvage 450 | Weapon parts, copper wire, batteries, a generator, medical salvage, cash bundles (bank at face value), gold, watches | Sell-only; salvage share claims what's left in the field (decided) | 50-2000 | Compounds, HQ safes, wrecks, rival PMC bodies (higher tier). Taking from civilian homes costs local reputation | Now (4B); more kinds any time |
+| **Contraband** | None | Smuggled cigarettes and alcohol, captagon, antiquities, counterfeit dollars, unregistered weapons | Not in the shop. Shady fixers (like `salvage_union`'s) pay well; lawful factions lose reputation. Or hand it to the client for a small bonus | 300-5000 | Smuggler compounds, checkpoints, caches; the rival PMC's stashes (ties to the conspiracy plot) | 6 (needs reputation and fixer markets) |
+| **Vehicle parts, fuel** | None | Jerrycan, spare wheel, track links, repair kit, vehicle battery, engine parts, .50 BMG belts, vehicle shells | Buyable at the motor pool; parts sell; wreck parts loot | 50-1500 (.50 belt 200) | Wrecks, technicals, QRF motor pools, fuel depots | 5 (V1, V4) |
+| **Module and fortification materials** | None | Shipping containers, steel sheet, electronics, generators and fuel bladders (company modules, built and upgraded on the LHD); sandbags, HESCO, concertina wire, camo net (fortifying your space at a friendly FOB, FOB defence) | Bought in bulk at the LHD; salvaged from destroyed outposts; carried as crates in vehicles | 50-2000 a crate | Destroyed outposts and HQs, supply convoys | 5 (needs cargo). Captain (2026-10-11): upgrades cost cash and materials; no player-built FOB, see "Bases" below. Full base construction only with wave 8 |
+| **Keys, access** | None | Door and padlock keys, HQ keycard, safe combination (a document), technical's keys | Mission-only, zone-bound; a quiet alternative to breaching | 0 | Officers, guards, HVTs | Hot zone HQs (4B part 3) or 6 |
+| **Quest, story** | HVT case, supply crate | Rival PMC evidence (ledgers, contracts, a drive), crash-site flight recorder, MIA squadmate's belongings | Mission-only | 0 | Set by the contract | 6 onward (story contracts) |
+| **Personal, civilian** | None | Dog tags, wallets, photos, prayer beads, civilian phones (not intel), civilian clothes (gear-based disguise is later scope) | Sell-only, `misc` default 50 or less | 5-50 | Bodies, villages. Taken from civilians: local reputation hit | Any time as `misc`. **A fallen squadmate's dog tags count (Captain, 2026-10-11):** taken off the body and brought home they close the case (KIA, not MIA: no recovery contract), pay the family's death benefit, put the name on the base's memorial wall and lift the company's standing with recruits a little; tags left behind count against it (the effects are Proposed) |
+
+**Order, in short:** 4B uses what exists (intel, salvage, zip cuffs as loot, the field radio).
+The next small pass adds the LMG, M320, 40 mm and belts so every role has its real weapon.
+Wave 5 brings launchers, 7.62x54R, vehicle parts and fuel. Wave 6 brings enemy and allied gear
+by region, contraband, drones and the jammer, IEDs, keys and story items. Wave 7 brings
+attachments and NVGs. Module and fortification materials follow wave 5; full base construction
+waits for wave 8.
+
+## Bases: the LHD and friendly FOBs
+
+Captain (2026-10-11): the players don't build a FOB. The **LHD is the company's only base**, and
+inland the squad deploys from a **friendly faction's FOB** in the area, bringing the company's
+own **portable modules**. **Replacement troops are flown in from the LHD at a cost** (no hiring
+at a FOB). The rest of this section is Proposed.
+
+**The LHD (owned):** safe (never attacked), fully stocked, does everything: the armory, the
+full medbay (serious injuries recover here), the hiring board, aircraft maintenance, the
+memorial wall. It moves between regions with the company (days of travel). Every company
+upgrade lives here and is paid in cash plus materials.
+
+**Company modules (owned, portable):** shipping-container modules, built and upgraded on the
+LHD, set up at whichever friendly FOB the squad works from. Upgrade one once; it works at every
+FOB.
+- Armory container: the squad's gear and resupply forward.
+- Med container: field surgery: stabilise, and back in the fight sooner (serious cases still go
+  to the LHD).
+- Comms container: radio chatter, the intel cell, drone control.
+- Workshop and drone container: repairs, quadcopters and FPVs.
+- Generator and fuel bladder: power for the rest (the host rations theirs).
+Moving regions means flying or driving the modules over: days and a lift.
+
+**The friendly FOB (the host's):** the same downsides as a FOB of our own, in their terms:
+- Supply: the host's allocation, plus their quartermaster at their prices (reputation-gated).
+  Our own stock comes in from the LHD by helicopter or convoy, and what's there is all there is.
+- Footprint: the host gives us space, a tent, then a bay, then a hangar slot, growing with our
+  reputation with them. It caps how many modules we can set up.
+- Power: rationed; heavy modules need our own generator and fuel.
+- Threat: the enemy attacks FOBs (by heat and alert level): FOB defence contracts. Overrun, what
+  we staged there is at risk.
+- Caps: no hiring, no heavy aircraft maintenance, field care only.
+- One per region, set by who holds it: a region with no friendly faction means the LHD only, or a
+  shady fixer's compound at a price and a risk.
+- New: access depends on the host. Low reputation, breaking their rules (contraband, abusing
+  prisoners) or working for their enemies can get the company thrown out.
+**Reputation perks from the host:** more space, priority on their helicopters or QRF, their
+surgical team, a fuel allocation, quartermaster discounts.
+
+**Replacement troops (Captain):** hired on the LHD and flown in to the FOB (or the zone) at a
+cost: the hire plus the flight, more for a hot LZ, and it takes time (the next lift). Bodies and
+casualties go back the same way.
+
+**Materials:** containers, steel, electronics and generators build and upgrade modules (on the
+LHD); sandbags, HESCO, wire and camo nets fortify our space and help in FOB defence. Waves:
+modules and FOB deployment with wave 5 (they need lift and cargo; the 4A base hub becomes the
+first friendly FOB), FOB defence contracts with wave 6 (factions), full base construction with
+wave 8 (the player-built faction).
+
 ## Backlog (small, any time)
 
 **From Captain's playtests and the reviews:**

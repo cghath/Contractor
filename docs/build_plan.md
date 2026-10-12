@@ -194,6 +194,9 @@ once -> back at the base; respawns paid from the one bank; Captain's clawback te
 contract; an MIA squadmate's recovery contract (they wait where they were left). Next: part 2
 (missions in zones: seams 3, 4, 5, 7), then the hot zone.
 The full plan for everything after that (waves 5 to 8, backlog, open questions): [ChrisPlan_handoff.md](ChrisPlan_handoff.md).
+What the game buys, sells and finds, category by category and wave by wave (Captain,
+2026-10-11): the item catalogue plan in [ChrisPlan_handoff.md](ChrisPlan_handoff.md#item-catalogue-plan).
+4B uses what exists: intel, electronics salvage, zip cuffs as zone loot, the field radio.
 
 - **World scale:** contract zones of 2 to 4 km² and hot zones of 8 to 16 km² (hot-zone size
   being confirmed). Today's voxel world is one bounded box, so this needs terrain plus
@@ -229,6 +232,11 @@ green/blue smoke, loiters until marked, first call takes green) and extraction (
 purple smoke, lands within 100 m of an unsafe spot); support calls with cost and cooldown;
 aircraft and AAVs lost with their cargo and passengers. The AH-1Z, MRAPs, Bradley and Abrams: the US and
 close allies that operate them (UK and Canada: MRAPs).
+Items: launchers and their rounds, 7.62x54R, vehicle parts, fuel and vehicle ammo (item catalogue plan).
+Bases (Captain, 2026-10-11): no player-built FOB. Inland the squad deploys from a friendly
+faction's FOB with the company's portable container modules (built and upgraded on the LHD,
+the only base we own); replacement troops fly in from the LHD at a cost. The 4A base hub becomes
+the first friendly FOB. Details: [ChrisPlan_handoff.md](ChrisPlan_handoff.md#bases-the-lhd-and-friendly-fobs).
 
 ### Wave 6: phase 6, factions
 
@@ -239,6 +247,8 @@ reputation; enemy gear by region (Chinese, Russian, Iranian, insurgent); technic
 light vehicles; rival contractor teams; bounty hunters with a heat meter and named,
 Nemesis-style squads. **Before this wave:** Captain decides reputation tiers, allied troop
 types and what limits the allied-troop support menu.
+Items: enemy and allied gear by region, contraband for fixers, drones and the jammer, IEDs, keys
+and story items (item catalogue plan).
 
 ### Wave 7: art, world and weapons
 
@@ -246,6 +256,7 @@ The rest of Noah's asset pack as it lands (characters, gear, weapons, environmen
 replacing the placeholders, with armor still destructible voxels; day and night, weather,
 NVGs as gear; modular weapon attachments (optics, lights, lasers, suppressors, grips);
 optional assists for co-op newcomers; controller support.
+Items: optics, lights, lasers, suppressors, grips and NVGs by generation (item catalogue plan).
 
 **Character models (Captain, 2026-10-11): in progress on Captain's side, ahead of wave 7.**
 The soldier models are being rebuilt in a Stormworks style, still in voxels (the keep-voxels
