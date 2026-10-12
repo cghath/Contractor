@@ -192,11 +192,12 @@ func _rebuild() -> void:
 	_refresh_plate_damage()
 
 
-## MOLLE attachments on the worn carrier, drawn as small boxes on its attach points (the
-## points' "at" and "face"); rebuilt only when what's attached changes.
+## MOLLE attachments on the worn carrier and pack, drawn as small boxes on their attach points
+## (the points' "at" and "face"; a launcher packed on top of the pack as its tube, lying
+## across); rebuilt only when what's attached changes.
 func _set_pouches() -> void:
 	var points := inventory.attach_points()
-	var key := String(inventory.slots[&"vest"])
+	var key := "%s+%s" % [inventory.slots[&"vest"], inventory.slots[&"backpack"]]
 	for p: Dictionary in points:
 		var att := inventory.attachment(StringName(p.id))
 		if not att.is_empty():
@@ -207,7 +208,7 @@ func _set_pouches() -> void:
 	if _pouches:
 		_pouches.queue_free()
 		_pouches = null
-	if inventory.attachment_count() == 0:
+	if inventory.attachment_count() + inventory.attachment_count(&"backpack") == 0:
 		return
 	_pouches = Node3D.new()
 	_pouches.name = "Pouches"
@@ -217,8 +218,12 @@ func _set_pouches() -> void:
 		var att := inventory.attachment(StringName(p.id))
 		if att.is_empty():
 			continue
-		var node := pouch_node(ItemDB.get_item(StringName(att.id)), gear, not att.get("held", []).is_empty(), render_layers)
-		node.transform = carrier_fit(String(p.get("face", "front"))) * point_transform(p, WorldItem.visual_size(ItemDB.get_item(StringName(att.id))))
+		var item := ItemDB.get_item(StringName(att.id))
+		var on_pack := inventory.point_slot(StringName(p.id)) == &"backpack"
+		var node := LauncherRig.make_model(item, render_layers) if item.type == "launcher" \
+			else pouch_node(item, gear, not att.get("held", []).is_empty(), render_layers)
+		# (A pack sits on the carrier's back, so its points take the back's fit.)
+		node.transform = carrier_fit("back" if on_pack else String(p.get("face", "front"))) * point_transform(p, WorldItem.visual_size(item))
 		_pouches.add_child(node)
 
 
@@ -300,6 +305,8 @@ static func point_transform(p: Dictionary, size: Vector3) -> Transform3D:
 		"back": basis = Basis(Vector3.UP, PI)
 		"left": basis = Basis(Vector3.UP, PI / 2)
 		"right": basis = Basis(Vector3.UP, -PI / 2)
+		"top":  # on top of a pack: lying across it, left to right, resting on "at"
+			return Transform3D(Basis(Vector3.UP, PI / 2), origin + Vector3(0, size.y * 0.5, 0))
 	return Transform3D(basis, origin + basis * Vector3(0, 0, -size.z * 0.5))
 
 

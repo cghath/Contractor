@@ -214,6 +214,7 @@ func _test_molle_rules() -> void:
 	var why := light_inv.no_point_problem(ItemDB.get_item(&"pouch_ifak"))
 	check(why.begins_with("Every ") and why.contains("taken") and why.contains("Low-Profile"), "its points taken: \"%s\"" % why)
 	light_inv.free()
+	_test_pack_points()
 	var expected := bare + 2 * 0.14 + 0.3 + 0.12 + 1.2 + 5 * 0.5
 	check(absf(inv.total_mass() - expected) < 0.01, "pouches and what's in them count in the mass (%.2f kg, expected %.2f)" % [inv.total_mass(), expected])
 	# Reloading pulls from the mag pouches first.
@@ -337,6 +338,33 @@ func _test_molle_host() -> void:
 		player._server_interact.rpc_id(1, dropped.get_path())
 		check(inv.slots[&"vest"] == &"plate_carrier" and inv.attachment_count() == 2 and inv.units_in(&"molle:mag_3") == 2, "picked up again, pouches, magazines and all")
 	inv.strip()
+
+
+## Captain, 2026-10-12: packs carry disposable launchers on top (a medium pack one, a heavy
+## pack up to three) and an aid bag on the back (medical storage, medics and players).
+func _test_pack_points() -> void:
+	print("Pack points: launchers on top, an aid bag on the back")
+	var inv := Inventory.new()
+	check(inv.no_point_problem(ItemDB.get_item(&"at4")) == "Put on a backpack first", "no pack: \"%s\"" % inv.no_point_problem(ItemDB.get_item(&"at4")))
+	inv.take(&"assault_pack")
+	check(inv.take(&"at4", 2) == 2 and inv.slots[&"launcher"] == &"at4" and inv.attachment(&"pack_top_1").get("id") == &"at4",
+		"two AT4s: one on the shoulder, one packed on top of the pack")
+	check(inv.take(&"at4") == 0 or _count_in(inv, &"backpack", &"at4") == 1, "a medium pack has one top spot (the third goes inside if anywhere)")
+	inv.strip()
+	inv.take(&"ruck_45")
+	check(inv.take(&"at4", 4) == 4 and inv.attachment_count(&"backpack") == 3, "a heavy pack takes three on top (%d)" % inv.attachment_count(&"backpack"))
+	check(inv.take(&"aid_bag") == 1 and inv.attachment(&"pack_aid").get("id") == &"aid_bag", "the aid bag goes on the pack's back")
+	check(inv.take(&"pressure_bandage", 4) == 4 and inv.units_in(Inventory.pouch_container(&"pack_aid")) == 4,
+		"medical kit goes into it (%d)" % inv.units_in(Inventory.pouch_container(&"pack_aid")))
+	check(not Inventory.pouch_accepts(ItemDB.get_item(&"aid_bag"), ItemDB.get_item(&"mag_556")), "and only medical kit")
+	var packed: Dictionary = inv.state_of(&"backpack").duplicate(true)
+	check(packed.get("molle", {}).size() == 4, "what's on the pack lives in the pack's state (%d)" % packed.get("molle", {}).size())
+	# Fired off the shoulder: the next one comes off the top of the pack.
+	inv.unequip(&"launcher")
+	check(inv.equip_attachment(&"pack_top_1") and inv.slots[&"launcher"] == &"at4" and inv.attachment(&"pack_top_1").is_empty(),
+		"a packed AT4 goes onto the shoulder")
+	check(not inv.equip_attachment(&"pack_top_2"), "not while one is already there")
+	inv.free()
 
 
 func _count_in(inv: Inventory, container: StringName, id: StringName) -> int:

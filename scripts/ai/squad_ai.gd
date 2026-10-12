@@ -1282,7 +1282,8 @@ func _care_reach(contact: bool) -> void:
 	if d > CASUALTY_REACH:
 		return
 	_has_destination = false
-	if exposed and not is_instance_valid(casualty.carried_by):
+	# (Never lift someone another is treating: it cut the Captain's IV short, P0164.)
+	if exposed and not is_instance_valid(casualty.carried_by) and not casualty.vitals.is_healing():
 		var spot: Variant = find_cover(body.global_position, 10.0)
 		if spot != null and body.server_pick_up_body(casualty, Soldier.DRAG):
 			_cover_point = spot
@@ -1415,6 +1416,9 @@ func _care_carry(contact: bool) -> void:
 		body.want_crouch = true
 		return
 	if body.carrying != casualty:
+		if casualty.vitals.is_healing():
+			_has_destination = false  # someone is treating them: wait, don't lift them away (P0164)
+			return
 		if _flat_distance(casualty.body_point()) <= CASUALTY_REACH and body.server_pick_up_body(casualty, Soldier.CARRY):
 			_callouts_carrying(false)
 		else:

@@ -392,7 +392,7 @@ func _redraw() -> void:
 	if not visible or _containers_box == null:
 		return
 	var inv := player.inventory
-	if inv.slots[&"vest"] == &"" and view == View.MOLLE:
+	if inv.attach_points().is_empty() and view == View.MOLLE:
 		view = View.LOADOUT
 	_validate_selection()
 	_tiles.clear()
@@ -401,7 +401,7 @@ func _redraw() -> void:
 	_mass_bar.value = mass
 	for v: View in _view_buttons:
 		_view_buttons[v].set_pressed_no_signal(v == view)
-	_view_buttons[View.MOLLE].disabled = inv.slots[&"vest"] == &""
+	_view_buttons[View.MOLLE].disabled = inv.attach_points().is_empty()  # a carrier's or a pack's points
 	_clear(_quick_box)
 	for id: StringName in _loose_round_ids():
 		if inv.loadable_rounds(id) > 0:
@@ -420,7 +420,7 @@ func _redraw_containers() -> void:
 	_clear(_containers_box)
 	var pouches := inv.pouch_containers()
 	if not pouches.is_empty():
-		var panel := _section("CARRIER POUCHES", "%d attached" % inv.attachment_count(), {})
+		var panel := _section("POUCHES", "%d attached" % (inv.attachment_count() + inv.attachment_count(&"backpack")), {})
 		var body: VBoxContainer = panel.get_meta(&"body")
 		for c in pouches:
 			var point := inv.attach_point(Inventory.point_of(c))
@@ -518,7 +518,7 @@ func _mark_points(id: StringName) -> void:
 			continue
 		if not attachable:
 			tile.modulate = Color.WHITE
-		elif String(p.type) in item.stats.attach and inv.attachment(StringName(p.id)).is_empty():
+		elif Inventory.point_types(p).any(func(t: String) -> bool: return t in item.stats.attach) and inv.attachment(StringName(p.id)).is_empty():
 			tile.modulate = FITS_TINT
 		else:
 			tile.modulate = Color(1, 1, 1, DIMMED_ALPHA)
@@ -546,7 +546,7 @@ func _point_tile(p: Dictionary) -> Control:
 	var inv := player.inventory
 	var point := StringName(p.id)
 	var att := inv.attachment(point)
-	var type_name: String = Inventory.POINT_TYPES.get(p.type, p.type)
+	var type_name: String = Inventory.types_text(Inventory.point_types(p), "/")  # a shared spot: "Utility/Radio"
 	var caption := "%s · %s" % [type_name, p.get("face", "")]
 	var src := {"kind": "point", "point": point, "id": StringName(att.get("id", ""))}
 	if att.is_empty():
@@ -571,7 +571,7 @@ func _redraw_details() -> void:
 		if selected.kind == "point":
 			var p := inv.attach_point(selected.point)
 			_detail_box.add_child(_label("Empty %s point" % Inventory.POINT_TYPES.get(p.get("type", ""), ""), 18, COL_TEXT))
-			_detail_box.add_child(_wrapped("Fits: %s." % ", ".join(_fits_point(String(p.get("type", "")))), COL_MUTED))
+			_detail_box.add_child(_wrapped("Fits: %s." % ", ".join(_fits_point(Inventory.point_types(p))), COL_MUTED))
 		else:
 			_detail_box.add_child(_label("Empty %s" % SLOT_NAMES.get(selected.get("slot", &""), "slot"), 18, COL_TEXT))
 		return
@@ -635,7 +635,7 @@ func _actions_for(src: Dictionary) -> Array:
 			var i: int = src.index
 			if item.slot != &"":
 				out.append(["Equip", _action.bind("equip_entry", c, i, &"", &"")])
-			if Inventory.is_attachable(item) and inv.slots[&"vest"] != &"":
+			if Inventory.is_attachable(item) and not inv.attach_points().is_empty():
 				out.append(["Attach", _action.bind("attach", c, i, &"", &"")])
 			var use := _medical_use(item)
 			if use.is_valid():
@@ -658,6 +658,9 @@ func _actions_for(src: Dictionary) -> Array:
 		"point":
 			if inv.attachment(src.point).is_empty():
 				return out
+			var on_point := ItemDB.get_item(StringName(inv.attachment(src.point).id))
+			if on_point and on_point.slot != &"":  # a launcher packed on top of the pack
+				out.append(["Equip", _action.bind("equip_attachment", &"", -1, src.point, &"")])
 			out.append(["Detach", _action.bind("detach", &"", -1, src.point, &"")])
 			out.append(["Drop", _action.bind("drop_attachment", &"", -1, src.point, &"")])
 		"nearby":
@@ -741,7 +744,7 @@ func drop_action(src: Dictionary, dst: Dictionary) -> Callable:
 				"slot", "doll":
 					if item.slot != &"":
 						return _action.bind("equip_entry", c, i, &"", &"")
-					if Inventory.is_attachable(item) and inv.slots[&"vest"] != &"":
+					if Inventory.is_attachable(item) and not inv.attach_points().is_empty():
 						return _action.bind("attach", c, i, &"", &"")
 				"point":
 					if Inventory.is_attachable(item):
@@ -763,6 +766,9 @@ func drop_action(src: Dictionary, dst: Dictionary) -> Callable:
 				"point":
 					if dst.point != src.point:
 						return _action.bind("move_attachment", &"", -1, src.point, dst.point)
+				"slot", "doll":
+					if item.slot != &"":  # a packed launcher onto the shoulder
+						return _action.bind("equip_attachment", &"", -1, src.point, &"")
 				"container":
 					if not Inventory.is_pouch_container(dst.container):
 						return _action.bind("detach", &"", -1, src.point, dst.container)
@@ -1166,12 +1172,12 @@ static func _holds_text(pouch: ItemData) -> String:
 	return text
 
 
-## Names of the attachables that fit a point type, for an empty point's details.
-static func _fits_point(kind: String) -> PackedStringArray:
+## Names of the attachables that fit any of a point's types, for an empty point's details.
+static func _fits_point(kinds: Array) -> PackedStringArray:
 	var out := PackedStringArray()
 	for id: StringName in ItemDB.all_ids():
 		var item := ItemDB.get_item(id)
-		if Inventory.is_attachable(item) and kind in item.stats.attach:
+		if Inventory.is_attachable(item) and kinds.any(func(k: String) -> bool: return k in item.stats.attach):
 			out.append(item.name)
 	out.sort()
 	return out

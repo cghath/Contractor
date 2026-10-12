@@ -862,6 +862,13 @@ func _server_inventory_action(action: String, container: StringName, index: int,
 					return
 			inventory.attach(slot, entry)  # no room: back on the carrier
 			_client_message.rpc_id(owner_peer(), "No room to stow that")
+		"equip_attachment":  # a disposable launcher off the top of the pack, onto the shoulder
+			var on_point := inventory.attachment(slot)
+			if on_point.is_empty():
+				return
+			var gear := ItemDB.get_item(StringName(on_point.id))
+			if not inventory.equip_attachment(slot):
+				_client_message.rpc_id(owner_peer(), "Already carrying a %s" % InventoryScreen.SLOT_NAMES.get(gear.slot, String(gear.slot)).to_lower() if gear and gear.slot != &"" else "Can't equip that")
 		"move_attachment":
 			var att := inventory.attachment(slot)
 			if att.is_empty():

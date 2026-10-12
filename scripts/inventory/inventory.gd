@@ -37,7 +37,14 @@ const MOLLE_PREFIX := "molle:"
 ## Display names of attach point types.
 const POINT_TYPES := {
 	"mag": "Mag", "pistol": "Pistol mag", "knife": "Knife", "radio": "Radio", "medical": "Medical", "tq": "Tourniquet", "utility": "Utility", "chest": "Chest",
+	"pack_top": "Pack top", "aid_bag": "Aid bag",
 }
+## What carries attach points: the carrier and the pack (Captain, 2026-10-12: disposable
+## launchers packed on top of a pack, an aid bag on its back). Their attachments live in that
+## item's state, so they go with it.
+const ATTACH_SLOTS: Array[StringName] = [&"vest", &"backpack"]
+## Point types only packs have.
+const PACK_POINT_TYPES: Array[String] = ["pack_top", "aid_bag"]
 
 ## Replicated snapshot. Always assign a fresh Dictionary so replication sees the change.
 var net_state: Dictionary = {}:
@@ -704,14 +711,37 @@ static func pouch_accepts(pouch: ItemData, item: ItemData) -> bool:
 	return false
 
 
-## The worn carrier's attach points (its stats' "molle"): [{"id", "type", "at", "face"}],
-## none without a carrier.
+## The attach points of what's worn (its stats' "molle"): the carrier's, then the pack's
+## (a pack's top takes disposable launchers, its back an aid bag). [{"id", "type", "also"?,
+## "at", "face"}]; none with neither worn. Point ids are unique across carriers and packs.
 func attach_points() -> Array:
-	var vest: StringName = slots.get(&"vest", &"")
-	return ItemDB.get_item(vest).stats.get("molle", []) if vest != &"" else []
+	var out := []
+	for slot: StringName in ATTACH_SLOTS:
+		var id: StringName = slots.get(slot, &"")
+		if id != &"":
+			out.append_array(ItemDB.get_item(id).stats.get("molle", []))
+	return out
 
 
-## The worn carrier's attach point `point` ({} if it has none).
+## The worn item (slot: &"vest" or &"backpack") whose attach point `point` is, or &"".
+func point_slot(point: StringName) -> StringName:
+	for slot: StringName in ATTACH_SLOTS:
+		var id: StringName = slots.get(slot, &"")
+		if id == &"":
+			continue
+		for p: Dictionary in ItemDB.get_item(id).stats.get("molle", []):
+			if p.id == String(point):
+				return slot
+	return &""
+
+
+## The types a point takes: its "type", and any "also" (a shared spot: a front corner of the
+## carrier that takes a radio or a utility pouch, Captain 2026-10-12).
+static func point_types(p: Dictionary) -> Array:
+	return [String(p.type)] + Array(p.get("also", []))
+
+
+## The worn attach point `point` ({} if nothing worn has it).
 func attach_point(point: StringName) -> Dictionary:
 	for p: Dictionary in attach_points():
 		if p.id == String(point):
@@ -719,9 +749,11 @@ func attach_point(point: StringName) -> Dictionary:
 	return {}
 
 
-## What's on attach point `point` of the worn carrier: {"id", "held"?}, or {}.
+## What's on attach point `point`: {"id", "held"? (a pouch's contents), "state"? (a launcher's)},
+## or {}.
 func attachment(point: StringName) -> Dictionary:
-	return slot_state.get(&"vest", {}).get("molle", {}).get(String(point), {})
+	var slot := point_slot(point)
+	return slot_state.get(slot, {}).get("molle", {}).get(String(point), {}) if slot != &"" else {}
 
 
 ## The pouch on a pouch container's point, or null.
@@ -730,48 +762,63 @@ func pouch_item(container: StringName) -> ItemData:
 	return ItemDB.get_item(StringName(att.get("id", ""))) if not att.is_empty() else null
 
 
-## Why `item` can't go on `point` of the worn carrier right now ("" if it can).
+## Whether `item` goes only on a pack's points (a disposable launcher, an aid bag).
+static func pack_only(item: ItemData) -> bool:
+	return is_attachable(item) and Array(item.stats.attach).all(func(t: String) -> bool: return t in PACK_POINT_TYPES)
+
+
+## "Put on a plate carrier first" or "... a backpack ...", whichever `item` would hang on.
+func _wear_first(item: ItemData) -> String:
+	return "Put on a backpack first" if pack_only(item) else "Put on a plate carrier first"
+
+
+## Why `item` can't go on `point` right now ("" if it can).
 func attach_problem(item: ItemData, point: StringName) -> String:
-	if slots[&"vest"] == &"":
-		return "Put on a plate carrier first"
 	if not is_attachable(item):
 		return "%s doesn't attach to a carrier" % item.name
 	var p := attach_point(point)
 	if p.is_empty():
-		return "The %s has no %s point" % [ItemDB.get_item(slots[&"vest"]).name, point]
+		if attach_points().is_empty():
+			return _wear_first(item)
+		return "Nothing you wear has a %s point" % point
 	if not attachment(point).is_empty():
 		return "Something is already on that point"
-	if not String(p.type) in item.stats.attach:
-		return "%s doesn't fit a %s point (fits %s)" % [item.name, POINT_TYPES.get(p.type, p.type), ", ".join(PackedStringArray(item.stats.attach.map(func(t: String) -> String: return POINT_TYPES.get(t, t))))]
+	if not point_types(p).any(func(t: String) -> bool: return t in item.stats.attach):
+		return "%s doesn't fit a %s point (fits %s)" % [item.name, types_text(point_types(p), "/"), types_text(item.stats.attach, ", ")]
 	return ""
 
 
-## Why `item` has no free point on the worn carrier (free_point_for found none): no carrier,
-## a carrier without a point of its types, or those points all taken ("" if one is free).
+static func types_text(types: Array, sep: String) -> String:
+	return sep.join(PackedStringArray(types.map(func(t: String) -> String: return POINT_TYPES.get(t, t))))
+
+
+## Why `item` has no free point (free_point_for found none): nothing worn to hang it on, no
+## point of its types, or those points all taken ("" if one is free).
 ## (Captain's playtest P0164: "No free point on the carrier" didn't say which.)
 func no_point_problem(item: ItemData) -> String:
-	if slots[&"vest"] == &"":
-		return "Put on a plate carrier first"
 	if not is_attachable(item):
 		return "%s doesn't attach to a carrier" % item.name
+	var on := &"backpack" if pack_only(item) else &"vest"
+	if slots[on] == &"":
+		return _wear_first(item)
 	if free_point_for(item) != &"":
 		return ""
-	var carrier := ItemDB.get_item(slots[&"vest"]).name
-	var types := " or ".join(PackedStringArray(item.stats.attach.map(func(t: String) -> String: return POINT_TYPES.get(t, t))))
-	var fitting := attach_points().filter(func(p: Dictionary) -> bool: return String(p.type) in item.stats.attach)
+	var wearing := ItemDB.get_item(slots[on]).name
+	var types := types_text(item.stats.attach, " or ")
+	var fitting := attach_points().filter(func(p: Dictionary) -> bool: return point_types(p).any(func(t: String) -> bool: return t in item.stats.attach))
 	if fitting.is_empty():
-		return "The %s has no %s point for the %s" % [carrier, types, item.name]
-	return "Every %s point on the %s is taken (%d)" % [types, carrier, fitting.size()]
+		return "The %s has no %s point for the %s" % [wearing, types, item.name]
+	return "Every %s point on the %s is taken (%d)" % [types, wearing, fitting.size()]
 
 
-## The first free attach point of the worn carrier that `item` fits (its own point types
-## first: a mag pouch on a mag point before a utility one), or &"".
+## The first free attach point that `item` fits (its own point types first: a mag pouch on a
+## mag point before a utility one), or &"".
 func free_point_for(item: ItemData) -> StringName:
 	if not is_attachable(item):
 		return &""
 	for kind: String in item.stats.attach:
 		for p: Dictionary in attach_points():
-			if p.type == kind and attachment(StringName(p.id)).is_empty():
+			if kind in point_types(p) and attachment(StringName(p.id)).is_empty():
 				return StringName(p.id)
 	return &""
 
@@ -834,18 +881,20 @@ func attach_entry(container: StringName, index: int, point: StringName = &"") ->
 	return true
 
 
-## Host only. Takes what's on `point` off the worn carrier and returns it as an entry
-## ({"id", "count": 1, "state"?: {"held": contents}}), or {}.
+## Host only. Takes what's on `point` off what's worn and returns it as an entry
+## ({"id", "count": 1, "state"?: {"held": contents} or a launcher's own state}), or {}.
 func detach(point: StringName) -> Dictionary:
 	var att := attachment(point)
 	if att.is_empty():
 		return {}
-	var molle: Dictionary = slot_state[&"vest"]["molle"]
+	var molle: Dictionary = slot_state[point_slot(point)]["molle"]
 	molle.erase(String(point))
 	var entry := {"id": StringName(att.id), "count": 1}
 	var held: Array = att.get("held", [])
 	if not held.is_empty():
 		entry.state = {"held": held.duplicate(true)}
+	elif not att.get("state", {}).is_empty():
+		entry.state = att.state.duplicate(true)
 	_commit()
 	return entry
 
@@ -861,7 +910,8 @@ func attach(point: StringName, entry: Dictionary) -> bool:
 	return true
 
 
-## Host only. Moves what's on attach point `from` to the free point `to`.
+## Host only. Moves what's on attach point `from` to the free point `to` (on the same item or
+## the other: carrier and pack).
 func move_attachment(from: StringName, to: StringName) -> bool:
 	var att := attachment(from)
 	if att.is_empty() or from == to:
@@ -869,28 +919,52 @@ func move_attachment(from: StringName, to: StringName) -> bool:
 	var item := ItemDB.get_item(StringName(att.id))
 	if attach_problem(item, to) != "":
 		return false
-	var molle: Dictionary = slot_state[&"vest"]["molle"]
-	molle.erase(String(from))
-	molle[String(to)] = att
+	(slot_state[point_slot(from)]["molle"] as Dictionary).erase(String(from))
+	_molle_of(point_slot(to))[String(to)] = att
 	_commit()
 	return true
 
 
-## How many attachments the worn carrier has.
-func attachment_count() -> int:
-	return slot_state.get(&"vest", {}).get("molle", {}).size()
+## How many attachments the worn carrier (or `slot`: the pack) has.
+func attachment_count(slot := &"vest") -> int:
+	return slot_state.get(slot, {}).get("molle", {}).size()
 
 
-## Sets what's on `point` (no checks, no commit). A pouch takes its contents from `state`.
+## Host only. Puts what's on `point` (a launcher packed on top of the pack) into its body slot,
+## its state and all. False if nothing is there, it isn't worn gear, or the slot is taken.
+func equip_attachment(point: StringName) -> bool:
+	var att := attachment(point)
+	if att.is_empty():
+		return false
+	var item := ItemDB.get_item(StringName(att.id))
+	if item == null or item.slot == &"" or slots.get(item.slot, &"x") != &"":
+		return false
+	var entry := detach(point)
+	slots[item.slot] = item.id
+	slot_state[item.slot] = entry.get("state", item.default_state())
+	_commit()
+	return true
+
+
+## The "molle" Dictionary in the state of worn `slot` (made if missing).
+func _molle_of(slot: StringName) -> Dictionary:
+	var s: Dictionary = slot_state.get(slot, {})
+	if not s.has("molle"):
+		s["molle"] = {}
+	slot_state[slot] = s
+	return s["molle"]
+
+
+## Sets what's on `point` (no checks, no commit). A pouch takes its contents from `state`;
+## anything else with state (a launcher's loaded round) keeps it.
 func _set_attachment(point: StringName, id: StringName, state: Dictionary) -> void:
-	var vest_state: Dictionary = slot_state.get(&"vest", {})
-	if not vest_state.has("molle"):
-		vest_state["molle"] = {}
-	slot_state[&"vest"] = vest_state
 	var att := {"id": id}
-	if is_pouch(ItemDB.get_item(id)):
+	var item := ItemDB.get_item(id)
+	if is_pouch(item):
 		att["held"] = state.get("held", []).duplicate(true)
-	vest_state["molle"][String(point)] = att
+	elif not state.is_empty():
+		att["state"] = state.duplicate(true)
+	_molle_of(point_slot(point))[String(point)] = att
 
 
 # --- Internals --------------------------------------------------------------------------
@@ -981,14 +1055,15 @@ func _apply_state(state: Dictionary) -> void:
 	containers.clear()
 	for container in CONTAINERS:
 		containers[container] = state.get("containers", {}).get(container, []).duplicate(true)
-	# Each pouch on the worn carrier is a container: the very Array in the carrier's state,
-	# so what goes in or out of it is in the vest's state too.
-	var molle: Dictionary = slot_state.get(&"vest", {}).get("molle", {})
-	for point: Variant in molle:
-		var att: Dictionary = molle[point]
-		if is_pouch(ItemDB.get_item(StringName(att.get("id", "")))):
-			if not att.has("held"):
-				att["held"] = []
-			containers[pouch_container(StringName(point))] = att["held"]
+	# Each pouch on the worn carrier (or pack: an aid bag) is a container: the very Array in
+	# that item's state, so what goes in or out of it is in its state too.
+	for slot: StringName in ATTACH_SLOTS:
+		var molle: Dictionary = slot_state.get(slot, {}).get("molle", {})
+		for point: Variant in molle:
+			var att: Dictionary = molle[point]
+			if is_pouch(ItemDB.get_item(StringName(att.get("id", "")))):
+				if not att.has("held"):
+					att["held"] = []
+				containers[pouch_container(StringName(point))] = att["held"]
 	hands = StringName(state.get("hands", &""))
 	changed.emit()

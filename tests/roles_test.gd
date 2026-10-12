@@ -64,7 +64,25 @@ func _test_assignment() -> void:
 	for team in 2:
 		var roles := layout.filter(func(s: Dictionary) -> bool: return s.team == team).map(func(s: Dictionary) -> StringName: return s.role)
 		check(roles.size() == 4 and roles.count(Roles.MEDIC) == 1, "fire team %s: four slots, one medic %s" % [Roles.TEAMS[team], roles])
-	check(Roles.ids().size() == 6 and Roles.has(&"grenadier") and Roles.has(&"autorifleman"), "six roles from data/roles.json")
+	check(Roles.ids().size() == 7 and Roles.has(&"grenadier") and Roles.has(&"autorifleman") and Roles.has(&"anti_tank"), "seven roles from data/roles.json")
+	# Captain, 2026-10-12: an AT role for the squad (a Carl Gustaf and three rounds), and the
+	# rifleman's AT4 now that there are launchers.
+	var at_plan := Roles.assign([&"anti_tank"])
+	check(at_plan.slots[0] >= 0 and at_plan.roles[at_plan.slots[0]] == &"anti_tank", "an AT pick takes a slot (%s)" % [at_plan.slots])
+	var at_inv := Inventory.new()
+	Roles.apply_kit(at_inv, &"anti_tank")
+	var rounds := 0
+	for c in Inventory.CONTAINERS:
+		for e: Dictionary in at_inv.containers[c]:
+			if String(e.id).begins_with("ffv"):
+				rounds += int(e.count)
+	check(at_inv.slots[&"launcher"] == &"maaws" and at_inv.slots[&"primary"] == &"m4a1" and rounds == 3,
+		"the AT kit: a Carl Gustaf on the back, an M4 and three rounds carried (%s, %d rounds)" % [at_inv.slots[&"launcher"], rounds])
+	at_inv.free()
+	var rfl_inv := Inventory.new()
+	Roles.apply_kit(rfl_inv, Roles.RIFLEMAN)
+	check(rfl_inv.slots[&"launcher"] == &"at4", "the rifleman carries an AT4 (%s)" % rfl_inv.slots[&"launcher"])
+	rfl_inv.free()
 	for picks: Array in [[&"team_leader"], [&"medic"], [&"medic", &"medic"], [&"marksman", &"marksman"],
 			[&"team_leader", &"medic", &"marksman", &"grenadier"], [&"medic", &"medic", &"medic", &"rifleman"],
 			[&"marksman", &"marksman", &"marksman", &"marksman"]]:
@@ -92,7 +110,7 @@ func _test_assignment() -> void:
 func _test_menu_picker() -> void:
 	print("Main menu role picker")
 	var picker: OptionButton = $Main/Menu.role_picker
-	check(picker.item_count == 6 and picker.get_item_metadata(picker.selected) == Roles.MEDIC, "lists the six roles, showing your pick")
+	check(picker.item_count == Roles.ids().size() and picker.get_item_metadata(picker.selected) == Roles.MEDIC, "lists every role (%d), showing your pick" % picker.item_count)
 	picker.select(picker.item_count - 1)
 	picker.item_selected.emit(picker.item_count - 1)
 	check(Roles.local_choice == picker.get_item_metadata(picker.item_count - 1), "picking one sets the role sent to the host")

@@ -385,7 +385,7 @@ static func body_items(body: Soldier) -> Array[Dictionary]:
 	for p: Dictionary in inv.attach_points():
 		var att := inv.attachment(StringName(p.id))
 		if not att.is_empty():
-			out.append({"label": "Carrier: %s" % ItemDB.get_item(StringName(att.id)).name,
+			out.append({"label": "%s: %s" % ["Pack" if inv.point_slot(StringName(p.id)) == &"backpack" else "Carrier", ItemDB.get_item(StringName(att.id)).name],
 				"where": Inventory.pouch_container(StringName(p.id)), "index": -1, "item": StringName(att.id), "disabled": ""})
 	for container in inv.search_containers():  # pouches first
 		var list: Array = inv.containers[container]

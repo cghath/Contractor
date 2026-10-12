@@ -35,6 +35,8 @@ const STRIDE_M := 0.8
 const STEP_MIN_SPEED := 0.5
 const STEP_WINDOW_S := 0.25
 const STEP_FRAME_M := 0.03
+## Proposed: another player's body rising or falling faster than this (m/s) is in the air.
+const STEP_AIR_SPEED := 2.0
 const STEP_VOICES := 3
 const STEP_OTHERS_DB := -3.0
 ## A round passing within this distance of the listener cracks (when fired from further
@@ -249,7 +251,9 @@ func _process(delta: float) -> void:
 		# (A random start in the stride, so a squad setting off together doesn't step in unison.)
 		var e: Dictionary = _steps.get(key, {"pos": pos, "walked": randf() * _stride(s), "anchor": pos, "since": 0.0, "walking": false})
 		var moved := Vector2(pos.x - e.pos.x, pos.z - e.pos.z).length()
+		var rise := absf(pos.y - float((e.pos as Vector3).y))
 		e.pos = pos
+		var airborne := _airborne(s, rise, delta)
 		# Walking or not: the ground covered over STEP_WINDOW_S (whatever the frame rate; standing
 		# jitter goes back and forth and covers none), or a big move in one frame.
 		e.since = float(e.since) + delta
@@ -262,6 +266,8 @@ func _process(delta: float) -> void:
 		if moved > 2.0 or not s.vitals.is_up() or is_instance_valid(s.carried_by) or is_instance_valid(s.vehicle) \
 				or dist > STEP_RANGE_M:
 			e.walked = 0.0  # a teleport, down, carried, riding or too far: no step
+		elif airborne:
+			pass  # jumping or falling: no steps in the air (Captain's playtest); the stride holds
 		elif e.walking or moved >= STEP_FRAME_M:
 			e.walked = float(e.walked) + moved
 			var stride := _stride(s)
@@ -283,6 +289,15 @@ func _process(delta: float) -> void:
 	_update_engines(ear, delta)
 	if _steps.size() > 256:
 		_steps.clear()
+
+
+## Whether `s` is off the ground this frame: the physics' own floor contact for a body this
+## peer moves (you, and the AI on the host), else rising or falling faster than
+## STEP_AIR_SPEED (`rise` metres this frame; another player's body only has its synced position).
+func _airborne(s: Soldier, rise: float, delta: float) -> bool:
+	if s.is_physics_processing() and (s.is_local() or (s.is_ai() and multiplayer.is_server())):
+		return not s.is_on_floor()
+	return delta > 0.0 and rise / delta > STEP_AIR_SPEED
 
 
 func _step(s: Soldier, volume_db: float) -> void:

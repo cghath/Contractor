@@ -144,6 +144,13 @@ func _test_in_level() -> void:
 		walker.global_position = rest + Vector3(0.004 * flip, 0, 0.003 * flip)
 		await get_tree().process_frame
 	check(not &"step" in Sfx.heard_after(t), "standing still, jittering: no footsteps (%d)" % Sfx.heard_after(t).count(&"step"))
+	# Jumping while moving: no steps in the air (Captain's playtest). Up then down 0.1 m a
+	# frame while going 2.4 m forward.
+	t = Sfx.heard_count()
+	for i in 24:
+		walker.global_position += Vector3(0, 0.1 if i < 12 else -0.1, -0.1)
+		await get_tree().process_frame
+	check(not &"step" in Sfx.heard_after(t), "a jump going forward 2.4 m: no footsteps in the air (%d)" % Sfx.heard_after(t).count(&"step"))
 	walker.queue_free()
 	# A squad of six walking around you: only the three nearest are heard (it sounded like a
 	# crowd, P0164).
