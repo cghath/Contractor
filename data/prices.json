@@ -23,7 +23,7 @@
 		"knife": 80, "radio": 1800, "enemy_radio": 250, "binoculars": 300,
 		"frag_grenade": 90, "smoke_grenade": 40, "smoke_green": 45, "smoke_yellow": 45, "smoke_blue": 45, "smoke_purple": 45,
 		"flashbang": 70, "breaching_charge": 400,
-		"electronics_salvage": 450, "hvt_case": 0, "supply_crate": 2500,
+		"electronics_salvage": 450, "hvt_case": 0, "supply_crate": 2500, "supply_pallet": 0,
 		"zip_cuffs": 5, "intel_laptop": 3000, "intel_phone": 1200, "intel_documents": 800,
 		"jerrycan": 60, "spare_wheel": 400, "track_links": 350, "repair_kit": 900, "vehicle_battery": 250, "engine_parts": 1200,
 		"belt_50bmg": 200, "belt_127x108": 150,
