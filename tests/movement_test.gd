@@ -186,13 +186,22 @@ func _test_hitboxes() -> void:
 		left -= 0.1
 	check(player.vitals.downed and absf(torso.global_basis.y.y) < 0.35, "downed still lays hitboxes down (lying flat with the body, a ragdoll now: up %.2f)" % torso.global_basis.y.y)
 	player.vitals.server_reset_health()
+	# Wait for the ragdoll to go: it moves the body to where it lay (Soldier._stand_where_ragdoll_lay)
+	# on whichever frame it notices, so moving the body back before then loses to it (the flake).
+	var gone := 120
+	while is_instance_valid(player.ragdoll) and gone > 0:
+		await get_tree().process_frame
+		gone -= 1
 	await _frames(2)
-	# Up again, the body stands where its ragdoll lay (Soldier._stand_where_ragdoll_lay): back
-	# to where it stood, which the later checks build their walls round.
+	# Up again: back to where it stood, which the later checks build their walls round, and
+	# settled onto the ground (we drive the body; its own physics is off).
 	player.global_transform = stood
 	player.velocity = Vector3.ZERO
 	move.set_stance(S.STAND_HIGH)
-	await _frames(2)
+	for i in 20:
+		await get_tree().physics_frame
+		move.step(get_physics_process_delta_time())
+	await _settle_pose(0.6)
 	check(torso.transform.is_equal_approx(rest_torso) and _shape_position(head).distance_to(rest_head) < 0.01, "standing again: back at rest")
 	move.press_lean(-1)
 	for i in 30:
