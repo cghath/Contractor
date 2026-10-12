@@ -77,10 +77,20 @@ const MENU := {
 				{"key": "4", "label": "Yellow", "select": "color:yellow"},
 			]},
 		]},
-		{"key": "0", "label": "Support", "items": [
-			{"key": "1", "label": "Helicopter transport", "cmd": ""},
-			{"key": "2", "label": "Resupply drop", "cmd": ""},
+		{"key": "0", "label": "Support", "items": [  # wave 5b: handlers registered with Supports
+			{"key": "1", "label": "Helicopter transport", "cmd": "support:transport"},
+			{"key": "2", "label": "Resupply drop", "cmd": "support:resupply"},
 			{"key": "3", "label": "Fire support", "cmd": ""},
+			{"key": "4", "label": "Helicopter extraction", "cmd": "support:extraction"},
+			{"key": "5", "label": "AAV", "items": [
+				{"key": "1", "label": "Call an AAV", "cmd": "support:aav_call"},
+				{"key": "2", "label": "Move there", "cmd": "support:aav_move", "point": true},
+				{"key": "3", "label": "Hold", "cmd": "support:aav_hold"},
+				{"key": "4", "label": "Follow me", "cmd": "support:aav_follow"},
+				{"key": "5", "label": "Squad get in", "cmd": "support:aav_mount"},
+				{"key": "6", "label": "Dismount", "cmd": "support:aav_dismount"},
+				{"key": "7", "label": "Return to base", "cmd": "support:aav_return"},
+			]},
 		]},
 	],
 }
