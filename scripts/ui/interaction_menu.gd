@@ -138,7 +138,7 @@ const ACTIONS := {
 const KIND_TEXT := {
 	"arterial": "arterial bleed", "junctional": "junctional bleed", "internal": "internal bleeding",
 	"venous": "venous bleed", "muscle": "muscle wound", "graze": "graze", "fracture": "broken bone",
-	"chest": "open chest wound", "heart": "heart wound", "rib": "cracked rib",
+	"chest": "open chest wound", "heart": "heart wound", "rib": "cracked rib", "brain": "brain wound",
 }
 const _HIDE := "-"
 
@@ -573,6 +573,12 @@ static func wound_report(vitals: Vitals, on_self := true, oximeter := false) -> 
 static func _kind_text(wound: Dictionary) -> String:
 	if wound.get("pneumo", false):
 		return "collapsed lung"
+	if wound.get("kind", "") == "fracture":
+		var bone := String(wound.get("name", ""))
+		var text := "broken pelvis" if bone == "pelvis" else ("broken collarbone" if bone.begins_with("clavicle") else ("broken hand" if bone.begins_with("hand") else "broken bone"))
+		return "open " + text if wound.get("open", false) else text
+	if wound.get("kind", "") == "venous" and BodyMap.BONES.has(StringName(wound.get("name", ""))):
+		return "open fracture bleed"
 	return KIND_TEXT.get(String(wound.get("kind", "")), "wound")
 
 
@@ -589,7 +595,10 @@ static func _wound_status(wound: Dictionary) -> String:
 	elif wound.get("packed", false):
 		done.append("packed")
 	elif wound.get("treated", false):
-		done.append({"fracture": "splinted", "chest": "sealed", "rib": "morphine given"}.get(kind, "bandaged"))
+		var fixed := "binder on" if wound.get("name", &"") == &"pelvis" else "splinted"
+		done.append({"fracture": fixed, "chest": "sealed", "rib": "morphine given"}.get(kind, "bandaged"))
+	if kind == "fracture" and wound.get("open", false):
+		done.append("bandaged" if wound.get("bandaged", false) else "open: needs a bandage")
 	if wound.get("tension", false):
 		done.append("tension pneumothorax")
 	if wound.get("bleeding", false):

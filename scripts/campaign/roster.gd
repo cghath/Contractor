@@ -304,7 +304,7 @@ static func assess_injuries(wounds: Array, blood_fraction: float, burn := 0.0, b
 			"fracture":
 				var bone := String(w.get("name", ""))  # a BodyMap.BONES id ("tibia_l")
 				found.append([FRACTURE_DAYS, "broken %s" % (Vitals.part_name(StringName(bone)).replace(" bones", "") if bone != "" else "bone")])
-			"internal", "heart", "chest":
+			"internal", "heart", "chest", "brain":
 				found.append([SURGERY_DAYS, "surgery (%s)" % where])
 			"arterial", "junctional":
 				if w.get("clamped", false):

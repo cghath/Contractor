@@ -16,11 +16,15 @@ func _ready() -> void:
 	_test_arterial_thigh()
 	_test_cavitation()
 	_test_fractures()
+	_test_open_fractures()
+	_test_pelvis()
+	_test_collarbone_hand_rib()
 	_test_pain_knockout()
 	_test_organs()
 	_test_blood_loss_effects()
 	_test_impact()
 	_test_spall_wounds()
+	_test_brain_fragment()
 	_test_limb_rifle_hits()
 	_test_consciousness()
 	_test_spo2()
@@ -178,6 +182,194 @@ func _test_fractures() -> void:
 	var arm := _model()
 	arm.add_hit(Vitals.UPPER_ARM_R, {"graze": false, "depth": 0.1, "vessels": [], "organs": [], "bones": [&"humerus_r"]}, Vitals.FULL_POWER)
 	check(arm.reload_mult() > 1.0 and arm.sway_mult() > 2.0 and arm.can_sprint(), "broken arm: slow reloads and high sway (x%.1f)" % arm.sway_mult())
+
+
+## Open and closed breaks (bullet chance by class, falls mostly closed), the open wound's own
+## bleed and its two treatments, and moving on an unsplinted broken leg.
+func _test_open_fractures() -> void:
+	print("Open and closed breaks")
+	var channel := {"graze": false, "depth": 0.15, "vessels": [], "organs": [], "bones": [&"femur_l"]}
+	var m := _model(11)
+	m.bone_rng.seed = 11
+	var broke := 0
+	var open := 0
+	for i in 800:
+		m.reset()
+		m.add_hit(Vitals.THIGH_L, channel, Vitals.FULL_POWER)
+		for w in m.wounds:
+			if w.kind == "fracture":
+				broke += 1
+				open += 1 if w.get("open", false) else 0
+	var expected: float = WoundModel.OPEN_FRACTURE_CHANCE[Vitals.FULL_POWER] + WoundModel.OPEN_FEMUR_BONUS
+	check(broke > 700 and absf(open / float(maxi(broke, 1)) - expected) < 0.06, "full-power femur breaks: %.0f%% open (expected %.0f%%)" % [open * 100.0 / maxi(broke, 1), expected * 100.0])
+	var shin := {"graze": false, "depth": 0.15, "vessels": [], "organs": [], "bones": [&"tibia_l"]}
+	var open_pistol := 0
+	var broke_pistol := 0
+	for i in 800:
+		m.reset()
+		m.add_hit(Vitals.SHIN_L, shin, Vitals.PISTOL)
+		for w in m.wounds:
+			if w.kind == "fracture":
+				broke_pistol += 1
+				open_pistol += 1 if w.get("open", false) else 0
+	check(broke_pistol > 100 and open_pistol / float(maxi(broke_pistol, 1)) < expected - 0.2, "a pistol break of a shin is open less often (%d of %d)" % [open_pistol, broke_pistol])
+	var fall_open := 0
+	var fall_broke := 0
+	for i in 600:
+		m.reset()
+		m.add_fall(5.5)
+		for w in m.wounds:
+			if w.kind == "fracture" and w.name != BodyMap.PELVIS_BONE:
+				fall_broke += 1
+				fall_open += 1 if w.get("open", false) else 0
+	check(fall_broke > 50 and fall_open / float(maxi(fall_broke, 1)) < 0.2, "a fall's break is mostly closed (%d of %d open)" % [fall_open, fall_broke])
+	# One open femur: its own bleed above the bone's, and two treatments.
+	var f := _model(5)
+	var w := f._add_fracture(Vitals.THIGH_L, &"femur_l")
+	f._open_break(w, "test")
+	f.update_state(0.0)
+	var o := f.open_wound_of(w)
+	check(w.open and not o.is_empty() and WoundModel.is_open_wound(o) and is_equal_approx(float(o.rate), WoundModel.OPEN_FEMUR_BLEED_RATE), "an open femur has its own bleed (%.2f L/min)" % float(o.rate))
+	check(f.wound_bleed_rate() > WoundModel.FEMUR_RATE + WoundModel.OPEN_BLEED_RATE, "and bleeds more than a closed one (%.2f)" % f.wound_bleed_rate())
+	var shut := _model(5)
+	var closed := shut._add_fracture(Vitals.THIGH_L, &"femur_l")
+	check(not closed.get("open", false) and shut.open_wound_of(closed).is_empty(), "a closed break has no open wound")
+	var tasks := f.care_tasks().map(func(t: Dictionary) -> String: return "%s:%s" % [t.kind, t.item])
+	check(tasks.has("venous:pressure_bandage") and tasks.has("fracture:splint"), "the plan of care asks for a bandage and a splint (%s)" % [tasks])
+	var venous: Dictionary = f.care_tasks().filter(func(t: Dictionary) -> bool: return t.kind == "venous")[0]
+	check(venous.items.has(WoundModel.HEMOSTATIC_GAUZE), "gauze does for the open wound too")
+	check(f.apply_item(WoundModel.SPLINT, Vitals.THIGH_L) and not f.open_bandaged(w) and f.wound_bleed_rate() > 0.0, "the splint doesn't stop the open bleed")
+	check(f.care_tasks().any(func(t: Dictionary) -> bool: return t.kind == "venous") and not f.care_tasks().any(func(t: Dictionary) -> bool: return t.kind == "fracture"), "bandage still asked for, splint done")
+	check(f.apply_item(WoundModel.PRESSURE_BANDAGE, Vitals.THIGH_L) and f.open_bandaged(w) and f.wound_bleed_rate() == 0.0, "the bandage stops it: both done")
+	var g := _model(5)
+	var wg := g._add_fracture(Vitals.SHIN_L, &"tibia_l")
+	g._open_break(wg, "test")
+	check(g.apply_item(WoundModel.HEMOSTATIC_GAUZE, Vitals.SHIN_L) and g.open_bandaged(wg) and not wg.treated, "gauze dresses an open break, the bone still needs its splint")
+	check(g.take_open_events().size() == 1 and g.take_open_events().is_empty(), "the break going open is reported once for the log")
+	# Moving on an unsplinted broken leg.
+	var s := _model(3)
+	s.bone_rng.seed = 3
+	var sw := s._add_fracture(Vitals.THIGH_L, &"femur_l")
+	s.add_leg_strain(200.0, 0.5)
+	check(not sw.get("open", false) and is_equal_approx(float(sw.rate), WoundModel.FEMUR_RATE), "a slow shuffle does nothing")
+	s.add_leg_strain(10.0, 3.0)
+	check(float(sw.rate) > WoundModel.FEMUR_RATE, "moving on it raises the femur's internal bleed (%.3f)" % float(sw.rate))
+	for i in 100:
+		s.add_leg_strain(10.0, 3.0)
+	check(float(sw.rate) <= WoundModel.FEMUR_STRAIN_MAX + 0.0001 and sw.get("open", false), "the bleed caps at %.2f and a kilometre of it opens the break" % WoundModel.FEMUR_STRAIN_MAX)
+	var events := s.take_open_events()
+	check(events.size() == 1 and events[0].contains("open fracture"), "the break going open is noted (%s)" % [events])
+	var opened := 0
+	for i in 400:
+		var t := _model(i)
+		t.bone_rng.seed = i
+		var tw := t._add_fracture(Vitals.SHIN_L, &"tibia_l")
+		t.add_leg_strain(50.0, 3.0)
+		opened += 1 if tw.get("open", false) else 0
+	var per_50 := 1.0 - pow(1.0 - WoundModel.OPEN_BREAK_PER_M, 50.0)
+	check(absf(opened / 400.0 - per_50) < 0.07, "50 m of it opens %.0f%% of tibias (expected %.0f%%)" % [opened / 4.0, per_50 * 100.0])
+	var splinted := _model(3)
+	var sp := splinted._add_fracture(Vitals.THIGH_L, &"femur_l")
+	splinted.apply_item(WoundModel.SPLINT, Vitals.THIGH_L)
+	splinted.add_leg_strain(500.0, 3.0)
+	check(not sp.get("open", false) and is_equal_approx(float(sp.rate), WoundModel.FEMUR_RATE), "a splinted leg is safe to move on")
+	var net := _model()
+	net.apply_net(f.to_net())
+	check(net.wounds.any(func(x: Dictionary) -> bool: return x.kind == "fracture" and x.get("open", false)), "net state carries the open flag")
+
+
+## The pelvis: a bone of the hips, heavy internal bleeding, no walking or standing, the binder.
+func _test_pelvis() -> void:
+	print("Pelvis and pelvic binder")
+	check(BodyMap.BONES.has(BodyMap.PELVIS_BONE) and BodyMap.BONES[BodyMap.PELVIS_BONE][3] == Vitals.PELVIS, "the pelvis is a bone of the pelvis part")
+	check(not BodyMap.BONES.keys().any(func(k: StringName) -> bool: return String(k).contains("spine") or String(k).contains("vertebra")), "no spine bones at all")
+	var channel := BodyMap.trace(Vitals.PELVIS, Vector3(0.0, 0.95, -0.11), Vector3.BACK, Vitals.INTERMEDIATE)
+	check(BodyMap.PELVIS_BONE in channel.bones, "a shot through the hips meets the pelvis")
+	var missed := BodyMap.trace(Vitals.PELVIS, Vector3(0.0, 0.87, -0.11), Vector3.BACK, Vitals.PISTOL)
+	check(not BodyMap.PELVIS_BONE in missed.bones, "and one below it doesn't")
+	var m := _model(2)
+	m.bone_rng.seed = 2
+	var broken := 0
+	for i in 400:
+		m.reset()
+		m.add_hit(Vitals.PELVIS, {"graze": false, "depth": 0.15, "vessels": [], "organs": [], "bones": [BodyMap.PELVIS_BONE]}, Vitals.FULL_POWER)
+		broken += 1 if m.pelvis_broken() else 0
+	check(broken > 340, "a full-power round breaks it most of the time (%d of 400)" % broken)
+	var p := _model(2)
+	var w := p._add_fracture(Vitals.PELVIS, BodyMap.PELVIS_BONE)
+	p.update_state(0.0)
+	check(p.wound_bleed_rate() >= WoundModel.PELVIS_RATE and WoundModel.PELVIS_RATE > WoundModel.FEMUR_RATE, "heavy internal bleeding, above a femur's (%.2f L/min)" % p.wound_bleed_rate())
+	check(not p.can_stand() and not p.can_sprint() and p.speed_mult() <= WoundModel.PELVIS_SPEED + 0.0001, "can't stand or walk: a crawl (x%.2f)" % p.speed_mult())
+	check(p.sway_mult(true) == p.sway_mult(false) and p.reload_mult() == 1.0, "but shoots and reloads as usual")
+	check(p.pain() >= WoundModel.PAIN_FLOOR_PELVIS, "heavy pain")
+	var tasks := p.care_tasks()
+	check(not tasks.is_empty() and tasks[0].kind == "pelvis" and tasks[0].item == WoundModel.PELVIC_BINDER, "the plan of care starts with the binder")
+	check(p.treatment_problem(WoundModel.SPLINT, Vitals.PELVIS) != "", "a splint doesn't do for a pelvis (%s)" % p.treatment_problem(WoundModel.SPLINT, Vitals.PELVIS))
+	check(p.treatment_problem(WoundModel.PELVIC_BINDER, Vitals.THIGH_L) == "No broken pelvis" and _model().treatment_problem(WoundModel.PELVIC_BINDER, Vitals.PELVIS) == "No broken pelvis", "no broken pelvis, no binder")
+	check(p.treatment_problem(WoundModel.PELVIC_BINDER, Vitals.PELVIS) == "" and p.apply_item(WoundModel.PELVIC_BINDER, Vitals.PELVIS) and w.treated, "the binder goes on")
+	check(absf(p.wound_bleed_rate() - WoundModel.PELVIS_RATE * WoundModel.PELVIS_BINDER_LEAK) < 0.001, "it cuts the bleed to %.0f%% (%.3f L/min)" % [WoundModel.PELVIS_BINDER_LEAK * 100.0, p.wound_bleed_rate()])
+	check(not p.can_stand() and not p.can_sprint() and p.speed_mult() <= WoundModel.PELVIS_SPEED + 0.0001, "still no walking until the mission ends")
+	check(p.pain() < WoundModel.PAIN_FLOOR_PELVIS and p.care_tasks().all(func(t: Dictionary) -> bool: return t.kind != "pelvis"), "pain eases and no more tasks for it")
+	var fell := 0
+	var fall_model := _model(9)
+	fall_model.bone_rng.seed = 9
+	for i in 400:
+		fall_model.reset()
+		fall_model.add_fall(6.0)
+		fell += 1 if fall_model.pelvis_broken() else 0
+	check(fell > 10 and fell < 120, "falls break a pelvis now and then (%d of 400)" % fell)
+	var blast := _model(4)
+	blast.bone_rng.seed = 4
+	var blasted := 0
+	for i in 400:
+		blast.reset()
+		blast.add_blast(0.3, 8.0)
+		blasted += 1 if blast.pelvis_broken() else 0
+	check(blasted > 0 and blasted < 80, "a blast close by can break it (%d of 400)" % blasted)
+	var client := _model()
+	client.apply_net(p.to_net())
+	check(client.pelvis_broken() and client.wounds.any(func(x: Dictionary) -> bool: return x.name == BodyMap.PELVIS_BONE and x.treated), "net state carries the bound pelvis")
+
+
+## Collarbones (rifle sway and aim, pistols untouched, a sling), hands, and bullet ribs.
+func _test_collarbone_hand_rib() -> void:
+	print("Collarbone, hand and bullet ribs")
+	var entry := BodyMap.trace(Vitals.CHEST, Vector3(-0.1, 1.415, -0.11), Vector3.BACK, Vitals.INTERMEDIATE)
+	check(&"clavicle_l" in entry.bones, "a shot high through the chest meets the collarbone")
+	var c := _model(6)
+	var w := c._add_fracture(Vitals.CHEST, &"clavicle_l")
+	check(c.sway_mult(true) >= 1.0 + WoundModel.CLAVICLE_RIFLE_SWAY - 0.0001, "broken collarbone: more rifle sway (x%.2f)" % c.sway_mult(true))
+	check(c.sway_mult(false) < 1.0 + 0.5 * WoundModel.CLAVICLE_RIFLE_SWAY and c.aim_mult(false) == 1.0, "pistols are unaffected")
+	check(c.aim_mult(true) == WoundModel.CLAVICLE_AIM_SPEED, "slower aim with a rifle")
+	check(c.pain() >= WoundModel.PAIN_FLOOR_CLAVICLE and c.reload_mult() == 1.0 and c.can_sprint(), "pain, but reloads and legs are fine")
+	var before := c.sway_mult(true)
+	check(c.treatment_problem(WoundModel.SPLINT, Vitals.CHEST) == "" and c.apply_item(WoundModel.SPLINT, Vitals.CHEST) and w.treated, "a sling (splint) goes on")
+	check(c.sway_mult(true) < before and c.sway_mult(true) > c.sway_mult(false) and c.aim_mult(true) == 1.0, "it eases the sway and the aim (x%.2f -> x%.2f)" % [before, c.sway_mult(true)])
+	var h := _model(6)
+	var base := h.sway_mult()
+	h._add_fracture(Vitals.FOREARM_R, &"hand_r")
+	check(h.reload_mult() > 1.0 and h.sway_mult() > base, "broken hand: slow reloads and some sway (x%.2f)" % h.sway_mult())
+	check(h.care_tasks().any(func(t: Dictionary) -> bool: return t.kind == "fracture" and t.part == Vitals.FOREARM_R), "and a splint is asked for")
+	var r := _model(8)
+	r.bone_rng.seed = 8
+	var cracked := 0
+	var plain := {"graze": false, "depth": 0.15, "vessels": [], "organs": [], "bones": []}
+	for i in 800:
+		r.reset()
+		r.add_hit(Vitals.CHEST, plain, Vitals.INTERMEDIATE)
+		cracked += 1 if r.has_kind("rib") else 0
+	var expected: float = WoundModel.RIB_BULLET_CHANCE[Vitals.INTERMEDIATE]
+	check(absf(cracked / 800.0 - expected) < 0.06, "a bullet in the chest cracks a rib %.0f%% of the time (expected %.0f%%)" % [cracked / 8.0, expected * 100.0])
+	r.reset()
+	var tries := 0
+	while not r.has_kind("rib") and tries < 100:
+		r.add_hit(Vitals.CHEST, plain, Vitals.INTERMEDIATE)
+		tries += 1
+	check(r.has_kind("rib") and r.pain() >= WoundModel.PAIN_FLOOR_RIB and r.stamina_mult() < 1.0, "the rib: pain floor and a stamina penalty")
+	check(r.care_tasks().any(func(t: Dictionary) -> bool: return t.kind == "pain") and r.apply_item(WoundModel.MORPHINE, Vitals.TORSO), "morphine treats it")
+	var a := _model(8)
+	a.add_hit(Vitals.ABDOMEN, plain, Vitals.FULL_POWER)
+	check(not a.has_kind("rib"), "only the chest has ribs")
 
 
 ## Sets a model's wound pain to `pain` and holds it long enough to knock out (PAIN_KNOCKOUT_S).
@@ -485,6 +677,36 @@ func _test_spall_wounds() -> void:
 	m.reset()
 	m.add_hit(Vitals.FACE, {"graze": false, "depth": 0.1, "vessels": [], "organs": [&"brain"], "bones": []}, WoundModel.SPALL)
 	check(not m.dead and m.wounds.size() == 1, "spall to the face never reaches the brain")
+
+
+## A fragment into the brain (vehicle spall, a grenade) is a recorded "brain" wound: out at
+## once, and dead later with BRAIN_FRAGMENT_FATAL_CHANCE. A bullet there still kills at once.
+## (It used to kill at once with no wound: antiarmor's M-ATV commander, R0146.)
+func _test_brain_fragment() -> void:
+	print("A fragment into the brain")
+	var brain := {"graze": false, "depth": 0.1, "vessels": [], "organs": [&"brain"], "bones": []}
+	var m := _model()
+	m.add_hit(Vitals.FACE, brain.duplicate(true), &"intermediate")
+	check(m.dead, "a bullet into the brain kills at once")
+	var fatal := 0
+	var runs := 400
+	var all_recorded := true
+	var all_out := true
+	for i in runs:
+		m = _model(i + 1)
+		var added := m.add_hit(Vitals.FACE, brain.duplicate(true), &"fragment")
+		_step(m, 0.2)
+		if m.dead or added.size() != 1 or added[0].kind != "brain" or m.wounds.size() != 1:
+			all_recorded = false
+		if not m.unconscious:
+			all_out = false
+		_step(m, WoundModel.BRAIN_ARREST_S.y + 1.0)
+		if m.arrest or m.dead:
+			fatal += 1
+	check(all_recorded, "a fragment there is one \"brain\" wound, not an instant death")
+	check(all_out, "and he's out at once")
+	check(absf(float(fatal) / runs - WoundModel.BRAIN_FRAGMENT_FATAL_CHANCE) < 0.08,
+		"and his heart stops within %.0f s in %d of %d (%.0f%% proposed)" % [WoundModel.BRAIN_ARREST_S.y, fatal, runs, WoundModel.BRAIN_FRAGMENT_FATAL_CHANCE * 100.0])
 
 
 ## Captain's playtest: one rifle round through a limb hurts and slows, but doesn't knock a

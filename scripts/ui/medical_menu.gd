@@ -27,11 +27,12 @@ const STATE_COLORS := {OK: Color(0.55, 0.57, 0.6), UNTREATED: Color(0.9, 0.65, 0
 ## Markers on a part.
 const TOURNIQUET := &"tourniquet"
 const SPLINT := &"splint"
+const BINDER := &"binder"
 const DRESSING := &"dressing"
 const SEAL := &"seal"
 const IV := &"iv"
 const IO := &"io"
-const MARKER_TEXT := {TOURNIQUET: "TQ", SPLINT: "SPL", DRESSING: "DR", SEAL: "SEAL", IV: "IV", IO: "IO"}
+const MARKER_TEXT := {TOURNIQUET: "TQ", SPLINT: "SPL", BINDER: "BND", DRESSING: "DR", SEAL: "SEAL", IV: "IV", IO: "IO"}
 const DRESSED_KINDS := ["venous", "muscle", "graze", "junctional", "arterial", "burn"]
 ## The diagram: each part's box in a 220 x 400 figure, the casualty facing you (their right
 ## arm on your left).
@@ -254,7 +255,7 @@ static func hud_parts(vitals: Vitals) -> Array[StringName]:
 
 
 ## One part's state: "state" (OK, BLEEDING, UNTREATED, TREATED), "severity" (0, or 1..3 while
-## bleeding) and "markers" (TOURNIQUET, SPLINT, DRESSING, SEAL, IV, IO).
+## bleeding) and "markers" (TOURNIQUET, SPLINT, BINDER, DRESSING, SEAL, IV, IO).
 static func part_state(vitals: Vitals, p: StringName) -> Dictionary:
 	var severity := 0
 	var untreated := false
@@ -271,7 +272,7 @@ static func part_state(vitals: Vitals, p: StringName) -> Dictionary:
 			untreated = true
 		if w.treated:
 			var kind := String(w.kind)
-			var marker: StringName = SPLINT if kind == "fracture" else (SEAL if kind == "chest" else (DRESSING if kind in DRESSED_KINDS else &""))
+			var marker: StringName = (BINDER if w.name == BodyMap.PELVIS_BONE else SPLINT) if kind == "fracture" else (SEAL if kind == "chest" else (DRESSING if kind in DRESSED_KINDS else &""))
 			if marker != &"" and not markers.has(marker):
 				markers.append(marker)
 	if vitals.tourniquets().has(p):

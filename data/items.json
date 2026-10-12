@@ -119,6 +119,7 @@
 		{"id": "hemostatic_gauze", "name": "Hemostatic Gauze", "type": "medical", "volume_l": 0.1, "mass_kg": 0.05, "stack": 10, "tags": ["medical"], "stats": {"short": "Gauze", "treats": ["junctional", "arterial"], "treat_s": 8.0}},
 		{"id": "chest_seal", "name": "Vented Chest Seal", "type": "medical", "volume_l": 0.1, "mass_kg": 0.04, "stack": 10, "tags": ["medical"], "stats": {"short": "Seal", "treats": ["chest"], "treat_s": 5.0}},
 		{"id": "splint", "name": "Splint", "type": "medical", "volume_l": 0.4, "mass_kg": 0.15, "stack": 5, "tags": ["medical"], "stats": {"short": "Splint", "treats": ["fracture"], "treat_s": 8.0}},
+		{"id": "pelvic_binder", "name": "Pelvic Binder", "type": "medical", "volume_l": 0.4, "mass_kg": 0.15, "stack": 5, "tags": ["medical"], "stats": {"short": "Binder", "treats": ["pelvis"], "treat_s": 10.0}},
 		{"id": "morphine", "name": "Morphine Autoinjector", "type": "medical", "volume_l": 0.05, "mass_kg": 0.03, "stack": 10, "tags": ["medical"], "stats": {"short": "Morphine", "treats": ["pain", "rib"], "treat_s": 2.0}},
 		{"id": "npa", "name": "NPA Airway", "type": "medical", "volume_l": 0.05, "mass_kg": 0.02, "stack": 10, "tags": ["medical"], "stats": {"short": "NPA", "treats": ["airway"], "treat_s": 3.0}},
 		{"id": "iv_10", "name": "IV Catheter (10G)", "type": "medical", "volume_l": 0.05, "mass_kg": 0.03, "stack": 10, "tags": ["medical", "very_rare"], "stats": {"short": "IV 10G", "treats": ["access"], "treat_s": 22.0, "gauge": 10}},

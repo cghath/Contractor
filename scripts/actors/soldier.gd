@@ -471,7 +471,7 @@ func _spread_direction(weapon: ItemData) -> Vector3:
 		spread *= ADS_SPREAD_MULT
 	var horizontal := Vector2(velocity.x, velocity.z).length()
 	spread *= 1.0 + clampf(horizontal / SoldierMovement.WALK_SPEED, 0.0, 1.5)
-	spread *= vitals.sway_mult()  # wounds, blood loss and pain
+	spread *= vitals.sway_mult(weapon.tags.has("rifle"))  # wounds, blood loss and pain (a broken collarbone: rifles only)
 	if not is_on_floor():
 		spread *= 2.5
 	else:

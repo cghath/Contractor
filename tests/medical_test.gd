@@ -32,6 +32,7 @@ func _ready() -> void:
 	_test_impact_pain()
 	_test_airway()
 	_test_care_order()
+	_test_bone_care()
 	_test_treatment_wakes()
 	_test_kits()
 	_test_iv_fluids()
@@ -371,6 +372,54 @@ func _test_airway() -> void:
 		"out longer than %.0f s, the obstruction stays until an NPA (%s)" % [WoundModel.AIRWAY_SELF_CLEAR_S, long_out.unconscious_causes()])
 	var awake := _model()
 	check(awake.treatment_problem(WoundModel.NPA, &"head") != "", "no NPA for someone awake")
+
+
+## Bone sim care (Vitals level): the pelvic binder item, open breaks' two tasks, the medical
+## menu's wording and markers, the plan of care order and the replicated list.
+func _test_bone_care() -> void:
+	print("Bone sim care: pelvic binder, open breaks")
+	check(ItemDB.has_item(&"pelvic_binder") and ItemDB.get_item(&"pelvic_binder").stats.has("treat_s") and MedicalMenu.medical_ids().has(&"pelvic_binder"), "the pelvic binder is a medical item")
+	var splint := ItemDB.get_item(&"splint")
+	var binder := ItemDB.get_item(&"pelvic_binder")
+	check(is_equal_approx(binder.volume_l, splint.volume_l) and is_equal_approx(binder.mass_kg, splint.mass_kg), "about a splint's size and weight")
+	var roles: Dictionary = JSON.parse_string(FileAccess.get_file_as_string("res://data/roles.json"))
+	var medic_kit: Array = roles.roles.medic.kit if roles.has("roles") else roles.medic.kit
+	check(medic_kit.any(func(e: Array) -> bool: return e[0] == "pelvic_binder"), "the medic's kit carries one")
+	var v := _vitals()
+	var w := v._model._add_fracture(Vitals.PELVIS, BodyMap.PELVIS_BONE)
+	v._model.update_state(0.0)
+	v._after_change(true)
+	var tasks := v.care_needed()
+	check(tasks[0].kind == "pelvis" and tasks[0].item == &"pelvic_binder" and Vitals.TREATS["pelvis"] == &"pelvic_binder", "care_needed: the binder first")
+	check(not v.can_stand() and v.treatment_problem(&"pelvic_binder", Vitals.PELVIS) == "" and v.treatment_problem(&"splint", Vitals.PELVIS) != "", "item checks: a binder for a pelvis, a splint no")
+	var listed: Dictionary = v.wound_list().filter(func(e: Dictionary) -> bool: return e.name == &"pelvis")[0]
+	check(InteractionMenu._kind_text(listed) == "broken pelvis" and MedicalMenu.hud_parts(v).has(Vitals.PELVIS), "the injury list and the HUD silhouette show it")
+	var ranked := SquadAI.plan_care([{"part": Vitals.SHIN_L, "kind": "fracture", "item": &"splint"}, {"part": Vitals.PELVIS, "kind": "pelvis", "item": &"pelvic_binder"},
+		{"part": Vitals.THIGH_L, "kind": "venous", "item": &"pressure_bandage"}], false, true)
+	check(ranked.map(func(t: Dictionary) -> String: return t.kind) == ["pelvis", "venous", "fracture"], "AI plan_care: binder before bandages, then splints")
+	check(v.server_apply_treatment(&"pelvic_binder", Vitals.PELVIS) and w.treated, "the binder goes on through Vitals")
+	var bound := MedicalMenu.part_state(v, Vitals.PELVIS)
+	var listed2: Dictionary = v.wound_list().filter(func(e: Dictionary) -> bool: return e.name == &"pelvis")[0]
+	check(bound.markers.has(MedicalMenu.BINDER) and InteractionMenu._wound_status(listed2).contains("binder on"), "the diagram marks the binder (%s)" % InteractionMenu._wound_status(listed2))
+	v.queue_free()
+	# An open break: two tasks, two statuses.
+	var o := _vitals()
+	var fx := o._model._add_fracture(Vitals.THIGH_L, &"femur_l")
+	o._model._open_break(fx, "test")
+	o._model.update_state(0.0)
+	o._after_change(true)
+	var kinds := o.care_needed().map(func(t: Dictionary) -> String: return "%s:%s" % [t.kind, t.item])
+	check(kinds.has("venous:pressure_bandage") and kinds.has("fracture:splint"), "an open break asks for a bandage and a splint (%s)" % [kinds])
+	var femur: Dictionary = o.wound_list().filter(func(e: Dictionary) -> bool: return e.kind == "fracture")[0]
+	check(femur.open and not femur.bandaged and InteractionMenu._kind_text(femur) == "open broken bone" and InteractionMenu._wound_status(femur).contains("needs a bandage"), "the list says open and needing a bandage")
+	check(o.server_apply_treatment(&"hemostatic_gauze", Vitals.THIGH_L), "gauze goes on the open wound")
+	femur = o.wound_list().filter(func(e: Dictionary) -> bool: return e.kind == "fracture")[0]
+	check(femur.bandaged and not femur.treated and o.care_needed().any(func(t: Dictionary) -> bool: return t.kind == "fracture"), "dressed, but the splint is still asked for")
+	var net := _vitals()
+	net._model.apply_net(o._model.to_net())
+	check(net.wound_list().any(func(e: Dictionary) -> bool: return e.kind == "fracture" and e.open and e.bandaged), "replicated: open and bandaged")
+	o.queue_free()
+	net.queue_free()
 
 
 func _test_care_order() -> void:

@@ -116,7 +116,9 @@ const ORGANS := {
 	&"lung_r": [Vector3(0.09, 1.22, 0.0), Vector3(0.09, 1.38, 0.0), 0.065],
 }
 
-## Long bones: name -> [from, to, radius, part]. Legs: femur, tibia; arms: humerus, forearm.
+## Bones: name -> [from, to, radius, part]. Legs: femur, tibia; arms: humerus, forearm, hand;
+## the collarbones sit in the chest part and the pelvis in the pelvis part (the hips). No
+## spine on purpose (Captain: nobody runs around shooting people with a broken back).
 const BONES := {
 	&"femur_l": [Vector3(-0.075, 0.86, -0.01), Vector3(-0.075, 0.49, -0.01), 0.015, &"thigh_l"],
 	&"femur_r": [Vector3(0.075, 0.86, -0.01), Vector3(0.075, 0.49, -0.01), 0.015, &"thigh_r"],
@@ -126,9 +128,16 @@ const BONES := {
 	&"humerus_r": [Vector3(0.25, 1.40, 0.0), Vector3(0.25, 1.11, 0.0), 0.012, &"upper_arm_r"],
 	&"forearm_bones_l": [Vector3(-0.25, 1.08, 0.0), Vector3(-0.25, 0.86, 0.0), 0.012, &"forearm_l"],
 	&"forearm_bones_r": [Vector3(0.25, 1.08, 0.0), Vector3(0.25, 0.86, 0.0), 0.012, &"forearm_r"],
+	&"hand_l": [Vector3(-0.25, 0.85, 0.0), Vector3(-0.25, 0.79, 0.0), 0.011, &"forearm_l"],
+	&"hand_r": [Vector3(0.25, 0.85, 0.0), Vector3(0.25, 0.79, 0.0), 0.011, &"forearm_r"],
+	&"clavicle_l": [Vector3(-0.02, 1.42, -0.03), Vector3(-0.17, 1.41, -0.03), 0.01, &"chest"],
+	&"clavicle_r": [Vector3(0.02, 1.42, -0.03), Vector3(0.17, 1.41, -0.03), 0.01, &"chest"],
+	&"pelvis": [Vector3(-0.12, 0.95, 0.0), Vector3(0.12, 0.95, 0.0), 0.02, &"pelvis"],
 }
 const LEG_BONES: Array[StringName] = [&"femur_l", &"femur_r", &"tibia_l", &"tibia_r"]
-const ARM_BONES: Array[StringName] = [&"humerus_l", &"humerus_r", &"forearm_bones_l", &"forearm_bones_r"]
+const ARM_BONES: Array[StringName] = [&"humerus_l", &"humerus_r", &"forearm_bones_l", &"forearm_bones_r", &"hand_l", &"hand_r"]
+const CLAVICLE_BONES: Array[StringName] = [&"clavicle_l", &"clavicle_r"]
+const PELVIS_BONE := &"pelvis"
 
 
 ## The segment (head, torso) a part belongs to, or the part itself for a limb.

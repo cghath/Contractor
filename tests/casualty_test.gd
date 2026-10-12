@@ -1212,10 +1212,14 @@ func _test_ragdolls() -> void:
 	SquadAI.of(walker).process_mode = Node.PROCESS_MODE_DISABLED
 	walker.move_input = Vector2(0, -1)
 	walker.look_at(spot + Vector3(2.5, 0, 0) + Vector3(0, walker.global_position.y - spot.y, 0), Vector3.UP)
-	await _seconds(2.5)
+	# (Until he's past the pile, up to 6 s: a walk of 3 m takes about 2 s. A fixed 2.5 s hid
+	# soldiers stuck at the pile's edge, R0142.)
+	var started := Time.get_ticks_msec()
+	var past := await _wait_until(func() -> bool: return walker.global_position.x > spot.x + 0.5, 6.0)
+	var took := (Time.get_ticks_msec() - started) / 1000.0
 	walker.move_input = Vector2.ZERO
 	check(torso_a.global_transform.origin.distance_to(before.origin) < 0.02, "walking into a body doesn't shove it")
-	check(walker.global_position.x > spot.x - 0.5, "the walker went on over the bodies (x %.2f, the pile at %.2f)" % [walker.global_position.x, spot.x])
+	check(past, "the walker went on over the bodies (x %.2f, the pile at %.2f, %.1f s)" % [walker.global_position.x, spot.x, took])
 	for s: Soldier in [first, second, walker]:
 		if is_instance_valid(s):
 			s.queue_free()

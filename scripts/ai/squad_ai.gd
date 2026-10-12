@@ -115,11 +115,11 @@ const COVER_MEDIC_M := 30.0
 ## wake soon.
 const STAY_WITH_M := 20.0
 ## The care order once safe, by care_needed() kind: massive bleeding, airway, tension (the needle), chest, the
-## other bleeding, circulation (IV or IO, a bag, a pressure bag), restarting a heart
+## pelvic binder (a broken pelvis bleeds heavily inside), other bleeding, circulation (IV or IO, a bag, a pressure bag), restarting a heart
 ## (epinephrine, shocks, CPR), the heart rate, fractures, burns, pain, epinephrine's wake-up roll
 ## (internal bleeding sits with the other bleeding; a blanket goes on after the bags). Kinds not
 ## listed go just before pain.
-const CARE_RANK: Array[String] = ["arterial", "airway", "tension", "chest", "junctional", "venous", "internal", "muscle", "graze",
+const CARE_RANK: Array[String] = ["arterial", "airway", "tension", "chest", "junctional", "pelvis", "venous", "internal", "muscle", "graze",
 	"access", "fluids", "pressure", "hypothermia", "epinephrine", "defib", "cpr", "racing", "slow_heart", "fracture", "burn", "pain", "wake"]
 ## Proposed: seconds past an item's time before checking whether it worked.
 const TREAT_MARGIN_S := 0.4
