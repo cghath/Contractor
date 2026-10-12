@@ -14,8 +14,9 @@ extends RefCounted
 ## - "extraction": Extraction's ride. Its landing spot is the extraction point (added or moved
 ##   there); the squad boards (players, the AI the players chose to bring, the downed and the
 ##   carried, cuffed or friendly HVTs), items set down inside the point are loaded aboard, and
-##   lifting off with everyone aboard ends the deployment (Extraction.server_ride_out). With no
-##   campaign to go home to (a dev session) it puts them back down and leaves.
+##   lifting off with everyone aboard ends the deployment (Extraction.server_ride_out). In a
+##   campaign it then circles overhead, flying them home, until the level switches to the
+##   base; with no campaign to go home to (a dev session) it puts them back down and leaves.
 ## - "insertion": the squad starts aboard (HeliSupports.server_insert), it flies them to the
 ##   insertion point, they get out, it leaves.
 ## On the way: a mark (a grid) sends it straight in; without one it loiters near the players,
@@ -77,8 +78,13 @@ const DEST_SMOKE_M := 300.0
 ## Extraction: the deployment ends once it's this high (m) or after LIFT_S.
 const LIFT_AGL_M := 6.0
 const LIFT_S := 4.0
-## A dev extraction (no campaign to switch to) lands them back after this long.
+## A dev extraction (no campaign to switch to) lands them back after this long. In a campaign
+## it circles this wide and high over the LZ until the level switches to the base.
 const DEV_DROP_S := 5.0
+const HOME_ORBIT_M := 600.0
+const HOME_ORBIT_AGL_M := 150.0
+## If the level still hasn't switched after this long (s), it puts them back down after all.
+const HOME_WAIT_S := 120.0
 ## It's gone this close to its exit (m), after hovering up for TAKEOFF_S.
 const EXIT_M := 150.0
 const TAKEOFF_S := 3.0
@@ -112,6 +118,8 @@ var exit := Vector3.ZERO
 var point_id := 0
 ## Extraction: the deployment ended with it (server_ride_out).
 var rode_out := false
+## Extraction: a campaign was running when it lifted off (it flies the squad home, not back down).
+var going_home := false
 
 var _t := 0.0
 var _check := 0.0
@@ -233,13 +241,19 @@ func _choose_lz(at: Vector3) -> bool:
 	lz = found.spot
 	lz_moved_m = float(found.moved_m)
 	if kind == "extraction" and stage == "pickup":
-		var extraction := MapNodes.extraction(sup)
-		if extraction and extraction.is_active():
-			var id := extraction.server_add_point(Vector2(lz.x, lz.z), "smoke" if String(mark.get("from", "")) == "smoke" else "grid",
-				"Helicopter LZ")
-			if id > 0:
-				point_id = id
+		_place_point()
 	return true
+
+
+## Extraction: its one extraction point at the landing spot (added once, moved after: a
+## recheck or a redirect doesn't leave the old one behind).
+func _place_point() -> void:
+	var extraction := MapNodes.extraction(sup)
+	if extraction and extraction.is_active():
+		var id := extraction.server_place_point(point_id, Vector2(lz.x, lz.z), "smoke" if String(mark.get("from", "")) == "smoke" else "grid",
+			"Helicopter LZ")
+		if id > 0:
+			point_id = id
 
 
 # --- Orders from the caller (host) -------------------------------------------------------------
@@ -329,12 +343,17 @@ func step(delta: float) -> void:
 		Phase.LIFTING:
 			if heli.height_agl() > LIFT_AGL_M or _t > LIFT_S / Helicopter.pace:
 				var extraction := MapNodes.extraction(sup)
+				going_home = HeliCall.campaign_running(sup)
+				if extraction and extraction.point_by_id(point_id).is_empty():
+					_place_point()  # (another call or smoke replaced it meanwhile)
 				rode_out = extraction != null and extraction.server_ride_out(point_id, heli)
 				sup.server_radio(kind, "We're out. Good work" if rode_out else "Lifting with what we've got")
 				phase = Phase.ENDED
 				_t = 0.0
+				if rode_out and going_home:  # the base takes over: circle until the level switches
+					heli.server_orbit(lz, HOME_ORBIT_M, HOME_ORBIT_AGL_M, Helicopter.CRUISE_KMH)
 		Phase.ENDED:
-			if _t > DEV_DROP_S:
+			if _t > (HOME_WAIT_S if rode_out and going_home else DEV_DROP_S):
 				sup.server_radio(kind, "Nowhere to take you: putting you back down")
 				stage = "drop"
 				mark = {"pos": lz}
@@ -384,6 +403,11 @@ func _step_inbound() -> void:
 func _land_on_smoke(cloud: SmokeCloud) -> void:
 	var at := level().ground_point(cloud.global_position)
 	mark = {"pos": at, "from": "smoke"}
+	var extraction := MapNodes.extraction(sup) if kind == "extraction" and stage == "pickup" else null
+	if extraction:  # the point Extraction set at this purple smoke becomes the helicopter's
+		var smoke_point := extraction.server_take_smoke(cloud)
+		if smoke_point > 0 and extraction.point_by_id(point_id).is_empty():
+			point_id = smoke_point
 	if not _choose_lz(at):
 		sup.server_radio(kind, "I see %s, but there's no LZ within %d m of it" % [cloud.colour, roundi(LandingZone.SEARCH_M)])
 		_smoke_failed[cloud.get_instance_id()] = true
@@ -659,6 +683,18 @@ func _leave() -> void:
 	stage = "leave"
 	phase = Phase.LEAVING
 	heli.server_fly_to(exit, Helicopter.CRUISE_AGL_M, Helicopter.CRUISE_KMH, false)
+
+
+## Whether a campaign deployment is running (BaseHub will switch to the base when it ends):
+## a contract deployed, or a deployment-end handler (BaseHub) running its campaign.
+static func campaign_running(from: Node) -> bool:
+	if Contracts.is_deployed():
+		return true
+	for n: Node in from.get_tree().get_nodes_in_group(Extraction.END_GROUP):
+		var running: Variant = n.get(&"campaign_running")
+		if running is bool and running:
+			return true
+	return false
 
 
 # --- Checks -----------------------------------------------------------------------------------------

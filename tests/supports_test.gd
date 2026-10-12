@@ -26,6 +26,7 @@ const HOME := Vector3(0, 0, 250)
 const WALL_AT := Vector3(170, 0, 250)
 const RAMP_AT := Vector3(-230, 0, 200)
 const SLAB_AT := Vector3(-330, 0, -330)
+const GENTLE_AT := Vector3(-420, 0, 40)
 const PACE := 2.0
 const START_M := 450.0
 const FLY_S := 90.0
@@ -246,6 +247,8 @@ func _run_host(wait_for_client: bool) -> void:
 		await _test_first_takes_green()
 	if _want("extraction"):
 		await _test_extraction()
+	if _want("extraction"):
+		await _test_extraction_home()
 	if _want("insertion"):
 		await _test_insertion()
 	if _want("shot_down"):
@@ -317,6 +320,12 @@ func _test_landing_zone() -> void:
 	var off_ramp := LandingZone.find(level, RAMP_AT)
 	check(off_ramp.ok and float(off_ramp.moved_m) <= 100.0 and float(off_ramp.moved_m) >= 15.0,
 		"off the slope: landing %.0f m away" % float(off_ramp.moved_m))
+	var gentle_top := _ground(GENTLE_AT) + Vector3.UP * (17.0 * sin(deg_to_rad(12.0)))
+	var gentle := _wall(gentle_top, Vector3(34, 2, 34), 12.0, true)
+	await get_tree().physics_frame
+	var on_gentle := LandingZone.check(level, GENTLE_AT)
+	check(on_gentle.ok and float(on_gentle.slope_deg) > 9.0, "a 12° slope takes a landing: Captain's limit is 15° (%s, %.1f°)" % [on_gentle.why, float(on_gentle.slope_deg)])
+	gentle.queue_free()
 	var truck_at := _ground(HOME + Vector3(-120, 0, -150))
 	var truck := layer.server_spawn("matv", Transform3D(Basis(), truck_at), "", &"player", "test_truck")
 	await _seconds(0.5)
@@ -385,6 +394,14 @@ func _test_payment() -> void:
 	cash = Economy.cash()
 	why = _call("support:resupply:here", _ground(HOME + Vector3(0, 0, -70)))
 	check(why.contains("available again") and Economy.cash() == cash and sup.calls.is_empty(), "called again at once: its cooldown refuses it, nothing paid (%s)" % why)
+	sup.server_reset_limits()
+	cash = Economy.cash()
+	budget = int(Contracts.contract(cid).get("support_left", 0))
+	HeliSupports.launch_fails = true
+	why = _call("support:resupply:here", _ground(HOME + Vector3(0, 0, -70)))
+	HeliSupports.launch_fails = false
+	check(why.contains("could take off") and Economy.cash() == cash and int(Contracts.contract(cid).get("support_left", 0)) == budget and sup.calls.is_empty(),
+		"no helicopter could take off: the budget and cash are given back (%s)" % why)
 	sup.server_reset_limits()
 	Contracts.server_draw_support(cid, 1000000)
 	Economy.spend(Economy.cash() - 100, "test: broke")
@@ -495,6 +512,7 @@ func _test_smoke_calls() -> void:
 	var point := ext.point_by_id(e.point_id) if ext else {}
 	check(not point.is_empty() and (point.pos as Vector2).distance_to(Vector2(e.lz.x, e.lz.z)) < 1.0 and point.source == "smoke",
 		"the extraction point is where it lands (%s)" % [point])
+	check(_called_points(ext) == 1, "one extraction point: the purple smoke's, moved to the LZ (%d)" % _called_points(ext))
 	await _wait_for(func() -> bool: return _landed(r) and _landed(t) and _landed(e), FLY_S)
 	check(_landed(r) and _flat(r.heli.global_position, yellow) <= 100.0, "resupply landed by the yellow smoke")
 	check(_landed(t) and _flat(t.heli.global_position, blue) <= 100.0, "transport landed by the blue smoke")
@@ -551,6 +569,7 @@ func _test_extraction() -> void:
 	if not _landed(e):
 		sup.server_dismiss_all()
 		return
+	check(_called_points(ext) == 1 and not ext.point_by_id(e.point_id).is_empty(), "one extraction point, the helicopter's, after the LZ recheck (%d)" % _called_points(ext))
 	await _wait_for(func() -> bool:
 		var hold := e.heli.cargo_hold.entries().map(func(x: Dictionary) -> String: return String(x.id))
 		return "intel_laptop" in hold and "electronics_salvage" in hold and _aboard(hvt, e), 15.0)
@@ -579,6 +598,60 @@ func _test_extraction() -> void:
 		e.heli.server_exit(hvt)
 	await _wait_for(func() -> bool: return e.is_over(), FLY_S)
 	check(e.phase == HeliCall.Phase.GONE, "then it left")
+	_regroup()
+
+
+## Extraction points that aren't the zone's presets.
+func _called_points(ext: Extraction) -> int:
+	return ext.points.filter(func(p: Dictionary) -> bool: return p.source != "zone").size() if ext else -1
+
+
+## Stands in for BaseHub with a campaign running (the extraction helicopter flies the squad
+## home rather than putting them back down).
+class FakeHub extends Node:
+	var campaign_running := true
+
+	func end_deployment(_report: Dictionary) -> void:
+		pass
+
+
+func _test_extraction_home() -> void:
+	print("Extraction in a campaign: it flies them home; items left in the point stay out of the report")
+	await _clear_smoke()
+	sup.server_reset_limits()
+	_regroup()
+	var hub := FakeHub.new()
+	hub.add_to_group(Extraction.END_GROUP)
+	add_child(hub)
+	var ext := MapNodes.extraction(level)
+	ext.server_begin({})
+	var lzp := _ground(HOME + Vector3(0, 0, -45))
+	check(_call("support:extraction:here", lzp) == "", "extraction called (with a campaign running)")
+	var e := sup.active("extraction")
+	await _wait_for(func() -> bool: return _landed(e), FLY_S)
+	if not _landed(e):
+		check(false, "landed for the campaign extraction")
+		sup.server_dismiss_all()
+		hub.queue_free()
+		return
+	for s: Soldier in [player] + mates:
+		e.heli.server_enter(s)
+	await _wait_for(func() -> bool: return e.phase == HeliCall.Phase.LIFTING, 15.0)
+	level.server_spawn_dropped(&"intel_documents", 1, _ground(e.lz + Vector3(6, 0, 6)) + Vector3.UP * 0.4)
+	check(e.phase == HeliCall.Phase.LIFTING, "lifting, and an item dropped in the point too late to load")
+	sup.heard.clear()
+	await _wait_for(func() -> bool: return e.phase == HeliCall.Phase.ENDED, 15.0)
+	var deposited: Array = (ext.last_report.get("deposited", []) as Array).map(func(d: Dictionary) -> String: return String(d.id))
+	check(e.rode_out and e.going_home and "intel_documents" not in deposited,
+		"the deployment ended; the item left on the ground isn't in the report (%s)" % [deposited])
+	await _seconds(HeliCall.DEV_DROP_S + 3.0)
+	check(e.phase == HeliCall.Phase.ENDED and is_instance_valid(e.heli) and e.heli.is_flying() and not sup.heard_line("putting you back down")
+		and _aboard(player, e), "with a campaign running it stays up with the squad aboard, waiting for the base")
+	sup.server_dismiss_all()
+	hub.queue_free()
+	for node in get_tree().get_nodes_in_group(WorldItem.GROUP):
+		if (node as WorldItem).item_id == &"intel_documents":
+			node.queue_free()
 	_regroup()
 
 

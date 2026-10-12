@@ -8,7 +8,8 @@ extends RefCounted
 ## a landing (terrain or obstacles); every helicopter support uses the same search. Enemy fire
 ## never moves a landing (that's HeliCall's business, not this).
 ##
-## Numbers are Proposed.
+## Numbers are Proposed, except the 15° slope and the 100 m search (Captain, decided: "Safe to
+## land": unsafe is a slope over 15°, water, buildings or trees).
 
 ## The UH-60's main rotor is 8.2 m: the disc plus a margin must be clear.
 const ROTOR_CLEAR_M := 9.5
@@ -20,8 +21,9 @@ const CLEAR_TOP_M := 7.0
 const PEOPLE_CLEAR_M := 5.0
 const PEOPLE_TOP_M := 2.5
 ## The gear stands on ground no steeper than this, measured between points GEAR_SPAN_M from
-## the spot (and the ground's own normal there).
-const MAX_SLOPE_DEG := 10.0
+## the spot (and the ground's own normal there). Captain (decided, design doc "Safe to land"):
+## a slope over 15° is unsafe.
+const MAX_SLOPE_DEG := 15.0
 const GEAR_SPAN_M := 4.0
 ## The search: rings every RING_STEP_M out to SEARCH_M (Captain: 100 m), RING_POINTS round each.
 const SEARCH_M := 100.0

@@ -48,6 +48,8 @@ static var start_m := -1.0
 ## Tests: calls are free (true), paid (false), or the default (-1: free only with DevTools.on()
 ## outside a deployment).
 static var free_calls := -1
+## Tests: launches fail (as when no helicopter can be spawned), to check the refund.
+static var launch_fails := false
 
 static var _data := {}
 
@@ -172,13 +174,21 @@ func server_call(kind: String, caller: Soldier, arg: String, point: Vector3) -> 
 	var target := _resolve(caller, arg, point)
 	if target.has("why"):
 		return String(target.why)
+	var cid := _contract_for_support()
+	var budget_before := int(Contracts.contract(cid).get("support_left", 0)) if cid != "" else 0
+	var paid := false
 	if not _free():
-		if not Economy.server_pay_support(kind, _contract_for_support()):
+		if not Economy.server_pay_support(kind, cid):
 			return "Can't pay for the %s ($%s)" % [kind, DebriefCalc.money(Economy.support_price(kind))]
+		paid = true
 	if kind == "extraction" and extraction and not extraction.is_active():
 		extraction.server_begin({})  # dev, outside a deployment: open extraction to end
 	var call := HeliCall.new(self, kind, caller, target)
-	if not call.server_launch():
+	if launch_fails or not call.server_launch():
+		if is_instance_valid(call.heli):
+			call.server_dismiss()
+		if paid:
+			_refund(kind, cid, budget_before)
 		return "No helicopter could take off"
 	calls.append(call)
 	_cooldown_until[kind] = Soldier._now() + cooldown_s(kind)
@@ -224,6 +234,18 @@ func _free() -> bool:
 	if free_calls >= 0:
 		return free_calls == 1
 	return DevTools.on() and not Contracts.is_deployed()
+
+
+## Host: gives back what server_pay_support took for `kind` (a call that couldn't launch): the
+## support budget it drew from contract `cid` (which had `budget_before` left), the rest as cash.
+static func _refund(kind: String, cid: String, budget_before: int) -> void:
+	var price := Economy.support_price(kind)
+	var from_budget := 0
+	if cid != "":
+		from_budget = clampi(budget_before - int(Contracts.contract(cid).get("support_left", 0)), 0, price)
+		if from_budget > 0:
+			Contracts.server_draw_support(cid, -from_budget)
+	Economy.add_cash(price - from_budget, "Support refund: %s" % kind)
 
 
 ## The deployment's contract with the most support budget left ("" outside a deployment).
