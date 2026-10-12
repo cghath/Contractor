@@ -253,6 +253,15 @@ wave 8 (the player-built faction).
 - **Zip cuffs lootable in zones** (Captain, 2026-10-11). They stay a base-shop buy, but some
   should also turn up as loot in zones (checkpoints, outposts, on hostile soldiers' bodies), so
   a squad that forgot them can still find a pair. See `ZoneModules.LOOT` and the hostile loadouts.
+- **Settled ragdolls react** (Captain, 2026-10-11: "when it's a good time"). A frozen body or pile
+  wakes and moves again for a blast (Throwables, charges), a body landing on it, a vehicle and
+  being walked on hard; then settles and freezes again. Hook: `Ragdoll.unfreeze()` exists.
+- **Conscious but can't stand** (Captain, 2026-10-11: on the roadmap). A new medical state between up
+  and down (down is always unconscious, Vitals): both legs broken or destroyed, a shattered
+  pelvis or a spinal hit leave a soldier awake but unable to stand. Prone only, crawling
+  (CRAWL_SPEED), a pistol and self-treatment still possible, no carrying. AI casualties in it
+  call out and crawl to cover; medics treat them like any casualty; a splint or surgery can get
+  them up again (Proposed). Today a downed body never moves itself.
 - You can fire during a pickup or equip animation.
 - A dragged casualty eases back about 1 m when put down.
 - An equip animation plays even when the action then fails.
