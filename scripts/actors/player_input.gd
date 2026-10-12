@@ -38,6 +38,8 @@ var _shake := 0.0
 var _deaf := false
 ## Placing a breaching charge (Charges): the ghost follows the view until Fire commits it.
 var placing := false
+## The Escape menu (PauseMenu), on the local player only.
+var pause_menu: PauseMenu
 var _ghost: Node3D
 ## Muffled hearing: everything through a low-pass this low, and quieter.
 const DEAF_CUTOFF_HZ := 600.0
@@ -59,6 +61,8 @@ func _ready() -> void:
 	hud = Hud.new()
 	hud.player = body
 	body.add_child(hud)
+	pause_menu = PauseMenu.new()
+	body.add_child(pause_menu)
 	interaction = InteractionMenu.new(body)
 	hud.add_child(interaction)
 	body.loadout_changed.connect(_update_view_model)
@@ -74,7 +78,9 @@ var _view_yaw := 0.0  # Soldier.view_yaw last applied
 
 func _unhandled_input(event: InputEvent) -> void:
 	var captured := _captured()
-	if event is InputEventMouseMotion and captured and interaction.is_open():
+	if pause_menu.is_open():
+		return  # the Escape menu has the mouse (it closes itself on Escape)
+	elif event is InputEventMouseMotion and captured and interaction.is_open():
 		interaction.move_cursor(event.relative)  # the menu has the mouse, not the view
 	elif event is InputEventMouseMotion and captured:
 		var turn := MOUSE_SENSITIVITY * body.vitals.turn_mult()  # concussion slows turning
@@ -91,7 +97,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed(&"debug_hurt") and OS.is_debug_build():
 		body._server_debug_hurt.rpc_id(1, 40.0)
 	elif event.is_action_pressed(&"pause"):
-		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if captured else Input.MOUSE_MODE_CAPTURED
+		pause_menu.open()  # Escape: resume, return to base, main menu, quit
 	elif event.is_action_pressed(&"fire") and not captured:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	elif not body.vitals.is_up():

@@ -88,6 +88,9 @@ var rng := RandomNumberGenerator.new()
 
 var _profiles := {}      # host: peer id -> player key
 var _gear_applied := {}  # host: peer ids whose gear is on their body in this level
+## Host: the campaign as it stood just before the running deployment left the base (server_deploy),
+## so the Escape menu's "Return to Base (revert)" can put everything back (Captain, 2026-10-12).
+var _before_deploy := {}
 var _broadcast_queued := false
 var _stash_poll := 0.0
 var _ui: BaseUI
@@ -747,6 +750,7 @@ func server_deploy(options := {}) -> String:
 	var zone_id := String(options.get("zone_id", prep.get("zone_id", "")))
 	if zone_id == "":
 		zone_id = DEFAULT_ZONE_ID
+	_before_deploy = Campaign.snapshot()  # before anything of the deployment is written
 	var squad: Array = options.get("squad", prep.get("squad", []))
 	squad = squad.slice(0, maxi(SQUAD_SIZE - _player_count(), 0))
 	var stand_ins := _pick_stand_ins(squad)
@@ -989,6 +993,24 @@ func server_end_deployment(extracted: Array, return_to_base := true, advance_day
 static func _outcome_of(s: Soldier) -> Dictionary:
 	return {"gear": s.inventory.net_state.duplicate(true), "wounds": s.vitals.wound_list(), "blood": s.vitals.blood_fraction(),
 		"burn": s.vitals.burn_share(), "blast_lung": s.vitals.has_blast_lung()}
+
+
+## Host (the Escape menu's "Return to Base (revert)", Captain 2026-10-12): back to just before the
+## running deployment: the campaign as it was when it left the base (cash, roster and their gear,
+## held contracts, the stash, the day), the deployment and its objectives gone, everyone at the
+## base. The zone keeps no trace either (it saves only when a deployment ends). Returns why not,
+## or "".
+func server_revert_deployment() -> String:
+	if not multiplayer.is_server():
+		return "Only the host can do that"
+	if not RosterDeployment.is_running(roster()) or _before_deploy.is_empty():
+		return "No deployment to revert"
+	Campaign.restore(_before_deploy)
+	_before_deploy = {}
+	Contracts.objectives.server_clear()
+	_changed_all()
+	server_switch_level({"level": "base"}, base_zone_id())
+	return ""
 
 
 ## Host: everyone goes back to the hub (after server_end_deployment(..., false) and a debrief).
