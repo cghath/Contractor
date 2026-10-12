@@ -177,6 +177,23 @@
 		{"id": "intel_phone", "name": "Phone (intel)", "type": "intel", "volume_l": 0.15, "mass_kg": 0.2, "tags": ["intel"],
 		 "stats": {"intel": "phone", "intel_value": 1200, "size_m": [0.08, 0.01, 0.16]}},
 		{"id": "intel_documents", "name": "Documents (intel)", "type": "intel", "volume_l": 0.3, "mass_kg": 0.3, "tags": ["intel"],
-		 "stats": {"intel": "documents", "intel_value": 800, "size_m": [0.22, 0.02, 0.3]}}
+		 "stats": {"intel": "documents", "intel_value": 800, "size_m": [0.22, 0.02, 0.3]}},
+
+		{"id": "jerrycan", "name": "Jerrycan (20 L fuel)", "type": "vehicle", "volume_l": 22.0, "mass_kg": 19.0, "tags": ["vehicle", "fuel"],
+		 "stats": {"fuel_l": 20.0, "refuel_s": 8.0, "size_m": [0.17, 0.47, 0.35]}},
+		{"id": "spare_wheel", "name": "Spare Wheel", "type": "vehicle", "volume_l": 120.0, "mass_kg": 60.0, "two_handed": true, "tags": ["vehicle", "bulky"],
+		 "stats": {"repair_s": 25.0, "repairs": ["wheels"], "repair_add": 0.5, "kinds": ["wheeled"], "size_m": [0.3, 0.9, 0.9]}},
+		{"id": "track_links", "name": "Track Links", "type": "vehicle", "volume_l": 15.0, "mass_kg": 22.0, "tags": ["vehicle"],
+		 "stats": {"repair_s": 45.0, "repairs": ["wheels"], "repair_to": 1.0, "kinds": ["tracked"], "size_m": [0.6, 0.12, 0.3]}},
+		{"id": "repair_kit", "name": "Vehicle Repair Kit", "type": "vehicle", "volume_l": 10.0, "mass_kg": 9.0, "tags": ["vehicle", "tools"],
+		 "stats": {"repair_s": 30.0, "repairs": ["engine", "wheels", "fuel", "hull"], "repair_to": 0.6, "size_m": [0.5, 0.2, 0.25]}},
+		{"id": "vehicle_battery", "name": "Vehicle Battery", "type": "vehicle", "volume_l": 12.0, "mass_kg": 28.0, "tags": ["vehicle", "electronics"],
+		 "stats": {"repair_s": 10.0, "battery": true, "size_m": [0.33, 0.24, 0.18]}},
+		{"id": "engine_parts", "name": "Engine Parts", "type": "vehicle", "volume_l": 20.0, "mass_kg": 18.0, "tags": ["vehicle", "salvage"],
+		 "stats": {"repair_s": 60.0, "repairs": ["engine"], "repair_to": 1.0, "size_m": [0.45, 0.25, 0.35]}},
+		{"id": "belt_50bmg", "name": ".50 BMG Belt (100)", "type": "ammo", "volume_l": 6.0, "mass_kg": 15.0, "stack": 4, "tags": ["12.7", "belt", "vehicle"],
+		 "stats": {"rounds": 100, "round": "50bmg_m33", "calibre": "12.7x99", "empty_mass_kg": 2.5, "belt": true, "size_m": [0.15, 0.2, 0.3]}},
+		{"id": "belt_127x108", "name": "12.7x108 Belt (50)", "type": "ammo", "volume_l": 4.0, "mass_kg": 9.0, "stack": 4, "tags": ["12.7", "belt", "vehicle"],
+		 "stats": {"rounds": 50, "round": "50bmg_m33", "calibre": "12.7x108", "empty_mass_kg": 1.5, "belt": true, "size_m": [0.12, 0.18, 0.28]}}
 	]
 }

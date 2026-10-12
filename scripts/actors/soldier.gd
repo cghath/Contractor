@@ -154,6 +154,9 @@ var died_at := -1.0
 static var body_cap := MAX_BODIES
 ## Host only. People (wave 4, PeopleLayer): a cuffed captive can be carried while conscious.
 var carriable_while_up := false
+## Every peer: the vehicle this soldier rides in (wave 5: Vehicle sets it from its replicated
+## seats), or null. While riding, the seat moves the body: no walking, no ragdoll.
+var vehicle: Vehicle = null
 
 
 func _enter_tree() -> void:
@@ -314,6 +317,9 @@ func _physics_process(delta: float) -> void:
 		velocity = Vector3.ZERO
 		carried_by_pos = null
 		return
+	if is_instance_valid(vehicle):
+		velocity = Vector3.ZERO
+		return  # riding: the seat moves the body (Vehicle)
 	movement.step(delta)
 	if is_reloading and _now() >= _busy_until:
 		is_reloading = false
@@ -333,7 +339,7 @@ func _update_ragdoll() -> void:
 	if multiplayer.is_server():
 		var lifted := is_instance_valid(carried_by) \
 			or StringName(model.carry_net.get("mode", &"")) in [CharacterModel.CARRIED, CharacterModel.DRAGGED]
-		want = Ragdoll.enabled and not vitals.is_up() and not lifted
+		want = Ragdoll.enabled and not vitals.is_up() and not lifted and not is_instance_valid(vehicle)  # no ragdoll in a seat
 	else:
 		want = model.ragdolled() and not vitals.is_up()
 	if want and not is_instance_valid(ragdoll):
@@ -361,6 +367,9 @@ func _ai_physics(delta: float) -> void:
 	if is_instance_valid(ragdoll):
 		velocity = Vector3.ZERO
 		return  # the ragdoll holds the body: the capsule stays where it fell
+	if is_instance_valid(vehicle):
+		velocity = Vector3.ZERO
+		return  # riding: the seat moves the body (Vehicle)
 	is_aiming = want_aim and vitals.is_up() and not is_reloading and inventory.hands == &"" and carrying == null
 	movement.step(delta)
 	_update_carried()
@@ -528,7 +537,7 @@ static func usable_direction(d: Vector3) -> bool:
 
 @rpc("any_peer", "call_local", "reliable")
 func _server_fire(origin: Vector3, direction: Vector3, slot: StringName) -> void:
-	if not _from_owner() or not vitals.is_up() or inventory.hands != &"":
+	if not _from_owner() or not vitals.is_up() or inventory.hands != &"" or is_instance_valid(vehicle):  # riding: the seat's gun instead (Vehicle)
 		return
 	if not usable_point(origin) or not usable_direction(direction):
 		return
@@ -582,6 +591,11 @@ func _server_squad_command(cmd: String, point: Vector3, names: PackedStringArray
 				_client_message.rpc_id(owner_peer(), why)
 		"scavenge_on", "scavenge_off":
 			squad.set_scavenge(self, cmd == "scavenge_on", names)
+		"mount", "dismount":  # wave 5: vehicles (VehicleLayer)
+			var layer := VehicleLayer.of(self)
+			var why := "No vehicles here" if layer == null else (layer.server_order_mount(self, point, names) if cmd == "mount" else layer.server_order_dismount(self, names))
+			if why != "":
+				_client_message.rpc_id(owner_peer(), why)
 		_:
 			if not squad.command(self, cmd, point, names):  # formation, target, combat mode, team
 				_client_message.rpc_id(owner_peer(), "Can't target that" if cmd.begins_with("target:") else ("Can't escort that" if cmd.begins_with("escort:") else "Order not given"))

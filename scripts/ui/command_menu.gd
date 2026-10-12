@@ -30,7 +30,10 @@ const MENU := {
 			{"key": "1", "label": "Open fire", "cmd": "open_fire"},
 			{"key": "2", "label": "Hold fire", "cmd": "hold_fire"},
 		]},
-		{"key": "4", "label": "Mount", "items": []},
+		{"key": "4", "label": "Mount", "items": [  # wave 5 (VehicleLayer); the full set is V4's
+			{"key": "1", "label": "Get in that vehicle", "cmd": "mount", "point": true},
+			{"key": "2", "label": "Get out", "cmd": "dismount"},
+		]},
 		{"key": "5", "label": "Status", "items": [
 			{"key": "1", "label": "Report status", "cmd": "report"},
 			{"key": "2", "label": "Report enemy position (radio)", "cmd": "radio_report"},

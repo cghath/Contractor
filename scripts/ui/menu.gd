@@ -54,6 +54,7 @@ func _ready() -> void:
 	# the host into whatever it plays, the campaign included.
 	box.add_child(_button("Campaign: host at the base (FOB)", _campaign_host))
 	box.add_child(_button("Host test zone (2 km, world scale)", host_test_zone))
+	box.add_child(_button("Host vehicle range (wave 5)", func() -> void: VehicleRange.host_from_menu(self)))
 	_status = Label.new()
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD
 	box.add_child(_status)

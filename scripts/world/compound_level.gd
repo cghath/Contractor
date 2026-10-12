@@ -211,6 +211,7 @@ func _ready() -> void:
 	people = PeopleLayer.new()  # "People": civilians, HVTs, intel (wave 4)
 	add_child(people)
 	add_child(Charges.new())  # "Charges": placed explosives (wave 4B)
+	add_child(VehicleLayer.new())  # "Vehicles": vehicles and wrecks (wave 5)
 
 
 ## The playable area on the map, in metres on the ground plane (x along x, y along z): the
@@ -325,6 +326,10 @@ func _restore_bodies() -> void:
 	records.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return float(a.get("age_s", 0.0)) > float(b.get("age_s", 0.0)))
 	for record: Dictionary in records:
 		server_spawn_body(record)
+	# Wave 5: the zone's vehicles and wrecks too (GameState.vehicles), bodies back in their seats.
+	var vehicles := get_node_or_null(^"Vehicles") as VehicleLayer
+	if vehicles:
+		vehicles.server_restore()
 
 
 @rpc("authority", "call_local", "unreliable")
