@@ -518,10 +518,11 @@ func _test_callout_events() -> void:
 	var reloaded := func() -> bool: return _said(&"reloading").any(func(c: Dictionary) -> bool: return c.speaker == String(loader.name))
 	await _wait_for(reloaded, 8.0)
 	check(reloaded.call(), "an empty magazine: %s calls Reloading! (%s, %s)" % [loader.name, loader.ai_status, SquadAI.of(loader).intent])
-	# Any AI squadmate with an AI buddy who is up (the fake players earlier hold some slots, so
-	# a fixed slot may not be an AI any more).
-	var casualty: Soldier = _squad().filter(func(s: Soldier) -> bool: return s != loader and is_instance_valid(s.buddy) \
-		and s.buddy.is_ai() and s.buddy.vitals.is_up()).front()
+	# Any AI squadmate who is up, with an AI buddy who is up (the fake players earlier hold some
+	# slots, so a fixed slot may not be an AI any more). One already down never goes down again,
+	# so nobody would call it (CI, dev 08504df: "heard: []").
+	var casualty: Soldier = _squad().filter(func(s: Soldier) -> bool: return s != loader and s.vitals.is_up() \
+		and is_instance_valid(s.buddy) and s.buddy.is_ai() and s.buddy.vitals.is_up()).front()
 	casualty.vitals.server_damage(500.0)
 	var expected := "Man down! %s is down" % casualty.display_name()
 	# The call comes when Vitals reports them down (its own 10 Hz tick), not on the next frame.
@@ -529,7 +530,8 @@ func _test_callout_events() -> void:
 	var down := _said(&"man_down")
 	var buddy_name := String(casualty.buddy.name) if is_instance_valid(casualty.buddy) else "?"
 	check(not down.is_empty() and down[-1].text == expected and down[-1].speaker == buddy_name,
-		"%s's buddy calls %s (heard: %s)" % [casualty.name, expected, down.map(func(c: Dictionary) -> String: return "%s: %s" % [c.speaker, c.text])])
+		"%s's buddy calls %s (heard: %s; buddy %s at %.1f m)" % [casualty.name, expected, down.map(func(c: Dictionary) -> String: return "%s: %s" % [c.speaker, c.text]),
+			buddy_name, casualty.buddy.global_position.distance_to(casualty.global_position) if is_instance_valid(casualty.buddy) else -1.0])
 	casualty.vitals.server_reset_health()
 	var thrower := squad.order_throw(player, &"smoke_grenade", Vector3(0, 0, 4), PackedStringArray())
 	check(thrower != "" and _said(&"smoke_out").any(func(c: Dictionary) -> bool: return c.speaker == thrower), "%s throws smoke: Smoke out!" % thrower)
