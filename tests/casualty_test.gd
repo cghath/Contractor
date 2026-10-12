@@ -1217,9 +1217,17 @@ func _test_ragdolls() -> void:
 	var started := Time.get_ticks_msec()
 	var past := await _wait_until(func() -> bool: return walker.global_position.x > spot.x + 0.5, 6.0)
 	var took := (Time.get_ticks_msec() - started) / 1000.0
+	# What he's against now (each: a body part or not, its name, the contact's height over his
+	# feet and its normal's y): a stuck walker says why.
+	var against: Array[String] = []
+	for i in walker.get_slide_collision_count():
+		var hit := walker.get_slide_collision(i)
+		var collider := hit.get_collider() as Node
+		against.append("%s %s %.2f m n.y %.2f" % ["body" if Ragdoll.body_of(collider) != null else "other",
+			collider.name if collider != null else "?", hit.get_position().y - walker.global_position.y, hit.get_normal().y])
 	walker.move_input = Vector2.ZERO
 	check(torso_a.global_transform.origin.distance_to(before.origin) < 0.02, "walking into a body doesn't shove it")
-	check(past, "the walker went on over the bodies (x %.2f, the pile at %.2f, %.1f s)" % [walker.global_position.x, spot.x, took])
+	check(past, "the walker went on over the bodies (x %.2f, the pile at %.2f, %.1f s; against: %s)" % [walker.global_position.x, spot.x, took, ", ".join(against) if not against.is_empty() else "nothing"])
 	for s: Soldier in [first, second, walker]:
 		if is_instance_valid(s):
 			s.queue_free()
