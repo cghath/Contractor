@@ -723,7 +723,47 @@ This list covers what is built and in the game today (2026-10-12). Work still un
 
 ## Medical system compared
 
-(Chart: our medical depth against typical tactical shooters, milsim games and hardcore milsim add-ons. Added separately.)
+Our medical depth against tactical shooters, milsim games and milsim mods, scored on 30 criteria
+(Y = 1, partial = 0.5). Vanilla Arma 3 is the control; Arma 3 + ACE3 is comp 1 and Arma 3 +
+ACE3 + KAT is comp 2. Full table, sources and doubtful cells:
+[docs/medical_market_comparison.md](docs/medical_market_comparison.md).
+
+**General criteria (1 to 16)**: per-limb damage, bleeding, tourniquets, blood and fluids,
+pain, fractures, unconsciousness, cardiac arrest and CPR, airway, drag and carry, AI medics,
+AI self-treatment, triage, field surgery, drug dosing, lasting injuries. This is the fairer
+comparison.
+
+```mermaid
+xychart-beta horizontal
+    title "Medical: general criteria (out of 16)"
+    x-axis ["Arma 3 (control)", "A3 + ACE3 (comp 1)", "A3 + ACE3 + KAT (comp 2)", "ACE for Reforger", "Escape from Tarkov", "Gray Zone Warfare", "SCUM", "Arma Reforger", "Arena Breakout: Infinite", "Project Zomboid", "DayZ", "Project Injury Reaction (A3)", "Lifeline Revive AI (A3)", "Ready or Not", "Squad", "Hell Let Loose", "Ground Branch", "Contractor"]
+    y-axis "Score" 0 --> 16
+    bar [3.5, 14, 15, 11.5, 8.5, 8, 7.5, 7, 6.5, 6, 6, 4, 4, 2, 1, 1, 0, 16]
+```
+
+**All 30 criteria**: the general 16 plus 14 of our own distinct features (voxel wound
+channels, bleed type decides the fix, per-lung chest injuries, brain fragments, blast lung,
+AI never lifting someone under treatment, and so on). We score full marks on those 14 because
+they were picked from our feature list, so read this chart with that in mind.
+
+```mermaid
+xychart-beta horizontal
+    title "Medical: all criteria (out of 30)"
+    x-axis ["Arma 3 (control)", "A3 + ACE3 (comp 1)", "A3 + ACE3 + KAT (comp 2)", "ACE for Reforger", "Escape from Tarkov", "Gray Zone Warfare", "SCUM", "Arma Reforger", "Arena Breakout: Infinite", "Project Zomboid", "DayZ", "Project Injury Reaction (A3)", "Lifeline Revive AI (A3)", "Ready or Not", "Squad", "Hell Let Loose", "Ground Branch", "Contractor"]
+    y-axis "Score" 0 --> 30
+    bar [4, 16.5, 20.5, 13.5, 10.5, 9.5, 8, 7.5, 7.5, 6.5, 6, 4, 4, 2, 1.5, 1.5, 0, 30]
+```
+
+| | General /16 | All /30 | vs control | vs ACE3 | vs ACE3 + KAT |
+|---|---|---|---|---|---|
+| Arma 3 (control) | 3.5 | 4 | 0 | -12.5 | -16.5 |
+| A3 + ACE3 (comp 1) | 14 | 16.5 | +12.5 | 0 | -4 |
+| A3 + ACE3 + KAT (comp 2) | 15 | 20.5 | +16.5 | +4 | 0 |
+| **Contractor** | **16** | **30** | **+26** | **+13.5** | **+9.5** |
+
+Where we don't lead yet: on the general criteria ACE3 + KAT is one point behind us. Our body
+doesn't compensate for blood loss (a faster heart doesn't change circulation), lost blood
+never comes back without an IV, and bleeds don't clot on their own.
 
 ---
 
