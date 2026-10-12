@@ -189,28 +189,29 @@ func _test_molle_rules() -> void:
 	check(inv.take(&"pouch_mag_double", 2) == 2 and inv.attachment(&"mag_1").get("id") == &"pouch_mag_double" and inv.attachment(&"mag_2").get("id") == &"pouch_mag_double",
 		"mag pouches picked up go onto the carrier's mag points")
 	check(inv.take(&"knife") == 1 and inv.attachment(&"knife").get("id") == &"knife", "a knife goes on the knife point")
-	check(inv.take(&"pouch_radio") == 1 and inv.attachment(&"radio").get("id") == &"pouch_radio", "the radio pouch on the radio point")
+	check(inv.take(&"pouch_radio") == 1 and inv.attachment(&"radio_l").get("id") == &"pouch_radio", "the radio pouch on the front-left radio spot")
 	check(inv.pouch_containers().size() == 3 and not inv.containers.has(Inventory.pouch_container(&"knife")), "pouches are containers, the knife isn't (%s)" % [inv.pouch_containers()])
 	check(inv.take(&"mag_556", 5) == 5, "5 magazines taken")
 	check(inv.units_in(&"molle:mag_1") == 2 and inv.units_in(&"molle:mag_2") == 2 and _count_in(inv, &"vest", &"mag_556") == 1,
 		"they fill the mag pouches first, 2 each, the 5th in the vest")
-	check(inv.take(&"radio") == 1 and inv.units_in(&"molle:radio") == 1, "the radio goes in its pouch")
-	check(inv.room_for(&"molle:radio", ItemDB.get_item(&"mag_556")) == 0 and inv.room_for(&"molle:mag_1", ItemDB.get_item(&"mag_556")) == 0,
+	check(inv.take(&"radio") == 1 and inv.units_in(&"molle:radio_l") == 1, "the radio goes in its pouch")
+	check(inv.room_for(&"molle:radio_l", ItemDB.get_item(&"mag_556")) == 0 and inv.room_for(&"molle:mag_1", ItemDB.get_item(&"mag_556")) == 0,
 		"a radio pouch takes no magazines, a full mag pouch no more")
-	check(inv.attach_problem(ItemDB.get_item(&"pouch_mag_double"), &"radio") != "", "a mag pouch doesn't fit the (taken) radio point")
-	check(inv.attach_problem(ItemDB.get_item(&"pouch_radio"), &"utility_1") == "", "a radio pouch fits a utility point")
-	# Captain's playtest P0164: chest points take the radio, IFAK and GP pouches too; and
+	check(inv.attach_problem(ItemDB.get_item(&"pouch_mag_double"), &"radio_l") != "", "a mag pouch doesn't fit the (taken) radio spot")
+	check(inv.attach_problem(ItemDB.get_item(&"pouch_radio"), &"utility_1") != "" and inv.attach_problem(ItemDB.get_item(&"pouch_radio"), &"chest_2") == "",
+		"a radio pouch only fits the front-left or front-right spots (Captain): not a back utility point, but chest_2 (front right)")
+	# Captain's playtest P0164: chest points take the IFAK and GP pouches too; and
 	# "no free point" says why.
 	var chest_points := inv.attach_points().filter(func(p: Dictionary) -> bool: return p.type == "chest")
-	check(not chest_points.is_empty() and [&"pouch_radio", &"pouch_ifak", &"pouch_utility"].all(func(id: StringName) -> bool:
+	check(not chest_points.is_empty() and [&"pouch_ifak", &"pouch_utility"].all(func(id: StringName) -> bool:
 			return inv.attach_problem(ItemDB.get_item(id), StringName(chest_points[0].id)) == ""),
-		"the Medium carrier's chest points take a radio, IFAK or GP pouch")
+		"the Medium carrier's chest points take an IFAK or GP pouch")
 	var ifak_point := inv.attach_point(inv.free_point_for(ItemDB.get_item(&"pouch_ifak")))
 	check(ifak_point.get("type") == "medical", "but an IFAK pouch still goes on its medical point first (%s)" % [ifak_point.get("type")])
 	var light_inv := Inventory.new()
 	check(light_inv.no_point_problem(ItemDB.get_item(&"pouch_ifak")) == "Put on a plate carrier first", "no carrier: \"%s\"" % light_inv.no_point_problem(ItemDB.get_item(&"pouch_ifak")))
 	light_inv.take(&"plate_carrier_light")
-	light_inv.take(&"pouch_utility")
+	light_inv.take(&"pouch_utility", 2)  # its utility point, then the shared front-left spot
 	var why := light_inv.no_point_problem(ItemDB.get_item(&"pouch_ifak"))
 	check(why.begins_with("Every ") and why.contains("taken") and why.contains("Low-Profile"), "its points taken: \"%s\"" % why)
 	light_inv.free()
@@ -225,8 +226,8 @@ func _test_molle_rules() -> void:
 		"reload takes a full mag from the first mag pouch and puts the empty back there (%s)" % [_rounds_in_container(inv, &"molle:mag_1")])
 	check(inv.spare_rounds(&"mag_556") == 30 * 4, "spare rounds count the pouches (%d)" % inv.spare_rounds(&"mag_556"))
 	# Moving and detaching.
-	check(inv.move_attachment(&"radio", &"utility_1") and inv.attachment(&"radio").is_empty() and inv.units_in(&"molle:utility_1") == 1,
-		"the radio pouch moves to a utility point with the radio in it")
+	check(inv.move_attachment(&"radio_l", &"chest_2") and inv.attachment(&"radio_l").is_empty() and inv.units_in(&"molle:chest_2") == 1,
+		"the radio pouch moves to the other front spot with the radio in it")
 	var pouch := inv.detach(&"mag_2")
 	check(pouch.get("id") == &"pouch_mag_double" and pouch.state.held.size() == 1 and int(pouch.state.held[0].count) == 2, "detached, a pouch keeps its magazines (%s)" % [pouch])
 	check(inv.spare_rounds(&"mag_556") == 30 * 2, "which no longer count as carried")
@@ -270,8 +271,8 @@ func _test_molle_host() -> void:
 	inv.take(&"pouch_mag_double")
 	check(inv.attachment(&"mag_1").get("id") == &"pouch_mag_double" and _count_in(inv, &"vest", &"mag_556") == 3, "a mag pouch attached; the magazines stay in the vest")
 	inv.insert_entry(&"backpack", {"id": &"pouch_pistol_mag", "count": 1})
-	player._server_inventory_action.rpc_id(1, "attach", &"backpack", _index_in(inv, &"backpack", &"pouch_pistol_mag"), &"", &"radio")
-	check(inv.attachment(&"radio").is_empty() and _count_in(inv, &"backpack", &"pouch_pistol_mag") == 1, "the host refuses a pistol pouch on the radio point")
+	player._server_inventory_action.rpc_id(1, "attach", &"backpack", _index_in(inv, &"backpack", &"pouch_pistol_mag"), &"", &"medical")
+	check(inv.attachment(&"medical").is_empty() and _count_in(inv, &"backpack", &"pouch_pistol_mag") == 1, "the host refuses a pistol pouch on the medical point")
 	player._server_inventory_action.rpc_id(1, "attach", &"backpack", _index_in(inv, &"backpack", &"pouch_pistol_mag"), &"", &"utility_1")
 	check(inv.attachment(&"utility_1").get("id") == &"pouch_pistol_mag", "and puts it on a utility point")
 	player._server_inventory_action.rpc_id(1, "move_entry", &"vest", _index_in(inv, &"vest", &"mag_556"), &"", &"molle:mag_1")
@@ -311,7 +312,7 @@ func _test_molle_host() -> void:
 	var lit := []
 	var wrong := []
 	for p: Dictionary in inv.attach_points():
-		var fits: bool = p.type in ["medical", "utility", "chest"] and inv.attachment(StringName(p.id)).is_empty()
+		var fits: bool = Inventory.point_types(p).any(func(t: String) -> bool: return t in ["medical", "utility", "chest"]) and inv.attachment(StringName(p.id)).is_empty()
 		var tint: Color = screen._point_tiles[String(p.id)].modulate
 		if fits:
 			lit.append(p.id)

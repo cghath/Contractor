@@ -8,6 +8,8 @@ medical model and voxel destruction. Godot 4.7.2 + Zylann Voxel Tools 1.7, GDScr
 Captain's decisions and working agreements. Where it disagrees with this README or
 `docs/squad_design.md`, the handoff wins.
 
+**Features:** [FEATURES.md](FEATURES.md) lists everything in the game, with how its medical system compares.
+
 **Version:** 0.1.0. See [CHANGELOG.md](CHANGELOG.md) for what changed in each version.
 
 ## Installation
@@ -110,7 +112,7 @@ include Voxel Tools.
 | F | Fire mode (M4 and Mk18: semi and auto; each weapon remembers its selector) |
 | Mouse / LMB | Look, fire |
 | RMB (hold) | Aim down sights: zoom, much tighter spread, half recoil, slower movement |
-| Left Ctrl (hold) | Interaction menu: action points on items, downed bodies and squadmates within about 3 m; move the cursor onto one and let go to pick (pick up, carry, drag, loot a body, check condition, give item; Release or Put down on the body you're moving). A squadmate's body has ACE-style points on the head, chest, each arm and each leg, each with that part's check and treatments, plus a general point at the waist. Dragging, you face the casualty and back away with S |
+| Left Ctrl (hold) | Interaction menu: action points on items, downed bodies and squadmates within about 3 m; move the cursor onto one and let go to pick (pick up, carry, drag, loot a body, check condition, give item; Release or Put down on the body you're moving). A squadmate's body has action points on the head, chest, each arm and each leg, each with that part's check and treatments, plus a general point at the waist. Dragging, you face the casualty and back away with S |
 | Left Ctrl + Left Alt (hold) | Self-interaction: the same body points on yourself (check and treat each part), and at the waist: check wounds, put down a carried body, drop held item |
 | R | Reload (fullest spare magazine; a part-used one goes back in your pouch) |
 | H | Medical menu on the person you look at within reach, else yourself: body diagram, injuries per part, every medical item you carry (greyed with the reason when it can't be used), signs, activity log. H or Esc closes |
@@ -122,13 +124,13 @@ include Voxel Tools.
 | F1-F8 | Select squadmates by slot (fire team A is F1-F4, B is F5-F8) and open the command menu; Shift+F-key adds to the selection |
 | ~ | Select the whole squad and open the command menu |
 | In the command menu | 1-9 and 0 pick an entry, or scroll the mouse wheel and click the middle button; Backspace goes back, Esc closes |
-| Tab | Inventory screen (Star Citizen style): drag items between slots, pouches and containers, onto the soldier to equip or onto the ground panel to drop; right-click a tile for its actions (equip, attach, stow, use, load magazines, drop); double-click for the first. The MOLLE button (or clicking the carrier twice) shows the carrier's attach points for pouches, a knife or a radio |
+| Tab | Inventory screen (3D soldier preview with gear tiles around it): drag items between slots, pouches and containers, onto the soldier to equip or onto the ground panel to drop; right-click a tile for its actions (equip, attach, stow, use, load magazines, drop); double-click for the first. The MOLLE button (or clicking the carrier twice) shows the carrier's attach points for pouches, a knife or a radio |
 | Esc | Close the inventory screen / release mouse |
 | M | Map: grid references under the cursor, zoom and pan, place and share markers and lines |
 | Home | Save zone (host) |
 | K | Debug builds only: costs 24% of your blood and adds pain; two presses knock you out (with no wound bleeding, blood creeps back at 1.5% a minute and you come round after a few minutes) |
 
-The command menu follows Arma 3's layout: 1 Move (return to formation, move there, stop), 2 Target (focus fire on
+The command menu: 1 Move (return to formation, move there, stop), 2 Target (focus fire on
 the enemy under your crosshair), 3 Engage (open fire, hold fire), 5 Status, 6 Action (throw smoke or frag at the
 crosshair; scavenge the body under the crosshair; scavenge freely or don't scavenge), 7 Combat mode (Safe, Aware, Combat, Stealth), 8 Formation (wedge, file, line, staggered column),
 9 Team (select fire team A or B, assign or select colour teams) and 0 Support. Mount and the support calls are
@@ -150,9 +152,9 @@ which has the full rules.
 | Armor | Plates and helmets are runtime voxel objects; hits chip voxels, holes let rounds through, and every hit wears the piece's integrity down by durability. Rounds and armor share an NIJ-named rating ladder (IIA to IV); ceramic cracks in zones, steel throws spall |
 | Medical | No hitpoints: 6 L of blood, wounds per body part, pain, unconsciousness at 40% lost, cardiac arrest at 50% with a 10-minute window. Blood comes back only through an IV or IO line with a saline or blood bag running |
 | Inventory | Volume budget in **litres** + visible gear; auto-stow, bulky items need two hands |
-| Squad | 8 slots (two fire teams of four, a medic each, battle-buddy pairs); up to 4 players, AI fills the rest. Starts at 1 AI squadmate. AI tactics modeled on LAMBS Danger and VCOM |
+| Squad | 8 slots (two fire teams of four, a medic each, battle-buddy pairs); up to 4 players, AI fills the rest. Starts at 1 AI squadmate. |
 | Death | AI: permadeath on bleed-out, MIA if left behind alive. Players respawn in the default kit (M4, 2 spare mags + 90 rounds, 1 smoke, 1 frag); their old gear stays where they died, with a marker |
-| HUD | Minimal, like Arma with ACE: no health bar or ammo counter |
+| HUD | Minimal: no health bar or ammo counter |
 | Missions | Contract zones and hot zones (several contracts, ends at extraction); cash economy; supports (resupply, transport, AAVs, extraction) called from the LHD or FOB |
 | World | 3 factions with shifting territory; day and night, weather, NVGs as gear |
 | Vehicles | Drivable ground vehicles (players or AI); aircraft AI-flown only |
@@ -305,8 +307,8 @@ a release:
 
 1. **Foundation (v0.1.0):** gray-box compound, FP co-op player, volume inventory, voxel plates, destructible walls, zone save.
 2. **Inventory depth (done, unreleased):** ammo and reloading, an inventory screen, armor damage and ammo that travel with the item, medical items.
-3. **Squad prototype (early, highest risk):** the wound model, then one AI squadmate scaling to the 8-slot squad with buddy pairs, throwables, carry/drag and treatment, the Arma-style command menu and the new controls. See the checklist in [docs/contractor_handoff.md](docs/contractor_handoff.md) and the design in [docs/squad_design.md](docs/squad_design.md). Step 1 (the shared `Soldier` body) is done.
-   - **Medical depth (build plan wave 3):** IV and IO, fluids, breathing, heart rate and drugs, CPR and defib, surgery kits and the other damage types are built; ACE3-style body interaction points (head, chest, each arm and leg, and a general point at the waist; IVs in the legs as well) and a technique animation for every treatment are in too. Wave 3 is built and waiting for playtest.
+3. **Squad prototype (early, highest risk):** the wound model, then one AI squadmate scaling to the 8-slot squad with buddy pairs, throwables, carry/drag and treatment, the command menu and the new controls. See the checklist in [docs/contractor_handoff.md](docs/contractor_handoff.md) and the design in [docs/squad_design.md](docs/squad_design.md). Step 1 (the shared `Soldier` body) is done.
+   - **Medical depth (build plan wave 3):** IV and IO, fluids, breathing, heart rate and drugs, CPR and defib, surgery kits and the other damage types are built; body interaction points (head, chest, each arm and leg, and a general point at the waist; IVs in the legs as well) and a technique animation for every treatment are in too. Wave 3 is built and waiting for playtest.
 4. **Mission loop:** contracts, reinforcement timer, extraction, salvage share, persistent zone graph.
 5. **Ground vehicles:** drivable, modular damage, cargo as a rolling stash. Aircraft as AI-flown transport and fire support.
 6. **Factions:** territory, reputation tiers, dynamic events.

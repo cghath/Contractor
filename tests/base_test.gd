@@ -195,7 +195,7 @@ func _check_kit_pouches(m: Dictionary) -> void:
 	var want_pouches := {}
 	for pair: Array in kit:
 		want[String(pair[0])] = int(want.get(String(pair[0]), 0)) + int(pair[1])
-		if Inventory.is_attachable(ItemDB.get_item(pair[0])):
+		if Inventory.is_attachable(ItemDB.get_item(pair[0])) and not Inventory.pack_only(ItemDB.get_item(pair[0])):  # (a packed AT4 or aid bag goes on the pack)
 			want_pouches[String(pair[0])] = int(want_pouches.get(String(pair[0]), 0)) + int(pair[1])
 	var molle: Dictionary = m.gear.get("slot_state", {}).get("vest", {}).get("molle", {})
 	var on := {}

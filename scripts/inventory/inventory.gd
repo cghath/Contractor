@@ -812,14 +812,17 @@ func no_point_problem(item: ItemData) -> String:
 
 
 ## The first free attach point that `item` fits (its own point types first: a mag pouch on a
-## mag point before a utility one), or &"".
+## mag point before a utility one; and a point that's mainly that type before a shared spot
+## that also takes it, so a GP pouch leaves the radio spot to the radio), or &"".
 func free_point_for(item: ItemData) -> StringName:
 	if not is_attachable(item):
 		return &""
 	for kind: String in item.stats.attach:
-		for p: Dictionary in attach_points():
-			if kind in point_types(p) and attachment(StringName(p.id)).is_empty():
-				return StringName(p.id)
+		for shared in [false, true]:
+			for p: Dictionary in attach_points():
+				var fits: bool = (kind in p.get("also", [])) if shared else String(p.type) == kind
+				if fits and attachment(StringName(p.id)).is_empty():
+					return StringName(p.id)
 	return &""
 
 
