@@ -101,6 +101,32 @@ func _test_issues() -> void:
 		check(line.size() == 1 and "at (5.0, -" in line[0] and SquadAI.Intent.keys().any(func(k: String) -> bool: return (k + ":") in line[0]),
 			"the dump has the soldier: where, and the AI's intent (%s)" % [line])
 		check("Player 1 (friendly" in state or "player 1" in state, "and the player")
+	# Casualties and care (host side lines).
+	var victim := level.spawn_soldier({"name": "Victim", "faction": "friendly", "variant": "multicam", "pos": player.global_position + Vector3(0.6, 0, 0),
+		"loadout": ["m4a1"], "combat": 0.5, "discipline": 0.5, "guard": true})
+	SquadAI.of(victim).process_mode = Node.PROCESS_MODE_DISABLED
+	await _frames(5)
+	victim.vitals.server_hit(Vitals.THIGH_L, {"round_class": Vitals.PISTOL, "distance": 12.0})
+	await _frames(2)
+	player.inventory.take(&"tourniquet")
+	await player._treat(victim, &"tourniquet", Vitals.THIGH_L, true)
+	var care := _log()
+	check(("%s treats %s: tourniquet on" % [player.display_name(), victim.display_name()]) in care and ", done" in care, "a treatment is logged: who, whom, item, part, done")
+	await player._treat(victim, &"morphine", Vitals.THIGH_L, false)  # none carried
+	check(("%s treats %s: morphine on" % [player.display_name(), victim.display_name()]) in _log() and "refused: " in _log(), "a refused treatment says why")
+	var dying := level.spawn_soldier({"name": "Dying", "faction": "enemy", "variant": "multicam", "pos": player.global_position + Vector3(-2, 0, 0),
+		"loadout": ["m4a1"], "combat": 0.5, "discipline": 0.5, "guard": true})
+	SquadAI.of(dying).process_mode = Node.PROCESS_MODE_DISABLED
+	await _frames(5)
+	Harm.note_hit(dying, player)
+	dying.vitals.server_hit(Vitals.HEAD, {"round_class": Vitals.FULL_POWER, "distance": 42.0})
+	await _frames(3)
+	var gone_down := _log()
+	check(("%s died (enemy): round (full_power), head, by %s (friendly) at 42 m" % [dying.display_name(), player.display_name()]) in gone_down
+		or ("%s went down (enemy): round (full_power), head, by %s (friendly) at 42 m" % [dying.display_name(), player.display_name()]) in gone_down,
+		"a soldier going down or dying is logged: who, cause, body part, attacker, distance")
+	victim.queue_free()
+	dying.queue_free()
 	SessionLog.finish()
 	check("-FAIL-" in SessionLog.folder.get_file() and DirAccess.dir_exists_absolute(SessionLog.folder), "something unexpected: the folder ends FAIL")
 	check(_index().contains("P0043 ") and _index().contains(" FAIL "), "and index.txt says so")

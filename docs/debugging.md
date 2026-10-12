@@ -114,6 +114,12 @@ numbered session, **P<number>**, from the same counter and in the same parent as
 - **Anything unexpected** counts: an engine or script error, a warning, or an anomaly the game
   notices (today: a soldier whose position isn't a number, or who fell out of the world). Call
   `SessionLog.anomaly(key, text)` for new ones; `SessionLog.note(text)` adds a plain line.
+- **Host-side event lines** (host only): `X went down (friendly): round (intermediate), chest, by
+  Cpl Reyes (enemy) at 42 m` (also `died`; cause is a round class, fragment, blast, fall,
+  burn, armor-stopped round, or bleed-out / cardiac arrest / "out: <causes>" when nothing hit
+  them in the last 3 s, then "last hit by ..."; players, squad AI and enemies);
+  `X treats Y: tourniquet on left thigh, done` (or `interrupted: you moved`, `refused: Too far
+  away`); `Return to Base` and `Return to Base (revert)` from the Escape menu / debrief.
 - On quit the folder becomes **PASS** (nothing unexpected) or **FAIL**, with a line in
   `index.txt`. A folder still **RUNNING** means the game crashed or was killed.
 - The pause menu shows the session number: send it with a playtest report ("P0047").

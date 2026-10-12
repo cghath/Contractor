@@ -22,6 +22,20 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   `res://audio/sfx/` override any sound. `tools/export_sounds.gd` writes them as WAV files.
   New suite `sound`.
 
+### Session-log event lines and a movement-test fix (2026-10-12)
+
+#### Added
+
+- **Session logs now record casualties, care and returns to base**: a soldier going down or
+  dying (who, cause, body part, who hit them and from how far; `Vitals.last_cause`), every
+  treatment (`Soldier._treat` / `_timed_care`: treater, patient, item, part, done / interrupted
+  / refused and why) and Return to Base / revert (`BaseHub`).
+
+#### Fixed
+
+- **Movement suite flake** (stand-up after the ragdoll): the test put the body back before the
+  ragdoll had finished standing it up where it lay, so the walls were built round the wrong spot.
+
 ### Wave 5a: vehicles and anti-armour (cghath's side, 2026-10-12)
 
 #### Added
