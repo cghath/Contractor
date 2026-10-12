@@ -11,7 +11,7 @@
 		"plate_pe_l3": 650, "plate_ceramic_l4": 900, "plate_steel_l3": 300, "plate_side": 250,
 		"assault_pack": 180, "ruck_45": 320,
 		"ifak": 220, "trauma_kit": 650, "tourniquet": 35, "pressure_bandage": 12, "hemostatic_gauze": 45,
-		"chest_seal": 30, "splint": 25, "morphine": 60, "npa": 15,
+		"chest_seal": 30, "splint": 25, "pelvic_binder": 55, "morphine": 60, "npa": 15,
 		"iv_10": 40, "iv_12": 30, "iv_14": 20, "iv_16": 15, "iv_18": 10, "iv_20": 8, "io_kit": 150,
 		"saline_250": 20, "saline_500": 30, "saline_1000": 45, "blood_250": 120, "blood_500": 220, "blood_1000": 400,
 		"pressure_bag": 90, "hypothermia_blanket": 40, "decompression_needle": 35, "pulse_oximeter": 80,

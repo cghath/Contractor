@@ -160,6 +160,8 @@ func step(delta: float) -> void:
 	if not body.is_on_floor():
 		body.velocity += body.get_gravity() * delta
 	var down := not body.vitals.is_up()
+	if not down and not body.vitals.can_stand() and stance != Stance.PRONE:
+		set_stance(Stance.PRONE)  # a broken pelvis: no standing, crawl (or be carried)
 	var jumped := false
 	var burdened := body.inventory.hands != &"" or body.carry_speed_mult() < 1.0  # carry_mode reaches the owner; carrying is host-only
 	var input := Vector2.ZERO
@@ -318,6 +320,8 @@ func can_jump() -> bool:
 ## Returns whether the body is now in that stance.
 func set_stance(new_stance: int) -> bool:
 	new_stance = clampi(new_stance, Stance.PRONE, Stance.STAND_HIGH)
+	if body.vitals != null and not body.vitals.can_stand():
+		new_stance = Stance.PRONE
 	if new_stance == stance:
 		return true
 	if new_stance > stance and not has_room(new_stance):
@@ -476,7 +480,8 @@ func top_speed(sprinting: bool, down: bool) -> float:
 	if sprinting:
 		speed = SPRINT_SPEED
 	if body.is_aiming:
-		speed = minf(speed, WALK_SPEED) * ADS_SPEED_MULT
+		var weapon := body.active_weapon()
+		speed = minf(speed, WALK_SPEED) * ADS_SPEED_MULT * body.vitals.aim_mult(weapon != null and weapon.tags.has("rifle"))
 	if down:
 		speed = CRAWL_SPEED
 	return speed * body.load_mult * body.vitals.speed_mult() * body.carry_speed_mult()

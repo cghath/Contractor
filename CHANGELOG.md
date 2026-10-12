@@ -11,6 +11,12 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### More bone simulation (Captain's picks, 2026-10-12)
+
+#### Added
+
+- **Open and closed breaks, a pelvis with a pelvic binder, collarbones, hands and bullet ribs** (`WoundModel` "Bone sim" constants, `BodyMap.BONES`): a bullet or fragment break is open with a chance by round class (a femur's higher), a fall's mostly closed; an open break bleeds on its own and needs a bandage or gauze besides its splint (two tasks in the plan of care, the medical menu and AI care), and moving on an unsplinted broken leg can turn a closed break open (noted in the session log) and raises a femur's internal bleed. A broken pelvis bleeds heavily inside and can't walk or stand (crawl, or be carried) but can still shoot; the new **Pelvic Binder** item (`data/items.json`, in the medic's kit) cuts its bleed and the legs stay out until the mission ends. A broken collarbone adds rifle sway and slows aiming down sights (pistols unaffected; a sling, the splint, eases it), a broken hand counts as a broken arm, and a bullet through an unplated chest can crack a rib. No spine injuries.
+
 ### Triage cards and bleeding HUD (2026-10-12)
 
 #### Added
