@@ -306,6 +306,10 @@ func state_text(reason: String) -> String:
 	lines.append("Soldiers (%d):" % soldiers.size())
 	for s in soldiers:
 		lines.append("  " + _soldier_line(s))
+	var mine := player_text()
+	if mine != "":
+		lines.append("")
+		lines.append(mine)
 	var readout := HotZoneDebug.readout(self)
 	if readout != "":
 		lines.append("")
@@ -316,6 +320,41 @@ func state_text(reason: String) -> String:
 	lines.append_array(_tail)
 	_mutex.unlock()
 	return "\n".join(lines) + "\n"
+
+
+## The local (human) player's condition, signs, wounds (per part) and inventory, or "".
+func player_text() -> String:
+	var me: Soldier
+	for s in _soldiers():
+		if not s.is_ai() and s.is_local():
+			me = s
+	if me == null:
+		return ""
+	var lines: Array[String] = ["Player %s: %s" % [me.display_name(), me.vitals.condition_text()]]
+	var signs := me.vitals.signs(true)
+	lines.append("  signs: %s" % (", ".join(signs) if not signs.is_empty() else "none"))
+	var wounds := me.vitals.wound_list()
+	lines.append("  wounds (%d):" % wounds.size())
+	for w: Dictionary in wounds:
+		var flags: Array[String] = []
+		for k: String in ["bleeding", "treated", "tourniquet", "packed", "tension", "clamped", "closed"]:
+			if w.get(k, false):
+				flags.append(k)
+		lines.append("    %s: %s %s%s" % [w.part, w.kind, w.name, (" (%s)" % ", ".join(flags)) if not flags.is_empty() else ""])
+	lines.append("  inventory:")
+	var inv := me.inventory
+	for slot: StringName in inv.slots:
+		if inv.slots[slot] != &"":
+			lines.append("    %s: %s" % [slot, inv.slots[slot]])
+	for container: StringName in inv.containers:
+		var items: Array[String] = []
+		for e: Dictionary in inv.containers[container]:
+			items.append("%s x%d" % [e.id, e.get("count", 1)])
+		if not items.is_empty():
+			lines.append("    %s: %s" % [container, ", ".join(items)])
+	if inv.hands != &"":
+		lines.append("    hands: %s" % inv.hands)
+	return "\n".join(lines)
 
 
 func _soldier_line(s: Soldier) -> String:

@@ -38,7 +38,7 @@ func _ready() -> void:
 	box.add_child(title)
 	if SessionLog.session_id != "":  # playtests: which session log to send with a report
 		var session := Label.new()
-		session.text = "Session %s (logged)" % SessionLog.session_id
+		session.text = "Session %s (logged); Insert: bug report" % SessionLog.session_id
 		session.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		session.modulate = Color(1, 1, 1, 0.6)
 		box.add_child(session)
