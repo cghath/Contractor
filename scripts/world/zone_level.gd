@@ -265,8 +265,10 @@ func _on_hosted() -> void:
 ## point (a zone definition with "insertion_kit": the test zone).
 func _spawn_insertion_kit() -> void:
 	var at := insertion_points()[0]
-	for i in LOOT.size():
-		var loot: Dictionary = LOOT[i]
+	# Clean sessions: only the spares row (the compound's objective items mean nothing here).
+	var kit: Array = LOOT if not clean_loot else CLEAN_LOOT.filter(func(l: Dictionary) -> bool: return float((l.pos as Vector3).z) > 20.0)
+	for i in kit.size():
+		var loot: Dictionary = kit[i]
 		var uid := "kit_%s" % loot.uid
 		if GameState.is_looted(uid):
 			continue

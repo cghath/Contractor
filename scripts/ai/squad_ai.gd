@@ -272,6 +272,8 @@ var _move_point := Vector3.ZERO
 var _patrol_index := 0
 var _think_cd := 0.0
 var _scan_cd := 0.0
+var _briefing_check_s := 0.0
+var _briefing_was_open := false
 var _cover_cd := 0.0
 var _grenade_cd := GRENADE_COOLDOWN_S * 0.4
 var _last_contact := -1000.0
@@ -322,6 +324,11 @@ func _physics_process(delta: float) -> void:
 	if not _ready_done:
 		_setup()
 		return
+	if _briefing_open():
+		_stop()  # nobody moves or fires while the squad reads the briefing
+		target = null
+		body.ai_status = "Waiting (briefing)"
+		return
 	var now := Soldier._now()
 	if _treat_until >= 0.0 and now >= _treat_until:
 		_finish_treatment()
@@ -363,6 +370,17 @@ func _physics_process(delta: float) -> void:
 	_steer(delta)
 	_shoot()
 	body.ai_status = status_text()
+
+
+## Whether the level's briefing is open (players planning before the deployment starts).
+## Looked up once a second.
+func _briefing_open() -> bool:
+	_briefing_check_s -= get_physics_process_delta_time()
+	if _briefing_check_s <= 0.0:
+		_briefing_check_s = 1.0
+		var briefing := MapNodes.briefing(body)
+		_briefing_was_open = briefing != null and briefing.is_open()
+	return _briefing_was_open
 
 
 func in_contact() -> bool:

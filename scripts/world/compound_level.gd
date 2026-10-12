@@ -94,13 +94,35 @@ const LOOT := [
 	{"uid": "c01_hvt_case", "id": "hvt_case", "pos": Vector3(0, 0.5, -10)},
 	{"uid": "c01_crate_a", "id": "supply_crate", "pos": Vector3(12, 0.6, -12)},
 ]
+## The clean test layout (Captain: a clean test environment, no needless clutter): players
+## come in their role's kit, so the gate holds one tidy row of spares behind the spawn, and the
+## compound only what the test contract and scavenging need.
+const CLEAN_LOOT := [
+	{"uid": "c01_frag_a", "id": "frag_grenade", "count": 3, "pos": Vector3(-3, 0.5, 27)},
+	{"uid": "c01_smoke_a", "id": "smoke_grenade", "count": 3, "pos": Vector3(-2, 0.5, 27)},
+	{"uid": "c01_flash_a", "id": "flashbang", "count": 3, "pos": Vector3(-1, 0.5, 27)},
+	{"uid": "c01_charge_a", "id": "breaching_charge", "count": 3, "pos": Vector3(0, 0.5, 27)},
+	{"uid": "c01_rounds_556_a", "id": "rounds_556", "count": 120, "pos": Vector3(1, 0.5, 27)},
+	{"uid": "c01_rounds_9mm_a", "id": "rounds_9mm", "count": 51, "pos": Vector3(2, 0.5, 27)},
+	{"uid": "c01_rounds_762_a", "id": "rounds_762", "count": 60, "pos": Vector3(3, 0.5, 27)},
+	{"uid": "c01_salvage_a", "id": "electronics_salvage", "count": 8, "pos": Vector3(3, 0.5, -10)},
+	{"uid": "c01_hvt_case", "id": "hvt_case", "pos": Vector3(0, 0.5, -10)},
+	{"uid": "c01_crate_a", "id": "supply_crate", "pos": Vector3(12, 0.6, -12)},
+]
 
 ## Turn off to host a session without AI (the older test suites do).
 static var spawn_ai := true
-## Players start in their role's kit (Roles) the first time they spawn. Off for now: players
-## kit out from the gate loot as before and respawn in the handoff's default kit, and the
-## older suites expect an empty start. AI squadmates always get their role's kit.
+## Players start in their role's kit (Roles) the first time they spawn, and respawn in it. Off
+## by default (the older suites expect an empty start and the gate loot); the main menu's play
+## entries turn it on with clean_loot. AI squadmates always get their role's kit.
 static var player_role_kits := false
+## Lay out CLEAN_LOOT instead of LOOT (the main menu's play entries).
+static var clean_loot := false
+
+
+## The starting loot this session lays out.
+static func starting_loot() -> Array:
+	return CLEAN_LOOT if clean_loot else LOOT
 
 ## The player squad has 8 slots in two fire teams (Roles); AI fills the ones players don't
 ## (see rebalance_squad). AI squadmates are named by callsign, the first one free.
@@ -286,6 +308,8 @@ func _make_body(data: Dictionary) -> Node:
 	corpse.left_handed = bool(data.get("left", false))
 	corpse.body_uid = String(data.uid)
 	corpse.collision_layer = 0
+	# Lies as it lay (its ragdoll pose; older saves and fresh bodies: none, it falls from where it is drawn).
+	(corpse.get_node(^"Model") as CharacterModel).ragdoll_net = PackedFloat32Array(data.get("ragdoll", []))
 	if data.get("marker", false):
 		corpse.has_gear_marker = true
 		var marker := GearMarker.new()
@@ -392,7 +416,7 @@ func _on_hosted() -> void:
 	BodyVolume.warm(["", BodyVolume.FEMALE])  # hits are judged on the host: build both bodies' shapes before the first one
 	GameState.load_zone()
 	voxel_world.load_edits(GameState.voxel_edits)
-	for loot: Dictionary in LOOT:
+	for loot: Dictionary in starting_loot():
 		if not GameState.is_looted(loot.uid):
 			spawn_item(StringName(loot.id), loot.get("count", 1), loot.pos, loot.uid)
 	for uid: String in GameState.dropped:

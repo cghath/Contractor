@@ -74,6 +74,9 @@ func host() -> void:
 ## Hosts the compound as a stand-in contract (W13 test path): the briefing on the map, then
 ## insertion, the reinforcement timer and extraction (Briefing.debug_open).
 func host_with_briefing() -> void:
+	BaseHub.cancel_session()
+	GameState.delete_save()  # the test contract starts fresh every time: no bodies or drops from last time
+	_clean_test_session()
 	host()
 	if Net.is_hosting():
 		Briefing.debug_open(self)
@@ -82,6 +85,7 @@ func host_with_briefing() -> void:
 ## Debug entry: hosts the 2 km test zone (data/zones.json "test") instead of the compound.
 func host_test_zone() -> void:
 	BaseHub.cancel_session()  # never a leftover campaign
+	_clean_test_session()
 	var main := get_parent()
 	if main and main.has_method(&"host_zone"):
 		GameState.zone_id = "zone_test"
@@ -114,10 +118,20 @@ func _on_join_failed() -> void:
 
 func _plain_host() -> void:
 	BaseHub.cancel_session()  # never a leftover campaign
+	_clean_test_session()
 	host()
 
 
+## The play and test entries (not the test suites, which host through host()): players come
+## in their role's kit, and the level lays out its clean loot (CompoundLevel.CLEAN_LOOT).
+static func _clean_test_session() -> void:
+	CompoundLevel.player_role_kits = true
+	CompoundLevel.clean_loot = true
+
+
 func _campaign_host() -> void:
+	CompoundLevel.player_role_kits = false  # the campaign gives each player their own gear
+	CompoundLevel.clean_loot = false
 	BaseHub.prepare_session()
 	host()
 	if not Net.is_hosting():
