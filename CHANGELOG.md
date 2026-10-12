@@ -11,6 +11,42 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Ragdolls, clean test sessions, clothing, intel fog (Captain's side, 2026-10-11 late)
+
+#### Added
+
+- **Ragdolls** (Captain): downed (unconscious) and dead bodies, AI and players, fall and lie
+  as host-simulated ragdolls (`Ragdoll`: torso, head, thighs, shins, upper arms, forearms,
+  anatomical joint limits), replicated as `CharacterModel.ragdoll_net` and kept by saves.
+  Bodies rest on each other instead of clipping; a settled body freezes, so nothing shoves
+  it; the living step over a body or pile up to 0.75 m. Hitboxes, wounds, blood and charges
+  follow the ragdoll. Carried or dragged it goes; put down it falls again.
+- **First-person arms**: your own forearms and hands on the weapon (there were none for
+  anyone), mirrored for a left-handed shooter.
+- **Clean test sessions** (Captain): the menu's play and test entries spawn players in their
+  role's kit with one tidy row of spares (`CompoundLevel.CLEAN_LOOT`); the test contract
+  starts fresh every time. The campaign keeps roster gear.
+- **Roadmap**: item catalogue plan, dog tags (Captain: they count), and bases (Captain: no
+  player-built FOB; friendly faction FOBs with portable company modules; replacement troops
+  flown in from the LHD at a cost) in `docs/ChrisPlan_handoff.md`.
+
+#### Changed
+
+- **Civilians, HVTs and hostages wear plain clothes** (Captain): one flat colour, no camo,
+  patch, belt or knee pads; HVT outfits by side, role, site, region and captivity
+  (`PersonLook.outfit`). The chest box and the HVT head band are gone.
+- **Briefing intel is never spot on** (Captain): estimates are off by what the intel's
+  accuracy allows; under 60% accuracy quality reads as a word.
+- **AI hold while a briefing is open**, so nobody dies before reading it.
+
+#### Fixed
+
+- A downed or dead body's capsule shoved itself out of anyone walking into it, and one going
+  down beside another was pushed on top of it.
+- Blood that landed on a body or item floated once that moved; it now sticks to it. Pools
+  stop at edges.
+- A downed (unconscious) player could crawl.
+
 ### Wave 4B part 2 follow-ups (Captain's side, 2026-10-11)
 
 #### Added
