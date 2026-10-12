@@ -635,6 +635,8 @@ func _test_engagement() -> void:
 	_hold_fire(true)
 	_firing = true
 	await _seconds(0.6)
+	print("  callout log before the engagement: %d of %d lines" % [level.callouts.sent.size(), Callouts.LOG_SIZE])
+	level.callouts.sent.clear()  # the log keeps only its last LOG_SIZE lines: start empty so sent_from stays valid as the scene's chatter trims it
 	var sent_from := level.callouts.sent.size()
 	_place(delta, Vector3(-3, 0.1, 15))
 	_shoot_femoral(delta, 5)
