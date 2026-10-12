@@ -1,0 +1,95 @@
+# Debugging: how we run, log and look at things
+
+Captain's rules (2026-10-12), for both sides (Captain's and cghath's) and every agent. Some of
+this is built and on `feat/wave4b-hotzone` (soon `dev`); the rest is planned and listed at the
+end so nobody builds it twice.
+
+## The rule: every run keeps its logs, numbered, and nothing deletes them
+
+Anything that runs the game or produces output (test suites, screenshot scripts, helper
+scripts, test builds, playtest sessions) keeps its logs in **one parent folder outside the
+repo**, by date, with a unique run number and PASS or FAIL in the folder's name:
+
+```
+<parent>/                                   e.g. B:\Contractor-test-logs (beside the main checkout)
+  run_counter.txt                           the last number given out (shared by every kind of run)
+  index.txt                                 one line per run: id, date, time, PASS/FAIL, branch-sha, what ran
+  2026-10-12/
+    R0001-025832-FAIL-feat-wave4b-hotzone-0e80746/    a test run: every suite's log + summary.txt
+    S0004-032507-PASS-hotzone-shots-0e80746/          a screenshot run: the PNGs + script.log
+    B0009-export.log                                  a build's export log
+```
+
+- **Letters:** R = test run (`tools/run_tests.sh`), S = screenshot or helper script, B = build,
+  P = playtest session or bug report (planned). The number is one counter for all of them, so
+  "R0012" or "S0004" names exactly one run on that machine.
+- **Folder names:** `<letter><number>-<HHMMSS>-<PASS|FAIL>-<branch or topic>-<sha>`. A folder
+  still named RUNNING was killed or hung.
+- **Never delete the parent folder or anything in it.** Cleanups only ever remove temp copies.
+- **Cite run numbers** in commit messages, handoffs, PR notes and Discord posts ("all suites
+  pass: R0010"; "animations' pistol-draw fails on dev too: R0002").
+
+### Tests: `tools/run_tests.sh` already does it
+
+```bash
+GODOT="<path to the Voxel Tools editor>" CONTRACTOR_PORT=24790 tools/run_tests.sh            # every suite
+GODOT="..." CONTRACTOR_PORT=24790 tools/run_tests.sh missions world                          # some suites
+```
+
+- Logs land in `Contractor-test-logs` beside the **main checkout** (found through
+  `git rev-parse --git-common-dir`, so every worktree shares one parent and one counter). Set
+  `CONTRACTOR_TEST_LOGS=<folder>` to put them elsewhere, or `=none` to keep nothing.
+- On CI (`GITHUB_ACTIONS`) nothing is kept unless `CONTRACTOR_TEST_LOGS` is set.
+- `summary.txt` in each run lists every suite's verdict and every `[FAIL]` line; the run's
+  folder is renamed PASS or FAIL when it ends; `index.txt` gets a line.
+- Always run suites through `tools/run_tests.sh`, not bare `godot`: a bare run's output is
+  gone when the terminal is. `tools/test_runner_check.sh` checks the runner keeps logs.
+- Use your own `CONTRACTOR_PORT` (the game and other runs use 24680; two on one port looks
+  like a hang) and one run at a time per machine.
+
+### Scripts and builds: do the same by hand until they're wired in
+
+Take the next number from `run_counter.txt`, make
+`<parent>/<date>/<letter><number>-<time>-RUNNING-<topic>-<sha>/`, run with output into it,
+rename RUNNING to PASS or FAIL, add a line to `index.txt`. A `-s` SceneTree script should
+also quit itself after a deadline (a script error leaves it idling, not quitting).
+Test build folders: `builds/contractor-<date>-<time>-B<number>-<topic>-<sha>/`.
+
+## Dev tools in the game: `DevTools.on()`
+
+Our exports use a release template, so `OS.is_debug_build()` is never true in a test build.
+Anything for testing goes behind **`DevTools.on()`** (`scripts/ui/dev_tools.gd`) instead: true in
+the editor and debug builds, and in any build started with **`--dev`**. Test builds ship a
+`Contractor (dev tools).bat` that starts the game with `--dev`; a normal start has none of it.
+
+Today's dev keys:
+
+| Key | What |
+|---|---|
+| K | hurt yourself (going down, dying) |
+| Shift+End | during a deployment, extract everyone near you at once |
+| End | open the contract board (any build) |
+| Page Up | hot zones: show/hide the enemy readout (alert per area, last known position, reports, pressure and tier, patrols, QRF, hunters, coordination, enemy radio) |
+| Page Down | hot zones: skip the enemy's clock 5 minutes |
+
+New dev keys: put them behind `DevTools.on()`, list them here, and keep them off F1-F12 (the
+squad command menu) and the game's keys (`autoload/controls.gd`).
+
+## Planned (Captain's side, first after 4B part 3: don't build these twice)
+
+1. **Bug-report key:** in a playtest, one key saves a numbered folder (P....) with a screenshot,
+   a note typed there, a state dump (every soldier's position; each AI's intent, target, combat
+   mode and why; alert and pressure; the player's inventory and wounds; zone id and seed) and
+   the last minutes of the log.
+2. **Session logs:** every exported build writes a numbered log per session to the same parent;
+   the pause menu shows the session number. Script errors and AI warnings land there.
+3. **AI debug overlay (dev tools):** over each AI its intent, target, combat mode and alert state,
+   and a line to where it's going.
+4. Later: **replay** a bug report (it saves a `Campaign.snapshot`; a headless test loads it,
+   reproduces the bug and stays as a regression test), a **test history page** (pass/fail per
+   suite over time from `index.txt`, flaky suites flagged), **performance lines** in session
+   logs (frame time, AI count, navigation bake time, modules streamed in, once a minute).
+
+When wave 5 adds systems (vehicles, supports, the FOB), please give them lines in the state
+dump and the overlay when those land (a vehicle's driver, passengers, damage; a support call's
+state), and put any test-only controls behind `DevTools.on()`.

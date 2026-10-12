@@ -56,6 +56,13 @@ date), as with wave 3, so both sides never build the same thing twice.**
 ## Wave 5: vehicles and supports (proposed 4 workstreams)
 
 > **For cghath's agent, starting wave 5 while Captain's side finishes 4B part 3 (Captain, 2026-10-12):**
+> - **New rule for both sides: debugging and logs. Read [debugging.md](debugging.md).** Every run
+>   (tests, scripts, builds, playtests) keeps numbered logs (R/S/B/P + number, by date, PASS or
+>   FAIL in the name) in one parent folder outside the repo that nothing deletes;
+>   `tools/run_tests.sh` already does it for suites. Cite run numbers when reporting. Test-only
+>   controls go behind `DevTools.on()` (debug builds or `--dev`), not `OS.is_debug_build()`.
+>   The bug-report key, session logs and AI overlay are Captain's side's next: please don't
+>   build them, but give wave 5's systems lines in them when they land.
 > - **The base hub stays as it is for now.** `BaseHub` / `BaseLevel` (today's "FOB" base scene)
 >   keeps working unchanged through 4B part 3. **Wave 5 turns it into the first friendly
 >   FOB** (Captain: the players don't build a FOB; inland the squad deploys from a friendly
