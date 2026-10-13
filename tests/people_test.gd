@@ -234,8 +234,11 @@ func _test_blast_casualty() -> void:
 	await _wait_until(func() -> bool: return by_blast.vitals.injury() > 0.0 or by_blast.vitals._model.burn > 0.0, 6.0)
 	await _frames(3)
 	var blast := People.casualties.filter(func(e: Dictionary) -> bool: return e.civilian == by_blast.display_name())
-	check(by_blast.vitals._model.burn > 0.0 and by_blast.vitals.wound_list().is_empty(),
-		"behind a wall: burned by the blast, no fragment wounds (burns %.2f, %d wounds)" % [by_blast.vitals._model.burn, by_blast.vitals.wound_list().size()])
+	# The fragments come after the blast: had one got through, it would be the last cause. (The
+	# blast itself may break his pelvis: a wound, but the blast's.)
+	var cause := String(by_blast.vitals.last_cause.get("cause", ""))
+	check(by_blast.vitals._model.burn > 0.0 and cause == "blast",
+		"behind a wall: burned by the blast, no fragment got through (burns %.2f, last cause %s, %d wounds)" % [by_blast.vitals._model.burn, cause, by_blast.vitals.wound_list().size()])
 	check(blast.size() == 1 and blast[0].kind == People.WOUNDED and blast[0].shooter == "Player 1" and String(Harm.last(by_blast).get("faction", "")) == "friendly",
 		"a blast-only injury counts against the thrower too (%s)" % [blast])
 	wall.queue_free()  # out of the way before the body falls
