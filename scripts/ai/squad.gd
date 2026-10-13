@@ -422,6 +422,7 @@ func order_command(from: Soldier, cmd: String, point: Vector3, names := PackedSt
 			var units := _able(names)
 			for ai in units:
 				ai.stance_order = SquadAI.STANCE_ORDERS[arg]
+				ai.body.want_stance = ai.stance_order  # (auto: back to their own choice at once)
 			return "" if not units.is_empty() else "Nobody selected can"
 		"heal":
 			var hurt := _able(names).filter(func(ai: SquadAI) -> bool: return not ai._self_task().is_empty())
@@ -455,15 +456,19 @@ func order_command(from: Soldier, cmd: String, point: Vector3, names := PackedSt
 	return "?"
 
 
-## "Give me ammo": the nearest selected unit carrying magazines of `from`'s weapon brings him some.
+## "Give me ammo": the nearest selected unit carrying magazines of `from`'s weapon (one not
+## busy with a casualty or his own wounds, if there is one) brings him some.
 func order_give_ammo(from: Soldier, names: PackedStringArray) -> String:
 	var weapon := from.active_weapon()
 	if weapon == null or weapon.type != "weapon":
 		return "Have a rifle in your hands"
 	var ammo := Soldier._ammo_of(weapon)
 	var best: SquadAI = null
+	var cost := func(ai: SquadAI) -> float:  # the nearest, and one not busy patching someone (or himself) up first
+		var busy := ai.care != SquadAI.Care.NONE or ai.intent in [SquadAI.Intent.HEAL, SquadAI.Intent.CASUALTY] or not ai._self_task().is_empty()
+		return ai.body.global_position.distance_to(from.global_position) + (1000.0 if busy else 0.0)
 	for ai in _able(names):
-		if ai.body.inventory.count_of(ammo) > 0 and (best == null or ai.body.global_position.distance_to(from.global_position) < best.body.global_position.distance_to(from.global_position)):
+		if ai.body.inventory.count_of(ammo) > 0 and (best == null or cost.call(ai) < cost.call(best)):
 			best = ai
 	if best == null:
 		return "Nobody selected carries %s" % ItemDB.get_item(ammo).name if ItemDB.has_item(ammo) else "Nobody selected has any"

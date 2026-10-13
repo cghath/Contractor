@@ -574,7 +574,7 @@ func hear(who: Soldier, where: Vector3, amount: float) -> void:
 	_aware[id] = maxf(a, minf(a + amount, Spotting.HEARD_MAX))
 	_suspect_pos = where
 	_suspect_at = Soldier._now()
-	if squad and who.faction != body.faction:
+	if squad and body and who.faction != body.faction:
 		squad.note_enemy(who, where, true)
 
 
@@ -900,7 +900,8 @@ func _act() -> void:
 		Intent.TACTIC:
 			_do_tactic(_tactic())
 	_apply_combat_mode()
-	body.want_stance = stance_order if intent != Intent.CASUALTY else -1  # (casualty care kneels as it needs)
+	if stance_order >= 0:
+		body.want_stance = stance_order if intent != Intent.CASUALTY else -1  # (casualty care kneels as it needs)
 
 
 ## Combat mode stance and weapon carry for the movement and fighting intents (reloading,
@@ -2541,12 +2542,14 @@ func _tactic_give_ammo(t: Dictionary) -> void:
 	_face(who.global_position)
 	var ammo := StringName(t.get("ammo", &""))
 	var given := 0
+	var full := false
 	for i in GIVE_MAGS:
 		var entry := _take_out(ammo)
 		if entry.is_empty():
 			break
 		if who.inventory.take(entry.id, 1, entry.get("state", {})) == 0:
-			body.inventory.take(entry.id, 1, entry.get("state", {}))
+			body.inventory.take(entry.id, 1, entry.get("state", {}))  # no room on them: keep it
+			full = true
 			break
 		given += 1
 	if given > 0:
@@ -2554,7 +2557,7 @@ func _tactic_give_ammo(t: Dictionary) -> void:
 		if not who.is_ai():
 			who._client_message.rpc_id(who.owner_peer(), "%s gave you %d magazine%s" % [body.display_name(), given, "s" if given > 1 else ""])
 	elif not who.is_ai():
-		who._client_message.rpc_id(who.owner_peer(), "%s has none to spare" % body.display_name())
+		who._client_message.rpc_id(who.owner_peer(), "No room for more magazines" if full else "%s has none to spare" % body.display_name())
 	ordered = {}  # back to what they were doing
 
 
