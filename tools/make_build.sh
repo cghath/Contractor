@@ -1,22 +1,77 @@
 #!/usr/bin/env bash
-# Leaves a playable test build in builds/<date>_<label>/:
-#   contractor.pck  the game
-#   Contractor.exe  the standalone game (when the Voxel Tools release template is installed; see below)
-#   play.bat        double-click to play; runs the pack with the Voxel Tools build of Godot
-#   BUILD.txt       branch, commit and what to test
+# Leaves a playable test build in its own folder, never reused (docs/debugging.md):
+#   builds/contractor-<date>-<time>-B<number>-<label>-<sha>/
+#     contractor.pck                 the game
+#     play.bat                       double-click to play; runs the pack with the Voxel Tools build of Godot
+#     Contractor.exe                 the standalone game (when the Voxel Tools release template is installed; see below)
+#     Contractor (dev tools).bat     the same with the dev tools on (--dev): Contractor.exe's, or play.bat's without one
+#     BUILD.txt                      build number, branch, commit, export log and what to test
 # Usage: GODOT=<voxel godot exe> tools/make_build.sh <label> ["what to test"]
+# The number is the next one from run_counter.txt in the logs parent the test runs use
+# (tools/run_log.sh: Contractor-test-logs beside the main checkout, or CONTRACTOR_TEST_LOGS),
+# and the build gets a line in its index.txt, PASS or FAIL. Both exports' output (the pack and
+# Contractor.exe) is kept there as <date>/B<number>-<time>-export.log. A failed export fails
+# the build loudly (exit 1, the reason, the log's last lines, FAILED.txt in the build folder).
 # builds/ is git-ignored: builds stay on the machine that made them.
 # play.bat needs no export templates: the Voxel Tools editor binary runs the pack directly.
 set -eu
 cd "$(dirname "$0")/.."
+. tools/run_log.sh
 GODOT="${GODOT:-godot}"
 label="${1:?usage: tools/make_build.sh <label> [\"what to test\"]}"
 notes="${2:-}"
-dir="builds/$(date +%Y-%m-%d)_${label}"
-mkdir -p "$dir"
+parent="$(run_log_parent)"
+[ -n "$parent" ] || { echo "make_build: no logs parent to number the build and keep its export log (set CONTRACTOR_TEST_LOGS to a folder)"; exit 1; }
+id="$(printf 'B%04d' "$(run_log_number "$parent")")"
+day="$(date +%Y-%m-%d)"
+time="$(date +%H%M%S)"
+run_tail="$(run_log_tail)"
+sha="$(git rev-parse --short HEAD 2>/dev/null || echo nogit)"
+topic="$(printf '%s' "$label" | tr -c 'A-Za-z0-9._-' '-')"
+dir="builds/contractor-$day-$time-$id-$topic-$sha"
+mkdir -p "$parent/$day"
+log="$parent/$day/$id-$time-export.log"
+why=""
+finished=""
+echo "build $id ($label), $day $time, $run_tail -> $dir" >"$log"
+
+# Whatever happens: the verdict goes in the log and index.txt; a failure says why, loudly.
+finish() {
+	local code=$? verdict=PASS
+	{ [ "$code" -ne 0 ] || [ -z "$finished" ] || [ -n "$why" ]; } && verdict=FAIL
+	[ "$verdict" = FAIL ] && [ -z "$why" ] && why="stopped (exit $code)"
+	echo "result: $verdict${why:+: $why}" >>"$log"
+	echo "$id $day $time $verdict $run_tail build $topic -> $dir" >>"$parent/index.txt"
+	if [ "$verdict" = PASS ]; then
+		echo "build $id: PASS, export log $log"
+		echo "$dir"
+	else
+		[ -d "$dir" ] && echo "This build failed ($why). Export log: $log" >"$dir/FAILED.txt"
+		echo "BUILD $id FAILED: $why"
+		echo "  export log: $log"
+		tail -n 30 "$log" | sed 's/^/  | /'
+		exit 1
+	fi
+}
+trap finish EXIT
+
+# Runs one export ("what", then the engine's arguments) with its output appended to the log.
+# Fails on a non-zero exit or a script error in the log (an export can report a script that
+# doesn't compile and still exit 0, packing the broken script).
+export_step() {
+	local what="$1" code=0
+	shift
+	echo "== $what: $GODOT --headless --path . $*" >>"$log"
+	"$GODOT" --headless --path . "$@" >>"$log" 2>&1 || code=$?
+	echo "== $what: exit $code" >>"$log"
+	[ "$code" -eq 0 ] && ! grep -qE 'SCRIPT ERROR|Parse Error' "$log"
+}
+
+mkdir -p builds
+mkdir "$dir"
 # The preset is git-ignored (local paths); write a minimal one if this checkout has none.
 if ! grep -q 'name="Windows Desktop"' export_presets.cfg 2>/dev/null; then
-	[ -f export_presets.cfg ] && { echo "export_presets.cfg has no \"Windows Desktop\" preset; add one or rename yours"; exit 1; }
+	[ -f export_presets.cfg ] && { why="export_presets.cfg has no \"Windows Desktop\" preset; add one or rename yours"; exit 1; }
 	cat > export_presets.cfg <<'CFG'
 [preset.0]
 
@@ -46,22 +101,9 @@ binary_format/embed_pck=false
 binary_format/architecture="x86_64"
 CFG
 fi
-"$GODOT" --headless --path . --export-pack "Windows Desktop" "$dir/contractor.pck" >/dev/null 2>&1
-[ -s "$dir/contractor.pck" ] || { echo "export failed"; exit 1; }
-# A standalone Contractor.exe too, when the Voxel Tools release template for this editor is there
-# (Zylann's godot.windows.template_release.x86_64.exe from the same release as the editor; set
-# CONTRACTOR_TEMPLATE to it, or unzip it to template_release/ beside the editor). The exe reads the
-# pack beside it, so nobody needs the editor to play. It's a release build: dev tools need --dev.
-template="${CONTRACTOR_TEMPLATE:-$(dirname "$GODOT")/template_release/godot.windows.template_release.x86_64.exe}"
-if [ -f "$template" ]; then
-	win_template="$(cygpath -m "$template" 2>/dev/null || echo "$template")"
-	sed -i "s|^custom_template/release=.*|custom_template/release=\"$win_template\"|" export_presets.cfg
-	"$GODOT" --headless --path . --export-release "Windows Desktop" "$dir/Contractor.exe" >/dev/null 2>&1
-	if [ -s "$dir/Contractor.exe" ]; then
-		printf '@echo off\r\nrem Plays this build with the dev tools on (docs/debugging.md: K, Shift+End, Insert, Delete...).\r\nstart "" "%%~dp0Contractor.exe" --dev %%*\r\n' > "$dir/Contractor (dev tools).bat"
-	else
-		echo "Contractor.exe export failed (play.bat still works)"
-	fi
+if ! export_step "pack" --export-pack "Windows Desktop" "$dir/contractor.pck" || [ ! -s "$dir/contractor.pck" ]; then
+	why="the pack export failed"
+	exit 1
 fi
 cat > "$dir/play.bat" <<'BAT'
 @echo off
@@ -81,16 +123,36 @@ if not exist "%GODOT%" (
 start "" "%GODOT%" --main-pack "%~dp0contractor.pck" %*
 BAT
 sed -i 's/$/\r/' "$dir/play.bat"
+# A standalone Contractor.exe too, when the Voxel Tools release template for this editor is there
+# (Zylann's godot.windows.template_release.x86_64.exe from the same release as the editor; set
+# CONTRACTOR_TEMPLATE to it, or unzip it to template_release/ beside the editor). The exe reads the
+# pack beside it, so nobody needs the editor to play. It's a release build: dev tools need --dev.
+template="${CONTRACTOR_TEMPLATE:-$(dirname "$GODOT")/template_release/godot.windows.template_release.x86_64.exe}"
+if [ -f "$template" ]; then
+	win_template="$(cygpath -m "$template" 2>/dev/null || echo "$template")"
+	sed -i "s|^custom_template/release=.*|custom_template/release=\"$win_template\"|" export_presets.cfg
+	if export_step "Contractor.exe" --export-release "Windows Desktop" "$dir/Contractor.exe" && [ -s "$dir/Contractor.exe" ]; then
+		printf '@echo off\r\nrem Plays this build with the dev tools on (docs/debugging.md: K, Shift+End, Insert, Delete...).\r\nstart "" "%%~dp0Contractor.exe" --dev %%*\r\n' > "$dir/Contractor (dev tools).bat"
+	else
+		why="the Contractor.exe export failed (play.bat still works)"
+	fi
+fi
+if [ ! -s "$dir/Contractor.exe" ]; then
+	# No exe: play.bat's own command, with the dev tools on.
+	printf '@echo off\r\nrem Plays this build with the dev tools on (docs/debugging.md: K, Shift+End, Insert, Delete...).\r\ncall "%%~dp0play.bat" --dev %%*\r\n' > "$dir/Contractor (dev tools).bat"
+fi
 {
-	echo "Contractor test build: $label"
-	echo "Built $(date '+%Y-%m-%d %H:%M') from branch $(git branch --show-current), commit $(git rev-parse --short HEAD)$(git diff --quiet HEAD -- . ':!builds' || echo ' plus uncommitted changes')"
+	echo "Contractor test build $id: $label"
+	echo "Built $(date '+%Y-%m-%d %H:%M') from branch $(git branch --show-current 2>/dev/null || echo unknown), commit $sha$(git diff --quiet HEAD -- . ':!builds' 2>/dev/null || echo ' plus uncommitted changes')"
+	echo "Export log: $log"
 	echo
 	if [ -s "$dir/Contractor.exe" ]; then
 		echo "Play: double-click Contractor.exe (or \"Contractor (dev tools).bat\" for the dev keys)."
 		echo "play.bat runs the same pack through the Voxel Tools editor (dev tools always on)."
 	else
-		echo "Play: double-click play.bat, then click Play (host a session)."
+		echo "Play: double-click play.bat (or \"Contractor (dev tools).bat\" for the dev keys), then click Play (host a session)."
 	fi
 	[ -n "$notes" ] && { echo; echo "What to test:"; echo "$notes"; }
 } > "$dir/BUILD.txt"
-echo "$dir"
+[ -n "$why" ] && exit 1
+finished=1
