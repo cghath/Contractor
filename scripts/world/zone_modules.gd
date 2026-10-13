@@ -60,8 +60,9 @@ static var GARRISON := {
 	"comms": [Vector3(-4.5, 0.1, -4.5), Vector3(4, 0.1, 2), Vector3(-2.5, 0.1, 4.5), Vector3(2.5, 0.1, 4.5)],
 }
 
-## Loot lying in each module (m from the origin; uids are made unique per module).
-const LOOT := {
+## Loot lying in each module (m from the origin; uids are made unique per module). A static
+## var: a town adds its own (_town).
+static var LOOT := {
 	"compound": [
 		{"uid": "mags", "id": "mag_556", "count": 3, "pos": Vector3(-3, 0.5, -10)},
 		{"uid": "ifak", "id": "ifak", "pos": Vector3(3, 0.5, -10)},
@@ -103,6 +104,42 @@ static var _cache := {}
 static var _counts := {}  # solid_voxels_in
 
 
+## A module type's base type: "town" for a generated town ("town#<seed>"), else the type. The
+## mission data (contracts.json "modules"), callsigns and the like are by base type.
+static func base(type: String) -> String:
+	return "town" if type.begins_with(TOWN) else type
+
+
+## A generated town's civilians (BuildingGen.town "civilians"); none for other types (theirs
+## are in contracts.json).
+static func civilians(type: String) -> Array:
+	return (_towns.get(type, {}) as Dictionary).get("civilians", []) if has_type(type) else []
+
+
+## A generated town's contract sites (contracts.json "modules" sites, made from its buildings):
+## "area" (the whole town), "intel" and "docs" (its intel spots), "hvt" (+ "hvt_phone") and
+## "hostage" (BuildingGen.town). {} for other types.
+static func town_sites(type: String) -> Dictionary:
+	if not type.begins_with(TOWN) or not has_type(type):
+		return {}
+	var t: Dictionary = _towns[type]
+	var half: Vector2 = t.half
+	var arr := func(p: Vector3) -> Array: return [p.x, p.y, p.z]
+	var intel: Array = t.points.intel
+	var hvt: Vector3 = t.hvt
+	return {
+		"area": {"rect": [-half.x, -half.y, half.x * 2.0, half.y * 2.0]},
+		"intel": {"pos": arr.call((intel[0] as Vector3) + Vector3(0, 0.5, 0)), "place": "intel_laptop", "name": "laptop"},
+		"docs": {"pos": arr.call((intel[intel.size() - 1] as Vector3) + Vector3(0.6, 0.5, 0)), "place": "intel_documents", "name": "documents"},
+		"hvt": {"pos": arr.call(hvt), "hvt": "hvt_town", "person": {"side": "hostile", "intel": ["intel_phone"]}},
+		"hvt_phone": {"pos": arr.call(hvt), "items": ["intel_phone"], "of_hvt": "hvt"},
+		"hostage": {"pos": arr.call(t.hostage), "hvt": "hostage_town", "person": {"side": "friendly"}},
+	}
+
+
+static var _towns := {}
+
+
 static func has_type(type: String) -> bool:
 	if type.begins_with(TOWN):
 		return _town(type)
@@ -125,6 +162,8 @@ static func _town(type: String) -> bool:
 	HALF[type] = t.half
 	POINTS[type] = t.points
 	GARRISON[type] = t.garrison
+	LOOT[type] = t.loot
+	_towns[type] = {"civilians": t.civilians, "half": t.half, "points": t.points, "hvt": t.hvt, "hostage": t.hostage}
 	return true
 
 

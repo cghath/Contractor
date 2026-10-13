@@ -511,13 +511,29 @@ const STREET_W := 8.0
 const CROSS_W := 7.0
 const LOT_GAP := 2.0
 const SETBACK := 1.0
+## What lies at a building's loot spots in a town, by the spot's table: [item id, count]
+## choices; tables not listed hold nothing yet. At most TOWN_LOOT_MAX in a town.
+const TOWN_LOOT := {
+	"medical": [["ifak", 1]], "ward": [["ifak", 1]],
+	"armoury": [["mag_556", 2], ["rounds_762", 40], ["frag_grenade", 2]],
+	"warehouse": [["electronics_salvage", 2]], "storeroom": [["electronics_salvage", 1], ["smoke_grenade", 1]],
+	"house_store": [["rounds_556", 30]], "office": [["electronics_salvage", 1]],
+}
+const TOWN_LOOT_MAX := 10
+## Every TOWN_CIVILIAN_EVERY'th building has someone living or working there, walking between
+## their front step, the street and the crossroads.
+const TOWN_CIVILIAN_EVERY := 3
 ## Lot types by where they are along the street (0 the middle .. 1 the end): weights.
 const TOWN_MIX := {"house": 6.0, "shop": 2.5, "warehouse": 1.0, "clinic": 0.6, "police": 0.6}
 
 
 ## The town from `seed`: {"boxes", "buildings": [{"type", "origin" (Vector3), "turned" (180
 ## degrees), "data" (building())}], "half" (Vector2: footprint half-size, m), "points"
-## ({"objective", "cache", "intel"}: Array of Vector3), "garrison" (Array of Vector3), "style"}.
+## ({"objective", "cache", "intel"}: Array of Vector3), "garrison" (Array of Vector3), "loot"
+## (ZoneModules.LOOT entries: {"uid", "id", "count", "pos"}), "hvt" and "hostage" (Vector3: the
+## middle of the room an HVT lives in, an office or a living room, and of the room a hostage is
+## held in, the police cells or a store room), "civilians" ({"pos", "routine"},
+## as contracts.json module "civilians", in arrays), "style"}.
 static func town(seed: int, style := "") -> Dictionary:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed
@@ -563,6 +579,9 @@ static func town(seed: int, style := "") -> Dictionary:
 	# Named points: where loot of a kind lies, in town metres.
 	var points := {"objective": [], "cache": [], "intel": []}
 	var garrison: Array = []
+	var loot: Array = []
+	var civilians: Array = []
+	var arr := func(p: Vector3) -> Array: return [snappedf(p.x, 0.1), snappedf(p.y, 0.1), snappedf(p.z, 0.1)]
 	for b: Dictionary in buildings:
 		var to_town := func(p: Vector3) -> Vector3:
 			return (Vector3(-p.x, p.y, -p.z) if b.turned else p) + (b.origin as Vector3)
@@ -575,6 +594,19 @@ static func town(seed: int, style := "") -> Dictionary:
 				points.cache.append(where)
 			elif t == "intel":
 				points.intel.append(where)
+			if TOWN_LOOT.has(t) and loot.size() < TOWN_LOOT_MAX:
+				var choices: Array = TOWN_LOOT[t]
+				var pick: Array = choices[rng.randi() % choices.size()]
+				loot.append({"uid": "loot%d" % loot.size(), "id": pick[0], "count": int(pick[1]), "pos": where + Vector3(0, 0.5, 0)})
+		var i := buildings.find(b)
+		if i % TOWN_CIVILIAN_EVERY == 1:
+			for dr: Dictionary in b.data.doors:
+				if dr.rooms[1] == -1 and (dr.at as Vector3).z > 0.0:
+					var step: Vector3 = to_town.call((dr.at as Vector3) + Vector3(0, 0, 1.2))
+					var across := Vector3(step.x + rng.randf_range(-6.0, 6.0), 0, -signf(step.z) * rng.randf_range(0.5, STREET_W * 0.4))
+					var corner := Vector3(signf(step.x) * CROSS_W * 0.3, 0, rng.randf_range(-STREET_W, STREET_W) * 0.3)
+					civilians.append({"pos": arr.call(step + Vector3(0, 0.1, 0)), "routine": [arr.call(step), arr.call(across), arr.call(corner)]})
+					break
 		# A post just inside the front door of every other building.
 		if buildings.find(b) % 2 == 0:
 			for dr: Dictionary in b.data.doors:
@@ -586,7 +618,23 @@ static func town(seed: int, style := "") -> Dictionary:
 			points[fallback].append(Vector3(0, 0, 0))
 	garrison.append(Vector3(-CROSS_W, 0.1, 0))
 	garrison.append(Vector3(CROSS_W, 0.1, 0))
-	return {"boxes": boxes, "buildings": buildings, "half": half, "points": points, "garrison": garrison, "style": style}
+	return {"boxes": boxes, "buildings": buildings, "half": half, "points": points, "garrison": garrison,
+		"loot": loot, "civilians": civilians, "style": style,
+		"hvt": _town_room(buildings, ["office", "living"], Vector3(-CROSS_W, 0.1, 0)),
+		"hostage": _town_room(buildings, ["cells", "storeroom", "house_store", "store"], Vector3(CROSS_W, 0.1, 0))}
+
+
+## The middle of the first room (in town metres, on the floor) whose role is the earliest of
+## `roles` in any building of a town; `fallback` if none has one.
+static func _town_room(buildings: Array, roles: Array, fallback: Vector3) -> Vector3:
+	for role: String in roles:
+		for b: Dictionary in buildings:
+			for r: Dictionary in b.data.rooms:
+				if r.role == role:
+					var c: Vector2 = (r.rect as Rect2).get_center()
+					var p := Vector3(c.x, 0.1, c.y)
+					return (Vector3(-p.x, p.y, -p.z) if b.turned else p) + (b.origin as Vector3)
+	return fallback
 
 
 ## A lot's building type: by TOWN_MIX, shops toward the middle, warehouses toward the ends, a

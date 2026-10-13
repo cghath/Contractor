@@ -34,7 +34,7 @@ const ROLES := {
 const HOSTILE_ROLES: Array[StringName] = [&"commander", &"financier", &"bomb_maker"]
 const HOSTAGE_ROLES: Array[StringName] = [&"aid_worker", &"engineer", &"journalist", &"contractor"]
 ## Sites where an HVT dresses to blend in, and where he's in the field.
-const TOWN_SITES: Array[String] = ["village", "compound"]
+const TOWN_SITES: Array[String] = ["village", "compound", "town"]
 const FIELD_SITES: Array[String] = ["outpost", "checkpoint"]
 ## How worn a hostage's clothes look (darkened by this share).
 const CAPTIVE_WEAR := 0.22
@@ -58,7 +58,7 @@ static func outfit(kind: StringName, side: StringName, factors: Dictionary = {})
 	var role := StringName(factors.get("role", ""))
 	if not ROLES.has(role):
 		role = role_for(rng, HOSTAGE_ROLES if hostage else HOSTILE_ROLES)
-	var site := String(factors.get("site", ""))
+	var site := ZoneModules.base(String(factors.get("site", "")))
 	var r: Dictionary = ROLES[role]
 	var shirt: String = r.shirt[rng.randi() % r.shirt.size()]
 	var trousers: String = r.trousers[rng.randi() % r.trousers.size()]

@@ -11,21 +11,21 @@
 			{"kind": "clear_area", "site": "area", "text": "Bonus: leave no fighter standing in the {module}", "optional": true, "bonus_share": 0.1}
 		 ]},
 		{"type": "hvt_capture", "name": "HVT capture", "brief": "A hostile HVT is at a site in the zone. Take them alive and bring them to extraction: they run, shout and fight back until cornered or zip-cuffed. Cuffs from the base shop keep them; an uncuffed captive left alone bolts, so someone stays close. They bleed out like anyone. On the clock.",
-		 "modules": ["compound", "village", "outpost", "hq"], "base_pay": 55000, "days": 1, "enemy_count": [4, 10], "enemy_quality": [0.35, 0.75],
+		 "modules": ["compound", "village", "town", "outpost", "hq"], "base_pay": 55000, "days": 1, "enemy_count": [4, 10], "enemy_quality": [0.35, 0.75],
 		 "threat_pool": ["sniper", "qrf", "mortar"], "time_limit_min": 90,
 		 "objectives": [
 			{"kind": "deliver_hvt", "site": "hvt", "text": "Capture {name} and bring them to extraction alive"},
 			{"kind": "extract_item", "site": "hvt_phone", "text": "Bonus: bring out {name}'s phone", "optional": true, "bonus_share": 0.1}
 		 ]},
 		{"type": "hostage_rescue", "name": "Hostage rescue", "brief": "A hostage is held at a site in the zone. Find them and bring them out alive: they follow the squad once found. On the clock.",
-		 "modules": ["compound", "village"], "base_pay": 60000, "days": 1, "enemy_count": [4, 10], "enemy_quality": [0.35, 0.75],
+		 "modules": ["compound", "village", "town"], "base_pay": 60000, "days": 1, "enemy_count": [4, 10], "enemy_quality": [0.35, 0.75],
 		 "threat_pool": ["sniper", "qrf", "ied"], "time_limit_min": 75,
 		 "objectives": [
 			{"kind": "deliver_hvt", "site": "hostage", "text": "Find {name} and bring them out alive"},
 			{"kind": "clear_area", "site": "area", "text": "Bonus: leave no guard standing in the {module}", "optional": true, "bonus_share": 0.1}
 		 ]},
 		{"type": "intel_grab", "name": "Intel grab", "brief": "Intel sits at a site in the zone: a laptop or a hard case. Carry it out; it only counts once it's out.",
-		 "modules": ["outpost", "checkpoint", "compound", "village", "hq", "qrf_base", "comms"], "base_pay": 38000, "days": 1, "enemy_count": [3, 9], "enemy_quality": [0.3, 0.65],
+		 "modules": ["outpost", "checkpoint", "compound", "village", "town", "hq", "qrf_base", "comms"], "base_pay": 38000, "days": 1, "enemy_count": [3, 9], "enemy_quality": [0.3, 0.65],
 		 "threat_pool": ["ied", "mg_nest", "qrf"],
 		 "objectives": [
 			{"kind": "extract_item", "site": "intel", "text": "Recover the {name} and carry it out"},
@@ -76,6 +76,8 @@
 			{"pos": [-10, 0.1, 4], "routine": [[-10, 0, 4], [-4, 0, -4], [2, 0, 2]]},
 			{"pos": [10, 0.1, 4], "routine": [[10, 0, 4], [4, 0, 8], [12, 0, -4]]}
 		 ]},
+		"town": {"name": "town", "_note": "A generated town (ZoneModules \"town#<seed>\"): its sites and civilians come from its own buildings (ZoneModules.town_sites, BuildingGen.town).",
+		 "sites": {}, "civilians": []},
 		"checkpoint": {"name": "checkpoint",
 		 "sites": {
 			"area": {"rect": [-14, -10, 28, 20]},
@@ -126,7 +128,7 @@
 	"zones": [
 		{"zone_id": "compound_01", "name": "Gray-box compound", "region": "coast", "kind": "contract", "def": {"seed": 1101, "size_m": 1536}},
 		{"zone_id": "wadi_farm", "name": "Wadi farm", "region": "inland", "kind": "contract", "def": {"seed": 2207, "size_m": 1920}},
-		{"zone_id": "harbour_yard", "name": "Harbour yard", "region": "coast", "kind": "contract", "def": {"seed": 3301, "size_m": 1536, "types": ["checkpoint", "compound", "outpost", "village"]}},
+		{"zone_id": "harbour_yard", "name": "Harbour yard", "region": "coast", "kind": "contract", "def": {"seed": 3301, "size_m": 1536, "types": ["checkpoint", "compound", "outpost", "village", "town"]}},
 		{"zone_id": "ridge_hot", "name": "Black Ridge hills", "region": "inland", "kind": "hot", "faction": "meridian", "def": {"seed": 4409, "size_m": 4096, "layout": "hot"}},
 		{"zone_id": "coast_hot", "name": "Salt flats", "region": "coast", "kind": "hot", "faction": "salvage_union", "def": {"seed": 5503, "size_m": 4096, "layout": "hot"}}
 	],

@@ -209,7 +209,7 @@ static func mission_target(rng: RandomNumberGenerator, def: Dictionary, zone_id:
 	var module_type: String = String(allowed[0]) if not allowed.is_empty() else ""
 	var module_id := ""
 	var options: Array = (MissionRegistry.zone_def(zone_id).get("modules", []) as Array).filter(
-		func(m: Dictionary) -> bool: return String(m.type) in allowed)
+		func(m: Dictionary) -> bool: return ZoneModules.base(String(m.type)) in allowed)
 	if not options.is_empty():
 		var m: Dictionary = options[pick.randi() % options.size()]
 		module_type = String(m.type)

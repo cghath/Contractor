@@ -77,11 +77,11 @@ func _test_generation() -> void:
 	for z: Dictionary in MissionRegistry.zones():
 		var layout := MissionRegistry.zone_def(String(z.zone_id))
 		var hot := String(z.get("kind", "")) == "hot"
-		zones_ok = zones_ok and not layout.is_empty() and (layout.modules as Array).size() >= 4 and (z.modules as Array).size() == (6 if hot else 4)
+		zones_ok = zones_ok and not layout.is_empty() and (layout.modules as Array).size() >= 4 			and ["compound", "outpost", "village", "checkpoint"].all(func(t: String) -> bool: return t in z.modules or (hot and t == "compound")) 			and (z.modules as Array).size() == (7 if hot else (5 if "town" in z.modules else 4))
 		zones_ok = zones_ok and layout == MissionRegistry.zone_def(String(z.zone_id))
 		var size := float(layout.get("size_m", 0))
 		zones_ok = zones_ok and (is_equal_approx(size, ZoneDef.HOT_SIZE_M) if hot else size * size >= 2.0e6 and size * size <= 4.0e6)
-	check(zones_ok, "every zone is a generated layout, the same every time: contract zones 2-4 km² with all four module types, hot zones 16 km² with the enemy's structure too")
+	check(zones_ok, "every zone is a generated layout, the same every time: contract zones 2-4 km² with all four module types (a town in some), hot zones 16 km² with the enemy's structure, villages and a town")
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 4242
 	var sites := {}
@@ -89,7 +89,7 @@ func _test_generation() -> void:
 		var c := ContractGen.generate(rng, {"day": 1, "source": "board"})
 		var layout := MissionRegistry.zone_def(String(c.zone_id))
 		var module: Array = (layout.modules as Array).filter(func(m: Dictionary) -> bool: return m.id == c.module_id)
-		sound = sound and module.size() == 1 and module[0].type == c.module and c.module in MissionRegistry.type_modules(MissionRegistry.type_def(c.type))
+		sound = sound and module.size() == 1 and module[0].type == c.module and ZoneModules.base(c.module) in MissionRegistry.type_modules(MissionRegistry.type_def(c.type))
 		for o: Dictionary in c.objectives:
 			sound = sound and MissionRegistry.has_site(String(c.module), String(o.site)) and not String(o.text).contains("{")
 			sites["%s/%s" % [c.type, o.site]] = true

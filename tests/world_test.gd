@@ -546,7 +546,7 @@ func _test_hot_layout() -> void:
 	print("Hot zone layout")
 	for seed in [4409, 5503, 77, 1234]:
 		var hot := ZoneDef.generate_hot(seed)
-		var count := func(type: String) -> int: return (hot.modules as Array).filter(func(m: Dictionary) -> bool: return m.type == type).size()
+		var count := func(type: String) -> int: return (hot.modules as Array).filter(func(m: Dictionary) -> bool: return ZoneModules.base(m.type) == type).size()
 		var sites: Array[Vector2] = []
 		for m: Dictionary in hot.modules:
 			sites.append(Vector2(m.pos[0], m.pos[1]))
@@ -558,13 +558,53 @@ func _test_hot_layout() -> void:
 		var first_best := (hot.insertion as Array).size() < 2 or ZoneDef._clearance(Vector2(hot.insertion[0][0], hot.insertion[0][1]), sites) \
 			>= ZoneDef._clearance(Vector2(hot.insertion[1][0], hot.insertion[1][1]), sites)
 		check(is_equal_approx(float(hot.size_m), 4096.0) and hot.kind == "hot" and count.call("hq") == 1 and count.call("comms") == 1
-			and count.call("qrf_base") >= 1 and count.call("outpost") >= 3 and count.call("checkpoint") >= 2 and count.call("village") >= 2,
-			"seed %d: a 16 km² hot zone: an HQ, a comms site, %d QRF bases, %d outposts, %d checkpoints, %d villages" % [seed,
-			count.call("qrf_base"), count.call("outpost"), count.call("checkpoint"), count.call("village")])
+			and count.call("qrf_base") >= 1 and count.call("outpost") >= 3 and count.call("checkpoint") >= 2 and count.call("village") >= 1
+			and count.call("town") == ZoneDef.HOT_TOWNS,
+			"seed %d: a 16 km² hot zone: an HQ, a comms site, %d QRF bases, %d outposts, %d checkpoints, %d villages, %d town" % [seed,
+			count.call("qrf_base"), count.call("outpost"), count.call("checkpoint"), count.call("village"), count.call("town")])
 		check(spaced and clear and first_best and (hot.insertion as Array).size() == 3 and (hot.extraction as Array).size() == 3,
 			"seed %d: sites spaced out, 3 insertion points %d m clear of every site (the default the furthest), 3 extractions" % [seed, int(ZoneDef.HOT_INSERTION_CLEAR_M)])
 		check((hot.roads as Array).size() == count.call("outpost") and (hot.patrols as Array).size() >= 2
 			and ZoneDef.generate_hot(seed).hash() == hot.hash(), "seed %d: roads to every outpost, %d patrol routes, the same every time" % [seed, (hot.patrols as Array).size()])
+	# The town is a real module type, with people, loot and a callsign of its own.
+	var town: Dictionary = (ZoneDef.generate_hot(4409).modules as Array).filter(func(m: Dictionary) -> bool: return ZoneModules.base(m.type) == "town")[0]
+	var ttype := String(town.type)
+	var civs: Array = MissionRegistry.module(ttype).get("civilians", [])
+	var loot: Array = ZoneModules.LOOT.get(ttype, [])
+	var half: Vector2 = ZoneModules.HALF[ttype]
+	var in_town := func(a: Array) -> bool: return absf(float(a[0])) <= half.x and absf(float(a[2])) <= half.y
+	check(String(town.id).begins_with("town_") and civs.size() >= 3 and civs.all(func(c: Dictionary) -> bool:
+			return in_town.call(c.pos) and (c.routine as Array).size() == 3 and (c.routine as Array).all(in_town))
+		and loot.size() >= 2 and loot.all(func(l: Dictionary) -> bool: return in_town.call([l.pos.x, l.pos.y, l.pos.z])),
+		"a hot zone's town (%s, \"%s\"): %d civilians walking its streets, %d loot spots, all inside it" % [ttype, town.id, civs.size(), loot.size()])
+	check(PersonLook.TOWN_SITES.has(ZoneModules.base(ttype)) and MissionRegistry.module("village").get("civilians", []).size() == 3
+		and ZoneModules.base("village") == "village", "townsfolk dress local; villages keep their own entry")
+	# Contract zones: Harbour yard holds a town, and an HVT capture, hostage rescue or intel grab
+	# there plays at sites made from its buildings.
+	var harbour: Array = (MissionRegistry.zone_def("harbour_yard").modules as Array).filter(func(m: Dictionary) -> bool: return ZoneModules.base(m.type) == "town")
+	var zone_entry: Array = MissionRegistry.zones().filter(func(z: Dictionary) -> bool: return z.zone_id == "harbour_yard")
+	check(harbour.size() == 1 and not zone_entry.is_empty() and "town" in zone_entry[0].modules, "Harbour yard holds a town (%s)" % [harbour.map(func(m: Dictionary) -> String: return m.type)])
+	if harbour.size() == 1:
+		var htype := String(harbour[0].type)
+		var hhalf: Vector2 = ZoneModules.HALF[htype]
+		var sites_ok := true
+		for id: String in ["area", "intel", "docs", "hvt", "hvt_phone", "hostage"]:
+			var site := MissionRegistry.site(htype, id)
+			sites_ok = sites_ok and not site.is_empty() and (not site.has("pos") or in_town.call(site.pos))
+		var rng := RandomNumberGenerator.new()
+		var picked := []
+		for type_id: String in ["hvt_capture", "hostage_rescue", "intel_grab"]:
+			for k in 40:
+				rng.seed = k
+				var target := ContractGen.mission_target(rng, MissionRegistry.type_def(type_id), "harbour_yard")
+				if target.module == htype:
+					picked.append(type_id)
+					sites_ok = sites_ok and (target.objectives as Array).all(func(ob: Dictionary) -> bool: return MissionRegistry.has_site(htype, String(ob.site)))
+					break
+		var hvt_at: Array = MissionRegistry.site(htype, "hvt").pos
+		var hostage_at: Array = MissionRegistry.site(htype, "hostage").pos
+		check(sites_ok and picked.size() == 3 and hvt_at != hostage_at,
+			"its contract sites come from its buildings (HVT at %s, hostage at %s), and %s can play there" % [hvt_at, hostage_at, picked])
 	var spec := MissionRegistry.zone_def("ridge_hot")
 	check(spec.get("kind", "") == "hot" and is_equal_approx(float(spec.size_m), 4096.0), "the campaign's hot zones are 16 km² hot layouts")
 	# Terrain visual pass: the roads are drawn, on the ground and off the module pads, and the

@@ -98,7 +98,13 @@ static func setting_i(key: String, default := 0) -> int:
 
 ## A module type's entry ("name", "sites", "civilians").
 static func module(module_type: String) -> Dictionary:
-	return (data().get("modules", {}) as Dictionary).get(module_type, {})
+	var entry: Dictionary = (data().get("modules", {}) as Dictionary).get(ZoneModules.base(module_type), {})
+	if module_type != ZoneModules.base(module_type):  # a generated town: its own civilians and sites
+		entry = entry.duplicate()
+		entry["name"] = entry.get("name", "town")
+		entry["civilians"] = ZoneModules.civilians(module_type)
+		entry["sites"] = ZoneModules.town_sites(module_type)
+	return entry
 
 
 ## A module type's name in words ("outpost").
@@ -141,8 +147,8 @@ static func zones() -> Array:
 			if not def.is_empty():
 				var types: Array = []
 				for m: Dictionary in def.modules:
-					if not String(m.type) in types:
-						types.append(String(m.type))
+					if not ZoneModules.base(String(m.type)) in types:  # a town ("town#<seed>") as "town"
+						types.append(ZoneModules.base(String(m.type)))
 				entry["modules"] = types
 			_zones.append(entry)
 	return _zones

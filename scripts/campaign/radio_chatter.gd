@@ -45,7 +45,7 @@ const LINE_ID := &"enemy_chatter"
 const COMPASS: Array[String] = ["north", "north-east", "east", "south-east", "south", "south-west", "west", "north-west"]
 ## Site callsigns by module type; others take their type's name.
 const CALLSIGNS := {"outpost": "Outpost", "checkpoint": "Checkpoint", "hq": "Command", "qrf_base": "Reserve",
-	"comms": "Relay", "village": "Village", "compound": "Compound"}
+	"comms": "Relay", "village": "Village", "compound": "Compound", "town": "Town"}
 const FIELD_CALLSIGN := "Patrol"
 const NET_CALLSIGN := "Command"
 
@@ -290,9 +290,10 @@ func _callsign(area: String) -> String:
 	if _callsigns.is_empty() and level and level.has_method(&"modules"):
 		var seen := {}
 		for m: ZoneModule in level.call(&"modules"):
-			seen[m.type] = int(seen.get(m.type, 0)) + 1
-			var base := String(CALLSIGNS.get(m.type, MissionRegistry.module_name(m.type).capitalize()))
-			_callsigns[m.module_id] = "%s %d" % [base, seen[m.type]] if m.type != "hq" else base
+			var type := ZoneModules.base(m.type)
+			seen[type] = int(seen.get(type, 0)) + 1
+			var base := String(CALLSIGNS.get(type, MissionRegistry.module_name(type).capitalize()))
+			_callsigns[m.module_id] = "%s %d" % [base, seen[type]] if type != "hq" else base
 	return String(_callsigns.get(area, FIELD_CALLSIGN))
 
 

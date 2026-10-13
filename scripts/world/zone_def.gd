@@ -34,6 +34,8 @@ const HOT_OUTPOSTS := Vector2i(3, 6)
 const HOT_QRF_BASES := Vector2i(1, 2)
 const HOT_CHECKPOINTS := Vector2i(2, 4)
 const HOT_VILLAGES := Vector2i(2, 3)
+## One of a hot zone's villages is a town instead (BuildingGen.town, "town#<seed>"): HOT_TOWNS.
+const HOT_TOWNS := 1
 const HOT_INSERTION_CLEAR_M := 700.0
 const HOT_PATROLS := Vector2i(2, 4)
 ## A shoreline (_choose_sea) is at least this wide and keeps this far from any pad (m).
@@ -142,7 +144,8 @@ static func _choose_sea(def: Dictionary) -> void:
 
 ## A zone made from a seed: `count` modules of `types` spread over a `size_m` square, two
 ## insertion points near the edges clear of every module, three extraction candidates. The
-## same seed gives the same zone.
+## same seed gives the same zone. A "town" in `types` is a generated town ("town#<seed>", its
+## seed from the zone's).
 static func generate(seed: int, size_m := 1920.0, types: Array = ["compound", "outpost", "village", "checkpoint"], count := 5) -> Dictionary:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed
@@ -159,7 +162,9 @@ static func generate(seed: int, size_m := 1920.0, types: Array = ["compound", "o
 			continue
 		placed.append(p)
 		var type: String = types[modules.size() % types.size()]
-		modules.append({"id": "%s_%d" % [type, modules.size()], "type": type, "pos": [p.x, p.y]})
+		if type == "town":
+			type = "%s%d" % [ZoneModules.TOWN, seed * 31 + modules.size()]
+		modules.append({"id": "%s_%d" % [ZoneModules.base(type), modules.size()], "type": type, "pos": [p.x, p.y]})
 	var edge_points := func(n: int) -> Array:
 		var out: Array = []
 		for attempt in 200:
@@ -180,7 +185,8 @@ static func generate(seed: int, size_m := 1920.0, types: Array = ["compound", "o
 ## A hot zone made from a seed (4B part 3): a `size_m` square (HOT_SIZE_M: 16 km²) holding the
 ## enemy's structure: one HQ near the centre; a comms site and HOT_QRF_BASES QRF bases in a
 ## ring round it; HOT_OUTPOSTS outposts spread out; HOT_CHECKPOINTS road checkpoints part way
-## along the "roads" from the HQ to the outposts; HOT_VILLAGES villages (people live there).
+## along the "roads" from the HQ to the outposts; HOT_VILLAGES villages (people live there),
+## HOT_TOWNS of them generated towns ("town#<seed>", its seed from the zone's).
 ## Three insertion points at the edges, HOT_INSERTION_CLEAR_M from any site, the default (first)
 ## the one furthest from them; three extraction candidates; "roads" ([[x, z], [x, z]] pairs,
 ## HQ to each outpost) and "patrols" (routes, [[x, z], ...], between nearby sites) for the
@@ -198,7 +204,7 @@ static func generate_hot(seed: int, size_m := HOT_SIZE_M) -> Dictionary:
 		if placed.any(func(q: Vector2) -> bool: return q.distance_to(p) < MIN_SPACING_M):
 			return false
 		placed.append(p)
-		modules.append({"id": "%s_%d" % [type, modules.size()], "type": type, "pos": [p.x, p.y]})
+		modules.append({"id": "%s_%d" % [ZoneModules.base(type), modules.size()], "type": type, "pos": [p.x, p.y]})
 		return true
 	var around := func(type: String, centre: Vector2, ring: Vector2) -> Variant:
 		for attempt in 200:
@@ -231,12 +237,13 @@ static func generate_hot(seed: int, size_m := HOT_SIZE_M) -> Dictionary:
 				checkpoints -= 1
 				break
 	for i in rng.randi_range(HOT_VILLAGES.x, HOT_VILLAGES.y):
+		var type := "%s%d" % [ZoneModules.TOWN, seed * 31 + i] if i < HOT_TOWNS else "village"
 		for attempt in 200:
-			if place.call("village", Vector2(rng.randf_range(-reach, reach), rng.randf_range(-reach, reach))):
+			if place.call(type, Vector2(rng.randf_range(-reach, reach), rng.randf_range(-reach, reach))):
 				break
 	# Patrols walk between neighbouring sites: each from a site to its two nearest, and back.
 	var patrols: Array = []
-	var sites := modules.filter(func(m: Dictionary) -> bool: return m.type != "village")
+	var sites := modules.filter(func(m: Dictionary) -> bool: return not ZoneModules.base(m.type) in ["village", "town"])
 	for i in rng.randi_range(HOT_PATROLS.x, HOT_PATROLS.y):
 		if sites.size() < 3:
 			break

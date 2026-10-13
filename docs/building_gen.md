@@ -45,6 +45,18 @@ suit it. Captain's side; see `docs/build_plan.md` ("Procedural buildings") for w
 2. **More types and a town module.** Shops, warehouses, clinic, police station; a "town" module:
    a small street grid of lots (12 to 20 buildings), placed in zones like a village, roads into
    it from the zone's road network.
+   **Towns in zones (built, 2026-10-13, Captain "both, and urban hot zones too").** A module
+   type "town#<seed>" (`ZoneModules.base` gives "town" for mission data, callsigns, dress):
+   - Hot zones: one of `ZoneDef.HOT_VILLAGES` is a town (`HOT_TOWNS`), seed from the zone's.
+     Patrols leave towns alone, like villages. Radio callsign "Town 1".
+   - Contract zones: a "town" in a zone's `types` (Harbour yard has one). HVT capture, hostage
+     rescue and intel grab can play in a town; its sites (`ZoneModules.town_sites`) come from
+     its buildings: the whole town as the area, its intel spots, an HVT in an office or living
+     room, a hostage in the police cells or a store room. No weapons-cache site yet (raids
+     skip towns), since cache counting is on cg's audit list.
+   - Its people: a civilian for every third building, walking front step, street, crossroads
+     (`BuildingGen.TOWN_CIVILIAN_EVERY`); loot from `BuildingGen.TOWN_LOOT` by spot table.
+   - Next: urban hot zones (several towns, denser), then storeys.
 3. **Storeys.** Multi-storey buildings: stair chunks, upper floors, rooftops the AI can use.
 4. **City zones.** A dense-streets terrain preset made of towns, with what it takes to stream
    that many buildings (budgets measured with the session log's performance lines).

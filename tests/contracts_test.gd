@@ -87,7 +87,7 @@ func _test_generation() -> void:
 		var zone := MissionRegistry.zone(o.zone_id)
 		var def := MissionRegistry.type_def(o.type)
 		valid = valid and int(o.rated) >= 1 and int(o.rated) <= 5 and int(o.true_rating) >= int(o.rated) and int(o.base_pay) > 0 \
-			and not (o.objectives as Array).is_empty() and o.module in MissionRegistry.type_modules(def) and o.module in zone.modules and String(o.module_id) != "" \
+			and not (o.objectives as Array).is_empty() and ZoneModules.base(o.module) in MissionRegistry.type_modules(def) and ZoneModules.base(o.module) in zone.modules and String(o.module_id) != "" \
 			and o.employer in MissionRegistry.employers() and o.target in MissionRegistry.enemies() and o.zone_kind == zone.kind
 	check(valid, "every offer is sound: rating 1-5, the briefing never overstates, pay, objectives, a target module in the zone's layout")
 	check(a[0].source == "safe" and int(a[0].rated) == 1 and not a[0].understated and a[0].zone_kind == "contract",
