@@ -585,6 +585,20 @@ func _test_iv_fluids() -> void:
 	tq.blood = 0.8
 	tq.tourniquets[&"upper_arm_l"] = {"count": 1, "rushed": 0}
 	check(tq.iv_part() == &"forearm_r", "a tourniquet on the left arm: the IV goes in the right")
+	check(tq.treatment_problem(&"iv_18", &"forearm_l") != "" and not tq.apply_item(&"iv_18", &"forearm_l") and tq.access.is_empty(),
+		"an IV asked for below that tourniquet is refused (\"%s\")" % tq.treatment_problem(&"iv_18", &"forearm_l"))
+	# Audit A2-03: a tourniquet on every limb leaves no IV site: no IV goes in anywhere, the
+	# care plan offers only an IO, and the IO still goes in.
+	for limb: StringName in [&"upper_arm_r", &"thigh_l", &"thigh_r"]:
+		tq.tourniquets[limb] = {"count": 1, "rushed": 0}
+	var plan := tq.care_tasks().filter(func(t: Dictionary) -> bool: return t.kind == "access")
+	check(tq.iv_part() == &"" and plan.size() == 1 and plan[0].items.size() == 1 and plan[0].items[0] == WoundModel.IO_KIT and plan[0].part == WoundModel.IO_PART,
+		"every limb under a tourniquet: the plan offers only an IO, in the sternum (%s)" % [plan])
+	var refused := true
+	for site: StringName in WoundModel.IV_SITES + [&"torso"]:
+		refused = refused and tq.treatment_problem(&"iv_18", site) != "" and not tq.apply_item(&"iv_18", site)
+	check(refused and tq.access.is_empty(), "and no IV goes in anywhere (%s)" % [tq.access])
+	check(tq.apply_item(WoundModel.IO_KIT, WoundModel.IO_PART) and tq.access.kind == "io", "the IO does")
 	var copy := _model()
 	copy.apply_net(shock.to_net())
 	check(copy.access == shock.access and int(copy.infusion.ml) == 500 and copy.infusion.item == &"saline_500",
@@ -992,6 +1006,28 @@ func _test_completed_treatments() -> void:
 	player._server_treat.rpc_id(1, casualty.get_path(), &"tourniquet", Vitals.THIGH_L)
 	await _seconds(4.2)
 	check(casualty.vitals.bleed_rate() > 0.0 and casualty.vitals.tourniquets()[Vitals.THIGH_L].rushed == 1, "placed under fire: it goes on rushed")
+	# Audit A2-03: with a tourniquet on every limb the host places no IV, whatever site is
+	# asked for; the IO the care plan offers instead goes in.
+	_reset(casualty)
+	_reset(player)
+	var m: WoundModel = casualty.vitals._model
+	m.blood = 0.8
+	for limb: StringName in [Vitals.UPPER_ARM_L, Vitals.UPPER_ARM_R, Vitals.THIGH_L, Vitals.THIGH_R]:
+		m.tourniquets[limb] = {"count": 1, "rushed": 0}
+	casualty.vitals._after_change(true)
+	player.inventory.take(&"iv_18")
+	player.inventory.take(&"io_kit")
+	var access := casualty.vitals.care_needed().filter(func(t: Dictionary) -> bool: return t.kind == "access")
+	check(access.size() == 1 and access[0].items.size() == 1 and access[0].items[0] == WoundModel.IO_KIT, "every limb under a tourniquet: the care plan asks for an IO only (%s)" % [access])
+	for site: StringName in [Vitals.FOREARM_L, &"shin_r", Vitals.TORSO]:
+		player._server_busy_until = 0.0
+		player._server_treat.rpc_id(1, casualty.get_path(), &"iv_18", site)
+		await _frames(2)
+		check(casualty.vitals.access().is_empty() and player._server_busy_until <= Soldier._now() and player.inventory.medical_count(&"iv_18") == 1,
+			"an IV asked for on the %s is refused at once, nothing used" % site)
+	player._server_treat.rpc_id(1, casualty.get_path(), &"io_kit", WoundModel.IO_PART)
+	await _seconds(player.treat_seconds(casualty, ItemDB.get_item(&"io_kit")) + 0.3)
+	check(casualty.vitals.access().get("kind", "") == "io" and player.inventory.medical_count(&"io_kit") == 0, "the IO goes in (%s)" % [casualty.vitals.access()])
 	_reset(casualty)
 	_reset(player)
 
