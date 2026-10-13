@@ -36,6 +36,9 @@ var medical_menu: MedicalMenu
 var throwable: StringName = &"frag_grenade"
 var _focus: Node3D  # an item or downed body under the crosshair, for the prompt
 var _view_model_id: StringName = &""
+## The casualty on this player's shoulder, kept out of their own first-person view (it would
+## fill it): drawn on LOCAL_ONLY_LAYER like their own body, so everyone else still sees it.
+var _shouldered: Soldier = null
 var _shake := 0.0
 var _deaf := false
 ## Placing a breaching charge (Charges): the ghost follows the view until Fire commits it.
@@ -193,11 +196,33 @@ func _physics_process(delta: float) -> void:
 	_try_fire()
 	var tilt := minf(-0.7 if body.is_reloading else 0.0, -CharacterModel.VIEW_LOWER_PITCH * body.model.view_lower())
 	body.view_model.rotation.x = move_toward(body.view_model.rotation.x, tilt, delta * 6.0)
+	body.view_model.visible = body.carry_mode == &""  # both hands on the casualty: no weapon in view
+	_hide_shouldered()
 	# Settle sway after a stop (W3, SoldierMovement.weapon_sway).
 	var sway := body.movement.weapon_sway()
 	body.view_model.rotation.y = sway.x
 	body.view_model.rotation.z = sway.y
 	hud.update_status(body)
+
+
+## Keeps the casualty this player has up on the shoulder out of their own camera (they still see
+## it lifted off the ground and laid back down).
+func _hide_shouldered() -> void:
+	var shown := body.model.carry_shown()
+	var on: Soldier = null
+	if shown.get("mode", &"") == CharacterModel.CARRY:
+		var ph := body.model.carry_phase()
+		var up: bool = ph.is_empty() or (ph.phase == &"lift" and ph.u > 0.8) or (ph.phase == &"lower" and ph.u < 0.2)
+		on = shown.get("body") as Soldier if up else null
+	if on == _shouldered:
+		return
+	if is_instance_valid(_shouldered):
+		_shouldered.model.render_layers = 1
+		_shouldered.gear.render_layers = 1
+	_shouldered = on
+	if on:
+		on.model.render_layers = LOCAL_ONLY_LAYER
+		on.gear.render_layers = LOCAL_ONLY_LAYER
 
 
 ## Where the crosshair meets the world (up to 150 m), or null.

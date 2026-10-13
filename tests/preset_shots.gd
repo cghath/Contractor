@@ -11,6 +11,7 @@ var camera: Camera3D
 
 
 func _ready() -> void:
+	preload("res://tests/shot_window.gd").stay_out_of_the_way(self)  # no focus, no cursor capture: the machine stays usable
 	get_tree().create_timer(90.0).timeout.connect(func() -> void: get_tree().quit(2))  # never idle forever (docs/debugging.md)
 	var args := OS.get_cmdline_user_args()
 	var preset := String(args[0]) if args.size() > 0 else "temperate"

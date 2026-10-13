@@ -1299,7 +1299,7 @@ func _do_care() -> void:
 				_go(_cover_point, false)
 			else:
 				_has_destination = false
-				body.release_carried()
+				body.server_put_down()
 				care = Care.TREAT
 		Care.TREAT:
 			_care_treat(contact)
@@ -1453,7 +1453,9 @@ func _give_up_casualty() -> void:
 ## (_should_carry) until they wake on their own.
 func _care_treat(contact: bool) -> void:
 	if body.carrying == casualty:
-		body.release_carried()
+		body.server_put_down()
+		if body.carrying == casualty:
+			return  # still lowering them off the shoulder
 	if _flat_distance(casualty.body_point()) > CASUALTY_REACH + 1.0:
 		_start_reach()  # a conscious casualty moved, or the body slid
 		return
@@ -1521,7 +1523,7 @@ func _holds_for_medic() -> bool:
 func _care_carry(contact: bool) -> void:
 	if contact:
 		if body.carrying == casualty:
-			body._set_carry_mode(Soldier.DRAG)
+			body._set_carry_mode(Soldier.DRAG, &"grab")
 			var spot: Variant = find_cover(body.global_position, 10.0)
 			_has_cover = spot != null
 			if spot != null:
@@ -1535,7 +1537,7 @@ func _care_carry(contact: bool) -> void:
 		return
 	if _holds_for_medic():
 		if body.carrying == casualty:
-			body.release_carried()  # a bleed opened up on the way: put them down for the medic
+			body.server_put_down()  # a bleed opened up on the way: put them down for the medic
 		_want_medic()
 		care = Care.TREAT
 		return
@@ -1543,7 +1545,7 @@ func _care_carry(contact: bool) -> void:
 	if leader == null or casualty == leader or body.faction != &"friendly":
 		# No one to follow (or the lead is down): keep them safe where they are.
 		if body.carrying == casualty:
-			body.release_carried()
+			body.server_put_down()
 		_has_destination = false
 		body.want_crouch = true
 		return
@@ -1561,7 +1563,7 @@ func _care_carry(contact: bool) -> void:
 			body.want_crouch = true
 			return
 		if body.carrying == casualty and _flat_distance(lay) <= 1.0:
-			body.release_carried()
+			body.server_put_down()
 			_has_destination = false
 			body.want_crouch = true
 			return

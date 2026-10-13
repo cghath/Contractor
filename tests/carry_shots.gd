@@ -21,6 +21,7 @@ var _shots := 0
 
 
 func _ready() -> void:
+	preload("res://tests/shot_window.gd").stay_out_of_the_way(self)  # no focus, no cursor capture: the machine stays usable
 	get_tree().create_timer(240.0, true, false, true).timeout.connect(func() -> void:
 		print("[shots] deadline passed, quitting")
 		get_tree().quit(2))  # never idle forever (docs/debugging.md)
