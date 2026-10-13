@@ -443,8 +443,12 @@ func _test_roster() -> void:
 
 func _test_callout_rules() -> void:
 	print("Callouts: rules")
-	var first := _slot(0)
-	var second := _slot(1)
+	# Not a team leader: the squad's tactics speak through the team leader (SquadTactics), and
+	# a tactic called in the speaker gap would take the place of the held-back Moving!.
+	var talkers := _squad().filter(func(s: Soldier) -> bool: return s.is_ai() and s.role != Roles.TEAM_LEADER)
+	talkers.sort_custom(func(a: Soldier, b: Soldier) -> bool: return a.squad_slot < b.squad_slot)
+	var first: Soldier = talkers[0]
+	var second: Soldier = talkers[1]
 	var line := "%s: Reloading!" % first.display_name()
 	# Squadmates talk on their own too: start from a clean slate and only look at these two.
 	callouts._last_by_speaker.clear()
@@ -453,8 +457,8 @@ func _test_callout_rules() -> void:
 	callouts._pending.clear()
 	callouts.sent.clear()
 	callouts.shown.clear()
-	# And their own brains stay quiet meanwhile: a leader in contact calls a tactic, and the
-	# newest held-back line wins, so it took the place of the test's Moving! (CI, ai/spotting).
+	# And their own brains stay quiet meanwhile (the newest held-back line wins: anything they
+	# called on their own in the gap would take the place of the test's Moving!; CI, R0274).
 	var brains: Array = [SquadAI.of(first), SquadAI.of(second)].filter(func(b: SquadAI) -> bool: return b != null)
 	for b: SquadAI in brains:
 		b.process_mode = Node.PROCESS_MODE_DISABLED
