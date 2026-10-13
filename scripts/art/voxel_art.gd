@@ -459,6 +459,15 @@ const BODY_SUB := 2
 ## tier (light: none, it has straps).
 const CARRIER_MOUNT_CM := 17.0
 const CUMMERBUND_PAD: Array[float] = [0.0, 1.5, 2.5]
+## How much the cummerbund's corners are cut (its loft's bevel): GearRig lays the pouches on
+## its corners flat on these facets.
+const CUMMERBUND_BEVEL := 0.3
+## The carriers' padded shoulder pads (_vest): centred SHOULDER_PAD_X cm out from the spine,
+## 5 cm wide, arching from the pockets' tops over the shoulders, as [carrier height, half-depth]
+## in cm (a woman's reach FEMALE_CARRIER_BACK less far back, to her back panel: shoulder_pad_line).
+## GearRig lays a pack's shoulder straps on them.
+const SHOULDER_PAD_X := 8.5
+const SHOULDER_PAD_ARCH := [[32.0, 12.0], [38.0, 10.5], [41.0, 7.5]]
 
 
 ## A loft: a low-poly body around the vertical line at (`cx`, `cz`), from `keys`, each
@@ -749,7 +758,7 @@ static func _vest(tier: int, torso := {}, female := false, front := false) -> Di
 			rows.append([o.y + y, at_y.x + pad, at_y.y + pad])
 			hw = maxf(hw, at_y.x + pad)
 			hd = maxf(hd, at_y.y + pad)
-		boxes.append(_loft(o.x, o.z, rows, C.GEAR, 0.3))
+		boxes.append(_loft(o.x, o.z, rows, C.GEAR, CUMMERBUND_BEVEL))
 		var w := ceili(hw)
 		var d := ceili(hd)
 		for y in [5, 9, 13, 17]:  # MOLLE rows on the sides
@@ -806,8 +815,8 @@ static func _vest(tier: int, torso := {}, female := false, front := false) -> Di
 			put.call(-3, 33, z1, 3, 35, z1 + 2, C.EMPTY)
 	# Padded shoulder pads, arching from the pockets' tops over the deltoids.
 	for side: int in [-1, 1]:
-		boxes.append(_loft(o.x + 8.5 * side, o.z - be * 0.5, [[o.y + 32, 2.5, 12.0 - be * 0.5], [o.y + 38, 2.5, 10.5 - be * 0.5],
-			[o.y + 41, 2.5, 7.5 - be * 0.5]], C.GEAR, 0.6))
+		var arch: Array = SHOULDER_PAD_ARCH.map(func(k: Array) -> Array: return [o.y + k[0], 2.5, k[1] - be * 0.5])
+		boxes.append(_loft(o.x + SHOULDER_PAD_X * side, o.z - be * 0.5, arch, C.GEAR, 0.6))
 	if tier == 0:
 		var back := ceili(_torso_at(body, 23.0).y)
 		for side: int in [-1, 1]:  # straps cross the back
@@ -841,9 +850,61 @@ static func carrier_side_inset(tier: int, body: String) -> float:
 	return 22.0 - mini(22, floori(_torso_at(_torso_f(), 11.0).x + CUMMERBUND_PAD[tier]))
 
 
-## How far in front of the spine (cm) the torso spec `torso` reaches at carrier height `y` cm:
-## the furthest of its lofts there (the trunk, a bust).
-static func _torso_front(torso: Dictionary, y: float) -> float:
+## A worn medium or heavy carrier's cummerbund (`tier` 1 or 2) round body type `body` at torso
+## height `y` (metres over the hips, as the gear is placed): its half-width and half-depth in
+## metres, the body's own shape there plus CUMMERBUND_PAD, centred on the spine. Its corners are
+## cut by CUMMERBUND_BEVEL (GearRig.cummerbund_spot lays pouches on it).
+static func cummerbund_size(tier: int, body: String, y: float) -> Vector2:
+	var at := _torso_at(_torso_f() if body == FEMALE else _torso(), y * 100.0 - CARRIER_MOUNT_CM)
+	return (at + Vector2.ONE * CUMMERBUND_PAD[clampi(tier, 0, 2)]) * 0.01
+
+
+## How far body type `body`'s torso reaches in front of the spine (`back`: behind it) at torso
+## height `y` (metres over the hips), in metres: the furthest of its lofts there (the trunk, a
+## bust, her seat). `carried`: a woman's bust as a carrier holds it ("torso_fc").
+static func torso_reach(body: String, y: float, back := false, carried := false) -> float:
+	var torso := _torso_f(carried) if body == FEMALE else _torso()
+	return _torso_front(torso, y * 100.0 - CARRIER_MOUNT_CM, back) * 0.01
+
+
+## The top of body type `body`'s shoulders `x` metres out from the spine (metres over the
+## hips): where the torso's main loft narrows in to that half-width above the chest, the line
+## from the neck out over the shoulder. A pack's straps lie on it when no carrier is worn.
+static func shoulder_top(body: String, x: float) -> float:
+	var torso := _torso_f() if body == FEMALE else _torso()
+	var keys: Array = (torso.boxes[0] as Dictionary).keys
+	var pivot_y := float((torso.pivot as Vector3).y)
+	var xc := absf(x) * 100.0
+	for i in range(keys.size() - 1, 0, -1):
+		var hi: Array = keys[i]
+		var lo: Array = keys[i - 1]
+		if float(hi[1]) >= xc:
+			return (float(hi[0]) - pivot_y) * 0.01
+		if float(lo[1]) >= xc:
+			var t := (float(lo[1]) - xc) / maxf(float(lo[1]) - float(hi[1]), 0.001)
+			return (lerpf(float(lo[0]), float(hi[0]), t) - pivot_y) * 0.01
+	return (float(keys[0][0]) - pivot_y) * 0.01
+
+
+## The top of a carrier's shoulder pad (SHOULDER_PAD_ARCH) from its back to its front, torso-local
+## metres, at the pad's middle (x SHOULDER_PAD_X; mirror x for the left): [back end, back of the
+## arch, top back, top front, front of the arch, front end]. A woman's pads reach
+## FEMALE_CARRIER_BACK less far back (to her back panel).
+static func shoulder_pad_line(female: bool) -> Array[Vector3]:
+	var be := float(FEMALE_CARRIER_BACK) if female else 0.0
+	var line: Array[Vector3] = []
+	for i in [0, 1, 2]:
+		var k: Array = SHOULDER_PAD_ARCH[i]
+		line.append(Vector3(SHOULDER_PAD_X, CARRIER_MOUNT_CM + float(k[0]), float(k[1]) - be) * 0.01)
+	for i in [2, 1, 0]:
+		var k: Array = SHOULDER_PAD_ARCH[i]
+		line.append(Vector3(SHOULDER_PAD_X, CARRIER_MOUNT_CM + float(k[0]), -float(k[1])) * 0.01)
+	return line
+
+
+## How far in front of the spine (cm) the torso spec `torso` reaches at carrier height `y` cm
+## (`back`: behind it): the furthest of its lofts there (the trunk, a bust, a seat).
+static func _torso_front(torso: Dictionary, y: float, back := false) -> float:
 	var fy := y + CARRIER_MOUNT_CM + float((torso.pivot as Vector3).y)
 	var pivot_z := float((torso.pivot as Vector3).z)
 	var front := 0.0
@@ -855,7 +916,10 @@ static func _torso_front(torso: Dictionary, y: float) -> float:
 			if fy >= float(keys[i - 1][0]) and fy <= float(keys[i][0]):
 				var t := (fy - float(keys[i - 1][0])) / maxf(float(keys[i][0]) - float(keys[i - 1][0]), 0.001)
 				var hd := lerpf(float(keys[i - 1][2]), float(keys[i][2]), t)
-				front = maxf(front, pivot_z - ((part.centre as Vector2).y - hd))
+				if back:
+					front = maxf(front, (part.centre as Vector2).y + hd - pivot_z)
+				else:
+					front = maxf(front, pivot_z - ((part.centre as Vector2).y - hd))
 	return front
 
 
