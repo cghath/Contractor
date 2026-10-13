@@ -405,6 +405,8 @@ var _aware := {}
 var _suspect_pos := Vector3.ZERO
 var _suspect_at := -1000.0
 var _preset := ""
+var _scatter: ZoneScatter  # the zone's scrub and trees (Spotting.foliage_m): _zone_scatter
+var _scatter_found := false
 ## Contact reports from squadmates on their way: enemy instance id -> {"point", "due", "who"}.
 var _reports := {}
 ## Morale (MORALE_*), and where this unit is falling back to (null: not worked out).
@@ -2636,13 +2638,17 @@ func _find_target() -> Soldier:
 				check_dist = d
 			continue
 		var steps := Spotting.footsteps_m(s)
-		if d <= steps and not can_see(s):
+		var leaves := INF  # metres of foliage in the way; INF: not in sight at all
+		if (d <= steps or d < best_dist) and can_see(s):
+			leaves = Spotting.foliage_m(_zone_scatter(), body, s)
+		var in_sight := leaves < Spotting.FOLIAGE_OPAQUE_M  # deep in the leaves: lost, awareness fades
+		if d <= steps and not in_sight:
 			seen[s.get_instance_id()] = true  # heard, not seen: keeps awareness from fading
 			hear(s, s.global_position, Spotting.HEARD_STEPS_PER_S * SCAN_S)
 			continue
-		if d < best_dist and can_see(s):
+		if d < best_dist and in_sight:
 			seen[s.get_instance_id()] = true
-			var a := _build_awareness(s)
+			var a := _build_awareness(s, leaves)
 			if a >= 1.0:
 				best = s
 				best_dist = d
@@ -2660,18 +2666,27 @@ func _find_target() -> Soldier:
 	return best if best != null else _dead_check
 
 
-## One scan's worth of spotting `s` (in sight): awareness rises by SCAN_S over the time
-## Spotting gives. Returns the new awareness.
-func _build_awareness(s: Soldier) -> float:
+## One scan's worth of spotting `s` (in sight, `leaves` metres of foliage in the way):
+## awareness rises by SCAN_S over the time Spotting gives. Returns the new awareness.
+func _build_awareness(s: Soldier, leaves := 0.0) -> float:
 	var id := s.get_instance_id()
 	var a: float = _aware.get(id, 0.0)
 	if a < 1.0:
 		if _preset == "":
 			_preset = Spotting.preset_of(body)
-		var t := Spotting.spot_seconds(body, s, _preset, combat, body.suppression >= SUPPRESSED, Soldier._now())
+		var suppressed := body.suppression >= SUPPRESSED
+		var t := Spotting.spot_seconds(body, s, _preset, combat, suppressed, Soldier._now(), leaves, not in_contact() and not suppressed)
 		a = 1.0 if t <= SCAN_S * 0.5 else minf(a + SCAN_S / t, 1.0)
 		_aware[id] = a
 	return a
+
+
+## The scrub and trees of this body's zone (null off a zone), looked up once.
+func _zone_scatter() -> ZoneScatter:
+	if not _scatter_found:
+		_scatter_found = true
+		_scatter = Spotting.scatter_of(body)
+	return _scatter
 
 
 ## Awareness of those out of sight this scan fades over Spotting.FADE_S.
