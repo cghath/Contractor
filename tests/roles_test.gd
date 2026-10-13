@@ -563,8 +563,11 @@ func _test_callout_events() -> void:
 	await _seconds(1.0)
 	var leader_ai := String(_slot(0).name)
 	_slot(0).inventory.take(&"frag_grenade")  # in case the fight used theirs up
+	_slot(0).release_carried()  # hands full with the casualty above: a carrier doesn't throw
+	# Nor one still busy treating him (a timed treatment holds the hands).
+	await _wait_for(func() -> bool: return Soldier._now() >= _slot(0)._busy_until and _slot(0).vitals.is_up(), 10.0)
 	thrower = squad.order_throw(player, &"frag_grenade", Vector3(0, 0, -2), PackedStringArray([leader_ai]))
-	check(thrower == leader_ai and _said(&"frag_out").any(func(c: Dictionary) -> bool: return c.speaker == thrower), "%s throws a frag: Frag out! (thrower: '%s', said: %s)" % [leader_ai, thrower, _said(&"frag_out")])
+	check(thrower == leader_ai and _said(&"frag_out").any(func(c: Dictionary) -> bool: return c.speaker == thrower), "%s throws a frag: Frag out! (thrower: '%s', said: %s; %s, busy %.1f s, frags %d)" % [leader_ai, thrower, _said(&"frag_out"), _slot(0).ai_status, _slot(0)._busy_until - Soldier._now(), _slot(0).inventory.count_of(&"frag_grenade")])
 	check(callouts.sent.all(func(c: Dictionary) -> bool: return c.to == PackedInt32Array([1])), "every squad callout went to the friendly player")
 
 

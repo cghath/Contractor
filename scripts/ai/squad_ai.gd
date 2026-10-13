@@ -226,6 +226,11 @@ const HEAR_SHOT_M := 200.0
 const HEAR_SUPPRESSED_M := 40.0
 const HEARD_ERROR_PER_100M := 6.0
 const SHARE_CONTACT_M := 80.0
+## Contact passed on (queue 17 part 3): seconds by voice, by radio beyond SHARE_CONTACT_M
+## (both need a radio; proposed).
+const SHARE_VOICE_S := 1.0
+const SHARE_RADIO_S := 2.5
+const RADIO := &"radio"
 ## Friendlies see this far (hostiles SIGHT_RANGE) and stay in contact this long after the last
 ## sign of the enemy (hostiles CONTACT_MEMORY_S).
 const SQUAD_SIGHT_RANGE := 120.0
@@ -314,6 +319,8 @@ var _aware := {}
 var _suspect_pos := Vector3.ZERO
 var _suspect_at := -1000.0
 var _preset := ""
+## Contact reports from squadmates on their way: enemy instance id -> {"point", "due", "who"}.
+var _reports := {}
 var _no_los_s := 0.0
 var _burst_left := 0
 var _pause_until := 0.0
@@ -385,6 +392,8 @@ func _physics_process(delta: float) -> void:
 	_notice_fire(now)
 	if body.threat_time > _last_contact:
 		_last_contact = body.threat_time
+	if not _reports.is_empty():
+		_take_reports(now)
 	_scan_cd -= delta
 	if _scan_cd <= 0.0:
 		_scan_cd = SCAN_S
@@ -474,15 +483,47 @@ func hear(who: Soldier, where: Vector3, amount: float) -> void:
 	_suspect_at = Soldier._now()
 
 
-## Contact this unit sees reaches its squadmates nearby (friendly squad).
+## Contact this unit sees reaches its squadmates (friendly squad; queue 17 part 3): by voice
+## within SHARE_CONTACT_M after SHARE_VOICE_S, farther by radio after SHARE_RADIO_S when both
+## carry one. It lands as where the enemy was when called (stale by then), and half finds him
+## for them (Spotting.TOLD), so they spot him sooner.
 func _share_contact(point: Vector3, now: float) -> void:
 	if squad == null or not _friendly():
 		return
+	var radio := body.inventory.count_of(RADIO) > 0
 	for s in squad.members():
-		if s != body and s.vitals.is_up() and s.threat_time < now \
-				and s.global_position.distance_to(body.global_position) <= SHARE_CONTACT_M:
-			s.threat_pos = point
-			s.threat_time = now
+		if s == body or not s.vitals.is_up():
+			continue
+		var d := s.global_position.distance_to(body.global_position)
+		var delay := SHARE_VOICE_S if d <= SHARE_CONTACT_M else (SHARE_RADIO_S if radio and s.inventory.count_of(RADIO) > 0 else -1.0)
+		if delay < 0.0:
+			continue
+		var ai := SquadAI.of(s)
+		if ai == null:  # a player: they hear it, and have their own eyes
+			if s.threat_time < now:
+				s.threat_pos = point
+				s.threat_time = now
+			continue
+		var id := target.get_instance_id() if target else 0
+		if ai._reports.has(id):
+			ai._reports[id].point = point  # still on its way: the latest position goes with it
+		else:
+			ai._reports[id] = {"point": point, "due": now + delay, "who": target}
+
+
+## Reports from squadmates (_share_contact) that have arrived: contact, and half a spot.
+func _take_reports(now: float) -> void:
+	for id: int in _reports.keys():
+		var r: Dictionary = _reports[id]
+		if now < float(r.due):
+			continue
+		_reports.erase(id)
+		if body.threat_time < now - SHARE_VOICE_S:
+			body.threat_pos = r.point
+			body.threat_time = now
+		var who: Soldier = r.who as Soldier if is_instance_valid(r.who) else null
+		if who and who.vitals.is_up():
+			hear(who, r.point, Spotting.TOLD)
 
 
 ## In contact and willing to fight: Safe units leave a contact alone until fired upon.
@@ -1206,6 +1247,7 @@ func _do_care() -> void:
 		casualty = dead
 		casualty.care_by = body
 		care = Care.BODY
+		_reset_reach()  # progress to the body is watched too (a player in the way: sidestep)
 	if care == Care.BODY:
 		_carry_body()
 		return
@@ -1281,6 +1323,11 @@ func _take_casualty(c: Soldier) -> void:
 ## Sets off toward the casualty (Care.REACH), watching for progress from here.
 func _start_reach() -> void:
 	care = Care.REACH
+	_reset_reach()
+
+
+## Starts watching progress toward the casualty or body afresh (_reach_progress).
+func _reset_reach() -> void:
 	_reach_best = INF
 	_reach_progress_at = Soldier._now()
 	_detour_until = -1.0
@@ -1512,10 +1559,12 @@ func _carry_body() -> void:
 			else:
 				_has_destination = false
 			return
-		if _flat_distance(casualty.body_point()) <= CASUALTY_REACH and body.server_pick_up_body(casualty, Soldier.CARRY):
+		var d := _flat_distance(casualty.body_point())
+		if d <= CASUALTY_REACH and body.server_pick_up_body(casualty, Soldier.CARRY):
 			_callouts_carrying(true)
-		else:
-			_go(casualty.body_point(), true)
+		elif _reach_progress(d, casualty.body_point(), _give_up_casualty):
+			# Something the navmesh doesn't know (a player) in the way: sidestep (casualty R0210).
+			_go(_detour if Soldier._now() < _detour_until else casualty.body_point(), true)
 		return
 	_go(squad.follow_point(body))
 

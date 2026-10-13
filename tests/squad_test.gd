@@ -180,8 +180,11 @@ func _test_senses() -> void:
 	_clear_contact()
 	# Shared contact: what one squadmate sees, the rest nearby know about.
 	var bravo := _ai("Bravo")
-	SquadAI.of(alpha)._share_contact(player.global_position + Vector3(0, 0, -40), Soldier._now())
-	check(bravo.threat_time >= Soldier._now() - 0.1 and _flat(bravo.threat_pos, player.global_position + Vector3(0, 0, -40)) < 0.1,
+	var told_at := Soldier._now()
+	SquadAI.of(alpha)._share_contact(player.global_position + Vector3(0, 0, -40), told_at)
+	check(bravo.threat_time < told_at, "a callout takes a moment to land (queue 17 part 3)")
+	await _seconds(SquadAI.SHARE_VOICE_S + 0.3)
+	check(bravo.threat_time >= told_at and _flat(bravo.threat_pos, player.global_position + Vector3(0, 0, -40)) < 0.1,
 		"contact Alpha sees reaches Bravo")
 	_clear_contact()
 	# Pinned in the open: crawl to cover rather than freeze.

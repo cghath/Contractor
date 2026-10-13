@@ -42,6 +42,8 @@ const SUSPECT := 0.35
 const HEARD_MAX := 0.8
 const HEARD_SHOT := 0.4
 const HEARD_STEPS_PER_S := 0.25
+## A squadmate's contact report (SquadAI._share_contact) adds this.
+const TOLD := 0.5
 const STEPS_RUN_M := 25.0
 const STEPS_WALK_M := 12.0
 const STEPS_CROUCH_M := 5.0
