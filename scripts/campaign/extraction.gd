@@ -11,7 +11,8 @@ extends Node
 ## uses that). Then a countdown runs (COUNTDOWN_S); anyone needed stepping out stops it.
 ## At the end the host builds the report of who and what got out and hands it to the
 ## economy (END_GROUP) and to deployment_ended. State replicates to every peer and late
-## joiners.
+## joiners. Wave 5b: a called extraction helicopter (HeliCall) lands at a point and, with the
+## squad aboard, ends the deployment by lifting off (server_ride_out): what's aboard is out.
 ##
 ## The report (Dictionary, JSON-safe):
 ##   "contract_id", "zone_id", "point" ({"name", "pos": [x, z], "source"}), "duration_s",
@@ -62,11 +63,15 @@ var countdown_s := COUNTDOWN_S
 var countdown_point := -1
 ## The last deployment's report (every peer once it ends).
 var last_report: Dictionary = {}
+## Host (wave 5b): the helicopter the squad rides out in (HeliCall: server_ride_out). Whoever
+## and whatever is aboard counts as out, and its cargo is the deposited items it lifted.
+var ride: Node = null
 
 var _plan: Dictionary = {}
 var _started_msec := 0
 var _next_id := 1
 var _seen_smoke := {}  # host: instance ids of purple clouds already handled
+var _smoke_points := {}  # host: purple cloud instance id -> the point it set
 var _smoke_check := 0.0
 var _last_whole := -1
 
@@ -121,6 +126,8 @@ func server_begin(plan: Dictionary) -> void:
 	leave = {}
 	last_report = {}
 	countdown_point = -1
+	ride = null
+	_smoke_points = {}
 	for cloud in SmokeCloud.clouds_of(SMOKE_COLOUR):
 		_seen_smoke[cloud.get_instance_id()] = true  # smoke from before the deployment doesn't count
 	for preset: Dictionary in plan.get("zone", {}).get("extraction_points", []):
@@ -147,6 +154,38 @@ func server_add_point(pos: Vector2, source := "grid", point_name := "", radius :
 	_broadcast()
 	_client_message.rpc("Extraction point: %s (%s)" % [MapGrid.grid_ref(pos, MapNodes.area_of(self)), _source_text(source)])
 	return id
+
+
+## Host only (wave 5b, the extraction helicopter): point `id` moves to `pos` (x, z) as `source`
+## (the one "grid" or "smoke" point: another of that source goes), or a new point is added
+## when `id` is gone. Returns the point's id (0 when no deployment is on).
+func server_place_point(id: int, pos: Vector2, source := "grid", point_name := "") -> int:
+	var point := point_by_id(id)
+	if point.is_empty() or point.source == "zone":
+		return server_add_point(pos, source, point_name)
+	if not multiplayer.is_server() or not is_active() or not pos.is_finite() or source not in SOURCES:
+		return 0
+	var moved: bool = (point.pos as Vector2).distance_to(pos) > 1.0 or point.source != source
+	points = points.filter(func(p: Dictionary) -> bool: return p.id == id or p.source != source)
+	point.pos = pos
+	point.source = source
+	if point_name != "":
+		point.name = point_name
+	if moved:
+		_broadcast()
+		_client_message.rpc("Extraction point moved: %s (%s)" % [MapGrid.grid_ref(pos, MapNodes.area_of(self)), _source_text(source)])
+	return id
+
+
+## Host only (wave 5b): the extraction helicopter takes purple smoke `cloud`; it's handled
+## (no point of its own from now on). Returns the id of the point this cloud already set, or 0.
+func server_take_smoke(cloud: Node) -> int:
+	if cloud == null:
+		return 0
+	var key := cloud.get_instance_id()
+	_seen_smoke[key] = true
+	var id := int(_smoke_points.get(key, 0))
+	return id if not point_by_id(id).is_empty() else 0
 
 
 ## Host only. An extraction point at the centre of a grid square ("0123 0456"); 0 if the
@@ -217,6 +256,26 @@ func server_confirm() -> String:
 	return ""
 
 
+## Host only (wave 5b, the extraction helicopter): the squad is aboard `p_ride` (a Vehicle) at
+## point `point_id` and it lifts off: the deployment ends the way the countdown's does
+## (_finish), with what's aboard counted out (build_report). Returns whether it ended.
+func server_ride_out(point_id: int, p_ride: Node) -> bool:
+	var point := point_by_id(point_id)
+	if not multiplayer.is_server() or not is_active() or point.is_empty():
+		return false
+	ride = p_ride
+	countdown_point = point_id
+	_finish(point)
+	return true
+
+
+## Whether `node` gets out at `point`: inside it, or aboard the ride (server_ride_out).
+func _out_at(point: Dictionary, node: Node3D) -> bool:
+	if inside(point, node.global_position):
+		return true
+	return is_instance_valid(ride) and ride is Vehicle and Vehicle.ride_of(node) == ride
+
+
 func _physics_process(delta: float) -> void:
 	if not multiplayer.is_server():
 		return
@@ -237,7 +296,7 @@ func _check_smoke() -> void:
 		_seen_smoke[key] = true
 		if is_active():
 			var p := cloud.global_position
-			server_add_point(Vector2(p.x, p.z), "smoke")
+			_smoke_points[key] = server_add_point(Vector2(p.x, p.z), "smoke")
 
 
 func _run_countdown(delta: float) -> void:
@@ -304,7 +363,7 @@ func build_report(point: Dictionary) -> Dictionary:
 		if body == null or body.is_queued_for_deletion():
 			continue
 		var record := {"uid": body.body_uid, "label": body.display_name(), "faction": String(body.faction), "role": String(body.role)}
-		if carried.has(body) or inside(point, body.global_position):
+		if carried.has(body) or _out_at(point, body):
 			record["items"] = items_of(body.inventory)
 			bodies.append(record)
 		elif body.faction == &"friendly":
@@ -312,7 +371,7 @@ func build_report(point: Dictionary) -> Dictionary:
 	var hvts: Array = []
 	for node in get_tree().get_nodes_in_group(HVT_GROUP):
 		var n := node as Node3D
-		if n == null or not (carried.has(n) or inside(point, n.global_position)):
+		if n == null or not (carried.has(n) or _out_at(point, n)):
 			continue
 		var record := {"name": String(n.name), "alive": true, "faction": String(n.get(&"faction")) if n.get(&"faction") != null else ""}
 		var vitals := n.get_node_or_null(^"Vitals") as Vitals
@@ -321,13 +380,28 @@ func build_report(point: Dictionary) -> Dictionary:
 		if n.has_method(&"hvt_record"):
 			record.merge(n.call(&"hvt_record"), true)
 		hvts.append(record)
+	if is_instance_valid(ride) and ride is Vehicle:  # wave 5b: HVTs and hostages aboard the helicopter
+		for s: Soldier in (ride as Vehicle).occupants():
+			if Person.is_hvt(s):
+				hvts.append({"name": String(s.name), "hvt": String(Person.state(s).get("hvt_id", s.name)), "alive": not s.vitals.is_dead(),
+					"faction": String(s.faction), "aboard": true})
 	var deposited: Array = []
-	for node in get_tree().get_nodes_in_group(WorldItem.GROUP):
+	var hold: VehicleCargo = (ride as Vehicle).cargo() as VehicleCargo if is_instance_valid(ride) and ride is Vehicle else null
+	# Wave 5b: with a ride, what's deposited is what it lifted (its hold, below), not what was
+	# left in the point.
+	var left_in_point: Array[Node] = get_tree().get_nodes_in_group(WorldItem.GROUP) if hold == null else ([] as Array[Node])
+	for node in left_in_point:
 		var item := node as WorldItem
 		if item and not item.is_queued_for_deletion() and inside(point, item.global_position):
 			var entry := {"id": String(item.item_id), "count": item.count, "where": "deposited", "uid": item.uid}
 			if not item.state.is_empty():
 				entry["state"] = item.state.duplicate(true)
+			deposited.append(entry)
+	if hold:  # wave 5b: what the helicopter lifted from the point
+		for e: Dictionary in hold.entries():
+			var entry := {"id": String(e.id), "count": int(e.get("count", 1)), "where": "deposited"}
+			if not e.get("state", {}).is_empty():
+				entry["state"] = (e.state as Dictionary).duplicate(true)
 			deposited.append(entry)
 	var totals := {}
 	for group: Array in [players, squad, bodies]:

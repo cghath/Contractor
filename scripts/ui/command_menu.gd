@@ -77,10 +77,36 @@ const MENU := {
 				{"key": "4", "label": "Yellow", "select": "color:yellow"},
 			]},
 		]},
-		{"key": "0", "label": "Support", "items": [
-			{"key": "1", "label": "Helicopter transport", "cmd": ""},
-			{"key": "2", "label": "Resupply drop", "cmd": ""},
+		{"key": "0", "label": "Support", "items": [  # wave 5b: handlers registered with Supports
+			{"key": "1", "label": "Helicopter transport", "items": [  # V3: HeliSupports (marker = a grid on the map)
+				{"key": "1", "label": "Pick up at my map marker", "cmd": "support:transport:marker"},
+				{"key": "2", "label": "Pick up there", "cmd": "support:transport:here", "point": true},
+				{"key": "3", "label": "Pick up on smoke (green, blue)", "cmd": "support:transport:smoke"},
+				{"key": "4", "label": "Fly to my map marker", "cmd": "support:transport:dest"},
+				{"key": "5", "label": "Send it home", "cmd": "support:transport:cancel"},
+			]},
+			{"key": "2", "label": "Resupply drop", "items": [
+				{"key": "1", "label": "At my map marker", "cmd": "support:resupply:marker"},
+				{"key": "2", "label": "There", "cmd": "support:resupply:here", "point": true},
+				{"key": "3", "label": "On smoke (green, yellow)", "cmd": "support:resupply:smoke"},
+				{"key": "4", "label": "Send it home", "cmd": "support:resupply:cancel"},
+			]},
 			{"key": "3", "label": "Fire support", "cmd": ""},
+			{"key": "4", "label": "Helicopter extraction", "items": [
+				{"key": "1", "label": "At my map marker", "cmd": "support:extraction:marker"},
+				{"key": "2", "label": "There", "cmd": "support:extraction:here", "point": true},
+				{"key": "3", "label": "On purple smoke", "cmd": "support:extraction:smoke"},
+				{"key": "4", "label": "Send it home", "cmd": "support:extraction:cancel"},
+			]},
+			{"key": "5", "label": "AAV", "items": [
+				{"key": "1", "label": "Call an AAV", "cmd": "support:aav_call"},
+				{"key": "2", "label": "Move there", "cmd": "support:aav_move", "point": true},
+				{"key": "3", "label": "Hold", "cmd": "support:aav_hold"},
+				{"key": "4", "label": "Follow me", "cmd": "support:aav_follow"},
+				{"key": "5", "label": "Squad get in", "cmd": "support:aav_mount"},
+				{"key": "6", "label": "Dismount", "cmd": "support:aav_dismount"},
+				{"key": "7", "label": "Return to base", "cmd": "support:aav_return"},
+			]},
 		]},
 	],
 }

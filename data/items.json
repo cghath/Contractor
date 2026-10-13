@@ -184,6 +184,8 @@
 		 "stats": {"size_m": [0.55, 0.4, 0.22]}},
 		{"id": "supply_crate", "name": "Supply Crate", "type": "objective", "volume_l": 60.0, "mass_kg": 25.0, "two_handed": true, "tags": ["salvage", "bulky"],
 		 "stats": {"size_m": [0.6, 0.4, 0.4]}},
+		{"id": "supply_pallet", "name": "Supply Pallet", "type": "objective", "volume_l": 300.0, "mass_kg": 22.0, "two_handed": true, "tags": ["bulky"],
+		 "stats": {"size_m": [1.2, 0.15, 1.0]}},
 
 		{"id": "zip_cuffs", "name": "Zip Cuffs", "type": "utility", "volume_l": 0.05, "mass_kg": 0.02, "stack": 10, "tags": ["restraint"],
 		 "stats": {"cuff_s": 3.0, "size_m": [0.12, 0.02, 0.06]}},

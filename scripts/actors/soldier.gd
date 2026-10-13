@@ -639,6 +639,10 @@ func _server_squad_command(cmd: String, point: Vector3, names: PackedStringArray
 		"fire_launcher":  # wave 5: a squadmate with a launcher fires at the vehicle there, or the spot
 			if LauncherAI.order_squad(squad, self, point, names) == "":
 				_client_message.rpc_id(owner_peer(), "Nobody selected has a loaded launcher or rounds")
+		_ when cmd.begins_with("support:"):  # wave 5b: helicopter supports and AAVs (Supports)
+			var why := Supports.server_command(self, cmd, point, names)
+			if why != "":
+				_client_message.rpc_id(owner_peer(), why)
 		_:
 			if not squad.command(self, cmd, point, names):  # formation, target, combat mode, team
 				_client_message.rpc_id(owner_peer(), "Can't target that" if cmd.begins_with("target:") else ("Can't escort that" if cmd.begins_with("escort:") else "Order not given"))

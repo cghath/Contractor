@@ -61,6 +61,8 @@ func members() -> Array[Soldier]:
 	for n in get_tree().get_nodes_in_group(&"combatants"):
 		var s := n as Soldier
 		if s and s.is_ai() and s.faction == faction and not s.is_queued_for_deletion() and not s.vitals.is_dead():
+			if s.has_meta(&"vehicle_crew"):
+				continue  # wave 5b: a support vehicle's AI crew (AavSupport) takes no squad orders
 			out.append(s)
 	out.sort_custom(func(a: Soldier, b: Soldier) -> bool:
 		if a.squad_slot != b.squad_slot:

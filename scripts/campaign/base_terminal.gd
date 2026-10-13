@@ -79,6 +79,29 @@ func action_point() -> Vector3:
 ## (a local Callable the menu runs)}.
 func interaction_actions(_actor: Node) -> Array[Dictionary]:
 	var page := String(KINDS.get(kind, {}).get("page", ""))
+	if kind == &"motor_pool":
+		return _motor_pool_actions()
 	if page == "":
 		return [{"id": &"use", "label": "%s (vehicles in wave 5)" % title(), "disabled": "No vehicles yet"}]
 	return [{"id": &"use", "label": "Use %s" % title(), "disabled": "", "call": BaseHub.open_ui.bind(page)}]
+
+
+## Wave 5b (V4): the motor pool's sign lists the company's vehicles (MotorPoolNode's copy of the
+## pool) and books one into the workshop: every hit zone, the battery and the hull fixed and the
+## tank filled, for money and days (MotorPool.server_repair, on the host).
+func _motor_pool_actions() -> Array[Dictionary]:
+	var node := MotorPoolNode.of(self)
+	var out: Array[Dictionary] = []
+	var pool: Array = node.pool if node else []
+	if pool.is_empty():
+		return [{"id": &"use", "label": "Motor pool: no vehicles", "disabled": "The company owns no vehicles"}]
+	for v: Dictionary in pool:
+		var quote: Dictionary = v.get("quote", {})
+		var why := String(v.get("problem", ""))
+		var label := "%s: %d%% damaged, %d L" % [String(v.name), roundi(float(v.get("damage", 0.0)) * 100.0), roundi(float(v.get("fuel", 0.0)))]
+		if why == "" and (int(quote.get("cost", 0)) > 0 or int(quote.get("days", 0)) > 0):
+			label += " | Service: $%s, %d day%s" % [DebriefCalc.money(int(quote.cost)), int(quote.days), "" if int(quote.days) == 1 else "s"]
+		elif why == "":
+			why = "Ready"
+		out.append({"id": StringName("repair_" + String(v.id)), "label": label, "disabled": why, "call": node.request_repair.bind(String(v.id))})
+	return out

@@ -94,6 +94,7 @@ Today's dev keys:
 | End | open the contract board (any build) |
 | Page Up | hot zones: show/hide the enemy readout (alert per area, last known position, reports, pressure and tier, patrols, QRF, hunters, coordination, enemy radio) |
 | Page Down | hot zones: skip the enemy's clock 5 minutes |
+| ] (right bracket) | call an AAV to you anywhere, free (wave 5b, `AavSupport`) |
 
 New dev keys: put them behind `DevTools.on()`, list them here, and keep them off F1-F12 (the
 squad command menu) and the game's keys (`autoload/controls.gd`).

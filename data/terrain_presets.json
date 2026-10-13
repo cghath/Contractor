@@ -32,6 +32,15 @@
 			"scatter": {"rocks_per_km2": 35, "large_rock_share": 0.12, "scrub_per_km2": 320, "trees_per_km2": 35,
 				"colours": {"rock": ["8a8576", "7a7568"], "scrub": ["627a3e", "7a8040"], "crown": ["4f6e30", "5b7a34"], "trunk": "5a4632"}}
 		},
+		"amphibious_coast": {
+			"name": "Amphibious coast (wave 5b: the AAV test zone, deep water for the LHD)",
+			"land": {"relief_scale": 0.55, "wavelength_m": 700, "octaves": 4, "gain": 0.4, "offset_m": 3.0},
+			"sea": {"width_m": 360, "depth_m": 14.0, "level": 0.0},
+			"palette": {"grass": "6a7440", "dry": "8a8650", "earth": "86744f", "rock": "7a7468", "sand": "c2b583"},
+			"ground": {"sand_below_m": 1.6},
+			"scatter": {"rocks_per_km2": 35, "large_rock_share": 0.12, "scrub_per_km2": 320, "trees_per_km2": 35,
+				"colours": {"rock": ["8a8576", "7a7568"], "scrub": ["627a3e", "7a8040"], "crown": ["4f6e30", "5b7a34"], "trunk": "5a4632"}}
+		},
 		"salt_flats": {
 			"name": "Salt flats",
 			"land": {"relief_scale": 0.16, "wavelength_m": 900, "octaves": 3, "gain": 0.4, "flatten": 1.8},
