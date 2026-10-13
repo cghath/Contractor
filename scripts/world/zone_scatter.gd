@@ -253,8 +253,9 @@ func build_visuals() -> void:
 	_meshes = {
 		Kind.ROCK: _blocky(Vector3(1, 1, 1), Color.WHITE, 0.22, 1, true),
 		Kind.SCRUB: _scrub_mesh(),
-		"trunk": _blocky(Vector3(0.4, 2.6, 0.4), Color(String(colours.get("trunk", "4f3e2c"))), 0.03, 2, false),
+		"trunk": _trunk_mesh(Color(String(colours.get("trunk", "4f3e2c")))),
 		"crown": _crown_mesh(),
+		"conifer": _conifer_mesh(),
 	}
 	set_process(true)
 
@@ -296,7 +297,7 @@ func _process(delta: float) -> void:
 
 func _build_cell(cell: Vector2i) -> void:
 	_built[cell] = true
-	var groups := {Kind.ROCK: [], Kind.SCRUB: [], "trunk": [], "crown": []}
+	var groups := {Kind.ROCK: [], Kind.SCRUB: [], "trunk": [], "crown": [], "conifer": []}
 	for index: int in _cells[cell]:
 		var item: Dictionary = items[index]
 		var basis := Basis(Vector3.UP, float(item.yaw))
@@ -309,8 +310,8 @@ func _build_cell(cell: Vector2i) -> void:
 			Kind.TREE:
 				var trunk := Transform3D(basis.scaled(item.size), (item.pos as Vector3) - Vector3(0, 0.1, 0))
 				groups["trunk"].append([trunk, Color.WHITE])
-				groups["crown"].append([xf, item.colour])
-	var ranges := {Kind.ROCK: SEE_ROCK_M, Kind.SCRUB: SEE_SCRUB_M, "trunk": SEE_TREE_M, "crown": SEE_TREE_M}
+				groups["conifer" if _is_conifer(item) else "crown"].append([xf, item.colour])
+	var ranges := {Kind.ROCK: SEE_ROCK_M, Kind.SCRUB: SEE_SCRUB_M, "trunk": SEE_TREE_M, "crown": SEE_TREE_M, "conifer": SEE_TREE_M}
 	for key in groups:
 		var list: Array = groups[key]
 		if list.is_empty():
@@ -377,37 +378,107 @@ func _add_box(st: SurfaceTool, corners: Array[Vector3], colour: Color) -> void:
 			st.add_vertex(v)
 
 
-## Scrub: three blocky lumps in a clump, on the ground (the instance colour tints it).
+## Trees and scrub are built like the soldiers (VoxelArt lofts): stacked tiers with an
+## octagonal cross-section (a square with its corners cut at 45 degrees), flat faces, light on
+## top and darker underneath (the instance colour tints them). They keep inside the cylinders
+## spotting hides people in (foliage_between: CROWN_R, CROWN_LOW, CROWN_HIGH; SCRUB_R, SCRUB_TOP).
+const TOP_SHADE := 1.0
+const SIDE_SHADE := 0.82
+const UNDER_SHADE := 0.6
+## A tree's chance of being a conifer when its preset doesn't say ("scatter": "conifer_share").
+const CONIFER_SHARE := 0.2
+
+
+## Whether tree `item` is drawn as a conifer: its preset's share of them, picked by where it
+## stands (the same every visit; the layout and its checksum don't change).
+func _is_conifer(item: Dictionary) -> bool:
+	var p: Vector3 = item.pos
+	var roll := float(absi(hash(Vector2i(roundi(p.x * 10.0), roundi(p.z * 10.0)))) % 1000) / 1000.0
+	return roll < float(_spec.get("conifer_share", CONIFER_SHARE))
+
+
+## One tier: an octagonal frustum from y0 (half-width r0) to y1 (r1), centred on (cx, cz),
+## with flat top and bottom.
+func _tier(st: SurfaceTool, cx: float, cz: float, y0: float, y1: float, r0: float, r1: float, tint := Color.WHITE) -> void:
+	var ring := func(y: float, r: float) -> Array[Vector3]:
+		var out: Array[Vector3] = []
+		var c := r * 0.7  # the 45-degree cut leaves 0.7 of each side (VoxelArt bevel 0.3)
+		for v: Vector2 in [Vector2(c, -r), Vector2(r, -c), Vector2(r, c), Vector2(c, r), Vector2(-c, r), Vector2(-r, c), Vector2(-r, -c), Vector2(-c, -r)]:
+			out.append(Vector3(cx + v.x, y, cz + v.y))
+		return out
+	var lo: Array[Vector3] = ring.call(y0, r0)
+	var hi: Array[Vector3] = ring.call(y1, r1)
+	var mid := Vector3(cx, (y0 + y1) * 0.5, cz)
+	for i in 8:
+		var j := (i + 1) % 8
+		_face(st, [lo[i], lo[j], hi[j], hi[i]], mid, tint * SIDE_SHADE)
+	for i in range(1, 7):
+		_face(st, [hi[0], hi[i], hi[i + 1]], mid, tint * TOP_SHADE)
+		_face(st, [lo[0], lo[i + 1], lo[i]], mid, tint * UNDER_SHADE)
+
+
+## A flat face through `points` (3 or 4, in order), turned to face away from `inside`.
+func _face(st: SurfaceTool, points: Array, inside: Vector3, colour: Color) -> void:
+	var a: Vector3 = points[0]
+	var b: Vector3 = points[1]
+	var c: Vector3 = points[2]
+	var n := (b - a).cross(c - a).normalized()
+	var centre := Vector3.ZERO
+	for q: Vector3 in points:
+		centre += q / points.size()
+	var flip := n.dot(centre - inside) < 0.0
+	if flip:
+		n = -n
+	colour.a = 1.0
+	var tris := [[0, 1, 2]] if points.size() == 3 else [[0, 1, 2], [0, 2, 3]]
+	for t: Array in tris:
+		# Godot wants clockwise seen from outside.
+		var order: Array = [t[0], t[2], t[1]] if not flip else [t[0], t[1], t[2]]
+		for k: int in order:
+			st.set_color(colour)
+			st.set_normal(n)
+			st.add_vertex(points[k])
+
+
+## Scrub: four small octagonal clumps on the ground, the middle one tallest (within SCRUB_R,
+## up to SCRUB_TOP of its height).
 func _scrub_mesh() -> ArrayMesh:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var rng := RandomNumberGenerator.new()
-	rng.seed = 5
-	for k in 3:
-		var corners: Array[Vector3] = []
-		var size := Vector3(0.55, rng.randf_range(0.45, 0.7), 0.55)
-		var at := Vector3(rng.randf_range(-0.3, 0.3), 0.0, rng.randf_range(-0.3, 0.3))
-		for c in 8:
-			var v := Vector3(-0.5 if (c & 1) == 0 else 0.5, 0.0 if (c & 2) == 0 else 1.0, -0.5 if (c & 4) == 0 else 0.5)
-			var top := 0.55 if (c & 2) != 0 else 1.0  # narrower at the top
-			corners.append(at + Vector3(v.x * size.x * top, v.y * size.y, v.z * size.z * top)
-				+ Vector3(rng.randf_range(-0.06, 0.06), 0.0, rng.randf_range(-0.06, 0.06)))
-		_add_box(st, corners, Color.WHITE)
+	for c: Array in [[0.0, 0.0, 0.26, 0.58], [0.2, 0.1, 0.18, 0.42], [-0.17, 0.14, 0.17, 0.38], [0.03, -0.21, 0.16, 0.34]]:
+		var r: float = c[2]
+		var h: float = c[3]
+		_tier(st, c[0], c[1], 0.0, h * 0.7, r * 0.75, r)
+		_tier(st, c[0], c[1], h * 0.7, h, r, r * 0.55)
 	return st.commit()
 
 
-## A tree's crown: two blocks, wide under narrow, from 2 m up (the trunk's top).
+## A broadleaf crown: a rounded blob of four tiers from 2 m up (the trunk's top) to 4.9 m.
 func _crown_mesh() -> ArrayMesh:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var rng := RandomNumberGenerator.new()
-	rng.seed = 9
-	for spec: Array in [[Vector3(2.6, 1.8, 2.6), 2.0], [Vector3(1.7, 1.3, 1.7), 3.6]]:
-		var size: Vector3 = spec[0]
-		var corners: Array[Vector3] = []
-		for c in 8:
-			var v := Vector3(-0.5 if (c & 1) == 0 else 0.5, 0.0 if (c & 2) == 0 else 1.0, -0.5 if (c & 4) == 0 else 0.5)
-			corners.append(Vector3(v.x * size.x, float(spec[1]) + v.y * size.y, v.z * size.z)
-				+ Vector3(rng.randf_range(-0.15, 0.15), rng.randf_range(-0.1, 0.1), rng.randf_range(-0.15, 0.15)))
-		_add_box(st, corners, Color.WHITE)
+	for t: Array in [[2.0, 2.55, 0.65, 1.05], [2.55, 3.45, 1.05, 1.1], [3.45, 4.3, 1.1, 0.85], [4.3, 4.9, 0.85, 0.35]]:
+		_tier(st, 0.0, 0.0, t[0], t[1], t[2], t[3])
+	# Two lobes out to the sides break the outline (within CROWN_R of the middle, about).
+	_tier(st, 0.72, 0.18, 2.55, 3.15, 0.45, 0.6)
+	_tier(st, 0.72, 0.18, 3.15, 3.75, 0.6, 0.3)
+	_tier(st, -0.45, -0.62, 3.25, 3.85, 0.42, 0.55)
+	_tier(st, -0.45, -0.62, 3.85, 4.4, 0.55, 0.25)
+	return st.commit()
+
+
+## A conifer: three stacked tiers, each narrower, from 2 m up to 4.9 m.
+func _conifer_mesh() -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for t: Array in [[2.0, 3.0, 1.15, 0.7], [2.8, 3.9, 0.9, 0.45], [3.7, 4.9, 0.6, 0.06]]:
+		_tier(st, 0.0, 0.0, t[0], t[1], t[2], t[3])
+	return st.commit()
+
+
+## The trunk: an octagonal post, a little narrower at the top, 2.6 m tall (into the crown).
+func _trunk_mesh(colour: Color) -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	_tier(st, 0.0, 0.0, 0.0, 2.6, 0.19, 0.14, colour / SIDE_SHADE)
 	return st.commit()

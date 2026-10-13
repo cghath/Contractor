@@ -2,7 +2,8 @@ extends Node
 ## Screenshots of one terrain preset on a seeded zone (needs a real window, not --headless):
 ##   <voxel godot exe> --path . res://tests/preset_shots.tscn -- <preset id> <output folder> [seed]
 ## Saves <preset>_aerial.png (from above the zone), <preset>_ground.png (soldier's height at
-## the insertion point, looking in) and, for a preset with a sea, <preset>_shore.png. Run it
+## the insertion point, looking in), <preset>_trees.png and _scrub.png (the nearest of each, close
+## up) and, for a preset with a sea, <preset>_shore.png. Run it
 ## once per preset (tools: docs/terrain_presets.md); keep the output as an S run
 ## (docs/debugging.md).
 
@@ -42,6 +43,18 @@ func _ready() -> void:
 	var mid := Vector3(0, t.height_at(0, 0), 0)
 	await _shot("%s/%s_aerial.png" % [out, preset], Vector3(ins.x * 0.2, 520.0, ins.z * 0.2 + 420.0), mid)
 	await _shot("%s/%s_ground.png" % [out, preset], ins + Vector3(0, 1.7, 0), Vector3(ins.x * 0.4, ins.y + 3.0, ins.z * 0.4))
+	# Close up: the tree and the scrub nearest the insertion point (preset_trees, preset_scrub).
+	for kind: int in [ZoneScatter.Kind.TREE, ZoneScatter.Kind.SCRUB]:
+		var best: Dictionary = {}
+		for item: Dictionary in level.scatter.items:
+			if int(item.kind) == kind and (best.is_empty() or (item.pos as Vector3).distance_to(ins) < (best.pos as Vector3).distance_to(ins)):
+				best = item
+		if best.is_empty():
+			continue
+		var p: Vector3 = best.pos
+		var tree := kind == ZoneScatter.Kind.TREE
+		var away := Vector3(9.0, 3.0, 9.0) if tree else Vector3(2.2, 1.2, 2.2)
+		await _shot("%s/%s_%s.png" % [out, preset, "trees" if tree else "scrub"], p + away, p + Vector3(0, 3.0 if tree else 0.3, 0))
 	var module := level.modules()[0]
 	var at := module.global_position
 	await _shot("%s/%s_module.png" % [out, preset], at + Vector3(70, 22, 90), at + Vector3(0, 4, 0))

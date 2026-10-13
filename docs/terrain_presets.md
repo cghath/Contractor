@@ -14,6 +14,8 @@ Wadi farm -> desert_wadi. The test zone is `plain` (no scatter).
 
 **Scatter**: deterministic from the seed; never on pads, roads, in water or on steep ground. Large rocks and
 trunks have collision and are baked into navigation; scrub is visual only. Visuals build nearest cells first.
+Trees and scrub are low-poly octagonal tiers like the soldiers; a tree is a broadleaf or a conifer, the
+preset's scatter `conifer_share` (0..1, default 0.2) of them conifers, picked by where each stands.
 
 **Adding one**: add an entry under `presets`, then name it from a zone (`"terrain"`) or a hint/region default.
 Test it in `tests/world_test.gd` (`_test_presets` runs every preset).
