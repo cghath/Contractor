@@ -391,6 +391,9 @@ var _move_point := Vector3.ZERO
 ## Where a casualty carried under a move order is laid down (null until worked out).
 var _lay_spot: Variant = null
 var _lay_for := Vector3.INF  # the point _lay_spot was found for (a moving CCP: found again)
+## This unit laid its casualty at _lay_spot: it stays with them wherever their ragdoll settles
+## (body_point is the ragdoll's chest, which can roll past LAY_NEAR_M: picked up again, R0267).
+var _laid := false
 var _patrol_index := 0
 var _think_cd := 0.0
 var _scan_cd := 0.0
@@ -685,6 +688,7 @@ func on_order(new_order: Squad.Order, point: Vector3, slot := 0, count := 1) -> 
 	_move_point = point + side * (slot - (count - 1) / 2.0) * 1.5
 	ordered = {}  # a movement order replaces a tactic order
 	_lay_spot = null
+	_laid = false
 	_has_cover = false
 	_think_cd = 0.0
 
@@ -1586,7 +1590,7 @@ func _should_carry() -> bool:
 	var ccp: Variant = squad.ccp_point() if squad else null
 	if ccp != null and _friendly():
 		return casualty.body_point().distance_to(ccp) > LAY_NEAR_M + 1.0  # "Bring casualties here"
-	if _friendly() and order == Squad.Order.MOVE and _lay_spot != null and _flat_between(casualty.body_point(), _lay_spot) <= LAY_NEAR_M + 1.0:
+	if _friendly() and order == Squad.Order.MOVE and _lay_spot != null and (_laid or _flat_between(casualty.body_point(), _lay_spot) <= LAY_NEAR_M + 1.0):
 		return false  # laid where the order sent them: they stay while it stands (queue 16)
 	if 1.0 - casualty.vitals.blood_fraction() >= WoundModel.UNCONSCIOUS_LOST:
 		return true
@@ -1646,16 +1650,19 @@ func _care_carry(contact: bool) -> void:
 		var goal: Vector3 = ccp if ccp != null else _move_point
 		if _lay_spot == null or _lay_for.distance_to(goal) > LAY_NEAR_M:
 			_lay_for = goal
+			_laid = false
 			var spot: Variant = find_cover(goal, LAY_DOWN_M)
 			_lay_spot = spot if spot != null else NavigationServer3D.map_get_closest_point(body.get_world_3d().navigation_map, goal)
 		var lay: Vector3 = _lay_spot
 		var at := casualty.body_point()
-		if body.carrying != casualty and Vector2(at.x - lay.x, at.z - lay.z).length() <= LAY_NEAR_M:
+		if body.carrying != casualty and (_laid or Vector2(at.x - lay.x, at.z - lay.z).length() <= LAY_NEAR_M) \
+				and not is_instance_valid(casualty.carried_by):
 			_has_destination = false  # laid down where ordered: stay with them
 			body.want_crouch = true
 			return
 		if body.carrying == casualty and _flat_distance(lay) <= 1.0:
 			body.server_put_down()
+			_laid = true
 			_has_destination = false
 			body.want_crouch = true
 			return
@@ -1715,6 +1722,7 @@ func _end_care() -> void:
 		body.release_carried()
 	casualty = null
 	care = Care.NONE
+	_laid = false
 	_has_cover = false
 	wants_medic = false
 	wanted.clear()

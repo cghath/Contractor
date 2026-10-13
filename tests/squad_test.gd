@@ -176,7 +176,10 @@ func _test_senses() -> void:
 	SquadAI.server_heard_shot(shooter, shooter.global_position, false)
 	var off := _flat(alpha.threat_pos, shooter.global_position)
 	check(alpha.threat_time > before and off <= SquadAI.HEARD_ERROR_PER_100M * 0.85, "a plain one is heard: contact toward it (%.1f m off)" % off)
-	await _frames(2)
+	# Contact is taken in SquadAI._physics_process: wait on physics ticks, not render frames
+	# (headless, two render frames can pass inside one tick: CI failed it on fcae676).
+	for i in 2:
+		await get_tree().physics_frame
 	check(SquadAI.of(alpha).in_contact(), "and Alpha is in contact (%s)" % alpha.ai_status)
 	shooter.queue_free()
 	_clear_contact()
