@@ -37,7 +37,7 @@ func _ready() -> void:
 	await _test_buddy_carries_buddy()
 	await _test_contact()
 	_test_flash_stuns()
-	_test_spotting()
+	await _test_spotting()
 	await _test_fire_discipline()
 	await _test_tactics()
 	await _test_dead_leave_squad()
@@ -420,12 +420,19 @@ func _test_spotting() -> void:
 	while ai._build_awareness(bravo) < 1.0 and after < 200:
 		after += 1
 	check(after < scans, "and seen, he's spotted sooner (%d scans, not %d)" % [after + 1, scans + 1])
+	# (Measured standing: a squadmate at a halt in Combat mode crouches, and crouched steps are quiet.)
+	var brain := SquadAI.of(bravo)
+	brain.process_mode = Node.PROCESS_MODE_DISABLED
+	bravo.want_crouch = false
+	bravo.want_stance = -1
+	await _wait_until(func() -> bool: return not bravo.is_crouching(), 3.0)
 	bravo.velocity = Vector3(0, 0, 4.0)
 	var running := Spotting.footsteps_m(bravo)
 	bravo.velocity = Vector3(0, 0, 1.5)
 	var walking := Spotting.footsteps_m(bravo)
 	bravo.velocity = Vector3.ZERO
 	check(running > walking and walking > 0.0 and Spotting.footsteps_m(bravo) == 0.0, "footsteps carry %.0f m running, %.0f m walking, none standing still" % [running, walking])
+	brain.process_mode = Node.PROCESS_MODE_INHERIT
 	ai._aware.clear()
 	ai._suspect_at = -1000.0
 	alpha.global_transform = saved[0]
