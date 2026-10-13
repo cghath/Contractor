@@ -119,11 +119,22 @@ numbered session, **P<number>**, from the same counter and in the same parent as
   notices (today: a soldier whose position isn't a number, or who fell out of the world). Call
   `SessionLog.anomaly(key, text)` for new ones; `SessionLog.note(text)` adds a plain line.
 - **Host-side event lines** (host only): `X went down (friendly): round (intermediate), chest, by
-  Cpl Reyes (enemy) at 42 m` (also `died`; cause is a round class, fragment, blast, fall,
-  burn, armor-stopped round, or bleed-out / cardiac arrest / "out: <causes>" when nothing hit
-  them in the last 3 s, then "last hit by ..."; players, squad AI and enemies);
-  `X treats Y: tourniquet on left thigh, done` (or `interrupted: you moved`, `refused: Too far
-  away`); `Return to Base` and `Return to Base (revert)` from the Escape menu / debrief.
+  Rahimi [Hostile3] (hostile) at 42 m` (also `died`; cause is a round class, fragment, blast,
+  fall, burn, armor-stopped round, or bleed-out / cardiac arrest / "out: <causes>" when nothing
+  hit them in the last 3 s, then "last hit by ..."; players, squad AI and enemies; a body
+  spawned as one, a player's left behind or one restored from the zone save, isn't logged
+  dying again); treatments, each with how far the casualty's body is (`Soldier.body_point`,
+  as treatment reach measures it): `X treats Y: tourniquet on left thigh at 1.2 m, started
+  (4.0 s)`, then `..., done`, or `interrupted: <why>` (`you moved 1.6 m`, `you went down`,
+  `out of reach`, `they were moved: dragged by Rahimi [Bravo] (0.4 m)` / `carried by ...` /
+  `put down by ...` / `nobody carried them (1.5 m, Wounded)`), or `refused: Too far away`
+  (taking a tourniquet off is `tourniquet removal`); `Return to Base` and `Return to Base
+  (revert)` from the Escape menu / debrief.
+- **Names in the log** (`SessionLog.who`, `Soldier.log_name`): a player is `Player 1`; an AI is
+  its name with its callsign, `Rahimi [Hostile3]`, so two hostiles who share a surname read
+  apart; a body spawned as one gets a tag from its uid instead, the same across saves,
+  `Player 1 [body 3fa2]`; a target dummy is `target dummy LightDummy`. The dumps' soldier
+  lines use the same names.
 - On quit the folder becomes **PASS** (nothing unexpected) or **FAIL**, with a line in
   `index.txt`. A folder still **RUNNING** means the game crashed or was killed.
 - The pause menu shows the session number: send it with a playtest report ("P0047").

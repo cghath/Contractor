@@ -164,6 +164,15 @@ func note(text: String) -> void:
 		_write(text)
 
 
+## How the log names `body` (Captain, P0164 queue 9): its log_name() (a Soldier: "Rahimi
+## [Hostile3]", so same-named hostiles read apart; a TargetDummy: "target dummy LightDummy"),
+## else its node's name, or "nobody" (null or freed: a Variant, so a freed body can be passed).
+static func who(body: Variant) -> String:
+	if not is_instance_valid(body):
+		return "nobody"
+	return body.log_name() if body.has_method(&"log_name") else String(body.name)
+
+
 ## Something unexpected the game itself noticed: logged, counted, and dumped once per `key`.
 func anomaly(key: String, text: String) -> void:
 	if session_id == "":
@@ -220,16 +229,16 @@ func _check() -> void:
 	for s in _soldiers():
 		var pos: Vector3 = s.global_position
 		if not pos.is_finite():
-			_flag(s, "nan", "%s's position is not a number (%s)" % [s.display_name(), pos])
+			_flag(s, "nan", "%s's position is not a number (%s)" % [s.log_name(), pos])
 		elif pos.y < FELL_Y:
-			_flag(s, "fell", "%s fell out of the world (y %.0f m at %.0f, %.0f)" % [s.display_name(), pos.y, pos.x, pos.z])
+			_flag(s, "fell", "%s fell out of the world (y %.0f m at %.0f, %.0f)" % [s.log_name(), pos.y, pos.x, pos.z])
 
 
 func _flag(s: Soldier, kind: String, text: String) -> void:
 	var key := "%s %s" % [kind, s.get_instance_id()]
 	if not _flagged.has(key):
 		_flagged[key] = true
-		anomaly("%s %s" % [kind, s.display_name()], text)
+		anomaly("%s %s" % [kind, s.log_name()], text)
 
 
 func _soldiers() -> Array[Soldier]:
@@ -330,7 +339,7 @@ func player_text() -> String:
 			me = s
 	if me == null:
 		return ""
-	var lines: Array[String] = ["Player %s: %s" % [me.display_name(), me.vitals.condition_text()]]
+	var lines: Array[String] = ["%s: %s" % [me.log_name(), me.vitals.condition_text()]]
 	var signs := me.vitals.signs(true)
 	lines.append("  signs: %s" % (", ".join(signs) if not signs.is_empty() else "none"))
 	var wounds := me.vitals.wound_list()
@@ -359,18 +368,18 @@ func player_text() -> String:
 
 func _soldier_line(s: Soldier) -> String:
 	var p := s.global_position
-	var who := "AI" if s.is_ai() else "player %d" % s.owner_peer()
-	var parts: Array[String] = ["%s (%s %s, %s)" % [s.display_name(), s.faction, String(s.role) if s.role != &"" else "-", who],
+	var driver := "AI" if s.is_ai() else "player %d" % s.owner_peer()
+	var parts: Array[String] = ["%s (%s %s, %s)" % [s.log_name(), s.faction, String(s.role) if s.role != &"" else "-", driver],
 		"at (%.1f, %.1f, %.1f)" % [p.x, p.y, p.z], s.vitals.condition_text()]
 	var ai := SquadAI.of(s)
 	if ai:
 		parts.append("%s: %s" % [SquadAI.Intent.keys()[ai.intent], ai.status_text()])
-		parts.append("target %s" % (ai.target.display_name() if is_instance_valid(ai.target) else "none"))
+		parts.append("target %s" % (who(ai.target) if is_instance_valid(ai.target) else "none"))
 		parts.append("mode %s" % Squad.CombatMode.keys()[ai.combat_mode])
 	if is_instance_valid(s.carrying):
-		parts.append("carrying %s" % s.carrying.display_name())
+		parts.append("carrying %s" % s.carrying.log_name())
 	if is_instance_valid(s.carried_by):
-		parts.append("carried by %s" % s.carried_by.display_name())
+		parts.append("carried by %s" % s.carried_by.log_name())
 	if s.inventory.hands != &"":
 		parts.append("hands %s" % s.inventory.hands)
 	return " | ".join(parts)
