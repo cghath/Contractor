@@ -111,6 +111,10 @@ static func _frag(level: CompoundLevel, pos: Vector3) -> void:
 			continue
 		var d := centre.distance_to(body_point(body))
 		if d <= blast_radius:
+			# Whose grenade it was, before the blast changes anything (as warheads do): burns or
+			# blast injuries with no fragment still count against the thrower (people: civilian
+			# casualties, the session log's "by"). The ledger keeps one event per civilian and kind.
+			Harm.note_hit(body, Harm.blast_source)
 			vitals.server_blast(d, blast_radius, has_ear_pro(body))  # overpressure (and burns up close)
 		if d > FRAG_RADIUS or vitals.is_dead():
 			continue
