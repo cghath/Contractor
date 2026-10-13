@@ -25,6 +25,10 @@ const DOOR_CLEAR := 1.0
 ## Interior walls, and how much a room's furniture stays off its walls (m).
 const INNER_T := 0.15
 const FURNITURE_GAP := 0.05
+## Moderate variation (Captain, 2026-10-13): an optional item is there at least MIN_CHANCE of the
+## time, and "vary" shrinks an item by at most MAX_VARY of its size on any side.
+const MIN_CHANCE := 0.6
+const MAX_VARY := 0.2
 ## Building styles: outer wall (material, thickness), inner walls, roof (material, thickness), and
 ## the wall height. Picked by region/preset (style_for) or given.
 const STYLES := {
@@ -438,13 +442,13 @@ static func _furnish(boxes: Array, loot: Array, room: Rect2, role: String, doors
 			# against the wall), one with "mats" is one of them.
 			var items: Array = []
 			for it: Dictionary in c.items:
-				if it.has("chance") and rng.randf() > float(it.chance):
+				if it.has("chance") and rng.randf() > maxf(float(it.chance), MIN_CHANCE):
 					continue
 				var b: Array = (it.box as Array).duplicate()
 				var v: Array = it.get("vary", [0, 0, 0])
-				b[3] = float(b[3]) - rng.randf() * float(v[0])
-				b[4] = float(b[4]) - rng.randf() * float(v[1])
-				b[5] = float(b[5]) - rng.randf() * float(v[2])
+				for k in 3:
+					var extent := float(b[k + 3]) - float(b[k])
+					b[k + 3] = float(b[k + 3]) - rng.randf() * minf(float(v[k]), extent * MAX_VARY)
 				var mats: Array = it.get("mats", [String(it.get("mat", "WOOD"))])
 				items.append({"box": b, "mat": String(mats[rng.randi() % mats.size()])})
 			if items.is_empty():
