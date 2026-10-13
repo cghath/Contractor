@@ -314,7 +314,7 @@ func _physics_process(delta: float) -> void:
 			_ai_physics(delta)
 		return
 	if multiplayer.is_server():
-		_update_carried()  # a player carrying or dragging someone: the host moves the casualty
+		_update_carried(delta)  # a player carrying or dragging someone: the host moves the casualty
 	if not is_local():
 		return
 	if not vitals.is_up() and carried_by_pos != null:
@@ -386,7 +386,8 @@ func _ai_physics(delta: float) -> void:
 	if is_reloading and _now() >= _busy_until:
 		is_reloading = false
 	if (not vitals.is_up() or carriable_while_up) and is_instance_valid(carried_by):
-		global_transform = carried_by.carry_transform()
+		if carried_by.carry_holds():
+			global_transform = carried_by.carry_transform()
 		velocity = Vector3.ZERO
 		return
 	if is_instance_valid(ragdoll):
@@ -397,12 +398,14 @@ func _ai_physics(delta: float) -> void:
 		return  # riding: the seat moves the body (Vehicle)
 	is_aiming = want_aim and vitals.is_up() and not is_reloading and inventory.hands == &"" and carrying == null
 	movement.step(delta)
-	_update_carried()
+	_update_carried(delta)
 
 
 ## Speed multiplier for moving a downed body (1 when not carrying or dragging). Reads
 ## carry_mode, so it works on the owner's machine too.
 func carry_speed_mult() -> float:
+	if carry_mode != &"" and _now() < carry_busy_until:
+		return 0.0  # picking them up or putting them down
 	match carry_mode:
 		CARRY:
 			return CARRY_SPEED_MULT
@@ -419,14 +422,29 @@ func carry_transform() -> Transform3D:
 	return global_transform * Transform3D(Basis(Vector3.UP, PI * 0.5), Vector3(0.0, 0.55, 0.15))
 
 
-## Host only. Keeps a carried body (AI or human) with this soldier.
-func _update_carried() -> void:
+## Host: whether the body this soldier moves is in the hold (on the shoulder, or dragged), so
+## it goes where they go; not while it's still being picked up or taken hold of, nor while
+## it's being put down.
+func carry_holds() -> bool:
+	return _carry_phase == &""
+
+
+## Host only. Keeps a carried body (AI or human) with this soldier, and ends a pick-up or
+## put-down when its time is up.
+func _update_carried(delta: float) -> void:
 	if carrying == null:
 		return
 	if not is_instance_valid(carrying) or not _movable(carrying) or carrying.carried_by != self or not vitals.is_up():
 		release_carried()
 		return
-	if not carrying.is_ai():
+	_carry_phase_left -= delta  # game time, like the animation it ends
+	if _carry_phase != &"" and _carry_phase_left <= 0.0:
+		if _carry_phase == &"lower":
+			release_carried()
+			return
+		_carry_phase = &""  # up on the shoulder, or got hold: from here they come along
+		CharacterModel.server_carry(self, carrying, carry_mode)  # a plain hold (late joiners don't replay the lift)
+	if carry_holds() and not carrying.is_ai():
 		carrying._client_carried.rpc_id(carrying.owner_peer(), carry_transform().origin)
 
 
@@ -444,7 +462,7 @@ func server_pick_up_body(other: Soldier, mode := CARRY, reach := REVIVE_RANGE) -
 	other.carried_by = self
 	other._client_lifted.rpc(true)  # a moved body mustn't shove its carrier around
 	carrying = other
-	_set_carry_mode(mode)
+	_set_carry_mode(mode, &"lift" if mode == CARRY else &"grab")
 	return true
 
 
@@ -453,15 +471,40 @@ static func _movable(other: Soldier) -> bool:
 	return not other.vitals.is_up() or other.carriable_while_up
 
 
-## Host only. Puts down whoever this soldier carries or drags.
+## Host only. Puts down whoever this soldier carries, the way a squadmate would: off the
+## shoulder onto the ground in front over CARRY_LOWER_S, standing still (the body already lies
+## where it's going, so nothing waits on the animation), then lets go. A dragged body is let go
+## at once. For anything that can't wait (the carrier hit, a vehicle, a teleport) use
+## release_carried.
+func server_put_down() -> void:
+	if carrying == null or _carry_phase == &"lower":
+		return
+	if carry_mode != CARRY or not is_instance_valid(carrying):
+		release_carried()
+		return
+	var spot := _put_down_spot()
+	if carrying.is_ai():
+		carrying.global_position = spot
+		carrying.rotation = Vector3(0, rotation.y, 0)
+	else:
+		carrying._client_carried.rpc_id(carrying.owner_peer(), spot)
+	_set_carry_mode(CARRY, &"lower")
+
+
+## Where a body put down off the shoulder lies: in front of the carrier.
+func _put_down_spot() -> Vector3:
+	return global_position - global_basis.z * 0.8
+
+
+## Host only. Lets go of whoever this soldier carries or drags, at once.
 func release_carried() -> void:
 	if is_instance_valid(carrying) and carrying.carried_by == self:
 		carrying.carried_by = null
 		carrying._client_lifted.rpc(false)
 		CharacterModel.server_carry(null, carrying, &"")  # the casualty's pose, for every peer
 		if carrying.is_ai():
-			if carry_mode != DRAG:  # a dragged body is already on the ground behind
-				carrying.global_position = global_position - global_basis.z * 0.8
+			if carry_mode != DRAG and _carry_phase != &"lower":  # a dragged or lowered body is already on the ground
+				carrying.global_position = _put_down_spot()
 			carrying.rotation = Vector3(0, rotation.y, 0)
 	carrying = null
 	_set_carry_mode(&"")
@@ -612,6 +655,11 @@ func _server_squad_command(cmd: String, point: Vector3, names: PackedStringArray
 	var squad := CompoundLevel.current(self).squad_for(faction)
 	if squad == null:
 		return
+	var ordered_why := squad.order_command(self, cmd, point, names)  # the command menu's orders (queue 12)
+	if ordered_why != "?":
+		if ordered_why != "":
+			_client_message.rpc_id(owner_peer(), ordered_why)
+		return
 	match cmd:
 		"follow":
 			squad.give_order(self, Squad.Order.FOLLOW, point, names)
@@ -639,6 +687,10 @@ func _server_squad_command(cmd: String, point: Vector3, names: PackedStringArray
 		"fire_launcher":  # wave 5: a squadmate with a launcher fires at the vehicle there, or the spot
 			if LauncherAI.order_squad(squad, self, point, names) == "":
 				_client_message.rpc_id(owner_peer(), "Nobody selected has a loaded launcher or rounds")
+		_ when cmd.begins_with("support:"):  # wave 5b: helicopter supports and AAVs (Supports)
+			var why := Supports.server_command(self, cmd, point, names)
+			if why != "":
+				_client_message.rpc_id(owner_peer(), why)
 		_:
 			if not squad.command(self, cmd, point, names):  # formation, target, combat mode, team
 				_client_message.rpc_id(owner_peer(), "Can't target that" if cmd.begins_with("target:") else ("Can't escort that" if cmd.begins_with("escort:") else "Order not given"))
@@ -987,6 +1039,8 @@ const TREAT_CHECK_S := 0.1
 ## rushed (proposed).
 const UNDER_FIRE_S := 3.0
 const UNDER_FIRE_SUPPRESSION := 0.3
+## What the session log calls taking a tourniquet off (_log_care's item; it has no item of its own).
+const LOG_TOURNIQUET_OFF := &"tourniquet removal"
 
 var _treat_serial := 0  # host: bumps with each timed treatment
 
@@ -1029,12 +1083,13 @@ func under_fire() -> bool:
 ## Vitals treatment interface): checks it would help and that you carry the item, takes the
 ## item's time (longer on yourself for a tourniquet; `rushed` only for a tourniquet:
 ## quicker, but it lets 30% through), then applies it and uses the item up. A tourniquet
-## placed while you're under fire goes on rushed whatever you asked for.
+## placed while you're under fire goes on rushed whatever you asked for. `their_kit`: the item
+## comes out of the casualty's own kit when they carry one (_kit_for), else out of yours.
 @rpc("any_peer", "call_local", "reliable")
-func _server_treat(path: NodePath, item_id: StringName, part: StringName, rushed := false) -> void:
+func _server_treat(path: NodePath, item_id: StringName, part: StringName, rushed := false, their_kit := false) -> void:
 	if not _from_owner() or not vitals.is_up() or _is_busy():
 		return
-	_treat(get_node_or_null(path) as Node3D, item_id, part, rushed)
+	_treat(get_node_or_null(path) as Node3D, item_id, part, rushed, their_kit)
 
 
 ## Puts a triage card (Vitals.TRIAGE_*) on `path` (a casualty within reach, or yourself).
@@ -1063,38 +1118,56 @@ func _server_remove_tourniquet(path: NodePath, part: StringName) -> void:
 	if other == null or other.is_dead():
 		return
 	if not _in_treat_reach(target):
+		_log_care(target, LOG_TOURNIQUET_OFF, part, "refused: Too far away")
 		_client_message.rpc_id(owner_peer(), "Too far away")
 		return
 	var why := other.removal_problem(part)
 	if why != "":
+		_log_care(target, LOG_TOURNIQUET_OFF, part, "refused: " + why)
 		_client_message.rpc_id(owner_peer(), why)
 		return
 	var item := ItemDB.get_item(WoundModel.TOURNIQUET)
 	var label := "Removing tourniquet, %s..." % Vitals.part_name(part)
-	if not await _timed_care(target, other, float(item.stats.get("remove_s", 3.0)), label, part):
+	if not await _timed_care(target, other, float(item.stats.get("remove_s", 3.0)), label, part, &"", LOG_TOURNIQUET_OFF):
 		return
 	var count := other.server_remove_tourniquets(part)
 	if count <= 0:
+		_log_care(target, LOG_TOURNIQUET_OFF, part, "refused: " + other.removal_problem(part))
 		_client_message.rpc_id(owner_peer(), other.removal_problem(part))
 		return
 	var kept := inventory.take(WoundModel.TOURNIQUET, count)
 	if kept < count:
 		_server_spawn_in_front(WoundModel.TOURNIQUET, count - kept)
+	_log_care(target, LOG_TOURNIQUET_OFF, part, "done")
 	_client_message.rpc_id(owner_peer(), "Tourniquet off, %s" % Vitals.part_name(part))
 
 
-## Host: a line in the session log for a treatment (SessionLog): who treats whom, with what, on
-## which part, and how it went (`outcome`: "done", "interrupted: why", "refused: why").
+## Host: a line in the session log for a treatment (SessionLog): who treats whom (log names:
+## same-named hostiles apart, a target dummy as one), with what, on which part, how far the
+## casualty is (_treat_distance; not on yourself), and how it went (`outcome`: "started (4.0 s)",
+## "done", "interrupted: why", "refused: why") (Captain, P0164 queue 7).
 func _log_care(target: Node, item_id: StringName, part: StringName, outcome: String) -> void:
 	if SessionLog.session_id == "":
 		return
-	var patient := (target as Soldier).display_name() if target is Soldier else (String(target.name) if target else "nobody")
-	SessionLog.note("%s treats %s: %s%s, %s" % [display_name(), "themself" if target == self else patient,
-		String(item_id) if item_id != &"" else "care", (" on " + Vitals.part_name(part)) if part != &"" else "", outcome])
+	var at := ""
+	if target != self and is_instance_valid(target) and target is Node3D:
+		at = " at %.1f m" % _treat_distance(target)
+	SessionLog.note("%s treats %s: %s%s%s, %s" % [log_name(), "themself" if target == self else SessionLog.who(target),
+		String(item_id) if item_id != &"" else "care", (" on " + Vitals.part_name(part)) if part != &"" else "", at, outcome])
+
+
+## Whose kit treating `target` with `item_id` uses up: with `their_kit`, the casualty's own
+## while they carry one (squad AI uses a casualty's own kit first and keeps its own for the
+## next casualty: Captain, P0164 queue 17), otherwise this soldier's.
+func _kit_for(target: Node3D, item_id: StringName, their_kit: bool) -> Inventory:
+	var casualty := target as Soldier
+	if their_kit and casualty and casualty != self and Vitals.has_item(casualty.inventory, item_id):
+		return casualty.inventory
+	return inventory
 
 
 ## Host side of a treatment (_server_treat, _server_use_medical).
-func _treat(target: Node3D, item_id: StringName, part: StringName, rushed: bool) -> void:
+func _treat(target: Node3D, item_id: StringName, part: StringName, rushed: bool, their_kit := false) -> void:
 	var other := Vitals.find_on(target) if target else null
 	if other == null or other.is_dead():
 		return
@@ -1104,7 +1177,7 @@ func _treat(target: Node3D, item_id: StringName, part: StringName, rushed: bool)
 		why = "Too far away"
 	elif item == null or not item.stats.has("treat_s"):
 		why = "That doesn't treat anything"
-	elif not Vitals.has_item(inventory, item_id):
+	elif not Vitals.has_item(_kit_for(target, item_id, their_kit), item_id):
 		why = "You have no %s" % item.name
 	elif target == self and Vitals.needs_other_hands(item_id):
 		why = "Someone else has to place that"
@@ -1122,7 +1195,8 @@ func _treat(target: Node3D, item_id: StringName, part: StringName, rushed: bool)
 	var label := "%s%s, %s..." % [item.name, " (rushed)" if rushed else "", Vitals.part_name(part)]
 	if not await _timed_care(target, other, treat_seconds(target, item, rushed), label, part, item_id):
 		return
-	if not Vitals.has_item(inventory, item_id):
+	var kit := _kit_for(target, item_id, their_kit)  # (theirs may have run out meanwhile)
+	if not Vitals.has_item(kit, item_id):
 		_log_care(target, item_id, part, "refused: no longer carrying it")
 		_client_message.rpc_id(owner_peer(), "You no longer have a %s" % item.name)
 		return
@@ -1132,7 +1206,7 @@ func _treat(target: Node3D, item_id: StringName, part: StringName, rushed: bool)
 		_client_message.rpc_id(owner_peer(), "%s does nothing there now" % item.name)
 		return
 	if not item.stats.get("no_item", false) and not item.stats.get("reusable", false):
-		inventory.take_medical(item_id)
+		kit.take_medical(item_id)
 	_log_care(target, item_id, part, "done")
 	var note := other.care_note()
 	if note != "":
@@ -1145,16 +1219,21 @@ func _treat(target: Node3D, item_id: StringName, part: StringName, rushed: bool)
 ## casualty shows as being treated. Returns false (and tells the treater) if it's
 ## interrupted: the treater went down or moved away, the casualty was moved, died or is out
 ## of reach. True once the time is up. `part` is where the hands work and `item` what with
-## (the animation's technique: CharacterModel.TECHNIQUES).
-func _timed_care(target: Node3D, other: Vitals, seconds: float, label: String, part := &"", item := &"") -> bool:
+## (the animation's technique: CharacterModel.TECHNIQUES); `logged` is what the session log
+## calls it when that isn't `item` (LOG_TOURNIQUET_OFF). The log gets a line when it starts
+## and when it's interrupted, with how far and why (who moved the casualty: _who_moved).
+func _timed_care(target: Node3D, other: Vitals, seconds: float, label: String, part := &"", item := &"", logged := &"") -> bool:
 	_treat_serial += 1
 	var serial := _treat_serial
 	var my_start := global_position
 	var their_start := target.global_position
 	var carrier := _carrier_id(target)
+	var had_them: Soldier = (target as Soldier).carried_by if carrier != 0 else null
+	var what := logged if logged != &"" else item
 	_server_busy_until = _now() + seconds
 	other.server_begin_treatment(seconds)
 	_client_busy.rpc_id(owner_peer(), seconds, label)
+	_log_care(target, what, part, "started (%.1f s)" % seconds)
 	var anim := model.server_treat(target, part, seconds, item)  # kneeling at the wound, with the item's technique, for every peer
 	var end := _now() + seconds
 	while _now() < end:
@@ -1162,6 +1241,7 @@ func _timed_care(target: Node3D, other: Vitals, seconds: float, label: String, p
 		if not is_inside_tree():
 			return false
 		var why := ""
+		var detail := ""  # the session log's more (the player's message keeps it short)
 		if serial != _treat_serial:
 			why = "something else came first"
 		elif not vitals.is_up():
@@ -1170,16 +1250,19 @@ func _timed_care(target: Node3D, other: Vitals, seconds: float, label: String, p
 			why = "the casualty is gone"
 		elif global_position.distance_to(my_start) > TREAT_MOVE_M:
 			why = "you moved"
+			detail = " %.1f m" % global_position.distance_to(my_start)
 		elif target != self and _carrier_id(target) != carrier:
 			why = "they were moved"
+			detail = ": " + _who_moved(target, had_them, their_start)
 		elif target != self and carrier != get_instance_id() and target.global_position.distance_to(their_start) > TREAT_MOVE_M:
 			why = "they were moved"  # (a body you carry yourself moves with you: that's "you moved")
+			detail = ": " + _who_moved(target, had_them, their_start)
 		elif not _in_treat_reach(target):
 			why = "out of reach"
 		if why != "":
 			if is_instance_valid(other):
 				other.server_end_treatment()
-			_log_care(target, item, part, "interrupted: " + why)
+			_log_care(target, what, part, "interrupted: " + why + detail)
 			model.server_stop(anim)
 			_server_busy_until = _now()
 			_client_busy.rpc_id(owner_peer(), 0.0, "Treatment interrupted: %s" % why)
@@ -1191,6 +1274,26 @@ func _timed_care(target: Node3D, other: Vitals, seconds: float, label: String, p
 
 func _in_treat_reach(target: Node3D) -> bool:
 	return target == self or ((target as Soldier).body_point() if target is Soldier else target.global_position).distance_to(global_position) <= TREAT_REACH
+
+
+## How far `target` is for the session log's treatment lines (_log_care), measured as
+## _in_treat_reach measures it: to its body_point (a ragdoll's chest), not its capsule.
+func _treat_distance(target: Node3D) -> float:
+	return ((target as Soldier).body_point() if target is Soldier else target.global_position).distance_to(global_position)
+
+
+## Host: who moved `target` during a treatment, for the session log (Captain, P0164 queue 7):
+## whoever carries or drags them now ("dragged by Rahimi [Bravo]"), else whoever had them
+## when it started and put them down (`had_them`), else that nobody had them (they got up, or
+## something shoved the body), with how far they went from `start`.
+func _who_moved(target: Node3D, had_them: Soldier, start: Vector3) -> String:
+	var moved := "%.1f m" % target.global_position.distance_to(start)
+	var s := target as Soldier
+	if s and is_instance_valid(s.carried_by):
+		return "%s by %s (%s)" % ["dragged" if s.carried_by.carry_mode == DRAG else "carried", s.carried_by.log_name(), moved]
+	if is_instance_valid(had_them):
+		return "put down by %s (%s)" % [had_them.log_name(), moved]
+	return "nobody carried them (%s, %s)" % [moved, s.vitals.condition_text() if s else "not a soldier"]
 
 
 ## Who carries or drags `target` (an instance id, 0 for nobody), to notice it being moved.
@@ -1223,7 +1326,13 @@ const DRAG := &"drag"
 const CARRY_SPEED_MULT := 0.55
 const DRAG_SPEED_MULT := 0.35
 ## Where a dragged body lies, in the dragger's frame (+z is behind).
-const DRAG_OFFSET := Vector3(0.0, 0.0, 1.1)
+const DRAG_OFFSET := Vector3(0.0, 0.0, 1.0)
+## Seconds to get a body up onto the shoulder, to take hold of a drag handle, and to lower a
+## carried body to the ground. The carrier stands still meanwhile (carry_speed_mult) and
+## CharacterModel plays them on every peer (server_carry's phase).
+const CARRY_LIFT_S := 1.6
+const DRAG_GRAB_S := 0.7
+const CARRY_LOWER_S := 1.3
 ## How far (body to body) the host accepts an interaction: the menu's reach plus slack for lag.
 const INTERACT_REACH := 3.0
 const INTERACT_SLACK := 1.0
@@ -1231,6 +1340,11 @@ const INTERACT_SLACK := 1.0
 ## CARRY, DRAG or empty. Set by the host; the owner learns it through _client_carry_mode
 ## (movement reads it for speed), so it's right on the host and the owner's machine.
 var carry_mode: StringName = &""
+## Host: the carry phase playing (&"lift", &"grab", &"lower"; &"" just holding) and how long it has left.
+var _carry_phase := &""
+var _carry_phase_left := 0.0  # seconds of it to go
+## Host and owner: the carrier stands still until then (a pick-up, take-hold or put-down).
+var carry_busy_until := 0.0
 
 
 ## "Player 1" for a player, the callsign for an AI squadmate, or a body's label (a dead
@@ -1241,6 +1355,20 @@ func display_name() -> String:
 	if is_ai():
 		return person_name if person_name != "" else String(name)
 	return "Player %s" % name
+
+
+## The name in the session log (SessionLog.who): display_name(), and for an AI its node's
+## callsign in brackets when that differs ("Rahimi [Hostile3]"), so hostiles who share a
+## surname read apart (Captain, P0164 queue 9). A body spawned as one (a player's left
+## behind, one restored from the zone save) gets a short tag from its uid instead, the same
+## across saves ("Player 1 [body 3fa2]"), so it reads apart from the player who respawned.
+func log_name() -> String:
+	var shown := display_name()
+	if body_label != "":
+		return "%s [body %04x]" % [shown, hash(body_uid) & 0xffff]
+	if not is_ai() or String(name) == shown:
+		return shown
+	return "%s [%s]" % [shown, name]
 
 
 @rpc("any_peer", "call_local", "reliable")
@@ -1274,7 +1402,7 @@ func _server_release_body() -> void:
 		return
 	if is_instance_valid(carrying) and carrying.care_by == self:
 		carrying.care_by = null
-	release_carried()
+	server_put_down()
 
 
 ## Hands one unit of a stowed entry to a standing squadmate, if it fits on them.
@@ -1311,7 +1439,8 @@ func _server_move_body(path: NodePath, mode: StringName) -> void:
 	if other == null or other == self or not _movable(other):
 		return  # a downed or a dead body (or a cuffed captive)
 	if carrying == other:
-		_set_carry_mode(mode)
+		if mode != carry_mode and _carry_phase != &"lower":
+			_set_carry_mode(mode, &"lift" if mode == CARRY else &"grab")
 		return
 	var why := ""
 	if carrying != null:
@@ -1331,19 +1460,29 @@ func _server_move_body(path: NodePath, mode: StringName) -> void:
 
 
 ## Host only. Sets carry_mode and tells the owning player.
-func _set_carry_mode(mode: StringName) -> void:
-	if carry_mode == mode:
-		return
+## Host: carrying, dragging or neither (`mode`), starting `phase` (&"lift", &"grab" or &"lower",
+## timed by CARRY_LIFT_S, DRAG_GRAB_S, CARRY_LOWER_S; the carrier stands still through it).
+func _set_carry_mode(mode: StringName, phase := &"") -> void:
+	if carry_mode == mode and (phase == &"" or phase == _carry_phase):
+		return  # already so (a phase playing plays on)
+	var seconds: float = {&"lift": CARRY_LIFT_S, &"grab": DRAG_GRAB_S, &"lower": CARRY_LOWER_S}.get(phase, 0.0)
+	if mode == &"":
+		phase = &""
+		seconds = 0.0
 	carry_mode = mode
-	CharacterModel.server_carry(self, carrying, mode)  # both bodies' poses, for every peer
+	_carry_phase = phase
+	_carry_phase_left = seconds
+	carry_busy_until = _now() + seconds
+	CharacterModel.server_carry(self, carrying, mode, phase, seconds)  # both bodies' poses, for every peer
 	if not is_ai() and owner_peer() != multiplayer.get_unique_id():
-		_client_carry_mode.rpc_id(owner_peer(), mode)
+		_client_carry_mode.rpc_id(owner_peer(), mode, seconds)
 
 
 @rpc("any_peer", "call_local", "reliable")
-func _client_carry_mode(mode: StringName) -> void:
+func _client_carry_mode(mode: StringName, busy_s := 0.0) -> void:
 	if multiplayer.get_remote_sender_id() == 1:
 		carry_mode = mode
+		carry_busy_until = _now() + busy_s
 
 
 ## Every peer: a carried or dragged body stops colliding, so it doesn't shove whoever moves it.
@@ -1355,23 +1494,26 @@ func _client_lifted(lifted: bool) -> void:
 
 ## Host: a line in the session log when this soldier goes down or dies (`what`): who, why (what
 ## last hurt them, or bleed-out / arrest when nothing recent did), where on the body, and who
-## did it (Harm.last) from how far. Does nothing without a session (SessionLog).
+## did it (Harm.last) from how far, both by their log_name (Captain, P0164 queue 9: same-named
+## hostiles apart). Does nothing without a session (SessionLog), nor for a body spawned as one
+## (body_label: a player's left behind, one restored from the zone save), whose death was
+## logged when it happened (it was logged a second time as a bleed-out).
 func _log_casualty(what: String) -> void:
-	if SessionLog.session_id == "":
+	if SessionLog.session_id == "" or body_label != "":
 		return
 	var c: Dictionary = vitals.last_cause
 	var recent := not c.is_empty() and vitals.seconds_since_hit() < 3.0
 	var cause := String(c.get("cause", "")) if recent else ("cardiac arrest" if vitals.in_cardiac_arrest() else "bleed-out")
 	if not recent and what == "went down":
 		cause = "out: " + ", ".join(vitals.why_unconscious())
-	var line := "%s %s (%s): %s" % [display_name(), what, faction, cause]
+	var line := "%s %s (%s): %s" % [log_name(), what, faction, cause]
 	if recent and c.has("part"):
 		line += ", " + String(c.part)
 	var by := Harm.last(self)
 	if String(by.get("name", "")) != "" and _now() - float(by.get("at", -1000.0)) < 900.0:
-		line += ", %s %s (%s)" % ["by" if recent else "last hit by", by.name, by.faction]
-		var dist := float(c.get("distance", -1.0)) if recent else -1.0
 		var who := get_node_or_null(NodePath(String(by.get("path", "")))) as Node3D
+		line += ", %s %s (%s)" % ["by" if recent else "last hit by", SessionLog.who(who) if who != null else by.name, by.faction]
+		var dist := float(c.get("distance", -1.0)) if recent else -1.0
 		if dist < 0.0 and who != null:
 			dist = global_position.distance_to(who.global_position)
 		if dist >= 0.0:

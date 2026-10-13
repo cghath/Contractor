@@ -37,8 +37,12 @@ const SUPPORTS := {
 	"transport": {"name": "Helicopter transport", "hot_only": true},
 	"aav": {"name": "AAV", "hot_only": true},
 }
+## A motor pool vehicle's support id (wave 5b): "pool:<MotorPool id>".
+const POOL_PREFIX := "pool:"
 ## Proposed: players arriving at an insertion point stand this far apart.
 const INSERT_SPACING_M := 2.0
+## An insertion point's method when a Black Hawk flies the squad in (wave 5b, hot zones).
+const HELI := "heli"
 
 ## The compound's stand-in contract and zone, for the debug path (Menu: briefing test).
 const DEBUG_CONTRACT := {
@@ -119,12 +123,27 @@ func insertion() -> Dictionary:
 
 
 ## Support ids this deployment can pick: the contract's list, else the zone's, else all;
-## transport and AAVs only in a hot zone.
+## transport and AAVs only in a hot zone (AAVs also on a coastal contract zone, wave 5b
+## AavSupport.zone_problem); then the company's own vehicles (wave 5b, MotorPool), "pool:<id>".
 func available_supports() -> Array:
 	var ids: Array = contract.get("supports", zone.get("supports", SUPPORTS.keys()))
 	var hot := String(zone.get("kind", "contract")) == "hot"
-	return ids.filter(func(id: Variant) -> bool:
-		return SUPPORTS.has(String(id)) and (hot or not SUPPORTS[String(id)].hot_only))
+	var aav_here := hot or AavSupport.coast_contracts(self)
+	var out := ids.filter(func(id: Variant) -> bool:
+		return SUPPORTS.has(String(id)) and (hot or not SUPPORTS[String(id)].hot_only or (String(id) == "aav" and aav_here)))
+	for v: Dictionary in zone.get("pool", []):
+		out.append(POOL_PREFIX + String(v.id))
+	return out
+
+
+## What a support id is called on the briefing (a pool vehicle by its name).
+func support_name(id: String) -> String:
+	if SUPPORTS.has(id):
+		return String(SUPPORTS[id].name)
+	for v: Dictionary in zone.get("pool", []):
+		if POOL_PREFIX + String(v.id) == id:
+			return "%s (motor pool)" % String(v.name)
+	return id
 
 
 ## Peer ids of everyone in the session (the host and every client; clients read the host's list).
@@ -189,7 +208,10 @@ func server_open(p_contract: Dictionary, p_zone: Dictionary) -> void:
 	if not multiplayer.is_server():
 		return
 	contract = p_contract.duplicate(true)
-	zone = p_zone.duplicate(true)
+	zone = Briefing.with_heli_insertion(p_zone)
+	if MotorPool.in_use():  # wave 5b: the company's vehicles that can come along
+		zone["pool"] = MotorPool.list().filter(func(v: Dictionary) -> bool: return MotorPool.problem(String(v.id)) == "") \
+			.map(func(v: Dictionary) -> Dictionary: return {"id": String(v.id), "name": String(v.name)})
 	phase = Phase.BRIEFING
 	ready_peers = {}
 	supports = []
@@ -263,12 +285,30 @@ func server_start(force := false) -> bool:
 	return true
 
 
-## The briefing's own flow (auto_flow): squad to the insertion point, extraction, reinforcements.
+## A copy of `p_zone` where a hot zone's insertion points can also be reached by helicopter
+## (wave 5b: a "heli" point beside each one on foot; HeliSupports.server_insert flies the squad in).
+static func with_heli_insertion(p_zone: Dictionary) -> Dictionary:
+	var out := p_zone.duplicate(true)
+	if String(out.get("kind", "contract")) != "hot":
+		return out
+	var points: Array = []
+	for point: Dictionary in out.get("insertion_points", []):
+		points.append(point)
+		if String(point.get("method", "foot")) == "foot":
+			points.append(point.merged({"id": "%s_heli" % point.get("id", ""), "name": "%s by helicopter" % point.get("name", ""), "method": HELI}, true))
+	out["insertion_points"] = points
+	return out
+
+
+## The briefing's own flow (auto_flow): squad to the insertion point (flown in for a "heli"
+## one), extraction, reinforcements.
 func _default_flow() -> void:
 	var point := insertion()
 	var p: Array = point.get("pos", [])
 	if p.size() >= 2:
-		server_move_squad_to(Vector2(float(p[0]), float(p[1])))
+		var at := Vector2(float(p[0]), float(p[1]))
+		if String(point.get("method", "foot")) != HELI or not HeliSupports.server_insert(self, at):
+			server_move_squad_to(at)
 	var extraction := MapNodes.extraction(self)
 	if extraction:
 		extraction.server_begin(plan)

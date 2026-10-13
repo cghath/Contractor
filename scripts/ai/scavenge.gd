@@ -16,7 +16,10 @@ extends RefCounted
 ## - Armor, only well out of contact (the swap takes time): a plate that protects more than his
 ##   own (higher rating, or his own is cracked through or missing) and fits his carrier; a
 ##   helmet when he has none or a better one is there. His old piece stays on the body.
-## - Another rifle only when his own has no ammunition left at all and the body's has some.
+## - Another rifle only when his own has no ammunition left at all and the body's has some. His
+##   empty one he lays on the ground beside the body, not on its sling: a body whose rifle was
+##   taken shows none (Captain, P0164 queue 15: the old rifle slung on the body looked like
+##   the one taken off it).
 ## Each candidate scores how short of it he is, weighted by how much it matters (ammo first,
 ## then the life-saving medical items, other medical, grenades, the rest). He takes nothing
 ## that would put his load over MAX_LOAD_KG (intel and armor swaps aside), no bulky items
@@ -51,6 +54,10 @@ const ARMOR_MARGIN := 1.0
 const KIT_SCORE := 0.9
 ## Proposed: seconds per pick, by where the item is.
 const PICK_S := {&"pouch": 1.5, &"vest": 2.0, &"pockets": 2.0, &"backpack": 4.0, &"weapon": 3.0, &"helmet": 3.0, &"plate": 8.0}
+## Proposed: an empty weapon swapped for the body's is laid this far (metres) from the body's
+## chest towards the soldier, let go this high above it (beside_body).
+const DROP_BESIDE_M := 0.6
+const DROP_LIFT_M := 0.4
 
 
 ## What `s` is short of, as needs keyed by item id: {"kind", "want" (units; rounds for ammo),
@@ -329,9 +336,10 @@ static func _pick_seconds(container: StringName) -> float:
 
 # --- Swaps ------------------------------------------------------------------------------
 
-## Takes the body's weapon, plate or helmet into his slot `pick.into` and leaves his old one
-## on the body (in the slot it came out of when it fits there, else stowed on the body). If
-## any step can't be done, everything goes back as it was.
+## Takes the body's weapon, plate or helmet into his slot `pick.into` and leaves his old one:
+## a weapon on the ground beside the body (DROP_BESIDE_M towards him), armour on the body (in
+## the slot it came out of when it fits there, else stowed on the body). If any step can't be
+## done, everything goes back as it was.
 static func _swap(s: Soldier, dead: Soldier, pick: Dictionary) -> bool:
 	var theirs := dead.inventory
 	var mine := s.inventory
@@ -351,15 +359,31 @@ static func _swap(s: Soldier, dead: Soldier, pick: Dictionary) -> bool:
 	if taken.is_empty():
 		return false
 	var old := mine.unequip(pick.into) if mine.slots[pick.into] != &"" else {}
+	var level := CompoundLevel.current(dead)
+	var lay_down: bool = not old.is_empty() and pick.into in Inventory.WEAPON_SLOTS and level != null
 	if not mine.slots[pick.into] == &"" or mine.take(taken.id, 1, taken.get("state", {})) != 1 \
-			or (not old.is_empty() and theirs.take(old.id, 1, old.get("state", {})) != 1):
+			or (not old.is_empty() and not lay_down and theirs.take(old.id, 1, old.get("state", {})) != 1):
 		theirs.net_state = before_theirs
 		mine.net_state = before_mine
 		if s.active_slot != slot_before:
 			s.select_weapon(slot_before)
 		return false
+	if lay_down:
+		level.server_spawn_dropped(old.id, 1, beside_body(s, dead), old.get("state", {}))
 	# Unequipping his own rifle switched him to the sidearm; the AI never selects a weapon
 	# itself, so bring up the one he just took.
 	if pick.into in Inventory.WEAPON_SLOTS and s.active_slot != pick.into:
 		s.select_weapon(pick.into)
 	return true
+
+
+## Where `s` lays something down beside the body `dead`: DROP_BESIDE_M from where it lies
+## (Soldier.body_point) towards him, a little up so it falls onto the ground (items fall
+## through bodies, onto the world).
+static func beside_body(s: Soldier, dead: Soldier) -> Vector3:
+	var chest := dead.body_point()
+	var towards := s.global_position - chest
+	towards.y = 0.0
+	if towards.length() < 0.05:
+		towards = Vector3.RIGHT
+	return chest + towards.normalized() * DROP_BESIDE_M + Vector3.UP * DROP_LIFT_M

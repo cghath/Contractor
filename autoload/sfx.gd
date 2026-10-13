@@ -355,7 +355,7 @@ func _update_engines(ear: Vector3, delta: float) -> void:
 		var key := v.get_instance_id()
 		var id := engine_id(v)
 		var def: Dictionary = defs.get(String(id), {})
-		var running := not v.wrecked and v.driver() != null and v.global_position.distance_to(ear) <= float(def.get("range_m", 200.0))
+		var running := not v.wrecked and v.engine_running() and v.global_position.distance_to(ear) <= float(def.get("range_m", 200.0))
 		if not running:
 			continue
 		var e: Dictionary = _engines.get(key, {})

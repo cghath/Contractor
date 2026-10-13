@@ -63,6 +63,7 @@ func _ready() -> void:
 	await _test_treat()
 	await _test_techniques()
 	await _test_loot()
+	await _test_looted_weapons()
 	await _test_stand_where_it_lay()
 	await _test_respawn_not_where_it_lay()
 	await _test_dummy()
@@ -100,7 +101,7 @@ func _test_carry() -> void:
 		and player.model.carry_net.get("with") == String(alpha.get_path()), "the carrier's carry_net: carrying Alpha")
 	check(alpha.model.carry_net.get("mode") == CharacterModel.CARRIED and alpha.model.carry_net.get("with") == String(player.get_path()),
 		"the casualty's carry_net: carried by the player")
-	await _seconds(0.7)
+	await _seconds(Soldier.CARRY_LIFT_S + 0.5)  # picked up off the ground, then up on the shoulder
 	check(alpha.model.carry_shown().get("mode") == CharacterModel.CARRIED and player.model.carry_shown().get("mode") == CharacterModel.CARRY,
 		"both models show the carry")
 	var hips := player.model.torso.to_global(CharacterModel.CARRY_HIPS)
@@ -112,9 +113,10 @@ func _test_carry() -> void:
 	check(pelvis.y > player.global_position.y + 1.35, "carried high, over the shoulders (pelvis %.2f m up)" % (pelvis.y - player.global_position.y))
 	check(head.y < pelvis.y - 0.25 and shin.y < pelvis.y - 0.25,
 		"limp and draped, not a plank: head %.2f m and shins %.2f m below the hips" % [pelvis.y - head.y, pelvis.y - shin.y])
-	var side_head := player.to_local(head).x
-	var side_shin := player.to_local(shin).x
-	check(side_head < -0.2 and side_shin > 0.2, "head and arms down the carrier's left, legs down the right (%.2f, %.2f)" % [side_head, side_shin])
+	var at_head := player.to_local(head)
+	var at_shin := player.to_local(shin)
+	check(at_head.z > 0.1 and at_head.x < 0.1 and at_shin.z < 0.05 and at_shin.x > 0.2,
+		"folded over the right shoulder: head and arms down the back, legs down the front on the right (head %s, shin %s)" % [at_head.snapped(Vector3.ONE * 0.01), at_shin.snapped(Vector3.ONE * 0.01)])
 	for i in 2:
 		var target := player.model.torso.to_global(CharacterModel.CARRY_HANDS[i])
 		var off := player.model.hand_position(i == 0).distance_to(target)
@@ -197,13 +199,13 @@ func _test_human_casualty() -> void:
 	bravo._server_carry_body.rpc_id(1, player.get_path())
 	check(player.model.carry_net.get("mode") == CharacterModel.CARRIED and bravo.model.carry_net.get("mode") == CharacterModel.CARRY,
 		"a downed player carried by an AI squadmate")
-	await _seconds(0.7)
+	await _seconds(Soldier.CARRY_LIFT_S + 0.5)
 	# The player's own body isn't moved here (their machine does that): the drawn body
 	# still rides on Bravo, because it follows the carrier, not its own replicated transform.
 	var hips := bravo.model.torso.to_global(CharacterModel.CARRY_HIPS)
 	check(player.model.torso.global_position.distance_to(hips) < 0.05, "drawn over Bravo's shoulders wherever its own body is")
 	bravo._server_drag_body.rpc_id(1, player.get_path())
-	await _seconds(0.7)
+	await _seconds(Soldier.DRAG_GRAB_S + 0.5)
 	var strap := player.model.torso.to_global(CharacterModel.STRAP_POINTS[1])
 	check(bravo.model.hand_position(false).distance_to(strap) < HAND_TOLERANCE, "and dragged by the strap")
 	bravo._server_release_body.rpc_id(1)
@@ -459,6 +461,64 @@ func _test_loot() -> void:
 	await _seconds(2.0)
 
 
+## A weapon looted off a body leaves it (Captain, P0164 queue 15: a rifle stayed drawn on the
+## chest of a body it had been looted off). An AI is killed while aiming its rifle or its pistol,
+## or with its launcher on the shoulder; the rifle is taken by a player (Loot) or by a squadmate
+## whose own rifle is dry (Scavenge, as SquadAI does: a swap, his empty one laid on the ground),
+## the pistol and the launcher by a player. Nothing of either rifle, the pistol or the launcher
+## is drawn on the body or its ragdoll after, and its hands hold nothing.
+func _test_looted_weapons() -> void:
+	print("Looted weapons leave the body")
+	var mine := player.inventory.net_state.duplicate(true)
+	var cases := [[&"primary", &"m4a1", "player"], [&"primary", &"m4a1", "scavenger"], [&"sidearm", &"m17", "player"],
+		[&"launcher", &"at4", "player"]]
+	for i in cases.size():
+		var slot: StringName = cases[i][0]
+		var id: StringName = cases[i][1]
+		var by: String = cases[i][2]
+		var dead := _spawn_ai("Kilo%d" % i, &"hostile", SPOT + Vector3(-4.0 + i * 2.5, 0, 6.0), ["plate_carrier", "m4a1", "m17", "at4", "mag_556"])
+		await _frames(3)
+		dead.select_weapon(slot)
+		dead.want_aim = true
+		var ready := await _wait(func() -> bool:
+			if slot == &"launcher":
+				var rig := dead.get_node_or_null(^"LauncherRig") as LauncherRig
+				return rig != null and rig._held
+			return dead.is_aiming and dead.gear._held_key == slot and not dead.gear.drawing(), 3.0)
+		check(ready, "%s: an AI aims its %s (%s)" % [id, slot, "on the shoulder" if slot == &"launcher" else dead.gear._held_key])
+		dead.vitals.server_hit(Vitals.HEAD, {"round_class": Vitals.INTERMEDIATE})
+		await _frames(3)
+		await _settled(dead)
+		check(dead.vitals.is_dead() and not _weapon_drawn(dead, id).is_empty(), "killed mid-aim, its %s is still drawn on the body" % id)
+		var looter: Soldier = player
+		if by == "scavenger":
+			looter = _spawn_ai("Lima%d" % i, &"friendly", dead.body_point() + Vector3(0.6, 0.0, 0.0), ["plate_carrier", "m110"])
+			await _frames(3)
+			var dry := looter.inventory.state_of(&"primary").duplicate(true)
+			dry["rounds"] = 0  # no 7.62 left anywhere: he wants the body's rifle
+			looter.inventory.slot_state[&"primary"] = dry
+			looter.inventory._commit()
+			var pick := Scavenge.best_pick(looter, dead, false)
+			check(pick.get("kind") == "weapon" and Scavenge.apply(looter, dead, pick) == 1, "a squadmate with his M110 dry swaps it for the body's (%s)" % [pick])
+		else:
+			player.inventory.unequip(slot)  # room for it in the player's own slot
+			_beside(dead.body_point())
+			await _seconds(0.3)
+			player._server_loot_item.rpc_id(1, dead.get_path(), slot, -1, id)
+		check(dead.inventory.slots[slot] == &"" and looter.inventory.slots[slot] == id, "the %s goes from the body to the %s" % [id, by])
+		await _frames(3)
+		var left := _weapon_drawn(dead, id) + _weapon_drawn(dead, &"m110")
+		check(left.is_empty(), "and no weapon is drawn on the body or its ragdoll (%s)" % [left])
+		check(not is_instance_valid(dead.model._held), "its hands hold nothing")
+		player.inventory.net_state = mine.duplicate(true)
+		if looter != player:
+			looter.queue_free()
+		dead.inventory.strip()  # nothing left to drop round the test area
+		dead.server_remove_body()
+	_place_player()
+	await _frames(3)
+
+
 ## A downed body whose ragdoll slid or rolled off stands up where it lay, not back where it fell
 ## (Soldier._stand_where_ragdoll_lay, Ragdoll.rest_spot), and a following peer's ragdoll finds
 ## the same spot.
@@ -571,6 +631,34 @@ func _task_with(s: Soldier, item: StringName) -> Dictionary:
 		if task.item == item:
 			return task
 	return {}
+
+
+## Where weapon `id` is drawn on `s` now (shown, not on its way out), as paths from `s`: a
+## mesh of its voxel model anywhere on the body (gear, hands, ragdoll), or for a launcher (no
+## voxel model) a "Launcher" node.
+func _weapon_drawn(s: Soldier, id: StringName) -> Array[String]:
+	var art := VoxelArt.model_for(ItemDB.get_item(id))
+	var drawn: Array[Node] = []
+	if art != "":
+		var mesh := VoxelArt.mesh(art, s.model.variant)
+		drawn = s.find_children("*", "MeshInstance3D", true, false).filter(func(n: Node) -> bool: return (n as MeshInstance3D).mesh == mesh)
+	else:
+		drawn = s.find_children("*", "Node3D", true, false).filter(func(n: Node) -> bool:
+			return n.name == &"Launcher" or String(n.name).begins_with("@Launcher@"))
+	var out: Array[String] = []
+	for n in drawn:
+		if (n as Node3D).is_visible_in_tree() and not _going(n, s):
+			out.append(String(s.get_path_to(n)))
+	return out
+
+
+## Whether `n` or anything above it up to `top` is queued to go.
+static func _going(n: Node, top: Node) -> bool:
+	while n != null and n != top:
+		if n.is_queued_for_deletion():
+			return true
+		n = n.get_parent()
+	return false
 
 
 func _entry_of(s: Soldier, id: StringName) -> Dictionary:

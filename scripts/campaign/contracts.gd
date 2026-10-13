@@ -777,6 +777,8 @@ static func report_from_level(level: CompoundLevel, extracted: Array) -> Diction
 		var s := node as Soldier
 		if s == null or out.has(s) or s.is_queued_for_deletion():
 			continue
+		if s.has_meta(&"vehicle_crew") and not s.vitals.is_dead():
+			continue  # wave 5b: a support vehicle's crew isn't the squad's, nor missing (it goes home with it)
 		out[s] = true
 		if s.vitals.is_dead():
 			field.append_array(inventory_items(s.inventory))

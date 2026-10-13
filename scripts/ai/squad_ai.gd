@@ -59,12 +59,52 @@ extends Node
 ##   and within SCAVENGE_LEASH_M of the squad leader; the command menu orders one to a body
 ##   or forbids it (scavenge_allowed).
 
-enum Intent { FOLLOW, HOLD, MOVE_TO, PATROL, INVESTIGATE, FIGHT, CASUALTY, RELOAD, HEAL, SCAVENGE, ESCORT, FALL_BACK }
+enum Intent { FOLLOW, HOLD, MOVE_TO, PATROL, INVESTIGATE, FIGHT, CASUALTY, RELOAD, HEAL, SCAVENGE, ESCORT, FALL_BACK, TACTIC }
 ## Casualty care: NONE, the living-casualty steps (REACH to GUARD and CARRY), or carrying a
 ## dead friendly's BODY.
 enum Care { NONE, REACH, DRAG, TREAT, GUARD, CARRY, BODY }
 
 const THINK_S := 0.5
+## Tactics (queue 17 core; Squad, SquadTactics). A unit has the squad evaluator's task for it
+## (set_task) and may have a command-menu tactic order (give_tactic), which wins over the task.
+## Kinds: "base" and "suppress" put rounds on "aim" while nothing is in sight, "watch" faces
+## "point" (these three leave the unit doing what it was: fighting from cover, following,
+## holding); the rest move it (Intent.TACTIC): "maneuver" along "route" then fights there,
+## "assault" onto "point", "clear" (its "slot" in "op", SquadTactics.clear_op), "garrison"
+## ("spot", "face", "port"), "cover" (the best cover near it), "break" (back to "point", smoke
+## over open ground), "bound" (to "point" by bounding overwatch), "search" (to "point", looking),
+## "give_ammo" (to "who", hands over magazines), "pick_pack" (back for the pack it dropped). An ordered one that ends (cover, break, bound,
+## clear, give_ammo) leaves the unit holding where it got to; a timed one ("until") just ends.
+const MOVING_TACTICS: Array[StringName] = [&"maneuver", &"assault", &"clear", &"garrison", &"cover", &"break", &"bound", &"search", &"give_ammo", &"pick_pack"]
+## How long "Suppress" lasts (Squad.order_suppress).
+const SUPPRESS_ORDER_S := 20.0
+## An evaluator task that moves the unit scores above fighting where it stands and below falling
+## back broken; an ordered tactic above that, below casualty care and an empty magazine.
+const TACTIC_SCORE := 0.75
+const ORDERED_SCORE := 0.85
+## Suppressive rounds wander this far round the point (a position, not a pixel), a new spot each burst.
+const SUPPRESS_SPREAD_M := 1.5
+## Bounding overwatch: legs of at most BOUND_LEG_M, cover to cover (within BOUND_COVER_M of the
+## leg's end); the one who just got there covers BOUND_COVER_S before it may go again.
+const BOUND_LEG_M := 10.0
+const BOUND_COVER_M := 3.0
+const BOUND_COVER_S := 1.0
+## Breaking contact over more than SMOKE_OPEN_M, in contact within SCREEN_RANGE_M of the threat,
+## a unit throws smoke between (SMOKE_OUT_M out) unless the squad screened within SCREEN_M in
+## the last SCREEN_S (_screened).
+const SMOKE_OPEN_M := 8.0
+const SCREEN_RANGE_M := 120.0
+const SMOKE_OUT_M := 7.0
+const SCREEN_S := 20.0
+const SCREEN_M := 15.0
+## "Give me ammo": this many magazines of the asker's ammunition, handed over within GIVE_M.
+const GIVE_MAGS := 2
+const GIVE_M := 2.0
+## "Heal up": self-care first for this long, even in contact.
+const HEAL_ORDER_S := 30.0
+## "Stance" orders (Squad.command "stance:<name>"): what want_stance the unit keeps (auto: -1).
+const STANCE_ORDERS := {"up": SoldierMovement.Stance.STAND_HIGH, "crouch": SoldierMovement.Stance.CROUCH_MID,
+	"prone": SoldierMovement.Stance.PRONE, "auto": -1}
 const SCAN_S := 0.3
 const CONTACT_MEMORY_S := 8.0
 const INVESTIGATE_MEMORY_S := 25.0
@@ -238,6 +278,20 @@ const FIRED_ON_SUPPRESSION := 0.001
 const FIRED_ON_INJURY := 0.02
 ## Proposed: don't shoot when a friendly is this close (metres) to the line of fire.
 const FRIENDLY_CLEARANCE := 0.7
+## Fire discipline (Captain, P0164 queue 17 part 5; proposed): rounds that miss fly on, so
+## people up to DOWNRANGE_M past the aim point count as in the line too; the clearance grows
+## with the cone this unit's rounds spread over (_fire_cone) the further down the line they
+## are; someone lying (prone, or down) counts LYING_EXTRA_M wider around their chest (the
+## length of them); someone beside or behind the muzzle (less than MUZZLE_M along the line)
+## isn't in it.
+const DOWNRANGE_M := 60.0
+const LYING_EXTRA_M := 0.6
+const MUZZLE_M := 0.5
+## Grenade discipline (queue 17 part 5; proposed): nobody to protect within FRAG_RADIUS plus
+## FRAG_SAFETY_M of where a frag lands (it bounces and rolls), nor within LOB_FRIEND_M of its
+## arc (it would hit them and drop at their feet).
+const FRAG_SAFETY_M := 2.0
+const LOB_FRIEND_M := 1.0
 ## Proposed (Captain, 2026-10-12: the squad seemed a bit unintelligent): the friendly squad's
 ## senses and habits. A squadmate hears an enemy shot within HEAR_SHOT_M (a suppressed one
 ## within HEAR_SUPPRESSED_M) and takes contact toward the shooter, placed up to
@@ -282,6 +336,16 @@ var intent := Intent.FOLLOW
 var target: Soldier
 ## This unit's standing order (friendlies), set from the command menu.
 var order := Squad.Order.FOLLOW
+## Tactics: the squad evaluator's task for this unit, and a command-menu tactic order (wins).
+## See MOVING_TACTICS. {} for none.
+var task: Dictionary = {}
+var ordered: Dictionary = {}
+## A stance order (STANCE_ORDERS; -1: the unit's own choice) and a "Heal up" order's end.
+var stance_order := -1
+var _heal_until := -1000.0
+var _suppress_jitter := Vector3.ZERO
+## "Drop packs here": the pack this unit left on the ground ({"id", "pos"}), {} for none.
+var dropped_pack: Dictionary = {}
 ## Command menu "Hold fire": don't shoot at all until told to open fire.
 var hold_fire := false
 ## Command menu "Combat mode": how this unit moves, fires and holds stance.
@@ -326,6 +390,7 @@ var _hold_point := Vector3.ZERO
 var _move_point := Vector3.ZERO
 ## Where a casualty carried under a move order is laid down (null until worked out).
 var _lay_spot: Variant = null
+var _lay_for := Vector3.INF  # the point _lay_spot was found for (a moving CCP: found again)
 var _patrol_index := 0
 var _think_cd := 0.0
 var _scan_cd := 0.0
@@ -438,6 +503,8 @@ func _physics_process(delta: float) -> void:
 		_no_los_s = 0.0
 		if _scan_cd == SCAN_S:
 			_share_contact(target.global_position, now)  # once a scan, not every frame
+			if squad:
+				squad.note_enemy(target, target.global_position)
 	else:
 		_no_los_s += delta  # a body being dead-checked is no contact
 	_think_cd -= delta
@@ -507,6 +574,8 @@ func hear(who: Soldier, where: Vector3, amount: float) -> void:
 	_aware[id] = maxf(a, minf(a + amount, Spotting.HEARD_MAX))
 	_suspect_pos = where
 	_suspect_at = Soldier._now()
+	if squad and body and who.faction != body.faction:
+		squad.note_enemy(who, where, true)
 
 
 ## Contact this unit sees reaches its squadmates (friendly squad; queue 17 part 3): by voice
@@ -594,6 +663,8 @@ func engaged() -> bool:
 func weapons_free() -> bool:
 	if hold_fire:
 		return false
+	if StringName(_tactic().get("kind", &"")) == &"suppress":
+		return true  # ordered to: whatever the combat mode
 	match combat_mode:
 		Squad.CombatMode.SAFE:
 			return engaged()
@@ -610,6 +681,7 @@ func on_order(new_order: Squad.Order, point: Vector3, slot := 0, count := 1) -> 
 	_hold_point = body.global_position
 	var side := squad.leader.global_basis.x if squad and is_instance_valid(squad.leader) else body.global_basis.x
 	_move_point = point + side * (slot - (count - 1) / 2.0) * 1.5
+	ordered = {}  # a movement order replaces a tactic order
 	_lay_spot = null
 	_has_cover = false
 	_think_cd = 0.0
@@ -677,6 +749,8 @@ func status_text() -> String:
 			return "Searching"
 		Intent.FALL_BACK:
 			return "Falling back"
+		Intent.TACTIC:
+			return _tactic_text()
 	return "Following"
 
 
@@ -751,6 +825,9 @@ func _choose_intent() -> void:
 	var heal := _self_care_score()
 	if heal > 0.0:
 		scores[Intent.HEAL] = heal
+	var t := _tactic()
+	if StringName(t.get("kind", &"")) in MOVING_TACTICS:
+		scores[Intent.TACTIC] = ORDERED_SCORE if not ordered.is_empty() else TACTIC_SCORE
 	var loot := _scavenge_score(contact)
 	if loot > 0.0:
 		scores[Intent.SCAVENGE] = loot
@@ -820,7 +897,11 @@ func _act() -> void:
 			_do_escort()
 		Intent.FALL_BACK:
 			_do_fall_back()
+		Intent.TACTIC:
+			_do_tactic(_tactic())
 	_apply_combat_mode()
+	if stance_order >= 0:
+		body.want_stance = stance_order if intent != Intent.CASUALTY else -1  # (casualty care kneels as it needs)
 
 
 ## Combat mode stance and weapon carry for the movement and fighting intents (reloading,
@@ -1299,7 +1380,7 @@ func _do_care() -> void:
 				_go(_cover_point, false)
 			else:
 				_has_destination = false
-				body.release_carried()
+				body.server_put_down()
 				care = Care.TREAT
 		Care.TREAT:
 			_care_treat(contact)
@@ -1453,7 +1534,9 @@ func _give_up_casualty() -> void:
 ## (_should_carry) until they wake on their own.
 func _care_treat(contact: bool) -> void:
 	if body.carrying == casualty:
-		body.release_carried()
+		body.server_put_down()
+		if body.carrying == casualty:
+			return  # still lowering them off the shoulder
 	if _flat_distance(casualty.body_point()) > CASUALTY_REACH + 1.0:
 		_start_reach()  # a conscious casualty moved, or the body slid
 		return
@@ -1498,6 +1581,11 @@ func _should_carry() -> bool:
 		return false
 	if Person.is_hvt(casualty):
 		return true  # an HVT goes with the squad, not left lying
+	var ccp: Variant = squad.ccp_point() if squad else null
+	if ccp != null and _friendly():
+		return casualty.body_point().distance_to(ccp) > LAY_NEAR_M + 1.0  # "Bring casualties here"
+	if _friendly() and order == Squad.Order.MOVE and _lay_spot != null and _flat_between(casualty.body_point(), _lay_spot) <= LAY_NEAR_M + 1.0:
+		return false  # laid where the order sent them: they stay while it stands (queue 16)
 	if 1.0 - casualty.vitals.blood_fraction() >= WoundModel.UNCONSCIOUS_LOST:
 		return true
 	var leader: Soldier = squad.leader if squad and is_instance_valid(squad.leader) else null
@@ -1521,7 +1609,7 @@ func _holds_for_medic() -> bool:
 func _care_carry(contact: bool) -> void:
 	if contact:
 		if body.carrying == casualty:
-			body._set_carry_mode(Soldier.DRAG)
+			body._set_carry_mode(Soldier.DRAG, &"grab")
 			var spot: Variant = find_cover(body.global_position, 10.0)
 			_has_cover = spot != null
 			if spot != null:
@@ -1535,7 +1623,7 @@ func _care_carry(contact: bool) -> void:
 		return
 	if _holds_for_medic():
 		if body.carrying == casualty:
-			body.release_carried()  # a bleed opened up on the way: put them down for the medic
+			body.server_put_down()  # a bleed opened up on the way: put them down for the medic
 		_want_medic()
 		care = Care.TREAT
 		return
@@ -1543,17 +1631,21 @@ func _care_carry(contact: bool) -> void:
 	if leader == null or casualty == leader or body.faction != &"friendly":
 		# No one to follow (or the lead is down): keep them safe where they are.
 		if body.carrying == casualty:
-			body.release_carried()
+			body.server_put_down()
 		_has_destination = false
 		body.want_crouch = true
 		return
-	var ordered := order == Squad.Order.MOVE
-	if ordered:
-		if _lay_spot == null:
-			# Captain (P0164 queue 16): ordered to move while carrying, go there and lay them
-			# down at the safest spot nearby (cover from the last known threat).
-			var spot: Variant = find_cover(_move_point, LAY_DOWN_M)
-			_lay_spot = spot if spot != null else NavigationServer3D.map_get_closest_point(body.get_world_3d().navigation_map, _move_point)
+	# Captain (P0164 queue 16): ordered to move while carrying, go there and lay them down at
+	# the safest spot nearby (cover from the last known threat). "Bring casualties here" (queue
+	# 12) does the same at the squad's casualty collection point (Squad.ccp), even following.
+	var ccp: Variant = squad.ccp_point() if squad else null
+	var to_spot := order == Squad.Order.MOVE or ccp != null
+	if to_spot:
+		var goal: Vector3 = ccp if ccp != null else _move_point
+		if _lay_spot == null or _lay_for.distance_to(goal) > LAY_NEAR_M:
+			_lay_for = goal
+			var spot: Variant = find_cover(goal, LAY_DOWN_M)
+			_lay_spot = spot if spot != null else NavigationServer3D.map_get_closest_point(body.get_world_3d().navigation_map, goal)
 		var lay: Vector3 = _lay_spot
 		var at := casualty.body_point()
 		if body.carrying != casualty and Vector2(at.x - lay.x, at.z - lay.z).length() <= LAY_NEAR_M:
@@ -1561,7 +1653,7 @@ func _care_carry(contact: bool) -> void:
 			body.want_crouch = true
 			return
 		if body.carrying == casualty and _flat_distance(lay) <= 1.0:
-			body.release_carried()
+			body.server_put_down()
 			_has_destination = false
 			body.want_crouch = true
 			return
@@ -1574,7 +1666,7 @@ func _care_carry(contact: bool) -> void:
 		else:
 			_go(casualty.body_point(), true)
 		return
-	_go(_lay_spot if ordered else squad.follow_point(body))
+	_go(_lay_spot if to_spot else squad.follow_point(body))
 
 
 ## Out of contact: picks up a fallen friendly's body and carries it after the squad leader.
@@ -1871,7 +1963,8 @@ func _end_scavenge() -> void:
 ## bleeding only), with an item it carries (loose or in a kit) that hasn't failed TREAT_TRIES
 ## times, not one the casualty is doing on themselves right now, and (on itself) not one a
 ## medic keeps for the squad (_kept_for_squad), nor an IV or IO on itself; {} for none. Where
-## several items would do, the task's "item" becomes the first one carried (Vitals.pick_item).
+## several items would do, the task's "item" becomes the first one carried (Vitals.pick_item),
+## out of the casualty's own kit first ("their_kit": _pick_for).
 func _next_task(c: Soldier, under_fire: bool) -> Dictionary:
 	var conscious := c.vitals.is_up() or c.vitals.why_unconscious().has(&"pain")  # morphine wakes one out from pain
 	var their := SquadAI.of(c) if c != body else null
@@ -1880,7 +1973,8 @@ func _next_task(c: Soldier, under_fire: bool) -> Dictionary:
 			continue
 		if String(task.kind) == "pain" and c.vitals.pain() < MORPHINE_PAIN:
 			continue
-		var item := Vitals.pick_item(task, body.inventory)
+		var pick := _pick_for(c, task)
+		var item: StringName = pick.item
 		if item == &"" or (c == body and Vitals.needs_other_hands(item)):
 			continue
 		if not _may_use(item):
@@ -1892,15 +1986,29 @@ func _next_task(c: Soldier, under_fire: bool) -> Dictionary:
 			continue
 		var chosen := task.duplicate()
 		chosen.item = item
+		chosen.their_kit = pick.theirs
 		return chosen
 	return {}
 
 
-## Items this unit lacks (or, on itself, keeps for the squad) for what `c` still needs once safe.
+## The item for `task` on casualty `c`: out of c's own kit first, then this unit's (Captain,
+## P0164 queue 17: a carer uses the casualty's IFAK before their own, so their own is still
+## there for the next casualty, or for themselves). On itself, its own. {"item" (&"" for
+## none), "theirs" (it comes out of c's kit)}.
+func _pick_for(c: Soldier, task: Dictionary) -> Dictionary:
+	if c != body:
+		var theirs := Vitals.pick_item(task, c.inventory)
+		if theirs != &"" and _may_use(theirs):
+			return {"item": theirs, "theirs": true}
+	return {"item": Vitals.pick_item(task, body.inventory), "theirs": false}
+
+
+## Items this unit lacks (or, on itself, keeps for the squad) for what `c` still needs once
+## safe, counting what c carries (_pick_for).
 func _missing_items(c: Soldier) -> Array[StringName]:
 	var out: Array[StringName] = []
 	for task in plan_care(c.vitals.care_needed(), false, c.vitals.is_up() or c.vitals.why_unconscious().has(&"pain")):
-		var item := Vitals.pick_item(task, body.inventory)
+		var item: StringName = _pick_for(c, task).item
 		var lacks := item == &"" or not _may_use(item) or (c == body and (Vitals.needs_other_hands(item) or _kept_for_squad(item, String(task.kind))))
 		if not lacks:
 			continue
@@ -1957,7 +2065,7 @@ func _start_treatment(target: Soldier, task: Dictionary) -> void:
 	_treat_key = _task_key(target, task)
 	_treat_before = _count_tasks(target, _treat_key)
 	_treat_until = Soldier._now() + seconds + TREAT_MARGIN_S
-	body._server_treat.rpc_id(1, target.get_path(), StringName(task.item), StringName(task.part))
+	body._server_treat.rpc_id(1, target.get_path(), StringName(task.item), StringName(task.part), false, bool(task.get("their_kit", false)))
 	if target != body and not _answered:
 		_answered = true
 		var callouts := Callouts.of(body)
@@ -2064,11 +2172,11 @@ func _self_care_score() -> float:
 		return 0.98  # finish what you started
 	if _being_treated():
 		return 0.92
-	var task := _self_task()
-	if task.is_empty():
+	var own := _self_task()
+	if own.is_empty():
 		return 0.0
-	if String(task.kind) in UNDER_FIRE_KINDS:
-		return 0.97
+	if String(own.kind) in UNDER_FIRE_KINDS or Soldier._now() < _heal_until:
+		return 0.97  # bleeding out, or told to patch up now
 	return 0.75 if in_contact() else 0.62
 
 
@@ -2119,6 +2227,382 @@ func _maybe_call_medic() -> void:
 	var callouts := Callouts.of(body)
 	if callouts:
 		callouts.medic_call(body)
+
+
+# --- Tactics ---------------------------------------------------------------
+
+## The squad evaluator's task for this unit (SquadTactics). The same task again (its "id" and
+## kind) only refreshes it, keeping its progress; {} clears it.
+func set_task(t: Dictionary) -> void:
+	if t.is_empty():
+		task = {}
+		return
+	if task.get("id") == t.get("id") and task.get("kind") == t.get("kind"):
+		for k: Variant in t:
+			task[k] = t[k]
+		return
+	task = t.duplicate()
+	task["since"] = Soldier._now()
+
+
+## A command-menu tactic order (Squad.order_suppress and the rest); {} cancels it. It wins over
+## the squad's own tactics until it ends or a movement order replaces it.
+func give_tactic(t: Dictionary) -> void:
+	ordered = t.duplicate()
+	if not t.is_empty():
+		ordered["since"] = Soldier._now()
+		set_escort(null)
+		_has_cover = false
+		_think_cd = 0.0
+
+
+## "Heal up": look after your own wounds first for HEAL_ORDER_S, even in contact.
+func order_heal() -> void:
+	_heal_until = Soldier._now() + HEAL_ORDER_S
+	_think_cd = 0.0
+
+
+## The tactic this unit works to now: its order, else the evaluator's task (a friendly only
+## moves for one while following its lead: a Hold or Move order keeps it where it was put).
+func _tactic() -> Dictionary:
+	if not ordered.is_empty():
+		if ordered.has("until") and Soldier._now() >= float(ordered.until):
+			ordered = {}
+		else:
+			return ordered
+	if task.is_empty():
+		return task
+	if _friendly() and order != Squad.Order.FOLLOW and StringName(task.kind) in MOVING_TACTICS:
+		return {}
+	return task
+
+
+## Share of a full load (`full_mags` magazines) of ammunition for the weapon in hand, 0..1 (1 if
+## it takes none).
+func ammo_share(full_mags: float) -> float:
+	var weapon := body.active_weapon()
+	if weapon == null or weapon.type != "weapon":
+		return 1.0
+	var mag := _mag_size(weapon)
+	if mag <= 0:
+		return 1.0
+	var rounds := body.inventory.rounds_in(body.active_slot) + body.inventory.spare_rounds(Soldier._ammo_of(weapon))
+	return clampf(rounds / (full_mags * mag), 0.0, 1.0)
+
+
+## Where suppressive fire goes now (a base of fire's or a "Suppress" order's point, wandering a
+## little each burst), or null.
+func _suppress_point() -> Variant:
+	var t := _tactic()
+	var kind := StringName(t.get("kind", &""))
+	if kind != &"base" and kind != &"suppress":
+		return null
+	var aim: Vector3 = t.get("aim", Vector3.INF)
+	if not aim.is_finite() or (kind == &"base" and not in_contact()):
+		return null
+	return aim + _suppress_jitter
+
+
+## Where this unit looks when it has nothing to shoot and isn't moving: what it suppresses, or the
+## sector it watches; null for neither.
+func _watch_point() -> Variant:
+	var t := _tactic()
+	if StringName(t.get("kind", &"")) == &"watch":
+		return (t.point as Vector3) + Vector3.UP * 1.2
+	return _suppress_point()
+
+
+## Whether the squad has thrown a screening smoke near `point` lately (SCREEN_S, SCREEN_M).
+func _screened(point: Vector3) -> bool:
+	return squad != null and Soldier._now() - squad.screen_at < SCREEN_S and squad.screen_point.distance_to(point) < SCREEN_M
+
+
+## An ordered tactic is done: the unit holds where it got to.
+func _tactic_done(t: Dictionary) -> void:
+	if t.is_empty() or ordered.is_empty() or t != ordered:
+		return
+	ordered = {}
+	if _friendly():
+		order = Squad.Order.HOLD
+		_hold_point = body.global_position
+		_think_cd = 0.0
+
+
+func _do_tactic(t: Dictionary) -> void:
+	if t.is_empty():
+		return
+	var now := Soldier._now()
+	match StringName(t.kind):
+		&"maneuver":
+			_tactic_maneuver(t)
+		&"assault":
+			var point: Vector3 = t.point
+			if body.suppression >= PINNED or _flat_distance(point) <= ARRIVE + 2.0:
+				_fight(point if _flat_distance(point) <= ARRIVE + 2.0 else body.global_position, 4.0)
+			else:
+				_go(point, true)
+				bounding = true
+		&"clear":
+			_tactic_clear(t, now)
+		&"garrison":
+			var spot: Vector3 = t.spot
+			if _flat_distance(spot) > ARRIVE + 0.2:
+				_go(spot, true)
+				return
+			_has_destination = false
+			if _foe() == null:
+				_face(spot + (t.face as Vector3) * 5.0)
+			body.want_crouch = String(t.get("port", "")) != "window" and not (_foe() != null and Soldier._now() >= _pause_until)
+		&"cover":
+			if not t.has("spot"):
+				var found: Variant = find_cover(body.global_position, 12.0)
+				t.spot = found if found != null else body.global_position
+				_cover_point = t.spot
+				_has_cover = found != null
+			if _flat_distance(t.spot) > ARRIVE + 0.3:
+				_go(t.spot, body.suppression < PINNED)
+				body.want_crouch = true
+			else:
+				_tactic_done(t)
+		&"break":
+			var point: Vector3 = t.point
+			if not t.has("smoked"):
+				t.smoked = true
+				_screen_toward_threat(point)
+			if _bound_toward(point, t):
+				if not ordered.is_empty():
+					_tactic_done(t)
+				else:
+					_fight(point, 4.0)
+		&"bound":
+			if _bound_toward(t.point, t):
+				_tactic_done(t)
+		&"search":
+			var point: Vector3 = t.point
+			if _flat_distance(point) > ARRIVE + 0.5:
+				_go(point, false)
+			else:
+				_has_destination = false
+				_face(point + Vector3(cos(now * 0.6), 0.0, sin(now * 0.6)) * 5.0)  # looking round
+		&"give_ammo":
+			_tactic_give_ammo(t)
+		&"pick_pack":
+			_tactic_pick_pack()
+
+
+## Host: "Drop packs here": the worn pack goes on the ground in front, still loaded, and this
+## unit remembers where. False if it wears none (or is busy carrying someone).
+func drop_pack() -> bool:
+	if body.carrying != null or body.inventory.slots.get(&"backpack", &"") == &"":
+		return false
+	var entry := body.inventory.unequip(&"backpack")
+	if entry.is_empty():
+		return false
+	var pos := body.global_position - body.global_basis.z * 0.6 + Vector3.UP * 0.4
+	CompoundLevel.current(body).server_spawn_dropped(entry.id, 1, pos, entry.get("state", {}))
+	dropped_pack = {"id": entry.id, "pos": pos}
+	return true
+
+
+## "Pick packs up": back to the pack it dropped, and on with it (if it's still there and no
+## other pack has been put on since).
+func _tactic_pick_pack() -> void:
+	var pos: Vector3 = dropped_pack.get("pos", body.global_position)
+	if dropped_pack.is_empty() or body.inventory.slots.get(&"backpack", &"") != &"":
+		dropped_pack = {}
+		ordered = {}
+		return
+	if _flat_distance(pos) > 1.5:
+		_go(pos, true)
+		return
+	_has_destination = false
+	var found: WorldItem = null
+	for node in get_tree().get_nodes_in_group(WorldItem.GROUP):
+		var item := node as WorldItem
+		if item and not item.is_queued_for_deletion() and item.item_id == StringName(dropped_pack.id) 				and item.global_position.distance_to(pos) < 3.0 and (found == null or item.global_position.distance_to(pos) < found.global_position.distance_to(pos)):
+			found = item
+	if found and body.inventory.take(found.item_id, 1, found.state) > 0:
+		body.model.server_pick_up(found.global_position, found.item_id)
+		GameState.item_taken(found.uid)
+		found.queue_free()
+	dropped_pack = {}
+	ordered = {}  # back to what they were doing
+
+
+## The maneuver element: along the flank route, point by point, then fighting from its end.
+## Pinned, it goes to ground until it can move again.
+func _tactic_maneuver(t: Dictionary) -> void:
+	var route: Array = t.get("route", [])
+	var leg: int = t.get("leg", 0)
+	while leg < route.size() and _flat_distance(route[leg]) <= ARRIVE + 1.0:
+		leg += 1
+	t["leg"] = leg
+	if body.suppression >= PINNED or leg >= route.size():
+		_fight(route[-1] if not route.is_empty() and leg >= route.size() else body.global_position, 6.0 if leg >= route.size() else PINNED_COVER_M)
+		return
+	_go(route[leg], true)
+	bounding = true
+	if not t.get("called", false) and in_contact():
+		t["called"] = true
+		_call_bound()
+
+
+## Clearing (SquadTactics.clear_op): to this unit's place in the stack, wait for the rest (or
+## STACK_WAIT_S), then in one after the other ENTRY_GAP_S apart, each to its room corner.
+func _tactic_clear(t: Dictionary, now: float) -> void:
+	var op: Dictionary = t.op
+	var slot: int = t.slot
+	var door: Vector3 = op.entrance.door
+	if not is_finite(float(op.go_at)):
+		var spot: Vector3 = op.stack[slot]
+		if _flat_distance(spot) > SquadTactics.STACK_READY_M:
+			_go(spot, true)
+			return
+		_has_destination = false
+		_face(door)
+		op.ready[slot] = true
+		op.first_ready_at = minf(float(op.first_ready_at), now)
+		if (op.ready as Dictionary).size() >= int(op.units) or now - float(op.first_ready_at) >= SquadTactics.STACK_WAIT_S:
+			op.go_at = now
+			_callout(&"tactic", "Going in!")
+		return
+	if now < float(op.go_at) + slot * SquadTactics.ENTRY_GAP_S:
+		_has_destination = false
+		_face(door)
+		return
+	var corner: Vector3 = op.rooms[slot]
+	if _flat_distance(corner) > ARRIVE + 0.3:
+		_go(corner, true)
+		return
+	_has_destination = false
+	op.done[slot] = true
+	if not ordered.is_empty():
+		if (op.done as Dictionary).size() >= int(op.units) and not bool(op.get("called", false)):
+			op.called = true
+			_callout(&"tactic", "Clear!")
+		_tactic_done(t)
+
+
+## Bounding overwatch toward `point` (t keeps the leg): in contact, legs of up to BOUND_LEG_M
+## cover to cover, never while the buddy is moving (covering him instead); out of contact
+## straight there. True once there.
+func _bound_toward(point: Vector3, t: Dictionary) -> bool:
+	if _flat_distance(point) <= ARRIVE + 0.5:
+		_has_destination = false
+		return true
+	if not in_contact():
+		t.erase("leg_point")
+		_go(point, true)
+		return false
+	var now := Soldier._now()
+	var leg: Variant = t.get("leg_point")
+	if leg != null and _flat_distance(leg) <= ARRIVE + 0.4:
+		t.erase("leg_point")  # made it: cover the buddy for a moment
+		t["wait_until"] = now + BOUND_COVER_S
+		leg = null
+	if leg == null:
+		if _buddy_bounding() or now < float(t.get("wait_until", 0.0)) or body.suppression >= PINNED:
+			_has_destination = false
+			body.want_crouch = true
+			return false
+		var flat := Vector3(point.x, body.global_position.y, point.z)
+		var step := body.global_position.move_toward(flat, BOUND_LEG_M)
+		var spot: Variant = find_cover(step, BOUND_COVER_M) if _flat_distance(point) > BOUND_LEG_M else null
+		leg = spot if spot != null else (point if _flat_distance(point) <= BOUND_LEG_M \
+			else NavigationServer3D.map_get_closest_point(body.get_world_3d().navigation_map, step))
+		t["leg_point"] = leg
+		_call_bound()
+	_go(leg, true)
+	bounding = true
+	return false
+
+
+## Breaking contact toward `point`: smoke between this unit and the threat first, over open
+## ground in contact, unless the squad screened there lately.
+func _screen_toward_threat(point: Vector3) -> void:
+	if not in_contact() or _flat_distance(point) <= SMOKE_OPEN_M or _screened(body.global_position):
+		return
+	var to := body.threat_pos - body.global_position
+	to.y = 0.0
+	if to.length() > SCREEN_RANGE_M or to.length() < 1.0:
+		return
+	var at := body.global_position + to.normalized() * minf(SMOKE_OUT_M, to.length() * 0.5)
+	if _throw(&"smoke_grenade", at) and squad:
+		squad.screen_at = Soldier._now()
+		squad.screen_point = at
+
+
+## "Give me ammo": to the asker, then magazines of their ammunition (GIVE_MAGS) if this unit
+## carries any; done either way.
+func _tactic_give_ammo(t: Dictionary) -> void:
+	var who := t.get("who") as Soldier
+	if who == null or not is_instance_valid(who) or not who.vitals.is_up():
+		_tactic_done(t)
+		return
+	if _flat_distance(who.global_position) > GIVE_M:
+		_go(who.global_position, true)
+		return
+	_has_destination = false
+	_face(who.global_position)
+	var ammo := StringName(t.get("ammo", &""))
+	var given := 0
+	var full := false
+	for i in GIVE_MAGS:
+		var entry := _take_out(ammo)
+		if entry.is_empty():
+			break
+		if who.inventory.take(entry.id, 1, entry.get("state", {})) == 0:
+			body.inventory.take(entry.id, 1, entry.get("state", {}))  # no room on them: keep it
+			full = true
+			break
+		given += 1
+	print("[tactics] %s brings %s %d x %s (%s)" % [body.name, who.name, given, ammo, "no room" if full else ("none left" if given == 0 else "handed over")])
+	if given > 0:
+		_callout(&"tactic", "Ammo!")
+		if not who.is_ai():
+			who._client_message.rpc_id(who.owner_peer(), "%s gave you %d magazine%s" % [body.display_name(), given, "s" if given > 1 else ""])
+	elif not who.is_ai():
+		who._client_message.rpc_id(who.owner_peer(), "No room for more magazines" if full else "%s has none to spare" % body.display_name())
+	ordered = {}  # back to what they were doing
+
+
+## Host: one stowed unit of `id` taken out of this unit's containers ({"id", "count", "state"}),
+## or {} if it carries none.
+func _take_out(id: StringName) -> Dictionary:
+	if id == &"":
+		return {}
+	for container in body.inventory.search_containers():
+		var list: Array = body.inventory.containers[container]
+		for i in list.size():
+			if list[i].id == id:
+				return body.inventory.remove_entry(container, i, 1)
+	return {}
+
+
+func _tactic_text() -> String:
+	var t := _tactic()
+	match StringName(t.get("kind", &"")):
+		&"maneuver":
+			return "Flanking"
+		&"assault":
+			return "Assaulting"
+		&"clear":
+			return "Clearing" if is_finite(float(t.op.go_at)) else "Stacking up"
+		&"garrison":
+			return "Holding a %s" % String(t.get("port", "position")) if _flat_distance(t.spot) <= ARRIVE + 0.2 else "Taking a position"
+		&"cover":
+			return "Taking cover"
+		&"break":
+			return "Breaking contact"
+		&"bound":
+			return "Bounding"
+		&"search":
+			return "Searching"
+		&"give_ammo":
+			return "Bringing ammo"
+		&"pick_pack":
+			return "Getting the pack"
+	return "Following"
 
 
 # --- Perception -----------------------------------------------------------
@@ -2295,6 +2779,8 @@ func _shoot() -> void:
 		aim_at = foe.aim_point()
 	elif _suppressing:
 		aim_at = body.threat_pos + Vector3.UP * 1.0  # keep their heads down before going out to the casualty
+	elif _suppress_point() != null:
+		aim_at = _suppress_point()
 	elif intent != Intent.CASUALTY and (_buddy_bounding() or _cover_medic) and in_contact() and now - _last_contact < 5.0:
 		aim_at = body.threat_pos + Vector3.UP * 1.0  # covering fire while the buddy (or a medic) moves
 	elif intent == Intent.FIGHT:
@@ -2313,14 +2799,29 @@ func _shoot() -> void:
 	_next_shot = now + 60.0 / float(weapon.stats.get("rpm", 600)) * (1.0 if auto else 1.6)
 	if _burst_left <= 0:
 		_burst_left = randi_range(3, 5) if auto else randi_range(2, 3)
+		_suppress_jitter = Vector3(randf_range(-1, 1), randf_range(-0.3, 0.5), randf_range(-1, 1)) * SUPPRESS_SPREAD_M
 	_burst_left -= 1
 	if _burst_left <= 0:
 		_pause_until = now + randf_range(0.5, 1.1) / lerpf(0.7, 1.3, combat)
 	var dir := body._spread_direction(weapon)
-	var shaken := maxf(MORALE_SHAKEN - morale, 0.0) / MORALE_SHAKEN  # 0 steady .. 1 no morale left
-	var extra := deg_to_rad((1.0 - combat) * 2.0 + body.suppression * 4.0 + (0.0 if foe else 3.0) + shaken * MORALE_SHAKEN_AIM_DEG)
+	var extra := deg_to_rad(_aim_error_deg(foe != null))
 	dir = (dir + Vector3(randf_range(-1, 1), randf_range(-1, 1), randf_range(-1, 1)) * tan(extra) * 0.6).normalized()
 	body._server_fire.rpc_id(1, body.camera.global_position, dir, body.active_slot)
+
+
+## The aim error (degrees) this unit adds to its weapon's own spread: less skill, suppression,
+## firing at a point rather than a seen foe, and shaken morale all widen it.
+func _aim_error_deg(seen_foe: bool) -> float:
+	var shaken := maxf(MORALE_SHAKEN - morale, 0.0) / MORALE_SHAKEN  # 0 steady .. 1 no morale left
+	return (1.0 - combat) * 2.0 + body.suppression * 4.0 + (0.0 if seen_foe else 3.0) + shaken * MORALE_SHAKEN_AIM_DEG
+
+
+## The half-angle (radians) this unit's next rounds may stray by: the weapon's spread plus
+## its aim error (_aim_error_deg).
+func _fire_cone() -> float:
+	var weapon := body.active_weapon()
+	var spread := float(weapon.stats.get("spread_deg", 1.0)) if weapon else 1.0
+	return deg_to_rad(spread + _aim_error_deg(_foe() != null))
 
 
 ## Turns the body and head toward a point; returns the remaining angle in radians.
@@ -2336,22 +2837,68 @@ func _aim_at(point: Vector3) -> float:
 	return (-body.camera.global_basis.z).angle_to(d.normalized())
 
 
-## Fire discipline: true if someone on this unit's side, or a civilian, HVT or captive
-## (Person.is_noncombatant; people, wave 4), standing or down, is in the line of fire to
-## `point`, closer than it.
-func _friendly_in_line(point: Vector3) -> bool:
+## Fire discipline (queue 17 part 5): true if someone this unit must not hit (_protects), up
+## or down, is in the line of fire to `point` or within DOWNRANGE_M past it, closer to the line
+## than FRIENDLY_CLEARANCE plus what the rounds' cone (`cone`, radians; _fire_cone() when
+## negative) has spread to by them. Upright people count from shins to head, prone or downed
+## ones around their chest, LYING_EXTRA_M wider.
+func _friendly_in_line(point: Vector3, cone := -1.0) -> bool:
 	var from := body.camera.global_position
 	var reach := from.distance_to(point)
+	if reach < 0.01:
+		return false
+	var ahead := (point - from) / reach
+	var far := point + ahead * DOWNRANGE_M
+	var widen := tan(_fire_cone() if cone < 0.0 else cone)
 	for n in get_tree().get_nodes_in_group(&"combatants"):
 		var s := n as Soldier
-		if s == null or s == body or s.is_queued_for_deletion() or s.vitals.is_dead():
+		if not _protects(s):
 			continue
-		if s.faction != body.faction and not Person.is_noncombatant(s):
-			continue
-		var chest := s.global_position + Vector3.UP * (1.1 if s.vitals.is_up() else 0.3)
-		if from.distance_to(chest) < reach and Geometry3D.get_closest_point_to_segment(chest, from, point).distance_to(chest) < FRIENDLY_CLEARANCE:
+		var lying := _lying(s)
+		var low := s.aim_point() if lying else s.global_position + Vector3.UP * 0.3
+		var high := low if lying else s.global_position + Vector3.UP * (1.2 if s.is_crouching() else 1.7)
+		var closest := Geometry3D.get_closest_points_between_segments(from, far, low, high)
+		var along := (closest[0] - from).dot(ahead)
+		if along < MUZZLE_M:
+			continue  # beside or behind the muzzle
+		var clearance := FRIENDLY_CLEARANCE + along * widen + (LYING_EXTRA_M if lying else 0.0)
+		if closest[0].distance_to(closest[1]) < clearance:
 			return true
 	return false
+
+
+## Someone this unit must not hurt: alive, not itself, on its side, or a civilian, HVT or
+## captive (Person.is_noncombatant; people, wave 4).
+func _protects(s: Soldier) -> bool:
+	return s != null and s != body and not s.is_queued_for_deletion() and not s.vitals.is_dead() \
+		and (s.faction == body.faction or Person.is_noncombatant(s))
+
+
+## Lying on the ground: prone, or down (where the ragdoll lies, Soldier.aim_point).
+static func _lying(s: Soldier) -> bool:
+	return not s.vitals.is_up() or s.movement.is_prone()
+
+
+## Grenade discipline (queue 17 part 5): a frag thrown from `from` at `at` hurts nobody this
+## unit protects: none within FRAG_RADIUS + FRAG_SAFETY_M of where it lands, none within
+## LOB_FRIEND_M of its arc.
+func _frag_safe(from: Vector3, at: Vector3) -> bool:
+	var arc := _lob_points(from, at)
+	var ahead := Vector3(at.x - from.x, 0.0, at.z - from.z).normalized()
+	for n in get_tree().get_nodes_in_group(&"combatants"):
+		var s := n as Soldier
+		if not _protects(s):
+			continue
+		var p := s.aim_point() if _lying(s) else s.global_position
+		if p.distance_to(at) < Throwables.FRAG_RADIUS + FRAG_SAFETY_M:
+			return false
+		var low := p if _lying(s) else s.global_position + Vector3.UP * 0.3
+		var high := p if _lying(s) else s.global_position + Vector3.UP * 1.8
+		for i in range(1, arc.size()):
+			var closest := Geometry3D.get_closest_points_between_segments(arc[i - 1], arc[i], low, high)
+			if (closest[0] - from).dot(ahead) >= MUZZLE_M and closest[0].distance_to(closest[1]) < LOB_FRIEND_M:
+				return false  # (someone beside the thrower's hand isn't under the arc)
+	return true
 
 
 func _maybe_frag() -> void:
@@ -2360,12 +2907,10 @@ func _maybe_frag() -> void:
 	var d := body.global_position.distance_to(body.threat_pos)
 	if d < 8.0 or d > 25.0:
 		return
-	for n in get_tree().get_nodes_in_group(&"combatants"):
-		var s := n as Soldier
-		if s and s != body and (s.faction == body.faction or Person.is_noncombatant(s)) \
-				and s.global_position.distance_to(body.threat_pos) < Throwables.FRAG_RADIUS + 1.0:
-			return  # friendlies (or civilians, people wave 4) too close to the blast
-	if not _lob_clear(body.camera.global_position + Vector3.UP * 0.2, body.threat_pos):
+	var from := body.camera.global_position + Vector3.UP * 0.2
+	if not _frag_safe(from, body.threat_pos):
+		return  # friendlies (or civilians, people wave 4) near the blast or under the arc
+	if not _lob_clear(from, body.threat_pos):
 		return  # it would hit a wall or roof on the way and bounce back
 	var now := Soldier._now()
 	if squad and now - squad.frag_at < SQUAD_FRAG_GAP_S and squad.frag_point.distance_to(body.threat_pos) < SQUAD_FRAG_SPREAD_M:
@@ -2380,18 +2925,25 @@ func _maybe_frag() -> void:
 ## Whether a grenade lobbed from `from` (Throwables.lob_velocity) flies to `at` without
 ## hitting anything on the way: a frag that clips a wall or a roof lands among your own.
 func _lob_clear(from: Vector3, at: Vector3) -> bool:
+	var world := body.get_world_3d()
+	var arc := _lob_points(from, at)
+	for i in range(1, arc.size()):
+		if not Throwables.clear_line(world, arc[i - 1], arc[i]):
+			return false
+	return true
+
+
+## Points along a grenade's arc lobbed from `from` at `at` (Throwables.lob_velocity), from the
+## hand to just short of the landing (the last tenth comes down onto the target).
+static func _lob_points(from: Vector3, at: Vector3) -> PackedVector3Array:
 	var gravity: float = ProjectSettings.get_setting("physics/3d/default_gravity")
 	var velocity := Throwables.lob_velocity(from, at)
 	var flight := clampf(from.distance_to(at) / 12.0, 0.6, 1.6)  # as lob_velocity times it
-	var world := body.get_world_3d()
-	var previous := from
+	var out := PackedVector3Array([from])
 	for i in range(1, LOB_CHECKS + 1):
-		var t := flight * 0.9 * i / LOB_CHECKS  # the last tenth comes down onto the target
-		var point := from + velocity * t + Vector3.DOWN * 0.5 * gravity * t * t
-		if not Throwables.clear_line(world, previous, point):
-			return false
-		previous = point
-	return true
+		var t := flight * 0.9 * i / LOB_CHECKS
+		out.append(from + velocity * t + Vector3.DOWN * 0.5 * gravity * t * t)
+	return out
 
 
 func _throw(id: StringName, at: Vector3) -> bool:
@@ -2454,6 +3006,8 @@ func _steer(delta: float) -> void:
 	if foe == null and dir != Vector3.ZERO and body.carrying == null:
 		body.rotation.y = lerp_angle(body.rotation.y, atan2(-dir.x, -dir.z), 1.0 - exp(-TURN_RATE * get_physics_process_delta_time()))
 		body.head.rotation.x = lerpf(body.head.rotation.x, 0.0, 0.1)
+	elif foe == null and dir == Vector3.ZERO and _watch_point() != null and intent != Intent.CASUALTY:
+		_aim_at(_watch_point())  # suppressing, or watching a sector
 	elif foe == null and dir == Vector3.ZERO and in_contact() and not (intent == Intent.CASUALTY and care == Care.TREAT):
 		_aim_at(body.threat_pos + Vector3.UP * 1.2)
 	elif foe == null and dir == Vector3.ZERO and suspecting() and intent != Intent.CASUALTY:
@@ -2478,6 +3032,10 @@ func _stop() -> void:
 
 
 # --- Helpers --------------------------------------------------------------
+
+static func _flat_between(a: Vector3, b: Vector3) -> float:
+	return Vector2(a.x - b.x, a.z - b.z).length()
+
 
 func _flat_distance(point: Vector3) -> float:
 	return Vector2(body.global_position.x - point.x, body.global_position.z - point.z).length()

@@ -55,6 +55,7 @@ func _ready() -> void:
 	await _test_self_actions()
 	await _test_menu()
 	await _test_body_points()
+	await _test_declutter()
 	GameState.delete_save()
 	print("INTERACTION TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
@@ -116,7 +117,8 @@ func _test_actions_for() -> void:
 	check(not _ids(player, alpha).has(&"revive"), "a trauma kit adds no Revive either (%s)" % [_ids(player, alpha)])
 	check(_action(player, alpha, &"treat").items[0].disabled == "", "its NPA can go in")
 	player.inventory.take(&"hvt_case")
-	check(_action(player, alpha, &"carry").disabled.contains("hands"), "can't carry with your hands full")
+	check(_action(player, alpha, &"carry").disabled.contains("hands") and not _ids(player, alpha).has(&"drag"),
+		"can't carry with your hands full; Drag, greyed for the same reason, is left out (%s)" % [_ids(player, alpha)])
 	player.inventory.release_hands()
 	check(_ids(player, dummy) == [&"treat", &"check_condition"]
 		and _action(player, dummy, &"treat").items.all(func(e: Dictionary) -> bool: return e.item in [WoundModel.IO_KIT, WoundModel.BLANKET] or WoundModel.IV_GAUGES.has(e.item)),
@@ -216,15 +218,32 @@ func _test_carry_and_drag() -> void:
 	await _frames(2)
 	InteractionMenu.perform(player, _action(player, alpha, &"carry"))
 	check(player.carrying == alpha and alpha.carried_by == player and player.carry_mode == Soldier.CARRY, "Carry picks the body up")
+	await _frames(2)  # (its ragdoll goes: the body is where it lay)
+	var lying := alpha.global_position
+	await _frames(3)
+	check(player.carry_speed_mult() == 0.0 and _flat(alpha.global_position, lying) < 0.05 and not player.carry_holds(),
+		"lifting it: you stand still and the body stays on the ground until it's up (speed %.2f, moved %.2f m, holds %s)"
+			% [player.carry_speed_mult(), _flat(alpha.global_position, lying), player.carry_holds()])
+	_end_carry_phase(player)
 	check(is_equal_approx(player.carry_speed_mult(), Soldier.CARRY_SPEED_MULT) and is_equal_approx(Soldier.CARRY_SPEED_MULT, 0.55), "carrying slows you to 0.55")
 	check(alpha.collision_layer == 0 and alpha.care_by == player, "the body stops colliding, and squadmates leave it to you")
 	await _frames(3)
 	check(alpha.global_position.distance_to(player.carry_transform().origin) < 0.05, "it rides on your shoulder")
-	check(_ids(player, player).has(&"put_down"), "self-interaction offers Put down")
-	check(_action(player, alpha, &"carry").disabled != "", "can't pick up a second body")
+	check(_ids(player, player)[0] == &"put_down", "self-interaction offers Put down, first (%s)" % [_ids(player, player)])
+	var on_carried := _ids(player, alpha)
+	check(on_carried[0] == &"put_down" and on_carried.has(&"drag") and _action(player, alpha, &"drag").disabled == "" and not on_carried.has(&"carry"),
+		"the body you carry: Put down first, Drag to switch, no Carry (%s)" % [on_carried])
+	hostile.vitals.server_damage(500.0)
+	await _frames(2)
+	check(_ids(player, hostile) == [&"carry", &"check_condition"] and _action(player, hostile, &"carry").disabled == "You're already moving someone",
+		"another body: Carry greyed (can't pick up a second), no Drag, no Put down (%s)" % [_ids(player, hostile)])
+	hostile.vitals.server_reset_health()
 
 	player._server_drag_body.rpc_id(1, alpha.get_path())
 	check(player.carrying == alpha and player.carry_mode == Soldier.DRAG, "Drag on the body you carry switches to dragging")
+	check(_ids(player, alpha).has(&"carry") and _action(player, alpha, &"carry").disabled == "" and not _ids(player, alpha).has(&"drag"),
+		"dragging it: Carry to switch back, no Drag (%s)" % [_ids(player, alpha)])
+	_end_carry_phase(player)  # took hold of the handle
 	check(is_equal_approx(player.carry_speed_mult(), Soldier.DRAG_SPEED_MULT) and Soldier.DRAG_SPEED_MULT < Soldier.CARRY_SPEED_MULT, "dragging is slower (0.35)")
 	player.global_position += Vector3(0, 0, -2.0)
 	await _frames(3)
@@ -255,11 +274,18 @@ func _test_carry_and_drag() -> void:
 		else:
 			player._server_carry_body.rpc_id(1, alpha.get_path())
 		var held := player.carry_mode == mode
+		await _frames(2)  # (its ragdoll goes as it's taken hold of)
+		_end_carry_phase(player)
 		var g := InputEventAction.new()
 		g.action = &"grenade"
 		g.pressed = true
 		player.player_input._unhandled_input(g)
 		await _frames(2)
+		if mode == Soldier.CARRY:
+			check(player.carrying == alpha and player.carry_speed_mult() == 0.0 and absf(_flat(alpha.global_position, player.global_position) - 0.8) < 0.1,
+				"putting a carried body down: you kneel and lower it (standing still), where it'll lie, in front (carrying %s, speed %.2f, %.2f m from you)"
+					% [player.carrying, player.carry_speed_mult(), _flat(alpha.global_position, player.global_position)])
+			_end_carry_phase(player)
 		check(held and player.carrying == null and player.carry_mode == &"" and alpha.carried_by == null,
 			"G lets go of a body you're %s" % ("dragging" if mode == Soldier.DRAG else "carrying"))
 
@@ -294,12 +320,14 @@ func _test_human_casualty() -> void:
 	check(InteractionMenu.actions_for(bravo, player).any(func(a: Dictionary) -> bool: return a.id == &"carry"), "a squadmate can carry a downed player")
 	bravo._server_carry_body.rpc_id(1, player.get_path())
 	check(bravo.carrying == player and player.carried_by == bravo and player.collision_layer == 0, "carried by Bravo")
+	_end_carry_phase(bravo)
 	await _frames(3)
 	var pos: Variant = player.carried_by_pos
 	check(pos is Vector3 and (pos as Vector3).distance_to(bravo.carry_transform().origin) < 0.05, "the host sends the player where they are carried")
 	player._physics_process(1.0 / 60.0)
 	check(player.global_position.distance_to(bravo.carry_transform().origin) < 0.05, "the player's body follows it")
 	bravo._server_drag_body.rpc_id(1, player.get_path())
+	_end_carry_phase(bravo)
 	await _frames(3)
 	pos = player.carried_by_pos
 	check(bravo.carry_mode == Soldier.DRAG and pos is Vector3 and (pos as Vector3).distance_to(bravo.carry_transform().origin) < 0.05, "and dragged")
@@ -385,7 +413,7 @@ func _test_menu() -> void:
 	menu.update_keys(true, false, 0.5)
 	check(menu.mode == InteractionMenu.Mode.SELF, "and stays on it, never the object menu, while Ctrl is held")
 	var rects := menu.entry_rects()
-	check(rects.size() == InteractionMenu.general_actions(player, player).size(), "your general actions are around the waist point")
+	check(rects.size() == InteractionMenu.grouped(InteractionMenu.general_actions(player, player)).size(), "your general actions are around the waist point")
 	menu.set_cursor(rects[0].get_center())
 	check(menu.highlighted().get("id") == &"check_wounds", "the cursor highlights Check wounds")
 	check(menu.update_keys(false, false, 0.05) and menu.chosen.get("id") == &"check_wounds" and not menu.is_open(), "letting go picks it and closes")
@@ -490,7 +518,7 @@ func _test_body_points() -> void:
 	var own := menu.points.map(func(p: Dictionary) -> StringName: return p.region)
 	check(menu.mode == InteractionMenu.Mode.SELF and own.size() == 7 and own.has(InteractionMenu.WAIST) and own.has(&"arm_r"),
 		"self-interaction: the same layout on yourself (%s)" % [own])
-	check(menu.highlighted().is_empty() and menu.entry_rects().size() == InteractionMenu.general_actions(player, player).size(), "starting on the waist point")
+	check(menu.highlighted().is_empty() and menu.entry_rects().size() == InteractionMenu.grouped(InteractionMenu.general_actions(player, player)).size(), "starting on the waist point")
 	var arm: Vector2 = menu.points.filter(func(p: Dictionary) -> bool: return p.region == &"arm_l")[0].screen
 	menu.set_cursor(arm)
 	check(menu.entry_rects().size() >= 1 and InteractionMenu.region_actions(player, player, &"arm_l")[0].label == "Check left arm", "moving onto your left arm opens its point")
@@ -499,6 +527,69 @@ func _test_body_points() -> void:
 	player.inventory.remove_one(&"iv_18")
 	player.inventory.remove_one(&"io_kit")
 	alpha.vitals.server_reset_health()
+
+
+## The menu decluttered (Captain, P0164 queue 8): rarely used entries share one More submenu
+## once two or more do (a submenu of one is clutter), entries with their own submenu stay on
+## the ring, a ring never holds more than RING_MAX (the rest go into More), a picked entry
+## inside More works like any other; on the dead Loot comes first, and Loot all is left out
+## once there's nothing left (greyed for the same reason as Loot).
+func _test_declutter() -> void:
+	print("Declutter: More, a full ring, the dead")
+	var entry := func(id: String, group: String) -> Dictionary:
+		var e := {"id": StringName(id), "label": id.capitalize(), "show": &"condition", "target": alpha, "disabled": ""}
+		if group != "":
+			e["group"] = group
+		return e
+	var labels := func(ring: Array) -> Array: return ring.map(func(a: Dictionary) -> String: return a.label)
+	var lone: Array[Dictionary] = [entry.call("carry", ""), entry.call("drag", ""), entry.call("check", InteractionMenu.MORE)]
+	check(labels.call(InteractionMenu.grouped(lone)) == ["Carry", "Drag", "Check"], "one rare entry stays on the ring (%s)" % [labels.call(InteractionMenu.grouped(lone))])
+	var cargo: Dictionary = entry.call("cargo", InteractionMenu.MORE)
+	cargo["items"] = [entry.call("take", "")]
+	var two: Array[Dictionary] = [entry.call("carry", ""), entry.call("search", InteractionMenu.MORE), cargo, entry.call("drag", ""), entry.call("check", InteractionMenu.MORE)]
+	var ring := InteractionMenu.grouped(two)
+	check(labels.call(ring) == ["Carry", "More", "Cargo", "Drag"] and ring[1].id == &"group" and labels.call(ring[1].get("items", [])) == ["Search", "Check"],
+		"two rare entries share More, where the first was; one with its own submenu stays on the ring (%s; %s)" % [labels.call(ring), labels.call(ring[1].get("items", []))])
+	var named: Array[Dictionary] = [entry.call("pull a", "Pull out"), entry.call("pull b", "Pull out")]
+	named[0]["group_label"] = "Alpha"
+	check(labels.call(InteractionMenu.grouped(named)) == ["Pull out"] and labels.call(InteractionMenu.grouped(named)[0].items) == ["Alpha", "Pull B"],
+		"a group's entries use their group_label inside it")
+	var many: Array[Dictionary] = []
+	for i in InteractionMenu.RING_MAX + 3:
+		many.append(entry.call("entry %d" % i, ""))
+	many.insert(2, cargo)
+	var full := InteractionMenu.grouped(many)
+	check(full.size() == InteractionMenu.RING_MAX and labels.call(full) == ["Entry 0", "Entry 1", "Cargo", "Entry 2", "Entry 3", "More"]
+		and labels.call(full.back().items) == ["Entry 4", "Entry 5", "Entry 6", "Entry 7", "Entry 8"],
+		"%d entries: the ring keeps %d, the last plain ones go into More (%s; %s)" % [many.size(), InteractionMenu.RING_MAX, labels.call(full), labels.call(full.back().get("items", []))])
+
+	var menu := InteractionMenu.new(player)
+	var screen := SubViewport.new()
+	screen.size = Vector2i(1280, 720)
+	add_child(screen)
+	screen.add_child(menu)
+	var centre := menu.get_viewport_rect().size * 0.5
+	menu.update_keys(true, false, 0.5)
+	var points: Array[Dictionary] = [{"target": alpha, "screen": centre, "actions": ring}]
+	menu.set_points(points)
+	menu.set_cursor(centre)
+	menu.set_cursor(menu.entry_rects()[1].get_center())
+	check(menu.highlighted().get("id") == &"group" and menu.submenu_rects(1).size() == 2, "hovering More opens its submenu")
+	menu.set_cursor(menu.submenu_rects(1)[1].get_center())
+	await _frames(2)  # draws with More open
+	check(menu.highlighted().get("id") == &"check", "the cursor highlights the entry inside it (%s)" % menu.highlighted().get("label"))
+	check(menu.update_keys(false, false, 0.05) and menu.chosen.get("id") == &"check", "letting go picks it")
+	var text := InteractionMenu.perform(player, menu.chosen)
+	check(text.begins_with(alpha.display_name()), "and it does what it says (%s)" % text.replace("\n", " | "))
+	screen.queue_free()
+
+	hostile.global_position = SPOT + Vector3(-2.0, 0, -1.0)
+	hostile.vitals.server_kill()
+	await _frames(3)
+	check(_ids(player, hostile) == [&"loot", &"loot_all", &"carry", &"drag"], "the dead: Loot first, then Loot all, Carry, Drag (%s)" % [_ids(player, hostile)])
+	hostile.inventory.strip()
+	check(_ids(player, hostile) == [&"loot", &"carry", &"drag"] and _action(player, hostile, &"loot").disabled == "Nothing left on them",
+		"stripped: Loot greyed (nothing left on them), Loot all left out (%s)" % [_ids(player, hostile)])
 
 
 # --- Helpers -------------------------------------------------------------------------------
@@ -585,3 +676,15 @@ func _frames(n: int) -> void:
 
 func _seconds(s: float) -> void:
 	await get_tree().create_timer(s).timeout
+
+
+## The pick-up, take-hold or put-down `s` is in is over (the host counts it down in the
+## carrier's physics step, which these tests mostly keep off).
+func _end_carry_phase(s: Soldier) -> void:
+	s._carry_phase_left = 0.0
+	s.carry_busy_until = 0.0
+	s._update_carried(0.0)
+
+
+static func _flat(a: Vector3, b: Vector3) -> float:
+	return Vector2(a.x - b.x, a.z - b.z).length()

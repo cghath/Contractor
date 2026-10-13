@@ -9,6 +9,10 @@ extends Node3D
 ## Godot switches by distance (visibility ranges), with skirts hiding the seams between
 ## them. Heights fade to 0 at the zone's edge, where a flat apron carries the ground on to
 ## the horizon and an invisible wall keeps everyone in.
+##
+## The preset's sea is also the coast of wave 5b (V4: the LHD offshore, AAVs swimming in):
+## has_coast(), shore_distance(), water_height(), seaward() and shore_point() at the end answer
+## for it, so every zone with a sea gets the LHD, and every other zone the FOB.
 
 ## Grid spacing (m). Proposed: 4 m keeps a 2 km zone at 513 x 513 heights.
 const CELL_M := 4.0
@@ -149,6 +153,7 @@ func generate(def: Dictionary, flat: Array) -> void:
 	for h in heights:
 		min_height = minf(min_height, h)
 		max_height = maxf(max_height, h)
+	_measure_shore()  # wave 5b (V4): the coast the LHD and AAVs use, from the sea above
 
 
 ## The dry riverbeds of a preset's "wadi": `count` lines across the zone (seeded), each a
@@ -608,3 +613,79 @@ func _water() -> MeshInstance3D:
 	node.material_override = material
 	node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	return node
+
+
+# --- The coast (wave 5b, V4): the sea above, as the LHD and the AAVs see it ------------------
+
+## The sea's side by name ("north" -z, "south" +z, "west" -x, "east" +x; "" with no sea).
+const SEA_SIDES: Array[String] = ["north", "south", "west", "east"]
+
+var coast_side := ""
+## The shoreline nearest the sea's edge: how far in from that edge the water ends at its
+## narrowest (m; the LHD lies inside it).
+var shore_m := 0.0
+var _shore := PackedFloat32Array()  # per grid line along the coast: the shoreline's distance from the edge
+
+
+## The shoreline along the coast: walking in from the sea's edge on each grid line, the first
+## ground at or above the water (between grid points, where the ground crosses it), else the
+## water's inner edge (sea_m + SEA_MARGIN_M). After the pads, so it is the ground as built.
+func _measure_shore() -> void:
+	coast_side = SEA_SIDES[sea_side] if sea_side >= 0 else ""
+	_shore = PackedFloat32Array()
+	shore_m = 0.0
+	if sea_side < 0:
+		return
+	var reach := sea_m + SEA_MARGIN_M
+	_shore.resize(points)
+	shore_m = reach
+	for k in points:
+		var line := reach
+		var prev := sea_level - sea_depth
+		for s in points:
+			var d := s * CELL_M
+			if d > reach:
+				break
+			var h: float = [_h(k, s), _h(k, points - 1 - s), _h(s, k), _h(points - 1 - s, k)][sea_side]
+			if h >= sea_level:
+				line = 0.0 if s == 0 else d - CELL_M * (h - sea_level) / maxf(h - prev, 0.001)
+				break
+			prev = h
+		_shore[k] = line
+		shore_m = minf(shore_m, line)
+
+
+func has_coast() -> bool:
+	return sea_side >= 0
+
+
+## How far (x, z) is inland of the shoreline (m; negative out to sea). INF with no sea.
+func shore_distance(x: float, z: float) -> float:
+	if sea_side < 0 or _shore.is_empty():
+		return INF
+	var along := x if sea_side <= 1 else z
+	var g := clampf((along + _half) / CELL_M, 0.0, points - 1.0)
+	var k := mini(floori(g), points - 2)
+	return sea_edge_distance(x, z) - lerpf(_shore[k], _shore[k + 1], g - k)
+
+
+## The water's surface at (x, z): sea_level over the sea strip (where the Sea mesh is, and on
+## out past the zone's edge), -INF where there is no water. Below the ground it's dry land.
+func water_height(x: float, z: float) -> float:
+	return sea_level if sea_side >= 0 and sea_edge_distance(x, z) <= sea_m + SEA_MARGIN_M else -INF
+
+
+## Out to sea (a unit vector on the ground plane), ZERO with no sea.
+func seaward() -> Vector3:
+	return [Vector3(0, 0, -1), Vector3(0, 0, 1), Vector3(-1, 0, 0), Vector3(1, 0, 0)][sea_side] if sea_side >= 0 else Vector3.ZERO
+
+
+## The point `t` metres inland of the shoreline (negative: out to sea) level with `pos` along
+## the coast, on the ground or the water.
+func shore_point(pos: Vector3, t: float) -> Vector3:
+	if sea_side < 0:
+		return pos
+	var out := seaward()
+	var p := Vector3(pos.x, 0.0, pos.z)
+	p -= out * (t - shore_distance(p.x, p.z))  # the shoreline is a function of the along-coast position: one step
+	return Vector3(p.x, maxf(height_at(p.x, p.z), water_height(p.x, p.z)), p.z)

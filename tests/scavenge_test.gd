@@ -149,8 +149,14 @@ func _test_weapon_swap() -> void:
 	pick = Scavenge.best_pick(marksman, dead, false)
 	check(pick.get("kind") == "weapon" and pick.id == &"mk18", "a marksman with no 7.62 left at all takes the body's loaded rifle (%s)" % [pick])
 	var mine: StringName = marksman.inventory.slots[&"primary"]
-	check(Scavenge.apply(marksman, dead, pick) == 1 and marksman.inventory.slots[&"primary"] == &"mk18" and dead.inventory.slots[&"primary"] == mine,
-		"and leaves his empty one on the body (%s, body has %s)" % [marksman.inventory.slots[&"primary"], dead.inventory.slots[&"primary"]])
+	var before := _item_ids()
+	check(Scavenge.apply(marksman, dead, pick) == 1 and marksman.inventory.slots[&"primary"] == &"mk18" and dead.inventory.slots[&"primary"] == &"",
+		"and takes it off the body (%s, body has %s)" % [marksman.inventory.slots[&"primary"], dead.inventory.slots[&"primary"]])
+	# His empty one goes on the ground beside the body, not on its sling, where it looked like
+	# the rifle he had just taken (Captain, P0164 queue 15).
+	var laid := _new_items(before, dead.body_point(), 1.5)
+	check(laid == [String(mine)] and dead.inventory.count_of(mine) == 0,
+		"his empty %s lies on the ground beside the body (%s), not on it" % [mine, laid])
 	check(marksman.active_slot == &"primary", "and fights with it, not his sidearm (%s)" % marksman.active_slot)
 	pick = Scavenge.best_pick(marksman, dead, false)
 	check(pick.get("id") == &"mag_556", "then its magazines (%s)" % [pick.get("id", "nothing")])

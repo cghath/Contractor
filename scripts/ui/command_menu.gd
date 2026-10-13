@@ -10,7 +10,7 @@ extends PanelContainer
 ## level and Esc closes. Orders go to the host as Soldier._server_squad_command.
 ##
 ## Entries with "cmd" are orders ("point": at the spot under the crosshair, "aim": at the
-## enemy under it; "hvt": at the HVT under it); entries with "select" change the selection (fire team or colour team)
+## enemy under it; "hvt": at the HVT under it; "squadmate": at the squadmate under it); entries with "select" change the selection (fire team or colour team)
 ## and keep the menu open. Status > Report enemy position ("radio_report", people, wave 4)
 ## reports the enemies under the crosshair by radio (PeopleLayer.request_report).
 
@@ -21,14 +21,28 @@ const MENU := {
 			{"key": "1", "label": "Return to formation", "cmd": "follow"},
 			{"key": "2", "label": "Move there", "cmd": "move", "point": true},
 			{"key": "3", "label": "Stop", "cmd": "hold"},
+			{"key": "4", "label": "Bound there (buddy covers)", "cmd": "bound", "point": true},
+			{"key": "5", "label": "Take cover", "cmd": "take_cover"},
+			{"key": "6", "label": "Fall back", "cmd": "fall_back"},
+			{"key": "7", "label": "Garrison that building", "cmd": "garrison", "point": true},
+			{"key": "8", "label": "Clear that building", "cmd": "clear", "point": true},
 		]},
 		{"key": "2", "label": "Target", "items": [
 			{"key": "1", "label": "Target that enemy", "cmd": "target", "aim": true},
 			{"key": "2", "label": "No target", "cmd": "target:"},
+			{"key": "3", "label": "Suppress there", "cmd": "suppress", "point": true},
+			{"key": "4", "label": "Suppress known enemy", "cmd": "suppress:known"},
+			{"key": "5", "label": "Watch that sector", "cmd": "watch", "point": true},
 		]},
 		{"key": "3", "label": "Engage", "items": [
 			{"key": "1", "label": "Open fire", "cmd": "open_fire"},
 			{"key": "2", "label": "Hold fire", "cmd": "hold_fire"},
+			{"key": "3", "label": "Stance", "items": [
+				{"key": "1", "label": "Stand", "cmd": "stance:up"},
+				{"key": "2", "label": "Crouch", "cmd": "stance:crouch"},
+				{"key": "3", "label": "Prone", "cmd": "stance:prone"},
+				{"key": "4", "label": "Their choice", "cmd": "stance:auto"},
+			]},
 		]},
 		{"key": "4", "label": "Mount", "items": [  # wave 5 (VehicleLayer); the full set is V4's
 			{"key": "1", "label": "Get in that vehicle", "cmd": "mount", "point": true},
@@ -41,12 +55,25 @@ const MENU := {
 		{"key": "6", "label": "Action", "items": [
 			{"key": "1", "label": "Throw smoke there", "cmd": "throw_smoke", "point": true},
 			{"key": "2", "label": "Throw frag there", "cmd": "throw_frag", "point": true},
-			{"key": "3", "label": "Scavenge that body", "cmd": "scavenge", "point": true},
-			{"key": "4", "label": "Scavenge freely", "cmd": "scavenge_on"},
-			{"key": "5", "label": "Don't scavenge", "cmd": "scavenge_off"},
-			{"key": "6", "label": "Escort that HVT", "cmd": "escort", "hvt": true},
-			{"key": "7", "label": "Stop escorting", "cmd": "escort:"},
-			{"key": "8", "label": "Fire launcher there", "cmd": "fire_launcher", "point": true},
+			{"key": "3", "label": "Fire launcher there", "cmd": "fire_launcher", "point": true},
+			{"key": "4", "label": "Launcher out", "cmd": "launcher_out"},
+			{"key": "5", "label": "Heal up", "cmd": "heal"},
+			{"key": "6", "label": "Gear", "items": [
+				{"key": "1", "label": "Rearm from that body", "cmd": "scavenge", "point": true},
+				{"key": "2", "label": "Scavenge freely", "cmd": "scavenge_on"},
+				{"key": "3", "label": "Don't scavenge", "cmd": "scavenge_off"},
+				{"key": "4", "label": "Give me ammo", "cmd": "give_ammo"},
+				{"key": "5", "label": "Drop packs here", "cmd": "drop_packs"},
+				{"key": "6", "label": "Pick packs up", "cmd": "pick_packs"},
+			]},
+			{"key": "7", "label": "Casualties", "items": [
+				{"key": "1", "label": "Treat that casualty", "cmd": "treat", "squadmate": true},
+				{"key": "2", "label": "Bring casualties there", "cmd": "ccp", "point": true},
+				{"key": "3", "label": "Bring casualties to me", "cmd": "ccp_me"},
+				{"key": "4", "label": "Stop bringing casualties", "cmd": "ccp_off"},
+			]},
+			{"key": "8", "label": "Escort that HVT", "cmd": "escort", "hvt": true},
+			{"key": "9", "label": "Stop escorting", "cmd": "escort:"},
 		]},
 		{"key": "7", "label": "Combat mode", "items": [
 			{"key": "1", "label": "Safe", "cmd": "mode:safe"},
@@ -77,10 +104,36 @@ const MENU := {
 				{"key": "4", "label": "Yellow", "select": "color:yellow"},
 			]},
 		]},
-		{"key": "0", "label": "Support", "items": [
-			{"key": "1", "label": "Helicopter transport", "cmd": ""},
-			{"key": "2", "label": "Resupply drop", "cmd": ""},
+		{"key": "0", "label": "Support", "items": [  # wave 5b: handlers registered with Supports
+			{"key": "1", "label": "Helicopter transport", "items": [  # V3: HeliSupports (marker = a grid on the map)
+				{"key": "1", "label": "Pick up at my map marker", "cmd": "support:transport:marker"},
+				{"key": "2", "label": "Pick up there", "cmd": "support:transport:here", "point": true},
+				{"key": "3", "label": "Pick up on smoke (green, blue)", "cmd": "support:transport:smoke"},
+				{"key": "4", "label": "Fly to my map marker", "cmd": "support:transport:dest"},
+				{"key": "5", "label": "Send it home", "cmd": "support:transport:cancel"},
+			]},
+			{"key": "2", "label": "Resupply drop", "items": [
+				{"key": "1", "label": "At my map marker", "cmd": "support:resupply:marker"},
+				{"key": "2", "label": "There", "cmd": "support:resupply:here", "point": true},
+				{"key": "3", "label": "On smoke (green, yellow)", "cmd": "support:resupply:smoke"},
+				{"key": "4", "label": "Send it home", "cmd": "support:resupply:cancel"},
+			]},
 			{"key": "3", "label": "Fire support", "cmd": ""},
+			{"key": "4", "label": "Helicopter extraction", "items": [
+				{"key": "1", "label": "At my map marker", "cmd": "support:extraction:marker"},
+				{"key": "2", "label": "There", "cmd": "support:extraction:here", "point": true},
+				{"key": "3", "label": "On purple smoke", "cmd": "support:extraction:smoke"},
+				{"key": "4", "label": "Send it home", "cmd": "support:extraction:cancel"},
+			]},
+			{"key": "5", "label": "AAV", "items": [
+				{"key": "1", "label": "Call an AAV", "cmd": "support:aav_call"},
+				{"key": "2", "label": "Move there", "cmd": "support:aav_move", "point": true},
+				{"key": "3", "label": "Hold", "cmd": "support:aav_hold"},
+				{"key": "4", "label": "Follow me", "cmd": "support:aav_follow"},
+				{"key": "5", "label": "Squad get in", "cmd": "support:aav_mount"},
+				{"key": "6", "label": "Dismount", "cmd": "support:aav_dismount"},
+				{"key": "7", "label": "Return to base", "cmd": "support:aav_return"},
+			]},
 		]},
 	],
 }
@@ -297,6 +350,12 @@ func _pick(i: int) -> void:
 			player._hud.flash("Look at an enemy")
 			return
 		cmd = "%s:%s" % [cmd, enemy.name]
+	if item.get("squadmate", false):
+		var mate := soldier_under_crosshair()
+		if mate == null or mate.faction != player.faction or mate.vitals.is_dead():
+			player._hud.flash("Look at a wounded squadmate")
+			return
+		cmd = "%s:%s" % [cmd, mate.name]
 	if item.get("hvt", false):
 		var hvt := soldier_under_crosshair()
 		if hvt == null or not Person.is_hvt(hvt) or hvt.vitals.is_dead():

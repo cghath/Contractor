@@ -288,10 +288,13 @@ func _test_charges() -> void:
 	await _frames(2)
 	var node := charges.get_charge_node(id)
 	var before := node.global_position if node else Vector3.ZERO
+	var host_was := host.global_position
 	host.global_position += Vector3(6, 0, 0)
 	await _frames(2)
 	node = charges.get_charge_node(id)
-	check(id != "" and node != null and node.global_position.distance_to(before + Vector3(6, 0, 0)) < 0.3 and player.inventory.count_of(Charges.ITEM) == 0,
+	# Along with him as he actually moved: on sloping ground (the rocky_ridge preset) the body
+	# settles onto the ground 6 m on, up or down a little (R0042: 0.3 m up).
+	check(id != "" and node != null and node.global_position.distance_to(before + (host.global_position - host_was)) < 0.3 and player.inventory.count_of(Charges.ITEM) == 0,
 		"placed on him, it rides along as he moves; one charge used")
 	_place(player, at + Vector3(-30, 0, 0))  # clear of the blast
 	charges._due[id] = Charges._now()

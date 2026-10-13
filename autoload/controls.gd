@@ -27,6 +27,9 @@ const KEYS := {
 	&"weapon_launcher": [KEY_3],  # the anti-armour launcher (wave 5, Launchers)
 	&"pause": [KEY_ESCAPE],
 	&"quick_save": [KEY_HOME],  # F-keys are the squad command menu
+	# Get out of the vehicle you sit in, when that option is on (ControlOptions; Captain, P0164
+	# queue 8). V is free on foot and in a seat (proposed).
+	&"get_out": [KEY_V],
 	&"debug_hurt": [KEY_K],  # dev tools only (DevTools.on): hurt yourself to test going down and dying
 }
 ## Keys pressed with Shift held. An action without Shift still matches with it held, so

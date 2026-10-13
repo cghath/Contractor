@@ -13,7 +13,7 @@ func _ready() -> void:
 	GameState.zone_id = "test_squad" + OS.get_environment("CONTRACTOR_TEST_TAG")  # never touch a real save
 	GameState.delete_save()
 	CompoundLevel.spawn_ai = true
-	get_tree().create_timer(240.0).timeout.connect(func() -> void:
+	get_tree().create_timer(300.0).timeout.connect(func() -> void:
 		print("SQUAD TEST FAILED (timed out)")
 		get_tree().quit(99))
 	add_child(load("res://scenes/main.tscn").instantiate())
@@ -37,7 +37,9 @@ func _ready() -> void:
 	await _test_buddy_carries_buddy()
 	await _test_contact()
 	_test_flash_stuns()
-	_test_spotting()
+	await _test_spotting()
+	await _test_fire_discipline()
+	await _test_tactics()
 	await _test_dead_leave_squad()
 	GameState.delete_save()
 	print("SQUAD TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
@@ -241,11 +243,12 @@ func _test_contact() -> void:
 	var fought_from_cover := false
 	for i in 20 * 4:
 		await _seconds(0.25)
-		if _squad().any(func(s: Soldier) -> bool: return s.ai_status in ["In cover", "Engaging", "Bounding", "Pinned down"]):
+		# (Seven on one this close, the squad's tactics may assault through: that's fighting too.)
+		if _squad().any(func(s: Soldier) -> bool: return s.ai_status in ["In cover", "Engaging", "Bounding", "Pinned down", "Assaulting", "Flanking"]):
 			fought_from_cover = true
 		if not is_instance_valid(hostile) or not hostile.vitals.is_up():
 			break
-	check(fought_from_cover, "the squad fights from cover")
+	check(fought_from_cover, "the squad fights (from cover, or assaulting the position)")
 	check(not is_instance_valid(hostile) or not hostile.vitals.is_up(), "and puts the hostile down")
 
 
@@ -272,6 +275,97 @@ func _test_dead_leave_squad() -> void:
 	await _frames(2)
 	check(is_instance_valid(foxtrot) and foxtrot.is_in_group(Soldier.DEAD_GROUP) and foxtrot.inventory.slots[&"primary"] != &""
 		and level._squad_ai().size() == living - 1, "a rebalance leaves his body and gear where they are and doesn't replace him (%d living)" % level._squad_ai().size())
+
+
+## Captain (P0164 queue 17 core): the squad's tactical evaluator picks what the situation calls
+## for (SquadTactics.score, staged), and (queue 12) the command menu's orders reach the units.
+func _test_tactics() -> void:
+	print("Tactics: the situation decides")
+	var sit := {"up": 6, "down": 0, "contact": true, "known": 3, "fresh": true, "stale": false, "cluster": {"centre": Vector3.ZERO},
+		"range": 80.0, "enemy_building": {}, "home_building": {}, "in_home": false, "suppression": 0.1, "morale": 0.9, "ammo": 0.9,
+		"cover": 0.6, "order": Squad.Order.FOLLOW, "weapons_free": true, "age": 1.0}
+	var pmc: Dictionary = SquadTactics.DOCTRINES[Doctrine.PMC]
+	var best := func(changes: Dictionary) -> int:
+		var scores: Dictionary = SquadTactics.score(sit.merged(changes, true), pmc).scores
+		var top := -1
+		for o: int in scores:
+			if top < 0 or float(scores[o]) > float(scores[top]):
+				top = o
+		return top
+	check(best.call({}) == SquadTactics.Option.SUPPRESS_FLANK, "6 of us, 3 of them 80 m off, in cover: fix them and flank")
+	check(best.call({"range": 15.0}) == SquadTactics.Option.ASSAULT, "2 to 1 and 15 m off: assault through")
+	check(best.call({"up": 2, "known": 6, "morale": 0.1, "down": 2}) == SquadTactics.Option.BREAK_CONTACT, "outnumbered, shaken, two down: break contact")
+	check(best.call({"down": 1}) == SquadTactics.Option.CASUALTY, "one down otherwise steady: cover the casualty first")
+	check(not SquadTactics.score(sit.merged({"order": Squad.Order.HOLD}, true), pmc).scores.has(SquadTactics.Option.SUPPRESS_FLANK),
+		"on Hold, the squad doesn't go flanking")
+	check(best.call({"contact": false, "fresh": false, "stale": true, "age": 30.0}) == SquadTactics.Option.SEARCH, "lost them: search where they were last seen")
+
+	print("Command menu orders")
+	var squad := level.squad_for(&"friendly")
+	squad.known.clear()
+	var alpha := SquadAI.of(_ai("Alpha"))
+	check(squad.order_command(player, "suppress:known", Vector3.ZERO, PackedStringArray(["Alpha"])) == "No known enemy to suppress",
+		"Suppress known enemy with nothing known: says so")
+	var far := level.spawn_soldier({"name": "TacticsTarget", "faction": "hostile", "variant": "urban", "pos": Vector3(40, 0.1, -40),
+		"loadout": CompoundLevel.HOSTILE_LOADOUT, "combat": 0.3, "discipline": 0.5, "guard": true})
+	SquadAI.of(far).process_mode = Node.PROCESS_MODE_DISABLED
+	squad.note_enemy(far, far.global_position)
+	check(squad.order_command(player, "suppress:known", Vector3.ZERO, PackedStringArray(["Alpha"])) == ""
+		and StringName(alpha.ordered.get("kind", &"")) == &"suppress" and alpha.weapons_free()
+		and alpha._suppress_point() != null and _flat(alpha._suppress_point(), far.global_position) < 3.0,
+		"Suppress known enemy: Alpha puts rounds on the known position (%s)" % [alpha.ordered])
+	far.queue_free()
+	squad.known.clear()
+	var lying := _standing_mate([_ai("Alpha")])
+	var one := PackedStringArray([String(lying.name)])
+	squad.order_command(player, "stance:prone", Vector3.ZERO, one)
+	await _frames(4)
+	check(lying.want_stance == SoldierMovement.Stance.PRONE, "Stance > Prone: %s goes prone (%s)" % [lying.name, lying.ai_status])
+	squad.order_command(player, "stance:auto", Vector3.ZERO, one)
+	await _frames(4)
+	check(lying.want_stance == -1, "Their choice: back to their own")
+	var hurt := _squad().filter(func(s: Soldier) -> bool: return not SquadAI.of(s)._self_task().is_empty()).size()
+	check(hurt > 0 or squad.order_command(player, "heal", Vector3.ZERO, one) == "Nobody selected has wounds they can treat",
+		"Heal up with nobody hurt: says so")
+	check(squad.order_command(player, "follow", Vector3.ZERO) == "?", "anything else goes to the older commands")
+	squad.order_command(player, "take_cover", Vector3.ZERO, PackedStringArray(["Charlie"]))
+	check(StringName(SquadAI.of(_ai("Charlie")).ordered.get("kind", &"")) == &"cover", "Take cover: Charlie looks for cover")
+	squad.give_order(player, Squad.Order.FOLLOW, player.global_position, PackedStringArray(["Charlie"]))
+	check(SquadAI.of(_ai("Charlie")).ordered.is_empty(), "and a movement order replaces it")
+
+	# Drop packs, then go back for them.
+	var mate: Soldier = null
+	for s: Soldier in _squad():
+		if s.inventory.slots.get(&"backpack", &"") != &"" and SquadAI.of(s).care == SquadAI.Care.NONE:
+			mate = s
+			break
+	if mate == null:
+		check(false, "someone in the squad wears a pack")
+	else:
+		var names := PackedStringArray([String(mate.name)])
+		var pack: StringName = mate.inventory.slots[&"backpack"]
+		check(squad.order_command(player, "drop_packs", Vector3.ZERO, names) == "" and mate.inventory.slots[&"backpack"] == &""
+			and get_tree().get_nodes_in_group(WorldItem.GROUP).any(func(n: Node) -> bool: return (n as WorldItem).item_id == pack and _flat(n.global_position, mate.global_position) < 2.0),
+			"Drop packs here: %s's pack goes on the ground beside him" % mate.name)
+		squad.order_command(player, "pick_packs", Vector3.ZERO, names)
+		check(await _wait_until(func() -> bool: return mate.inventory.slots[&"backpack"] == pack, 8.0), "Pick packs up: and back on (%s)" % mate.ai_status)
+
+	# Give me ammo: the nearest who carries the player's magazines brings some.
+	player.inventory.take(&"assault_pack")  # somewhere to put them
+	var ammo := Soldier._ammo_of(player.active_weapon()) if player.active_weapon() else &""
+	var had := player.inventory.count_of(ammo)
+	var why := squad.order_command(player, "give_ammo", Vector3.ZERO) if ammo != &"" else "no rifle"
+	var bringer: SquadAI = null
+	for s: Soldier in _squad():
+		if StringName(SquadAI.of(s).ordered.get("kind", &"")) == &"give_ammo":
+			bringer = SquadAI.of(s)
+	var status := "%s %s" % [bringer.body.name, bringer.ordered] if bringer else "nobody"
+	check(why == "" and await _wait_until(func() -> bool:
+			if bringer:
+				status = "%s: %s, %.1f m off, %s" % [bringer.body.name, bringer.body.ai_status, _flat(bringer.body.global_position, player.global_position), bringer.ordered]
+			return player.inventory.count_of(ammo) > had, 10.0),
+		"Give me ammo: a squadmate brings magazines (%s; %d -> %d; %s)" % [why, had, player.inventory.count_of(ammo), status])
+	squad.give_order(player, Squad.Order.FOLLOW, player.global_position)
 
 
 # --- Helpers --------------------------------------------------------------
@@ -326,12 +420,19 @@ func _test_spotting() -> void:
 	while ai._build_awareness(bravo) < 1.0 and after < 200:
 		after += 1
 	check(after < scans, "and seen, he's spotted sooner (%d scans, not %d)" % [after + 1, scans + 1])
+	# (Measured standing: a squadmate at a halt in Combat mode crouches, and crouched steps are quiet.)
+	var brain := SquadAI.of(bravo)
+	brain.process_mode = Node.PROCESS_MODE_DISABLED
+	bravo.want_crouch = false
+	bravo.want_stance = -1
+	await _wait_until(func() -> bool: return not bravo.is_crouching(), 3.0)
 	bravo.velocity = Vector3(0, 0, 4.0)
 	var running := Spotting.footsteps_m(bravo)
 	bravo.velocity = Vector3(0, 0, 1.5)
 	var walking := Spotting.footsteps_m(bravo)
 	bravo.velocity = Vector3.ZERO
 	check(running > walking and walking > 0.0 and Spotting.footsteps_m(bravo) == 0.0, "footsteps carry %.0f m running, %.0f m walking, none standing still" % [running, walking])
+	brain.process_mode = Node.PROCESS_MODE_INHERIT
 	ai._aware.clear()
 	ai._suspect_at = -1000.0
 	alpha.global_transform = saved[0]
@@ -360,6 +461,91 @@ func _test_spotting() -> void:
 	ai.morale = steady
 	ai._fall_back_point = null
 	_clear_contact()
+
+
+## Captain (P0164 queue 17, part 5): fire discipline. No round through or past a squadmate:
+## the clearance grows down the line with the rounds' spread, someone past the target counts,
+## someone prone counts where he lies, someone beside the shooter doesn't. Frags: nobody near
+## where it lands or under its arc. Launchers: nobody in the backblast. Staged in one frame
+## at a time.
+func _test_fire_discipline() -> void:
+	print("Fire discipline: the line of fire, past the target, frags and backblast")
+	var alpha := _ai("Alpha")
+	var bravo := _standing_mate([alpha])  # (whoever the fights so far left up and on his feet)
+	var ai := SquadAI.of(alpha)
+	var saved := [alpha.global_transform, bravo.global_transform]
+	bravo.want_stance = SoldierMovement.Stance.PRONE
+	var prone := await _wait_until(func() -> bool: return bravo.movement.is_prone(), 4.0)
+	await _seconds(0.5)  # the hit boxes follow the pose down
+	var origin := Vector3(300, 50.1, 300)  # up and away from everyone: only Bravo near the lines
+	alpha.global_transform = Transform3D(Basis.IDENTITY, origin)  # faces -z
+	var eye := alpha.camera.global_position
+	var aim := eye + Vector3(0, -0.4, -30)  # someone 30 m off
+	var away := Vector3(500, 50.1, 500)
+	_place(bravo, away)
+	check(not ai._friendly_in_line(aim), "nobody near the line: free to fire")
+	var widen := tan(ai._fire_cone())
+	_place(bravo, origin + Vector3(1.5, 0, -25))
+	var far_off := ai._friendly_in_line(aim)
+	_place(bravo, origin + Vector3(1.5, 0, -3))
+	var near_off := ai._friendly_in_line(aim)
+	check(prone and far_off and not near_off, "1.5 m off the line: in it 25 m out (clearance %.1f m), clear 3 m out (%.1f m)" % [
+		SquadAI.FRIENDLY_CLEARANCE + 25.0 * widen, SquadAI.FRIENDLY_CLEARANCE + 3.0 * widen])
+	_place(bravo, origin + Vector3(0, 0, -50))
+	check(ai._friendly_in_line(aim), "a squadmate 20 m past the target: rounds that miss fly on, no shot")
+	_place(bravo, origin + Vector3(0, 0, -90 - SquadAI.DOWNRANGE_M))
+	check(not ai._friendly_in_line(aim), "far beyond that, the shot is free again")
+	_place(bravo, origin + Vector3(0.6, 0, 0.2))
+	check(not ai._friendly_in_line(aim), "a squadmate beside the shooter isn't in the line")
+	_place(bravo, origin + Vector3(0, 0, -29))
+	var low := bravo.aim_point().y - bravo.global_position.y
+	check(SquadAI._lying(bravo) and low < 0.8 and ai._friendly_in_line(aim + Vector3.DOWN * 1.0),
+		"prone just short of a prone target, he counts where he lies (chest %.2f m up)" % low)
+	# Frags: where it lands, and the arc's low start in front of the thrower.
+	var from := eye + Vector3.UP * 0.2
+	var at := origin + Vector3(0, 0, -15)
+	_place(bravo, away)
+	var clear := ai._frag_safe(from, at)
+	_place(bravo, at + Vector3(Throwables.FRAG_RADIUS + 1.0, 0, 0))
+	var near_blast := ai._frag_safe(from, at)
+	_place(bravo, at + Vector3(Throwables.FRAG_RADIUS + SquadAI.FRAG_SAFETY_M + 3.0, 0, 0))
+	var outside := ai._frag_safe(from, at)
+	check(clear and not near_blast and outside, "a frag: not with a squadmate within %.0f m of where it lands" % (Throwables.FRAG_RADIUS + SquadAI.FRAG_SAFETY_M))
+	bravo.want_stance = -1
+	alpha.global_transform = saved[0]  # back on the ground while he gets up
+	bravo.global_transform = saved[1]
+	await _wait_until(func() -> bool: return not bravo.movement.is_prone(), 4.0)
+	alpha.global_transform = Transform3D(Basis.IDENTITY, origin)
+	var far_at := origin + Vector3(0, 0, -20)
+	_place(bravo, origin + Vector3(0, 0, -1.2))
+	var in_front := ai._frag_safe(from, far_at)
+	_place(bravo, origin + Vector3(0, 0, -9))
+	var under_top := ai._frag_safe(from, far_at)
+	_place(bravo, origin + Vector3(0.6, 0, 0))
+	var beside := ai._frag_safe(from, far_at)
+	check(not in_front and under_top and beside, "nor with one right in front, in the arc's way; one under its peak or beside the thrower is fine")
+	# Launcher backblast (RPG-7: a 45 degree cone, 20 m of injury).
+	var rpg := ItemDB.get_item(&"rpg7")
+	_place(bravo, origin + Vector3(0, 0, 4))
+	var behind := LauncherAI.friend_in_backblast(alpha, rpg)
+	_place(bravo, origin + Vector3(0, 0, -4))
+	var ahead := LauncherAI.friend_in_backblast(alpha, rpg)
+	_place(bravo, origin + Vector3(8, 0, 2))
+	var aside := LauncherAI.friend_in_backblast(alpha, rpg)
+	check(behind and not ahead and not aside, "no rocket with a squadmate in the backblast (behind %s, ahead %s, off to the side %s)" % [behind, ahead, aside])
+	alpha.global_transform = saved[0]
+	bravo.global_transform = saved[1]
+	_clear_contact()
+
+
+## A squadmate (not one of `besides`) who is up, not carrying or carried, and not busy with a
+## casualty: the staged checks move him about.
+func _standing_mate(besides: Array) -> Soldier:
+	for s: Soldier in _squad():
+		var ai := SquadAI.of(s)
+		if s not in besides and s.vitals.is_up() and s.carrying == null and not is_instance_valid(s.carried_by) and ai.care == SquadAI.Care.NONE:
+			return s
+	return _ai("Bravo")
 
 
 func _ai(callsign: String) -> Soldier:

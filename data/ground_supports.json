@@ -1,0 +1,74 @@
+{
+	"_note": "Wave 5b (V4): the AAV support, the LHD, the company's motor pool, enemy vehicle QRFs and the AI gunner on a mounted gun. Everything here is Proposed (Captain decided: AAVs from the LHD on the coast or the FOB inland, commandable, transport; lost with their cargo and passengers; AAVs can't work mountains; the LHD is never attacked). Distances in metres, speeds in km/h, times in seconds.",
+
+	"aav": {
+		"_note": "hot_zones: the support works in hot zones (design doc). contract_coast: and in contract zones on the coast (Proposed data switch). one_at_a_time: one support AAV out at once. A lost AAV is gone for the rest of the op (Captain). mountain_relief_m: a zone with hills this high (or \"terrain\": \"mountain\") is mountains; max_slope_deg: the steepest ground an AAV-7 climbs (60% grade). arrive_m: it stops this far short of whoever called it; follow_m / follow_gap_m: following, it closes in once further than follow_m and stops follow_gap_m short. dock_m: back within this of the LHD's stern or the FOB's road, it's gone.",
+		"model": "aav7",
+		"scheme": "od",
+		"hot_zones": true,
+		"contract_coast": true,
+		"one_at_a_time": true,
+		"crew_loadout": ["plate_carrier", "plate_ceramic_l4", "helmet", "m4a1", "mag_556", "mag_556", "ifak"],
+		"cargo": [["belt_50bmg", 4]],
+		"arrive_m": 14.0,
+		"follow_m": 30.0,
+		"follow_gap_m": 14.0,
+		"follow_check_s": 1.5,
+		"retarget_m": 20.0,
+		"max_slope_deg": 31.0,
+		"mountain_relief_m": 45.0,
+		"route_step_m": 8.0,
+		"beach_out_m": 40.0,
+		"beach_in_m": 25.0,
+		"stern_gap_m": 20.0,
+		"dock_m": 25.0,
+		"board_timeout_s": 60.0
+	},
+
+	"lhd": {
+		"_note": "The LHD (a Wasp/America-class amphibious assault ship, about 257 m by 32 m). lhd_m (zone \"coast\"): its centre line's distance from the coast's edge, default half the shoreline's; lhd_along_m: along the coast from the middle. deck_m: the flight deck above the water; draft_m below it. fob_inset_m: inland, supports come in from the friendly FOB's side of the map this far inside its edge.",
+		"length_m": 257.0,
+		"beam_m": 32.0,
+		"deck_m": 18.0,
+		"draft_m": 8.0,
+		"fob_inset_m": 40.0
+	},
+
+	"motor_pool": {
+		"_note": "The company's vehicles between deployments (campaign section motor_pool). start: what a new campaign owns. value: what each model is worth (repairs cost repair_share of it for a vehicle written off, less for less damage, plus battery_price for a dead battery and fuel_price a litre to fill the tank); repair_days: days in the workshop for a vehicle written off (at least 1 for any damage). Zone weights say how much of the damage each hit zone's wear counts for. bring_offset_m: a vehicle brought on a deployment waits this far behind the insertion point; return_reach_m: it goes home if it's this close to the extraction point when the squad extracts.",
+		"start": [{"model": "matv", "scheme": "desert"}],
+		"value": {"matv": 300000, "maxxpro": 350000, "technical": 25000, "technical_dshk": 30000, "aav7": 900000, "bradley": 1500000, "abrams": 4000000},
+		"default_value": 250000,
+		"repair_share": 0.12,
+		"repair_days": 6,
+		"zone_weights": {"hull": 0.4, "engine": 0.3, "wheels": 0.2, "fuel": 0.1},
+		"battery_price": 800,
+		"fuel_price": 2,
+		"bring_offset_m": 14.0,
+		"return_reach_m": 60.0
+	},
+
+	"vehicle_qrf": {
+		"_note": "Hot zones: a QRF from a base rides in an enemy technical this share of the time (decided per launch from the zone's seed, the base and the count, so a replay is the same); the soldiers get out dismount_m short of where they're sent, or sooner if it's stuck stuck_s or hit; it's only worth it for min_drive_m and up. At most max_vehicles per wave; a wave too big for them walks the rest.",
+		"share": 0.5,
+		"models": ["technical_dshk", "technical"],
+		"scheme": "",
+		"cargo": [["belt_127x108", 2]],
+		"speed_kmh": 55.0,
+		"dismount_m": 180.0,
+		"min_drive_m": 250.0,
+		"max_vehicles": 2,
+		"stuck_s": 8.0,
+		"timeout_s": 240.0
+	},
+
+	"gunner": {
+		"_note": "An AI gunner on a vehicle's mounted gun: looks for enemies every check_s out to range_m, fires bursts of burst rounds with pause_s between, spread_deg of aim error on top of the gun's own, and holds fire when a friend is within friend_clear_m of the line.",
+		"range_m": 600.0,
+		"check_s": 0.5,
+		"burst": [4, 9],
+		"pause_s": [0.8, 1.8],
+		"spread_deg": 0.8,
+		"friend_clear_m": 2.5
+	}
+}

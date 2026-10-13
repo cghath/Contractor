@@ -4,7 +4,8 @@ extends Node3D
 ## tourniquet off, seals and tension, splints, morphine as a level in the blood (relief,
 ## sedation, slowed breathing), NPAs and airway obstruction, care_needed's order, treatment
 ## waking a casualty (there is no revive), kits as bags of items, and, in a hosted session,
-## the timed host requests (times on yourself and others, interruptions, H, the Treat menu,
+## the timed host requests (times on yourself and others, interruptions and their session-log
+## lines: who moved the casualty, how far; H, the Treat menu,
 ## a casualty coming round once treated).
 ##   <voxel godot exe> --headless --path . res://tests/medical_test.tscn
 ## Exits with the number of failures. Rule dice are seeded, so results repeat.
@@ -997,6 +998,7 @@ func _test_completed_treatments() -> void:
 
 func _test_interruptions() -> void:
 	print("Interruptions")
+	_open_scratch_log()
 	_restock()
 	_wound(casualty.vitals, Vitals.FOREARM_L, "muscle", 0.25)
 	player.inventory.take(&"pressure_bandage")
@@ -1005,12 +1007,17 @@ func _test_interruptions() -> void:
 	casualty.global_position += Vector3(1.5, 0, 0)
 	await _seconds(0.3)
 	check(not casualty.vitals.is_healing() and player._server_busy_until <= Soldier._now(), "the casualty moved away: interrupted")
+	var shoved := _care_lines("interrupted: ")
+	check(shoved.size() == 1 and shoved[0].contains("%s treats %s: pressure_bandage on" % [player.log_name(), casualty.log_name()])
+		and shoved[0].contains("interrupted: they were moved: nobody carried them (1.5 m, "),
+		"  the log says nobody carried them, how far they went and how they are (%s)" % [shoved])
 	casualty.global_position = SPOT + Vector3(0, 0, -1.5)
 	player._server_treat.rpc_id(1, casualty.get_path(), &"pressure_bandage", Vitals.FOREARM_L)
 	await _seconds(0.3)
 	player.vitals.server_damage(500.0)
 	await _seconds(0.3)
 	check(not casualty.vitals.is_healing() and casualty.vitals.wound_list()[0].bleeding, "the treater went down: interrupted")
+	check(_care_lines("interrupted: you went down").size() == 1, "  the log says so")
 	player.vitals.server_reset_health()
 	casualty.vitals.server_damage(500.0)  # down, so it can be carried
 	await _frames(2)
@@ -1022,6 +1029,8 @@ func _test_interruptions() -> void:
 	await _seconds(0.3)
 	check(not casualty.vitals.is_healing() and player.inventory.count_of(&"pressure_bandage") == 1, "someone drags them off: interrupted, the bandage kept (%s, healing %s, carried by %s)"
 		% [casualty.vitals.wound_list(), casualty.vitals.is_healing(), casualty.carried_by])
+	var dragged := _care_lines("interrupted: they were moved: dragged by ")
+	check(dragged.size() == 1 and dragged[0].contains("dragged by %s (" % helper.log_name()), "  the log says who dragged them (%s)" % [dragged])
 	helper.release_carried()
 	casualty.global_position = SPOT + Vector3(0, 0, -1.5)
 	player._server_treat.rpc_id(1, casualty.get_path(), &"pressure_bandage", Vitals.FOREARM_L)
@@ -1032,10 +1041,41 @@ func _test_interruptions() -> void:
 	player._server_busy_until = 0.0
 	player._server_treat.rpc_id(1, casualty.get_path(), &"pressure_bandage", Vitals.FOREARM_L)
 	check(not casualty.vitals.is_healing(), "too far to start")
+	var refused := _care_lines("refused: Too far away")
+	var at := RegEx.create_from_string(" at ([0-9.]+) m,").search(refused[-1] if not refused.is_empty() else "")
+	check(at != null and at.get_string(1).to_float() > Soldier.TREAT_REACH, "  the log says how far they were (%s)" % [refused])
+	check(_care_lines("started (").size() == 4 and _care_lines("interrupted: ").size() == 4, "  each start and each interruption has its line (%s)" % [_care_lines("")])
+	SessionLog.finish()
 	casualty.global_position = SPOT + Vector3(0, 0, -1.5)
 	_reset(casualty)
 	_reset(player)
 	player.inventory.remove_one(&"pressure_bandage")
+
+
+## Opens a session log in this test's own scratch folder under user:// (emptied first; never
+## the real logs), so the checks can read the treatment lines: SessionLog is off when headless.
+func _open_scratch_log() -> void:
+	var dir := OS.get_user_data_dir().path_join("medical_test_log" + OS.get_environment("CONTRACTOR_TEST_TAG"))
+	_remove(dir)
+	DirAccess.make_dir_recursive_absolute(dir)
+	SessionLog.start(dir)
+
+
+## The open session log's treatment lines ("<who> treats <whom>: ...") with `text` in them.
+func _care_lines(text: String) -> Array:
+	var lines := FileAccess.get_file_as_string(SessionLog.folder.path_join("session.log")).split("\n")
+	return Array(lines).filter(func(l: String) -> bool: return " treats " in l and text in l and not "  [ok] " in l and not "  [FAIL] " in l)
+
+
+## Removes this test's scratch folder (under user://, made by this test).
+static func _remove(dir: String) -> void:
+	if not DirAccess.dir_exists_absolute(dir):
+		return
+	for sub in DirAccess.get_directories_at(dir):
+		_remove(dir.path_join(sub))
+	for f in DirAccess.get_files_at(dir):
+		DirAccess.remove_absolute(dir.path_join(f))
+	DirAccess.remove_absolute(dir)
 
 
 func _test_use_medical() -> void:

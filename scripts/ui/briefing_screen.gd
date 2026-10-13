@@ -79,7 +79,8 @@ func show_briefing(briefing: Briefing) -> void:
 	_intel.text = "Intel: %d known enemy position%s (red on the map)" % [known, "" if known == 1 else "s"] if known > 0 else "Intel: no known enemy positions"
 	_insertion.clear()
 	for point: Dictionary in briefing.insertion_points():
-		_insertion.add_item("%s (%s)" % [String(point.get("name", "")), String(point.get("method", "foot"))])
+		var method := String(point.get("method", "foot"))
+		_insertion.add_item("%s (%s)" % [String(point.get("name", "")), "Black Hawk" if method == Briefing.HELI else method])  # wave 5b
 		_insertion.set_item_metadata(_insertion.item_count - 1, String(point.get("id", "")))
 		if String(point.get("id", "")) == briefing.insertion_id:
 			_insertion.select(_insertion.item_count - 1)
@@ -87,7 +88,7 @@ func show_briefing(briefing: Briefing) -> void:
 		child.queue_free()
 	for id: String in briefing.available_supports():
 		var box := CheckBox.new()
-		box.text = String(Briefing.SUPPORTS[id].name)
+		box.text = briefing.support_name(id)  # wave 5b: motor pool vehicles too
 		box.set_pressed_no_signal(id in briefing.supports)
 		box.toggled.connect(func(on: bool) -> void: briefing.request_support(id, on))
 		_supports.add_child(box)

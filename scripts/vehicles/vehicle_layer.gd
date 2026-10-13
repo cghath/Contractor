@@ -86,7 +86,11 @@ func server_spawn(p_model: String, xform: Transform3D, scheme := "", faction := 
 
 
 func _make(data: Dictionary) -> Node:
-	var v := Vehicle.create(String(data.model), String(data.get("scheme", "")), StringName(String(data.get("faction", "player"))), String(data.id))
+	var model := String(data.model)
+	var scheme := String(data.get("scheme", ""))
+	var faction := StringName(String(data.get("faction", "player")))
+	var v: Vehicle = Helicopter.make(model, scheme, faction, String(data.id)) if Helicopter.flies(model) \
+		else Vehicle.create(model, scheme, faction, String(data.id))  # wave 5b: helicopters fly (V3)
 	v.from_save(data)
 	return v
 
@@ -125,8 +129,11 @@ func server_place_parked(entries: Array) -> Array[Vehicle]:
 
 
 ## Host: every vehicle as the zone save keeps it (GameState.save_zone calls this through the group).
+## Wave 5b: one with meta "no_save" (a support AAV, an enemy QRF technical, a motor pool vehicle
+## out with the squad) goes with the op; only its wreck stays.
 func records() -> Array:
-	return vehicles().map(func(v: Vehicle) -> Dictionary: return v.to_save())
+	return vehicles().filter(func(v: Vehicle) -> bool: return v.wrecked or not v.has_meta(&"no_save")) \
+		.map(func(v: Vehicle) -> Dictionary: return v.to_save())
 
 
 ## Host: the vehicles in the zone save (GameState.vehicles, loaded by the level), back where

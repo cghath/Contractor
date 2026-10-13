@@ -136,11 +136,11 @@ desert, white, tan, red.
 
 **Order:** V1 first, or with a vehicle-body stub agreed up front, because V3 and V4 sit on it.
 
-**Status (2026-10-12):** V1 and V2 are done (wave 5a, cghath's side; CHANGELOG). The Vehicle API is in
-`scripts/vehicles/vehicle.gd`; `VehicleLayer` holds a level's vehicles. V3 and V4 (5b) are next. The
-friendly-FOB conversion of the base hub is on hold until cghath and Captain decide; until then
-nobody changes `base_hub.gd`, `base_level.gd` or `base_economy.gd` for wave 5.
-V2 can run beside V1.
+**Status (2026-10-12):** all four are done (V1 and V2 in 5a, V3 and V4 in 5b; CHANGELOG). `Vehicle`
+and `VehicleLayer` (vehicles), `Supports` (the support seam), `HeliSupports` (Black Hawks),
+`AavSupport`, `Lhd`, `MotorPool`, `VehicleQrf`. The friendly-FOB conversion of the base hub is on
+hold until cghath and Captain decide; the motor pool keeps its own campaign section and only the
+base's motor pool sign lists it.
 
 ## Wave 6: factions (blocked)
 

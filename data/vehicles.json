@@ -143,6 +143,7 @@
 			"name": "AAV-7A1", "kind": "tracked", "class": "ifv", "mass_kg": 25000, "com": [0.0, 1.0, 0.0],
 			"top_speed_kmh": 72, "reverse_kmh": 12, "accel_ms2": 1.5, "brake_ms2": 5.0, "turn_deg_s": 40,
 			"fuel_l": 650, "fuel_l_per_km": 1.35, "idle_l_per_h": 8.0, "cargo_l": 3000, "cargo_kg": 4500,
+			"amphibious": {"swim_kmh": 13, "swim_turn_deg_s": 18},
 			"wheels": [[-1.35, -2.82, 0.3, false], [-1.35, -1.65, 0.3, false], [-1.35, -0.48, 0.3, false], [-1.35, 0.69, 0.3, false], [-1.35, 1.86, 0.3, false], [-1.35, 3.02, 0.3, false],
 				[1.35, -2.82, 0.3, false], [1.35, -1.65, 0.3, false], [1.35, -0.48, 0.3, false], [1.35, 0.69, 0.3, false], [1.35, 1.86, 0.3, false], [1.35, 3.02, 0.3, false]],
 			"boxes": [[-1.66, 0.45, -3.4, 1.66, 2.64, 3.98], [-1.1, 1.0, -4.05, 1.1, 2.2, -3.4], [0.18, 2.64, -2.6, 1.46, 3.3, -1.2]],

@@ -30,6 +30,12 @@ func _process(_delta: float) -> void:
 	CharacterModel.lay_down(self, model, not vitals.is_up())  # down or dead
 
 
+## The name in the session log (SessionLog.who): "target dummy LightDummy", never "someone"
+## (Captain, P0164 queue 9).
+func log_name() -> String:
+	return "target dummy %s" % name
+
+
 ## The dummy is a test target, so its label shows what the wound model did: condition,
 ## blood left and bleeding, pain, and the wounds by kind.
 func _update_label() -> void:

@@ -509,6 +509,17 @@ func _test_callout_rules() -> void:
 
 func _test_callout_events() -> void:
 	print("Callouts: events")
+	# A clean slate: the test hostiles of the sections above gone, the squad patched up and out
+	# of contact (they fight back now, and the squad's tactics move them about doing it).
+	_remove_hostiles()
+	await _frames(2)
+	for s: Soldier in _squad():
+		if not s.vitals.is_dead():
+			s.vitals.server_reset_health()
+		if s.carrying != null:
+			s.release_carried()
+		SquadAI.of(s)._end_care()
+	await _wait_for(func() -> bool: return _squad().all(func(s: Soldier) -> bool: return not SquadAI.of(s).in_contact()), SquadAI.SQUAD_CONTACT_MEMORY_S + 4.0)
 	_place(player, Vector3(0, 0.1, 16))  # inside the gate, with low cover around
 	player.rotation = Vector3.ZERO
 	var squad := level.squad_for(&"friendly")
@@ -538,6 +549,11 @@ func _test_callout_events() -> void:
 	await _seconds(Callouts.REPEAT_GAP_S)
 	_set_hold_fire(false)
 	var loader := _slot(6)
+	for slot in [6, 5, 7, 4, 3]:  # (one not busy with a casualty the contact left: care comes first)
+		var s := _slot(slot)
+		if s and s.vitals.is_up() and SquadAI.of(s).care == SquadAI.Care.NONE and s.carrying == null:
+			loader = s
+			break
 	while loader.inventory.consume_round(loader.active_slot):
 		pass
 	var reloaded := func() -> bool: return _said(&"reloading").any(func(c: Dictionary) -> bool: return c.speaker == String(loader.name))
@@ -564,6 +580,8 @@ func _test_callout_events() -> void:
 	var leader_ai := String(_slot(0).name)
 	_slot(0).inventory.take(&"frag_grenade")  # in case the fight used theirs up
 	_slot(0).release_carried()  # hands full with the casualty above: a carrier doesn't throw
+	if not _slot(0).vitals.is_up():
+		_slot(0).vitals.server_reset_health()  # (the contact above can knock the leader out: this checks his throw)
 	# Nor one still busy treating him (a timed treatment holds the hands).
 	await _wait_for(func() -> bool: return Soldier._now() >= _slot(0)._busy_until and _slot(0).vitals.is_up(), 10.0)
 	thrower = squad.order_throw(player, &"frag_grenade", Vector3(0, 0, -2), PackedStringArray([leader_ai]))
