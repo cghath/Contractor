@@ -59,7 +59,7 @@ extends Node
 ##   and within SCAVENGE_LEASH_M of the squad leader; the command menu orders one to a body
 ##   or forbids it (scavenge_allowed).
 
-enum Intent { FOLLOW, HOLD, MOVE_TO, PATROL, INVESTIGATE, FIGHT, CASUALTY, RELOAD, HEAL, SCAVENGE, ESCORT }
+enum Intent { FOLLOW, HOLD, MOVE_TO, PATROL, INVESTIGATE, FIGHT, CASUALTY, RELOAD, HEAL, SCAVENGE, ESCORT, FALL_BACK }
 ## Casualty care: NONE, the living-casualty steps (REACH to GUARD and CARRY), or carrying a
 ## dead friendly's BODY.
 enum Care { NONE, REACH, DRAG, TREAT, GUARD, CARRY, BODY }
@@ -70,6 +70,27 @@ const CONTACT_MEMORY_S := 8.0
 const INVESTIGATE_MEMORY_S := 25.0
 ## A partly-spotted enemy (Spotting.SUSPECT) is looked for this long after last glimpsed.
 const SUSPECT_S := 8.0
+## Morale (queue 17 part 4; proposed): 0..1, heading for a level set by discipline, less for
+## each friend down nearby (MORALE_NEAR_M), the unit's own injury, suppression and being
+## outnumbered (enemies spotted against friends up nearby), more with the squad leader close.
+## It falls fast and comes back slowly. Under MORALE_SHAKEN aim suffers; under MORALE_BROKEN in
+## contact a hostile falls back (a friendly too, but only on Follow: orders win) and, seen
+## and alone, may give up (PeopleLayer.surrender_reason).
+const MORALE_NEAR_M := 40.0
+const MORALE_PER_DOWN := 0.12
+const MORALE_INJURY := 0.4
+const MORALE_SUPPRESSION := 0.3
+const MORALE_OUTNUMBERED := 0.1
+const MORALE_LEADER := 0.1
+const MORALE_LEADER_M := 15.0
+const MORALE_FALL_PER_S := 0.15
+const MORALE_RISE_PER_S := 0.03
+const MORALE_SHAKEN := 0.4
+const MORALE_BROKEN := 0.25
+const MORALE_SHAKEN_AIM_DEG := 3.0
+## Falling back: this far from the threat (or toward the leader), into cover within FALL_BACK_COVER_M.
+const FALL_BACK_M := 20.0
+const FALL_BACK_COVER_M := 8.0
 const SIGHT_RANGE := 60.0
 const SUPPRESSED := 0.5
 const PINNED := 0.85
@@ -321,6 +342,10 @@ var _suspect_at := -1000.0
 var _preset := ""
 ## Contact reports from squadmates on their way: enemy instance id -> {"point", "due", "who"}.
 var _reports := {}
+## Morale (MORALE_*), and where this unit is falling back to (null: not worked out).
+var morale := 1.0
+var _fall_back_point: Variant = null
+var _morale_state := "steady"
 var _no_los_s := 0.0
 var _burst_left := 0
 var _pause_until := 0.0
@@ -418,6 +443,7 @@ func _physics_process(delta: float) -> void:
 	_think_cd -= delta
 	if _think_cd <= 0.0:
 		_think_cd = THINK_S
+		_update_morale(THINK_S)
 		_choose_intent()
 	_act()
 	_steer(delta)
@@ -649,6 +675,8 @@ func status_text() -> String:
 			return "Patrolling"
 		Intent.INVESTIGATE:
 			return "Searching"
+		Intent.FALL_BACK:
+			return "Falling back"
 	return "Following"
 
 
@@ -660,6 +688,7 @@ func _setup() -> void:
 		return
 	_hold_point = body.global_position
 	_move_point = body.global_position
+	morale = _morale_base()
 	_ready_done = true
 	_pass_through_squadmates()
 
@@ -713,6 +742,8 @@ func _choose_intent() -> void:
 	_cover_medic = _medic_needs_cover()
 	if fighting():
 		scores[Intent.FIGHT] = 0.7
+	if broken() and in_contact() and (not _friendly() or order == Squad.Order.FOLLOW):
+		scores[Intent.FALL_BACK] = 0.8  # above fighting, below casualty care and an empty magazine
 	if weapon and rounds == 0 and spare > 0:
 		scores[Intent.RELOAD] = 0.95
 	elif weapon and rounds < full * 0.35 and spare > 0 and target == null:
@@ -787,6 +818,8 @@ func _act() -> void:
 			_do_scavenge()
 		Intent.ESCORT:
 			_do_escort()
+		Intent.FALL_BACK:
+			_do_fall_back()
 	_apply_combat_mode()
 
 
@@ -1952,6 +1985,75 @@ func _face(point: Vector3) -> void:
 		body.rotation.y = lerp_angle(body.rotation.y, atan2(-d.x, -d.z), 0.2)
 
 
+# --- Morale ---------------------------------------------------------------
+
+## Where morale settles with nothing going on: the more disciplined, the steadier.
+func _morale_base() -> float:
+	return lerpf(0.6, 1.0, clampf(discipline, 0.0, 1.0))
+
+
+## The level morale heads for now (see MORALE_NEAR_M).
+func morale_target() -> float:
+	var t := _morale_base()
+	var up := 0
+	var down := 0
+	var seen := {}
+	for group: StringName in [&"combatants", Soldier.DEAD_GROUP]:
+		for n in get_tree().get_nodes_in_group(group):
+			var s := n as Soldier
+			if s == null or s == body or s.faction != body.faction or s.is_queued_for_deletion() or seen.has(s) \
+					or s.global_position.distance_to(body.global_position) > MORALE_NEAR_M:
+				continue
+			seen[s] = true
+			if s.vitals.is_up():
+				up += 1
+			else:
+				down += 1
+	t -= MORALE_PER_DOWN * down
+	t -= MORALE_INJURY * body.vitals.injury()
+	t -= MORALE_SUPPRESSION * body.suppression
+	var known := _aware.values().filter(func(a: float) -> bool: return a >= 1.0).size()
+	if known > up + 1:
+		t -= MORALE_OUTNUMBERED * (known - up - 1)
+	var lead: Soldier = squad.leader if squad and is_instance_valid(squad.leader) else null
+	if lead and lead != body and lead.vitals.is_up() and lead.global_position.distance_to(body.global_position) <= MORALE_LEADER_M:
+		t += MORALE_LEADER
+	return clampf(t, 0.0, 1.0)
+
+
+func _update_morale(dt: float) -> void:
+	var t := morale_target()
+	morale = move_toward(morale, t, (MORALE_FALL_PER_S if t < morale else MORALE_RISE_PER_S) * dt)
+	var state := "broken" if morale < MORALE_BROKEN else ("shaken" if morale < MORALE_SHAKEN else "steady")
+	if state != _morale_state:
+		print("[tactics] %s %s (morale %.2f)" % [body.name, state, morale])
+		_morale_state = state
+		if state != "broken":
+			_fall_back_point = null
+
+
+func broken() -> bool:
+	return morale < MORALE_BROKEN
+
+
+## Falls back (Intent.FALL_BACK): to cover FALL_BACK_M away from the threat (a friendly: toward
+## the leader), then fights from there.
+func _do_fall_back() -> void:
+	if _fall_back_point == null:
+		var away := body.global_position - body.threat_pos
+		away.y = 0.0
+		var lead: Soldier = squad.leader if squad and is_instance_valid(squad.leader) else null
+		var p := lead.global_position if _friendly() and lead and lead != body \
+			else body.global_position + (away.normalized() if away.length() > 0.1 else -body.global_basis.z) * FALL_BACK_M
+		var spot: Variant = find_cover(p, FALL_BACK_COVER_M)
+		_fall_back_point = spot if spot != null else NavigationServer3D.map_get_closest_point(body.get_world_3d().navigation_map, p)
+	var point: Vector3 = _fall_back_point
+	if _flat_distance(point) > ARRIVE + 0.5:
+		_go(point, true)
+	else:
+		_fight(point, 3.0)
+
+
 # --- Self-care ------------------------------------------------------------
 
 ## How much this unit wants to look after itself (0 for not at all): its own arterial bleed
@@ -2215,7 +2317,8 @@ func _shoot() -> void:
 	if _burst_left <= 0:
 		_pause_until = now + randf_range(0.5, 1.1) / lerpf(0.7, 1.3, combat)
 	var dir := body._spread_direction(weapon)
-	var extra := deg_to_rad((1.0 - combat) * 2.0 + body.suppression * 4.0 + (0.0 if foe else 3.0))
+	var shaken := maxf(MORALE_SHAKEN - morale, 0.0) / MORALE_SHAKEN  # 0 steady .. 1 no morale left
+	var extra := deg_to_rad((1.0 - combat) * 2.0 + body.suppression * 4.0 + (0.0 if foe else 3.0) + shaken * MORALE_SHAKEN_AIM_DEG)
 	dir = (dir + Vector3(randf_range(-1, 1), randf_range(-1, 1), randf_range(-1, 1)) * tan(extra) * 0.6).normalized()
 	body._server_fire.rpc_id(1, body.camera.global_position, dir, body.active_slot)
 

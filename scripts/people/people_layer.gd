@@ -594,12 +594,14 @@ func _check_surrenders() -> void:
 			server_surrender(s, surrender_reason(s))
 
 
-## Why hostile soldier `s` would give up now ("" if he wouldn't): badly hurt, alone and seen.
+## Why hostile soldier `s` would give up now ("" if he wouldn't): badly hurt or his morale
+## broken (SquadAI.MORALE_BROKEN; queue 17 part 4), alone and seen.
 func surrender_reason(s: Soldier) -> String:
 	if s.faction != Person.HOSTILE or not s.vitals.is_up() or s.is_queued_for_deletion() or SquadAI.of(s) == null or Person.is_captive(s):
 		return ""
 	var hurt := s.vitals.pain() >= SURRENDER_PAIN or s.vitals.blood_fraction() <= SURRENDER_BLOOD or s.vitals.injury() >= SURRENDER_INJURY
-	if not hurt:
+	var broken := SquadAI.of(s).broken()
+	if not hurt and not broken:
 		return ""
 	var seen := false
 	for n in get_tree().get_nodes_in_group(&"combatants"):
@@ -611,7 +613,9 @@ func surrender_reason(s: Soldier) -> String:
 			return ""  # not alone
 		if o.faction == &"friendly" and d <= SURRENDER_SEEN_M and Squad.sees(s, o):
 			seen = true
-	return "badly hurt and alone" if seen else ""
+	if not seen:
+		return ""
+	return "badly hurt and alone" if hurt else "broken and alone"
 
 
 ## Host only. `s` gives up: a hostile soldier drops his weapons and his SquadAI makes way for

@@ -336,6 +336,30 @@ func _test_spotting() -> void:
 	ai._suspect_at = -1000.0
 	alpha.global_transform = saved[0]
 	bravo.global_transform = saved[1]
+	# Morale (part 4): suppression drags it down; broken in contact on Follow, he falls back.
+	var calm := ai.morale_target()
+	alpha.suppression = 1.0
+	var pinned := ai.morale_target()
+	check(pinned < calm - 0.2, "suppression drags morale down (%.2f -> %.2f)" % [calm, pinned])
+	alpha.suppression = 0.0
+	var steady := ai.morale
+	ai.morale = 0.1
+	alpha.threat_pos = alpha.global_position + Vector3(0, 0, -30)
+	alpha.threat_time = Soldier._now()
+	ai._last_contact = Soldier._now()
+	var order_was := ai.order
+	ai.order = Squad.Order.FOLLOW
+	ai._choose_intent()
+	ai._choose_intent()
+	check(ai.broken() and ai.intent == SquadAI.Intent.FALL_BACK, "broken in contact on Follow, he falls back (%s)" % ai.status_text())
+	ai.order = Squad.Order.HOLD
+	ai._choose_intent()
+	ai._choose_intent()
+	check(ai.intent != SquadAI.Intent.FALL_BACK, "but a Hold order wins (%s)" % ai.status_text())
+	ai.order = order_was
+	ai.morale = steady
+	ai._fall_back_point = null
+	_clear_contact()
 
 
 func _ai(callsign: String) -> Soldier:

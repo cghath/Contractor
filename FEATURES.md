@@ -773,6 +773,7 @@ Being built now, not in test builds yet:
 
 - Backpack swap and roll-up.
 - AI spotting: awareness builds over time (distance, stance, movement, camo against the terrain, muzzle flash, the observer suppressed or looking elsewhere, skill); a half-spotted enemy is looked at, and hostiles go to search. Hearing feeds it: gunfire and footsteps (running carries farthest, prone and still are silent) half find someone, never fully.
+- AI morale: falls with friends down nearby, wounds, suppression and being outnumbered, comes back slowly (a leader close helps); shaken spoils aim, broken in contact falls back (hostiles, and squadmates on Follow: orders win), and a broken hostile seen and alone may surrender.
 - AI carry: a casualty still bleeding is held for the medic, not carried; ordered to move while carrying, the AI lays them down in cover there.
 - Radio on the front-left or front-right carrier spots.
 - Gear fit fixes.
