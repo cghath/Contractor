@@ -35,15 +35,19 @@ const AIMER_AT := Vector3(4, 0.1, 33)
 
 var failures := 0
 var level: CompoundLevel
+## Host: its save fixture (SAVED_BODY, SAVED_EDITS) was there to load when hosting started.
+var _fixture_loaded := false
 
 
 func _ready() -> void:
 	GameState.zone_id = "test_net" + OS.get_environment("CONTRACTOR_TEST_TAG")
 	CompoundLevel.spawn_ai = false
-	GameState.delete_save()
 	if "--join" in OS.get_cmdline_user_args():
+		# Both processes share the zone name and user data: the save fixture is the host's alone
+		# (audit A1-06: a client deleting it raced the host's loading it). Checked at the end.
 		Roles.local_choice = Roles.MARKSMAN  # the client's pick in the main menu, sent on join
 	else:
+		GameState.delete_save()
 		_write_save_with_body()
 	add_child(load("res://scenes/main.tscn").instantiate())  # main reads --host/--join
 	await get_tree().process_frame
@@ -65,7 +69,7 @@ func _on_client_left(id: int) -> void:
 		return b is Soldier and (b as Soldier).display_name() == "Player %d" % id and (b as Soldier).vitals.is_dead() \
 			and (b as Soldier).inventory.slots[&"primary"] == &"m4a1")
 	print("[host] peer %d left while down: %s" % [id, "its body stayed, gear and all" if left.size() == 1 else "NO BODY"])
-	get_tree().quit(0 if left.size() == 1 else 1)
+	get_tree().quit(0 if left.size() == 1 and _fixture_loaded else 1)
 
 
 ## Host: a zone save holding one body (SAVED_BODY), loaded when hosting starts.
@@ -81,6 +85,11 @@ func _write_save_with_body() -> void:
 func _stage_drag() -> void:
 	while not level.voxel_world.is_built():
 		await get_tree().process_frame
+	# Audit A1-06: the saved body and wall edits are this host's to load; if they're missing the
+	# client's checks of them would fail for a reason that isn't replication.
+	_fixture_loaded = GameState.bodies.size() == 1 and String(GameState.bodies[0].get("uid", "")) == SAVED_BODY.uid \
+		and GameState.voxel_edits.size() == SAVED_EDITS.size()
+	print("[host] %s" % ("loaded its saved body and wall edits" if _fixture_loaded else "FAILED to load its saved body and wall edits (the fixture was gone)"))
 	var make := func(callsign: String, pos: Vector3) -> Soldier:
 		var s := level.spawn_soldier({"name": callsign, "faction": "hostile", "variant": "woodland", "pos": pos,
 			"loadout": ["plate_carrier", "m4a1"], "combat": 0.5, "discipline": 0.5, "guard": true})
@@ -333,6 +342,8 @@ func _wait_for(condition: Callable, seconds: float) -> void:
 
 
 func _finish() -> void:
+	# Audit A1-06: the client shares the host's user data but never touches the host's saves.
+	check(FileAccess.file_exists(GameState.save_path()), "the host's zone save is still there: the client never deleted it")
 	print("NET TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	Net.leave()
 	get_tree().quit(failures)

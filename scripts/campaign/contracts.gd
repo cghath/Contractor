@@ -242,15 +242,20 @@ func _on_intel_banked(entry: Dictionary) -> void:
 # --- Host: campaign ----------------------------------------------------------------------
 
 ## Host: makes sure a campaign exists: loads the save for Campaign.campaign_id the first time
-## if nothing has been loaded, else starts a fresh one.
+## if nothing has been loaded (its backup too when the save itself is gone, audit A1-02), else
+## starts a fresh one. What the load has to say (a backup used, a damaged save kept aside) is
+## told to the host.
 func ensure_campaign() -> void:
 	if _ensuring:
 		return
 	_ensuring = true
 	if Campaign.section(Economy.SECTION).is_empty() and Campaign.section(SECTION).is_empty() and not _tried_load \
-			and FileAccess.file_exists(Campaign.save_path()):
+			and Campaign.has_save():
 		_tried_load = true
-		Campaign.load_campaign()
+		if not Campaign.load_campaign() and Campaign.last_load == Campaign.Loaded.UNREADABLE:
+			BaseHub.set_aside_zone_saves()  # a fresh campaign starts in its name: its zones go aside too (A1-01)
+		if Campaign.load_notice != "":
+			_notify(1, Campaign.load_notice)
 		# _on_campaign_changed skips while ensuring: put a saved deployment's objectives back.
 		if not Campaign.section(SECTION).is_empty():
 			objectives.server_restore(Campaign.section(SECTION).get("objectives", []))
@@ -866,13 +871,39 @@ func _request(what: String, args: Array) -> void:
 		_rq.rpc_id(1, what, args)
 
 
+## What each request's arguments must be (audit A1-05), checked before any is read.
+const REQUEST_ARGS := {"accept": [TYPE_STRING, TYPE_DICTIONARY], "renegotiate": [TYPE_STRING], "abort": [TYPE_STRING],
+	"pick": [TYPE_INT], "unpick": [TYPE_INT], "turn_in": [TYPE_INT], "sell": [TYPE_INT, TYPE_STRING], "finish": []}
+
+
+## Untyped on purpose: whatever a client sends reaches _handle, which checks it.
 @rpc("any_peer", "call_remote", "reliable")
-func _rq(what: String, args: Array) -> void:
+func _rq(what: Variant, args: Variant) -> void:
 	if multiplayer.is_server():
 		_handle(what, args, multiplayer.get_remote_sender_id())
 
 
-func _handle(what: String, args: Array, peer: int) -> void:
+## Whether `args` are what request `what` takes (REQUEST_ARGS): that many, of those types.
+static func request_ok(what: Variant, args: Variant) -> bool:
+	if typeof(what) != TYPE_STRING or not REQUEST_ARGS.has(what) or typeof(args) != TYPE_ARRAY:
+		return false
+	var want: Array = REQUEST_ARGS[what]
+	if (args as Array).size() != want.size():
+		return false
+	for i in want.size():
+		var t := typeof(args[i])
+		if t != want[i] and not (want[i] == TYPE_STRING and t == TYPE_STRING_NAME):
+			return false
+	return true
+
+
+## Host: a request from `peer` (1: the host itself). A malformed one, local or remote, is
+## refused before any argument is read (audit A1-05).
+func _handle(what: Variant, args: Variant, peer: int) -> void:
+	if not request_ok(what, args):
+		push_warning("Contracts: refused a malformed request from peer %d: %s %s" % [peer, str(what).left(40), str(args).left(120)])
+		_notify(peer, "Bad request")
+		return
 	var why := ""
 	match what:
 		"accept":
@@ -1009,8 +1040,8 @@ func _flush() -> void:
 
 
 func _save() -> void:
-	if autosave and _is_host():
-		Campaign.save_campaign()
+	if autosave and _is_host() and not Campaign.save_campaign():
+		_notify(1, "Campaign NOT saved: " + Campaign.save_error)  # audit A1-04: the host hears of it
 
 
 func _on_peer_joined(id: int) -> void:
