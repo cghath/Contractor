@@ -9,8 +9,9 @@
 # A suite passes only if its process exits 0, prints "<NAME> TEST PASSED", prints no
 # "TEST FAILED", and logs no SCRIPT ERROR (a script that fails to compile or crashes mid-test
 # can still exit 0, or never exit at all). Each process gets SUITE_TIMEOUT seconds (default
-# 480); one that runs past it is killed and fails as hung. The import must succeed too.
-# Exits non-zero if any suite fails. tools/test_runner_check.sh checks these rules.
+# 480); one that runs past it is killed and fails as hung. The import must succeed too: exit 0
+# and no SCRIPT ERROR or parse error in its log (an import can report a broken script and still
+# exit 0). Exits non-zero if any suite fails. tools/test_runner_check.sh checks these rules.
 #
 # Every run's logs are kept (Captain, 2026-10-12) in their own folder outside the repo, which
 # nothing here ever deletes, all under one parent: CONTRACTOR_TEST_LOGS (default:
@@ -81,15 +82,16 @@ engine() {
 }
 
 # Judges a finished process: `name`, its log, its exit code, and the summary line it must
-# print ("" for none, e.g. "NET TEST PASSED"). Prints the log's [FAIL], summary and SCRIPT ERROR
-# lines (prefixed with `prefix`) and a reason when it fails; sets status.
+# print ("" for none, e.g. "NET TEST PASSED"). Prints the log's [FAIL], summary and script error
+# lines (prefixed with `prefix`) and a reason when it fails; sets status. A script error is a
+# SCRIPT ERROR line or a parse error, which the import can report without that prefix.
 judge() {
 	local name="$1" log="$2" code="$3" summary="$4" prefix="${5:-}"
-	grep -E '\[FAIL\]|TEST (PASSED|FAILED)|SCRIPT ERROR' "$log" | sed "s/^/$prefix/"
+	grep -E '\[FAIL\]|TEST (PASSED|FAILED)|SCRIPT ERROR|Parse Error' "$log" | sed "s/^/$prefix/"
 	local why=""
 	if [ "$code" -eq 124 ] || [ "$code" -eq 137 ]; then
 		why="timed out after ${SUITE_TIMEOUT}s (hung?)"
-	elif grep -q 'SCRIPT ERROR' "$log"; then
+	elif grep -qE 'SCRIPT ERROR|Parse Error' "$log"; then
 		why="script error (see above)"
 	elif grep -q 'TEST FAILED' "$log"; then
 		why="exit $code"
@@ -119,20 +121,19 @@ judge() {
 			# failed checks and script errors wherever they are in the log, then the last lines.
 			echo "::error title=$name::FAILED: $why"
 			grep -E '\[FAIL\]' "$log" | head -n 3 | while IFS= read -r line; do echo "::error title=$name failed check::$line"; done
-			grep -A1 'SCRIPT ERROR' "$log" | grep -v '^--$' | head -n 3 | while IFS= read -r line; do echo "::error title=$name script error::$line"; done
+			grep -A1 -E 'SCRIPT ERROR|Parse Error' "$log" | grep -v '^--$' | head -n 3 | while IFS= read -r line; do echo "::error title=$name script error::$line"; done
 			tail -n 3 "$log" | while IFS= read -r line; do echo "::error title=$name::$line"; done
 		fi
 		status=1
 	fi
 }
 
-if ! engine "$logs/import.log" --import; then
-	echo "import: failed"
-	note "import: FAILED"
-	status=1
-	grep -E 'SCRIPT ERROR|ERROR' "$logs/import.log" | head -20
-	exit 1
-fi
+# The import is judged like a suite with no summary line: a non-zero exit, a hang, or a SCRIPT
+# ERROR or parse error in its log (a broken script can be reported while the import still exits
+# 0) fails the run before any suite starts.
+engine "$logs/import.log" --import
+judge import "$logs/import.log" $? ""
+[ "$status" -ne 0 ] && exit 1
 for suite in "${SUITES[@]}"; do
 	if [ "$suite" = net ] || [ "$suite" = world ] || [ "$suite" = vehicles ] || [ "$suite" = supports ] || [ "$suite" = aav ]; then
 		# Two processes over ENet on localhost. net: the client prints the summary, the host
