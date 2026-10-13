@@ -443,8 +443,12 @@ func _test_roster() -> void:
 
 func _test_callout_rules() -> void:
 	print("Callouts: rules")
-	var first := _slot(0)
-	var second := _slot(1)
+	# Two squadmates the squad's tactics never speak through: a change of option has the team
+	# leader (or the first brain) call it ("Get in cover, hold here!"), and that newer line would
+	# replace a held-back one (one per speaker, the newest wins), which flaked this on CI.
+	var quiet := _squad().filter(func(s: Soldier) -> bool: return s.role != Roles.TEAM_LEADER).slice(-2)
+	var first: Soldier = quiet[0]
+	var second: Soldier = quiet[1]
 	var line := "%s: Reloading!" % first.display_name()
 	# Squadmates talk on their own too: start from a clean slate and only look at these two.
 	callouts._last_by_speaker.clear()
