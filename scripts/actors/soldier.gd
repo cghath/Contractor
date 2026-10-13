@@ -443,6 +443,7 @@ func _update_carried(delta: float) -> void:
 			release_carried()
 			return
 		_carry_phase = &""  # up on the shoulder, or got hold: from here they come along
+		CharacterModel.server_carry(self, carrying, carry_mode)  # a plain hold (late joiners don't replay the lift)
 	if carry_holds() and not carrying.is_ai():
 		carrying._client_carried.rpc_id(carrying.owner_peer(), carry_transform().origin)
 

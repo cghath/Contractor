@@ -100,7 +100,7 @@ func _test_carry() -> void:
 		and player.model.carry_net.get("with") == String(alpha.get_path()), "the carrier's carry_net: carrying Alpha")
 	check(alpha.model.carry_net.get("mode") == CharacterModel.CARRIED and alpha.model.carry_net.get("with") == String(player.get_path()),
 		"the casualty's carry_net: carried by the player")
-	await _seconds(0.7)
+	await _seconds(Soldier.CARRY_LIFT_S + 0.5)  # picked up off the ground, then up on the shoulder
 	check(alpha.model.carry_shown().get("mode") == CharacterModel.CARRIED and player.model.carry_shown().get("mode") == CharacterModel.CARRY,
 		"both models show the carry")
 	var hips := player.model.torso.to_global(CharacterModel.CARRY_HIPS)
@@ -112,9 +112,10 @@ func _test_carry() -> void:
 	check(pelvis.y > player.global_position.y + 1.35, "carried high, over the shoulders (pelvis %.2f m up)" % (pelvis.y - player.global_position.y))
 	check(head.y < pelvis.y - 0.25 and shin.y < pelvis.y - 0.25,
 		"limp and draped, not a plank: head %.2f m and shins %.2f m below the hips" % [pelvis.y - head.y, pelvis.y - shin.y])
-	var side_head := player.to_local(head).x
-	var side_shin := player.to_local(shin).x
-	check(side_head < -0.2 and side_shin > 0.2, "head and arms down the carrier's left, legs down the right (%.2f, %.2f)" % [side_head, side_shin])
+	var at_head := player.to_local(head)
+	var at_shin := player.to_local(shin)
+	check(at_head.z > 0.1 and at_head.x < 0.1 and at_shin.z < 0.05 and at_shin.x > 0.2,
+		"folded over the right shoulder: head and arms down the back, legs down the front on the right (head %s, shin %s)" % [at_head.snapped(Vector3.ONE * 0.01), at_shin.snapped(Vector3.ONE * 0.01)])
 	for i in 2:
 		var target := player.model.torso.to_global(CharacterModel.CARRY_HANDS[i])
 		var off := player.model.hand_position(i == 0).distance_to(target)
@@ -197,13 +198,13 @@ func _test_human_casualty() -> void:
 	bravo._server_carry_body.rpc_id(1, player.get_path())
 	check(player.model.carry_net.get("mode") == CharacterModel.CARRIED and bravo.model.carry_net.get("mode") == CharacterModel.CARRY,
 		"a downed player carried by an AI squadmate")
-	await _seconds(0.7)
+	await _seconds(Soldier.CARRY_LIFT_S + 0.5)
 	# The player's own body isn't moved here (their machine does that): the drawn body
 	# still rides on Bravo, because it follows the carrier, not its own replicated transform.
 	var hips := bravo.model.torso.to_global(CharacterModel.CARRY_HIPS)
 	check(player.model.torso.global_position.distance_to(hips) < 0.05, "drawn over Bravo's shoulders wherever its own body is")
 	bravo._server_drag_body.rpc_id(1, player.get_path())
-	await _seconds(0.7)
+	await _seconds(Soldier.DRAG_GRAB_S + 0.5)
 	var strap := player.model.torso.to_global(CharacterModel.STRAP_POINTS[1])
 	check(bravo.model.hand_position(false).distance_to(strap) < HAND_TOLERANCE, "and dragged by the strap")
 	bravo._server_release_body.rpc_id(1)
