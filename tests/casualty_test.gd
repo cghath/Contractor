@@ -655,8 +655,10 @@ func _test_engagement() -> void:
 	var delta := _ai("Delta")
 	var golf := _ai("Golf")
 	var counts := {}
+	var his := {}  # Delta's own kit: a carer uses it first (queue 17)
 	for id: StringName in [&"tourniquet", &"pressure_bandage", &"smoke_grenade", &"splint", &"npa"]:
 		counts[id] = golf.inventory.medical_count(id)
+		his[id] = delta.inventory.medical_count(id)
 	_threat = Vector3(-3, 1.5, 0)
 	_hold_fire(true)
 	_firing = true
@@ -696,8 +698,9 @@ func _test_engagement() -> void:
 			return true
 		return false, TOURNIQUET_WITHIN_S)
 	var tq_s := Soldier._now() - start
-	check(tq and golf.inventory.medical_count(&"tourniquet") < counts[&"tourniquet"],
-		"Golf reaches him and puts a tourniquet on under fire in %.0f s (limit %.0f; %s)" % [tq_s, TOURNIQUET_WITHIN_S, seen.status.keys()])
+	check(tq and delta.inventory.medical_count(&"tourniquet") < his[&"tourniquet"] and golf.inventory.medical_count(&"tourniquet") == counts[&"tourniquet"],
+		"Golf reaches him and puts a tourniquet on under fire in %.0f s (limit %.0f; %s), Delta's own first (Delta %d -> %d, Golf %d -> %d)" % [tq_s,
+		TOURNIQUET_WITHIN_S, seen.status.keys(), his[&"tourniquet"], delta.inventory.medical_count(&"tourniquet"), counts[&"tourniquet"], golf.inventory.medical_count(&"tourniquet")])
 	check(golf.inventory.count_of(&"smoke_grenade") < counts[&"smoke_grenade"] and _said(sent_from, "Golf", &"smoke_out"), "Golf throws smoke between him and the threat")
 	check(seen.drag, "and drags him out of the line of fire")
 	check(not other_open_at_tq.is_empty() and other_open_at_tq[0] > 0, "massive bleeding first: his other wounds wait for the tourniquet (%s open)" % [other_open_at_tq])
@@ -713,8 +716,11 @@ func _test_engagement() -> void:
 	var all_s := Soldier._now() - start
 	check(treated, "then the rest in the care order: patched up within %.0f s (%.0f s; Delta: %s, %s; Golf: %s)" % [TREATED_WITHIN_S, all_s,
 		delta.vitals.condition_text(), _kinds(delta.vitals.care_needed()), golf.ai_status])
-	check(golf.inventory.medical_count(&"pressure_bandage") < counts[&"pressure_bandage"] and golf.inventory.medical_count(&"npa") < counts[&"npa"],
-		"through _server_treat: Golf's bandages and an NPA were used on him")
+	var his_bandages := delta.inventory.medical_count(&"pressure_bandage")
+	check(his_bandages < his[&"pressure_bandage"] and (golf.inventory.medical_count(&"pressure_bandage") == counts[&"pressure_bandage"] or his_bandages == 0)
+		and golf.inventory.medical_count(&"npa") < counts[&"npa"],
+		"through _server_treat: Delta's own bandages first (%d -> %d; Golf's %d -> %d), then Golf's NPA (Delta carries none)" % [his[&"pressure_bandage"], his_bandages,
+		counts[&"pressure_bandage"], golf.inventory.medical_count(&"pressure_bandage")])
 	check(called, "Golf calls it: \"Moving to Delta\", \"Treating Delta\" (%s)" % [called_lines])
 	await _out_of_contact()
 	_hold_fire(false)

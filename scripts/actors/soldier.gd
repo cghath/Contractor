@@ -1031,12 +1031,13 @@ func under_fire() -> bool:
 ## Vitals treatment interface): checks it would help and that you carry the item, takes the
 ## item's time (longer on yourself for a tourniquet; `rushed` only for a tourniquet:
 ## quicker, but it lets 30% through), then applies it and uses the item up. A tourniquet
-## placed while you're under fire goes on rushed whatever you asked for.
+## placed while you're under fire goes on rushed whatever you asked for. `their_kit`: the item
+## comes out of the casualty's own kit when they carry one (_kit_for), else out of yours.
 @rpc("any_peer", "call_local", "reliable")
-func _server_treat(path: NodePath, item_id: StringName, part: StringName, rushed := false) -> void:
+func _server_treat(path: NodePath, item_id: StringName, part: StringName, rushed := false, their_kit := false) -> void:
 	if not _from_owner() or not vitals.is_up() or _is_busy():
 		return
-	_treat(get_node_or_null(path) as Node3D, item_id, part, rushed)
+	_treat(get_node_or_null(path) as Node3D, item_id, part, rushed, their_kit)
 
 
 ## Puts a triage card (Vitals.TRIAGE_*) on `path` (a casualty within reach, or yourself).
@@ -1103,8 +1104,18 @@ func _log_care(target: Node, item_id: StringName, part: StringName, outcome: Str
 		String(item_id) if item_id != &"" else "care", (" on " + Vitals.part_name(part)) if part != &"" else "", at, outcome])
 
 
+## Whose kit treating `target` with `item_id` uses up: with `their_kit`, the casualty's own
+## while they carry one (squad AI uses a casualty's own kit first and keeps its own for the
+## next casualty: Captain, P0164 queue 17), otherwise this soldier's.
+func _kit_for(target: Node3D, item_id: StringName, their_kit: bool) -> Inventory:
+	var casualty := target as Soldier
+	if their_kit and casualty and casualty != self and Vitals.has_item(casualty.inventory, item_id):
+		return casualty.inventory
+	return inventory
+
+
 ## Host side of a treatment (_server_treat, _server_use_medical).
-func _treat(target: Node3D, item_id: StringName, part: StringName, rushed: bool) -> void:
+func _treat(target: Node3D, item_id: StringName, part: StringName, rushed: bool, their_kit := false) -> void:
 	var other := Vitals.find_on(target) if target else null
 	if other == null or other.is_dead():
 		return
@@ -1114,7 +1125,7 @@ func _treat(target: Node3D, item_id: StringName, part: StringName, rushed: bool)
 		why = "Too far away"
 	elif item == null or not item.stats.has("treat_s"):
 		why = "That doesn't treat anything"
-	elif not Vitals.has_item(inventory, item_id):
+	elif not Vitals.has_item(_kit_for(target, item_id, their_kit), item_id):
 		why = "You have no %s" % item.name
 	elif target == self and Vitals.needs_other_hands(item_id):
 		why = "Someone else has to place that"
@@ -1132,7 +1143,8 @@ func _treat(target: Node3D, item_id: StringName, part: StringName, rushed: bool)
 	var label := "%s%s, %s..." % [item.name, " (rushed)" if rushed else "", Vitals.part_name(part)]
 	if not await _timed_care(target, other, treat_seconds(target, item, rushed), label, part, item_id):
 		return
-	if not Vitals.has_item(inventory, item_id):
+	var kit := _kit_for(target, item_id, their_kit)  # (theirs may have run out meanwhile)
+	if not Vitals.has_item(kit, item_id):
 		_log_care(target, item_id, part, "refused: no longer carrying it")
 		_client_message.rpc_id(owner_peer(), "You no longer have a %s" % item.name)
 		return
@@ -1142,7 +1154,7 @@ func _treat(target: Node3D, item_id: StringName, part: StringName, rushed: bool)
 		_client_message.rpc_id(owner_peer(), "%s does nothing there now" % item.name)
 		return
 	if not item.stats.get("no_item", false) and not item.stats.get("reusable", false):
-		inventory.take_medical(item_id)
+		kit.take_medical(item_id)
 	_log_care(target, item_id, part, "done")
 	var note := other.care_note()
 	if note != "":

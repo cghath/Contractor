@@ -15,10 +15,12 @@ extends RefCounted
 ##   at soldiers in the open.
 ## - Squadmates fire when ordered (the command menu's Action > Fire launcher there: order_squad)
 ##   at the vehicle near that point, or the point itself.
-## - Never with a friend (or a civilian) within FRIEND_CLEAR_M of the target, nor with a friend
-##   in the backblast: they wait and call "Clear the backblast!", and call "Backblast clear!"
-##   before they fire. Nor with a wall right behind them (the backblast would come back), nor
-##   with something solid between them and the target (they may have moved since choosing).
+## - Never with a friend (or a civilian) within FRIEND_CLEAR_M of the target, up or down, nor
+##   with one in the rocket's path (SquadAI._friendly_in_line, over the launcher's spread), nor
+##   with a friend or civilian in the backblast, standing, prone or down (queue 17 part 5):
+##   they wait and call "Clear the backblast!", and call "Backblast clear!" before they fire.
+##   Nor with a wall right behind them (the backblast would come back), nor with something
+##   solid between them and the target (they may have moved since choosing).
 ## - Out of rounds, a soldier keeps the launcher (it's loot) but stops trying.
 
 const SCAN_S := 0.5
@@ -223,6 +225,9 @@ static func think(ai: SquadAI) -> bool:
 			st.point = again.point
 		st.why = "no clear line"
 		return true
+	if ai._friendly_in_line(_target_point(st), spread_rad(ai)):
+		st.why = "a friend in the line of fire"
+		return true
 	if friend_in_backblast(body, item):
 		st.why = "a friend in the backblast"
 		if not st.warned:
@@ -238,7 +243,7 @@ static func think(ai: SquadAI) -> bool:
 		return true
 	if now - st.called_at < CALL_LEAD_S:
 		return true
-	var spread := deg_to_rad((1.0 - ai.combat) * 1.2 + body.suppression * 3.0)
+	var spread := spread_rad(ai)
 	var dir := ((aim - eye).normalized() + Vector3(randf_range(-1, 1), randf_range(-1, 1), randf_range(-1, 1)) * tan(spread) * 0.5).normalized()
 	var guided_target: Node3D = st.target if st.kind != "group" else null
 	var why := launchers.server_fire(body, eye, dir, "", guided_target)
@@ -249,6 +254,11 @@ static func think(ai: SquadAI) -> bool:
 	if st.kind == "order":
 		st.order_point = null
 	return _stand_down(body, st)
+
+
+## How far (radians) `ai`'s rocket may stray from the aim: less skill and suppression widen it.
+static func spread_rad(ai: SquadAI) -> float:
+	return deg_to_rad((1.0 - ai.combat) * 1.2 + ai.body.suppression * 3.0)
 
 
 ## Puts the launcher away (back to the rifle or pistol). Always false (the rifle has them).
@@ -353,14 +363,20 @@ static func group_behind_cover(ai: SquadAI) -> Dictionary:
 	return {"kind": "group", "point": cover_point}
 
 
-## A friend (own side) or a civilian within FRIEND_CLEAR_M of `point`.
+## A friend (own side) or a civilian within FRIEND_CLEAR_M of `point`, up or down (where a
+## downed one's ragdoll lies: Soldier.body_point).
 static func _friend_near(body: Soldier, point: Vector3) -> bool:
 	for n in body.get_tree().get_nodes_in_group(&"combatants"):
 		var s := n as Soldier
-		if s and s != body and (s.faction == body.faction or Person.is_noncombatant(s)) and s.vitals.is_up() \
-				and s.global_position.distance_to(point) < FRIEND_CLEAR_M:
+		if _shields(body, s) and s.body_point().distance_to(point) < FRIEND_CLEAR_M:
 			return true
 	return false
+
+
+## Someone `body` must not hurt: alive, not itself, on its side, or a civilian, HVT or captive.
+static func _shields(body: Soldier, s: Soldier) -> bool:
+	return s != null and s != body and not s.is_queued_for_deletion() and not s.vitals.is_dead() \
+		and (s.faction == body.faction or Person.is_noncombatant(s))
 
 
 ## A line of sight from `body`'s eye to `point` on vehicle `v` (nothing of the world first).
@@ -384,8 +400,9 @@ static func _line_clear(body: Soldier, eye: Vector3, point: Vector3) -> bool:
 	return hit.is_empty() or eye.distance_to(hit.position) >= eye.distance_to(point) - LINE_SLACK_M
 
 
-## A friend standing in the backblast of `body`'s launcher (its stats' backblast cone and
-## injury reach).
+## A friend or a civilian in the backblast of `body`'s launcher (its stats' backblast cone and
+## injury reach): standing, crouched, prone or down (queue 17 part 5: a body lying behind the
+## shooter is checked where it lies, someone upright anywhere from shins to head).
 static func friend_in_backblast(body: Soldier, item: ItemData) -> bool:
 	var blast: Dictionary = item.stats.get("backblast", {})
 	var reach := float(blast.get("injury_m", 10.0))
@@ -394,11 +411,14 @@ static func friend_in_backblast(body: Soldier, item: ItemData) -> bool:
 	var rear := body.camera.global_position + back * 0.6
 	for n in body.get_tree().get_nodes_in_group(&"combatants"):
 		var s := n as Soldier
-		if s == null or s == body or s.faction != body.faction or not s.vitals.is_up():
+		if not _shields(body, s):
 			continue
-		var to := s.global_position + Vector3.UP - rear
-		if to.length() < reach and to.normalized().dot(back) >= cone and Throwables.clear_line(body.get_world_3d(), rear, s.global_position + Vector3.UP):
-			return true
+		var points: Array = [s.aim_point()] if SquadAI._lying(s) \
+			else [s.global_position + Vector3.UP * 0.4, s.global_position + Vector3.UP, s.global_position + Vector3.UP * 1.6]
+		for p: Vector3 in points:
+			var to := p - rear
+			if to.length() < reach and to.normalized().dot(back) >= cone and Throwables.clear_line(body.get_world_3d(), rear, p):
+				return true
 	return false
 
 
