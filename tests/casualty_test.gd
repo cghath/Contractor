@@ -873,6 +873,8 @@ func _test_player_and_enemy_bodies() -> void:
 		"a dead player leaves a body (%s)" % (corpse.display_name() if corpse else "none"))
 	if corpse == null:
 		return
+	check(corpse.log_name().begins_with("Player 1 [body ") and player.log_name() == "Player 1",
+		"the session log tells his body (%s) from him (%s)" % [corpse.log_name(), player.log_name()])
 	check(_flat(corpse.global_position, spot) < 0.5 and corpse.collision_layer == 0, "lying where he fell")
 	var on_body := _gear_of(corpse)
 	var without_case := gear_before.filter(func(g: String) -> bool: return not g.begins_with("hands:"))
@@ -911,7 +913,7 @@ func _test_body_persistence() -> void:
 	check(_bodies().all(func(b: Soldier) -> bool: return not is_instance_valid(b.carried_by)), "nobody is carrying a body")
 	var before := {}
 	for b: Soldier in _bodies():
-		before[b.body_uid] = {"label": b.display_name(), "gear": _gear_of(b), "pos": b.global_position}
+		before[b.body_uid] = {"label": b.display_name(), "log": b.log_name(), "gear": _gear_of(b), "pos": b.global_position}
 	check(before.size() >= 3, "bodies lying around: %s" % [before.values().map(func(v: Dictionary) -> String: return v.label)])
 	GameState.save_zone()
 	# A reload: the bodies go (without dropping anything) and the save brings them back.
@@ -924,7 +926,7 @@ func _test_body_persistence() -> void:
 	await _frames(3)
 	var after := {}
 	for b: Soldier in _bodies():
-		after[b.body_uid] = {"label": b.display_name(), "gear": _gear_of(b), "pos": b.global_position}
+		after[b.body_uid] = {"label": b.display_name(), "log": b.log_name(), "gear": _gear_of(b), "pos": b.global_position}
 	check(after.keys().size() == before.keys().size() and before.keys().all(func(uid: String) -> bool: return after.has(uid)),
 		"every body is back (%d of %d)" % [after.size(), before.size()])
 	var differ := PackedStringArray()
@@ -935,6 +937,9 @@ func _test_body_persistence() -> void:
 	# The differences go in the check's own line: run_tests.sh only shows [FAIL] lines.
 	check(differ.is_empty(), "where they lay, with the same gear (rounds, plates and kits included)%s"
 		% ("" if differ.is_empty() else ": " + " | ".join(differ)))
+	var renamed := before.keys().filter(func(uid: String) -> bool: return "[body " in String(before[uid].log) and after.has(uid) and after[uid].log != before[uid].log)
+	check(renamed.is_empty() and after.values().all(func(v: Dictionary) -> bool: return String(v.log).begins_with(String(v.label) + " [body ")),
+		"in the session log each reads as its name and its uid's tag, the same as before the load (%s)" % [after.values().map(func(v: Dictionary) -> String: return v.log)])
 	check(_bodies().all(func(b: Soldier) -> bool: return b.vitals.is_dead() and b.collision_layer == 0 and SquadAI.of(b) == null),
 		"dead, lying and brainless")
 	var markers := get_tree().get_nodes_in_group(GearMarker.GROUP).filter(func(m: Node) -> bool: return not m.is_queued_for_deletion())
