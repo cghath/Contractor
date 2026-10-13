@@ -34,6 +34,8 @@ const FRIEND_CLEAR_M := 10.0
 const SHOULDER_S := 1.5
 const ENGAGE_MAX_S := 20.0
 const COOLDOWN_S := 10.0
+## Seconds to unstrap a disposable packed on top of the pack once the shoulder one is spent.
+const UNSTRAP_S := 2.5
 const AIM_TOLERANCE_DEG := 1.5
 ## The line to the target counts as clear when the first wall on it is at most this short of
 ## the target (the cover a group hides behind is the target).
@@ -138,7 +140,10 @@ static func side_of(faction: StringName) -> StringName:
 ## Host only, each physics frame from SquadAI._shoot. True while the launcher has the soldier.
 static func think(ai: SquadAI) -> bool:
 	var body := ai.body
-	if body == null or body.inventory.slots.get(Launchers.SLOT, &"") == &"":
+	if body == null:
+		return false
+	if body.inventory.slots.get(Launchers.SLOT, &"") == &"":
+		unstrap_packed(body)
 		return false
 	var st := _state(body)
 	var now := Soldier._now()
@@ -247,6 +252,26 @@ static func think(ai: SquadAI) -> bool:
 
 
 ## Puts the launcher away (back to the rifle or pistol). Always false (the rifle has them).
+## Shoulder tube spent: takes the next one off the top of the pack (a short busy unstrap),
+## unless riding, carrying someone, pinned or already busy. True if it did.
+static func unstrap_packed(body: Soldier) -> bool:
+	if is_instance_valid(body.vehicle) or body.carrying != null or body.suppression >= SquadAI.PINNED:
+		return false
+	var now := Soldier._now()
+	if now < body._server_busy_until:
+		return false
+	for p: Dictionary in body.inventory.attach_points():
+		if not "pack_top" in Inventory.point_types(p):
+			continue
+		var item := ItemDB.get_item(StringName(body.inventory.attachment(StringName(p.id)).get("id", "")))
+		if item == null or item.slot != Launchers.SLOT or not body.inventory.equip_attachment(StringName(p.id)):
+			continue
+		body._server_busy_until = now + UNSTRAP_S
+		body._busy_until = body._server_busy_until
+		return true
+	return false
+
+
 static func _stand_down(body: Soldier, st: State) -> bool:
 	if st.engaged:
 		st.engaged = false

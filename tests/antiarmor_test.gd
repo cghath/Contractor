@@ -733,6 +733,21 @@ func _test_ai() -> void:
 	for n in [grenadier, up, low1, low2]:
 		n.queue_free()
 	await _frames(3)
+	print("AI: a spare tube packed on top of the ruck")
+	var packer := _soldier("Packer", &"friendly", Vector3(-60, 0.1, -60), ["ruck_45", "m4a1"], false)
+	await _frames(2)
+	var packed := packer.inventory.attach(&"pack_top_1", {"id": &"at4"})
+	var empty_before: bool = packer.inventory.slots.get(Launchers.SLOT, &"") == &""
+	var took := LauncherAI.unstrap_packed(packer)
+	var again := LauncherAI.unstrap_packed(packer)  # nothing left up there
+	var unstrapped: bool = packer.inventory.slots.get(Launchers.SLOT, &"") == &"at4"
+	check(packed and empty_before and took and not again and unstrapped and packer.inventory.attachment(&"pack_top_1").is_empty()
+			and packer._server_busy_until > Soldier._now(),
+		"with the shoulder tube gone, the AI unstraps the AT4 off the top of the pack (busy while it does) (packed %s, problem '%s', empty before %s, launcher now '%s', point now %s, busy %.1f s)"
+			% [packed, packer.inventory.attach_problem(ItemDB.get_item(&"at4"), &"pack_top_1"), empty_before,
+				packer.inventory.slots.get(Launchers.SLOT, &""), packer.inventory.attachment(&"pack_top_1"), packer._server_busy_until - Soldier._now()])
+	packer.queue_free()
+	await _frames(3)
 
 
 # --- Replication: a second process joins ---------------------------------------------------
