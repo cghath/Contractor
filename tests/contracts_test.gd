@@ -455,8 +455,47 @@ func _test_save_reload() -> void:
 	Contracts.ensure_campaign()
 	check(Contracts.is_deployed() and Economy.cash() == int(econ.cash) and states.call(Contracts.objectives.list) == states.call(objectives)
 		and Contracts.objectives.list[0].state == "done", "loaded on first access (ensure_campaign): the deployment and its objectives back")
+	# Audit A1-02: with the save itself gone, first access still loads its backup.
+	var path := Campaign.save_path()
+	var saved := FileAccess.get_file_as_string(path)
+	Campaign.reset_campaign()
+	_write_file(GameState.backup_path(path), saved)
+	Contracts.objectives.server_clear()
+	Contracts._tried_load = false
+	Contracts.ensure_campaign()
+	check(Contracts.is_deployed() and Economy.cash() == int(econ.cash) and states.call(Contracts.objectives.list) == states.call(objectives),
+		"with the save gone, first access loads its backup")
 	Contracts.server_end_deployment({})
 	Contracts.server_finish_debrief()
+	# Audit A1-01: nothing readable on first access: the save and the campaign's zones are kept
+	# aside, a fresh campaign starts, and the host is told.
+	Campaign.reset_campaign()
+	_write_file(path, "{broken")
+	var zone_path := "%s/%s.json" % [GameState.SAVE_DIR, BaseHub.zone_save_id("old_zone")]
+	_write_file(zone_path, "{}")
+	var notes: Array = []
+	var on_notice := func(text: String) -> void: notes.append(text)
+	Contracts.notice.connect(on_notice)
+	Contracts.objectives.server_clear()
+	Contracts._tried_load = false
+	Contracts.ensure_campaign()
+	Contracts.notice.disconnect(on_notice)
+	var kept := GameState.kept_copies(path)
+	var zone_kept := GameState.kept_copies(zone_path)
+	check(kept.size() == 1 and zone_kept.size() == 1 and not GameState.has_save(zone_path) and not Contracts.is_deployed() and not Contracts.board().is_empty()
+		and notes.any(func(n: String) -> bool: return n.contains("couldn't be read")),
+		"an unreadable save on first access: kept aside with its zones (%s, %s), a fresh campaign, the host told" % [", ".join(kept), ", ".join(zone_kept)])
+	for f in kept:
+		DirAccess.remove_absolute("%s/%s" % [Campaign.SAVE_DIR, f])
+	for f in zone_kept:
+		DirAccess.remove_absolute("%s/%s" % [GameState.SAVE_DIR, f])
+
+
+func _write_file(path: String, text: String) -> void:
+	DirAccess.make_dir_recursive_absolute(path.get_base_dir())
+	var f := FileAccess.open(path, FileAccess.WRITE)
+	f.store_string(text)
+	f.close()
 
 
 func _test_shop() -> void:

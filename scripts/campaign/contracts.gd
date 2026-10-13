@@ -252,7 +252,8 @@ func ensure_campaign() -> void:
 	if Campaign.section(Economy.SECTION).is_empty() and Campaign.section(SECTION).is_empty() and not _tried_load \
 			and Campaign.has_save():
 		_tried_load = true
-		Campaign.load_campaign()
+		if not Campaign.load_campaign() and Campaign.last_load == Campaign.Loaded.UNREADABLE:
+			BaseHub.set_aside_zone_saves()  # a fresh campaign starts in its name: its zones go aside too (A1-01)
 		if Campaign.load_notice != "":
 			_notify(1, Campaign.load_notice)
 		# _on_campaign_changed skips while ensuring: put a saved deployment's objectives back.

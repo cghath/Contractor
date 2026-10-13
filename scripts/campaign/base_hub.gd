@@ -188,7 +188,7 @@ func load_or_new() -> void:
 	var loaded := Campaign.load_campaign()
 	_host_notice = Campaign.load_notice
 	if not loaded and Campaign.last_load == Campaign.Loaded.UNREADABLE:
-		_set_aside_zone_saves()
+		set_aside_zone_saves()
 	if _host_notice != "":
 		note.emit(_host_notice)
 	if not loaded or not started():
@@ -250,7 +250,7 @@ func _delete_zone_saves() -> void:
 
 ## Moves every zone save of the current campaign aside (GameState.set_aside): the campaign they
 ## belong to couldn't be read, and a new one starting in its name mustn't load them or delete them.
-func _set_aside_zone_saves() -> void:
+func set_aside_zone_saves() -> void:
 	for path in _zone_save_files():
 		push_warning("BaseHub: kept %s aside (its campaign couldn't be read)" % GameState.set_aside(path, "orphaned").get_file())
 
