@@ -128,10 +128,15 @@ const MORALE_RISE_PER_S := 0.03
 const MORALE_SHAKEN := 0.4
 const MORALE_BROKEN := 0.25
 const MORALE_SHAKEN_AIM_DEG := 3.0
+## Aim error (degrees) at combat skill 0, falling to none at 1 (was 2.0: at the longer ranges a
+## middling shooter put every round metres off).
+const AIM_UNSKILLED_DEG := 1.2
 ## Falling back: this far from the threat (or toward the leader), into cover within FALL_BACK_COVER_M.
 const FALL_BACK_M := 20.0
 const FALL_BACK_COVER_M := 8.0
-const SIGHT_RANGE := 60.0
+## Hostiles see this far (Captain, 2026-10-13: engagement ranges up; was 60 m). Doctrine's
+## engage_m should match once it's wired (audit A3-07, cghath).
+const SIGHT_RANGE := 200.0
 const SUPPRESSED := 0.5
 const PINNED := 0.85
 const HYSTERESIS := 0.1
@@ -308,7 +313,7 @@ const SHARE_RADIO_S := 2.5
 const RADIO := &"radio"
 ## Friendlies see this far (hostiles SIGHT_RANGE) and stay in contact this long after the last
 ## sign of the enemy (hostiles CONTACT_MEMORY_S).
-const SQUAD_SIGHT_RANGE := 120.0
+const SQUAD_SIGHT_RANGE := 300.0  # (was 120 m; Captain, 2026-10-13)
 const SQUAD_CONTACT_MEMORY_S := 20.0
 ## The lead still for LEAD_HALT_S (moved less than LEAD_MOVED_M): squadmates take a spot beside
 ## something solid within HALT_COVER_M of their slot, and watch outward.
@@ -2837,7 +2842,7 @@ func _shoot() -> void:
 ## firing at a point rather than a seen foe, and shaken morale all widen it.
 func _aim_error_deg(seen_foe: bool) -> float:
 	var shaken := maxf(MORALE_SHAKEN - morale, 0.0) / MORALE_SHAKEN  # 0 steady .. 1 no morale left
-	return (1.0 - combat) * 2.0 + body.suppression * 4.0 + (0.0 if seen_foe else 3.0) + shaken * MORALE_SHAKEN_AIM_DEG
+	return (1.0 - combat) * AIM_UNSKILLED_DEG + body.suppression * 4.0 + (0.0 if seen_foe else 3.0) + shaken * MORALE_SHAKEN_AIM_DEG
 
 
 ## The half-angle (radians) this unit's next rounds may stray by: the weapon's spread plus
