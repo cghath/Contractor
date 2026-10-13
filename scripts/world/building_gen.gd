@@ -433,13 +433,29 @@ static func _furnish(boxes: Array, loot: Array, room: Rect2, role: String, doors
 			var depth := room.size.y if wl[0] in ["n", "s"] else room.size.x
 			if float(size[0]) > float(wl[1]) - FURNITURE_GAP * 2.0 or float(size[1]) > depth - FURNITURE_GAP * 2.0:
 				continue
+			# This placement's take on the chunk: an item with a "chance" may be left out, one
+			# with "vary" [x, y, z] is up to that much smaller (from its far side, so it stays
+			# against the wall), one with "mats" is one of them.
+			var items: Array = []
+			for it: Dictionary in c.items:
+				if it.has("chance") and rng.randf() > float(it.chance):
+					continue
+				var b: Array = (it.box as Array).duplicate()
+				var v: Array = it.get("vary", [0, 0, 0])
+				b[3] = float(b[3]) - rng.randf() * float(v[0])
+				b[4] = float(b[4]) - rng.randf() * float(v[1])
+				b[5] = float(b[5]) - rng.randf() * float(v[2])
+				var mats: Array = it.get("mats", [String(it.get("mat", "WOOD"))])
+				items.append({"box": b, "mat": String(mats[rng.randi() % mats.size()])})
+			if items.is_empty():
+				continue
 			# Centred on the wall, else slid to either end of it, wherever the most of it fits.
 			var slack := float(wl[1]) - float(size[0]) - FURNITURE_GAP * 2.0
 			var best_offset := 0.0
 			var best: Array = []
 			for offset: float in [FURNITURE_GAP + slack * 0.5, FURNITURE_GAP, FURNITURE_GAP + slack]:
 				var fit: Array = []
-				for it: Dictionary in c.items:
+				for it: Dictionary in items:
 					var b: Array = it.box  # [x0, y0, z0, x1, y1, z1]: x along the wall, z out from it
 					var lo := _to_room(room, wl[0], offset + float(b[0]), float(b[2]) + FURNITURE_GAP, float(b[1]))
 					var hi := _to_room(room, wl[0], offset + float(b[3]), float(b[5]) + FURNITURE_GAP, float(b[4]))
@@ -451,7 +467,7 @@ static func _furnish(boxes: Array, loot: Array, room: Rect2, role: String, doors
 				if fit.size() > best.size():
 					best = fit
 					best_offset = offset
-				if fit.size() == (c.items as Array).size():
+				if fit.size() == items.size():
 					break
 			if best.is_empty():
 				continue
