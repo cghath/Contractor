@@ -17,11 +17,11 @@ picking up next, we'll read it and steer around it.
 
 | # | Work | Branch | Files it touches | State |
 |---|---|---|---|---|
-| 1 | Spotter module: camo from colours (every pattern x preset x civilians), foliage concealment, rifle sights and binoculars past 60 m | `ai/spotting` (3858d2f) | `scripts/ai/spotting.gd`, `scripts/ai/squad_ai.gd` (`_find_target`), `scripts/world/zone_scatter.gd` (`foliage_between`), `data/items.json` (binoculars magnification), `tests/squad_test.gd`, `FEATURES.md` | Built. R0267: squad, smoke, roles and people pass. One intermittent casualty check to fix (#2), then CI, then dev on Captain's go |
-| 2 | Casualty flake: "doesn't pick him up again while the order stands" (failed R0257, R0267) | `ai/spotting` | `scripts/ai/squad_ai.gd` (`_care_carry`, `_should_carry`), `tests/casualty_test.gd` | Finding the cause |
-| 3 | Terrain visual pass: hot-zone roads drawn on the ground | new `art/terrain-roads` | `scripts/world/zone_terrain.gd`, `scripts/world/zone_scatter.gd` | Next |
-| 4 | Gear fit: wire `gear_rig` to the fit helpers in `voxel_art.gd` (male and female) | `art/gear-fit` | `scripts/combat/gear_rig.gd`, `scripts/art/voxel_art.gd` | Queued |
-| 5 | Gear secondary motion: bags and armour sway with the body | new `art/gear-motion` | `scripts/combat/gear_rig.gd`, `scripts/player/character_model.gd` | Queued |
+| 1 | Spotter module: camo from colours (every pattern x preset x civilians), foliage concealment, rifle sights and binoculars past 60 m | `ai/spotting` (5cb7fee) | `scripts/ai/spotting.gd`, `scripts/ai/squad_ai.gd` (`_find_target`), `scripts/world/zone_scatter.gd` (`foliage_between`), `data/items.json` (binoculars magnification), `tests/squad_test.gd`, `FEATURES.md` | Built; R0268 PASS (squad smoke casualty roles people). CI pending on 5cb7fee; dev on Captain's go |
+| 2 | Casualty flake: "doesn't pick him up again while the order stands" (failed R0257, R0267) | `ai/spotting` | `scripts/ai/squad_ai.gd` (`_care_carry`, `_should_carry`), `tests/casualty_test.gd` | Fixed (c4bb31d): the ragdoll's chest rolled past the 2 m stay radius. Also fixed two CI-only test races on that branch: squad 'Alpha is in contact' (render frames vs physics ticks, also flakes on dev) and roles 'held-back Moving!' |
+| 3 | Terrain visual pass: hot-zone roads drawn on the ground | `art/terrain-roads` (30ec617) | new `scripts/world/zone_roads.gd`, `scripts/world/zone_terrain.gd`, `scripts/world/zone_level.gd`, `tests/world_test.gd` | Built, R0270 PASS (world, map); CI pending |
+| 4 | Gear fit: wire `gear_rig` to the fit helpers in `voxel_art.gd` (male and female) | `art/gear-fit-wire` (ed3494d) | `scripts/combat/gear_rig.gd`, `tests/armor_test.gd` | Built, R0272/R0273 PASS (armor smoke animations); CI pending |
+| 5 | Gear secondary motion: bags and armour sway with the body | new `art/gear-motion` | `scripts/combat/gear_rig.gd`, `scripts/player/character_model.gd` | Next |
 | 6 | Tree and bush art pass to match the voxel characters | `art/terrain-roads` or own branch | `scripts/world/zone_scatter.gd` | Queued |
 | 7 | Final audit and a smoke test of the debug tools (bug-report key, session logs, AI overlay, test-log numbering) | none until fixes are found | read-only first | Last |
 
@@ -33,4 +33,5 @@ picking up next, we'll read it and steer around it.
 
 ## Log
 
+- 2026-10-13 04:50: casualty flake fixed; roads and gear fit built and pushed; starting gear motion.
 - 2026-10-13 04:15: list posted.
