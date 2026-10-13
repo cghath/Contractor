@@ -122,4 +122,19 @@ static func text_for(s: Soldier, ai: SquadAI) -> String:
 	var lines: Array[String] = ["%s: %s" % [SquadAI.Intent.keys()[ai.intent], ai.status_text()]]
 	lines.append("target %s; %s; suppr %.1f" % [ai.target.display_name() if is_instance_valid(ai.target) else "none",
 		Squad.CombatMode.keys()[ai.combat_mode], s.suppression])
+	# What it's half-spotted (SquadAI._aware, Spotting: 1 is a full spot) and, in a hot zone, the
+	# alert state a hostile acts on (Alert.state_at).
+	var top := 0.0
+	var who := ""
+	for id: int in ai._aware:
+		var a: float = ai._aware[id]
+		var other := instance_from_id(id) as Soldier
+		if a > top and other != null and is_instance_valid(other):
+			top = a
+			who = other.display_name()
+	var third := "aware %.2f %s" % [top, who] if top > 0.0 else "aware none"
+	var alert := Alert.of(s) if s.faction == &"hostile" else null
+	if alert:
+		third += "; alert %s" % Alert.State.keys()[alert.state_at(s.global_position)]
+	lines.append(third)
 	return "\n".join(lines)
