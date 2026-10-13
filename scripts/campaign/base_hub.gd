@@ -99,6 +99,7 @@ var _switch_zone := ""     # host: and the zone save it goes with ("" keeps Game
 var _switch_waiting := {}  # host: peers not ready for it yet
 var _switch_serial := 0
 var _zone_before := ""     # host: GameState.zone_id before the campaign took over (restored after)
+var _host_notice := ""     # host: what loading the campaign has to tell the host (shown again on open_ui)
 
 
 func _ready() -> void:
@@ -179,9 +180,18 @@ func new_campaign(hiring_seed := -1) -> void:
 	_changed_all()
 
 
-## Host: the saved campaign for Campaign.campaign_id, or a new one if there's none.
+## Host: the saved campaign for Campaign.campaign_id, or a new one if there's none. A save that
+## can't be read isn't taken as leave to start over on top of it (audit A1-01): load_campaign
+## keeps its files aside and falls back on its backup; only with nothing readable does a new
+## campaign start, its zone saves kept aside too, and the host is told (note, and on open_ui).
 func load_or_new() -> void:
-	if not Campaign.load_campaign() or not started():
+	var loaded := Campaign.load_campaign()
+	_host_notice = Campaign.load_notice
+	if not loaded and Campaign.last_load == Campaign.Loaded.UNREADABLE:
+		_set_aside_zone_saves()
+	if _host_notice != "":
+		note.emit(_host_notice)
+	if not loaded or not started():
 		new_campaign()
 	elif base().has("day"):
 		# A save from before the one clock: the base's own day and wage count give way to the
@@ -207,12 +217,18 @@ func load_or_new() -> void:
 
 ## Host: saves the campaign (the hub's stash and people read back first). Never one that was
 ## never loaded or started (no "day"): that would write an empty campaign over the save.
-func server_save() -> void:
+## Returns whether it was saved (audit A1-04: Campaign.save_error says why not).
+func server_save() -> bool:
 	if not started():
 		push_warning("BaseHub: no campaign loaded; not saving over %s" % Campaign.save_path())
-		return
+		return false
 	_read_back_base()
-	Campaign.save_campaign()
+	return Campaign.save_campaign()
+
+
+## Host: what to tell the player after server_save returned `saved`.
+static func save_note(saved: bool) -> String:
+	return "Campaign saved" if saved else "Campaign NOT saved: %s" % (Campaign.save_error if Campaign.save_error != "" else "no campaign loaded")
 
 
 ## The zone save (GameState.zone_id) of the campaign's zone `zone_id`: each campaign keeps its
@@ -225,14 +241,30 @@ func base_zone_id() -> String:
 	return zone_save_id("fob")
 
 
-## Deletes every zone save of the current campaign (zone_save_id).
+## Deletes every zone save of the current campaign (zone_save_id), with their backups and
+## interrupted writes (a backup left behind would load as the new campaign's zone).
 func _delete_zone_saves() -> void:
+	for path in _zone_save_files():
+		DirAccess.remove_absolute(path)
+
+
+## Moves every zone save of the current campaign aside (GameState.set_aside): the campaign they
+## belong to couldn't be read, and a new one starting in its name mustn't load them or delete them.
+func _set_aside_zone_saves() -> void:
+	for path in _zone_save_files():
+		push_warning("BaseHub: kept %s aside (its campaign couldn't be read)" % GameState.set_aside(path, "orphaned").get_file())
+
+
+## The current campaign's zone save files: each save, backup and interrupted write.
+func _zone_save_files() -> Array[String]:
+	var out: Array[String] = []
 	var prefix := zone_save_id("")
 	if not DirAccess.dir_exists_absolute(GameState.SAVE_DIR):
-		return
+		return out
 	for file in DirAccess.get_files_at(GameState.SAVE_DIR):
-		if file.begins_with(prefix) and file.ends_with(".json"):
-			DirAccess.remove_absolute("%s/%s" % [GameState.SAVE_DIR, file])
+		if file.begins_with(prefix) and (file.ends_with(".json") or file.ends_with(".json.bak") or file.ends_with(".json.tmp")):
+			out.append("%s/%s" % [GameState.SAVE_DIR, file])
+	return out
 
 
 static func _empty_prep() -> Dictionary:
@@ -981,7 +1013,8 @@ func server_end_deployment(extracted: Array, return_to_base := true, advance_day
 	if advance_days:
 		server_advance_days(int(RosterDeployment.DAYS.get(report.zone_kind, 1)))
 	_changed_all()
-	Campaign.save_campaign()
+	if not Campaign.save_campaign():
+		note.emit(save_note(false))  # the host's player hears it (audit A1-04)
 	deployment_ended.emit(report)
 	if return_to_base:
 		server_switch_level({"level": "base"}, base_zone_id())
@@ -1280,8 +1313,7 @@ func _server_request(action: String, args: Array) -> void:
 				if why == "":
 					why = "Prepping %s" % String(prep_contract().get("title", ""))
 			"save":
-				server_save()
-				why = "Campaign saved"
+				why = save_note(server_save())
 			_:
 				why = "Unknown request"
 	if why != "":
@@ -1360,14 +1392,16 @@ func open_ui(page := "squad") -> void:
 		_ui = BaseUI.new()
 		get_tree().root.add_child(_ui)
 	_ui.open(page)
+	if _host_notice != "":
+		note.emit(_host_notice)  # loading had something to say before the screen existed (load_or_new)
+		_host_notice = ""
 
 
 func _unhandled_input(event: InputEvent) -> void:
 	if not campaign_running or not Net.is_hosting():
 		return
 	if event.is_action_pressed(&"quick_save"):
-		server_save()
-		note.emit("Campaign saved")
+		note.emit(save_note(server_save()))
 	elif DevTools.on() and event is InputEventKey and event.pressed and not event.echo \
 			and (event as InputEventKey).physical_keycode == KEY_END and (event as InputEventKey).shift_pressed and deployment_running():
 		var me := level().players.get_node_or_null(^"1") as Node3D

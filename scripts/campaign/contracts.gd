@@ -242,15 +242,19 @@ func _on_intel_banked(entry: Dictionary) -> void:
 # --- Host: campaign ----------------------------------------------------------------------
 
 ## Host: makes sure a campaign exists: loads the save for Campaign.campaign_id the first time
-## if nothing has been loaded, else starts a fresh one.
+## if nothing has been loaded (its backup too when the save itself is gone, audit A1-02), else
+## starts a fresh one. What the load has to say (a backup used, a damaged save kept aside) is
+## told to the host.
 func ensure_campaign() -> void:
 	if _ensuring:
 		return
 	_ensuring = true
 	if Campaign.section(Economy.SECTION).is_empty() and Campaign.section(SECTION).is_empty() and not _tried_load \
-			and FileAccess.file_exists(Campaign.save_path()):
+			and Campaign.has_save():
 		_tried_load = true
 		Campaign.load_campaign()
+		if Campaign.load_notice != "":
+			_notify(1, Campaign.load_notice)
 		# _on_campaign_changed skips while ensuring: put a saved deployment's objectives back.
 		if not Campaign.section(SECTION).is_empty():
 			objectives.server_restore(Campaign.section(SECTION).get("objectives", []))
@@ -1009,8 +1013,8 @@ func _flush() -> void:
 
 
 func _save() -> void:
-	if autosave and _is_host():
-		Campaign.save_campaign()
+	if autosave and _is_host() and not Campaign.save_campaign():
+		_notify(1, "Campaign NOT saved: " + Campaign.save_error)  # audit A1-04: the host hears of it
 
 
 func _on_peer_joined(id: int) -> void:
