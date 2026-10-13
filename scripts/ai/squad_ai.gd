@@ -1584,6 +1584,8 @@ func _should_carry() -> bool:
 	var ccp: Variant = squad.ccp_point() if squad else null
 	if ccp != null and _friendly():
 		return casualty.body_point().distance_to(ccp) > LAY_NEAR_M + 1.0  # "Bring casualties here"
+	if _friendly() and order == Squad.Order.MOVE and _lay_spot != null and _flat_between(casualty.body_point(), _lay_spot) <= LAY_NEAR_M + 1.0:
+		return false  # laid where the order sent them: they stay while it stands (queue 16)
 	if 1.0 - casualty.vitals.blood_fraction() >= WoundModel.UNCONSCIOUS_LOST:
 		return true
 	var leader: Soldier = squad.leader if squad and is_instance_valid(squad.leader) else null
@@ -2554,6 +2556,7 @@ func _tactic_give_ammo(t: Dictionary) -> void:
 			full = true
 			break
 		given += 1
+	print("[tactics] %s brings %s %d x %s (%s)" % [body.name, who.name, given, ammo, "no room" if full else ("none left" if given == 0 else "handed over")])
 	if given > 0:
 		_callout(&"tactic", "Ammo!")
 		if not who.is_ai():
@@ -3029,6 +3032,10 @@ func _stop() -> void:
 
 
 # --- Helpers --------------------------------------------------------------
+
+static func _flat_between(a: Vector3, b: Vector3) -> float:
+	return Vector2(a.x - b.x, a.z - b.z).length()
+
 
 func _flat_distance(point: Vector3) -> float:
 	return Vector2(body.global_position.x - point.x, body.global_position.z - point.z).length()
