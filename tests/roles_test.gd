@@ -473,7 +473,9 @@ func _test_callout_rules() -> void:
 	await _seconds(Callouts.SPEAKER_GAP_S + 0.3)
 	var waited: Array = said.call(first, &"moving")
 	check(waited.size() == 1 and float(waited[0].time) - frag_time >= Callouts.SPEAKER_GAP_S - 0.05,
-		"the held-back Moving! follows once the speaker's gap has passed")
+		"the held-back Moving! follows once the speaker's gap has passed (%s said %s; pending %s; %s)" % [first.name,
+		callouts.sent.filter(func(c: Dictionary) -> bool: return c.speaker == String(first.name)).map(func(c: Dictionary) -> String: return "%s@%.2f" % [c.id, c.time]),
+		callouts._pending.get(String(first.name), {}).get("id", "none"), first.ai_status])
 	await _seconds(Callouts.SPEAKER_GAP_S + 0.1)
 	check(not callouts.say(first, &"reloading"), "the same callout doesn't repeat within %.0f s" % Callouts.REPEAT_GAP_S)
 	await _seconds(0.3)
