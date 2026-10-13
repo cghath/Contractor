@@ -44,6 +44,7 @@ func _ready() -> void:
 	await _test_helmet_impact()
 	await _test_playtest_knockouts()
 	_test_fit()
+	await _test_gear_fit()
 	await _test_state_travels()
 	await _test_dents_and_holes()
 	await _test_oblique_dents()
@@ -635,6 +636,66 @@ func _test_fit() -> void:
 	full.take(&"plate_pe_l3")
 	check(full.fit_problem(pe) == "No free plate pocket", "a full carrier: \"%s\"" % full.fit_problem(pe))
 	full.queue_free()
+
+
+## Gear fit (queue 4, Captain's screenshots P0164): pouches stayed past the carrier's edges and
+## pack straps stood off the shoulders.
+func _test_gear_fit() -> void:
+	print("Gear fit")
+	var dummy := await _dummy(["plate_carrier", "ruck_45"])
+	var on := [[&"radio_l", &"pouch_radio"], [&"chest_1", &"pouch_grenade"], [&"chest_2", &"pouch_grenade"],
+		[&"tq", &"pouch_tq"], [&"pistol_1", &"pouch_pistol_mag"]]
+	var put := true
+	for pair: Array in on:
+		put = dummy.inventory.attach(pair[0], {"id": pair[1]}) and put
+	check(put, "a radio and two grenade pouches across the chest, a tourniquet and a pistol mag pouch at the sides")
+	await get_tree().physics_frame
+	var spots: Dictionary = dummy.gear.pouch_spots()
+	var half := func(id: StringName) -> Vector3: return WorldItem.visual_size(ItemDB.get_item(id)) * 0.5
+	var inside := true
+	var edges: Array = []
+	for pair: Array in on.slice(0, 3):
+		var x: float = (spots[pair[0]] as Transform3D).origin.x
+		var hw: float = half.call(pair[1]).x
+		inside = inside and absf(x) + hw <= GearRig.PANEL_HALF_M + 0.001
+		edges.append([snappedf(x - hw, 0.001), snappedf(x + hw, 0.001)])
+	edges.sort_custom(func(a: Array, b: Array) -> bool: return a[0] < b[0])
+	var apart := true
+	for i in edges.size() - 1:
+		apart = apart and edges[i][1] <= edges[i + 1][0] + 0.0005
+	check(inside and apart, "the chest pouches stay on the plate pocket (%.2f m either side) and don't overlap (%s)" % [GearRig.PANEL_HALF_M, edges])
+	# A row too wide for the pocket (a GP pouch in the middle) still stays on it, overlapping.
+	dummy.inventory.detach(&"chest_1")
+	put = dummy.inventory.attach(&"chest_1", {"id": &"pouch_utility"})
+	await get_tree().physics_frame
+	var wide: Dictionary = dummy.gear.pouch_spots()
+	var still := true
+	for pair: Array in [[&"radio_l", &"pouch_radio"], [&"chest_1", &"pouch_utility"], [&"chest_2", &"pouch_grenade"]]:
+		still = still and absf((wide[pair[0]] as Transform3D).origin.x) + half.call(pair[1]).x <= GearRig.PANEL_HALF_M + 0.001
+	check(put and still, "a row too wide for the pocket (radio, GP, grenade: %.0f cm) still doesn't hang off it" % ((0.08 + 0.13 + 0.07) * 100.0))
+	var corners := true
+	var seen: Array = []
+	for pair: Array in on.slice(3):
+		var t: Transform3D = spots[pair[0]]
+		var c := VoxelArt.cummerbund_size(1, dummy.model.body, t.origin.y)
+		var facing := -t.basis.z
+		var sx := signf(t.origin.x)
+		corners = corners and absf(t.origin.x) <= c.x and facing.x * sx > 0.2 and facing.z < -0.2
+		seen.append("%s x %.3f (cummerbund %.3f), facing %.2f, %.2f" % [pair[1], t.origin.x, c.x, facing.x, facing.z])
+	check(corners, "the side pouches lie on the cummerbund's front corners, facing out of them (%s)" % [seen])
+	var pad_top := (VoxelArt.CARRIER_MOUNT_CM + float(VoxelArt.SHOULDER_PAD_ARCH[2][0])) * 0.01
+	for body: String in [VoxelArt.MALE, VoxelArt.FEMALE]:
+		var path := GearRig.strap_path(body, true, 0.14)
+		var top := path.reduce(func(m: float, v: Vector3) -> float: return maxf(m, v.y), 0.0) as float
+		var narrow := path.all(func(v: Vector3) -> bool: return absf(v.x) <= GearRig.PANEL_HALF_M)
+		check(top >= pad_top and top <= pad_top + 0.04 and narrow,
+			"%s: pack straps lie on the carrier's shoulder pads (top %.3f m, the pads' %.3f m), not out past them" % [body, top, pad_top])
+		var bare := GearRig.strap_path(body, false, 0.14)
+		var shoulder := VoxelArt.shoulder_top(body, VoxelArt.SHOULDER_PAD_X * 0.01)
+		var bare_top := bare.reduce(func(m: float, v: Vector3) -> float: return maxf(m, v.y), 0.0) as float
+		check(absf(bare_top - shoulder - GearRig.STRAP_LIFT) < 0.005,
+			"%s, no carrier: on the shoulders themselves (%.3f m, the shoulder %.3f m)" % [body, bare_top, shoulder])
+	dummy.queue_free()
 
 
 # --- Item state -------------------------------------------------------------------------------
