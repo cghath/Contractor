@@ -1001,11 +1001,38 @@ func _server_interact(path: NodePath) -> void:
 		_server_swap_pack(entry)
 		return
 	var taken := inventory.take(item.item_id, item.count, item.state)
-	if taken > 0:
-		model.server_pick_up(item.global_position, item.item_id)  # the pickup animation
 	if taken == 0:
 		_client_message.rpc_id(owner_peer(), "No room for %s" % ItemDB.get_item(item.item_id).name)
-	elif taken >= item.count:
+		return
+	_server_took(item, taken)
+
+
+## Inventory screen: the nearby item at `path` dragged onto container `into` (a pouch too)
+## goes in there, not on the body: a pack dragged into the worn pack is stowed (empty, rolled
+## if it's as big), never swapped for it (audit A2-07). The same reach as picking it up.
+@rpc("any_peer", "call_local", "reliable")
+func _server_pick_up_into(path: NodePath, into: StringName) -> void:
+	if not _from_owner() or not vitals.is_up():
+		return
+	var item := get_node_or_null(path) as WorldItem
+	if item == null or item.is_queued_for_deletion() or not inventory.containers.has(into):
+		return
+	if item.global_position.distance_to(global_position) > INTERACT_RANGE + 1.5:
+		return
+	var data := ItemDB.get_item(item.item_id)
+	var taken := mini(item.count, inventory.room_for(into, data, item.state))
+	if taken <= 0 or not inventory.insert_entry(into, {"id": item.item_id, "count": taken, "state": item.state.duplicate(true)}):
+		var why := inventory.pack_problem(into, data, item.state)
+		_client_message.rpc_id(owner_peer(), why if why != "" else "No room for %s in %s" % [data.name, container_name(into)])
+		return
+	_server_took(item, taken)
+
+
+## Host: `taken` of the world item `item` went into this soldier's gear: the pickup
+## animation, and the item leaves the world (or what's left of the stack stays).
+func _server_took(item: WorldItem, taken: int) -> void:
+	model.server_pick_up(item.global_position, item.item_id)  # the pickup animation
+	if taken >= item.count:
 		GameState.item_taken(item.uid)
 		item.queue_free()
 	else:

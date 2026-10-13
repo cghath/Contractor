@@ -685,6 +685,10 @@ func _pick_up(path: NodePath) -> void:
 	player._server_interact.rpc_id(1, path)
 
 
+func _pick_up_into(path: NodePath, container: StringName) -> void:
+	player._server_pick_up_into.rpc_id(1, path, container)
+
+
 func _drop_held() -> void:
 	player._server_drop.rpc_id(1, &"")
 
@@ -788,7 +792,13 @@ func drop_action(src: Dictionary, dst: Dictionary) -> Callable:
 				"nearby":
 					return _action.bind("drop_attachment", &"", -1, src.point, &"")
 		"nearby":
-			if kind in ["container", "slot", "point", "doll"]:
+			# Into the container (or pouch) it was dragged onto; onto the body (a slot, the
+			# soldier) it's picked up as a click would: a pack swaps for the worn one there only.
+			if kind == "container":
+				return _pick_up_into.bind(src.path, dst.container)
+			if kind == "point" and not Inventory.is_attachable(item) and inv.containers.has(Inventory.pouch_container(dst.point)):
+				return _pick_up_into.bind(src.path, Inventory.pouch_container(dst.point))
+			if kind in ["slot", "point", "doll"]:
 				return _pick_up.bind(src.path)
 		"hands":
 			if kind == "nearby":

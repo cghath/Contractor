@@ -39,6 +39,7 @@ func _ready() -> void:
 	await _test_molle_host()
 	await _test_loot_aid_bag()
 	await _test_screen_launcher()
+	await _test_screen_ground_pack()
 	await _test_respawn_kit()
 	await _test_smoke_colours()
 	await _test_breach_navigation()
@@ -552,6 +553,66 @@ func _slot_tile(screen: InventoryScreen, slot: StringName) -> Array:
 		if is_instance_valid(t[0]) and not t[0].is_queued_for_deletion() and t[1].kind == "slot" and t[1].slot == slot:
 			return [t[0], t[1]]
 	return []
+
+
+## Audit A2-07: a pack on the ground dragged into the worn pack is stowed there, not swapped
+## for it; one with things in it isn't (and nothing changes); dragged onto the body (the pack's
+## slot) it still swaps, as picking it up does.
+func _test_screen_ground_pack() -> void:
+	print("Inventory screen: a ground pack dragged into the worn pack")
+	var inv := player.inventory
+	inv.strip()
+	player.global_position = Vector3(0, 0.1, 18)
+	inv.take(&"ruck_45")
+	inv.insert_entry(&"backpack", {"id": &"mag_556", "count": 2})
+	var screen: InventoryScreen = player._hud.inventory_screen
+	screen.visible = true
+	for id: StringName in [&"ruck_45", &"assault_pack"]:  # packs earlier checks left lying about
+		for n: WorldItem in _ground(id):
+			GameState.item_taken(n.uid)
+			n.queue_free()
+	await _frames(2)
+	level.server_spawn_dropped(&"assault_pack", 1, player.global_position + Vector3(0.5, 0.5, 0))
+	await _frames(3)
+	var ground := _ground(&"assault_pack")
+	check(ground.size() == 1 and inv.room_for(&"backpack", ItemDB.get_item(&"assault_pack")) >= 1,
+		"an empty Assault Pack on the ground fits in the Ruck (%d on the ground, room %d)" % [ground.size(), inv.room_for(&"backpack", ItemDB.get_item(&"assault_pack"))])
+	if ground.is_empty():
+		screen.visible = false
+		return
+	var src := {"kind": "nearby", "id": &"assault_pack", "path": ground[0].get_path()}
+	screen._drop(Vector2.ZERO, {"inventory_drag": src}, {"kind": "container", "container": &"backpack"})
+	await _frames(3)
+	check(inv.slots[&"backpack"] == &"ruck_45" and _count_in(inv, &"backpack", &"assault_pack") == 1 and _count_in(inv, &"backpack", &"mag_556") == 2
+		and _ground(&"assault_pack").is_empty() and _ground(&"ruck_45").is_empty(),
+		"dragged into the Ruck it's stowed there; the Ruck stays on, nothing on the ground (wearing %s, inside %s)" % [inv.slots[&"backpack"], inv.containers[&"backpack"]])
+	# A loaded pack never goes in: nothing moves.
+	inv.remove_entry(&"backpack", _index_in(inv, &"backpack", &"assault_pack"))
+	level.server_spawn_dropped(&"assault_pack", 1, player.global_position + Vector3(0.5, 0.5, 0), {"held": [{"id": &"pressure_bandage", "count": 2}]})
+	await _frames(3)
+	ground = _ground(&"assault_pack")
+	if not ground.is_empty():
+		screen._drop(Vector2.ZERO, {"inventory_drag": {"kind": "nearby", "id": &"assault_pack", "path": ground[0].get_path()}}, {"kind": "container", "container": &"backpack"})
+	await _frames(3)
+	check(ground.size() == 1 and is_instance_valid(ground[0]) and not ground[0].is_queued_for_deletion() and inv.slots[&"backpack"] == &"ruck_45"
+		and _count_in(inv, &"backpack", &"assault_pack") == 0, "a loaded one dragged into it stays on the ground; the Ruck stays on")
+	# Onto the pack's slot: the swap, as a click picks it up.
+	if not ground.is_empty():
+		screen._drop(Vector2.ZERO, {"inventory_drag": {"kind": "nearby", "id": &"assault_pack", "path": ground[0].get_path()}}, {"kind": "slot", "slot": &"backpack"})
+	await _frames(3)
+	check(inv.slots[&"backpack"] == &"assault_pack" and inv.medical_count(&"pressure_bandage") == 2 and _ground(&"ruck_45").size() == 1,
+		"dragged onto the pack's slot it swaps: the Assault Pack on (its 2 bandages in it), the Ruck on the ground")
+	for id: StringName in [&"ruck_45", &"assault_pack"]:
+		for n: WorldItem in _ground(id):
+			GameState.item_taken(n.uid)
+			n.queue_free()
+	screen.visible = false
+	inv.strip()
+
+
+## World items of `id` lying about (not on their way out).
+func _ground(id: StringName) -> Array:
+	return get_tree().get_nodes_in_group(WorldItem.GROUP).filter(func(n: Node) -> bool: return n is WorldItem and n.item_id == id and not n.is_queued_for_deletion())
 
 
 ## Every item on `soldiers`, wherever it is (worn, on a carrier's or pack's points, in a pouch,
