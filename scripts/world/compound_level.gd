@@ -268,11 +268,13 @@ func spawn_item(id: StringName, count: int, pos: Vector3, uid: String, state := 
 	item_spawner.spawn({"id": String(id), "count": count, "pos": pos, "uid": uid, "state": state})
 
 
-## Host only. Spawns an item a player dropped and records it for saving.
-func server_spawn_dropped(id: StringName, count: int, pos: Vector3, state := {}) -> void:
+## Host only. Spawns an item a player dropped and records it for saving. Returns its uid
+## (WorldItem.uid), so whoever dropped it can find that very item again.
+func server_spawn_dropped(id: StringName, count: int, pos: Vector3, state := {}) -> String:
 	var uid := GameState.new_uid()
 	GameState.item_dropped(uid, id, count, pos, state)
 	spawn_item(id, count, pos, uid, state)
+	return uid
 
 
 ## Host only. Leaves a dead body from `record` (Soldier.body_record): a Soldier with no brain,

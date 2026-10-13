@@ -344,7 +344,8 @@ var ordered: Dictionary = {}
 var stance_order := -1
 var _heal_until := -1000.0
 var _suppress_jitter := Vector3.ZERO
-## "Drop packs here": the pack this unit left on the ground ({"id", "pos"}), {} for none.
+## "Drop packs here": the pack this unit left on the ground ({"id", "uid", "pos"}: its item,
+## that very WorldItem's uid, where it went down), {} for none.
 var dropped_pack: Dictionary = {}
 ## Command menu "Hold fire": don't shoot at all until told to open fire.
 var hold_fire := false
@@ -2391,7 +2392,8 @@ func _do_tactic(t: Dictionary) -> void:
 
 
 ## Host: "Drop packs here": the worn pack goes on the ground in front, still loaded, and this
-## unit remembers where. False if it wears none (or is busy carrying someone).
+## unit remembers which item it is (its uid), not just the model: squadmates often wear the
+## same pack with different things in it. False if it wears none (or is busy carrying someone).
 func drop_pack() -> bool:
 	if body.carrying != null or body.inventory.slots.get(&"backpack", &"") == &"":
 		return false
@@ -2399,34 +2401,42 @@ func drop_pack() -> bool:
 	if entry.is_empty():
 		return false
 	var pos := body.global_position - body.global_basis.z * 0.6 + Vector3.UP * 0.4
-	CompoundLevel.current(body).server_spawn_dropped(entry.id, 1, pos, entry.get("state", {}))
-	dropped_pack = {"id": entry.id, "pos": pos}
+	var uid := CompoundLevel.current(body).server_spawn_dropped(entry.id, 1, pos, entry.get("state", {}))
+	dropped_pack = {"id": entry.id, "uid": uid, "pos": pos}
 	return true
 
 
-## "Pick packs up": back to the pack it dropped, and on with it (if it's still there and no
-## other pack has been put on since).
+## "Pick packs up": back to the pack it dropped, wherever it has rolled since, and on with it
+## (if it's still there and no other pack has been put on since). Only its own: another pack
+## of the same model lying closer is somebody else's. Gone (someone took it): the order ends.
 func _tactic_pick_pack() -> void:
-	var pos: Vector3 = dropped_pack.get("pos", body.global_position)
-	if dropped_pack.is_empty() or body.inventory.slots.get(&"backpack", &"") != &"":
+	var own := _dropped_pack_item()
+	if own == null or body.inventory.slots.get(&"backpack", &"") != &"":
 		dropped_pack = {}
 		ordered = {}
 		return
-	if _flat_distance(pos) > 1.5:
-		_go(pos, true)
+	if _flat_distance(own.global_position) > 1.5:
+		_go(own.global_position, true)
 		return
 	_has_destination = false
-	var found: WorldItem = null
-	for node in get_tree().get_nodes_in_group(WorldItem.GROUP):
-		var item := node as WorldItem
-		if item and not item.is_queued_for_deletion() and item.item_id == StringName(dropped_pack.id) 				and item.global_position.distance_to(pos) < 3.0 and (found == null or item.global_position.distance_to(pos) < found.global_position.distance_to(pos)):
-			found = item
-	if found and body.inventory.take(found.item_id, 1, found.state) > 0:
-		body.model.server_pick_up(found.global_position, found.item_id)
-		GameState.item_taken(found.uid)
-		found.queue_free()
+	if body.inventory.take(own.item_id, 1, own.state) > 0:
+		body.model.server_pick_up(own.global_position, own.item_id)
+		GameState.item_taken(own.uid)
+		own.queue_free()
 	dropped_pack = {}
 	ordered = {}  # back to what they were doing
+
+
+## The very pack this unit dropped (dropped_pack's uid), lying in the world; null once it's gone.
+func _dropped_pack_item() -> WorldItem:
+	var uid := String(dropped_pack.get("uid", ""))
+	if uid == "":
+		return null
+	for node in get_tree().get_nodes_in_group(WorldItem.GROUP):
+		var item := node as WorldItem
+		if item and item.uid == uid and not item.is_queued_for_deletion():
+			return item
+	return null
 
 
 ## The maneuver element: along the flank route, point by point, then fighting from its end.

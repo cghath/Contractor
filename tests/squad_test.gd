@@ -347,8 +347,43 @@ func _test_tactics() -> void:
 		check(squad.order_command(player, "drop_packs", Vector3.ZERO, names) == "" and mate.inventory.slots[&"backpack"] == &""
 			and get_tree().get_nodes_in_group(WorldItem.GROUP).any(func(n: Node) -> bool: return (n as WorldItem).item_id == pack and _flat(n.global_position, mate.global_position) < 2.0),
 			"Drop packs here: %s's pack goes on the ground beside him" % mate.name)
+		# Audit A2-08: his own pack, by identity. It has rolled behind him, and a squadmate's pack of
+		# the same model lies right where his went down: he must not take that one.
+		var mate_ai := SquadAI.of(mate)
+		var own := mate_ai._dropped_pack_item()
+		var had_own := own != null
+		var decoy_uid := ""
+		if own:
+			own.state = own.state.merged({"test_serial": "own"}, true)
+			own.global_position = mate.global_position + mate.global_basis.z * 0.6 + Vector3.UP * 0.4
+			own.linear_velocity = Vector3.ZERO
+			decoy_uid = level.server_spawn_dropped(pack, 1, mate_ai.dropped_pack.pos, {"test_serial": "decoy"})
 		squad.order_command(player, "pick_packs", Vector3.ZERO, names)
 		check(await _wait_until(func() -> bool: return mate.inventory.slots[&"backpack"] == pack, 8.0), "Pick packs up: and back on (%s)" % mate.ai_status)
+		var decoy := _world_item(decoy_uid)
+		check(had_own and mate.inventory.state_of(&"backpack").get("test_serial", "") == "own" and decoy != null,
+			"his own pack, not a same-model one lying closer to where his went down (wears %s; the other %s)"
+			% [mate.inventory.state_of(&"backpack").get("test_serial", "?"), "still there" if decoy else "gone"])
+		# And one somebody has taken meanwhile: the order ends, nobody else's pack goes on instead.
+		squad.order_command(player, "drop_packs", Vector3.ZERO, names)
+		var taken := mate_ai._dropped_pack_item()
+		var had_taken := taken != null
+		var taken_state: Dictionary = taken.state.duplicate(true) if taken else {}
+		if taken:
+			GameState.item_taken(taken.uid)
+			taken.queue_free()
+		await _frames(1)
+		squad.order_command(player, "pick_packs", Vector3.ZERO, names)
+		await _seconds(1.0)
+		var decoy_left := _world_item(decoy_uid) != null
+		check(had_taken and mate_ai.dropped_pack.is_empty() and mate_ai.ordered.is_empty() and mate.inventory.slots[&"backpack"] == &"" and decoy_left,
+			"Pick packs up with his pack gone: the order ends and he leaves the other pack alone (%s; %s; wears %s; the other %s)"
+			% [mate.ai_status, mate_ai.ordered, mate.inventory.slots[&"backpack"], "still there" if decoy_left else "gone"])
+		mate.inventory.take(pack, 1, taken_state)  # back on, for what follows
+		decoy = _world_item(decoy_uid)
+		if decoy:
+			GameState.item_taken(decoy.uid)
+			decoy.queue_free()
 
 	# Give me ammo: the nearest who carries the player's magazines brings some.
 	player.inventory.take(&"assault_pack")  # somewhere to put them
@@ -557,6 +592,13 @@ func _remove_hostiles() -> void:
 	for s: Soldier in level.ai.get_children():
 		if s.faction == &"hostile":
 			s.queue_free()
+
+
+func _world_item(uid: String) -> WorldItem:
+	for n in get_tree().get_nodes_in_group(WorldItem.GROUP):
+		if n is WorldItem and (n as WorldItem).uid == uid and uid != "" and not n.is_queued_for_deletion():
+			return n
+	return null
 
 
 func _place(s: Soldier, pos: Vector3) -> void:
