@@ -776,6 +776,15 @@ func server_inventory_action(inventory: Inventory, action: String, container: St
 		"drop_attachment":
 			from = &"carrier"
 			to = &"ground"
+		"attach_slot":  # the launcher off the shoulder, onto the top of the pack
+			from = SLOT_MOUNTS.get(slot, &"pouch")
+			to = &"pack"
+		"equip_attachment":  # a packed launcher off the top of the pack, onto the shoulder
+			var att := inventory.attachment(slot)
+			if att.is_empty():
+				return
+			from = &"pack"
+			to = mount_for_item(ItemDB.get_item(StringName(att.id)))
 		_:
 			return
 	server_play(EQUIP, EQUIP_S, Vector3.ZERO, from, to)
