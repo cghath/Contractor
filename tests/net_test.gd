@@ -28,6 +28,10 @@ const SMOKE_AGE_S := 3.0
 ## Two AI the host stages before the client joins: one dragging the other (_stage_drag).
 const DRAGGER := "Dragger"
 const DRAGGED := "Dragged"
+## A hostile the host stages aiming its rifle (_stage_drag), for the client to shoot and loot
+## (_check_looted_rifle).
+const AIMER := "Aimer"
+const AIMER_AT := Vector3(4, 0.1, 33)
 
 var failures := 0
 var level: CompoundLevel
@@ -47,7 +51,7 @@ func _ready() -> void:
 	if Net.is_hosting():
 		Net.peer_joined.connect(_give_kit)
 		Net.peer_left.connect(_on_client_left)
-		get_tree().create_timer(60.0).timeout.connect(func() -> void: get_tree().quit(1))
+		get_tree().create_timer(90.0).timeout.connect(func() -> void: get_tree().quit(1))
 		_stage_drag()
 	else:
 		_run_client()
@@ -87,6 +91,8 @@ func _stage_drag() -> void:
 	await get_tree().create_timer(0.3).timeout
 	dragged.vitals.server_damage(500.0)
 	print("[host] staged a drag: %s" % dragger.server_pick_up_body(dragged, Soldier.DRAG, INF))
+	var aimer: Soldier = make.call(AIMER, AIMER_AT)
+	aimer.want_aim = true  # its rifle shouldered when the client shoots it
 	# Smoke already out when the client joins (audit L2-01): it must see it too, as old as here.
 	# It starts SMOKE_AGE_S old, so the check doesn't hang on how long the client takes to join
 	# (a quick join reached the client at 1.6 s, under the old 2 s mark, and failed).
@@ -177,6 +183,7 @@ func _run_client() -> void:
 	check(_dropped_helmet() != null, "dropped helmet spawned on the client")
 	await _shoot_dropped_helmet(me)
 	await _check_saved_body(me)
+	await _check_looted_rifle(me)
 	await _check_world_edits()
 	# Knocked out, then gone: the host keeps this player's body (see _on_client_left).
 	me._server_debug_hurt.rpc_id(1, 140.0)
@@ -204,6 +211,59 @@ func _check_saved_body(me: Soldier) -> void:
 	await _wait_for(func() -> bool: return body.inventory.count_of(&"mag_556") == 0, 3.0)
 	check(body.inventory.count_of(&"mag_556") == 0 and me.inventory.count_of(&"mag_556") == mags + 3,
 		"looting its magazines over the network moves them onto the looter (%d -> %d)" % [mags, me.inventory.count_of(&"mag_556")])
+
+
+## An AI shot dead with its rifle shouldered and then looted over the network: on this client
+## too, nothing of the rifle stays drawn on the body (Captain, P0164 queue 15).
+func _check_looted_rifle(me: Soldier) -> void:
+	var aimer: Soldier = _combatant(AIMER)
+	await _wait_for(func() -> bool: return aimer != null and aimer.is_aiming and aimer.gear._held_key == &"primary", 3.0)
+	check(aimer != null and aimer.is_aiming and aimer.gear._held_key == &"primary", "a hostile aims its rifle: shouldered here too")
+	if aimer == null:
+		return
+	me.global_position = aimer.global_position + Vector3(0.0, 0.0, 2.5)
+	await get_tree().create_timer(0.4).timeout  # the host sees us there
+	for shot in 5:
+		var head := CharacterModel.part_position(aimer, Vitals.HEAD)
+		me._server_fire.rpc_id(1, me.camera.global_position, (head - me.camera.global_position).normalized(), &"primary")
+		await _wait_for(func() -> bool: return aimer.vitals.is_dead(), 1.0)
+		if aimer.vitals.is_dead():
+			break
+	check(aimer.vitals.is_dead() and not _rifle_drawn(aimer).is_empty(), "shot dead while aiming, its rifle still on the body")
+	await get_tree().create_timer(1.0).timeout  # it falls
+	var chest := aimer.body_point()
+	me.global_position = Vector3(chest.x + 0.8, AIMER_AT.y, chest.z)
+	await get_tree().create_timer(0.4).timeout
+	me._server_loot_item.rpc_id(1, aimer.get_path(), &"primary", -1, &"m4a1")
+	await _wait_for(func() -> bool: return aimer.inventory.slots[&"primary"] == &"", 3.0)
+	for i in 3:
+		await get_tree().process_frame
+	var left := _rifle_drawn(aimer)
+	check(aimer.inventory.slots[&"primary"] == &"" and left.is_empty(),
+		"looted over the network: nothing of the rifle stays drawn on the body here (%s)" % [left])
+
+
+## The soldier named `callsign` (players and AI), or null.
+func _combatant(callsign: String) -> Soldier:
+	for node in get_tree().get_nodes_in_group(&"combatants"):
+		if node is Soldier and String(node.name) == callsign:
+			return node
+	return null
+
+
+## Where an M4's voxel model is drawn on `s` now (shown, not on its way out), as paths from `s`.
+func _rifle_drawn(s: Soldier) -> Array[String]:
+	var mesh := VoxelArt.mesh(VoxelArt.model_for(ItemDB.get_item(&"m4a1")), s.model.variant)
+	var out: Array[String] = []
+	for n: Node in s.find_children("*", "MeshInstance3D", true, false):
+		var going := false
+		var up := n
+		while up != null and up != s:
+			going = going or up.is_queued_for_deletion()
+			up = up.get_parent()
+		if (n as MeshInstance3D).mesh == mesh and (n as Node3D).is_visible_in_tree() and not going:
+			out.append(String(s.get_path_to(n)))
+	return out
 
 
 ## Armor on the ground is a target: a round the host resolves against the dropped helmet
@@ -242,16 +302,11 @@ func _check_world_edits() -> void:
 ## The drag the host staged before this client joined shows here: both poses from the
 ## replicated carry_net (the host-only carried_by and carrying never reach a client).
 func _check_late_drag() -> void:
-	var find := func(callsign: String) -> Soldier:
-		for node in get_tree().get_nodes_in_group(&"combatants"):
-			if node is Soldier and String(node.name) == callsign:
-				return node
-		return null
 	await _wait_for(func() -> bool:
-		var d: Soldier = find.call(DRAGGED)
+		var d: Soldier = _combatant(DRAGGED)
 		return d != null and d.model.carry_shown().get("mode") == CharacterModel.DRAGGED, 3.0)
-	var dragger: Soldier = find.call(DRAGGER)
-	var dragged: Soldier = find.call(DRAGGED)
+	var dragger: Soldier = _combatant(DRAGGER)
+	var dragged: Soldier = _combatant(DRAGGED)
 	check(dragger != null and dragged != null and dragger.model.carry_net.get("mode") == CharacterModel.DRAG
 		and dragged.model.carry_shown().get("mode") == CharacterModel.DRAGGED and dragged.carried_by == null,
 		"a late joiner sees a drag that started before it joined, from replicated state alone")
