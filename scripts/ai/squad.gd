@@ -48,6 +48,10 @@ var formation := "wedge"
 var patrol: Array[Vector3] = []
 ## When a member was last fired upon (Soldier._now() seconds).
 var engaged_at := -1000.0
+## The squad's last frag: when (Soldier._now()) and where it went, so the rest don't throw at
+## the same spot at once (SquadAI._maybe_frag).
+var frag_at := -1000.0
+var frag_point := Vector3.ZERO
 
 
 ## The squad's living AI soldiers, in squad-slot order (then by name). Dead bodies keep no

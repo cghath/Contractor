@@ -90,6 +90,9 @@ const ADVANCE_STEP := 8.0
 const WORLD_MASK := 1
 const TURN_RATE := 7.0
 const GRENADE_COOLDOWN_S := 15.0
+## One frag per spot per squad within this long, over this spread (proposed).
+const SQUAD_FRAG_GAP_S := 6.0
+const SQUAD_FRAG_SPREAD_M := 6.0
 ## Points checked along a frag's arc before throwing it (_lob_clear).
 const LOB_CHECKS := 10
 const CASUALTY_REACH := 1.6
@@ -2212,7 +2215,13 @@ func _maybe_frag() -> void:
 			return  # friendlies (or civilians, people wave 4) too close to the blast
 	if not _lob_clear(body.camera.global_position + Vector3.UP * 0.2, body.threat_pos):
 		return  # it would hit a wall or roof on the way and bounce back
+	var now := Soldier._now()
+	if squad and now - squad.frag_at < SQUAD_FRAG_GAP_S and squad.frag_point.distance_to(body.threat_pos) < SQUAD_FRAG_SPREAD_M:
+		return  # a squadmate just threw one there: the whole squad dumped frags on one spot (roles, R0203)
 	_grenade_cd = GRENADE_COOLDOWN_S
+	if squad:
+		squad.frag_at = now
+		squad.frag_point = body.threat_pos
 	_throw(&"frag_grenade", body.threat_pos)
 
 

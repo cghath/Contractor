@@ -373,6 +373,12 @@ func _test_target() -> void:
 	check(SquadAI.of(gunner).focus == null, "a target that goes down is dropped")
 	_free(near)
 	_free(far)
+	# The stand-ins are gone, but the squad would still be in contact with where they stood (and
+	# fight it: frags into an empty spot it then walks through). Clear it like a real lull.
+	for s: Soldier in _squad():
+		s.threat_time = -1000.0
+		SquadAI.of(s)._last_contact = -1000.0
+	level.squad_for(&"friendly").engaged_at = -1000.0
 	_set_hold_fire(false)
 
 
@@ -510,7 +516,8 @@ func _test_callout_events() -> void:
 	_set_hold_fire(true)  # keep the stand-in alive while they take cover
 	callouts.sent.clear()
 	var hostile := _spawn_test_hostile("ContactTest", Vector3(0, 0.1, -1))
-	await _wait_for(func() -> bool: return not _said(&"contact").is_empty(), 3.0)
+	# Spotting takes time (queue 17): the one squadmate with a line to him may be facing away.
+	await _wait_for(func() -> bool: return not _said(&"contact").is_empty(), 8.0)
 	var contact := _said(&"contact")
 	check(not contact.is_empty() and contact[0].text.begins_with("Contact, front, ") and contact[0].text.ends_with(" m"),
 		"contact: %s" % (contact[0].text if not contact.is_empty() else "nothing"))
