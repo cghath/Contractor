@@ -1846,7 +1846,8 @@ func _local_controls(delta: float) -> void:
 	_hud.text = readout(seat)
 
 
-## One line for the HUD: the vehicle, the seat, speed, fuel, damage, the gun's rounds.
+## One line for the HUD: the vehicle, the seat, speed, fuel, damage, the gun's rounds, and
+## the get-out key when it's on (ControlOptions: the seat's menu has no Get out then).
 func readout(seat: int) -> String:
 	var parts := PackedStringArray(["%s, %s" % [display_name(), seat_name(seat)]])
 	if seat_kind(seat) == DRIVER:
@@ -1864,6 +1865,8 @@ func readout(seat: int) -> String:
 		parts.append("ON FIRE: GET OUT")
 	elif not can_drive() and seat_kind(seat) == DRIVER:
 		parts.append("Won't drive")
+	if ControlOptions.get_out_key():
+		parts.append("%s: get out" % ControlOptions.get_out_key_name())
 	return "  |  ".join(parts)
 
 

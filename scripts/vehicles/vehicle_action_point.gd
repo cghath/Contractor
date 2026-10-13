@@ -10,7 +10,8 @@ extends Node3D
 ##   the body you carry into a seat, pull a body (down or dead) out, check the vehicle.
 ## - Cargo: what's in the hold (take one), load something you carry or hold, refuel, check.
 ## - Service: repairs with the parts you carry, a new battery, refuel; on a wreck, salvage.
-## - Seat (inside, only for its occupant): get out, move to another seat, check the vehicle.
+## - Seat (inside, only for its occupant): get out (unless the get-out key does it:
+##   ControlOptions), move to another seat, check the vehicle.
 ## Rare entries carry a "group" (Check vehicle: InteractionMenu.MORE; "Pull out", "Repair") so
 ## the ring folds them into a submenu (InteractionMenu.grouped).
 
@@ -216,10 +217,13 @@ func _service_actions(actor: Soldier) -> Array[Dictionary]:
 	return out
 
 
+## Inside, for whoever sits here: Get out (left off when the get-out key is on:
+## ControlOptions; Captain, P0164 queue 8), Move to another seat, Check vehicle.
 func _seat_actions(_actor: Soldier) -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	var v := vehicle
-	out.append(_entry(&"exit", "Get out", func() -> void: v.request_exit.rpc_id(1)))
+	if not ControlOptions.get_out_key():
+		out.append(_entry(&"exit", "Get out", func() -> void: v.request_exit.rpc_id(1)))
 	var moves: Array[Dictionary] = []
 	for i in v.seat_count():
 		if i == seat_index or v.occupant(i) != null or v.seat_kind(i) == Vehicle.PILOT:

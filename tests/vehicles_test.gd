@@ -32,6 +32,8 @@ func _ready() -> void:
 	CompoundLevel.spawn_ai = false
 	Vehicle.local_input = false  # the tests drive by request
 	Vehicle.fire_rolls = false  # no chance fires: the fire test starts its own
+	ControlOptions._get_out = false  # the menu's Get out, whatever this machine's settings say (never saved)
+	ControlOptions._loaded = true
 	var args := OS.get_cmdline_user_args()
 	if "--vehicles-join" in args:
 		var i := args.find("--vehicles-join")
@@ -474,6 +476,7 @@ func _test_interaction() -> void:
 	check(v.seat_of(player) == 1, "Move to > Commander")
 	InteractionMenu.perform(player, _entry(InteractionMenu.actions_for(player, v.get_node(^"Seat1")), "Get out"))
 	check(v.seat_of(player) < 0, "Get out")
+	await _test_get_out_key(v)
 	await _test_door_declutter(v)
 	var cargo := v.get_node(^"Point3") as VehicleActionPoint
 	player.global_position = cargo.global_position + Vector3(0, -1.5, 0.8)
@@ -509,6 +512,41 @@ func _test_interaction() -> void:
 	player.inventory.strip()
 	player.inventory.take(&"m4a1")
 	v.server_set_zone(Vehicle.ZONE_ENGINE, 1.0)
+
+
+## The get-out key (Captain, P0164 queue 8: an option, with the menu decluttered for it): on,
+## V gets you out and the seat's menu has no Get out (the HUD line names the key); off, V does
+## nothing and Get out is in the menu.
+func _test_get_out_key(v: Vehicle) -> void:
+	print("The get-out key (an option)")
+	var bound := InputMap.action_get_events(ControlOptions.GET_OUT_ACTION)
+	check(bound.size() == 1 and bound[0] is InputEventKey and (bound[0] as InputEventKey).physical_keycode == KEY_V and ControlOptions.get_out_key_name() == "V",
+		"get_out is bound to V (%s)" % ControlOptions.get_out_key_name())
+	var clashes := InputMap.get_actions().filter(func(action: StringName) -> bool:  # the engine's ui_* text-field keys (Ctrl+V paste) aside
+		return action != ControlOptions.GET_OUT_ACTION and not String(action).begins_with("ui_") and InputMap.action_get_events(action).any(func(e: InputEvent) -> bool:
+			return e is InputEventKey and ((e as InputEventKey).physical_keycode == KEY_V or (e as InputEventKey).keycode == KEY_V)))
+	check(clashes.is_empty(), "and V does nothing else (%s)" % [clashes])
+	check(not ControlOptions.GET_OUT_DEFAULT and not ControlOptions.get_out_key(), "off unless the player turns it on")
+	var press := InputEventAction.new()
+	press.action = ControlOptions.GET_OUT_ACTION
+	press.pressed = true
+	check(v.server_enter(player, 0), "back in the driver's seat")
+	player.player_input._unhandled_input(press)
+	await get_tree().physics_frame
+	check(v.seat_of(player) == 0, "off: V does nothing")
+	ControlOptions._get_out = true
+	var labels: Array = InteractionMenu.actions_for(player, v.get_node(^"Seat0")).map(func(a: Dictionary) -> String: return a.label)
+	check(labels == ["Move to", "Check vehicle"], "on: the seat's menu has no Get out (%s)" % [labels])
+	check(v.readout(0).ends_with("V: get out"), "and the HUD line names the key (%s)" % v.readout(0))
+	var pause := player.player_input.pause_menu
+	pause.open()
+	check(pause.get_out_toggle.button_pressed and pause.get_out_toggle.text.contains("with V"), "the Escape menu shows the option, on (%s)" % pause.get_out_toggle.text)
+	pause.close()
+	player.player_input._unhandled_input(press)
+	await get_tree().physics_frame
+	check(v.seat_of(player) < 0 and Vehicle.ride_of(player) == null, "on: V gets you out")
+	ControlOptions._get_out = false
+	check(not v.readout(0).contains("get out"), "off: the HUD line doesn't mention it")
 
 
 ## A door's ring (Captain, P0164 queue 8): Get in for each kind of seat it has free, no greyed
