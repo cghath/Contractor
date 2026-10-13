@@ -107,10 +107,13 @@ const ENTRY_MAX := 4
 ## Searching: pairs go SEARCH_RING_M round the last known position.
 const SEARCH_RING_M := 8.0
 const SEARCH_S := 45.0
-## A squad's way of fighting: added to the option scores.
+## A squad's way of fighting (Doctrine ids: the squad's, else its side's): added to the option
+## scores. Contractors fight the drill and look after their own; regulars flank readily;
+## insurgents rush, hole up and melt away, and leave their wounded.
 const DOCTRINES := {
-	&"squad": {"flank": 0.05, "assault": 0.0, "clear": 0.0, "defend": 0.0, "break": 0.0, "casualty": 0.05, "search": 0.0},
-	&"insurgent": {"flank": -0.1, "assault": 0.08, "clear": -0.05, "defend": 0.1, "break": 0.05, "casualty": -0.15, "search": 0.1},
+	Doctrine.PMC: {"flank": 0.05, "assault": 0.0, "clear": 0.0, "defend": 0.0, "break": 0.0, "casualty": 0.05, "search": 0.0},
+	Doctrine.REGULAR: {"flank": 0.08, "assault": 0.03, "clear": 0.03, "defend": 0.03, "break": -0.03, "casualty": 0.0, "search": 0.05},
+	Doctrine.INSURGENT: {"flank": -0.1, "assault": 0.08, "clear": -0.05, "defend": 0.1, "break": 0.05, "casualty": -0.15, "search": 0.1},
 }
 ## Hostile squads in a hot zone flank this much less at no coordination (EnemyResponse).
 const UNCOORDINATED_FLANK := 0.3
@@ -159,8 +162,8 @@ func think(now: float) -> void:
 func doctrine() -> Dictionary:
 	var name := squad.doctrine
 	if name == &"":
-		name = &"squad" if squad.faction == &"friendly" else &"insurgent"
-	var d: Dictionary = DOCTRINES.get(name, DOCTRINES[&"squad"]).duplicate()
+		name = Doctrine.default_for(squad.faction)
+	var d: Dictionary = DOCTRINES.get(name, DOCTRINES[Doctrine.PMC]).duplicate()
 	if squad.faction != &"friendly" and squad.is_inside_tree():
 		var response := EnemyResponse.of(squad)
 		if response:
@@ -210,7 +213,6 @@ func assess() -> Dictionary:
 	for ai in up:
 		centre += ai.body.global_position
 		sit.suppression += ai.body.suppression / up.size()
-		sit.morale = minf(sit.morale, 1.0) if false else sit.morale
 		if ai.in_contact():
 			sit.contact = true
 		if ai._at_cover():

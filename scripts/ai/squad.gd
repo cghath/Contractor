@@ -81,6 +81,9 @@ var tactics: SquadTactics
 ## How this squad fights (SquadTactics.DOCTRINES); empty: by its side (the friendly squad's
 ## drills, or the insurgents').
 var doctrine: StringName = &""
+## "Bring casualties here" (order_ccp): where the squad's carriers lay their casualties, a
+## point or a soldier to bring them to (the ordering player, wherever he goes); null for none.
+var ccp: Variant = null
 ## The squad's last screening smoke (SquadAI._screened): when and where it went up.
 var screen_at := -1000.0
 var screen_point := Vector3.ZERO
@@ -381,6 +384,128 @@ func order_fall_back(from: Soldier, point: Vector3, names := PackedStringArray()
 	return ""
 
 
+## The command menu's orders (Captain, P0164 queue 12; thin wrappers over the tactics and the
+## units' own skills), by command string. Returns "" when given, why not otherwise, or "?"
+## for a command that isn't one of these (command() handles the rest).
+##  suppress, suppress:known, bound, garrison, clear, take_cover, fall_back: the tactic orders.
+##  watch: face the sector at `point` and engage there. stance:<up|crouch|prone|auto>.
+##  heal: patch yourselves up now. give_ammo: the nearest selected with your ammunition brings
+##  you magazines. launcher_out: shoulder launchers and look for targets for them.
+##  treat:<name>: the selected (a medic first) treats that casualty. ccp: bring casualties to
+##  `point`; ccp_me: to me; ccp_off: stop. drop_packs: packs off where they stand (lighter,
+##  faster); pick_packs: each goes back for his own.
+func order_command(from: Soldier, cmd: String, point: Vector3, names := PackedStringArray()) -> String:
+	var parts := cmd.split(":", true, 1)
+	var arg := parts[1] if parts.size() > 1 else ""
+	match parts[0]:
+		"suppress":
+			return order_suppress(from, Vector3.INF if arg == "known" else point, names)
+		"bound":
+			return order_bound(from, point, names)
+		"garrison":
+			return order_garrison(from, point, names)
+		"clear":
+			return order_clear(from, point, names)
+		"take_cover":
+			return order_take_cover(from, names)
+		"fall_back":
+			return order_fall_back(from, Vector3.INF, names)
+		"watch":
+			leader = from
+			var units := _able(names)
+			for ai in units:
+				ai.give_tactic({"kind": &"watch", "point": point})
+			return "" if not units.is_empty() else "Nobody selected can"
+		"stance":
+			if not SquadAI.STANCE_ORDERS.has(arg):
+				return "?"
+			var units := _able(names)
+			for ai in units:
+				ai.stance_order = SquadAI.STANCE_ORDERS[arg]
+			return "" if not units.is_empty() else "Nobody selected can"
+		"heal":
+			var hurt := _able(names).filter(func(ai: SquadAI) -> bool: return not ai._self_task().is_empty())
+			for ai: SquadAI in hurt:
+				ai.order_heal()
+			return "" if not hurt.is_empty() else "Nobody selected has wounds they can treat"
+		"give_ammo":
+			return order_give_ammo(from, names)
+		"launcher_out":
+			var ready := _able(names).filter(func(ai: SquadAI) -> bool: return LauncherAI.order_ready(ai.body))
+			return "" if not ready.is_empty() else "Nobody selected has a launcher"
+		"treat":
+			return order_treat(from, arg, names)
+		"drop_packs":
+			var dropped := _able(names).filter(func(ai: SquadAI) -> bool: return ai.drop_pack())
+			return "" if not dropped.is_empty() else "Nobody selected wears a pack"
+		"pick_packs":
+			var going := _able(names).filter(func(ai: SquadAI) -> bool: return not ai.dropped_pack.is_empty())
+			for ai: SquadAI in going:
+				ai.give_tactic({"kind": &"pick_pack"})
+			return "" if not going.is_empty() else "Nobody selected dropped a pack"
+		"ccp":
+			ccp = point
+			return ""
+		"ccp_me":
+			ccp = from
+			return ""
+		"ccp_off":
+			ccp = null
+			return ""
+	return "?"
+
+
+## "Give me ammo": the nearest selected unit carrying magazines of `from`'s weapon brings him some.
+func order_give_ammo(from: Soldier, names: PackedStringArray) -> String:
+	var weapon := from.active_weapon()
+	if weapon == null or weapon.type != "weapon":
+		return "Have a rifle in your hands"
+	var ammo := Soldier._ammo_of(weapon)
+	var best: SquadAI = null
+	for ai in _able(names):
+		if ai.body.inventory.count_of(ammo) > 0 and (best == null or ai.body.global_position.distance_to(from.global_position) < best.body.global_position.distance_to(from.global_position)):
+			best = ai
+	if best == null:
+		return "Nobody selected carries %s" % ItemDB.get_item(ammo).name if ItemDB.has_item(ammo) else "Nobody selected has any"
+	best.give_tactic({"kind": &"give_ammo", "who": from, "ammo": ammo})
+	return ""
+
+
+## "Treat that casualty": the selected unit best fit for it (a medic first, else the nearest)
+## takes over casualty `callsign`.
+func order_treat(from: Soldier, callsign: String, names: PackedStringArray) -> String:
+	var c: Soldier = null
+	for s in get_tree().get_nodes_in_group(&"combatants"):
+		if s is Soldier and String(s.name) == callsign:
+			c = s
+	if c == null or c.vitals.is_dead() or c.faction != from.faction:
+		return "Look at a wounded squadmate"
+	if not SquadAI.needs_help(c):
+		return "%s doesn't need treatment" % c.display_name()
+	var best: SquadAI = null
+	for ai in _able(names):
+		if ai.body == c:
+			continue
+		var medic: bool = ai.body.role == Roles.MEDIC
+		var d := ai.body.global_position.distance_to(c.global_position)
+		if best == null or (medic and best.body.role != Roles.MEDIC) or (medic == (best.body.role == Roles.MEDIC) and d < best.body.global_position.distance_to(c.global_position)):
+			best = ai
+	if best == null:
+		return "Nobody selected can"
+	best._take_casualty(c)
+	best._think_cd = 0.0
+	return ""
+
+
+## Where the squad's carriers lay their casualties now (ccp), or null.
+func ccp_point() -> Variant:
+	if ccp is Vector3:
+		return ccp
+	if ccp != null and is_instance_valid(ccp) and (ccp as Soldier).vitals.is_up():
+		return (ccp as Soldier).global_position
+	return null
+
+
 ## The named units' brains that can take a tactic order: AI, up.
 func _able(names: PackedStringArray) -> Array[SquadAI]:
 	var out: Array[SquadAI] = []
@@ -399,18 +524,6 @@ func command(from: Soldier, cmd: String, point: Vector3, names := PackedStringAr
 	var parts := cmd.split(":", true, 1)
 	var arg := parts[1] if parts.size() > 1 else ""
 	match parts[0]:
-		"suppress":
-			return order_suppress(from, Vector3.INF if arg == "known" else point, names) == ""
-		"bound":
-			return order_bound(from, point, names) == ""
-		"garrison":
-			return order_garrison(from, point, names) == ""
-		"clear":
-			return order_clear(from, point, names) == ""
-		"take_cover":
-			return order_take_cover(from, names) == ""
-		"fall_back":
-			return order_fall_back(from, Vector3.INF, names) == ""
 		"formation":
 			if not FORMATIONS.has(arg):
 				return false
