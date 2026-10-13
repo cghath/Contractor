@@ -178,7 +178,10 @@ func _test_senses() -> void:
 	SquadAI.server_heard_shot(shooter, shooter.global_position, false)
 	var off := _flat(alpha.threat_pos, shooter.global_position)
 	check(alpha.threat_time > before and off <= SquadAI.HEARD_ERROR_PER_100M * 0.85, "a plain one is heard: contact toward it (%.1f m off)" % off)
-	await _frames(2)
+	# Contact (SquadAI._last_contact) is taken up in the AI's physics step, and a process frame
+	# can pass with no physics step at all (0 in 52 of 300 two-frame windows here, R0125): wait
+	# for physics steps, not frames (CI run 38422752494 failed this check after two frames).
+	await _physics_frames(2)
 	check(SquadAI.of(alpha).in_contact(), "and Alpha is in contact (%s)" % alpha.ai_status)
 	shooter.queue_free()
 	_clear_contact()
@@ -679,6 +682,13 @@ func _wait_until(cond: Callable, timeout: float) -> bool:
 func _frames(n: int) -> void:
 	for i in n:
 		await get_tree().process_frame
+
+
+## Waits until `n` physics steps have begun, so at least n - 1 have run in full (every AI's
+## _physics_process included).
+func _physics_frames(n: int) -> void:
+	for i in n:
+		await get_tree().physics_frame
 
 
 func _seconds(s: float) -> void:

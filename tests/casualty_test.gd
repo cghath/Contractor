@@ -747,8 +747,16 @@ func _test_engagement() -> void:
 			return not is_instance_valid(delta.carried_by) and _flat(delta.global_position, move_to) <= SquadAI.LAY_DOWN_M + SquadAI.LAY_NEAR_M, 30.0)
 		check(laid and bearer_ai.casualty == delta, "ordered to move while carrying him, %s lays him down near the order point (%.1f m) and stays (%s)"
 			% [_name(bearer), _flat(delta.global_position, move_to), bearer.ai_status])
-		await _seconds(2.0)
-		check(not is_instance_valid(delta.carried_by), "and doesn't pick him up again while the order stands")
+		# He lies where his ragdoll settled (body_point), up to ~3 m from the lay spot: the bearer
+		# must take that as laid there, not lift him again to bring him closer (R0123-R0125).
+		var lifted_by := []
+		await _wait_until(func() -> bool:
+			if is_instance_valid(delta.carried_by) and delta.carried_by not in lifted_by:
+				lifted_by.append(delta.carried_by)
+			return false, 2.0)
+		var lay: Variant = bearer_ai._lay_spot
+		check(lifted_by.is_empty() and not is_instance_valid(delta.carried_by), "and doesn't pick him up again while the order stands (lifted by %s; lying %s m from the lay spot)"
+			% [lifted_by.map(func(s: Soldier) -> String: return _name(s)), ("%.1f" % _flat(delta.body_point(), lay)) if lay != null else "-"])
 		bearer_ai.on_order(Squad.Order.FOLLOW, player.global_position)
 	# He comes round on his own (the wound model decides when; the test stands in for it).
 	delta.vitals.server_reset_health()

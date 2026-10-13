@@ -184,6 +184,12 @@ const STAY_WITH_M := 20.0
 ## them down in; lying within LAY_NEAR_M of it counts as laid down there (proposed).
 const LAY_DOWN_M := 8.0
 const LAY_NEAR_M := 2.0
+## A body laid at the lay spot lies within LAID_M of it, measured to where it lies
+## (Soldier.body_point): the bearer lowers it once within 1 m of the spot, 0.8 m in front of
+## him (Soldier._put_down_spot), and its ragdoll's chest settles some 1.3 m from the capsule.
+## Measured against LAY_NEAR_M alone it often read as not there (2.2-2.6 m), and the bearer
+## lifted the casualty again to bring him closer, over and over (casualty R0123-R0125).
+const LAID_M := LAY_NEAR_M + 1.5
 ## The care order once safe, by care_needed() kind: massive bleeding, airway, tension (the needle), chest, the
 ## pelvic binder (a broken pelvis bleeds heavily inside), other bleeding, circulation (IV or IO, a bag, a pressure bag), restarting a heart
 ## (epinephrine, shocks, CPR), the heart rate, fractures, burns, pain, epinephrine's wake-up roll
@@ -1585,7 +1591,7 @@ func _should_carry() -> bool:
 	var ccp: Variant = squad.ccp_point() if squad else null
 	if ccp != null and _friendly():
 		return casualty.body_point().distance_to(ccp) > LAY_NEAR_M + 1.0  # "Bring casualties here"
-	if _friendly() and order == Squad.Order.MOVE and _lay_spot != null and _flat_between(casualty.body_point(), _lay_spot) <= LAY_NEAR_M + 1.0:
+	if _friendly() and order == Squad.Order.MOVE and _lay_spot != null and _lies_at(_lay_spot):
 		return false  # laid where the order sent them: they stay while it stands (queue 16)
 	if 1.0 - casualty.vitals.blood_fraction() >= WoundModel.UNCONSCIOUS_LOST:
 		return true
@@ -1648,8 +1654,7 @@ func _care_carry(contact: bool) -> void:
 			var spot: Variant = find_cover(goal, LAY_DOWN_M)
 			_lay_spot = spot if spot != null else NavigationServer3D.map_get_closest_point(body.get_world_3d().navigation_map, goal)
 		var lay: Vector3 = _lay_spot
-		var at := casualty.body_point()
-		if body.carrying != casualty and Vector2(at.x - lay.x, at.z - lay.z).length() <= LAY_NEAR_M:
+		if body.carrying != casualty and _lies_at(lay):
 			_has_destination = false  # laid down where ordered: stay with them
 			body.want_crouch = true
 			return
@@ -3045,6 +3050,13 @@ func _stop() -> void:
 
 static func _flat_between(a: Vector3, b: Vector3) -> float:
 	return Vector2(a.x - b.x, a.z - b.z).length()
+
+
+## Whether the casualty lies at `spot` (a lay spot): where its body lies, within LAID_M. The
+## one test for "laid down there", so the bearer who stays with them (_care_carry) and the
+## carry decision (_should_carry) never disagree about it.
+func _lies_at(spot: Vector3) -> bool:
+	return _flat_between(casualty.body_point(), spot) <= LAID_M
 
 
 func _flat_distance(point: Vector3) -> float:
