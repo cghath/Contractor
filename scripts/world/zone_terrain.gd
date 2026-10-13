@@ -44,6 +44,10 @@ const GRASS := Color("5f6a3c")
 const DRY := Color("7d7748")
 const EARTH := Color("7f6d4f")
 const ROCK := Color("6f6a60")
+## Ground within this distance of a road's line is tinted toward the road colour (full at
+## ROAD_CORE_M, fading out by ROAD_VERGE_M).
+const ROAD_CORE_M := 3.0
+const ROAD_VERGE_M := 7.0
 
 var size_m := 2048.0
 var seed_value := 0
@@ -73,9 +77,14 @@ var c_earth := EARTH
 var c_rock := ROCK
 var c_sand := Color("c2b583")
 var c_apron := GRASS
+## Roads (ZoneRoads): packed earth, the palette's "road" or a darker earth.
+var c_road := EARTH
 var sand_below_m := -1000.0
 var rock_above_m := 1.0e9
 var _bed := PackedByteArray()  # riverbed weight (0..255) per height
+## The def's "roads" as [a, b, bounds] (Vector2, Vector2, Rect2 grown by ROAD_VERGE_M): the
+## ground under and beside them takes the road colour, so they show past ZoneRoads.SEE_M.
+var _roads: Array = []
 
 var _half := 0.0
 var _visuals_built := false
@@ -97,6 +106,11 @@ func generate(def: Dictionary, flat: Array) -> void:
 	_half = size_m * 0.5
 	points = int(round(size_m / CELL_M)) + 1
 	_read_palette()
+	_roads.clear()
+	for road: Array in def.get("roads", []):
+		var a := Vector2(float(road[0][0]), float(road[0][1]))
+		var b := Vector2(float(road[1][0]), float(road[1][1]))
+		_roads.append([a, b, Rect2(a, Vector2.ZERO).expand(b).grow(ROAD_VERGE_M)])
 	var sea: Dictionary = preset.get("sea", {})
 	sea_side = int(def.get("sea_side", -1)) if not sea.is_empty() else -1
 	sea_m = float(def.get("sea_m", 0.0)) if sea_side >= 0 else 0.0
@@ -197,6 +211,7 @@ func _read_palette() -> void:
 	c_rock = Color(String(p.get("rock", "6f6a60")))
 	c_sand = Color(String(p.get("sand", "c2b583")))
 	c_apron = Color(String(p.get("apron", String(p.get("grass", "5f6a3c")))))
+	c_road = Color(String(p["road"])) if p.has("road") else c_earth.darkened(0.15)
 	var g: Dictionary = preset.get("ground", {})
 	sand_below_m = float(g.get("sand_below_m", -1000.0))
 	rock_above_m = float(g.get("rock_above_m", 1.0e9))
@@ -510,7 +525,20 @@ func _ground_colour(i: int, j: int, n: Vector3) -> Color:
 		colour = colour.lerp(c_sand, clampf(float(_bed[i + j * points]) / 255.0 * 1.6 - 0.3, 0.0, 0.85) * (1.0 - steep))
 	if sea_side >= 0 and sand_below_m > -100.0 and sea_edge_distance(p.x, p.y) < sea_m + SEA_MARGIN_M + 40.0:
 		colour = colour.lerp(c_sand, smoothstep(sea_level + sand_below_m, sea_level, h) * (1.0 - steep * 0.5))
-	return colour
+	return colour.lerp(c_road, road_weight(p.x, p.y) * 0.8)
+
+
+## How much the ground at (x, z) is road: 1 on the line out to ROAD_CORE_M, 0 past
+## ROAD_VERGE_M.
+func road_weight(x: float, z: float) -> float:
+	var p := Vector2(x, z)
+	var best := 0.0
+	for r: Array in _roads:
+		if not (r[2] as Rect2).has_point(p):
+			continue
+		var d := Geometry2D.get_closest_point_to_segment(p, r[0], r[1]).distance_to(p)
+		best = maxf(best, 1.0 - smoothstep(ROAD_CORE_M, ROAD_VERGE_M, d))
+	return best
 
 
 func v_x(i: int) -> float:

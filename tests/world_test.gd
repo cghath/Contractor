@@ -565,6 +565,28 @@ func _test_hot_layout() -> void:
 			and ZoneDef.generate_hot(seed).hash() == hot.hash(), "seed %d: roads to every outpost, %d patrol routes, the same every time" % [seed, (hot.patrols as Array).size()])
 	var spec := MissionRegistry.zone_def("ridge_hot")
 	check(spec.get("kind", "") == "hot" and is_equal_approx(float(spec.size_m), 4096.0), "the campaign's hot zones are 16 km² hot layouts")
+	# Terrain visual pass: the roads are drawn, on the ground and off the module pads, and the
+	# ground along them takes the road colour (seen past ZoneRoads.SEE_M).
+	var def := ZoneDef.normalize(ZoneDef.generate_hot(4409))
+	var t := _preset_terrain(def)
+	var roads := ZoneRoads.new()
+	roads.build(t, def)
+	var on_ground := true
+	var off_pads := true
+	for v in roads.vertices:
+		on_ground = on_ground and absf(v.y - t.height_at(v.x, v.z) - ZoneRoads.LIFT_M) < 0.01
+		var inside := t.pads.any(func(pad: Array) -> bool:
+			return (pad[0] as Rect2).grow(-(ZoneRoads.WIDTH_M * 0.5 + ZoneRoads.STEP_M)).has_point(Vector2(v.x, v.z)))
+		off_pads = off_pads and not inside
+	var r0: Array = def.roads[0]
+	var mid := (Vector2(r0[0][0], r0[0][1]) + Vector2(r0[1][0], r0[1][1])) * 0.5
+	var across := (Vector2(r0[1][0], r0[1][1]) - Vector2(r0[0][0], r0[0][1])).normalized().orthogonal()
+	check(roads.segments == (def.roads as Array).size() and on_ground and off_pads,
+		"hot zone roads drawn: %d of %d, on the ground (%.2f m up), not over the module pads" % [roads.segments, (def.roads as Array).size(), ZoneRoads.LIFT_M])
+	check(is_equal_approx(t.road_weight(mid.x, mid.y), 1.0) and t.road_weight(mid.x + across.x * 20.0, mid.y + across.y * 20.0) == 0.0,
+		"the ground on a road takes its colour, and 20 m off it doesn't (%.2f, %.2f)" % [t.road_weight(mid.x, mid.y), t.road_weight(mid.x + across.x * 20.0, mid.y + across.y * 20.0)])
+	roads.free()
+	t.free()
 
 
 # --- Terrain presets ----------------------------------------------------------------------------
