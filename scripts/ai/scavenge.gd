@@ -360,7 +360,7 @@ static func _swap(s: Soldier, dead: Soldier, pick: Dictionary) -> bool:
 		return false
 	var old := mine.unequip(pick.into) if mine.slots[pick.into] != &"" else {}
 	var level := CompoundLevel.current(dead)
-	var lay_down := not old.is_empty() and pick.into in Inventory.WEAPON_SLOTS and level != null
+	var lay_down: bool = not old.is_empty() and pick.into in Inventory.WEAPON_SLOTS and level != null
 	if not mine.slots[pick.into] == &"" or mine.take(taken.id, 1, taken.get("state", {})) != 1 \
 			or (not old.is_empty() and not lay_down and theirs.take(old.id, 1, old.get("state", {})) != 1):
 		theirs.net_state = before_theirs
