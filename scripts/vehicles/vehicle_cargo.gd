@@ -18,6 +18,7 @@ var max_kg := 1500.0
 func _init(p_litres := 1000.0, p_kg := 1500.0) -> void:
 	super._init()
 	capacity_l = p_litres
+	stows_loaded_packs = true
 	max_kg = p_kg
 	name = "Cargo"
 

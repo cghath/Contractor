@@ -368,8 +368,8 @@ static func _submenu(def: Dictionary, actor: Soldier, target: Node) -> Array[Dic
 ## Mag Pouch"), then each container's entries, pouches first ("2x Mag pouch: 7.62 Magazine x2",
 ## "Vest: 5.56 Magazine x4"). Each is {"label", "where" (a slot, pouch container or
 ## container), "index" (-1 for a slot or an attachment), "item" (its id), "disabled"}: a
-## carrier or pack still holding things is greyed out until it's empty (pouches can stay on
-## the carrier; they go with it). Past MAX_LOOT_ENTRIES the last line counts the rest.
+## carrier still holding things is greyed out until it's empty (pouches can stay on the
+## carrier; they go with it); a pack comes off loaded. Past MAX_LOOT_ENTRIES the last line counts the rest.
 static func body_items(body: Soldier) -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	var inv := body.inventory
@@ -378,8 +378,7 @@ static func body_items(body: Soldier) -> Array[Dictionary]:
 		if id == &"":
 			continue
 		var item := ItemDB.get_item(id)
-		var full: bool = (slot == &"backpack" and not inv.containers[&"backpack"].is_empty()) \
-			or (slot == &"vest" and (not inv.containers[&"vest"].is_empty() or Inventory.PLATE_SLOTS.any(func(s: StringName) -> bool: return inv.slots[s] != &"")))
+		var full: bool = (slot == &"vest" and (not inv.containers[&"vest"].is_empty() or Inventory.PLATE_SLOTS.any(func(s: StringName) -> bool: return inv.slots[s] != &"")))
 		out.append({"label": "%s: %s%s" % [InventoryScreen.SLOT_NAMES.get(slot, String(slot)), item.name, _rounds_text(inv.state_of(slot))],
 			"where": slot, "index": -1, "item": id, "disabled": "Take what's in it first" if full else ""})
 	for p: Dictionary in inv.attach_points():

@@ -341,6 +341,28 @@ func _test_molle_host() -> void:
 	if dropped:
 		player._server_interact.rpc_id(1, dropped.get_path())
 		check(inv.slots[&"vest"] == &"plate_carrier" and inv.attachment_count() == 2 and inv.units_in(&"molle:mag_3") == 2, "picked up again, pouches, magazines and all")
+	# Packs swap (Captain, P0164): picking one up drops the worn one, still loaded.
+	inv.insert_entry(&"backpack", {"id": &"pressure_bandage", "count": 3})
+	var in_assault := inv.units_in(&"backpack")
+	level.server_spawn_dropped(&"ruck_45", 1, player.global_position + Vector3(0, 0.5, -0.8), {})
+	await _frames(3)
+	var ruck: WorldItem = null
+	for node in get_tree().get_nodes_in_group(WorldItem.GROUP):
+		if node.item_id == &"ruck_45" and not node.is_queued_for_deletion():
+			ruck = node
+	if ruck:
+		player._server_interact.rpc_id(1, ruck.get_path())
+	await _frames(3)
+	var old_pack: WorldItem = null
+	for node in get_tree().get_nodes_in_group(WorldItem.GROUP):
+		if node.item_id == &"assault_pack" and not node.is_queued_for_deletion():
+			old_pack = node
+	check(inv.slots[&"backpack"] == &"ruck_45" and old_pack != null and old_pack.state.get("held", []).size() > 0,
+		"picking up a Ruck swaps packs: the Assault Pack lies there, still loaded (%d inside before)" % in_assault)
+	if old_pack:
+		player._server_interact.rpc_id(1, old_pack.get_path())
+		await _frames(3)
+		check(inv.slots[&"backpack"] == &"assault_pack" and inv.units_in(&"backpack") == in_assault, "and swapping back brings its contents (%d)" % inv.units_in(&"backpack"))
 	inv.strip()
 
 
@@ -368,6 +390,44 @@ func _test_pack_points() -> void:
 	check(inv.equip_attachment(&"pack_top_1") and inv.slots[&"launcher"] == &"at4" and inv.attachment(&"pack_top_1").is_empty(),
 		"a packed AT4 goes onto the shoulder")
 	check(not inv.equip_attachment(&"pack_top_2"), "not while one is already there")
+	inv.free()
+	_test_pack_rules()
+
+
+## Captain (P0164): a pack comes off and goes on loaded; a loaded pack never goes in the kit;
+## a pack as big as the worn one (or bigger) goes in only rolled; the Assault Pack fits a
+## Ruck unrolled.
+func _test_pack_rules() -> void:
+	print("Packs: loaded, rolled, packed inside another")
+	var inv := Inventory.new()
+	inv.take(&"assault_pack")
+	inv.insert_entry(&"backpack", {"id": &"mag_556", "count": 3})
+	inv.insert_entry(&"backpack", {"id": &"pressure_bandage", "count": 2})
+	var inside := inv.units_in(&"backpack")
+	var off := inv.unequip(&"backpack")
+	check(not off.is_empty() and off.state.get("held", []).size() > 0 and inv.containers[&"backpack"].is_empty(),
+		"a loaded pack comes off with its contents in its state")
+	check(inv.take(off.id, 1, off.state) == 1 and inv.units_in(&"backpack") == inside and not inv.state_of(&"backpack").has("held"),
+		"and goes back on with them (%d of %d)" % [inv.units_in(&"backpack"), inside])
+	var assault := ItemDB.get_item(&"assault_pack")
+	var ruck := ItemDB.get_item(&"ruck_45")
+	check(inv.room_for(&"backpack", ruck) == 0 and inv.pack_problem(&"backpack", ruck).begins_with("Roll"), "a bigger pack goes into a smaller one only rolled")
+	check(inv.room_for(&"backpack", assault) == 0, "the same size only rolled")
+	check(inv.room_for(&"backpack", assault, {"rolled": true}) > 0, "a rolled Assault Pack fits an Assault Pack")
+	check(inv.room_for(&"backpack", ruck, {"held": [{"id": &"mag_556", "count": 1}]}) == 0 and inv.room_for(&"vest", ruck, {"held": [{"id": &"mag_556", "count": 1}]}) == 0,
+		"a loaded pack never goes in")
+	inv.strip()
+	inv.take(&"ruck_45")
+	check(inv.room_for(&"backpack", assault) > 0, "the Assault Pack fits a Ruck unrolled")
+	check(inv.insert_entry(&"backpack", {"id": &"ruck_45", "count": 1}) == false, "a second Ruck doesn't, unrolled")
+	inv.insert_entry(&"backpack", {"id": &"assault_pack", "count": 1})
+	var i := _index_in(inv, &"backpack", &"assault_pack")
+	var used := inv.used(&"backpack")
+	check(inv.set_rolled(&"backpack", i, true) and inv.used(&"backpack") < used and Inventory.unit_volume(assault, {"rolled": true}) == 1.5,
+		"rolling it up makes it smaller (%.1f L)" % inv.used(&"backpack"))
+	check(inv.roll_problem(&"backpack", i, true) != "", "it can't be rolled twice")
+	check(inv.set_rolled(&"backpack", i, false) and not inv.containers[&"backpack"][i].has("state"), "and unrolls back to a plain pack")
+	inv.strip()
 	inv.free()
 
 

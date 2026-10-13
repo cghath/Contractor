@@ -642,6 +642,9 @@ func _actions_for(src: Dictionary) -> Array:
 				out.append(["Use", use])
 			if Inventory.is_loose_rounds(item) and inv.loadable_rounds(item.id) > 0:
 				out.append(["Load magazines", load_magazines.bind(item.id)])
+			if Inventory.is_pack(item):
+				var rolled: bool = list[i].get("state", {}).get("rolled", false)
+				out.append(["Unroll" if rolled else "Roll up", _action.bind("unroll_entry" if rolled else "roll_entry", c, i, &"", &"")])
 			for other in inv.search_containers():
 				if other != c and inv.room_for(other, item, list[i].get("state", {})) > 0:
 					out.append(["> " + player.container_name(other), _action.bind("move_entry", c, i, &"", other)])
@@ -1135,6 +1138,8 @@ static func _detail(item: ItemData, state: Dictionary) -> String:
 		return "  [%s]" % Inventory.kit_text(item, state)  # what's left in the kit
 	if state.has("rounds") and item.type == "weapon":
 		return "  [%d loaded]" % int(state.rounds)
+	if state.get("rolled", false):
+		return "  [rolled]"
 	if state.has("rounds") and int(state.rounds) < item.magazine_rounds():
 		return "  [%d/%d rds]" % [int(state.rounds), item.magazine_rounds()]
 	if item.is_voxel_armor():

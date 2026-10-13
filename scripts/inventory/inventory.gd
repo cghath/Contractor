@@ -22,6 +22,12 @@ extends Node
 ## pouch_container(point) ("molle:mag_1"), and come before the vest, pockets and backpack
 ## in search_containers(): reloads pull from mag pouches first, and what a pouch accepts
 ## goes into it first when picked up.
+##
+## Backpacks (Captain, P0164): a pack comes off with what's in it (the contents travel in its
+## state's "held", like a pouch's) and goes back on with them. A loaded pack never goes into
+## a container; an empty one fits by volume, and a pack as big as the worn one or bigger only
+## once it's rolled (set_rolled: smaller, its stats' "rolled_l"). Wearing a rolled pack
+## unrolls it.
 
 signal changed
 
@@ -56,6 +62,8 @@ var slots: Dictionary = {}       # slot -> item id, or &""
 var slot_state: Dictionary = {}  # slot -> Dictionary (empty if the item has no state)
 var containers: Dictionary = {}  # container -> Array of {"id", "count", "state"?}
 var hands: StringName = &""      # two-handed carry
+## A vehicle hold (VehicleCargo) carries packs loaded; a body never stows one.
+var stows_loaded_packs := false
 
 
 func _init() -> void:
@@ -99,6 +107,8 @@ func room_for(container: StringName, item: ItemData, state := {}) -> int:
 	if item == null:
 		return 0
 	var each := unit_volume(item, state)
+	if pack_problem(container, item, state) != "":
+		return 0
 	if is_pouch_container(container):
 		var pouch := pouch_item(container)
 		if pouch == null or not pouch_accepts(pouch, item):
@@ -121,6 +131,8 @@ func room_for(container: StringName, item: ItemData, state := {}) -> int:
 ## Litres one unit of `item` takes up stowed, with its state: a pouch is as big as what it
 ## holds (an empty one folds down to its own volume_l), a carrier adds its pouches.
 static func unit_volume(item: ItemData, state := {}) -> float:
+	if state.get("rolled", false):
+		return float(item.stats.get("rolled_l", item.volume_l))
 	var each := maxf(item.volume_l, held_volume(state.get("held", [])))
 	var molle: Dictionary = state.get("molle", {})
 	for point: Variant in molle:
@@ -233,8 +245,7 @@ func take(id: StringName, count := 1, state := {}) -> int:
 	var taken := 0
 	var slot := _free_slot_for(item)
 	if slot != &"":
-		slots[slot] = id
-		slot_state[slot] = state.duplicate(true) if not state.is_empty() else item.default_state()
+		_wear(slot, item, state)
 		taken = 1
 	# Pouches and knives go onto free attach points of the worn carrier that they fit.
 	while taken < count and is_attachable(item):
@@ -262,17 +273,19 @@ func release_hands() -> StringName:
 
 
 ## Host only. Removes the item in `slot` and returns {"id", "state"}, or {} if the slot
-## is empty or can't be emptied (a vest still holding plates or pouch contents, a
-## backpack that isn't empty).
+## is empty or can't be emptied (a vest still holding plates or pouch contents). A backpack
+## comes off loaded: what's in it goes in its state's "held".
 func unequip(slot: StringName) -> Dictionary:
 	var id: StringName = slots.get(slot, &"")
 	if id == &"":
 		return {}
 	if slot == &"vest" and (PLATE_SLOTS.any(func(s: StringName) -> bool: return slots[s] != &"") or not containers[&"vest"].is_empty()):
 		return {}
-	if slot == &"backpack" and not containers[&"backpack"].is_empty():
-		return {}
 	var removed := {"id": id, "state": slot_state.get(slot, {})}
+	if slot == &"backpack" and not containers[&"backpack"].is_empty():
+		removed.state = removed.state.duplicate(true)
+		removed.state["held"] = containers[&"backpack"].duplicate(true)
+		containers[&"backpack"].clear()
 	slots[slot] = &""
 	slot_state.erase(slot)
 	_commit()
@@ -348,8 +361,7 @@ func equip_entry(container: StringName, index: int) -> bool:
 	if slot == &"":
 		return false
 	var entry := remove_entry(container, index)
-	slots[slot] = item.id
-	slot_state[slot] = entry.get("state", {}).duplicate(true) if entry.has("state") else item.default_state()
+	_wear(slot, item, entry.get("state", {}))
 	_commit()
 	return true
 
@@ -943,8 +955,7 @@ func equip_attachment(point: StringName) -> bool:
 	if item == null or item.slot == &"" or slots.get(item.slot, &"x") != &"":
 		return false
 	var entry := detach(point)
-	slots[item.slot] = item.id
-	slot_state[item.slot] = entry.get("state", item.default_state())
+	_wear(item.slot, item, entry.get("state", {}))
 	_commit()
 	return true
 
@@ -970,7 +981,81 @@ func _set_attachment(point: StringName, id: StringName, state: Dictionary) -> vo
 	_molle_of(point_slot(point))[String(point)] = att
 
 
+# --- Backpacks --------------------------------------------------------------------------
+
+## Whether `item` is a pack (worn in the backpack slot).
+static func is_pack(item: ItemData) -> bool:
+	return item != null and item.slot == &"backpack"
+
+
+## Why the pack `item` (with `state`) can't go into `container` ("" if it can, or isn't a
+## pack): a loaded pack never goes in, and one as big as the worn pack or bigger goes into
+## it only rolled.
+func pack_problem(container: StringName, item: ItemData, state := {}) -> String:
+	if not is_pack(item) or stows_loaded_packs:
+		return ""
+	if not state.get("held", []).is_empty():
+		return "Empty the %s first" % item.name
+	if container == &"backpack" and slots.get(&"backpack", &"") != &"" and not state.get("rolled", false) \
+			and item.capacity_l >= ItemDB.get_item(slots[&"backpack"]).capacity_l:
+		return "Roll the %s up first" % item.name
+	return ""
+
+
+## Why the pack in a container entry can't be rolled up (`rolled` true) or unrolled ("" if it
+## can): only an empty pack with nothing attached rolls, and unrolling needs the room.
+func roll_problem(container: StringName, index: int, rolled: bool) -> String:
+	var list: Array = containers.get(container, [])
+	if index < 0 or index >= list.size():
+		return "Nothing there"
+	var item := ItemDB.get_item(list[index].id)
+	var state: Dictionary = list[index].get("state", {})
+	if not is_pack(item):
+		return "Only a pack rolls up"
+	if bool(state.get("rolled", false)) == rolled:
+		return "It's already %s" % ("rolled up" if rolled else "unrolled")
+	if rolled and (not state.get("held", []).is_empty() or not state.get("molle", {}).is_empty()):
+		return "Empty the %s and take everything off it first" % item.name
+	if not rolled:
+		var unrolled := state.duplicate(true)
+		unrolled.erase("rolled")
+		if pack_problem(container, item, unrolled) != "" \
+				or unit_volume(item, unrolled) - unit_volume(item, state) > free_volume(container) + 0.0001:
+			return "No room to unroll it in there"
+	return ""
+
+
+## Host only. Rolls up (or unrolls) the pack in a container entry. False if roll_problem.
+func set_rolled(container: StringName, index: int, rolled: bool) -> bool:
+	if roll_problem(container, index, rolled) != "":
+		return false
+	var entry: Dictionary = containers[container][index]
+	var state: Dictionary = entry.get("state", {}).duplicate(true)
+	if rolled:
+		state["rolled"] = true
+	else:
+		state.erase("rolled")
+	if state.is_empty():
+		entry.erase("state")
+	else:
+		entry["state"] = state
+	_commit()
+	return true
+
+
 # --- Internals --------------------------------------------------------------------------
+
+## Puts `item` into body `slot` with `state` (no checks, no commit). A pack goes on unrolled,
+## and what it carried ("held") goes into the backpack container.
+func _wear(slot: StringName, item: ItemData, state: Dictionary) -> void:
+	var s := state.duplicate(true) if not state.is_empty() else item.default_state()
+	if slot == &"backpack":
+		s.erase("rolled")
+		containers[&"backpack"] = s.get("held", []).duplicate(true)
+		s.erase("held")
+	slots[slot] = item.id
+	slot_state[slot] = s
+
 
 func _free_slot_for(item: ItemData) -> StringName:
 	match item.slot:

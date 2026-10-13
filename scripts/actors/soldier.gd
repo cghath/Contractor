@@ -821,6 +821,10 @@ func _server_inventory_action(action: String, container: StringName, index: int,
 				inventory.insert_entry(container, entry)  # put it back
 				_client_message.rpc_id(owner_peer(), "Not enough room in %s" % container_name(target))
 		"equip_entry":
+			var list: Array = inventory.containers.get(container, [])
+			if index >= 0 and index < list.size() and Inventory.is_pack(ItemDB.get_item(list[index].id)) and inventory.slots[&"backpack"] != &"":
+				_server_swap_pack(inventory.remove_entry(container, index))  # Captain: packs swap on equip
+				return
 			var problem := inventory.entry_fit_problem(container, index)  # before equip_entry moves it
 			if not inventory.equip_entry(container, index):
 				_client_message.rpc_id(owner_peer(), problem if problem != "" else "No free slot for that")
@@ -837,7 +841,13 @@ func _server_inventory_action(action: String, container: StringName, index: int,
 				if inventory.insert_entry(c, {"id": removed.id, "count": 1, "state": removed.state}):
 					return
 			inventory.take(removed.id, 1, removed.state)  # no room: straight back on
-			_client_message.rpc_id(owner_peer(), "No room to stow that")
+			var why := inventory.pack_problem(target if target != &"" else &"backpack", ItemDB.get_item(removed.id), removed.state)
+			_client_message.rpc_id(owner_peer(), why if why != "" else "No room to stow that")
+		"roll_entry", "unroll_entry":
+			var rolled := action == "roll_entry"
+			var problem := inventory.roll_problem(container, index, rolled)
+			if problem != "" or not inventory.set_rolled(container, index, rolled):
+				_client_message.rpc_id(owner_peer(), problem if problem != "" else "Can't do that")
 		# MOLLE: `target` (attach) and `slot` (detach, move, drop) name attach points of the
 		# worn carrier; a pouch's contents go with it.
 		"attach":
@@ -900,6 +910,15 @@ func _server_interact(path: NodePath) -> void:
 		return
 	if item.global_position.distance_to(global_position) > INTERACT_RANGE + 1.5:
 		return
+	if Inventory.is_pack(ItemDB.get_item(item.item_id)) and inventory.slots[&"backpack"] != &"":
+		# Captain (P0164): picking up a pack swaps it for the one worn (dragging it into the
+		# pack in the inventory screen stows it instead).
+		var entry := {"id": item.item_id, "count": 1, "state": item.state.duplicate(true)}
+		model.server_pick_up(item.global_position, item.item_id)
+		GameState.item_taken(item.uid)
+		item.queue_free()
+		_server_swap_pack(entry)
+		return
 	var taken := inventory.take(item.item_id, item.count, item.state)
 	if taken > 0:
 		model.server_pick_up(item.global_position, item.item_id)  # the pickup animation
@@ -929,6 +948,16 @@ func _server_drop(slot: StringName) -> void:
 		var removed := inventory.unequip(slot)
 		if not removed.is_empty():
 			_server_spawn_in_front(removed.id, 1, removed.state)
+
+
+## Host: puts on the pack `entry` ({"id", "state"?}, already out of the world or the
+## inventory) and drops the worn one in front, still loaded.
+func _server_swap_pack(entry: Dictionary) -> void:
+	var old := inventory.unequip(&"backpack")
+	inventory.take(entry.id, 1, entry.get("state", {}))
+	if not old.is_empty():
+		_server_spawn_in_front(old.id, 1, old.state)
+		_client_message.rpc_id(owner_peer(), "Swapped packs: dropped the %s" % ItemDB.get_item(old.id).name)
 
 
 func _server_spawn_in_front(id: StringName, count := 1, state := {}) -> void:
@@ -1680,7 +1709,8 @@ func _loot_one(other: Soldier, where: StringName, index: int) -> Dictionary:
 		if inventory.take(removed.id, 1, removed.state) == 1:
 			return {"moved": 1, "name": item_name, "why": ""}
 		inv.take(removed.id, 1, removed.state)  # no room: back on the body
-		return {"moved": 0, "name": item_name, "why": "No room for %s" % item_name}
+		var loaded_pack: bool = Inventory.is_pack(ItemDB.get_item(removed.id)) and not removed.state.get("held", []).is_empty()
+		return {"moved": 0, "name": item_name, "why": "You're already wearing a pack" if loaded_pack else "No room for %s" % item_name}
 	var list: Array = inv.containers.get(where, [])
 	if index >= list.size():
 		return {"moved": 0, "name": "", "why": "Nothing there any more"}

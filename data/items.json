@@ -112,11 +112,11 @@
 		 "stats": {"short": "Binos", "size_m": [0.12, 0.06, 0.15]}},
 
 		{"id": "assault_pack", "name": "Assault Pack (24 L)", "type": "backpack", "slot": "backpack", "volume_l": 4.0, "mass_kg": 1.1, "capacity_l": 24.0, "tags": ["pack"],
-		 "stats": {"molle": [
+		 "stats": {"rolled_l": 1.5, "molle": [
 			{"id": "pack_top_1", "type": "pack_top", "at": [0.0, 0.52, 0.275], "face": "top"},
 			{"id": "pack_aid", "type": "aid_bag", "at": [0.0, 0.27, 0.385], "face": "back"}]}},
 		{"id": "ruck_45", "name": "Ruck (45 L)", "type": "backpack", "slot": "backpack", "volume_l": 7.0, "mass_kg": 2.2, "capacity_l": 45.0, "tags": ["pack"],
-		 "stats": {"molle": [
+		 "stats": {"rolled_l": 2.5, "molle": [
 			{"id": "pack_top_1", "type": "pack_top", "at": [0.0, 0.52, 0.255], "face": "top"},
 			{"id": "pack_top_2", "type": "pack_top", "at": [0.0, 0.52, 0.375], "face": "top"},
 			{"id": "pack_top_3", "type": "pack_top", "at": [0.0, 0.63, 0.315], "face": "top"},
