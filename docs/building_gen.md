@@ -37,7 +37,7 @@ suit it. Captain's side; see `docs/build_plan.md` ("Procedural buildings") for w
 
 ## Phases
 
-1. **Houses.** Single-storey houses with about 8 interior chunks (living room, kitchen, two
+1. **Houses (built, 2026-10-13: `BuildingGen.house`, 14 chunks).** Single-storey houses with about 8 interior chunks (living room, kitchen, two
    bedrooms, bathroom, hall, storeroom, courtyard). Checks: every room reachable, no door
    blocked by furniture, the same building from the same seed, `Buildings` finds the rooms and
    entrances, under a voxel budget. Screenshots. Generated houses then stand alongside the

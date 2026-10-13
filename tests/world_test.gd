@@ -133,6 +133,7 @@ func _test_generation(mem_before: float) -> void:
 	check(ZoneDef.generate(1234).hash() == gen.hash() and gen.modules.size() == 5 and gen.insertion.size() == 2 and gen.extraction.size() == 3,
 		"a zone generated from a seed is the same every time (%d modules, %d insertion points, %d extraction candidates)" % [gen.modules.size(), gen.insertion.size(), gen.extraction.size()])
 	_test_hot_layout()
+	_test_building_gen()
 	_test_presets()
 	var ins := level.insertion_points()[0]
 	check(player.global_position.distance_to(ins) < 5.0 and absf(player.global_position.y - t.height_at(player.global_position.x, player.global_position.z) - 0.1) < 0.05,
@@ -587,6 +588,86 @@ func _test_hot_layout() -> void:
 		"the ground on a road takes its colour, and 20 m off it doesn't (%.2f, %.2f)" % [t.road_weight(mid.x, mid.y), t.road_weight(mid.x + across.x * 20.0, mid.y + across.y * 20.0)])
 	roads.free()
 	t.free()
+
+
+# --- Procedural buildings (docs/building_gen.md) ----------------------------------------------
+
+## Phase 1: houses. Over many seeds: the right rooms, every room reachable from the street, the
+## bathroom off one doorway, doorways clear of furniture, everything inside the shell, the same
+## house from the same seed, and within a voxel budget.
+func _test_building_gen() -> void:
+	print("Procedural buildings: houses")
+	var ok_rooms := true
+	var ok_reach := true
+	var ok_doors := true
+	var ok_inside := true
+	var furnished := 0
+	var room_total := 0
+	var worst_voxels := 0
+	var styles := {}
+	var bare := {}  # role -> rooms of it left unfurnished
+	var bad := []
+	for seed in range(1, 41):
+		var hs := BuildingGen.house(seed)
+		styles[hs.style] = true
+		var rooms: Array = hs.rooms
+		var roles: Array = rooms.map(func(r: Dictionary) -> String: return r.role)
+		var n := rooms.size()
+		room_total += n
+		furnished += rooms.filter(func(r: Dictionary) -> bool: return r.chunk != "").size()
+		for r: Dictionary in rooms:
+			if r.chunk == "":
+				bare[r.role] = int(bare.get(r.role, 0)) + 1
+		if n < 4 or n > 6 or roles.count("living") != 1 or roles.count("kitchen") != 1 or roles.count("bathroom") != 1:
+			ok_rooms = false
+			bad.append("seed %d rooms %s" % [seed, roles])
+		# Reachable from outside through the doorways; the bathroom has one.
+		var seen := {-1: true}
+		var grew := true
+		while grew:
+			grew = false
+			for dr: Dictionary in hs.doors:
+				var a: int = dr.rooms[0]
+				var b: int = dr.rooms[1]
+				if seen.has(a) != seen.has(b):
+					seen[a] = true
+					seen[b] = true
+					grew = true
+		var bath := roles.find("bathroom")
+		var bath_doors := (hs.doors as Array).filter(func(dr: Dictionary) -> bool: return bath in dr.rooms).size()
+		var front := (hs.doors as Array).any(func(dr: Dictionary) -> bool: return dr.rooms[1] == -1 and (dr.at as Vector3).z > 0.0)
+		if seen.size() != n + 1 or bath_doors != 1 or not front:
+			ok_reach = false
+			bad.append("seed %d: %d of %d rooms reached, bathroom doors %d, front door %s" % [seed, seen.size() - 1, n, bath_doors, front])
+		# Doorways clear: the gap itself and a step either side of it.
+		var solid := func(q: Vector3) -> bool:
+			return (hs.boxes as Array).any(func(bx: Array) -> bool: return AABB(bx[0], (bx[1] as Vector3) - (bx[0] as Vector3)).has_point(q))
+		for dr: Dictionary in hs.doors:
+			var at: Vector3 = (dr.at as Vector3) + Vector3(0, 0.5, 0)
+			var through_x: bool = not solid.call(at + Vector3(0.6, 0, 0)) and not solid.call(at - Vector3(0.6, 0, 0))
+			var through_z: bool = not solid.call(at + Vector3(0, 0, 0.6)) and not solid.call(at - Vector3(0, 0, 0.6))
+			if solid.call(at) or not (through_x or through_z) and dr.rooms[1] != -1:
+				ok_doors = false
+				bad.append("seed %d: doorway at %s blocked" % [seed, dr.at])
+		# Inside the shell, and its size in voxels.
+		var half := (hs.size as Vector2) * 0.5
+		var top := float(BuildingGen.STYLES[hs.style].h) + float(BuildingGen.STYLES[hs.style].roof_t)
+		var voxels := 0
+		for bx: Array in hs.boxes:
+			var lo: Vector3 = bx[0]
+			var hi: Vector3 = bx[1]
+			voxels += int((hi - lo).x * (hi - lo).y * (hi - lo).z / pow(VoxelWorld.VOXEL_SIZE, 3))
+			if lo.x < -half.x - 0.01 or lo.z < -half.y - 0.01 or hi.x > half.x + 0.01 or hi.z > half.y + 0.01 or hi.y > top + 0.01 or lo.y < -0.01:
+				ok_inside = false
+		worst_voxels = maxi(worst_voxels, voxels)
+	check(ok_rooms, "houses (40 seeds): 4 to 6 rooms, one living room, kitchen and bathroom each %s" % [bad.slice(0, 3)])
+	check(ok_reach, "every room reachable from the street, a front door on it, the bathroom off one doorway %s" % [bad.slice(0, 3)])
+	check(ok_doors, "doorways clear of furniture: walk through each %s" % [bad.slice(0, 3)])
+	check(ok_inside and worst_voxels < 150000, "everything inside the shell and under the roof; at most %d voxels (budget 150000)" % worst_voxels)
+	check(furnished >= room_total - 2 and styles.size() >= 3,
+		"rooms furnished from the chunk library (%d of %d; bare: %s), in %d styles" % [furnished, room_total, bare, styles.size()])
+	var again := BuildingGen.house(7)
+	check(BuildingGen.house(7).boxes == again.boxes and BuildingGen.house(8).boxes != again.boxes, "the same seed builds the same house, another seed another")
 
 
 # --- Terrain presets ----------------------------------------------------------------------------
