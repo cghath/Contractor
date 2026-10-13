@@ -1247,6 +1247,22 @@ func _test_medical_menu_scrolls() -> void:
 	check(menu.row_shown(last) and casualty.vitals.is_healing() and player._server_busy_until > Soldier._now(),
 		"scrolled to it, clicking the last usable row (%s) starts it" % menu.options[last].label)
 	await _seconds(player.treat_seconds(casualty, ItemDB.get_item(item)) + 0.3)
+	# In a short window (the panel at its least height) the activity log, full, still ends
+	# above the panel's foot: only the newest lines that fit are drawn.
+	var root := get_tree().root
+	var old_size := root.size
+	root.size = Vector2i(old_size.x, int(MedicalMenu.PANEL_MIN_H))
+	await _frames(2)
+	for n in MedicalMenu.MAX_LOG + 4:
+		menu._add_log("Test line %d" % n)
+	var font := menu.get_theme_default_font()
+	panel = menu._panel()
+	var shown := menu.log_lines_shown(font)
+	var log_end := panel.position.y + MedicalMenu.LOG_Y + 22.0 + (shown - 1) * font.get_height(12) + font.get_descent(12)
+	check(shown >= 1 and log_end <= panel.end.y and menu.log_lines.size() == MedicalMenu.MAX_LOG,
+		"a full activity log in a %.0f px panel: %d of %d lines drawn, ending %.0f px above its foot" % [panel.size.y, shown, menu.log_lines.size(), panel.end.y - log_end])
+	root.size = old_size
+	await _frames(2)
 	menu.close()
 	_reset(casualty)
 	_reset(player)

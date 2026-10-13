@@ -53,6 +53,8 @@ const ROW_H := 24.0
 ## The item list's scroll bar, right of the rows (click above or below the thumb: a page).
 const SCROLL_BAR_W := 10.0
 const MAX_LOG := 14
+## The activity log's heading, below the panel's top (right-hand column, under the signs).
+const LOG_Y := 310.0
 const REFRESH_S := 0.25
 
 ## The treater (the local player).
@@ -476,6 +478,15 @@ func _panel() -> Rect2:
 	return Rect2(((screen - dims) * 0.5).max(Vector2.ZERO), dims)
 
 
+## How many activity log lines are drawn: as many as fit between the log's heading and the
+## panel's foot (fewer in a short window), at most MAX_LOG. The newest are the ones shown.
+func log_lines_shown(font: Font) -> int:
+	var panel := _panel()
+	var first := panel.position.y + LOG_Y + 22.0  # the first line's baseline
+	var room := panel.end.y - 8.0 - font.get_descent(12) - first
+	return clampi(int(floor(room / font.get_height(12))) + 1, 0, mini(MAX_LOG, log_lines.size()))
+
+
 func _figure_origin() -> Vector2:
 	return _panel().position + Vector2(30, 70)
 
@@ -599,6 +610,9 @@ func _draw() -> void:
 	draw_string(font, right, "Signs", HORIZONTAL_ALIGNMENT_LEFT, 340, 16)
 	var sign_lines := signs_lines(vitals, target == actor, InteractionMenu.has_oximeter(actor))
 	draw_multiline_string(font, right + Vector2(0, 22), "\n".join(sign_lines), HORIZONTAL_ALIGNMENT_LEFT, 340, 13, 8)
-	var log_top := right + Vector2(0, 240)
+	var log_top := top + Vector2(720, LOG_Y)
 	draw_string(font, log_top, "Activity (this menu, your view)", HORIZONTAL_ALIGNMENT_LEFT, 340, 16)
-	draw_multiline_string(font, log_top + Vector2(0, 22), "\n".join(log_lines), HORIZONTAL_ALIGNMENT_LEFT, 340, 12, MAX_LOG, Color(0.8, 0.8, 0.8))
+	var shown := log_lines_shown(font)
+	if shown > 0:  # the newest lines, as many as fit above the panel's foot
+		draw_multiline_string(font, log_top + Vector2(0, 22), "\n".join(log_lines.slice(log_lines.size() - shown)), HORIZONTAL_ALIGNMENT_LEFT, 340, 12,
+			shown, Color(0.8, 0.8, 0.8))
