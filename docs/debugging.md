@@ -161,10 +161,13 @@ numbered session, **P<number>**, from the same counter and in the same parent as
    `SessionLog.state_text()` for its dump and save into the session's folder.
 3. ~~**AI debug overlay**~~: built (Delete, `AiOverlay`; intent, status, target, mode, suppression, line to its destination; no alert state yet). Original spec: over each AI its intent, target, combat mode and alert state,
    and a line to where it's going.
-4. Later: **replay** a bug report (it saves a `Campaign.snapshot`; a headless test loads it,
-   reproduces the bug and stays as a regression test), a **test history page** (pass/fail per
-   suite over time from `index.txt`, flaky suites flagged), **performance lines** in session
-   logs (frame time, AI count, navigation bake time, modules streamed in, once a minute).
+4. Built: **performance lines** in session logs (`SessionLog.perf_line`, every `PERF_S` = 60 s:
+   frame time average and worst, fps, AI and players up, modules streamed in, nav rebakes,
+   memory) and a **test history page** (`python tools/test_history.py` writes
+   `<logs>/history.html`: pass/fail per suite over the last 40 runs, flaky suites flagged, the
+   checks that fail most). The AI overlay also shows what each AI half-spotted and a hostile's
+   alert state. Still later: **replay** a bug report (it saves a `Campaign.snapshot`; a headless test loads it,
+   reproduces the bug and stays as a regression test).
 
 When wave 5 adds systems (vehicles, supports, the FOB), please give them lines in the state
 dump and the overlay when those land (a vehicle's driver, passengers, damage; a support call's

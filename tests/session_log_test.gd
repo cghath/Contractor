@@ -248,11 +248,16 @@ func _test_bug_report(player: Soldier, level: CompoundLevel, faller: Soldier) ->
 	overlay.set_shown(true)
 	overlay.refresh()
 	var label: Label3D = overlay.labels.get(scout)
-	check(label != null and SquadAI.Intent.keys()[SquadAI.of(scout).intent] in label.text and "suppr" in label.text,
-		"it has a label with the intent over a nearby AI (%s)" % [label.text if label else "none"])
+	check(label != null and SquadAI.Intent.keys()[SquadAI.of(scout).intent] in label.text and "suppr" in label.text and "aware" in label.text,
+		"it has a label with the intent and what it's spotting over a nearby AI (%s)" % [label.text.replace("\n", " | ") if label else "none"])
 	check(not overlay.labels.has(faller), "and none over one far away")
 	overlay.set_shown(false)
 	check(overlay.labels.is_empty(), "switched off, the labels go")
+	# Performance lines (every SessionLog.PERF_S): frame times, AI, what's streamed in.
+	await _frames(10)
+	var perf := SessionLog.perf_line()
+	check(perf.begins_with("perf: frame ") and " ms avg" in perf and " AI, " in perf and "nav rebakes" in perf and "memory" in perf,
+		"a performance line: %s" % perf)
 	overlay.queue_free()
 	scout.queue_free()
 

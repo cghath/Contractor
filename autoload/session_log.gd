@@ -23,6 +23,8 @@ const PARENT_NAME := "Contractor-test-logs"
 const SLOW_FRAME_S := 0.5
 ## How often soldiers are checked for impossible positions, and the zone for a change (seconds).
 const CHECK_S := 1.0
+## A performance line this often (s): frame times, AI count, modules streamed in, nav rebakes.
+const PERF_S := 60.0
 ## Below this a soldier has fallen out of the world.
 const FELL_Y := -100.0
 ## Log lines kept for the dumps.
@@ -54,6 +56,14 @@ var _last_frame_usec := 0
 var _check_left := CHECK_S
 var _zone := ""
 var _net_watched := false
+## Performance lines (docs/debugging.md, planned item 4): every PERF_S, the frames since the last
+## line, the AI, what's streamed in and the navigation rebakes.
+var _perf_left := PERF_S
+var _perf_frames := 0
+var _perf_sum := 0.0
+var _perf_worst := 0.0
+var _rebakes := 0
+var _nav_watched: Node
 
 
 ## Catches what the engine logs, on whatever thread logs it.
@@ -209,6 +219,13 @@ func _process(delta: float) -> void:
 	_last_frame_usec = now
 	if frame_s >= SLOW_FRAME_S:
 		_write("slow frame: %.2f s" % frame_s)
+	_perf_frames += 1
+	_perf_sum += frame_s
+	_perf_worst = maxf(_perf_worst, frame_s)
+	_perf_left -= delta
+	if _perf_left <= 0.0:
+		_perf_left = PERF_S
+		_write(perf_line())
 	_mutex.lock()
 	var pending := _pending.duplicate()
 	_pending.clear()
@@ -226,6 +243,12 @@ func _check() -> void:
 	if GameState.zone_id != _zone:
 		_zone = GameState.zone_id
 		note("zone: %s" % _zone)
+	var level := CompoundLevel.current(get_tree().root)
+	var nav: Node = level.get_node_or_null(^"Navigation") if level else null
+	if nav != _nav_watched:
+		_nav_watched = nav
+		if nav and nav.has_signal(&"rebaked"):
+			nav.rebaked.connect(func(_chunk: Vector2i) -> void: _rebakes += 1)
 	for s in _soldiers():
 		var pos: Vector3 = s.global_position
 		if not pos.is_finite():
@@ -295,6 +318,33 @@ func _dump(what: String, text: String) -> void:
 		if image:
 			image.save_png(base + ".png")
 	note("dump %d written: %s" % [dumps, (base + ".txt").get_file()])
+
+
+## The performance line for the frames since the last one (and starts counting afresh):
+## "perf: frame 12.3 ms avg, 40.2 ms worst (81 fps); 14 AI, 1 player; modules 3/12 streamed;
+## nav rebakes 2; memory 512 MB".
+func perf_line() -> String:
+	var avg := _perf_sum / maxi(_perf_frames, 1)
+	var ai := 0
+	var players := 0
+	for s in _soldiers():
+		if s.vitals.is_up():
+			if s.is_ai():
+				ai += 1
+			else:
+				players += 1
+	var level := CompoundLevel.current(get_tree().root)
+	var modules := "no modules"
+	if level and level.has_method(&"streamed_modules") and level.has_method(&"modules"):
+		modules = "modules %d/%d streamed" % [level.call(&"streamed_modules").size(), level.call(&"modules").size()]
+	var text := "perf: frame %.1f ms avg, %.1f ms worst (%.0f fps); %d AI, %d player%s; %s; nav rebakes %d; memory %.0f MB" % [
+		avg * 1000.0, _perf_worst * 1000.0, 1.0 / maxf(avg, 0.0001), ai, players, "" if players == 1 else "s", modules, _rebakes,
+		Performance.get_monitor(Performance.MEMORY_STATIC) / 1048576.0]
+	_perf_frames = 0
+	_perf_sum = 0.0
+	_perf_worst = 0.0
+	_rebakes = 0
+	return text
 
 
 ## What's going on now, for a dump (and the bug-report key, planned): the session, the zone, the
