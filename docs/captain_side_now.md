@@ -41,14 +41,31 @@ picking up next, we'll read it and steer around it.
 | 6 | Tree and bush art pass to match the voxel characters | `art/scatter-art` (6ce346a) | `scripts/world/zone_scatter.gd`, `data/terrain_presets.json` (conifer_share), `docs/terrain_presets.md`, `tests/preset_shots.gd` | Built, R0283 PASS |
 | 7 | Final audit and a smoke test of the debug tools (bug-report key, session logs, AI overlay, test-log numbering) | `integrate/oct13` | new `tests/debug_tools_smoke.gd`, `docs/debugging.md` | Smoke test P0292: 12/12 pass; runner check passes; audit done, 4 code fixes in 8f8812a (pack turn sign, sway reset, ordered targets in deep leaves, straps with no carrier) |
 
+## Next (Captain, 2026-10-13), in order
+
+| # | Work | Branch | Files it touches | State |
+|---|---|---|---|---|
+| 8 | Engagement ranges up: hostiles see 200 m (was 60), the squad 300 m (was 120); aim error at skill 0 1.2 deg (was 2.0); scrub drawn to 400 m and hides nobody past it | `ai/ranges` (ac6957e) | `scripts/ai/squad_ai.gd` (SIGHT_RANGE, SQUAD_SIGHT_RANGE, AIM_UNSKILLED_DEG), `scripts/world/zone_scatter.gd` | Built, R0294 PASS; CI pending. **cghath: doctrine engage_m (A3-07) should match these.** |
+| 9 | Debug tools: overlay shows spotting and alert state; performance lines in session logs; test history page | `debug/overlay-alert` (897eb0e) | `scripts/ui/ai_overlay.gd`, `autoload/session_log.gd`, `tests/session_log_test.gd`, new `tools/test_history.py`, `docs/debugging.md` | Built, R0295 PASS; CI pending |
+| 10 | Procedural buildings, phase 1: generated single-storey houses with interior chunks (`docs/building_gen.md`) | `world/building-gen` | new `scripts/world/building_gen.gd`, new `data/building_chunks.json`, `scripts/world/zone_modules.gd` (a house module type), new tests | Next |
+| 11 | Procedural buildings, phase 2: shops, warehouse, clinic, police station; a town module (street grid of lots) | `world/building-gen` | the above, `scripts/world/zone_def.gd` (placing towns) | Queued |
+| 12 | Procedural buildings, phases 3 and 4: storeys and stairs; city zones | later | | Queued |
+
+## Decided (Captain, 2026-10-13)
+
+- Enemy camo: stays "urban" for now; decided with factions in wave 6.
+- Scrub: drawn further (400 m) rather than capped; it hides nobody past where it's drawn.
+- Engagement and detection ranges up (item 8).
+
 ## Waiting on Captain
 
-- Hostiles wear "urban" in every zone: terrain-matched enemy camo vs friend-or-foe.
-- Scrub draws to 240 m but hides from the AI at any range.
+- Procedural buildings: replace the village's hand-built houses after phase 1, or keep both;
+  which building types matter most; how tall in cities.
 - Back utility points (A/B/C/D), homeostasis.
 
 ## Log
 
+- 2026-10-13 17:00: ranges up and debug tools (items 8, 9) built; procedural buildings planned (items 10-12).
 - 2026-10-13: dev fast-forwarded to 8f8812a on the Captain's go; these notes are on dev now.
 - 2026-10-13 06:20: integrate/oct13 8f8812a CI green; waiting on the Captain's go for dev.
 - 2026-10-13 05:45: everything on the list built; integrate/oct13 full suite R0284; debug tools smoke P0292 pass; final audit running.
