@@ -238,6 +238,20 @@ const FIRED_ON_SUPPRESSION := 0.001
 const FIRED_ON_INJURY := 0.02
 ## Proposed: don't shoot when a friendly is this close (metres) to the line of fire.
 const FRIENDLY_CLEARANCE := 0.7
+## Fire discipline (Captain, P0164 queue 17 part 5; proposed): rounds that miss fly on, so
+## people up to DOWNRANGE_M past the aim point count as in the line too; the clearance grows
+## with the cone this unit's rounds spread over (_fire_cone) the further down the line they
+## are; someone lying (prone, or down) counts LYING_EXTRA_M wider around their chest (the
+## length of them); someone beside or behind the muzzle (less than MUZZLE_M along the line)
+## isn't in it.
+const DOWNRANGE_M := 60.0
+const LYING_EXTRA_M := 0.6
+const MUZZLE_M := 0.5
+## Grenade discipline (queue 17 part 5; proposed): nobody to protect within FRAG_RADIUS plus
+## FRAG_SAFETY_M of where a frag lands (it bounces and rolls), nor within LOB_FRIEND_M of its
+## arc (it would hit them and drop at their feet).
+const FRAG_SAFETY_M := 2.0
+const LOB_FRIEND_M := 1.0
 ## Proposed (Captain, 2026-10-12: the squad seemed a bit unintelligent): the friendly squad's
 ## senses and habits. A squadmate hears an enemy shot within HEAR_SHOT_M (a suppressed one
 ## within HEAR_SUPPRESSED_M) and takes contact toward the shooter, placed up to
@@ -1871,7 +1885,8 @@ func _end_scavenge() -> void:
 ## bleeding only), with an item it carries (loose or in a kit) that hasn't failed TREAT_TRIES
 ## times, not one the casualty is doing on themselves right now, and (on itself) not one a
 ## medic keeps for the squad (_kept_for_squad), nor an IV or IO on itself; {} for none. Where
-## several items would do, the task's "item" becomes the first one carried (Vitals.pick_item).
+## several items would do, the task's "item" becomes the first one carried (Vitals.pick_item),
+## out of the casualty's own kit first ("their_kit": _pick_for).
 func _next_task(c: Soldier, under_fire: bool) -> Dictionary:
 	var conscious := c.vitals.is_up() or c.vitals.why_unconscious().has(&"pain")  # morphine wakes one out from pain
 	var their := SquadAI.of(c) if c != body else null
@@ -1880,7 +1895,8 @@ func _next_task(c: Soldier, under_fire: bool) -> Dictionary:
 			continue
 		if String(task.kind) == "pain" and c.vitals.pain() < MORPHINE_PAIN:
 			continue
-		var item := Vitals.pick_item(task, body.inventory)
+		var pick := _pick_for(c, task)
+		var item: StringName = pick.item
 		if item == &"" or (c == body and Vitals.needs_other_hands(item)):
 			continue
 		if not _may_use(item):
@@ -1892,15 +1908,29 @@ func _next_task(c: Soldier, under_fire: bool) -> Dictionary:
 			continue
 		var chosen := task.duplicate()
 		chosen.item = item
+		chosen.their_kit = pick.theirs
 		return chosen
 	return {}
 
 
-## Items this unit lacks (or, on itself, keeps for the squad) for what `c` still needs once safe.
+## The item for `task` on casualty `c`: out of c's own kit first, then this unit's (Captain,
+## P0164 queue 17: a carer uses the casualty's IFAK before their own, so their own is still
+## there for the next casualty, or for themselves). On itself, its own. {"item" (&"" for
+## none), "theirs" (it comes out of c's kit)}.
+func _pick_for(c: Soldier, task: Dictionary) -> Dictionary:
+	if c != body:
+		var theirs := Vitals.pick_item(task, c.inventory)
+		if theirs != &"" and _may_use(theirs):
+			return {"item": theirs, "theirs": true}
+	return {"item": Vitals.pick_item(task, body.inventory), "theirs": false}
+
+
+## Items this unit lacks (or, on itself, keeps for the squad) for what `c` still needs once
+## safe, counting what c carries (_pick_for).
 func _missing_items(c: Soldier) -> Array[StringName]:
 	var out: Array[StringName] = []
 	for task in plan_care(c.vitals.care_needed(), false, c.vitals.is_up() or c.vitals.why_unconscious().has(&"pain")):
-		var item := Vitals.pick_item(task, body.inventory)
+		var item: StringName = _pick_for(c, task).item
 		var lacks := item == &"" or not _may_use(item) or (c == body and (Vitals.needs_other_hands(item) or _kept_for_squad(item, String(task.kind))))
 		if not lacks:
 			continue
@@ -1957,7 +1987,7 @@ func _start_treatment(target: Soldier, task: Dictionary) -> void:
 	_treat_key = _task_key(target, task)
 	_treat_before = _count_tasks(target, _treat_key)
 	_treat_until = Soldier._now() + seconds + TREAT_MARGIN_S
-	body._server_treat.rpc_id(1, target.get_path(), StringName(task.item), StringName(task.part))
+	body._server_treat.rpc_id(1, target.get_path(), StringName(task.item), StringName(task.part), false, bool(task.get("their_kit", false)))
 	if target != body and not _answered:
 		_answered = true
 		var callouts := Callouts.of(body)
@@ -2317,10 +2347,24 @@ func _shoot() -> void:
 	if _burst_left <= 0:
 		_pause_until = now + randf_range(0.5, 1.1) / lerpf(0.7, 1.3, combat)
 	var dir := body._spread_direction(weapon)
-	var shaken := maxf(MORALE_SHAKEN - morale, 0.0) / MORALE_SHAKEN  # 0 steady .. 1 no morale left
-	var extra := deg_to_rad((1.0 - combat) * 2.0 + body.suppression * 4.0 + (0.0 if foe else 3.0) + shaken * MORALE_SHAKEN_AIM_DEG)
+	var extra := deg_to_rad(_aim_error_deg(foe != null))
 	dir = (dir + Vector3(randf_range(-1, 1), randf_range(-1, 1), randf_range(-1, 1)) * tan(extra) * 0.6).normalized()
 	body._server_fire.rpc_id(1, body.camera.global_position, dir, body.active_slot)
+
+
+## The aim error (degrees) this unit adds to its weapon's own spread: less skill, suppression,
+## firing at a point rather than a seen foe, and shaken morale all widen it.
+func _aim_error_deg(seen_foe: bool) -> float:
+	var shaken := maxf(MORALE_SHAKEN - morale, 0.0) / MORALE_SHAKEN  # 0 steady .. 1 no morale left
+	return (1.0 - combat) * 2.0 + body.suppression * 4.0 + (0.0 if seen_foe else 3.0) + shaken * MORALE_SHAKEN_AIM_DEG
+
+
+## The half-angle (radians) this unit's next rounds may stray by: the weapon's spread plus
+## its aim error (_aim_error_deg).
+func _fire_cone() -> float:
+	var weapon := body.active_weapon()
+	var spread := float(weapon.stats.get("spread_deg", 1.0)) if weapon else 1.0
+	return deg_to_rad(spread + _aim_error_deg(_foe() != null))
 
 
 ## Turns the body and head toward a point; returns the remaining angle in radians.
@@ -2336,22 +2380,68 @@ func _aim_at(point: Vector3) -> float:
 	return (-body.camera.global_basis.z).angle_to(d.normalized())
 
 
-## Fire discipline: true if someone on this unit's side, or a civilian, HVT or captive
-## (Person.is_noncombatant; people, wave 4), standing or down, is in the line of fire to
-## `point`, closer than it.
-func _friendly_in_line(point: Vector3) -> bool:
+## Fire discipline (queue 17 part 5): true if someone this unit must not hit (_protects), up
+## or down, is in the line of fire to `point` or within DOWNRANGE_M past it, closer to the line
+## than FRIENDLY_CLEARANCE plus what the rounds' cone (`cone`, radians; _fire_cone() when
+## negative) has spread to by them. Upright people count from shins to head, prone or downed
+## ones around their chest, LYING_EXTRA_M wider.
+func _friendly_in_line(point: Vector3, cone := -1.0) -> bool:
 	var from := body.camera.global_position
 	var reach := from.distance_to(point)
+	if reach < 0.01:
+		return false
+	var ahead := (point - from) / reach
+	var far := point + ahead * DOWNRANGE_M
+	var widen := tan(_fire_cone() if cone < 0.0 else cone)
 	for n in get_tree().get_nodes_in_group(&"combatants"):
 		var s := n as Soldier
-		if s == null or s == body or s.is_queued_for_deletion() or s.vitals.is_dead():
+		if not _protects(s):
 			continue
-		if s.faction != body.faction and not Person.is_noncombatant(s):
-			continue
-		var chest := s.global_position + Vector3.UP * (1.1 if s.vitals.is_up() else 0.3)
-		if from.distance_to(chest) < reach and Geometry3D.get_closest_point_to_segment(chest, from, point).distance_to(chest) < FRIENDLY_CLEARANCE:
+		var lying := _lying(s)
+		var low := s.aim_point() if lying else s.global_position + Vector3.UP * 0.3
+		var high := low if lying else s.global_position + Vector3.UP * (1.2 if s.is_crouching() else 1.7)
+		var closest := Geometry3D.get_closest_points_between_segments(from, far, low, high)
+		var along := (closest[0] - from).dot(ahead)
+		if along < MUZZLE_M:
+			continue  # beside or behind the muzzle
+		var clearance := FRIENDLY_CLEARANCE + along * widen + (LYING_EXTRA_M if lying else 0.0)
+		if closest[0].distance_to(closest[1]) < clearance:
 			return true
 	return false
+
+
+## Someone this unit must not hurt: alive, not itself, on its side, or a civilian, HVT or
+## captive (Person.is_noncombatant; people, wave 4).
+func _protects(s: Soldier) -> bool:
+	return s != null and s != body and not s.is_queued_for_deletion() and not s.vitals.is_dead() \
+		and (s.faction == body.faction or Person.is_noncombatant(s))
+
+
+## Lying on the ground: prone, or down (where the ragdoll lies, Soldier.aim_point).
+static func _lying(s: Soldier) -> bool:
+	return not s.vitals.is_up() or s.movement.is_prone()
+
+
+## Grenade discipline (queue 17 part 5): a frag thrown from `from` at `at` hurts nobody this
+## unit protects: none within FRAG_RADIUS + FRAG_SAFETY_M of where it lands, none within
+## LOB_FRIEND_M of its arc.
+func _frag_safe(from: Vector3, at: Vector3) -> bool:
+	var arc := _lob_points(from, at)
+	var ahead := Vector3(at.x - from.x, 0.0, at.z - from.z).normalized()
+	for n in get_tree().get_nodes_in_group(&"combatants"):
+		var s := n as Soldier
+		if not _protects(s):
+			continue
+		var p := s.aim_point() if _lying(s) else s.global_position
+		if p.distance_to(at) < Throwables.FRAG_RADIUS + FRAG_SAFETY_M:
+			return false
+		var low := p if _lying(s) else s.global_position + Vector3.UP * 0.3
+		var high := p if _lying(s) else s.global_position + Vector3.UP * 1.8
+		for i in range(1, arc.size()):
+			var closest := Geometry3D.get_closest_points_between_segments(arc[i - 1], arc[i], low, high)
+			if (closest[0] - from).dot(ahead) >= MUZZLE_M and closest[0].distance_to(closest[1]) < LOB_FRIEND_M:
+				return false  # (someone beside the thrower's hand isn't under the arc)
+	return true
 
 
 func _maybe_frag() -> void:
@@ -2360,12 +2450,10 @@ func _maybe_frag() -> void:
 	var d := body.global_position.distance_to(body.threat_pos)
 	if d < 8.0 or d > 25.0:
 		return
-	for n in get_tree().get_nodes_in_group(&"combatants"):
-		var s := n as Soldier
-		if s and s != body and (s.faction == body.faction or Person.is_noncombatant(s)) \
-				and s.global_position.distance_to(body.threat_pos) < Throwables.FRAG_RADIUS + 1.0:
-			return  # friendlies (or civilians, people wave 4) too close to the blast
-	if not _lob_clear(body.camera.global_position + Vector3.UP * 0.2, body.threat_pos):
+	var from := body.camera.global_position + Vector3.UP * 0.2
+	if not _frag_safe(from, body.threat_pos):
+		return  # friendlies (or civilians, people wave 4) near the blast or under the arc
+	if not _lob_clear(from, body.threat_pos):
 		return  # it would hit a wall or roof on the way and bounce back
 	var now := Soldier._now()
 	if squad and now - squad.frag_at < SQUAD_FRAG_GAP_S and squad.frag_point.distance_to(body.threat_pos) < SQUAD_FRAG_SPREAD_M:
@@ -2380,18 +2468,25 @@ func _maybe_frag() -> void:
 ## Whether a grenade lobbed from `from` (Throwables.lob_velocity) flies to `at` without
 ## hitting anything on the way: a frag that clips a wall or a roof lands among your own.
 func _lob_clear(from: Vector3, at: Vector3) -> bool:
+	var world := body.get_world_3d()
+	var arc := _lob_points(from, at)
+	for i in range(1, arc.size()):
+		if not Throwables.clear_line(world, arc[i - 1], arc[i]):
+			return false
+	return true
+
+
+## Points along a grenade's arc lobbed from `from` at `at` (Throwables.lob_velocity), from the
+## hand to just short of the landing (the last tenth comes down onto the target).
+static func _lob_points(from: Vector3, at: Vector3) -> PackedVector3Array:
 	var gravity: float = ProjectSettings.get_setting("physics/3d/default_gravity")
 	var velocity := Throwables.lob_velocity(from, at)
 	var flight := clampf(from.distance_to(at) / 12.0, 0.6, 1.6)  # as lob_velocity times it
-	var world := body.get_world_3d()
-	var previous := from
+	var out := PackedVector3Array([from])
 	for i in range(1, LOB_CHECKS + 1):
-		var t := flight * 0.9 * i / LOB_CHECKS  # the last tenth comes down onto the target
-		var point := from + velocity * t + Vector3.DOWN * 0.5 * gravity * t * t
-		if not Throwables.clear_line(world, previous, point):
-			return false
-		previous = point
-	return true
+		var t := flight * 0.9 * i / LOB_CHECKS
+		out.append(from + velocity * t + Vector3.DOWN * 0.5 * gravity * t * t)
+	return out
 
 
 func _throw(id: StringName, at: Vector3) -> bool:

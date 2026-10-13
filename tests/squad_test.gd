@@ -38,6 +38,7 @@ func _ready() -> void:
 	await _test_contact()
 	_test_flash_stuns()
 	_test_spotting()
+	await _test_fire_discipline()
 	await _test_dead_leave_squad()
 	GameState.delete_save()
 	print("SQUAD TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
@@ -359,6 +360,81 @@ func _test_spotting() -> void:
 	ai.order = order_was
 	ai.morale = steady
 	ai._fall_back_point = null
+	_clear_contact()
+
+
+## Captain (P0164 queue 17, part 5): fire discipline. No round through or past a squadmate:
+## the clearance grows down the line with the rounds' spread, someone past the target counts,
+## someone prone counts where he lies, someone beside the shooter doesn't. Frags: nobody near
+## where it lands or under its arc. Launchers: nobody in the backblast. Staged in one frame
+## at a time.
+func _test_fire_discipline() -> void:
+	print("Fire discipline: the line of fire, past the target, frags and backblast")
+	var alpha := _ai("Alpha")
+	var bravo := _ai("Bravo") if _ai("Bravo") else _ai("Charlie")
+	var ai := SquadAI.of(alpha)
+	var saved := [alpha.global_transform, bravo.global_transform]
+	bravo.want_stance = SoldierMovement.Stance.PRONE
+	var prone := await _wait_until(func() -> bool: return bravo.movement.is_prone(), 4.0)
+	await _seconds(0.5)  # the hit boxes follow the pose down
+	var origin := Vector3(300, 50.1, 300)  # up and away from everyone: only Bravo near the lines
+	alpha.global_transform = Transform3D(Basis.IDENTITY, origin)  # faces -z
+	var eye := alpha.camera.global_position
+	var aim := eye + Vector3(0, -0.4, -30)  # someone 30 m off
+	var away := Vector3(500, 50.1, 500)
+	_place(bravo, away)
+	check(not ai._friendly_in_line(aim), "nobody near the line: free to fire")
+	var widen := tan(ai._fire_cone())
+	_place(bravo, origin + Vector3(1.5, 0, -25))
+	var far_off := ai._friendly_in_line(aim)
+	_place(bravo, origin + Vector3(1.5, 0, -3))
+	var near_off := ai._friendly_in_line(aim)
+	check(prone and far_off and not near_off, "1.5 m off the line: in it 25 m out (clearance %.1f m), clear 3 m out (%.1f m)" % [
+		SquadAI.FRIENDLY_CLEARANCE + 25.0 * widen, SquadAI.FRIENDLY_CLEARANCE + 3.0 * widen])
+	_place(bravo, origin + Vector3(0, 0, -50))
+	check(ai._friendly_in_line(aim), "a squadmate 20 m past the target: rounds that miss fly on, no shot")
+	_place(bravo, origin + Vector3(0, 0, -90 - SquadAI.DOWNRANGE_M))
+	check(not ai._friendly_in_line(aim), "far beyond that, the shot is free again")
+	_place(bravo, origin + Vector3(0.6, 0, 0.2))
+	check(not ai._friendly_in_line(aim), "a squadmate beside the shooter isn't in the line")
+	_place(bravo, origin + Vector3(0, 0, -29))
+	var low := bravo.aim_point().y - bravo.global_position.y
+	check(SquadAI._lying(bravo) and low < 0.8 and ai._friendly_in_line(aim + Vector3.DOWN * 1.0),
+		"prone just short of a prone target, he counts where he lies (chest %.2f m up)" % low)
+	# Frags: where it lands, and the arc's low start in front of the thrower.
+	var from := eye + Vector3.UP * 0.2
+	var at := origin + Vector3(0, 0, -15)
+	_place(bravo, away)
+	var clear := ai._frag_safe(from, at)
+	_place(bravo, at + Vector3(Throwables.FRAG_RADIUS + 1.0, 0, 0))
+	var near_blast := ai._frag_safe(from, at)
+	_place(bravo, at + Vector3(Throwables.FRAG_RADIUS + SquadAI.FRAG_SAFETY_M + 3.0, 0, 0))
+	var outside := ai._frag_safe(from, at)
+	check(clear and not near_blast and outside, "a frag: not with a squadmate within %.0f m of where it lands" % (Throwables.FRAG_RADIUS + SquadAI.FRAG_SAFETY_M))
+	bravo.want_stance = -1
+	alpha.global_transform = saved[0]  # back on the ground while he gets up
+	bravo.global_transform = saved[1]
+	await _wait_until(func() -> bool: return not bravo.movement.is_prone(), 4.0)
+	alpha.global_transform = Transform3D(Basis.IDENTITY, origin)
+	var far_at := origin + Vector3(0, 0, -20)
+	_place(bravo, origin + Vector3(0, 0, -1.2))
+	var in_front := ai._frag_safe(from, far_at)
+	_place(bravo, origin + Vector3(0, 0, -9))
+	var under_top := ai._frag_safe(from, far_at)
+	_place(bravo, origin + Vector3(0.6, 0, 0))
+	var beside := ai._frag_safe(from, far_at)
+	check(not in_front and under_top and beside, "nor with one right in front, in the arc's way; one under its peak or beside the thrower is fine")
+	# Launcher backblast (RPG-7: a 45 degree cone, 20 m of injury).
+	var rpg := ItemDB.get_item(&"rpg7")
+	_place(bravo, origin + Vector3(0, 0, 4))
+	var behind := LauncherAI.friend_in_backblast(alpha, rpg)
+	_place(bravo, origin + Vector3(0, 0, -4))
+	var ahead := LauncherAI.friend_in_backblast(alpha, rpg)
+	_place(bravo, origin + Vector3(8, 0, 2))
+	var aside := LauncherAI.friend_in_backblast(alpha, rpg)
+	check(behind and not ahead and not aside, "no rocket with a squadmate in the backblast (behind %s, ahead %s, off to the side %s)" % [behind, ahead, aside])
+	alpha.global_transform = saved[0]
+	bravo.global_transform = saved[1]
 	_clear_contact()
 
 
