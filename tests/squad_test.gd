@@ -314,7 +314,23 @@ func _test_spotting() -> void:
 	while ai._build_awareness(bravo) < 1.0 and scans < 200:
 		scans += 1
 	check(scans >= 2 and scans <= ceili(far / SquadAI.SCAN_S) + 1, "awareness builds over %d scans (%.1f s at 80 m)" % [scans + 1, (scans + 1) * SquadAI.SCAN_S])
+	# Hearing (part 2): a heard shot half finds the shooter, never fully; then sight is quicker.
 	ai._aware.clear()
+	for i in 5:
+		ai.hear(bravo, bravo.global_position, Spotting.HEARD_SHOT)
+	check(is_equal_approx(float(ai._aware[bravo.get_instance_id()]), Spotting.HEARD_MAX) and ai.suspecting(), "shots heard: suspected, awareness capped at %.1f" % Spotting.HEARD_MAX)
+	var after := 0
+	while ai._build_awareness(bravo) < 1.0 and after < 200:
+		after += 1
+	check(after < scans, "and seen, he's spotted sooner (%d scans, not %d)" % [after + 1, scans + 1])
+	bravo.velocity = Vector3(0, 0, 4.0)
+	var running := Spotting.footsteps_m(bravo)
+	bravo.velocity = Vector3(0, 0, 1.5)
+	var walking := Spotting.footsteps_m(bravo)
+	bravo.velocity = Vector3.ZERO
+	check(running > walking and walking > 0.0 and Spotting.footsteps_m(bravo) == 0.0, "footsteps carry %.0f m running, %.0f m walking, none standing still" % [running, walking])
+	ai._aware.clear()
+	ai._suspect_at = -1000.0
 	alpha.global_transform = saved[0]
 	bravo.global_transform = saved[1]
 

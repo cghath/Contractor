@@ -440,20 +440,35 @@ func _contact_memory() -> float:
 ## contact toward it (a rough bearing: further off, further out), unless they had fresher
 ## contact of their own this last second.
 static func server_heard_shot(shooter: Soldier, origin: Vector3, suppressed: bool) -> void:
-	if shooter == null or shooter.faction == &"friendly" or not shooter.is_inside_tree():
+	if shooter == null or not shooter.is_inside_tree():
 		return
 	var reach := HEAR_SUPPRESSED_M if suppressed else HEAR_SHOT_M
 	var now := Soldier._now()
 	for n in shooter.get_tree().get_nodes_in_group(&"combatants"):
 		var s := n as Soldier
-		if s == null or s == shooter or not s.is_ai() or s.faction != &"friendly" or not s.vitals.is_up() or SquadAI.of(s) == null:
+		if s == null or s == shooter or not s.is_ai() or s.faction == shooter.faction or not s.vitals.is_up() or SquadAI.of(s) == null:
 			continue
 		var d := s.global_position.distance_to(origin)
-		if d > reach or now - s.threat_time < 1.0:
+		if d > reach:
 			continue
 		var error := HEARD_ERROR_PER_100M * d / 100.0
-		s.threat_pos = origin + Vector3(randf_range(-error, error), 0.0, randf_range(-error, error))
+		var heard_at := origin + Vector3(randf_range(-error, error), 0.0, randf_range(-error, error))
+		# Hearing feeds spotting (queue 17 part 2): the shooter is half found already.
+		SquadAI.of(s).hear(shooter, heard_at, Spotting.HEARD_SHOT)
+		if s.faction != &"friendly" or now - s.threat_time < 1.0:
+			continue  # the squad takes a heard shot as contact; hostiles go and search
+		s.threat_pos = heard_at
 		s.threat_time = now
+
+
+## Heard `who` at about `where`: awareness of them rises by `amount` (never to a full spot:
+## that takes sight), and they're suspected there.
+func hear(who: Soldier, where: Vector3, amount: float) -> void:
+	var id := who.get_instance_id()
+	var a: float = _aware.get(id, 0.0)
+	_aware[id] = maxf(a, minf(a + amount, Spotting.HEARD_MAX))
+	_suspect_pos = where
+	_suspect_at = Soldier._now()
 
 
 ## Contact this unit sees reaches its squadmates nearby (friendly squad).
@@ -1981,6 +1996,11 @@ func _find_target() -> Soldier:
 			if clearing and d < check_dist and can_see(s):
 				check = s
 				check_dist = d
+			continue
+		var steps := Spotting.footsteps_m(s)
+		if d <= steps and not can_see(s):
+			seen[s.get_instance_id()] = true  # heard, not seen: keeps awareness from fading
+			hear(s, s.global_position, Spotting.HEARD_STEPS_PER_S * SCAN_S)
 			continue
 		if d < best_dist and can_see(s):
 			seen[s.get_instance_id()] = true

@@ -36,6 +36,16 @@ const FADE_S := 20.0
 ## Awareness from which the AI suspects someone is there (looks, searches).
 const SUSPECT := 0.35
 
+## Hearing (queue 17 part 2) adds awareness but never a full spot: at most HEARD_MAX.
+## A heard shot adds HEARD_SHOT; footsteps HEARD_STEPS_PER_S while heard, out to
+## STEPS_RUN_M running, STEPS_WALK_M walking, STEPS_CROUCH_M crouched (none prone or still).
+const HEARD_MAX := 0.8
+const HEARD_SHOT := 0.4
+const HEARD_STEPS_PER_S := 0.25
+const STEPS_RUN_M := 25.0
+const STEPS_WALK_M := 12.0
+const STEPS_CROUCH_M := 5.0
+
 ## How well each camo hides on each terrain preset: a factor on the time to spot (above 1
 ## blends in, below 1 stands out). Presets missing from a row use its "_" value.
 const CAMO := {
@@ -83,6 +93,16 @@ static func spot_seconds(observer: Soldier, target: Soldier, preset: String, com
 	if now - target.last_shot_at <= FLASH_S:
 		s *= SUPPRESSED_FLASH if target.last_shot_suppressed else FLASH
 	return s
+
+
+## How far `s`'s footsteps carry now (0 when still or prone).
+static func footsteps_m(s: Soldier) -> float:
+	var speed := Vector2(s.velocity.x, s.velocity.z).length()
+	if speed < WALK_MPS or s.movement.is_prone():
+		return 0.0
+	if s.is_crouching():
+		return STEPS_CROUCH_M
+	return STEPS_RUN_M if speed >= RUN_MPS else STEPS_WALK_M
 
 
 ## The terrain preset of the zone `node` is in ("plain" for the compound and the base).

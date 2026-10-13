@@ -596,9 +596,8 @@ func _server_fire(origin: Vector3, direction: Vector3, slot: StringName) -> void
 		"suppressed" if suppressed else ("pistol" if weapon.slot == &"sidearm" else "rifle"))  # every peer hears it (Sfx)
 	PeopleLayer.server_noise(self, origin)  # people nearby hear it (wave 4)
 	if faction != &"hostile":
-		Alert.server_noise(self, origin, Alert.SHOT, bool(weapon.stats.get("suppressed", false)))  # hot zones: the enemy hears it (4B part 3)
-	else:
-		SquadAI.server_heard_shot(self, origin, bool(weapon.stats.get("suppressed", false)))  # the squad hears enemy fire
+		Alert.server_noise(self, origin, Alert.SHOT, suppressed)  # hot zones: the enemy hears it (4B part 3)
+	SquadAI.server_heard_shot(self, origin, suppressed)  # the other side hears it (and half finds the shooter: Spotting)
 	if result.result != "none":
 		CompoundLevel.current(self).show_impact.rpc(result.position, result.normal, result.result)
 	Throwables.server_gunfire(self)  # indoors, sustained fire muffles hearing
