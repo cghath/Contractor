@@ -705,8 +705,10 @@ func _test_gunner() -> void:
 	_put_player(spot - _inland() * 20.0 + Vector3(15, 0, 0))
 	var foe := _dummy("hostile", spot + _inland() * 60.0)
 	var g := v.get_node_or_null(NodePath(AavGunner.NODE_NAME)) as AavGunner
-	var fired := await _wait_for(func() -> bool: return g != null and g.fired >= 3, 20.0)
-	check(fired and g.target == foe or (fired and not foe.vitals.is_up()), "the gunner fires the M2 at an enemy in sight (%d rounds)" % (g.fired if g else 0))
+	# Three rounds at him, or fewer if they put him down (one .50 to the chest can: then the
+	# gunner stops, and waiting for a third round timed out, R0284 / CI 6bd3a5a).
+	var fired := await _wait_for(func() -> bool: return g != null and (g.fired >= 3 or (g.fired >= 1 and not foe.vitals.is_up())), 20.0)
+	check(fired and g.target == foe or (fired and not foe.vitals.is_up()), "the gunner fires the M2 at an enemy in sight (%d rounds%s)" % [g.fired if g else 0, "; he's down" if not foe.vitals.is_up() else ""])
 	await _wait_for(func() -> bool: return not foe.vitals.is_up(), 10.0)
 	foe.queue_free()
 

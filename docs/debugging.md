@@ -99,6 +99,12 @@ Today's dev keys:
 New dev keys: put them behind `DevTools.on()`, list them here, and keep them off F1-F12 (the
 squad command menu) and the game's keys (`autoload/controls.gd`).
 
+**Smoke test of these tools** (in a window, not a CI suite):
+`CONTRACTOR_SESSION_LOG=1 CONTRACTOR_PORT=<port> <godot> --path . res://tests/debug_tools_smoke.tscn`
+opens a session, presses Insert (bug report, note, screenshot) and Delete (AI overlay) as a
+player would, raises an anomaly (state dump) and ends the session (folder renamed, index line).
+Run it after touching any of them.
+
 ## Session logs: automatic in every playtest (`SessionLog`, built)
 
 Every run that isn't headless (a playtest: the editor or any build, dev tools or not) opens a
