@@ -2552,6 +2552,7 @@ func _tactic_give_ammo(t: Dictionary) -> void:
 			full = true
 			break
 		given += 1
+	print("[tactics] %s brings %s %d x %s (%s)" % [body.name, who.name, given, ammo, "no room" if full else ("none left" if given == 0 else "handed over")])
 	if given > 0:
 		_callout(&"tactic", "Ammo!")
 		if not who.is_ai():

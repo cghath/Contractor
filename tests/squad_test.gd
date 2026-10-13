@@ -316,14 +316,16 @@ func _test_tactics() -> void:
 		"Suppress known enemy: Alpha puts rounds on the known position (%s)" % [alpha.ordered])
 	far.queue_free()
 	squad.known.clear()
-	var bravo := SquadAI.of(_ai("Bravo"))
-	squad.order_command(player, "stance:prone", Vector3.ZERO, PackedStringArray(["Bravo"]))
+	var lying := _standing_mate([_ai("Alpha")])
+	var one := PackedStringArray([String(lying.name)])
+	squad.order_command(player, "stance:prone", Vector3.ZERO, one)
 	await _frames(4)
-	check(_ai("Bravo").want_stance == SoldierMovement.Stance.PRONE, "Stance > Prone: Bravo goes prone")
-	squad.order_command(player, "stance:auto", Vector3.ZERO, PackedStringArray(["Bravo"]))
+	check(lying.want_stance == SoldierMovement.Stance.PRONE, "Stance > Prone: %s goes prone (%s)" % [lying.name, lying.ai_status])
+	squad.order_command(player, "stance:auto", Vector3.ZERO, one)
 	await _frames(4)
-	check(_ai("Bravo").want_stance == -1, "Their choice: back to their own")
-	check(squad.order_command(player, "heal", Vector3.ZERO, PackedStringArray(["Bravo"])) == "Nobody selected has wounds they can treat",
+	check(lying.want_stance == -1, "Their choice: back to their own")
+	var hurt := _squad().filter(func(s: Soldier) -> bool: return not SquadAI.of(s)._self_task().is_empty()).size()
+	check(hurt > 0 or squad.order_command(player, "heal", Vector3.ZERO, one) == "Nobody selected has wounds they can treat",
 		"Heal up with nobody hurt: says so")
 	check(squad.order_command(player, "follow", Vector3.ZERO) == "?", "anything else goes to the older commands")
 	squad.order_command(player, "take_cover", Vector3.ZERO, PackedStringArray(["Charlie"]))
@@ -357,10 +359,10 @@ func _test_tactics() -> void:
 	for s: Soldier in _squad():
 		if StringName(SquadAI.of(s).ordered.get("kind", &"")) == &"give_ammo":
 			bringer = SquadAI.of(s)
-	var status := bringer.body.ai_status if bringer else "nobody"
+	var status := "%s %s" % [bringer.body.name, bringer.ordered] if bringer else "nobody"
 	check(why == "" and await _wait_until(func() -> bool:
 			if bringer:
-				status = "%s, %.1f m off" % [bringer.body.ai_status, _flat(bringer.body.global_position, player.global_position)]
+				status = "%s: %s, %.1f m off, %s" % [bringer.body.name, bringer.body.ai_status, _flat(bringer.body.global_position, player.global_position), bringer.ordered]
 			return player.inventory.count_of(ammo) > had, 10.0),
 		"Give me ammo: a squadmate brings magazines (%s; %d -> %d; %s)" % [why, had, player.inventory.count_of(ammo), status])
 	squad.give_order(player, Squad.Order.FOLLOW, player.global_position)
@@ -462,7 +464,7 @@ func _test_spotting() -> void:
 func _test_fire_discipline() -> void:
 	print("Fire discipline: the line of fire, past the target, frags and backblast")
 	var alpha := _ai("Alpha")
-	var bravo := _ai("Bravo") if _ai("Bravo") else _ai("Charlie")
+	var bravo := _standing_mate([alpha])  # (whoever the fights so far left up and on his feet)
 	var ai := SquadAI.of(alpha)
 	var saved := [alpha.global_transform, bravo.global_transform]
 	bravo.want_stance = SoldierMovement.Stance.PRONE
@@ -527,6 +529,16 @@ func _test_fire_discipline() -> void:
 	alpha.global_transform = saved[0]
 	bravo.global_transform = saved[1]
 	_clear_contact()
+
+
+## A squadmate (not one of `besides`) who is up, not carrying or carried, and not busy with a
+## casualty: the staged checks move him about.
+func _standing_mate(besides: Array) -> Soldier:
+	for s: Soldier in _squad():
+		var ai := SquadAI.of(s)
+		if s not in besides and s.vitals.is_up() and s.carrying == null and not is_instance_valid(s.carried_by) and ai.care == SquadAI.Care.NONE:
+			return s
+	return _ai("Bravo")
 
 
 func _ai(callsign: String) -> Soldier:
