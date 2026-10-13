@@ -38,6 +38,8 @@ const ENGAGE_MAX_S := 20.0
 const COOLDOWN_S := 10.0
 ## Seconds to unstrap a disposable packed on top of the pack once the shoulder one is spent.
 const UNSTRAP_S := 2.5
+## "Launcher out" (command menu): the launcher stays shouldered, looking for a target, this long.
+const READY_S := 60.0
 const AIM_TOLERANCE_DEG := 1.5
 ## The line to the target counts as clear when the first wall on it is at most this short of
 ## the target (the cover a group hides behind is the target).
@@ -67,6 +69,7 @@ class State extends RefCounted:
 	var order_point: Variant = null  # Vector3 when ordered
 	var order_target: Node3D
 	var out_of_rounds := false
+	var ready_until := -1.0  # "Launcher out" (order_ready): kept on the shoulder until then
 	## What it is doing or why it isn't (status, tests).
 	var why := ""
 
@@ -90,6 +93,21 @@ static func _state(s: Soldier) -> State:
 	if not s.has_meta(META):
 		s.set_meta(META, State.new())
 	return s.get_meta(META) as State
+
+
+## Host only. "Launcher out" (command menu): `body` shoulders its launcher (one packed on top
+## of the pack if none is on the shoulder) and keeps it out for READY_S, firing at whatever is
+## worth a rocket. False if it has none.
+static func order_ready(body: Soldier) -> bool:
+	if body.inventory.slots.get(Launchers.SLOT, &"") == &"" and not unstrap_packed(body):
+		return false
+	var st := _state(body)
+	var now := Soldier._now()
+	st.ready_until = now + READY_S
+	st.next_scan = now
+	st.cooldown_until = now
+	st.out_of_rounds = false
+	return true
 
 
 ## Host only. Squadmates among `names` (all if empty) carrying a launcher: the nearest one
@@ -161,7 +179,10 @@ static func think(ai: SquadAI) -> bool:
 	if launchers == null or item == null:
 		return false
 	if not st.engaged:
-		if body.active_slot == Launchers.SLOT and not body.is_reloading:
+		if now < st.ready_until:
+			if body.active_slot != Launchers.SLOT and not body.is_reloading:
+				body.select_weapon(Launchers.SLOT)  # "Launcher out": on the shoulder, looking for a target
+		elif body.active_slot == Launchers.SLOT and not body.is_reloading:
 			_stand_down(body, st)  # done with it (or a reload just finished): back to the rifle
 		if now < st.next_scan or now < st.cooldown_until or (st.out_of_rounds and st.order_point == null):
 			return false

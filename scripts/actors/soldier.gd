@@ -655,6 +655,11 @@ func _server_squad_command(cmd: String, point: Vector3, names: PackedStringArray
 	var squad := CompoundLevel.current(self).squad_for(faction)
 	if squad == null:
 		return
+	var ordered_why := squad.order_command(self, cmd, point, names)  # the command menu's orders (queue 12)
+	if ordered_why != "?":
+		if ordered_why != "":
+			_client_message.rpc_id(owner_peer(), ordered_why)
+		return
 	match cmd:
 		"follow":
 			squad.give_order(self, Squad.Order.FOLLOW, point, names)
