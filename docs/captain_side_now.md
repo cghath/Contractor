@@ -15,9 +15,10 @@ picking up next, we'll read it and steer around it.
 
 ## For you (cghath)
 
-- **`integrate/oct13`** (30842cc) = dev + ai/spotting + art/terrain-roads + art/gear-motion
-  (which has art/gear-fit-wire) + art/scatter-art. Full local suite R0284: 28 of 29 suite runs
-  pass, the one failure your AAV gunner check (below). Goes to `dev` on the Captain's go once CI is green.
+- **`integrate/oct13`** (8f8812a, **CI green 28/28**) = dev + ai/spotting + art/terrain-roads +
+  art/gear-motion (which has art/gear-fit-wire) + art/scatter-art + the final audit's fixes.
+  A fast-forward from dev fcae676; goes to `dev` on the Captain's go. If you push to dev first,
+  we merge yours in and re-run CI before that.
 - **I touched your `tests/aav_test.gd`** (30842cc): "the gunner fires the M2" waited for three
   rounds, but one .50 to the chest can put the dummy down, the gunner stops, and the wait timed
   out (R0284 1 round; CI 2 rounds). It now waits for three rounds or the kill. Revert if you'd rather.
@@ -39,7 +40,7 @@ picking up next, we'll read it and steer around it.
 | 4 | Gear fit: wire `gear_rig` to the fit helpers in `voxel_art.gd` (male and female) | `art/gear-fit-wire` (ed3494d) | `scripts/combat/gear_rig.gd`, `tests/armor_test.gd` | Built, R0272/R0273 PASS; CI green |
 | 5 | Gear secondary motion: bags and armour sway with the body | `art/gear-motion` (6bd3a5a) | new `scripts/combat/gear_sway.gd`, `scripts/combat/gear_rig.gd`, `tests/animations_test.gd` | Built, R0275/R0276 PASS |
 | 6 | Tree and bush art pass to match the voxel characters | `art/scatter-art` (6ce346a) | `scripts/world/zone_scatter.gd`, `data/terrain_presets.json` (conifer_share), `docs/terrain_presets.md`, `tests/preset_shots.gd` | Built, R0283 PASS |
-| 7 | Final audit and a smoke test of the debug tools (bug-report key, session logs, AI overlay, test-log numbering) | `integrate/oct13` | new `tests/debug_tools_smoke.gd`, `docs/debugging.md` | Smoke test P0292: 12/12 pass; runner check passes; audit of the diff running |
+| 7 | Final audit and a smoke test of the debug tools (bug-report key, session logs, AI overlay, test-log numbering) | `integrate/oct13` | new `tests/debug_tools_smoke.gd`, `docs/debugging.md` | Smoke test P0292: 12/12 pass; runner check passes; audit done, 4 code fixes in 8f8812a (pack turn sign, sway reset, ordered targets in deep leaves, straps with no carrier) |
 
 ## Waiting on Captain
 
@@ -49,6 +50,7 @@ picking up next, we'll read it and steer around it.
 
 ## Log
 
+- 2026-10-13 06:20: integrate/oct13 8f8812a CI green; waiting on the Captain's go for dev.
 - 2026-10-13 05:45: everything on the list built; integrate/oct13 full suite R0284; debug tools smoke P0292 pass; final audit running.
 - 2026-10-13 04:50: casualty flake fixed; roads and gear fit built and pushed; starting gear motion.
 - 2026-10-13 04:15: list posted.
