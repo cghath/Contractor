@@ -46,6 +46,7 @@ func _ready() -> void:
 	await _test_use_medical()
 	await _test_menu_and_removal()
 	await _test_medical_menu()
+	await _test_medical_menu_scrolls()
 	await _test_menu_prefers_living()
 	await _test_bleed_hud()
 	await _test_wakes_in_session()
@@ -1177,6 +1178,79 @@ func _test_menu_and_removal() -> void:
 	check(player.inventory.medical_count(&"tourniquet") == tourniquets + 1, "and goes back in your kit")
 	_reset(casualty)
 	player.inventory.remove_one(&"trauma_kit")
+
+
+## Audit A2-05: a medic carrying everything gets more item rows than fit; the list scrolls
+## (mouse wheel), every usable row can be brought on screen and clicked, and only the rows on
+## screen are hit (none past the panel's foot, unseen).
+func _test_medical_menu_scrolls() -> void:
+	print("Medical menu: a long item list scrolls")
+	player.inventory.strip()
+	player.inventory.take(&"ruck_45")
+	player.inventory.take(&"aid_bag")
+	for id: StringName in MedicalMenu.medical_ids():
+		if not ItemDB.get_item(id).stats.get("no_item", false):
+			player.inventory.take(id)
+	_place_player()
+	_reset(casualty)
+	_reset(player)
+	var m: WoundModel = casualty.vitals._model
+	m.blood = 0.8
+	m.pain_wounds = 0.5
+	m.burn = 0.2
+	m.access = {"kind": "iv", "gauge": 18, "part": &"forearm_l", "pressure": false}
+	m._add_wound(&"forearm_l", "muscle", 0.1)
+	m._add_fracture(&"forearm_l", &"forearm_bones_l")
+	casualty.vitals._after_change(true)
+	await _frames(2)
+	var menu := player.player_input.medical_menu
+	menu.open(casualty)
+	menu.select_part(&"forearm_l")
+	var panel := menu._panel()
+	var fits := menu.visible_rows()
+	var usable := range(menu.options.size()).filter(func(i: int) -> bool: return menu.options[i].disabled == "")
+	check(menu.options.size() > fits and usable.any(func(i: int) -> bool: return i >= fits),
+		"a full kit: %d rows, %d fit, usable ones past them" % [menu.options.size(), fits])
+	var wheel := func(down: bool) -> void:
+		var e := InputEventMouseButton.new()
+		e.button_index = MOUSE_BUTTON_WHEEL_DOWN if down else MOUSE_BUTTON_WHEEL_UP
+		e.pressed = true
+		e.position = menu._rows_origin() + Vector2(100, 10)
+		menu._gui_input(e)
+	var unreachable := []
+	var hit_unseen := []
+	for i: int in usable:
+		for step in menu.options.size():
+			if menu.row_shown(i):
+				break
+			wheel.call(i >= menu.scroll)
+		var rect := menu._row_rect(i)
+		if not menu.row_shown(i) or rect.end.y > panel.end.y - 52.0 + 0.01 or menu._row_at(rect.get_center()) != i:
+			unreachable.append(menu.options[i].label)
+		for j in menu.options.size():
+			if not menu.row_shown(j) and menu._row_at(menu._row_rect(j).get_center()) == j:
+				hit_unseen.append(menu.options[j].label)
+	check(unreachable.is_empty(), "the wheel brings every usable row into the list, inside the panel, and it's hit there (out of reach: %s)" % [unreachable])
+	check(hit_unseen.is_empty(), "rows scrolled out of the list are never hit (%s)" % [hit_unseen])
+	# The last usable row, clicked: its treatment starts, like any other.
+	var last: int = usable[-1]
+	for step in menu.options.size():
+		if menu.row_shown(last):
+			break
+		wheel.call(last >= menu.scroll)
+	var click := InputEventMouseButton.new()
+	click.button_index = MOUSE_BUTTON_LEFT
+	click.pressed = true
+	click.position = menu._row_rect(last).get_center()
+	var item: StringName = menu.options[last].item
+	menu._gui_input(click)
+	check(menu.row_shown(last) and casualty.vitals.is_healing() and player._server_busy_until > Soldier._now(),
+		"scrolled to it, clicking the last usable row (%s) starts it" % menu.options[last].label)
+	await _seconds(player.treat_seconds(casualty, ItemDB.get_item(item)) + 0.3)
+	menu.close()
+	_reset(casualty)
+	_reset(player)
+	_restock()
 
 
 ## H: the medical menu (MedicalMenu) on the casualty you look at, else yourself; Shift+H

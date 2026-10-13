@@ -46,7 +46,12 @@ const PART_RECTS := {
 	&"shin_r": Rect2(78, 292, 28, 106), &"shin_l": Rect2(114, 292, 28, 106),
 }
 const PANEL_SIZE := Vector2(1080.0, 620.0)
+## The panel gets shorter in a short window, down to this (the body diagram still fits); the
+## item list shows fewer rows and scrolls.
+const PANEL_MIN_H := 540.0
 const ROW_H := 24.0
+## The item list's scroll bar, right of the rows (click above or below the thumb: a page).
+const SCROLL_BAR_W := 10.0
 const MAX_LOG := 14
 const REFRESH_S := 0.25
 
@@ -59,6 +64,10 @@ var part: StringName = &"chest"
 var options: Array[Dictionary] = []
 ## Activity log lines, newest last.
 var log_lines: PackedStringArray = []
+## The first item row shown. More rows than fit (a medic's full kit) scroll: the mouse
+## wheel, the scroll bar, or the up and down keys (audit A2-05: rows past the panel's foot
+## couldn't be reached, yet were still clickable unseen).
+var scroll := 0
 var _hover := -1
 var _refresh_left := 0.0
 var _seen := {}  # part -> its summary last refresh, for the log
@@ -84,6 +93,7 @@ func open(who: Node3D) -> void:
 		_seen.clear()
 		_add_log("Opened on %s" % _who())
 	_log_target = target
+	scroll = 0
 	visible = true
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	refresh()
@@ -105,8 +115,21 @@ func _last_target() -> Node3D:
 
 func select_part(p: StringName) -> void:
 	if Vitals.BODY_PARTS.has(p):
+		if p != part:
+			scroll = 0
 		part = p
 		refresh()
+
+
+## Scrolls the item list by `rows` (negative: up), kept within the list.
+func scroll_rows(rows: int) -> void:
+	scroll += rows
+	_clamp_scroll()
+	queue_redraw()
+
+
+func _clamp_scroll() -> void:
+	scroll = clampi(scroll, 0, maxi(options.size() - visible_rows(), 0))
 
 
 ## Chooses option row `index`: sends its host request, logs it. Returns the text to show
@@ -144,6 +167,7 @@ func refresh() -> void:
 	if not is_instance_valid(target):
 		return
 	options = item_options(actor, target, part)
+	_clamp_scroll()
 	_watch(Vitals.find_on(target))
 	queue_redraw()
 
@@ -153,6 +177,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if event.is_action_pressed(&"medical_menu") or event.is_action_pressed(&"pause"):
 		close()
+	elif event.is_action_pressed(&"ui_up", true) or event.is_action_pressed(&"ui_down", true):
+		scroll_rows(-1 if event.is_action(&"ui_up") else 1)
+	elif event.is_action_pressed(&"ui_page_up", true) or event.is_action_pressed(&"ui_page_down", true):
+		scroll_rows(visible_rows() * (-1 if event.is_action(&"ui_page_up") else 1))
 	if event is InputEventKey:
 		get_viewport().set_input_as_handled()  # the menu has the keys: no reloading or throwing behind it
 
@@ -163,12 +191,20 @@ func _gui_input(event: InputEvent) -> void:
 		if row != _hover:
 			_hover = row
 			queue_redraw()
+	elif event is InputEventMouseButton and event.pressed and (event.button_index == MOUSE_BUTTON_WHEEL_UP or event.button_index == MOUSE_BUTTON_WHEEL_DOWN):
+		scroll_rows(-1 if event.button_index == MOUSE_BUTTON_WHEEL_UP else 1)
+		_hover = _row_at(event.position)
+		accept_event()
 	elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		var p := part_at(event.position)
 		if p != &"":
 			select_part(p)
 		elif triage_at(event.position) != &"":
 			set_triage(triage_at(event.position))
+		elif _scroll_bar_rect().has_point(event.position):
+			var thumb := _scroll_thumb_rect()
+			if event.position.y < thumb.position.y or event.position.y > thumb.end.y:
+				scroll_rows(visible_rows() * (-1 if event.position.y < thumb.position.y else 1))
 		else:
 			var text := choose(_row_at(event.position))
 			if text != "" and actor.player_input:
@@ -436,7 +472,8 @@ func _who() -> String:
 
 func _panel() -> Rect2:
 	var screen := get_viewport_rect().size
-	return Rect2((screen - PANEL_SIZE) * 0.5, PANEL_SIZE)
+	var dims := Vector2(PANEL_SIZE.x, clampf(screen.y - 20.0, PANEL_MIN_H, PANEL_SIZE.y))
+	return Rect2(((screen - dims) * 0.5).max(Vector2.ZERO), dims)
 
 
 func _figure_origin() -> Vector2:
@@ -456,13 +493,37 @@ func _rows_origin() -> Vector2:
 	return _panel().position + Vector2(290, 230)
 
 
+## How many item rows fit between the list's top and the triage cards.
+func visible_rows() -> int:
+	return maxi(int((_panel().end.y - 52.0 - _rows_origin().y) / ROW_H), 1)
+
+
+## Whether option row `i` is on screen now (scrolled into the list).
+func row_shown(i: int) -> bool:
+	return i >= scroll and i < mini(scroll + visible_rows(), options.size())
+
+
+## Where option row `i` is drawn (scrolled; only meaningful while row_shown).
 func _row_rect(i: int) -> Rect2:
-	return Rect2(_rows_origin() + Vector2(0, i * ROW_H), Vector2(400, ROW_H - 2))
+	return Rect2(_rows_origin() + Vector2(0, (i - scroll) * ROW_H), Vector2(400, ROW_H - 2))
+
+
+## The scroll bar beside the rows (there whether or not the list overflows; drawn only then).
+func _scroll_bar_rect() -> Rect2:
+	return Rect2(_rows_origin() + Vector2(404, 0), Vector2(SCROLL_BAR_W, visible_rows() * ROW_H - 2))
+
+
+func _scroll_thumb_rect() -> Rect2:
+	var bar := _scroll_bar_rect()
+	var total := maxi(options.size(), 1)
+	var shown := float(mini(visible_rows(), total)) / total
+	return Rect2(bar.position + Vector2(0, bar.size.y * scroll / total), Vector2(bar.size.x, bar.size.y * shown))
 
 
 ## The triage card buttons along the panel's foot (Vitals.TRIAGE_CARDS, in order).
 func _triage_rect(i: int) -> Rect2:
-	return Rect2(_panel().position + Vector2(290 + i * 84, PANEL_SIZE.y - 44), Vector2(80, 28))
+	var panel := _panel()
+	return Rect2(panel.position + Vector2(290 + i * 84, panel.size.y - 44), Vector2(80, 28))
 
 
 ## The triage card button under `pos`, or &"".
@@ -473,8 +534,9 @@ func triage_at(pos: Vector2) -> StringName:
 	return &""
 
 
+## The option row under `pos`, or -1: only rows on screen (row_shown) are hit.
 func _row_at(pos: Vector2) -> int:
-	for i in options.size():
+	for i in range(scroll, mini(scroll + visible_rows(), options.size())):
 		if _row_rect(i).has_point(pos):
 			return i
 	return -1
@@ -504,13 +566,18 @@ func _draw() -> void:
 	var mid := top + Vector2(290, 70)
 	draw_string(font, mid, InteractionMenu.part_name(part), HORIZONTAL_ALIGNMENT_LEFT, 400, 18)
 	draw_multiline_string(font, mid + Vector2(0, 24), injuries_text(vitals, part), HORIZONTAL_ALIGNMENT_LEFT, 400, 14, 6)
-	draw_string(font, _rows_origin() - Vector2(0, 8), "Your medical items", HORIZONTAL_ALIGNMENT_LEFT, 400, 15, Color(0.8, 0.8, 0.8))
+	var overflow := options.size() > visible_rows()
+	var heading := "Your medical items"
+	if overflow:
+		heading += "  (%d-%d of %d: scroll)" % [scroll + 1, mini(scroll + visible_rows(), options.size()), options.size()]
+	draw_string(font, _rows_origin() - Vector2(0, 8), heading, HORIZONTAL_ALIGNMENT_LEFT, 420, 15, Color(0.8, 0.8, 0.8))
 	if options.is_empty():
 		draw_string(font, _rows_origin() + Vector2(0, 16), "You carry no medical items", HORIZONTAL_ALIGNMENT_LEFT, 400, 14, Color(0.6, 0.6, 0.6))
-	for i in options.size():
+	if overflow:
+		draw_rect(_scroll_bar_rect(), Color(0.2, 0.21, 0.23))
+		draw_rect(_scroll_thumb_rect(), Color(0.55, 0.57, 0.6))
+	for i in range(scroll, mini(scroll + visible_rows(), options.size())):
 		var rect := _row_rect(i)
-		if rect.end.y > panel.end.y - 52:
-			break
 		var entry := options[i]
 		var greyed := String(entry.disabled) != ""
 		if i == _hover and not greyed:
