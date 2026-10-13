@@ -453,6 +453,11 @@ func _test_callout_rules() -> void:
 	callouts._pending.clear()
 	callouts.sent.clear()
 	callouts.shown.clear()
+	# And their own brains stay quiet meanwhile: a leader in contact calls a tactic, and the
+	# newest held-back line wins, so it took the place of the test's Moving! (CI, ai/spotting).
+	var brains: Array = [SquadAI.of(first), SquadAI.of(second)].filter(func(b: SquadAI) -> bool: return b != null)
+	for b: SquadAI in brains:
+		b.process_mode = Node.PROCESS_MODE_DISABLED
 	var said := func(who: Soldier, id: StringName) -> Array:
 		return callouts.sent.filter(func(c: Dictionary) -> bool: return c.speaker == String(who.name) and c.id == id)
 	check(callouts.say(first, &"reloading"), "%s calls Reloading!" % first.name)
@@ -480,6 +485,8 @@ func _test_callout_rules() -> void:
 	check(not callouts.say(first, &"reloading"), "the same callout doesn't repeat within %.0f s" % Callouts.REPEAT_GAP_S)
 	await _seconds(0.3)
 	check(said.call(first, &"reloading").size() == 1, "and a repeat isn't held back for later either")
+	for b: SquadAI in brains:
+		b.process_mode = Node.PROCESS_MODE_INHERIT
 	var hostile := _spawn_test_hostile("ChatterTest", Vector3(75, 0.1, -75))  # out of sight
 	check(callouts.say(hostile, &"reloading") and said.call(hostile, &"reloading")[0].to.is_empty(), "a hostile callout goes to nobody")
 	await _frames(2)
