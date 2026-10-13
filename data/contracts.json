@@ -130,7 +130,8 @@
 		{"zone_id": "wadi_farm", "name": "Wadi farm", "region": "inland", "kind": "contract", "def": {"seed": 2207, "size_m": 1920}},
 		{"zone_id": "harbour_yard", "name": "Harbour yard", "region": "coast", "kind": "contract", "def": {"seed": 3301, "size_m": 1536, "types": ["checkpoint", "compound", "outpost", "village", "town"]}},
 		{"zone_id": "ridge_hot", "name": "Black Ridge hills", "region": "inland", "kind": "hot", "faction": "meridian", "def": {"seed": 4409, "size_m": 4096, "layout": "hot"}},
-		{"zone_id": "coast_hot", "name": "Salt flats", "region": "coast", "kind": "hot", "faction": "salvage_union", "def": {"seed": 5503, "size_m": 4096, "layout": "hot"}}
+		{"zone_id": "coast_hot", "name": "Salt flats", "region": "coast", "kind": "hot", "faction": "salvage_union", "def": {"seed": 5503, "size_m": 4096, "layout": "hot"}},
+		{"zone_id": "city_hot", "name": "Old Quarter", "region": "inland", "kind": "hot", "faction": "meridian", "terrain": "scrubland", "def": {"seed": 6607, "size_m": 4096, "layout": "hot", "urban": true}}
 	],
 
 	"fixers": [

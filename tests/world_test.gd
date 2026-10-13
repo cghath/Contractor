@@ -605,6 +605,37 @@ func _test_hot_layout() -> void:
 		var hostage_at: Array = MissionRegistry.site(htype, "hostage").pos
 		check(sites_ok and picked.size() == 3 and hvt_at != hostage_at,
 			"its contract sites come from its buildings (HVT at %s, hostage at %s), and %s can play there" % [hvt_at, hostage_at, picked])
+	# Urban hot zones: towns packed round the HQ, a road to each, patrols in their streets.
+	for seed in [6607, 4409, 77]:
+		var city := ZoneDef.generate_hot(seed, ZoneDef.HOT_SIZE_M, true)
+		var mods: Array = city.modules
+		var hq_m: Dictionary = mods.filter(func(m: Dictionary) -> bool: return m.type == "hq")[0]
+		var hq_at := Vector2(hq_m.pos[0], hq_m.pos[1])
+		var towns: Array = mods.filter(func(m: Dictionary) -> bool: return ZoneModules.base(m.type) == "town")
+		var near := towns.all(func(m: Dictionary) -> bool:
+			return Vector2(m.pos[0], m.pos[1]).distance_to(hq_at) <= ZoneDef.URBAN_REACH_M.y + ZoneDef.GRID_M)
+		var roads_in := towns.all(func(m: Dictionary) -> bool:
+			return (city.roads as Array).any(func(r: Array) -> bool: return is_equal_approx(float(r[1][0]), float(m.pos[0])) and is_equal_approx(float(r[1][1]), float(m.pos[1]))))
+		var town_spots := towns.map(func(m: Dictionary) -> Vector2: return Vector2(m.pos[0], m.pos[1]))
+		var patrolled := (city.patrols as Array).any(func(route: Array) -> bool:
+			return route.any(func(q: Array) -> bool: return Vector2(q[0], q[1]) in town_spots))
+		var apart := true
+		for i in towns.size():
+			for j in range(i + 1, towns.size()):
+				var a: Dictionary = towns[i]
+				var b: Dictionary = towns[j]
+				var ha: Vector2 = ZoneModules.HALF[a.type]
+				var hb: Vector2 = ZoneModules.HALF[b.type]
+				var ra := Rect2(Vector2(a.pos[0], a.pos[1]) - ha, ha * 2.0)
+				apart = apart and not ra.intersects(Rect2(Vector2(b.pos[0], b.pos[1]) - hb, hb * 2.0))
+		check(bool(city.get("urban", false)) and towns.size() >= ZoneDef.URBAN_TOWNS.x and towns.size() <= ZoneDef.URBAN_TOWNS.y and near and roads_in and apart
+			and patrolled and mods.any(func(m: Dictionary) -> bool: return m.type == "village") and ZoneDef.generate_hot(seed, ZoneDef.HOT_SIZE_M, true).hash() == city.hash(),
+			"urban seed %d: %d towns within %d m of the HQ, apart, a road into each, patrols in their streets, a village outside, the same every time" % [seed,
+			towns.size(), int(ZoneDef.URBAN_REACH_M.y)])
+	var old_quarter := MissionRegistry.zone_def("city_hot")
+	check(bool(old_quarter.get("urban", false)) and old_quarter.get("kind", "") == "hot" and MissionRegistry.zone("city_hot").get("modules", []).has("town"),
+		"the campaign has an urban hot zone (%s: %d towns)" % [old_quarter.get("name", ""),
+		(old_quarter.get("modules", []) as Array).filter(func(m: Dictionary) -> bool: return ZoneModules.base(m.type) == "town").size()])
 	var spec := MissionRegistry.zone_def("ridge_hot")
 	check(spec.get("kind", "") == "hot" and is_equal_approx(float(spec.size_m), 4096.0), "the campaign's hot zones are 16 km² hot layouts")
 	# Terrain visual pass: the roads are drawn, on the ground and off the module pads, and the
@@ -811,7 +842,7 @@ func _test_presets() -> void:
 		and pick.call({"name": "Somewhere", "region": "coast", "terrain": "scrubland"}) == "scrubland"
 		and pick.call({"name": "Somewhere"}) == "temperate",
 		"terrain preset by zone: explicit, then name hints, then the region's default, then temperate")
-	var expect := {"compound_01": "coastal_lowland", "wadi_farm": "desert_wadi", "harbour_yard": "coastal_lowland", "ridge_hot": "rocky_ridge", "coast_hot": "salt_flats"}
+	var expect := {"compound_01": "coastal_lowland", "wadi_farm": "desert_wadi", "harbour_yard": "coastal_lowland", "ridge_hot": "rocky_ridge", "coast_hot": "salt_flats", "city_hot": "scrubland"}
 	var mapped := true
 	for id: String in expect:
 		mapped = mapped and String(MissionRegistry.zone_def(id).get("terrain", "")) == expect[id]

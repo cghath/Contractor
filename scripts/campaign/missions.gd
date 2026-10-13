@@ -169,7 +169,7 @@ static func zone_def(zone_id: String) -> Dictionary:
 	if spec is String:
 		def = ZoneDef.get_def(spec)
 	elif spec is Dictionary and String(spec.get("layout", "")) == "hot":
-		def = ZoneDef.generate_hot(int(spec.get("seed", hash(zone_id))), float(spec.get("size_m", ZoneDef.HOT_SIZE_M)))
+		def = ZoneDef.generate_hot(int(spec.get("seed", hash(zone_id))), float(spec.get("size_m", ZoneDef.HOT_SIZE_M)), bool(spec.get("urban", false)))
 	elif spec is Dictionary:
 		def = ZoneDef.generate(int(spec.get("seed", hash(zone_id))), float(spec.get("size_m", 1920.0)),
 			spec.get("types", ["compound", "outpost", "village", "checkpoint"]), int(spec.get("count", 5)))

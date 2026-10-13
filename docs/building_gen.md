@@ -56,7 +56,14 @@ suit it. Captain's side; see `docs/build_plan.md` ("Procedural buildings") for w
      skip towns), since cache counting is on cg's audit list.
    - Its people: a civilian for every third building, walking front step, street, crossroads
      (`BuildingGen.TOWN_CIVILIAN_EVERY`); loot from `BuildingGen.TOWN_LOOT` by spot table.
-   - Next: urban hot zones (several towns, denser), then storeys.
+   - Urban hot zones (built): `ZoneDef.generate_hot(seed, size, urban = true)`, zone def
+     `"urban": true`. 3-4 towns within 900 m of the HQ, 190 m apart (districts of one city), a
+     road from the HQ into each, enemy patrols through their streets, 1-2 villages outside. The
+     campaign's is "Old Quarter" (`city_hot`, scrubland, Meridian).
+   - Measured (agent-tools/city_shots.gd, Old Quarter): a town streams in in under a second;
+     the frame it lands in takes 290-350 ms against a village's 190 ms (the garrison spawning
+     and the voxel build together). Worth smoothing before city zones (phase 4).
+   - Next: storeys.
 3. **Storeys.** Multi-storey buildings: stair chunks, upper floors, rooftops the AI can use.
 4. **City zones.** A dense-streets terrain preset made of towns, with what it takes to stream
    that many buildings (budgets measured with the session log's performance lines).
