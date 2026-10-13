@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Leaves a playable test build in builds/<date>_<label>/:
-#   contractor.pck  the game (about 130 KB)
+#   contractor.pck  the game
+#   Contractor.exe  the standalone game (when the Voxel Tools release template is installed; see below)
 #   play.bat        double-click to play; runs the pack with the Voxel Tools build of Godot
 #   BUILD.txt       branch, commit and what to test
 # Usage: GODOT=<voxel godot exe> tools/make_build.sh <label> ["what to test"]
 # builds/ is git-ignored: builds stay on the machine that made them.
-# No export templates needed: the Voxel Tools editor binary runs the pack directly.
+# play.bat needs no export templates: the Voxel Tools editor binary runs the pack directly.
 set -eu
 cd "$(dirname "$0")/.."
 GODOT="${GODOT:-godot}"
@@ -47,6 +48,21 @@ CFG
 fi
 "$GODOT" --headless --path . --export-pack "Windows Desktop" "$dir/contractor.pck" >/dev/null 2>&1
 [ -s "$dir/contractor.pck" ] || { echo "export failed"; exit 1; }
+# A standalone Contractor.exe too, when the Voxel Tools release template for this editor is there
+# (Zylann's godot.windows.template_release.x86_64.exe from the same release as the editor; set
+# CONTRACTOR_TEMPLATE to it, or unzip it to template_release/ beside the editor). The exe reads the
+# pack beside it, so nobody needs the editor to play. It's a release build: dev tools need --dev.
+template="${CONTRACTOR_TEMPLATE:-$(dirname "$GODOT")/template_release/godot.windows.template_release.x86_64.exe}"
+if [ -f "$template" ]; then
+	win_template="$(cygpath -m "$template" 2>/dev/null || echo "$template")"
+	sed -i "s|^custom_template/release=.*|custom_template/release=\"$win_template\"|" export_presets.cfg
+	"$GODOT" --headless --path . --export-release "Windows Desktop" "$dir/Contractor.exe" >/dev/null 2>&1
+	if [ -s "$dir/Contractor.exe" ]; then
+		printf '@echo off\r\nrem Plays this build with the dev tools on (docs/debugging.md: K, Shift+End, Insert, Delete...).\r\nstart "" "%%~dp0Contractor.exe" --dev %%*\r\n' > "$dir/Contractor (dev tools).bat"
+	else
+		echo "Contractor.exe export failed (play.bat still works)"
+	fi
+fi
 cat > "$dir/play.bat" <<'BAT'
 @echo off
 rem Plays this build. Needs the Voxel Tools 1.7 build of Godot (see the README).
@@ -69,7 +85,12 @@ sed -i 's/$/\r/' "$dir/play.bat"
 	echo "Contractor test build: $label"
 	echo "Built $(date '+%Y-%m-%d %H:%M') from branch $(git branch --show-current), commit $(git rev-parse --short HEAD)$(git diff --quiet HEAD -- . ':!builds' || echo ' plus uncommitted changes')"
 	echo
-	echo "Play: double-click play.bat, then click Play (host a session)."
+	if [ -s "$dir/Contractor.exe" ]; then
+		echo "Play: double-click Contractor.exe (or \"Contractor (dev tools).bat\" for the dev keys)."
+		echo "play.bat runs the same pack through the Voxel Tools editor (dev tools always on)."
+	else
+		echo "Play: double-click play.bat, then click Play (host a session)."
+	fi
 	[ -n "$notes" ] && { echo; echo "What to test:"; echo "$notes"; }
 } > "$dir/BUILD.txt"
 echo "$dir"
