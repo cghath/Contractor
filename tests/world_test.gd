@@ -592,11 +592,12 @@ func _test_hot_layout() -> void:
 
 # --- Procedural buildings (docs/building_gen.md) ----------------------------------------------
 
-## Phase 1: houses. Over many seeds: the right rooms, every room reachable from the street, the
-## bathroom off one doorway, doorways clear of furniture, everything inside the shell, the same
-## house from the same seed, and within a voxel budget.
+## Houses (phase 1) and shops, warehouses, clinics and police stations (phase 2). Over many
+## seeds: the right rooms, every room reachable from the street, the bathroom off one doorway,
+## doorways clear of furniture, everything inside the shell, the same building from the same
+## seed, and within a voxel budget.
 func _test_building_gen() -> void:
-	print("Procedural buildings: houses")
+	print("Procedural buildings: houses, shops, warehouses, clinics, police stations")
 	var ok_rooms := true
 	var ok_reach := true
 	var ok_doors := true
@@ -607,8 +608,17 @@ func _test_building_gen() -> void:
 	var styles := {}
 	var bare := {}  # role -> rooms of it left unfurnished
 	var bad := []
+	var runs := []
 	for seed in range(1, 41):
-		var hs := BuildingGen.house(seed)
+		runs.append(["house", seed])
+	for type: String in ["shop", "warehouse", "clinic", "police"]:
+		for seed in range(1, 16 if type != "shop" else 21):
+			runs.append([type, seed * 7 + 3])
+	for run: Array in runs:
+		var type: String = run[0]
+		var seed: int = run[1]
+		var hs := BuildingGen.building(type, seed)
+		var spec: Dictionary = BuildingGen.TYPES[type]
 		styles[hs.style] = true
 		var rooms: Array = hs.rooms
 		var roles: Array = rooms.map(func(r: Dictionary) -> String: return r.role)
@@ -617,10 +627,15 @@ func _test_building_gen() -> void:
 		furnished += rooms.filter(func(r: Dictionary) -> bool: return r.chunk != "").size()
 		for r: Dictionary in rooms:
 			if r.chunk == "":
-				bare[r.role] = int(bare.get(r.role, 0)) + 1
-		if n < 4 or n > 6 or roles.count("living") != 1 or roles.count("kitchen") != 1 or roles.count("bathroom") != 1:
+				bare["%s %s" % [type, r.role]] = int(bare.get("%s %s" % [type, r.role], 0)) + 1
+		var right: bool = n >= int(spec.rooms[0]) and n <= int(spec.rooms[1]) and roles.count(spec.front) == 1 and roles.count("bathroom") <= 1
+		if type == "house":
+			right = right and roles.count("kitchen") == 1 and roles.count("bathroom") == 1
+		if type == "police":
+			right = right and roles.has("armoury") and roles.has("cells")
+		if not right:
 			ok_rooms = false
-			bad.append("seed %d rooms %s" % [seed, roles])
+			bad.append("%s %d rooms %s" % [type, seed, roles])
 		# Reachable from outside through the doorways; the bathroom has one.
 		var seen := {-1: true}
 		var grew := true
@@ -636,9 +651,9 @@ func _test_building_gen() -> void:
 		var bath := roles.find("bathroom")
 		var bath_doors := (hs.doors as Array).filter(func(dr: Dictionary) -> bool: return bath in dr.rooms).size()
 		var front := (hs.doors as Array).any(func(dr: Dictionary) -> bool: return dr.rooms[1] == -1 and (dr.at as Vector3).z > 0.0)
-		if seen.size() != n + 1 or bath_doors != 1 or not front:
+		if seen.size() != n + 1 or (bath >= 0 and bath_doors != 1) or not front:
 			ok_reach = false
-			bad.append("seed %d: %d of %d rooms reached, bathroom doors %d, front door %s" % [seed, seen.size() - 1, n, bath_doors, front])
+			bad.append("%s %d: %d of %d rooms reached, bathroom doors %d, front door %s" % [type, seed, seen.size() - 1, n, bath_doors, front])
 		# Doorways clear: the gap itself and a step either side of it.
 		var solid := func(q: Vector3) -> bool:
 			return (hs.boxes as Array).any(func(bx: Array) -> bool: return AABB(bx[0], (bx[1] as Vector3) - (bx[0] as Vector3)).has_point(q))
@@ -648,7 +663,7 @@ func _test_building_gen() -> void:
 			var through_z: bool = not solid.call(at + Vector3(0, 0, 0.6)) and not solid.call(at - Vector3(0, 0, 0.6))
 			if solid.call(at) or not (through_x or through_z) and dr.rooms[1] != -1:
 				ok_doors = false
-				bad.append("seed %d: doorway at %s blocked" % [seed, dr.at])
+				bad.append("%s %d: doorway at %s blocked" % [type, seed, dr.at])
 		# Inside the shell, and its size in voxels.
 		var half := (hs.size as Vector2) * 0.5
 		var top := float(BuildingGen.STYLES[hs.style].h) + float(BuildingGen.STYLES[hs.style].roof_t)
@@ -659,12 +674,12 @@ func _test_building_gen() -> void:
 			voxels += int((hi - lo).x * (hi - lo).y * (hi - lo).z / pow(VoxelWorld.VOXEL_SIZE, 3))
 			if lo.x < -half.x - 0.01 or lo.z < -half.y - 0.01 or hi.x > half.x + 0.01 or hi.z > half.y + 0.01 or hi.y > top + 0.01 or lo.y < -0.01:
 				ok_inside = false
-		worst_voxels = maxi(worst_voxels, voxels)
-	check(ok_rooms, "houses (40 seeds): 4 to 6 rooms, one living room, kitchen and bathroom each %s" % [bad.slice(0, 3)])
+		worst_voxels = maxi(worst_voxels, voxels if type != "warehouse" else voxels / 2)
+	check(ok_rooms, "%d buildings: each type's rooms (a house's living room, kitchen and bathroom; a police station's armoury and cells) %s" % [runs.size(), bad.slice(0, 3)])
 	check(ok_reach, "every room reachable from the street, a front door on it, the bathroom off one doorway %s" % [bad.slice(0, 3)])
 	check(ok_doors, "doorways clear of furniture: walk through each %s" % [bad.slice(0, 3)])
-	check(ok_inside and worst_voxels < 150000, "everything inside the shell and under the roof; at most %d voxels (budget 150000)" % worst_voxels)
-	check(furnished >= room_total - 2 and styles.size() >= 3,
+	check(ok_inside and worst_voxels < 150000, "everything inside the shell and under the roof; at most %d voxels (budget 150000; a warehouse twice that)" % worst_voxels)
+	check(furnished >= room_total - runs.size() / 20 and styles.size() >= 3,
 		"rooms furnished from the chunk library (%d of %d; bare: %s), in %d styles" % [furnished, room_total, bare, styles.size()])
 	var again := BuildingGen.house(7)
 	check(BuildingGen.house(7).boxes == again.boxes and BuildingGen.house(8).boxes != again.boxes, "the same seed builds the same house, another seed another")

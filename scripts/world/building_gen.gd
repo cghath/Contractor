@@ -7,7 +7,7 @@ extends RefCounted
 ## front door to +z), so destruction, saves and streaming work as they do, and the AI finds its
 ## rooms and doorways by probing (Buildings). The same seed gives the same building.
 ##
-## Phase 1: single-storey houses.
+## Phase 1: single-storey houses. Phase 2: shops, warehouses, clinics, police stations.
 
 const CHUNKS_PATH := "res://data/building_chunks.json"
 ## The narrowest a room may be (m), and how much wall a doorway keeps either side of it.
@@ -33,25 +33,45 @@ const STYLES := {
 	"block": {"wall": VoxelWorld.Mat.CINDER_BLOCK, "t": 0.2, "inner": VoxelWorld.Mat.CINDER_BLOCK, "roof": VoxelWorld.Mat.SHEET_METAL, "roof_t": 0.1, "h": 2.6},
 	"stone": {"wall": VoxelWorld.Mat.STONE, "t": 0.4, "inner": VoxelWorld.Mat.PLASTER, "roof": VoxelWorld.Mat.ROOF_TILE, "roof_t": 0.2, "h": 2.8},
 }
-## Building types: footprint (width x along the street, depth z: [min, max] m each) and rooms.
+## Building types: footprint (width x along the street, depth z: [min, max] m each), how many
+## rooms, and their roles: "front" the room the front door opens into (the one with most street
+## wall; doorways spread from it), "fill" roles given to the rest biggest first, "smallest" the
+## smallest room's role, "inner" a role that goes in the room with the least outside wall (none
+## for "rest" when the list runs out); "back" the room with a back door; rooms with no windows;
+## the front door's and the windows' widths (m). A house keeps its own rules (_house_roles).
 const TYPES := {
-	"house": {"w": [8.0, 13.0], "d": [7.0, 11.0], "rooms": [4, 6]},
+	"house": {"w": [8.0, 13.0], "d": [7.0, 11.0], "rooms": [4, 6], "front": "living", "back": "kitchen",
+		"dark": ["bathroom", "storeroom"], "door_w": 0.9, "win_w": 1.0},
+	"shop": {"w": [7.0, 11.0], "d": [8.0, 12.0], "rooms": [3, 4], "front": "shopfront", "fill": ["storeroom", "office"],
+		"smallest": "bathroom", "rest": "storeroom", "back": "storeroom", "dark": ["bathroom", "storeroom"], "door_w": 1.8, "win_w": 2.0},
+	"warehouse": {"w": [12.0, 18.0], "d": [10.0, 14.0], "rooms": [2, 3], "front": "hall", "fill": ["office", "storeroom"],
+		"rest": "storeroom", "back": "hall", "dark": ["storeroom"], "door_w": 3.0, "win_w": 1.0, "first_cut": 0.72},
+	"clinic": {"w": [11.0, 15.0], "d": [10.0, 13.0], "rooms": [5, 6], "front": "reception", "fill": ["ward", "treatment", "office"],
+		"smallest": "bathroom", "inner": "pharmacy", "rest": "ward", "back": "treatment", "dark": ["bathroom", "pharmacy"], "door_w": 1.2, "win_w": 1.2},
+	"police": {"w": [11.0, 15.0], "d": [9.0, 12.0], "rooms": [5, 6], "front": "front_desk", "fill": ["office", "cells", "storeroom"],
+		"smallest": "bathroom", "inner": "armoury", "rest": "office", "back": "office", "dark": ["bathroom", "armoury", "cells", "storeroom"],
+		"door_w": 1.2, "win_w": 1.0},
 }
 
 static var _chunks: Array = []
 
 
-## A house from `seed` in `style` (STYLES; "" picks one from the seed). Returns
-## {"boxes": [[lo, hi, Mat]], "rooms": [{"role", "rect" (Rect2, x/z inside its walls), "chunk"}],
-##  "doors": [{"at": Vector3, "rooms": [i, j] (j -1: outside)}], "loot": [{"at", "table"}],
-##  "size": Vector2, "style"}.
+## A house from `seed` in `style` (building("house", ...)).
 static func house(seed: int, style := "") -> Dictionary:
+	return building("house", seed, style)
+
+
+## A building of `type` (TYPES) from `seed` in `style` (STYLES; "" picks one from the seed).
+## Returns {"boxes": [[lo, hi, Mat]], "rooms": [{"role", "rect" (Rect2, x/z inside its walls),
+## "chunk"}], "doors": [{"at": Vector3, "rooms": [i, j] (j -1: outside)}], "loot": [{"at",
+## "table"}], "size": Vector2, "style", "type"}.
+static func building(type: String, seed: int, style := "") -> Dictionary:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed
 	if style == "":
 		style = STYLES.keys()[rng.randi() % STYLES.size()]
 	var st: Dictionary = STYLES[style]
-	var spec: Dictionary = TYPES["house"]
+	var spec: Dictionary = TYPES[type]
 	var w := snappedf(rng.randf_range(spec.w[0], spec.w[1]), 0.1)
 	var d := snappedf(rng.randf_range(spec.d[0], spec.d[1]), 0.1)
 	var outer := Rect2(-w * 0.5, -d * 0.5, w, d)
@@ -73,7 +93,8 @@ static func house(seed: int, style := "") -> Dictionary:
 				span = r.size.x if axis == 0 else r.size.y
 				if span < MIN_ROOM * 2.0 + INNER_T:
 					continue
-			var cut := snappedf(clampf(span * rng.randf_range(0.4, 0.6), MIN_ROOM + INNER_T * 0.5, span - MIN_ROOM - INNER_T * 0.5), 0.1)
+			var share := float(spec.first_cut) if splits.is_empty() and spec.has("first_cut") else rng.randf_range(0.4, 0.6)
+			var cut := snappedf(clampf(span * share, MIN_ROOM + INNER_T * 0.5, span - MIN_ROOM - INNER_T * 0.5), 0.1)
 			var a: Rect2
 			var b: Rect2
 			if axis == 0:
@@ -100,13 +121,13 @@ static func house(seed: int, style := "") -> Dictionary:
 			var l := _shared(rects[i], rects[j])
 			if not l.is_empty():
 				links.append([i, j] + l)
-	var roles := _roles(rects, links, outer)
+	var roles := _house_roles(rects, links) if type == "house" else _roles(spec, rects, inner)
 	var n := rects.size()
-	var living := roles.find("living")
+	var hub := roles.find(spec.front)
 	var bath := roles.find("bathroom")
-	# Doorways: a tree from the living room (the bathroom a leaf), and now and then one loop.
+	# Doorways: a tree from the front room (the bathroom a leaf), and now and then one loop.
 	var tree: Array = []
-	var reached := {living: true}
+	var reached := {hub: true}
 	var grew := true
 	while grew and reached.size() < n:
 		grew = false
@@ -140,26 +161,28 @@ static func house(seed: int, style := "") -> Dictionary:
 		_gap(gaps, "in:%d:%s" % [l[2], snappedf(l[3], 0.01)], lo, lo + DOOR_W, 0.0, DOOR_H)
 		var at := Vector3(l[3], 0, lo + DOOR_W * 0.5) if l[2] == 0 else Vector3(lo + DOOR_W * 0.5, 0, l[3])
 		doors.append({"at": at, "rooms": [l[0], l[1]]})
-	# Outside: the front door (+z, the street) from the living room if it can, else the room
-	# nearest the front; a back door from the kitchen.
-	var front := living if _side_len(rects[living], inner, "s") >= DOOR_W + 2.0 * DOOR_EDGE else _nearest_side(rects, inner, "s", bath)
-	_outer_door(gaps, doors, rects, inner, front, "s", rng)
-	var kitchen := roles.find("kitchen")
+	# Outside: the front door (+z, the street) from the front room if it can, else the room
+	# nearest the front; a back door from the type's back room.
+	var door_w: float = spec.door_w
+	var front := hub if _side_len(rects[hub], inner, "s") >= door_w + 2.0 * DOOR_EDGE else _nearest_side(rects, inner, "s", bath)
+	_outer_door(gaps, doors, rects, inner, front, "s", rng, door_w)
+	var back := roles.find(spec.back)
 	for side: String in ["n", "e", "w"]:
-		if kitchen >= 0 and kitchen != front and _side_len(rects[kitchen], inner, side) >= DOOR_W + 2.0 * DOOR_EDGE:
-			_outer_door(gaps, doors, rects, inner, kitchen, side, rng)
+		if back >= 0 and (back != front or side == "n") and _side_len(rects[back], inner, side) >= DOOR_W + 2.0 * DOOR_EDGE:
+			_outer_door(gaps, doors, rects, inner, back, side, rng, maxf(DOOR_W, door_w if type == "warehouse" else DOOR_W))
 			break
-	# Windows on outer walls, but not a bathroom's or a storeroom's.
+	# Windows on outer walls, but not in the type's dark rooms (bathrooms, storerooms, an armoury).
+	var win_w: float = spec.win_w
 	for i in n:
-		if roles[i] in ["bathroom", "storeroom"]:
+		if roles[i] in (spec.dark as Array):
 			continue
 		for side: String in ["n", "s", "e", "w"]:
 			var span := _side_span(rects[i], inner, side)
-			if span.y - span.x < WIN_WALL_MIN:
+			if span.y - span.x < maxf(WIN_WALL_MIN, win_w + 1.0):
 				continue
 			var mid := (span.x + span.y) * 0.5
-			if not _overlaps(gaps.get("out:" + side, []), mid - WIN_W * 0.5 - 0.3, mid + WIN_W * 0.5 + 0.3):
-				_gap(gaps, "out:" + side, mid - WIN_W * 0.5, mid + WIN_W * 0.5, WIN_SILL, WIN_TOP)
+			if not _overlaps(gaps.get("out:" + side, []), mid - win_w * 0.5 - 0.3, mid + win_w * 0.5 + 0.3):
+				_gap(gaps, "out:" + side, mid - win_w * 0.5, mid + win_w * 0.5, WIN_SILL, WIN_TOP)
 	# The walls.
 	var boxes: Array = []
 	var h: float = st.h
@@ -178,7 +201,7 @@ static func house(seed: int, style := "") -> Dictionary:
 		var room := _room_rect(rects[i], inner)
 		var placed := _furnish(boxes, loot, room, roles[i], doors, i, rng)
 		rooms.append({"role": roles[i], "rect": room, "chunk": placed})
-	return {"boxes": boxes, "rooms": rooms, "doors": doors, "loot": loot, "size": Vector2(w, d), "style": style}
+	return {"boxes": boxes, "rooms": rooms, "doors": doors, "loot": loot, "size": Vector2(w, d), "style": style, "type": type}
 
 
 ## A style for a zone's region and terrain preset (TerrainPresets ids).
@@ -214,9 +237,39 @@ static func _shared(a: Rect2, b: Rect2) -> Array:
 	return []
 
 
-## Each room's role: the biggest is the living room, the smallest the bathroom, the kitchen the
-## biggest left next to the living room, a sixth room a storeroom, the rest bedrooms.
-static func _roles(rects: Array[Rect2], links: Array, outer: Rect2) -> Array:
+## A non-house building's room roles from its type's spec (TYPES): the front room the one with
+## the most street wall, the smallest room its "smallest" role, the room with the least outside
+## wall its "inner" role, the rest "fill" biggest first, then "rest".
+static func _roles(spec: Dictionary, rects: Array[Rect2], inner: Rect2) -> Array:
+	var n := rects.size()
+	var roles: Array = []
+	roles.resize(n)
+	roles.fill("")
+	var front := _nearest_side(rects, inner, "s")
+	roles[front] = spec.front
+	var order: Array = range(n)
+	order.sort_custom(func(a: int, b: int) -> bool: return rects[a].get_area() > rects[b].get_area())
+	if spec.has("smallest") and n >= 4 and roles[order[n - 1]] == "":
+		roles[order[n - 1]] = spec.smallest
+	if spec.has("inner"):
+		var outside := func(i: int) -> float:
+			return _side_len(rects[i], inner, "n") + _side_len(rects[i], inner, "s") + _side_len(rects[i], inner, "e") + _side_len(rects[i], inner, "w")
+		var best := -1
+		for i in n:
+			if roles[i] == "" and (best < 0 or outside.call(i) < outside.call(best)):
+				best = i
+		if best >= 0:
+			roles[best] = spec.inner
+	var fill: Array = (spec.get("fill", []) as Array).duplicate()
+	for i: int in order:
+		if roles[i] == "":
+			roles[i] = fill.pop_front() if not fill.is_empty() else String(spec.get("rest", "storeroom"))
+	return roles
+
+
+## A house's room roles: the biggest is the living room, the smallest the bathroom, the kitchen
+## the biggest left next to the living room, a sixth room a storeroom, the rest bedrooms.
+static func _house_roles(rects: Array[Rect2], links: Array) -> Array:
 	var n := rects.size()
 	var order: Array = range(n)
 	order.sort_custom(func(a: int, b: int) -> bool: return rects[a].get_area() > rects[b].get_area())
@@ -283,13 +336,14 @@ static func _nearest_side(rects: Array[Rect2], inner: Rect2, side: String, skip 
 	return best
 
 
-static func _outer_door(gaps: Dictionary, doors: Array, rects: Array[Rect2], inner: Rect2, room: int, side: String, rng: RandomNumberGenerator) -> void:
+static func _outer_door(gaps: Dictionary, doors: Array, rects: Array[Rect2], inner: Rect2, room: int, side: String, rng: RandomNumberGenerator, width := DOOR_W) -> void:
 	var span := _side_span(rects[room], inner, side)
-	if span.y - span.x < DOOR_W + DOOR_EDGE * 2.0:
+	width = minf(width, span.y - span.x - DOOR_EDGE * 2.0)
+	if width < DOOR_W:
 		return
-	var lo := snappedf(rng.randf_range(span.x + DOOR_EDGE, span.y - DOOR_EDGE - DOOR_W), 0.1)
-	_gap(gaps, "out:" + side, lo, lo + DOOR_W, 0.0, DOOR_H)
-	var c := lo + DOOR_W * 0.5
+	var lo := snappedf(rng.randf_range(span.x + DOOR_EDGE, span.y - DOOR_EDGE - width), 0.1)
+	_gap(gaps, "out:" + side, lo, lo + width, 0.0, DOOR_H + (0.4 if width >= 2.5 else 0.0))
+	var c := lo + width * 0.5
 	var at: Vector3
 	match side:
 		"n": at = Vector3(c, 0, inner.position.y)
