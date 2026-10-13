@@ -35,3 +35,5 @@
 - Plans and who owns what: [docs/build_plan.md](docs/build_plan.md) and
   [docs/ChrisPlan_handoff.md](docs/ChrisPlan_handoff.md) (cghath's agent: the note at the top
   of "Wave 5").
+- What Captain's side is working on right now, and the files it touches: [docs/captain_side_now.md](docs/captain_side_now.md)
+  (kept current; cghath owns the audit findings A1-01 to A3-10).
