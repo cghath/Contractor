@@ -787,7 +787,7 @@ func _test_dead_bodies() -> void:
 		"Loot lists what's on him, like the inventory screen (%s)" % [listed])
 	var carried := await _wait_until(func() -> bool: return is_instance_valid(echo.carried_by) and echo.carried_by.is_ai(), 25.0)
 	var bearer := echo.carried_by
-	check(carried, "out of contact a squadmate picks his body up (%s; squad: %s)" % [bearer.ai_status if bearer else "nobody", _squad().map(func(s: Soldier) -> String: return "%s %s %.1f m %s v%.1f in%s st%.1f c%s path%d dest%s phys%s" % [s.name, s.ai_status, _flat(s.global_position, echo.global_position), SquadAI.of(s)._has_destination, s.velocity.length(), s.move_input, s.stunned_s, SquadAI.of(s).in_contact(), SquadAI.of(s)._path.size(), SquadAI.of(s)._destination, s.is_physics_processing()])])
+	check(carried, "out of contact a squadmate picks his body up (%s; squad: %s)" % [bearer.ai_status if bearer else "nobody", _squad().map(func(s: Soldier) -> String: return "%s %s %.1f m at %s v%.1f in%s hits %s busy %.1f" % [s.name, s.ai_status, _flat(s.global_position, echo.global_position), s.global_position, s.velocity.length(), s.move_input, range(s.get_slide_collision_count()).map(func(i: int) -> String: return str(s.get_slide_collision(i).get_collider())), s._busy_until - Soldier._now()])])
 	if not carried:
 		print("    squad: %s" % [_squad().map(func(s: Soldier) -> String: return "%s %s %s/%s contact %s" % [s.name, s.ai_status,
 			SquadAI.Intent.keys()[SquadAI.of(s).intent], SquadAI.Care.keys()[SquadAI.of(s).care], SquadAI.of(s).in_contact()])])
