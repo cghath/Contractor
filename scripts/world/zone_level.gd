@@ -391,6 +391,14 @@ func garrison_alive(module_id: String) -> int:
 	return count
 
 
+## Host: whether module `module_id`'s garrison has been put in (it streamed in with AI on;
+## its posts may all have fallen on an earlier visit, or it may have none). A clear-area
+## objective there waits for this (Objectives._garrisoned). True when this session spawns no
+## AI (some test fixtures) or there's no such module: nothing will come to wait for.
+func garrison_spawned(module_id: String) -> bool:
+	return not spawn_ai or get_module(module_id) == null or _garrisoned.has(module_id)
+
+
 ## Host: a site taken out (4B part 3): its garrison spawned and none of it is left standing. A
 ## site nobody has been near yet (never garrisoned) is still up.
 func site_down(module_id: String) -> bool:

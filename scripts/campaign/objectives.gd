@@ -11,7 +11,9 @@ extends Node
 ## How each kind completes (the hooks other parts call are on this node, host only):
 ## - CLEAR_AREA: no hostile left standing in "rect" ([x, z, w, d] metres). Checked here
 ##   twice a second once the level is up; armed once a hostile has been seen there (or after
-##   "clear_arm_timeout_s" with none), so it can't complete before the enemy spawns.
+##   "clear_arm_timeout_s" with none), so it can't complete before the enemy spawns. In a
+##   zone the check waits until the site's module has had its garrison (_garrisoned): an
+##   unvisited target's empty rect doesn't pay the bonus.
 ## - EXTRACT_ITEM: an item in "items" (or tagged one of "tags") is carried out:
 ##   server_items_out(items), from extraction (Contracts.server_end_deployment) or a mid-zone
 ##   loot evacuation.
@@ -401,6 +403,8 @@ func hostiles_in(o: Dictionary) -> int:
 
 
 func _check_clear(o: Dictionary) -> void:
+	if not _garrisoned(o):
+		return  # nobody has been there yet: an unvisited site isn't a cleared one
 	var left := hostiles_in(o)
 	if left > 0:
 		_armed[o.oid] = true
@@ -414,6 +418,20 @@ func _check_clear(o: Dictionary) -> void:
 		server_set_state(o.oid, DONE)
 	else:
 		server_set_state(o.oid, ACTIVE, "%d hostile%s left" % [left, "" if left == 1 else "s"])
+
+
+## Whether a CLEAR_AREA's site has had its garrison put in. In a zone, hostiles come with
+## their module when it first streams in (ZoneLevel.garrison_spawned), so until then the site
+## is empty because nobody has been near it, not because it was cleared: the check (and its
+## arm timeout) waits. A site whose garrison fell on an earlier visit, or whose module holds
+## no posts, counts as put in once it streams in, and then completes as clear. Levels without
+## streamed garrisons (the compound) have nothing to wait for.
+func _garrisoned(o: Dictionary) -> bool:
+	var module_id := String((o.params as Dictionary).get("module_id", ""))
+	var level := get_tree().get_first_node_in_group(&"level")
+	if module_id == "" or level == null or not level.has_method(&"garrison_spawned"):
+		return true
+	return bool(level.call(&"garrison_spawned", module_id))
 
 
 ## Solid voxels in `box` (metres, level space), or -1 while that part of the world can't be

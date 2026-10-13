@@ -864,6 +864,7 @@ func _test_service() -> void:
 	check(player.inventory.count_of(&"vehicle_battery") == 1, "carrying a battery")
 	VehicleService.finish(v, player, "repair", &"battery", &"vehicle_battery")
 	check(v.can_drive(), "a new battery fitted")
+	await _test_service_vehicle_leaves(v)
 	var aav := _vehicle("range_aav7")
 	player.inventory.take(&"track_links")
 	check(VehicleService.repair_problem(aav, player, Vehicle.ZONE_WHEELS, &"spare_wheel") != "" or not VehicleService.has_part(player, &"spare_wheel"),
@@ -874,6 +875,54 @@ func _test_service() -> void:
 	player.inventory.take(&"m4a1")
 	aav.server_set_zone(Vehicle.ZONE_WHEELS, 1.0)
 	await _reset(v, Vector3(-12, 0, 6))
+
+
+## Audit A3-06: a service job asked for the real way (the service menu's request) runs to the
+## end with the vehicle standing there, and stops, doing nothing, once the vehicle drives off
+## from the worker (repairs and refuelling alike).
+func _test_service_vehicle_leaves(v: Vehicle) -> void:
+	var home := v.global_transform
+	var me := player.get_instance_id()
+	player.global_position = v.global_position + Vector3(0, 0.1, -3.9)
+	while player.inventory.count_of(&"jerrycan") > 0:
+		player.inventory.remove_one(&"jerrycan")  # the empty one from before
+	player.inventory.take(&"jerrycan")
+	v.server_set_fuel(250.0)
+	await get_tree().physics_frame
+	check(v.in_reach(player), "standing by the vehicle to work on it")
+	v.request_service.rpc_id(1, "refuel", &"", VehicleService.JERRYCAN)
+	var started := v.job_left(player)
+	await _wait_for(func() -> bool: return not v._jobs.has(me), 12.0)
+	check(started > 7.0 and v.fuel > 260.0, "a refuel left to run: done where it stands (%.0f s, %.0f L)" % [started, v.fuel])
+	player.inventory.take(&"repair_kit")
+	v.server_set_zone(Vehicle.ZONE_ENGINE, 0.3)
+	v.request_service.rpc_id(1, "repair", Vehicle.ZONE_ENGINE, &"repair_kit")
+	started = v.job_left(player)
+	v.global_position += Vector3(30, 0, 0)  # driven off
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	check(started > 0.0 and v.job_left(player) == 0.0 and is_equal_approx(v.zone_health(Vehicle.ZONE_ENGINE), 0.3) and player.inventory.count_of(&"repair_kit") == 1,
+		"a repair under way stops when the vehicle drives off: engine untouched, kit kept (%.0f s)" % started)
+	v.global_transform = home
+	v.linear_velocity = Vector3.ZERO
+	await get_tree().physics_frame
+	while player.inventory.count_of(&"jerrycan") > 0:
+		player.inventory.remove_one(&"jerrycan")
+	player.inventory.take(&"jerrycan")  # a full one
+	v.server_set_fuel(250.0)
+	var why := v.server_start_job(player, "refuel", &"", VehicleService.JERRYCAN) if v.in_reach(player) else "out of reach"
+	started = v.job_left(player)
+	v.global_position += Vector3(30, 0, 0)  # driven off
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	check(started > 0.0 and v.job_left(player) == 0.0 and v.fuel < 251.0,  # the idling engine may burn a little
+		"and a refuel too: not a drop goes in (%.0f L; %.0f s%s; %.0f m off, %.0f s left)" % [v.fuel, started, "" if why == "" else ", " + why,
+			v.global_position.distance_to(home.origin), v.job_left(player)])
+	v.global_transform = home
+	v.linear_velocity = Vector3.ZERO
+	player.inventory.remove_one(&"jerrycan")
+	player.inventory.remove_one(&"repair_kit")
+	await get_tree().physics_frame
 
 
 func _test_fire() -> void:
@@ -952,6 +1001,13 @@ func _test_save_reload() -> void:
 	await _wait_for(func() -> bool: return VehicleHull.pending() == 0, 10.0)
 	await _seconds(0.8)
 	if back:
+		# Audit A3-06: salvage stops too once the worker isn't by the wreck any more (here the
+		# job started out of reach, as nothing in the menu allows): nothing comes off it.
+		player.global_position = back.global_position + Vector3(0, 0.1, -40.0)
+		var far_job := back.server_start_job(player, "salvage", &"", &"")
+		await get_tree().physics_frame
+		await get_tree().physics_frame
+		check(far_job == "" and back.job_left(player) == 0.0 and not back.salvaged, "salvaging a wreck out of reach stops at once, nothing taken")
 		var salvage_job := back.server_start_job(player, "salvage", &"", &"")
 		player.global_position = back.global_position + Vector3(0, 0.1, -3.2)
 		check(VehicleService.finish(back, player, "salvage", &"", &"") != "" and back.salvaged

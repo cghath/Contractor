@@ -171,6 +171,8 @@ const GUN_BUNCH_S := 0.15
 const USE_REACH_M := 4.0
 ## A wreck yields this when salvaged (Proposed).
 const SALVAGE_S := 20.0
+## A service job stops when its worker or the vehicle moves this far from where it began (m).
+const JOB_MOVE_M := 1.5
 
 ## Read the local occupant's keys and mouse (tests that drive by request turn it off).
 static var local_input := true
@@ -1701,12 +1703,16 @@ func server_start_job(actor: Soldier, action: String, zone: StringName, item: St
 			label = "Salvaging parts"
 		_:
 			return ""
-	_jobs[actor.get_instance_id()] = {"actor": actor, "action": action, "zone": zone, "item": item, "until": Soldier._now() + seconds, "at": actor.global_position}
+	_jobs[actor.get_instance_id()] = {"actor": actor, "action": action, "zone": zone, "item": item, "until": Soldier._now() + seconds,
+		"at": actor.global_position, "vehicle_at": global_position}
 	if not actor.is_ai():
 		actor._client_busy.rpc_id(actor.owner_peer(), seconds, "%s (%.0f s)" % [label, seconds])
 	return ""
 
 
+## Host: runs the service jobs. Each stops when its worker goes down or walks off, or when
+## the vehicle drives (or is pushed) away from them, checked every step and so right before
+## it would finish: work on a vehicle that has gone does nothing to it.
 func _job_step() -> void:
 	if _jobs.is_empty():
 		return
@@ -1714,10 +1720,12 @@ func _job_step() -> void:
 	for id: int in _jobs.keys():
 		var job: Dictionary = _jobs[id]
 		var actor: Soldier = job.actor if is_instance_valid(job.actor) else null
-		if actor == null or not actor.vitals.is_up() or actor.global_position.distance_to(job.at) > 1.5:
+		var stopped := actor == null or not actor.vitals.is_up() or actor.global_position.distance_to(job.at) > JOB_MOVE_M
+		var gone := not stopped and (global_position.distance_to(job.get("vehicle_at", global_position)) > JOB_MOVE_M or not in_reach(actor))
+		if stopped or gone:
 			_jobs.erase(id)
 			if actor:
-				_tell(actor, "Stopped working on the %s" % display_name())
+				_tell(actor, "Stopped working on the %s%s" % [display_name(), ": it moved away" if gone else ""])
 			continue
 		if now < float(job.until):
 			continue

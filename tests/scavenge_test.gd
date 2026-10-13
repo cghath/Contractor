@@ -265,10 +265,15 @@ func _test_orders() -> void:
 	_strip_mags(rifleman, &"mag_556", 1)
 	squad().set_scavenge(player, false, PackedStringArray([String(rifleman.name)]))
 	var dead := _dead_hostile(player.global_position + Vector3(-3, 0, -3))
+	# Audit A2-09: its ragdoll slid 5 m from the capsule (which stays where it fell); the
+	# player aims at the body he sees, and the order is measured there (Soldier.body_point).
+	var slid := await _slide_ragdoll(dead, Vector3(-5, 0, 0))
 	await _seconds(4.0)
 	check(ai.loot_body == null and ai.intent != SquadAI.Intent.SCAVENGE, "told not to scavenge, he leaves the body alone (%s)" % rifleman.ai_status)
-	var why := squad().order_scavenge(player, dead.global_position + Vector3(0.5, 0, 0), PackedStringArray([String(rifleman.name)]))
-	check(why == "" and ai.scavenge_order == dead, "\"Scavenge that body\" sends him to the body under the crosshair (%s)" % why)
+	check(slid and squad().order_scavenge(player, dead.global_position, PackedStringArray([String(rifleman.name)])) == "Look at a body",
+		"aimed at the empty spot where it fell, not the body: \"Look at a body\" (ragdoll %.1f m off)" % _flat(dead.body_point(), dead.global_position))
+	var why := squad().order_scavenge(player, dead.body_point() + Vector3(0.5, 0, 0), PackedStringArray([String(rifleman.name)]))
+	check(why == "" and ai.scavenge_order == dead, "\"Scavenge that body\" sends him to the body under the crosshair, where it lies (%s)" % why)
 	var went := await _wait_until(func() -> bool: return ai.loot_body == dead or rifleman.inventory.count_of(&"mag_556") > 1, 20.0)
 	check(went, "and he goes, even with scavenging forbidden (%s)" % rifleman.ai_status)
 	await _wait_until(func() -> bool: return ai.loot_body == null and ai.scavenge_order == null, 30.0)
@@ -318,6 +323,23 @@ func _dead_hostile(pos: Vector3) -> Soldier:
 	SquadAI.of(s).set_physics_process(false)
 	s.vitals.server_hit(Vitals.HEAD, {"round_class": Vitals.INTERMEDIATE})
 	return s
+
+
+## Once `dead`'s ragdoll is at rest, moves it `by` (the capsule stays where it fell), as a
+## ragdoll sliding or rolling would. False if it never lay as one.
+func _slide_ragdoll(dead: Soldier, by: Vector3) -> bool:
+	if not await _wait_until(func() -> bool: return is_instance_valid(dead.ragdoll) and dead.ragdoll.frozen, 10.0):
+		return false
+	for part: Node3D in dead.ragdoll.parts.values():
+		part.global_position += by
+	dead.ragdoll._send(true)
+	for i in 4:
+		await get_tree().process_frame  # the shown pose (and its hitboxes) follows
+	return _flat(dead.body_point(), dead.global_position) > Squad.ORDER_BODY_M + 0.5
+
+
+func _flat(a: Vector3, b: Vector3) -> float:
+	return Vector2(a.x - b.x, a.z - b.z).length()
 
 
 ## Removes `id` magazines from `s` until `keep` are left.

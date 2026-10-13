@@ -217,7 +217,7 @@ func missing_at(point: Dictionary) -> PackedStringArray:
 	var missing := PackedStringArray()
 	var need := required()
 	for s: Soldier in need.players + need.ai:
-		if not inside(point, s.global_position):
+		if not inside(point, s.body_point()):  # a downed one lying as a ragdoll: where it lies
 			missing.append(_soldier_name(s))
 	return missing
 
@@ -269,9 +269,12 @@ func server_ride_out(point_id: int, p_ride: Node) -> bool:
 	return true
 
 
-## Whether `node` gets out at `point`: inside it, or aboard the ride (server_ride_out).
+## Whether `node` gets out at `point`: inside it, or aboard the ride (server_ride_out). A
+## body counts where it lies (Soldier.body_point: a ragdoll can rest metres from the capsule,
+## which stays where it fell), so the corpse players see in the point is the one banked.
 func _out_at(point: Dictionary, node: Node3D) -> bool:
-	if inside(point, node.global_position):
+	var at := (node as Soldier).body_point() if node is Soldier else node.global_position
+	if inside(point, at):
 		return true
 	return is_instance_valid(ride) and ride is Vehicle and Vehicle.ride_of(node) == ride
 
