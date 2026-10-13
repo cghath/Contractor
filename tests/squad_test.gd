@@ -40,7 +40,9 @@ func _ready() -> void:
 	await _test_spotting()
 	await _test_fire_discipline()
 	await _test_tactics()
+	_test_doctrine_pending()
 	await _test_dead_leave_squad()
+	await _test_buildings_per_world()
 	GameState.delete_save()
 	print("SQUAD TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
@@ -401,6 +403,59 @@ func _test_tactics() -> void:
 			return player.inventory.count_of(ammo) > had, 10.0),
 		"Give me ammo: a squadmate brings magazines (%s; %d -> %d; %s)" % [why, had, player.inventory.count_of(ammo), status])
 	squad.give_order(player, Squad.Order.FOLLOW, player.global_position)
+
+
+## Audit A3-07: a doctrine acts through its id only (SquadTactics' option biases); its numbers
+## aren't wired into the AI yet, and say so. Every number a profile holds is listed pending in
+## the code and the file alike, so tuning one can't pass for working gameplay: wiring one in
+## means taking it off both lists, with a check of what it now does.
+func _test_doctrine_pending() -> void:
+	print("Doctrines: the id acts, the numbers are pending")
+	var file: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(Doctrine.PATH))
+	var pending: Array = file.get("_pending", [])
+	var unmarked: Array[String] = []
+	for id: StringName in Doctrine.ids():
+		for key: String in (file.doctrines[String(id)] as Dictionary):
+			if key != "name" and not (key in Doctrine.PENDING and key in pending):
+				unmarked.append("%s.%s" % [id, key])
+	check(not Doctrine.ids().is_empty() and unmarked.is_empty() and pending.size() == Doctrine.PENDING.size() and String(file.get("_notes", "")).begins_with("PENDING"),
+		"every doctrine number is marked pending, in the code and the file (unmarked: %s)" % [unmarked])
+	var sit := {"up": 6, "down": 1, "contact": true, "known": 3, "fresh": true, "stale": false, "cluster": {"centre": Vector3.ZERO},
+		"range": 80.0, "enemy_building": {}, "home_building": {}, "in_home": false, "suppression": 0.1, "morale": 0.9, "ammo": 0.9,
+		"cover": 0.6, "order": Squad.Order.FOLLOW, "weapons_free": true, "age": 1.0}
+	var pmc: Dictionary = SquadTactics.score(sit, SquadTactics.DOCTRINES[Doctrine.PMC]).scores
+	var insurgent: Dictionary = SquadTactics.score(sit, SquadTactics.DOCTRINES[Doctrine.INSURGENT]).scores
+	check(float(pmc.get(SquadTactics.Option.CASUALTY, 0.0)) > float(insurgent.get(SquadTactics.Option.CASUALTY, 0.0)),
+		"what does act: the same fight scores differently for a PMC squad and an insurgent one (casualty care %.2f vs %.2f)"
+		% [float(pmc.get(SquadTactics.Option.CASUALTY, 0.0)), float(insurgent.get(SquadTactics.Option.CASUALTY, 0.0))])
+
+
+## Audit A3-04: the building scan cache belongs to one world (and level). The compound's main
+## building is found where it stands; another world with only an open floor at the same
+## coordinates (as the next zone would be) must not be handed that building from the cache.
+func _test_buildings_per_world() -> void:
+	print("Buildings: one world's scans stay in it")
+	var inside := Vector3(-3, 0.1, -6)  # in the main building
+	var here := Buildings.at(player, inside)
+	var viewport := SubViewport.new()
+	viewport.own_world_3d = true
+	add_child(viewport)
+	var other := Node3D.new()
+	viewport.add_child(other)
+	var mesh := NavigationMesh.new()
+	mesh.set_vertices(PackedVector3Array([Vector3(-12, 0, -14), Vector3(-12, 0, 2), Vector3(6, 0, 2), Vector3(6, 0, -14)]))
+	mesh.add_polygon(PackedInt32Array([0, 1, 2, 3]))
+	var floor_region := NavigationRegion3D.new()
+	floor_region.navigation_mesh = mesh
+	other.add_child(floor_region)
+	await _frames(4)
+	var there := Buildings.at(other, inside)
+	var again := Buildings.at(player, inside)
+	check(not here.is_empty() and there.is_empty() and not again.is_empty(),
+		"the main building is found in the compound (%d spots); an open floor at the same spot in another world has none (%d); the compound's is still found"
+		% [(here.get("spots", []) as Array).size(), (there.get("spots", []) as Array).size()])
+	viewport.queue_free()
+	await _frames(2)
 
 
 # --- Helpers --------------------------------------------------------------

@@ -47,13 +47,21 @@ const CACHE_S := 20.0
 const CACHE_MAX := 48
 
 static var _cache := {}
+## The world and level the cached scans belong to (_scope); another one empties the cache.
+static var _cache_scope := ""
 
 
 ## The buildings with an inside spot within `radius` of `centre` (see the class notes).
+## Cached per world and level: another level at the same coordinates (the next zone, a
+## second world) never gets this one's buildings.
 static func near(from: Node3D, centre: Vector3, radius := SCAN_M) -> Array:
 	if from == null or not from.is_inside_tree():
 		return []
-	var key := "%d,%d,%d,%d" % [roundi(centre.x / 2.0), roundi(centre.y / 2.0), roundi(centre.z / 2.0), roundi(radius)]
+	var scope := _scope(from)
+	if scope != _cache_scope:
+		_cache.clear()  # a new level (or world): the old one's scans mean nothing here
+		_cache_scope = scope
+	var key := "%s|%d,%d,%d,%d" % [scope, roundi(centre.x / 2.0), roundi(centre.y / 2.0), roundi(centre.z / 2.0), roundi(radius)]
 	var now := Soldier._now()
 	var hit: Dictionary = _cache.get(key, {})
 	if not hit.is_empty() and now - float(hit.at) < CACHE_S:
@@ -63,6 +71,15 @@ static func near(from: Node3D, centre: Vector3, radius := SCAN_M) -> Array:
 	var list := _scan(from.get_world_3d(), centre, radius)
 	_cache[key] = {"at": now, "list": list}
 	return list
+
+
+## Which world and level `from` is in: its World3D and the level node above it (none for a
+## node outside any level), as a cache key.
+static func _scope(from: Node3D) -> String:
+	var level: Node = from
+	while level and not level.is_in_group(&"level"):
+		level = level.get_parent()
+	return "%d/%d" % [from.get_world_3d().get_instance_id(), level.get_instance_id() if level else 0]
 
 
 ## The building `point` is inside ({} for none).
