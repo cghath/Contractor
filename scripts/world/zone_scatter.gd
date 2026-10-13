@@ -35,6 +35,15 @@ const SEE_SCRUB_M := 240.0
 const SEE_ROCK_M := 650.0
 const SEE_TREE_M := 950.0
 
+## Foliage shapes for spotting (foliage_between), as shares of an item's size (its meshes:
+## _scrub_mesh, _crown_mesh), and how far past a line's ends an item can still reach it (m).
+const SCRUB_R := 0.5
+const SCRUB_TOP := 0.6
+const CROWN_R := 1.1
+const CROWN_LOW := 2.0
+const CROWN_HIGH := 4.9
+const FOLIAGE_PAD_M := 3.0
+
 ## Every item: {"kind", "pos" (Vector3), "yaw", "size" (Vector3), "colour" (Color), "solid"}.
 var items: Array[Dictionary] = []
 var counts := {Kind.ROCK: 0, Kind.SCRUB: 0, Kind.TREE: 0}
@@ -196,6 +205,57 @@ func boxes_in(area: Rect2) -> Array[AABB]:
 				var centre := p + Vector3(0, half.y, 0) if item.kind == Kind.TREE else p
 				out.append(AABB(centre - half, half * 2.0))
 	return out
+
+
+## Metres of foliage (scrub, and tree crowns) the straight line `from` -> `to` passes through,
+## for spotting (Spotting.foliage_m). Each is a vertical cylinder about its mesh: scrub
+## SCRUB_R x its width, up to SCRUB_TOP x its height; a crown CROWN_R x its size, from
+## CROWN_LOW to CROWN_HIGH x its size up. Trunks and rocks are solid: rays see to those.
+func foliage_between(from: Vector3, to: Vector3) -> float:
+	if _cells.is_empty():
+		return 0.0
+	var flat := Vector2(to.x - from.x, to.z - from.z)
+	var flat_len := flat.length()
+	if flat_len < 0.01:
+		return 0.0
+	var lo := _cell_of(minf(from.x, to.x) - FOLIAGE_PAD_M, minf(from.z, to.z) - FOLIAGE_PAD_M)
+	var hi := _cell_of(maxf(from.x, to.x) + FOLIAGE_PAD_M, maxf(from.z, to.z) + FOLIAGE_PAD_M)
+	var length := from.distance_to(to)
+	var dy := to.y - from.y
+	var total := 0.0
+	for cz in range(lo.y, hi.y + 1):
+		for cx in range(lo.x, hi.x + 1):
+			for index: int in _cells.get(Vector2i(cx, cz), []):
+				var item: Dictionary = items[index]
+				var kind := int(item.kind)
+				if kind == Kind.ROCK:
+					continue
+				var p: Vector3 = item.pos
+				var size: Vector3 = item.size
+				var r := size.x * (SCRUB_R if kind == Kind.SCRUB else CROWN_R)
+				var y0 := p.y + (0.0 if kind == Kind.SCRUB else size.y * CROWN_LOW)
+				var y1 := p.y + size.y * (SCRUB_TOP if kind == Kind.SCRUB else CROWN_HIGH)
+				# The flat line against the circle: t runs 0..1 along it.
+				var c := Vector2(p.x - from.x, p.z - from.z)
+				var along := c.dot(flat) / (flat_len * flat_len)
+				var miss := (c - flat * along).length()
+				if miss >= r:
+					continue
+				var half_t := sqrt(r * r - miss * miss) / flat_len
+				var t0 := maxf(along - half_t, 0.0)
+				var t1 := minf(along + half_t, 1.0)
+				# ...then its height (the line's y is linear in t).
+				if absf(dy) < 0.0001:
+					if from.y < y0 or from.y > y1:
+						continue
+				else:
+					var ta := (y0 - from.y) / dy
+					var tb := (y1 - from.y) / dy
+					t0 = maxf(t0, minf(ta, tb))
+					t1 = minf(t1, maxf(ta, tb))
+				if t1 > t0:
+					total += (t1 - t0) * length
+	return total
 
 
 func _solid_half(item: Dictionary) -> Vector3:

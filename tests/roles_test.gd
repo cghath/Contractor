@@ -443,8 +443,12 @@ func _test_roster() -> void:
 
 func _test_callout_rules() -> void:
 	print("Callouts: rules")
-	var first := _slot(0)
-	var second := _slot(1)
+	# Not a team leader: the squad's tactics speak through the team leader (SquadTactics), and
+	# a tactic called in the speaker gap would take the place of the held-back Moving!.
+	var talkers := _squad().filter(func(s: Soldier) -> bool: return s.is_ai() and s.role != Roles.TEAM_LEADER)
+	talkers.sort_custom(func(a: Soldier, b: Soldier) -> bool: return a.squad_slot < b.squad_slot)
+	var first: Soldier = talkers[0]
+	var second: Soldier = talkers[1]
 	var line := "%s: Reloading!" % first.display_name()
 	# Squadmates talk on their own too: start from a clean slate and only look at these two.
 	callouts._last_by_speaker.clear()
@@ -453,6 +457,11 @@ func _test_callout_rules() -> void:
 	callouts._pending.clear()
 	callouts.sent.clear()
 	callouts.shown.clear()
+	# And their own brains stay quiet meanwhile (the newest held-back line wins: anything they
+	# called on their own in the gap would take the place of the test's Moving!; CI, R0274).
+	var brains: Array = [SquadAI.of(first), SquadAI.of(second)].filter(func(b: SquadAI) -> bool: return b != null)
+	for b: SquadAI in brains:
+		b.process_mode = Node.PROCESS_MODE_DISABLED
 	var said := func(who: Soldier, id: StringName) -> Array:
 		return callouts.sent.filter(func(c: Dictionary) -> bool: return c.speaker == String(who.name) and c.id == id)
 	check(callouts.say(first, &"reloading"), "%s calls Reloading!" % first.name)
@@ -473,11 +482,15 @@ func _test_callout_rules() -> void:
 	await _seconds(Callouts.SPEAKER_GAP_S + 0.3)
 	var waited: Array = said.call(first, &"moving")
 	check(waited.size() == 1 and float(waited[0].time) - frag_time >= Callouts.SPEAKER_GAP_S - 0.05,
-		"the held-back Moving! follows once the speaker's gap has passed")
+		"the held-back Moving! follows once the speaker's gap has passed (%s said %s; pending %s; %s)" % [first.name,
+		callouts.sent.filter(func(c: Dictionary) -> bool: return c.speaker == String(first.name)).map(func(c: Dictionary) -> String: return "%s@%.2f" % [c.id, c.time]),
+		callouts._pending.get(String(first.name), {}).get("id", "none"), first.ai_status])
 	await _seconds(Callouts.SPEAKER_GAP_S + 0.1)
 	check(not callouts.say(first, &"reloading"), "the same callout doesn't repeat within %.0f s" % Callouts.REPEAT_GAP_S)
 	await _seconds(0.3)
 	check(said.call(first, &"reloading").size() == 1, "and a repeat isn't held back for later either")
+	for b: SquadAI in brains:
+		b.process_mode = Node.PROCESS_MODE_INHERIT
 	var hostile := _spawn_test_hostile("ChatterTest", Vector3(75, 0.1, -75))  # out of sight
 	check(callouts.say(hostile, &"reloading") and said.call(hostile, &"reloading")[0].to.is_empty(), "a hostile callout goes to nobody")
 	await _frames(2)

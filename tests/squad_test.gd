@@ -176,7 +176,10 @@ func _test_senses() -> void:
 	SquadAI.server_heard_shot(shooter, shooter.global_position, false)
 	var off := _flat(alpha.threat_pos, shooter.global_position)
 	check(alpha.threat_time > before and off <= SquadAI.HEARD_ERROR_PER_100M * 0.85, "a plain one is heard: contact toward it (%.1f m off)" % off)
-	await _frames(2)
+	# Contact is taken in SquadAI._physics_process: wait on physics ticks, not render frames
+	# (headless, two render frames can pass inside one tick: CI failed it on fcae676).
+	for i in 2:
+		await get_tree().physics_frame
 	check(SquadAI.of(alpha).in_contact(), "and Alpha is in contact (%s)" % alpha.ai_status)
 	shooter.queue_free()
 	_clear_contact()
@@ -368,6 +371,40 @@ func _test_tactics() -> void:
 	squad.give_order(player, Squad.Order.FOLLOW, player.global_position)
 
 
+## ZoneScatter.foliage_between on made-up lines: through a bush, over it, past it, through a
+## crown, and not through the open space under the crown.
+func _test_foliage_lines() -> void:
+	var sc := _scatter_with([
+		{"kind": ZoneScatter.Kind.SCRUB, "pos": Vector3(0, 0, 0), "size": Vector3(1.4, 1.2, 1.4)},
+		{"kind": ZoneScatter.Kind.TREE, "pos": Vector3(20, 0, 0), "size": Vector3(1, 1, 1)},
+	])
+	var through := sc.foliage_between(Vector3(0, 0.3, -20), Vector3(0, 0.3, 20))
+	var over := sc.foliage_between(Vector3(0, 1.6, -20), Vector3(0, 1.6, 20))
+	var past := sc.foliage_between(Vector3(3, 0.3, -20), Vector3(3, 0.3, 20))
+	var crown := sc.foliage_between(Vector3(20, 3.0, -20), Vector3(20, 3.0, 20))
+	var under := sc.foliage_between(Vector3(20, 1.0, -20), Vector3(20, 1.0, 20))
+	check(is_equal_approx(through, 1.4) and over == 0.0 and past == 0.0 and crown > 2.0 and under == 0.0,
+		"foliage lines: %.2f m through a bush, none over or past it, %.1f m through a crown, none under it" % [through, crown])
+	sc.free()
+
+
+## A ZoneScatter holding just `items` (on a made-up 2 km terrain), for foliage checks.
+func _scatter_with(items: Array) -> ZoneScatter:
+	var sc := ZoneScatter.new()
+	var terrain := ZoneTerrain.new()
+	terrain.size_m = 2048.0
+	sc._terrain = terrain
+	sc.add_child(terrain)
+	for item: Dictionary in items:
+		var p: Vector3 = item.pos
+		var cell := sc._cell_of(p.x, p.z)
+		if not sc._cells.has(cell):
+			sc._cells[cell] = []
+		(sc._cells[cell] as Array).append(sc.items.size())
+		sc.items.append(item)
+	return sc
+
+
 # --- Helpers --------------------------------------------------------------
 
 func _squad() -> Array:
@@ -403,6 +440,52 @@ func _test_spotting() -> void:
 	check(Spotting.spot_seconds(alpha, bravo, "plain", 0.6, false, now) > far * 2.0, "someone outside the view cone is much slower to spot")
 	check(Spotting.camo("woodland", "temperate") > Spotting.camo("woodland", "desert_wadi") and Spotting.camo("desert", "desert_wadi") > Spotting.camo("desert", "temperate"),
 		"camo that matches the terrain hides better")
+	# The spotter module (Captain, 2026-10-13): the camo matrix complete, worked out from the
+	# colours: every uniform on every terrain preset, and plain clothes too.
+	var matrix := ""
+	var in_range := true
+	for preset in TerrainPresets.ids():
+		matrix += "\n    %-17s" % preset
+		for variant: String in Soldier.PLAYER_VARIANTS:
+			var f := Spotting.camo(variant, String(preset))
+			in_range = in_range and f >= Spotting.CAMO_MIN and f <= Spotting.CAMO_MAX
+			matrix += " %s %.2f" % [variant, f]
+	print("  camo (above 1 hides, below 1 stands out):" + matrix)
+	check(in_range and TerrainPresets.ids().size() >= 8, "every uniform has a camo factor on every terrain preset (%d)" % TerrainPresets.ids().size())
+	check(Spotting.camo("woodland", "temperate") > Spotting.camo("woodland", "salt_flats") and Spotting.camo("desert", "salt_flats") > Spotting.camo("desert", "temperate")
+		and Spotting.camo("multicam", "temperate") > Spotting.camo("urban", "temperate"),
+		"woodland hides in green hills, not on the salt flats; desert the other way; grey urban stands out in the hills")
+	var robe := PersonLook._variant("e8e4d8", "e8e4d8", "c8996f", "6b4a2b")
+	check(Spotting.camo(robe, "salt_flats") > Spotting.camo(robe, "temperate") and Spotting.camo(robe, "temperate") < Spotting.camo("woodland", "temperate"),
+		"plain clothes too: a white robe blends on the salt flats (%.2f), stands out in green hills (%.2f)" % [Spotting.camo(robe, "salt_flats"), Spotting.camo(robe, "temperate")])
+	# Each soldier's own camo reaches the spot time.
+	var own := String(bravo.model.variant)
+	var other := "desert" if own != "desert" else "woodland"
+	var with_own := Spotting.spot_seconds(alpha, bravo, "temperate", 0.6, false, now)
+	bravo.model.variant = other
+	var with_other := Spotting.spot_seconds(alpha, bravo, "temperate", 0.6, false, now)
+	bravo.model.variant = own
+	check(absf(with_other / with_own - Spotting.camo(other, "temperate") / Spotting.camo(own, "temperate")) < 0.01,
+		"the soldier's own camo (%s) is what's scored: %.1f s, in %s %.1f s" % [own, with_own, other, with_other])
+	# Optics: past OPTIC_FROM_M the rifle's sight, and binoculars when calm, shorten the distance.
+	alpha.global_transform = Transform3D(Basis.IDENTITY, Vector3(0, 0.1, 30))
+	_place(bravo, Vector3(0, 0.1, -270))
+	var had_binos := alpha.inventory.count_of(&"binoculars") > 0
+	if not had_binos:
+		alpha.inventory.take(&"binoculars")
+	var busy_s := Spotting.spot_seconds(alpha, bravo, "plain", 0.6, false, now, 0.0, false)
+	var calm_s := Spotting.spot_seconds(alpha, bravo, "plain", 0.6, false, now, 0.0, true)
+	check(Spotting.optic_x(alpha, false) > 1.0 and calm_s < busy_s * 0.75 and alpha.inventory.count_of(&"binoculars") > 0,
+		"at 300 m the rifle sight helps (x%.2f, %.1f s) and binoculars more when calm (x%.2f, %.1f s)" % [Spotting.optic_x(alpha, false), busy_s, Spotting.optic_x(alpha, true), calm_s])
+	if not had_binos:
+		alpha.inventory.remove_one(&"binoculars")
+	_place(bravo, Vector3(0, 0.1, -50))
+	alpha.global_transform = Transform3D(Basis.IDENTITY.rotated(Vector3.UP, PI), alpha.global_position)
+	# Foliage: leaves in the way slow a spot down, and enough hide someone.
+	check(Spotting.spot_seconds(alpha, bravo, "plain", 0.6, false, now, 1.0) > Spotting.spot_seconds(alpha, bravo, "plain", 0.6, false, now) * 3.0
+		and Spotting.spot_seconds(alpha, bravo, "plain", 0.6, false, now, Spotting.FOLIAGE_OPAQUE_M) == INF,
+		"a metre of leaves in the way slows a spot down; %.1f m hides them" % Spotting.FOLIAGE_OPAQUE_M)
+	_test_foliage_lines()
 	# Through SquadAI: no instant target, a few scans first.
 	alpha.global_transform = Transform3D(Basis.IDENTITY, Vector3(0, 0.1, 30))
 	var ai := SquadAI.of(alpha)
@@ -432,6 +515,19 @@ func _test_spotting() -> void:
 	var walking := Spotting.footsteps_m(bravo)
 	bravo.velocity = Vector3.ZERO
 	check(running > walking and walking > 0.0 and Spotting.footsteps_m(bravo) == 0.0, "footsteps carry %.0f m running, %.0f m walking, none standing still" % [running, walking])
+	# Foliage on real bodies: a bush between them hides Bravo prone, not standing (his head
+	# shows over it). A made-up scatter: the compound has none.
+	var bush := _scatter_with([{"kind": ZoneScatter.Kind.SCRUB, "pos": Vector3(0, 0.1, -48.0), "size": Vector3(1.5, 1.35, 1.5)}])
+	alpha.global_transform = Transform3D(Basis.IDENTITY, Vector3(0, 0.1, 30))
+	var standing_leaves := Spotting.foliage_m(bush, alpha, bravo)
+	bravo.want_stance = SoldierMovement.Stance.PRONE
+	await _wait_until(func() -> bool: return bravo.movement.is_prone(), 3.0)
+	await get_tree().create_timer(0.6).timeout  # the eyes settle down
+	var prone_leaves := Spotting.foliage_m(bush, alpha, bravo)
+	check(bravo.movement.is_prone() and standing_leaves < 0.2 and prone_leaves >= Spotting.FOLIAGE_OPAQUE_M,
+		"a bush hides him prone (%.1f m of leaves), not standing (%.1f m: his head shows)" % [prone_leaves, standing_leaves])
+	bravo.want_stance = -1
+	bush.free()
 	brain.process_mode = Node.PROCESS_MODE_INHERIT
 	ai._aware.clear()
 	ai._suspect_at = -1000.0

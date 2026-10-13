@@ -748,7 +748,9 @@ func _test_engagement() -> void:
 		check(laid and bearer_ai.casualty == delta, "ordered to move while carrying him, %s lays him down near the order point (%.1f m) and stays (%s)"
 			% [_name(bearer), _flat(delta.global_position, move_to), bearer.ai_status])
 		await _seconds(2.0)
-		check(not is_instance_valid(delta.carried_by), "and doesn't pick him up again while the order stands")
+		var again: Soldier = delta.carried_by if is_instance_valid(delta.carried_by) else null
+		check(again == null, "and doesn't pick him up again while the order stands (%s)" % ("picked up by %s: %s" % [_name(again), again.ai_status]
+			if again else "%s: %s" % [_name(bearer), bearer.ai_status]))
 		bearer_ai.on_order(Squad.Order.FOLLOW, player.global_position)
 	# He comes round on his own (the wound model decides when; the test stands in for it).
 	delta.vitals.server_reset_health()

@@ -391,6 +391,9 @@ var _move_point := Vector3.ZERO
 ## Where a casualty carried under a move order is laid down (null until worked out).
 var _lay_spot: Variant = null
 var _lay_for := Vector3.INF  # the point _lay_spot was found for (a moving CCP: found again)
+## This unit laid its casualty at _lay_spot: it stays with them wherever their ragdoll settles
+## (body_point is the ragdoll's chest, which can roll past LAY_NEAR_M: picked up again, R0267).
+var _laid := false
 var _patrol_index := 0
 var _think_cd := 0.0
 var _scan_cd := 0.0
@@ -405,6 +408,8 @@ var _aware := {}
 var _suspect_pos := Vector3.ZERO
 var _suspect_at := -1000.0
 var _preset := ""
+var _scatter: ZoneScatter  # the zone's scrub and trees (Spotting.foliage_m): _zone_scatter
+var _scatter_found := false
 ## Contact reports from squadmates on their way: enemy instance id -> {"point", "due", "who"}.
 var _reports := {}
 ## Morale (MORALE_*), and where this unit is falling back to (null: not worked out).
@@ -683,6 +688,7 @@ func on_order(new_order: Squad.Order, point: Vector3, slot := 0, count := 1) -> 
 	_move_point = point + side * (slot - (count - 1) / 2.0) * 1.5
 	ordered = {}  # a movement order replaces a tactic order
 	_lay_spot = null
+	_laid = false
 	_has_cover = false
 	_think_cd = 0.0
 
@@ -1584,7 +1590,7 @@ func _should_carry() -> bool:
 	var ccp: Variant = squad.ccp_point() if squad else null
 	if ccp != null and _friendly():
 		return casualty.body_point().distance_to(ccp) > LAY_NEAR_M + 1.0  # "Bring casualties here"
-	if _friendly() and order == Squad.Order.MOVE and _lay_spot != null and _flat_between(casualty.body_point(), _lay_spot) <= LAY_NEAR_M + 1.0:
+	if _friendly() and order == Squad.Order.MOVE and _lay_spot != null and (_laid or _flat_between(casualty.body_point(), _lay_spot) <= LAY_NEAR_M + 1.0):
 		return false  # laid where the order sent them: they stay while it stands (queue 16)
 	if 1.0 - casualty.vitals.blood_fraction() >= WoundModel.UNCONSCIOUS_LOST:
 		return true
@@ -1644,16 +1650,19 @@ func _care_carry(contact: bool) -> void:
 		var goal: Vector3 = ccp if ccp != null else _move_point
 		if _lay_spot == null or _lay_for.distance_to(goal) > LAY_NEAR_M:
 			_lay_for = goal
+			_laid = false
 			var spot: Variant = find_cover(goal, LAY_DOWN_M)
 			_lay_spot = spot if spot != null else NavigationServer3D.map_get_closest_point(body.get_world_3d().navigation_map, goal)
 		var lay: Vector3 = _lay_spot
 		var at := casualty.body_point()
-		if body.carrying != casualty and Vector2(at.x - lay.x, at.z - lay.z).length() <= LAY_NEAR_M:
+		if body.carrying != casualty and (_laid or Vector2(at.x - lay.x, at.z - lay.z).length() <= LAY_NEAR_M) \
+				and not is_instance_valid(casualty.carried_by):
 			_has_destination = false  # laid down where ordered: stay with them
 			body.want_crouch = true
 			return
 		if body.carrying == casualty and _flat_distance(lay) <= 1.0:
 			body.server_put_down()
+			_laid = true
 			_has_destination = false
 			body.want_crouch = true
 			return
@@ -1713,6 +1722,7 @@ func _end_care() -> void:
 		body.release_carried()
 	casualty = null
 	care = Care.NONE
+	_laid = false
 	_has_cover = false
 	wants_medic = false
 	wanted.clear()
@@ -2636,13 +2646,17 @@ func _find_target() -> Soldier:
 				check_dist = d
 			continue
 		var steps := Spotting.footsteps_m(s)
-		if d <= steps and not can_see(s):
+		var leaves := INF  # metres of foliage in the way; INF: not in sight at all
+		if (d <= steps or d < best_dist) and can_see(s):
+			leaves = Spotting.foliage_m(_zone_scatter(), body, s)
+		var in_sight := leaves < Spotting.FOLIAGE_OPAQUE_M  # deep in the leaves: lost, awareness fades
+		if d <= steps and not in_sight:
 			seen[s.get_instance_id()] = true  # heard, not seen: keeps awareness from fading
 			hear(s, s.global_position, Spotting.HEARD_STEPS_PER_S * SCAN_S)
 			continue
-		if d < best_dist and can_see(s):
+		if d < best_dist and in_sight:
 			seen[s.get_instance_id()] = true
-			var a := _build_awareness(s)
+			var a := _build_awareness(s, leaves)
 			if a >= 1.0:
 				best = s
 				best_dist = d
@@ -2660,18 +2674,27 @@ func _find_target() -> Soldier:
 	return best if best != null else _dead_check
 
 
-## One scan's worth of spotting `s` (in sight): awareness rises by SCAN_S over the time
-## Spotting gives. Returns the new awareness.
-func _build_awareness(s: Soldier) -> float:
+## One scan's worth of spotting `s` (in sight, `leaves` metres of foliage in the way):
+## awareness rises by SCAN_S over the time Spotting gives. Returns the new awareness.
+func _build_awareness(s: Soldier, leaves := 0.0) -> float:
 	var id := s.get_instance_id()
 	var a: float = _aware.get(id, 0.0)
 	if a < 1.0:
 		if _preset == "":
 			_preset = Spotting.preset_of(body)
-		var t := Spotting.spot_seconds(body, s, _preset, combat, body.suppression >= SUPPRESSED, Soldier._now())
+		var suppressed := body.suppression >= SUPPRESSED
+		var t := Spotting.spot_seconds(body, s, _preset, combat, suppressed, Soldier._now(), leaves, not in_contact() and not suppressed)
 		a = 1.0 if t <= SCAN_S * 0.5 else minf(a + SCAN_S / t, 1.0)
 		_aware[id] = a
 	return a
+
+
+## The scrub and trees of this body's zone (null off a zone), looked up once.
+func _zone_scatter() -> ZoneScatter:
+	if not _scatter_found:
+		_scatter_found = true
+		_scatter = Spotting.scatter_of(body)
+	return _scatter
 
 
 ## Awareness of those out of sight this scan fades over Spotting.FADE_S.
