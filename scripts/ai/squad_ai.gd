@@ -1853,7 +1853,7 @@ func _scavenge_score(contact: bool) -> float:
 		var dead := n as Soldier
 		if dead == null or not _may_scavenge(dead) or Soldier._now() < float(_looted.get(dead.get_instance_id(), -1.0)):
 			continue
-		var d := body.global_position.distance_to(dead.global_position)
+		var d := body.global_position.distance_to(dead.body_point())  # where it lies, not its capsule
 		if d > SCAVENGE_RANGE_M:
 			continue
 		var worth := Scavenge.value(body, dead, _calm_for_armor()) - d * 0.002  # nearer first
@@ -1877,7 +1877,7 @@ func _may_scavenge(dead: Soldier, ordered := false) -> bool:
 	if is_instance_valid(other) and other != body and other.vitals.is_up() and SquadAI.of(other) and SquadAI.of(other).loot_body == dead:
 		return false
 	if not ordered and body.faction == &"friendly" and squad and is_instance_valid(squad.leader) and squad.leader != body \
-			and dead.global_position.distance_to(squad.leader.global_position) > SCAVENGE_LEASH_M:
+			and dead.body_point().distance_to(squad.leader.global_position) > SCAVENGE_LEASH_M:
 		return false
 	return true
 
