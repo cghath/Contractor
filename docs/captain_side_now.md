@@ -48,7 +48,7 @@ picking up next, we'll read it and steer around it.
 | 8 | Engagement ranges up: hostiles see 200 m (was 60), the squad 300 m (was 120); aim error at skill 0 1.2 deg (was 2.0); scrub drawn to 400 m and hides nobody past it | `ai/ranges` (ac6957e) | `scripts/ai/squad_ai.gd` (SIGHT_RANGE, SQUAD_SIGHT_RANGE, AIM_UNSKILLED_DEG), `scripts/world/zone_scatter.gd` | Built, R0294 PASS; CI pending. **cghath: doctrine engage_m (A3-07) should match these.** |
 | 9 | Debug tools: overlay shows spotting and alert state; performance lines in session logs; test history page | `debug/overlay-alert` (897eb0e) | `scripts/ui/ai_overlay.gd`, `autoload/session_log.gd`, `tests/session_log_test.gd`, new `tools/test_history.py`, `docs/debugging.md` | Built, R0295 PASS; CI pending |
 | 10 | Procedural buildings, phase 1: generated single-storey houses with interior chunks (`docs/building_gen.md`) | `world/building-gen` | new `scripts/world/building_gen.gd`, new `data/building_chunks.json`, `tests/world_test.gd` | Built (R0300 PASS: 40 seeds, every room reachable and furnished, doorways clear); placing them in zones comes with the town module (11) |
-| 11 | Procedural buildings, phase 2: shops, warehouse, clinic, police station; a town module (street grid of lots) | `world/building-gen` | the above, `scripts/world/zone_def.gd` (placing towns) | Queued |
+| 11 | Procedural buildings, phase 2: shops, warehouse, clinic, police station; a town module (street grid of lots) | `world/building-gen` (57c16fc, aa1228a) | `scripts/world/building_gen.gd`, `data/building_chunks.json` (48 chunks), `scripts/world/zone_modules.gd` ("town#<seed>" type; HALF/POINTS/GARRISON now static vars, read the same), `tests/world_test.gd` | Built (R0306, R0308); towns not placed in zones yet: Captain decides where. **cghath: zone_modules.gd changed, merge dev before touching it.** |
 | 12 | Procedural buildings, phases 3 and 4: storeys and stairs; city zones | later | | Queued |
 
 ## Decided (Captain, 2026-10-13)
@@ -65,6 +65,7 @@ picking up next, we'll read it and steer around it.
 
 ## Log
 
+- 2026-10-13 18:10: procedural houses on dev (c856aaa); shops/warehouses/clinics/police, towns and 48 interiors following.
 - 2026-10-13 17:00: ranges up and debug tools (items 8, 9) built; procedural buildings planned (items 10-12).
 - 2026-10-13: dev fast-forwarded to 8f8812a on the Captain's go; these notes are on dev now.
 - 2026-10-13 06:20: integrate/oct13 8f8812a CI green; waiting on the Captain's go for dev.
