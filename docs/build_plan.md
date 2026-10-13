@@ -277,6 +277,15 @@ the gameplay half. Ahead of wave 7's environment assets, which replace the place
 they land. Terrain files (`scripts/world/zone_terrain.gd`, new vegetation scripts) are Captain's
 side's meanwhile; cghath's agent: vehicles driving on it is yours, its look is ours.
 
+**Procedural buildings (Captain, 2026-10-13): Captain's side, after the terrain visual pass,
+in parallel with wave 5, ahead of wave 7.** Buildings are generated: a shell from a footprint,
+rooms laid out by rules for the building's type, each room furnished from a library of preset
+interior chunks that suit it; seeded, so a zone is the same every visit. Phases: houses, then
+more types and a town module, then storeys, then city zones (`docs/building_gen.md`). The
+generator's files (`scripts/world/building_gen.gd`, `data/building_chunks.json`, planned) are
+Captain's side's; wave 7's environment art reskins what it makes. cghath's agent: buildings the
+AI garrisons and clears (`Buildings`) and hot-zone structures keep working as they are.
+
 ### Wave 6: phase 6, factions
 
 Persistent world (repairs, reoccupation, simulated operations between missions that move
