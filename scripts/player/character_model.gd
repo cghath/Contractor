@@ -177,29 +177,45 @@ const SLOT_MOUNTS := {
 }
 const CONTAINER_MOUNTS := {&"vest": &"pouch", &"pockets": &"pocket", &"backpack": &"pack"}
 ## Fireman's carry, in the carrier's torso space (torso pivot at the hips): the casualty lies
-## belly down across the back of the shoulders, its hips here (behind the head, so the
-## carrier's camera stays clear), head and arms hanging down the carrier's left side and legs
-## down the right. Droops are how far its upper body, head and legs hang (radians).
-const CARRY_HIPS := Vector3(0.0, 0.68, 0.36)
-const CARRY_TORSO_DROOP := 0.85
-const CARRY_HEAD_DROOP := 0.6
-const CARRY_LEG_DROOP := 0.7
-## The carrier leans forward a little under the weight, an arm round the casualty's legs
-## over the right shoulder and a hand holding its arm on the left (torso-local).
-const CARRY_LEAN := -0.1
-const CARRY_HANDS: Array[Vector3] = [Vector3(0.28, 0.64, 0.16), Vector3(-0.3, 0.52, 0.16)]
+## belly down over the right shoulder, its hips here (beside and just behind the carrier's
+## head, clear of the camera), folded at the waist: upper body, head and arms hanging down the
+## carrier's back on the left, legs down the front on the right (CARRY_YAW turns the fold that
+## way, so the carrier sees the legs in first person). Droops are how far its upper body, head
+## and legs hang (radians); the knees bend with the legs.
+const CARRY_HIPS := Vector3(0.18, 0.7, 0.1)
+const CARRY_YAW := 0.85
+const CARRY_TORSO_DROOP := 1.05
+const CARRY_HEAD_DROOP := 0.5
+const CARRY_LEG_DROOP := 1.2
+## The carrier leans forward under the weight, both arms hugging the casualty's thighs in front
+## of the right shoulder (torso-local).
+const CARRY_LEAN := -0.18
+const CARRY_HANDS: Array[Vector3] = [Vector3(0.28, 0.42, -0.1), Vector3(0.14, 0.42, -0.2)]
+## Picking up, taking hold and putting down (Soldier.CARRY_LIFT_S, DRAG_GRAB_S, CARRY_LOWER_S),
+## as fractions of the phase: the carrier kneels to the body over KNEEL.x and stands back up
+## from KNEEL.y; a lifted body leaves the ground over LIFT_RISE (a lowered one reaches it over
+## LOWER_FALL); a dragged one's shoulders come up over GRAB_RISE.
+const KNEEL := Vector2(0.25, 0.68)
+const LIFT_RISE := Vector2(0.3, 0.75)
+const LOWER_FALL := Vector2(0.25, 0.7)
+const GRAB_RISE := Vector2(0.45, 1.0)
 ## Drag, in the dragger's body space: the casualty lies on its back behind the dragger
 ## (+Z), head towards them, its upper body lifted by the collar; its hips here, its upper
 ## body raised this much (radians) and its head lolling back.
-const DRAG_HIPS := Vector3(0.0, 0.13, 1.25)
-const DRAG_LIFT := 0.45
+const DRAG_HIPS := Vector3(0.0, 0.13, 1.0)
+const DRAG_LIFT := 0.75
 const DRAG_HEAD_LOLL := 0.4
 const DRAG_LEG_SPLAY := 0.12
-## The dragger turns to face the casualty (yaw PI: it walks backwards), crouched and bent
-## at the hips, both hands on the casualty's carrier shoulder straps (casualty torso-local,
+## The dragger turns to face the casualty (yaw PI: it walks backwards), in a crouch bent
+## forward at the hips (not squatting over them), both hands on the casualty's carrier shoulder straps (casualty torso-local,
 ## right strap first: the dragger's right hand takes the casualty's right strap).
-const DRAG_POSE := {"hip": 0.5, "hip_x": 0.0, "hip_z": 0.12, "pitch": -1.15, "roll": 0.0, "prone": false, "prone_roll": 0.0, "yaw": PI}
+const DRAG_POSE := {"hip": 0.6, "hip_x": 0.0, "hip_z": 0.05, "pitch": -0.95, "roll": 0.0, "prone": false, "prone_roll": 0.0, "yaw": PI}
 const STRAP_POINTS: Array[Vector3] = [Vector3(0.12, 0.5, -0.08), Vector3(-0.12, 0.5, -0.08)]
+## First person while dragging: the eye (body space, towards the casualty), head held up over the
+## bent back rather than right over the casualty's face, so the view looks down along them.
+const DRAG_EYE := Vector3(0, 1.22, 0.22)
+## First person: how far the eye drops at the bottom of a pick-up or put-down (carry_kneel).
+const KNEEL_EYE_DROP := 0.6
 ## First person: the local player's view model drops by this much (camera-local metres)
 ## and pitches down this far (radians) while the hands are busy (PlayerInput).
 const VIEW_LOWER_OFFSET := Vector3(0.02, -0.2, 0.06)
@@ -280,6 +296,9 @@ var _draw_t := -1.0           # seconds into a weapon draw (< 0: none)
 var _held_weapon := false     # what's held is a weapon (set_held)
 var _aim_w := 0.0             # 0 at the ready .. 1 shouldered, eased
 var _attach := 0.0            # 0..1: how far the drawn casualty has moved onto its carrier
+var _carry_key := ""          # carry_net's mode, phase and serial last seen
+var _carry_t := 0.0           # seconds since that changed (local clock)
+var _carry_reach: Dictionary = {}  # the kneeling pose for this pick-up or put-down
 var _attached := Transform3D.IDENTITY  # where its carrier holds it (world space)
 var _hand_source: Array[String] = ["", ""]
 var _hand_from: Array[Vector3] = [Vector3.ZERO, Vector3.ZERO]
@@ -449,7 +468,7 @@ static func casualty_bones(mode: StringName) -> Dictionary:
 	var splay: float
 	if mode == CARRIED:
 		# Belly down (its front faces the carrier's -Y), head towards the carrier's left (-X).
-		place = Basis(Vector3(0, 0, -1), Vector3(-1, 0, 0), Vector3(0, 1, 0))
+		place = Basis(Vector3.UP, CARRY_YAW) * Basis(Vector3(0, 0, -1), Vector3(-1, 0, 0), Vector3(0, 1, 0))
 		hips = CARRY_HIPS
 		torso_pitch = -CARRY_TORSO_DROOP
 		head_pitch = -CARRY_HEAD_DROOP
@@ -471,8 +490,8 @@ static func casualty_bones(mode: StringName) -> Dictionary:
 		"pelvis": Transform3D(Basis(), TORSO_PIVOT),
 		"leg_l": Transform3D(Basis(Vector3.BACK, -splay) * Basis(Vector3.RIGHT, legs), HIP * Vector3(-1, 1, 1)),
 		"leg_r": Transform3D(Basis(Vector3.BACK, splay) * Basis(Vector3.RIGHT, legs * 1.15), HIP),
-		"knee_l": _knee(legs * 0.6),
-		"knee_r": _knee(legs * 0.5 + 0.05),
+		"knee_l": _knee(legs * 0.7),
+		"knee_r": _knee(legs * 0.6 + 0.05),
 	}
 
 
@@ -651,14 +670,55 @@ func view_lower() -> float:
 ## Host only. `carrier` carries or drags (`mode`: CARRY, DRAG) `casualty`, or stopped (mode
 ## &""): sets both sides' carry_net for every peer. Either body may be null (only the other
 ## side is set).
-static func server_carry(carrier: Node, casualty: Node, mode: StringName) -> void:
+## `phase` (&"lift", &"grab", &"lower" or &"" for holding) plays over `seconds` on both bodies
+## (each from when it hears of it: carry_phase).
+static func server_carry(carrier: Node, casualty: Node, mode: StringName, phase := &"", seconds := 0.0) -> void:
 	var carrier_model := _model_of(carrier)
 	var casualty_model := _model_of(casualty)
+	_carry_serial += 1
+	var timing := {"phase": phase, "s": seconds, "n": _carry_serial} if phase != &"" else {}
 	if carrier_model:
-		carrier_model.carry_net = {} if mode == &"" else {"mode": mode, "with": String(casualty.get_path()) if casualty else ""}
+		carrier_model.carry_net = {} if mode == &"" else \
+			{"mode": mode, "with": String(casualty.get_path()) if casualty else ""}.merged(timing)
 	if casualty_model:
 		casualty_model.carry_net = {} if mode == &"" else {"mode": DRAGGED if mode == DRAG else CARRIED,
-			"with": String(carrier.get_path()) if carrier else ""}
+			"with": String(carrier.get_path()) if carrier else ""}.merged(timing)
+
+
+static var _carry_serial := 0
+
+
+## The pick-up, take-hold or put-down playing now: {"phase", "u" (0..1 through it)}, or {}
+## while just holding (or nothing).
+func carry_phase() -> Dictionary:
+	var phase := StringName(carry_net.get("phase", &""))
+	var s := float(carry_net.get("s", 0.0))
+	if phase == &"" or s <= 0.0:
+		return {}
+	return {"phase": phase, "u": clampf(_carry_t / s, 0.0, 1.0)}
+
+
+## 0..1: how far down on one knee the carrier is, picking a body up or putting it down (the
+## first-person camera dips with it: SoldierMovement).
+func carry_kneel() -> float:
+	var ph := carry_phase()
+	if ph.is_empty() or StringName(carry_net.get("mode", &"")) != CARRY:
+		return 0.0
+	var u: float = ph.u
+	return smoothstep(0.0, KNEEL.x, u) * (1.0 - smoothstep(KNEEL.y, 1.0, u))
+
+
+## 0..1: how far a carried or dragged casualty is drawn in its carrier's hold (0: lying where
+## its own body is), from the phase playing.
+static func _hold_weight(phase: StringName, u: float) -> float:
+	match phase:
+		&"lift":
+			return smoothstep(LIFT_RISE.x, LIFT_RISE.y, u)
+		&"lower":
+			return 1.0 - smoothstep(LOWER_FALL.x, LOWER_FALL.y, u)
+		&"grab":
+			return smoothstep(GRAB_RISE.x, GRAB_RISE.y, u)
+	return 1.0
 
 
 ## Host only. Starts hand action `id` for every peer (see action_net); returns its serial
@@ -879,6 +939,13 @@ func _process(delta: float) -> void:
 	_speed = lerpf(_speed, speed, minf(delta * 10.0, 1.0))
 	_time += delta
 	_phase += delta * (2.0 + _speed * 1.6)
+	var carry_key := "%s/%s/%s" % [carry_net.get("mode", ""), carry_net.get("phase", ""), carry_net.get("n", 0)]
+	if carry_key != _carry_key:
+		_carry_key = carry_key
+		_carry_t = 0.0
+		_carry_reach = {}
+	else:
+		_carry_t += delta
 	_update_action(delta)
 	if _draw_t >= 0.0:
 		_draw_t += delta
@@ -977,7 +1044,10 @@ static func pack_ragdoll(bones: Dictionary) -> PackedFloat32Array:
 func _target_bones(carry: Dictionary) -> Dictionary:
 	var mode: StringName = carry.get("mode", &"")
 	if mode == CARRIED or mode == DRAGGED:
-		return casualty_bones(mode)
+		var ph := carry_phase()
+		if ph.is_empty() or _hold_weight(ph.phase, ph.u) > 0.05:
+			return casualty_bones(mode)
+		# Still on the ground (not yet lifted, or already put down): lying as it fell.
 	if downed and ragdolled():
 		return ragdoll_bones()
 	if downed:
@@ -1013,14 +1083,25 @@ func twist_shown() -> float:
 ## casualty), the carry lean, or bending or kneeling to reach.
 func _action_pose(mode: StringName) -> Dictionary:
 	var prone: bool = pose.get("prone", false)
+	var ph := carry_phase()
 	if mode == DRAG and not prone:
+		if not ph.is_empty() and ph.phase == &"grab":
+			return blend_pose(pose, DRAG_POSE, smoothstep(0.0, 0.6, ph.u))
 		return DRAG_POSE
 	if mode == CARRY:
 		if prone:
 			return pose
 		var leaning := pose.duplicate()
 		leaning["pitch"] = float(pose.get("pitch", 0.0)) + CARRY_LEAN
-		return leaning
+		var k := carry_kneel()
+		if k <= 0.0:
+			return leaning
+		if _carry_reach.is_empty():
+			# Down on one knee by the body (where it lies, or where it's going), facing it.
+			var other := _carry_state().get("body") as Node3D
+			var at := to_local(other.global_position) if other else Vector3(0, 0, -0.8)
+			_carry_reach = reach_pose(pose, at + Vector3(0, 0.25, 0), true, true, body)
+		return blend_pose(leaning, _carry_reach, k) if not _carry_reach.is_empty() else leaning
 	if _reaching.is_empty() or not _action_active():
 		return pose
 	var s := float(action_net.get("s", 0.0))
@@ -1096,13 +1177,20 @@ func _update_attachment(delta: float, carry: Dictionary) -> void:
 		var other: CharacterModel = carry.model
 		var frame: Transform3D = other.torso.global_transform if mode == CARRIED else other.global_transform
 		_attached = frame.orthonormalized()
-	_attach = move_toward(_attach, 1.0 if on else 0.0, delta / ATTACH_S)
-	if _attach <= 0.0 or parent == null:
+	var ph := carry_phase() if on else {}
+	var w: float
+	if ph.is_empty():
+		_attach = move_toward(_attach, 1.0 if on else 0.0, delta / ATTACH_S)
+		w = smoothstep(0.0, 1.0, _attach)
+	else:
+		w = _hold_weight(ph.phase, ph.u)  # timed with the carrier kneeling and standing
+		_attach = w
+	if w <= 0.0 or parent == null:
 		if transform != base_transform():
 			transform = base_transform()
 		return
 	var held := parent.global_transform.affine_inverse() * _attached
-	transform = base_transform().interpolate_with(held * Transform3D(Basis.from_scale(Vector3.ONE * body_scale()), Vector3.ZERO), smoothstep(0.0, 1.0, _attach))
+	transform = base_transform().interpolate_with(held * Transform3D(Basis.from_scale(Vector3.ONE * body_scale()), Vector3.ZERO), w)
 
 
 ## Arms: each hand goes to its goal (blending from where it was when the goal changes), or
@@ -1165,6 +1253,13 @@ func _arm_goals(carry: Dictionary) -> Array:
 	if downed:
 		return [["swing", null], ["swing", null]]
 	if mode == CARRY:
+		var ph := carry_phase()
+		var other: CharacterModel = carry.get("model")
+		if not ph.is_empty() and other and ph.u < (0.7 if ph.phase == &"lift" else 0.85) and (ph.phase == &"lift" or ph.u > 0.15):
+			# Hands under the body, at its waist and chest, while it comes up (or goes down).
+			var at := other.torso.global_position
+			var along := other.torso.global_basis.y.normalized() * 0.18
+			return [["lift", torso.to_local(at - along)], ["lift", torso.to_local(at + along)]]
 		return [["carry", CARRY_HANDS[0]], ["carry", CARRY_HANDS[1]]]
 	if mode == DRAG:
 		var straps := drag_hand_points()

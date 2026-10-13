@@ -314,7 +314,7 @@ func _physics_process(delta: float) -> void:
 			_ai_physics(delta)
 		return
 	if multiplayer.is_server():
-		_update_carried()  # a player carrying or dragging someone: the host moves the casualty
+		_update_carried(delta)  # a player carrying or dragging someone: the host moves the casualty
 	if not is_local():
 		return
 	if not vitals.is_up() and carried_by_pos != null:
@@ -386,7 +386,8 @@ func _ai_physics(delta: float) -> void:
 	if is_reloading and _now() >= _busy_until:
 		is_reloading = false
 	if (not vitals.is_up() or carriable_while_up) and is_instance_valid(carried_by):
-		global_transform = carried_by.carry_transform()
+		if carried_by.carry_holds():
+			global_transform = carried_by.carry_transform()
 		velocity = Vector3.ZERO
 		return
 	if is_instance_valid(ragdoll):
@@ -397,12 +398,14 @@ func _ai_physics(delta: float) -> void:
 		return  # riding: the seat moves the body (Vehicle)
 	is_aiming = want_aim and vitals.is_up() and not is_reloading and inventory.hands == &"" and carrying == null
 	movement.step(delta)
-	_update_carried()
+	_update_carried(delta)
 
 
 ## Speed multiplier for moving a downed body (1 when not carrying or dragging). Reads
 ## carry_mode, so it works on the owner's machine too.
 func carry_speed_mult() -> float:
+	if carry_mode != &"" and _now() < carry_busy_until:
+		return 0.0  # picking them up or putting them down
 	match carry_mode:
 		CARRY:
 			return CARRY_SPEED_MULT
@@ -419,14 +422,29 @@ func carry_transform() -> Transform3D:
 	return global_transform * Transform3D(Basis(Vector3.UP, PI * 0.5), Vector3(0.0, 0.55, 0.15))
 
 
-## Host only. Keeps a carried body (AI or human) with this soldier.
-func _update_carried() -> void:
+## Host: whether the body this soldier moves is in the hold (on the shoulder, or dragged), so
+## it goes where they go; not while it's still being picked up or taken hold of, nor while
+## it's being put down.
+func carry_holds() -> bool:
+	return _carry_phase == &""
+
+
+## Host only. Keeps a carried body (AI or human) with this soldier, and ends a pick-up or
+## put-down when its time is up.
+func _update_carried(delta: float) -> void:
 	if carrying == null:
 		return
 	if not is_instance_valid(carrying) or not _movable(carrying) or carrying.carried_by != self or not vitals.is_up():
 		release_carried()
 		return
-	if not carrying.is_ai():
+	_carry_phase_left -= delta  # game time, like the animation it ends
+	if _carry_phase != &"" and _carry_phase_left <= 0.0:
+		if _carry_phase == &"lower":
+			release_carried()
+			return
+		_carry_phase = &""  # up on the shoulder, or got hold: from here they come along
+		CharacterModel.server_carry(self, carrying, carry_mode)  # a plain hold (late joiners don't replay the lift)
+	if carry_holds() and not carrying.is_ai():
 		carrying._client_carried.rpc_id(carrying.owner_peer(), carry_transform().origin)
 
 
@@ -444,7 +462,7 @@ func server_pick_up_body(other: Soldier, mode := CARRY, reach := REVIVE_RANGE) -
 	other.carried_by = self
 	other._client_lifted.rpc(true)  # a moved body mustn't shove its carrier around
 	carrying = other
-	_set_carry_mode(mode)
+	_set_carry_mode(mode, &"lift" if mode == CARRY else &"grab")
 	return true
 
 
@@ -453,15 +471,40 @@ static func _movable(other: Soldier) -> bool:
 	return not other.vitals.is_up() or other.carriable_while_up
 
 
-## Host only. Puts down whoever this soldier carries or drags.
+## Host only. Puts down whoever this soldier carries, the way a squadmate would: off the
+## shoulder onto the ground in front over CARRY_LOWER_S, standing still (the body already lies
+## where it's going, so nothing waits on the animation), then lets go. A dragged body is let go
+## at once. For anything that can't wait (the carrier hit, a vehicle, a teleport) use
+## release_carried.
+func server_put_down() -> void:
+	if carrying == null or _carry_phase == &"lower":
+		return
+	if carry_mode != CARRY or not is_instance_valid(carrying):
+		release_carried()
+		return
+	var spot := _put_down_spot()
+	if carrying.is_ai():
+		carrying.global_position = spot
+		carrying.rotation = Vector3(0, rotation.y, 0)
+	else:
+		carrying._client_carried.rpc_id(carrying.owner_peer(), spot)
+	_set_carry_mode(CARRY, &"lower")
+
+
+## Where a body put down off the shoulder lies: in front of the carrier.
+func _put_down_spot() -> Vector3:
+	return global_position - global_basis.z * 0.8
+
+
+## Host only. Lets go of whoever this soldier carries or drags, at once.
 func release_carried() -> void:
 	if is_instance_valid(carrying) and carrying.carried_by == self:
 		carrying.carried_by = null
 		carrying._client_lifted.rpc(false)
 		CharacterModel.server_carry(null, carrying, &"")  # the casualty's pose, for every peer
 		if carrying.is_ai():
-			if carry_mode != DRAG:  # a dragged body is already on the ground behind
-				carrying.global_position = global_position - global_basis.z * 0.8
+			if carry_mode != DRAG and _carry_phase != &"lower":  # a dragged or lowered body is already on the ground
+				carrying.global_position = _put_down_spot()
 			carrying.rotation = Vector3(0, rotation.y, 0)
 	carrying = null
 	_set_carry_mode(&"")
@@ -1278,7 +1321,13 @@ const DRAG := &"drag"
 const CARRY_SPEED_MULT := 0.55
 const DRAG_SPEED_MULT := 0.35
 ## Where a dragged body lies, in the dragger's frame (+z is behind).
-const DRAG_OFFSET := Vector3(0.0, 0.0, 1.1)
+const DRAG_OFFSET := Vector3(0.0, 0.0, 1.0)
+## Seconds to get a body up onto the shoulder, to take hold of a drag handle, and to lower a
+## carried body to the ground. The carrier stands still meanwhile (carry_speed_mult) and
+## CharacterModel plays them on every peer (server_carry's phase).
+const CARRY_LIFT_S := 1.6
+const DRAG_GRAB_S := 0.7
+const CARRY_LOWER_S := 1.3
 ## How far (body to body) the host accepts an interaction: the menu's reach plus slack for lag.
 const INTERACT_REACH := 3.0
 const INTERACT_SLACK := 1.0
@@ -1286,6 +1335,11 @@ const INTERACT_SLACK := 1.0
 ## CARRY, DRAG or empty. Set by the host; the owner learns it through _client_carry_mode
 ## (movement reads it for speed), so it's right on the host and the owner's machine.
 var carry_mode: StringName = &""
+## Host: the carry phase playing (&"lift", &"grab", &"lower"; &"" just holding) and how long it has left.
+var _carry_phase := &""
+var _carry_phase_left := 0.0  # seconds of it to go
+## Host and owner: the carrier stands still until then (a pick-up, take-hold or put-down).
+var carry_busy_until := 0.0
 
 
 ## "Player 1" for a player, the callsign for an AI squadmate, or a body's label (a dead
@@ -1343,7 +1397,7 @@ func _server_release_body() -> void:
 		return
 	if is_instance_valid(carrying) and carrying.care_by == self:
 		carrying.care_by = null
-	release_carried()
+	server_put_down()
 
 
 ## Hands one unit of a stowed entry to a standing squadmate, if it fits on them.
@@ -1380,7 +1434,8 @@ func _server_move_body(path: NodePath, mode: StringName) -> void:
 	if other == null or other == self or not _movable(other):
 		return  # a downed or a dead body (or a cuffed captive)
 	if carrying == other:
-		_set_carry_mode(mode)
+		if mode != carry_mode and _carry_phase != &"lower":
+			_set_carry_mode(mode, &"lift" if mode == CARRY else &"grab")
 		return
 	var why := ""
 	if carrying != null:
@@ -1400,19 +1455,29 @@ func _server_move_body(path: NodePath, mode: StringName) -> void:
 
 
 ## Host only. Sets carry_mode and tells the owning player.
-func _set_carry_mode(mode: StringName) -> void:
-	if carry_mode == mode:
-		return
+## Host: carrying, dragging or neither (`mode`), starting `phase` (&"lift", &"grab" or &"lower",
+## timed by CARRY_LIFT_S, DRAG_GRAB_S, CARRY_LOWER_S; the carrier stands still through it).
+func _set_carry_mode(mode: StringName, phase := &"") -> void:
+	if carry_mode == mode and (phase == &"" or phase == _carry_phase):
+		return  # already so (a phase playing plays on)
+	var seconds: float = {&"lift": CARRY_LIFT_S, &"grab": DRAG_GRAB_S, &"lower": CARRY_LOWER_S}.get(phase, 0.0)
+	if mode == &"":
+		phase = &""
+		seconds = 0.0
 	carry_mode = mode
-	CharacterModel.server_carry(self, carrying, mode)  # both bodies' poses, for every peer
+	_carry_phase = phase
+	_carry_phase_left = seconds
+	carry_busy_until = _now() + seconds
+	CharacterModel.server_carry(self, carrying, mode, phase, seconds)  # both bodies' poses, for every peer
 	if not is_ai() and owner_peer() != multiplayer.get_unique_id():
-		_client_carry_mode.rpc_id(owner_peer(), mode)
+		_client_carry_mode.rpc_id(owner_peer(), mode, seconds)
 
 
 @rpc("any_peer", "call_local", "reliable")
-func _client_carry_mode(mode: StringName) -> void:
+func _client_carry_mode(mode: StringName, busy_s := 0.0) -> void:
 	if multiplayer.get_remote_sender_id() == 1:
 		carry_mode = mode
+		carry_busy_until = _now() + busy_s
 
 
 ## Every peer: a carried or dragged body stops colliding, so it doesn't shove whoever moves it.

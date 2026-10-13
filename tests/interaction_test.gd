@@ -218,6 +218,13 @@ func _test_carry_and_drag() -> void:
 	await _frames(2)
 	InteractionMenu.perform(player, _action(player, alpha, &"carry"))
 	check(player.carrying == alpha and alpha.carried_by == player and player.carry_mode == Soldier.CARRY, "Carry picks the body up")
+	await _frames(2)  # (its ragdoll goes: the body is where it lay)
+	var lying := alpha.global_position
+	await _frames(3)
+	check(player.carry_speed_mult() == 0.0 and _flat(alpha.global_position, lying) < 0.05 and not player.carry_holds(),
+		"lifting it: you stand still and the body stays on the ground until it's up (speed %.2f, moved %.2f m, holds %s)"
+			% [player.carry_speed_mult(), _flat(alpha.global_position, lying), player.carry_holds()])
+	_end_carry_phase(player)
 	check(is_equal_approx(player.carry_speed_mult(), Soldier.CARRY_SPEED_MULT) and is_equal_approx(Soldier.CARRY_SPEED_MULT, 0.55), "carrying slows you to 0.55")
 	check(alpha.collision_layer == 0 and alpha.care_by == player, "the body stops colliding, and squadmates leave it to you")
 	await _frames(3)
@@ -236,6 +243,7 @@ func _test_carry_and_drag() -> void:
 	check(player.carrying == alpha and player.carry_mode == Soldier.DRAG, "Drag on the body you carry switches to dragging")
 	check(_ids(player, alpha).has(&"carry") and _action(player, alpha, &"carry").disabled == "" and not _ids(player, alpha).has(&"drag"),
 		"dragging it: Carry to switch back, no Drag (%s)" % [_ids(player, alpha)])
+	_end_carry_phase(player)  # took hold of the handle
 	check(is_equal_approx(player.carry_speed_mult(), Soldier.DRAG_SPEED_MULT) and Soldier.DRAG_SPEED_MULT < Soldier.CARRY_SPEED_MULT, "dragging is slower (0.35)")
 	player.global_position += Vector3(0, 0, -2.0)
 	await _frames(3)
@@ -266,11 +274,18 @@ func _test_carry_and_drag() -> void:
 		else:
 			player._server_carry_body.rpc_id(1, alpha.get_path())
 		var held := player.carry_mode == mode
+		await _frames(2)  # (its ragdoll goes as it's taken hold of)
+		_end_carry_phase(player)
 		var g := InputEventAction.new()
 		g.action = &"grenade"
 		g.pressed = true
 		player.player_input._unhandled_input(g)
 		await _frames(2)
+		if mode == Soldier.CARRY:
+			check(player.carrying == alpha and player.carry_speed_mult() == 0.0 and absf(_flat(alpha.global_position, player.global_position) - 0.8) < 0.1,
+				"putting a carried body down: you kneel and lower it (standing still), where it'll lie, in front (carrying %s, speed %.2f, %.2f m from you)"
+					% [player.carrying, player.carry_speed_mult(), _flat(alpha.global_position, player.global_position)])
+			_end_carry_phase(player)
 		check(held and player.carrying == null and player.carry_mode == &"" and alpha.carried_by == null,
 			"G lets go of a body you're %s" % ("dragging" if mode == Soldier.DRAG else "carrying"))
 
@@ -305,12 +320,14 @@ func _test_human_casualty() -> void:
 	check(InteractionMenu.actions_for(bravo, player).any(func(a: Dictionary) -> bool: return a.id == &"carry"), "a squadmate can carry a downed player")
 	bravo._server_carry_body.rpc_id(1, player.get_path())
 	check(bravo.carrying == player and player.carried_by == bravo and player.collision_layer == 0, "carried by Bravo")
+	_end_carry_phase(bravo)
 	await _frames(3)
 	var pos: Variant = player.carried_by_pos
 	check(pos is Vector3 and (pos as Vector3).distance_to(bravo.carry_transform().origin) < 0.05, "the host sends the player where they are carried")
 	player._physics_process(1.0 / 60.0)
 	check(player.global_position.distance_to(bravo.carry_transform().origin) < 0.05, "the player's body follows it")
 	bravo._server_drag_body.rpc_id(1, player.get_path())
+	_end_carry_phase(bravo)
 	await _frames(3)
 	pos = player.carried_by_pos
 	check(bravo.carry_mode == Soldier.DRAG and pos is Vector3 and (pos as Vector3).distance_to(bravo.carry_transform().origin) < 0.05, "and dragged")
@@ -659,3 +676,15 @@ func _frames(n: int) -> void:
 
 func _seconds(s: float) -> void:
 	await get_tree().create_timer(s).timeout
+
+
+## The pick-up, take-hold or put-down `s` is in is over (the host counts it down in the
+## carrier's physics step, which these tests mostly keep off).
+func _end_carry_phase(s: Soldier) -> void:
+	s._carry_phase_left = 0.0
+	s.carry_busy_until = 0.0
+	s._update_carried(0.0)
+
+
+static func _flat(a: Vector3, b: Vector3) -> float:
+	return Vector2(a.x - b.x, a.z - b.z).length()

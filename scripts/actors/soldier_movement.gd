@@ -453,7 +453,8 @@ func _update_head(delta: float, down: bool) -> void:
 		var pose := pose_for(stance, side, lean)
 		target = CharacterModel.eye_position(pose)
 		if body.carry_mode == Soldier.DRAG and stance != Stance.PRONE:
-			target = CharacterModel.eye_position(CharacterModel.DRAG_POSE)  # crouched over the casualty
+			target = CharacterModel.DRAG_EYE  # bent over the casualty, head up
+		target.y -= CharacterModel.KNEEL_EYE_DROP * body.model.carry_kneel()  # down on a knee to lift or lay them
 		roll = pose.roll * CAMERA_ROLL if not pose.prone else pose.prone_roll * CAMERA_PRONE_ROLL - lean * 0.1
 	body.head.position = body.head.position.move_toward(target, HEAD_SPEED * delta)
 	body.head.rotation.z = move_toward(body.head.rotation.z, roll, ROLL_SPEED * delta)
