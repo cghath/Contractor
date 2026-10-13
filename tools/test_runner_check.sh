@@ -27,10 +27,32 @@ case "$FAKE_MODE" in
 	script_error_after_pass) echo "SMOKE TEST PASSED (0 failures)"; echo "SCRIPT ERROR: injected at exit"; exit 0 ;;
 	no_summary) echo "  [ok] something"; exit 0 ;;
 	hang) sleep 30; exit 0 ;;
+	slow) echo "  [ok] started"; sleep 6; echo "SMOKE TEST PASSED (0 failures)"; exit 0 ;;
+	world) echo "  [ok] $*"; echo "WORLD TEST PASSED (0 failures)"; exit 0 ;;
 esac
 FAKE
 chmod +x "$fake"
 bad=0
+# A run stopped part-way (killed, or CI's job cancelled or out of time) still has the logs it
+# wrote so far and is a FAIL, never a PASS (its folder may stay RUNNING while the engine it
+# started still holds its log open).
+FAKE_MODE=slow GODOT="$fake" SUITE_TIMEOUT=10 CONTRACTOR_TEST_LOGS="$dir/kept-killed" tools/run_tests.sh smoke >/dev/null 2>&1 &
+runner=$!
+for _ in $(seq 50); do
+	grep -qs started "$dir/kept-killed"/*/R0001-*/smoke.log && break
+	sleep 0.2
+done
+kill -TERM "$runner" 2>/dev/null
+wait "$runner" 2>/dev/null
+kept="$(ls -d "$dir/kept-killed"/*/R0001-*/ 2>/dev/null | head -1)"
+if [ -n "$kept" ] && [ -f "$kept/smoke.log" ] && grep -q "^stopped before it finished" "$kept/summary.txt" \
+		&& grep -q "^result: FAIL" "$kept/summary.txt" && grep -q "^R0001 .* FAIL " "$dir/kept-killed/index.txt" \
+		&& [ -z "$(ls -d "$dir/kept-killed"/*/R0001-*-PASS-*/ 2>/dev/null)" ]; then
+	echo "ok   killed -> FAIL, its logs kept"
+else
+	echo "BAD  killed: a run stopped part-way must keep its logs and be a FAIL"
+	bad=1
+fi
 for case in pass:0 fail:1 script_error:1 script_error_after_pass:1 no_summary:1 hang:1 import_fail:1 import_script_error:1 import_parse_error:1; do
 	mode="${case%%:*}"; want="${case##*:}"
 	out="$(FAKE_MODE="$mode" GODOT="$fake" SUITE_TIMEOUT=2 CONTRACTOR_TEST_LOGS="$dir/kept-$mode" tools/run_tests.sh smoke 2>&1)"
@@ -68,5 +90,35 @@ for case in pass:PASS fail:FAIL import_fail:FAIL; do
 		bad=1
 	fi
 done
+# On CI the workflow sets CONTRACTOR_TEST_LOGS and uploads it whatever the verdict, so the
+# original logs survive: a two-process suite keeps the import, client and host logs, and the
+# summary names the CI run and commit. A failure there still raises its annotations.
+ci_env=(GITHUB_ACTIONS=true GITHUB_REPOSITORY=x/Contractor GITHUB_RUN_ID=4242 GITHUB_RUN_ATTEMPT=2 GITHUB_REF=refs/heads/ci-check GITHUB_SHA=0123abc)
+env "${ci_env[@]}" FAKE_MODE=world GODOT="$fake" SUITE_TIMEOUT=10 CONTRACTOR_TEST_LOGS="$dir/kept-ci" tools/run_tests.sh world >/dev/null 2>&1
+got=$?
+kept="$(ls -d "$dir/kept-ci"/*/R0001-*-PASS-*/ 2>/dev/null | head -1)"
+if [ "$got" -eq 0 ] && [ -n "$kept" ] && [ -f "$kept/import.log" ] && grep -q -- "--world-join" "$kept/world.log" \
+		&& grep -q -- "--world-host" "$kept/world-host.log" && grep -q "^CI: x/Contractor run 4242 attempt 2, refs/heads/ci-check, commit 0123abc" "$kept/summary.txt"; then
+	echo "ok   CI world -> import, client and host logs kept, with the CI run"
+else
+	echo "BAD  CI world: exited $got; no PASS run keeping import.log, world.log, world-host.log and the CI line in $dir/kept-ci"
+	bad=1
+fi
+out="$(env "${ci_env[@]}" FAKE_MODE=fail GODOT="$fake" SUITE_TIMEOUT=2 CONTRACTOR_TEST_LOGS="$dir/kept-ci-fail" tools/run_tests.sh smoke 2>&1)"
+if echo "$out" | grep -q "^::error title=smoke::FAILED" && echo "$out" | grep -q "^::error title=smoke failed check::" \
+		&& [ -f "$(ls -d "$dir/kept-ci-fail"/*/R0001-*-FAIL-*/ 2>/dev/null | head -1)/smoke.log" ]; then
+	echo "ok   CI fail -> annotations raised, logs kept"
+else
+	echo "BAD  CI fail: no ::error annotations, or no kept FAIL run with smoke.log"
+	bad=1
+fi
+wf=.github/workflows/tests.yml
+logs_path="$(grep -m1 'CONTRACTOR_TEST_LOGS:' "$wf" | sed 's/.*CONTRACTOR_TEST_LOGS: *//')"
+if [ -n "$logs_path" ] && grep -A2 'if: always()' "$wf" | grep -q 'uses: actions/upload-artifact' && grep -qF "path: $logs_path" "$wf"; then
+	echo "ok   $wf keeps CONTRACTOR_TEST_LOGS ($logs_path) as an artifact on every verdict"
+else
+	echo "BAD  $wf: the suite step must set CONTRACTOR_TEST_LOGS and an 'if: always()' upload-artifact step keep that path"
+	bad=1
+fi
 [ "$bad" -eq 0 ] && echo "RUNNER CHECK PASSED" || echo "RUNNER CHECK FAILED"
 exit $bad

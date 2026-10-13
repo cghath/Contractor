@@ -19,52 +19,50 @@
 # B:\Contractor-test-logs). Each run gets a number (run_counter.txt there, counting up forever,
 # unique across worktrees) and a folder by date:
 #   <parent>/<date>/R<number>-<time>-<PASS|FAIL>-<branch>-<sha>/
-# (RUNNING while it runs; a folder left RUNNING was killed). Inside: every suite's log and
-# summary.txt (run id, suites, each verdict and [FAIL] line). index.txt at the top lists every
-# run, one line each. On CI (GITHUB_ACTIONS) nothing is kept unless CONTRACTOR_TEST_LOGS is set;
-# CONTRACTOR_TEST_LOGS=none keeps nothing.
+# (RUNNING while it runs; a folder left RUNNING was killed outright). Inside: every suite's log,
+# written there as it runs (so a run stopped part-way still has them), and summary.txt (run id,
+# CI run and commit on CI, suites, each verdict and [FAIL] line). A run stopped before it
+# finishes (killed, or CI's job cancelled or out of time) is a FAIL. index.txt at the top lists
+# every run, one line each. On CI (GITHUB_ACTIONS) nothing is kept unless CONTRACTOR_TEST_LOGS
+# is set (.github/workflows/tests.yml sets it and uploads the folder); CONTRACTOR_TEST_LOGS=none
+# keeps nothing. tools/run_log.sh finds the parent, the number and the branch-sha.
 set -u
 cd "$(dirname "$0")/.."
+. tools/run_log.sh
 GODOT="${GODOT:-godot}"
 SUITE_TIMEOUT="${SUITE_TIMEOUT:-480}"
 SUITES=("$@")
 [ ${#SUITES[@]} -eq 0 ] && SUITES=(smoke gameplay squad net wounds armor movement interaction roles medical logistics casualty materials animations scavenge contracts people map base world missions vehicles antiarmor session_log supports aav sound)
 status=0
-logs="$(mktemp -d)"
-keep_root="${CONTRACTOR_TEST_LOGS:-}"
-if [ -z "$keep_root" ] && [ -z "${GITHUB_ACTIONS:-}" ]; then
-	# One parent for every worktree (beside the main checkout), so run numbers are unique
-	# across them; a copy outside git keeps its own beside its folder.
-	common="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
-	if [ -n "$common" ]; then keep_root="$(cd "$common/../.." && pwd)/Contractor-test-logs"; else keep_root="$(cd .. && pwd)/Contractor-test-logs"; fi
-fi
+finished=""
+keep_root="$(run_log_parent)"
 keep=""
 run_id=""
-if [ -n "$keep_root" ] && [ "$keep_root" != none ] && mkdir -p "$keep_root"; then
-	n=$(( $(cat "$keep_root/run_counter.txt" 2>/dev/null || echo 0) + 1 ))
-	echo "$n" >"$keep_root/run_counter.txt"
-	run_id="$(printf 'R%04d' "$n")"
-	branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null | tr '/' '-')"
-	sha="$(git rev-parse --short HEAD 2>/dev/null || echo nogit)"
-	run_tail="${branch:-nobranch}-$sha"
+if [ -n "$keep_root" ]; then
+	run_id="$(printf 'R%04d' "$(run_log_number "$keep_root")")"
+	run_tail="$(run_log_tail)"
 	run_day="$keep_root/$(date +%Y-%m-%d)"
 	run_time="$(date +%H%M%S)"
 	keep="$run_day/$run_id-$run_time-RUNNING-$run_tail"
 	mkdir -p "$keep" || keep=""
 fi
-# The temp folder goes; the kept copy never does. The run's folder is renamed PASS or FAIL.
+# The logs go straight into the kept folder; with none, into a temp folder that goes at the end.
+logs="$keep"
+[ -z "$logs" ] && logs="$(mktemp -d)"
+# The kept folder never goes: it's renamed PASS or FAIL.
 keep_logs() {
 	if [ -n "$keep" ]; then
-		cp "$logs"/*.log "$keep"/ 2>/dev/null
 		local verdict=PASS
 		[ "$status" -ne 0 ] && verdict=FAIL
+		[ -z "$finished" ] && { verdict=FAIL; note "stopped before it finished"; }
 		note "result: $verdict"
 		local done_dir="$run_day/$run_id-$run_time-$verdict-$run_tail"
 		mv "$keep" "$done_dir" 2>/dev/null && keep="$done_dir"
 		echo "$run_id $(date +%Y-%m-%d) $run_time $verdict $run_tail suites: ${SUITES[*]}" >>"$keep_root/index.txt"
 		echo "run $run_id: $verdict, logs kept in $keep"
+	else
+		rm -rf "$logs"
 	fi
-	rm -rf "$logs"
 }
 trap keep_logs EXIT
 # One line per verdict in the kept folder's summary.txt.
@@ -72,6 +70,7 @@ note() {
 	[ -n "$keep" ] && echo "$1" >>"$keep/summary.txt"
 }
 note "run $run_id, $(date '+%Y-%m-%d %H:%M:%S'), ${run_tail:-}"
+[ -n "${GITHUB_ACTIONS:-}" ] && note "CI: ${GITHUB_REPOSITORY:-} run ${GITHUB_RUN_ID:-} attempt ${GITHUB_RUN_ATTEMPT:-}, ${GITHUB_REF:-}, commit ${GITHUB_SHA:-}"
 note "suites: ${SUITES[*]}  (port ${CONTRACTOR_PORT:-default}, timeout ${SUITE_TIMEOUT}s)"
 
 # Runs the engine with "$@" under the timeout, output to log file $1. Returns the exit code
@@ -133,7 +132,7 @@ judge() {
 # 0) fails the run before any suite starts.
 engine "$logs/import.log" --import
 judge import "$logs/import.log" $? ""
-[ "$status" -ne 0 ] && exit 1
+[ "$status" -ne 0 ] && { finished=1; exit 1; }
 for suite in "${SUITES[@]}"; do
 	if [ "$suite" = net ] || [ "$suite" = world ] || [ "$suite" = vehicles ] || [ "$suite" = supports ] || [ "$suite" = aav ]; then
 		# Two processes over ENet on localhost. net: the client prints the summary, the host
@@ -155,4 +154,5 @@ for suite in "${SUITES[@]}"; do
 	fi
 done
 
+finished=1
 exit $status
