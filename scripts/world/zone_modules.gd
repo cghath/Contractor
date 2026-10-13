@@ -32,6 +32,8 @@ static var HALF := {
 }
 ## Voxel bounds reach this far above the ground (m) and this far below it.
 const TOP_M := 4.8
+## A generated town's own top (m; two storeys and a roof go higher than TOP_M).
+static var TOP := {}
 const BELOW_M := 0.8
 
 ## Named points (m from the origin, on the ground): "objective" (where a mission's target
@@ -163,6 +165,10 @@ static func _town(type: String) -> bool:
 	POINTS[type] = t.points
 	GARRISON[type] = t.garrison
 	LOOT[type] = t.loot
+	var top := TOP_M
+	for bx: Array in t.boxes:
+		top = maxf(top, (bx[1] as Vector3).y + 0.5)
+	TOP[type] = top
 	_towns[type] = {"civilians": t.civilians, "half": t.half, "points": t.points, "hvt": t.hvt, "hostage": t.hostage}
 	return true
 
@@ -210,7 +216,7 @@ static func bounds_voxels(type: String) -> AABB:
 	var half: Vector2 = HALF.get(type, Vector2(20, 20))
 	var s := VoxelWorld.VOXEL_SIZE
 	var lo := Vector3(-half.x - 1.0, -BELOW_M, -half.y - 1.0) / s
-	var hi := Vector3(half.x + 1.0, TOP_M, half.y + 1.0) / s
+	var hi := Vector3(half.x + 1.0, float(TOP.get(type, TOP_M)), half.y + 1.0) / s
 	return AABB(lo.round(), (hi - lo).round())
 
 

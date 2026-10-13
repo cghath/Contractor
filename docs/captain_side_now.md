@@ -15,9 +15,21 @@ picking up next, we'll read it and steer around it.
 
 ## For you (cghath)
 
-- **`dev` is now 8f8812a** (Captain's go, 2026-10-13; CI green 28/28): ai/spotting +
-  art/terrain-roads + art/gear-motion (with art/gear-fit-wire) + art/scatter-art + the final
-  audit's fixes, fast-forwarded from fcae676 (`integrate/oct13`). Fetch before you push.
+- **`dev` is now 903c235** (CI green): procedural buildings, towns in zones and urban hot zones
+  on top of 8f8812a. Fetch before you push.
+- **Campaign files touched, small and on purpose (towns in zones, Captain's call):** please merge
+  dev before you edit these. Every change routes a generated town's type ("town#<seed>") to the
+  base type "town" through `ZoneModules.base()`; nothing else changes for the other types.
+  - `scripts/campaign/missions.gd`: `module()` gives a town its own civilians and sites;
+    `zones()` lists "town" (not "town#<seed>").
+  - `scripts/campaign/contracts_gen.gd`: one line in `mission_target`, the module-type filter.
+  - `scripts/campaign/radio_chatter.gd`: a "Town" callsign.
+  - `data/contracts.json`: a "town" module entry; town in hvt_capture, hostage_rescue and
+    intel_grab; Harbour yard holds a town; the new zone `city_hot` ("Old Quarter").
+  - Raids skip towns: a town has no weapons-cache site yet, since cache counting ("building
+    caches") is on your list. Tell us when it's safe to add one.
+- **`scripts/world/voxel_world.gd`** (phase 3, not on dev yet): base structures are stamped at
+  most 4 ms a frame instead of all in one frame (a town is 1,100+ boxes).
 - **I touched your `tests/aav_test.gd`** (30842cc): "the gunner fires the M2" waited for three
   rounds, but one .50 to the chest can put the dummy down, the gunner stops, and the wait timed
   out (R0284 1 round; CI 2 rounds). It now waits for three rounds or the kill. Revert if you'd rather.
@@ -48,23 +60,29 @@ picking up next, we'll read it and steer around it.
 | 8 | Engagement ranges up: hostiles see 200 m (was 60), the squad 300 m (was 120); aim error at skill 0 1.2 deg (was 2.0); scrub drawn to 400 m and hides nobody past it | `ai/ranges` (ac6957e) | `scripts/ai/squad_ai.gd` (SIGHT_RANGE, SQUAD_SIGHT_RANGE, AIM_UNSKILLED_DEG), `scripts/world/zone_scatter.gd` | Built, R0294 PASS; CI pending. **cghath: doctrine engage_m (A3-07) should match these.** |
 | 9 | Debug tools: overlay shows spotting and alert state; performance lines in session logs; test history page | `debug/overlay-alert` (897eb0e) | `scripts/ui/ai_overlay.gd`, `autoload/session_log.gd`, `tests/session_log_test.gd`, new `tools/test_history.py`, `docs/debugging.md` | Built, R0295 PASS; CI pending |
 | 10 | Procedural buildings, phase 1: generated single-storey houses with interior chunks (`docs/building_gen.md`) | `world/building-gen` | new `scripts/world/building_gen.gd`, new `data/building_chunks.json`, `tests/world_test.gd` | Built (R0300 PASS: 40 seeds, every room reachable and furnished, doorways clear); placing them in zones comes with the town module (11) |
-| 11 | Procedural buildings, phase 2: shops, warehouse, clinic, police station; a town module (street grid of lots) | `world/building-gen` (57c16fc, aa1228a) | `scripts/world/building_gen.gd`, `data/building_chunks.json` (48 chunks), `scripts/world/zone_modules.gd` ("town#<seed>" type; HALF/POINTS/GARRISON now static vars, read the same), `tests/world_test.gd` | Built (R0306, R0308); towns not placed in zones yet: Captain decides where. **cghath: zone_modules.gd changed, merge dev before touching it.** |
-| 12 | Procedural buildings, phases 3 and 4: storeys and stairs; city zones | later | | Queued |
+| 11 | Procedural buildings, phase 2: shops, warehouse, clinic, police station; a town module (street grid of lots) | `world/building-gen` (57c16fc, aa1228a) | `scripts/world/building_gen.gd`, `data/building_chunks.json` (48 chunks), `scripts/world/zone_modules.gd` ("town#<seed>" type; HALF/POINTS/GARRISON/LOOT now static vars, read the same), `tests/world_test.gd` | On dev. **cghath: zone_modules.gd changed, merge dev before touching it.** |
+| 12 | Towns in zones: one village in every hot zone is a town; Harbour yard has one; HVT capture, hostage rescue and intel grab can play in towns | `world/building-gen` (1919ac7) | `scripts/world/zone_def.gd`, `zone_modules.gd`, `building_gen.gd`, `scripts/people/person_look.gd`, campaign files above, `tests/world_test.gd`, `missions_test.gd`, `contracts_test.gd` | On dev; R0311-R0318 PASS |
+| 13 | Urban hot zones: "Old Quarter" (`city_hot`), 3-4 towns round the HQ, patrols in their streets | `world/building-gen` (903c235) | `scripts/world/zone_def.gd` (`generate_hot(..., urban)`), `missions.gd`, `data/contracts.json` | On dev; R0317 PASS |
+| 14 | Procedural buildings, phase 3: two storeys with stairs, flat roofs the AI can climb onto (parapet, railed hatch), L-shaped buildings, walled yards and courtyards | `world/building-storeys` | `scripts/world/building_gen.gd`, `data/building_chunks.json` (52 chunks: 4 yard), `scripts/world/zone_modules.gd` (a town's own top), `scripts/world/voxel_world.gd` (stamping budget), `tests/world_test.gd` | Built, R0321 PASS; screenshots in Discord. The AI's building scan (`Buildings`) still only knows ground floors: upper floors are on the navmesh but not garrisoned yet. |
+| 15 | Procedural buildings, phase 4: city zones (denser streets, taller buildings) | later | | Queued |
 
 ## Decided (Captain, 2026-10-13)
 
+- Towns: in hot zones (in place of a village) and in contract zones, and urban hot zones too.
+- Interior chunks vary moderately per placement (an optional item 60% or more, at most 20% smaller).
+- Phase 3 (L shapes, courtyards, storeys) approved.
 - Enemy camo: stays "urban" for now; decided with factions in wave 6.
 - Scrub: drawn further (400 m) rather than capped; it hides nobody past where it's drawn.
 - Engagement and detection ranges up (item 8).
 
 ## Waiting on Captain
 
-- Procedural buildings: replace the village's hand-built houses after phase 1, or keep both;
-  which building types matter most; how tall in cities.
+- Procedural buildings: replace the village's hand-built houses, or keep both; how tall in cities.
 - Back utility points (A/B/C/D), homeostasis.
 
 ## Log
 
+- 2026-10-13 18:55: phase 3 built (storeys, stairs, roofs, L shapes, yards) on `world/building-storeys`; dev 903c235 (towns in zones, Old Quarter).
 - 2026-10-13 18:10: procedural houses on dev (c856aaa); shops/warehouses/clinics/police, towns and 48 interiors following.
 - 2026-10-13 17:00: ranges up and debug tools (items 8, 9) built; procedural buildings planned (items 10-12).
 - 2026-10-13: dev fast-forwarded to 8f8812a on the Captain's go; these notes are on dev now.

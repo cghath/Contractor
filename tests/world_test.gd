@@ -664,12 +664,15 @@ func _test_hot_layout() -> void:
 
 # --- Procedural buildings (docs/building_gen.md) ----------------------------------------------
 
-## Houses (phase 1) and shops, warehouses, clinics and police stations (phase 2). Over many
-## seeds: the right rooms, every room reachable from the street, the bathroom off one doorway,
-## doorways clear of furniture, everything inside the shell, the same building from the same
-## seed, and within a voxel budget.
+## Houses (phase 1) and shops, warehouses, clinics and police stations (phase 2); second
+## storeys, roofs, L shapes and yards (phase 3). Over many seeds: the right rooms, every room
+## reachable from the street (up the stairs too), the bathroom off one doorway, doorways clear
+## of furniture, everything inside the lot, the same building from the same seed, and within a
+## voxel budget (per storey).
 func _test_building_gen() -> void:
 	print("Procedural buildings: houses, shops, warehouses, clinics, police stations")
+	var feats := {"two storeys": 0, "roof access": 0, "l shape": 0, "yard": 0}
+	var ok_stairs := true
 	var ok_rooms := true
 	var ok_reach := true
 	var ok_doors := true
@@ -693,14 +696,31 @@ func _test_building_gen() -> void:
 		var spec: Dictionary = BuildingGen.TYPES[type]
 		styles[hs.style] = true
 		var rooms: Array = hs.rooms
-		var roles: Array = rooms.map(func(r: Dictionary) -> String: return r.role)
 		var n := rooms.size()
+		# The type's rules are the ground floor's; the floor above has rooms of its own.
+		var roles: Array = rooms.filter(func(r: Dictionary) -> bool: return int(r.floor) == 0).map(func(r: Dictionary) -> String: return r.role)
+		var n0 := roles.size()
 		room_total += n
+		feats["two storeys"] += 1 if int(hs.storeys) == 2 else 0
+		feats["roof access"] += 1 if hs.roof_access else 0
+		feats["l shape"] += 1 if hs.shape == "l" else 0
+		feats["yard"] += (hs.yards as Array).size()
+		# Stairs: no step higher than the navmesh climbs, a stair door for each, each floor's
+		# rooms at its height.
+		for st: Dictionary in hs.stairs:
+			if (float(st.to_y) - float(st.from_y)) / int(st.steps) > 0.25 + 0.001:
+				ok_stairs = false
+				bad.append("%s %d: stair steps %.2f m" % [type, seed, (float(st.to_y) - float(st.from_y)) / int(st.steps)])
+		if (hs.doors as Array).filter(func(dr: Dictionary) -> bool: return dr.get("stair", false)).size() != (hs.stairs as Array).size() \
+				or (int(hs.storeys) == 2) != rooms.any(func(r: Dictionary) -> bool: return int(r.floor) == 1) \
+				or (hs.roof_access as bool) != (hs.doors as Array).any(func(dr: Dictionary) -> bool: return int(dr.rooms[1]) == -2):
+			ok_stairs = false
+			bad.append("%s %d: storeys %d, %d stairs, roof %s" % [type, seed, hs.storeys, (hs.stairs as Array).size(), hs.roof_access])
 		furnished += rooms.filter(func(r: Dictionary) -> bool: return r.chunk != "").size()
 		for r: Dictionary in rooms:
 			if r.chunk == "":
 				bare["%s %s" % [type, r.role]] = int(bare.get("%s %s" % [type, r.role], 0)) + 1
-		var right: bool = n >= int(spec.rooms[0]) and n <= int(spec.rooms[1]) and roles.count(spec.front) == 1 and roles.count("bathroom") <= 1
+		var right: bool = n0 >= int(spec.rooms[0]) and n0 <= int(spec.rooms[1]) and roles.count(spec.front) == 1 and roles.count("bathroom") <= 1
 		if type == "house":
 			right = right and roles.count("kitchen") == 1 and roles.count("bathroom") == 1
 		if type == "police":
@@ -723,9 +743,10 @@ func _test_building_gen() -> void:
 		var bath := roles.find("bathroom")
 		var bath_doors := (hs.doors as Array).filter(func(dr: Dictionary) -> bool: return bath in dr.rooms).size()
 		var front := (hs.doors as Array).any(func(dr: Dictionary) -> bool: return dr.rooms[1] == -1 and (dr.at as Vector3).z > 0.0)
-		if seen.size() != n + 1 or (bath >= 0 and bath_doors != 1) or not front:
+		var reached := seen.keys().filter(func(k: int) -> bool: return k >= 0).size()
+		if reached != n or (bath >= 0 and bath_doors != 1) or not front:
 			ok_reach = false
-			bad.append("%s %d: %d of %d rooms reached, bathroom doors %d, front door %s" % [type, seed, seen.size() - 1, n, bath_doors, front])
+			bad.append("%s %d: %d of %d rooms reached, bathroom doors %d, front door %s" % [type, seed, reached, n, bath_doors, front])
 		# Doorways clear: the gap itself and a step either side of it.
 		var solid := func(q: Vector3) -> bool:
 			return (hs.boxes as Array).any(func(bx: Array) -> bool: return AABB(bx[0], (bx[1] as Vector3) - (bx[0] as Vector3)).has_point(q))
@@ -733,12 +754,12 @@ func _test_building_gen() -> void:
 			var at: Vector3 = (dr.at as Vector3) + Vector3(0, 0.5, 0)
 			var through_x: bool = not solid.call(at + Vector3(0.6, 0, 0)) and not solid.call(at - Vector3(0.6, 0, 0))
 			var through_z: bool = not solid.call(at + Vector3(0, 0, 0.6)) and not solid.call(at - Vector3(0, 0, 0.6))
-			if solid.call(at) or not (through_x or through_z) and dr.rooms[1] != -1:
+			if solid.call(at) or not (through_x or through_z) and dr.rooms[1] != -1 and not dr.get("stair", false):
 				ok_doors = false
 				bad.append("%s %d: doorway at %s blocked" % [type, seed, dr.at])
 		# Inside the shell, and its size in voxels.
 		var half := (hs.size as Vector2) * 0.5
-		var top := float(BuildingGen.STYLES[hs.style].h) + float(BuildingGen.STYLES[hs.style].roof_t)
+		var top := float(hs.height)
 		var voxels := 0
 		for bx: Array in hs.boxes:
 			var lo: Vector3 = bx[0]
@@ -746,13 +767,30 @@ func _test_building_gen() -> void:
 			voxels += int((hi - lo).x * (hi - lo).y * (hi - lo).z / pow(VoxelWorld.VOXEL_SIZE, 3))
 			if lo.x < -half.x - 0.01 or lo.z < -half.y - 0.01 or hi.x > half.x + 0.01 or hi.z > half.y + 0.01 or hi.y > top + 0.01 or lo.y < -0.01:
 				ok_inside = false
+		voxels /= int(hs.storeys)
 		worst_voxels = maxi(worst_voxels, voxels if type != "warehouse" else voxels / 2)
 	check(ok_rooms, "%d buildings: each type's rooms (a house's living room, kitchen and bathroom; a police station's armoury and cells) %s" % [runs.size(), bad.slice(0, 3)])
 	check(ok_reach, "every room reachable from the street, a front door on it, the bathroom off one doorway %s" % [bad.slice(0, 3)])
 	check(ok_doors, "doorways clear of furniture: walk through each %s" % [bad.slice(0, 3)])
-	check(ok_inside and worst_voxels < 150000, "everything inside the shell and under the roof; at most %d voxels (budget 150000; a warehouse twice that)" % worst_voxels)
+	check(ok_inside and worst_voxels < 150000, "everything inside the lot and under its top; at most %d voxels a storey (budget 150000; a warehouse twice that)" % worst_voxels)
+	check(ok_stairs and feats.values().all(func(v: int) -> bool: return v >= 3),
+		"phase 3: %s; every stair's steps 0.25 m or less, a stair door for each, one up to the roof when it's used %s" % [feats, bad.slice(0, 3)])
 	check(furnished >= room_total - runs.size() / 20 and styles.size() >= 3,
 		"rooms furnished from the chunk library (%d of %d; bare: %s), in %d styles" % [furnished, room_total, bare, styles.size()])
+	# A second storey's stairwell isn't walled across, and its landing is in the room above.
+	var ok_well := true
+	for seed in range(1, 61):
+		var b := BuildingGen.building(["house", "shop", "clinic", "police"][seed % 4], seed * 13)
+		if int(b.storeys) != 2:
+			continue
+		var foot: Rect2 = (b.stairs as Array)[0].foot
+		var y_up := float((b.stairs as Array)[0].to_y)
+		for bx: Array in b.boxes:
+			var lo: Vector3 = bx[0]
+			var hi: Vector3 = bx[1]
+			if lo.y >= y_up - 0.01 and lo.y < y_up + 2.0 and Rect2(lo.x, lo.z, hi.x - lo.x, hi.z - lo.z).grow(-0.01).intersects(foot.grow(-0.05)):
+				ok_well = false
+	check(ok_well, "nothing stands in a stairwell on the floor above")
 	var again := BuildingGen.house(7)
 	check(BuildingGen.house(7).boxes == again.boxes and BuildingGen.house(8).boxes != again.boxes, "the same seed builds the same house, another seed another")
 

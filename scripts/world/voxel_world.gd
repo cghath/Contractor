@@ -120,6 +120,10 @@ var _tool: VoxelTool
 var _structures: Array = []  # [begin: Vector3i, end: Vector3i, mat]
 var _structure_area := AABB()
 var _built := false
+var _next_structure := 0  # how many of _structures are stamped so far
+## The base structures are stamped a few at a time, at most BUILD_BUDGET_MS a frame (a
+## generated town is over a thousand boxes: all at once held a frame for half a second).
+const BUILD_BUDGET_MS := 4.0
 var _pending: Array = []
 var _dirty: Array[AABB] = []  # host: carved voxel boxes not checked for breaches yet
 var _breached := {}           # host: Vector2i columns already reported as part of a gap
@@ -210,9 +214,14 @@ func _process(_delta: float) -> void:
 	if not _tool.is_area_editable(_structure_area):
 		return
 	_tool.mode = VoxelTool.MODE_SET
-	for s: Array in _structures:
+	var until := Time.get_ticks_usec() + int(BUILD_BUDGET_MS * 1000.0)
+	while _next_structure < _structures.size():
+		var s: Array = _structures[_next_structure]
 		_tool.value = s[2]
 		_tool.do_box(s[0], s[1])
+		_next_structure += 1
+		if Time.get_ticks_usec() >= until:
+			return
 	_built = true
 	set_process(not _dirty.is_empty())
 	for edit: Dictionary in _pending:

@@ -63,8 +63,31 @@ suit it. Captain's side; see `docs/build_plan.md` ("Procedural buildings") for w
    - Measured (agent-tools/city_shots.gd, Old Quarter): a town streams in in under a second;
      the frame it lands in takes 290-350 ms against a village's 190 ms (the garrison spawning
      and the voxel build together). Worth smoothing before city zones (phase 4).
-   - Next: storeys.
-3. **Storeys.** Multi-storey buildings: stair chunks, upper floors, rooftops the AI can use.
+   - Phase 3 made a town 1,100-1,250 boxes; `VoxelWorld` now stamps base structures at most
+     `BUILD_BUDGET_MS` (4 ms) a frame instead of all in one frame. A teleport next to a town still
+     costs one long frame (about 350 ms, a village about 280): terrain, scatter and the garrison
+     arriving together, not the buildings. Walking in, the town builds over 30-40 frames.
+3. **Storeys, roofs, L shapes, yards (built, 2026-10-13, Captain approved).** Per type in
+   `BuildingGen.TYPES`: the chance of each.
+   - Two storeys: the upper walls stand on the ground floor's (load-bearing, and the
+     stairwell always lands in one room), the rooms get the type's `"upper"` roles (a house:
+     a family room, bedrooms, a bathroom; a shop: a flat; a police station: offices) and
+     doorways of their own. A concrete slab (wood in mud-brick) between.
+   - Stairs: built from solid steps, 0.23 m rise (the navmesh climbs 0.25), 0.25 m tread, 1 m
+     wide, along a wall from a corner, clear of every doorway, 0.8 m landing past the top; the
+     stairwell above has a steel railing on its open side and foot. A door entry with
+     `"stair": true` links the floors (rooms numbered across floors).
+   - Roofs: two-storey buildings always, and some single-storey ones (`"roof"`), get a stair
+     up through a railed hatch onto a flat roof with a 0.9 m parapet.
+   - L shapes (single storey, no yard behind): a back corner left out; the outside walls are
+     traced round whatever shape the rooms make. More than half of them wall the missing
+     corner in as a courtyard.
+   - Yards: a walled yard behind (4-6.5 m deep, part of the lot), a gate to the side alley,
+     furnished from four "yard" chunks (water tank, woodpile, crates, table and benches).
+   - Checks (world_test): every room reachable up the stairs, no step over 0.25 m, nothing
+     in a stairwell above, a voxel budget per storey; screenshots `agent-tools/phase3_shots.gd`.
+   - Not yet: the AI's building scan (`Buildings`) looks at ground floors only, so upper floors
+     and roofs are walkable but not garrisoned or cleared room by room.
 4. **City zones.** A dense-streets terrain preset made of towns, with what it takes to stream
    that many buildings (budgets measured with the session log's performance lines).
 
