@@ -114,6 +114,10 @@ const COVER_MEDIC_M := 30.0
 ## further than this from them; then they're carried after the squad like anyone who won't
 ## wake soon.
 const STAY_WITH_M := 20.0
+## Ordered to move while carrying a casualty: cover within LAY_DOWN_M of the order point to lay
+## them down in; lying within LAY_NEAR_M of it counts as laid down there (proposed).
+const LAY_DOWN_M := 8.0
+const LAY_NEAR_M := 2.0
 ## The care order once safe, by care_needed() kind: massive bleeding, airway, tension (the needle), chest, the
 ## pelvic binder (a broken pelvis bleeds heavily inside), other bleeding, circulation (IV or IO, a bag, a pressure bag), restarting a heart
 ## (epinephrine, shocks, CPR), the heart rate, fractures, burns, pain, epinephrine's wake-up roll
@@ -289,6 +293,8 @@ var _cover_point := Vector3.ZERO
 var _has_cover := false
 var _hold_point := Vector3.ZERO
 var _move_point := Vector3.ZERO
+## Where a casualty carried under a move order is laid down (null until worked out).
+var _lay_spot: Variant = null
 var _patrol_index := 0
 var _think_cd := 0.0
 var _scan_cd := 0.0
@@ -511,6 +517,7 @@ func on_order(new_order: Squad.Order, point: Vector3, slot := 0, count := 1) -> 
 	_hold_point = body.global_position
 	var side := squad.leader.global_basis.x if squad and is_instance_valid(squad.leader) else body.global_basis.x
 	_move_point = point + side * (slot - (count - 1) / 2.0) * 1.5
+	_lay_spot = null
 	_has_cover = false
 	_think_cd = 0.0
 
@@ -1381,12 +1388,25 @@ func _care_exposed(contact: bool) -> bool:
 ## wake soon (past the wound model's unconscious blood loss), or any once the squad leader is
 ## more than STAY_WITH_M away. Otherwise they're watched over where they lie.
 func _should_carry() -> bool:
+	if _holds_for_medic():
+		return false
 	if Person.is_hvt(casualty):
 		return true  # an HVT goes with the squad, not left lying
 	if 1.0 - casualty.vitals.blood_fraction() >= WoundModel.UNCONSCIOUS_LOST:
 		return true
 	var leader: Soldier = squad.leader if squad and is_instance_valid(squad.leader) else null
 	return leader != null and leader != casualty and leader.global_position.distance_to(casualty.body_point()) > STAY_WITH_M
+
+
+## Still bleeding with nothing this unit can do about it (a medic-only clamp, no gauze or
+## tourniquet left) and a medic who has it is free: hold beside them and call the medic,
+## rather than carry them bleeding after the leader (cghath's test, P0164 queue 14).
+func _holds_for_medic() -> bool:
+	if casualty.vitals.bleed_rate() <= 0.0:
+		return false
+	if wanted.is_empty():
+		wanted = _missing_items(casualty)
+	return medic_for(casualty, wanted) != null
 
 
 ## Carrying an unconscious casualty after the squad leader until they wake on their own. In
@@ -1407,6 +1427,12 @@ func _care_carry(contact: bool) -> void:
 	if not casualty.vitals.downed or not _next_task(casualty, false).is_empty():
 		care = Care.TREAT  # woke up, or there's something new to do (an item handed over)
 		return
+	if _holds_for_medic():
+		if body.carrying == casualty:
+			body.release_carried()  # a bleed opened up on the way: put them down for the medic
+		_want_medic()
+		care = Care.TREAT
+		return
 	var leader: Soldier = squad.leader if squad and is_instance_valid(squad.leader) else null
 	if leader == null or casualty == leader or body.faction != &"friendly":
 		# No one to follow (or the lead is down): keep them safe where they are.
@@ -1415,6 +1441,24 @@ func _care_carry(contact: bool) -> void:
 		_has_destination = false
 		body.want_crouch = true
 		return
+	var ordered := order == Squad.Order.MOVE
+	if ordered:
+		if _lay_spot == null:
+			# Captain (P0164 queue 16): ordered to move while carrying, go there and lay them
+			# down at the safest spot nearby (cover from the last known threat).
+			var spot: Variant = find_cover(_move_point, LAY_DOWN_M)
+			_lay_spot = spot if spot != null else NavigationServer3D.map_get_closest_point(body.get_world_3d().navigation_map, _move_point)
+		var lay: Vector3 = _lay_spot
+		var at := casualty.body_point()
+		if body.carrying != casualty and Vector2(at.x - lay.x, at.z - lay.z).length() <= LAY_NEAR_M:
+			_has_destination = false  # laid down where ordered: stay with them
+			body.want_crouch = true
+			return
+		if body.carrying == casualty and _flat_distance(lay) <= 1.0:
+			body.release_carried()
+			_has_destination = false
+			body.want_crouch = true
+			return
 	if body.carrying != casualty:
 		if casualty.vitals.is_healing():
 			_has_destination = false  # someone is treating them: wait, don't lift them away (P0164)
@@ -1424,7 +1468,7 @@ func _care_carry(contact: bool) -> void:
 		else:
 			_go(casualty.body_point(), true)
 		return
-	_go(squad.follow_point(body))
+	_go(_lay_spot if ordered else squad.follow_point(body))
 
 
 ## Out of contact: picks up a fallen friendly's body and carries it after the squad leader.

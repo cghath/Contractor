@@ -72,6 +72,7 @@ func _ready() -> void:
 	await _test_medic_choice()
 	await _test_triage()
 	_test_medic_keeps_kit()
+	_test_hold_for_medic()
 	_test_medic_fights_only_close()
 	await _out_of_contact()
 	await _test_dead_check()
@@ -255,6 +256,27 @@ func _test_medic_keeps_kit() -> void:
 	check(not SquadAI.of(_ai("Echo"))._kept_for_squad(&"pressure_bandage", "venous"), "only medics keep their kit")
 	charlie.inventory.net_state = charlie_gear
 	player.inventory.net_state = player_gear
+
+
+## cghath's test (P0164 queue 14): AI carried a teammate who was still bleeding (internal
+## bleeding: the clamp is medic-only for AI) after the leader. Staged in one frame: a rifleman
+## with such a casualty holds and calls the medic instead.
+func _test_hold_for_medic() -> void:
+	print("A bleed the carer can't stop: hold for the medic, don't carry")
+	var echo := _ai("Echo")
+	var delta := _ai("Delta")
+	var echo_ai := SquadAI.of(echo)
+	echo_ai.casualty = delta
+	echo_ai.wanted.clear()
+	delta.vitals._model._add_wound(Vitals.ABDOMEN, "internal", 0.8, &"renal_l")
+	delta.vitals._model.update_state(0.0)
+	delta.vitals._after_change(true)
+	check(echo.role != Roles.MEDIC and delta.vitals.bleed_rate() > 0.0 and echo_ai._holds_for_medic() and not echo_ai._should_carry(),
+		"Echo (no clamp of his own to use) holds beside bleeding Delta for the medic instead of carrying him (wants %s)" % [echo_ai.wanted])
+	delta.vitals.server_reset_health()
+	echo_ai.wanted.clear()
+	check(not echo_ai._holds_for_medic(), "not bleeding: nothing to hold for")
+	echo_ai.casualty = null
 
 
 ## Staged in one frame (no brain runs in between): whom a medic on its way to a casualty
@@ -705,6 +727,19 @@ func _test_engagement() -> void:
 	check(along, "after the lead (%.1f m from him)" % _flat(delta.global_position, player.global_position))
 	check(not seen.woke and delta.vitals.downed and delta.vitals.blood_fraction() <= seen.blood_min + 0.02 and not seen.status.has("Reviving Delta"),
 		"no revive: he stayed unconscious, his blood only creeping back (%.0f%% -> %.0f%%)" % [seen.blood_min * 100.0, delta.vitals.blood_fraction() * 100.0])
+	# Captain (P0164 queue 16): ordered to move while carrying him, the bearer goes there and
+	# lays him down in cover nearby, and stays with him.
+	if bearer and SquadAI.of(bearer):
+		var bearer_ai := SquadAI.of(bearer)
+		var move_to := Vector3(-3, 0.1, 15)  # where he went down: open, walkable ground
+		bearer_ai.on_order(Squad.Order.MOVE, move_to)
+		var laid := await _wait_until(func() -> bool:
+			return not is_instance_valid(delta.carried_by) and _flat(delta.global_position, move_to) <= SquadAI.LAY_DOWN_M + SquadAI.LAY_NEAR_M, 30.0)
+		check(laid and bearer_ai.casualty == delta, "ordered to move while carrying him, %s lays him down near the order point (%.1f m) and stays (%s)"
+			% [_name(bearer), _flat(delta.global_position, move_to), bearer.ai_status])
+		await _seconds(2.0)
+		check(not is_instance_valid(delta.carried_by), "and doesn't pick him up again while the order stands")
+		bearer_ai.on_order(Squad.Order.FOLLOW, player.global_position)
 	# He comes round on his own (the wound model decides when; the test stands in for it).
 	delta.vitals.server_reset_health()
 	var put_down := await _wait_until(func() -> bool: return not is_instance_valid(delta.carried_by) and SquadAI.of(golf).casualty != delta, 5.0)
