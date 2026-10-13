@@ -31,7 +31,7 @@ const BUILD_M := 1000.0
 const PER_FRAME := 2
 const CHECK_S := 0.5
 ## Draw distances (m): scrub, rocks, trunks and crowns.
-const SEE_SCRUB_M := 240.0
+const SEE_SCRUB_M := 400.0
 const SEE_ROCK_M := 650.0
 const SEE_TREE_M := 950.0
 
@@ -231,6 +231,8 @@ func foliage_between(from: Vector3, to: Vector3) -> float:
 				if kind == Kind.ROCK:
 					continue
 				var p: Vector3 = item.pos
+				if kind == Kind.SCRUB and Vector2(p.x - from.x, p.z - from.z).length() > SEE_SCRUB_M:
+					continue  # past where scrub is drawn it hides nobody (what players see is what counts)
 				var size: Vector3 = item.size
 				var r := size.x * (SCRUB_R if kind == Kind.SCRUB else CROWN_R)
 				var y0 := p.y + (0.0 if kind == Kind.SCRUB else size.y * CROWN_LOW)
