@@ -870,13 +870,39 @@ func _request(what: String, args: Array) -> void:
 		_rq.rpc_id(1, what, args)
 
 
+## What each request's arguments must be (audit A1-05), checked before any is read.
+const REQUEST_ARGS := {"accept": [TYPE_STRING, TYPE_DICTIONARY], "renegotiate": [TYPE_STRING], "abort": [TYPE_STRING],
+	"pick": [TYPE_INT], "unpick": [TYPE_INT], "turn_in": [TYPE_INT], "sell": [TYPE_INT, TYPE_STRING], "finish": []}
+
+
+## Untyped on purpose: whatever a client sends reaches _handle, which checks it.
 @rpc("any_peer", "call_remote", "reliable")
-func _rq(what: String, args: Array) -> void:
+func _rq(what: Variant, args: Variant) -> void:
 	if multiplayer.is_server():
 		_handle(what, args, multiplayer.get_remote_sender_id())
 
 
-func _handle(what: String, args: Array, peer: int) -> void:
+## Whether `args` are what request `what` takes (REQUEST_ARGS): that many, of those types.
+static func request_ok(what: Variant, args: Variant) -> bool:
+	if typeof(what) != TYPE_STRING or not REQUEST_ARGS.has(what) or typeof(args) != TYPE_ARRAY:
+		return false
+	var want: Array = REQUEST_ARGS[what]
+	if (args as Array).size() != want.size():
+		return false
+	for i in want.size():
+		var t := typeof(args[i])
+		if t != want[i] and not (want[i] == TYPE_STRING and t == TYPE_STRING_NAME):
+			return false
+	return true
+
+
+## Host: a request from `peer` (1: the host itself). A malformed one, local or remote, is
+## refused before any argument is read (audit A1-05).
+func _handle(what: Variant, args: Variant, peer: int) -> void:
+	if not request_ok(what, args):
+		push_warning("Contracts: refused a malformed request from peer %d: %s %s" % [peer, str(what).left(40), str(args).left(120)])
+		_notify(peer, "Bad request")
+		return
 	var why := ""
 	match what:
 		"accept":

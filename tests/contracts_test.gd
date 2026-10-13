@@ -42,6 +42,7 @@ func _ready() -> void:
 	_register_clear_compound()
 	_test_rating_and_understatement()
 	_test_negotiation()
+	_test_malformed_requests()
 	_test_reveal_renegotiate_abort()
 	_test_wages_and_floor()
 	_test_lapse()
@@ -192,6 +193,30 @@ func _test_rating_and_understatement() -> void:
 
 
 # --- Negotiation -----------------------------------------------------------------------------
+
+## Audit A1-05: a request with missing or wrong-typed arguments, local or from a client, and
+## terms that aren't plain numbers, are refused (the asker is told) before anything is read.
+func _test_malformed_requests() -> void:
+	print("Malformed requests")
+	Contracts.new_full_campaign(55, 150000)
+	var notes: Array = []
+	var on_notice := func(text: String) -> void: notes.append(text)
+	Contracts.notice.connect(on_notice)
+	var cash := Economy.cash()
+	var cid := String(Contracts.board()[0].cid)
+	var bad: Array = [["accept", []], ["accept", [cid]], ["accept", [cid, []]], ["accept", [7, {}]], ["accept", "x"], ["renegotiate", []],
+		["abort", [7]], ["pick", []], ["unpick", ["0"]], ["turn_in", [null]], ["sell", [0]], ["sell", ["0", "meridian"]], ["finish", [1]],
+		[7, []], ["nonsense", []]]
+	for req: Array in bad:
+		Contracts._handle(req[0], req[1], 1)
+	check(notes.size() == bad.size() and notes.all(func(n: String) -> bool: return n == "Bad request") and Economy.cash() == cash
+		and Contracts.contract(cid).state == "offered" and Contracts.held().is_empty(),
+		"%d malformed requests are each refused as a bad request, nothing changes (%d answers)" % [bad.size(), notes.size()])
+	var bad_terms: Array = [{"pay_points": "lots"}, {"advance_share": NAN}, {"pay_points": 1.5}, {"bribe": 1}, {"support_points": []}, {7: 1}]
+	check(bad_terms.all(func(t: Dictionary) -> bool: return Contracts.server_accept(cid, t) == "Those terms make no sense")
+		and Economy.cash() == cash and Contracts.contract(cid).state == "offered", "terms that aren't the plain numbers negotiated are refused")
+	Contracts.notice.disconnect(on_notice)
+
 
 func _test_negotiation() -> void:
 	print("Negotiation, the advance, and failure")
@@ -671,8 +696,12 @@ func _test_over_network() -> void:
 	Contracts.new_full_campaign(91, 150000)
 	var cid := _make_offer("clear_compound", "compound_01")
 	Contracts.server_accept(cid, ContractGen.default_terms())
+	# Audit A1-07: a hostile holds out in the compound, so the clear objective is legitimately
+	# still active however long the client takes to join (an empty area completes itself after
+	# "clear_arm_timeout_s"); the client compares with what the host has.
+	var holdout := _hostile("NetHoldout", Vector3(8, 0.1, 0))
 	Contracts.server_start_deployment([cid])
-	var args := PackedStringArray(["--headless", "--path", ProjectSettings.globalize_path("res://"), "res://tests/contracts_test.tscn", "--", "--join", "127.0.0.1"])
+	var args :=PackedStringArray(["--headless", "--path", ProjectSettings.globalize_path("res://"), "res://tests/contracts_test.tscn", "--", "--join", "127.0.0.1"])
 	var pid := OS.create_process(OS.get_executable_path(), args)
 	check(pid > 0, "client process started")
 	if pid <= 0:
@@ -682,10 +711,14 @@ func _test_over_network() -> void:
 	if _client_ready:
 		var peer := multiplayer.get_peers()[0]
 		var offer: Dictionary = Contracts.board()[2]
+		var states: Array = Contracts.objectives.list.map(func(o: Dictionary) -> String: return String(o.state))
+		check(states.all(func(st: String) -> bool: return st == "active") and Contracts.objectives.hostiles_in(Contracts.objectives.list[0]) == 1,
+			"host: with a hostile holding out, the clear objective is still active when the client is in (%s)" % ", ".join(PackedStringArray(states)))
 		_start_client.rpc_id(peer, {"board": Contracts.board().size(), "objectives": Contracts.objectives.list.size(), "offer": offer.cid,
-			"cash": Economy.cash(), "title": Contracts.contract(cid).title})
+			"cash": Economy.cash(), "title": Contracts.contract(cid).title, "states": states})
 		await _wait_for(func() -> bool: return _client_phase >= 1, 20.0)
 		check(Contracts.contract(String(offer.cid)).get("state") == "accepted", "the client's accept went through the host")
+		holdout.vitals.server_kill()
 		Contracts.objectives.server_set_state(Contracts.objectives.list[0].oid, Objectives.DONE)
 		await _wait_for(func() -> bool: return _client_phase >= 2, 10.0)
 		Contracts.server_end_deployment(Contracts.report_from_level(level, [player]))
@@ -724,13 +757,24 @@ func _run_client() -> void:
 	_remote_ready.rpc_id(1)
 	while _go.is_empty() and Time.get_ticks_msec() < deadline + 15000:
 		await get_tree().process_frame
-	await _wait_for(func() -> bool: return Contracts.board().size() == int(_go.board) and Contracts.objectives.list.size() == int(_go.objectives), 5.0)
+	var host_states: Array = _go.get("states", [])
+	var my_states := func() -> Array: return Contracts.objectives.list.map(func(o: Dictionary) -> String: return String(o.state))
+	await _wait_for(func() -> bool: return Contracts.board().size() == int(_go.board) and my_states.call() == host_states, 5.0)
 	_remote_check.rpc_id(1, Contracts.board().size() == int(_go.board) and Economy.cash() == int(_go.cash) and Economy.day() >= 1,
 		"a late joiner gets the board (%d offers) and the company's cash ($%d)" % [Contracts.board().size(), Economy.cash()])
 	_remote_check.rpc_id(1, not Contracts.board().any(func(o: Dictionary) -> bool: return o.has("true_rating") or o.has("understated")),
 		"without the host-only truth about the threat")
-	_remote_check.rpc_id(1, Contracts.objectives.list.size() == int(_go.objectives) and Contracts.is_deployed()
-		and Contracts.objectives.list.all(func(o: Dictionary) -> bool: return o.state == "active"), "and the deployment's objectives, live")
+	_remote_check.rpc_id(1, Contracts.objectives.list.size() == int(_go.objectives) and Contracts.is_deployed() and my_states.call() == host_states,
+		"and the deployment's objectives, live, as the host has them (%s)" % ", ".join(PackedStringArray(my_states.call())))
+	# Audit A1-05: a malformed request from a client is refused with an answer, not a host error.
+	var answers: Array = []
+	var on_notice := func(text: String) -> void: answers.append(text)
+	Contracts.notice.connect(on_notice)
+	Contracts._rq.rpc_id(1, "accept", [])
+	Contracts._rq.rpc_id(1, "sell", ["0", 1])
+	await _wait_for(func() -> bool: return answers.size() >= 2, 5.0)
+	Contracts.notice.disconnect(on_notice)
+	_remote_check.rpc_id(1, answers == ["Bad request", "Bad request"], "a client's malformed requests are refused as bad requests (%s)" % ", ".join(PackedStringArray(answers)))
 	var board := Contracts.open_board()
 	await _frames(2)
 	_remote_check.rpc_id(1, board.offer_count() == int(_go.board) and board.held_count() == 1 and board.header_text().contains("Cash $%s" % DebriefCalc.money(_go.cash)),
