@@ -2,6 +2,8 @@
 
 October 13, 2026 · `dev` · `fcae676b8318b7534fdc3f2e4d17a9e9a228275f`
 
+> **Status (2026-10-13, cghath's side):** all 26 dealt with on branch `fix/audit-2026-10-13`: 25 fixed, A3-07 marked pending (doctrine numbers left to Captain's tactics work). Each has a regression check; all 27 suites pass (R0119). Details in CHANGELOG.md.
+
 **26 actionable findings: 3 high priority (P1), 23 medium priority (P2).** Gameplay source was not changed. Reports and diagnostic fixtures are in this folder; logs are retained outside the repository. Findings remain open.
 
 | Part | Findings | Report |
