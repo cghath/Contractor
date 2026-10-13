@@ -1760,7 +1760,9 @@ static func _loot_order(other: Soldier) -> Array:
 ## weapons), then what's stowed, pouches first. The carrier comes with its pouches on but
 ## empty, and what was in them follows as entries of their own, so a looter who already
 ## wears a carrier gets the magazines in his own pouches instead of buried in a spare
-## carrier, and one who puts this carrier on gets them back in its pouches.
+## carrier, and one who puts this carrier on gets them back in its pouches. The same goes for
+## the pack's attachments (an aid bag): each thing is handed over once, never both inside its
+## pouch and as an entry of its own (audit A2-01: loot-all doubled an aid bag's bandages).
 func gear_entries() -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	for slot in LOOT_SLOT_ORDER:
@@ -1768,7 +1770,7 @@ func gear_entries() -> Array[Dictionary]:
 			var entry := {"id": inventory.slots[slot], "count": 1}
 			if not inventory.state_of(slot).is_empty():
 				entry.state = inventory.state_of(slot).duplicate(true)
-				if slot == &"vest":
+				if slot in Inventory.ATTACH_SLOTS:
 					for att: Dictionary in entry.state.get("molle", {}).values():
 						if att.has("held"):
 							att.held = []

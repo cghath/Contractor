@@ -37,6 +37,7 @@ func _ready() -> void:
 	await _test_loading()
 	_test_molle_rules()
 	await _test_molle_host()
+	await _test_loot_aid_bag()
 	await _test_respawn_kit()
 	await _test_smoke_colours()
 	await _test_breach_navigation()
@@ -429,6 +430,90 @@ func _test_pack_rules() -> void:
 	check(inv.set_rolled(&"backpack", i, false) and not inv.containers[&"backpack"][i].has("state"), "and unrolls back to a plain pack")
 	inv.strip()
 	inv.free()
+
+
+## Audit A2-01: looting a dead medic hands over his pack's aid bag and what's in it exactly
+## once: loot all into a looter wearing nothing, loot all into one with gear of his own, and
+## item by item (how loot all goes when it has to undo). Nothing is made or lost.
+func _test_loot_aid_bag() -> void:
+	print("Looting a pack with an aid bag on it")
+	var inv := player.inventory
+	player.global_position = Vector3(0, 0.1, 18)
+	var looters := {
+		"nothing on": [] as Array[StringName],
+		"gear of his own": [&"plate_carrier", &"ruck_45", &"aid_bag", &"pressure_bandage", &"mag_556"] as Array[StringName],
+		"item by item": [&"ruck_45"] as Array[StringName],
+	}
+	var n := 0
+	for kind: String in looters:
+		n += 1
+		inv.strip()
+		for id: StringName in looters[kind]:
+			inv.take(id)
+		var medic := level.spawn_soldier({"name": "LootMedic%d" % n, "faction": "hostile", "variant": "woodland", "pos": Vector3(2, 0.1, 18),
+			"loadout": [], "combat": 0.5, "discipline": 0.5, "guard": true})
+		medic.set_physics_process(false)
+		SquadAI.of(medic).set_physics_process(false)
+		medic.inventory.strip()
+		medic.inventory.take(&"plate_carrier")
+		medic.inventory.take(&"pouch_ifak", 1, {"held": [{"id": &"tourniquet", "count": 1}]})
+		medic.inventory.take(&"assault_pack")
+		medic.inventory.take(&"aid_bag", 1, {"held": [{"id": &"pressure_bandage", "count": 2}, {"id": &"tourniquet", "count": 1}]})
+		medic.inventory.insert_entry(&"backpack", {"id": &"mag_556", "count": 2})
+		medic.vitals.server_kill()
+		await _frames(3)
+		player.global_position = medic.body_point() + Vector3(0.6, 0.0, 0.0)
+		var before := _all_items([player, medic])
+		var bandages := inv.medical_count(&"pressure_bandage") + medic.inventory.medical_count(&"pressure_bandage")
+		if kind == "item by item":
+			player._server_loot_item.rpc_id(1, medic.get_path(), Inventory.pouch_container(&"pack_aid"), -1, &"aid_bag")
+		else:
+			player._server_loot_body.rpc_id(1, medic.get_path())
+		await _frames(3)
+		var after := _all_items([player, medic])
+		var bandages_after := inv.medical_count(&"pressure_bandage") + medic.inventory.medical_count(&"pressure_bandage")
+		check(after == before and bandages_after == bandages,
+			"looting (%s): every item kept, none made (bandages %d -> %d; before %s, after %s)" % [kind, bandages, bandages_after, before, after])
+		if kind == "nothing on":
+			check(not medic.has_gear() and inv.slots[&"backpack"] == &"assault_pack" and inv.attachment(&"pack_aid").get("id") == &"aid_bag"
+				and inv.medical_count(&"pressure_bandage") == 2,
+				"loot all: everything comes over, his pack on with the aid bag on it, 2 bandages (%d)" % inv.medical_count(&"pressure_bandage"))
+		elif kind == "item by item":
+			check(medic.inventory.attachment(&"pack_aid").is_empty() and inv.medical_count(&"pressure_bandage") == 2,
+				"Loot > the aid bag: it comes over with its contents, once (%d bandages)" % inv.medical_count(&"pressure_bandage"))
+		medic.remove_from_group(Soldier.DEAD_GROUP)  # test cleanup: gone without dropping anything
+		medic.queue_free()
+		await _frames(2)
+	inv.strip()
+
+
+## Every item on `soldiers`, wherever it is (worn, on a carrier's or pack's points, in a pouch,
+## stowed, inside a stowed pack or pouch, in the hands): id -> units.
+func _all_items(soldiers: Array) -> Dictionary:
+	var counts := {}
+	for s: Soldier in soldiers:
+		var inv := s.inventory
+		for slot in Inventory.SLOTS:
+			if inv.slots[slot] != &"":
+				_count_entry(counts, {"id": inv.slots[slot], "count": 1, "state": inv.state_of(slot)})
+		for container in Inventory.CONTAINERS:  # pouch contents are in the carrier's state
+			for entry: Dictionary in inv.containers[container]:
+				_count_entry(counts, entry)
+		if inv.hands != &"":
+			_count_entry(counts, {"id": inv.hands, "count": 1})
+	return counts
+
+
+func _count_entry(counts: Dictionary, entry: Dictionary) -> void:
+	var id := StringName(entry.id)
+	counts[id] = int(counts.get(id, 0)) + int(entry.count)
+	var state: Dictionary = entry.get("state", {})
+	for inner: Dictionary in state.get("held", []):
+		_count_entry(counts, inner)
+	var molle: Dictionary = state.get("molle", {})
+	for point: Variant in molle:
+		var att: Dictionary = molle[point]
+		_count_entry(counts, {"id": att.id, "count": int(entry.count), "state": {"held": att.get("held", [])}})
 
 
 func _count_in(inv: Inventory, container: StringName, id: StringName) -> int:
