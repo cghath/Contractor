@@ -794,6 +794,9 @@ func drop_action(src: Dictionary, dst: Dictionary) -> Callable:
 		"nearby":
 			# Into the container (or pouch) it was dragged onto; onto the body (a slot, the
 			# soldier) it's picked up as a click would: a pack swaps for the worn one there only.
+			# A two-handed load always goes into the hands, as a click takes it.
+			if item.two_handed and kind in ["container", "slot", "point", "doll"]:
+				return _pick_up.bind(src.path)
 			if kind == "container":
 				return _pick_up_into.bind(src.path, dst.container)
 			if kind == "point" and not Inventory.is_attachable(item) and inv.containers.has(Inventory.pouch_container(dst.point)):

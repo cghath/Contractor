@@ -62,7 +62,8 @@ var slots: Dictionary = {}       # slot -> item id, or &""
 var slot_state: Dictionary = {}  # slot -> Dictionary (empty if the item has no state)
 var containers: Dictionary = {}  # container -> Array of {"id", "count", "state"?}
 var hands: StringName = &""      # two-handed carry
-## A vehicle hold (VehicleCargo) carries packs loaded; a body never stows one.
+## A vehicle hold (VehicleCargo) carries packs loaded, and two-handed loads (a case, a
+## crate); a body never stows either (a two-handed load goes in the hands, see take).
 var stows_loaded_packs := false
 ## Host: slot -> the revision of the item worn there, bumped whenever something is put on or
 ## taken off that slot (or the whole inventory is replaced), so a timed action on the weapon
@@ -111,7 +112,7 @@ func units_in(container: StringName) -> int:
 ## what it accepts and how many units it takes. `state`: the unit's own state, so a pouch
 ## or carrier going in takes the room its contents fill (unit_volume).
 func room_for(container: StringName, item: ItemData, state := {}) -> int:
-	if item == null:
+	if item == null or (item.two_handed and not stows_loaded_packs):
 		return 0
 	var each := unit_volume(item, state)
 	if pack_problem(container, item, state) != "":

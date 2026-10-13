@@ -435,8 +435,8 @@ func _test_pack_rules() -> void:
 
 
 ## Audit A2-01: looting a dead medic hands over his pack's aid bag and what's in it exactly
-## once: loot all into a looter wearing nothing, loot all into one with gear of his own, and
-## item by item (how loot all goes when it has to undo). Nothing is made or lost.
+## once: loot all into a looter wearing nothing, loot all into one with gear of his own, item
+## by item, and loot all that has to undo and go item by item. Nothing is made or lost.
 func _test_loot_aid_bag() -> void:
 	print("Looting a pack with an aid bag on it")
 	var inv := player.inventory
@@ -445,6 +445,7 @@ func _test_loot_aid_bag() -> void:
 		"nothing on": [] as Array[StringName],
 		"gear of his own": [&"plate_carrier", &"ruck_45", &"aid_bag", &"pressure_bandage", &"mag_556"] as Array[StringName],
 		"item by item": [&"ruck_45"] as Array[StringName],
+		"loot all has to undo": [&"plate_carrier", &"ruck_45"] as Array[StringName],
 	}
 	var n := 0
 	for kind: String in looters:
@@ -462,6 +463,21 @@ func _test_loot_aid_bag() -> void:
 		medic.inventory.take(&"assault_pack")
 		medic.inventory.take(&"aid_bag", 1, {"held": [{"id": &"pressure_bandage", "count": 2}, {"id": &"tourniquet", "count": 1}]})
 		medic.inventory.insert_entry(&"backpack", {"id": &"mag_556", "count": 2})
+		if kind == "loot all has to undo":
+			# His carrier and pack fit the looter's Ruck, nothing else fits on the looter, and
+			# what's in his vest (3 L) can't go back into his pockets (2 L) once the carrier is
+			# gone: loot all at once can't put it back, so it's undone and goes item by item.
+			medic.inventory.insert_entry(&"vest", {"id": &"mag_556", "count": 6})
+			medic.inventory.insert_entry(&"vest", {"id": &"mag_556", "count": 6})
+			var need := 0.0
+			for entry: Dictionary in medic.gear_entries().slice(0, 2):
+				need += Inventory.unit_volume(ItemDB.get_item(StringName(entry.id)), entry.get("state", {}))
+			var mag := ItemDB.get_item(&"mag_556")
+			for c: StringName in [&"vest", &"pockets"]:
+				while inv.room_for(c, mag) > 0:
+					inv.insert_entry(c, {"id": &"mag_556", "count": 1})
+			while inv.free_volume(&"backpack") >= need + Inventory.unit_volume(mag):
+				inv.insert_entry(&"backpack", {"id": &"mag_556", "count": 1})
 		medic.vitals.server_kill()
 		await _frames(3)
 		player.global_position = medic.body_point() + Vector3(0.6, 0.0, 0.0)
@@ -483,6 +499,12 @@ func _test_loot_aid_bag() -> void:
 		elif kind == "item by item":
 			check(medic.inventory.attachment(&"pack_aid").is_empty() and inv.medical_count(&"pressure_bandage") == 2,
 				"Loot > the aid bag: it comes over with its contents, once (%d bandages)" % inv.medical_count(&"pressure_bandage"))
+		elif kind == "loot all has to undo":
+			# At once, his carrier would have gone first, into the Ruck; item by item it comes
+			# last and no longer fits there.
+			check(medic.inventory.slots[&"vest"] == &"plate_carrier" and _count_in(inv, &"backpack", &"plate_carrier") == 0
+				and _count_in(medic.inventory, &"vest", &"mag_556") < 12,
+				"loot all undid itself and went item by item: his magazines came over, his carrier stays on him (%d left in it)" % _count_in(medic.inventory, &"vest", &"mag_556"))
 		medic.remove_from_group(Soldier.DEAD_GROUP)  # test cleanup: gone without dropping anything
 		medic.queue_free()
 		await _frames(2)
@@ -596,6 +618,28 @@ func _test_screen_ground_pack() -> void:
 	await _frames(3)
 	check(ground.size() == 1 and is_instance_valid(ground[0]) and not ground[0].is_queued_for_deletion() and inv.slots[&"backpack"] == &"ruck_45"
 		and _count_in(inv, &"backpack", &"assault_pack") == 0, "a loaded one dragged into it stays on the ground; the Ruck stays on")
+	# A two-handed load (the HVT case, 30 L, would fit the Ruck by volume) is never stowed:
+	# dragged into the pack, or asked for straight from the host, it goes into the hands.
+	var hvt := ItemDB.get_item(&"hvt_case")
+	check(hvt.two_handed and Inventory.unit_volume(hvt) <= inv.free_volume(&"backpack") and inv.room_for(&"backpack", hvt) == 0,
+		"an HVT case would fit the Ruck by volume (%.0f of %.0f L free), but the Ruck has no room for it" % [Inventory.unit_volume(hvt), inv.free_volume(&"backpack")])
+	for how: String in ["dragged into the Ruck", "asked for into the Ruck"]:
+		level.server_spawn_dropped(&"hvt_case", 1, player.global_position + Vector3(-0.5, 0.5, 0))
+		await _frames(3)
+		var cases := _ground(&"hvt_case").filter(func(n: WorldItem) -> bool: return n.global_position.distance_to(player.global_position) < 1.5)
+		if cases.is_empty():
+			check(false, "an HVT case %s: none on the ground near him" % how)
+			continue
+		var case_item: WorldItem = cases[0]
+		if how == "dragged into the Ruck":
+			screen._drop(Vector2.ZERO, {"inventory_drag": {"kind": "nearby", "id": &"hvt_case", "path": case_item.get_path()}}, {"kind": "container", "container": &"backpack"})
+		else:
+			player._server_pick_up_into.rpc_id(1, case_item.get_path(), &"backpack")
+		await _frames(3)
+		check(inv.hands == &"hvt_case" and _count_in(inv, &"backpack", &"hvt_case") == 0 and inv.slots[&"backpack"] == &"ruck_45"
+			and (not is_instance_valid(case_item) or case_item.is_queued_for_deletion()),
+			"an HVT case %s is carried in the hands, never stowed (hands %s, %d in the pack)" % [how, inv.hands, _count_in(inv, &"backpack", &"hvt_case")])
+		inv.release_hands()
 	# Onto the pack's slot: the swap, as a click picks it up.
 	if not ground.is_empty():
 		screen._drop(Vector2.ZERO, {"inventory_drag": {"kind": "nearby", "id": &"assault_pack", "path": ground[0].get_path()}}, {"kind": "slot", "slot": &"backpack"})

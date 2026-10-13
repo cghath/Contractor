@@ -1009,7 +1009,9 @@ func _server_interact(path: NodePath) -> void:
 
 ## Inventory screen: the nearby item at `path` dragged onto container `into` (a pouch too)
 ## goes in there, not on the body: a pack dragged into the worn pack is stowed (empty, rolled
-## if it's as big), never swapped for it (audit A2-07). The same reach as picking it up.
+## if it's as big), never swapped for it (audit A2-07). The same reach as picking it up. A
+## two-handed load (an objective case, a crate) is never stowed: it's picked up as a click
+## does, into the hands.
 @rpc("any_peer", "call_local", "reliable")
 func _server_pick_up_into(path: NodePath, into: StringName) -> void:
 	if not _from_owner() or not vitals.is_up():
@@ -1020,6 +1022,11 @@ func _server_pick_up_into(path: NodePath, into: StringName) -> void:
 	if item.global_position.distance_to(global_position) > INTERACT_RANGE + 1.5:
 		return
 	var data := ItemDB.get_item(item.item_id)
+	if data == null:
+		return
+	if data.two_handed:
+		_server_interact(path)
+		return
 	var taken := mini(item.count, inventory.room_for(into, data, item.state))
 	if taken <= 0 or not inventory.insert_entry(into, {"id": item.item_id, "count": taken, "state": item.state.duplicate(true)}):
 		var why := inventory.pack_problem(into, data, item.state)
