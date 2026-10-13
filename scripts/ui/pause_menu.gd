@@ -4,10 +4,12 @@ extends CanvasLayer
 ## Base (revert) (the host, during a campaign deployment: back to just before it deployed,
 ## BaseHub.server_revert_deployment; confirmed first), Return to main menu and Quit game (the
 ## host saves first). The game keeps running behind it: it's co-op, nothing pauses. PlayerInput
-## opens it on Escape.
+## opens it on Escape. It also has the get-out key option (ControlOptions), as on the main menu.
 
 var _panel: PanelContainer
 var _base_button: Button
+## The get-out key option (ControlOptions), the same as the main menu's.
+var get_out_toggle: CheckBox
 var _confirm: Control
 var _status: Label
 
@@ -43,6 +45,8 @@ func _ready() -> void:
 		session.modulate = Color(1, 1, 1, 0.6)
 		box.add_child(session)
 	box.add_child(_button("Resume", close))
+	get_out_toggle = ControlOptions.get_out_toggle()  # changeable mid-game
+	box.add_child(get_out_toggle)
 	_base_button = _button("Return to Base (revert)", _ask_return_to_base)
 	box.add_child(_base_button)
 	box.add_child(_button("Return to main menu", _to_main_menu))
@@ -72,6 +76,7 @@ func open() -> void:
 	_confirm.visible = false
 	_status.text = ""
 	_base_button.visible = can_return_to_base()
+	get_out_toggle.set_pressed_no_signal(ControlOptions.get_out_key())
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 
 

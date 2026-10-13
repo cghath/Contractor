@@ -655,8 +655,10 @@ func _test_engagement() -> void:
 	var delta := _ai("Delta")
 	var golf := _ai("Golf")
 	var counts := {}
+	var his := {}  # Delta's own kit: a carer uses it first (queue 17)
 	for id: StringName in [&"tourniquet", &"pressure_bandage", &"smoke_grenade", &"splint", &"npa"]:
 		counts[id] = golf.inventory.medical_count(id)
+		his[id] = delta.inventory.medical_count(id)
 	_threat = Vector3(-3, 1.5, 0)
 	_hold_fire(true)
 	_firing = true
@@ -696,8 +698,9 @@ func _test_engagement() -> void:
 			return true
 		return false, TOURNIQUET_WITHIN_S)
 	var tq_s := Soldier._now() - start
-	check(tq and golf.inventory.medical_count(&"tourniquet") < counts[&"tourniquet"],
-		"Golf reaches him and puts a tourniquet on under fire in %.0f s (limit %.0f; %s)" % [tq_s, TOURNIQUET_WITHIN_S, seen.status.keys()])
+	check(tq and delta.inventory.medical_count(&"tourniquet") < his[&"tourniquet"] and golf.inventory.medical_count(&"tourniquet") == counts[&"tourniquet"],
+		"Golf reaches him and puts a tourniquet on under fire in %.0f s (limit %.0f; %s), Delta's own first (Delta %d -> %d, Golf %d -> %d)" % [tq_s,
+		TOURNIQUET_WITHIN_S, seen.status.keys(), his[&"tourniquet"], delta.inventory.medical_count(&"tourniquet"), counts[&"tourniquet"], golf.inventory.medical_count(&"tourniquet")])
 	check(golf.inventory.count_of(&"smoke_grenade") < counts[&"smoke_grenade"] and _said(sent_from, "Golf", &"smoke_out"), "Golf throws smoke between him and the threat")
 	check(seen.drag, "and drags him out of the line of fire")
 	check(not other_open_at_tq.is_empty() and other_open_at_tq[0] > 0, "massive bleeding first: his other wounds wait for the tourniquet (%s open)" % [other_open_at_tq])
@@ -713,8 +716,11 @@ func _test_engagement() -> void:
 	var all_s := Soldier._now() - start
 	check(treated, "then the rest in the care order: patched up within %.0f s (%.0f s; Delta: %s, %s; Golf: %s)" % [TREATED_WITHIN_S, all_s,
 		delta.vitals.condition_text(), _kinds(delta.vitals.care_needed()), golf.ai_status])
-	check(golf.inventory.medical_count(&"pressure_bandage") < counts[&"pressure_bandage"] and golf.inventory.medical_count(&"npa") < counts[&"npa"],
-		"through _server_treat: Golf's bandages and an NPA were used on him")
+	var his_bandages := delta.inventory.medical_count(&"pressure_bandage")
+	check(his_bandages < his[&"pressure_bandage"] and (golf.inventory.medical_count(&"pressure_bandage") == counts[&"pressure_bandage"] or his_bandages == 0)
+		and golf.inventory.medical_count(&"npa") < counts[&"npa"],
+		"through _server_treat: Delta's own bandages first (%d -> %d; Golf's %d -> %d), then Golf's NPA (Delta carries none)" % [his[&"pressure_bandage"], his_bandages,
+		counts[&"pressure_bandage"], golf.inventory.medical_count(&"pressure_bandage")])
 	check(called, "Golf calls it: \"Moving to Delta\", \"Treating Delta\" (%s)" % [called_lines])
 	await _out_of_contact()
 	_hold_fire(false)
@@ -873,6 +879,8 @@ func _test_player_and_enemy_bodies() -> void:
 		"a dead player leaves a body (%s)" % (corpse.display_name() if corpse else "none"))
 	if corpse == null:
 		return
+	check(corpse.log_name().begins_with("Player 1 [body ") and player.log_name() == "Player 1",
+		"the session log tells his body (%s) from him (%s)" % [corpse.log_name(), player.log_name()])
 	check(_flat(corpse.global_position, spot) < 0.5 and corpse.collision_layer == 0, "lying where he fell")
 	var on_body := _gear_of(corpse)
 	var without_case := gear_before.filter(func(g: String) -> bool: return not g.begins_with("hands:"))
@@ -911,7 +919,7 @@ func _test_body_persistence() -> void:
 	check(_bodies().all(func(b: Soldier) -> bool: return not is_instance_valid(b.carried_by)), "nobody is carrying a body")
 	var before := {}
 	for b: Soldier in _bodies():
-		before[b.body_uid] = {"label": b.display_name(), "gear": _gear_of(b), "pos": b.global_position}
+		before[b.body_uid] = {"label": b.display_name(), "log": b.log_name(), "gear": _gear_of(b), "pos": b.global_position}
 	check(before.size() >= 3, "bodies lying around: %s" % [before.values().map(func(v: Dictionary) -> String: return v.label)])
 	GameState.save_zone()
 	# A reload: the bodies go (without dropping anything) and the save brings them back.
@@ -924,7 +932,7 @@ func _test_body_persistence() -> void:
 	await _frames(3)
 	var after := {}
 	for b: Soldier in _bodies():
-		after[b.body_uid] = {"label": b.display_name(), "gear": _gear_of(b), "pos": b.global_position}
+		after[b.body_uid] = {"label": b.display_name(), "log": b.log_name(), "gear": _gear_of(b), "pos": b.global_position}
 	check(after.keys().size() == before.keys().size() and before.keys().all(func(uid: String) -> bool: return after.has(uid)),
 		"every body is back (%d of %d)" % [after.size(), before.size()])
 	var differ := PackedStringArray()
@@ -935,6 +943,9 @@ func _test_body_persistence() -> void:
 	# The differences go in the check's own line: run_tests.sh only shows [FAIL] lines.
 	check(differ.is_empty(), "where they lay, with the same gear (rounds, plates and kits included)%s"
 		% ("" if differ.is_empty() else ": " + " | ".join(differ)))
+	var renamed := before.keys().filter(func(uid: String) -> bool: return "[body " in String(before[uid].log) and after.has(uid) and after[uid].log != before[uid].log)
+	check(renamed.is_empty() and after.values().all(func(v: Dictionary) -> bool: return String(v.log).begins_with(String(v.label) + " [body ")),
+		"in the session log each reads as its name and its uid's tag, the same as before the load (%s)" % [after.values().map(func(v: Dictionary) -> String: return v.log)])
 	check(_bodies().all(func(b: Soldier) -> bool: return b.vitals.is_dead() and b.collision_layer == 0 and SquadAI.of(b) == null),
 		"dead, lying and brainless")
 	var markers := get_tree().get_nodes_in_group(GearMarker.GROUP).filter(func(m: Node) -> bool: return not m.is_queued_for_deletion())

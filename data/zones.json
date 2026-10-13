@@ -17,6 +17,21 @@
 			],
 			"insertion": [[-120, 780], [780, -600]],
 			"extraction": [[-700, -700], [360, 720], [720, -120]]
+		},
+		"coast": {
+			"_note": "Wave 5b (V4): a contract zone on the coast, for the AAV support's tests and the debug path (--zone coast). Its sea is the terrain preset's (amphibious_coast: 360 m of water, 14 m deep at the edge; ZoneDef picks the side), and the second insertion and extraction points sit by the north, west and east edges so the south is the only side it can pick. \"coast\": the company's LHD lies offshore lhd_m from the sea's edge, lhd_along_m along it (Lhd).",
+			"name": "Coast test zone",
+			"size_m": 1536,
+			"seed": 7712,
+			"relief_m": 14,
+			"terrain": "amphibious_coast",
+			"coast": {"lhd_m": 120, "lhd_along_m": 0},
+			"modules": [
+				{"id": "compound", "type": "compound", "pos": [120, -360]},
+				{"id": "village_w", "type": "village", "pos": [-480, -240]}
+			],
+			"insertion": [[-200, 340], [660, 200]],
+			"extraction": [[300, 320], [-660, -660]]
 		}
 	}
 }

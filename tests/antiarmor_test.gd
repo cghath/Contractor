@@ -343,6 +343,22 @@ func _real_matv() -> void:
 	await _seated()
 	var chest := _chest(rear)
 	var holes := _carves(matv, VehicleHull.HOLE)
+	# The spall's parts are random: each man's first, deep fragment through the face reaches the
+	# brain about one time in nine (S0037) and kills outright, recording no wound
+	# (WoundModel.add_hit), which failed this check about one run in 70 (R0019: "0 wounds;
+	# Dead"). A seed whose deep fragments aren't the face, whichever man the pass takes first
+	# (the rider's 3 to 6 fragments before the commander's, or none), makes it repeatable.
+	var spall_seed := 0
+	var face := true
+	while face:
+		spall_seed += 1
+		var r := RandomNumberGenerator.new()
+		r.seed = spall_seed
+		face = false
+		for i in 7:
+			var p := Vehicle.SPALL_PARTS[r.randi() % Vehicle.SPALL_PARTS.size()]
+			face = face or (p == Vitals.FACE and i in [0, 3, 4, 5, 6])
+	Vehicle.spall_rng.seed = spall_seed
 	# (The tube rides 10 cm right of and below the eye: aim that much the other way to put the
 	# rocket, and its jet, through his chest.)
 	var r := await _shot(&"at4", &"at4_heat", Vector3(chest.x - 25.0, _ground(chest) + 0.1, chest.z), chest + Vector3(0, 0.1, -0.1))
@@ -353,6 +369,7 @@ func _real_matv() -> void:
 		"AT4 HEAT (420 mm) through the M-ATV's side (32 mm): the crew zone %.0f%%, a hole in the hull (%s)" % [matv.zone_health(Vehicle.ZONE_CREW) * 100.0, _describe(r, b.get("vehicle_hit", {}))])
 	check(rear.vitals.is_dead(), "the jet kills the rider on its line (%s)" % rear.vitals.condition_text())
 	var spall := cmdr.vitals.wound_list().size()
+	Vehicle.spall_rng.randomize()
 	check(spall >= 1 and spall <= SPALL_WOUNDS_MAX and not cmdr.vitals.is_dead(),
 		"the commander beside him takes the spall, one pass of it (%d wounds; %s)" % [spall, cmdr.vitals.condition_text()])
 	await _clear(matv, [rear, cmdr])
@@ -732,6 +749,21 @@ func _test_ai() -> void:
 	cover.queue_free()
 	for n in [grenadier, up, low1, low2]:
 		n.queue_free()
+	await _frames(3)
+	print("AI: a spare tube packed on top of the ruck")
+	var packer := _soldier("Packer", &"friendly", Vector3(-60, 0.1, -60), ["ruck_45", "m4a1"], false)
+	await _frames(2)
+	var packed := packer.inventory.attach(&"pack_top_1", {"id": &"at4"})
+	var empty_before: bool = packer.inventory.slots.get(Launchers.SLOT, &"") == &""
+	var took := LauncherAI.unstrap_packed(packer)
+	var again := LauncherAI.unstrap_packed(packer)  # nothing left up there
+	var unstrapped: bool = packer.inventory.slots.get(Launchers.SLOT, &"") == &"at4"
+	check(packed and empty_before and took and not again and unstrapped and packer.inventory.attachment(&"pack_top_1").is_empty()
+			and packer._server_busy_until > Soldier._now(),
+		"with the shoulder tube gone, the AI unstraps the AT4 off the top of the pack (busy while it does) (packed %s, problem '%s', empty before %s, launcher now '%s', point now %s, busy %.1f s)"
+			% [packed, packer.inventory.attach_problem(ItemDB.get_item(&"at4"), &"pack_top_1"), empty_before,
+				packer.inventory.slots.get(Launchers.SLOT, &""), packer.inventory.attachment(&"pack_top_1"), packer._server_busy_until - Soldier._now()])
+	packer.queue_free()
 	await _frames(3)
 
 

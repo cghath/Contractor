@@ -63,6 +63,7 @@ func _ready() -> void:
 	await _test_treat()
 	await _test_techniques()
 	await _test_loot()
+	await _test_looted_weapons()
 	await _test_stand_where_it_lay()
 	await _test_respawn_not_where_it_lay()
 	await _test_dummy()
@@ -459,6 +460,64 @@ func _test_loot() -> void:
 	await _seconds(2.0)
 
 
+## A weapon looted off a body leaves it (Captain, P0164 queue 15: a rifle stayed drawn on the
+## chest of a body it had been looted off). An AI is killed while aiming its rifle or its pistol,
+## or with its launcher on the shoulder; the rifle is taken by a player (Loot) or by a squadmate
+## whose own rifle is dry (Scavenge, as SquadAI does: a swap, his empty one laid on the ground),
+## the pistol and the launcher by a player. Nothing of either rifle, the pistol or the launcher
+## is drawn on the body or its ragdoll after, and its hands hold nothing.
+func _test_looted_weapons() -> void:
+	print("Looted weapons leave the body")
+	var mine := player.inventory.net_state.duplicate(true)
+	var cases := [[&"primary", &"m4a1", "player"], [&"primary", &"m4a1", "scavenger"], [&"sidearm", &"m17", "player"],
+		[&"launcher", &"at4", "player"]]
+	for i in cases.size():
+		var slot: StringName = cases[i][0]
+		var id: StringName = cases[i][1]
+		var by: String = cases[i][2]
+		var dead := _spawn_ai("Kilo%d" % i, &"hostile", SPOT + Vector3(-4.0 + i * 2.5, 0, 6.0), ["plate_carrier", "m4a1", "m17", "at4", "mag_556"])
+		await _frames(3)
+		dead.select_weapon(slot)
+		dead.want_aim = true
+		var ready := await _wait(func() -> bool:
+			if slot == &"launcher":
+				var rig := dead.get_node_or_null(^"LauncherRig") as LauncherRig
+				return rig != null and rig._held
+			return dead.is_aiming and dead.gear._held_key == slot and not dead.gear.drawing(), 3.0)
+		check(ready, "%s: an AI aims its %s (%s)" % [id, slot, "on the shoulder" if slot == &"launcher" else dead.gear._held_key])
+		dead.vitals.server_hit(Vitals.HEAD, {"round_class": Vitals.INTERMEDIATE})
+		await _frames(3)
+		await _settled(dead)
+		check(dead.vitals.is_dead() and not _weapon_drawn(dead, id).is_empty(), "killed mid-aim, its %s is still drawn on the body" % id)
+		var looter: Soldier = player
+		if by == "scavenger":
+			looter = _spawn_ai("Lima%d" % i, &"friendly", dead.body_point() + Vector3(0.6, 0.0, 0.0), ["plate_carrier", "m110"])
+			await _frames(3)
+			var dry := looter.inventory.state_of(&"primary").duplicate(true)
+			dry["rounds"] = 0  # no 7.62 left anywhere: he wants the body's rifle
+			looter.inventory.slot_state[&"primary"] = dry
+			looter.inventory._commit()
+			var pick := Scavenge.best_pick(looter, dead, false)
+			check(pick.get("kind") == "weapon" and Scavenge.apply(looter, dead, pick) == 1, "a squadmate with his M110 dry swaps it for the body's (%s)" % [pick])
+		else:
+			player.inventory.unequip(slot)  # room for it in the player's own slot
+			_beside(dead.body_point())
+			await _seconds(0.3)
+			player._server_loot_item.rpc_id(1, dead.get_path(), slot, -1, id)
+		check(dead.inventory.slots[slot] == &"" and looter.inventory.slots[slot] == id, "the %s goes from the body to the %s" % [id, by])
+		await _frames(3)
+		var left := _weapon_drawn(dead, id) + _weapon_drawn(dead, &"m110")
+		check(left.is_empty(), "and no weapon is drawn on the body or its ragdoll (%s)" % [left])
+		check(not is_instance_valid(dead.model._held), "its hands hold nothing")
+		player.inventory.net_state = mine.duplicate(true)
+		if looter != player:
+			looter.queue_free()
+		dead.inventory.strip()  # nothing left to drop round the test area
+		dead.server_remove_body()
+	_place_player()
+	await _frames(3)
+
+
 ## A downed body whose ragdoll slid or rolled off stands up where it lay, not back where it fell
 ## (Soldier._stand_where_ragdoll_lay, Ragdoll.rest_spot), and a following peer's ragdoll finds
 ## the same spot.
@@ -571,6 +630,34 @@ func _task_with(s: Soldier, item: StringName) -> Dictionary:
 		if task.item == item:
 			return task
 	return {}
+
+
+## Where weapon `id` is drawn on `s` now (shown, not on its way out), as paths from `s`: a
+## mesh of its voxel model anywhere on the body (gear, hands, ragdoll), or for a launcher (no
+## voxel model) a "Launcher" node.
+func _weapon_drawn(s: Soldier, id: StringName) -> Array[String]:
+	var art := VoxelArt.model_for(ItemDB.get_item(id))
+	var drawn: Array[Node] = []
+	if art != "":
+		var mesh := VoxelArt.mesh(art, s.model.variant)
+		drawn = s.find_children("*", "MeshInstance3D", true, false).filter(func(n: Node) -> bool: return (n as MeshInstance3D).mesh == mesh)
+	else:
+		drawn = s.find_children("*", "Node3D", true, false).filter(func(n: Node) -> bool:
+			return n.name == &"Launcher" or String(n.name).begins_with("@Launcher@"))
+	var out: Array[String] = []
+	for n in drawn:
+		if (n as Node3D).is_visible_in_tree() and not _going(n, s):
+			out.append(String(s.get_path_to(n)))
+	return out
+
+
+## Whether `n` or anything above it up to `top` is queued to go.
+static func _going(n: Node, top: Node) -> bool:
+	while n != null and n != top:
+		if n.is_queued_for_deletion():
+			return true
+		n = n.get_parent()
+	return false
 
 
 func _entry_of(s: Soldier, id: StringName) -> Dictionary:

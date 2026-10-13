@@ -39,6 +39,7 @@ func _ready() -> void:
 	box.add_child(title)
 	box.add_child(_role_picker())
 	box.add_child(_hand_picker())
+	box.add_child(ControlOptions.get_out_toggle())  # the get-out key (an option, saved)
 	box.add_child(_people_toggle())
 	box.add_child(_button("Play (host a session)", _plain_host))
 	box.add_child(_hint("Solo play is a session nobody else has joined."))

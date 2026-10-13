@@ -283,6 +283,9 @@ func _test_hostile_hvt() -> void:
 	player._server_carry_body.rpc_id(1, hvt.get_path())
 	await _frames(3)
 	check(player.carrying == hvt and hvt.carried_by == player, "a cuffed HVT can be carried")
+	var on_shoulder := _ids(player, hvt)
+	check(not on_shoulder.is_empty() and on_shoulder[0] == &"put_down" and not &"lead" in on_shoulder and not &"cover" in on_shoulder,
+		"carrying him, his menu has Put down first and no orders (%s)" % [on_shoulder])
 	player._server_release_body.rpc_id(1)
 	await _frames(3)
 	check(player.carrying == null and hvt.carried_by == null and hvt.vitals.is_up(), "and put down again, still conscious")
@@ -290,6 +293,7 @@ func _test_hostile_hvt() -> void:
 	InteractionMenu.perform(player, _action(player, hvt, &"lead"))
 	await _frames(3)
 	check(String(Person.state(hvt).get("led_by", "")) == "Players/1" and Person.state(hvt).get("order") == "follow", "Follow me: he's led by the player")
+	check(not _ids(player, hvt).has(&"lead") and _ids(player, hvt).has(&"stop"), "following you: Stop, no Follow me again (%s)" % [_ids(player, hvt)])
 	var point := layer.server_add_point(Vector3(35, 0, 22), 4.0, "Test extraction", "TestExtraction")
 	for step in 20:
 		if _flat(player.global_position, Vector3(35, 0, 22)) < 0.5:
@@ -347,6 +351,7 @@ func _test_friendly_hvt() -> void:
 	PeopleLayer.server_noise(player, hvt.global_position + Vector3(0, 0, -20))
 	await _seconds(2.0)
 	check(_brain(hvt).mode == CivilianAI.Mode.COVER and hvt.movement.stance <= SoldierMovement.Stance.CROUCH_MID, "Get in cover: down in cover")
+	check(not _ids(player, hvt).has(&"cover") and _ids(player, hvt).has(&"lead"), "in cover: Follow me, no Get in cover again (%s)" % [_ids(player, hvt)])
 
 
 ## Intel from an officer's body and a placed laptop, carried out to an extraction point.

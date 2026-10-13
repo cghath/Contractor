@@ -873,12 +873,12 @@ func _after_change(force := false) -> void:
 	_publish(force)
 
 
-## Host: a session-log line for each break that went open (SessionLog does nothing without a session).
+## Host: a session-log line for each break that went open, under the body's log name
+## (SessionLog.who: a target dummy as one, not "someone"). SessionLog does nothing without a session.
 func _log_open_breaks() -> void:
 	for line: String in _model.take_open_events():
 		if SessionLog.session_id != "":
-			var body := get_parent()
-			SessionLog.note("%s: %s" % [body.display_name() if body != null and body.has_method(&"display_name") else "someone", line])
+			SessionLog.note("%s: %s" % [SessionLog.who(get_parent()), line])
 
 
 ## Publishes net_state when it changed: at once when forced or when consciousness, arrest or

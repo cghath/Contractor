@@ -115,6 +115,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	elif not body.vitals.is_up():
 		return  # downed: no giving up (handoff); you come round on your own, or the arrest window runs out
+	elif event.is_action_pressed(ControlOptions.GET_OUT_ACTION) and ControlOptions.get_out_key() and Vehicle.ride_of(body) != null:
+		Vehicle.ride_of(body).request_exit.rpc_id(1)  # the get-out key (an option; the seat's menu then has no Get out)
 	elif interaction.is_open() and event is InputEventMouseButton:
 		return  # clicks don't fire through the interaction menu
 	elif placing and event.is_action_pressed(&"fire"):
@@ -213,7 +215,7 @@ func flash(text: String) -> void:
 		SessionLog.note("shown to the player: " + text)
 		hud.flash(text)
 	elif body and body.is_ai():  # an AI's own messages (what it's treating, why it can't): no screen, but worth a line
-		SessionLog.note("%s (AI): %s" % [body.display_name(), text])
+		SessionLog.note("%s (AI): %s" % [body.log_name(), text])
 
 
 ## A flashbang went off in sight: the whiteout is strongest when you were looking at it.
