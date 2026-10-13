@@ -19,7 +19,9 @@ extends RefCounted
 const TYPES: Array[String] = ["compound", "outpost", "village", "checkpoint", "hq", "qrf_base", "comms"]
 
 ## Half the footprint in metres (x, z): the pad under it and its voxel bounds.
-const HALF := {
+## (Static vars, not consts: a generated town ("town#<seed>", BuildingGen.town) adds its own
+## entries the first time it's asked for: _town.)
+static var HALF := {
 	"compound": Vector2(21.0, 21.0),
 	"outpost": Vector2(11.0, 11.0),
 	"village": Vector2(20.0, 14.0),
@@ -36,7 +38,7 @@ const BELOW_M := 0.8
 ## goes: an HVT room, a document table), "cache" (something to destroy or recover: the crate
 ## stack), "intel" and "aa" (the outpost's AA emplacement). The mission sites built on them
 ## are in data/contracts.json "modules" (MissionRegistry.site).
-const POINTS := {
+static var POINTS := {
 	"compound": {"objective": [Vector3(0, 0, -8)], "cache": [Vector3(-12, 0, -9)], "intel": [Vector3(18, 0, -9)]},
 	"outpost": {"objective": [Vector3(-5.5, 0, -6)], "cache": [Vector3(2.5, 0, -0.5)], "intel": [Vector3(-4.5, 0, -6.5)], "aa": [Vector3(-6, 0, 2.5)]},
 	"village": {"objective": [Vector3(15.5, 0, -10)], "cache": [Vector3(-14.8, 0, 10.2)], "intel": [Vector3(1, 0, -9.5)]},
@@ -47,7 +49,7 @@ const POINTS := {
 }
 
 ## Hostile garrison (m from the origin): they hold where they stand (guards), in pairs.
-const GARRISON := {
+static var GARRISON := {
 	"compound": [Vector3(-2.5, 0.1, -10), Vector3(2.5, 0.1, -6.5), Vector3(-12, 0.1, -2), Vector3(-10, 0.1, -3)],
 	"outpost": [Vector3(-5.5, 0.1, -6), Vector3(6, 0.1, -2), Vector3(-4, 0.1, 7.2), Vector3(4, 0.1, 7.2)],
 	"village": [Vector3(-15, 0.1, -10), Vector3(1, 0.1, -10), Vector3(15.5, 0.1, -10), Vector3(-13.5, 0.1, 9)],
@@ -102,7 +104,28 @@ static var _counts := {}  # solid_voxels_in
 
 
 static func has_type(type: String) -> bool:
+	if type.begins_with(TOWN):
+		return _town(type)
 	return type in TYPES
+
+
+## Generated towns (docs/building_gen.md): "town#<seed>". Builds it once (BuildingGen.town) and
+## enters its boxes, footprint, named points and garrison under that type. False for a bad seed.
+const TOWN := "town#"
+
+
+static func _town(type: String) -> bool:
+	if _cache.has(type):
+		return true
+	var seed_text := type.substr(TOWN.length())
+	if not seed_text.is_valid_int():
+		return false
+	var t := BuildingGen.town(int(seed_text))
+	_cache[type] = t.boxes
+	HALF[type] = t.half
+	POINTS[type] = t.points
+	GARRISON[type] = t.garrison
+	return true
 
 
 ## The module's base structure: [from (Vector3, m), to (Vector3, m), VoxelWorld.Mat] boxes,
@@ -124,6 +147,8 @@ static func boxes(type: String) -> Array:
 				_cache[type] = _qrf_base()
 			"comms":
 				_cache[type] = _comms()
+			_ when type.begins_with(TOWN) and _town(type):
+				pass
 			_:
 				push_error("ZoneModules: unknown type %s" % type)
 				return []

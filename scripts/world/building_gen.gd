@@ -479,3 +479,115 @@ static func _to_room(room: Rect2, side: String, along: float, out: float, up: fl
 		"s": return Vector3(room.end.x - along, up, room.end.y - out)
 		"w": return Vector3(room.position.x + out, up, room.end.y - along)
 		_: return Vector3(room.end.x - out, up, room.position.y + along)
+
+
+# --- Towns (phase 2) -------------------------------------------------------------------------
+
+## A town (ZoneModules type "town#<seed>"): a main street along x and a cross street along z,
+## lots along both sides of each, every building facing its street (the far side turned round).
+## Mostly houses; shops near the middle, warehouses at the ends, a clinic and a police station.
+const TOWN_HALF_X := 54.0
+const STREET_W := 8.0
+const CROSS_W := 7.0
+const LOT_GAP := 2.0
+const SETBACK := 1.0
+## Lot types by where they are along the street (0 the middle .. 1 the end): weights.
+const TOWN_MIX := {"house": 6.0, "shop": 2.5, "warehouse": 1.0, "clinic": 0.6, "police": 0.6}
+
+
+## The town from `seed`: {"boxes", "buildings": [{"type", "origin" (Vector3), "turned" (180
+## degrees), "data" (building())}], "half" (Vector2: footprint half-size, m), "points"
+## ({"objective", "cache", "intel"}: Array of Vector3), "garrison" (Array of Vector3), "style"}.
+static func town(seed: int, style := "") -> Dictionary:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed
+	if style == "":
+		style = STYLES.keys()[rng.randi() % STYLES.size()]
+	var boxes: Array = []
+	var buildings: Array = []
+	var once := {}
+	var deepest := 0.0
+	var k := 0
+	for side: int in [-1, 1]:  # -1: north of the main street (facing +z), 1: south (turned round)
+		for dir: int in [-1, 1]:  # out from the cross street, west then east
+			var cursor := CROSS_W * 0.5 + LOT_GAP
+			while true:
+				var along := cursor / TOWN_HALF_X
+				var type := _town_type(rng, along, once)
+				var b := building(type, seed * 97 + k, style)
+				k += 1
+				var size: Vector2 = b.size
+				if cursor + size.x > TOWN_HALF_X:
+					if type == "house":
+						break
+					continue  # too big for what's left: try again (a house, most likely)
+				if type in ["clinic", "police"]:
+					once[type] = true
+				var x := dir * (cursor + size.x * 0.5)
+				var z := side * (STREET_W * 0.5 + SETBACK + size.y * 0.5)  # north (-z) faces +z as built; south turned
+				var turned := side == 1
+				var origin := Vector3(x, 0, z)
+				for bx: Array in b.boxes:
+					var lo: Vector3 = bx[0]
+					var hi: Vector3 = bx[1]
+					if turned:
+						var nlo := Vector3(-hi.x, lo.y, -hi.z)
+						var nhi := Vector3(-lo.x, hi.y, -lo.z)
+						lo = nlo
+						hi = nhi
+					boxes.append([lo + origin, hi + origin, bx[2]])
+				buildings.append({"type": type, "origin": origin, "turned": turned, "data": b})
+				deepest = maxf(deepest, size.y)
+				cursor += size.x + LOT_GAP
+	var half := Vector2(TOWN_HALF_X + 2.0, STREET_W * 0.5 + SETBACK + deepest + 2.0)
+	# Named points: where loot of a kind lies, in town metres.
+	var points := {"objective": [], "cache": [], "intel": []}
+	var garrison: Array = []
+	for b: Dictionary in buildings:
+		var to_town := func(p: Vector3) -> Vector3:
+			return (Vector3(-p.x, p.y, -p.z) if b.turned else p) + (b.origin as Vector3)
+		for l: Dictionary in b.data.loot:
+			var t: String = l.table
+			var where: Vector3 = to_town.call(l.at)
+			if t in ["armoury", "objective"]:
+				points.objective.append(where)
+			elif t == "cache":
+				points.cache.append(where)
+			elif t == "intel":
+				points.intel.append(where)
+		# A post just inside the front door of every other building.
+		if buildings.find(b) % 2 == 0:
+			for dr: Dictionary in b.data.doors:
+				if dr.rooms[1] == -1 and (dr.at as Vector3).z > 0.0:
+					garrison.append(to_town.call((dr.at as Vector3) + Vector3(0, 0.1, -1.0)))
+					break
+	for fallback: String in ["objective", "cache", "intel"]:
+		if (points[fallback] as Array).is_empty():
+			points[fallback].append(Vector3(0, 0, 0))
+	garrison.append(Vector3(-CROSS_W, 0.1, 0))
+	garrison.append(Vector3(CROSS_W, 0.1, 0))
+	return {"boxes": boxes, "buildings": buildings, "half": half, "points": points, "garrison": garrison, "style": style}
+
+
+## A lot's building type: by TOWN_MIX, shops toward the middle, warehouses toward the ends, a
+## clinic and a police station at most once each (`once`).
+static func _town_type(rng: RandomNumberGenerator, along: float, once: Dictionary) -> String:
+	var weights := {}
+	for t: String in TOWN_MIX:
+		var w: float = TOWN_MIX[t]
+		if t == "shop":
+			w *= lerpf(2.0, 0.3, along)
+		elif t == "warehouse":
+			w *= lerpf(0.1, 2.0, along)
+		elif once.has(t):
+			w = 0.0
+		weights[t] = w
+	var total := 0.0
+	for t: String in weights:
+		total += weights[t]
+	var roll := rng.randf() * total
+	for t: String in weights:
+		roll -= weights[t]
+		if roll <= 0.0:
+			return t
+	return "house"

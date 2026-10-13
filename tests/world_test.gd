@@ -134,6 +134,7 @@ func _test_generation(mem_before: float) -> void:
 		"a zone generated from a seed is the same every time (%d modules, %d insertion points, %d extraction candidates)" % [gen.modules.size(), gen.insertion.size(), gen.extraction.size()])
 	_test_hot_layout()
 	_test_building_gen()
+	_test_towns()
 	_test_presets()
 	var ins := level.insertion_points()[0]
 	check(player.global_position.distance_to(ins) < 5.0 and absf(player.global_position.y - t.height_at(player.global_position.x, player.global_position.z) - 0.1) < 0.05,
@@ -683,6 +684,62 @@ func _test_building_gen() -> void:
 		"rooms furnished from the chunk library (%d of %d; bare: %s), in %d styles" % [furnished, room_total, bare, styles.size()])
 	var again := BuildingGen.house(7)
 	check(BuildingGen.house(7).boxes == again.boxes and BuildingGen.house(8).boxes != again.boxes, "the same seed builds the same house, another seed another")
+
+
+## Towns (phase 2): a street grid of generated buildings, a module type of its own.
+func _test_towns() -> void:
+	print("Procedural buildings: towns")
+	var counts := []
+	var ok_mix := true
+	var ok_apart := true
+	var ok_facing := true
+	var ok_inside := true
+	var why := []
+	for seed: int in [5, 12, 77, 301, 4409, 9001, 23, 640]:
+		var t := BuildingGen.town(seed)
+		var bs: Array = t.buildings
+		counts.append(bs.size())
+		var types: Array = bs.map(func(b: Dictionary) -> String: return b.type)
+		if bs.size() < 12 or bs.size() > 20 or types.count("clinic") > 1 or types.count("police") > 1:
+			ok_mix = false
+			why.append("town %d: %d buildings %s" % [seed, bs.size(), types])
+		var rects: Array[Rect2] = []
+		for b: Dictionary in bs:
+			var size: Vector2 = b.data.size
+			var o: Vector3 = b.origin
+			var r := Rect2(o.x - size.x * 0.5, o.z - size.y * 0.5, size.x, size.y)
+			for q: Rect2 in rects:
+				if q.grow(BuildingGen.LOT_GAP * 0.5 - 0.05).intersects(r):
+					ok_apart = false
+					why.append("town %d: %s overlaps" % [seed, b.type])
+			rects.append(r)
+			var half: Vector2 = t.half
+			if absf(r.position.x) > half.x or absf(r.end.x) > half.x or absf(r.position.y) > half.y or absf(r.end.y) > half.y \
+					or (r.position.y < BuildingGen.STREET_W * 0.5 and r.end.y > -BuildingGen.STREET_W * 0.5):
+				ok_inside = false
+				why.append("town %d: %s outside or in the street" % [seed, b.type])
+			# The front door opens onto its street: toward z = 0.
+			var front := (b.data.doors as Array).filter(func(dr: Dictionary) -> bool: return dr.rooms[1] == -1)
+			front.sort_custom(func(p: Dictionary, q: Dictionary) -> bool: return (p.at as Vector3).z > (q.at as Vector3).z)  # the front wall's door first
+			if front.is_empty():
+				ok_facing = false
+			else:
+				var at: Vector3 = front[0].at
+				var world_z: float = (-at.z if b.turned else at.z) + o.z
+				if absf(world_z) > absf(o.z):
+					ok_facing = false
+					why.append("town %d: %s faces away" % [seed, b.type])
+	check(ok_mix, "towns (8 seeds): 12 to 20 buildings each (%s), a clinic and a police station at most once %s" % [counts, why.slice(0, 2)])
+	check(ok_apart and ok_inside, "lots don't overlap, inside the town's footprint and off the street %s" % [why.slice(0, 2)])
+	check(ok_facing, "every building's front door opens onto its street %s" % [why.slice(0, 2)])
+	var type := "town#4409"
+	check(ZoneModules.has_type(type) and not ZoneModules.boxes(type).is_empty() and ZoneModules.HALF.has(type)
+		and not (ZoneModules.points(type, "objective") as Array).is_empty() and not (ZoneModules.points(type, "cache") as Array).is_empty()
+		and not (ZoneModules.points(type, "intel") as Array).is_empty() and (ZoneModules.GARRISON.get(type, []) as Array).size() >= 6,
+		"a town is a module type (\"%s\"): its boxes, footprint %s, objective, cache and intel points, %d garrison posts" % [type,
+		ZoneModules.HALF.get(type), (ZoneModules.GARRISON.get(type, []) as Array).size()])
+	check(not ZoneModules.has_type("town#x") and BuildingGen.town(12).boxes == BuildingGen.town(12).boxes,
+		"a bad seed isn't a type; the same seed builds the same town")
 
 
 # --- Terrain presets ----------------------------------------------------------------------------
