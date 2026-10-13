@@ -551,7 +551,7 @@ func status_text() -> String:
 				Care.GUARD:
 					return "Guarding %s" % who
 				Care.CARRY:
-					return "Carrying %s" % who
+					return "Carrying %s" % who if body.carrying == casualty else "Watching over %s" % who
 				Care.BODY:
 					return "Carrying %s's body" % who if body.carrying == casualty else "Recovering %s's body" % who
 		Intent.FIGHT:
