@@ -52,6 +52,7 @@ func _ready() -> void:
 	hostile = _spawn_ai("Hostile", &"hostile", SPOT + Vector3(-3.0, 0, 1.0), ["plate_carrier", "m4a1", "mag_556"])
 	await _frames(10)
 	_test_replication_config()
+	_test_gear_sway()
 	await _test_carry()
 	await _test_drag()
 	await _test_put_down()
@@ -70,6 +71,42 @@ func _ready() -> void:
 	GameState.delete_save()
 	print("ANIMATIONS TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
+
+
+## Gear secondary motion (queue 10): the pack's spring (GearRig.PACK_SWAY) lags behind the
+## torso when it speeds up, settles once it's steady, isn't flung by a teleport, and swings out
+## on a turn.
+func _test_gear_sway() -> void:
+	print("Gear sway")
+	var c := GearRig.PACK_SWAY
+	var pack := GearSway.make(c[0], c[1], c[2], c[3], c[4], c[5])
+	for i in 18:  # 0.3 s speeding up forward (-Z) at 4 m/s^2
+		pack.step(Vector3(0, 0, -4.0), 1.0 / 60.0)
+	var lag := pack.offset()
+	check(lag.z > 0.005 and lag.length() <= pack.reach + 0.0001,
+		"speeding up, the pack lags back (%.3f m, at most %.2f)" % [lag.z, pack.reach])
+	check(pack.turn().z.z < 1.0 and (pack.turn() * Vector3(0, -pack.hang, 0)).z > 0.0, "its bottom swings back, about its straps")
+	for i in 120:  # 2 s steady
+		pack.step(Vector3.ZERO, 1.0 / 60.0)
+	check(pack.offset().length() < 0.002, "and settles once the pace is steady (%.4f m)" % pack.offset().length())
+	pack.reset()
+	var t := Transform3D.IDENTITY
+	pack.follow(t, 1.0 / 60.0)
+	t.origin = Vector3(40, 0, 0)  # respawned, or got out of a vehicle
+	pack.follow(t, 1.0 / 60.0)
+	pack.follow(t, 1.0 / 60.0)
+	check(pack.offset().length() < 0.001, "a teleport doesn't fling it (%.4f m)" % pack.offset().length())
+	pack.reset()
+	t = Transform3D.IDENTITY
+	pack.follow(t, 1.0 / 60.0)
+	var yaw := 0.0
+	var spin := 0.0
+	for i in 12:  # turning left, faster and faster
+		spin += 0.5
+		yaw += spin / 60.0
+		t.basis = Basis(Vector3.UP, yaw)
+		pack.follow(t, 1.0 / 60.0)
+	check(absf(pack.offset().x) > 0.001, "turning swings it out to the side (%.4f m)" % pack.offset().x)
 
 
 func check(condition: bool, what: String) -> void:

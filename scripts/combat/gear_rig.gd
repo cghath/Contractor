@@ -79,6 +79,11 @@ const POUCH_GAP_M := 0.004
 const STRAP_W := 0.045
 const STRAP_T := 0.015
 const STRAP_LIFT := 0.012
+## Gear secondary motion (queue 10, GearSway): the pack swings from its strap anchors (slow,
+## up to 4 cm, turning swings it out), pouches flap from their top edges (quick, 1.2 cm).
+## Drawn only where something renders: headless hosts and tests keep gear still.
+const PACK_SWAY := [2.4, 0.35, 0.04, 1.0, 0.25, 0.32]  # freq, damping, reach, gain, lever, hang
+const POUCH_SWAY := [4.0, 0.3, 0.012, 1.0, 0.0, 0.06]
 
 var _armor: Dictionary = {}        # slot -> VoxelArmor
 var _chip_counts: Dictionary = {}  # slot -> chips already applied to the mesh
@@ -96,6 +101,12 @@ var _carrier: ItemData          # the worn carrier (carrier_fit reads its depth 
 var _straps_for := ""  # the pack and carrier they were built for
 var _tape: Node3D                 # the name tape on the carrier's loop panel
 var _tape_key := ""              # carrier and text it shows
+var _pack_sway := GearSway.make(PACK_SWAY[0], PACK_SWAY[1], PACK_SWAY[2], PACK_SWAY[3], PACK_SWAY[4], PACK_SWAY[5])
+var _pouch_sway := GearSway.make(POUCH_SWAY[0], POUCH_SWAY[1], POUCH_SWAY[2], POUCH_SWAY[3], POUCH_SWAY[4], POUCH_SWAY[5])
+var _pack_rest := Transform3D.IDENTITY  # the pack's place, unswung
+var _pack_pivot := Vector3.ZERO         # torso-local: where it hangs from (its straps' anchors)
+var _swinging: Array = []              # [node, rest Transform3D, pivot Vector3, on the pack]
+var _sway_on := DisplayServer.get_name() != "headless"
 
 
 
@@ -189,8 +200,10 @@ func _rebuild() -> void:
 		_set_gear(slot, inventory.slots[slot], &"torso", rest_transform(slot))
 	_fit_front_panel(carrier)
 	var pack: StringName = inventory.slots[&"backpack"]
-	var pack_depth := VoxelArt.size_m(VoxelArt.model_for(ItemDB.get_item(pack))).z if pack != &"" else 0.0
-	_set_gear(&"backpack", pack, &"torso", carrier_fit("back") * Transform3D(Basis.IDENTITY, Vector3(0, 0.3, 0.165 + pack_depth * 0.5)))
+	var pack_size := VoxelArt.size_m(VoxelArt.model_for(ItemDB.get_item(pack))) if pack != &"" else Vector3.ZERO
+	_pack_rest = carrier_fit("back") * Transform3D(Basis.IDENTITY, Vector3(0, 0.3, 0.165 + pack_size.z * 0.5))
+	_pack_pivot = carrier_fit("back") * Vector3(0, 0.3 + pack_size.y * 0.5, 0.165)
+	_set_gear(&"backpack", pack, &"torso", _pack_rest)
 	var held := inventory.hands
 	var held_size := WorldItem.visual_size(ItemDB.get_item(held)) if held != &"" else Vector3.ZERO
 	_set_gear(&"hands", held, &"torso", Transform3D(Basis.IDENTITY, Vector3(0, 0.15, -0.15 - held_size.z * 0.5)))
@@ -213,6 +226,7 @@ func _set_pouches() -> void:
 	if key == _pouch_key:
 		return
 	_pouch_key = key
+	_swinging.clear()
 	if _pouches:
 		_pouches.queue_free()
 		_pouches = null
@@ -232,6 +246,9 @@ func _set_pouches() -> void:
 			else pouch_node(item, gear, not att.get("held", []).is_empty(), render_layers)
 		node.transform = spots[p.id]
 		_pouches.add_child(node)
+		var h := WorldItem.visual_size(item).y
+		var top: Vector3 = (spots[p.id] as Transform3D) * Vector3(0, h * 0.5, 0)
+		_swinging.append([node, node.transform, top, inventory.point_slot(StringName(p.id)) == &"backpack"])
 
 
 ## Where each attachment on the worn carrier and pack sits: point id -> torso-local transform.
@@ -508,6 +525,42 @@ func _process(delta: float) -> void:
 	if want != _held_key or _held_dirty:
 		_put_in_hands(want)
 	_ease_held(delta)
+
+
+## Gear secondary motion, on physics ticks: the body moves on them, so a render frame between
+## two would read as standing still and shake the springs.
+func _physics_process(delta: float) -> void:
+	if _sway_on:
+		_sway(delta)
+
+
+## The springs follow the torso, the pack swings about its anchors (and what's on it with it),
+## every other pouch flaps about its own top edge.
+func _sway(delta: float) -> void:
+	var pack: Node3D = _gear.get(&"backpack", [&"", null])[1]
+	if pack == null and _swinging.is_empty():
+		return
+	if not model.is_visible_in_tree() or model.ragdolled():
+		_pack_sway.reset()
+		_pouch_sway.reset()
+		return
+	var torso := model.torso.global_transform
+	_pack_sway.follow(torso, delta)
+	_pouch_sway.follow(torso, delta)
+	var swing := _about(_pack_pivot, _pack_sway.turn())
+	if pack:
+		pack.transform = swing * _pack_rest
+	var flap := _pouch_sway.turn()
+	for e: Array in _swinging:
+		var node: Node3D = e[0]
+		if not is_instance_valid(node):
+			continue
+		node.transform = (swing if e[3] else _about(e[2], flap)) * (e[1] as Transform3D)
+
+
+## A turn `b` about torso-local point `pivot`.
+static func _about(pivot: Vector3, b: Basis) -> Transform3D:
+	return Transform3D(Basis.IDENTITY, pivot) * Transform3D(b, Vector3.ZERO) * Transform3D(Basis.IDENTITY, -pivot)
 
 
 ## True while a weapon is on its way from its sling or holster to the hands.
