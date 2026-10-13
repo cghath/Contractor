@@ -485,7 +485,9 @@ func _real_open_bed() -> void:
 
 
 ## The most spall wounds V1's Vehicle._spall gives anyone (3 to 6 fragments).
-const SPALL_WOUNDS_MAX := 6
+## One pass of spall is at most 6 fragments, and a fragment can open two wounds (a muscle and the
+## vessel under it, WoundModel's anatomy); a second pass would add up to 6 more fragments.
+const SPALL_WOUNDS_MAX := 12
 
 
 ## Holes (or another kind of edit) carved into a vehicle's hull so far.

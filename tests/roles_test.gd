@@ -564,6 +564,8 @@ func _test_callout_events() -> void:
 	var leader_ai := String(_slot(0).name)
 	_slot(0).inventory.take(&"frag_grenade")  # in case the fight used theirs up
 	_slot(0).release_carried()  # hands full with the casualty above: a carrier doesn't throw
+	if not _slot(0).vitals.is_up():
+		_slot(0).vitals.server_reset_health()  # (the contact above can knock the leader out: this checks his throw)
 	# Nor one still busy treating him (a timed treatment holds the hands).
 	await _wait_for(func() -> bool: return Soldier._now() >= _slot(0)._busy_until and _slot(0).vitals.is_up(), 10.0)
 	thrower = squad.order_throw(player, &"frag_grenade", Vector3(0, 0, -2), PackedStringArray([leader_ai]))
