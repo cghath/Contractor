@@ -344,14 +344,16 @@ func server_reload(s: Soldier, round_id: StringName = &"") -> float:
 	s._server_busy_until = now + seconds
 	var serial := int(_reload_serial.get(s.get_instance_id(), 0)) + 1
 	_reload_serial[s.get_instance_id()] = serial
-	_finish_reload(s, item.id, choice, seconds, serial)
+	_finish_reload(s, item.id, s.inventory.slot_revision(SLOT), choice, seconds, serial)
 	return seconds
 
 
-func _finish_reload(s: Soldier, launcher_id: StringName, choice: StringName, seconds: float, serial: int) -> void:
+## The round goes in only if the very launcher being reloaded is still on the shoulder: not
+## another of the same model picked up meanwhile (`rev`, Inventory.slot_revision; audit A2-02).
+func _finish_reload(s: Soldier, launcher_id: StringName, rev: int, choice: StringName, seconds: float, serial: int) -> void:
 	await get_tree().create_timer(seconds).timeout
 	if not is_instance_valid(s) or int(_reload_serial.get(s.get_instance_id(), 0)) != serial or not s.vitals.is_up() \
-			or s.inventory.slots.get(SLOT, &"") != launcher_id:
+			or s.inventory.slots.get(SLOT, &"") != launcher_id or s.inventory.slot_revision(SLOT) != rev:
 		return
 	var w := StringName(ItemDB.get_item(choice).stats.get("warhead", ""))
 	var current := loaded_of(s)

@@ -46,6 +46,7 @@ func _ready() -> void:
 	await _test_use_medical()
 	await _test_menu_and_removal()
 	await _test_medical_menu()
+	await _test_medical_menu_scrolls()
 	await _test_menu_prefers_living()
 	await _test_bleed_hud()
 	await _test_wakes_in_session()
@@ -585,6 +586,20 @@ func _test_iv_fluids() -> void:
 	tq.blood = 0.8
 	tq.tourniquets[&"upper_arm_l"] = {"count": 1, "rushed": 0}
 	check(tq.iv_part() == &"forearm_r", "a tourniquet on the left arm: the IV goes in the right")
+	check(tq.treatment_problem(&"iv_18", &"forearm_l") != "" and not tq.apply_item(&"iv_18", &"forearm_l") and tq.access.is_empty(),
+		"an IV asked for below that tourniquet is refused (\"%s\")" % tq.treatment_problem(&"iv_18", &"forearm_l"))
+	# Audit A2-03: a tourniquet on every limb leaves no IV site: no IV goes in anywhere, the
+	# care plan offers only an IO, and the IO still goes in.
+	for limb: StringName in [&"upper_arm_r", &"thigh_l", &"thigh_r"]:
+		tq.tourniquets[limb] = {"count": 1, "rushed": 0}
+	var plan := tq.care_tasks().filter(func(t: Dictionary) -> bool: return t.kind == "access")
+	check(tq.iv_part() == &"" and plan.size() == 1 and plan[0].items.size() == 1 and plan[0].items[0] == WoundModel.IO_KIT and plan[0].part == WoundModel.IO_PART,
+		"every limb under a tourniquet: the plan offers only an IO, in the sternum (%s)" % [plan])
+	var refused := true
+	for site: StringName in WoundModel.IV_SITES + [&"torso"]:
+		refused = refused and tq.treatment_problem(&"iv_18", site) != "" and not tq.apply_item(&"iv_18", site)
+	check(refused and tq.access.is_empty(), "and no IV goes in anywhere (%s)" % [tq.access])
+	check(tq.apply_item(WoundModel.IO_KIT, WoundModel.IO_PART) and tq.access.kind == "io", "the IO does")
 	var copy := _model()
 	copy.apply_net(shock.to_net())
 	check(copy.access == shock.access and int(copy.infusion.ml) == 500 and copy.infusion.item == &"saline_500",
@@ -992,6 +1007,28 @@ func _test_completed_treatments() -> void:
 	player._server_treat.rpc_id(1, casualty.get_path(), &"tourniquet", Vitals.THIGH_L)
 	await _seconds(4.2)
 	check(casualty.vitals.bleed_rate() > 0.0 and casualty.vitals.tourniquets()[Vitals.THIGH_L].rushed == 1, "placed under fire: it goes on rushed")
+	# Audit A2-03: with a tourniquet on every limb the host places no IV, whatever site is
+	# asked for; the IO the care plan offers instead goes in.
+	_reset(casualty)
+	_reset(player)
+	var m: WoundModel = casualty.vitals._model
+	m.blood = 0.8
+	for limb: StringName in [Vitals.UPPER_ARM_L, Vitals.UPPER_ARM_R, Vitals.THIGH_L, Vitals.THIGH_R]:
+		m.tourniquets[limb] = {"count": 1, "rushed": 0}
+	casualty.vitals._after_change(true)
+	player.inventory.take(&"iv_18")
+	player.inventory.take(&"io_kit")
+	var access := casualty.vitals.care_needed().filter(func(t: Dictionary) -> bool: return t.kind == "access")
+	check(access.size() == 1 and access[0].items.size() == 1 and access[0].items[0] == WoundModel.IO_KIT, "every limb under a tourniquet: the care plan asks for an IO only (%s)" % [access])
+	for site: StringName in [Vitals.FOREARM_L, &"shin_r", Vitals.TORSO]:
+		player._server_busy_until = 0.0
+		player._server_treat.rpc_id(1, casualty.get_path(), &"iv_18", site)
+		await _frames(2)
+		check(casualty.vitals.access().is_empty() and player._server_busy_until <= Soldier._now() and player.inventory.medical_count(&"iv_18") == 1,
+			"an IV asked for on the %s is refused at once, nothing used" % site)
+	player._server_treat.rpc_id(1, casualty.get_path(), &"io_kit", WoundModel.IO_PART)
+	await _seconds(player.treat_seconds(casualty, ItemDB.get_item(&"io_kit")) + 0.3)
+	check(casualty.vitals.access().get("kind", "") == "io" and player.inventory.medical_count(&"io_kit") == 0, "the IO goes in (%s)" % [casualty.vitals.access()])
 	_reset(casualty)
 	_reset(player)
 
@@ -1141,6 +1178,95 @@ func _test_menu_and_removal() -> void:
 	check(player.inventory.medical_count(&"tourniquet") == tourniquets + 1, "and goes back in your kit")
 	_reset(casualty)
 	player.inventory.remove_one(&"trauma_kit")
+
+
+## Audit A2-05: a medic carrying everything gets more item rows than fit; the list scrolls
+## (mouse wheel), every usable row can be brought on screen and clicked, and only the rows on
+## screen are hit (none past the panel's foot, unseen).
+func _test_medical_menu_scrolls() -> void:
+	print("Medical menu: a long item list scrolls")
+	player.inventory.strip()
+	player.inventory.take(&"ruck_45")
+	player.inventory.take(&"aid_bag")
+	for id: StringName in MedicalMenu.medical_ids():
+		if not ItemDB.get_item(id).stats.get("no_item", false):
+			player.inventory.take(id)
+	_place_player()
+	_reset(casualty)
+	_reset(player)
+	var m: WoundModel = casualty.vitals._model
+	m.blood = 0.8
+	m.pain_wounds = 0.5
+	m.burn = 0.2
+	m.access = {"kind": "iv", "gauge": 18, "part": &"forearm_l", "pressure": false}
+	m._add_wound(&"forearm_l", "muscle", 0.1)
+	m._add_fracture(&"forearm_l", &"forearm_bones_l")
+	casualty.vitals._after_change(true)
+	await _frames(2)
+	var menu := player.player_input.medical_menu
+	menu.open(casualty)
+	menu.select_part(&"forearm_l")
+	var panel := menu._panel()
+	var fits := menu.visible_rows()
+	var usable := range(menu.options.size()).filter(func(i: int) -> bool: return menu.options[i].disabled == "")
+	check(menu.options.size() > fits and usable.any(func(i: int) -> bool: return i >= fits),
+		"a full kit: %d rows, %d fit, usable ones past them" % [menu.options.size(), fits])
+	var wheel := func(down: bool) -> void:
+		var e := InputEventMouseButton.new()
+		e.button_index = MOUSE_BUTTON_WHEEL_DOWN if down else MOUSE_BUTTON_WHEEL_UP
+		e.pressed = true
+		e.position = menu._rows_origin() + Vector2(100, 10)
+		menu._gui_input(e)
+	var unreachable := []
+	var hit_unseen := []
+	for i: int in usable:
+		for step in menu.options.size():
+			if menu.row_shown(i):
+				break
+			wheel.call(i >= menu.scroll)
+		var rect := menu._row_rect(i)
+		if not menu.row_shown(i) or rect.end.y > panel.end.y - 52.0 + 0.01 or menu._row_at(rect.get_center()) != i:
+			unreachable.append(menu.options[i].label)
+		for j in menu.options.size():
+			if not menu.row_shown(j) and menu._row_at(menu._row_rect(j).get_center()) == j:
+				hit_unseen.append(menu.options[j].label)
+	check(unreachable.is_empty(), "the wheel brings every usable row into the list, inside the panel, and it's hit there (out of reach: %s)" % [unreachable])
+	check(hit_unseen.is_empty(), "rows scrolled out of the list are never hit (%s)" % [hit_unseen])
+	# The last usable row, clicked: its treatment starts, like any other.
+	var last: int = usable[-1]
+	for step in menu.options.size():
+		if menu.row_shown(last):
+			break
+		wheel.call(last >= menu.scroll)
+	var click := InputEventMouseButton.new()
+	click.button_index = MOUSE_BUTTON_LEFT
+	click.pressed = true
+	click.position = menu._row_rect(last).get_center()
+	var item: StringName = menu.options[last].item
+	menu._gui_input(click)
+	check(menu.row_shown(last) and casualty.vitals.is_healing() and player._server_busy_until > Soldier._now(),
+		"scrolled to it, clicking the last usable row (%s) starts it" % menu.options[last].label)
+	await _seconds(player.treat_seconds(casualty, ItemDB.get_item(item)) + 0.3)
+	# In a short window (the panel at its least height) the activity log, full, still ends
+	# above the panel's foot: only the newest lines that fit are drawn.
+	var root := get_tree().root
+	var old_size := root.size
+	root.size = Vector2i(old_size.x, int(MedicalMenu.PANEL_MIN_H))
+	await _frames(2)
+	for n in MedicalMenu.MAX_LOG + 4:
+		menu._add_log("Test line %d" % n)
+	var font := menu.get_theme_default_font()
+	panel = menu._panel()
+	var shown := menu.log_lines_shown(font)
+	var log_end := panel.position.y + MedicalMenu.LOG_Y + 22.0 + (shown - 1) * font.get_height(12) + font.get_descent(12)
+	check(shown >= 1 and log_end <= panel.end.y and menu.log_lines.size() == MedicalMenu.MAX_LOG,
+		"a full activity log in a %.0f px panel: %d of %d lines drawn, ending %.0f px above its foot" % [panel.size.y, shown, menu.log_lines.size(), panel.end.y - log_end])
+	root.size = old_size
+	await _frames(2)
+	menu.close()
+	_reset(casualty)
+	_reset(player)
+	_restock()
 
 
 ## H: the medical menu (MedicalMenu) on the casualty you look at, else yourself; Shift+H

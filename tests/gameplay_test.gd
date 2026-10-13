@@ -31,6 +31,7 @@ func _ready() -> void:
 	await _test_throwables()
 	await _test_bad_input()
 	await _test_reload_across_death()
+	await _test_reload_replaced_gun()
 	await _test_fire_cadence()
 	await _test_saves()
 	GameState.delete_save()
@@ -190,6 +191,41 @@ func _test_reload_across_death() -> void:
 	var after := player.inventory.rounds_in(&"primary")
 	await _seconds(player.reload_seconds(ItemDB.get_item(&"m4a1")) + 0.5)
 	check(after > 0 and player.inventory.rounds_in(&"primary") == after, "the old reload didn't refill the new rifle (%d rounds, still %d)" % [after, player.inventory.rounds_in(&"primary")])
+
+
+## Audit A2-02: a reload started on one M4 doesn't finish on another M4 picked up meanwhile;
+## the gun now in hand reloads as usual.
+func _test_reload_replaced_gun() -> void:
+	print("Reload, then a different gun of the same model")
+	var inv := player.inventory
+	var seconds := player.reload_seconds(ItemDB.get_item(&"m4a1"))
+	inv.consume_round(&"primary")
+	player._server_busy_until = 0.0
+	player._server_reload.rpc_id(1, &"primary")
+	await _seconds(0.1)
+	player._server_inventory_action.rpc_id(1, "drop_slot", &"", -1, &"primary", &"")
+	level.server_spawn_dropped(&"m4a1", 1, player.global_position + Vector3.UP * 0.5, {"rounds": 1, "test_mark": "replacement"})
+	await _frames(2)
+	var replacement: WorldItem = null
+	for node in get_tree().get_nodes_in_group(WorldItem.GROUP):
+		if node is WorldItem and node.state.get("test_mark", "") == "replacement":
+			replacement = node
+	if replacement:
+		player._server_interact.rpc_id(1, replacement.get_path())
+	var spare := inv.spare_rounds(&"mag_556")
+	check(replacement != null and inv.slots[&"primary"] == &"m4a1" and inv.rounds_in(&"primary") == 1,
+		"mid-reload: the M4 dropped, another M4 (1 round) picked up")
+	await _seconds(seconds + 0.5)
+	check(inv.rounds_in(&"primary") == 1 and inv.spare_rounds(&"mag_556") == spare,
+		"the old reload didn't load the other M4 (%d rounds, spare %d -> %d)" % [inv.rounds_in(&"primary"), spare, inv.spare_rounds(&"mag_556")])
+	player._server_busy_until = 0.0
+	player._server_reload.rpc_id(1, &"primary")
+	await _seconds(seconds + 0.3)
+	check(inv.rounds_in(&"primary") == 30, "reloading the M4 now in hand works (%d)" % inv.rounds_in(&"primary"))
+	for node in get_tree().get_nodes_in_group(WorldItem.GROUP):  # the dropped M4: not part of later tests
+		if node is WorldItem and node.item_id == &"m4a1":
+			GameState.item_taken(node.uid)
+			node.queue_free()
 
 
 ## Audit L1-01 and L1-05: a level-placed stack partly taken saves what's left; a save goes through a

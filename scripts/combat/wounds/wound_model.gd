@@ -1001,13 +1001,13 @@ func treat_time_mult(item: StringName) -> float:
 	return 1.0 + (IV_SHOCK_TIME_MULT - 1.0) * iv_difficulty() if IV_GAUGES.has(item) else 1.0
 
 
-## Where an IV goes by default: the first of IV_SITES with no tourniquet on or above it (the
-## left forearm if every limb has one).
+## Where an IV goes by default: the first of IV_SITES with no tourniquet on or above it, or
+## &"" if every limb has one (no vein left for an IV; an IO still goes in: audit A2-03).
 func iv_part() -> StringName:
 	for site in IV_SITES:
 		if iv_site_ok(site):
 			return site
-	return IV_SITES[0]
+	return &""
 
 
 ## An IV can go in `site` (one of IV_SITES): no tourniquet on or above it.
@@ -1016,10 +1016,13 @@ func iv_site_ok(site: StringName) -> bool:
 
 
 ## Items that would give this body a line, best pick first: in deep shock (veins collapsed
-## or arrest) IO, then the big bores; with time, the common 18 gauge first.
+## or arrest) IO, then the big bores; with time, the common 18 gauge first. Only IO with a
+## tourniquet on every limb (no IV site left, iv_part).
 func access_options() -> Array[StringName]:
 	var out: Array[StringName] = []
-	if veins_collapsed() or arrest:
+	if iv_part() == &"":
+		out.assign([IO_KIT])
+	elif veins_collapsed() or arrest:
 		out.assign([IO_KIT, &"iv_14", &"iv_12", &"iv_10", &"iv_16", &"iv_18", &"iv_20"])
 	else:
 		out.assign([&"iv_18", &"iv_16", &"iv_14", &"iv_20", &"iv_12", &"iv_10", IO_KIT])
@@ -1083,7 +1086,8 @@ func care_tasks() -> Array[Dictionary]:
 			tasks.append(_task(w.part, w.kind, PRESSURE_BANDAGE))
 	if access.is_empty():
 		if lost() >= FLUIDS_FROM_LOST:
-			tasks.append(_task(iv_part(), "access", &"", access_options()))
+			var site := iv_part()
+			tasks.append(_task(site if site != &"" else IO_PART, "access", &"", access_options()))
 	else:
 		if infusion.is_empty() and lost() >= FLUIDS_FROM_LOST:
 			tasks.append(_task(access.part, "fluids", &"", bag_options()))
@@ -1118,7 +1122,13 @@ func treatment_problem(item: StringName, part: StringName) -> String:
 	if dead:
 		return "Already dead"
 	if item == IO_KIT or IV_GAUGES.has(item):
-		return "Already has a line in" if not access.is_empty() else ""
+		if not access.is_empty():
+			return "Already has a line in"
+		# An IV goes in `part`, or the first free site if that isn't one (apply_item); never
+		# below a tourniquet (audit A2-03).
+		if IV_GAUGES.has(item) and not iv_site_ok(part) and (part in IV_SITES or iv_part() == &""):
+			return "Not below a tourniquet"
+		return ""
 	if FLUID_BAGS.has(item):
 		if access.is_empty():
 			return "Needs IV or IO access first"

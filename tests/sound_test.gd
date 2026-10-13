@@ -179,6 +179,24 @@ func _test_in_level() -> void:
 		"six walking around you: the %d nearest are heard (heard: %s)" % [Sfx.STEP_VOICES, heard_from.keys()])
 	for s in squad:
 		s.queue_free()
+	await _test_hearing_lifetime(player)
+
+
+## Audit A2-04: ears ringing muffle the global Master bus; leaving the session while deaf (the
+## level and the player go) clears it again, so the menu and the next session sound normal.
+func _test_hearing_lifetime(player: Soldier) -> void:
+	print("Muffled hearing ends with the session")
+	var bus := AudioServer.get_bus_index(&"Master")
+	var volume := AudioServer.get_bus_volume_db(bus)
+	var muffled := func() -> bool: return AudioServer.get_bus_effect_count(bus) > 0 and AudioServer.is_bus_effect_enabled(bus, 0)
+	player.vitals.server_deafen(30.0)
+	await _frames(3)
+	check(muffled.call() and AudioServer.get_bus_volume_db(bus) < volume - 6.0, "ears ringing: the Master bus is muffled and quieter")
+	Net.leave()
+	$Main.queue_free()
+	await _frames(3)
+	check(not muffled.call() and is_equal_approx(AudioServer.get_bus_volume_db(bus), volume),
+		"left the session still deaf: hearing is back to normal (%.1f dB)" % AudioServer.get_bus_volume_db(bus))
 
 
 func _now() -> float:

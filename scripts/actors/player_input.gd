@@ -61,6 +61,7 @@ func _ready() -> void:
 		await body.ready  # children are ready before their parent
 	if not body.is_local():
 		return
+	set_muffled(false)  # a new local player starts hearing normally, whatever came before
 	body.camera.current = true
 	body.camera.cull_mask &= ~LOCAL_ONLY_LAYER
 	body.model.render_layers = LOCAL_ONLY_LAYER
@@ -180,15 +181,39 @@ func _update_hearing() -> void:
 	if deaf == _deaf:
 		return
 	_deaf = deaf
-	var bus := AudioServer.get_bus_index(&"Master")
-	if AudioServer.get_bus_effect_count(bus) == 0 or not AudioServer.get_bus_effect(bus, 0) is AudioEffectLowPassFilter:
-		var filter := AudioEffectLowPassFilter.new()
-		filter.cutoff_hz = DEAF_CUTOFF_HZ
-		AudioServer.add_bus_effect(bus, filter, 0)
-	AudioServer.set_bus_effect_enabled(bus, 0, deaf)
-	AudioServer.set_bus_volume_db(bus, DEAF_VOLUME_DB if deaf else 0.0)
+	set_muffled(deaf)
 	if deaf:
 		flash("Ears ringing")
+
+
+## The Master bus volume from before hearing was muffled (put back when it clears).
+static var _volume_before := 0.0
+
+
+## Muffles the Master bus (a low-pass, quieter) or clears it, putting back the volume from
+## before; already so, it does nothing. The bus is global and outlives the player: whoever
+## muffles it clears it again (audit A2-04: deaf when leaving, the menu and the next session
+## stayed muffled).
+static func set_muffled(on: bool) -> void:
+	var bus := AudioServer.get_bus_index(&"Master")
+	var has_filter := AudioServer.get_bus_effect_count(bus) > 0 and AudioServer.get_bus_effect(bus, 0) is AudioEffectLowPassFilter
+	if on == (has_filter and AudioServer.is_bus_effect_enabled(bus, 0)):
+		return
+	if on:
+		if not has_filter:
+			var filter := AudioEffectLowPassFilter.new()
+			filter.cutoff_hz = DEAF_CUTOFF_HZ
+			AudioServer.add_bus_effect(bus, filter, 0)
+		_volume_before = AudioServer.get_bus_volume_db(bus)
+	AudioServer.set_bus_effect_enabled(bus, 0, on)
+	AudioServer.set_bus_volume_db(bus, DEAF_VOLUME_DB if on else _volume_before)
+
+
+## Leaving (the session ends, the level changes, the body goes): hearing comes back with it.
+func _exit_tree() -> void:
+	if _deaf:
+		_deaf = false
+		set_muffled(false)
 
 
 ## Runs after the body has moved this frame (children process after their parent).
