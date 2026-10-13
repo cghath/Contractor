@@ -64,6 +64,12 @@ check in the suite that owns the code.
   "Contractor (dev tools).bat" that starts it with `--dev`.
 - Tests: the net test's client no longer deletes the host's save fixture (A1-06); the contracts
   replication test keeps a hostile in the compound so its objective stays active (A1-07).
+- **A bearer ordered to move no longer lifts the casualty he just laid down, over and over**
+  (found by CI on this branch; on dev too): the body's ragdoll settles up to about 2.6 m from
+  the lay spot, which one check counted as "not there yet" and another as "laid". Both now use
+  one test (`SquadAI._lies_at`, measured to `body_point()`). The squad suite's contact check
+  waits for an AI physics step; the roles callout check uses squadmates tactics never speak
+  through.
 
 #### Changed
 
