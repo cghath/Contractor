@@ -61,15 +61,37 @@ This list covers what is built and in the game today (2026-10-12). Work still un
 - Combat modes: Safe (weapons lowered, no fights started), Aware, Combat (default, crouch at
   halts), Stealth (always crouched, no sprint, fires only when fired on or at close range).
 - Formations: wedge, file, line, staggered column.
+- Squad tactics: the squad keeps one picture of the enemy (where each was last seen or heard,
+  how long ago, grouped into clusters) and every second scores its options from range, numbers,
+  buildings, cover, suppression, casualties, ammunition, morale and its orders, keeping the best
+  until another clearly beats it:
+  - hold and improve cover, the autorifleman suppressing the densest cluster;
+  - suppress and flank: one fire team (with the autorifleman) fixes the enemy while the other
+    works round through cover on the side the enemy sees least of;
+  - assault through when close and well outnumbering them;
+  - clear a building the enemy holds: the base suppresses it, the entry team stacks beside the
+    door and goes in one after the other, pair by pair, to the room corners;
+  - defend a building: windows and doors facing the threat first, the rest inside;
+  - break contact: bound back by pairs, with smoke over open ground;
+  - casualty care: everyone else holds and suppresses while the casualty is seen to;
+  - search where the enemy was last seen, then forget them.
+  Orders always win (a squad on Hold or Move doesn't go flanking), the squad leader calls each
+  change, and enemy squads fight the same way with their own doctrine.
 - Command menu (F1-F8 per slot, ~ for everyone, Shift+F-key to add; number keys or mouse wheel):
-  - Move: return to formation, move there, stop.
-  - Target: focus fire on the enemy under your crosshair (up to 300 m), or clear the target.
-  - Engage: open fire, hold fire.
+  - Move: return to formation, move there, stop, bound there (buddies covering each other),
+    take cover, fall back, garrison that building, clear that building.
+  - Target: focus fire on the enemy under your crosshair (up to 300 m), clear the target,
+    suppress there, suppress known enemy (the densest known group), watch that sector.
+  - Engage: open fire, hold fire, stance (stand, crouch, prone, their choice).
   - Mount: get in that vehicle, get out.
   - Status: report status, report an enemy position by radio.
-  - Action: throw smoke or frag there, scavenge that body, scavenge freely or don't scavenge,
-    escort that HVT or stop escorting, fire launcher there.
+  - Action: throw smoke or frag there, fire launcher there, launcher out, heal up, escort that
+    HVT or stop escorting;
+    - Gear: rearm from that body, scavenge freely or don't, give me ammo, drop packs here, pick
+      packs up;
+    - Casualties: treat that casualty (a medic first), bring casualties there or to me, stop.
   - Combat mode, Formation, Team (select fire team A or B, assign or select red, green, blue and yellow colour teams).
+  - An order that can't be carried out says why ("Look at a building", "Nobody selected has a launcher").
 - Any player can give orders. The last one to give an order leads.
 - Callouts as subtitles: contact with direction and distance, reloading, frag/smoke/flashbang
   out, moving, covering, man down, "Medic!", "Moving to X", "Treating X", "Need a medic on X",
@@ -464,6 +486,7 @@ This list covers what is built and in the game today (2026-10-12). Work still un
   - a wall or vehicle right behind reflects it onto the shooter, and a small room fills with it;
   - you can't fire from a vehicle seat.
 - Disposable launchers ride on top of the pack (1 on the assault pack, up to 3 on the ruck) and come off onto the shoulder.
+  An AI who has fired the one on his shoulder unstraps the next off his pack (2.5 s).
 
 ## Vehicles
 
@@ -555,8 +578,13 @@ This list covers what is built and in the game today (2026-10-12). Work still un
   Move the cursor onto one and let go to choose it.
 - Left Ctrl + Left Alt for actions on yourself.
 - Carrying and dragging:
-  - fireman's carry at 55% speed;
-  - drag at 35%: you face the casualty and back away with S;
+  - fireman's carry at 55% speed: over the right shoulder, legs down the front, arms round them;
+  - picking someone up takes 1.6 s: you go down on a knee, get your hands under them and stand
+    with them; putting them down takes 1.3 s, kneeling to lay them in front of you; you stand
+    still meanwhile, and AI squadmates do the same;
+  - drag at 35%: you take the vest's handle from a crouch, face the casualty and back away with S;
+  - in first person: no rifle in view while your hands are full, and the casualty on your
+    shoulder doesn't block your view (everyone else sees them);
   - Release or Put down, or press G to let go.
 - Looting:
   - Loot (one item) or Loot all (whatever fits);
@@ -778,16 +806,6 @@ Being built now, not in test builds yet:
 - Radio on the front-left or front-right carrier spots.
 - Gear fit fixes.
 - Gear movement: bags and armour sway with the body.
-- Carry and drag animations and transitions.
-- Expanded command menu:
-  - take cover and fall back;
-  - stance;
-  - suppress, including a generic suppress order;
-  - casualty orders, heal up and rearm;
-  - bounding;
-  - garrison and clear;
-  - drop packs and launcher out.
-- Smarter AI tactics with a situational tactical evaluator.
 - A spotting model where camouflage, stance, movement and distance matter.
 - Fuller hearing and shared contacts (basic versions are in; see Squad AI).
 - Morale.
