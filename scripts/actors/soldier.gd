@@ -938,8 +938,28 @@ func _server_inventory_action(action: String, container: StringName, index: int,
 			if on_point.is_empty():
 				return
 			var gear := ItemDB.get_item(StringName(on_point.id))
-			if not inventory.equip_attachment(slot):
-				_client_message.rpc_id(owner_peer(), "Already carrying a %s" % InventoryScreen.SLOT_NAMES.get(gear.slot, String(gear.slot)).to_lower() if gear and gear.slot != &"" else "Can't equip that")
+			if inventory.equip_attachment(slot):
+				return
+			# One already on the shoulder that packs on that point too: they swap places.
+			var worn := ItemDB.get_item(inventory.slots.get(gear.slot, &"")) if gear and gear.slot != &"" and inventory.slots.get(gear.slot, &"") != &"" else null
+			if worn and Inventory.point_types(inventory.attach_point(slot)).any(func(t: String) -> bool: return t in worn.stats.get("attach", [])):
+				var packed := inventory.detach(slot)
+				var off := inventory.unequip(gear.slot)
+				inventory.attach(slot, {"id": off.id, "state": off.state})
+				inventory.take(packed.id, 1, packed.get("state", {}))
+				return
+			_client_message.rpc_id(owner_peer(), "Already carrying a %s" % InventoryScreen.SLOT_NAMES.get(gear.slot, String(gear.slot)).to_lower() if gear and gear.slot != &"" else "Can't equip that")
+		"attach_slot":  # the launcher off the shoulder, packed on top of the pack (`target`, or the first free point it fits)
+			var gear := ItemDB.get_item(inventory.slots.get(slot, &"")) if inventory.slots.get(slot, &"") != &"" else null
+			if gear == null or not Inventory.is_attachable(gear):
+				return
+			var point := target if target != &"" else inventory.free_point_for(gear)
+			var problem := inventory.attach_problem(gear, point) if point != &"" else inventory.no_point_problem(gear)
+			if problem != "":
+				_client_message.rpc_id(owner_peer(), problem)
+				return
+			var off := inventory.unequip(slot)
+			inventory.attach(point, {"id": off.id, "state": off.state})
 		"move_attachment":
 			var att := inventory.attachment(slot)
 			if att.is_empty():

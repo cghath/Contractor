@@ -17,10 +17,11 @@ extends Control
 const SLOT_NAMES := {
 	&"primary": "Primary", &"sidearm": "Sidearm", &"helmet": "Helmet", &"vest": "Carrier",
 	&"backpack": "Backpack", &"plate_front": "Front plate", &"plate_back": "Back plate",
-	&"plate_left": "Left plate", &"plate_right": "Right plate",
+	&"plate_left": "Left plate", &"plate_right": "Right plate", &"launcher": "Launcher",
 }
-## Slots down each side of the soldier.
-const LEFT_SLOTS: Array[StringName] = [&"helmet", &"vest", &"backpack", &"plate_left"]
+## Slots down each side of the soldier: every slot in Inventory.SLOTS has a tile (audit A2-06:
+## the launcher had none). The launcher sits under the pack it's slung beside.
+const LEFT_SLOTS: Array[StringName] = [&"helmet", &"vest", &"backpack", &"launcher", &"plate_left"]
 const RIGHT_SLOTS: Array[StringName] = [&"primary", &"sidearm", &"plate_front", &"plate_back", &"plate_right"]
 ## How far the ground panel looks for items (metres): about the interaction reach.
 const NEARBY_M := Soldier.INTERACT_RANGE + 0.8
@@ -657,6 +658,9 @@ func _actions_for(src: Dictionary) -> Array:
 				out.append(["MOLLE view", _set_view.bind(View.MOLLE)])
 			if slot != &"vest" and slot != &"backpack":
 				out.append(["Stow", _action.bind("stow_slot", &"", -1, slot, &"")])
+			var gear := ItemDB.get_item(inv.slots[slot])
+			if Inventory.is_attachable(gear) and inv.free_point_for(gear) != &"":  # a disposable launcher onto the pack's top
+				out.append(["Pack on top", _action.bind("attach_slot", &"", -1, slot, &"")])
 			out.append(["Drop", _action.bind("drop_slot", &"", -1, slot, &"")])
 		"point":
 			if inv.attachment(src.point).is_empty():
@@ -762,6 +766,12 @@ func drop_action(src: Dictionary, dst: Dictionary) -> Callable:
 				"container":
 					if not Inventory.is_pouch_container(dst.container):
 						return _action.bind("stow_slot", &"", -1, src.slot, dst.container)
+				"point":
+					if Inventory.is_attachable(item):  # the launcher off the shoulder, onto the pack's top
+						return _action.bind("attach_slot", &"", -1, src.slot, dst.point)
+				"slot":
+					if dst.slot == &"backpack" and src.slot != &"backpack" and Inventory.is_attachable(item):  # onto the pack: packed on top
+						return _action.bind("attach_slot", &"", -1, src.slot, &"")
 				"nearby":
 					return _action.bind("drop_slot", &"", -1, src.slot, &"")
 		"point":
@@ -1138,6 +1148,9 @@ static func _detail(item: ItemData, state: Dictionary) -> String:
 		return "  [%s]" % Inventory.kit_text(item, state)  # what's left in the kit
 	if state.has("rounds") and item.type == "weapon":
 		return "  [%d loaded]" % int(state.rounds)
+	if Launchers.is_launcher(item):  # loaded with what, or empty (a fired disposable is gone)
+		var w := Launchers.loaded_warhead(item, state)
+		return "  [%s loaded]" % String(w).replace("_", " ").to_upper() if w != &"" else "  [empty]"
 	if state.get("rolled", false):
 		return "  [rolled]"
 	if state.has("rounds") and int(state.rounds) < item.magazine_rounds():

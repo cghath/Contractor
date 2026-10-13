@@ -38,6 +38,7 @@ func _ready() -> void:
 	_test_molle_rules()
 	await _test_molle_host()
 	await _test_loot_aid_bag()
+	await _test_screen_launcher()
 	await _test_respawn_kit()
 	await _test_smoke_colours()
 	await _test_breach_navigation()
@@ -485,6 +486,72 @@ func _test_loot_aid_bag() -> void:
 		medic.queue_free()
 		await _frames(2)
 	inv.strip()
+
+
+## Audit A2-06: the launcher has a slot tile on the inventory screen like the other weapons:
+## it shows what's loaded, packs on top of the pack (dragged onto the pack, or Pack on top),
+## comes back off it onto the shoulder (swapping with one already there), stows, drops.
+func _test_screen_launcher() -> void:
+	print("Inventory screen: the launcher slot")
+	var inv := player.inventory
+	inv.strip()
+	player.global_position = Vector3(0, 0.1, 18)
+	inv.take(&"assault_pack")
+	inv.take(&"at4")
+	var screen: InventoryScreen = player._hud.inventory_screen
+	screen._set_view(InventoryScreen.View.LOADOUT)
+	screen.visible = true
+	await _frames(2)
+	var tile := _slot_tile(screen, &"launcher")
+	check(tile.size() == 2 and tile[1].id == &"at4" and tile[0].tooltip_text.contains("AT4") and tile[0].tooltip_text.contains("loaded"),
+		"the loadout shows a launcher slot tile: the AT4, loaded (%s)" % (tile[0].tooltip_text.replace("\n", " | ") if tile.size() == 2 else "no tile"))
+	var labels := screen._actions_for(tile[1] if tile.size() == 2 else {}).map(func(a: Array) -> String: return a[0])
+	check(labels.has("Stow") and labels.has("Pack on top") and labels.has("Drop"), "its actions: Stow, Pack on top, Drop (%s)" % [labels])
+	var onto_pack := screen.drop_action({"kind": "slot", "slot": &"launcher", "id": &"at4"}, {"kind": "slot", "slot": &"backpack"})
+	check(onto_pack.is_valid(), "dragging it onto the pack is an action")
+	if onto_pack.is_valid():
+		screen._drop(Vector2.ZERO, {"inventory_drag": {"kind": "slot", "slot": &"launcher", "id": &"at4"}}, {"kind": "slot", "slot": &"backpack"})
+	await _frames(2)
+	tile = _slot_tile(screen, &"launcher")
+	check(inv.slots[&"launcher"] == &"" and inv.attachment(&"pack_top_1").get("id") == &"at4" and tile.size() == 2 and tile[1].id == &"",
+		"and packs it on top of the pack; the slot tile shows empty")
+	# A second AT4 on the shoulder, then the packed one dragged onto the soldier: they swap.
+	inv.take(&"at4", 1, {"test_mark": "shoulder"})
+	screen._drop(Vector2.ZERO, {"inventory_drag": {"kind": "point", "point": &"pack_top_1", "id": &"at4"}}, {"kind": "doll"})
+	await _frames(2)
+	check(inv.slots[&"launcher"] == &"at4" and inv.state_of(&"launcher").get("test_mark", "") == "" \
+		and inv.attachment(&"pack_top_1").get("state", {}).get("test_mark", "") == "shoulder",
+		"the packed AT4 dragged onto the soldier swaps with the one on the shoulder (%s / %s)" % [inv.state_of(&"launcher"), inv.attachment(&"pack_top_1")])
+	# An RPG-7 shows empty; it stows, and drops.
+	inv.detach(&"pack_top_1")
+	inv.unequip(&"launcher")
+	inv.take(&"rpg7")
+	await _frames(2)
+	tile = _slot_tile(screen, &"launcher")
+	check(tile.size() == 2 and tile[1].id == &"rpg7" and tile[0].tooltip_text.contains("empty"), "an unloaded RPG-7 shows empty (%s)" % (tile[0].tooltip_text.replace("\n", " | ") if tile.size() == 2 else "no tile"))
+	screen._drop(Vector2.ZERO, {"inventory_drag": {"kind": "slot", "slot": &"launcher", "id": &"rpg7"}}, {"kind": "container", "container": &"backpack"})
+	await _frames(2)
+	check(inv.slots[&"launcher"] == &"" and _count_in(inv, &"backpack", &"rpg7") == 1, "dragged into the pack, it's stowed")
+	screen._drop(Vector2.ZERO, {"inventory_drag": {"kind": "entry", "container": &"backpack", "index": _index_in(inv, &"backpack", &"rpg7"), "id": &"rpg7"}}, {"kind": "slot", "slot": &"launcher"})
+	await _frames(2)
+	check(inv.slots[&"launcher"] == &"rpg7", "dragged back onto its slot, it's on the shoulder")
+	screen._drop(Vector2.ZERO, {"inventory_drag": {"kind": "slot", "slot": &"launcher", "id": &"rpg7"}}, {"kind": "nearby"})
+	await _frames(3)
+	var dropped := get_tree().get_nodes_in_group(WorldItem.GROUP).filter(func(n: Node) -> bool: return n is WorldItem and n.item_id == &"rpg7")
+	check(inv.slots[&"launcher"] == &"" and dropped.size() == 1, "and dropped on the ground, it lies there")
+	for n: Node in dropped:
+		GameState.item_taken(n.uid)
+		n.queue_free()
+	screen.visible = false
+	inv.strip()
+
+
+## The slot tile of `slot` on the inventory screen as [tile, src], or [] if there is none.
+func _slot_tile(screen: InventoryScreen, slot: StringName) -> Array:
+	for t: Array in screen._tiles:
+		if is_instance_valid(t[0]) and not t[0].is_queued_for_deletion() and t[1].kind == "slot" and t[1].slot == slot:
+			return [t[0], t[1]]
+	return []
 
 
 ## Every item on `soldiers`, wherever it is (worn, on a carrier's or pack's points, in a pouch,
