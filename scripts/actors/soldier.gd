@@ -725,10 +725,14 @@ func _server_reload(slot: StringName) -> void:
 	Sfx.server_play(&"reload", global_position + Vector3.UP)
 	_reload_n += 1
 	var n := _reload_n
+	var rev := inventory.slot_revision(slot)
 	# The new magazine goes in when the reload finishes, if the same weapon is still there and
-	# the soldier hasn't died since (a respawn's new rifle isn't the one being reloaded).
+	# the soldier hasn't died since (a respawn's new rifle isn't the one being reloaded). The
+	# same weapon, not just the same model: one dropped and another M4 picked up meanwhile has
+	# a new slot revision (audit A2-02).
 	await get_tree().create_timer(seconds).timeout
-	if is_inside_tree() and n == _reload_n and vitals.is_up() and inventory.slots.get(slot, &"") == id:
+	if is_inside_tree() and n == _reload_n and vitals.is_up() and inventory.slots.get(slot, &"") == id \
+			and inventory.slot_revision(slot) == rev:
 		inventory.reload(slot)
 
 

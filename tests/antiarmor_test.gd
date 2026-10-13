@@ -684,6 +684,25 @@ func _test_reload() -> void:
 		"R again swaps it for the OG-7V; the PG-7V goes back in the kit")
 	var r := await _shot(&"rpg7", &"", Vector3(-30, 0.1, 45), Vector3(0, 0.05, 45))
 	check(r.get("how", "") == "burst" and player.inventory.slots[SLOT] == &"rpg7" and Launchers.loaded_of(player) == &"", "fired, the RPG-7 is empty again (kept)")
+	# Audit A2-02: the rocket goes into the launcher being reloaded, not another RPG-7 picked
+	# up meanwhile.
+	var rounds_before := player.inventory.count_of(&"pg7v_round") + player.inventory.count_of(&"og7v_round")
+	player._server_busy_until = 0.0
+	launchers.server_reload(player)
+	await _seconds(0.5)
+	player._server_inventory_action.rpc_id(1, "drop_slot", &"", -1, SLOT, &"")
+	level.server_spawn_dropped(&"rpg7", 1, player.global_position + Vector3.UP * 0.5, {"test_mark": "other_rpg"})
+	await _frames(2)
+	for node in get_tree().get_nodes_in_group(WorldItem.GROUP):
+		if node is WorldItem and node.state.get("test_mark", "") == "other_rpg":
+			player._server_interact.rpc_id(1, node.get_path())
+	check(player.inventory.slots[SLOT] == &"rpg7" and player.inventory.state_of(SLOT).get("test_mark", "") == "other_rpg", "mid-reload: the RPG-7 dropped, another picked up")
+	await _seconds(4.8)
+	check(Launchers.loaded_of(player) == &"" and player.inventory.count_of(&"pg7v_round") + player.inventory.count_of(&"og7v_round") == rounds_before,
+		"the old reload didn't load the other RPG-7 (%s loaded)" % Launchers.loaded_of(player))
+	for node in get_tree().get_nodes_in_group(WorldItem.GROUP):  # the dropped RPG-7: not part of later tests
+		if node is WorldItem and node.item_id == &"rpg7":
+			node.queue_free()
 	player.inventory.unequip(SLOT)
 	player.inventory.take(&"at4")
 	await _shot(&"at4", &"", Vector3(-30, 0.1, 45), Vector3(0, 0.05, 45))
