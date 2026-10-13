@@ -393,12 +393,14 @@ func _set_pack_straps(pack: StringName) -> void:
 	model.torso.add_child(_straps)
 	var colour := Color(VoxelArt.spec(model.variant).gear).darkened(0.3)
 	var path := strap_path(model.body, _carrier != null, _plate_depth())
-	path.assign(path.map(func(v: Vector3) -> Vector3: return _on_panels(v) if absf(v.z) > 0.15 else v))
+	if _carrier:  # (no carrier: nothing to fit to; torso_reach has the body itself)
+		path.assign(path.map(func(v: Vector3) -> Vector3: return _on_panels(v) if absf(v.z) > 0.15 else v))
 	for s: float in [-1.0, 1.0]:
 		for i in path.size() - 1:
 			_straps.add_child(_strap(path[i] * Vector3(s, 1, 1), path[i + 1] * Vector3(s, 1, 1), STRAP_W, STRAP_T, colour))
 	var front := -(_plate_depth() + 0.03) - STRAP_T if _carrier else -VoxelArt.torso_reach(model.body, 0.355) - STRAP_T
-	_straps.add_child(_strap(_on_panels(Vector3(-0.12, 0.355, front)), _on_panels(Vector3(0.12, 0.355, front)), 0.02, 0.008, colour))  # sternum strap
+	var fit := func(v: Vector3) -> Vector3: return _on_panels(v) if _carrier else v
+	_straps.add_child(_strap(fit.call(Vector3(-0.12, 0.355, front)), fit.call(Vector3(0.12, 0.355, front)), 0.02, 0.008, colour))  # sternum strap
 
 
 ## The right shoulder strap's line, torso-local (mirror x for the left): from the pack's top,

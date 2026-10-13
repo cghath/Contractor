@@ -440,8 +440,10 @@ func _add_box(st: SurfaceTool, corners: Array[Vector3], colour: Color) -> void:
 
 ## Trees and scrub are built like the soldiers (VoxelArt lofts): stacked tiers with an
 ## octagonal cross-section (a square with its corners cut at 45 degrees), flat faces, light on
-## top and darker underneath (the instance colour tints them). They keep inside the cylinders
-## spotting hides people in (foliage_between: CROWN_R, CROWN_LOW, CROWN_HIGH; SCRUB_R, SCRUB_TOP).
+## top and darker underneath (the instance colour tints them). Scrub keeps inside the cylinder
+## spotting hides people in (foliage_between: SCRUB_R, SCRUB_TOP); a crown's octagon corners and
+## lobes reach out to about 1.45 x its size, past CROWN_R (as the old blocks' corners did), so its
+## outer edge doesn't hide anyone (CROWN_LOW and CROWN_HIGH match it).
 const TOP_SHADE := 1.0
 const SIDE_SHADE := 0.82
 const UNDER_SHADE := 0.6

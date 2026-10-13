@@ -54,7 +54,9 @@ func follow(torso: Transform3D, delta: float) -> void:
 	if delta <= 0.0:
 		return
 	var pos := torso.origin
-	var yaw := torso.basis.get_euler().y
+	# Yaw from the torso's right axis: it stays level when the torso pitches (prone), where
+	# Euler angles flip about.
+	var yaw := atan2(-torso.basis.x.z, torso.basis.x.x)
 	if _last_pos == Vector3.INF:
 		_last_pos = pos
 		_last_yaw = yaw
@@ -73,8 +75,9 @@ func follow(torso: Transform3D, delta: float) -> void:
 	var turn_acc := clampf((spin - _last_spin) / delta, -TURN_ACCEL_MAX, TURN_ACCEL_MAX)
 	_last_vel = vel
 	_last_spin = spin
-	# In the torso's frame; turning swings what hangs behind the spine out to the side.
-	var local := torso.basis.inverse() * acc + Vector3(-turn_acc * lever, 0, 0)
+	# In the torso's frame; turning swings what hangs behind the spine out to the side (a point
+	# `lever` behind it is pushed along +x as the yaw speeds up, so the gear lags to -x).
+	var local := torso.basis.inverse() * acc + Vector3(turn_acc * lever, 0, 0)
 	_accel = _accel.lerp(local, clampf(ACCEL_SMOOTH * delta, 0.0, 1.0))
 	step(_accel, delta)
 
@@ -112,3 +115,5 @@ func reset() -> void:
 	_v = Vector3.ZERO
 	_accel = Vector3.ZERO
 	_last_pos = Vector3.INF
+	_last_vel = Vector3.ZERO  # or getting up after running reads as a jolt
+	_last_spin = 0.0

@@ -106,7 +106,20 @@ func _test_gear_sway() -> void:
 		yaw += spin / 60.0
 		t.basis = Basis(Vector3.UP, yaw)
 		pack.follow(t, 1.0 / 60.0)
-	check(absf(pack.offset().x) > 0.001, "turning swings it out to the side (%.4f m)" % pack.offset().x)
+	check(pack.offset().x < -0.001, "turning left, his back swings right and the pack lags behind it, to his left (%.4f m)" % pack.offset().x)
+	pack.step(Vector3(0, 0, -4.0), 0.5)
+	pack.reset()
+	t = Transform3D.IDENTITY
+	pack.follow(t, 1.0 / 60.0)
+	pack.follow(t, 1.0 / 60.0)
+	check(pack.offset().length() < 0.0001, "after a reset (ragdolled, hidden) standing still doesn't jolt it (%.4f m)" % pack.offset().length())
+	pack.reset()
+	t = Transform3D(Basis(Vector3.RIGHT, deg_to_rad(-88.0)), Vector3.ZERO)  # prone: the torso pitched flat
+	pack.follow(t, 1.0 / 60.0)
+	for i in 30:
+		t.basis = Basis(Vector3.RIGHT, deg_to_rad(-88.0 + sin(i * 0.5) * 3.0))  # breathing, a little rock
+		pack.follow(t, 1.0 / 60.0)
+	check(absf(pack.offset().x) < 0.002, "lying prone it doesn't jitter side to side (%.4f m)" % pack.offset().x)
 
 
 func check(condition: bool, what: String) -> void:
