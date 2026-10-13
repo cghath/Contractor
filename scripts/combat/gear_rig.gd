@@ -71,6 +71,19 @@ const TAPE_INK := Color(0.1, 0.1, 0.08)
 ## The tape: a strip of tan cloth on the loop panel, letters on it.
 const TAPE_SIZE := Vector3(0.12, 0.028, 0.004)
 const TAPE_CLOTH := Color("8f8a6c")
+## The carrier's plate pocket: 14 cm either side of the spine (VoxelArt._vest). Pouches on it
+## stay inside its edges, and a row of them doesn't overlap (POUCH_GAP_M apart).
+const PANEL_HALF_M := 0.14
+const POUCH_GAP_M := 0.004
+## Pack straps: width, thickness, and how far they lie off what they rest on (m).
+const STRAP_W := 0.045
+const STRAP_T := 0.015
+const STRAP_LIFT := 0.012
+## Gear secondary motion (queue 10, GearSway): the pack swings from its strap anchors (slow,
+## up to 4 cm, turning swings it out), pouches flap from their top edges (quick, 1.2 cm).
+## Drawn only where something renders: headless hosts and tests keep gear still.
+const PACK_SWAY := [2.4, 0.35, 0.04, 1.0, 0.25, 0.32]  # freq, damping, reach, gain, lever, hang
+const POUCH_SWAY := [4.0, 0.3, 0.012, 1.0, 0.0, 0.06]
 
 var _armor: Dictionary = {}        # slot -> VoxelArmor
 var _chip_counts: Dictionary = {}  # slot -> chips already applied to the mesh
@@ -85,9 +98,15 @@ var _pouch_key := ""             # what _pouches shows
 var _left_shown := false          # model.left_handed the rest mounts were placed for
 var _straps: Node3D              # the pack's shoulder straps (torso-local)
 var _carrier: ItemData          # the worn carrier (carrier_fit reads its depth and tier)
-var _straps_for: StringName = &""  # the pack they were built for
+var _straps_for := ""  # the pack and carrier they were built for
 var _tape: Node3D                 # the name tape on the carrier's loop panel
 var _tape_key := ""              # carrier and text it shows
+var _pack_sway := GearSway.make(PACK_SWAY[0], PACK_SWAY[1], PACK_SWAY[2], PACK_SWAY[3], PACK_SWAY[4], PACK_SWAY[5])
+var _pouch_sway := GearSway.make(POUCH_SWAY[0], POUCH_SWAY[1], POUCH_SWAY[2], POUCH_SWAY[3], POUCH_SWAY[4], POUCH_SWAY[5])
+var _pack_rest := Transform3D.IDENTITY  # the pack's place, unswung
+var _pack_pivot := Vector3.ZERO         # torso-local: where it hangs from (its straps' anchors)
+var _swinging: Array = []              # [node, rest Transform3D, pivot Vector3, on the pack]
+var _sway_on := DisplayServer.get_name() != "headless"
 
 
 
@@ -181,8 +200,10 @@ func _rebuild() -> void:
 		_set_gear(slot, inventory.slots[slot], &"torso", rest_transform(slot))
 	_fit_front_panel(carrier)
 	var pack: StringName = inventory.slots[&"backpack"]
-	var pack_depth := VoxelArt.size_m(VoxelArt.model_for(ItemDB.get_item(pack))).z if pack != &"" else 0.0
-	_set_gear(&"backpack", pack, &"torso", carrier_fit("back") * Transform3D(Basis.IDENTITY, Vector3(0, 0.3, 0.165 + pack_depth * 0.5)))
+	var pack_size := VoxelArt.size_m(VoxelArt.model_for(ItemDB.get_item(pack))) if pack != &"" else Vector3.ZERO
+	_pack_rest = carrier_fit("back") * Transform3D(Basis.IDENTITY, Vector3(0, 0.3, 0.165 + pack_size.z * 0.5))
+	_pack_pivot = carrier_fit("back") * Vector3(0, 0.3 + pack_size.y * 0.5, 0.165)
+	_set_gear(&"backpack", pack, &"torso", _pack_rest)
 	var held := inventory.hands
 	var held_size := WorldItem.visual_size(ItemDB.get_item(held)) if held != &"" else Vector3.ZERO
 	_set_gear(&"hands", held, &"torso", Transform3D(Basis.IDENTITY, Vector3(0, 0.15, -0.15 - held_size.z * 0.5)))
@@ -205,6 +226,7 @@ func _set_pouches() -> void:
 	if key == _pouch_key:
 		return
 	_pouch_key = key
+	_swinging.clear()
 	if _pouches:
 		_pouches.queue_free()
 		_pouches = null
@@ -214,17 +236,111 @@ func _set_pouches() -> void:
 	_pouches.name = "Pouches"
 	model.torso.add_child(_pouches)
 	var gear := Color(VoxelArt.spec(model.variant).gear).darkened(0.12)
+	var spots := pouch_spots()
 	for p: Dictionary in points:
 		var att := inventory.attachment(StringName(p.id))
 		if att.is_empty():
 			continue
 		var item := ItemDB.get_item(StringName(att.id))
-		var on_pack := inventory.point_slot(StringName(p.id)) == &"backpack"
 		var node := LauncherRig.make_model(item, render_layers) if item.type == "launcher" \
 			else pouch_node(item, gear, not att.get("held", []).is_empty(), render_layers)
-		# (A pack sits on the carrier's back, so its points take the back's fit.)
-		node.transform = carrier_fit("back" if on_pack else String(p.get("face", "front"))) * point_transform(p, WorldItem.visual_size(item))
+		node.transform = spots[p.id]
 		_pouches.add_child(node)
+		var h := WorldItem.visual_size(item).y
+		var top: Vector3 = (spots[p.id] as Transform3D) * Vector3(0, h * 0.5, 0)
+		_swinging.append([node, node.transform, top, inventory.point_slot(StringName(p.id)) == &"backpack"])
+
+
+## Where each attachment on the worn carrier and pack sits: point id -> torso-local transform.
+## Pouches on the plate pocket's front stay inside it (_panel_rows), ones past its edge lie on
+## the cummerbund's corner (cummerbund_spot), the rest go on their points as they are.
+func pouch_spots() -> Dictionary:
+	var points := inventory.attach_points()
+	var panel_x := _panel_rows(points)
+	var out := {}
+	for p: Dictionary in points:
+		var att := inventory.attachment(StringName(p.id))
+		if att.is_empty():
+			continue
+		var size := WorldItem.visual_size(ItemDB.get_item(StringName(att.id)))
+		var on_pack := inventory.point_slot(StringName(p.id)) == &"backpack"
+		if not on_pack and _on_cummerbund(p):
+			out[p.id] = cummerbund_spot(_carrier_tier(), model.body, p, size)
+			continue
+		var q := p
+		if panel_x.has(p.id):
+			q = p.duplicate()
+			q.at = [panel_x[p.id], p.at[1], p.at[2]]
+		# (A pack sits on the carrier's back, so its points take the back's fit.)
+		out[p.id] = carrier_fit("back" if on_pack else String(p.get("face", "front"))) * point_transform(q, size)
+	return out
+
+
+## Gear fit (queue 4): the pouches on the plate pocket's front, row by row (points within 5 cm
+## of each other's height), kept inside its edges (PANEL_HALF_M) and moved apart where wide
+## ones would overlap, each as near its own point as that allows (a row too wide for the
+## pocket overlaps). Point id -> its x.
+func _panel_rows(points: Array) -> Dictionary:
+	var rows: Array = []  # each: Array of [id, x, half-width, y]
+	for p: Dictionary in points:
+		var att := inventory.attachment(StringName(p.id))
+		if att.is_empty() or String(p.get("face", "front")) != "front" or String(p.get("type", "")) == "knife" \
+				or inventory.point_slot(StringName(p.id)) == &"backpack" or _on_cummerbund(p):
+			continue
+		var at: Array = p.at
+		var e := [p.id, float(at[0]), WorldItem.visual_size(ItemDB.get_item(StringName(att.id))).x * 0.5, float(at[1])]
+		var row: Array = []
+		for r: Array in rows:
+			if absf(float(r[0][3]) - float(e[3])) < 0.05:
+				row = r
+		if row.is_empty():
+			rows.append([e])
+		else:
+			row.append(e)
+	var out := {}
+	for row: Array in rows:
+		row.sort_custom(func(a: Array, b: Array) -> bool: return float(a[1]) < float(b[1]))
+		for i in 8:
+			for e: Array in row:
+				var hw := float(e[2])
+				e[1] = clampf(float(e[1]), -PANEL_HALF_M + hw, PANEL_HALF_M - hw) if hw < PANEL_HALF_M else 0.0
+			for j in row.size() - 1:
+				var a: Array = row[j]
+				var b: Array = row[j + 1]
+				var overlap := (float(a[1]) + float(a[2])) - (float(b[1]) - float(b[2])) + POUCH_GAP_M
+				if overlap > 0.0:
+					a[1] = float(a[1]) - overlap * 0.5
+					b[1] = float(b[1]) + overlap * 0.5
+		for e: Array in row:  # a row wider than the pocket overlaps rather than hangs off it
+			var hw := float(e[2])
+			out[e[0]] = clampf(float(e[1]), -PANEL_HALF_M + hw, PANEL_HALF_M - hw) if hw < PANEL_HALF_M else 0.0
+	return out
+
+
+## A front point past the plate pocket's edge on a medium or heavy carrier: its pouch goes on
+## the cummerbund's front corner (cummerbund_spot), not standing out past the panel.
+func _on_cummerbund(p: Dictionary) -> bool:
+	var at: Array = p.get("at", [0, 0, 0])
+	return _carrier != null and _carrier_tier() > 0 and String(p.get("face", "front")) == "front" \
+		and absf(float(at[0])) > PANEL_HALF_M and String(p.get("type", "")) != "knife"
+
+
+## Torso-local transform of an attachment of `size` on the front corner of a tier `tier`
+## carrier's cummerbund round body type `body`, on point `p`'s side and at its height: flat on
+## the corner's cut (VoxelArt.CUMMERBUND_BEVEL: from 1 - bevel of the way out across the front
+## to 1 - bevel of the way back down the side), facing out of it.
+static func cummerbund_spot(tier: int, body: String, p: Dictionary, size: Vector3) -> Transform3D:
+	var at: Array = p.at
+	var sx := signf(float(at[0]))
+	var y := float(at[1])
+	var c := VoxelArt.cummerbund_size(tier, body, y)
+	var k := 1.0 - VoxelArt.CUMMERBUND_BEVEL
+	var a := Vector2(sx * k * c.x, -c.y)
+	var b := Vector2(sx * c.x, -k * c.y)
+	var n := Vector2(sx * c.y, -c.x).normalized()  # out of the cut
+	var mid := (a + b) * 0.5 + n * size.z * 0.5
+	var basis := Basis(Vector3.UP, atan2(-n.x, -n.y))  # the pouch's front (-Z) along n
+	return Transform3D(basis, Vector3(mid.x, y, mid.y))
 
 
 ## The name tape: the soldier's surname (CharacterModel.name_tape) in dark capitals on the
@@ -258,13 +374,15 @@ func _set_name_tape(carrier: ItemData) -> void:
 	_tape.add_child(letters)
 
 
-## A worn pack's padded shoulder straps: from the top of the pack, over each shoulder outside
-## the carrier's pads, and down the front edges of the plate pocket, with a sternum strap
-## across under the ID panel, in front of the pouches. Rebuilt when the pack changes.
+## A worn pack's padded shoulder straps: from the top of the pack, over each shoulder along
+## the carrier's shoulder pad (VoxelArt.shoulder_pad_line) or, with no carrier, on the
+## shoulder itself (VoxelArt.shoulder_top), down the plate pocket's front edges (or the chest),
+## with a sternum strap across under the ID panel. Rebuilt when the pack or carrier changes.
 func _set_pack_straps(pack: StringName) -> void:
-	if pack == _straps_for:
+	var key := "%s|%s" % [pack, _carrier.id if _carrier else &""]
+	if key == _straps_for:
 		return
-	_straps_for = pack
+	_straps_for = key
 	if _straps:
 		_straps.queue_free()
 		_straps = null
@@ -274,13 +392,44 @@ func _set_pack_straps(pack: StringName) -> void:
 	_straps.name = "PackStraps"
 	model.torso.add_child(_straps)
 	var colour := Color(VoxelArt.spec(model.variant).gear).darkened(0.3)
+	var path := strap_path(model.body, _carrier != null, _plate_depth())
+	path.assign(path.map(func(v: Vector3) -> Vector3: return _on_panels(v) if absf(v.z) > 0.15 else v))
 	for s: float in [-1.0, 1.0]:
-		var path: Array[Vector3] = [Vector3(0.12, 0.5, 0.17), Vector3(0.13, 0.585, 0.06), Vector3(0.13, 0.595, -0.06),
-			Vector3(0.155, 0.5, -0.17), Vector3(0.155, 0.34, -0.16)]
-		path.assign(path.map(_on_panels))
 		for i in path.size() - 1:
-			_straps.add_child(_strap(path[i] * Vector3(s, 1, 1), path[i + 1] * Vector3(s, 1, 1), 0.045, 0.015, colour))
-	_straps.add_child(_strap(_on_panels(Vector3(-0.155, 0.355, -0.215)), _on_panels(Vector3(0.155, 0.355, -0.215)), 0.02, 0.008, colour))  # sternum strap
+			_straps.add_child(_strap(path[i] * Vector3(s, 1, 1), path[i + 1] * Vector3(s, 1, 1), STRAP_W, STRAP_T, colour))
+	var front := -(_plate_depth() + 0.03) - STRAP_T if _carrier else -VoxelArt.torso_reach(model.body, 0.355) - STRAP_T
+	_straps.add_child(_strap(_on_panels(Vector3(-0.12, 0.355, front)), _on_panels(Vector3(0.12, 0.355, front)), 0.02, 0.008, colour))  # sternum strap
+
+
+## The right shoulder strap's line, torso-local (mirror x for the left): from the pack's top,
+## up over the carrier's shoulder pad (`carrier`) or body type `body`'s shoulder, and down the
+## front to the sternum strap's height. Points on the carrier's back or front (|z| > 0.15) are
+## moved with its panels by the caller.
+static func strap_path(body: String, carrier: bool, plate_depth: float) -> Array[Vector3]:
+	var x := VoxelArt.SHOULDER_PAD_X * 0.01
+	var path: Array[Vector3] = [Vector3(x, 0.5, 0.17)]  # into the pack's top
+	if carrier:
+		var centre := Vector3(x, (VoxelArt.CARRIER_MOUNT_CM + 30.0) * 0.01, 0)
+		# Up the pad's back and over its top; its front slope lies behind the plate pocket, so from
+		# the top the strap drapes over the pocket's top edge and down its face.
+		var line := VoxelArt.shoulder_pad_line(body == VoxelArt.FEMALE)
+		for v: Vector3 in line.slice(0, 4):
+			var out := v - centre
+			out.x = 0.0
+			path.append(v + out.normalized() * (STRAP_LIFT + STRAP_T * 0.5))
+		var face := -(plate_depth + 0.03) - STRAP_T
+		path.append(Vector3(PANEL_HALF_M - STRAP_W * 0.5, 0.17 + 0.33 + STRAP_T, face + STRAP_T))  # over the pocket's top
+		path.append(Vector3(PANEL_HALF_M - STRAP_W * 0.5, 0.34, face))
+	else:
+		var top := VoxelArt.shoulder_top(body, x) + STRAP_LIFT
+		var back := VoxelArt.torso_reach(body, top - 0.08, true) + STRAP_T
+		var chest := VoxelArt.torso_reach(body, top - 0.08) + STRAP_T
+		path.append(Vector3(x, top - 0.08, back))
+		path.append(Vector3(x, top, 0.04))
+		path.append(Vector3(x, top, -0.04))
+		path.append(Vector3(x, top - 0.08, -chest))
+		path.append(Vector3(x + 0.03, 0.34, -VoxelArt.torso_reach(body, 0.34) - STRAP_T))
+	return path
 
 
 ## A strap of `width` and `thick` from `a` to `b` (torso-local), lying flat on the body: its
@@ -376,6 +525,42 @@ func _process(delta: float) -> void:
 	if want != _held_key or _held_dirty:
 		_put_in_hands(want)
 	_ease_held(delta)
+
+
+## Gear secondary motion, on physics ticks: the body moves on them, so a render frame between
+## two would read as standing still and shake the springs.
+func _physics_process(delta: float) -> void:
+	if _sway_on:
+		_sway(delta)
+
+
+## The springs follow the torso, the pack swings about its anchors (and what's on it with it),
+## every other pouch flaps about its own top edge.
+func _sway(delta: float) -> void:
+	var pack: Node3D = _gear.get(&"backpack", [&"", null])[1]
+	if pack == null and _swinging.is_empty():
+		return
+	if not model.is_visible_in_tree() or model.ragdolled():
+		_pack_sway.reset()
+		_pouch_sway.reset()
+		return
+	var torso := model.torso.global_transform
+	_pack_sway.follow(torso, delta)
+	_pouch_sway.follow(torso, delta)
+	var swing := _about(_pack_pivot, _pack_sway.turn())
+	if pack:
+		pack.transform = swing * _pack_rest
+	var flap := _pouch_sway.turn()
+	for e: Array in _swinging:
+		var node: Node3D = e[0]
+		if not is_instance_valid(node):
+			continue
+		node.transform = (swing if e[3] else _about(e[2], flap)) * (e[1] as Transform3D)
+
+
+## A turn `b` about torso-local point `pivot`.
+static func _about(pivot: Vector3, b: Basis) -> Transform3D:
+	return Transform3D(Basis.IDENTITY, pivot) * Transform3D(b, Vector3.ZERO) * Transform3D(Basis.IDENTITY, -pivot)
 
 
 ## True while a weapon is on its way from its sling or holster to the hands.
