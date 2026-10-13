@@ -282,9 +282,11 @@ func _test_hostile_hvt() -> void:
 	# Carried, and put down.
 	player._server_carry_body.rpc_id(1, hvt.get_path())
 	await _frames(3)
+	_end_carry_phase(player)  # up on the shoulder (the host counts it down in the player's physics, off here)
 	check(player.carrying == hvt and hvt.carried_by == player, "a cuffed HVT can be carried")
 	player._server_release_body.rpc_id(1)
 	await _frames(3)
+	_end_carry_phase(player)  # lowered off the shoulder
 	check(player.carrying == null and hvt.carried_by == null and hvt.vitals.is_up(), "and put down again, still conscious")
 	# Led.
 	InteractionMenu.perform(player, _action(player, hvt, &"lead"))
@@ -840,3 +842,11 @@ func _frames(n: int) -> void:
 
 func _seconds(s: float) -> void:
 	await get_tree().create_timer(s).timeout
+
+
+## The pick-up or put-down `s` is in is over (Soldier.CARRY_LIFT_S, CARRY_LOWER_S: the host
+## counts them down in the carrier's physics step).
+func _end_carry_phase(s: Soldier) -> void:
+	s._carry_phase_left = 0.0
+	s.carry_busy_until = 0.0
+	s._update_carried(0.0)
