@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Checks tools/run_tests.sh against a fake engine (no Godot needed): a pass passes; an explicit
 # failure, a script error with exit 0, a missing summary, a hang, a failed import and an import
-# that reports a script or parse error but exits 0 each fail.
+# that reports a script or parse error but exits 0 each fail; a stopped run is a FAIL with its
+# logs; CI keeps and uploads every log. And tools/make_build.sh against a fake exporter: every
+# build gets its own numbered folder and kept export log, and a failed export fails it.
 #   tools/test_runner_check.sh      (prints each case; exits non-zero if the runner misjudges one)
 set -u
 cd "$(dirname "$0")/.."
@@ -120,5 +122,80 @@ else
 	echo "BAD  $wf: the suite step must set CONTRACTOR_TEST_LOGS and an 'if: always()' upload-artifact step keep that path"
 	bad=1
 fi
+# tools/make_build.sh, in a copy of the tools outside git with a fake exporter: every build gets
+# its own numbered folder (two builds never overwrite each other), a line in index.txt and its
+# exporter output kept as B<number>-<time>-export.log; a failed export fails loudly.
+proj="$dir/proj"
+mkdir -p "$proj/tools"
+cp tools/make_build.sh tools/run_log.sh "$proj/tools/"
+touch "$proj/project.godot" "$dir/fake-template.exe"
+exporter="$dir/fake-exporter.sh"
+cat >"$exporter" <<'FAKE'
+#!/usr/bin/env bash
+# Fake Godot exporter for tools/test_runner_check.sh: behaves as FAKE_MODE says.
+echo "fake exporter: $*"
+while [ $# -gt 0 ]; do
+	case "$1" in
+		--export-pack|--export-release)
+			kind="$1"; out="$3"
+			[ "$FAKE_MODE" = pack_fail ] && [ "$kind" = --export-pack ] && { echo "ERROR: pack export broke"; exit 1; }
+			[ "$FAKE_MODE" = exe_fail ] && [ "$kind" = --export-release ] && { echo "ERROR: exe export broke"; exit 1; }
+			[ "$FAKE_MODE" = script_error ] && echo "SCRIPT ERROR: Parse Error: injected"
+			echo "built by $kind" >"$out"
+			exit 0 ;;
+	esac
+	shift
+done
+FAKE
+chmod +x "$exporter"
+blogs="$dir/kept-build"
+build() {  # mode, template, label
+	FAKE_MODE="$1" GODOT="$exporter" CONTRACTOR_TEMPLATE="$2" CONTRACTOR_TEST_LOGS="$blogs" "$proj/tools/make_build.sh" "$3" "check notes" >"$dir/build-$3.out" 2>&1
+}
+build ok "$dir/no-template.exe" same && build ok "$dir/no-template.exe" same
+got=$?
+b1="$(ls -d "$proj"/builds/contractor-*-B0001-same-*/ 2>/dev/null | head -1)"
+b2="$(ls -d "$proj"/builds/contractor-*-B0002-same-*/ 2>/dev/null | head -1)"
+if [ "$got" -eq 0 ] && [ -n "$b1" ] && [ -n "$b2" ] && [ "$b1" != "$b2" ] && [ "$(tail -n1 "$dir/build-same.out")/" = "builds/$(basename "$b2")/" ] \
+		&& grep -q "built by --export-pack" "$b1/contractor.pck" && [ -f "$b1/play.bat" ] && [ -f "$b2/play.bat" ] \
+		&& grep -q "build B0001" "$b1/BUILD.txt" && grep -q "build B0002" "$b2/BUILD.txt" && grep -q "check notes" "$b2/BUILD.txt" \
+		&& grep -q 'call "%~dp0play.bat" --dev %\*' "$b1/Contractor (dev tools).bat" && [ ! -f "$b1/Contractor.exe" ] \
+		&& [ "$(grep -c "^B000[12] .* PASS .* build same -> builds/contractor-" "$blogs/index.txt")" = 2 ] \
+		&& grep -q "fake exporter: .*--export-pack Windows Desktop" "$blogs"/*/B0002-*-export.log && grep -q "^result: PASS" "$blogs"/*/B0001-*-export.log; then
+	echo "ok   make_build twice -> B0001 and B0002 in their own folders, logs and index lines kept"
+else
+	echo "BAD  make_build twice: exited $got; expected two numbered builds (pack, play.bat, BUILD.txt, dev tools .bat calling play.bat --dev), two PASS index lines and their export logs"
+	sed 's/^/     /' "$dir/build-same.out"
+	bad=1
+fi
+build ok "$dir/fake-template.exe" exe
+got=$?
+b="$(ls -d "$proj"/builds/contractor-*-B0003-exe-*/ 2>/dev/null | head -1)"
+if [ "$got" -eq 0 ] && [ -n "$b" ] && grep -q "built by --export-release" "$b/Contractor.exe" && [ -f "$b/play.bat" ] \
+		&& grep -q 'Contractor.exe" --dev' "$b/Contractor (dev tools).bat" && grep -q "^== Contractor.exe: exit 0" "$blogs"/*/B0003-*-export.log; then
+	echo "ok   make_build with the release template -> Contractor.exe, its dev tools .bat, and the exe export in the log"
+else
+	echo "BAD  make_build with the release template: exited $got"
+	sed 's/^/     /' "$dir/build-exe.out"
+	bad=1
+fi
+n=4
+for case in pack_fail:"ERROR: pack export broke" exe_fail:"ERROR: exe export broke" script_error:"SCRIPT ERROR"; do
+	mode="${case%%:*}"; text="${case#*:}"
+	build "$mode" "$dir/fake-template.exe" "$mode"
+	got=$?
+	id="$(printf 'B%04d' "$n")"; n=$((n + 1))
+	b="$(ls -d "$proj"/builds/contractor-*-"$id-$mode"-*/ 2>/dev/null | head -1)"
+	if [ "$got" -ne 0 ] && grep -q "BUILD $id FAILED" "$dir/build-$mode.out" && grep -q "^$id .* FAIL .* build $mode " "$blogs/index.txt" \
+			&& grep -qF "$text" "$blogs"/*/"$id"-*-export.log && grep -q "^result: FAIL" "$blogs"/*/"$id"-*-export.log && [ -f "$b/FAILED.txt" ]; then
+		echo "ok   make_build $mode -> fails loudly, FAIL in index.txt, the exporter's error kept in $id's log"
+	else
+		echo "BAD  make_build $mode: exited $got; expected a loud failure, a FAIL index line and the exporter's \"$text\" in the log"
+		sed 's/^/     /' "$dir/build-$mode.out"
+		bad=1
+	fi
+done
+b="$(ls -d "$proj"/builds/contractor-*-B0005-exe_fail-*/ 2>/dev/null | head -1)"
+[ -n "$b" ] && [ -f "$b/play.bat" ] || { echo "BAD  make_build exe_fail: play.bat should still be made when only the exe fails"; bad=1; }
 [ "$bad" -eq 0 ] && echo "RUNNER CHECK PASSED" || echo "RUNNER CHECK FAILED"
 exit $bad
