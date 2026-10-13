@@ -935,6 +935,8 @@ const TOWN_LOOT := {
 	"house_store": [["rounds_556", 30]], "office": [["electronics_salvage", 1]], "yard": [["smoke_grenade", 1]],
 }
 const TOWN_LOOT_MAX := 10
+## A town's weapons cache: a stack of crates this size (m).
+const TOWN_CACHE := Vector3(1.4, 1.0, 0.9)
 ## Every TOWN_CIVILIAN_EVERY'th building has someone living or working there, walking between
 ## their front step, the street and the crossroads.
 const TOWN_CIVILIAN_EVERY := 3
@@ -947,7 +949,8 @@ const TOWN_MIX := {"house": 6.0, "shop": 2.5, "warehouse": 1.0, "clinic": 0.6, "
 ## ({"objective", "cache", "intel"}: Array of Vector3), "garrison" (Array of Vector3), "loot"
 ## (ZoneModules.LOOT entries: {"uid", "id", "count", "pos"}), "hvt" and "hostage" (Vector3: the
 ## middle of the room an HVT lives in, an office or a living room, and of the room a hostage is
-## held in, the police cells or a store room), "civilians" ({"pos", "routine"},
+## held in, the police cells or a bedroom), "cache" ([lo, hi] Vector3s: a weapons cache, crates
+## stacked in the police armoury or a store room), "civilians" ({"pos", "routine"},
 ## as contracts.json module "civilians", in arrays), "style"}.
 static func town(seed: int, style := "") -> Dictionary:
 	var rng := RandomNumberGenerator.new()
@@ -1033,10 +1036,14 @@ static func town(seed: int, style := "") -> Dictionary:
 			points[fallback].append(Vector3(0, 0, 0))
 	garrison.append(Vector3(-CROSS_W, 0.1, 0))
 	garrison.append(Vector3(CROSS_W, 0.1, 0))
+	# The weapons cache: crates in the middle of the armoury or a store room (a raid's target).
+	var at := _town_room(buildings, ["armoury", "storeroom"], Vector3(0, 0.1, STREET_W * 0.5 + SETBACK + 3.0)) - Vector3(0, 0.1, 0)
+	var cache: Array = [at - Vector3(TOWN_CACHE.x * 0.5, 0, TOWN_CACHE.z * 0.5), at + Vector3(TOWN_CACHE.x * 0.5, TOWN_CACHE.y, TOWN_CACHE.z * 0.5)]
+	boxes.append([cache[0], cache[1], VoxelWorld.Mat.WOOD])
 	return {"boxes": boxes, "buildings": buildings, "half": half, "points": points, "garrison": garrison,
-		"loot": loot, "civilians": civilians, "style": style,
+		"loot": loot, "civilians": civilians, "style": style, "cache": cache,
 		"hvt": _town_room(buildings, ["office", "living"], Vector3(-CROSS_W, 0.1, 0)),
-		"hostage": _town_room(buildings, ["cells", "storeroom", "house_store", "store"], Vector3(CROSS_W, 0.1, 0))}
+		"hostage": _town_room(buildings, ["cells", "bedroom"], Vector3(CROSS_W, 0.1, 0))}
 
 
 ## The middle of the first room (in town metres, on the floor) whose role is the earliest of

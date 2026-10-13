@@ -50,10 +50,10 @@ suit it. Captain's side; see `docs/build_plan.md` ("Procedural buildings") for w
    - Hot zones: one of `ZoneDef.HOT_VILLAGES` is a town (`HOT_TOWNS`), seed from the zone's.
      Patrols leave towns alone, like villages. Radio callsign "Town 1".
    - Contract zones: a "town" in a zone's `types` (Harbour yard has one). HVT capture, hostage
-     rescue and intel grab can play in a town; its sites (`ZoneModules.town_sites`) come from
-     its buildings: the whole town as the area, its intel spots, an HVT in an office or living
-     room, a hostage in the police cells or a store room. No weapons-cache site yet (raids
-     skip towns), since cache counting is on cg's audit list.
+     rescue, intel grab and raids can play in a town; its sites (`ZoneModules.town_sites`)
+     come from its buildings: the whole town as the area, its intel spots, an HVT in an office
+     or living room, a hostage in the police cells or a bedroom (upstairs too), a weapons cache
+     of crates in the police armoury or a store room.
    - Its people: a civilian for every third building, walking front step, street, crossroads
      (`BuildingGen.TOWN_CIVILIAN_EVERY`); loot from `BuildingGen.TOWN_LOOT` by spot table.
    - Urban hot zones (built): `ZoneDef.generate_hot(seed, size, urban = true)`, zone def

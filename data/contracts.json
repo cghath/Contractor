@@ -4,7 +4,7 @@
 	"_mission_types": "A type names the module types it can play in (\"modules\"); a contract picks one of the zone's modules of those types as its target, and each objective template names a site of that module (\"site\": one name, or a list to pick from). An optional objective whose site the module lacks is left out. In \"text\", {name} is the site's (or the person's) name and {module} the module's. \"time_limit_min\" (Proposed: about twice the expected completion time, forgiving) fails the required objectives still open when it runs out.",
 	"mission_types": [
 		{"type": "raid", "name": "Raid", "brief": "Hostiles keep a weapons cache or an AA gun at a site in the zone. Destroy it: grenades break crates, a steel gun takes a placed breaching charge (base shop).",
-		 "modules": ["outpost", "compound", "village", "checkpoint", "hq", "qrf_base", "comms"], "base_pay": 46000, "days": 1, "enemy_count": [4, 11], "enemy_quality": [0.3, 0.7],
+		 "modules": ["outpost", "compound", "village", "town", "checkpoint", "hq", "qrf_base", "comms"], "base_pay": 46000, "days": 1, "enemy_count": [4, 11], "enemy_quality": [0.3, 0.7],
 		 "threat_pool": ["mg_nest", "aa", "armor", "ied", "qrf"],
 		 "objectives": [
 			{"kind": "destroy_cache", "site": ["aa", "cache"], "text": "Destroy the {name}"},

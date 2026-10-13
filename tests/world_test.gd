@@ -588,12 +588,12 @@ func _test_hot_layout() -> void:
 		var htype := String(harbour[0].type)
 		var hhalf: Vector2 = ZoneModules.HALF[htype]
 		var sites_ok := true
-		for id: String in ["area", "intel", "docs", "hvt", "hvt_phone", "hostage"]:
+		for id: String in ["area", "intel", "docs", "hvt", "hvt_phone", "hostage", "cache"]:
 			var site := MissionRegistry.site(htype, id)
 			sites_ok = sites_ok and not site.is_empty() and (not site.has("pos") or in_town.call(site.pos))
 		var rng := RandomNumberGenerator.new()
 		var picked := []
-		for type_id: String in ["hvt_capture", "hostage_rescue", "intel_grab"]:
+		for type_id: String in ["raid", "hvt_capture", "hostage_rescue", "intel_grab"]:
 			for k in 40:
 				rng.seed = k
 				var target := ContractGen.mission_target(rng, MissionRegistry.type_def(type_id), "harbour_yard")
@@ -603,8 +603,9 @@ func _test_hot_layout() -> void:
 					break
 		var hvt_at: Array = MissionRegistry.site(htype, "hvt").pos
 		var hostage_at: Array = MissionRegistry.site(htype, "hostage").pos
-		check(sites_ok and picked.size() == 3 and hvt_at != hostage_at,
-			"its contract sites come from its buildings (HVT at %s, hostage at %s), and %s can play there" % [hvt_at, hostage_at, picked])
+		var crates := int(MissionRegistry.site(htype, "cache").get("voxels", 0))
+		check(sites_ok and picked.size() == 4 and hvt_at != hostage_at and crates >= 1000,
+			"its contract sites come from its buildings (HVT at %s, hostage at %s, a cache of %d voxels), and %s can play there" % [hvt_at, hostage_at, crates, picked])
 	# Urban hot zones: towns packed round the HQ, a road to each, patrols in their streets.
 	for seed in [6607, 4409, 77]:
 		var city := ZoneDef.generate_hot(seed, ZoneDef.HOT_SIZE_M, true)

@@ -26,8 +26,10 @@ picking up next, we'll read it and steer around it.
   - `scripts/campaign/radio_chatter.gd`: a "Town" callsign.
   - `data/contracts.json`: a "town" module entry; town in hvt_capture, hostage_rescue and
     intel_grab; Harbour yard holds a town; the new zone `city_hot` ("Old Quarter").
-  - Raids skip towns: a town has no weapons-cache site yet, since cache counting ("building
-    caches") is on your list. Tell us when it's safe to add one.
+  - Raids play in towns too (on `world/building-storeys`): a town's weapons cache is a crate
+    stack in the police armoury or a store room. That's the objective cache, not the AI's
+    building-scan cache (A3-04, yours): `scripts/ai/buildings.gd` is untouched, which is why
+    upper floors aren't garrisoned yet.
 - **`scripts/world/voxel_world.gd`** (phase 3, not on dev yet): base structures are stamped at
   most 4 ms a frame instead of all in one frame (a town is 1,100+ boxes).
 - **I touched your `tests/aav_test.gd`** (30842cc): "the gunner fires the M2" waited for three

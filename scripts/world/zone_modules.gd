@@ -119,8 +119,9 @@ static func civilians(type: String) -> Array:
 
 
 ## A generated town's contract sites (contracts.json "modules" sites, made from its buildings):
-## "area" (the whole town), "intel" and "docs" (its intel spots), "hvt" (+ "hvt_phone") and
-## "hostage" (BuildingGen.town). {} for other types.
+## "area" (the whole town), "intel" and "docs" (its intel spots), "hvt" (+ "hvt_phone"),
+## "hostage" and "cache" (the weapons cache, its voxels counted) (BuildingGen.town). {} for other
+## types.
 static func town_sites(type: String) -> Dictionary:
 	if not type.begins_with(TOWN) or not has_type(type):
 		return {}
@@ -136,6 +137,7 @@ static func town_sites(type: String) -> Dictionary:
 		"hvt": {"pos": arr.call(hvt), "hvt": "hvt_town", "person": {"side": "hostile", "intel": ["intel_phone"]}},
 		"hvt_phone": {"pos": arr.call(hvt), "items": ["intel_phone"], "of_hvt": "hvt"},
 		"hostage": {"pos": arr.call(t.hostage), "hvt": "hostage_town", "person": {"side": "friendly"}},
+		"cache": {"box": [arr.call(t.cache[0]), arr.call(t.cache[1])], "cache": "cache_town", "name": "weapons cache", "voxels": "auto"},
 	}
 
 
@@ -169,7 +171,7 @@ static func _town(type: String) -> bool:
 	for bx: Array in t.boxes:
 		top = maxf(top, (bx[1] as Vector3).y + 0.5)
 	TOP[type] = top
-	_towns[type] = {"civilians": t.civilians, "half": t.half, "points": t.points, "hvt": t.hvt, "hostage": t.hostage}
+	_towns[type] = {"civilians": t.civilians, "half": t.half, "points": t.points, "hvt": t.hvt, "hostage": t.hostage, "cache": t.cache}
 	return true
 
 
