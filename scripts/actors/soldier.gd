@@ -83,6 +83,10 @@ var _reload_n := 0  # host: counts reloads and deaths; a reload finishes only if
 ## stops the one in progress.
 var loading_mags := false
 var _load_run := 0
+## Host: when this body last fired (Soldier._now()), and whether through a suppressor (Spotting:
+## a muzzle flash gives a shooter away).
+var last_shot_at := -1000.0
+var last_shot_suppressed := false
 
 ## "friendly" (players and their squad) or "hostile". Set before the body enters the tree.
 @export var faction := &"friendly"
@@ -585,6 +589,8 @@ func _server_fire(origin: Vector3, direction: Vector3, slot: StringName) -> void
 		origin = camera.global_position  # don't trust a far-off muzzle
 	var result := Ballistics.fire(self, origin, direction.normalized(), weapon)
 	var suppressed := bool(weapon.stats.get("suppressed", false))
+	last_shot_at = now
+	last_shot_suppressed = suppressed
 	var round_end: Variant = result.get("position")
 	Sfx.server_shot(origin, round_end if round_end is Vector3 else origin + direction.normalized() * 400.0,
 		"suppressed" if suppressed else ("pistol" if weapon.slot == &"sidearm" else "rifle"))  # every peer hears it (Sfx)

@@ -68,6 +68,8 @@ const THINK_S := 0.5
 const SCAN_S := 0.3
 const CONTACT_MEMORY_S := 8.0
 const INVESTIGATE_MEMORY_S := 25.0
+## A partly-spotted enemy (Spotting.SUSPECT) is looked for this long after last glimpsed.
+const SUSPECT_S := 8.0
 const SIGHT_RANGE := 60.0
 const SUPPRESSED := 0.5
 const PINNED := 0.85
@@ -303,6 +305,12 @@ var _briefing_was_open := false
 var _cover_cd := 0.0
 var _grenade_cd := GRENADE_COOLDOWN_S * 0.4
 var _last_contact := -1000.0
+## Spotting (Spotting): awareness of each enemy in sight, by instance id, 0..1; at 1 they're a
+## target. The best partly-spotted one is suspected: looked at, and a hostile goes to search.
+var _aware := {}
+var _suspect_pos := Vector3.ZERO
+var _suspect_at := -1000.0
+var _preset := ""
 var _no_los_s := 0.0
 var _burst_left := 0
 var _pause_until := 0.0
@@ -633,7 +641,7 @@ func _choose_intent() -> void:
 			set_escort(null)
 	else:
 		scores[Intent.PATROL] = 0.3
-		if Soldier._now() - _last_contact < INVESTIGATE_MEMORY_S:
+		if Soldier._now() - _last_contact < INVESTIGATE_MEMORY_S or suspecting():
 			scores[Intent.INVESTIGATE] = 0.55
 	# Casualty care, both sides: a living casualty comes before almost anything; a fallen
 	# friendly's body is carried only out of contact.
@@ -707,7 +715,7 @@ func _act() -> void:
 		Intent.PATROL:
 			_patrol()
 		Intent.INVESTIGATE:
-			_go(body.threat_pos, false)
+			_go(_suspect_pos if suspecting() and _suspect_at > _last_contact else body.threat_pos, false)
 		Intent.FIGHT:
 			_fight_from_context()
 		Intent.RELOAD:
@@ -1959,6 +1967,8 @@ func _find_target() -> Soldier:
 	var check: Soldier = null
 	var check_dist := DEAD_CHECK_M
 	var clearing := _clearing()
+	var seen := {}
+	var suspect_a := 0.0
 	for n in get_tree().get_nodes_in_group(&"combatants"):
 		var s := n as Soldier
 		if s == null or s.faction == body.faction or s.vitals.is_dead() or s.is_queued_for_deletion():
@@ -1973,8 +1983,16 @@ func _find_target() -> Soldier:
 				check_dist = d
 			continue
 		if d < best_dist and can_see(s):
-			best = s
-			best_dist = d
+			seen[s.get_instance_id()] = true
+			var a := _build_awareness(s)
+			if a >= 1.0:
+				best = s
+				best_dist = d
+			elif a >= Spotting.SUSPECT and a > suspect_a:
+				suspect_a = a
+				_suspect_pos = s.global_position
+				_suspect_at = Soldier._now()
+	_fade_awareness(seen)
 	# A dead-check, once started, goes on until the body is dead or out of range, even after
 	# the advance ends; only new ones need clearing.
 	if check != null:
@@ -1982,6 +2000,37 @@ func _find_target() -> Soldier:
 	elif _dead_check != null and not _dead_check_valid(_dead_check):
 		_dead_check = null
 	return best if best != null else _dead_check
+
+
+## One scan's worth of spotting `s` (in sight): awareness rises by SCAN_S over the time
+## Spotting gives. Returns the new awareness.
+func _build_awareness(s: Soldier) -> float:
+	var id := s.get_instance_id()
+	var a: float = _aware.get(id, 0.0)
+	if a < 1.0:
+		if _preset == "":
+			_preset = Spotting.preset_of(body)
+		var t := Spotting.spot_seconds(body, s, _preset, combat, body.suppression >= SUPPRESSED, Soldier._now())
+		a = 1.0 if t <= SCAN_S * 0.5 else minf(a + SCAN_S / t, 1.0)
+		_aware[id] = a
+	return a
+
+
+## Awareness of those out of sight this scan fades over Spotting.FADE_S.
+func _fade_awareness(seen: Dictionary) -> void:
+	for id: int in _aware.keys():
+		if seen.has(id):
+			continue
+		var a: float = _aware[id] - SCAN_S / Spotting.FADE_S
+		if a <= 0.0:
+			_aware.erase(id)
+		else:
+			_aware[id] = a
+
+
+## Someone was partly spotted in the last SUSPECT_S.
+func suspecting() -> bool:
+	return Soldier._now() - _suspect_at < SUSPECT_S
 
 
 ## Still worth dead-checking: unconscious (not dead) and within DEAD_CHECK_M. Kept while it
@@ -2226,6 +2275,8 @@ func _steer(delta: float) -> void:
 		body.head.rotation.x = lerpf(body.head.rotation.x, 0.0, 0.1)
 	elif foe == null and dir == Vector3.ZERO and in_contact() and not (intent == Intent.CASUALTY and care == Care.TREAT):
 		_aim_at(body.threat_pos + Vector3.UP * 1.2)
+	elif foe == null and dir == Vector3.ZERO and suspecting() and intent != Intent.CASUALTY:
+		_aim_at(_suspect_pos + Vector3.UP * 1.0)  # something there: look (Spotting)
 
 
 ## Safe units only run to catch up from far behind; Stealth units never sprint.

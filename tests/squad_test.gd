@@ -37,6 +37,7 @@ func _ready() -> void:
 	await _test_buddy_carries_buddy()
 	await _test_contact()
 	_test_flash_stuns()
+	_test_spotting()
 	await _test_dead_leave_squad()
 	GameState.delete_save()
 	print("SQUAD TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
@@ -274,6 +275,48 @@ func _test_dead_leave_squad() -> void:
 
 func _squad() -> Array:
 	return level.ai.get_children().filter(func(s: Node) -> bool: return s.faction == &"friendly" and not s.is_queued_for_deletion())
+
+
+## Captain (P0164 queue 17, part 1): spotting takes time, more for the far, the hidden and
+## the unseen; a muzzle flash gives a shooter away. Staged in one frame with two squadmates
+## (Spotting doesn't care whose side they're on).
+func _test_spotting() -> void:
+	print("Spotting: awareness builds over time")
+	var alpha := _ai("Alpha")
+	var bravo := _ai("Bravo") if _ai("Bravo") else _ai("Charlie")
+	var saved := [alpha.global_transform, bravo.global_transform]
+	var now := Soldier._now()
+	alpha.global_transform = Transform3D(Basis.IDENTITY, Vector3(0, 0.1, 30))  # faces -z
+	bravo.velocity = Vector3.ZERO
+	bravo.last_shot_at = -1000.0
+	_place(bravo, Vector3(0, 0.1, 10))
+	var near := Spotting.spot_seconds(alpha, bravo, "plain", 0.6, false, now)
+	_place(bravo, Vector3(0, 0.1, -50))
+	var far := Spotting.spot_seconds(alpha, bravo, "plain", 0.6, false, now)
+	check(near > 0.0 and far > near * 2.0, "farther takes longer: 20 m %.1f s, 80 m %.1f s" % [near, far])
+	check(Spotting.spot_seconds(alpha, bravo, "plain", 0.6, true, now) > far * 1.5, "a suppressed observer is slower")
+	check(Spotting.spot_seconds(alpha, bravo, "plain", 0.1, false, now) > far, "and an unskilled one")
+	bravo.last_shot_at = now
+	check(Spotting.spot_seconds(alpha, bravo, "plain", 0.6, false, now) < far * 0.3, "a muzzle flash gives a shooter away")
+	bravo.last_shot_suppressed = true
+	check(Spotting.spot_seconds(alpha, bravo, "plain", 0.6, false, now) > far * 0.3, "less so through a suppressor")
+	bravo.last_shot_at = -1000.0
+	bravo.last_shot_suppressed = false
+	alpha.global_transform = Transform3D(Basis.IDENTITY.rotated(Vector3.UP, PI), alpha.global_position)  # faces away
+	check(Spotting.spot_seconds(alpha, bravo, "plain", 0.6, false, now) > far * 2.0, "someone outside the view cone is much slower to spot")
+	check(Spotting.camo("woodland", "temperate") > Spotting.camo("woodland", "desert_wadi") and Spotting.camo("desert", "desert_wadi") > Spotting.camo("desert", "temperate"),
+		"camo that matches the terrain hides better")
+	# Through SquadAI: no instant target, a few scans first.
+	alpha.global_transform = Transform3D(Basis.IDENTITY, Vector3(0, 0.1, 30))
+	var ai := SquadAI.of(alpha)
+	ai._aware.clear()
+	var scans := 0
+	while ai._build_awareness(bravo) < 1.0 and scans < 200:
+		scans += 1
+	check(scans >= 2 and scans <= ceili(far / SquadAI.SCAN_S) + 1, "awareness builds over %d scans (%.1f s at 80 m)" % [scans + 1, (scans + 1) * SquadAI.SCAN_S])
+	ai._aware.clear()
+	alpha.global_transform = saved[0]
+	bravo.global_transform = saved[1]
 
 
 func _ai(callsign: String) -> Soldier:

@@ -772,6 +772,8 @@ never comes back without an IV, and bleeds don't clot on their own.
 Being built now, not in test builds yet:
 
 - Backpack swap and roll-up.
+- AI spotting: awareness builds over time (distance, stance, movement, camo against the terrain, muzzle flash, the observer suppressed or looking elsewhere, skill); a half-spotted enemy is looked at, and hostiles go to search.
+- AI carry: a casualty still bleeding is held for the medic, not carried; ordered to move while carrying, the AI lays them down in cover there.
 - Radio on the front-left or front-right carrier spots.
 - Gear fit fixes.
 - Gear movement: bags and armour sway with the body.
