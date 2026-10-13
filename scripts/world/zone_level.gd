@@ -226,6 +226,10 @@ func _build_environment() -> void:
 	if DisplayServer.get_name() != "headless":
 		terrain.build_visuals()
 		scatter.build_visuals()
+		var roads := ZoneRoads.new()
+		roads.name = "Roads"
+		add_child(roads)
+		roads.build(terrain, def)
 		var at := insertion_points()[0]
 		terrain.build_near(at, 16)
 		scatter.build_near(at, 4)
