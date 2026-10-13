@@ -39,6 +39,12 @@ const MAX_LOOT_ENTRIES := 20
 ## Height of an action point above a body's origin: standing, and lying down.
 const STANDING_POINT_Y := 1.3
 const DOWNED_POINT_Y := 0.3
+## Most entries one ring shows: the most that fit around RING_RADIUS_PX at ENTRY_SIZE without
+## two overlapping. Past it the last plain entries go into the MORE submenu (Captain, P0164
+## queue 8: declutter).
+const RING_MAX := 6
+## The submenu rarely used entries share (an entry's "group"; see grouped).
+const MORE := "More"
 
 ## Body interaction points (ACE3's medical rig; Captain, 2026-10-11). A body you can treat
 ## (a downed or standing squadmate, or yourself) gets a point per region, offering that
@@ -91,6 +97,11 @@ const INTERACTABLES := &"interactables"
 ##   carry their own request: see treatments).
 ## - people: a people action (PeopleLayer.request: "cuff", "lead", "stop", "cover", "search")
 ##   on the target, instead of a Soldier request; its conditions are Person.MENU_NEEDS.
+## - group: rarely used, so the ring shows it in that submenu (MORE) once two or more share
+##   it (see grouped).
+## Menu order is what you most likely want there (Captain, P0164 queue 8): on a body you're
+## moving, letting go; on a casualty, treat, carry and drag; on the dead, loot; on yourself,
+## letting go of who you carry, then your wounds.
 const ACTIONS := {
 	ITEM: [
 		{"id": &"pick_up", "label": "Pick up", "request": &"_server_interact", "with": &"target"},
@@ -98,18 +109,18 @@ const ACTIONS := {
 	DOWNED: [
 		{"id": &"put_down", "label": "Put down", "needs": &"moving_body", "request": &"_server_release_body", "with": &"none"},
 		{"id": &"treat", "label": "Treat", "needs": &"treatable", "submenu": &"treatments"},
-		{"id": &"carry", "label": "Carry", "needs": &"can_move_body", "request": &"_server_carry_body", "with": &"target"},
-		{"id": &"drag", "label": "Drag", "needs": &"can_move_body", "request": &"_server_drag_body", "with": &"target"},
-		{"id": &"check_condition", "label": "Check condition", "show": &"condition"},
+		{"id": &"carry", "label": "Carry", "needs": &"can_carry", "request": &"_server_carry_body", "with": &"target"},
+		{"id": &"drag", "label": "Drag", "needs": &"can_drag", "request": &"_server_drag_body", "with": &"target"},
 		{"id": &"cuff", "label": "Zip-cuff", "needs": &"cuffable", "people": &"cuff"},
-		{"id": &"search", "label": "Search for intel", "needs": &"searchable", "people": &"search"},
+		{"id": &"search", "label": "Search for intel", "needs": &"searchable", "people": &"search", "group": MORE},
+		{"id": &"check_condition", "label": "Check condition", "show": &"condition", "group": MORE},
 	],
 	DEAD: [
 		{"id": &"put_down", "label": "Put down", "needs": &"moving_body", "request": &"_server_release_body", "with": &"none"},
 		{"id": &"loot", "label": "Loot", "needs": &"has_gear", "submenu": &"body_items", "request": &"_server_loot_item", "with": &"target_loot"},
 		{"id": &"loot_all", "label": "Loot all", "needs": &"has_gear", "request": &"_server_loot_body", "with": &"target"},
-		{"id": &"carry", "label": "Carry", "needs": &"can_move_body", "request": &"_server_carry_body", "with": &"target"},
-		{"id": &"drag", "label": "Drag", "needs": &"can_move_body", "request": &"_server_drag_body", "with": &"target"},
+		{"id": &"carry", "label": "Carry", "needs": &"can_carry", "request": &"_server_carry_body", "with": &"target"},
+		{"id": &"drag", "label": "Drag", "needs": &"can_drag", "request": &"_server_drag_body", "with": &"target"},
 	],
 	SQUADMATE: [
 		{"id": &"give_item", "label": "Give item", "submenu": &"stowed_items", "request": &"_server_give_item", "with": &"target_entry"},
@@ -117,21 +128,22 @@ const ACTIONS := {
 		{"id": &"check_condition", "label": "Check wounds", "needs": &"wounded", "show": &"condition"},
 	],
 	PERSON: [
+		{"id": &"put_down", "label": "Put down", "needs": &"moving_body", "request": &"_server_release_body", "with": &"none"},
 		{"id": &"cuff", "label": "Zip-cuff", "needs": &"cuffable", "people": &"cuff"},
-		{"id": &"lead", "label": "Follow me", "needs": &"leadable", "people": &"lead"},
-		{"id": &"stop", "label": "Stop", "needs": &"led", "people": &"stop"},
-		{"id": &"cover", "label": "Get in cover", "needs": &"leadable", "people": &"cover"},
-		{"id": &"search", "label": "Search for intel", "needs": &"searchable", "people": &"search"},
+		{"id": &"lead", "label": "Follow me", "needs": &"follow_order", "people": &"lead"},
+		{"id": &"stop", "label": "Stop", "needs": &"stop_order", "people": &"stop"},
+		{"id": &"cover", "label": "Get in cover", "needs": &"cover_order", "people": &"cover"},
+		{"id": &"search", "label": "Search for intel", "needs": &"searchable", "people": &"search", "group": MORE},
 		{"id": &"carry", "label": "Carry", "needs": &"carriable_person", "request": &"_server_carry_body", "with": &"target"},
 		{"id": &"treat", "label": "Treat", "needs": &"treatable", "submenu": &"treatments"},
-		{"id": &"check_condition", "label": "Check wounds", "needs": &"wounded", "show": &"condition"},
+		{"id": &"check_condition", "label": "Check wounds", "needs": &"wounded", "show": &"condition", "group": MORE},
 	],
 	SELF: [
+		{"id": &"put_down", "label": "Put down", "needs": &"moving_body", "request": &"_server_release_body", "with": &"none"},
 		{"id": &"check_wounds", "label": "Check wounds", "show": &"wounds"},
 		{"id": &"treat", "label": "Treat yourself", "needs": &"treatable", "submenu": &"treatments"},
-		{"id": &"put_down", "label": "Put down", "needs": &"moving_body", "request": &"_server_release_body", "with": &"none"},
 		{"id": &"drop_held", "label": "Drop held item", "needs": &"held_item", "request": &"_server_drop", "with": &"slot"},
-		{"id": &"radio_contract", "label": "Radio for a contract", "needs": &"field_radio", "request": &"_server_radio_contract", "with": &"none"},
+		{"id": &"radio_contract", "label": "Radio for a contract", "needs": &"field_radio", "request": &"_server_radio_contract", "with": &"none", "group": MORE},
 	],
 }
 ## Wound kinds in words, for Check wounds.
@@ -152,7 +164,8 @@ var player: Soldier
 var mode := Mode.CLOSED
 ## The virtual cursor, in screen pixels.
 var cursor := Vector2.ZERO
-## Action points on screen: {"target": Node, "screen": Vector2, "actions": Array}.
+## Action points on screen: {"target": Node, "screen": Vector2, "actions": Array (the ring's
+## entries: grouped)}.
 var points: Array[Dictionary] = []
 ## Set when update_keys reports the keys let go: the action to perform ({} for none).
 var chosen: Dictionary = {}
@@ -199,7 +212,9 @@ static func target_kind(actor: Soldier, target: Node) -> StringName:
 
 ## The actions `actor` can take on `target` right now, in menu order. Each is a copy of its
 ## ACTIONS entry plus "target", a final "label", "disabled" (a reason, or "") and, for a
-## submenu, "items" (its entries, built the same way).
+## submenu, "items" (its entries, built the same way). An entry greyed out for the same
+## reason as one before it is left out (Captain, P0164 queue 8: "Your hands are full" once,
+## on Carry, not on Drag too). The ring groups these for the screen (grouped).
 static func actions_for(actor: Soldier, target: Node) -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	var kind := target_kind(actor, target)
@@ -211,7 +226,7 @@ static func actions_for(actor: Soldier, target: Node) -> Array[Dictionary]:
 			action["target"] = target
 			action["disabled"] = String(def.get("disabled", ""))
 			out.append(action)
-		return out
+		return _without_repeated_reasons(out)
 	for def: Dictionary in ACTIONS[kind]:
 		var why := _check(def.get("needs", &""), actor, target)
 		if why == _HIDE:
@@ -225,7 +240,80 @@ static func actions_for(actor: Soldier, target: Node) -> Array[Dictionary]:
 			if action.items.is_empty() and why == "":
 				action["disabled"] = {&"stowed_items": "Nothing stowed to give", &"body_items": "Nothing left on them"}.get(def.submenu, "Nothing to treat")
 		out.append(action)
+	return _without_repeated_reasons(out)
+
+
+## `actions` without the entries greyed out for a reason an earlier entry already shows.
+static func _without_repeated_reasons(actions: Array[Dictionary]) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	var shown := {}
+	for action in actions:
+		var why := String(action.get("disabled", ""))
+		if why != "" and shown.has(why):
+			continue
+		shown[why] = true
+		out.append(action)
 	return out
+
+
+## What one ring shows for `actions` (actions_for, region_actions): entries sharing a "group"
+## (MORE, or a vehicle point's "Pull out" and "Repair") become one submenu entry where the
+## first of them was, once two or more share it (a submenu of one is clutter of its own); a
+## member's "group_label", if any, is its label in there. Entries with a submenu of their own
+## stay on the ring (submenus don't nest). Past RING_MAX, the last plain entries go into
+## MORE as well, so the ring never overlaps itself. Grouped entries are {"id": &"group",
+## "group", "label", "items", "target", "disabled": ""}; perform ignores them like any submenu.
+static func grouped(actions: Array[Dictionary]) -> Array[Dictionary]:
+	var counts := {}
+	for action in actions:
+		var group := String(action.get("group", ""))
+		if group != "" and not action.has("items"):
+			counts[group] = int(counts.get(group, 0)) + 1
+	var out: Array[Dictionary] = []
+	var groups := {}
+	for action in actions:
+		var group := String(action.get("group", ""))
+		if group == "" or action.has("items") or int(counts[group]) < 2:
+			out.append(action)
+			continue
+		if not groups.has(group):
+			groups[group] = _group_entry(group, action.get("target"))
+			out.append(groups[group])
+		groups[group].items.append(_group_member(action))
+	# Too many for the ring: the last plain entries go into MORE (in order; a new MORE entry
+	# takes a place on the ring itself).
+	var extra := out.size() + (0 if groups.has(MORE) else 1) - RING_MAX
+	if out.size() <= RING_MAX or extra <= 0:
+		return out
+	var spill: Array[Dictionary] = []
+	for i in range(out.size() - 1, -1, -1):
+		if spill.size() >= extra:
+			break
+		if not out[i].has("items"):
+			spill.push_front(out[i])
+			out.remove_at(i)
+	if spill.is_empty():
+		return out
+	if not groups.has(MORE):
+		groups[MORE] = _group_entry(MORE, spill[0].get("target"))
+		out.append(groups[MORE])
+	for action in spill:
+		groups[MORE].items.append(_group_member(action))
+	return out
+
+
+## A ring entry holding `group`'s entries as its submenu.
+static func _group_entry(group: String, target: Variant) -> Dictionary:
+	var items: Array[Dictionary] = []
+	return {"id": &"group", "group": group, "label": group, "items": items, "target": target, "disabled": ""}
+
+
+## One entry inside a group's submenu: a copy, labelled by its group_label if it has one.
+static func _group_member(action: Dictionary) -> Dictionary:
+	var member := action.duplicate()
+	if action.has("group_label"):
+		member["label"] = action.group_label
+	return member
 
 
 ## `target` gets body interaction points (a region point each, and the waist): a squadmate,
@@ -304,14 +392,14 @@ static func _check(need: StringName, actor: Soldier, target: Node) -> String:
 		&"wounded":
 			var vitals := Vitals.find_on(target)
 			return "" if vitals and (not vitals.wound_list().is_empty() or vitals.condition_text() != "OK") else _HIDE
-		&"can_move_body":
-			if not target is Soldier:
-				return _HIDE  # dummies stay on their stands
-			if actor.carry_mode != &"":
-				return "You're already moving someone"
-			return "" if actor.inventory.hands == &"" else "Your hands are full"
-		&"moving_body":
-			return "" if actor.carry_mode != &"" else _HIDE
+		&"can_carry":
+			return _move_check(actor, target, Soldier.CARRY)
+		&"can_drag":
+			return _move_check(actor, target, Soldier.DRAG)
+		&"moving_body":  # on yourself, or the body you're moving (not every body you look at)
+			return "" if actor.carry_mode != &"" and (target == actor or _moved_by(target, actor)) else _HIDE
+		&"follow_order", &"stop_order", &"cover_order":
+			return _order_check(need, actor, target)
 		&"has_gear":
 			return "" if target is Soldier and (target as Soldier).has_gear() else "Nothing left on them"
 		&"held_item":
@@ -324,6 +412,45 @@ static func _check(need: StringName, actor: Soldier, target: Node) -> String:
 			return "" if RadioChatter.carried(actor, "radio", "enemy_radio") > 0 else "You have no field radio"
 	if need in Person.MENU_NEEDS:
 		return Person.menu_check(need, actor, target)  # people (wave 4)
+	return ""
+
+
+## Carry or Drag (`mode`) on a body. On the body you're moving, the other way of moving it
+## (the host switches: Soldier._server_move_body), never the way you already are. On another
+## body while you're moving someone, or with your hands full, greyed out with why (Drag then
+## repeats Carry's reason and is left out). Dummies stay on their stands.
+static func _move_check(actor: Soldier, target: Node, mode: StringName) -> String:
+	if not target is Soldier:
+		return _HIDE
+	if _moved_by(target, actor):
+		return _HIDE if actor.carry_mode == mode else ""
+	if actor.carry_mode != &"":
+		return "You're already moving someone"
+	return "" if actor.inventory.hands == &"" else "Your hands are full"
+
+
+## `target` is the body `actor` carries or drags.
+static func _moved_by(target: Node, actor: Soldier) -> bool:
+	return target is Soldier and target != actor and (target as Soldier).carried_by == actor
+
+
+## A person's orders (Follow me, Stop, Get in cover): as the people rules allow
+## (Person.menu_check "leadable" and "led"), but not the order they're already following
+## (Follow me to someone following you, Get in cover to someone in cover) and none while
+## someone carries them.
+static func _order_check(need: StringName, actor: Soldier, target: Node) -> String:
+	var why := Person.menu_check(&"led" if need == &"stop_order" else &"leadable", actor, target)
+	if why != "":
+		return why
+	if target is Soldier and is_instance_valid((target as Soldier).carried_by):
+		return _HIDE
+	var st := Person.state(target)
+	match need:
+		&"follow_order":
+			var layer := PeopleLayer.find(actor)
+			return _HIDE if layer and String(st.get("led_by", "")) == layer.key_of(actor) else ""
+		&"cover_order":
+			return _HIDE if String(st.get("order", "")) == "cover" else ""
 	return ""
 
 
@@ -626,7 +753,7 @@ static func display_name(target: Node) -> String:
 ## Action points `actor` can see through `camera`: everything within REACH, in front, in
 ## sight and with at least one action. A body with regions (has_regions) gets its waist point
 ## (WAIST: the general actions) and a point per region on its hitboxes ("region" says which);
-## anything else one point (region &"").
+## anything else one point (region &""). Each point's "actions" are its ring (grouped).
 static func collect_points(actor: Soldier, camera: Camera3D) -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	for point in _single_points(actor, camera):
@@ -636,13 +763,13 @@ static func collect_points(actor: Soldier, camera: Camera3D) -> Array[Dictionary
 			continue
 		var general := general_actions(actor, node)
 		if not general.is_empty():
-			out.append({"target": node, "region": WAIST, "screen": point.screen, "actions": general})
+			out.append({"target": node, "region": WAIST, "screen": point.screen, "actions": grouped(general)})
 		for region in REGIONS:
 			var at: Variant = part_anchor(node, REGION_ANCHORS[region])
 			if at == null or camera.is_position_behind(at) or (at as Vector3).distance_to(camera.global_position) > REACH + 0.6:
 				continue
 			out.append({"target": node, "region": region, "screen": camera.unproject_position(at),
-				"actions": region_actions(actor, node, region)})
+				"actions": grouped(region_actions(actor, node, region))})
 	return out
 
 
@@ -682,7 +809,7 @@ static func _single_points(actor: Soldier, camera: Camera3D) -> Array[Dictionary
 		var actions := actions_for(actor, node)
 		if actions.is_empty():
 			continue
-		out.append({"target": node, "screen": camera.unproject_position(at), "actions": actions})
+		out.append({"target": node, "screen": camera.unproject_position(at), "actions": grouped(actions)})
 	return out
 
 
@@ -752,10 +879,10 @@ func open_self() -> void:
 ## Rebuilds the self points (what you carry and your wounds can change while it's open).
 func refresh_self() -> void:
 	var centre := _centre()
-	points = [{"target": player, "region": WAIST, "screen": centre + SELF_LAYOUT[WAIST], "actions": general_actions(player, player)}]
+	points = [{"target": player, "region": WAIST, "screen": centre + SELF_LAYOUT[WAIST], "actions": grouped(general_actions(player, player))}]
 	for region in REGIONS:
 		points.append({"target": player, "region": region, "screen": centre + SELF_LAYOUT[region],
-			"actions": region_actions(player, player, region)})
+			"actions": grouped(region_actions(player, player, region))})
 	queue_redraw()
 
 

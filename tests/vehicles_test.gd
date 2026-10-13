@@ -379,6 +379,9 @@ func _test_seats() -> void:
 	check(heli != null and not heli.server_enter(player, 0) and heli.server_enter(player, 2), "a player can't take a UH-60 pilot's seat, only a crew or passenger seat")
 	if heli:
 		heli.server_exit(player)
+		var pilot_door: Array = InteractionMenu.actions_for(player, heli.get_node(^"Point1")).map(func(a: Dictionary) -> String: return "%s (%s)" % [a.label, a.disabled])
+		check(pilot_door == ["Get in (Aircraft are flown by AI pilots)", "Check vehicle ()"],
+			"the pilot's door: one greyed Get in saying why, no 'Get in as pilot' (%s)" % [pilot_door])
 		heli.queue_free()
 
 
@@ -471,6 +474,7 @@ func _test_interaction() -> void:
 	check(v.seat_of(player) == 1, "Move to > Commander")
 	InteractionMenu.perform(player, _entry(InteractionMenu.actions_for(player, v.get_node(^"Seat1")), "Get out"))
 	check(v.seat_of(player) < 0, "Get out")
+	await _test_door_declutter(v)
 	var cargo := v.get_node(^"Point3") as VehicleActionPoint
 	player.global_position = cargo.global_position + Vector3(0, -1.5, 0.8)
 	player.inventory.take(&"ruck_45")
@@ -491,6 +495,11 @@ func _test_interaction() -> void:
 	acts = InteractionMenu.actions_for(player, service)
 	var fix := _entry(acts, "Engine Parts: engine")
 	check(not fix.is_empty(), "the service point offers to fit the engine parts you carry (%s)" % [acts.map(func(a: Dictionary) -> String: return a.label)])
+	player.inventory.take(&"repair_kit")
+	var ring := InteractionMenu.grouped(InteractionMenu.actions_for(player, service))
+	var repairs: Array = _entry(ring, "Repair").get("items", [])
+	check(ring.size() == 2 and repairs.map(func(a: Dictionary) -> String: return a.label) == ["Engine Parts: engine", "Vehicle Repair Kit: engine"]
+		and ring[1].label == "Check vehicle", "two repairs share one Repair submenu on the ring, then Check vehicle (%s)" % [ring.map(func(a: Dictionary) -> String: return a.label)])
 	InteractionMenu.perform(player, fix)
 	check(v.job_left(player) > 55.0, "a timed job (%.0f s)" % v.job_left(player))
 	player.global_position += Vector3(0, 0, -3)
@@ -500,6 +509,48 @@ func _test_interaction() -> void:
 	player.inventory.strip()
 	player.inventory.take(&"m4a1")
 	v.server_set_zone(Vehicle.ZONE_ENGINE, 1.0)
+
+
+## A door's ring (Captain, P0164 queue 8): Get in for each kind of seat it has free, no greyed
+## "Driver taken"; one greyed Get in saying why when nothing's free; bodies down in its seats
+## under Pull out (one submenu once there are two); Check vehicle last.
+func _test_door_declutter(v: Vehicle) -> void:
+	print("A door's ring, decluttered")
+	var shown := func(point: Node) -> Array:
+		return InteractionMenu.actions_for(player, point).map(func(a: Dictionary) -> String: return a.label + (" (%s)" % a.disabled if a.disabled != "" else ""))
+	var door := v.get_node(^"Point0") as VehicleActionPoint
+	var rear := v.get_node(^"Point2") as VehicleActionPoint
+	player.global_position = rear.global_position + Vector3(0, -1.8, 1.0)  # at the rear door (Pull out checks reach)
+	check(shown.call(door) == ["Get in as driver", "Check vehicle"], "the driver's door: Get in as driver, Check vehicle (%s)" % [shown.call(door)])
+	check(shown.call(rear) == ["Get in as gunner", "Get in", "Check vehicle"], "the rear door: gunner, then the troop seats (%s)" % [shown.call(rear)])
+	var driver := _soldier("friendly", v.global_position + Vector3(-4, 0.1, -1), "DoorDriver")
+	check(v.server_enter(driver, 0), "someone else takes the wheel")
+	check(shown.call(door) == ["Get in (No free seat on this side)", "Check vehicle"], "then one greyed Get in, no 'Driver taken' (%s)" % [shown.call(door)])
+	v.burning_s = 30.0
+	check(shown.call(rear) == ["Get in (It's on fire)", "Check vehicle"], "on fire: one greyed Get in, not one per seat (%s)" % [shown.call(rear)])
+	v.burning_s = 0.0
+	var riders: Array[Soldier] = []
+	for seat in [2, 3]:
+		var rider := _soldier("friendly", v.global_position + Vector3(4, 0.1, seat), "DoorRider%d" % seat)
+		v.server_enter(rider, seat)
+		rider.vitals.server_damage(500.0)
+		riders.append(rider)
+	await get_tree().physics_frame
+	var ring := InteractionMenu.grouped(InteractionMenu.actions_for(player, rear))
+	var pull: Array = _entry(ring, "Pull out").get("items", [])
+	check(ring.map(func(a: Dictionary) -> String: return a.label) == ["Get in as gunner", "Get in", "Pull out", "Check vehicle"]
+		and pull.map(func(a: Dictionary) -> String: return a.label) == riders.map(func(s: Soldier) -> String: return s.display_name()),
+		"two bodies down inside: one Pull out submenu naming them (%s; %s)" % [ring.map(func(a: Dictionary) -> String: return a.label), pull.map(func(a: Dictionary) -> String: return a.label)])
+	if not pull.is_empty():
+		InteractionMenu.perform(player, pull[0])
+	check(v.seat_of(riders[0]) < 0, "and picking one pulls them out")
+	ring = InteractionMenu.grouped(InteractionMenu.actions_for(player, rear))
+	check(ring.any(func(a: Dictionary) -> bool: return a.label == "Pull out %s" % riders[1].display_name() and not a.has("items")),
+		"one left: Pull out on the ring itself (%s)" % [ring.map(func(a: Dictionary) -> String: return a.label)])
+	for s: Soldier in [driver] + riders:
+		v.server_exit(s)
+		s.queue_free()
+	await get_tree().physics_frame
 
 
 func _test_charge() -> void:

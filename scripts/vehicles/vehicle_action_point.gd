@@ -6,11 +6,13 @@ extends Node3D
 ## its interaction_actions list what can be done there; picking one sends the host request
 ## (Vehicle.request_*), which checks it again.
 ##
-## - Door: get in (as driver, gunner or passenger, by the seats this door serves), load the
-##   body you carry into a seat, pull a body (down or dead) out, check the vehicle.
+## - Door: get in (as driver, gunner or passenger, by the free seats this door serves), load
+##   the body you carry into a seat, pull a body (down or dead) out, check the vehicle.
 ## - Cargo: what's in the hold (take one), load something you carry or hold, refuel, check.
 ## - Service: repairs with the parts you carry, a new battery, refuel; on a wreck, salvage.
 ## - Seat (inside, only for its occupant): get out, move to another seat, check the vehicle.
+## Rare entries carry a "group" (Check vehicle: InteractionMenu.MORE; "Pull out", "Repair") so
+## the ring folds them into a submenu (InteractionMenu.grouped).
 
 const DOOR := "door"
 const CARGO := "cargo"
@@ -71,8 +73,12 @@ func _entry(id: StringName, label: String, call: Callable, disabled := "") -> Di
 	return {"id": id, "label": label, "disabled": disabled, "call": call, "target": self}
 
 
+## Check vehicle: on every point, rarely needed, so it's last and shares the ring's MORE submenu
+## with anything else rare there.
 func _check() -> Dictionary:
-	return _entry(&"check_vehicle", "Check vehicle", func() -> void: _say(VehicleActionPoint.report(vehicle)))
+	var entry := _entry(&"check_vehicle", "Check vehicle", func() -> void: _say(VehicleActionPoint.report(vehicle)))
+	entry["group"] = InteractionMenu.MORE
+	return entry
 
 
 func _say(text: String) -> void:
@@ -104,6 +110,12 @@ static func report(v: Vehicle) -> String:
 	return "\n".join(lines)
 
 
+## A door's ring (Captain, P0164 queue 8: get in and the seat choices first, nothing you can't
+## do): a Get in entry for each kind of seat this door serves that has one free (driver,
+## gunner, then passenger), never a pilot's (aircraft are flown by AI); when none is free, one
+## greyed Get in saying why (on fire, every seat taken, or only a pilot's seat here). Then Pull
+## out for each body down or dead in a seat here (two or more share a "Pull out" submenu),
+## then Check vehicle. Carrying a body, only Load casualty.
 func _door_actions(actor: Soldier) -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	if vehicle.wrecked:
@@ -114,22 +126,27 @@ func _door_actions(actor: Soldier) -> Array[Dictionary]:
 		out.append(_entry(&"load_body", "Load casualty", func() -> void: v.request_load_body.rpc_id(1, free),
 			"" if free >= 0 else "No free seat on this side"))
 		return out
-	for k: StringName in [Vehicle.DRIVER, Vehicle.PILOT, Vehicle.GUNNER, Vehicle.PASSENGER]:
-		if not _serves(k):
-			continue
+	for k: StringName in [Vehicle.DRIVER, Vehicle.GUNNER, Vehicle.PASSENGER]:
 		var seat := _first_free(k)
-		var why := "" if seat >= 0 else "%s taken" % _kind_name(k).capitalize()
-		if k == Vehicle.PILOT:
-			why = "Aircraft are flown by AI pilots"
-		elif v.is_burning():
-			why = "It's on fire"
+		if seat < 0 or v.is_burning():
+			continue
 		var label := "Get in" if k == Vehicle.PASSENGER else "Get in as %s" % _kind_name(k)
-		out.append(_entry(StringName("enter_%s" % k), label, func() -> void: v.request_enter.rpc_id(1, seat), why))
+		out.append(_entry(StringName("enter_%s" % k), label, func() -> void: v.request_enter.rpc_id(1, seat)))
+	if out.is_empty():
+		var why := "No free seat on this side"
+		if v.is_burning():
+			why = "It's on fire"
+		elif seat_list.all(func(i: int) -> bool: return v.seat_kind(i) == Vehicle.PILOT):
+			why = "Aircraft are flown by AI pilots"
+		out.append(_entry(&"enter", "Get in", Callable(), why))
 	for i: int in seat_list:
 		var s := v.occupant(i)
 		if s and not s.vitals.is_up():
 			var index := i
-			out.append(_entry(&"pull_out", "Pull out %s" % s.display_name(), func() -> void: v.request_pull_out.rpc_id(1, index)))
+			var entry := _entry(&"pull_out", "Pull out %s" % s.display_name(), func() -> void: v.request_pull_out.rpc_id(1, index))
+			entry["group"] = "Pull out"
+			entry["group_label"] = s.display_name()
+			out.append(entry)
 	out.append(_check())
 	return out
 
@@ -189,8 +206,10 @@ func _service_actions(actor: Soldier) -> Array[Dictionary]:
 		for part: StringName in VehicleService.parts_for(v, actor, z):
 			var zone := z
 			var id := part
-			out.append(_entry(&"repair", "%s: %s" % [ItemDB.get_item(part).name, VehicleService.zone_name(z, v.kind)],
-				func() -> void: v.request_service.rpc_id(1, "repair", zone, id)))
+			var repair := _entry(&"repair", "%s: %s" % [ItemDB.get_item(part).name, VehicleService.zone_name(z, v.kind)],
+				func() -> void: v.request_service.rpc_id(1, "repair", zone, id))
+			repair["group"] = "Repair"  # two or more share a submenu (InteractionMenu.grouped)
+			out.append(repair)
 	if VehicleService.jerrycan_fuel(actor) > 0.0:
 		out.append(_entry(&"refuel", "Refuel (jerrycan)", func() -> void: v.request_service.rpc_id(1, "refuel", &"", VehicleService.JERRYCAN)))
 	out.append(_check())
@@ -210,13 +229,6 @@ func _seat_actions(_actor: Soldier) -> Array[Dictionary]:
 	out.append({"id": &"move_seat", "label": "Move to", "disabled": "" if not moves.is_empty() else "No free seat", "items": moves, "target": self})
 	out.append(_check())
 	return out
-
-
-func _serves(k: StringName) -> bool:
-	for i: int in seat_list:
-		if vehicle.seat_kind(i) == k:
-			return true
-	return false
 
 
 func _first_free(k: StringName) -> int:
