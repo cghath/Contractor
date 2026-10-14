@@ -336,6 +336,13 @@ const REACH_STUCK_S := 1.5
 const DETOUR_M := 1.8
 const DETOUR_S := 1.2
 const REACH_GIVE_UP_S := 12.0
+## Dragging a casualty to cover: no closer to the cover spot for DRAG_STUCK_S (blocked, or the
+## spot can't be reached), or out of contact for DRAG_QUIET_S, and the casualty is put down
+## where they are and treated (Captain, 2026-10-14, P0914: "Dragging to cover" for minutes after
+## the fight, the casualty held and untreated). Proposed.
+const DRAG_STUCK_S := 8.0
+const DRAG_QUIET_S := 3.0
+const DRAG_PROGRESS_M := 0.5
 const REACH_SKIP_S := 20.0
 ## Proposed: while clearing or assaulting through a position, unconscious foes this close get
 ## dead-checked (shot); otherwise targeting skips them.
@@ -469,6 +476,11 @@ var _destination := Vector3.ZERO
 var _has_destination := false
 var _run := false
 var _cover_point := Vector3.ZERO
+## Dragging (Care.DRAG): the nearest it got to _cover_point, when it last got nearer, and when
+## contact was last seen (_drag_stalled).
+var _drag_best := INF
+var _drag_moved_at := 0.0
+var _drag_contact_at := 0.0
 var _has_cover := false
 var _hold_point := Vector3.ZERO
 var _move_point := Vector3.ZERO
@@ -1519,7 +1531,7 @@ func _do_care() -> void:
 		Care.DRAG:
 			if body.carrying != casualty:
 				care = Care.TREAT
-			elif _has_cover and not _at_cover():
+			elif _has_cover and not _at_cover() and not _drag_stalled(contact):
 				_go(_cover_point, false)
 			else:
 				_has_destination = false
@@ -1626,6 +1638,7 @@ func _care_reach(contact: bool) -> void:
 			_cover_point = spot
 			_has_cover = true
 			care = Care.DRAG
+			_start_drag_watch()
 			return
 	care = Care.TREAT
 
@@ -1763,6 +1776,7 @@ func _care_carry(contact: bool) -> void:
 			if spot != null:
 				_cover_point = spot
 			care = Care.DRAG
+			_start_drag_watch()
 		else:
 			care = Care.GUARD
 		return
@@ -2972,6 +2986,30 @@ func _cover_taken(point: Vector3) -> bool:
 		var other := SquadAI.of(n)
 		if other and other != self and other._has_cover and other._cover_point.distance_to(point) < 1.2:
 			return true
+	return false
+
+
+func _start_drag_watch() -> void:
+	_drag_best = INF
+	_drag_moved_at = Soldier._now()
+	_drag_contact_at = Soldier._now()
+
+
+## Dragging to cover should stop: no closer to the cover spot for DRAG_STUCK_S, or no contact
+## for DRAG_QUIET_S (nothing to drag them out of the line of fire from any more).
+func _drag_stalled(contact: bool) -> bool:
+	var now := Soldier._now()
+	if contact:
+		_drag_contact_at = now
+	var d := _flat_distance(_cover_point)
+	if d < _drag_best - DRAG_PROGRESS_M:
+		_drag_best = d
+		_drag_moved_at = now
+	var stuck := now - _drag_moved_at > DRAG_STUCK_S
+	if stuck or now - _drag_contact_at > DRAG_QUIET_S:
+		SessionLog.note("%s puts %s down (%s)" % [body.log_name(), _name_of(casualty),
+			"no closer to cover for %.0f s" % DRAG_STUCK_S if stuck else "out of contact"])
+		return true
 	return false
 
 
