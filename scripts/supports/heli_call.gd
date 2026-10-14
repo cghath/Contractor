@@ -134,6 +134,8 @@ var _dest_at := -1.0
 var _no_room := {}
 var _empty_since := -1.0
 var _smoke_failed := {}
+## What the radio last said it's doing (_say): the same state isn't said twice in a row.
+var _radio_state := ""
 
 
 func _init(p_sup: HeliSupports, p_kind: String, p_caller: Soldier, p_mark: Dictionary) -> void:
@@ -211,8 +213,10 @@ func server_launch() -> bool:
 	return true
 
 
-## Heads for the mark (choosing the landing spot), or for the players to look for smoke.
-func _go_in() -> void:
+## Heads for the mark (choosing the landing spot), or for the players to look for smoke. One
+## radio line says what happens next (P0331: "No safe LZ", "Inbound" and "On station" went out
+## in the same second); `why` (no LZ where it was sent) leads it.
+func _go_in(why := "") -> void:
 	phase = Phase.INBOUND
 	_t = 0.0
 	_rechecked = false
@@ -223,13 +227,33 @@ func _go_in() -> void:
 				ceili(Helicopter.eta_s(_flat(heli.global_position, lz)))]
 			if lz_moved_m > 5.0:
 				text += ". No LZ at the mark: landing %d m off" % roundi(lz_moved_m)
-			sup.server_radio(kind, text)
+			_say("landing %s" % _grid(lz), text)
 			return
-		sup.server_radio(kind, "No safe LZ within %d m of %s. Give me another grid or pop smoke" % [roundi(LandingZone.SEARCH_M), _grid(mark.pos)])
+		why = "No safe LZ within %d m of %s" % [roundi(LandingZone.SEARCH_M), _grid(mark.pos)]
 		mark = {}
 	_orbit_next = 0.0
 	_update_orbit()
-	sup.server_radio(kind, "Inbound. Pop %s smoke" % " or ".join(HeliSupports.smoke_colours(_smoke_kind())))
+	var ask := "Pop %s smoke or give me %s grid" % [" or ".join(HeliSupports.smoke_colours(_smoke_kind())), "another" if why != "" else "a"]
+	var lead := why + ". " if why != "" else ""
+	if _near_station():  # already there: it says so, not "inbound" first
+		phase = Phase.LOITER
+		_say("on station " + why, lead + "On station, orbiting. " + ask)
+	else:
+		_say("looking " + why, lead + "Inbound. " + ask)
+
+
+## Whether it's close enough to the players to be on station (orbiting, looking for smoke).
+func _near_station() -> bool:
+	return _flat(heli.global_position, _loiter_centre()) < LOITER_RADIUS_M * 1.6
+
+
+## A radio line for the state it's in (`state`): said once, not again while the state's the
+## same; a new order from the caller (server_redirect) always gets an answer.
+func _say(state: String, text: String) -> void:
+	if state == _radio_state:
+		return
+	_radio_state = state
+	sup.server_radio(kind, text)
 
 
 ## Picks the landing spot for `at` (LandingZone: the nearest safe spot within 100 m). An
@@ -262,6 +286,7 @@ func _place_point() -> void:
 func server_redirect(new_mark: Dictionary) -> String:
 	if phase != Phase.INBOUND and phase != Phase.LOITER:
 		return "%s is already %s" % [HeliSupports.callsign(kind), "down" if phase == Phase.GROUND else "on its way out"]
+	_radio_state = ""  # a new order: it answers
 	if not new_mark.has("pos"):
 		mark = {}
 		_go_in()
@@ -377,9 +402,9 @@ func _step_inbound() -> void:
 			_rechecked = true
 			var before := lz
 			if not _choose_lz(mark.pos):
-				sup.server_radio(kind, "Can't land at %s: no LZ within %d m. Give me another grid or pop smoke" % [_grid(mark.pos), roundi(LandingZone.SEARCH_M)])
+				var why := "Can't land at %s: no LZ within %d m" % [_grid(mark.pos), roundi(LandingZone.SEARCH_M)]
 				mark = {}
-				_go_in()
+				_go_in(why)
 				return
 			if lz.distance_to(before) > 1.0:
 				heli.server_land_at(lz)
@@ -395,9 +420,9 @@ func _step_inbound() -> void:
 			return
 	if _orbit_next <= 0.0:
 		_update_orbit()
-	if phase == Phase.INBOUND and _flat(heli.global_position, _loiter_centre()) < LOITER_RADIUS_M * 1.6:
+	if phase == Phase.INBOUND and _near_station():
 		phase = Phase.LOITER
-		sup.server_radio(kind, "On station, orbiting. Pop %s smoke or give me a grid" % " or ".join(HeliSupports.smoke_colours(_smoke_kind())))
+		_say("on station", "On station, orbiting. Pop %s smoke or give me a grid" % " or ".join(HeliSupports.smoke_colours(_smoke_kind())))
 
 
 func _land_on_smoke(cloud: SmokeCloud) -> void:

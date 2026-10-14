@@ -46,6 +46,19 @@ func _ready() -> void:
 		session.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		session.modulate = Color(1, 1, 1, 0.6)
 		box.add_child(session)
+		# Where the logs are, so a friend can send them (P0331 triage: nobody knew where to look).
+		var where := Label.new()
+		where.text = "Session logs (send the %s folder):" % SessionLog.session_id
+		where.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		where.modulate = Color(1, 1, 1, 0.6)
+		box.add_child(where)
+		var path := LineEdit.new()
+		path.name = "SessionLogFolder"
+		path.text = SessionLog.logs_folder()
+		path.editable = false  # still selectable, to copy
+		path.tooltip_text = path.text
+		box.add_child(path)
+		box.add_child(_button("Open the log folder", func() -> void: OS.shell_open(SessionLog.logs_folder())))
 	box.add_child(_button("Resume", close))
 	box.add_child(_button("Settings", _open_settings))
 	get_out_toggle = ControlOptions.get_out_toggle()  # changeable mid-game
