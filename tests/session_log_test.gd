@@ -31,6 +31,7 @@ func _ready() -> void:
 	await _test_quiet_session()
 	await _test_issues()
 	await _test_settings()
+	await _test_counter_lock()
 	GameState.delete_save()
 	print("SESSION_LOG TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
@@ -115,6 +116,36 @@ func check(condition: bool, what: String) -> void:
 	print("  [%s] %s" % ["ok" if condition else "FAIL", what])
 	if not condition:
 		failures += 1
+
+
+## The run counter's lock, shared with tools/run_log.sh (two runs in the same second both got
+## R0232): a number waits for a live lock, and a killed run's stale lock is taken over.
+func _test_counter_lock() -> void:
+	print("The run counter's lock")
+	var p := parent + "_counter"
+	_remove(p)
+	DirAccess.make_dir_recursive_absolute(p)
+	var lock := p.path_join("run_counter.lock")
+	DirAccess.make_dir_absolute(lock)  # another run is numbering
+	var got := [0]
+	var worker := Thread.new()
+	worker.start(func() -> void: got[0] = SessionLog._next_number(p))
+	await _seconds(0.5)
+	var waited := worker.is_alive() and not FileAccess.file_exists(p.path_join("run_counter.txt"))
+	DirAccess.remove_absolute(lock)  # it's done
+	worker.wait_to_finish()
+	check(waited and got[0] == 1 and not DirAccess.dir_exists_absolute(lock), "a session's number waits for a live lock, then takes 1 (%d)" % got[0])
+	DirAccess.make_dir_absolute(lock)  # left by a killed run
+	var stamped := FileAccess.get_modified_time(lock)
+	var stale_was := SessionLog.counter_lock_stale_s
+	SessionLog.counter_lock_stale_s = 1
+	await _seconds(2.2)
+	var started := Time.get_ticks_msec()
+	var n := SessionLog._next_number(p)
+	SessionLog.counter_lock_stale_s = stale_was
+	check(stamped > 0 and n == 2 and Time.get_ticks_msec() - started < 3000 and not DirAccess.dir_exists_absolute(lock),
+		"a stale lock is taken over: 2 at once (%d ms)" % (Time.get_ticks_msec() - started))
+	_remove(p)
 
 
 func _test_quiet_session() -> void:
@@ -334,6 +365,15 @@ func _test_bug_report(player: Soldier, level: CompoundLevel, faller: Soldier) ->
 	var perf := SessionLog.perf_line()
 	check(perf.begins_with("perf: frame ") and " ms avg" in perf and " AI, " in perf and "nav rebakes" in perf and "memory" in perf,
 		"a performance line: %s" % perf)
+	# Memory a release build can read too (Captain P0362: release builds logged "memory 0 MB";
+	# the engine's static count is debug-only), with no child process (no console window).
+	var debug_mem := SessionLog.memory_text()
+	var release_mem := SessionLog.memory_text(0.0)  # as a release build reads the engine's count
+	var rss := SessionLog.process_memory_mb()
+	check(debug_mem.begins_with("memory ") and not "memory 0 MB" in release_mem and " video " in " " + release_mem
+		and "system memory " in release_mem and not "memory -" in release_mem and " objects, " in release_mem and (rss > 10.0 or OS.get_name() not in ["Linux", "Android", "FreeBSD"])
+		and (release_mem.begins_with("memory ") == (rss > 0.0)),
+		"memory in the perf line, release-safe: %s | as release: %s (process %.0f MB)" % [debug_mem, release_mem, rss])
 	overlay.queue_free()
 	scout.queue_free()
 

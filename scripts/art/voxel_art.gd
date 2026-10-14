@@ -91,6 +91,21 @@ static func _civ_part(model: String, variant: String) -> String:
 
 static var _meshers: Dictionary = {}  # variant -> VoxelMesherCubes
 static var _meshes: Dictionary = {}   # "model|variant" -> Mesh
+## Plain clothes' rasterised models (the model name's hash -> VoxelBuffer), shared by every plain-clothes
+## scheme: their cloth is one flat palette entry (no camo), so the voxels' colour indices are the
+## same whatever the colours, and only the mesher's palette differs. Rasterising a 0.5 cm body
+## is about 0.5 s and meshing it about 30 ms, so a new person's outfit costs only the meshing
+## (Captain P0362: 12 civilians at once were a 3.4 s hitch on deploying).
+static var _plain_rasters: Dictionary = {}
+## The body parts a soldier or person is built from (CharacterModel).
+const BODY_PARTS: Array[String] = ["head", "torso", "upper_arm", "forearm", "thigh", "shin"]
+## Rasters built ahead on a worker thread (warm): "salt|variant" (_raster_key) -> VoxelBuffer.
+## The worker adds each as it finishes, under _warm_mutex; the main thread takes one that's there
+## and never waits for the rest (it rasterises one that isn't, as before).
+static var _warmed: Dictionary = {}
+static var _warm_mutex := Mutex.new()
+static var _warm_tasks: Array[int] = []
+static var _warm_asked: Dictionary = {}  # "model|variant" -> true: warmed once already
 static var _material: StandardMaterial3D
 static var _noise_a: FastNoiseLite
 static var _noise_b: FastNoiseLite
@@ -202,7 +217,93 @@ static func mesh(model: String, variant: String) -> Mesh:
 
 
 static func _build(spec: Dictionary, variant: String, salt: int) -> Mesh:
-	return _get_mesher(variant).build_mesh(_rasterize(spec, variant, salt), [])
+	return _get_mesher(variant).build_mesh(_raster(spec, variant, salt), [])
+
+
+## The model rasterised for `variant`: a plain-clothes scheme ("civp:") reuses the model's one
+## plain raster (_plain_rasters, by `salt`: mesh() salts with the model's name); otherwise one
+## the warm-up built (warm), or built now.
+static func _raster(spec: Dictionary, variant: String, salt: int) -> VoxelBuffer:
+	var plain := variant.begins_with("civp:")
+	if plain and _plain_rasters.has(salt):
+		return _plain_rasters[salt]
+	var key := _raster_key(salt, variant)
+	_warm_mutex.lock()
+	var buffer: VoxelBuffer = _warmed.get(key)
+	_warmed.erase(key)
+	_warm_mutex.unlock()
+	if buffer == null:
+		buffer = _rasterize(spec, variant, salt)
+	if plain:
+		_plain_rasters[salt] = buffer
+	return buffer
+
+
+## Plain clothes all share one raster per model ("civp:"); every other scheme has its own.
+static func _raster_key(salt: int, variant: String) -> String:
+	return "%d|%s" % [salt, "civp:" if variant.begins_with("civp:") else variant]
+
+
+## Rasterises `pairs` ([model, variant], as mesh() takes them) on a worker thread, so the
+## first soldier or person built from them only meshes (rasterising is ~95% of building a
+## 0.5 cm part). Each pair is warmed once a session. PeopleLayer calls it as a level starts:
+## the hostiles' uniform (Captain P0362: the first garrison of the session was a 0.43 s frame)
+## and plain clothes' bodies.
+static func warm(pairs: Array) -> void:
+	var todo: Array = []
+	for pair: Array in pairs:
+		var model: String = pair[0]
+		var variant: String = pair[1]
+		if variant.begins_with(CIV_PREFIX):
+			variant = _civ_part(model, variant)
+		var asked := "%s|%s" % [model, "civp:" if variant.begins_with("civp:") else variant]
+		if _warm_asked.has(asked) or _meshes.has("%s|%s" % [model, variant]) or (variant.begins_with("civp:") and _plain_rasters.has(model.hash())):
+			continue
+		_warm_asked[asked] = true
+		todo.append([model, variant])
+	if todo.is_empty():
+		return
+	_camo(Vector3.ZERO, 0, "multicam")  # its noise is made here on the main thread, not on the worker
+	_reap_warm()
+	_warm_tasks.append(WorkerThreadPool.add_task(_warm.bind(todo), false, "VoxelArt warm-up"))
+
+
+## The models a soldier in `variant` with `loadout` (item ids) is built from: the body's parts
+## and the art of what's worn and carried (model_for), as [model, variant] pairs for warm().
+static func uniform(variant: String, loadout: Array, body := MALE) -> Array:
+	var out: Array = []
+	for part in BODY_PARTS:
+		out.append([body_part(part, body), variant])
+	for id: Variant in loadout:
+		var item := ItemDB.get_item(StringName(id))
+		var model := fitted(model_for(item), body) if item else ""
+		if model != "" and not out.has([model, variant]):
+			out.append([model, variant])
+	return out
+
+
+static func _warm(todo: Array) -> void:
+	for pair: Array in todo:
+		var model: String = pair[0]
+		var buffer := _rasterize(_spec(model), pair[1], model.hash())
+		_warm_mutex.lock()
+		_warmed[_raster_key(model.hash(), pair[1])] = buffer
+		_warm_mutex.unlock()
+
+
+## Lets go of finished warm-up tasks (WorkerThreadPool wants every task waited for).
+static func _reap_warm() -> void:
+	for task in _warm_tasks.duplicate():
+		if WorkerThreadPool.is_task_completed(task):
+			WorkerThreadPool.wait_for_task_completion(task)
+			_warm_tasks.erase(task)
+
+
+## Waits for every warm-up task still running. As a level goes, so none is left at quit.
+static func finish_warm() -> void:
+	for task in _warm_tasks:
+		WorkerThreadPool.wait_for_task_completion(task)
+	_warm_tasks.clear()
 
 
 ## Which built voxels of `model` are solid, for hit tests (BodyVolume): {"dims" (built
