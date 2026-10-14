@@ -35,7 +35,7 @@ const SEED := 4711
 const EXTRA_STASH := [["assault_pack", 4], ["m4a1", 4], ["plate_carrier", 2], ["helmet", 4], ["mag_556", 24], ["ifak", 6], ["iv_18", 4],
 	["saline_500", 6], ["epinephrine", 4], ["morphine", 4], ["tourniquet", 4]]
 ## What each bot picks up at the armory: id -> how many it wants on it.
-const KIT := {"assault_pack": 1, "m4a1": 1, "plate_carrier": 1, "helmet": 1, "mag_556": 3, "ifak": 1, "iv_18": 1, "saline_500": 1, "epinephrine": 1}
+const KIT := {"assault_pack": 1, "ifak": 1, "iv_18": 1, "saline_500": 1, "epinephrine": 1, "plate_carrier": 1, "helmet": 1, "m4a1": 1, "mag_556": 3}
 ## The game's own paces (SoldierMovement.WALK_SPEED, SPRINT_SPEED).
 const WALK_SPEED := 4.0
 const RUN_SPEED := 6.5
@@ -418,7 +418,7 @@ func _host_cycle(cycle: int) -> Dictionary:
 	_goal = null
 	extraction.server_add_point(Vector2(at.x, at.z))
 	_set_phase("extract", {"rally": [at.x, at.y, at.z]})
-	var gathered := await _wait_for(func() -> bool: return not extraction.point_with_squad().is_empty(), 75.0)
+	var gathered := await _wait_for(func() -> bool: return not extraction.point_with_squad().is_empty(), 180.0)
 	var left_behind: Array = []
 	if not gathered:
 		var point := extraction._nearest_point()
@@ -714,7 +714,7 @@ func _client_tick(ph: String) -> void:
 			var spot := leader.global_position + Vector3(cos(angle), 0.0, sin(angle)) * 5.0
 			if _flat(me.global_position, spot) > 3.0 and not _dropping:
 				_walk(spot, 1.5, RUN_SPEED if _flat(me.global_position, spot) > 15.0 else WALK_SPEED)
-	elif ph in ["extract", "confirm"]:
+	elif ph in ["extract", "confirm"] and _casevac == "":
 		var rally: Array = _phase.get("rally", [])
 		if rally.size() == 3:
 			var at := Vector3(float(rally[0]), float(rally[1]), float(rally[2]))
@@ -889,6 +889,69 @@ func _stop_fighting() -> void:
 ## hostiles) gets treated by the nearest player still up, as a squad would.
 var _aid_left := 1.0
 var _last_clear_shot := 0.0
+var _casevac := ""          # the downed player this bot is carrying to the extraction, or ""
+var _casevac_since := 0.0
+var _casevac_left := 0.0
+
+
+## Extraction with a player still down (nobody could bring them round): the nearest player up
+## carries them to the rally point, as a squad would (the extraction waits for every player).
+func _casevac_tick(me: Soldier, delta: float) -> void:
+	var ph := String(_phase.get("phase", ""))
+	if ph not in ["extract", "confirm"]:
+		_casevac = ""
+		return
+	var rally: Array = _phase.get("rally", [])
+	if rally.size() != 3:
+		return
+	var at := Vector3(float(rally[0]), float(rally[1]), float(rally[2]))
+	if _casevac != "":
+		var victim := _player(int(_casevac))
+		if victim == null or victim.vitals.is_up():
+			_casevac = ""
+			return
+		if me.carry_mode != &"":
+			# Lifting takes a moment (the carrier stands still), then to the rally point.
+			if Soldier._now() - _casevac_since > Soldier.CARRY_LIFT_S + 0.5:
+				_walk(at, 1.5, WALK_SPEED)
+			return
+		_casevac_left -= delta
+		if _casevac_left > 0.0:
+			return
+		_casevac_left = 0.5
+		var body := victim.body_point()
+		if _flat(me.global_position, body) > 1.2:
+			_walk(body, 0.8, RUN_SPEED)
+		else:
+			_goal = null
+			me._server_carry_body.rpc_id(1, victim.get_path())
+			_casevac_since = Soldier._now()
+		return
+	_casevac_left -= delta
+	if _casevac_left > 0.0 or _treating or me.carry_mode != &"":
+		return
+	_casevac_left = 1.0
+	var players := _level().get_node_or_null(^"Players")
+	if players == null:
+		return
+	for node in players.get_children():
+		var casualty := node as Soldier
+		if casualty == null or casualty == me or casualty.vitals.is_up() or _flat(casualty.body_point(), at) < 8.0 				or StringName(casualty.model.carry_net.get("mode", &"")) in [CharacterModel.CARRIED, CharacterModel.DRAGGED]:
+			continue  # up, already at the rally point, or someone has them
+		var nearest: Soldier = null
+		var best := INF
+		for other in players.get_children():
+			var s := other as Soldier
+			if s and s.vitals.is_up() and s.carry_mode == &"":
+				var d := _flat(s.global_position, casualty.body_point())
+				if d < best:
+					best = d
+					nearest = s
+		if nearest == me:
+			_casevac = String(casualty.name)
+			_say("casevac: carrying %s (%s) to the extraction" % [casualty.name, casualty.vitals.condition_text()])
+			recorder.event(["casevac", "Players/%s" % casualty.name])
+			return
 var _hunt_left := 0.0
 
 
@@ -947,6 +1010,7 @@ func _physics_process(delta: float) -> void:
 	_buddy_aid(me, delta)
 	if me.vitals.is_up():
 		_hunt(me, delta)
+		_casevac_tick(me, delta)
 	if not me.vitals.is_up() or is_instance_valid(me.vehicle):
 		return
 	if _goal != null:
