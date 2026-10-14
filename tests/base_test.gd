@@ -558,6 +558,8 @@ func _start_client(ids: Array, stash_counts: Dictionary) -> Dictionary:
 		DirAccess.remove_absolute(log_path)
 	var args := ["--headless", "--path", ProjectSettings.globalize_path("res://"), "res://tests/base_test.tscn", "--", "--join", "127.0.0.1",
 		"--expect", Marshalls.utf8_to_base64(JSON.stringify(expect)), "--log", log_path]
+	check(BaseHub.all_ready() and BaseHub.not_ready_names().is_empty(), "FOB ready-up: a host alone is always ready (their Deploy is their ready)")
+	BaseHub.server_set_ready(77, true)  # stands for someone who readied before the client came
 	var pid := OS.create_process(OS.get_executable_path(), args)
 	check(pid > 0, "a client process starts")
 	var deadline := Time.get_ticks_msec() + 120000
@@ -566,6 +568,7 @@ func _start_client(ids: Array, stash_counts: Dictionary) -> Dictionary:
 			break
 		await _seconds(0.25)
 	check(Roster.ids(BaseHub.roster()).size() == ids.size() + 1, "the host hired who the client asked for (%d on the books)" % Roster.ids(BaseHub.roster()).size())
+	check(77 not in BaseHub.ready_peers(), "a player joining resets the FOB ready-up")
 	return {"pid": pid, "log": log_path}
 
 
@@ -622,6 +625,12 @@ func _run_client() -> void:
 	var hired := await _wait_until(func() -> bool:
 		return BaseHub.view.get("roster", {}).get("members", {}).values().any(func(m: Dictionary) -> bool: return String(m.callsign).begins_with(String(expect.hire_callsign))), 10.0)
 	check(hired, "a hire asked from the client goes through the host and comes back (%s)" % expect.hire_callsign)
+	var me := multiplayer.get_unique_id()
+	check(not BaseHub.is_ready(me) and ", ".join(PackedStringArray(BaseHub.not_ready_names())) == "Player %d" % me,
+		"FOB ready-up: the client starts not ready and sees the host waiting for it (%s)" % ", ".join(PackedStringArray(BaseHub.not_ready_names())))
+	BaseHub.request("ready", [true])
+	var readied := await _wait_until(func() -> bool: return BaseHub.is_ready(me) and BaseHub.all_ready(), 10.0)
+	check(readied, "its Ready goes through the host and comes back in the view")
 	_say(CLIENT_HUB_DONE)
 	# The host deploys: the session moves to the zone, then back.
 	var deployed := await _wait_until(func() -> bool:
@@ -643,6 +652,7 @@ func _run_client() -> void:
 	var back := await _wait_until(func() -> bool:
 		return level.ai.get_node_or_null(NodePath(String(expect.back))) != null and level.ai.get_node_or_null(NodePath(String(expect.dead))) == null, 30.0)
 	check(back, "where %s is back at the muster line and %s isn't" % [expect.back, expect.dead])
+	check(not BaseHub.is_ready(me), "back at the FOB the client has to ready up again")
 	_say("CLIENT %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	_log.close()
 	Net.leave()
@@ -798,8 +808,22 @@ func _test_deployment(client: Dictionary) -> void:
 		BaseHub.server_pick(mid, true)
 	var wage_a := int(BaseHub.member(a).wage)
 	var day := BaseHub.day()
+	# FOB ready-up (Captain, 2026-10-14): no deploying while a player isn't ready.
+	var peers := multiplayer.get_peers()
+	var client_peer: int = peers[0] if not peers.is_empty() else 0
+	check(client_peer != 0 and BaseHub.is_ready(client_peer), "the client readied up from its base screen (Player %d)" % client_peer)
+	BaseHub.server_set_ready(client_peer, false)
 	var why := BaseHub.server_deploy({"zone_id": ZONE + tag, "no_contract": true})
+	check(why == BaseHub.WAITING_FOR + "Player %d" % client_peer and not RosterDeployment.is_running(BaseHub.roster()),
+		"deploy is refused while the client isn't ready, naming them (%s)" % why)
+	BaseHub.request("deploy")  # the Deploy button's way: refused the same
+	await _frames(2)
+	check(not RosterDeployment.is_running(BaseHub.roster()), "and so is the Deploy button's request")
+	BaseHub.server_set_ready(client_peer, true)
+	check(BaseHub.all_ready(), "once the client is ready again everyone is")
+	why = BaseHub.server_deploy({"zone_id": ZONE + tag, "no_contract": true})
 	check(why == "" and RosterDeployment.is_running(BaseHub.roster()), "deploy starts the deployment")
+	check(BaseHub.ready_peers().is_empty(), "and the ready-up resets for the next one")
 	await _wait_until(func() -> bool: return not CompoundLevel.current(self) is BaseLevel, 10.0)
 	level = CompoundLevel.current(self)
 	check(level != null and not level is BaseLevel, "and the session moves to the zone")

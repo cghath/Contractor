@@ -172,16 +172,32 @@ func _build_squad(rows: VBoxContainer, v: Dictionary) -> void:
 		rows.add_child(row)
 	rows.add_child(_heading("Players"))
 	var players: Dictionary = roster.get("players", {})
+	var me := multiplayer.get_unique_id()
 	for peer: String in v.get("players", {}):
 		var key := String(v.players[peer])
 		var main: Dictionary = players.get(key, {})
 		var days := int(main.get("sit_out_days", 0))
-		rows.add_child(_text("%s: %s" % [key, "recovering %d days: plays a squadmate next time" % days if days > 0 else "ready"]))
+		var id := int(peer)
+		# FOB ready-up (Captain, 2026-10-14), worded as the briefing's: the host's Deploy is their ready.
+		var readiness := "deploys" if id == 1 else ("ready" if BaseHub.is_ready(id) else "not ready")
+		rows.add_child(_text("%s (%s): %s; %s" % ["You" if id == me else "Player %d" % id, key, readiness,
+			"recovering %d days: plays a squadmate next time" % days if days > 0 else "fit"]))
 	var buttons := HBoxContainer.new()
+	if not multiplayer.is_server():
+		var ready_button := Button.new()
+		ready_button.name = "Ready"
+		ready_button.toggle_mode = true
+		ready_button.set_pressed_no_signal(BaseHub.is_ready(me))
+		ready_button.text = "Ready (click to stand down)" if ready_button.button_pressed else "Ready"
+		ready_button.tooltip_text = "The host can deploy once every player is ready"
+		ready_button.toggled.connect(func(on: bool) -> void: BaseHub.request("ready", [on]))
+		buttons.add_child(ready_button)
 	var deploy := _button("Deploy", func() -> void: BaseHub.request("deploy"))
 	deploy.name = "Deploy"
+	var waiting := BaseHub.not_ready_names()
 	deploy.disabled = not multiplayer.is_server() or contract.is_empty()
-	deploy.tooltip_text = BaseHub.NO_CONTRACT if contract.is_empty() else "The host deploys the squad"
+	deploy.tooltip_text = BaseHub.NO_CONTRACT if contract.is_empty() else (BaseHub.WAITING_FOR + ", ".join(PackedStringArray(waiting))
+		if not waiting.is_empty() else "The host deploys the squad")
 	buttons.add_child(deploy)
 	buttons.add_child(_button("Rest a day", func() -> void: BaseHub.request("rest", [1])))
 	buttons.add_child(_button("Save campaign", func() -> void: BaseHub.request("save")))
