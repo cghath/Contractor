@@ -1132,6 +1132,7 @@ func _walk(to: Vector3, stop := 1.0, speed := WALK_SPEED) -> void:
 
 
 var _treating := false
+var _medic_note_at := 0.0
 var _said_lacking := false
 var _dropping := false
 
@@ -1153,6 +1154,11 @@ func _down_self() -> void:
 ## Goes to `victim_peer`'s body and treats it with what its care list asks for (own kit first,
 ## then the casualty's), until they're up or dead, or it had nothing to do for MEDIC_IDLE_S.
 func _treat_loop(victim_peer: int) -> void:
+	if _treating:
+		# Already treating (buddy aid got there first, S0733: the planned medic then ran a second
+		# loop on the same casualty beside it): that loop carries on.
+		_say("medic: already treating, not starting a second treatment of peer %d" % victim_peer)
+		return
 	_treating = true
 	_said_lacking = false
 	var hard_stop := Recorder.now() + MEDIC_MAX_S
@@ -1171,6 +1177,10 @@ func _treat_loop(victim_peer: int) -> void:
 			await _sleep(1.0)
 			continue
 		var body := victim.body_point()
+		if Recorder.now() >= _medic_note_at:
+			_medic_note_at = Recorder.now() + 20.0
+			_say("medic: peer %d %s, %.1f m from the body, care list %s" % [victim_peer, victim.vitals.condition_text(),
+				_flat(me.global_position, body), str(victim.vitals.care_needed().map(func(t: Dictionary) -> String: return "%s:%s" % [t.get("kind", "?"), t.get("part", "")]))])
 		if _flat(me.global_position, body) > 1.3:
 			_walk(body, 0.9, RUN_SPEED)
 			await _sleep(0.3)

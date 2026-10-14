@@ -172,8 +172,9 @@ func _ready() -> void:
 	print("[replay] %d frames (%.0f s), %d segments: %s" % [frames.size(), float(frames[-1].t) - _start_t, segments.size(),
 		JSON.stringify(segments.map(func(s: Dictionary) -> String: return "%s %.0f-%.0f x%.1f" % [s.title, s.from - _start_t, s.to - _start_t, s.speed]))])
 	_build_view()
-	if live and get_window().size.x >= 2000:
-		get_window().content_scale_factor = 2.0  # a big screen: the labels and map at a readable size
+	if get_window().size.x >= 2000:
+		get_window().content_scale_factor = 2.0  # a big screen or a native-res video: labels and map at a readable size
+	print("[replay] window %s at %s on %s" % [get_window().size, get_window().position, RenderingServer.get_video_adapter_name()])
 	_begin_segment(0)
 
 

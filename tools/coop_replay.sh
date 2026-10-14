@@ -3,21 +3,21 @@
 # replay.jsonl back in the real level (the client's beside it for divergence flags) and Godot's
 # Movie Maker writes every frame to an AVI, then ffmpeg (if found) makes an mp4 of it.
 #
-#   GODOT=<Voxel Tools editor exe> tools/coop_replay.sh <run folder>                 # highlights, 1280x720
-#   GODOT=... tools/coop_replay.sh <run folder> --cut full --speed 8 --res 854x480    # the whole run
+#   GODOT=<Voxel Tools editor exe> tools/coop_replay.sh <run folder>                 # highlights, 2560x1600
+#   GODOT=... tools/coop_replay.sh <run folder> --cut full --speed 8 --res 1280x800   # the whole run
 #
-# Options: --cut highlights|full (highlights), --speed N (full: 4), --res WxH (1280x720),
-# --compare client1|client2|client3|none (client1), --gpu N (Vulkan GPU index, default 1: the Radeon
-# iGPU on this PC), --out NAME (coop-<cut>), --capsules.
-# Videos go into <run folder>/video/. The window is a no-focus window placed in the corner (the
-# Captain games on this PC: nothing may take the focus); it renders on the integrated Radeon.
+# Options: --cut highlights|full (highlights), --speed N (full: 4), --res WxH (2560x1600, the
+# Captain's native), --compare client1|client2|client3|none (client1), --gpu N (Vulkan GPU index,
+# default 0: the RTX 4060 on this PC; 1 is the Radeon iGPU), --out NAME (coop-<cut>), --capsules.
+# Videos go into <run folder>/video/. The window is a no-focus window placed off every screen (the
+# Captain games on this PC: nothing may show up or take the focus); Movie Maker still renders it.
 set -u
 cd "$(dirname "$0")/.."
 GODOT="${GODOT:-godot}"
 RUN="${1:-}"
 [ -z "$RUN" ] || [ ! -d "$RUN" ] && { echo "usage: tools/coop_replay.sh <run folder> [options]"; exit 2; }
 shift
-CUT=highlights SPEED="" RES=1280x720 COMPARE=client1 GPU="${COOP_GPU_INDEX:-}" OUT="" EXTRA=()
+CUT=highlights SPEED="" RES=2560x1600 COMPARE=client1 GPU="${COOP_GPU_INDEX:-}" OUT="" EXTRA=()
 while [ $# -gt 0 ]; do
 	case "$1" in
 		--cut) CUT="$2"; shift ;;
@@ -52,19 +52,20 @@ if [ "$had_override" = 0 ]; then
 	printf '[display]\n\nwindow/size/no_focus=true\nwindow/energy_saving/keep_screen_on=false\n' >override.cfg
 fi
 render() {  # $1 = gpu index; writes $RUN/video/$OUT.avi, log $RUN/video/$OUT.log
-	timeout -k 10 7200 "$GODOT" --path . --gpu-index "$1" --resolution "$RES" --position 0,0 --fixed-fps 30 \
+	timeout -k 10 7200 "$GODOT" --path . --gpu-index "$1" --resolution "$RES" --position -20000,-20000 --fixed-fps 30 \
 		--write-movie "$(win "$RUN/video/$OUT.avi")" res://tests/coop_replay.tscn -- "${args[@]}" >"$RUN/video/$OUT.log" 2>&1
 }
 device_line() { grep -m1 -E 'Vulkan .*Using Device|Using Device #' "$RUN/video/$OUT.log"; }
-# This PC: Vulkan device 0 is the NVIDIA (the Captain's games), 1 the Radeon 890M. Checked after
-# the render from Godot's device line; set COOP_GPU_INDEX / --gpu elsewhere.
-GPU="${GPU:-1}"
+# This PC: Vulkan device 0 is the NVIDIA RTX 4060, 1 the Radeon 890M. Checked after the render
+# from Godot's device line; set COOP_GPU_INDEX / --gpu elsewhere.
+GPU="${GPU:-0}"
 echo "rendering $CUT of $RUN on GPU $GPU at $RES"
 render "$GPU"
 code=$?
 [ "$had_override" = 0 ] && rm -f override.cfg
 echo "device: $(device_line)"
-device_line | grep -qiE 'AMD|Radeon' || echo "WARNING: not rendered on the Radeon: pass --gpu <index> (see the device line above)"
+want=NVIDIA; [ "$GPU" = 1 ] && want=Radeon
+device_line | grep -qiE "$want" || echo "WARNING: not rendered on the $want: pass --gpu <index> (see the device line above)"
 grep -E '^\[replay\]' "$RUN/video/$OUT.log" | head -5
 if [ "$code" != 0 ] || [ ! -s "$RUN/video/$OUT.avi" ]; then
 	echo "render failed (exit $code): see $RUN/video/$OUT.log"
