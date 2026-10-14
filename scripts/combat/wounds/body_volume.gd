@@ -31,6 +31,10 @@ const FEMALE_SUFFIX := "_f"
 
 static var _grids: Dictionary = {}  # "part/body" -> {"origin", "cell", "dims", "entry", "body"}
 static var _occupancy: Dictionary = {}  # model -> VoxelArt.occupancy
+## warm_async: its task (-1: none running or taken in) and the grids it builds (its own dict,
+## written only by the worker until _take_warmed).
+static var _warm_task := -1
+static var _warmed: Dictionary = {}
 
 
 ## Where a round on `direction` that touched `hitbox` (part `part`) at world `position`
@@ -112,13 +116,29 @@ static func _solid(grid: Dictionary, cells: PackedByteArray, p: Vector3) -> bool
 ## through the whole torso or head, BodyMap.SEGMENTS), "entry" only those in this part (a
 ## torso or head voxel counts for a part inside that part's BodyMap.PART_BOXES).
 static func _grid(part: StringName, body := "") -> Dictionary:
-	var key := "%s/%s" % [part, body if body == FEMALE else ""]
+	var key := _key(part, body)
 	if _grids.has(key):
 		return _grids[key]
+	if _warm_task >= 0:
+		_take_warmed()  # warm_async still building (or done and not taken in): wait for it
+		if _grids.has(key):
+			return _grids[key]
+	var grid := _build_grid(part, body, _occupancy)
+	_grids[key] = grid
+	return grid
+
+
+static func _key(part: StringName, body: String) -> String:
+	return "%s/%s" % [part, body if body == FEMALE else ""]
+
+
+## Builds a part's grid, its models' occupancy cached in `occupancy` (no other state: a worker
+## thread can build them, warm_async).
+static func _build_grid(part: StringName, body: String, occupancy: Dictionary) -> Dictionary:
 	var model: String = model_of(part, body)
-	if not _occupancy.has(model):
-		_occupancy[model] = VoxelArt.occupancy(model)
-	var occ: Dictionary = _occupancy[model]
+	if not occupancy.has(model):
+		occupancy[model] = VoxelArt.occupancy(model)
+	var occ: Dictionary = occupancy[model]
 	var origin: Vector3 = pivot_at(part, body) - Vector3(occ.pivot)
 	var dims: Vector3i = occ.dims
 	var cell: float = occ.cell
@@ -135,9 +155,7 @@ static func _grid(part: StringName, body := "") -> Dictionary:
 					for x in range(maxi(int(lo.x), 0), mini(int(hi.x), dims.x)):
 						var i := x + dims.x * (y + dims.y * z)
 						entry_cells[i] = solid[i]
-	var grid := {"origin": origin, "cell": cell, "dims": dims, "entry": entry_cells, "body": solid}
-	_grids[key] = grid
-	return grid
+	return {"origin": origin, "cell": cell, "dims": dims, "entry": entry_cells, "body": solid}
 
 
 ## Builds every part's grid now (host, at level start) so the first hit doesn't hitch, for each
@@ -146,6 +164,50 @@ static func warm(bodies: Array = [""]) -> void:
 	for body: String in bodies:
 		for part: StringName in PART_MODELS:
 			_grid(part, body)
+
+
+## The same on a worker thread (a zone's host: 0.3-0.6 s of building kept off the main thread
+## while the zone loads); the first hit before it's done waits for it (_grid).
+static func warm_async(bodies: Array = [""]) -> void:
+	if _warm_task >= 0:
+		return
+	var wanted: Array = []
+	for body: String in bodies:
+		for part: StringName in PART_MODELS:
+			if not _grids.has(_key(part, body)):
+				wanted.append([part, body])
+	if wanted.is_empty():
+		return
+	_warmed = {}
+	var into := _warmed
+	_warm_task = WorkerThreadPool.add_task(func() -> void:
+		var occupancy := {}
+		for w: Array in wanted:
+			into[_key(w[0], w[1])] = _build_grid(w[0], w[1], occupancy), false, "BodyVolume warm")
+
+
+## Whether warm_async's grids are taken in (true when none was started).
+static func is_warm() -> bool:
+	if _warm_task >= 0 and WorkerThreadPool.is_task_completed(_warm_task):
+		_take_warmed()
+	return _warm_task < 0
+
+
+## Waits for warm_async (at once if it's done) and takes its grids in (a level going calls it:
+## a task must be waited on).
+static func finish_warm() -> void:
+	_take_warmed()
+
+
+static func _take_warmed() -> void:
+	if _warm_task < 0:
+		return
+	WorkerThreadPool.wait_for_task_completion(_warm_task)
+	_warm_task = -1
+	for key: String in _warmed:
+		if not _grids.has(key):
+			_grids[key] = _warmed[key]
+	_warmed = {}
 
 
 ## Where the part's model pivot sits in the rest pose (CharacterModel's joints for body type

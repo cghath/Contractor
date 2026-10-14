@@ -148,8 +148,10 @@ func _physics_process(_delta: float) -> void:
 	if now >= _next_update:
 		_next_update = now + UPDATE_S
 		_update_wanted()
-	# Start new chunks, nearest first, while there's room.
-	while not _queue.is_empty() and _baking.size() < MAX_BAKES:
+	# Start new chunks, nearest first, while there's room, for at most REBAKE_BUDGET_MS a frame
+	# (gathering a chunk's voxels takes milliseconds; 8 at once held fights' frames for 50-200 ms).
+	var until := Time.get_ticks_usec() + int(REBAKE_BUDGET_MS * 1000.0)
+	while not _queue.is_empty() and _baking.size() < MAX_BAKES and Time.get_ticks_usec() < until:
 		var chunk: Vector2i = _queue.pop_front()
 		if _regions.has(chunk) or not _wanted.has(chunk):
 			continue

@@ -288,7 +288,14 @@ func _build_structures() -> void:
 
 # --- Hosting ----------------------------------------------------------------------------------
 
+func _exit_tree() -> void:
+	BodyVolume.finish_warm()
+
+
 func _on_hosted() -> void:
+	# Hits are judged on the host: both bodies' shapes built on a worker as the zone loads (the
+	# first hit in a zone used to build them mid-fight: 200-340 ms, tests/perf_timing.gd).
+	BodyVolume.warm_async(["", BodyVolume.FEMALE])
 	GameState.load_zone()
 	_logs = {}
 	for edit: Dictionary in GameState.voxel_edits:

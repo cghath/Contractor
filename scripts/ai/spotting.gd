@@ -214,8 +214,7 @@ static func optic_x(observer: Soldier, calm: bool) -> float:
 static func foliage_m(scatter: ZoneScatter, observer: Soldier, target: Soldier) -> float:
 	if scatter == null:
 		return 0.0
-	var eyes := observer.camera.global_position
-	return minf(scatter.foliage_between(eyes, target.camera.global_position), scatter.foliage_between(eyes, target.aim_point()))
+	return scatter.foliage_least(observer.camera.global_position, target.camera.global_position, target.aim_point())  # one walk for both lines
 
 
 ## How far `s`'s footsteps carry now (0 when still or prone).

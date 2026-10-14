@@ -41,6 +41,9 @@ func _test_streams() -> void:
 		if options.size() != Sfx.SYNTH_VARIANTS or (options[0] as AudioStreamWAV).data.size() < 400:
 			bad.append(id)
 	check(bad.is_empty(), "each has %d generated variants (bad: %s)" % [Sfx.SYNTH_VARIANTS, bad])
+	check(Sfx.is_prebuilt() and Sfx.prebuild_ms > 0.0
+		and (Sfx.streams(&"explosion")[1] as AudioStreamWAV).data == Sfx.synth(Sfx.defs["explosion"].synth, hash("explosion") + 7919).data,
+		"they were built on worker threads at boot (%.0f ms), the same as built on the main thread" % Sfx.prebuild_ms)
 	var a := (Sfx.streams(&"shot_rifle")[0] as AudioStreamWAV).data
 	var b := (Sfx.streams(&"shot_rifle")[1] as AudioStreamWAV).data
 	check(a != b, "variants differ, so repeats don't sound identical")
