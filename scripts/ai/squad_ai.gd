@@ -135,7 +135,8 @@ const AIM_UNSKILLED_DEG := 1.2
 const FALL_BACK_M := 20.0
 const FALL_BACK_COVER_M := 8.0
 ## Hostiles see this far (Captain, 2026-10-13: engagement ranges up; was 60 m). Doctrine's
-## engage_m should match once it's wired (audit A3-07, cghath).
+## engage_m fits it (insurgents 180 m, regulars 200 m) and Doctrine.engage_m never goes past
+## it (audit F-03; still pending, A3-07).
 const SIGHT_RANGE := 200.0
 const SUPPRESSED := 0.5
 const PINNED := 0.85
