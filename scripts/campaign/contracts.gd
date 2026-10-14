@@ -616,7 +616,10 @@ func server_draw_support(cid: String, amount: int) -> int:
 ##   claim from), optional;
 ## - "extracted": names of who got out; "casualties": [{"name", "status" ("kia", "mia",
 ##   "wounded"), "injury"}];
-## - "hvts": [{"hvt", "alive"}] delivered at extraction (also server_hvt_delivered).
+## - "hvts": [{"hvt", "alive"}] delivered at extraction (also server_hvt_delivered);
+## - "bank": what else came out, banked instead of "items" (BaseHub: set down at the point,
+##   bodies brought in); "driven_out": in the hold of a motor-pool vehicle going home (B-18:
+##   it counts and shows in the debrief, but isn't banked: it stays in the vehicle).
 ## report_from_level(level, soldiers) builds one from the level as it stands.
 func server_end_deployment(report: Dictionary) -> Dictionary:
 	var s := _s()
@@ -625,7 +628,14 @@ func server_end_deployment(report: Dictionary) -> Dictionary:
 		return {}
 	for h: Dictionary in report.get("hvts", []):
 		objectives.server_hvt_delivered(String(h.get("hvt", "")), bool(h.get("alive", true)))
-	var out_items: Array = (report.get("items", []) as Array) + (dep.banked as Array)
+	# B-18: what else came out (BaseHub's "bank": items set down in the point, a helicopter's
+	# hold, bodies carried in) counts for "carry it out" objectives and shows in the debrief too,
+	# not only what the people still hold: intel set down at the point debriefed "failed".
+	var out_items: Array = (report.get("items", []) as Array) + (report.get("bank", []) as Array) + (dep.banked as Array)
+	# And what went home in a motor-pool vehicle's hold ("driven_out"): a hard case driven out in
+	# the M-ATV debriefed "failed" too. It stays in the vehicle, so it isn't banked below.
+	for entry: Dictionary in report.get("driven_out", []):
+		out_items.append_array(flatten_entry(entry))
 	objectives.server_items_out(out_items)
 	for o: Dictionary in objectives.active():
 		objectives.server_set_state(o.oid, Objectives.FAILED)

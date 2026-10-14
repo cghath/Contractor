@@ -1310,6 +1310,7 @@ func end_deployment(report: Dictionary) -> void:
 		var debrief_report := Contracts.report_from_level(lvl, extracted, banked)
 		debrief_report["hvts"] = hvts
 		debrief_report["bank"] = bank
+		debrief_report["driven_out"] = report.get("driven_out", [])  # B-18: in a pool vehicle's hold going home (it stays there)
 		_take_out_of_zone(banked)
 		Contracts.server_end_deployment(debrief_report)
 	server_end_deployment(extracted, true, not contract_ran)

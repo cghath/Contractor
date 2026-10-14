@@ -117,7 +117,6 @@ func server_settle(points: Array) -> int:
 	if not multiplayer.is_server():
 		return 0
 	_handled = true
-	var reach := float(AavSupport.data().get("motor_pool", {}).get("return_reach_m", 60.0))
 	var layer := VehicleLayer.of(self)
 	var home := 0
 	if layer == null:
@@ -126,16 +125,47 @@ func server_settle(points: Array) -> int:
 		var id := MotorPool.pool_id(v)
 		if id == "":
 			continue
-		var near := false
-		for q: Vector3 in points:
-			near = near or Vector2(v.global_position.x - q.x, v.global_position.z - q.z).length() <= reach
-		if near and MotorPool.server_return(v):
+		if in_reach(v, points) and MotorPool.server_return(v):
 			home += 1
 		else:
 			MotorPool.remove(id)
 			v.remove_meta(&"no_save")  # it stays where it was left: the zone keeps it
 			v.remove_meta(&"pool_id")
 	return home
+
+
+## Whether vehicle `v` is within return_reach_m (flat) of one of `points`: a pool vehicle that
+## is goes home when the squad extracts there (server_settle).
+static func in_reach(v: Vehicle, points: Array) -> bool:
+	var reach := float(AavSupport.data().get("motor_pool", {}).get("return_reach_m", 60.0))
+	for q: Vector3 in points:
+		if Vector2(v.global_position.x - q.x, v.global_position.z - q.z).length() <= reach:
+			return true
+	return false
+
+
+## Host. What's in the holds of the pool vehicles in this level that go home with the squad
+## extracting at `points` (server_settle: in reach, still in the pool, and neither a wreck nor
+## burning, which MotorPool.server_return loses), one entry per stack ({"id", "count", "state"?,
+## "vehicle"}), leaving out `skip` (a helicopter the squad rides out in: Extraction lists its
+## own hold). B-18: that left the zone with the squad, so it counts as carried out, though it
+## stays in the vehicle (its record keeps the cargo): a hard case driven out in the M-ATV
+## debriefed "failed".
+func cargo_going_home(points: Array, skip: Node = null) -> Array:
+	var out: Array = []
+	var layer := VehicleLayer.of(self)
+	for v in (layer.vehicles() if layer else []):
+		var id := MotorPool.pool_id(v)
+		if v == skip or v.is_queued_for_deletion() or id == "" or MotorPool.entry(id).is_empty() or v.wrecked or v.is_burning() \
+				or not in_reach(v, points):
+			continue
+		var hold := v.cargo() as VehicleCargo
+		for e: Dictionary in (hold.entries() if hold else []):
+			var entry := {"id": String(e.id), "count": int(e.get("count", 1)), "vehicle": v.display_name()}
+			if not (e.get("state", {}) as Dictionary).is_empty():
+				entry["state"] = (e.state as Dictionary).duplicate(true)
+			out.append(entry)
+	return out
 
 
 # --- The pool on every peer ------------------------------------------------------------------------
