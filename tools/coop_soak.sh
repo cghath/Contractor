@@ -32,7 +32,24 @@
 # from (its BUILD.txt), so they run the same game code the build does (a build's pack leaves
 # tests/ out, so the bots run in the editor on a checkout of that commit: a worktree
 # ../Contractor-soakbuild-<sha>, with this harness's own files laid over it). Default: newest
-# with --human, none (this checkout) otherwise.
+# with --human, none (this checkout) otherwise. DIR may also be a git commit or branch (say
+# origin/integrate/oct15): the bots run that commit's code the same way, no build needed.
+#
+# Checks of the co-op fixes (--checks; Captain, 2026-10-14: the soak finds regressions so he
+# doesn't have to by playing): the --human flow, with tests/coop_fake_human.tscn as the human
+# (started here, on the bots' private session) running these checks, each PASS, FAIL or
+# SKIPPED (not in this build: the harness feature-detects, so it still runs bots from any older
+# build's commit), or NOT RUN (the run never got there), in report.md's "Co-op fix checks":
+#   extract_confirm  a client confirms extraction from inside a point; refused from outside
+#   leave_behind     a bot player down outside the point: the first confirm warns "Leaving
+#                    behind", a second one extracts
+#   fob_ready        FOB ready-up: Deploy refused naming the client who isn't ready, then allowed
+#   respawn_kit      a respawn keeps the kit you died in and leaves no player body
+#   heli_lz          a helicopter extraction shows only its LZ (and every point again when sent home)
+#   GODOT=... tools/coop_soak.sh --checks --port 25520                      # this checkout, ~25 min
+#   GODOT=... tools/coop_soak.sh --checks --port 25520 --build origin/integrate/oct15
+# Defaults with --checks: 40 min at most (it ends when the fake human is done: 2 deployments),
+# 2 bots, a direct link, a free soak port unless --port.
 set -u
 # Bash reads a script as it runs: editing this file under a running soak broke S0706 mid-run.
 # Run from a private copy (the checkout's path is passed along).
@@ -50,11 +67,12 @@ if [ -z "$PYTHON" ]; then
 		if "$p" -c "import sys" >/dev/null 2>&1; then PYTHON="$p"; break; fi
 	done
 fi
-MINUTES=10 MODE=lossy LATENCY=100 JITTER=30 LOSS=1.5 CLIENTS=3 PORT=25400 LATE=1 TAG="" HUMAN=0 BUILD="" WAIT_HUMAN=600
+MINUTES=10 MODE=lossy LATENCY=100 JITTER=30 LOSS=1.5 CLIENTS=3 PORT=25400 LATE=1 TAG="" HUMAN=0 BUILD="" WAIT_HUMAN=600 CHECKS=0
 ALL_ARGS=("$@")
 while [ $# -gt 0 ]; do
 	case "$1" in
 		--human) HUMAN=1 ;;
+		--checks) CHECKS=1 ;;
 		--build) BUILD="$2"; shift ;;
 		--wait-human) WAIT_HUMAN="$2"; shift ;;
 		--minutes) MINUTES="$2"; shift ;;
@@ -70,7 +88,12 @@ while [ $# -gt 0 ]; do
 	esac
 	shift
 done
-if [ "$HUMAN" = 1 ]; then
+if [ "$CHECKS" = 1 ]; then
+	# The fake human plays the human's part (the --human flow), on the bots' private session.
+	printf '%s\n' "${ALL_ARGS[@]}" | grep -qx -- --minutes || MINUTES=40
+	printf '%s\n' "${ALL_ARGS[@]}" | grep -qx -- --clients || CLIENTS=2
+	HUMAN=1 MODE=clean LATE=0 TAG="${TAG:-checks}"
+elif [ "$HUMAN" = 1 ]; then
 	# Defaults for playing along, unless given: 120 min, 2 bots, the game's port, a direct link.
 	printf '%s\n' "${ALL_ARGS[@]}" | grep -qx -- --minutes || MINUTES=120
 	printf '%s\n' "${ALL_ARGS[@]}" | grep -qx -- --clients || CLIENTS=2
@@ -83,12 +106,22 @@ if [ -n "$BUILD" ] && [ "$BUILD" != none ]; then
 	if [ "$BUILD" = newest ]; then
 		BUILD="$(ls -1d "$builds"/contractor-* 2>/dev/null | sort | tail -1)"
 	fi
-	[ -f "$BUILD/BUILD.txt" ] || { echo "no BUILD.txt in '$BUILD'"; exit 2; }
-	sha="$(grep -oE 'commit [0-9a-f]{7,40}' "$BUILD/BUILD.txt" | head -1 | cut -d' ' -f2)"
-	[ -n "$sha" ] || { echo "no commit in $BUILD/BUILD.txt"; exit 2; }
+	if [ -f "$BUILD/BUILD.txt" ]; then
+		sha="$(grep -oE 'commit [0-9a-f]{7,40}' "$BUILD/BUILD.txt" | head -1 | cut -d' ' -f2)"
+		[ -n "$sha" ] || { echo "no commit in $BUILD/BUILD.txt"; exit 2; }
+		what="$(basename "$BUILD")"
+	else
+		# A commit or branch (Captain, 2026-10-14: run the checks on integrate/oct15 before it
+		# is built): a checkout of that commit with the harness laid over it, as for a build.
+		git fetch -q origin 2>/dev/null
+		sha="$(git rev-parse --verify -q "$BUILD^{commit}")"
+		[ -n "$sha" ] || { echo "'$BUILD' is no build folder (no BUILD.txt) and no commit or branch"; exit 2; }
+		sha="${sha:0:12}"
+		what="$BUILD"
+	fi
 	here="$(pwd)"
 	wt="$(cd .. && pwd)/Contractor-soakbuild-$sha"
-	echo "bots run the game code of $(basename "$BUILD") (commit $sha) in $wt"
+	echo "bots run the game code of $what (commit $sha) in $wt"
 	if [ ! -d "$wt" ]; then
 		git fetch -q origin 2>/dev/null
 		git worktree add -q --detach "$wt" "$sha" || { echo "could not check out $sha"; exit 2; }
@@ -115,7 +148,7 @@ if [ "$MODE" = clean ]; then LATENCY=0; JITTER=0; LOSS=0; fi
 # running soak's config.json names.
 # Not with --human: a build only joins the game's own port (a stopped play-along's RUNNING
 # folder naming 24680 moved S0754 to 24690, where the Captain's game couldn't reach it).
-if [ "$HUMAN" != 1 ] && ! printf '%s\n' "${ALL_ARGS[@]}" | grep -qx -- --port; then
+if { [ "$HUMAN" != 1 ] || [ "$CHECKS" = 1 ]; } && ! printf '%s\n' "${ALL_ARGS[@]}" | grep -qx -- --port; then
 	parent_for_ports="$(run_log_parent)"
 	taken="$(cat "$parent_for_ports"/*/S*-RUNNING-coop-soak-*/config.json 2>/dev/null | grep -oE '"port": [0-9]+' | grep -oE '[0-9]+' | tr '\n' ' ')"
 	PORT="$("$PYTHON" - "$PORT" "$CLIENTS" "$taken" <<'PY'
@@ -159,7 +192,9 @@ run="$day/$run_id-$start_time-RUNNING-$tail_name"
 mkdir -p "$run/host" "$run/sessions"
 win() { cygpath -m "$1" 2>/dev/null || echo "$1"; }
 echo "co-op soak $run_id: $MINUTES min, $MODE, $CLIENTS clients, logs in $run"
-if [ "$HUMAN" = 1 ]; then
+if [ "$CHECKS" = 1 ]; then
+	echo "co-op fix checks: tests/coop_fake_human.tscn plays the human on port $PORT (its log: $run/human/fake_human.log)"
+elif [ "$HUMAN" = 1 ]; then
 	ips="$(ipconfig 2>/dev/null | grep -aE 'IPv4' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | tr '\n' ' ')"
 	echo "PLAY ALONG: start the game build, Join someone's session, host address 127.0.0.1 (from another PC: one of $ips), port $PORT."
 	echo "The bots wait up to $WAIT_HUMAN s for you before the first contract, and for you at each extraction. Ctrl+C here ends the session."
@@ -167,13 +202,13 @@ fi
 cat >"$run/config.json" <<EOF
 {"run_id": "$run_id", "mode": "$MODE", "minutes": $MINUTES, "latency_ms": $LATENCY, "jitter_ms": $JITTER, "loss_pct": $LOSS,
  "clients": $CLIENTS, "port": $PORT, "late": $LATE, "branch_sha": "$(run_log_tail)", "started": "$(date '+%Y-%m-%d %H:%M:%S')",
- "godot": "$(win "$GODOT")"}
+ "godot": "$(win "$GODOT")", "checks": $CHECKS}
 EOF
 
 # The bots' session takes only joiners with this token (Net._hello): another run's test that
 # hits the port is refused. Not with --human (a player's build has no token to give).
 token="soak-$run_id-$start_time"
-[ "$HUMAN" = 1 ] && token=""
+[ "$HUMAN" = 1 ] && [ "$CHECKS" = 0 ] && token=""  # the fake human (--checks) gets the token
 pids=()
 cleanup() {
 	for pid in "${pids[@]}"; do kill "$pid" 2>/dev/null; done
@@ -211,6 +246,7 @@ fi
 
 human_args=()
 [ "$HUMAN" = 1 ] && human_args=(--soak-human --soak-wait-human "$WAIT_HUMAN")
+[ "$CHECKS" = 1 ] && human_args+=(--soak-checks)
 instance host "$PORT" --soak-role host --soak-bot 0 --soak-duration "$DURATION" --soak-expect $(( LATE == 1 && CLIENTS == 3 ? 2 : CLIENTS )) "${human_args[@]}"
 for i in $(seq 1 90); do
 	[ -f "$run/host_ready" ] && break
@@ -229,7 +265,7 @@ if [ ! -f "$run/host_ready" ]; then
 fi
 label="$(grep -m1 -aoE '^\[build\] .*' "$run/host/stdout.log" 2>/dev/null | cut -c9-)"
 echo "the bots' game: ${label:-$(git rev-parse --short HEAD) (no build label in this commit)}"
-[ "$HUMAN" = 1 ] && echo "Your game's main menu title must show the same commit, or the host turns you away (builds from before the build check just connect)."
+[ "$HUMAN" = 1 ] && [ "$CHECKS" = 0 ] && echo "Your game's main menu title must show the same commit, or the host turns you away (builds from before the build check just connect)."
 for n in $(seq 1 "$CLIENTS"); do
 	[ "$HUMAN" = 1 ] && break  # bots join the host directly, as the human does
 	"$PYTHON" tools/coop_relay.py --listen $(( PORT + n )) --target "127.0.0.1:$PORT" --latency "$LATENCY" --jitter "$JITTER" --loss "$LOSS" \
@@ -247,6 +283,21 @@ for n in $(seq 1 "$CLIENTS"); do
 	instance "client$n" "$cport" --soak-role client --soak-bot "$n" --soak-duration "$DURATION" "${extra[@]}"  # their own deadline too (S0758: 600 s default + 1500 s, gone at 35 min)
 	sleep 2
 done
+if [ "$CHECKS" = 1 ]; then
+	# The fake human joins once the bots are in (the host tells the human from the bots by their
+	# posted peer ids), through the main menu's Join as a build does, with the session's token.
+	sleep 10
+	mkdir -p "$run/human"
+	(
+		CONTRACTOR_SESSION_TOKEN="$token" CONTRACTOR_PORT="$PORT" CONTRACTOR_TEST_TAG="_soak${PORT}h" CONTRACTOR_SESSION_LOG=1 CONTRACTOR_TEST_LOGS="$(win "$run/sessions/human")" \
+			timeout -k 10 $(( DURATION + 1800 )) "$GODOT" --headless --path . res://tests/coop_fake_human.tscn -- --out "$(win "$run/human")" --run "$(win "$run")" --checks \
+			>"$run/human/stdout.log" 2>&1 &
+		echo $! >"$run/human/timeout_pid"
+		wait $!
+		echo $? >"$run/human/exit_code"
+	) &
+	pids+=($!)
+fi
 host_pid="${pids[0]}"
 late_started=0
 deadline=$(( $(date +%s) + DURATION + 1800 ))

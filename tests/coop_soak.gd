@@ -95,6 +95,14 @@ var late := false
 ## (up to HUMAN_EXTRACT_S); nothing here ever targets them (no planned knock-out, no give-up).
 var human := false
 var wait_human_s := 600.0
+## Checks of the co-op fixes (tools/coop_soak.sh --checks; Captain, 2026-10-14): the human is
+## tests/coop_fake_human.tscn running them (see its doc). The host does its part: the FOB
+## ready-up's Deploy tried with the human not ready (fob_ready), the bot player the fake human
+## asks to be knocked out kept down (leave_behind, <run>/human_ask.json), and on a build where
+## clients confirm extraction (fix/coop-extraction) it leaves the confirm to the fake human for
+## CHECKS_CONFIRM_AFTER_S. What it checked goes to host/checks.jsonl (the report merges both).
+var checks := false
+const CHECKS_CONFIRM_AFTER_S := 150.0
 const HUMAN_EXTRACT_S := 1200.0
 ## Time at the FOB between contracts once the human is back (the debrief, kitting up).
 const HUMAN_BASE_S := 60.0
@@ -140,6 +148,7 @@ func _ready() -> void:
 	late = "--soak-late" in args
 	human = "--soak-human" in args
 	wait_human_s = float(_arg(args, "--soak-wait-human", "600"))
+	checks = "--soak-checks" in args
 	_t0 = Recorder.now()
 	var peer_dir := run_dir.path_join("host" if role == "host" else "client%d" % bot)
 	DirAccess.make_dir_recursive_absolute(peer_dir)
@@ -364,6 +373,9 @@ func _host_main() -> void:
 			break
 		if cycle >= (40 if human else 12):
 			break
+		if checks and _humans().is_empty():
+			_say("checks: the fake human is done and gone: no more contracts")
+			break
 		if human and not _humans().is_empty():
 			# S0758: the host took the next contract at once, and the human was left on the
 			# debrief in the old zone. Wait at the FOB until they're in it, then give them
@@ -401,17 +413,57 @@ func _restock() -> void:
 ## waits until every player is ready). The bots ready up at once; a human readies up with the
 ## Ready button on the squad page (up to HUMAN_READY_S, then the bots go without waiting).
 ## Builds from before the ready-up have nothing to wait for.
-func _ready_up() -> void:
+## --checks (fob_ready): with the bots ready and the human not, Deploy must be refused naming
+## the human and no bot (BaseHub.WAITING_FOR); the refusal goes out in the phase ("ready_up",
+## the fake human's cue to check its view and press Ready). Returns true when that Deploy went
+## through anyway (a FAIL: the session is on its way to the zone).
+func _ready_up() -> bool:
 	if not BaseHub.has_method(&"server_set_ready"):
-		return
+		if checks and not _checked.has("fob_ready"):
+			_check("fob_ready", "SKIPPED", "not in this build (no BaseHub.server_set_ready)")
+		return false
 	for n: int in _bots():
 		BaseHub.call(&"server_set_ready", _bot_peer(n), true)
 	if human and not _humans().is_empty() and not BaseHub.call(&"all_ready"):
+		if checks:
+			var waiting: Array = BaseHub.call(&"not_ready_names")
+			var why := BaseHub.server_deploy()
+			_say("checks: Deploy with the human not ready: \"%s\"" % why)
+			if why == "":
+				_check("fob_ready", "FAIL", "Deploy went through with %s not ready" % [waiting])
+				return true
+			var prefix := String((BaseHub.get_script() as Script).get_script_constant_map().get("WAITING_FOR", "Waiting for: "))
+			var names_human := _humans().all(func(peer: int) -> bool: return why.contains("Player %d" % peer))
+			var names_bot := _bots().values().any(func(st: Dictionary) -> bool: return why.contains("Player %d" % int(st.get("peer", 0))))
+			_ready_check = {"why": why, "ok": why.begins_with(prefix) and names_human and not names_bot, "names_human": names_human, "names_bot": names_bot}
+			_set_phase("ready_up", {"waiting_for": waiting, "refused": why})
 		_say("FOB: waiting for the human to press Ready (up to %d s)" % int(HUMAN_READY_S))
 		if not await _wait_for(func() -> bool: return BaseHub.call(&"all_ready"), HUMAN_READY_S):
 			_say("FOB: still waiting for %s: deploying anyway would be refused, so marking them ready" % [BaseHub.call(&"not_ready_names")])
 			for peer: int in _humans():
 				BaseHub.call(&"server_set_ready", peer, true)
+			if not _ready_check.is_empty():
+				_ready_check["ok"] = false
+				_ready_check["never_ready"] = true
+	return false
+
+
+var _ready_check := {}  # host, --checks: what the Deploy with the human not ready answered (fob_ready)
+var _checked := {}      # host, --checks: check id -> true once this host wrote a result for it
+
+
+## Host, --checks: one check's result (tests/coop_fake_human.gd has the list), a line in
+## host/checks.jsonl.
+func _check(id: String, result: String, detail: String) -> void:
+	_checked[id] = true
+	_say("CHECK %s %s: %s" % [id, result, detail])
+	var f := FileAccess.open(run_dir.path_join("host").path_join("checks.jsonl"), FileAccess.READ_WRITE)
+	if f == null:
+		f = FileAccess.open(run_dir.path_join("host").path_join("checks.jsonl"), FileAccess.WRITE)
+	if f:
+		f.seek_end()
+		f.store_line(JSON.stringify({"check": id, "result": result, "detail": detail, "by": "host", "t": Recorder.now()}))
+		f.close()
 
 
 ## Connected peers that are no bot of this harness (a real player who joined).
@@ -515,8 +567,15 @@ func _host_cycle(cycle: int) -> Dictionary:
 			BaseHub.server_pick(mid, true)
 	result.contract["squad"] = squad
 	result.contract["picked_by"] = picked_by
-	await _ready_up()
-	var why_deploy := BaseHub.server_deploy()
+	var deployed_anyway: bool = await _ready_up()
+	var why_deploy := "" if deployed_anyway else BaseHub.server_deploy()
+	if not _ready_check.is_empty():
+		var rc := _ready_check
+		_ready_check = {}
+		var ok: bool = rc.ok and why_deploy == ""
+		_check("fob_ready", "PASS" if ok else "FAIL", "Deploy with the human not ready: \"%s\"%s%s; after the human's Ready: %s" % [rc.why,
+			"" if rc.names_human else " (DOESN'T NAME THE HUMAN)", " (NAMES A BOT, who was ready)" if rc.names_bot else "",
+			"the human never pressed Ready in %d s" % int(HUMAN_READY_S) if rc.get("never_ready", false) else ("deployed" if why_deploy == "" else "REFUSED: %s" % why_deploy)])
 	if why_deploy != "":
 		result.why = "deploy: %s" % why_deploy
 		return result
@@ -719,6 +778,8 @@ func _host_follow_human(result: Dictionary) -> Dictionary:
 			_set_phase("follow", {"leader": now_lead})
 		_follow_tick(_me(), now_lead)
 		_extract_with_human(now_lead)
+		if checks:
+			_checks_tick()
 		if Recorder.now() >= note_at:
 			note_at = Recorder.now() + 30.0
 			_say("follow: %s" % _follow_note(now_lead))
@@ -729,6 +790,37 @@ func _host_follow_human(result: Dictionary) -> Dictionary:
 		result.why = "the human never extracted (%s)" % ("left the deployment" if _human_lead() == 0 else "%d s passed" % int(HUMAN_DEPLOY_S))
 		return result
 	return await _host_debrief(result, serial_before)
+
+
+var _ask_serial := 0
+var _keep_down_at := 0.0
+
+
+## Host, --checks, while the human leads: what the fake human asks for in <run>/human_ask.json
+## (its "voice chat"). "down" {peer}: that bot player goes down (dev tools' damage, as the soak's
+## planned knock-out) and stays down, posted as the phase's planned casualty with "check" so no
+## bot treats them and they don't give up (leave_behind: a player down outside the point);
+## "release" ends that.
+func _checks_tick() -> void:
+	var ask := _read_json(run_dir.path_join("human_ask.json"))
+	if int(ask.get("serial", 0)) > _ask_serial:
+		_ask_serial = int(ask.get("serial", 0))
+		match String(ask.get("ask", "")):
+			"down":
+				_say("checks: the fake human asks for Player %d to go down (leave_behind)" % int(ask.get("peer", 0)))
+				_set_phase("follow", {"down": {"victim": int(ask.get("peer", 0)), "medic": 0, "check": true}})
+				_keep_down_at = 0.0
+			"release":
+				_say("checks: the fake human's casualty is released")
+				_set_phase("follow", {"down": {}})
+	var down: Dictionary = _phase.get("down", {})
+	if not bool(down.get("check", false)) or Recorder.now() < _keep_down_at:
+		return
+	_keep_down_at = Recorder.now() + 2.0
+	var victim := _player(int(down.get("victim", 0)))
+	if victim and victim.vitals.is_up() and int(victim.get(&"respawn_state") if victim.get(&"respawn_state") != null else 0) != 1:
+		_say("checks: knocking Player %s out (%.0f)" % [victim.name, DOWN_DAMAGE])
+		victim.vitals.server_damage(DOWN_DAMAGE)
 
 
 ## Host: how far each bot is from the human, for the log ("host 14 m, bot1 19 m (down)").
@@ -872,10 +964,17 @@ func _extract_with_human(lead: int) -> void:
 		return
 	_confirm_next = now + 3.0
 	var missing := extraction.missing_at(point)
-	if missing.is_empty() and now - _human_in_point_since > (5.0 if called else 20.0):
+	# --checks on a build where clients confirm (fix/coop-extraction): the fake human confirms
+	# itself (extract_confirm, leave_behind); the host confirms only after CHECKS_CONFIRM_AFTER_S,
+	# down players or not (that build warns, then extracts at a second confirm), so a failed check
+	# never strands the run, and leaves no squad AI behind by itself (that would change who the
+	# fake human's "Leaving behind" warning names between its two confirms).
+	var client_confirms := checks and extraction.has_method(&"point_of_player")
+	var wait := CHECKS_CONFIRM_AFTER_S if client_confirms else (5.0 if called else 20.0)
+	if (missing.is_empty() or client_confirms) and now - _human_in_point_since > wait:
 		var why := extraction.server_confirm()
 		_say("extraction confirmed for the human" if why == "" else "extraction not confirmed: %s" % why)
-	elif not missing.is_empty() and now - _human_in_point_since > 90.0:
+	elif not client_confirms and not missing.is_empty() and now - _human_in_point_since > 90.0:
 		for mate: Soldier in extraction.required().ai:
 			if not Extraction.inside(point, mate.body_point()):
 				extraction.server_set_bring(String(mate.name), false)
@@ -1631,6 +1730,9 @@ func _give_up_tick(me: Soldier, delta: float) -> void:
 		return
 	_down_for += delta
 	_give_up_left -= delta
+	var planned: Dictionary = _phase.get("down", {})
+	if bool(planned.get("check", false)) and int(planned.get("victim", 0)) == multiplayer.get_unique_id():
+		return  # --checks: the fake human's casualty (leave_behind) stays down where it fell
 	if _down_for < GIVE_UP_S or _give_up_left > 0.0:
 		return
 	_give_up_left = 5.0

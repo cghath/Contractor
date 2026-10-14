@@ -15,6 +15,11 @@ hash differing; per peer: level, objectives, world items, debrief count. A misma
 on the next mark is "transient" (in flight when the mark was taken); one that is still there on
 the next mark is "persistent". Marks where either side is switching level or the client is
 offline are skipped (counted).
+With --checks (tools/coop_soak.sh) the fake human's and the host's checks of the co-op fixes
+(human/checks.jsonl, host/checks.jsonl) go in "Co-op fix checks", one line each: FAIL if any
+try failed, else PASS if one passed, else SKIPPED (not in this build), else NOT RUN; a FAIL fails
+the verdict, and so do the fake human's own problems (human/summary.json). The checks are also
+printed ("CHECK <id> <result> <detail>") before the verdict line.
 Standard library only.
 """
 import argparse
@@ -27,6 +32,30 @@ import sys
 
 PEERS = ["host", "client1", "client2", "client3"]
 F_UP, F_DOWNED, F_DEAD = 1, 2, 4
+# The co-op fix checks (tests/coop_fake_human.gd has what each does), in report order.
+CHECKS = [
+    ("extract_confirm", "a client confirms extraction from inside a point; refused from outside (fix/coop-extraction)"),
+    ("leave_behind", "a bot player down outside the point: first confirm warns \"Leaving behind\", a second extracts (fix/coop-extraction)"),
+    ("fob_ready", "FOB ready-up: Deploy refused naming the unready client, allowed after Ready (feat/fob-ready-up)"),
+    ("respawn_kit", "a respawn keeps the kit you died in and leaves no player body (fix/respawn-own-kit)"),
+    ("heli_lz", "a helicopter extraction shows only its LZ (fix/coop-extraction: Extraction.shown_points/heli_point)"),
+]
+
+
+def merge_checks(rows):
+    """{check id: (result, [row, ...])} from every try: FAIL if one failed, else PASS if one
+    passed, else SKIPPED if one was skipped (not in this build), else NOT RUN."""
+    out = {}
+    for cid, _ in CHECKS:
+        tries = [r for r in rows if r.get("check") == cid]
+        results = [r.get("result") for r in tries]
+        for verdict in ("FAIL", "PASS", "SKIPPED"):
+            if verdict in results:
+                break
+        else:
+            verdict = "NOT RUN"
+        out[cid] = (verdict, tries)
+    return out
 
 
 def jsonl(path):
@@ -235,7 +264,9 @@ def main():
     err_re = re.compile(r"^(SCRIPT ERROR|ERROR|WARNING|USER ERROR|USER WARNING)[:]? (.*)")
     errors = {}
     crash = {}
-    for p in peers:
+    # The fake human's output too (--checks): a script error there fails the run like a bot's.
+    err_peers = peers + (["human"] if os.path.isdir(os.path.join(run, "human")) else [])
+    for p in err_peers:
         text = read(os.path.join(run, p, "stdout.log"))
         counter = collections.Counter()
         where = {}
@@ -262,6 +293,9 @@ def main():
         for line in read(os.path.join(run, p, "bot.log")).splitlines():
             if any(w in line for w in ("joined", "left", "lost the connection", "leaving", "PROBLEM", "finished", "TIMED OUT", "could not join")):
                 events.append(f"{p}: {line}")
+    for line in read(os.path.join(run, "human", "fake_human.log")).splitlines():
+        if any(w in line for w in ("joined", "PROBLEM", "finished", "CHECK ")):
+            events.append(f"human: {line}")
     exits = {}
     for p in peers:
         e = read(os.path.join(run, p, "exit_code")).strip()
@@ -319,6 +353,42 @@ def main():
         out.append("Kit after kitting up, per bot (cycle 1): " + json.dumps(cycles[0].get("kit", {})))
         out.append("")
 
+    # --- Co-op fix checks (--checks) -----------------------------------------------------------
+    check_rows = jsonl(os.path.join(run, "host", "checks.jsonl")) + jsonl(os.path.join(run, "human", "checks.jsonl"))
+    merged = {}
+    if config.get("checks") or check_rows or os.path.isdir(os.path.join(run, "human")):
+        merged = merge_checks(check_rows)
+        out.append("## Co-op fix checks (fake human + host)")
+        out.append("")
+        out.append("PASS / FAIL / SKIPPED (not in this build: the harness looks for each fix's code first) / NOT RUN (the run never got to it). "
+                   "Every try is listed: by whom, the result, what was seen.")
+        out.append("")
+        out.append("| check | result | what it checks | tries |")
+        out.append("|---|---|---|---|")
+        for cid, what in CHECKS:
+            verdict, tries = merged[cid]
+            listed = "<br>".join(f"{r.get('by', '?')}: **{r.get('result')}** {str(r.get('detail', '')).replace('|', '/')}" for r in tries) or "-"
+            out.append(f"| {cid} | **{verdict}** | {what} | {listed} |")
+            if verdict == "FAIL":
+                problems.append(f"check {cid} FAILED")
+        out.append("")
+        human_exit = read(os.path.join(run, "human", "exit_code")).strip() or "?"
+        summary = {}
+        if os.path.exists(os.path.join(run, "human", "summary.json")):
+            try:
+                summary = json.loads(read(os.path.join(run, "human", "summary.json")))
+            except json.JSONDecodeError:
+                summary = {}
+        human_problems = summary.get("problems", [])
+        out.append(f"Fake human: exit {human_exit}; bots within 30 m of it in {summary.get('near_share', 0) * 100:.0f}% of "
+                   f"{summary.get('samples', 0)} samples (farthest {summary.get('farthest_m', 0):.0f} m); "
+                   f"its problems: {'; '.join(human_problems) if human_problems else 'none'}. Its log: human/fake_human.log.")
+        out.append("")
+        for hp in human_problems:
+            problems.append(f"fake human: {hp}")
+        if not summary:
+            problems.append(f"the fake human never finished (exit {human_exit}, no human/summary.json)")
+
     out.append("## Divergences (client vs host, on the same 5 s marks)")
     out.append("")
     out.append(f"Tolerance: {args.pos_tol} m plus what the host saw the soldier move in {args.slack_s} s. "
@@ -353,7 +423,7 @@ def main():
     out.append("## Errors and warnings (every instance's output)")
     out.append("")
     any_err = False
-    for p in peers:
+    for p in err_peers:
         counter, where = errors[p]
         if not counter:
             continue
@@ -475,6 +545,11 @@ def main():
     with open(os.path.join(run, "report.md"), "w", encoding="utf-8") as f:
         f.write("\n".join(out) + "\n")
     print(f"report: {os.path.join(run, 'report.md')}")
+    for cid, _ in CHECKS:
+        if cid in merged:
+            verdict_c, tries = merged[cid]
+            last = next((r for r in reversed(tries) if r.get("result") == verdict_c), tries[-1] if tries else {})
+            print(f"CHECK {cid} {verdict_c} {str(last.get('detail', ''))[:300]}")
     print(f"VERDICT {verdict} " + "; ".join(problems[:12]))
     return 0
 
