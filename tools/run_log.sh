@@ -22,19 +22,44 @@ run_log_parent() {
 	return 0
 }
 
-# Takes the next number from <parent>/run_counter.txt and prints it. A short lock (a folder
-# beside the counter) keeps two runs starting at once from getting the same number; one left
-# behind by a killed run is ignored after about ten seconds.
-run_log_number() {
-	local parent="$1" lock="$1/run_counter.lock" tries=0 n
+# Takes the next number from <parent>/run_counter.txt and prints it. The read and the write
+# happen under a lock: a folder beside the counter (run_counter.lock; mkdir either makes it or
+# fails, so only one run holds it), which SessionLog._next_number takes the same way, so R, S,
+# B and P numbers never repeat (two runs in the same second both got R0232). A lock older than
+# RUN_LOCK_STALE_S (10 s; it's held for milliseconds) was left by a killed run: it's moved
+# aside (a rename, so only one waiter takes it over) and removed. After RUN_LOCK_WAIT_S (30 s)
+# of waiting on a live lock the run goes on without it and says so.
+RUN_LOCK_STALE_S="${RUN_LOCK_STALE_S:-10}"
+RUN_LOCK_WAIT_S="${RUN_LOCK_WAIT_S:-30}"
+run_log_lock() {
+	local lock="$1" start age mtime
+	start=$(date +%s)
 	until mkdir "$lock" 2>/dev/null; do
-		tries=$((tries + 1))
-		[ "$tries" -ge 50 ] && break
-		sleep 0.2
+		mtime=$(stat -c %Y "$lock" 2>/dev/null || stat -f %m "$lock" 2>/dev/null || echo "")
+		if [ -n "$mtime" ]; then
+			age=$(( $(date +%s) - mtime ))
+			if [ "$age" -ge "$RUN_LOCK_STALE_S" ] && mv "$lock" "$lock.stale.$$" 2>/dev/null; then
+				rmdir "$lock.stale.$$" 2>/dev/null
+				echo "run_log: took over a stale lock ($lock, ${age} s old)" >&2
+				continue
+			fi
+		fi
+		if [ $(( $(date +%s) - start )) -ge "$RUN_LOCK_WAIT_S" ]; then
+			echo "run_log: $lock held for ${RUN_LOCK_WAIT_S} s; going on without it" >&2
+			return 1
+		fi
+		sleep 0.1
 	done
-	n=$(( $(cat "$parent/run_counter.txt" 2>/dev/null || echo 0) + 1 ))
+	return 0
+}
+
+run_log_number() {
+	local parent="$1" lock="$1/run_counter.lock" n locked=0
+	run_log_lock "$lock" && locked=1
+	n="$(tr -dc 0-9 2>/dev/null <"$parent/run_counter.txt")"
+	n=$(( 10#${n:-0} + 1 ))
 	echo "$n" >"$parent/run_counter.txt"
-	rmdir "$lock" 2>/dev/null || true
+	[ "$locked" = 1 ] && rmdir "$lock" 2>/dev/null
 	echo "$n"
 }
 
