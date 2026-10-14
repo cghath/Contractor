@@ -73,7 +73,10 @@ const STARTING_STASH := [["plate_carrier", 2], ["plate_ceramic_l4", 4], ["helmet
 ## extraction calls server_end_deployment).
 const DEBUG_EXTRACT_M := 60.0
 ## A level switch waits at most this long for clients to stop sending (server_switch_level).
-const SWITCH_WAIT_S := 1.0
+## B-04: 1 s is short on a lossy link or a loaded host; a client still sending its old player's
+## Sync after the host swapped is the likely source of the 26 'Node not found:
+## ".../Players/<id>/Sync"' errors on every peer in S0743. Going ahead without someone is logged.
+const SWITCH_WAIT_S := 3.0
 ## A roster squadmate removed this frame comes back for a free slot after this long (their
 ## body's name is taken until it's freed).
 const REFILL_RETRY_S := 0.2
@@ -413,6 +416,7 @@ func server_switch_level(level_info: Variant, zone_id := "") -> void:
 	_switch_serial = serial
 	get_tree().create_timer(SWITCH_WAIT_S).timeout.connect(func() -> void:
 		if _switch_serial == serial and switch_pending():
+			push_warning("BaseHub: level switch went ahead without peers %s (B-04)" % [_switch_waiting.keys()])
 			_do_switch())
 
 
