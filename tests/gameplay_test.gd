@@ -11,6 +11,8 @@ var player: Soldier
 
 func _ready() -> void:
 	GameState.zone_id = "test_gameplay" + OS.get_environment("CONTRACTOR_TEST_TAG")  # never touch a real save
+	Soldier.respawn_delay_s = 0.0  # these checks want the old instant respawn (the wait and spawn
+	Soldier.spawn_protect_s = 0.0  # protection have their own checks in gameplay and missions)
 	CompoundLevel.spawn_ai = false  # squad AI has its own test
 	GameState.delete_save()
 	add_child(load("res://scenes/main.tscn").instantiate())
@@ -32,6 +34,8 @@ func _ready() -> void:
 	await _test_throwables()
 	await _test_bad_input()
 	await _test_reload_across_death()
+	await _test_respawn_wait_and_protection()
+	await _test_give_up()
 	await _test_reload_replaced_gun()
 	await _test_fire_cadence()
 	_test_ammo_replication()
@@ -108,11 +112,11 @@ func _test_ammo_replication() -> void:
 	for scene: String in ["res://scenes/soldier.tscn", "res://scenes/target_dummy.tscn"]:
 		var node: Node = load(scene).instantiate()
 		var config: SceneReplicationConfig = node.get_node(^"ServerSync").replication_config
-		var ok := not config.has_property(^"Inventory:net_state")
-		for prop: NodePath in [^"Inventory:net_gear", ^"Inventory:net_ammo"]:
+		var ok := not config.has_property(^"Inventory:net_state") and not config.has_property(^"Vitals:net_state")
+		for prop: NodePath in [^"Inventory:net_gear", ^"Inventory:net_ammo", ^"Vitals:net_vitals", ^"Vitals:net_pulse"]:
 			ok = ok and config.has_property(prop) and config.property_get_spawn(prop) \
 				and config.property_get_replication_mode(prop) == SceneReplicationConfig.REPLICATION_MODE_ON_CHANGE
-		check(ok, "%s: the host sends net_gear and net_ammo on change and to late joiners, not the whole net_state" % scene.get_file())
+		check(ok, "%s: the host sends net_gear, net_ammo, net_vitals and net_pulse on change and to late joiners, not a whole net_state" % scene.get_file())
 		node.free()
 
 
@@ -227,6 +231,121 @@ func _test_fire_cadence() -> void:
 	var flood := start - player.inventory.rounds_in(&"primary")
 	var most := int(1.0 / interval) + 1 + int(Soldier.FIRE_BUNCH_S / interval) + 1
 	check(flood >= int(1.0 / interval) - 1 and flood <= most, "a request every frame for a second fires at the weapon's rate (%d shots, at most %d)" % [flood, most])
+
+
+## Captain, playtest P0362: a dead player waits Soldier.respawn_delay_s out of the fight (unseen,
+## untouchable, no firing), then comes back with spawn protection that blocks harm until it runs
+## out or they fire. (Where they come back: missions, _test_respawn_points.)
+func _test_respawn_wait_and_protection() -> void:
+	print("Respawn: the wait and spawn protection")
+	Soldier.respawn_delay_s = 1.5
+	Soldier.spawn_protect_s = 1.5
+	var death_spot := Vector3(10, 0.1, 30)
+	player.global_position = death_spot
+	await _frames(2)
+	var bodies_before := level.bodies.get_child_count()
+	player.vitals.server_kill()
+	var died_at := Soldier._now()
+	await _frames(3)
+	check(player.respawn_state == Soldier.RESPAWN_WAITING and player.vitals.is_up() and level.bodies.get_child_count() == bodies_before + 1,
+		"killed: the body stays, the player waits to respawn (state %d)" % player.respawn_state)
+	check(not player.model.visible and not player.is_in_group(&"combatants") and player.collision_layer == 0,
+		"while waiting: not drawn, no collision, not a target")
+	check(player.global_position.distance_to(death_spot) < 0.5, "still where he died, not at a spawn point yet")
+	player.vitals.server_damage(40.0)
+	check(player.vitals.blood_fraction() == 1.0, "nothing hurts him while he waits")
+	var rounds := player.inventory.rounds_in(&"primary")
+	player._server_fire.rpc_id(1, player.head.global_position, -player.global_basis.z, &"primary")
+	check(player.inventory.rounds_in(&"primary") == rounds and rounds > 0, "and he can't fire")
+	await _seconds(0.8)
+	check(player.respawn_state == Soldier.RESPAWN_WAITING, "%.1f s on, still waiting (the delay is %.1f s)" % [Soldier._now() - died_at, Soldier.respawn_delay_s])
+	var t0 := Soldier._now()
+	while player.respawn_state == Soldier.RESPAWN_WAITING and Soldier._now() - t0 < 3.0:
+		await get_tree().process_frame
+	var waited := Soldier._now() - died_at
+	await _frames(2)  # every peer applies the state in its own frame (Soldier._apply_respawn_state)
+	var spawn_gap: float = CompoundLevel.SPAWN_POINTS.map(func(p: Vector3) -> float: return p.distance_to(player.global_position)).min()
+	check(player.respawn_state == Soldier.RESPAWN_PROTECTED and waited >= Soldier.respawn_delay_s - 0.05 and waited < Soldier.respawn_delay_s + 0.5,
+		"respawned after the delay (%.2f s), with spawn protection" % waited)
+	check(spawn_gap < 0.5 and player.model.visible and player.is_in_group(&"combatants") and player.collision_layer == Soldier.BODY_LAYER,
+		"back at a spawn point (%.2f m off), seen and solid again" % spawn_gap)
+	player.vitals.server_hit(Vitals.CHEST, {"round_class": Vitals.INTERMEDIATE})
+	player.vitals.server_damage(40.0)
+	check(player.vitals.wound_list().is_empty() and player.vitals.blood_fraction() == 1.0, "spawn protection: a round and trauma do nothing")
+	await _seconds(0.2)
+	player._server_fire.rpc_id(1, player.head.global_position, -player.global_basis.z, &"primary")
+	check(player.respawn_state == Soldier.RESPAWN_NONE and player.inventory.rounds_in(&"primary") == rounds - 1, "firing ends it")
+	player.vitals.server_damage(40.0)
+	check(player.vitals.blood_fraction() < 1.0, "and then harm lands again")
+	player.vitals.server_reset_health()
+	# Unbroken, it runs out on its own.
+	player.vitals.server_kill()
+	await _seconds(Soldier.respawn_delay_s + 0.3)
+	check(player.respawn_state == Soldier.RESPAWN_PROTECTED, "killed again: back with protection")
+	await _seconds(Soldier.spawn_protect_s + 0.3)
+	check(player.respawn_state == Soldier.RESPAWN_NONE and not player.vitals.shielded, "spawn protection runs out after %.1f s" % Soldier.spawn_protect_s)
+	Soldier.respawn_delay_s = 0.0
+	Soldier.spawn_protect_s = 0.0
+	player.vitals.server_reset_health()
+
+
+## Captain, playtest P0362: down with nobody to help, a player was stuck until the session ended.
+## Holding the give-up key Soldier.GIVE_UP_HOLD_S gives up (a death: the body stays, the respawn
+## pool counts it, base checks the pool), once down GIVE_UP_AFTER_S or at once with no conscious
+## friendly within GIVE_UP_ALONE_M.
+func _test_give_up() -> void:
+	print("Giving up while down")
+	player.global_position = Vector3(10, 0.1, 30)
+	await _frames(2)
+	check(not player.can_give_up() and Hud.give_up_text(player, 0.0) == "", "on his feet: no giving up, no prompt")
+	var buddy := level.spawn_soldier({"name": "GiveUpBuddy", "faction": "friendly", "variant": "multicam", "pos": Vector3(14, 0.1, 30),
+		"loadout": [], "slot": 1, "combat": 0.5, "discipline": 0.5, "guard": false})
+	await _frames(3)
+	SquadAI.of(buddy).process_mode = Node.PROCESS_MODE_DISABLED
+	player.vitals.server_damage(500.0)
+	await _frames(3)
+	var key := OS.get_keycode_string(GameSettings.key_for(&"give_up"))
+	check(not player.vitals.is_up() and player.help_near() and not player.can_give_up(),
+		"down with a conscious squadmate 4 m off: not yet")
+	check(("Give up ([%s], hold) in" % key) in Hud.give_up_text(player, 0.0), "the prompt says when (%s)" % Hud.give_up_text(player, 0.0).strip_edges())
+	player._server_give_up.rpc_id(1)
+	await _frames(2)
+	check(not player.vitals.is_up() and not player.vitals.is_dead(), "the host refuses a give-up asked too early")
+	buddy.global_position = Vector3(10, 0.1, 30 + Soldier.GIVE_UP_ALONE_M + 10.0)
+	await _frames(2)
+	check(not player.help_near() and player.can_give_up() and ("Hold [%s] to give up" % key) in Hud.give_up_text(player, 0.0),
+		"nobody within %.0f m: open at once, and the prompt says so" % Soldier.GIVE_UP_ALONE_M)
+	buddy.global_position = Vector3(14, 0.1, 30)
+	buddy.vitals.server_damage(500.0)  # a squadmate who's down himself is no help
+	await _frames(3)
+	check(not buddy.vitals.is_up() and player.can_give_up(), "a downed squadmate beside him is no help: open")
+	buddy.vitals.server_reset_health()
+	await _frames(3)
+	check(not player.can_give_up(), "the squadmate back up: closed again")
+	player._down_since = Soldier._now() - Soldier.GIVE_UP_AFTER_S - 0.1
+	check(player.can_give_up(), "down %.0f s: open even with help near" % Soldier.GIVE_UP_AFTER_S)
+	# Holding the key (PlayerInput._update_give_up): a short hold does nothing...
+	var deaths := [0]
+	var on_died := func() -> void: deaths[0] += 1
+	player.vitals.died.connect(on_died)
+	var bodies_before := level.bodies.get_child_count()
+	Input.action_press(&"give_up")
+	await _seconds(Soldier.GIVE_UP_HOLD_S * 0.5)
+	check(player.player_input.give_up_held > 0.0 and "Giving up" in Hud.give_up_text(player, player.player_input.give_up_held), "holding the key fills the prompt")
+	Input.action_release(&"give_up")
+	await _frames(2)
+	check(not player.vitals.is_up() and deaths[0] == 0 and player.player_input.give_up_held == 0.0, "let go early: still down")
+	# ...a full one gives up: a death, through the respawn.
+	Input.action_press(&"give_up")
+	await _seconds(Soldier.GIVE_UP_HOLD_S + 0.4)
+	Input.action_release(&"give_up")
+	await _frames(3)
+	player.vitals.died.disconnect(on_died)
+	check(deaths[0] == 1 and level.bodies.get_child_count() == bodies_before + 1, "held %.0f s: he dies (a death, his body left behind)" % Soldier.GIVE_UP_HOLD_S)
+	var spawn_gap: float = CompoundLevel.SPAWN_POINTS.map(func(p: Vector3) -> float: return p.distance_to(player.global_position)).min()
+	check(player.vitals.is_up() and spawn_gap < 0.5 and player.inventory.slots[&"primary"] == &"m4a1", "and respawns in the default kit")
+	buddy.queue_free()
+	await _frames(2)
 
 
 ## Audit L3-02: a reload started before dying doesn't finish on the rifle you respawn with.

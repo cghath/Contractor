@@ -61,6 +61,12 @@ static var GARRISON := {
 	"qrf_base": [Vector3(-8, 0.1, -6), Vector3(-10, 0.1, -5), Vector3(6, 0.1, -5), Vector3(9, 0.1, -5), Vector3(-3, 0.1, 8), Vector3(3, 0.1, 8)],
 	"comms": [Vector3(-4.5, 0.1, -4.5), Vector3(4, 0.1, 2), Vector3(-2.5, 0.1, 4.5), Vector3(2.5, 0.1, 4.5)],
 }
+## The way each GARRISON post looks out (module space; Vector3.ZERO, or a type not here: away
+## from the module's middle, ZoneLevel.post_yaw). A town's posts at doors look onto the street,
+## those up high (F-02: upper windows, roofs) out of their window or over their parapet.
+static var GARRISON_FACE := {}
+## A generated town's stair ramps for the navmesh (ramps()).
+static var RAMPS := {}
 
 ## Loot lying in each module (m from the origin; uids are made unique per module). A static
 ## var: a town adds its own (_town).
@@ -166,6 +172,8 @@ static func _town(type: String) -> bool:
 	HALF[type] = t.half
 	POINTS[type] = t.points
 	GARRISON[type] = t.garrison
+	GARRISON_FACE[type] = t.garrison_face
+	RAMPS[type] = t.ramps
 	LOOT[type] = t.loot
 	var top := TOP_M
 	for bx: Array in t.boxes:
@@ -200,6 +208,14 @@ static func boxes(type: String) -> Array:
 				push_error("ZoneModules: unknown type %s" % type)
 				return []
 	return _cache[type]
+
+
+## The ramps over the module's stairs for the navmesh bake (BuildingGen.ramp_faces: triangles,
+## m from the origin; a generated town's), empty for a type without stairs.
+static func ramps(type: String) -> PackedVector3Array:
+	if type.begins_with(TOWN):
+		boxes(type)  # builds the town once
+	return RAMPS.get(type, PackedVector3Array())
 
 
 ## The base structure as AABBs in metres from the origin, snapped to the voxels as

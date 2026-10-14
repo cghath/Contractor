@@ -186,6 +186,22 @@ func _build_squad(rows: VBoxContainer, v: Dictionary) -> void:
 	buttons.add_child(_button("Rest a day", func() -> void: BaseHub.request("rest", [1])))
 	buttons.add_child(_button("Save campaign", func() -> void: BaseHub.request("save")))
 	rows.add_child(buttons)
+	_add_restock_row(rows)
+
+
+## Playtest S2: kitting up from the stash in one go, the kit each deployed in last time
+## (BaseHub.server_restock_player / server_restock_squad). What it did shows in the status line.
+func _add_restock_row(rows: VBoxContainer) -> void:
+	var row := HBoxContainer.new()
+	row.name = "Restock"
+	var mine := _button("Restock my last loadout", func() -> void: BaseHub.request("restock"))
+	mine.tooltip_text = "Rebuild the kit you last deployed with from the stash; what the stash is short of is listed"
+	row.add_child(mine)
+	var squad := _button("Restock squad", func() -> void: BaseHub.request("restock_squad"))
+	squad.disabled = not multiplayer.is_server()  # the squad leader (the host)
+	squad.tooltip_text = "Rebuild every picked squadmate's last loadout (everyone at the muster line if nobody is picked) from the stash"
+	row.add_child(squad)
+	rows.add_child(row)
 
 
 func _build_roster(rows: VBoxContainer, v: Dictionary) -> void:

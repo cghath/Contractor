@@ -279,6 +279,18 @@ func _test_edits() -> void:
 	var through_wall := [m.to_global(SHED_INTACT + Vector3(0, 0, 1)), m.to_global(SHED_INTACT - Vector3(0, 0, 1))]
 	check(world.material_at(m.to_global(SHED_BREACH)) == VoxelWorld.Mat.EMPTY and Throwables.clear_line(space, through_breach[0], through_breach[1])
 		and not Throwables.clear_line(space, through_wall[0], through_wall[1]), "a breach blown in the shed's south wall: clear through it, the rest of the wall stands")
+	# Navigation's voxel boxes: structures nothing carved go in as built, unread; the same solid
+	# volume as reading every voxel, the breach included.
+	var area := AABB(Vector3(-60, -2, -60), Vector3(120, 16, 120))
+	var quick := world.solid_boxes_m(area)
+	world.read_all_voxels = true
+	var full := world.solid_boxes_m(area)
+	world.read_all_voxels = false
+	var volume := func(boxes: Array[AABB]) -> float: return boxes.reduce(func(sum: float, b: AABB) -> float: return sum + b.get_volume(), 0.0)
+	var breach_in := func(boxes: Array[AABB]) -> bool: return boxes.any(func(b: AABB) -> bool: return b.grow(-0.01).has_point(SHED_BREACH))
+	check(absf(volume.call(quick) - volume.call(full)) < 0.01 and quick.size() < full.size() and not breach_in.call(quick) and not breach_in.call(full),
+		"navigation's voxel boxes: untouched structures unread (%d boxes, read all: %d), the same %.2f m3 (read all: %.2f), the breach open" % [
+		quick.size(), full.size(), volume.call(quick), volume.call(full)])
 	# Out and back in: rebuilt from its base boxes and its log.
 	player.global_position = level.ground_point(m.global_position + Vector3(0, 0, 500))
 	await _wait_for(func() -> bool: return not m.is_streamed(), 3.0)
@@ -867,6 +879,7 @@ func _test_towns() -> void:
 	check(ok_mix, "towns (8 seeds): 12 to 20 buildings each (%s), a clinic and a police station at most once %s" % [counts, why.slice(0, 2)])
 	check(ok_apart and ok_inside, "lots don't overlap, inside the town's footprint and off the street %s" % [why.slice(0, 2)])
 	check(ok_facing, "every building's front door opens onto its street %s" % [why.slice(0, 2)])
+	_test_town_posts()
 	var type := "town#4409"
 	check(ZoneModules.has_type(type) and not ZoneModules.boxes(type).is_empty() and ZoneModules.HALF.has(type)
 		and not (ZoneModules.points(type, "objective") as Array).is_empty() and not (ZoneModules.points(type, "cache") as Array).is_empty()
@@ -875,6 +888,93 @@ func _test_towns() -> void:
 		ZoneModules.HALF.get(type), (ZoneModules.GARRISON.get(type, []) as Array).size()])
 	check(not ZoneModules.has_type("town#x") and BuildingGen.town(12).boxes == BuildingGen.town(12).boxes,
 		"a bad seed isn't a type; the same seed builds the same town")
+	check((ZoneModules.GARRISON_FACE.get(type, []) as Array).size() == (ZoneModules.GARRISON.get(type, []) as Array).size(),
+		"and the way each of its posts looks out (%d)" % (ZoneModules.GARRISON_FACE.get(type, []) as Array).size())
+	# Its stairs as ramps for the navmesh bake (ZoneNav): two triangles a stair, every stair.
+	var stairs := 0
+	for bt: Dictionary in BuildingGen.town(4409).buildings:
+		stairs += (bt.data.stairs as Array).size()
+	check(stairs > 0 and ZoneModules.ramps(type).size() == stairs * 6 and ZoneModules.ramps("village").is_empty(),
+		"its %d stairs have ramps for the navmesh (%d corners); a village has none" % [stairs, ZoneModules.ramps(type).size()])
+	# Navigation reaches the roofs (F-01): a zone chunk's bake keeps HEADROOM_M over its highest
+	# ground, room for the tallest building's roof and a soldier standing on it.
+	var tallest := 0.0
+	for seed in range(1, 41):
+		var b := BuildingGen.building(["house", "shop", "clinic", "police"][seed % 4], seed * 13)
+		if b.roof_access:
+			tallest = maxf(tallest, float(b.roof_y))
+	check(tallest > 5.0 and tallest + NavBuilder.AGENT_HEIGHT < ZoneNav.HEADROOM_M,
+		"a zone's navmesh bakes %.0f m up: a two-storey roof (%.1f m) and a man on it fit" % [ZoneNav.HEADROOM_M, tallest])
+
+
+## Town garrison posts (audit follow-up F-02): about a third up high, at upper windows and on
+## roofs (only roofs with a parapet: those a stair goes up to), each standing on a floor with
+## room round him, looking out onto the street; the rest on the ground, most inside front doors.
+func _test_town_posts() -> void:
+	var seeds: Array = [5, 12, 77, 301, 4409, 9001, 23, 640]
+	var shares := []
+	var ok_share := true
+	var all_high := 0
+	var all_posts := 0
+	var ok_up := true
+	var ok_ground := true
+	var roofs := 0
+	var windows := 0
+	var why := []
+	for seed: int in seeds:
+		var t := BuildingGen.town(seed)
+		var posts: Array = t.garrison
+		var faces: Array = t.garrison_face
+		var high := 0
+		var ground := 0
+		for i in posts.size():
+			var p: Vector3 = posts[i]
+			if p.y < 1.0:
+				ground += 1
+				continue
+			high += 1
+			# Which building it stands in, and on what.
+			var home := {}
+			for b: Dictionary in t.buildings:
+				var size: Vector2 = b.data.size
+				var o: Vector3 = b.origin
+				if absf(p.x - o.x) < size.x * 0.5 and absf(p.z - o.z) < size.y * 0.5:
+					home = b
+			if home.is_empty():
+				ok_up = false
+				why.append("town %d: post %s in no building" % [seed, p])
+				continue
+			var local: Vector3 = p - (home.origin as Vector3)
+			if home.turned:
+				local = Vector3(-local.x, local.y, -local.z)
+			var upper: Array = (home.data.rooms as Array).filter(func(r: Dictionary) -> bool: return int(r.floor) == 1)
+			var on_roof: bool = home.data.roof_access and absf(local.y - float(home.data.roof_y) - 0.1) < 0.05
+			var upstairs: bool = int(home.data.storeys) == 2 and not upper.is_empty() and absf(local.y - float(upper[0].y) - 0.1) < 0.05
+			roofs += 1 if on_roof else 0
+			windows += 1 if upstairs else 0
+			var out: Vector3 = faces[i]
+			var street := Vector3(0, 0, -signf((home.origin as Vector3).z))  # toward the main street
+			if not (on_roof or upstairs) or not BuildingGen._clear_post(home.data.boxes, local) or out.dot(street) < 0.5:
+				ok_up = false
+				why.append("town %d: post %s (roof %s, upstairs %s, looks %s)" % [seed, local, on_roof, upstairs, out])
+		# A third of them, as far as the town has buildings with an upper floor or a roof to stand on.
+		var can := 0
+		for bi in (t.buildings as Array).size():
+			can += 0 if BuildingGen._high_post(t.buildings[bi].data, bi).is_empty() else 1
+		var total := ((t.buildings as Array).size() + 1) / 2 + 2  # as BuildingGen._town_posts counts them
+		var want := mini(roundi(total * BuildingGen.TOWN_HIGH_SHARE), can)
+		shares.append("%d/%d" % [high, posts.size()])
+		all_high += high
+		all_posts += posts.size()
+		if high != want or float(high) / maxf(posts.size(), 1.0) > 0.4 or high != int(t.garrison_high):
+			ok_share = false
+		if ground * 2 < posts.size() or faces.size() != posts.size():
+			ok_ground = false
+	var all_share := float(all_high) / maxf(all_posts, 1.0)
+	check(ok_share and all_share >= 0.22 and roofs >= 3 and windows >= 3,
+		"town garrisons (8 seeds): about a third of the posts up high where the town has the buildings for it (%s, %.0f%% in all), at upper windows (%d) and on roofs (%d)" % [", ".join(shares), all_share * 100.0, windows, roofs])
+	check(ok_up, "each up high stands on a floor or a roof with a parapet, room round him, looking out onto the street %s" % [why.slice(0, 3)])
+	check(ok_ground, "the rest on the ground (doors and the crossroads), each with the way it looks")
 
 
 # --- Terrain presets ----------------------------------------------------------------------------

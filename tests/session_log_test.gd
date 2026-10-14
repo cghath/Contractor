@@ -16,6 +16,8 @@ var parent := ""
 
 func _ready() -> void:
 	GameState.zone_id = "test_session_log" + OS.get_environment("CONTRACTOR_TEST_TAG")  # never touch a real save
+	Soldier.respawn_delay_s = 0.0  # these checks want the old instant respawn (the wait and spawn
+	Soldier.spawn_protect_s = 0.0  # protection have their own checks in gameplay and missions)
 	CompoundLevel.spawn_ai = false
 	GameState.delete_save()
 	get_tree().create_timer(150.0).timeout.connect(func() -> void:
@@ -367,6 +369,14 @@ func _test_bug_report(player: Soldier, level: CompoundLevel, faller: Soldier) ->
 	var perf := SessionLog.perf_line()
 	check(perf.begins_with("perf: frame ") and " ms avg" in perf and " AI, " in perf and "nav rebakes" in perf and "memory" in perf,
 		"a performance line: %s" % perf)
+	check("; worst frame: " in perf and " draws, " in perf, "it says what the worst frame went on")
+	var spent := SessionLog.costs_text({&"nav": 3100, &"ai": 212400, &"sfx": 40}, {"physics": 215.0, "process": 4.2, "draws": 812, "primitives": 1200000})
+	check(spent == "ai 212.4 ms, nav 3.1 ms; engine physics 215.0 ms, process 4.2 ms, 812 draws, 1.20M primitives",
+		"costliest system first, under 0.1 ms left out: %s" % spent)
+	var t := Time.get_ticks_usec()
+	OS.delay_msec(2)
+	FrameCost.spent(&"probe", t)
+	check(int(FrameCost.take().get(&"probe", 0)) >= 2000 and FrameCost.take().is_empty(), "FrameCost counts a system's time while a session is open, and starts afresh")
 	# Memory a release build can read too (Captain P0362: release builds logged "memory 0 MB";
 	# the engine's static count is debug-only), with no child process (no console window).
 	var debug_mem := SessionLog.memory_text()
@@ -402,10 +412,17 @@ func _test_group_night(player: Soldier, level: CompoundLevel) -> void:
 		"clawback": 300}], "fines": 50, "civilians": 1, "days": 2}, {"extracted": ["Player 1", "Gunny"], "casualties": [{"name": "Reaper", "status": "kia"}]})
 	check(line == "debrief: Probe Yard: Hold Fast completed, paid $1200, $300 advance clawed back; fines $50 (1 civilians); 2 days; out: Player 1, Gunny; casualties: Reaper kia",
 		"the debrief's line: pay, clawback, fines and losses (%s)" % line)
+	# The respawn waits (gameplay/respawn): the death and the wait are logged at once, the
+	# respawn line when it really happens, with the point it uses.
+	Soldier.respawn_delay_s = 0.5
 	player.vitals.server_kill()
 	await _frames(5)
-	check(_has("%s died (friendly)" % player.log_name()) and _has("%s respawns at (" % player.log_name()),
-		"a player's death and respawn are logged (%s)" % [_lines_with("respawns at")])
+	check(_has("%s died (friendly)" % player.log_name()) and _has("%s waits 0.5 s to respawn" % player.log_name()) and not _has("%s respawns at (" % player.log_name()),
+		"a player's death and the wait to respawn are logged, not the respawn yet (%s)" % [_lines_with("respawn")])
+	await get_tree().create_timer(1.0).timeout
+	Soldier.respawn_delay_s = 0.0
+	check(_has("%s respawns at (" % player.log_name()),
+		"and the respawn when it happens (%s)" % [_lines_with("respawns at")])
 
 
 ## A session whose folder can't be renamed at its end (P0331, P0362: something held a file in

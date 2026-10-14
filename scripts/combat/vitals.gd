@@ -9,9 +9,17 @@ extends Node
 ## Everything outside this file uses only the "wound-model interface" section below (plus
 ## the signals, is_up, downed and find_on). The host simulates at about 10 Hz and publishes
 ## net_state (a fresh Dictionary on change, at most about 2 Hz, at once when consciousness,
-## arrest or death change); ServerSync replicates it and `downed` to every peer, including
-## late joiners, and every query works on every peer from that state. (Armor damage is
-## item state, in Inventory.)
+## arrest or death change), and every query works on every peer from that state. (Armor
+## damage is item state, in Inventory.)
+##
+## Replication (the same split as Inventory's net_gear/net_ammo): net_state itself isn't sent.
+## ServerSync replicates `downed` and two parts of it to every peer, late joiners included
+## (spawn): `net_vitals`, the structure that changes only on real events (wounds, tourniquets,
+## the line and bag, the triage card; STRUCT_KEYS) with a revision, sent only when it changes;
+## and `net_pulse`, the fast scalars (blood, pain, SpO2, heart rate, drugs, lungs, flags,
+## countdowns) quantised into a few dozen bytes (_encode_pulse), sent when a quantised value
+## changes, at most every NET_INTERVAL_S (at once when the flags change). A peer rebuilds
+## net_state from the two (merge_net) and reads it as before.
 ##
 ## Consciousness follows the body; there is no revive. Unconscious (downed) while any cause
 ## holds (why_unconscious): SpO2 under 85%, pain held at the knockout threshold for 3 s, 40% of
@@ -94,12 +102,33 @@ var downed := false:
 		downed = value
 		changed.emit()
 
-## Replicated wound-model state (host assigns a fresh Dictionary on change; see WoundModel.to_net).
+## Wound-model state (see WoundModel.to_net, plus "tg" the triage card). The host assigns a
+## fresh Dictionary on each publish; a peer rebuilds it from net_vitals and net_pulse. Not
+## replicated itself.
 var net_state: Dictionary = {}:
 	set(value):
 		net_state = value
 		_net_dirty = true
 		changed.emit()
+
+## Keys of net_state that make up the structure (net_vitals): they change only on real events.
+## "v" (the bag) goes here as [item, mL]; the mL left goes in the pulse.
+const STRUCT_KEYS: Array[String] = ["w", "q", "a", "v", "tg"]
+## Replicated (ServerSync): the structure of net_state (STRUCT_KEYS) plus "r", its revision.
+## The host sets it only when the structure changes.
+var net_vitals: Dictionary = {}:
+	set(value):
+		net_vitals = value
+		if not _publishing:
+			_receive(false)
+
+## Replicated (ServerSync): the fast-changing scalars, quantised (_encode_pulse), starting with
+## the revision of the structure they go with.
+var net_pulse: PackedByteArray = PackedByteArray():
+	set(value):
+		net_pulse = value
+		if not _publishing:
+			_receive(true)
 
 ## Host-side dice for wounds, fractures and wake rolls (tests may seed it).
 var rng: RandomNumberGenerator:
@@ -122,6 +151,14 @@ var _published_at := -1000.0
 var _publish_pending := false  # host: a routine change held back by the rate limit
 var _shown_second := -1        # whole seconds of the arrest countdown last signalled
 var _died_sent := false
+var _struct_rev := 0           # host: revision of the last structure sent; peer: of the one held
+var _sent_struct := {}         # host: the structure last sent (without "r")
+var _sent_pulse := PackedByteArray()  # host: the last pulse sent, without revision and countdowns
+var _publishing := false       # host: setting net_vitals/net_pulse to send them
+var _timers_fresh := false     # peer: a pulse (with its countdowns) came since _m() last rebuilt
+## Host only: spawn protection (Soldier.respawn_state, after a respawn or while waiting for one):
+## rounds, impacts, blasts, falls, burns and trauma do nothing.
+var shielded := false
 
 
 ## A body part in words: "upper_arm_l" -> "left upper arm", TORSO -> "torso".
@@ -337,6 +374,8 @@ func server_exert() -> bool:
 ## Host only. A blast `distance` metres away (radius already doubled indoors); see
 ## WoundModel.add_blast.
 func server_blast(distance: float, radius: float, ear_pro := false) -> void:
+	if shielded:
+		return
 	_model.add_blast(distance, radius, ear_pro)
 	_last_hit_at = Time.get_ticks_msec() / 1000.0
 	last_cause = {"cause": "blast", "distance": distance}
@@ -345,6 +384,8 @@ func server_blast(distance: float, radius: float, ear_pro := false) -> void:
 
 ## Host only. A fall from `height` metres (see WoundModel.add_fall).
 func server_fall(height: float) -> void:
+	if shielded:
+		return
 	_model.add_fall(height)
 	last_cause = {"cause": "fall (%.1f m)" % height}
 	_after_change(true)
@@ -352,6 +393,8 @@ func server_fall(height: float) -> void:
 
 ## Host only. Burns over `share` of the body.
 func server_burn(share: float) -> void:
+	if shielded:
+		return
 	_model.add_burn(share)
 	last_cause = {"cause": "burn"}
 	_after_change(true)
@@ -717,7 +760,7 @@ func vision() -> Dictionary:
 ## position the channel goes in at a random spot on the part. ("damage" is ignored: the
 ## wound model has none.)
 func server_hit(part: StringName, hit: Dictionary) -> void:
-	if _m().dead:
+	if _m().dead or shielded:
 		return
 	var round_class := StringName(hit.get("round_class", INTERMEDIATE))
 	var channel_in := _rest_channel(part, hit)
@@ -752,6 +795,8 @@ func server_hit(part: StringName, hit: Dictionary) -> void:
 ## real). Head and face are helmet stops; anything else is a plate or vest. `energy_j` is
 ## the round's energy on arrival (Ballistics), or -1 if unknown.
 func server_impact(part: StringName, round_class: StringName, distance: float, energy_j := -1.0) -> void:
+	if shielded:
+		return
 	_last_hit_at = Time.get_ticks_msec() / 1000.0
 	_model.add_impact(part, round_class, distance, energy_j)
 	last_cause = {"cause": "round stopped by armor (%s)" % round_class, "part": part, "distance": distance}
@@ -761,6 +806,8 @@ func server_impact(part: StringName, round_class: StringName, distance: float, e
 ## Host only. Legacy damage (the debug K key and some tests): generic trauma that adds
 ## amount/100 pain and loses amount * 0.6% of blood volume at once.
 func server_damage(amount: float) -> void:
+	if shielded:
+		return
 	_model.add_trauma(amount * TRAUMA_PAIN_PER_DAMAGE, amount * TRAUMA_BLOOD_PER_DAMAGE)
 	last_cause = {"cause": "trauma (%.0f damage)" % amount}
 	_after_change()
@@ -901,6 +948,174 @@ func _publish(force: bool) -> void:
 	_published_at = now
 	net_state = state
 	_net_dirty = false
+	_send(state, force)
+
+
+## Host: sends what changed of `state` (a net_state just published): the structure only when it
+## changed, under a new revision, and the pulse when a quantised value changed (or along with a
+## new structure, so the two arrive together). `force` (a forced publish: a treatment started
+## or ended, a wake countdown began) also sends countdowns that changed on their own; routine
+## publishes leave those to the clients, which run them down themselves.
+func _send(state: Dictionary, force: bool) -> void:
+	var parts := split_net(state)
+	var structure: Dictionary = parts[0]
+	var pulse_key := _encode_pulse(parts[1], 0, false)
+	var struct_changed := structure != _sent_struct or net_vitals.is_empty()
+	var pulse := _encode_pulse(parts[1], (_struct_rev + 1) % 65536 if struct_changed else _struct_rev, true)
+	if not struct_changed and (pulse == net_pulse if force else pulse_key == _sent_pulse):
+		return
+	_publishing = true
+	if struct_changed:
+		_struct_rev = (_struct_rev + 1) % 65536
+		_sent_struct = structure
+		var sent := structure.duplicate()
+		sent["r"] = _struct_rev
+		net_vitals = sent
+	_sent_pulse = pulse_key
+	net_pulse = pulse
+	_publishing = false
+
+
+## net_state split in two: [the structure (STRUCT_KEYS), the scalars (everything else, with
+## the bag's mL left as "vl")].
+static func split_net(state: Dictionary) -> Array[Dictionary]:
+	var structure := {}
+	var scalars := {}
+	for key: String in state:
+		if key == "v":
+			var bag: Array = state.v
+			structure["v"] = bag.slice(0, 2)
+			scalars["vl"] = float(bag[2]) if bag.size() > 2 else 0.0
+		elif key in STRUCT_KEYS:
+			structure[key] = state[key]
+		else:
+			scalars[key] = state[key]
+	return [structure, scalars]
+
+
+## A net_state from a structure (net_vitals) and a pulse (net_pulse): what the host published,
+## to the pulse's quantisation.
+static func merge_net(structure: Dictionary, pulse: PackedByteArray) -> Dictionary:
+	var state := structure.duplicate()
+	state.erase("r")
+	var scalars := decode_pulse(pulse)
+	var left: float = scalars.get("vl", 0.0)
+	scalars.erase("vl")
+	state.merge(scalars, true)
+	var bag: Array = state.get("v", [])
+	if bag.size() >= 2:
+		state["v"] = [bag[0], bag[1], left]
+	return state
+
+
+## The pulse's scalars, each sent as a whole number of steps: [net_state key, index in its
+## array value (-1: a plain number), step, bytes]. The steps are net_state's own rounding.
+const PULSE_FIELDS := [["b", -1, 0.001, 2], ["p", -1, 0.01, 2], ["i", -1, 0.01, 2], ["o", -1, 0.5, 1],
+	["m", -1, 0.01, 2], ["d", -1, 0.01, 2], ["x", -1, 0.01, 2], ["h", -1, 1.0, 1],
+	["l", 0, 0.01, 1], ["l", 1, 0.01, 1], ["l", 2, 0.01, 1], ["l", 3, 0.01, 1],
+	["u", 0, 0.01, 1], ["u", 1, 1.0, 1], ["u", 2, 0.01, 2], ["vl", -1, 1.0, 2]]
+
+
+## The scalars of a net_state (split_net) as bytes: the structure revision (u16), the flags
+## (u16), PULSE_FIELDS, the drugs in the blood (a count, then [index in WoundModel.DRUGS,
+## level, depot] each) and, with `timers`, the countdowns running (a count, then [index in
+## WoundModel.TIMERS, tenths of a second] each). About 30 to 40 bytes.
+static func _encode_pulse(scalars: Dictionary, rev: int, timers: bool) -> PackedByteArray:
+	var out := PackedByteArray()
+	out.resize(4)
+	out.encode_u16(0, rev)
+	out.encode_u16(2, clampi(int(scalars.get("f", 0)), 0, 65535))
+	for field: Array in PULSE_FIELDS:
+		var value: Variant = scalars.get(field[0], 0.0)
+		if int(field[1]) >= 0:
+			var list: Array = value if value is Array else []
+			value = list[field[1]] if list.size() > int(field[1]) else 0.0
+		_put(out, float(value) / float(field[2]), int(field[3]))
+	var drugs: Dictionary = scalars.get("g", {})
+	out.append(drugs.size())
+	for id: String in drugs:
+		out.append(WoundModel.DRUGS.keys().find(StringName(id)))
+		_put(out, float(drugs[id][0]) / 0.01, 2)
+		_put(out, float(drugs[id][1]) / 0.01, 2)
+	if timers:
+		var running: Dictionary = scalars.get("t", {})
+		out.append(running.size())
+		for key: String in running:
+			out.append(WoundModel.TIMERS.find(key))
+			_put(out, float(running[key]) / 0.1, 2)
+	return out
+
+
+static func _put(out: PackedByteArray, steps: float, size: int) -> void:
+	var at := out.size()
+	out.resize(at + size)
+	if size == 1:
+		out.encode_u8(at, clampi(roundi(steps), 0, 255))
+	else:
+		out.encode_u16(at, clampi(roundi(steps), 0, 65535))
+
+
+## A pulse (_encode_pulse) back as net_state's scalar keys (plus "vl", the bag's mL left).
+static func decode_pulse(pulse: PackedByteArray) -> Dictionary:
+	var out := {}
+	if pulse.size() < 4:
+		return out
+	out["f"] = pulse.decode_u16(2)
+	var at := 4
+	for field: Array in PULSE_FIELDS:
+		var size := int(field[3])
+		if at + size > pulse.size():
+			return out
+		var value := float(pulse.decode_u8(at) if size == 1 else pulse.decode_u16(at)) * float(field[2])
+		at += size
+		if int(field[1]) < 0:
+			out[field[0]] = value
+		else:
+			var list: Array = out.get(field[0], [])
+			list.append(value)
+			out[field[0]] = list
+	out["u"][1] = int(out["u"][1])
+	var drugs := {}
+	var count := pulse.decode_u8(at) if at < pulse.size() else 0
+	at += 1
+	for i in count:
+		if at + 5 > pulse.size():
+			break
+		var index := pulse.decode_u8(at)
+		if index < WoundModel.DRUGS.size():
+			drugs[String(WoundModel.DRUGS.keys()[index])] = [pulse.decode_u16(at + 1) * 0.01, pulse.decode_u16(at + 3) * 0.01]
+		at += 5
+	out["g"] = drugs
+	var running := {}
+	count = pulse.decode_u8(at) if at < pulse.size() else 0
+	at += 1
+	for i in count:
+		if at + 3 > pulse.size():
+			break
+		var index := pulse.decode_u8(at)
+		if index < WoundModel.TIMERS.size():
+			running[WoundModel.TIMERS[index]] = pulse.decode_u16(at + 1) * 0.1
+		at += 3
+	out["t"] = running
+	return out
+
+
+## Peer: a structure or a pulse arrived (spawn state can land before the body is in the tree,
+## so this doesn't ask whether it's the host: only replication sets these outside _send);
+## net_state is rebuilt from both. A pulse built on an
+## older structure than the one held is stale and dropped. (Both come on one reliable sync,
+## the structure first, so that shouldn't happen.)
+func _receive(pulse: bool) -> void:
+	if pulse:
+		if net_pulse.size() < 4:
+			return
+		var behind := (_struct_rev - net_pulse.decode_u16(0) + 65536) % 65536
+		if not net_vitals.is_empty() and behind > 0 and behind < 32768:
+			return
+		_timers_fresh = true
+	else:
+		_struct_rev = int(net_vitals.get("r", 0))
+	net_state = merge_net(net_vitals, net_pulse)
 
 
 ## Emits `changed` each time the arrest countdown passes a whole second, so labels that
@@ -913,11 +1128,20 @@ func _signal_countdown() -> void:
 		changed.emit()
 
 
-## The model to read: the host's own, or on a client the copy rebuilt from net_state.
+## The model to read: the host's own, or on a client the copy rebuilt from net_state. A
+## structure that came without a new pulse keeps the countdowns the client has been running
+## down (the held pulse's are as old as that pulse).
 func _m() -> WoundModel:
 	if _net_dirty and not _is_host():
 		_net_dirty = false
+		var keep := {}
+		if not _timers_fresh:
+			for key: String in WoundModel.TIMERS:
+				keep[key] = _model.get(key)
+		_timers_fresh = false
 		_model.apply_net(net_state)
+		for key: String in keep:
+			_model.set(key, keep[key])
 	return _model
 
 

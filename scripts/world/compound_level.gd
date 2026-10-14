@@ -231,6 +231,127 @@ func next_spawn_point() -> Vector3:
 	return spawn_point(_spawn_index)
 
 
+# --- Respawn points (Captain, playtest P0362, 2026-10-13) ---------------------------------------
+# A dead player came back at once at one fixed point with their killer standing on it. Now
+# (Soldier._server_respawn_now) they come back at the first of respawn_candidates() that is
+# safe: no live enemy within RESPAWN_SAFE_M and none that can see it from within RESPAWN_SIGHT_M.
+# With none safe, at respawn_fallback() (a zone's FOB) if that is safe; else wherever is least
+# dangerous (respawn_clearance: the nearest enemy's distance, one in sight counting as closer).
+# Design intent (docs/mission_brainstorm.md, squad wipe): respawn at the LHD or FOB and push back in.
+
+## Proposed (Captain: about 150 m, and none with line of sight).
+const RESPAWN_SAFE_M := 150.0
+## An enemy further off than this doesn't count as seeing a respawn point.
+const RESPAWN_SIGHT_M := 400.0
+## Eye height above a respawn point, for the line-of-sight check.
+const RESPAWN_EYE_M := 1.6
+## Players respawning at one point stand this far apart (two rows of four).
+const RESPAWN_SPREAD_M := 2.0
+## Host: what the last respawn_point() picked and why, for the session log and tests.
+var last_respawn := {}
+
+
+## Host only. Where `player` respawns (see above), on the ground, spread from the last one.
+func respawn_point(player: Soldier) -> Vector3:
+	var cands := respawn_candidates()
+	if cands.is_empty():
+		last_respawn = {"why": "the level's spawn point"}
+		return next_spawn_point()
+	var foes := respawn_enemies(player)
+	var pick: Variant = null
+	var why := ""
+	for i in cands.size():
+		if respawn_clearance(cands[i], foes) >= RESPAWN_SAFE_M:
+			pick = cands[i]
+			why = "candidate %d of %d, no enemy near or in sight" % [i + 1, cands.size()]
+			break
+	var fallback: Variant = respawn_fallback()
+	if pick == null and fallback != null and respawn_clearance(fallback, foes) >= RESPAWN_SAFE_M:
+		pick = fallback
+		why = "every insertion hot: the FOB"
+	if pick == null:
+		var best := -1.0
+		var all: Array[Vector3] = cands.duplicate()
+		if fallback != null:
+			all.append(fallback)
+		for p in all:
+			var c := respawn_clearance(p, foes)
+			if c > best:
+				best = c
+				pick = p
+		why = "every point hot: the least dangerous (nearest enemy %.0f m, or in sight)" % best
+	_spawn_index += 1
+	var k := posmod(_spawn_index, 8)
+	var at: Vector3 = ground_point((pick as Vector3) + Vector3((k % 4 - 1.5) * RESPAWN_SPREAD_M, 0, (k / 4) * RESPAWN_SPREAD_M))
+	last_respawn = {"pos": at, "why": why, "point": pick}
+	SessionLog.note("%s respawned at (%.0f, %.0f): %s" % [player.log_name(), at.x, at.z, why])
+	return at
+
+
+## Where a dead player may respawn, best first (ground points). Here: with the briefing
+## deployed, its chosen insertion point, then its other insertion points and its extraction
+## points; else none (the level's spawn point). ZoneLevel has the zone's own.
+func respawn_candidates() -> Array[Vector3]:
+	var out: Array[Vector3] = []
+	var briefing := MapNodes.briefing(self)
+	if briefing == null or not briefing.is_deployed():
+		return out
+	add_respawn_candidate(out, briefing.insertion().get("pos", []))
+	for point: Dictionary in briefing.insertion_points():
+		add_respawn_candidate(out, point.get("pos", []))
+	for point: Dictionary in briefing.zone.get("extraction_points", []):
+		add_respawn_candidate(out, point.get("pos", []))
+	return out
+
+
+## Adds `at` (a Vector3, or an [x, z] map position) to `out` unless one already there is close.
+func add_respawn_candidate(out: Array[Vector3], at: Variant) -> void:
+	var p: Vector3
+	if at is Vector3:
+		p = at
+	elif at is Array and (at as Array).size() >= 2:
+		p = ground_point(Vector3(float(at[0]), 0.1, float(at[1])))
+	else:
+		return
+	for q in out:
+		if Vector2(q.x - p.x, q.z - p.z).length() < RESPAWN_SPREAD_M * 4.0:
+			return
+	out.append(p)
+
+
+## A safe point to fall back on when every candidate is hot (a zone's FOB), or null.
+func respawn_fallback() -> Variant:
+	return null
+
+
+## Host: the soldiers who'd make a respawn point unsafe for `player`: on another side, up, and
+## not civilians, captives or HVTs (Person.is_noncombatant).
+func respawn_enemies(player: Soldier) -> Array[Soldier]:
+	var out: Array[Soldier] = []
+	for n in get_tree().get_nodes_in_group(&"combatants"):
+		var s := n as Soldier
+		if s and s != player and s.faction != player.faction and not s.is_queued_for_deletion() and s.vitals.is_up() \
+				and not Person.is_noncombatant(s):
+			out.append(s)
+	return out
+
+
+## How safe `at` is from `foes`: the nearest one's distance, where one that can see it (from
+## within RESPAWN_SIGHT_M) counts as RESPAWN_SAFE_M / RESPAWN_SIGHT_M as far. RESPAWN_SAFE_M and
+## over is safe; INF with no foes.
+func respawn_clearance(at: Vector3, foes: Array[Soldier]) -> float:
+	var out := INF
+	var eye := at + Vector3.UP * RESPAWN_EYE_M
+	var world := get_world_3d()
+	for s in foes:
+		var d := s.global_position.distance_to(at)
+		var c := d
+		if d < RESPAWN_SIGHT_M and d >= RESPAWN_SAFE_M and Throwables.clear_line(world, s.camera.global_position, eye):
+			c = d * RESPAWN_SAFE_M / RESPAWN_SIGHT_M
+		out = minf(out, c)
+	return out
+
+
 ## The `index`th of the level's player spawn points (they repeat): the compound's gate.
 func spawn_point(index: int) -> Vector3:
 	return SPAWN_POINTS[posmod(index, SPAWN_POINTS.size())]
@@ -821,6 +942,7 @@ func _make_item(data: Dictionary) -> Node:
 	item.uid = data.uid
 	item.name = data.uid
 	item.position = data.pos
+	item.rotation = ItemArt.spawn_rotation(ItemDB.get_item(item.item_id))  # a plate lies flat
 	return item
 
 

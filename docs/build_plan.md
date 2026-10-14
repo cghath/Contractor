@@ -277,6 +277,16 @@ the gameplay half. Ahead of wave 7's environment assets, which replace the place
 they land. Terrain files (`scripts/world/zone_terrain.gd`, new vegetation scripts) are Captain's
 side's meanwhile; cghath's agent: vehicles driving on it is yours, its look is ours.
 
+**Terrain quality pass (Captain, 2026-10-14): Captain's side, after the Oct 14 playtest build
+and the first co-op night.** Up close the zones' ground reads as wide flat colour. First
+priority: ground detail and grass near the player: surface variation instead of flat colour
+(dirt, gravel, rock and path patches), and low grass and ground cover drawn with MultiMesh
+around the player, fading out with distance. Grass density and draw distance become settings,
+and the frame-rate benchmark (`perf/frame-rate`) measures the cost on the RTX at native
+2560x1600. Later in the pass: terrain shape (gullies, ditches, berms that give cover) and the
+far view. Same files as the terrain visual pass (`scripts/world/zone_terrain.gd`,
+`zone_scatter.gd`); wave 7's environment art reskins it.
+
 **Procedural buildings (Captain, 2026-10-13): Captain's side, after the terrain visual pass,
 in parallel with wave 5, ahead of wave 7.** Buildings are generated: a shell from a footprint,
 rooms laid out by rules for the building's type, each room furnished from a library of preset

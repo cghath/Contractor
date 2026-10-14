@@ -173,9 +173,33 @@ func update_status(player: Soldier) -> void:
 		lines.append(squad)
 	if player.inventory.hands != &"":
 		lines.append("Carrying %s (Alt+G to drop)" % ItemDB.get_item(player.inventory.hands).name)
+	if player.respawn_state == Soldier.RESPAWN_PROTECTED:
+		lines.append("Spawn protection%s - firing ends it" % (" %d s" % ceili(player.protect_eta - Soldier._now()) if player.protect_eta > Soldier._now() else ""))
 	_status.text = "\n".join(lines)
-	_crosshair.visible = not player.is_aiming and player.vitals.is_up()
-	_downed.text = downed_text(player.vitals)
+	_crosshair.visible = not player.is_aiming and player.vitals.is_up() and player.respawn_state != Soldier.RESPAWN_WAITING
+	var held: float = player.player_input.give_up_held if player.player_input else 0.0
+	_downed.text = respawn_text(player) if player.respawn_state == Soldier.RESPAWN_WAITING \
+		else downed_text(player.vitals) + give_up_text(player, held)
+
+
+## The countdown while a dead player waits to respawn (Soldier.RESPAWN_WAITING).
+static func respawn_text(player: Soldier) -> String:
+	var left := ceili(maxf(player.respawn_eta - Soldier._now(), 0.0))
+	return "KILLED\nRespawning in %d s" % left if player.respawn_eta >= 0.0 else "KILLED\nRespawning..."
+
+
+## The give-up prompt under the downed text (Soldier.can_give_up): hold the key (rebindable,
+## Controls "give_up") GIVE_UP_HOLD_S; until it's open, how long until it is. `held`: seconds held.
+static func give_up_text(player: Soldier, held: float) -> String:
+	if player.vitals.is_up() or player.vitals.is_dead() or player.is_ai():
+		return ""
+	var key := OS.get_keycode_string(GameSettings.key_for(&"give_up"))
+	if player.can_give_up():
+		if held > 0.0:
+			return "\n\nGiving up... %d%%" % clampi(roundi(held / Soldier.GIVE_UP_HOLD_S * 100.0), 0, 100)
+		return "\n\nHold [%s] to give up and respawn" % key
+	var wait := ceili(maxf(Soldier.GIVE_UP_AFTER_S - player.seconds_down(), 0.0))
+	return "\n\nGive up ([%s], hold) in %d s" % [key, wait]
 
 
 ## The text over a downed player's black screen: no health, just what is happening. You

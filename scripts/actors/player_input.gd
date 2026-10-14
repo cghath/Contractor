@@ -100,6 +100,12 @@ func _ready() -> void:
 
 
 var _view_yaw := 0.0  # Soldier.view_yaw last applied
+## The turn cap under load (MovementRules.MAX_YAW_RATE): mouse yaw (radians) still to play out,
+## and what this frame may still turn.
+var _pending_yaw := 0.0
+var _turn_budget := 0.0
+## 0..1: how far a wall close ahead has pushed the weapon back (MovementRules.WALL_PULL_*).
+var wall_pull := 0.0
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -114,7 +120,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		# The settings' sensitivity (and aiming sensitivity down sights); concussion slows turning.
 		var turn := GameSettings.mouse_turn(MOUSE_SENSITIVITY, body.is_aiming) * body.vitals.turn_mult()
 		turn *= GunSight.zoom_turn(body)  # through a scope: slower with the zoom (P0362)
-		body.rotate_y(-event.relative.x * turn)
+		if body.movement.is_sprinting:  # sprinting under load, the view comes round slower
+			turn *= lerpf(1.0, MovementRules.SPRINT_TURN_LOADED, MovementRules.load_fraction(body.load_kg))
+		turn_view(-event.relative.x * turn)
 		body.set_pitch(body.head.rotation.x - event.relative.y * turn * (-1.0 if GameSettings.invert_y() else 1.0))
 	elif hud.map_screen and hud.map_screen.is_open():
 		return  # the map (M) has the mouse and the keys: no reloading or throwing behind it
@@ -122,8 +130,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		hud.toggle_detail()
 	elif hud.is_inventory_open():
 		return  # the inventory screen has the mouse
-	elif body.vitals.is_up() and hud.command_menu.handle_input(event):
-		return  # F-keys, and 1-9 / wheel / middle click while the command menu is open
+	elif body.vitals.is_up() and body.respawn_state != Soldier.RESPAWN_WAITING and hud.command_menu.handle_input(event):
+		return  # F-keys, and 1-9 / wheel / middle click while the command menu is open (not while dead, waiting to respawn)
 	elif event.is_action_pressed(&"debug_hurt") and DevTools.on():
 		body._server_debug_hurt.rpc_id(1, 40.0)
 	elif event.is_action_pressed(&"zoom_in") or event.is_action_pressed(&"zoom_out"):
@@ -138,7 +146,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed(VehicleCamera.ACTION) and Vehicle.ride_of(body) != null:
 		hud.flash(VehicleCamera.toggle())  # seated: chase view <-> first person, for the session
 	elif not body.vitals.is_up():
-		return  # downed: no giving up (handoff); you come round on your own, or the arrest window runs out
+		return  # downed: you come round on your own, the arrest window runs out, or you give up (_update_give_up)
+	elif body.respawn_state == Soldier.RESPAWN_WAITING:
+		return  # dead, waiting to respawn: nothing to do but wait
 	elif event.is_action_pressed(ControlOptions.GET_OUT_ACTION) and ControlOptions.get_out_key() and Vehicle.ride_of(body) != null:
 		Vehicle.ride_of(body).request_exit.rpc_id(1)  # the get-out key (an option; the seat's menu then has no Get out)
 	elif interaction.is_open() and event is InputEventMouseButton:
@@ -176,8 +186,45 @@ func _unhandled_input(event: InputEvent) -> void:
 		body.select_weapon(Launchers.SLOT)
 
 
+## Turns the body (yaw, radians) as fast as its load lets it (MovementRules.MAX_YAW_RATE): light,
+## at once; loaded, up to this frame's share of the cap now and the rest over the next frames
+## (advance_turn), so a flick swings round slower but nothing is lost.
+func turn_view(yaw: float) -> void:
+	if is_inf(max_yaw_rate()):
+		_pending_yaw = 0.0
+		body.rotate_y(yaw)
+		return
+	_pending_yaw += yaw
+	_spend_turn()
+
+
+## The turn cap now (degrees a second): by load tier.
+func max_yaw_rate() -> float:
+	return MovementRules.MAX_YAW_RATE[body.load_tier()]
+
+
+## Each frame: a fresh share of the turn cap, spent on any turn still pending.
+func advance_turn(delta: float) -> void:
+	var rate := max_yaw_rate()
+	_turn_budget = INF if is_inf(rate) else deg_to_rad(rate) * delta
+	if not body.vitals.is_up():
+		_pending_yaw = 0.0
+	_spend_turn()
+
+
+func _spend_turn() -> void:
+	if _pending_yaw == 0.0:
+		return
+	var step := clampf(_pending_yaw, -_turn_budget, _turn_budget)
+	body.rotate_y(step)
+	_pending_yaw -= step
+	_turn_budget -= absf(step)
+
+
 func _process(delta: float) -> void:
+	advance_turn(delta)
 	_update_interaction(delta)
+	_update_give_up(delta)
 	if placing:
 		_update_ghost()
 	if body.view_yaw() != _view_yaw:
@@ -238,15 +285,19 @@ func _exit_tree() -> void:
 
 ## Runs after the body has moved this frame (children process after their parent).
 func _physics_process(delta: float) -> void:
-	_update_focus()
-	_update_aim(delta)
-	_try_fire()
+	var waiting := body.respawn_state == Soldier.RESPAWN_WAITING  # dead, waiting to respawn: no aiming or firing
+	if waiting:
+		body.is_aiming = false
+	else:
+		_update_focus()
+		_update_aim(delta)
+		_try_fire()
 	var tilt := minf(-0.7 if body.is_reloading else 0.0, -CharacterModel.VIEW_LOWER_PITCH * body.model.view_lower())
 	body.view_model.rotation.x = move_toward(body.view_model.rotation.x, tilt, delta * 6.0)
 	# Both hands on the casualty: no weapon in view; through a scope: only the glass (P0362); nor
 	# seated in a vehicle (no firing your own from a seat, and in first person it hid the cabin and
-	# poked through the dash).
-	body.view_model.visible = body.carry_mode == &"" and not GunSight.scoped(body) and not is_instance_valid(body.vehicle)
+	# poked through the dash); nor dead, waiting to respawn.
+	body.view_model.visible = body.carry_mode == &"" and not GunSight.scoped(body) and not is_instance_valid(body.vehicle) and not waiting
 	_settle_recoil(delta)
 	_update_sway(delta)
 	_hide_shouldered()
@@ -255,6 +306,26 @@ func _physics_process(delta: float) -> void:
 	body.view_model.rotation.y = sway.x
 	body.view_model.rotation.z = sway.y
 	hud.update_status(body)
+
+
+## How long the give-up key has been held (0 when it isn't, or giving up isn't open): the HUD's prompt.
+var give_up_held := 0.0
+var _give_up_sent := false
+
+
+## Downed: holding the give-up key (Controls "give_up") for Soldier.GIVE_UP_HOLD_S, while
+## Soldier.can_give_up(), asks the host to let this player die and respawn (Captain, P0362).
+func _update_give_up(delta: float) -> void:
+	var menus := pause_menu.is_open() or bug_report.is_open() or medical_menu.is_open() or hud.is_inventory_open() \
+		or (hud.map_screen != null and hud.map_screen.is_open())
+	if not body.can_give_up() or menus or not Input.is_action_pressed(&"give_up"):
+		give_up_held = 0.0
+		_give_up_sent = false
+		return
+	give_up_held += delta
+	if give_up_held >= Soldier.GIVE_UP_HOLD_S and not _give_up_sent:
+		_give_up_sent = true
+		body._server_give_up.rpc_id(1)
 
 
 ## Keeps the casualty this player has up on the shoulder out of their own camera (they still see
@@ -342,7 +413,7 @@ func _update_focus() -> void:
 ## Hold Left Ctrl for the interaction menu, Left Ctrl + Left Alt for yourself; letting go
 ## performs the highlighted action. Going down or opening the inventory cancels it.
 func _update_interaction(delta: float) -> void:
-	var allowed := _captured() and body.vitals.is_up() and not hud.is_inventory_open()
+	var allowed := _captured() and body.vitals.is_up() and body.respawn_state != Soldier.RESPAWN_WAITING and not hud.is_inventory_open()
 	if not allowed:
 		if interaction.is_open():
 			interaction.close()
@@ -420,11 +491,30 @@ func _update_aim(delta: float) -> void:
 	body.is_aiming = _captured() and body.vitals.is_up() and weapon != null and (weapon.type == "weapon" or Launchers.is_launcher(weapon)) \
 		and body.inventory.hands == &"" and not body.is_reloading and Input.is_action_pressed(&"aim")
 	var fov := GunSight.aimed_fov_of(body, weapon, GameSettings.fov()) if body.is_aiming else GameSettings.fov()
-	body.camera.fov = lerpf(body.camera.fov, fov, minf(delta * 12.0, 1.0))
+	# Up to the eye in the weapon's ADS time (its mass with optic, slower on tired arms:
+	# MovementRules.ads_seconds); lowering stays quick.
+	var rate := MovementRules.ADS_EASE_K / body.movement.ads_seconds() if body.is_aiming else 14.0
+	body.camera.fov = lerpf(body.camera.fov, fov, minf(delta * (rate if body.is_aiming else 12.0), 1.0))
 	var hip_view := HIP_VIEW * Vector3(-1.0 if body.left_handed else 1.0, 1, 1)  # off the firing shoulder
 	var aimed_view := ads_view(weapon, body.inventory.state_of(body.active_slot)) if weapon and not Launchers.is_launcher(weapon) else hip_view
 	var lowered := CharacterModel.VIEW_LOWER_OFFSET * body.model.view_lower()  # ducks while the hands are busy
-	body.view_model.position = body.view_model.position.lerp((aimed_view if body.is_aiming else hip_view) + lowered, minf(delta * 14.0, 1.0))
+	wall_pull = move_toward(wall_pull, wall_pull_at(), delta * 6.0)
+	var pulled := MovementRules.WALL_PULL_BACK * Vector3(-1.0 if body.left_handed else 1.0, 1, 1) * wall_pull  # a wall ahead: weapon back
+	body.view_model.position = body.view_model.position.lerp((aimed_view if body.is_aiming else hip_view) + lowered + pulled, minf(delta * rate, 1.0))
+
+
+## How far a wall ahead pushes the weapon back now: 0 clear (past WALL_PULL_REACH_M from the eye)
+## to 1 (at WALL_PULL_MIN_M or closer).
+func wall_pull_at() -> float:
+	if not body.is_inside_tree():
+		return 0.0
+	var from := body.camera.global_position
+	var query := PhysicsRayQueryParameters3D.create(from, from - body.camera.global_basis.z * MovementRules.WALL_PULL_REACH_M, 1, [body.get_rid()])
+	var hit := body.get_world_3d().direct_space_state.intersect_ray(query)
+	if hit.is_empty():
+		return 0.0
+	var d := from.distance_to(hit.position)
+	return clampf((MovementRules.WALL_PULL_REACH_M - d) / (MovementRules.WALL_PULL_REACH_M - MovementRules.WALL_PULL_MIN_M), 0.0, 1.0)
 
 
 func _try_reload() -> void:

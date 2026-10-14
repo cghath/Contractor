@@ -95,7 +95,8 @@ func _structures_readable(bounds: AABB) -> bool:
 
 
 ## Loaded modules' voxels as they are now (false while one isn't built yet); unloaded
-## modules' proxies (ZoneModule.proxy_boxes: the base boxes, less what was carved).
+## modules' proxies (ZoneModule.proxy_boxes: the base boxes, less what was carved); either's
+## stairs as ramps (ZoneModules.ramps).
 func _add_structures(source: NavigationMeshSourceGeometryData3D, bounds: AABB) -> bool:
 	var rect := Rect2(bounds.position.x, bounds.position.z, bounds.size.x, bounds.size.z)
 	for module in zone.modules():
@@ -114,6 +115,10 @@ func _add_structures(source: NavigationMeshSourceGeometryData3D, bounds: AABB) -
 			for box in module.proxy_boxes():  # with any breach made before it streamed out
 				if box.intersects(local):
 					source.add_faces(_box_faces(box.intersection(local.grow(0.01))), module.global_transform)
+		# Its stairs as ramps (the steps as voxels bake cut in two: BuildingGen.ramp_faces).
+		var ramps := ZoneModules.ramps(module.type)
+		if not ramps.is_empty():
+			source.add_faces(ramps, module.global_transform)
 	return true
 
 
@@ -143,8 +148,10 @@ func _physics_process(_delta: float) -> void:
 	if now >= _next_update:
 		_next_update = now + UPDATE_S
 		_update_wanted()
-	# Start new chunks, nearest first, while there's room.
-	while not _queue.is_empty() and _baking.size() < MAX_BAKES:
+	# Start new chunks, nearest first, while there's room, for at most REBAKE_BUDGET_MS a frame
+	# (gathering a chunk's voxels takes milliseconds; 8 at once held fights' frames for 50-200 ms).
+	var until := Time.get_ticks_usec() + int(REBAKE_BUDGET_MS * 1000.0)
+	while not _queue.is_empty() and _baking.size() < MAX_BAKES and Time.get_ticks_usec() < until:
 		var chunk: Vector2i = _queue.pop_front()
 		if _regions.has(chunk) or not _wanted.has(chunk):
 			continue

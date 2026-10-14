@@ -144,6 +144,9 @@ const HYSTERESIS := 0.1
 const ARRIVE := 0.7
 const RUN_DISTANCE := 5.0
 const WAYPOINT_REACH := 0.45
+## Points more than this above or below a unit are on another floor (F-01): distances to them
+## are measured in 3D, so a corner upstairs is never "reached" from the room under it.
+const FLOOR_DY_M := 1.6
 const REPATH_S := 1.0
 const COVER_RINGS: Array[float] = [2.0, 4.0, 6.0, 8.0, 10.0]
 const COVER_SEARCH_S := 1.0
@@ -156,6 +159,53 @@ const ADVANCE_AFTER_S := 6.0
 const ADVANCE_STEP := 8.0
 const WORLD_MASK := 1
 const TURN_RATE := 7.0
+## Proposed (Captain, P0362: close-range hostiles were lasers): how fast the aim can swing
+## (degrees a second) at combat skill 0 and 1. Below this _aim_at turns as it always did; a
+## big swing (a target behind him) takes its time. Pitch swings at PITCH_SWING_MULT of that.
+const SWING_UNSKILLED_DEG_S := 150.0
+const SWING_SKILLED_DEG_S := 400.0
+const PITCH_SWING_MULT := 0.6
+## Proposed: a target more than TURN_HOLD_MIN_DEG off his aim freezes him this long before he
+## starts to turn (taking in what he saw), skill 0 and 1.
+const TURN_HOLD_UNSKILLED_S := 0.35
+const TURN_HOLD_SKILLED_S := 0.1
+const TURN_HOLD_MIN_DEG := 20.0
+## Proposed: close-range aim (_cqb_aim_point). Within CQB_FULL_M the full model applies,
+## fading out to none at CQB_FADE_M (the range hold, RANGE_HOLD_*, takes over). The first
+## shots land up to CQB_ACQ_*_M off the chest (mostly low: the muzzle comes up onto him; high in
+## CQB_HIGH_SHARE of acquisitions, at CQB_HIGH_MULT of the size: a snap from above, the few
+## rounds that go to the neck or head), settling over CQB_SETTLE_*_S once the reaction time
+## has passed; each burst holds a small offset of its own (CQB_BURST_OFFSET_M, one sigma).
+## Skill 0 and 1.
+const CQB_FULL_M := 10.0
+const CQB_FADE_M := 30.0
+const CQB_ACQ_UNSKILLED_M := 0.45
+const CQB_ACQ_SKILLED_M := 0.12
+const CQB_HIGH_SHARE := 0.15
+const CQB_HIGH_MULT := 0.6
+const CQB_SETTLE_UNSKILLED_S := 0.6
+const CQB_SETTLE_SKILLED_S := 0.25
+const CQB_BURST_OFFSET_M := 0.05
+## Proposed (Captain, P0362: the old gate fired once the turn was within 6 degrees, which at
+## 2-6 m is 20-60 cm, and the sights came down onto a man from eye level through his head and
+## neck): a round at a seen foe goes only once the sights are within GATE_*_M (skill 0 and 1)
+## of the aim point, measured at his range; on the high side only GATE_HIGH_MULT of that (a
+## high miss is a head shot), on the low side GATE_LOW_MULT (a low one is still his belly). Out
+## at range never tighter than GATE_MIN_DEG, so he still fires at a man on the move.
+const GATE_UNSKILLED_M := 0.25
+const GATE_SKILLED_M := 0.15
+const GATE_HIGH_MULT := 0.5
+const GATE_LOW_MULT := 1.5
+const GATE_MIN_DEG := 0.3
+## Proposed (Captain, P0362: one guard downed three at 155 m in 13 s): beyond close range each
+## burst is held a little off (one sigma RANGE_HOLD_*_DEG, skill 0 and 1: the whole burst
+## groups round a wrong point, as a man's hold on a small far figure wanders), fully from
+## CQB_FADE_M out. The first bursts at a new target are wider (RANGE_ACQ_MULT more, settling
+## over RANGE_SETTLE_S: finding the range, the wind, his own fall of shot).
+const RANGE_HOLD_UNSKILLED_DEG := 0.35
+const RANGE_HOLD_SKILLED_DEG := 0.1
+const RANGE_ACQ_MULT := 1.0
+const RANGE_SETTLE_S := 4.0
 const GRENADE_COOLDOWN_S := 15.0
 ## One frag per spot per squad within this long, over this spread (proposed).
 const SQUAD_FRAG_GAP_S := 6.0
@@ -281,6 +331,16 @@ const REACH_SKIP_S := 20.0
 ## Proposed: while clearing or assaulting through a position, unconscious foes this close get
 ## dead-checked (shot); otherwise targeting skips them.
 const DEAD_CHECK_M := 8.0
+## Proposed (Captain, P0362: dead-checks fired bursts until the body died, nearly always of a
+## head or neck round): a dead-check is a look (DEAD_CHECK_LOOK_*_S, skill 0 and 1), then
+## DEAD_CHECK_ROUNDS deliberate single rounds to the torso, each only with the sights within
+## DEAD_CHECK_GATE_DEG and on the body (not the head); then the body counts as checked. One he
+## can't get a clean shot at within DEAD_CHECK_GIVE_UP_S after the look counts as checked too.
+const DEAD_CHECK_LOOK_UNSKILLED_S := 2.0
+const DEAD_CHECK_LOOK_SKILLED_S := 1.0
+const DEAD_CHECK_GATE_DEG := 1.0
+const DEAD_CHECK_ROUNDS := 2
+const DEAD_CHECK_GIVE_UP_S := 4.0
 ## Proposed: in Stealth, open fire unprovoked only at an enemy this close.
 const STEALTH_ENGAGE_M := 15.0
 ## Proposed: in Safe, only run to catch up from this far behind.
@@ -453,7 +513,20 @@ var _detour_until := -1.0
 var _detour_next := -1.0  # no new sidestep before then (try the direct way in between)
 var _detour_side := 1.0
 var _skip := {}  # casualty instance id -> Soldier._now() until which this unit leaves them to others
-var _dead_check: Soldier  # an unconscious foe being dead-checked, kept until dead or out of range
+var _dead_check: Soldier  # an unconscious foe being dead-checked, kept until checked, dead or out of range
+var _dead_check_rounds := 0  # rounds fired at _dead_check
+var _dead_check_since := -1000.0  # when _dead_check became that body
+var _checked := {}  # instance id -> true: bodies this unit has dead-checked (cleared when they're up again)
+## Close-range aim (_acquire, _cqb_aim_point): the first-shot offset (metres, right/up), the
+## offset held through this burst, seconds since the target was acquired, its reaction time,
+## how long he holds before turning, and whether it was up when acquired.
+var _acq_offset := Vector2.ZERO
+var _burst_offset := Vector2.ZERO
+var _burst_hold := Vector2.ZERO  # radians right/up: this burst's hold at range (RANGE_HOLD_*_DEG)
+var _acq_age := 0.0
+var _acq_react_s := 0.0
+var _acq_hold_s := 0.0
+var _acq_up := true
 var _score := 0.0
 var _ready_done := false
 var _was_bounding := false
@@ -475,6 +548,12 @@ static func of(s: Node) -> SquadAI:
 
 
 func _physics_process(delta: float) -> void:
+	var started := Time.get_ticks_usec()
+	_tick(delta)
+	FrameCost.spent(&"ai", started)
+
+
+func _tick(delta: float) -> void:
 	if not _ready_done:
 		_setup()
 		return
@@ -506,13 +585,14 @@ func _physics_process(delta: float) -> void:
 		_scan_cd = SCAN_S
 		var previous := target
 		target = _find_target()
-		if target != null and target != previous and target.vitals.is_up():
-			_next_shot = maxf(_next_shot, now + lerpf(0.9, 0.25, combat))  # reaction time
-			var callouts := Callouts.of(body)
-			if callouts:
-				callouts.contact(body, target)
-			if body.faction == &"hostile":
-				Alert.server_sighting(body, target.global_position)  # hot zones: he'll radio it in (4B part 3)
+		if target != null and (target != previous or target.vitals.is_up() != _acq_up):
+			_acquire(target)  # reaction time, first-shot error, snap-aim hold (or a dead-check's look)
+			if target != previous and target.vitals.is_up():
+				var callouts := Callouts.of(body)
+				if callouts:
+					callouts.contact(body, target)
+				if body.faction == &"hostile":
+					Alert.server_sighting(body, target.global_position)  # hot zones: he'll radio it in (4B part 3)
 	if target != null and target.vitals.is_up():
 		_last_contact = now
 		body.threat_pos = target.global_position
@@ -780,6 +860,10 @@ func _setup() -> void:
 	_hold_point = body.global_position
 	_move_point = body.global_position
 	morale = _morale_base()
+	# AI spawned together (a squad, a garrison) would otherwise scan and think in the same
+	# frames for good: a random start spreads them out (research 2026-10-13 B2.6).
+	_scan_cd = randf() * SCAN_S
+	_think_cd = randf() * THINK_S
 	_ready_done = true
 	_pass_through_squadmates()
 
@@ -2368,7 +2452,7 @@ func _do_tactic(t: Dictionary) -> void:
 			_has_destination = false
 			if _foe() == null:
 				_face(spot + (t.face as Vector3) * 5.0)
-			body.want_crouch = String(t.get("port", "")) != "window" and not (_foe() != null and Soldier._now() >= _pause_until)
+			body.want_crouch = String(t.get("port", "")) not in ["window", "parapet"] and not (_foe() != null and Soldier._now() >= _pause_until)
 		&"cover":
 			if not t.has("spot"):
 				var found: Variant = find_cover(body.global_position, 12.0)
@@ -2473,7 +2557,9 @@ func _tactic_maneuver(t: Dictionary) -> void:
 
 
 ## Clearing (SquadTactics.clear_op): to this unit's place in the stack, wait for the rest (or
-## STACK_WAIT_S), then in one after the other ENTRY_GAP_S apart, each to its room corner.
+## STACK_WAIT_S), then in one after the other ENTRY_GAP_S apart, each to its room corner; then
+## floor by floor (F-01): once everyone has his corner on this floor (or FLOOR_WAIT_S after the
+## first did), up the stair one after the other, ENTRY_GAP_S apart, to his corner on the next.
 func _tactic_clear(t: Dictionary, now: float) -> void:
 	var op: Dictionary = t.op
 	var slot: int = t.slot
@@ -2495,11 +2581,24 @@ func _tactic_clear(t: Dictionary, now: float) -> void:
 		_has_destination = false
 		_face(door)
 		return
-	var corner: Vector3 = op.rooms[slot]
+	var floors: Array = op.get("floors", [op.rooms])
+	var level: int = (op.get("floor_of", {}) as Dictionary).get(slot, 0)
+	var corner: Vector3 = floors[level][slot]
 	if _flat_distance(corner) > ARRIVE + 0.3:
 		_go(corner, true)
 		return
 	_has_destination = false
+	if level + 1 < floors.size():
+		# This floor done: up the stair once the rest are done here too, one after the other.
+		var marks: Dictionary = op.floor_done[level]
+		marks[slot] = true
+		op.floor_first[level] = minf(float(op.floor_first[level]), now)
+		if not is_finite(float(op.floor_go[level + 1])) and (marks.size() >= int(op.units) or now - float(op.floor_first[level]) >= SquadTactics.FLOOR_WAIT_S):
+			op.floor_go[level + 1] = now
+			_callout(&"tactic", "Moving up!")
+		if is_finite(float(op.floor_go[level + 1])) and now >= float(op.floor_go[level + 1]) + slot * SquadTactics.ENTRY_GAP_S:
+			op.floor_of[slot] = level + 1
+		return
 	op.done[slot] = true
 	if not ordered.is_empty():
 		if (op.done as Dictionary).size() >= int(op.units) and not bool(op.get("called", false)):
@@ -2635,8 +2734,9 @@ func _tactic_text() -> String:
 func _find_target() -> Soldier:
 	if body.stunned_s > 0.0:
 		return null
-	if focus != null and (not is_instance_valid(focus) or focus.is_queued_for_deletion() or not focus.vitals.is_up()):
-		focus = null  # the target is down: pick freely again
+	if focus != null and (not is_instance_valid(focus) or focus.is_queued_for_deletion() or not focus.vitals.is_up() \
+			or not focus.is_in_group(&"combatants")):
+		focus = null  # the target is down (or a dead player waiting to respawn, Soldier): pick freely again
 	if focus != null and focus.faction != body.faction and not Person.is_noncombatant(focus) \
 			and body.global_position.distance_to(focus.global_position) <= Squad.TARGET_RANGE and can_see(focus) \
 			and Spotting.foliage_m(_zone_scatter(), body, focus) < Spotting.FOLIAGE_OPAQUE_M:
@@ -2656,11 +2756,13 @@ func _find_target() -> Soldier:
 			continue  # civilians, HVTs and hostiles who gave up are never targets (people, wave 4)
 		var d := body.global_position.distance_to(s.global_position)
 		if not s.vitals.is_up():
-			# Unconscious foes are left alone, except for a dead-check while clearing.
-			if clearing and d < check_dist and can_see(s):
+			# Unconscious foes are left alone, except for a dead-check while clearing (once
+			# each: a body he has checked counts as dead to him).
+			if clearing and d < check_dist and not _dead_check_done(s) and can_see(s):
 				check = s
 				check_dist = d
 			continue
+		_checked.erase(s.get_instance_id())  # up again (revived): he can be checked again if he goes down
 		var steps := Spotting.footsteps_m(s)
 		var leaves := INF  # metres of foliage in the way; INF: not in sight at all
 		if (d <= steps or d < best_dist) and can_see(s):
@@ -2684,6 +2786,9 @@ func _find_target() -> Soldier:
 	# A dead-check, once started, goes on until the body is dead or out of range, even after
 	# the advance ends; only new ones need clearing.
 	if check != null:
+		if check != _dead_check:
+			_dead_check_rounds = 0
+			_dead_check_since = Soldier._now()
 		_dead_check = check
 	elif _dead_check != null and not _dead_check_valid(_dead_check):
 		_dead_check = null
@@ -2730,11 +2835,25 @@ func suspecting() -> bool:
 	return Soldier._now() - _suspect_at < SUSPECT_S
 
 
-## Still worth dead-checking: unconscious (not dead) and within DEAD_CHECK_M. Kept while it
-## drops in and out of sight behind low cover: only death or distance ends it.
+## Still worth dead-checking: unconscious (not dead), within DEAD_CHECK_M and not checked yet.
+## Kept while it drops in and out of sight behind low cover: only death, distance or the check
+## being done (_dead_check_done) ends it.
 func _dead_check_valid(s: Soldier) -> bool:
 	return is_instance_valid(s) and not s.is_queued_for_deletion() and not s.vitals.is_dead() and not s.vitals.is_up() \
-		and body.global_position.distance_to(s.global_position) <= DEAD_CHECK_M
+		and body.global_position.distance_to(s.global_position) <= DEAD_CHECK_M and not _dead_check_done(s)
+
+
+## This unit has dead-checked `s` (fired DEAD_CHECK_ROUNDS at him, _start_burst), or has been
+## at it past the look plus DEAD_CHECK_GIVE_UP_S without a clean shot (he looked; the body
+## counts as dead to him, and is marked checked here).
+func _dead_check_done(s: Soldier) -> bool:
+	var id := s.get_instance_id()
+	if _checked.has(id):
+		return true
+	if s == _dead_check and Soldier._now() - _dead_check_since > lerpf(DEAD_CHECK_LOOK_UNSKILLED_S, DEAD_CHECK_LOOK_SKILLED_S, combat) + DEAD_CHECK_GIVE_UP_S:
+		_checked[id] = true
+		return true
+	return false
 
 
 ## Clearing or assaulting through a position (pushing toward the enemy, searching, or moving
@@ -2804,6 +2923,170 @@ func _buddy_bounding() -> bool:
 
 # --- Shooting -------------------------------------------------------------
 
+## A new target `t` (or the same one gone down or back up): the reaction time before the first
+## round, and for one who is up, the first-shot error (_acq_offset, mostly low: the muzzle comes
+## up onto him; CQB_HIGH_SHARE high) and the snap-aim hold before a big swing (_acq_hold_s),
+## both larger the further the target is off his aim, and the first burst's hold (_new_hold);
+## for an unconscious one (a dead-check), a look of DEAD_CHECK_LOOK_*_S instead, no error
+## (Captain, P0362). Doctrine's reaction factor (audit A3-07) belongs on `react` here.
+func _acquire(t: Soldier) -> void:
+	_acq_age = 0.0
+	_acq_up = t.vitals.is_up()
+	var to := t.aim_point() - body.camera.global_position
+	var swing_deg := rad_to_deg((-body.camera.global_basis.z).angle_to(to.normalized())) if to.length() > 0.01 else 0.0
+	var react: float
+	if _acq_up:
+		react = lerpf(0.9, 0.25, combat)  # reaction time
+		_acq_hold_s = lerpf(TURN_HOLD_UNSKILLED_S, TURN_HOLD_SKILLED_S, combat) if swing_deg > TURN_HOLD_MIN_DEG else 0.0
+		var a := lerpf(CQB_ACQ_UNSKILLED_M, CQB_ACQ_SKILLED_M, combat) * (0.5 + minf(swing_deg, 120.0) / 120.0)
+		var up := CQB_HIGH_MULT if randf() < CQB_HIGH_SHARE else -1.0
+		_acq_offset = Vector2(a * randf_range(-0.7, 0.7), up * a * randf_range(0.4, 1.0))
+		_new_hold()
+	else:
+		react = lerpf(DEAD_CHECK_LOOK_UNSKILLED_S, DEAD_CHECK_LOOK_SKILLED_S, combat)
+		_acq_hold_s = 0.0
+		_acq_offset = Vector2.ZERO
+	_acq_react_s = react
+	_next_shot = maxf(_next_shot, Soldier._now() + react)
+
+
+## Where to aim at `foe` this frame (advances the time since he was acquired by `delta`). A
+## downed foe being dead-checked: his belly (_dead_check_point). One who is up: his chest,
+## plus, within CQB_FADE_M (fully within CQB_FULL_M), the first-shot error settling away once
+## the reaction time has passed and this burst's own small offset; further out (fully from
+## CQB_FADE_M), this burst's hold at range (_burst_hold, an angle, so metres grow with range).
+func _cqb_aim_point(foe: Soldier, delta: float) -> Vector3:
+	_acq_age += delta
+	if not foe.vitals.is_up():
+		return _dead_check_point(foe)
+	var p := foe.aim_point()
+	var from := body.camera.global_position
+	var dist := from.distance_to(p)
+	var w := clampf((CQB_FADE_M - dist) / (CQB_FADE_M - CQB_FULL_M), 0.0, 1.0)
+	var off := _burst_hold * dist * (1.0 - w)
+	if w > 0.0:
+		var settle := lerpf(CQB_SETTLE_UNSKILLED_S, CQB_SETTLE_SKILLED_S, combat)
+		off += (_acq_offset * exp(-maxf(_acq_age - _acq_react_s, 0.0) / settle) + _burst_offset) * w
+	if off == Vector2.ZERO:
+		return p
+	var flat := Vector3(p.x - from.x, 0.0, p.z - from.z)
+	var right := flat.normalized().cross(Vector3.UP) if flat.length() > 0.01 else body.global_basis.x
+	return p + right * off.x + Vector3.UP * off.y
+
+
+## Turns toward `point` for a shot at `foe` and returns the angle still off (radians), except
+## for the first _acq_hold_s after a big swing was called for: he holds still, taking in what
+## he saw, and the angle is what it is.
+func _aim_for_shot(point: Vector3, foe: Soldier) -> float:
+	if foe != null and _acq_age < _acq_hold_s:
+		var d := point - body.camera.global_position
+		return (-body.camera.global_basis.z).angle_to(d.normalized()) if d.length() > 0.001 else 0.0
+	return _aim_at(point)
+
+
+## May a round go now (the time gates passed)? At a foe who is up, aimed at `point`: where the
+## sights cross his range, within GATE_*_M of the point to the side, GATE_HIGH_MULT of that
+## above, GATE_LOW_MULT below (_gate_miss_ok). A dead-check: within DEAD_CHECK_GATE_DEG, rounds
+## left of DEAD_CHECK_ROUNDS, and the sights on his body rather than his head (_sights_on_body).
+## Covering fire at a spot (no foe): within 6 degrees, as ever.
+func _gate_open(foe: Soldier, error: float, point: Variant = null) -> bool:
+	if foe != null and not foe.vitals.is_up():
+		return error <= deg_to_rad(DEAD_CHECK_GATE_DEG) and _dead_check_rounds < DEAD_CHECK_ROUNDS and _sights_on_body(foe)
+	if foe == null or point == null:
+		return error <= deg_to_rad(6.0)
+	return _gate_miss_ok(point)
+
+
+## Whether the sights (straight down the camera) pass close enough to `point` for a round at a
+## foe: measured in metres in the plane square to the line at his range (GATE_* above).
+func _gate_miss_ok(point: Vector3) -> bool:
+	var from := body.camera.global_position
+	var to := point - from
+	var dist := to.length()
+	if dist < 0.05:
+		return true
+	var along := to / dist
+	var dir := -body.camera.global_basis.z
+	var cos_off := dir.dot(along)
+	if cos_off <= 0.1:
+		return false
+	var miss := from + dir * (dist / cos_off) - point
+	var up := (Vector3.UP - along * along.y)
+	up = up.normalized() if up.length() > 0.01 else body.global_basis.z
+	var high := miss.dot(up)
+	var side := absf(miss.dot(along.cross(up)))
+	var gate := maxf(lerpf(GATE_UNSKILLED_M, GATE_SKILLED_M, combat), dist * tan(deg_to_rad(GATE_MIN_DEG)))
+	return side <= gate and high <= gate * GATE_HIGH_MULT and high >= -gate * GATE_LOW_MULT
+
+
+## The next burst's aim off the chest, drawn when a target is acquired and as each burst ends
+## (so the sights settle on it before its first round): a small offset up close (capped on the
+## high side) and the hold at range (_burst_hold: wider while he's new to the target).
+func _new_hold() -> void:
+	_burst_offset = Vector2(randfn(0.0, CQB_BURST_OFFSET_M), minf(randfn(-0.02, 0.04), 0.03))
+	var hold := deg_to_rad(lerpf(RANGE_HOLD_UNSKILLED_DEG, RANGE_HOLD_SKILLED_DEG, combat)) \
+		* (1.0 + RANGE_ACQ_MULT * exp(-_acq_age / RANGE_SETTLE_S))
+	_burst_hold = Vector2(randfn(0.0, hold), randfn(0.0, hold))
+
+
+## A new burst at `foe`. A dead-check fires one round at a time and counts them; the last one
+## marks the body checked.
+func _start_burst(foe: Soldier) -> void:
+	if foe == null or foe.vitals.is_up():
+		return
+	_burst_left = 1
+	_dead_check_rounds += 1
+	if _dead_check_rounds == 1:
+		SessionLog.note("%s dead-checks %s at %.0f m" % [body.log_name(), SessionLog.who(foe), body.global_position.distance_to(foe.body_point())])
+	if _dead_check_rounds >= DEAD_CHECK_ROUNDS:
+		_checked[foe.get_instance_id()] = true
+
+
+## The middle of `s`'s hitbox for `part` (Vitals.CHEST...), wherever his pose or ragdoll put it;
+## null if he has none.
+static func _part_point(s: Soldier, part: StringName) -> Variant:
+	for child in s.get_children():
+		if child is Area3D and child.get_meta(&"body_part", &"") == part:
+			for shape in child.get_children():
+				if shape is CollisionShape3D:
+					return (shape as CollisionShape3D).global_position
+	return null
+
+
+## Where a dead-check aims: the belly (well away from the head), else the chest.
+func _dead_check_point(s: Soldier) -> Vector3:
+	var p: Variant = _part_point(s, Vitals.ABDOMEN)
+	return p if p != null else s.aim_point()
+
+
+## Whether his sights (straight down the camera) meet `foe`'s body first, not his head, face
+## or neck, nor nothing: from a body's head end the head hides the torso, and a dead-check
+## round goes only where it meets the torso or limbs. Geometric, against the hitbox boxes.
+func _sights_on_body(foe: Soldier) -> bool:
+	var from := body.camera.global_position
+	var dir := -body.camera.global_basis.z
+	var nearest := INF
+	var part: StringName = &""
+	for child in foe.get_children():
+		if not (child is Area3D and child.has_meta(&"body_part")):
+			continue
+		for shape in child.get_children():
+			var cs := shape as CollisionShape3D
+			if cs == null or not (cs.shape is BoxShape3D):
+				continue
+			var xf := cs.global_transform
+			var inv := xf.affine_inverse()
+			var size := (cs.shape as BoxShape3D).size
+			var hit: Variant = AABB(-size * 0.5, size).intersects_ray(inv * from, inv.basis * dir)
+			if hit == null:
+				continue
+			var dist := from.distance_to(xf * (hit as Vector3))
+			if dist < nearest:
+				nearest = dist
+				part = child.get_meta(&"body_part")
+	return part != &"" and part not in [Vitals.HEAD, Vitals.FACE, Vitals.NECK]
+
+
 func _shoot() -> void:
 	if LauncherAI.think(self):
 		return  # the launcher has them: vehicles, a group behind cover, an order (wave 5)
@@ -2815,7 +3098,7 @@ func _shoot() -> void:
 	var foe := _foe()
 	var aim_at: Variant = null
 	if foe != null:
-		aim_at = foe.aim_point()
+		aim_at = _cqb_aim_point(foe, get_physics_process_delta_time())
 	elif _suppressing:
 		aim_at = body.threat_pos + Vector3.UP * 1.0  # keep their heads down before going out to the casualty
 	elif _suppress_point() != null:
@@ -2826,11 +3109,11 @@ func _shoot() -> void:
 		_maybe_frag()
 	if aim_at == null:
 		return
-	var error := _aim_at(aim_at)
+	var error := _aim_for_shot(aim_at, foe)
 	if body.want_crouch and _at_cover() and foe != null:
 		body.want_crouch = false  # stand up to shoot over cover
 		return
-	if error > deg_to_rad(6.0) or now < _next_shot or now < _pause_until or now < body._busy_until:
+	if now < _next_shot or now < _pause_until or now < body._busy_until or not _gate_open(foe, error, aim_at):
 		return
 	if body.inventory.rounds_in(body.active_slot) <= 0 or _friendly_in_line(aim_at):
 		return
@@ -2839,8 +3122,10 @@ func _shoot() -> void:
 	if _burst_left <= 0:
 		_burst_left = randi_range(3, 5) if auto else randi_range(2, 3)
 		_suppress_jitter = Vector3(randf_range(-1, 1), randf_range(-0.3, 0.5), randf_range(-1, 1)) * SUPPRESS_SPREAD_M
+		_start_burst(foe)  # (a dead-check: one deliberate round at a time)
 	_burst_left -= 1
 	if _burst_left <= 0:
+		_new_hold()  # the next burst's aim (the sights settle on it in the pause)
 		_pause_until = now + randf_range(0.5, 1.1) / lerpf(0.7, 1.3, combat)
 	var dir := body.ai_spread_direction(weapon)  # the AI keeps its own cone (Captain, P0362)
 	var extra := deg_to_rad(_aim_error_deg(foe != null))
@@ -2870,9 +3155,14 @@ func _aim_at(point: Vector3) -> float:
 	var flat := Vector2(d.x, d.z)
 	var yaw := atan2(-d.x, -d.z)
 	var pitch := atan2(d.y, flat.length())
-	var step := 1.0 - exp(-TURN_RATE * lerpf(0.6, 1.4, combat) * get_physics_process_delta_time())
-	body.rotation.y = lerp_angle(body.rotation.y, yaw, step)
-	body.head.rotation.x = lerpf(body.head.rotation.x, clampf(pitch, -1.4, 1.4), step)
+	var dt := get_physics_process_delta_time()
+	var step := 1.0 - exp(-TURN_RATE * lerpf(0.6, 1.4, combat) * dt)
+	# The same ease as ever, but no faster than the swing cap (Captain, P0362): a snap round to
+	# a man behind him takes its time.
+	var cap := deg_to_rad(lerpf(SWING_UNSKILLED_DEG_S, SWING_SKILLED_DEG_S, combat)) * dt
+	body.rotation.y += clampf(wrapf(yaw - body.rotation.y, -PI, PI) * step, -cap, cap)
+	var cap_pitch := cap * PITCH_SWING_MULT
+	body.head.rotation.x += clampf((clampf(pitch, -1.4, 1.4) - body.head.rotation.x) * step, -cap_pitch, cap_pitch)
 	return (-body.camera.global_basis.z).angle_to(d.normalized())
 
 
@@ -3084,8 +3374,11 @@ func _lies_at(spot: Vector3) -> bool:
 	return _flat_between(casualty.body_point(), spot) <= LAID_M
 
 
+## Flat distance to `point` (the baked navmesh sits a little above the ground, so 3D distances
+## never quite close), or the 3D distance when it's on another floor (FLOOR_DY_M).
 func _flat_distance(point: Vector3) -> float:
-	return Vector2(body.global_position.x - point.x, body.global_position.z - point.z).length()
+	var flat := Vector2(body.global_position.x - point.x, body.global_position.z - point.z).length()
+	return flat if absf(body.global_position.y - point.y) < FLOOR_DY_M else body.global_position.distance_to(point)
 
 
 

@@ -9,6 +9,11 @@ const KEYS := {
 	&"move_right": [KEY_D],
 	&"jump": [KEY_SPACE],
 	&"sprint": [KEY_SHIFT],
+	# Hold the breath while aiming (SoldierMovement.update_arms; movement phase 1). Shift is
+	# sprint too, on purpose: there is no sprint while aiming, so the two never meet
+	# (GameSettings.SHARED lets them keep one key). Clear of B (vehicle view), J, F (fire mode,
+	# command menu), V and the side mouse buttons (optic zoom).
+	&"hold_breath": [KEY_SHIFT],
 	# Movement and weapon handling (design doc "Controls and feel", keys agreed since).
 	&"crouch": [KEY_X],  # toggle
 	&"prone": [KEY_Z],  # toggle
@@ -33,6 +38,8 @@ const KEYS := {
 	# Seated: switch the view between the chase camera and first person (VehicleCamera; Captain,
 	# 2026-10-13: "1st person + 3rd toggle"). B is free on foot and in a seat (proposed).
 	&"vehicle_view": [KEY_B],
+	# Downed: hold to give up and respawn (Soldier.can_give_up; Captain, P0362). Proposed key.
+	&"give_up": [KEY_J],
 	&"debug_hurt": [KEY_K],  # dev tools only (DevTools.on): hurt yourself to test going down and dying
 }
 ## Keys pressed with Shift held. An action without Shift still matches with it held, so

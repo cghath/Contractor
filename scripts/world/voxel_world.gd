@@ -121,6 +121,11 @@ var module_id := ""
 var edit_sink := Callable()
 var _tool: VoxelTool
 var _structures: Array = []  # [begin: Vector3i, end: Vector3i, mat]
+## Host: 1 for each of _structures that carving (or a later empty box) may have changed since
+## it was stamped; 0: still solid as built, so solid_boxes_m needn't read its voxels.
+var _touched := PackedByteArray()
+## Tests: solid_boxes_m reads every structure's voxels, carved or not.
+var read_all_voxels := false
 var _structure_area := AABB()
 var _built := false
 var _next_structure := 0  # how many of _structures are stamped so far
@@ -191,6 +196,18 @@ func add_box_m(from_m: Vector3, to_m: Vector3, mat: Mat) -> void:
 	_structures.append([a.min(b), a.max(b) - Vector3i.ONE, mat])
 	var box := AABB(Vector3(a.min(b)), Vector3((a - b).abs()))
 	_structure_area = box if _structures.size() == 1 else _structure_area.merge(box)
+	_touched.append(1 if mat == Mat.EMPTY else 0)
+	if mat == Mat.EMPTY:
+		_touch(box)  # an empty box stamped over earlier ones takes voxels out of them
+
+
+## Marks the structures that `box` (voxel units) reaches as no longer as built (solid_boxes_m).
+func _touch(box: AABB) -> void:
+	var area := box.grow(1.0)
+	for i in _structures.size():
+		var s: Array = _structures[i]
+		if _touched[i] == 0 and area.intersects(AABB(Vector3(s[0]), Vector3(s[1] - s[0] + Vector3i.ONE))):
+			_touched[i] = 1
 
 
 func is_built() -> bool:
@@ -217,19 +234,22 @@ func _process(_delta: float) -> void:
 	if not _tool.is_area_editable(_structure_area):
 		return
 	_tool.mode = VoxelTool.MODE_SET
-	var until := Time.get_ticks_usec() + int(BUILD_BUDGET_MS * 1000.0)
+	var started := Time.get_ticks_usec()
+	var until := started + int(BUILD_BUDGET_MS * 1000.0)
 	while _next_structure < _structures.size():
 		var s: Array = _structures[_next_structure]
 		_tool.value = s[2]
 		_tool.do_box(s[0], s[1])
 		_next_structure += 1
 		if Time.get_ticks_usec() >= until:
+			FrameCost.spent(&"voxels", started)
 			return
 	_built = true
 	set_process(not _dirty.is_empty())
 	for edit: Dictionary in _pending:
 		_apply(edit)  # saved or early edits: the host checks them for breaches too
 	_pending.clear()
+	FrameCost.spent(&"voxels", started)
 	print("[world] voxel structures built (%d boxes)" % _structures.size())
 	structures_built.emit()
 
@@ -605,6 +625,7 @@ func _carved(box: AABB) -> void:
 		_mark_cells.erase(cell)
 		_queue_mark_rebuild()
 	if multiplayer.is_server():
+		_touch(box)
 		_dirty.append(box)
 		set_process(true)
 
@@ -875,16 +896,22 @@ func solid_voxels(begin: Vector3i, size: Vector3i) -> PackedByteArray:
 
 ## Host only. The structures' voxels as they are now (carving included), as boxes in metres
 ## in this node's space, for the part inside `area_m`: one box per vertical run of solid
-## voxels, merged along x where neighbouring columns match. For navigation rebakes.
+## voxels, merged along x where neighbouring columns match. For navigation rebakes. A structure
+## nothing has carved (_touched) is still solid as built: its box goes in as it is, unread
+## (research 2026-10-13 B2.3: reading a town's voxels took up to 126 ms a chunk).
 func solid_boxes_m(area_m: AABB) -> Array[AABB]:
 	var boxes: Array[AABB] = []
 	var area_lo := Vector3i((area_m.position / VOXEL_SIZE).floor())
 	var area_hi := Vector3i((area_m.end / VOXEL_SIZE).ceil())
-	for s: Array in _structures:
+	for i in _structures.size():
+		var s: Array = _structures[i]
 		var lo: Vector3i = (s[0] as Vector3i).max(area_lo)
 		var hi: Vector3i = (s[1] as Vector3i + Vector3i.ONE).min(area_hi)
 		var size := hi - lo
 		if size.x <= 0 or size.y <= 0 or size.z <= 0:
+			continue
+		if _touched[i] == 0 and not read_all_voxels:
+			boxes.append(_box_m(lo, size))
 			continue
 		var solid := solid_voxels(lo, size)
 		for z in size.z:

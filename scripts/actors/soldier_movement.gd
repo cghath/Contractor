@@ -12,6 +12,8 @@ extends Node
 ## (apply_pose, called by the body every frame).
 ##
 ## Values marked "proposed" in the design doc are the constants below; tune them freely.
+## Load tiers, directional speeds, the sprint ramp, arm stamina, holding the breath and ADS
+## time (movement phase 1) take their numbers from MovementRules, with their sources.
 
 enum Stance { PRONE, CROUCH_LOW, CROUCH_MID, CROUCH_HIGH, STAND_LOW, STAND_MID, STAND_HIGH }
 
@@ -58,6 +60,10 @@ const BODY_CLIMB_SPEED := 2.4
 ## this far (so a slow walk still gets its feet past the edge).
 const BODY_STEP_MARGIN := 0.04
 const BODY_STEP_AHEAD_M := 0.05
+## A step of the world (a stair's, a kerb) up to this high is stepped up the same way, from the
+## floor: the capsule's round bottom met a 0.2 m stair step as a wall (F-01: nobody got upstairs).
+## Under the capsule's radius, so a wall's foot (met at the radius) never counts.
+const WORLD_STEP_M := 0.27
 
 ## Side stances (Caps Lock + A/D): hips shift and the upper body tilts out; prone rolls
 ## onto a side. Slower to move in.
@@ -100,12 +106,11 @@ const SETTLE_DECAY := 1.4           # per second
 const SETTLE_SPREAD := 0.6          # spread x1.6 right after a hard stop
 const SETTLE_SWAY_RAD := 0.035      # view-model sway at full settle
 
-## Stamina (0..1): seconds of sprint from full, unloaded (a full load drains it
-## HEAVY_STAMINA_MULT times faster again), and seconds to refill from empty standing still
-## (half speed on the move), scaled by Vitals.stamina_mult(). Once empty, no sprint until
-## it is back to STAMINA_RESUME.
+## Stamina (0..1): seconds of sprint from full, unloaded (a load drains it faster by its
+## tier: MovementRules.TIER_DRAIN), and seconds to refill from empty standing still (half
+## speed on the move, faster crouched or prone: MovementRules.REGEN_*), scaled by
+## Vitals.stamina_mult(). Once empty, no sprint or jump until it is back to STAMINA_RESUME.
 const SPRINT_STAMINA_S := 15.0
-const HEAVY_STAMINA_MULT := 1.0
 const STAMINA_REGEN_S := 10.0
 const STAMINA_REGEN_MOVING := 0.5
 const STAMINA_RESUME := 0.2
@@ -134,9 +139,20 @@ var side := 0
 var lean := 0.0
 ## Replicated: weapon rested on a surface.
 var mounted := false
-## Owner-side: 0..1, drained by sprinting.
+## Owner-side: 0..1, drained by sprinting and jumping (the legs).
 var stamina := 1.0
 var is_sprinting := false
+## Owner-side: 0..1 of the way from a jog to full sprint speed (MovementRules.SPRINT_RAMP_S).
+var sprint_ramp := 0.0
+## Owner-side: 0..1, drained by holding a weapon up aimed, by its mass (MovementRules: arms).
+var arm_stamina := 1.0
+## Owner-side: holding the breath (the hold_breath key while aiming), steadying the aim.
+var breath_held := false
+## Owner-side: the breathing cycle (radians), quicker out of breath (Soldier.aim_sway).
+var breath_phase := 0.0
+var _breath_left := 0.0   # seconds of held breath left
+var _gasp_left := 0.0     # seconds of gasping after a hold: no hold, more sway
+var _hold_spent := false  # a hold ended with the key still down: let go before the next one
 ## Owner-side: 0..1, weapon sway left over from stopping.
 var settle := 0.0
 
@@ -170,6 +186,7 @@ func step(delta: float) -> void:
 	var burdened := body.inventory.hands != &"" or body.carry_speed_mult() < 1.0  # carry_mode reaches the owner; carrying is host-only
 	var input := Vector2.ZERO
 	var sprint := false
+	var hold := false
 	if down:
 		_lean_held = 0
 		_lean_latched = 0
@@ -192,13 +209,16 @@ func step(delta: float) -> void:
 			# view, and only away from the casualty (back) or to the sides, never onto it.
 			input = Vector2(-input.x, minf(-input.y, 0.0))
 		sprint = Input.is_action_pressed(&"sprint")
+		hold = Input.is_action_pressed(&"hold_breath")
 		if Input.is_action_just_pressed(&"jump") and can_jump():
-			body.velocity.y = JUMP_VELOCITY
-			mounted = false
+			jump()
 			jumped = true
 	else:
 		_lean_held = 0  # keys released while the mouse was free
-	is_sprinting = sprint and input != Vector2.ZERO and not down and not burdened and is_standing() and can_sprint()
+	# Sprint: forward only (MovementRules.SPRINT_ARC_DEG), never aimed (the sprint key aimed is
+	# holding the breath by default), within the load tier (can_sprint).
+	is_sprinting = sprint and MovementRules.sprint_direction_ok(input) and not body.is_aiming and not down and not burdened \
+		and is_standing() and can_sprint()
 	if is_sprinting and (stance != Stance.STAND_HIGH or side != 0):
 		side = 0
 		# Sprinting needs full height: no sprint (speed or stamina) where there's no room to
@@ -209,7 +229,9 @@ func step(delta: float) -> void:
 		body.report_exertion()  # a surgically closed chest wound may reopen
 	_exerting = exerting
 	update_stamina(delta, is_sprinting, input != Vector2.ZERO)
-	var target := (body.global_basis * Vector3(input.x, 0.0, input.y)).normalized() * top_speed(is_sprinting, down)
+	update_arms(delta, body.is_aiming and not down, hold and not down)
+	sprint_ramp = minf(sprint_ramp + delta / MovementRules.SPRINT_RAMP_S, 1.0) if is_sprinting else 0.0
+	var target := (body.global_basis * Vector3(input.x, 0.0, input.y)).normalized() * top_speed(is_sprinting, down, input)
 	var before := Vector3(body.velocity.x, 0.0, body.velocity.z)
 	var after := next_velocity(before, target, delta, body.is_on_floor(), not body.is_ai())
 	body.velocity.x = after.x
@@ -236,9 +258,18 @@ func _track_fall() -> void:
 	if not body.is_on_floor():
 		_air_top = y if is_inf(_air_top) else maxf(_air_top, y)
 		return
-	if not is_inf(_air_top) and _air_top - y >= WoundModel.FALL_SAFE_M:
-		body.report_fall(_air_top - y)
+	var drop := (_air_top - y) * fall_scale() if not is_inf(_air_top) else 0.0
+	if drop >= WoundModel.FALL_SAFE_M:
+		body.report_fall(drop)
 	_air_top = -INF
+
+
+## How much worse a drop lands than its height: overloaded, a 1.75 m drop counts as the safe
+## 3 m (MovementRules.OVERLOADED_FALL_SAFE_M).
+func fall_scale() -> float:
+	if body.load_tier() >= MovementRules.Tier.OVERLOADED:
+		return WoundModel.FALL_SAFE_M / MovementRules.OVERLOADED_FALL_SAFE_M
+	return 1.0
 
 
 ## Owner-side: eases the lean and moves the camera (head) to the stance's eye point.
@@ -252,14 +283,16 @@ func update_pose(delta: float) -> void:
 ## by the contact's height, then on by this step's move, when both are clear. (Only lifting
 ## the velocity, as before, stuck soldiers at a pile's edge: the bump had stopped them and in
 ## the air they had AIR_CONTROL to get going again, so they hopped in place; R0142.)
+## A step of the world up to WORLD_STEP_M (a stair's) the same way, from the floor.
 ## `motion`: the horizontal velocity this step wanted, over `delta` seconds.
 func _climb_bodies(motion: Vector3, delta: float) -> void:
 	var feet := body.global_position.y
 	for i in body.get_slide_collision_count():
 		var hit := body.get_slide_collision(i)
-		if Ragdoll.body_of(hit.get_collider()) == null:
-			continue
 		var rise := hit.get_position().y - feet
+		var lying := Ragdoll.body_of(hit.get_collider()) != null
+		if not lying and (rise >= WORLD_STEP_M or rise < 0.02 or not body.is_on_floor() or not _is_world(hit.get_collider())):
+			continue  # not a body, and no stair step either
 		if rise >= BODY_STEP_M or hit.get_normal().y >= 0.7:
 			continue
 		var up := Vector3(0.0, minf(rise + BODY_STEP_MARGIN, BODY_STEP_M), 0.0)
@@ -272,9 +305,17 @@ func _climb_bodies(motion: Vector3, delta: float) -> void:
 			body.velocity.x = motion.x  # the bump doesn't cost the walk its speed
 			body.velocity.z = motion.z
 			body.velocity.y = maxf(body.velocity.y, 0.0)
-		else:
+		elif lying:
 			body.velocity.y = maxf(body.velocity.y, BODY_CLIMB_SPEED)  # no room: try a hop
+		else:
+			continue  # no room over that step: another contact may still be one
 		return
+
+
+## Whether `collider` is the world standing still (voxels, the ground, a static body), not a
+## soldier or a vehicle.
+static func _is_world(collider: Object) -> bool:
+	return collider != null and (not collider is PhysicsBody3D or collider is StaticBody3D)
 
 
 ## Every peer, every frame (from the body): the model, hitbox pose and capsule follow the
@@ -331,10 +372,25 @@ func is_prone() -> bool:
 	return stance == Stance.PRONE
 
 
-## Jumping only from a standing stance, on the ground, hands free and not down.
+## Jumping only from a standing stance, on the ground, hands free, not down, not critically
+## loaded (MovementRules.can_jump_at), with the legs for it (jump_cost).
 func can_jump() -> bool:
 	return is_standing() and body.is_on_floor() and body.vitals.is_up() \
-		and body.inventory.hands == &"" and body.carry_speed_mult() >= 1.0
+		and body.inventory.hands == &"" and body.carry_speed_mult() >= 1.0 \
+		and MovementRules.can_jump_at(body.load_tier()) and not _winded and stamina >= jump_cost()
+
+
+## Legs stamina a jump takes at this load (MovementRules.JUMP_STAMINA x TIER_DRAIN).
+func jump_cost() -> float:
+	return MovementRules.JUMP_STAMINA * MovementRules.TIER_DRAIN[body.load_tier()]
+
+
+## Jumps (check can_jump first): up, unmounted, paying jump_cost.
+func jump() -> void:
+	body.velocity.y = JUMP_VELOCITY
+	mounted = false
+	stamina -= jump_cost()
+	_settle_winded()
 
 
 ## Changes stance if there's room (a taller stance needs headroom). Unmounts the weapon.
@@ -494,13 +550,17 @@ func _has_weapon_up() -> bool:
 
 # --- Speed, momentum, stamina, sway ------------------------------------------------------
 
-## Top speed right now, before momentum.
-func top_speed(sprinting: bool, down: bool) -> float:
+## Top speed right now, before momentum, moving along `input` (Input.get_vector: forward by
+## default): slower sideways and backwards (MovementRules.direction_mult); a sprint builds from a
+## jog over the sprint ramp and loses some of its edge under load (MovementRules.sprint_left).
+func top_speed(sprinting: bool, down: bool, input := Vector2(0, -1)) -> float:
 	var speed := STANCE_SPEED[stance]
 	if side != 0:
 		speed *= SIDE_SPEED_MULT
 	if sprinting:
-		speed = SPRINT_SPEED
+		var full := WALK_SPEED + (SPRINT_SPEED - WALK_SPEED) * MovementRules.sprint_left(body.load_kg)
+		speed = lerpf(STANCE_SPEED[Stance.STAND_HIGH], full, sprint_ramp)
+	speed *= MovementRules.direction_mult(input, body.load_kg)
 	if body.is_aiming:
 		var weapon := body.active_weapon()
 		speed = minf(speed, WALK_SPEED) * ADS_SPEED_MULT * body.vitals.aim_mult(weapon != null and weapon.tags.has("rifle"))
@@ -540,21 +600,105 @@ func next_velocity(current: Vector3, target: Vector3, delta: float, on_floor := 
 	return dir * along + across.move_toward(Vector3.ZERO, WALK_SPEED / (GRIP_TIME * weight) * delta)
 
 
+## Sprinting needs legs stamina, sound legs and a load under OVERLOADED (MovementRules).
 func can_sprint() -> bool:
-	return not _winded and stamina > 0.0 and body.vitals.can_sprint()
+	return not _winded and stamina > 0.0 and body.vitals.can_sprint() and MovementRules.can_sprint_at(body.load_tier())
 
 
-## Sprinting drains stamina (faster under load); otherwise it comes back.
+## Sprinting drains stamina (faster by load tier); otherwise it comes back (faster crouched or
+## prone).
 func update_stamina(delta: float, sprinting: bool, moving: bool) -> void:
 	if sprinting:
-		stamina -= delta / SPRINT_STAMINA_S * (1.0 + HEAVY_STAMINA_MULT * load_fraction())
-		if stamina <= 0.0:
-			_winded = true
+		stamina -= delta / SPRINT_STAMINA_S * MovementRules.TIER_DRAIN[body.load_tier()]
 	else:
-		stamina += delta / STAMINA_REGEN_S * body.vitals.stamina_mult() * (STAMINA_REGEN_MOVING if moving else 1.0)
-		if stamina >= STAMINA_RESUME:
-			_winded = false
+		var posture := MovementRules.REGEN_PRONE_MULT if is_prone() else (MovementRules.REGEN_CROUCH_MULT if is_crouched() else 1.0)
+		stamina += delta / STAMINA_REGEN_S * body.vitals.stamina_mult() * (STAMINA_REGEN_MOVING if moving else 1.0) * posture
+	_settle_winded()
+
+
+func _settle_winded() -> void:
 	stamina = clampf(stamina, 0.0, 1.0)
+	if stamina <= 0.0:
+		_winded = true
+	elif stamina >= STAMINA_RESUME:
+		_winded = false
+
+
+## Out of breath: legs stamina ran out and hasn't come back to STAMINA_RESUME.
+func is_winded() -> bool:
+	return _winded
+
+
+## The arms (MovementRules: arm stamina) and the breath, each step. Holding the weapon up
+## `aiming` drains the arms by its mass and the stance (empty arms drain the legs instead);
+## lowered, they refill. `hold`: the hold-breath key is down.
+func update_arms(delta: float, aiming: bool, hold: bool) -> void:
+	var kg := held_weapon_mass()
+	var tired := 1.0 - stamina
+	breath_phase = fmod(breath_phase + delta * TAU * lerpf(MovementRules.BREATH_HZ, MovementRules.BREATH_HZ_WINDED, tired), TAU * 64.0)
+	_gasp_left = maxf(_gasp_left - delta, 0.0)
+	if not hold:
+		_hold_spent = false
+	if breath_held and (not hold or not aiming):
+		breath_held = false  # let go early: a shorter gasp
+		_gasp_left = MovementRules.BREATH_RECOVER_S * clampf(1.0 - _breath_left / maxf(_hold_limit(), 0.01), 0.0, 1.0)
+	elif not breath_held and hold and aiming and _gasp_left <= 0.0 and not _hold_spent:
+		breath_held = true
+		_breath_left = _hold_limit()
+	if breath_held:
+		_breath_left -= delta
+		if _breath_left <= 0.0:
+			breath_held = false
+			_hold_spent = true
+			_gasp_left = MovementRules.BREATH_RECOVER_S
+	if aiming and kg > 0.0:
+		var drain := MovementRules.arm_drain(kg) * _arm_posture() * (MovementRules.BREATH_HOLD_ARM_MULT if breath_held else 1.0) * delta
+		if arm_stamina > 0.0:
+			arm_stamina = maxf(arm_stamina - drain, 0.0)
+		else:
+			stamina -= drain * MovementRules.ARMS_EMPTY_LEG_SHARE  # arms gone: the legs and lungs pay
+			_settle_winded()
+	else:
+		arm_stamina = minf(arm_stamina + delta / MovementRules.ARM_REGEN_S * body.vitals.stamina_mult(), 1.0)
+
+
+## Seconds a breath can be held now: shorter out of breath or with spent arms.
+func _hold_limit() -> float:
+	return lerpf(MovementRules.BREATH_HOLD_MIN_S, MovementRules.BREATH_HOLD_S, minf(stamina, maxf(arm_stamina, 0.5)))
+
+
+## How much the arms pay for holding up the weapon in this stance (rested: little).
+func _arm_posture() -> float:
+	if mounted:
+		return MovementRules.ARM_MOUNTED_MULT
+	if is_prone():
+		return MovementRules.ARM_PRONE_MULT
+	return MovementRules.ARM_CROUCH_MULT if is_crouched() else 1.0
+
+
+## Mass (kg) of the active weapon with its optic, 0 without one.
+func held_weapon_mass() -> float:
+	var weapon := body.active_weapon()
+	if weapon == null or body.inventory.hands != &"":
+		return 0.0
+	return MovementRules.weapon_mass(weapon, body.inventory.state_of(body.active_slot))
+
+
+## Seconds to bring the active weapon to the eye now (PlayerInput._update_aim).
+func ads_seconds() -> float:
+	return MovementRules.ads_seconds(held_weapon_mass(), arm_stamina)
+
+
+## Aimed sway multiplier from the breath: steady while held, worse while gasping after.
+func breath_sway_mult() -> float:
+	if breath_held:
+		return MovementRules.BREATH_HOLD_SWAY
+	return MovementRules.BREATH_GASP_SWAY if _gasp_left > 0.0 else 1.0
+
+
+## Seconds of gasping left after a held breath (0: none).
+func gasp_left() -> float:
+	return _gasp_left
 
 
 ## Weapon spread multiplier (the game's sway): stance, mount, and the settle after a stop.

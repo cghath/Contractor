@@ -137,7 +137,9 @@ func _request_rebake(chunk: Vector2i) -> void:
 	if _baking.has(chunk):
 		_again[chunk] = true  # the bake running now may have read the voxels too early
 		return
+	var started := Time.get_ticks_usec()
 	var source := _voxel_source(chunk)
+	FrameCost.spent(&"nav", started)
 	if source == null:
 		_waiting[chunk] = true  # voxels not loaded yet: try again next frame
 		set_process(true)
