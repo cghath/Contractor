@@ -642,6 +642,9 @@ func _test_session() -> void:
 	await _finish_client(client)
 	await _test_restock_session()
 	await _test_restock_conservation()
+	await _test_restock_medic_first()
+	await _test_restock_top_up()
+	await _test_restock_player_leaves_medic()
 	await _test_zone_deployment()
 	await _test_revert()
 	await _test_contract_loop()
@@ -1546,6 +1549,91 @@ func _test_restock() -> void:
 	check(not old_member.has("loadout"), "and an empty kit doesn't write one")
 	Roster.record_loadout(old_member, gear)
 	check(Roster.loadout_of(old_member) == loadout, "deploying writes it down")
+	_test_restock_shared()
+
+
+## S0743 (restock left the medic short silently): two medics (one per fire team) restocked
+## from a stash with 3 IVs and 1 epinephrine for 6 and 6. Dealt out round the squad
+## (Restock.fair_caps): 2 IVs and the epinephrine to the first, 1 IV to the second, not all
+## of it to whoever went first; each one's shortfall is listed and kept for the squad page.
+func _test_restock_shared() -> void:
+	var medic_gear: Dictionary = Roster.gear_for_kit(Roles.kit(Roles.MEDIC))
+	var medic := Restock.template_of(medic_gear)
+	var pool := _scatter(medic_gear)
+	for e: Dictionary in _scatter(medic_gear):
+		BaseArmory.add(pool, StringName(String(e.id)), int(e.count), e.get("state", {}))
+	BaseArmory.remove(pool, &"iv_18", 3)
+	BaseArmory.remove(pool, &"epinephrine", 5)
+	var before := _units(pool, {})
+	var caps := Restock.fair_caps([medic, medic], pool)
+	check(caps[0] == {"iv_18": 2, "epinephrine": 1} and caps[1] == {"iv_18": 1, "epinephrine": 0},
+		"what the stash can't fill for both is dealt out one at a time, the rest of the kit uncapped (%s / %s)" % [caps[0], caps[1]])
+	var first := Restock.build(medic, pool, caps[0])
+	var second := Restock.build(medic, pool, caps[1])
+	check(first.missing == {"epinephrine": 2} and first.held_back == {"iv_18": 1} and second.missing == {"iv_18": 2, "epinephrine": 3},
+		"the first medic doesn't take it all: both come out short, both listed (%s + %s / %s)" % [first.missing, first.held_back, second.missing])
+	var first_text := Restock.report_text("Doc", first)
+	check(first_text.contains("Left in the armory for squadmates: IV") and not first_text.contains("Missing from the stash: IV")
+		and Restock.short_of(first) == {"iv_18": 1, "epinephrine": 2},
+		"the IV kept for the second isn't called missing from the stash, but he's still short of it (%s)" % first_text)
+	var after := _units(pool, first.gear)
+	var worn := _units([], second.gear)  # the optic on his gun too
+	for id: String in worn:
+		after[id] = int(after.get(id, 0)) + int(worn[id])
+	check(after == before and BaseArmory.count_of(pool, &"iv_18") == 0, "nothing made or lost; no IV left lying in the stash")
+	var alone := Restock.fair_caps([medic], _scatter(medic_gear))
+	check(alone.size() == 1 and alone[0].is_empty(), "a stash that fills the loadout caps nothing (%s)" % [alone])
+	var short := Restock.short_of(second)
+	var person := {}
+	Roster.record_restock_short(person, short)
+	check(Roster.restock_short_of(person) == {"iv_18": 2, "epinephrine": 3} and Restock.list_text(short).contains("x3"),
+		"the shortfall is kept on the roster entry (%s)" % Restock.list_text(short))
+	Roster.record_restock_short(person, {})
+	check(not person.has("restock_short"), "and a full restock clears it")
+	# Review of c33712a: a share someone couldn't use goes round again (Restock.top_up), less
+	# what's kept for the medics not restocking.
+	var loose: Array = []
+	BaseArmory.add(loose, &"iv_18", 2)
+	var held: Array = [{"iv_18": 1}, {"iv_18": 3}]
+	check(Restock.top_up(held, loose, {}) == [{"iv_18": 1}, {"iv_18": 1}] and Restock.top_up(held, loose, {"iv_18": 1}) == [{"iv_18": 1}, {}]
+		and Restock.top_up(held, loose, {"iv_18": 2}) == [{}, {}],
+		"what lies spare goes round those it was kept from, one at a time, but not a medic's share (%s)" % [Restock.top_up(held, loose, {})])
+	_test_restock_keep_short()
+
+
+## Review of c33712a (S0743): the medic restocked "73 of 74, missing Adenosine", then deployed;
+## the loadout written down at deploy had no adenosine, and the next restock said "Nothing
+## missing". What a short restock couldn't give stays in the loadout and on the roster
+## (Roster.record_loadout, Restock.keep_short) until he has it again.
+func _test_restock_keep_short() -> void:
+	var medic_gear: Dictionary = Roster.gear_for_kit(Roles.kit(Roles.MEDIC))
+	var full := Restock.template_of(medic_gear)
+	var inv := Inventory.new()
+	inv.net_state = GameState.from_json(medic_gear.duplicate(true))
+	var had := inv.count_of(&"adenosine")
+	while inv.remove_one(&"adenosine"):
+		pass
+	var short_gear: Dictionary = Roster.json_safe(inv.net_state.duplicate(true))
+	inv.free()
+	var person := {"loadout": full.duplicate(true)}
+	Roster.record_restock_short(person, {"adenosine": had})
+	Roster.record_loadout(person, short_gear)  # he deploys short
+	check(had > 0 and Restock.counts(Roster.loadout_of(person)) == Restock.counts(full) and Roster.restock_short_of(person) == {"adenosine": had},
+		"deploying short keeps the adenosine in his loadout and on the roster (%d; %s)" % [had, Roster.restock_short_of(person)])
+	var res := Restock.build(Roster.loadout_of(person), _scatter(short_gear))
+	check(res.missing == {"adenosine": had} and Restock.report_text("Doc", res).contains("Missing from the stash: Adenosine"),
+		"so the next restock still names it (%s)" % Restock.report_text("Doc", res))
+	var no_pack: Dictionary = short_gear.duplicate(true)
+	no_pack.slots["backpack"] = ""
+	no_pack.containers["backpack"] = []
+	var other := {"loadout": full.duplicate(true)}
+	Roster.record_restock_short(other, {"adenosine": had})
+	Roster.record_loadout(other, no_pack)
+	var put_back := int(Restock.counts(Roster.loadout_of(other)).get("adenosine", 0))
+	check(int(Roster.restock_short_of(other).get("adenosine", 0)) == put_back and (Roster.loadout_of(other).containers.get("backpack", []) as Array).is_empty(),
+		"nothing goes back into a pack he left behind; what's put back stays noted (%d; %s)" % [put_back, Roster.restock_short_of(other)])
+	Roster.record_loadout(person, medic_gear)  # he has it again
+	check(Roster.restock_short_of(person).is_empty() and Roster.loadout_of(person) == full, "deploying with it clears the note")
 
 
 ## `gear`'s items as a stash: everything taken off, out of and off the carrier, pack and pouches.
@@ -1643,6 +1731,9 @@ func _test_restock_session() -> void:
 	check(player.inventory.slots[&"vest"] == &"plate_carrier" and player.inventory.slots[&"helmet"] == &"",
 		"the player's Restock puts on what the stash has (the carrier)")
 	check(notes.size() == 1 and String(notes[0]).contains("Missing from the stash: Ballistic Helmet"), "and lists what it hasn't (%s)" % [notes])
+	var short := Roster.restock_short_of(Roster.main_character(BaseHub.roster(), BaseHub.player_key(1)))
+	check(short == {"helmet": 1}, "and the shortfall stays on the player's roster entry for the squad page (%s)" % [short])
+	check(Roster.restock_short_of(BaseHub.member(mid)).is_empty(), "a squadmate restocked in full has none")
 	check(_hub_units([s, player]) == before, "and the carrier's pouches it didn't need lie in the stash: nothing made or lost")
 	var screen: InventoryScreen = player._hud.inventory_screen if player._hud else null
 	if screen:
@@ -1719,6 +1810,168 @@ func _test_restock_conservation() -> void:
 	check(_level_units(everyone) == before, "and Restock squad after it makes nothing either")
 	await _seconds(BaseHub.STASH_POLL_S + 0.3)
 	check(_deep_units(BaseHub.stash()) == _deep_units(base.server_collect_stash()), "the campaign's stash is the floor (no stale copy to draw from)")
+
+
+## S0743: restock left the medic short silently. Two squadmates at the muster line want the
+## medic's kit, the medic picked second; the stash has one IV. "Restock squad" restocks them
+## together, medic first: the IV goes to the medic, the other is short of it, and the squad
+## page names him and what he's short of.
+func _test_restock_medic_first() -> void:
+	print("Restock squad shares out what the stash is short of, medics first (S0743)")
+	var base := level as BaseLevel
+	var mids: Array[String] = []
+	for mid: String in Roster.available_ids(BaseHub.roster()):
+		if base.muster_soldier(mid) != null:
+			mids.append(mid)
+	if mids.size() < 2:
+		check(false, "two squadmates at the muster line (%d)" % mids.size())
+		return
+	var a := BaseHub.member(mids[0])
+	var b := BaseHub.member(mids[1])
+	var kept := [a.get("role"), a.get("loadout"), b.get("role"), b.get("loadout")]
+	var medic := Restock.template_of(Roster.gear_for_kit(Roles.kit(Roles.MEDIC)))
+	a["role"] = String(Roles.RIFLEMAN)
+	b["role"] = String(Roles.MEDIC)
+	a["loadout"] = medic.duplicate(true)
+	b["loadout"] = medic.duplicate(true)
+	for mid in [mids[0], mids[1]]:
+		base.muster_soldier(mid).inventory.strip()  # kit gone (left in the field)
+	for n: Node in level.items.get_children():
+		if n is WorldItem and (n as WorldItem).item_id == &"iv_18":
+			GameState.item_taken((n as WorldItem).uid)
+			n.queue_free()
+	level.server_spawn_dropped(&"iv_18", 1, BaseLevel.DELIVERY + Vector3(0.5, 0.3, 0.0))
+	await _frames(3)
+	var picked: Array = BaseHub._prep().get("squad", []).duplicate()
+	BaseHub._prep()["squad"] = [mids[0], mids[1]]  # the rifleman asked first
+	var text := BaseHub.server_restock_squad()
+	BaseHub._prep()["squad"] = picked
+	var sa := base.muster_soldier(mids[0])
+	var sb := base.muster_soldier(mids[1])
+	check(sb.inventory.count_of(&"iv_18") == 1 and sa.inventory.count_of(&"iv_18") == 0,
+		"the one IV goes to the medic, though he was picked second (%d / %d)" % [sb.inventory.count_of(&"iv_18"), sa.inventory.count_of(&"iv_18")])
+	check(int(Roster.restock_short_of(a).get("iv_18", 0)) == 3 and int(Roster.restock_short_of(b).get("iv_18", 0)) == 2,
+		"each one's shortfall is on the roster (%s / %s)" % [Roster.restock_short_of(a), Roster.restock_short_of(b)])
+	check(text.contains(String(b.callsign)) and text.contains("Missing from the stash") and text.contains("IV"), "the host is told who is short of what")
+	await _frames(3)  # the view goes out
+	var ui: BaseUI = BaseHub._ui
+	if ui:
+		ui.open("squad")
+		await _frames(2)
+		var lines: Array = ui._pages["squad"].find_children("*", "Label", true, false).filter(func(l: Label) -> bool:
+			return not l.is_queued_for_deletion() and l.text.contains(String(a.callsign) + " is short after restock") and l.text.contains("IV"))
+		check(lines.size() == 1, "the squad page names him and what he's short of (%s)" % (lines[0].text if not lines.is_empty() else "no line"))
+		ui.close()
+	for i in 2:
+		var m: Dictionary = [a, b][i]
+		m["role"] = kept[i * 2]
+		if kept[i * 2 + 1] == null:
+			m.erase("loadout")
+		else:
+			m["loadout"] = kept[i * 2 + 1]
+		Roster.record_restock_short(m, {})
+
+
+## Review of c33712a: the medic's IFAKs, drawn with no room on him (his pockets full), went
+## back to the stash while the squadmate capped below him was told he was short. Restock squad
+## hands what's left over round again: the squadmate gets both.
+func _test_restock_top_up() -> void:
+	print("Restock squad hands round what someone had no room for (review of c33712a)")
+	var base := level as BaseLevel
+	var mids: Array[String] = []
+	for mid: String in Roster.available_ids(BaseHub.roster()):
+		if base.muster_soldier(mid) != null:
+			mids.append(mid)
+	if mids.size() < 2:
+		check(false, "two squadmates at the muster line (%d)" % mids.size())
+		return
+	var a := BaseHub.member(mids[0])
+	var b := BaseHub.member(mids[1])
+	var kept := [a.get("role"), a.get("loadout"), b.get("role"), b.get("loadout")]
+	a["role"] = String(Roles.RIFLEMAN)
+	b["role"] = String(Roles.MEDIC)
+	a["loadout"] = {"slots": {}, "optics": {}, "molle": {}, "containers": {"pockets": [{"id": "ifak", "count": 2}]}}
+	b["loadout"] = {"slots": {}, "optics": {}, "molle": {}, "containers": {"pockets": [{"id": "hypothermia_blanket", "count": 3}, {"id": "ifak", "count": 2}]}}
+	for mid in [mids[0], mids[1]]:
+		base.muster_soldier(mid).inventory.strip()
+	for n: Node in level.items.get_children():
+		if n is WorldItem and (n as WorldItem).item_id in [&"ifak", &"hypothermia_blanket"]:
+			GameState.item_taken((n as WorldItem).uid)
+			n.queue_free()
+	level.server_spawn_dropped(&"ifak", 2, BaseLevel.DELIVERY + Vector3(0.5, 0.3, 0.0))
+	level.server_spawn_dropped(&"hypothermia_blanket", 3, BaseLevel.DELIVERY + Vector3(-0.5, 0.3, 0.0))
+	await _frames(3)
+	var picked: Array = BaseHub._prep().get("squad", []).duplicate()
+	BaseHub._prep()["squad"] = [mids[0], mids[1]]
+	var text := BaseHub.server_restock_squad()
+	BaseHub._prep()["squad"] = picked
+	var sa := base.muster_soldier(mids[0])
+	var sb := base.muster_soldier(mids[1])
+	check(sa.inventory.count_of(&"ifak") == 2 and sb.inventory.count_of(&"ifak") == 0 and Roster.restock_short_of(a).is_empty(),
+		"the squadmate gets both IFAKs, the medic had no room for his (%d / %d; %s) [%s]" % [sa.inventory.count_of(&"ifak"), sb.inventory.count_of(&"ifak"), Roster.restock_short_of(a), text])
+	check(int(Roster.restock_short_of(b).get("ifak", 0)) == 2 and text.contains("No room for: IFAK x2"), "the medic is short of them for want of room, and told so")
+	for i in 2:
+		var m: Dictionary = [a, b][i]
+		m["role"] = kept[i * 2]
+		if kept[i * 2 + 1] == null:
+			m.erase("loadout")
+		else:
+			m["loadout"] = kept[i * 2 + 1]
+		Roster.record_restock_short(m, {})
+
+
+## Review of c33712a (player restocks first-come): the host player, a rifleman whose loadout
+## names IVs, restocks while the squad's medic at the muster line still needs his; the stash
+## has one IV. The player leaves it for the medic and is told it's in the armory for a
+## squadmate; Restock squad then gives it to the medic.
+func _test_restock_player_leaves_medic() -> void:
+	print("A player's Restock leaves a medic's share (review of c33712a)")
+	var base := level as BaseLevel
+	var mids: Array[String] = []
+	for mid: String in Roster.available_ids(BaseHub.roster()):
+		if base.muster_soldier(mid) != null:
+			mids.append(mid)
+	if mids.is_empty():
+		check(false, "a squadmate at the muster line")
+		return
+	var b := BaseHub.member(mids[0])
+	var main := Roster.main_character(BaseHub.roster(), BaseHub.player_key(1))
+	var player: Soldier = level.players.get_node(^"1")
+	var kept := [b.get("role"), b.get("loadout"), main.get("role"), main.get("loadout"), player.inventory.net_state.duplicate(true)]
+	var ivs := {"slots": {}, "optics": {}, "molle": {}, "containers": {"pockets": [{"id": "iv_18", "count": 2}]}}
+	b["role"] = String(Roles.MEDIC)
+	b["loadout"] = ivs.duplicate(true)
+	main["role"] = String(Roles.RIFLEMAN)
+	main["loadout"] = ivs.duplicate(true)
+	base.muster_soldier(mids[0]).inventory.strip()
+	player.inventory.strip()
+	for n: Node in level.items.get_children():
+		if n is WorldItem and (n as WorldItem).item_id == &"iv_18":
+			GameState.item_taken((n as WorldItem).uid)
+			n.queue_free()
+	level.server_spawn_dropped(&"iv_18", 1, BaseLevel.DELIVERY + Vector3(0.5, 0.3, 0.0))
+	await _frames(3)
+	var picked: Array = BaseHub._prep().get("squad", []).duplicate()
+	BaseHub._prep()["squad"] = [mids[0]]
+	var text := BaseHub.server_restock_player(1)
+	check(player.inventory.count_of(&"iv_18") == 0 and text.contains("Left in the armory for squadmates: IV"),
+		"the player leaves the one IV for the medic and is told where it is (%s)" % text)
+	BaseHub.server_restock_squad()
+	BaseHub._prep()["squad"] = picked
+	check(base.muster_soldier(mids[0]).inventory.count_of(&"iv_18") == 1, "and Restock squad gives it to the medic")
+	b["role"] = kept[0]
+	if kept[1] == null:
+		b.erase("loadout")
+	else:
+		b["loadout"] = kept[1]
+	main["role"] = kept[2]
+	if kept[3] == null:
+		main.erase("loadout")
+	else:
+		main["loadout"] = kept[3]
+	player.inventory.net_state = kept[4]
+	Roster.record_restock_short(b, {})
+	Roster.record_restock_short(main, {})
 
 
 ## Every unit in the base level: its world items and `soldiers`' kit, with what's on and in
