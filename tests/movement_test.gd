@@ -534,7 +534,7 @@ func _test_arms_and_ads() -> void:
 	var times := [MovementRules.ads_seconds(MovementRules.weapon_mass(pistol)), MovementRules.ads_seconds(MovementRules.weapon_mass(m4)),
 		MovementRules.ads_seconds(MovementRules.weapon_mass(m4, scoped)), MovementRules.ads_seconds(MovementRules.weapon_mass(m110))]
 	check(times[0] < times[1] and times[1] < times[2] and times[2] < times[3] and times[0] >= MovementRules.ADS_LIGHT_S and times[0] < 0.3
-		and times[1] > 0.35 and times[1] < 0.5 and is_equal_approx(MovementRules.ads_seconds(MovementRules.ADS_HEAVY_KG), MovementRules.ADS_HEAVY_S),
+		and times[1] > 0.28 and times[1] < 0.4 and is_equal_approx(MovementRules.ads_seconds(MovementRules.ADS_HEAVY_KG), MovementRules.ADS_HEAVY_S),
 		"ADS time rises with mass: pistol %.2f s, M4 %.2f s, M4 + 3-15x %.2f s, M110 %.2f s" % times)
 	check(absf(MovementRules.ads_seconds(3.4, 0.0) / MovementRules.ads_seconds(3.4, 1.0) - 1.5) < 0.01, "empty arms: ADS x1.5 slower")
 	player.select_weapon(&"primary")

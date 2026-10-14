@@ -67,12 +67,13 @@ const JUMP_STAMINA := 14.0 / 115.0
 
 ## Holding a weapon up (aimed) drains the arms in proportion to its mass (with its optic): a
 ## REF_WEAPON_KG weapon held up for ARM_HOLD_S empties them. Tarkov: 80 points, 1.1 a second
-## (73 s) aimed with a typical rifle; lighter here (about 45 s with an optic'd M4), so a squad
+## (73 s) aimed with a typical rifle, more with heavier ones. Here about 70 s with an M4, 48 s
+## with a scoped M110 (group playtest build, Captain 2026-10-14: the lighter end), so a squad
 ## overwatching a street isn't forever lowering. ARM_REGEN_S refills them from empty
-## (Tarkov 80 / 2.1 a second = 38 s; 20 s here).
+## (Tarkov 80 / 2.1 a second = 38 s; 15 s here).
 const REF_WEAPON_KG := 4.0
-const ARM_HOLD_S := 45.0
-const ARM_REGEN_S := 20.0
+const ARM_HOLD_S := 60.0
+const ARM_REGEN_S := 15.0
 ## Aiming drain by stance (Tarkov: x0.75 crouched, x0.15 prone). A rested weapon (C) is held
 ## up by the rest: prone's x0.15 too (Contractor's choice).
 const ARM_CROUCH_MULT := 0.75
@@ -88,12 +89,13 @@ const BREATH_HOLD_ARM_MULT := 2.0
 
 ## Seconds to bring a weapon up to the eye, by its mass with optic (Inventory.total_mass counts
 ## the optic the same way: Optics.extra_mass). Tarkov: 0.35 s at 0.6 kg to 0.95 s at 9 kg (its
-## floors before ergonomics). Leaned lighter (x about 0.75): 0.25 s to 0.75 s, so an optic'd M4
-## (3.9 kg) is about 0.45 s and a pistol 0.26 s. Empty arms make it ADS_TIRED_MULT x slower.
+## floors before ergonomics). Leaned lighter for the group playtest (x about 0.6): 0.2 s to 0.6 s, so an M4
+## (3.4 kg) is about 0.33 s (the old fixed blend was about 0.21 s) and a pistol 0.21 s. Empty arms
+## make it ADS_TIRED_MULT x slower.
 const ADS_LIGHT_KG := 0.6
 const ADS_HEAVY_KG := 9.0
-const ADS_LIGHT_S := 0.25
-const ADS_HEAVY_S := 0.75
+const ADS_LIGHT_S := 0.2
+const ADS_HEAVY_S := 0.6
 const ADS_TIRED_MULT := 0.5
 ## The eased blend reaches 95% in ads_seconds (exp(-3) = 0.05).
 const ADS_EASE_K := 3.0
@@ -122,8 +124,9 @@ const BREATH_GASP_SWAY := 1.8
 
 ## Most the view turns a second by tier (degrees): a light soldier flicks freely, a loaded one
 ## swings round slower. Mouse movement over the cap isn't lost: it plays out at the cap. Small
-## aiming movements are well under every cap. (Research A4 proposed 900/600/360; lighter here.)
-const MAX_YAW_RATE: Array[float] = [INF, 1080.0, 720.0, 450.0]
+## aiming movements are well under every cap. (Research A4 proposed 900/600/360; lighter here for
+## the group playtest.)
+const MAX_YAW_RATE: Array[float] = [INF, 1440.0, 900.0, 540.0]
 ## Sprinting, mouse sensitivity falls to this under a full load (Tarkov: to 50%).
 const SPRINT_TURN_LOADED := 0.5
 
