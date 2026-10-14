@@ -48,6 +48,11 @@ func _ready() -> void:
 	await _test_momentum()
 	await _test_falls()
 	await _test_stamina()
+	await _test_load_tiers()
+	_test_directions()
+	_test_arms_and_ads()
+	_test_turn_cap()
+	await _test_wall_pull()
 	await _test_ai_body()
 	GameState.delete_save()
 	print("MOVEMENT TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
@@ -69,6 +74,16 @@ func _test_bindings() -> void:
 	for action: StringName in expect:
 		check(_keys(action) == expect[action], "%s on %s" % [action, _keys(action).map(func(k: int) -> String: return OS.get_keycode_string(k))])
 	check(not KEY_CTRL in _keys(&"crouch") and not KEY_C in _keys(&"crouch"), "Ctrl and C no longer crouch")
+	# Hold breath (movement phase 1): Shift, shared with sprint on purpose (no sprint aimed), and
+	# clear of the vehicle view (B), the fire mode and command menu (F), get out (V), J and the
+	# side mouse buttons (optic zoom).
+	var others := []
+	for action: StringName in [&"vehicle_view", &"fire_mode", &"get_out", &"zoom_in", &"zoom_out"]:
+		others.append_array(_keys(action))
+	check(_keys(&"hold_breath") == [KEY_SHIFT] and _keys(&"sprint") == [KEY_SHIFT] and not KEY_SHIFT in others and not KEY_J in _keys(&"hold_breath")
+		and GameSettings.BINDABLE.any(func(p: Array) -> bool: return p[0] == &"hold_breath") and GameSettings.shares_key(&"hold_breath", &"sprint")
+		and not GameSettings.shares_key(&"hold_breath", &"jump"),
+		"hold breath on Shift (with sprint, never aimed), rebindable, clear of B, F, V, J and Mouse 4/5")
 
 
 func _test_stances() -> void:
@@ -370,15 +385,35 @@ func _drop(height: float) -> void:
 func _test_stamina() -> void:
 	print("Stamina")
 	move.stamina = 1.0
-	var saved := player.load_mult
+	var saved := player.load_kg
+	player.load_kg = 10.0
 	move.update_stamina(1.0, true, true)
 	var light_drain := 1.0 - move.stamina
 	move.stamina = 1.0
-	player.load_mult = Soldier.MIN_LOAD_MULT
+	player.load_kg = 30.0
+	move.update_stamina(1.0, true, true)
+	var burdened_drain := 1.0 - move.stamina
+	move.stamina = 1.0
+	player.load_kg = 45.0
 	move.update_stamina(1.0, true, true)
 	var heavy_drain := 1.0 - move.stamina
-	player.load_mult = saved
-	check(light_drain > 0.0 and absf(heavy_drain / light_drain - 2.0) < 0.1, "sprinting drains stamina, twice as fast under a full load")
+	player.load_kg = 10.0
+	check(light_drain > 0.0 and absf(burdened_drain / light_drain - 1.5) < 0.05 and absf(heavy_drain / light_drain - 2.0) < 0.05,
+		"sprinting drains stamina: x1.5 burdened, x2 overloaded (%.3f, %.3f, %.3f a second)" % [light_drain, burdened_drain, heavy_drain])
+	move.set_stance(S.CROUCH_MID)
+	move.stamina = 0.5
+	move.update_stamina(1.0, false, false)
+	var crouched := move.stamina - 0.5
+	move.set_stance(S.PRONE)
+	move.stamina = 0.5
+	move.update_stamina(1.0, false, false)
+	var prone := move.stamina - 0.5
+	move.set_stance(S.STAND_HIGH)
+	move.stamina = 0.5
+	move.update_stamina(1.0, false, false)
+	var standing := move.stamina - 0.5
+	check(absf(crouched / standing - 1.25) < 0.02 and absf(prone / standing - 1.45) < 0.02,
+		"stamina comes back x1.25 crouched, x1.45 prone (Tarkov's rates)")
 	move.stamina = 1.0
 	var seconds := 0
 	while move.stamina > 0.0 and seconds < 100:
@@ -390,6 +425,246 @@ func _test_stamina() -> void:
 	move.update_stamina(2.0, false, false)
 	check(move.can_sprint(), "rested: can sprint again")
 	move.stamina = 1.0
+	player.load_kg = saved
+
+
+## Load tiers (movement phase 1, MovementRules): light, burdened, overloaded, critical.
+func _test_load_tiers() -> void:
+	print("Load tiers")
+	check(MovementRules.tier_of(10.0) == MovementRules.Tier.LIGHT and MovementRules.tier_of(24.9) == MovementRules.Tier.LIGHT
+		and MovementRules.tier_of(25.0) == MovementRules.Tier.BURDENED and MovementRules.tier_of(39.9) == MovementRules.Tier.BURDENED
+		and MovementRules.tier_of(40.0) == MovementRules.Tier.OVERLOADED and MovementRules.tier_of(55.0) == MovementRules.Tier.CRITICAL,
+		"tiers start at 25, 40 and 55 kg")
+	var speeds := [MovementRules.load_speed_mult(20.0), MovementRules.load_speed_mult(40.0), MovementRules.load_speed_mult(55.0),
+		MovementRules.load_speed_mult(70.0), MovementRules.load_speed_mult(90.0)]
+	var smooth := true
+	var last := 1.0
+	for i in 200:
+		var m := MovementRules.load_speed_mult(i * 0.5)
+		smooth = smooth and m <= last + 0.0001 and last - m < 0.01
+		last = m
+	check(is_equal_approx(speeds[0], 1.0) and is_equal_approx(speeds[1], 0.9) and is_equal_approx(speeds[2], 0.75)
+		and is_equal_approx(speeds[3], 0.55) and is_equal_approx(speeds[4], 0.55) and smooth,
+		"speed x1 to 25 kg, x0.9 at 40, x0.75 at 55, x0.55 at 70, no step anywhere (%s)" % [speeds])
+	player._on_inventory_changed()
+	check(is_equal_approx(player.load_kg, player.inventory.total_mass()) and player.load_tier() == MovementRules.tier_of(player.load_kg),
+		"the body's load is its inventory's mass (%.1f kg, tier %d)" % [player.load_kg, player.load_tier()])
+	var saved_kg := player.load_kg
+	var saved_mult := player.load_mult
+	for i in 10:  # on the ground, so the jump checks mean something
+		await get_tree().physics_frame
+		move.step(get_physics_process_delta_time())
+	var sprints := []
+	var jumps := []
+	for kg: float in [10.0, 30.0, 45.0, 60.0]:
+		player.load_kg = kg
+		move.stamina = 1.0
+		sprints.append(move.can_sprint())
+		jumps.append(move.can_jump())
+	check(sprints == [true, true, false, false], "sprint while light or burdened, not overloaded or critical (%s)" % [sprints])
+	check(jumps == [true, true, true, false], "jump unless critical (%s)" % [jumps])
+	player.load_kg = 10.0
+	player.load_mult = 1.0
+	move.sprint_ramp = 1.0
+	var light_sprint := move.top_speed(true, false)
+	player.load_kg = 39.0
+	var burdened_sprint := move.top_speed(true, false)
+	check(absf(light_sprint - SoldierMovement.SPRINT_SPEED) < 0.01 and burdened_sprint < light_sprint - 0.5 and burdened_sprint > SoldierMovement.WALK_SPEED,
+		"burdened, sprint loses some of its edge (%.2f m/s light, %.2f near overloaded, before the load's own slowing)" % [light_sprint, burdened_sprint])
+	move.sprint_ramp = 0.0
+	check(absf(move.top_speed(true, false) - SoldierMovement.WALK_SPEED) < 0.01, "a sprint starts from a jog (sprint ramp)")
+	player.load_kg = 10.0
+	move.stamina = 1.0
+	move.jump()
+	var light_cost := 1.0 - move.stamina
+	player.load_kg = 30.0
+	move.stamina = 1.0
+	move.jump()
+	var burdened_cost := 1.0 - move.stamina
+	check(absf(light_cost - 14.0 / 115.0) < 0.001 and absf(burdened_cost / light_cost - 1.5) < 0.01,
+		"a jump costs %.0f%% of the legs (Tarkov's 14 of 115), x1.5 burdened" % (light_cost * 100.0))
+	player.load_kg = 10.0
+	move.stamina = move.jump_cost() * 0.5
+	check(not move.can_jump(), "no jump without the legs for it")
+	player.velocity = Vector3.ZERO
+	for i in 30:
+		await get_tree().physics_frame
+		move.step(get_physics_process_delta_time())
+	move.stamina = 1.0
+	player.load_kg = 45.0
+	check(absf(move.fall_scale() - 3.0 / 1.75) < 0.01, "overloaded, a 1.75 m drop lands like 3 m (Tarkov)")
+	player.load_kg = 10.0
+	check(move.fall_scale() == 1.0, "lighter, drops land as they are")
+	player.load_kg = saved_kg
+	player.load_mult = saved_mult
+
+
+## Which way you move (movement phase 1): slower sideways and backwards, sprint forward only.
+func _test_directions() -> void:
+	print("Directional speed")
+	var side := MovementRules.direction_mult(Vector2(1, 0))
+	var back := MovementRules.direction_mult(Vector2(0, 1))
+	var diag := MovementRules.direction_mult(Vector2(1, -1))
+	check(is_equal_approx(MovementRules.direction_mult(Vector2(0, -1)), 1.0) and is_equal_approx(side, 0.85) and is_equal_approx(back, 0.7)
+		and diag > 0.85 and diag < 1.0, "forward x1, strafe x0.85, backpedal x0.7, a forward diagonal between (%.2f)" % diag)
+	check(is_equal_approx(MovementRules.direction_mult(Vector2(0, 1), MovementRules.MAX_LOAD_KG), 0.6), "backpedalling under a full load x0.6")
+	check(MovementRules.sprint_direction_ok(Vector2(0, -1)) and MovementRules.sprint_direction_ok(Vector2(1, -1))
+		and not MovementRules.sprint_direction_ok(Vector2(1, 0)) and not MovementRules.sprint_direction_ok(Vector2(0, 1))
+		and not MovementRules.sprint_direction_ok(Vector2(1, -0.5)),
+		"sprint only within 45 degrees of straight ahead")
+	var saved := player.load_kg
+	player.load_kg = 10.0
+	var forward := move.top_speed(false, false, Vector2(0, -1))
+	var strafe := move.top_speed(false, false, Vector2(1, 0))
+	var backwards := move.top_speed(false, false, Vector2(0, 1))
+	check(absf(strafe / forward - 0.85) < 0.01 and absf(backwards / forward - 0.7) < 0.01,
+		"the body's top speed follows (jog %.2f, strafe %.2f, back %.2f m/s)" % [forward, strafe, backwards])
+	player.load_kg = saved
+
+
+## Arm stamina, ADS time by weapon mass, breathing and holding the breath (movement phase 1).
+func _test_arms_and_ads() -> void:
+	print("Arms, ADS time and breath")
+	var m4 := ItemDB.get_item(&"m4a1")
+	var pistol := ItemDB.get_item(&"m17")
+	var m110 := ItemDB.get_item(&"m110")
+	var scoped := Optics.with_optic(m4, {}, &"optic_dmr_3_15")
+	check(is_equal_approx(MovementRules.weapon_mass(m4), m4.mass_kg) and MovementRules.weapon_mass(m4, scoped) > m4.mass_kg + 0.5,
+		"a weapon's handling mass counts its mounted optic (M4 %.2f kg, with a 3-15x %.2f kg)" % [MovementRules.weapon_mass(m4), MovementRules.weapon_mass(m4, scoped)])
+	var times := [MovementRules.ads_seconds(MovementRules.weapon_mass(pistol)), MovementRules.ads_seconds(MovementRules.weapon_mass(m4)),
+		MovementRules.ads_seconds(MovementRules.weapon_mass(m4, scoped)), MovementRules.ads_seconds(MovementRules.weapon_mass(m110))]
+	check(times[0] < times[1] and times[1] < times[2] and times[2] < times[3] and times[0] >= MovementRules.ADS_LIGHT_S and times[0] < 0.3
+		and times[1] > 0.28 and times[1] < 0.4 and is_equal_approx(MovementRules.ads_seconds(MovementRules.ADS_HEAVY_KG), MovementRules.ADS_HEAVY_S),
+		"ADS time rises with mass: pistol %.2f s, M4 %.2f s, M4 + 3-15x %.2f s, M110 %.2f s" % times)
+	check(absf(MovementRules.ads_seconds(3.4, 0.0) / MovementRules.ads_seconds(3.4, 1.0) - 1.5) < 0.01, "empty arms: ADS x1.5 slower")
+	player.select_weapon(&"primary")
+	var rifle_kg := MovementRules.weapon_mass(player.active_weapon(), player.inventory.state_of(&"primary"))
+	check(player.active_weapon() != null and absf(move.held_weapon_mass() - rifle_kg) < 0.001
+		and absf(move.ads_seconds() - MovementRules.ads_seconds(rifle_kg)) < 0.001,
+		"the body's ADS time is its rifle's (%.2f kg, %.2f s)" % [rifle_kg, move.ads_seconds()])
+	var kg := move.held_weapon_mass()
+	move.arm_stamina = 1.0
+	move.update_arms(10.0, true, false)
+	var standing := 1.0 - move.arm_stamina
+	check(kg > 0.0 and absf(standing - 10.0 * MovementRules.arm_drain(kg)) < 0.001 and standing > 0.1 and standing < 0.3,
+		"aiming the rifle 10 s uses %.0f%% of the arms (empty in about %.0f s)" % [standing * 100.0, 1.0 / maxf(MovementRules.arm_drain(kg), 0.0001)])
+	move.update_arms(30.0, false, false)
+	move.set_stance(S.PRONE)
+	move.arm_stamina = 1.0
+	move.update_arms(10.0, true, false)
+	var prone := 1.0 - move.arm_stamina
+	move.set_stance(S.STAND_HIGH)
+	check(standing > 0.0 and absf(prone / standing - 0.15) < 0.01, "prone, the arms tire at x0.15 (Tarkov)")
+	move.arm_stamina = 0.5
+	var before := move.arm_stamina
+	move.update_arms(5.0, false, false)
+	check(move.arm_stamina > before + 0.2, "lowered, the arms come back")
+	move.arm_stamina = 0.0
+	move.stamina = 1.0
+	move.update_arms(5.0, true, false)
+	check(move.stamina < 1.0 and move.arm_stamina == 0.0, "arms empty: aiming drains the legs instead (%.3f)" % (1.0 - move.stamina))
+	move.arm_stamina = 1.0
+	move.stamina = 1.0
+	move.update_arms(5.0, false, false)
+	# Breath: hold, run out, gasp, let go, hold again.
+	check(not move.breath_held and is_equal_approx(move.breath_sway_mult(), 1.0), "breathing normally")
+	move.update_arms(0.1, false, true)
+	check(not move.breath_held, "no holding the breath unaimed")
+	move.update_arms(0.1, true, true)
+	check(move.breath_held and is_equal_approx(move.breath_sway_mult(), MovementRules.BREATH_HOLD_SWAY), "aimed, the key holds the breath: sway x%.2f" % move.breath_sway_mult())
+	var held := 0.1
+	while move.breath_held and held < 20.0:
+		move.update_arms(0.1, true, true)
+		held += 0.1
+	check(held > MovementRules.BREATH_HOLD_S - 0.5 and held < MovementRules.BREATH_HOLD_S + 0.5 and move.gasp_left() > 0.0 and move.breath_sway_mult() > 1.0,
+		"fresh, a breath holds %.1f s, then a gasp: sway x%.1f" % [held, move.breath_sway_mult()])
+	move.update_arms(3.0, true, true)
+	check(not move.breath_held, "keeping the key down after it runs out doesn't hold again")
+	move.update_arms(0.1, true, false)
+	move.update_arms(0.1, true, true)
+	check(move.breath_held, "let go and press again: holding again")
+	move.update_arms(0.1, true, false)
+	move.update_arms(5.0, false, false)
+	move.stamina = 0.0
+	var winded_hold := 0.0
+	move.update_arms(0.1, true, true)
+	while move.breath_held and winded_hold < 20.0:
+		move.update_arms(0.1, true, true)
+		winded_hold += 0.1
+	check(winded_hold < MovementRules.BREATH_HOLD_MIN_S + 0.5, "out of breath, it holds only %.1f s" % winded_hold)
+	move.update_arms(0.1, true, false)
+	move.update_arms(5.0, false, false)
+	# Breathing in the aim: bigger with tired arms and out of breath.
+	player.is_aiming = true
+	move.stamina = 1.0
+	move.arm_stamina = 1.0
+	var rested := player.breath_sway_deg(m4)
+	move.arm_stamina = 0.0
+	var tired_arms := player.breath_sway_deg(m4)
+	move.stamina = 0.0
+	var spent := player.breath_sway_deg(m4)
+	player.is_aiming = false
+	check(rested > 0.0 and tired_arms > rested * 2.5 and spent > tired_arms and player.breath_sway_deg(m4) == 0.0,
+		"aimed, the breath moves the sight: %.3f deg rested, %.3f tired arms, %.3f spent; none unaimed" % [rested, tired_arms, spent])
+	move.stamina = 1.0
+	move.arm_stamina = 1.0
+	move.update_stamina(0.0, false, false)
+
+
+## Turn cap under load (players, movement phase 1): a light soldier flicks at once, a loaded
+## one swings round at MAX_YAW_RATE, with nothing lost.
+func _test_turn_cap() -> void:
+	print("Turn cap")
+	var input := player.player_input
+	input.set_process(false)
+	var saved := player.load_kg
+	player.load_kg = 10.0
+	input.advance_turn(1.0 / 60.0)
+	var start := player.rotation.y
+	input.turn_view(PI / 2.0)
+	var light := absf(angle_difference(start, player.rotation.y))
+	check(is_inf(input.max_yaw_rate()) and absf(light - PI / 2.0) < 0.001, "light: a 90 degree flick turns at once")
+	player.load_kg = 60.0
+	input.advance_turn(1.0 / 60.0)
+	start = player.rotation.y
+	input.turn_view(PI / 2.0)
+	var first := rad_to_deg(absf(angle_difference(start, player.rotation.y)))
+	for i in 6:
+		input.advance_turn(1.0 / 60.0)
+	var after := rad_to_deg(absf(angle_difference(start, player.rotation.y)))
+	for i in 60:
+		input.advance_turn(1.0 / 60.0)
+	var done := rad_to_deg(absf(angle_difference(start, player.rotation.y)))
+	var cap: float = MovementRules.MAX_YAW_RATE[MovementRules.Tier.CRITICAL]
+	check(absf(first - cap / 60.0) < 0.01 and absf(after - cap * 7.0 / 60.0) < 0.05 and absf(done - 90.0) < 0.01,
+		"critical load: %.1f deg in the first frame, %.1f in 7 frames (%.0f deg/s), all 90 in the end (%.1f)" % [first, after, cap, done])
+	input.advance_turn(1.0 / 60.0)
+	start = player.rotation.y
+	input.turn_view(deg_to_rad(0.5))
+	check(absf(rad_to_deg(angle_difference(start, player.rotation.y)) - 0.5) < 0.001, "small aiming moves aren't held back")
+	check(MovementRules.MAX_YAW_RATE[MovementRules.Tier.BURDENED] > MovementRules.MAX_YAW_RATE[MovementRules.Tier.OVERLOADED]
+		and MovementRules.MAX_YAW_RATE[MovementRules.Tier.OVERLOADED] > cap, "heavier tiers turn slower")
+	player.load_kg = saved
+	input.advance_turn(1.0 / 60.0)
+	player.rotation = Vector3.ZERO
+	input.set_process(true)
+
+
+## The weapon pulls back from a wall close ahead (movement phase 1).
+func _test_wall_pull() -> void:
+	print("Weapon near a wall")
+	player.rotation = Vector3.ZERO
+	player.head.rotation = Vector3.ZERO
+	await get_tree().physics_frame
+	check(player.player_input.wall_pull_at() == 0.0, "open ground: no pull")
+	var eye := player.camera.global_position
+	var wall := _box(eye + Vector3(0, 0, -0.45), Vector3(2, 2, 0.1))
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	var pull := player.player_input.wall_pull_at()
+	check(pull > 0.5 and pull <= 1.0, "a wall 0.4 m ahead pulls the weapon back (%.2f)" % pull)
+	wall.free()
+	await get_tree().physics_frame
 
 
 func _test_ai_body() -> void:
@@ -440,12 +715,56 @@ func _test_ai_body() -> void:
 	mover.want_stance = -1
 	await _seconds(1.0)
 	check(m.is_sprinting and _speed(mover) > 5.0, "out from under it, it sprints again (%.1f m/s)" % _speed(mover))
+	# Movement phase 1 for the AI, through the same step: a sprint ramps up from a jog, sideways
+	# and backwards are slower, no sprint sideways, none overloaded.
+	mover.want_stance = -1
+	mover.want_crouch = false
+	mover.want_sprint = false
+	mover.move_input = Vector2(0, -1)
+	await _seconds(0.8)
+	var jog := _speed(mover)
+	mover.want_sprint = true
+	await _seconds(0.12)
+	var ramping := _speed(mover)
+	await _seconds(0.6)
+	var sprinting := _speed(mover)
+	check(jog < 4.1 and ramping < 5.6 and sprinting > 6.2, "sprint builds from a jog (%.1f, %.1f after 0.12 s, %.1f m/s)" % [jog, ramping, sprinting])
+	mover.move_input = Vector2(1, 0)
+	await _seconds(0.8)
+	var strafe := _speed(mover)
+	check(not m.is_sprinting and absf(strafe - SoldierMovement.WALK_SPEED * 0.85) < 0.15, "sideways: no sprint, x0.85 (%.2f m/s)" % strafe)
+	mover.move_input = Vector2(0, 1)
+	await _seconds(0.8)
+	var back := _speed(mover)
+	check(not m.is_sprinting and absf(back - SoldierMovement.WALK_SPEED * 0.7) < 0.15, "backwards: x0.7 (%.2f m/s)" % back)
+	mover.move_input = Vector2(0, -1)
+	mover.load_kg = 45.0
+	mover.load_mult = MovementRules.load_speed_mult(45.0)
+	await _seconds(0.8)
+	check(not m.is_sprinting and _speed(mover) < SoldierMovement.WALK_SPEED * 0.9 + 0.05, "overloaded, it doesn't sprint (%.2f m/s)" % _speed(mover))
+	mover._on_inventory_changed()
 	mover.want_stance = -1
 	mover.want_crouch = false
 	mover.want_sprint = false
 	mover.move_input = Vector2.ZERO
 	await _seconds(1.0)
 	check(m.stance == S.STAND_HIGH, "stands back up")
+	# Stairs and load (with ai/building-floors' world steps, SoldierMovement.WORLD_STEP_M): a
+	# critically loaded body still steps up a 0.2 m stair. Skipped where that isn't merged yet.
+	if (SoldierMovement as Script).get_script_constant_map().has("WORLD_STEP_M"):
+		var feet := mover.global_position
+		var stair := _box(feet + Vector3(0, 0.1, -10.6), Vector3(3, 0.2, 20))  # long: still on it at the end
+		mover.load_kg = 60.0
+		mover.load_mult = MovementRules.load_speed_mult(60.0)
+		await _seconds(0.3)
+		mover.move_input = Vector2(0, -1)
+		await _seconds(2.0)
+		var rose := mover.global_position.y - feet.y
+		mover.move_input = Vector2.ZERO
+		check(rose > 0.15 and rose < 0.35, "critically loaded, it still steps up a 0.2 m stair (up %.2f m)" % rose)
+		stair.free()
+		mover._on_inventory_changed()
+		await _seconds(0.5)
 	mover.inventory.take(&"m4a1")
 	var wall := _box(mover.global_position + Vector3(0, 1.0, -0.6), Vector3(1, 2, 0.2))
 	await _seconds(0.5)

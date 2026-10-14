@@ -20,10 +20,11 @@ const INTERACT_RANGE := 2.2
 ## Furthest the view tilts up or down (about 83 degrees): stopping short of straight up
 ## keeps the head's Euler angles unique, so the view can't flip over behind you.
 const MAX_PITCH := 1.45
-## Carried mass below this costs no speed; at MAX_LOAD_KG you are at the slowest.
-const FREE_LOAD_KG := 15.0
-const MAX_LOAD_KG := 60.0
-const MIN_LOAD_MULT := 0.55
+## Carried mass below this costs no speed; at MAX_LOAD_KG you are at the slowest. The load
+## tiers between (burdened, overloaded, critical) and their sources are in MovementRules.
+const FREE_LOAD_KG := MovementRules.BURDENED_KG
+const MAX_LOAD_KG := MovementRules.MAX_LOAD_KG
+const MIN_LOAD_MULT := MovementRules.MIN_LOAD_MULT
 ## The AI's cone (ai_spread_direction): aimed, it is this fraction of the weapon's
 ## "ai_spread_deg"; moving and jumping widen it (the AI's accuracy as it was before P0362).
 const ADS_SPREAD_MULT := 0.12
@@ -95,7 +96,11 @@ var is_reloading := false
 ## Owner-driven (players: the aim key; AI: SquadAI), replicated so everyone sees the rifle
 ## shouldered.
 var is_aiming := false
+## Speed multiplier from the load (MovementRules.load_speed_mult) and a bulky item in the hands.
 var load_mult := 1.0
+## Kg carried (Inventory.total_mass), on every peer from the replicated inventory: sets the load
+## tier (load_tier).
+var load_kg := 0.0
 ## The local player's HUD (null for everyone else). Lives on PlayerInput.
 var _hud: Hud:
 	get:
@@ -318,6 +323,12 @@ func _process(_delta: float) -> void:
 	model.left_handed = left_handed
 	model.name_tape = person_name.to_upper()
 	movement.apply_pose()  # model pose, hitbox pose and capsule from the replicated stance
+	if is_local() or (is_ai() and multiplayer.is_server()):
+		# Breathing quickens and deepens as the legs tire (stamina is the owner's, so other peers
+		# see the resting breath).
+		var tired := 1.0 - movement.stamina
+		model.breath_rate = lerpf(1.0, MovementRules.ANIM_BREATH_RATE_WINDED, tired)
+		model.breath_depth = lerpf(1.0, MovementRules.ANIM_BREATH_DEPTH_WINDED, tired)
 	_update_ragdoll()
 	if vitals.is_up() or vitals.is_dead():
 		_down_since = -1.0
@@ -593,16 +604,28 @@ func aim_sway_deg(weapon: ItemData) -> float:
 	if not is_aiming or weapon == null:
 		return 0.0
 	var moving := clampf(Vector2(velocity.x, velocity.z).length() / SoldierMovement.WALK_SPEED, 0.0, 1.5)
-	var tired := 1.0 - clampf(movement.stamina, 0.0, 1.0)
+	var tired := 1.0 - clampf(minf(movement.stamina, movement.arm_stamina), 0.0, 1.0)  # out of breath, or tired arms
 	return SWAY_DEG * movement.spread_mult() * (1.0 + SWAY_MOVE_MULT * moving) * (1.0 + SWAY_TIRED_MULT * tired) \
 		* vitals.sway_mult(weapon.tags.has("rifle"))
 
 
+## Breathing in the aim (MovementRules.BREATH_*), degrees at its widest: bigger with tired arms
+## and out of breath, scaled by stance, a rest and wounds like the sway. 0 unaimed.
+func breath_sway_deg(weapon: ItemData) -> float:
+	if not is_aiming or weapon == null:
+		return 0.0
+	return MovementRules.BREATH_SWAY_DEG * movement.spread_mult() * vitals.sway_mult(weapon.tags.has("rifle")) 		* (1.0 + MovementRules.BREATH_ARMS_GAIN * (1.0 - movement.arm_stamina) + MovementRules.BREATH_LEGS_GAIN * (1.0 - movement.stamina))
+
+
 ## The sway's offset (pitch, yaw in radians) at time `t` seconds: a slow, wandering figure of
-## eight, at most aim_sway_deg() across.
+## eight, at most aim_sway_deg() across, plus the breath rising and falling
+## (SoldierMovement.breath_phase); holding the breath steadies both, gasping after makes them
+## worse (SoldierMovement.breath_sway_mult).
 func aim_sway(weapon: ItemData, t: float) -> Vector2:
 	var amp := deg_to_rad(aim_sway_deg(weapon))
-	return Vector2(sin(t * 1.3) * 0.8 + sin(t * 0.55 + 1.7) * 0.2, sin(t * 0.7 + 0.4) * 0.8 + sin(t * 1.9) * 0.2) * amp
+	var drift := Vector2(sin(t * 1.3) * 0.8 + sin(t * 0.55 + 1.7) * 0.2, sin(t * 0.7 + 0.4) * 0.8 + sin(t * 1.9) * 0.2) * amp
+	var breath := Vector2(sin(movement.breath_phase), sin(movement.breath_phase * 0.5) * 0.25) * deg_to_rad(breath_sway_deg(weapon))
+	return (drift + breath) * movement.breath_sway_mult()
 
 
 ## The AI's shot direction (SquadAI._shoot): the weapon's "ai_spread_deg" cone, tighter aimed,
@@ -692,10 +715,15 @@ static func _now() -> float:
 	return Time.get_ticks_msec() / 1000.0
 
 
+## MovementRules.Tier for the load carried: what it may still do (sprint, jump) and how fast
+## it tires.
+func load_tier() -> int:
+	return MovementRules.tier_of(load_kg)
+
+
 func _on_inventory_changed() -> void:
-	var mass := inventory.total_mass()
-	var over := clampf((mass - FREE_LOAD_KG) / (MAX_LOAD_KG - FREE_LOAD_KG), 0.0, 1.0)
-	load_mult = lerpf(1.0, MIN_LOAD_MULT, over) * (BULKY_SPEED_MULT if inventory.hands != &"" else 1.0)
+	load_kg = inventory.total_mass()
+	load_mult = MovementRules.load_speed_mult(load_kg) * (BULKY_SPEED_MULT if inventory.hands != &"" else 1.0)
 	if active_weapon() == null:
 		for slot: StringName in [&"primary", &"sidearm"]:
 			if inventory.slots[slot] != &"":
