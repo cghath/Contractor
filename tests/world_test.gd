@@ -1194,3 +1194,4 @@ func _test_woods() -> void:
 	for sc in [a, b, c, d]:
 		sc.free()
 	t.free()
+	ZoneScatter.clear_cache()  # the big layouts out of memory before the frame-time checks
