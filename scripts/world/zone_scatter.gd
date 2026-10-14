@@ -108,6 +108,7 @@ var _roads: Array = []
 var _cluster: FastNoiseLite
 var _key := ""
 var _entry := {}  # this zone's cache entry
+var _far := {}  # cell -> MultiMesh of far blobs (built in build_visuals)
 # While laying out: the zone's half width, colours, scrub sizes, the trees placed so far by
 # TREE_GAP_M square (_crowded), and the noise that ragged the woods' outlines.
 var _half := 0.0
@@ -826,27 +827,52 @@ func build_collision() -> void:
 
 # --- Visuals ---------------------------------------------------------------------------------
 
-## Starts building the visuals as the camera nears (nothing on a headless server).
+## Starts building the visuals as the camera nears (nothing on a headless server), and lays
+## out the far stand-ins for the whole zone at once (they're few: one blob per FAR_GROUP_M
+## square of trees, one MultiMesh per cell).
 func build_visuals() -> void:
 	if _visuals_on or _cells.is_empty():
 		return
 	_visuals_on = true
-	_material = StandardMaterial3D.new()
-	_material.vertex_color_use_as_albedo = true
-	_material.vertex_color_is_srgb = true
-	_material.roughness = 1.0
 	var colours: Dictionary = _spec.get("colours", {})
-	_meshes = {
-		Kind.ROCK: _blocky(Vector3(1, 1, 1), Color.WHITE, 0.22, 1, true),
-		Kind.SCRUB: _scrub_mesh(),
-		"trunk": _trunk_mesh(Color(String(colours.get("trunk", "4f3e2c")))),
-		"crown": _crown_mesh(),
-		"conifer": _conifer_mesh(),
-		"tuft": _tuft_mesh(),
-		"pebble": _blocky(Vector3(1, 1, 1), Color.WHITE, 0.3, 7, true),
-		"outcrop": _blocky(Vector3(1, 1, 1), Color.WHITE, 0.26, 3, true),
-	}
+	_meshes = _shared_meshes(String(colours.get("trunk", "4f3e2c")))
+	_material = _shared_material_once()
+	_build_far()
 	set_process(true)
+
+
+## The material every scatter MultiMesh draws with, made once a game (Captain, 2026-10-14:
+## caching for performance).
+static func _shared_material_once() -> StandardMaterial3D:
+	if _shared_material == null:
+		_shared_material = StandardMaterial3D.new()
+		_shared_material.vertex_color_use_as_albedo = true
+		_shared_material.vertex_color_is_srgb = true
+		_shared_material.roughness = 1.0
+	return _shared_material
+
+
+## The shapes by group key, built once a game and shared by every zone (only the trunk's
+## colour differs by preset, so trunks are kept by colour).
+func _shared_meshes(trunk_hex: String) -> Dictionary:
+	if _shapes.is_empty():
+		_shapes = {
+			Kind.ROCK: _blocky(Vector3(1, 1, 1), Color.WHITE, 0.22, 1, true),
+			Kind.SCRUB: _scrub_mesh(),
+			"crown": _crown_mesh(),
+			"conifer": _conifer_mesh(),
+			"tuft": _tuft_mesh(),
+			"pebble": _blocky(Vector3(1, 1, 1), Color.WHITE, 0.3, 7, true),
+			"outcrop": _blocky(Vector3(1, 1, 1), Color.WHITE, 0.26, 3, true),
+			"far": _far_mesh(),
+		}
+		_shapes["thicket"] = _shapes[Kind.SCRUB]
+	var trunk_key := "trunk:" + trunk_hex
+	if not _shapes.has(trunk_key):
+		_shapes[trunk_key] = _trunk_mesh(Color(trunk_hex))
+	var out := _shapes.duplicate()
+	out["trunk"] = _shapes[trunk_key]
+	return out
 
 
 ## Builds up to `budget` cells' visuals near `pos`, nearest first; returns how many it built.
@@ -886,7 +912,33 @@ func _process(delta: float) -> void:
 
 func _build_cell(cell: Vector2i) -> void:
 	_built[cell] = true
-	var groups := {Kind.ROCK: [], Kind.SCRUB: [], "trunk": [], "crown": [], "conifer": []}
+	var kept: Dictionary = _entry.get("visual", {})
+	var parts: Array = kept.get(cell, [])
+	if not kept.has(cell):
+		parts = _cell_parts(cell)
+		if _entry.has("visual"):
+			kept[cell] = parts  # built once, kept while this zone is among the newest (CACHE_VISUAL_ZONES)
+	for part: Array in parts:
+		var key: Variant = part[0]
+		var node := MultiMeshInstance3D.new()
+		node.name = "Scatter_%d_%d_%s" % [cell.x, cell.y, str(key)]
+		node.multimesh = part[1]
+		node.material_override = _material
+		node.visibility_range_end = float(_RANGES[key])
+		node.visibility_range_end_margin = 20.0
+		var shade: bool = not ((key is int and key == Kind.SCRUB) or (key is String and key in ["tuft", "pebble", "thicket"]))  # keys mix Kind values and names
+		node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if shade else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(node)
+
+
+## Draw distance by group key.
+const _RANGES := {Kind.ROCK: SEE_ROCK_M, Kind.SCRUB: SEE_SCRUB_M, "thicket": SEE_TREE_M, "trunk": SEE_TREE_M, "crown": SEE_TREE_M,
+	"conifer": SEE_TREE_M, "tuft": SEE_TUFT_M, "pebble": SEE_PEBBLE_M, "outcrop": SEE_OUTCROP_M}
+
+
+## Cell `cell`'s MultiMeshes: [[group key, MultiMesh], ...].
+func _cell_parts(cell: Vector2i) -> Array:
+	var groups := {Kind.ROCK: [], Kind.SCRUB: [], "thicket": [], "trunk": [], "crown": [], "conifer": []}
 	for index: int in _cells[cell]:
 		var item: Dictionary = items[index]
 		var basis := Basis(Vector3.UP, float(item.yaw))
@@ -896,34 +948,117 @@ func _build_cell(cell: Vector2i) -> void:
 				groups[Kind.ROCK].append([xf, item.colour])
 			Kind.SCRUB:
 				groups[Kind.SCRUB].append([xf, item.colour])
+			Kind.THICKET:
+				# The scrub mesh (0.58 high), its height scaled so the thicket stands size.y * SCRUB_TOP
+				# tall, as foliage_between counts it.
+				var size: Vector3 = item.size
+				var tall := Transform3D(basis.scaled(Vector3(size.x, size.y * SCRUB_TOP / 0.58, size.z)), item.pos)
+				groups["thicket"].append([tall, item.colour])
 			Kind.TREE:
 				var trunk := Transform3D(basis.scaled(item.size), (item.pos as Vector3) - Vector3(0, 0.1, 0))
 				groups["trunk"].append([trunk, Color.WHITE])
 				groups["conifer" if _is_conifer(item) else "crown"].append([xf, item.colour])
 	_ground_cover(cell, groups)
-	var ranges := {Kind.ROCK: SEE_ROCK_M, Kind.SCRUB: SEE_SCRUB_M, "trunk": SEE_TREE_M, "crown": SEE_TREE_M, "conifer": SEE_TREE_M,
-		"tuft": SEE_TUFT_M, "pebble": SEE_PEBBLE_M, "outcrop": SEE_OUTCROP_M}
+	var parts: Array = []
 	for key in groups:
 		var list: Array = groups[key]
 		if list.is_empty():
 			continue
-		var multi := MultiMesh.new()
-		multi.transform_format = MultiMesh.TRANSFORM_3D
-		multi.use_colors = true
-		multi.mesh = _meshes[key]
-		multi.instance_count = list.size()
-		for k in list.size():
-			multi.set_instance_transform(k, list[k][0])
-			multi.set_instance_color(k, list[k][1])
+		parts.append([key, _multimesh(_meshes[key], list)])
+	return parts
+
+
+## A MultiMesh of `mesh` at `list`'s [transform, colour] pairs.
+static func _multimesh(mesh: Mesh, list: Array) -> MultiMesh:
+	var multi := MultiMesh.new()
+	multi.transform_format = MultiMesh.TRANSFORM_3D
+	multi.use_colors = true
+	multi.mesh = mesh
+	multi.instance_count = list.size()
+	for k in list.size():
+		multi.set_instance_transform(k, list[k][0])
+		multi.set_instance_color(k, list[k][1])
+	return multi
+
+
+# --- Far stand-ins -----------------------------------------------------------------------------
+
+## Builds the far canopy blobs: per cell, one blob per FAR_GROUP_M square holding trees (at
+## their middle, as wide as they spread, as tall as their crowns), one MultiMesh per cell, seen
+## from just inside SEE_TREE_M out to the horizon, no shadows. Kept in the zone's cache entry.
+func _build_far() -> void:
+	var kept: Dictionary = _entry.get("far", {})
+	if kept.is_empty():
+		kept = _far_parts()
+		if _entry.has("far"):
+			_entry.far = kept
+	_far = kept
+	for cell: Vector2i in kept:
 		var node := MultiMeshInstance3D.new()
-		node.name = "Scatter_%d_%d_%s" % [cell.x, cell.y, str(key)]
-		node.multimesh = multi
+		node.name = "Far_%d_%d" % [cell.x, cell.y]
+		node.multimesh = kept[cell]
 		node.material_override = _material
-		node.visibility_range_end = float(ranges[key])
-		node.visibility_range_end_margin = 20.0
-		var scrub: bool = (key is int and key == Kind.SCRUB) or key is String and key in ["tuft", "pebble"]  # keys mix Kind values and names
-		node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF if scrub else GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+		node.visibility_range_begin = SEE_TREE_M - 10.0
+		node.visibility_range_begin_margin = 20.0
+		node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		add_child(node)
+
+
+## cell -> MultiMesh of its far blobs.
+func _far_parts() -> Dictionary:
+	var out := {}
+	var half := _terrain.size_m * 0.5
+	for cell: Vector2i in _cells:
+		var squares := {}  # Vector2i -> [position sum, count, size sum, colour sum, low corner, high corner]
+		for index: int in _cells[cell]:
+			var item: Dictionary = items[index]
+			if int(item.kind) != Kind.TREE:
+				continue
+			var p: Vector3 = item.pos
+			var g := Vector2i(floori((p.x + half) / FAR_GROUP_M), floori((p.z + half) / FAR_GROUP_M))
+			if not squares.has(g):
+				squares[g] = [Vector3.ZERO, 0, 0.0, Color(0, 0, 0, 0), Vector2(INF, INF), Vector2(-INF, -INF)]
+			var sq: Array = squares[g]
+			sq[0] = (sq[0] as Vector3) + p
+			sq[1] = int(sq[1]) + 1
+			sq[2] = float(sq[2]) + (item.size as Vector3).y
+			sq[3] = (sq[3] as Color) + (item.colour as Color)
+			sq[4] = (sq[4] as Vector2).min(Vector2(p.x, p.z))
+			sq[5] = (sq[5] as Vector2).max(Vector2(p.x, p.z))
+		if squares.is_empty():
+			continue
+		var list: Array = []
+		for g: Vector2i in squares:
+			var sq: Array = squares[g]
+			var n := int(sq[1])
+			var mid: Vector3 = (sq[0] as Vector3) / n
+			var spread: Vector2 = (sq[5] as Vector2) - (sq[4] as Vector2)
+			var r := clampf(maxf(spread.x, spread.y) * 0.5 + CROWN_R * 1.3, 2.5, FAR_GROUP_M * 0.7)
+			var tall := float(sq[2]) / n
+			var c: Color = (sq[3] as Color) / float(n)
+			c.a = 1.0
+			var basis := Basis(Vector3.UP, float(g.x * 7 + g.y * 13) * 0.37).scaled(Vector3(r, tall, r))
+			list.append([Transform3D(basis, mid), c.darkened(0.06)])
+		out[cell] = _multimesh(_meshes.get("far", _far_mesh()), list)
+	return out
+
+
+## How many far stand-ins are built: {"cells": MultiMeshes, "blobs": instances}, for tests.
+func far_counts() -> Dictionary:
+	var blobs := 0
+	for cell: Vector2i in _far:
+		blobs += (_far[cell] as MultiMesh).instance_count
+	return {"cells": _far.size(), "blobs": blobs}
+
+
+## A far canopy blob: a low, wide rounded mass from 1.2 to 4.9 x the crowns' size up, radius 1
+## (scaled to the trees' spread).
+func _far_mesh() -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for t: Array in [[1.2, 2.4, 0.75, 1.0], [2.4, 3.9, 1.0, 0.85], [3.9, 4.9, 0.85, 0.35]]:
+		_tier(st, 0.0, 0.0, t[0], t[1], t[2], t[3])
+	return st.commit()
 
 
 ## Grass tufts and pebbles for `cell` (visual only, see SEE_TUFT_M): from the cell and the seed,

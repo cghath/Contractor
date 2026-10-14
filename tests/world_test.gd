@@ -1077,7 +1077,7 @@ func _test_presets() -> void:
 	for item in sh.items:
 		for road: Array in hot.roads:
 			off_roads = off_roads and Geometry2D.get_closest_point_to_segment(Vector2(item.pos.x, item.pos.z), Vector2(road[0][0], road[0][1]), Vector2(road[1][0], road[1][1])).distance_to(Vector2(item.pos.x, item.pos.z)) >= ZoneScatter.ROAD_KEEP_M - 0.01
-	check(hot.terrain == "rocky_ridge" and off_roads and sh.total() > 1500 and sh.total() < 14000 and th.max_slope_deg() < 42.0,
+	check(hot.terrain == "rocky_ridge" and off_roads and sh.total() > 1500 and sh.total() < 22000 and th.max_slope_deg() < 42.0,
 		"hot zone on the ridge preset: %d scatter items off the roads, steepest %.0f degrees" % [sh.total(), th.max_slope_deg()])
 	ss.free()
 	sb2.free()
@@ -1085,3 +1085,97 @@ func _test_presets() -> void:
 	ts.free()
 	tb.free()
 	th.free()
+	_test_woods()
+
+
+## Round 4 (Captain, 2026-10-14: "we need copses and groves and such. the terrain is too empty.
+## we'll use caching for performance if needed"): trees in clusters, the layout the same twice,
+## cached in memory and on disk, nothing on pads, roads, insertion or extraction points, and a
+## wood hides a standing man; far stand-ins.
+func _test_woods() -> void:
+	ZoneScatter.clear_cache(true)
+	var hot := ZoneDef.generate_hot(4409)
+	hot["terrain"] = "temperate"
+	hot = ZoneDef.normalize(hot)
+	var t := _preset_terrain(hot)
+	var started := Time.get_ticks_usec()
+	var a := ZoneScatter.new()
+	a.generate(t, hot)
+	var fresh_ms := (Time.get_ticks_usec() - started) / 1000.0
+	ZoneScatter.clear_cache()  # memory only: the same layout made again, then off disk
+	ZoneScatter.clear_cache(true)
+	var b := ZoneScatter.new()
+	b.generate(t, hot)
+	check(a.cache_source == "generated" and b.cache_source == "generated" and a.checksum() == b.checksum() and a.total() == b.total(),
+		"woods: the same zone lays out the same twice (%d items, %s, %.0f ms)" % [a.total(), a.counts, fresh_ms])
+	started = Time.get_ticks_usec()
+	var c := ZoneScatter.new()
+	c.generate(t, hot)
+	var memory_ms := (Time.get_ticks_usec() - started) / 1000.0
+	ZoneScatter.clear_cache()
+	started = Time.get_ticks_usec()
+	var d := ZoneScatter.new()
+	d.generate(t, hot)
+	var disk_ms := (Time.get_ticks_usec() - started) / 1000.0
+	check(c.cache_source == "memory" and c.checksum() == a.checksum() and d.cache_source == "disk" and d.checksum() == a.checksum() and d.solid_count == a.solid_count,
+		"woods: the layout comes from memory the second time (%.1f ms), from disk after memory is cleared (%.0f ms; fresh %.0f ms)" % [memory_ms, disk_ms, fresh_ms])
+	# Clusters: at least half the trees have 5 or more others within 25 m.
+	var grid := {}
+	var trees: Array[Vector2] = []
+	for item in a.items:
+		if int(item.kind) == ZoneScatter.Kind.TREE:
+			var q := Vector2(item.pos.x, item.pos.z)
+			trees.append(q)
+			var g := Vector2i(floori(q.x / 25.0), floori(q.y / 25.0))
+			if not grid.has(g):
+				grid[g] = []
+			(grid[g] as Array).append(q)
+	var clustered := 0
+	var densest := Vector2.ZERO
+	var most := 0
+	for q in trees:
+		var g := Vector2i(floori(q.x / 25.0), floori(q.y / 25.0))
+		var n := -1
+		for dz in range(-1, 2):
+			for dx in range(-1, 2):
+				for o: Vector2 in grid.get(g + Vector2i(dx, dz), []):
+					if o.distance_to(q) < 25.0:
+						n += 1
+		if n >= 5:
+			clustered += 1
+		if n > most:
+			most = n
+			densest = q
+	check(trees.size() > 500 and clustered * 2 >= trees.size() and a.counts[ZoneScatter.Kind.THICKET] > 0,
+		"woods: trees grow in clusters (%d of %d with 5+ others within 25 m; %d thickets)" % [clustered, trees.size(), a.counts[ZoneScatter.Kind.THICKET]])
+	# Nothing on the pads (modules, insertion and extraction points) or the roads.
+	var clear := true
+	for item in a.items:
+		var q := Vector2(item.pos.x, item.pos.z)
+		for pad: Array in t.pads:
+			clear = clear and not (pad[0] as Rect2).has_point(q)
+		for p: Array in hot.insertion + hot.extraction:
+			clear = clear and q.distance_to(Vector2(float(p[0]), float(p[1]))) > 8.0
+		for road: Array in hot.roads:
+			clear = clear and Geometry2D.get_closest_point_to_segment(q, Vector2(road[0][0], road[0][1]), Vector2(road[1][0], road[1][1])).distance_to(q) >= ZoneScatter.ROAD_KEEP_M - 0.01
+	check(clear, "woods: nothing on a pad, an insertion or extraction point, or a road")
+	# A standing man's eye line (1.6 m up) across the densest wood is hidden.
+	var from := Vector3(densest.x - 30.0, 0.0, densest.y)
+	var to := Vector3(densest.x + 30.0, 0.0, densest.y)
+	from.y = t.height_at(from.x, from.z) + 1.6
+	to.y = t.height_at(to.x, to.z) + 1.6
+	var through := a.foliage_between(from, to)
+	check(through >= Spotting.FOLIAGE_OPAQUE_M, "woods: a 1.6 m line through a wood (%d trees within 25 m) passes %.1f m of foliage (hidden at %.1f)" % [most + 1, through, Spotting.FOLIAGE_OPAQUE_M])
+	# Far stand-ins: one blob per 24 m square of trees, one MultiMesh per cell (built with the visuals).
+	a.build_visuals()
+	var far := a.far_counts()
+	var squares := {}
+	for q in trees:
+		squares[Vector2i(floori((q.x + t.size_m * 0.5) / ZoneScatter.FAR_GROUP_M), floori((q.y + t.size_m * 0.5) / ZoneScatter.FAR_GROUP_M))] = true
+	check(int(far.blobs) == squares.size() and int(far.cells) > 0 and int(far.cells) <= a._cells.size(),
+		"woods: far stand-ins, %d canopy blobs in %d cells for %d trees" % [far.blobs, far.cells, trees.size()])
+	var built := a.build_near(Vector3.ZERO, 2)
+	check(built == 2 and a._entry.visual.size() == 2, "woods: built cells' meshes are kept in the cache (%d)" % a._entry.visual.size())
+	for sc in [a, b, c, d]:
+		sc.free()
+	t.free()

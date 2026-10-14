@@ -42,3 +42,30 @@ The beach is a band along the measured shoreline (`shore_distance`). The sea str
 two sides, and the apron (ground past the edge) now faces up: it was culled, leaving a void past the edge.
 **Cover**: scatter `scrub_size` [min, max] (default 0.6-1.5); desert_wadi (600/km2) and coastal_lowland (750/km2) at
 0.7-1.7, scrub seen out to 550 m (was 400).
+Round 4 (Captain, 2026-10-14: "we need copses and groves and such. the terrain is too empty"): **trees grow in
+clusters** (`ZoneScatter._lay_out_trees`), each optional in a preset's scatter, per km2 of zone: `woods_per_km2`
+(ragged woods `wood_radius_m` [min, max] across, default 50-130, trees `wood_spacing_m` apart, default 6.5, with
+clearings; `thicket_share` (default 0.35) of the sites also get a thicket: tall undergrowth that hides a standing
+man), `copses_per_km2` (tight clumps of `copse_trees` [min, max], default 10-40), `hedgerows_per_km2` (tree and bush
+lines along the edges of a `field_m` field grid, default 120 m), `road_trees` (0..1, the share of the roads' sides
+lined), `wadi_groves_per_km2` (clumps of `wadi_grove_trees` on the wadis' banks, `ZoneTerrain.bed_at`), and
+`edge_scrub_per_m` (bushes a metre round each wood, copse and grove, default 0.5). `trees_per_km2` is now only the
+few lone trees. Caps: trees 5000, thickets 3000, solid 5600. Set as:
+
+| preset | woods | copses | hedgerows | road_trees | wadi groves | lone trees |
+| --- | --- | --- | --- | --- | --- | --- |
+| temperate | 1.5 | 5 | 4 | 0.4 | - | 12 |
+| coastal_lowland (harbour_yard) | 0.8 | 6 | 5 | 0.5 | - | 10 |
+| amphibious_coast | 0.4 | 4 | 3 | 0.3 | - | 8 |
+| desert_wadi | 0 | 1.5 (6-16 trees) | 0.5 | - | 6 (6-16 trees) | 4 |
+| rocky_ridge | 1.0 | 4 | - | - | - | 8 |
+| scrubland | 0.3 | 3 | - | - | - | 6 |
+| salt_flats | - | - | - | - | - | 0 |
+
+**Caching** ("we'll use caching for performance if needed"): the layout is kept in memory per zone (`CACHE_ZONES`,
+4) and on disk (`user://cache/scatter_*.bin`, the newest 24), keyed by everything it comes from (layout version,
+seed, preset, ground checksum, pads, roads), so coming back to a zone skips the layout (`cache_source`: "generated",
+"memory" or "disk"; `ZoneScatter.clear_cache`). The shapes and material are built once a game; each cell's built
+MultiMeshes are kept for the 2 newest zones. Thickets draw with the scrub mesh to 950 m, no shadows. **Far
+stand-ins**: past 940 m each 24 m square of trees is one low canopy blob (one MultiMesh per 128 m cell, no shadows),
+out to the horizon, built with the visuals (never on a headless server; `far_counts()`).
