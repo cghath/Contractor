@@ -580,9 +580,19 @@ func _report_insertions(target: Variant) -> void:
 			int(_hidden_fraction(at, watching) * 100.0), _rim(at)])
 
 
-## Where the hostiles watch from now: every hostile soldier up in the level.
+## Where the hostiles watch from: every module's garrison posts (ZoneModules.GARRISON, as many
+## as the module's garrison; a garrison comes out only once players are near, so the soldiers
+## alone would leave most of them out), and every hostile soldier up in the level.
 func _hostile_posts() -> Array[Vector3]:
 	var out: Array[Vector3] = []
+	var zone := _level() as ZoneLevel
+	if zone:
+		for m: ZoneModule in zone.modules():
+			if not m.is_inside_tree():
+				continue
+			var spots: Array = ZoneModules.GARRISON.get(m.type, [])
+			for i in mini(zone.garrison_size(m.module_id), spots.size()):
+				out.append(m.to_global(spots[i]))
 	for node in get_tree().get_nodes_in_group(&"combatants"):
 		var s := node as Soldier
 		if s and s.faction == &"hostile" and s.vitals.is_up() and not s.is_queued_for_deletion():
