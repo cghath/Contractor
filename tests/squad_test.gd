@@ -1088,7 +1088,8 @@ func _test_close_range_aim() -> void:
 			if not cqb:
 				continue
 			check(hits > 0 and head_share <= 0.08, "%.0f m: head, face and neck at most 8%% of hits (%d of %d)" % [d, head, hits])
-			check(hits > 0 and float(torso) / hits >= 0.75, "%.0f m: chest, abdomen and pelvis at least 75%% of hits (%d of %d)" % [d, torso, hits])
+			check(hits > 0 and float(torso) / hits >= 0.75, "%.0f m: chest, abdomen and pelvis at least 75%% of hits (%d of %d)%s" % [d, torso, hits,
+				"" if hits > 0 and float(torso) / hits >= 0.75 else "; " + _pose_note(target)])
 			check(share >= 0.6, "%.0f m: still hits: at least 60%% of rounds (%.0f%%)" % [d, share * 100.0])
 			check(first_chest <= 51, "%.0f m: the first round isn't a sure chest hit (%d of 60 front trials, at most 51)" % [d, first_chest])
 			check(early == 0, "%.0f m: no first hit sooner than 0.35 s (%d were)" % [d, early])
@@ -1287,6 +1288,19 @@ static func _round_part(shooter: Soldier, target: Soldier, from: Vector3, dir: V
 			continue
 		return part if vitals.get_parent() == target else &""
 	return &""
+
+
+## Where `who`'s chest and right upper arm hitboxes sit (his own frame), his model's pose and
+## speed: what a centre-mass check that comes out arms-heavy needs to say why.
+static func _pose_note(who: Soldier) -> String:
+	var at := {}
+	for child in who.get_children():
+		var area := child as Area3D
+		if area and StringName(area.get_meta(&"body_part", &"")) in [Vitals.CHEST, Vitals.UPPER_ARM_R]:
+			for shape in area.get_children():
+				if shape is CollisionShape3D:
+					at[area.get_meta(&"body_part")] = who.to_local((shape as Node3D).global_position).snapped(Vector3.ONE * 0.01)
+	return "pose %s, speed %.2f, hitboxes %s, rotation %.2f" % [who.model._last_pose, who.model._speed, at, who.rotation.y]
 
 
 static func _median(values: Array[float]) -> float:
