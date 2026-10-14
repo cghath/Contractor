@@ -297,6 +297,7 @@ func _host_main() -> void:
 	var joined := await _wait_for(func() -> bool: return multiplayer.get_peers().size() >= expect_clients, 120.0)
 	_say("%d client(s) in (%s)%s" % [multiplayer.get_peers().size(), multiplayer.get_peers(), "" if joined else ": fewer than expected"])
 	Net.peer_joined.connect(func(id: int) -> void: _say("peer %d joined" % id); recorder.event(["join", id]))
+
 	if human:
 		await _sleep(3.0)  # the bots post their peer ids (bot<N>.json) just after joining
 		_say("waiting up to %d s for the human player to join (port %d)" % [int(wait_human_s), Net.port()])
@@ -352,6 +353,48 @@ func _restock() -> void:
 func _humans() -> Array:
 	var bot_peers := _bots().values().map(func(st: Dictionary) -> int: return int(st.get("peer", 0)))
 	return Array(multiplayer.get_peers()).filter(func(id: int) -> bool: return not id in bot_peers)
+
+
+## Host: one line per player and friendly squad AI with what they wear (the Captain: are the
+## plates on?): carrier, each plate pocket, helmet, pack, primary + optic. At each deployment
+## and after each respawn (Net/level: a player's soldier came back).
+func _log_kits(when: String) -> void:
+	var lvl := _level()
+	if lvl == null:
+		return
+	for holder: String in ["Players", "AI"]:
+		var node := lvl.get_node_or_null(NodePath(holder))
+		for c in (node.get_children() if node else []):
+			var s := c as Soldier
+			if s == null or s.faction != &"friendly" or s.vitals.is_dead():
+				continue
+			_say("[kit] %s %s: %s" % [_kit_name(s), String(s.role).replace("_", " "), _kit_line(s)])
+
+
+func _kit_name(s: Soldier) -> String:
+	if not s.is_ai():
+		var peer := int(String(s.name)) if String(s.name).is_valid_int() else 0
+		if peer == 1:
+			return "Host (bot 0)"
+		for n: int in _bots():
+			if int(_bots()[n].get("peer", 0)) == peer:
+				return "Bot %d" % n
+		return "Player %s" % s.name
+	return s.display_name()
+
+
+static func _kit_line(s: Soldier) -> String:
+	var slots: Dictionary = s.inventory.slots
+	var parts: Array[String] = []
+	parts.append(String(slots.get(&"vest", &"")) if slots.get(&"vest", &"") != &"" else "NO CARRIER")
+	for pocket: StringName in Inventory.PLATE_SLOTS:
+		var pname := {&"plate_front": "front", &"plate_back": "rear", &"plate_left": "left", &"plate_right": "right"}[pocket]
+		parts.append("%s=%s" % [pname, String(slots.get(pocket, &"")) if slots.get(pocket, &"") != &"" else "-"])
+	parts.append("helmet=%s" % (String(slots.get(&"helmet", &"")) if slots.get(&"helmet", &"") != &"" else "-"))
+	parts.append("pack=%s" % (String(slots.get(&"backpack", &"")) if slots.get(&"backpack", &"") != &"" else "-"))
+	var optic := GunSight.optic_of(s)
+	parts.append("%s%s" % [String(slots.get(&"primary", &"")) if slots.get(&"primary", &"") != &"" else "no primary", ("+" + String(optic.id)) if optic else ""])
+	return " ".join(parts)
 
 
 ## Every connected client's posted status, by bot number.
@@ -451,6 +494,7 @@ func _host_cycle(cycle: int) -> Dictionary:
 		_go_to_start()
 		_line_up_squad()
 	await _sleep(4.0)
+	_log_kits("deploy")
 	# Advance toward the objective: in line, at a walk.
 	_set_phase("advance")
 	var me := _me()
@@ -985,7 +1029,8 @@ func _kit_up(cycle: int) -> void:
 				return
 			if _owned(me, StringName(id)) >= int(KIT[id]):
 				break
-			var item := _nearest_item(StringName(id), 500.0)
+			# Only what the kit still lacks: a whole armory stack (ifak x10) is left for the others.
+			var item := _nearest_item(StringName(id), 500.0, int(KIT[id]) - _owned(me, StringName(id)))
 			if item == null:
 				break
 			_walk(item.global_position, 0.9, RUN_SPEED)
@@ -1021,7 +1066,7 @@ func _kit_summary(me: Soldier) -> Dictionary:
 	return out
 
 
-func _nearest_item(id: StringName, within: float) -> WorldItem:
+func _nearest_item(id: StringName, within: float, at_most := 1 << 30) -> WorldItem:
 	var me := _me()
 	if me == null:
 		return null
@@ -1029,7 +1074,7 @@ func _nearest_item(id: StringName, within: float) -> WorldItem:
 	var best_d := within
 	for node in get_tree().get_nodes_in_group(WorldItem.GROUP):
 		var item := node as WorldItem
-		if item == null or item.item_id != id or item.is_queued_for_deletion() or not item.is_inside_tree():
+		if item == null or item.item_id != id or item.is_queued_for_deletion() or not item.is_inside_tree() or item.count > at_most:
 			continue
 		var d := _flat(me.global_position, item.global_position)
 		if d < best_d:
@@ -1325,7 +1370,30 @@ func _buddy_aid(me: Soldier, delta: float) -> void:
 			return
 
 
+var _was_dead := {}  # host: player name -> true while dead (a respawn: dead, then up again)
+var _respawn_left := 2.0
+
+
+## Host: a player who died and is up again has respawned: log the kit they came back in.
+func _watch_respawns(delta: float) -> void:
+	_respawn_left -= delta
+	if _respawn_left > 0.0 or role != "host" or not (_level() is ZoneLevel):
+		return
+	_respawn_left = 2.0
+	var players := _level().get_node_or_null(^"Players")
+	for c in (players.get_children() if players else []):
+		var s := c as Soldier
+		if s == null:
+			continue
+		if s.vitals.is_dead():
+			_was_dead[s.name] = true
+		elif _was_dead.has(s.name) and s.vitals.is_up():
+			_was_dead.erase(s.name)
+			_say("[kit] respawned %s %s: %s" % [_kit_name(s), String(s.role).replace("_", " "), _kit_line(s)])
+
+
 func _physics_process(delta: float) -> void:
+	_watch_respawns(delta)
 	var me := _me()
 	if me == null or not me.is_local():
 		return

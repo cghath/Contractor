@@ -34,7 +34,14 @@
 # ../Contractor-soakbuild-<sha>, with this harness's own files laid over it). Default: newest
 # with --human, none (this checkout) otherwise.
 set -u
-cd "$(dirname "$0")/.."
+# Bash reads a script as it runs: editing this file under a running soak broke S0706 mid-run.
+# Run from a private copy (the checkout's path is passed along).
+if [ -z "${COOP_SOAK_COPY:-}" ]; then
+	copy="$(mktemp "${TMPDIR:-/tmp}/coop_soak.XXXXXX.sh")"
+	cp "$0" "$copy"
+	COOP_SOAK_COPY=1 COOP_SOAK_HOME="$(cd "$(dirname "$0")/.." && pwd)" exec bash "$copy" "$@"
+fi
+cd "${COOP_SOAK_HOME:-$(dirname "$0")/..}"
 . tools/run_log.sh
 GODOT="${GODOT:-godot}"
 PYTHON="${PYTHON:-}"
@@ -100,7 +107,7 @@ if [ -n "$BUILD" ] && [ "$BUILD" != none ]; then
 		[ "$a" = --build ] && { skip=1; continue; }
 		rest+=("$a")
 	done
-	exec bash "$wt/tools/coop_soak.sh" --build none "${rest[@]}"
+	COOP_SOAK_COPY= exec bash "$wt/tools/coop_soak.sh" --build none "${rest[@]}"
 fi
 if [ "$MODE" = clean ]; then LATENCY=0; JITTER=0; LOSS=0; fi
 # Free ports (S0651 failed hosting on a port another soak still held): unless --port was given,
