@@ -67,6 +67,12 @@ var address := "127.0.0.1"
 var expect_clients := 2
 var reconnects := false
 var late := false
+## A real player plays along (tools/coop_soak.sh --human): the host waits for them before the
+## first contract (up to wait_human_s) and waits for them at the extraction as long as it takes
+## (up to HUMAN_EXTRACT_S); nothing here ever targets them (no planned knock-out, no give-up).
+var human := false
+var wait_human_s := 600.0
+const HUMAN_EXTRACT_S := 1200.0
 
 var recorder: Node
 var level: CompoundLevel
@@ -95,6 +101,8 @@ func _ready() -> void:
 	expect_clients = int(_arg(args, "--soak-expect", "2"))
 	reconnects = "--soak-reconnect" in args
 	late = "--soak-late" in args
+	human = "--soak-human" in args
+	wait_human_s = float(_arg(args, "--soak-wait-human", "600"))
 	_t0 = Recorder.now()
 	var peer_dir := run_dir.path_join("host" if role == "host" else "client%d" % bot)
 	DirAccess.make_dir_recursive_absolute(peer_dir)
@@ -270,6 +278,11 @@ func _host_main() -> void:
 	var joined := await _wait_for(func() -> bool: return multiplayer.get_peers().size() >= expect_clients, 120.0)
 	_say("%d client(s) in (%s)%s" % [multiplayer.get_peers().size(), multiplayer.get_peers(), "" if joined else ": fewer than expected"])
 	Net.peer_joined.connect(func(id: int) -> void: _say("peer %d joined" % id); recorder.event(["join", id]))
+	if human:
+		await _sleep(3.0)  # the bots post their peer ids (bot<N>.json) just after joining
+		_say("waiting up to %d s for the human player to join (port %d)" % [int(wait_human_s), Net.port()])
+		var came := await _wait_for(func() -> bool: return not _humans().is_empty(), wait_human_s)
+		_say("human player %s" % (("in: peer %s" % [_humans()]) if came else "not in yet: starting without them (they can join any time)"))
 	Net.peer_left.connect(func(id: int) -> void: _say("peer %d left" % id); recorder.event(["leave", id]))
 	var cycle := 0
 	while true:
@@ -290,7 +303,7 @@ func _host_main() -> void:
 		var cycle_s := Recorder.now() - started
 		if cycle >= 2 and elapsed + cycle_s * 0.8 > duration_s:
 			break
-		if cycle >= 12:
+		if cycle >= (40 if human else 12):
 			break
 	_set_phase("quit", {"quit": true})
 	await _wait_for(func() -> bool: return multiplayer.get_peers().is_empty(), 30.0)
@@ -314,6 +327,12 @@ func _restock() -> void:
 				given[id] = short
 		if not given.is_empty():
 			_say("restock for %s: %s" % [s.name, JSON.stringify(given)])
+
+
+## Connected peers that are no bot of this harness (a real player who joined).
+func _humans() -> Array:
+	var bot_peers := _bots().values().map(func(st: Dictionary) -> int: return int(st.get("peer", 0)))
+	return Array(multiplayer.get_peers()).filter(func(id: int) -> bool: return not id in bot_peers)
 
 
 ## Every connected client's posted status, by bot number.
@@ -440,7 +459,7 @@ func _host_cycle(cycle: int) -> Dictionary:
 	extraction.server_add_point(Vector2(at.x, at.z))
 	_set_phase("extract", {"rally": [at.x, at.y, at.z]})
 	# Long enough for a player who respawned at the insertion (~1 km) to come back on foot.
-	var gathered := await _wait_for(func() -> bool: return not extraction.point_with_squad().is_empty(), 300.0)
+	var gathered := await _wait_for(func() -> bool: return not extraction.point_with_squad().is_empty(), HUMAN_EXTRACT_S if human and not _humans().is_empty() else 300.0)
 	var left_behind: Array = []
 	if not gathered:
 		var point := extraction._nearest_point()

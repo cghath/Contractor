@@ -49,7 +49,7 @@ var _events: Array = []
 ## replaced whole on every change (a shot, a reload, a pickup) and ServerSync sends it whole. Every
 ## frame this peer counts the replacements it sees and their encoded size (var_to_bytes, about
 ## what goes over the wire per peer, before ENet's headers).
-var _inv_refs := {}  # soldier key -> the net_state Dictionary last seen
+var _inv_refs := {}  # soldier key -> [the replicated gear Dictionary, net_ammo] last seen
 var _inv_changes := 0
 var _inv_bytes := 0
 ## The same for Vitals.net_state (the next big one after the inventory: a fresh Dictionary on
@@ -200,11 +200,20 @@ func _count_inventory() -> void:
 	var all := _soldiers()
 	for k: String in all:
 		var s: Soldier = all[k]
-		var state: Dictionary = s.inventory.net_state
+		# With net/ammo-delta (integrate/oct14 on) what goes over the wire is net_gear (whole
+		# snapshot, on real gear changes) and net_ammo (rounds per slot); before it, net_state.
+		var wire: Variant = s.inventory.get(&"net_gear") if &"net_gear" in s.inventory else s.inventory.net_state
+		var ammo: Variant = s.inventory.get(&"net_ammo") if &"net_ammo" in s.inventory else null
+		var state: Array = [wire, ammo]
 		seen[k] = state
-		if _inv_refs.has(k) and not is_same(_inv_refs[k], state):
-			_inv_changes += 1
-			_inv_bytes += var_to_bytes(state).size()
+		if _inv_refs.has(k):
+			var before: Array = _inv_refs[k]
+			if not is_same(before[0], wire):
+				_inv_changes += 1
+				_inv_bytes += var_to_bytes(wire).size()
+			if ammo != null and before[1] != ammo:
+				_inv_changes += 1
+				_inv_bytes += var_to_bytes(ammo).size()
 		var vit: Dictionary = s.vitals.net_state
 		seen_vit[k] = vit
 		if _vit_refs.has(k) and not is_same(_vit_refs[k], vit):
