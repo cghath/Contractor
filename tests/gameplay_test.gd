@@ -561,6 +561,7 @@ func _test_optics() -> void:
 		and not Optics.has_rail(ItemDB.get_item(&"m17")) and Optics.mounted(ItemDB.get_item(&"m17"), {}) == null,
 		"the M4 comes with its red dot, the M110 with its 3.5-10x, the M17 has irons only")
 	check(VoxelArt.model_for(m4, inv.state_of(&"primary")).ends_with(":dot"), "the M4's model shows its red dot")
+	_check_red_dot_size()
 	var rounds := inv.rounds_in(&"primary")
 	check(inv.take(&"optic_lpvo") == 1, "an LPVO picked up")
 	var where := _find(inv, &"optic_lpvo")
@@ -639,6 +640,48 @@ func _test_optics() -> void:
 		"mil marks a mil apart at 10x, wider apart at 3.5x")
 	# The AI's cone doesn't care what optic the gun carries.
 	check(is_equal_approx(Soldier.ai_spread_deg(m4), 1.2) and is_equal_approx(Soldier.ai_spread_deg(m110), 1.6), "the AI's cone is the gun's, whatever its optic")
+
+
+## The red dot is a micro red dot's size (Captain, 2026-10-14: its 9 cm box housing, longer than
+## the holographic sight, filled the right of the first-person view; a T-2/CompM4 class sight is
+## about 6-12 cm long and 4-7 cm tall). Its model (the optic on its own, built at 0.5 cm) is an
+## Aimpoint T-2's size (6.2 cm long, 4.1 cm wide): 5.5-8 cm long, 4-7 cm tall on its mount, no
+## wider than 4.5 cm, shorter than the holographic sight; and on the M4 its 2 cm window stays
+## clear front to back round the line of sight, inside its tube, so aimed you still look through
+## it at the dot (PlayerInput.ads_view, GunSight).
+func _check_red_dot_size() -> void:
+	var extent := func(model: String) -> Vector3:  # metres across the model's solid voxels
+		var occ := VoxelArt.occupancy(model)
+		var dims: Vector3i = occ.dims
+		var lo := dims
+		var hi := -Vector3i.ONE
+		for z in dims.z:
+			for y in dims.y:
+				for x in dims.x:
+					if occ.solid[x + dims.x * (y + dims.y * z)]:
+						lo = lo.min(Vector3i(x, y, z))
+						hi = hi.max(Vector3i(x, y, z))
+		return Vector3(hi - lo + Vector3i.ONE) * float(occ.cell)
+	var dot: Vector3 = extent.call("optic:dot")
+	var holo: Vector3 = extent.call("optic:holo")
+	check(dot.z >= 0.055 and dot.z <= 0.08 and dot.y >= 0.04 and dot.y <= 0.07 and dot.x <= 0.045 and dot.z < holo.z,
+		"the red dot is a micro red dot's size: %.1f cm long, %.1f cm tall, %.1f cm wide (the holo %.1f cm long)"
+		% [dot.z * 100.0, dot.y * 100.0, dot.x * 100.0, holo.z * 100.0])
+	var rifle := VoxelArt.occupancy("rifle:42:dot")
+	var dims: Vector3i = rifle.dims
+	var s := roundi(VoxelArt.VOXEL_SIZE / float(rifle.cell))  # built voxels per frame voxel
+	var back := roundi(VoxelArt.sight_back("dot", 42.0) * s)
+	var front := roundi((VoxelArt.sight_back("dot", 42.0) - VoxelArt.optic_length("dot")) * s)
+	var ax := roundi(1.5 * s)  # the line of sight: the rifle's middle, OPTIC_AXIS_Y up
+	var ay := floori(VoxelArt.OPTIC_AXIS_Y * s)
+	var clear := true
+	var walled := true
+	for z in range(front, back):
+		for x in range(ax - 2, ax + 2):
+			for y in range(ay - 2, ay + 2):
+				clear = clear and not rifle.solid[x + dims.x * (y + dims.y * z)]
+		walled = walled and rifle.solid[ax + dims.x * (ay + 2 + dims.y * z)] and rifle.solid[ax + dims.x * (ay - 3 + dims.y * z)] 			and rifle.solid[ax - 3 + dims.x * (ay + dims.y * z)] and rifle.solid[ax + 2 + dims.x * (ay + dims.y * z)]
+	check(back - front >= 12 and clear and walled, "on the M4 its window is clear front to back round the line of sight, inside its tube")
 
 
 ## [container, index] of the first stowed `id`, or [&"", -1].

@@ -10,7 +10,7 @@
 		{"id": "m17", "name": "M17 Pistol", "type": "weapon", "slot": "sidearm", "volume_l": 1.2, "mass_kg": 0.9, "tags": ["pistol", "9mm"],
 		 "stats": {"damage": 22, "rpm": 400, "auto": false, "fire_modes": ["semi"], "ammo": "mag_9mm", "reload_s": 1.6, "spread_deg": 0.15, "ai_spread_deg": 1.8, "recoil_deg": 1.1, "ads_fov": 65, "wall_carve_m": 0.07, "plate_wear": 0.5, "muzzle_velocity_mps": 370, "size_m": [0.04, 0.14, 0.2]}},
 		{"id": "optic_red_dot", "name": "Red Dot Sight", "type": "optic", "volume_l": 0.3, "mass_kg": 0.22, "tags": ["optic"],
-		 "stats": {"short": "Red dot", "view": "open", "reticle": "dot", "dot_moa": 2.0, "magnification": 1.0, "art": "dot", "size_m": [0.05, 0.06, 0.1]}},
+		 "stats": {"short": "Red dot", "view": "open", "reticle": "dot", "dot_moa": 2.0, "magnification": 1.0, "art": "dot", "size_m": [0.04, 0.055, 0.065]}},
 		{"id": "optic_holo", "name": "Holographic Sight + 3x Magnifier", "type": "optic", "volume_l": 0.7, "mass_kg": 0.66, "tags": ["optic"],
 		 "stats": {"short": "Holo 3x", "view": "open", "reticle": "holo", "dot_moa": 1.0, "ring_moa": 65.0, "magnification": 1.0, "magnifier": 3.0, "art": "holo", "size_m": [0.06, 0.07, 0.17]}},
 		{"id": "optic_lpvo", "name": "LPVO 1-6x", "type": "optic", "volume_l": 0.6, "mass_kg": 0.55, "tags": ["optic"],

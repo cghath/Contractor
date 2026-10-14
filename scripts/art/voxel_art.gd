@@ -1103,6 +1103,12 @@ static func sight_back(art: String, n: float) -> float:
 	return n * 0.64
 
 
+## A red dot's length (voxels): 6.5 cm, a micro red dot's (Aimpoint T-2 class, about 6 cm).
+## Captain, 2026-10-14: the 9 cm box it was, with a 3 x 4 cm window in a 4 x 5 cm housing, was
+## longer than the holographic sight and filled the right of the first-person view.
+const RED_DOT_LENGTH := 3.25
+
+
 ## An optic's length (voxels), front to back.
 static func optic_length(art: String) -> float:
 	match art:
@@ -1112,13 +1118,14 @@ static func optic_length(art: String) -> float:
 		"scope": return 17.0
 		"scope_fixed": return 15.0
 		"scope_long": return 19.0
-	return 4.6  # red dot
+	return RED_DOT_LENGTH
 
 
 ## The boxes of optic `art` in a rifle's frame, its back end at z = `back` (voxels): on the rail
 ## (RAIL_Y), its line of sight at OPTIC_AXIS_Y. Proposed shapes (Captain, P0362): a red dot's
-## open tube, a holographic window (its 3x magnifier flipped down beside the rail), an LPVO's
-## slim tube, a prism's squat body, and DMR scopes with their objective bells and turrets.
+## open tube (a micro red dot's size, 2026-10-14), a holographic window (its 3x magnifier
+## flipped down beside the rail), an LPVO's slim tube, a prism's squat body, and DMR scopes with
+## their objective bells and turrets.
 static func optic_boxes(art: String, back: float) -> Array:
 	var front := back - optic_length(art)
 	match art:
@@ -1155,13 +1162,26 @@ static func optic_boxes(art: String, back: float) -> Array:
 				_fb(0.75, 10.75, front - 0.25, 2.25, 12.75, front, C.LENS),
 				_fb(1.25, 12.75, front + 2.0, 1.75, 13.0, back - 1.5, C.GUN_LIGHT),  # fibre on top
 			]
-	# Red dot: an open tube you look through when aimed.
+	# Red dot: a micro red dot (Captain, 2026-10-14: the size of an Aimpoint T-2, not a box): an
+	# open tube you look through when aimed, 3 cm across round a clear 2 cm window on the line of
+	# sight, RED_DOT_LENGTH long: lens ends with their edges cut (an octagon in 0.5 cm voxels)
+	# either side of a square body carrying the elevation and windage caps and the brightness
+	# knob, on a slim riser and a rail clamp. 5.5 cm from the rail to the top cap, 4 cm across
+	# the knobs.
+	var x := 1.5
+	var y := 11.75  # the line of sight (OPTIC_AXIS_Y) on the 0.5 cm build grid
+	var mid := (front + back) * 0.5
 	return [
-		_fb(1.1, RAIL_Y, front, 1.9, 10.6, back - 0.6, C.GUN),                     # mount
-		_fb(0.55, 10.6, front, 2.45, 10.85, back, C.GUN),                          # floor
-		_fb(0.55, 12.75, front, 2.45, 13.0, back, C.GUN),                          # roof
-		_fb(0.55, 10.85, front, 0.75, 12.75, back, C.GUN),                         # sides
-		_fb(2.25, 10.85, front, 2.45, 12.75, back, C.GUN),
+		_fb(0.8, RAIL_Y, front + 0.5, 2.2, 10.5, back - 0.5, C.GUN),                     # rail clamp
+		_fb(0.55, RAIL_Y, mid - 0.5, 0.8, 10.25, mid + 0.5, C.GUN_LIGHT),               # its lever
+		_fb(1.05, 10.5, front + 0.75, 1.95, y - 0.5, back - 0.75, C.GUN),                # riser
+		_fb(x - 0.75, y - 0.5, front, x + 0.75, y + 0.5, back, C.GUN),                   # tube
+		_fb(x - 0.5, y - 0.75, front, x + 0.5, y + 0.75, back, C.GUN),
+		_fb(x - 0.75, y - 0.75, mid - 0.75, x + 0.75, y + 0.75, mid + 0.75, C.GUN),      # body
+		_fb(x - 0.25, y + 0.75, mid - 0.25, x + 0.25, y + 1.0, mid + 0.25, C.GUN_LIGHT), # elevation cap
+		_fb(x + 0.75, y - 0.25, mid - 0.25, x + 1.0, y + 0.25, mid + 0.25, C.GUN_LIGHT), # windage cap
+		_fb(x - 1.0, y - 0.25, mid - 0.5, x - 0.75, y + 0.25, mid + 0.5, C.GUN_LIGHT),   # brightness knob
+		_fb(x - 0.5, y - 0.5, front, x + 0.5, y + 0.5, back, C.EMPTY),                   # the window, clear through
 	]
 
 
