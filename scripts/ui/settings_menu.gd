@@ -22,13 +22,18 @@ func _init() -> void:
 
 func _ready() -> void:
 	var dim := ColorRect.new()
-	dim.color = Color(0, 0, 0, 0.55)
+	dim.color = Color(0, 0, 0, 0.7)
 	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(dim)
 	var centre := CenterContainer.new()
 	centre.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(centre)
 	var panel := PanelContainer.new()
+	var style := StyleBoxFlat.new()  # opaque: whatever opened it doesn't show through
+	style.bg_color = Color(0.11, 0.12, 0.11)
+	style.set_content_margin_all(14)
+	style.set_corner_radius_all(4)
+	panel.add_theme_stylebox_override(&"panel", style)
 	centre.add_child(panel)
 	var box := VBoxContainer.new()
 	box.custom_minimum_size = Vector2(620, 560)
