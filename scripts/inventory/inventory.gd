@@ -5,6 +5,12 @@ extends Node
 ## mutates it; every change is copied into `net_state`, which the owner's ServerSync
 ## replicates to all peers so everyone can see what you are wearing.
 ##
+## Replication (playtest blocker B2): the whole snapshot (`net_gear`) goes out only when the
+## gear really changes (an item put on, taken off, moved, added or removed). A round fired
+## changes only a count, so it goes out in `net_ammo` (a few ints: the rounds loaded in each
+## weapon slot), not as another whole snapshot. Both carry the snapshot's revision, so a peer
+## puts the counts only on the snapshot they belong to, and a late joiner gets both (spawn).
+##
 ## Items can carry state that travels with them: rounds in a weapon or magazine, chips in
 ## a plate or helmet, a ceramic plate's cracks and integrity (see ItemData.default_state and
 ## ArmorRules). Equipped items keep it in `slot_state`; stowed entries carry an optional
@@ -52,11 +58,35 @@ const ATTACH_SLOTS: Array[StringName] = [&"vest", &"backpack"]
 ## Point types only packs have.
 const PACK_POINT_TYPES: Array[String] = ["pack_top", "aid_bag"]
 
-## Replicated snapshot. Always assign a fresh Dictionary so replication sees the change.
+## The whole inventory as one snapshot (saves, loot undo, the base hub's stash read and
+## assign it). On the host it is always current, rounds included; assigning it replaces the
+## inventory and sends the new snapshot to every peer (net_gear). It keeps a copy of what's
+## assigned (consume_round updates its counts in place, which mustn't reach the caller's
+## dictionary).
 var net_state: Dictionary = {}:
 	set(value):
-		net_state = value
+		net_state = value if _committing or _receiving else value.duplicate(true)
 		_apply_state(value)
+		if not _receiving:
+			_publish()
+
+## Replicated (ServerSync): {"rev": the snapshot's revision, "state": a copy of net_state}, set
+## by the host only when the gear really changes (_publish). Peers apply it as net_state.
+var net_gear: Dictionary = {}:
+	set(value):
+		net_gear = value
+		if not _publishing:
+			_receive_gear()
+
+## Replicated (ServerSync): [net_gear's revision, then the rounds loaded in each of
+## WEAPON_SLOTS, -1 where the slot's item keeps no count], set by the host on every round
+## fired (consume_round) and with every snapshot. A few bytes where a snapshot is a kilobyte
+## or more.
+var net_ammo: PackedInt32Array = PackedInt32Array():
+	set(value):
+		net_ammo = value
+		if not _publishing:
+			_receive_ammo()
 
 var slots: Dictionary = {}       # slot -> item id, or &""
 var slot_state: Dictionary = {}  # slot -> Dictionary (empty if the item has no state)
@@ -72,6 +102,9 @@ var stows_loaded_packs := false
 var _slot_rev: Dictionary = {}
 var _rev := 0
 var _committing := false  # _commit's own net_state update keeps the revisions
+var _gear_rev := 0          # host: the revision of the last snapshot published (net_gear)
+var _publishing := false    # host: setting net_gear/net_ammo to send them, not receiving them
+var _receiving := false     # peer: applying a received snapshot, not publishing one
 
 
 func _init() -> void:
@@ -411,7 +444,18 @@ func consume_round(slot: StringName) -> bool:
 	if slots.get(slot, &"") == &"" or rounds <= 0:
 		return false
 	slot_state[slot]["rounds"] = rounds - 1
-	_commit()
+	# Only a count changed: the snapshot keeps up in place and the peers get the counts
+	# (net_ammo), not the whole inventory again.
+	var snap_state: Dictionary = net_state.get("slot_state", {}).get(slot, {})
+	if snap_state.has("rounds"):
+		snap_state["rounds"] = rounds - 1
+	else:  # (not seen: every snapshot holds the counts slot_state has)
+		_commit()
+		return true
+	_publishing = true
+	net_ammo = _ammo_counts()
+	_publishing = false
+	changed.emit()
 	return true
 
 
@@ -1147,17 +1191,71 @@ static func _state_stacks(item: ItemData) -> bool:
 
 
 func _commit() -> void:
+	_committing = true
+	net_state = _snapshot()
+	_committing = false
+
+
+func _snapshot() -> Dictionary:
 	var stowed := {}
 	for container in CONTAINERS:  # pouch contents travel in the carrier's state
 		stowed[container] = containers[container].duplicate(true)
-	_committing = true
-	net_state = {
+	return {
 		"slots": slots.duplicate(),
 		"slot_state": slot_state.duplicate(true),
 		"containers": stowed,
 		"hands": hands,
 	}
-	_committing = false
+
+
+## Host (whoever assigns net_state): sends the whole snapshot, with the counts that go with it.
+## The copy keeps consume_round's in-place count updates out of what was sent.
+func _publish() -> void:
+	if is_inside_tree() and not multiplayer.is_server():
+		return  # a peer's copy (a vehicle's cargo applied from its state): nothing to send
+	_gear_rev += 1
+	_publishing = true
+	net_gear = {"rev": _gear_rev, "state": net_state.duplicate(true)}
+	net_ammo = _ammo_counts()
+	_publishing = false
+
+
+func _ammo_counts() -> PackedInt32Array:
+	var counts := PackedInt32Array([_gear_rev])
+	for slot in WEAPON_SLOTS:
+		var state: Dictionary = slot_state.get(slot, {})
+		counts.append(int(state.rounds) if slots.get(slot, &"") != &"" and state.has("rounds") else -1)
+	return counts
+
+
+## Peer: a snapshot arrived. Becomes net_state, then the counts fired since go on it.
+func _receive_gear() -> void:
+	_gear_rev = int(net_gear.get("rev", 0))
+	_receiving = true
+	net_state = net_gear.get("state", {})
+	_receiving = false
+	_receive_ammo()
+
+
+## Peer: counts arrived. They go on the snapshot of the same revision; older ones are already
+## in a newer snapshot, and newer ones wait for theirs (_receive_gear applies them).
+func _receive_ammo() -> void:
+	if net_ammo.size() != WEAPON_SLOTS.size() + 1 or net_ammo[0] != _gear_rev or net_gear.is_empty():
+		return
+	var any := false
+	for i in WEAPON_SLOTS.size():
+		var slot := WEAPON_SLOTS[i]
+		var rounds := net_ammo[i + 1]
+		var state: Dictionary = slot_state.get(slot, {})
+		if rounds < 0 or not state.has("rounds") or int(state.rounds) == rounds:
+			continue
+		state["rounds"] = rounds
+		var snap_state: Dictionary = net_state.get("slot_state", {}).get(slot, {})
+		if snap_state.has("rounds"):
+			snap_state["rounds"] = rounds
+		any = true
+	if any:
+		changed.emit()
 
 
 func _apply_state(state: Dictionary) -> void:
