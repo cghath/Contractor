@@ -363,6 +363,15 @@ func _try_fire() -> void:
 	if not _captured() or placing or body.inventory.hands != &"" or not body.vitals.is_up() or interaction.is_open() \
 			or body.carry_mode != &"" or is_instance_valid(body.vehicle):  # both hands on the casualty; or riding (the seat's gun fires: Vehicle)
 		return
+	if body.being_dragged():
+		# Dragged on your back (Captain, 2026-10-14): return fire with the primary, the sidearm
+		# with a broken firing arm, nothing when too hurt (Soldier.dragged_fire_slot).
+		var slot := body.dragged_fire_slot()
+		if slot == &"":
+			return
+		if body.active_slot != slot:
+			body.select_weapon(slot)
+			return
 	var weapon := body.active_weapon()
 	if Launchers.is_launcher(weapon):
 		LauncherSight.of(body).try_fire()  # its own fire path (wave 5)

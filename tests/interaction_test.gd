@@ -246,10 +246,12 @@ func _test_carry_and_drag() -> void:
 		"dragging it: Carry to switch back, no Drag (%s)" % [_ids(player, alpha)])
 	_end_carry_phase(player)  # took hold of the handle
 	check(is_equal_approx(player.carry_speed_mult(), Soldier.DRAG_SPEED_MULT) and Soldier.DRAG_SPEED_MULT < Soldier.CARRY_SPEED_MULT, "dragging is slower (0.35)")
-	player.global_position += Vector3(0, 0, -2.0)
-	await _frames(3)
-	var local := player.global_transform.affine_inverse() * alpha.global_position
-	check(local.z > 0.8 and absf(local.y) < 0.2, "the body slides along behind you (%s)" % local)
+	for i in 60:  # walking backwards 2 m (the casualty, a ragdoll held by the straps, trails)
+		player.global_position += player.global_basis.z * -2.0 / 60.0
+		await get_tree().physics_frame
+	await _seconds(0.5)
+	var local := player.global_transform.affine_inverse() * alpha.body_point()
+	check(local.z > 0.5 and absf(local.x) < 0.5 and local.y < 0.7, "the body slides along behind you, its chest by your hands (%s)" % local)
 	check(is_equal_approx(player.view_yaw(), PI), "dragging, the view faces the casualty behind the body")
 	check(_ids(player, alpha).has(&"put_down") and _action(player, alpha, &"put_down").get("label") == "Release",
 		"looking at the body you drag offers Release (%s)" % [_ids(player, alpha)])

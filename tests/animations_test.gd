@@ -182,8 +182,13 @@ func _test_drag() -> void:
 	player._server_drag_body.rpc_id(1, alpha.get_path())
 	check(player.model.carry_net.get("mode") == CharacterModel.DRAG and alpha.model.carry_net.get("mode") == CharacterModel.DRAGGED,
 		"switching to a drag updates both sides")
-	player.global_position += Vector3(0, 0, -1.0)
-	await _seconds(0.7)
+	await _seconds(Soldier.DRAG_GRAB_S + 0.3)  # down off the shoulder as a ragdoll, taken by the straps
+	for i in 60:  # backing away 1 m: it trails, head first, held by the straps (Ragdoll._pin)
+		player.global_position += player.global_basis.z * -1.0 / 60.0
+		await get_tree().physics_frame
+	await _seconds(0.8)
+	check(alpha.dragged_as_ragdoll() and alpha.model.ragdolled() and alpha.model.carry_shown().is_empty(),
+		"dragged, the casualty is a ragdoll held by the straps (drawn from its parts, not posed)")
 	var back := alpha.model.torso.global_basis.z  # the casualty's back
 	check(back.dot(Vector3.UP) < -0.6, "the casualty lies on its back (back faces %.2f up)" % back.dot(Vector3.UP))
 	var head := _part(alpha, Vitals.HEAD)
@@ -229,11 +234,14 @@ func _test_from_replicated_state() -> void:
 	bravo.model.carry_net = {"mode": CharacterModel.DRAG, "with": String(hostile.get_path())}
 	hostile.model.carry_net = {"mode": CharacterModel.DRAGGED, "with": String(bravo.get_path())}
 	await _seconds(0.7)
-	var strap := hostile.model.torso.to_global(CharacterModel.STRAP_POINTS[0])
-	check(hostile.model.carry_shown().get("mode") == CharacterModel.DRAGGED and bravo.model.hand_position(true).distance_to(strap) < HAND_TOLERANCE,
-		"as a late joiner gets it: the drag shows from carry_net alone")
-	check(_flat(_part(hostile, Vitals.HEAD), bravo.global_position) < _flat(_part(hostile, Vitals.PELVIS), bravo.global_position),
-		"with the casualty head first to the dragger")
+	# Dragged as a ragdoll (Ragdoll._pin), a peer draws the casualty from ragdoll_net and the
+	# dragger's hands go to its straps wherever they lie.
+	var strap := hostile.model.torso.global_transform * CharacterModel.STRAP_POINTS[0]
+	var goals: Array = bravo.model._arm_goals(bravo.model._carry_state())
+	var goal: Vector3 = bravo.model.torso.to_global(goals[0][1])
+	check(hostile.model.ragdolled() and hostile.model.carry_shown().is_empty() and bravo.model.carry_shown().get("mode") == CharacterModel.DRAG
+		and goal.distance_to(strap) < 0.01,
+		"as a late joiner gets it: the drag shows from carry_net and ragdoll_net alone, the dragger's hands going to its straps (%.2f m off)" % goal.distance_to(strap))
 	hostile.model.carry_net = {}
 	bravo.model.carry_net = {}
 	hostile.vitals.server_reset_health()

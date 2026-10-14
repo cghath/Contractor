@@ -215,6 +215,9 @@ const DRAG_POSE := {"hip": 0.6, "hip_x": 0.0, "hip_z": 0.05, "pitch": -0.95, "ro
 const DRAG_GLANCE_S := 3.2
 const DRAG_GLANCE_HOLD_S := 0.9
 const DRAG_GLANCE_YAW := 1.15
+## An awake casualty being dragged holds the head toward where they look, at most this far
+## (radians) off straight along the body.
+const DRAGGED_HEAD_TURN := 1.1
 const STRAP_POINTS: Array[Vector3] = [Vector3(0.12, 0.5, -0.08), Vector3(-0.12, 0.5, -0.08)]
 ## First person while dragging: the eye (body space, towards the casualty), head held up over the
 ## bent back rather than right over the casualty's face, so the view looks down along them.
@@ -243,6 +246,8 @@ const VIEW_LOWER_PITCH := 0.9
 var hold := Hold.NONE
 ## Head pitch in radians (positive looks up), set by the owner each frame.
 var look_pitch := 0.0
+## Where the soldier looks (world direction; Soldier sets it every frame on every peer).
+var aim_dir := Vector3.FORWARD
 ## Shouldering the weapon (Soldier.is_aiming, replicated): GearRig raises it from the ready.
 var aiming := false
 ## Shoots from the left shoulder (Soldier.left_handed): the hands and the weapon holds mirror.
@@ -994,7 +999,12 @@ func _process(delta: float) -> void:
 	_shin_left.transform = (_shown.knee_l as Transform3D) * Transform3D(Basis(Vector3.RIGHT, -STEP_KNEE * stride * maxf(cos(_phase), 0.0)), Vector3.ZERO)
 	_shin_right.transform = (_shown.knee_r as Transform3D) * Transform3D(Basis(Vector3.RIGHT, -STEP_KNEE * stride * maxf(-cos(_phase), 0.0)), Vector3.ZERO)
 	torso.transform = (_shown.torso as Transform3D).translated_local(Vector3(0, sin(_time * 2.0) * 0.003, 0))  # breathing
-	if casualty:
+	if casualty and not downed and mode == DRAGGED:
+		# Awake, dragged (can't stand): head held up and the weapon pointed where they look,
+		# returning fire from their back (SquadAI / PlayerInput fire it; Soldier.can_fire_dragged).
+		_face_world(head, aim_dir, DRAGGED_HEAD_TURN)
+		_face_world(hands_anchor, aim_dir, PI)
+	elif casualty:
 		# Limp: the head hangs (carried) or lolls back (dragged) with the body.
 		head.rotation = Vector3(-CARRY_HEAD_DROOP if mode == CARRIED else DRAG_HEAD_LOLL, 0, 0)
 		hands_anchor.rotation = Vector3.ZERO
@@ -1093,6 +1103,22 @@ func twist_shown() -> float:
 	return _twist_shown
 
 
+## Turns `node` (a child of the torso) to face world direction `dir`, at most `limit` radians
+## from where it faces at rest on the torso, keeping its scale.
+func _face_world(node: Node3D, dir: Vector3, limit: float) -> void:
+	if dir.length() < 0.01:
+		node.rotation = Vector3.ZERO
+		return
+	var parent := (node.get_parent() as Node3D).global_basis.orthonormalized()
+	var local := (parent.inverse() * dir.normalized())
+	var rest := Vector3.FORWARD
+	var angle := rest.angle_to(local)
+	if angle > limit:
+		local = rest.slerp(local, limit / angle).normalized()
+	var up := Vector3.UP if absf(local.y) < 0.98 else Vector3.BACK
+	node.basis = Basis.looking_at(local, up)
+
+
 ## Dragging (facing the casualty, walking backwards): the head turns to look over a shoulder
 ## at where he's going for a moment every DRAG_GLANCE_S while he moves, alternating sides
 ## (radians of head turn; 0 between glances or standing still). Time-based, so every peer
@@ -1189,8 +1215,8 @@ func _carry_state() -> Dictionary:
 	var other: Node = get_node_or_null(NodePath(path)) if path != "" and is_inside_tree() else null
 	var other_model := _model_of(other)
 	if mode == CARRIED or mode == DRAGGED:
-		if not downed or other_model == null:
-			return {}
+		if other_model == null or (not downed and mode != DRAGGED):
+			return {}  # (awake and dragged: someone who can't stand, drawn on their back holding their weapon)
 		if mode == DRAGGED and ragdolled():
 			return {}  # dragged as a ragdoll (Ragdoll._pin): drawn from its parts, wherever they trail
 	return {"mode": mode, "body": other, "model": other_model}
@@ -1278,6 +1304,8 @@ func _place_shoulders(delta: float) -> void:
 ## [[goal key, torso-local point or null to swing], ...] for the right and left hand.
 func _arm_goals(carry: Dictionary) -> Array:
 	var mode: StringName = carry.get("mode", &"")
+	if mode == DRAGGED and not downed and is_instance_valid(_held):
+		return _held_goals()  # awake: hands on the weapon (hands_anchor points it where they look)
 	if mode == CARRIED or mode == DRAGGED:
 		return [["limp", _limp_point(0, mode)], ["limp", _limp_point(1, mode)]]
 	if downed:

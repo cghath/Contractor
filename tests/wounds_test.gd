@@ -177,7 +177,7 @@ func _test_fractures() -> void:
 		check(absf(broken / 600.0 - expected) < 0.06, "%s: %.0f%% broke (expected %.0f%%)" % [round_class, broken / 6.0, expected * 100.0])
 	var leg := _model()
 	leg.add_hit(Vitals.THIGH_L, channel, Vitals.FULL_POWER)
-	check(not leg.can_sprint() and leg.speed_mult() < 0.7 and leg.pain() >= WoundModel.PAIN_FLOOR_LEG, "broken leg: walk only, heavy pain")
+	check(not leg.can_stand() and not leg.can_sprint() and leg.pain() >= WoundModel.PAIN_FLOOR_LEG, "broken femur: no standing (crawl, or be dragged), heavy pain")
 	check(leg.wound_bleed_rate() >= WoundModel.FEMUR_RATE, "a broken femur bleeds internally")
 	var arm := _model()
 	arm.add_hit(Vitals.UPPER_ARM_R, {"graze": false, "depth": 0.1, "vessels": [], "organs": [], "bones": [&"humerus_r"]}, Vitals.FULL_POWER)

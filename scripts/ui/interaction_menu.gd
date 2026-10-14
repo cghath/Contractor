@@ -125,9 +125,12 @@ const ACTIONS := {
 		{"id": &"drag", "label": "Drag", "needs": &"can_drag", "request": &"_server_drag_body", "with": &"target"},
 	],
 	SQUADMATE: [
+		{"id": &"put_down", "label": "Put down", "needs": &"moving_body", "request": &"_server_release_body", "with": &"none"},
 		{"id": &"give_item", "label": "Give item", "submenu": &"stowed_items", "request": &"_server_give_item", "with": &"target_entry"},
 		{"id": &"treat", "label": "Treat", "needs": &"treatable", "submenu": &"treatments"},
 		{"id": &"check_condition", "label": "Check wounds", "needs": &"wounded", "show": &"condition"},
+		{"id": &"carry", "label": "Carry", "needs": &"can_carry_up", "request": &"_server_carry_body", "with": &"target"},
+		{"id": &"drag", "label": "Drag", "needs": &"can_drag_up", "request": &"_server_drag_body", "with": &"target"},
 	],
 	PERSON: [
 		{"id": &"put_down", "label": "Put down", "needs": &"moving_body", "request": &"_server_release_body", "with": &"none"},
@@ -143,6 +146,7 @@ const ACTIONS := {
 	SELF: [
 		{"id": &"put_down", "label": "Put down", "needs": &"moving_body", "request": &"_server_release_body", "with": &"none"},
 		{"id": &"check_wounds", "label": "Check wounds", "show": &"wounds"},
+		{"id": &"call_medic", "label": "Call for a medic", "needs": &"need_help", "request": &"_server_call_medic", "with": &"none"},
 		{"id": &"treat", "label": "Treat yourself", "needs": &"treatable", "submenu": &"treatments"},
 		{"id": &"drop_held", "label": "Drop held item", "needs": &"held_item", "request": &"_server_drop", "with": &"slot"},
 		{"id": &"radio_contract", "label": "Radio for a contract", "needs": &"field_radio", "request": &"_server_radio_contract", "with": &"none", "group": MORE},
@@ -396,8 +400,16 @@ static func _check(need: StringName, actor: Soldier, target: Node) -> String:
 			return "" if vitals and (not vitals.wound_list().is_empty() or vitals.condition_text() != "OK") else _HIDE
 		&"can_carry":
 			return _move_check(actor, target, Soldier.CARRY)
+		&"can_carry_up", &"can_drag_up":  # a squadmate awake but unable to stand (a broken pelvis, an unsplinted femur)
+			if not target is Soldier or (target as Soldier).vitals.can_stand():
+				return _HIDE
+			return _move_check(actor, target, Soldier.CARRY if need == &"can_carry_up" else Soldier.DRAG)
 		&"can_drag":
 			return _move_check(actor, target, Soldier.DRAG)
+		&"need_help":  # yourself, wounded or unable to stand
+			if not target is Soldier or (target as Soldier).vitals.is_dead() or ((target as Soldier).vitals.can_stand() and (target as Soldier).vitals.care_needed().is_empty()):
+				return _HIDE
+			return ""
 		&"moving_body":  # on yourself, or the body you're moving (not every body you look at)
 			return "" if actor.carry_mode != &"" and (target == actor or _moved_by(target, actor)) else _HIDE
 		&"follow_order", &"stop_order", &"cover_order":

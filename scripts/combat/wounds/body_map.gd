@@ -135,6 +135,8 @@ const BONES := {
 	&"pelvis": [Vector3(-0.12, 0.95, 0.0), Vector3(0.12, 0.95, 0.0), 0.02, &"pelvis"],
 }
 const LEG_BONES: Array[StringName] = [&"femur_l", &"femur_r", &"tibia_l", &"tibia_r"]
+const FEMUR_BONES: Array[StringName] = [&"femur_l", &"femur_r"]
+const TIBIA_BONES: Array[StringName] = [&"tibia_l", &"tibia_r"]
 const ARM_BONES: Array[StringName] = [&"humerus_l", &"humerus_r", &"forearm_bones_l", &"forearm_bones_r", &"hand_l", &"hand_r"]
 const CLAVICLE_BONES: Array[StringName] = [&"clavicle_l", &"clavicle_r"]
 const PELVIS_BONE := &"pelvis"

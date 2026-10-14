@@ -221,8 +221,8 @@ func aim_mult(rifle := false) -> float:
 	return _m().aim_mult(rifle)
 
 
-## False with a broken pelvis: no standing or walking, crawl or be carried (a binder only
-## stops the bleeding).
+## False with a broken pelvis (a binder only stops the bleeding) or an unsplinted broken
+## femur: no standing or walking, crawl or be dragged or carried.
 func can_stand() -> bool:
 	return _m().can_stand()
 
@@ -232,9 +232,30 @@ func stamina_mult() -> float:
 	return _m().stamina_mult()
 
 
-## False with a broken leg (even splinted), from 30% blood lost, or while winded.
+## False with a broken shin (even splinted) or an unsplinted femur, from 30% blood lost, or
+## while winded.
 func can_sprint() -> bool:
 	return _m().can_sprint()
+
+
+## A splinted femur still knitting (WoundModel.FEMUR_HEAL_S): sprint pace share and how
+## many times as fast a sprint drains stamina.
+func sprint_mult() -> float:
+	return _m().sprint_mult()
+
+
+func sprint_drain_mult() -> float:
+	return _m().sprint_drain_mult()
+
+
+## Whether any of `bones` (BodyMap bone ids) is broken (only unsplinted ones with `untreated_only`).
+func has_fracture(bones: Array, untreated_only := false) -> bool:
+	return _m().has_fracture(bones, untreated_only)
+
+
+## Game seconds until a splinted femur has knitted (0 for none).
+func femur_heal_left() -> float:
+	return _m().femur_heal_left
 
 
 ## Reload time multiplier (a broken arm slows reloads).

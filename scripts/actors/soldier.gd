@@ -313,6 +313,7 @@ func select_weapon(slot: StringName) -> void:
 func _process(_delta: float) -> void:
 	# Runs on every peer: active_slot, inventory and head rotation are replicated.
 	model.look_pitch = head.rotation.x
+	model.aim_dir = -camera.global_basis.z
 	model.reloading = is_reloading
 	model.aiming = is_aiming
 	model.left_handed = left_handed
@@ -353,6 +354,14 @@ func _physics_process(delta: float) -> void:
 		global_position = carried_by_pos
 		velocity = Vector3.ZERO
 		carried_by_pos = null
+		return
+	if vitals.is_up() and StringName(model.carry_net.get("mode", &"")) in [CharacterModel.CARRIED, CharacterModel.DRAGGED]:
+		# Awake but moved by someone (can't stand): the host places us; we only turn and aim
+		# (and fire while dragged: PlayerInput, Soldier.dragged_fire_slot).
+		if carried_by_pos != null:
+			global_position = carried_by_pos
+			carried_by_pos = null
+		velocity = Vector3.ZERO
 		return
 	if is_instance_valid(vehicle):
 		velocity = Vector3.ZERO
@@ -455,6 +464,58 @@ func dragged_as_ragdoll() -> bool:
 	return is_instance_valid(ragdoll) and is_instance_valid(carried_by) and carried_by.carry_mode == DRAG
 
 
+## Host: when this player last called for a medic (_server_call_medic).
+var _medic_called_at := -1000.0
+
+
+## Host: a player called "Medic!" within SquadAI.MEDIC_CALL_S (and is still awake): a free
+## squadmate comes to treat them, or to drag them to cover if they can't stand (SquadAI.needs_help).
+func medic_called() -> bool:
+	return vitals.is_up() and _now() - _medic_called_at < SquadAI.MEDIC_CALL_S
+
+
+## A player calls "Medic!" (self-interaction, "Call for a medic"): squadmates hear it and the
+## nearest free one comes (Captain, 2026-10-14: a player who can't stand gets dragged to cover).
+@rpc("any_peer", "call_local", "reliable")
+func _server_call_medic() -> void:
+	if not _from_owner() or not vitals.is_up():
+		return
+	_medic_called_at = _now()
+	var callouts := Callouts.of(self)
+	if callouts:
+		callouts.medic_call(self)
+
+
+## Every peer: being dragged by someone (carry_net, so it's known on the owner's machine too).
+func being_dragged() -> bool:
+	return StringName(model.carry_net.get("mode", &"")) == CharacterModel.DRAGGED
+
+
+## Being dragged, awake (Captain, 2026-10-14): the slot this soldier can still return fire
+## with from their back, or &"" for none. The primary, unless too hurt to fight (unconscious,
+## DRAGGED_FIRE_LOST of the blood gone, both arms broken); a broken firing arm or collarbone
+## (the right one, the left for a left-hander) falls back to the sidearm if they carry one.
+func dragged_fire_slot() -> StringName:
+	if not vitals.is_up() or 1.0 - vitals.blood_fraction() >= DRAGGED_FIRE_LOST:
+		return &""
+	var right: Array[StringName] = [&"humerus_r", &"forearm_bones_r", &"hand_r", &"clavicle_r"]
+	var left: Array[StringName] = [&"humerus_l", &"forearm_bones_l", &"hand_l", &"clavicle_l"]
+	var firing_broken := vitals.has_fracture(left if left_handed else right)
+	var other_broken := vitals.has_fracture(right if left_handed else left)
+	if firing_broken and other_broken:
+		return &""
+	if not firing_broken and inventory.slots.get(&"primary", &"") != &"":
+		return &"primary"
+	if inventory.slots.get(&"sidearm", &"") != &"":
+		return &"sidearm"
+	return &""
+
+
+## Whether a shot from `slot` is allowed as far as being dragged goes (always, when not).
+func may_fire_from(slot: StringName) -> bool:
+	return not being_dragged() or (slot != &"" and slot == dragged_fire_slot())
+
+
 ## Host: 0..1 through taking hold of the drag handle (1 once holding, or not dragging).
 func drag_grab_u() -> float:
 	if carry_mode != DRAG or _carry_phase != &"grab":
@@ -514,9 +575,10 @@ func server_pick_up_body(other: Soldier, mode := CARRY, reach := REVIVE_RANGE) -
 	return true
 
 
-## A body that can be carried or dragged: down or dead, or a cuffed captive (People).
+## A body that can be carried or dragged: down or dead, a cuffed captive (People), or someone
+## awake who can't stand (a broken pelvis, an unsplinted femur: Vitals.can_stand).
 static func _movable(other: Soldier) -> bool:
-	return not other.vitals.is_up() or other.carriable_while_up
+	return not other.vitals.is_up() or other.carriable_while_up or not other.vitals.can_stand()
 
 
 ## Host only. Puts down whoever this soldier carries, the way a squadmate would: off the
@@ -722,6 +784,8 @@ static func usable_direction(d: Vector3) -> bool:
 func _server_fire(origin: Vector3, direction: Vector3, slot: StringName) -> void:
 	if not _from_owner() or not vitals.is_up() or inventory.hands != &"" or is_instance_valid(vehicle):  # riding: the seat's gun instead (Vehicle)
 		return
+	if not may_fire_from(slot) or carry_mode != &"":
+		return  # dragged and too hurt (or that weapon's arm broken), or both hands on a casualty
 	if not usable_point(origin) or not usable_direction(direction):
 		return
 	var id: StringName = inventory.slots.get(slot, &"")
@@ -1506,6 +1570,12 @@ const DRAG_SPEED_MULT := 0.35
 ## Dragging, the pace is at most this (m/s, crouched and walking backwards, whatever the
 ## stance asked for: SoldierMovement.top_speed).
 const DRAG_SPEED := 1.0
+## Dragged and awake, no returning fire with this much of the blood gone (shock; the same 30%
+## that stops a sprint, WoundModel.NO_SPRINT_LOST).
+const DRAGGED_FIRE_LOST := 0.3
+## An AI returning fire while dragged on its back aims this much worse (degrees, on top of
+## its own cone: SquadAI._aim_error_deg).
+const DRAGGED_AIM_DEG := 5.0
 ## Where a dragged body lies, in the dragger's frame (+z is behind).
 const DRAG_OFFSET := Vector3(0.0, 0.0, 1.0)
 ## Seconds to get a body up onto the shoulder, to take hold of a drag handle, and to lower a

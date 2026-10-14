@@ -145,6 +145,7 @@ var _exerting := false    # sprinting, jumping or moving under an extreme load (
 var _air_top := -INF      # highest point since leaving the ground (_track_fall)
 var _last_y := 0.0
 var _before_prone: int = Stance.STAND_HIGH
+var _floored := false  # pushed down to prone by a leg or pelvis that can't take weight (step stands back up once it can)
 var _lean_held := 0       # the lean key held now
 var _lean_latched := 0    # double-tapped: stays leaned
 var _lean_last_tap := {-1: -10.0, 1: -10.0}
@@ -164,8 +165,14 @@ func step(delta: float) -> void:
 	if not body.is_on_floor():
 		body.velocity += body.get_gravity() * delta
 	var down := not body.vitals.is_up()
-	if not down and not body.vitals.can_stand() and stance != Stance.PRONE:
-		set_stance(Stance.PRONE)  # a broken pelvis: no standing, crawl (or be carried)
+	if not down and not body.vitals.can_stand():
+		if stance != Stance.PRONE:
+			set_stance(Stance.PRONE)  # a broken pelvis or femur: no standing, crawl (or be dragged or carried)
+		_floored = true
+	elif _floored and not down:
+		# Able to stand again (a splint on the femur): back up, as you were before going down.
+		_floored = false
+		set_stance(_before_prone if _before_prone != Stance.PRONE else Stance.STAND_HIGH)
 	var jumped := false
 	var burdened := body.inventory.hands != &"" or body.carry_speed_mult() < 1.0  # carry_mode reaches the owner; carrying is host-only
 	var input := Vector2.ZERO
@@ -500,7 +507,7 @@ func top_speed(sprinting: bool, down: bool) -> float:
 	if side != 0:
 		speed *= SIDE_SPEED_MULT
 	if sprinting:
-		speed = SPRINT_SPEED
+		speed = SPRINT_SPEED * body.vitals.sprint_mult()  # slower on a splinted femur still knitting
 	if body.is_aiming:
 		var weapon := body.active_weapon()
 		speed = minf(speed, WALK_SPEED) * ADS_SPEED_MULT * body.vitals.aim_mult(weapon != null and weapon.tags.has("rifle"))
@@ -552,7 +559,7 @@ func can_sprint() -> bool:
 ## Sprinting drains stamina (faster under load); otherwise it comes back.
 func update_stamina(delta: float, sprinting: bool, moving: bool) -> void:
 	if sprinting:
-		stamina -= delta / SPRINT_STAMINA_S * (1.0 + HEAVY_STAMINA_MULT * load_fraction())
+		stamina -= delta / SPRINT_STAMINA_S * (1.0 + HEAVY_STAMINA_MULT * load_fraction()) * body.vitals.sprint_drain_mult()
 		if stamina <= 0.0:
 			_winded = true
 	else:

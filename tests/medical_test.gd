@@ -182,12 +182,27 @@ func _test_splint() -> void:
 	print("Splint")
 	var v := _vitals()
 	_wound(v, Vitals.THIGH_L, "fracture", WoundModel.FEMUR_RATE, &"femur_l")
-	check(absf(v.speed_mult() - WoundModel.BROKEN_LEG_SPEED) < 0.001 and not v.can_sprint() and v.pain() >= WoundModel.PAIN_FLOOR_LEG, "broken leg: walk only, heavy pain")
+	check(not v.can_stand() and not v.can_sprint() and v.pain() >= WoundModel.PAIN_FLOOR_LEG, "broken femur, unsplinted: can't stand (crawl, or be dragged), heavy pain")
 	check(v.care_needed()[0].item == &"splint" and v.server_apply_treatment(&"splint", Vitals.THIGH_L), "a splint goes on")
-	check(v.speed_mult() == 1.0 and not v.can_sprint(), "splinted: walking and jogging back, still no sprint")
+	check(v.can_stand() and v.speed_mult() == 1.0, "splinted: up at once and a normal walk, no limp (x%.2f)" % v.speed_mult())
+	check(v.can_sprint() and absf(v.sprint_mult() - WoundModel.FEMUR_SPRINT_SPEED) < 0.001 and v.sprint_drain_mult() > 1.0,
+		"sprinting allowed, but slower (x%.2f) and harder on stamina (x%.1f) while it knits" % [v.sprint_mult(), v.sprint_drain_mult()])
 	check(absf(v.pain() - WoundModel.PAIN_FLOOR_SPLINTED_LEG) < 0.001 and v.bleed_rate() == 0.0, "its pain floor eases (%.2f) and the femur stops bleeding" % v.pain())
+	var net := WoundModel.new()
+	net.apply_net(v._model.to_net())
+	check(absf(net.femur_heal_left - v.femur_heal_left()) < 0.2 and is_equal_approx(net.sprint_mult(), WoundModel.FEMUR_SPRINT_SPEED) and net.can_stand(),
+		"a client's copy knows it too (%.0f s left)" % net.femur_heal_left)
+	v.server_advance(WoundModel.FEMUR_HEAL_S - 60.0)
+	check(v.sprint_mult() < 1.0, "still slower %.0f game minutes on" % ((WoundModel.FEMUR_HEAL_S - 60.0) / 60.0))
+	v.server_advance(61.0)
+	check(v.can_sprint() and v.sprint_mult() == 1.0 and v.sprint_drain_mult() == 1.0, "knitted %.0f game minutes after the splint: sprinting as usual" % (WoundModel.FEMUR_HEAL_S / 60.0))
 	v.server_reset_health()
 	check(v.can_sprint(), "sprinting again after a full reset (a respawn)")
+	_wound(v, Vitals.SHIN_L, "fracture", 0.0, &"tibia_l")
+	check(v.can_stand() and absf(v.speed_mult() - WoundModel.BROKEN_LEG_SPEED) < 0.001 and not v.can_sprint(), "a broken shin: walk only (it takes weight), no sprint")
+	v.server_apply_treatment(&"splint", Vitals.SHIN_L)
+	check(v.speed_mult() == 1.0 and not v.can_sprint() and v.sprint_mult() == 1.0, "splinted: walking back, still no sprint until the mission ends")
+	v.server_reset_health()
 	_wound(v, Vitals.UPPER_ARM_R, "fracture", 0.0, &"humerus_r")
 	var broken := v.sway_mult()
 	check(v.reload_mult() > 1.0, "broken arm: slow reloads")
@@ -1452,16 +1467,22 @@ func _test_wakes_in_session() -> void:
 
 
 func _test_splint_movement() -> void:
-	print("Splint: jog, no sprint (movement)")
+	print("Splint: a broken femur floors you, a splint has you up (movement)")
 	_restock()
 	var move := player.movement
 	var normal := move.top_speed(false, false)
+	var sprint := move.top_speed(true, false)
 	_wound(player.vitals, Vitals.THIGH_L, "fracture", WoundModel.FEMUR_RATE, &"femur_l")
-	check(move.top_speed(false, false) < normal * 0.7 and not move.can_sprint(), "broken leg: walking pace (%.1f of %.1f m/s), no sprint" % [move.top_speed(false, false), normal])
+	await _seconds(0.3)
+	check(move.stance == SoldierMovement.Stance.PRONE and move.top_speed(false, false) < normal * 0.3 and not move.can_sprint(),
+		"broken femur: down on the ground, crawling (%.1f of %.1f m/s), no sprint" % [move.top_speed(false, false), normal])
 	player.inventory.take(&"splint")
 	player._server_treat.rpc_id(1, player.get_path(), &"splint", Vitals.THIGH_L)
 	await _seconds(8.2)
-	check(absf(move.top_speed(false, false) - normal) < 0.01 and not move.can_sprint(), "splinted: back to a jog (%.1f m/s), still no sprint" % move.top_speed(false, false))
+	check(move.stance != SoldierMovement.Stance.PRONE and absf(move.top_speed(false, false) - normal) < 0.01,
+		"splinted: back on your feet at your usual pace (%.1f m/s)" % move.top_speed(false, false))
+	check(move.can_sprint() and absf(move.top_speed(true, false) - sprint * WoundModel.FEMUR_SPRINT_SPEED) < 0.01,
+		"and sprinting, slower while it knits (%.1f of %.1f m/s)" % [move.top_speed(true, false), sprint])
 	_reset(player)
 	check(move.can_sprint(), "after a respawn you can sprint again")
 

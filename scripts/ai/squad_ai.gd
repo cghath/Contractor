@@ -1136,16 +1136,29 @@ func _do_reload() -> void:
 # --- Casualty care --------------------------------------------------------
 
 ## Whether `s` needs someone else's help: unconscious (downed, players too), or conscious
-## and calling for a medic. The dead are bodies, not casualties.
+## and calling for a medic. The dead are bodies, not casualties. Awake but unable to stand (a
+## broken pelvis, an unsplinted femur: Captain, 2026-10-14) counts like unconscious for an AI
+## squadmate; a player who can't stand (or is wounded) asks with "Call for a medic"
+## (Soldier.medic_called).
 static func needs_help(s: Soldier) -> bool:
 	if s == null or not is_instance_valid(s) or s.is_queued_for_deletion() or s.vitals.is_dead():
 		return false
 	if s.vitals.downed:
 		return true
+	var ai := SquadAI.of(s)
+	if not s.vitals.can_stand() and (ai != null or s.medic_called()):
+		return true
 	if Person.is_hvt(s):
 		return s.vitals.care_needed().any(func(t: Dictionary) -> bool: return String(t.kind) in HVT_CARE_KINDS)
-	var ai := SquadAI.of(s)
-	return ai != null and ai.asking_for_medic()
+	if ai == null:
+		return s.medic_called() and not s.vitals.care_needed().is_empty()
+	return ai.asking_for_medic()
+
+
+## Can't get anywhere on their own: unconscious, or awake but unable to stand, so they're
+## dragged to cover and carried with the squad rather than left to walk.
+static func immobile(s: Soldier) -> bool:
+	return s.vitals.downed or (not s.vitals.is_dead() and not s.vitals.can_stand())
 
 
 ## This unit called "Medic!" within the last MEDIC_CALL_S and still needs care.
@@ -1244,7 +1257,7 @@ static func medic_for(c: Soldier, wanted: Array[StringName]) -> Soldier:
 ## Up, set up, and not looking after anyone but `c` (a body being carried can be put down),
 ## and not leaving `c` to others after failing to reach them (_give_up_casualty).
 func _free_for(c: Soldier) -> bool:
-	return _ready_done and body != null and body != c and body.vitals.is_up() and not body.is_queued_for_deletion() \
+	return _ready_done and body != null and body != c and body.vitals.is_up() and body.vitals.can_stand() and not body.is_queued_for_deletion() \
 		and (care == Care.NONE or care == Care.BODY or casualty == c) and not _skipping(c) \
 		and (not escort_valid() or c == escorting)
 
@@ -1489,7 +1502,7 @@ func _care_reach(contact: bool) -> void:
 	if body.carrying == casualty:
 		care = Care.CARRY
 		return
-	var exposed := contact and casualty.vitals.downed and not _sheltered(casualty)
+	var exposed := contact and immobile(casualty) and not _sheltered(casualty)
 	if exposed and not _smoke_used and d <= SMOKE_RANGE_M:
 		if body.inventory.count_of(SCREEN_SMOKE) <= 0:
 			_smoke_used = true  # nothing to screen them with
@@ -1592,7 +1605,7 @@ func _care_treat(contact: bool) -> void:
 		_start_treatment(casualty, task)
 		return
 	# Nothing more this unit can do for them now.
-	if not casualty.vitals.downed:
+	if not immobile(casualty):
 		if exposed and not _next_task(casualty, false).is_empty():
 			care = Care.GUARD  # the rest once in cover or quiet
 		else:
@@ -1621,6 +1634,8 @@ func _should_carry() -> bool:
 		return false
 	if Person.is_hvt(casualty):
 		return true  # an HVT goes with the squad, not left lying
+	if casualty.vitals.is_up():
+		return true  # awake but unable to stand: they come along with the squad
 	var ccp: Variant = squad.ccp_point() if squad else null
 	if ccp != null and _friendly():
 		return casualty.body_point().distance_to(ccp) > LAY_NEAR_M + 1.0  # "Bring casualties here"
@@ -1659,7 +1674,7 @@ func _care_carry(contact: bool) -> void:
 		else:
 			care = Care.GUARD
 		return
-	if not casualty.vitals.downed or not _next_task(casualty, false).is_empty():
+	if not immobile(casualty) or not _next_task(casualty, false).is_empty():
 		care = Care.TREAT  # woke up, or there's something new to do (an item handed over)
 		return
 	if _holds_for_medic():
@@ -2891,6 +2906,14 @@ func _shoot() -> void:
 	if LauncherAI.think(self):
 		return  # the launcher has them: vehicles, a group behind cover, an order (wave 5)
 	var now := Soldier._now()
+	if body.being_dragged():
+		# Dragged on his back (Captain, 2026-10-14): he returns fire if he's fit to, with the
+		# primary, or the sidearm with a broken firing arm (Soldier.dragged_fire_slot).
+		var slot := body.dragged_fire_slot()
+		if slot == &"":
+			return
+		if body.active_slot != slot:
+			body.select_weapon(slot)
 	var weapon := body.active_weapon()
 	if weapon == null or weapon.type != "weapon" or body.carrying != null or body.is_reloading \
 			or body.stunned_s > 0.0 or (body.suppression >= PINNED and not _suppressing) or not weapons_free():
@@ -2899,6 +2922,8 @@ func _shoot() -> void:
 	var aim_at: Variant = null
 	if foe != null:
 		aim_at = foe.aim_point()
+	elif body.being_dragged() and in_contact():
+		aim_at = body.threat_pos + Vector3.UP * 1.0  # dragged out of it: returning fire at where it comes from
 	elif _suppressing:
 		aim_at = body.threat_pos + Vector3.UP * 1.0  # keep their heads down before going out to the casualty
 	elif _suppress_point() != null:
@@ -2910,7 +2935,7 @@ func _shoot() -> void:
 	if aim_at == null:
 		return
 	var error := _aim_at(aim_at)
-	if body.want_crouch and _at_cover() and foe != null:
+	if body.want_crouch and _at_cover() and foe != null and not body.being_dragged():
 		body.want_crouch = false  # stand up to shoot over cover
 		return
 	if error > deg_to_rad(6.0) or now < _next_shot or now < _pause_until or now < body._busy_until:
@@ -2935,7 +2960,8 @@ func _shoot() -> void:
 ## firing at a point rather than a seen foe, and shaken morale all widen it.
 func _aim_error_deg(seen_foe: bool) -> float:
 	var shaken := maxf(MORALE_SHAKEN - morale, 0.0) / MORALE_SHAKEN  # 0 steady .. 1 no morale left
-	return (1.0 - combat) * AIM_UNSKILLED_DEG + body.suppression * 4.0 + (0.0 if seen_foe else 3.0) + shaken * MORALE_SHAKEN_AIM_DEG
+	return (1.0 - combat) * AIM_UNSKILLED_DEG + body.suppression * 4.0 + (0.0 if seen_foe else 3.0) + shaken * MORALE_SHAKEN_AIM_DEG \
+		+ (Soldier.DRAGGED_AIM_DEG if body.being_dragged() else 0.0)  # on his back, being dragged
 
 
 ## The half-angle (radians) this unit's next rounds may stray by: the weapon's spread plus

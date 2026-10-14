@@ -214,6 +214,14 @@ const BROKEN_ARM_SWAY := 1.0
 const CONCUSSION_SWAY := 0.8
 const STAGGER_SWAY := 1.0
 const BROKEN_LEG_SPEED := 0.6     # walk only
+## A broken femur (Captain, 2026-10-14): unsplinted, no standing (crawl, or be dragged or
+## carried: can_stand); splinted, a normal walk and a sprint at FEMUR_SPRINT_SPEED that
+## drains stamina FEMUR_SPRINT_DRAIN times as fast, until FEMUR_HEAL_S (game seconds, 30
+## minutes; medical time runs 1:1 with real time) after the splint went on. Past that the
+## base's recovery days and medbay see to the rest.
+const FEMUR_HEAL_S := 1800.0
+const FEMUR_SPRINT_SPEED := 0.75
+const FEMUR_SPRINT_DRAIN := 1.6
 const STAGGER_SPEED := 0.5
 const BROKEN_ARM_RELOAD := 1.6
 const CONCUSSION_TURN := 0.6
@@ -370,7 +378,7 @@ const FIXABLE_BLEEDS: Array[String] = ["arterial", "junctional", "venous", "musc
 const BANDAGED_KINDS: Array[String] = ["venous", "muscle", "graze"]
 ## Countdowns that clients run down between updates (to_net "t").
 const TIMERS: Array[String] = ["arrest_left", "concussion_left", "knockout_left", "winded_left", "stagger_left",
-	"treating_left", "wake_left", "deaf_left"]
+	"treating_left", "wake_left", "deaf_left", "femur_heal_left"]
 
 ## --- Surgery kit (design doc "Surgery kit"; proposed values) ---
 ## One use of a kit is a SURGICAL_CLAMP (kits hold 2, 3 or 5): about 20 s, players and medics
@@ -491,6 +499,9 @@ var concussion_left := 0.0
 var knockout_left := 0.0
 var winded_left := 0.0
 var stagger_left := 0.0
+## A splinted femur still knitting: game seconds until it's healed enough to sprint as usual
+## (the longest of them; FEMUR_HEAL_S from the splint). Host from the wounds, clients from "t".
+var femur_heal_left := 0.0
 var rng := RandomNumberGenerator.new()
 ## Dice for the bone sim (open breaks, bullet ribs, pelvis from falls and blasts), apart from
 ## rng so the older wound dice repeat. Tests seed it.
@@ -910,16 +921,29 @@ func stamina_mult() -> float:
 	return stamina
 
 
-## A splinted leg still can't sprint until the mission ends (design doc), nor a leg with a
-## tourniquet on.
+## A splinted shin still can't sprint until the mission ends (design doc), nor a leg with a
+## tourniquet on. A splinted femur can (Captain, 2026-10-14), slower while it knits
+## (sprint_mult); an unsplinted one can't even stand (can_stand).
 func can_sprint() -> bool:
 	return not unconscious and not dead and lost() < NO_SPRINT_LOST and winded_left <= 0.0 \
-		and not has_fracture(BodyMap.LEG_BONES, false) and not has_leg_tourniquet() and not pelvis_broken()
+		and not has_fracture(BodyMap.TIBIA_BONES, false) and not has_fracture(BodyMap.FEMUR_BONES, true) \
+		and not has_leg_tourniquet() and not pelvis_broken()
 
 
-## Standing and walking upright: not with a broken pelvis (crawl, or be carried).
+## Standing and walking upright: not with a broken pelvis, nor an unsplinted broken femur
+## (crawl, or be dragged or carried; a splint has them up and walking at once).
 func can_stand() -> bool:
-	return not pelvis_broken()
+	return not pelvis_broken() and not has_fracture(BodyMap.FEMUR_BONES, true)
+
+
+## Sprint pace (share of the usual sprint) and how many times as fast a sprint drains stamina:
+## slower and harder on a splinted femur still knitting (FEMUR_HEAL_S), else as usual.
+func sprint_mult() -> float:
+	return FEMUR_SPRINT_SPEED if femur_heal_left > 0.0 else 1.0
+
+
+func sprint_drain_mult() -> float:
+	return FEMUR_SPRINT_DRAIN if femur_heal_left > 0.0 else 1.0
 
 
 ## Aiming down sights moves at this share of the usual pace: slower with an unsplinted
@@ -1261,6 +1285,8 @@ func apply_item(item: StringName, part: StringName, rushed := false) -> bool:
 		_:
 			var w := _target_wound(item, part)
 			w.treated = true
+			if item == SPLINT and w.kind == "fracture" and w.name in BodyMap.FEMUR_BONES:
+				femur_heal_left = FEMUR_HEAL_S  # up and walking now; sprinting slower until it knits
 			if item == HEMOSTATIC_GAUZE:
 				w.packed = true
 			elif item == CHEST_SEAL:
@@ -1600,6 +1626,7 @@ func reset() -> void:
 	knockout_left = 0.0
 	winded_left = 0.0
 	stagger_left = 0.0
+	femur_heal_left = 0.0
 	_last_concussion = -INF
 	_heart_arrest_in = -1.0
 	tourniquets.clear()
@@ -1647,6 +1674,7 @@ func advance(dt: float) -> void:
 	winded_left = maxf(winded_left - dt, 0.0)
 	stagger_left = maxf(stagger_left - dt, 0.0)
 	deaf_left = maxf(deaf_left - dt, 0.0)
+	femur_heal_left = maxf(femur_heal_left - dt, 0.0)
 	noise = maxf(noise - NOISE_FADE_PER_S * dt, 0.0)
 	treating_left = maxf(treating_left - dt, 0.0)
 	pain_wounds = maxf(pain_wounds - PAIN_FADE_PER_S * dt, 0.0)
