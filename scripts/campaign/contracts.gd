@@ -975,6 +975,19 @@ func debrief_screen() -> DebriefScreen:
 	return _debrief_screen as DebriefScreen if is_instance_valid(_debrief_screen) else null
 
 
+## Closes the contract screens open on this peer (the debrief, any contract board). BaseHub
+## calls it when the session moves into a zone (Captain, 2026-10-14: a client sat on the
+## debrief after the host had gone back to base and on into the next zone, and couldn't leave
+## it): every peer follows the host's level switch, whatever is open.
+func close_screens() -> void:
+	var screen := debrief_screen()
+	if screen and not screen.is_queued_for_deletion():
+		screen.close()
+	for child in get_tree().root.get_children():
+		if child is ContractBoard and not child.is_queued_for_deletion():
+			(child as ContractBoard).close()
+
+
 # --- Internals ---------------------------------------------------------------------------
 
 ## Host: called by Objectives whenever they change, so a saved deployment keeps them.

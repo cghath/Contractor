@@ -80,6 +80,7 @@ func _ready() -> void:
 	await _test_map_contents()
 	await _test_briefing_and_markers()
 	await _test_extraction()
+	await _test_coop_extraction()
 	await _test_reinforcements()
 	_kill_clients()
 	GameState.delete_save()
@@ -388,6 +389,8 @@ func _run_client() -> void:
 		and multiplayer.multiplayer_peer.get_connection_status() == MultiplayerPeer.CONNECTION_CONNECTED, 20.0)
 	if _tag == "A":
 		await _client_a()
+	elif _tag == "C":
+		await _client_c()
 	else:
 		await _client_b()
 	await get_tree().create_timer(0.5).timeout
@@ -572,6 +575,97 @@ func _test_extraction() -> void:
 	for s: Soldier in mates:
 		if is_instance_valid(s):
 			SquadAI.of(s).process_mode = Node.PROCESS_MODE_INHERIT
+
+
+## Captain, 2026-10-14 (co-op): any player standing inside a point confirms (client C, over
+## real ENet: refused outside, told why; inside, its confirm starts the countdown); a player who
+## is up and elsewhere still blocks; one down outside is warned about, then left behind at a
+## second confirm and reported like a squadmate left behind.
+func _test_coop_extraction() -> void:
+	print("Co-op extraction: a client confirms, a downed player is left behind")
+	var ext := MapNodes.extraction(level)
+	var lz := Vector3(0, 0.1, 34)
+	_place(player, lz)
+	ext.server_begin({"zone": ZONE, "contract": CONTRACT})
+	for s: Soldier in MapNodes.squad_ai(level):
+		ext.server_set_bring(String(s.name), false)  # this part is about the players
+	ext.countdown_s = 60.0
+	_spawn_client("C")
+	var c0 := await _wait_report("c0")
+	var c_peer := int(c0.get("peer", 0))
+	var c_body := level.players.get_node_or_null(str(c_peer)) as Soldier
+	check(c_body != null and ext.is_active() and ext.points.size() == 1, "client C joined during a fresh deployment (peer %d)" % c_peer)
+	if c_body == null:
+		return
+	_client_go.rpc_id(c_peer, "c1")
+	await _wait_report("c1")
+	check(ext.state == Extraction.State.ACTIVE and not Extraction.inside(ext.points[0], c_body.global_position),
+		"the client's confirm from outside the LZ is refused: no countdown")
+	_client_go.rpc_id(c_peer, "c2")
+	await _wait_report("c2")
+	await _wait_for(func() -> bool: return ext.state == Extraction.State.COUNTDOWN, 3.0)
+	check(ext.state == Extraction.State.COUNTDOWN, "the client's confirm from inside the LZ, the host there too, starts the countdown")
+	_place(player, Vector3(0, 0.1, -20))
+	await _wait_for(func() -> bool: return ext.state == Extraction.State.ACTIVE, 3.0)
+	check(ext.state == Extraction.State.ACTIVE, "the host walking off stops it")
+	var why := ext.server_confirm(c_peer)
+	check(why.contains("Waiting for: Player 1") and ext.state == Extraction.State.ACTIVE, "the host up and elsewhere blocks the client's confirm: %s" % why)
+	why = ext.server_confirm(c_peer)
+	check(why.contains("Waiting for: Player 1") and ext.state == Extraction.State.ACTIVE and ext.left_at_call.is_empty(),
+		"and confirming again doesn't leave a player who can walk there behind")
+	player.respawn_state = Soldier.RESPAWN_WAITING
+	check(Extraction.can_leave_behind(player), "a player dead and waiting to respawn can be left behind")
+	player.respawn_state = Soldier.RESPAWN_NONE
+	player.vitals.server_damage(65.0)  # out cold from pain (as the casualty test does)
+	player.vitals.server_advance(WoundModel.PAIN_KNOCKOUT_S + 0.1)
+	await _frames(2)
+	check(player.vitals.downed and Extraction.can_leave_behind(player), "the host goes down outside the LZ")
+	why = ext.server_confirm(c_peer)
+	check(why.contains("Leaving behind: Player 1") and why.contains("Confirm again") and ext.state == Extraction.State.ACTIVE,
+		"the first confirm warns who'd be left behind: %s" % why)
+	ext.countdown_s = 1.0
+	var ended_before := _ended.size()
+	why = ext.server_confirm(c_peer)
+	check(why == "" and ext.state == Extraction.State.COUNTDOWN and ext.left_at_call.has("Player 1"), "the second starts the countdown without them (%s)" % why)
+	await _wait_for(func() -> bool: return ext.state == Extraction.State.ENDED, 4.0)
+	var report: Dictionary = _ended.back() if _ended.size() > ended_before else {}
+	var out_peers: Array = report.get("players", []).map(func(r: Dictionary) -> int: return int(r.peer))
+	var left_players: Array = report.get("left_behind", []).filter(func(e: Dictionary) -> bool: return e.get("player", false))
+	check(ext.state == Extraction.State.ENDED and out_peers == [c_peer], "the client got out (%s)" % [out_peers])
+	check(left_players.size() == 1 and int(left_players[0].peer) == 1 and left_players[0].downed and not left_players[0].chosen,
+		"the downed host is in the report left behind (MIA), like a squadmate (%s)" % [left_players])
+	check(Extraction.summary(report).contains("Left behind: ") and Extraction.summary(report).contains("Player 1"), "and the summary says so")
+	player.vitals.server_reset_health()
+	_place(player, Vector3(0, 0.1, 10))
+	_client_go.rpc_id(c_peer, "done")
+	await _wait_for(func() -> bool: return level.players.get_child_count() == 1, 15.0)
+
+
+## Joins mid-deployment for the co-op extraction: confirms from outside the LZ (refused, and
+## told so), then from inside it.
+func _client_c() -> void:
+	var ext := MapNodes.extraction(level)
+	await _wait_for(func() -> bool: return MapNodes.local_player(level) != null and MapNodes.local_player(level)._hud != null and ext.is_active(), 20.0)
+	var me := MapNodes.local_player(level)
+	check(me != null and ext.is_active(), "joined with extraction open")
+	_report("c0")
+	if me == null:
+		return
+	await _wait_for(func() -> bool: return _go == "c1", 30.0)
+	_place(me, Vector3(0, 0.1, -20))
+	await _seconds(1.0)
+	ext.request_confirm()
+	await _wait_for(func() -> bool: return me._hud._message.text.contains("Only a player standing inside"), 5.0)
+	check(me._hud._message.text.contains("Only a player standing inside"), "confirming outside every point, this client is told why not (%s)" % me._hud._message.text)
+	_report("c1")
+	await _wait_for(func() -> bool: return _go == "c2", 30.0)
+	_place(me, Vector3(4, 0.1, 34))
+	await _seconds(1.0)
+	ext.request_confirm()
+	await _wait_for(func() -> bool: return ext.state == Extraction.State.COUNTDOWN, 5.0)
+	check(ext.state == Extraction.State.COUNTDOWN, "standing inside the LZ, this client's confirm starts the countdown")
+	_report("c2")
+	await _wait_for(func() -> bool: return _go == "done", 60.0)
 
 
 ## Once `body`'s ragdoll is at rest, moves it `by` (its capsule stays where it fell), as a

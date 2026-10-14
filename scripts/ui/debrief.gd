@@ -134,8 +134,25 @@ func _actions() -> void:
 	row.add_child(cont)
 
 
+## A screen to click on, as the contract board is: whatever loads under it, the mouse stays
+## free while it's up, and Escape closes it like Continue (Captain, 2026-10-14: a client's
+## debrief stayed up after the host moved on, the new level's player took the mouse, and there
+## was no getting off it).
+func _process(_delta: float) -> void:
+	if Input.mouse_mode != Input.MOUSE_MODE_VISIBLE:
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event.is_action_pressed(&"pause"):
+		get_viewport().set_input_as_handled()
+		close()
+
+
 ## Closes the screen; on the host it also closes the debrief (banks the salvage picks).
 func close() -> void:
+	if is_queued_for_deletion():
+		return
 	if Contracts.is_host():
 		Contracts.finish_debrief()
 	Input.mouse_mode = _mouse_before

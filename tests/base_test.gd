@@ -623,11 +623,18 @@ func _run_client() -> void:
 		return BaseHub.view.get("roster", {}).get("members", {}).values().any(func(m: Dictionary) -> bool: return String(m.callsign).begins_with(String(expect.hire_callsign))), 10.0)
 	check(hired, "a hire asked from the client goes through the host and comes back (%s)" % expect.hire_callsign)
 	_say(CLIENT_HUB_DONE)
+	# Captain, 2026-10-14: a client sat on the debrief when the host moved on into the next zone
+	# and couldn't leave it. A debrief left open here closes when the client follows.
+	var debrief: Object = Contracts.show_debrief()
+	var had_debrief := debrief != null
 	# The host deploys: the session moves to the zone, then back.
 	var deployed := await _wait_until(func() -> bool:
 		var l := CompoundLevel.current(self)
 		return l != null and not l is BaseLevel, 120.0)
 	check(deployed, "the client follows the host into the zone")
+	await get_tree().process_frame
+	check(had_debrief and not is_instance_valid(debrief) and Contracts.debrief_screen() == null,
+		"and the debrief it had open closed on the way (the switch doesn't wait on it)")
 	level = CompoundLevel.current(self)
 	var squad_ok := await _wait_until(func() -> bool:
 		return expect.callsigns.all(func(c: String) -> bool: return level.ai.get_node_or_null(NodePath(c)) != null), 60.0)
@@ -902,8 +909,11 @@ func _test_zone_deployment() -> void:
 		return
 	var squad: Array = Roster.available_ids(BaseHub.roster()).slice(0, 1)
 	var def := ZoneDef.get_def("test")
+	var debrief: Object = Contracts.show_debrief()  # Captain, 2026-10-14: an open debrief doesn't hold anyone at the base
 	var why := BaseHub.server_deploy({"level": {"level": "zone", "def": def}, "zone_id": ZONE + "_wide" + tag, "squad": squad, "no_contract": true})
 	var moved := await _wait_until(func() -> bool: return CompoundLevel.current(self) is ZoneLevel, 20.0)
+	await get_tree().process_frame
+	check(not is_instance_valid(debrief) and Contracts.debrief_screen() == null, "heading into the zone closes an open debrief")
 	var zone := CompoundLevel.current(self) as ZoneLevel
 	check(why == "" and moved and zone != null and int(zone.def.get("seed", -1)) == int(def.seed) and zone.modules().size() == (def.modules as Array).size(),
 		"deploying into a zone generates it from its definition (%s, %d modules)" % [String(def.get("name", "?")), zone.modules().size() if zone else 0])
