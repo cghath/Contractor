@@ -1802,6 +1802,7 @@ func _server_respawn_after(level: CompoundLevel, delay: float) -> void:
 		return
 	respawn_state = RESPAWN_WAITING
 	vitals.shielded = true
+	SessionLog.note("%s waits %.1f s to respawn" % [log_name(), delay])
 	_client_respawn_wait.rpc_id(owner_peer(), delay)
 	get_tree().create_timer(delay, false).timeout.connect(func() -> void:
 		if serial == _respawn_serial and respawn_state == RESPAWN_WAITING and is_instance_valid(level) and not level.is_queued_for_deletion():
@@ -1894,6 +1895,7 @@ func _server_give_up() -> void:
 	if not _from_owner() or not can_give_up(GIVE_UP_SLACK_S):
 		return
 	_gave_up = true
+	SessionLog.note("%s gives up after %.0f s down%s" % [log_name(), seconds_down(), "" if help_near() else " (nobody near to help)"])
 	vitals.server_kill()
 
 

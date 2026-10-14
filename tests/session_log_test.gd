@@ -16,6 +16,8 @@ var parent := ""
 
 func _ready() -> void:
 	GameState.zone_id = "test_session_log" + OS.get_environment("CONTRACTOR_TEST_TAG")  # never touch a real save
+	Soldier.respawn_delay_s = 0.0  # these checks want the old instant respawn (the wait and spawn
+	Soldier.spawn_protect_s = 0.0  # protection have their own checks in gameplay and missions)
 	CompoundLevel.spawn_ai = false
 	GameState.delete_save()
 	get_tree().create_timer(150.0).timeout.connect(func() -> void:
@@ -402,10 +404,17 @@ func _test_group_night(player: Soldier, level: CompoundLevel) -> void:
 		"clawback": 300}], "fines": 50, "civilians": 1, "days": 2}, {"extracted": ["Player 1", "Gunny"], "casualties": [{"name": "Reaper", "status": "kia"}]})
 	check(line == "debrief: Probe Yard: Hold Fast completed, paid $1200, $300 advance clawed back; fines $50 (1 civilians); 2 days; out: Player 1, Gunny; casualties: Reaper kia",
 		"the debrief's line: pay, clawback, fines and losses (%s)" % line)
+	# The respawn waits (gameplay/respawn): the death and the wait are logged at once, the
+	# respawn line when it really happens, with the point it uses.
+	Soldier.respawn_delay_s = 0.5
 	player.vitals.server_kill()
 	await _frames(5)
-	check(_has("%s died (friendly)" % player.log_name()) and _has("%s respawns at (" % player.log_name()),
-		"a player's death and respawn are logged (%s)" % [_lines_with("respawns at")])
+	check(_has("%s died (friendly)" % player.log_name()) and _has("%s waits 0.5 s to respawn" % player.log_name()) and not _has("%s respawns at (" % player.log_name()),
+		"a player's death and the wait to respawn are logged, not the respawn yet (%s)" % [_lines_with("respawn")])
+	await get_tree().create_timer(1.0).timeout
+	Soldier.respawn_delay_s = 0.0
+	check(_has("%s respawns at (" % player.log_name()),
+		"and the respawn when it happens (%s)" % [_lines_with("respawns at")])
 
 
 ## A session whose folder can't be renamed at its end (P0331, P0362: something held a file in
