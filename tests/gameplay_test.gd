@@ -595,6 +595,12 @@ func _test_optics() -> void:
 	var at10 := GunSight.aimed_fov(m110, 80.0, 10.0)
 	check(absf(tan(deg_to_rad(40.0)) / tan(deg_to_rad(at10 * 0.5)) - 10.0) < 0.01 and is_equal_approx(GunSight.aimed_fov(m4, 80.0, 1.0), 50.0),
 		"10x shows a tenth of the unaimed view's tangent (%.1f deg at 80), 1x the weapon's aimed view" % at10)
+	# Captain, 2026-10-14: a 1x red dot or holo aims a little wider (its own ads_fov), never wider
+	# than the unaimed view; magnified, the power rules.
+	var dot_optic := ItemDB.get_item(&"optic_red_dot")
+	check(is_equal_approx(GunSight.aimed_fov(m4, 80.0, 1.0, dot_optic), 60.0) and is_equal_approx(GunSight.aimed_fov(m4, 55.0, 1.0, dot_optic), 55.0)
+		and is_equal_approx(GunSight.aimed_fov(m4, 80.0, 3.0, ItemDB.get_item(&"optic_holo")), GunSight.aimed_fov(m4, 80.0, 3.0)),
+		"a red dot aims at 60 deg on the M4 (not its 50), no wider than the unaimed view; the holo's 3x is unchanged")
 	var zr := func(id: StringName) -> Vector2: return GunSight.zoom_range(ItemDB.get_item(id))
 	check(zr.call(&"optic_lpvo") == Vector2(1, 6) and zr.call(&"optic_prism_4x") == Vector2(4, 4) and zr.call(&"optic_dmr_3_5_10") == Vector2(3.5, 10)
 		and zr.call(&"optic_dmr_8x") == Vector2(8, 8) and zr.call(&"optic_dmr_3_15") == Vector2(3, 15) and zr.call(&"optic_red_dot") == Vector2.ONE
@@ -663,10 +669,10 @@ func _check_red_dot_size() -> void:
 						hi = hi.max(Vector3i(x, y, z))
 		return Vector3(hi - lo + Vector3i.ONE) * float(occ.cell)
 	var dot: Vector3 = extent.call("optic:dot")
-	var holo: Vector3 = extent.call("optic:holo")
-	check(dot.z >= 0.055 and dot.z <= 0.08 and dot.y >= 0.04 and dot.y <= 0.07 and dot.x <= 0.045 and dot.z < holo.z,
-		"the red dot is a micro red dot's size: %.1f cm long, %.1f cm tall, %.1f cm wide (the holo %.1f cm long)"
-		% [dot.z * 100.0, dot.y * 100.0, dot.x * 100.0, holo.z * 100.0])
+	var holo := VoxelArt.optic_length("holo") * VoxelArt.VOXEL_SIZE  # its body, not the magnifier's mount
+	check(dot.z >= 0.055 and dot.z <= 0.08 and dot.y >= 0.04 and dot.y <= 0.07 and dot.x <= 0.045 and dot.z < holo,
+		"the red dot is a micro red dot's size: %.1f cm long, %.1f cm tall, %.1f cm wide (the holo's body %.1f cm long)"
+		% [dot.z * 100.0, dot.y * 100.0, dot.x * 100.0, holo * 100.0])
 	var rifle := VoxelArt.occupancy("rifle:42:dot")
 	var dims: Vector3i = rifle.dims
 	var s := roundi(VoxelArt.VOXEL_SIZE / float(rifle.cell))  # built voxels per frame voxel

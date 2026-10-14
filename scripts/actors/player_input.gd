@@ -10,9 +10,10 @@ const BASE_FOV := 80.0
 ## View model position (camera-local) at the hip; aiming puts the weapon's sight point
 ## (VoxelArt.sight_point) on the eye's line instead (ads_view), this far in front of it: a
 ## rifle's optic close to the eye so you look through the tube, a pistol out at arm's length
-## (Captain, P0362: a sight picture you can use).
+## (Captain, P0362: a sight picture you can use). ADS_EYE back out from 16 to 19 cm (Captain,
+## 2026-10-14: aimed, the red dot still looked big; a little further from the eye).
 const HIP_VIEW := Vector3(0.14, -0.16, -0.38)
-const ADS_EYE := Vector3(0.0, 0.0, -0.16)
+const ADS_EYE := Vector3(0.0, 0.0, -0.19)
 const ADS_EYE_PISTOL := Vector3(0.0, 0.0, -0.5)
 ## Recoil settling back (Soldier.RECOIL_SETTLE), per second: most of it within a quarter second.
 const RECOIL_SETTLE_RATE := 12.0
