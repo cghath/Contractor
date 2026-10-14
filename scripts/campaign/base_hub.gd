@@ -63,6 +63,8 @@ const SQUAD_SIZE := CompoundLevel.SQUAD_SIZE
 const DEFAULT_ZONE_ID := "compound_01"
 ## Why Deploy waits (the button's tooltip and server_deploy's answer).
 const NO_CONTRACT := "Prep a contract first"
+## What a refused Deploy starts with while a player at the FOB isn't ready ("Waiting for: Player 2").
+const WAITING_FOR := "Waiting for: "
 ## A squadmate left behind (a recovery contract's) joins the squad when a player comes this
 ## close (metres). Proposed.
 const FOUND_M := 4.0
@@ -113,6 +115,7 @@ var _loading: CanvasLayer  # client: the loading screen while a switched level a
 var _loading_serial := 0
 ## Client: the host's summary of the last level it switched to (level_synced), for tests.
 var last_switch_summary := {}
+var _ready_peers := {}     # host: peer id -> true for each player ready to deploy (FOB ready-up)
 
 
 func _ready() -> void:
@@ -753,7 +756,75 @@ func _server_hello(key: String) -> void:
 
 func _on_peer_joined(id: int) -> void:
 	if multiplayer.is_server() and campaign_running:
+		server_clear_ready()  # someone new at the FOB: everyone readies again, with them in the plan
 		_client_view.rpc_id(id, JSON.stringify(build_view()))
+
+
+# --- FOB ready-up -------------------------------------------------------------------------------
+# Captain, 2026-10-14: "should be a ready up button instead in the fob". In co-op the host took
+# the next contract and deployed while a client was still reading the debrief, and left them
+# behind. Every player at the FOB now readies up (the in-zone briefing's pattern, Briefing.
+# ready_peers / all_ready); the host's Deploy is refused, naming who isn't ready, until all are.
+# The host's own Deploy is their ready, so a host alone deploys as before.
+
+## The players in this session, by peer id (the host is 1). Clients read it from the view.
+func session_peers() -> Array:
+	if not multiplayer.is_server():
+		var keys: Array = view.get("players", {}).keys().map(func(k: Variant) -> int: return int(k))
+		keys.sort()
+		return keys
+	var peers: Array = [1]
+	if multiplayer.has_multiplayer_peer():
+		for id in multiplayer.get_peers():
+			if id != 1:
+				peers.append(id)
+	peers.sort()
+	return peers
+
+
+## The peers who said they're ready (host: the live set; clients: the view's copy).
+func ready_peers() -> Array:
+	if not multiplayer.is_server():
+		return (view.get("ready", []) as Array).map(func(id: Variant) -> int: return int(id))
+	return _ready_peers.keys()
+
+
+## Whether `peer` counts as ready. The host always does: pressing Deploy is the host's ready.
+func is_ready(peer: int) -> bool:
+	return peer == 1 or peer in ready_peers()
+
+
+## The players a Deploy waits for, by name as the briefing shows them ("Player 2").
+func not_ready_names() -> Array[String]:
+	var out: Array[String] = []
+	for id: int in session_peers():
+		if not is_ready(id):
+			out.append("Player %d" % id)
+	return out
+
+
+## Every player in the session is ready (always so for a host alone).
+func all_ready() -> bool:
+	return not_ready_names().is_empty()
+
+
+## Host: `peer` is ready to deploy, or stands down. Everyone sees it through the view.
+func server_set_ready(peer: int, is_ready_now: bool) -> void:
+	if not multiplayer.is_server():
+		return
+	if is_ready_now:
+		_ready_peers[peer] = true
+	else:
+		_ready_peers.erase(peer)
+	_queue_broadcast()
+
+
+## Host: nobody is ready any more (after a deployment starts, and when a player joins).
+func server_clear_ready() -> void:
+	if _ready_peers.is_empty():
+		return
+	_ready_peers.clear()
+	_queue_broadcast()
 
 
 ## Host: a player leaving keeps what they stand up in (on their main character, or their
@@ -776,6 +847,8 @@ func _on_peer_left(id: int) -> void:
 		_changed(&"roster")
 	_gear_applied.erase(id)
 	_profiles.erase(id)
+	if _ready_peers.erase(id):
+		_queue_broadcast()
 
 
 func _on_session_ended() -> void:
@@ -786,6 +859,7 @@ func _on_session_ended() -> void:
 	_restore_zone_id()
 	_profiles.clear()
 	_gear_applied.clear()
+	_ready_peers.clear()
 
 
 ## Host hook (CompoundLevel._add_player): a player's body was added. In a campaign it gets
@@ -856,9 +930,10 @@ func server_count_respawn() -> String:
 
 ## Host: takes the picked squad into the zone. `options` may override the prep: "squad"
 ## (member ids), "zone_kind", "zone_id", "scene"; "no_contract": true deploys without a prepped
-## contract (code and tests only: the Deploy request never sends it). Players whose main
-## character is recovering get a stand-in (an available member not in the squad, else a free
-## rookie). Returns "" or why it can't.
+## contract (code and tests only: the Deploy request never sends it). Every player must be
+## ready first (FOB ready-up): it returns WAITING_FOR and who isn't, and readiness clears once
+## the deployment starts. Players whose main character is recovering get a stand-in (an
+## available member not in the squad, else a free rookie). Returns "" or why it can't.
 func server_deploy(options := {}) -> String:
 	if not multiplayer.is_server():
 		return "Only the host deploys"
@@ -869,6 +944,8 @@ func server_deploy(options := {}) -> String:
 	# Without a contract there's no briefing, so no extraction and no way home (P0331): refuse.
 	if (prep.get("contract", {}) as Dictionary).is_empty() and not options.get("no_contract", false):
 		return NO_CONTRACT
+	if not all_ready():
+		return WAITING_FOR + ", ".join(PackedStringArray(not_ready_names()))
 	var info: Dictionary = options.get("level", prep.get("level", {}))
 	var scene := String(options.get("scene", prep.get("scene", "")))
 	if not info.is_empty():
@@ -892,6 +969,7 @@ func server_deploy(options := {}) -> String:
 		int(dep.respawns_free)])
 	prep["contract"] = {}
 	prep["level"] = {}
+	_ready_peers.clear()  # back at the FOB everyone readies again for the next one
 	_changed_all()
 	server_switch_level(info, zone_save_id(zone_id))
 	return ""
@@ -1563,7 +1641,7 @@ func _apply_stash(lvl: BaseLevel, before: Array, after: Array) -> void:
 ## Any peer: asks the host to do something at the base. `action`: "hire" [cid], "release"
 ## [mid], "medbay" [mid or "player:<key>"], "pick" [mid, bool], "role" [mid, role], "buy"
 ## [item id, count], "rest" [days], "prep" [held contract id], "deploy" [], "save" [], "restock"
-## [] (the sender's last loadout), "restock_squad" []; "deploy", "rest", "release", "prep",
+## [] (the sender's last loadout), "restock_squad" [], "ready" [bool] (the sender, FOB ready-up); "deploy", "rest", "release", "prep",
 ## "save" and "restock_squad" only from the host. The answer comes back as `note`.
 func request(action: String, args: Array = []) -> void:
 	_server_request.rpc_id(1, action, args)
@@ -1576,7 +1654,7 @@ func _server_request(action: String, args: Array) -> void:
 	var sender := multiplayer.get_remote_sender_id()
 	var why := ""
 	var at_base := in_base() and not RosterDeployment.is_running(roster())
-	var needs: int = {"hire": 1, "release": 1, "medbay": 1, "pick": 2, "role": 2, "buy": 1, "prep": 1}.get(action, 0)
+	var needs: int = {"hire": 1, "release": 1, "medbay": 1, "pick": 2, "role": 2, "buy": 1, "prep": 1, "ready": 1}.get(action, 0)
 	if args.size() < needs:
 		why = "Bad request"
 	elif action in ["deploy", "rest", "release", "save", "prep", "restock_squad"] and sender != 1:
@@ -1611,6 +1689,8 @@ func _server_request(action: String, args: Array) -> void:
 				why = server_restock_player(sender if sender != 0 else 1)
 			"restock_squad":
 				why = server_restock_squad()
+			"ready":
+				server_set_ready(sender if sender != 0 else 1, bool(args[0]))
 			_:
 				why = "Unknown request"
 	if why != "":
@@ -1639,7 +1719,7 @@ func build_view() -> Dictionary:
 		"roster": roster(), "hiring": {"pool": Hiring.pool(hiring(), day()), "refreshed_day": int(hiring().get("refreshed_day", 1))},
 		"stash": stash(), "prep": _prep(), "catalog": BaseEconomy.shop_catalog(), "held": held,
 		"daily_wages": Roster.daily_wages(roster()), "bill_in_days": Economy.days_to_bill(), "weekly_bill": int(Economy.weekly_bill().total),
-		"players": keys, "in_base": in_base(),
+		"players": keys, "in_base": in_base(), "ready": _ready_peers.keys(),
 	}
 
 
