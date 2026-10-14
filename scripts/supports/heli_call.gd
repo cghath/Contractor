@@ -103,6 +103,9 @@ const INSERT_DROP_WAIT_S := 20.0
 const HOT_CHECK_M := 700.0
 const HOT_CHECK_S := 1.0
 const WAVE_OFF_AVOID_M := 150.0
+## Extraction wave-off with no other LZ round the squad (DeadGround.SQUAD_RING_M): it looks
+## out to this far from them (m) before asking for smoke or a grid (2026-10-14: the loop test's wave-off found none within 300 m).
+const WAVE_OFF_WIDE_M := 500.0
 
 ## Tests: AI ordered in get in directly after this long (s).
 static var board_direct_s := 45.0
@@ -850,31 +853,42 @@ func _pick_other_lz(hot: Soldier) -> bool:
 	waved_off.append(lz)
 	var lvl := level()
 	var posts := DeadGround.watchers(lvl)
-	if is_instance_valid(hot) and hot.global_position not in posts:
-		posts.append(hot.global_position)
+	# Whoever made an LZ hot must not see the next one (over the terrain: walls aside).
+	var spotters: Array[Vector3] = []
+	if is_instance_valid(hot):
+		spotters.append(hot.global_position)
+		if hot.global_position not in posts:
+			posts.append(hot.global_position)
 	var centre := _players_centre()
-	var ring := DeadGround.SQUAD_RING_M
+	var rings: Array[Vector2] = [DeadGround.SQUAD_RING_M, Vector2(DeadGround.SQUAD_RING_M.x, WAVE_OFF_WIDE_M)]
 	var prefer: Variant = centre
 	if kind == "insertion":
 		centre = objective if objective != Vector3.INF else lz
-		ring = DeadGround.OBJECTIVE_RING_M if objective != Vector3.INF else Vector2(150.0, 450.0)
+		rings = [DeadGround.OBJECTIVE_RING_M if objective != Vector3.INF else Vector2(150.0, 450.0)]
 		prefer = heli.global_position
-	for attempt in 3:
-		var found := DeadGround.find(lvl, centre, ring, prefer, waved_off, WAVE_OFF_AVOID_M, posts, _ignore())
-		if not found.get("ok", false):
-			return false
-		var spot: Vector3 = found.spot
-		var also := DeadGround.hot_watcher(lvl, spot)
-		if also:
-			waved_off.append(spot)
-			continue
-		lz = spot
-		lz_moved_m = 0.0
-		mark = {"source": "grid", "pos": spot, "from": "wave_off", "hidden": bool(found.hidden), "near": kind == "extraction"}
-		_rechecked = true
-		if kind == "extraction" and stage == "pickup":
-			_place_point()
-		return true
+	for ring in rings:
+		for attempt in 3:
+			var found := DeadGround.find(lvl, centre, ring, prefer, waved_off, WAVE_OFF_AVOID_M, posts, _ignore(), spotters)
+			if not found.get("ok", false):
+				_log("%s helicopter: no other LZ round (%.0f, %.0f), %.0f-%.0f m (%d checked, %d watchers)" % [kind, centre.x, centre.z,
+					ring.x, ring.y, int(found.get("checked", 0)), int(found.get("watchers", 0))])
+				break
+			var spot: Vector3 = found.spot
+			var also := DeadGround.hot_watcher(lvl, spot)
+			_log("%s helicopter: other LZ (%.0f, %.0f) %s, seen by %d post(s)%s" % [kind, spot.x, spot.z,
+				"hidden" if found.hidden else "not hidden", int(found.get("seen_by", 0)), ", hot: %s sees it" % also.display_name() if also else ""])
+			if also:
+				waved_off.append(spot)
+				if also.global_position not in spotters:
+					spotters.append(also.global_position)
+				continue
+			lz = spot
+			lz_moved_m = 0.0
+			mark = {"source": "grid", "pos": spot, "from": "wave_off", "hidden": bool(found.hidden), "near": kind == "extraction"}
+			_rechecked = true
+			if kind == "extraction" and stage == "pickup":
+				_place_point()
+			return true
 	return false
 
 
@@ -883,7 +897,7 @@ func _pick_other_lz(hot: Soldier) -> bool:
 func _wave_off(hot: Soldier) -> void:
 	var old := lz
 	_radio_state = ""
-	SessionLog.note("%s helicopter: LZ (%.0f, %.0f) hot: %s sees it from %.0f m" % [kind, old.x, old.z, hot.display_name(), _flat(hot.global_position, old)])
+	_log("%s helicopter: LZ (%.0f, %.0f) hot: %s sees it from %.0f m" % [kind, old.x, old.z, hot.display_name(), _flat(hot.global_position, old)])
 	if _pick_other_lz(hot):
 		_fly_in()
 		var dir := Vector2(lz.x - old.x, lz.z - old.z)
@@ -893,6 +907,12 @@ func _wave_off(hot: Soldier) -> void:
 		return
 	mark = {}
 	_go_in("LZ %s is hot and there's no other near" % _grid(old))
+
+
+## A line for the session log and the console (the wave-off's reasoning, for playtests and tests).
+static func _log(text: String) -> void:
+	print("[heli] " + text)
+	SessionLog.note(text)
 
 
 ## Insertion: a player who joined while it flies in (up, on foot) gets a seat aboard.

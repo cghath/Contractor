@@ -108,8 +108,10 @@ static func seen_by(level: Node3D, at: Vector3, posts: Array[Vector3], stop_at :
 ## (watchers(level) when empty). Returns {"ok", "spot" (on the ground), "hidden" (true: seen by
 ## none), "seen_by", "dist" (from centre), "checked"}; with no hidden spot that takes a landing,
 ## the LZ-safe spot seen by fewest ("hidden" false); not ok when there's no safe spot at all.
+## `never_seen_by`: watchers no spot may be seen by, not even the fallback (2026-10-14:
+## a wave-off never picks another LZ the enemy who made the last one hot can see).
 static func find(level: Node3D, centre: Vector3, ring := OBJECTIVE_RING_M, prefer: Variant = null, avoid: Array[Vector3] = [],
-		avoid_m := 150.0, posts: Array[Vector3] = [], ignore: Array[RID] = []) -> Dictionary:
+		avoid_m := 150.0, posts: Array[Vector3] = [], ignore: Array[RID] = [], never_seen_by: Array[Vector3] = []) -> Dictionary:
 	if level == null or not level.is_inside_tree():
 		return {"ok": false}
 	var watch := posts if not posts.is_empty() else watchers(level)
@@ -146,8 +148,10 @@ static func find(level: Node3D, centre: Vector3, ring := OBJECTIVE_RING_M, prefe
 	for c: Array in cands:
 		if checked >= MAX_SIGHT_CHECKS:
 			break
-		checked += 1
 		var at: Vector3 = c[1]
+		if seen_by(level, at, never_seen_by, 1) > 0:
+			continue  # (one sight line each: not counted against the cap)
+		checked += 1
 		var seen := seen_by(level, at, watch, int(fallback.get("seen_by", 1 << 30)) if not fallback.is_empty() else 1 << 30)
 		if seen > 0 and not fallback.is_empty() and seen >= int(fallback.seen_by):
 			continue
