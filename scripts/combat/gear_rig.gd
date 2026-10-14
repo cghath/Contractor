@@ -70,6 +70,11 @@ const TAPE_HEIGHT_M := 0.016
 const TAPE_INK := Color(0.1, 0.1, 0.08)
 ## The tape: a strip of tan cloth on the loop panel, letters on it.
 const TAPE_SIZE := Vector3(0.12, 0.028, 0.004)
+## The name tape's letters aren't drawn past this (m): too small to read.
+const TAPE_READ_M := 15.0
+## Small details (_part_box) aren't drawn past this (m).
+const DETAIL_M := 45.0
+const DETAIL_MARGIN_M := 2.0  # hysteresis: no flicker at the edge
 const TAPE_CLOTH := Color("8f8a6c")
 ## The carrier's plate pocket: 14 cm either side of the spine (VoxelArt._vest). Pouches on it
 ## stay inside its edges, and a row of them doesn't overlap (POUCH_GAP_M apart).
@@ -107,6 +112,7 @@ var _pack_rest := Transform3D.IDENTITY  # the pack's place, unswung
 var _pack_pivot := Vector3.ZERO         # torso-local: where it hangs from (its straps' anchors)
 var _swinging: Array = []              # [node, rest Transform3D, pivot Vector3, on the pack]
 var _sway_on := DisplayServer.get_name() != "headless"
+var _lod := UpdateLod.new()
 
 
 
@@ -475,6 +481,8 @@ func _set_name_tape(carrier: ItemData) -> void:
 	letters.modulate = TAPE_INK
 	letters.double_sided = false
 	letters.layers = render_layers
+	letters.visibility_range_end = TAPE_READ_M
+	letters.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	letters.transform = Transform3D(Basis(Vector3.UP, PI), Vector3(0, 0, -TAPE_SIZE.z - 0.001))  # reads from the front
 	_tape.add_child(letters)
 
@@ -627,10 +635,19 @@ static func _part_box(size: Vector3, pos: Vector3, colour: Color, layers: int) -
 	mesh_instance.scale = Vector3.ONE * VoxelArt.FINE_VOXEL
 	mesh_instance.position = pos - Vector3(VoxelArt.fine_dims(size)) * VoxelArt.FINE_VOXEL * 0.5
 	mesh_instance.layers = layers
+	# Small details (pouches, tabs, straps, the name tape): not drawn past DETAIL_M, where they're
+	# a pixel or two, and no shadow of their own (it falls on the body they sit on); each is a
+	# draw call, in every shadow cascade too (frame rate, 2026-10-14).
+	mesh_instance.visibility_range_end = DETAIL_M
+	mesh_instance.visibility_range_end_margin = DETAIL_MARGIN_M
+	mesh_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	return mesh_instance
 
 
 func _process(delta: float) -> void:
+	delta = _lod.tick(self, delta, model.downed and model.ragdolled())
+	if delta < 0.0:
+		return  # far away or off screen: every few frames (UpdateLod)
 	_clock += delta
 	if not _tape_key.ends_with("|" + model.name_tape):  # the name arrives after the body is built
 		var vest: StringName = inventory.slots[&"vest"]
@@ -672,8 +689,8 @@ func _sway(delta: float) -> void:
 	var pack: Node3D = _gear.get(&"backpack", [&"", null])[1]
 	if pack == null and _swinging.is_empty():
 		return
-	if not model.is_visible_in_tree() or model.ragdolled():
-		_pack_sway.reset()
+	if not model.is_visible_in_tree() or model.ragdolled() or UpdateLod.every(model.global_position, get_viewport()) > 1:
+		_pack_sway.reset()  # (too far, or off screen, to see it swing)
 		_pouch_sway.reset()
 		return
 	var torso := model.torso.global_transform

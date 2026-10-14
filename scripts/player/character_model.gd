@@ -305,6 +305,8 @@ var _hand_from: Array[Vector3] = [Vector3.ZERO, Vector3.ZERO]
 var _hand_blend: Array[float] = [1.0, 1.0]
 var _arms_posed := false
 var _carrier_worn := false
+var _lod := UpdateLod.new()   # far, off screen or lying still: the pose every few frames
+var _rag_seen := PackedFloat32Array()  # ragdoll_net the pose was last worked out from
 
 
 ## How big this body is drawn: FEMALE_SCALE for a female soldier, else 1.
@@ -323,9 +325,7 @@ func set_carrier_worn(worn: bool) -> void:
 	if body != VoxelArt.FEMALE or torso == null or _carrier_worn == worn:
 		return
 	_carrier_worn = worn
-	var mesh := torso.get_child(0) as MeshInstance3D  # VoxelArt.instance's mesh, its first child
-	if mesh:
-		mesh.mesh = VoxelArt.mesh("torso_fc" if worn else VoxelArt.body_part("torso", body), variant)
+	VoxelArt.set_model(torso, "torso_fc" if worn else VoxelArt.body_part("torso", body), variant, render_layers)  # every level of detail
 
 
 ## The right shoulder joint, torso-local (mirrored for the left), for this body.
@@ -940,6 +940,10 @@ static func _bone_of(area: Area3D) -> String:
 
 
 func _process(delta: float) -> void:
+	delta = _lod.tick(self, delta, downed and ragdolled() and ragdoll_net == _rag_seen and carry_net.is_empty() and action_net.is_empty())
+	if delta < 0.0:
+		return
+	_rag_seen = ragdoll_net
 	# Speed from position change works the same for local, remote and AI bodies.
 	var moved := global_position - _last_position
 	_last_position = global_position

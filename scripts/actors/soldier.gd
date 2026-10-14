@@ -187,6 +187,8 @@ var spawn_position := Vector3.ZERO
 var died_at := -1.0
 ## Host only (tests may lower it): the body cap in force.
 static var body_cap := MAX_BODIES
+## Far away, off screen or lying still: _process every few frames (UpdateLod).
+var _lod := UpdateLod.new()
 ## Host only. People (wave 4, PeopleLayer): a cuffed captive can be carried while conscious.
 var carriable_while_up := false
 ## Every peer: the vehicle this soldier rides in (wave 5: Vehicle sets it from its replicated
@@ -310,7 +312,10 @@ func select_weapon(slot: StringName) -> void:
 	_on_inventory_changed()
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
+	# Far away, off screen or lying still as a settled ragdoll: every few frames (UpdateLod).
+	if _lod.tick(self, delta, not vitals.is_up() and is_instance_valid(ragdoll) and ragdoll.frozen) < 0.0:
+		return
 	# Runs on every peer: active_slot, inventory and head rotation are replicated.
 	model.look_pitch = head.rotation.x
 	model.reloading = is_reloading

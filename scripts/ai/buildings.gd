@@ -45,8 +45,19 @@ const EXIT_PROBE_M := 8.0
 const ROOM_EYE := 1.2
 const CACHE_S := 20.0
 const CACHE_MAX := 48
+## A scan reaches REUSE_M further than it was asked to, and a later ask whose circle lies inside
+## a fresh scan's is answered from it (frame rate, 2026-10-14: a squad's tactics ask about the
+## buildings round its moving centre every second; keyed on that centre to 2 m, nearly every
+## ask was a new scan, 125-220 ms each in a town fight, the worst frames of a group night).
+const REUSE_M := 4.0
 
 static var _cache := {}
+## inside()'s answers: Vector4i(spot to 10 cm, world id) -> [when, inside]. At most INSIDE_MAX
+## (then emptied).
+static var _inside := {}
+## closest()'s answers: [map, point to 10 cm] -> [when, the navmesh point]. At most INSIDE_MAX.
+static var _closest := {}
+const INSIDE_MAX := 60000
 ## The world and level the cached scans belong to (_scope); another one empties the cache.
 static var _cache_scope := ""
 
@@ -63,14 +74,26 @@ static func near(from: Node3D, centre: Vector3, radius := SCAN_M) -> Array:
 		_cache_scope = scope
 	var key := "%s|%d,%d,%d,%d" % [scope, roundi(centre.x / 2.0), roundi(centre.y / 2.0), roundi(centre.z / 2.0), roundi(radius)]
 	var now := Soldier._now()
-	var hit: Dictionary = _cache.get(key, {})
-	if not hit.is_empty() and now - float(hit.at) < CACHE_S:
-		return hit.list
+	for k: String in _cache:
+		var hit: Dictionary = _cache[k]
+		var c: Vector3 = hit.centre
+		if now - float(hit.at) < CACHE_S and absf(c.y - centre.y) <= 1.0 \
+				and Vector2(c.x - centre.x, c.z - centre.z).length() + radius <= float(hit.radius):
+			return _within(hit.list, centre, radius)
 	if _cache.size() >= CACHE_MAX:
 		_cache.clear()
-	var list := _scan(from.get_world_3d(), centre, radius)
-	_cache[key] = {"at": now, "list": list}
-	return list
+	var list := _scan(from.get_world_3d(), centre, radius + REUSE_M)
+	_cache[key] = {"at": now, "list": list, "centre": centre, "radius": radius + REUSE_M}
+	return _within(list, centre, radius)
+
+
+## The buildings of `list` with an inside spot within `radius` (flat) of `centre`.
+static func _within(list: Array, centre: Vector3, radius: float) -> Array:
+	return list.filter(func(b: Dictionary) -> bool:
+		for s: Vector3 in b.get("spots", []):
+			if Vector2(s.x - centre.x, s.z - centre.z).length() <= radius:
+				return true
+		return false)
 
 
 ## Which world and level `from` is in: its World3D and the level node above it (none for a
@@ -138,8 +161,8 @@ static func _scan(world: World3D, centre: Vector3, radius: float) -> Array:
 			if Vector2(ix, iz).length() * GRID_M > radius:
 				continue
 			var cell := base + Vector2i(ix, iz)
-			var p := Vector3((cell.x + 0.5) * GRID_M, centre.y, (cell.y + 0.5) * GRID_M)
-			var q := NavigationServer3D.map_get_closest_point(map, p)
+			var p := Vector3((cell.x + 0.5) * GRID_M, snappedf(centre.y, 0.5), (cell.y + 0.5) * GRID_M)
+			var q := closest(map, p)
 			if Vector2(q.x - p.x, q.z - p.z).length() > NAV_SNAP_M or absf(q.y - p.y) > 2.5:
 				continue
 			if inside(world, q):
@@ -167,8 +190,39 @@ static func _scan(world: World3D, centre: Vector3, radius: float) -> Array:
 	return out
 
 
-## Whether walkable spot `q` has walls round it (see the class notes).
+## The navmesh point closest to `p` (NavigationServer3D.map_get_closest_point), kept for CACHE_S
+## per point (to 10 cm), like the scans: on a zone's navmesh each call is a long walk, and a
+## town scan asks about a thousand grid points, the same ones again as its squad moves about.
+static func closest(map: RID, p: Vector3) -> Vector3:
+	var now := Soldier._now()
+	var key := [map, Vector3i(roundi(p.x * 10.0), roundi(p.y * 10.0), roundi(p.z * 10.0))]
+	var memo: Variant = _closest.get(key)
+	if memo != null and now - float(memo[0]) < CACHE_S:
+		return memo[1]
+	if _closest.size() >= INSIDE_MAX:
+		_closest.clear()
+	var q := NavigationServer3D.map_get_closest_point(map, p)
+	_closest[key] = [now, q]
+	return q
+
+
+## Whether walkable spot `q` has walls round it (see the class notes). Kept for CACHE_S per
+## spot (to 10 cm), like the scans: overlapping scans (a squad moving about) probe each spot
+## once (8 rays a spot; ~1,000 spots in a town scan).
 static func inside(world: World3D, q: Vector3) -> bool:
+	var now := Soldier._now()
+	var key := Vector4i(roundi(q.x * 10.0), roundi(q.y * 10.0), roundi(q.z * 10.0), world.get_instance_id())
+	var memo: Variant = _inside.get(key)
+	if memo != null and now - float(memo[0]) < CACHE_S:
+		return memo[1]
+	if _inside.size() >= INSIDE_MAX:
+		_inside.clear()
+	var out := _probe_inside(world, q)
+	_inside[key] = [now, out]
+	return out
+
+
+static func _probe_inside(world: World3D, q: Vector3) -> bool:
 	var eye := q + Vector3.UP * PROBE_HEIGHT
 	var open: Array[int] = []
 	for k in PROBE_DIRS:
@@ -318,3 +372,4 @@ static func _rooms(world: World3D, b: Dictionary) -> Array:
 		out.append({"spots": room, "centre": centre, "corners": corners})
 		from = seed
 	return out
+

@@ -90,7 +90,18 @@ static func _civ_part(model: String, variant: String) -> String:
 	return "civp:%s:%s:%s" % [f[2] if legs else f[1], f[3], f[4]]
 
 static var _meshers: Dictionary = {}  # variant -> VoxelMesherCubes
-static var _meshes: Dictionary = {}   # "model|variant" -> Mesh
+static var _meshes: Dictionary = {}   # "model|variant" -> [Mesh, its coarser levels...] (lods)
+## Levels of detail (frame rate, 2026-10-14: a 0.5 cm male body is about 33,000 triangles and a
+## group night draws dozens of them): beyond LOD_M[0] metres from the camera a model is drawn
+## from its voxels at twice the size (1 cm), beyond LOD_M[1] at four times (2 cm), beyond
+## LOD_M[2] at eight (4 cm). On a 1600-pixel-tall screen at the default 80 degrees a voxel of each
+## level is under a pixel where it takes over, and through a 4x optic about one to three pixels.
+## Models under LOD_MIN_TRIS triangles keep one mesh. The levels meet with no margin: a margin
+## is hysteresis per mesh, and a body coming into view inside one level's margin showed neither
+## that level nor the next (seen in the bench's screenshots: half a soldier at 34 m).
+const LOD_LEVELS := 3
+const LOD_M: Array[float] = [12.0, 40.0, 150.0]
+const LOD_MIN_TRIS := 1000
 ## Plain clothes' rasterised models (the model name's hash -> VoxelBuffer), shared by every plain-clothes
 ## scheme: their cloth is one flat palette entry (no camo), so the voxels' colour indices are the
 ## same whatever the colours, and only the mesher's palette differs. Rasterising a 0.5 cm body
@@ -114,20 +125,41 @@ static var _colour_meshers: Dictionary = {}  # colour -> VoxelMesherCubes
 
 
 ## A pivot node holding the model's mesh. The pivot is the model's centre unless the
-## spec names one (body parts pivot at their joints).
+## spec names one (body parts pivot at their joints). The mesh is its first child; a model big
+## enough for levels of detail (lods) has one more child per coarser level, each shown only
+## from its LOD_M distance on (visibility ranges: the renderer picks, nothing runs per frame).
 static func instance(model: String, variant: String, layers := 1) -> Node3D:
-	var spec := _spec(model)
 	var pivot := Node3D.new()
 	pivot.name = model.get_slice(":", 0).trim_suffix(FEMALE_SUFFIX)  # "torso_f" is still the torso
-	var mesh_instance := MeshInstance3D.new()
-	mesh_instance.mesh = mesh(model, variant)
-	mesh_instance.material_override = _get_material()
-	mesh_instance.layers = layers
-	var voxel: float = spec.get("voxel", VOXEL_SIZE)
-	mesh_instance.scale = Vector3.ONE * voxel / int(spec.get("sub", 1))  # built in sub-voxels
-	mesh_instance.position = -spec.get("pivot", Vector3(spec.size) * 0.5) * voxel
-	pivot.add_child(mesh_instance)
+	set_model(pivot, model, variant, layers)
 	return pivot
+
+
+## Puts model `model` in `variant` on an instance() pivot (its first build, or another model in
+## its place: a carrier going on a woman's torso), every level of detail.
+static func set_model(pivot: Node3D, model: String, variant: String, layers := 1) -> void:
+	var spec := _spec(model)
+	var levels := lods(model, variant)
+	var voxel: float = spec.get("voxel", VOXEL_SIZE)
+	var at: Vector3 = -spec.get("pivot", Vector3(spec.size) * 0.5) * voxel
+	var have := pivot.get_children().filter(func(n: Node) -> bool: return n is MeshInstance3D)
+	for i in maxi(levels.size(), have.size()):
+		if i >= levels.size():
+			(have[i] as Node).queue_free()
+			continue
+		var fresh := i >= have.size()
+		var mesh_instance: MeshInstance3D = MeshInstance3D.new() if fresh else have[i]
+		mesh_instance.mesh = levels[i]
+		mesh_instance.material_override = _get_material()
+		if fresh:
+			mesh_instance.layers = layers
+		mesh_instance.scale = Vector3.ONE * voxel / int(spec.get("sub", 1)) * float(1 << i)  # built in sub-voxels, x2 a level
+		mesh_instance.position = at
+		var last := i == levels.size() - 1
+		mesh_instance.visibility_range_begin = LOD_M[i - 1] if i > 0 else 0.0
+		mesh_instance.visibility_range_end = 0.0 if last else LOD_M[i]
+		if fresh:
+			pivot.add_child(mesh_instance)
 
 
 ## The model name of body part `part` ("head", "torso", "upper_arm", "forearm", "leg",
@@ -216,16 +248,62 @@ static func butt_point(model: String) -> Vector3:
 
 
 static func mesh(model: String, variant: String) -> Mesh:
+	return lods(model, variant)[0]
+
+
+## The model's meshes, finest first: the model as built, then (for one of LOD_MIN_TRIS or more)
+## LOD_LEVELS coarser copies, each from the level before with its voxels twice the size
+## (VoxelBuffer.downscale_to: every other voxel each way), built with it from the same raster.
+## A coarse copy has about a quarter of the triangles of the one before.
+static func lods(model: String, variant: String) -> Array:
 	if variant.begins_with(CIV_PREFIX):
 		variant = _civ_part(model, variant)
 	var key := "%s|%s" % [model, variant]
 	if not _meshes.has(key):
+		var started := Time.get_ticks_usec()
 		_meshes[key] = _build(_spec(model), variant, model.hash())
+		FrameCost.spent(&"models", started)
 	return _meshes[key]
 
 
-static func _build(spec: Dictionary, variant: String, salt: int) -> Mesh:
-	return _get_mesher(variant).build_mesh(_raster(spec, variant, salt), [])
+static func _build(spec: Dictionary, variant: String, salt: int) -> Array:
+	var mesher := _get_mesher(variant)
+	var buffer := _raster(spec, variant, salt)
+	var fine := mesher.build_mesh(buffer, [])
+	var out: Array = [fine]
+	if fine == null or triangles(fine) < LOD_MIN_TRIS:
+		return out
+	for level in LOD_LEVELS:
+		buffer = _downscaled(buffer)
+		var coarse := mesher.build_mesh(buffer, [])
+		if coarse == null:
+			break
+		out.append(coarse)
+	return out
+
+
+## `buffer` (a model with 1 voxel of mesher padding per side) at half the resolution, padded
+## the same way: coarse voxel c is fine voxel 2c, so the coarse mesh lines up drawn at twice the
+## scale from the same corner.
+static func _downscaled(buffer: VoxelBuffer) -> VoxelBuffer:
+	var inner := buffer.get_size() - Vector3i(2, 2, 2)
+	var even := Vector3i(inner.x + inner.x % 2, inner.y + inner.y % 2, inner.z + inner.z % 2)
+	var out := VoxelBuffer.new()
+	out.set_channel_depth(VoxelBuffer.CHANNEL_COLOR, VoxelBuffer.DEPTH_8_BIT)
+	out.create(even.x / 2 + 2, even.y / 2 + 2, even.z / 2 + 2)
+	out.fill(C.EMPTY, VoxelBuffer.CHANNEL_COLOR)
+	buffer.downscale_to(out, Vector3i.ONE, Vector3i.ONE + even, Vector3i.ONE)
+	return out
+
+
+## A mesh's triangle count.
+static func triangles(m: Mesh) -> int:
+	var n := 0
+	for s in m.get_surface_count():
+		var arrays := m.surface_get_arrays(s)
+		var idx: Variant = arrays[Mesh.ARRAY_INDEX]
+		n += (idx as PackedInt32Array).size() / 3 if idx != null else (arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array).size() / 3
+	return n
 
 
 ## The model rasterised for `variant`: a plain-clothes scheme ("civp:") reuses the model's one
