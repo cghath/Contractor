@@ -267,6 +267,12 @@ func _test_buddy_carries_buddy() -> void:
 func _test_contact() -> void:
 	print("Contact")
 	_place(player, Vector3(0, 0.1, 16))
+	## The player stands in the open 17 m from the hostile (placed by hand, physics off) and
+	## the hostile rightly shoots him too: unshielded, he went down here and stayed down for
+	## every later check (R0612, R0864, R0925: Give me ammo with the player Unconscious, the
+	## squad on casualty care for him). Shielded, the hostile still sees and fires at him;
+	## his rounds just do nothing, so no wounds leak into what follows.
+	player.vitals.shielded = true
 	await _seconds(3.0)
 	var hostile := level.spawn_soldier({"name": "TestHostile", "faction": "hostile", "variant": "urban", "pos": Vector3(0, 0.1, -1),
 		"loadout": CompoundLevel.HOSTILE_LOADOUT, "combat": 0.3, "discipline": 0.5, "guard": true})
@@ -280,6 +286,8 @@ func _test_contact() -> void:
 			break
 	check(fought_from_cover, "the squad fights (from cover, or assaulting the position)")
 	check(not is_instance_valid(hostile) or not hostile.vitals.is_up(), "and puts the hostile down")
+	player.vitals.shielded = false
+	check(player.vitals.condition_text() == "OK", "the player, shielded, comes out of it unhurt (%s)" % player.vitals.condition_text())
 
 
 func _test_flash_stuns() -> void:
@@ -436,6 +444,12 @@ func _test_tactics() -> void:
 	player.inventory.take(&"assault_pack")  # somewhere to put them
 	var ammo := Soldier._ammo_of(player.active_weapon()) if player.active_weapon() else &""
 	var had := player.inventory.count_of(ammo)
+	## Down, he can't take magazines: a clear refusal, not an order the bringer drops on the way.
+	player.vitals.downed = true
+	var down_why := squad.order_command(player, "give_ammo", Vector3.ZERO) if ammo != &"" else "no rifle"
+	player.vitals.downed = false
+	check(down_why != "" and not _squad().any(func(s: Soldier) -> bool: return StringName(SquadAI.of(s).ordered.get("kind", &"")) == &"give_ammo"),
+		"Give me ammo while down: refused, nobody sent (%s)" % down_why)
 	var why := squad.order_command(player, "give_ammo", Vector3.ZERO) if ammo != &"" else "no rifle"
 	var bringer: SquadAI = null
 	for s: Soldier in _squad():
@@ -892,6 +906,11 @@ func _test_spotting() -> void:
 	# (Measured standing: a squadmate at a halt in Combat mode crouches, and crouched steps are quiet.)
 	var brain := SquadAI.of(bravo)
 	brain.process_mode = Node.PROCESS_MODE_DISABLED
+	## A stopped brain leaves its last move_input on the body, and the body keeps moving on it
+	## (R0920, R0933: he crawled off prone at 0.35 m/s, out from behind the bush, 1.5 m of
+	## leaves down to 0 in 2 s; how far he got by the measure was down to timing).
+	bravo.move_input = Vector2.ZERO
+	bravo.want_sprint = false
 	bravo.want_crouch = false
 	bravo.want_stance = -1
 	await _wait_until(func() -> bool: return not bravo.is_crouching(), 3.0)
@@ -914,7 +933,8 @@ func _test_spotting() -> void:
 	await get_tree().create_timer(0.6).timeout  # the eyes settle down
 	var prone_leaves := Spotting.foliage_m(bush, alpha, bravo)
 	check(bravo.movement.is_prone() and standing_leaves < 0.2 and prone_leaves >= Spotting.FOLIAGE_OPAQUE_M,
-		"a bush hides him prone (%.1f m of leaves), not standing (%.1f m: his head shows)" % [prone_leaves, standing_leaves])
+		"a bush hides him prone (%.2f m of leaves; prone %s, eye %.2f m up), not standing (%.1f m: his head shows)" % [prone_leaves,
+		bravo.movement.is_prone(), bravo.camera.global_position.y - bravo.global_position.y, standing_leaves])
 	bravo.want_stance = -1
 	bush.free()
 	brain.process_mode = Node.PROCESS_MODE_INHERIT
@@ -1062,6 +1082,11 @@ func _test_close_range_aim() -> void:
 	target.move_input = Vector2.ZERO
 	hostile.want_aim = true
 	_place(target, spot)
+	## Square on to the shooter. His facing was whatever his AI turned to in the frames before
+	## it was stopped (it turns to the hostile it sees, a different part of the way each run:
+	## -0.26, -0.70, -1.04 rad): side on, his arm covers his chest and the centre-mass share
+	## swung from 85% to 33% with the aim unchanged (R0612, R0826, R0864).
+	target.rotation.y = atan2(-diag.x, -diag.z)
 	_place(hostile, spot + diag * 4.0)
 	await _physics_frames(15)  # lands (a 10 cm drop) and stands
 	hostile.is_aiming = true
@@ -1177,6 +1202,7 @@ func _test_close_range_aim() -> void:
 	var to := target.global_position - hostile.global_position
 	hostile.rotation.y = atan2(-to.x, -to.z)
 	hostile.head.rotation.x = 0.0
+	target.rotation.y = atan2(-diag.x, -diag.z)
 	await _physics_frames(4)
 	ai.target = null
 	ai._acq_age = 0.0
