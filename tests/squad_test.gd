@@ -43,6 +43,7 @@ func _ready() -> void:
 	_test_doctrine_pending()
 	await _test_dead_leave_squad()
 	await _test_buildings_per_world()
+	await _test_multi_storey()
 	GameState.delete_save()
 	print("SQUAD TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
@@ -459,6 +460,169 @@ func _test_buildings_per_world() -> void:
 		% [(here.get("spots", []) as Array).size(), (there.get("spots", []) as Array).size()])
 	viewport.queue_free()
 	await _frames(2)
+
+
+## Audit follow-up F-01: a generated two-storey house with a flat roof (a parapet, a railed
+## hatch), stamped in voxels on the open ground south-west of the compound, its navigation
+## baked as the game bakes it (the chunks' ground and the voxels as they stand). The scan finds
+## its ground floor, the floor above and the roof, and the stairs between; the squad ordered to
+## clear it goes floor by floor up to the floor above; a man on the roof behind the parapet
+## sees and takes on a hostile in the street.
+const STOREY_AT := Vector3(-32, 0, 40)
+
+
+func _test_multi_storey() -> void:
+	print("Buildings: floors, stairs and roofs (F-01)")
+	var b := {}
+	for seed in range(1, 400):
+		var c := BuildingGen.house(seed, "brick")
+		if int(c.storeys) == 2 and c.roof_access and (c.yards as Array).is_empty() and c.shape == "rect":
+			b = c
+			b["seed"] = seed
+			break
+	if b.is_empty():
+		check(false, "a two-storey house with a roof to stand on")
+		return
+	var upper: float = (b.rooms as Array).filter(func(r: Dictionary) -> bool: return int(r.floor) == 1)[0].y
+	var roof_y: float = b.roof_y
+	print("    house seed %d: %.1f x %.1f m, floor above at %.2f m, roof at %.2f m" % [b.seed, b.size.x, b.size.y, upper, roof_y])
+	var holder := Node3D.new()
+	holder.name = "StoreyHouse"
+	holder.position = STOREY_AT
+	var world := VoxelWorld.new()
+	world.bounds = AABB(Vector3(-120, -10, -120), Vector3(240, 100, 240))  # voxels: 24 x 10 x 24 m
+	world.view_distance = 2000
+	for bx: Array in b.boxes:
+		world.add_box_m(bx[0], bx[1], bx[2])
+	level.add_child(holder)
+	holder.add_child(world)
+	_place(player, STOREY_AT + Vector3(0, 0.1, b.size.y * 0.5 + 6.0))  # the street in front (voxels build round the player)
+	var built := await _wait_until(func() -> bool: return world.is_built(), 30.0)
+	var space := player.get_world_3d().direct_space_state
+	var on_roof := STOREY_AT + Vector3(0, roof_y + 2.0, b.size.y * 0.25)
+	var solid := await _wait_until(func() -> bool:
+		var hit := space.intersect_ray(PhysicsRayQueryParameters3D.create(on_roof, on_roof + Vector3.DOWN * 3.0, 1))
+		return not hit.is_empty() and absf((hit.position as Vector3).y - roof_y) < 0.2, 15.0)
+	# Its navigation, as NavBuilder bakes a chunk: the ground and the voxels as they stand.
+	var nav := level.get_node(^"Navigation") as NavBuilder
+	var foot := Rect2(STOREY_AT.x - b.size.x * 0.5 - 3.0, STOREY_AT.z - b.size.y * 0.5 - 3.0, b.size.x + 6.0, b.size.y + 6.0)
+	var lo := NavBuilder.chunk_at(Vector3(foot.position.x, 0, foot.position.y))
+	var hi := NavBuilder.chunk_at(Vector3(foot.end.x, 0, foot.end.y))
+	for cz in range(lo.y, hi.y + 1):
+		for cx in range(lo.x, hi.x + 1):
+			var chunk := Vector2i(cx, cz)
+			var source := nav._ground_source(chunk)
+			var bounds := NavBuilder._bake_bounds(chunk)
+			var local := world.global_transform.affine_inverse() * bounds
+			for box in world.solid_boxes_m(local):
+				source.add_faces(NavBuilder._box_faces(box), world.global_transform)
+			var mesh := NavBuilder._new_mesh(chunk)
+			NavigationServer3D.bake_from_source_geometry_data(mesh, source)
+			nav.region_of(chunk).navigation_mesh = mesh
+	await _physics_frames(4)
+	var map := player.get_world_3d().navigation_map
+	var street := NavigationServer3D.map_get_closest_point(map, STOREY_AT + Vector3(0, 0, b.size.y * 0.5 + 4.0))
+	var roof_goal := NavigationServer3D.map_get_closest_point(map, STOREY_AT + Vector3(0, roof_y + 0.2, b.size.y * 0.25))
+	var path := NavigationServer3D.map_get_path(map, street, roof_goal, true)
+	check(built and solid and absf(roof_goal.y - roof_y) < 0.4 and path.size() > 2 and path[-1].distance_to(roof_goal) < 0.5,
+		"the house stands (%s, %s) and the navmesh runs from the street up the stairs onto its roof (%d points, ends %.1f m off, at %.2f m)"
+		% [built, solid, path.size(), path[-1].distance_to(roof_goal) if path.size() > 0 else INF, roof_goal.y])
+	# The scan: from the ground floor, three floors (the roof the top one), two stairs.
+	var front_room := STOREY_AT + Vector3(0, 0.1, b.size.y * 0.5 - 2.0)
+	var found := Buildings.nearest(player, front_room, 3.0)
+	var floors: Array = found.get("floors", [])
+	var heights: Array = floors.map(func(f: Dictionary) -> String: return "%.2f%s" % [f.y, " roof" if f.roof else ""])
+	var stairs: Array = (found.get("stairs", []) as Array).map(func(s: Dictionary) -> String: return "%d-%d" % [s.from, s.to])
+	check(floors.size() == 3 and absf(float(floors[1].y) - upper) < 0.4 and absf(float(floors[2].y) - roof_y) < 0.4
+		and not floors[0].roof and not floors[1].roof and floors[2].roof and "0-1" in stairs and "1-2" in stairs,
+		"the scan finds its ground floor, the floor above and the roof (%s), and the stairs between (%s)" % [heights, stairs])
+	var ports: Array = found.get("ports", [])
+	var count := func(fi: int, kind: String) -> int: return ports.filter(func(p: Dictionary) -> bool: return int(p.floor) == fi and p.kind == kind).size()
+	var rooms_by_floor: Array = floors.map(func(f: Dictionary) -> int: return (f.rooms as Array).size())
+	check(count.call(0, "door") >= 1 and count.call(1, "window") >= 1 and count.call(2, "parapet") >= 4
+		and rooms_by_floor.size() == 3 and rooms_by_floor.all(func(n: int) -> bool: return n >= 1),
+		"doors below, windows on the floor above (%d), the roof's parapet all round (%d), rooms on every floor %s"
+		% [count.call(1, "window"), count.call(2, "parapet"), rooms_by_floor])
+	# The same building from its roof; the scan cached (A3-04) under its own key, in this world.
+	var from_roof := Buildings.at(player, roof_goal)
+	var again := Buildings.near(player, roof_goal)
+	check((from_roof.get("floors", []) as Array).size() == 3 and from_roof.get("centre", Vector3.INF).distance_to(found.centre) < 1.0
+		and is_same(again, Buildings.near(player, roof_goal)),
+		"scanned from the roof: the same building, all three floors (cached: the same list again)")
+	if found.is_empty():
+		return
+	# Garrisoned against a threat in the street: men upstairs and on the roof.
+	var squad := level.squad_for(&"friendly")
+	var mates: Array[SquadAI] = []
+	for s: Soldier in _squad():
+		if s.vitals.is_up() and s.carrying == null and not is_instance_valid(s.carried_by) and SquadAI.of(s).care == SquadAI.Care.NONE and mates.size() < 4:
+			mates.append(SquadAI.of(s))
+	var tasks := SquadTactics.garrison_tasks(found, mates, STOREY_AT + Vector3(0, 0, b.size.y * 0.5 + 30.0))
+	var up_high := tasks.values().filter(func(t: Dictionary) -> bool: return (t.spot as Vector3).y > upper - 0.5).size()
+	check(up_high >= 2, "garrisoning it against the street: %d of %d posts up high (%s)" % [up_high, tasks.size(),
+		tasks.values().map(func(t: Dictionary) -> String: return "%s@%.1f" % [t.port, (t.spot as Vector3).y])])
+	# Cleared by four: floor by floor, the floor above once the ground floor's done.
+	var names := PackedStringArray(mates.map(func(ai: SquadAI) -> String: return String(ai.body.name)))
+	var why := squad.order_clear(player, front_room, names)
+	var op: Dictionary = mates[0].ordered.get("op", {}) if why == "" else {}
+	var first_up := -1.0
+	var gone_up_at := INF
+	var upstairs := ""
+	var visited := await _wait_until(func() -> bool:
+		for ai: SquadAI in mates:
+			if ai.body.global_position.y > upper - 0.5 and Buildings.contains(found, ai.body.global_position):
+				if first_up < 0.0:
+					first_up = Soldier._now()
+					gone_up_at = float((op.get("floor_go", [INF, INF]) as Array)[1]) if not op.is_empty() else INF
+					upstairs = String(ai.body.name)
+				return true
+		return false, 90.0)
+	var statuses := mates.map(func(ai: SquadAI) -> String: return "%s %s %.1f" % [ai.body.name, ai.body.ai_status, ai.body.global_position.y])
+	check(why == "" and visited and (op.get("floors", []) as Array).size() == 3,
+		"ordered to clear it, the team goes up the stairs: %s on the floor above (%s; %s)" % [upstairs, why, statuses])
+	check(is_finite(gone_up_at) and gone_up_at <= first_up,
+		"floor by floor: nobody goes up before the ground floor's rooms are done (went up at %.1f, first upstairs at %.1f)" % [gone_up_at, first_up])
+	for ai: SquadAI in mates:
+		ai.give_tactic({})
+	squad.give_order(player, Squad.Order.FOLLOW, player.global_position)
+	await _seconds(0.5)
+	# A man on the roof behind the parapet sees a hostile in the street and takes him on.
+	var watch: Dictionary = {}
+	for p: Dictionary in ports:
+		if int(p.floor) == 2 and p.kind == "parapet" and (p.dir as Vector3).z > 0.9:
+			watch = p
+			break
+	var gunner := mates[0]
+	if watch.is_empty():
+		check(false, "a parapet port facing the street (%s)" % [ports.filter(func(p: Dictionary) -> bool: return int(p.floor) == 2).map(func(p: Dictionary) -> Vector3: return p.dir)])
+		return
+	_clear_contact()
+	_place(player, STOREY_AT + Vector3(0, 0.1, -b.size.y * 0.5 - 8.0))  # the rest follow round the back, out of sight of the street
+	_place(gunner.body, (watch.point as Vector3) + Vector3.UP * 0.1)
+	gunner.give_tactic({"kind": &"garrison", "spot": watch.point, "face": watch.dir, "port": "parapet"})
+	var others := _squad().filter(func(s: Soldier) -> bool: return s != gunner.body)
+	for s: Soldier in others:
+		SquadAI.of(s).hold_fire = true  # the roof's man alone takes him on
+	await _seconds(1.0)
+	var hostile := level.spawn_soldier({"name": "StreetHostile", "faction": "hostile", "variant": "urban",
+		"pos": Vector3((watch.point as Vector3).x, 0.1, (watch.point as Vector3).z) + (watch.dir as Vector3) * 22.0,
+		"loadout": CompoundLevel.HOSTILE_LOADOUT, "combat": 0.3, "discipline": 0.5, "guard": true})
+	await _frames(2)
+	SquadAI.of(hostile).process_mode = Node.PROCESS_MODE_DISABLED
+	var engaged := await _wait_until(func() -> bool:
+		return not is_instance_valid(hostile) or not hostile.vitals.is_up() or gunner.target == hostile, 12.0)
+	var seen := is_instance_valid(hostile) and Squad.sees(gunner.body, hostile)
+	var seen_back := is_instance_valid(hostile) and Squad.sees(hostile, gunner.body)
+	check(engaged and gunner.body.global_position.y > roof_y - 0.3,
+		"%s on the roof behind the parapet sees the hostile in the street and takes him on (%s; sees him %s, seen back %s)"
+		% [gunner.body.name, gunner.body.ai_status, seen, seen_back])
+	if is_instance_valid(hostile):
+		hostile.queue_free()
+	gunner.give_tactic({})
+	for s: Soldier in others:
+		SquadAI.of(s).hold_fire = false
+	_clear_contact()
+	_place(gunner.body, STOREY_AT + Vector3(0, 0.1, b.size.y * 0.5 + 4.0))
 
 
 ## ZoneScatter.foliage_between on made-up lines: through a bush, over it, past it, through a

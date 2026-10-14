@@ -143,6 +143,9 @@ const HYSTERESIS := 0.1
 const ARRIVE := 0.7
 const RUN_DISTANCE := 5.0
 const WAYPOINT_REACH := 0.45
+## Points more than this above or below a unit are on another floor (F-01): distances to them
+## are measured in 3D, so a corner upstairs is never "reached" from the room under it.
+const FLOOR_DY_M := 1.6
 const REPATH_S := 1.0
 const COVER_RINGS: Array[float] = [2.0, 4.0, 6.0, 8.0, 10.0]
 const COVER_SEARCH_S := 1.0
@@ -2367,7 +2370,7 @@ func _do_tactic(t: Dictionary) -> void:
 			_has_destination = false
 			if _foe() == null:
 				_face(spot + (t.face as Vector3) * 5.0)
-			body.want_crouch = String(t.get("port", "")) != "window" and not (_foe() != null and Soldier._now() >= _pause_until)
+			body.want_crouch = String(t.get("port", "")) not in ["window", "parapet"] and not (_foe() != null and Soldier._now() >= _pause_until)
 		&"cover":
 			if not t.has("spot"):
 				var found: Variant = find_cover(body.global_position, 12.0)
@@ -2472,7 +2475,9 @@ func _tactic_maneuver(t: Dictionary) -> void:
 
 
 ## Clearing (SquadTactics.clear_op): to this unit's place in the stack, wait for the rest (or
-## STACK_WAIT_S), then in one after the other ENTRY_GAP_S apart, each to its room corner.
+## STACK_WAIT_S), then in one after the other ENTRY_GAP_S apart, each to its room corner; then
+## floor by floor (F-01): once everyone has his corner on this floor (or FLOOR_WAIT_S after the
+## first did), up the stair one after the other, ENTRY_GAP_S apart, to his corner on the next.
 func _tactic_clear(t: Dictionary, now: float) -> void:
 	var op: Dictionary = t.op
 	var slot: int = t.slot
@@ -2494,11 +2499,24 @@ func _tactic_clear(t: Dictionary, now: float) -> void:
 		_has_destination = false
 		_face(door)
 		return
-	var corner: Vector3 = op.rooms[slot]
+	var floors: Array = op.get("floors", [op.rooms])
+	var level: int = (op.get("floor_of", {}) as Dictionary).get(slot, 0)
+	var corner: Vector3 = floors[level][slot]
 	if _flat_distance(corner) > ARRIVE + 0.3:
 		_go(corner, true)
 		return
 	_has_destination = false
+	if level + 1 < floors.size():
+		# This floor done: up the stair once the rest are done here too, one after the other.
+		var marks: Dictionary = op.floor_done[level]
+		marks[slot] = true
+		op.floor_first[level] = minf(float(op.floor_first[level]), now)
+		if not is_finite(float(op.floor_go[level + 1])) and (marks.size() >= int(op.units) or now - float(op.floor_first[level]) >= SquadTactics.FLOOR_WAIT_S):
+			op.floor_go[level + 1] = now
+			_callout(&"tactic", "Moving up!")
+		if is_finite(float(op.floor_go[level + 1])) and now >= float(op.floor_go[level + 1]) + slot * SquadTactics.ENTRY_GAP_S:
+			op.floor_of[slot] = level + 1
+		return
 	op.done[slot] = true
 	if not ordered.is_empty():
 		if (op.done as Dictionary).size() >= int(op.units) and not bool(op.get("called", false)):
@@ -3083,8 +3101,11 @@ func _lies_at(spot: Vector3) -> bool:
 	return _flat_between(casualty.body_point(), spot) <= LAID_M
 
 
+## Flat distance to `point` (the baked navmesh sits a little above the ground, so 3D distances
+## never quite close), or the 3D distance when it's on another floor (FLOOR_DY_M).
 func _flat_distance(point: Vector3) -> float:
-	return Vector2(body.global_position.x - point.x, body.global_position.z - point.z).length()
+	var flat := Vector2(body.global_position.x - point.x, body.global_position.z - point.z).length()
+	return flat if absf(body.global_position.y - point.y) < FLOOR_DY_M else body.global_position.distance_to(point)
 
 
 

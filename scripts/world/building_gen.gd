@@ -102,7 +102,8 @@ static func house(seed: int, style := "") -> Dictionary:
 ## Returns {"boxes": [[lo, hi, Mat]], "rooms": [{"role", "rect" (Rect2, x/z inside its walls),
 ## "chunk", "floor" (0 the ground), "y" (its floor's height, m)}], "doors": [{"at": Vector3,
 ## "rooms": [i, j] (j -1: outside, -2: the roof), "stair" (a stair up: "at" its landing)}],
-## "loot": [{"at", "table"}], "stairs": [{"foot" (Rect2), "from_y", "to_y", "steps"}], "yards":
+## "windows": [{"at" (the middle of its opening's inner face, on its floor), "out" (Vector3 out
+## of it), "floor", "room"}], "roof_y" (the roof's top: where one stands on it), "loot": [{"at", "table"}], "stairs": [{"foot" (Rect2), "from_y", "to_y", "steps"}], "yards":
 ## [{"rect" (Rect2 inside its walls), "gate" (Vector3, or null)}], "size": Vector2 (the lot,
 ## yard and all), "storeys", "shape" ("rect" or "l"), "roof_access", "height" (m, its top),
 ## "style", "type"}. The shell stands at the front (+z) of the lot, a yard behind it.
@@ -194,7 +195,10 @@ static func building(type: String, seed: int, style := "") -> Dictionary:
 			avoid[key] = (avoid.get(key, []) as Array) + [(roof.foot as Rect2).grow(0.7)]
 	# Windows on outside walls, but not in the type's dark rooms (bathrooms, storerooms, an armoury).
 	var win_w: float = spec.win_w
-	for f: Dictionary in floors:
+	var windows: Array = []
+	var outward := {"n": Vector3(0, 0, -1), "s": Vector3(0, 0, 1), "w": Vector3(-1, 0, 0), "e": Vector3(1, 0, 0)}
+	for fi in floors.size():
+		var f: Dictionary = floors[fi]
 		var fr: Array[Rect2] = f.rects
 		for i in fr.size():
 			if f.roles[i] in (spec.dark as Array):
@@ -207,6 +211,9 @@ static func building(type: String, seed: int, style := "") -> Dictionary:
 				var key := _out_key(fr[i], side)
 				if not _overlaps(f.gaps.get(key, []), mid - win_w * 0.5 - 0.3, mid + win_w * 0.5 + 0.3):
 					_gap(f.gaps, key, mid - win_w * 0.5, mid + win_w * 0.5, WIN_SILL, WIN_TOP)
+					var line := _line(fr[i], side)
+					windows.append({"at": Vector3(mid, f.y, line) if side in ["n", "s"] else Vector3(line, f.y, mid),
+						"out": outward[side], "floor": fi, "room": int(f.first) + i})
 	# The walls, floor by floor; the slab between, the roof (with its parapet when it's used).
 	var boxes: Array = []
 	for f: Dictionary in floors:
@@ -252,7 +259,8 @@ static func building(type: String, seed: int, style := "") -> Dictionary:
 	var height := roof_y + roof_t + (maxf(PARAPET_H, RAIL_H) if not roof.is_empty() else 0.0)
 	return {"boxes": boxes, "rooms": rooms, "doors": doors, "loot": loot, "stairs": stairs, "yards": yards,
 		"size": Vector2(w, depth), "storeys": storeys, "shape": "l" if cut.has_area() else "rect",
-		"roof_access": not roof.is_empty(), "height": height, "style": style, "type": type}
+		"roof_access": not roof.is_empty(), "height": height, "style": style, "type": type,
+		"windows": windows, "roof_y": roof_y + roof_t}
 
 
 ## A style for a zone's region and terrain preset (TerrainPresets ids).
@@ -937,6 +945,14 @@ const TOWN_LOOT := {
 const TOWN_LOOT_MAX := 10
 ## A town's weapons cache: a stack of crates this size (m).
 const TOWN_CACHE := Vector3(1.4, 1.0, 0.9)
+## Garrison posts (F-02): as many as one for every other building and two at the crossroads,
+## TOWN_HIGH_SHARE of them up high: at an upper floor's window onto the street, or behind a
+## roof's parapet (a roof is only ever reached by a stair, and every such roof has a parapet);
+## the rest just inside front doors. A post up high stands POST_IN_M in from the wall, on a floor
+## or a roof with nothing in a man's way (POST_CLEAR_M round, 1.7 m up).
+const TOWN_HIGH_SHARE := 1.0 / 3.0
+const POST_IN_M := 0.7
+const POST_CLEAR_M := 0.3
 ## Every TOWN_CIVILIAN_EVERY'th building has someone living or working there, walking between
 ## their front step, the street and the crossroads.
 const TOWN_CIVILIAN_EVERY := 3
@@ -946,7 +962,9 @@ const TOWN_MIX := {"house": 6.0, "shop": 2.5, "warehouse": 1.0, "clinic": 0.6, "
 
 ## The town from `seed`: {"boxes", "buildings": [{"type", "origin" (Vector3), "turned" (180
 ## degrees), "data" (building())}], "half" (Vector2: footprint half-size, m), "points"
-## ({"objective", "cache", "intel"}: Array of Vector3), "garrison" (Array of Vector3), "loot"
+## ({"objective", "cache", "intel"}: Array of Vector3), "garrison" (Array of Vector3),
+## "garrison_face" (Vector3 for each post: the way it looks out, Vector3.ZERO: the default),
+## "garrison_high" (how many of the posts are up high), "loot"
 ## (ZoneModules.LOOT entries: {"uid", "id", "count", "pos"}), "hvt" and "hostage" (Vector3: the
 ## middle of the room an HVT lives in, an office or a living room, and of the room a hostage is
 ## held in, the police cells or a bedroom), "cache" ([lo, hi] Vector3s: a weapons cache, crates
@@ -1025,25 +1043,116 @@ static func town(seed: int, style := "") -> Dictionary:
 					var corner := Vector3(signf(step.x) * CROSS_W * 0.3, 0, rng.randf_range(-STREET_W, STREET_W) * 0.3)
 					civilians.append({"pos": arr.call(step + Vector3(0, 0.1, 0)), "routine": [arr.call(step), arr.call(across), arr.call(corner)]})
 					break
-		# A post just inside the front door of every other building.
-		if buildings.find(b) % 2 == 0:
-			for dr: Dictionary in b.data.doors:
-				if dr.rooms[1] == -1 and (dr.at as Vector3).z > 0.0:
-					garrison.append(to_town.call((dr.at as Vector3) + Vector3(0, 0.1, -1.0)))
-					break
+	# Garrison posts (F-02): a share up high at upper windows and on roofs, the rest just inside
+	# front doors, two at the crossroads; in building order (posts pair off as buddies in turn).
+	var face: Array = []
+	var high := _town_posts(buildings, garrison, face)
 	for fallback: String in ["objective", "cache", "intel"]:
 		if (points[fallback] as Array).is_empty():
 			points[fallback].append(Vector3(0, 0, 0))
 	garrison.append(Vector3(-CROSS_W, 0.1, 0))
 	garrison.append(Vector3(CROSS_W, 0.1, 0))
+	face.append_array([Vector3.ZERO, Vector3.ZERO])
 	# The weapons cache: crates in the middle of the armoury or a store room (a raid's target).
 	var at := _town_room(buildings, ["armoury", "storeroom"], Vector3(0, 0.1, STREET_W * 0.5 + SETBACK + 3.0)) - Vector3(0, 0.1, 0)
 	var cache: Array = [at - Vector3(TOWN_CACHE.x * 0.5, 0, TOWN_CACHE.z * 0.5), at + Vector3(TOWN_CACHE.x * 0.5, TOWN_CACHE.y, TOWN_CACHE.z * 0.5)]
 	boxes.append([cache[0], cache[1], VoxelWorld.Mat.WOOD])
 	return {"boxes": boxes, "buildings": buildings, "half": half, "points": points, "garrison": garrison,
-		"loot": loot, "civilians": civilians, "style": style, "cache": cache,
+		"garrison_face": face, "garrison_high": high, "loot": loot, "civilians": civilians, "style": style, "cache": cache,
 		"hvt": _town_room(buildings, ["office", "living"], Vector3(-CROSS_W, 0.1, 0)),
 		"hostage": _town_room(buildings, ["cells", "bedroom"], Vector3(CROSS_W, 0.1, 0))}
+
+
+## A town's building posts into `posts` (town metres) and the way each looks out into `face`:
+## as many as one for every other building, TOWN_HIGH_SHARE of them up high (spread over the
+## buildings with an upper floor or a roof to stand on), the rest inside front doors (spread
+## over the others). Returns how many are up high. No random numbers: the town's stay the same.
+static func _town_posts(buildings: Array, posts: Array, face: Array) -> int:
+	var total := (buildings.size() + 1) / 2 + 2  # with the two at the crossroads
+	var up_at := {}  # building index -> [post, face] up high
+	for i in buildings.size():
+		var p := _high_post(buildings[i].data, i)
+		if not p.is_empty():
+			up_at[i] = p
+	var want_high := mini(roundi(total * TOWN_HIGH_SHARE), up_at.size())
+	var high := {}
+	var keys: Array = up_at.keys()
+	for k in want_high:
+		high[keys[k * keys.size() / want_high]] = true
+	var rest: Array = range(buildings.size()).filter(func(i: int) -> bool: return not high.has(i))
+	var want_door := mini(total - 2 - want_high, rest.size())
+	var door := {}
+	for k in want_door:
+		door[rest[k * rest.size() / want_door]] = true
+	var count := 0
+	for i in buildings.size():
+		var b: Dictionary = buildings[i]
+		var turned: bool = b.turned
+		var turn := func(p: Vector3) -> Vector3: return Vector3(-p.x, p.y, -p.z) if turned else p
+		if door.has(i):
+			for dr: Dictionary in b.data.doors:
+				if dr.rooms[1] == -1 and (dr.at as Vector3).z > 0.0:
+					posts.append(turn.call((dr.at as Vector3) + Vector3(0, 0.1, -1.0)) + (b.origin as Vector3))
+					face.append(turn.call(Vector3(0, 0, 1)))  # out of the door, onto the street
+					break
+		if high.has(i):
+			posts.append(turn.call(up_at[i][0]) + (b.origin as Vector3))
+			face.append(turn.call(up_at[i][1]))
+			count += 1
+	return count
+
+
+## Building `b`'s post up high (in its own metres) and the way it looks: [post, face], [] for
+## none. A two-storey building's is at an upper window onto the street, a roof's behind its
+## parapet on the street side (a building with both: by `i`, every other one on its roof).
+static func _high_post(b: Dictionary, i: int) -> Array:
+	var tries: Array = []
+	var roof := func() -> void:
+		if not b.roof_access:
+			return
+		var front := -INF
+		var span := Vector2(INF, -INF)
+		for r: Dictionary in b.rooms:
+			if int(r.floor) == int(b.storeys) - 1:
+				var rect: Rect2 = r.rect
+				front = maxf(front, rect.end.y)
+				span = Vector2(minf(span.x, rect.position.x), maxf(span.y, rect.end.x))
+		var y := float(b.roof_y)
+		for k in 9:  # from the middle out, either way
+			var x := (span.x + span.y) * 0.5 + float((k + 1) / 2) * 1.2 * (1.0 if k % 2 == 1 else -1.0)
+			if x > span.x + 0.6 and x < span.y - 0.6:
+				tries.append([Vector3(x, y + 0.1, front - POST_IN_M), Vector3(0, 0, 1)])
+	var window := func() -> void:
+		# Onto the street (+z) only.
+		for w: Dictionary in (b.windows as Array).filter(func(w: Dictionary) -> bool: return int(w.floor) >= 1 and (w.out as Vector3).z > 0.5):
+			for back: float in [POST_IN_M, POST_IN_M + 0.4]:
+				tries.append([(w.at as Vector3) - (w.out as Vector3) * back + Vector3(0, 0.1, 0), w.out])
+	if int(b.storeys) == 2 and i % 2 == 0:
+		window.call()
+		roof.call()
+	else:
+		roof.call()
+		if int(b.storeys) == 2:
+			window.call()
+	for t: Array in tries:
+		if _clear_post(b.boxes, t[0]):
+			return t
+	return []
+
+
+## Whether a man fits at `p` (building metres, at his feet): nothing within POST_CLEAR_M of him
+## up to 1.7 m, and something under his feet (a floor, a slab, a roof).
+static func _clear_post(boxes: Array, p: Vector3) -> bool:
+	var body := AABB(p + Vector3(-POST_CLEAR_M, 0.05, -POST_CLEAR_M), Vector3(POST_CLEAR_M * 2.0, 1.65, POST_CLEAR_M * 2.0))
+	var under := false
+	for bx: Array in boxes:
+		var lo: Vector3 = bx[0]
+		var hi: Vector3 = bx[1]
+		if AABB(lo, hi - lo).intersects(body):
+			return false
+		if p.x >= lo.x and p.x <= hi.x and p.z >= lo.z and p.z <= hi.z and absf(hi.y - (p.y - 0.1)) < 0.05:
+			under = true
+	return under
 
 
 ## The middle of the first room (in town metres, on the floor) whose role is the earliest of
