@@ -13,6 +13,43 @@ ask here first.
 Captain's side checks GitHub every 15 minutes. If you push a README or note saying what you're
 picking up next, we'll read it and steer around it.
 
+## HANDOFF for cghath (2026-10-13, late; Captain's side out of usage). Start here.
+
+**State.** `dev` = 4888efa (loot fix, friendly-muzzle fix, settings menu). Everything newer is on
+branches, all pushed:
+- **`integrate/b3` = 5862988**: dev + menu cleanup (no people checkbox, people always on),
+  settings polish (opaque panel, objective-marker toggle), pouch overhang fix, objective helper +
+  ammo readout (mags + "about half" estimate, not exact counts), contract board keeps the mouse
+  (base screen steps aside under it). Local suites green (R0360 on b2; R0363 supports). CI was
+  running at handoff; one CI flake seen (supports host) that passes locally. **Next: if CI is
+  green, ff `dev` to 5862988, then build** (`tools/make_build.sh`, preset renamed "Windows Desktop",
+  template `C:/Users/noahg/Downloads/godot.windows.template_release.x86_64.exe/...`) into
+  `B:\Contractor\builds`, move B0357 to `builds\outdated`.
+- **`ui/gear-marker` = ec22a34** (off 5862988): dead player's "X's gear" label ~35% smaller
+  (pixel_size 0.0015 -> 0.00098). One line; merge after b3.
+- **Agent branches, may be WIP** (each off 5862988; read the last commit message for what's left):
+  - `gameplay/gun-handling` (worktree B:\Contractor-guns, port 25333): sight picture when aiming,
+    M110 scope with magnification, realistic spread (M4 spread_deg 1.2 = ~2 m at 100 m is far too
+    wide) with sway/recoil/movement as the main error. Must NOT make the AI more accurate.
+  - `vehicles/chase-camera` (B:\Contractor-vehcam, 25331): 1st person + 3rd person toggle in vehicles.
+  - `vehicles/interiors` (B:\Contractor-vehint, 25332): simple readable interiors and windows.
+  Each needs: finish, screenshots checked, its suites + smoke, CI, then merge into an integrate branch.
+
+**Playtest P0362 (build B0357, Captain) findings still open:**
+- **Close-range hostile accuracy too high**: squad and Player 1 killed by head/neck shots at 2-6 m
+  by village guards and R1 (5 deaths in ~4 min). Look after the guns branch lands (same area).
+- **3.42 s hitch on deploying to Harbour yard** (0:10:01): HVT + 12 civilians (town_4 x5) spawn
+  plus town stamping the same second, 5 nav rebakes. Spread civilian/garrison spawns over frames.
+- Perf line says "memory 0 MB" in release builds (needs a release-safe memory reading).
+- AT4 "No room" is expected (launcher slot + pack top only).
+
+**Not ours, left alone:** `B:\Contractor-hotzone` (fix/loot-flake) has 4 uncommitted files
+(ragdoll.gd +78, CLAUDE.md, two tests) from an earlier session; not committed by us.
+`docs/captain-side-status` local branch has diverged from origin (16 ahead / 4 behind); not pushed.
+
+**Captain decisions still pending:** city building height, wave 6 calls, back utility points,
+village houses, base hub -> FOB, CI audit option (Claude PR review vs static checks).
+
 ## For you (cghath)
 
 - **Your audit branch is merged into dev (8333679, Captain's go, 2026-10-13 ~20:00).** dev now
