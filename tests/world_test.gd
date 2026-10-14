@@ -279,6 +279,18 @@ func _test_edits() -> void:
 	var through_wall := [m.to_global(SHED_INTACT + Vector3(0, 0, 1)), m.to_global(SHED_INTACT - Vector3(0, 0, 1))]
 	check(world.material_at(m.to_global(SHED_BREACH)) == VoxelWorld.Mat.EMPTY and Throwables.clear_line(space, through_breach[0], through_breach[1])
 		and not Throwables.clear_line(space, through_wall[0], through_wall[1]), "a breach blown in the shed's south wall: clear through it, the rest of the wall stands")
+	# Navigation's voxel boxes: structures nothing carved go in as built, unread; the same solid
+	# volume as reading every voxel, the breach included.
+	var area := AABB(Vector3(-60, -2, -60), Vector3(120, 16, 120))
+	var quick := world.solid_boxes_m(area)
+	world.read_all_voxels = true
+	var full := world.solid_boxes_m(area)
+	world.read_all_voxels = false
+	var volume := func(boxes: Array[AABB]) -> float: return boxes.reduce(func(sum: float, b: AABB) -> float: return sum + b.get_volume(), 0.0)
+	var breach_in := func(boxes: Array[AABB]) -> bool: return boxes.any(func(b: AABB) -> bool: return b.grow(-0.01).has_point(SHED_BREACH))
+	check(absf(volume.call(quick) - volume.call(full)) < 0.01 and quick.size() < full.size() and not breach_in.call(quick) and not breach_in.call(full),
+		"navigation's voxel boxes: untouched structures unread (%d boxes, read all: %d), the same %.2f m3 (read all: %.2f), the breach open" % [
+		quick.size(), full.size(), volume.call(quick), volume.call(full)])
 	# Out and back in: rebuilt from its base boxes and its log.
 	player.global_position = level.ground_point(m.global_position + Vector3(0, 0, 500))
 	await _wait_for(func() -> bool: return not m.is_streamed(), 3.0)

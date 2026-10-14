@@ -148,25 +148,33 @@ func _time_sounds(when: String) -> void:
 func _time_nav_reads(module: ZoneModule) -> void:
 	var world := module.voxel_world
 	var r := module.footprint()
-	var total := 0.0
-	var worst := 0.0
-	var boxes := 0
-	var chunks := 0
-	var x := r.position.x
-	while x < r.end.x:
-		var z := r.position.y
-		while z < r.end.y:
-			var bounds := AABB(Vector3(x - 1.0, -2.0, z - 1.0), Vector3(14.0, 14.0, 14.0))
-			var local := world.global_transform.affine_inverse() * bounds
-			var t := Time.get_ticks_usec()
-			boxes += world.solid_boxes_m(local).size()
-			var ms := (Time.get_ticks_usec() - t) / 1000.0
-			total += ms
-			worst = maxf(worst, ms)
-			chunks += 1
-			z += 12.0
-		x += 12.0
-	print("timing: nav voxel reads, module %s: %d chunks, %.1f ms in all, worst chunk %.1f ms, %d boxes" % [module.type, chunks, total, worst, boxes])
+	for read_all in [true, false]:
+		world.read_all_voxels = read_all
+		var total := 0.0
+		var worst := 0.0
+		var boxes := 0
+		var chunks := 0
+		var volume := 0.0
+		var x := r.position.x
+		while x < r.end.x:
+			var z := r.position.y
+			while z < r.end.y:
+				var bounds := AABB(Vector3(x - 1.0, module.global_position.y - 2.0, z - 1.0), Vector3(14.0, 16.0, 14.0))
+				var local := world.global_transform.affine_inverse() * bounds
+				var t := Time.get_ticks_usec()
+				var got := world.solid_boxes_m(local)
+				var ms := (Time.get_ticks_usec() - t) / 1000.0
+				boxes += got.size()
+				for b in got:
+					volume += b.get_volume()
+				total += ms
+				worst = maxf(worst, ms)
+				chunks += 1
+				z += 12.0
+			x += 12.0
+		print("timing: nav voxel reads (%s), module %s: %d chunks, %.1f ms in all, worst chunk %.1f ms, %d boxes, %.1f m3" % [
+			"every voxel read" if read_all else "uncarved structures unread", module.type, chunks, total, worst, boxes, volume])
+	world.read_all_voxels = false
 
 
 func _time_calls() -> void:
