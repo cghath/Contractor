@@ -35,7 +35,10 @@ run_log_lock() {
 	local lock="$1" start age mtime
 	start=$(date +%s)
 	until mkdir "$lock" 2>/dev/null; do
-		mtime=$(stat -c %Y "$lock" 2>/dev/null || stat -f %m "$lock" 2>/dev/null || echo "")
+		# GNU stat -c, else BSD stat -f. Only a number counts: when the lock is let go and taken
+		# again between the two, GNU's stat -f prints a filesystem report ("File: ...") instead.
+		mtime=$(stat -c %Y "$lock" 2>/dev/null) || mtime=$(stat -f %m "$lock" 2>/dev/null) || mtime=""
+		case "$mtime" in ''|*[!0-9]*) mtime="" ;; esac
 		if [ -n "$mtime" ]; then
 			age=$(( $(date +%s) - mtime ))
 			if [ "$age" -ge "$RUN_LOCK_STALE_S" ] && mv "$lock" "$lock.stale.$$" 2>/dev/null; then
