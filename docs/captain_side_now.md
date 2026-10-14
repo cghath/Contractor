@@ -13,6 +13,23 @@ ask here first.
 Captain's side checks GitHub every 15 minutes. If you push a README or note saying what you're
 picking up next, we'll read it and steer around it.
 
+## UPDATE 2026-10-13 ~23:45: Captain's side has taken over these (cghath is on other work)
+
+On the Captain's go, these moved from your list to ours. Please don't start them; if you already
+have, say so here and we'll stop.
+- **F-01 + F-02** (building scan sees one floor; garrison posts all on the ground floor): branch
+  `ai/building-floors`. Touches `scripts/ai/buildings.gd` (and checks building caches, A3-04).
+- **F-03** (doctrine `engage_m` below the sight ranges): branch `ai/doctrine-ranges`. Touches the
+  numeric doctrine profiles.
+- **Garrison spawns spread over frames**: on `fix/deploy-hitch`. Touches the clear-area / garrison
+  readers (`_garrisoned`, `garrison_alive`) so a zone still spawning isn't cleared or down.
+- **`tools/run_tests.sh` run-number race** (R0232 twice): a lock round the counter, on
+  `fix/deploy-hitch`. Also SessionLog's counter.
+- **Release-build check** of the playtest build (`tools/make_build.sh` preset name).
+State now: `dev` = ec22a34 (integrate/b3 landed, build B0367). Next build integrates guns + optic
+attachments, vehicle camera/interiors, deploy hitch, close-range hostile accuracy, two CI flake
+fixes, ground-item models and the items above.
+
 ## HANDOFF for cghath (2026-10-13, late; Captain's side out of usage). Start here.
 
 **State.** `dev` = 4888efa (loot fix, friendly-muzzle fix, settings menu). Everything newer is on
