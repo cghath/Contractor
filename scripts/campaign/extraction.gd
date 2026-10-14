@@ -5,10 +5,16 @@ extends Node
 ## countdown. Points come from the zone's preset LZs, from a grid reference a player picks on
 ## the map, or from a thrown purple smoke (SmokeCloud, the colour extraction looks for).
 ##
-## The deployment ends when the squad is inside one point and the host confirms: every
-## living player (downed ones carried in) and every AI squadmate the players chose to bring.
-## Squadmates the players chose to leave stay behind and are reported (the base's MIA rule
-## uses that). Then a countdown runs (COUNTDOWN_S); anyone needed stepping out stops it.
+## The deployment ends when the squad is inside one point and a player inside it confirms:
+## every living player (downed ones carried in) and every AI squadmate the players chose to
+## bring. Squadmates the players chose to leave stay behind and are reported (the base's MIA
+## rule uses that). Captain, 2026-10-14 (co-op): any player standing inside a point can
+## confirm, not only the host; and players down or dead (waiting to respawn) outside the point,
+## and AI squadmates away from it, don't block: the first confirm warns who'd be left behind
+## (server_confirm), a second one within LEAVE_CONFIRM_S extracts without them and they're
+## reported left behind (MIA) like a squadmate left by choice. A player who is up and simply
+## elsewhere still blocks: they can walk there. Then a countdown runs (COUNTDOWN_S); anyone
+## needed stepping out stops it.
 ## At the end the host builds the report of who and what got out and hands it to the
 ## economy (END_GROUP) and to deployment_ended. State replicates to every peer and late
 ## joiners. Wave 5b: a called extraction helicopter (HeliCall) lands at a point and, with the
@@ -45,6 +51,9 @@ const HVT_GROUP := &"hvt"
 const RADIUS_M := 20.0
 const COUNTDOWN_S := 10.0
 const SMOKE_COLOUR := "purple"
+## Captain, 2026-10-14: how long a "Leaving behind" warning stands; a second confirm within it
+## extracts without those named.
+const LEAVE_CONFIRM_S := 10.0
 const SMOKE_CHECK_S := 0.5
 ## Sources of a point. One "grid" and one "smoke" point at a time: the newest replaces the
 ## last, as a helicopter goes to the latest call; the zone's presets all stay.
@@ -66,6 +75,10 @@ var last_report: Dictionary = {}
 ## Host (wave 5b): the helicopter the squad rides out in (HeliCall: server_ride_out). Whoever
 ## and whatever is aboard counts as out, and its cargo is the deposited items it lifted.
 var ride: Node = null
+## Host (Captain, 2026-10-14): who the squad extracts without after a confirmed "Leaving behind"
+## warning (players down or dead outside the point, AI squadmates away from it), by
+## _soldier_name: {name: true}. Cleared when the countdown stops or a deployment begins.
+var left_at_call: Dictionary = {}
 
 var _plan: Dictionary = {}
 var _started_msec := 0
@@ -74,6 +87,9 @@ var _seen_smoke := {}  # host: instance ids of purple clouds already handled
 var _smoke_points := {}  # host: purple cloud instance id -> the point it set
 var _smoke_check := 0.0
 var _last_whole := -1
+var _warned := PackedStringArray()  # host: who the last "Leaving behind" warning named
+var _warned_point := -1  # host: and at which point
+var _warned_msec := -1  # host: and when (Time.get_ticks_msec)
 
 
 func _init() -> void:
@@ -107,7 +123,8 @@ func request_bring(mate: String, bring: bool) -> void:
 	_server_bring.rpc_id(1, mate, bring)
 
 
-## Only the host's confirmation counts.
+## Asks the host to confirm the extraction; it counts when this peer's player stands inside a
+## point (Captain, 2026-10-14: any player there, not only the host).
 func request_confirm() -> void:
 	_server_confirm.rpc_id(1)
 
@@ -128,6 +145,7 @@ func server_begin(plan: Dictionary) -> void:
 	countdown_point = -1
 	ride = null
 	_smoke_points = {}
+	_clear_left()
 	for cloud in SmokeCloud.clouds_of(SMOKE_COLOUR):
 		_seen_smoke[cloud.get_instance_id()] = true  # smoke from before the deployment doesn't count
 	for preset: Dictionary in plan.get("zone", {}).get("extraction_points", []):
@@ -207,10 +225,30 @@ func server_set_bring(mate: String, bring: bool) -> void:
 	_broadcast()
 
 
-## Host only. Everyone who must be at the point: {"players": [Soldier], "ai": [Soldier]}.
+## Host only. Everyone who must be at the point: {"players": [Soldier], "ai": [Soldier]}
+## (not those left at the call: left_at_call).
 func required() -> Dictionary:
-	var ai := MapNodes.squad_ai(self).filter(func(s: Soldier) -> bool: return not leave.has(String(s.name)))
-	return {"players": MapNodes.players(self), "ai": ai}
+	var ai := MapNodes.squad_ai(self).filter(func(s: Soldier) -> bool:
+		return not leave.has(String(s.name)) and not left_at_call.has(_soldier_name(s)))
+	var players := MapNodes.players(self).filter(func(s: Soldier) -> bool: return not left_at_call.has(_soldier_name(s)))
+	return {"players": players, "ai": ai}
+
+
+## Captain, 2026-10-14: whether the squad may extract without `s` (after a warning): an AI
+## squadmate, or a player who is down, or dead and waiting to respawn. A player who is up can
+## walk to the point, so they're waited for.
+static func can_leave_behind(s: Soldier) -> bool:
+	return s.is_ai() or not s.vitals.is_up() or s.respawn_state == Soldier.RESPAWN_WAITING
+
+
+## The point player `s` can confirm at (up, not waiting to respawn, standing inside it), or {}.
+func point_of_player(s: Soldier) -> Dictionary:
+	if s == null or not s.vitals.is_up() or s.respawn_state == Soldier.RESPAWN_WAITING:
+		return {}
+	for point: Dictionary in points:
+		if inside(point, s.global_position):
+			return point
+	return {}
 
 
 ## Names of those required who aren't inside `point`.
@@ -235,19 +273,106 @@ static func inside(point: Dictionary, pos: Vector3) -> bool:
 	return Vector2(pos.x, pos.z).distance_to(point.pos) <= float(point.get("radius", RADIUS_M))
 
 
-## Host only. The host confirms the extraction: with the squad inside a point the countdown
-## starts. Returns "" when it started, or why it didn't.
-func server_confirm() -> String:
+## Host only. Confirms the extraction: with the squad inside a point the countdown starts.
+## `by_peer` is the player who confirmed (0: the host's own call, as tests make it); they must
+## stand inside a point (Captain, 2026-10-14: any player there can confirm), else they're told
+## so. With only those who can be left behind missing (can_leave_behind), the first confirm
+## warns everyone who'd be left; a second within LEAVE_CONFIRM_S, from anyone inside, starts
+## the countdown without them (left_at_call). A player who is up and elsewhere blocks, and at
+## least one player must be inside. Returns "" when it started, or why it didn't.
+func server_confirm(by_peer := 0) -> String:
 	if not multiplayer.is_server() or state != State.ACTIVE:
 		return "No extraction to confirm"
 	if points.is_empty():
 		return "No extraction point: pick one on the map or throw a purple smoke"
-	var point := point_with_squad()
-	if point.is_empty():
-		var nearest := _nearest_point()
-		var why := "Not everyone is at the extraction point. Waiting for: %s" % ", ".join(missing_at(nearest))
+	var point := {}
+	if by_peer > 0:
+		point = point_of_player(_player_of(by_peer))
+		if point.is_empty():
+			var refused := "Only a player standing inside an extraction point can confirm it"
+			_client_message.rpc_id(by_peer, refused)
+			SessionLog.note("extraction: player %d's confirm refused (not inside a point)" % by_peer)
+			return refused
+	else:
+		point = point_with_squad()
+		if point.is_empty():
+			point = _point_for_call()
+	if not missing_at(point).is_empty():
+		return _confirm_without(point)
+	return _start_countdown(point)
+
+
+## Host. Not everyone needed is inside `point`. Players who are up and elsewhere block; the
+## rest (can_leave_behind) are warned about, then left at a second confirm. Returns "" when the
+## countdown started, or why it didn't.
+func _confirm_without(point: Dictionary) -> String:
+	var need := required()
+	var blockers := PackedStringArray()
+	var leaving := PackedStringArray()
+	var players_in := 0
+	for s: Soldier in need.players + need.ai:
+		if inside(point, s.body_point()):
+			players_in += 0 if s.is_ai() else 1
+		elif can_leave_behind(s):
+			leaving.append(_soldier_name(s))
+		else:
+			blockers.append(_soldier_name(s))
+	var why := ""
+	if not blockers.is_empty():
+		why = "Not everyone is at the extraction point. Waiting for: %s" % ", ".join(blockers)
+	elif players_in == 0:
+		why = "Nobody is at the extraction point"
+	if why != "":
 		_client_message.rpc(why)
 		return why
+	var again := _warned == leaving and _warned_point == int(point.id) and _warned_msec >= 0 \
+		and Time.get_ticks_msec() - _warned_msec <= int(LEAVE_CONFIRM_S * 1000.0)
+	if not again:
+		_warned = leaving
+		_warned_point = int(point.id)
+		_warned_msec = Time.get_ticks_msec()
+		why = "Leaving behind: %s. Confirm again to extract without them" % ", ".join(leaving)
+		_client_message.rpc(why)
+		SessionLog.note("extraction at %s: warned, leaving behind %s" % [point.name, ", ".join(leaving)])
+		return why
+	for who in leaving:
+		left_at_call[who] = true
+	SessionLog.note("extraction at %s: confirmed again, leaving behind %s" % [point.name, ", ".join(leaving)])
+	return _start_countdown(point)
+
+
+## Host: the point a call without a confirmer is about: the one with the most of the squad
+## inside, else the nearest to the first player.
+func _point_for_call() -> Dictionary:
+	var need := required()
+	var best := {}
+	var best_n := 0
+	for point: Dictionary in points:
+		var n := 0
+		for s: Soldier in need.players + need.ai:
+			n += 1 if inside(point, s.body_point()) else 0
+		if n > best_n:
+			best = point
+			best_n = n
+	return best if not best.is_empty() else _nearest_point()
+
+
+func _player_of(peer: int) -> Soldier:
+	for s: Soldier in MapNodes.players(self):
+		if s.name.to_int() == peer:
+			return s
+	return null
+
+
+func _clear_left() -> void:
+	left_at_call = {}
+	_warned = PackedStringArray()
+	_warned_point = -1
+	_warned_msec = -1
+
+
+## Host. Everyone needed is inside `point`: the countdown starts. Returns "".
+func _start_countdown(point: Dictionary) -> String:
 	SessionLog.note("extraction called at %s: %.0f s countdown" % [point.name, countdown_s])
 	state = State.COUNTDOWN
 	countdown_point = int(point.id)
@@ -310,6 +435,7 @@ func _run_countdown(delta: float) -> void:
 	if not missing.is_empty():
 		state = State.ACTIVE
 		countdown_point = -1
+		_clear_left()  # who's left behind is asked again at the next confirm
 		_broadcast()
 		_client_message.rpc("Extraction stopped: %s left the extraction point" % ", ".join(missing))
 		SessionLog.note("extraction stopped: %s left %s" % [", ".join(missing), point.get("name", "the point")])
@@ -345,21 +471,38 @@ func _finish(point: Dictionary) -> void:
 ## Host only. Who and what is getting out at `point` (see the class doc).
 func build_report(point: Dictionary) -> Dictionary:
 	var need := required()
+	var out_players: Array = need.players.duplicate()
+	var out_ai: Array = need.ai.duplicate()
+	# Left at the call but inside (or aboard) at the end after all: they got out.
+	for s: Soldier in MapNodes.players(self):
+		if left_at_call.has(_soldier_name(s)) and s.respawn_state != Soldier.RESPAWN_WAITING and _out_at(point, s):
+			out_players.append(s)
+	for s: Soldier in MapNodes.squad_ai(self):
+		if left_at_call.has(_soldier_name(s)) and not leave.has(String(s.name)) and _out_at(point, s):
+			out_ai.append(s)
 	var out_soldiers: Array[Soldier] = []
 	var players: Array = []
 	var squad: Array = []
-	for s: Soldier in need.players:
+	for s: Soldier in out_players:
 		players.append(_soldier_record(s))
 		out_soldiers.append(s)
-	for s: Soldier in need.ai:
+	for s: Soldier in out_ai:
 		squad.append(_soldier_record(s))
 		out_soldiers.append(s)
 	var left: Array = []
 	for s: Soldier in MapNodes.squad_ai(self):
-		if s not in need.ai:
+		if s not in out_ai:
 			var p := s.global_position
 			left.append({"name": String(s.name), "role": String(s.role), "slot": s.squad_slot, "alive": true,
 				"downed": not s.vitals.is_up(), "chosen": leave.has(String(s.name)), "pos": [p.x, p.y, p.z]})
+	# Captain, 2026-10-14: players down or dead outside the point, left at the call, are left
+	# behind (MIA) like a squadmate ("player", "peer"; "alive" false while waiting to respawn).
+	for s: Soldier in MapNodes.players(self):
+		if s not in out_players:
+			var p := s.body_point()
+			left.append({"name": _soldier_name(s), "player": true, "peer": s.name.to_int(), "node": String(s.name), "role": String(s.role),
+				"slot": s.squad_slot, "alive": not s.vitals.is_dead() and s.respawn_state != Soldier.RESPAWN_WAITING,
+				"downed": not s.vitals.is_up(), "chosen": false, "pos": [p.x, p.y, p.z]})
 	var carried := {}
 	for s: Soldier in out_soldiers:
 		if is_instance_valid(s.carrying):
@@ -520,11 +663,13 @@ func _server_bring(mate: String, bring: bool) -> void:
 		server_set_bring(mate, bring)
 
 
+## Captain, 2026-10-14: any player inside a point may confirm, the host's clients too (only the
+## host's used to count, so a client's confirm went nowhere).
 @rpc("any_peer", "call_local", "reliable")
 func _server_confirm() -> void:
-	var sender := multiplayer.get_remote_sender_id()
-	if multiplayer.is_server() and (sender == 0 or sender == 1):
-		server_confirm()
+	if multiplayer.is_server():
+		var sender := multiplayer.get_remote_sender_id()
+		server_confirm(sender if sender > 0 else multiplayer.get_unique_id())
 
 
 func _state() -> Dictionary:

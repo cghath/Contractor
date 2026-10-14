@@ -436,6 +436,7 @@ func _do_switch() -> void:
 	if is_instance_valid(_ui):
 		_ui.close()
 	var fresh := _swap_level(info)
+	_close_screens_for(fresh)
 	_client_switch_level.rpc(info)
 	fresh.player_roles = roles
 	fresh._on_hosted()
@@ -553,7 +554,16 @@ func _client_switch_level(info: Dictionary) -> void:
 	if is_instance_valid(_ui):
 		_ui.close()
 	var fresh := _swap_level(info)
+	_close_screens_for(fresh)
 	level_switched.emit(fresh)
+
+
+## Every peer: heading into a zone, the contract screens close (Contracts.close_screens): a
+## debrief still up from the last deployment doesn't hold this player at it (Captain,
+## 2026-10-14). Back at the base the debrief stays: that's where it's read.
+func _close_screens_for(fresh: CompoundLevel) -> void:
+	if fresh != null and not (fresh is BaseLevel):
+		Contracts.close_screens()
 
 
 ## Replaces the running level with a new one playing `info` (level_info()) under the same
@@ -1018,7 +1028,9 @@ func _take_out_of_zone(uids: Dictionary) -> void:
 
 
 ## Host (the map's extraction): the deployment ends. `extracted` are the soldiers who made it
-## out (AI squadmates and players; players are always counted back). Every roster squadmate
+## out (AI squadmates and players). A player not among them was left behind down or dead
+## (Captain, 2026-10-14: Extraction leaves them at a second confirm): a stand-in they played goes
+## MIA like a squadmate; their own main character makes it home (RosterDeployment.resolve). Every roster squadmate
 ## who deployed is settled (RosterDeployment.resolve): dead ones are lost with their gear on
 ## their body in the zone, those alive but not in `extracted` go MIA (a recovery contract is
 ## requested), the rest come back with their gear, experience and wounds. Days pass (with
@@ -1055,7 +1067,11 @@ func server_end_deployment(extracted: Array, return_to_base := true, advance_day
 	for n: Node in lvl.players.get_children():
 		var p := n as Soldier
 		if p and not p.is_queued_for_deletion():
-			outcomes.players[player_key(p.name.to_int())] = _outcome_of(p)
+			var o := _outcome_of(p)
+			if not made_it.has(p.get_instance_id()):
+				o["state"] = RosterDeployment.LEFT_BEHIND
+				o["pos"] = [p.global_position.x, p.global_position.y, p.global_position.z]
+			outcomes.players[player_key(p.name.to_int())] = o
 	var report := RosterDeployment.resolve(roster(), outcomes, rng, day())
 	SessionLog.note("deployment ended: zone %s (%s); back %s; MIA %s; KIA %s; respawns %d used (%d bought)" % [report.zone_id,
 		report.zone_kind, _callsigns(report.extracted), _callsigns(report.mia), _callsigns(report.dead), int(report.respawns_used),

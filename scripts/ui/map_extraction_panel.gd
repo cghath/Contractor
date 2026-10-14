@@ -2,7 +2,8 @@ class_name MapExtractionPanel
 extends PanelContainer
 ## The extraction side panel on the map (MapScreen) while a deployment is on: the extraction
 ## points, which AI squadmates come along (untick to leave one behind), what's happening,
-## and for the host the Extract button that confirms once the squad is at a point.
+## and the Extract button that confirms once the squad is at a point (Captain, 2026-10-14: any
+## player standing inside a point, not only the host; the host says why when it can't).
 ## Points are set on the map (right click) or by throwing a purple smoke.
 
 const WIDTH := 300.0
@@ -66,7 +67,7 @@ func show_extraction(extraction: Extraction) -> void:
 			_status.text = Extraction.summary(extraction.last_report)
 		_:
 			_status.text = ""
-	_confirm.visible = multiplayer.is_server() and extraction.state == Extraction.State.ACTIVE
+	_confirm.visible = extraction.state == Extraction.State.ACTIVE
 
 
 func _add_label(text: String, font_size: int) -> Label:

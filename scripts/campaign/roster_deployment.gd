@@ -156,17 +156,20 @@ static func free_respawns_left(data: Dictionary) -> int:
 ##   Inventory.net_state now, carrier pouches and all), "wounds" (Vitals.wound_list()), "blood"
 ##   (Vitals.blood_fraction()), "burn" (Vitals.burn_share()), "blast_lung"
 ##   (Vitals.has_blast_lung()), "pos" ([x, y, z])}, for the AI squadmates who deployed.
-## - "players": player key -> {"gear", "wounds", "blood", "burn", "blast_lung"}, for the
-##   players there at the end.
+## - "players": player key -> {"gear", "wounds", "blood", "burn", "blast_lung", "state"?,
+##   "pos"?}, for the players there at the end. "state" LEFT_BEHIND (Captain, 2026-10-14: left
+##   down or dead outside the extraction point): a stand-in goes MIA like a squadmate left
+##   behind; a main character (no recovery contract for them) still comes home, and the debrief
+##   lists them in "players_left".
 ## The dead are lost with their gear (it lies on the body in the zone); those left behind
 ## alive go MIA, gear and all; those who extracted come back with what they carry, a mission
 ## more experience, and any serious wounds as days to sit out. A player's outcome lands on
 ## their stand-in when they had one, else on their main character. Returns the debrief:
-## {"extracted", "mia", "dead": member ids, "injured": {name: days}, "respawns_used",
-## "respawns_bought", "zone_id", "zone_kind"}. The deployment is cleared.
+## {"extracted", "mia", "dead": member ids, "injured": {name: days}, "players_left": player
+## keys, "respawns_used", "respawns_bought", "zone_id", "zone_kind"}. The deployment is cleared.
 static func resolve(data: Dictionary, outcomes: Dictionary, rng: RandomNumberGenerator, day: int) -> Dictionary:
 	var dep := active(data)
-	var report := {"extracted": [], "mia": [], "dead": [], "injured": {}, "respawns_used": int(dep.get("respawns_used", 0)),
+	var report := {"extracted": [], "mia": [], "dead": [], "injured": {}, "players_left": [], "respawns_used": int(dep.get("respawns_used", 0)),
 		"respawns_bought": int(dep.get("respawns_bought", 0)), "zone_id": String(dep.get("zone_id", "")),
 		"zone_kind": String(dep.get("zone_kind", CONTRACT))}
 	var what := "a %s zone" % ("hot" if report.zone_kind == HOT else "contract")
@@ -196,7 +199,18 @@ static func resolve(data: Dictionary, outcomes: Dictionary, rng: RandomNumberGen
 	var player_outcomes: Dictionary = outcomes.get("players", {})
 	for key: String in player_outcomes:
 		var o: Dictionary = player_outcomes[key]
-		if stand_ins.has(key) and not Roster.get_member(data, String(stand_ins[key])).is_empty():
+		var left_behind := String(o.get("state", EXTRACTED)) == LEFT_BEHIND
+		if left_behind:
+			report.players_left.append(key)
+		if left_behind and stand_ins.has(key) and not Roster.get_member(data, String(stand_ins[key])).is_empty():
+			var stand_in := Roster.get_member(data, String(stand_ins[key]))
+			stand_in["status"] = Roster.MIA
+			stand_in["gear"] = Roster.json_safe(o.get("gear", stand_in.get("gear", {})))
+			stand_in["mia_zone"] = report.zone_id
+			stand_in["mia_pos"] = o.get("pos", [])
+			Roster.add_history(stand_in, day, "Missing in action in %s (left behind at extraction)" % report.zone_id)
+			report.mia.append(String(stand_in.mid))
+		elif stand_ins.has(key) and not Roster.get_member(data, String(stand_ins[key])).is_empty():
 			_came_back(Roster.get_member(data, String(stand_ins[key])), o, rng, day, what, report)
 		else:
 			var main := Roster.main_character(data, key)
@@ -206,7 +220,7 @@ static func resolve(data: Dictionary, outcomes: Dictionary, rng: RandomNumberGen
 			Roster.injure(main, hurt, day)
 			if int(hurt.days) > 0:
 				report.injured[String(main.name)] = int(hurt.days)
-			Roster.add_history(main, day, "Came back from %s" % what)
+			Roster.add_history(main, day, "Left behind in %s, made it home" % report.zone_id if left_behind else "Came back from %s" % what)
 	data["deployment"] = {}
 	data["last_debrief"] = report
 	return report
