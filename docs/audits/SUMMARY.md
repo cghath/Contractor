@@ -12,6 +12,11 @@ October 13, 2026 · `dev` · `fcae676b8318b7534fdc3f2e4d17a9e9a228275f`
 | 2: gameplay, AI and interfaces | 9: one P1, eight P2 | [Part 2](<C:/Users/My Little Pony/Documents/Contractor/docs/audits/part-2.md>) |
 | 3: worlds, missions, vehicles and delivery | 10: ten P2 | [Part 3](<C:/Users/My Little Pony/Documents/Contractor/docs/audits/part-3.md>) |
 
+> **Follow-ups (added 2026-10-13, Captain's side):** three new tasks in
+> [followups.md](followups.md): F-01 the AI building scan only sees one floor (upper floors and
+> roofs of the new multi-storey buildings are never garrisoned or cleared), F-02 town garrison
+> posts are all on the ground floor, F-03 doctrine `engage_m` sits below the new sight ranges.
+
 ## What to fix first
 
 1. **Protect campaign progress.** A1-01 resets an unreadable campaign and deletes its zone saves; A1-02 ignores usable backups if the primary is absent. Preserve damaged files and recover backup-only state before creating fresh state. Then strengthen validation and report failed writes (A1-03/A1-04).
