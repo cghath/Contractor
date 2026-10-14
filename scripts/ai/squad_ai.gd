@@ -773,7 +773,13 @@ func weapons_free() -> bool:
 ## An order from the command menu. `slot` and `count` spread a group of units around the
 ## point so they don't all head for the same spot.
 func on_order(new_order: Squad.Order, point: Vector3, slot := 0, count := 1) -> void:
+	if not _ready_done:
+		# 2026-10-14 (helicopter insertion): an AI seated aboard before its first physics
+		# frame (its brain is off while seated) gets its order on the way out: set up first.
+		_setup()
 	order = new_order
+	if body == null:
+		return
 	set_escort(null)  # a movement order takes them off the escort
 	_hold_point = body.global_position
 	var side := squad.leader.global_basis.x if squad and is_instance_valid(squad.leader) else body.global_basis.x

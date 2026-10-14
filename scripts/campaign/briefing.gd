@@ -208,7 +208,10 @@ func server_open(p_contract: Dictionary, p_zone: Dictionary) -> void:
 	if not multiplayer.is_server():
 		return
 	contract = p_contract.duplicate(true)
-	zone = Briefing.with_heli_insertion(p_zone)
+	var real_zone := CompoundLevel.current(self) is ZoneLevel  # (not the compound's stand-in briefing)
+	zone = Briefing.with_heli_insertion(p_zone, real_zone)
+	if real_zone and String(zone.get("kind", "contract")) != "hot":
+		zone = HeliSupports.plan_insertions(self, zone, contract)  # each one's LZ in dead ground near the objective
 	if MotorPool.in_use():  # wave 5b: the company's vehicles that can come along
 		zone["pool"] = MotorPool.list().filter(func(v: Dictionary) -> bool: return MotorPool.problem(String(v.id)) == "") \
 			.map(func(v: Dictionary) -> Dictionary: return {"id": String(v.id), "name": String(v.name)})
@@ -285,19 +288,38 @@ func server_start(force := false) -> bool:
 	return true
 
 
-## A copy of `p_zone` where a hot zone's insertion points can also be reached by helicopter
-## (wave 5b: a "heli" point beside each one on foot; HeliSupports.server_insert flies the squad in).
-static func with_heli_insertion(p_zone: Dictionary) -> Dictionary:
+## A copy of `p_zone` where the insertion points can also be reached by helicopter (wave 5b: a
+## "heli" point beside each one on foot; HeliSupports.server_insert flies the squad in): a hot
+## zone's always, landing at the point; with `contract_zones` (a real zone, not the compound's
+## stand-in) a contract zone's too, marked "lz": "dead_ground": its LZ is planned near the
+## objective (HeliSupports.plan_insertions), flown in by the point (design doc: staged insertion).
+static func with_heli_insertion(p_zone: Dictionary, contract_zones := false) -> Dictionary:
 	var out := p_zone.duplicate(true)
-	if String(out.get("kind", "contract")) != "hot":
+	var hot := String(out.get("kind", "contract")) == "hot"
+	if not hot and not contract_zones:
 		return out
 	var points: Array = []
 	for point: Dictionary in out.get("insertion_points", []):
 		points.append(point)
 		if String(point.get("method", "foot")) == "foot":
-			points.append(point.merged({"id": "%s_heli" % point.get("id", ""), "name": "%s by helicopter" % point.get("name", ""), "method": HELI}, true))
+			var heli := point.merged({"id": "%s_heli" % point.get("id", ""), "name": "%s by helicopter" % point.get("name", ""), "method": HELI}, true)
+			if not hot:
+				heli["lz"] = "dead_ground"
+				heli["name"] = String(point.get("name", ""))
+			points.append(heli)
 	out["insertion_points"] = points
 	return out
+
+
+## The contract's objective on the map (x, z): its first objective with a position, else the
+## first known enemy position; null for none.
+static func objective_point(p_contract: Dictionary) -> Variant:
+	for key: String in ["objectives", "known_enemies"]:
+		for o: Dictionary in p_contract.get(key, []):
+			var p: Variant = o.get("pos")
+			if p is Array and (p as Array).size() >= 2:
+				return Vector2(float(p[0]), float(p[1]))
+	return null
 
 
 ## The briefing's own flow (auto_flow): squad to the insertion point (flown in for a "heli"
@@ -307,7 +329,9 @@ func _default_flow() -> void:
 	var p: Array = point.get("pos", [])
 	if p.size() >= 2:
 		var at := Vector2(float(p[0]), float(p[1]))
-		if String(point.get("method", "foot")) != HELI or not HeliSupports.server_insert(self, at):
+		var via: Variant = _xz(point.get("from"))
+		var objective: Variant = _xz(point.get("objective"))
+		if String(point.get("method", "foot")) != HELI or not HeliSupports.server_insert(self, at, via, objective):
 			server_move_squad_to(at)
 	var extraction := MapNodes.extraction(self)
 	if extraction:
@@ -315,6 +339,11 @@ func _default_flow() -> void:
 	var reinforcements := MapNodes.reinforcements(self)
 	if reinforcements:
 		reinforcements.server_start(contract.get("reinforcements", {}))
+
+
+## [x, z] as a Vector2, or null.
+static func _xz(p: Variant) -> Variant:
+	return Vector2(float(p[0]), float(p[1])) if p is Array and (p as Array).size() >= 2 else null
 
 
 ## Host only. Puts the players and their AI squadmates at a ground point (x, z): players in a

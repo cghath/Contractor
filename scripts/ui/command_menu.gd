@@ -123,7 +123,8 @@ const MENU := {
 				{"key": "1", "label": "At my map marker", "cmd": "support:extraction:marker"},
 				{"key": "2", "label": "There", "cmd": "support:extraction:here", "point": true},
 				{"key": "3", "label": "On purple smoke", "cmd": "support:extraction:smoke"},
-				{"key": "4", "label": "Send it home", "cmd": "support:extraction:cancel"},
+				{"key": "4", "label": "Near us: the pilot picks an LZ in dead ground", "cmd": "support:extraction:near"},
+				{"key": "5", "label": "Send it home", "cmd": "support:extraction:cancel"},
 			]},
 			{"key": "5", "label": "AAV", "items": [
 				{"key": "1", "label": "Call an AAV", "cmd": "support:aav_call"},
