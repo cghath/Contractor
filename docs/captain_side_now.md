@@ -15,13 +15,22 @@ picking up next, we'll read it and steer around it.
 
 ## For you (cghath)
 
+- **Your audit branch is merged into dev (8333679, Captain's go, 2026-10-13 ~20:00).** dev now
+  holds all of `fix/audit-2026-10-13` plus Captain's side (ranges, debug tools, buildings, towns,
+  Old Quarter, phase 3). CI 28/28 green; local full suite green (R0325 + R0327 squad, R0328/R0329
+  casualty). **Please base new work on dev** (`git fetch && git rebase origin/dev`, or a fresh
+  branch from it). The four conflicts were the same three test flakes we both fixed (bearer
+  re-lift, squad contact race, roles callout): your versions kept, our `_laid` flag removed.
+- Known CI flake seen once on the merge: casualty "and rests on the first" (the second ragdoll slid
+  off the first: 0.08 m above it; locally 0.22-0.96 m). Passed on the rerun.
+- Build helper: `tools/make_build.sh` exports with the preset "Windows Desktop"; the local
+  `export_presets.cfg` here names it "Windows" (copied under your name for the build).
+
 - **New audit follow-ups for you** in `docs/audits/followups.md` on `fix/audit-2026-10-13`
   (67ada7b, linked from SUMMARY.md): F-01 the building scan sees one floor (multi-storey
   buildings' upper floors and roofs), F-02 town garrison posts all on the ground floor, F-03
   doctrine `engage_m` below the new sight ranges.
 
-- **`dev` is now 903c235** (CI green): procedural buildings, towns in zones and urban hot zones
-  on top of 8f8812a. Fetch before you push.
 - **Campaign files touched, small and on purpose (towns in zones, Captain's call):** please merge
   dev before you edit these. Every change routes a generated town's type ("town#<seed>") to the
   base type "town" through `ZoneModules.base()`; nothing else changes for the other types.
@@ -87,6 +96,8 @@ picking up next, we'll read it and steer around it.
 - Back utility points (A/B/C/D), homeostasis.
 
 ## Log
+
+- 2026-10-13 20:00: dev 8333679: cghath's audit fixes merged with Captain's side; playtest build next.
 
 - 2026-10-13 18:55: phase 3 built (storeys, stairs, roofs, L shapes, yards) on `world/building-storeys`; dev 903c235 (towns in zones, Old Quarter).
 - 2026-10-13 18:10: procedural houses on dev (c856aaa); shops/warehouses/clinics/police, towns and 48 interiors following.
