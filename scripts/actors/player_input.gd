@@ -57,7 +57,9 @@ var bug_report: BugReport
 ## player only.
 var vehicle_camera: VehicleCamera
 var _ghost: Node3D
-## Muffled hearing: everything through a low-pass this low, and quieter.
+## Muffled hearing: everything through a low-pass this low, and this much quieter than the
+## Master volume it had (relative, so a player with Master turned well down isn't made louder:
+## -12 dB flat was 28 dB up from a Master at 1%, R0911/R0913).
 const DEAF_CUTOFF_HZ := 600.0
 const DEAF_VOLUME_DB := -12.0
 
@@ -274,7 +276,7 @@ static func set_muffled(on: bool) -> void:
 			AudioServer.add_bus_effect(bus, filter, 0)
 		_volume_before = AudioServer.get_bus_volume_db(bus)
 	AudioServer.set_bus_effect_enabled(bus, 0, on)
-	AudioServer.set_bus_volume_db(bus, DEAF_VOLUME_DB if on else _volume_before)
+	AudioServer.set_bus_volume_db(bus, _volume_before + DEAF_VOLUME_DB if on else _volume_before)
 
 
 ## Leaving (the session ends, the level changes, the body goes): hearing comes back with it.
