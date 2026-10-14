@@ -32,10 +32,10 @@ const Recorder := preload("res://tests/coop_soak_recorder.gd")
 
 const SEED := 4711
 ## What the base's stash holds on top of the starting stash, so four players can kit up.
-const EXTRA_STASH := [["m4a1", 4], ["plate_carrier", 2], ["helmet", 4], ["mag_556", 24], ["ifak", 6], ["iv_18", 4],
+const EXTRA_STASH := [["assault_pack", 4], ["m4a1", 4], ["plate_carrier", 2], ["helmet", 4], ["mag_556", 24], ["ifak", 6], ["iv_18", 4],
 	["saline_500", 6], ["epinephrine", 4], ["morphine", 4], ["tourniquet", 4]]
 ## What each bot picks up at the armory: id -> how many it wants on it.
-const KIT := {"m4a1": 1, "plate_carrier": 1, "helmet": 1, "mag_556": 3, "ifak": 1, "iv_18": 1, "saline_500": 1, "epinephrine": 1}
+const KIT := {"assault_pack": 1, "m4a1": 1, "plate_carrier": 1, "helmet": 1, "mag_556": 3, "ifak": 1, "iv_18": 1, "saline_500": 1, "epinephrine": 1}
 ## The game's own paces (SoldierMovement.WALK_SPEED, SPRINT_SPEED).
 const WALK_SPEED := 4.0
 const RUN_SPEED := 6.5
@@ -48,6 +48,10 @@ const EXTRACT_S := 150.0
 ## Engage hostiles this close (m), firing about this often (s).
 const ENGAGE_M := 140.0
 const SHOT_GAP_S := 0.28
+## In the fight the host's bot (the others follow it) closes in on the nearest hostile when it
+## has had no clear shot for HUNT_AFTER_S, stopping this far from it (m).
+const HUNT_STOP_M := 45.0
+const HUNT_AFTER_S := 4.0
 ## The knock-out (a dev-tools hurt, like the K key): enough to go down, and more if not.
 const DOWN_DAMAGE := 70.0
 const REVIVE_S := 150.0
@@ -379,7 +383,7 @@ func _host_cycle(cycle: int) -> Dictionary:
 	var me := _me()
 	if target != null and me:
 		_walk(target, 40.0, RUN_SPEED)
-		await _wait_for(func() -> bool: return _me() == null or _flat(_me().global_position, target) < 70.0 or _hostile_in_range(_me(), ENGAGE_M) != null, ADVANCE_S)
+		await _wait_for(func() -> bool: return _me() == null or _flat(_me().global_position, target) < 70.0 or _hostile_in_range(_me(), HUNT_STOP_M * 2.0) != null, ADVANCE_S)
 	# Fight, with a knock-out and a revive.
 	_fight = true
 	_set_phase("fight")
@@ -884,6 +888,22 @@ func _stop_fighting() -> void:
 ## Buddy aid: once a second while deployed, a player down that nobody planned (shot by the
 ## hostiles) gets treated by the nearest player still up, as a squad would.
 var _aid_left := 1.0
+var _last_clear_shot := 0.0
+var _hunt_left := 0.0
+
+
+## Host, in the fight: no clear shot for a while, walk toward the nearest hostile (a squad
+## pushing on; a fight with nobody in sight shows nothing).
+func _hunt(me: Soldier, delta: float) -> void:
+	_hunt_left -= delta
+	if _hunt_left > 0.0:
+		return
+	_hunt_left = 1.0
+	if role != "host" or not _fight or _treating or _dropping or Soldier._now() - _last_clear_shot < HUNT_AFTER_S:
+		return
+	var foe := _hostile_in_range(me, 800.0)
+	if foe and _flat(me.global_position, foe.global_position) > HUNT_STOP_M:
+		_walk(foe.global_position, HUNT_STOP_M, WALK_SPEED)
 
 
 func _buddy_aid(me: Soldier, delta: float) -> void:
@@ -925,6 +945,8 @@ func _physics_process(delta: float) -> void:
 	if me == null or not me.is_local():
 		return
 	_buddy_aid(me, delta)
+	if me.vitals.is_up():
+		_hunt(me, delta)
 	if not me.vitals.is_up() or is_instance_valid(me.vehicle):
 		return
 	if _goal != null:
@@ -982,5 +1004,6 @@ func _fight_tick(me: Soldier) -> void:
 	var hit := space.intersect_ray(query)
 	if not hit.is_empty() and (hit.position as Vector3).distance_to(chest) > 1.0:
 		return
+	_last_clear_shot = now
 	_next_shot = now + SHOT_GAP_S
 	me._server_fire.rpc_id(1, eye, to.normalized(), me.active_slot)
