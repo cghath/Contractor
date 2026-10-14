@@ -95,8 +95,10 @@ def in_step(host_now, client, host_before):
 
 
 def ammo_split(h, c, prev):
-    """B-08: why a client's weapon counts (net_ammo: [snapshot revision, rounds per weapon
-    slot]) are out of step with the host's, or None. Within one revision rounds only go down
+    """B-08: why a client's weapon counts ([revision of the snapshot it applied, rounds loaded
+    per weapon slot as it holds them], tests/coop_soak_recorder.gd applied_ammo; not the raw
+    net_ammo it last received, which would hide counts it dropped) are out of step with the
+    host's, or None. Within one revision rounds only go down
     (a shot), so a client behind a burst holds more than the host now and no more than the
     host held at the previous mark (same revision). A client on an older revision is a
     snapshot in flight only if the host's revision changed since the previous mark."""

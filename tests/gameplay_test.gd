@@ -98,6 +98,19 @@ func _test_ammo_replication() -> void:
 	check(late.rounds_in(&"primary") == 28 and early.rounds_in(&"primary") == 28 and stale.rounds_in(&"primary") == 30
 		and late.slots[&"vest"] == &"plate_carrier" and late.count_of(&"mag_556") == 2,
 		"a peer gets 28 whichever comes first; old counts are ignored (%d, %d, %d)" % [late.rounds_in(&"primary"), early.rounds_in(&"primary"), stale.rounds_in(&"primary")])
+	# B-08 soak compare (review of fix/b08-soak-compare): the recorder writes the counts a peer
+	# applied, not the last net_ammo received, so a peer that dropped its counts shows as split.
+	var recorder: GDScript = load("res://tests/coop_soak_recorder.gd")
+	var rec_late: Array = recorder.applied_ammo(late)
+	var rec_stale: Array = recorder.applied_ammo(stale)
+	var gearless := Inventory.new()  # counts with no snapshot yet: nothing applied
+	gearless.net_ammo = inv.net_ammo.duplicate()
+	var rec_gearless: Array = recorder.applied_ammo(gearless)
+	check(rec_late == Array(inv.net_ammo) and rec_late == recorder.applied_ammo(inv)
+		and rec_stale[0] == rev and rec_stale[1] == 30 and rec_stale != Array(stale.net_ammo)
+		and rec_gearless[0] != rev and rec_gearless[1] != 28,
+		"soak recorder: the counts a peer applied (late %s, stale %s, no snapshot %s), not the net_ammo it got" % [rec_late, rec_stale, rec_gearless])
+	gearless.free()
 	inv.take(&"mag_556")
 	check(int(inv.net_gear.get("rev", -1)) == rev + 1 and inv.net_ammo[0] == rev + 1 and int(inv.net_gear.state.slot_state.primary.rounds) == 28,
 		"a real change sends the whole snapshot again, counts included (rev %d)" % int(inv.net_gear.get("rev", -1)))

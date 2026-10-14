@@ -154,10 +154,24 @@ static func gear_hash(s: Soldier) -> String:
 	return JSON.stringify(state, "", true).md5_text().left(10)
 
 
-## B-08: [snapshot revision, rounds in each weapon slot] as the host sent them (net_ammo), or
-## [] on a build without it.
+## B-08: [snapshot revision, rounds in each weapon slot] as this peer holds them: the revision
+## of the snapshot it applied (net_gear) and the rounds in its weapons (slot_state, what
+## _receive_ammo wrote and the HUD shows), -1 where the slot keeps no count; [] on a build
+## without net_ammo. Not the raw net_ammo: that is only the last counts received, and a peer
+## that dropped them (a revision out of step, no snapshot yet) would still look in step
+## (review of fix/b08-soak-compare).
 static func ammo_of(s: Soldier) -> Array:
-	return Array(s.inventory.get(&"net_ammo")) if &"net_ammo" in s.inventory else []
+	return applied_ammo(s.inventory)
+
+
+static func applied_ammo(inv: Inventory) -> Array:
+	if not (&"net_ammo" in inv) or not (&"_gear_rev" in inv):
+		return []
+	var counts: Array = [int(inv.get(&"_gear_rev"))]
+	for slot: StringName in Inventory.WEAPON_SLOTS:
+		var state: Dictionary = inv.slot_state.get(slot, {})
+		counts.append(int(state.rounds) if inv.slots.get(slot, &"") != &"" and state.has("rounds") else -1)
+	return counts
 
 
 func _flags(s: Soldier) -> int:
