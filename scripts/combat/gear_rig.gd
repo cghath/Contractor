@@ -197,7 +197,7 @@ func _rebuild() -> void:
 			if slot != &"helmet":  # a plate sits inside the carrier's pocket, under its fabric
 				piece.set_cover(Color(VoxelArt.spec(model.variant).gear) if carrier else Color(0, 0, 0, 0))
 	for slot: StringName in MOUNTS:
-		_set_gear(slot, inventory.slots[slot], &"torso", rest_transform(slot))
+		_set_gear(slot, inventory.slots[slot], &"torso", rest_transform(slot), inventory.state_of(slot))
 	_fit_front_panel(carrier)
 	var pack: StringName = inventory.slots[&"backpack"]
 	var pack_size := VoxelArt.size_m(VoxelArt.model_for(ItemDB.get_item(pack))) if pack != &"" else Vector3.ZERO
@@ -854,9 +854,12 @@ func _refresh_plate_damage() -> void:
 			_chip_counts[slot] = chips.size()
 
 
-func _set_gear(key: StringName, id: StringName, mount: StringName, at: Transform3D) -> void:
-	var current: Array = _gear.get(key, [&"", null])
-	if current[0] == id:
+## `state`: the item's state, for a model that shows it (a rifle's optic, P0362).
+func _set_gear(key: StringName, id: StringName, mount: StringName, at: Transform3D, state := {}) -> void:
+	var current: Array = _gear.get(key, [&"", null, ""])
+	var item := ItemDB.get_item(id) if id != &"" else null
+	var art := VoxelArt.fitted(VoxelArt.model_for(item, state), model.body) if item else ""
+	if current[0] == id and (current.size() < 3 or current[2] == art):
 		return
 	if current[1]:
 		current[1].queue_free()
@@ -864,12 +867,10 @@ func _set_gear(key: StringName, id: StringName, mount: StringName, at: Transform
 	_held_dirty = true
 	if id == &"":
 		return
-	var item := ItemDB.get_item(id)
-	var art := VoxelArt.fitted(VoxelArt.model_for(item), model.body)
 	var node: Node3D = VoxelArt.instance(art, model.variant, render_layers) if art != "" else _box(item)
 	node.transform = at
 	(model.head if mount == &"head" else model.torso).add_child(node)
-	_gear[key] = [id, node]
+	_gear[key] = [id, node, art]
 	_held_dirty = true  # a held node may have been replaced
 
 

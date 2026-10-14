@@ -49,7 +49,7 @@ func _ready() -> void:
 	add_to_group(GROUP)
 	freeze = not multiplayer.is_server()
 	var item := ItemDB.get_item(item_id)
-	var art := VoxelArt.model_for(item)
+	var art := VoxelArt.model_for(item, state)  # a rifle shows the optic it carries (P0362)
 	var is_armor := item.type == "plate" or item.slot == &"helmet"
 	var size := visual_size(item)
 	if is_armor:
@@ -118,7 +118,8 @@ func describe() -> String:
 	var amount := " x%d" % count if count > 1 else ""
 	var detail := ""
 	if state.has("rounds"):
-		detail = "  [%d rds]" % int(state.rounds)
+		var optic := Optics.label(item, state)  # what's on its rail (P0362)
+		detail = "  [%d rds%s]" % [int(state.rounds), ", " + optic if optic != "" else ""]
 	elif not state.get("molle", {}).is_empty():
 		detail = "  [%d attached]" % state.molle.size()  # a carrier keeps its pouches
 	elif not state.get("held", []).is_empty():

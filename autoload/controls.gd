@@ -25,6 +25,7 @@ const KEYS := {
 	&"weapon_primary": [KEY_1],
 	&"weapon_sidearm": [KEY_2],
 	&"weapon_launcher": [KEY_3],  # the anti-armour launcher (wave 5, Launchers)
+	&"magnifier": [KEY_B],  # a holographic sight's flip-up magnifier in and out (GunSight, P0362)
 	&"pause": [KEY_ESCAPE],
 	&"quick_save": [KEY_HOME],  # F-keys are the squad command menu
 	# Get out of the vehicle you sit in, when that option is on (ControlOptions; Captain, P0164

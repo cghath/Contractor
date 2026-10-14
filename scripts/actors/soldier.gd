@@ -1000,6 +1000,17 @@ func _server_inventory_action(action: String, container: StringName, index: int,
 			var problem := inventory.roll_problem(container, index, rolled)
 			if problem != "" or not inventory.set_rolled(container, index, rolled):
 				_client_message.rpc_id(owner_peer(), problem if problem != "" else "Can't do that")
+		# Optics (P0362): the optic entry at `container`/`index` onto the weapon in `slot` (the
+		# one it had goes into your containers), or the weapon in `slot`'s optic off (into
+		# `target` if named).
+		"mount_optic":
+			var problem := Optics.server_mount(inventory, container, index, slot)
+			if problem != "":
+				_client_message.rpc_id(owner_peer(), problem)
+		"remove_optic":
+			var problem := Optics.server_remove(inventory, slot, target)
+			if problem != "":
+				_client_message.rpc_id(owner_peer(), problem)
 		# MOLLE: `target` (attach) and `slot` (detach, move, drop) name attach points of the
 		# worn carrier; a pouch's contents go with it.
 		"attach":

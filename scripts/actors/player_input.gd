@@ -122,7 +122,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed(&"debug_hurt") and DevTools.on():
 		body._server_debug_hurt.rpc_id(1, 40.0)
 	elif event is InputEventMouseButton and event.pressed and captured and _wheel(event) != 0 and GunSight.zoom_by(body, _wheel(event)):
-		return  # the wheel zooms a variable scope while aimed through it (P0362)
+		return  # the wheel zooms a variable optic while aimed with it (P0362)
 	elif event.is_action_pressed(&"pause"):
 		pause_menu.open()  # Escape: resume, return to base, main menu, quit
 	elif event.is_action_pressed(&"fire") and not captured:
@@ -162,6 +162,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		body.select_weapon(&"primary")
 	elif event.is_action_pressed(&"weapon_sidearm"):
 		body.select_weapon(&"sidearm")
+	elif event.is_action_pressed(&"magnifier") and GunSight.optic_of(body) != null:
+		if GunSight.toggle_magnifier(body):  # a holographic sight's flip-up magnifier (P0362)
+			hud.flash("Magnifier in" if GunSight.magnified(body, GunSight.optic_of(body)) else "Magnifier out")
 	elif event.is_action_pressed(&"weapon_launcher") and body.inventory.slots.get(Launchers.SLOT, &"") != &"":
 		body.select_weapon(Launchers.SLOT)
 
@@ -404,10 +407,11 @@ func _update_sway(delta: float) -> void:
 	body.camera.rotation.y = lerpf(body.camera.rotation.y, sway.y, k)
 
 
-## Where the view model goes aimed with `weapon` (camera-local): its sight point on the eye's
-## line, ADS_EYE in front (ADS_EYE_PISTOL for a pistol).
-static func ads_view(weapon: ItemData) -> Vector3:
-	var model := VoxelArt.model_for(weapon)
+## Where the view model goes aimed with `weapon` (camera-local), its item state `state`
+## naming its optic: its sight point on the eye's line, ADS_EYE in front (ADS_EYE_PISTOL for a
+## pistol).
+static func ads_view(weapon: ItemData, state := {}) -> Vector3:
+	var model := VoxelArt.model_for(weapon, state)
 	var eye := ADS_EYE_PISTOL if model == "pistol" else ADS_EYE
 	return eye - VoxelArt.sight_point(model)
 
@@ -419,7 +423,7 @@ func _update_aim(delta: float) -> void:
 	var fov := GunSight.aimed_fov_of(body, weapon, GameSettings.fov()) if body.is_aiming else GameSettings.fov()
 	body.camera.fov = lerpf(body.camera.fov, fov, minf(delta * 12.0, 1.0))
 	var hip_view := HIP_VIEW * Vector3(-1.0 if body.left_handed else 1.0, 1, 1)  # off the firing shoulder
-	var aimed_view := ads_view(weapon) if weapon and not Launchers.is_launcher(weapon) else hip_view
+	var aimed_view := ads_view(weapon, body.inventory.state_of(body.active_slot)) if weapon and not Launchers.is_launcher(weapon) else hip_view
 	var lowered := CharacterModel.VIEW_LOWER_OFFSET * body.model.view_lower()  # ducks while the hands are busy
 	body.view_model.position = body.view_model.position.lerp((aimed_view if body.is_aiming else hip_view) + lowered, minf(delta * 14.0, 1.0))
 
@@ -471,7 +475,8 @@ func _try_throw() -> void:
 func _update_view_model() -> void:
 	var weapon := body.active_weapon()
 	var id: StringName = weapon.id if weapon and body.inventory.hands == &"" else &""
-	var key := StringName("%s|%s|%s|%s" % [id, body.left_handed, body.model.variant, body.model.body])
+	var art := VoxelArt.model_for(weapon, body.inventory.state_of(body.active_slot)) if id != &"" else ""  # its optic (P0362)
+	var key := StringName("%s|%s|%s|%s|%s" % [id, art, body.left_handed, body.model.variant, body.model.body])
 	if key == _view_model_id:
 		return
 	_view_model_id = key
@@ -482,7 +487,7 @@ func _update_view_model() -> void:
 	if Launchers.is_launcher(weapon):
 		body.view_model.add_child(LauncherSight.view_node(weapon))  # placeholder launcher (wave 5)
 		return
-	var model := VoxelArt.model_for(weapon)
+	var model := art
 	body.view_model.add_child(VoxelArt.instance(model, body.model.variant))
 	var points := VoxelArt.hand_points(model)
 	if points.is_empty():

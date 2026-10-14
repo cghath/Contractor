@@ -27,6 +27,7 @@ func _ready() -> void:
 	await _test_inventory_actions()
 	await _test_drop_and_pickup_keep_state()
 	await _test_spread()
+	await _test_optics()
 	await _test_downed()
 	await _test_throwables()
 	await _test_bad_input()
@@ -372,17 +373,76 @@ func _test_spread() -> void:
 	var cold := player.spread_deg_now(weapon)
 	player.is_aiming = false
 	check(hot > cold + 0.3, "auto fire blooms the cone (%.2f vs %.2f deg)" % [hot, cold])
-	# Sights: the M4's red dot, the M17's irons, the M110's 3.5-10x scope (its ring shows the
-	# real scope's field: about 2 degrees at 10x, 5.7 at 3.5x).
+
+
+## Optics as attachments (Captain, P0362, 2026-10-13): the optic on a gun is in the gun's own
+## item state (so it's replicated, dropped, picked up and saved with it), swapped from the
+## inventory screen's actions; magnified power is against the unaimed view; the AI's cone is
+## the gun's whatever optic it carries.
+func _test_optics() -> void:
+	print("Optics (RPC)")
+	var inv := player.inventory
+	var m4 := ItemDB.get_item(&"m4a1")
 	var m110 := ItemDB.get_item(&"m110")
-	check(GunSight.sight_of(weapon) == "red_dot" and GunSight.sight_of(ItemDB.get_item(&"m17")) == "iron" and GunSight.sight_of(m110) == "scope",
-		"M4 red dot, M17 irons, M110 scope")
-	var zr := GunSight.zoom_range(m110)
-	var at10 := GunSight.aimed_fov(m110, 80.0, zr.y)
-	var at35 := GunSight.aimed_fov(m110, 80.0, zr.x)
-	check(zr == Vector2(3.5, 10.0) and absf(GunSight.ring_field(at10) - 2.05) < 0.05 and absf(GunSight.ring_field(at35) - 5.86) < 0.05,
-		"the M110's scope zooms 3.5-10x (the ring shows %.1f deg at 10x, %.1f at 3.5x)" % [GunSight.ring_field(at10), GunSight.ring_field(at35)])
-	check(is_equal_approx(GunSight.magnification(player, m110), 6.0), "and starts at 6x")
+	var on_gun := func() -> StringName:
+		var optic := Optics.on_slot(inv, &"primary")
+		return optic.id if optic else &""
+	check(on_gun.call() == &"optic_red_dot" and Optics.mounted(m110, {}).id == &"optic_dmr_3_5_10"
+		and not Optics.has_rail(ItemDB.get_item(&"m17")) and Optics.mounted(ItemDB.get_item(&"m17"), {}) == null,
+		"the M4 comes with its red dot, the M110 with its 3.5-10x, the M17 has irons only")
+	check(VoxelArt.model_for(m4, inv.state_of(&"primary")).ends_with(":dot"), "the M4's model shows its red dot")
+	var rounds := inv.rounds_in(&"primary")
+	check(inv.take(&"optic_lpvo") == 1, "an LPVO picked up")
+	var where := _find(inv, &"optic_lpvo")
+	player._server_inventory_action.rpc_id(1, "mount_optic", where[0], where[1], &"primary", &"")
+	check(on_gun.call() == &"optic_lpvo" and inv.count_of(&"optic_red_dot") == 1 and inv.count_of(&"optic_lpvo") == 0,
+		"the LPVO goes on the M4, its red dot into the kit")
+	check(String(inv.net_state.slot_state.primary.get("optic", "")) == "optic_lpvo" and inv.rounds_in(&"primary") == rounds,
+		"in the gun's replicated state, its rounds kept")
+	check(VoxelArt.model_for(m4, inv.state_of(&"primary")).ends_with(":lpvo"), "and its model shows the LPVO")
+	player._server_inventory_action.rpc_id(1, "remove_optic", &"", -1, &"primary", &"")
+	check(on_gun.call() == &"" and inv.count_of(&"optic_lpvo") == 1 and VoxelArt.model_for(m4, inv.state_of(&"primary")).ends_with(":irons"),
+		"taken off: back-up irons, the LPVO stowed")
+	where = _find(inv, &"optic_lpvo")
+	player._server_inventory_action.rpc_id(1, "mount_optic", where[0], where[1], &"primary", &"")
+	player._server_inventory_action.rpc_id(1, "drop_slot", &"", -1, &"primary", &"")
+	await _frames(2)
+	var rifle := _world_item(&"m4a1")
+	check(rifle != null and String(rifle.state.get("optic", "")) == "optic_lpvo", "a dropped M4 keeps its LPVO")
+	if rifle:
+		rifle.global_position = player.global_position + Vector3(0, 0.5, -0.6)
+		player._server_interact.rpc_id(1, rifle.get_path())
+	await _frames(2)
+	check(on_gun.call() == &"optic_lpvo", "and has it when picked up again")
+	where = _find(inv, &"optic_red_dot")
+	player._server_inventory_action.rpc_id(1, "mount_optic", where[0], where[1], &"primary", &"")
+	check(on_gun.call() == &"optic_red_dot" and not inv.state_of(&"primary").has("optic") and inv.count_of(&"optic_lpvo") == 1,
+		"the red dot back on: the M4 as it came")
+	player._server_inventory_action.rpc_id(1, "mount_optic", where[0], where[1], &"sidearm", &"")
+	check(inv.slots[&"sidearm"] == &"" or Optics.on_slot(inv, &"sidearm") == null, "nothing mounts on a pistol")
+	# Power against the unaimed view: 10x is a tenth of its tangent; 1x the weapon's ads_fov.
+	var at10 := GunSight.aimed_fov(m110, 80.0, 10.0)
+	check(absf(tan(deg_to_rad(40.0)) / tan(deg_to_rad(at10 * 0.5)) - 10.0) < 0.01 and is_equal_approx(GunSight.aimed_fov(m4, 80.0, 1.0), 50.0),
+		"10x shows a tenth of the unaimed view's tangent (%.1f deg at 80), 1x the weapon's aimed view" % at10)
+	var zr := func(id: StringName) -> Vector2: return GunSight.zoom_range(ItemDB.get_item(id))
+	check(zr.call(&"optic_lpvo") == Vector2(1, 6) and zr.call(&"optic_prism_4x") == Vector2(4, 4) and zr.call(&"optic_dmr_3_5_10") == Vector2(3.5, 10)
+		and zr.call(&"optic_dmr_8x") == Vector2(8, 8) and zr.call(&"optic_dmr_3_15") == Vector2(3, 15) and zr.call(&"optic_red_dot") == Vector2.ONE
+		and float(ItemDB.get_item(&"optic_holo").stats.magnifier) == 3.0, "LPVO 1-6x, 4x prism, 3.5-10x, 8x, 3-15x, a red dot at 1x, the holo's 3x magnifier")
+	check(is_equal_approx(GunSight.power(player, ItemDB.get_item(&"optic_dmr_3_5_10")), 6.0), "the 3.5-10x starts at 6x")
+	# Mils read true at any power; a scale too crowded to read spaces out.
+	check(GunSight.mark_step(GunSight.px_per_mil(at10, 1080.0)) == 1.0 and GunSight.mark_step(GunSight.px_per_mil(GunSight.aimed_fov(m110, 80.0, 3.5), 1080.0)) > 1.0,
+		"mil marks a mil apart at 10x, wider apart at 3.5x")
+	# The AI's cone doesn't care what optic the gun carries.
+	check(is_equal_approx(Soldier.ai_spread_deg(m4), 1.2) and is_equal_approx(Soldier.ai_spread_deg(m110), 1.6), "the AI's cone is the gun's, whatever its optic")
+
+
+## [container, index] of the first stowed `id`, or [&"", -1].
+func _find(inv: Inventory, id: StringName) -> Array:
+	for c in inv.search_containers():
+		var i := _index_of(inv, c, id)
+		if i >= 0:
+			return [c, i]
+	return [&"", -1]
 
 
 func _test_downed() -> void:
