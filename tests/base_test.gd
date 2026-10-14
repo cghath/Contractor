@@ -530,7 +530,7 @@ func _test_session() -> void:
 	var s0 := base.muster_soldier(ids[0])
 	check(s0 != null and String(s0.name) == String(member0.callsign) and Roster.gear_counts(Roster.json_safe(s0.inventory.net_state)) == Roster.gear_counts(member0.gear),
 		"each in their own gear, by callsign (%s)" % member0.callsign)
-	_test_terminals(base)
+	await _test_terminals(base)
 	var client := await _start_client(ids, stash_counts)
 	await _test_armory(base)
 	await _test_deployment(client)
@@ -661,6 +661,20 @@ func _test_terminals(base: BaseLevel) -> void:
 		ui.open(p)
 		drawn = drawn and ui._pages[p].get_child_count() > 0
 	check(drawn, "every page draws (%s)" % ", ".join(PackedStringArray(BaseUI.PAGES)))
+	# The contract board over it (P0362): this screen steps aside, and the board keeps the mouse
+	# until it closes, then this screen is back with it.
+	ui.open("squad")
+	ui._open_board()
+	var boards := get_tree().root.get_children().filter(func(n: Node) -> bool: return n is ContractBoard)
+	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED  # something under it took the mouse
+	await get_tree().process_frame
+	var held := Input.mouse_mode == Input.MOUSE_MODE_VISIBLE
+	var aside := not ui.is_open()
+	if not boards.is_empty():
+		(boards.back() as ContractBoard).close()
+	await get_tree().process_frame
+	check(boards.size() == 1 and aside and held and ui.is_open() and ui.page == "squad",
+		"the contract board: the base screen steps aside, the board keeps the mouse, and the screen is back when it closes")
 	var pool: Dictionary = InteractionMenu.actions_for(player, base.get_node(^"Terminal_motor_pool"))[0]
 	check(String(pool.disabled) != "", "the motor pool waits for wave 5's vehicles")
 	ui.close()

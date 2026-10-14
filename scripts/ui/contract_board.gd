@@ -112,6 +112,13 @@ func _ready() -> void:
 	refresh()
 
 
+## A screen to click on: whatever else opens or closes under it, the mouse stays free while
+## it's up (P0362: the base screen closing under it took the mouse).
+func _process(_delta: float) -> void:
+	if Input.mouse_mode != Input.MOUSE_MODE_VISIBLE:
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+
 func close() -> void:
 	Input.mouse_mode = _mouse_before
 	closed.emit()

@@ -78,6 +78,17 @@ func is_open() -> bool:
 	return visible
 
 
+## The contract board over the base screen (Captain, P0362: closing this screen to see the
+## board whole took the mouse away from the board). This screen steps aside while the board
+## is up and comes back, with the mouse, when it closes.
+func _open_board() -> void:
+	var board := Contracts.open_board()
+	visible = false
+	board.closed.connect(func() -> void:
+		if is_inside_tree():
+			open(page))
+
+
 func _input(event: InputEvent) -> void:
 	if visible and event.is_action_pressed(&"pause"):
 		close()
@@ -124,7 +135,7 @@ func _build_squad(rows: VBoxContainer, v: Dictionary) -> void:
 		else "none in prep (Deploy goes to the test compound)")))
 	var board := Button.new()
 	board.text = "Contract board"
-	board.pressed.connect(func() -> void: Contracts.open_board())
+	board.pressed.connect(_open_board)
 	rows.add_child(board)
 	if contract.is_empty():
 		for c: Dictionary in v.get("held", []):
