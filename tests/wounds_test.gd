@@ -971,6 +971,7 @@ func _test_net_state() -> void:
 		"SpO2 %.1f%%, morphine %.2f and trauma %.2f replicate" % [copy.spo2, copy.morphine_level, copy.trauma_level])
 	check(copy.unconscious_causes() == vitals._model.unconscious_causes() and copy.breathing_laboured() == vitals.breathing_laboured()
 		and absf(copy.pain() - vitals.pain()) < 0.01, "so every peer works out the same causes, cues and pain (%s)" % [copy.unconscious_causes()])
+	_check_net_split(vitals)
 	var published := vitals.net_state
 	var was_down := vitals.downed
 	vitals.server_damage(1.0)
@@ -980,6 +981,48 @@ func _test_net_state() -> void:
 	vitals.server_damage(40.0)
 	check(vitals.downed and int(vitals.net_state.f) & 1 != 0, "going unconscious publishes at once")
 	vitals.queue_free()
+
+
+## What goes on the wire (Vitals.net_vitals and net_pulse) rebuilds the host's net_state on a
+## peer: the structure only on real changes, under a revision; the scalars in a few dozen bytes.
+func _check_net_split(vitals: Vitals) -> void:
+	vitals.server_apply_treatment(WoundModel.TOURNIQUET, Vitals.THIGH_R)
+	vitals.server_begin_treatment(4.0)  # a countdown running (is_healing)
+	var peer := Vitals.new()  # a late joiner: both parts arrive (spawn)
+	peer.net_vitals = vitals.net_vitals
+	peer.net_pulse = vitals.net_pulse
+	var host := WoundModel.new()
+	host.apply_net(vitals.net_state)
+	var copy := WoundModel.new()
+	copy.apply_net(peer.net_state)
+	check(copy.wounds.size() == host.wounds.size() and copy.tourniquets == host.tourniquets and not copy.tourniquets.is_empty()
+		and absf(copy.blood - host.blood) < 0.0006 and absf(copy.spo2 - host.spo2) < 0.3 and absf(copy.heart_rate - host.heart_rate) < 0.6
+		and absf(copy.morphine_level - host.morphine_level) < 0.006 and absf(copy.pain() - host.pain()) < 0.01
+		and absf(copy.treating_left - host.treating_left) < 0.06 and copy.is_healing()
+		and copy.unconscious == host.unconscious and copy.arrest == host.arrest and copy.breathing_laboured() == host.breathing_laboured(),
+		"structure + pulse rebuild the host's state on a peer (%d wounds, blood %.3f/%.3f, SpO2 %.1f/%.1f, HR %.0f/%.0f, tourniquets %s, treating %.1f/%.1f, morphine %.2f/%.2f)" % [copy.wounds.size(), copy.blood, host.blood, copy.spo2, host.spo2, copy.heart_rate, host.heart_rate, copy.tourniquets, copy.treating_left, host.treating_left, copy.morphine_level, host.morphine_level])
+	check(str(copy.care_tasks()) == str(host.care_tasks()) and str(copy.unconscious_causes()) == str(host.unconscious_causes())
+		and peer.net_state.get("tg") == vitals.net_state.get("tg"),
+		"so the medical menu lists the same tasks there (%d) and the same triage card" % copy.care_tasks().size())
+	check(vitals.net_pulse.size() <= 64 and var_to_bytes(vitals.net_pulse).size() < var_to_bytes(vitals.net_state).size() / 4,
+		"the scalars go in %d bytes (the whole state is %d)" % [vitals.net_pulse.size(), var_to_bytes(vitals.net_state).size()])
+	vitals.server_end_treatment()
+	var rev := int(vitals.net_vitals.get("r", 0))
+	var pulse := vitals.net_pulse
+	vitals.server_advance(5.0)  # time passes: blood, heart rate and SpO2 move, the wounds don't
+	check(vitals.net_pulse != pulse and int(vitals.net_vitals.get("r", 0)) == rev,
+		"time passing sends a new pulse, not the structure again (revision %d)" % int(vitals.net_vitals.get("r", 0)))
+	var old_pulse := vitals.net_pulse
+	vitals.server_set_triage(Vitals.TRIAGE_DELAYED)
+	check(int(vitals.net_vitals.get("r", 0)) == rev + 1 and vitals.net_pulse.decode_u16(0) == rev + 1,
+		"a triage card is a real change: the structure goes out under a new revision, with a pulse for it")
+	peer.net_vitals = vitals.net_vitals
+	peer.net_pulse = vitals.net_pulse
+	check(peer.net_state.get("tg") == "delayed", "a peer takes the new structure")
+	var before_stale: Dictionary = peer.net_state
+	peer.net_pulse = old_pulse
+	check(peer.net_state == before_stale, "and drops a pulse built on the structure before it (stale)")
+	peer.free()
 
 
 ## Every hitbox in the soldier and dummy scenes names a real body part, matches BodyMap's
