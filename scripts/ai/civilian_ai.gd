@@ -88,6 +88,11 @@ func _physics_process(delta: float) -> void:
 		return
 	if not body.vitals.is_up() or is_instance_valid(body.carried_by):
 		_stop()
+		# Captain, 2026-10-14: a captive carried, put down or released holds where he's set down,
+		# not where he was picked up. Forget the order seen so the first think after he's let go
+		# (at once) takes his hold point where he lies.
+		_order_seen = "-"
+		_think_cd = 0.0
 		body.ai_status = body.vitals.condition_text() if not body.vitals.is_up() else "Carried"
 		return
 	_notice()
@@ -170,9 +175,10 @@ func _notice() -> void:
 func _decide() -> void:
 	var st := Person.state(body)
 	var order := String(st.get("order", ""))
-	# A new order, or he just gave up (or was brought in): hold where he is now, not where an
-	# older order found him (an HVT who ran, then surrendered, walked back to where he started).
-	var seen := order + ("|captive" if Person.is_captive(body) or bool(st.get("delivered", false)) else "")
+	# A new order, or he just gave up (or was brought in), or got in or out of a vehicle: hold
+	# where he is now, not where an older order found him (an HVT who ran, then surrendered, walked
+	# back to where he started; Captain, 2026-10-14: so did one unloaded from a vehicle).
+	var seen := order + ("|captive" if Person.is_captive(body) or bool(st.get("delivered", false)) else "") 		+ ("|seated" if String(st.get("seated_in", "")) != "" else "")
 	if seen != _order_seen:
 		_order_seen = seen
 		_hold = body.global_position

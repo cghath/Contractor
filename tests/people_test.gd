@@ -346,6 +346,36 @@ func _test_hostile_hvt() -> void:
 	await _frames(3)
 	_end_carry_phase(player)  # lowered off the shoulder
 	check(player.carrying == null and hvt.carried_by == null and hvt.vitals.is_up(), "and put down again, still conscious")
+	# Carried off and put down somewhere else, he stays there (Captain, 2026-10-14: he walked back
+	# to where he was picked up).
+	var picked_at := hvt.global_position
+	player._server_carry_body.rpc_id(1, hvt.get_path())
+	await _frames(3)
+	_end_carry_phase(player)
+	_place(player, player.global_position + Vector3(6, 0, 0))
+	await _frames(2)
+	player._server_release_body.rpc_id(1)
+	await _frames(3)
+	_end_carry_phase(player)
+	var set_down := hvt.global_position
+	await _seconds(5.0)
+	check(hvt.carried_by == null and _flat(set_down, picked_at) > 4.0 and _flat(hvt.global_position, set_down) < 0.6,
+		"carried %.1f m and put down, he stays where he's set down (%.2f m off it)" % [_flat(set_down, picked_at), _flat(hvt.global_position, set_down)])
+	# Seated in a vehicle and unloaded somewhere else, he stays where he got out.
+	var car := Node3D.new()
+	car.name = "HoldTestCar"
+	level.add_child(car)
+	check(layer.server_seat_in_vehicle(hvt, car, "1"), "seated in a vehicle")
+	await _seconds(0.6)
+	_place(hvt, hvt.global_position + Vector3(0, 0, 5))  # driven off: the vehicle's exit spot
+	layer.server_unseat(hvt)
+	var got_out := hvt.global_position
+	await _seconds(2.5)
+	check(String(Person.state(hvt).get("seated_in", "")) == "" and _flat(hvt.global_position, got_out) < 0.6,
+		"unloaded from the vehicle, he stays where he got out (%.2f m off it)" % _flat(hvt.global_position, got_out))
+	car.queue_free()
+	_place(player, hvt.global_position - Vector3(0, 0, 1.8))
+	await _frames(2)
 	# Led.
 	InteractionMenu.perform(player, _action(player, hvt, &"lead"))
 	await _frames(3)
