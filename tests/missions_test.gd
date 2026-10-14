@@ -40,6 +40,7 @@ func _ready() -> void:
 	player.set_physics_process(false)  # we drive it
 	await _frames(10)
 	await _test_deployment()
+	await _test_clear_unvisited()
 	await _test_charges()
 	await _test_failures()
 	await _test_no_cuffs()
@@ -256,6 +257,64 @@ func _test_deployment() -> void:
 		"the debrief: all four completed, one civilian casualty (%s)" % [outcomes.values()])
 	check((d.get("intel", []) as Array).any(func(e: Dictionary) -> bool: return e.id == "intel_laptop"), "and the laptop is intel to decide on")
 	Contracts.server_finish_debrief()
+
+
+## Audit A3-01: a raid deployed while its target module has never streamed in (no garrison
+## yet). Its "leave no fighter standing" bonus must wait for the garrison, not pay out because
+## an unvisited rect is empty; arriving puts the garrison in, and clearing it completes it.
+func _test_clear_unvisited() -> void:
+	print("Clear-area bonus at a site nobody has been to")
+	var before := level.ai.get_children()
+	var cid := ""
+	var module: ZoneModule = null
+	for i in 12:  # a raid on a module that hasn't streamed in or had a garrison
+		var c := _offer("raid")
+		var m := level.get_module(String(c.get("module_id", "")))
+		if m and not m.is_streamed() and not level._garrisoned.has(m.module_id):
+			cid = _add(c)
+			module = m
+			break
+	if module == null:
+		check(false, "a raid on a module nobody has been to")
+		return
+	var far: ZoneModule = null
+	for m in level.modules():
+		if far == null or m.distance_to(module.global_position) > far.distance_to(module.global_position):
+			far = m
+	_place(player, far.global_position)
+	await _wait_for(func() -> bool: return far.is_ready(), 20.0)  # streamed in with AI off: nobody there
+	check(Contracts.server_accept(cid, ContractGen.default_terms()) == "", "accepted: %s" % Contracts.contract(cid).title)
+	var settings: Dictionary = MissionRegistry.data().settings
+	var arm_s: Variant = settings.clear_arm_timeout_s
+	settings.clear_arm_timeout_s = 1.0
+	CompoundLevel.spawn_ai = true
+	level._ai_ready = true
+	check(Contracts.server_start_deployment([], ZONE) == "", "deployed with AI on, %.0f m from the target" % module.distance_to(player.global_position))
+	var clear: Array = Contracts.objectives.for_contract(cid).filter(func(o: Dictionary) -> bool: return o.kind == Objectives.CLEAR_AREA)
+	if clear.is_empty():
+		check(false, "the raid has a clear-area bonus")
+	else:
+		var oid := String(clear[0].oid)
+		await _seconds(2.5)  # past the arm timeout, several polls
+		check(not module.is_streamed() and Contracts.objectives.get_objective(oid).state == Objectives.ACTIVE,
+			"far from the unvisited target, the clear-area bonus stays open (%s)" % Contracts.objectives.get_objective(oid).state)
+		_place(player, module.global_position + Vector3(0, 0, 30))
+		await _wait_for(func() -> bool: return module.is_ready(), 20.0)
+		CompoundLevel.spawn_ai = false  # the target's garrison only; modules beside it stay empty
+		var garrison := _garrison(module)
+		await _seconds(1.0)
+		check(module.is_ready() and garrison.size() > 0 and Contracts.objectives.get_objective(oid).state == Objectives.ACTIVE,
+			"arriving puts its garrison in (%d) and the bonus is still to earn" % garrison.size())
+		for s: Soldier in garrison:
+			_kill(s)
+		await _wait_for(func() -> bool: return Contracts.objectives.get_objective(oid).state == Objectives.DONE, 3.0)
+		check(Contracts.objectives.get_objective(oid).state == Objectives.DONE, "every one of them down: the bonus is earned")
+	settings.clear_arm_timeout_s = arm_s
+	CompoundLevel.spawn_ai = false
+	Contracts.server_end_deployment(Contracts.report_from_level(level, [player]))
+	Contracts.server_finish_debrief()
+	_free_new(before)
+	await _frames(3)
 
 
 # --- Charges ------------------------------------------------------------------------------------

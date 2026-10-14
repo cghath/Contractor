@@ -352,7 +352,14 @@ static func terms_cost(terms: Dictionary) -> int:
 
 
 ## Why `terms` can't be offered with reputation `rep` ("" when they can).
+## Terms are only the default_terms keys, as finite numbers, the points whole ones (audit
+## A1-05: a client's terms are checked before they're read or kept with the contract).
 static func terms_problem(terms: Dictionary, rep: int) -> String:
+	for key: Variant in terms:
+		var v: Variant = terms[key]
+		if typeof(key) != TYPE_STRING or not default_terms().has(key) or not (typeof(v) == TYPE_INT or typeof(v) == TYPE_FLOAT) \
+				or not is_finite(float(v)) or (key != "advance_share" and float(v) != floorf(float(v))):
+			return "Those terms make no sense"
 	for key: String in ["pay_points", "salvage_points", "support_points"]:
 		if int(terms.get(key, 0)) < 0:
 			return "Negative %s" % key

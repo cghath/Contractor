@@ -62,8 +62,16 @@ var slots: Dictionary = {}       # slot -> item id, or &""
 var slot_state: Dictionary = {}  # slot -> Dictionary (empty if the item has no state)
 var containers: Dictionary = {}  # container -> Array of {"id", "count", "state"?}
 var hands: StringName = &""      # two-handed carry
-## A vehicle hold (VehicleCargo) carries packs loaded; a body never stows one.
+## A vehicle hold (VehicleCargo) carries packs loaded, and two-handed loads (a case, a
+## crate); a body never stows either (a two-handed load goes in the hands, see take).
 var stows_loaded_packs := false
+## Host: slot -> the revision of the item worn there, bumped whenever something is put on or
+## taken off that slot (or the whole inventory is replaced), so a timed action on the weapon
+## in a slot (a reload) can tell it's still the same gun, not another of the same model
+## picked up meanwhile (audit A2-02). Not replicated: only the host times actions.
+var _slot_rev: Dictionary = {}
+var _rev := 0
+var _committing := false  # _commit's own net_state update keeps the revisions
 
 
 func _init() -> void:
@@ -104,7 +112,7 @@ func units_in(container: StringName) -> int:
 ## what it accepts and how many units it takes. `state`: the unit's own state, so a pouch
 ## or carrier going in takes the room its contents fill (unit_volume).
 func room_for(container: StringName, item: ItemData, state := {}) -> int:
-	if item == null:
+	if item == null or (item.two_handed and not stows_loaded_packs):
 		return 0
 	var each := unit_volume(item, state)
 	if pack_problem(container, item, state) != "":
@@ -218,6 +226,17 @@ func state_of(slot: StringName) -> Dictionary:
 	return slot_state.get(slot, {})
 
 
+## Host only. The revision of what's worn in `slot`: it changes whenever the item there is
+## put on, taken off or swapped, even for another of the same model (see _slot_rev).
+func slot_revision(slot: StringName) -> int:
+	return int(_slot_rev.get(slot, 0))
+
+
+func _bump_revision(slot: StringName) -> void:
+	_rev += 1
+	_slot_rev[slot] = _rev
+
+
 ## Host only. Replaces the state of the item in `slot` (a launcher's loaded round, wave 5).
 func set_slot_state(slot: StringName, state: Dictionary) -> void:
 	if slots.get(slot, &"") == &"":
@@ -288,6 +307,7 @@ func unequip(slot: StringName) -> Dictionary:
 		containers[&"backpack"].clear()
 	slots[slot] = &""
 	slot_state.erase(slot)
+	_bump_revision(slot)
 	_commit()
 	return removed
 
@@ -1055,6 +1075,7 @@ func _wear(slot: StringName, item: ItemData, state: Dictionary) -> void:
 		s.erase("held")
 	slots[slot] = item.id
 	slot_state[slot] = s
+	_bump_revision(slot)
 
 
 func _free_slot_for(item: ItemData) -> StringName:
@@ -1127,15 +1148,20 @@ func _commit() -> void:
 	var stowed := {}
 	for container in CONTAINERS:  # pouch contents travel in the carrier's state
 		stowed[container] = containers[container].duplicate(true)
+	_committing = true
 	net_state = {
 		"slots": slots.duplicate(),
 		"slot_state": slot_state.duplicate(true),
 		"containers": stowed,
 		"hands": hands,
 	}
+	_committing = false
 
 
 func _apply_state(state: Dictionary) -> void:
+	if not _committing:
+		for slot in SLOTS:  # replaced wholesale (stripped, a loot undone, a zone load): new items
+			_bump_revision(slot)
 	slots.clear()
 	for slot in SLOTS:
 		slots[slot] = StringName(state.get("slots", {}).get(slot, &""))

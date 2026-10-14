@@ -507,6 +507,14 @@ func _test_extraction() -> void:
 	level.server_spawn_body({"uid": "test_map_body", "label": "Hostile9", "faction": "hostile", "variant": "urban", "pos": [-3.0, 0.1, 35.0],
 		"gear": {"slots": {"vest": "plate_carrier_light"}, "slot_state": {}, "containers": {"vest": [{"id": "mag_556", "count": 2}], "pockets": [], "backpack": []}, "hands": ""}})
 	level.spawn_item(&"electronics_salvage", 3, Vector3(3, 0.5, 33), "test_map_deposit")
+	# Audit A3-03: bodies count where they lie, not where their capsule fell. One fell just
+	# outside the LZ and its ragdoll slid in; the other fell inside and slid out.
+	var slid_in := level.server_spawn_body({"uid": "test_map_slid_in", "label": "SlidIn", "faction": "friendly", "variant": "multicam", "pos": [8.0, 0.1, 20.0],
+		"gear": {"slots": {"vest": "plate_carrier_light"}, "slot_state": {}, "containers": {"vest": [], "pockets": [], "backpack": []}, "hands": ""}})
+	var slid_out := level.server_spawn_body({"uid": "test_map_slid_out", "label": "SlidOut", "faction": "friendly", "variant": "multicam", "pos": [-6.0, 0.1, 30.0],
+		"gear": {"slots": {"vest": "plate_carrier_light"}, "slot_state": {}, "containers": {"vest": [], "pockets": [], "backpack": []}, "hands": ""}})
+	var slid: bool = await _slide_body(slid_in, Vector3(0, 0, 8))
+	slid = await _slide_body(slid_out, Vector3(0, 0, -8)) and slid
 	await _seconds(0.5)
 	check(mates.size() == 7, "seven squadmates to bring (%d)" % mates.size())
 	var why := ext.server_confirm()
@@ -546,7 +554,12 @@ func _test_extraction() -> void:
 	check(not in_pouches.is_empty() and counted and in_pouches.has("tourniquet"),
 		"the host's MOLLE pouches and their contents are in the report, once each (%s in %s)" % [in_pouches.keys(), pouch_ids.keys()])
 	var bodies: Array = report.get("bodies", [])
-	check(bodies.size() == 1 and bodies[0].label == "Hostile9" and bodies[0].items.size() >= 2, "the body brought along, with its gear (%s)" % [bodies])
+	var hostile9 := bodies.filter(func(b: Dictionary) -> bool: return b.label == "Hostile9")
+	check(hostile9.size() == 1 and hostile9[0].items.size() >= 2, "the body brought along, with its gear (%s)" % [bodies])
+	var out_labels: Array = bodies.map(func(b: Dictionary) -> String: return b.label)
+	var left_labels: Array = report.get("bodies_left", []).map(func(b: Dictionary) -> String: return b.label)
+	check(slid and bodies.size() == 2 and "SlidIn" in out_labels and "SlidOut" in left_labels and "SlidOut" not in out_labels,
+		"bodies count where they lie: one that slid into the LZ goes out with its gear, one that slid out of it stays (slid %s; out %s, left %s)" % [slid, out_labels, left_labels])
 	var hvts: Array = report.get("hvts", [])
 	check(hvts.size() == 1 and hvts[0].name == "TestHVT", "the HVT inside the LZ, not the one left in the compound (%s)" % [hvts])
 	check(report.get("point", {}).get("name") == "LZ South" and report.get("contract_id") == "test_contract" and report.get("objectives", []).size() <= 1,
@@ -559,6 +572,24 @@ func _test_extraction() -> void:
 	for s: Soldier in mates:
 		if is_instance_valid(s):
 			SquadAI.of(s).process_mode = Node.PROCESS_MODE_INHERIT
+
+
+## Once `body`'s ragdoll is at rest, moves it `by` (its capsule stays where it fell), as a
+## ragdoll sliding or rolling would. False if it never lay as one.
+func _slide_body(body: Soldier, by: Vector3) -> bool:
+	var deadline := Time.get_ticks_msec() + 5000
+	while not is_instance_valid(body.ragdoll) and Time.get_ticks_msec() < deadline:
+		await get_tree().process_frame
+	if not is_instance_valid(body.ragdoll):
+		print("  (%s never lay as a ragdoll)" % body.display_name())
+		return false
+	for part: RigidBody3D in body.ragdoll.parts.values():
+		part.freeze = true
+		part.global_position += by
+	body.ragdoll._send(true)
+	await _frames(5)  # the shown pose (and its hitboxes) follows
+	print("  %s: capsule %s, lies at %s" % [body.display_name(), body.global_position, body.body_point()])
+	return _flat(body.body_point(), body.global_position) > by.length() - 1.5
 
 
 func end_deployment(report: Dictionary) -> void:

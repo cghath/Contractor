@@ -725,10 +725,14 @@ func _server_reload(slot: StringName) -> void:
 	Sfx.server_play(&"reload", global_position + Vector3.UP)
 	_reload_n += 1
 	var n := _reload_n
+	var rev := inventory.slot_revision(slot)
 	# The new magazine goes in when the reload finishes, if the same weapon is still there and
-	# the soldier hasn't died since (a respawn's new rifle isn't the one being reloaded).
+	# the soldier hasn't died since (a respawn's new rifle isn't the one being reloaded). The
+	# same weapon, not just the same model: one dropped and another M4 picked up meanwhile has
+	# a new slot revision (audit A2-02).
 	await get_tree().create_timer(seconds).timeout
-	if is_inside_tree() and n == _reload_n and vitals.is_up() and inventory.slots.get(slot, &"") == id:
+	if is_inside_tree() and n == _reload_n and vitals.is_up() and inventory.slots.get(slot, &"") == id \
+			and inventory.slot_revision(slot) == rev:
 		inventory.reload(slot)
 
 
@@ -934,8 +938,28 @@ func _server_inventory_action(action: String, container: StringName, index: int,
 			if on_point.is_empty():
 				return
 			var gear := ItemDB.get_item(StringName(on_point.id))
-			if not inventory.equip_attachment(slot):
-				_client_message.rpc_id(owner_peer(), "Already carrying a %s" % InventoryScreen.SLOT_NAMES.get(gear.slot, String(gear.slot)).to_lower() if gear and gear.slot != &"" else "Can't equip that")
+			if inventory.equip_attachment(slot):
+				return
+			# One already on the shoulder that packs on that point too: they swap places.
+			var worn := ItemDB.get_item(inventory.slots.get(gear.slot, &"")) if gear and gear.slot != &"" and inventory.slots.get(gear.slot, &"") != &"" else null
+			if worn and Inventory.point_types(inventory.attach_point(slot)).any(func(t: String) -> bool: return t in worn.stats.get("attach", [])):
+				var packed := inventory.detach(slot)
+				var off := inventory.unequip(gear.slot)
+				inventory.attach(slot, {"id": off.id, "state": off.state})
+				inventory.take(packed.id, 1, packed.get("state", {}))
+				return
+			_client_message.rpc_id(owner_peer(), "Already carrying a %s" % InventoryScreen.SLOT_NAMES.get(gear.slot, String(gear.slot)).to_lower() if gear and gear.slot != &"" else "Can't equip that")
+		"attach_slot":  # the launcher off the shoulder, packed on top of the pack (`target`, or the first free point it fits)
+			var gear := ItemDB.get_item(inventory.slots.get(slot, &"")) if inventory.slots.get(slot, &"") != &"" else null
+			if gear == null or not Inventory.is_attachable(gear):
+				return
+			var point := target if target != &"" else inventory.free_point_for(gear)
+			var problem := inventory.attach_problem(gear, point) if point != &"" else inventory.no_point_problem(gear)
+			if problem != "":
+				_client_message.rpc_id(owner_peer(), problem)
+				return
+			var off := inventory.unequip(slot)
+			inventory.attach(point, {"id": off.id, "state": off.state})
 		"move_attachment":
 			var att := inventory.attachment(slot)
 			if att.is_empty():
@@ -977,11 +1001,45 @@ func _server_interact(path: NodePath) -> void:
 		_server_swap_pack(entry)
 		return
 	var taken := inventory.take(item.item_id, item.count, item.state)
-	if taken > 0:
-		model.server_pick_up(item.global_position, item.item_id)  # the pickup animation
 	if taken == 0:
 		_client_message.rpc_id(owner_peer(), "No room for %s" % ItemDB.get_item(item.item_id).name)
-	elif taken >= item.count:
+		return
+	_server_took(item, taken)
+
+
+## Inventory screen: the nearby item at `path` dragged onto container `into` (a pouch too)
+## goes in there, not on the body: a pack dragged into the worn pack is stowed (empty, rolled
+## if it's as big), never swapped for it (audit A2-07). The same reach as picking it up. A
+## two-handed load (an objective case, a crate) is never stowed: it's picked up as a click
+## does, into the hands.
+@rpc("any_peer", "call_local", "reliable")
+func _server_pick_up_into(path: NodePath, into: StringName) -> void:
+	if not _from_owner() or not vitals.is_up():
+		return
+	var item := get_node_or_null(path) as WorldItem
+	if item == null or item.is_queued_for_deletion() or not inventory.containers.has(into):
+		return
+	if item.global_position.distance_to(global_position) > INTERACT_RANGE + 1.5:
+		return
+	var data := ItemDB.get_item(item.item_id)
+	if data == null:
+		return
+	if data.two_handed:
+		_server_interact(path)
+		return
+	var taken := mini(item.count, inventory.room_for(into, data, item.state))
+	if taken <= 0 or not inventory.insert_entry(into, {"id": item.item_id, "count": taken, "state": item.state.duplicate(true)}):
+		var why := inventory.pack_problem(into, data, item.state)
+		_client_message.rpc_id(owner_peer(), why if why != "" else "No room for %s in %s" % [data.name, container_name(into)])
+		return
+	_server_took(item, taken)
+
+
+## Host: `taken` of the world item `item` went into this soldier's gear: the pickup
+## animation, and the item leaves the world (or what's left of the stack stays).
+func _server_took(item: WorldItem, taken: int) -> void:
+	model.server_pick_up(item.global_position, item.item_id)  # the pickup animation
+	if taken >= item.count:
 		GameState.item_taken(item.uid)
 		item.queue_free()
 	else:
@@ -1760,7 +1818,9 @@ static func _loot_order(other: Soldier) -> Array:
 ## weapons), then what's stowed, pouches first. The carrier comes with its pouches on but
 ## empty, and what was in them follows as entries of their own, so a looter who already
 ## wears a carrier gets the magazines in his own pouches instead of buried in a spare
-## carrier, and one who puts this carrier on gets them back in its pouches.
+## carrier, and one who puts this carrier on gets them back in its pouches. The same goes for
+## the pack's attachments (an aid bag): each thing is handed over once, never both inside its
+## pouch and as an entry of its own (audit A2-01: loot-all doubled an aid bag's bandages).
 func gear_entries() -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	for slot in LOOT_SLOT_ORDER:
@@ -1768,7 +1828,7 @@ func gear_entries() -> Array[Dictionary]:
 			var entry := {"id": inventory.slots[slot], "count": 1}
 			if not inventory.state_of(slot).is_empty():
 				entry.state = inventory.state_of(slot).duplicate(true)
-				if slot == &"vest":
+				if slot in Inventory.ATTACH_SLOTS:
 					for att: Dictionary in entry.state.get("molle", {}).values():
 						if att.has("held"):
 							att.held = []

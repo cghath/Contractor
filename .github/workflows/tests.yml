@@ -61,20 +61,39 @@ jobs:
           echo "GODOT=$bin" >> "$GITHUB_ENV"
           "$bin" --version
 
+      # The runner keeps the run's own logs (import, the suite, and host and client for the
+      # two-process suites, plus summary.txt with the CI run and commit) in CONTRACTOR_TEST_LOGS.
       - name: Run the ${{ matrix.suite }} suite
         env:
           CONTRACTOR_TEST_TAG: ci-${{ matrix.suite }}
+          CONTRACTOR_TEST_LOGS: ${{ runner.temp }}/contractor-test-logs
         run: bash tools/run_tests.sh ${{ matrix.suite }}
 
-      # On failure, run the suite again with its full output, keep the tail in the log and
-      # raise the failing checks and script errors as annotations (shown on the run page).
+      # On failure, show the end of every log that run kept (the same processes, not a rerun)
+      # and raise their failing checks and script errors as annotations (shown on the run page;
+      # job logs need repo admin rights). The runner's own annotations come first, above.
       - name: Show why ${{ matrix.suite }} failed
-        if: failure() && matrix.suite != 'net'
+        if: failure()
         env:
-          CONTRACTOR_TEST_TAG: ci-${{ matrix.suite }}-again
+          CONTRACTOR_TEST_LOGS: ${{ runner.temp }}/contractor-test-logs
         run: |
-          timeout -k 10 480 "$GODOT" --headless --path . "res://tests/${{ matrix.suite }}_test.tscn" > /tmp/out.txt 2>&1 || true
-          tail -n 200 /tmp/out.txt
-          grep -E '\[FAIL\]|SCRIPT ERROR|Parse Error|ERROR:|TEST (FAILED|PASSED)' /tmp/out.txt | head -n 10 | while IFS= read -r line; do
+          shopt -s nullglob
+          for f in "$CONTRACTOR_TEST_LOGS"/*/R*/summary.txt "$CONTRACTOR_TEST_LOGS"/*/R*/*.log; do
+            echo "===== $(basename "$(dirname "$f")")/$(basename "$f"), last 200 lines"
+            tail -n 200 "$f"
+          done
+          for d in "$CONTRACTOR_TEST_LOGS"/*/R*/; do
+            (cd "$d" && grep -HE '\[FAIL\]|SCRIPT ERROR|Parse Error|ERROR:|TEST (FAILED|PASSED)' -- *.log)
+          done | head -n 10 | while IFS= read -r line; do
             echo "::error title=${{ matrix.suite }}::${line}"
           done
+
+      # Whatever the verdict (passed, failed, cancelled or out of time), keep those logs as the
+      # run's "test-logs-<suite>" artifact.
+      - name: Keep the ${{ matrix.suite }} logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-${{ matrix.suite }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/contractor-test-logs
+          if-no-files-found: warn

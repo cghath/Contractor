@@ -37,6 +37,9 @@ func _ready() -> void:
 	await _test_loading()
 	_test_molle_rules()
 	await _test_molle_host()
+	await _test_loot_aid_bag()
+	await _test_screen_launcher()
+	await _test_screen_ground_pack()
 	await _test_respawn_kit()
 	await _test_smoke_colours()
 	await _test_breach_navigation()
@@ -429,6 +432,260 @@ func _test_pack_rules() -> void:
 	check(inv.set_rolled(&"backpack", i, false) and not inv.containers[&"backpack"][i].has("state"), "and unrolls back to a plain pack")
 	inv.strip()
 	inv.free()
+
+
+## Audit A2-01: looting a dead medic hands over his pack's aid bag and what's in it exactly
+## once: loot all into a looter wearing nothing, loot all into one with gear of his own, item
+## by item, and loot all that has to undo and go item by item. Nothing is made or lost.
+func _test_loot_aid_bag() -> void:
+	print("Looting a pack with an aid bag on it")
+	var inv := player.inventory
+	player.global_position = Vector3(0, 0.1, 18)
+	var looters := {
+		"nothing on": [] as Array[StringName],
+		"gear of his own": [&"plate_carrier", &"ruck_45", &"aid_bag", &"pressure_bandage", &"mag_556"] as Array[StringName],
+		"item by item": [&"ruck_45"] as Array[StringName],
+		"loot all has to undo": [&"plate_carrier", &"ruck_45"] as Array[StringName],
+	}
+	var n := 0
+	for kind: String in looters:
+		n += 1
+		inv.strip()
+		for id: StringName in looters[kind]:
+			inv.take(id)
+		var medic := level.spawn_soldier({"name": "LootMedic%d" % n, "faction": "hostile", "variant": "woodland", "pos": Vector3(2, 0.1, 18),
+			"loadout": [], "combat": 0.5, "discipline": 0.5, "guard": true})
+		medic.set_physics_process(false)
+		SquadAI.of(medic).set_physics_process(false)
+		medic.inventory.strip()
+		medic.inventory.take(&"plate_carrier")
+		medic.inventory.take(&"pouch_ifak", 1, {"held": [{"id": &"tourniquet", "count": 1}]})
+		medic.inventory.take(&"assault_pack")
+		medic.inventory.take(&"aid_bag", 1, {"held": [{"id": &"pressure_bandage", "count": 2}, {"id": &"tourniquet", "count": 1}]})
+		medic.inventory.insert_entry(&"backpack", {"id": &"mag_556", "count": 2})
+		if kind == "loot all has to undo":
+			# His carrier and pack fit the looter's Ruck, nothing else fits on the looter, and
+			# what's in his vest (3 L) can't go back into his pockets (2 L) once the carrier is
+			# gone: loot all at once can't put it back, so it's undone and goes item by item.
+			medic.inventory.insert_entry(&"vest", {"id": &"mag_556", "count": 6})
+			medic.inventory.insert_entry(&"vest", {"id": &"mag_556", "count": 6})
+			var need := 0.0
+			for entry: Dictionary in medic.gear_entries().slice(0, 2):
+				need += Inventory.unit_volume(ItemDB.get_item(StringName(entry.id)), entry.get("state", {}))
+			var mag := ItemDB.get_item(&"mag_556")
+			for c: StringName in [&"vest", &"pockets"]:
+				while inv.room_for(c, mag) > 0:
+					inv.insert_entry(c, {"id": &"mag_556", "count": 1})
+			while inv.free_volume(&"backpack") >= need + Inventory.unit_volume(mag):
+				inv.insert_entry(&"backpack", {"id": &"mag_556", "count": 1})
+		medic.vitals.server_kill()
+		await _frames(3)
+		player.global_position = medic.body_point() + Vector3(0.6, 0.0, 0.0)
+		var before := _all_items([player, medic])
+		var bandages := inv.medical_count(&"pressure_bandage") + medic.inventory.medical_count(&"pressure_bandage")
+		if kind == "item by item":
+			player._server_loot_item.rpc_id(1, medic.get_path(), Inventory.pouch_container(&"pack_aid"), -1, &"aid_bag")
+		else:
+			player._server_loot_body.rpc_id(1, medic.get_path())
+		await _frames(3)
+		var after := _all_items([player, medic])
+		var bandages_after := inv.medical_count(&"pressure_bandage") + medic.inventory.medical_count(&"pressure_bandage")
+		check(after == before and bandages_after == bandages,
+			"looting (%s): every item kept, none made (bandages %d -> %d; before %s, after %s)" % [kind, bandages, bandages_after, before, after])
+		if kind == "nothing on":
+			check(not medic.has_gear() and inv.slots[&"backpack"] == &"assault_pack" and inv.attachment(&"pack_aid").get("id") == &"aid_bag"
+				and inv.medical_count(&"pressure_bandage") == 2,
+				"loot all: everything comes over, his pack on with the aid bag on it, 2 bandages (%d)" % inv.medical_count(&"pressure_bandage"))
+		elif kind == "item by item":
+			check(medic.inventory.attachment(&"pack_aid").is_empty() and inv.medical_count(&"pressure_bandage") == 2,
+				"Loot > the aid bag: it comes over with its contents, once (%d bandages)" % inv.medical_count(&"pressure_bandage"))
+		elif kind == "loot all has to undo":
+			# At once, his carrier would have gone first, into the Ruck; item by item it comes
+			# last and no longer fits there.
+			check(medic.inventory.slots[&"vest"] == &"plate_carrier" and _count_in(inv, &"backpack", &"plate_carrier") == 0
+				and _count_in(medic.inventory, &"vest", &"mag_556") < 12,
+				"loot all undid itself and went item by item: his magazines came over, his carrier stays on him (%d left in it)" % _count_in(medic.inventory, &"vest", &"mag_556"))
+		medic.remove_from_group(Soldier.DEAD_GROUP)  # test cleanup: gone without dropping anything
+		medic.queue_free()
+		await _frames(2)
+	inv.strip()
+
+
+## Audit A2-06: the launcher has a slot tile on the inventory screen like the other weapons:
+## it shows what's loaded, packs on top of the pack (dragged onto the pack, or Pack on top),
+## comes back off it onto the shoulder (swapping with one already there), stows, drops.
+func _test_screen_launcher() -> void:
+	print("Inventory screen: the launcher slot")
+	var inv := player.inventory
+	inv.strip()
+	player.global_position = Vector3(0, 0.1, 18)
+	inv.take(&"assault_pack")
+	inv.take(&"at4")
+	var screen: InventoryScreen = player._hud.inventory_screen
+	screen._set_view(InventoryScreen.View.LOADOUT)
+	screen.visible = true
+	await _frames(2)
+	var tile := _slot_tile(screen, &"launcher")
+	check(tile.size() == 2 and tile[1].id == &"at4" and tile[0].tooltip_text.contains("AT4") and tile[0].tooltip_text.contains("loaded"),
+		"the loadout shows a launcher slot tile: the AT4, loaded (%s)" % (tile[0].tooltip_text.replace("\n", " | ") if tile.size() == 2 else "no tile"))
+	var labels := screen._actions_for(tile[1] if tile.size() == 2 else {}).map(func(a: Array) -> String: return a[0])
+	check(labels.has("Stow") and labels.has("Pack on top") and labels.has("Drop"), "its actions: Stow, Pack on top, Drop (%s)" % [labels])
+	var onto_pack := screen.drop_action({"kind": "slot", "slot": &"launcher", "id": &"at4"}, {"kind": "slot", "slot": &"backpack"})
+	check(onto_pack.is_valid(), "dragging it onto the pack is an action")
+	if onto_pack.is_valid():
+		screen._drop(Vector2.ZERO, {"inventory_drag": {"kind": "slot", "slot": &"launcher", "id": &"at4"}}, {"kind": "slot", "slot": &"backpack"})
+	await _frames(2)
+	tile = _slot_tile(screen, &"launcher")
+	check(inv.slots[&"launcher"] == &"" and inv.attachment(&"pack_top_1").get("id") == &"at4" and tile.size() == 2 and tile[1].id == &"",
+		"and packs it on top of the pack; the slot tile shows empty")
+	# A second AT4 on the shoulder, then the packed one dragged onto the soldier: they swap.
+	inv.take(&"at4", 1, {"test_mark": "shoulder"})
+	screen._drop(Vector2.ZERO, {"inventory_drag": {"kind": "point", "point": &"pack_top_1", "id": &"at4"}}, {"kind": "doll"})
+	await _frames(2)
+	check(inv.slots[&"launcher"] == &"at4" and inv.state_of(&"launcher").get("test_mark", "") == "" \
+		and inv.attachment(&"pack_top_1").get("state", {}).get("test_mark", "") == "shoulder",
+		"the packed AT4 dragged onto the soldier swaps with the one on the shoulder (%s / %s)" % [inv.state_of(&"launcher"), inv.attachment(&"pack_top_1")])
+	# An RPG-7 shows empty; it stows, and drops.
+	inv.detach(&"pack_top_1")
+	inv.unequip(&"launcher")
+	inv.take(&"rpg7")
+	await _frames(2)
+	tile = _slot_tile(screen, &"launcher")
+	check(tile.size() == 2 and tile[1].id == &"rpg7" and tile[0].tooltip_text.contains("empty"), "an unloaded RPG-7 shows empty (%s)" % (tile[0].tooltip_text.replace("\n", " | ") if tile.size() == 2 else "no tile"))
+	screen._drop(Vector2.ZERO, {"inventory_drag": {"kind": "slot", "slot": &"launcher", "id": &"rpg7"}}, {"kind": "container", "container": &"backpack"})
+	await _frames(2)
+	check(inv.slots[&"launcher"] == &"" and _count_in(inv, &"backpack", &"rpg7") == 1, "dragged into the pack, it's stowed")
+	screen._drop(Vector2.ZERO, {"inventory_drag": {"kind": "entry", "container": &"backpack", "index": _index_in(inv, &"backpack", &"rpg7"), "id": &"rpg7"}}, {"kind": "slot", "slot": &"launcher"})
+	await _frames(2)
+	check(inv.slots[&"launcher"] == &"rpg7", "dragged back onto its slot, it's on the shoulder")
+	screen._drop(Vector2.ZERO, {"inventory_drag": {"kind": "slot", "slot": &"launcher", "id": &"rpg7"}}, {"kind": "nearby"})
+	await _frames(3)
+	var dropped := get_tree().get_nodes_in_group(WorldItem.GROUP).filter(func(n: Node) -> bool: return n is WorldItem and n.item_id == &"rpg7")
+	check(inv.slots[&"launcher"] == &"" and dropped.size() == 1, "and dropped on the ground, it lies there")
+	for n: Node in dropped:
+		GameState.item_taken(n.uid)
+		n.queue_free()
+	screen.visible = false
+	inv.strip()
+
+
+## The slot tile of `slot` on the inventory screen as [tile, src], or [] if there is none.
+func _slot_tile(screen: InventoryScreen, slot: StringName) -> Array:
+	for t: Array in screen._tiles:
+		if is_instance_valid(t[0]) and not t[0].is_queued_for_deletion() and t[1].kind == "slot" and t[1].slot == slot:
+			return [t[0], t[1]]
+	return []
+
+
+## Audit A2-07: a pack on the ground dragged into the worn pack is stowed there, not swapped
+## for it; one with things in it isn't (and nothing changes); dragged onto the body (the pack's
+## slot) it still swaps, as picking it up does.
+func _test_screen_ground_pack() -> void:
+	print("Inventory screen: a ground pack dragged into the worn pack")
+	var inv := player.inventory
+	inv.strip()
+	player.global_position = Vector3(0, 0.1, 18)
+	inv.take(&"ruck_45")
+	inv.insert_entry(&"backpack", {"id": &"mag_556", "count": 2})
+	var screen: InventoryScreen = player._hud.inventory_screen
+	screen.visible = true
+	for id: StringName in [&"ruck_45", &"assault_pack"]:  # packs earlier checks left lying about
+		for n: WorldItem in _ground(id):
+			GameState.item_taken(n.uid)
+			n.queue_free()
+	await _frames(2)
+	level.server_spawn_dropped(&"assault_pack", 1, player.global_position + Vector3(0.5, 0.5, 0))
+	await _frames(3)
+	var ground := _ground(&"assault_pack")
+	check(ground.size() == 1 and inv.room_for(&"backpack", ItemDB.get_item(&"assault_pack")) >= 1,
+		"an empty Assault Pack on the ground fits in the Ruck (%d on the ground, room %d)" % [ground.size(), inv.room_for(&"backpack", ItemDB.get_item(&"assault_pack"))])
+	if ground.is_empty():
+		screen.visible = false
+		return
+	var src := {"kind": "nearby", "id": &"assault_pack", "path": ground[0].get_path()}
+	screen._drop(Vector2.ZERO, {"inventory_drag": src}, {"kind": "container", "container": &"backpack"})
+	await _frames(3)
+	check(inv.slots[&"backpack"] == &"ruck_45" and _count_in(inv, &"backpack", &"assault_pack") == 1 and _count_in(inv, &"backpack", &"mag_556") == 2
+		and _ground(&"assault_pack").is_empty() and _ground(&"ruck_45").is_empty(),
+		"dragged into the Ruck it's stowed there; the Ruck stays on, nothing on the ground (wearing %s, inside %s)" % [inv.slots[&"backpack"], inv.containers[&"backpack"]])
+	# A loaded pack never goes in: nothing moves.
+	inv.remove_entry(&"backpack", _index_in(inv, &"backpack", &"assault_pack"))
+	level.server_spawn_dropped(&"assault_pack", 1, player.global_position + Vector3(0.5, 0.5, 0), {"held": [{"id": &"pressure_bandage", "count": 2}]})
+	await _frames(3)
+	ground = _ground(&"assault_pack")
+	if not ground.is_empty():
+		screen._drop(Vector2.ZERO, {"inventory_drag": {"kind": "nearby", "id": &"assault_pack", "path": ground[0].get_path()}}, {"kind": "container", "container": &"backpack"})
+	await _frames(3)
+	check(ground.size() == 1 and is_instance_valid(ground[0]) and not ground[0].is_queued_for_deletion() and inv.slots[&"backpack"] == &"ruck_45"
+		and _count_in(inv, &"backpack", &"assault_pack") == 0, "a loaded one dragged into it stays on the ground; the Ruck stays on")
+	# A two-handed load (the HVT case, 30 L, would fit the Ruck by volume) is never stowed:
+	# dragged into the pack, or asked for straight from the host, it goes into the hands.
+	var hvt := ItemDB.get_item(&"hvt_case")
+	check(hvt.two_handed and Inventory.unit_volume(hvt) <= inv.free_volume(&"backpack") and inv.room_for(&"backpack", hvt) == 0,
+		"an HVT case would fit the Ruck by volume (%.0f of %.0f L free), but the Ruck has no room for it" % [Inventory.unit_volume(hvt), inv.free_volume(&"backpack")])
+	for how: String in ["dragged into the Ruck", "asked for into the Ruck"]:
+		level.server_spawn_dropped(&"hvt_case", 1, player.global_position + Vector3(-0.5, 0.5, 0))
+		await _frames(3)
+		var cases := _ground(&"hvt_case").filter(func(n: WorldItem) -> bool: return n.global_position.distance_to(player.global_position) < 1.5)
+		if cases.is_empty():
+			check(false, "an HVT case %s: none on the ground near him" % how)
+			continue
+		var case_item: WorldItem = cases[0]
+		if how == "dragged into the Ruck":
+			screen._drop(Vector2.ZERO, {"inventory_drag": {"kind": "nearby", "id": &"hvt_case", "path": case_item.get_path()}}, {"kind": "container", "container": &"backpack"})
+		else:
+			player._server_pick_up_into.rpc_id(1, case_item.get_path(), &"backpack")
+		await _frames(3)
+		check(inv.hands == &"hvt_case" and _count_in(inv, &"backpack", &"hvt_case") == 0 and inv.slots[&"backpack"] == &"ruck_45"
+			and (not is_instance_valid(case_item) or case_item.is_queued_for_deletion()),
+			"an HVT case %s is carried in the hands, never stowed (hands %s, %d in the pack)" % [how, inv.hands, _count_in(inv, &"backpack", &"hvt_case")])
+		inv.release_hands()
+	# Onto the pack's slot: the swap, as a click picks it up.
+	if not ground.is_empty():
+		screen._drop(Vector2.ZERO, {"inventory_drag": {"kind": "nearby", "id": &"assault_pack", "path": ground[0].get_path()}}, {"kind": "slot", "slot": &"backpack"})
+	await _frames(3)
+	check(inv.slots[&"backpack"] == &"assault_pack" and inv.medical_count(&"pressure_bandage") == 2 and _ground(&"ruck_45").size() == 1,
+		"dragged onto the pack's slot it swaps: the Assault Pack on (its 2 bandages in it), the Ruck on the ground")
+	for id: StringName in [&"ruck_45", &"assault_pack"]:
+		for n: WorldItem in _ground(id):
+			GameState.item_taken(n.uid)
+			n.queue_free()
+	screen.visible = false
+	inv.strip()
+
+
+## World items of `id` lying about (not on their way out).
+func _ground(id: StringName) -> Array:
+	return get_tree().get_nodes_in_group(WorldItem.GROUP).filter(func(n: Node) -> bool: return n is WorldItem and n.item_id == id and not n.is_queued_for_deletion())
+
+
+## Every item on `soldiers`, wherever it is (worn, on a carrier's or pack's points, in a pouch,
+## stowed, inside a stowed pack or pouch, in the hands): id -> units.
+func _all_items(soldiers: Array) -> Dictionary:
+	var counts := {}
+	for s: Soldier in soldiers:
+		var inv := s.inventory
+		for slot in Inventory.SLOTS:
+			if inv.slots[slot] != &"":
+				_count_entry(counts, {"id": inv.slots[slot], "count": 1, "state": inv.state_of(slot)})
+		for container in Inventory.CONTAINERS:  # pouch contents are in the carrier's state
+			for entry: Dictionary in inv.containers[container]:
+				_count_entry(counts, entry)
+		if inv.hands != &"":
+			_count_entry(counts, {"id": inv.hands, "count": 1})
+	return counts
+
+
+func _count_entry(counts: Dictionary, entry: Dictionary) -> void:
+	var id := StringName(entry.id)
+	counts[id] = int(counts.get(id, 0)) + int(entry.count)
+	var state: Dictionary = entry.get("state", {})
+	for inner: Dictionary in state.get("held", []):
+		_count_entry(counts, inner)
+	var molle: Dictionary = state.get("molle", {})
+	for point: Variant in molle:
+		var att: Dictionary = molle[point]
+		_count_entry(counts, {"id": att.id, "count": int(entry.count), "state": {"held": att.get("held", [])}})
 
 
 func _count_in(inv: Inventory, container: StringName, id: StringName) -> int:

@@ -240,15 +240,17 @@ func set_scavenge(from: Soldier, allowed: bool, names := PackedStringArray()) ->
 
 ## Command menu "Scavenge that body": the nearest named AI goes through the dead body within
 ## ORDER_BODY_M of `point` for what it needs. Returns why nobody could ("" if someone went).
+## Measured to where the body lies (Soldier.body_point: its ragdoll can rest metres from the
+## capsule), so the body the player looks at is the one found.
 func order_scavenge(from: Soldier, point: Vector3, names := PackedStringArray()) -> String:
 	leader = from
 	var dead: Soldier = null
 	var best := ORDER_BODY_M
 	for n in from.get_tree().get_nodes_in_group(Soldier.DEAD_GROUP):
 		var s := n as Soldier
-		if s and not s.is_queued_for_deletion() and s.global_position.distance_to(point) < best:
+		if s and not s.is_queued_for_deletion() and s.body_point().distance_to(point) < best:
 			dead = s
-			best = s.global_position.distance_to(point)
+			best = s.body_point().distance_to(point)
 	if dead == null:
 		return "Look at a body"
 	if dead.has_gear_marker:

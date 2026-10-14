@@ -4,7 +4,8 @@ extends NavBuilder
 ## background around the players (PLAYER_RADIUS_M) and every living AI soldier (AI_RADIUS_M)
 ## as they move, and dropped again once nobody is near (DROP_MARGIN_M beyond). A chunk bakes
 ## the terrain under it and the structures on it: a loaded module's voxels as they are now,
-## or an unloaded module's base boxes. A breach in a module rebakes the chunks around it
+## or an unloaded module's proxy (its base boxes, with breaches made before it streamed out
+## kept open). A breach in a module rebakes the chunks around it
 ## (VoxelWorld.breached), as in the compound.
 ##
 ## The grid's chunk centres fall on module origins (ZoneDef.GRID_M), so chunk edges run 6 m
@@ -82,7 +83,7 @@ func _ground_source(chunk: Vector2i) -> NavigationMeshSourceGeometryData3D:
 
 
 ## Loaded modules' voxels as they are now (false while one isn't built yet); unloaded
-## modules' base boxes.
+## modules' proxies (ZoneModule.proxy_boxes: the base boxes, less what was carved).
 func _add_structures(source: NavigationMeshSourceGeometryData3D, bounds: AABB) -> bool:
 	var rect := Rect2(bounds.position.x, bounds.position.z, bounds.size.x, bounds.size.z)
 	for module in zone.modules():
@@ -98,7 +99,7 @@ func _add_structures(source: NavigationMeshSourceGeometryData3D, bounds: AABB) -
 				source.add_faces(_box_faces(box), world.global_transform)
 		else:
 			var local := module.global_transform.affine_inverse() * bounds
-			for box in ZoneModules.boxes_m(module.type):
+			for box in module.proxy_boxes():  # with any breach made before it streamed out
 				if box.intersects(local):
 					source.add_faces(_box_faces(box.intersection(local.grow(0.01))), module.global_transform)
 	return true

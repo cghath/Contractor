@@ -189,6 +189,12 @@ const STAY_WITH_M := 20.0
 ## them down in; lying within LAY_NEAR_M of it counts as laid down there (proposed).
 const LAY_DOWN_M := 8.0
 const LAY_NEAR_M := 2.0
+## A body laid at the lay spot lies within LAID_M of it, measured to where it lies
+## (Soldier.body_point): the bearer lowers it once within 1 m of the spot, 0.8 m in front of
+## him (Soldier._put_down_spot), and its ragdoll's chest settles some 1.3 m from the capsule.
+## Measured against LAY_NEAR_M alone it often read as not there (2.2-2.6 m), and the bearer
+## lifted the casualty again to bring him closer, over and over (casualty R0123-R0125).
+const LAID_M := LAY_NEAR_M + 1.5
 ## The care order once safe, by care_needed() kind: massive bleeding, airway, tension (the needle), chest, the
 ## pelvic binder (a broken pelvis bleeds heavily inside), other bleeding, circulation (IV or IO, a bag, a pressure bag), restarting a heart
 ## (epinephrine, shocks, CPR), the heart rate, fractures, burns, pain, epinephrine's wake-up roll
@@ -349,7 +355,8 @@ var ordered: Dictionary = {}
 var stance_order := -1
 var _heal_until := -1000.0
 var _suppress_jitter := Vector3.ZERO
-## "Drop packs here": the pack this unit left on the ground ({"id", "pos"}), {} for none.
+## "Drop packs here": the pack this unit left on the ground ({"id", "uid", "pos"}: its item,
+## that very WorldItem's uid, where it went down), {} for none.
 var dropped_pack: Dictionary = {}
 ## Command menu "Hold fire": don't shoot at all until told to open fire.
 var hold_fire := false
@@ -396,9 +403,6 @@ var _move_point := Vector3.ZERO
 ## Where a casualty carried under a move order is laid down (null until worked out).
 var _lay_spot: Variant = null
 var _lay_for := Vector3.INF  # the point _lay_spot was found for (a moving CCP: found again)
-## This unit laid its casualty at _lay_spot: it stays with them wherever their ragdoll settles
-## (body_point is the ragdoll's chest, which can roll past LAY_NEAR_M: picked up again, R0267).
-var _laid := false
 var _patrol_index := 0
 var _think_cd := 0.0
 var _scan_cd := 0.0
@@ -693,7 +697,6 @@ func on_order(new_order: Squad.Order, point: Vector3, slot := 0, count := 1) -> 
 	_move_point = point + side * (slot - (count - 1) / 2.0) * 1.5
 	ordered = {}  # a movement order replaces a tactic order
 	_lay_spot = null
-	_laid = false
 	_has_cover = false
 	_think_cd = 0.0
 
@@ -1595,7 +1598,7 @@ func _should_carry() -> bool:
 	var ccp: Variant = squad.ccp_point() if squad else null
 	if ccp != null and _friendly():
 		return casualty.body_point().distance_to(ccp) > LAY_NEAR_M + 1.0  # "Bring casualties here"
-	if _friendly() and order == Squad.Order.MOVE and _lay_spot != null and (_laid or _flat_between(casualty.body_point(), _lay_spot) <= LAY_NEAR_M + 1.0):
+	if _friendly() and order == Squad.Order.MOVE and _lay_spot != null and _lies_at(_lay_spot):
 		return false  # laid where the order sent them: they stay while it stands (queue 16)
 	if 1.0 - casualty.vitals.blood_fraction() >= WoundModel.UNCONSCIOUS_LOST:
 		return true
@@ -1655,19 +1658,15 @@ func _care_carry(contact: bool) -> void:
 		var goal: Vector3 = ccp if ccp != null else _move_point
 		if _lay_spot == null or _lay_for.distance_to(goal) > LAY_NEAR_M:
 			_lay_for = goal
-			_laid = false
 			var spot: Variant = find_cover(goal, LAY_DOWN_M)
 			_lay_spot = spot if spot != null else NavigationServer3D.map_get_closest_point(body.get_world_3d().navigation_map, goal)
 		var lay: Vector3 = _lay_spot
-		var at := casualty.body_point()
-		if body.carrying != casualty and (_laid or Vector2(at.x - lay.x, at.z - lay.z).length() <= LAY_NEAR_M) \
-				and not is_instance_valid(casualty.carried_by):
+		if body.carrying != casualty and _lies_at(lay):
 			_has_destination = false  # laid down where ordered: stay with them
 			body.want_crouch = true
 			return
 		if body.carrying == casualty and _flat_distance(lay) <= 1.0:
 			body.server_put_down()
-			_laid = true
 			_has_destination = false
 			body.want_crouch = true
 			return
@@ -1727,7 +1726,6 @@ func _end_care() -> void:
 		body.release_carried()
 	casualty = null
 	care = Care.NONE
-	_laid = false
 	_has_cover = false
 	wants_medic = false
 	wanted.clear()
@@ -1867,7 +1865,7 @@ func _scavenge_score(contact: bool) -> float:
 		var dead := n as Soldier
 		if dead == null or not _may_scavenge(dead) or Soldier._now() < float(_looted.get(dead.get_instance_id(), -1.0)):
 			continue
-		var d := body.global_position.distance_to(dead.global_position)
+		var d := body.global_position.distance_to(dead.body_point())  # where it lies, not its capsule
 		if d > SCAVENGE_RANGE_M:
 			continue
 		var worth := Scavenge.value(body, dead, _calm_for_armor()) - d * 0.002  # nearer first
@@ -1891,7 +1889,7 @@ func _may_scavenge(dead: Soldier, ordered := false) -> bool:
 	if is_instance_valid(other) and other != body and other.vitals.is_up() and SquadAI.of(other) and SquadAI.of(other).loot_body == dead:
 		return false
 	if not ordered and body.faction == &"friendly" and squad and is_instance_valid(squad.leader) and squad.leader != body \
-			and dead.global_position.distance_to(squad.leader.global_position) > SCAVENGE_LEASH_M:
+			and dead.body_point().distance_to(squad.leader.global_position) > SCAVENGE_LEASH_M:
 		return false
 	return true
 
@@ -2406,7 +2404,8 @@ func _do_tactic(t: Dictionary) -> void:
 
 
 ## Host: "Drop packs here": the worn pack goes on the ground in front, still loaded, and this
-## unit remembers where. False if it wears none (or is busy carrying someone).
+## unit remembers which item it is (its uid), not just the model: squadmates often wear the
+## same pack with different things in it. False if it wears none (or is busy carrying someone).
 func drop_pack() -> bool:
 	if body.carrying != null or body.inventory.slots.get(&"backpack", &"") == &"":
 		return false
@@ -2414,34 +2413,42 @@ func drop_pack() -> bool:
 	if entry.is_empty():
 		return false
 	var pos := body.global_position - body.global_basis.z * 0.6 + Vector3.UP * 0.4
-	CompoundLevel.current(body).server_spawn_dropped(entry.id, 1, pos, entry.get("state", {}))
-	dropped_pack = {"id": entry.id, "pos": pos}
+	var uid := CompoundLevel.current(body).server_spawn_dropped(entry.id, 1, pos, entry.get("state", {}))
+	dropped_pack = {"id": entry.id, "uid": uid, "pos": pos}
 	return true
 
 
-## "Pick packs up": back to the pack it dropped, and on with it (if it's still there and no
-## other pack has been put on since).
+## "Pick packs up": back to the pack it dropped, wherever it has rolled since, and on with it
+## (if it's still there and no other pack has been put on since). Only its own: another pack
+## of the same model lying closer is somebody else's. Gone (someone took it): the order ends.
 func _tactic_pick_pack() -> void:
-	var pos: Vector3 = dropped_pack.get("pos", body.global_position)
-	if dropped_pack.is_empty() or body.inventory.slots.get(&"backpack", &"") != &"":
+	var own := _dropped_pack_item()
+	if own == null or body.inventory.slots.get(&"backpack", &"") != &"":
 		dropped_pack = {}
 		ordered = {}
 		return
-	if _flat_distance(pos) > 1.5:
-		_go(pos, true)
+	if _flat_distance(own.global_position) > 1.5:
+		_go(own.global_position, true)
 		return
 	_has_destination = false
-	var found: WorldItem = null
-	for node in get_tree().get_nodes_in_group(WorldItem.GROUP):
-		var item := node as WorldItem
-		if item and not item.is_queued_for_deletion() and item.item_id == StringName(dropped_pack.id) 				and item.global_position.distance_to(pos) < 3.0 and (found == null or item.global_position.distance_to(pos) < found.global_position.distance_to(pos)):
-			found = item
-	if found and body.inventory.take(found.item_id, 1, found.state) > 0:
-		body.model.server_pick_up(found.global_position, found.item_id)
-		GameState.item_taken(found.uid)
-		found.queue_free()
+	if body.inventory.take(own.item_id, 1, own.state) > 0:
+		body.model.server_pick_up(own.global_position, own.item_id)
+		GameState.item_taken(own.uid)
+		own.queue_free()
 	dropped_pack = {}
 	ordered = {}  # back to what they were doing
+
+
+## The very pack this unit dropped (dropped_pack's uid), lying in the world; null once it's gone.
+func _dropped_pack_item() -> WorldItem:
+	var uid := String(dropped_pack.get("uid", ""))
+	if uid == "":
+		return null
+	for node in get_tree().get_nodes_in_group(WorldItem.GROUP):
+		var item := node as WorldItem
+		if item and item.uid == uid and not item.is_queued_for_deletion():
+			return item
+	return null
 
 
 ## The maneuver element: along the flank route, point by point, then fighting from its end.
@@ -3064,6 +3071,13 @@ func _stop() -> void:
 
 static func _flat_between(a: Vector3, b: Vector3) -> float:
 	return Vector2(a.x - b.x, a.z - b.z).length()
+
+
+## Whether the casualty lies at `spot` (a lay spot): where its body lies, within LAID_M. The
+## one test for "laid down there", so the bearer who stays with them (_care_carry) and the
+## carry decision (_should_carry) never disagree about it.
+func _lies_at(spot: Vector3) -> bool:
+	return _flat_between(casualty.body_point(), spot) <= LAID_M
 
 
 func _flat_distance(point: Vector3) -> float:

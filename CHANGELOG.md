@@ -11,6 +11,83 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Audit fixes: 26 findings of the 2026-10-13 audit (cghath's side, 2026-10-13)
+
+The audit (`docs/audits/SUMMARY.md`, parts 1 to 3, at `fcae676`) found 3 high-priority and 23
+medium findings. All 26 are dealt with: 25 fixed, A3-07 marked pending. Each has a regression
+check in the suite that owns the code.
+
+#### Fixed
+
+- **Campaign saves are never deleted because they can't be read** (A1-01, high): an unreadable
+  save, backup or interrupted write is renamed aside (`<file>.unreadable-<date>-<time>`) and the
+  backup or a finished interrupted write loads instead. Only with nothing readable does a new
+  campaign start; its old zone saves are moved aside ("orphaned") and the host is told where.
+- **A missing save loads its backup** (A1-02, high), campaign and zone; saving checks every step,
+  so the last good save is always on disk.
+- **Loot all no longer duplicates an aid bag's contents** on a backpack (A2-01, high).
+- Saves from another version, or with sections, records or voxel edits of the wrong shape, are
+  refused (campaign) or skipped record by record (zone) (A1-03).
+- A save that fails to write says "Campaign NOT saved: ..." instead of "Campaign saved" (A1-04).
+- Malformed contract requests are answered "Bad request" instead of a host script error;
+  negotiation terms must be plain numbers (A1-05).
+- A reload no longer finishes on a different gun or launcher of the same model (A2-02).
+- No IV below a tourniquet; with tourniquets on all four limbs only an IO is offered (A2-03).
+- Muffled hearing clears when you leave the session or the level changes (A2-04).
+- The medical menu's item list scrolls (wheel, arrows, page keys, scroll bar); off-screen rows
+  can't be clicked; the panel fits shorter windows (A2-05).
+- **The launcher has its own tile on the inventory screen**: what's loaded, Stow, Pack on top and
+  Drop; drag to stow, drop or pack; a packed launcher dragged onto the soldier swaps with the one
+  on the shoulder (A2-06).
+- A pack dragged from the ground into a container is stowed, not swapped with your worn pack
+  (A2-07); a crate or objective case dragged onto a container goes to the hands, as a click does.
+- Squadmates picking their packs back up take their own pack by item, wherever it rolled (A2-08).
+- "Scavenge that body" and AI scavengers use where the body lies (A2-09), and extraction counts a
+  body or a downed squadmate where it lies (A3-03), per CLAUDE.md's reach rule.
+- A raid's clear-area bonus waits until the target's garrison has spawned (A3-01).
+- A civilian hurt only by a grenade's blast counts against the thrower, for fines and reputation,
+  and so does a later death (A3-02).
+- AI building scans no longer carry over between levels at the same coordinates (A3-04).
+- A wall blown open in a zone module stays open for sight lines, rounds and AI paths after the
+  module streams out (A3-05).
+- Repair, refuel and salvage stop if the vehicle leaves the worker mid-job (A3-06).
+- **Test runner**: an import that logs a SCRIPT ERROR or parse error fails the run even when the
+  editor exits 0 (A3-08); logs are written straight into the kept run folder, and a run stopped
+  part-way is a FAIL (A3-09). New `tools/run_log.sh` holds the logs parent, run number (taken under
+  a lock) and branch-sha for the runner and the build tool.
+- **CI** keeps each suite's own logs (import, suite, host and client) and uploads them as the
+  artifact `test-logs-<suite>-attempt-<n>` whatever the verdict (A3-09).
+- **Test builds** get their own numbered folder (`builds/contractor-<date>-<time>-B<number>-<label>-<sha>/`),
+  an `index.txt` line and a kept export log; a failed export fails loudly (A3-10). With Zylann's
+  Voxel Tools release template installed (`template_release/` beside the editor, or
+  `CONTRACTOR_TEMPLATE`), a build also has a standalone `Contractor.exe` and a
+  "Contractor (dev tools).bat" that starts it with `--dev`.
+- Tests: the net test's client no longer deletes the host's save fixture (A1-06); the contracts
+  replication test keeps a hostile in the compound so its objective stays active (A1-07).
+- **A bearer ordered to move no longer lifts the casualty he just laid down, over and over**
+  (found by CI on this branch; on dev too): the body's ragdoll settles up to about 2.6 m from
+  the lay spot, which one check counted as "not there yet" and another as "laid". Both now use
+  one test (`SquadAI._lies_at`, measured to `body_point()`). The squad suite's contact check
+  waits for an AI physics step; the roles callout check uses squadmates tactics never speak
+  through.
+
+#### Changed
+
+- **Faction doctrine numbers are pending** (A3-07): engage range, reaction, aim, bursts, frags,
+  morale and movement in `data/doctrines.json` are marked pending in code and data; the AI doesn't
+  use them yet (only the doctrine type shapes squad tactics). Wiring them in retunes every side's
+  fighting, so it's left to Captain's tactics work.
+
+#### Known gaps
+
+- Quit from the pause menu still quits when the save fails (the failure is shown and logged).
+- A civilian at a blast's edge with only ringing ears counts as a wounded casualty (A3-02; a design
+  call).
+- A peer that never streamed a module in still shows its original walls in that module's proxy
+  until it streams in once (A3-05).
+- Load-dependent test flakes seen during the work, also on the unchanged base: squad "Give me
+  ammo", animations dragger hand placement, people's late-join client.
+
 ### Wave 5b: helicopter supports, AAVs, the LHD, the motor pool (cghath's side, 2026-10-12)
 
 #### Added

@@ -21,6 +21,9 @@ signal structures_built
 ## Host only. Carving opened a gap in a structure that a soldier fits through; `area_m` is
 ## the gap (this node's space, metres). NavBuilder rebakes the navigation around it.
 signal breached(area_m: AABB)
+## Every peer: voxels in `box` (voxel units, terrain space) were just cleared, by an edit or
+## its replay (a zone module keeps its streamed-out proxy up to date from it).
+signal carved(box: AABB)
 
 const VOXEL_SIZE := 0.1
 ## World materials, set by the structure that places the voxels (add_box_m). PAINTED is
@@ -590,6 +593,7 @@ func _blast(centre: Vector3, r: float) -> void:
 ## After voxels in `box` (voxel units) were cleared: marks on voxels that are gone go too,
 ## and the host checks the area for a breach.
 func _carved(box: AABB) -> void:
+	carved.emit(box)
 	var gone: Array[Vector3i] = []
 	var area := box.grow(1.0)
 	for cell: Vector3i in _mark_cells:

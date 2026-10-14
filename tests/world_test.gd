@@ -23,6 +23,9 @@ const BUDGET_MEMORY_MB := 250.0
 const SHED_SHOT_FROM := Vector3(17.05, 1.35, -3)
 const SHED_SHOT_TO := Vector3(17.05, 1.35, -13)
 const SHED_WALL := Vector3(17.05, 1.35, -7.05)
+## A breach blown in the shed's south wall, and a spot of that wall left standing.
+const SHED_BREACH := Vector3(17.9, 1.2, -10.95)
+const SHED_INTACT := Vector3(16.6, 1.2, -10.95)
 const LIVE_MARK := Vector3(0.0, 1.2, 19.7)
 
 var failures := 0
@@ -268,10 +271,24 @@ func _test_edits() -> void:
 		"applied in the module: one round through the plank, %d hole decals" % world.bullet_hole_count())
 	world.server_mark(m.to_global(Vector3(-2.95, 1.35, -4.0)), Vector3.BACK, VoxelWorld.Mat.PAINTED)
 	check(world.marks_near(m.to_global(Vector3(-2.95, 1.35, -4.0)), 0.05) == 1, "an impact mark on the main building")
+	# Audit A3-05: a breach in the shed's south wall stays open in the proxy while it's away.
+	world.server_carve(m.to_global(SHED_BREACH), 0.6)
+	await get_tree().create_timer(1.0).timeout
+	var space := m.get_world_3d()
+	var through_breach := [m.to_global(SHED_BREACH + Vector3(0, 0, 1)), m.to_global(SHED_BREACH - Vector3(0, 0, 1))]
+	var through_wall := [m.to_global(SHED_INTACT + Vector3(0, 0, 1)), m.to_global(SHED_INTACT - Vector3(0, 0, 1))]
+	check(world.material_at(m.to_global(SHED_BREACH)) == VoxelWorld.Mat.EMPTY and Throwables.clear_line(space, through_breach[0], through_breach[1])
+		and not Throwables.clear_line(space, through_wall[0], through_wall[1]), "a breach blown in the shed's south wall: clear through it, the rest of the wall stands")
 	# Out and back in: rebuilt from its base boxes and its log.
 	player.global_position = level.ground_point(m.global_position + Vector3(0, 0, 500))
 	await _wait_for(func() -> bool: return not m.is_streamed(), 3.0)
-	check(not m.is_streamed() and level.edit_logs().compound.size() == mine.size() + 1, "500 m away it streams out; its log stays")
+	check(not m.is_streamed() and level.edit_logs().compound.size() == mine.size() + 2, "500 m away it streams out; its log stays")
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	var breach_local := SHED_BREACH
+	check(Throwables.clear_line(space, through_breach[0], through_breach[1]) and not Throwables.clear_line(space, through_wall[0], through_wall[1])
+		and m.proxy_boxes().all(func(b: AABB) -> bool: return not b.grow(0.05).has_point(breach_local)),
+		"streamed out, its proxy keeps the breach open (sight, rounds, and the navigation baked meanwhile) and the rest of the wall")
 	m = await _go_to_module("compound")
 	check(m.voxel_world.holes_through(m.to_global(SHED_WALL)) == 1 and m.voxel_world.marks_near(m.to_global(Vector3(-2.95, 1.35, -4.0)), 0.05) == 1,
 		"back again: rebuilt with the bullet holes and the mark")

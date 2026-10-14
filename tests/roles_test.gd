@@ -443,12 +443,12 @@ func _test_roster() -> void:
 
 func _test_callout_rules() -> void:
 	print("Callouts: rules")
-	# Not a team leader: the squad's tactics speak through the team leader (SquadTactics), and
-	# a tactic called in the speaker gap would take the place of the held-back Moving!.
-	var talkers := _squad().filter(func(s: Soldier) -> bool: return s.is_ai() and s.role != Roles.TEAM_LEADER)
-	talkers.sort_custom(func(a: Soldier, b: Soldier) -> bool: return a.squad_slot < b.squad_slot)
-	var first: Soldier = talkers[0]
-	var second: Soldier = talkers[1]
+	# Two squadmates the squad's tactics never speak through: a change of option has the team
+	# leader (or the first brain) call it ("Get in cover, hold here!"), and that newer line would
+	# replace a held-back one (one per speaker, the newest wins), which flaked this on CI.
+	var quiet := _squad().filter(func(s: Soldier) -> bool: return s.role != Roles.TEAM_LEADER).slice(-2)
+	var first: Soldier = quiet[0]
+	var second: Soldier = quiet[1]
 	var line := "%s: Reloading!" % first.display_name()
 	# Squadmates talk on their own too: start from a clean slate and only look at these two.
 	callouts._last_by_speaker.clear()

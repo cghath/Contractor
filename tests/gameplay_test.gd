@@ -31,6 +31,7 @@ func _ready() -> void:
 	await _test_throwables()
 	await _test_bad_input()
 	await _test_reload_across_death()
+	await _test_reload_replaced_gun()
 	await _test_fire_cadence()
 	await _test_saves()
 	GameState.delete_save()
@@ -192,6 +193,41 @@ func _test_reload_across_death() -> void:
 	check(after > 0 and player.inventory.rounds_in(&"primary") == after, "the old reload didn't refill the new rifle (%d rounds, still %d)" % [after, player.inventory.rounds_in(&"primary")])
 
 
+## Audit A2-02: a reload started on one M4 doesn't finish on another M4 picked up meanwhile;
+## the gun now in hand reloads as usual.
+func _test_reload_replaced_gun() -> void:
+	print("Reload, then a different gun of the same model")
+	var inv := player.inventory
+	var seconds := player.reload_seconds(ItemDB.get_item(&"m4a1"))
+	inv.consume_round(&"primary")
+	player._server_busy_until = 0.0
+	player._server_reload.rpc_id(1, &"primary")
+	await _seconds(0.1)
+	player._server_inventory_action.rpc_id(1, "drop_slot", &"", -1, &"primary", &"")
+	level.server_spawn_dropped(&"m4a1", 1, player.global_position + Vector3.UP * 0.5, {"rounds": 1, "test_mark": "replacement"})
+	await _frames(2)
+	var replacement: WorldItem = null
+	for node in get_tree().get_nodes_in_group(WorldItem.GROUP):
+		if node is WorldItem and node.state.get("test_mark", "") == "replacement":
+			replacement = node
+	if replacement:
+		player._server_interact.rpc_id(1, replacement.get_path())
+	var spare := inv.spare_rounds(&"mag_556")
+	check(replacement != null and inv.slots[&"primary"] == &"m4a1" and inv.rounds_in(&"primary") == 1,
+		"mid-reload: the M4 dropped, another M4 (1 round) picked up")
+	await _seconds(seconds + 0.5)
+	check(inv.rounds_in(&"primary") == 1 and inv.spare_rounds(&"mag_556") == spare,
+		"the old reload didn't load the other M4 (%d rounds, spare %d -> %d)" % [inv.rounds_in(&"primary"), spare, inv.spare_rounds(&"mag_556")])
+	player._server_busy_until = 0.0
+	player._server_reload.rpc_id(1, &"primary")
+	await _seconds(seconds + 0.3)
+	check(inv.rounds_in(&"primary") == 30, "reloading the M4 now in hand works (%d)" % inv.rounds_in(&"primary"))
+	for node in get_tree().get_nodes_in_group(WorldItem.GROUP):  # the dropped M4: not part of later tests
+		if node is WorldItem and node.item_id == &"m4a1":
+			GameState.item_taken(node.uid)
+			node.queue_free()
+
+
 ## Audit L1-01 and L1-05: a level-placed stack partly taken saves what's left; a save goes through a
 ## checked temporary file and keeps a backup; a broken save falls back to it; bad records are
 ## skipped and a save with a wrong-typed section is refused, without touching the live state.
@@ -222,7 +258,46 @@ func _test_saves() -> void:
 	f.close()
 	GameState.load_zone()
 	check(int(GameState.dropped.get(uid, {}).get("count", -1)) == left, "a broken save loads its backup instead")
-	var bad := {"version": GameState.SAVE_VERSION, "looted": ["a"], "voxel_edits": [], "bodies": [{"uid": "b1", "pos": [0, 1]}],
+	# Audit A1-01, A1-02: the broken save is kept aside, not deleted, and with the save gone the
+	# backup still loads.
+	var kept := GameState.kept_copies(path)
+	check(kept.size() == 1 and FileAccess.get_file_as_string("%s/%s" % [GameState.SAVE_DIR, kept[0]]) == "{\"version\": 1, \"looted\": [",
+		"the broken save is kept aside as it was (%s)" % ", ".join(kept))
+	GameState.dropped.clear()
+	GameState.load_zone()
+	check(not FileAccess.file_exists(path) and int(GameState.dropped.get(uid, {}).get("count", -1)) == left, "with no save but its backup, the backup loads")
+	for k in kept:
+		DirAccess.remove_absolute("%s/%s" % [GameState.SAVE_DIR, k])
+	# Audit A1-03: records replay or restore can't use are skipped, the rest of the zone loads and
+	# replays in the live level.
+	var good_text := FileAccess.get_file_as_string(GameState.backup_path(path))
+	var zone: Dictionary = JSON.parse_string(good_text)
+	var mark_at := player.global_position + Vector3(0, 1.0, -3.0)
+	var at := level.voxel_world.terrain.to_local(mark_at)
+	zone.voxel_edits = [{"op": "carve", "c": [], "r": 1}, {"op": "blast", "c": [1, 2, 3], "r": "big"}, {"op": "holes", "v": [1, 2]},
+		{"op": "shot", "a": [0, 1, 0], "an": [0, 0, 1], "b": [0, 1, 1], "v": []}, {"op": "melt", "c": [0, 0, 0]}, "carve",
+		{"op": "mark", "p": [at.x, at.y, at.z], "n": [0, 0, 1], "m": "concrete"}, {"op": "mark", "p": [at.x, at.y, at.z], "n": [0, 0, 1], "m": 2}]
+	zone.bodies = [{"uid": "bad_gear", "pos": [0, 1, 0], "gear": []}, {"uid": "bad_ragdoll", "pos": [0, 1, 0], "ragdoll": {"a": 1}},
+		{"uid": "bad_age", "pos": [0, 1, 0], "age_s": "old"}]
+	zone.dropped["bad_state"] = {"id": "mag_556", "count": 1, "pos": [0, 1, 0], "state": []}
+	zone.dropped["bad_id"] = {"id": ["mag_556"], "count": 1, "pos": [0, 1, 0]}
+	zone["vehicles"] = [{"id": "bad_zones", "model": "matv", "pos": [0, 1, 0], "zones": []}, {"id": "bad_model", "model": 7, "pos": [0, 1, 0]}]
+	var f2 := FileAccess.open(path, FileAccess.WRITE)
+	f2.store_string(JSON.stringify(zone))
+	f2.close()
+	GameState.load_zone()
+	check(GameState.voxel_edits.size() == 1 and int(GameState.voxel_edits[0].m) == 2 and GameState.bodies.is_empty() and GameState.vehicles.is_empty()
+		and int(GameState.dropped.get(uid, {}).get("count", -1)) == left and not GameState.dropped.has("bad_state") and not GameState.dropped.has("bad_id"),
+		"bad voxel edits, bodies, vehicles and dropped items are skipped; the good edit and the stack load (%d edits)" % GameState.voxel_edits.size())
+	var marks := level.voxel_world.marks_near(mark_at, 0.05)
+	level.voxel_world.load_edits(GameState.voxel_edits)
+	await _frames(2)
+	check(level.voxel_world.marks_near(mark_at, 0.05) == marks + 1, "and what's left replays in the level: the good mark is there")
+	var f3 := FileAccess.open(path, FileAccess.WRITE)
+	f3.store_string(good_text)
+	f3.close()
+	GameState.load_zone()
+	var bad :={"version": GameState.SAVE_VERSION, "looted": ["a"], "voxel_edits": [], "bodies": [{"uid": "b1", "pos": [0, 1]}],
 		"dropped": {"ok": {"id": "mag_556", "count": 2, "pos": [0, 1, 0]}, "unknown": {"id": "no_such_item", "count": 1, "pos": [0, 1, 0]},
 			"short_pos": {"id": "mag_556", "count": 1, "pos": [0, 1]}, "zero": {"id": "mag_556", "count": 0, "pos": [0, 1, 0]}}}
 	var test_path := "%s/%s_bad.json" % [GameState.SAVE_DIR, GameState.zone_id]

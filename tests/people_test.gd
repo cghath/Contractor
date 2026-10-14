@@ -83,6 +83,7 @@ func _ready() -> void:
 	await _test_escort()
 	await _test_client()
 	await _test_compound_content()
+	await _test_blast_casualty()
 	GameState.delete_save()
 	Campaign.reset_campaign()
 	print("PEOPLE TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
@@ -202,8 +203,50 @@ func _test_casualties() -> void:
 	check(not frag.is_empty() and frag[0].shooter == "Player 1", "a player's grenade counts against the thrower (%s)" % [frag])
 	check(People.casualty_count() == 3 and People.summary().civilian_casualties == 3 and not People.summary().contract_voided,
 		"three different civilians count (%d)" % People.casualty_count())
+	check(frag.filter(func(e: Dictionary) -> bool: return e.kind == People.WOUNDED).size() == 1,
+		"blast and fragments together: still one wounded event for that civilian (%d)" % frag.size())
 	alpha.queue_free()
 	hostile.queue_free()
+	await _frames(2)
+
+
+## Audit A3-02: a grenade's blast alone. A wall stops every fragment, but the overpressure
+## burns the civilian behind it: still the thrower's casualty, wounded and then killed. (Last,
+## after the client has come and gone: kept out of the replication checks' way.)
+func _test_blast_casualty() -> void:
+	print("A civilian hurt by a grenade's blast alone")
+	for n in level.ai.get_children():  # the compound's people hold still: no stray rounds
+		if n is Soldier and SquadAI.of(n):
+			SquadAI.of(n).process_mode = Node.PROCESS_MODE_DISABLED
+	_place(player, Vector3(0, 0.1, 40))
+	var by_blast := _person({"name": "CivByBlast", "kind": CIVILIAN, "pos": Vector3(-20, 0.1, 54)})
+	_brain(by_blast).process_mode = Node.PROCESS_MODE_DISABLED
+	var wall := StaticBody3D.new()
+	wall.collision_layer = 1
+	var wall_shape := CollisionShape3D.new()
+	wall_shape.shape = BoxShape3D.new()
+	(wall_shape.shape as BoxShape3D).size = Vector3(0.2, 5.0, 5.0)
+	wall.add_child(wall_shape)
+	add_child(wall)
+	wall.global_position = by_blast.global_position + Vector3(0.6, 1.4, 0.0)
+	await _frames(3)
+	level.server_throw(&"frag_grenade", by_blast.global_position + Vector3(1.0, 0.2, 0.0), Vector3.ZERO, player)
+	await _wait_until(func() -> bool: return by_blast.vitals.injury() > 0.0 or by_blast.vitals._model.burn > 0.0, 6.0)
+	await _frames(3)
+	var blast := People.casualties.filter(func(e: Dictionary) -> bool: return e.civilian == by_blast.display_name())
+	# The fragments come after the blast: had one got through, it would be the last cause. (The
+	# blast itself may break his pelvis: a wound, but the blast's.)
+	var cause := String(by_blast.vitals.last_cause.get("cause", ""))
+	check(by_blast.vitals._model.burn > 0.0 and cause == "blast",
+		"behind a wall: burned by the blast, no fragment got through (burns %.2f, last cause %s, %d wounds)" % [by_blast.vitals._model.burn, cause, by_blast.vitals.wound_list().size()])
+	check(blast.size() == 1 and blast[0].kind == People.WOUNDED and blast[0].shooter == "Player 1" and String(Harm.last(by_blast).get("faction", "")) == "friendly",
+		"a blast-only injury counts against the thrower too (%s)" % [blast])
+	wall.queue_free()  # out of the way before the body falls
+	await _frames(3)
+	by_blast.vitals.server_kill()
+	await _frames(3)
+	var blast_killed := People.casualties.filter(func(e: Dictionary) -> bool: return e.civilian == by_blast.display_name() and e.kind == People.KILLED)
+	check(blast_killed.size() == 1 and blast_killed[0].shooter == "Player 1", "and dying of it later names the thrower (%s)" % [blast_killed])
 	await _frames(2)
 
 

@@ -1,18 +1,29 @@
 class_name Doctrine
 extends RefCounted
 ## Faction doctrine (Captain, P0164 queue 17 part 6): how a side's fighters were trained to
-## fight, as weights that bias decisions the squad AI already makes, loaded once from
-## res://data/doctrines.json (its "_notes" say what each weight does). Three profiles:
+## fight, as weights meant to bias decisions the squad AI already makes (pending: see
+## below), loaded once from res://data/doctrines.json (its "_notes" say what each weight
+## does). Three profiles:
 ## insurgent (short range, long bursts, quick to break, rarely flanks), regular army (steady,
 ## frags readily, flanks) and PMC (long range, controlled bursts, steadiest under fire). The
 ## friendly squad fights as a PMC; hostiles as their zone's people (an insurgent region's are
-## insurgents, a regional army's regulars). A squad (Squad.doctrine) or a unit
-## (SquadAI.doctrine) can be given another.
+## insurgents, a regional army's regulars). A squad (Squad.doctrine) can be given another.
+##
+## PENDING (audit A3-07, 2026-10-13): today only the doctrine's id acts, through SquadTactics'
+## option biases (SquadTactics.DOCTRINES). The numeric weights below and in the file are
+## proposals for Captain's tactics work that no AI code reads yet: the squad AI still uses its
+## own constants (hostiles pick targets out to SquadAI.SIGHT_RANGE, 60 m, whatever engage_m
+## says; morale uses SquadAI.MORALE_SHAKEN/BROKEN...). Changing them changes nothing in a
+## fight until each is wired into the decision its note names, with a check, and taken off
+## PENDING and the file's "_pending". A per-unit doctrine (SquadAI.doctrine) is pending too.
 
 const PATH := "res://data/doctrines.json"
 const INSURGENT := &"insurgent"
 const REGULAR := &"regular"
 const PMC := &"pmc"
+## The weights no AI reads yet (see the class notes); the file's "_pending" lists the same.
+const PENDING: Array[String] = ["engage_m", "reaction", "aim_deg", "burst", "burst_pause", "cover_fire_s",
+	"frag_cooldown_s", "frag_wait_s", "morale_shaken", "morale_broken", "advance_after_s", "flank"]
 ## What a weight is when the file lacks it: the squad AI's numbers before doctrines.
 const FALLBACK := {"engage_m": 60.0, "reaction": 1.0, "aim_deg": 0.0, "burst": 1.0, "burst_pause": 1.0, "cover_fire_s": 5.0,
 	"frag_cooldown_s": 15.0, "frag_wait_s": 4.0, "morale_shaken": 0.4, "morale_broken": 0.25, "advance_after_s": 6.0, "flank": 0.0}
@@ -34,7 +45,8 @@ static func has(id: StringName) -> bool:
 	return _profiles().has(String(id))
 
 
-## Weight `key` of doctrine `id` (FALLBACK's when the profile or the weight is missing).
+## Weight `key` of doctrine `id` (FALLBACK's when the profile or the weight is missing). A
+## weight still in PENDING isn't wired into any decision yet: reading it doesn't make it act.
 static func value(id: StringName, key: String) -> float:
 	var profile: Dictionary = _profiles().get(String(id), {})
 	return float(profile.get(key, FALLBACK.get(key, 0.0)))

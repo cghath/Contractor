@@ -8,7 +8,10 @@ extends Node3D
 ## on every peer, and saves them with the zone). While nobody is near, the voxels are freed
 ## and a proxy stands in: the base boxes as one plain mesh, seen from up to PROXY_VIEW_M, with
 ## box collision so rounds and sight lines still stop at its walls. The proxy goes once the
-## voxels are built and their collision has had PROXY_HOLD_S to come in.
+## voxels are built and their collision has had PROXY_HOLD_S to come in. Streaming out keeps
+## what was carved: a base box carving touched stands in the proxy (and in the navigation
+## baked while away, proxy_boxes) as coarse cells of the voxels as they were, so a breach
+## stays open for distant sight lines, rounds and paths until the voxels come back.
 
 ## Emitted on the peer where it happens.
 signal streamed_in(module: ZoneModule)
@@ -16,6 +19,9 @@ signal streamed_out(module: ZoneModule)
 
 const PROXY_VIEW_M := 2500.0
 const PROXY_HOLD_S := 0.5
+## A carved box's proxy cells: this many voxels a side (0.5 m), solid when at least half
+## their voxels are (a bullet hole leaves a wall whole; a breach opens it).
+const PROXY_CELL_VOXELS := 5
 
 var module_id := ""
 var type := ""
@@ -28,6 +34,14 @@ var view_voxels := 4000
 
 var _proxy_mesh: MeshInstance3D
 var _proxy_body: StaticBody3D
+## What the proxy is made of: [AABB (m, module space), VoxelWorld.Mat] each. The base boxes,
+## until streaming out finds carving (_carved_parts).
+var _proxy_parts: Array = []
+## The base boxes in voxels from the origin, [lo: Vector3i, size: Vector3i] each (as built).
+var _proxy_base: Array = []
+## While streamed in: base box index -> {cell (Vector3i): solid} for the cells carving has
+## touched (_on_carved); the rest of a box is as built. Made again by each stream-in's replay.
+var _cells := {}
 var _ready_at := -1.0  # Time (s) the proxy can go, once the voxels are built
 var _proxy_up := true
 
@@ -40,8 +54,23 @@ func setup(id: String, p_type: String, origin: Vector3) -> void:
 
 
 func _ready() -> void:
+	var mats := ZoneModules.boxes(type)
+	var boxes := ZoneModules.boxes_m(type)
+	for i in boxes.size():
+		_proxy_parts.append([boxes[i], int(mats[i][2])])
+		var lo := Vector3i((boxes[i].position / VoxelWorld.VOXEL_SIZE).round())
+		_proxy_base.append([lo, Vector3i((boxes[i].end / VoxelWorld.VOXEL_SIZE).round()) - lo])
 	_build_proxy()
 	set_process(false)
+
+
+## The structure as it stands while streamed out (m, module space): the base boxes, with what
+## was carved before streaming out taken out of them (for navigation baked meanwhile).
+func proxy_boxes() -> Array[AABB]:
+	var out: Array[AABB] = []
+	for part: Array in _proxy_parts:
+		out.append(part[0])
+	return out
 
 
 ## The footprint on the ground (x, z in metres, world space).
@@ -93,6 +122,8 @@ func stream_in(log: Array, sink: Callable) -> void:
 		world.add_box_m(box[0], box[1], box[2])
 	voxel_world = world
 	applied = 0
+	_cells.clear()  # the replay of the log fills it again
+	world.carved.connect(_on_carved.bind(world))
 	add_child(world)
 	world.structures_built.connect(_on_built, CONNECT_ONE_SHOT)
 	sync(log)
@@ -111,6 +142,10 @@ func sync(log: Array) -> void:
 func stream_out() -> void:
 	if voxel_world == null:
 		return
+	var parts := _carved_parts()
+	if not parts.is_empty():
+		_proxy_parts = parts
+		_rebuild_proxy()
 	voxel_world.queue_free()
 	remove_child(voxel_world)
 	voxel_world = null
@@ -140,20 +175,105 @@ func _show_proxy(on: bool) -> void:
 	_proxy_body.collision_layer = 1 if on else 0
 
 
-## The stand-in while streamed out: the base boxes as one mesh in their materials' colours,
-## and as box shapes on the world layer. Placeholder art: replace this one function.
-func _build_proxy() -> void:
-	var boxes := ZoneModules.boxes_m(type)
+## Every peer: carving cleared voxels in `box` (voxels): the cells it touched of each base
+## box, looked at again while the voxels are certainly there (_cells).
+func _on_carved(box: AABB, world: VoxelWorld) -> void:
+	var touched := box.grow(1.0)
+	var c := PROXY_CELL_VOXELS
+	for i in _proxy_base.size():
+		var lo: Vector3i = _proxy_base[i][0]
+		var size: Vector3i = _proxy_base[i][1]
+		if not AABB(Vector3(lo), Vector3(size)).intersects(touched):
+			continue
+		var n := _cell_count(size)
+		var c_lo := Vector3i(((touched.position - Vector3(lo)) / c).floor()).clamp(Vector3i.ZERO, n)
+		var c_hi := Vector3i(((touched.end - Vector3(lo)) / c).ceil()).clamp(Vector3i.ZERO, n)
+		var read_lo := lo + c_lo * c
+		var read_size := (lo + c_hi * c).min(lo + size) - read_lo
+		if read_size.x <= 0 or read_size.y <= 0 or read_size.z <= 0 or not world.is_area_readable(AABB(Vector3(read_lo), Vector3(read_size))):
+			continue
+		var solid := world.solid_voxels(read_lo, read_size)
+		var known: Dictionary = _cells.get(i, {})
+		for z in range(c_lo.z, c_hi.z):
+			for y in range(c_lo.y, c_hi.y):
+				for x in range(c_lo.x, c_hi.x):
+					var cell := Vector3i(x, y, z)
+					known[cell] = _half_solid(cell * c, ((cell + Vector3i.ONE) * c).min(size), c_lo * c, read_size, solid)
+		_cells[i] = known
+
+
+## The cells (PROXY_CELL_VOXELS a side) along each axis of a box `size` voxels big.
+static func _cell_count(size: Vector3i) -> Vector3i:
+	var c := float(PROXY_CELL_VOXELS)
+	return Vector3i(ceili(size.x / c), ceili(size.y / c), ceili(size.z / c))
+
+
+## Whether the voxels from `a` to `b` (voxels from the box's corner) are at least half solid.
+## `solid` is VoxelWorld.solid_voxels from `offset` (from the box's corner), `read_size` big.
+static func _half_solid(a: Vector3i, b: Vector3i, offset: Vector3i, read_size: Vector3i, solid: PackedByteArray) -> bool:
+	var count := 0
+	for z in range(a.z, b.z):
+		for x in range(a.x, b.x):
+			for y in range(a.y, b.y):
+				var r := Vector3i(x, y, z) - offset
+				count += solid[r.y + read_size.y * (r.x + read_size.x * r.z)]
+	return count * 2 >= (b.x - a.x) * (b.y - a.y) * (b.z - a.z)
+
+
+## The proxy's parts with what carving took out (_cells): an untouched base box as it is, a
+## touched one as its solid cells, merged into runs along x. [] while nothing was carved.
+func _carved_parts() -> Array:
+	if _cells.is_empty():
+		return []
+	var s := VoxelWorld.VOXEL_SIZE
+	var c := PROXY_CELL_VOXELS
 	var mats := ZoneModules.boxes(type)
+	var out: Array = []
+	for i in _proxy_base.size():
+		var lo: Vector3i = _proxy_base[i][0]
+		var size: Vector3i = _proxy_base[i][1]
+		var mat := int(mats[i][2])
+		if not _cells.has(i):
+			out.append([AABB(Vector3(lo) * s, Vector3(size) * s), mat])
+			continue
+		var known: Dictionary = _cells[i]
+		var n := _cell_count(size)
+		for z in n.z:
+			for y in n.y:
+				var run_from := -1
+				for x in n.x + 1:
+					var full := x < n.x and bool(known.get(Vector3i(x, y, z), true))
+					if full and run_from < 0:
+						run_from = x
+					elif not full and run_from >= 0:
+						var a := Vector3i(run_from, y, z) * c
+						var b := (Vector3i(x, y + 1, z + 1) * c).min(size)
+						out.append([AABB(Vector3(lo + a) * s, Vector3(b - a) * s), mat])
+						run_from = -1
+	return out
+
+
+## The proxy made again from _proxy_parts (after carving changed them).
+func _rebuild_proxy() -> void:
+	for node: Node in [_proxy_mesh, _proxy_body]:
+		remove_child(node)
+		node.queue_free()
+	_build_proxy()
+	_show_proxy(_proxy_up)
+
+
+## The stand-in while streamed out: its parts (_proxy_parts) as one mesh in their materials'
+## colours, and as box shapes on the world layer. Placeholder art: replace this one function.
+func _build_proxy() -> void:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	_proxy_body = StaticBody3D.new()
 	_proxy_body.name = "Proxy"
 	_proxy_body.collision_layer = 1
 	_proxy_body.collision_mask = 0
-	for i in boxes.size():
-		var box: AABB = boxes[i]
-		var colour: Color = VoxelWorld.PALETTE[int(mats[i][2])]
+	for part: Array in _proxy_parts:
+		var box: AABB = part[0]
+		var colour: Color = VoxelWorld.PALETTE[int(part[1])]
 		st.set_color(colour)
 		var faces := NavBuilder._box_faces(box)
 		for k in range(0, faces.size(), 3):

@@ -44,6 +44,7 @@ func _ready() -> void:
 	GameState.delete_save()
 	Campaign.reset_campaign()
 	_test_stash_and_saves()
+	_test_damaged_saves()
 	_test_hiring()
 	_test_wages()
 	_test_growth()
@@ -112,6 +113,116 @@ func _test_stash_and_saves() -> void:
 	BaseHub.note.disconnect(on_note)
 	BaseHub.campaign_running = false
 	check(notes == ["Bad request"], "a request short of its arguments is refused (%s)" % ", ".join(PackedStringArray(notes)))
+
+
+## Audit A1-01 to A1-04: a campaign save that's missing, cut off, broken or of another version
+## never costs the campaign: its backup or an interrupted write loads; files that can't be read,
+## and the zones of a campaign that can't be, are kept aside (never deleted, never loaded) and
+## the host is told; a save that can't be written says so and leaves the last good one.
+func _test_damaged_saves() -> void:
+	print("Damaged, missing and unwritable campaign saves")
+	var path := Campaign.save_path()
+	var bak := GameState.backup_path(path)
+	var notes: Array = []
+	var on_note := func(text: String) -> void: notes.append(text)
+	BaseHub.note.connect(on_note)
+	BaseHub.new_campaign(SEED)
+	BaseHub.base()["sentinel"] = 731
+	check(BaseHub.server_save(), "a campaign saves")
+	var good := FileAccess.get_file_as_string(path)
+	var data: Dictionary = JSON.parse_string(good)
+	# The save itself gone (lost between write_safely's renames): the backup is the campaign.
+	_wipe_campaign_files()
+	_write(bak, good)
+	BaseHub.load_or_new()
+	check(Campaign.last_load == Campaign.Loaded.LOADED and int(BaseHub.base().get("sentinel", 0)) == 731,
+		"with the save gone its backup loads, not a new campaign (A1-02)")
+	check(notes.any(func(n: String) -> bool: return n.contains(bak.get_file())), "and the host is told which copy loaded")
+	# A new save written whole but not put in place yet is newer than the backup.
+	_wipe_campaign_files()
+	data.sections.base.sentinel = 732
+	_write(path + ".tmp", JSON.stringify(data))
+	_write(bak, good)
+	BaseHub.load_or_new()
+	check(int(BaseHub.base().get("sentinel", 0)) == 732, "an interrupted save's finished temporary file loads before the older backup")
+	# Saves this game can't use (A1-03): another version, a section of the wrong shape, nothing.
+	data.sections.base.sentinel = 731
+	var bad_economy: Dictionary = data.duplicate(true)
+	bad_economy.sections.economy = []
+	var bad_board: Dictionary = data.duplicate(true)
+	bad_board.sections.contracts.board = [1, 2]
+	var wrong := {"version 999": JSON.stringify({"version": 999, "sections": data.sections}), "an economy that is a list": JSON.stringify(bad_economy),
+		"a contract board of numbers": JSON.stringify(bad_board), "no version or sections": "{}"}
+	for what: String in wrong:
+		_wipe_campaign_files()
+		_write(path, wrong[what])
+		_write(bak, good)
+		BaseHub.load_or_new()
+		var refused := GameState.kept_copies(path)
+		check(int(BaseHub.base().get("sentinel", 0)) == 731 and refused.size() == 1
+			and FileAccess.get_file_as_string("%s/%s" % [Campaign.SAVE_DIR, refused[0]]) == wrong[what],
+			"a save with %s is refused: the backup loads and the refused file is kept as it was (%s)" % [what, ", ".join(refused)])
+	# Nothing readable (A1-01): a new campaign, but nothing deleted.
+	_wipe_campaign_files()
+	_write(path, "{broken")
+	_write(bak, "{also broken")
+	var zone_path := "%s/%s.json" % [GameState.SAVE_DIR, BaseHub.zone_save_id("old_zone")]
+	var zone_text := JSON.stringify({"version": GameState.SAVE_VERSION, "looted": ["old_progress"], "dropped": {}, "voxel_edits": [], "bodies": []})
+	_write(zone_path, zone_text)
+	_write(GameState.backup_path(zone_path), zone_text)
+	notes.clear()
+	BaseHub.load_or_new()
+	var kept := GameState.kept_copies(path)
+	var kept_text := Array(kept).map(func(f: String) -> String: return FileAccess.get_file_as_string("%s/%s" % [Campaign.SAVE_DIR, f]))
+	check(BaseHub.started() and Campaign.last_load == Campaign.Loaded.UNREADABLE and not BaseHub.base().has("sentinel"),
+		"with nothing readable a new campaign starts")
+	check(kept.size() == 2 and "{broken" in kept_text and "{also broken" in kept_text,
+		"but the unreadable save and backup are kept aside as they were (%s)" % ", ".join(kept))
+	var zone_kept := GameState.kept_copies(zone_path)
+	check(not GameState.has_save(zone_path) and zone_kept.size() == 2
+		and FileAccess.get_file_as_string("%s/%s" % [GameState.SAVE_DIR, zone_kept[0]]) == zone_text,
+		"and so are its zone saves: not deleted, and not loaded by the new campaign (%s)" % ", ".join(zone_kept))
+	check(notes.any(func(n: String) -> bool: return n.contains("couldn't be read") and n.contains(kept[0] if kept.size() > 0 else "?"))
+		and BaseHub._host_notice.contains("couldn't be read"), "the host is told where they are, now and when the base screen opens")
+	for f in GameState.kept_copies(zone_path):
+		DirAccess.remove_absolute("%s/%s" % [GameState.SAVE_DIR, f])
+	BaseHub._host_notice = ""
+	# A save that can't be written (A1-04): it says so, and the last good save stays.
+	_wipe_campaign_files()
+	BaseHub.new_campaign(SEED)
+	check(BaseHub.server_save(), "a fresh campaign saves")
+	var before := FileAccess.get_file_as_string(path)
+	BaseHub.base()["sentinel"] = 999
+	DirAccess.make_dir_recursive_absolute(path + ".tmp")  # a folder where the new save is written first: the write fails
+	BaseHub.campaign_running = true
+	notes.clear()
+	var saved := BaseHub.server_save()
+	BaseHub.request("save")
+	check(not saved and FileAccess.get_file_as_string(path) == before and not Campaign.save_error.is_empty(),
+		"a save that can't be written fails and leaves the last good save as it was")
+	check(notes.size() == 1 and String(notes[0]).begins_with("Campaign NOT saved"), "and the save request says so, not \"Campaign saved\" (%s)" % ", ".join(PackedStringArray(notes)))
+	DirAccess.remove_absolute(path + ".tmp")
+	notes.clear()
+	BaseHub.request("save")
+	BaseHub.campaign_running = false
+	check(notes == ["Campaign saved"] and int(JSON.parse_string(FileAccess.get_file_as_string(path)).sections.base.sentinel) == 999,
+		"once it can be written it saves and says so")
+	BaseHub.note.disconnect(on_note)
+	_wipe_campaign_files()
+
+
+## Deletes the campaign's save, backup, interrupted write and every copy kept aside.
+func _wipe_campaign_files() -> void:
+	Campaign.reset_campaign()
+	for f in GameState.kept_copies(Campaign.save_path()):
+		DirAccess.remove_absolute("%s/%s" % [Campaign.SAVE_DIR, f])
+
+
+func _write(path: String, text: String) -> void:
+	DirAccess.make_dir_recursive_absolute(path.get_base_dir())
+	var f := FileAccess.open(path, FileAccess.WRITE)
+	f.store_string(text)
+	f.close()
 
 func _test_hiring() -> void:
 	print("Hiring")

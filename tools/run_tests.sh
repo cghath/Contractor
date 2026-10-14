@@ -9,8 +9,9 @@
 # A suite passes only if its process exits 0, prints "<NAME> TEST PASSED", prints no
 # "TEST FAILED", and logs no SCRIPT ERROR (a script that fails to compile or crashes mid-test
 # can still exit 0, or never exit at all). Each process gets SUITE_TIMEOUT seconds (default
-# 480); one that runs past it is killed and fails as hung. The import must succeed too.
-# Exits non-zero if any suite fails. tools/test_runner_check.sh checks these rules.
+# 480); one that runs past it is killed and fails as hung. The import must succeed too: exit 0
+# and no SCRIPT ERROR or parse error in its log (an import can report a broken script and still
+# exit 0). Exits non-zero if any suite fails. tools/test_runner_check.sh checks these rules.
 #
 # Every run's logs are kept (Captain, 2026-10-12) in their own folder outside the repo, which
 # nothing here ever deletes, all under one parent: CONTRACTOR_TEST_LOGS (default:
@@ -18,52 +19,50 @@
 # B:\Contractor-test-logs). Each run gets a number (run_counter.txt there, counting up forever,
 # unique across worktrees) and a folder by date:
 #   <parent>/<date>/R<number>-<time>-<PASS|FAIL>-<branch>-<sha>/
-# (RUNNING while it runs; a folder left RUNNING was killed). Inside: every suite's log and
-# summary.txt (run id, suites, each verdict and [FAIL] line). index.txt at the top lists every
-# run, one line each. On CI (GITHUB_ACTIONS) nothing is kept unless CONTRACTOR_TEST_LOGS is set;
-# CONTRACTOR_TEST_LOGS=none keeps nothing.
+# (RUNNING while it runs; a folder left RUNNING was killed outright). Inside: every suite's log,
+# written there as it runs (so a run stopped part-way still has them), and summary.txt (run id,
+# CI run and commit on CI, suites, each verdict and [FAIL] line). A run stopped before it
+# finishes (killed, or CI's job cancelled or out of time) is a FAIL. index.txt at the top lists
+# every run, one line each. On CI (GITHUB_ACTIONS) nothing is kept unless CONTRACTOR_TEST_LOGS
+# is set (.github/workflows/tests.yml sets it and uploads the folder); CONTRACTOR_TEST_LOGS=none
+# keeps nothing. tools/run_log.sh finds the parent, the number and the branch-sha.
 set -u
 cd "$(dirname "$0")/.."
+. tools/run_log.sh
 GODOT="${GODOT:-godot}"
 SUITE_TIMEOUT="${SUITE_TIMEOUT:-480}"
 SUITES=("$@")
 [ ${#SUITES[@]} -eq 0 ] && SUITES=(smoke gameplay squad net wounds armor movement interaction roles medical logistics casualty materials animations scavenge contracts people map base world missions vehicles antiarmor session_log supports aav sound)
 status=0
-logs="$(mktemp -d)"
-keep_root="${CONTRACTOR_TEST_LOGS:-}"
-if [ -z "$keep_root" ] && [ -z "${GITHUB_ACTIONS:-}" ]; then
-	# One parent for every worktree (beside the main checkout), so run numbers are unique
-	# across them; a copy outside git keeps its own beside its folder.
-	common="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
-	if [ -n "$common" ]; then keep_root="$(cd "$common/../.." && pwd)/Contractor-test-logs"; else keep_root="$(cd .. && pwd)/Contractor-test-logs"; fi
-fi
+finished=""
+keep_root="$(run_log_parent)"
 keep=""
 run_id=""
-if [ -n "$keep_root" ] && [ "$keep_root" != none ] && mkdir -p "$keep_root"; then
-	n=$(( $(cat "$keep_root/run_counter.txt" 2>/dev/null || echo 0) + 1 ))
-	echo "$n" >"$keep_root/run_counter.txt"
-	run_id="$(printf 'R%04d' "$n")"
-	branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null | tr '/' '-')"
-	sha="$(git rev-parse --short HEAD 2>/dev/null || echo nogit)"
-	run_tail="${branch:-nobranch}-$sha"
+if [ -n "$keep_root" ]; then
+	run_id="$(printf 'R%04d' "$(run_log_number "$keep_root")")"
+	run_tail="$(run_log_tail)"
 	run_day="$keep_root/$(date +%Y-%m-%d)"
 	run_time="$(date +%H%M%S)"
 	keep="$run_day/$run_id-$run_time-RUNNING-$run_tail"
 	mkdir -p "$keep" || keep=""
 fi
-# The temp folder goes; the kept copy never does. The run's folder is renamed PASS or FAIL.
+# The logs go straight into the kept folder; with none, into a temp folder that goes at the end.
+logs="$keep"
+[ -z "$logs" ] && logs="$(mktemp -d)"
+# The kept folder never goes: it's renamed PASS or FAIL.
 keep_logs() {
 	if [ -n "$keep" ]; then
-		cp "$logs"/*.log "$keep"/ 2>/dev/null
 		local verdict=PASS
 		[ "$status" -ne 0 ] && verdict=FAIL
+		[ -z "$finished" ] && { verdict=FAIL; note "stopped before it finished"; }
 		note "result: $verdict"
 		local done_dir="$run_day/$run_id-$run_time-$verdict-$run_tail"
 		mv "$keep" "$done_dir" 2>/dev/null && keep="$done_dir"
 		echo "$run_id $(date +%Y-%m-%d) $run_time $verdict $run_tail suites: ${SUITES[*]}" >>"$keep_root/index.txt"
 		echo "run $run_id: $verdict, logs kept in $keep"
+	else
+		rm -rf "$logs"
 	fi
-	rm -rf "$logs"
 }
 trap keep_logs EXIT
 # One line per verdict in the kept folder's summary.txt.
@@ -71,6 +70,7 @@ note() {
 	[ -n "$keep" ] && echo "$1" >>"$keep/summary.txt"
 }
 note "run $run_id, $(date '+%Y-%m-%d %H:%M:%S'), ${run_tail:-}"
+[ -n "${GITHUB_ACTIONS:-}" ] && note "CI: ${GITHUB_REPOSITORY:-} run ${GITHUB_RUN_ID:-} attempt ${GITHUB_RUN_ATTEMPT:-}, ${GITHUB_REF:-}, commit ${GITHUB_SHA:-}"
 note "suites: ${SUITES[*]}  (port ${CONTRACTOR_PORT:-default}, timeout ${SUITE_TIMEOUT}s)"
 
 # Runs the engine with "$@" under the timeout, output to log file $1. Returns the exit code
@@ -81,15 +81,16 @@ engine() {
 }
 
 # Judges a finished process: `name`, its log, its exit code, and the summary line it must
-# print ("" for none, e.g. "NET TEST PASSED"). Prints the log's [FAIL], summary and SCRIPT ERROR
-# lines (prefixed with `prefix`) and a reason when it fails; sets status.
+# print ("" for none, e.g. "NET TEST PASSED"). Prints the log's [FAIL], summary and script error
+# lines (prefixed with `prefix`) and a reason when it fails; sets status. A script error is a
+# SCRIPT ERROR line or a parse error, which the import can report without that prefix.
 judge() {
 	local name="$1" log="$2" code="$3" summary="$4" prefix="${5:-}"
-	grep -E '\[FAIL\]|TEST (PASSED|FAILED)|SCRIPT ERROR' "$log" | sed "s/^/$prefix/"
+	grep -E '\[FAIL\]|TEST (PASSED|FAILED)|SCRIPT ERROR|Parse Error' "$log" | sed "s/^/$prefix/"
 	local why=""
 	if [ "$code" -eq 124 ] || [ "$code" -eq 137 ]; then
 		why="timed out after ${SUITE_TIMEOUT}s (hung?)"
-	elif grep -q 'SCRIPT ERROR' "$log"; then
+	elif grep -qE 'SCRIPT ERROR|Parse Error' "$log"; then
 		why="script error (see above)"
 	elif grep -q 'TEST FAILED' "$log"; then
 		why="exit $code"
@@ -119,20 +120,19 @@ judge() {
 			# failed checks and script errors wherever they are in the log, then the last lines.
 			echo "::error title=$name::FAILED: $why"
 			grep -E '\[FAIL\]' "$log" | head -n 3 | while IFS= read -r line; do echo "::error title=$name failed check::$line"; done
-			grep -A1 'SCRIPT ERROR' "$log" | grep -v '^--$' | head -n 3 | while IFS= read -r line; do echo "::error title=$name script error::$line"; done
+			grep -A1 -E 'SCRIPT ERROR|Parse Error' "$log" | grep -v '^--$' | head -n 3 | while IFS= read -r line; do echo "::error title=$name script error::$line"; done
 			tail -n 3 "$log" | while IFS= read -r line; do echo "::error title=$name::$line"; done
 		fi
 		status=1
 	fi
 }
 
-if ! engine "$logs/import.log" --import; then
-	echo "import: failed"
-	note "import: FAILED"
-	status=1
-	grep -E 'SCRIPT ERROR|ERROR' "$logs/import.log" | head -20
-	exit 1
-fi
+# The import is judged like a suite with no summary line: a non-zero exit, a hang, or a SCRIPT
+# ERROR or parse error in its log (a broken script can be reported while the import still exits
+# 0) fails the run before any suite starts.
+engine "$logs/import.log" --import
+judge import "$logs/import.log" $? ""
+[ "$status" -ne 0 ] && { finished=1; exit 1; }
 for suite in "${SUITES[@]}"; do
 	if [ "$suite" = net ] || [ "$suite" = world ] || [ "$suite" = vehicles ] || [ "$suite" = supports ] || [ "$suite" = aav ]; then
 		# Two processes over ENet on localhost. net: the client prints the summary, the host
@@ -154,4 +154,5 @@ for suite in "${SUITES[@]}"; do
 	fi
 done
 
+finished=1
 exit $status
