@@ -39,6 +39,8 @@ const MAX_LOOT_ENTRIES := 20
 ## Height of an action point above a body's origin: standing, and lying down.
 const STANDING_POINT_Y := 1.3
 const DOWNED_POINT_Y := 0.3
+## Height of a ragdoll's action point above its chest (Soldier.body_point), on top of the body.
+const RAGDOLL_POINT_Y := 0.15
 ## Most entries one ring shows: the most that fit around RING_RADIUS_PX at ENTRY_SIZE without
 ## two overlapping. Past it the last plain entries go into the MORE submenu (Captain, P0164
 ## queue 8: declutter).
@@ -815,11 +817,16 @@ static func _single_points(actor: Soldier, camera: Camera3D) -> Array[Dictionary
 
 ## Where `node`'s action point sits in the world: just above an item as it lies (a plate
 ## flat on the floor has its centre barely above it, so a point there could be out of sight).
+## A body lying as a ragdoll has it on the ragdoll's chest, where the body is seen: the
+## capsule stays where it fell, and a body shot on the run slides metres from it (Captain,
+## P0331: the dead couldn't be looted, their point was out of sight where they had stood).
 static func action_point(node: Node3D) -> Vector3:
 	if node is WorldItem:
 		return (node as WorldItem).action_point()
 	if node.has_method(&"action_point"):
 		return node.call(&"action_point")
+	if node is Soldier and is_instance_valid((node as Soldier).ragdoll):
+		return (node as Soldier).body_point() + Vector3.UP * RAGDOLL_POINT_Y
 	var vitals := node.get_node_or_null(^"Vitals") as Vitals
 	var lying := vitals != null and not vitals.is_up()
 	return node.global_position + Vector3.UP * (DOWNED_POINT_Y if lying else STANDING_POINT_Y)
