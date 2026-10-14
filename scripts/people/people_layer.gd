@@ -719,12 +719,12 @@ func server_surrender(s: Soldier, why := "") -> void:
 
 ## Host only. An uncuffed HVT who gave up takes it back and runs (HvtAI's babysitting): no
 ## longer a captive, led or under orders. He has to be cornered again.
-func server_take_back_surrender(s: Soldier) -> void:
+func server_take_back_surrender(s: Soldier, why := "") -> void:
 	if not Person.is_hvt(s) or Person.is_cuffed(s) or not bool(state_of(s).get("surrendered", false)):
 		return
 	server_set_state(s, {"surrendered": false, "led_by": "", "order": ""})
 	server_say(s, BOLT_LINES[_rng.randi() % BOLT_LINES.size()])
-	print("[people] %s took his surrender back and ran" % s.display_name())
+	print("[people] %s took his surrender back and ran%s" % [s.display_name(), " (%s)" % why if why != "" else ""])
 
 
 # --- Requests (interaction menu, command menu) ---------------------------------------------

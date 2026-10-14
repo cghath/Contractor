@@ -25,9 +25,14 @@ extends CivilianAI
 ## counts when brought in, uncuffed. An uncuffed one needs babysitting: nobody from the squad
 ## up and not pinned within WATCH_M (watched) for BOLT_GRACE_S, and every BOLT_CHECK_S he
 ## may take his surrender back and bolt, the odds climbing to BOLT_MAX over BOLT_RAMP_S
-## alone. Even watched, a fight around him (gunfire heard) gives him a small chance
-## (BOLT_CHAOS). The more it hurts the less he tries (bolt_will); badly hurt, he stays put.
-## Then he has to be cornered again. A cuffed HVT never bolts.
+## alone. Even watched, a fight close to him (gunfire within CHAOS_NEAR_M in the last CHAOS_S)
+## gives him a small chance (BOLT_CHAOS). The more it hurts the less he tries (bolt_will); badly
+## hurt, he stays put. A cuffed HVT never bolts.
+## Calmer (Captain, 2026-10-14, v0.3.1: "that is quite a bit lively ... like 3 or 4 minutes my
+## guys chased him"): he never bolts with one of the squad within NO_BOLT_M or while grabbed
+## (held_by, until his holder lets go: down, gone or beyond WATCH_M), at most MAX_BOLTS times a
+## deployment, and a bolter gives up again quickly: after BOLT_MIN_RUN_S, once one of the squad
+## is within CAUGHT_M, and in any case after BOLT_RUN_S on the run.
 
 ## Proposed: how far, and how wide (half-angle), a hostile HVT spots the squad.
 const SPOT_M := 30.0
@@ -52,7 +57,20 @@ const BOLT_CHECK_S := 2.0
 const BOLT_GRACE_S := 4.0
 const BOLT_RAMP_S := 12.0
 const BOLT_MAX := 0.6
-const BOLT_CHAOS := 0.04
+## Proposed (Captain, 2026-10-14; was 0.04 for COWER_S = 25 s after any gunfire heard): odds per
+## BOLT_CHECK_S, watched, while gunfire was close (within CHAOS_NEAR_M) in the last CHAOS_S.
+const BOLT_CHAOS := 0.01
+const CHAOS_NEAR_M := 25.0
+const CHAOS_S := 12.0
+## Proposed (Captain, 2026-10-14): never bolts with one of the squad this close.
+const NO_BOLT_M := 4.0
+## Proposed (Captain, 2026-10-14): bolts at most this often per deployment (a fresh brain each).
+const MAX_BOLTS := 1
+## Proposed (Captain, 2026-10-14): a bolter gives up again once one of the squad is within
+## CAUGHT_M (after running BOLT_MIN_RUN_S, so a bolt is more than a step), or after BOLT_RUN_S.
+const BOLT_MIN_RUN_S := 5.0
+const CAUGHT_M := 8.0
+const BOLT_RUN_S := 40.0
 
 ## The squad member he last saw, where, and when.
 var spotted: Soldier
@@ -68,6 +86,12 @@ var bolts := 0
 var bolt_scale := 1.0
 var _unwatched_since := -1.0
 var _bolt_check := 0.0
+## Host: who grabbed him (SquadAI._chase); he doesn't bolt while held (until let go).
+var held_by: Soldier
+## Host: when he last bolted (-1: not on the run from a bolt; tests set it back).
+var bolted_at := -1.0
+## When he last heard gunfire within CHAOS_NEAR_M.
+var _close_fire_at := -1000.0
 
 
 func hostile() -> bool:
@@ -88,6 +112,33 @@ func _decide() -> void:
 	if hostile() and _check_bolt():
 		_think_cd = 0.0
 	super._decide()
+
+
+func hear(pos: Vector3) -> void:
+	if pos.distance_to(body.global_position) <= CHAOS_NEAR_M:
+		_close_fire_at = Soldier._now()
+	super.hear(pos)
+
+
+## Grabbed and not yet let go: his holder up, not gone, within WATCH_M.
+func held() -> bool:
+	if is_instance_valid(held_by) and not held_by.is_queued_for_deletion() and held_by.vitals.is_up() 			and held_by.global_position.distance_to(body.global_position) <= WATCH_M:
+		return true
+	held_by = null
+	return false
+
+
+## One of the squad (up) within NO_BOLT_M: he won't try it.
+func squad_close() -> bool:
+	return _squad_within(NO_BOLT_M)
+
+
+func _squad_within(m: float) -> bool:
+	for n in get_tree().get_nodes_in_group(&"combatants"):
+		var s := n as Soldier
+		if s and s.faction == &"friendly" and not s.is_queued_for_deletion() and s.vitals.is_up() 				and s.global_position.distance_to(body.global_position) <= m:
+			return true
+	return false
 
 
 ## A hostile HVT who gave up but isn't cuffed (and isn't delivered): he needs watching.
@@ -130,17 +181,29 @@ func _check_bolt() -> bool:
 	if now < _bolt_check:
 		return false
 	_bolt_check = now + BOLT_CHECK_S
-	var chance := BOLT_CHAOS if threatened() else 0.0
+	if bolts >= MAX_BOLTS or held() or squad_close():
+		return false
+	var fire_close := now - _close_fire_at < CHAOS_S
+	var chance := BOLT_CHAOS if fire_close else 0.0
 	if not is_watched:
 		chance = maxf(chance, BOLT_MAX * clampf((now - _unwatched_since - BOLT_GRACE_S) / BOLT_RAMP_S, 0.0, 1.0))
 	chance = minf(chance * bolt_will() * bolt_scale, 1.0)
 	if chance <= 0.0 or _rng.randf() >= chance:
 		return false
+	return bolt("left alone" if not is_watched else "gunfire close")
+
+
+## Takes his surrender back and runs (no checks: _check_bolt's odds, or a test). True if he did.
+func bolt(why := "") -> bool:
 	var layer := PeopleLayer.find(body)
 	if layer == null:
 		return false
-	layer.server_take_back_surrender(body)
+	var now := Soldier._now()
+	layer.server_take_back_surrender(body, why)
 	bolts += 1
+	bolted_at = now
+	held_by = null
+	_unwatched_since = -1.0
 	_cornered_since = -1.0
 	# He knows where they are: the nearest of the squad.
 	var nearest: Soldier = null
@@ -160,7 +223,7 @@ func _decide_free() -> void:
 		super._decide_free()
 		return
 	_look()
-	if _check_give_up():
+	if _check_give_up_bolter() or _check_give_up():
 		return
 	if not _alarmed():
 		if threatened():
@@ -266,6 +329,34 @@ func _resist() -> void:
 	_go(spot, true)
 
 
+## On the run from a bolt: caught up with (one of the squad within CAUGHT_M after
+## BOLT_MIN_RUN_S) or run out (BOLT_RUN_S), he gives up again. True if he did.
+func _check_give_up_bolter() -> bool:
+	if bolted_at < 0.0:
+		return false
+	var ran := Soldier._now() - bolted_at
+	var why := ""
+	if ran >= BOLT_RUN_S:
+		why = "ran out of steam after %.0f s" % ran
+	elif ran >= BOLT_MIN_RUN_S and _squad_within(CAUGHT_M):
+		why = "caught up with after %.0f s" % ran
+	else:
+		return false
+	return _give_up(why)
+
+
+## Gives up where he stands.
+func _give_up(why: String) -> bool:
+	bolted_at = -1.0
+	_cornered_since = -1.0
+	var layer := PeopleLayer.find(body)
+	if layer:
+		layer.server_surrender(body, why)
+	mode = Mode.HOLD
+	_hold = body.global_position  # he stops where he gave up
+	return true
+
+
 ## Cornered or badly hurt and alone: he gives up. True if he did.
 func _check_give_up() -> bool:
 	var friend_close := false
@@ -287,9 +378,4 @@ func _check_give_up() -> bool:
 	var hurt := body.vitals.pain() >= PeopleLayer.SURRENDER_PAIN or body.vitals.blood_fraction() <= PeopleLayer.SURRENDER_BLOOD
 	if not hurt and Soldier._now() - _cornered_since < CORNERED_S:
 		return false
-	var layer := PeopleLayer.find(body)
-	if layer:
-		layer.server_surrender(body, "cornered")
-	mode = Mode.HOLD
-	_hold = body.global_position  # he stops where he gave up
-	return true
+	return _give_up("cornered")

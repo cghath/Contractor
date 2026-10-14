@@ -1999,6 +1999,10 @@ func _chase(h: Soldier, now: float) -> void:
 	var layer := PeopleLayer.find(body)
 	if layer:
 		layer.server_surrender(h, "grabbed by %s" % body.display_name())
+		var hvt_brain := h.get_node_or_null(NodePath(PeopleLayer.BRAIN)) as HvtAI
+		if hvt_brain:
+			hvt_brain.held_by = body  ## Captain, 2026-10-14: grabbed holds until let go
+			hvt_brain.bolted_at = -1.0
 		grabs += 1
 		_react_at = -1.0
 		_think_cd = 0.0
