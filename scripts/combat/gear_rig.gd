@@ -33,6 +33,10 @@ const HELMET_POSITION := Vector3(0, 0.2, 0)
 ## A tourniquet's band and the red of medical pull tabs, as drawn on the carrier.
 const TQ_BAND := Color("1b1b1a")
 const MED_RED := Color("b3261e")
+## Torso height (m, before carrier_fit) of a worn pack's middle.
+const PACK_CENTRE_Y := 0.3
+## How deep an aid bag strapped on a pack is drawn (_pack_bag_size).
+const AID_BAG_DEPTH_M := 0.12
 ## Rest mounts, torso-local, for a right-handed shooter (rest_transform mirrors them for a
 ## left-handed one): the vest at the cummerbund; the primary on its sling in the patrol
 ## carry, diagonally across the front of the carrier clear of the pouches (stock up under the
@@ -201,7 +205,7 @@ func _rebuild() -> void:
 	_fit_front_panel(carrier)
 	var pack: StringName = inventory.slots[&"backpack"]
 	var pack_size := VoxelArt.size_m(VoxelArt.model_for(ItemDB.get_item(pack))) if pack != &"" else Vector3.ZERO
-	_pack_rest = carrier_fit("back") * Transform3D(Basis.IDENTITY, Vector3(0, 0.3, 0.165 + pack_size.z * 0.5))
+	_pack_rest = carrier_fit("back") * Transform3D(Basis.IDENTITY, Vector3(0, PACK_CENTRE_Y, 0.165 + pack_size.z * 0.5))
 	_pack_pivot = carrier_fit("back") * Vector3(0, 0.3 + pack_size.y * 0.5, 0.165)
 	_set_gear(&"backpack", pack, &"torso", _pack_rest)
 	var held := inventory.hands
@@ -242,8 +246,10 @@ func _set_pouches() -> void:
 		if att.is_empty():
 			continue
 		var item := ItemDB.get_item(StringName(att.id))
+		var bag := _pack_bag_size(p, item)  # an aid bag strapped on the pack: in the pack's cloth
+		var cloth := Color(VoxelArt.spec(model.variant).pack).darkened(0.08) if bag != Vector3.ZERO else gear
 		var node := LauncherRig.make_model(item, render_layers) if item.type == "launcher" \
-			else pouch_node(item, gear, not att.get("held", []).is_empty(), render_layers)
+			else pouch_node(item, cloth, not att.get("held", []).is_empty(), render_layers, bag)
 		node.name = String(p.id)
 		node.transform = spots[p.id]
 		_pouches.add_child(node)
@@ -274,6 +280,12 @@ func pouch_spots() -> Dictionary:
 		var on_pack := inventory.point_slot(StringName(p.id)) == &"backpack"
 		if on_pack or _carrier == null or face == "top" or String(p.get("type", "")) == "knife":
 			# (A pack sits on the carrier's back, so its points take the back's fit.)
+			var bag := _pack_bag_size(p, item)
+			if bag != Vector3.ZERO:  # centred on the pack's back, as tall as it
+				var q := p.duplicate()
+				q["at"] = [0.0, PACK_CENTRE_Y, float(p["at"][2])]
+				out[p.id] = carrier_fit("back") * point_transform(q, bag)
+				continue
 			out[p.id] = carrier_fit("back" if on_pack else face) * point_transform(p, size)
 			continue
 		var extent := pouch_extent(item, not att.get("held", []).is_empty())
@@ -286,6 +298,17 @@ func pouch_spots() -> Dictionary:
 	for face: String in faces:
 		_fit_face(face, faces[face], out)
 	return out
+
+
+## How an aid bag on point `p` of the worn pack is drawn (Captain: it dangled off the pack like
+## a second box): as wide and tall as the pack's back less 1 cm a side, centred on it
+## (pouch_spots), strapped flat to it, AID_BAG_DEPTH_M deep. ZERO for anything else.
+func _pack_bag_size(p: Dictionary, item: ItemData) -> Vector3:
+	var pack: StringName = inventory.slots[&"backpack"]
+	if String(p.get("type", "")) != "aid_bag" or pack == &"" or not item.stats.get("attach", []).has("aid_bag"):
+		return Vector3.ZERO
+	var pack_size := VoxelArt.size_m(VoxelArt.model_for(ItemDB.get_item(pack)))
+	return Vector3(pack_size.x - 0.02, pack_size.y - 0.02, minf(AID_BAG_DEPTH_M, WorldItem.visual_size(item).z))
 
 
 ## The part of the worn carrier that the pouches on `face` (front, back, left or right) lie on,
@@ -569,10 +592,13 @@ static func point_transform(p: Dictionary, size: Vector3, scale := 1.0) -> Trans
 ## A pouch (or knife) as small boxes: body and a darker flap, or a sheath and handle; a radio
 ## shows its antenna. A tourniquet holder is open-topped: the tourniquet in it shows (black
 ## band, windlass rod across the top, red tab). A full IFAK pouch shows its red pull tabs, so
-## you can see who carries one. Front is -Z. Used on the soldier and for item previews.
-static func pouch_node(item: ItemData, colour: Color, full: bool, layers := 1) -> Node3D:
+## you can see who carries one; every red tab lies flat on the pouch's face, below its top edge
+## (Captain: tabs standing up off a top edge read as a glitch). An aid bag (aid_bag_parts) shows
+## a red cross. Front is -Z. Used on the soldier and for item previews. `size`, when given,
+## draws it that size instead of its own (an aid bag fitted to the pack it is strapped on).
+static func pouch_node(item: ItemData, colour: Color, full: bool, layers := 1, size := Vector3.ZERO) -> Node3D:
 	var root := Node3D.new()
-	for part: Array in pouch_parts(item, colour, full):
+	for part: Array in pouch_parts(item, colour, full, size):
 		var box := _part_box(part[0], part[1], part[2], layers)
 		if part[3]:
 			box.name = "Antenna"
@@ -583,8 +609,10 @@ static func pouch_node(item: ItemData, colour: Color, full: bool, layers := 1) -
 ## The boxes pouch_node draws for `item` (`full`: with what is in it showing), pouch-local:
 ## [size, centre, colour, whether it is a radio's antenna (which stands up past whatever the
 ## pouch is on)].
-static func pouch_parts(item: ItemData, colour: Color, full: bool) -> Array:
-	var size := WorldItem.visual_size(item)
+static func pouch_parts(item: ItemData, colour: Color, full: bool, drawn := Vector3.ZERO) -> Array:
+	var size := drawn if drawn != Vector3.ZERO else WorldItem.visual_size(item)
+	if item.stats.get("attach", []).has("aid_bag"):
+		return aid_bag_parts(size, colour)
 	if item.id == &"knife" or item.stats.get("attach", []).has("knife") and not Inventory.is_pouch(item):
 		return [[Vector3(size.x, size.y * 0.62, size.z), Vector3(0, -size.y * 0.19, 0), colour.darkened(0.35), false],
 			[Vector3(size.x * 0.7, size.y * 0.38, size.z * 0.8), Vector3(0, size.y * 0.31, 0), Color("26241f"), false]]
@@ -594,15 +622,37 @@ static func pouch_parts(item: ItemData, colour: Color, full: bool) -> Array:
 		if full:
 			holder.append([Vector3(size.x * 0.8, size.y * 0.5, size.z * 0.75), Vector3(0, size.y * 0.25, 0), TQ_BAND, false])
 			holder.append([Vector3(size.x * 1.3, 0.012, 0.012), Vector3(0, size.y * 0.5, -size.z * 0.1), TQ_BAND.lightened(0.15), false])
-			holder.append([Vector3(0.016, 0.022, 0.006), Vector3(size.x * 0.25, size.y * 0.42, -size.z * 0.42), MED_RED, false])
+			# the red tab on the band's face, flush, its top below the band's
+			holder.append([Vector3(0.016, 0.02, 0.005), Vector3(size.x * 0.25, size.y * 0.36, -size.z * 0.375 - 0.0025), MED_RED, false])
 		return holder
 	var parts := [[size, Vector3.ZERO, colour, false],
 		[Vector3(size.x * 1.02, size.y * 0.28, size.z * 1.08), Vector3(0, size.y * 0.36, -size.z * 0.04), colour.darkened(0.25), false]]
 	if full and accepts.has("radio"):
 		parts.append([Vector3(0.008, 0.16, 0.008), Vector3(size.x * 0.3, size.y * 0.5 + 0.08, 0), Color("1d1d1b"), true])
 	if full and accepts.has("type:medical"):
+		# pull tabs flat on the flap's face, inside its top edge
+		var tab_h := minf(0.02, size.y * 0.2)
 		for side in [-1.0, 1.0]:
-			parts.append([Vector3(0.018, 0.03, 0.008), Vector3(side * size.x * 0.32, size.y * 0.5 + 0.012, -size.z * 0.3), MED_RED, false])
+			parts.append([Vector3(0.014, tab_h, 0.005), Vector3(side * size.x * 0.32, size.y * 0.36, -size.z * 0.58 - 0.0025), MED_RED, false])
+	return parts
+
+
+## A medic's aid bag, `size`, front -Z: the bag, a darker zipped lid band across its top, two
+## compression straps down its face and over its top (it is strapped to the pack), a flat red cross patch between
+## them and small red pull loops at the zip's ends, all flush on its face; nothing red above its top.
+static func aid_bag_parts(size: Vector3, colour: Color) -> Array:
+	var face := -size.z * 0.5 - 0.0025  # a 0.5 cm thing lying on the face
+	var strap := colour.darkened(0.35)
+	var parts := [[size, Vector3.ZERO, colour, false],
+		[Vector3(size.x, size.y * 0.12, size.z), Vector3(0, size.y * 0.44, 0), colour.darkened(0.22), false]]
+	for side in [-1.0, 1.0]:
+		parts.append([Vector3(0.035, size.y, 0.005), Vector3(side * size.x * 0.3, 0, face), strap, false])
+		# and over its top, back to the pack it holds it to
+		parts.append([Vector3(0.035, 0.005, size.z + 0.005), Vector3(side * size.x * 0.3, size.y * 0.5 + 0.0025, -0.0025), strap, false])
+		parts.append([Vector3(0.012, 0.02, 0.005), Vector3(side * size.x * 0.43, size.y * 0.42, face), MED_RED, false])
+	var arm := minf(0.09, size.x * 0.3)
+	parts.append([Vector3(arm, arm / 3.0, 0.005), Vector3(0, -size.y * 0.05, face), MED_RED, false])
+	parts.append([Vector3(arm / 3.0, arm, 0.005), Vector3(0, -size.y * 0.05, face), MED_RED, false])
 	return parts
 
 
