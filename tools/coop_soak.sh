@@ -113,7 +113,9 @@ if [ "$MODE" = clean ]; then LATENCY=0; JITTER=0; LOSS=0; fi
 # Free ports (S0651 failed hosting on a port another soak still held): unless --port was given,
 # the first base from 25400 up (no test suite uses 25400-25499), in steps of 10, whose P..P+clients all bind and that no
 # running soak's config.json names.
-if ! printf '%s\n' "${ALL_ARGS[@]}" | grep -qx -- --port; then
+# Not with --human: a build only joins the game's own port (a stopped play-along's RUNNING
+# folder naming 24680 moved S0754 to 24690, where the Captain's game couldn't reach it).
+if [ "$HUMAN" != 1 ] && ! printf '%s\n' "${ALL_ARGS[@]}" | grep -qx -- --port; then
 	parent_for_ports="$(run_log_parent)"
 	taken="$(cat "$parent_for_ports"/*/S*-RUNNING-coop-soak-*/config.json 2>/dev/null | grep -oE '"port": [0-9]+' | grep -oE '[0-9]+' | tr '\n' ' ')"
 	PORT="$("$PYTHON" - "$PORT" "$CLIENTS" "$taken" <<'PY'
