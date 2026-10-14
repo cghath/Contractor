@@ -24,6 +24,9 @@ const MAX_PX_PER_M := 24.0
 const ZOOM_STEP := 1.25
 ## The furthest out you can zoom, as a share of the zoom that fits the whole area.
 const MIN_FIT_SHARE := 0.6
+## How much of the view the whole area fills when fitted (Captain, 2026-10-14: the map sat
+## small in the middle of a lot of empty space; what's around it is now drawn too).
+const FIT_SHARE := 0.97
 ## How far past the area's edge (as a share of its size) the view can pan.
 const PAN_MARGIN := 0.25
 const HOVER_PX := 10.0
@@ -37,6 +40,16 @@ const GEAR_COLOUR := Color("ffd166")
 const GRID_MINOR := Color(0, 0, 0, 0.22)
 const GRID_MAJOR := Color(0, 0, 0, 0.5)
 const BACKDROP := Color(0.12, 0.13, 0.12)
+## Labels (Captain, 2026-10-14, B0912: labels at one spot were drawn over each other and over
+## other symbols). Every label is queued while drawing and laid out last (_layout_labels): beside
+## its symbol where there's room, else stacked off it with a leader line, never over another
+## label or symbol and always inside the map; one wider than LABEL_MAX_PX is cut short with "..."
+## and shows whole while the cursor is on it or its symbol.
+const LABEL_MAX_PX := 230.0
+const LABEL_GAP_PX := 8.0
+const SYMBOL_PX := 9.0  # half the box a symbol keeps clear of labels
+## What a label's symbol is, most important first: which keeps the best spot.
+const LABEL_PRIORITY := {"self": 9, "objective": 8, "insert_chosen": 7, "extract": 6, "intel": 5, "marker": 4, "insert": 3, "player": 3, "gear": 2, "squad": 1}
 
 ## The level shown (anything with map_area()).
 var level: Node
@@ -65,6 +78,16 @@ var _text_at := Vector2.ZERO
 var _menu: PopupMenu
 var _menu_at := Vector2.ZERO
 var _fitted := false  # showing the whole area (fit), until zoomed or panned
+## The zone picture being made on a worker thread (-1: none).
+var _render_task := -1
+var _render_inputs := {}
+var _render_image: Image
+var _surround := {}
+## This frame's labels and symbol boxes (queued while drawing), and where the last draw put
+## each label: [{"rect": Rect2, "text" (as shown), "full", "anchor": Vector2, "leader": bool}].
+var _labels: Array[Dictionary] = []
+var _symbols: Array[Rect2] = []
+var drawn_labels: Array[Dictionary] = []
 
 
 func _ready() -> void:
@@ -93,14 +116,55 @@ func setup(p_level: Node) -> void:
 	level = p_level
 	area = p_level.call(&"map_area") if p_level else Rect2()
 	_texture = null
+	_surround = MapRender.surround(p_level) if p_level else {}
 	fit()
 
 
-## The picture under the grid (made on first use).
-func texture() -> Texture2D:
-	if _texture == null and level:
-		_texture = ImageTexture.create_from_image(MapRender.render(level))
+## The level's cached map picture (made once per level; Captain, 2026-10-14: never per frame).
+const IMAGE_META := &"map_render_image"
+
+
+## The picture under the grid (made on first use and kept on the level). A zone's is made on
+## a worker thread: null until it's ready (texture_pending()); `wait` makes it here instead.
+func texture(wait := false) -> Texture2D:
+	if _texture != null or level == null:
+		return _texture
+	if level.has_meta(IMAGE_META):
+		_texture = ImageTexture.create_from_image(level.get_meta(IMAGE_META))
+		return _texture
+	if not MapRender.is_zone(level) or wait:
+		if _render_task >= 0:
+			WorkerThreadPool.wait_for_task_completion(_render_task)
+			_render_task = -1
+		var image := _render_image if _render_image else MapRender.render(level)
+		_render_image = null
+		level.set_meta(IMAGE_META, image)
+		_texture = ImageTexture.create_from_image(image)
+		return _texture
+	if _render_task < 0:
+		_render_inputs = MapRender.zone_inputs(level)
+		_render_image = null
+		_render_task = WorkerThreadPool.add_task(func() -> void: _render_image = MapRender.compose_zone(_render_inputs), false, "map render")
+	elif WorkerThreadPool.is_task_completed(_render_task):
+		WorkerThreadPool.wait_for_task_completion(_render_task)
+		_render_task = -1
+		_render_inputs = {}
+		if _render_image:
+			level.set_meta(IMAGE_META, _render_image)
+			_texture = ImageTexture.create_from_image(_render_image)
+			_render_image = null
 	return _texture
+
+
+## Whether the picture is still being made.
+func texture_pending() -> bool:
+	return _render_task >= 0
+
+
+func _exit_tree() -> void:
+	if _render_task >= 0:
+		WorkerThreadPool.wait_for_task_completion(_render_task)
+		_render_task = -1
 
 
 ## The size used for view maths: the control's, or a stand-in before it's laid out.
@@ -113,7 +177,7 @@ func fit_zoom() -> float:
 	if area.size.x <= 0.0 or area.size.y <= 0.0:
 		return 1.0
 	var v := view_size()
-	return minf(v.x / area.size.x, v.y / area.size.y) * 0.92
+	return minf(v.x / area.size.x, v.y / area.size.y) * FIT_SHARE
 
 
 func min_zoom() -> float:
@@ -378,15 +442,20 @@ func _process(_delta: float) -> void:
 # --- Drawing ---------------------------------------------------------------------
 
 func _draw() -> void:
-	draw_rect(Rect2(Vector2.ZERO, size), BACKDROP)
+	_labels.clear()
+	_symbols.clear()
+	var map_rect := Rect2(map_to_screen(area.position), area.size * zoom)
+	_draw_surround(map_rect)
 	if area.size.x <= 0.0:
 		return
 	var tex := texture()
-	var map_rect := Rect2(map_to_screen(area.position), area.size * zoom)
 	if tex:
 		draw_texture_rect(tex, map_rect, false)
+	else:
+		draw_rect(map_rect, MapRender.GROUND)
+		_label_raw(map_rect.get_center() - Vector2(40, 0), "Drawing the map...", Color(1, 1, 1, 0.7), 14)
 	_draw_grid()
-	draw_rect(map_rect, Color.BLACK, false, 2.0)
+	draw_rect(map_rect, Color(0, 0, 0, 0.8), false, 2.0)
 	_draw_objectives()
 	_draw_insertion()
 	_draw_extraction()
@@ -395,6 +464,20 @@ func _draw() -> void:
 	_draw_squad()
 	if _line.size() >= 2:
 		_polyline(_line, MapMarkers.colour_value(marker_colour), 2.0)
+	_layout_labels(map_rect)
+
+
+## Around the map: the ground past a zone's edge (and the sea past its coast), dimmed, so the
+## view is never a small square in a lot of empty space.
+func _draw_surround(map_rect: Rect2) -> void:
+	draw_rect(Rect2(Vector2.ZERO, size), _surround.get("ground", BACKDROP))
+	var side := int(_surround.get("sea_side", -1))
+	if side >= 0:
+		var v := Rect2(Vector2.ZERO, size)
+		var sea: Rect2 = [Rect2(v.position, Vector2(v.size.x, map_rect.position.y)), Rect2(Vector2(0, map_rect.end.y), Vector2(v.size.x, v.size.y - map_rect.end.y)),
+			Rect2(v.position, Vector2(map_rect.position.x, v.size.y)), Rect2(Vector2(map_rect.end.x, 0), Vector2(v.size.x - map_rect.end.x, v.size.y))][side]
+		if sea.size.x > 0.0 and sea.size.y > 0.0:
+			draw_rect(sea, _surround.get("sea", BACKDROP))
 
 
 func _draw_grid() -> void:
@@ -402,7 +485,6 @@ func _draw_grid() -> void:
 	var shown := visible_rect().intersection(area)
 	if shown.size.x <= 0.0 or shown.size.y <= 0.0:
 		return
-	var font := get_theme_default_font()
 	var top := maxf(map_to_screen(area.position).y, 0.0)
 	var left := maxf(map_to_screen(area.position).x, 0.0)
 	# Eastings: vertical lines from the west edge.
@@ -416,8 +498,8 @@ func _draw_grid() -> void:
 		var b := map_to_screen(Vector2(x, minf(shown.end.y, area.end.y)))
 		var major := i % 10 == 0
 		draw_line(a, b, GRID_MAJOR if major else GRID_MINOR, 2.0 if major else 1.0)
-		if x < area.end.x:
-			draw_string(font, Vector2(a.x + 3, top + 14), MapGrid.line_label(i, spacing), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color.BLACK)
+		if x < area.end.x and a.x + 3 > left + 28:  # clear of the northings' column
+			_grid_label(Vector2(a.x + 3, top + 14), MapGrid.line_label(i, spacing))
 	# Northings: horizontal lines from the south edge.
 	var n0 := floori((area.end.y - shown.end.y) / spacing)
 	var n1 := ceili((area.end.y - shown.position.y) / spacing)
@@ -429,8 +511,15 @@ func _draw_grid() -> void:
 		var b := map_to_screen(Vector2(minf(shown.end.x, area.end.x), z))
 		var major := j % 10 == 0
 		draw_line(a, b, GRID_MAJOR if major else GRID_MINOR, 2.0 if major else 1.0)
-		if z > area.position.y:
-			draw_string(font, Vector2(left + 3, a.y - 3), MapGrid.line_label(j, spacing), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color.BLACK)
+		if z > area.position.y and a.y - 3 > top + 30:  # clear of the eastings' row
+			_grid_label(Vector2(left + 3, a.y - 3), MapGrid.line_label(j, spacing))
+
+
+## A grid number: dark on a light halo, readable on any ground.
+func _grid_label(at: Vector2, text: String) -> void:
+	var font := get_theme_default_font()
+	draw_string_outline(font, at, text, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, 3, Color(1, 1, 1, 0.45))
+	draw_string(font, at, text, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0, 0, 0, 0.9))
 
 
 func _draw_objectives() -> void:
@@ -441,7 +530,7 @@ func _draw_objectives() -> void:
 		var r := maxf(float(o.get("radius", 0.0)) * zoom, 8.0)
 		draw_arc(s, r, 0.0, TAU, 48, colour, 2.0)
 		draw_circle(s, 4.0, colour)
-		_label(s + Vector2(8, -6), String(o.get("title", "Objective")), colour)
+		_label(s, String(o.get("title", "Objective")), colour, "objective")
 
 
 func _draw_insertion() -> void:
@@ -461,7 +550,7 @@ func _draw_insertion() -> void:
 			draw_colored_polygon(tri, INSERT_COLOUR)
 		tri.append(tri[0])
 		draw_polyline(tri, INSERT_COLOUR.darkened(0.4), 2.0)
-		_label(s + Vector2(11, 4), ("INSERT: " if chosen else "") + String(point.get("name", "")), INSERT_COLOUR)
+		_label(s, ("INSERT: " if chosen else "") + String(point.get("name", "")), INSERT_COLOUR, "insert_chosen" if chosen else "insert")
 
 
 func _draw_extraction() -> void:
@@ -474,7 +563,7 @@ func _draw_extraction() -> void:
 		draw_arc(s, maxf(float(point.radius) * zoom, 10.0), 0.0, TAU, 48, EXTRACT_COLOUR, 4.0 if counting else 2.0)
 		draw_line(s + Vector2(-6, -6), s + Vector2(6, 6), EXTRACT_COLOUR, 2.0)
 		draw_line(s + Vector2(-6, 6), s + Vector2(6, -6), EXTRACT_COLOUR, 2.0)
-		_label(s + Vector2(9, -8), "EXTRACT: %s" % point.name, EXTRACT_COLOUR)
+		_label(s, "EXTRACT: %s" % point.name, EXTRACT_COLOUR, "extract")
 
 
 func _draw_markers() -> void:
@@ -495,6 +584,7 @@ func _draw_markers() -> void:
 			_polyline(points, colour, 3.0 if hover else 2.0)
 			continue
 		var s := map_to_screen(points[0])
+		_symbol(s)
 		if marker.kind == "enemy":
 			var d := 7.0 if not hover else 9.0
 			draw_colored_polygon(PackedVector2Array([s + Vector2(0, -d), s + Vector2(d, 0), s + Vector2(0, d), s + Vector2(-d, 0)]), colour)
@@ -502,7 +592,7 @@ func _draw_markers() -> void:
 			draw_circle(s, 6.0 if hover else 5.0, colour)
 			draw_arc(s, 6.0 if hover else 5.0, 0.0, TAU, 16, Color.WHITE if hover else Color(0, 0, 0, 0.6), 1.0)
 		if String(marker.text) != "":
-			_label(s + Vector2(9, 4), String(marker.text), colour)
+			_label(s, String(marker.text), colour, "intel" if marker.channel == "intel" else "marker")
 
 
 ## Dead players' gear on the map (their bodies with a GearMarker): [{"pos": Vector2, "text"}].
@@ -536,7 +626,7 @@ func _draw_gear_markers() -> void:
 		var s := map_to_screen(gear.pos)
 		draw_line(s + Vector2(-5, -5), s + Vector2(5, 5), GEAR_COLOUR, 3.0)
 		draw_line(s + Vector2(-5, 5), s + Vector2(5, -5), GEAR_COLOUR, 3.0)
-		_label(s + Vector2(8, -6), gear.text, GEAR_COLOUR)
+		_label(s, gear.text, GEAR_COLOUR, "gear")
 
 
 func _draw_squad() -> void:
@@ -544,13 +634,13 @@ func _draw_squad() -> void:
 		var s := map_to_screen(point.pos)
 		if point.kind == "squad":
 			draw_circle(s, 4.0, SQUAD_COLOUR if point.up else SQUAD_COLOUR.darkened(0.5))
-			_label(s + Vector2(6, 4), point.text, SQUAD_COLOUR, 11)
+			_label(s, point.text, SQUAD_COLOUR, "squad", 11)
 			continue
 		var dir: Vector2 = point.dir
 		var side := dir.orthogonal()
 		var colour := SELF_COLOUR if point.kind == "self" else SQUAD_COLOUR.lightened(0.3)
 		draw_colored_polygon(PackedVector2Array([s + dir * 10.0, s - dir * 6.0 + side * 6.0, s - dir * 3.0, s - dir * 6.0 - side * 6.0]), colour)
-		_label(s + Vector2(9, 4), point.text, colour, 12)
+		_label(s, point.text, colour, String(point.kind), 12)
 
 
 func _polyline(points: PackedVector2Array, colour: Color, width: float) -> void:
@@ -561,7 +651,111 @@ func _polyline(points: PackedVector2Array, colour: Color, width: float) -> void:
 		draw_polyline(screen, colour, width, true)
 
 
-func _label(at: Vector2, text: String, colour: Color, font_size := 13) -> void:
+## Queues a label for the symbol at `anchor` (screen); `kind` is a LABEL_PRIORITY key. Laid
+## out and drawn at the end of the frame (_layout_labels).
+func _label(anchor: Vector2, text: String, colour: Color, kind := "marker", font_size := 13) -> void:
+	_symbol(anchor)
+	if text != "":
+		_labels.append({"anchor": anchor, "text": text, "colour": colour, "size": font_size,
+			"prio": int(LABEL_PRIORITY.get(kind, 0)), "order": _labels.size()})
+
+
+## A symbol's box, kept clear of labels.
+func _symbol(at: Vector2) -> void:
+	_symbols.append(Rect2(at - Vector2(SYMBOL_PX, SYMBOL_PX), Vector2(SYMBOL_PX, SYMBOL_PX) * 2.0))
+
+
+func _label_raw(at: Vector2, text: String, colour: Color, font_size := 13) -> void:
 	var font := get_theme_default_font()
 	draw_string_outline(font, at, text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, 3, Color(0, 0, 0, 0.75))
 	draw_string(font, at, text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, colour)
+
+
+## `text` cut to fit `max_px` with "..." (whole if it fits).
+func _fit_text(text: String, font_size: int, max_px: float) -> String:
+	var font := get_theme_default_font()
+	if font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x <= max_px:
+		return text
+	var lo := 0
+	var hi := text.length()
+	while lo < hi:
+		var mid := (lo + hi + 1) / 2
+		if font.get_string_size(text.left(mid).strip_edges() + "...", HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x <= max_px:
+			lo = mid
+		else:
+			hi = mid - 1
+	return text.left(lo).strip_edges() + "..."
+
+
+## Places this frame's labels, most important first: beside the symbol (right, left, above,
+## below) where that's clear of every other label and symbol and inside the map; else off it
+## in a stack below or above with a leader line; never outside the visible map.
+func _layout_labels(map_rect: Rect2) -> void:
+	drawn_labels.clear()
+	var bounds := map_rect.intersection(Rect2(Vector2.ZERO, size)).grow(-2.0)
+	if bounds.size.x <= 0.0 or bounds.size.y <= 0.0:
+		return
+	var font := get_theme_default_font()
+	_labels.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		return a.prio > b.prio or (a.prio == b.prio and a.order < b.order))
+	var taken: Array[Rect2] = []
+	var hovered: Dictionary = {}
+	for lab: Dictionary in _labels:
+		var font_size: int = lab.size
+		var shown := _fit_text(lab.text, font_size, minf(LABEL_MAX_PX, bounds.size.x - 4.0))
+		var box := font.get_string_size(shown, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size) + Vector2(4, 2)
+		var a: Vector2 = lab.anchor
+		var g := LABEL_GAP_PX
+		var spots: Array[Vector2] = [a + Vector2(g, -box.y * 0.5), a + Vector2(-g - box.x, -box.y * 0.5),
+			a + Vector2(-box.x * 0.5, -g - box.y), a + Vector2(-box.x * 0.5, g), a + Vector2(g, -g - box.y), a + Vector2(g, g)]
+		for k in range(1, 9):  # off the symbol, with a leader line
+			spots.append(a + Vector2(g + 6.0, g + k * (box.y + 2.0)))
+			spots.append(a + Vector2(g + 6.0, -g - box.y - k * (box.y + 2.0)))
+			spots.append(a + Vector2(-g - 6.0 - box.x, g + k * (box.y + 2.0)))
+		var placed := Rect2()
+		var found := false
+		for spot in spots:
+			var r := _clamp_rect(Rect2(spot, box), bounds)
+			if not _overlaps(r, taken) and not _overlaps(r, _symbols, a):
+				placed = r
+				found = true
+				break
+		if not found:
+			placed = _clamp_rect(Rect2(spots[0], box), bounds)  # crowded: beside it anyway
+		taken.append(placed)
+		var leader := placed.grow(2.0).has_point(a) == false and _gap(a, placed) > g + 2.0
+		var entry := {"rect": placed, "text": shown, "full": String(lab.text), "anchor": a, "leader": leader, "colour": lab.colour, "size": font_size}
+		drawn_labels.append(entry)
+		if (placed.has_point(_cursor_screen) or a.distance_to(_cursor_screen) <= HOVER_PX) and shown != lab.text and hovered.is_empty():
+			hovered = entry
+	for entry: Dictionary in drawn_labels:
+		var r: Rect2 = entry.rect
+		var colour: Color = entry.colour
+		if entry.leader:
+			var to := Vector2(clampf(entry.anchor.x, r.position.x, r.end.x), clampf(entry.anchor.y, r.position.y, r.end.y))
+			draw_line(entry.anchor, to, Color(colour, 0.8), 1.0, true)
+		draw_rect(r, Color(0.06, 0.06, 0.05, 0.72))  # dark plate: readable on the pale map
+		_label_raw(r.position + Vector2(2, r.size.y - 5), entry.text, colour, entry.size)
+	if not hovered.is_empty():  # the whole text of a label cut short, under the cursor
+		var full_box := font.get_string_size(hovered.full, HORIZONTAL_ALIGNMENT_LEFT, -1, 13) + Vector2(12, 8)
+		var tip := _clamp_rect(Rect2(_cursor_screen + Vector2(14, 14), full_box), Rect2(Vector2.ZERO, size))
+		draw_rect(tip, Color(0.05, 0.05, 0.05, 0.92))
+		draw_rect(tip, Color(hovered.colour, 0.9), false, 1.0)
+		_label_raw(tip.position + Vector2(6, full_box.y - 8), hovered.full, Color.WHITE, 13)
+
+
+static func _clamp_rect(r: Rect2, bounds: Rect2) -> Rect2:
+	var p := r.position.clamp(bounds.position, (bounds.end - r.size).max(bounds.position))
+	return Rect2(p, r.size)
+
+
+## Whether `r` overlaps any of `rects` (a symbol box at `own` doesn't count: the label's own).
+static func _overlaps(r: Rect2, rects: Array[Rect2], own := Vector2.INF) -> bool:
+	for other in rects:
+		if other.intersects(r) and not (own != Vector2.INF and other.get_center().is_equal_approx(own)):
+			return true
+	return false
+
+
+static func _gap(p: Vector2, r: Rect2) -> float:
+	return Vector2(clampf(p.x, r.position.x, r.end.x), clampf(p.y, r.position.y, r.end.y)).distance_to(p)
