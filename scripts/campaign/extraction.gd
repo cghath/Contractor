@@ -21,9 +21,11 @@ extends Node
 ##   "bodies": [{"uid", "label", "faction", "role", "items"}] (bodies brought out),
 ##   "bodies_left": [{"uid", "label", "faction", "role"}] (squad and player bodies not brought),
 ##   "hvts": [{"name", "alive", "faction", ...hvt_record()}], "deposited": [item] (items set
-##   down inside the point, which wave 5's helicopter lifts), "items": {item id: count} (all
-##   of it together: carried, on bodies, deposited, and what's on a carrier's MOLLE points and
-##   in its pouches), "objectives": [map objectives at the end].
+##   down inside the point, which wave 5's helicopter lifts), "driven_out": [item] (B-18: in
+##   the holds of motor-pool vehicles going home with the squad; it stays in them),
+##   "items": {item id: count} (all of it together: carried, on bodies, deposited, driven out,
+##   and what's on a carrier's MOLLE points and in its pouches), "objectives": [map objectives
+##   at the end].
 ##   A soldier is {"name", "node", "peer" (players; 0 for AI), "role", "slot", "downed",
 ##   "condition", "items"}; an item is {"id", "count", "where", "state"?}. A carrier's pouches
 ##   and their contents stay in its state ("molle"), as the inventory keeps them, so the vest
@@ -411,11 +413,19 @@ func build_report(point: Dictionary) -> Dictionary:
 			if not e.get("state", {}).is_empty():
 				entry["state"] = (e.state as Dictionary).duplicate(true)
 			deposited.append(entry)
+	# B-18: the holds of motor-pool vehicles going home with the squad (MotorPoolNode.server_settle)
+	# came out too, though what's in them stays in the vehicle, not deposited (not banked).
+	var at: Vector2 = point.get("pos", Vector2.ZERO)
+	var pool := MotorPoolNode.of(self)
+	var driven: Array = pool.cargo_going_home([Vector3(at.x, 0.0, at.y)], ride) if pool else []
+	for entry: Dictionary in driven:
+		entry["where"] = "vehicle"
 	var totals := {}
 	for group: Array in [players, squad, bodies]:
 		for record: Dictionary in group:
 			_add_totals(totals, record.items)
 	_add_totals(totals, deposited)
+	_add_totals(totals, driven)
 	var objectives: Array = []
 	for o: Dictionary in MapView.objectives_in(self):
 		objectives.append({"id": o.get("id", ""), "title": o.get("title", ""), "state": o.get("state", "")})
@@ -424,7 +434,7 @@ func build_report(point: Dictionary) -> Dictionary:
 		"point": {"name": String(point.get("name", "")), "pos": [pos.x, pos.y], "source": String(point.get("source", ""))},
 		"duration_s": (Time.get_ticks_msec() - _started_msec) / 1000.0,
 		"players": players, "squad": squad, "left_behind": left, "bodies": bodies, "bodies_left": bodies_left,
-		"hvts": hvts, "deposited": deposited, "items": totals, "objectives": objectives}
+		"hvts": hvts, "deposited": deposited, "driven_out": driven, "items": totals, "objectives": objectives}
 
 
 ## Everything an inventory holds, one entry per slot, stack and the hands:

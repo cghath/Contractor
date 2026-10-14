@@ -66,6 +66,7 @@ func _ready() -> void:
 	await _test_live_objectives()
 	await _test_objective_helper()
 	_test_ammo_readout()
+	await _test_driven_out()
 	await _test_over_network()
 	Campaign.reset_campaign()
 	GameState.delete_save()
@@ -647,6 +648,75 @@ func _out_entries(cid: String) -> Array:
 			entry.state["intel_id"] = String(ids[0])
 		out.append(entry)
 	return out
+
+
+## B-18 (review): what goes home in a motor-pool vehicle's hold came out too. The hard case
+## loaded into the M-ATV's hold from the player's hands (Vehicle.server_load) and the bonus
+## documents in a pack stowed beside it, the squad extracting next to it: Extraction's report
+## lists both as driven out (not deposited, so not banked), the M-ATV goes home with them aboard
+## (MotorPoolNode.server_settle) and the debrief counts them: completed with the bonus, where it
+## debriefed "failed". Extracting out of its reach, its hold doesn't count.
+func _test_driven_out() -> void:
+	print("Driven out in a motor-pool vehicle's hold (B-18)")
+	Contracts.new_full_campaign(84, 200000)
+	Economy.take_unbanked()
+	Campaign.section(MotorPool.SECTION).clear()
+	var pool_id := String(MotorPool.list()[0].id)
+	var cid := _make_offer("intel_grab", "compound_01")
+	Contracts.server_accept(cid, ContractGen.default_terms())
+	Contracts.server_start_deployment([cid])
+	var docs: Array = _out_entries(cid).filter(func(e: Dictionary) -> bool: return e.id == "intel_documents")
+	var ext := MapNodes.extraction(level)
+	ext.server_begin({"zone": Briefing.DEBUG_ZONE})
+	var lz: Vector2 = ext.points[0].pos if not ext.points.is_empty() else Vector2(0, 34)
+	var v := MotorPool.server_bring(pool_id, level, Transform3D(Basis(), Vector3(lz.x + 7.0, 0.3, lz.y)))
+	await _frames(3)
+	if v == null:
+		check(false, "the pool's M-ATV is brought into the level")
+		ext.server_cancel()
+		Contracts.server_end_deployment({})
+		Contracts.server_finish_debrief()
+		return
+	player.inventory.release_hands()
+	player.inventory.take(&"hvt_case")
+	var said := v.server_load(player, &"", -1, &"hvt_case")
+	v.cargo_hold.take(&"assault_pack", 1, {"held": [{"id": "intel_documents", "count": 1, "state": docs[0].state if not docs.is_empty() else {}}]})
+	check(said.begins_with("Loaded") and player.inventory.hands == &"" and v.cargo_hold.count_of(&"hvt_case") == 1 and v.cargo_hold.count_of(&"assault_pack") == 1
+		and docs.size() == 1, "the hard case loaded into the M-ATV's hold from the hands (%s), the documents in a pack beside it" % said)
+	var far := ext.build_report({"name": "far", "pos": lz + Vector2(300, 0)})
+	check((far.get("driven_out", [0]) as Array).is_empty(), "extracting out of its reach: nothing in its hold is out")
+	player.global_position = Vector3(lz.x, 0.1, lz.y)
+	var report := {}
+	ext.deployment_ended.connect(func(r: Dictionary) -> void: report.merge(r, true), CONNECT_ONE_SHOT)
+	ext.countdown_s = 0.3
+	var why := ext.server_confirm()
+	await _wait_for(func() -> bool: return not report.is_empty(), 5.0)
+	var driven: Array = report.get("driven_out", [])
+	var ids := driven.map(func(e: Dictionary) -> String: return String(e.id))
+	check(why == "" and "hvt_case" in ids and "assault_pack" in ids and driven.all(func(e: Dictionary) -> bool: return e.get("where") == "vehicle")
+		and not (report.get("deposited", []) as Array).any(func(e: Dictionary) -> bool: return String(e.id) == "hvt_case"),
+		"extracted beside it: the report lists its hold as driven out, not deposited (%s; %s)" % [why, ids])
+	await _frames(2)
+	var aboard: Array = []
+	for list: Variant in (((MotorPool.entry(pool_id).get("record", {}) as Dictionary).get("cargo", {}) as Dictionary).get("containers", {}) as Dictionary).values():
+		for e: Dictionary in list:
+			aboard.append(String(e.id))
+	check(String(MotorPool.entry(pool_id).get("out", "?")) == "" and (not is_instance_valid(v) or v.is_queued_for_deletion()) and "hvt_case" in aboard,
+		"the M-ATV goes home with the case aboard (%s)" % [aboard])
+	# The debrief, from the report as BaseHub builds it (the people bring their own gear home).
+	var debrief_report := Contracts.report_from_level(level, [player])
+	debrief_report["bank"] = []
+	debrief_report["driven_out"] = driven
+	var d := Contracts.server_end_deployment(debrief_report)
+	var line: Dictionary = d.contracts[0] if not (d.get("contracts", []) as Array).is_empty() else {"outcome": "missing", "bonuses": [], "objectives": []}
+	check(line.outcome == "completed" and (line.bonuses as Array).any(func(b: Dictionary) -> bool: return String(b.text).contains("too")),
+		"the case and the documents driven out complete the intel grab with its bonus (%s, %s)" % [line.outcome, line.objectives])
+	var intel := (d.get("intel", []) as Array).map(func(e: Dictionary) -> String: return String(e.id))
+	var banked := Economy.take_unbanked().map(func(e: Dictionary) -> String: return String(e.id))
+	check("hvt_case" in intel and "intel_documents" in intel and "hvt_case" not in banked and "intel_documents" not in banked,
+		"they show as intel in the debrief and aren't banked as well: they stay in the M-ATV (intel %s, banked %s)" % [intel, banked])
+	Contracts.server_finish_debrief()
+	ext.server_cancel()
 
 
 func _test_board_ui() -> void:

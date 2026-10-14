@@ -252,12 +252,14 @@ func _mission(type: String) -> String:
 		left = squad[squad.size() - 1]
 		bring.erase(left)
 	var deposit := type == "raid"  # the rifle set down at the point goes to the stash
+	# B-18: the HVT's phone goes out in the hold of the pool's M-ATV, not on the player.
+	var stow: Array = [&"intel_phone"] if type == "hvt_capture" else []
 	var cash_before := Economy.cash()
 	var stash_before := BaseArmory.counts(BaseHub.stash())
 	var bills := [0]
 	var on_week := func(_week: int, bill: Dictionary) -> void: bills[0] += int(bill.total) - int(bill.get("loan_taken", 0))
 	Economy.week_paid.connect(on_week)
-	var out := await _extract(bring, done.get("cargo", []), left, deposit)
+	var out := await _extract(bring, done.get("cargo", []), left, deposit, stow)
 	Economy.week_paid.disconnect(on_week)
 	if not out.get("ok", false):
 		return "extraction: %s" % out.get("why", "")
@@ -281,6 +283,17 @@ func _mission(type: String) -> String:
 	check(Economy.cash() == cash_before + int(debrief.totals.paid_now) - bills[0],
 		"the bank moved by what the debrief paid ($%s, bills $%s)" % [DebriefCalc.money(debrief.totals.paid_now), DebriefCalc.money(bills[0])])
 	check(Contracts.history().any(func(h: Dictionary) -> bool: return h.cid == cid and h.outcome == "completed"), "the contract closes as completed in the history")
+	if not stow.is_empty():
+		var pool_id := String(out.get("pool_id", ""))
+		var aboard: Array = []
+		for list: Variant in (((MotorPool.entry(pool_id).get("record", {}) as Dictionary).get("cargo", {}) as Dictionary).get("containers", {}) as Dictionary).values():
+			for e: Dictionary in list:
+				aboard.append(String(e.id))
+		var counts := BaseArmory.counts(BaseHub.stash())
+		check(bool(out.get("stowed", false)) and (line.get("bonuses", []) as Array).any(func(b: Dictionary) -> bool: return String(b.text).contains("phone"))
+			and pool_id != "" and String(MotorPool.entry(pool_id).get("out", "?")) == "" and "intel_phone" in aboard
+			and int(counts.get("intel_phone", 0)) == int(stash_before.get("intel_phone", 0)),
+			"the phone driven out in the M-ATV's hold counts for the bonus; the M-ATV is home with it aboard, not banked as well (B-18; aboard %s)" % [aboard])
 	# The roster.
 	var grew := true
 	for mid in bring:
@@ -643,9 +656,11 @@ func _do_recovery(cid: String) -> Dictionary:
 ## The player, the squadmates in `bring` and `cargo` (HVTs, hostages, a found squadmate) at the
 ## zone's landing zone nearest the player; `left` (a member id) stays behind, 60 m off; with
 ## `deposit` the player sets his rifle down inside the point and a dead hostile is brought
-## there. Extraction confirmed, and back
-## at the base. {"ok", "why", "deposited", "bodies", "body_items", "field" (what was left outside the point), "lz"}.
-func _extract(bring: Array, cargo: Array, left: String, deposit: bool) -> Dictionary:
+## there; `stow` (item ids in the player's kit) goes into the hold of the pool's M-ATV, brought
+## beside the point before anyone walks in (_load_truck). Extraction confirmed, and back
+## at the base. {"ok", "why", "deposited", "bodies", "body_items", "field" (what was left outside the point), "lz",
+## "pool_id", "stowed"}.
+func _extract(bring: Array, cargo: Array, left: String, deposit: bool, stow: Array = []) -> Dictionary:
 	var extraction := MapNodes.extraction(level)
 	var zone_points: Array = extraction.points.filter(func(p: Dictionary) -> bool: return p.source == "zone")
 	if zone_points.is_empty():
@@ -654,6 +669,9 @@ func _extract(bring: Array, cargo: Array, left: String, deposit: bool) -> Dictio
 	zone_points.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return (a.pos as Vector2).distance_to(here) < (b.pos as Vector2).distance_to(here))
 	var lz: Vector2 = zone_points[0].pos
 	var at := Vector3(lz.x, 0, lz.y)
+	var truck := {}
+	if not stow.is_empty():
+		truck = await _load_truck(stow, at)
 	_put(player, at)
 	var i := 0
 	for mid: String in bring:
@@ -701,7 +719,35 @@ func _extract(bring: Array, cargo: Array, left: String, deposit: bool) -> Dictio
 	player = level.players.get_node_or_null(^"1")
 	await _seconds(BaseHub.STASH_POLL_S + 0.3)
 	return {"ok": true, "deposited": report.get("deposited", []), "bodies": report.get("bodies", []), "body_items": body_items,
-		"field": field, "lz": lz}
+		"field": field, "lz": lz, "pool_id": truck.get("pool_id", ""), "stowed": truck.get("stowed", false)}
+
+
+## B-18: the pool's M-ATV brought beside the landing zone at `at`, and `ids` moved from the
+## player's kit into its hold the way a player loads it (Vehicle.server_load): it goes home with
+## the squad, and what's aboard counts as carried out. {"pool_id", "stowed" (all of them aboard)}.
+func _load_truck(ids: Array, at: Vector3) -> Dictionary:
+	var free := MotorPool.list().filter(func(e: Dictionary) -> bool: return MotorPool.problem(String(e.id)) == "")
+	var zone := level as ZoneLevel
+	var spot := at + Vector3(8, 0, 6)
+	var v: Vehicle = MotorPool.server_bring(String(free[0].id), level, Transform3D(Basis(), (zone.ground_point(spot) if zone else spot) + Vector3.UP * 0.3)) if not free.is_empty() else null
+	if v == null:
+		check(false, "the pool's M-ATV is brought beside the landing zone")
+		return {}
+	await _frames(3)
+	var stowed := true
+	for id: StringName in ids:
+		var said := ""
+		for container: StringName in player.inventory.search_containers():
+			var list: Array = player.inventory.containers[container]
+			for k in list.size():
+				if StringName(list[k].id) == id:
+					said = v.server_load(player, container, k, id)
+					break
+			if said != "":
+				break
+		stowed = stowed and said.begins_with("Loaded") and v.cargo_hold.count_of(id) > 0 and player.inventory.count_of(id) == 0
+	check(stowed, "the %s loaded into the hold of the pool's M-ATV beside the landing zone" % ", ".join(PackedStringArray(ids.map(func(id: StringName) -> String: return ItemDB.get_item(id).name))))
+	return {"pool_id": MotorPool.pool_id(v), "stowed": stowed}
 
 
 ## A dead hostile's body in the zone with something on it, or null.
