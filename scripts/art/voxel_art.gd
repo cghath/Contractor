@@ -169,16 +169,18 @@ static func hand_points(model: String) -> Dictionary:
 	return {"grip": (grip - centre) * VOXEL_SIZE, "support": (support - centre) * VOXEL_SIZE}
 
 
-## Top of the rear sight, in metres relative to the instance pivot (its centre). Aiming
-## puts this point just under the eye. Zero for non-weapons.
+## The line of sight's back end, in metres relative to the instance pivot (its centre):
+## aiming puts this point on the eye's line (PlayerInput.ads_view). A rifle's is the middle of
+## its optic tube's back opening (you look through it: Captain, P0362), a pistol's the top of
+## its rear sight notch, level with the front post's top. Zero for non-weapons.
 static func sight_point(model: String) -> Vector3:
 	var spec := _spec(model)
 	var centre := Vector3(spec.size) * 0.5
 	match model.get_slice(":", 0):
 		"rifle":
-			return (Vector3(1.5, 13, spec.size.z * 0.62) - centre) * VOXEL_SIZE  # back of the optic
+			return (Vector3(1.5, OPTIC_AXIS_Y, spec.size.z * 0.64) - centre) * VOXEL_SIZE  # back of the optic
 		"pistol":
-			return (Vector3(1, 7, 9) - centre) * VOXEL_SIZE  # rear sight
+			return (Vector3(1, 7.0, 9.4) - centre) * VOXEL_SIZE  # rear sight notch
 	return Vector3.ZERO
 
 
@@ -966,6 +968,10 @@ static func _fb(x0: float, y0: float, z0: float, x1: float, y1: float, z1: float
 	return [Vector3(x0, y0, z0), Vector3(x1, y1, z1), colour]
 
 
+## Height (voxels) of a rifle optic's axis: the middle of its tube.
+const OPTIC_AXIS_Y := 11.8
+
+
 ## Rifle of `length` voxels, muzzle at z = 0, in a 2 cm frame built at 0.5 cm: muzzle
 ## device, barrel, railed handguard, upper and lower receiver, optic, curved magazine,
 ## angled pistol grip, buffer tube and stock. hand_points and sight_point read this frame
@@ -984,8 +990,11 @@ static func _rifle(length: int) -> Dictionary:
 		_fb(0.7, 7.0, f.call(0.45), 2.3, 9.6, f.call(0.74), C.GUN),             # upper receiver
 		_fb(0.75, 5.6, f.call(0.47), 2.25, 7.0, f.call(0.72), C.GUN),           # lower receiver
 		_fb(1.1, 9.95, f.call(0.53), 1.9, 10.6, f.call(0.61), C.GUN),           # optic mount
-		_fb(0.85, 10.6, f.call(0.5), 2.15, 13.0, f.call(0.64), C.GUN),          # optic
-		_fb(1.05, 10.9, f.call(0.5) - 0.01, 1.95, 12.7, f.call(0.5) + 0.3, C.LENS),
+		# Optic: an open tube you look through when aimed (Captain, P0362).
+		_fb(0.55, 10.6, f.call(0.53), 2.45, 10.85, f.call(0.64), C.GUN),       # optic: floor
+		_fb(0.55, 12.75, f.call(0.53), 2.45, 13.0, f.call(0.64), C.GUN),       # roof
+		_fb(0.55, 10.85, f.call(0.53), 0.75, 12.75, f.call(0.64), C.GUN),      # sides
+		_fb(2.25, 10.85, f.call(0.53), 2.45, 12.75, f.call(0.64), C.GUN),
 		_fb(0.9, 4.2, f.call(0.5), 2.1, 5.6, f.call(0.575), C.GUN_LIGHT),       # magazine, curving forward
 		_fb(0.9, 2.8, f.call(0.49), 2.1, 4.2, f.call(0.565), C.GUN_LIGHT),
 		_fb(0.9, 1.4, f.call(0.475), 2.1, 2.8, f.call(0.55), C.GUN_LIGHT),
@@ -1002,12 +1011,14 @@ static func _rifle(length: int) -> Dictionary:
 
 
 ## 0.04 x 0.14 x 0.20 m, muzzle at z = 0, built at 0.5 cm: slide, frame, raked grip,
-## trigger guard. hand_points: grip at (1, 2.5, 7.5); sight_point: rear sight (1, 7, 9).
+## trigger guard, a front post and a notched rear sight (Captain, P0362: readable irons).
+## hand_points: grip at (1, 2.5, 7.5); sight_point: the rear notch's top (1, 7.0, 9.4).
 static func _pistol() -> Dictionary:
 	return {"size": Vector3i(2, 7, 10), "sub": 4, "boxes": [
 		_fb(0.15, 4.6, 0, 1.85, 6.8, 10, C.GUN),             # slide
-		_fb(0.4, 6.8, 0.3, 1.6, 7.0, 0.8, C.GUN),            # front sight
-		_fb(0.3, 6.8, 8.8, 1.7, 7.0, 9.4, C.GUN),            # rear sight
+		_fb(0.85, 6.8, 0.3, 1.15, 7.0, 0.8, C.GUN),         # front post
+		_fb(0.3, 6.8, 8.8, 0.75, 7.0, 9.4, C.GUN),          # rear sight, either side of the notch
+		_fb(1.25, 6.8, 8.8, 1.7, 7.0, 9.4, C.GUN),
 		_fb(0.2, 3.6, 0.6, 1.8, 4.6, 9.2, C.GUN_LIGHT),      # frame
 		_fb(0.2, 2.4, 6.0, 1.8, 3.6, 9.2, C.GUN_LIGHT),      # grip, raked back
 		_fb(0.2, 1.2, 6.4, 1.8, 2.4, 9.5, C.GUN_LIGHT),

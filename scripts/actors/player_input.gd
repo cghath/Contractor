@@ -8,9 +8,14 @@ extends Node
 const MOUSE_SENSITIVITY := 0.0025
 const BASE_FOV := 80.0
 ## View model position (camera-local) at the hip; aiming puts the weapon's sight point
-## (VoxelArt.sight_point) here instead.
+## (VoxelArt.sight_point) on the eye's line instead (ads_view), this far in front of it: a
+## rifle's optic close to the eye so you look through the tube, a pistol out at arm's length
+## (Captain, P0362: a sight picture you can use).
 const HIP_VIEW := Vector3(0.14, -0.16, -0.38)
-const ADS_EYE := Vector3(0.0, -0.012, -0.24)
+const ADS_EYE := Vector3(0.0, 0.0, -0.16)
+const ADS_EYE_PISTOL := Vector3(0.0, 0.0, -0.42)
+## Recoil settling back (Soldier.RECOIL_SETTLE), per second: most of it within a quarter second.
+const RECOIL_SETTLE_RATE := 12.0
 ## Proposed: where each first-person forearm's elbow sits from its hand, in view space (a
 ## right-handed shooter's; x mirrors for a left-handed one): the firing elbow low and out
 ## behind the grip, the support elbow under and behind the handguard.
@@ -80,6 +85,7 @@ func _ready() -> void:
 	medical_menu = MedicalMenu.new(body)
 	hud.add_child(medical_menu)
 	hud.add_child(LauncherSight.new(body))  # anti-armour launchers: sight, lock, fire (wave 5)
+	hud.add_child(GunSight.new(body))  # rifle and pistol sights (P0362)
 	body.loadout_changed.connect(_update_view_model)
 	_update_view_model()
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
@@ -102,6 +108,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event is InputEventMouseMotion and captured:
 		# The settings' sensitivity (and aiming sensitivity down sights); concussion slows turning.
 		var turn := GameSettings.mouse_turn(MOUSE_SENSITIVITY, body.is_aiming) * body.vitals.turn_mult()
+		turn *= GunSight.zoom_turn(body)  # through a scope: slower with the zoom (P0362)
 		body.rotate_y(-event.relative.x * turn)
 		body.set_pitch(body.head.rotation.x - event.relative.y * turn * (-1.0 if GameSettings.invert_y() else 1.0))
 	elif hud.map_screen and hud.map_screen.is_open():
@@ -224,7 +231,10 @@ func _physics_process(delta: float) -> void:
 	_try_fire()
 	var tilt := minf(-0.7 if body.is_reloading else 0.0, -CharacterModel.VIEW_LOWER_PITCH * body.model.view_lower())
 	body.view_model.rotation.x = move_toward(body.view_model.rotation.x, tilt, delta * 6.0)
-	body.view_model.visible = body.carry_mode == &""  # both hands on the casualty: no weapon in view
+	# Both hands on the casualty: no weapon in view; through a scope: only the glass (P0362).
+	body.view_model.visible = body.carry_mode == &"" and not GunSight.scoped(body)
+	_settle_recoil(delta)
+	_update_sway(delta)
 	_hide_shouldered()
 	# Settle sway after a stop (W3, SoldierMovement.weapon_sway).
 	var sway := body.movement.weapon_sway()
@@ -362,16 +372,44 @@ func _try_fire() -> void:
 	body._kick(weapon)
 
 
+## Recoil settles: Soldier.RECOIL_SETTLE of each kick comes back down (Captain, P0362), so
+## the view kicks and settles and auto fire climbs by the rest.
+func _settle_recoil(delta: float) -> void:
+	if body.recoil_return <= 0.0:
+		return
+	var step := minf(body.recoil_return, body.recoil_return * RECOIL_SETTLE_RATE * delta + 0.0002)
+	body.recoil_return -= step
+	body.set_pitch(body.head.rotation.x - step)
+
+
+## Aimed sway (Soldier.aim_sway, P0362): the camera itself drifts, so the sight shows where the
+## shot goes. Eases in and out as you aim and lower.
+func _update_sway(delta: float) -> void:
+	var weapon := body.active_weapon()
+	var sway := body.aim_sway(weapon, Soldier._now()) if weapon and weapon.type == "weapon" and not Launchers.is_launcher(weapon) else Vector2.ZERO
+	var k := minf(delta * 8.0, 1.0)
+	body.camera.rotation.x = lerpf(body.camera.rotation.x, sway.x, k)
+	body.camera.rotation.y = lerpf(body.camera.rotation.y, sway.y, k)
+
+
+## Where the view model goes aimed with `weapon` (camera-local): its sight point on the eye's
+## line, ADS_EYE in front (ADS_EYE_PISTOL for a pistol).
+static func ads_view(weapon: ItemData) -> Vector3:
+	var model := VoxelArt.model_for(weapon)
+	var eye := ADS_EYE_PISTOL if model == "pistol" else ADS_EYE
+	return eye - VoxelArt.sight_point(model)
+
+
 func _update_aim(delta: float) -> void:
 	var weapon := body.active_weapon()
 	body.is_aiming = _captured() and body.vitals.is_up() and weapon != null and (weapon.type == "weapon" or Launchers.is_launcher(weapon)) \
 		and body.inventory.hands == &"" and not body.is_reloading and Input.is_action_pressed(&"aim")
-	var fov := float(weapon.stats.get("ads_fov", 55)) if body.is_aiming else GameSettings.fov()
+	var fov := GunSight.aimed_fov(weapon, GameSettings.fov()) if body.is_aiming else GameSettings.fov()
 	body.camera.fov = lerpf(body.camera.fov, fov, minf(delta * 12.0, 1.0))
 	var hip_view := HIP_VIEW * Vector3(-1.0 if body.left_handed else 1.0, 1, 1)  # off the firing shoulder
-	var ads_view := ADS_EYE - VoxelArt.sight_point(VoxelArt.model_for(weapon)) if weapon and not Launchers.is_launcher(weapon) else hip_view
+	var aimed_view := ads_view(weapon) if weapon and not Launchers.is_launcher(weapon) else hip_view
 	var lowered := CharacterModel.VIEW_LOWER_OFFSET * body.model.view_lower()  # ducks while the hands are busy
-	body.view_model.position = body.view_model.position.lerp((ads_view if body.is_aiming else hip_view) + lowered, minf(delta * 14.0, 1.0))
+	body.view_model.position = body.view_model.position.lerp((aimed_view if body.is_aiming else hip_view) + lowered, minf(delta * 14.0, 1.0))
 
 
 func _try_reload() -> void:
