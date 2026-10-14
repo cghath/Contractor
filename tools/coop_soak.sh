@@ -9,7 +9,7 @@
 #   GODOT=... tools/coop_soak.sh --minutes 10 --mode clean                 # relays forward only
 #
 # Options: --minutes N (10), --mode lossy|clean (lossy), --latency MS (100, one-way),
-# --jitter MS (30), --loss PCT (1.5), --clients 1-3 (3), --port P (25347: the host; the relays
+# --jitter MS (30), --loss PCT (1.5), --clients 1-3 (3), --port P (default: a free one from 25400 up, a range no test suite uses; the relays
 # take P+1..P+3), --no-late (client 3 joins at the start), --tag TOPIC (folder name).
 # Client 1 accepts the contracts and confirms extraction, client 2 picks the squad and leaves
 # and rejoins in the first fight, client 3 joins late once the first deployment is under way.
@@ -43,7 +43,7 @@ if [ -z "$PYTHON" ]; then
 		if "$p" -c "import sys" >/dev/null 2>&1; then PYTHON="$p"; break; fi
 	done
 fi
-MINUTES=10 MODE=lossy LATENCY=100 JITTER=30 LOSS=1.5 CLIENTS=3 PORT=25347 LATE=1 TAG="" HUMAN=0 BUILD="" WAIT_HUMAN=600
+MINUTES=10 MODE=lossy LATENCY=100 JITTER=30 LOSS=1.5 CLIENTS=3 PORT=25400 LATE=1 TAG="" HUMAN=0 BUILD="" WAIT_HUMAN=600
 ALL_ARGS=("$@")
 while [ $# -gt 0 ]; do
 	case "$1" in
@@ -104,7 +104,7 @@ if [ -n "$BUILD" ] && [ "$BUILD" != none ]; then
 fi
 if [ "$MODE" = clean ]; then LATENCY=0; JITTER=0; LOSS=0; fi
 # Free ports (S0651 failed hosting on a port another soak still held): unless --port was given,
-# the first base from 25347 up, in steps of 10, whose P..P+clients all bind and that no
+# the first base from 25400 up (no test suite uses 25400-25499), in steps of 10, whose P..P+clients all bind and that no
 # running soak's config.json names.
 if ! printf '%s\n' "${ALL_ARGS[@]}" | grep -qx -- --port; then
 	parent_for_ports="$(run_log_parent)"
@@ -158,6 +158,10 @@ cat >"$run/config.json" <<EOF
  "godot": "$(win "$GODOT")"}
 EOF
 
+# The bots' session takes only joiners with this token (Net._hello): another run's test that
+# hits the port is refused. Not with --human (a player's build has no token to give).
+token="soak-$run_id-$start_time"
+[ "$HUMAN" = 1 ] && token=""
 pids=()
 cleanup() {
 	for pid in "${pids[@]}"; do kill "$pid" 2>/dev/null; done
@@ -177,7 +181,7 @@ instance() {
 	local dir="$1" port="$2"; shift 2
 	mkdir -p "$run/$dir"
 	(
-		CONTRACTOR_PORT="$port" CONTRACTOR_TEST_TAG="_soak$PORT" CONTRACTOR_SESSION_LOG=1 CONTRACTOR_TEST_LOGS="$(win "$run/sessions/$dir")" \
+		CONTRACTOR_SESSION_TOKEN="$token" CONTRACTOR_PORT="$port" CONTRACTOR_TEST_TAG="_soak$PORT" CONTRACTOR_SESSION_LOG=1 CONTRACTOR_TEST_LOGS="$(win "$run/sessions/$dir")" \
 			timeout -k 10 $(( DURATION + 1800 )) "$GODOT" --headless --path . res://tests/coop_soak.tscn -- --soak-run "$(win "$run")" "$@" \
 			>"$run/$dir/stdout.log" 2>&1
 		echo $? >"$run/$dir/exit_code"

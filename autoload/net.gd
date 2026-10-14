@@ -93,7 +93,7 @@ func _on_connected() -> void:
 		_server_peer(peer).set_timeout(ENET_TIMEOUT[0], ENET_TIMEOUT[1], ENET_TIMEOUT[2])
 	joined.emit()
 	_welcomed = false
-	_hello.rpc_id(1, BuildInfo.commit(), BuildInfo.label())
+	_hello.rpc_id(1, BuildInfo.commit(), BuildInfo.label(), OS.get_environment("CONTRACTOR_SESSION_TOKEN"))
 	get_tree().create_timer(HELLO_WAIT_S).timeout.connect(func() -> void:
 		if not _welcomed and multiplayer.multiplayer_peer is ENetMultiplayerPeer and not multiplayer.is_server():
 			_warn("The host did not answer the build check: it may be an older build than yours (%s). If things act oddly, play the same build." % BuildInfo.label()))
@@ -110,19 +110,30 @@ func _expect_hello(id: int) -> void:
 	_said_hello.erase(id)
 	get_tree().create_timer(HELLO_WAIT_S).timeout.connect(func() -> void:
 		if not _said_hello.has(id) and id in multiplayer.get_peers():
+			if OS.get_environment("CONTRACTOR_SESSION_TOKEN") != "":
+				print("[net] dropped peer %d: no hello in a private test session" % id)
+				(multiplayer.multiplayer_peer as ENetMultiplayerPeer).disconnect_peer(id)
+				return
 			_warn("Player %d did not say which build they run (an older build?); this host is %s" % [id, BuildInfo.label()]))
 
 
 ## Client -> host, right after connecting: this player's build.
 @rpc("any_peer", "reliable")
-func _hello(commit: String, label: String) -> void:
+func _hello(commit: String, label: String, token := "") -> void:
 	if not multiplayer.is_server():
 		return
 	var id := multiplayer.get_remote_sender_id()
 	_said_hello[id] = true
 	var mine := BuildInfo.commit()
-	if commit != "" and mine != "" and commit != mine:
-		var why := "This session runs %s; you are on %s. Play the same build to join." % [BuildInfo.label(), label]
+	# A private session (tools: CONTRACTOR_SESSION_TOKEN, e.g. a co-op soak's bots) takes only
+	# joiners with its token: a test from another run that hit its port by chance is turned away.
+	var my_token := OS.get_environment("CONTRACTOR_SESSION_TOKEN")
+	var why := ""
+	if my_token != "" and token != my_token:
+		why = "This is a private test session."
+	elif commit != "" and mine != "" and commit != mine:
+		why = "This session runs %s; you are on %s. Play the same build to join." % [BuildInfo.label(), label]
+	if why != "":
 		print("[net] refused peer %d: on %s, this host %s" % [id, label, BuildInfo.label()])
 		_refuse.rpc_id(id, why)
 		get_tree().create_timer(1.0).timeout.connect(func() -> void:
