@@ -64,8 +64,12 @@ var _orbit_dist := 7.0
 var _dragging := false
 var _swapped := false
 var _objectives: Array = []  # [[text, state]] from the latest frame that had them
-var _box: SubViewportContainer
+var _box: Control
+var _map_centre := Vector2.ZERO
+var _map_span := 300.0  # metres across the map's width
+var _start_at: Variant = null  # Vector3 where the team started (spawn_point), or null
 var _user_orbit := false
+var _names_left := 5.0
 var _held := false  # live: the viewer picked a player (Tab, 1-4): no automatic switching
 
 
@@ -94,8 +98,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			_held = true
 		elif k == KEY_O:
 			_swapped = not _swapped
-			_box.offset_left = -1270.0 if _swapped else -330.0
-			_box.offset_bottom = 640.0 if _swapped else 250.0
+			_box.offset_left = -810.0 if _swapped else -330.0
+			_box.offset_bottom = 610.0 if _swapped else 250.0
 		elif k == KEY_A:
 			_held = false  # back to automatic
 	elif event is InputEventMouseButton and event.pressed:
@@ -107,7 +111,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		_dragging = event.pressed
 	elif event is InputEventMouseMotion and _dragging:
 		_orbit_yaw -= (event as InputEventMouseMotion).relative.x * 0.008
-		_orbit_pitch = clampf(_orbit_pitch + (event as InputEventMouseMotion).relative.y * 0.006, -0.2, 1.4)
+		_orbit_pitch = clampf(_orbit_pitch + (event as InputEventMouseMotion).relative.y * 0.006, 0.05, 1.4)
 		_user_orbit = true
 ## "Players/<peer id>" -> the bot's name ("Host (bot 0)", "Bot 2"), from each client's own replay
 ## ("joined" events carry its peer id; a rejoin gets a new one).
@@ -363,30 +367,20 @@ func _build_view() -> void:
 	_viewer.add_child(viewer)
 	var ui := CanvasLayer.new()
 	add_child(ui)
-	# The overhead view, top right.
-	var box := SubViewportContainer.new()
-	box.stretch = true
+	# The map, top right: drawn (north up), every soldier a dot (friendly players blue, squad AI
+	# green, hostiles red, the dead grey), the objectives and the start; the followed one ringed.
+	# (A second 3D camera from above showed a blank square on the Captain's screen.)
+	var box := Control.new()
 	box.anchor_left = 1.0
 	box.anchor_right = 1.0
 	box.offset_left = -330.0
 	box.offset_right = -10.0
 	box.offset_top = 10.0
 	box.offset_bottom = 250.0
+	box.clip_contents = true
+	box.draw.connect(_draw_map.bind(box))
 	_box = box
 	ui.add_child(box)
-	var sub := SubViewport.new()
-	sub.size = Vector2i(320, 240)
-	sub.world_3d = get_viewport().find_world_3d()
-	box.add_child(sub)
-	top_cam = Camera3D.new()
-	top_cam.cull_mask &= ~LABEL_LAYER
-	# Orthographic from a fixed height: the map stays sharp (a perspective camera high enough
-	# for a spread-out squad looked through the fog at nothing).
-	top_cam.projection = Camera3D.PROJECTION_ORTHOGONAL
-	top_cam.size = 80.0
-	top_cam.far = 600.0
-	sub.add_child(top_cam)
-	top_cam.current = true
 	hud = _label(ui, Vector2(12, 8), 18)
 	feed = _label(ui, Vector2(12, 470), 20)
 	feed.anchor_top = 1.0
@@ -399,6 +393,48 @@ func _build_view() -> void:
 	title.offset_left = -500
 	title.offset_right = 500
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+
+
+## The map's world (x, z) -> the box's pixels.
+func _map_px(box: Control, p: Vector3) -> Vector2:
+	var scale := box.size.x / _map_span
+	return box.size * 0.5 + Vector2(p.x - _map_centre.x, p.z - _map_centre.y) * scale
+
+
+func _draw_map(box: Control) -> void:
+	box.draw_rect(Rect2(Vector2.ZERO, box.size), Color(0.08, 0.1, 0.08, 0.82))
+	box.draw_rect(Rect2(Vector2.ZERO, box.size), Color(1, 1, 1, 0.5), false, 1.5)
+	var scale := box.size.x / _map_span
+	# A 100 m grid, for distances at a glance.
+	var step := 100.0 * scale
+	if step > 6.0:
+		var off := Vector2(fposmod(-_map_centre.x * scale + box.size.x * 0.5, step), fposmod(-_map_centre.y * scale + box.size.y * 0.5, step))
+		var x := off.x
+		while x < box.size.x:
+			box.draw_line(Vector2(x, 0), Vector2(x, box.size.y), Color(1, 1, 1, 0.08))
+			x += step
+		var y := off.y
+		while y < box.size.y:
+			box.draw_line(Vector2(0, y), Vector2(box.size.x, y), Color(1, 1, 1, 0.08))
+			y += step
+	for o: Array in _objectives:
+		if o.size() >= 4:
+			var at := _map_px(box, Vector3(float(o[2]), 0.0, float(o[3])))
+			var c := Color(1.0, 0.85, 0.2) if String(o[1]) == "active" else Color(0.6, 0.6, 0.6)
+			box.draw_rect(Rect2(at - Vector2(5, 5), Vector2(10, 10)), c, false, 2.0)
+	if _start_at != null:
+		var sp := _map_px(box, _start_at)
+		box.draw_circle(sp, 4.0, Color(1.0, 0.55, 0.1))
+	for key: String in puppets:
+		var flags := int((puppets[key] as Node3D).get_meta(&"flags", 0))
+		var c := _colour(flags)
+		var at := _map_px(box, (puppets[key] as Node3D).global_position)
+		var r := 4.5 if flags & FLAGS.F_PLAYER else 3.0
+		box.draw_circle(at, r, c)
+		if key == _cam_target:
+			box.draw_arc(at, r + 3.0, 0.0, TAU, 16, Color.WHITE, 1.5)
+	box.draw_string(ThemeDB.fallback_font, Vector2(6, box.size.y - 6), "%d m across, north up" % int(_map_span),
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1, 1, 1, 0.7))
 
 
 func _label(parent: Node, at: Vector2, size: int) -> Label:
@@ -469,6 +505,10 @@ func _process(delta: float) -> void:
 		if _live_poll <= 0.0:
 			_live_poll = 0.5
 			_live_read()
+			_names_left -= 0.5
+			if _names_left <= 0.0:
+				_names_left = 5.0
+				_load_names(_live_paths[0].get_base_dir().get_base_dir())
 	if _hold > 0:
 		_hold -= 1
 		title.modulate.a = 1.0
@@ -535,6 +575,7 @@ var _start_marker: Node3D
 
 ## A tall orange post where the team started, seen from far off and on the map.
 func _mark_start(at: Vector3, score: float) -> void:
+	_start_at = at
 	if is_instance_valid(_start_marker):
 		_start_marker.queue_free()
 	var m := MeshInstance3D.new()
@@ -606,6 +647,7 @@ func _draw_frame(delta: float) -> void:
 		if flags & FLAGS.F_PLAYER:
 			players.append(key)
 		var puppet := _puppet(key, flags)
+		puppet.set_meta(&"flags", flags)
 		puppet.global_position = p
 		puppet.rotation.y = lerp_angle(float(row[4]), float(nrow[4]), w)
 		var lying := not (flags & FLAGS.F_UP)
@@ -629,7 +671,14 @@ func _draw_frame(delta: float) -> void:
 			aim.rotation.x = float(row[5])
 		var label: Label3D = puppet.get_node(^"Label")
 		var state := "DEAD" if flags & FLAGS.F_DEAD else ("DOWN" if flags & FLAGS.F_DOWNED else "")
-		var text := "%s\n%d%%%s" % [names.get(key, String(row[8])) + ("  " + String(row[9]).replace("_", " ") if String(row[9]) != "" else ""), int(float(row[7]) * 100.0), (" " + state) if state != "" else ""]
+		# Friendlies: callsign, role, blood; hostiles: the name only (and DOWN), the dead ones none.
+		var text := ""
+		if flags & FLAGS.F_HOSTILE:
+			text = String(row[8]) + ((" " + state) if state != "" else "")
+		else:
+			text = "%s%s\n%d%%%s" % [_short_name(key, String(row[8])), ("  " + String(row[9]).replace("_", " ")) if String(row[9]) != "" else "",
+				int(float(row[7]) * 100.0), (" " + state) if state != "" else ""]
+		label.visible = not (flags & FLAGS.F_HOSTILE and flags & FLAGS.F_DEAD)
 		var ghost: Node3D = puppet.get_node(^"Ghost")
 		ghost.visible = false
 		label.modulate = Color.WHITE if not (flags & FLAGS.F_HOSTILE) else Color(1.0, 0.75, 0.75)
@@ -658,6 +707,7 @@ func _draw_frame(delta: float) -> void:
 			puppets.erase(key)
 	_update_tracers(delta)
 	_update_cameras(delta, players)
+	_declutter_labels()
 	var s: Dictionary = segments[_seg]
 	hud.text = "Co-op soak replay   %s   %s   x%.1f\nphase %s   level %s   soldiers %d%s" % [_clock(_t), String(s.title), float(s.speed),
 		_phase_at(_i), String(a.get("L", "")), a.get("s", []).size(), ("   client disagrees on %d" % flagged) if not client.is_empty() else ""]
@@ -669,6 +719,54 @@ objective: " + "; ".join(active.map(func(o: Array) -> String: return String(o[0]
 		hud.text += "
 LIVE, %.0f s behind the host   following %s   Tab/1-4 player, A auto, O map, wheel/right-drag camera, Esc quit" % [
 			Recorder_now() - _t, _name_of(_cam_target)]
+
+
+## A player's name without the peer id: "Bot 2", "Host (bot 0)", or "Player" + the last 4 digits.
+func _short_name(key: String, shown: String) -> String:
+	if names.has(key):
+		return String(names[key])
+	if shown.begins_with("Player ") and shown.length() > 11:
+		return "Player ..%s" % shown.right(4)
+	return shown
+
+
+## Labels that would land on each other on screen go up, nearest first; far ones fade, and
+## hostiles past LABEL_HOSTILE_M (or out of view) aren't labelled.
+const LABEL_HOSTILE_M := 150.0
+
+
+func _declutter_labels() -> void:
+	var items: Array = []
+	for key: String in puppets:
+		var label: Label3D = (puppets[key] as Node3D).get_node(^"Label")
+		label.position.y = 2.3
+		if not label.visible:
+			continue
+		var at := (puppets[key] as Node3D).global_position + Vector3.UP * 2.3
+		var d := cam.global_position.distance_to(at)
+		var hostile := int((puppets[key] as Node3D).get_meta(&"flags", 0)) & FLAGS.F_HOSTILE
+		if cam.is_position_behind(at) or (hostile and d > LABEL_HOSTILE_M):
+			label.visible = false
+			continue
+		label.modulate.a = clampf(1.0 - (d - 60.0) / 200.0, 0.35, 1.0)
+		items.append([d, label, at])
+	items.sort_custom(func(a: Array, b: Array) -> bool: return a[0] < b[0])
+	var placed: Array[Rect2] = []
+	for it: Array in items:
+		var label: Label3D = it[1]
+		var at: Vector3 = it[2]
+		var lines := label.text.count("\n") + 1
+		var size := Vector2(150.0, 20.0 * lines)
+		for lift in 8:
+			var px := cam.unproject_position(at + Vector3.UP * (0.0 + lift * 0.0))
+			px.y -= lift * size.y
+			var r := Rect2(px - Vector2(size.x * 0.5, size.y), size)
+			if not placed.any(func(q: Rect2) -> bool: return q.intersects(r)) or lift == 7:
+				placed.append(r)
+				# Lift in world units: the screen offset back to metres at this distance.
+				var per_px := 2.0 * float(it[0]) * tan(deg_to_rad(cam.fov) * 0.5) / maxf(get_viewport().get_visible_rect().size.y, 1.0)
+				label.position.y = 2.3 + lift * size.y * per_px
+				break
 
 
 func _phase_at(i: int) -> String:
@@ -884,6 +982,9 @@ func _update_cameras(delta: float, players: Array[String]) -> void:
 			want = target.global_position + Vector3.UP * 1.4 + Vector3(sin(_orbit_yaw) * cos(_orbit_pitch), sin(_orbit_pitch),
 				cos(_orbit_yaw) * cos(_orbit_pitch)) * _orbit_dist
 		cam.global_position = cam.global_position.lerp(want, minf(delta * 3.0, 1.0)) if cam.global_position.distance_to(want) < 30.0 else want
+		var ground := level.ground_point(cam.global_position).y if level else -INF
+		if cam.global_position.y < ground + 1.5:
+			cam.global_position.y = ground + 1.5  # never under the terrain
 		cam.look_at(target.global_position + Vector3.UP * 1.4, Vector3.UP)
 		centre = target.global_position
 	elif not puppets.is_empty():
@@ -903,7 +1004,7 @@ func _update_cameras(delta: float, players: Array[String]) -> void:
 		for key: String in players:
 			if puppets.has(key):
 				spread = maxf(spread, (puppets[key] as Node3D).global_position.distance_to(mid) * 2.5)
-		top_cam.size = clampf(spread * 1.3, 60.0, 600.0)
-		top_cam.global_position = mid + Vector3(0, 250.0, 0.01)
-		top_cam.look_at(mid, Vector3.FORWARD)
+		_map_centre = Vector2(mid.x, mid.z)
+		_map_span = clampf(spread * 1.6 + 120.0, 250.0, 2000.0)
+	_box.queue_redraw()
 	_viewer.global_position = centre

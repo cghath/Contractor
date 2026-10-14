@@ -264,7 +264,10 @@ func _host_main() -> void:
 	_phase = {"cycle": 0, "phase": "starting", "quit": false}
 	_set_phase("starting")
 	Campaign.reset_campaign()
-	CompoundLevel.player_role_kits = false  # as the menu's campaign entry: each player's own gear
+	# Players start in their role's kit (Roles.apply_kit: the play entries' path, both plates in
+	# the carrier), and from the second contract restock their last loadout from the stash
+	# (BaseHub "restock", the base screen's button). The kit-up walk then only tops up extras.
+	CompoundLevel.player_role_kits = true
 	CompoundLevel.clean_loot = false
 	CompoundLevel.spawn_ai = true
 	BaseHub.new_campaign(SEED)
@@ -371,8 +374,6 @@ func _host_cycle(cycle: int) -> Dictionary:
 		result.why = "not at the base"
 		return result
 	# Kit up.
-	if cycle > 1:
-		_restock()
 	_set_phase("kit", {"down": {}, "cid": "", "pick": [], "rally": [], "spawn": [], "facing": 0.0})
 	await _kit_up(cycle)
 	await _wait_for(func() -> bool: return _bots().values().all(func(s: Dictionary) -> bool: return int(s.get("kit", 0)) >= cycle), KIT_S)
@@ -967,8 +968,11 @@ func _client_tick(ph: String) -> void:
 # --- What every bot does ----------------------------------------------------------------------
 
 ## Walks to the armory's world items and picks up what KIT says it lacks.
-func _kit_up(_cycle: int) -> void:
+func _kit_up(cycle: int) -> void:
 	var deadline := Recorder.now() + KIT_S - 10.0
+	if cycle > 1:
+		BaseHub.request("restock")  # last contract's loadout, from the stash (the game's own path)
+		await _sleep(2.0)
 	for id: String in KIT:
 		while Recorder.now() < deadline:
 			var me := _me()
@@ -1040,6 +1044,7 @@ func _walk(to: Vector3, stop := 1.0, speed := WALK_SPEED) -> void:
 
 
 var _treating := false
+var _said_lacking := false
 var _dropping := false
 
 
@@ -1061,6 +1066,7 @@ func _down_self() -> void:
 ## then the casualty's), until they're up, dead, or REVIVE_S runs out.
 func _treat_loop(victim_peer: int) -> void:
 	_treating = true
+	_said_lacking = false
 	var deadline := Recorder.now() + REVIVE_S
 	await _wait_for(func() -> bool: return _player(victim_peer) != null and not _player(victim_peer).vitals.is_up(), 25.0)
 	var done: Array[String] = []
@@ -1091,6 +1097,11 @@ func _treat_loop(victim_peer: int) -> void:
 				task = t
 				break
 		if task.is_empty():
+			var wanted := victim.vitals.care_needed()
+			if not wanted.is_empty() and not _said_lacking:
+				_said_lacking = true
+				_say("medic: %d thing(s) to do on peer %d but nothing to do them with: %s" % [wanted.size(), victim_peer,
+					", ".join(wanted.map(func(t: Dictionary) -> String: return "%s (%s)" % [t.get("label", t.get("kind", "?")), str(Vitals.task_items(t))]))])
 			await _sleep(1.0)  # nothing to do now: waiting for them to come round
 			continue
 		var seconds := me.treat_seconds(victim, ItemDB.get_item(item))
@@ -1174,9 +1185,15 @@ func _give_up_tick(me: Soldier, delta: float) -> void:
 		var s := node as Soldier
 		if s and s.vitals.is_up():
 			return  # someone could still come
-	_say("B3: down %.0f s and every player is down: giving up (dev hurt until dead, then respawn)" % _down_for)
 	recorder.event(["give_up", "Players/%d" % multiplayer.get_unique_id()])
-	me._server_debug_hurt.rpc_id(1, 1000.0)
+	if me.has_method(&"_server_give_up"):
+		if not me.can_give_up():
+			return
+		_say("down %.0f s and every player is down: giving up (the give-up key's request)" % _down_for)
+		me._server_give_up.rpc_id(1)
+	else:  # code from before gameplay/respawn: no give-up, so die through the dev hurt
+		_say("B3: down %.0f s and every player is down: giving up (dev hurt until dead, then respawn)" % _down_for)
+		me._server_debug_hurt.rpc_id(1, 1000.0)
 
 
 var _casevac := ""          # the downed player this bot is carrying to the extraction, or ""

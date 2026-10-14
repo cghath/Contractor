@@ -103,6 +103,37 @@ if [ -n "$BUILD" ] && [ "$BUILD" != none ]; then
 	exec bash "$wt/tools/coop_soak.sh" --build none "${rest[@]}"
 fi
 if [ "$MODE" = clean ]; then LATENCY=0; JITTER=0; LOSS=0; fi
+# Free ports (S0651 failed hosting on a port another soak still held): unless --port was given,
+# the first base from 25347 up, in steps of 10, whose P..P+clients all bind and that no
+# running soak's config.json names.
+if ! printf '%s\n' "${ALL_ARGS[@]}" | grep -qx -- --port; then
+	parent_for_ports="$(run_log_parent)"
+	taken="$(cat "$parent_for_ports"/*/S*-RUNNING-coop-soak-*/config.json 2>/dev/null | grep -oE '"port": [0-9]+' | grep -oE '[0-9]+' | tr '\n' ' ')"
+	PORT="$("$PYTHON" - "$PORT" "$CLIENTS" "$taken" <<'PY'
+import socket, sys
+base, n, taken = int(sys.argv[1]), int(sys.argv[2]), {int(t) for t in sys.argv[3].split()}
+for k in range(40):
+    p = base + 10 * k
+    if any(q in taken for q in range(p - 3, p + n + 4)):
+        continue
+    socks = []
+    try:
+        for q in range(p, p + n + 1):
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.bind(("127.0.0.1", q))
+            socks.append(s)
+        print(p)
+        break
+    except OSError:
+        pass
+    finally:
+        for s in socks:
+            s.close()
+else:
+    print(base)
+PY
+)"
+fi
 DURATION=$(( MINUTES * 60 ))
 
 parent="$(run_log_parent)"

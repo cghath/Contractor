@@ -214,11 +214,19 @@ func _count_inventory() -> void:
 			if ammo != null and before[1] != ammo:
 				_inv_changes += 1
 				_inv_bytes += var_to_bytes(ammo).size()
-		var vit: Dictionary = s.vitals.net_state
-		seen_vit[k] = vit
-		if _vit_refs.has(k) and not is_same(_vit_refs[k], vit):
-			_vit_changes += 1
-			_vit_bytes += var_to_bytes(vit).size()
+		# With net/vitals-delta (integrate/oct14) the wire carries net_vitals (structure, on real
+		# events) and net_pulse (quantised scalars); before it, the whole net_state.
+		var vit: Variant = s.vitals.get(&"net_vitals") if &"net_vitals" in s.vitals else s.vitals.net_state
+		var pulse: Variant = s.vitals.get(&"net_pulse") if &"net_pulse" in s.vitals else null
+		seen_vit[k] = [vit, pulse]
+		if _vit_refs.has(k):
+			var was: Array = _vit_refs[k]
+			if not is_same(was[0], vit):
+				_vit_changes += 1
+				_vit_bytes += var_to_bytes(vit).size()
+			if pulse != null and was[1] != pulse:
+				_vit_changes += 1
+				_vit_bytes += var_to_bytes(pulse).size()
 	_inv_refs = seen
 	_vit_refs = seen_vit
 
@@ -355,9 +363,16 @@ func _write_replay_frame(t: float, _delta: float) -> void:
 		_items_left = 1.0
 		frame["i"] = _items()
 		frame["v"] = _vehicles()
-		var objs: Array = []
+		var objs: Array = []  # [text, state, x, z] (x, z only for those on the map)
+		var at := {}
+		for m: Dictionary in Contracts.objectives.markers():
+			at[String(m.oid)] = m.pos
 		for o: Dictionary in Contracts.objectives.list:
-			objs.append([String(o.get("text", o.get("oid", ""))), String(o.get("state", ""))])
+			var row := [String(o.get("text", o.get("oid", ""))), String(o.get("state", ""))]
+			var pos: Variant = at.get(String(o.get("oid", "")))
+			if pos is Vector3:
+				row.append_array([_r((pos as Vector3).x, 1), _r((pos as Vector3).z, 1)])
+			objs.append(row)
 		frame["o"] = objs
 		_replay_file.flush()  # once a second: the live viewer (tools/coop_watch.sh) reads along
 		var extraction := MapNodes.extraction(lvl) if lvl else null
