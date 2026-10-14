@@ -175,6 +175,29 @@ func _points(list: Array) -> Array[Vector3]:
 	return out
 
 
+## Where a dead player may respawn (CompoundLevel.respawn_point), best first: the insertion
+## point the briefing chose, the zone's other insertion points, then its extraction points.
+func respawn_candidates() -> Array[Vector3]:
+	var out: Array[Vector3] = []
+	var briefing := MapNodes.briefing(self)
+	if briefing:
+		add_respawn_candidate(out, briefing.insertion().get("pos", []))
+	for p in insertion_points():
+		add_respawn_candidate(out, ground_point(p))
+	for p in extraction_points():
+		add_respawn_candidate(out, ground_point(p))
+	return out
+
+
+## Every insertion and extraction point hot: the FOB (Lhd, inland), where the company's ground
+## supports come from. An LHD offshore isn't one: nobody walks ashore from its deck.
+func respawn_fallback() -> Variant:
+	var origin := get_node_or_null(NodePath(Lhd.NODE_NAME)) as Lhd
+	if origin == null or origin.is_ship():
+		return null
+	return ground_point(origin.global_position)
+
+
 ## Every module's edit log (module id -> Array). Read only.
 func edit_logs() -> Dictionary:
 	return _logs

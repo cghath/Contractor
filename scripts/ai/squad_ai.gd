@@ -2635,8 +2635,9 @@ func _tactic_text() -> String:
 func _find_target() -> Soldier:
 	if body.stunned_s > 0.0:
 		return null
-	if focus != null and (not is_instance_valid(focus) or focus.is_queued_for_deletion() or not focus.vitals.is_up()):
-		focus = null  # the target is down: pick freely again
+	if focus != null and (not is_instance_valid(focus) or focus.is_queued_for_deletion() or not focus.vitals.is_up() \
+			or not focus.is_in_group(&"combatants")):
+		focus = null  # the target is down (or a dead player waiting to respawn, Soldier): pick freely again
 	if focus != null and focus.faction != body.faction and not Person.is_noncombatant(focus) \
 			and body.global_position.distance_to(focus.global_position) <= Squad.TARGET_RANGE and can_see(focus) \
 			and Spotting.foliage_m(_zone_scatter(), body, focus) < Spotting.FOLIAGE_OPAQUE_M:

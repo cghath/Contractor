@@ -60,6 +60,7 @@ const BINDABLE := [
 	[&"weapon_primary", "Primary weapon"], [&"weapon_sidearm", "Sidearm"], [&"weapon_launcher", "Launcher"],
 	[&"get_out", "Get out of vehicle"], [&"vehicle_view", "Vehicle view (1st/3rd person)"], [&"quick_save", "Quick save"],
 	[&"zoom_in", "Optic zoom in / magnifier up"], [&"zoom_out", "Optic zoom out / magnifier down"],
+	[&"give_up", "Give up while down (hold)"],
 ]
 ## The audio buses each volume sets (Sfx makes them; the room bus follows effects).
 const BUSES := {"master": [&"Master"], "effects": [&"SFX", &"SFX_Room"], "voice": [&"Voice"]}

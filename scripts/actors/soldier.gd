@@ -319,6 +319,12 @@ func _process(_delta: float) -> void:
 	model.name_tape = person_name.to_upper()
 	movement.apply_pose()  # model pose, hitbox pose and capsule from the replicated stance
 	_update_ragdoll()
+	if vitals.is_up() or vitals.is_dead():
+		_down_since = -1.0
+	elif _down_since < 0.0:
+		_down_since = _now()  # the give-up clock (can_give_up)
+	if not is_ai():
+		_apply_respawn_state()
 	CharacterModel.lay_down(self, model, not vitals.is_up())
 	if collision_layer != 0 and is_ai() and vitals.is_dead():
 		collision_layer = 0  # a dead body lies where it fell and doesn't block anyone
@@ -357,6 +363,9 @@ func _physics_process(delta: float) -> void:
 	if is_instance_valid(vehicle):
 		velocity = Vector3.ZERO
 		return  # riding: the seat moves the body (Vehicle)
+	if respawn_state == RESPAWN_WAITING:
+		velocity = Vector3.ZERO
+		return  # dead, waiting to respawn: no moving (the host puts us back in)
 	movement.step(delta)
 	if is_reloading and _now() >= _busy_until:
 		is_reloading = false
@@ -704,7 +713,7 @@ static func usable_direction(d: Vector3) -> bool:
 func _server_fire(origin: Vector3, direction: Vector3, slot: StringName) -> void:
 	if not _from_owner() or not vitals.is_up() or inventory.hands != &"" or is_instance_valid(vehicle):  # riding: the seat's gun instead (Vehicle)
 		return
-	if not usable_point(origin) or not usable_direction(direction):
+	if not usable_point(origin) or not usable_direction(direction) or respawn_state == RESPAWN_WAITING:
 		return
 	var id: StringName = inventory.slots.get(slot, &"")
 	var weapon := ItemDB.get_item(id) if id != &"" else null
@@ -715,6 +724,7 @@ func _server_fire(origin: Vector3, direction: Vector3, slot: StringName) -> void
 		return
 	if not inventory.consume_round(slot):
 		return
+	server_end_spawn_protection()  # firing ends spawn protection
 	stop_loading_mags("Stopped loading magazines")  # firing needs your hands
 	# The weapon's rate holds over time, but shots the network delivered bunched up (paced
 	# right when sent) still count: the schedule may run up to FIRE_BUNCH_S behind now.
@@ -790,11 +800,12 @@ func _server_squad_command(cmd: String, point: Vector3, names: PackedStringArray
 @rpc("any_peer", "call_local", "reliable")
 func _server_throw(origin: Vector3, direction: Vector3, id: StringName) -> void:
 	if not _from_owner() or not vitals.is_up() or inventory.hands != &"" or _now() < _server_busy_until - 0.1 \
-			or not usable_point(origin) or not usable_direction(direction):
+			or not usable_point(origin) or not usable_direction(direction) or respawn_state == RESPAWN_WAITING:
 		return
 	var item := ItemDB.get_item(id)
 	if item == null or not item.stats.has("throwable") or not inventory.remove_one(id):
 		return
+	server_end_spawn_protection()  # throwing ends spawn protection too
 	_server_busy_until = _now() + THROW_BUSY_S
 	Sfx.server_play(&"throw", global_position + Vector3.UP * 1.4)
 	if origin.distance_to(camera.global_position) > 1.0:
@@ -1666,6 +1677,8 @@ func _log_casualty(what: String) -> void:
 	var cause := String(c.get("cause", "")) if recent else ("cardiac arrest" if vitals.in_cardiac_arrest() else "bleed-out")
 	if not recent and what == "went down":
 		cause = "out: " + ", ".join(vitals.why_unconscious())
+	if what == "died" and _gave_up:
+		cause = "gave up after %.0f s down" % (_now() - _down_since) if _down_since >= 0.0 else "gave up"
 	var line := "%s %s (%s): %s" % [log_name(), what, faction, cause]
 	if recent and c.has("part"):
 		line += ", " + String(c.part)
@@ -1716,6 +1729,41 @@ var _respawned_until := -1.0
 ## reach a client in either order).
 const RESPAWN_HOLD_S := 2.0
 
+# Respawning (Captain, playtest P0362, 2026-10-13: a dead player came back at once at the same
+# spot, the killer stood on it, and the shared respawn pool burned 3 -> 1 in 30 s). A dead
+# player's body and gear stay where they fell and they're back in the default kit at once, as
+# before, but they wait respawn_delay_s out of the fight (RESPAWN_WAITING: unseen, untouchable,
+# no input, a countdown on their screen), then come back at the level's safest respawn point
+# (CompoundLevel.respawn_point: the briefing's insertion if no enemy is near it or can see it,
+# else another insertion or extraction point, else the FOB, else the least dangerous one) with
+# spawn_protect_s of spawn protection (RESPAWN_PROTECTED: no harm; firing or throwing ends it).
+const RESPAWN_NONE := 0
+const RESPAWN_WAITING := 1
+const RESPAWN_PROTECTED := 2
+## Proposed (Captain asked for 5-10 s and 3-5 s). Tests that don't test the wait set them to 0.
+static var respawn_delay_s := 8.0
+static var spawn_protect_s := 4.0
+## Every peer (host-owned, replicated): RESPAWN_NONE, RESPAWN_WAITING or RESPAWN_PROTECTED.
+var respawn_state := RESPAWN_NONE
+## Owner: when the wait or the protection ends (Soldier._now(), this peer's clock), for the HUD.
+var respawn_eta := -1.0
+var protect_eta := -1.0
+var _respawn_serial := 0  # host: a newer death or respawn cancels an older one's timer
+var _hidden_for_respawn := false  # every peer: respawn_state's look applied
+
+# Giving up (Captain, P0362: down with the squad wiped, stuck until the session ended). A downed
+# player can hold the give-up key (Controls "give_up") GIVE_UP_HOLD_S once they've been down
+# GIVE_UP_AFTER_S, or at once with no conscious friendly (player or AI squadmate) within
+# GIVE_UP_ALONE_M. It's a death like any other: the body stays, the respawn pool counts it.
+const GIVE_UP_HOLD_S := 2.0
+const GIVE_UP_AFTER_S := 15.0
+const GIVE_UP_ALONE_M := 50.0
+## The host's leeway on GIVE_UP_AFTER_S (each peer starts the clock when it sees the fall).
+const GIVE_UP_SLACK_S := 1.0
+## Every peer: when this soldier went down (Soldier._now(), this peer's clock), -1 while up.
+var _down_since := -1.0
+var _gave_up := false  # host: this death was a give-up (the session log says so)
+
 
 ## AI dies for good (permadeath) and its own node stays as the body, on the shoulder of
 ## whoever carries it if anyone does. A player leaves a body with all their gear where they
@@ -1740,10 +1788,113 @@ func _on_died() -> void:
 	else:
 		for kit: Array in DEFAULT_KIT:
 			inventory.take(kit[0], kit[1])
-	var spawn := level.next_spawn_point()
-	SessionLog.note("%s respawns at (%.0f, %.0f) in %s; the body and its gear stay where they fell" % [log_name(), spawn.x, spawn.z,
+	_gave_up = false
+	_server_respawn_after(level, respawn_delay_s)
+
+
+## Host only. A dead player waits `delay` seconds out of the fight (RESPAWN_WAITING), then
+## respawns (_server_respawn_now); with no delay, at once.
+func _server_respawn_after(level: CompoundLevel, delay: float) -> void:
+	_respawn_serial += 1
+	var serial := _respawn_serial
+	if delay <= 0.0:
+		_server_respawn_now(level)
+		return
+	respawn_state = RESPAWN_WAITING
+	vitals.shielded = true
+	_client_respawn_wait.rpc_id(owner_peer(), delay)
+	get_tree().create_timer(delay, false).timeout.connect(func() -> void:
+		if serial == _respawn_serial and respawn_state == RESPAWN_WAITING and is_instance_valid(level) and not level.is_queued_for_deletion():
+			_server_respawn_now(level))
+
+
+## Host only. Back in the fight at the level's respawn point (CompoundLevel.respawn_point), with
+## spawn protection for spawn_protect_s.
+func _server_respawn_now(level: CompoundLevel) -> void:
+	_respawn_serial += 1
+	var serial := _respawn_serial
+	var pos := level.respawn_point(self)
+	var protect := spawn_protect_s
+	SessionLog.note("%s respawns at (%.0f, %.0f) in %s; the body and its gear stay where they fell" % [log_name(), pos.x, pos.z,
 		"their role's kit" if CompoundLevel.player_role_kits and role != &"" else "the default kit"])
-	_client_respawn.rpc_id(owner_peer(), spawn)
+	respawn_state = RESPAWN_PROTECTED if protect > 0.0 else RESPAWN_NONE
+	vitals.shielded = protect > 0.0
+	_client_respawn.rpc_id(owner_peer(), pos, protect)
+	if protect > 0.0:
+		get_tree().create_timer(protect, false).timeout.connect(func() -> void:
+			if serial == _respawn_serial:
+				server_end_spawn_protection())
+
+
+## Host only. Spawn protection ends (its time is up, or this player fired or threw something).
+func server_end_spawn_protection() -> void:
+	if respawn_state != RESPAWN_PROTECTED:
+		return
+	respawn_state = RESPAWN_NONE
+	vitals.shielded = false
+
+
+## Every peer, every frame: a player waiting to respawn is out of the fight: not drawn, no
+## collision or hitboxes, and not among the "combatants" (no AI sees, hears or targets them).
+func _apply_respawn_state() -> void:
+	var hide := respawn_state == RESPAWN_WAITING
+	if hide:
+		collision_layer = 0  # whatever else set it (the ragdoll going)
+	if hide == _hidden_for_respawn:
+		return
+	_hidden_for_respawn = hide
+	model.visible = not hide
+	gear.visible = not hide
+	for child in get_children():
+		var area := child as Area3D
+		if area == null or not area.has_meta(&"body_part"):
+			continue
+		if hide:
+			area.set_meta(&"respawn_layer", area.collision_layer)
+			area.collision_layer = 0
+		elif area.has_meta(&"respawn_layer"):
+			area.collision_layer = int(area.get_meta(&"respawn_layer"))
+			area.remove_meta(&"respawn_layer")
+	if hide:
+		remove_from_group(&"combatants")
+	else:
+		add_to_group(&"combatants")
+		if vitals.is_up():
+			collision_layer = BODY_LAYER
+
+
+## Every peer: how long this soldier has been down (0 while up or dead).
+func seconds_down() -> float:
+	return _now() - _down_since if _down_since >= 0.0 else 0.0
+
+
+## Whether a conscious friendly (a player or an AI squadmate, not one waiting to respawn) is
+## within GIVE_UP_ALONE_M of this body. Every peer (positions and vitals replicate).
+func help_near() -> bool:
+	var at := body_point()
+	for group: Array[Soldier] in [MapNodes.players(self), MapNodes.squad_ai(self)]:
+		for s: Soldier in group:
+			if s != self and s.faction == faction and s.vitals.is_up() and s.respawn_state != RESPAWN_WAITING \
+					and s.body_point().distance_to(at) <= GIVE_UP_ALONE_M:
+				return true
+	return false
+
+
+## Whether this player may give up now: down (not dead), and down GIVE_UP_AFTER_S already or
+## with nobody to help (help_near). Every peer; the host checks with `slack` seconds' leeway.
+func can_give_up(slack := 0.0) -> bool:
+	if is_ai() or vitals.is_up() or vitals.is_dead() or respawn_state != RESPAWN_NONE or _down_since < 0.0:
+		return false
+	return seconds_down() >= GIVE_UP_AFTER_S - slack or not help_near()
+
+
+## Owner -> host: the give-up key was held GIVE_UP_HOLD_S. A death (the respawn pool counts it).
+@rpc("any_peer", "call_local", "reliable")
+func _server_give_up() -> void:
+	if not _from_owner() or not can_give_up(GIVE_UP_SLACK_S):
+		return
+	_gave_up = true
+	vitals.server_kill()
 
 
 ## Host only. Leaves this player's body where it lies as a dead body node
@@ -2060,14 +2211,28 @@ func _client_carried(pos: Vector3) -> void:
 		carried_by_pos = pos
 
 
+## Owner: you died and wait `seconds` to respawn (the HUD counts down).
 @rpc("any_peer", "call_local", "reliable")
-func _client_respawn(pos: Vector3) -> void:
+func _client_respawn_wait(seconds: float) -> void:
+	if multiplayer.get_remote_sender_id() != 1:
+		return
+	respawn_eta = _now() + seconds
+	velocity = Vector3.ZERO
+	player_input.flash("You were killed. Respawning in %d s" % ceili(seconds))
+
+
+## Owner: back in the fight at `pos`, with `protect_s` of spawn protection.
+@rpc("any_peer", "call_local", "reliable")
+func _client_respawn(pos: Vector3, protect_s: float) -> void:
 	if multiplayer.get_remote_sender_id() != 1:
 		return
 	_respawned_until = _now() + RESPAWN_HOLD_S
+	var text := "Respawned" if respawn_eta >= 0.0 else "You were killed. Respawned"  # no wait: one message
+	respawn_eta = -1.0
+	protect_eta = _now() + protect_s if protect_s > 0.0 else -1.0
 	global_position = pos
 	velocity = Vector3.ZERO
-	player_input.flash("You were killed. Respawned.")
+	player_input.flash(text + (" (spawn protection %d s; firing ends it)" % ceili(protect_s) if protect_s > 0.0 else ""))
 
 
 @rpc("any_peer", "call_local", "reliable")

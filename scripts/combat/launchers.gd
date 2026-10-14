@@ -230,7 +230,7 @@ func _sender() -> Soldier:
 func server_fire(s: Soldier, origin: Vector3, dir: Vector3, mode := "", target: Node3D = null) -> String:
 	if not multiplayer.is_server():
 		return "Not the host"
-	if s == null or not s.vitals.is_up() or s.inventory.hands != &"" or s.carry_mode != &"":
+	if s == null or not s.vitals.is_up() or s.inventory.hands != &"" or s.carry_mode != &"" or s.respawn_state == Soldier.RESPAWN_WAITING:
 		return "Can't fire now"
 	if is_instance_valid(s.vehicle):
 		return "Get out to fire it"  # riding: the seat's gun instead (as Soldier._server_fire)
@@ -257,6 +257,7 @@ func server_fire(s: Soldier, origin: Vector3, dir: Vector3, mode := "", target: 
 		var why := lock_problem(s, origin, dir, target, item)
 		if why != "":
 			return why
+	s.server_end_spawn_protection()  # firing ends spawn protection (Soldier)
 	# Spend the round: a disposable tube is thrown away, a reloadable one is empty.
 	if item.stats.get("disposable", false):
 		s.inventory.unequip(SLOT)

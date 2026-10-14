@@ -26,6 +26,8 @@ var hostile: Soldier  # becomes a dead body to loot
 
 func _ready() -> void:
 	GameState.zone_id = "test_animations" + OS.get_environment("CONTRACTOR_TEST_TAG")  # never touch a real save
+	Soldier.respawn_delay_s = 0.0  # these checks want the old instant respawn (the wait and spawn
+	Soldier.spawn_protect_s = 0.0  # protection have their own checks in gameplay and missions)
 	CompoundLevel.spawn_ai = false
 	Handedness._left = false  # right-handed whatever this machine's settings say (never saved)
 	Handedness._loaded = true

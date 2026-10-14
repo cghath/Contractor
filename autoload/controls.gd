@@ -33,6 +33,8 @@ const KEYS := {
 	# Seated: switch the view between the chase camera and first person (VehicleCamera; Captain,
 	# 2026-10-13: "1st person + 3rd toggle"). B is free on foot and in a seat (proposed).
 	&"vehicle_view": [KEY_B],
+	# Downed: hold to give up and respawn (Soldier.can_give_up; Captain, P0362). Proposed key.
+	&"give_up": [KEY_J],
 	&"debug_hurt": [KEY_K],  # dev tools only (DevTools.on): hurt yourself to test going down and dying
 }
 ## Keys pressed with Shift held. An action without Shift still matches with it held, so

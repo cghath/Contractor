@@ -31,6 +31,8 @@ var _log: FileAccess  # client: where its checks go
 
 func _ready() -> void:
 	GameState.zone_id = "test_base" + tag
+	Soldier.respawn_delay_s = 0.0  # these checks want the old instant respawn (the wait and spawn
+	Soldier.spawn_protect_s = 0.0  # protection have their own checks in gameplay and missions)
 	Campaign.campaign_id = "test_base" + tag  # never touch a real save
 	get_tree().create_timer(600.0).timeout.connect(func() -> void:
 		_say("BASE TEST FAILED (timed out)")
@@ -827,6 +829,14 @@ func _test_deployment(client: Dictionary) -> void:
 	player.vitals.server_kill()
 	await _frames(2)
 	check(int(RosterDeployment.active(BaseHub.roster()).get("respawns_used", 0)) == 1, "a player respawn counts (%d free left)" % RosterDeployment.free_respawns_left(BaseHub.roster()))
+	# Giving up while down (Captain, P0362) is a death like any other: the pool counts it too.
+	player.vitals.server_damage(500.0)
+	await _frames(2)
+	player._down_since = Soldier._now() - Soldier.GIVE_UP_AFTER_S - 1.0  # down long enough, help near or not
+	player._server_give_up.rpc_id(1)
+	await _frames(2)
+	check(player.vitals.is_up() and int(RosterDeployment.active(BaseHub.roster()).get("respawns_used", 0)) == 2,
+		"giving up while down respawns through the pool (%d free left)" % RosterDeployment.free_respawns_left(BaseHub.roster()))
 	# A picks up a frag; C is killed; B wanders off; the rest extract by the player.
 	var frags := sa.inventory.count_of(&"frag_grenade") + sa.inventory.take(&"frag_grenade", 1)
 	var sc := _roster_soldier(c)
