@@ -697,11 +697,26 @@ func _test_fire_discipline() -> void:
 	_place(bravo, at + Vector3(Throwables.FRAG_RADIUS + SquadAI.FRAG_SAFETY_M + 3.0, 0, 0))
 	var outside := ai._frag_safe(from, at)
 	check(clear and not near_blast and outside, "a frag: not with a squadmate within %.0f m of where it lands" % (Throwables.FRAG_RADIUS + SquadAI.FRAG_SAFETY_M))
-	bravo.want_stance = -1
+	# Both on their feet for the muzzle check (combat mode would crouch either of them, and a
+	# standing shooter's line passes over a crouched man's head, rightly clear).
+	bravo.want_stance = SoldierMovement.Stance.STAND_HIGH
+	alpha.want_stance = SoldierMovement.Stance.STAND_HIGH
 	alpha.global_transform = saved[0]  # back on the ground while he gets up
 	bravo.global_transform = saved[1]
-	await _wait_until(func() -> bool: return not bravo.movement.is_prone(), 4.0)
+	var standing := await _wait_until(func() -> bool:
+		return bravo.movement.stance == SoldierMovement.Stance.STAND_HIGH and alpha.movement.stance == SoldierMovement.Stance.STAND_HIGH, 4.0)
+	await _seconds(0.5)  # the head rises to its standing eye
 	alpha.global_transform = Transform3D(Basis.IDENTITY, origin)
+	var stood_eye := alpha.camera.global_position.y - origin.y
+	# On his feet right in front of the muzzle, the line goes through him (playtest P0331: a
+	# squadmate was shot in the head at 0 m); beside the shooter he still isn't in it.
+	_place(bravo, origin + Vector3(0, 0, -0.35))
+	var at_muzzle := ai._friendly_in_line(aim)
+	_place(bravo, origin + Vector3(0.6, 0, 0.2))
+	check(standing and stood_eye > 1.4 and at_muzzle and not ai._friendly_in_line(aim),
+		"a squadmate standing right in front of the muzzle blocks the shot; beside the shooter he doesn't (eye %.2f m)" % stood_eye)
+	bravo.want_stance = -1
+	alpha.want_stance = -1
 	var far_at := origin + Vector3(0, 0, -20)
 	_place(bravo, origin + Vector3(0, 0, -1.2))
 	var in_front := ai._frag_safe(from, far_at)

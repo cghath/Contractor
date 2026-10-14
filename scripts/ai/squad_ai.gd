@@ -294,10 +294,12 @@ const FRIENDLY_CLEARANCE := 0.7
 ## with the cone this unit's rounds spread over (_fire_cone) the further down the line they
 ## are; someone lying (prone, or down) counts LYING_EXTRA_M wider around their chest (the
 ## length of them); someone beside or behind the muzzle (less than MUZZLE_M along the line)
-## isn't in it.
+## isn't in it, unless the line goes through them (within MUZZLE_BODY_M: right in front of the
+## barrel; playtest P0331, a squadmate shot one at 0 m).
 const DOWNRANGE_M := 60.0
 const LYING_EXTRA_M := 0.6
 const MUZZLE_M := 0.5
+const MUZZLE_BODY_M := 0.35
 ## Grenade discipline (queue 17 part 5; proposed): nobody to protect within FRAG_RADIUS plus
 ## FRAG_SAFETY_M of where a frag lands (it bounces and rolls), nor within LOB_FRIEND_M of its
 ## arc (it would hit them and drop at their feet).
@@ -2895,10 +2897,11 @@ func _friendly_in_line(point: Vector3, cone := -1.0) -> bool:
 		var high := low if lying else s.global_position + Vector3.UP * (1.2 if s.is_crouching() else 1.7)
 		var closest := Geometry3D.get_closest_points_between_segments(from, far, low, high)
 		var along := (closest[0] - from).dot(ahead)
-		if along < MUZZLE_M:
-			continue  # beside or behind the muzzle
+		var off := closest[0].distance_to(closest[1])
+		if along < MUZZLE_M and off > MUZZLE_BODY_M:
+			continue  # beside or behind the muzzle, clear of his body
 		var clearance := FRIENDLY_CLEARANCE + along * widen + (LYING_EXTRA_M if lying else 0.0)
-		if closest[0].distance_to(closest[1]) < clearance:
+		if off < clearance:
 			return true
 	return false
 
