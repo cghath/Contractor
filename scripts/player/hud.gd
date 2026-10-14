@@ -8,6 +8,10 @@ var inventory_screen: InventoryScreen
 var command_menu: CommandMenu
 ## The map (M) and briefing (MapScreen).
 var map_screen: MapScreen
+## The "what to do now" line and the objective markers (ObjectiveHelper).
+var objective_helper: ObjectiveHelper
+## The magazines and their rough fill (AmmoReadout).
+var ammo_readout: AmmoReadout
 var _crosshair: Label
 var _prompt: Label
 var _status: Label
@@ -76,6 +80,10 @@ func _ready() -> void:
 	add_child(command_menu)
 	add_child(Callouts.Subtitles.new())  # squadmates' callouts
 	add_child(ObjectivesPanel.new())  # the deployment's objectives (wave 4, Contracts)
+	objective_helper = ObjectiveHelper.new(player)  # what to do now, and small markers on its target
+	add_child(objective_helper)
+	ammo_readout = AmmoReadout.new(player)  # mags and roughly how full, not a count
+	add_child(ammo_readout)
 	_message = _label("", Control.PRESET_CENTER_TOP)
 	_message.position.y += 60
 	_message.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -155,8 +163,9 @@ func toggle_detail() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if inventory_screen.visible else Input.MOUSE_MODE_CAPTURED
 
 
-## Minimal HUD, as in Arma with ACE: no health bar, ammo counter or load readout. Weight,
-## litres, rounds loaded and armor damage are on the inventory screen (Tab).
+## Minimal HUD, as in Arma with ACE: no health bar, round counter or load readout. Weight,
+## litres, exact rounds loaded and armor damage are on the inventory screen (Tab); the HUD
+## only says roughly how full the magazine is and how many are left (AmmoReadout).
 func update_status(player: Soldier) -> void:
 	var lines := PackedStringArray()
 	var squad := _squad_lines(player)

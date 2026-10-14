@@ -5,7 +5,10 @@ extends Node
 ## wages and the safety floor, the shop, the debrief's sums (pay, bonuses, fines, the
 ## 8-casualty void, salvage picks, intel), saving and reloading the campaign, objectives in a
 ## live level (clear an area, carry out an item, deliver an HVT, destroy a cache by voxels or
-## a placed charge), and over ENet a client that sees the board, the objectives and the debrief.
+## a placed charge), the HUD's objective helper (the "what to do now" line for each kind and
+## state, the markers on the current target, clamped to the screen's edge when behind, and
+## their switch) and the ammo readout's estimates, and over ENet a client that sees the board,
+## the objectives, the helper's line and marker, and the debrief.
 ##   <voxel godot exe> --headless --path . res://tests/contracts_test.tscn
 ## It hosts a session, and at the end starts a second copy of itself that joins (`-- --join`);
 ## the client reports its checks back to the host. Exits with the number of failures.
@@ -60,6 +63,8 @@ func _ready() -> void:
 	player.set_physics_process(false)  # we drive it
 	await _frames(20)
 	await _test_live_objectives()
+	await _test_objective_helper()
+	_test_ammo_readout()
 	await _test_over_network()
 	Campaign.reset_campaign()
 	GameState.delete_save()
@@ -716,6 +721,169 @@ func _test_live_objectives() -> void:
 	Contracts.server_finish_debrief()
 
 
+# --- The HUD's objective helper and ammo readout ------------------------------------------------
+
+func _test_objective_helper() -> void:
+	print("Objective helper (HUD): what to do now, and the markers")
+	var at := func(x: float, z: float) -> Vector3: return Vector3(x, 0.1, z)
+	var step := func(list: Array, sit: Dictionary) -> String: return String(ObjectiveHelper.step_for(list, sit).text)
+	var area := {"oid": "t_o1", "cid": "t", "kind": "clear_area", "text": "Clear the compound of hostiles", "state": "active", "optional": false,
+		"progress": "", "params": {"rect": [-20, -20, 40, 40]}, "pos": [0, 0, 0]}
+	var sit := {"pos": at.call(0, 300), "sites": {"t": "compound"}}
+	check(step.call([], sit) == "", "no deployment, no hint")
+	check(step.call([area], sit) == "Head to the compound (N, 300 m)", "away from the site: head there, with the direction and distance")
+	sit.pos = at.call(5, 5)
+	check(step.call([area], sit) == "Clear the compound: search it for hostiles", "in the area: clear it")
+	var cleared := area.duplicate(true)
+	cleared.progress = "2 hostiles left"
+	check(step.call([cleared], sit) == "Clear the compound: 2 hostiles left", "with the hostiles left")
+	var cache := {"oid": "t_o2", "cid": "t", "kind": "destroy_cache", "text": "Destroy the weapons cache", "state": "active", "optional": false,
+		"progress": "", "params": {"box": [[-13, 0, -11], [-11, 2, -10]], "name": "weapons cache"}, "pos": [-12, 1, -10.5]}
+	check(step.call([cache], sit) == "Destroy the weapons cache (breaching charge or explosives)", "at a cache: destroy it")
+	var charged := cache.duplicate(true)
+	charged.progress = "charge set"
+	check(step.call([charged], sit) == "Charge set on the weapons cache: get clear", "a charge set on it: get clear")
+	var laptop := {"oid": "t_o3", "cid": "t", "kind": "extract_item", "text": "Recover the laptop and carry it out", "state": "active", "optional": false,
+		"progress": "", "params": {"pos": [3, 0.5, -10], "place": "intel_laptop", "items": ["intel_laptop"], "name": "laptop"}, "pos": [3, 0.5, -10]}
+	sit["indoors"] = ["t_o3"]
+	check(step.call([laptop], sit) == "Find the laptop in the building", "an item indoors: find it in the building")
+	sit["held"] = ["t_o3"]
+	check(step.call([laptop], sit) == "Carry the laptop out: walk to an LZ or call extraction (map, M)", "the laptop in hand: carry it out")
+	sit.erase("held")
+	var hvt := {"oid": "t_o4", "cid": "t", "kind": "deliver_hvt", "text": "Capture Amir and bring them to extraction alive", "state": "active", "optional": false,
+		"progress": "", "params": {"pos": [0, 0.1, -8], "hvt": "hvt_t", "person": {"side": "hostile", "name": "Amir", "label": "HVT (Amir)"}}, "pos": [0, 0.1, -8]}
+	var phone := {"oid": "t_o5", "cid": "t", "kind": "extract_item", "text": "Bring out Amir's phone", "state": "active", "optional": false,
+		"progress": "", "params": {"pos": [0, 0.1, -8], "items": ["intel_phone"], "of_hvt": "hvt"}, "pos": [0, 0.1, -8]}
+	sit["cuffs"] = true
+	check(step.call([hvt], sit) == "Capture Amir: cuff them, take them to the LZ", "at an HVT: capture them")
+	sit.cuffs = false
+	check(step.call([hvt], sit) == "Capture Amir: you need zip cuffs", "and says when the player has no cuffs")
+	sit.cuffs = true
+	sit["hvts"] = {"hvt_t": {"found": true, "custody": false, "surrendered": true}}
+	check(step.call([hvt], sit) == "Amir gave up: cuff them, take them to the LZ", "an HVT who gave up: cuff them")
+	var hvt_done := hvt.duplicate(true)
+	hvt_done.state = "done"
+	check(step.call([hvt_done, phone], sit) == "Search Amir for the phone", "a piece the HVT carries: search them")
+	var lz := {"name": "LZ South", "pos": Vector3(0, 0, 34), "radius": 20.0, "source": "zone"}
+	sit["lzs"] = [lz]
+	sit.hvts = {"hvt_t": {"found": true, "custody": true}}
+	var going: Dictionary = ObjectiveHelper.step_for([area, hvt], sit)
+	check(String(going.text) == "Bring Amir to LZ South (S, 30 m)" and going.targets.size() == 1 and bool(going.targets[0].extract)
+		and (going.targets[0].pos as Vector3).is_equal_approx(lz.pos), "an HVT in hand goes to the LZ first, the marker on it (%s)" % going.text)
+	var hostage := hvt.duplicate(true)
+	hostage.params.person = {"side": "friendly", "name": "Sara"}
+	sit.hvts = {}
+	check(step.call([hostage], sit) == "Free Sara: have them follow you to the LZ", "a hostage: free them")
+	sit.pos = at.call(0, 300)
+	check(step.call([hostage], sit) == "Find Sara at the compound (N, 310 m)", "a hostage far off: find them at the site")
+	# Everything required done: extraction.
+	var done := area.duplicate(true)
+	done.state = "done"
+	var bonus := cache.duplicate(true)
+	bonus.optional = true
+	var out: Dictionary = ObjectiveHelper.step_for([done, bonus], sit)
+	check(String(out.text) == "All done: call extraction (map, M) or walk to an LZ" and out.targets.size() == 1 and bool(out.targets[0].extract),
+		"all required done (a bonus left): extraction, the marker on the LZ")
+	sit.pos = at.call(2, 30)
+	check(step.call([done], sit) == "At LZ South: extract on the map (M) once everyone's in", "at the LZ: extract on the map")
+	sit["extraction"] = {"countdown": true, "left": 6.2}
+	check(step.call([done], sit) == "Extracting in 7 s: stay inside", "the countdown")
+	sit.erase("extraction")
+	check(ObjectiveHelper.distance_text(1234.0) == "1.2 km" and ObjectiveHelper.distance_text(47.0) == "45 m" and ObjectiveHelper.distance_text(347.0) == "350 m"
+		and ObjectiveHelper.compass(Vector3.ZERO, Vector3(100, 0, 0)) == "E" and ObjectiveHelper.compass(Vector3.ZERO, Vector3(-50, 0, 50)) == "SW",
+		"distances rounded as said, compass points with north up the map")
+	# Live: a raid on the compound, from this HUD.
+	Contracts.new_full_campaign(83, 200000)
+	var cid := _make_offer("raid", "compound_01")
+	Contracts.server_accept(cid, ContractGen.default_terms())
+	player.global_position = Vector3(40, 0.1, 40)
+	Contracts.server_start_deployment([cid])
+	var helper := _helper()
+	check(helper != null, "the HUD has the objective helper")
+	if helper == null:
+		return
+	helper.refresh()
+	var target_o: Dictionary = Contracts.objectives.for_contract(cid)[0]
+	var site := Objectives.site_pos(target_o.params)
+	var site_v := Vector3(float(site[0]), float(site[1]), float(site[2]))
+	check(helper.hint_text().begins_with("Head to the compound (NW, ") and helper.current.targets.size() == 1,
+		"deployed away from the site: '%s'" % helper.hint_text())
+	var target: Vector3 = helper.current.targets[0].pos if not helper.current.targets.is_empty() else Vector3.INF
+	check(Vector2(target.x, target.z).is_equal_approx(Vector2(site_v.x, site_v.z)), "one marker, on the objective's site (%s)" % target)
+	var cam := player.camera
+	var keep := cam.global_transform
+	cam.global_transform = Transform3D(Basis.IDENTITY, cam.global_position).looking_at(target)
+	var marks := helper.layout_markers()
+	var view := helper.size
+	check(marks.size() == 1 and not bool(marks[0].edge) and (marks[0].screen as Vector2).distance_to(view * 0.5) < 4.0 and String(marks[0].label) != "",
+		"looking at it: the marker sits on it, mid-screen, labelled (%s)" % [marks[0].screen if not marks.is_empty() else "none"])
+	cam.global_transform = Transform3D(Basis.IDENTITY, cam.global_position).looking_at(cam.global_position * 2.0 - target)
+	marks = helper.layout_markers()
+	var off: Vector2 = (marks[0].screen as Vector2 - view * 0.5).abs() if not marks.is_empty() else Vector2.ZERO
+	var half := view * 0.5 - Vector2.ONE * ObjectiveHelper.EDGE_PX
+	check(marks.size() == 1 and bool(marks[0].edge) and Rect2(Vector2.ZERO, view).has_point(marks[0].screen)
+		and (is_equal_approx(off.x, half.x) or is_equal_approx(off.y, half.y)),
+		"behind the camera: an arrow clamped to the screen's edge (%s)" % [marks[0].screen if not marks.is_empty() else "none"])
+	ObjectiveHelper.markers_on = false
+	check(helper.layout_markers().is_empty() and helper.hint_text() != "", "the switch hides the markers (the line stays)")
+	ObjectiveHelper.markers_on = true
+	cam.global_transform = keep
+	player.global_position = site_v + Vector3(1, 0, 4)
+	helper.refresh()
+	check(helper.hint_text().begins_with("Destroy the ") and helper.layout_markers().is_empty(),
+		"at the cache: what to do, and no marker that close ('%s')" % helper.hint_text())
+	var ext := MapNodes.extraction(level)
+	ext.server_begin({"zone": Briefing.DEBUG_ZONE})
+	Contracts.server_cache_destroyed(String(target_o.params.get("cache", "")))
+	helper.refresh()
+	var lz_at: Vector3 = helper.current.targets[0].pos if not helper.current.targets.is_empty() else Vector3.INF
+	check(helper.hint_text() == "All done: call extraction (map, M) or walk to an LZ" and helper.current.targets.size() == 1
+		and Vector2(lz_at.x, lz_at.z).is_equal_approx(Vector2(0, 34)), "the cache gone: extraction, the marker on the LZ ('%s')" % helper.hint_text())
+	ext.server_cancel()
+	Contracts.server_end_deployment({})
+	Contracts.server_finish_debrief()
+	helper.refresh()
+	check(helper.hint_text() == "" and helper.layout_markers().is_empty(), "no deployment: no line and no markers")
+
+
+func _test_ammo_readout() -> void:
+	print("Ammo readout (HUD): mags and an estimate, not a count")
+	var words := [[30, "Full"], [29, "Full"], [28, "Nearly full"], [20, "Nearly full"], [19, "About half"], [11, "About half"],
+		[10, "Low"], [5, "Low"], [4, "Nearly empty"], [1, "Nearly empty"], [0, "Empty"]]
+	var wrong := words.filter(func(w: Array) -> bool: return AmmoReadout.fill_word(int(w[0]), 30) != String(w[1]))
+	check(wrong.is_empty(), "the fill words of a 30-round magazine by rounds left (%s wrong)" % [wrong])
+	var inv := player.inventory
+	if inv.slots.get(&"primary", &"") == &"":
+		inv.take(&"m4a1")
+	player.active_slot = &"primary"
+	var weapon := player.active_weapon()
+	var ammo_id := StringName(weapon.stats.get("ammo", "")) if weapon else &""
+	check(weapon != null and ItemDB.has_item(ammo_id), "the player holds a magazine-fed rifle")
+	if not ItemDB.has_item(ammo_id):
+		return
+	var full := ItemDB.get_item(ammo_id).magazine_rounds()
+	inv.set_slot_state(&"primary", {"rounds": roundi(full * 0.5)})
+	inv.take(ammo_id, 1, {"rounds": roundi(full * 0.3)})
+	inv.take(ammo_id, 1, {"rounds": 0})
+	var sum := AmmoReadout.summary(player)
+	var mags := inv.count_of(ammo_id)
+	var spares: Array = sum.get("spares", [])
+	check(String(sum.get("loaded", "")) == "About half" and spares.size() == mags and spares.count(0.0) >= 1
+		and spares.any(func(f: float) -> bool: return f > 0.0 and f < 0.95),
+		"half a magazine loaded reads About half; a pip per spare magazine carried (%d), part-used and empty ones told apart" % mags)
+	var text := AmmoReadout.text_of(sum)
+	var with_rounds := spares.filter(func(f: float) -> bool: return f > 0.0).size()
+	check(text.begins_with("About half | %d mag%s (" % [with_rounds, "" if with_rounds == 1 else "s"]) and text.contains("part-used") and text.contains("1 empty")
+		and not text.contains("/%d" % full), "the readout in words, no round count ('%s')" % text)
+	inv.take(&"frag_grenade", 2)
+	check(AmmoReadout.text_of(AmmoReadout.summary(player)).contains("frag"), "grenades as a count")
+
+
+func _helper() -> ObjectiveHelper:
+	var found := get_tree().root.find_children("*", "ObjectiveHelper", true, false)
+	return found[0] as ObjectiveHelper if not found.is_empty() else null
+
+
 func _hostile(callsign: String, pos: Vector3) -> Soldier:
 	var s := level.spawn_soldier({"name": callsign, "faction": "hostile", "variant": "urban", "pos": pos,
 		"loadout": ["plate_carrier_light", "mk18"], "combat": 0.5, "discipline": 0.5, "guard": true})
@@ -805,6 +973,13 @@ func _run_client() -> void:
 		"without the host-only truth about the threat")
 	_remote_check.rpc_id(1, Contracts.objectives.list.size() == int(_go.objectives) and Contracts.is_deployed() and my_states.call() == host_states,
 		"and the deployment's objectives, live, as the host has them (%s)" % ", ".join(PackedStringArray(my_states.call())))
+	var helper := _helper()
+	if helper:
+		helper.refresh()
+	var site: Array = Objectives.site_pos(Contracts.objectives.list[0].params) if not Contracts.objectives.list.is_empty() else [INF, 0, INF]
+	var t: Vector3 = helper.current.targets[0].pos if helper and not helper.current.targets.is_empty() else Vector3.INF
+	_remote_check.rpc_id(1, helper != null and helper.hint_text() != "" and Vector2(t.x, t.z).is_equal_approx(Vector2(float(site[0]), float(site[2]))),
+		"the client's helper says what to do from the replicated objectives ('%s'), its marker on the site" % (helper.hint_text() if helper else ""))
 	# Audit A1-05: a malformed request from a client is refused with an answer, not a host error.
 	var answers: Array = []
 	var on_notice := func(text: String) -> void: answers.append(text)
