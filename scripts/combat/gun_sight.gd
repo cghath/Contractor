@@ -151,7 +151,7 @@ static func zoom_step(s: Soldier, steps: int) -> String:
 		if up == magnified(s, optic):
 			return ""
 		sight._magnified[optic.id] = up
-		return "Magnifier up (%gx)" % float(optic.stats.magnifier) if up else "Magnifier down"
+		return "Magnifier up (%dx)" % roundi(float(optic.stats.magnifier)) if up else "Magnifier down"
 	var zr := zoom_range(optic)
 	if zr.y <= zr.x:
 		return ""
