@@ -450,13 +450,12 @@ func _test_callout_rules() -> void:
 	var first: Soldier = quiet[0]
 	var second: Soldier = quiet[1]
 	var line := "%s: Reloading!" % first.display_name()
-	# Squadmates talk on their own too: start from a clean slate and only look at these two.
-	callouts._last_by_speaker.clear()
-	callouts._last_by_key.clear()
-	callouts._last_by_side_key.clear()
-	callouts._pending.clear()
-	callouts.sent.clear()
-	callouts.shown.clear()
+	# Squadmates talk on their own too: start from a clean slate (gates, queue, the side's net
+	# budget, both logs) and only look at these two. The squad's comms (SquadComms: answers,
+	# what changed) stay quiet meanwhile: they speak through these two as well.
+	callouts.reset()
+	var comms := SquadComms.of(level.squad_for(&"friendly"))
+	comms.paused = true
 	# And their own brains stay quiet meanwhile (the newest held-back line wins: anything they
 	# called on their own in the gap would take the place of the test's Moving!; CI, R0274).
 	var brains: Array = [SquadAI.of(first), SquadAI.of(second)].filter(func(b: SquadAI) -> bool: return b != null)
@@ -470,11 +469,11 @@ func _test_callout_rules() -> void:
 	check(callouts.shown.any(func(c: Dictionary) -> bool: return c.speaker == first.display_name() and c.text == "Reloading!") and line in callouts.current_lines(),
 		"and shown here as a subtitle")
 	await _frames(2)
-	var subtitles: Label = null
+	var subtitles: RichTextLabel = null
 	for child in player._hud.get_children():
 		if child is Callouts.Subtitles:
 			subtitles = child
-	check(subtitles != null and subtitles.text.contains(line), "the HUD shows it")
+	check(subtitles != null and subtitles.get_parsed_text().contains(line), "the HUD shows it (%s)" % (subtitles.get_parsed_text() if subtitles else "no subtitles"))
 	check(not callouts.say(first, &"moving") and said.call(first, &"moving").is_empty(), "a speaker doesn't talk again right away")
 	check(callouts.say(second, &"moving"), "another speaker can")
 	check(callouts.say(first, &"frag_out"), "urgent calls (Frag out!) cut in")
@@ -484,13 +483,14 @@ func _test_callout_rules() -> void:
 	check(waited.size() == 1 and float(waited[0].time) - frag_time >= Callouts.SPEAKER_GAP_S - 0.05,
 		"the held-back Moving! follows once the speaker's gap has passed (%s said %s; pending %s; %s)" % [first.name,
 		callouts.sent.filter(func(c: Dictionary) -> bool: return c.speaker == String(first.name)).map(func(c: Dictionary) -> String: return "%s@%.2f" % [c.id, c.time]),
-		callouts._pending.get(String(first.name), {}).get("id", "none"), first.ai_status])
+		callouts.waiting().filter(func(p: Dictionary) -> bool: return p.who == String(first.name)).map(func(p: Dictionary) -> StringName: return p.id), first.ai_status])
 	await _seconds(Callouts.SPEAKER_GAP_S + 0.1)
 	check(not callouts.say(first, &"reloading"), "the same callout doesn't repeat within %.0f s" % Callouts.REPEAT_GAP_S)
 	await _seconds(0.3)
 	check(said.call(first, &"reloading").size() == 1, "and a repeat isn't held back for later either")
 	for b: SquadAI in brains:
 		b.process_mode = Node.PROCESS_MODE_INHERIT
+	comms.paused = false
 	var hostile := _spawn_test_hostile("ChatterTest", Vector3(75, 0.1, -75))  # out of sight
 	check(callouts.say(hostile, &"reloading") and said.call(hostile, &"reloading")[0].to.is_empty(), "a hostile callout goes to nobody")
 	await _frames(2)

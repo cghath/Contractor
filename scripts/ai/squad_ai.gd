@@ -21,6 +21,8 @@ extends Node
 ## - Stealth: always crouched, never sprint; open fire only when fired upon or an enemy is
 ##   very close.
 ## Squadmates call out what they do (Callouts): contact, reloading, grenades, bounding.
+## The squad's comms (SquadComms) read this state (intent, care, status_text) to answer
+## orders and tell the players what changed; nothing here depends on them.
 ##
 ## Casualty care on the wound model (design doc "Downed friendlies", "Medics" and "Fits the
 ## squad decisions"; Captain's playtest: medics put the wounded first, even in a firefight),

@@ -78,6 +78,9 @@ var frag_point := Vector3.ZERO
 var known := {}
 ## Host: the squad's tactical evaluator (made on its first think).
 var tactics: SquadTactics
+## Host, the friendly squad: what it says to its players (SquadComms.of makes it; Captain,
+## 2026-10-14: "bots should act like players, communicate with the player").
+var comms: SquadComms
 ## How this squad fights (SquadTactics.DOCTRINES); empty: by its side (the friendly squad's
 ## drills, or the insurgents').
 var doctrine: StringName = &""
@@ -94,6 +97,7 @@ var _tactics_cd := 0.0
 func _physics_process(delta: float) -> void:
 	if not multiplayer.is_server():
 		return
+	SquadComms.step(self, delta)  # the friendly squad's comms: answers, status, what changed
 	_tactics_cd -= delta
 	if _tactics_cd > 0.0:
 		return

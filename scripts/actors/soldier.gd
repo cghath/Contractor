@@ -787,7 +787,9 @@ func _server_fire(origin: Vector3, direction: Vector3, slot: StringName) -> void
 
 
 ## A command from the command menu (CommandMenu) for the named squadmates (all if empty).
-## Any player can command the friendly squad; that makes them its lead.
+## Any player can command the friendly squad; that makes them its lead. Why it couldn't be
+## given goes back to the player, and the squadmates answer it (SquadComms: "Copy, holding",
+## "Can't, carrying Miller's body"; Captain, 2026-10-14).
 @rpc("any_peer", "call_local", "reliable")
 func _server_squad_command(cmd: String, point: Vector3, names: PackedStringArray) -> void:
 	if not _from_owner() or is_ai() or not vitals.is_up() or not usable_point(point):
@@ -795,11 +797,20 @@ func _server_squad_command(cmd: String, point: Vector3, names: PackedStringArray
 	var squad := CompoundLevel.current(self).squad_for(faction)
 	if squad == null:
 		return
+	var why := _squad_command(squad, cmd, point, names)
+	if why != "":
+		_client_message.rpc_id(owner_peer(), why)
+	SquadComms.heard(squad, self, cmd, names, why)
+
+
+## Host: carries out squad command `cmd`; returns why it couldn't be given ("" if it was).
+## "report" (Status > Report status) gives no order: the squadmates answer it (SquadComms).
+func _squad_command(squad: Squad, cmd: String, point: Vector3, names: PackedStringArray) -> String:
+	if cmd == "report":
+		return ""
 	var ordered_why := squad.order_command(self, cmd, point, names)  # the command menu's orders (queue 12)
 	if ordered_why != "?":
-		if ordered_why != "":
-			_client_message.rpc_id(owner_peer(), ordered_why)
-		return
+		return ordered_why
 	match cmd:
 		"follow":
 			squad.give_order(self, Squad.Order.FOLLOW, point, names)
@@ -810,30 +821,24 @@ func _server_squad_command(cmd: String, point: Vector3, names: PackedStringArray
 		"open_fire", "hold_fire":
 			squad.set_hold_fire(self, cmd == "hold_fire", names)
 		"throw_smoke", "throw_frag":
-			var who := squad.order_throw(self, &"smoke_grenade" if cmd == "throw_smoke" else &"frag_grenade", point, names)
-			if who == "":
-				_client_message.rpc_id(owner_peer(), "Nobody selected has one")
+			if squad.order_throw(self, &"smoke_grenade" if cmd == "throw_smoke" else &"frag_grenade", point, names) == "":
+				return "Nobody selected has one"
 		"scavenge":
-			var why := squad.order_scavenge(self, point, names)
-			if why != "":
-				_client_message.rpc_id(owner_peer(), why)
+			return squad.order_scavenge(self, point, names)
 		"scavenge_on", "scavenge_off":
 			squad.set_scavenge(self, cmd == "scavenge_on", names)
 		"mount", "dismount":  # wave 5: vehicles (VehicleLayer)
 			var layer := VehicleLayer.of(self)
-			var why := "No vehicles here" if layer == null else (layer.server_order_mount(self, point, names) if cmd == "mount" else layer.server_order_dismount(self, names))
-			if why != "":
-				_client_message.rpc_id(owner_peer(), why)
+			return "No vehicles here" if layer == null else (layer.server_order_mount(self, point, names) if cmd == "mount" else layer.server_order_dismount(self, names))
 		"fire_launcher":  # wave 5: a squadmate with a launcher fires at the vehicle there, or the spot
 			if LauncherAI.order_squad(squad, self, point, names) == "":
-				_client_message.rpc_id(owner_peer(), "Nobody selected has a loaded launcher or rounds")
+				return "Nobody selected has a loaded launcher or rounds"
 		_ when cmd.begins_with("support:"):  # wave 5b: helicopter supports and AAVs (Supports)
-			var why := Supports.server_command(self, cmd, point, names)
-			if why != "":
-				_client_message.rpc_id(owner_peer(), why)
+			return Supports.server_command(self, cmd, point, names)
 		_:
 			if not squad.command(self, cmd, point, names):  # formation, target, combat mode, team
-				_client_message.rpc_id(owner_peer(), "Can't target that" if cmd.begins_with("target:") else ("Can't escort that" if cmd.begins_with("escort:") else "Order not given"))
+				return "Can't target that" if cmd.begins_with("target:") else ("Can't escort that" if cmd.begins_with("escort:") else "Order not given")
+	return ""
 
 
 @rpc("any_peer", "call_local", "reliable")

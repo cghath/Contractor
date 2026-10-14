@@ -12,7 +12,9 @@ extends PanelContainer
 ## Entries with "cmd" are orders ("point": at the spot under the crosshair, "aim": at the
 ## enemy under it; "hvt": at the HVT under it; "squadmate": at the squadmate under it); entries with "select" change the selection (fire team or colour team)
 ## and keep the menu open. Status > Report enemy position ("radio_report", people, wave 4)
-## reports the enemies under the crosshair by radio (PeopleLayer.request_report).
+## reports the enemies under the crosshair by radio (PeopleLayer.request_report). Status >
+## Report status ("report") goes to the host like an order: each selected squadmate answers
+## the asker in his own words (SquadComms.status_reply; Captain, 2026-10-14).
 
 const MENU := {
 	"title": "Command",
@@ -330,10 +332,6 @@ func _pick(i: int) -> void:
 	if cmd == "":
 		player._hud.flash("%s isn't in this build yet" % item["label"])
 		return
-	if cmd == "report":
-		_report()
-		close()
-		return
 	if cmd == "radio_report":
 		_radio_report()
 		return
@@ -435,14 +433,6 @@ func _back() -> void:
 		_redraw()
 	else:
 		close()
-
-
-func _report() -> void:
-	var lines := PackedStringArray()
-	for s in roster():
-		if String(s.name) in selected:
-			lines.append("%s [%s]: %s (%s)" % [s.display_name(), unit_tag(s), s.ai_status, s.vitals.condition_text()])
-	player._hud.flash("\n".join(lines))
 
 
 func _names() -> String:

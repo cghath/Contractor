@@ -333,5 +333,4 @@ func _flush() -> void:
 	var by := carrier(self, ENEMY_TAG)
 	if callouts == null or by == null:
 		return
-	for peer in callouts.recipients(by):
-		callouts._show.rpc_id(peer, by.get_path(), SPEAKER, String(LINE_ID), text)
+	callouts.relay(by, SPEAKER, LINE_ID, text)  # through the side's queue (Callouts.relay)
