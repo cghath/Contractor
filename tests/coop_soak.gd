@@ -641,12 +641,17 @@ func _dead_ground(target: Vector3) -> Dictionary:
 	if not (_level() is ZoneLevel):
 		return {}
 	var posts := _hostile_posts()
+	# Well inside the map: S0672/S0697 picked points at or past the zone's edge (no ground
+	# there), and the bots and squad AI put there fell out of the world.
+	var inside := (_level() as ZoneLevel).map_area().grow(-80.0)
 	var best := {}
 	var r := DEAD_RING_M.x
 	while r <= DEAD_RING_M.y:
 		for k in 48:
 			var a := TAU * k / 48.0
 			var at := target + Vector3(cos(a), 0.0, sin(a)) * r
+			if not inside.has_point(Vector2(at.x, at.z)):
+				continue
 			at.y = _ground_h(at)
 			var near: Array[Vector3] = []
 			var nearest := INF
