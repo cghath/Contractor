@@ -689,10 +689,12 @@ func _test_engagement() -> void:
 		return SquadAI.of(golf).casualty == delta, 2.0)
 	check(going, "under fire his team's medic Golf goes to him at once (%s)" % [seen.status.keys()])
 	var other_open_at_tq := []
+	var drag_samples: Array[Dictionary] = []
 	var tq := await _wait_until(func() -> bool:
 		watch.call()
 		if delta.carried_by == golf and golf.carry_mode == Soldier.DRAG:
 			seen.drag = true
+			_sample_drag(golf, delta, drag_samples)
 		if not _bleeding(delta, "arterial"):
 			other_open_at_tq.append(delta.vitals.care_needed().filter(func(t: Dictionary) -> bool: return t.kind != "pain").size())
 			return true
@@ -703,6 +705,7 @@ func _test_engagement() -> void:
 		TOURNIQUET_WITHIN_S, seen.status.keys(), his[&"tourniquet"], delta.inventory.medical_count(&"tourniquet"), counts[&"tourniquet"], golf.inventory.medical_count(&"tourniquet")])
 	check(golf.inventory.count_of(&"smoke_grenade") < counts[&"smoke_grenade"] and _said(sent_from, "Golf", &"smoke_out"), "Golf throws smoke between him and the threat")
 	check(seen.drag, "and drags him out of the line of fire")
+	_check_drag(drag_samples)
 	check(not other_open_at_tq.is_empty() and other_open_at_tq[0] > 0, "massive bleeding first: his other wounds wait for the tourniquet (%s open)" % [other_open_at_tq])
 	# Read now: the callout log keeps only its last Callouts.LOG_SIZE lines, and the squad's
 	# chatter through the rest of the scene pushes these early ones out.
@@ -1204,6 +1207,88 @@ func _place(s: Soldier, pos: Vector3) -> void:
 
 func _flat(a: Vector3, b: Vector3) -> float:
 	return Vector2(a.x - b.x, a.z - b.z).length()
+
+
+static func _flat_dir(v: Vector3) -> Vector3:
+	return Vector3(v.x, 0.0, v.z).normalized() if Vector2(v.x, v.z).length() > 0.001 else Vector3.ZERO
+
+
+## One moment of `dragger` dragging `casualty`, while he walks (holding, moving): which way
+## the drawn dragger faces and moves, where he's going, and where the casualty's parts are.
+func _sample_drag(dragger: Soldier, casualty: Soldier, samples: Array[Dictionary]) -> void:
+	var speed := Vector2(dragger.velocity.x, dragger.velocity.z).length()
+	if not dragger.carry_holds() or speed < 0.3:
+		return
+	var ai := SquadAI.of(dragger)
+	var m := casualty.model
+	var torso_t := m.torso.global_transform.orthonormalized()
+	samples.append({
+		"t": Soldier._now(),
+		"spine": _flat_dir(torso_t.basis.y).dot(_flat_dir(dragger.global_position - torso_t.origin)),
+		"gap": (torso_t * Ragdoll.strap_point()).distance_to(Ragdoll.hold_point(dragger)),
+		"hips_d": _flat(torso_t.origin, dragger.global_position),
+		"facing": _flat_dir(-(dragger.model.get("_root") as Node3D).global_basis.z),
+		"view": _flat_dir(-dragger.camera.global_basis.z),
+		"to_casualty": _flat_dir(casualty.body_point() - dragger.global_position),
+		"moving": _flat_dir(dragger.velocity),
+		"to_goal": _flat_dir(ai._drag_goal() - dragger.global_position) if ai and ai._has_cover else Vector3.ZERO,
+		"speed": speed,
+		"head_d": _flat(m.head.global_position, dragger.global_position),
+		"feet_d": minf(_flat(m.part_node(Vitals.SHIN_L).global_transform * Vector3(0, -0.45, 0), dragger.global_position),
+			_flat(m.part_node(Vitals.SHIN_R).global_transform * Vector3(0, -0.45, 0), dragger.global_position)),  # the feet: the shins' far ends
+		"ragdoll": casualty.dragged_as_ragdoll() and m.ragdolled(),
+		"ground": dragger.global_position.y,
+		"shin_y": maxf(m.part_node(Vitals.SHIN_L).global_position.y, m.part_node(Vitals.SHIN_R).global_position.y),
+		"shin_in_torso": torso_t.affine_inverse() * m.part_node(Vitals.SHIN_L).global_position,
+	})
+
+
+## The Captain's drag (2026-10-14): the dragger faces the casualty and walks backwards toward
+## cover at about 1 m/s, the casualty head first toward him; dragged as a ragdoll, the legs
+## trail on the ground and move on their own, not posed stiff with the torso.
+func _check_drag(samples: Array[Dictionary]) -> void:
+	check(samples.size() >= 3, "a drag was seen in motion (%d samples)" % samples.size())
+	if samples.size() < 3:
+		return
+	var facing_ok := 0
+	var backwards := 0
+	var to_goal := 0
+	var goal_n := 0
+	var head_first := 0
+	var fast := 0.0
+	var ragdoll := 0
+	var legs_low := 0
+	var shin_min := Vector3.INF
+	var shin_max := -Vector3.INF
+	for s: Dictionary in samples:
+		if (s.facing as Vector3).dot(s.to_casualty) > 0.7 and (s.view as Vector3).dot(s.to_casualty) > 0.7:
+			facing_ok += 1
+		if (s.moving as Vector3).dot(s.facing) < -0.7:
+			backwards += 1
+		if s.to_goal != Vector3.ZERO:
+			goal_n += 1
+			if (s.moving as Vector3).dot(s.to_goal) > 0.5:
+				to_goal += 1
+		if float(s.head_d) < float(s.feet_d):
+			head_first += 1
+		else:
+			print("    not head first: head %.2f m, feet %.2f m, hips %.2f m from the dragger, spine.to-dragger %.2f, straps %.2f m off the hands, t %.1f" % [s.head_d, s.feet_d, s.hips_d, s.spine, s.gap, s.t])
+		fast = maxf(fast, s.speed)
+		if s.ragdoll:
+			ragdoll += 1
+			if float(s.shin_y) - float(s.ground) < 0.45:
+				legs_low += 1
+			shin_min = shin_min.min(s.shin_in_torso)
+			shin_max = shin_max.max(s.shin_in_torso)
+	var n := samples.size()
+	check(facing_ok >= n * 0.8, "dragging, Golf faces Delta (drawn body and view, dot > 0.7) in %d of %d moments" % [facing_ok, n])
+	check(backwards >= n * 0.8, "and walks backwards, opposite his facing, in %d of %d" % [backwards, n])
+	check(goal_n > 0 and to_goal >= goal_n * 0.7, "toward the cover he's dragging Delta to, in %d of %d" % [to_goal, goal_n])
+	check(head_first >= n * 0.9, "Delta goes head first, his head nearer Golf than his feet, in %d of %d" % [head_first, n])
+	check(fast <= Soldier.DRAG_SPEED + 0.25, "slowly: at most %.2f m/s (limit %.1f)" % [fast, Soldier.DRAG_SPEED])
+	check(ragdoll == n, "Delta stays a ragdoll held by the straps all the way (%d of %d)" % [ragdoll, n])
+	var spread := (shin_max - shin_min).length() if ragdoll > 0 else 0.0
+	check(legs_low == ragdoll and spread > 0.05, "his legs trail on the ground (%d of %d low) and move on their own, not stiff with the torso (shin moved %.2f m in the torso's frame)" % [legs_low, ragdoll, spread])
 
 
 ## Waits until `cond` holds or `timeout` seconds pass; returns whether it held.

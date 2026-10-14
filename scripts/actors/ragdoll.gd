@@ -13,9 +13,15 @@ extends Node3D
 ##
 ## Every other peer builds the same parts as static colliders that follow ragdoll_net, so a
 ## player (who drives their own movement) walks over bodies on their own machine too.
-## Soldier._update_ragdoll starts and stops it: a body down and not carried has one;
-## carried or dragged it hasn't (putting it down drops it again), nor once it's back up. When
+## Soldier._update_ragdoll starts and stops it: a body down and not carried has one; carried
+## over the shoulder it hasn't (putting it down drops it again), nor once it's back up. When
 ## it goes, the body stands where it lay (rest_spot), not where it fell.
+## Dragged (Captain, 2026-10-14), it stays a ragdoll: only the shoulder straps are held, by a
+## soft pin (a capped spring-damper force, not a joint, so a snag can't throw the body) to the
+## dragger's hands, and the rest trails on the ground: legs drag and catch, arms flop, the head
+## lolls within the neck's limits. The body (capsule) stays where it was while the parts move,
+## so every peer draws the same pose from ragdoll_net without the body's position sync in the
+## way; let go, an AI body moves to where the ragdoll lies (_rebase) and it settles as any other.
 ## Arms are parts too (upper arm and forearm), with shoulder and elbow limits.
 
 ## Layer 6 ("ragdolls"): the parts. They meet the world and each other; living soldiers meet
@@ -41,8 +47,10 @@ const PARTS := {
 ## rest, where each child lines up with its parent)]. Thighs swing forward on +x, knees bend on
 ## -x (CharacterModel's pose_bones and _knee); arms swing on x, a right arm lifts out on +z (a
 ## left on -z), elbows bend on +x.
+## The neck (Captain, 2026-10-14): flexion (chin down, -x) and extension 50 degrees, side
+## bend 35 each way, twist 65 each way.
 const JOINTS := [
-	["torso", "head", Vector3(-0.6, -0.8, -0.4), Vector3(0.7, 0.8, 0.4)],
+	["torso", "head", Vector3(-0.87, -1.13, -0.61), Vector3(0.87, 1.13, 0.61)],
 	["torso", "leg_l", Vector3(-0.5, -0.3, -0.6), Vector3(1.8, 0.3, 0.6)],
 	["torso", "leg_r", Vector3(-0.5, -0.3, -0.6), Vector3(1.8, 0.3, 0.6)],
 	["leg_l", "shin_l", Vector3(-2.4, -0.05, -0.05), Vector3(0.0, 0.05, 0.05)],
@@ -56,6 +64,23 @@ const JOINTS := [
 const SETTLE_SPEED := 0.08
 const SETTLE_S := 0.6
 const SETTLE_MAX_S := 8.0
+## Dragging (the soft pin): the strap point (strap_point, torso space) is pulled to the
+## dragger's hands with this stiffness (N/m) and damping (N s/m), the pull capped at
+## PIN_MAX_N; a body snagged further than PIN_SNAG_M behind comes along bodily. The torso is
+## turned gently head first towards the dragger and kept face up (N m/rad, N m s/rad).
+const PIN_K := 4000.0
+const PIN_C := 900.0
+const PIN_MAX_N := 2600.0
+const PIN_SNAG_M := 1.6
+const PIN_TURN_K := 150.0
+const PIN_TURN_C := 35.0
+## The neck while dragged: a little spring toward neutral and damping (N m/rad, N m s/rad,
+## against the torso), so the head sways and rolls with the steps but never snaps or bobbles;
+## held up (a conscious body) it's much stiffer.
+const NECK_K := 1.6
+const NECK_C := 0.35
+const NECK_HELD_K := 22.0
+const NECK_HELD_C := 1.6
 ## A pose change smaller than this (metres) isn't sent.
 const SEND_EPSILON := 0.003
 
@@ -70,6 +95,9 @@ var _still_s := 0.0
 var _age_s := 0.0
 var _sent := PackedFloat32Array()
 var _root_last: Variant = null  # the body's transform last step (host)
+var _pinned := false            # a dragger holds it by the straps (host)
+var _pin_by: Soldier = null     # who (check is_instance_valid: they can be freed)
+var _pin_from := Vector3.ZERO   # where the straps were when the take-hold began (world)
 
 
 ## Host: starts a ragdoll for `soldier` from the pose it's drawn in (or its saved ragdoll pose).
@@ -280,6 +308,14 @@ func _physics_process(delta: float) -> void:
 	if not simulated:
 		_follow()
 		return
+	var by := body.carried_by
+	if is_instance_valid(by) and by.carrying == body and by.carry_mode == Soldier.DRAG:
+		_root_last = body.global_transform  # the body stays put while dragged: nothing to carry along
+		_pin(by)
+		_send()
+		return
+	if _pinned:
+		_unpin()
 	_carry_along()
 	if frozen:
 		return
@@ -310,6 +346,121 @@ func _carry_along() -> void:
 	for p: Node3D in parts.values():
 		p.global_transform = moved * p.global_transform
 	_send(true)
+
+
+## The strap point in torso space: between the shoulder straps, at the top of the chest.
+static func strap_point() -> Vector3:
+	return (CharacterModel.STRAP_POINTS[0] + CharacterModel.STRAP_POINTS[1]) * 0.5
+
+
+## Where a dragger's hands hold the straps (world): the drag hold (CharacterModel.drag_hand_points)
+## on `by`.
+static func hold_point(by: Soldier) -> Vector3:
+	var hands := CharacterModel.drag_hand_points()
+	return by.global_transform * ((hands[0] + hands[1]) * 0.5)
+
+
+## Host, each step while `by` drags it: the straps pulled to the hands (rising there through
+## the take-hold), the torso turned head first and face up, the neck sprung; the rest is free.
+func _pin(by: Soldier) -> void:
+	var torso := parts["torso"] as RigidBody3D
+	var strap := torso.global_transform * (strap_point() * body.model.body_scale())
+	if not _pinned or _pin_by != by:
+		if _pinned:
+			_unpin()
+		_pinned = true
+		_pin_by = by
+		_pin_from = strap
+		if frozen:
+			unfreeze()
+		for p: PhysicsBody3D in parts.values():
+			by.add_collision_exception_with(p)  # the dragger's capsule doesn't stand on the casualty
+	for p: RigidBody3D in parts.values():
+		p.sleeping = false
+	var target := hold_point(by)
+	var u := by.drag_grab_u()
+	if u < 1.0:
+		target = _pin_from.lerp(target, smoothstep(CharacterModel.GRAB_RISE.x, CharacterModel.GRAB_RISE.y, u))
+	var off := target - strap
+	if off.length() > PIN_SNAG_M:
+		# Snagged (a corner, a ledge it can't ride up): it comes along bodily rather than the
+		# pull stretching until it throws the body.
+		var shift := off - off.normalized() * PIN_SNAG_M * 0.5
+		for p: RigidBody3D in parts.values():
+			p.global_position += shift
+		strap += shift
+		off = target - strap
+	var arm := strap - torso.global_position
+	var point_v := torso.linear_velocity + torso.angular_velocity.cross(arm)
+	var force := (off * PIN_K + (by.velocity - point_v) * PIN_C).limit_length(PIN_MAX_N)
+	torso.apply_force(force, arm)
+	# Head first towards the dragger and face up: a gentle turn, so it trails straight behind
+	# the hands and doesn't roll onto its front.
+	var spine := torso.global_basis.y.normalized()
+	var chest := -torso.global_basis.z.normalized()
+	var turn := Vector3.ZERO
+	var head_way := Vector3(target.x - torso.global_position.x, 0.0, target.z - torso.global_position.z)
+	var flat_spine := Vector3(spine.x, 0.0, spine.z)
+	if head_way.length() > 0.1 and flat_spine.length() > 0.1:
+		turn += Vector3.UP * flat_spine.normalized().cross(head_way.normalized()).y
+	turn += spine * chest.cross(Vector3.UP).dot(spine) * 0.5
+	torso.apply_torque(turn * PIN_TURN_K - torso.angular_velocity * PIN_TURN_C)
+	_spring_neck(body.vitals.is_up())
+
+
+## Host: the head eased toward neutral on the torso (at rest it lines up with it), damped
+## against the torso's turn, so it lolls and rolls with the drag without bobbing; `held` (a
+## conscious body) holds it up.
+func _spring_neck(held: bool) -> void:
+	var torso := parts["torso"] as RigidBody3D
+	var head := parts["head"] as RigidBody3D
+	var rel := (torso.global_basis.orthonormalized().inverse() * head.global_basis.orthonormalized()).get_rotation_quaternion()
+	var angle := rel.get_angle()
+	if angle < 0.0001:
+		return
+	if angle > PI:
+		angle -= TAU
+	var bend := torso.global_basis.orthonormalized() * (rel.get_axis() * angle)
+	var k := NECK_HELD_K if held else NECK_K
+	var c := NECK_HELD_C if held else NECK_C
+	var torque := -bend * k - (head.angular_velocity - torso.angular_velocity) * c
+	head.apply_torque(torque)
+	torso.apply_torque(-torque)
+
+
+## Host: let go of (the dragger released it, or lost hold): it settles like any other.
+func _unpin() -> void:
+	if is_instance_valid(_pin_by):
+		for p: PhysicsBody3D in parts.values():
+			_pin_by.remove_collision_exception_with(p)
+	_pinned = false
+	_pin_by = null
+	_still_s = 0.0
+	_age_s = 0.0
+	if body.is_ai():
+		_rebase()
+
+
+## Host, an AI body: moves the body (origin on the ground) under the ragdoll's hips, leaving the
+## parts where they lie, so what reads the body's position (cover, distances) finds it where it
+## was dragged to. A player's own machine owns theirs (they stand up where the ragdoll lay
+## anyway: rest_spot).
+func _rebase() -> void:
+	var hips := (parts["torso"] as Node3D).global_position
+	var spot := hips + Vector3.DOWN * 0.15
+	if body.is_inside_tree():
+		var hit := body.get_world_3d().direct_space_state.intersect_ray(
+			PhysicsRayQueryParameters3D.create(hips + Vector3.UP * 0.3, hips + Vector3.DOWN * 1.5, SoldierMovement.WORLD_MASK))
+		if not hit.is_empty():
+			spot = hit.position
+	body.global_position = spot
+	_root_last = body.global_transform
+	_send(true)
+
+
+## Host: whether a dragger holds it by the straps now.
+func pinned() -> bool:
+	return _pinned
 
 
 ## Host: holds it where it lies (static: nothing shoves it; falling bodies rest on it).

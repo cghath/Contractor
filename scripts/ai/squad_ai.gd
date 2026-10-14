@@ -163,6 +163,17 @@ const SQUAD_FRAG_SPREAD_M := 6.0
 ## Points checked along a frag's arc before throwing it (_lob_clear).
 const LOB_CHECKS := 10
 const CASUALTY_REACH := 1.6
+## Dragging to cover: the dragger goes this far past the cover point (the casualty trails
+## about a body length in front of him), and gives up dragging after DRAG_GIVE_UP_S.
+const DRAG_PAST_M := 1.1
+const DRAG_GIVE_UP_S := 25.0
+## Dragging, the most (radians) his way may lie off straight back: he backs round in an arc (_steer).
+const DRAG_VEER := 0.7
+## Before a drag: kneel this far past the casualty's head (GRIP_PAST_HEAD_M), within GRIP_NEAR_M of
+## it, taking at most GRIP_WALK_S to get there.
+const GRIP_PAST_HEAD_M := 0.35
+const GRIP_NEAR_M := 1.3
+const GRIP_WALK_S := 3.0
 ## Proposed: a fire team's medic further than this from a casualty counts as far, so the
 ## buddy or the other medic answers instead.
 const MEDIC_FAR_M := 40.0
@@ -443,6 +454,8 @@ var _treat_before := 0
 var _failures := {}  # task key -> treatments that changed nothing
 var _suppressing := false  # pinned while the casualty lies in the open: fire on the threat first
 var _cover_medic := false  # a squadmate nearby is out reaching or dragging a casualty (refreshed each think)
+var _drag_since := -1000.0  # when this unit took hold of its casualty to drag them to cover (_start_drag)
+var _grip_since := -1000.0  # when this unit set off round to the casualty's head to take hold (_care_reach)
 var _asked_medic := false
 var _answered := false
 var _medic_called_at := -1000.0
@@ -1391,10 +1404,11 @@ func _do_care() -> void:
 		Care.REACH:
 			_care_reach(contact)
 		Care.DRAG:
+			body.want_crouch = true  # the drag crouch, about 1 m/s (SoldierMovement.top_speed)
 			if body.carrying != casualty:
 				care = Care.TREAT
-			elif _has_cover and not _at_cover():
-				_go(_cover_point, false)
+			elif _has_cover and not _dragged_in() and Soldier._now() - _drag_since < DRAG_GIVE_UP_S:
+				_go(_drag_goal(), false)
 			else:
 				_has_destination = false
 				body.server_put_down()
@@ -1496,11 +1510,20 @@ func _care_reach(contact: bool) -> void:
 	# (Never lift someone another is treating: it cut the Captain's IV short, P0164.)
 	if exposed and not is_instance_valid(casualty.carried_by) and not casualty.vitals.is_healing():
 		var spot: Variant = find_cover(body.global_position, 10.0)
-		if spot != null and body.server_pick_up_body(casualty, Soldier.DRAG):
-			_cover_point = spot
-			_has_cover = true
-			care = Care.DRAG
-			return
+		if spot != null:
+			# A drag takes them by the straps at the head end: get round to their head first
+			# (a moment at most), so they come head first without being swung round.
+			var now := Soldier._now()
+			if now - _grip_since > GRIP_WALK_S + 2.0:
+				_grip_since = now
+			if not _at_head_end(casualty) and now - _grip_since < GRIP_WALK_S:
+				_go(_head_end(casualty), false)
+				body.want_crouch = true
+				return
+			_grip_since = -1000.0
+			if body.server_pick_up_body(casualty, Soldier.DRAG):
+				_start_drag(spot)
+				return
 	care = Care.TREAT
 
 
@@ -1628,10 +1651,11 @@ func _care_carry(contact: bool) -> void:
 		if body.carrying == casualty:
 			body._set_carry_mode(Soldier.DRAG, &"grab")
 			var spot: Variant = find_cover(body.global_position, 10.0)
-			_has_cover = spot != null
 			if spot != null:
-				_cover_point = spot
-			care = Care.DRAG
+				_start_drag(spot)
+			else:
+				_has_cover = false
+				care = Care.DRAG
 		else:
 			care = Care.GUARD
 		return
@@ -2797,6 +2821,65 @@ func _at_cover() -> bool:
 	return _has_cover and _flat_distance(_cover_point) <= ARRIVE + 0.4
 
 
+## Dragging to cover: the dragger walks backwards past the cover point, so the casualty
+## trailing in front of him ends up in it, not left a body length out in the open.
+func _drag_goal() -> Vector3:
+	var on := _cover_point - casualty.body_point()
+	on.y = 0.0
+	if on.length() < 0.1:
+		return _cover_point
+	var past := _cover_point + on.normalized() * DRAG_PAST_M
+	return NavigationServer3D.map_get_closest_point(body.get_world_3d().navigation_map, past)
+
+
+## The casualty dragged into the cover point (or the dragger got as far past it as he can).
+func _dragged_in() -> bool:
+	return _flat_between(casualty.body_point(), _cover_point) <= ARRIVE + 0.5 or _flat_distance(_drag_goal()) <= ARRIVE
+
+
+## Which way `c`'s head lies from their hips, flat (zero if it can't be told: upright, or not drawn).
+static func _head_way(c: Soldier) -> Vector3:
+	if c.model == null:
+		return Vector3.ZERO
+	var along := c.model.head.global_position - c.model.torso.global_position
+	along.y = 0.0
+	return along.normalized() if along.length() > 0.05 else Vector3.ZERO
+
+
+## Where a rescuer heads to take `c` by the straps: past their head, along the body (far
+## enough that stopping ARRIVE short still leaves him past it).
+func _head_end(c: Soldier) -> Vector3:
+	var way := _head_way(c)
+	if way == Vector3.ZERO:
+		return c.body_point()
+	var spot := c.model.head.global_position + way * (GRIP_PAST_HEAD_M + ARRIVE)
+	return NavigationServer3D.map_get_closest_point(body.get_world_3d().navigation_map, spot)
+
+
+## This unit is at `c`'s head end: past the head along the body, within reach of it.
+func _at_head_end(c: Soldier) -> bool:
+	var way := _head_way(c)
+	if way == Vector3.ZERO:
+		return true
+	var from_head := body.global_position - c.model.head.global_position
+	from_head.y = 0.0
+	return from_head.dot(way) > 0.1 and from_head.length() < GRIP_NEAR_M
+
+
+## Takes hold of `casualty` to drag (already in hand as `carrying` for a switch from the
+## shoulder): turns his back to the casualty first, so he takes the straps at the head end
+## facing them and walks backwards (the casualty lies behind the body: Soldier.carry_transform).
+func _start_drag(spot: Vector3) -> void:
+	var away := body.global_position - casualty.body_point()
+	away.y = 0.0
+	if away.length() > 0.05:
+		body.rotation.y = atan2(-away.x, -away.z)
+	_cover_point = spot
+	_has_cover = true
+	_drag_since = Soldier._now()
+	care = Care.DRAG
+
+
 func _buddy_bounding() -> bool:
 	var ai := SquadAI.of(buddy) if is_instance_valid(buddy) and buddy.vitals.is_up() else null
 	return ai != null and ai.bounding
@@ -3039,11 +3122,28 @@ func _steer(delta: float) -> void:
 		dir = next - body.global_position
 		dir.y = 0.0
 		dir = dir.normalized() if dir.length() > 0.05 else Vector3.ZERO
+	if dir != Vector3.ZERO and body.carry_mode == Soldier.DRAG:
+		# Dragging, he can't spin round on the spot (it would pull the casualty under him):
+		# where the way lies off his back, he backs round in an arc, at most DRAG_VEER off
+		# the way he's backing, turning as he goes.
+		var back := -body.global_basis.z
+		back.y = 0.0
+		back = back.normalized()
+		var off := back.signed_angle_to(dir, Vector3.UP)
+		if absf(off) > DRAG_VEER:
+			dir = back.rotated(Vector3.UP, signf(off) * DRAG_VEER)
 	var local := body.global_basis.inverse() * dir
 	body.move_input = Vector2(local.x, local.z)
 	var foe := _foe()
 	body.want_sprint = _run and not body.want_crouch and foe == null and _may_sprint()
-	if foe == null and dir != Vector3.ZERO and body.carrying == null:
+	body.head.rotation.y = body.view_yaw()  # dragging, he looks at the casualty (Soldier.view_yaw)
+	if dir != Vector3.ZERO and body.carrying != null:
+		# Carrying or dragging: the body heads where he's going, so a dragger walks backwards
+		# with the casualty trailing in front of him (the casualty lies behind the body; the
+		# drawn dragger and his view face it: Soldier.carry_transform, view_yaw), and a carrier
+		# doesn't crab sideways. He can't shoot meanwhile (_shoot), so no foe turns him.
+		body.rotation.y = lerp_angle(body.rotation.y, atan2(-dir.x, -dir.z), 1.0 - exp(-TURN_RATE * 0.6 * get_physics_process_delta_time()))
+	elif foe == null and dir != Vector3.ZERO and body.carrying == null:
 		body.rotation.y = lerp_angle(body.rotation.y, atan2(-dir.x, -dir.z), 1.0 - exp(-TURN_RATE * get_physics_process_delta_time()))
 		body.head.rotation.x = lerpf(body.head.rotation.x, 0.0, 0.1)
 	elif foe == null and dir == Vector3.ZERO and _watch_point() != null and intent != Intent.CASUALTY:

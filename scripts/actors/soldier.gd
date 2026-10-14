@@ -374,8 +374,9 @@ func is_crouching() -> bool:
 func _update_ragdoll() -> void:
 	var want: bool
 	if multiplayer.is_server():
-		var lifted := is_instance_valid(carried_by) \
-			or StringName(model.carry_net.get("mode", &"")) in [CharacterModel.CARRIED, CharacterModel.DRAGGED]
+		# Dragged, it stays a ragdoll held by the straps (Ragdoll._pin); only the shoulder lifts it.
+		var lifted := (is_instance_valid(carried_by) and carried_by.carry_mode != DRAG) \
+			or StringName(model.carry_net.get("mode", &"")) == CharacterModel.CARRIED
 		want = Ragdoll.enabled and not vitals.is_up() and not lifted and not is_instance_valid(vehicle)  # no ragdoll in a seat
 	else:
 		want = model.ragdolled() and not vitals.is_up()
@@ -416,9 +417,12 @@ func _ai_physics(delta: float) -> void:
 	suppression = move_toward(suppression, 0.0, delta * 0.25)
 	if is_reloading and _now() >= _busy_until:
 		is_reloading = false
-	if (not vitals.is_up() or carriable_while_up) and is_instance_valid(carried_by):
-		if carried_by.carry_holds():
-			global_transform = carried_by.carry_transform()
+	if _movable(self) and is_instance_valid(carried_by):
+		if carried_by.carry_holds() and not dragged_as_ragdoll():
+			if vitals.is_up() and carried_by.carry_mode == DRAG:
+				global_position = carried_by.carry_transform().origin  # conscious: free to turn and aim (return_fire)
+			else:
+				global_transform = carried_by.carry_transform()
 		velocity = Vector3.ZERO
 		return
 	if is_instance_valid(ragdoll):
@@ -443,6 +447,19 @@ func carry_speed_mult() -> float:
 		DRAG:
 			return DRAG_SPEED_MULT
 	return 1.0
+
+
+## Host: whether this body is being dragged as a ragdoll (down or dead: held by the straps,
+## the rest trailing, Ragdoll._pin) rather than drawn in a pose.
+func dragged_as_ragdoll() -> bool:
+	return is_instance_valid(ragdoll) and is_instance_valid(carried_by) and carried_by.carry_mode == DRAG
+
+
+## Host: 0..1 through taking hold of the drag handle (1 once holding, or not dragging).
+func drag_grab_u() -> float:
+	if carry_mode != DRAG or _carry_phase != &"grab":
+		return 1.0
+	return clampf(1.0 - _carry_phase_left / DRAG_GRAB_S, 0.0, 1.0)
 
 
 ## Where a body this soldier moves goes: over the shoulder when carried, on the ground
@@ -475,7 +492,7 @@ func _update_carried(delta: float) -> void:
 			return
 		_carry_phase = &""  # up on the shoulder, or got hold: from here they come along
 		CharacterModel.server_carry(self, carrying, carry_mode)  # a plain hold (late joiners don't replay the lift)
-	if carry_holds() and not carrying.is_ai():
+	if carry_holds() and not carrying.is_ai() and not carrying.dragged_as_ragdoll():
 		carrying._client_carried.rpc_id(carrying.owner_peer(), carry_transform().origin)
 
 
@@ -533,10 +550,11 @@ func release_carried() -> void:
 		carrying.carried_by = null
 		carrying._client_lifted.rpc(false)
 		CharacterModel.server_carry(null, carrying, &"")  # the casualty's pose, for every peer
-		if carrying.is_ai():
+		if carrying.is_ai() and not is_instance_valid(carrying.ragdoll):  # a dragged ragdoll lies where it was let go (Ragdoll._unpin)
 			if carry_mode != DRAG and _carry_phase != &"lower":  # a dragged or lowered body is already on the ground
 				carrying.global_position = _put_down_spot()
-			carrying.rotation = Vector3(0, rotation.y, 0)
+			if carry_mode != DRAG or not carrying.vitals.is_up():
+				carrying.rotation = Vector3(0, rotation.y, 0)
 	carrying = null
 	_set_carry_mode(&"")
 
@@ -1485,6 +1503,9 @@ const DRAG := &"drag"
 ## Speed while moving a downed body (proposed; Soldier.carry_speed_mult).
 const CARRY_SPEED_MULT := 0.55
 const DRAG_SPEED_MULT := 0.35
+## Dragging, the pace is at most this (m/s, crouched and walking backwards, whatever the
+## stance asked for: SoldierMovement.top_speed).
+const DRAG_SPEED := 1.0
 ## Where a dragged body lies, in the dragger's frame (+z is behind).
 const DRAG_OFFSET := Vector3(0.0, 0.0, 1.0)
 ## Seconds to get a body up onto the shoulder, to take hold of a drag handle, and to lower a

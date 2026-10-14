@@ -210,6 +210,11 @@ const DRAG_LEG_SPLAY := 0.12
 ## forward at the hips (not squatting over them), both hands on the casualty's carrier shoulder straps (casualty torso-local,
 ## right strap first: the dragger's right hand takes the casualty's right strap).
 const DRAG_POSE := {"hip": 0.6, "hip_x": 0.0, "hip_z": 0.05, "pitch": -0.95, "roll": 0.0, "prone": false, "prone_roll": 0.0, "yaw": PI}
+## Over-the-shoulder glances while dragging (drag_glance): every this many seconds, held this
+## long, the head turned this far (radians).
+const DRAG_GLANCE_S := 3.2
+const DRAG_GLANCE_HOLD_S := 0.9
+const DRAG_GLANCE_YAW := 1.15
 const STRAP_POINTS: Array[Vector3] = [Vector3(0.12, 0.5, -0.08), Vector3(-0.12, 0.5, -0.08)]
 ## First person while dragging: the eye (body space, towards the casualty), head held up over the
 ## bent back rather than right over the casualty's face, so the view looks down along them.
@@ -999,7 +1004,7 @@ func _process(delta: float) -> void:
 	else:
 		# Head and weapon keep facing where the owner looks, whatever the upper body's lean
 		# and twist (rotation.y, applied outside the pitch: the turn the torso's twist undoes).
-		head.rotation.y = -_twist_shown
+		head.rotation.y = -_twist_shown + (drag_glance() if mode == DRAG else 0.0)
 		hands_anchor.rotation.y = -_twist_shown
 		var lean := 0.0 if downed else _upper_body_pitch((_shown.root as Transform3D).basis * (_shown.torso as Transform3D).basis, _yaw_shown)
 		_aim_w = move_toward(_aim_w, 1.0 if aiming and _held_weapon and is_instance_valid(_held) else 0.0, delta * 6.0)
@@ -1088,6 +1093,20 @@ func twist_shown() -> float:
 	return _twist_shown
 
 
+## Dragging (facing the casualty, walking backwards): the head turns to look over a shoulder
+## at where he's going for a moment every DRAG_GLANCE_S while he moves, alternating sides
+## (radians of head turn; 0 between glances or standing still). Time-based, so every peer
+## draws it alike.
+func drag_glance() -> float:
+	if _speed < 0.25:
+		return 0.0
+	var cycle := fmod(_time, DRAG_GLANCE_S * 2.0)
+	var side := 1.0 if cycle < DRAG_GLANCE_S else -1.0
+	var t := fmod(cycle, DRAG_GLANCE_S)
+	var w := smoothstep(0.0, 0.25, t) * (1.0 - smoothstep(DRAG_GLANCE_HOLD_S, DRAG_GLANCE_HOLD_S + 0.3, t))
+	return side * DRAG_GLANCE_YAW * w
+
+
 ## The stance pose with the current action applied: the drag crouch (facing the
 ## casualty), the carry lean, or bending or kneeling to reach.
 func _action_pose(mode: StringName) -> Dictionary:
@@ -1172,6 +1191,8 @@ func _carry_state() -> Dictionary:
 	if mode == CARRIED or mode == DRAGGED:
 		if not downed or other_model == null:
 			return {}
+		if mode == DRAGGED and ragdolled():
+			return {}  # dragged as a ragdoll (Ragdoll._pin): drawn from its parts, wherever they trail
 	return {"mode": mode, "body": other, "model": other_model}
 
 
@@ -1271,6 +1292,12 @@ func _arm_goals(carry: Dictionary) -> Array:
 			return [["lift", torso.to_local(at - along)], ["lift", torso.to_local(at + along)]]
 		return [["carry", CARRY_HANDS[0]], ["carry", CARRY_HANDS[1]]]
 	if mode == DRAG:
+		var other: CharacterModel = carry.get("model")
+		var ph := carry_phase()
+		if other and other.downed and other.ragdolled() and (ph.is_empty() or ph.u > 0.3):
+			# A trailing ragdoll: the hands stay on its straps wherever they swing.
+			var t := other.torso.global_transform
+			return [["drag", torso.to_local(t * STRAP_POINTS[0])], ["drag", torso.to_local(t * STRAP_POINTS[1])]]
 		var straps := drag_hand_points()
 		return [["drag", _torso_point(straps[0])], ["drag", _torso_point(straps[1])]]
 	var held := _held_goals()

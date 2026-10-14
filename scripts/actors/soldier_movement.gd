@@ -506,7 +506,12 @@ func top_speed(sprinting: bool, down: bool) -> float:
 		speed = minf(speed, WALK_SPEED) * ADS_SPEED_MULT * body.vitals.aim_mult(weapon != null and weapon.tags.has("rifle"))
 	if down:
 		speed = CRAWL_SPEED
-	return speed * body.load_mult * body.vitals.speed_mult() * body.carry_speed_mult()
+	var carry := body.carry_speed_mult()
+	if body.carry_mode == Soldier.DRAG and carry > 0.0 and stance != Stance.PRONE:
+		# Dragging: bent over the casualty in the drag crouch, walking backwards at about
+		# 1 m/s whatever stance was asked for (Captain, 2026-10-14).
+		return Soldier.DRAG_SPEED * body.load_mult * body.vitals.speed_mult()
+	return speed * body.load_mult * body.vitals.speed_mult() * carry
 
 
 ## 0 (light) to 1 (a full load, a bulky item or a body on your shoulder counts too).
