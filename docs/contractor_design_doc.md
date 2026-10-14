@@ -173,7 +173,9 @@ Surgery kit (decided). Arterial bleeds can be stopped the old-fashioned way, by 
 
 Pain, broken arms and concussion add their own sway on top, so a wounded, bleeding soldier stacks penalties.
 
-AI uses exactly the same rules, so wounding an enemy and watching his buddy drag him is a real tactic. Enemies normally ignore unconscious foes and only dead-check bodies when clearing or assaulting through a position (Captain), so a downed friendly left in a room the enemy is pushing through is in real danger.
+AI uses exactly the same rules, so wounding an enemy and watching his buddy drag him is a real tactic. Enemies normally ignore unconscious foes and only dead-check bodies when clearing or assaulting through a position (Captain), so a downed friendly left in a room the enemy is pushing through is in real danger. A dead-check (P0362) is a look of 1-2 s, then two deliberate single rounds to the torso, fired only with the sights on the body rather than the head; then the body counts as checked and he moves on. It no longer fires bursts until the casualty dies. Both sides play by this rule.
+
+AI marksmanship (P0362, proposed values). Up close an AI takes a reaction time on a new target (0.25-0.9 s by skill, longer when he has to swing round to someone beside or behind him, at a capped turn rate), his first rounds land off the chest (mostly low, as the muzzle comes up onto the man) and settle within a second, and a round goes only once his sights are within 15-25 cm of where he means to put it (tighter above, since a high miss is a head shot), so close-range hits go centre mass with only a few to the neck or head. At range each burst is held a little off (wider on a new target, settling over a few seconds), so an average guard at 150 m hits about one round in thirteen, not one in seven, and a skilled shooter still about two and a half times as often.
 
 **The kit.** Ten items, two more drugs (below) and a defibrillator, each used up from the physical inventory.
 
