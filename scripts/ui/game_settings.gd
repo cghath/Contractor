@@ -216,7 +216,7 @@ static func apply_video() -> void:
 
 ## A level's sun under the shadow setting (each level calls it when it makes its sun).
 static func apply_sun(sun: DirectionalLight3D) -> void:
-	if sun == null:
+	if sun == null or sun.name == &"SkyFill":  # ZoneLevel's shadowless fill light stays shadowless
 		return
 	var shadows := String(get_value("video", "shadows"))
 	sun.shadow_enabled = shadows != "off"

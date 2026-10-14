@@ -228,6 +228,16 @@ func _build_environment() -> void:
 	sun.directional_shadow_max_distance = 250.0
 	GameSettings.apply_sun(sun)  # the shadows setting
 	add_child(sun)
+	# Sky fill: a weak, shadowless light from the far side, so the shade sides of rocks, crowns
+	# and walls read as rock and foliage instead of near-black.
+	var fill := DirectionalLight3D.new()
+	fill.name = "SkyFill"
+	fill.rotation_degrees = Vector3(-60, 145, 0)
+	fill.light_color = Color(0.72, 0.80, 0.95)
+	fill.light_energy = 0.35
+	fill.light_specular = 0.0
+	fill.shadow_enabled = false
+	add_child(fill)
 	var env := Environment.new()
 	env.background_mode = Environment.BG_SKY
 	env.sky = Sky.new()
@@ -235,11 +245,11 @@ func _build_environment() -> void:
 	sky.sky_top_color = SKY_TOP
 	sky.sky_horizon_color = SKY_HORIZON
 	sky.ground_horizon_color = SKY_HORIZON
-	sky.ground_bottom_color = Color(0.30, 0.27, 0.22)
+	sky.ground_bottom_color = SKY_HORIZON  # past the camera's far plane: haze, not a dark void
 	sky.sun_angle_max = 20.0
 	env.sky.sky_material = sky
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-	env.ambient_light_sky_contribution = 0.85
+	env.ambient_light_sky_contribution = 1.0
 	env.ambient_light_energy = 0.95  # with the lower, warmer sun: the shade side reads, the ground stops looking flat-lit
 	env.tonemap_mode = Environment.TONE_MAPPER_ACES
 	env.tonemap_exposure = 1.05

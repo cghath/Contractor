@@ -49,7 +49,9 @@ const FOLIAGE_PAD_M := 3.0
 ## "pebbles_per_km2"; seen out to SEE_TUFT_M / SEE_PEBBLE_M.
 const SEE_TUFT_M := 140.0
 const SEE_PEBBLE_M := 90.0
-const CAP_TUFTS_PER_CELL := 900
+## Rock clusters (the preset's scatter "rock_clusters_per_km2"), visual only like the tufts.
+const SEE_OUTCROP_M := 420.0
+const CAP_TUFTS_PER_CELL := 1200
 
 ## Every item: {"kind", "pos" (Vector3), "yaw", "size" (Vector3), "colour" (Color), "solid"}.
 var items: Array[Dictionary] = []
@@ -397,6 +399,7 @@ func build_visuals() -> void:
 		"conifer": _conifer_mesh(),
 		"tuft": _tuft_mesh(),
 		"pebble": _blocky(Vector3(1, 1, 1), Color.WHITE, 0.3, 7, true),
+		"outcrop": _blocky(Vector3(1, 1, 1), Color.WHITE, 0.26, 3, true),
 	}
 	set_process(true)
 
@@ -454,7 +457,7 @@ func _build_cell(cell: Vector2i) -> void:
 				groups["conifer" if _is_conifer(item) else "crown"].append([xf, item.colour])
 	_ground_cover(cell, groups)
 	var ranges := {Kind.ROCK: SEE_ROCK_M, Kind.SCRUB: SEE_SCRUB_M, "trunk": SEE_TREE_M, "crown": SEE_TREE_M, "conifer": SEE_TREE_M,
-		"tuft": SEE_TUFT_M, "pebble": SEE_PEBBLE_M}
+		"tuft": SEE_TUFT_M, "pebble": SEE_PEBBLE_M, "outcrop": SEE_OUTCROP_M}
 	for key in groups:
 		var list: Array = groups[key]
 		if list.is_empty():
@@ -483,7 +486,7 @@ func _build_cell(cell: Vector2i) -> void:
 func _ground_cover(cell: Vector2i, groups: Dictionary) -> void:
 	var tufts := mini(int(float(_spec.get("tufts_per_km2", 0.0)) * CELL_M * CELL_M / 1.0e6), CAP_TUFTS_PER_CELL)
 	var pebbles := mini(int(float(_spec.get("pebbles_per_km2", 0.0)) * CELL_M * CELL_M / 1.0e6), CAP_TUFTS_PER_CELL)
-	if tufts + pebbles == 0:
+	if tufts + pebbles == 0 and float(_spec.get("rock_clusters_per_km2", 0.0)) <= 0.0:
 		return
 	groups["tuft"] = []
 	groups["pebble"] = []
@@ -521,10 +524,35 @@ func _ground_cover(cell: Vector2i, groups: Dictionary) -> void:
 			var c: Color = rock_colours[int(tint * rock_colours.size()) % rock_colours.size()]
 			groups["pebble"].append([Transform3D(basis.scaled(Vector3(size, size * 0.55, size * 1.2)), Vector3(x, h + size * 0.12, z)), c.darkened(tint * 0.15)])
 		else:
-			var size := lerpf(0.7, 1.4, s)
+			var size := lerpf(0.9, 1.8, s)
 			var c: Color = tuft_colours[int(tint * tuft_colours.size()) % tuft_colours.size()]
 			c = c.lerp(Color(c.r * 1.08, c.g * 1.05, c.b * 0.9), roll)  # some sun-bleached
 			groups["tuft"].append([Transform3D(basis.scaled(Vector3(size, size * lerpf(0.8, 1.3, tint), size)), Vector3(x, h - 0.03, z)), c])
+	# Rock clusters: a few half-buried stones round a bigger one (visual only, all under a
+	# metre like the scatter's small rocks, which have no collision either).
+	var clusters := int(float(_spec.get("rock_clusters_per_km2", 0.0)) * CELL_M * CELL_M / 1.0e6 + rng.randf())
+	groups["outcrop"] = []
+	for n in clusters:
+		var cx := x0 + rng.randf() * CELL_M
+		var cz := z0 + rng.randf() * CELL_M
+		var stones := rng.randi_range(3, 7)
+		if absf(cx) > half - EDGE_KEEP_M or absf(cz) > half - EDGE_KEEP_M or _ground_blocked(cx, cz):
+			continue
+		var ch := _terrain.height_at(cx, cz)
+		if (_terrain.sea_side >= 0 and ch < _terrain.sea_level + 0.5) or _terrain.normal_at(cx, cz).y < 0.6:
+			continue
+		var base: Color = rock_colours[rng.randi() % rock_colours.size()]
+		for k in stones:
+			var a := rng.randf() * TAU
+			var r := 0.0 if k == 0 else rng.randf_range(0.6, 2.6)
+			var x := cx + cos(a) * r
+			var z := cz + sin(a) * r
+			var size := rng.randf_range(0.55, 0.95) if k == 0 else rng.randf_range(0.2, 0.6)
+			var squash := rng.randf_range(0.5, 0.8)
+			var basis := Basis(Vector3.UP, rng.randf() * TAU).rotated(Vector3(cos(a), 0, sin(a)), rng.randf_range(-0.25, 0.25))
+			var h := _terrain.height_at(x, z)
+			groups["outcrop"].append([Transform3D(basis.scaled(Vector3(size, size * squash, size * rng.randf_range(0.8, 1.3))), Vector3(x, h + size * squash * 0.2, z)),
+				base.darkened(rng.randf() * 0.12).lightened(rng.randf() * 0.08)])
 
 
 ## Whether ground cover keeps off (x, z): a pad or the line of a road.

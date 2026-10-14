@@ -27,3 +27,8 @@ on steep faces and part-faceted normals (`facet_share`), all procedural. **Groun
 out per cell when it builds, from the cell and the seed, not in `items`, no collision, no effect on sight or the
 checksum; seen out to 140 m / 90 m. Set on desert_wadi and coastal_lowland (the co-op soak's zones). The zone's sky:
 a lower warm sun, a blue procedural sky, lighter haze with aerial perspective, ACES tonemap (ZoneLevel).
+Round 2 (same day): `rock_clusters_per_km2` adds visual-only clusters of 3-7 half-buried stones under a metre (seen out
+to 420 m); pebbles on; more scrub on the soak presets (desert_wadi 600/km2, coastal_lowland and amphibious_coast
+750/km2; scrub is visual but counts for sight through foliage). ZoneLevel adds a weak shadowless "SkyFill" light from
+the sun's far side (GameSettings.apply_sun leaves it alone), so rock and crown shade sides read; the sky's lower half
+is haze-coloured (no dark band past the far plane) and the sea is a lighter blue-teal. Land heights are unchanged.

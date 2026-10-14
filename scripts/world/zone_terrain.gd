@@ -651,10 +651,10 @@ func _water() -> MeshInstance3D:
 	var mesh := ArrayMesh.new()
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 	var material := StandardMaterial3D.new()
-	material.albedo_color = Color(0.13, 0.33, 0.40, 0.82)
+	material.albedo_color = Color(0.20, 0.42, 0.50, 0.86)  # a sea under a blue sky, not a grey slab
 	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	material.roughness = 0.12
-	material.metallic_specular = 0.8
+	material.metallic_specular = 0.55
 	var node := MeshInstance3D.new()
 	node.name = "Sea"
 	node.mesh = mesh
