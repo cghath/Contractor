@@ -49,7 +49,6 @@ func _ready() -> void:
 	add_to_group(GROUP)
 	freeze = not multiplayer.is_server()
 	var item := ItemDB.get_item(item_id)
-	var art := VoxelArt.model_for(item, state)  # a rifle shows the optic it carries (P0362)
 	var is_armor := item.type == "plate" or item.slot == &"helmet"
 	var size := visual_size(item)
 	if is_armor:
@@ -61,18 +60,10 @@ func _ready() -> void:
 		piece.position = -VoxelArmor.center_offset(item)  # centred, like the collision box
 		_armor = piece
 		piece.apply_damage(state.get("chips", []), ArmorRules.is_shattered(state))
-	elif art != "":
-		size = VoxelArt.size_m(art)
-		add_child(VoxelArt.instance(art, "multicam"))
 	else:
-		var mesh_instance := MeshInstance3D.new()
-		var box := BoxMesh.new()
-		box.size = size
-		var material := StandardMaterial3D.new()
-		material.albedo_color = color_for(item)
-		box.material = material
-		mesh_instance.mesh = box
-		add_child(mesh_instance)
+		# Its ground model (ItemArt), lying as it rests; the collision box is the model's bounds.
+		add_child(ItemArt.ground_node(item, state))  # a rifle shows the optic it carries (P0362)
+		size = ItemArt.ground_size(item, state)
 	var shape := CollisionShape3D.new()
 	_box = BoxShape3D.new()
 	_box.size = size

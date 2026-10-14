@@ -942,6 +942,7 @@ func _make_item(data: Dictionary) -> Node:
 	item.uid = data.uid
 	item.name = data.uid
 	item.position = data.pos
+	item.rotation = ItemArt.spawn_rotation(ItemDB.get_item(item.item_id))  # a plate lies flat
 	return item
 
 
