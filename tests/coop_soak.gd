@@ -611,6 +611,12 @@ func _host_cycle(cycle: int) -> Dictionary:
 			gathered = await _wait_for(func() -> bool: return not extraction.point_with_squad().is_empty(), 150.0)
 			left_behind.append("(regathered %s)" % ("ok" if gathered else "failed"))
 	result["extract"] = {"gathered": gathered, "left_behind": left_behind, "missing": Array(extraction.missing_at(extraction._nearest_point())) if not gathered else []}
+	if human and _human_lead() != 0 and not _in_base():
+		# S0755: the human joined mid-contract; the scripted run went on to confirm without
+		# them (refused, then the run quit). The bots never extract without the human
+		# (Captain, 2026-10-14): from here the human leads, as if they'd been in from the start.
+		_say("the human is in the zone: they lead the rest of this contract")
+		return await _host_follow_human(result)
 	var confirmed_by := "bot1"
 	_set_phase("confirm")
 	if _bot_peer(1) == 0 or not await _wait_for(func() -> bool: return extraction.state == Extraction.State.COUNTDOWN or _in_base(), 8.0):
@@ -777,6 +783,29 @@ func _follow_tick(me: Soldier, leader_peer: int) -> void:
 		_goal = null  # in contact: hold and fight
 	elif to_leader > FOLLOW_FAR_M or to_leader < FOLLOW_NEAR_M * 0.6 or _flat(me.global_position, spot) > 8.0:
 		_walk(spot, 2.0, RUN_SPEED if to_leader > FOLLOW_FAR_M + 10.0 else WALK_SPEED)
+
+
+var _stuck_at := Vector3.INF
+var _stuck_since := 0.0
+var _stuck_said := 0.0
+
+
+## S0758: both bots stood still, up and unhurt, 400 m behind the human for 20 minutes with
+## nothing in their logs. Far from the leader and not moving for 15 s: say what holds them.
+func _stuck_note(me: Soldier, leader_peer: int) -> void:
+	var leader := _player(leader_peer)
+	var now := Recorder.now()
+	if leader == null or _flat(me.global_position, leader.global_position) <= FOLLOW_FAR_M or _flat(me.global_position, _stuck_at) > 1.0:
+		_stuck_at = me.global_position
+		_stuck_since = now
+		return
+	if now - _stuck_since < 15.0 or now - _stuck_said < 30.0:
+		return
+	_stuck_said = now
+	_say("stuck %.0f s, %.0f m from the leader at %s: goal %s, treating %s, dropping %s, casevac '%s', pinned %s, fight %s, contact %s, vehicle %s, hands '%s', carry '%s'" % [
+		now - _stuck_since, _flat(me.global_position, leader.global_position), Recorder._v3(me.global_position),
+		Recorder._v3(_goal) if _goal != null else "none", _treating, _dropping, _casevac, Soldier._now() < _pinned_until, _fight,
+		_in_contact(me), is_instance_valid(me.vehicle), me.inventory.hands, me.carry_mode])
 
 
 var _board_next := 0.0
@@ -1297,6 +1326,8 @@ func _client_phase(cycle: int, ph: String) -> void:
 ## Every quarter second during a phase: where to walk.
 func _client_tick(ph: String) -> void:
 	var me := _me()
+	if ph == "follow" and me != null and me.vitals.is_up():
+		_stuck_note(me, int(_phase.get("leader", 1)))  # before the treating check: it may be what holds them
 	if me == null or not me.vitals.is_up() or _treating:
 		return
 	if ph in ["advance", "fight", "deployed", "items"]:
@@ -1566,6 +1597,10 @@ var _give_up_left := 0.0
 ## until it dies and respawns. Dev has no give-up yet (B3, on gameplay/respawn); without
 ## this a squad wipe leaves the soak waiting at an extraction nobody can reach.
 const GIVE_UP_S := 45.0
+## With a human in (--human), a bot down this long gives up even with others still up: nobody
+## came for it, and lying there blocks the human's extraction (S0758: both bots down 400 m
+## from the LZ for 20 minutes).
+const GIVE_UP_ALONE_S := 120.0
 
 
 func _give_up_tick(me: Soldier, delta: float) -> void:
@@ -1580,13 +1615,13 @@ func _give_up_tick(me: Soldier, delta: float) -> void:
 	var players := _level().get_node_or_null(^"Players")
 	for node in (players.get_children() if players else []):
 		var s := node as Soldier
-		if s and s.vitals.is_up():
+		if s and s.vitals.is_up() and not (human and _down_for >= GIVE_UP_ALONE_S):
 			return  # someone could still come
 	recorder.event(["give_up", "Players/%d" % multiplayer.get_unique_id()])
 	if me.has_method(&"_server_give_up"):
 		if not me.can_give_up():
 			return
-		_say("down %.0f s and every player is down: giving up (the give-up key's request)" % _down_for)
+		_say("down %.0f s and %s: giving up (the give-up key's request)" % [_down_for, "nobody came" if human and _down_for >= GIVE_UP_ALONE_S else "every player is down"])
 		me._server_give_up.rpc_id(1)
 	else:  # code from before gameplay/respawn: no give-up, so die through the dev hurt
 		_say("B3: down %.0f s and every player is down: giving up (dev hurt until dead, then respawn)" % _down_for)

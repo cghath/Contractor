@@ -241,6 +241,7 @@ for n in $(seq 1 "$CLIENTS"); do
 	[ "$n" = 3 ] && [ "$LATE" = 1 ] && continue
 	extra=()
 	[ "$n" = 2 ] && [ "$HUMAN" = 0 ] && extra=(--soak-reconnect)
+	[ "$HUMAN" = 1 ] && extra=(--soak-human)  # the bots play along too (give up when nobody comes)
 	cport=$(( PORT + n ))
 	[ "$HUMAN" = 1 ] && cport=$PORT
 	instance "client$n" "$cport" --soak-role client --soak-bot "$n" --soak-duration "$DURATION" "${extra[@]}"  # their own deadline too (S0758: 600 s default + 1500 s, gone at 35 min)
