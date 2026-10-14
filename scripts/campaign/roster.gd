@@ -17,9 +17,11 @@ extends RefCounted
 ##   MOLLE pouches and what's in them ride in its slot state), "status"
 ##   (READY, MIA or DEAD), "sit_out_days" (days left recovering), "injuries" (words),
 ##   "history" ([{"day", "text"}]), "hired_day", "medbay" (treated this spell already),
-##   "mia_zone" (where an MIA one was left).
+##   "mia_zone" (where an MIA one was left), "loadout" (optional, {} until their first
+##   deployment: the kit they last deployed with, Restock.template_of, for "Restock last
+##   loadout" at the base; loadout_of).
 ## - "players": player key -> main character: "name", "role", "gear", "sit_out_days",
-##   "injuries", "history", "missions", "medbay".
+##   "injuries", "history", "missions", "medbay", "loadout" (optional, as a member's).
 ## - "next_id": the counter member ids come from.
 ## - "deployment": the running deployment (RosterDeployment), {} between deployments.
 ##
@@ -410,6 +412,20 @@ static func main_recovering(data: Dictionary, key: String) -> bool:
 
 
 # --- Gear -------------------------------------------------------------------------------
+
+## A member's or main character's last deployed loadout (Restock), {} if none was recorded
+## (a save from before loadouts, or nobody deployed yet): the field is optional.
+static func loadout_of(person: Dictionary) -> Dictionary:
+	return person.get("loadout", {})
+
+
+## Writes down `person`'s kit (an Inventory.net_state) as their last loadout; an empty kit
+## leaves the last one as it was.
+static func record_loadout(person: Dictionary, gear: Dictionary) -> void:
+	var loadout := Restock.template_of(gear)
+	if not Restock.is_blank(loadout):
+		person["loadout"] = loadout
+
 
 ## An Inventory.net_state holding `kit` ([item id, count] pairs, as Roles.kit gives them).
 static func gear_for_kit(kit: Array) -> Dictionary:

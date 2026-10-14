@@ -409,9 +409,11 @@ func _redraw() -> void:
 			var b := _button("Load magazines", load_magazines.bind(id))
 			b.tooltip_text = "Load the %s magazines you carry from your loose %s" % [Inventory.calibre_of(ItemDB.get_item(id)), ItemDB.get_item(id).name]
 			_quick_box.add_child(b)
+	_add_restock_button()
 	_redraw_containers()
 	_redraw_doll_tiles()
 	_redraw_details()
+	_mark_refused()
 	if _overlay:
 		_overlay.queue_redraw()
 
@@ -460,6 +462,7 @@ func _entry_grid(container: StringName, compact: bool) -> HFlowContainer:
 	var inv := player.inventory
 	var grid := _grid()
 	var dst := {"kind": "container", "container": container}
+	grid.set_meta(&"container", container)  # _mark_refused finds it
 	grid.mouse_filter = Control.MOUSE_FILTER_STOP
 	grid.set_drag_forwarding(Callable(), _can_drop.bind(dst), _drop.bind(dst))
 	var entries: Array = inv.containers.get(container, [])
@@ -1247,3 +1250,81 @@ func _nearby_signature() -> String:
 	for item: WorldItem in _nearby_items():
 		parts.append("%s:%d" % [item.name, item.count])
 	return ",".join(parts)
+
+
+# --- Refusals and the base's restock (playtest S2) -----------------------------------------
+# An item the host refused (no room, wrong point) puts a note at the top of the containers
+# saying why, and lights up the containers, pouches, points and slots that would take it
+# (Inventory.places_for), for REFUSAL_S. At the base a "Restock last loadout" button rebuilds
+# the loadout this character deployed with from the stash (BaseHub.server_restock_player).
+
+const REFUSAL_S := 6.0
+
+## The last refusal: {"text", "id", "state", "until" (seconds, Time)}, {} once it's gone.
+var _refusal: Dictionary = {}
+## The places lit up for it (Inventory.places_for), for the checks.
+var refusal_places: Array = []
+
+
+## Soldier._client_refused: the host refused `id` (with `state`) and said `text`.
+func show_refusal(text: String, id: StringName, state: Dictionary) -> void:
+	_refusal = {"text": text, "id": id, "state": state.duplicate(true), "until": Time.get_ticks_msec() / 1000.0 + REFUSAL_S}
+	if visible:
+		_redraw()
+	if is_inside_tree():
+		var stamp := float(_refusal.until)
+		get_tree().create_timer(REFUSAL_S + 0.05).timeout.connect(func() -> void:
+			if is_instance_valid(self) and float(_refusal.get("until", -1.0)) == stamp:
+				_refusal = {}
+				_queue_redraw())
+
+
+## The refusal note and the lit places (end of _redraw).
+func _mark_refused() -> void:
+	refusal_places = []
+	if _refusal.is_empty() or Time.get_ticks_msec() / 1000.0 > float(_refusal.until):
+		_refusal = {}
+		return
+	var inv := player.inventory
+	var item := ItemDB.get_item(StringName(_refusal.id))
+	refusal_places = inv.places_for(item, _refusal.state)
+	var lit_containers: Array = []
+	var lit_points: Array = []
+	var lit_slots: Array = []
+	for p: Dictionary in refusal_places:
+		match String(p.kind):
+			"container": lit_containers.append(p.container)
+			"point":
+				lit_points.append(String(p.point))
+				lit_slots.append(inv.point_slot(p.point))  # the carrier or pack it's on, in the loadout view
+			"slot": lit_slots.append(p.slot)
+	var note := _section("WON'T GO THERE", item.name if item else "", {})
+	note.add_theme_stylebox_override(&"panel", _box(COL_PANEL, COL_WARN, 2))
+	var body: VBoxContainer = note.get_meta(&"body")
+	body.add_child(_wrapped(String(_refusal.text), COL_WARN))
+	var where := inv.places_text(refusal_places)
+	body.add_child(_wrapped("Lit up: %s%s" % [where, "  (MOLLE view shows the points)" if not lit_points.is_empty() and view == View.LOADOUT else ""] if where != ""
+		else "Nothing you carry has room for it: make room, or put on a bigger carrier or pack.", COL_TEXT))
+	note.name = "RefusalNote"
+	_containers_box.add_child(note)
+	_containers_box.move_child(note, 0)
+	for node: Node in _containers_box.find_children("*", "HFlowContainer", true, false):
+		if node.has_meta(&"container"):
+			(node as CanvasItem).modulate = FITS_TINT if node.get_meta(&"container") in lit_containers else Color.WHITE
+	for point: String in _point_tiles:
+		var tile: Control = _point_tiles[point]
+		if is_instance_valid(tile):
+			tile.modulate = FITS_TINT if point in lit_points else Color(1, 1, 1, DIMMED_ALPHA)
+	for t: Array in _tiles:
+		if is_instance_valid(t[0]) and String(t[1].kind) == "slot":
+			(t[0] as CanvasItem).modulate = FITS_TINT if t[1].slot in lit_slots else Color.WHITE
+
+
+## At the base (a campaign, between deployments): the restock button.
+func _add_restock_button() -> void:
+	if not BaseHub.campaign_running or not BaseHub.in_base():
+		return
+	var b := _button("Restock last loadout", func() -> void: BaseHub.request("restock"))
+	b.name = "RestockButton"
+	b.tooltip_text = "Rebuild the kit you last deployed with from the armory's stash: same carrier, pouches on the same points, mags, meds, weapons and optics. What the stash is short of is listed."
+	_quick_box.add_child(b)

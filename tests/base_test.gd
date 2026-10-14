@@ -52,6 +52,7 @@ func _ready() -> void:
 	_test_respawn_pool()
 	_test_resolve()
 	_test_stand_ins()
+	_test_restock()
 	await _test_session()
 	for zone_id: String in [ZONE + tag, ZONE + "_wide" + tag]:
 		GameState.zone_id = BaseHub.zone_save_id(zone_id)
@@ -535,6 +536,7 @@ func _test_session() -> void:
 	await _test_armory(base)
 	await _test_deployment(client)
 	await _finish_client(client)
+	await _test_restock_session()
 	await _test_zone_deployment()
 	await _test_revert()
 	await _test_contract_loop()
@@ -1211,3 +1213,211 @@ func _test_revert() -> void:
 		"and the campaign is as it was before deploying (cash %d, day %d)" % [Economy.cash(), BaseHub.day()])
 	check(BaseHub.server_revert_deployment() != "", "with nothing to revert at the base, it says why")
 	level = CompoundLevel.current(self)
+
+
+# --- Restock last loadout (playtest S2) -----------------------------------------------------------
+
+## Restock's rules on a stash list: a stocked stash rebuilds the loadout exactly (pouches on the
+## same points, mags in the same pouches, the optic it had), the best of each first, and nothing
+## is made or lost; a short stash builds what it can and lists the rest; a loadout survives a
+## JSON round trip, and a person from an older save has none.
+func _test_restock() -> void:
+	print("Restock last loadout (S2)")
+	var m4 := ItemDB.get_item(&"m4a1")
+	# A rifleman as deployed: his kit, a holo on the M4 (it comes with a red dot), and the GP
+	# pouch moved to the back.
+	var inv := Inventory.new()
+	inv.net_state = GameState.from_json(Roster.gear_for_kit(Roles.kit(Roles.RIFLEMAN)))
+	var stock: Dictionary = Roster.json_safe(inv.net_state.duplicate(true))  # before the player's touches
+	inv.set_slot_state(&"primary", Optics.with_optic(m4, inv.state_of(&"primary"), &"optic_holo"))
+	var gp := ""
+	for p: Variant in inv.state_of(&"vest").get("molle", {}):
+		if String(inv.attachment(StringName(p)).get("id", "")) == "pouch_utility":
+			gp = String(p)
+	var moved := gp != "" and inv.move_attachment(StringName(gp), &"utility_2")
+	var gear: Dictionary = Roster.json_safe(inv.net_state.duplicate(true))
+	inv.free()
+	var loadout := Restock.template_of(gear)
+	check(moved and String(loadout.molle.get("utility_2", {}).get("id", "")) == "pouch_utility" and String(loadout.optics.get("primary", "")) == "optic_holo",
+		"a loadout keeps which pouch is on which point and the optic on the gun (%d points, %s)" % [loadout.molle.size(), loadout.optics])
+	check(int(loadout.molle.get("mag_1", {}).get("held", [{}])[0].get("count", 0)) == 2 and String(loadout.molle.mag_1.held[0].id) == "mag_556",
+		"and which magazines are in which pouch (mag_1: %s)" % [loadout.molle.get("mag_1", {}).get("held", [])])
+	# The stash: the same kit in pieces (the M4 with its red dot, the holo loose), plus a damaged
+	# plate and a part-used magazine that mustn't be picked over good ones.
+	var stash := _scatter(stock)
+	BaseArmory.add(stash, &"optic_holo", 1)
+	BaseArmory.add(stash, &"plate_ceramic_l4", 1, {"chips": [[1, 2, 3], [4, 5, 6]], "integrity": 0.4})
+	BaseArmory.add(stash, &"mag_556", 1, {"rounds": 9})
+	BaseArmory.add(stash, &"m17", 1)
+	var before := _units(stash, {})
+	var res := Restock.build(loadout, stash)
+	var rebuilt := Restock.template_of(res.gear)
+	check(rebuilt == loadout, "a stocked stash rebuilds it exactly: same worn kit, same points, same contents, same optic")
+	if rebuilt != loadout:
+		print("    wanted %s\n    got    %s" % [JSON.stringify(loadout, "", true), JSON.stringify(rebuilt, "", true)])
+	check((res.missing as Dictionary).is_empty() and (res.no_room as Dictionary).is_empty() and int(res.placed) == int(res.wanted),
+		"nothing missing, nothing without room (%d of %d)" % [int(res.placed), int(res.wanted)])
+	var plates_ok := true
+	for slot: StringName in [&"plate_front", &"plate_back"]:
+		plates_ok = plates_ok and not (res.gear.slot_state.get(String(slot), {}) as Dictionary).has("integrity")
+	var full_mags := true
+	for point: String in res.gear.slot_state.vest.molle:
+		for e: Dictionary in res.gear.slot_state.vest.molle[point].get("held", []):
+			full_mags = full_mags and int(e.get("state", {}).get("rounds", 30)) == 30
+	check(plates_ok and full_mags and BaseArmory.count_of(stash, &"plate_ceramic_l4") == 1 and BaseArmory.count_of(stash, &"mag_556") == 1,
+		"the best of each first: undamaged plates and full magazines; the damaged plate and the 9-round mag stay in the stash")
+	check(BaseArmory.count_of(stash, &"optic_red_dot") == 1 and BaseArmory.count_of(stash, &"optic_holo") == 0 and BaseArmory.count_of(stash, &"m17") == 1,
+		"the holo goes on the M4 and its red dot into the stash; what the loadout doesn't name stays")
+	var after := _units(stash, res.gear)
+	check(after == before, "nothing is made or lost (stash + kit, item by item)")
+	if after != before:
+		print("    before %s\n    after  %s" % [before, after])
+	# A short stash: four magazines, the holo and the helmet aren't there.
+	var short := _scatter(stock)
+	BaseArmory.remove(short, &"helmet", 1)
+	var mags_short := 0
+	for e: Dictionary in short:
+		if String(e.id) == "mag_556":
+			mags_short = int(e.count)
+	BaseArmory.remove(short, &"mag_556", 4)
+	var part := Restock.build(loadout, short)
+	check(part.missing == {"mag_556": 4, "optic_holo": 1, "helmet": 1} and int(part.placed) == int(part.wanted) - 6,
+		"a short stash builds the rest and lists what's missing (%s; %d of %d)" % [part.missing, int(part.placed), int(part.wanted)])
+	var text := Restock.report_text("Hawk", part)
+	check(text.contains("Missing from the stash") and text.contains("Helmet") and text.contains("x4") and text.contains("Holographic"),
+		"and says so: %s" % text)
+	var part_inv := Inventory.new()
+	part_inv.net_state = GameState.from_json(part.gear.duplicate(true))
+	check(part_inv.slots[&"helmet"] == &"" and part_inv.slots[&"vest"] == &"plate_carrier" and Optics.on_slot(part_inv, &"primary") != null
+		and Optics.on_slot(part_inv, &"primary").id == &"optic_red_dot" and part_inv.count_of(&"mag_556") == mags_short - 4,
+		"with no holo the M4 keeps its red dot; the magazines there are go in (%d)" % part_inv.count_of(&"mag_556"))
+	part_inv.free()
+	# Saved with the roster: a JSON round trip changes nothing; an old save's people have none.
+	var round_trip: Dictionary = GameState.from_json(JSON.parse_string(JSON.stringify(loadout)))
+	var again := Restock.build(round_trip, _scatter_with_holo(stock))
+	check(Restock.template_of(again.gear) == loadout, "a loadout read back from a save rebuilds the same")
+	var old_member := {"mid": "m0099", "callsign": "Old", "gear": stock}
+	check(Restock.is_blank(Roster.loadout_of(old_member)), "a member from an older save has no loadout (the field is optional)")
+	Roster.record_loadout(old_member, {})
+	check(not old_member.has("loadout"), "and an empty kit doesn't write one")
+	Roster.record_loadout(old_member, gear)
+	check(Roster.loadout_of(old_member) == loadout, "deploying writes it down")
+
+
+## `gear`'s items as a stash: everything taken off, out of and off the carrier, pack and pouches.
+func _scatter(gear: Dictionary) -> Array:
+	var inv := Inventory.new()
+	inv.net_state = GameState.from_json(gear.duplicate(true))
+	var stash: Array = []
+	for e: Dictionary in inv.strip():
+		var state: Dictionary = e.get("state", {}).duplicate(true)
+		for loose: Dictionary in Restock.unpack(state):
+			BaseArmory.add(stash, StringName(String(loose.id)), int(loose.count), loose.get("state", {}))
+		BaseArmory.add(stash, StringName(String(e.id)), int(e.count), state)
+	inv.free()
+	return stash
+
+
+func _scatter_with_holo(gear: Dictionary) -> Array:
+	var stash := _scatter(gear)
+	BaseArmory.add(stash, &"optic_holo", 1)
+	return stash
+
+
+## Every unit in a stash plus a kit, item by item (pouch contents and the optics on guns too).
+func _units(stash: Array, gear: Dictionary) -> Dictionary:
+	var out := BaseArmory.counts(stash)
+	for id: String in BaseArmory.contents_counts(stash):
+		out[id] = int(out.get(id, 0)) + int(BaseArmory.contents_counts(stash)[id])
+	var worn := Roster.gear_counts(gear)
+	for id: String in worn:
+		out[id] = int(out.get(id, 0)) + int(worn[id])
+	var optics := func(id: StringName, state: Dictionary) -> void:
+		var item := ItemDB.get_item(id)
+		var o := Optics.mounted_id(item, state) if item else &""
+		if o != &"":
+			out[String(o)] = int(out.get(String(o), 0)) + 1
+	for e: Dictionary in stash:
+		for i in int(e.count):
+			optics.call(StringName(String(e.id)), e.get("state", {}))
+	for slot: Variant in gear.get("slots", {}):
+		if String(gear.slots[slot]) != "":
+			optics.call(StringName(String(gear.slots[slot])), gear.get("slot_state", {}).get(slot, {}))
+	return out
+
+
+## At the hub: deploying wrote down the squadmate's and the player's loadouts; "Restock squad"
+## rebuilds the squadmate's from the armory's world items after his kit went into the stash,
+## and the player's own "Restock" builds what the stash has and names what it hasn't. The
+## stash on the floor and the kits together hold the same items before and after.
+func _test_restock_session() -> void:
+	print("Restock last loadout at the hub (S2)")
+	var base := level as BaseLevel
+	if base == null:
+		check(false, "at the base for the restock checks")
+		return
+	var mid := ""
+	for m: String in Roster.available_ids(BaseHub.roster()):
+		if base.muster_soldier(m) != null and not Restock.is_blank(Roster.loadout_of(BaseHub.member(m))):
+			mid = m
+	check(mid != "", "deploying wrote down the squad's loadouts")
+	var main := Roster.main_character(BaseHub.roster(), BaseHub.player_key(1))
+	check(String(Roster.loadout_of(main).get("slots", {}).get("vest", "")) == "plate_carrier", "and the player's (%s)" % [Roster.loadout_of(main).get("slots", {})])
+	if mid == "":
+		return
+	var s := base.muster_soldier(mid)
+	var loadout: Dictionary = Roster.json_safe(Roster.loadout_of(BaseHub.member(mid)))  # read back from the save: ids as StringNames
+	var player: Soldier = level.players.get_node(^"1")
+	# His kit goes onto the armory floor, as if he'd dropped it all there.
+	for e: Dictionary in s.inventory.strip():
+		level.server_spawn_dropped(StringName(e.id), int(e.count), BaseLevel.DELIVERY + Vector3(randf_range(-1, 1), 0.3, randf_range(-0.5, 0.5)), e.get("state", {}))
+	await _frames(3)
+	var before := _hub_units([s, player])
+	var notes: Array = []
+	var on_note := func(t: String) -> void: notes.append(t)
+	BaseHub.note.connect(on_note)
+	BaseHub.request("restock_squad")
+	await _frames(3)
+	var rebuilt := Restock.template_of(Roster.json_safe(s.inventory.net_state))
+	check(rebuilt == loadout, "Restock squad rebuilds %s's loadout from the stash on the floor" % String(s.name))
+	if rebuilt != loadout:
+		print("    wanted %s\n    got    %s\n    notes %s" % [JSON.stringify(loadout, "", true), JSON.stringify(rebuilt, "", true), notes])
+	check(Roster.gear_counts(BaseHub.member(mid).gear) == Roster.gear_counts(Roster.json_safe(s.inventory.net_state)), "and it's his gear on the roster")
+	check(_hub_units([s, player]) == before, "nothing is made or lost: the armory's items and the kits hold the same")
+	# The player: kit off and gone; the stash has no helmet.
+	player.inventory.strip()
+	for n: Node in level.items.get_children():
+		if n is WorldItem and (n as WorldItem).item_id == &"helmet":
+			GameState.item_taken((n as WorldItem).uid)
+			n.queue_free()
+	await _frames(2)
+	before = _hub_units([s, player])
+	notes.clear()
+	BaseHub.request("restock")
+	await _frames(3)
+	BaseHub.note.disconnect(on_note)
+	check(player.inventory.slots[&"vest"] == &"plate_carrier" and player.inventory.slots[&"helmet"] == &"",
+		"the player's Restock puts on what the stash has (the carrier)")
+	check(notes.size() == 1 and String(notes[0]).contains("Missing from the stash: Ballistic Helmet"), "and lists what it hasn't (%s)" % [notes])
+	check(_hub_units([s, player]) == before, "and the carrier's pouches it didn't need lie in the stash: nothing made or lost")
+	var screen: InventoryScreen = player._hud.inventory_screen if player._hud else null
+	if screen:
+		screen.visible = true
+		await _frames(2)
+		check(screen._quick_box.get_node_or_null(^"RestockButton") != null, "the inventory screen has the Restock button at the base")
+		screen.visible = false
+
+
+## Units of every item in the hub's stash (world items, with what's on and in them) and on
+## `soldiers`, item by item.
+func _hub_units(soldiers: Array) -> Dictionary:
+	var stash := (level as BaseLevel).server_collect_stash()
+	var out := BaseArmory.counts(stash)
+	var inside := BaseArmory.contents_counts(stash)
+	for id: String in inside:
+		out[id] = int(out.get(id, 0)) + int(inside[id])
+	for s: Soldier in soldiers:
+		var worn := Roster.gear_counts(Roster.json_safe(s.inventory.net_state))
+		for id: String in worn:
+			out[id] = int(out.get(id, 0)) + int(worn[id])
+	return out
