@@ -57,6 +57,8 @@ const SQUAD_SIZE := CompoundLevel.SQUAD_SIZE
 ## The zone a deployment goes to when nothing says otherwise. A campaign's zone saves are its
 ## own (zone_save_id), apart from the plain session's and other campaigns'.
 const DEFAULT_ZONE_ID := "compound_01"
+## Why Deploy waits (the button's tooltip and server_deploy's answer).
+const NO_CONTRACT := "Prep a contract first"
 ## A squadmate left behind (a recovery contract's) joins the squad when a player comes this
 ## close (metres). Proposed.
 const FOUND_M := 4.0
@@ -760,9 +762,10 @@ func server_count_respawn() -> String:
 # --- Deployments -------------------------------------------------------------------------------
 
 ## Host: takes the picked squad into the zone. `options` may override the prep: "squad"
-## (member ids), "zone_kind", "zone_id", "scene". Players whose main character is recovering
-## get a stand-in (an available member not in the squad, else a free rookie). Returns "" or
-## why it can't.
+## (member ids), "zone_kind", "zone_id", "scene"; "no_contract": true deploys without a prepped
+## contract (code and tests only: the Deploy request never sends it). Players whose main
+## character is recovering get a stand-in (an available member not in the squad, else a free
+## rookie). Returns "" or why it can't.
 func server_deploy(options := {}) -> String:
 	if not multiplayer.is_server():
 		return "Only the host deploys"
@@ -770,6 +773,9 @@ func server_deploy(options := {}) -> String:
 		return "A deployment is already running"
 	_read_back_base()
 	var prep := _prep()
+	# Without a contract there's no briefing, so no extraction and no way home (P0331): refuse.
+	if (prep.get("contract", {}) as Dictionary).is_empty() and not options.get("no_contract", false):
+		return NO_CONTRACT
 	var info: Dictionary = options.get("level", prep.get("level", {}))
 	var scene := String(options.get("scene", prep.get("scene", "")))
 	if not info.is_empty():

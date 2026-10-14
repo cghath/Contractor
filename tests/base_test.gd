@@ -661,6 +661,15 @@ func _test_terminals(base: BaseLevel) -> void:
 		ui.open(p)
 		drawn = drawn and ui._pages[p].get_child_count() > 0
 	check(drawn, "every page draws (%s)" % ", ".join(PackedStringArray(BaseUI.PAGES)))
+	# No contract in prep (P0331): Deploy waits, and the host's deploy itself refuses (a deploy
+	# without one had no briefing, so no extraction and no way home).
+	ui.open("squad")
+	await get_tree().process_frame  # the page's old rows go
+	var deploy := ui._pages["squad"].find_child("Deploy", true, false) as Button
+	check(BaseHub.prep_contract().is_empty() and deploy != null and deploy.disabled and deploy.tooltip_text == "Prep a contract first",
+		"with no contract in prep, Deploy is off: \"%s\"" % (deploy.tooltip_text if deploy else "no Deploy button"))
+	check(BaseHub.server_deploy() == BaseHub.NO_CONTRACT and not RosterDeployment.is_running(BaseHub.roster()),
+		"and deploying without a contract is refused")
 	# The contract board over it (P0362): this screen steps aside, and the board keeps the mouse
 	# until it closes, then this screen is back with it.
 	ui.open("squad")
@@ -784,7 +793,7 @@ func _test_deployment(client: Dictionary) -> void:
 		BaseHub.server_pick(mid, true)
 	var wage_a := int(BaseHub.member(a).wage)
 	var day := BaseHub.day()
-	var why := BaseHub.server_deploy({"zone_id": ZONE + tag})
+	var why := BaseHub.server_deploy({"zone_id": ZONE + tag, "no_contract": true})
 	check(why == "" and RosterDeployment.is_running(BaseHub.roster()), "deploy starts the deployment")
 	await _wait_until(func() -> bool: return not CompoundLevel.current(self) is BaseLevel, 10.0)
 	level = CompoundLevel.current(self)
@@ -880,7 +889,7 @@ func _test_zone_deployment() -> void:
 		return
 	var squad: Array = Roster.available_ids(BaseHub.roster()).slice(0, 1)
 	var def := ZoneDef.get_def("test")
-	var why := BaseHub.server_deploy({"level": {"level": "zone", "def": def}, "zone_id": ZONE + "_wide" + tag, "squad": squad})
+	var why := BaseHub.server_deploy({"level": {"level": "zone", "def": def}, "zone_id": ZONE + "_wide" + tag, "squad": squad, "no_contract": true})
 	var moved := await _wait_until(func() -> bool: return CompoundLevel.current(self) is ZoneLevel, 20.0)
 	var zone := CompoundLevel.current(self) as ZoneLevel
 	check(why == "" and moved and zone != null and int(zone.def.get("seed", -1)) == int(def.seed) and zone.modules().size() == (def.modules as Array).size(),
@@ -1171,7 +1180,7 @@ func _test_revert() -> void:
 	var cash_before := Economy.cash()
 	var day_before := BaseHub.day()
 	var squad: Array = Roster.available_ids(BaseHub.roster()).slice(0, 1)
-	var why := BaseHub.server_deploy({"level": {"level": "zone", "def": ZoneDef.get_def("test")}, "zone_id": ZONE + "_revert" + tag, "squad": squad})
+	var why := BaseHub.server_deploy({"level": {"level": "zone", "def": ZoneDef.get_def("test")}, "zone_id": ZONE + "_revert" + tag, "squad": squad, "no_contract": true})
 	var moved := await _wait_until(func() -> bool: return CompoundLevel.current(self) is ZoneLevel, 20.0)
 	check(why == "" and moved and RosterDeployment.is_running(BaseHub.roster()), "deployed into a zone")
 	Economy.spend(1234, "test: money spent out there")
