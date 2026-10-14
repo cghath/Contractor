@@ -828,6 +828,7 @@ func _build_environment() -> void:
 	var sun := DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-50, -30, 0)
 	sun.shadow_enabled = true
+	GameSettings.apply_sun(sun)  # the shadows setting
 	add_child(sun)
 	var env := Environment.new()
 	env.background_mode = Environment.BG_SKY

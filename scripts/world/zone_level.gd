@@ -188,6 +188,7 @@ func _build_environment() -> void:
 	sun.rotation_degrees = Vector3(-50, -30, 0)
 	sun.shadow_enabled = true
 	sun.directional_shadow_max_distance = 250.0
+	GameSettings.apply_sun(sun)  # the shadows setting
 	add_child(sun)
 	var env := Environment.new()
 	env.background_mode = Environment.BG_SKY

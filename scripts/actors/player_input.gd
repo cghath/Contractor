@@ -100,9 +100,10 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event is InputEventMouseMotion and captured and interaction.is_open():
 		interaction.move_cursor(event.relative)  # the menu has the mouse, not the view
 	elif event is InputEventMouseMotion and captured:
-		var turn := MOUSE_SENSITIVITY * body.vitals.turn_mult()  # concussion slows turning
+		# The settings' sensitivity (and aiming sensitivity down sights); concussion slows turning.
+		var turn := GameSettings.mouse_turn(MOUSE_SENSITIVITY, body.is_aiming) * body.vitals.turn_mult()
 		body.rotate_y(-event.relative.x * turn)
-		body.set_pitch(body.head.rotation.x - event.relative.y * turn)
+		body.set_pitch(body.head.rotation.x - event.relative.y * turn * (-1.0 if GameSettings.invert_y() else 1.0))
 	elif hud.map_screen and hud.map_screen.is_open():
 		return  # the map (M) has the mouse and the keys: no reloading or throwing behind it
 	elif event.is_action_pressed(&"inventory") or (event.is_action_pressed(&"pause") and hud.is_inventory_open()):
@@ -365,7 +366,7 @@ func _update_aim(delta: float) -> void:
 	var weapon := body.active_weapon()
 	body.is_aiming = _captured() and body.vitals.is_up() and weapon != null and (weapon.type == "weapon" or Launchers.is_launcher(weapon)) \
 		and body.inventory.hands == &"" and not body.is_reloading and Input.is_action_pressed(&"aim")
-	var fov := float(weapon.stats.get("ads_fov", 55)) if body.is_aiming else BASE_FOV
+	var fov := float(weapon.stats.get("ads_fov", 55)) if body.is_aiming else GameSettings.fov()
 	body.camera.fov = lerpf(body.camera.fov, fov, minf(delta * 12.0, 1.0))
 	var hip_view := HIP_VIEW * Vector3(-1.0 if body.left_handed else 1.0, 1, 1)  # off the firing shoulder
 	var ads_view := ADS_EYE - VoxelArt.sight_point(VoxelArt.model_for(weapon)) if weapon and not Launchers.is_launcher(weapon) else hip_view

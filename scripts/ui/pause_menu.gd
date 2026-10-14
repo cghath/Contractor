@@ -12,6 +12,8 @@ var _base_button: Button
 var get_out_toggle: CheckBox
 var _confirm: Control
 var _status: Label
+## The settings screen (GameSettings): the pause panel hides while it's open.
+var settings_menu: SettingsMenu
 
 
 func _init() -> void:
@@ -45,6 +47,7 @@ func _ready() -> void:
 		session.modulate = Color(1, 1, 1, 0.6)
 		box.add_child(session)
 	box.add_child(_button("Resume", close))
+	box.add_child(_button("Settings", _open_settings))
 	get_out_toggle = ControlOptions.get_out_toggle()  # changeable mid-game
 	box.add_child(get_out_toggle)
 	_base_button = _button("Return to Base (revert)", _ask_return_to_base)
@@ -71,6 +74,17 @@ func is_open() -> bool:
 	return visible
 
 
+func _open_settings() -> void:
+	if settings_menu == null:
+		settings_menu = SettingsMenu.new()
+		add_child(settings_menu)
+		settings_menu.closed.connect(func() -> void:
+			_panel.visible = true
+			Input.mouse_mode = Input.MOUSE_MODE_VISIBLE)
+	_panel.visible = false
+	settings_menu.open()
+
+
 func open() -> void:
 	visible = true
 	_confirm.visible = false
@@ -81,6 +95,9 @@ func open() -> void:
 
 
 func close() -> void:
+	if settings_menu and settings_menu.is_open():
+		settings_menu.close()
+	_panel.visible = true
 	visible = false
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 

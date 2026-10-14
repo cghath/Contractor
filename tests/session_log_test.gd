@@ -30,9 +30,81 @@ func _ready() -> void:
 	check(SessionLog.session_id == "", "off in a headless run")
 	await _test_quiet_session()
 	await _test_issues()
+	await _test_settings()
 	GameState.delete_save()
 	print("SESSION_LOG TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
+
+
+## The settings menu (GameSettings, SettingsMenu; Captain, 2026-10-13), on a settings file of
+## its own: defaults, saved and read back (keeping the file's other sections), volumes on the
+## buses, video on the viewport, shadows on a sun, key rebinding with swaps, and the screen.
+func _test_settings() -> void:
+	print("Settings")
+	var file := parent.path_join("settings_test.cfg")
+	var other := ConfigFile.new()
+	other.set_value("hand", "left", true)
+	other.set_value(ControlOptions.SECTION, ControlOptions.GET_OUT_KEY, true)
+	other.save(file)
+	GameSettings.use_file(file)
+	check(GameSettings.settings_path() == file, "on a settings file of its own (%s), never the player's" % GameSettings.settings_path())
+	var base := 0.0025
+	check(is_equal_approx(GameSettings.fov(), 80.0) and is_equal_approx(GameSettings.mouse_turn(base, false), base)
+		and is_equal_approx(GameSettings.mouse_turn(base, true), base * 0.75) and not GameSettings.invert_y(),
+		"defaults: 80 deg view, sensitivity 1x, 0.75x down sights, not inverted")
+	GameSettings.set_value("video", "fov", 95.0)
+	GameSettings.set_value("controls", "mouse_sensitivity", 1.5)
+	GameSettings.reload()
+	var cfg := ConfigFile.new()
+	cfg.load(GameSettings.settings_path())
+	check(is_equal_approx(GameSettings.fov(), 95.0) and is_equal_approx(GameSettings.mouse_turn(base, false), base * 1.5)
+		and cfg.get_value("hand", "left", false) == true and cfg.get_value(ControlOptions.SECTION, ControlOptions.GET_OUT_KEY, false) == true, "saved and read back, the file's other sections kept (fov %s, turn %s, hand %s, file %s)" % [GameSettings.fov(), GameSettings.mouse_turn(base, false), cfg.get_value("hand", "left", "none"), GameSettings.settings_path()])
+	GameSettings.set_value("audio", "master", 0.5)
+	GameSettings.set_value("audio", "effects", 0.0)
+	var master := AudioServer.get_bus_index(&"Master")
+	var sfx := AudioServer.get_bus_index(&"SFX")
+	check(absf(AudioServer.get_bus_volume_db(master) - linear_to_db(0.5)) < 0.01 and sfx >= 0 and AudioServer.is_bus_mute(sfx),
+		"volumes go on the buses (master at half, effects off: muted)")
+	GameSettings.set_value("video", "render_scale", 0.7)
+	GameSettings.set_value("video", "antialiasing", "msaa4")
+	var root := get_tree().root
+	check(is_equal_approx(root.scaling_3d_scale, 0.7) and root.msaa_3d == Viewport.MSAA_4X, "render scale and anti-aliasing on the view")
+	var sun := DirectionalLight3D.new()
+	sun.shadow_enabled = true
+	GameSettings.set_value("video", "shadows", "off")
+	GameSettings.apply_sun(sun)
+	var off := not sun.shadow_enabled
+	GameSettings.set_value("video", "shadows", "high")
+	GameSettings.apply_sun(sun)
+	check(off and sun.shadow_enabled and is_equal_approx(sun.directional_shadow_max_distance, 400.0), "shadows off, then high (400 m)")
+	sun.free()
+	var on_key := func(action: StringName, key: Key) -> bool:
+		return InputMap.action_get_events(action).any(func(e: InputEvent) -> bool:
+			return e is InputEventKey and (e as InputEventKey).physical_keycode == key and not (e as InputEventKey).shift_pressed)
+	GameSettings.bind(&"reload", KEY_T)
+	var moved: bool = on_key.call(&"reload", KEY_T) and not on_key.call(&"reload", KEY_R)
+	var swapped := GameSettings.bind(&"jump", KEY_T)
+	check(moved and swapped == &"reload" and on_key.call(&"jump", KEY_T) and on_key.call(&"reload", KEY_SPACE),
+		"rebinding: reload on T, then jump on T swaps reload to jump's old key (Space)")
+	GameSettings.reload()
+	GameSettings.apply_keys()
+	check(on_key.call(&"jump", KEY_T) and GameSettings.key_for(&"reload") == KEY_SPACE, "and the bindings are saved")
+	var shifted := InputMap.action_get_events(&"quick_treat").any(func(e: InputEvent) -> bool: return e is InputEventKey and (e as InputEventKey).shift_pressed)
+	GameSettings.reset_keys()
+	check(on_key.call(&"reload", KEY_R) and on_key.call(&"jump", KEY_SPACE) and shifted, "reset keys: R and Space again; Shift+H untouched")
+	var screen := SettingsMenu.new()
+	get_tree().root.add_child(screen)
+	screen.open()
+	await get_tree().process_frame
+	var tabs := screen.find_children("*", "TabContainer", true, false)
+	check(screen.is_open() and not tabs.is_empty() and (tabs[0] as TabContainer).get_tab_count() == 4 and screen._key_buttons.size() == GameSettings.BINDABLE.size(),
+		"the settings screen: Video, Audio, Controls and Keys, a button for every bindable key")
+	screen.close()
+	check(not screen.is_open(), "and closes")
+	screen.queue_free()
+	GameSettings.reset_all()
+	GameSettings.use_file("")
+	GameSettings.apply_all()
 
 
 func check(condition: bool, what: String) -> void:
