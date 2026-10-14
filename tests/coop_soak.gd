@@ -297,9 +297,11 @@ func _host_main() -> void:
 	_set_phase("starting")
 	Campaign.reset_campaign()
 	# The campaign's own gear path (player_role_kits off: a player's gear is their main
-	# character's, BaseHub._apply_player_gear). Each bot player gets its role's kit once, through
-	# Roles.apply_kit, after BaseHub has put its saved gear on (_kit_players: at the start, a late
-	# joiner, a rejoin). From the second contract the bots restock their last loadout from the
+	# character's, BaseHub._apply_player_gear). Each bot player gets its role's kit once, after
+	# BaseHub has put its saved gear on (_kit_players: at the start, a late joiner, a rejoin): a
+	# build with the B-23 fix (BaseHub.server_give_due_kit) gives a brand-new main character's
+	# kit itself and the harness only logs it; an older build gets it from the harness, through
+	# Roles.apply_kit. From the second contract the bots restock their last loadout from the
 	# stash (BaseHub "restock", the base screen's button); the kit-up walk only tops up to KIT's
 	# quantities. With player_role_kits on, the level's kit went on first and the saved gear then
 	# replaced the whole inventory: a late joiner deployed with nothing (B-23).
@@ -1808,6 +1810,10 @@ var _kit_check_left := 1.0
 ## inventory, so a kit given before it is lost): at the start, a late joiner (in the zone), a bot
 ## that rejoined under a new peer id (the same profile: its own gear comes back, no second kit).
 ## A real player (--human) plays in their own gear.
+## B-23 (fix/b23-campaign-gear-vs-kit): a build whose BaseHub kits a brand-new main character
+## itself (server_give_due_kit, in the same frame as their gear or squad role) owns the campaign
+## kit, so here it is only logged: Roles.apply_kit adds, and a second call gave every bot two kits
+## (a second M4 and helmet, 4 plates, double magazines) that the base then saved as their gear.
 func _kit_players(delta: float) -> void:
 	_kit_check_left -= delta
 	if _kit_check_left > 0.0 or role != "host":
@@ -1834,8 +1840,11 @@ func _kit_players(delta: float) -> void:
 		if _role_kitted.has(key):
 			continue
 		_role_kitted[key] = true
-		Roles.apply_kit(s.inventory, s.role)
-		_say("[kit] role kit (Roles.apply_kit) for %s %s%s: %s" % [_kit_name(s) if bot_of.has(peer) else "the human (peer %d)" % peer, String(s.role).replace("_", " "),
+		var by_game: bool = BaseHub.campaign_running and BaseHub.has_method(&"server_give_due_kit")
+		if not by_game:
+			Roles.apply_kit(s.inventory, s.role)
+		_say("[kit] role kit (%s) for %s %s%s: %s" % ["the game's, BaseHub kit_due" if by_game else "Roles.apply_kit",
+			_kit_name(s) if bot_of.has(peer) else "the human (peer %d)" % peer, String(s.role).replace("_", " "),
 			"" if _in_base() else " (joined in the zone)", _kit_line(s)])
 
 
