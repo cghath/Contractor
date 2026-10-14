@@ -938,8 +938,24 @@ func _test_respawn_points() -> void:
 	p = level.respawn_point(player)
 	if fob != null and level.respawn_clearance(fob, foes) >= CompoundLevel.RESPAWN_SAFE_M:
 		check(_flat_m(p, fob) < 8.0, "every insertion and extraction point hot: the FOB (%s)" % level.last_respawn.get("why", ""))
-	else:
+	else:  # (ridge_hot: an insertion point lies near the FOB, so its camper makes the FOB hot too)
 		check(String(level.last_respawn.get("why", "")).begins_with("every point hot"), "every point hot, the FOB too: the least dangerous (%s)" % level.last_respawn.get("why", ""))
+	# The campers that make the FOB hot step back from it, still near (or in sight of) their point:
+	# every insertion and extraction point hot, the FOB not: the FOB.
+	if fob != null:
+		for s in campers:
+			var own := s.global_position
+			var away := Vector3(own.x - (fob as Vector3).x, 0.0, own.z - (fob as Vector3).z).normalized()
+			var just: Array[Soldier] = [s]
+			for k in 14:
+				if level.respawn_clearance(fob, just) >= CompoundLevel.RESPAWN_SAFE_M:
+					break
+				s.global_position = level.ground_point(own + away * 10.0 * (k + 1)) + Vector3.UP * 1.0
+		foes = level.respawn_enemies(player)
+		var all_hot := cands.all(func(c: Vector3) -> bool: return level.respawn_clearance(c, foes) < CompoundLevel.RESPAWN_SAFE_M)
+		p = level.respawn_point(player)
+		check(all_hot and level.respawn_clearance(fob, foes) >= CompoundLevel.RESPAWN_SAFE_M and _flat_m(p, fob) < 8.0,
+			"every insertion and extraction point hot, the FOB not: the FOB (%s)" % level.last_respawn.get("why", ""))
 	for s in campers:
 		s.queue_free()
 	await _frames(2)
