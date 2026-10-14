@@ -5,7 +5,14 @@ extends PanelContainer
 ## who is ready, a Ready button for everyone and Start for the host. Plan marks are drawn on
 ## the map itself. Everything goes through Briefing's requests; the host decides.
 
+## The panel's widest, and narrowest (Captain, 2026-10-14, B0912: the panel ran off the window's
+## right edge: the insertion list was as wide as its longest name). Its width follows the window
+## (width_for); text wraps, a long choice is cut short with "..." (its whole text in a tooltip),
+## and a tall panel scrolls.
 const WIDTH := 360.0
+const MIN_WIDTH := 240.0
+## The most of the window's width it takes.
+const MAX_SHARE := 0.3
 
 var _briefing: Briefing
 var _box: VBoxContainer
@@ -18,11 +25,27 @@ var _supports: VBoxContainer
 var _players: Label
 var _ready_button: Button
 var _start: Button
+var _width := WIDTH
+var _labels: Array[Label] = []
+
+
+## The panel's width in a window (or map screen) `screen_width` wide.
+static func width_for(screen_width: float) -> float:
+	return clampf(screen_width * MAX_SHARE, MIN_WIDTH, WIDTH)
+
+
+## Sets the panel's width (MapScreen, as the window changes).
+func set_panel_width(w: float) -> void:
+	_width = w
+	custom_minimum_size = Vector2(w, 0)
+	for label in _labels:
+		label.custom_minimum_size = Vector2(maxf(w - 30.0, 0.0), 0)
 
 
 func _ready() -> void:
-	custom_minimum_size = Vector2(WIDTH, 0)
+	custom_minimum_size = Vector2(_width, 0)
 	mouse_filter = Control.MOUSE_FILTER_STOP
+	clip_contents = true
 	var scroll := ScrollContainer.new()
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	add_child(scroll)
@@ -37,6 +60,9 @@ func _ready() -> void:
 	_intel = _add_label("", 14)
 	_add_label("INSERTION", 13).modulate = Color(1, 1, 1, 0.6)
 	_insertion = OptionButton.new()
+	_insertion.fit_to_longest_item = false
+	_insertion.clip_text = true
+	_insertion.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	_insertion.item_selected.connect(func(index: int) -> void:
 		if _briefing:
 			_briefing.request_insertion(String(_insertion.get_item_metadata(index))))
@@ -48,12 +74,14 @@ func _ready() -> void:
 	_players = _add_label("", 14)
 	_ready_button = Button.new()
 	_ready_button.toggle_mode = true
+	_fit_button(_ready_button)
 	_ready_button.text = "Ready"
 	_ready_button.toggled.connect(func(on: bool) -> void:
 		if _briefing:
 			_briefing.request_set_ready(on))
 	_box.add_child(_ready_button)
 	_start = Button.new()
+	_fit_button(_start)
 	_start.text = "Start deployment"
 	_start.pressed.connect(func() -> void:
 		if _briefing:
@@ -84,11 +112,14 @@ func show_briefing(briefing: Briefing) -> void:
 		_insertion.set_item_metadata(_insertion.item_count - 1, String(point.get("id", "")))
 		if String(point.get("id", "")) == briefing.insertion_id:
 			_insertion.select(_insertion.item_count - 1)
+	_insertion.tooltip_text = _insertion.text
 	for child in _supports.get_children():
 		child.queue_free()
 	for id: String in briefing.available_supports():
 		var box := CheckBox.new()
+		_fit_button(box)
 		box.text = briefing.support_name(id)  # wave 5b: motor pool vehicles too
+		box.tooltip_text = box.text
 		box.set_pressed_no_signal(id in briefing.supports)
 		box.toggled.connect(func(on: bool) -> void: briefing.request_support(id, on))
 		_supports.add_child(box)
@@ -107,7 +138,14 @@ func _add_label(text: String, font_size: int) -> Label:
 	var label := Label.new()
 	label.text = text
 	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	label.custom_minimum_size = Vector2(WIDTH - 30.0, 0)
+	label.custom_minimum_size = Vector2(_width - 30.0, 0)
 	label.add_theme_font_size_override(&"font_size", font_size)
 	_box.add_child(label)
+	_labels.append(label)
 	return label
+
+
+## A button that never widens the panel: a long text is cut short with "...".
+static func _fit_button(button: Button) -> void:
+	button.clip_text = true
+	button.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS

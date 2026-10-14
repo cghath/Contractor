@@ -135,7 +135,7 @@ func _test_large_map() -> void:
 	add_child(view)
 	view.size = Vector2(1600, 900)
 	view.setup(zone)
-	check(absf(view.zoom - 900.0 / 2000.0 * 0.92) < 0.001 and view.centre == Vector2.ZERO, "it opens fitted to the whole 2 km (%.3f px/m)" % view.zoom)
+	check(absf(view.zoom - 900.0 / 2000.0 * MapView.FIT_SHARE) < 0.001 and view.centre == Vector2.ZERO, "it opens fitted to the whole 2 km (%.3f px/m)" % view.zoom)
 	check(view.grid_spacing() == 100.0 and view.reference_at(view.map_to_screen(Vector2(-999, 999))) == "000 000",
 		"100 m grid lines and 6-digit references when zoomed out (%s)" % view.reference_at(view.map_to_screen(Vector2(-999, 999))))
 	var corner := Vector2(995.0, -995.0)
@@ -212,6 +212,7 @@ func _test_briefing_and_markers() -> void:
 	check(screen.visible and screen.briefing_panel.visible and screen.view.marker_channel == "plan", "and the map opens on its own with the briefing panel; marks are plan marks")
 	screen.close()
 	check(screen.visible, "it stays open until the deployment starts")
+	await _test_fit_sizes()
 	var objectives := MapView.objectives_in(level)
 	check(objectives.size() == 1 and objectives[0].title == "Recover the case" and objectives[0].pos == Vector2(0, -10),
 		"the contract's objective is on the map (%s)" % [objectives])
@@ -755,6 +756,63 @@ func _wait_for(condition: Callable, seconds: float) -> void:
 	var deadline := Time.get_ticks_msec() + int(seconds * 1000)
 	while not condition.call() and Time.get_ticks_msec() < deadline:
 		await get_tree().process_frame
+
+
+## Captain, 2026-10-14 (B0912): at 2000x1250 the briefing panel ran off the window's right edge
+## and the map's labels were drawn over each other. At every common window size, with UI scale
+## 1.0 and his 1.2: the bar, the map and the briefing panel sit inside the window side by side,
+## and no two of the map's labels overlap or leave the map.
+const FIT_SIZES: Array[Vector2i] = [Vector2i(1280, 720), Vector2i(1366, 768), Vector2i(1600, 900), Vector2i(1920, 1080), Vector2i(1920, 1200),
+	Vector2i(2000, 1250), Vector2i(2560, 1440), Vector2i(2560, 1600), Vector2i(3440, 1440), Vector2i(3840, 2160)]
+
+
+func _test_fit_sizes() -> void:
+	print("The briefing map at every window size")
+	var markers := MapNodes.markers(level)
+	# Crowd one spot: a long-named marker on the objective, beside the intel and the case.
+	var long_id := markers.server_add({"kind": "point", "points": PackedVector2Array([Vector2(0.5, -10.0)]), "colour": "red", "channel": "plan", "author": 1,
+		"text": "A very long marker text that runs on and on past any sensible width"})
+	var frame := Control.new()
+	add_child(frame)
+	var screen := MapScreen.new()
+	frame.add_child(screen)
+	await _frames(3)
+	var bad := PackedStringArray()
+	for ui_scale: float in [1.0, 1.2]:
+		for res in FIT_SIZES:
+			frame.size = Vector2(res) / ui_scale
+			screen.view.fit()
+			await _frames(3)
+			var win := Rect2(Vector2.ZERO, frame.size).grow(0.5)
+			var panel := screen.briefing_panel.get_global_rect()
+			var bar := screen.toolbar.get_global_rect()
+			var map := screen.view.get_global_rect()
+			var why := ""
+			if not screen.briefing_panel.visible or not win.encloses(panel):
+				why += " panel %s" % panel
+			if not win.encloses(bar) or screen.toolbar.get_combined_minimum_size().x > frame.size.x:
+				why += " bar %s" % bar
+			if not win.encloses(map) or map.end.x > panel.position.x + 0.5 or map.size.x < frame.size.x * 0.5:
+				why += " map %s" % map
+			var labels := screen.view.drawn_labels
+			var inside := Rect2(Vector2.ZERO, screen.view.size).grow(0.5)
+			for i in labels.size():
+				if not inside.encloses(labels[i].rect):
+					why += " label '%s' off the map" % labels[i].text
+				for j in range(i + 1, labels.size()):
+					if (labels[i].rect as Rect2).intersects(labels[j].rect):
+						why += " labels '%s' and '%s' overlap" % [labels[i].text, labels[j].text]
+			if labels.is_empty():
+				why += " no labels drawn"
+			if why != "":
+				bad.append("%dx%d @%.1f:%s" % [res.x, res.y, ui_scale, why])
+	check(bad.is_empty(), "at %d window sizes (UI scale 1.0 and 1.2) the bar, map and briefing panel fit and no labels overlap%s" % [FIT_SIZES.size(), "" if bad.is_empty() else ": " + "; ".join(bad)])
+	var long_label := screen.view.drawn_labels.filter(func(l: Dictionary) -> bool: return String(l.full).begins_with("A very long"))
+	check(long_label.size() == 1 and String(long_label[0].text).ends_with("...") and (long_label[0].rect as Rect2).size.x <= MapView.LABEL_MAX_PX + 4.0,
+		"a long label is cut short with \"...\" (%s)" % [long_label.map(func(l: Dictionary) -> String: return l.text)])
+	frame.queue_free()
+	markers.server_remove(long_id)
+	await _frames(2)
 
 
 func _frames(n: int) -> void:
