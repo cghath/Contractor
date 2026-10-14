@@ -461,6 +461,40 @@ func _test_buildings_per_world() -> void:
 	await _frames(2)
 
 
+## ZoneScatter.foliage_between on made-up lines: through a bush, over it, past it, through a
+## crown, and not through the open space under the crown.
+func _test_foliage_lines() -> void:
+	var sc := _scatter_with([
+		{"kind": ZoneScatter.Kind.SCRUB, "pos": Vector3(0, 0, 0), "size": Vector3(1.4, 1.2, 1.4)},
+		{"kind": ZoneScatter.Kind.TREE, "pos": Vector3(20, 0, 0), "size": Vector3(1, 1, 1)},
+	])
+	var through := sc.foliage_between(Vector3(0, 0.3, -20), Vector3(0, 0.3, 20))
+	var over := sc.foliage_between(Vector3(0, 1.6, -20), Vector3(0, 1.6, 20))
+	var past := sc.foliage_between(Vector3(3, 0.3, -20), Vector3(3, 0.3, 20))
+	var crown := sc.foliage_between(Vector3(20, 3.0, -20), Vector3(20, 3.0, 20))
+	var under := sc.foliage_between(Vector3(20, 1.0, -20), Vector3(20, 1.0, 20))
+	check(is_equal_approx(through, 1.4) and over == 0.0 and past == 0.0 and crown > 2.0 and under == 0.0,
+		"foliage lines: %.2f m through a bush, none over or past it, %.1f m through a crown, none under it" % [through, crown])
+	sc.free()
+
+
+## A ZoneScatter holding just `items` (on a made-up 2 km terrain), for foliage checks.
+func _scatter_with(items: Array) -> ZoneScatter:
+	var sc := ZoneScatter.new()
+	var terrain := ZoneTerrain.new()
+	terrain.size_m = 2048.0
+	sc._terrain = terrain
+	sc.add_child(terrain)
+	for item: Dictionary in items:
+		var p: Vector3 = item.pos
+		var cell := sc._cell_of(p.x, p.z)
+		if not sc._cells.has(cell):
+			sc._cells[cell] = []
+		(sc._cells[cell] as Array).append(sc.items.size())
+		sc.items.append(item)
+	return sc
+
+
 # --- Helpers --------------------------------------------------------------
 
 func _squad() -> Array:
