@@ -119,8 +119,10 @@ if ! printf '%s\n' "${ALL_ARGS[@]}" | grep -qx -- --port; then
 	PORT="$("$PYTHON" - "$PORT" "$CLIENTS" "$taken" <<'PY'
 import socket, sys
 base, n, taken = int(sys.argv[1]), int(sys.argv[2]), {int(t) for t in sys.argv[3].split()}
-for k in range(40):
+for k in range(10):  # the soak's range is 25400-25499: host P and relays P+1..P+n stay in it
     p = base + 10 * k
+    if p + n > 25499:
+        break
     if any(q in taken for q in range(p - 3, p + n + 4)):
         continue
     socks = []
@@ -137,9 +139,10 @@ for k in range(40):
         for s in socks:
             s.close()
 else:
-    print(base)
+    print("")
 PY
 )"
+	[ -n "$PORT" ] || { echo "no free soak port base in 25400-25499 (every one is held or named by a running soak)"; exit 2; }
 fi
 DURATION=$(( MINUTES * 60 ))
 

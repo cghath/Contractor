@@ -79,6 +79,21 @@ def spark(values, width=48):
     return "".join(bars[min(8, int(round((v or 0) / top * 8)))] for v in values)
 
 
+def in_step(host_now, client, host_before):
+    """True if a client's counter is the host's, or is a delay behind it (the host's value at
+    the previous mark, or between that and now)."""
+    if client == host_now:
+        return True
+    if host_before is None:
+        return False
+    if client == host_before:
+        return True
+    try:
+        return min(host_before, host_now) <= client <= max(host_before, host_now)
+    except TypeError:
+        return False
+
+
 def compare(host, client, args, host_prev):
     """Mismatches between a host snapshot and a client snapshot on the same mark: a list of
     (key, kind, detail)."""
@@ -109,15 +124,16 @@ def compare(host, client, args, host_prev):
             out.append((key, "position", f"{d:.1f} m apart (tolerance {tol:.1f}): host {hp} client {cp}"))
         if state_of(h["f"]) != state_of(c["f"]):
             out.append((key, "condition", f"host {state_of(h['f'])} / client {state_of(c['f'])}"))
-        # Counters that change fast (a burst, a reload) are compared only when the host's value
-        # held since the previous mark: else the client is just a relay delay behind (B-08:
-        # every S0706 ammo mismatch was +1 on a mark where the host's count had just changed).
-        hp_row = prev if prev is not None else None
-        steady_rounds = hp_row is not None and hp_row.get("rounds") == h.get("rounds")
-        steady_inv = hp_row is not None and hp_row.get("inv") == h.get("inv")
-        if "rounds" in h and steady_rounds and h.get("rounds") != c.get("rounds"):
-            out.append((key, "ammo", f"host {h.get('rounds')} / client {c.get('rounds')} in the rifle"))
-        if "inv" in h and steady_inv and h.get("inv") != c.get("inv"):
+        # Counters that change fast (a burst, a reload): the client sees them up to a relay delay
+        # (plus a lost packet's resend) after the host. A client value that is the host's now,
+        # the host's at the previous mark, or (rounds) anywhere between the two (the host fired
+        # past it in between) is in step (B-08: every S0706 ammo mismatch was +1 on a mark where
+        # the host's count had just changed). A real split stays: it is still there on the next
+        # mark, when the host's value has held (the "persistent" count).
+        if "rounds" in h and not in_step(h.get("rounds"), c.get("rounds"), prev.get("rounds") if prev else None):
+            out.append((key, "ammo", f"host {h.get('rounds')} / client {c.get('rounds')} in the rifle"
+                        + (f" (host {prev.get('rounds')} the mark before)" if prev and prev.get("rounds") != h.get("rounds") else "")))
+        if "inv" in h and c.get("inv") != h.get("inv") and not (prev and c.get("inv") == prev.get("inv")):
             out.append((key, "inventory", f"hash host {h.get('inv')} / client {c.get('inv')}"))
     for key in cs:
         if key not in hs:

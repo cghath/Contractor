@@ -12,6 +12,11 @@ than the packet before it in the same direction (no reordering, as on most real 
 three at 0 ("clean LAN") it only forwards and counts. Every --stats-every seconds a JSON line
 goes to --stats: bytes and packets each way, dropped, and the delays used. Runs until killed
 or --seconds pass. Standard library only.
+
+Each client address gets its own socket toward the host (like a NAT), so the host sees every
+client as its own peer: a stray client from another run that hits this port is a separate
+peer the host's private session turns away (no token), not traffic mixed into our bot's link
+(BUGLIST B-15: test clients that reached a soak host through its relays).
 """
 import argparse
 import heapq
@@ -43,16 +48,27 @@ def main() -> int:
     front = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)  # the client's side
     front.bind(("127.0.0.1", a.listen))
     front.setblocking(False)
-    back = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)  # toward the host
-    back.bind(("127.0.0.1", 0))
-    back.setblocking(False)
-    for s in (front, back):
+    def bufs(s):
         try:
             s.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1 << 22)
             s.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 1 << 22)
         except OSError:
             pass
-    client = None  # the client's address (the latest one seen: a reconnect may use a new port)
+    bufs(front)
+    backs = {}  # client address -> its own socket toward the host
+    owner = {}  # back socket -> client address
+
+    def back_for(addr):
+        s = backs.get(addr)
+        if s is None:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.bind(("127.0.0.1", 0))
+            s.setblocking(False)
+            bufs(s)
+            backs[addr] = s
+            owner[s] = addr
+            print(f"[relay] new client {addr[0]}:{addr[1]} (link {len(backs)})", flush=True)
+        return s
     queue = []  # (due, seq, direction, data)
     seq = 0
     last_due = {"up": 0.0, "down": 0.0}
@@ -64,7 +80,7 @@ def main() -> int:
     next_stats = start + a.stats_every
     print(f"[relay] {a.listen} -> {a.target}: {a.latency} ms +- {a.jitter}, {a.loss}% loss", flush=True)
 
-    def schedule(direction: str, data: bytes) -> None:
+    def schedule(direction: str, data: bytes, addr) -> None:
         nonlocal seq
         for d in (window[direction], total[direction]):
             d["packets"] += 1
@@ -81,17 +97,17 @@ def main() -> int:
             last_due[direction] = due
         window[direction]["delay_sum"] += due - now
         if due <= now and not queue:
-            send(direction, data)
+            send(direction, data, addr)
             return
         seq += 1
-        heapq.heappush(queue, (due, seq, direction, data))
+        heapq.heappush(queue, (due, seq, direction, data, addr))
 
-    def send(direction: str, data: bytes) -> None:
+    def send(direction: str, data: bytes, addr) -> None:
         try:
             if direction == "up":
-                back.sendto(data, target)
-            elif client is not None:
-                front.sendto(data, client)
+                back_for(addr).sendto(data, target)
+            else:
+                front.sendto(data, addr)
         except OSError:
             pass  # the far side is gone for now (ENet retries)
 
@@ -103,7 +119,7 @@ def main() -> int:
             timeout = 0.05
             if queue:
                 timeout = max(0.0, min(timeout, queue[0][0] - now))
-            readable, _, _ = select.select([front, back], [], [], timeout)
+            readable, _, _ = select.select([front] + list(owner), [], [], timeout)
             for s in readable:
                 while True:
                     try:
@@ -111,14 +127,14 @@ def main() -> int:
                     except (BlockingIOError, ConnectionResetError, OSError):
                         break
                     if s is front:
-                        client = addr
-                        schedule("up", data)
+                        back_for(addr)
+                        schedule("up", data, addr)
                     else:
-                        schedule("down", data)
+                        schedule("down", data, owner[s])
             now = time.time()
             while queue and queue[0][0] <= now:
-                _, _, direction, data = heapq.heappop(queue)
-                send(direction, data)
+                _, _, direction, data, addr = heapq.heappop(queue)
+                send(direction, data, addr)
             if now >= next_stats:
                 if stats:
                     row = {"t": round(now, 3)}
