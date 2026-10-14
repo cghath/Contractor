@@ -717,6 +717,8 @@ func _host_follow_human(result: Dictionary) -> Dictionary:
 		gone_since = -1.0
 		if now_lead != int(_phase.get("leader", 0)):
 			_set_phase("follow", {"leader": now_lead})
+		if _me() != null and _me().vitals.is_up():
+			_stuck_note(_me(), now_lead)  # the host bot can be wedged too (soak-stuck-bots)
 		_follow_tick(_me(), now_lead)
 		_extract_with_human(now_lead)
 		if Recorder.now() >= note_at:
@@ -1857,6 +1859,7 @@ func _physics_process(delta: float) -> void:
 		_pinned_until = Soldier._now() + PINNED_S  # hit: stop and get down
 	_last_blood = blood
 	var pinned := Soldier._now() < _pinned_until and _casevac == "" and not _treating
+	_track_wedge(me, pinned)
 	if _goal != null and not pinned:
 		var to: Vector3 = _goal
 		var d := _flat(me.global_position, to)
@@ -1864,6 +1867,8 @@ func _physics_process(delta: float) -> void:
 			_goal = null
 		else:
 			var dir := Vector3(to.x - me.global_position.x, 0.0, to.z - me.global_position.z).normalized()
+			if Recorder.now() < _detour_until:
+				dir = _detour_dir  # wedged: a few metres off the straight line first
 			var step := minf(_goal_speed * delta, d - _goal_stop * 0.5)
 			var pos := me.global_position + dir * step
 			var ground := _level().ground_point(pos)
@@ -1874,6 +1879,94 @@ func _physics_process(delta: float) -> void:
 				me.rotation.y = atan2(-dir.x, -dir.z)
 	if _fight:
 		_fight_tick(me)
+
+
+## soak-stuck-bots (S0758): a bot walks by stepping its position straight at the goal, and its
+## own move_and_slide pushes it back out of whatever it stepped into. At harbour_yard's town_4
+## both client bots stepped into the voxel pockets of a quayside building (walls 0.3-0.7 m off
+## on every side, a floor 3 m overhead) and stood there for 20 minutes, up and unhurt, 400 m
+## behind the human, every step undone by the wall. Wedged (no headway toward the goal for
+## WEDGED_S): a few metres off the straight line, a different way each time (DETOUR_DEG); still
+## wedged after CATCH_UP_S: caught up beside the leader (the human in FOLLOW, the host
+## otherwise), as a player would be teleported out of a spot they cannot leave.
+const WEDGED_S := 4.0
+const DETOUR_S := 1.5
+const DETOUR_DEG: Array[float] = [75.0, -75.0, 135.0, -135.0, 180.0]
+const CATCH_UP_S := 20.0
+const CATCH_UP_MIN_M := 8.0  # no catch-up this close to the leader: the detours will do
+var _wedge_last := Vector3.INF
+var _wedge_gain := 0.0     # metres made toward the goal since _wedge_since
+var _wedge_since := 0.0
+var _detour_until := 0.0
+var _detour_dir := Vector3.ZERO
+var _detour_n := 0
+
+
+## Every physics frame: the headway made toward the goal; wedged, a detour, then a catch-up.
+func _track_wedge(me: Soldier, pinned: bool) -> void:
+	var now := Recorder.now()
+	var pos := me.global_position
+	var last := _wedge_last
+	_wedge_last = pos
+	if _goal == null or pinned or _treating or _dropping or me.carry_mode != &"" or is_instance_valid(me.vehicle) \
+			or last == Vector3.INF or last.distance_to(pos) > 5.0:  # a respawn or a warp: start over
+		_wedge_gain = 0.0
+		_wedge_since = now
+		_detour_n = 0
+		return
+	var to: Vector3 = _goal
+	var ahead := Vector3(to.x - pos.x, 0.0, to.z - pos.z)
+	if ahead.length() > 0.01:
+		_wedge_gain += Vector3(pos.x - last.x, 0.0, pos.z - last.z).dot(ahead.normalized())
+	if _wedge_gain >= 1.0:
+		_wedge_gain = 0.0
+		_wedge_since = now
+		_detour_n = 0
+		return
+	var wedged := now - _wedge_since
+	if wedged >= CATCH_UP_S and _catch_up(me, wedged):
+		return
+	if wedged >= WEDGED_S and now >= _detour_until:
+		var angle := deg_to_rad(DETOUR_DEG[_detour_n % DETOUR_DEG.size()])
+		_detour_n += 1
+		_detour_dir = ahead.normalized().rotated(Vector3.UP, angle)
+		_detour_until = now + DETOUR_S
+
+
+## The leader a wedged bot catches up with: the human in FOLLOW, else the host (for its clients).
+func _wedge_leader() -> Soldier:
+	if String(_phase.get("phase", "")) == "follow":
+		return _player(int(_phase.get("leader", 0)))
+	return _player(1) if role != "host" else null
+
+
+## Wedged CATCH_UP_S in the zone: put the bot beside the leader (on foot, up, and not right
+## here), on the first spot round them with open air between the two. True once it moved.
+func _catch_up(me: Soldier, wedged: float) -> bool:
+	var lead := _wedge_leader()
+	if lead == null or lead == me or not lead.vitals.is_up() or Vehicle.ride_of(lead) != null or _in_base() \
+			or _flat(lead.global_position, me.global_position) < CATCH_UP_MIN_M:
+		return false
+	var yaw := lead.rotation.y
+	var fwd := Vector3(-sin(yaw), 0.0, -cos(yaw))
+	var right := Vector3(cos(yaw), 0.0, -sin(yaw))
+	var space := me.get_world_3d().direct_space_state
+	var chest := lead.global_position + Vector3.UP * 1.2
+	for off: Vector3 in [-fwd * 2.0, right * 2.0, -right * 2.0, -fwd * 1.2 + right * 1.2]:
+		var spot := lead.global_position + off
+		var q := PhysicsRayQueryParameters3D.create(chest, spot + Vector3.UP * 1.2, 1)
+		q.exclude = [me.get_rid(), lead.get_rid()]
+		if not space.intersect_ray(q).is_empty():
+			continue  # a wall between: not this side
+		_say("wedged %.0f s at %s (goal %s, %.0f m from the leader): caught up beside %s at %s" % [wedged, Recorder._v3(me.global_position),
+			Recorder._v3(_goal), _flat(lead.global_position, me.global_position), lead.name, Recorder._v3(spot)])
+		recorder.event(["caught_up", "Players/%d" % multiplayer.get_unique_id(), snappedf(wedged, 0.1)])
+		me.velocity = Vector3.ZERO
+		me.global_position = spot + Vector3.UP * 0.1
+		_wedge_last = Vector3.INF
+		_detour_until = 0.0
+		return true
+	return false
 
 
 func _fight_tick(me: Soldier) -> void:
