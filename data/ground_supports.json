@@ -8,7 +8,7 @@
 		"hot_zones": true,
 		"contract_coast": true,
 		"one_at_a_time": true,
-		"crew_loadout": ["plate_carrier", "plate_ceramic_l4", "helmet", "m4a1", "mag_556", "mag_556", "ifak"],
+		"crew_loadout": ["plate_carrier", "plate_ceramic_l4", "plate_ceramic_l4", "helmet", "m4a1", "mag_556", "mag_556", "ifak"],
 		"cargo": [["belt_50bmg", 4]],
 		"arrive_m": 14.0,
 		"follow_m": 30.0,

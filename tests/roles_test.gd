@@ -44,6 +44,7 @@ func _ready() -> void:
 	_test_roster()
 	await _test_callout_rules()
 	await _test_callout_events()
+	await _test_default_plates()  # last: it kills and respawns the player
 	GameState.delete_save()
 	print("ROLES TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
@@ -716,3 +717,76 @@ func _wait_for(condition: Callable, seconds: float) -> void:
 	var deadline := Time.get_ticks_msec() + int(seconds * 1000)
 	while not condition.call() and Time.get_ticks_msec() < deadline:
 		await get_tree().process_frame
+
+
+## Captain (co-op soak, 2026-10-14): front AND rear plates are worn by default on every kit whose
+## carrier takes them (a plate-less rig wears none). Every way a soldier is kitted: each role
+## through Roles.apply_kit (AI squadmates, player role kits, respawn in the role's kit) and
+## Roster.gear_for_kit (the campaign's hires), the squad in this session, the player, a respawn,
+## the AAV's crew (crew_loadout) and the hostiles (a light carrier: one front pocket). Every
+## plate pocket the carrier has front or back is filled, and nothing plated is left stowed.
+func _test_default_plates() -> void:
+	print("Front and rear plates on every kit (Captain)")
+	for role: StringName in Roles.ids():
+		var applied := Inventory.new()
+		Roles.apply_kit(applied, role)
+		var hired := Inventory.new()
+		hired.net_state = GameState.from_json(Roster.gear_for_kit(Roles.kit(role)))
+		check(_plates_worn(applied) == "" and _plates_worn(hired) == "",
+			"%s: front and rear plates worn, by Roles.apply_kit (%s) and Roster.gear_for_kit (%s)" % [Roles.display_name(role), _plates_text(applied), _plates_text(hired)])
+		applied.free()
+		hired.free()
+	for s: Soldier in _squad():
+		check(_plates_worn(s.inventory) == "", "squadmate %s (%s): %s" % [s.name, Roles.display_name(s.role), _plates_text(s.inventory)])
+		# Drawn too: each plate is a VoxelArmor piece on the torso (inside the carrier's pocket).
+		var drawn: Array = [&"plate_front", &"plate_back"].filter(func(slot: StringName) -> bool:
+			var piece: VoxelArmor = s.gear._armor.get(slot)
+			return piece != null and piece.is_visible_in_tree() and piece.item.is_plate())
+		check(drawn.size() == 2, "and %s's plates are drawn on the carrier (%s)" % [s.name, drawn])
+	var crew := level.spawn_soldier({"name": "TestAavCrew", "faction": "friendly", "variant": "multicam", "pos": Vector3(34, 0.1, 40),
+		"loadout": AavSupport.data().get("aav", {}).get("crew_loadout", []), "combat": 0.5, "discipline": 0.5, "guard": true})
+	check(_plates_worn(crew.inventory) == "", "the AAV's crew (crew_loadout): %s" % _plates_text(crew.inventory))
+	_free(crew)
+	var hostile := level.spawn_soldier({"name": "TestPlatesHostile", "faction": "hostile", "variant": "urban", "pos": Vector3(36, 0.1, 40),
+		"loadout": CompoundLevel.HOSTILE_LOADOUT, "combat": 0.3, "discipline": 0.5, "guard": true})
+	check(_plates_worn(hostile.inventory) == "" and hostile.inventory.carrier_plate_slots() == [&"plate_front"] and hostile.inventory.slots[&"plate_front"] != &"",
+		"a hostile's light carrier has one (front) pocket, and it's filled: %s" % _plates_text(hostile.inventory))
+	_free(hostile)
+	# A carrier with no plate pockets wears none (and a kit's plates have nowhere to go on it).
+	for id: Variant in ItemDB.all_ids():
+		var item := ItemDB.get_item(StringName(id))
+		if item and item.slot == &"vest" and (item.stats.get("plate_slots", []) as Array).is_empty():
+			var rig := Inventory.new()
+			rig.take(item.id)
+			Roles.give(rig, &"plate_ceramic_l4", 2)
+			check(Inventory.PLATE_SLOTS.all(func(p: StringName) -> bool: return rig.slots[p] == &""), "%s (no plate pockets) wears no plates" % item.name)
+			rig.free()
+	# A player in a play session (the menu's Host: CompoundLevel.player_role_kits) is kitted, and
+	# respawns, in their role's kit (Roles.apply_kit; suites host without it).
+	var was := CompoundLevel.player_role_kits
+	CompoundLevel.player_role_kits = true
+	player.vitals.server_kill()
+	await _frames(3)
+	check(player.inventory.slots[&"vest"] != &"" and _plates_worn(player.inventory) == "", "a player respawned in their role's kit: %s" % _plates_text(player.inventory))
+	CompoundLevel.player_role_kits = was
+	await _wait_for(func() -> bool: return player.vitals.is_up(), 15.0)
+
+
+## "" if every front/back plate pocket of the worn carrier holds a plate and no plate is
+## stowed, else what's wrong.
+func _plates_worn(inv: Inventory) -> String:
+	if inv.slots[&"vest"] == &"":
+		return "no carrier"
+	for slot: StringName in inv.carrier_plate_slots():
+		if (slot == &"plate_front" or slot == &"plate_back") and inv.slots[slot] == &"":
+			return "%s empty" % slot
+	for c in Inventory.CONTAINERS:
+		for e: Dictionary in inv.containers[c]:
+			if ItemDB.get_item(e.id).is_plate():
+				return "a plate stowed in the %s" % c
+	return ""
+
+
+func _plates_text(inv: Inventory) -> String:
+	return "%s: front %s, back %s%s" % [inv.slots[&"vest"], inv.slots[&"plate_front"], inv.slots[&"plate_back"],
+		"" if _plates_worn(inv) == "" else " (%s)" % _plates_worn(inv)]
