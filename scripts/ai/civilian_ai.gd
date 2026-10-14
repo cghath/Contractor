@@ -170,8 +170,11 @@ func _notice() -> void:
 func _decide() -> void:
 	var st := Person.state(body)
 	var order := String(st.get("order", ""))
-	if order != _order_seen:
-		_order_seen = order
+	# A new order, or he just gave up (or was brought in): hold where he is now, not where an
+	# older order found him (an HVT who ran, then surrendered, walked back to where he started).
+	var seen := order + ("|captive" if Person.is_captive(body) or bool(st.get("delivered", false)) else "")
+	if seen != _order_seen:
+		_order_seen = seen
 		_hold = body.global_position
 		_has_cover = false
 	if String(st.get("seated_in", "")) != "":
