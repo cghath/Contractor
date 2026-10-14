@@ -422,9 +422,11 @@ static func _stride(s: Soldier) -> float:
 func streams(id: StringName) -> Array:
 	if _streams.has(id):
 		return _streams[id]
+	var started := Time.get_ticks_usec()
 	if _prebuild_task >= 0 and _prebuild_ids.has(String(id)):
 		_finish_prebuild()  # asked for before the workers are done (right at boot): wait for them
 		if _streams.has(id):
+			FrameCost.spent(&"sfx", started)
 			return _streams[id]
 	var out: Array = []
 	var single := AUDIO_DIR + String(id) + ".ogg"
@@ -439,6 +441,7 @@ func streams(id: StringName) -> Array:
 		if not recipe.is_empty():
 			out = _synth_variants(String(id), recipe)
 	_streams[id] = out
+	FrameCost.spent(&"sfx", started)
 	return out
 
 

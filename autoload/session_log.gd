@@ -62,6 +62,10 @@ var _perf_left := PERF_S
 var _perf_frames := 0
 var _perf_sum := 0.0
 var _perf_worst := 0.0
+## What the worst frame since the last perf line was spent on (FrameCost: system -> usec) and
+## the engine's own counts read then (worst_frame_text).
+var _worst_costs := {}
+var _worst_engine := {}
 var _rebakes := 0
 var _nav_watched: Node
 
@@ -120,6 +124,8 @@ func start(parent: String) -> void:
 		return
 	_started_usec = Time.get_ticks_usec()
 	_last_frame_usec = _started_usec
+	FrameCost.on = true  # the hot spots count their time (worst_frame_text)
+	FrameCost.take()
 	_catcher = _Catcher.new()
 	_catcher.log_node = self
 	OS.add_logger(_catcher)
@@ -217,10 +223,14 @@ func _process(delta: float) -> void:
 	var now := Time.get_ticks_usec()
 	var frame_s := (now - _last_frame_usec) / 1000000.0
 	_last_frame_usec = now
+	var costs := FrameCost.take()  # what the frame just measured was spent on
 	if frame_s >= SLOW_FRAME_S:
-		_write("slow frame: %.2f s" % frame_s)
+		_write("slow frame: %.2f s (%s)" % [frame_s, costs_text(costs, engine_counts())])
 	_perf_frames += 1
 	_perf_sum += frame_s
+	if frame_s > _perf_worst:
+		_worst_costs = costs
+		_worst_engine = engine_counts()
 	_perf_worst = maxf(_perf_worst, frame_s)
 	_perf_left -= delta
 	if _perf_left <= 0.0:
@@ -322,7 +332,9 @@ func _dump(what: String, text: String) -> void:
 
 ## The performance line for the frames since the last one (and starts counting afresh):
 ## "perf: frame 12.3 ms avg, 40.2 ms worst (81 fps); 14 AI, 1 player; modules 3/12 streamed;
-## nav rebakes 2; memory 512 MB".
+## nav rebakes 2; memory 512 MB; worst frame: ai 30.1 ms, nav 2.0 ms; engine physics ...".
+## The worst frame's part (costs_text) names what it went on: the systems FrameCost counts, and
+## the engine's own counts read in that frame.
 func perf_line() -> String:
 	var avg := _perf_sum / maxi(_perf_frames, 1)
 	var ai := 0
@@ -340,10 +352,38 @@ func perf_line() -> String:
 	var text := "perf: frame %.1f ms avg, %.1f ms worst (%.0f fps); %d AI, %d player%s; %s; nav rebakes %d; %s" % [
 		avg * 1000.0, _perf_worst * 1000.0, 1.0 / maxf(avg, 0.0001), ai, players, "" if players == 1 else "s", modules, _rebakes,
 		memory_text()]
+	text += "; worst frame: %s" % costs_text(_worst_costs, _worst_engine)
 	_perf_frames = 0
 	_perf_sum = 0.0
 	_perf_worst = 0.0
+	_worst_costs = {}
+	_worst_engine = {}
 	_rebakes = 0
+	return text
+
+
+## The engine's own counts now (Performance): the last frame's physics and process time (ms),
+## draw calls and primitives.
+static func engine_counts() -> Dictionary:
+	return {"physics": Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0,
+		"process": Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0,
+		"draws": int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)),
+		"primitives": int(Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME))}
+
+
+## Where a frame went (research 2026-10-13 B3.4), costliest first: "ai 212.4 ms, nav 3.1 ms;
+## engine physics 215.0 ms, process 4.2 ms, 812 draws, 1.20M primitives". `costs`: FrameCost
+## (system -> usec); `engine`: engine_counts() read in that frame.
+static func costs_text(costs: Dictionary, engine: Dictionary) -> String:
+	var systems := costs.keys().filter(func(k: StringName) -> bool: return int(costs[k]) >= 100)
+	systems.sort_custom(func(a: StringName, b: StringName) -> bool: return int(costs[a]) > int(costs[b]))
+	var parts: Array[String] = []
+	for k: StringName in systems:
+		parts.append("%s %.1f ms" % [k, int(costs[k]) / 1000.0])
+	var text := ", ".join(parts) if not parts.is_empty() else "no counted system over 0.1 ms"
+	if not engine.is_empty():
+		text += "; engine physics %.1f ms, process %.1f ms, %d draws, %.2fM primitives" % [
+			float(engine.physics), float(engine.process), int(engine.draws), int(engine.primitives) / 1000000.0]
 	return text
 
 

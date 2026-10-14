@@ -23,6 +23,20 @@ var _nav_ms: Array[float] = []
 var _timing := false
 var _timing_nav := false
 var _worst_ai := ""
+## The whole game's worst frame in the fight (FrameCost, as the session log's
+## perf line has it).
+var _frame_usec := 0
+var _worst_frame_ms := 0.0
+var _worst_frame := ""
+
+
+func _process(_delta: float) -> void:
+	var now := Time.get_ticks_usec()
+	var costs := FrameCost.take()
+	if FrameCost.on and _frame_usec > 0 and (now - _frame_usec) / 1000.0 > _worst_frame_ms:
+		_worst_frame_ms = (now - _frame_usec) / 1000.0
+		_worst_frame = SessionLog.costs_text(costs, SessionLog.engine_counts())
+	_frame_usec = now
 
 
 func _ready() -> void:
@@ -84,6 +98,7 @@ func _ready() -> void:
 		if ai:
 			ai.set_physics_process(false)  # run (and timed) from here instead
 			_ais.append(ai)
+	FrameCost.on = true
 	_timing = true
 	for i in FRAMES:
 		await get_tree().physics_frame
@@ -93,6 +108,7 @@ func _ready() -> void:
 	var worst := _ai_ms.find(_ai_ms.max())
 	print("timing: the AI's worst frame is fight frame %d (%s)" % [worst, _worst_ai])
 	_report("ZoneNav per frame in the fight", _nav_ms)
+	print("timing: the worst frame in the fight: %.1f ms (%s)" % [_worst_frame_ms, _worst_frame])
 	_time_calls()
 	Campaign.reset_campaign()
 	GameState.delete_save()
@@ -104,6 +120,7 @@ func _physics_process(delta: float) -> void:
 		var t0 := Time.get_ticks_usec()
 		var top := 0
 		var top_name := ""
+		var before := FrameCost.take()
 		for ai in _ais:
 			if is_instance_valid(ai):
 				var t := Time.get_ticks_usec()
@@ -112,8 +129,14 @@ func _physics_process(delta: float) -> void:
 					top = Time.get_ticks_usec() - t
 					top_name = "%s %.1f ms, %s" % [ai.get_parent().name, top / 1000.0, ai.body.ai_status if ai.body else ""]
 		var ms := (Time.get_ticks_usec() - t0) / 1000.0
+		var mine := FrameCost.take()
+		for k in before:  # back for the frame's own count
+			FrameCost._costs[k] = before[k] + int(mine.get(k, 0))
+		for k in mine:
+			if not before.has(k):
+				FrameCost._costs[k] = mine[k]
 		if _ai_ms.is_empty() or ms > _ai_ms.max():
-			_worst_ai = "slowest: " + top_name
+			_worst_ai = "slowest: %s; the AI's costs: %s" % [top_name, SessionLog.costs_text(mine, {})]
 		_ai_ms.append(ms)
 	if _timing_nav and is_instance_valid(_nav):
 		var t1 := Time.get_ticks_usec()

@@ -474,6 +474,12 @@ static func of(s: Node) -> SquadAI:
 
 
 func _physics_process(delta: float) -> void:
+	var started := Time.get_ticks_usec()
+	_tick(delta)
+	FrameCost.spent(&"ai", started)
+
+
+func _tick(delta: float) -> void:
 	if not _ready_done:
 		_setup()
 		return

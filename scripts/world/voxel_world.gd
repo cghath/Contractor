@@ -234,19 +234,22 @@ func _process(_delta: float) -> void:
 	if not _tool.is_area_editable(_structure_area):
 		return
 	_tool.mode = VoxelTool.MODE_SET
-	var until := Time.get_ticks_usec() + int(BUILD_BUDGET_MS * 1000.0)
+	var started := Time.get_ticks_usec()
+	var until := started + int(BUILD_BUDGET_MS * 1000.0)
 	while _next_structure < _structures.size():
 		var s: Array = _structures[_next_structure]
 		_tool.value = s[2]
 		_tool.do_box(s[0], s[1])
 		_next_structure += 1
 		if Time.get_ticks_usec() >= until:
+			FrameCost.spent(&"voxels", started)
 			return
 	_built = true
 	set_process(not _dirty.is_empty())
 	for edit: Dictionary in _pending:
 		_apply(edit)  # saved or early edits: the host checks them for breaches too
 	_pending.clear()
+	FrameCost.spent(&"voxels", started)
 	print("[world] voxel structures built (%d boxes)" % _structures.size())
 	structures_built.emit()
 
