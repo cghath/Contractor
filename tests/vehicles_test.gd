@@ -852,6 +852,34 @@ func _test_turret() -> void:
 			"%s: a turret and a gun of their own" % id)
 	var tech := VehicleSpecs.spec("technical_dshk")
 	check(VehicleTurret.of(tech) != null and VehicleTurret.of(VehicleSpecs.spec("technical_zu23")) == null, "a technical's DShK turns; the ones without a working gun don't")
+	# A mount with traverse limits (a pintle that can't swing over the cab): held inside them,
+	# never wrapping round the short way through the dead arc, and turning at its speed.
+	var lim := VehicleTurret.of({"gun": {"weapon": "dshk", "at": [0, 1.8, -1.0]}, "turret": {"pivot": [0, 1.7, 0],
+		"traverse_deg": [-120, 120], "elevation_deg": [-5, 60], "traverse_dps": 90, "elevation_dps": 60}})
+	lim.aim(deg_to_rad(170.0), deg_to_rad(80.0))
+	check(is_equal_approx(lim.target_yaw, deg_to_rad(120.0)) and is_equal_approx(lim.target_pitch, deg_to_rad(60.0)), "a limited mount stops at its traverse and elevation limits")
+	lim.aim(deg_to_rad(110.0), 0.0)
+	lim.settle()
+	lim.aim(deg_to_rad(-110.0), 0.0)
+	lim.step(0.5)
+	check(is_equal_approx(lim.yaw, deg_to_rad(65.0)), "and turns back the long way, not through the dead arc, at 90 degrees a second (%.0f)" % rad_to_deg(lim.yaw))
+	# The turrets' windows, vision blocks and gun ports are see-through glass in the drawn mesh
+	# only: the voxels rounds meet stay glass (P.GLASS), the look has P.WINDOW there.
+	for model: String in ["matv", "maxxpro", "aav7"]:
+		var parts: Array = VehicleHull.canvas(model).get("parts", [])
+		var seen := {}
+		var hit := {}
+		for part: Dictionary in parts:
+			if part.name != "Turret":
+				continue
+			var sz: Vector3i = part.size
+			for x in sz.x:
+				for y in sz.y:
+					for z in sz.z:
+						seen[(part.look as VoxelBuffer).get_voxel(x + 1, y + 1, z + 1, VoxelBuffer.CHANNEL_COLOR)] = true
+						hit[(part.buffer as VoxelBuffer).get_voxel(x + 1, y + 1, z + 1, VoxelBuffer.CHANNEL_COLOR)] = true
+		check(seen.has(VehicleArt.P.WINDOW) and not seen.has(VehicleArt.P.GLASS) and not seen.has(VehicleArt.P.BLACK) and hit.has(VehicleArt.P.GLASS) and not hit.has(VehicleArt.P.WINDOW),
+			"%s: the turret's glass is see-through in its look, still glass to rounds" % model)
 	var v := _vehicle("range_matv")
 	await _reset(v, Vector3(-12, 0, 6))
 	VehicleCamera.chase = false
@@ -1528,6 +1556,8 @@ func _run_client(address: String) -> void:
 	player.set_physics_process(false)
 	player.global_position = matv.global_position + Vector3(-1.5, 0.1, -0.5)
 	await _seconds(0.5)  # the host sees us at the door
+	check(not VehicleCamera.chase, "a fresh session starts in first person (Captain: FIRST_PERSON_DEFAULT)")
+	VehicleCamera.chase = true  # the chase checks below (as B would)
 	matv.request_enter.rpc_id(1, 0)
 	await _wait_for(func() -> bool: return matv.seat_of(player) == 0, 5.0)
 	check(matv.seat_of(player) == 0 and player.vehicle == matv, "the client gets in as driver (through the host)")

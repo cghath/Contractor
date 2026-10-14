@@ -150,6 +150,16 @@ class Cab:
 						break
 					c.put(p.x, p.y, p.z, P.WINDOW)
 
+	## Makes every voxel of `colours` in a box see-through (P.WINDOW), whatever side it faces: a
+	## turret's armoured windows and vision blocks, drawn dark on thick or angled plates where
+	## glaze()'s straight lines don't reach every voxel.
+	func see_through(x0: float, y0: float, z0: float, x1: float, y1: float, z1: float, colours: Array) -> void:
+		for xi in range(vx(minf(x0, x1)), vx(maxf(x0, x1))):
+			for yi in range(v(y0), v(y1)):
+				for zi in range(v(minf(z0, z1)), v(maxf(z0, z1))):
+					if c.get_at(xi, yi, zi) in colours:
+						c.put(xi, yi, zi, P.WINDOW)
+
 	## Glazes a box from both sides along x (a cabin's side windows, both sides at once when
 	## the box spans the hull).
 	func glaze_sides(x_out: float, x_in: float, y0: float, z0: float, y1: float, z1: float) -> void:
@@ -293,15 +303,48 @@ static func seats_of(model: String) -> Array:
 ## M-ATV: the cab was drawn as a hollow shell (VehicleArt._matv), open at the back. A back wall
 ## with a small window closes it off from the bed (visual only: rounds still pass there as
 ## before), the gunner's hatch is cut through the roof under the turret ring (visual only), and
-## the windscreen and door windows are glazed. The turret's windows are VehicleTurret's (it turns).
+## the windscreen and door windows are glazed, and the turret's shield windows (_ogpk; they turn
+## with it: VehicleTurret.split carries the look).
 static func _matv(k: Cab) -> void:
 	k.bulkhead(4.3, 4.4, 0.95, 2.45, P.PAINT)
 	k.c.mbox(-0.45, 1.85, 4.3, 0.45, 2.2, 4.4, P.WINDOW)
 	k.c.mdisc(0.0, 3.3, 0.3, 2.3, 2.65, P.EMPTY)  # through the turret's floor plate too
 	k.glaze(-0.95, 1.8, 1.9, 0.95, 2.42, 2.7, 2, true)
 	k.glaze_sides(1.3, 0.6, 1.75, 2.6, 2.3, 4.1)
+	_ogpk(k, 0.0, 2.48, 3.3, 0.88)
 	k.seats(1.0, -0.95, 0.95)
 
+
+## The O-GPK gun shield's armoured windows (VehicleArt._turret, same numbers): the front window,
+## the gun port under it and the window in each angled wing, see-through right through the
+## plate (they were dark blocks from the gunner's place). Visual only.
+static func _ogpk(k: Cab, x: float, roof: float, z: float, half: float) -> void:
+	var front := z - half
+	var clear := [P.GLASS, P.BLACK, P.PAINT, P.PAINT_DARK]
+	k.see_through(x - 0.22, roof + 0.42, front - 0.02, x + 0.22, roof + 0.66, front + 0.07, clear)
+	k.see_through(x - 0.07, roof + 0.25, front - 0.02, x + 0.07, roof + 0.38, front + 0.07, [P.BLACK])
+	for side: float in [-1.0, 1.0]:
+		var wx := x + side * half * 0.7
+		k.see_through(wx - 0.1, roof + 0.4, front - 0.02, wx + 0.1, roof + 0.6, front + half * 0.3 + 0.05, clear)
+
+
+## The AAV-7's weapon station: vision blocks all round its wall at the gunner's eye (the real
+## UGWS has a ring of them), besides the three in front (VehicleArt._aav7); posts between them.
+## Visual only.
+static func _ugws_ring(k: Cab, ux: float, uz: float) -> void:
+	var lo := Vector3i(k.vx(ux - 0.7), k.v(2.95), k.v(uz - 0.7))
+	var hi := Vector3i(k.vx(ux + 0.7), k.v(3.08), k.v(uz + 0.7))
+	for xi in range(lo.x, hi.x + 1):
+		for yi in range(lo.y, hi.y):
+			for zi in range(lo.z, hi.z + 1):
+				if not k.c.get_at(xi, yi, zi) in [P.PAINT, P.GLASS]:
+					continue
+				var dx := (xi + 0.5 - k.c.size.x * 0.5) * k.c.vs - ux
+				var dz := (zi + 0.5) * k.c.vs - uz
+				var a := rad_to_deg(atan2(dx, dz))  # 0 back, +-180 front
+				var nearest := roundf(a / 45.0) * 45.0
+				if absf(a - nearest) <= 13.0 and absf(nearest) < 160.0:  # the front's are drawn already
+					k.c.put(xi, yi, zi, P.WINDOW)
 
 ## MaxxPro: the armoured box was drawn solid. Hollowed (behind the raked windscreen, floor and
 ## walls 10-15 cm), the gunner's hatch cut under the turret (visual only), windscreen, door, troop
@@ -316,6 +359,7 @@ static func _maxxpro(k: Cab) -> void:
 	k.glaze(-1.0, 2.0, 1.4, 1.0, 2.75, 2.1, 2, true)
 	k.glaze_sides(1.4, 0.9, 1.95, 2.0, 2.55, 6.1)
 	k.glaze(-0.3, 2.05, 6.0, 0.3, 2.4, 6.5, 2, false)
+	_ogpk(k, 0.0, 2.85, 3.0, 0.95)
 	k.seats(1.2, -1.0, 1.0)
 
 
@@ -357,6 +401,7 @@ static func _aav7(k: Cab) -> void:
 	k.glaze_ring(-1.4, 2.82, 2.65, -0.5, 2.94, 3.55)
 	for gx: float in [-0.35, 0.0, 0.35]:
 		k.glaze(0.82 + gx - 0.1, 2.95, 1.3, 0.82 + gx + 0.1, 3.08, 2.2, 2, true)
+	_ugws_ring(k, 0.82, 2.15)
 	k.glaze(-0.2, 1.65, 7.6, 0.2, 1.95, 8.1, 2, false)
 	# The troop compartment's vision blocks along the roof edges: glass (visual only).
 	for side: float in [-1.0, 1.0]:
@@ -367,11 +412,17 @@ static func _aav7(k: Cab) -> void:
 
 ## UH-60: the fuselage was drawn as a shell, but the upper deck's floor runs through the cabin's
 ## ceiling. Cleared back to the shell from the cockpit's back to the aft cabin, then the
-## windscreen, overhead, cockpit door, gunner's and cabin door windows glazed.
+## windscreen, overhead, cockpit door, gunner's and cabin door windows glazed (the door
+## guns' middles in the gunners' windows too).
 static func _uh60(k: Cab) -> void:
 	var cabin := VehicleArt.Section.new(0.5, 2.22, 1.18, 0.94, 0.3, 0.45)
 	k.carve_section(cabin, 2.45, 7.95, 0.62, 2.1, 0.13)
 	k.glaze(-1.0, 1.6, 0.9, 1.0, 2.18, 2.2, 2, true)
 	k.glaze(-0.55, 2.0, 2.1, 0.55, 2.4, 2.45, 1, false)
 	k.glaze_sides(1.45, 0.75, 0.78, 1.3, 2.14, 6.3)
+	# Each gunner's window (the fuselage narrows there, past the side glazing's reach) and the
+	# M240H and its can stowed across it at the gunner's eye (a dark bar through the middle of the
+	# view): see-through within the window (visual only; they still stop rounds).
+	for side: float in [-1.0, 1.0]:
+		k.see_through(side * 0.75, 1.45, 2.95, side * 1.5, 2.08, 3.55, [P.GLASS, P.PAINT, P.GUN, P.METAL, P.SEAT])
 	k.seats(0.62, -0.85, 0.85)

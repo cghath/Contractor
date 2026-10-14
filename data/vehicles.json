@@ -286,8 +286,8 @@
 			"seats": [
 				{"name": "Pilot", "kind": "pilot", "at": [0.55, 1.9, -5.3], "stance": "sit", "exit": "right"},
 				{"name": "Co-pilot", "kind": "pilot", "at": [-0.55, 1.9, -5.3], "stance": "sit", "exit": "left"},
-				{"name": "Crew chief", "kind": "passenger", "at": [-0.72, 1.95, -3.6], "stance": "sit", "exit": "left"},
-				{"name": "Door gunner", "kind": "passenger", "at": [0.72, 1.95, -3.6], "stance": "sit", "exit": "right"},
+				{"name": "Crew chief", "kind": "passenger", "at": [-0.72, 1.85, -4.65], "stance": "sit", "exit": "left"},
+				{"name": "Door gunner", "kind": "passenger", "at": [0.72, 1.85, -4.65], "stance": "sit", "exit": "right"},
 				{"name": "Passenger 1", "kind": "passenger", "at": [-0.6, 1.85, -3.0], "stance": "sit", "exit": "left"},
 				{"name": "Passenger 2", "kind": "passenger", "at": [0.0, 1.85, -3.0], "stance": "sit", "exit": "left"},
 				{"name": "Passenger 3", "kind": "passenger", "at": [0.6, 1.85, -3.0], "stance": "sit", "exit": "right"},
