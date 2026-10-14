@@ -620,7 +620,7 @@ func _test_respawn_not_where_it_lay() -> void:
 	player.ragdoll._send(true)
 	await _frames(3)
 	var lay: Vector3 = (player.ragdoll.parts["torso"] as Node3D).global_position
-	player.vitals.server_hit(Vitals.HEAD, {"round_class": Vitals.INTERMEDIATE})  # dies: a body is left, the player respawns
+	player.vitals.server_hit(Vitals.HEAD, {"round_class": Vitals.INTERMEDIATE})  # dies: no body is left (Captain, 2026-10-14), the player respawns
 	await _frames(5)
 	var spawn_gap: float = CompoundLevel.SPAWN_POINTS.map(func(p: Vector3) -> float: return _flat(p, player.global_position)).min()
 	check(player.vitals.is_up() and not is_instance_valid(player.ragdoll), "respawned: up, no ragdoll")

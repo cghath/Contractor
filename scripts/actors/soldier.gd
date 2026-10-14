@@ -57,9 +57,6 @@ const BULKY_SPEED_MULT := 0.7
 const ITEM_MASK := 1 << 2
 ## Camo variants for players, picked from the peer id so every peer agrees.
 const PLAYER_VARIANTS: Array[String] = ["multicam", "woodland", "desert", "urban"]
-## What a player respawns with (handoff): an M4 (loaded) and 2 spare magazines plus 90 loose
-## rounds (Captain confirmed they're loose), a smoke and a frag.
-const DEFAULT_KIT: Array = [[&"m4a1", 1], [&"mag_556", 2], [&"rounds_556", 90], [&"smoke_grenade", 1], [&"frag_grenade", 1]]
 ## Loading magazines from loose rounds (_server_load_mags): seconds per round (proposed:
 ## 1 s per 5 rounds), and how far you can move before it stops.
 const LOAD_ROUND_S := 0.2
@@ -1815,8 +1812,10 @@ var _gave_up := false  # host: this death was a give-up (the session log says so
 
 
 ## AI dies for good (permadeath) and its own node stays as the body, on the shoulder of
-## whoever carries it if anyone does. A player leaves a body with all their gear where they
-## fell (server_leave_body, with a gear marker) and respawns in the default kit (handoff).
+## whoever carries it if anyone does. A player (Captain, 2026-10-14: "respawn with the kit you
+## had on. delete old player/bot bodies") leaves no body: whoever carried them lets go, and
+## they respawn with their inventory exactly as it was (spent mags and damaged plates as they
+## are; only the hands item drops, _drop_held), so nothing is duplicated or lost.
 func _on_died() -> void:
 	if not multiplayer.is_server():
 		return
@@ -1829,14 +1828,11 @@ func _on_died() -> void:
 		died_for_good.emit(self)
 		return
 	var level := CompoundLevel.current(self)
-	server_leave_body()
-	inventory.strip()  # it's all on the body now
+	if is_instance_valid(carried_by) and carried_by.carrying == self:
+		carried_by.release_carried()  # no body to go on carrying
+	carried_by = null
+	care_by = null
 	vitals.server_reset_health()
-	if CompoundLevel.player_role_kits and role != &"":
-		Roles.apply_kit(inventory, role)  # the clean test sessions: back in your role's kit
-	else:
-		for kit: Array in DEFAULT_KIT:
-			inventory.take(kit[0], kit[1])
 	_gave_up = false
 	_server_respawn_after(level, respawn_delay_s)
 
@@ -1865,8 +1861,9 @@ func _server_respawn_now(level: CompoundLevel) -> void:
 	var serial := _respawn_serial
 	var pos := level.respawn_point(self)
 	var protect := spawn_protect_s
-	SessionLog.note("%s respawns at (%.0f, %.0f) in %s; the body and its gear stay where they fell" % [log_name(), pos.x, pos.z,
-		"their role's kit" if CompoundLevel.player_role_kits and role != &"" else "the default kit"])
+	SessionLog.note("%s respawns at (%.0f, %.0f) with the kit they had on (%s, vest %s); no body is left" % [log_name(), pos.x, pos.z,
+		inventory.slots[&"primary"] if inventory.slots[&"primary"] != &"" else &"no rifle",
+		inventory.slots[&"vest"] if inventory.slots[&"vest"] != &"" else &"none"])
 	respawn_state = RESPAWN_PROTECTED if protect > 0.0 else RESPAWN_NONE
 	vitals.shielded = protect > 0.0
 	_client_respawn.rpc_id(owner_peer(), pos, protect)
@@ -1950,8 +1947,9 @@ func _server_give_up() -> void:
 
 ## Host only. Leaves this player's body where it lies as a dead body node
 ## (CompoundLevel.server_spawn_body) with everything this player carries and a gear marker. A
-## player who was carrying or dragging them goes on carrying the body. For a player who died,
-## or who leaves the session while down. Returns the body (null if there's no level).
+## player who was carrying or dragging them goes on carrying the body. Only for a player who
+## leaves the session while down (a player who dies leaves no body since Captain, 2026-10-14:
+## they respawn in their own kit). Returns the body (null if there's no level).
 func server_leave_body() -> Soldier:
 	var carrier: Soldier = carried_by if is_instance_valid(carried_by) and carried_by.carrying == self else null
 	var mode := carrier.carry_mode if carrier else &""

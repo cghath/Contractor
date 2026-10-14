@@ -829,9 +829,15 @@ func _test_deployment(client: Dictionary) -> void:
 	player = level.players.get_node(^"1")
 	check(player.inventory.slots[&"vest"] == &"plate_carrier" and player.inventory.slots[&"helmet"] == &"helmet", "the player deploys in the kit from the armory")
 	# A player death counts against the pool.
+	var deployed_kit := Roster.gear_counts(Roster.json_safe(player.inventory.net_state))
+	var bodies_before := level.bodies.get_child_count()
 	player.vitals.server_kill()
 	await _frames(2)
 	check(int(RosterDeployment.active(BaseHub.roster()).get("respawns_used", 0)) == 1, "a player respawn counts (%d free left)" % RosterDeployment.free_respawns_left(BaseHub.roster()))
+	# Captain, 2026-10-14: "respawn with the kit you had on. delete old player/bot bodies": the
+	# armory kit is still on him, and no body holds a second set of it.
+	check(Roster.gear_counts(Roster.json_safe(player.inventory.net_state)) == deployed_kit and level.bodies.get_child_count() == bodies_before,
+		"he respawns in the kit he deployed in, and leaves no body with a second set of it")
 	# Giving up while down (Captain, P0362) is a death like any other: the pool counts it too.
 	player.vitals.server_damage(500.0)
 	await _frames(2)

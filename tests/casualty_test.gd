@@ -1041,8 +1041,9 @@ func _test_dead_bodies() -> void:
 	level.squad_for(&"friendly").set_scavenge(player, true)
 
 
-## A dead player leaves a body with all their gear (only the hands item drops) and respawns;
-## a dead enemy's body keeps its gear too.
+## A dead player leaves no body and respawns with everything he had on (only the hands item
+## drops: Captain, 2026-10-14, "respawn with the kit you had on. delete old player/bot bodies");
+## a dead enemy's body keeps its gear.
 func _test_player_and_enemy_bodies() -> void:
 	print("Dead players and enemies")
 	_place(player, Vector3(-4, 0.1, 30))
@@ -1054,26 +1055,18 @@ func _test_player_and_enemy_bodies() -> void:
 	var spot := player.global_position
 	var items_before := _item_ids()
 	var bodies_before := level.bodies.get_child_count()
+	var markers_before := get_tree().get_nodes_in_group(GearMarker.GROUP).size()
 	player.vitals.server_hit(Vitals.HEAD, {"round_class": Vitals.FULL_POWER})
 	await _frames(3)
-	var corpse: Soldier = level.bodies.get_child(level.bodies.get_child_count() - 1) if level.bodies.get_child_count() > bodies_before else null
-	check(corpse != null and corpse.display_name() == "Player 1" and corpse.vitals.is_dead() and corpse.is_in_group(Soldier.DEAD_GROUP),
-		"a dead player leaves a body (%s)" % (corpse.display_name() if corpse else "none"))
-	if corpse == null:
-		return
-	check(corpse.log_name().begins_with("Player 1 [body ") and player.log_name() == "Player 1",
-		"the session log tells his body (%s) from him (%s)" % [corpse.log_name(), player.log_name()])
-	check(_flat(corpse.global_position, spot) < 0.5 and corpse.collision_layer == 0, "lying where he fell")
-	var on_body := _gear_of(corpse)
+	check(level.bodies.get_child_count() == bodies_before and get_tree().get_nodes_in_group(GearMarker.GROUP).size() == markers_before,
+		"a dead player leaves no body and no gear marker (%d bodies, %d before)" % [level.bodies.get_child_count(), bodies_before])
 	var without_case := gear_before.filter(func(g: String) -> bool: return not g.begins_with("hands:"))
-	check(on_body == without_case, "with everything he carried on it but the case in his hands (%d things)" % on_body.size())
+	var on_him := _gear_of(player)
+	check(player.vitals.is_up() and on_him == without_case,
+		"he respawned with everything he had on but the case in his hands (%d things)%s" % [on_him.size(),
+		"" if on_him == without_case else ": %s -> %s" % [without_case, on_him]])
 	var new_items := _new_items(items_before, spot, 10.0)
 	check(new_items == ["hvt_case"], "only what was in his hands dropped (%s)" % [new_items])
-	var markers := get_tree().get_nodes_in_group(GearMarker.GROUP)
-	check(markers.size() == 1 and (markers[0] as GearMarker).body() == corpse and "Player 1" in (markers[0] as GearMarker).text,
-		"the gear marker points at the body")
-	check(player.vitals.is_up() and player.inventory.slots[&"primary"] == &"m4a1" and player.inventory.slots[&"vest"] == &"",
-		"he respawned in the default kit")
 	# An enemy's body.
 	var hostile := level.spawn_soldier({"name": "BodyHostile", "faction": "hostile", "variant": "urban", "pos": Vector3(20, 0.1, 30),
 		"loadout": CompoundLevel.HOSTILE_LOADOUT, "combat": 0.5, "discipline": 0.5, "guard": true})
@@ -1099,6 +1092,11 @@ func _test_body_persistence() -> void:
 	_freeze()
 	await _seconds(1.0)  # bodies put down settle on the ground
 	check(_bodies().all(func(b: Soldier) -> bool: return not is_instance_valid(b.carried_by)), "nobody is carrying a body")
+	# A player who left the session while down leaves his body and a gear marker (a player who
+	# dies leaves none since Captain, 2026-10-14); stand one in for the save.
+	var left_body := player.server_leave_body()
+	await _frames(2)
+	check(left_body != null and left_body.has_gear_marker, "a body left by a player who left while down")
 	var before := {}
 	for b: Soldier in _bodies():
 		before[b.body_uid] = {"label": b.display_name(), "log": b.log_name(), "gear": _gear_of(b), "pos": b.global_position}
