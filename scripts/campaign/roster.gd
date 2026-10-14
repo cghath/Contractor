@@ -431,7 +431,7 @@ static func record_loadout(person: Dictionary, gear: Dictionary) -> void:
 static func gear_for_kit(kit: Array) -> Dictionary:
 	var inv := Inventory.new()
 	for pair: Array in kit:
-		inv.take(StringName(pair[0]), int(pair[1]))
+		Roles.give(inv, StringName(pair[0]), int(pair[1]))  # both plates worn
 	var state := inv.net_state.duplicate(true)
 	inv.free()
 	return json_safe(state)

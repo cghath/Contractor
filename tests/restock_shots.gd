@@ -78,8 +78,14 @@ func _ready() -> void:
 	screen.visible = true
 	await _seconds(0.5)
 	await _grab("inventory_before_restock")
+	var in_carriers := 0  # S0590: the six magazines restock found came out of a squadmate's carrier on the floor
+	for n: Node in level.items.get_children():
+		if n is WorldItem and not n.is_queued_for_deletion():
+			in_carriers += int(BaseArmory.contents_counts([{"id": (n as WorldItem).item_id, "count": (n as WorldItem).count, "state": (n as WorldItem).state}]).get("mag_556", 0))
+	print("[shots] 5.56 magazines inside carriers' pouches on the floor before the restock: %d" % in_carriers)
 	BaseHub.request("restock")
 	await _seconds(0.6)
+	print("[shots] the player has %d after it" % inv.count_of(&"mag_556"))
 	await _grab("inventory_after_restock")
 	# A magazine dragged into the IFAK pouch.
 	inv.insert_entry(&"pockets", {"id": &"mag_556", "count": 1})

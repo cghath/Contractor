@@ -537,6 +537,7 @@ func _test_session() -> void:
 	await _test_deployment(client)
 	await _finish_client(client)
 	await _test_restock_session()
+	await _test_restock_conservation()
 	await _test_zone_deployment()
 	await _test_revert()
 	await _test_contract_loop()
@@ -1224,6 +1225,15 @@ func _test_revert() -> void:
 func _test_restock() -> void:
 	print("Restock last loadout (S2)")
 	var m4 := ItemDB.get_item(&"m4a1")
+	# Role kits wear both plates (Inventory.take wears one unit per call: the second went in the vest).
+	var kitted := Inventory.new()
+	Roles.apply_kit(kitted, Roles.RIFLEMAN)
+	var from_roster := Inventory.new()
+	from_roster.net_state = GameState.from_json(Roster.gear_for_kit(Roles.kit(Roles.MEDIC)))
+	for k: Inventory in [kitted, from_roster]:
+		check(k.slots[&"plate_front"] == &"plate_ceramic_l4" and k.slots[&"plate_back"] == &"plate_ceramic_l4" and k.count_of(&"plate_ceramic_l4") == 0,
+			"a role kit wears both plates, front and back, none stowed (%s / %s, %d stowed)" % [k.slots[&"plate_front"], k.slots[&"plate_back"], k.count_of(&"plate_ceramic_l4")])
+		k.free()
 	# A rifleman as deployed: his kit, a holo on the M4 (it comes with a red dot), and the GP
 	# pouch moved to the back.
 	var inv := Inventory.new()
@@ -1420,4 +1430,98 @@ func _hub_units(soldiers: Array) -> Dictionary:
 		var worn := Roster.gear_counts(Roster.json_safe(s.inventory.net_state))
 		for id: String in worn:
 			out[id] = int(out.get(id, 0)) + int(worn[id])
+	return out
+
+
+## The screenshot run S0590's question: with every loose 5.56 magazine taken off the armory
+## floor, the player's Restock still came out with six. They came out of a squadmate's carrier
+## lying on the floor with its pouches full (the stash's own carriers count as stash: their
+## pouches and what's in them are unpacked into the pool). Restock never makes anything: every
+## item in the base level (world items, the player, everyone at the muster line), optics on
+## guns and what's in pouches and kits included, is counted before and after.
+func _test_restock_conservation() -> void:
+	print("Restock makes nothing (S2, S0590's six magazines)")
+	var base := level as BaseLevel
+	if base == null:
+		check(false, "at the base for the conservation checks")
+		return
+	var player: Soldier = level.players.get_node(^"1")
+	var muster: Array = []
+	for mid: String in Roster.available_ids(BaseHub.roster()):
+		if base.muster_soldier(mid) != null:
+			muster.append(base.muster_soldier(mid))
+	# The player deployed as a rifleman; a squadmate's full kit lies on the floor as it came
+	# off him (carrier with pouches and magazines); no loose magazines anywhere.
+	player.inventory.net_state = GameState.from_json(Roster.gear_for_kit(Roles.kit(Roles.RIFLEMAN)))
+	Roster.record_loadout(Roster.main_character(BaseHub.roster(), BaseHub.player_key(1)), Roster.json_safe(player.inventory.net_state))
+	player.inventory.strip()
+	var donor: Soldier = muster[0] if not muster.is_empty() else null
+	var in_pouches := 0
+	if donor:
+		donor.inventory.net_state = GameState.from_json(Roster.gear_for_kit(Roles.kit(Roles.RIFLEMAN)))
+		for e: Dictionary in donor.inventory.strip():
+			in_pouches += int(_deep_units([e]).get("mag_556", 0)) if String(e.id) == "plate_carrier" else 0
+			level.server_spawn_dropped(StringName(e.id), int(e.count), BaseLevel.DELIVERY + Vector3(randf_range(-1, 1), 0.3, randf_range(-0.5, 0.5)), e.get("state", {}))
+	for n: Node in level.items.get_children():
+		if n is WorldItem and (n as WorldItem).item_id == &"mag_556":
+			GameState.item_taken((n as WorldItem).uid)
+			n.queue_free()
+	await _frames(3)
+	var loose := level.items.get_children().filter(func(n: Node) -> bool: return n is WorldItem and not n.is_queued_for_deletion() and (n as WorldItem).item_id == &"mag_556")
+	var everyone: Array = [player] + muster
+	var before := _level_units(everyone)
+	check(loose.is_empty() and in_pouches == 6 and int(before.get("mag_556", 0)) >= 6,
+		"no loose magazines on the floor; the dropped carrier holds %d in its pouches (%d in the level)" % [in_pouches, int(before.get("mag_556", 0))])
+	BaseHub.request("restock")
+	await _frames(3)
+	var after := _level_units(everyone)
+	check(after == before, "the player's Restock makes nothing and loses nothing: every item in the base level, item by item")
+	if after != before:
+		print("    before %s\n    after  %s" % [before, after])
+	check(player.inventory.count_of(&"mag_556") <= int(before.get("mag_556", 0)) and player.inventory.count_of(&"mag_556") == 6,
+		"its six magazines are the ones from the carrier's pouches (%d)" % player.inventory.count_of(&"mag_556"))
+	BaseHub.request("restock_squad")
+	await _frames(3)
+	check(_level_units(everyone) == before, "and Restock squad after it makes nothing either")
+	await _seconds(BaseHub.STASH_POLL_S + 0.3)
+	check(_deep_units(BaseHub.stash()) == _deep_units(base.server_collect_stash()), "the campaign's stash is the floor (no stale copy to draw from)")
+
+
+## Every unit in the base level: its world items and `soldiers`' kit, with what's on and in
+## them (carriers' pouches, pouch and pack contents, kits) and the optic on each gun.
+func _level_units(soldiers: Array) -> Dictionary:
+	var entries: Array = []
+	for n: Node in level.items.get_children():
+		var w := n as WorldItem
+		if w and not w.is_queued_for_deletion():
+			entries.append({"id": w.item_id, "count": w.count, "state": w.state})
+	for s: Soldier in soldiers:
+		if is_instance_valid(s):
+			var copy := Inventory.new()
+			copy.net_state = s.inventory.net_state
+			entries.append_array(copy.strip())
+			copy.free()
+	return _deep_units(entries)
+
+
+## Units of each item in `entries` ({"id", "count", "state"?}), into their states (attachments,
+## held contents, a kit's contents), and a rail gun's optic (its own one when its state names none).
+func _deep_units(entries: Array, out := {}) -> Dictionary:
+	for e: Dictionary in entries:
+		var id := String(e.id)
+		var n := int(e.get("count", 1))
+		var state: Dictionary = e.get("state", {})
+		var item := ItemDB.get_item(StringName(id))
+		out[id] = int(out.get(id, 0)) + n
+		if item and Optics.has_rail(item) and Optics.mounted_id(item, state) != &"":
+			out[String(Optics.mounted_id(item, state))] = int(out.get(String(Optics.mounted_id(item, state)), 0)) + n
+		var inner: Array = []
+		var molle: Dictionary = state.get("molle", {})
+		for point: Variant in molle:
+			var att: Dictionary = molle[point]
+			inner.append({"id": att.id, "count": 1, "state": att.get("state", {})})
+			inner.append_array(att.get("held", []))
+		inner.append_array(state.get("held", []))
+		for i in n:
+			_deep_units(inner, out)
 	return out

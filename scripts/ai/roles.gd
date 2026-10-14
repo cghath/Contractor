@@ -67,7 +67,20 @@ static func kit(role: StringName) -> Array:
 ## Gives `inventory` the role's kit. Host only.
 static func apply_kit(inventory: Inventory, role: StringName) -> void:
 	for pair: Array in kit(role):
-		inventory.take(pair[0], pair[1])
+		give(inventory, pair[0], pair[1])
+
+
+## Gives `inventory` `count` of `id` as a kit does. Worn gear goes on one at a time:
+## Inventory.take wears only one unit per call and stows the rest, which put every kit's
+## second plate in the vest instead of the carrier's back pocket.
+static func give(inventory: Inventory, id: StringName, count: int) -> int:
+	var item := ItemDB.get_item(id)
+	if item == null or item.slot == &"":
+		return inventory.take(id, count)
+	var taken := 0
+	for i in count:
+		taken += inventory.take(id, 1)
+	return taken
 
 
 ## The squad's slots in order: [{"role": StringName, "team": int}], fire team A first.
