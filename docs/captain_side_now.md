@@ -17,16 +17,17 @@ picking up next, we'll read it and steer around it.
 
 **State.** `dev` = 4888efa (loot fix, friendly-muzzle fix, settings menu). Everything newer is on
 branches, all pushed:
-- **`integrate/b3` = 5862988**: dev + menu cleanup (no people checkbox, people always on),
+- **`integrate/b3` = ec22a34** (5862988 + the gear marker below; 5862988's CI failed only on the
+  known casualty flake "rests on the first", 0.08 m, so b3 was moved on to rerun CI): dev + menu cleanup (no people checkbox, people always on),
   settings polish (opaque panel, objective-marker toggle), pouch overhang fix, objective helper +
   ammo readout (mags + "about half" estimate, not exact counts), contract board keeps the mouse
   (base screen steps aside under it). Local suites green (R0360 on b2; R0363 supports). CI was
   running at handoff; one CI flake seen (supports host) that passes locally. **Next: if CI is
-  green, ff `dev` to 5862988, then build** (`tools/make_build.sh`, preset renamed "Windows Desktop",
+  green, ff `dev` to ec22a34, then build** (`tools/make_build.sh`, preset renamed "Windows Desktop",
   template `C:/Users/noahg/Downloads/godot.windows.template_release.x86_64.exe/...`) into
   `B:\Contractor\builds`, move B0357 to `builds\outdated`.
 - **`ui/gear-marker` = ec22a34** (off 5862988): dead player's "X's gear" label ~35% smaller
-  (pixel_size 0.0015 -> 0.00098). One line; merge after b3.
+  (pixel_size 0.0015 -> 0.00098). Already in b3.
 - **Agent branches, may be WIP** (each off 5862988; read the last commit message for what's left):
   - `gameplay/gun-handling` (worktree B:\Contractor-guns, port 25333): sight picture when aiming,
     M110 scope with magnification, realistic spread (M4 spread_deg 1.2 = ~2 m at 100 m is far too
