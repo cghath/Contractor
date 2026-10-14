@@ -334,6 +334,13 @@ func _test_bug_report(player: Soldier, level: CompoundLevel, faller: Soldier) ->
 	var perf := SessionLog.perf_line()
 	check(perf.begins_with("perf: frame ") and " ms avg" in perf and " AI, " in perf and "nav rebakes" in perf and "memory" in perf,
 		"a performance line: %s" % perf)
+	# Memory a release build can read too (Captain P0362: release builds logged "memory 0 MB";
+	# the engine's static count is debug-only): the process's resident memory, off the main thread.
+	var rss := SessionLog.process_memory_mb()
+	SessionLog._rss_mb = rss
+	var mem := SessionLog.memory_text()
+	check(rss > 10.0 and rss < 65536.0 and mem.begins_with("memory %.0f MB" % rss) and ", video " in mem,
+		"the process's memory is read without the debug-only count (%.0f MB): %s" % [rss, mem])
 	overlay.queue_free()
 	scout.queue_free()
 

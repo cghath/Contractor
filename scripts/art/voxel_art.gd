@@ -91,6 +91,17 @@ static func _civ_part(model: String, variant: String) -> String:
 
 static var _meshers: Dictionary = {}  # variant -> VoxelMesherCubes
 static var _meshes: Dictionary = {}   # "model|variant" -> Mesh
+## Plain clothes' rasterised models (the model name's hash -> VoxelBuffer), shared by every plain-clothes
+## scheme: their cloth is one flat palette entry (no camo), so the voxels' colour indices are the
+## same whatever the colours, and only the mesher's palette differs. Rasterising a 0.5 cm body
+## is about 0.5 s and meshing it about 30 ms, so a new person's outfit costs only the meshing
+## (Captain P0362: 12 civilians at once were a 3.4 s hitch on deploying).
+static var _plain_rasters: Dictionary = {}
+## The body parts' plain rasters are built ahead on a worker thread (warm_plain_bodies), so not
+## even the first person of a session waits for them.
+const PLAIN_PARTS: Array[String] = ["head", "torso", "upper_arm", "forearm", "leg", "thigh", "shin"]
+static var _warm_task := -1
+static var _warm_built: Dictionary = {}  # written by the worker only; taken after waiting for it
 static var _material: StandardMaterial3D
 static var _noise_a: FastNoiseLite
 static var _noise_b: FastNoiseLite
@@ -202,7 +213,49 @@ static func mesh(model: String, variant: String) -> Mesh:
 
 
 static func _build(spec: Dictionary, variant: String, salt: int) -> Mesh:
-	return _get_mesher(variant).build_mesh(_rasterize(spec, variant, salt), [])
+	return _get_mesher(variant).build_mesh(_raster(spec, variant, salt), [])
+
+
+## The model rasterised for `variant`: a plain-clothes scheme ("civp:") reuses the model's one
+## plain raster (_plain_rasters, by `salt`: mesh() salts with the model's name); anything else is built.
+static func _raster(spec: Dictionary, variant: String, salt: int) -> VoxelBuffer:
+	if not variant.begins_with("civp:"):
+		return _rasterize(spec, variant, salt)
+	finish_warm()  # the worker writes _plain_rasters: wait for it before reading
+	if not _plain_rasters.has(salt):
+		_plain_rasters[salt] = _rasterize(spec, variant, salt)
+	return _plain_rasters[salt]
+
+
+## Starts building every body part's plain raster (both body types) on a worker thread, once.
+## PeopleLayer calls it as a level starts, long before anyone in plain clothes spawns.
+static func warm_plain_bodies() -> void:
+	if _warm_task != -1 or not _plain_rasters.is_empty():
+		return
+	_camo(Vector3.ZERO, 0, "civp:")  # its noise is made here on the main thread, not on the worker
+	var models: Array[String] = []
+	for body in BODIES:
+		for part in PLAIN_PARTS:
+			models.append(body_part(part, body))
+	_warm_task = WorkerThreadPool.add_task(_warm.bind(models), false, "VoxelArt plain rasters")
+
+
+static func _warm(models: Array[String]) -> void:
+	for model in models:
+		_warm_built[model.hash()] = _rasterize(_spec(model), "civp:", model.hash())
+
+
+## Waits for the warm-up's worker (if one is running) and takes what it built. Call before
+## reading _plain_rasters, and as the level goes (so no task is left un-waited at quit).
+static func finish_warm() -> void:
+	if _warm_task < 0:
+		return
+	WorkerThreadPool.wait_for_task_completion(_warm_task)
+	_warm_task = -2  # done: never warmed again
+	for salt: int in _warm_built:
+		if not _plain_rasters.has(salt):
+			_plain_rasters[salt] = _warm_built[salt]
+	_warm_built = {}
 
 
 ## Which built voxels of `model` are solid, for hit tests (BodyVolume): {"dims" (built

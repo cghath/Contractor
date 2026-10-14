@@ -25,6 +25,9 @@ const SLOW_FRAME_S := 0.5
 const CHECK_S := 1.0
 ## A performance line this often (s): frame times, AI count, modules streamed in, nav rebakes.
 const PERF_S := 60.0
+## The process's memory is read this long before each performance line, off the main thread
+## (process_memory_mb).
+const MEMORY_LEAD_S := 5.0
 ## Below this a soldier has fallen out of the world.
 const FELL_Y := -100.0
 ## Log lines kept for the dumps.
@@ -64,6 +67,11 @@ var _perf_sum := 0.0
 var _perf_worst := 0.0
 var _rebakes := 0
 var _nav_watched: Node
+## The process's resident memory (MB) last read (-1: not known), the read running (-1: none),
+## and whether it's been read for the coming line.
+var _rss_mb := -1.0
+var _rss_task := -1
+var _rss_read := false
 
 
 ## Catches what the engine logs, on whatever thread logs it.
@@ -145,6 +153,9 @@ func _watch_net() -> void:
 func finish() -> void:
 	if session_id == "":
 		return
+	if _rss_task >= 0:
+		WorkerThreadPool.wait_for_task_completion(_rss_task)
+		_rss_task = -1
 	var verdict := "PASS" if errors + warnings + anomalies == 0 else "FAIL"
 	_write("session %s ended after %s: %s (%d errors, %d warnings, %d anomalies, %d dumps)" % [session_id,
 		_clock(), verdict, errors, warnings, anomalies, dumps])
@@ -223,9 +234,16 @@ func _process(delta: float) -> void:
 	_perf_sum += frame_s
 	_perf_worst = maxf(_perf_worst, frame_s)
 	_perf_left -= delta
+	if _rss_task >= 0 and WorkerThreadPool.is_task_completed(_rss_task):
+		WorkerThreadPool.wait_for_task_completion(_rss_task)
+		_rss_task = -1
+		_rss_read = true
+	if _perf_left <= MEMORY_LEAD_S and _rss_task < 0 and not _rss_read:
+		_rss_task = WorkerThreadPool.add_task(_read_rss, false, "SessionLog memory")
 	if _perf_left <= 0.0:
 		_perf_left = PERF_S
 		_write(perf_line())
+		_rss_read = false
 	_mutex.lock()
 	var pending := _pending.duplicate()
 	_pending.clear()
@@ -337,14 +355,62 @@ func perf_line() -> String:
 	var modules := "no modules"
 	if level and level.has_method(&"streamed_modules") and level.has_method(&"modules"):
 		modules = "modules %d/%d streamed" % [level.call(&"streamed_modules").size(), level.call(&"modules").size()]
-	var text := "perf: frame %.1f ms avg, %.1f ms worst (%.0f fps); %d AI, %d player%s; %s; nav rebakes %d; memory %.0f MB" % [
+	var text := "perf: frame %.1f ms avg, %.1f ms worst (%.0f fps); %d AI, %d player%s; %s; nav rebakes %d; %s" % [
 		avg * 1000.0, _perf_worst * 1000.0, 1.0 / maxf(avg, 0.0001), ai, players, "" if players == 1 else "s", modules, _rebakes,
-		Performance.get_monitor(Performance.MEMORY_STATIC) / 1048576.0]
+		memory_text()]
 	_perf_frames = 0
 	_perf_sum = 0.0
 	_perf_worst = 0.0
 	_rebakes = 0
 	return text
+
+
+## "memory 812 MB, video 240 MB": the process's resident memory (process_memory_mb, read off
+## the main thread before each line; the engine's own count where that isn't known), and the
+## video memory in use. Captain P0362: the engine's static count (Performance.MEMORY_STATIC,
+## OS.get_static_memory_usage) is only kept in debug builds, so a release build read 0 MB.
+func memory_text() -> String:
+	var mb := _rss_mb
+	if mb <= 0.0:
+		mb = Performance.get_monitor(Performance.MEMORY_STATIC) / 1048576.0
+	var video := Performance.get_monitor(Performance.RENDER_VIDEO_MEM_USED) / 1048576.0
+	return "memory %s MB, video %.0f MB" % ["%.0f" % mb if mb > 0.0 else "?", video]
+
+
+func _read_rss() -> void:
+	_rss_mb = process_memory_mb()
+
+
+## The process's resident memory (MB), or -1 if it can't be read: Linux from /proc/self/status,
+## Windows from tasklist, macOS from ps. Blocks for a moment on Windows and macOS (a process
+## runs): call it off the main thread.
+static func process_memory_mb() -> float:
+	var pid := OS.get_process_id()
+	match OS.get_name():
+		"Linux", "FreeBSD", "Android":
+			for line in FileAccess.get_file_as_string("/proc/self/status").split("\n"):
+				if line.begins_with("VmRSS:"):
+					return _digits(line) / 1024.0
+		"Windows":
+			var out: Array = []
+			if OS.execute("tasklist", ["/FI", "PID eq %d" % pid, "/FO", "CSV", "/NH"], out) == 0 and not out.is_empty():
+				var fields := String(out[0]).strip_edges().split("\",\"")
+				if fields.size() >= 5:
+					return _digits(fields[fields.size() - 1]) / 1024.0  # "1,234,567 K"
+		"macOS":
+			var out: Array = []
+			if OS.execute("ps", ["-o", "rss=", "-p", str(pid)], out) == 0 and not out.is_empty():
+				return _digits(String(out[0])) / 1024.0
+	return -1.0
+
+
+## The digits in `text` as a number (thousands separators of any locale dropped), or -1.
+static func _digits(text: String) -> float:
+	var d := ""
+	for c in text:
+		if c >= "0" and c <= "9":
+			d += c
+	return float(d.to_int()) if d != "" else -1.0
 
 
 ## What's going on now, for a dump (and the bug-report key, planned): the session, the zone, the

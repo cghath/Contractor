@@ -150,8 +150,41 @@ func _test_deployment() -> void:
 	level._ai_ready = true
 	level._spawn_garrison(module)
 	var first := _garrison(module).size()
+	var people_before := level.people.people().size()
+	var deploy_started := Time.get_ticks_usec()
 	check(Contracts.server_start_deployment([], ZONE) == "" and Contracts.deployment().cids.size() == 4, "deployed on all four (a hot zone)")
+	var deploy_ms := (Time.get_ticks_usec() - deploy_started) / 1000.0
 	CompoundLevel.spawn_ai = false
+	# Captain P0362: the zone's civilians all spawning in the deploy frame (with the navigation
+	# rebaking under each) was a 3.4 s hitch. They're queued and come out a few a frame, the
+	# navigation held till the last is out and then rebaked once per chunk.
+	var queued := level.people.spawning()
+	var held := level.nav.is_held()
+	var spawn_frames := 0
+	var worst_ms := 0.0
+	var last := Time.get_ticks_usec()
+	while level.people.spawning() > 0 and spawn_frames < 600:
+		await get_tree().process_frame
+		var now := Time.get_ticks_usec()
+		worst_ms = maxf(worst_ms, (now - last) / 1000.0)
+		last = now
+		spawn_frames += 1
+	check(queued >= 3 and held and level.people.spawning() == 0 and spawn_frames >= 2 and not level.nav.is_held(),
+		"the zone's %d civilians come out over %d frames (deploy call %.0f ms, worst frame after %.0f ms), the navigation held meanwhile and released after"
+		% [queued, spawn_frames, deploy_ms, worst_ms])
+	check(level.people.people().size() >= people_before + queued, "every queued civilian is out (%d people)" % level.people.people().size())
+	# What made each one slow: rasterising a 0.5 cm body for every new outfit. Plain clothes share
+	# one raster per body part (only the palette differs), so a new outfit is only meshed.
+	var rasters := VoxelArt._plain_rasters.size()
+	var outfit_started := Time.get_ticks_usec()
+	var torso_a := VoxelArt.mesh("torso", PersonLook._variant("123456", "654321", "c8996f", "6b4a2b"))
+	var torso_b := VoxelArt.mesh("torso", PersonLook._variant("abcdef", "654321", "c8996f", "6b4a2b"))
+	var outfit_ms := (Time.get_ticks_usec() - outfit_started) / 1000.0
+	var colours_a: PackedColorArray = torso_a.surface_get_arrays(0)[Mesh.ARRAY_COLOR]
+	var colours_b: PackedColorArray = torso_b.surface_get_arrays(0)[Mesh.ARRAY_COLOR]
+	check(rasters > 0 and VoxelArt._plain_rasters.size() == rasters and torso_a.get_surface_count() == torso_b.get_surface_count()
+		and colours_a.size() == colours_b.size() and colours_a != colours_b,
+		"two new shirts reuse the torso's plain raster (%d rasters), meshed in their own colours (%.0f ms for both)" % [rasters, outfit_ms])
 	var garrison := _garrison(module)
 	var apart := true
 	for i in garrison.size():

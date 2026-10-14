@@ -40,6 +40,11 @@ static var surrender_enabled := false
 static var contract_people := true
 
 const TICK_S := 0.25
+## A zone's civilians come out a few a frame, at most SPAWN_BUDGET_MS of spawning a frame (at
+## least one), as the voxel world stamps its structures (VoxelWorld.BUILD_BUDGET_MS); the
+## navigation's rebakes are held meanwhile and done once after (NavBuilder.hold). Captain P0362:
+## an HVT and 12 civilians spawned in one frame on deploying to Harbour yard was a 3.4 s hitch.
+const SPAWN_BUDGET_MS := 4.0
 const SURRENDER_CHECK_S := 1.0
 ## Proposed surrender rule: a hostile up but at least this hurt (pain, or blood left at most
 ## SURRENDER_BLOOD, or injury), with no other hostile up within SURRENDER_ALONE_M and someone
@@ -122,6 +127,8 @@ var _report_serial := 0
 var _cuffing := {}  # target instance id -> true while being cuffed
 var _rng := RandomNumberGenerator.new()
 var _zone_people := false  # host: the zone's civilians and delivery points are out
+var _spawn_queue: Array[Dictionary] = []  # host: civilians still to spawn (server_spawn_person data)
+var _held_nav: NavBuilder  # the navigation held while they come out
 
 
 ## The people layer of the level `from` is in (or null).
@@ -147,6 +154,8 @@ func _ready() -> void:
 	spawner.spawn_function = _make
 	add_child(spawner)
 	_rng.seed = 4511
+	set_process(false)  # on while civilians are queued
+	VoxelArt.warm_plain_bodies()  # plain clothes' body rasters, on a worker, before anyone needs them
 	Net.hosted.connect(_on_hosted)
 	Contracts.contract_live.connect(_on_contract_live)
 	Net.peer_joined.connect(_on_peer_joined)
@@ -280,8 +289,50 @@ func _spawn_civilians() -> void:
 			for q: Array in data.get("routine", []):
 				routine.append(module.to_global(Vector3(float(q[0]), float(q[1]), float(q[2]))))
 			var at: Array = data.get("pos", [0, 0.1, 0])
-			server_spawn_person({"name": ("Civ_%s_%d" % [module.module_id, i]).validate_node_name(), "kind": "civilian", "side": "neutral",
+			queue_spawn({"name": ("Civ_%s_%d" % [module.module_id, i]).validate_node_name(), "kind": "civilian", "side": "neutral",
 				"label": label, "pos": module.to_global(Vector3(float(at[0]), float(at[1]), float(at[2]))), "routine": routine})
+
+
+## Host only. A person (server_spawn_person's `data`) spawned over the next frames, a few a frame
+## (SPAWN_BUDGET_MS), with the navigation's rebakes held till the last is out.
+func queue_spawn(data: Dictionary) -> void:
+	if _spawn_queue.is_empty():
+		_held_nav = level.get_node_or_null(^"Navigation") as NavBuilder if level else null
+		if _held_nav:
+			_held_nav.hold()
+	_spawn_queue.append(data)
+	set_process(true)
+
+
+## Host: how many queued people (queue_spawn) are still to come out.
+func spawning() -> int:
+	return _spawn_queue.size()
+
+
+func _process(_delta: float) -> void:
+	var until := Time.get_ticks_usec() + int(SPAWN_BUDGET_MS * 1000.0)
+	while not _spawn_queue.is_empty():
+		var data: Dictionary = _spawn_queue.pop_front()
+		if persons.get_node_or_null(NodePath(String(data.name))) == null:
+			server_spawn_person(data)
+		if Time.get_ticks_usec() >= until:
+			break
+	if _spawn_queue.is_empty():
+		set_process(false)
+		_release_nav()
+
+
+func _release_nav() -> void:
+	if is_instance_valid(_held_nav):
+		_held_nav.release()
+	_held_nav = null
+
+
+func _exit_tree() -> void:
+	VoxelArt.finish_warm()
+	if not _spawn_queue.is_empty():
+		_spawn_queue.clear()
+		_release_nav()
 
 
 ## Host only. HVTs getting out at an extraction point centred on `centre` (x, z) within
