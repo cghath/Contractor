@@ -648,13 +648,24 @@ func reload_seconds(weapon: ItemData) -> float:
 	return float(weapon.stats.get("reload_s", 2.0)) * vitals.reload_mult()
 
 
+## aim_point's chest shape, found once and kept while it's still this body's (every AI scan asks).
+var _chest_shape: CollisionShape3D
+
+
 ## Where to aim at this body: the middle of its chest hitbox, wherever its stance put it.
 func aim_point() -> Vector3:
-	for child in get_children():
-		if child is Area3D and child.get_meta(&"body_part", &"") == Vitals.CHEST:
-			for shape in child.get_children():
-				if shape is CollisionShape3D:
-					return (shape as CollisionShape3D).global_position
+	if not is_instance_valid(_chest_shape) or _chest_shape.get_parent() == null or _chest_shape.get_parent().get_parent() != self:
+		_chest_shape = null
+		for child in get_children():
+			if child is Area3D and child.get_meta(&"body_part", &"") == Vitals.CHEST:
+				for shape in child.get_children():
+					if shape is CollisionShape3D:
+						_chest_shape = shape
+						break
+				if _chest_shape:
+					break
+	if _chest_shape:
+		return _chest_shape.global_position
 	return global_position + Vector3.UP * (1.0 if is_crouching() else 1.3)
 
 

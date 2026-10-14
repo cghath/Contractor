@@ -475,6 +475,12 @@ static func of(s: Node) -> SquadAI:
 
 
 func _physics_process(delta: float) -> void:
+	var started := Time.get_ticks_usec()
+	_tick(delta)
+	FrameCost.spent(&"ai", started)
+
+
+func _tick(delta: float) -> void:
 	if not _ready_done:
 		_setup()
 		return
@@ -780,6 +786,10 @@ func _setup() -> void:
 	_hold_point = body.global_position
 	_move_point = body.global_position
 	morale = _morale_base()
+	# AI spawned together (a squad, a garrison) would otherwise scan and think in the same
+	# frames for good: a random start spreads them out (research 2026-10-13 B2.6).
+	_scan_cd = randf() * SCAN_S
+	_think_cd = randf() * THINK_S
 	_ready_done = true
 	_pass_through_squadmates()
 

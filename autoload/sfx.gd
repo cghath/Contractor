@@ -3,8 +3,8 @@ extends Node
 ## world rather than photo-real; real recordings may override any sound later). Every sound
 ## has an id (data/sounds.json). Its stream is res://audio/sfx/<id>.ogg (or <id>_1.ogg,
 ## <id>_2.ogg ... for variants) when such a file exists, else a placeholder generated here
-## once and cached (_synth): layered noise and tones, a few variants per sound so repeats
-## don't sound identical.
+## (on worker threads at boot, _start_prebuild): layered noise and tones, a few variants per
+## sound so repeats don't sound identical.
 ##
 ## Each peer hears from its own listener (the current camera): a shot plays its near or far
 ## variant by distance and arrives late at the speed of sound; a round passing close to the
@@ -61,6 +61,16 @@ var _next := 0
 var _steps := {}  # soldier instance id -> {"pos": Vector3, "walked": float}
 var _engines := {}  # vehicle instance id -> {"player", "pos", "speed", "id"}
 var _heard := 0  # sounds played so far (history "n")
+## The boot prebuild (_start_prebuild): the sounds' ids and recipes, the group task (-1 once
+## taken in), and what the workers have built so far (under the mutex).
+var _prebuild_ids: Array[String] = []
+var _prebuild_recipes: Array[Dictionary] = []
+var _prebuild_task := -1
+var _prebuilt := {}
+var _prebuild_mutex := Mutex.new()
+var _prebuild_started := 0
+## How long the boot prebuild took, start to taken in (ms); 0 until then.
+var prebuild_ms := 0.0
 
 ## A sound under a roof this close above it plays through the room bus (reverb).
 const ROOF_M := 8.0
@@ -89,6 +99,7 @@ func _ready() -> void:
 		p.attenuation_model = AudioStreamPlayer3D.ATTENUATION_INVERSE_DISTANCE
 		add_child(p)
 		_pool.append(p)
+	_start_prebuild()
 
 
 func _load_defs() -> void:
@@ -239,6 +250,8 @@ func heard_since(since: float) -> Array[StringName]:
 # --- Footsteps (every peer, no network) -------------------------------------------------------
 
 func _process(delta: float) -> void:
+	if _prebuild_task >= 0 and WorkerThreadPool.is_group_task_completed(_prebuild_task):
+		_finish_prebuild()
 	var ear: Variant = listener()
 	if ear == null:
 		return
@@ -404,10 +417,17 @@ static func _stride(s: Soldier) -> float:
 # --- Streams: files first, else generated ---------------------------------------------------
 
 ## The streams for `id`: res://audio/sfx/<id>.ogg or <id>_1.ogg ... if present, else the
-## generated placeholders from its "synth" recipe.
+## generated placeholders from its "synth" recipe (built on worker threads at boot:
+## _start_prebuild).
 func streams(id: StringName) -> Array:
 	if _streams.has(id):
 		return _streams[id]
+	var started := Time.get_ticks_usec()
+	if _prebuild_task >= 0 and _prebuild_ids.has(String(id)):
+		_finish_prebuild()  # asked for before the workers are done (right at boot): wait for them
+		if _streams.has(id):
+			FrameCost.spent(&"sfx", started)
+			return _streams[id]
 	var out: Array = []
 	var single := AUDIO_DIR + String(id) + ".ogg"
 	if ResourceLoader.exists(single):
@@ -419,10 +439,70 @@ func streams(id: StringName) -> Array:
 	if out.is_empty():
 		var recipe: Dictionary = defs.get(String(id), {}).get("synth", {})
 		if not recipe.is_empty():
-			for v in SYNTH_VARIANTS:
-				out.append(synth(recipe, hash(String(id)) + v * 7919))
+			out = _synth_variants(String(id), recipe)
 	_streams[id] = out
+	FrameCost.spent(&"sfx", started)
 	return out
+
+
+static func _synth_variants(id: String, recipe: Dictionary) -> Array:
+	var out: Array = []
+	for v in SYNTH_VARIANTS:
+		out.append(synth(recipe, hash(id) + v * 7919))
+	return out
+
+
+## Synthesising a sound takes 60-250 ms (an explosion about 200, a rifle shot about 80), which
+## used to land on the main thread the first time it played, mid-fight (research 2026-10-13,
+## B2.1: over a second in all). So every sound with a recipe and no recording is built at boot,
+## on worker threads (one task a sound) while the main menu is up, and taken in once they're all
+## done (_process); streams() waits for them only if asked before then.
+func _start_prebuild() -> void:
+	for id: String in defs:
+		var recipe: Dictionary = (defs[id] as Dictionary).get("synth", {})
+		if recipe.is_empty() or ResourceLoader.exists(AUDIO_DIR + id + ".ogg") or ResourceLoader.exists("%s%s_1.ogg" % [AUDIO_DIR, id]):
+			continue
+		_prebuild_ids.append(id)
+		_prebuild_recipes.append(recipe.duplicate(true))  # the workers' own copy
+	if _prebuild_ids.is_empty():
+		return
+	_prebuild_started = Time.get_ticks_usec()
+	_prebuild_task = WorkerThreadPool.add_group_task(_prebuild_one, _prebuild_ids.size(), -1, false, "Sfx prebuild")
+
+
+## On a worker thread: sound `i` of _prebuild_ids.
+func _prebuild_one(i: int) -> void:
+	var built := _synth_variants(_prebuild_ids[i], _prebuild_recipes[i])
+	_prebuild_mutex.lock()
+	_prebuilt[_prebuild_ids[i]] = built
+	_prebuild_mutex.unlock()
+
+
+## Waits for the prebuild (no wait once it's done) and takes its sounds in.
+func _finish_prebuild() -> void:
+	if _prebuild_task < 0:
+		return
+	WorkerThreadPool.wait_for_group_task_completion(_prebuild_task)
+	_prebuild_task = -1
+	_prebuild_mutex.lock()
+	for id: String in _prebuilt:
+		if not _streams.has(StringName(id)):
+			_streams[StringName(id)] = _prebuilt[id]
+	_prebuilt.clear()
+	_prebuild_mutex.unlock()
+	prebuild_ms = (Time.get_ticks_usec() - _prebuild_started) / 1000.0
+	print("[sfx] %d sounds built on worker threads in %.0f ms" % [_prebuild_ids.size(), prebuild_ms])
+
+
+## Whether the sounds built at boot are all taken in.
+func is_prebuilt() -> bool:
+	return _prebuild_task < 0
+
+
+func _exit_tree() -> void:
+	if _prebuild_task >= 0:
+		WorkerThreadPool.wait_for_group_task_completion(_prebuild_task)  # a group task must be waited on
+		_prebuild_task = -1
 
 
 ## A placeholder sound from a recipe (SfxSynth.make).

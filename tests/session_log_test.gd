@@ -367,6 +367,14 @@ func _test_bug_report(player: Soldier, level: CompoundLevel, faller: Soldier) ->
 	var perf := SessionLog.perf_line()
 	check(perf.begins_with("perf: frame ") and " ms avg" in perf and " AI, " in perf and "nav rebakes" in perf and "memory" in perf,
 		"a performance line: %s" % perf)
+	check("; worst frame: " in perf and " draws, " in perf, "it says what the worst frame went on")
+	var spent := SessionLog.costs_text({&"nav": 3100, &"ai": 212400, &"sfx": 40}, {"physics": 215.0, "process": 4.2, "draws": 812, "primitives": 1200000})
+	check(spent == "ai 212.4 ms, nav 3.1 ms; engine physics 215.0 ms, process 4.2 ms, 812 draws, 1.20M primitives",
+		"costliest system first, under 0.1 ms left out: %s" % spent)
+	var t := Time.get_ticks_usec()
+	OS.delay_msec(2)
+	FrameCost.spent(&"probe", t)
+	check(int(FrameCost.take().get(&"probe", 0)) >= 2000 and FrameCost.take().is_empty(), "FrameCost counts a system's time while a session is open, and starts afresh")
 	# Memory a release build can read too (Captain P0362: release builds logged "memory 0 MB";
 	# the engine's static count is debug-only), with no child process (no console window).
 	var debug_mem := SessionLog.memory_text()

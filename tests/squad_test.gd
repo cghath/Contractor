@@ -565,6 +565,13 @@ func _test_foliage_lines() -> void:
 	var under := sc.foliage_between(Vector3(20, 1.0, -20), Vector3(20, 1.0, 20))
 	check(is_equal_approx(through, 1.4) and over == 0.0 and past == 0.0 and crown > 2.0 and under == 0.0,
 		"foliage lines: %.2f m through a bush, none over or past it, %.1f m through a crown, none under it" % [through, crown])
+	# foliage_least walks the foliage once for two lines (Spotting.foliage_m: head and chest).
+	var eyes := Vector3(1, 1.6, -20)
+	var pairs := [[Vector3(0, 0.3, 20), Vector3(0, 1.6, 20)], [Vector3(20, 3.0, 20), Vector3(20, 1.0, 20)],
+		[Vector3(0, 0.3, 20), Vector3(20, 3.0, 20)], [Vector3(3, 0.3, 20), Vector3(1, 1.6, -20)]]
+	var same := pairs.all(func(p: Array) -> bool: return is_equal_approx(sc.foliage_least(eyes, p[0], p[1]),
+		minf(sc.foliage_between(eyes, p[0]), sc.foliage_between(eyes, p[1]))))
+	check(same, "foliage for two lines in one walk: the clearer line's, as two walks give")
 	sc.free()
 
 
