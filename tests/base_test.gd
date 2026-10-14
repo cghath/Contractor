@@ -1118,6 +1118,12 @@ func _test_zone_deployment() -> void:
 		"the host's player starts at the zone's insertion point")
 	var up := squad.is_empty() or await _wait_until(func() -> bool: return _roster_soldier(String(squad[0])) != null, 30.0)
 	check(up, "the picked squadmate deploys into the zone with them")
+	# Captain, 2026-10-14 (falling out of the world): straight after the switch, and a moment
+	# on, everyone stands on the zone's ground, none below it or past its edge.
+	check(_all_on_ground(zone), "right after the switch into the zone, nobody is below or past its ground")
+	await get_tree().create_timer(1.5).timeout
+	check(_all_on_ground(zone) and zone.get_node_or_null(^"GroundGuard") is GroundGuard,
+		"and a moment on still nobody has fallen (the zone's safety net is in place)")
 	var out: Array = [player]
 	if not squad.is_empty() and _roster_soldier(String(squad[0])):
 		out.append(_roster_soldier(String(squad[0])))
@@ -1129,6 +1135,23 @@ func _test_zone_deployment() -> void:
 	var home := await _wait_until(func() -> bool: return CompoundLevel.current(self) is BaseLevel, 20.0)
 	check(home, "and everyone is back at the base")
 	level = CompoundLevel.current(self)
+	await get_tree().create_timer(1.5).timeout
+	check(level != null and _all_on_ground(level), "back at the base a moment on, nobody is below or past its ground (S0736)")
+
+
+## Every soldier in `lvl` within 2 m of its ground height and inside its ground area.
+func _all_on_ground(lvl: CompoundLevel) -> bool:
+	var ok := true
+	for n in get_tree().get_nodes_in_group(&"combatants"):
+		var s := n as Soldier
+		if s == null or s.is_queued_for_deletion() or is_instance_valid(s.vehicle):
+			continue
+		var p := s.global_position
+		var fine := absf(p.y - lvl.ground_height(p.x, p.z)) < 2.0 and lvl.ground_area().grow(0.5).has_point(Vector2(p.x, p.z))
+		if not fine:
+			print("    %s is at %s (ground %.1f)" % [s.log_name(), p, lvl.ground_height(p.x, p.z)])
+		ok = ok and fine
+	return ok
 
 
 ## Wave 4B part 1, the loop: accept on the board -> prep -> deploy -> the briefing in the zone

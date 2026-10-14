@@ -6,6 +6,8 @@ extends Node3D
 const PLAYER_SCENE := preload("res://scenes/soldier.tscn")
 const SPAWN_POINTS: Array[Vector3] = [Vector3(-3, 0.1, 24), Vector3(-1, 0.1, 24), Vector3(1, 0.1, 24), Vector3(3, 0.1, 24)]
 const COMPOUND_HALF := 20.0
+## The flat ground pad's side (m), centred on the origin (the compound and the base hub).
+const GROUND_SIZE_M := 160.0
 const WALL_THICKNESS := 0.3
 ## Thin-walled outbuildings (see _build_structures), as [from, to (metres), material] boxes.
 ## A wooden lean-to against the east wall, 10 cm plank walls with a doorway to the west and
@@ -215,6 +217,7 @@ func _ready() -> void:
 	add_child(Launchers.new())  # "Launchers": anti-armour rockets and missiles in flight (wave 5)
 	add_child(HeliSupports.new())  # "HeliSupports": Black Hawk resupply, transport, extraction (wave 5b V3)
 	AavSupport.install(self)  # wave 5b (V4): the LHD or FOB origin, the AAV support, the motor pool
+	add_child(GroundGuard.new())  # "GroundGuard": puts back on the ground anything lost below or past it
 
 
 ## The playable area on the map, in metres on the ground plane (x along x, y along z): the
@@ -367,6 +370,34 @@ func level_info() -> Dictionary:
 ## `pos` moved onto the ground (the compound's ground is flat at 0; a zone's follows its terrain).
 func ground_point(pos: Vector3) -> Vector3:
 	return pos
+
+
+## The ground's height at (x, z): the compound's is flat at 0 (ZoneLevel: its terrain).
+func ground_height(_x: float, _z: float) -> float:
+	return 0.0
+
+
+## Where there is ground (x along x, y along z, metres): the compound's GROUND_SIZE_M pad
+## (ZoneLevel: the whole zone). Past it there is nothing to stand on (GroundGuard).
+func ground_area() -> Rect2:
+	return Rect2(-GROUND_SIZE_M * 0.5, -GROUND_SIZE_M * 0.5, GROUND_SIZE_M, GROUND_SIZE_M)
+
+
+## `pos` relative to the ground: its y is height above the ground at (x, z). The compound's
+## fixed placements (PeopleLayer.COMPOUND) are written for flat ground at 0; B-05: in a
+## procedural zone they spawned under the terrain and fell to y -120.
+func above_ground(pos: Vector3) -> Vector3:
+	return Vector3(pos.x, ground_height(pos.x, pos.z) + pos.y, pos.z)
+
+
+## The nearest spot on the ground to `pos` (Captain, 2026-10-14: anything that fell below or
+## past the ground goes back on it nearby, GroundGuard): (x, z) kept inside the ground area by
+## GroundGuard.INSET_M, then on the ground (ground_point).
+func put_on_ground(pos: Vector3) -> Vector3:
+	var area := ground_area().grow(-GroundGuard.INSET_M)
+	var x := clampf(pos.x if is_finite(pos.x) else 0.0, area.position.x, area.end.x)
+	var z := clampf(pos.z if is_finite(pos.z) else 0.0, area.position.y, area.end.y)
+	return Vector3(x, ground_height(x, z) + 0.1, z)
 
 
 ## Every voxel world in the level that is loaded now.
@@ -975,13 +1006,13 @@ func _build_environment() -> void:
 	ground.collision_layer = 1
 	var shape := CollisionShape3D.new()
 	var box := BoxShape3D.new()
-	box.size = Vector3(160, 1, 160)
+	box.size = Vector3(GROUND_SIZE_M, 1, GROUND_SIZE_M)
 	shape.shape = box
 	shape.position.y = -0.5
 	ground.add_child(shape)
 	var mesh_instance := MeshInstance3D.new()
 	var plane := PlaneMesh.new()
-	plane.size = Vector2(160, 160)
+	plane.size = Vector2(GROUND_SIZE_M, GROUND_SIZE_M)
 	var material := StandardMaterial3D.new()
 	material.albedo_color = Color("6d6a55")
 	plane.material = material

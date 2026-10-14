@@ -215,18 +215,26 @@ func server_populate(content: Dictionary) -> void:
 	var fallen := {}
 	for record: Dictionary in GameState.bodies:
 		fallen[String(record.get("label", ""))] = true
+	var lvl := level as CompoundLevel
+	# B-05: `content`'s positions are heights above the ground (COMPOUND's are written for the
+	# compound's flat ground at 0). In a procedural zone they were taken as world heights and
+	# put people under the terrain (civilians and HVTs fell to y -120 in the frame bench).
+	var on_ground := func(p: Vector3) -> Vector3: return lvl.above_ground(p) if lvl else p
 	for data: Dictionary in content.get("people", []):
 		if fallen.has(String(data.get("label", data.name))) or People.is_delivered(String(data.get("hvt_id", "-"))):
 			continue
-		server_spawn_person(data)
+		var placed := data.duplicate()
+		placed.pos = on_ground.call(data.pos)
+		if data.has("routine"):
+			placed.routine = (data.routine as Array).map(func(q: Vector3) -> Vector3: return on_ground.call(q))
+		server_spawn_person(placed)
 	for data: Dictionary in content.get("intel", []):
-		server_place_intel(StringName(data.id), data.pos, String(data.get("source", "")), String(data.uid))
-	var lvl := level as CompoundLevel
+		server_place_intel(StringName(data.id), on_ground.call(data.pos), String(data.get("source", "")), String(data.uid))
 	for data: Dictionary in content.get("items", []):
 		if lvl and not GameState.is_looted(data.uid):
-			lvl.spawn_item(StringName(data.id), int(data.get("count", 1)), data.pos, data.uid)
+			lvl.spawn_item(StringName(data.id), int(data.get("count", 1)), on_ground.call(data.pos), data.uid)
 	for data: Dictionary in content.get("points", []):
-		server_add_point(data.pos, float(data.get("radius", DeliveryPoint.DEFAULT_RADIUS)), String(data.get("label", "Extraction")), String(data.get("name", "")))
+		server_add_point(on_ground.call(data.pos), float(data.get("radius", DeliveryPoint.DEFAULT_RADIUS)), String(data.get("label", "Extraction")), String(data.get("name", "")))
 
 
 # --- Host: a contract's people (wave 4B) ---------------------------------------------------

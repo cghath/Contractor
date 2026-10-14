@@ -127,6 +127,11 @@ func ground_height(x: float, z: float) -> float:
 	return terrain.height_at(x, z)
 
 
+## Where there is ground: the whole zone (its edge walls stand just outside).
+func ground_area() -> Rect2:
+	return map_area()
+
+
 func voxel_worlds() -> Array[VoxelWorld]:
 	var out: Array[VoxelWorld] = []
 	for module in _modules:
