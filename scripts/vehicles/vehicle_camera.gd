@@ -152,6 +152,10 @@ func look_angles() -> Vector2:
 func place(delta: float) -> void:
 	var v := _vehicle
 	var target := pivot_of(v)
+	# Under a roof, a bridge or an overhang: the pivot comes down below it, so the arm never
+	# starts inside something.
+	var base := v.global_transform * hull_box(v).get_center()
+	target = base + (target - base) * _clear_share(base, target - base, v)
 	if _arm < 0.0 or _pivot.distance_to(target) > SNAP_M:
 		_pivot = target
 	else:

@@ -849,6 +849,9 @@ func _test_chase_camera() -> void:
 	check(clashes.is_empty(), "and B does nothing else (%s)" % [clashes])
 	VehicleCamera.chase = not VehicleCamera.FIRST_PERSON_DEFAULT
 	check(VehicleCamera.chase, "a session starts in the chase view (first person waits for the interiors)")
+	# Out of the M2 a moment ago (the gun checks): the exit's grace runs out first (a body that
+	# just got out isn't placed at a seat for EXIT_GRACE_S), and the camera has a frame to notice.
+	await _seconds(Vehicle.EXIT_GRACE_S + 0.1)
 	var cam := VehicleCamera.of(player)
 	check(cam != null and not cam.active and player.camera.current, "on foot: the soldier's own camera")
 	if cam == null:
@@ -866,7 +869,8 @@ func _test_chase_camera() -> void:
 	check(rel.dot(fwd) < -box.size.z * 0.5 and cam.global_position.y > v.global_position.y + box.end.y,
 		"behind the vehicle (%.1f m) and above its roof (%.1f m)" % [-rel.dot(fwd), cam.global_position.y - v.global_position.y])
 	check((-cam.global_basis.z).dot(fwd) > 0.99, "looking where the driver looks: ahead")
-	await get_tree().physics_frame
+	for i in 2:  # physics_frame fires before the tick's _physics_process: wait one through
+		await get_tree().physics_frame
 	check(not player.view_model.visible, "no first-person weapon floating in the chase view")
 	var readout := v.readout(0)
 	check(readout.contains("B: 1st person"), "the HUD line names the key and the view it switches to (%s)" % readout)
@@ -885,7 +889,8 @@ func _test_chase_camera() -> void:
 	player.player_input._unhandled_input(press)
 	for i in 2:
 		await get_tree().process_frame
-	await get_tree().physics_frame
+	for i in 2:  # physics_frame fires before the tick's _physics_process: wait one through
+		await get_tree().physics_frame
 	check(not VehicleCamera.chase and not cam.active and player.camera.current and get_viewport().get_camera_3d() == player.camera,
 		"B: first person")
 	check(player.camera.global_position.distance_to(v.seat_eye_point(0)) < 0.15 and player.view_model.visible,
@@ -894,6 +899,25 @@ func _test_chase_camera() -> void:
 	for i in 2:
 		await get_tree().process_frame
 	check(VehicleCamera.chase and cam.active and cam.current, "B again: back to the chase view")
+	# A passenger: the same chase view, and B works there too.
+	check(v.server_switch(player, 2), "over to a rear passenger seat")
+	player.rotation.y = _yaw(v)
+	player.set_pitch(0.0)
+	for i in 3:
+		await get_tree().process_frame
+	check(cam.active and get_viewport().get_camera_3d() == cam and (cam.global_position - v.global_position).dot(fwd) < -box.size.z * 0.5,
+		"a passenger sees through the chase camera too, behind the vehicle")
+	player.player_input._unhandled_input(press)
+	for i in 2:
+		await get_tree().process_frame
+	for i in 2:  # physics_frame fires before the tick's _physics_process: wait one through
+		await get_tree().physics_frame
+	check(not cam.active and get_viewport().get_camera_3d() == player.camera and player.camera.global_position.distance_to(v.seat_eye_point(2)) < 0.15,
+		"B in the passenger seat: first person at that seat's eye (%.2f m off)" % player.camera.global_position.distance_to(v.seat_eye_point(2)))
+	player.player_input._unhandled_input(press)
+	for i in 2:
+		await get_tree().process_frame
+	check(cam.active, "and B back to the chase view")
 	# The gunner's rounds go where the chase camera looks.
 	check(v.server_switch(player, 4) and v.gunner() == player, "over to the M2")
 	await get_tree().process_frame
@@ -954,7 +978,8 @@ func _test_chase_camera() -> void:
 	check(cam.global_position.distance_to(VehicleCamera.pivot_of(v)) > VehicleCamera.arm_length(v) - 0.3, "the wall gone, the arm eases back out")
 	# Out of the ground: looking up from a helicopter (a long arm) keeps the camera above it.
 	var heli := layer.server_spawn("uh60", Transform3D(Basis(), Vector3(30, 0, 40)), "", &"player", "test_chase_heli")
-	await get_tree().physics_frame
+	for i in 2:  # physics_frame fires before the tick's _physics_process: wait one through
+		await get_tree().physics_frame
 	check(heli != null and heli.server_enter(player, 2), "into a UH-60's crew seat")
 	if heli:
 		player.rotation.y = _yaw(heli)
@@ -966,6 +991,13 @@ func _test_chase_camera() -> void:
 		check(cam.active and above > VehicleCamera.ARM_RADIUS * 0.5, "looking up, the camera stays above the ground (%.2f m)" % above)
 		var behind := (cam.global_position - heli.global_position).dot(heli.global_basis.z)
 		check(behind > 6.0, "behind a helicopter, further for its size (%.1f m)" % behind)
+		await _seconds(Vehicle.EXIT_GRACE_S + 0.1)  # seated for real (out of the M-ATV's grace)
+		player.rotation.y = _yaw(heli) + deg_to_rad(150.0)
+		player.set_pitch(-0.2)
+		for i in 30:
+			await get_tree().process_frame
+		var side := (cam.global_position - heli.global_position).dot(heli.global_basis.x)
+		check(side > 4.0, "looking back over the left shoulder from the crew seat (held at the seat's limit), the camera swings round to the helicopter's right (%.1f m)" % side)
 		heli.server_exit(player)
 		heli.queue_free()
 	else:
@@ -1388,6 +1420,14 @@ func _run_client(address: String) -> void:
 	var moved := matv.global_position.distance_to(start)
 	check(moved > 8.0, "it drives: the client sees the M-ATV move %.1f m" % moved)
 	check(seat_err < 0.05, "and its own player rides at the seat all the way (%.3f m off at worst)" % seat_err)
+	# The chase camera is client side: the client's own seated player sees through it, following
+	# the vehicle as the client draws it (VehicleCamera).
+	var cam := VehicleCamera.of(player)
+	var arm := VehicleCamera.arm_length(matv)
+	var cam_off := (cam.global_position - VehicleCamera.pivot_of(matv)).length() if cam else INF
+	check(cam != null and cam.active and get_viewport().get_camera_3d() == cam and cam_off < arm + 1.5
+		and (cam.global_position - matv.global_position).dot(-matv.global_basis.z) < 0.0,
+		"the client's driver sees through the chase camera, behind the M-ATV as it drives (%.1f m from the pivot, arm %.1f m)" % [cam_off, arm])
 	var jumps := 0
 	var last := matv.global_position
 	for i in 30:
@@ -1405,5 +1445,7 @@ func _run_client(address: String) -> void:
 	matv.request_exit.rpc_id(1)
 	await _wait_for(func() -> bool: return player.vehicle == null and matv.seat_of(player) < 0, 5.0)
 	check(player.vehicle == null and player.global_position.distance_to(matv.global_position) > 1.2, "and gets out beside it")
+	await get_tree().process_frame
+	check(cam != null and not cam.active and get_viewport().get_camera_3d() == player.camera, "and sees through their own eyes again")
 	await _seconds(0.5)
 	_finish()
