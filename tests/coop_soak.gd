@@ -1206,6 +1206,16 @@ func _treat_loop(victim_peer: int) -> void:
 				_said_lacking = true
 				_say("medic: %d thing(s) to do on peer %d but nothing to do them with: %s" % [wanted.size(), victim_peer,
 					", ".join(wanted.map(func(t: Dictionary) -> String: return "%s (%s)" % [t.get("label", t.get("kind", "?")), str(Vitals.task_items(t))]))])
+				# What this medic holds of them, as this machine sees it (S0735: a medic whose kit
+				# summary had 3 IVs found none here).
+				var held := {}
+				for t: Dictionary in wanted:
+					for id: StringName in Vitals.task_items(t):
+						var n := me.inventory.medical_count(id)
+						if n > 0:
+							held[String(id)] = n
+				_say("medic: holds %s; containers %s; slots %s" % [JSON.stringify(held), str(me.inventory.search_containers()),
+					str(me.inventory.slots.values().filter(func(v: StringName) -> bool: return v != &""))])
 			await _sleep(1.0)  # nothing to do now: waiting for them to come round
 			continue
 		var seconds := me.treat_seconds(victim, ItemDB.get_item(item))
