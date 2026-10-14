@@ -96,6 +96,16 @@ var late := false
 var human := false
 var wait_human_s := 600.0
 const HUMAN_EXTRACT_S := 1200.0
+## With a human in (--human), the human leads each deployment: the bots keep a loose formation
+## 10-25 m off them (FOLLOW: right, back in m, turned the way the human faces), fight what they
+## see, treat them when they go down, board a vehicle or get in an extraction point with them.
+## The host still takes the contract and runs the briefing (it waits for the human's "ready"),
+## but there is no scripted advance, fight or extraction: the human decides. Gives up on a
+## deployment after HUMAN_DEPLOY_S, or 60 s after the human left it.
+const FOLLOW := {0: Vector2(-12.0, 8.0), 1: Vector2(10.0, 10.0), 2: Vector2(-5.0, 17.0), 3: Vector2(17.0, 18.0)}
+const FOLLOW_NEAR_M := 10.0
+const FOLLOW_FAR_M := 25.0
+const HUMAN_DEPLOY_S := 7200.0
 
 var recorder: Node
 var level: CompoundLevel
@@ -229,6 +239,17 @@ func _wait_for(condition: Callable, seconds: float) -> bool:
 	return true
 
 
+## main.tscn goes in at /root/Main, where a player's build has it, so the host's node paths
+## (RPCs, spawners) are the ones a real client has (S0745: the Captain's build joined a soak host
+## whose world was at /root/CoopSoak/Main: "Node not found: CoopSoak/Main/Base/ItemSpawner",
+## nothing replicated to him). Bots and a build can then share one session.
+func _add_main(node: Node) -> void:
+	node.name = "Main"
+	get_tree().root.add_child.call_deferred(node)
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+
 func _level() -> CompoundLevel:
 	level = CompoundLevel.current(self)
 	return level
@@ -294,8 +315,7 @@ func _host_main() -> void:
 		BaseArmory.add(BaseHub.stash(), StringName(pair[0]), int(pair[1]))
 	Campaign.save_campaign()
 	main = load("res://scenes/main.tscn").instantiate()
-	add_child(main)
-	await get_tree().process_frame
+	await _add_main(main)
 	BaseHub.prepare_session()
 	main.get_node(^"Menu").host()
 	if not Net.is_hosting():
@@ -476,7 +496,11 @@ func _host_cycle(cycle: int) -> Dictionary:
 		_pick_insertion(briefing)
 	if briefing:
 		briefing.server_set_ready(1, true)
-	var all_ready := await _wait_for(func() -> bool: return briefing != null and briefing.all_ready(), 25.0)
+	var ready_wait := 25.0
+	if human and not _humans().is_empty():
+		ready_wait = wait_human_s  # the human says when to go
+		_say("briefing: waiting up to %d s for the human to say ready" % int(ready_wait))
+	var all_ready := await _wait_for(func() -> bool: return briefing != null and briefing.all_ready(), ready_wait)
 	if briefing:
 		briefing.server_start(true)
 	result["briefing"] = {"all_ready": all_ready}
@@ -485,6 +509,8 @@ func _host_cycle(cycle: int) -> Dictionary:
 		result.why = "the contract never went live"
 		return result
 	await _sleep(3.0)  # the garrisons come out over a few frames
+	if human and _human_lead() != 0:
+		return await _host_follow_human(result)
 	var target: Variant = _objective_point()
 	result["objective"] = Recorder._v3(target) if target != null else null
 	# Start in dead ground out of the hostiles' sight (Captain: the insertion put the team in
@@ -588,7 +614,11 @@ func _host_cycle(cycle: int) -> Dictionary:
 	if not await _wait_for(_in_base, 60.0):
 		result.why = "never got back to the base (extraction state %d)" % extraction.state
 		return result
-	# Debrief.
+	return await _host_debrief(result, serial_before)
+
+
+## Host: back at the base after a deployment: every peer gets the debrief, the host closes it.
+func _host_debrief(result: Dictionary, serial_before: int) -> Dictionary:
 	await _wait_for(func() -> bool: return int(Contracts.last_debrief().get("serial", 0)) > serial_before, 10.0)
 	var debrief := Contracts.last_debrief()
 	_set_phase("debrief", {"debrief": int(debrief.get("serial", 0))})
@@ -604,6 +634,221 @@ func _host_cycle(cycle: int) -> Dictionary:
 	await _sleep(3.0)
 	result.ok = true
 	return result
+
+
+## The human the bots follow (--human): the first connected peer that is no bot and has a
+## soldier in the level; 0 if none.
+func _human_lead() -> int:
+	for peer: int in _humans():
+		if _player(peer) != null:
+			return peer
+	return 0
+
+
+## Host, --human with a human in: the human leads the deployment (FOLLOW). Waits until the
+## session is back at the base (the human extracted), then the debrief as usual.
+func _host_follow_human(result: Dictionary) -> Dictionary:
+	var lead := _human_lead()
+	var serial_before := int(Contracts.last_debrief().get("serial", 0))
+	_set_phase("follow", {"leader": lead, "down": {}})
+	_say("the human (peer %d) leads: the bots keep %d-%d m off them, fight what they see, treat them, board and extract with them" % [lead, int(FOLLOW_NEAR_M), int(FOLLOW_FAR_M)])
+	_fight = true
+	var started := Recorder.now()
+	var gone_since := -1.0
+	var note_at := 0.0
+	# The zone's preset extraction points (one may lie on the insertion): only a point the human
+	# calls, or a preset one they come back to after going out, means "extract now".
+	var extraction := MapNodes.extraction(_level())
+	_preset_points = extraction.points.map(func(p: Dictionary) -> int: return int(p.get("id", -1))) if extraction else []
+	_human_start = _player(lead).global_position if _player(lead) else Vector3.ZERO
+	_human_went_out = false
+	_human_in_point_since = -1.0
+	while not _in_base() and Recorder.now() - started < HUMAN_DEPLOY_S:
+		await _sleep(0.25)
+		var now_lead := _human_lead()
+		if now_lead == 0:
+			if gone_since < 0.0:
+				gone_since = Recorder.now()
+				_say("the human is not in the deployment: waiting 60 s for them")
+			if Recorder.now() - gone_since > 60.0:
+				break
+			continue
+		gone_since = -1.0
+		if now_lead != int(_phase.get("leader", 0)):
+			_set_phase("follow", {"leader": now_lead})
+		_follow_tick(_me(), now_lead)
+		_extract_with_human(now_lead)
+		if Recorder.now() >= note_at:
+			note_at = Recorder.now() + 30.0
+			_say("follow: %s" % _follow_note(now_lead))
+	_fight = false
+	_stop_fighting()
+	result["follow"] = {"seconds": snappedf(Recorder.now() - started, 0.1), "human": lead}
+	if not await _wait_for(_in_base, 60.0):
+		result.why = "the human never extracted (%s)" % ("left the deployment" if _human_lead() == 0 else "%d s passed" % int(HUMAN_DEPLOY_S))
+		return result
+	return await _host_debrief(result, serial_before)
+
+
+## Host: how far each bot is from the human, for the log ("host 14 m, bot1 19 m (down)").
+func _follow_note(lead: int) -> String:
+	var human_s := _player(lead)
+	if human_s == null:
+		return "no human"
+	var parts: Array[String] = []
+	var peers := {"host": 1}
+	for n: int in _bots():
+		peers["bot%d" % n] = int(_bots()[n].get("peer", 0))
+	for who: String in peers:
+		var s := _player(int(peers[who]))
+		if s == null:
+			continue
+		var state := "" if s.vitals.is_up() else (" (dead)" if s.vitals.is_dead() else " (down)")
+		if Vehicle.ride_of(s) != null:
+			state += " (in %s)" % Vehicle.ride_of(s).name
+		parts.append("%s %.0f m%s" % [who, _flat(s.global_position, human_s.global_position), state])
+	return "human %s%s; %s" % ["up" if human_s.vitals.is_up() else human_s.vitals.condition_text(),
+		(" in %s" % Vehicle.ride_of(human_s).name) if Vehicle.ride_of(human_s) != null else "", ", ".join(parts)]
+
+
+## Every bot (host's and clients'), with a human leading: keep a loose place 10-25 m off the
+## leader; in contact hold and fight; get in the leader's vehicle, or out with them; get inside
+## the extraction point the leader stands in.
+func _follow_tick(me: Soldier, leader_peer: int) -> void:
+	if me == null or not me.vitals.is_up() or _treating or _dropping or _casevac != "":
+		return
+	var leader := _player(leader_peer)
+	if leader == null:
+		return
+	var ride := Vehicle.ride_of(leader)
+	var mine := Vehicle.ride_of(me)
+	var now := Recorder.now()
+	if ride != null:
+		if mine == ride:
+			_goal = null
+			return
+		if mine != null:
+			if now >= _board_next:
+				_board_next = now + 2.0
+				mine.request_exit.rpc_id(1)
+			return
+		var door := _door_of(ride, me)
+		if me.global_position.distance_to(door) > 3.0:
+			_walk(door, 1.0, RUN_SPEED)
+		elif now >= _board_next:
+			_board_next = now + 2.0
+			_goal = null
+			_say("boarding %s with the human" % ride.name)
+			ride.request_enter.rpc_id(1, -1)
+		return
+	if mine != null:
+		if now >= _board_next:
+			_board_next = now + 2.0
+			_say("getting out of %s with the human" % mine.name)
+			mine.request_exit.rpc_id(1)
+		return
+	var extraction := MapNodes.extraction(_level()) if _level() else null
+	if extraction and extraction.is_active():
+		for point: Dictionary in extraction.points:
+			if Extraction.inside(point, leader.global_position):
+				var p: Vector2 = point.pos
+				var r := float(point.get("radius", Extraction.RADIUS_M)) * 0.4
+				var a := TAU * float(bot) / 4.0 + 0.4
+				var in_point := Vector3(p.x + cos(a) * r, me.global_position.y, p.y + sin(a) * r)
+				if _flat(me.global_position, in_point) > 1.5:
+					_walk(in_point, 1.0, RUN_SPEED)
+				return
+	var to_leader := _flat(me.global_position, leader.global_position)
+	var spot := _follow_spot(leader)
+	if _in_contact(me) and to_leader <= FOLLOW_FAR_M:
+		_goal = null  # in contact: hold and fight
+	elif to_leader > FOLLOW_FAR_M or to_leader < FOLLOW_NEAR_M * 0.6 or _flat(me.global_position, spot) > 8.0:
+		_walk(spot, 2.0, RUN_SPEED if to_leader > FOLLOW_FAR_M + 10.0 else WALK_SPEED)
+
+
+var _board_next := 0.0
+var _human_in_point_since := -1.0
+var _confirm_next := 0.0
+var _preset_points: Array = []  # extraction point ids there at the deployment's start
+var _human_start := Vector3.ZERO
+var _human_went_out := false     # the human went HUMAN_OUT_M from where they started
+const HUMAN_OUT_M := 150.0
+
+
+## Host, a human leading: only the host may confirm an extraction (Extraction._server_confirm),
+## so when the human stands in an extraction point and every player is in it too, the host
+## confirms it for them (S0751: the human called a point, everyone was in it, nothing happened).
+## Squad AI still out of the point after 90 s is left behind, as a squad leader would decide.
+func _extract_with_human(lead: int) -> void:
+	var extraction := MapNodes.extraction(_level()) if _level() else null
+	var h := _player(lead)
+	if extraction == null or h == null or extraction.state != Extraction.State.ACTIVE:
+		_human_in_point_since = -1.0
+		return
+	if not _human_went_out and _flat(h.global_position, _human_start) > HUMAN_OUT_M:
+		_human_went_out = true
+	var point := {}
+	for p: Dictionary in extraction.points:
+		if Extraction.inside(p, h.global_position):
+			point = p
+			break
+	if point.is_empty():
+		_human_in_point_since = -1.0
+		return
+	var now := Recorder.now()
+	var called := not int(point.get("id", -1)) in _preset_points
+	if not called and not _human_went_out:
+		_human_in_point_since = -1.0
+		return  # a preset point at the insertion they haven't left yet: not an extraction call (S0752)
+	if _human_in_point_since < 0.0:
+		_human_in_point_since = now
+		_say("the human is in extraction point %s (%s): the bots get in, the host confirms once everyone is in" % [point.get("name", "?"),
+			"called by them" if called else "a preset point, back from %.0f m out" % HUMAN_OUT_M])
+	if now < _confirm_next:
+		return
+	_confirm_next = now + 3.0
+	var missing := extraction.missing_at(point)
+	if missing.is_empty() and now - _human_in_point_since > (5.0 if called else 20.0):
+		var why := extraction.server_confirm()
+		_say("extraction confirmed for the human" if why == "" else "extraction not confirmed: %s" % why)
+	elif not missing.is_empty() and now - _human_in_point_since > 90.0:
+		for mate: Soldier in extraction.required().ai:
+			if not Extraction.inside(point, mate.body_point()):
+				extraction.server_set_bring(String(mate.name), false)
+				_say("left %s behind (not at the extraction point after 90 s)" % mate.name)
+
+
+## This bot's loose place off `leader` (FOLLOW), turned the way the leader faces.
+func _follow_spot(leader: Soldier) -> Vector3:
+	var o: Vector2 = FOLLOW.get(bot, Vector2(0.0, 15.0))
+	var yaw := leader.rotation.y
+	var fwd := Vector3(-sin(yaw), 0.0, -cos(yaw))
+	var right := Vector3(cos(yaw), 0.0, -sin(yaw))
+	return leader.global_position + right * o.x - fwd * o.y
+
+
+## Where `me` gets in `v`: its nearest door or hatch (an action point that is no seat).
+static func _door_of(v: Vehicle, me: Soldier) -> Vector3:
+	var best := v.global_position
+	var best_d := INF
+	for p in v.get_children():
+		if p is VehicleActionPoint and (p as VehicleActionPoint).kind != VehicleActionPoint.SEAT:
+			var d := me.global_position.distance_to((p as Node3D).global_position)
+			if d < best_d:
+				best_d = d
+				best = (p as Node3D).global_position
+	return best
+
+
+## A peer of this harness's bots (the host's or a client's), from the posted statuses: works on
+## clients too (they see only the host as a peer).
+func _is_bot_peer(peer: int) -> bool:
+	if peer == 1:
+		return true
+	for n in range(1, 4):
+		if int(_read_json(run_dir.path_join("bot%d.json" % n)).get("peer", 0)) == peer:
+			return true
+	return false
 
 
 ## The insertion point on foot nearest the contract's first objective (what a squad picks on
@@ -894,8 +1139,7 @@ func _drop_and_pick_up_inner(me: Soldier) -> void:
 
 func _client_main() -> void:
 	main = load("res://scenes/main.tscn").instantiate()
-	add_child(main)
-	await get_tree().process_frame
+	await _add_main(main)
 	if not await _join():
 		_fail("could not join %s:%d" % [address, Net.port()])
 		_finish(2)
@@ -959,8 +1203,7 @@ func _rejoin(gap: float) -> bool:
 	main = null
 	await _sleep(gap)
 	main = load("res://scenes/main.tscn").instantiate()
-	add_child(main)
-	await get_tree().process_frame
+	await _add_main(main)
 	var ok := await _join()
 	_rejoining = false
 	if ok:
@@ -1026,7 +1269,11 @@ func _client_phase(cycle: int, ph: String) -> void:
 				if extraction:
 					extraction.request_confirm()
 					_say("asked to confirm the extraction")
+		"follow":
+			_fight = true
 		"debrief":
+			_fight = false
+			_stop_fighting()
 			var want := int(_phase.get("debrief", 0))
 			var got := await _wait_for(func() -> bool: return int(Contracts.last_debrief().get("serial", 0)) >= want, 10.0)
 			if not got:
@@ -1050,6 +1297,8 @@ func _client_tick(ph: String) -> void:
 				_walk(spot, 1.5, RUN_SPEED if off > 15.0 else WALK_SPEED)
 			elif not may_move:
 				_goal = null
+	elif ph == "follow":
+		_follow_tick(me, int(_phase.get("leader", 1)))
 	elif ph in ["extract", "confirm"] and _casevac == "":
 		var rally: Array = _phase.get("rally", [])
 		if rally.size() == 3:
@@ -1406,7 +1655,8 @@ func _hunt(me: Soldier, delta: float) -> void:
 	if _hunt_left > 0.0:
 		return
 	_hunt_left = 1.0
-	if role != "host" or not _fight or _treating or _dropping or Soldier._now() - _last_clear_shot < HUNT_AFTER_S:
+	if role != "host" or not _fight or _treating or _dropping or Soldier._now() - _last_clear_shot < HUNT_AFTER_S \
+			or String(_phase.get("phase", "")) == "follow":  # with a human leading, the bots stay with them
 		return
 	var foe := _hostile_in_range(me, 800.0)
 	if foe == null:
@@ -1448,7 +1698,9 @@ func _buddy_aid(me: Soldier, delta: float) -> void:
 				if d < best:
 					best = d
 					nearest = s
-		if nearest == me and best < 150.0:
+		var for_human := String(_phase.get("phase", "")) == "follow" and not _is_bot_peer(peer) and me.role == Roles.MEDIC \
+			and _flat(me.global_position, casualty.body_point()) < 400.0  # the medic goes to the human, whoever is nearer
+		if (nearest == me and best < 150.0) or for_human:
 			_say("buddy aid: %s is down (%s), going to treat" % [casualty.name, casualty.vitals.condition_text()])
 			recorder.event(["aid", "Players/%s" % casualty.name])
 			_treat_loop(peer)
@@ -1504,8 +1756,8 @@ func _kit_players(delta: float) -> void:
 		if s == null or s.is_queued_for_deletion() or s.role == &"" or not s.vitals.is_up():
 			continue
 		var peer := int(String(s.name)) if String(s.name).is_valid_int() else 0
-		if not bot_of.has(peer):
-			continue  # a human, or a bot that hasn't posted its peer id yet
+		if not bot_of.has(peer) and not human:
+			continue  # a bot that hasn't posted its peer id yet (with --human: a human gets the kit too)
 		if BaseHub.campaign_running and not BaseHub._gear_applied.has(peer):
 			continue  # its saved gear goes on first
 		var key := BaseHub.player_key(peer) if BaseHub.campaign_running else str(peer)
@@ -1513,7 +1765,7 @@ func _kit_players(delta: float) -> void:
 			continue
 		_role_kitted[key] = true
 		Roles.apply_kit(s.inventory, s.role)
-		_say("[kit] role kit (Roles.apply_kit) for %s %s%s: %s" % [_kit_name(s), String(s.role).replace("_", " "),
+		_say("[kit] role kit (Roles.apply_kit) for %s %s%s: %s" % [_kit_name(s) if bot_of.has(peer) else "the human (peer %d)" % peer, String(s.role).replace("_", " "),
 			"" if _in_base() else " (joined in the zone)", _kit_line(s)])
 
 

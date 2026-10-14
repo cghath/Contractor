@@ -96,7 +96,7 @@ if [ -n "$BUILD" ] && [ "$BUILD" != none ]; then
 	[ "$(git -C "$wt" rev-parse HEAD)" = "$(git rev-parse "$sha^{commit}")" ] || { echo "$wt is not at $sha"; exit 2; }
 	# The harness's own files (tests/ and tools/ never go into a build's pack) over that commit.
 	for f in tests/coop_soak.gd tests/coop_soak.tscn tests/coop_soak.gd.uid tests/coop_soak_recorder.gd tests/coop_soak_recorder.gd.uid \
-		tests/coop_replay.gd tests/coop_replay.tscn tests/coop_replay.gd.uid tools/coop_soak.sh tools/coop_relay.py tools/coop_soak_report.py tools/coop_replay.sh; do
+		tests/coop_replay.gd tests/coop_replay.tscn tests/coop_replay.gd.uid tests/coop_fake_human.gd tests/coop_fake_human.tscn tests/coop_fake_human.gd.uid tools/coop_soak.sh tools/coop_relay.py tools/coop_soak_report.py tools/coop_replay.sh; do
 		[ -f "$here/$f" ] && cp "$here/$f" "$wt/$f"
 	done
 	# Same options, this time without --build: the copy runs in that checkout.
