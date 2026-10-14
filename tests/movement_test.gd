@@ -749,6 +749,22 @@ func _test_ai_body() -> void:
 	mover.move_input = Vector2.ZERO
 	await _seconds(1.0)
 	check(m.stance == S.STAND_HIGH, "stands back up")
+	# Stairs and load (with ai/building-floors' world steps, SoldierMovement.WORLD_STEP_M): a
+	# critically loaded body still steps up a 0.2 m stair. Skipped where that isn't merged yet.
+	if (SoldierMovement as Script).get_script_constant_map().has("WORLD_STEP_M"):
+		var feet := mover.global_position
+		var stair := _box(feet + Vector3(0, 0.1, -1.6), Vector3(3, 0.2, 2))
+		mover.load_kg = 60.0
+		mover.load_mult = MovementRules.load_speed_mult(60.0)
+		await _seconds(0.3)
+		mover.move_input = Vector2(0, -1)
+		await _seconds(2.0)
+		var rose := mover.global_position.y - feet.y
+		mover.move_input = Vector2.ZERO
+		check(rose > 0.15 and rose < 0.35, "critically loaded, it still steps up a 0.2 m stair (up %.2f m)" % rose)
+		stair.free()
+		mover._on_inventory_changed()
+		await _seconds(0.5)
 	mover.inventory.take(&"m4a1")
 	var wall := _box(mover.global_position + Vector3(0, 1.0, -0.6), Vector3(1, 2, 0.2))
 	await _seconds(0.5)
