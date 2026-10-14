@@ -3,7 +3,8 @@
 # failure, a script error with exit 0, a missing summary, a hang, a failed import and an import
 # that reports a script or parse error but exits 0 each fail; a stopped run is a FAIL with its
 # logs; CI keeps and uploads every log. And tools/make_build.sh against a fake exporter: every
-# build gets its own numbered folder and kept export log, and a failed export fails it.
+# build gets its own numbered folder and kept export log, and a failed export fails it. And the
+# run counter: runs numbered at once never share a number; a killed run's lock is taken over.
 #   tools/test_runner_check.sh      (prints each case; exits non-zero if the runner misjudges one)
 set -u
 cd "$(dirname "$0")/.."
@@ -197,5 +198,42 @@ for case in pack_fail:"ERROR: pack export broke" exe_fail:"ERROR: exe export bro
 done
 b="$(ls -d "$proj"/builds/contractor-*-B0005-exe_fail-*/ 2>/dev/null | head -1)"
 [ -n "$b" ] && [ -f "$b/play.bat" ] || { echo "BAD  make_build exe_fail: play.bat should still be made when only the exe fails"; bad=1; }
+# The run counter (run_log_number, shared with SessionLog): runs started at the same moment each
+# get their own number (two in the same second both got R0232), and a lock left by a killed run
+# is taken over instead of holding everyone up.
+cdir="$dir/counter"
+mkdir -p "$cdir"
+for k in $(seq 12); do
+	( . tools/run_log.sh; run_log_number "$cdir" >"$cdir/got-$k" ) &
+done
+wait
+got="$(cat "$cdir"/got-* | sort -n | tr '\n' ' ')"
+if [ "$got" = "$(seq 12 | tr '\n' ' ')" ] && [ "$(cat "$cdir/run_counter.txt")" = 12 ] && [ ! -d "$cdir/run_counter.lock" ]; then
+	echo "ok   12 runs numbered at once -> 1 to 12, none twice"
+else
+	echo "BAD  12 runs numbered at once got: $got (counter $(cat "$cdir/run_counter.txt"))"
+	bad=1
+fi
+mkdir "$cdir/run_counter.lock"
+touch -d "1 minute ago" "$cdir/run_counter.lock"
+start=$(date +%s)
+n="$(. tools/run_log.sh; run_log_number "$cdir" 2>/dev/null)"
+if [ "$n" = 13 ] && [ $(( $(date +%s) - start )) -le 5 ] && [ ! -d "$cdir/run_counter.lock" ] && [ -z "$(ls -d "$cdir"/run_counter.lock.stale.* 2>/dev/null)" ]; then
+	echo "ok   a stale lock (a killed run's) is taken over: the next run is 13 at once"
+else
+	echo "BAD  stale lock: got \"$n\" after $(( $(date +%s) - start )) s"
+	bad=1
+fi
+mkdir "$cdir/run_counter.lock"  # a live lock: the run waits for it
+( sleep 1; rmdir "$cdir/run_counter.lock" ) &
+start=$(date +%s)
+n="$(. tools/run_log.sh; run_log_number "$cdir")"
+wait
+if [ "$n" = 14 ] && [ $(( $(date +%s) - start )) -ge 1 ]; then
+	echo "ok   a live lock is waited for: 14 once it's let go"
+else
+	echo "BAD  live lock: got \"$n\" after $(( $(date +%s) - start )) s"
+	bad=1
+fi
 [ "$bad" -eq 0 ] && echo "RUNNER CHECK PASSED" || echo "RUNNER CHECK FAILED"
 exit $bad

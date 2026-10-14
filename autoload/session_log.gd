@@ -337,14 +337,64 @@ func perf_line() -> String:
 	var modules := "no modules"
 	if level and level.has_method(&"streamed_modules") and level.has_method(&"modules"):
 		modules = "modules %d/%d streamed" % [level.call(&"streamed_modules").size(), level.call(&"modules").size()]
-	var text := "perf: frame %.1f ms avg, %.1f ms worst (%.0f fps); %d AI, %d player%s; %s; nav rebakes %d; memory %.0f MB" % [
+	var text := "perf: frame %.1f ms avg, %.1f ms worst (%.0f fps); %d AI, %d player%s; %s; nav rebakes %d; %s" % [
 		avg * 1000.0, _perf_worst * 1000.0, 1.0 / maxf(avg, 0.0001), ai, players, "" if players == 1 else "s", modules, _rebakes,
-		Performance.get_monitor(Performance.MEMORY_STATIC) / 1048576.0]
+		memory_text()]
 	_perf_frames = 0
 	_perf_sum = 0.0
 	_perf_worst = 0.0
 	_rebakes = 0
 	return text
+
+
+## The memory part of the performance line, read with no child process (so a release build
+## never flashes a console window): "memory 812 MB, video 240 MB, system memory 9.1/16.0 GB
+## used, 41203 objects, 6120 nodes".
+## - "memory": the engine's own count (Performance.MEMORY_STATIC), else the process's resident
+##   memory where the OS lets a file say it (Linux /proc/self/status). Captain P0362: the engine's
+##   count is kept only in debug builds, so a Windows release build logged "memory 0 MB"; there
+##   it's left out (Godot has no process-memory call, and asking tasklist would start a process).
+## - video memory and the system's memory in use (OS.get_memory_info), and the engine's object
+##   and node counts: all kept in release builds, and a leak shows in them as it grows.
+## `static_bytes` stands in for the engine's count (the test passes 0, as a release build reads).
+func memory_text(static_bytes := -1.0) -> String:
+	var parts: Array[String] = []
+	var mb := (Performance.get_monitor(Performance.MEMORY_STATIC) if static_bytes < 0.0 else static_bytes) / 1048576.0
+	if mb <= 0.0:
+		mb = process_memory_mb()
+	if mb > 0.0:
+		parts.append("memory %.0f MB" % mb)
+	parts.append("video %.0f MB" % (Performance.get_monitor(Performance.RENDER_VIDEO_MEM_USED) / 1048576.0))
+	var info := OS.get_memory_info()
+	var physical := float(info.get("physical", -1))
+	var available := float(info.get("available", -1))
+	if available > physical:  # Windows: "available" counts the page file too; "free" is the RAM left
+		available = float(info.get("free", -1))
+	if physical > 0.0 and available >= 0.0:
+		parts.append("system memory %.1f/%.1f GB used" % [(physical - available) / 1073741824.0, physical / 1073741824.0])
+	parts.append("%d objects, %d nodes" % [Performance.get_monitor(Performance.OBJECT_COUNT), Performance.get_monitor(Performance.OBJECT_NODE_COUNT)])
+	return ", ".join(parts)
+
+
+## The process's resident memory (MB) where a file says it (Linux, Android: /proc/self/status),
+## else -1. Reads a file only: no child process.
+static func process_memory_mb() -> float:
+	if OS.get_name() not in ["Linux", "Android", "FreeBSD"]:
+		return -1.0
+	var f := FileAccess.open("/proc/self/status", FileAccess.READ)  # streamed: /proc files have no length
+	if f == null:
+		return -1.0
+	for i in 100:
+		var line := f.get_line()
+		if f.eof_reached() and line == "":
+			break
+		if line.begins_with("VmRSS:"):
+			var digits := ""
+			for c in line:
+				if c >= "0" and c <= "9":
+					digits += c
+			return digits.to_int() / 1024.0 if digits != "" else -1.0
+	return -1.0
 
 
 ## What's going on now, for a dump (and the bug-report key, planned): the session, the zone, the
@@ -468,9 +518,12 @@ static func _find_parent() -> String:
 	return ProjectSettings.globalize_path("user://session-logs")
 
 
-## The next number from `parent`/run_counter.txt (shared with the test runs), saved back.
+## The next number from `parent`/run_counter.txt (shared with the test runs), saved back,
+## under the same lock as tools/run_log.sh (run_counter.lock; _lock_counter).
 static func _next_number(parent: String) -> int:
 	var path := parent.path_join("run_counter.txt")
+	var lock := parent.path_join("run_counter.lock")
+	var locked := _lock_counter(lock)
 	var n := 0
 	if FileAccess.file_exists(path):
 		n = FileAccess.get_file_as_string(path).strip_edges().to_int()
@@ -479,7 +532,39 @@ static func _next_number(parent: String) -> int:
 	if f:
 		f.store_line(str(n))
 		f.close()
+	if locked:
+		DirAccess.remove_absolute(lock)
 	return n
+
+
+## A lock older than this (s) was left by a killed run (it's held for milliseconds; a test
+## shortens it); after COUNTER_LOCK_WAIT_S of waiting on a live one a session goes on without it.
+static var counter_lock_stale_s := 10
+const COUNTER_LOCK_WAIT_S := 30.0
+
+
+## Takes the run counter's lock, the folder `lock` (making a folder either succeeds or finds it
+## there, so only one run holds it), as tools/run_log.sh's run_log_lock does: two runs started
+## in the same second got the same number (R0232). A stale lock is moved aside (a rename: only
+## one waiter takes it over) and removed. Returns whether it holds the lock.
+static func _lock_counter(lock: String) -> bool:
+	var deadline := Time.get_ticks_msec() + int(COUNTER_LOCK_WAIT_S * 1000.0)
+	while DirAccess.make_dir_absolute(lock) != OK:
+		if not DirAccess.dir_exists_absolute(lock):
+			if Time.get_ticks_msec() >= deadline:
+				return false  # can't make it at all (a read-only parent): go on without
+			OS.delay_msec(100)
+			continue
+		var age := int(Time.get_unix_time_from_system()) - int(FileAccess.get_modified_time(lock))
+		var aside := "%s.stale.%d" % [lock, OS.get_process_id()]
+		if FileAccess.get_modified_time(lock) > 0 and age >= counter_lock_stale_s and DirAccess.rename_absolute(lock, aside) == OK:
+			DirAccess.remove_absolute(aside)
+			continue
+		if Time.get_ticks_msec() >= deadline:
+			push_warning("SessionLog: %s held for %.0f s; numbering without it" % [lock, COUNTER_LOCK_WAIT_S])
+			return false
+		OS.delay_msec(100)
+	return true
 
 
 ## "B0046-dev-983b844" from a test build's folder name, "editor-<sha>" in the editor, else "build".
