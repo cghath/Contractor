@@ -159,6 +159,47 @@ func _mate(callsign: String, slot: int, at: Vector3) -> Soldier:
 		"role": "rifleman", "team": 0, "slot": slot, "combat": 0.5, "discipline": 0.6, "guard": false})
 
 
+## The person (civilian or HVT) called `node_name`, or null.
+func _person_named(node_name: String) -> Soldier:
+	for s in level.people.people():
+		if is_instance_valid(s) and not s.is_queued_for_deletion() and String(s.name) == node_name:
+			return s
+	return null
+
+
+## Everyone aboard `c` but the player and the squadmates is taken out and freed (a test-only
+## dismiss drops occupants from the air, and only the squad is regrouped after).
+func _clear_passengers(c: HeliCall) -> void:
+	if c == null or not is_instance_valid(c.heli):
+		return
+	for s: Soldier in c.heli.occupants():
+		if s != player and s not in mates:
+			c.heli.server_exit(s)
+			s.queue_free()
+
+
+## One line on a squadmate, for a check that fails: up, down or dead; what it rides; how far
+## from the helicopter; what its AI is doing (and for whom).
+func _mate_state(m: Soldier, heli: Node3D) -> String:
+	if not is_instance_valid(m):
+		return "gone"
+	var v := m.vitals
+	var life := "dead" if v.is_dead() else ("down" if v.downed else ("up" if v.is_up() else "not up"))
+	var ride := Vehicle.ride_of(m)
+	var far := _flat(m.global_position, heli.global_position) if is_instance_valid(heli) else -1.0
+	var ai := SquadAI.of(m)
+	var doing := "no AI"
+	if ai:
+		doing = "%s, intent %s" % [ai.status_text(), SquadAI.Intent.keys()[ai.intent]]
+		if is_instance_valid(ai.casualty):
+			doing += ", casualty %s at %.0f m" % [ai.casualty.name, _flat(ai.casualty.global_position, m.global_position)]
+	return "%s: %s, riding %s, %.0f m from the helicopter, %s" % [m.name, life, ride.name if ride else "nothing", far, doing]
+
+
+func _mates_state(heli: Node3D) -> String:
+	return "; ".join(mates.map(func(m: Soldier) -> String: return _mate_state(m, heli)))
+
+
 ## The player and the living squadmates back by HOME.
 func _regroup() -> void:
 	player.global_position = _ground(HOME)
@@ -598,6 +639,13 @@ func _test_extraction() -> void:
 		e.heli.server_exit(hvt)
 	await _wait_for(func() -> bool: return e.is_over(), FLY_S)
 	check(e.phase == HeliCall.Phase.GONE, "then it left")
+	# The test HVT goes now. Left in the level, the next extraction loaded it (HVT_REACH_M)
+	# and the dismiss dropped it from the air; when it lived through the fall, wounded, a mate
+	# went to treat it and missed the shot-down transport ("two AI aboard", CI flake).
+	if is_instance_valid(hvt):
+		hvt.queue_free()
+	await get_tree().process_frame
+	check(not is_instance_valid(hvt) and _person_named("HvtTest") == null, "the test HVT is cleared")
 	_regroup()
 
 
@@ -647,6 +695,7 @@ func _test_extraction_home() -> void:
 	await _seconds(HeliCall.DEV_DROP_S + 3.0)
 	check(e.phase == HeliCall.Phase.ENDED and is_instance_valid(e.heli) and e.heli.is_flying() and not sup.heard_line("putting you back down")
 		and _aboard(player, e), "with a campaign running it stays up with the squad aboard, waiting for the base")
+	_clear_passengers(e)
 	sup.server_dismiss_all()
 	hub.queue_free()
 	for node in get_tree().get_nodes_in_group(WorldItem.GROUP):
@@ -688,14 +737,17 @@ func _test_shot_down() -> void:
 	print("Shot down with passengers and cargo aboard")
 	sup.server_reset_limits()
 	_regroup()
+	check(mates.all(func(m: Soldier) -> bool: return is_instance_valid(m) and m.vitals.is_up() and Vehicle.ride_of(m) == null
+		and _flat(m.global_position, HOME) <= 15.0), "both AI up, on foot and by HOME before the transport (%s)" % _mates_state(null))
 	var pickup := _ground(HOME + Vector3(0, 0, -35))
 	check(_call("support:transport:here", pickup) == "", "a transport called")
 	var t := sup.active("transport")
 	if t == null:
 		return
 	await _wait_for(func() -> bool: return _landed(t), FLY_S)
+	check(_landed(t), "the transport lands at the pickup")
 	await _wait_for(func() -> bool: return mates.all(func(m: Soldier) -> bool: return _aboard(m, t)), 40.0)
-	check(mates.all(func(m: Soldier) -> bool: return _aboard(m, t)), "two AI aboard")
+	check(mates.all(func(m: Soldier) -> bool: return _aboard(m, t)), "two AI aboard (%s)" % _mates_state(t.heli if t else null))
 	t.heli.cargo_hold.take(&"frag_grenade", 3)
 	player.global_position = _ground(HOME + Vector3(0, 0, 100))  # stays behind: it goes once everyone near is in
 	_marker(Vector2(-300.0, -200.0))
@@ -723,7 +775,8 @@ func _test_shot_down() -> void:
 	check(h.is_down() and h.zone_health(Vehicle.ZONE_ROTOR) <= 0.0, "a rocket kills the rotor: it goes down")
 	await _wait_for(func() -> bool: return h.flight_mode() == Helicopter.Mode.CRASHED, 40.0)
 	check(h.flight_mode() == Helicopter.Mode.CRASHED and h.is_burning() and h.height_agl() < 3.0, "it crashes and burns")
-	check(mates.all(func(m: Soldier) -> bool: return m.vitals.is_dead()) and h.cargo_hold.entries().is_empty(), "everyone aboard is dead and the cargo lost (Captain)")
+	check(mates.all(func(m: Soldier) -> bool: return m.vitals.is_dead()) and h.cargo_hold.entries().is_empty(),
+		"everyone aboard is dead and the cargo lost (Captain) (%s)" % _mates_state(h))
 	check(sup.is_lost("transport") and sup.heard_line("Mayday"), "the transport is lost: mayday")
 	var why := _call("support:transport:here", _ground(HOME + Vector3(0, 0, -60)))
 	check(why.contains("lost"), "and gone for the rest of the op (%s)" % why)
