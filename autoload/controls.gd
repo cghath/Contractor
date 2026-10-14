@@ -30,6 +30,9 @@ const KEYS := {
 	# Get out of the vehicle you sit in, when that option is on (ControlOptions; Captain, P0164
 	# queue 8). V is free on foot and in a seat (proposed).
 	&"get_out": [KEY_V],
+	# Seated: switch the view between the chase camera and first person (VehicleCamera; Captain,
+	# 2026-10-13: "1st person + 3rd toggle"). B is free on foot and in a seat (proposed).
+	&"vehicle_view": [KEY_B],
 	&"debug_hurt": [KEY_K],  # dev tools only (DevTools.on): hurt yourself to test going down and dying
 }
 ## Keys pressed with Shift held. An action without Shift still matches with it held, so

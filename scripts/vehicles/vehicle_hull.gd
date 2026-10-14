@@ -19,9 +19,17 @@ extends Node3D
 ## The host also marches rounds through the voxels (first_solid), so a round meets the hull
 ## where the model really is, not just its collision box.
 ##
-## Reads Captain's VehicleArt (scripts/art/vehicle_art.gd) without changing it: instance() for
-## the look, and its canvas builder, mesher and material (_canvas_for, _get_mesher,
-## _get_material) for the voxels.
+## Reads Captain's VehicleArt (scripts/art/vehicle_art.gd): instance() for the look, and its
+## canvas builder, mesher and materials (_canvas_for, _get_mesher, _get_material,
+## _get_window_material) for the voxels. A canvas has two sets of voxels: `buffer`, what rounds
+## meet (first_solid, voxel_at), and `look`, what's drawn: the same with the cabins hollowed and
+## furnished and their windows see-through (VehicleInteriors). Edits land on both; a mark
+## (scuff, scorch, a hole's ring) is only drawn where the look has a voxel, so a hidden solid
+## cabin never shows as a black lump inside.
+##
+## A turret and its gun (VehicleTurret) are separate parts with their own voxels and meshes
+## (the art's "Turret" and "Turret/Gun" nodes): pose_turret() turns them, and first_solid meets
+## them where they are now. Edits (holes, marks) land on the hull only.
 
 ## Voxels per chunk side. 24 voxels (1.2 m) re-mesh in about 1 ms (32: 2-3 ms; measured on the
 ## M-ATV, MaxxPro, technical and AAV-7).
@@ -37,7 +45,7 @@ const SCORCH := 2   ## fire or blast: blackened
 ## Wreck: the whole hull darkened (albedo times this).
 const WRECK_TINT := Color(0.24, 0.22, 0.2)
 
-static var _canvases := {}   # model -> {"buffer": VoxelBuffer, "size": Vector3i, "vs": float}
+static var _canvases := {}   # model -> {"buffer": VoxelBuffer, "look": VoxelBuffer, "size": Vector3i, "vs": float}
 static var _tasks := {}      # model -> WorkerThreadPool task id (canvas being built)
 static var _pending := {}    # model -> Canvas built on a worker
 static var _mutex := Mutex.new()
@@ -61,6 +69,10 @@ var _chunked := false
 var _chunk_nodes := {}      # chunk -> MeshInstance3D
 var _own := {}              # chunk -> VoxelBuffer (this vehicle's copy, with its edits)
 var _wrecked := false
+## The turret's pose (VehicleTurret, set by the vehicle): where first_solid meets its parts.
+var turret: VehicleTurret
+var _turret_node: Node3D
+var _gun_node: Node3D
 
 
 func _init(p_model := "matv", p_scheme := "") -> void:
@@ -76,8 +88,11 @@ func _ready() -> void:
 	_material = (VehicleArt._get_material() as StandardMaterial3D).duplicate()
 	if _wrecked:
 		_material.albedo_color = WRECK_TINT  # set_wrecked came before the tree (a saved wreck)
-	if _hull_mesh:
-		_hull_mesh.material_override = _material
+	_dress(_hull_mesh)
+	_turret_node = art.get_node_or_null(^"Turret") as Node3D
+	_gun_node = art.get_node_or_null(^"Turret/Gun") as Node3D
+	for mi in _part_meshes():
+		_dress(mi)
 	VehicleHull.prewarm(model)
 
 
@@ -102,8 +117,8 @@ static func _build_canvas(p_model: String) -> void:
 	_mutex.unlock()
 
 
-## The model's voxels: {"buffer" (VoxelBuffer with VehicleArt's 1-voxel padding), "size"
-## (voxels), "vs" (metres per voxel)}. Waits for the worker if it's still building.
+## The model's voxels: {"buffer" (VoxelBuffer with VehicleArt's 1-voxel padding: what rounds
+## meet), "look" (the same size: what's drawn), "size" (voxels), "vs" (metres per voxel)}. Waits for the worker if it's still building.
 static func canvas(p_model: String) -> Dictionary:
 	if _canvases.has(p_model):
 		return _canvases[p_model]
@@ -118,7 +133,7 @@ static func canvas(p_model: String) -> Dictionary:
 	_mutex.unlock()
 	if c == null:
 		c = VehicleArt._canvas_for(p_model)
-	_canvases[p_model] = {"buffer": c.buffer, "size": c.size, "vs": c.vs}
+	_canvases[p_model] = {"buffer": c.buffer, "look": c.look if c.look else c.buffer, "size": c.size, "vs": c.vs, "parts": c.parts}
 	return _canvases[p_model]
 
 
@@ -166,22 +181,66 @@ func solid(v: Vector3i) -> bool:
 
 
 ## The first solid voxel along a ray in the vehicle's frame, within `max_m` metres:
-## {"hit": true, "voxel", "local" (where the ray meets it), "distance"} or {"hit": false}.
+## {"hit": true, "voxel", "local" (where the ray meets it), "distance", "part" ("" the hull,
+## or "Turret"/"Gun": then "voxel" is the part's voxel at rest)} or {"hit": false}.
 func first_solid(from: Vector3, dir: Vector3, max_m: float) -> Dictionary:
-	var vs: float = canvas(model).vs
+	var c := canvas(model)
+	var vs: float = c.vs
 	var step := vs * 0.4
 	var d := 0.0
 	dir = dir.normalized()
 	var last := Vector3i(-99999, 0, 0)
+	# The parts at rest: each step's point taken back through the part's pose.
+	var parts: Array = []
+	if turret:
+		for part: Dictionary in c.get("parts", []):
+			var gun_part: bool = part.name == "Gun"
+			var pose := turret.gun_transform() if gun_part else turret.turret_transform()
+			parts.append([part, pose.affine_inverse(), turret.trunnion if gun_part else turret.pivot])
 	while d <= max_m:
 		var p := from + dir * d
 		var v := voxel_of(p)
 		if v != last:
 			last = v
 			if solid(v):
-				return {"hit": true, "voxel": v, "local": p, "distance": d}
+				return {"hit": true, "voxel": v, "local": p, "distance": d, "part": ""}
+		for entry: Array in parts:
+			var part: Dictionary = entry[0]
+			var rest: Vector3 = (entry[1] as Transform3D) * p + (entry[2] as Vector3)
+			var pv := voxel_of(rest)
+			if _part_voxel(part, pv) != VehicleArt.P.EMPTY:
+				return {"hit": true, "voxel": pv, "local": p, "distance": d, "part": String(part.name)}
 		d += step
 	return {"hit": false}
+
+
+## A part's voxel (VehicleArt.P) at canvas voxel `v` (at rest).
+static func _part_voxel(part: Dictionary, v: Vector3i) -> int:
+	var at: Vector3i = v - (part.origin as Vector3i)
+	var size: Vector3i = part.size
+	if at.x < 0 or at.y < 0 or at.z < 0 or at.x >= size.x or at.y >= size.y or at.z >= size.z:
+		return VehicleArt.P.EMPTY
+	return (part.buffer as VoxelBuffer).get_voxel(at.x + 1, at.y + 1, at.z + 1, VoxelBuffer.CHANNEL_COLOR)
+
+
+## Turns the turret's and the gun's meshes to the turret's pose.
+func pose_turret() -> void:
+	if turret == null:
+		return
+	if _turret_node:
+		_turret_node.rotation = Vector3(0.0, turret.yaw, 0.0)
+	if _gun_node:
+		_gun_node.rotation = Vector3(turret.pitch, 0.0, 0.0)
+
+
+## The turret's and gun's mesh nodes (empty without a turret).
+func _part_meshes() -> Array[MeshInstance3D]:
+	var out: Array[MeshInstance3D] = []
+	for path: NodePath in [^"Turret/Mesh", ^"Turret/Gun/Mesh"]:
+		var mi := art.get_node_or_null(path) as MeshInstance3D if art else null
+		if mi:
+			out.append(mi)
+	return out
 
 
 # --- Edits ----------------------------------------------------------------------------------
@@ -258,11 +317,27 @@ func _put_voxel(v: Vector3i, value: int, touched: Dictionary) -> void:
 				touched[chunk] = true
 
 
-## A burnt-out wreck: the whole hull darkened.
+## A burnt-out wreck: the whole hull darkened, the windows too (opaque).
 func set_wrecked(on: bool) -> void:
 	_wrecked = on
 	if _material:
 		_material.albedo_color = WRECK_TINT if on else Color.WHITE
+		_dress(_hull_mesh)
+		for chunk: Vector3i in _chunk_nodes:
+			_dress(_chunk_nodes[chunk])
+		for mi in _part_meshes():
+			_dress(mi)
+
+
+## This hull's materials on a mesh's surfaces: its own (tinted on a wreck) for the hull, the
+## shared see-through one for the windows (VehicleArt.P.WINDOW's surface) unless burnt out.
+func _dress(mi: MeshInstance3D) -> void:
+	if mi == null or mi.mesh == null or _material == null:
+		return
+	var window := VehicleArt._get_window_material()
+	for i in mi.mesh.get_surface_count():
+		var see_through := mi.mesh.surface_get_material(i) == window and not _wrecked
+		mi.set_surface_override_material(i, null if see_through else _material)
 
 
 # --- Chunked display --------------------------------------------------------------------------
@@ -311,7 +386,9 @@ func _show_chunks() -> void:
 			for z in n.z:
 				var chunk := Vector3i(x, y, z)
 				if not _chunk_nodes.has(chunk) and shared[chunk] != null:
-					_chunk_node(chunk).mesh = shared[chunk]
+					var mi := _chunk_node(chunk)
+					mi.mesh = shared[chunk]
+					_dress(mi)
 	if _hull_mesh:
 		_hull_mesh.visible = false
 
@@ -324,7 +401,6 @@ func _chunk_node(chunk: Vector3i) -> MeshInstance3D:
 	var size: Vector3i = c.size
 	var mi := MeshInstance3D.new()
 	mi.name = "Chunk_%d_%d_%d" % [chunk.x, chunk.y, chunk.z]
-	mi.material_override = _material
 	mi.scale = Vector3.ONE * vs
 	mi.position = Vector3(-size.x * 0.5 + chunk.x * CHUNK, chunk.y * CHUNK, -size.z * 0.5 + chunk.z * CHUNK) * vs
 	art.add_child(mi)
@@ -332,10 +408,10 @@ func _chunk_node(chunk: Vector3i) -> MeshInstance3D:
 	return mi
 
 
-## The model's voxels for one chunk with a voxel of padding all round, as the mesher wants.
+## The model's look for one chunk with a voxel of padding all round, as the mesher wants.
 static func _chunk_buffer(p_model: String, chunk: Vector3i) -> VoxelBuffer:
 	var c := canvas(p_model)
-	var src: VoxelBuffer = c.buffer
+	var src: VoxelBuffer = c.look
 	var sub := VoxelBuffer.new()
 	sub.set_channel_depth(VoxelBuffer.CHANNEL_COLOR, VoxelBuffer.DEPTH_8_BIT)
 	sub.create(CHUNK + 2, CHUNK + 2, CHUNK + 2)
@@ -363,14 +439,20 @@ func _mesh_own(chunk: Vector3i) -> void:
 	for v: Vector3i in _edits:
 		var at := v - lo
 		if at.x >= 0 and at.y >= 0 and at.z >= 0 and at.x < CHUNK + 2 and at.y < CHUNK + 2 and at.z < CHUNK + 2:
-			buf.set_voxel(int(_edits[v]), at.x, at.y, at.z, VoxelBuffer.CHANNEL_COLOR)
+			var value := int(_edits[v])
+			# A mark needs a voxel to sit on: none where the look is hollow (a cabin).
+			if value != VehicleArt.P.EMPTY and buf.get_voxel(at.x, at.y, at.z, VoxelBuffer.CHANNEL_COLOR) == VehicleArt.P.EMPTY:
+				continue
+			buf.set_voxel(value, at.x, at.y, at.z, VoxelBuffer.CHANNEL_COLOR)
 	_own[chunk] = buf
 	var mesh := _mesh_of(buf, scheme)
 	if mesh == null:
 		if _chunk_nodes.has(chunk):
 			(_chunk_nodes[chunk] as MeshInstance3D).mesh = null
 		return
-	_chunk_node(chunk).mesh = mesh
+	var mi := _chunk_node(chunk)
+	mi.mesh = mesh
+	_dress(mi)
 
 
 # --- The meshing queue (one for every vehicle, inside a frame budget) ----------------------------

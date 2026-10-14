@@ -52,6 +52,9 @@ var placing := false
 var pause_menu: PauseMenu
 ## The bug-report note panel (Insert), on the local player only.
 var bug_report: BugReport
+## The third-person view while seated in a vehicle (VehicleCamera; B switches it), on the local
+## player only.
+var vehicle_camera: VehicleCamera
 var _ghost: Node3D
 ## Muffled hearing: everything through a low-pass this low, and quieter.
 const DEAF_CUTOFF_HZ := 600.0
@@ -78,6 +81,8 @@ func _ready() -> void:
 	body.add_child(pause_menu)
 	bug_report = BugReport.new()
 	body.add_child(bug_report)
+	vehicle_camera = VehicleCamera.new(body)
+	body.add_child(vehicle_camera)
 	if DevTools.on() and multiplayer.is_server():
 		body.add_child(AiOverlay.new())
 	interaction = InteractionMenu.new(body)
@@ -130,6 +135,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		pause_menu.open()  # Escape: resume, return to base, main menu, quit
 	elif event.is_action_pressed(&"fire") and not captured:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	elif event.is_action_pressed(VehicleCamera.ACTION) and Vehicle.ride_of(body) != null:
+		hud.flash(VehicleCamera.toggle())  # seated: chase view <-> first person, for the session
 	elif not body.vitals.is_up():
 		return  # downed: no giving up (handoff); you come round on your own, or the arrest window runs out
 	elif event.is_action_pressed(ControlOptions.GET_OUT_ACTION) and ControlOptions.get_out_key() and Vehicle.ride_of(body) != null:
@@ -236,8 +243,10 @@ func _physics_process(delta: float) -> void:
 	_try_fire()
 	var tilt := minf(-0.7 if body.is_reloading else 0.0, -CharacterModel.VIEW_LOWER_PITCH * body.model.view_lower())
 	body.view_model.rotation.x = move_toward(body.view_model.rotation.x, tilt, delta * 6.0)
-	# Both hands on the casualty: no weapon in view; through a scope: only the glass (P0362).
-	body.view_model.visible = body.carry_mode == &"" and not GunSight.scoped(body)
+	# Both hands on the casualty: no weapon in view; through a scope: only the glass (P0362); nor
+	# seated in a vehicle (no firing your own from a seat, and in first person it hid the cabin and
+	# poked through the dash).
+	body.view_model.visible = body.carry_mode == &"" and not GunSight.scoped(body) and not is_instance_valid(body.vehicle)
 	_settle_recoil(delta)
 	_update_sway(delta)
 	_hide_shouldered()
