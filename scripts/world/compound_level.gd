@@ -893,11 +893,12 @@ func _on_join_role_timeout(id: int) -> void:
 		rebalance_squad()
 
 
+## A client leaves the leaver's player alone: the host's despawn frees it there (B-04: freed
+## here first, the despawn that followed logged 'Condition "!pinfo.recv_nodes.has(net_id)"').
 func _on_peer_left(id: int) -> void:
 	var player := players.get_node_or_null(str(id)) as Soldier
-	if player:
-		if multiplayer.is_server():
-			_server_player_leaves(player)
+	if player and multiplayer.is_server():
+		_server_player_leaves(player)
 		player.queue_free()
 	if multiplayer.is_server():
 		player_roles.erase(id)

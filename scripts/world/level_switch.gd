@@ -118,6 +118,21 @@ static func _retire(old: CompoundLevel) -> void:
 			if target and (target == old or old.is_ancestor_of(target)):
 				sig.disconnect(c.callable)
 	old.remove_from_group(&"level")
+	_despawn_now(old)
 	old.name = "%s_old_%d" % [old.name, old.get_instance_id()]
 	old.process_mode = Node.PROCESS_MODE_DISABLED
 	old.queue_free()
+
+
+## Host with clients: everything the old level's spawners replicated is despawned on the clients
+## now, before BaseHub's switch RPC goes out after it (B-04). Left to the end of the frame, the
+## despawns reached each client after the RPC had already freed its copy of the old level, and
+## every one logged 'Condition "!pinfo.recv_nodes.has(net_id)"' (25-50 per switch, S0743). A
+## spawner leaving the tree despawns what it tracks; the nodes themselves go with the level.
+static func _despawn_now(old: CompoundLevel) -> void:
+	var mp := old.multiplayer
+	if mp == null or not mp.has_multiplayer_peer() or not mp.is_server() or mp.get_peers().is_empty():
+		return
+	for spawner: Node in old.find_children("*", "MultiplayerSpawner", true, false):
+		spawner.get_parent().remove_child(spawner)
+		spawner.queue_free()
