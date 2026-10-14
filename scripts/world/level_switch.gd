@@ -123,6 +123,7 @@ static func _retire(old: CompoundLevel) -> void:
 	old.process_mode = Node.PROCESS_MODE_DISABLED
 	if old.multiplayer.is_server() and not old.multiplayer.get_peers().is_empty():
 		despawn_replicated(old)
+		_despawn_now(old)
 	old.queue_free()
 
 
@@ -148,3 +149,18 @@ static func despawn_replicated(old: Node) -> int:
 			child.queue_free()
 			count += 1
 	return count
+
+
+## Then the old level's spawners and the host's own synchronizers leave the tree too (B-04,
+## fix/b04-despawn-rejoin; merged with despawn_replicated above, which takes the replicated
+## nodes first): a switch run from an RPC (_server_switch_ready) is inside the network poll, which
+## sends deltas right after it, and each delta for a node just despawned logged 'Ignoring delta
+## for non-authority or invalid synchronizer' (5-6 per client per switch, S0830).
+static func _despawn_now(old: CompoundLevel) -> void:
+	for spawner: Node in old.find_children("*", "MultiplayerSpawner", true, false):
+		spawner.get_parent().remove_child(spawner)
+		spawner.queue_free()
+	for sync: Node in old.find_children("*", "MultiplayerSynchronizer", true, false):
+		if sync.is_multiplayer_authority():
+			sync.get_parent().remove_child(sync)
+			sync.queue_free()
