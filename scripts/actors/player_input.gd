@@ -13,7 +13,7 @@ const BASE_FOV := 80.0
 ## (Captain, P0362: a sight picture you can use).
 const HIP_VIEW := Vector3(0.14, -0.16, -0.38)
 const ADS_EYE := Vector3(0.0, 0.0, -0.16)
-const ADS_EYE_PISTOL := Vector3(0.0, 0.0, -0.42)
+const ADS_EYE_PISTOL := Vector3(0.0, 0.0, -0.5)
 ## Recoil settling back (Soldier.RECOIL_SETTLE), per second: most of it within a quarter second.
 const RECOIL_SETTLE_RATE := 12.0
 ## Proposed: where each first-person forearm's elbow sits from its hand, in view space (a
@@ -121,6 +121,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		return  # F-keys, and 1-9 / wheel / middle click while the command menu is open
 	elif event.is_action_pressed(&"debug_hurt") and DevTools.on():
 		body._server_debug_hurt.rpc_id(1, 40.0)
+	elif event is InputEventMouseButton and event.pressed and captured and _wheel(event) != 0 and GunSight.zoom_by(body, _wheel(event)):
+		return  # the wheel zooms a variable scope while aimed through it (P0362)
 	elif event.is_action_pressed(&"pause"):
 		pause_menu.open()  # Escape: resume, return to base, main menu, quit
 	elif event.is_action_pressed(&"fire") and not captured:
@@ -162,6 +164,16 @@ func _unhandled_input(event: InputEvent) -> void:
 		body.select_weapon(&"sidearm")
 	elif event.is_action_pressed(&"weapon_launcher") and body.inventory.slots.get(Launchers.SLOT, &"") != &"":
 		body.select_weapon(Launchers.SLOT)
+
+
+## +1 for a wheel step up, -1 down, 0 for any other button.
+static func _wheel(event: InputEventMouseButton) -> int:
+	match event.button_index:
+		MOUSE_BUTTON_WHEEL_UP:
+			return 1
+		MOUSE_BUTTON_WHEEL_DOWN:
+			return -1
+	return 0
 
 
 func _process(delta: float) -> void:
@@ -404,7 +416,7 @@ func _update_aim(delta: float) -> void:
 	var weapon := body.active_weapon()
 	body.is_aiming = _captured() and body.vitals.is_up() and weapon != null and (weapon.type == "weapon" or Launchers.is_launcher(weapon)) \
 		and body.inventory.hands == &"" and not body.is_reloading and Input.is_action_pressed(&"aim")
-	var fov := GunSight.aimed_fov(weapon, GameSettings.fov()) if body.is_aiming else GameSettings.fov()
+	var fov := GunSight.aimed_fov_of(body, weapon, GameSettings.fov()) if body.is_aiming else GameSettings.fov()
 	body.camera.fov = lerpf(body.camera.fov, fov, minf(delta * 12.0, 1.0))
 	var hip_view := HIP_VIEW * Vector3(-1.0 if body.left_handed else 1.0, 1, 1)  # off the firing shoulder
 	var aimed_view := ads_view(weapon) if weapon and not Launchers.is_launcher(weapon) else hip_view

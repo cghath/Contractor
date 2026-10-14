@@ -349,8 +349,40 @@ func _test_spread() -> void:
 		player.is_aiming = true
 		aimed = maxf(aimed, rad_to_deg(forward.angle_to(player._spread_direction(weapon))))
 	player.is_aiming = false
-	check(hip > 0.3 and hip <= 1.2 * 2.5 + 0.01, "hip-fire stays inside the cone (max %.2f deg)" % hip)
+	check(hip > 0.3 and hip <= Soldier.SHOOTER_HIP_DEG * 1.5 + 0.1, "hip-fire stays inside the cone (max %.2f deg)" % hip)
 	check(aimed < hip * 0.3, "aiming tightens it (max %.2f deg)" % aimed)
+	# Captain, P0362: a player's aimed rifle shot standing still lands within about 10 cm at
+	# 100 m (the weapon's own cone plus the trigger press); sway and recoil are the rest.
+	check(aimed <= 0.06, "aimed and still, an M4 groups tight (max %.3f deg, %.0f cm at 100 m)" % [aimed, tan(deg_to_rad(aimed)) * 10000.0])
+	# The AI keeps its own cone: the weapon's ai_spread_deg, its accuracy before P0362.
+	check(is_equal_approx(Soldier.ai_spread_deg(weapon), 1.2) and is_equal_approx(Soldier.ai_spread_deg(ItemDB.get_item(&"m110")), 1.6),
+		"the AI's cone is unchanged (M4 %.2f deg)" % Soldier.ai_spread_deg(weapon))
+	var ai_max := 0.0
+	player.is_aiming = true
+	for i in 200:
+		ai_max = maxf(ai_max, rad_to_deg(forward.angle_to(player.ai_spread_direction(weapon))))
+	player.is_aiming = false
+	check(ai_max > aimed * 1.5, "and stays wider than a player's aimed shot (AI %.3f, player %.3f deg)" % [ai_max, aimed])
+	# Recoil heat blooms the cone; it fades in about a second.
+	player.recoil_heat = 5.0
+	player._heat_at = Soldier._now()
+	player.is_aiming = true
+	var hot := player.spread_deg_now(weapon)
+	player.recoil_heat = 0.0
+	var cold := player.spread_deg_now(weapon)
+	player.is_aiming = false
+	check(hot > cold + 0.3, "auto fire blooms the cone (%.2f vs %.2f deg)" % [hot, cold])
+	# Sights: the M4's red dot, the M17's irons, the M110's 3.5-10x scope (its ring shows the
+	# real scope's field: about 2 degrees at 10x, 5.7 at 3.5x).
+	var m110 := ItemDB.get_item(&"m110")
+	check(GunSight.sight_of(weapon) == "red_dot" and GunSight.sight_of(ItemDB.get_item(&"m17")) == "iron" and GunSight.sight_of(m110) == "scope",
+		"M4 red dot, M17 irons, M110 scope")
+	var zr := GunSight.zoom_range(m110)
+	var at10 := GunSight.aimed_fov(m110, 80.0, zr.y)
+	var at35 := GunSight.aimed_fov(m110, 80.0, zr.x)
+	check(zr == Vector2(3.5, 10.0) and absf(GunSight.ring_field(at10) - 2.05) < 0.05 and absf(GunSight.ring_field(at35) - 5.86) < 0.05,
+		"the M110's scope zooms 3.5-10x (the ring shows %.1f deg at 10x, %.1f at 3.5x)" % [GunSight.ring_field(at10), GunSight.ring_field(at35)])
+	check(is_equal_approx(GunSight.magnification(player, m110), 6.0), "and starts at 6x")
 
 
 func _test_downed() -> void:
