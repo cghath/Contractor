@@ -6,7 +6,10 @@
 #     Contractor.exe                 the standalone game (when the Voxel Tools release template is installed; see below)
 #     Contractor (dev tools).bat     the same with the dev tools on (--dev): Contractor.exe's, or play.bat's without one
 #     BUILD.txt                      build number, branch, commit, export log and what to test
-# Usage: GODOT=<voxel godot exe> tools/make_build.sh <label> ["what to test"]
+# Usage: GODOT=<voxel godot exe> [VERSION=0.3.1] tools/make_build.sh <label> ["what to test"]
+# VERSION (Captain, 2026-10-14: builds go by version, v0.MINOR.PATCH: minor for a feature
+# build, patch for a fix-only one) names the folder builds/contractor-v<VERSION>-B<number>-<sha>/
+# instead; the B<number> stays in it (the run-log id; SessionLog reads the build label from it).
 # The number is the next one from run_counter.txt in the logs parent the test runs use
 # (tools/run_log.sh: Contractor-test-logs beside the main checkout, or CONTRACTOR_TEST_LOGS),
 # and the build gets a line in its index.txt, PASS or FAIL. Both exports' output (the pack and
@@ -28,7 +31,13 @@ time="$(date +%H%M%S)"
 run_tail="$(run_log_tail)"
 sha="$(git rev-parse --short HEAD 2>/dev/null || echo nogit)"
 topic="$(printf '%s' "$label" | tr -c 'A-Za-z0-9._-' '-')"
-dir="builds/contractor-$day-$time-$id-$topic-$sha"
+version="${VERSION:-}"
+version="${version#v}"
+if [ -n "$version" ]; then
+	dir="builds/contractor-v$version-$id-$sha"
+else
+	dir="builds/contractor-$day-$time-$id-$topic-$sha"
+fi
 mkdir -p "$parent/$day"
 log="$parent/$day/$id-$time-export.log"
 why=""
@@ -142,7 +151,11 @@ if [ ! -s "$dir/Contractor.exe" ]; then
 	printf '@echo off\r\nrem Plays this build with the dev tools on (docs/debugging.md: K, Shift+End, Insert, Delete...).\r\ncall "%%~dp0play.bat" --dev %%*\r\n' > "$dir/Contractor (dev tools).bat"
 fi
 {
-	echo "Contractor test build $id: $label"
+	if [ -n "$version" ]; then
+		echo "Contractor v$version (test build $id): $label"
+	else
+		echo "Contractor test build $id: $label"
+	fi
 	echo "Built $(date '+%Y-%m-%d %H:%M') from branch $(git branch --show-current 2>/dev/null || echo unknown), commit $sha$(git diff --quiet HEAD -- . ':!builds' 2>/dev/null || echo ' plus uncommitted changes')"
 	echo "Export log: $log"
 	echo
