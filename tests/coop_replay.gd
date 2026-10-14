@@ -40,6 +40,8 @@ var _i := 0
 var _hold := 0
 var _cam_left := 0.0
 var _cam_target := ""
+var _action_at := Vector3.ZERO  # where something last happened (a player firing, a hit)
+var _action_t := -1000.0
 var _feed_lines: Array[String] = []
 var _tracers: Array = []        # [MeshInstance3D, seconds left]
 var _speed := 1.0
@@ -131,13 +133,17 @@ static func _load(path: String) -> Array:
 
 # --- The cut ------------------------------------------------------------------------------------
 
-## Contact, a down and revive, the reconnect and the extraction, from the first two contracts.
+## Contact, players going down and coming back (treated, carried, or given up), the reconnect
+## and late join, and the extraction, contract by contract until about HIGHLIGHT_S of video.
+const HIGHLIGHT_S := 270.0
+
+
 func _highlights() -> Array:
-	var out: Array = []
 	var phase_at := {}  # "cycle:phase" -> first time
 	var first_fire := {}  # cycle -> time
 	var downs: Array = []  # [time, key, cycle]
 	var ups := {}  # key -> [times]
+	var casevacs: Array = []  # [time, key, cycle]
 	var joins: Array = []
 	var leaves: Array = []
 	var cycle := 0
@@ -147,14 +153,15 @@ func _highlights() -> Array:
 		if f.has("ph"):
 			var ph := String(f.ph)
 			cycle = int(ph.get_slice(":", 0))
-			if not phase_at.has(ph):
-				phase_at[ph] = t
+			var name_ := "%d:%s" % [cycle, ph.get_slice(":", 1).get_slice("+", 0)]
+			if not phase_at.has(name_):
+				phase_at[name_] = t
 		if phase_at.has("%d:extract" % cycle) and String(f.get("L", "")) == "base" and not base_after.has(cycle):
 			base_after[cycle] = t
 		for e: Array in f.get("e", []):
 			match String(e[0]):
 				"fire":
-					if not first_fire.has(cycle) and phase_at.has("%d:fight" % cycle):
+					if not first_fire.has(cycle) and phase_at.has("%d:deployed" % cycle) and String(e[1]).begins_with("Players/"):
 						first_fire[cycle] = t
 				"down":
 					if String(e[1]).begins_with("Players/"):
@@ -163,51 +170,74 @@ func _highlights() -> Array:
 					if not ups.has(String(e[1])):
 						ups[String(e[1])] = []
 					ups[String(e[1])].append(t)
+				"casevac":
+					casevacs.append([t, String(e[1]), cycle])
 				"join":
 					joins.append(t)
 				"leave":
 					leaves.append(t)
-	for c in [1, 2]:
+	var out: Array = []
+	var budget := 0.0
+	for c in range(1, 13):
+		if budget > HIGHLIGHT_S or not phase_at.has("%d:kit" % c):
+			break
+		var mine: Array = []
 		if first_fire.has(c):
-			out.append({"from": first_fire[c] - 3.0, "to": first_fire[c] + (40.0 if c == 1 else 25.0), "speed": 1.0, "title": "Contract %d: contact" % c, "focus": ""})
-		elif phase_at.has("%d:fight" % c):
-			out.append({"from": phase_at["%d:fight" % c], "to": phase_at["%d:fight" % c] + 30.0, "speed": 1.0, "title": "Contract %d: the fight" % c, "focus": ""})
+			mine.append({"from": first_fire[c] - 4.0, "to": first_fire[c] + 40.0, "speed": 1.0, "title": "Contract %d: contact" % c, "focus": ""})
+		var shown := 0
 		for d: Array in downs:
-			if int(d[2]) != c:
+			if int(d[2]) != c or shown >= 2:
 				continue
-			var back := float(d[0]) + 60.0
+			var back := float(d[0]) + 40.0
 			for t: float in ups.get(d[1], []):
 				if t > float(d[0]):
-					back = t
+					back = minf(t, float(d[0]) + 240.0)
 					break
 			var length := back - float(d[0]) + 10.0
-			out.append({"from": float(d[0]) - 5.0, "to": back + 5.0, "speed": maxf(1.0, length / 40.0),
-				"title": "Contract %d: %s down, treated back up" % [c, d[1]], "focus": String(d[1])})
-			break
+			mine.append({"from": float(d[0]) - 5.0, "to": back + 5.0, "speed": maxf(1.0, length / 35.0),
+				"title": "Contract %d: %s down%s" % [c, _name_of(String(d[1])), ", back up" if back < float(d[0]) + 239.0 else ""], "focus": String(d[1])})
+			shown += 1
+		for cv: Array in casevacs:
+			if int(cv[2]) == c:
+				mine.append({"from": float(cv[0]) - 2.0, "to": float(cv[0]) + 40.0, "speed": 2.0,
+					"title": "Contract %d: carrying %s to the extraction" % [c, _name_of(String(cv[1]))], "focus": ""})
+				break
 		if c == 1:
 			for t: float in leaves:
-				out.append({"from": t - 3.0, "to": t + 6.0, "speed": 1.0, "title": "A player leaves mid-deployment", "focus": ""})
+				mine.append({"from": t - 3.0, "to": t + 6.0, "speed": 1.0, "title": "A player leaves mid-deployment", "focus": ""})
 				break
 			for t: float in joins:
 				if not leaves.is_empty() and t > float(leaves[0]):
-					out.append({"from": t - 2.0, "to": t + 8.0, "speed": 1.0, "title": "...and joins again", "focus": ""})
+					mine.append({"from": t - 2.0, "to": t + 8.0, "speed": 1.0, "title": "...and joins again", "focus": ""})
 					break
 		if phase_at.has("%d:extract" % c):
 			var from := float(phase_at["%d:extract" % c])
 			var to := float(base_after.get(c, from + 60.0)) + 4.0
-			out.append({"from": from, "to": to, "speed": maxf(1.0, (to - from) / 45.0), "title": "Contract %d: extraction" % c, "focus": ""})
+			mine.append({"from": from, "to": to, "speed": maxf(1.0, (to - from) / 35.0), "title": "Contract %d: extraction" % c, "focus": ""})
+		for m: Dictionary in mine:
+			budget += (float(m.to) - float(m.from)) / float(m.speed)
+		out.append_array(mine)
 	out.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a.from < b.from)
-	# Overlapping pieces become one.
+	# Overlapping pieces become one, titled with all of them.
 	var merged: Array = []
 	for s: Dictionary in out:
 		if not merged.is_empty() and s.from <= merged[-1].to:
 			merged[-1].to = maxf(merged[-1].to, s.to)
 			merged[-1].speed = maxf(merged[-1].speed, s.speed)
+			if not String(merged[-1].title).contains(String(s.title)):
+				merged[-1].title = String(merged[-1].title) + "
+" + String(s.title)
+			if String(merged[-1].focus) == "":
+				merged[-1].focus = s.focus
 			continue
-		merged.append(s)
+		merged.append(s.duplicate())
 	if merged.is_empty():
 		merged.append({"from": _start_t, "to": float(frames[-1].t), "speed": 4.0, "title": "Whole run (no highlights found)", "focus": ""})
 	return merged
+
+
+func _name_of(key: String) -> String:
+	return String(names.get(key, key.get_slice("/", 1)))
 
 
 # --- The view -----------------------------------------------------------------------------------
@@ -244,12 +274,15 @@ func _build_view() -> void:
 	box.add_child(sub)
 	top_cam = Camera3D.new()
 	top_cam.cull_mask &= ~LABEL_LAYER
-	top_cam.fov = 60.0
-	top_cam.far = 3000.0
+	# Orthographic from a fixed height: the map stays sharp (a perspective camera high enough
+	# for a spread-out squad looked through the fog at nothing).
+	top_cam.projection = Camera3D.PROJECTION_ORTHOGONAL
+	top_cam.size = 80.0
+	top_cam.far = 600.0
 	sub.add_child(top_cam)
 	top_cam.current = true
 	hud = _label(ui, Vector2(12, 8), 18)
-	feed = _label(ui, Vector2(12, 470), 15)
+	feed = _label(ui, Vector2(12, 470), 20)
 	feed.anchor_top = 1.0
 	feed.anchor_bottom = 1.0
 	feed.offset_top = -190.0
@@ -347,10 +380,16 @@ func _events(f: Dictionary) -> void:
 		var key := _id(e[1]) if e.size() > 1 else ""
 		match what:
 			"fire":
+				if puppets.has(key) and key.begins_with("Players/"):
+					_action_at = puppets[key].global_position
+					_action_t = _t
 				if e.size() >= 5 and puppets.has(key):
 					_tracer((puppets[key] as Node3D).global_position + Vector3.UP * 1.5, Vector3(float(e[2]), float(e[3]), float(e[4])))
 			"hit":
-				_feed("%s hit (-%d%% blood)" % [_name(key), int(float(e[2]) * 100.0)])
+				if float(e[2]) >= 0.03:  # a bleed's slow drip would flood the feed
+					_feed("%s hit (-%d%% blood)" % [_name(key), int(float(e[2]) * 100.0)])
+				_action_at = puppets[key].global_position if puppets.has(key) else _action_at
+				_action_t = _t
 				if puppets.has(key):
 					_flash(puppets[key])
 			"down", "up", "dead":
@@ -537,7 +576,7 @@ func _puppet(key: String, flags: int) -> Node3D:
 	label.no_depth_test = true
 	label.fixed_size = true
 	label.pixel_size = 0.0012
-	label.font_size = 34
+	label.font_size = 34 if flags & FLAGS.F_PLAYER else 24
 	label.outline_size = 8
 	root.add_child(label)
 	var ghost := MeshInstance3D.new()
@@ -663,6 +702,14 @@ func _update_cameras(delta: float, players: Array[String]) -> void:
 		if not players.is_empty():
 			var at := players.find(_cam_target)
 			_cam_target = players[(at + 1) % players.size()]
+			if _t - _action_t < 6.0:
+				# Something just happened: the player nearest it.
+				var best := INF
+				for key: String in players:
+					var d := (puppets[key] as Node3D).global_position.distance_to(_action_at) if puppets.has(key) else INF
+					if d < best:
+						best = d
+						_cam_target = key
 	var centre := Vector3.ZERO
 	if puppets.has(_cam_target):
 		var target: Node3D = puppets[_cam_target]
@@ -690,6 +737,7 @@ func _update_cameras(delta: float, players: Array[String]) -> void:
 		for key: String in players:
 			if puppets.has(key):
 				spread = maxf(spread, (puppets[key] as Node3D).global_position.distance_to(mid) * 2.5)
-		top_cam.global_position = mid + Vector3(0, spread + 25.0, 0.01)
+		top_cam.size = clampf(spread * 1.3, 60.0, 600.0)
+		top_cam.global_position = mid + Vector3(0, 250.0, 0.01)
 		top_cam.look_at(mid, Vector3.FORWARD)
 	_viewer.global_position = centre

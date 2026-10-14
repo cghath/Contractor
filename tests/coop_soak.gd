@@ -297,6 +297,25 @@ func _host_main() -> void:
 	_finish(0 if _failures.is_empty() else 1)
 
 
+## Host, from the second contract on: what each player lost (gear stays on a body in the zone
+## when a player dies and respawns; the armory doesn't refill) is put down in front of them,
+## like a quartermaster, so every bot can kit up again by picking it up.
+func _restock() -> void:
+	var players := _level().get_node_or_null(^"Players") if _level() else null
+	for node in (players.get_children() if players else []):
+		var s := node as Soldier
+		if s == null:
+			continue
+		var given := {}
+		for id: String in KIT:
+			var short := int(KIT[id]) - _owned(s, StringName(id))
+			if short > 0:
+				s._server_spawn_in_front(StringName(id), short)
+				given[id] = short
+		if not given.is_empty():
+			_say("restock for %s: %s" % [s.name, JSON.stringify(given)])
+
+
 ## Every connected client's posted status, by bot number.
 func _bots() -> Dictionary:
 	var out := {}
@@ -317,6 +336,8 @@ func _host_cycle(cycle: int) -> Dictionary:
 		result.why = "not at the base"
 		return result
 	# Kit up.
+	if cycle > 1:
+		_restock()
 	_set_phase("kit", {"down": {}, "cid": "", "pick": [], "rally": []})
 	await _kit_up(cycle)
 	await _wait_for(func() -> bool: return _bots().values().all(func(s: Dictionary) -> bool: return int(s.get("kit", 0)) >= cycle), KIT_S)
