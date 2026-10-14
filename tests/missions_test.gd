@@ -149,9 +149,49 @@ func _test_deployment() -> void:
 	CompoundLevel.spawn_ai = true
 	level._ai_ready = true
 	level._spawn_garrison(module)
+	# Garrisons come out a few a frame (P0362): until the last is out the site isn't put in yet
+	# (a clear-area objective waits) and isn't down.
+	var coming := level.garrison_pending(module.module_id)
+	check(coming > 0 and not level.garrison_spawned(module.module_id) and not level.site_down(module.module_id),
+		"a garrison put in comes out over the next frames (%d coming): not spawned yet, not down" % coming)
+	await _garrison_out(module)
 	var first := _garrison(module).size()
+	var people_before := level.people.people().size()
+	var deploy_started := Time.get_ticks_usec()
 	check(Contracts.server_start_deployment([], ZONE) == "" and Contracts.deployment().cids.size() == 4, "deployed on all four (a hot zone)")
+	var deploy_ms := (Time.get_ticks_usec() - deploy_started) / 1000.0
 	CompoundLevel.spawn_ai = false
+	# Captain P0362: the zone's civilians all spawning in the deploy frame (with the navigation
+	# rebaking under each) was a 3.4 s hitch. They're queued and come out a few a frame, the
+	# navigation held till the last is out and then rebaked once per chunk.
+	var queued := level.people.spawning()
+	var held := level.nav.is_held()
+	var spawn_frames := 0
+	var worst_ms := 0.0
+	var last := Time.get_ticks_usec()
+	while level.people.spawning() > 0 and spawn_frames < 600:
+		await get_tree().process_frame
+		var now := Time.get_ticks_usec()
+		worst_ms = maxf(worst_ms, (now - last) / 1000.0)
+		last = now
+		spawn_frames += 1
+	check(queued >= 3 and held and level.people.spawning() == 0 and spawn_frames >= 2 and not level.nav.is_held(),
+		"the zone's %d civilians come out over %d frames (deploy call %.0f ms, worst frame after %.0f ms), the navigation held meanwhile and released after"
+		% [queued, spawn_frames, deploy_ms, worst_ms])
+	check(level.people.people().size() >= people_before + queued, "every queued civilian is out (%d people)" % level.people.people().size())
+	# What made each one slow: rasterising a 0.5 cm body for every new outfit. Plain clothes share
+	# one raster per body part (only the palette differs), so a new outfit is only meshed.
+	var rasters := VoxelArt._plain_rasters.size()
+	var outfit_started := Time.get_ticks_usec()
+	var torso_a := VoxelArt.mesh("torso", PersonLook._variant("123456", "654321", "c8996f", "6b4a2b"))
+	var torso_b := VoxelArt.mesh("torso", PersonLook._variant("abcdef", "654321", "c8996f", "6b4a2b"))
+	var outfit_ms := (Time.get_ticks_usec() - outfit_started) / 1000.0
+	var colours_a: PackedColorArray = torso_a.surface_get_arrays(0)[Mesh.ARRAY_COLOR]
+	var colours_b: PackedColorArray = torso_b.surface_get_arrays(0)[Mesh.ARRAY_COLOR]
+	check(rasters > 0 and VoxelArt._plain_rasters.size() == rasters and torso_a.get_surface_count() == torso_b.get_surface_count()
+		and colours_a.size() == colours_b.size() and colours_a != colours_b,
+		"two new shirts reuse the torso's plain raster (%d rasters), meshed in their own colours (%.0f ms for both)" % [rasters, outfit_ms])
+	await _garrison_out(module)
 	var garrison := _garrison(module)
 	var apart := true
 	for i in garrison.size():
@@ -301,6 +341,7 @@ func _test_clear_unvisited() -> void:
 		_place(player, module.global_position + Vector3(0, 0, 30))
 		await _wait_for(func() -> bool: return module.is_ready(), 20.0)
 		CompoundLevel.spawn_ai = false  # the target's garrison only; modules beside it stay empty
+		await _garrison_out(module)
 		var garrison := _garrison(module)
 		await _seconds(1.0)
 		check(module.is_ready() and garrison.size() > 0 and Contracts.objectives.get_objective(oid).state == Objectives.ACTIVE,
@@ -451,6 +492,11 @@ func _offer(type: String) -> Dictionary:
 
 func _add(c: Dictionary) -> String:
 	return Contracts.server_add_offer(c)
+
+
+## Waits for module `module`'s garrison to be all out (ZoneLevel.garrison_pending).
+func _garrison_out(module: ZoneModule) -> void:
+	await _wait_for(func() -> bool: return level.garrison_pending(module.module_id) == 0, 10.0)
 
 
 ## A module's garrison soldiers (callsigns "<module id>_H<n>"), their brains off.
@@ -707,11 +753,22 @@ func _test_enemy_response() -> void:
 		await _end_response(er, before)
 		return
 	var first: ZoneModule = bases[0]
+	var fresh := not level._garrisoned.has(first.module_id)
 	level._spawn_garrison(first)
+	await get_tree().process_frame  # the first of them out, the rest still coming
+	var early := _garrison(first)
+	for s in early:
+		_kill(s)
+	var still := level.garrison_pending(first.module_id)
+	if fresh:
+		check(still > 0 and not level.site_down(first.module_id) and not level.garrison_spawned(first.module_id),
+			"the ones out killed while %d are still coming: the site isn't down" % still)
+	await _garrison_out(first)
 	var g := _garrison(first)
 	for s in g:
 		_kill(s)
-	check(not g.is_empty() and level.site_down(first.module_id), "the nearest QRF base's garrison killed: the site is down")
+	check(not g.is_empty() and level.site_down(first.module_id) and early.size() + g.size() >= level.garrison_size(first.module_id),
+		"the nearest QRF base's garrison killed: the site is down (%d + %d of %d)" % [early.size(), g.size(), level.garrison_size(first.module_id)])
 	pressure.points = 0.0
 	pressure._tier = 0
 	er._last_qrf = -INF
@@ -724,6 +781,7 @@ func _test_enemy_response() -> void:
 			"on standby the next QRF goes at once, from the other base, none from the dead one")
 	for m: ZoneModule in bases.slice(1):
 		level._spawn_garrison(m)
+		await _garrison_out(m)
 		for s in _garrison(m):
 			_kill(s)
 	pressure.points = 0.0

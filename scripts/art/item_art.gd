@@ -19,6 +19,10 @@ const ON_SIDE := Vector3(0, 0, PI / 2)
 const ON_BACK := Vector3(PI / 2, 0, 0)
 const ON_STRAPS := Vector3(-PI / 2, 0, 0)
 
+## A carrier lying empty is this deep front to back, of what it is worn (VoxelArt's vest is
+## shaped round a torso).
+const VEST_SLUMP := 0.42
+
 enum Axis { X, Y, Z }
 
 ## Colours for the item models: VoxelArt's palette (VoxelArt.C, multicam) plus these.
@@ -49,33 +53,56 @@ static var _sizes: Dictionary = {}   # item id -> Vector3 (ground_size)
 
 
 ## The item's ground model: a holder whose children are the model, centred on its bounds (so
-## a box of ground_size() round the holder's origin is the model's).
-static func ground_node(item: ItemData) -> Node3D:
+## a box of ground_size() round the holder's origin is the model's). `state` is the item's
+## state: a rifle shows the optic its state mounts (VoxelArt.model_for, P0362).
+static func ground_node(item: ItemData, state := {}) -> Node3D:
 	var holder := Node3D.new()
 	holder.name = "Art"
-	var model := _raw_node(item)
+	var model := _raw_node(item, state)
 	holder.add_child(model)
 	var bounds := _bounds(holder)
 	model.position -= bounds.get_center()
-	_sizes[item.id] = bounds.size
+	_sizes[_key(item, state)] = bounds.size
 	return holder
 
 
-## The size (metres) of what ground_node() shows for `item`, as it rests.
-static func ground_size(item: ItemData) -> Vector3:
-	if not _sizes.has(item.id):
-		ground_node(item).free()
-	return _sizes[item.id]
+## The size (metres) of what ground_node() shows for `item` (with `state`), as it rests.
+static func ground_size(item: ItemData, state := {}) -> Vector3:
+	var key := _key(item, state)
+	if not _sizes.has(key):
+		ground_node(item, state).free()
+	return _sizes[key]
+
+
+## The turn an item spawned in the world (CompoundLevel._make_item) starts with, so it lies as
+## it would come to rest: a plate flat on its back, strike face up (its VoxelArmor piece is
+## upright, and it stood on its edge). Everything else is modelled lying already.
+static func spawn_rotation(item: ItemData) -> Vector3:
+	return ON_BACK if item != null and item.type == "plate" else Vector3.ZERO
+
+
+## What the size cache is keyed by: the item id, plus the VoxelArt model (a rifle's names its
+## optic, so the same rifle with another optic is its own entry).
+static func _key(item: ItemData, state: Dictionary) -> String:
+	return "%s|%s" % [item.id, VoxelArt.model_for(item, state)]
 
 
 ## The model in its resting pose, not yet centred.
-static func _raw_node(item: ItemData) -> Node3D:
-	var art := VoxelArt.model_for(item)
+static func _raw_node(item: ItemData, state := {}) -> Node3D:
+	var art := VoxelArt.model_for(item, state)
 	if art != "":
-		var turn := ON_SIDE if item.type == "weapon" else ON_STRAPS if item.slot == &"backpack" else ON_BACK
-		var weapon := VoxelArt.instance(art, "multicam")
-		weapon.rotation = turn
-		return weapon
+		var turn := Vector3.ZERO  # an optic sits on its mount, upright
+		if item.type == "weapon":
+			turn = ON_SIDE
+		elif item.slot == &"backpack":
+			turn = ON_STRAPS
+		elif not Optics.is_optic(item):
+			turn = ON_BACK
+		var model := VoxelArt.instance(art, "multicam")
+		model.rotation = turn
+		if item.slot == &"vest":
+			model.scale = Vector3(1, 1, VEST_SLUMP)  # nobody in it: the front panel sags onto the back
+		return model
 	if Inventory.is_attachable(item) and item.type != "launcher" and not _has_own(item):
 		var pouch := GearRig.pouch_node(item, Color(VoxelArt.VARIANTS.multicam.gear).darkened(0.12), false)
 		pouch.rotation = ON_BACK  # lying on its back, flap up
@@ -225,7 +252,7 @@ static func _spec_for(item: ItemData) -> Dictionary:
 static func _fallback(item: ItemData) -> Shape:
 	var size := WorldItem.visual_size(item) * 100.0
 	var s := Shape.new(0.5 if maxf(size.x, maxf(size.y, size.z)) < 50.0 else 1.0)
-	var colour := K.GREY
+	var colour: int = K.GREY
 	match item.type:
 		"weapon", "launcher": colour = VoxelArt.C.GUN
 		"ammo": colour = K.BRASS
@@ -615,6 +642,23 @@ static func _npa() -> Shape:
 		s.b(off, 0, i, off + 1.3, 1.3, i + 1, K.AMBER)
 	s.b(-1.2, -0.2, -0.6, 2.5, 1.5, 0, K.AMBER)                  # flange
 	s.b(0.3, 0.3, -0.7, 1.0, 1.0, 0, K.BROWN)                    # bore
+	return s
+
+
+## An IV catheter in its blister: a clear tray, the needle in its cover, the hub and wings in
+## the gauge's colour code, the white flash plug.
+static func _iv_catheter(gauge: int) -> Shape:
+	var s := Shape.new()
+	var hub: int = GAUGE_COLOURS.get(gauge, K.GREY)
+	var r := 0.5 + 0.05 * maxi(20 - gauge, 0)  # bigger bore, fatter cover
+	s.b(-2.5, 0, -1, 2.5, 0.5, 10, K.CLEAR)                       # the blister's tray
+	s.p(-2.5, 0, 7.5, 2.5, 0.5, 10, K.WHITE)                       # its paper end
+	s.cyl(Axis.Z, 0, 0.5 + r, r, 0, 4.5, K.CLEAR)                  # needle cover
+	s.cyl(Axis.Z, 0, 0.5 + r, 0.3, 0.2, 4.3, K.STEEL, true)         # the needle in it
+	s.cyl(Axis.Z, 0, 0.5 + r, r + 0.3, 4.5, 6.5, hub)              # hub
+	s.b(-2.0, 0.5, 4.8, 2.0, 1.0, 6.0, hub)                        # wings
+	s.cyl(Axis.Z, 0, 0.5 + r, r + 0.1, 6.5, 8.5, K.CLEAR)          # flash chamber
+	s.cyl(Axis.Z, 0, 0.5 + r, r + 0.2, 8.5, 9.5, K.WHITE)          # flash plug
 	return s
 
 

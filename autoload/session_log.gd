@@ -10,7 +10,10 @@ extends Node
 ## impossible) also writes dump-<n>-<what>.txt (every soldier: where, condition, the AI's intent,
 ## target and mode; the hot zone's state; the last log lines) and a screenshot, once per kind of
 ## issue. On quit the folder becomes PASS (nothing unexpected) or FAIL; a session that crashed
-## keeps RUNNING. The pause menu shows the session number.
+## keeps RUNNING. A rename that fails (something holds a file in the folder open: an editor
+## or a tail on session.log) is retried, then logged, and the next session finishes it
+## (_finish_stuck_folders). The pause menu shows the session number and where its logs are, so
+## a friend can find them and send them.
 ##
 ## Off when headless (test suites) or running a -s script; CONTRACTOR_SESSION_LOG=0 turns it
 ## off, =1 on. CONTRACTOR_TEST_LOGS picks the parent (as for the test runner); otherwise the
@@ -29,6 +32,9 @@ const PERF_S := 60.0
 const FELL_Y := -100.0
 ## Log lines kept for the dumps.
 const TAIL_LINES := 200
+## Renaming the folder at the end: this many tries, this far apart (ms), before giving up.
+const RENAME_TRIES := 10
+const RENAME_RETRY_MS := 100
 ## At most this many dumps (and screenshots) per session.
 const MAX_DUMPS := 20
 const ERROR_NAMES := ["ERROR", "WARNING", "SCRIPT ERROR", "SHADER ERROR"]
@@ -106,6 +112,12 @@ func start(parent: String) -> void:
 		return
 	_parent = parent
 	DirAccess.make_dir_recursive_absolute(parent)
+	errors = 0
+	warnings = 0
+	anomalies = 0
+	dumps = 0
+	_dumped = {}
+	_flagged = {}
 	var number := _next_number(parent)
 	session_id = "P%04d" % number
 	var build := _build_name()
@@ -128,6 +140,8 @@ func start(parent: String) -> void:
 		Engine.get_version_info().string, OS.get_name()])
 	_write("args %s %s; dev tools %s" % [OS.get_cmdline_args(), OS.get_cmdline_user_args(), "on" if DevTools.on() else "off"])
 	_write("logging to %s" % folder)
+	for line in _finish_stuck_folders(parent, folder):
+		_write(line)
 	_watch_net.call_deferred()  # this autoload loads first (to catch the others' errors); Net comes later
 
 
@@ -137,8 +151,8 @@ func _watch_net() -> void:
 	_net_watched = true
 	for sig: String in ["hosted", "joined", "join_failed", "session_ended"]:
 		Net.connect(sig, note.bind("net: %s" % sig.replace("_", " ")))
-	Net.peer_joined.connect(func(id: int) -> void: note("net: peer %d joined" % id))
-	Net.peer_left.connect(func(id: int) -> void: note("net: peer %d left" % id))
+	Net.peer_joined.connect(func(id: int) -> void: note("net: peer %d joined (Player %d)" % [id, id]))
+	Net.peer_left.connect(func(id: int) -> void: note("net: peer %d left (Player %d)" % [id, id]))
 
 
 ## Closes the session: PASS if nothing unexpected happened, else FAIL, and a line in index.txt.
@@ -154,18 +168,69 @@ func finish() -> void:
 	_file = null
 	_mutex.unlock()
 	var done := folder.replace("-RUNNING-", "-%s-" % verdict)
-	if DirAccess.rename_absolute(folder, done) == OK:
+	var renamed := _rename(folder, done)
+	if renamed == OK:
 		folder = done
+	else:
+		# P0331, P0362: the folder stayed RUNNING after a clean end and nothing said why.
+		var log_file := FileAccess.open(folder.path_join("session.log"), FileAccess.READ_WRITE)
+		if log_file:
+			log_file.seek_end()
+			log_file.store_line("[%s] !! could not rename the folder to %s (%s, %d tries): something has a file in it open; it stays RUNNING until the next session renames it" % [
+				_clock(), done.get_file(), error_string(renamed), RENAME_TRIES])
+			log_file.close()
+		printerr("SessionLog: could not rename %s to %s (%s)" % [folder, done.get_file(), error_string(renamed)])
 	var index := FileAccess.open(_parent.path_join("index.txt"), FileAccess.READ_WRITE)
 	if index == null:
 		index = FileAccess.open(_parent.path_join("index.txt"), FileAccess.WRITE)
 	if index:
 		index.seek_end()
 		var name_parts := folder.get_file().split("-")
-		index.store_line("%s %s %s %s %s playtest session: %d errors, %d warnings, %d anomalies" % [session_id,
-			folder.get_base_dir().get_file(), name_parts[1], verdict, "-".join(name_parts.slice(3)), errors, warnings, anomalies])
+		index.store_line("%s %s %s %s %s playtest session: %d errors, %d warnings, %d anomalies%s" % [session_id,
+			folder.get_base_dir().get_file(), name_parts[1], verdict, "-".join(name_parts.slice(3)), errors, warnings, anomalies,
+			"" if renamed == OK else " (folder left RUNNING: rename failed, %s)" % error_string(renamed)])
 		index.close()
 	session_id = ""
+
+
+## Renames folder `from` to `to`, trying RENAME_TRIES times RENAME_RETRY_MS apart (on Windows a
+## folder with a file open in it can't be renamed, and a scanner or a tail may let go of it in a
+## moment). Returns the last error, or OK.
+static func _rename(from: String, to: String) -> Error:
+	var err := FAILED
+	for i in RENAME_TRIES:
+		err = DirAccess.rename_absolute(from, to)
+		if err == OK or not DirAccess.dir_exists_absolute(from):
+			return err
+		OS.delay_msec(RENAME_RETRY_MS)
+	return err
+
+
+## The session folders under `parent` left RUNNING by a session that did end (its session.log
+## has the "ended" line: the rename at its end failed) get their verdict now; a crashed one
+## (no "ended" line) stays RUNNING. `skip`: this session's own folder. Returns a line for each.
+static func _finish_stuck_folders(parent: String, skip: String) -> Array[String]:
+	var out: Array[String] = []
+	var ended := RegEx.create_from_string("session (P\\d+) ended after \\S+: (PASS|FAIL)")
+	for day in DirAccess.get_directories_at(parent):  # the dated folders
+		for sub in DirAccess.get_directories_at(parent.path_join(day)):
+			var path := parent.path_join(day).path_join(sub)
+			if not sub.begins_with("P") or not "-RUNNING-" in sub or path == skip:
+				continue
+			var m := ended.search(FileAccess.get_file_as_string(path.path_join("session.log")))
+			if m == null:
+				continue
+			var to := path.get_base_dir().path_join(sub.replace("-RUNNING-", "-%s-" % m.get_string(2)))
+			var err := DirAccess.rename_absolute(path, to)
+			out.append("%s's folder was left RUNNING after it ended %s: %s" % [m.get_string(1), m.get_string(2),
+				"renamed to %s" % to.get_file() if err == OK else "still can't rename it (%s)" % error_string(err)])
+	return out
+
+
+## The folder holding this session's (dated) log folders, for the player to send in: the
+## session's own folder is the one in it starting with the session's number. "" without one.
+func logs_folder() -> String:
+	return folder.get_base_dir() if session_id != "" else ""
 
 
 ## A line in the session log (any thread). Does nothing without a session.
@@ -337,14 +402,64 @@ func perf_line() -> String:
 	var modules := "no modules"
 	if level and level.has_method(&"streamed_modules") and level.has_method(&"modules"):
 		modules = "modules %d/%d streamed" % [level.call(&"streamed_modules").size(), level.call(&"modules").size()]
-	var text := "perf: frame %.1f ms avg, %.1f ms worst (%.0f fps); %d AI, %d player%s; %s; nav rebakes %d; memory %.0f MB" % [
+	var text := "perf: frame %.1f ms avg, %.1f ms worst (%.0f fps); %d AI, %d player%s; %s; nav rebakes %d; %s" % [
 		avg * 1000.0, _perf_worst * 1000.0, 1.0 / maxf(avg, 0.0001), ai, players, "" if players == 1 else "s", modules, _rebakes,
-		Performance.get_monitor(Performance.MEMORY_STATIC) / 1048576.0]
+		memory_text()]
 	_perf_frames = 0
 	_perf_sum = 0.0
 	_perf_worst = 0.0
 	_rebakes = 0
 	return text
+
+
+## The memory part of the performance line, read with no child process (so a release build
+## never flashes a console window): "memory 812 MB, video 240 MB, system memory 9.1/16.0 GB
+## used, 41203 objects, 6120 nodes".
+## - "memory": the engine's own count (Performance.MEMORY_STATIC), else the process's resident
+##   memory where the OS lets a file say it (Linux /proc/self/status). Captain P0362: the engine's
+##   count is kept only in debug builds, so a Windows release build logged "memory 0 MB"; there
+##   it's left out (Godot has no process-memory call, and asking tasklist would start a process).
+## - video memory and the system's memory in use (OS.get_memory_info), and the engine's object
+##   and node counts: all kept in release builds, and a leak shows in them as it grows.
+## `static_bytes` stands in for the engine's count (the test passes 0, as a release build reads).
+func memory_text(static_bytes := -1.0) -> String:
+	var parts: Array[String] = []
+	var mb := (Performance.get_monitor(Performance.MEMORY_STATIC) if static_bytes < 0.0 else static_bytes) / 1048576.0
+	if mb <= 0.0:
+		mb = process_memory_mb()
+	if mb > 0.0:
+		parts.append("memory %.0f MB" % mb)
+	parts.append("video %.0f MB" % (Performance.get_monitor(Performance.RENDER_VIDEO_MEM_USED) / 1048576.0))
+	var info := OS.get_memory_info()
+	var physical := float(info.get("physical", -1))
+	var available := float(info.get("available", -1))
+	if available > physical:  # Windows: "available" counts the page file too; "free" is the RAM left
+		available = float(info.get("free", -1))
+	if physical > 0.0 and available >= 0.0:
+		parts.append("system memory %.1f/%.1f GB used" % [(physical - available) / 1073741824.0, physical / 1073741824.0])
+	parts.append("%d objects, %d nodes" % [Performance.get_monitor(Performance.OBJECT_COUNT), Performance.get_monitor(Performance.OBJECT_NODE_COUNT)])
+	return ", ".join(parts)
+
+
+## The process's resident memory (MB) where a file says it (Linux, Android: /proc/self/status),
+## else -1. Reads a file only: no child process.
+static func process_memory_mb() -> float:
+	if OS.get_name() not in ["Linux", "Android", "FreeBSD"]:
+		return -1.0
+	var f := FileAccess.open("/proc/self/status", FileAccess.READ)  # streamed: /proc files have no length
+	if f == null:
+		return -1.0
+	for i in 100:
+		var line := f.get_line()
+		if f.eof_reached() and line == "":
+			break
+		if line.begins_with("VmRSS:"):
+			var digits := ""
+			for c in line:
+				if c >= "0" and c <= "9":
+					digits += c
+			return digits.to_int() / 1024.0 if digits != "" else -1.0
+	return -1.0
 
 
 ## What's going on now, for a dump (and the bug-report key, planned): the session, the zone, the
@@ -468,9 +583,12 @@ static func _find_parent() -> String:
 	return ProjectSettings.globalize_path("user://session-logs")
 
 
-## The next number from `parent`/run_counter.txt (shared with the test runs), saved back.
+## The next number from `parent`/run_counter.txt (shared with the test runs), saved back,
+## under the same lock as tools/run_log.sh (run_counter.lock; _lock_counter).
 static func _next_number(parent: String) -> int:
 	var path := parent.path_join("run_counter.txt")
+	var lock := parent.path_join("run_counter.lock")
+	var locked := _lock_counter(lock)
 	var n := 0
 	if FileAccess.file_exists(path):
 		n = FileAccess.get_file_as_string(path).strip_edges().to_int()
@@ -479,7 +597,39 @@ static func _next_number(parent: String) -> int:
 	if f:
 		f.store_line(str(n))
 		f.close()
+	if locked:
+		DirAccess.remove_absolute(lock)
 	return n
+
+
+## A lock older than this (s) was left by a killed run (it's held for milliseconds; a test
+## shortens it); after COUNTER_LOCK_WAIT_S of waiting on a live one a session goes on without it.
+static var counter_lock_stale_s := 10
+const COUNTER_LOCK_WAIT_S := 30.0
+
+
+## Takes the run counter's lock, the folder `lock` (making a folder either succeeds or finds it
+## there, so only one run holds it), as tools/run_log.sh's run_log_lock does: two runs started
+## in the same second got the same number (R0232). A stale lock is moved aside (a rename: only
+## one waiter takes it over) and removed. Returns whether it holds the lock.
+static func _lock_counter(lock: String) -> bool:
+	var deadline := Time.get_ticks_msec() + int(COUNTER_LOCK_WAIT_S * 1000.0)
+	while DirAccess.make_dir_absolute(lock) != OK:
+		if not DirAccess.dir_exists_absolute(lock):
+			if Time.get_ticks_msec() >= deadline:
+				return false  # can't make it at all (a read-only parent): go on without
+			OS.delay_msec(100)
+			continue
+		var age := int(Time.get_unix_time_from_system()) - int(FileAccess.get_modified_time(lock))
+		var aside := "%s.stale.%d" % [lock, OS.get_process_id()]
+		if FileAccess.get_modified_time(lock) > 0 and age >= counter_lock_stale_s and DirAccess.rename_absolute(lock, aside) == OK:
+			DirAccess.remove_absolute(aside)
+			continue
+		if Time.get_ticks_msec() >= deadline:
+			push_warning("SessionLog: %s held for %.0f s; numbering without it" % [lock, COUNTER_LOCK_WAIT_S])
+			return false
+		OS.delay_msec(100)
+	return true
 
 
 ## "B0046-dev-983b844" from a test build's folder name, "editor-<sha>" in the editor, else "build".

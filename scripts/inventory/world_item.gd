@@ -62,8 +62,8 @@ func _ready() -> void:
 		piece.apply_damage(state.get("chips", []), ArmorRules.is_shattered(state))
 	else:
 		# Its ground model (ItemArt), lying as it rests; the collision box is the model's bounds.
-		add_child(ItemArt.ground_node(item))
-		size = ItemArt.ground_size(item)
+		add_child(ItemArt.ground_node(item, state))  # a rifle shows the optic it carries (P0362)
+		size = ItemArt.ground_size(item, state)
 	var shape := CollisionShape3D.new()
 	_box = BoxShape3D.new()
 	_box.size = size
@@ -109,7 +109,8 @@ func describe() -> String:
 	var amount := " x%d" % count if count > 1 else ""
 	var detail := ""
 	if state.has("rounds"):
-		detail = "  [%d rds]" % int(state.rounds)
+		var optic := Optics.label(item, state)  # what's on its rail (P0362)
+		detail = "  [%d rds%s]" % [int(state.rounds), ", " + optic if optic != "" else ""]
 	elif not state.get("molle", {}).is_empty():
 		detail = "  [%d attached]" % state.molle.size()  # a carrier keeps its pouches
 	elif not state.get("held", []).is_empty():

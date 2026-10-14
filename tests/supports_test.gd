@@ -235,6 +235,7 @@ func _run_host(wait_for_client: bool) -> void:
 	_test_data()
 	if _want("landing"):
 		await _test_landing_zone()
+		await _test_radio_one_line()
 	if _want("refusals"):
 		_test_refusals()
 	if _want("payment"):
@@ -345,6 +346,34 @@ func _test_landing_zone() -> void:
 	await get_tree().physics_frame
 	var nowhere := LandingZone.find(level, _ground(SLAB_AT))
 	check(not nowhere.ok, "in the middle of a 240 m built-up slab there's nowhere within 100 m (%s)" % nowhere.why)
+
+
+## P0331: a call to a spot with no LZ sent "No safe LZ", "Inbound" and "On station" in the
+## same second. One line now, the next step, and nothing more until something changes.
+func _test_radio_one_line() -> void:
+	print("The radio: one line, the next step, only when it changes")
+	sup.server_reset_limits()
+	_regroup()
+	var lines: Array[String] = []
+	var hear := func(text: String) -> void: lines.append(text)
+	sup.radio_heard.connect(hear)
+	var why := _call("support:resupply:here", _ground(SLAB_AT))  # the slab: nowhere to land within 100 m
+	var r := sup.active("resupply")
+	await _seconds(1.0)
+	check(why == "" and r != null and lines.size() == 1 and lines[0].contains("No safe LZ") and lines[0].contains("smoke or give me another grid"),
+		"a call where there's no LZ: one radio line, why and what next (%s)" % [lines])
+	if r == null:
+		sup.radio_heard.disconnect(hear)
+		return
+	await _wait_for(func() -> bool: return r.phase == HeliCall.Phase.LOITER, FLY_S)
+	var on_station := lines.filter(func(l: String) -> bool: return l.contains("On station"))
+	check(r.phase == HeliCall.Phase.LOITER and on_station.size() == 1, "on station: said once (%s)" % [lines])
+	var said := lines.size()
+	await _seconds(3.0)
+	check(lines.size() == said, "and nothing more while nothing changes (%s)" % [lines.slice(said)])
+	sup.radio_heard.disconnect(hear)
+	sup.server_dismiss_all()
+	sup.server_reset_limits()
 
 
 func _test_refusals() -> void:

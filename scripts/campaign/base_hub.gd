@@ -57,6 +57,8 @@ const SQUAD_SIZE := CompoundLevel.SQUAD_SIZE
 ## The zone a deployment goes to when nothing says otherwise. A campaign's zone saves are its
 ## own (zone_save_id), apart from the plain session's and other campaigns'.
 const DEFAULT_ZONE_ID := "compound_01"
+## Why Deploy waits (the button's tooltip and server_deploy's answer).
+const NO_CONTRACT := "Prep a contract first"
 ## A squadmate left behind (a recovery contract's) joins the squad when a player comes this
 ## close (metres). Proposed.
 const FOUND_M := 4.0
@@ -510,6 +512,7 @@ func _on_briefing_started(_plan: Dictionary, cid: String) -> void:
 	if why != "":
 		push_warning("BaseHub: %s" % why)
 		return
+	SessionLog.note("deployment: briefing done, contract %s is live" % _contract_text(Contracts.contract(cid)))
 	_spawn_recovery_targets(level())
 	_size_reinforcements.call_deferred(cid)  # after the briefing's own flow started the timer
 
@@ -653,6 +656,7 @@ func _server_hello(key: String) -> void:
 		k = "%s_%d" % [base_key, n]
 		n += 1
 	_profiles[peer] = k
+	SessionLog.note("player joined: Player %d plays profile %s (%d players)" % [peer, k, _player_count()])
 	var lvl := level()
 	var p := lvl.players.get_node_or_null(str(peer)) as Soldier if lvl else null
 	if p and campaign_running:
@@ -672,6 +676,8 @@ func _on_peer_left(id: int) -> void:
 		return
 	var lvl := level()
 	var p := lvl.players.get_node_or_null(str(id)) as Soldier if lvl else null
+	SessionLog.note("player left: Player %d (profile %s)%s" % [id, player_key(id),
+		"" if p == null else ", %s" % p.vitals.condition_text()])
 	if p and _gear_applied.has(id):
 		var gear: Dictionary = Roster.json_safe(p.inventory.net_state.duplicate(true)) if p.vitals.is_up() else {}
 		var key := player_key(id)
@@ -727,6 +733,7 @@ func _on_player_died(player: Soldier) -> void:
 	if not RosterDeployment.is_running(roster()) or not is_instance_valid(player):
 		return
 	var text := server_count_respawn()
+	SessionLog.note("respawn pool: %s died (%s): %s" % [SessionLog.who(player), player_key(player.name.to_int()), text])
 	player._client_message.rpc_id(player.name.to_int(), text)
 
 
@@ -760,9 +767,10 @@ func server_count_respawn() -> String:
 # --- Deployments -------------------------------------------------------------------------------
 
 ## Host: takes the picked squad into the zone. `options` may override the prep: "squad"
-## (member ids), "zone_kind", "zone_id", "scene". Players whose main character is recovering
-## get a stand-in (an available member not in the squad, else a free rookie). Returns "" or
-## why it can't.
+## (member ids), "zone_kind", "zone_id", "scene"; "no_contract": true deploys without a prepped
+## contract (code and tests only: the Deploy request never sends it). Players whose main
+## character is recovering get a stand-in (an available member not in the squad, else a free
+## rookie). Returns "" or why it can't.
 func server_deploy(options := {}) -> String:
 	if not multiplayer.is_server():
 		return "Only the host deploys"
@@ -770,6 +778,9 @@ func server_deploy(options := {}) -> String:
 		return "A deployment is already running"
 	_read_back_base()
 	var prep := _prep()
+	# Without a contract there's no briefing, so no extraction and no way home (P0331): refuse.
+	if (prep.get("contract", {}) as Dictionary).is_empty() and not options.get("no_contract", false):
+		return NO_CONTRACT
 	var info: Dictionary = options.get("level", prep.get("level", {}))
 	var scene := String(options.get("scene", prep.get("scene", "")))
 	if not info.is_empty():
@@ -786,12 +797,30 @@ func server_deploy(options := {}) -> String:
 	var squad: Array = options.get("squad", prep.get("squad", []))
 	squad = squad.slice(0, maxi(SQUAD_SIZE - _player_count(), 0))
 	var stand_ins := _pick_stand_ins(squad)
-	RosterDeployment.begin(roster(), squad, zone_kind, zone_id, scene, day(), prep.get("contract", {}), stand_ins)
+	var dep := RosterDeployment.begin(roster(), squad, zone_kind, zone_id, scene, day(), prep.get("contract", {}), stand_ins)
+	SessionLog.note("deployment started: zone %s (%s), contract %s, day %d; squad %s; %d player%s; %d free respawns" % [zone_id, zone_kind,
+		_contract_text(prep.get("contract", {})), day(), _callsigns(dep.squad), _player_count(), "" if _player_count() == 1 else "s",
+		int(dep.respawns_free)])
 	prep["contract"] = {}
 	prep["level"] = {}
 	_changed_all()
 	server_switch_level(info, zone_save_id(zone_id))
 	return ""
+
+
+## For the session log: "Hold the Line [c12]", or "none".
+static func _contract_text(c: Dictionary) -> String:
+	if c.is_empty():
+		return "none"
+	return "%s [%s]" % [String(c.get("title", c.get("name", "?"))), String(c.get("cid", "?"))]
+
+
+## For the session log: the members' callsigns, or "none".
+func _callsigns(mids: Array) -> String:
+	var names := PackedStringArray()
+	for mid: Variant in mids:
+		names.append(String(member(String(mid)).get("callsign", mid)))
+	return ", ".join(names) if not names.is_empty() else "none"
 
 
 func _pick_stand_ins(squad: Array) -> Dictionary:
@@ -1005,6 +1034,9 @@ func server_end_deployment(extracted: Array, return_to_base := true, advance_day
 		if p and not p.is_queued_for_deletion():
 			outcomes.players[player_key(p.name.to_int())] = _outcome_of(p)
 	var report := RosterDeployment.resolve(roster(), outcomes, rng, day())
+	SessionLog.note("deployment ended: zone %s (%s); back %s; MIA %s; KIA %s; respawns %d used (%d bought)" % [report.zone_id,
+		report.zone_kind, _callsigns(report.extracted), _callsigns(report.mia), _callsigns(report.dead), int(report.respawns_used),
+		int(report.respawns_bought)])
 	for mid: String in report.mia:
 		var m := member(mid)
 		BaseEconomy.request_recovery_contract({"mid": mid, "name": m.name, "callsign": m.callsign, "role": m.role,

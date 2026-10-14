@@ -12,8 +12,8 @@ extends RefCounted
 ## PENDING (audit A3-07, 2026-10-13): today only the doctrine's id acts, through SquadTactics'
 ## option biases (SquadTactics.DOCTRINES). The numeric weights below and in the file are
 ## proposals for Captain's tactics work that no AI code reads yet: the squad AI still uses its
-## own constants (hostiles pick targets out to SquadAI.SIGHT_RANGE, 60 m, whatever engage_m
-## says; morale uses SquadAI.MORALE_SHAKEN/BROKEN...). Changing them changes nothing in a
+## own constants (hostiles pick targets out to SquadAI.SIGHT_RANGE, 200 m, the squad out to
+## SQUAD_SIGHT_RANGE, 300 m, whatever engage_m says; morale uses SquadAI.MORALE_SHAKEN/BROKEN...). Changing them changes nothing in a
 ## fight until each is wired into the decision its note names, with a check, and taken off
 ## PENDING and the file's "_pending". A per-unit doctrine (SquadAI.doctrine) is pending too.
 
@@ -24,8 +24,9 @@ const PMC := &"pmc"
 ## The weights no AI reads yet (see the class notes); the file's "_pending" lists the same.
 const PENDING: Array[String] = ["engage_m", "reaction", "aim_deg", "burst", "burst_pause", "cover_fire_s",
 	"frag_cooldown_s", "frag_wait_s", "morale_shaken", "morale_broken", "advance_after_s", "flank"]
-## What a weight is when the file lacks it: the squad AI's numbers before doctrines.
-const FALLBACK := {"engage_m": 60.0, "reaction": 1.0, "aim_deg": 0.0, "burst": 1.0, "burst_pause": 1.0, "cover_fire_s": 5.0,
+## What a weight is when the file lacks it: the squad AI's numbers before doctrines (engage_m:
+## a hostile's sight, SquadAI.SIGHT_RANGE).
+const FALLBACK := {"engage_m": 200.0, "reaction": 1.0, "aim_deg": 0.0, "burst": 1.0, "burst_pause": 1.0, "cover_fire_s": 5.0,
 	"frag_cooldown_s": 15.0, "frag_wait_s": 4.0, "morale_shaken": 0.4, "morale_broken": 0.25, "advance_after_s": 6.0, "flank": 0.0}
 
 static var _data := {}
@@ -50,6 +51,16 @@ static func has(id: StringName) -> bool:
 static func value(id: StringName, key: String) -> float:
 	var profile: Dictionary = _profiles().get(String(id), {})
 	return float(profile.get(key, FALLBACK.get(key, 0.0)))
+
+
+## How far out doctrine `id`'s fighters pick targets (audit F-03): its engage_m, but never past
+## what the shooter can see (`sight_m`: SquadAI.SIGHT_RANGE for a hostile, SQUAD_SIGHT_RANGE
+## for the squad) nor past its weapon's reach (`weapon_m`, when known: about 300 m for an
+## M4/Mk18, 600 m for an M110, 50 m for an M17). A doctrine can be set on either side's squad
+## (Squad.doctrine), so a PMC's 300 m on a hostile still stops at 200 m. engage_m is pending:
+## wiring it into target picking goes through here, so no doctrine can engage what it can't see.
+static func engage_m(id: StringName, sight_m: float, weapon_m := INF) -> float:
+	return minf(value(id, "engage_m"), minf(sight_m, weapon_m))
 
 
 ## "Insurgent", "PMC"... ("" for an unknown id).

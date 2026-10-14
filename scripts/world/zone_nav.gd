@@ -82,6 +82,18 @@ func _ground_source(chunk: Vector2i) -> NavigationMeshSourceGeometryData3D:
 	return source
 
 
+## Whether every loaded module's voxels inside `bounds` can be read now (_add_structures).
+func _structures_readable(bounds: AABB) -> bool:
+	var rect := Rect2(bounds.position.x, bounds.position.z, bounds.size.x, bounds.size.z)
+	for module in zone.modules():
+		var world := module.voxel_world
+		if world and module.footprint().grow(1.0).intersects(rect):
+			var local := world.global_transform.affine_inverse() * bounds
+			if not world.is_area_readable(AABB(local.position / VoxelWorld.VOXEL_SIZE, local.size / VoxelWorld.VOXEL_SIZE)):
+				return false
+	return true
+
+
 ## Loaded modules' voxels as they are now (false while one isn't built yet); unloaded
 ## modules' proxies (ZoneModule.proxy_boxes: the base boxes, less what was carved).
 func _add_structures(source: NavigationMeshSourceGeometryData3D, bounds: AABB) -> bool:

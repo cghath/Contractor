@@ -132,7 +132,7 @@ func _build_squad(rows: VBoxContainer, v: Dictionary) -> void:
 			int(dep.get("respawns_used", 0)), int(dep.get("respawns_free", 0))]))
 		return
 	rows.add_child(_text("Contract: %s" % (String(contract.get("name", contract.get("title", ""))) + " (" + ContractGen.clawback_text(contract) + ")" if not contract.is_empty()
-		else "none in prep (Deploy goes to the test compound)")))
+		else "none in prep: prep one from the contract board to deploy")))
 	var board := Button.new()
 	board.text = "Contract board"
 	board.pressed.connect(_open_board)
@@ -179,8 +179,9 @@ func _build_squad(rows: VBoxContainer, v: Dictionary) -> void:
 		rows.add_child(_text("%s: %s" % [key, "recovering %d days: plays a squadmate next time" % days if days > 0 else "ready"]))
 	var buttons := HBoxContainer.new()
 	var deploy := _button("Deploy", func() -> void: BaseHub.request("deploy"))
-	deploy.disabled = not multiplayer.is_server()
-	deploy.tooltip_text = "The host deploys the squad"
+	deploy.name = "Deploy"
+	deploy.disabled = not multiplayer.is_server() or contract.is_empty()
+	deploy.tooltip_text = BaseHub.NO_CONTRACT if contract.is_empty() else "The host deploys the squad"
 	buttons.add_child(deploy)
 	buttons.add_child(_button("Rest a day", func() -> void: BaseHub.request("rest", [1])))
 	buttons.add_child(_button("Save campaign", func() -> void: BaseHub.request("save")))
