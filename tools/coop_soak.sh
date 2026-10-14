@@ -21,6 +21,18 @@
 #                         replay.jsonl (tests/coop_replay.gd plays it back), exit_code
 #     sessions/: each instance's SessionLog folder (CONTRACTOR_SESSION_LOG=1)
 # A line goes to index.txt. Nothing here deletes a log. Exits 0 on PASS.
+#
+# Play WITH the bots (--human): the host listens on the game's own port (24680, what a build
+# joins), 2 bot clients join it directly (no relay, nobody leaves or joins late), and the host
+# waits up to 10 min for you before the first contract and for you at every extraction:
+#   GODOT=... tools/coop_soak.sh --human                 # 120 min, bots from the newest build's commit
+# then in the game: Join someone's session, host address 127.0.0.1 (another PC: this one's LAN IP).
+#
+# --build DIR|newest|none: run the bots from the commit a build in B:\Contractor\builds was made
+# from (its BUILD.txt), so they run the same game code the build does (a build's pack leaves
+# tests/ out, so the bots run in the editor on a checkout of that commit: a worktree
+# ../Contractor-soakbuild-<sha>, with this harness's own files laid over it). Default: newest
+# with --human, none (this checkout) otherwise.
 set -u
 cd "$(dirname "$0")/.."
 . tools/run_log.sh
@@ -31,9 +43,13 @@ if [ -z "$PYTHON" ]; then
 		if "$p" -c "import sys" >/dev/null 2>&1; then PYTHON="$p"; break; fi
 	done
 fi
-MINUTES=10 MODE=lossy LATENCY=100 JITTER=30 LOSS=1.5 CLIENTS=3 PORT=25347 LATE=1 TAG=""
+MINUTES=10 MODE=lossy LATENCY=100 JITTER=30 LOSS=1.5 CLIENTS=3 PORT=25347 LATE=1 TAG="" HUMAN=0 BUILD="" WAIT_HUMAN=600
+ALL_ARGS=("$@")
 while [ $# -gt 0 ]; do
 	case "$1" in
+		--human) HUMAN=1 ;;
+		--build) BUILD="$2"; shift ;;
+		--wait-human) WAIT_HUMAN="$2"; shift ;;
 		--minutes) MINUTES="$2"; shift ;;
 		--mode) MODE="$2"; shift ;;
 		--latency) LATENCY="$2"; shift ;;
@@ -47,6 +63,45 @@ while [ $# -gt 0 ]; do
 	esac
 	shift
 done
+if [ "$HUMAN" = 1 ]; then
+	# Defaults for playing along, unless given: 120 min, 2 bots, the game's port, a direct link.
+	printf '%s\n' "${ALL_ARGS[@]}" | grep -qx -- --minutes || MINUTES=120
+	printf '%s\n' "${ALL_ARGS[@]}" | grep -qx -- --clients || CLIENTS=2
+	printf '%s\n' "${ALL_ARGS[@]}" | grep -qx -- --port || PORT=24680
+	MODE=clean LATE=0 TAG="${TAG:-human}"
+	[ -z "$BUILD" ] && BUILD=newest
+fi
+if [ -n "$BUILD" ] && [ "$BUILD" != none ]; then
+	builds="${CONTRACTOR_BUILDS:-/b/Contractor/builds}"
+	if [ "$BUILD" = newest ]; then
+		BUILD="$(ls -1d "$builds"/contractor-* 2>/dev/null | sort | tail -1)"
+	fi
+	[ -f "$BUILD/BUILD.txt" ] || { echo "no BUILD.txt in '$BUILD'"; exit 2; }
+	sha="$(grep -oE 'commit [0-9a-f]{7,40}' "$BUILD/BUILD.txt" | head -1 | cut -d' ' -f2)"
+	[ -n "$sha" ] || { echo "no commit in $BUILD/BUILD.txt"; exit 2; }
+	here="$(pwd)"
+	wt="$(cd .. && pwd)/Contractor-soakbuild-$sha"
+	echo "bots run the game code of $(basename "$BUILD") (commit $sha) in $wt"
+	if [ ! -d "$wt" ]; then
+		git fetch -q origin 2>/dev/null
+		git worktree add -q --detach "$wt" "$sha" || { echo "could not check out $sha"; exit 2; }
+	fi
+	[ "$(git -C "$wt" rev-parse HEAD)" = "$(git rev-parse "$sha^{commit}")" ] || { echo "$wt is not at $sha"; exit 2; }
+	# The harness's own files (tests/ and tools/ never go into a build's pack) over that commit.
+	for f in tests/coop_soak.gd tests/coop_soak.tscn tests/coop_soak.gd.uid tests/coop_soak_recorder.gd tests/coop_soak_recorder.gd.uid \
+		tests/coop_replay.gd tests/coop_replay.tscn tests/coop_replay.gd.uid tools/coop_soak.sh tools/coop_relay.py tools/coop_soak_report.py tools/coop_replay.sh; do
+		[ -f "$here/$f" ] && cp "$here/$f" "$wt/$f"
+	done
+	# Same options, this time without --build: the copy runs in that checkout.
+	rest=()
+	skip=0
+	for a in "${ALL_ARGS[@]}"; do
+		if [ "$skip" = 1 ]; then skip=0; continue; fi
+		[ "$a" = --build ] && { skip=1; continue; }
+		rest+=("$a")
+	done
+	exec bash "$wt/tools/coop_soak.sh" --build none "${rest[@]}"
+fi
 if [ "$MODE" = clean ]; then LATENCY=0; JITTER=0; LOSS=0; fi
 DURATION=$(( MINUTES * 60 ))
 
@@ -61,6 +116,11 @@ run="$day/$run_id-$start_time-RUNNING-$tail_name"
 mkdir -p "$run/host" "$run/sessions"
 win() { cygpath -m "$1" 2>/dev/null || echo "$1"; }
 echo "co-op soak $run_id: $MINUTES min, $MODE, $CLIENTS clients, logs in $run"
+if [ "$HUMAN" = 1 ]; then
+	ips="$(ipconfig 2>/dev/null | grep -aE 'IPv4' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | tr '\n' ' ')"
+	echo "PLAY ALONG: start the game build, Join someone's session, host address 127.0.0.1 (from another PC: one of $ips), port $PORT."
+	echo "The bots wait up to $WAIT_HUMAN s for you before the first contract, and for you at each extraction. Ctrl+C here ends the session."
+fi
 cat >"$run/config.json" <<EOF
 {"run_id": "$run_id", "mode": "$MODE", "minutes": $MINUTES, "latency_ms": $LATENCY, "jitter_ms": $JITTER, "loss_pct": $LOSS,
  "clients": $CLIENTS, "port": $PORT, "late": $LATE, "branch_sha": "$(run_log_tail)", "started": "$(date '+%Y-%m-%d %H:%M:%S')",
@@ -100,7 +160,9 @@ if grep -qE 'SCRIPT ERROR|Parse Error' "$run/import.log"; then
 	echo "import failed: see $run/import.log"
 fi
 
-instance host "$PORT" --soak-role host --soak-bot 0 --soak-duration "$DURATION" --soak-expect $(( LATE == 1 && CLIENTS == 3 ? 2 : CLIENTS ))
+human_args=()
+[ "$HUMAN" = 1 ] && human_args=(--soak-human --soak-wait-human "$WAIT_HUMAN")
+instance host "$PORT" --soak-role host --soak-bot 0 --soak-duration "$DURATION" --soak-expect $(( LATE == 1 && CLIENTS == 3 ? 2 : CLIENTS )) "${human_args[@]}"
 for i in $(seq 1 90); do
 	[ -f "$run/host_ready" ] && break
 	grep -qE 'SCRIPT ERROR|Parse Error' "$run/host/stdout.log" 2>/dev/null && break
@@ -109,7 +171,11 @@ done
 if [ ! -f "$run/host_ready" ]; then
 	echo "the host never came up: see $run/host/stdout.log"
 fi
+label="$(grep -m1 -aoE '^\[build\] .*' "$run/host/stdout.log" 2>/dev/null | cut -c9-)"
+echo "the bots' game: ${label:-$(git rev-parse --short HEAD) (no build label in this commit)}"
+[ "$HUMAN" = 1 ] && echo "Your game's main menu title must show the same commit, or the host turns you away (builds from before the build check just connect)."
 for n in $(seq 1 "$CLIENTS"); do
+	[ "$HUMAN" = 1 ] && break  # bots join the host directly, as the human does
 	"$PYTHON" tools/coop_relay.py --listen $(( PORT + n )) --target "127.0.0.1:$PORT" --latency "$LATENCY" --jitter "$JITTER" --loss "$LOSS" \
 		--seed $(( PORT + n )) --stats "$(win "$run/relay$n.jsonl")" >"$run/relay$n.log" 2>&1 &
 	pids+=($!)
@@ -118,8 +184,10 @@ sleep 1
 for n in $(seq 1 "$CLIENTS"); do
 	[ "$n" = 3 ] && [ "$LATE" = 1 ] && continue
 	extra=()
-	[ "$n" = 2 ] && extra=(--soak-reconnect)
-	instance "client$n" $(( PORT + n )) --soak-role client --soak-bot "$n" "${extra[@]}"
+	[ "$n" = 2 ] && [ "$HUMAN" = 0 ] && extra=(--soak-reconnect)
+	cport=$(( PORT + n ))
+	[ "$HUMAN" = 1 ] && cport=$PORT
+	instance "client$n" "$cport" --soak-role client --soak-bot "$n" "${extra[@]}"
 	sleep 2
 done
 host_pid="${pids[0]}"

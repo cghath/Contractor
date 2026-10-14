@@ -40,6 +40,11 @@ func _ready() -> void:
 	title.text = "Paused (the game keeps running)"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(title)
+	var build := Label.new()  # which build (BuildInfo), to say in a bug report
+	build.text = "Build " + BuildInfo.label()
+	build.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	build.modulate = Color(1, 1, 1, 0.6)
+	box.add_child(build)
 	if SessionLog.session_id != "":  # playtests: which session log to send with a report
 		var session := Label.new()
 		session.text = "Session %s (logged); Insert: bug report" % SessionLog.session_id

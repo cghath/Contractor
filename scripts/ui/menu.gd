@@ -43,7 +43,10 @@ func _ready() -> void:
 	box.add_theme_constant_override(&"separation", 10)
 	panel.add_child(box)
 	var title := Label.new()
-	title.text = "CONTRACTOR v%s (gray box)" % ProjectSettings.get_setting("application/config/version", "dev")
+	# Which build this is (BuildInfo: "B0367 · dev ec22a34", or "editor <branch> <commit>"),
+	# so players can tell they run the same one before joining each other.
+	title.text = "CONTRACTOR %s
+v%s (gray box)" % [BuildInfo.label(), ProjectSettings.get_setting("application/config/version", "dev")]
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(title)
 	box.add_child(_role_picker())
@@ -73,6 +76,10 @@ func _ready() -> void:
 	box.add_child(_status)
 	Net.joined.connect(hide)
 	Net.join_failed.connect(_on_join_failed)
+	Net.refused.connect(func(reason: String) -> void:
+		_status.text = reason
+		show())
+	Net.version_warning.connect(func(text: String) -> void: _status.text = text)
 
 
 func host() -> void:
