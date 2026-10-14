@@ -330,7 +330,11 @@ func _host_main() -> void:
 	Net.peer_joined.connect(func(id: int) -> void: _say("peer %d joined" % id); recorder.event(["join", id]))
 
 	if human:
-		await _sleep(3.0)  # the bots post their peer ids (bot<N>.json) just after joining
+		# The bots post their peer ids (bot<N>.json) just after joining; until every one has, a
+		# bot not posted yet looks like the human (S0757: bot 2 was taken for him, and the
+		# contract started without him).
+		if not await _wait_for(func() -> bool: return _bots().size() >= expect_clients, 30.0):
+			_say("only %d of %d bots posted their peer ids: a late one may be taken for the human" % [_bots().size(), expect_clients])
 		_say("waiting up to %d s for the human player to join (port %d)" % [int(wait_human_s), Net.port()])
 		var came := await _wait_for(func() -> bool: return not _humans().is_empty(), wait_human_s)
 		_say("human player %s" % (("in: peer %s" % [_humans()]) if came else "not in yet: starting without them (they can join any time)"))
