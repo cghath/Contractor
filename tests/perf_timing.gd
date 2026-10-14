@@ -3,8 +3,8 @@ extends Node
 ## 2026-10-13, Part B). Headless:
 ##   <voxel godot exe> --headless --path . res://tests/perf_timing.tscn
 ## Prints, as "timing:" lines:
-## - sounds: the main-thread cost of the first play of each heavy sound right at boot, and again
-##   after 3 s (Sfx builds them on a worker at boot; it used to synthesise them at first play);
+## - sounds: the main-thread cost of the first play of each heavy sound, and of every
+##   synthesised sound's first use, 3 s after boot (the first game starts later than that);
 ## - voxels for navigation: VoxelWorld.solid_boxes_m over every 12 m chunk of a streamed module;
 ## - a zone fight: 8 hostiles and 8 friendlies spawned in one frame in sight of each other, then
 ##   600 physics frames with every SquadAI and the zone's navigation run (and timed) from here:
@@ -21,6 +21,8 @@ var _nav: Node
 var _ai_ms: Array[float] = []
 var _nav_ms: Array[float] = []
 var _timing := false
+var _timing_nav := false
+var _worst_ai := ""
 
 
 func _ready() -> void:
@@ -33,9 +35,8 @@ func _ready() -> void:
 	get_tree().create_timer(240.0).timeout.connect(func() -> void:
 		print("timing: TIMED OUT")
 		get_tree().quit(99))
-	_time_sounds("at boot")
-	await get_tree().create_timer(3.0).timeout
-	_time_sounds("after 3 s")
+	await get_tree().create_timer(3.0).timeout  # the main menu is up at least this long
+	_time_sounds("3 s after boot")
 	var main: Node = load("res://scenes/main.tscn").instantiate()
 	add_child(main)
 	await get_tree().process_frame
@@ -44,26 +45,38 @@ func _ready() -> void:
 	while level.players.get_node_or_null(^"1") == null:
 		await get_tree().process_frame
 	var player := level.players.get_node(^"1") as Soldier
+	# Stand just outside the biggest module (most boxes), so it streams in and the fight's
+	# navigation reads its voxels.
 	var module: ZoneModule = null
+	for m in level.modules():
+		if module == null or ZoneModules.boxes(m.type).size() > ZoneModules.boxes(module.type).size():
+			module = m
+	var edge := module.footprint()
+	var at := level.ground_point(Vector3(edge.get_center().x, 0, edge.end.y + 4.0))
+	player.global_position = at + Vector3(0, 0, -2)
+	# The zone's navigation, run (and timed) from here from now on: the chunks around the
+	# player bake as the module streams in.
+	_nav = level.get_node_or_null(^"Navigation")
+	if _nav:
+		_nav.set_physics_process(false)
+	_timing_nav = true
 	for i in 1200:
-		await get_tree().process_frame
-		for m in level.streamed_modules():
-			if m.is_ready():
-				module = m
-		if module:
+		await get_tree().physics_frame
+		if module.is_ready() and _nav and _nav.is_settled():
 			break
-	if module == null:
-		print("timing: no module streamed in")
+	_report("ZoneNav per frame while %s streams in (%d chunks)" % [module.type, _nav.chunk_total() if _nav else 0], _nav_ms)
+	_nav_ms.clear()
+	if not module.is_ready():
+		print("timing: module %s didn't stream in" % module.module_id)
 	else:
 		_time_nav_reads(module)
-	# The fight: on open ground beside the player.
-	var at := player.global_position
+	# The fight: friendlies along the module's edge, hostiles 40 m out.
 	for i in 8:
 		level.spawn_soldier({"name": "TimingHostile%d" % i, "faction": "hostile", "variant": "urban",
 			"pos": level.ground_point(at + Vector3(-12.0 + i * 3.0, 0, 45)),
 			"loadout": CompoundLevel.HOSTILE_LOADOUT, "combat": 0.45, "discipline": 0.5, "mode": "aware", "guard": true})
 		level.spawn_soldier({"name": "TimingFriend%d" % i, "faction": "friendly", "variant": "multicam",
-			"pos": level.ground_point(at + Vector3(-12.0 + i * 3.0, 0, 5)), "loadout": CompoundLevel.HOSTILE_LOADOUT,
+			"pos": level.ground_point(at + Vector3(-12.0 + i * 3.0, 0, 0)), "loadout": CompoundLevel.HOSTILE_LOADOUT,
 			"combat": 0.5, "discipline": 0.6, "guard": true})
 	await get_tree().physics_frame
 	for s in level.ai.get_children():
@@ -71,15 +84,15 @@ func _ready() -> void:
 		if ai:
 			ai.set_physics_process(false)  # run (and timed) from here instead
 			_ais.append(ai)
-	_nav = level.get_node_or_null(^"Navigation")
-	if _nav:
-		_nav.set_physics_process(false)
 	_timing = true
 	for i in FRAMES:
 		await get_tree().physics_frame
 	_timing = false
+	_timing_nav = false
 	_report("AI per frame (%d SquadAI)" % _ais.size(), _ai_ms)
-	_report("ZoneNav per frame", _nav_ms)
+	var worst := _ai_ms.find(_ai_ms.max())
+	print("timing: the AI's worst frame is fight frame %d (%s)" % [worst, _worst_ai])
+	_report("ZoneNav per frame in the fight", _nav_ms)
 	_time_calls()
 	Campaign.reset_campaign()
 	GameState.delete_save()
@@ -87,18 +100,25 @@ func _ready() -> void:
 
 
 func _physics_process(delta: float) -> void:
-	if not _timing:
-		return
-	var t0 := Time.get_ticks_usec()
-	for ai in _ais:
-		if is_instance_valid(ai):
-			ai._physics_process(delta)
-	var t1 := Time.get_ticks_usec()
-	if is_instance_valid(_nav):
+	if _timing:
+		var t0 := Time.get_ticks_usec()
+		var top := 0
+		var top_name := ""
+		for ai in _ais:
+			if is_instance_valid(ai):
+				var t := Time.get_ticks_usec()
+				ai._physics_process(delta)
+				if Time.get_ticks_usec() - t > top:
+					top = Time.get_ticks_usec() - t
+					top_name = "%s %.1f ms, %s" % [ai.get_parent().name, top / 1000.0, ai.body.ai_status if ai.body else ""]
+		var ms := (Time.get_ticks_usec() - t0) / 1000.0
+		if _ai_ms.is_empty() or ms > _ai_ms.max():
+			_worst_ai = "slowest: " + top_name
+		_ai_ms.append(ms)
+	if _timing_nav and is_instance_valid(_nav):
+		var t1 := Time.get_ticks_usec()
 		_nav._physics_process(delta)
-	var t2 := Time.get_ticks_usec()
-	_ai_ms.append((t1 - t0) / 1000.0)
-	_nav_ms.append((t2 - t1) / 1000.0)
+		_nav_ms.append((Time.get_ticks_usec() - t1) / 1000.0)
 
 
 func _time_sounds(when: String) -> void:
@@ -108,7 +128,7 @@ func _time_sounds(when: String) -> void:
 	for id: StringName in HEAVY:
 		var t := Time.get_ticks_usec()
 		if id == &"engine_mbt":
-			Sfx.streams(id) if not Sfx.has_method(&"ready_streams") else Sfx.call(&"ready_streams", id)
+			Sfx.streams(id)
 		else:
 			Sfx.play_at(id, Vector3.ZERO)
 		var ms := (Time.get_ticks_usec() - t) / 1000.0
@@ -116,6 +136,13 @@ func _time_sounds(when: String) -> void:
 		parts.append("%s %.1f" % [id, ms])
 	print("timing: sounds' first play %s: %.1f ms on the main thread (%s)" % [when, total, ", ".join(parts)])
 	Sfx.listener_override = null
+	var t_all := Time.get_ticks_usec()
+	var n := 0
+	for id: String in Sfx.defs:
+		if not ((Sfx.defs[id] as Dictionary).get("synth", {}) as Dictionary).is_empty():
+			Sfx.streams(StringName(id))
+			n += 1
+	print("timing: every synthesised sound's first use (%d sounds) %s: %.1f ms on the main thread" % [n, when, (Time.get_ticks_usec() - t_all) / 1000.0])
 
 
 func _time_nav_reads(module: ZoneModule) -> void:
