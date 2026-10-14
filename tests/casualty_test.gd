@@ -443,21 +443,34 @@ func _test_dead_check() -> void:
 	check(ai._find_target() == null, "but not from further than %.0f m" % SquadAI.DEAD_CHECK_M)
 	foxtrot.vitals.server_reset_health()
 	_place(foxtrot, Vector3(40, 0.1, 60))
-	# In play: an advancing hostile keeps the body targeted and actually shoots it. The body
-	# is a stand-in friendly (a squadmate killed here would stay dead for the later tests).
+	# In play: an advancing hostile picks the body, looks, then fires DEAD_CHECK_ROUNDS
+	# deliberate rounds at the torso and moves on (Captain, P0362: dead-checks used to fire bursts
+	# until the body died, nearly always of a head or neck round). The body is a stand-in friendly
+	# (a squadmate killed here would stay dead for the later tests).
 	var victim := level.spawn_soldier({"name": "CheckVictim", "faction": "friendly", "variant": "urban", "pos": Vector3(-11, 0.1, -15),
 		"loadout": [], "combat": 0.5, "discipline": 0.5, "guard": true})
 	await _frames(3)
 	SquadAI.of(victim).set_physics_process(false)
 	_place(victim, Vector3(-11, 0.1, -15))
 	victim.vitals.server_damage(500.0)
-	await _frames(2)
+	await _seconds(1.5)  # the ragdoll comes to rest
+	# Stand him 4 m off to the side of the body (head to pelvis), where the torso shows.
+	var side := _body_side(victim)
+	var centre: Vector3 = SquadAI._part_point(victim, Vitals.ABDOMEN) if SquadAI._part_point(victim, Vitals.ABDOMEN) != null else victim.body_point()
+	var stand := Vector3(centre.x, 0.1, centre.z) + side * 4.0
+	_place(hostile, stand)
+	var face := centre - stand
+	hostile.rotation.y = atan2(-face.x, -face.z)
+	await get_tree().physics_frame
+	await get_tree().physics_frame
 	var wounds_before := victim.vitals.wound_list().size()
+	var rounds_before := hostile.inventory.rounds_in(hostile.active_slot)
 	ai._dead_check = null
+	ai._checked.clear()
 	ai.target = null
 	ai.intent = SquadAI.Intent.FIGHT
 	ai._advancing = true
-	ai._advance_anchor = Vector3(-15, 0.1, -15)
+	ai._advance_anchor = stand
 	ai._no_los_s = 0.0
 	ai._last_contact = Soldier._now()
 	hostile.threat_pos = victim.global_position
@@ -466,15 +479,32 @@ func _test_dead_check() -> void:
 	check(victim.vitals.downed, "a stand-in body lies unconscious 4 m from an advancing hostile (%s)" % victim.vitals.condition_text())
 	ai._cover_cd = 1000.0  # stays where it stands, 4 m off, instead of looking for cover
 	ai.set_physics_process(true)
-	var spotted := await _wait_until(func() -> bool: return ai.target == victim, 3.0)
-	check(spotted, "an advancing hostile picks the unconscious body for a dead-check")
-	ai._advancing = false  # the advance ends (it reached cover, say): the dead-check goes on
-	await _seconds(SquadAI.SCAN_S * 3.0)
-	check(ai.target == victim or victim.vitals.is_dead(), "and keeps it targeted over the next scans (%s)" % _name(ai.target))
-	var shot := await _wait_until(func() -> bool:
-		return victim.vitals.is_dead() or victim.vitals.wound_list().size() >= wounds_before + 3, 12.0)
-	check(shot, "shooting it (%s, %d -> %d wounds)" % [victim.vitals.condition_text(), wounds_before, victim.vitals.wound_list().size()])
+	var picked_at := -1.0
+	var wounded_at := -1.0
+	var start := Soldier._now()
+	while Soldier._now() - start < 15.0:
+		await get_tree().physics_frame
+		if picked_at < 0.0 and ai.target == victim:
+			picked_at = Soldier._now()
+			ai._advancing = false  # the advance ends (it reached cover, say): the dead-check goes on
+		if wounded_at < 0.0 and victim.vitals.wound_list().size() > wounds_before:
+			wounded_at = Soldier._now()
+		if picked_at >= 0.0 and wounded_at >= 0.0 and ai.target != victim:
+			break
+	check(picked_at >= 0.0 and picked_at - start <= 3.0, "an advancing hostile picks the unconscious body for a dead-check")
+	check(wounded_at >= 0.0 and wounded_at - picked_at <= 12.0, "and shoots it (%s, %d -> %d wounds)" % [victim.vitals.condition_text(), wounds_before, victim.vitals.wound_list().size()])
+	check(wounded_at < 0.0 or wounded_at - picked_at >= 1.0, "after a look first: the first round %.2f s after picking it (at least 1 s)" % (wounded_at - picked_at))
+	var spent := rounds_before - hostile.inventory.rounds_in(hostile.active_slot)
+	check(spent >= 1 and spent <= SquadAI.DEAD_CHECK_ROUNDS, "deliberate single rounds: %d spent (at most %d)" % [spent, SquadAI.DEAD_CHECK_ROUNDS])
+	ai._advancing = true
+	check(ai.target != victim and ai._find_target() != victim, "then the body counts as checked: dropped, and not picked again while still clearing (%s)" % _name(ai.target))
+	ai._advancing = false
+	var cause: Dictionary = victim.vitals.last_cause
+	check(not victim.vitals.is_dead() or cause.get("part", &"") not in [Vitals.HEAD, Vitals.FACE, Vitals.NECK],
+		"not killed by a head or neck round (%s, %s)" % [victim.vitals.condition_text(), cause.get("part", "-")])
 	check(ai._last_contact <= contact_at + 0.01, "a dead-check doesn't count as contact")
+	ai.set_physics_process(false)
+	await _dead_check_odds(hostile, ai, victim)
 	ai.set_physics_process(false)
 	hostile.queue_free()
 	if is_instance_valid(victim):
@@ -486,6 +516,148 @@ func _test_dead_check() -> void:
 	_place(player, Vector3(0, 0.1, 22))
 	_unfreeze()
 	await _seconds(0.5)
+
+
+## Flat, unit: across the body lying as `s`'s ragdoll (square to his head-to-pelvis line).
+static func _body_side(s: Soldier) -> Vector3:
+	var head: Variant = SquadAI._part_point(s, Vitals.HEAD)
+	var pelvis: Variant = SquadAI._part_point(s, Vitals.PELVIS)
+	if head == null or pelvis == null:
+		return Vector3.RIGHT
+	var along := (head as Vector3) - (pelvis as Vector3)
+	along.y = 0.0
+	if along.length() < 0.05:
+		return Vector3.RIGHT
+	return along.normalized().cross(Vector3.UP)
+
+
+## The dead-check odds (Captain, P0362): around the same body at rest, a hostile at 2, 4, 6 and
+## 8 m on 8 bearings (from beyond the head round), 5 checks each, run synchronously at 60 Hz the
+## way _shoot does it, with the rounds traced against the real hitboxes. Few rounds to the
+## head, never more than DEAD_CHECK_ROUNDS, none before the look is over, and from the side up
+## close the check still happens.
+func _dead_check_odds(hostile: Soldier, ai: SquadAI, victim: Soldier) -> void:
+	hostile.want_crouch = false  # on his feet, as he'd stand over a body
+	hostile.move_input = Vector2.ZERO
+	await _seconds(1.0)  # the ragdoll settles after the live rounds
+	var side := _body_side(victim)
+	var along := side.cross(Vector3.DOWN)  # pelvis to head, flat
+	var centre: Vector3 = SquadAI._part_point(victim, Vitals.ABDOMEN) if SquadAI._part_point(victim, Vitals.ABDOMEN) != null else victim.body_point()
+	var weapon := hostile.active_weapon()
+	if weapon == null:
+		check(false, "dead-check odds: the hostile has a weapon")
+		return
+	var auto: bool = weapon.stats.get("auto", false)
+	var gap := 60.0 / float(weapon.stats.get("rpm", 600)) * (1.0 if auto else 1.6)
+	hostile.want_aim = true
+	seed(4242)
+	var fired := 0
+	var head := 0
+	var over := 0
+	var early := 0
+	var side_checks := 0
+	var side_fired := 0
+	var line := ""
+	for d: float in [2.0, 4.0, 6.0, 8.0]:
+		line += "
+    %.0f m:" % d
+		for b in 8:
+			var dir := along.rotated(Vector3.UP, b * PI / 4.0)
+			_place(hostile, Vector3(centre.x, 0.1, centre.z) + dir * d)
+			await get_tree().physics_frame
+			await get_tree().physics_frame
+			await get_tree().physics_frame
+			hostile.is_aiming = true
+			var here := 0
+			for k in 5:
+				var to := centre - hostile.global_position
+				hostile.rotation.y = atan2(-to.x, -to.z) + deg_to_rad(randf_range(-30.0, 30.0))
+				hostile.head.rotation.x = 0.0
+				ai.target = victim
+				ai._burst_left = 0
+				ai._dead_check_rounds = 0
+				ai._checked.clear()
+				ai._acquire(victim)
+				var t := 0.0
+				var next_t := 0.0
+				var pause_t := 0.0
+				var shots := 0
+				while t < ai._acq_react_s + SquadAI.DEAD_CHECK_GIVE_UP_S:
+					t += 1.0 / 60.0
+					var err := ai._aim_for_shot(ai._cqb_aim_point(victim, 1.0 / 60.0), victim)
+					if t < ai._acq_react_s or t < next_t or t < pause_t or not ai._gate_open(victim, err):
+						continue
+					next_t = t + gap
+					if ai._burst_left <= 0:
+						ai._burst_left = randi_range(3, 5) if auto else randi_range(2, 3)
+						ai._suppress_jitter = Vector3(randf_range(-1, 1), randf_range(-0.3, 0.5), randf_range(-1, 1)) * SquadAI.SUPPRESS_SPREAD_M
+						ai._start_burst(victim)
+					ai._burst_left -= 1
+					if ai._burst_left <= 0:
+						pause_t = t + randf_range(0.5, 1.1) / lerpf(0.7, 1.3, ai.combat)
+					var ray: Vector3 = hostile.call(&"ai_spread_direction", weapon) if hostile.has_method(&"ai_spread_direction") else hostile._spread_direction(weapon)
+					var extra := deg_to_rad(ai._aim_error_deg(true))
+					ray = (ray + Vector3(randf_range(-1, 1), randf_range(-1, 1), randf_range(-1, 1)) * tan(extra) * 0.6).normalized()
+					var part := _round_part(hostile, victim, hostile.camera.global_position, ray)
+					shots += 1
+					if t < 1.0:
+						early += 1
+					if part in [Vitals.HEAD, Vitals.FACE, Vitals.NECK]:
+						head += 1
+					if ai._dead_check_rounds >= SquadAI.DEAD_CHECK_ROUNDS and ai._burst_left <= 0:
+						break
+				fired += shots
+				here += shots
+				if shots > SquadAI.DEAD_CHECK_ROUNDS:
+					over += 1
+				if d <= 4.0 and b % 4 == 2:
+					side_checks += 1
+					if shots > 0:
+						side_fired += 1
+			line += " %d" % here
+	randomize()
+	ai.target = null
+	ai._checked.clear()
+	print("    rounds fired per bearing (5 checks; bearing 0 beyond the head, 4 beyond the feet):" + line)
+	check(fired > 0 and float(head) / fired <= 0.05, "dead-checks: head, face or neck at most 5%% of rounds (%d of %d)" % [head, fired])
+	check(over == 0, "no check fires more than %d rounds (%d did)" % [SquadAI.DEAD_CHECK_ROUNDS, over])
+	check(early == 0, "no round before a 1 s look (%d were)" % early)
+	check(side_fired >= 0.8 * side_checks, "from the side at 2-4 m the check happens: %d of %d fire" % [side_fired, side_checks])
+
+
+## The part of `target` a round from `from` along `dir` meets, as Ballistics._trace finds it
+## (the hitbox, then the body inside it), or &"" for a miss (the ground, anyone else).
+static func _round_part(shooter: Soldier, target: Soldier, from: Vector3, dir: Vector3) -> StringName:
+	var space := shooter.get_world_3d().direct_space_state
+	var exclude: Array[RID] = [shooter.get_rid()]
+	for child in shooter.get_children():
+		if child is Area3D:
+			exclude.append(child.get_rid())
+	var gear := shooter.get_node_or_null(^"Gear") as GearRig
+	if gear:
+		exclude.append_array(gear.armor_rids())
+	var start := from
+	for i in Ballistics.MAX_PENETRATIONS:
+		var query := PhysicsRayQueryParameters3D.create(start, from + dir * Ballistics.RANGE, (1 << 0) | (1 << 1) | (1 << 3), exclude)
+		query.collide_with_areas = true
+		var hit := space.intersect_ray(query)
+		if hit.is_empty():
+			return &""
+		var collider: Object = hit.collider
+		if collider is VoxelArmor:
+			exclude.append(collider.get_rid())
+			start = hit.position
+			continue
+		var vitals := Vitals.find_on(collider)
+		if vitals == null:
+			return &""
+		var part: StringName = collider.get_meta(&"body_part", Vitals.TORSO)
+		if BodyVolume.entry(collider as Node3D, part, hit.position, dir, BodyVolume.body_of(collider)).is_empty():
+			exclude.append(collider.get_rid())
+			start = hit.position
+			continue
+		return part if vitals.get_parent() == target else &""
+	return &""
 
 
 func _test_body_cap() -> void:

@@ -39,6 +39,7 @@ func _ready() -> void:
 	_test_flash_stuns()
 	await _test_spotting()
 	await _test_fire_discipline()
+	await _test_close_range_aim()
 	await _test_tactics()
 	_test_doctrine_pending()
 	await _test_dead_leave_squad()
@@ -610,6 +611,9 @@ func _test_spotting() -> void:
 	var bush := _scatter_with([{"kind": ZoneScatter.Kind.SCRUB, "pos": Vector3(0, 0.1, -48.0), "size": Vector3(1.5, 1.35, 1.5)}])
 	alpha.global_transform = Transform3D(Basis.IDENTITY, Vector3(0, 0.1, 30))
 	var standing_leaves := Spotting.foliage_m(bush, alpha, bravo)
+	# Facing the observer, so he lies square behind the bush: lying across the line, his head
+	# would poke out past its edge (his facing was whatever his AI last turned to).
+	bravo.rotation.y = PI
 	bravo.want_stance = SoldierMovement.Stance.PRONE
 	await _wait_until(func() -> bool: return bravo.movement.is_prone(), 3.0)
 	await get_tree().create_timer(0.6).timeout  # the eyes settle down
@@ -737,6 +741,272 @@ func _test_fire_discipline() -> void:
 	alpha.global_transform = saved[0]
 	bravo.global_transform = saved[1]
 	_clear_contact()
+
+
+## Close-range hostile accuracy (Captain, P0362: squad killed by head and neck shots at 2-6 m).
+## A hostile at combat 0.45 meets a standing man at 2, 4 and 6 m, in front of him or off to the
+## side and behind; the rounds are traced against the real hitboxes the way Ballistics does.
+## Up close he should take a moment, start low and miss a little, and hit centre mass, not the
+## head; at 100-200 m nothing changes.
+func _test_close_range_aim() -> void:
+	print("Close-range aim: reaction, first-shot error, snap-aim lag, centre mass")
+	var spot := Vector3(-70, 0.1, -70)  # a corner of the flat ground, away from the squad
+	var diag := Vector3(1, 0, 1).normalized()  # the shooter stands off along this (200 m fits)
+	var hostile := level.spawn_soldier({"name": "CqbHostile", "faction": "hostile", "variant": "urban", "pos": spot + diag * 4.0,
+		"loadout": CompoundLevel.HOSTILE_LOADOUT, "combat": 0.45, "discipline": 0.5, "guard": true})
+	var target := level.spawn_soldier({"name": "CqbTarget", "faction": "friendly", "variant": "urban", "pos": spot,
+		"loadout": [], "combat": 0.5, "discipline": 0.5, "guard": true})
+	await _frames(3)
+	var ai := SquadAI.of(hostile)
+	ai.set_physics_process(false)
+	SquadAI.of(target).set_physics_process(false)
+	hostile.remove_from_group(&"combatants")  # the squad leaves him be (they see 120 m)
+	hostile.move_input = Vector2.ZERO
+	target.move_input = Vector2.ZERO
+	hostile.want_aim = true
+	_place(target, spot)
+	_place(hostile, spot + diag * 4.0)
+	await _physics_frames(15)  # lands (a 10 cm drop) and stands
+	hostile.is_aiming = true
+	var weapon := hostile.active_weapon()
+	check(weapon != null and weapon.type == "weapon" and hostile.is_on_floor() and target.vitals.is_up(),
+		"a hostile (%s, combat %.2f) on his feet (%s), aiming (%s), and a standing man to shoot at (%s)" % [
+		weapon.id if weapon else "no weapon", ai.combat, hostile.is_on_floor(), hostile.is_aiming, target.vitals.condition_text()])
+	if weapon == null:
+		hostile.queue_free()
+		target.queue_free()
+		return
+	seed(4242)
+	for d: float in [2.0, 4.0, 6.0]:
+		_place(hostile, spot + diag * d)
+		await _physics_frames(15)
+		hostile.is_aiming = true
+		check(hostile.is_on_floor(), "%.0f m: he stands on the ground" % d)
+		var fired := 0
+		var hits := 0
+		var head := 0
+		var torso := 0
+		var first_chest := 0
+		var early := 0
+		var quick := 0
+		var front_t: Array[float] = []
+		var flank_t: Array[float] = []
+		for k in 120:
+			var flank := k >= 60
+			var off := deg_to_rad(randf_range(-60.0, 60.0)) if not flank else deg_to_rad(randf_range(90.0, 180.0)) * (1.0 if k % 2 == 0 else -1.0)
+			var r := _cqb_trial(hostile, ai, target, off, true)
+			fired += r.fired
+			hits += r.hits
+			head += r.head
+			torso += r.torso
+			if not flank and r.first_part == Vitals.CHEST:
+				first_chest += 1
+			if r.first_hit >= 0.0:
+				if r.first_hit < 0.35:
+					early += 1
+				if r.first_hit <= 2.5:
+					quick += 1
+				(flank_t if flank else front_t).append(r.first_hit)
+			else:
+				(flank_t if flank else front_t).append(99.0)
+		var front_med := _median(front_t)
+		var flank_med := _median(flank_t)
+		var share := float(hits) / maxf(fired, 1)
+		print("    %.0f m: %d rounds, %d hits (%.0f%%), head/face/neck %d, torso %d, first round in the chest %d/60, first hit median front %.2f s, flank %.2f s" % [
+			d, fired, hits, share * 100.0, head, torso, first_chest, front_med, flank_med])
+		check(hits > 0 and float(head) / hits <= 0.03, "%.0f m: head, face and neck at most 3%% of hits (%d of %d)" % [d, head, hits])
+		check(hits > 0 and float(torso) / hits >= 0.75, "%.0f m: chest, abdomen and pelvis at least 75%% of hits (%d of %d)" % [d, torso, hits])
+		check(share >= 0.75, "%.0f m: still hits: at least 75%% of rounds (%.0f%%)" % [d, share * 100.0])
+		check(first_chest <= 51, "%.0f m: the first round isn't a sure chest hit (%d of 60 front trials, at most 51)" % [d, first_chest])
+		check(early == 0, "%.0f m: no first hit sooner than 0.35 s (%d were)" % [d, early])
+		check(front_med >= 0.55 and front_med <= 1.4, "%.0f m: a reaction before the first hit in front: median %.2f s (0.55-1.4)" % [d, front_med])
+		check(flank_med >= front_med + 0.1, "%.0f m: a man off to the side or behind takes longer: median %.2f s vs %.2f s in front" % [d, flank_med, front_med])
+		check(quick >= 108, "%.0f m: at least 90%% of trials hit within 2.5 s (%d of 120)" % [d, quick])
+	# At range: nothing changes. Same seed, same draws, with the new aim point and the old one.
+	# Up in the air, clear of the compound's walls (both held there, physics off).
+	var at_range := true
+	var sky := spot + Vector3.UP * 40.0
+	hostile.set_physics_process(false)
+	target.set_physics_process(false)
+	_place(target, sky)
+	for d: float in [100.0, 150.0, 200.0]:
+		_place(hostile, sky + diag * d)
+		await _physics_frames(2)
+		hostile.is_aiming = true
+		var offs: Array[float] = []
+		for k in 60:
+			offs.append(deg_to_rad(randf_range(-10.0, 10.0)))
+		var seed_now := randi()
+		var hits_new := 0
+		var hits_old := 0
+		var fired_new := 0
+		var fired_old := 0
+		seed(seed_now)
+		for off: float in offs:
+			var r := _cqb_trial(hostile, ai, target, off, true)
+			hits_new += r.hits
+			fired_new += r.fired
+		seed(seed_now)
+		for off: float in offs:
+			var r := _cqb_trial(hostile, ai, target, off, false)
+			hits_old += r.hits
+			fired_old += r.fired
+		var new_share := float(hits_new) / maxf(fired_new, 1)
+		var old_share := float(hits_old) / maxf(fired_old, 1)
+		print("    %.0f m: hit share %.2f (%d/%d), before %.2f (%d/%d)" % [d, new_share, hits_new, fired_new, old_share, hits_old, fired_old])
+		at_range = at_range and new_share >= old_share - 0.01
+		ai._acquire(target)
+		at_range = at_range and ai._cqb_aim_point(target, 0.0) == target.aim_point()
+	_place(hostile, sky + diag * SquadAI.CQB_FADE_M)
+	hostile.rotation.y = 0.0
+	ai._acquire(target)
+	var at_fade := ai._cqb_aim_point(target, 0.0) == target.aim_point()
+	check(at_range and at_fade, "at 100, 150 and 200 m he hits as often as before, and from %.0f m out the aim point is exactly the chest" % SquadAI.CQB_FADE_M)
+	randomize()
+	# Live: a real 4 m engagement through _shoot. The squad is kept out of earshot (out of the
+	# combatants for it) so the shots don't start a fight for the later checks.
+	_place(target, spot)
+	_place(hostile, spot + diag * 4.0)
+	hostile.set_physics_process(true)
+	target.set_physics_process(true)
+	var deaf: Array[Soldier] = []
+	for s: Soldier in _squad():
+		if s != target and s.is_in_group(&"combatants"):
+			s.remove_from_group(&"combatants")
+			deaf.append(s)
+	var to := target.global_position - hostile.global_position
+	hostile.rotation.y = atan2(-to.x, -to.z)
+	hostile.head.rotation.x = 0.0
+	await _physics_frames(4)
+	ai.target = null
+	ai._acq_age = 0.0
+	ai._next_shot = 0.0
+	ai._pause_until = 0.0
+	ai._burst_left = 0
+	ai.intent = SquadAI.Intent.FIGHT
+	ai._cover_cd = 1000.0  # stays where he stands
+	var start := Soldier._now()
+	ai.set_physics_process(true)
+	var hit_at := -1.0
+	while Soldier._now() - start < 3.5:
+		await get_tree().physics_frame
+		if target.vitals.wound_list().size() > 0:
+			hit_at = Soldier._now() - start
+			break
+	ai.set_physics_process(false)
+	check(hit_at >= 0.4 and hit_at <= 3.0 and ai._acq_age > 0.0, "live at 4 m: the first wound comes after %.2f s (0.4-3 s), through the close-range aim (age %.2f s)" % [hit_at, ai._acq_age])
+	hostile.queue_free()
+	target.queue_free()
+	for s: Soldier in deaf:
+		if is_instance_valid(s):
+			s.add_to_group(&"combatants")
+	await _frames(2)
+	_clear_contact()
+
+
+## One staged engagement for _test_close_range_aim, run synchronously at 60 Hz the way _shoot
+## does it: `hostile` starts `yaw_off` off facing `target`, acquires him, and fires two bursts
+## (or gives up at 4 s). `cqb`: aim with _cqb_aim_point; else at the plain chest (the old path,
+## with the same random draws). Returns rounds fired, hits on the target, head (head, face,
+## neck) and torso (chest, abdomen, pelvis) hits, the first round's part and the first hit's
+## time (-1: none).
+func _cqb_trial(hostile: Soldier, ai: SquadAI, target: Soldier, yaw_off: float, cqb: bool) -> Dictionary:
+	var to := target.aim_point() - hostile.global_position
+	hostile.rotation.y = atan2(-to.x, -to.z) + yaw_off
+	hostile.head.rotation.x = 0.0
+	ai.target = target
+	ai._burst_left = 0
+	ai._acquire(target)
+	var weapon := hostile.active_weapon()
+	var auto: bool = weapon.stats.get("auto", false)
+	var gap := 60.0 / float(weapon.stats.get("rpm", 600)) * (1.0 if auto else 1.6)
+	var res := {"fired": 0, "hits": 0, "head": 0, "torso": 0, "first_part": &"", "first_hit": -1.0}
+	var dt := 1.0 / 60.0
+	var t := 0.0
+	var next_t := 0.0
+	var pause_t := 0.0
+	var bursts := 0
+	while t < 4.0:
+		t += dt
+		var aim: Vector3
+		if cqb:
+			aim = ai._cqb_aim_point(target, dt)
+		else:
+			ai._acq_age += dt
+			aim = target.aim_point()
+		var err := ai._aim_for_shot(aim, target)
+		if t < ai._acq_react_s or t < next_t or t < pause_t or not ai._gate_open(target, err):
+			continue
+		next_t = t + gap
+		if ai._burst_left <= 0:
+			bursts += 1
+			ai._burst_left = randi_range(3, 5) if auto else randi_range(2, 3)
+			ai._suppress_jitter = Vector3(randf_range(-1, 1), randf_range(-0.3, 0.5), randf_range(-1, 1)) * SquadAI.SUPPRESS_SPREAD_M
+			ai._start_burst(target)
+		ai._burst_left -= 1
+		if ai._burst_left <= 0:
+			pause_t = t + randf_range(0.5, 1.1) / lerpf(0.7, 1.3, ai.combat)
+		var dir: Vector3 = hostile.call(&"ai_spread_direction", weapon) if hostile.has_method(&"ai_spread_direction") else hostile._spread_direction(weapon)
+		var extra := deg_to_rad(ai._aim_error_deg(true))
+		dir = (dir + Vector3(randf_range(-1, 1), randf_range(-1, 1), randf_range(-1, 1)) * tan(extra) * 0.6).normalized()
+		var part := _round_part(hostile, target, hostile.camera.global_position, dir)
+		res.fired += 1
+		if res.fired == 1:
+			res.first_part = part
+		if part != &"":
+			res.hits += 1
+			if res.first_hit < 0.0:
+				res.first_hit = t
+			if part in [Vitals.HEAD, Vitals.FACE, Vitals.NECK]:
+				res.head += 1
+			elif part in Vitals.TORSO_PARTS:
+				res.torso += 1
+		if bursts >= 2 and ai._burst_left <= 0:
+			break
+	return res
+
+
+## The part of `target` a round from `from` along `dir` meets, as Ballistics._trace finds it
+## (the hitbox, then the body inside it), or &"" for a miss (the ground, anyone else).
+static func _round_part(shooter: Soldier, target: Soldier, from: Vector3, dir: Vector3) -> StringName:
+	var space := shooter.get_world_3d().direct_space_state
+	var exclude: Array[RID] = [shooter.get_rid()]
+	for child in shooter.get_children():
+		if child is Area3D:
+			exclude.append(child.get_rid())
+	var gear := shooter.get_node_or_null(^"Gear") as GearRig
+	if gear:
+		exclude.append_array(gear.armor_rids())
+	var start := from
+	for i in Ballistics.MAX_PENETRATIONS:
+		var query := PhysicsRayQueryParameters3D.create(start, from + dir * Ballistics.RANGE, (1 << 0) | (1 << 1) | (1 << 3), exclude)
+		query.collide_with_areas = true
+		var hit := space.intersect_ray(query)
+		if hit.is_empty():
+			return &""
+		var collider: Object = hit.collider
+		if collider is VoxelArmor:
+			exclude.append(collider.get_rid())
+			start = hit.position
+			continue
+		var vitals := Vitals.find_on(collider)
+		if vitals == null:
+			return &""
+		var part: StringName = collider.get_meta(&"body_part", Vitals.TORSO)
+		if BodyVolume.entry(collider as Node3D, part, hit.position, dir, BodyVolume.body_of(collider)).is_empty():
+			exclude.append(collider.get_rid())
+			start = hit.position
+			continue
+		return part if vitals.get_parent() == target else &""
+	return &""
+
+
+static func _median(values: Array[float]) -> float:
+	if values.is_empty():
+		return 0.0
+	var v := values.duplicate()
+	v.sort()
+	return v[int(v.size() / 2.0)]
 
 
 ## A squadmate (not one of `besides`) who is up, not carrying or carried, and not busy with a

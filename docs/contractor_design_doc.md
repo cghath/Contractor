@@ -173,7 +173,7 @@ Surgery kit (decided). Arterial bleeds can be stopped the old-fashioned way, by 
 
 Pain, broken arms and concussion add their own sway on top, so a wounded, bleeding soldier stacks penalties.
 
-AI uses exactly the same rules, so wounding an enemy and watching his buddy drag him is a real tactic. Enemies normally ignore unconscious foes and only dead-check bodies when clearing or assaulting through a position (Captain), so a downed friendly left in a room the enemy is pushing through is in real danger.
+AI uses exactly the same rules, so wounding an enemy and watching his buddy drag him is a real tactic. Enemies normally ignore unconscious foes and only dead-check bodies when clearing or assaulting through a position (Captain), so a downed friendly left in a room the enemy is pushing through is in real danger. A dead-check (P0362) is a look of 1-2 s, then two deliberate single rounds to the torso, fired only with the sights on the body rather than the head; then the body counts as checked and he moves on. It no longer fires bursts until the casualty dies. Both sides play by this rule.
 
 **The kit.** Ten items, two more drugs (below) and a defibrillator, each used up from the physical inventory.
 
