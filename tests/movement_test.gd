@@ -753,7 +753,7 @@ func _test_ai_body() -> void:
 	# critically loaded body still steps up a 0.2 m stair. Skipped where that isn't merged yet.
 	if (SoldierMovement as Script).get_script_constant_map().has("WORLD_STEP_M"):
 		var feet := mover.global_position
-		var stair := _box(feet + Vector3(0, 0.1, -1.6), Vector3(3, 0.2, 2))
+		var stair := _box(feet + Vector3(0, 0.1, -10.6), Vector3(3, 0.2, 20))  # long: still on it at the end
 		mover.load_kg = 60.0
 		mover.load_mult = MovementRules.load_speed_mult(60.0)
 		await _seconds(0.3)
