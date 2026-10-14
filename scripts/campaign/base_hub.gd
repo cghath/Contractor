@@ -68,7 +68,11 @@ const STASH_POLL_S := 1.0
 ## Its carriers come with the base kit's MOLLE pouches on (BaseArmory.kitted_carrier_state),
 ## so magazines and the tourniquet go into them when picked up.
 const STARTING_STASH := [["plate_carrier", 2], ["plate_ceramic_l4", 4], ["helmet", 2], ["assault_pack", 2], ["m4a1", 2],
-	["mag_556", 12], ["ifak", 4], ["tourniquet", 2], ["smoke_grenade", 2], ["frag_grenade", 2]]
+	["mag_556", 12], ["ifak", 4], ["tourniquet", 6], ["smoke_grenade", 2], ["frag_grenade", 2],
+	# Captain, 2026-10-14: the FOB starts with medical supplies, so a medic who used his kit on a
+	# contract can restock it (before, only IFAKs and tourniquets were ever in the stash).
+	["hemostatic_gauze", 8], ["pressure_bandage", 12], ["chest_seal", 6], ["splint", 4], ["burn_dressing", 4],
+	["morphine", 8], ["npa", 4], ["epinephrine", 6], ["iv_18", 6], ["io_kit", 2], ["saline_500", 4], ["blood_500", 2]]
 ## Debug builds: Shift+End extracts everyone within this many metres of the host (until the map's
 ## extraction calls server_end_deployment).
 const DEBUG_EXTRACT_M := 60.0
