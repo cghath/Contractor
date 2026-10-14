@@ -247,8 +247,8 @@ func _test_respawn_wait_and_protection() -> void:
 	player.vitals.server_kill()
 	var died_at := Soldier._now()
 	await _frames(3)
-	check(player.respawn_state == Soldier.RESPAWN_WAITING and player.vitals.is_up() and level.bodies.get_child_count() == bodies_before + 1,
-		"killed: the body stays, the player waits to respawn (state %d)" % player.respawn_state)
+	check(player.respawn_state == Soldier.RESPAWN_WAITING and player.vitals.is_up() and level.bodies.get_child_count() == bodies_before,
+		"killed: no body is left (Captain, 2026-10-14), the player waits to respawn (state %d)" % player.respawn_state)
 	check(not player.model.visible and not player.is_in_group(&"combatants") and player.collision_layer == 0,
 		"while waiting: not drawn, no collision, not a target")
 	check(player.global_position.distance_to(death_spot) < 0.5, "still where he died, not at a spawn point yet")
@@ -290,7 +290,7 @@ func _test_respawn_wait_and_protection() -> void:
 
 
 ## Captain, playtest P0362: down with nobody to help, a player was stuck until the session ended.
-## Holding the give-up key Soldier.GIVE_UP_HOLD_S gives up (a death: the body stays, the respawn
+## Holding the give-up key Soldier.GIVE_UP_HOLD_S gives up (a death: no body is left, the respawn
 ## pool counts it, base checks the pool), once down GIVE_UP_AFTER_S or at once with no conscious
 ## friendly within GIVE_UP_ALONE_M.
 func _test_give_up() -> void:
@@ -341,9 +341,9 @@ func _test_give_up() -> void:
 	Input.action_release(&"give_up")
 	await _frames(3)
 	player.vitals.died.disconnect(on_died)
-	check(deaths[0] == 1 and level.bodies.get_child_count() == bodies_before + 1, "held %.0f s: he dies (a death, his body left behind)" % Soldier.GIVE_UP_HOLD_S)
+	check(deaths[0] == 1 and level.bodies.get_child_count() == bodies_before, "held %.0f s: he dies (a death, no body left behind)" % Soldier.GIVE_UP_HOLD_S)
 	var spawn_gap: float = CompoundLevel.SPAWN_POINTS.map(func(p: Vector3) -> float: return p.distance_to(player.global_position)).min()
-	check(player.vitals.is_up() and spawn_gap < 0.5 and player.inventory.slots[&"primary"] == &"m4a1", "and respawns in the default kit")
+	check(player.vitals.is_up() and spawn_gap < 0.5 and player.inventory.slots[&"primary"] == &"m4a1", "and respawns with his own rifle")
 	buddy.queue_free()
 	await _frames(2)
 
@@ -355,7 +355,7 @@ func _test_reload_across_death() -> void:
 	player.inventory.consume_round(&"primary")
 	player._server_reload.rpc_id(1, &"primary")
 	await _frames(2)
-	player.vitals.server_kill()  # respawns in the default kit, a fresh M4
+	player.vitals.server_kill()  # respawns with the same M4 (Captain, 2026-10-14: your own kit)
 	await _frames(3)
 	player.inventory.consume_round(&"primary")
 	player.inventory.consume_round(&"primary")
@@ -722,21 +722,25 @@ func _test_downed() -> void:
 	check(player.inventory.rounds_in(&"primary") == rounds, "can't shoot while down")
 	var death_spot := player.global_position
 	var had_vest: StringName = player.inventory.slots[&"vest"]
+	var kit_before := _kit_of(player.inventory)
+	var bodies_before := level.bodies.get_child_count()
 	player.vitals.server_damage(50.0)
 	check(player.vitals.downed, "a hit while down is just another wound")
 	player.vitals.server_advance(Vitals.ARREST_WINDOW_S + 1.0)  # nothing restarts a heart yet: the arrest window runs out
 	await _frames(2)
 	check(player.vitals.is_up() and player.vitals.blood_fraction() == 1.0 and player.vitals.wound_list().is_empty(), "dying respawns you unhurt")
-	var inv := player.inventory
-	check(inv.slots[&"primary"] == &"m4a1" and inv.count_of(&"mag_556") == 2 and inv.count_of(&"smoke_grenade") == 1 and inv.count_of(&"frag_grenade") == 1,
-		"respawned in the default kit: M4, 2 mags, smoke, frag")
-	check(inv.slots[&"vest"] == &"" and inv.slots[&"helmet"] == &"", "none of the old gear came along")
-	var corpse: Soldier = level.bodies.get_child(level.bodies.get_child_count() - 1) if level.bodies.get_child_count() > 0 else null
-	check(corpse != null and corpse.vitals.is_dead() and corpse.global_position.distance_to(death_spot) < 0.5
-		and had_vest != &"" and corpse.inventory.slots[&"vest"] == had_vest and not _items_near(death_spot, 3.0).has(had_vest),
-		"your body stays where you died with your old gear still on it (%s)" % [corpse.inventory.slots if corpse else "no body"])
-	var markers := get_tree().get_nodes_in_group(GearMarker.GROUP)
-	check(markers.size() == 1 and (markers[0] as GearMarker).body() == corpse, "a marker shows where it lies")
+	# Captain, 2026-10-14: "respawn with the kit you had on. delete old player/bot bodies".
+	var kit_after := _kit_of(player.inventory)
+	check(kit_after == kit_before and had_vest != &"" and player.inventory.slots[&"vest"] == had_vest,
+		"respawned with the kit he had on, spent rounds and all%s" % ("" if kit_after == kit_before else " (%s -> %s)" % [kit_before, kit_after]))
+	check(level.bodies.get_child_count() == bodies_before and get_tree().get_nodes_in_group(GearMarker.GROUP).is_empty()
+		and not _items_near(death_spot, 3.0).has(had_vest), "no body and no gear marker left where he died, and nothing of his on the ground")
+
+
+## Everything in an inventory, worn and stowed, with its state (rounds, plate damage): to tell
+## the kit after a respawn is the kit before it.
+static func _kit_of(inv: Inventory) -> String:
+	return JSON.stringify(Roster.json_safe(inv.net_state), "", true)
 
 
 func _test_throwables() -> void:
