@@ -134,6 +134,7 @@ func server_begin(plan: Dictionary) -> void:
 		var p: Array = preset.get("pos", [])
 		if p.size() >= 2:
 			_add_point(Vector2(float(p[0]), float(p[1])), "zone", String(preset.get("name", "")), float(preset.get("radius", RADIUS_M)))
+	SessionLog.note("extraction open: contract %s, %d preset points" % [String(plan.get("contract", {}).get("id", "none")), points.size()])
 	_broadcast()
 
 
@@ -247,6 +248,7 @@ func server_confirm() -> String:
 		var why := "Not everyone is at the extraction point. Waiting for: %s" % ", ".join(missing_at(nearest))
 		_client_message.rpc(why)
 		return why
+	SessionLog.note("extraction called at %s: %.0f s countdown" % [point.name, countdown_s])
 	state = State.COUNTDOWN
 	countdown_point = int(point.id)
 	countdown_left = countdown_s
@@ -310,6 +312,7 @@ func _run_countdown(delta: float) -> void:
 		countdown_point = -1
 		_broadcast()
 		_client_message.rpc("Extraction stopped: %s left the extraction point" % ", ".join(missing))
+		SessionLog.note("extraction stopped: %s left %s" % [", ".join(missing), point.get("name", "the point")])
 		return
 	countdown_left -= delta
 	var whole := ceili(countdown_left)
@@ -326,6 +329,8 @@ func _finish(point: Dictionary) -> void:
 	countdown_left = 0.0
 	var report := build_report(point)
 	last_report = report
+	SessionLog.note("extraction complete at %s (%s) after %d s: %s" % [point.get("name", "?"),
+		"aboard %s" % ride.name if is_instance_valid(ride) else "countdown", int(report.get("duration_s", 0)), summary(report)])
 	var reinforcements := MapNodes.reinforcements(self)
 	if reinforcements:
 		reinforcements.server_stop()

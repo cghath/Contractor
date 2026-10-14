@@ -948,6 +948,9 @@ func _test_contract_loop() -> void:
 	var stay: String = squad[0]
 	var lost: String = squad[1]
 	var day0 := Economy.day()
+	# The session log tells the night's story (S3, P0331 triage): a session of its own, in a
+	# scratch folder of this test's.
+	SessionLog.start(OS.get_user_data_dir().path_join("base_test_session_log" + tag))
 	var why := BaseHub.server_deploy()
 	var moved := await _wait_until(func() -> bool: return not CompoundLevel.current(self) is BaseLevel, 20.0)
 	level = CompoundLevel.current(self)
@@ -993,6 +996,7 @@ func _test_contract_loop() -> void:
 	var line: Dictionary = (debrief.get("contracts", [{}]) as Array)[0] if not (debrief.get("contracts", []) as Array).is_empty() else {}
 	check(home and String(line.get("cid", "")) == cid and line.get("outcome") == "completed", "extraction ends it once: the debrief (%s) and back at the base" % line.get("outcome", "none"))
 	Economy.week_paid.disconnect(on_week)
+	_check_story(cid, String(BaseHub.member(lost).callsign))
 	check(Economy.cash() == cash_before + int(debrief.totals.paid_now) - bills[0] and int(line.get("pay", 0)) > 0,
 		"the pay lands in the one bank (+$%s)" % DebriefCalc.money(debrief.totals.paid_now))
 	check(Economy.day() == day0 + int(debrief.days) and BaseHub.day() == Economy.day(), "the days pass once, on one clock (%d -> %d)" % [day0, Economy.day()])
@@ -1171,6 +1175,22 @@ func _seconds(s: float) -> void:
 
 ## The Escape menu's "Return to Base (revert)" (Captain, 2026-10-12): back to just before the
 ## deployment, as if it never happened.
+## The session log's lines for the contract loop (S3): deployment start and end, the contract
+## going live, extraction open, called and complete, and the debrief's pay and losses.
+func _check_story(cid: String, lost_callsign: String) -> void:
+	var story := Array(FileAccess.get_file_as_string(SessionLog.folder.path_join("session.log")).split("
+")).filter(
+		func(l: String) -> bool: return not "  [ok] " in l and not "  [FAIL] " in l)
+	var has := func(parts: Array) -> bool: return story.any(func(l: String) -> bool: return parts.all(func(p: String) -> bool: return p in l))
+	check(has.call(["deployment started: zone ", "[%s]" % cid, "squad "]), "the session log has the deployment's start: zone, contract and squad")
+	check(has.call(["deployment: briefing done, contract ", "[%s] is live" % cid]) and has.call(["extraction open: contract %s" % cid]),
+		"the contract going live and extraction opening")
+	check(has.call(["extraction called at "]) and has.call(["extraction complete at ", "Extracted: "]), "extraction called and complete")
+	check(has.call(["debrief: ", "paid $", "casualties: "]), "the debrief: pay and losses")
+	check(has.call(["deployment ended: zone ", "MIA %s" % lost_callsign]), "and the deployment's end: who's back, MIA and KIA")
+	SessionLog.finish()
+
+
 func _test_revert() -> void:
 	print("Return to Base (revert)")
 	level = CompoundLevel.current(self)

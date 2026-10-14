@@ -10,7 +10,10 @@ extends Node
 ## impossible) also writes dump-<n>-<what>.txt (every soldier: where, condition, the AI's intent,
 ## target and mode; the hot zone's state; the last log lines) and a screenshot, once per kind of
 ## issue. On quit the folder becomes PASS (nothing unexpected) or FAIL; a session that crashed
-## keeps RUNNING. The pause menu shows the session number.
+## keeps RUNNING. A rename that fails (something holds a file in the folder open: an editor
+## or a tail on session.log) is retried, then logged, and the next session finishes it
+## (_finish_stuck_folders). The pause menu shows the session number and where its logs are, so
+## a friend can find them and send them.
 ##
 ## Off when headless (test suites) or running a -s script; CONTRACTOR_SESSION_LOG=0 turns it
 ## off, =1 on. CONTRACTOR_TEST_LOGS picks the parent (as for the test runner); otherwise the
@@ -29,6 +32,9 @@ const PERF_S := 60.0
 const FELL_Y := -100.0
 ## Log lines kept for the dumps.
 const TAIL_LINES := 200
+## Renaming the folder at the end: this many tries, this far apart (ms), before giving up.
+const RENAME_TRIES := 10
+const RENAME_RETRY_MS := 100
 ## At most this many dumps (and screenshots) per session.
 const MAX_DUMPS := 20
 const ERROR_NAMES := ["ERROR", "WARNING", "SCRIPT ERROR", "SHADER ERROR"]
@@ -106,6 +112,12 @@ func start(parent: String) -> void:
 		return
 	_parent = parent
 	DirAccess.make_dir_recursive_absolute(parent)
+	errors = 0
+	warnings = 0
+	anomalies = 0
+	dumps = 0
+	_dumped = {}
+	_flagged = {}
 	var number := _next_number(parent)
 	session_id = "P%04d" % number
 	var build := _build_name()
@@ -128,6 +140,8 @@ func start(parent: String) -> void:
 		Engine.get_version_info().string, OS.get_name()])
 	_write("args %s %s; dev tools %s" % [OS.get_cmdline_args(), OS.get_cmdline_user_args(), "on" if DevTools.on() else "off"])
 	_write("logging to %s" % folder)
+	for line in _finish_stuck_folders(parent, folder):
+		_write(line)
 	_watch_net.call_deferred()  # this autoload loads first (to catch the others' errors); Net comes later
 
 
@@ -137,8 +151,8 @@ func _watch_net() -> void:
 	_net_watched = true
 	for sig: String in ["hosted", "joined", "join_failed", "session_ended"]:
 		Net.connect(sig, note.bind("net: %s" % sig.replace("_", " ")))
-	Net.peer_joined.connect(func(id: int) -> void: note("net: peer %d joined" % id))
-	Net.peer_left.connect(func(id: int) -> void: note("net: peer %d left" % id))
+	Net.peer_joined.connect(func(id: int) -> void: note("net: peer %d joined (Player %d)" % [id, id]))
+	Net.peer_left.connect(func(id: int) -> void: note("net: peer %d left (Player %d)" % [id, id]))
 
 
 ## Closes the session: PASS if nothing unexpected happened, else FAIL, and a line in index.txt.
@@ -154,18 +168,69 @@ func finish() -> void:
 	_file = null
 	_mutex.unlock()
 	var done := folder.replace("-RUNNING-", "-%s-" % verdict)
-	if DirAccess.rename_absolute(folder, done) == OK:
+	var renamed := _rename(folder, done)
+	if renamed == OK:
 		folder = done
+	else:
+		# P0331, P0362: the folder stayed RUNNING after a clean end and nothing said why.
+		var log_file := FileAccess.open(folder.path_join("session.log"), FileAccess.READ_WRITE)
+		if log_file:
+			log_file.seek_end()
+			log_file.store_line("[%s] !! could not rename the folder to %s (%s, %d tries): something has a file in it open; it stays RUNNING until the next session renames it" % [
+				_clock(), done.get_file(), error_string(renamed), RENAME_TRIES])
+			log_file.close()
+		printerr("SessionLog: could not rename %s to %s (%s)" % [folder, done.get_file(), error_string(renamed)])
 	var index := FileAccess.open(_parent.path_join("index.txt"), FileAccess.READ_WRITE)
 	if index == null:
 		index = FileAccess.open(_parent.path_join("index.txt"), FileAccess.WRITE)
 	if index:
 		index.seek_end()
 		var name_parts := folder.get_file().split("-")
-		index.store_line("%s %s %s %s %s playtest session: %d errors, %d warnings, %d anomalies" % [session_id,
-			folder.get_base_dir().get_file(), name_parts[1], verdict, "-".join(name_parts.slice(3)), errors, warnings, anomalies])
+		index.store_line("%s %s %s %s %s playtest session: %d errors, %d warnings, %d anomalies%s" % [session_id,
+			folder.get_base_dir().get_file(), name_parts[1], verdict, "-".join(name_parts.slice(3)), errors, warnings, anomalies,
+			"" if renamed == OK else " (folder left RUNNING: rename failed, %s)" % error_string(renamed)])
 		index.close()
 	session_id = ""
+
+
+## Renames folder `from` to `to`, trying RENAME_TRIES times RENAME_RETRY_MS apart (on Windows a
+## folder with a file open in it can't be renamed, and a scanner or a tail may let go of it in a
+## moment). Returns the last error, or OK.
+static func _rename(from: String, to: String) -> Error:
+	var err := FAILED
+	for i in RENAME_TRIES:
+		err = DirAccess.rename_absolute(from, to)
+		if err == OK or not DirAccess.dir_exists_absolute(from):
+			return err
+		OS.delay_msec(RENAME_RETRY_MS)
+	return err
+
+
+## The session folders under `parent` left RUNNING by a session that did end (its session.log
+## has the "ended" line: the rename at its end failed) get their verdict now; a crashed one
+## (no "ended" line) stays RUNNING. `skip`: this session's own folder. Returns a line for each.
+static func _finish_stuck_folders(parent: String, skip: String) -> Array[String]:
+	var out: Array[String] = []
+	var ended := RegEx.create_from_string("session (P\\d+) ended after \\S+: (PASS|FAIL)")
+	for day in DirAccess.get_directories_at(parent):  # the dated folders
+		for sub in DirAccess.get_directories_at(parent.path_join(day)):
+			var path := parent.path_join(day).path_join(sub)
+			if not sub.begins_with("P") or not "-RUNNING-" in sub or path == skip:
+				continue
+			var m := ended.search(FileAccess.get_file_as_string(path.path_join("session.log")))
+			if m == null:
+				continue
+			var to := path.get_base_dir().path_join(sub.replace("-RUNNING-", "-%s-" % m.get_string(2)))
+			var err := DirAccess.rename_absolute(path, to)
+			out.append("%s's folder was left RUNNING after it ended %s: %s" % [m.get_string(1), m.get_string(2),
+				"renamed to %s" % to.get_file() if err == OK else "still can't rename it (%s)" % error_string(err)])
+	return out
+
+
+## The folder holding this session's (dated) log folders, for the player to send in: the
+## session's own folder is the one in it starting with the session's number. "" without one.
+func logs_folder() -> String:
+	return folder.get_base_dir() if session_id != "" else ""
 
 
 ## A line in the session log (any thread). Does nothing without a session.

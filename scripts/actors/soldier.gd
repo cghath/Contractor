@@ -1638,7 +1638,10 @@ func _on_died() -> void:
 	else:
 		for kit: Array in DEFAULT_KIT:
 			inventory.take(kit[0], kit[1])
-	_client_respawn.rpc_id(owner_peer(), level.next_spawn_point())
+	var spawn := level.next_spawn_point()
+	SessionLog.note("%s respawns at (%.0f, %.0f) in %s; the body and its gear stay where they fell" % [log_name(), spawn.x, spawn.z,
+		"their role's kit" if CompoundLevel.player_role_kits and role != &"" else "the default kit"])
+	_client_respawn.rpc_id(owner_peer(), spawn)
 
 
 ## Host only. Leaves this player's body where it lies as a dead body node

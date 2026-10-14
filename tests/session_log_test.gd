@@ -30,6 +30,7 @@ func _ready() -> void:
 	check(SessionLog.session_id == "", "off in a headless run")
 	await _test_quiet_session()
 	await _test_issues()
+	await _test_stuck_folder()
 	await _test_settings()
 	GameState.delete_save()
 	print("SESSION_LOG TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
@@ -209,6 +210,7 @@ func _test_issues() -> void:
 	await _test_care_lines(player, level)
 	await _test_names(player, level)
 	await _test_bug_report(player, level, faller)
+	await _test_group_night(player, level)
 	SessionLog.finish()
 	check("-FAIL-" in SessionLog.folder.get_file() and DirAccess.dir_exists_absolute(SessionLog.folder), "something unexpected: the folder ends FAIL")
 	check(_index().contains("P0043 ") and _index().contains(" FAIL "), "and index.txt says so")
@@ -336,6 +338,61 @@ func _test_bug_report(player: Soldier, level: CompoundLevel, faller: Soldier) ->
 		"a performance line: %s" % perf)
 	overlay.queue_free()
 	scout.queue_free()
+
+
+## What a group night needs in the log (S3, P0331 triage; the deployment's own lines are
+## checked in the base suite's contract loop): where the logs are, on the pause menu;
+## extraction opening and being called; the debrief's line; a player's death and respawn.
+func _test_group_night(player: Soldier, level: CompoundLevel) -> void:
+	print("A group night in the log")
+	var path := player.player_input.pause_menu.find_child("SessionLogFolder", true, false) as LineEdit
+	check(path != null and path.text == SessionLog.logs_folder() and SessionLog.folder.get_base_dir() == path.text
+		and DirAccess.dir_exists_absolute(path.text), "the pause menu shows where the session logs are (%s)" % (path.text if path else "no path"))
+	var extraction := MapNodes.extraction(level)
+	if extraction:
+		var at := player.global_position
+		extraction.server_begin({"contract": {"id": "c_probe"}, "zone": {"extraction_points": [{"name": "LZ Probe", "pos": [at.x, at.z]}]}})
+		var why := extraction.server_confirm()
+		check(_has("extraction open: contract c_probe, 1 preset points") and (why != "" or _has("extraction called at LZ Probe")),
+			"extraction opening and being called are logged (%s)" % ("called" if why == "" else why))
+		extraction.server_cancel()
+	else:
+		check(false, "the level has an extraction")
+	var line := Contracts.debrief_log_line({"zone_name": "Probe Yard", "contracts": [{"title": "Hold Fast", "outcome": "completed", "pay": 1200,
+		"clawback": 300}], "fines": 50, "civilians": 1, "days": 2}, {"extracted": ["Player 1", "Gunny"], "casualties": [{"name": "Reaper", "status": "kia"}]})
+	check(line == "debrief: Probe Yard: Hold Fast completed, paid $1200, $300 advance clawed back; fines $50 (1 civilians); 2 days; out: Player 1, Gunny; casualties: Reaper kia",
+		"the debrief's line: pay, clawback, fines and losses (%s)" % line)
+	player.vitals.server_kill()
+	await _frames(5)
+	check(_has("%s died (friendly)" % player.log_name()) and _has("%s respawns at (" % player.log_name()),
+		"a player's death and respawn are logged (%s)" % [_lines_with("respawns at")])
+
+
+## A session whose folder can't be renamed at its end (P0331, P0362: something held a file in
+## it open, and it stayed RUNNING with no word why): the rename is retried, the failure is in
+## session.log and index.txt, and the next session renames it.
+func _test_stuck_folder() -> void:
+	print("A folder that can't be renamed at the end")
+	SessionLog.start(parent)
+	var id := SessionLog.session_id
+	var running := SessionLog.folder
+	check(SessionLog.errors + SessionLog.warnings + SessionLog.anomalies == 0, "a new session counts its own issues (none yet)")
+	var blocker := running.replace("-RUNNING-", "-PASS-")  # the name it wants, taken: the rename fails anywhere
+	DirAccess.make_dir_recursive_absolute(blocker)
+	var f := FileAccess.open(blocker.path_join("in_the_way.txt"), FileAccess.WRITE)
+	f.store_line("probe")
+	f.close()
+	SessionLog.finish()
+	var text := FileAccess.get_file_as_string(running.path_join("session.log"))
+	check(SessionLog.folder == running and DirAccess.dir_exists_absolute(running) and "!! could not rename the folder to " in text,
+		"the rename fails: the folder stays RUNNING and session.log says why")
+	check(_index().contains("%s " % id) and _index().contains("folder left RUNNING: rename failed"), "and so does index.txt")
+	DirAccess.remove_absolute(blocker.path_join("in_the_way.txt"))
+	DirAccess.remove_absolute(blocker)
+	SessionLog.start(parent)
+	check(not DirAccess.dir_exists_absolute(running) and DirAccess.dir_exists_absolute(blocker) and _has("%s's folder was left RUNNING after it ended PASS: renamed to " % id),
+		"the next session renames it and says so")
+	SessionLog.finish()
 
 
 func _probe_error() -> void:
