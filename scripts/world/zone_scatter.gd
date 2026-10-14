@@ -207,6 +207,63 @@ func boxes_in(area: Rect2) -> Array[AABB]:
 	return out
 
 
+## The least foliage_between `from` and either of `to_a` and `to_b` (a head and a chest), with
+## the foliage walked once for both lines (Spotting.foliage_m: two walks per pair in sight were
+## a large share of an AI scan, research 2026-10-13 B2.6).
+func foliage_least(from: Vector3, to_a: Vector3, to_b: Vector3) -> float:
+	if _cells.is_empty():
+		return 0.0
+	var lo := _cell_of(minf(from.x, minf(to_a.x, to_b.x)) - FOLIAGE_PAD_M, minf(from.z, minf(to_a.z, to_b.z)) - FOLIAGE_PAD_M)
+	var hi := _cell_of(maxf(from.x, maxf(to_a.x, to_b.x)) + FOLIAGE_PAD_M, maxf(from.z, maxf(to_a.z, to_b.z)) + FOLIAGE_PAD_M)
+	var a := 0.0
+	var b := 0.0
+	for cz in range(lo.y, hi.y + 1):
+		for cx in range(lo.x, hi.x + 1):
+			for index: int in _cells.get(Vector2i(cx, cz), []):
+				var item: Dictionary = items[index]
+				var kind := int(item.kind)
+				if kind == Kind.ROCK:
+					continue
+				var p: Vector3 = item.pos
+				if kind == Kind.SCRUB and Vector2(p.x - from.x, p.z - from.z).length() > SEE_SCRUB_M:
+					continue  # as in foliage_between
+				a += _through(item, kind, from, to_a)
+				b += _through(item, kind, from, to_b)
+	return minf(a, b)
+
+
+## Metres of `item` (foliage of `kind`) the line `from` -> `to` passes through (foliage_between's
+## test, for foliage_least).
+static func _through(item: Dictionary, kind: int, from: Vector3, to: Vector3) -> float:
+	var flat := Vector2(to.x - from.x, to.z - from.z)
+	var flat_len := flat.length()
+	if flat_len < 0.01:
+		return 0.0
+	var p: Vector3 = item.pos
+	var size: Vector3 = item.size
+	var r := size.x * (SCRUB_R if kind == Kind.SCRUB else CROWN_R)
+	var c := Vector2(p.x - from.x, p.z - from.z)
+	var along := c.dot(flat) / (flat_len * flat_len)
+	var miss := (c - flat * along).length()
+	if miss >= r:
+		return 0.0
+	var y0 := p.y + (0.0 if kind == Kind.SCRUB else size.y * CROWN_LOW)
+	var y1 := p.y + size.y * (SCRUB_TOP if kind == Kind.SCRUB else CROWN_HIGH)
+	var half_t := sqrt(r * r - miss * miss) / flat_len
+	var t0 := maxf(along - half_t, 0.0)
+	var t1 := minf(along + half_t, 1.0)
+	var dy := to.y - from.y
+	if absf(dy) < 0.0001:
+		if from.y < y0 or from.y > y1:
+			return 0.0
+	else:
+		var ta := (y0 - from.y) / dy
+		var tb := (y1 - from.y) / dy
+		t0 = maxf(t0, minf(ta, tb))
+		t1 = minf(t1, maxf(ta, tb))
+	return (t1 - t0) * from.distance_to(to) if t1 > t0 else 0.0
+
+
 ## Metres of foliage (scrub, and tree crowns) the straight line `from` -> `to` passes through,
 ## for spotting (Spotting.foliage_m). Each is a vertical cylinder about its mesh: scrub
 ## SCRUB_R x its width, up to SCRUB_TOP x its height; a crown CROWN_R x its size, from
