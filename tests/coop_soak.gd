@@ -1900,15 +1900,21 @@ var _wedge_since := 0.0
 var _detour_until := 0.0
 var _detour_dir := Vector3.ZERO
 var _detour_n := 0
+var _wedge_tick := 0.0     # when _track_wedge last ran (it doesn't while down or riding)
 
 
 ## Every physics frame: the headway made toward the goal; wedged, a detour, then a catch-up.
+## Not called while down or riding: a gap of more than half a second starts over (S0794: a bot
+## that gave up after 120 s down was "wedged 121 s" the moment it stood up again).
 func _track_wedge(me: Soldier, pinned: bool) -> void:
 	var now := Recorder.now()
 	var pos := me.global_position
 	var last := _wedge_last
+	var gap := now - _wedge_tick
 	_wedge_last = pos
+	_wedge_tick = now
 	if _goal == null or pinned or _treating or _dropping or me.carry_mode != &"" or is_instance_valid(me.vehicle) \
+			or me.respawn_state == Soldier.RESPAWN_WAITING or gap > 0.5 \
 			or last == Vector3.INF or last.distance_to(pos) > 5.0:  # a respawn or a warp: start over
 		_wedge_gain = 0.0
 		_wedge_since = now
