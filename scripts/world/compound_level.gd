@@ -632,7 +632,9 @@ func rebalance_squad() -> void:
 		h.fire_team = int(layout[slot].team) if slot >= 0 else -1
 		if slot >= 0:
 			everyone[slot] = h
-		if player_role_kits and player_roles.has(h.name.to_int()) and not _kitted.has(h.name.to_int()):
+		if BaseHub.campaign_running:
+			BaseHub.server_give_due_kit(h)  # B-23: campaign gear is the player's own; a new player's kit, once
+		elif player_role_kits and player_roles.has(h.name.to_int()) and not _kitted.has(h.name.to_int()):
 			_kitted[h.name.to_int()] = true
 			Roles.apply_kit(h.inventory, h.role)
 	if _ai_ready:
