@@ -26,6 +26,17 @@ have, say so here and we'll stop.
 - **`tools/run_tests.sh` run-number race** (R0232 twice): a lock round the counter, on
   `fix/deploy-hitch`. Also SessionLog's counter.
 - **Release-build check** of the playtest build (`tools/make_build.sh` preset name).
+- **Deploy without a contract** (playtest P0331 dead end): Deploy is disabled until a contract is
+  prepped, and `server_deploy` refuses an empty one. Branch `fix/playtest-small` (`base_ui.gd`,
+  `base_hub.gd`). Small and on purpose; merge dev before you edit those.
+- **End-to-end contract loop test** (board -> debrief for every mission type), branch
+  `test/contract-loop`: may fix small loop bugs in campaign files; each one will be listed here.
+
+**Still yours, from the playtest-readiness triage (2026-10-13):** (1) no autosave between deploy
+and extraction: a host quit/crash loses the whole deployment (`base_hub.gd:204-214`); autosave at
+insertion and on a timer. (2) the voxel edit log is never compacted (P0331 logged 370 edits in one
+14-min visit), so saves and late-join payloads grow all night. (3) more contract zones/types for a
+2-hour night (four types, three contract zones today).
 State now: `dev` = ec22a34 (integrate/b3 landed, build B0367). Next build integrates guns + optic
 attachments, vehicle camera/interiors, deploy hitch, close-range hostile accuracy, two CI flake
 fixes, ground-item models and the items above.
