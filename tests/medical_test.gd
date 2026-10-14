@@ -43,6 +43,8 @@ func _ready() -> void:
 	await _test_times()
 	await _test_completed_treatments()
 	await _test_interruptions()
+	await _test_one_treater_per_site()
+	await _test_care_plan_moves_on()
 	await _test_use_medical()
 	await _test_menu_and_removal()
 	await _test_medical_menu()
@@ -1087,6 +1089,115 @@ func _test_interruptions() -> void:
 	_reset(casualty)
 	_reset(player)
 	player.inventory.remove_one(&"pressure_bandage")
+
+
+## B-09 (co-op soak S0578: "iv_18 on forearm_l" twice, "tourniquet on upper_arm_l" twice):
+## a treatment goes on once. The same request sent twice (a resent or doubled RPC) is turned
+## away while the first runs; a second treater (an AI medic beside a player) can't start the
+## same thing on the same casualty meanwhile (the same item on that part, or a second line or
+## bag); and a missed IV says so in the log, so a retry doesn't read as a second line put in.
+func _test_one_treater_per_site() -> void:
+	print("One treater per site (B-09)")
+	_open_scratch_log()
+	_restock()
+	_reset(casualty)
+	_reset(helper)
+	var helper_was := helper.global_position
+	helper.global_position = casualty.global_position + Vector3(-0.8, 0, 0)
+	_wound(casualty.vitals, Vitals.FOREARM_L, "muscle", 0.25)
+	player.inventory.take(&"pressure_bandage", 2)
+	if helper.inventory.count_of(&"assault_pack") == 0 and helper.inventory.slots.get(&"backpack", &"") == &"":
+		helper.inventory.take(&"assault_pack")
+	helper.inventory.take(&"pressure_bandage")
+	player._server_treat.rpc_id(1, casualty.get_path(), &"pressure_bandage", Vitals.FOREARM_L)
+	player._server_treat.rpc_id(1, casualty.get_path(), &"pressure_bandage", Vitals.FOREARM_L)  # the same request again
+	helper._server_treat.rpc_id(1, casualty.get_path(), &"pressure_bandage", Vitals.FOREARM_L)
+	check(casualty.vitals.is_healing() and helper._server_busy_until <= Soldier._now(), "a second treater can't start the same bandage on the same wound")
+	check(_care_lines("refused: Someone is already doing that").size() == 1, "  the log says why (%s)" % [_care_lines("refused")])
+	await _seconds(5.3)
+	var w: Dictionary = casualty.vitals.wound_list()[0]
+	check(w.treated and not w.bleeding and player.inventory.medical_count(&"pressure_bandage") == 1 and helper.inventory.medical_count(&"pressure_bandage") == 1,
+		"bandaged once: one bandage used, the doubled request and the second treater's used nothing (player %d, helper %d left)"
+		% [player.inventory.medical_count(&"pressure_bandage"), helper.inventory.medical_count(&"pressure_bandage")])
+	check(_care_lines("pressure_bandage on left forearm").filter(func(l: String) -> bool: return l.ends_with(", done")).size() == 1, "  one \"done\" line for it")
+	# One line at a time: a second IV, even on the other arm, waits until the first is in.
+	_reset(casualty)
+	casualty.vitals._model.blood = 0.8
+	casualty.vitals._after_change(true)
+	player.inventory.take(&"iv_18")
+	helper.inventory.take(&"iv_18")
+	player._server_busy_until = 0.0
+	player._server_treat.rpc_id(1, casualty.get_path(), &"iv_18", Vitals.FOREARM_L)
+	helper._server_treat.rpc_id(1, casualty.get_path(), &"iv_18", Vitals.FOREARM_R)
+	check(casualty.vitals.is_healing() and helper._server_busy_until <= Soldier._now() and helper.inventory.medical_count(&"iv_18") == 1,
+		"a second IV while the first is going in is turned away, nothing used")
+	await _seconds(player.treat_seconds(casualty, ItemDB.get_item(&"iv_18")) + 0.3)
+	var lines := _care_lines("iv_18 on left forearm")
+	var missed := casualty.vitals.access().is_empty()
+	check(player.inventory.medical_count(&"iv_18") == 0 and not lines.is_empty()
+		and lines[-1].ends_with("done: Missed the vein" if missed else ", done"),
+		"the IV's line in the log says how it went (%s: %s)" % ["missed" if missed else "in", lines[-1] if not lines.is_empty() else "none"])
+	# Once the first treater is done, the site is free again.
+	helper._server_treat.rpc_id(1, casualty.get_path(), &"iv_18", Vitals.FOREARM_R)
+	check(helper._server_busy_until > Soldier._now() if missed else helper._server_busy_until <= Soldier._now(),
+		"after it: another IV starts only if the first missed (%s)" % ("missed" if missed else "in"))
+	await _seconds(player.treat_seconds(casualty, ItemDB.get_item(&"iv_18")) + 0.3)
+	SessionLog.finish()
+	helper.global_position = helper_was
+	_reset(casualty)
+	_reset(helper)
+	_reset(player)
+	_restock()
+
+
+## B-09 follow-up (co-op soak S0697: "npa on head (their kit)" 42 times, the casualty still
+## Unconscious; S0578: two iv_18, two tourniquets): a treatment that goes on is kept, reaches
+## every peer's copy (the state a client's care plan reads), and the plan moves on; asking for
+## it again is refused with nothing used. (In S0697 every one of those requests was refused
+## "Too far away": both bodies had fallen out of the world, 6 km below; none went on.)
+func _test_care_plan_moves_on() -> void:
+	print("A treatment goes on once and the care plan moves on (B-09)")
+	_open_scratch_log()
+	_restock()
+	_reset(casualty)
+	casualty.vitals._model.blood = 0.58  # unconscious from blood loss, heart still going: the plan asks for an airway
+	casualty.vitals._model.update_state(0.0)
+	casualty.vitals._after_change(true)
+	await _frames(2)
+	var asks_npa := func(v: Vitals) -> bool: return v.care_needed().any(func(t: Dictionary) -> bool: return t.item == &"npa")
+	check(casualty.vitals.is_unconscious() and asks_npa.call(casualty.vitals), "unconscious: the plan asks for an NPA")
+	player.inventory.take(&"npa", 2)
+	player._server_busy_until = 0.0
+	player._server_treat.rpc_id(1, casualty.get_path(), &"npa", Vitals.HEAD)
+	await _seconds(player.treat_seconds(casualty, ItemDB.get_item(&"npa")) + 0.3)
+	check(casualty.vitals.has_npa() and not asks_npa.call(casualty.vitals) and player.inventory.medical_count(&"npa") == 1,
+		"one NPA goes in, stays in, and the plan moves on (%s)" % [casualty.vitals.care_needed().map(func(t: Dictionary) -> StringName: return t.item)])
+	# What a client's copy reads (net_state, the replicated wound-model state): the NPA is in there too.
+	var copy := WoundModel.new()
+	copy.apply_net(casualty.vitals._model.to_net())
+	check(copy.npa and not copy.care_tasks().any(func(t: Dictionary) -> bool: return t.item == &"npa"), "a client's copy has the NPA and asks for none")
+	player._server_treat.rpc_id(1, casualty.get_path(), &"npa", Vitals.HEAD)
+	await _frames(2)
+	check(player._server_busy_until <= Soldier._now() and player.inventory.medical_count(&"npa") == 1 and _care_lines("npa on head").any(func(l: String) -> bool: return l.ends_with("refused: Already has an NPA")),
+		"asked again: refused at once (Already has an NPA), nothing used")
+	# A tourniquet that stops the bleed: the plan doesn't ask for a second, and a second is refused.
+	_reset(casualty)
+	_wound(casualty.vitals, Vitals.UPPER_ARM_L, "arterial", 1.2)
+	player.inventory.take(&"tourniquet", 2)
+	player._server_busy_until = 0.0
+	player._server_treat.rpc_id(1, casualty.get_path(), &"tourniquet", Vitals.UPPER_ARM_L)
+	await _seconds(4.3)
+	var asks_tq := func() -> bool: return casualty.vitals.care_needed().any(func(t: Dictionary) -> bool: return t.item == &"tourniquet")
+	check(casualty.vitals.bleed_rate() == 0.0 and not asks_tq.call() and int(casualty.vitals.tourniquets()[Vitals.UPPER_ARM_L].count) == 1,
+		"a tourniquet stops the arm's bleed: one on, the plan asks for no second")
+	player._server_treat.rpc_id(1, casualty.get_path(), &"tourniquet", Vitals.UPPER_ARM_L)
+	await _frames(2)
+	check(player._server_busy_until <= Soldier._now() and player.inventory.medical_count(&"tourniquet") == 1 and int(casualty.vitals.tourniquets()[Vitals.UPPER_ARM_L].count) == 1,
+		"asked again: refused at once (nothing bleeding there), still one on, nothing used")
+	SessionLog.finish()
+	_reset(casualty)
+	_reset(player)
+	_restock()
 
 
 ## Opens a session log in this test's own scratch folder under user:// (emptied first; never
