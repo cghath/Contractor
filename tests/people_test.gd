@@ -19,6 +19,17 @@ var _client_live := false
 var _listener: Listener
 
 
+## Counts the engine's errors whose text has `match` in it (RPCs to a peer that isn't there).
+class ErrorCount extends Logger:
+	var match := ""
+	var count := 0
+
+	func _log_error(_function: String, _file: String, _line: int, code: String, rationale: String, _editor_notify: bool,
+			_error_type: int, _script_backtraces: Array[ScriptBacktrace]) -> void:
+		if match in code or match in rationale:
+			count += 1
+
+
 ## A mission listener (People.LISTENER_GROUP), as the economy would add.
 class Listener extends Node:
 	var casualties: Array = []
@@ -81,6 +92,7 @@ func _ready() -> void:
 	await _test_surrender()
 	await _test_scavenge_intel()
 	await _test_escort()
+	await _test_carried_owner_gone()
 	await _test_client()
 	await _test_compound_content()
 	await _test_blast_casualty()
@@ -765,6 +777,44 @@ func _test_escort() -> void:
 	for s: Soldier in [e1, e2, medic, hvt]:
 		s.queue_free()
 	await _frames(3)
+
+
+## B-06 (P0583: 1456 "Attempt to call RPC with unknown peer ID" from _update_carried): a
+## player's body carried while its player isn't in the session (a frame bench's stand-in, or
+## the moment a player drops) is the host's: no RPC to the gone peer every tick, and the host
+## moves the body with its carrier itself, as it does an AI's.
+func _test_carried_owner_gone() -> void:
+	print("A carried player's body whose player isn't here (B-06)")
+	var at := Vector3(-46, 0.1, 30)
+	var gone := 4242  # no such peer
+	check(not gone in multiplayer.get_peers(), "peer %d isn't in the session" % gone)
+	var body := CompoundLevel.PLAYER_SCENE.instantiate() as Soldier
+	body.name = str(gone)
+	body.position = at
+	level.players.add_child(body, true)
+	await _frames(2)
+	check(not body.owner_connected() and player.owner_connected(), "owner_connected: no for the stand-in, yes for the host's own player")
+	body.vitals.server_damage(500.0)
+	await _frames(3)
+	var bearer := _soldier("Bearer", &"friendly", at + Vector3(0.8, 0, 0), ["m4a1"], false)
+	await _frames(3)
+	var errors := ErrorCount.new()
+	errors.match = "unknown peer"
+	OS.add_logger(errors)
+	check(bearer.server_pick_up_body(body, Soldier.CARRY, 4.0), "an AI picks the body up")
+	_end_carry_phase(bearer)
+	bearer.global_position = at + Vector3(3.0, 0, 2.0)
+	await _seconds(0.5)
+	var held := bearer.carry_transform().origin
+	check(body.global_position.distance_to(held) < 0.2, "the host carries it along on the shoulder (%.2f m off)" % body.global_position.distance_to(held))
+	bearer.server_put_down()
+	await _seconds(Soldier.CARRY_LOWER_S + 0.3)
+	check(body.carried_by == null and _flat(body.global_position, bearer.global_position) < 1.5, "and puts it down in front of the bearer")
+	OS.remove_logger(errors)
+	check(errors.count == 0, "no RPC to the gone peer (%d errors)" % errors.count)
+	body.queue_free()
+	bearer.queue_free()
+	await _frames(2)
 
 
 func _squadmate(callsign: String, role: StringName, pos: Vector3) -> Soldier:

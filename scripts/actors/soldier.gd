@@ -250,6 +250,13 @@ func _ready() -> void:
 	print("[%s] %s spawned on peer %d (local: %s)" % ["ai" if is_ai() else "player", name, multiplayer.get_unique_id(), is_local()])
 
 
+## Whether the peer that drives this body is in the session: always for an AI (the host), and
+## for a player until they leave. A body whose player has gone is the host's to move (B-06).
+func owner_connected() -> bool:
+	var peer := owner_peer()
+	return peer == multiplayer.get_unique_id() or peer in multiplayer.get_peers()
+
+
 ## True for the human player on their own machine.
 func is_local() -> bool:
 	return is_multiplayer_authority() and not is_ai()
@@ -499,7 +506,13 @@ func _update_carried(delta: float) -> void:
 		_carry_phase = &""  # up on the shoulder, or got hold: from here they come along
 		CharacterModel.server_carry(self, carrying, carry_mode)  # a plain hold (late joiners don't replay the lift)
 	if carry_holds() and not carrying.is_ai():
-		carrying._client_carried.rpc_id(carrying.owner_peer(), carry_transform().origin)
+		if carrying.owner_connected():
+			carrying._client_carried.rpc_id(carrying.owner_peer(), carry_transform().origin)
+		else:
+			# Its player has left (B-06: an RPC to the gone peer every tick, "unknown peer ID"):
+			# the host has the body now and moves it itself, like an AI's.
+			carrying.global_transform = carry_transform()
+			carrying.velocity = Vector3.ZERO
 
 
 ## Host only. Picks up (CARRY) or takes hold of (DRAG) a downed body within `reach`.
@@ -537,7 +550,7 @@ func server_put_down() -> void:
 		release_carried()
 		return
 	var spot := _put_down_spot()
-	if carrying.is_ai():
+	if carrying.is_ai() or not carrying.owner_connected():
 		carrying.global_position = spot
 		carrying.rotation = Vector3(0, rotation.y, 0)
 	else:
