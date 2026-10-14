@@ -208,7 +208,8 @@ func _live_read() -> void:
 			if at >= f.get_length():
 				break
 			var line := f.get_line()
-			var d: Variant = JSON.parse_string(line) if not line.is_empty() else null
+			var json := JSON.new()  # quiet: a half-written last line is normal here
+			var d: Variant = json.data if not line.is_empty() and json.parse(line) == OK else null
 			if not line.is_empty() and d == null and f.get_position() >= f.get_length():
 				f.seek(at)  # half written
 				break
