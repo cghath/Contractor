@@ -674,6 +674,14 @@ func _test_hot_layout() -> void:
 	var across := (Vector2(r0[1][0], r0[1][1]) - Vector2(r0[0][0], r0[0][1])).normalized().orthogonal()
 	check(roads.segments == (def.roads as Array).size() and on_ground and off_pads,
 		"hot zone roads drawn: %d of %d, on the ground (%.2f m up), not over the module pads" % [roads.segments, (def.roads as Array).size(), ZoneRoads.LIFT_M])
+	# A town's streets are road-coloured on its pad.
+	var town_m: Dictionary = (def.modules as Array).filter(func(m: Dictionary) -> bool: return ZoneModules.base(m.type) == "town")[0]
+	var tp := Vector2(town_m.pos[0], town_m.pos[1])
+	var street_i := roundi((tp.x + 20.0 + t.size_m * 0.5) / ZoneTerrain.CELL_M)
+	var street_j := roundi((tp.y + t.size_m * 0.5) / ZoneTerrain.CELL_M)
+	var lot_j := roundi((tp.y + 14.0 + t.size_m * 0.5) / ZoneTerrain.CELL_M)
+	check(t._ground_colour(street_i, street_j, Vector3.UP) == t.c_road and t._ground_colour(street_i, lot_j, Vector3.UP) == t.c_earth,
+		"a town's main street is road-coloured on its pad, its lots bare earth")
 	check(is_equal_approx(t.road_weight(mid.x, mid.y), 1.0) and t.road_weight(mid.x + across.x * 20.0, mid.y + across.y * 20.0) == 0.0,
 		"the ground on a road takes its colour, and 20 m off it doesn't (%.2f, %.2f)" % [t.road_weight(mid.x, mid.y), t.road_weight(mid.x + across.x * 20.0, mid.y + across.y * 20.0)])
 	roads.free()

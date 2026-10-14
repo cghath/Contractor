@@ -85,6 +85,8 @@ var _bed := PackedByteArray()  # riverbed weight (0..255) per height
 ## The def's "roads" as [a, b, bounds] (Vector2, Vector2, Rect2 grown by ROAD_VERGE_M): the
 ## ground under and beside them takes the road colour, so they show past ZoneRoads.SEE_M.
 var _roads: Array = []
+## A generated town's streets (Rect2s, x/z in metres): its pad is road-coloured along them.
+var _streets: Array[Rect2] = []
 
 var _half := 0.0
 var _visuals_built := false
@@ -111,6 +113,13 @@ func generate(def: Dictionary, flat: Array) -> void:
 		var a := Vector2(float(road[0][0]), float(road[0][1]))
 		var b := Vector2(float(road[1][0]), float(road[1][1]))
 		_roads.append([a, b, Rect2(a, Vector2.ZERO).expand(b).grow(ROAD_VERGE_M)])
+	_streets.clear()
+	for m: Dictionary in def.get("modules", []):
+		if ZoneModules.base(String(m.type)) == "town" and ZoneModules.has_type(String(m.type)):
+			var at := Vector2(float(m.pos[0]), float(m.pos[1]))
+			var half: Vector2 = ZoneModules.HALF[String(m.type)]
+			_streets.append(Rect2(at.x - BuildingGen.TOWN_HALF_X, at.y - BuildingGen.STREET_W * 0.5, BuildingGen.TOWN_HALF_X * 2.0, BuildingGen.STREET_W))
+			_streets.append(Rect2(at.x - BuildingGen.CROSS_W * 0.5, at.y - half.y, BuildingGen.CROSS_W, half.y * 2.0))
 	var sea: Dictionary = preset.get("sea", {})
 	sea_side = int(def.get("sea_side", -1)) if not sea.is_empty() else -1
 	sea_m = float(def.get("sea_m", 0.0)) if sea_side >= 0 else 0.0
@@ -512,7 +521,7 @@ func _ground_colour(i: int, j: int, n: Vector3) -> Color:
 	var p := Vector2(v_x(i), v_x(j))
 	for pad: Array in pads:
 		if (pad[0] as Rect2).grow(-1.0).has_point(p):
-			return c_earth
+			return c_road if _streets.any(func(r: Rect2) -> bool: return r.has_point(p)) else c_earth
 	var steep := clampf((1.0 - n.y) * 12.0, 0.0, 1.0)
 	var patch := float(absi(hash(Vector2i(i / 3, j / 3) + Vector2i(seed_value, 0))) % 1000) / 1000.0
 	var colour := c_grass.lerp(c_dry, patch * 0.6)
