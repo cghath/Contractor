@@ -33,7 +33,8 @@ const Recorder := preload("res://tests/coop_soak_recorder.gd")
 const SEED := 4711
 ## What the base's stash holds on top of the starting stash, so four players can kit up.
 const EXTRA_STASH := [["assault_pack", 4], ["plate_ceramic_l4", 8], ["m4a1", 4], ["plate_carrier", 2], ["helmet", 4], ["mag_556", 24], ["ifak", 6], ["iv_18", 4],
-	["saline_500", 6], ["epinephrine", 4], ["morphine", 4], ["tourniquet", 4]]
+	["saline_500", 6], ["epinephrine", 4], ["morphine", 4], ["tourniquet", 4],
+	["npa", 4], ["io_kit", 4], ["pressure_bag", 3], ["hypothermia_blanket", 3], ["blood_500", 3]]  # the medic's consumables (S0736: its restock had no bag or blanket left)
 ## What each bot picks up at the armory: id -> how many it wants on it.
 const KIT := {"assault_pack": 1, "ifak": 1, "iv_18": 1, "saline_500": 1, "epinephrine": 1, "plate_carrier": 1, "helmet": 1, "m4a1": 1, "mag_556": 3}
 ## The game's own paces (SoldierMovement.WALK_SPEED, SPRINT_SPEED).
@@ -555,6 +556,21 @@ func _host_cycle(cycle: int) -> Dictionary:
 				extraction.server_set_bring(String(mate.name), false)
 				left_behind.append(String(mate.name))
 		gathered = await _wait_for(func() -> bool: return not extraction.point_with_squad().is_empty(), 45.0)
+	if not gathered:
+		# S0736: the team was wiped near the objective, everyone gave up and respawned at the
+		# insertion, far from the rally point, after the wait above ran out. Gather again where
+		# the team now is: once every player is up, a new point where the host stands.
+		var all_up := await _wait_for(func() -> bool:
+			var ps := _level().get_node_or_null(^"Players") if _level() else null
+			return ps != null and ps.get_children().all(func(p: Node) -> bool: return not (p is Soldier) or (p as Soldier).vitals.is_up()), 180.0)
+		me = _me()
+		if all_up and me != null and extraction.is_active():
+			var again := me.global_position
+			extraction.server_add_point(Vector2(again.x, again.z))
+			_set_phase("extract", {"rally": [again.x, again.y, again.z]})
+			_say("gathering again at %s (everyone up again after a wipe)" % Recorder._v3(again))
+			gathered = await _wait_for(func() -> bool: return not extraction.point_with_squad().is_empty(), 150.0)
+			left_behind.append("(regathered %s)" % ("ok" if gathered else "failed"))
 	result["extract"] = {"gathered": gathered, "left_behind": left_behind, "missing": Array(extraction.missing_at(extraction._nearest_point())) if not gathered else []}
 	var confirmed_by := "bot1"
 	_set_phase("confirm")
