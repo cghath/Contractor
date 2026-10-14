@@ -98,6 +98,8 @@ var wait_human_s := 600.0
 const HUMAN_EXTRACT_S := 1200.0
 ## Time at the FOB between contracts once the human is back (the debrief, kitting up).
 const HUMAN_BASE_S := 60.0
+## With the FOB ready-up, how long the host waits for the human's Ready before going anyway.
+const HUMAN_READY_S := 900.0
 ## With a human in (--human), the human leads each deployment: the bots keep a loose formation
 ## 10-25 m off them (FOLLOW: right, back in m, turned the way the human faces), fight what they
 ## see, treat them when they go down, board a vehicle or get in an extraction point with them.
@@ -366,9 +368,11 @@ func _host_main() -> void:
 			# S0758: the host took the next contract at once, and the human was left on the
 			# debrief in the old zone. Wait at the FOB until they're in it, then give them
 			# time to read the debrief and kit up before the next contract.
-			_say("back at the FOB: waiting for the human to arrive, then %d s before the next contract" % int(HUMAN_BASE_S))
+			_say("back at the FOB: waiting for the human to arrive")
 			await _wait_for(func() -> bool: return _in_base() and _human_lead() != 0, 600.0)
-			await _sleep(HUMAN_BASE_S)
+			if not BaseHub.has_method(&"server_set_ready"):
+				_say("this build has no FOB ready-up: %d s before the next contract" % int(HUMAN_BASE_S))
+				await _sleep(HUMAN_BASE_S)
 	_set_phase("quit", {"quit": true})
 	await _wait_for(func() -> bool: return multiplayer.get_peers().is_empty(), 30.0)
 	_finish(0 if _failures.is_empty() else 1)
@@ -391,6 +395,23 @@ func _restock() -> void:
 				given[id] = short
 		if not given.is_empty():
 			_say("restock for %s: %s" % [s.name, JSON.stringify(given)])
+
+
+## Host, before deploying: the FOB ready-up (feat/fob-ready-up, Captain 2026-10-14: deploy
+## waits until every player is ready). The bots ready up at once; a human readies up with the
+## Ready button on the squad page (up to HUMAN_READY_S, then the bots go without waiting).
+## Builds from before the ready-up have nothing to wait for.
+func _ready_up() -> void:
+	if not BaseHub.has_method(&"server_set_ready"):
+		return
+	for n: int in _bots():
+		BaseHub.call(&"server_set_ready", _bot_peer(n), true)
+	if human and not _humans().is_empty() and not BaseHub.call(&"all_ready"):
+		_say("FOB: waiting for the human to press Ready (up to %d s)" % int(HUMAN_READY_S))
+		if not await _wait_for(func() -> bool: return BaseHub.call(&"all_ready"), HUMAN_READY_S):
+			_say("FOB: still waiting for %s: deploying anyway would be refused, so marking them ready" % [BaseHub.call(&"not_ready_names")])
+			for peer: int in _humans():
+				BaseHub.call(&"server_set_ready", peer, true)
 
 
 ## Connected peers that are no bot of this harness (a real player who joined).
@@ -494,6 +515,7 @@ func _host_cycle(cycle: int) -> Dictionary:
 			BaseHub.server_pick(mid, true)
 	result.contract["squad"] = squad
 	result.contract["picked_by"] = picked_by
+	await _ready_up()
 	var why_deploy := BaseHub.server_deploy()
 	if why_deploy != "":
 		result.why = "deploy: %s" % why_deploy
