@@ -687,8 +687,9 @@ func surrender_reason(s: Soldier) -> String:
 
 ## Host only. `s` gives up: a hostile soldier drops his weapons and his SquadAI makes way for
 ## a captive's brain; an HVT just stops running. Either way he's a captive (no longer a
-## target) who can be cuffed from any side, led and searched.
-func server_surrender(s: Soldier, why := "") -> void:
+## target) who can be cuffed from any side, led and searched. `say`: he calls it out (not
+## when he's cuffed lying unconscious).
+func server_surrender(s: Soldier, why := "", say := true) -> void:
 	if s.vitals.is_dead() or Person.is_captive(s):
 		return
 	var squad_ai := SquadAI.of(s)
@@ -713,7 +714,8 @@ func server_surrender(s: Soldier, why := "") -> void:
 		changes.merge({"kind": String(Person.SOLDIER), "side": String(Person.HOSTILE), "uid": "%s_%s" % [GameState.zone_id, s.name],
 			"cuffed": false, "delivered": false})
 	server_set_state(s, changes)
-	server_say(s, SURRENDER_LINES[_rng.randi() % SURRENDER_LINES.size()])
+	if say:
+		server_say(s, SURRENDER_LINES[_rng.randi() % SURRENDER_LINES.size()])
 	print("[people] %s surrendered (%s)" % [s.display_name(), why])
 
 
@@ -823,6 +825,11 @@ func server_cuff(actor: Soldier, target: Soldier) -> bool:
 		actor._server_busy_until = Soldier._now()
 		actor._client_busy.rpc_id(actor.owner_peer(), 0.0, "Cuffing interrupted: %s" % interrupted)
 		return false
+	if not Person.is_captive(target) and SquadAI.of(target) != null:
+		# Captain, 2026-10-14: a hostile soldier cuffed lying downed is taken prisoner: disarmed
+		# and given a captive's brain like one who gave up, so he doesn't fight on cuffed when he
+		# comes round.
+		server_surrender(target, "cuffed while down", false)
 	server_set_state(target, {"cuffed": true, "led_by": "", "order": ""})
 	_tell(actor, "Cuffed %s" % target.display_name())
 	print("[people] %s cuffed %s" % [actor.display_name(), target.display_name()])

@@ -182,6 +182,18 @@ func pool_size() -> int:
 	return _pool.size()
 
 
+## Where each pool cell lies (world), and how many drops are still in the air (tests).
+func pool_cells() -> Array[Vector3]:
+	var out: Array[Vector3] = []
+	for cell: Vector2i in _pool:
+		out.append(Vector3(cell.x * POOL_CELL, float(_pool[cell].y), cell.y * POOL_CELL))
+	return out
+
+
+func drops_in_air() -> int:
+	return _drips.size()
+
+
 func _update_processing() -> void:
 	var bleeding := _spots.values().any(func(s: Dictionary) -> bool: return s.flow > 0.0)
 	set_process(bleeding or not _drips.is_empty())
@@ -302,12 +314,14 @@ func _spatter(spot: Dictionary) -> void:
 	set_process(true)
 
 
-## The ground under world point `from` (2.5 m down at most), ignoring this body.
+## The ground under world point `from` (2.5 m down at most): the world only (WORLD_MASK), never
+## this body. Captain, 2026-10-14 ("floating blood"): it met anything but this body's capsule, so
+## its own plates and pack, its ragdoll's parts and other bodies too, and a drop that fell that
+## far "landed" there as a pool cell left hanging in the air once the body fell or moved
+## (0.45-0.9 m up, R0950-R0953). What a drop really meets on the way down (a person, an item, a
+## vehicle) is _surface_between's, and it rides on that.
 func _floor_below(from: Vector3) -> float:
-	var query := PhysicsRayQueryParameters3D.create(from, from + Vector3.DOWN * 2.5)
-	var own := model.get_parent() as CollisionObject3D
-	if own:
-		query.exclude = [own.get_rid()]
+	var query := PhysicsRayQueryParameters3D.create(from, from + Vector3.DOWN * 2.5, WORLD_MASK, _own_rids())
 	var hit := get_world_3d().direct_space_state.intersect_ray(query)
 	return hit.position.y if not hit.is_empty() else from.y - 2.5
 

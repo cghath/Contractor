@@ -1546,6 +1546,22 @@ func _test_ragdolls() -> void:
 	check(past, "the walker went on over the bodies (x %.2f, the pile at %.2f, %.1f s; against: %s)%s" % [walker.global_position.x, spot.x, took,
 		", ".join(against) if not against.is_empty() else "nothing", "" if past else "; x/height (^ in the air): %s; he's %s%s, last hurt by %s" % [" ".join(trail),
 		walker.vitals.condition_text(), " (a ragdoll)" if is_instance_valid(walker.ragdoll) else "", walker.vitals.last_cause]])
+	# Captain, 2026-10-14 ("weird ragdoll": a downed man lying in the air at chest height, legs
+	# hanging): the body under him carried off, the one on top doesn't stay up there, frozen where
+	# he lay; he comes down onto the ground.
+	walker.move_input = Vector2.ZERO
+	walker.global_position = first.body_point() + Vector3(0.0, spot.y - first.body_point().y, 1.0)
+	await _frames(2)
+	var on_top_y := torso_b.global_position.y
+	check(second.ragdoll.frozen and walker.server_pick_up_body(first, Soldier.CARRY, 3.0), "the body underneath is picked up")
+	var landed := await _wait_until(func() -> bool:
+		var y: float = second.ragdoll.parts["torso"].global_position.y
+		return y < on_top_y - 0.12 and y < spot.y + 0.4, 4.0)
+	check(landed, "the one on top comes down onto the ground (torso %.2f m up, was %.2f; frozen: %s)" % [torso_b.global_position.y - spot.y,
+		on_top_y - spot.y, second.ragdoll.frozen])
+	settled = await _wait_until(func() -> bool: return second.ragdoll.frozen, 10.0)
+	check(settled and second.ragdoll.has_support(), "and settles there, on something")
+	walker.release_carried()
 	for s: Soldier in [first, second, walker]:
 		if is_instance_valid(s):
 			s.queue_free()

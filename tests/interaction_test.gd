@@ -57,6 +57,7 @@ func _ready() -> void:
 	await _test_body_points()
 	await _test_declutter()
 	await _test_slid_body()
+	await _test_downed_enemy()  # last: the hostile ends up a prisoner
 	GameState.delete_save()
 	print("INTERACTION TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
@@ -129,7 +130,11 @@ func _test_actions_for() -> void:
 	var lines: Array = _action(player, dummy, &"treat").items.map(func(e: Dictionary) -> String: return e.label)
 	check(lines == ["IO Kit (Sternal), sternum", "IV Catheter (18G), left forearm", "Hypothermia Blanket, torso"],
 		"with an IO kit and an IV in the kit, one entry each, IO first in arrest (%s)" % [lines])
-	check(_ids(player, hostile) == [&"carry", &"drag", &"check_condition"], "downed enemy: Carry, Drag, Check condition (%s)" % [_ids(player, hostile)])
+	# Captain, 2026-10-14 ("cant loot" a downed hostile): Loot and Loot all first, then Carry,
+	# Drag and Zip-cuff (greyed: no cuffs), no Treat.
+	check(_ids(player, hostile) == [&"loot", &"loot_all", &"carry", &"drag", &"cuff", &"check_condition"],
+		"downed enemy: Loot, Loot all, Carry, Drag, Zip-cuff, Check condition (%s)" % [_ids(player, hostile)])
+	check(_action(player, hostile, &"cuff").disabled == "You have no zip cuffs", "Zip-cuff greyed without cuffs (%s)" % _action(player, hostile, &"cuff").disabled)
 	var report := InteractionMenu.perform(player, _action(player, alpha, &"check_condition"))
 	check(report.begins_with(alpha.display_name() + ": " + alpha.vitals.condition_text()) and report.contains("\n"), "Check condition reads condition and wounds (%s)" % report.replace("\n", " | "))
 	hostile.vitals.server_reset_health()
@@ -236,7 +241,7 @@ func _test_carry_and_drag() -> void:
 		"the body you carry: Put down first, Drag to switch, no Carry (%s)" % [on_carried])
 	hostile.vitals.server_damage(500.0)
 	await _frames(2)
-	check(_ids(player, hostile) == [&"carry", &"check_condition"] and _action(player, hostile, &"carry").disabled == "You're already moving someone",
+	check(_ids(player, hostile) == [&"loot", &"loot_all", &"carry", &"cuff", &"check_condition"] and _action(player, hostile, &"carry").disabled == "You're already moving someone",
 		"another body: Carry greyed (can't pick up a second), no Drag, no Put down (%s)" % [_ids(player, hostile)])
 	hostile.vitals.server_reset_health()
 
@@ -725,6 +730,16 @@ func _seconds(s: float) -> void:
 	await get_tree().create_timer(s).timeout
 
 
+func _wait_until(cond: Callable, timeout: float) -> bool:
+	var left := timeout
+	while left > 0.0:
+		if cond.call():
+			return true
+		await _seconds(0.25)
+		left -= 0.25
+	return cond.call()
+
+
 ## The pick-up, take-hold or put-down `s` is in is over (the host counts it down in the
 ## carrier's physics step, which these tests mostly keep off).
 func _end_carry_phase(s: Soldier) -> void:
@@ -735,3 +750,71 @@ func _end_carry_phase(s: Soldier) -> void:
 
 static func _flat(a: Vector3, b: Vector3) -> float:
 	return Vector2(a.x - b.x, a.z - b.z).length()
+
+
+## Captain, 2026-10-14 (v0.3.1, wadi_farm: "cant loot weird ragdoll floating blood"): a hostile
+## shot through and lying downed lies on the ground (his ragdoll's parts, not in the air), his
+## blood lies on the ground (it hung in the air: drops "landed" on his own gear and parts), and
+## he can be searched and stripped (Loot, Loot all) and taken prisoner (Zip-cuff), while a
+## squadmate down can't be looted.
+func _test_downed_enemy() -> void:
+	print("A downed enemy: on the ground, his blood on the ground, looted and cuffed")
+	hostile.vitals.server_reset_health()
+	hostile.global_position = SPOT + Vector3(-2.0, 0, -3.0)
+	hostile.rotation = Vector3.ZERO
+	for id: StringName in [&"plate_carrier", &"assault_pack", &"m4a1"]:  # (the dead check before stripped him)
+		hostile.inventory.take(id)
+	hostile.inventory.take(&"mag_556", 3)
+	for i in 20:
+		await get_tree().physics_frame
+	var ground := SPOT.y - 0.1  # the compound's yard
+	var shooter := StaticBody3D.new()
+	add_child(shooter)
+	shooter.global_position = hostile.global_transform * Vector3(0.1, 1.0, -6.0)
+	var aim := (hostile.global_transform * Vector3(0.1, 1.0, 0.0) - shooter.global_position).normalized()
+	var shot := Ballistics.fire(shooter, shooter.global_position, aim, ItemDB.get_item(&"m4a1"))
+	shooter.queue_free()
+	var through := hostile.vitals.wound_list().any(func(w: Dictionary) -> bool: return w.get("out") is Vector3)
+	check(shot.result == "body" and through, "shot through the hips (%s, through: %s)" % [shot.result, through])
+	hostile.vitals.server_damage(70.0)  # down, not dead
+	await _seconds(2.5)
+	check(hostile.vitals.downed and is_instance_valid(hostile.ragdoll), "he's down, a ragdoll")
+	var high := -INF
+	for p: Node3D in hostile.ragdoll.parts.values():
+		high = maxf(high, p.global_position.y - ground)
+	var torso: Node3D = hostile.ragdoll.parts["torso"]
+	check(torso.global_position.y - ground < 0.4 and high < 0.7,
+		"lying on the ground (torso %.2f m up, highest part %.2f m)" % [torso.global_position.y - ground, high])
+	var marks: WoundMarks = hostile.model.get_node(^"WoundMarks")
+	# A drop falls to the ground under him, not onto his own parts (or plates, or pack): the
+	# floor a drop falls to is looked up through the body (R0953: pool cells 0.45-0.9 m up).
+	var floor_y := marks._floor_below(torso.global_position + Vector3.UP * 0.5)
+	check(absf(floor_y - ground) < 0.05, "a drop over him falls through to the ground (%.2f m up)" % (floor_y - ground))
+	for i in 60:
+		if marks.drops_in_air() == 0:
+			break
+		await get_tree().physics_frame
+	var cells := marks.pool_cells()
+	var off := cells.map(func(c: Vector3) -> float: return c.y - ground).filter(func(h: float) -> bool: return absf(h) > 0.2)
+	check(not cells.is_empty() and off.is_empty(), "his blood is on the ground (%d cells; off it: %s)" % [cells.size(), off])
+	player.global_position = hostile.body_point() + Vector3(0, 0, 1.2)
+	player.global_position.y = SPOT.y
+	await _frames(2)
+	alpha.vitals.server_damage(70.0)
+	await _frames(2)
+	check(not _ids(player, alpha).has(&"loot"), "a downed squadmate can't be looted (%s)" % [_ids(player, alpha)])
+	alpha.vitals.server_reset_health()
+	var loot := _action(player, hostile, &"loot")
+	check(loot.get("disabled") == "" and loot.get("items", []).any(func(e: Dictionary) -> bool: return e.item == &"m4a1"),
+		"Loot lists what he has (%s)" % [loot.get("items", []).map(func(e: Dictionary) -> String: return e.label)])
+	var mags := player.inventory.count_of(&"mag_556")
+	InteractionMenu.perform(player, _action(player, hostile, &"loot_all"))
+	await _frames(3)
+	check(hostile.inventory.slots[&"primary"] == &"" and hostile.inventory.count_of(&"mag_556") == 0 and player.inventory.count_of(&"mag_556") > mags,
+		"Loot all disarms him: his rifle and mags are gone, the mags are yours (%d -> %d)" % [mags, player.inventory.count_of(&"mag_556")])
+	player.inventory.take(Person.ZIP_CUFFS)
+	InteractionMenu.perform(player, _action(player, hostile, &"cuff"))
+	var cuffed: bool = await _wait_until(func() -> bool: return Person.is_cuffed(hostile), 8.0)
+	check(cuffed and Person.is_captive(hostile) and SquadAI.of(hostile) == null,
+		"Zip-cuff takes him prisoner: cuffed, a captive, no squad brain to fight on with")
+	check(_ids(player, hostile).has(&"loot") and _ids(player, hostile).has(&"carry"), "and he can still be searched and carried (%s)" % [_ids(player, hostile)])
