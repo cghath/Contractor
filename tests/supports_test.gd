@@ -737,8 +737,9 @@ func _test_shot_down() -> void:
 	print("Shot down with passengers and cargo aboard")
 	sup.server_reset_limits()
 	_regroup()
-	check(mates.all(func(m: Soldier) -> bool: return is_instance_valid(m) and m.vitals.is_up() and Vehicle.ride_of(m) == null
-		and _flat(m.global_position, HOME) <= 15.0), "both AI up, on foot and by HOME before the transport (%s)" % _mates_state(null))
+	var ready_by_home := func(m: Soldier) -> bool:
+		return is_instance_valid(m) and m.vitals.is_up() and Vehicle.ride_of(m) == null and _flat(m.global_position, HOME) <= 15.0
+	check(mates.all(ready_by_home), "both AI up, on foot and by HOME before the transport (%s)" % _mates_state(null))
 	var pickup := _ground(HOME + Vector3(0, 0, -35))
 	check(_call("support:transport:here", pickup) == "", "a transport called")
 	var t := sup.active("transport")
