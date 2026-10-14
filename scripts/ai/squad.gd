@@ -84,6 +84,12 @@ var doctrine: StringName = &""
 ## "Bring casualties here" (order_ccp): where the squad's carriers lay their casualties, a
 ## point or a soldier to bring them to (the ordering player, wherever he goes); null for none.
 var ccp: Variant = null
+## "Stop bringing casualties" (ccp_off) as a standing order (Captain, 2026-10-14: it did
+## nothing visible): carriers lay their casualty or body down where they are and treat or
+## watch over them there, and nobody lifts a casualty or body on their own until "Bring
+## casualties there/to me" or a move order. Contact drags to cover and an HVT's carry still
+## happen under it (SquadAI._care_carry).
+var hold_casualties := false
 ## The squad's last screening smoke (SquadAI._screened): when and where it went up.
 var screen_at := -1000.0
 var screen_point := Vector3.ZERO
@@ -211,6 +217,8 @@ func pick(names: PackedStringArray) -> Array[Soldier]:
 ## A movement order (follow, hold, move to `point`) for the named units.
 func give_order(from: Soldier, order: Order, point: Vector3, names := PackedStringArray()) -> void:
 	leader = from
+	if order == Order.MOVE:
+		hold_casualties = false  # a move takes the casualties along (SquadAI._care_carry)
 	var units := pick(names)
 	for i in units.size():
 		var ai := SquadAI.of(units[i])
@@ -448,12 +456,19 @@ func order_command(from: Soldier, cmd: String, point: Vector3, names := PackedSt
 			return "" if not going.is_empty() else "Nobody selected dropped a pack"
 		"ccp":
 			ccp = point
+			hold_casualties = false
 			return ""
 		"ccp_me":
 			ccp = from
+			hold_casualties = false
 			return ""
 		"ccp_off":
 			ccp = null
+			hold_casualties = true
+			for s in members():
+				var ai := SquadAI.of(s)
+				if ai:
+					ai._think_cd = 0.0  # carriers put them down now, not at their next think
 			return ""
 	return "?"
 

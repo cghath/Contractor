@@ -218,6 +218,16 @@ func carrying(speaker: Soldier, other: Soldier, dead: bool) -> bool:
 	return say(speaker, &"carrying", line, "carrying/%s" % other.name)
 
 
+## Host only. A squadmate lays down who he carried (contact, "Stop bringing casualties", or
+## where he was taking them): "Putting Charlie down" / "Leaving Charlie's body here" (Captain,
+## 2026-10-14: "bots should act like players, communicate with the player").
+func putting_down(speaker: Soldier, other: Soldier, dead: bool) -> bool:
+	if other == null:
+		return false
+	var line := ("Leaving %s's body here" if dead else "Putting %s down") % display_name(other)
+	return say(speaker, &"putting_down", line, "putting_down/%s" % other.name)
+
+
 ## Host only. A squadmate goes through a body for what he needs: "Checking Charlie's body"
 ## (an enemy's: "Checking the body").
 func scavenging(speaker: Soldier, dead: Soldier) -> bool:

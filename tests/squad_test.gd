@@ -237,6 +237,28 @@ func _test_buddy_carries_buddy() -> void:
 	var along := await _wait_until(func() -> bool: return _flat(bravo.global_position, player.global_position) < 11.0, 15.0)
 	check(along, "and carries him after the lead (%.1f m)" % _flat(bravo.global_position, player.global_position))
 	check(bravo.vitals.downed, "nobody revives him: he's still out (%s)" % bravo.vitals.condition_text())
+	# Captain, 2026-10-14: "Stop bringing casualties" did nothing visible. Now it stands: the
+	# carrier lays him down where he is and stays with him, and nobody lifts him again until
+	# "Bring casualties" (or a move order).
+	var squad := level.squad_for(&"friendly")
+	var said_from: int = level.callouts.sent.size()
+	check(squad.order_command(player, "ccp_off", player.global_position) == "" and squad.hold_casualties, "Stop bringing casualties: the order stands")
+	var laid := await _wait_until(func() -> bool: return bravo.carried_by == null, 3.0)
+	await _seconds(0.5)
+	var laid_at := bravo.global_position
+	check(laid, "Charlie lays him down where he is (%s)" % charlie.ai_status)
+	_place(player, Vector3(-8, 0.1, 34))  # the lead goes off: without the order he'd be carried along
+	var lifted := await _wait_until(func() -> bool: return is_instance_valid(bravo.carried_by), 8.0)
+	check(not lifted and _flat(bravo.global_position, laid_at) < 1.5, "and nobody lifts him again while it stands (%s)"
+		% (bravo.carried_by.ai_status if is_instance_valid(bravo.carried_by) else "he lies where he was put"))
+	check(SquadAI.of(charlie).casualty == bravo, "Charlie stays with him (%s)" % charlie.ai_status)
+	var said := level.callouts.sent.slice(mini(said_from, level.callouts.sent.size())).any(
+		func(l: Dictionary) -> bool: return l.speaker == "Charlie" and l.id == &"putting_down")
+	check(said, "and says so")
+	check(squad.order_command(player, "ccp_me", player.global_position) == "" and not squad.hold_casualties, "Bring casualties to me lifts it")
+	var again := await _wait_until(func() -> bool: return is_instance_valid(bravo.carried_by), 10.0)
+	check(again, "and he's carried again (%s)" % charlie.ai_status)
+	squad.ccp = null
 	bravo.vitals.server_reset_health()  # he comes round (the wound model decides when; the test stands in)
 	var down := await _wait_until(func() -> bool: return bravo.carried_by == null and SquadAI.of(charlie).casualty == null, 5.0)
 	check(down, "awake, he's put down and Charlie goes back to following (%s)" % charlie.ai_status)
@@ -275,6 +297,12 @@ func _test_dead_leave_squad() -> void:
 	foxtrot.vitals.server_hit(Vitals.HEAD, {"round_class": Vitals.INTERMEDIATE})
 	await _frames(2)
 	check(foxtrot not in squad.members() and foxtrot.squad_slot == -1, "leaves the squad: no member, no slot, no formation place")
+	# Captain, 2026-10-14: no reflex body-hauling. Long out of contact, nowhere to take him.
+	for s: Soldier in _squad():
+		SquadAI.of(s)._last_contact = -1000.0
+	var hauled := await _wait_until(func() -> bool: return is_instance_valid(foxtrot.carried_by), 6.0)
+	check(not hauled, "nobody carries his body off on reflex (%s)"
+		% (foxtrot.carried_by.ai_status if is_instance_valid(foxtrot.carried_by) else "he lies where he fell"))
 	var order_before := SquadAI.of(foxtrot).order
 	squad.give_order(player, Squad.Order.HOLD, player.global_position)
 	check(SquadAI.of(foxtrot).order == order_before and SquadAI.of(_ai("Golf")).order == Squad.Order.HOLD, "and takes no orders")

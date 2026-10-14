@@ -270,6 +270,15 @@ const MEDIC_CALL_S := 20.0
 const BEING_TREATED_M := 6.0
 ## Proposed: out of contact, squadmates recover friendly bodies within this range.
 const BODY_RECOVER_M := 60.0
+## Captain, 2026-10-14: no reflex body-hauling ("they can if they choose to. bots should act
+## like players, communicate with the player"). A squadmate recovers a fallen friendly's body
+## only once out of contact BODY_QUIET_S, hands free and with nothing ordered, and only with
+## somewhere to take it within BODY_TAKE_M of the body (_body_destination: the squad's
+## casualty collection point, or an active extraction point). Proposed numbers.
+const BODY_QUIET_S := 30.0
+const BODY_TAKE_M := 120.0
+## A body this close to where it was being taken is there (laid down, not lifted again).
+const BODY_THERE_M := 4.0
 ## Proposed: how much recovering a fallen friendly's body scores out of contact. Above
 ## following, holding and moving (0.5) plus HYSTERESIS, so a squadmate who is following
 ## switches to it; below fighting (0.7), a low-magazine reload (0.65) and casualty care.
@@ -1407,17 +1416,19 @@ static func _carer_of(s: Soldier) -> Soldier:
 	return carer if ai.casualty == s else null
 
 
-## A friendly's dead body this unit should carry after the squad leader (out of contact):
-## the body's battle buddy goes first, otherwise the nearest free non-medic.
+## A friendly's dead body this unit chooses to take somewhere (_body_destination; BODY_QUIET_S
+## out of contact): the body's battle buddy goes first, otherwise the nearest free non-medic.
+## None in a normal situation, and none while the squad holds casualties (Squad.hold_casualties).
 func _find_body() -> Soldier:
-	if body.faction != &"friendly" or squad == null or not is_instance_valid(squad.leader) or body.carrying != null:
+	if body.faction != &"friendly" or squad == null or not is_instance_valid(squad.leader) or body.carrying != null \
+			or squad.hold_casualties:
 		return null
 	var best: Soldier = null
 	var best_d := BODY_RECOVER_M
 	for n in get_tree().get_nodes_in_group(Soldier.DEAD_GROUP):
 		var s := n as Soldier
 		if s == null or s.is_queued_for_deletion() or s.faction != body.faction or is_instance_valid(s.carried_by) \
-				or _carer_of(s) != null:
+				or _carer_of(s) != null or _body_destination(s.body_point()) == null:
 			continue
 		var d := body.global_position.distance_to(s.global_position)
 		if d < best_d and _bearer_for(s) == body:
@@ -1443,11 +1454,36 @@ func _bearer_for(dead: Soldier) -> Soldier:
 	return best
 
 
-## Free to carry a body: not looking after anyone, not carrying, out of contact and not busy
-## with its own wounds.
+## Free to carry a body: not looking after anyone, not carrying, hands free, out of contact
+## BODY_QUIET_S, nothing ordered and not busy with its own wounds.
 func _can_bear(dead: Soldier) -> bool:
-	return care == Care.NONE and _free_for(dead) and body.carrying == null and not in_contact() \
+	return care == Care.NONE and _free_for(dead) and body.carrying == null and body.inventory.hands == &"" \
+		and Soldier._now() - _last_contact >= BODY_QUIET_S and ordered.is_empty() and scavenge_order == null \
 		and _self_care_score() <= 0.0 and not asking_for_medic()
+
+
+## Where a fallen friendly's body at `at` could be taken, or null: the squad's casualty
+## collection point (Squad.ccp_point), else the nearest point of an active extraction, within
+## BODY_TAKE_M of it. Null too once it lies within BODY_THERE_M of that place.
+func _body_destination(at: Vector3) -> Variant:
+	if squad == null or squad.hold_casualties:
+		return null
+	var best: Variant = null
+	var ccp: Variant = squad.ccp_point()
+	if ccp != null:
+		best = ccp
+	else:
+		var extraction := MapNodes.extraction(body)
+		if extraction and extraction.is_active():
+			for p: Dictionary in extraction.points:
+				var v: Vector2 = p.get("pos", Vector2.INF)
+				var there := Vector3(v.x, at.y, v.y)
+				if v.is_finite() and (best == null or _flat_between(there, at) < _flat_between(best, at)):
+					best = there
+	if best == null:
+		return null
+	var d := _flat_between(best, at)
+	return best if d <= BODY_TAKE_M and d > BODY_THERE_M else null
 
 
 func _do_care() -> void:
@@ -1681,7 +1717,9 @@ func _should_carry() -> bool:
 	if _holds_for_medic():
 		return false
 	if Person.is_hvt(casualty):
-		return true  # an HVT goes with the squad, not left lying
+		return true  # an HVT goes with the squad, not left lying (even under the hold below)
+	if squad and squad.hold_casualties and _friendly():
+		return false  # "Stop bringing casualties": they're looked after where they lie
 	var ccp: Variant = squad.ccp_point() if squad else null
 	if ccp != null and _friendly():
 		return casualty.body_point().distance_to(ccp) > LAY_NEAR_M + 1.0  # "Bring casualties here"
@@ -1706,7 +1744,10 @@ func _holds_for_medic() -> bool:
 
 ## Carrying an unconscious casualty after the squad leader until they wake on their own. In
 ## contact they're dragged to cover (or guarded where they lie); something new to treat, or
-## waking up, sends this unit back to treating them.
+## waking up, sends this unit back to treating them. Under "Stop bringing casualties"
+## (Squad.hold_casualties, Captain 2026-10-14) out of contact the carrier lays them down where
+## he is and treats or watches over them there; a contact drag to cover and an HVT's carry
+## still happen under it.
 func _care_carry(contact: bool) -> void:
 	if contact:
 		if body.carrying == casualty:
@@ -1718,6 +1759,15 @@ func _care_carry(contact: bool) -> void:
 			care = Care.DRAG
 		else:
 			care = Care.GUARD
+		return
+	if squad and squad.hold_casualties and _friendly() and not Person.is_hvt(casualty):
+		if body.carrying == casualty:
+			body.server_put_down()
+			var callouts := Callouts.of(body)
+			if callouts:
+				callouts.putting_down(body, casualty, false)
+		_has_destination = false
+		care = Care.TREAT
 		return
 	if not casualty.vitals.downed or not _next_task(casualty, false).is_empty():
 		care = Care.TREAT  # woke up, or there's something new to do (an item handed over)
@@ -1769,10 +1819,17 @@ func _care_carry(contact: bool) -> void:
 	_go(_lay_spot if to_spot else squad.follow_point(body))
 
 
-## Out of contact: picks up a fallen friendly's body and carries it after the squad leader.
+## Out of contact: picks up a fallen friendly's body and takes it where it's going
+## (_body_destination), and says so. Contact, "Stop bringing casualties" or getting there puts
+## it down (and says that too).
 func _carry_body() -> void:
-	if in_contact() or not is_instance_valid(casualty) or casualty.is_queued_for_deletion() \
-			or (is_instance_valid(casualty.carried_by) and casualty.carried_by != body) or squad == null or not is_instance_valid(squad.leader):
+	var dest: Variant = _body_destination(casualty.body_point()) if is_instance_valid(casualty) and not casualty.is_queued_for_deletion() else null
+	if in_contact() or dest == null or (is_instance_valid(casualty.carried_by) and casualty.carried_by != body) \
+			or not is_instance_valid(squad.leader):
+		if is_instance_valid(casualty) and body.carrying == casualty:
+			var callouts := Callouts.of(body)
+			if callouts:
+				callouts.putting_down(body, casualty, true)
 		_end_care()
 		return
 	if body.carrying != casualty:
@@ -1791,7 +1848,7 @@ func _carry_body() -> void:
 			# Something the navmesh doesn't know (a player) in the way: sidestep (casualty R0210).
 			_go(_detour if Soldier._now() < _detour_until else casualty.body_point(), true)
 		return
-	_go(squad.follow_point(body))
+	_go(dest)
 
 
 func _callouts_carrying(dead: bool) -> void:

@@ -973,15 +973,30 @@ func _test_dead_bodies() -> void:
 	var listed := InteractionMenu.body_items(echo).map(func(e: Dictionary) -> String: return e.label)
 	check(listed.any(func(l: String) -> bool: return l.begins_with("Primary: M110")) and listed.any(func(l: String) -> bool: return "Magazine" in l or "mag" in l.to_lower()),
 		"Loot lists what's on him, like the inventory screen (%s)" % [listed])
+	# Captain, 2026-10-14: no reflex body-hauling. Quiet a good while (SquadAI.BODY_QUIET_S) with
+	# nowhere to take him: nobody picks him up.
+	for s: Soldier in _squad():
+		SquadAI.of(s)._last_contact = -1000.0
+	var hauled := await _wait_until(func() -> bool: return is_instance_valid(echo.carried_by), 6.0)
+	check(not hauled, "out of contact with nowhere to take him, nobody hauls his body on reflex (%s)"
+		% (echo.carried_by.ai_status if is_instance_valid(echo.carried_by) else "left lying"))
+	# "Bring casualties there": a squadmate chooses to take the body there, and says so.
+	var said_from: int = level.callouts.sent.size()
+	var ccp_at := Vector3(-8, 0.1, 4)
+	var friendly := level.squad_for(&"friendly")
+	check(friendly.order_command(player, "ccp", ccp_at) == "", "Bring casualties there")
 	var carried := await _wait_until(func() -> bool: return is_instance_valid(echo.carried_by) and echo.carried_by.is_ai(), 25.0)
 	var bearer := echo.carried_by
-	check(carried, "out of contact a squadmate picks his body up (%s; squad: %s)" % [bearer.ai_status if bearer else "nobody", _squad().map(func(s: Soldier) -> String: return "%s %s %.1f m at %s v%.1f in%s hits %s busy %.1f" % [s.name, s.ai_status, _flat(s.global_position, echo.global_position), s.global_position, s.velocity.length(), s.move_input, range(s.get_slide_collision_count()).map(func(i: int) -> String: return str(s.get_slide_collision(i).get_collider())), s._busy_until - Soldier._now()])])
+	check(carried, "with a collection point set, a squadmate picks his body up (%s; squad: %s)" % [bearer.ai_status if bearer else "nobody", _squad().map(func(s: Soldier) -> String: return "%s %s %.1f m at %s v%.1f in%s hits %s busy %.1f" % [s.name, s.ai_status, _flat(s.global_position, echo.global_position), s.global_position, s.velocity.length(), s.move_input, range(s.get_slide_collision_count()).map(func(i: int) -> String: return str(s.get_slide_collision(i).get_collider())), s._busy_until - Soldier._now()])])
 	if not carried:
 		print("    squad: %s" % [_squad().map(func(s: Soldier) -> String: return "%s %s %s/%s contact %s" % [s.name, s.ai_status,
 			SquadAI.Intent.keys()[SquadAI.of(s).intent], SquadAI.Care.keys()[SquadAI.of(s).care], SquadAI.of(s).in_contact()])])
-	_place(player, Vector3(-8, 0.1, 4))
-	var along := await _wait_until(func() -> bool: return _flat(echo.global_position, player.global_position) < 12.0, 30.0)
-	check(along, "and carries it after the lead (%.1f m)" % _flat(echo.global_position, player.global_position))
+	_place(player, Vector3(-12, 0.1, 4))
+	var laid_there := func() -> bool: return _flat(echo.global_position, ccp_at) < SquadAI.BODY_THERE_M + 1.0 and not is_instance_valid(echo.carried_by)
+	var along := await _wait_until(laid_there, 40.0)
+	check(along, "and carries it to the collection point and lays it down there (%.1f m off)" % _flat(echo.global_position, ccp_at))
+	check(bearer != null and _said(said_from, String(bearer.name), &"carrying"), "saying so (%s)" % [_lines(said_from)])
+	friendly.ccp = null  # nowhere to take it any more: it stays where it lies
 	check(SquadAI.of(echo) != null and echo.ai_status == "Dead" and echo not in player._hud.command_menu.roster(),
 		"he shows as dead and has left the HUD roster, F-keys and Select all (%s)" % echo.ai_status)
 	if is_instance_valid(bearer):
@@ -1143,7 +1158,9 @@ func _test_downed_player() -> void:
 	print("A downed player")
 	_place(player, Vector3(-6, 0.1, 6))
 	await _seconds(3.0)
-	var tourniquets: int = _squad().reduce(func(n: int, s: Soldier) -> int: return n + s.inventory.count_of(&"tourniquet"), 0)
+	# He respawned in his own kit (Captain, 2026-10-14), IFAK included, and a carer uses the
+	# casualty's own IFAK first: count his tourniquets with the squad's.
+	var tourniquets: int = (_squad() + [player]).reduce(func(n: int, s: Soldier) -> int: return n + s.inventory.medical_count(&"tourniquet"), 0)
 	_shoot_femoral(player, 11)
 	var sim := 0.0
 	while not player.vitals.downed and sim < 400.0:
@@ -1151,7 +1168,7 @@ func _test_downed_player() -> void:
 		sim += 1.0
 	check(player.vitals.downed and _bleeding(player, "arterial"), "the lead bleeds out from a femoral hit (%s)" % player.vitals.condition_text())
 	var stopped := await _wait_until(func() -> bool: return not _bleeding(player, "arterial"), 30.0)
-	var used: int = tourniquets - _squad().reduce(func(n: int, s: Soldier) -> int: return n + s.inventory.count_of(&"tourniquet"), 0)
+	var used: int = tourniquets - (_squad() + [player]).reduce(func(n: int, s: Soldier) -> int: return n + s.inventory.medical_count(&"tourniquet"), 0)
 	check(stopped and used >= 1 and is_instance_valid(player.care_by) and player.care_by.is_ai(),
 		"squadmates treat a downed player like anyone else (%s, by %s)" % [_wound_kinds(player), _name(player.care_by) if is_instance_valid(player.care_by) else "nobody"])
 	player.vitals.server_reset_health()
