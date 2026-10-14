@@ -1,0 +1,78 @@
+--- a/tests/coop_soak.gd	2026-10-14 11:09:55.726894400 -0500
++++ b/tests/coop_soak.gd	2026-10-14 11:10:17.457614500 -0500
+@@ -46,8 +46,10 @@
+ const FIGHT_S := 120.0
+ const ITEMS_S := 25.0
+ const EXTRACT_S := 150.0
+-## Engage hostiles this close (m), firing about this often (s).
+-const ENGAGE_M := 140.0
++## Engage hostiles this close (m), firing about this often (s). The garrison's own reach
++## (SquadAI.SIGHT_RANGE, 200 m; S1, S0736: at 140 m the bots walked upright through 60 m of
++## fire from a checkpoint they never answered, and three went down before the fight began).
++const ENGAGE_M := 200.0
+ const SHOT_GAP_S := 0.28
+ ## In the fight the host's bot (the others follow it) closes in on the nearest hostile when it
+ ## has had no clear shot for HUNT_AFTER_S, stopping this far from it (m).
+@@ -572,7 +574,9 @@
+ 	var me := _me()
+ 	if target != null and me:
+ 		_walk(target, 40.0, WALK_SPEED)
+-		await _wait_for(func() -> bool: return _me() == null or _flat(_me().global_position, target) < 70.0 or _hostile_in_range(_me(), HUNT_STOP_M * 2.0) != null, ADVANCE_S)
++		# The fight starts at the first contact, not only 90 m out (S1, S0736: hit and down at
++		# 112-160 m, the phase stayed "advance" for its full 210 s, nobody fired back).
++		await _wait_for(func() -> bool: return _me() == null or _flat(_me().global_position, target) < 70.0 or _hostile_in_range(_me(), HUNT_STOP_M * 2.0) != null 			or _contact_while_advancing(), ADVANCE_S)
+ 	# Fight, with a knock-out and a revive.
+ 	_fight = true
+ 	_set_phase("fight")
+@@ -583,7 +587,11 @@
+ 	if _bot_peer(1) == 0:
+ 		victim_bot = 0
+ 		medic_bot = 2 if _bot_peer(2) != 0 else (3 if _bot_peer(3) != 0 else -1)
+-	var victim_peer := 1 if victim_bot == 0 else _bot_peer(victim_bot)
++	if medic_bot < 0:
++		# Nobody else in the zone to bring them round (S1, S0755: the host knocked itself out
++		# alone, "every player is down" after 45 s, gave up, and the cycle never regathered).
++		victim_bot = -1
++	var victim_peer := 0 if victim_bot < 0 else (1 if victim_bot == 0 else _bot_peer(victim_bot))
+ 	var medic_peer := 1 if medic_bot == 0 else (_bot_peer(medic_bot) if medic_bot > 0 else 0)
+ 	_set_phase("fight", {"down": {"victim": victim_peer, "medic": medic_peer, "victim_bot": victim_bot, "medic_bot": medic_bot}})
+ 	var revive := await _down_and_revive(victim_peer, medic_peer)
+@@ -1124,6 +1132,9 @@
+ ## them back up. Both are told through the phase; the host watches from the replicated state.
+ func _down_and_revive(victim_peer: int, medic_peer: int) -> Dictionary:
+ 	var out := {"victim": victim_peer, "medic": medic_peer}
++	if victim_peer == 0:
++		out["skipped"] = "no medic in the zone"
++		return out
+ 	if victim_peer == 1:
+ 		_down_self()
+ 	if medic_peer == 1:
+@@ -1580,6 +1591,28 @@
+ 	return best
+ 
+ 
++## Contact on the way in (S1): a player down or hurt, or a hostile within ENGAGE_M with a
++## clear line to this bot's head.
++func _contact_while_advancing() -> bool:
++	var me := _me()
++	if me == null:
++		return false
++	if not me.vitals.is_up() or me.vitals.blood_fraction() < 0.995:
++		return true
++	var players := _level().get_node_or_null(^"Players") if _level() else null
++	for node in (players.get_children() if players else []):
++		var s := node as Soldier
++		if s and not s.vitals.is_up() and not s.vitals.is_dead():
++			return true
++	var foe := _hostile_in_range(me, ENGAGE_M)
++	if foe == null:
++		return false
++	var query := PhysicsRayQueryParameters3D.create(foe.camera.global_position, me.camera.global_position, 1)
++	query.exclude = [foe.get_rid()]
++	var hit := me.get_world_3d().direct_space_state.intersect_ray(query)
++	return hit.is_empty() or (hit.position as Vector3).distance_to(me.camera.global_position) < 1.0
++
++
+ func _stop_fighting() -> void:
+ 	var me := _me()
+ 	if me:
