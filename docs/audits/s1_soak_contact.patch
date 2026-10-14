@@ -1,6 +1,8 @@
---- a/tests/coop_soak.gd	2026-10-14 11:09:55.726894400 -0500
-+++ b/tests/coop_soak.gd	2026-10-14 11:10:17.457614500 -0500
-@@ -46,8 +46,10 @@
+diff --git a/tests/coop_soak.gd b/tests/coop_soak.gd
+index a23d720..9de66f4 100644
+--- a/tests/coop_soak.gd
++++ b/tests/coop_soak.gd
+@@ -46,8 +46,10 @@ const ADVANCE_S := 210.0
  const FIGHT_S := 120.0
  const ITEMS_S := 25.0
  const EXTRACT_S := 150.0
@@ -13,18 +15,18 @@
  const SHOT_GAP_S := 0.28
  ## In the fight the host's bot (the others follow it) closes in on the nearest hostile when it
  ## has had no clear shot for HUNT_AFTER_S, stopping this far from it (m).
-@@ -572,7 +574,9 @@
+@@ -572,7 +574,9 @@ func _host_cycle(cycle: int) -> Dictionary:
  	var me := _me()
  	if target != null and me:
  		_walk(target, 40.0, WALK_SPEED)
 -		await _wait_for(func() -> bool: return _me() == null or _flat(_me().global_position, target) < 70.0 or _hostile_in_range(_me(), HUNT_STOP_M * 2.0) != null, ADVANCE_S)
 +		# The fight starts at the first contact, not only 90 m out (S1, S0736: hit and down at
 +		# 112-160 m, the phase stayed "advance" for its full 210 s, nobody fired back).
-+		await _wait_for(func() -> bool: return _me() == null or _flat(_me().global_position, target) < 70.0 or _hostile_in_range(_me(), HUNT_STOP_M * 2.0) != null 			or _contact_while_advancing(), ADVANCE_S)
++		await _wait_for(func() -> bool: return _advance_done(target), ADVANCE_S)
  	# Fight, with a knock-out and a revive.
  	_fight = true
  	_set_phase("fight")
-@@ -583,7 +587,11 @@
+@@ -583,7 +587,11 @@ func _host_cycle(cycle: int) -> Dictionary:
  	if _bot_peer(1) == 0:
  		victim_bot = 0
  		medic_bot = 2 if _bot_peer(2) != 0 else (3 if _bot_peer(3) != 0 else -1)
@@ -37,7 +39,7 @@
  	var medic_peer := 1 if medic_bot == 0 else (_bot_peer(medic_bot) if medic_bot > 0 else 0)
  	_set_phase("fight", {"down": {"victim": victim_peer, "medic": medic_peer, "victim_bot": victim_bot, "medic_bot": medic_bot}})
  	var revive := await _down_and_revive(victim_peer, medic_peer)
-@@ -1124,6 +1132,9 @@
+@@ -1124,6 +1132,9 @@ func _objective_point() -> Variant:
  ## them back up. Both are told through the phase; the host watches from the replicated state.
  func _down_and_revive(victim_peer: int, medic_peer: int) -> Dictionary:
  	var out := {"victim": victim_peer, "medic": medic_peer}
@@ -47,10 +49,19 @@
  	if victim_peer == 1:
  		_down_self()
  	if medic_peer == 1:
-@@ -1580,6 +1591,28 @@
+@@ -1580,6 +1591,37 @@ func _hostile_in_range(me: Soldier, within: float) -> Soldier:
  	return best
  
  
++## The advance is over: this bot is gone, near the objective, a hostile is close, or there was
++## contact on the way in (S1).
++func _advance_done(target: Variant) -> bool:
++	var me := _me()
++	if me == null:
++		return true
++	return _flat(me.global_position, target) < 70.0 or _hostile_in_range(me, HUNT_STOP_M * 2.0) != null or _contact_while_advancing()
++
++
 +## Contact on the way in (S1): a player down or hurt, or a hostile within ENGAGE_M with a
 +## clear line to this bot's head.
 +func _contact_while_advancing() -> bool:

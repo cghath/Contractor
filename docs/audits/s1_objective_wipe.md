@@ -24,7 +24,7 @@ S0736 cycle 3, host snapshots (`t` = seconds into the run):
 2. **coop_soak.gd:50.** `ENGAGE_M` is 140 m, but the garrison's reach is `SquadAI.SIGHT_RANGE` = 200 m (squad_ai.gd:140). Even in "fight", the bots cannot answer anyone between 140 and 200 m.
 3. **coop_soak.gd:582-588.** The knock-out still runs when there is no medic (`medic_bot == -1`), which guarantees "every player is down" for a lone host (S0755).
 
-The proposed patch is `docs/audits/s1_soak_contact.patch`, against test/coop-soak 33d3e87. It is for the owner of test/coop-soak to apply; it was not committed there. It does three things:
+The proposed patch is `docs/audits/s1_soak_contact.patch`, against test/coop-soak 33d3e87 (applies cleanly with `git apply`). It is for the owner of test/coop-soak to apply; it was not committed there. It does three things:
 
 - Ends the advance on first contact: this bot is hurt or down, any player is down, or a hostile within `ENGAGE_M` has a clear line to it.
 - Raises `ENGAGE_M` to 200 m.
@@ -59,3 +59,10 @@ With no fire coming back (suppression 0), 135 rounds at 110-160 m comes to about
 - If 150 m still feels too lethal once the bots fire back, the smallest lever is a range term in `_aim_error_deg`, for example `+0.25 deg per 100 m past 100 m` for unskilled AI. That would roughly halve the 200 m hit rate and leave close range alone.
 - Alternatively, wire the pending doctrine `aim_deg` (insurgent 0.6), which is already proposed in data/doctrines.json.
 - First re-measure with the patched soak: down-events per cycle before the "fight" phase should drop to about 0.
+
+## Verification (2026-10-14, patch applied to a detached checkout of test/coop-soak 33d3e87)
+
+- **S0862 PASS** (15 min asked, 13 min run, lossy, 3 clients, port 25455): 3/3 contracts, 0 "every player is down", 0 give-ups. Advance to fight took 29 s, 53 s and 56 s (it was the full 210 s in S0736 cycle 3).
+- Unresolved, not S1: in cycles 2 and 3 the planned knock-out victim was "still down" at the end of the revive window (blood / spo2). That is the soak medic or the medical flow, not the garrison. Worth a separate look.
+- The advance condition is now a named helper (`_advance_done`). Before, the one-line lambda had lost its line break.
+- Game suites on this branch (docs only, same code as dev fc98665): R0864 smoke PASS; squad FAIL on the known intermittents (close-range centre-mass at 2/4/6 m, "Give me ammo") under load. Solo rerun R0883: squad PASS, missions PASS.
