@@ -267,6 +267,7 @@ func _mission(type: String) -> String:
 		bring.erase(casualty)  # back wounded: checked on its own below
 	elif type == "intel_grab":
 		wounded = squad[1]
+		(mates[wounded] as Soldier).vitals.shielded = false  # (_shield: this one's meant)
 		(mates[wounded] as Soldier).vitals.server_burn(0.3)  # caught in a fire: burns sit them out
 	if type == "raid":
 		left = squad[squad.size() - 1]
@@ -459,8 +460,10 @@ func _deploy(cid: String, squad: Array, heli := false) -> bool:
 	var extraction := MapNodes.extraction(level)
 	check(started and Contracts.is_deployed() and cid in Contracts.deployment().get("cids", []) and extraction.is_active()
 		and not Contracts.objectives.for_contract(cid).is_empty(), "everyone ready, the briefing starts: the contract is live and extraction open")
+	_shield(player)
 	for mid: String in squad:
 		_hold(_roster_soldier(mid))
+		_shield(_roster_soldier(mid))
 	for n: Node in level.ai.get_children():
 		_on_ai_added(n)
 	return started and Contracts.is_deployed()
@@ -490,6 +493,26 @@ func _hold(s: Soldier) -> void:
 		SquadAI.of(s).process_mode = Node.PROCESS_MODE_DISABLED
 
 
+## Rounds, blasts and falls do nothing to `s` (Vitals.shielded, what spawn protection uses) for
+## the rest of the deployment: a hostile who sees the player or a squadmate in the moment before
+## _kill_hostile gets to him can shoot them down mid-step (a slow CI runner gives him longer),
+## and a player who's down can't pick up the intel or the casualty (R0800, CI run 38646615024).
+## The fight isn't what this suite checks; the injuries it means are dealt on purpose, unshielded.
+func _shield(s: Soldier) -> void:
+	if s:
+		s.vitals.shielded = true
+
+
+## Hostiles up within `r` m of `at` that _kill_hostile will put down.
+func _hostiles_up_near(at: Vector3, r: float) -> int:
+	var n := 0
+	for c: Node in level.ai.get_children():
+		var s := c as Soldier
+		if s and s.faction == &"hostile" and not s.is_queued_for_deletion() and not s.has_meta(&"loop_keep") and s.vitals.is_up() 				and _flat(s.global_position, at) <= r:
+			n += 1
+	return n
+
+
 func _required(cid: String, kind: String) -> Dictionary:
 	for o: Dictionary in Contracts.objectives.for_contract(cid):
 		if o.kind == kind and not o.optional:
@@ -513,7 +536,10 @@ func _go_to(at: Vector3, squad_too := true) -> void:
 	var module := zone.module_at(at) if zone else null
 	if module:
 		await _wait_until(func() -> bool: return module.is_ready(), 20.0)
-	await _seconds(0.6)  # its garrison spawns and falls
+	await _seconds(0.6)  # its garrison spawns
+	## and falls (_kill_hostile, 0.8 s after each comes in): waited on, not a fixed sleep, so a
+	## slow runner doesn't start the step with the garrison still up and shooting.
+	await _wait_until(func() -> bool: return _hostiles_up_near(at, 150.0) == 0, 10.0)
 
 
 func _put(s: Soldier, at: Vector3) -> void:
@@ -606,6 +632,12 @@ func _do_hvt(cid: String) -> Dictionary:
 	var hvt := people.hvt(String(o.params.hvt)) if people else null
 	if hvt == null:
 		return {"why": "the HVT isn't in the zone"}
+	## He never takes his surrender back here: an uncuffed captive may bolt even while watched
+	## (HvtAI.BOLT_CHAOS, for COWER_S after any gunfire he heard), a coin toss every BOLT_CHECK_S
+	## that walked him off mid-cuff (R0746: moved 3.9 m, then 7.2 m). Bolting is missions_test's.
+	var brain := hvt.get_node_or_null(^"PersonAI") as HvtAI
+	if brain:
+		brain.bolt_scale = 0.0
 	# Cornered: a player stays within HvtAI.CORNERED_M of him, behind him, until he gives up.
 	var gave_up := false
 	var t := 0.0
@@ -678,6 +710,7 @@ func _do_recovery(cid: String) -> Dictionary:
 		return {"why": "the squadmate isn't waiting in the zone"}
 	var p: Array = (c.objectives[0] as Dictionary).params.pos
 	check(target.global_position.distance_to(_v(p)) < 3.0, "%s waits where they were left" % target.name)
+	_shield(target)
 	_put(player, target.global_position + Vector3(1.5, 0, 0))
 	var found := await _wait_until(func() -> bool: return target.has_meta(&"found"), 5.0)
 	check(found, "a player reaching them finds them")
@@ -925,6 +958,7 @@ func _extract_heli(squad: Array, casualty: String) -> Dictionary:
 	if hurt == null:
 		return {"why": "no casualty"}
 	_put(hurt, player.global_position + Vector3(2.0, 0, 0))
+	hurt.vitals.shielded = false  # (_shield: this one's meant)
 	hurt.vitals.server_damage(70.0)
 	await _frames(3)
 	check(not hurt.vitals.is_up(), "%s goes down" % hurt.name)
@@ -997,7 +1031,10 @@ func _extract_heli(squad: Array, casualty: String) -> Dictionary:
 		_put(left, c.heli.global_position + Vector3(10.0, 0, 9.0))  # in the point, away from the doors: stays
 	await _frames(3)
 	var lifted := player.server_pick_up_body(hurt, Soldier.CARRY, 3.0)
-	check(lifted, "the player picks up the casualty")
+	check(lifted, "the player picks up the casualty (%.1f m off; casualty up=%s wake in %.0f s (%s), carried by %s; player up=%s hands=%s carrying %s)" % [
+		hurt.body_point().distance_to(player.global_position), hurt.vitals.is_up(), hurt.vitals.wake_eta(), ", ".join(PackedStringArray(hurt.vitals.why_unconscious())),
+		hurt.carried_by.name if is_instance_valid(hurt.carried_by) else "nobody", player.vitals.is_up(), player.inventory.hands,
+		player.carrying.name if is_instance_valid(player.carrying) else "nobody"])
 	await _seconds(2.0)
 	_put(player, by_door + Vector3(-1.0, 0, 0))
 	var loaded := await _wait_until(func() -> bool:
