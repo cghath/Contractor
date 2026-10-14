@@ -94,6 +94,35 @@ def in_step(host_now, client, host_before):
         return False
 
 
+def ammo_split(h, c, prev):
+    """B-08: why a client's weapon counts (net_ammo: [snapshot revision, rounds per weapon
+    slot]) are out of step with the host's, or None. Within one revision rounds only go down
+    (a shot), so a client behind a burst holds more than the host now and no more than the
+    host held at the previous mark (same revision). A client on an older revision is a
+    snapshot in flight only if the host's revision changed since the previous mark."""
+    ha, ca = h.get("ammo") or [], c.get("ammo") or []
+    if not ha or not ca or len(ha) != len(ca):
+        return None if ha == ca else f"counts host {ha} / client {ca}"
+    pa = (prev.get("ammo") or []) if prev else []
+    hrev, crev = ha[0], ca[0]
+    if crev > hrev:
+        return f"client on snapshot {crev}, ahead of the host's {hrev}"
+    if crev < hrev:
+        if pa and pa[0] == hrev:
+            return f"client still on snapshot {crev}; the host has been on {hrev} since the mark before"
+        return None
+    same_before = len(pa) == len(ha) and pa[0] == hrev
+    for i in range(1, len(ha)):
+        hn, cn = ha[i], ca[i]
+        if cn == hn:
+            continue
+        if hn < 0 or cn < 0 or cn < hn:
+            return f"slot {i}: client {cn} / host {hn} rounds (snapshot {hrev})"
+        if same_before and cn > pa[i]:
+            return f"slot {i}: client {cn} / host {hn} rounds, more than the host's {pa[i]} the mark before (snapshot {hrev})"
+    return None
+
+
 def compare(host, client, args, host_prev):
     """Mismatches between a host snapshot and a client snapshot on the same mark: a list of
     (key, kind, detail)."""
@@ -130,10 +159,20 @@ def compare(host, client, args, host_prev):
         # past it in between) is in step (B-08: every S0706 ammo mismatch was +1 on a mark where
         # the host's count had just changed). A real split stays: it is still there on the next
         # mark, when the host's value has held (the "persistent" count).
-        if "rounds" in h and not in_step(h.get("rounds"), c.get("rounds"), prev.get("rounds") if prev else None):
+        if "rounds" in h and "ammo" not in h and not in_step(h.get("rounds"), c.get("rounds"), prev.get("rounds") if prev else None):
             out.append((key, "ammo", f"host {h.get('rounds')} / client {c.get('rounds')} in the rifle"
                         + (f" (host {prev.get('rounds')} the mark before)" if prev and prev.get("rounds") != h.get("rounds") else "")))
-        if "inv" in h and c.get("inv") != h.get("inv") and not (prev and c.get("inv") == prev.get("inv")):
+        # B-08 (S0743: AI/Sparrow's hash differed on two marks in a row, firing on both): with the
+        # gear hash (no loaded rounds) and the counts by snapshot revision, a rifleman firing
+        # across marks is in step; a split still shows (gear not the host's now or the mark
+        # before; counts ahead of the host, or more than a mark behind).
+        if "gear" in h and "gear" in c:
+            if c["gear"] != h["gear"] and not (prev and c["gear"] == prev.get("gear")):
+                out.append((key, "inventory", f"gear hash host {h['gear']} / client {c['gear']}"))
+            split = ammo_split(h, c, prev)
+            if split:
+                out.append((key, "ammo", split))
+        elif "inv" in h and c.get("inv") != h.get("inv") and not (prev and c.get("inv") == prev.get("inv")):
             out.append((key, "inventory", f"hash host {h.get('inv')} / client {c.get('inv')}"))
     for key in cs:
         if key not in hs:

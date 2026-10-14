@@ -142,6 +142,24 @@ static func inv_hash(s: Soldier) -> String:
 	return JSON.stringify(s.inventory.net_state, "", true).md5_text().left(10)
 
 
+## B-08: the inventory without the rounds loaded in the weapons (those change every shot and
+## travel as Inventory.net_ammo; the report compares them by snapshot revision, see ammo_of).
+## S0743's one persistent diff was an AI rifleman firing on two marks in a row.
+static func gear_hash(s: Soldier) -> String:
+	var state: Dictionary = s.inventory.net_state.duplicate(true)
+	var slot_state: Dictionary = state.get("slot_state", {})
+	for slot: StringName in Inventory.WEAPON_SLOTS:
+		if slot_state.get(slot, {}) is Dictionary:
+			(slot_state.get(slot, {}) as Dictionary).erase("rounds")
+	return JSON.stringify(state, "", true).md5_text().left(10)
+
+
+## B-08: [snapshot revision, rounds in each weapon slot] as the host sent them (net_ammo), or
+## [] on a build without it.
+static func ammo_of(s: Soldier) -> Array:
+	return Array(s.inventory.get(&"net_ammo")) if &"net_ammo" in s.inventory else []
+
+
 func _flags(s: Soldier) -> int:
 	var f := 0
 	if s.vitals.is_up():
@@ -246,8 +264,12 @@ func _write_snapshot(key: int, t: float) -> void:
 			row["rounds"] = s.inventory.rounds_in(&"primary")
 			row["mags"] = s.inventory.count_of(&"mag_556")
 			row["inv"] = inv_hash(s)
+			row["gear"] = gear_hash(s)
+			row["ammo"] = ammo_of(s)
 		elif k.begins_with("AI/") and s.faction == &"friendly":
 			row["inv"] = inv_hash(s)
+			row["gear"] = gear_hash(s)
+			row["ammo"] = ammo_of(s)
 		soldiers[k] = row
 	var items := _items()
 	var extraction := MapNodes.extraction(_level()) if _level() else null
