@@ -25,11 +25,11 @@
 		},
 		"coastal_lowland": {
 			"name": "Coastal lowland",
-			"land": {"relief_scale": 0.55, "wavelength_m": 700, "octaves": 4, "gain": 0.4, "offset_m": 3.0},
-			"sea": {"width_m": 190, "depth_m": 7.0, "level": 0.0},
+			"land": {"relief_scale": 0.55, "wavelength_m": 700, "octaves": 4, "gain": 0.4, "offset_m": 3.0, "detail_m": 2.4, "detail_wavelength_m": 190},
+			"sea": {"width_m": 190, "depth_m": 7.0, "level": 0.0, "coast_wobble_m": 70},
 			"palette": {"grass": "6a7440", "dry": "8a8650", "earth": "86744f", "rock": "7a7468", "sand": "c2b583"},
 			"ground": {"sand_below_m": 1.6},
-			"scatter": {"conifer_share": 0.15, "rocks_per_km2": 35, "large_rock_share": 0.12, "scrub_per_km2": 750, "trees_per_km2": 35, "tufts_per_km2": 70000, "pebbles_per_km2": 4000, "rock_clusters_per_km2": 40,
+			"scatter": {"conifer_share": 0.15, "rocks_per_km2": 35, "large_rock_share": 0.12, "scrub_per_km2": 750, "scrub_size": [0.7, 1.7], "trees_per_km2": 35, "tufts_per_km2": 70000, "pebbles_per_km2": 4000, "rock_clusters_per_km2": 40,
 				"colours": {"rock": ["8a8576", "7a7568"], "scrub": ["627a3e", "7a8040"], "tuft": ["5a7436", "68803e", "788545"], "crown": ["4f6e30", "5b7a34"], "trunk": "5a4632"}}
 		},
 		"amphibious_coast": {
@@ -50,10 +50,10 @@
 		},
 		"desert_wadi": {
 			"name": "Desert wadi",
-			"land": {"relief_scale": 0.85, "wavelength_m": 560, "octaves": 4, "gain": 0.44, "ridge": 0.2},
-			"wadi": {"count": 2, "width_m": 55, "depth_m": 8.0, "meander_m": 140},
+			"land": {"relief_scale": 0.85, "wavelength_m": 560, "octaves": 4, "gain": 0.44, "ridge": 0.2, "detail_m": 3.2, "detail_wavelength_m": 150},
+			"wadi": {"count": 2, "width_m": 55, "depth_m": 8.0, "meander_m": 140, "berm_m": 2.0},
 			"palette": {"grass": "a08f5a", "dry": "b3a068", "earth": "94785a", "rock": "7d6f5c", "sand": "c9b27a", "apron": "a08f5a"},
-			"scatter": {"conifer_share": 0.0, "rocks_per_km2": 90, "large_rock_share": 0.18, "scrub_per_km2": 600, "trees_per_km2": 8, "tufts_per_km2": 40000, "pebbles_per_km2": 12000, "rock_clusters_per_km2": 120,
+			"scatter": {"conifer_share": 0.0, "rocks_per_km2": 90, "large_rock_share": 0.18, "scrub_per_km2": 600, "scrub_size": [0.7, 1.7], "trees_per_km2": 8, "tufts_per_km2": 32000, "pebbles_per_km2": 12000, "rock_clusters_per_km2": 120,
 				"colours": {"rock": ["8a7a64", "7a6c58"], "scrub": ["6f7040", "857b45"], "tuft": ["a89a5c", "94935a", "85884e"], "crown": ["5f6b35", "6b7338"], "trunk": "5e4a34"}}
 		},
 		"rocky_ridge": {

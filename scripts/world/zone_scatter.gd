@@ -31,7 +31,7 @@ const BUILD_M := 1000.0
 const PER_FRAME := 2
 const CHECK_S := 0.5
 ## Draw distances (m): scrub, rocks, trunks and crowns.
-const SEE_SCRUB_M := 400.0
+const SEE_SCRUB_M := 550.0  # bushes read at mid range (round 3: was 400)
 const SEE_ROCK_M := 650.0
 const SEE_TREE_M := 950.0
 
@@ -48,7 +48,7 @@ const FOLIAGE_PAD_M := 3.0
 ## seed, so every peer draws the same. The preset's scatter "tufts_per_km2" (0: none) and
 ## "pebbles_per_km2"; seen out to SEE_TUFT_M / SEE_PEBBLE_M.
 const SEE_TUFT_M := 140.0
-const SEE_PEBBLE_M := 90.0
+const SEE_PEBBLE_M := 70.0
 ## Rock clusters (the preset's scatter "rock_clusters_per_km2"), visual only like the tufts.
 const SEE_OUTCROP_M := 420.0
 const CAP_TUFTS_PER_CELL := 1200
@@ -109,6 +109,9 @@ func generate(terrain: ZoneTerrain, def: Dictionary) -> void:
 	var scrub_colours := _colours(colours.get("scrub", ["55633a"]))
 	var crown_colours := _colours(colours.get("crown", ["46602f"]))
 	var large_share := float(_spec.get("large_rock_share", 0.15))
+	var scrub_size: Array = _spec.get("scrub_size", [0.6, 1.5])
+	var scrub_lo := float(scrub_size[0])
+	var scrub_hi := float(scrub_size[1])
 	var plan := [
 		[Kind.ROCK, float(_spec.get("rocks_per_km2", 0.0)), CAP_ROCKS],
 		[Kind.TREE, float(_spec.get("trees_per_km2", 0.0)), CAP_TREES],
@@ -149,7 +152,7 @@ func generate(terrain: ZoneTerrain, def: Dictionary) -> void:
 					# Clumps: denser where the cluster noise is high.
 					if up < 0.8 or roll > clampf(cluster.get_noise_2d(x, z) * 1.6 + 0.8, 0.1, 1.0):
 						continue
-					var s := lerpf(0.6, 1.5, scale_roll)
+					var s := lerpf(scrub_lo, scrub_hi, scale_roll)  # the preset's "scrub_size" [min, max], else 0.6..1.5
 					item["size"] = Vector3(s, s * lerpf(0.5, 0.9, squash_roll), s)
 					item["pos"] = Vector3(x, h, z)
 					item["colour"] = scrub_colours[int(variation * scrub_colours.size()) % scrub_colours.size()]
@@ -689,12 +692,12 @@ func _scrub_mesh() -> ArrayMesh:
 	return st.commit()
 
 
-## A grass tuft: seven thin four-sided blades from a 0.25 m clump, leaning out, up to 0.45 m.
+## A grass tuft: five thin four-sided blades from a 0.25 m clump, leaning out, up to 0.45 m.
 func _tuft_mesh() -> ArrayMesh:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	for k in 7:
-		var a := k * TAU / 7.0 + 0.4 * (k % 2)
+	for k in 5:
+		var a := k * TAU / 5.0 + 0.4 * (k % 2)
 		var out := Vector3(cos(a), 0.0, sin(a))
 		var foot := out * (0.05 + 0.04 * (k % 3))
 		var tip := out * (0.12 + 0.05 * (k % 2)) + Vector3(0, 0.30 + 0.05 * (k % 3), 0)

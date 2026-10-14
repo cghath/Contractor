@@ -36,6 +36,8 @@ const PAD_BLEND_M := 40.0
 const APRON_M := 6000.0
 ## The water reaches this far past the shoreline strip so the beach is covered (m).
 const SEA_MARGIN_M := 40.0
+## The coast wobble (sea "coast_wobble_m") pushes the water inland at most this far.
+const COAST_IN_M := 35.0
 ## Ground this far below the water is left out of the navigation mesh (m).
 const NAV_WATER_M := 0.9
 const WALL_HEIGHT_M := 400.0
@@ -84,6 +86,8 @@ var c_road := EARTH
 var sand_below_m := -1000.0
 var rock_above_m := 1.0e9
 var _bed := PackedByteArray()  # riverbed weight (0..255) per height
+var _coast: FastNoiseLite
+var _wobble_m := 0.0
 ## The def's "roads" as [a, b, bounds] (Vector2, Vector2, Rect2 grown by ROAD_VERGE_M): the
 ## ground under and beside them takes the road colour, so they show past ZoneRoads.SEE_M.
 var _roads: Array = []
@@ -145,6 +149,25 @@ func generate(def: Dictionary, flat: Array) -> void:
 	ridged.fractal_octaves = 3
 	ridged.frequency = 1.3 / wavelength
 	var wadis := _wadi_lines(preset.get("wadi", {}))
+	# Gentle rises (land "detail_m" over "detail_wavelength_m"): small swells and dips on the
+	# big shape, a few metres over a hundred or more, so the ground stops reading as a plain.
+	var detail_m := float(land.get("detail_m", 0.0))
+	var detail := FastNoiseLite.new()
+	detail.seed = seed_value + 2
+	detail.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+	detail.fractal_type = FastNoiseLite.FRACTAL_FBM
+	detail.fractal_octaves = 2
+	detail.frequency = 1.0 / float(land.get("detail_wavelength_m", 160.0))
+	var berm_m := float((preset.get("wadi", {}) as Dictionary).get("berm_m", 0.0))
+	# The coast (sea "coast_wobble_m"): the shoreline pushed in and out along its length, so
+	# it isn't a ruled line. Inland at most COAST_IN_M (pads keep ZoneDef.SEA_PAD_KEEP_M clear).
+	_wobble_m = minf(float(sea.get("coast_wobble_m", 0.0)), sea_m * 0.45)
+	_coast = FastNoiseLite.new()
+	_coast.seed = seed_value + 3
+	_coast.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+	_coast.fractal_type = FastNoiseLite.FRACTAL_FBM
+	_coast.fractal_octaves = 3
+	_coast.frequency = 1.0 / 260.0
 	heights.resize(points * points)
 	_bed.resize(points * points)
 	for j in points:
@@ -158,16 +181,29 @@ func generate(def: Dictionary, flat: Array) -> void:
 			if flatten != 1.0:
 				n = signf(n) * pow(absf(n), flatten)
 			var h := n * relief_m + offset
+			if detail_m > 0.0:
+				h += detail.get_noise_2d(x, z) * detail_m
 			var carve := 0.0
+			var berm := 0.0
 			for w: Dictionary in wadis:
 				carve = maxf(carve, _wadi_weight(w, x, z))
+				if berm_m > 0.0:
+					berm = maxf(berm, _wadi_berm(w, x, z))
 			if carve > 0.0:
 				h -= carve * float(w_depth)
+			h += berm * berm_m * (1.0 - carve)
 			var fade := smoothstep(0.0, EDGE_FADE_M, edge)
 			h *= fade
 			if sea_side >= 0:
 				var d: float = [z + _half, _half - z, x + _half, _half - x][sea_side]
+				d -= coast_shift(x, z)
 				h = lerpf(h, sea_level - sea_depth, 1.0 - smoothstep(0.0, sea_m, d))
+				if _wobble_m > 0.0:
+					# Low land by the sea rises out of it along the (wobbly) coast profile, so the
+					# shoreline is the coast's, not the straight inner edge of the water plane.
+					var floor_h := lerpf(sea_level - sea_depth, sea_level + 0.5, smoothstep(0.0, sea_m, d))
+					if h < floor_h:
+						h = lerpf(h, floor_h, 1.0 - smoothstep(sea_m + SEA_MARGIN_M, sea_m + SEA_MARGIN_M + 80.0, d))
 			heights[i + j * points] = h
 			_bed[i + j * points] = int(carve * 255.0)
 	pads.clear()
@@ -212,6 +248,28 @@ func _wadi_weight(w: Dictionary, x: float, z: float) -> float:
 		return 0.0
 	# A flat-ish floor, banks easing up to the land.
 	return 1.0 - smoothstep(width * 0.3, width * 1.6, d)
+
+
+## How far the coast at (x, z) is pushed inland (+) or out to sea (-) by the wobble: smooth,
+## out to sea up to _wobble_m, inland only up to COAST_IN_M.
+func coast_shift(x: float, z: float) -> float:
+	if sea_side < 0 or _wobble_m <= 0.0:
+		return 0.0
+	var along: float = [x, x, z, z][sea_side]
+	var n := tanh(_coast.get_noise_1d(along) * 1.8)  # smooth: no clipped, ruled stretches
+	return n * (minf(_wobble_m, COAST_IN_M) if n > 0.0 else _wobble_m)
+
+
+## 0 to 1: a low bank-top ridge just outside riverbed `w` (the wadi's "berm_m" high).
+func _wadi_berm(w: Dictionary, x: float, z: float) -> float:
+	var dir: Vector2 = w.dir
+	var along := x * dir.x + z * dir.y
+	var side := -x * dir.y + z * dir.x - float(w.offset) - (w.noise as FastNoiseLite).get_noise_1d(along) * float(w.meander)
+	var width := float(w.width)
+	var u := (absf(side) - width * 1.75) / (width * 0.45)
+	if absf(u) > 3.0:
+		return 0.0
+	return exp(-u * u)
 
 
 func _read_palette() -> void:
@@ -544,7 +602,9 @@ func _ground_colour(i: int, j: int, n: Vector3) -> Color:
 	if _bed.size() == heights.size():
 		colour = colour.lerp(c_sand, clampf(float(_bed[i + j * points]) / 255.0 * 1.6 - 0.3, 0.0, 0.85) * (1.0 - steep))
 	if sea_side >= 0 and sand_below_m > -100.0 and sea_edge_distance(p.x, p.y) < sea_m + SEA_MARGIN_M + 40.0:
-		colour = colour.lerp(c_sand, smoothstep(sea_level + sand_below_m, sea_level, h) * (1.0 - steep * 0.5))
+		# The beach: a band along the measured shoreline (which the coast wobble shapes).
+		var beach := 1.0 - smoothstep(14.0, 50.0, shore_distance(p.x, p.y) + float(absi(hash(Vector2i(i / 2, j / 2))) % 100) * 0.08)
+		colour = colour.lerp(c_sand, beach * (1.0 - steep * 0.5))
 	return colour.lerp(c_road, road_weight(p.x, p.y) * 0.8)
 
 
@@ -579,8 +639,8 @@ func _apron(material: Material) -> MeshInstance3D:
 		var a: Vector2 = q[0]
 		var b: Vector2 = q[1]
 		var y := (sea_level - sea_depth) if k == sea_side else -0.02  # the seabed beyond a sea
-		verts.append_array([Vector3(a.x, y, a.y), Vector3(b.x, y, b.y), Vector3(b.x, y, a.y),
-			Vector3(a.x, y, a.y), Vector3(a.x, y, b.y), Vector3(b.x, y, b.y)])
+		verts.append_array([Vector3(a.x, y, a.y), Vector3(b.x, y, a.y), Vector3(b.x, y, b.y),
+			Vector3(a.x, y, a.y), Vector3(b.x, y, b.y), Vector3(a.x, y, b.y)])  # clockwise from above (it faced down: culled, a void past the edge)
 	var normals := PackedVector3Array()
 	var colours := PackedColorArray()
 	for v in verts:
@@ -635,7 +695,10 @@ func _water() -> MeshInstance3D:
 	var h := _half
 	var outer: Rect2 = [Rect2(-o, -o, 2.0 * o, o - h), Rect2(-o, h, 2.0 * o, o - h), Rect2(-o, -h, o - h, size_m), Rect2(h, -h, o - h, size_m)][sea_side]
 	var verts := PackedVector3Array()
-	for q: Rect2 in [r, outer]:
+	# The strip carried on past the zone's two sides, so the coast doesn't end in a dry
+	# spit of apron where the sea meets the side edge.
+	var sides: Array = [Rect2(-o, r.position.y, o - h, r.size.y), Rect2(h, r.position.y, o - h, r.size.y)] if sea_side < 2 else [Rect2(r.position.x, -o, r.size.x, o - h), Rect2(r.position.x, h, r.size.x, o - h)]
+	for q: Rect2 in [r, outer] + sides:
 		var a := q.position
 		var b := q.end
 		var y := sea_level
