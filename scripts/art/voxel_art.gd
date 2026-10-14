@@ -462,6 +462,14 @@ const CUMMERBUND_PAD: Array[float] = [0.0, 1.5, 2.5]
 ## How much the cummerbund's corners are cut (its loft's bevel): GearRig lays the pouches on
 ## its corners flat on these facets.
 const CUMMERBUND_BEVEL := 0.3
+## How far up from the mount (cm) the plate pockets and the cummerbund reach, and a heavy
+## carrier's side plate pockets: their outer face out from the spine, half-depth and height
+## (cm). GearRig keeps the pouches on a carrier inside these (GearRig.face_region).
+const POCKET_TOP_CM := 33
+const CUMMERBUND_TOP_CM := 22
+const SIDE_POCKET_OUT_CM := 27
+const SIDE_POCKET_HALF_Z_CM := 9
+const SIDE_POCKET_TOP_CM := 23
 ## The carriers' padded shoulder pads (_vest): centred SHOULDER_PAD_X cm out from the spine,
 ## 5 cm wide, arching from the pockets' tops over the shoulders, as [carrier height, half-depth]
 ## in cm (a woman's reach FEMALE_CARRIER_BACK less far back, to her back panel: shoulder_pad_line).
@@ -753,7 +761,7 @@ static func _vest(tier: int, torso := {}, female := false, front := false) -> Di
 		var rows: Array = []
 		var hw := 0.0
 		var hd := 0.0
-		for y in range(0, 23, 2):
+		for y in range(0, CUMMERBUND_TOP_CM + 1, 2):
 			var at_y := _torso_at(body, y)
 			rows.append([o.y + y, at_y.x + pad, at_y.y + pad])
 			hw = maxf(hw, at_y.x + pad)
@@ -782,7 +790,7 @@ static func _vest(tier: int, torso := {}, female := false, front := false) -> Di
 		var z0 := (-outer if f < 0 else inner) + shift
 		var z1 := (-inner if f < 0 else outer) + shift
 		# The pocket: bevelled upright edges, its top chamfered in.
-		list.append(_loft(o.x, o.z + (z0 + z1) * 0.5, [[o.y, 14.0, 3.0], [o.y + 31, 14.0, 3.0], [o.y + 33, 13.0, 2.0]], C.GEAR, 0.35))
+		list.append(_loft(o.x, o.z + (z0 + z1) * 0.5, [[o.y, 14.0, 3.0], [o.y + 31, 14.0, 3.0], [o.y + POCKET_TOP_CM, 13.0, 2.0]], C.GEAR, 0.35))
 		put.call(-13, 1, z0 + 1, 13, 32, z1 - 1, C.EMPTY)                 # the plate's room
 		if f < 0 and female:
 			# The panel conforms to her (the plate stays inside): padding behind the pocket down
@@ -829,9 +837,9 @@ static func _vest(tier: int, torso := {}, female := false, front := false) -> Di
 		var inside := mini(22, floori(_torso_at(body, 11.0).x + pad))
 		var inset := 22 - inside if female else 0
 		for side: int in [-1, 1]:
-			var x0 := inside if side > 0 else -27 + inset
-			var x1 := 27 - inset if side > 0 else -inside
-			at.call(x0, 0, -9, x1, 23, 9, C.GEAR)
+			var x0 := inside if side > 0 else -SIDE_POCKET_OUT_CM + inset
+			var x1 := SIDE_POCKET_OUT_CM - inset if side > 0 else -inside
+			at.call(x0, 0, -SIDE_POCKET_HALF_Z_CM, x1, SIDE_POCKET_TOP_CM, SIDE_POCKET_HALF_Z_CM, C.GEAR)
 			var room := 23 - inset if side > 0 else -26 + inset
 			at.call(room, 1, -8, room + 3, 22, 8, C.EMPTY)
 			var face := 26 - inset if side > 0 else -27 + inset
