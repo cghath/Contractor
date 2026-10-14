@@ -995,6 +995,7 @@ func _preset_terrain(def: Dictionary) -> ZoneTerrain:
 
 
 func _test_presets() -> void:
+	ZoneScatter.clear_cache(true)  # layouts from this run's code, not an older run's disk cache
 	# Which preset a zone gets: explicit, name, region, default.
 	var pick := func(d: Dictionary) -> String: return TerrainPresets.choose(d)
 	check(pick.call({"name": "Salt flats", "region": "coast"}) == "salt_flats"
@@ -1131,8 +1132,6 @@ func _test_woods() -> void:
 				grid[g] = []
 			(grid[g] as Array).append(q)
 	var clustered := 0
-	var densest := Vector2.ZERO
-	var most := 0
 	for q in trees:
 		var g := Vector2i(floori(q.x / 25.0), floori(q.y / 25.0))
 		var n := -1
@@ -1143,9 +1142,6 @@ func _test_woods() -> void:
 						n += 1
 		if n >= 5:
 			clustered += 1
-		if n > most:
-			most = n
-			densest = q
 	check(trees.size() > 500 and clustered * 2 >= trees.size() and a.counts[ZoneScatter.Kind.THICKET] > 0,
 		"woods: trees grow in clusters (%d of %d with 5+ others within 25 m; %d thickets)" % [clustered, trees.size(), a.counts[ZoneScatter.Kind.THICKET]])
 	# Nothing on the pads (modules, insertion and extraction points) or the roads.
@@ -1159,19 +1155,38 @@ func _test_woods() -> void:
 		for road: Array in hot.roads:
 			clear = clear and Geometry2D.get_closest_point_to_segment(q, Vector2(road[0][0], road[0][1]), Vector2(road[1][0], road[1][1])).distance_to(q) >= ZoneScatter.ROAD_KEEP_M - 0.01
 	check(clear, "woods: nothing on a pad, an insertion or extraction point, or a road")
-	# A standing man's eye line (1.6 m up) across the densest wood is hidden.
-	var from := Vector3(densest.x - 30.0, 0.0, densest.y)
-	var to := Vector3(densest.x + 30.0, 0.0, densest.y)
-	from.y = t.height_at(from.x, from.z) + 1.6
-	to.y = t.height_at(to.x, to.z) + 1.6
-	var through := a.foliage_between(from, to)
-	check(through >= Spotting.FOLIAGE_OPAQUE_M, "woods: a 1.6 m line through a wood (%d trees within 25 m) passes %.1f m of foliage (hidden at %.1f)" % [most + 1, through, Spotting.FOLIAGE_OPAQUE_M])
+	# A standing man's eye line (1.6 m above the ground all along, in 5 m pieces) 40 m across a
+	# wood or copse (a tree with 20+ others within 25 m) is hidden, in four directions, at most
+	# spots (clearings and edges let some through).
+	var lines := 0
+	var hidden := 0
+	for k in range(0, trees.size(), 97):
+		var q: Vector2 = trees[k]
+		var near := -1
+		for o: Vector2 in trees:
+			if o.distance_squared_to(q) < 625.0:
+				near += 1
+		if near < 20:
+			continue
+		for ang: float in [0.0, PI * 0.25, PI * 0.5, PI * 0.75]:
+			var dir := Vector2.from_angle(ang)
+			var through := 0.0
+			for seg in 8:
+				var p0 := q + dir * (-20.0 + seg * 5.0)
+				var p1 := q + dir * (-15.0 + seg * 5.0)
+				through += a.foliage_between(Vector3(p0.x, t.height_at(p0.x, p0.y) + 1.6, p0.y), Vector3(p1.x, t.height_at(p1.x, p1.y) + 1.6, p1.y))
+			lines += 1
+			if through >= Spotting.FOLIAGE_OPAQUE_M:
+				hidden += 1
+	check(lines >= 40 and hidden >= lines * 0.65, "woods: %d of %d eye-height lines 40 m through woods and copses are hidden (%.1f m of foliage or more)" % [hidden, lines, Spotting.FOLIAGE_OPAQUE_M])
 	# Far stand-ins: one blob per 24 m square of trees, one MultiMesh per cell (built with the visuals).
 	a.build_visuals()
 	var far := a.far_counts()
-	var squares := {}
+	var squares := {}  # a square split by a cell's edge is a blob each side
 	for q in trees:
-		squares[Vector2i(floori((q.x + t.size_m * 0.5) / ZoneScatter.FAR_GROUP_M), floori((q.y + t.size_m * 0.5) / ZoneScatter.FAR_GROUP_M))] = true
+		var cell := Vector2i(floori((q.x + t.size_m * 0.5) / ZoneScatter.CELL_M), floori((q.y + t.size_m * 0.5) / ZoneScatter.CELL_M))
+		var g := Vector2i(floori((q.x + t.size_m * 0.5) / ZoneScatter.FAR_GROUP_M), floori((q.y + t.size_m * 0.5) / ZoneScatter.FAR_GROUP_M))
+		squares[[cell, g]] = true
 	check(int(far.blobs) == squares.size() and int(far.cells) > 0 and int(far.cells) <= a._cells.size(),
 		"woods: far stand-ins, %d canopy blobs in %d cells for %d trees" % [far.blobs, far.cells, trees.size()])
 	var built := a.build_near(Vector3.ZERO, 2)

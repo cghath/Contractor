@@ -45,12 +45,13 @@ two sides, and the apron (ground past the edge) now faces up: it was culled, lea
 Round 4 (Captain, 2026-10-14: "we need copses and groves and such. the terrain is too empty"): **trees grow in
 clusters** (`ZoneScatter._lay_out_trees`), each optional in a preset's scatter, per km2 of zone: `woods_per_km2`
 (ragged woods `wood_radius_m` [min, max] across, default 50-130, trees `wood_spacing_m` apart, default 6.5, with
-clearings; `thicket_share` (default 0.35) of the sites also get a thicket: tall undergrowth that hides a standing
-man), `copses_per_km2` (tight clumps of `copse_trees` [min, max], default 10-40), `hedgerows_per_km2` (tree and bush
+clearings; `thicket_share` (default 0.5) of the sites also get a thicket: tall undergrowth, 1.8-2.5 m, that hides a
+standing man), `copses_per_km2` (tight clumps of `copse_trees` [min, max], default 10-40), `hedgerows_per_km2` (tree and bush
 lines along the edges of a `field_m` field grid, default 120 m), `road_trees` (0..1, the share of the roads' sides
 lined), `wadi_groves_per_km2` (clumps of `wadi_grove_trees` on the wadis' banks, `ZoneTerrain.bed_at`), and
 `edge_scrub_per_m` (bushes a metre round each wood, copse and grove, default 0.5). `trees_per_km2` is now only the
-few lone trees. Caps: trees 5000, thickets 3000, solid 5600. Set as:
+few lone trees. Caps: trees 5000 (woods at most 60% of it, woods with copses and groves 82%, so a 16 km2 zone's woods leave
+trees for its copses, hedgerows and roadsides), thickets 5000, solid 5600. Set as:
 
 | preset | woods | copses | hedgerows | road_trees | wadi groves | lone trees |
 | --- | --- | --- | --- | --- | --- | --- |

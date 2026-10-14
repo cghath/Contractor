@@ -28,7 +28,10 @@ enum Kind { ROCK, SCRUB, TREE, THICKET }
 const CAP_ROCKS := 2600
 const CAP_SCRUB := 9000
 const CAP_TREES := 5000
-const CAP_THICKETS := 3000
+const CAP_THICKETS := 5000
+## The shares of CAP_TREES woods, then woods with copses and groves, may take.
+const WOODS_SHARE := 0.6
+const COPSES_SHARE := 0.82
 ## Most items with collision (large rocks and trees) in a zone.
 const CAP_SOLID := 5600
 ## Items keep this far outside every pad (the pad's own margin is already in its rect), the
@@ -53,7 +56,7 @@ const SEE_TREE_M := 950.0
 ## Far stand-ins: past SEE_TREE_M each FAR_GROUP_M square of trees is one low canopy blob.
 const FAR_GROUP_M := 24.0
 ## Layout format: bump when the layout code changes, so old cached layouts are not used.
-const LAYOUT_VERSION := 4
+const LAYOUT_VERSION := 5
 ## Zones kept in memory (layouts), the newest of them also keep their built cell meshes, and
 ## files kept in the disk cache.
 const CACHE_ZONES := 4
@@ -118,6 +121,7 @@ var _scrub_lo := 0.6
 var _scrub_hi := 1.5
 var _tree_grid := {}
 var _outline: FastNoiseLite
+var _tree_limit := CAP_TREES  # the trees allowed so far in the layout (woods leave room for the rest)
 
 
 ## Lays the items out. `terrain` must be generated; `def` is the zone's def ("roads" in it
@@ -245,9 +249,13 @@ func _lay_out_trees(area_km2: float) -> void:
 	var inner := _half - EDGE_KEEP_M
 	# Woods first (the biggest), then copses: each where the cluster noise favours trees.
 	var radius: Array = _spec.get("wood_radius_m", [50.0, 130.0])
+	# Woods take at most WOODS_SHARE of the tree cap and copses and groves up to COPSES_SHARE, so
+	# a big zone's woods leave trees for its copses, hedgerows and roadsides.
+	_tree_limit = int(CAP_TREES * WOODS_SHARE)
 	for n in _how_many(rng, float(_spec.get("woods_per_km2", 0.0)) * area_km2):
 		var at := _cluster_site(rng, inner)
 		_wood(rng, at.x, at.y, rng.randf_range(float(radius[0]), float(radius[1])) * 0.5)
+	_tree_limit = int(CAP_TREES * COPSES_SHARE)
 	var copse: Array = _spec.get("copse_trees", [10, 40])
 	for n in _how_many(rng, float(_spec.get("copses_per_km2", 0.0)) * area_km2):
 		var at := _cluster_site(rng, inner)
@@ -265,6 +273,7 @@ func _lay_out_trees(area_km2: float) -> void:
 			continue
 		_copse(rng, x, z, rng.randi_range(int(grove[0]), int(grove[1])))
 		groves -= 1
+	_tree_limit = CAP_TREES
 	_hedgerows(rng, _how_many(rng, float(_spec.get("hedgerows_per_km2", 0.0)) * area_km2))
 	_road_lines(rng, float(_spec.get("road_trees", 0.0)))
 
@@ -297,7 +306,7 @@ func _edge_r(cx: float, cz: float, r: float, a: float) -> float:
 ## trees, thick scrub round the edge.
 func _wood(rng: RandomNumberGenerator, cx: float, cz: float, r: float) -> void:
 	var spacing := float(_spec.get("wood_spacing_m", 6.5))
-	var thickets := float(_spec.get("thicket_share", 0.35))
+	var thickets := float(_spec.get("thicket_share", 0.5))
 	var steps := ceili(r * 1.3 / spacing)
 	for j in range(-steps, steps + 1):
 		for i in range(-steps, steps + 1):
@@ -312,11 +321,11 @@ func _wood(rng: RandomNumberGenerator, cx: float, cz: float, r: float) -> void:
 			if roll < 0.85:
 				_try_tree(rng, x, z, 0.75, 1.3)
 			if roll > 1.0 - thickets or roll < thickets * 0.4:
-				_try_bush(rng, x + spacing * 0.5, z + spacing * 0.3, Kind.THICKET, 1.8, 3.0)
+				_try_bush(rng, x + spacing * 0.5, z + spacing * 0.3, Kind.THICKET, 2.2, 3.4)
 	_edge_scrub(rng, cx, cz, r, true)
 
 
-## A copse: `n` trees close together round (cx, cz), scrub round it.
+## A copse: `n` trees close together round (cx, cz), thickets among them, scrub round it.
 func _copse(rng: RandomNumberGenerator, cx: float, cz: float, n: int) -> void:
 	var r := 2.3 * sqrt(float(n)) + 3.0
 	var placed := 0
@@ -327,10 +336,10 @@ func _copse(rng: RandomNumberGenerator, cx: float, cz: float, n: int) -> void:
 		var d := r * sqrt(rng.randf())
 		if _try_tree(rng, cx + cos(a) * d, cz + sin(a) * d, 0.8, 1.4):
 			placed += 1
-	for k in n / 5:
+	for k in n / 2:  # undergrowth through it (round 4: n / 5 left most copses see-through at eye height)
 		var a := rng.randf() * TAU
-		var d := r * 0.6 * sqrt(rng.randf())
-		_try_bush(rng, cx + cos(a) * d, cz + sin(a) * d, Kind.THICKET, 1.6, 2.6)
+		var d := r * 0.85 * sqrt(rng.randf())
+		_try_bush(rng, cx + cos(a) * d, cz + sin(a) * d, Kind.THICKET, 1.8, 2.8)
 	if placed > 0:
 		_edge_scrub(rng, cx, cz, r, false)
 
@@ -406,7 +415,7 @@ func _try_tree(rng: RandomNumberGenerator, x: float, z: float, lo: float, hi: fl
 	var s := lerpf(lo, hi, rng.randf())
 	var yaw := rng.randf() * TAU
 	var tint := rng.randf()
-	if counts[Kind.TREE] >= CAP_TREES or absf(x) > _half - EDGE_KEEP_M or absf(z) > _half - EDGE_KEEP_M:
+	if counts[Kind.TREE] >= _tree_limit or absf(x) > _half - EDGE_KEEP_M or absf(z) > _half - EDGE_KEEP_M:
 		return false
 	if _crowded(x, z) or _blocked(x, z, _keep, _roads):
 		return false
@@ -437,8 +446,9 @@ func _crowded(x: float, z: float) -> bool:
 
 
 ## Places scrub or a thicket (`kind`) `lo`..`hi` wide at (x, z) unless it's off the zone,
-## blocked, wet or steep; whether it did. Thickets stand tall (2.6 to 3.6 x their mesh's
-## height): undergrowth that hides a standing man in a wood.
+## blocked, wet or steep; whether it did. Thickets stand tall (size.y 3.0 to 4.2, so SCRUB_TOP
+## of it is 1.8 to 2.5 m): undergrowth that hides a standing man in a wood (round 4 measured
+## 40 m eye-height lines through woods: with 2.6 to 3.6 and a third as many, a third saw through).
 func _try_bush(rng: RandomNumberGenerator, x: float, z: float, kind: int, lo: float, hi: float) -> bool:
 	var s := lerpf(lo, hi, rng.randf())
 	var squash := rng.randf()
@@ -454,7 +464,7 @@ func _try_bush(rng: RandomNumberGenerator, x: float, z: float, kind: int, lo: fl
 		return false
 	if _terrain.normal_at(x, z).y < 0.8:
 		return false
-	var tall := lerpf(2.6, 3.6, squash) if kind == Kind.THICKET else s * lerpf(0.5, 0.9, squash)
+	var tall := lerpf(3.0, 4.2, squash) if kind == Kind.THICKET else s * lerpf(0.5, 0.9, squash)
 	var colour: Color = _scrubs[int(tint * _scrubs.size()) % _scrubs.size()]
 	if kind == Kind.THICKET:
 		colour = colour.lerp(_crowns[0], 0.5).darkened(0.08)  # between the bushes and the crowns
