@@ -24,9 +24,13 @@ extends CompoundLevel
 const STREAM_IN_M := 260.0
 const STREAM_OUT_M := 340.0
 const STREAM_CHECK_S := 0.25
-## Haze: about 50% at 1 km, 25% at 2 km.
-const FOG_DENSITY := 0.0007
-const FOG_COLOUR := Color(0.70, 0.74, 0.78)
+## Haze: about 70% clear at 1 km, half at 2 km (was 50% at 1 km: everything washed out).
+const FOG_DENSITY := 0.00035
+const FOG_COLOUR := Color(0.72, 0.77, 0.83)
+## Sun and sky: a warm sun, a clear blue sky paling to a warm haze at the horizon.
+const SUN_COLOUR := Color(1.0, 0.94, 0.84)
+const SKY_TOP := Color(0.24, 0.42, 0.68)
+const SKY_HORIZON := Color(0.70, 0.74, 0.78)
 ## Reinforcements (Reinforcements.edge_point): they come in this far inside the zone's edge
 ## (there is no ground beyond it), at the spot of REINFORCE_TRIES round the edge nearest the
 ## players but at least REINFORCE_MIN_M from every one of them (the furthest if none is).
@@ -214,7 +218,12 @@ func streamed_modules() -> Array[ZoneModule]:
 func _build_environment() -> void:
 	var started := Time.get_ticks_usec()
 	var sun := DirectionalLight3D.new()
-	sun.rotation_degrees = Vector3(-50, -30, 0)
+	# A mid-morning sun, lower than before, so slopes and scrub read in light and shade.
+	sun.rotation_degrees = Vector3(-38, -35, 0)
+	sun.light_color = SUN_COLOUR
+	sun.light_energy = 1.25
+	sun.shadow_bias = 0.15  # the lower sun streaks the gentle slopes with acne at the defaults
+	sun.shadow_normal_bias = 3.0
 	sun.shadow_enabled = true
 	sun.directional_shadow_max_distance = 250.0
 	GameSettings.apply_sun(sun)  # the shadows setting
@@ -222,13 +231,28 @@ func _build_environment() -> void:
 	var env := Environment.new()
 	env.background_mode = Environment.BG_SKY
 	env.sky = Sky.new()
-	env.sky.sky_material = ProceduralSkyMaterial.new()
+	var sky := ProceduralSkyMaterial.new()
+	sky.sky_top_color = SKY_TOP
+	sky.sky_horizon_color = SKY_HORIZON
+	sky.ground_horizon_color = SKY_HORIZON
+	sky.ground_bottom_color = Color(0.30, 0.27, 0.22)
+	sky.sun_angle_max = 20.0
+	env.sky.sky_material = sky
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+	env.ambient_light_sky_contribution = 0.85
+	env.ambient_light_energy = 0.95  # with the lower, warmer sun: the shade side reads, the ground stops looking flat-lit
+	env.tonemap_mode = Environment.TONE_MAPPER_ACES
+	env.tonemap_exposure = 1.05
+	env.tonemap_white = 6.0
+	env.adjustment_enabled = true
+	env.adjustment_contrast = 1.06
+	env.adjustment_saturation = 1.0
 	env.fog_enabled = true
 	env.fog_light_color = FOG_COLOUR
 	env.fog_density = FOG_DENSITY
-	env.fog_sky_affect = 0.5
+	env.fog_sky_affect = 0.35
+	env.fog_aerial_perspective = 0.6  # distant ground takes the sky's colour, not a flat grey
+	env.fog_sun_scatter = 0.15
 	var world_env := WorldEnvironment.new()
 	world_env.environment = env
 	add_child(world_env)

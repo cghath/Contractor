@@ -43,6 +43,13 @@ const CROWN_R := 1.1
 const CROWN_LOW := 2.0
 const CROWN_HIGH := 4.9
 const FOLIAGE_PAD_M := 3.0
+## Ground cover (visual only, not in `items`, no collision, no effect on sight or the layout's
+## checksum): grass tufts and pebbles laid out per cell when it builds, from the cell and the
+## seed, so every peer draws the same. The preset's scatter "tufts_per_km2" (0: none) and
+## "pebbles_per_km2"; seen out to SEE_TUFT_M / SEE_PEBBLE_M.
+const SEE_TUFT_M := 140.0
+const SEE_PEBBLE_M := 90.0
+const CAP_TUFTS_PER_CELL := 900
 
 ## Every item: {"kind", "pos" (Vector3), "yaw", "size" (Vector3), "colour" (Color), "solid"}.
 var items: Array[Dictionary] = []
@@ -57,6 +64,9 @@ var _meshes := {}
 var _material: StandardMaterial3D
 var _next_check := 0.0
 var _visuals_on := false
+var _keep: Array[Rect2] = []
+var _roads: Array = []
+var _cluster: FastNoiseLite
 
 
 ## Lays the items out. `terrain` must be generated; `def` is the zone's def ("roads" in it
@@ -82,6 +92,16 @@ func generate(terrain: ZoneTerrain, def: Dictionary) -> void:
 	for pad: Array in terrain.pads:
 		keep.append((pad[0] as Rect2).grow(PAD_KEEP_M))
 	var roads: Array = def.get("roads", [])
+	_keep = keep
+	_roads = roads
+	_cluster = cluster
+	if float(_spec.get("tufts_per_km2", 0.0)) > 0.0:
+		# Ground cover goes in every cell, not only those holding an item.
+		var cells := ceili(terrain.size_m / CELL_M)
+		for cz in cells:
+			for cx in cells:
+				if not _cells.has(Vector2i(cx, cz)):
+					_cells[Vector2i(cx, cz)] = []
 	var colours: Dictionary = _spec.get("colours", {})
 	var rock_colours := _colours(colours.get("rock", ["77736a"]))
 	var scrub_colours := _colours(colours.get("scrub", ["55633a"]))
@@ -375,6 +395,8 @@ func build_visuals() -> void:
 		"trunk": _trunk_mesh(Color(String(colours.get("trunk", "4f3e2c")))),
 		"crown": _crown_mesh(),
 		"conifer": _conifer_mesh(),
+		"tuft": _tuft_mesh(),
+		"pebble": _blocky(Vector3(1, 1, 1), Color.WHITE, 0.3, 7, true),
 	}
 	set_process(true)
 
@@ -430,7 +452,9 @@ func _build_cell(cell: Vector2i) -> void:
 				var trunk := Transform3D(basis.scaled(item.size), (item.pos as Vector3) - Vector3(0, 0.1, 0))
 				groups["trunk"].append([trunk, Color.WHITE])
 				groups["conifer" if _is_conifer(item) else "crown"].append([xf, item.colour])
-	var ranges := {Kind.ROCK: SEE_ROCK_M, Kind.SCRUB: SEE_SCRUB_M, "trunk": SEE_TREE_M, "crown": SEE_TREE_M, "conifer": SEE_TREE_M}
+	_ground_cover(cell, groups)
+	var ranges := {Kind.ROCK: SEE_ROCK_M, Kind.SCRUB: SEE_SCRUB_M, "trunk": SEE_TREE_M, "crown": SEE_TREE_M, "conifer": SEE_TREE_M,
+		"tuft": SEE_TUFT_M, "pebble": SEE_PEBBLE_M}
 	for key in groups:
 		var list: Array = groups[key]
 		if list.is_empty():
@@ -449,9 +473,72 @@ func _build_cell(cell: Vector2i) -> void:
 		node.material_override = _material
 		node.visibility_range_end = float(ranges[key])
 		node.visibility_range_end_margin = 20.0
-		var scrub: bool = key is int and key == Kind.SCRUB  # keys mix Kind values and "trunk"/"crown" names
+		var scrub: bool = (key is int and key == Kind.SCRUB) or key is String and key in ["tuft", "pebble"]  # keys mix Kind values and names
 		node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF if scrub else GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 		add_child(node)
+
+
+## Grass tufts and pebbles for `cell` (visual only, see SEE_TUFT_M): from the cell and the seed,
+## thicker where the scrub clusters, none on pads, roads, water or steep ground.
+func _ground_cover(cell: Vector2i, groups: Dictionary) -> void:
+	var tufts := mini(int(float(_spec.get("tufts_per_km2", 0.0)) * CELL_M * CELL_M / 1.0e6), CAP_TUFTS_PER_CELL)
+	var pebbles := mini(int(float(_spec.get("pebbles_per_km2", 0.0)) * CELL_M * CELL_M / 1.0e6), CAP_TUFTS_PER_CELL)
+	if tufts + pebbles == 0:
+		return
+	groups["tuft"] = []
+	groups["pebble"] = []
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(Vector3i(cell.x, cell.y, _terrain.seed_value))
+	var half := _terrain.size_m * 0.5
+	var x0 := -half + cell.x * CELL_M
+	var z0 := -half + cell.y * CELL_M
+	var colours: Dictionary = _spec.get("colours", {})
+	var tuft_colours := _colours(colours.get("tuft", colours.get("scrub", ["6f7040"])))
+	var rock_colours := _colours(colours.get("rock", ["77736a"]))
+	for n in tufts + pebbles:
+		var pebble := n >= tufts
+		var x := x0 + rng.randf() * CELL_M
+		var z := z0 + rng.randf() * CELL_M
+		var roll := rng.randf()
+		var yaw := rng.randf() * TAU
+		var s := rng.randf()
+		var tint := rng.randf()
+		if absf(x) > half - EDGE_KEEP_M or absf(z) > half - EDGE_KEEP_M:
+			continue
+		if not pebble and roll > clampf(_cluster.get_noise_2d(x * 3.0, z * 3.0) * 1.4 + 0.7, 0.15, 1.0):
+			continue  # tufts in patches
+		if _ground_blocked(x, z):
+			continue
+		var h := _terrain.height_at(x, z)
+		if _terrain.sea_side >= 0 and h < _terrain.sea_level + 0.5:
+			continue
+		var nrm := _terrain.normal_at(x, z)
+		if nrm.y < 0.82:
+			continue
+		var basis := Basis(Vector3.UP, yaw)
+		if pebble:
+			var size := lerpf(0.08, 0.32, s * s)
+			var c: Color = rock_colours[int(tint * rock_colours.size()) % rock_colours.size()]
+			groups["pebble"].append([Transform3D(basis.scaled(Vector3(size, size * 0.55, size * 1.2)), Vector3(x, h + size * 0.12, z)), c.darkened(tint * 0.15)])
+		else:
+			var size := lerpf(0.7, 1.4, s)
+			var c: Color = tuft_colours[int(tint * tuft_colours.size()) % tuft_colours.size()]
+			c = c.lerp(Color(c.r * 1.08, c.g * 1.05, c.b * 0.9), roll)  # some sun-bleached
+			groups["tuft"].append([Transform3D(basis.scaled(Vector3(size, size * lerpf(0.8, 1.3, tint), size)), Vector3(x, h - 0.03, z)), c])
+
+
+## Whether ground cover keeps off (x, z): a pad or the line of a road.
+func _ground_blocked(x: float, z: float) -> bool:
+	var p := Vector2(x, z)
+	for r in _keep:
+		if r.grow(-PAD_KEEP_M + 2.0).has_point(p):
+			return true
+	for road: Array in _roads:
+		var a := Vector2(float(road[0][0]), float(road[0][1]))
+		var b := Vector2(float(road[1][0]), float(road[1][1]))
+		if Geometry2D.get_closest_point_to_segment(p, a, b).distance_to(p) < 4.0:
+			return true
+	return false
 
 
 # --- Shapes: low-poly blocks, flat shaded ----------------------------------------------------
@@ -539,7 +626,7 @@ func _tier(st: SurfaceTool, cx: float, cz: float, y0: float, y1: float, r0: floa
 
 
 ## A flat face through `points` (3 or 4, in order), turned to face away from `inside`.
-func _face(st: SurfaceTool, points: Array, inside: Vector3, colour: Color) -> void:
+func _face(st: SurfaceTool, points: Array, inside: Vector3, colour: Color, up_normal := false) -> void:
 	var a: Vector3 = points[0]
 	var b: Vector3 = points[1]
 	var c: Vector3 = points[2]
@@ -557,7 +644,7 @@ func _face(st: SurfaceTool, points: Array, inside: Vector3, colour: Color) -> vo
 		var order: Array = [t[0], t[2], t[1]] if not flip else [t[0], t[1], t[2]]
 		for k: int in order:
 			st.set_color(colour)
-			st.set_normal(n)
+			st.set_normal(Vector3.UP if up_normal else n)  # grass: lit like the ground it stands on
 			st.add_vertex(points[k])
 
 
@@ -571,6 +658,25 @@ func _scrub_mesh() -> ArrayMesh:
 		var h: float = c[3]
 		_tier(st, c[0], c[1], 0.0, h * 0.7, r * 0.75, r)
 		_tier(st, c[0], c[1], h * 0.7, h, r, r * 0.55)
+	return st.commit()
+
+
+## A grass tuft: seven thin four-sided blades from a 0.25 m clump, leaning out, up to 0.45 m.
+func _tuft_mesh() -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for k in 7:
+		var a := k * TAU / 7.0 + 0.4 * (k % 2)
+		var out := Vector3(cos(a), 0.0, sin(a))
+		var foot := out * (0.05 + 0.04 * (k % 3))
+		var tip := out * (0.12 + 0.05 * (k % 2)) + Vector3(0, 0.30 + 0.05 * (k % 3), 0)
+		var w := 0.035
+		var side := out.cross(Vector3.UP) * w
+		var b := [foot + side, foot + out * w, foot - side, foot - out * w]
+		var inside := foot + (tip - foot) * 0.25
+		for i in 4:
+			var shade := TOP_SHADE if i % 2 == 0 else SIDE_SHADE
+			_face(st, [b[i], b[(i + 1) % 4], tip], inside, Color.WHITE * lerpf(shade, 1.0, 0.3), true)
 	return st.commit()
 
 

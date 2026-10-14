@@ -41,6 +41,8 @@ const NAV_WATER_M := 0.9
 const WALL_HEIGHT_M := 400.0
 ## Ground colours: grass, dry grass, bare earth on slopes and on pads, rock on steep ground.
 const GRASS := Color("5f6a3c")
+## The ground's look (ground_material): vertex palette + world-space breakup, see the shader.
+const GROUND_SHADER := preload("res://scripts/world/zone_ground.gdshader")
 const DRY := Color("7d7748")
 const EARTH := Color("7f6d4f")
 const ROCK := Color("6f6a60")
@@ -90,7 +92,7 @@ var _streets: Array[Rect2] = []
 
 var _half := 0.0
 var _visuals_built := false
-var _material: StandardMaterial3D
+var _material: ShaderMaterial
 var _lod0 := {}  # Vector2i chunk -> its finest MeshInstance3D
 var _lod1 := {}  # Vector2i chunk -> its middle MeshInstance3D
 
@@ -392,10 +394,7 @@ func build_visuals() -> void:
 	if _visuals_built:
 		return
 	_visuals_built = true
-	_material = StandardMaterial3D.new()
-	_material.vertex_color_use_as_albedo = true
-	_material.vertex_color_is_srgb = true
-	_material.roughness = 1.0
+	_material = ground_material()
 	var count := chunk_count()
 	for cz in count:
 		for cx in count:
@@ -408,6 +407,18 @@ func build_visuals() -> void:
 	if sea_side >= 0:
 		add_child(_water())
 	set_process(true)
+
+
+## The ground's material (zone_ground.gdshader): the vertex palette broken up in world space,
+## per-pixel rock on steep faces, fine normal detail near the camera; tinted from the preset.
+func ground_material() -> ShaderMaterial:
+	var m := ShaderMaterial.new()
+	m.shader = GROUND_SHADER
+	m.set_shader_parameter(&"dry_colour", c_dry)
+	m.set_shader_parameter(&"rock_colour", c_rock)
+	m.set_shader_parameter(&"earth_colour", c_earth)
+	m.set_shader_parameter(&"seed_offset", float(seed_value % 97) * 3.1)  # small: the noise keeps its float precision
+	return m
 
 
 ## The finest level for the chunks nearest `pos`, at most `budget` of them; returns how
@@ -524,7 +535,7 @@ func _ground_colour(i: int, j: int, n: Vector3) -> Color:
 			return c_road if _streets.any(func(r: Rect2) -> bool: return r.has_point(p)) else c_earth
 	var steep := clampf((1.0 - n.y) * 12.0, 0.0, 1.0)
 	var patch := float(absi(hash(Vector2i(i / 3, j / 3) + Vector2i(seed_value, 0))) % 1000) / 1000.0
-	var colour := c_grass.lerp(c_dry, patch * 0.6)
+	var colour := c_grass.lerp(c_dry, patch * 0.25)  # the shader adds the larger, smoother patches
 	var h := _h(i, j)
 	# Rock on the high ground; sand in riverbeds and on the beach.
 	colour = colour.lerp(c_rock, clampf((h - rock_above_m) / 8.0, 0.0, 0.8))
