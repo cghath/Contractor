@@ -63,6 +63,12 @@ var _by_id := {}  # module id -> ZoneModule
 ## entries are the same dictionaries as in GameState.voxel_edits.
 var _logs := {}
 var _garrisoned := {}  # host: module id -> how many of its garrison posts have spawned
+## Host: garrison soldiers put in but still to come out (_spawn_garrison queues them; at most
+## PeopleLayer.SPAWN_BUDGET_MS of spawning a frame): [{"module_id", "i", "pos"}], and how many
+## each module still has coming (garrison_pending).
+var _garrison_queue: Array[Dictionary] = []
+var _garrison_pending := {}
+var _garrison_nav_held := false
 var _next_stream := 0.0
 
 
@@ -337,6 +343,10 @@ func _on_contract_live(cid: String, _objectives: Array) -> void:
 ## Host only. A module's hostiles (garrison_size of them: the module's posts, then extra posts
 ## beside them), all but those whose bodies the zone save holds, in buddy pairs, holding their
 ## ground. Called again it tops the garrison up to garrison_size (never takes anyone away).
+## Their posts are worked out now; the soldiers come out over the next frames, a few a frame
+## (Captain P0362: a deploy's spawns all in one frame were a 3.4 s hitch). Until the last is out
+## the module's garrison is still coming (garrison_pending): not spawned yet for a clear-area
+## objective, not down, no missed check-ins.
 func _spawn_garrison(module: ZoneModule) -> void:
 	if not _ai_ready or not spawn_ai:
 		return
@@ -353,19 +363,59 @@ func _spawn_garrison(module: ZoneModule) -> void:
 	if spots.is_empty():
 		return
 	var taken: Array[Vector3] = []
-	var alert := get_node_or_null(^"Alert") as Alert  # hot zones: relaxed until something happens
 	for i in range(from, want):
 		var callsign := _garrison_callsign(module, i)
 		if fallen.has(callsign) or ai.get_node_or_null(NodePath(callsign)) != null:
 			continue
 		var pos := module.to_global(spots[i]) if i < spots.size() else _extra_post(module.to_global(spots[i % spots.size()]), taken)
 		taken.append(pos)
-		var s := spawn_soldier({"name": callsign, "faction": "hostile", "variant": "urban", "pos": pos,
-			"loadout": HOSTILE_LOADOUT + ["enemy_radio"] if i % RADIO_EVERY == 0 else HOSTILE_LOADOUT, "combat": GARRISON_STATS.combat, "discipline": GARRISON_STATS.discipline, "guard": true,
-			"mode": alert.mode_at(pos) if alert else GARRISON_STATS.mode})
-		if s:
-			s.rotation.y = post_yaw(module, pos)
-	for i in want:
+		if _garrison_queue.is_empty() and nav and not _garrison_nav_held:
+			nav.hold()  # the navigation's rebakes wait for the last of them (NavBuilder.hold)
+			_garrison_nav_held = true
+		_garrison_queue.append({"module_id": module.module_id, "i": i, "pos": pos})
+		_garrison_pending[module.module_id] = garrison_pending(module.module_id) + 1
+	if garrison_pending(module.module_id) == 0:
+		_pair_garrison(module)  # nobody to wait for: the ones still up pair as they are
+
+
+## Host: how many of module `module_id`'s garrison are put in but still to come out.
+func garrison_pending(module_id: String) -> int:
+	return int(_garrison_pending.get(module_id, 0))
+
+
+## Host: spawns queued garrison soldiers, at most PeopleLayer.SPAWN_BUDGET_MS a frame (at least one).
+func _spawn_queued_garrison() -> void:
+	var until := Time.get_ticks_usec() + int(PeopleLayer.SPAWN_BUDGET_MS * 1000.0)
+	var alert := get_node_or_null(^"Alert") as Alert  # hot zones: relaxed until something happens
+	while not _garrison_queue.is_empty():
+		var q: Dictionary = _garrison_queue.pop_front()
+		var module := get_module(String(q.module_id))
+		var i := int(q.i)
+		var pos: Vector3 = q.pos
+		if module and ai.get_node_or_null(NodePath(_garrison_callsign(module, i))) == null:
+			var s := spawn_soldier({"name": _garrison_callsign(module, i), "faction": "hostile", "variant": "urban", "pos": pos,
+				"loadout": HOSTILE_LOADOUT + ["enemy_radio"] if i % RADIO_EVERY == 0 else HOSTILE_LOADOUT, "combat": GARRISON_STATS.combat, "discipline": GARRISON_STATS.discipline, "guard": true,
+				"mode": alert.mode_at(pos) if alert else GARRISON_STATS.mode})
+			if s:
+				s.rotation.y = post_yaw(module, pos)
+		var left := garrison_pending(String(q.module_id)) - 1
+		if left > 0:
+			_garrison_pending[q.module_id] = left
+		else:
+			_garrison_pending.erase(q.module_id)
+			if module:
+				_pair_garrison(module)
+		if Time.get_ticks_usec() >= until:
+			break
+	if _garrison_queue.is_empty() and _garrison_nav_held:
+		_garrison_nav_held = false
+		if is_instance_valid(nav):
+			nav.release()
+
+
+## Buddy pairs in module `module`'s garrison (posts 1 and 2, 3 and 4, ...), for those up.
+func _pair_garrison(module: ZoneModule) -> void:
+	for i in int(_garrisoned.get(module.module_id, 0)):
 		var me := ai.get_node_or_null(NodePath(_garrison_callsign(module, i))) as Soldier
 		if me and (me.buddy == null or not is_instance_valid(me.buddy)):
 			me.buddy = ai.get_node_or_null(NodePath(_garrison_callsign(module, i ^ 1))) as Soldier
@@ -401,13 +451,13 @@ func garrison_alive(module_id: String) -> int:
 ## objective there waits for this (Objectives._garrisoned). True when this session spawns no
 ## AI (some test fixtures) or there's no such module: nothing will come to wait for.
 func garrison_spawned(module_id: String) -> bool:
-	return not spawn_ai or get_module(module_id) == null or _garrisoned.has(module_id)
+	return not spawn_ai or get_module(module_id) == null or (_garrisoned.has(module_id) and garrison_pending(module_id) == 0)
 
 
 ## Host: a site taken out (4B part 3): its garrison spawned and none of it is left standing. A
 ## site nobody has been near yet (never garrisoned) is still up.
 func site_down(module_id: String) -> bool:
-	return int(_garrisoned.get(module_id, 0)) > 0 and garrison_alive(module_id) == 0
+	return int(_garrisoned.get(module_id, 0)) > 0 and garrison_pending(module_id) == 0 and garrison_alive(module_id) == 0
 
 
 ## Host: a clear spot for an extra garrison post beside the post at `post` (world): the first
@@ -498,6 +548,8 @@ func _receive_logs(logs: Dictionary) -> void:
 # --- Streaming --------------------------------------------------------------------------------
 
 func _process(_delta: float) -> void:
+	if not _garrison_queue.is_empty():
+		_spawn_queued_garrison()
 	var now := Time.get_ticks_msec() / 1000.0
 	if now >= _next_stream:
 		_next_stream = now + STREAM_CHECK_S

@@ -22,7 +22,10 @@ repo**, by date, with a unique run number and PASS or FAIL in the folder's name:
 
 - **Letters:** R = test run (`tools/run_tests.sh`), S = screenshot or helper script, B = build,
   P = playtest session or bug report (planned). The number is one counter for all of them, so
-  "R0012" or "S0004" names exactly one run on that machine.
+  "R0012" or "S0004" names exactly one run on that machine. The counter is read and written
+  under a lock, the folder `run_counter.lock` beside it (`run_log_number` in `tools/run_log.sh`,
+  `SessionLog._next_number`): two runs started in the same second both got R0232 before it. A
+  lock older than 10 s was left by a killed run and is taken over.
 - **Folder names:** `<letter><number>-<HHMMSS>-<PASS|FAIL>-<branch or topic>-<sha>`. A folder
   still named RUNNING was killed or hung.
 - **Never delete the parent folder or anything in it.** Cleanups only ever remove temp copies.
@@ -70,7 +73,8 @@ unauthenticated API allows 60 calls an hour: poll every few minutes, not in a ti
 
 ### Scripts and builds: do the same by hand until they're wired in
 
-Take the next number from `run_counter.txt`, make
+Take the next number from `run_counter.txt` (by hand: `. tools/run_log.sh; run_log_number <parent>`,
+which takes the lock), make
 `<parent>/<date>/<letter><number>-<time>-RUNNING-<topic>-<sha>/`, run with output into it,
 rename RUNNING to PASS or FAIL, add a line to `index.txt`. A `-s` SceneTree script should
 also quit itself after a deadline (a script error leaves it idling, not quitting).
@@ -163,7 +167,9 @@ numbered session, **P<number>**, from the same counter and in the same parent as
    and a line to where it's going.
 4. Built: **performance lines** in session logs (`SessionLog.perf_line`, every `PERF_S` = 60 s:
    frame time average and worst, fps, AI and players up, modules streamed in, nav rebakes,
-   memory) and a **test history page** (`python tools/test_history.py` writes
+   memory: the engine's own count, which is debug-only (a release build read 0 MB, P0362), else
+   the process's resident memory where /proc gives it; video memory, the system's memory in use
+   and the object and node counts, all release-safe and read with no child process) and a **test history page** (`python tools/test_history.py` writes
    `<logs>/history.html`: pass/fail per suite over the last 40 runs, flaky suites flagged, the
    checks that fail most). The AI overlay also shows what each AI half-spotted and a hostile's
    alert state. Still later: **replay** a bug report (it saves a `Campaign.snapshot`; a headless test loads it,

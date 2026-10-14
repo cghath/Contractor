@@ -638,6 +638,9 @@ func _actions_for(src: Dictionary) -> Array:
 				out.append(["Equip", _action.bind("equip_entry", c, i, &"", &"")])
 			if Inventory.is_attachable(item) and not inv.attach_points().is_empty():
 				out.append(["Attach", _action.bind("attach", c, i, &"", &"")])
+			for gun: StringName in [&"primary", &"sidearm"]:  # an optic onto a gun's rail (P0362)
+				if Optics.is_optic(item) and Optics.mount_problem(inv, c, i, gun) == "":
+					out.append(["Mount on " + ItemDB.get_item(inv.slots[gun]).name, _action.bind("mount_optic", c, i, gun, &"")])
 			var use := _medical_use(item)
 			if use.is_valid():
 				out.append(["Use", use])
@@ -658,6 +661,8 @@ func _actions_for(src: Dictionary) -> Array:
 				out.append(["MOLLE view", _set_view.bind(View.MOLLE)])
 			if slot != &"vest" and slot != &"backpack":
 				out.append(["Stow", _action.bind("stow_slot", &"", -1, slot, &"")])
+			if Optics.on_slot(inv, slot) != null:  # P0362
+				out.append(["Remove " + Optics.on_slot(inv, slot).name, _action.bind("remove_optic", &"", -1, slot, &"")])
 			var gear := ItemDB.get_item(inv.slots[slot])
 			if Inventory.is_attachable(gear) and inv.free_point_for(gear) != &"":  # a disposable launcher onto the pack's top
 				out.append(["Pack on top", _action.bind("attach_slot", &"", -1, slot, &"")])
@@ -1160,7 +1165,8 @@ static func _detail(item: ItemData, state: Dictionary) -> String:
 	if Inventory.is_kit(item):
 		return "  [%s]" % Inventory.kit_text(item, state)  # what's left in the kit
 	if state.has("rounds") and item.type == "weapon":
-		return "  [%d loaded]" % int(state.rounds)
+		var optic := Optics.label(item, state)  # what's on its rail (P0362)
+		return "  [%d loaded%s]" % [int(state.rounds), ", " + optic if optic != "" else ""]
 	if Launchers.is_launcher(item):  # loaded with what, or empty (a fired disposable is gone)
 		var w := Launchers.loaded_warhead(item, state)
 		return "  [%s loaded]" % String(w).replace("_", " ").to_upper() if w != &"" else "  [empty]"

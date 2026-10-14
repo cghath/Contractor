@@ -49,7 +49,8 @@ const RANGES := {
 	"mouse_sensitivity": [0.2, 3.0, 0.05], "aim_sensitivity": [0.2, 1.5, 0.05],
 }
 ## The keys a player can rebind (Controls.KEYS, each one key): the label in the Keys list. The
-## rest stay fixed (Escape, the Ctrl/Alt menus, the mouse buttons, Shift combinations, dev keys).
+## rest stay fixed (Escape, the Ctrl/Alt menus, fire and aim, Shift combinations, dev keys). An
+## optic's zoom is on the side mouse buttons by default (Controls.BUTTONS; bindings: key_for).
 const BINDABLE := [
 	[&"move_forward", "Move forward"], [&"move_back", "Move back"], [&"move_left", "Move left"], [&"move_right", "Move right"],
 	[&"jump", "Jump"], [&"sprint", "Sprint"], [&"crouch", "Crouch (toggle)"], [&"prone", "Prone (toggle)"],
@@ -57,7 +58,8 @@ const BINDABLE := [
 	[&"mount", "Rest weapon"], [&"fire_mode", "Fire mode"], [&"reload", "Reload"], [&"grenade", "Grenade"],
 	[&"medical_menu", "Medical menu"], [&"inventory", "Inventory"], [&"map", "Map"],
 	[&"weapon_primary", "Primary weapon"], [&"weapon_sidearm", "Sidearm"], [&"weapon_launcher", "Launcher"],
-	[&"get_out", "Get out of vehicle"], [&"quick_save", "Quick save"],
+	[&"get_out", "Get out of vehicle"], [&"vehicle_view", "Vehicle view (1st/3rd person)"], [&"quick_save", "Quick save"],
+	[&"zoom_in", "Optic zoom in / magnifier up"], [&"zoom_out", "Optic zoom out / magnifier down"],
 ]
 ## The audio buses each volume sets (Sfx makes them; the room bus follows effects).
 const BUSES := {"master": [&"Master"], "effects": [&"SFX", &"SFX_Room"], "voice": [&"Voice"]}
@@ -264,18 +266,36 @@ static func invert_y() -> bool:
 
 # --- Key bindings -----------------------------------------------------------------------------
 
-## The key an action is on now (its rebinding, else Controls.KEYS).
-static func key_for(action: StringName) -> Key:
+## A binding that is a mouse button: this bit with the button index (Controls.BUTTONS).
+const MOUSE_BIND := 1 << 28
+
+
+## The key an action is on now (its rebinding, else Controls.KEYS, else its mouse button in
+## Controls.BUTTONS as MOUSE_BIND | index).
+static func key_for(action: StringName) -> int:
 	_load()
 	if _keys.has(action):
-		return _keys[action] as Key
+		return int(_keys[action])
+	if Controls.BUTTONS.has(action):
+		return MOUSE_BIND | int(Controls.BUTTONS[action])
 	var keys: Array = Controls.KEYS.get(action, [])
 	return keys[0] if not keys.is_empty() else KEY_NONE
 
 
+## A binding's name for the Keys list: the key's, or "Mouse 4" and the like.
+static func binding_name(code: int) -> String:
+	if code & MOUSE_BIND:
+		match code & ~MOUSE_BIND:
+			MOUSE_BUTTON_MIDDLE: return "Middle mouse"
+			MOUSE_BUTTON_XBUTTON1: return "Mouse 4"
+			MOUSE_BUTTON_XBUTTON2: return "Mouse 5"
+		return "Mouse %d" % (code & ~MOUSE_BIND)
+	return OS.get_keycode_string(code)
+
+
 ## Puts `action` on `key` (saved). Any other bindable action on that key is moved to the
 ## first one's old key, so nothing is left on two actions. Returns the action that swapped, or &"".
-static func bind(action: StringName, key: Key) -> StringName:
+static func bind(action: StringName, key: int) -> StringName:
 	_load()
 	var old := key_for(action)
 	var swapped := &""
@@ -308,10 +328,15 @@ static func apply_keys() -> void:
 			continue
 		for event: InputEvent in InputMap.action_get_events(action):
 			var k := event as InputEventKey
-			if k and not k.shift_pressed and not k.ctrl_pressed and not k.alt_pressed and k.location == KEY_LOCATION_UNSPECIFIED:
+			if (k and not k.shift_pressed and not k.ctrl_pressed and not k.alt_pressed and k.location == KEY_LOCATION_UNSPECIFIED) \
+					or event is InputEventMouseButton:
 				InputMap.action_erase_event(action, event)
 		var key := key_for(action)
-		if key != KEY_NONE:
+		if key & MOUSE_BIND:
+			var button := InputEventMouseButton.new()
+			button.button_index = (key & ~MOUSE_BIND) as MouseButton
+			InputMap.action_add_event(action, button)
+		elif key != KEY_NONE:
 			var event := InputEventKey.new()
-			event.physical_keycode = key
+			event.physical_keycode = key as Key
 			InputMap.action_add_event(action, event)

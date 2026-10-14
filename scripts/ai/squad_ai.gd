@@ -135,7 +135,8 @@ const AIM_UNSKILLED_DEG := 1.2
 const FALL_BACK_M := 20.0
 const FALL_BACK_COVER_M := 8.0
 ## Hostiles see this far (Captain, 2026-10-13: engagement ranges up; was 60 m). Doctrine's
-## engage_m should match once it's wired (audit A3-07, cghath).
+## engage_m fits it (insurgents 180 m, regulars 200 m) and Doctrine.engage_m never goes past
+## it (audit F-03; still pending, A3-07).
 const SIGHT_RANGE := 200.0
 const SUPPRESSED := 0.5
 const PINNED := 0.85
@@ -2841,7 +2842,7 @@ func _shoot() -> void:
 	_burst_left -= 1
 	if _burst_left <= 0:
 		_pause_until = now + randf_range(0.5, 1.1) / lerpf(0.7, 1.3, combat)
-	var dir := body._spread_direction(weapon)
+	var dir := body.ai_spread_direction(weapon)  # the AI keeps its own cone (Captain, P0362)
 	var extra := deg_to_rad(_aim_error_deg(foe != null))
 	dir = (dir + Vector3(randf_range(-1, 1), randf_range(-1, 1), randf_range(-1, 1)) * tan(extra) * 0.6).normalized()
 	body._server_fire.rpc_id(1, body.camera.global_position, dir, body.active_slot)
@@ -2858,7 +2859,7 @@ func _aim_error_deg(seen_foe: bool) -> float:
 ## its aim error (_aim_error_deg).
 func _fire_cone() -> float:
 	var weapon := body.active_weapon()
-	var spread := float(weapon.stats.get("spread_deg", 1.0)) if weapon else 1.0
+	var spread := Soldier.ai_spread_deg(weapon) if weapon else 1.0
 	return deg_to_rad(spread + _aim_error_deg(_foe() != null))
 
 

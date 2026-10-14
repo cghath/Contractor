@@ -661,10 +661,30 @@ func server_end_deployment(report: Dictionary) -> Dictionary:
 	objectives.server_clear()
 	Economy.advance_days(int(debrief.days), "deployment to %s" % debrief.zone_name)
 	debrief["day"] = Economy.day()
+	SessionLog.note(debrief_log_line(debrief, report))
 	_commit()
 	_save()
 	debrief_ready.emit(debrief)
 	return debrief
+
+
+## The session log's line for a debrief: each contract's outcome, pay and clawback, fines, and
+## the losses ("debrief: Harbour Yard: Hold the Line done, paid $12000; fines $0; out: Gunny,
+## Player 1; casualties: Reaper kia").
+static func debrief_log_line(debrief: Dictionary, report: Dictionary) -> String:
+	var lines := PackedStringArray()
+	for line: Dictionary in debrief.get("contracts", []):
+		var text := "%s %s, paid $%d" % [String(line.get("title", "?")), String(line.get("outcome", "?")), int(line.get("pay", 0))]
+		if int(line.get("clawback", 0)) > 0:
+			text += ", $%d advance clawed back" % int(line.clawback)
+		lines.append(text)
+	var losses := PackedStringArray()
+	for c: Dictionary in report.get("casualties", []):
+		losses.append("%s %s" % [String(c.get("name", "?")), String(c.get("status", "?"))])
+	return "debrief: %s: %s; fines $%d (%d civilians); %d days; out: %s; casualties: %s" % [String(debrief.get("zone_name", "?")),
+		"; ".join(lines) if not lines.is_empty() else "no contract", int(debrief.get("fines", 0)), int(debrief.get("civilians", 0)),
+		int(debrief.get("days", 0)), ", ".join(PackedStringArray(report.get("extracted", []))) if not (report.get("extracted", []) as Array).is_empty() else "nobody",
+		", ".join(losses) if not losses.is_empty() else "none"]
 
 
 ## Host: claims salvage pool entry `index` against the salvage budget. Returns whether it fit.

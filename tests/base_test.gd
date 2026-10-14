@@ -661,6 +661,15 @@ func _test_terminals(base: BaseLevel) -> void:
 		ui.open(p)
 		drawn = drawn and ui._pages[p].get_child_count() > 0
 	check(drawn, "every page draws (%s)" % ", ".join(PackedStringArray(BaseUI.PAGES)))
+	# No contract in prep (P0331): Deploy waits, and the host's deploy itself refuses (a deploy
+	# without one had no briefing, so no extraction and no way home).
+	ui.open("squad")
+	await get_tree().process_frame  # the page's old rows go
+	var deploy := ui._pages["squad"].find_child("Deploy", true, false) as Button
+	check(BaseHub.prep_contract().is_empty() and deploy != null and deploy.disabled and deploy.tooltip_text == "Prep a contract first",
+		"with no contract in prep, Deploy is off: \"%s\"" % (deploy.tooltip_text if deploy else "no Deploy button"))
+	check(BaseHub.server_deploy() == BaseHub.NO_CONTRACT and not RosterDeployment.is_running(BaseHub.roster()),
+		"and deploying without a contract is refused")
 	# The contract board over it (P0362): this screen steps aside, and the board keeps the mouse
 	# until it closes, then this screen is back with it.
 	ui.open("squad")
@@ -784,7 +793,7 @@ func _test_deployment(client: Dictionary) -> void:
 		BaseHub.server_pick(mid, true)
 	var wage_a := int(BaseHub.member(a).wage)
 	var day := BaseHub.day()
-	var why := BaseHub.server_deploy({"zone_id": ZONE + tag})
+	var why := BaseHub.server_deploy({"zone_id": ZONE + tag, "no_contract": true})
 	check(why == "" and RosterDeployment.is_running(BaseHub.roster()), "deploy starts the deployment")
 	await _wait_until(func() -> bool: return not CompoundLevel.current(self) is BaseLevel, 10.0)
 	level = CompoundLevel.current(self)
@@ -880,7 +889,7 @@ func _test_zone_deployment() -> void:
 		return
 	var squad: Array = Roster.available_ids(BaseHub.roster()).slice(0, 1)
 	var def := ZoneDef.get_def("test")
-	var why := BaseHub.server_deploy({"level": {"level": "zone", "def": def}, "zone_id": ZONE + "_wide" + tag, "squad": squad})
+	var why := BaseHub.server_deploy({"level": {"level": "zone", "def": def}, "zone_id": ZONE + "_wide" + tag, "squad": squad, "no_contract": true})
 	var moved := await _wait_until(func() -> bool: return CompoundLevel.current(self) is ZoneLevel, 20.0)
 	var zone := CompoundLevel.current(self) as ZoneLevel
 	check(why == "" and moved and zone != null and int(zone.def.get("seed", -1)) == int(def.seed) and zone.modules().size() == (def.modules as Array).size(),
@@ -939,6 +948,9 @@ func _test_contract_loop() -> void:
 	var stay: String = squad[0]
 	var lost: String = squad[1]
 	var day0 := Economy.day()
+	# The session log tells the night's story (S3, P0331 triage): a session of its own, in a
+	# scratch folder of this test's.
+	SessionLog.start(OS.get_user_data_dir().path_join("base_test_session_log" + tag))
 	var why := BaseHub.server_deploy()
 	var moved := await _wait_until(func() -> bool: return not CompoundLevel.current(self) is BaseLevel, 20.0)
 	level = CompoundLevel.current(self)
@@ -984,6 +996,7 @@ func _test_contract_loop() -> void:
 	var line: Dictionary = (debrief.get("contracts", [{}]) as Array)[0] if not (debrief.get("contracts", []) as Array).is_empty() else {}
 	check(home and String(line.get("cid", "")) == cid and line.get("outcome") == "completed", "extraction ends it once: the debrief (%s) and back at the base" % line.get("outcome", "none"))
 	Economy.week_paid.disconnect(on_week)
+	_check_story(cid, String(BaseHub.member(lost).callsign))
 	check(Economy.cash() == cash_before + int(debrief.totals.paid_now) - bills[0] and int(line.get("pay", 0)) > 0,
 		"the pay lands in the one bank (+$%s)" % DebriefCalc.money(debrief.totals.paid_now))
 	check(Economy.day() == day0 + int(debrief.days) and BaseHub.day() == Economy.day(), "the days pass once, on one clock (%d -> %d)" % [day0, Economy.day()])
@@ -1162,6 +1175,22 @@ func _seconds(s: float) -> void:
 
 ## The Escape menu's "Return to Base (revert)" (Captain, 2026-10-12): back to just before the
 ## deployment, as if it never happened.
+## The session log's lines for the contract loop (S3): deployment start and end, the contract
+## going live, extraction open, called and complete, and the debrief's pay and losses.
+func _check_story(cid: String, lost_callsign: String) -> void:
+	var story := Array(FileAccess.get_file_as_string(SessionLog.folder.path_join("session.log")).split("
+")).filter(
+		func(l: String) -> bool: return not "  [ok] " in l and not "  [FAIL] " in l)
+	var has := func(parts: Array) -> bool: return story.any(func(l: String) -> bool: return parts.all(func(p: String) -> bool: return p in l))
+	check(has.call(["deployment started: zone ", "[%s]" % cid, "squad "]), "the session log has the deployment's start: zone, contract and squad")
+	check(has.call(["deployment: briefing done, contract ", "[%s] is live" % cid]) and has.call(["extraction open: contract %s" % cid]),
+		"the contract going live and extraction opening")
+	check(has.call(["extraction called at "]) and has.call(["extraction complete at ", "Extracted: "]), "extraction called and complete")
+	check(has.call(["debrief: ", "paid $", "casualties: "]), "the debrief: pay and losses")
+	check(has.call(["deployment ended: zone ", "MIA %s" % lost_callsign]), "and the deployment's end: who's back, MIA and KIA")
+	SessionLog.finish()
+
+
 func _test_revert() -> void:
 	print("Return to Base (revert)")
 	level = CompoundLevel.current(self)
@@ -1171,7 +1200,7 @@ func _test_revert() -> void:
 	var cash_before := Economy.cash()
 	var day_before := BaseHub.day()
 	var squad: Array = Roster.available_ids(BaseHub.roster()).slice(0, 1)
-	var why := BaseHub.server_deploy({"level": {"level": "zone", "def": ZoneDef.get_def("test")}, "zone_id": ZONE + "_revert" + tag, "squad": squad})
+	var why := BaseHub.server_deploy({"level": {"level": "zone", "def": ZoneDef.get_def("test")}, "zone_id": ZONE + "_revert" + tag, "squad": squad, "no_contract": true})
 	var moved := await _wait_until(func() -> bool: return CompoundLevel.current(self) is ZoneLevel, 20.0)
 	check(why == "" and moved and RosterDeployment.is_running(BaseHub.roster()), "deployed into a zone")
 	Economy.spend(1234, "test: money spent out there")

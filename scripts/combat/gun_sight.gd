@@ -1,0 +1,304 @@
+class_name GunSight
+extends Control
+## The local player's sight picture (Captain, P0362: "No scope/sights"), drawn over the view
+## while aiming. What it shows is the optic mounted on the weapon in hand (Optics: an item in
+## the gun's state), or the gun's irons with none:
+## - irons: the view model's own sights line up on the eye (VoxelArt.sight_point,
+##   PlayerInput.ads_view): a pistol's post and notch, a rifle's back-up aperture and post.
+## - an open optic ("view": "open"): you look through it and its lit reticle sits in the
+##   middle: a red dot ("dot", dot_moa across) or a holographic ring and dot ("holo"). A
+##   holographic sight's flip-up magnifier ("magnifier", its power) flips up on zoom in and
+##   down on zoom out (zoom_step), and while it's up you look through its glass.
+## - a tube optic ("view": "tube": LPVO, prism, DMR scopes): once zoomed in you're behind the
+##   glass: the view model goes and the scope picture is drawn, black outside the eyepiece
+##   ring ("ring", a share of the screen's height) with the optic's reticle: "lpvo" (lit
+##   centre dot, crosshair with mil hashes, heavy posts), "chevron" (a lit chevron and its BDC
+##   holds, "bdc") or "mil_dot".
+## Power (Captain, 2026-10-13) is against the player's own unaimed view: 10x makes things ten
+## times bigger than the base field of view shows them (its tangent over 10: about 9.5 degrees
+## at the default 80), the same rule for every magnified optic; at 1x the weapon's ads_fov.
+## A variable optic steps through its powers on zoom in and out (the side mouse buttons by
+## default, Controls.BUTTONS; zoom_step) from its "magnification_start". Mils
+## and MOA are worked out from the field of view actually shown, so every reticle reads true
+## at any power (a 1.8 m man at 300 m is 6 mils tall). The heavy posts start POST_SHARE of the
+## way out to the ring, and the fine cross between carries mil marks a mil apart, or 2, 5, 10
+## or 20 where that would crowd them (mark_step). Launchers draw their own
+## (LauncherSight). One per local player, on the HUD.
+
+## How far a tube optic must have zoomed in (camera fov within this factor of its aimed fov at
+## its lowest power) before you are behind the glass.
+const SCOPE_IN := 1.35
+## One zoom step of a variable optic (x or / this).
+const ZOOM_STEP := 1.25
+## The eyepiece ring when an optic names none, and a magnifier's.
+const RING := 0.46
+const MAGNIFIER_RING := 0.4
+## Mil marks on the fine cross, out to the heavy posts (POST_SHARE of the ring): the finest
+## spacing of MARK_STEPS (mils) that keeps them MIN_MARK_PX apart and at most MAX_MARKS each
+## way; every fifth mark is bigger.
+const POST_SHARE := 0.4
+const MARK_STEPS := [1.0, 2.0, 5.0, 10.0, 20.0]
+const MIN_MARK_PX := 6.0
+const MAX_MARKS := 16
+const DOT_SIZE_MILS := 0.25
+## Lit reticles: drawn at least LIT_MIN_PX across.
+const LIT_MIN_PX := 3.0
+const INK := Color(0.02, 0.02, 0.02, 0.95)
+const LIT := Color(1.0, 0.12, 0.08, 0.95)
+const LIT_GLOW := Color(1.0, 0.2, 0.1, 0.25)
+## A man's shoulders (m): a BDC hold's stadia line is this wide at its range.
+const SHOULDERS_M := 0.48
+const MOA_PER_MIL := 3.4377
+
+var body: Soldier
+var _drawn := false
+## A variable optic's power, per optic id (kept while you switch away and back).
+var _zoom := {}
+## Flip-up magnifiers that are in, per optic id.
+var _magnified := {}
+
+
+func _init(s: Soldier) -> void:
+	body = s
+	name = "GunSight"
+	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+
+
+## The optic on `s`'s weapon in hand (null: irons, or not a gun).
+static func optic_of(s: Soldier) -> ItemData:
+	var weapon := s.active_weapon()
+	if weapon == null or weapon.type != "weapon" or Launchers.is_launcher(weapon):
+		return null
+	return Optics.mounted(weapon, s.inventory.state_of(s.active_slot))
+
+
+## "iron", or the optic's view: "open" or "tube".
+static func view_of(optic: ItemData) -> String:
+	return String(optic.stats.get("view", "open")) if optic else "iron"
+
+
+## An optic's powers: (lowest, highest); both "magnification" for a fixed one (1: none).
+static func zoom_range(optic: ItemData) -> Vector2:
+	if optic == null:
+		return Vector2.ONE
+	var low := maxf(float(optic.stats.get("magnification", 1.0)), 1.0)
+	return Vector2(low, maxf(float(optic.stats.get("magnification_max", low)), low))
+
+
+## The local player's sight (null for anyone else).
+static func of(s: Soldier) -> GunSight:
+	var hud: Node = s.player_input.hud if s and s.player_input else null
+	return hud.get_node_or_null(^"GunSight") as GunSight if hud else null
+
+
+## True while `optic`'s flip-up magnifier is in (for `s`, the local player).
+static func magnified(s: Soldier, optic: ItemData) -> bool:
+	var sight := of(s)
+	return optic != null and optic.stats.has("magnifier") and sight != null and bool(sight._magnified.get(optic.id, false))
+
+
+## The power `s` sees through `optic` at: its magnifier's while that's in, else what they
+## last zoomed it to (else its "magnification_start", else its lowest).
+static func power(s: Soldier, optic: ItemData) -> float:
+	if optic == null:
+		return 1.0
+	if magnified(s, optic):
+		return float(optic.stats.magnifier)
+	var zr := zoom_range(optic)
+	var sight := of(s)
+	var start := float(optic.stats.get("magnification_start", zr.x))
+	return clampf(float(sight._zoom.get(optic.id, start)) if sight else start, zr.x, zr.y)
+
+
+## The camera's (vertical) field of view aimed with `weapon` at power `mag`, from the unaimed
+## `base_fov`: the view's tangent over the power (no wider than the weapon's ads_fov).
+static func aimed_fov(weapon: ItemData, base_fov: float, mag := 1.0) -> float:
+	var ads := float(weapon.stats.get("ads_fov", 55)) if weapon else base_fov
+	if mag <= 1.0:
+		return ads
+	return minf(ads, rad_to_deg(2.0 * atan(tan(deg_to_rad(base_fov * 0.5)) / mag)))
+
+
+## `s`'s aimed field of view with `weapon` right now (their optic's power).
+static func aimed_fov_of(s: Soldier, weapon: ItemData, base_fov: float) -> float:
+	return aimed_fov(weapon, base_fov, power(s, optic_of(s)))
+
+
+## True while `s` is aimed through glass: a tube optic, or a magnifier that's in, zoomed in
+## far enough (SCOPE_IN) to be behind it.
+static func scoped(s: Soldier) -> bool:
+	if not s.is_aiming:
+		return false
+	var optic := optic_of(s)
+	var magnifier := magnified(s, optic)
+	if view_of(optic) != "tube" and not magnifier:
+		return false
+	var lowest := float(optic.stats.magnifier) if magnifier else zoom_range(optic).x
+	return s.camera.fov <= aimed_fov(s.active_weapon(), GameSettings.fov(), lowest) * SCOPE_IN
+
+
+## Zoom in (`steps` > 0) or out on the optic in hand: a magnifier flips up on zoom in and down
+## on zoom out; a variable optic steps a ZOOM_STEP each, within its range. Returns what to show
+## ("LPVO 1-6x: 2.4x", "Magnifier up"), or "" when nothing changed.
+static func zoom_step(s: Soldier, steps: int) -> String:
+	var sight := of(s)
+	var optic := optic_of(s)
+	if sight == null or optic == null or steps == 0:
+		return ""
+	if optic.stats.has("magnifier"):
+		var up := steps > 0
+		if up == magnified(s, optic):
+			return ""
+		sight._magnified[optic.id] = up
+		return "Magnifier up (%dx)" % roundi(float(optic.stats.magnifier)) if up else "Magnifier down"
+	var zr := zoom_range(optic)
+	if zr.y <= zr.x:
+		return ""
+	var was := power(s, optic)
+	sight._zoom[optic.id] = clampf(was * pow(ZOOM_STEP, steps), zr.x, zr.y)
+	var now := power(s, optic)
+	return "%s: %.1fx" % [optic.name, now] if not is_equal_approx(now, was) else ""
+
+
+## Mouse turn scale for the zoom (P0362: sensitivity follows the magnification): behind glass,
+## how much the view's tangent has shrunk from the weapon's plain aimed view (the settings'
+## aim sensitivity covers that); 1 otherwise.
+static func zoom_turn(s: Soldier) -> float:
+	if not scoped(s):
+		return 1.0
+	var ads := aimed_fov(s.active_weapon(), GameSettings.fov())
+	return minf(tan(deg_to_rad(s.camera.fov * 0.5)) / tan(deg_to_rad(ads * 0.5)), 1.0)
+
+
+## Pixels per mil at camera field of view `fov` on a screen `height` pixels tall.
+static func px_per_mil(fov: float, height: float) -> float:
+	return 0.001 / tan(deg_to_rad(fov * 0.5)) * height * 0.5
+
+
+## The spacing (mils) of mil marks at `px` pixels a mil out to `reach` pixels: the finest of
+## MARK_STEPS that keeps them MIN_MARK_PX apart and no more than MAX_MARKS.
+static func mark_step(px: float, reach := 0.0) -> float:
+	for step: float in MARK_STEPS:
+		if step * px >= MIN_MARK_PX and (reach <= 0.0 or reach / (step * px) <= MAX_MARKS):
+			return step
+	return MARK_STEPS[-1]
+
+
+func _active() -> bool:
+	var weapon := body.active_weapon()
+	return body.is_aiming and weapon != null and weapon.type == "weapon" and not Launchers.is_launcher(weapon) \
+		and not is_instance_valid(body.vehicle)
+
+
+func _process(_delta: float) -> void:
+	var on := _active()
+	if on or _drawn:
+		queue_redraw()
+	_drawn = on
+
+
+func _draw() -> void:
+	if not _active():
+		return
+	var optic := optic_of(body)
+	if optic == null:
+		return  # irons: the view model's own
+	var size := get_viewport_rect().size
+	var centre := size * 0.5
+	var px := px_per_mil(body.camera.fov, size.y)
+	var reticle := String(optic.stats.get("reticle", "dot"))
+	if scoped(body):
+		var magnifier := magnified(body, optic)
+		var ring := size.y * (MAGNIFIER_RING if magnifier else float(optic.stats.get("ring", RING)))
+		_draw_ring(size, centre, ring)
+		match reticle:
+			"lpvo": _draw_lpvo(centre, ring, px)
+			"chevron": _draw_chevron(centre, ring, px, optic.stats.get("bdc", []))
+			"mil_dot": _draw_scale(centre, ring, px, true)
+			_: _draw_lit(centre, px, optic)  # a magnified red dot or holographic reticle
+	elif view_of(optic) == "open":
+		_draw_lit(centre, px, optic)
+
+
+## Black beyond the eyepiece ring (`ring` pixels across the middle): the screen's edges, then
+## a thick circle out to the corners.
+func _draw_ring(size: Vector2, centre: Vector2, ring: float) -> void:
+	var reach := centre.length() + 2.0
+	var band := reach - ring
+	draw_arc(centre, ring + band * 0.5, 0.0, TAU, 128, Color.BLACK, band + 2.0, true)
+	draw_arc(centre, ring, 0.0, TAU, 128, Color(0.1, 0.1, 0.1), maxf(size.y * 0.006, 3.0), true)
+
+
+## A lit dot (dot_moa across), and a holographic sight's ring (ring_moa) around it.
+func _draw_lit(centre: Vector2, px: float, optic: ItemData) -> void:
+	var moa := px / MOA_PER_MIL
+	var r := maxf(float(optic.stats.get("dot_moa", 2.0)) * moa, LIT_MIN_PX) * 0.5
+	draw_circle(centre, r * 2.0, LIT_GLOW)
+	draw_circle(centre, r, LIT)
+	if optic.stats.has("ring_moa"):
+		var ring := float(optic.stats.ring_moa) * moa * 0.5
+		draw_arc(centre, ring, 0.0, TAU, 96, LIT_GLOW, maxf(r * 2.4, 2.0), true)
+		draw_arc(centre, ring, 0.0, TAU, 96, LIT, maxf(r * 1.2, 1.0), true)
+
+
+## Thin cross with mil marks (mark_step) out to the heavy posts, which run from POST_SHARE of
+## the ring out to it; `dots`: round mil dots, else short hashes.
+func _draw_scale(centre: Vector2, ring: float, px: float, dots: bool) -> void:
+	var height := get_viewport_rect().size.y
+	var thin := maxf(height * 0.0012, 1.0)
+	var heavy := maxf(height * 0.006, 3.0)
+	var post := ring * POST_SHARE
+	var step := mark_step(px, post)
+	draw_line(centre + Vector2(-post, 0), centre + Vector2(post, 0), INK, thin, true)
+	draw_line(centre + Vector2(0, -post), centre + Vector2(0, post), INK, thin, true)
+	for dir: Vector2 in [Vector2.LEFT, Vector2.RIGHT, Vector2.UP, Vector2.DOWN]:
+		draw_line(centre + dir * post, centre + dir * ring, INK, heavy)
+		var k := 1
+		while k * step * px < post - 2.0:
+			var at := centre + dir * k * step * px
+			var big := 1.6 if k % 5 == 0 else 1.0
+			if dots:
+				draw_circle(at, maxf(px * DOT_SIZE_MILS * 0.5, 1.5) * big, INK)
+			else:
+				var across := Vector2(dir.y, dir.x) * maxf(px * 0.3, 3.0) * big
+				draw_line(at - across, at + across, INK, thin, true)
+			k += 1
+
+
+## An LPVO: a lit centre dot (usable at 1x) on a hashed cross with heavy posts.
+func _draw_lpvo(centre: Vector2, ring: float, px: float) -> void:
+	_draw_scale(centre, ring, px, false)
+	var r := maxf(0.5 * px, LIT_MIN_PX * 1.3) * 0.5
+	draw_circle(centre, r * 2.0, LIT_GLOW)
+	draw_circle(centre, r, LIT)
+
+
+## A prism's lit chevron (its tip the aim point) on a thin post, with its BDC holds below:
+## each `bdc` entry [range m, mils below] a line as wide as a man's shoulders at that range,
+## its hundreds of metres beside it; heavy side posts out to the ring.
+func _draw_chevron(centre: Vector2, ring: float, px: float, bdc: Array) -> void:
+	var height := get_viewport_rect().size.y
+	var w := maxf(px * 0.75, height * 0.007)  # the chevron's half-width
+	var line := maxf(px * 0.2, height * 0.0015)
+	for c: Color in [LIT_GLOW, LIT]:
+		var t := line * (2.2 if c == LIT_GLOW else 1.0)
+		draw_line(centre, centre + Vector2(-w, w), c, t, true)
+		draw_line(centre, centre + Vector2(w, w), c, t, true)
+	var lowest := centre.y + w
+	var font := get_theme_default_font()
+	for hold: Array in bdc:
+		# True to its mils: one that would sit under the chevron or crowd the one above (at low
+		# power, against a wide base view) is left out.
+		var y := centre.y + float(hold[1]) * px
+		if y > centre.y + ring - 4.0 or y < lowest + 12.0:
+			continue
+		var half := SHOULDERS_M / float(hold[0]) * 1000.0 * px * 0.5
+		draw_line(Vector2(centre.x - half, y), Vector2(centre.x + half, y), INK, maxf(line * 0.6, 1.0), true)
+		if font:
+			draw_string(font, Vector2(centre.x + half + 4.0, y + 4.0), str(roundi(float(hold[0]) / 100.0)), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, INK)
+		lowest = y
+	draw_line(Vector2(centre.x, centre.y + line), Vector2(centre.x, lowest), INK, maxf(line * 0.6, 1.0), true)
+	var heavy := maxf(height * 0.006, 3.0)
+	for dir: Vector2 in [Vector2.LEFT, Vector2.RIGHT]:
+		draw_line(centre + dir * ring * 0.55, centre + dir * ring, INK, heavy)

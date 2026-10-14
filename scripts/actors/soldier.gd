@@ -24,8 +24,34 @@ const MAX_PITCH := 1.45
 const FREE_LOAD_KG := 15.0
 const MAX_LOAD_KG := 60.0
 const MIN_LOAD_MULT := 0.55
-## Aimed spread is this fraction of hip-fire spread; moving and jumping widen it.
+## The AI's cone (ai_spread_direction): aimed, it is this fraction of the weapon's
+## "ai_spread_deg"; moving and jumping widen it (the AI's accuracy as it was before P0362).
 const ADS_SPREAD_MULT := 0.12
+## A player's shots (_spread_direction, Captain, P0362: "the spread is bad for the ranges and
+## unrealistic"): the weapon's own "spread_deg" is its mechanical cone (about 1-2 MOA for a
+## rifle), and the shooter adds the rest, in degrees of half-angle: from the hip, aimed (the
+## trigger press; sway is seen, not random: aim_sway), at walking pace and faster (up to 1.5x
+## walk), in the air, and per unit of recoil heat (recent shots, x the weapon's recoil_deg).
+## Stance, a rested weapon, the settle after a stop and wounds scale the shooter's part only.
+const SHOOTER_HIP_DEG := 2.0
+const SHOOTER_AIMED_DEG := 0.01
+const SHOOTER_MOVE_AIMED_DEG := 0.8
+const SHOOTER_MOVE_HIP_DEG := 1.5
+const SHOOTER_AIR_DEG := 3.0
+const SHOOTER_HEAT_DEG := 0.25
+## Recoil heat: +1 a shot, falling off this fast (per second, exponential): gone in about a
+## second, so deliberate aimed shots stay tight and auto fire blooms.
+const RECOIL_HEAT_DECAY := 4.0
+## Recoil (Captain, P0362): the view kicks up by the full kick and this share of it settles
+## back (PlayerInput._settle_recoil), so follow-up shots and auto fire climb by the rest.
+const RECOIL_SETTLE := 0.6
+## Weapon sway when aimed (aim_sway): a slow drift of the aim point, degrees at its widest,
+## standing still and fresh; stance and a rest scale it (SoldierMovement.spread_mult), moving
+## adds up to SWAY_MOVE_MULT x walk pace more, an empty stamina bar SWAY_TIRED_MULT more, and
+## wounds (Vitals.sway_mult).
+const SWAY_DEG := 0.06
+const SWAY_MOVE_MULT := 3.0
+const SWAY_TIRED_MULT := 1.5
 const BULKY_SPEED_MULT := 0.7
 const ITEM_MASK := 1 << 2
 ## Camo variants for players, picked from the peer id so every peer agrees.
@@ -75,6 +101,11 @@ var _hud: Hud:
 	get:
 		return player_input.hud if player_input else null
 var _next_shot := 0.0         # owner-side fire-rate gate
+## Recoil heat (shots, decaying at RECOIL_HEAT_DECAY) as of _heat_at; the player's, owner side.
+var recoil_heat := 0.0
+var _heat_at := 0.0
+## View pitch (radians) still to settle back after recoil (PlayerInput._settle_recoil).
+var recoil_return := 0.0
 var _busy_until := 0.0        # owner-side: reloading or using a medkit
 var _server_next_shot := 0.0  # host-side check
 var _server_busy_until := 0.0
@@ -510,10 +541,66 @@ func release_carried() -> void:
 	_set_carry_mode(&"")
 
 
-## Shot direction inside the weapon's cone. Spread is computed on the shooter's machine
-## (co-op: the host trusts it) and widens when moving or airborne.
+## The AI's weapon cone in degrees: "ai_spread_deg", else "spread_deg".
+static func ai_spread_deg(weapon: ItemData) -> float:
+	return float(weapon.stats.get("ai_spread_deg", weapon.stats.get("spread_deg", 1.0)))
+
+
+## A player's shot direction (Captain, P0362), worked out on the shooter's machine (co-op: the
+## host trusts it): inside the half-angle spread_deg_now(), uniform over the cone's disc.
 func _spread_direction(weapon: ItemData) -> Vector3:
-	var spread := deg_to_rad(float(weapon.stats.get("spread_deg", 1.0)))
+	var spread := deg_to_rad(spread_deg_now(weapon))
+	var forward := -camera.global_basis.z
+	var angle := randf() * TAU
+	var amount := sqrt(randf()) * spread
+	var offset := camera.global_basis.x * cos(angle) + camera.global_basis.y * sin(angle)
+	return (forward + offset * tan(amount)).normalized()
+
+
+## A player's cone right now, degrees of half-angle: the weapon's mechanical spread_deg plus
+## the shooter's part (SHOOTER_*): hip or aimed, moving, airborne and recoil heat, scaled by
+## stance, a rest, the settle after a stop and wounds.
+func spread_deg_now(weapon: ItemData) -> float:
+	var shooter := SHOOTER_AIMED_DEG if is_aiming else SHOOTER_HIP_DEG
+	var horizontal := Vector2(velocity.x, velocity.z).length()
+	shooter += (SHOOTER_MOVE_AIMED_DEG if is_aiming else SHOOTER_MOVE_HIP_DEG) * clampf(horizontal / SoldierMovement.WALK_SPEED, 0.0, 1.5)
+	shooter += heat_now() * float(weapon.stats.get("recoil_deg", 0.6)) * SHOOTER_HEAT_DEG
+	if not is_on_floor():
+		shooter += SHOOTER_AIR_DEG
+	else:
+		shooter *= movement.spread_mult()  # stance, mounted weapon, settle after a stop
+	shooter *= vitals.sway_mult(weapon.tags.has("rifle"))  # wounds, blood loss and pain (a broken collarbone: rifles only)
+	return float(weapon.stats.get("spread_deg", 0.05)) + shooter
+
+
+## Recoil heat now (shots, decayed since the last one).
+func heat_now() -> float:
+	return recoil_heat * exp(-RECOIL_HEAT_DECAY * maxf(_now() - _heat_at, 0.0))
+
+
+## Aimed weapon sway (Captain, P0362): how far the aim point drifts, degrees at its widest
+## (SWAY_*). None from the hip: the hip cone is wide enough.
+func aim_sway_deg(weapon: ItemData) -> float:
+	if not is_aiming or weapon == null:
+		return 0.0
+	var moving := clampf(Vector2(velocity.x, velocity.z).length() / SoldierMovement.WALK_SPEED, 0.0, 1.5)
+	var tired := 1.0 - clampf(movement.stamina, 0.0, 1.0)
+	return SWAY_DEG * movement.spread_mult() * (1.0 + SWAY_MOVE_MULT * moving) * (1.0 + SWAY_TIRED_MULT * tired) \
+		* vitals.sway_mult(weapon.tags.has("rifle"))
+
+
+## The sway's offset (pitch, yaw in radians) at time `t` seconds: a slow, wandering figure of
+## eight, at most aim_sway_deg() across.
+func aim_sway(weapon: ItemData, t: float) -> Vector2:
+	var amp := deg_to_rad(aim_sway_deg(weapon))
+	return Vector2(sin(t * 1.3) * 0.8 + sin(t * 0.55 + 1.7) * 0.2, sin(t * 0.7 + 0.4) * 0.8 + sin(t * 1.9) * 0.2) * amp
+
+
+## The AI's shot direction (SquadAI._shoot): the weapon's "ai_spread_deg" cone, tighter aimed,
+## wider moving or airborne: the numbers the AI used before the player's spread was made
+## realistic (Captain, P0362), so its accuracy is unchanged (its aim error comes on top).
+func ai_spread_direction(weapon: ItemData) -> Vector3:
+	var spread := deg_to_rad(ai_spread_deg(weapon))
 	if is_aiming:
 		spread *= ADS_SPREAD_MULT
 	var horizontal := Vector2(velocity.x, velocity.z).length()
@@ -543,12 +630,16 @@ func view_yaw() -> float:
 	return PI if carry_mode == DRAG else 0.0
 
 
-## Recoil: the view kicks up and a little sideways; aiming halves it.
+## Recoil: the view kicks up and a little sideways; aiming halves it. RECOIL_SETTLE of the
+## climb settles back (PlayerInput._settle_recoil), and the shot adds recoil heat (P0362).
 func _kick(weapon: ItemData) -> void:
 	var kick := deg_to_rad(float(weapon.stats.get("recoil_deg", 0.6))) * (0.5 if is_aiming else 1.0)
 	kick *= movement.recoil_mult()  # stance and mounted weapon
 	set_pitch(head.rotation.x + kick)
 	rotate_y(randf_range(-0.35, 0.35) * kick)
+	recoil_return += kick * RECOIL_SETTLE
+	recoil_heat = heat_now() + 1.0
+	_heat_at = _now()
 
 
 ## How long reloading `weapon` takes this body: the weapon's time, slowed by wounds
@@ -909,6 +1000,17 @@ func _server_inventory_action(action: String, container: StringName, index: int,
 			var problem := inventory.roll_problem(container, index, rolled)
 			if problem != "" or not inventory.set_rolled(container, index, rolled):
 				_client_message.rpc_id(owner_peer(), problem if problem != "" else "Can't do that")
+		# Optics (P0362): the optic entry at `container`/`index` onto the weapon in `slot` (the
+		# one it had goes into your containers), or the weapon in `slot`'s optic off (into
+		# `target` if named).
+		"mount_optic":
+			var problem := Optics.server_mount(inventory, container, index, slot)
+			if problem != "":
+				_client_message.rpc_id(owner_peer(), problem)
+		"remove_optic":
+			var problem := Optics.server_remove(inventory, slot, target)
+			if problem != "":
+				_client_message.rpc_id(owner_peer(), problem)
 		# MOLLE: `target` (attach) and `slot` (detach, move, drop) name attach points of the
 		# worn carrier; a pouch's contents go with it.
 		"attach":
@@ -1638,7 +1740,10 @@ func _on_died() -> void:
 	else:
 		for kit: Array in DEFAULT_KIT:
 			inventory.take(kit[0], kit[1])
-	_client_respawn.rpc_id(owner_peer(), level.next_spawn_point())
+	var spawn := level.next_spawn_point()
+	SessionLog.note("%s respawns at (%.0f, %.0f) in %s; the body and its gear stay where they fell" % [log_name(), spawn.x, spawn.z,
+		"their role's kit" if CompoundLevel.player_role_kits and role != &"" else "the default kit"])
+	_client_respawn.rpc_id(owner_peer(), spawn)
 
 
 ## Host only. Leaves this player's body where it lies as a dead body node

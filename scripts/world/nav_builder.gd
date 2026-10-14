@@ -31,12 +31,17 @@ const GROUND_HALF := 80.0
 const AGENT_RADIUS := 0.25
 const AGENT_HEIGHT := 1.75
 const AGENT_MAX_CLIMB := 0.25
+## Rebakes waiting their turn (held, or waiting for voxels) start at most this long a frame (at
+## least one): gathering a chunk's geometry runs on the main thread.
+const REBAKE_BUDGET_MS := 4.0
 
 var level: CompoundLevel
 var _regions := {}   # Vector2i -> NavigationRegion3D
 var _baking := {}    # Vector2i -> true while a background rebake runs
 var _again := {}     # Vector2i -> true: breached again during its rebake
 var _waiting := {}   # Vector2i -> true: voxels not loaded yet, rebake when they are
+var _holds := 0      # hold() calls not yet released
+var _held := {}      # Vector2i -> true: rebakes asked for while held, done once on release
 
 
 ## Host only. Bakes the compound's navigation from the structures' boxes and keeps it up to
@@ -68,9 +73,30 @@ static func chunk_aabb(chunk: Vector2i) -> AABB:
 		Vector3(CHUNK_M, AREA.size.y, CHUNK_M))
 
 
-## True while any chunk is waiting for or running a background rebake.
+## True while any chunk is waiting for, held back from or running a background rebake.
 func is_rebaking() -> bool:
-	return not _baking.is_empty() or not _waiting.is_empty()
+	return not _baking.is_empty() or not _waiting.is_empty() or not _held.is_empty()
+
+
+## Holds rebakes back during a burst of changes (PeopleLayer bringing a zone's people out over
+## several frames): every chunk asked for meanwhile, however often, is rebaked once after the
+## last release(), a few a frame (REBAKE_BUDGET_MS). Captain P0362: 5 rebakes in the deploy hitch.
+func hold() -> void:
+	_holds += 1
+
+
+func release() -> void:
+	_holds = maxi(_holds - 1, 0)
+	if _holds > 0 or _held.is_empty():
+		return
+	for chunk: Vector2i in _held:
+		_waiting[chunk] = true
+	_held.clear()
+	set_process(true)
+
+
+func is_held() -> bool:
+	return _holds > 0
 
 
 ## The region of one chunk (null outside the grid).
@@ -93,14 +119,21 @@ func rebake_area(area_m: AABB, world: VoxelWorld = null) -> void:
 
 
 func _process(_delta: float) -> void:
+	var until := Time.get_ticks_usec() + int(REBAKE_BUDGET_MS * 1000.0)
 	for chunk: Vector2i in _waiting.keys():
+		if Time.get_ticks_usec() >= until:
+			break
 		_waiting.erase(chunk)
-		_request_rebake(chunk)
+		if _regions.has(chunk):
+			_request_rebake(chunk)
 	if _waiting.is_empty():
 		set_process(false)
 
 
 func _request_rebake(chunk: Vector2i) -> void:
+	if _holds > 0:
+		_held[chunk] = true  # done once on release()
+		return
 	if _baking.has(chunk):
 		_again[chunk] = true  # the bake running now may have read the voxels too early
 		return
@@ -158,8 +191,18 @@ func _bake_from_boxes() -> void:
 
 ## A chunk's geometry from the voxels as they are now, or null if they aren't loaded.
 func _voxel_source(chunk: Vector2i) -> NavigationMeshSourceGeometryData3D:
+	var bounds := _bounds_of(chunk)
+	if not _structures_readable(bounds):
+		return null  # checked first: a chunk waiting on a module still stamping retries every frame
 	var source := _ground_source(chunk)
-	return source if _add_structures(source, _bounds_of(chunk)) else null
+	return source if _add_structures(source, bounds) else null
+
+
+## Whether the structures inside `bounds` (world space) can be read now (_add_structures).
+func _structures_readable(bounds: AABB) -> bool:
+	var world := level.voxel_world
+	var local := world.global_transform.affine_inverse() * bounds
+	return world.is_area_readable(AABB(local.position / VoxelWorld.VOXEL_SIZE, local.size / VoxelWorld.VOXEL_SIZE))
 
 
 ## Adds the structures inside `bounds` (world space) to `source`: the compound's voxels as they

@@ -285,7 +285,7 @@ a release:
 ## Known gaps (next up)
 
 - Shots are hitscan, with no bullet drop or travel time. Spread is decided by the shooter's machine (fine for co-op, not cheat-proof).
-- Every inventory change, including each shot fired, re-sends the whole inventory snapshot. That's fine on a LAN; it needs a lighter path (for example, ammo only) before internet play.
+- A round fired now sends only the loaded-round counts (about 24 bytes, `Inventory.net_ammo`); the whole inventory snapshot goes out only when gear really changes. The biggest share of co-op traffic is now each soldier's whole `Vitals.net_state` (about 1.4 to 1.8 KB, re-sent on every change: 35 to 80 KB/s per client in a firefight, `tools/net_load.sh`); it needs the same treatment before internet play.
 - Reloading and healing can't be cancelled, and taking damage doesn't interrupt them.
 - A vest or backpack can't be dropped while it still has things in its own pockets (its MOLLE pouches and their contents go with it). Empty it from the inventory screen first.
 - The mission loop (wave 4A) isn't wired end to end yet: the contract board, the campaign base, the test contract with briefing and extraction, and the test zone each start from their own main-menu entry. The contract board still deploys into the compound, not a zone. Mission types are placeholders. Zones have placeholder modules, plain box stand-ins at distance, no roads, vegetation or terrain textures, and rendering cost hasn't been measured with a display. AI navigation bakes near players and fighting AI only, so a long move order is walked in steps.

@@ -23,9 +23,10 @@ extends RigidBody3D
 ## Seats: whoever sits rides with the vehicle on every peer (_place_occupants): at the seat,
 ## crouched for a seat, standing for a gunner's hatch or a pickup bed, hidden inside an enclosed
 ## vehicle, with their hitboxes (so a round that gets through the hull finds them). A player's
-## view is their own head at the seat. Getting in, out, switching seats and loading bodies go
+## first-person view is their own head at the seat. Getting in, out, switching seats and loading bodies go
 ## through the Left Ctrl menu (VehicleActionPoint); AI squadmates are ordered in and out from the
-## command menu (VehicleLayer.server_order_mount).
+## command menu (VehicleLayer.server_order_mount). A seated player sees out through the chase
+## camera (VehicleCamera: third person, B switches to first person at the seat's eye).
 ##
 ## Damage: server_take_hit (Ballistics' rounds; V2's launchers) finds the 5 cm voxel the hit
 ## really meets, its hit zone and armour (VehicleDamage), wears the zone and the hull, carves the
@@ -34,6 +35,16 @@ extends RigidBody3D
 ## burning vehicle burns FIRE_S, hurting everyone still aboard (the wound model's burns), then
 ## kills them, destroys its cargo and is a wreck: blackened, immobile, lootable for parts, saved
 ## with the zone (GameState.vehicles).
+##
+## The mounted gun: a turret or pintle that turns (VehicleTurret: the M-ATV's and MaxxPro's
+## O-GPK, the AAV-7's weapon station, a technical's DShK). The host owns where it points: the
+## gunner's peer sends where it wants it (request_aim; the local gunner's own peer turns it
+## ahead of the host, so their view never waits on the network), an AI gunner aims through
+## server_aim, and it turns there at the mount's speeds, within its limits. Its pose rides in
+## net_pose (every peer draws it interpolated, like the hull). The gunner's seat turns with the
+## ring; in first person the gunner's view is the gun's (the mouse turns the turret, the view
+## follows it), in the chase view the turret turns to the camera's crosshair. Rounds leave the
+## gun's muzzle along its barrel.
 ##
 ## Helicopters are this class with kind "helicopter": seats, cargo, damage and saving work; the
 ## ground drive does nothing for them. V3 flies them by overriding _drive_step (or a subclass).
@@ -261,6 +272,11 @@ var _spawn_xform := Transform3D.IDENTITY
 var _died_calls := {}        # host: occupant instance id -> its bound died callable
 var _bodies := {}            # host: instance ids of bodies loaded into seats (down or dead): they ride on if they die
 var _saved_bodies := {}      # host: seat index -> body uid from the zone save, seated again once the bodies are back
+## The mounted gun's turret, or null (VehicleTurret).
+var turret: VehicleTurret
+var _gun_seat := -1
+var _aim_send_left := 0.0
+var _aim_sent := Vector2(INF, INF)
 
 
 ## A new vehicle of `model` (VehicleArt.MODELS, with numbers in data/vehicles.json), ready
@@ -296,6 +312,9 @@ func setup(p_model: String, p_scheme := "", p_faction := &"player", id := "") ->
 		col.position = aabb.get_center()
 		add_child(col)
 	hull = VehicleHull.new(model, scheme)
+	turret = VehicleTurret.of(spec)
+	hull.turret = turret
+	_gun_seat = int((spec.get("gun", {}) as Dictionary).get("seat", -1)) if turret else -1
 	add_child(hull)
 	cargo_hold = VehicleCargo.new(float(spec.get("cargo_l", 0.0)), float(spec.get("cargo_kg", 0.0)))
 	add_child(cargo_hold)
@@ -508,12 +527,22 @@ func seat_transform(seat: String) -> Transform3D:
 		if index < 0:
 			index = _first_free_passenger()
 	index = clampi(index, 0, maxi(_seat_local.size() - 1, 0))
-	return global_transform * _seat_local[index] if not _seat_local.is_empty() else global_transform
+	return global_transform * _seat_at(index) if not _seat_local.is_empty() else global_transform
 
 
-## A seat's eye point in the world.
+## A seat's eye point in the world (the gunner's turns with the turret).
 func seat_eye_point(index: int) -> Vector3:
-	return global_transform * VehicleSpecs.vec(spec.seats[index].at)
+	var at := VehicleSpecs.vec(spec.seats[index].at)
+	return global_transform * (turret.carry(at) if index == _gun_seat else at)
+
+
+## Where seat `index` puts its occupant's body, in the vehicle's frame: the turret's seat goes
+## round with the ring.
+func _seat_at(index: int) -> Transform3D:
+	var t := _seat_local[index]
+	if index == _gun_seat:
+		t.origin = turret.carry(t.origin)
+	return t
 
 
 ## Health of a hit zone, 1 (whole) to 0 (wrecked).
@@ -731,6 +760,7 @@ func _release(s: Soldier) -> void:
 	remove_collision_exception_with(s)
 	if s.vehicle == self:
 		s.vehicle = null
+	s.remove_meta(&"turret_set")
 	s.model.visible = true
 	s.gear.visible = true
 	s.remove_meta(&"seat_veh_yaw")
@@ -766,7 +796,7 @@ func _on_occupant_died(s: Soldier) -> void:
 	if s.is_ai():
 		server_exit(s)
 		return
-	var seat_pos := (global_transform * _seat_local[index]).origin
+	var seat_pos := (global_transform * _seat_at(index)).origin
 	var spot := exit_spot(index, s)
 	_seat_nodes[index] = null
 	_bodies.erase(s.get_instance_id())
@@ -796,7 +826,7 @@ func _place_occupants() -> void:
 		if not _seen.has(s.get_instance_id()):
 			add_collision_exception_with(s)  # its capsule sits inside the hull: never pushes it
 		var seat_def: Dictionary = defs[i]
-		var t := global_transform * _seat_local[i]
+		var t := global_transform * _seat_at(i)
 		s.vehicle = self
 		s.global_position = t.origin
 		s.velocity = Vector3.ZERO
@@ -815,6 +845,8 @@ func _place_occupants() -> void:
 				rel = wrapf(s.rotation.y - float(s.get_meta(&"seat_veh_yaw")), -PI, PI)
 				if StringName(seat_def.kind) != GUNNER:
 					rel = clampf(rel, -2.2, 2.2)
+			if i == _gun_seat:
+				rel = _gunner_look(s, rel, veh_yaw)
 			s.rotation = Vector3(0, veh_yaw + rel, 0)
 			s.set_meta(&"seat_veh_yaw", veh_yaw)
 			var stance := Vehicle.seat_stance(String(seat_def.get("stance", "sit")))
@@ -838,7 +870,10 @@ func _physics_process(delta: float) -> void:
 		_server_step(delta)
 	else:
 		_client_follow()
+		_client_turret(delta)
 	_place_occupants()
+	if hull:
+		hull.pose_turret()
 
 
 func _process(delta: float) -> void:
@@ -846,6 +881,8 @@ func _process(delta: float) -> void:
 		_resolve_seats()
 		_client_follow()
 	_place_occupants()
+	if hull:
+		hull.pose_turret()
 	_local_controls(delta)
 	_update_fire_fx()
 
@@ -865,13 +902,16 @@ func _server_step(delta: float) -> void:
 	if burning_s > 0.0:
 		_fire_step(delta)
 	_job_step()
+	if turret and not wrecked:
+		turret.step(delta)
 	_pose_left -= delta
 	if _pose_left <= 0.0:
 		_pose_left = 1.0 / POSE_HZ
 		var p := global_position
 		var q := global_basis.get_rotation_quaternion()
 		var v := linear_velocity
-		net_pose = PackedFloat32Array([Soldier._now(), p.x, p.y, p.z, q.x, q.y, q.z, q.w, v.x, v.y, v.z])
+		net_pose = PackedFloat32Array([Soldier._now(), p.x, p.y, p.z, q.x, q.y, q.z, q.w, v.x, v.y, v.z,
+			turret.yaw if turret else 0.0, turret.pitch if turret else 0.0])
 	_state_left -= delta
 	if _state_dirty and _state_left <= 0.0:
 		_publish_state(true)
@@ -1161,7 +1201,8 @@ func _push_snapshot(pose: PackedFloat32Array) -> void:
 	_clock = offset if offset < _clock else lerpf(_clock, offset, 0.02)
 	if not _snaps.is_empty() and t <= float(_snaps[-1][0]):
 		return
-	_snaps.append([t, Vector3(pose[1], pose[2], pose[3]), Quaternion(pose[4], pose[5], pose[6], pose[7]).normalized(), Vector3(pose[8], pose[9], pose[10])])
+	_snaps.append([t, Vector3(pose[1], pose[2], pose[3]), Quaternion(pose[4], pose[5], pose[6], pose[7]).normalized(), Vector3(pose[8], pose[9], pose[10]),
+		Vector2(pose[11], pose[12]) if pose.size() >= 13 else Vector2.ZERO])
 	while _snaps.size() > 30:
 		_snaps.pop_front()
 
@@ -1172,15 +1213,18 @@ func _client_follow() -> void:
 	var render_t := Soldier._now() - _clock - INTERP_DELAY_S
 	var p: Vector3
 	var q: Quaternion
+	var aim: Vector2  # the turret's (yaw, pitch)
 	if render_t <= float(_snaps[0][0]):
 		p = _snaps[0][1]
 		q = _snaps[0][2]
+		aim = _snaps[0][4]
 	else:
 		var last: Array = _snaps[-1]
 		if render_t >= float(last[0]):
 			var ahead := minf(render_t - float(last[0]), EXTRAPOLATE_MAX_S)
 			p = (last[1] as Vector3) + (last[3] as Vector3) * ahead
 			q = last[2]
+			aim = last[4]
 		else:
 			for i in range(_snaps.size() - 1):
 				var a: Array = _snaps[i]
@@ -1189,8 +1233,30 @@ func _client_follow() -> void:
 					var w := (render_t - float(a[0])) / maxf(float(b[0]) - float(a[0]), 0.0001)
 					p = (a[1] as Vector3).lerp(b[1], w)
 					q = (a[2] as Quaternion).slerp(b[2], w)
+					var ya: Vector2 = a[4]
+					var yb: Vector2 = b[4]
+					aim = Vector2(lerp_angle(ya.x, yb.x, w), lerpf(ya.y, yb.y, w))
 					break
 	global_transform = Transform3D(Basis(q), p)
+	if turret and _local_gunner() == null:
+		turret.yaw = aim.x  # someone else's gun (or nobody's): as the host has it
+		turret.pitch = aim.y
+		turret.target_yaw = aim.x
+		turret.target_pitch = aim.y
+
+
+## Clients: the local gunner's own turret turns here at once (towards what they ask the host
+## for; the host turns its own the same way a moment later), and their aim goes to the host.
+func _client_turret(delta: float) -> void:
+	if turret == null or wrecked or _local_gunner() == null:
+		return
+	turret.step(delta)
+	_aim_send_left -= delta
+	var want := Vector2(turret.target_yaw, turret.target_pitch)
+	if want != _aim_sent or _aim_send_left <= 0.0:
+		_aim_sent = want
+		_aim_send_left = 0.1
+		request_aim.rpc_id(1, want.x, want.y)
 
 
 ## Clients: the replicated state applied (seats, wreck, fire).
@@ -1262,6 +1328,7 @@ func server_take_hit(hit: Dictionary) -> Dictionary:
 		dir = (global_transform * center_of_mass - pos).normalized() if not pos.is_equal_approx(global_position) else Vector3.DOWN
 	var local := to_local(pos)
 	var ldir := (global_basis.inverse() * dir.normalized()).normalized()
+	var on_part := false  # met the turret or its gun (they turn: no marks drawn on them)
 	if hit_kind == KINETIC or hit_kind in VehicleDamage.KINDS_HEAT:
 		# Rounds and jets meet the hull's voxels, not just its boxes: through an open pickup bed,
 		# over a door's window frame, past a turret's open back.
@@ -1272,6 +1339,7 @@ func server_take_hit(hit: Dictionary) -> Dictionary:
 			out.energy_left = float(hit.get("energy_j", 0.0))
 			return out
 		local = found.local
+		on_part = String(found.get("part", "")) != ""
 		out.position = to_global(local)
 	var zone := VehicleDamage.zone_at(spec, local)
 	var res := VehicleDamage.resolve(hit, zone, ldir)
@@ -1280,7 +1348,8 @@ func server_take_hit(hit: Dictionary) -> Dictionary:
 	out.stopped = res.stopped
 	out.energy_left = res.energy_left
 	out.lost_j = maxf(float(hit.get("energy_j", 0.0)) - float(res.energy_left), 0.0)
-	_carve_for(hit_kind, res, local, hit)
+	if not on_part:
+		_carve_for(hit_kind, res, local, hit)
 	if not wrecked:
 		_apply_damage(zone, res, out.position, hit)
 	damaged.emit(zone.zone, hit)
@@ -1801,6 +1870,90 @@ func gun_info() -> Dictionary:
 		"rounds": cargo_hold.feed_rounds(StringName(data.feed)) if cargo_hold else 0, "rpm": float(data.get("rpm", 600))}
 
 
+## Where the gun's rounds start (world): its muzzle ("gun" "at"), where the turret has it now.
+func gun_origin() -> Vector3:
+	if turret:
+		return global_transform * turret.muzzle_local()
+	return global_transform * VehicleSpecs.vec((spec.get("gun", {}) as Dictionary).get("at"), Vector3(0, 2, 0))
+
+
+## The way the gun's barrel points (world): along the turret's gun, or forward on a fixed gun.
+func barrel_direction() -> Vector3:
+	return (global_basis * (turret.barrel_local() if turret else Vector3.FORWARD)).normalized()
+
+
+## Host: points the turret towards `direction` (world), within its limits (an AI gunner; it
+## turns there at the mount's speeds).
+func server_aim(direction: Vector3) -> void:
+	if turret and direction.length_squared() > 0.000001:
+		turret.aim_local(global_basis.inverse() * direction)
+
+
+## Whether the barrel points within `within_deg` of `direction` (world); true on a fixed gun.
+func gun_on(direction: Vector3, within_deg := VehicleTurret.ON_TARGET_DEG) -> bool:
+	return turret == null or turret.on_target(global_basis.inverse() * direction, within_deg)
+
+
+## The gunner's peer: where it wants the turret (the vehicle's frame, radians).
+@rpc("any_peer", "call_remote", "unreliable_ordered")
+func request_aim(p_yaw: float, p_pitch: float) -> void:
+	var actor := _sender()
+	if multiplayer.is_server() and turret and actor and actor.vitals.is_up() and gunner() == actor and is_finite(p_yaw) and is_finite(p_pitch):
+		turret.aim(p_yaw, p_pitch)
+
+
+## The local player on this peer, if they man this vehicle's turret.
+func _local_gunner() -> Soldier:
+	if _gun_seat < 0:
+		return null
+	var s := occupant(_gun_seat)
+	return s if s and not s.is_ai() and s.is_local() else null
+
+
+## The turret's gunner turning it (every peer, for the body it drives; returns the body's turn
+## from the vehicle's heading). An AI gunner faces where the gun points (AavGunner aims it). A
+## player in first person: the mouse turns the turret, not the view (what the mouse turned since
+## last frame goes to where the turret's going) and the view is the gun's; in the chase view
+## the view is free and the turret turns to the camera's crosshair (gun_direction).
+func _gunner_look(s: Soldier, rel: float, veh_yaw: float) -> float:
+	if turret == null:
+		return rel
+	if s.is_ai():
+		return turret.yaw
+	if not s.is_local():
+		return rel
+	if VehicleCamera.chase:
+		var cam := VehicleCamera.of(s)
+		if cam and cam.active and s.vitals.is_up():
+			turret.aim_local(global_basis.inverse() * gun_direction(s))
+		s.remove_meta(&"turret_set")
+		return rel
+	# What we set last frame (turn, pitch, when): only a fresh one counts (not one left from an
+	# earlier turn at the gun, or from the chase view).
+	var was: Vector3 = s.get_meta(&"turret_set", Vector3(0, 0, -INF))
+	if s.vitals.is_up() and Soldier._now() - was.z < 0.25:
+		turret.aim(turret.target_yaw + wrapf(rel - was.x, -PI, PI), turret.target_pitch + (s.head.rotation.x - was.y))
+	var w := global_basis * turret.barrel_local()
+	var out := wrapf(atan2(-w.x, -w.z) - veh_yaw, -PI, PI)
+	s.set_pitch(asin(clampf(w.y, -1.0, 1.0)))
+	s.set_meta(&"turret_set", Vector3(out, s.head.rotation.x, Soldier._now()))
+	return out
+
+
+## The way the local gunner `viewer` aims: along their view in first person; in the chase view
+## (VehicleCamera) from the gun to what the camera's crosshair is on, so the gun points where
+## the camera looks (Arma's third-person gunner).
+func gun_direction(viewer: Soldier) -> Vector3:
+	var cam := VehicleCamera.of(viewer)
+	if cam == null or not cam.active:
+		return -viewer.camera.global_basis.z
+	var fwd := -cam.global_basis.z
+	var to := cam.aim_point() - gun_origin()
+	if to.length() < 1.0 or to.normalized().dot(fwd) < 0.2:
+		return fwd  # the crosshair on something at the gun itself, or behind it: along the view
+	return to.normalized()
+
+
 ## The gunner fires along `direction` (from their view).
 @rpc("any_peer", "call_local", "reliable")
 func request_gun(direction: Vector3) -> void:
@@ -1810,9 +1963,9 @@ func request_gun(direction: Vector3) -> void:
 
 
 ## Host: one shot of the mounted gun by `shooter` along `direction` (its rate kept, a round
-## drawn from the hold). Returns Ballistics' result, or {} if it didn't fire.
+## drawn from the hold); a turret's along its barrel, whatever `direction` says. Returns
+## Ballistics' result, or {} if it didn't fire.
 func server_fire_gun(shooter: Soldier, direction: Vector3) -> Dictionary:
-	var g: Dictionary = spec.get("gun", {})
 	var info := gun_info()
 	if info.is_empty() or wrecked:
 		return {}
@@ -1824,9 +1977,10 @@ func server_fire_gun(shooter: Soldier, direction: Vector3) -> Dictionary:
 	if not cargo_hold.take_feed(info.feed):
 		_tell(shooter, "%s: no ammunition in the %s" % [info.name, display_name()])
 		return {}
-	var origin := global_transform * VehicleSpecs.vec(g.get("at"), Vector3(0, 2, 0))
+	var origin := gun_origin()
 	var spread := deg_to_rad(float(item.stats.get("spread_deg", 0.3)))
-	var dir := direction.normalized()
+	# A turret's rounds go where its barrel points (the gunner turns it: request_aim, server_aim).
+	var dir := barrel_direction() if turret else direction.normalized()
 	var side := dir.cross(Vector3.UP).normalized() if absf(dir.y) < 0.99 else Vector3.RIGHT
 	var lift := side.cross(dir).normalized()
 	dir = (dir + side * randf_range(-1, 1) * tan(spread) + lift * randf_range(-1, 1) * tan(spread)).normalized()
@@ -1870,7 +2024,7 @@ func _local_controls(delta: float) -> void:
 		var info := gun_info()
 		if not info.is_empty() and Soldier._now() >= _gun_local_next:
 			_gun_local_next = Soldier._now() + 60.0 / float(info.rpm)
-			request_gun.rpc_id(1, -me.camera.global_basis.z)
+			request_gun.rpc_id(1, gun_direction(me))
 	if _hud == null:
 		_hud = Label.new()
 		_hud.name = "VehicleReadout"
@@ -1882,8 +2036,9 @@ func _local_controls(delta: float) -> void:
 	_hud.text = readout(seat)
 
 
-## One line for the HUD: the vehicle, the seat, speed, fuel, damage, the gun's rounds, and
-## the get-out key when it's on (ControlOptions: the seat's menu has no Get out then).
+## One line for the HUD: the vehicle, the seat, speed, fuel, damage, the gun's rounds, the
+## view key (VehicleCamera: the view it switches to), and the get-out key when it's on
+## (ControlOptions: the seat's menu has no Get out then).
 func readout(seat: int) -> String:
 	var parts := PackedStringArray(["%s, %s" % [display_name(), seat_name(seat)]])
 	if seat_kind(seat) == DRIVER:
@@ -1901,6 +2056,7 @@ func readout(seat: int) -> String:
 		parts.append("ON FIRE: GET OUT")
 	elif not can_drive() and seat_kind(seat) == DRIVER:
 		parts.append("Won't drive")
+	parts.append("%s: %s" % [OS.get_keycode_string(GameSettings.key_for(VehicleCamera.ACTION)), "1st person" if VehicleCamera.chase else "3rd person"])
 	if ControlOptions.get_out_key():
 		parts.append("%s: get out" % ControlOptions.get_out_key_name())
 	return "  |  ".join(parts)

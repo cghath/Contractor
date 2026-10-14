@@ -28,7 +28,7 @@ func _ready() -> void:
 		player.inventory.take(id)
 	_remove_hostiles()
 	await _frames(10)
-	_clear_contact()  # anyone glimpsed before they were removed (friendlies see 120 m)
+	_clear_contact()  # anyone glimpsed before they were removed (friendlies see SquadAI.SQUAD_SIGHT_RANGE, 300 m)
 	await _test_roster()
 	_test_command_menu()
 	_test_navigation()
@@ -41,6 +41,7 @@ func _ready() -> void:
 	await _test_fire_discipline()
 	await _test_tactics()
 	_test_doctrine_pending()
+	await _test_doctrine_ranges()
 	await _test_dead_leave_squad()
 	await _test_buildings_per_world()
 	GameState.delete_save()
@@ -304,6 +305,17 @@ func _test_tactics() -> void:
 	check(not SquadTactics.score(sit.merged({"order": Squad.Order.HOLD}, true), pmc).scores.has(SquadTactics.Option.SUPPRESS_FLANK),
 		"on Hold, the squad doesn't go flanking")
 	check(best.call({"contact": false, "fresh": false, "stale": true, "age": 30.0}) == SquadTactics.Option.SEARCH, "lost them: search where they were last seen")
+	# P0362: "base of fire ... no flank to take" every second while taking fire, sitting still.
+	var keep := SquadTactics.MIN_KEEP_S
+	check(not SquadTactics.switches(0.6, 0.75, keep * 0.4, false) and SquadTactics.switches(0.6, 0.75, keep, false),
+		"a chosen tactic is held %.0f s against a somewhat better one" % keep)
+	check(SquadTactics.switches(0.6, 0.6 + SquadTactics.URGENT_MARGIN, 1.0, false) and SquadTactics.switches(0.6, 0.75, 1.0, true)
+		and SquadTactics.switches(-1.0, 0.3, 0.0, false), "unless the situation changes a lot: a much better option, someone else down, or it stops applying")
+	var pinned := {"no_flank": true, "up": 4, "known": 4, "suppression": 0.35, "cover": 0.0}
+	check(not SquadTactics.score(sit.merged({"no_flank": true}, true), pmc).scores.has(SquadTactics.Option.SUPPRESS_FLANK)
+		and best.call({"no_flank": true}) == SquadTactics.Option.HOLD, "no flank to take, not out-shot: no drill, hold and improve cover")
+	check(best.call(pinned) == SquadTactics.Option.BREAK_CONTACT and best.call(pinned.merged({"no_flank": false}, true)) != SquadTactics.Option.BREAK_CONTACT,
+		"no flank to take and out-shot (P0362: 4 on 4, suppressed, nobody in cover): bound back to cover, not hold")
 
 	print("Command menu orders")
 	var squad := level.squad_for(&"friendly")
@@ -431,6 +443,84 @@ func _test_doctrine_pending() -> void:
 	check(float(pmc.get(SquadTactics.Option.CASUALTY, 0.0)) > float(insurgent.get(SquadTactics.Option.CASUALTY, 0.0)),
 		"what does act: the same fight scores differently for a PMC squad and an insurgent one (casualty care %.2f vs %.2f)"
 		% [float(pmc.get(SquadTactics.Option.CASUALTY, 0.0)), float(insurgent.get(SquadTactics.Option.CASUALTY, 0.0))])
+
+
+## Audit F-03: the doctrines' engage_m fits the sight ranges (hostiles SIGHT_RANGE, the squad
+## SQUAD_SIGHT_RANGE): no doctrine engages past what its shooter can see, and none sits so far
+## inside it that the AI spots targets it then won't engage. And the ranges act: a hostile picks
+## a target he sees 180 m off (not one 210 m off, past his sight), the squad one 280 m off.
+## Staged up in the air like the fire discipline checks, all in one frame (_find_target builds
+## awareness one scan per call).
+func _test_doctrine_ranges() -> void:
+	print("Doctrines: engage ranges fit the sight ranges")
+	var file: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(Doctrine.PATH))
+	var hostile_ids: Array[StringName] = [StringName(String(file.sides.hostile))]
+	for nation: String in (file.get("nations", {}) as Dictionary):
+		hostile_ids.append(StringName(String(file.nations[nation])))
+	var friendly_id := Doctrine.default_for(&"friendly")
+	var report := ""
+	var fits := true
+	var clamped := true
+	for id: StringName in Doctrine.ids():
+		var e := Doctrine.value(id, "engage_m")
+		report += " %s %.0f m" % [id, e]
+		var sight := SquadAI.SIGHT_RANGE if id in hostile_ids and id != friendly_id else SquadAI.SQUAD_SIGHT_RANGE
+		# Past its side's sight it would never act; under 3/4 of it, targets in sight go unengaged.
+		fits = fits and e <= sight and e >= sight * 0.75
+		for s: float in [SquadAI.SIGHT_RANGE, SquadAI.SQUAD_SIGHT_RANGE]:
+			clamped = clamped and Doctrine.engage_m(id, s) <= s and Doctrine.engage_m(id, s, 50.0) <= 50.0
+	check(fits, "each side's doctrines engage within its sight (hostiles %.0f m, the squad %.0f m) and not far inside it:%s"
+		% [SquadAI.SIGHT_RANGE, SquadAI.SQUAD_SIGHT_RANGE, report])
+	check(clamped and Doctrine.engage_m(Doctrine.PMC, SquadAI.SIGHT_RANGE) == SquadAI.SIGHT_RANGE,
+		"and Doctrine.engage_m never goes past the shooter's sight or his weapon's reach (a PMC on the hostile side stops at %.0f m)"
+		% Doctrine.engage_m(Doctrine.PMC, SquadAI.SIGHT_RANGE))
+	var hostile_default := Doctrine.default_for(&"hostile")
+	check(Doctrine.engage_m(hostile_default, SquadAI.SIGHT_RANGE) >= 180.0,
+		"this zone's hostiles (%s) engage at 180 m (%.0f m)" % [hostile_default, Doctrine.engage_m(hostile_default, SquadAI.SIGHT_RANGE)])
+	# Live: the AI's own target pick at those distances.
+	var mate := _standing_mate([])
+	await _wait_until(func() -> bool: return mate.stunned_s <= 0.0, 5.0)  # a stunned man picks no target (the flash check)
+	var saved := mate.global_transform
+	var origin := Vector3(300, 50.1, 300)  # up and away from everyone
+	var hostile := level.spawn_soldier({"name": "RangeHostile", "faction": "hostile", "variant": "urban", "pos": origin,
+		"loadout": CompoundLevel.HOSTILE_LOADOUT, "combat": 0.5, "discipline": 0.5, "guard": true})
+	await _frames(2)
+	var hai := SquadAI.of(hostile)
+	var mai := SquadAI.of(mate)
+	hai.process_mode = Node.PROCESS_MODE_DISABLED
+	mai.process_mode = Node.PROCESS_MODE_DISABLED
+	hostile.global_transform = Transform3D(Basis.IDENTITY, origin)  # faces -z
+	hostile.velocity = Vector3.ZERO
+	mate.velocity = Vector3.ZERO
+	mate.global_transform = Transform3D(Basis.IDENTITY.rotated(Vector3.UP, PI), origin + Vector3(0, 0, -180))  # faces the hostile
+	var at_180 := _picks(hai, mate)
+	hai._aware.clear()
+	_place(mate, origin + Vector3(0, 0, -210))
+	var at_210 := _picks(hai, mate)
+	_place(mate, origin + Vector3(0, 0, -280))
+	var squad_280 := _picks(mai, hostile)
+	check(at_180 >= 0 and at_210 < 0, "a hostile engages a target he sees 180 m off (after %d scans), not one 210 m off, past his %.0f m sight"
+		% [at_180, SquadAI.SIGHT_RANGE])
+	var why := "%s stunned %.1f s, sees him %s, %.0f m, leaves %.1f m, spot %.1f s, aware %.2f, focus %s" % [mate.name, mate.stunned_s,
+		mai.can_see(hostile), mate.global_position.distance_to(hostile.global_position), Spotting.foliage_m(mai._zone_scatter(), mate, hostile),
+		Spotting.spot_seconds(mate, hostile, Spotting.preset_of(mate), 0.5, false, Soldier._now()), float(mai._aware.get(hostile.get_instance_id(), 0.0)), mai.focus]
+	check(squad_280 >= 0, "the squad engages a hostile it sees 280 m off (after %d scans; %s)" % [squad_280, why])
+	hostile.queue_free()
+	mai._aware.clear()
+	mai.process_mode = Node.PROCESS_MODE_INHERIT
+	mate.global_transform = saved
+	mate.velocity = Vector3.ZERO
+	_clear_contact()
+	await _frames(2)
+
+
+## How many of `ai`'s scans (SquadAI._find_target calls, in one frame) it takes to pick `who`
+## as its target; -1 if 60 scans (18 s of looking) don't.
+func _picks(ai: SquadAI, who: Soldier) -> int:
+	for i in 60:
+		if ai._find_target() == who:
+			return i + 1
+	return -1
 
 
 ## Audit A3-04: the building scan cache belongs to one world (and level). The compound's main
