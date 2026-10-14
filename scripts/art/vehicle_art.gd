@@ -11,8 +11,10 @@ extends RefCounted
 
 enum P {
 	EMPTY, PAINT, PAINT_DARK, PAINT_LIGHT, GLASS, BLACK, METAL, TIRE, TRACK,
-	MARKING, LIGHT_RED, LIGHT_GREEN, RUST, SEAT, GUN,
+	MARKING, LIGHT_RED, LIGHT_GREEN, RUST, SEAT, GUN, WINDOW,
 }
+## P.WINDOW is see-through glass. Only the look carries it (VehicleInteriors: a cabin's windows
+## glazed through the wall, so a seated player sees out); the voxels rounds meet keep P.GLASS.
 
 ## Paint schemes: body colour, darker panels, lighter trim, and markings.
 const SCHEMES := {
@@ -49,6 +51,7 @@ static var _rotors := {}  # model -> [[name, position_m, radius, chord, blades, 
 static var _meshers := {}
 static var _material: StandardMaterial3D
 static var _blade_material: StandardMaterial3D
+static var _window_material: StandardMaterial3D
 
 
 ## The whole vehicle: hull mesh plus rotor and weapon nodes. `scheme` "" picks the default.
@@ -59,8 +62,7 @@ static func instance(model: String, scheme := "") -> Node3D:
 	root.name = model
 	var hull := MeshInstance3D.new()
 	hull.name = "Hull"
-	hull.mesh = mesh(model, scheme)
-	hull.material_override = _get_material()
+	hull.mesh = mesh(model, scheme)  # its surfaces carry the hull and window materials
 	var vs: float = _voxel[model]
 	hull.scale = Vector3.ONE * vs
 	var size: Vector3i = _sizes[model]
@@ -117,11 +119,19 @@ static func mesh(model: String, scheme: String) -> Mesh:
 		_sizes[model] = canvas.size
 		_voxel[model] = canvas.vs
 		_rotors[model] = canvas.rotors
-		_meshes[key] = _get_mesher(scheme).build_mesh(canvas.buffer, [])
+		_meshes[key] = _get_mesher(scheme).build_mesh(canvas.look if canvas.look else canvas.buffer, [])
 	return _meshes[key]
 
 
+## The model's voxels (`buffer`, what rounds meet) and its look (`look`: the same with the
+## cabin interiors and see-through windows, VehicleInteriors).
 static func _canvas_for(model: String) -> Canvas:
+	var c := _shape_for(model)
+	VehicleInteriors.furnish(model, c)
+	return c
+
+
+static func _shape_for(model: String) -> Canvas:
 	match model:
 		"uh60": return _uh60()
 		"ah1z": return _ah1z()
@@ -179,6 +189,7 @@ static func _get_mesher(scheme: String) -> VoxelMesherCubes:
 			P.METAL: Color("6e6f6a"), P.TIRE: Color("1c1c1b"), P.TRACK: Color("2a2926"),
 			P.MARKING: Color(s.marking), P.LIGHT_RED: Color("c0281e"), P.LIGHT_GREEN: Color("2ea043"),
 			P.RUST: Color("7a4a2a"), P.SEAT: Color("3b3a33"), P.GUN: Color("262626"),
+			P.WINDOW: Color(0.36, 0.46, 0.5, 0.3),
 		}
 		var palette := VoxelColorPalette.new()
 		for index: int in colours:
@@ -187,6 +198,9 @@ static func _get_mesher(scheme: String) -> VoxelMesherCubes:
 		mesher.palette = palette
 		mesher.color_mode = VoxelMesherCubes.COLOR_MESHER_PALETTE
 		mesher.greedy_meshing_enabled = false  # greedy quads leave hairline cracks at 5 cm
+		# See-through voxels (P.WINDOW) go to their own surface with the window material.
+		mesher.opaque_material = _get_material()
+		mesher.transparent_material = _get_window_material()
 		_meshers[scheme] = mesher
 	return _meshers[scheme]
 
@@ -198,6 +212,18 @@ static func _get_material() -> StandardMaterial3D:
 		_material.vertex_color_is_srgb = true
 		_material.roughness = 0.8
 	return _material
+
+
+## The see-through windows' material (P.WINDOW's surface): tinted glass, a little glossy.
+static func _get_window_material() -> StandardMaterial3D:
+	if _window_material == null:
+		_window_material = StandardMaterial3D.new()
+		_window_material.vertex_color_use_as_albedo = true
+		_window_material.vertex_color_is_srgb = true
+		_window_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		_window_material.roughness = 0.15
+		_window_material.metallic_specular = 0.7
+	return _window_material
 
 
 # --- Canvas -----------------------------------------------------------------------------
@@ -243,6 +269,8 @@ class Section:
 class Canvas:
 	var size: Vector3i
 	var buffer := VoxelBuffer.new()
+	## What's drawn, if it differs from `buffer` (VehicleInteriors: cabins and windows).
+	var look: VoxelBuffer = null
 	## Voxel size in metres.
 	var vs := 0.1
 	## Rotors to add as separate nodes: [name, position_m, radius, chord, blades, axis].

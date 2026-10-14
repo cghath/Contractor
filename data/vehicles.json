@@ -274,19 +274,19 @@
 			"seats": [
 				{"name": "Pilot", "kind": "pilot", "at": [0.55, 1.9, -5.3], "stance": "sit", "exit": "right"},
 				{"name": "Co-pilot", "kind": "pilot", "at": [-0.55, 1.9, -5.3], "stance": "sit", "exit": "left"},
-				{"name": "Crew chief", "kind": "passenger", "at": [-0.95, 1.95, -3.6], "stance": "sit", "exit": "left"},
-				{"name": "Door gunner", "kind": "passenger", "at": [0.95, 1.95, -3.6], "stance": "sit", "exit": "right"},
+				{"name": "Crew chief", "kind": "passenger", "at": [-0.72, 1.95, -3.6], "stance": "sit", "exit": "left"},
+				{"name": "Door gunner", "kind": "passenger", "at": [0.72, 1.95, -3.6], "stance": "sit", "exit": "right"},
 				{"name": "Passenger 1", "kind": "passenger", "at": [-0.6, 1.85, -3.0], "stance": "sit", "exit": "left"},
 				{"name": "Passenger 2", "kind": "passenger", "at": [0.0, 1.85, -3.0], "stance": "sit", "exit": "left"},
 				{"name": "Passenger 3", "kind": "passenger", "at": [0.6, 1.85, -3.0], "stance": "sit", "exit": "right"},
-				{"name": "Passenger 4", "kind": "passenger", "at": [-0.9, 1.85, -2.2], "stance": "sit", "exit": "left"},
+				{"name": "Passenger 4", "kind": "passenger", "at": [-0.75, 1.85, -2.2], "stance": "sit", "exit": "left"},
 				{"name": "Passenger 5", "kind": "passenger", "at": [-0.3, 1.85, -2.2], "stance": "sit", "exit": "left"},
 				{"name": "Passenger 6", "kind": "passenger", "at": [0.3, 1.85, -2.2], "stance": "sit", "exit": "right"},
-				{"name": "Passenger 7", "kind": "passenger", "at": [0.9, 1.85, -2.2], "stance": "sit", "exit": "right"},
-				{"name": "Passenger 8", "kind": "passenger", "at": [-0.9, 1.85, -1.3], "stance": "sit", "exit": "left"},
+				{"name": "Passenger 7", "kind": "passenger", "at": [0.75, 1.85, -2.2], "stance": "sit", "exit": "right"},
+				{"name": "Passenger 8", "kind": "passenger", "at": [-0.75, 1.85, -1.3], "stance": "sit", "exit": "left"},
 				{"name": "Passenger 9", "kind": "passenger", "at": [-0.3, 1.85, -1.3], "stance": "sit", "exit": "left"},
 				{"name": "Passenger 10", "kind": "passenger", "at": [0.3, 1.85, -1.3], "stance": "sit", "exit": "right"},
-				{"name": "Passenger 11", "kind": "passenger", "at": [0.9, 1.85, -1.3], "stance": "sit", "exit": "right"}
+				{"name": "Passenger 11", "kind": "passenger", "at": [0.75, 1.85, -1.3], "stance": "sit", "exit": "right"}
 			],
 			"points": [
 				{"kind": "door", "at": [-1.5, 1.6, -5.3], "seats": [1]},
