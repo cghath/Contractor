@@ -146,7 +146,13 @@ sleep 2
 verdict=FAIL
 grep -q '^VERDICT PASS' "$run/report.log" && verdict=PASS
 final="$day/$run_id-$start_time-$verdict-$tail_name"
-mv "$run" "$final" 2>/dev/null && run="$final"
+# Something still holding a file in the folder (a viewer, a tail) blocks the rename on Windows:
+# try for a minute, then say so (the folder stays RUNNING).
+for i in $(seq 1 12); do
+	mv "$run" "$final" 2>/dev/null && { run="$final"; break; }
+	sleep 5
+done
+[ "$run" = "$final" ] || echo "could not rename $run to $final (a file in it is open): rename it by hand"
 echo "$run_id $(date +%Y-%m-%d) $start_time $verdict $tail_name script: tools/coop_soak.sh ($MINUTES min $MODE, $CLIENTS clients)" >>"$parent/index.txt"
 echo "co-op soak $run_id: $verdict, report: $run/report.md"
 [ "$verdict" = PASS ]
