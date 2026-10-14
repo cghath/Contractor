@@ -44,9 +44,11 @@ func _ready() -> void:
 		await _run_client()
 		return
 	GameState.delete_save()
-	Campaign.reset_campaign()
+	BaseHub.delete_test_campaign_files()  # whatever a run cut short left behind
 	_test_stash_and_saves()
 	_test_damaged_saves()
+	_test_archive()
+	_test_squad_count()
 	_test_hiring()
 	_test_wages()
 	_test_growth()
@@ -56,12 +58,9 @@ func _ready() -> void:
 	_test_stand_ins()
 	_test_restock()
 	await _test_session()
-	for zone_id: String in [ZONE + tag, ZONE + "_wide" + tag]:
-		GameState.zone_id = BaseHub.zone_save_id(zone_id)
-		GameState.delete_save()
 	GameState.zone_id = "test_base" + tag
 	GameState.delete_save()
-	Campaign.reset_campaign()
+	BaseHub.delete_test_campaign_files()  # every zone save and copy set aside: the game deletes none
 	print("BASE TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
 
@@ -105,7 +104,8 @@ func _test_stash_and_saves() -> void:
 	GameState.save_zone()
 	var path := GameState.save_path()
 	BaseHub.new_campaign(SEED)
-	check(not FileAccess.file_exists(path), "and a new campaign starts with none")
+	check(not FileAccess.file_exists(path) and Array(GameState.kept_copies(path)).any(func(f: String) -> bool: return f.contains(".replaced-")),
+		"and a new campaign starts with none: the old one is set aside, never deleted (%s)" % ", ".join(GameState.kept_copies(path)))
 	GameState.zone_id = "test_base" + tag
 	# Requests the host refuses.
 	BaseHub.campaign_running = true
@@ -214,11 +214,112 @@ func _test_damaged_saves() -> void:
 	_wipe_campaign_files()
 
 
-## Deletes the campaign's save, backup, interrupted write and every copy kept aside.
+## Deletes the campaign's save and zone saves, their backups, interrupted writes and every copy
+## kept aside (BaseHub.delete_test_campaign_files: the game itself never deletes a save).
 func _wipe_campaign_files() -> void:
-	Campaign.reset_campaign()
-	for f in GameState.kept_copies(Campaign.save_path()):
-		DirAccess.remove_absolute("%s/%s" % [Campaign.SAVE_DIR, f])
+	if BaseHub.delete_test_campaign_files() < 0:
+		check(false, "the test campaign's files are deleted (only a test_ campaign's ever are)")
+
+
+## Captain, 2026-10-14: "New campaign (archive current saves)" puts the campaign away, never
+## deletes it: its save, zone saves (the FOB's too), backups and copies kept aside all move into
+## the archive folder as they were, and another campaign's files stay. A deployment sets the
+## zone's earlier save aside (kept, never loaded), never the FOB's. And the test-only delete
+## refuses a campaign that isn't a test's.
+func _test_archive() -> void:
+	print("Archiving a campaign, setting zone saves aside")
+	_wipe_campaign_files()
+	var own_id := Campaign.campaign_id
+	var real := "not_a_test" + tag
+	Campaign.campaign_id = real
+	check(BaseHub.delete_test_campaign_files() == -1, "the test-only delete refuses a campaign that isn't a test's (%s)" % real)
+	Campaign.campaign_id = own_id
+	# set_aside_zone_save: a zone's earlier save is kept aside, the FOB's never.
+	var zone_path := "%s/%s.json" % [GameState.SAVE_DIR, BaseHub.zone_save_id("aside_zone")]
+	var zone_text := JSON.stringify({"version": GameState.SAVE_VERSION, "looted": ["earlier"], "dropped": {}, "voxel_edits": [], "bodies": []})
+	_write(zone_path, zone_text)
+	_write(GameState.backup_path(zone_path), zone_text)
+	var n := BaseHub.set_aside_zone_save("aside_zone")
+	var kept := GameState.kept_copies(zone_path)
+	check(n == 2 and not GameState.has_save(zone_path) and kept.size() == 2
+		and Array(kept).all(func(f: String) -> bool: return f.contains("earlier-deployment") and FileAccess.get_file_as_string("%s/%s" % [GameState.SAVE_DIR, f]) == zone_text),
+		"a zone's earlier save and backup are set aside, as they were, and nothing loads them (%s)" % ", ".join(kept))
+	var fob_path := "%s/%s.json" % [GameState.SAVE_DIR, BaseHub.base_zone_id()]
+	_write(fob_path, zone_text)
+	check(BaseHub.set_aside_zone_save("fob") == 0 and FileAccess.file_exists(fob_path) and GameState.kept_copies(fob_path).is_empty(),
+		"never the FOB's save")
+	# archive_campaign into a test folder (never the real archive folder).
+	BaseHub.new_campaign(SEED)
+	BaseHub.base()["sentinel"] = 4141
+	BaseHub.server_save()
+	BaseHub.server_save()  # the second keeps the first as the backup
+	_write(fob_path, zone_text)  # new_campaign set the FOB's aside: it's back
+	_write(zone_path, zone_text)
+	_write(GameState.backup_path(zone_path), zone_text)
+	_write(Campaign.save_path() + ".unreadable-20261014-000000", "{broken")
+	var other := "%s/test_base_other%s.json" % [Campaign.SAVE_DIR, tag]
+	_write(other, "other campaign")
+	var expect := {}
+	for f in BaseHub._campaign_files():
+		expect[f] = FileAccess.get_file_as_string("%s/%s" % [Campaign.SAVE_DIR, f])
+	var names := PackedStringArray(expect.keys())
+	var save_file := Campaign.save_path().get_file()
+	var wanted := [save_file, save_file + ".bak", save_file + ".unreadable-20261014-000000", zone_path.get_file(), zone_path.get_file() + ".bak", fob_path.get_file()]
+	check(wanted.all(func(f: String) -> bool: return expect.has(f)) and Array(kept).all(func(f: String) -> bool: return expect.has(f))
+		and not expect.has(other.get_file()),
+		"the campaign's files: save, backup, zone save and backup, the FOB's, copies kept aside (%d)" % names.size())
+	var into := "user://test_archive" + tag
+	_wipe_folder(into)
+	var out := BaseHub.archive_campaign(into)
+	var moved := PackedStringArray(out.moved)
+	moved.sort()
+	names.sort()
+	check(out.dir == ProjectSettings.globalize_path(into) and (out.failed as Array).is_empty() and moved == names,
+		"archive_campaign moves every one into the folder given (%d moved, %d failed)" % [moved.size(), (out.failed as Array).size()])
+	check(expect.keys().all(func(f: String) -> bool: return FileAccess.get_file_as_string("%s/%s" % [into, f]) == expect[f]),
+		"each as it was")
+	check(BaseHub._campaign_files().is_empty() and not Campaign.has_save() and not GameState.has_save(zone_path) and not GameState.has_save(fob_path),
+		"nothing of the campaign is left in the saves folder")
+	check(FileAccess.get_file_as_string(other) == "other campaign", "another campaign's save is left alone")
+	check(not BaseHub.started() and not BaseHub.base().has("sentinel") and not BaseHub.campaign_running, "and the campaign in memory is empty")
+	DirAccess.remove_absolute(other)
+	_wipe_folder(into)
+	DirAccess.remove_absolute(into)
+
+
+## Deletes every file in `dir` (a test's own folder).
+func _wipe_folder(dir: String) -> void:
+	if DirAccess.dir_exists_absolute(dir):
+		for f in DirAccess.get_files_at(dir):
+			DirAccess.remove_absolute("%s/%s" % [dir, f])
+
+
+## Captain, 2026-10-14: the Ops desk said "6 of 7 AI" over three names, the other three KIA.
+## The count (BaseUI.picked_count) and the pick itself (BaseHub._prune_prep_squad) leave out
+## the killed, the MIA and the recovering.
+func _test_squad_count() -> void:
+	print("The Ops desk's squad count")
+	_wipe_campaign_files()
+	BaseHub.new_campaign(SEED)
+	for i in 4:
+		BaseHub.server_hire(String(_cheapest(Hiring.pool(BaseHub.hiring(), 1)).cid))
+	var ids := Roster.ids(BaseHub.roster())
+	check(ids.size() == 4, "four hired (%d)" % ids.size())
+	if ids.size() < 4:
+		return
+	for mid in ids:
+		BaseHub.server_pick(mid, true)
+	var picked: Array = BaseHub._prep().squad
+	var members: Dictionary = BaseHub.roster().get("members", {})
+	check(BaseUI.picked_count(picked, members) == 4, "four picked, four counted")
+	BaseHub.member(ids[0])["status"] = Roster.DEAD
+	BaseHub.member(ids[1])["status"] = Roster.MIA
+	BaseHub.member(ids[2])["sit_out_days"] = 3
+	check(BaseUI.picked_count(picked, members) == 1 and BaseUI.picked_count(picked + ["nobody"], members) == 1,
+		"the killed, the MIA and the recovering aren't counted, nor anyone not on the roster (%d)" % BaseUI.picked_count(picked, members))
+	check(BaseHub._prune_prep_squad() and BaseHub._prep().squad == [ids[3]], "and they leave the pick (%s)" % ", ".join(PackedStringArray(BaseHub._prep().squad)))
+	check(not BaseHub._prune_prep_squad(), "a pick of the deployable stays as it is")
+	_wipe_campaign_files()
 
 
 func _write(path: String, text: String) -> void:
@@ -902,6 +1003,14 @@ func _test_zone_deployment() -> void:
 		return
 	var squad: Array = Roster.available_ids(BaseHub.roster()).slice(0, 1)
 	var def := ZoneDef.get_def("test")
+	# Captain, 2026-10-14: every contract finds its zone fresh. The zone's save from an earlier
+	# deployment (the compound's from _test_deployment, bodies and all) is set aside, not loaded.
+	var earlier_path := "%s/%s.json" % [GameState.SAVE_DIR, BaseHub.zone_save_id(ZONE + tag)]
+	var wide_path := "%s/%s.json" % [GameState.SAVE_DIR, BaseHub.zone_save_id(ZONE + "_wide" + tag)]
+	var earlier := FileAccess.get_file_as_string(earlier_path)
+	var earlier_data: Variant = JSON.parse_string(earlier) if earlier != "" else null
+	check(earlier_data is Dictionary and not (earlier_data.get("bodies", []) as Array).is_empty(), "the earlier deployment's zone save has bodies in it")
+	_write(wide_path, earlier)
 	var why := BaseHub.server_deploy({"level": {"level": "zone", "def": def}, "zone_id": ZONE + "_wide" + tag, "squad": squad, "no_contract": true})
 	var moved := await _wait_until(func() -> bool: return CompoundLevel.current(self) is ZoneLevel, 20.0)
 	var zone := CompoundLevel.current(self) as ZoneLevel
@@ -911,6 +1020,12 @@ func _test_zone_deployment() -> void:
 		return
 	level = zone
 	check(get_tree().get_nodes_in_group(&"level").size() == 1, "and it is the session's one level")
+	await _frames(5)
+	check(GameState.bodies.is_empty() and get_tree().get_nodes_in_group(&"dead_bodies").is_empty(),
+		"a second deployment into the zone starts fresh: no bodies from the earlier one (%d)" % get_tree().get_nodes_in_group(&"dead_bodies").size())
+	var set_aside := GameState.kept_copies(wide_path)
+	check(set_aside.size() == 1 and set_aside[0].contains("earlier-deployment") and FileAccess.get_file_as_string("%s/%s" % [GameState.SAVE_DIR, set_aside[0]]) == earlier,
+		"and the earlier save is set aside as it was, not deleted (%s)" % ", ".join(set_aside))
 	var player := zone.players.get_node_or_null(^"1") as Soldier
 	var start := zone.insertion_points()[0]
 	check(player != null and Vector2(player.global_position.x - start.x, player.global_position.z - start.z).length() < 10.0,
