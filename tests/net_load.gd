@@ -127,6 +127,11 @@ func _ready() -> void:
 			inv += int(_bytes[key][0])
 	lines.append("NETLOAD inventory share: %d bytes/s, %.1f%% of the payload, %.1f%% of what ENet sent; %.0f bytes per shot" % [
 		int(inv / secs), 100.0 * inv / maxf(total, 1.0), 100.0 * inv / maxf(sent, 1.0), inv / maxf(_shots, 1.0)])
+	var vit := 0
+	for key: String in keys:
+		if key.begins_with("Vitals:"):
+			vit += int(_bytes[key][0])
+	lines.append("NETLOAD vitals share: %d bytes/s, %.1f%% of the payload" % [int(vit / secs), 100.0 * vit / maxf(total, 1.0)])
 	for key: String in keys:
 		lines.append("NETLOAD   %-28s %8d bytes/s  %6d changes  (%.0f bytes each)" % [key, int(_bytes[key][0] / secs), int(_bytes[key][1]),
 			float(_bytes[key][0]) / maxf(float(_bytes[key][1]), 1.0)])

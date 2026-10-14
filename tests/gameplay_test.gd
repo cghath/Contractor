@@ -107,11 +107,11 @@ func _test_ammo_replication() -> void:
 	for scene: String in ["res://scenes/soldier.tscn", "res://scenes/target_dummy.tscn"]:
 		var node: Node = load(scene).instantiate()
 		var config: SceneReplicationConfig = node.get_node(^"ServerSync").replication_config
-		var ok := not config.has_property(^"Inventory:net_state")
-		for prop: NodePath in [^"Inventory:net_gear", ^"Inventory:net_ammo"]:
+		var ok := not config.has_property(^"Inventory:net_state") and not config.has_property(^"Vitals:net_state")
+		for prop: NodePath in [^"Inventory:net_gear", ^"Inventory:net_ammo", ^"Vitals:net_vitals", ^"Vitals:net_pulse"]:
 			ok = ok and config.has_property(prop) and config.property_get_spawn(prop) \
 				and config.property_get_replication_mode(prop) == SceneReplicationConfig.REPLICATION_MODE_ON_CHANGE
-		check(ok, "%s: the host sends net_gear and net_ammo on change and to late joiners, not the whole net_state" % scene.get_file())
+		check(ok, "%s: the host sends net_gear, net_ammo, net_vitals and net_pulse on change and to late joiners, not a whole net_state" % scene.get_file())
 		node.free()
 
 
