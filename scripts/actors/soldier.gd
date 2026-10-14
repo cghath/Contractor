@@ -237,8 +237,11 @@ func stun(seconds: float, from: Vector3) -> void:
 
 func _ready() -> void:
 	add_to_group(&"combatants")
-	if is_local() and not multiplayer.is_server() and spawn_position != Vector3.ZERO:
-		position = spawn_position  # see spawn_position
+	if not is_ai() and not multiplayer.is_server() and spawn_position != Vector3.ZERO:
+		# See spawn_position. Another player's body too: its position is its owner's to send
+		# (its Sync isn't in the host's spawn), so until that first arrives it stood at the
+		# origin (B-04: other players at (0, 0, 0) for seconds after each level switch).
+		position = spawn_position
 	inventory.changed.connect(_on_inventory_changed)
 	vitals.died.connect(_on_died)
 	vitals.went_down.connect(_on_went_down)

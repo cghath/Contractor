@@ -520,12 +520,8 @@ func _extra_post(post: Vector3, taken: Array[Vector3]) -> Vector3:
 	return post + Vector3(0.9, 0.0, 0.9 * float(taken.size() % 3))
 
 
-func _add_player(id: int) -> void:
-	super._add_player(id)
-	var player := players.get_node_or_null(str(id)) as Node3D
-	if player:
-		player.position = player_spawn(id)
-		(player as Soldier).spawn_position = player.position
+func _player_start(id: int) -> Vector3:
+	return player_spawn(id)
 
 
 ## A client's own player as it spawns there: the host's spawn doesn't carry its position (its
