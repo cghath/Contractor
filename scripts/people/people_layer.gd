@@ -155,7 +155,12 @@ func _ready() -> void:
 	add_child(spawner)
 	_rng.seed = 4511
 	set_process(false)  # on while civilians are queued
-	VoxelArt.warm_plain_bodies()  # plain clothes' body rasters, on a worker, before anyone needs them
+	# On a worker, before anyone needs them: the hostiles' uniform (garrisons, patrols,
+	# reinforcements) and plain clothes' bodies (a person's colours only change the palette).
+	var art: Array = VoxelArt.uniform("urban", CompoundLevel.HOSTILE_LOADOUT)
+	for body in VoxelArt.BODIES:
+		art.append_array(VoxelArt.uniform("civp:", [], body))
+	VoxelArt.warm(art)
 	Net.hosted.connect(_on_hosted)
 	Contracts.contract_live.connect(_on_contract_live)
 	Net.peer_joined.connect(_on_peer_joined)

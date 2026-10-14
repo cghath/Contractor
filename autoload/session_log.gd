@@ -25,9 +25,6 @@ const SLOW_FRAME_S := 0.5
 const CHECK_S := 1.0
 ## A performance line this often (s): frame times, AI count, modules streamed in, nav rebakes.
 const PERF_S := 60.0
-## The process's memory is read this long before each performance line, off the main thread
-## (process_memory_mb).
-const MEMORY_LEAD_S := 5.0
 ## Below this a soldier has fallen out of the world.
 const FELL_Y := -100.0
 ## Log lines kept for the dumps.
@@ -67,11 +64,6 @@ var _perf_sum := 0.0
 var _perf_worst := 0.0
 var _rebakes := 0
 var _nav_watched: Node
-## The process's resident memory (MB) last read (-1: not known), the read running (-1: none),
-## and whether it's been read for the coming line.
-var _rss_mb := -1.0
-var _rss_task := -1
-var _rss_read := false
 
 
 ## Catches what the engine logs, on whatever thread logs it.
@@ -153,9 +145,6 @@ func _watch_net() -> void:
 func finish() -> void:
 	if session_id == "":
 		return
-	if _rss_task >= 0:
-		WorkerThreadPool.wait_for_task_completion(_rss_task)
-		_rss_task = -1
 	var verdict := "PASS" if errors + warnings + anomalies == 0 else "FAIL"
 	_write("session %s ended after %s: %s (%d errors, %d warnings, %d anomalies, %d dumps)" % [session_id,
 		_clock(), verdict, errors, warnings, anomalies, dumps])
@@ -234,16 +223,9 @@ func _process(delta: float) -> void:
 	_perf_sum += frame_s
 	_perf_worst = maxf(_perf_worst, frame_s)
 	_perf_left -= delta
-	if _rss_task >= 0 and WorkerThreadPool.is_task_completed(_rss_task):
-		WorkerThreadPool.wait_for_task_completion(_rss_task)
-		_rss_task = -1
-		_rss_read = true
-	if _perf_left <= MEMORY_LEAD_S and _rss_task < 0 and not _rss_read:
-		_rss_task = WorkerThreadPool.add_task(_read_rss, false, "SessionLog memory")
 	if _perf_left <= 0.0:
 		_perf_left = PERF_S
 		_write(perf_line())
-		_rss_read = false
 	_mutex.lock()
 	var pending := _pending.duplicate()
 	_pending.clear()
@@ -365,52 +347,54 @@ func perf_line() -> String:
 	return text
 
 
-## "memory 812 MB, video 240 MB": the process's resident memory (process_memory_mb, read off
-## the main thread before each line; the engine's own count where that isn't known), and the
-## video memory in use. Captain P0362: the engine's static count (Performance.MEMORY_STATIC,
-## OS.get_static_memory_usage) is only kept in debug builds, so a release build read 0 MB.
-func memory_text() -> String:
-	var mb := _rss_mb
+## The memory part of the performance line, read with no child process (so a release build
+## never flashes a console window): "memory 812 MB, video 240 MB, system memory 9.1/16.0 GB
+## used, 41203 objects, 6120 nodes".
+## - "memory": the engine's own count (Performance.MEMORY_STATIC), else the process's resident
+##   memory where the OS lets a file say it (Linux /proc/self/status). Captain P0362: the engine's
+##   count is kept only in debug builds, so a Windows release build logged "memory 0 MB"; there
+##   it's left out (Godot has no process-memory call, and asking tasklist would start a process).
+## - video memory and the system's memory in use (OS.get_memory_info), and the engine's object
+##   and node counts: all kept in release builds, and a leak shows in them as it grows.
+## `static_bytes` stands in for the engine's count (the test passes 0, as a release build reads).
+func memory_text(static_bytes := -1.0) -> String:
+	var parts: Array[String] = []
+	var mb := (Performance.get_monitor(Performance.MEMORY_STATIC) if static_bytes < 0.0 else static_bytes) / 1048576.0
 	if mb <= 0.0:
-		mb = Performance.get_monitor(Performance.MEMORY_STATIC) / 1048576.0
-	var video := Performance.get_monitor(Performance.RENDER_VIDEO_MEM_USED) / 1048576.0
-	return "memory %s MB, video %.0f MB" % ["%.0f" % mb if mb > 0.0 else "?", video]
+		mb = process_memory_mb()
+	if mb > 0.0:
+		parts.append("memory %.0f MB" % mb)
+	parts.append("video %.0f MB" % (Performance.get_monitor(Performance.RENDER_VIDEO_MEM_USED) / 1048576.0))
+	var info := OS.get_memory_info()
+	var physical := float(info.get("physical", -1))
+	var available := float(info.get("available", -1))
+	if available > physical:  # Windows: "available" counts the page file too; "free" is the RAM left
+		available = float(info.get("free", -1))
+	if physical > 0.0 and available >= 0.0:
+		parts.append("system memory %.1f/%.1f GB used" % [(physical - available) / 1073741824.0, physical / 1073741824.0])
+	parts.append("%d objects, %d nodes" % [Performance.get_monitor(Performance.OBJECT_COUNT), Performance.get_monitor(Performance.OBJECT_NODE_COUNT)])
+	return ", ".join(parts)
 
 
-func _read_rss() -> void:
-	_rss_mb = process_memory_mb()
-
-
-## The process's resident memory (MB), or -1 if it can't be read: Linux from /proc/self/status,
-## Windows from tasklist, macOS from ps. Blocks for a moment on Windows and macOS (a process
-## runs): call it off the main thread.
+## The process's resident memory (MB) where a file says it (Linux, Android: /proc/self/status),
+## else -1. Reads a file only: no child process.
 static func process_memory_mb() -> float:
-	var pid := OS.get_process_id()
-	match OS.get_name():
-		"Linux", "FreeBSD", "Android":
-			for line in FileAccess.get_file_as_string("/proc/self/status").split("\n"):
-				if line.begins_with("VmRSS:"):
-					return _digits(line) / 1024.0
-		"Windows":
-			var out: Array = []
-			if OS.execute("tasklist", ["/FI", "PID eq %d" % pid, "/FO", "CSV", "/NH"], out) == 0 and not out.is_empty():
-				var fields := String(out[0]).strip_edges().split("\",\"")
-				if fields.size() >= 5:
-					return _digits(fields[fields.size() - 1]) / 1024.0  # "1,234,567 K"
-		"macOS":
-			var out: Array = []
-			if OS.execute("ps", ["-o", "rss=", "-p", str(pid)], out) == 0 and not out.is_empty():
-				return _digits(String(out[0])) / 1024.0
+	if OS.get_name() not in ["Linux", "Android", "FreeBSD"]:
+		return -1.0
+	var f := FileAccess.open("/proc/self/status", FileAccess.READ)  # streamed: /proc files have no length
+	if f == null:
+		return -1.0
+	for i in 100:
+		var line := f.get_line()
+		if f.eof_reached() and line == "":
+			break
+		if line.begins_with("VmRSS:"):
+			var digits := ""
+			for c in line:
+				if c >= "0" and c <= "9":
+					digits += c
+			return digits.to_int() / 1024.0 if digits != "" else -1.0
 	return -1.0
-
-
-## The digits in `text` as a number (thousands separators of any locale dropped), or -1.
-static func _digits(text: String) -> float:
-	var d := ""
-	for c in text:
-		if c >= "0" and c <= "9":
-			d += c
-	return float(d.to_int()) if d != "" else -1.0
 
 
 ## What's going on now, for a dump (and the bug-report key, planned): the session, the zone, the

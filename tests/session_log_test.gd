@@ -335,12 +335,14 @@ func _test_bug_report(player: Soldier, level: CompoundLevel, faller: Soldier) ->
 	check(perf.begins_with("perf: frame ") and " ms avg" in perf and " AI, " in perf and "nav rebakes" in perf and "memory" in perf,
 		"a performance line: %s" % perf)
 	# Memory a release build can read too (Captain P0362: release builds logged "memory 0 MB";
-	# the engine's static count is debug-only): the process's resident memory, off the main thread.
+	# the engine's static count is debug-only), with no child process (no console window).
+	var debug_mem := SessionLog.memory_text()
+	var release_mem := SessionLog.memory_text(0.0)  # as a release build reads the engine's count
 	var rss := SessionLog.process_memory_mb()
-	SessionLog._rss_mb = rss
-	var mem := SessionLog.memory_text()
-	check(rss > 10.0 and rss < 65536.0 and mem.begins_with("memory %.0f MB" % rss) and ", video " in mem,
-		"the process's memory is read without the debug-only count (%.0f MB): %s" % [rss, mem])
+	check(debug_mem.begins_with("memory ") and not "memory 0 MB" in release_mem and " video " in " " + release_mem
+		and "system memory " in release_mem and not "memory -" in release_mem and " objects, " in release_mem and (rss > 10.0 or OS.get_name() not in ["Linux", "Android", "FreeBSD"])
+		and (release_mem.begins_with("memory ") == (rss > 0.0)),
+		"memory in the perf line, release-safe: %s | as release: %s (process %.0f MB)" % [debug_mem, release_mem, rss])
 	overlay.queue_free()
 	scout.queue_free()
 

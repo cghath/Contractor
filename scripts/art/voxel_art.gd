@@ -97,11 +97,15 @@ static var _meshes: Dictionary = {}   # "model|variant" -> Mesh
 ## is about 0.5 s and meshing it about 30 ms, so a new person's outfit costs only the meshing
 ## (Captain P0362: 12 civilians at once were a 3.4 s hitch on deploying).
 static var _plain_rasters: Dictionary = {}
-## The body parts' plain rasters are built ahead on a worker thread (warm_plain_bodies), so not
-## even the first person of a session waits for them.
-const PLAIN_PARTS: Array[String] = ["head", "torso", "upper_arm", "forearm", "leg", "thigh", "shin"]
-static var _warm_task := -1
-static var _warm_built: Dictionary = {}  # written by the worker only; taken after waiting for it
+## The body parts a soldier or person is built from (CharacterModel).
+const BODY_PARTS: Array[String] = ["head", "torso", "upper_arm", "forearm", "thigh", "shin"]
+## Rasters built ahead on a worker thread (warm): "salt|variant" (_raster_key) -> VoxelBuffer.
+## The worker adds each as it finishes, under _warm_mutex; the main thread takes one that's there
+## and never waits for the rest (it rasterises one that isn't, as before).
+static var _warmed: Dictionary = {}
+static var _warm_mutex := Mutex.new()
+static var _warm_tasks: Array[int] = []
+static var _warm_asked: Dictionary = {}  # "model|variant" -> true: warmed once already
 static var _material: StandardMaterial3D
 static var _noise_a: FastNoiseLite
 static var _noise_b: FastNoiseLite
@@ -217,45 +221,89 @@ static func _build(spec: Dictionary, variant: String, salt: int) -> Mesh:
 
 
 ## The model rasterised for `variant`: a plain-clothes scheme ("civp:") reuses the model's one
-## plain raster (_plain_rasters, by `salt`: mesh() salts with the model's name); anything else is built.
+## plain raster (_plain_rasters, by `salt`: mesh() salts with the model's name); otherwise one
+## the warm-up built (warm), or built now.
 static func _raster(spec: Dictionary, variant: String, salt: int) -> VoxelBuffer:
-	if not variant.begins_with("civp:"):
-		return _rasterize(spec, variant, salt)
-	finish_warm()  # the worker writes _plain_rasters: wait for it before reading
-	if not _plain_rasters.has(salt):
-		_plain_rasters[salt] = _rasterize(spec, variant, salt)
-	return _plain_rasters[salt]
+	var plain := variant.begins_with("civp:")
+	if plain and _plain_rasters.has(salt):
+		return _plain_rasters[salt]
+	var key := _raster_key(salt, variant)
+	_warm_mutex.lock()
+	var buffer: VoxelBuffer = _warmed.get(key)
+	_warmed.erase(key)
+	_warm_mutex.unlock()
+	if buffer == null:
+		buffer = _rasterize(spec, variant, salt)
+	if plain:
+		_plain_rasters[salt] = buffer
+	return buffer
 
 
-## Starts building every body part's plain raster (both body types) on a worker thread, once.
-## PeopleLayer calls it as a level starts, long before anyone in plain clothes spawns.
-static func warm_plain_bodies() -> void:
-	if _warm_task != -1 or not _plain_rasters.is_empty():
+## Plain clothes all share one raster per model ("civp:"); every other scheme has its own.
+static func _raster_key(salt: int, variant: String) -> String:
+	return "%d|%s" % [salt, "civp:" if variant.begins_with("civp:") else variant]
+
+
+## Rasterises `pairs` ([model, variant], as mesh() takes them) on a worker thread, so the
+## first soldier or person built from them only meshes (rasterising is ~95% of building a
+## 0.5 cm part). Each pair is warmed once a session. PeopleLayer calls it as a level starts:
+## the hostiles' uniform (Captain P0362: the first garrison of the session was a 0.43 s frame)
+## and plain clothes' bodies.
+static func warm(pairs: Array) -> void:
+	var todo: Array = []
+	for pair: Array in pairs:
+		var model: String = pair[0]
+		var variant: String = pair[1]
+		if variant.begins_with(CIV_PREFIX):
+			variant = _civ_part(model, variant)
+		var asked := "%s|%s" % [model, "civp:" if variant.begins_with("civp:") else variant]
+		if _warm_asked.has(asked) or _meshes.has("%s|%s" % [model, variant]) or (variant.begins_with("civp:") and _plain_rasters.has(model.hash())):
+			continue
+		_warm_asked[asked] = true
+		todo.append([model, variant])
+	if todo.is_empty():
 		return
-	_camo(Vector3.ZERO, 0, "civp:")  # its noise is made here on the main thread, not on the worker
-	var models: Array[String] = []
-	for body in BODIES:
-		for part in PLAIN_PARTS:
-			models.append(body_part(part, body))
-	_warm_task = WorkerThreadPool.add_task(_warm.bind(models), false, "VoxelArt plain rasters")
+	_camo(Vector3.ZERO, 0, "multicam")  # its noise is made here on the main thread, not on the worker
+	_reap_warm()
+	_warm_tasks.append(WorkerThreadPool.add_task(_warm.bind(todo), false, "VoxelArt warm-up"))
 
 
-static func _warm(models: Array[String]) -> void:
-	for model in models:
-		_warm_built[model.hash()] = _rasterize(_spec(model), "civp:", model.hash())
+## The models a soldier in `variant` with `loadout` (item ids) is built from: the body's parts
+## and the art of what's worn and carried (model_for), as [model, variant] pairs for warm().
+static func uniform(variant: String, loadout: Array, body := MALE) -> Array:
+	var out: Array = []
+	for part in BODY_PARTS:
+		out.append([body_part(part, body), variant])
+	for id: Variant in loadout:
+		var item := ItemDB.get_item(StringName(id))
+		var model := fitted(model_for(item), body) if item else ""
+		if model != "" and not out.has([model, variant]):
+			out.append([model, variant])
+	return out
 
 
-## Waits for the warm-up's worker (if one is running) and takes what it built. Call before
-## reading _plain_rasters, and as the level goes (so no task is left un-waited at quit).
+static func _warm(todo: Array) -> void:
+	for pair: Array in todo:
+		var model: String = pair[0]
+		var buffer := _rasterize(_spec(model), pair[1], model.hash())
+		_warm_mutex.lock()
+		_warmed[_raster_key(model.hash(), pair[1])] = buffer
+		_warm_mutex.unlock()
+
+
+## Lets go of finished warm-up tasks (WorkerThreadPool wants every task waited for).
+static func _reap_warm() -> void:
+	for task in _warm_tasks.duplicate():
+		if WorkerThreadPool.is_task_completed(task):
+			WorkerThreadPool.wait_for_task_completion(task)
+			_warm_tasks.erase(task)
+
+
+## Waits for every warm-up task still running. As a level goes, so none is left at quit.
 static func finish_warm() -> void:
-	if _warm_task < 0:
-		return
-	WorkerThreadPool.wait_for_task_completion(_warm_task)
-	_warm_task = -2  # done: never warmed again
-	for salt: int in _warm_built:
-		if not _plain_rasters.has(salt):
-			_plain_rasters[salt] = _warm_built[salt]
-	_warm_built = {}
+	for task in _warm_tasks:
+		WorkerThreadPool.wait_for_task_completion(task)
+	_warm_tasks.clear()
 
 
 ## Which built voxels of `model` are solid, for hit tests (BodyVolume): {"dims" (built

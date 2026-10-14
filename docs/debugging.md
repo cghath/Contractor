@@ -163,8 +163,9 @@ numbered session, **P<number>**, from the same counter and in the same parent as
    and a line to where it's going.
 4. Built: **performance lines** in session logs (`SessionLog.perf_line`, every `PERF_S` = 60 s:
    frame time average and worst, fps, AI and players up, modules streamed in, nav rebakes,
-   memory: the process's resident memory, read off the main thread, since the engine's own
-   count is debug-only and read 0 MB in release builds, P0362; and video memory) and a **test history page** (`python tools/test_history.py` writes
+   memory: the engine's own count, which is debug-only (a release build read 0 MB, P0362), else
+   the process's resident memory where /proc gives it; video memory, the system's memory in use
+   and the object and node counts, all release-safe and read with no child process) and a **test history page** (`python tools/test_history.py` writes
    `<logs>/history.html`: pass/fail per suite over the last 40 runs, flaky suites flagged, the
    checks that fail most). The AI overlay also shows what each AI half-spotted and a hostile's
    alert state. Still later: **replay** a bug report (it saves a `Campaign.snapshot`; a headless test loads it,
