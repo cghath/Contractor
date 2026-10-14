@@ -15,6 +15,11 @@ picking up next, we'll read it and steer around it.
 
 ## For you (cghath)
 
+- **New audit follow-ups for you** in `docs/audits/followups.md` on `fix/audit-2026-10-13`
+  (67ada7b, linked from SUMMARY.md): F-01 the building scan sees one floor (multi-storey
+  buildings' upper floors and roofs), F-02 town garrison posts all on the ground floor, F-03
+  doctrine `engage_m` below the new sight ranges.
+
 - **`dev` is now 903c235** (CI green): procedural buildings, towns in zones and urban hot zones
   on top of 8f8812a. Fetch before you push.
 - **Campaign files touched, small and on purpose (towns in zones, Captain's call):** please merge
@@ -28,8 +33,7 @@ picking up next, we'll read it and steer around it.
     intel_grab; Harbour yard holds a town; the new zone `city_hot` ("Old Quarter").
   - Raids play in towns too (on `world/building-storeys`): a town's weapons cache is a crate
     stack in the police armoury or a store room. That's the objective cache, not the AI's
-    building-scan cache (A3-04, yours): `scripts/ai/buildings.gd` is untouched, which is why
-    upper floors aren't garrisoned yet.
+    building-scan cache (A3-04, yours): `scripts/ai/buildings.gd` is untouched (F-01).
 - **`scripts/world/voxel_world.gd`** (phase 3, not on dev yet): base structures are stamped at
   most 4 ms a frame instead of all in one frame (a town is 1,100+ boxes).
 - **I touched your `tests/aav_test.gd`** (30842cc): "the gunner fires the M2" waited for three
@@ -59,13 +63,13 @@ picking up next, we'll read it and steer around it.
 
 | # | Work | Branch | Files it touches | State |
 |---|---|---|---|---|
-| 8 | Engagement ranges up: hostiles see 200 m (was 60), the squad 300 m (was 120); aim error at skill 0 1.2 deg (was 2.0); scrub drawn to 400 m and hides nobody past it | `ai/ranges` (ac6957e) | `scripts/ai/squad_ai.gd` (SIGHT_RANGE, SQUAD_SIGHT_RANGE, AIM_UNSKILLED_DEG), `scripts/world/zone_scatter.gd` | Built, R0294 PASS; CI pending. **cghath: doctrine engage_m (A3-07) should match these.** |
+| 8 | Engagement ranges up: hostiles see 200 m (was 60), the squad 300 m (was 120); aim error at skill 0 1.2 deg (was 2.0); scrub drawn to 400 m and hides nobody past it | `ai/ranges` (ac6957e) | `scripts/ai/squad_ai.gd` (SIGHT_RANGE, SQUAD_SIGHT_RANGE, AIM_UNSKILLED_DEG), `scripts/world/zone_scatter.gd` | On dev. **cghath: doctrine engage_m should match these (audit follow-up F-03).** |
 | 9 | Debug tools: overlay shows spotting and alert state; performance lines in session logs; test history page | `debug/overlay-alert` (897eb0e) | `scripts/ui/ai_overlay.gd`, `autoload/session_log.gd`, `tests/session_log_test.gd`, new `tools/test_history.py`, `docs/debugging.md` | Built, R0295 PASS; CI pending |
 | 10 | Procedural buildings, phase 1: generated single-storey houses with interior chunks (`docs/building_gen.md`) | `world/building-gen` | new `scripts/world/building_gen.gd`, new `data/building_chunks.json`, `tests/world_test.gd` | Built (R0300 PASS: 40 seeds, every room reachable and furnished, doorways clear); placing them in zones comes with the town module (11) |
 | 11 | Procedural buildings, phase 2: shops, warehouse, clinic, police station; a town module (street grid of lots) | `world/building-gen` (57c16fc, aa1228a) | `scripts/world/building_gen.gd`, `data/building_chunks.json` (48 chunks), `scripts/world/zone_modules.gd` ("town#<seed>" type; HALF/POINTS/GARRISON/LOOT now static vars, read the same), `tests/world_test.gd` | On dev. **cghath: zone_modules.gd changed, merge dev before touching it.** |
 | 12 | Towns in zones: one village in every hot zone is a town; Harbour yard has one; HVT capture, hostage rescue and intel grab can play in towns | `world/building-gen` (1919ac7) | `scripts/world/zone_def.gd`, `zone_modules.gd`, `building_gen.gd`, `scripts/people/person_look.gd`, campaign files above, `tests/world_test.gd`, `missions_test.gd`, `contracts_test.gd` | On dev; R0311-R0318 PASS |
 | 13 | Urban hot zones: "Old Quarter" (`city_hot`), 3-4 towns round the HQ, patrols in their streets | `world/building-gen` (903c235) | `scripts/world/zone_def.gd` (`generate_hot(..., urban)`), `missions.gd`, `data/contracts.json` | On dev; R0317 PASS |
-| 14 | Procedural buildings, phase 3: two storeys with stairs, flat roofs the AI can climb onto (parapet, railed hatch), L-shaped buildings, walled yards and courtyards | `world/building-storeys` | `scripts/world/building_gen.gd`, `data/building_chunks.json` (52 chunks: 4 yard), `scripts/world/zone_modules.gd` (a town's own top), `scripts/world/voxel_world.gd` (stamping budget), `tests/world_test.gd` | Built, R0321 PASS; screenshots in Discord. The AI's building scan (`Buildings`) still only knows ground floors: upper floors are on the navmesh but not garrisoned yet. |
+| 14 | Procedural buildings, phase 3: two storeys with stairs, flat roofs the AI can climb onto (parapet, railed hatch), L-shaped buildings, walled yards and courtyards | `world/building-storeys` | `scripts/world/building_gen.gd`, `data/building_chunks.json` (52 chunks: 4 yard), `scripts/world/zone_modules.gd` (a town's own top), `scripts/world/voxel_world.gd` (stamping budget), `tests/world_test.gd` | Built, R0321-R0323 PASS, CI green; screenshots in Discord. Upper floors and roofs are walkable but not garrisoned: audit follow-ups F-01/F-02 for cghath. |
 | 15 | Procedural buildings, phase 4: city zones (denser streets, taller buildings) | later | | Queued |
 
 ## Decided (Captain, 2026-10-13)

@@ -86,8 +86,11 @@ suit it. Captain's side; see `docs/build_plan.md` ("Procedural buildings") for w
      furnished from four "yard" chunks (water tank, woodpile, crates, table and benches).
    - Checks (world_test): every room reachable up the stairs, no step over 0.25 m, nothing
      in a stairwell above, a voxel budget per storey; screenshots `agent-tools/phase3_shots.gd`.
-   - Not yet: the AI's building scan (`Buildings`) looks at ground floors only, so upper floors
-     and roofs are walkable but not garrisoned or cleared room by room.
+   - Not yet, tasks for cghath in the audit (`docs/audits/followups.md` on
+     `fix/audit-2026-10-13`): F-01, the AI's building scan (`scripts/ai/buildings.gd`) sees one
+     floor, so upper floors and roofs are walkable but not garrisoned or cleared room by room;
+     F-02, town garrison posts are all on the ground floor (Captain's side adds upper and
+     rooftop posts to `BuildingGen.town` once F-01 lands).
 4. **City zones.** A dense-streets terrain preset made of towns, with what it takes to stream
    that many buildings (budgets measured with the session log's performance lines).
 
