@@ -176,6 +176,8 @@ func _run_host(wait_for_client: bool) -> void:
 		await _test_gun()
 	if _want("chase_camera"):
 		await _test_chase_camera()
+	if _want("turret"):
+		await _test_turret()
 	if _want("service"):
 		await _test_service()
 	if _want("fire"):
@@ -808,12 +810,15 @@ func _test_gun() -> void:
 	print("Mounted gun")
 	var v := _vehicle("range_matv")
 	await _reset(v, Vector3(-12, 0, 6))
+	VehicleCamera.chase = false  # first person: the turret goes where it's sent (server_aim), not after a chase crosshair
 	check(v.server_enter(player, 4) and v.gunner() == player, "the player mans the M-ATV's M2")
 	var target := _soldier("hostile", v.global_position + Vector3(0, 0.1, -30), "GunTarget")
 	await _seconds(0.3)
 	var rounds := v.cargo_hold.feed_rounds(&"belt_50bmg")
 	var chest := (target.get_node(^"ChestHitbox/Shape") as Node3D).global_position
-	var origin := v.global_transform * VehicleSpecs.vec(v.spec.gun.at)
+	v.server_aim(chest - v.gun_origin())
+	await _wait_for(func() -> bool: return v.gun_on(chest - v.gun_origin(), 0.3), 3.0)
+	var origin := v.gun_origin()
 	var hits := 0
 	for i in 6:
 		var r := v.server_fire_gun(player, (chest - origin).normalized())
@@ -826,11 +831,120 @@ func _test_gun() -> void:
 	var burst := [v.server_fire_gun(player, Vector3.FORWARD), v.server_fire_gun(player, Vector3.FORWARD), v.server_fire_gun(player, Vector3.FORWARD)]
 	check(not burst[0].is_empty() and burst[2].is_empty(), "the rate holds: shots sent all at once don't all fire (%s)" % [burst.map(func(b: Dictionary) -> bool: return not b.is_empty())])
 	var own := v.zone_health(Vehicle.ZONE_ENGINE)
-	await _seconds(0.2)
-	v.server_fire_gun(player, (v.global_transform * Vector3(0, 0.8, -3.0) - origin).normalized())
+	v.server_aim(v.global_transform * Vector3(0, 0.8, -3.0) - v.gun_origin())
+	await _seconds(0.8)
+	v.server_fire_gun(player, (v.global_transform * Vector3(0, 0.8, -3.0) - v.gun_origin()).normalized())
 	check(is_equal_approx(v.zone_health(Vehicle.ZONE_ENGINE), own), "a gunner firing down over the bonnet never hits their own vehicle")
 	v.server_exit(player)
+	VehicleCamera.chase = true
 	target.queue_free()
+
+
+## Turrets turn (VehicleTurret; Captain, 2026-10-13): at the mount's speed, within its
+## elevation limits, the mesh, gun and gunner with it; first person is the gun's view; rounds
+## leave the real muzzle along the barrel; rounds meet the turret where it is now; an AI gunner
+## turns onto its target at the same speed before it fires.
+func _test_turret() -> void:
+	print("Turrets")
+	for id: String in ["range_matv", "range_maxxpro", "range_aav7"]:
+		var tv := _vehicle(id)
+		check(tv != null and tv.turret != null and tv.hull.art.get_node_or_null(^"Turret/Mesh") != null and tv.hull.art.get_node_or_null(^"Turret/Gun/Mesh") != null,
+			"%s: a turret and a gun of their own" % id)
+	var tech := VehicleSpecs.spec("technical_dshk")
+	check(VehicleTurret.of(tech) != null and VehicleTurret.of(VehicleSpecs.spec("technical_zu23")) == null, "a technical's DShK turns; the ones without a working gun don't")
+	var v := _vehicle("range_matv")
+	await _reset(v, Vector3(-12, 0, 6))
+	VehicleCamera.chase = false
+	check(v.server_enter(player, 4), "the player mans the M-ATV's turret, first person")
+	var t := v.turret
+	t.aim(0.0, 0.0)
+	t.settle()
+	await _seconds(Vehicle.EXIT_GRACE_S + 0.1)
+	# Traverse: 90 degrees to the right takes 1.5 s at 60 a second.
+	var right := v.global_basis.x
+	v.server_aim(right)
+	var t0 := Soldier._now()
+	await _seconds(0.5)
+	var turned := absf(t.yaw)
+	var most := t.yaw_rate * (Soldier._now() - t0) + 0.05
+	check(turned > t.yaw_rate * 0.35 and turned <= most,
+		"it traverses at its speed: %.0f degrees in %.2f s (at most %.0f)" % [rad_to_deg(turned), Soldier._now() - t0, rad_to_deg(most)])
+	var turret_node := v.hull.art.get_node(^"Turret") as Node3D
+	check(is_equal_approx(turret_node.rotation.y, t.yaw), "the turret's mesh turns with it")
+	await _wait_for(func() -> bool: return absf(t.yaw + PI * 0.5) < 0.01, 3.0)
+	check(absf(t.yaw + PI * 0.5) < 0.01 and v.barrel_direction().dot(right) > 0.99, "and stops on the target, the barrel to the right")
+	var seat := v.seat_transform("4").origin
+	check(player.global_position.distance_to(seat) < 0.05 and seat.distance_to(v.global_transform * t.carry(VehicleSpecs.vec(v.spec.seats[4].at) - Vector3(0, Vehicle.seat_eye("stand"), 0))) < 0.01,
+		"the gunner stands at the ring, turned with it")
+	for i in 3:
+		await get_tree().process_frame
+	check((-player.camera.global_basis.z).dot(v.barrel_direction()) > 0.99, "first person: the gunner looks along the gun")
+	# The mouse turns the turret, not the view: a turn of the body goes to where the turret's going.
+	player.rotation.y += deg_to_rad(30.0)
+	await get_tree().process_frame
+	check(absf(wrapf(t.target_yaw - (-PI * 0.5 + deg_to_rad(30.0)), -PI, PI)) < 0.02, "a mouse turn of 30 degrees sends the turret 30 degrees on")
+	await _seconds(0.1)
+	check((-player.camera.global_basis.z).dot(v.barrel_direction()) > 0.99, "and the view stays the gun's while it turns")
+	# Elevation limits.
+	v.server_aim(Vector3.UP + v.global_basis.z * -0.01)
+	await _wait_for(func() -> bool: return is_equal_approx(t.pitch, t.pitch_max), 3.0)
+	check(is_equal_approx(t.pitch, t.pitch_max) and is_equal_approx(t.target_pitch, t.pitch_max), "straight up: the gun stops at its highest (%.0f degrees)" % rad_to_deg(t.pitch_max))
+	v.server_aim(Vector3.DOWN - v.global_basis.z * 0.01)
+	await _wait_for(func() -> bool: return is_equal_approx(t.pitch, t.pitch_min), 3.0)
+	check(is_equal_approx(t.pitch, t.pitch_min), "straight down: at its lowest (%.0f degrees)" % rad_to_deg(t.pitch_min))
+	check(is_equal_approx((v.hull.art.get_node(^"Turret/Gun") as Node3D).rotation.x, t.pitch), "the gun's mesh elevates with it")
+	# Rounds leave the muzzle along the barrel: turned 60 degrees left and a little down, whatever direction the shot names.
+	t.aim(deg_to_rad(60.0), deg_to_rad(-6.0))
+	t.settle()
+	await get_tree().physics_frame
+	var muzzle := v.gun_origin()
+	check(muzzle.distance_to(v.global_transform * (t.gun_transform() * (t.muzzle - t.trunnion))) < 0.001 and (muzzle - v.global_transform * t.pivot).dot(v.barrel_direction()) > 1.0,
+		"the muzzle is out at the barrel's end")
+	await _seconds(0.3)
+	var shot := v.server_fire_gun(player, -v.global_basis.z)
+	var at: Vector3 = shot.get("position", muzzle)
+	var off := ((at - muzzle) - v.barrel_direction() * (at - muzzle).dot(v.barrel_direction())).length()
+	var spread := tan(deg_to_rad(float(VehicleSpecs.gun_item("m2hb").stats.get("spread_deg", 0.3)))) * 1.5
+	check(shot.get("result", "none") != "none" and (at - muzzle).dot(v.barrel_direction()) > 2.0 and off < (at - muzzle).length() * spread + 0.05,
+		"a round leaves the muzzle along the barrel, not where the shot asked (%.2f m off the line at %.1f m)" % [off, (at - muzzle).length()])
+	# Rounds meet the turret where it is: the front plate, straight ahead, then behind.
+	var ahead := v.hull.first_solid(Vector3(0, 3.05, -2.5), Vector3.BACK, 4.0)
+	t.aim(0.0, 0.0)
+	t.settle()
+	ahead = v.hull.first_solid(Vector3(0, 3.05, -2.5), Vector3.BACK, 4.0)
+	t.aim(PI, 0.0)
+	t.settle()
+	var behind := v.hull.first_solid(Vector3(0, 3.05, -2.5), Vector3.BACK, 4.0)
+	check(ahead.get("part", "") == "Turret" and absf(float(ahead.local.z) - (t.pivot.z - 0.88)) < 0.1, "a round from ahead meets the shield's front plate (%s)" % [ahead.get("local")])
+	check(behind.get("part", "") == "Turret" and float(behind.local.z) > t.pivot.z + 0.6, "turned round, the same round meets it behind the ring (%s)" % [behind.get("local")])
+	t.aim(0.0, 0.0)
+	t.settle()
+	v.server_exit(player)
+	VehicleCamera.chase = true
+	# An AI gunner turns onto its target at the weapon station's speed before it fires.
+	var aav := _vehicle("range_aav7")
+	await _reset(aav, Vector3(18, 0, -10))
+	aav.turret.aim(0.0, 0.0)
+	aav.turret.settle()
+	var crew := _soldier("player", aav.global_position + aav.global_basis.x * 3.0, "TurretAI")
+	check(aav.server_enter(crew, 2), "an AI gunner in the AAV's weapon station")
+	var foe := _soldier("hostile", aav.global_position + aav.global_basis.x * 40.0 + Vector3(0, 0.1, 0), "TurretFoe")
+	var gunner := AavGunner.attach(aav)
+	await _seconds(0.6)
+	var early := gunner.fired
+	var turned_ai := absf(aav.turret.yaw)
+	check(early == 0 and turned_ai > 0.05 and turned_ai <= aav.turret.yaw_rate * 0.7 + 0.05,
+		"it doesn't fire while still turning (%d rounds, %.0f degrees in 0.6 s)" % [early, rad_to_deg(turned_ai)])
+	await _wait_for(func() -> bool: return gunner.fired > 0, 6.0)
+	var to_foe := foe.global_position - aav.gun_origin()
+	check(gunner.fired > 0 and aav.barrel_direction().dot(Vector3(to_foe.x, 0, to_foe.z).normalized()) > 0.97,
+		"then fires with the gun on it (%d rounds)" % gunner.fired)
+	gunner.queue_free()
+	aav.server_exit(crew)
+	crew.queue_free()
+	foe.queue_free()
+	aav.turret.aim(0.0, 0.0)
+	aav.turret.settle()
 
 
 ## Seated players see out through a chase camera (VehicleCamera; Captain, 2026-10-13: the
@@ -847,8 +961,8 @@ func _test_chase_camera() -> void:
 		return action != VehicleCamera.ACTION and not String(action).begins_with("ui_") and InputMap.action_get_events(action).any(func(e: InputEvent) -> bool:
 			return e is InputEventKey and ((e as InputEventKey).physical_keycode == KEY_B or (e as InputEventKey).keycode == KEY_B)))
 	check(clashes.is_empty(), "and B does nothing else (%s)" % [clashes])
-	VehicleCamera.chase = not VehicleCamera.FIRST_PERSON_DEFAULT
-	check(VehicleCamera.chase, "a session starts in the chase view (first person waits for the interiors)")
+	check(VehicleCamera.FIRST_PERSON_DEFAULT, "a session starts in first person now the cabins are hollow and glazed (Captain); B gives the chase view")
+	VehicleCamera.chase = true  # the checks below start from the chase view
 	# Out of the M2 a moment ago (the gun checks): the exit's grace runs out first (a body that
 	# just got out isn't placed at a seat for EXIT_GRACE_S), and the camera has a frame to notice.
 	await _seconds(Vehicle.EXIT_GRACE_S + 0.1)
@@ -893,8 +1007,8 @@ func _test_chase_camera() -> void:
 		await get_tree().physics_frame
 	check(not VehicleCamera.chase and not cam.active and player.camera.current and get_viewport().get_camera_3d() == player.camera,
 		"B: first person")
-	check(player.camera.global_position.distance_to(v.seat_eye_point(0)) < 0.15 and player.view_model.visible,
-		"at the seat's eye, as before (%.2f m off)" % player.camera.global_position.distance_to(v.seat_eye_point(0)))
+	check(player.camera.global_position.distance_to(v.seat_eye_point(0)) < 0.15 and not player.view_model.visible,
+		"at the seat's eye, as before, with no rifle in view (it can't fire from a seat; it hid the cabin) (%.2f m off)" % player.camera.global_position.distance_to(v.seat_eye_point(0)))
 	player.player_input._unhandled_input(press)
 	for i in 2:
 		await get_tree().process_frame
@@ -1311,8 +1425,12 @@ func _stage_for_client() -> void:
 	mrap.server_enter(rider, 3)
 	mrap.server_set_zone(Vehicle.ZONE_ENGINE, 0.55)
 	mrap._add_carves([[0.0, 2.0, -1.0, 0.1, VehicleHull.HOLE]])
+	mrap.turret.aim(1.2, 0.2)  # the MaxxPro's turret turned left and up: the late joiner sees it so
+	mrap.turret.settle()
 	var matv := _vehicle("range_matv")
 	await _reset(matv, Vector3(-12, 0, 6))
+	matv.turret.aim(0.0, 0.0)
+	matv.turret.settle()
 	player.global_position = Vector3(0, 0.1, 20)
 
 
@@ -1339,7 +1457,7 @@ func _digest() -> Dictionary:
 			if v.occupant(i):
 				seated[str(i)] = String(v.occupant(i).name)
 		out[v.vehicle_id] = {"model": v.model, "wrecked": v.wrecked, "carves": v.net_carves.size(), "engine": v.zone_health(Vehicle.ZONE_ENGINE),
-			"seated": seated, "pos": v.global_position}
+			"seated": seated, "pos": v.global_position, "turret": Vector2(v.turret.yaw, v.turret.pitch) if v.turret else Vector2.ZERO}
 	return out
 
 
@@ -1398,6 +1516,10 @@ func _run_client(address: String) -> void:
 	check(mrap.hull.edit_count() > 0, "and the MaxxPro's hull damage is drawn here too")
 	var wreck := _vehicle("range_technical")
 	check(wreck != null and wreck.wrecked and wreck.freeze, "the wreck is a wreck here too")
+	var host_aim: Vector2 = (_host_digest.get("range_maxxpro", {}) as Dictionary).get("turret", Vector2.ZERO)
+	var mrap_turret := mrap.hull.art.get_node(^"Turret") as Node3D if mrap else null
+	check(mrap and mrap.turret and Vector2(mrap.turret.yaw, mrap.turret.pitch).distance_to(host_aim) < 0.02 and mrap_turret and absf(mrap_turret.rotation.y - host_aim.x) < 0.02,
+		"the MaxxPro's turret points where the host has it (%s, host %s)" % [Vector2(mrap.turret.yaw, mrap.turret.pitch) if mrap and mrap.turret else null, host_aim])
 	if player == null:
 		_finish()
 		return
@@ -1447,5 +1569,40 @@ func _run_client(address: String) -> void:
 	check(player.vehicle == null and player.global_position.distance_to(matv.global_position) > 1.2, "and gets out beside it")
 	await get_tree().process_frame
 	check(cam != null and not cam.active and get_viewport().get_camera_3d() == player.camera, "and sees through their own eyes again")
+	await _client_turret(matv)
 	await _seconds(0.5)
 	_finish()
+
+
+## Client: mans the M-ATV's turret (first person) and turns it: it turns here at once and
+## smoothly, at the mount's speed, the host's turns there too, and the view is the gun's.
+func _client_turret(matv: Vehicle) -> void:
+	VehicleCamera.chase = false
+	await _seconds(Vehicle.EXIT_GRACE_S + 0.2)
+	matv.request_enter.rpc_id(1, 4)
+	await _wait_for(func() -> bool: return matv.seat_of(player) == 4, 5.0)
+	check(matv.seat_of(player) == 4 and matv.turret != null, "the client mans the M-ATV's turret (through the host)")
+	if matv.seat_of(player) != 4:
+		return
+	await _seconds(0.3)
+	matv.turret.aim(-1.0, 0.15)  # as the mouse would: the gunner's own peer sets where it goes
+	var worst := 0.0
+	var last := matv.turret.yaw
+	var end := Time.get_ticks_msec() + 2500
+	while Time.get_ticks_msec() < end:
+		await get_tree().physics_frame
+		worst = maxf(worst, absf(wrapf(matv.turret.yaw - last, -PI, PI)))
+		last = matv.turret.yaw
+	check(absf(matv.turret.yaw + 1.0) < 0.01 and absf(matv.turret.pitch - 0.15) < 0.01, "the client's turret turns there (%.2f, %.2f)" % [matv.turret.yaw, matv.turret.pitch])
+	check(worst <= matv.turret.yaw_rate / Engine.physics_ticks_per_second * 1.05 + 0.001,
+		"smoothly, never faster than the mount (worst %.3f rad a tick)" % worst)
+	check((-player.camera.global_basis.z).dot(matv.barrel_direction()) > 0.99 and player.global_position.distance_to(matv.seat_transform("4").origin) < 0.05,
+		"first person: the client looks along the gun, standing at the turned ring")
+	_host_digest = {}
+	_ask_digest.rpc_id(1)
+	await _wait_for(func() -> bool: return not _host_digest.is_empty(), 10.0)
+	var host_aim: Vector2 = (_host_digest.get("range_matv", {}) as Dictionary).get("turret", Vector2(INF, INF))
+	check(host_aim.distance_to(Vector2(-1.0, 0.15)) < 0.02, "and the host's turret is there too (%s)" % host_aim)
+	matv.request_exit.rpc_id(1)
+	await _wait_for(func() -> bool: return player.vehicle == null, 5.0)
+	VehicleCamera.chase = true

@@ -48,6 +48,8 @@ static var _meshes := {}  # "model|scheme" -> Mesh
 static var _sizes := {}   # model -> Vector3i canvas size
 static var _voxel := {}   # model -> voxel size in metres
 static var _rotors := {}  # model -> [[name, position_m, radius, chord, blades, axis]]
+static var _parts := {}   # model -> the canvas's turning parts (VehicleTurret.split)
+static var _part_meshes := {}  # "model|scheme|part" -> Mesh
 static var _meshers := {}
 static var _material: StandardMaterial3D
 static var _blade_material: StandardMaterial3D
@@ -72,7 +74,41 @@ static func instance(model: String, scheme := "") -> Node3D:
 	for r: Array in _rotors.get(model, []):
 		var at: Vector3 = r[1]
 		_add_rotor(root, r[0], Vector3(at.x, at.y, at.z - size.z * vs * 0.5), r[2], r[3], r[4], r[5])
+	_add_turret(root, model, scheme)
 	return root
+
+
+## The turning turret and its gun (VehicleTurret), as nodes "Turret" (at the ring's pivot) and
+## "Turret/Gun" (at the trunnion), each with its own mesh "Mesh"; at rest they sit where the
+## model drew them.
+static func _add_turret(root: Node3D, model: String, scheme: String) -> void:
+	var parts: Array = _parts.get(model, [])
+	if parts.is_empty():
+		return
+	var t := VehicleTurret.of(VehicleSpecs.spec(model))
+	if t == null:
+		return
+	var vs: float = _voxel[model]
+	var size: Vector3i = _sizes[model]
+	var turret := Node3D.new()
+	turret.name = "Turret"
+	turret.position = t.pivot
+	root.add_child(turret)
+	var gun := Node3D.new()
+	gun.name = "Gun"
+	gun.position = t.trunnion - t.pivot
+	turret.add_child(gun)
+	for part: Dictionary in parts:
+		var key := "%s|%s|%s" % [model, scheme, part.name]
+		if not _part_meshes.has(key):
+			_part_meshes[key] = _get_mesher(scheme).build_mesh(part.look, [])
+		var mi := MeshInstance3D.new()
+		mi.name = "Mesh"
+		mi.mesh = _part_meshes[key]
+		mi.scale = Vector3.ONE * vs
+		var gun_part: bool = part.name == "Gun"
+		mi.position = VehicleTurret.part_offset(part, size, vs, t.trunnion if gun_part else t.pivot)
+		(gun if gun_part else turret).add_child(mi)
 
 
 ## Footprint and height in metres.
@@ -119,15 +155,18 @@ static func mesh(model: String, scheme: String) -> Mesh:
 		_sizes[model] = canvas.size
 		_voxel[model] = canvas.vs
 		_rotors[model] = canvas.rotors
+		_parts[model] = canvas.parts
 		_meshes[key] = _get_mesher(scheme).build_mesh(canvas.look if canvas.look else canvas.buffer, [])
 	return _meshes[key]
 
 
 ## The model's voxels (`buffer`, what rounds meet) and its look (`look`: the same with the
-## cabin interiors and see-through windows, VehicleInteriors).
+## cabin interiors and see-through windows, VehicleInteriors), less a turret and its gun, which
+## go to `parts` (VehicleTurret.split: they turn).
 static func _canvas_for(model: String) -> Canvas:
 	var c := _shape_for(model)
 	VehicleInteriors.furnish(model, c)
+	VehicleTurret.split(model, c)
 	return c
 
 
@@ -275,6 +314,8 @@ class Canvas:
 	var vs := 0.1
 	## Rotors to add as separate nodes: [name, position_m, radius, chord, blades, axis].
 	var rotors: Array = []
+	## The turret and gun lifted out of buffer and look (VehicleTurret.split): turned as nodes.
+	var parts: Array = []
 
 	func _init(p_size: Vector3i, p_vs := 0.1) -> void:
 		size = p_size

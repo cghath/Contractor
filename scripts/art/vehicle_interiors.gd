@@ -293,11 +293,11 @@ static func seats_of(model: String) -> Array:
 ## M-ATV: the cab was drawn as a hollow shell (VehicleArt._matv), open at the back. A back wall
 ## with a small window closes it off from the bed (visual only: rounds still pass there as
 ## before), the gunner's hatch is cut through the roof under the turret ring (visual only), and
-## the windscreen and door windows are glazed.
+## the windscreen and door windows are glazed. The turret's windows are VehicleTurret's (it turns).
 static func _matv(k: Cab) -> void:
 	k.bulkhead(4.3, 4.4, 0.95, 2.45, P.PAINT)
 	k.c.mbox(-0.45, 1.85, 4.3, 0.45, 2.2, 4.4, P.WINDOW)
-	k.c.mdisc(0.0, 3.3, 0.3, 2.3, 2.6, P.EMPTY)
+	k.c.mdisc(0.0, 3.3, 0.3, 2.3, 2.65, P.EMPTY)  # through the turret's floor plate too
 	k.glaze(-0.95, 1.8, 1.9, 0.95, 2.42, 2.7, 2, true)
 	k.glaze_sides(1.3, 0.6, 1.75, 2.6, 2.3, 4.1)
 	k.seats(1.0, -0.95, 0.95)
@@ -312,7 +312,7 @@ static func _maxxpro(k: Cab) -> void:
 			return lerpf(1.95, 2.85, clampf((z - 1.45) / 0.4, 0.0, 1.0)) - 0.2
 		return 2.75
 	k.carve_under(-1.02, 1.2, 1.5, 1.02, 6.3, top)
-	k.c.mdisc(0.0, 3.0, 0.28, 2.7, 2.97, P.EMPTY)
+	k.c.mdisc(0.0, 3.0, 0.28, 2.7, 3.02, P.EMPTY)  # through the turret's floor plate too
 	k.glaze(-1.0, 2.0, 1.4, 1.0, 2.75, 2.1, 2, true)
 	k.glaze_sides(1.4, 0.9, 1.95, 2.0, 2.55, 6.1)
 	k.glaze(-0.3, 2.05, 6.0, 0.3, 2.4, 6.5, 2, false)
@@ -358,6 +358,10 @@ static func _aav7(k: Cab) -> void:
 	for gx: float in [-0.35, 0.0, 0.35]:
 		k.glaze(0.82 + gx - 0.1, 2.95, 1.3, 0.82 + gx + 0.1, 3.08, 2.2, 2, true)
 	k.glaze(-0.2, 1.65, 7.6, 0.2, 1.95, 8.1, 2, false)
+	# The troop compartment's vision blocks along the roof edges: glass (visual only).
+	for side: float in [-1.0, 1.0]:
+		for vz: float in [4.0, 5.2, 6.4]:
+			k.c.mbox(minf(side * 1.3, side * 1.55), 2.62, vz, maxf(side * 1.3, side * 1.55), 2.7, vz + 0.3, P.WINDOW)
 	k.seats(1.0, -1.5, -0.35)
 
 

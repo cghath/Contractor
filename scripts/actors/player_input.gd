@@ -231,8 +231,9 @@ func _physics_process(delta: float) -> void:
 	_try_fire()
 	var tilt := minf(-0.7 if body.is_reloading else 0.0, -CharacterModel.VIEW_LOWER_PITCH * body.model.view_lower())
 	body.view_model.rotation.x = move_toward(body.view_model.rotation.x, tilt, delta * 6.0)
-	# Both hands on the casualty: no weapon in view; nor in the vehicle's chase view (the body has it).
-	body.view_model.visible = body.carry_mode == &"" and not (vehicle_camera and vehicle_camera.active)
+	# Both hands on the casualty: no weapon in view; nor seated in a vehicle (no firing your own
+	# from a seat, and in first person it hid the cabin and poked through the dash).
+	body.view_model.visible = body.carry_mode == &"" and not is_instance_valid(body.vehicle)
 	_hide_shouldered()
 	# Settle sway after a stop (W3, SoldierMovement.weapon_sway).
 	var sway := body.movement.weapon_sway()

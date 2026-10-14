@@ -7,6 +7,9 @@ extends Node
 ## (the gun's own rate, spread and belts from the hold), holding fire while a friend stands
 ## near the line. The support AAV's gunner and an enemy technical's both use it. Numbers in
 ## data/ground_supports.json "gunner" (Proposed). A child of the vehicle on the host only.
+## A turret (VehicleTurret) turns to the target at its own speeds and within its limits, as a
+## player's does (Vehicle.server_aim), and fires once its barrel is on (Vehicle.gun_on); the
+## gunner's own unsteadiness goes into where it aims.
 
 const NODE_NAME := "AIGunner"
 ## Aim at the chest; a little below for a target lying down.
@@ -61,10 +64,13 @@ func _physics_process(delta: float) -> void:
 		_burst_left = randi_range(int(burst[0]), int(burst[1]))
 	var muzzle := _muzzle()
 	var aim := target.aim_point() if target.vitals.is_up() else target.body_point() + Vector3.UP * LOW_TARGET_M
-	var dir := (aim - muzzle).normalized()
+	var exact := (aim - muzzle).normalized()
 	var spread := deg_to_rad(float(_cfg.get("spread_deg", 0.8)))
-	var side := dir.cross(Vector3.UP).normalized() if absf(dir.y) < 0.99 else Vector3.RIGHT
-	dir = (dir + side * randf_range(-1, 1) * tan(spread) + side.cross(dir) * randf_range(-1, 1) * tan(spread)).normalized()
+	var side := exact.cross(Vector3.UP).normalized() if absf(exact.y) < 0.99 else Vector3.RIGHT
+	var dir := (exact + side * randf_range(-1, 1) * tan(spread) + side.cross(exact) * randf_range(-1, 1) * tan(spread)).normalized()
+	vehicle.server_aim(dir)
+	if not vehicle.gun_on(exact):
+		return  # still turning onto it
 	var shot := vehicle.server_fire_gun(gunner, dir)
 	if shot.is_empty():
 		if vehicle.gun_info().get("rounds", 0) <= 0:
@@ -78,10 +84,9 @@ func _physics_process(delta: float) -> void:
 		_pause = randf_range(float(pause[0]), float(pause[1]))
 
 
-## The gun's muzzle in the world.
+## The gun's muzzle in the world (where the turret has it now).
 func _muzzle() -> Vector3:
-	var g: Dictionary = vehicle.spec.get("gun", {})
-	return vehicle.global_transform * VehicleSpecs.vec(g.get("at"), Vector3(0, 2, 0))
+	return vehicle.gun_origin()
 
 
 ## The nearest enemy in range, in clear sight of the muzzle, with no friend near the line.

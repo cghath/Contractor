@@ -19,15 +19,16 @@ extends Camera3D
 ## Vehicle.gun_direction), as Arma's third-person gunner. Client side only: nothing new is
 ## replicated.
 ##
-## For the interiors (first-person seat views): FIRST_PERSON_DEFAULT makes first person the
-## session's starting view once the hulls are hollow; `chase` is what PlayerInput reads.
+## First person is the session's starting view (FIRST_PERSON_DEFAULT; Captain, 2026-10-14: the
+## cabins are hollow and glazed, the turrets turn), B gives this chase view; `chase` is what
+## PlayerInput and Vehicle read.
 ## Numbers marked Proposed are tunable.
 
 ## The input action that switches the view while seated (Controls.KEYS, GameSettings.BINDABLE).
 const ACTION := &"vehicle_view"
-## Proposed: whether a session starts in first person. False until the vehicles have hollow
-## interiors and windows to see out of (the chase view is the only usable one till then).
-const FIRST_PERSON_DEFAULT := false
+## Whether a session starts in first person (Captain: yes, once every seat reads right in it:
+## the vehicles have hollow, furnished cabins, see-through windows and turning turrets).
+const FIRST_PERSON_DEFAULT := true
 ## Proposed: the arm's length, times the hull's diagonal (VehicleSpecs boxes), and its limits (m).
 const DISTANCE_SCALE := 0.8
 const DISTANCE_MIN := 5.0
