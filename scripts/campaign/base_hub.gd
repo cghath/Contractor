@@ -950,19 +950,41 @@ func end_deployment(report: Dictionary) -> void:
 			server_store_member_gear(String(s.get_meta(&"roster_id")), s.inventory.net_state)
 	var contract_ran := Contracts.is_deployed()
 	if contract_ran:
-		var debrief_report := Contracts.report_from_level(lvl, extracted)
-		debrief_report["hvts"] = hvts
 		# The people bring their own gear home; what else came out (bodies carried in, items set
-		# down at the point) goes to the stash.
+		# down at the point) goes to the stash, and so leaves the zone: it isn't salvage too,
+		# and the zone save doesn't keep it to be banked again (the loop test caught both).
 		var bank: Array = []
+		var banked := {}
 		for body: Dictionary in report.get("bodies", []):
+			banked[String(body.get("uid", ""))] = true
 			for entry: Dictionary in body.get("items", []):
 				bank.append_array(Contracts.flatten_entry(entry))
 		for entry: Dictionary in report.get("deposited", []):
+			banked[String(entry.get("uid", ""))] = true
 			bank.append_array(Contracts.flatten_entry(entry))
+		banked.erase("")
+		var debrief_report := Contracts.report_from_level(lvl, extracted, banked)
+		debrief_report["hvts"] = hvts
 		debrief_report["bank"] = bank
+		_take_out_of_zone(banked)
 		Contracts.server_end_deployment(debrief_report)
 	server_end_deployment(extracted, true, not contract_ran)
+
+
+## Host: items (WorldItem.uid) and bodies (Soldier.body_uid) in `uids` came out at extraction
+## and were banked: they leave the zone (GameState.save_zone skips what's going).
+func _take_out_of_zone(uids: Dictionary) -> void:
+	if uids.is_empty():
+		return
+	for n: Node in get_tree().get_nodes_in_group(WorldItem.GROUP):
+		var item := n as WorldItem
+		if item and uids.has(item.uid) and not item.is_queued_for_deletion():
+			GameState.item_taken(item.uid)
+			item.queue_free()
+	for n: Node in get_tree().get_nodes_in_group(Soldier.DEAD_GROUP):
+		var body := n as Soldier
+		if body and uids.has(body.body_uid) and not body.is_queued_for_deletion():
+			body.queue_free()
 
 
 ## Host (the map's extraction): the deployment ends. `extracted` are the soldiers who made it

@@ -761,8 +761,11 @@ func server_finish_debrief() -> void:
 ## An extraction report (see server_end_deployment) from the level as it stands, with
 ## `extracted` (Soldiers) getting out: what they carry is "items"; loose items and what's
 ## on the dead is "field_items"; friendly squadmates left behind are casualties (dead: KIA,
-## alive: MIA), and those who got out hurt are "wounded".
-static func report_from_level(level: CompoundLevel, extracted: Array) -> Dictionary:
+## alive: MIA), and those who got out hurt are "wounded". `banked`: uids (WorldItem.uid,
+## Soldier.body_uid) of what came out at the extraction point and is banked on its own (items
+## set down there, bodies brought there): not salvage as well (the loop test caught it offered
+## twice).
+static func report_from_level(level: CompoundLevel, extracted: Array, banked := {}) -> Dictionary:
 	var items: Array = []
 	var names: Array = []
 	var casualties: Array = []
@@ -776,7 +779,7 @@ static func report_from_level(level: CompoundLevel, extracted: Array) -> Diction
 	var field: Array = []
 	for node in level.get_tree().get_nodes_in_group(WorldItem.GROUP):
 		var item := node as WorldItem
-		if item and not item.is_queued_for_deletion():
+		if item and not item.is_queued_for_deletion() and not banked.has(item.uid):
 			field.append_array(flatten_entry({"id": item.item_id, "count": item.count, "state": item.state}))
 	for node in level.get_tree().get_nodes_in_group(&"combatants") + level.get_tree().get_nodes_in_group(&"dead_bodies"):
 		var s := node as Soldier
@@ -785,7 +788,7 @@ static func report_from_level(level: CompoundLevel, extracted: Array) -> Diction
 		if s.has_meta(&"vehicle_crew") and not s.vitals.is_dead():
 			continue  # wave 5b: a support vehicle's crew isn't the squad's, nor missing (it goes home with it)
 		out[s] = true
-		if s.vitals.is_dead():
+		if s.vitals.is_dead() and not banked.has(s.body_uid):
 			field.append_array(inventory_items(s.inventory))
 		if s.faction == &"friendly":
 			casualties.append({"name": s.display_name(), "status": "kia" if s.vitals.is_dead() else "mia", "injury": s.vitals.condition_text()})

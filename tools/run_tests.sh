@@ -32,7 +32,7 @@ cd "$(dirname "$0")/.."
 GODOT="${GODOT:-godot}"
 SUITE_TIMEOUT="${SUITE_TIMEOUT:-480}"
 SUITES=("$@")
-[ ${#SUITES[@]} -eq 0 ] && SUITES=(smoke gameplay squad net wounds armor movement interaction roles medical logistics casualty materials animations scavenge contracts people map base world missions vehicles antiarmor session_log supports aav sound)
+[ ${#SUITES[@]} -eq 0 ] && SUITES=(smoke gameplay squad net wounds armor movement interaction roles medical logistics casualty materials animations scavenge contracts people map base world missions vehicles antiarmor session_log supports aav sound loop)
 status=0
 finished=""
 keep_root="$(run_log_parent)"
