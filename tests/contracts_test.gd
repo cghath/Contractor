@@ -54,6 +54,7 @@ func _ready() -> void:
 	_test_save_reload()
 	_test_shop()
 	_test_intel_and_salvage()
+	_test_set_down_at_the_point()
 	await _test_board_ui()
 	$Main/Menu.host()
 	level = CompoundLevel.current(self)
@@ -589,6 +590,63 @@ func _test_intel_and_salvage() -> void:
 	check(leads.size() == leads_before + 2 and String(leads.back().title).begins_with("Lead:") and float(leads.back().intel_accuracy) >= 0.8,
 		"two pieces open two leads on the board, with good intel (%s)" % [leads.map(func(o: Dictionary) -> String: return o.title)])
 	Contracts.server_finish_debrief()
+
+
+## B-18: every contract debriefed "failed". What else came out at extraction (BaseHub's
+## "bank": items set down in the point, a helicopter's hold, bodies carried in) never counted
+## for "carry it out" objectives, only what the people still held: an intel grab whose laptop
+## was set down at the point failed, as did an HVT capture's phone bonus.
+func _test_set_down_at_the_point() -> void:
+	print("Carried out but set down at the point (B-18)")
+	Contracts.new_full_campaign(62, 100000)
+	Economy.take_unbanked()
+	var cid := _make_offer("intel_grab", "harbour_yard")
+	Contracts.server_accept(cid, ContractGen.default_terms())
+	Contracts.server_start_deployment([cid])
+	var bank := _out_entries(cid)
+	check(bank.size() == 2, "the intel grab wants two things carried out (%d)" % bank.size())
+	var d := Contracts.server_end_deployment({"items": [{"id": "m4a1", "count": 1}], "bank": bank, "extracted": ["You"]})
+	var line: Dictionary = d.contracts[0]
+	check(line.outcome == "completed" and (line.bonuses as Array).any(func(b: Dictionary) -> bool: return String(b.text).contains("too")),
+		"the intel and the bonus documents set down at the point complete the contract with its bonus (%s, %s)" % [line.outcome, line.objectives])
+	check(d.intel.size() >= 1, "what was set down shows as intel in the debrief")
+	Contracts.server_finish_debrief()
+	# The HVT capture: the HVT delivered, his phone (the bonus) set down at the point.
+	var hvt_cid := _make_offer("hvt_capture", "harbour_yard")
+	Contracts.server_accept(hvt_cid, ContractGen.default_terms())
+	Contracts.server_start_deployment([hvt_cid])
+	var hvt_id := ""
+	for o: Dictionary in Contracts.objectives.list:
+		if o.cid == hvt_cid and o.kind == Objectives.DELIVER_HVT:
+			hvt_id = String(o.params.get("hvt", ""))
+	var phone := _out_entries(hvt_cid)
+	d = Contracts.server_end_deployment({"items": [], "bank": phone, "hvts": [{"hvt": hvt_id, "alive": true}], "extracted": ["You"]})
+	line = d.contracts[0]
+	check(hvt_id != "" and phone.size() == 1 and line.outcome == "completed" and not (line.bonuses as Array).filter(func(b: Dictionary) -> bool: return String(b.text).contains("phone")).is_empty(),
+		"the HVT delivered and his phone set down at the point: completed with the bonus (%s, %s)" % [line.outcome, line.objectives])
+	Contracts.server_finish_debrief()
+	# Nothing done is still a failure (the soaks' bots never take the objective).
+	var idle := _make_offer("intel_grab", "compound_01")
+	Contracts.server_accept(idle, ContractGen.default_terms())
+	Contracts.server_start_deployment([idle])
+	d = Contracts.server_end_deployment({"items": [{"id": "m4a1", "count": 1}], "bank": [{"id": "rounds_556", "count": 30}], "extracted": ["You"]})
+	check(d.contracts[0].outcome == "failed", "extracting without the intel is still a failure (%s)" % d.contracts[0].outcome)
+	Contracts.server_finish_debrief()
+
+
+## One entry per "carry it out" objective of contract `cid`: its item, as the mission placed it.
+func _out_entries(cid: String) -> Array:
+	var out: Array = []
+	for o: Dictionary in Contracts.objectives.list:
+		if o.cid != cid or o.kind != Objectives.EXTRACT_ITEM:
+			continue
+		var items: Array = o.params.get("items", [])
+		var ids: Array = o.params.get("intel_ids", [])
+		var entry := {"id": String(items[0]) if not items.is_empty() else "hvt_case", "count": 1, "state": {}}
+		if not ids.is_empty():
+			entry.state["intel_id"] = String(ids[0])
+		out.append(entry)
+	return out
 
 
 func _test_board_ui() -> void:

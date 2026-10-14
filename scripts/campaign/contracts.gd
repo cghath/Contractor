@@ -625,7 +625,10 @@ func server_end_deployment(report: Dictionary) -> Dictionary:
 		return {}
 	for h: Dictionary in report.get("hvts", []):
 		objectives.server_hvt_delivered(String(h.get("hvt", "")), bool(h.get("alive", true)))
-	var out_items: Array = (report.get("items", []) as Array) + (dep.banked as Array)
+	# B-18: what else came out (BaseHub's "bank": items set down in the point, a helicopter's
+	# hold, bodies carried in) counts for "carry it out" objectives and shows in the debrief too,
+	# not only what the people still hold: intel set down at the point debriefed "failed".
+	var out_items: Array = (report.get("items", []) as Array) + (report.get("bank", []) as Array) + (dep.banked as Array)
 	objectives.server_items_out(out_items)
 	for o: Dictionary in objectives.active():
 		objectives.server_set_state(o.oid, Objectives.FAILED)
