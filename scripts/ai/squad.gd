@@ -476,6 +476,10 @@ func order_command(from: Soldier, cmd: String, point: Vector3, names := PackedSt
 ## "Give me ammo": the nearest selected unit carrying magazines of `from`'s weapon (one not
 ## busy with a casualty or his own wounds, if there is one) brings him some.
 func order_give_ammo(from: Soldier, names: PackedStringArray) -> String:
+	## Down, he can't take them: before, the order went out and the bringer dropped it on
+	## arrival (_tactic_give_ammo ends for a casualty), with no word why.
+	if not from.vitals.is_up():
+		return "Not while you're down"
 	var weapon := from.active_weapon()
 	if weapon == null or weapon.type != "weapon":
 		return "Have a rifle in your hands"
