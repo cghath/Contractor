@@ -47,6 +47,9 @@ var _start_t := 0.0
 ## Draw soldiers with the game's own body (soldier.tscn, nothing simulated: placed each frame,
 ## posed from the replay) instead of capsules (--capsules).
 var models := true
+## "Players/<peer id>" -> the bot's name ("Host (bot 0)", "Bot 2"), from each client's own replay
+## ("joined" events carry its peer id; a rejoin gets a new one).
+var names := {"Players/1": "Host (bot 0)"}
 ## Render layers: names only in the main view, map discs only in the overhead one.
 const LABEL_LAYER := 1 << 10
 const MAP_LAYER := 1 << 11
@@ -63,6 +66,7 @@ func _ready() -> void:
 	Ragdoll.enabled = false  # a puppet lies down posed, not as physics
 	models = not args.has("--capsules")
 	frames = _load(path)
+	_load_names(path.get_base_dir().get_base_dir())
 	var cpath := _arg(args, "--compare", "")
 	if cpath != "" and FileAccess.file_exists(cpath):
 		compare = _load(cpath)
@@ -96,6 +100,20 @@ func _ready() -> void:
 static func _arg(args: PackedStringArray, flag: String, fallback: String) -> String:
 	var i := args.find(flag)
 	return args[i + 1] if i >= 0 and i + 1 < args.size() else fallback
+
+
+func _load_names(run_dir: String) -> void:
+	for n in range(1, 4):
+		var f := FileAccess.open(run_dir.path_join("client%d" % n).path_join("replay.jsonl"), FileAccess.READ)
+		while f and not f.eof_reached():
+			var line := f.get_line()
+			if not line.contains("\"joined\""):
+				continue
+			var d: Variant = JSON.parse_string(line)
+			if d is Dictionary:
+				for e: Array in d.get("e", []):
+					if e.size() > 1 and String(e[0]) == "joined":
+						names["Players/%d" % int(e[1])] = "Bot %d" % n
 
 
 static func _load(path: String) -> Array:
@@ -326,7 +344,7 @@ func _process(delta: float) -> void:
 func _events(f: Dictionary) -> void:
 	for e: Array in f.get("e", []):
 		var what := String(e[0])
-		var key := String(e[1]) if e.size() > 1 else ""
+		var key := _id(e[1]) if e.size() > 1 else ""
 		match what:
 			"fire":
 				if e.size() >= 5 and puppets.has(key):
@@ -348,10 +366,15 @@ func _events(f: Dictionary) -> void:
 					_feed(key.left(90))
 
 
+## An event's subject as text: a soldier key, a note, or a peer id (JSON makes ids floats).
+static func _id(v: Variant) -> String:
+	return "%d" % int(v) if v is float or v is int else str(v)
+
+
 func _name(key: String) -> String:
 	for row: Array in frames[_i].get("s", []):
 		if String(row[0]) == key:
-			return String(row[8])
+			return names.get(key, String(row[8]))
 	return key
 
 
@@ -412,7 +435,7 @@ func _draw_frame(delta: float) -> void:
 			aim.rotation.x = float(row[5])
 		var label: Label3D = puppet.get_node(^"Label")
 		var state := "DEAD" if flags & FLAGS.F_DEAD else ("DOWN" if flags & FLAGS.F_DOWNED else "")
-		var text := "%s\n%d%%%s" % [String(row[8]), int(float(row[7]) * 100.0), (" " + state) if state != "" else ""]
+		var text := "%s\n%d%%%s" % [names.get(key, String(row[8])) + ("  " + String(row[9]).replace("_", " ") if String(row[9]) != "" else ""), int(float(row[7]) * 100.0), (" " + state) if state != "" else ""]
 		var ghost: Node3D = puppet.get_node(^"Ghost")
 		ghost.visible = false
 		label.modulate = Color.WHITE if not (flags & FLAGS.F_HOSTILE) else Color(1.0, 0.75, 0.75)
@@ -487,6 +510,7 @@ func _puppet(key: String, flags: int) -> Node3D:
 	if puppets.has(key):
 		return puppets[key]
 	var root := Node3D.new()
+	add_child(root)  # first: the soldier model's @onready parts exist only once it is in the tree
 	var disc := MeshInstance3D.new()  # the overhead view's marker
 	disc.name = "Disc"
 	var cyl := CylinderMesh.new()
@@ -513,7 +537,7 @@ func _puppet(key: String, flags: int) -> Node3D:
 	label.no_depth_test = true
 	label.fixed_size = true
 	label.pixel_size = 0.0012
-	label.font_size = 28
+	label.font_size = 34
 	label.outline_size = 8
 	root.add_child(label)
 	var ghost := MeshInstance3D.new()
@@ -529,7 +553,6 @@ func _puppet(key: String, flags: int) -> Node3D:
 	ghost.top_level = true
 	ghost.visible = false
 	root.add_child(ghost)
-	add_child(root)
 	puppets[key] = root
 	return root
 

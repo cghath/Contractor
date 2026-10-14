@@ -70,12 +70,13 @@ EOF
 pids=()
 cleanup() {
 	for pid in "${pids[@]}"; do kill "$pid" 2>/dev/null; done
-	# Killing a subshell doesn't reach the Godot it started: stop this run's by command line.
-	if command -v powershell.exe >/dev/null 2>&1; then
-		powershell.exe -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name like 'godot%'\" | Where-Object { \$_.CommandLine -like '*$run_id-$start_time-*' } | ForEach-Object { Stop-Process -Id \$_.ProcessId -Force }" >/dev/null 2>&1
-	else
-		pkill -f "$run_id-$start_time-" 2>/dev/null
-	fi
+	# Killing a subshell doesn't reach the Godot it started: each instance wrote its own pid.
+	for f in "$run"/*/pid; do
+		[ -f "$f" ] || continue
+		[ -f "$(dirname "$f")/exit_code" ] && continue  # it quit by itself: the pid may be someone else's now
+		if command -v taskkill >/dev/null 2>&1; then taskkill //F //PID "$(cat "$f")" >/dev/null 2>&1
+		else kill "$(cat "$f")" 2>/dev/null; fi
+	done
 }
 trap cleanup EXIT
 

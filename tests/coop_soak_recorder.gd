@@ -52,6 +52,11 @@ var _events: Array = []
 var _inv_refs := {}  # soldier key -> the net_state Dictionary last seen
 var _inv_changes := 0
 var _inv_bytes := 0
+## The same for Vitals.net_state (the next big one after the inventory: a fresh Dictionary on
+## each change, up to about 2 Hz per soldier, more while hurt).
+var _vit_refs := {}
+var _vit_changes := 0
+var _vit_bytes := 0
 
 
 func _ready() -> void:
@@ -191,6 +196,7 @@ func _objectives() -> Array:
 
 func _count_inventory() -> void:
 	var seen := {}
+	var seen_vit := {}
 	var all := _soldiers()
 	for k: String in all:
 		var s: Soldier = all[k]
@@ -199,7 +205,13 @@ func _count_inventory() -> void:
 		if _inv_refs.has(k) and not is_same(_inv_refs[k], state):
 			_inv_changes += 1
 			_inv_bytes += var_to_bytes(state).size()
+		var vit: Dictionary = s.vitals.net_state
+		seen_vit[k] = vit
+		if _vit_refs.has(k) and not is_same(_vit_refs[k], vit):
+			_vit_changes += 1
+			_vit_bytes += var_to_bytes(vit).size()
 	_inv_refs = seen
+	_vit_refs = seen_vit
 
 
 # --- Snapshots (every SNAP_S, on wall-clock marks) --------------------------------------------
@@ -245,9 +257,12 @@ func _write_metrics(key: int, t: float) -> void:
 		"frames": _frames, "frame_avg_ms": _r(_frame_sum / maxf(_frames, 1) * 1000.0), "frame_max_ms": _r(_frame_worst * 1000.0),
 		"fps": Engine.get_frames_per_second(), "mem_static_mb": _r(Performance.get_monitor(Performance.MEMORY_STATIC) / 1048576.0, 1),
 		"nodes": int(Performance.get_monitor(Performance.OBJECT_NODE_COUNT)), "objects": int(Performance.get_monitor(Performance.OBJECT_COUNT)),
-		"soldiers": _soldiers().size(), "inv_changes": _inv_changes, "inv_bytes": _inv_bytes}
+		"soldiers": _soldiers().size(), "inv_changes": _inv_changes, "inv_bytes": _inv_bytes,
+		"vit_changes": _vit_changes, "vit_bytes": _vit_bytes}
 	_inv_changes = 0
 	_inv_bytes = 0
+	_vit_changes = 0
+	_vit_bytes = 0
 	_frames = 0
 	_frame_sum = 0.0
 	_frame_worst = 0.0

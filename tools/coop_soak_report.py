@@ -370,14 +370,15 @@ def main():
             per_min.setdefault(minute, []).append(m)
         out.append(f"### {p}")
         out.append("")
-        out.append("| min | phase | up KB/s | down KB/s | inv. changes/s | inv. KB/s | frame avg ms | frame worst ms | mem MB | soldiers | RTT ms | loss % |")
-        out.append("|---|---|---|---|---|---|---|---|---|---|---|---|")
+        out.append("| min | phase | up KB/s | down KB/s | inv. changes/s | inv. KB/s | vitals KB/s | frame avg ms | frame worst ms | mem MB | soldiers | RTT ms | loss % |")
+        out.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|")
         for minute, rows in per_min.items():
             secs = 5.0 * len(rows)
             sent = sum(r.get("sent_bytes", 0) for r in rows) / 1024 / secs
             recv = sum(r.get("recv_bytes", 0) for r in rows) / 1024 / secs
             invc = sum(r.get("inv_changes", 0) for r in rows) / secs
             invb = sum(r.get("inv_bytes", 0) for r in rows) / 1024 / secs
+            vitb = sum(r.get("vit_bytes", 0) for r in rows) / 1024 / secs
             favg = sum(r.get("frame_avg_ms", 0) for r in rows) / len(rows)
             fmax = max(r.get("frame_max_ms", 0) for r in rows)
             mem = rows[-1].get("mem_static_mb", 0)
@@ -385,7 +386,7 @@ def main():
             rtts = [v.get("rtt_ms", 0) for r in rows for v in r.get("peers", {}).values()]
             losses = [v.get("loss", 0) for r in rows for v in r.get("peers", {}).values()]
             phase = rows[len(rows) // 2].get("phase", "")
-            out.append(f"| {minute} | {phase} | {sent:.1f} | {recv:.1f} | {invc:.1f} | {invb:.2f} | {favg:.1f} | {fmax:.0f} | {mem:.0f} | {sol} | "
+            out.append(f"| {minute} | {phase} | {sent:.1f} | {recv:.1f} | {invc:.1f} | {invb:.2f} | {vitb:.2f} | {favg:.1f} | {fmax:.0f} | {mem:.0f} | {sol} | "
                        f"{(sum(rtts) / len(rtts)) if rtts else 0:.0f} | {(sum(losses) / len(losses) * 100) if losses else 0:.2f} |")
         out.append("")
         sent_series = [m.get("sent_bytes", 0) / 5120 for m in ms]
@@ -404,7 +405,8 @@ def main():
                              max(m.get("sent_bytes", 0) for m in ms) / 5120, max(m.get("recv_bytes", 0) for m in ms) / 5120,
                              sum(m.get("frame_avg_ms", 0) for m in ms) / len(ms), max(frame_series or [0]),
                              mem_series[0] if mem_series else 0, max(mem_series or [0]), mem_series[-1] if mem_series else 0,
-                             sum(m.get("inv_changes", 0) for m in ms) / secs, sum(m.get("inv_bytes", 0) for m in ms) / 1024 / secs))
+                             sum(m.get("inv_changes", 0) for m in ms) / secs, sum(m.get("inv_bytes", 0) for m in ms) / 1024 / secs,
+                             sum(m.get("vit_changes", 0) for m in ms) / secs, sum(m.get("vit_bytes", 0) for m in ms) / 1024 / secs))
     relays = sorted(f for f in os.listdir(run) if f.startswith("relay") and f.endswith(".jsonl"))
     if relays:
         out.append("### Relays (what crossed each client's link)")
@@ -430,14 +432,14 @@ def main():
 
     out.append("## Summary per peer")
     out.append("")
-    out.append("| peer | up KB/s avg | down KB/s avg | up peak | down peak | frame avg ms | frame worst ms | memory start / peak / end MB | inventory replacements/s | inventory KB/s |")
-    out.append("|---|---|---|---|---|---|---|---|---|---|")
+    out.append("| peer | up KB/s avg | down KB/s avg | up peak | down peak | frame avg ms | frame worst ms | memory start / peak / end MB | inventory replacements/s | inventory KB/s | vitals replacements/s | vitals KB/s |")
+    out.append("|---|---|---|---|---|---|---|---|---|---|---|---|")
     for r in summary_rows:
-        out.append(f"| {r[0]} | {r[1]:.1f} | {r[2]:.1f} | {r[3]:.1f} | {r[4]:.1f} | {r[5]:.1f} | {r[6]:.0f} | {r[7]:.0f} / {r[8]:.0f} / {r[9]:.0f} | {r[10]:.1f} | {r[11]:.2f} |")
+        out.append(f"| {r[0]} | {r[1]:.1f} | {r[2]:.1f} | {r[3]:.1f} | {r[4]:.1f} | {r[5]:.1f} | {r[6]:.0f} | {r[7]:.0f} / {r[8]:.0f} / {r[9]:.0f} | {r[10]:.1f} | {r[11]:.2f} | {r[12]:.1f} | {r[13]:.2f} |")
     out.append("")
     out.append("Inventory columns are the baseline for net/ammo-delta: every inventory change replaces the soldier's whole `Inventory.net_state` "
                "and ServerSync sends it whole; \"inventory KB/s\" is the encoded size (`var_to_bytes`) of the replacements this peer saw, "
-               "per peer, before ENet's headers.")
+               "per peer, before ENet's headers. The vitals columns count `Vitals.net_state` the same way (the next big one).")
     out.append("")
     for (p, kind), n in persistent_kind.items():
         if kind in ("condition", "ammo", "inventory", "objectives", "level", "missing", "ghost", "debrief"):

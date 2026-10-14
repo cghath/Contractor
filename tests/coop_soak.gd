@@ -94,6 +94,8 @@ func _ready() -> void:
 	_t0 = Recorder.now()
 	var peer_dir := run_dir.path_join("host" if role == "host" else "client%d" % bot)
 	DirAccess.make_dir_recursive_absolute(peer_dir)
+	# The harness stops this process by its pid (tools/coop_soak.sh, taskkill) if it outlives the run.
+	FileAccess.open(peer_dir.path_join("pid"), FileAccess.WRITE).store_string(str(OS.get_process_id()))
 	_log = FileAccess.open(peer_dir.path_join("bot.log"), FileAccess.WRITE)
 	recorder = Recorder.new()
 	recorder.name = "Recorder"
@@ -377,7 +379,7 @@ func _host_cycle(cycle: int) -> Dictionary:
 	var me := _me()
 	if target != null and me:
 		_walk(target, 40.0, RUN_SPEED)
-		await _wait_for(func() -> bool: return _me() == null or _flat(_me().global_position, target) < 70.0 or _hostile_in_range(_me(), 100.0) != null, ADVANCE_S)
+		await _wait_for(func() -> bool: return _me() == null or _flat(_me().global_position, target) < 70.0 or _hostile_in_range(_me(), ENGAGE_M) != null, ADVANCE_S)
 	# Fight, with a knock-out and a revive.
 	_fight = true
 	_set_phase("fight")
@@ -591,6 +593,8 @@ func _client_main() -> void:
 		var cycle := int(_phase.get("cycle", 0))
 		var ph := String(_phase.get("phase", ""))
 		var key := "%d:%s" % [cycle, ph]
+		if ph == "fight" and not (_phase.get("down", {}) as Dictionary).is_empty():
+			key += "+down"  # the host posts the fight again with who goes down: a new job
 		if key != last_phase:
 			last_phase = key
 			recorder.phase = key
@@ -873,12 +877,54 @@ func _stop_fighting() -> void:
 	var me := _me()
 	if me:
 		me.is_aiming = false
+		if me.vitals.is_up():
+			me.movement.set_stance(SoldierMovement.Stance.STAND_HIGH)
+
+
+## Buddy aid: once a second while deployed, a player down that nobody planned (shot by the
+## hostiles) gets treated by the nearest player still up, as a squad would.
+var _aid_left := 1.0
+
+
+func _buddy_aid(me: Soldier, delta: float) -> void:
+	_aid_left -= delta
+	if _aid_left > 0.0:
+		return
+	_aid_left = 1.0
+	if _treating or _rejoining or _in_base() or not me.vitals.is_up() or not Contracts.is_deployed():
+		return
+	var planned: Dictionary = _phase.get("down", {})
+	var players := _level().get_node_or_null(^"Players")
+	if players == null:
+		return
+	for node in players.get_children():
+		var casualty := node as Soldier
+		if casualty == null or casualty == me or casualty.vitals.is_up() or casualty.vitals.is_dead():
+			continue
+		var peer := int(String(casualty.name)) if String(casualty.name).is_valid_int() else 0
+		if peer == int(planned.get("victim", -1)):
+			continue  # the planned knock-out has its own medic
+		var nearest: Soldier = null
+		var best := INF
+		for other in players.get_children():
+			var s := other as Soldier
+			if s and s.vitals.is_up():
+				var d := _flat(s.global_position, casualty.body_point())
+				if d < best:
+					best = d
+					nearest = s
+		if nearest == me and best < 150.0:
+			_say("buddy aid: %s is down (%s), going to treat" % [casualty.name, casualty.vitals.condition_text()])
+			recorder.event(["aid", "Players/%s" % casualty.name])
+			_treat_loop(peer)
+			return
 
 
 func _physics_process(delta: float) -> void:
 	var me := _me()
 	if me == null or not me.is_local():
 		return
+	_buddy_aid(me, delta)
 	if not me.vitals.is_up() or is_instance_valid(me.vehicle):
 		return
 	if _goal != null:
@@ -906,6 +952,10 @@ func _fight_tick(me: Soldier) -> void:
 		me.is_aiming = false
 		return
 	var target := _hostile_in_range(me, ENGAGE_M)
+	# Crouched while there is something to shoot at (a smaller target, as a player would be).
+	var stance := SoldierMovement.Stance.CROUCH_MID if target != null else SoldierMovement.Stance.STAND_HIGH
+	if me.movement.stance != stance:
+		me.movement.set_stance(stance)
 	if target == null:
 		me.is_aiming = false
 		return
