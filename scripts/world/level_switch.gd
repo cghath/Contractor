@@ -129,6 +129,10 @@ static func _retire(old: CompoundLevel) -> void:
 ## despawns reached each client after the RPC had already freed its copy of the old level, and
 ## every one logged 'Condition "!pinfo.recv_nodes.has(net_id)"' (25-50 per switch, S0743). A
 ## spawner leaving the tree despawns what it tracks; the nodes themselves go with the level.
+## The host's own synchronizers leave with them: a switch run from an RPC (_server_switch_ready)
+## is inside the network poll, which sends deltas right after it, and each delta for a node just
+## despawned logged 'Ignoring delta for non-authority or invalid synchronizer' (5-6 per client
+## per switch, S0830).
 static func _despawn_now(old: CompoundLevel) -> void:
 	var mp := old.multiplayer
 	if mp == null or not mp.has_multiplayer_peer() or not mp.is_server() or mp.get_peers().is_empty():
@@ -136,3 +140,7 @@ static func _despawn_now(old: CompoundLevel) -> void:
 	for spawner: Node in old.find_children("*", "MultiplayerSpawner", true, false):
 		spawner.get_parent().remove_child(spawner)
 		spawner.queue_free()
+	for sync: Node in old.find_children("*", "MultiplayerSynchronizer", true, false):
+		if sync.is_multiplayer_authority():
+			sync.get_parent().remove_child(sync)
+			sync.queue_free()
