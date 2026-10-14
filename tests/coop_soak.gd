@@ -388,7 +388,7 @@ static func _kit_line(s: Soldier) -> String:
 	var parts: Array[String] = []
 	parts.append(String(slots.get(&"vest", &"")) if slots.get(&"vest", &"") != &"" else "NO CARRIER")
 	for pocket: StringName in Inventory.PLATE_SLOTS:
-		var pname := {&"plate_front": "front", &"plate_back": "rear", &"plate_left": "left", &"plate_right": "right"}[pocket]
+		var pname: String = {&"plate_front": "front", &"plate_back": "rear", &"plate_left": "left", &"plate_right": "right"}[pocket]
 		parts.append("%s=%s" % [pname, String(slots.get(pocket, &"")) if slots.get(pocket, &"") != &"" else "-"])
 	parts.append("helmet=%s" % (String(slots.get(&"helmet", &"")) if slots.get(&"helmet", &"") != &"" else "-"))
 	parts.append("pack=%s" % (String(slots.get(&"backpack", &"")) if slots.get(&"backpack", &"") != &"" else "-"))
@@ -816,6 +816,12 @@ func _drop_and_pick_up() -> void:
 	var me := _me()
 	if me == null or not me.vitals.is_up():
 		return
+	_dropping = true  # the follow tick leaves this bot alone meanwhile (B-07: it never was set)
+	await _drop_and_pick_up_inner(me)
+	_dropping = false
+
+
+func _drop_and_pick_up_inner(me: Soldier) -> void:
 	var slot := &"helmet" if me.inventory.slots.get(&"helmet", &"") != &"" else &""
 	if slot == &"":
 		return

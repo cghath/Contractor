@@ -190,7 +190,9 @@ instance() {
 	(
 		CONTRACTOR_SESSION_TOKEN="$token" CONTRACTOR_PORT="$port" CONTRACTOR_TEST_TAG="_soak$PORT" CONTRACTOR_SESSION_LOG=1 CONTRACTOR_TEST_LOGS="$(win "$run/sessions/$dir")" \
 			timeout -k 10 $(( DURATION + 1800 )) "$GODOT" --headless --path . res://tests/coop_soak.tscn -- --soak-run "$(win "$run")" "$@" \
-			>"$run/$dir/stdout.log" 2>&1
+			>"$run/$dir/stdout.log" 2>&1 &
+		echo $! >"$run/$dir/timeout_pid"  # killing this timeout stops its Godot too (one that never ran our script has no pid file)
+		wait $!
 		echo $? >"$run/$dir/exit_code"
 	) &
 	pids+=($!)
@@ -212,6 +214,13 @@ for i in $(seq 1 90); do
 done
 if [ ! -f "$run/host_ready" ]; then
 	echo "the host never came up: see $run/host/stdout.log"
+	grep -m3 -E 'SCRIPT ERROR|Parse Error' "$run/host/stdout.log"
+	# A script that doesn't load leaves Godot idle forever (S0721): stop it, no clients.
+	for f in "$run"/*/timeout_pid; do [ -f "$f" ] && kill "$(cat "$f")" 2>/dev/null; done
+	for pid in "${pids[@]}"; do kill "$pid" 2>/dev/null; done
+	echo "$run_id $(date +%Y-%m-%d) $start_time FAIL $tail_name script: tools/coop_soak.sh (the host never came up)" >>"$parent/index.txt"
+	mv "$run" "$day/$run_id-$start_time-FAIL-$tail_name" 2>/dev/null
+	exit 1
 fi
 label="$(grep -m1 -aoE '^\[build\] .*' "$run/host/stdout.log" 2>/dev/null | cut -c9-)"
 echo "the bots' game: ${label:-$(git rev-parse --short HEAD) (no build label in this commit)}"
