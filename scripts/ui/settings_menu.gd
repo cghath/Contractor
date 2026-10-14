@@ -141,6 +141,7 @@ func _video_tab() -> Control:
 	page.add_child(_choice("Shadows", "video", "shadows", GameSettings.SHADOWS))
 	page.add_child(_slider("Field of view", "video", "fov", func(v: float) -> String: return "%d deg" % roundi(v)))
 	page.add_child(_slider("Menu and HUD size", "video", "ui_scale", func(v: float) -> String: return "%d%%" % roundi(v * 100.0)))
+	page.add_child(_toggle("Objective markers on screen (the hint line always shows)", "hud", "objective_markers"))
 	return page.get_parent()
 
 

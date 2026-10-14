@@ -40,6 +40,7 @@ const DEFAULTS := {
 		"render_scale": 1.0, "antialiasing": "fxaa", "shadows": "medium", "fov": 80.0, "ui_scale": 1.0},
 	"audio": {"master": 0.8, "effects": 1.0, "voice": 1.0, "mute_unfocused": false},
 	"controls": {"mouse_sensitivity": 1.0, "aim_sensitivity": 0.75, "invert_y": false},
+	"hud": {"objective_markers": true},
 }
 ## Ranges for the sliders: [min, max, step].
 const RANGES := {

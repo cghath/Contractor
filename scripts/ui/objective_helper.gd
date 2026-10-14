@@ -521,7 +521,7 @@ static func place_on_screen(camera: Camera3D, view: Vector2, pos: Vector3) -> Di
 func layout_markers() -> Array:
 	var out: Array = []
 	var camera := get_viewport().get_camera_3d() if is_inside_tree() else null
-	if not markers_on or not _shown() or camera == null:
+	if not markers_on or not bool(GameSettings.get_value("hud", "objective_markers")) or not _shown() or camera == null:
 		return out
 	var from := player.global_position
 	var view := size if size.x > 0.0 else get_viewport_rect().size
