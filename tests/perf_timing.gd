@@ -54,8 +54,13 @@ func _ready() -> void:
 	var main: Node = load("res://scenes/main.tscn").instantiate()
 	add_child(main)
 	await get_tree().process_frame
+	var t_host := Time.get_ticks_usec()
 	main.host_zone(MissionRegistry.zone_def("harbour_yard"))
+	print("timing: hosting the zone held the main thread %.1f ms" % ((Time.get_ticks_usec() - t_host) / 1000.0))
 	level = CompoundLevel.current(self) as ZoneLevel
+	while not BodyVolume.is_warm():
+		await get_tree().process_frame
+	print("timing: both bodies' hit shapes built on a worker %.1f ms after hosting began" % ((Time.get_ticks_usec() - t_host) / 1000.0))
 	while level.players.get_node_or_null(^"1") == null:
 		await get_tree().process_frame
 	var player := level.players.get_node(^"1") as Soldier
