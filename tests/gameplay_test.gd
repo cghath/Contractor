@@ -33,6 +33,7 @@ func _ready() -> void:
 	await _test_reload_across_death()
 	await _test_reload_replaced_gun()
 	await _test_fire_cadence()
+	_test_ammo_replication()
 	await _test_saves()
 	GameState.delete_save()
 	print("GAMEPLAY TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
@@ -62,6 +63,47 @@ func _test_firing_and_reload() -> void:
 	await _seconds(2.6)
 	check(inv.rounds_in(&"primary") == 30, "reload finished: 30 loaded")
 	check(inv.spare_rounds(&"mag_556") == 57, "spare: one full mag + the 27-round one (%d)" % inv.spare_rounds(&"mag_556"))
+
+
+## Playtest blocker B2: a shot sends only the counts (Inventory.net_ammo), not the whole
+## snapshot (net_gear); a peer, whichever arrives first and joining late, ends up with the
+## right rounds. Peers are stand-in inventories given what the synchroniser would set.
+func _test_ammo_replication() -> void:
+	print("Ammo replication: counts, not the whole inventory")
+	var inv := Inventory.new()
+	for id: StringName in [&"plate_carrier", &"m4a1"]:
+		inv.take(id)
+	inv.take(&"mag_556", 2)
+	var gear_before := inv.net_gear
+	var rev := int(inv.net_gear.get("rev", -1))
+	inv.consume_round(&"primary")
+	inv.consume_round(&"primary")
+	check(is_same(inv.net_gear, gear_before) and inv.net_ammo[0] == rev and inv.net_ammo[1] == 28
+		and int(inv.net_state.slot_state.primary.rounds) == 28 and int(inv.net_gear.state.slot_state.primary.rounds) == 30,
+		"two shots: only the counts change (rev %d, %s); the host's own net_state keeps up (28)" % [rev, inv.net_ammo])
+	var late := Inventory.new()  # a late joiner: the snapshot, then the counts
+	late.net_gear = inv.net_gear.duplicate(true)
+	late.net_ammo = inv.net_ammo.duplicate()
+	var early := Inventory.new()  # the counts first: they wait for their snapshot
+	early.net_ammo = inv.net_ammo.duplicate()
+	early.net_gear = inv.net_gear.duplicate(true)
+	var stale := Inventory.new()  # counts of an older snapshot don't land on a newer one
+	stale.net_gear = inv.net_gear.duplicate(true)
+	stale.net_ammo = PackedInt32Array([rev - 1, 3, -1, -1])
+	check(late.rounds_in(&"primary") == 28 and early.rounds_in(&"primary") == 28 and stale.rounds_in(&"primary") == 30
+		and late.slots[&"vest"] == &"plate_carrier" and late.count_of(&"mag_556") == 2,
+		"a peer gets 28 whichever comes first; old counts are ignored (%d, %d, %d)" % [late.rounds_in(&"primary"), early.rounds_in(&"primary"), stale.rounds_in(&"primary")])
+	inv.take(&"mag_556")
+	check(int(inv.net_gear.get("rev", -1)) == rev + 1 and inv.net_ammo[0] == rev + 1 and int(inv.net_gear.state.slot_state.primary.rounds) == 28,
+		"a real change sends the whole snapshot again, counts included (rev %d)" % int(inv.net_gear.get("rev", -1)))
+	var kept := inv.net_state.duplicate(true)
+	var copy := Inventory.new()
+	copy.net_state = kept
+	copy.consume_round(&"primary")
+	check(int(kept.slot_state.primary.rounds) == 28 and copy.rounds_in(&"primary") == 27,
+		"a shot after net_state is assigned doesn't change the caller's dictionary")
+	for x: Inventory in [inv, late, early, stale, copy]:
+		x.free()
 
 
 func _test_medical() -> void:

@@ -32,6 +32,9 @@ const DRAGGED := "Dragged"
 ## (_check_looted_rifle).
 const AIMER := "Aimer"
 const AIMER_AT := Vector3(4, 0.1, 33)
+## Rounds the aimer has left after firing some before the client joins: the counts
+## (Inventory.net_ammo) say so, whatever snapshot (net_gear) came with them (playtest blocker B2).
+const AIMER_ROUNDS := 23
 
 var failures := 0
 var level: CompoundLevel
@@ -102,6 +105,8 @@ func _stage_drag() -> void:
 	print("[host] staged a drag: %s" % dragger.server_pick_up_body(dragged, Soldier.DRAG, INF))
 	var aimer: Soldier = make.call(AIMER, AIMER_AT)
 	aimer.want_aim = true  # its rifle shouldered when the client shoots it
+	while aimer.inventory.rounds_in(&"primary") > AIMER_ROUNDS:
+		aimer.inventory.consume_round(&"primary")
 	# Smoke already out when the client joins (audit L2-01): it must see it too, as old as here.
 	# It starts SMOKE_AGE_S old, so the check doesn't hang on how long the client takes to join
 	# (a quick join reached the client at 1.6 s, under the old 2 s mark, and failed).
@@ -228,6 +233,11 @@ func _check_looted_rifle(me: Soldier) -> void:
 	var aimer: Soldier = _combatant(AIMER)
 	await _wait_for(func() -> bool: return aimer != null and aimer.is_aiming and aimer.gear._held_key == &"primary", 3.0)
 	check(aimer != null and aimer.is_aiming and aimer.gear._held_key == &"primary", "a hostile aims its rifle: shouldered here too")
+	if aimer:
+		var sent := int(aimer.inventory.net_gear.get("state", {}).get("slot_state", {}).get("primary", {}).get("rounds", -1))
+		check(aimer.inventory.rounds_in(&"primary") == AIMER_ROUNDS and aimer.inventory.net_ammo.size() == Inventory.WEAPON_SLOTS.size() + 1
+			and aimer.inventory.net_ammo[1] == AIMER_ROUNDS,
+			"late join: the rounds it fired before we joined count here too (%d left; counts %s, snapshot %d)" % [aimer.inventory.rounds_in(&"primary"), aimer.inventory.net_ammo, sent])
 	if aimer == null:
 		return
 	me.global_position = aimer.global_position + Vector3(0.0, 0.0, 2.5)
