@@ -214,6 +214,7 @@ func load_or_new() -> void:
 				Roster.add_history(m, day(), "Killed in action in %s" % dep.get("zone_id", "?"))
 		roster()["deployment"] = {}
 		Contracts.server_abandon_deployment()
+	_prune_prep_squad()  # a save from before the pick was kept clean may still hold the fallen
 	_changed_all()
 
 
@@ -257,6 +258,54 @@ func set_aside_zone_saves() -> void:
 		push_warning("BaseHub: kept %s aside (its campaign couldn't be read)" % GameState.set_aside(path, "orphaned").get_file())
 
 
+## The main menu's "New campaign (archive current saves)" (Captain, 2026-10-14): the current
+## campaign (Campaign.campaign_id) is put away, never deleted: its save and every zone save of
+## it (the FOB's included), with their backups, interrupted writes and copies kept aside, move
+## into user://saves/archive-<date>/ (archive-<date>-<time>/ when that already holds a file of
+## the same name), and the campaign in memory empties, so the next campaign host starts a new
+## one. Outside a session only. Returns {"dir": the archive folder (global path), "moved": file
+## names, "failed": file names that couldn't be moved and stay where they were}.
+func archive_campaign() -> Dictionary:
+	var out := {"dir": "", "moved": [], "failed": []}
+	if Net.is_hosting():
+		push_warning("BaseHub: not archiving the campaign during a session")
+		return out
+	var files := _campaign_files()
+	if files.is_empty():
+		Campaign.restore({})
+		return out
+	var t := Time.get_datetime_dict_from_system()
+	var dir := "%s/archive-%04d-%02d-%02d" % [Campaign.SAVE_DIR, t.year, t.month, t.day]
+	if files.any(func(f: String) -> bool: return FileAccess.file_exists("%s/%s" % [dir, f])):
+		dir += "-%02d%02d%02d" % [t.hour, t.minute, t.second]
+	DirAccess.make_dir_recursive_absolute(dir)
+	for f: String in files:
+		if DirAccess.rename_absolute("%s/%s" % [Campaign.SAVE_DIR, f], "%s/%s" % [dir, f]) == OK:
+			(out.moved as Array).append(f)
+		else:
+			(out.failed as Array).append(f)
+			push_error("BaseHub: couldn't move %s into %s; it stays where it is" % [f, dir])
+	out["dir"] = ProjectSettings.globalize_path(dir)
+	Campaign.restore({})  # nothing deleted: whatever couldn't move stays on disk
+	campaign_running = false
+	view = {}
+	return out
+
+
+## Every file of the current campaign in the saves folder: its save (with backup, interrupted
+## write and copies kept aside) and each of its zone saves (likewise). File names.
+func _campaign_files() -> Array[String]:
+	var out: Array[String] = []
+	if not DirAccess.dir_exists_absolute(Campaign.SAVE_DIR):
+		return out
+	var own := Campaign.campaign_id + ".json"
+	var zones := zone_save_id("")
+	for file in DirAccess.get_files_at(Campaign.SAVE_DIR):
+		if file == own or file.begins_with(own + ".") or file.begins_with(zones):
+			out.append(file)
+	return out
+
+
 ## The current campaign's zone save files: each save, backup and interrupted write.
 func _zone_save_files() -> Array[String]:
 	var out: Array[String] = []
@@ -292,6 +341,7 @@ func begin_prep(contract: Dictionary, zone_kind := RosterDeployment.CONTRACT, zo
 	prep["zone_id"] = zone_id
 	prep["scene"] = scene
 	prep["level"] = level_info.duplicate(true)
+	_prune_prep_squad()
 	if (prep.squad as Array).is_empty():
 		prep["squad"] = RosterDeployment.auto_squad(roster(), SQUAD_SIZE - _player_count())
 	_changed(&"base")
@@ -805,8 +855,29 @@ func server_deploy(options := {}) -> String:
 	prep["contract"] = {}
 	prep["level"] = {}
 	_changed_all()
+	discard_zone_save(zone_id)  # every contract finds the zone fresh (Captain, 2026-10-14)
 	server_switch_level(info, zone_save_id(zone_id))
 	return ""
+
+
+## Host (server_deploy): the campaign's save of zone `zone_id` goes, with its backup and any
+## interrupted write, so the deployment starting there finds the zone as generated. Captain,
+## 2026-10-14: zones are fresh each contract: no bodies, vehicles, dropped gear, loot taken or
+## voxel damage from earlier deployments. (The zone is still saved when a deployment ends, and
+## by the host's quick save or quit; a campaign loaded with a deployment running ends that
+## deployment at the base (load_or_new), so there is no mid-deployment save to resume into.)
+## Never the FOB's save. Returns how many files went.
+func discard_zone_save(zone_id: String) -> int:
+	var path := "%s/%s.json" % [GameState.SAVE_DIR, zone_save_id(zone_id)]
+	if zone_save_id(zone_id) == base_zone_id():
+		return 0
+	var n := 0
+	for p: String in GameState.save_candidates(path):
+		if FileAccess.file_exists(p) and DirAccess.remove_absolute(p) == OK:
+			n += 1
+	if n > 0:
+		SessionLog.note("zone %s starts fresh: its save from an earlier deployment is discarded" % zone_id)
+	return n
 
 
 ## For the session log: "Hold the Line [c12]", or "none".
@@ -1057,6 +1128,7 @@ func server_end_deployment(extracted: Array, return_to_base := true, advance_day
 		if p and not p.is_queued_for_deletion():
 			outcomes.players[player_key(p.name.to_int())] = _outcome_of(p)
 	var report := RosterDeployment.resolve(roster(), outcomes, rng, day())
+	_prune_prep_squad()  # the killed and the missing leave the pick for the next one
 	SessionLog.note("deployment ended: zone %s (%s); back %s; MIA %s; KIA %s; respawns %d used (%d bought)" % [report.zone_id,
 		report.zone_kind, _callsigns(report.extracted), _callsigns(report.mia), _callsigns(report.dead), int(report.respawns_used),
 		int(report.respawns_bought)])
@@ -1287,6 +1359,7 @@ func server_add_to_stash(id: StringName, count := 1, state := {}) -> void:
 
 ## Host: puts a member in or out of the squad picked for the next deployment.
 func server_pick(mid: String, in_squad: bool) -> String:
+	_prune_prep_squad()  # the dead and missing don't hold a slot ("The squad is full" over three names)
 	var squad: Array = _prep().squad
 	if not in_squad:
 		squad.erase(mid)
@@ -1298,6 +1371,18 @@ func server_pick(mid: String, in_squad: bool) -> String:
 		squad.append(mid)
 	_changed(&"base")
 	return ""
+
+
+## Host: the squad picked for the next deployment keeps only members who can deploy now. The
+## pick outlives a deployment, so without this the killed, the MIA and the recovering stayed in
+## it: the Ops desk counted them ("6 of 7 AI" over three names) and they held squad slots.
+## Returns whether anyone was taken out.
+func _prune_prep_squad() -> bool:
+	var squad: Array = _prep().squad
+	var gone := squad.filter(func(mid: Variant) -> bool: return not Roster.is_available(member(String(mid))))
+	for mid: Variant in gone:
+		squad.erase(mid)
+	return not gone.is_empty()
 
 
 ## Host: a member's role in the squad from now on.
