@@ -70,7 +70,13 @@ const BOUND_M := 15.0
 const PINNED_S := 4.0
 ## The knock-out (a dev-tools hurt, like the K key): enough to go down, and more if not.
 const DOWN_DAMAGE := 70.0
-const REVIVE_S := 150.0
+## The medic bot keeps treating while there is something to do, and gives up only after
+## MEDIC_IDLE_S with nothing it could do (B-01: a flat 150 s from the start cut off a medic that
+## was still working); MEDIC_MAX_S caps the whole treatment. The same item on the same part is
+## used at most SAME_CARE_MAX times (B-09: "npa on head" x42 in one go).
+const MEDIC_IDLE_S := 150.0
+const MEDIC_MAX_S := 420.0
+const SAME_CARE_MAX := 2
 ## Bot 2 leaves this long into the first fight and comes back after RECONNECT_GAP_S.
 const LEAVE_AT_S := 12.0
 const RECONNECT_GAP_S := 20.0
@@ -264,10 +270,14 @@ func _host_main() -> void:
 	_phase = {"cycle": 0, "phase": "starting", "quit": false}
 	_set_phase("starting")
 	Campaign.reset_campaign()
-	# Players start in their role's kit (Roles.apply_kit: the play entries' path, both plates in
-	# the carrier), and from the second contract restock their last loadout from the stash
-	# (BaseHub "restock", the base screen's button). The kit-up walk then only tops up extras.
-	CompoundLevel.player_role_kits = true
+	# The campaign's own gear path (player_role_kits off: a player's gear is their main
+	# character's, BaseHub._apply_player_gear). Each bot player gets its role's kit once, through
+	# Roles.apply_kit, after BaseHub has put its saved gear on (_kit_players: at the start, a late
+	# joiner, a rejoin). From the second contract the bots restock their last loadout from the
+	# stash (BaseHub "restock", the base screen's button); the kit-up walk only tops up to KIT's
+	# quantities. With player_role_kits on, the level's kit went on first and the saved gear then
+	# replaced the whole inventory: a late joiner deployed with nothing (B-23).
+	CompoundLevel.player_role_kits = false
 	CompoundLevel.clean_loot = false
 	CompoundLevel.spawn_ai = true
 	BaseHub.new_campaign(SEED)
@@ -799,9 +809,9 @@ func _down_and_revive(victim_peer: int, medic_peer: int) -> Dictionary:
 	if not went_down:
 		return out
 	var t := Recorder.now()
-	var up := await _wait_for(func() -> bool:
+	await _wait_for(func() -> bool:
 		var v := _player(victim_peer)
-		return v == null or v.vitals.is_up() or v.vitals.is_dead(), REVIVE_S)
+		return v == null or v.vitals.is_up() or v.vitals.is_dead() or _medic_done(medic_peer, t), MEDIC_MAX_S + 30.0)
 	victim = _player(victim_peer)
 	out["up"] = victim != null and victim.vitals.is_up()
 	out["dead"] = victim != null and victim.vitals.is_dead()
@@ -810,6 +820,17 @@ func _down_and_revive(victim_peer: int, medic_peer: int) -> Dictionary:
 		out["still_down"] = victim.vitals.condition_text()
 		out["why_unconscious"] = Array(victim.vitals.why_unconscious())
 	return out
+
+
+## Host: the medic's treatment loop has ended since `since` (it gave up, or the casualty is up).
+func _medic_done(medic_peer: int, since: float) -> bool:
+	if medic_peer == 1:
+		return not _treating and Recorder.now() - since > 2.0
+	for n: int in _bots():
+		var st: Dictionary = _bots()[n]
+		if int(st.get("peer", 0)) == medic_peer:
+			return float(st.get("treat_end", 0.0)) > since
+	return medic_peer == 0 and Recorder.now() - since > MEDIC_IDLE_S  # no medic at all
 
 
 func _drop_and_pick_up() -> void:
@@ -842,10 +863,11 @@ func _drop_and_pick_up_inner(me: Soldier) -> void:
 	me = _me()
 	if me == null:
 		return
+	var ref: WeakRef = weakref(item)
 	_walk(item.global_position, 0.8, WALK_SPEED)
-	await _wait_for(func() -> bool: return _me() == null or not is_instance_valid(item) or _flat(_me().global_position, item.global_position) < 1.2, 6.0)
-	if is_instance_valid(item) and _me():
-		_me()._server_interact.rpc_id(1, item.get_path())
+	await _wait_for(func() -> bool: return _me() == null or not _alive(ref) or _flat(_me().global_position, (ref.get_ref() as Node3D).global_position) < 1.2, 6.0)
+	if _alive(ref) and _me():
+		_me()._server_interact.rpc_id(1, (ref.get_ref() as Node).get_path())
 	if not await _wait_for(func() -> bool: return _me() != null and _me().inventory.slots.get(slot, &"") == id, 6.0):
 		_fail("picking the dropped %s up again never showed" % id)
 	else:
@@ -1025,6 +1047,9 @@ func _client_tick(ph: String) -> void:
 ## Walks to the armory's world items and picks up what KIT says it lacks.
 func _kit_up(cycle: int) -> void:
 	var deadline := Recorder.now() + KIT_S - 10.0
+	# A late joiner may still be loading the base here (its kit phase lasted 0.2 s, B-23), and
+	# the host gives the role kit a moment after the body appears: wait for both.
+	await _wait_for(func() -> bool: return _me() != null and _me().inventory.slots.get(&"vest", &"") != &"", 20.0)
 	if cycle > 1:
 		BaseHub.request("restock")  # last contract's loadout, from the stash (the game's own path)
 		await _sleep(2.0)
@@ -1040,14 +1065,16 @@ func _kit_up(cycle: int) -> void:
 			if item == null:
 				break
 			_walk(item.global_position, 0.9, RUN_SPEED)
-			await _wait_for(func() -> bool: return _me() == null or not is_instance_valid(item) or _flat(_me().global_position, item.global_position) < 1.4, 15.0)
-			if not is_instance_valid(item) or _me() == null:
+			# A weak reference: the item may be freed while waiting (B-17, "Lambda capture freed").
+			var ref: WeakRef = weakref(item)
+			await _wait_for(func() -> bool: return _me() == null or not _alive(ref) or _flat(_me().global_position, (ref.get_ref() as Node3D).global_position) < 1.4, 15.0)
+			if not _alive(ref) or _me() == null:
 				continue
 			var before := _owned(_me(), StringName(id))
-			_me()._server_interact.rpc_id(1, item.get_path())
+			_me()._server_interact.rpc_id(1, (ref.get_ref() as Node).get_path())
 			var took := await _wait_for(func() -> bool: return _me() != null and _owned(_me(), StringName(id)) > before, 3.0)
 			if not took:
-				_say("could not take %s (%s)" % [id, "gone" if not is_instance_valid(item) else "refused"])
+				_say("could not take %s (%s)" % [id, "gone" if not _alive(ref) else "refused"])
 				break
 	_goal = null
 	_say("kit: %s" % JSON.stringify(_kit_summary(_me())))
@@ -1089,6 +1116,11 @@ func _nearest_item(id: StringName, within: float, at_most := 1 << 30) -> WorldIt
 	return best
 
 
+static func _alive(ref: WeakRef) -> bool:
+	var n := ref.get_ref() as Node
+	return n != null and n.is_inside_tree() and not n.is_queued_for_deletion()
+
+
 static func _flat(a: Vector3, b: Vector3) -> float:
 	return Vector2(a.x - b.x, a.z - b.z).length()
 
@@ -1119,17 +1151,21 @@ func _down_self() -> void:
 
 
 ## Goes to `victim_peer`'s body and treats it with what its care list asks for (own kit first,
-## then the casualty's), until they're up, dead, or REVIVE_S runs out.
+## then the casualty's), until they're up or dead, or it had nothing to do for MEDIC_IDLE_S.
 func _treat_loop(victim_peer: int) -> void:
 	_treating = true
 	_said_lacking = false
-	var deadline := Recorder.now() + REVIVE_S
+	var hard_stop := Recorder.now() + MEDIC_MAX_S
 	await _wait_for(func() -> bool: return _player(victim_peer) != null and not _player(victim_peer).vitals.is_up(), 25.0)
+	var idle_until := Recorder.now() + MEDIC_IDLE_S  # pushed back by every treatment
 	var done: Array[String] = []
-	while Recorder.now() < deadline:
+	var times := {}  # "item@part" -> how often used
+	var why_stop := "time"
+	while Recorder.now() < minf(idle_until, hard_stop):
 		var me := _me()
 		var victim := _player(victim_peer)
 		if me == null or victim == null or victim.vitals.is_up() or victim.vitals.is_dead():
+			why_stop = "up" if victim != null and victim.vitals.is_up() else ("dead" if victim != null else "gone")
 			break
 		if not me.vitals.is_up():
 			await _sleep(1.0)
@@ -1149,6 +1185,8 @@ func _treat_loop(victim_peer: int) -> void:
 			if item == &"":
 				item = Vitals.pick_item(t, victim.inventory)
 				their = item != &""
+			if item != &"" and int(times.get("%s@%s" % [item, t.get("part", "")], 0)) >= SAME_CARE_MAX:
+				item = &""  # done twice already and still listed: it isn't taking (B-09)
 			if item != &"":
 				task = t
 				break
@@ -1162,12 +1200,17 @@ func _treat_loop(victim_peer: int) -> void:
 			continue
 		var seconds := me.treat_seconds(victim, ItemDB.get_item(item))
 		me._server_treat.rpc_id(1, victim.get_path(), item, StringName(task.get("part", &"")), false, their)
+		var care_key := "%s@%s" % [item, task.get("part", "")]
+		times[care_key] = int(times.get(care_key, 0)) + 1
 		done.append("%s on %s%s" % [item, task.get("part", ""), " (their kit)" if their else ""])
+		idle_until = Recorder.now() + seconds + MEDIC_IDLE_S
 		await _sleep(seconds + 0.6)
 	var victim := _player(victim_peer)
-	_say("treated peer %d: %s -> %s" % [victim_peer, ", ".join(done), victim.vitals.condition_text() if victim else "gone"])
-	_post_status({"treated": done})
+	if why_stop == "time":
+		why_stop = "nothing to do for %d s" % int(MEDIC_IDLE_S) if Recorder.now() >= idle_until else "the %d s cap" % int(MEDIC_MAX_S)
+	_say("treated peer %d: %s -> %s (stopped: %s)" % [victim_peer, ", ".join(done), victim.vitals.condition_text() if victim else "gone", why_stop])
 	_treating = false
+	_post_status({"treated": done, "treat_end": Recorder.now()})
 
 
 func _hostile_in_range(me: Soldier, within: float) -> Soldier:
@@ -1398,8 +1441,49 @@ func _watch_respawns(delta: float) -> void:
 			_say("[kit] respawned %s %s: %s" % [_kit_name(s), String(s.role).replace("_", " "), _kit_line(s)])
 
 
+var _role_kitted := {}  # host: profile key -> true once that bot got its role's kit
+var _kit_check_left := 1.0
+
+
+## Host: each bot player gets its role's kit once (Roles.apply_kit, the game's own kit path), as
+## soon as its soldier has a role and BaseHub has put its saved gear on (that replaces the whole
+## inventory, so a kit given before it is lost): at the start, a late joiner (in the zone), a bot
+## that rejoined under a new peer id (the same profile: its own gear comes back, no second kit).
+## A real player (--human) plays in their own gear.
+func _kit_players(delta: float) -> void:
+	_kit_check_left -= delta
+	if _kit_check_left > 0.0 or role != "host":
+		return
+	_kit_check_left = 1.0
+	var lvl := _level()
+	var players := lvl.get_node_or_null(^"Players") if lvl else null
+	if players == null:
+		return
+	var bot_of := {1: 0}
+	var bots := _bots()
+	for n: int in bots:
+		bot_of[int(bots[n].get("peer", 0))] = n
+	for c in players.get_children():
+		var s := c as Soldier
+		if s == null or s.is_queued_for_deletion() or s.role == &"" or not s.vitals.is_up():
+			continue
+		var peer := int(String(s.name)) if String(s.name).is_valid_int() else 0
+		if not bot_of.has(peer):
+			continue  # a human, or a bot that hasn't posted its peer id yet
+		if BaseHub.campaign_running and not BaseHub._gear_applied.has(peer):
+			continue  # its saved gear goes on first
+		var key := BaseHub.player_key(peer) if BaseHub.campaign_running else str(peer)
+		if _role_kitted.has(key):
+			continue
+		_role_kitted[key] = true
+		Roles.apply_kit(s.inventory, s.role)
+		_say("[kit] role kit (Roles.apply_kit) for %s %s%s: %s" % [_kit_name(s), String(s.role).replace("_", " "),
+			"" if _in_base() else " (joined in the zone)", _kit_line(s)])
+
+
 func _physics_process(delta: float) -> void:
 	_watch_respawns(delta)
+	_kit_players(delta)
 	var me := _me()
 	if me == null or not me.is_local():
 		return
