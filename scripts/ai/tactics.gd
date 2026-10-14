@@ -8,9 +8,10 @@ extends RefCounted
 ## cluster, a building the enemy holds and one by the squad (Buildings), how pinned the squad
 ## is, how much of it is in cover, its casualties, ammunition and morale, and its units'
 ## orders. Then it scores the options (score) and keeps the best, with hysteresis: another
-## option has to beat the current one by HYSTERESIS, and nothing changes within MIN_KEEP_S
-## unless the current option stops applying. Every change prints a "[tactics]" line: the
-## squad, the option, the top scores and why.
+## option has to beat the current one by HYSTERESIS, and a chosen option is held MIN_KEEP_S
+## unless it stops applying or the situation changes a lot (someone else goes down, or another
+## option beats it by URGENT_MARGIN) (P0362: the squad re-called its drill every second and sat
+## still). Every change prints a "[tactics]" line: the squad, the option, the top scores and why.
 ##
 ## The options, and what the units do for each (SquadAI.task):
 ## - Hold and improve cover: everyone fights from the best cover near their order's anchor
@@ -27,7 +28,10 @@ extends RefCounted
 ## - Defend a building: take its window and door positions, those facing the threat first,
 ##   the rest inside (garrison_tasks).
 ## - Break contact: bound back by pairs, smoke over open ground, to a point away from the enemy
-##   (friendlies following their lead: behind the lead).
+##   (friendlies following their lead: behind the lead). With no flank to take (the drill found
+##   no route round, or nobody free to go) the squad remembers it (NO_FLANK_S), drops the drill,
+##   and when it's being out-shot (suppressed, outnumbered or taking losses) it bounds back to
+##   cover rather than holding where it is (NO_FLANK_BREAK).
 ## - Casualty care: everyone not looking after the casualty holds and suppresses the threat;
 ##   SquadAI's casualty care does the rest.
 ## - Search last known (positions known but stale): hostile pairs search round where the enemy
@@ -57,7 +61,21 @@ const CALLS := {
 
 const THINK_S := 1.0
 const HYSTERESIS := 0.1
-const MIN_KEEP_S := 3.0
+const MIN_KEEP_S := 8.0
+## Within MIN_KEEP_S another option takes over only when it beats the current one by this much
+## (or someone else went down since it was chosen).
+const URGENT_MARGIN := 0.25
+## The contact drill's plan is drawn again for an enemy that moved REPLAN_M at most this often
+## (s), and its "[tactics]" line printed only when who does what changes, or after PLAN_LOG_S.
+const REPLAN_MIN_S := 4.0
+const PLAN_LOG_S := 20.0
+## No flank to take: remembered this long (s), or until the enemy has moved NO_FLANK_MOVED_M.
+const NO_FLANK_S := 30.0
+const NO_FLANK_MOVED_M := 25.0
+## Out-shot (0..1): suppression at OUTSHOT_SUPPRESSION counts fully, as does being outnumbered
+## and losses of a third. With no flank, breaking contact gains NO_FLANK_BREAK times that.
+const OUTSHOT_SUPPRESSION := 0.3
+const NO_FLANK_BREAK := 0.5
 ## The contact drill wants this many up and the enemy between FLANK_MIN_M and FLANK_MAX_M.
 const FLANK_MIN_UP := 3
 const FLANK_MIN_M := 20.0
@@ -128,6 +146,13 @@ var situation := {}
 var scores := {}
 ## The current option's plan: who is in which element, the flank route, the clearance.
 var plan := {}
+## The fewest down since the current option was chosen: one more down is a big change.
+var _down_at_pick := 0
+## The last drill that found no flank to take: {"enemy": Vector3, "at": seconds}, or {}.
+var _no_flank := {}
+## When the drill's plan was drawn, and its last "[tactics]" line: {"key", "at"}.
+var _plan_at := -1000.0
+var _plan_logged := {"key": "", "at": -1000.0}
 
 
 func _init(p_squad: Squad) -> void:
@@ -137,24 +162,76 @@ func _init(p_squad: Squad) -> void:
 ## One think: assess, score, keep or change the option (logging the change), and hand out tasks.
 func think(now: float) -> void:
 	situation = assess()
+	situation["no_flank"] = _no_flank_now(now)
 	var result := score(situation, doctrine())
+	var best := _best(result.scores)
+	var urgent := int(situation.down) > _down_at_pick
+	var drill := {}
+	if best == Option.SUPPRESS_FLANK and best != option and switches(result.scores.get(option, -1.0), result.scores[best], now - since, urgent):
+		# Draw the drill before calling it: with no flank to take it's a base of fire sitting still.
+		drill = _drill_plan(now)
+		if drill.is_empty() or (drill.moving as Array).is_empty():
+			situation.no_flank = true
+			result = score(situation, doctrine())
+			best = _best(result.scores)
+			drill = {}
 	scores = result.scores
-	var best := option
-	var best_score := -1.0
-	for o: Option in scores:
-		if float(scores[o]) > best_score:
-			best = o
-			best_score = scores[o]
-	var current: float = scores.get(option, -1.0)
-	if best != option and (current < 0.0 or (best_score >= current + HYSTERESIS and now - since >= MIN_KEEP_S)):
+	if best != option and switches(scores.get(option, -1.0), scores[best], now - since, urgent):
 		var was := option
 		option = best
 		since = now
-		plan = {}
+		plan = drill if best == Option.SUPPRESS_FLANK else {}
+		_down_at_pick = int(situation.down)
 		_log(was, String(result.why.get(best, "")))
 		_call_option()
+		if not plan.is_empty():
+			_log_plan(now)
+	_down_at_pick = mini(_down_at_pick, int(situation.down))
 	option_score = scores.get(option, 0.0)
 	_carry_out(now)
+
+
+## Whether the option scoring `current` (-1: it no longer applies) gives way to one scoring
+## `best`, after holding it `held_s`; `urgent`: someone else went down since it was chosen.
+static func switches(current: float, best: float, held_s: float, urgent: bool) -> bool:
+	if current < 0.0:
+		return true
+	if best < current + HYSTERESIS:
+		return false
+	return held_s >= MIN_KEEP_S or urgent or best >= current + URGENT_MARGIN
+
+
+static func _best(option_scores: Dictionary) -> Option:
+	var best := Option.NONE
+	var best_score := -INF
+	for o: Option in option_scores:
+		if float(option_scores[o]) > best_score:
+			best = o
+			best_score = option_scores[o]
+	return best
+
+
+## Whether the drill lately found no flank to take against (about) the enemy the squad has now.
+func _no_flank_now(now: float) -> bool:
+	if _no_flank.is_empty():
+		return false
+	var cluster: Dictionary = situation.get("cluster", {})
+	if now - float(_no_flank.at) > NO_FLANK_S or cluster.is_empty() \
+			or (cluster.centre as Vector3).distance_to(_no_flank.enemy) > NO_FLANK_MOVED_M:
+		_no_flank = {}
+		return false
+	return true
+
+
+## The drill's plan against the enemy the squad has now (see _flank), drawn for the units free
+## to take a task; {} with no enemy or nobody. With no maneuver element it's remembered as no
+## flank to take.
+func _drill_plan(now: float) -> Dictionary:
+	var units := _free_units()
+	var cluster: Dictionary = situation.cluster
+	if units.is_empty() or cluster.is_empty():
+		return {}
+	return _draw_flank(units, cluster.centre, now)
 
 
 ## This squad's doctrine (DOCTRINES), with a hot zone's enemy coordination taken into
@@ -282,10 +359,12 @@ static func score(sit: Dictionary, d: Dictionary) -> Dictionary:
 	var down: int = sit.down
 	var losses := float(down) / (up + down)
 	var weapons: bool = sit.weapons_free
+	var no_flank: bool = sit.get("no_flank", false)
+	var outshot := clampf(maxf(supp / OUTSHOT_SUPPRESSION, maxf(outnumbered, losses * 3.0)), 0.0, 1.0)
 	var odds := "%d known%s, %d of us up" % [int(sit.known), (" %.0f m off" % range) if range < INF else "", up]
 	s[Option.HOLD] = 0.45 + 0.2 * supp + 0.1 * (1.0 - cover)
 	why[Option.HOLD] = "%s; suppression %.2f, %.0f%% in cover" % [odds, supp, cover * 100.0]
-	if sit.fresh and free and weapons and up >= FLANK_MIN_UP and range >= FLANK_MIN_M and range <= FLANK_MAX_M:
+	if sit.fresh and free and weapons and up >= FLANK_MIN_UP and range >= FLANK_MIN_M and range <= FLANK_MAX_M and not no_flank:
 		s[Option.SUPPRESS_FLANK] = 0.55 + 0.1 * clampf(ratio - 1.0, 0.0, 2.0) + 0.1 * cover - 0.3 * supp - 0.2 * shaken \
 			- 0.3 * short - 0.2 * losses + float(d.flank)
 		why[Option.SUPPRESS_FLANK] = "%s: fix them and go round" % odds
@@ -302,6 +381,9 @@ static func score(sit: Dictionary, d: Dictionary) -> Dictionary:
 	if free:
 		s[Option.BREAK_CONTACT] = 0.25 + 0.35 * outnumbered + 0.4 * shaken + 0.3 * short + 0.3 * clampf((losses - 0.25) / 0.75, 0.0, 1.0) + float(d.break)
 		why[Option.BREAK_CONTACT] = "%s, morale %.2f, ammunition %.0f%%, %d down: get out" % [odds, float(sit.morale), float(sit.ammo) * 100.0, down]
+		if no_flank and outshot > 0.0:
+			s[Option.BREAK_CONTACT] += NO_FLANK_BREAK * outshot
+			why[Option.BREAK_CONTACT] = "%s, no flank to take and out-shot (suppression %.2f, %d down): bound back to cover" % [odds, supp, down]
 	if down > 0:
 		s[Option.CASUALTY] = 0.6 + 0.1 * mini(down, 3) + float(d.casualty)
 		why[Option.CASUALTY] = "%d down: cover them while they're seen to" % down
@@ -310,12 +392,18 @@ static func score(sit: Dictionary, d: Dictionary) -> Dictionary:
 
 # --- Carrying it out ----------------------------------------------------------------------
 
-## Hands each unit its task for the current option (units with a tactic order keep theirs).
-func _carry_out(now: float) -> void:
+## The units up and without a command-menu tactic order (they take the option's tasks).
+func _free_units() -> Array[SquadAI]:
 	var units: Array[SquadAI] = []
 	for ai in squad.brains():
 		if ai.body.vitals.is_up() and ai.ordered.is_empty():
 			units.append(ai)
+	return units
+
+
+## Hands each unit its task for the current option (units with a tactic order keep theirs).
+func _carry_out(now: float) -> void:
+	var units := _free_units()
 	if units.is_empty():
 		return
 	var sit := situation
@@ -328,7 +416,7 @@ func _carry_out(now: float) -> void:
 			for ai in units:
 				ai.set_task({"kind": &"base", "aim": aim, "id": id} if ai.body.role == Roles.AUTORIFLEMAN and aim.is_finite() else {})
 		Option.SUPPRESS_FLANK:
-			_flank(units, enemy, aim, id)
+			_flank(units, enemy, aim, id, now)
 		Option.ASSAULT:
 			_assault(units, enemy, aim, id)
 		Option.CLEAR:
@@ -356,28 +444,50 @@ func _carry_out(now: float) -> void:
 
 
 ## The contact drill: the base of fire suppresses `aim` while the maneuver element works round
-## the flank (flank_route). Drawn once per contact (again if the enemy moves REPLAN_M or the
-## squad changes); units on Hold or Move, or with no flank to take, join the base.
-func _flank(units: Array[SquadAI], enemy: Vector3, aim: Vector3, id: String) -> void:
+## the flank (flank_route). Drawn once per contact (again if the squad changes, or if the enemy
+## moves REPLAN_M, at most every REPLAN_MIN_S); units on Hold or Move, or with no flank to take,
+## join the base. A plan with nobody to flank is remembered (_no_flank): the next think drops
+## the drill for something that does something.
+func _flank(units: Array[SquadAI], enemy: Vector3, aim: Vector3, id: String, now: float) -> void:
 	var names := units.map(func(ai: SquadAI) -> String: return String(ai.body.name))
-	if plan.is_empty() or (plan.enemy as Vector3).distance_to(enemy) > REPLAN_M or plan.names != names:
-		var split := elements(units, enemy)
-		var base: Array = split[0]
-		var moving: Array = split[1].filter(func(ai: SquadAI) -> bool: return ai.order == Squad.Order.FOLLOW or not ai._friendly())
-		base.append_array(split[1].filter(func(ai: SquadAI) -> bool: return ai not in moving))
-		var lead: Soldier = situation.lead
-		var route := {} if moving.is_empty() else flank_route(moving[0].body, _middle(moving), enemy, lead, _other_clusters())
-		if route.is_empty():
-			base.append_array(moving)
-			moving = []
-		plan = {"enemy": enemy, "names": names, "base": base, "moving": moving, "route": route.get("route", []), "side": route.get("side", "")}
-		print("[tactics] %s: base of fire %s on (%.0f, %.0f)%s" % [squad.name, _names(base), enemy.x, enemy.z,
-			(", %s flank %s by %s" % [_names(moving), plan.side, _points(plan.route)]) if not moving.is_empty() else ", no flank to take"])
+	if plan.is_empty() or plan.names != names or ((plan.enemy as Vector3).distance_to(enemy) > REPLAN_M and now - _plan_at >= REPLAN_MIN_S):
+		plan = _draw_flank(units, enemy, now)
+		_log_plan(now)
 	for ai in units:
 		if ai in plan.moving:
 			ai.set_task({"kind": &"maneuver", "route": plan.route, "aim": aim, "id": id})
 		else:
 			ai.set_task({"kind": &"base", "aim": aim, "id": id})
+
+
+## The drill's plan for `units` against `enemy`: {"enemy", "names", "base", "moving", "route",
+## "side"}. With no maneuver element, no flank to take is remembered.
+func _draw_flank(units: Array[SquadAI], enemy: Vector3, now: float) -> Dictionary:
+	var names := units.map(func(ai: SquadAI) -> String: return String(ai.body.name))
+	var split := elements(units, enemy)
+	var base: Array = split[0]
+	var moving: Array = split[1].filter(func(ai: SquadAI) -> bool: return ai.order == Squad.Order.FOLLOW or not ai._friendly())
+	base.append_array(split[1].filter(func(ai: SquadAI) -> bool: return ai not in moving))
+	var lead: Soldier = situation.lead
+	var route := {} if moving.is_empty() else flank_route(moving[0].body, _middle(moving), enemy, lead, _other_clusters())
+	if route.is_empty():
+		base.append_array(moving)
+		moving = []
+		_no_flank = {"enemy": enemy, "at": now}
+	_plan_at = now
+	return {"enemy": enemy, "names": names, "base": base, "moving": moving, "route": route.get("route", []), "side": route.get("side", "")}
+
+
+## The drill's "[tactics]" line, when who does what changed since the last one (or PLAN_LOG_S on).
+func _log_plan(now: float) -> void:
+	var moving: Array = plan.moving
+	var key := "%s|%s|%s" % [_names(plan.base), _names(moving), plan.side]
+	if key == _plan_logged.key and now - float(_plan_logged.at) < PLAN_LOG_S:
+		return
+	_plan_logged = {"key": key, "at": now}
+	var enemy: Vector3 = plan.enemy
+	print("[tactics] %s: base of fire %s on (%.0f, %.0f)%s" % [squad.name, _names(plan.base), enemy.x, enemy.z,
+		(", %s flank %s by %s" % [_names(moving), plan.side, _points(plan.route)]) if not moving.is_empty() else ", no flank to take"])
 
 
 ## Assault: the autorifleman and his buddy (else the pair nearest the enemy) keep their heads

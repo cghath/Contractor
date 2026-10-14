@@ -304,6 +304,17 @@ func _test_tactics() -> void:
 	check(not SquadTactics.score(sit.merged({"order": Squad.Order.HOLD}, true), pmc).scores.has(SquadTactics.Option.SUPPRESS_FLANK),
 		"on Hold, the squad doesn't go flanking")
 	check(best.call({"contact": false, "fresh": false, "stale": true, "age": 30.0}) == SquadTactics.Option.SEARCH, "lost them: search where they were last seen")
+	# P0362: "base of fire ... no flank to take" every second while taking fire, sitting still.
+	var keep := SquadTactics.MIN_KEEP_S
+	check(not SquadTactics.switches(0.6, 0.75, keep * 0.4, false) and SquadTactics.switches(0.6, 0.75, keep, false),
+		"a chosen tactic is held %.0f s against a somewhat better one" % keep)
+	check(SquadTactics.switches(0.6, 0.6 + SquadTactics.URGENT_MARGIN, 1.0, false) and SquadTactics.switches(0.6, 0.75, 1.0, true)
+		and SquadTactics.switches(-1.0, 0.3, 0.0, false), "unless the situation changes a lot: a much better option, someone else down, or it stops applying")
+	var pinned := {"no_flank": true, "up": 4, "known": 4, "suppression": 0.35, "cover": 0.0}
+	check(not SquadTactics.score(sit.merged({"no_flank": true}, true), pmc).scores.has(SquadTactics.Option.SUPPRESS_FLANK)
+		and best.call({"no_flank": true}) == SquadTactics.Option.HOLD, "no flank to take, not out-shot: no drill, hold and improve cover")
+	check(best.call(pinned) == SquadTactics.Option.BREAK_CONTACT and best.call(pinned.merged({"no_flank": false}, true)) != SquadTactics.Option.BREAK_CONTACT,
+		"no flank to take and out-shot (P0362: 4 on 4, suppressed, nobody in cover): bound back to cover, not hold")
 
 	print("Command menu orders")
 	var squad := level.squad_for(&"friendly")
