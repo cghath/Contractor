@@ -743,13 +743,15 @@ func _test_fire_discipline() -> void:
 	_clear_contact()
 
 
-## Close-range hostile accuracy (Captain, P0362: squad killed by head and neck shots at 2-6 m).
-## A hostile at combat 0.45 meets a standing man at 2, 4 and 6 m, in front of him or off to the
-## side and behind; the rounds are traced against the real hitboxes the way Ballistics does.
-## Up close he should take a moment, start low and miss a little, and hit centre mass, not the
-## head; at 100-200 m nothing changes.
+## Close-range and long-range hostile accuracy (Captain, P0362: squad killed by head and neck
+## shots at 2-6 m; one guard downed three at 155 m in 13 s). A hostile at combat 0.45 meets a
+## standing man at 2, 4 and 6 m, in front of him or off to the side and behind; the rounds are
+## traced against the real hitboxes the way Ballistics does. Up close he should take a moment,
+## start low and miss a little, and hit centre mass, with only a few high rounds. At 100-200 m
+## he hits less often than before (the old aim, staged the same way, is printed beside it),
+## and a skilled man (combat 0.8) still clearly better than him.
 func _test_close_range_aim() -> void:
-	print("Close-range aim: reaction, first-shot error, snap-aim lag, centre mass")
+	print("Close-range aim: reaction, first-shot error, snap-aim lag, centre mass; long-range hit rates")
 	var spot := Vector3(-70, 0.1, -70)  # a corner of the flat ground, away from the squad
 	var diag := Vector3(1, 0, 1).normalized()  # the shooter stands off along this (200 m fits)
 	var hostile := level.spawn_soldier({"name": "CqbHostile", "faction": "hostile", "variant": "urban", "pos": spot + diag * 4.0,
@@ -782,86 +784,88 @@ func _test_close_range_aim() -> void:
 		await _physics_frames(15)
 		hostile.is_aiming = true
 		check(hostile.is_on_floor(), "%.0f m: he stands on the ground" % d)
-		var fired := 0
-		var hits := 0
-		var head := 0
-		var torso := 0
-		var first_chest := 0
-		var early := 0
-		var quick := 0
-		var front_t: Array[float] = []
-		var flank_t: Array[float] = []
-		for k in 120:
-			var flank := k >= 60
-			var off := deg_to_rad(randf_range(-60.0, 60.0)) if not flank else deg_to_rad(randf_range(90.0, 180.0)) * (1.0 if k % 2 == 0 else -1.0)
-			var r := _cqb_trial(hostile, ai, target, off, true)
-			fired += r.fired
-			hits += r.hits
-			head += r.head
-			torso += r.torso
-			if not flank and r.first_part == Vitals.CHEST:
-				first_chest += 1
-			if r.first_hit >= 0.0:
-				if r.first_hit < 0.35:
-					early += 1
-				if r.first_hit <= 2.5:
-					quick += 1
-				(flank_t if flank else front_t).append(r.first_hit)
-			else:
-				(flank_t if flank else front_t).append(99.0)
-		var front_med := _median(front_t)
-		var flank_med := _median(flank_t)
-		var share := float(hits) / maxf(fired, 1)
-		print("    %.0f m: %d rounds, %d hits (%.0f%%), head/face/neck %d, torso %d, first round in the chest %d/60, first hit median front %.2f s, flank %.2f s" % [
-			d, fired, hits, share * 100.0, head, torso, first_chest, front_med, flank_med])
-		check(hits > 0 and float(head) / hits <= 0.03, "%.0f m: head, face and neck at most 3%% of hits (%d of %d)" % [d, head, hits])
-		check(hits > 0 and float(torso) / hits >= 0.75, "%.0f m: chest, abdomen and pelvis at least 75%% of hits (%d of %d)" % [d, torso, hits])
-		check(share >= 0.75, "%.0f m: still hits: at least 75%% of rounds (%.0f%%)" % [d, share * 100.0])
-		check(first_chest <= 51, "%.0f m: the first round isn't a sure chest hit (%d of 60 front trials, at most 51)" % [d, first_chest])
-		check(early == 0, "%.0f m: no first hit sooner than 0.35 s (%d were)" % [d, early])
-		check(front_med >= 0.55 and front_med <= 1.4, "%.0f m: a reaction before the first hit in front: median %.2f s (0.55-1.4)" % [d, front_med])
-		check(flank_med >= front_med + 0.1, "%.0f m: a man off to the side or behind takes longer: median %.2f s vs %.2f s in front" % [d, flank_med, front_med])
-		check(quick >= 108, "%.0f m: at least 90%% of trials hit within 2.5 s (%d of 120)" % [d, quick])
-	# At range: nothing changes. Same seed, same draws, with the new aim point and the old one.
-	# Up in the air, clear of the compound's walls (both held there, physics off).
-	var at_range := true
+		for cqb: bool in [false, true]:
+			var fired := 0
+			var hits := 0
+			var head := 0
+			var torso := 0
+			var first_chest := 0
+			var early := 0
+			var quick := 0
+			var front_t: Array[float] = []
+			var flank_t: Array[float] = []
+			for k in 120:
+				var flank := k >= 60
+				var off := deg_to_rad(randf_range(-60.0, 60.0)) if not flank else deg_to_rad(randf_range(90.0, 180.0)) * (1.0 if k % 2 == 0 else -1.0)
+				var r := _cqb_trial(hostile, ai, target, off, cqb)
+				fired += r.fired
+				hits += r.hits
+				head += r.head
+				torso += r.torso
+				if not flank and r.first_part == Vitals.CHEST:
+					first_chest += 1
+				if r.first_hit >= 0.0:
+					if r.first_hit < 0.35:
+						early += 1
+					if r.first_hit <= 2.5:
+						quick += 1
+					(flank_t if flank else front_t).append(r.first_hit)
+				else:
+					(flank_t if flank else front_t).append(99.0)
+			var front_med := _median(front_t)
+			var flank_med := _median(flank_t)
+			var share := float(hits) / maxf(fired, 1)
+			var head_share := float(head) / maxf(hits, 1)
+			print("    %.0f m %s: %d rounds, %d hits (%.0f%%), head/face/neck %d (%.1f%% of hits), torso %d, first round in the chest %d/60, first hit median front %.2f s, flank %.2f s" % [
+				d, "now   " if cqb else "before", fired, hits, share * 100.0, head, head_share * 100.0, torso, first_chest, front_med, flank_med])
+			if not cqb:
+				continue
+			check(hits > 0 and head_share <= 0.08, "%.0f m: head, face and neck at most 8%% of hits (%d of %d)" % [d, head, hits])
+			check(hits > 0 and float(torso) / hits >= 0.75, "%.0f m: chest, abdomen and pelvis at least 75%% of hits (%d of %d)" % [d, torso, hits])
+			check(share >= 0.6, "%.0f m: still hits: at least 60%% of rounds (%.0f%%)" % [d, share * 100.0])
+			check(first_chest <= 51, "%.0f m: the first round isn't a sure chest hit (%d of 60 front trials, at most 51)" % [d, first_chest])
+			check(early == 0, "%.0f m: no first hit sooner than 0.35 s (%d were)" % [d, early])
+			check(front_med >= 0.55 and front_med <= 1.4, "%.0f m: a reaction before the first hit in front: median %.2f s (0.55-1.4)" % [d, front_med])
+			check(flank_med >= front_med + 0.1, "%.0f m: a man off to the side or behind takes longer: median %.2f s vs %.2f s in front" % [d, flank_med, front_med])
+			check(quick >= 108, "%.0f m: at least 90%% of trials hit within 2.5 s (%d of 120)" % [d, quick])
+	# At range: up in the air, clear of the compound's walls (both held there, physics off). Each
+	# trial is 20 s of fire at one man in the open, as at 155 m in P0362.
 	var sky := spot + Vector3.UP * 40.0
 	hostile.set_physics_process(false)
 	target.set_physics_process(false)
 	_place(target, sky)
+	var shares := {}
 	for d: float in [100.0, 150.0, 200.0]:
 		_place(hostile, sky + diag * d)
 		await _physics_frames(2)
 		hostile.is_aiming = true
-		var offs: Array[float] = []
-		for k in 60:
-			offs.append(deg_to_rad(randf_range(-10.0, 10.0)))
-		var seed_now := randi()
-		var hits_new := 0
-		var hits_old := 0
-		var fired_new := 0
-		var fired_old := 0
-		seed(seed_now)
-		for off: float in offs:
-			var r := _cqb_trial(hostile, ai, target, off, true)
-			hits_new += r.hits
-			fired_new += r.fired
-		seed(seed_now)
-		for off: float in offs:
-			var r := _cqb_trial(hostile, ai, target, off, false)
-			hits_old += r.hits
-			fired_old += r.fired
-		var new_share := float(hits_new) / maxf(fired_new, 1)
-		var old_share := float(hits_old) / maxf(fired_old, 1)
-		print("    %.0f m: hit share %.2f (%d/%d), before %.2f (%d/%d)" % [d, new_share, hits_new, fired_new, old_share, hits_old, fired_old])
-		at_range = at_range and new_share >= old_share - 0.01
-		ai._acquire(target)
-		at_range = at_range and ai._cqb_aim_point(target, 0.0) == target.aim_point()
-	_place(hostile, sky + diag * SquadAI.CQB_FADE_M)
-	hostile.rotation.y = 0.0
-	ai._acquire(target)
-	var at_fade := ai._cqb_aim_point(target, 0.0) == target.aim_point()
-	check(at_range and at_fade, "at 100, 150 and 200 m he hits as often as before, and from %.0f m out the aim point is exactly the chest" % SquadAI.CQB_FADE_M)
+		for skill: float in [0.45, 0.8]:
+			ai.combat = skill
+			for cqb: bool in [false, true]:
+				var fired := 0
+				var hits := 0
+				var first_t: Array[float] = []
+				var third_t: Array[float] = []
+				for k in 30:
+					var r := _cqb_trial(hostile, ai, target, deg_to_rad(randf_range(-10.0, 10.0)), cqb, 20.0, 0)
+					fired += r.fired
+					hits += r.hits
+					first_t.append(r.first_hit if r.first_hit >= 0.0 else 99.0)
+					third_t.append(r.third_hit if r.third_hit >= 0.0 else 99.0)
+				var share := float(hits) / maxf(fired, 1)
+				shares[str(d, " ", skill, " ", cqb)] = share
+				print("    %.0f m, combat %.2f %s: %d rounds, %d hits (%.1f%%), first hit median %.1f s, third hit median %.1f s (99: none in 20 s)" % [
+					d, skill, "now   " if cqb else "before", fired, hits, share * 100.0, _median(first_t), _median(third_t)])
+				if cqb and is_equal_approx(d, 150.0) and is_equal_approx(skill, 0.45):
+					var med := _median(first_t)
+					check(share >= 0.04 and share <= 0.15, "150 m, combat 0.45: %.1f%% of rounds hit (4-15%%)" % (share * 100.0))
+					check(med >= 2.5 and med <= 12.0, "150 m, combat 0.45: the first hit takes a while: median %.1f s (2.5-12)" % med)
+					check(_median(third_t) >= 8.0, "150 m, combat 0.45: three hits take at least 8 s (median %.1f s)" % _median(third_t))
+	ai.combat = 0.45
+	for d: float in [100.0, 150.0, 200.0]:
+		check(shares[str(d, " ", 0.45, " ", true)] < shares[str(d, " ", 0.45, " ", false)] and shares[str(d, " ", 0.8, " ", true)] < shares[str(d, " ", 0.8, " ", false)],
+			"%.0f m: fewer hits than before (combat 0.45 %.2f vs %.2f, 0.8 %.2f vs %.2f)" % [d, shares[str(d, " ", 0.45, " ", true)], shares[str(d, " ", 0.45, " ", false)], shares[str(d, " ", 0.8, " ", true)], shares[str(d, " ", 0.8, " ", false)]])
+		check(shares[str(d, " ", 0.8, " ", true)] >= shares[str(d, " ", 0.45, " ", true)] * 1.5, "%.0f m: combat 0.8 hits at least 1.5x as often as 0.45 (%.2f vs %.2f)" % [d, shares[str(d, " ", 0.8, " ", true)], shares[str(d, " ", 0.45, " ", true)]])
 	randomize()
 	# Live: a real 4 m engagement through _shoot. The squad is kept out of earshot (out of the
 	# combatants for it) so the shots don't start a fight for the later checks.
@@ -905,12 +909,13 @@ func _test_close_range_aim() -> void:
 
 
 ## One staged engagement for _test_close_range_aim, run synchronously at 60 Hz the way _shoot
-## does it: `hostile` starts `yaw_off` off facing `target`, acquires him, and fires two bursts
-## (or gives up at 4 s). `cqb`: aim with _cqb_aim_point; else at the plain chest (the old path,
-## with the same random draws). Returns rounds fired, hits on the target, head (head, face,
-## neck) and torso (chest, abdomen, pelvis) hits, the first round's part and the first hit's
-## time (-1: none).
-func _cqb_trial(hostile: Soldier, ai: SquadAI, target: Soldier, yaw_off: float, cqb: bool) -> Dictionary:
+## does it: `hostile` starts `yaw_off` off facing `target`, acquires him, and fires bursts for
+## up to `length` seconds (`max_bursts` of them; 0: no limit). `cqb`: the aim as it is now
+## (_cqb_aim_point, _aim_for_shot, _gate_open, _new_hold); else the old one as it was on dev
+## before P0362 (the chest, an uncapped ease, fire within 6 degrees). Returns rounds fired,
+## hits on the target, head (head, face, neck) and torso (chest, abdomen, pelvis) hits, the
+## first round's part, and the first and third hits' times (-1: none).
+func _cqb_trial(hostile: Soldier, ai: SquadAI, target: Soldier, yaw_off: float, cqb: bool, length := 4.0, max_bursts := 2) -> Dictionary:
 	var to := target.aim_point() - hostile.global_position
 	hostile.rotation.y = atan2(-to.x, -to.z) + yaw_off
 	hostile.head.rotation.x = 0.0
@@ -920,22 +925,22 @@ func _cqb_trial(hostile: Soldier, ai: SquadAI, target: Soldier, yaw_off: float, 
 	var weapon := hostile.active_weapon()
 	var auto: bool = weapon.stats.get("auto", false)
 	var gap := 60.0 / float(weapon.stats.get("rpm", 600)) * (1.0 if auto else 1.6)
-	var res := {"fired": 0, "hits": 0, "head": 0, "torso": 0, "first_part": &"", "first_hit": -1.0}
+	var res := {"fired": 0, "hits": 0, "head": 0, "torso": 0, "first_part": &"", "first_hit": -1.0, "third_hit": -1.0}
 	var dt := 1.0 / 60.0
 	var t := 0.0
 	var next_t := 0.0
 	var pause_t := 0.0
 	var bursts := 0
-	while t < 4.0:
+	while t < length:
 		t += dt
-		var aim: Vector3
+		var open: bool
 		if cqb:
-			aim = ai._cqb_aim_point(target, dt)
+			var aim := ai._cqb_aim_point(target, dt)
+			open = ai._gate_open(target, ai._aim_for_shot(aim, target), aim)
 		else:
 			ai._acq_age += dt
-			aim = target.aim_point()
-		var err := ai._aim_for_shot(aim, target)
-		if t < ai._acq_react_s or t < next_t or t < pause_t or not ai._gate_open(target, err):
+			open = _old_aim_at(hostile, ai, target.aim_point(), dt) <= deg_to_rad(6.0)
+		if t < ai._acq_react_s or t < next_t or t < pause_t or not open:
 			continue
 		next_t = t + gap
 		if ai._burst_left <= 0:
@@ -946,6 +951,8 @@ func _cqb_trial(hostile: Soldier, ai: SquadAI, target: Soldier, yaw_off: float, 
 		ai._burst_left -= 1
 		if ai._burst_left <= 0:
 			pause_t = t + randf_range(0.5, 1.1) / lerpf(0.7, 1.3, ai.combat)
+			if cqb:
+				ai._new_hold()
 		var dir: Vector3 = hostile.call(&"ai_spread_direction", weapon) if hostile.has_method(&"ai_spread_direction") else hostile._spread_direction(weapon)
 		var extra := deg_to_rad(ai._aim_error_deg(true))
 		dir = (dir + Vector3(randf_range(-1, 1), randf_range(-1, 1), randf_range(-1, 1)) * tan(extra) * 0.6).normalized()
@@ -957,13 +964,27 @@ func _cqb_trial(hostile: Soldier, ai: SquadAI, target: Soldier, yaw_off: float, 
 			res.hits += 1
 			if res.first_hit < 0.0:
 				res.first_hit = t
+			if res.hits == 3:
+				res.third_hit = t
 			if part in [Vitals.HEAD, Vitals.FACE, Vitals.NECK]:
 				res.head += 1
 			elif part in Vitals.TORSO_PARTS:
 				res.torso += 1
-		if bursts >= 2 and ai._burst_left <= 0:
+		if max_bursts > 0 and bursts >= max_bursts and ai._burst_left <= 0:
 			break
 	return res
+
+
+## SquadAI._aim_at as it was before P0362 (for the "before" numbers): the same ease, no cap on
+## the swing. Returns the angle still off (radians).
+static func _old_aim_at(hostile: Soldier, ai: SquadAI, point: Vector3, dt: float) -> float:
+	var d := point - hostile.camera.global_position
+	var yaw := atan2(-d.x, -d.z)
+	var pitch := atan2(d.y, Vector2(d.x, d.z).length())
+	var step := 1.0 - exp(-SquadAI.TURN_RATE * lerpf(0.6, 1.4, ai.combat) * dt)
+	hostile.rotation.y = lerp_angle(hostile.rotation.y, yaw, step)
+	hostile.head.rotation.x = lerpf(hostile.head.rotation.x, clampf(pitch, -1.4, 1.4), step)
+	return (-hostile.camera.global_basis.z).angle_to(d.normalized())
 
 
 ## The part of `target` a round from `from` along `dir` meets, as Ballistics._trace finds it

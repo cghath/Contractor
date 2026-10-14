@@ -167,17 +167,41 @@ const TURN_HOLD_UNSKILLED_S := 0.35
 const TURN_HOLD_SKILLED_S := 0.1
 const TURN_HOLD_MIN_DEG := 20.0
 ## Proposed: close-range aim (_cqb_aim_point). Within CQB_FULL_M the full model applies,
-## fading out to none at CQB_FADE_M (nothing changes at range). The first shots land up to
-## CQB_ACQ_*_M off the chest (always low: the muzzle comes up onto him), settling over
-## CQB_SETTLE_*_S once the reaction time has passed; each burst holds a small offset of its own
-## (CQB_BURST_OFFSET_M, one sigma). Skill 0 and 1.
+## fading out to none at CQB_FADE_M (the range hold, RANGE_HOLD_*, takes over). The first
+## shots land up to CQB_ACQ_*_M off the chest (mostly low: the muzzle comes up onto him; high in
+## CQB_HIGH_SHARE of acquisitions, at CQB_HIGH_MULT of the size: a snap from above, the few
+## rounds that go to the neck or head), settling over CQB_SETTLE_*_S once the reaction time
+## has passed; each burst holds a small offset of its own (CQB_BURST_OFFSET_M, one sigma).
+## Skill 0 and 1.
 const CQB_FULL_M := 10.0
 const CQB_FADE_M := 30.0
 const CQB_ACQ_UNSKILLED_M := 0.45
 const CQB_ACQ_SKILLED_M := 0.12
+const CQB_HIGH_SHARE := 0.15
+const CQB_HIGH_MULT := 0.6
 const CQB_SETTLE_UNSKILLED_S := 0.6
 const CQB_SETTLE_SKILLED_S := 0.25
 const CQB_BURST_OFFSET_M := 0.05
+## Proposed (Captain, P0362: the old gate fired once the turn was within 6 degrees, which at
+## 2-6 m is 20-60 cm, and the sights came down onto a man from eye level through his head and
+## neck): a round at a seen foe goes only once the sights are within GATE_*_M (skill 0 and 1)
+## of the aim point, measured at his range; on the high side only GATE_HIGH_MULT of that (a
+## high miss is a head shot), on the low side GATE_LOW_MULT (a low one is still his belly). Out
+## at range never tighter than GATE_MIN_DEG, so he still fires at a man on the move.
+const GATE_UNSKILLED_M := 0.25
+const GATE_SKILLED_M := 0.15
+const GATE_HIGH_MULT := 0.5
+const GATE_LOW_MULT := 1.5
+const GATE_MIN_DEG := 0.3
+## Proposed (Captain, P0362: one guard downed three at 155 m in 13 s): beyond close range each
+## burst is held a little off (one sigma RANGE_HOLD_*_DEG, skill 0 and 1: the whole burst
+## groups round a wrong point, as a man's hold on a small far figure wanders), fully from
+## CQB_FADE_M out. The first bursts at a new target are wider (RANGE_ACQ_MULT more, settling
+## over RANGE_SETTLE_S: finding the range, the wind, his own fall of shot).
+const RANGE_HOLD_UNSKILLED_DEG := 0.35
+const RANGE_HOLD_SKILLED_DEG := 0.1
+const RANGE_ACQ_MULT := 1.0
+const RANGE_SETTLE_S := 4.0
 const GRENADE_COOLDOWN_S := 15.0
 ## One frag per spot per squad within this long, over this spread (proposed).
 const SQUAD_FRAG_GAP_S := 6.0
@@ -494,6 +518,7 @@ var _checked := {}  # instance id -> true: bodies this unit has dead-checked (cl
 ## how long he holds before turning, and whether it was up when acquired.
 var _acq_offset := Vector2.ZERO
 var _burst_offset := Vector2.ZERO
+var _burst_hold := Vector2.ZERO  # radians right/up: this burst's hold at range (RANGE_HOLD_*_DEG)
 var _acq_age := 0.0
 var _acq_react_s := 0.0
 var _acq_hold_s := 0.0
@@ -2869,11 +2894,11 @@ func _buddy_bounding() -> bool:
 # --- Shooting -------------------------------------------------------------
 
 ## A new target `t` (or the same one gone down or back up): the reaction time before the first
-## round, and for one who is up, the first-shot error (_acq_offset, always low: the muzzle comes
-## up onto him, never over his head) and the snap-aim hold before a big swing (_acq_hold_s),
-## both larger the further the target is off his aim; for an unconscious one (a dead-check), a
-## look of DEAD_CHECK_LOOK_*_S instead, no error (Captain, P0362). Doctrine's reaction factor
-## (audit A3-07) belongs on `react` here.
+## round, and for one who is up, the first-shot error (_acq_offset, mostly low: the muzzle comes
+## up onto him; CQB_HIGH_SHARE high) and the snap-aim hold before a big swing (_acq_hold_s),
+## both larger the further the target is off his aim, and the first burst's hold (_new_hold);
+## for an unconscious one (a dead-check), a look of DEAD_CHECK_LOOK_*_S instead, no error
+## (Captain, P0362). Doctrine's reaction factor (audit A3-07) belongs on `react` here.
 func _acquire(t: Soldier) -> void:
 	_acq_age = 0.0
 	_acq_up = t.vitals.is_up()
@@ -2884,7 +2909,9 @@ func _acquire(t: Soldier) -> void:
 		react = lerpf(0.9, 0.25, combat)  # reaction time
 		_acq_hold_s = lerpf(TURN_HOLD_UNSKILLED_S, TURN_HOLD_SKILLED_S, combat) if swing_deg > TURN_HOLD_MIN_DEG else 0.0
 		var a := lerpf(CQB_ACQ_UNSKILLED_M, CQB_ACQ_SKILLED_M, combat) * (0.5 + minf(swing_deg, 120.0) / 120.0)
-		_acq_offset = Vector2(a * randf_range(-0.7, 0.7), -a * randf_range(0.4, 1.0))
+		var up := CQB_HIGH_MULT if randf() < CQB_HIGH_SHARE else -1.0
+		_acq_offset = Vector2(a * randf_range(-0.7, 0.7), up * a * randf_range(0.4, 1.0))
+		_new_hold()
 	else:
 		react = lerpf(DEAD_CHECK_LOOK_UNSKILLED_S, DEAD_CHECK_LOOK_SKILLED_S, combat)
 		_acq_hold_s = 0.0
@@ -2896,22 +2923,25 @@ func _acquire(t: Soldier) -> void:
 ## Where to aim at `foe` this frame (advances the time since he was acquired by `delta`). A
 ## downed foe being dead-checked: his belly (_dead_check_point). One who is up: his chest,
 ## plus, within CQB_FADE_M (fully within CQB_FULL_M), the first-shot error settling away once
-## the reaction time has passed and this burst's own small offset. At CQB_FADE_M and beyond
-## exactly aim_point(), as before.
+## the reaction time has passed and this burst's own small offset; further out (fully from
+## CQB_FADE_M), this burst's hold at range (_burst_hold, an angle, so metres grow with range).
 func _cqb_aim_point(foe: Soldier, delta: float) -> Vector3:
 	_acq_age += delta
 	if not foe.vitals.is_up():
 		return _dead_check_point(foe)
 	var p := foe.aim_point()
 	var from := body.camera.global_position
-	var w := clampf((CQB_FADE_M - from.distance_to(p)) / (CQB_FADE_M - CQB_FULL_M), 0.0, 1.0)
-	if w <= 0.0:
+	var dist := from.distance_to(p)
+	var w := clampf((CQB_FADE_M - dist) / (CQB_FADE_M - CQB_FULL_M), 0.0, 1.0)
+	var off := _burst_hold * dist * (1.0 - w)
+	if w > 0.0:
+		var settle := lerpf(CQB_SETTLE_UNSKILLED_S, CQB_SETTLE_SKILLED_S, combat)
+		off += (_acq_offset * exp(-maxf(_acq_age - _acq_react_s, 0.0) / settle) + _burst_offset) * w
+	if off == Vector2.ZERO:
 		return p
-	var settle := lerpf(CQB_SETTLE_UNSKILLED_S, CQB_SETTLE_SKILLED_S, combat)
-	var off := _acq_offset * exp(-maxf(_acq_age - _acq_react_s, 0.0) / settle) + _burst_offset
 	var flat := Vector3(p.x - from.x, 0.0, p.z - from.z)
 	var right := flat.normalized().cross(Vector3.UP) if flat.length() > 0.01 else body.global_basis.x
-	return p + (right * off.x + Vector3.UP * off.y) * w
+	return p + right * off.x + Vector3.UP * off.y
 
 
 ## Turns toward `point` for a shot at `foe` and returns the angle still off (radians), except
@@ -2924,23 +2954,55 @@ func _aim_for_shot(point: Vector3, foe: Soldier) -> float:
 	return _aim_at(point)
 
 
-## May a round go now (the time gates passed)? At a foe who is up: within 6 degrees, as ever.
-## A dead-check: within DEAD_CHECK_GATE_DEG, rounds left of DEAD_CHECK_ROUNDS, and the sights on
-## his body rather than his head (_sights_on_body).
-func _gate_open(foe: Soldier, error: float) -> bool:
+## May a round go now (the time gates passed)? At a foe who is up, aimed at `point`: where the
+## sights cross his range, within GATE_*_M of the point to the side, GATE_HIGH_MULT of that
+## above, GATE_LOW_MULT below (_gate_miss_ok). A dead-check: within DEAD_CHECK_GATE_DEG, rounds
+## left of DEAD_CHECK_ROUNDS, and the sights on his body rather than his head (_sights_on_body).
+## Covering fire at a spot (no foe): within 6 degrees, as ever.
+func _gate_open(foe: Soldier, error: float, point: Variant = null) -> bool:
 	if foe != null and not foe.vitals.is_up():
 		return error <= deg_to_rad(DEAD_CHECK_GATE_DEG) and _dead_check_rounds < DEAD_CHECK_ROUNDS and _sights_on_body(foe)
-	return error <= deg_to_rad(6.0)
+	if foe == null or point == null:
+		return error <= deg_to_rad(6.0)
+	return _gate_miss_ok(point)
 
 
-## A new burst at `foe`: a small offset held through it (capped on the high side). A dead-check
-## fires one round at a time and counts them; the last one marks the body checked.
+## Whether the sights (straight down the camera) pass close enough to `point` for a round at a
+## foe: measured in metres in the plane square to the line at his range (GATE_* above).
+func _gate_miss_ok(point: Vector3) -> bool:
+	var from := body.camera.global_position
+	var to := point - from
+	var dist := to.length()
+	if dist < 0.05:
+		return true
+	var along := to / dist
+	var dir := -body.camera.global_basis.z
+	var cos_off := dir.dot(along)
+	if cos_off <= 0.1:
+		return false
+	var miss := from + dir * (dist / cos_off) - point
+	var up := (Vector3.UP - along * along.y)
+	up = up.normalized() if up.length() > 0.01 else body.global_basis.z
+	var high := miss.dot(up)
+	var side := absf(miss.dot(along.cross(up)))
+	var gate := maxf(lerpf(GATE_UNSKILLED_M, GATE_SKILLED_M, combat), dist * tan(deg_to_rad(GATE_MIN_DEG)))
+	return side <= gate and high <= gate * GATE_HIGH_MULT and high >= -gate * GATE_LOW_MULT
+
+
+## The next burst's aim off the chest, drawn when a target is acquired and as each burst ends
+## (so the sights settle on it before its first round): a small offset up close (capped on the
+## high side) and the hold at range (_burst_hold: wider while he's new to the target).
+func _new_hold() -> void:
+	_burst_offset = Vector2(randfn(0.0, CQB_BURST_OFFSET_M), minf(randfn(-0.02, 0.04), 0.03))
+	var hold := deg_to_rad(lerpf(RANGE_HOLD_UNSKILLED_DEG, RANGE_HOLD_SKILLED_DEG, combat)) \
+		* (1.0 + RANGE_ACQ_MULT * exp(-_acq_age / RANGE_SETTLE_S))
+	_burst_hold = Vector2(randfn(0.0, hold), randfn(0.0, hold))
+
+
+## A new burst at `foe`. A dead-check fires one round at a time and counts them; the last one
+## marks the body checked.
 func _start_burst(foe: Soldier) -> void:
-	_burst_offset = Vector2.ZERO
-	if foe == null:
-		return
-	if foe.vitals.is_up():
-		_burst_offset = Vector2(randfn(0.0, CQB_BURST_OFFSET_M), minf(randfn(-0.02, 0.04), 0.03))
+	if foe == null or foe.vitals.is_up():
 		return
 	_burst_left = 1
 	_dead_check_rounds += 1
@@ -3021,7 +3083,7 @@ func _shoot() -> void:
 	if body.want_crouch and _at_cover() and foe != null:
 		body.want_crouch = false  # stand up to shoot over cover
 		return
-	if now < _next_shot or now < _pause_until or now < body._busy_until or not _gate_open(foe, error):
+	if now < _next_shot or now < _pause_until or now < body._busy_until or not _gate_open(foe, error, aim_at):
 		return
 	if body.inventory.rounds_in(body.active_slot) <= 0 or _friendly_in_line(aim_at):
 		return
@@ -3033,6 +3095,7 @@ func _shoot() -> void:
 		_start_burst(foe)  # (a dead-check: one deliberate round at a time)
 	_burst_left -= 1
 	if _burst_left <= 0:
+		_new_hold()  # the next burst's aim (the sights settle on it in the pause)
 		_pause_until = now + randf_range(0.5, 1.1) / lerpf(0.7, 1.3, combat)
 	var dir := body._spread_direction(weapon)
 	var extra := deg_to_rad(_aim_error_deg(foe != null))
