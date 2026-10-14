@@ -244,6 +244,7 @@ func _set_pouches() -> void:
 		var item := ItemDB.get_item(StringName(att.id))
 		var node := LauncherRig.make_model(item, render_layers) if item.type == "launcher" \
 			else pouch_node(item, gear, not att.get("held", []).is_empty(), render_layers)
+		node.name = String(p.id)
 		node.transform = spots[p.id]
 		_pouches.add_child(node)
 		var h := WorldItem.visual_size(item).y
@@ -252,69 +253,157 @@ func _set_pouches() -> void:
 
 
 ## Where each attachment on the worn carrier and pack sits: point id -> torso-local transform.
-## Pouches on the plate pocket's front stay inside it (_panel_rows), ones past its edge lie on
-## the cummerbund's corner (cummerbund_spot), the rest go on their points as they are.
+## Gear fit (queue 4; Captain, build B0330: "still there on both sides"): every pouch on the
+## carrier stays on what it hangs on, its tabs and rods too (pouch_extent). The pouches on each
+## face (the plate pockets' fronts and backs; the sides: the cummerbund, or a heavy rig's side
+## plate pockets) are laid out inside that face (face_region, _fit_face), each as near its own
+## point as that allows, and shrunk where a face's pouches don't fit it at full size. A front
+## point past the plate pocket's edge on a medium or heavy carrier puts its pouch on the
+## cummerbund's corner (_corner_spot). A knife on its own point and what is on the pack go on
+## their points as they are.
 func pouch_spots() -> Dictionary:
-	var points := inventory.attach_points()
-	var panel_x := _panel_rows(points)
 	var out := {}
-	for p: Dictionary in points:
+	var faces := {}  # face -> [{"p", "size", "extent"}], for _fit_face
+	for p: Dictionary in inventory.attach_points():
 		var att := inventory.attachment(StringName(p.id))
 		if att.is_empty():
 			continue
-		var size := WorldItem.visual_size(ItemDB.get_item(StringName(att.id)))
+		var item := ItemDB.get_item(StringName(att.id))
+		var size := WorldItem.visual_size(item)
+		var face := String(p.get("face", "front"))
 		var on_pack := inventory.point_slot(StringName(p.id)) == &"backpack"
-		if not on_pack and _on_cummerbund(p):
-			out[p.id] = cummerbund_spot(_carrier_tier(), model.body, p, size)
+		if on_pack or _carrier == null or face == "top" or String(p.get("type", "")) == "knife":
+			# (A pack sits on the carrier's back, so its points take the back's fit.)
+			out[p.id] = carrier_fit("back" if on_pack else face) * point_transform(p, size)
 			continue
-		var q := p
-		if panel_x.has(p.id):
-			q = p.duplicate()
-			q.at = [panel_x[p.id], p.at[1], p.at[2]]
-		# (A pack sits on the carrier's back, so its points take the back's fit.)
-		out[p.id] = carrier_fit("back" if on_pack else String(p.get("face", "front"))) * point_transform(q, size)
+		var extent := pouch_extent(item, not att.get("held", []).is_empty())
+		if _on_cummerbund(p):
+			out[p.id] = _corner_spot(p, size, extent)
+			continue
+		if not faces.has(face):
+			faces[face] = []
+		faces[face].append({"p": p, "size": size, "extent": extent})
+	for face: String in faces:
+		_fit_face(face, faces[face], out)
 	return out
 
 
-## Gear fit (queue 4): the pouches on the plate pocket's front, row by row (points within 5 cm
-## of each other's height), kept inside its edges (PANEL_HALF_M) and moved apart where wide
-## ones would overlap, each as near its own point as that allows (a row too wide for the
-## pocket overlaps). Point id -> its x.
-func _panel_rows(points: Array) -> Dictionary:
-	var rows: Array = []  # each: Array of [id, x, half-width, y]
-	for p: Dictionary in points:
-		var att := inventory.attachment(StringName(p.id))
-		if att.is_empty() or String(p.get("face", "front")) != "front" or String(p.get("type", "")) == "knife" \
-				or inventory.point_slot(StringName(p.id)) == &"backpack" or _on_cummerbund(p):
-			continue
-		var at: Array = p.at
-		var e := [p.id, float(at[0]), WorldItem.visual_size(ItemDB.get_item(StringName(att.id))).x * 0.5, float(at[1])]
+## The part of the worn carrier that the pouches on `face` (front, back, left or right) lie on,
+## before carrier_fit, torso-local metres: "u", its extent across (x on the front and back, z
+## on the sides), "v", its extent up (y), and "out", how far out from the spine a side's
+## surface is at torso height y (a Callable; the front and back keep their points' depth).
+## - Front and back: the plate pocket, PANEL_HALF_M either side of the spine, from the mount to
+##   the pocket's top (VoxelArt.POCKET_TOP_CM).
+## - Sides of a heavy carrier: the side plate pocket's outer face (VoxelArt.SIDE_POCKET_*).
+## - Sides of a medium (or light) one: the cummerbund's flat side between its cut corners
+##   (VoxelArt.CUMMERBUND_BEVEL), as narrow as it is anywhere up its height, which is the
+##   body's own width there plus the padding (VoxelArt.cummerbund_size).
+func face_region(face: String) -> Dictionary:
+	var mount := VoxelArt.CARRIER_MOUNT_CM * 0.01
+	var tier := _carrier_tier()
+	if face == "front" or face == "back":
+		return {"u": Vector2(-PANEL_HALF_M, PANEL_HALF_M), "v": Vector2(mount, mount + VoxelArt.POCKET_TOP_CM * 0.01),
+			"out": Callable()}
+	var sx := -1.0 if face == "left" else 1.0
+	if tier == 2:
+		var pocket_z := VoxelArt.SIDE_POCKET_HALF_Z_CM * 0.01
+		var pocket_out := func(_y: float) -> float: return sx * VoxelArt.SIDE_POCKET_OUT_CM * 0.01
+		return {"u": Vector2(-pocket_z, pocket_z), "v": Vector2(mount, mount + VoxelArt.SIDE_POCKET_TOP_CM * 0.01), "out": pocket_out}
+	var top := mount + VoxelArt.CUMMERBUND_TOP_CM * 0.01
+	var half_z := INF
+	for i in 12:
+		half_z = minf(half_z, VoxelArt.cummerbund_size(tier, model.body, lerpf(mount, top, i / 11.0)).y)
+	half_z *= 1.0 - VoxelArt.CUMMERBUND_BEVEL
+	var body := model.body
+	var side_out := func(y: float) -> float: return sx * VoxelArt.cummerbund_size(tier, body, y).x
+	return {"u": Vector2(-half_z, half_z), "v": Vector2(mount, top), "out": side_out}
+
+
+## Lays out the pouches on one face of the carrier (`entries` from pouch_spots) inside its
+## face_region, into `out`: row by row (points within 5 cm of each other's height), each row
+## across the face (_fit_line) at its points' height, then the rows up the face, all shrunk
+## alike where they don't fit. A side's pouches lie flat on its surface.
+func _fit_face(face: String, entries: Array, out: Dictionary) -> void:
+	var region := face_region(face)
+	var side := face == "left" or face == "right"
+	var rows: Array = []
+	for e: Dictionary in entries:
+		var at: Array = e.p.at
+		e.u = float(at[2]) if side else float(at[0])
+		e.v = float(at[1])
+		var ext: AABB = e.extent
+		e.hu = maxf(-ext.position.x, ext.end.x)
 		var row: Array = []
 		for r: Array in rows:
-			if absf(float(r[0][3]) - float(e[3])) < 0.05:
+			if absf(float(r[0].v) - float(e.v)) < 0.05:
 				row = r
 		if row.is_empty():
 			rows.append([e])
 		else:
 			row.append(e)
-	var out := {}
+	var lines: Array = []  # one per row: [y, reach down, reach up, row]
 	for row: Array in rows:
-		row.sort_custom(func(a: Array, b: Array) -> bool: return float(a[1]) < float(b[1]))
-		for i in 8:
-			for e: Array in row:
-				var hw := float(e[2])
-				e[1] = clampf(float(e[1]), -PANEL_HALF_M + hw, PANEL_HALF_M - hw) if hw < PANEL_HALF_M else 0.0
-			for j in row.size() - 1:
-				var a: Array = row[j]
-				var b: Array = row[j + 1]
-				var overlap := (float(a[1]) + float(a[2])) - (float(b[1]) - float(b[2])) + POUCH_GAP_M
-				if overlap > 0.0:
-					a[1] = float(a[1]) - overlap * 0.5
-					b[1] = float(b[1]) + overlap * 0.5
-		for e: Array in row:  # a row wider than the pocket overlaps rather than hangs off it
-			var hw := float(e[2])
-			out[e[0]] = clampf(float(e[1]), -PANEL_HALF_M + hw, PANEL_HALF_M - hw) if hw < PANEL_HALF_M else 0.0
-	return out
+		var across: Array = row.map(func(e: Dictionary) -> Array: return [e.u, -float(e.hu), float(e.hu), e])
+		var s := _fit_line(across, region.u.x, region.u.y)
+		var y := 0.0
+		var down := 0.0
+		var up := 0.0
+		for a: Array in across:
+			var e: Dictionary = a[3]
+			e.u = a[0]
+			e.s = s
+			y += float(e.v) / row.size()
+			down = minf(down, (e.extent as AABB).position.y * s)
+			up = maxf(up, (e.extent as AABB).end.y * s)
+		lines.append([y, down, up, row])
+	var shrink := _fit_line(lines, region.v.x, region.v.y)
+	for line: Array in lines:
+		var y: float = line[0]
+		for e: Dictionary in line[3]:
+			var q: Dictionary = e.p.duplicate()
+			var at: Array = e.p.at
+			q.at = [(region.out as Callable).call(y), y, e.u] if side else [e.u, y, at[2]]
+			out[e.p.id] = carrier_fit(face) * point_transform(q, e.size, float(e.s) * shrink)
+
+
+## Lays `items` ([centre, reach down, reach up, ...]: how far each reaches below and above its
+## centre) along a line, inside [`lo`, `hi`], in order and POUCH_GAP_M apart, each as near its
+## own centre as that allows, moving the centres in place. When they don't all fit at full
+## size, they are all shrunk by the same factor first (their reaches with them); that factor
+## is returned (1 when they fit).
+static func _fit_line(items: Array, lo: float, hi: float) -> float:
+	if items.is_empty():
+		return 1.0
+	items.sort_custom(func(a: Array, b: Array) -> bool: return float(a[0]) < float(b[0]))
+	var total := 0.0
+	for it: Array in items:
+		total += float(it[2]) - float(it[1])
+	var room := hi - lo - POUCH_GAP_M * (items.size() - 1)
+	var s := clampf(room / total, 0.05, 1.0) if total > 0.0 else 1.0
+	for it: Array in items:
+		it[1] = float(it[1]) * s
+		it[2] = float(it[2]) * s
+	for i in 8:  # spread them apart, near their own places
+		for it: Array in items:
+			it[0] = clampf(float(it[0]), lo - float(it[1]), hi - float(it[2]))
+		for j in items.size() - 1:
+			var a: Array = items[j]
+			var b: Array = items[j + 1]
+			var overlap := (float(a[0]) + float(a[2])) - (float(b[0]) + float(b[1])) + POUCH_GAP_M
+			if overlap > 0.0:
+				a[0] = float(a[0]) - overlap * 0.5
+				b[0] = float(b[0]) + overlap * 0.5
+	# Then settle them for certain: up from the low end, then back down from the high end.
+	var edge := lo
+	for it: Array in items:
+		it[0] = maxf(float(it[0]), edge - float(it[1]))
+		edge = float(it[0]) + float(it[2]) + POUCH_GAP_M
+	edge = hi
+	for k in range(items.size() - 1, -1, -1):
+		var it: Array = items[k]
+		it[0] = minf(float(it[0]), edge - float(it[2]))
+		edge = float(it[0]) + float(it[1]) - POUCH_GAP_M
+	return s
 
 
 ## A front point past the plate pocket's edge on a medium or heavy carrier: its pouch goes on
@@ -325,11 +414,27 @@ func _on_cummerbund(p: Dictionary) -> bool:
 		and absf(float(at[0])) > PANEL_HALF_M and String(p.get("type", "")) != "knife"
 
 
+## Where a pouch of `size` (reaching as `extent` says) on front point `p` past the plate
+## pocket's edge sits: on the cummerbund's corner (cummerbund_spot), between its bottom and top
+## (VoxelArt.CUMMERBUND_TOP_CM), shrunk if it is wider than the corner's cut is there.
+func _corner_spot(p: Dictionary, size: Vector3, extent: AABB) -> Transform3D:
+	var tier := _carrier_tier()
+	var lo := VoxelArt.CARRIER_MOUNT_CM * 0.01
+	var hi := lo + VoxelArt.CUMMERBUND_TOP_CM * 0.01
+	var at: Array = p.at
+	var y := float(at[1])
+	var cut := VoxelArt.CUMMERBUND_BEVEL * VoxelArt.cummerbund_size(tier, model.body, y).length()
+	var s := minf(1.0, minf(cut / (2.0 * maxf(-extent.position.x, extent.end.x)), (hi - lo) / extent.size.y))
+	var q := p.duplicate()
+	q.at = [at[0], clampf(y, lo - extent.position.y * s, hi - extent.end.y * s), at[2]]
+	return cummerbund_spot(tier, model.body, q, size, s)
+
+
 ## Torso-local transform of an attachment of `size` on the front corner of a tier `tier`
 ## carrier's cummerbund round body type `body`, on point `p`'s side and at its height: flat on
 ## the corner's cut (VoxelArt.CUMMERBUND_BEVEL: from 1 - bevel of the way out across the front
-## to 1 - bevel of the way back down the side), facing out of it.
-static func cummerbund_spot(tier: int, body: String, p: Dictionary, size: Vector3) -> Transform3D:
+## to 1 - bevel of the way back down the side), facing out of it, drawn `scale` of its size.
+static func cummerbund_spot(tier: int, body: String, p: Dictionary, size: Vector3, scale := 1.0) -> Transform3D:
 	var at: Array = p.at
 	var sx := signf(float(at[0]))
 	var y := float(at[1])
@@ -338,8 +443,8 @@ static func cummerbund_spot(tier: int, body: String, p: Dictionary, size: Vector
 	var a := Vector2(sx * k * c.x, -c.y)
 	var b := Vector2(sx * c.x, -k * c.y)
 	var n := Vector2(sx * c.y, -c.x).normalized()  # out of the cut
-	var mid := (a + b) * 0.5 + n * size.z * 0.5
-	var basis := Basis(Vector3.UP, atan2(-n.x, -n.y))  # the pouch's front (-Z) along n
+	var mid := (a + b) * 0.5 + n * size.z * 0.5 * scale
+	var basis := Basis(Vector3.UP, atan2(-n.x, -n.y)).scaled(Vector3.ONE * scale)  # the pouch's front (-Z) along n
 	return Transform3D(basis, Vector3(mid.x, y, mid.y))
 
 
@@ -447,8 +552,8 @@ func _strap(a: Vector3, b: Vector3, width: float, thick: float, colour: Color) -
 
 
 ## Torso-local transform of an attachment of `size` on attach point `p`: its back against the
-## carrier at "at", facing out of "face" (front, back, left or right).
-static func point_transform(p: Dictionary, size: Vector3) -> Transform3D:
+## carrier at "at", facing out of "face" (front, back, left or right), drawn `scale` of its size.
+static func point_transform(p: Dictionary, size: Vector3, scale := 1.0) -> Transform3D:
 	var at: Array = p.get("at", [0, 0.3, -0.18])
 	var origin := Vector3(float(at[0]), float(at[1]), float(at[2]))
 	var basis := Basis.IDENTITY
@@ -458,7 +563,7 @@ static func point_transform(p: Dictionary, size: Vector3) -> Transform3D:
 		"right": basis = Basis(Vector3.UP, -PI / 2)
 		"top":  # on top of a pack: lying across it, left to right, resting on "at"
 			return Transform3D(Basis(Vector3.UP, PI / 2), origin + Vector3(0, size.y * 0.5, 0))
-	return Transform3D(basis, origin + basis * Vector3(0, 0, -size.z * 0.5))
+	return Transform3D(basis.scaled(Vector3.ONE * scale), origin + basis * Vector3(0, 0, -size.z * 0.5 * scale))
 
 
 ## A pouch (or knife) as small boxes: body and a darker flap, or a sheath and handle; a radio
@@ -467,27 +572,52 @@ static func point_transform(p: Dictionary, size: Vector3) -> Transform3D:
 ## you can see who carries one. Front is -Z. Used on the soldier and for item previews.
 static func pouch_node(item: ItemData, colour: Color, full: bool, layers := 1) -> Node3D:
 	var root := Node3D.new()
+	for part: Array in pouch_parts(item, colour, full):
+		var box := _part_box(part[0], part[1], part[2], layers)
+		if part[3]:
+			box.name = "Antenna"
+		root.add_child(box)
+	return root
+
+
+## The boxes pouch_node draws for `item` (`full`: with what is in it showing), pouch-local:
+## [size, centre, colour, whether it is a radio's antenna (which stands up past whatever the
+## pouch is on)].
+static func pouch_parts(item: ItemData, colour: Color, full: bool) -> Array:
 	var size := WorldItem.visual_size(item)
 	if item.id == &"knife" or item.stats.get("attach", []).has("knife") and not Inventory.is_pouch(item):
-		root.add_child(_part_box(Vector3(size.x, size.y * 0.62, size.z), Vector3(0, -size.y * 0.19, 0), colour.darkened(0.35), layers))
-		root.add_child(_part_box(Vector3(size.x * 0.7, size.y * 0.38, size.z * 0.8), Vector3(0, size.y * 0.31, 0), Color("26241f"), layers))
-		return root
+		return [[Vector3(size.x, size.y * 0.62, size.z), Vector3(0, -size.y * 0.19, 0), colour.darkened(0.35), false],
+			[Vector3(size.x * 0.7, size.y * 0.38, size.z * 0.8), Vector3(0, size.y * 0.31, 0), Color("26241f"), false]]
 	var accepts: Array = item.stats.get("accepts", [])
 	if accepts.has("tourniquet"):
-		root.add_child(_part_box(Vector3(size.x, size.y * 0.6, size.z), Vector3(0, -size.y * 0.2, 0), colour, layers))
+		var holder := [[Vector3(size.x, size.y * 0.6, size.z), Vector3(0, -size.y * 0.2, 0), colour, false]]
 		if full:
-			root.add_child(_part_box(Vector3(size.x * 0.8, size.y * 0.5, size.z * 0.75), Vector3(0, size.y * 0.25, 0), TQ_BAND, layers))
-			root.add_child(_part_box(Vector3(size.x * 1.9, 0.012, 0.012), Vector3(0, size.y * 0.5, -size.z * 0.1), TQ_BAND.lightened(0.15), layers))
-			root.add_child(_part_box(Vector3(0.016, 0.022, 0.006), Vector3(size.x * 0.25, size.y * 0.42, -size.z * 0.42), MED_RED, layers))
-		return root
-	root.add_child(_part_box(size, Vector3.ZERO, colour, layers))
-	root.add_child(_part_box(Vector3(size.x * 1.02, size.y * 0.28, size.z * 1.08), Vector3(0, size.y * 0.36, -size.z * 0.04), colour.darkened(0.25), layers))
+			holder.append([Vector3(size.x * 0.8, size.y * 0.5, size.z * 0.75), Vector3(0, size.y * 0.25, 0), TQ_BAND, false])
+			holder.append([Vector3(size.x * 1.3, 0.012, 0.012), Vector3(0, size.y * 0.5, -size.z * 0.1), TQ_BAND.lightened(0.15), false])
+			holder.append([Vector3(0.016, 0.022, 0.006), Vector3(size.x * 0.25, size.y * 0.42, -size.z * 0.42), MED_RED, false])
+		return holder
+	var parts := [[size, Vector3.ZERO, colour, false],
+		[Vector3(size.x * 1.02, size.y * 0.28, size.z * 1.08), Vector3(0, size.y * 0.36, -size.z * 0.04), colour.darkened(0.25), false]]
 	if full and accepts.has("radio"):
-		root.add_child(_part_box(Vector3(0.008, 0.16, 0.008), Vector3(size.x * 0.3, size.y * 0.5 + 0.08, 0), Color("1d1d1b"), layers))
+		parts.append([Vector3(0.008, 0.16, 0.008), Vector3(size.x * 0.3, size.y * 0.5 + 0.08, 0), Color("1d1d1b"), true])
 	if full and accepts.has("type:medical"):
 		for side in [-1.0, 1.0]:
-			root.add_child(_part_box(Vector3(0.018, 0.03, 0.008), Vector3(side * size.x * 0.32, size.y * 0.5 + 0.012, -size.z * 0.3), MED_RED, layers))
-	return root
+			parts.append([Vector3(0.018, 0.03, 0.008), Vector3(side * size.x * 0.32, size.y * 0.5 + 0.012, -size.z * 0.3), MED_RED, false])
+	return parts
+
+
+## The box round what pouch_node draws for `item` (`full`: with its tabs, band and rod), a
+## radio's antenna left out, pouch-local. GearRig keeps it on the carrier.
+static func pouch_extent(item: ItemData, full: bool) -> AABB:
+	var box := AABB()
+	var first := true
+	for part: Array in pouch_parts(item, Color.WHITE, full):
+		if part[3]:
+			continue
+		var b := AABB(part[1] - part[0] * 0.5, part[0])
+		box = b if first else box.merge(b)
+		first = false
+	return box
 
 
 static func _part_box(size: Vector3, pos: Vector3, colour: Color, layers: int) -> MeshInstance3D:

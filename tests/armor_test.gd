@@ -45,6 +45,7 @@ func _ready() -> void:
 	await _test_playtest_knockouts()
 	_test_fit()
 	await _test_gear_fit()
+	await _test_pouches_on_carriers()
 	await _test_state_travels()
 	await _test_dents_and_holes()
 	await _test_oblique_dents()
@@ -638,6 +639,123 @@ func _test_fit() -> void:
 	full.queue_free()
 
 
+## Gear fit, every carrier fully loaded (Captain, build B0330: pouches still stood out past the
+## carrier's edges on both sides; the side points put a 14 cm pouch at z 0.13, past the
+## cummerbund's back and the back panel, and a woman's 5 cm off her cummerbund). A light, medium
+## and heavy carrier on a man and on a woman, a pouch on every point (the widest that fits it,
+## full, so its tabs and rods show), and every box each pouch draws (a radio's antenna aside)
+## lies on the part of the carrier it hangs on, measured from the meshes drawn: across and up
+## inside the plate pocket's front or back, the cummerbund's flat side, a heavy rig's side plate
+## pocket or the cummerbund's cut corner, with its back on that surface, not standing off it.
+## A knife on its own point stands up by the collar as drawn, so only its width is checked.
+## Shrunk pouches stay at least half size.
+func _test_pouches_on_carriers() -> void:
+	print("Gear fit: every carrier fully loaded")
+	const TOL := 0.006
+	var fillers := [&"pouch_sustainment", &"pouch_ifak", &"pouch_utility", &"pouch_binos", &"pouch_radio",
+		&"pouch_mag_double", &"pouch_mag_single", &"pouch_grenade", &"pouch_pistol_mag", &"pouch_tq", &"knife"]
+	var mount := VoxelArt.CARRIER_MOUNT_CM * 0.01
+	var k := 1.0 - VoxelArt.CUMMERBUND_BEVEL
+	for tier in 3:
+		var carrier: StringName = [&"plate_carrier_light", &"plate_carrier", &"plate_carrier_heavy"][tier]
+		for body: String in [VoxelArt.MALE, VoxelArt.FEMALE]:
+			var dummy: TargetDummy = DUMMY.instantiate()
+			dummy.loadout = PackedStringArray([carrier])
+			(dummy.get_node(^"Model") as CharacterModel).body = body
+			add_child(dummy)
+			await get_tree().physics_frame
+			var inv := dummy.inventory
+			for p: Dictionary in inv.attach_points():
+				for id: StringName in fillers:
+					if inv.attach(StringName(p.id), {"id": id, "state": {"held": [{"id": &"tourniquet", "count": 1}]}}):
+						break
+			await get_tree().physics_frame
+			var depth := float(ItemDB.get_item(carrier).stats.get("plate_depth", 0.14)) + 0.03  # the pockets' faces
+			var pouches: Node3D = dummy.gear._pouches  # (the one drawn last: earlier ones may not be freed yet)
+			var to_torso := dummy.model.torso.global_transform.affine_inverse()
+			var bad: Array = []
+			var drawn := 0
+			var smallest := 1.0
+			for p: Dictionary in inv.attach_points():
+				var node: Node3D = pouches.get_node_or_null(NodePath(String(p.id))) if pouches else null
+				if node == null:
+					bad.append("%s: nothing drawn" % p.id)
+					continue
+				drawn += 1
+				var face := String(p.get("face", "front"))
+				var at: Array = p.at
+				var knife := String(p.get("type", "")) == "knife"
+				var corner := tier > 0 and face == "front" and absf(float(at[0])) > GearRig.PANEL_HALF_M and not knife
+				var frame := Transform3D.IDENTITY if corner else dummy.gear.carrier_fit(face).affine_inverse()
+				var y := (frame * to_torso * node.global_transform).origin.y
+				smallest = minf(smallest, node.transform.basis.get_scale().x)
+				var lo := Vector3.INF
+				var hi := -Vector3.INF
+				var corners: Array[Vector3] = []
+				for mesh: MeshInstance3D in node.find_children("*", "MeshInstance3D", true, false):
+					if mesh.name == "Antenna":
+						continue
+					var t := frame * to_torso * mesh.global_transform
+					var box := mesh.get_aabb()
+					for i in 8:
+						var v := t * box.get_endpoint(i)
+						corners.append(v)
+						lo = lo.min(v)
+						hi = hi.max(v)
+				var why := ""
+				if corner:  # on the cut corner: along it, its back on it
+					var c := VoxelArt.cummerbund_size(tier, body, y)
+					var sx := signf(float(at[0]))
+					var a := Vector2(sx * k * c.x, -c.y)
+					var b := Vector2(sx * c.x, -k * c.y)
+					var along := (b - a).normalized()
+					var n := Vector2(sx * c.y, -c.x).normalized()
+					var reach := 0.0
+					var back := INF
+					for v: Vector3 in corners:
+						var d := Vector2(v.x, v.z) - (a + b) * 0.5
+						reach = maxf(reach, absf(d.dot(along)))
+						back = minf(back, d.dot(n))
+					if reach > (b - a).length() * 0.5 + TOL:
+						why += " past the corner's cut (%.3f of %.3f m)" % [reach, (b - a).length() * 0.5]
+					if absf(back) > TOL:
+						why += " %.3f m off the corner" % back
+					if lo.y < mount - TOL or hi.y > mount + VoxelArt.CUMMERBUND_TOP_CM * 0.01 + TOL:
+						why += " below or above the cummerbund (y %.3f-%.3f)" % [lo.y, hi.y]
+				elif face == "front" or face == "back":
+					if lo.x < -GearRig.PANEL_HALF_M - TOL or hi.x > GearRig.PANEL_HALF_M + TOL:
+						why += " past the pocket's side edge (x %.3f to %.3f)" % [lo.x, hi.x]
+					if lo.y < mount - TOL or (hi.y > mount + VoxelArt.POCKET_TOP_CM * 0.01 + TOL and not knife):
+						why += " below or above the pocket (y %.3f-%.3f)" % [lo.y, hi.y]
+					var off := -depth - hi.z if face == "front" else lo.z - depth
+					if off > TOL:
+						why += " %.3f m off the pocket's face" % off
+				else:  # a side: the cummerbund's flat side, or a heavy rig's side plate pocket
+					var sx := -1.0 if face == "left" else 1.0
+					var surface := VoxelArt.SIDE_POCKET_OUT_CM * 0.01
+					var half_z := VoxelArt.SIDE_POCKET_HALF_Z_CM * 0.01
+					var top := mount + VoxelArt.SIDE_POCKET_TOP_CM * 0.01
+					if tier < 2:
+						surface = VoxelArt.cummerbund_size(tier, body, y).x
+						half_z = k * minf(VoxelArt.cummerbund_size(tier, body, lo.y).y, VoxelArt.cummerbund_size(tier, body, hi.y).y)
+						top = mount + VoxelArt.CUMMERBUND_TOP_CM * 0.01
+					if lo.z < -half_z - TOL or hi.z > half_z + TOL:
+						why += " past the side's front or back edge (z %.3f to %.3f, the side %.3f either way)" % [lo.z, hi.z, half_z]
+					if lo.y < mount - TOL or hi.y > top + TOL:
+						why += " below or above the side (y %.3f-%.3f)" % [lo.y, hi.y]
+					var inner := lo.x if sx > 0.0 else -hi.x
+					if absf(inner - surface) > TOL:
+						why += " %.3f m off the side (its back at %.3f, the side at %.3f)" % [inner - surface, inner, surface]
+				if why != "":
+					bad.append("%s %s:%s" % [p.id, inv.attachment(StringName(p.id)).id, why])
+			var points := inv.attach_points().size()
+			check(drawn == points and bad.is_empty() and smallest >= 0.5,
+				"%s, %s: all %d of %d pouches on the carrier, none past its edges or off it, the smallest at %d%% %s"
+				% [carrier, body, drawn, points, roundi(smallest * 100.0), bad])
+			dummy.queue_free()
+			await get_tree().physics_frame
+
+
 ## Gear fit (queue 4, Captain's screenshots P0164): pouches stayed past the carrier's edges and
 ## pack straps stood off the shoulders.
 func _test_gear_fit() -> void:
@@ -664,14 +782,15 @@ func _test_gear_fit() -> void:
 	for i in edges.size() - 1:
 		apart = apart and edges[i][1] <= edges[i + 1][0] + 0.0005
 	check(inside and apart, "the chest pouches stay on the plate pocket (%.2f m either side) and don't overlap (%s)" % [GearRig.PANEL_HALF_M, edges])
-	# A row too wide for the pocket (a GP pouch in the middle) still stays on it, overlapping.
+	# A row too wide for the pocket (a GP pouch in the middle) still stays on it, shrunk to fit.
 	dummy.inventory.detach(&"chest_1")
 	put = dummy.inventory.attach(&"chest_1", {"id": &"pouch_utility"})
 	await get_tree().physics_frame
 	var wide: Dictionary = dummy.gear.pouch_spots()
 	var still := true
 	for pair: Array in [[&"radio_l", &"pouch_radio"], [&"chest_1", &"pouch_utility"], [&"chest_2", &"pouch_grenade"]]:
-		still = still and absf((wide[pair[0]] as Transform3D).origin.x) + half.call(pair[1]).x <= GearRig.PANEL_HALF_M + 0.001
+		var t: Transform3D = wide[pair[0]]
+		still = still and absf(t.origin.x) + half.call(pair[1]).x * t.basis.get_scale().x <= GearRig.PANEL_HALF_M + 0.001
 	check(put and still, "a row too wide for the pocket (radio, GP, grenade: %.0f cm) still doesn't hang off it" % ((0.08 + 0.13 + 0.07) * 100.0))
 	var corners := true
 	var seen: Array = []
