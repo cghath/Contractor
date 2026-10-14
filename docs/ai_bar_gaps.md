@@ -7,7 +7,7 @@ that bar, worst first, and a short list of where we are already ahead.
 It comes from four research notes (vanilla Arma 3, LAMBS Danger 2.6.2, VCOM 3.3 to 3.4.1, and the
 medical AI of Lifeline, PIR, ACE3 and KAT), each read against dev `fc98665` (build B0734), and a
 critic's pass that checked the shakiest claims against the code and corrected or sharpened
-several. Every Contractor reference below was read again at `fc98665`; line numbers are from that
+several (G-27 to G-30 and the corrections under "Already ahead" come from it). Every Contractor reference below was read again at `fc98665`; line numbers are from that
 commit and will drift, so the function names are the reliable part.
 
 We learn from these mods and are inspired by how they behave. We take no code from any of them
@@ -31,10 +31,13 @@ We learn from these mods and are inspired by how they behave. We take no code fr
 
 | # | Gap | Pri | Size |
 |---|---|---|---|
+| G-27 | Hostiles can't pick a target past 200 m | P0 | S |
 | G-01 | A squadmate sitting in a vehicle blocks casualty care for everyone | P0 | S |
 | G-02 | Every garrison and patrol in a zone is one hostile squad | P0 | M |
 | G-03 | Incoming fire tells the AI exactly where the shooter is | P0 | S |
 | G-04 | The base of fire may be shooting into its own cover | P0 | S |
+| G-28 | A heard shot tells the AI who fired and which side he is on | P1 | S |
+| G-29 | Walls don't muffle shots or footsteps | P1 | M |
 | G-05 | The AI never chooses to go prone | P1 | M |
 | G-06 | Assault and the flank's maneuver element run, they don't bound | P1 | M |
 | G-07 | No instant reaction to a near miss or a blast | P1 | M |
@@ -47,6 +50,7 @@ We learn from these mods and are inspired by how they behave. We take no code fr
 | G-14 | Smoke and bangs only on break contact, casualty reach or an order | P1 | M |
 | G-15 | Doctrine numbers still don't act (audit A3-07) | P1 | M |
 | G-16 | The AI never judges which casualty is worst | P2 | S |
+| G-30 | Only an AI medic can give CPR or shock a heart | P2 | S |
 | G-17 | Positions are picked without terrain, height or a second threat | P2 | M |
 | G-18 | No first-contact drill (freeze, face, get down) | P2 | S |
 | G-19 | Nothing avoids ground that is being shot up | P2 | M |
@@ -58,9 +62,13 @@ We learn from these mods and are inspired by how they behave. We take no code fr
 | G-25 | No enemy fire support: mortars, static guns | P3 | L |
 | G-26 | Patrols don't ambush; no mines | P3 | M |
 
-Suggested batches: the four P0s first (three are S). Then G-05, G-06 and G-07 together, since all
+G-27 to G-30 were added from the critic's pass (the gaps are numbered in the order they were
+found, not by priority).
+
+Suggested batches: the five P0s first (four are S; G-27 is a constant and a check). Then G-05, G-06 and G-07 together, since all
 three are how a unit moves and gets down under fire. G-12, G-13 and G-16 together as one casualty
-pass. G-09, G-11 and G-15 together, as the numbers behind firing and suppression.
+pass (G-30 with it). G-09, G-11 and G-15 together, as the numbers behind firing and suppression.
+G-28 and G-29 together, as one hearing pass.
 
 Working near other lanes: `squad_ai.gd`'s body carrying belongs to the coop-respawn worktree
 right now, so the casualty gaps (G-01, G-12, G-13, G-16) wait for it or keep clear of that code.
@@ -70,6 +78,24 @@ gap here.
 ---
 
 ## P0
+
+### G-27: hostiles can't pick a target past 200 m
+
+- **The behaviour.** An enemy who can see you at 300-400 m shoots at you, with the accuracy that
+  range deserves.
+- **Who has it.** Arma's AI at Veteran engages out to its weapon's and its spotting's reach, well
+  past 200 m in open country (the exact Veteran skill numbers are unverified; dump them in-game with
+  `skillFinal` before tuning against them).
+- **Contractor now.** Target choice stops at `SquadAI.SIGHT_RANGE` (200 m, `squad_ai.gd:140`) for
+  hostiles and `SQUAD_SIGHT_RANGE` (300 m, `:385`) for the squad (`_find_target`, `:2745`).
+  `Doctrine.engage_m` clamps to that sight range too (`doctrine.gd:62`). Hostiles still hear shots
+  out to 200 m and go to search (`server_heard_shot`, `:643-662`), so they react past 200 m; they
+  just never get a target there. The squad out-ranges every hostile by 100 m.
+- **Proposed work.** It's a constant, not a system: raise the hostile sight range (by weapon and
+  optic, so a rifle with irons doesn't snipe), let `Doctrine.engage_m` set each faction's real
+  range under it (G-15), and make sure long-range aim error and G-09's slower fire keep it fair.
+  A check: a hostile on a rise with a scoped rifle engages a squad crossing open ground at 300 m.
+- **Size** S. **Priority** P0.
 
 ### G-01: a squadmate sitting in a vehicle blocks casualty care for everyone (untested)
 
@@ -148,6 +174,37 @@ gap here.
 ---
 
 ## P1
+
+### G-28: a heard shot tells the AI who fired and which side he is on
+
+- **The behaviour.** A shot heard but not seen is a sound from roughly over there. You can't tell
+  by ear whether it was your own side, and you certainly don't know which man fired.
+- **Who has it.** Arma's AI can't tell friendly from enemy fire by sound. (VCOM goes the other
+  way: every shot gives all enemies within 800 m an instant fix. We learn from Arma here.)
+- **Contractor now.** `server_heard_shot` (`squad_ai.gd:643-662`) skips listeners of the shooter's
+  own faction, so a hostile never reacts to his own side's shots and always reacts to ours. It then
+  calls `hear(shooter, ...)` (`:668`), raising awareness of that exact soldier and putting him in
+  the squad picture (`Squad.note_enemy`). Footsteps are heard at the walker's exact position
+  (`_find_target`, `:2766-2772`). The heard-position error is a uniform square of +-6 m per
+  100 m, so up to about 8.5 m per 100 m diagonally, not 6.
+- **Proposed work.** A heard shot makes an anonymous sound contact (a position with its error)
+  that a listener investigates whoever fired, unless he knows a friendly is there (his own
+  squad's known positions); awareness of a soldier only builds once he is seen. Footsteps get a
+  small position error. Make the error round, not square.
+- **Size** S. **Priority** P1.
+
+### G-29: walls don't muffle shots or footsteps
+
+- **The behaviour.** Gunfire inside a building, or footsteps on the far side of a wall, carry less
+  far.
+- **Who has it.** Arma: footsteps depend on speed and are muffled by solid objects.
+- **Contractor now.** `HEAR_SHOT_M` 200, `HEAR_SUPPRESSED_M` 40 and `Spotting.footsteps_m`
+  (`spotting.gd:221`: 25 m running, 12 m walking, 5 m crouched) are straight distances; nothing
+  traces between source and listener (`server_heard_shot`, `_find_target`).
+- **Proposed work.** For listeners already in range, one ray to the source; each wall or building
+  shell in the way cuts the reach (say by half for shots, to nothing for footsteps through more
+  than one wall). Keep it cheap: only candidates in range, cached per shot.
+- **Size** M. **Priority** P1.
 
 ### G-05: the AI never chooses to go prone
 
@@ -329,6 +386,24 @@ gap here.
   tier.
 - **Size** S. **Priority** P2.
 
+### G-30: only an AI medic can give CPR or shock a heart
+
+- **The behaviour.** When the medic is down or far off, someone else starts CPR on a casualty in
+  cardiac arrest.
+- **Who has it.** Lifeline lets any squad AI turn medic for a revive, CPR included. ACE3's medical
+  AI goes to CPR right after stopping the bleeding.
+- **Contractor now.** `_may_use` (`squad_ai.gd:1338`) keeps every `medic_only` item (CPR, the
+  defibrillator) for medics among the AI, and the care loop skips them for anyone else (`:2081`,
+  "players and medics only"). With the medic down, an arrested casualty gets no CPR from the AI
+  and the cardiac-arrest window runs out. (No instant death does hold for both sides:
+  `can_go_down`, `vitals.gd:84`, defaults to true and only a test sets it false. The `vitals.gd`
+  header saying nothing restarts a heart until wave 3 is stale: CPR and the defib are in,
+  `vitals.gd:335`, `:543`.)
+- **Proposed work.** Captain's call, since medic-only was a design choice. Suggested: any AI may do
+  CPR when no medic can reach the casualty within a set time; the defibrillator stays medic-only.
+  Fix the stale header in the same change.
+- **Size** S. **Priority** P2.
+
 ### G-17: positions are picked without terrain, height or a second threat
 
 - **The behaviour.** Overwatch from a hill, a treeline or a building; flank through dead ground;
@@ -465,16 +540,24 @@ Where Contractor already beats the bar, checked at `fc98665`:
   ghillies don't count.
 - **Foliage that hides you.** Every 0.7 m of leaves multiplies the time to spot; 1.2 m hides you
   (`Spotting.foliage_m`). Arma's AI is known to see and keep a lock through grass.
-- **Honest hearing.** Heard shots carry 6 m of error per 100 m and never give a full spot (at most
-  0.8 awareness); footsteps by gait. Players call Arma's hearing overpowered.
+- **Honest hearing, mostly.** Heard shots carry up to 6 m of error per 100 m on each axis and
+  never give a full spot (at most 0.8 awareness); footsteps by gait. Players call Arma's hearing
+  overpowered. But see G-28 (it knows who fired) and G-29 (no walls).
+- **Spotting that takes time.** Awareness builds over seconds (`Spotting.spot_seconds`) from range,
+  stance, gait, camo, foliage, the view cone, muzzle flash and optics, so there is always a grace
+  period; line of sight goes to the target's stance-following aim point and smoke cuts it
+  (`can_see`, `SmokeCloud.blocks`). Arma's AI is known to open fire with no grace period.
 - **Believable aim.** A turn-speed cap (no spinning round for a headshot), a first-shot error and
   settle time, and a shot gate measured in metres (P0362). Arma's AI is known for laser accuracy
   and near-instant turns.
 - **News travels by radio.** `Alert` (`alert.gd`): a hostile reacts to what he sees; the zone only
   learns when he radios it, slower once the mast is down; check-ins, bodies found, states that cool
   slowly. LAMBS, VCOM and Arma share at once. (G-02 currently leaks around it.)
-- **A real contact drill.** A base of fire with the autorifleman, a maneuver element on the side
-  the enemy sees least of, chosen by a scored, logged evaluator with hysteresis. VCOM's flank
+- **A real contact drill.** A base of fire that always keeps the autorifleman (`elements`), a
+  maneuver element on the side the enemy sees least of (`flank_route` scores two points per side,
+  the mid point and the end, not the whole route), checked on the navmesh, with "no flank"
+  remembered for 30 s or until the enemy moves 25 m (`NO_FLANK_S`, `NO_FLANK_MOVED_M`), chosen by
+  a scored, logged evaluator with hysteresis. VCOM's flank
   orders move the whole group, with nobody left as a base of fire.
 - **Buildings.** Defence from firing ports facing the threat, and clearing stack by stack, room by
   room, floor by floor, with dead-checks on the way.
