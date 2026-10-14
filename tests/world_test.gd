@@ -94,6 +94,7 @@ func _run_host(wait_for_client: bool) -> void:
 	await _test_loot_and_care()
 	await _test_frag_and_body()
 	await _test_ai_path()
+	await _test_ground_guard()
 	await _test_reload()
 	_test_budget(mem_before)
 	if not wait_for_client:
@@ -424,6 +425,68 @@ func _test_ai_path() -> void:
 	var arrived := await _wait_for(func() -> bool: return Vector2(walker.global_position.x - target.x, walker.global_position.z - target.z).length() < 1.5, 60.0)
 	check(arrived, "the walker gets there on foot (%.1f m left)" % Vector2(walker.global_position.x - target.x, walker.global_position.z - target.z).length())
 	walker.queue_free()
+
+
+## Captain, 2026-10-14 (falling out of the world): a soldier placed where the ground's chunk
+## has no collision yet waits there instead of falling, and lands once it's there; one below the
+## terrain or past the zone's edge goes back on the ground (GroundGuard); B-05: the compound's
+## fixed placements sit on the terrain, not under it.
+func _test_ground_guard() -> void:
+	print("Ground: a spawn ahead of its chunk, and the safety net")
+	var t := level.terrain
+	var chunk_m := ZoneTerrain.CHUNK_CELLS * ZoneTerrain.CELL_M
+	var half := t.size_m * 0.5
+	# A chunk well inside the zone, clear of every module (their proxies are ground too).
+	var c := Vector2i(-1, -1)
+	var centre := Vector2.ZERO
+	for cz in range(1, t.chunk_count() - 1):
+		for cx in range(1, t.chunk_count() - 1):
+			var at := Vector2(-half + (cx + 0.5) * chunk_m, -half + (cz + 0.5) * chunk_m)
+			if c.x < 0 and level.modules().all(func(m: ZoneModule) -> bool: return m.distance_to(Vector3(at.x, 0.0, at.y)) > 120.0):
+				c = Vector2i(cx, cz)
+				centre = at
+	check(c.x >= 0, "a ground chunk clear of the modules (%s)" % c)
+	if c.x < 0:
+		return
+	var ground := t.get_node("Ground_%d_%d" % [c.x, c.y]) as StaticBody3D
+	ground.collision_layer = 0  # this chunk's collision isn't there yet
+	await get_tree().physics_frame
+	# Clear of the scatter's rocks and trees (they have collision of their own).
+	for i in 64:
+		var at := centre + Vector2(i % 8 - 3.5, i / 8 - 3.5) * 12.0
+		if not GroundGuard.floor_below(level.get_world_3d(), Vector3(at.x, t.height_at(at.x, at.y) + 2.0, at.y)):
+			centre = at
+			break
+	var h := t.height_at(centre.x, centre.y)
+	var guy := level.spawn_soldier({"name": "FallGuy", "person_name": "FallGuy", "faction": "hostile", "variant": "urban",
+		"pos": Vector3(centre.x, h + 2.0, centre.y), "loadout": [], "combat": 0.5, "discipline": 0.5, "guard": true})
+	SquadAI.of(guy).process_mode = Node.PROCESS_MODE_DISABLED
+	await get_tree().create_timer(1.0).timeout
+	check(absf(guy.global_position.y - (h + 2.0)) < 0.2 and guy.movement.holding,
+		"spawned where the ground's chunk has no collision yet, he waits there (y %.1f, ground %.1f)" % [guy.global_position.y, h])
+	ground.collision_layer = 1
+	await _wait_for(func() -> bool: return guy.is_on_floor(), 3.0)
+	check(guy.is_on_floor() and absf(guy.global_position.y - h) < 0.6 and not guy.movement.holding,
+		"once it's there he lands on it (y %.1f, ground %.1f)" % [guy.global_position.y, h])
+	var guard := level.get_node(^"GroundGuard") as GroundGuard
+	guy.global_position = Vector3(centre.x, h - 20.0, centre.y)
+	await get_tree().physics_frame
+	var before := guard.rescued
+	guard.check_now()
+	check(guard.rescued > before and absf(guy.global_position.y - h) < 1.0,
+		"20 m under the terrain, the safety net puts him back on it (y %.1f, ground %.1f)" % [guy.global_position.y, h])
+	guy.global_position = Vector3(half + 12.0, h - 5.0, centre.y)
+	await get_tree().physics_frame
+	var edge_h := t.height_at(half - GroundGuard.INSET_M, centre.y)
+	before = guard.rescued
+	guard.check_now()
+	check(guard.rescued > before and guy.global_position.x <= half - GroundGuard.INSET_M + 0.01 and absf(guy.global_position.y - edge_h) < 1.0,
+		"past the zone's edge, back inside on the ground (%.0f, %.1f)" % [guy.global_position.x, guy.global_position.y])
+	var farid := Vector3(-8, 0.1, 12)  # PeopleLayer.COMPOUND's first civilian
+	check(absf(level.above_ground(farid).y - t.height_at(farid.x, farid.z) - 0.1) < 0.01,
+		"B-05: the compound's fixed placements go on the terrain in a zone")
+	guy.queue_free()
+	await get_tree().physics_frame
 
 
 ## Saved, then hosted again from the save: module edits and bodies come back.

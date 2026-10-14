@@ -164,6 +164,8 @@ var _before_prone: int = Stance.STAND_HIGH
 var _lean_held := 0       # the lean key held now
 var _lean_latched := 0    # double-tapped: stays leaned
 var _lean_last_tap := {-1: -10.0, 1: -10.0}
+## Owner-side: held this step because nothing is under the body (no_ground_below).
+var holding := false
 var _collision: CollisionShape3D
 var _capsule: CapsuleShape3D
 var _shape_key := -99
@@ -175,10 +177,26 @@ func _ready() -> void:
 	_collision.shape = _capsule
 
 
+## Whether nothing at all is under the body to land on (GroundGuard.floor_below), the body's
+## own capsule aside. Only asked while it is off the floor.
+func no_ground_below() -> bool:
+	if not body.is_inside_tree():
+		return false
+	return not GroundGuard.floor_below(body.get_world_3d(), body.global_position, [body.get_rid()])
+
+
 ## One physics step for the body's owner (the human's peer, or the host for AI).
 func step(delta: float) -> void:
 	if not body.is_on_floor():
+		if no_ground_below():
+			# Captain, 2026-10-14 (falling out of the world): nothing under the body yet (a spawn,
+			# respawn or level switch ahead of the ground under it, or past its edge): it waits
+			# where it is, not falling, until there is (GroundGuard puts one past the edge back).
+			body.velocity = Vector3.ZERO
+			holding = true
+			return
 		body.velocity += body.get_gravity() * delta
+	holding = false
 	var down := not body.vitals.is_up()
 	if not down and not body.vitals.can_stand() and stance != Stance.PRONE:
 		set_stance(Stance.PRONE)  # a broken pelvis: no standing, crawl (or be carried)
