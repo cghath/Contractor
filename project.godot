@@ -9,6 +9,7 @@ config/name="Contractor"
 config/description="Tactical first-person co-op with physical inventory and voxel destruction."
 config/version="0.1.0"
 run/main_scene="res://scenes/main.tscn"
+run/main_scene.frame_bench="res://tests/frame_bench.tscn"
 config/features=PackedStringArray("4.7", "Forward Plus")
 config/icon="res://icon.svg"
 

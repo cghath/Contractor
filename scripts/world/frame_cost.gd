@@ -14,6 +14,8 @@ extends RefCounted
 static var on := false
 ## System -> microseconds spent since take() last ran.
 static var _costs := {}
+## What the last take() handed out (a reader beside the session log: tests/frame_bench.gd).
+static var last := {}
 
 
 ## Adds the time since `since_usec` (Time.get_ticks_usec) to `system`.
@@ -26,4 +28,5 @@ static func spent(system: StringName, since_usec: int) -> void:
 static func take() -> Dictionary:
 	var out := _costs
 	_costs = {}
+	last = out
 	return out
