@@ -52,6 +52,14 @@ const SHOT_GAP_S := 0.28
 ## has had no clear shot for HUNT_AFTER_S, stopping this far from it (m).
 const HUNT_STOP_M := 45.0
 const HUNT_AFTER_S := 4.0
+## Fireteam (the Captain, after S0578: the bots stood in a 3 m clump, upright, walking at the
+## hostiles): a wedge on the leader (the host's bot) with 8 m between bots; in contact the team
+## bounds in pairs, one pair moving BOUND_M while the other holds and fires, swapping every
+## BOUND_S; a bot that was just hit stops and gets down for PINNED_S.
+const WEDGE := {1: Vector2(-8.0, 6.0), 2: Vector2(8.0, 6.0), 3: Vector2(-16.0, 12.0)}  # (right, back) m
+const BOUND_S := 8.0
+const BOUND_M := 15.0
+const PINNED_S := 4.0
 ## The knock-out (a dev-tools hurt, like the K key): enough to go down, and more if not.
 const DOWN_DAMAGE := 70.0
 const REVIVE_S := 150.0
@@ -753,10 +761,14 @@ func _client_tick(ph: String) -> void:
 	if ph in ["advance", "fight", "deployed", "items"]:
 		var leader := _player(1)
 		if leader:
-			var angle := TAU * float(bot) / 4.0
-			var spot := leader.global_position + Vector3(cos(angle), 0.0, sin(angle)) * 5.0
-			if _flat(me.global_position, spot) > 3.0 and not _dropping:
-				_walk(spot, 1.5, RUN_SPEED if _flat(me.global_position, spot) > 15.0 else WALK_SPEED)
+			var spot := _wedge_spot(leader)
+			var off := _flat(me.global_position, spot)
+			# In contact only this bot's pair moves (or anyone left far behind).
+			var may_move := not _in_contact(me) or _pair_moving() or off > 25.0
+			if off > 3.0 and not _dropping and may_move:
+				_walk(spot, 1.5, RUN_SPEED if off > 15.0 else WALK_SPEED)
+			elif not may_move:
+				_goal = null
 	elif ph in ["extract", "confirm"] and _casevac == "":
 		var rally: Array = _phase.get("rally", [])
 		if rally.size() == 3:
@@ -932,6 +944,27 @@ func _stop_fighting() -> void:
 ## hostiles) gets treated by the nearest player still up, as a squad would.
 var _aid_left := 1.0
 var _last_clear_shot := 0.0
+var _pinned_until := 0.0
+var _last_blood := 1.0
+
+
+## This bot's pair (host and bot 2, bot 1 and bot 3) is the one moving now (wall clock, so all
+## processes on this machine agree).
+func _pair_moving() -> bool:
+	return int(Time.get_unix_time_from_system() / BOUND_S) % 2 == bot % 2
+
+
+## This bot's place in the wedge behind `leader`, turned the way the leader faces.
+func _wedge_spot(leader: Soldier) -> Vector3:
+	var o: Vector2 = WEDGE.get(bot, Vector2(0.0, 8.0))
+	var yaw := leader.rotation.y
+	var fwd := Vector3(-sin(yaw), 0.0, -cos(yaw))
+	var right := Vector3(cos(yaw), 0.0, -sin(yaw))
+	return leader.global_position + right * o.x - fwd * o.y
+
+
+func _in_contact(me: Soldier) -> bool:
+	return _fight and _hostile_in_range(me, ENGAGE_M) != null
 var _down_for := 0.0
 var _give_up_left := 0.0
 ## Down this long with every player down (nobody can help), a bot gives up: dev tools' hurt
@@ -1037,8 +1070,16 @@ func _hunt(me: Soldier, delta: float) -> void:
 	if role != "host" or not _fight or _treating or _dropping or Soldier._now() - _last_clear_shot < HUNT_AFTER_S:
 		return
 	var foe := _hostile_in_range(me, 800.0)
-	if foe and _flat(me.global_position, foe.global_position) > HUNT_STOP_M:
-		_walk(foe.global_position, HUNT_STOP_M, WALK_SPEED)
+	if foe == null:
+		return
+	var d := _flat(me.global_position, foe.global_position)
+	if d <= HUNT_STOP_M:
+		return
+	if _in_contact(me) and not _pair_moving():
+		return  # the other pair is moving: hold and cover them
+	# One bound toward them (not the whole way in one walk).
+	var dir := Vector3(foe.global_position.x - me.global_position.x, 0.0, foe.global_position.z - me.global_position.z).normalized()
+	_walk(me.global_position + dir * minf(BOUND_M, d - HUNT_STOP_M), 1.0, RUN_SPEED)
 
 
 func _buddy_aid(me: Soldier, delta: float) -> void:
@@ -1086,7 +1127,12 @@ func _physics_process(delta: float) -> void:
 		_casevac_tick(me, delta)
 	if not me.vitals.is_up() or is_instance_valid(me.vehicle):
 		return
-	if _goal != null:
+	var blood := me.vitals.blood_fraction()
+	if blood < _last_blood - 0.004 and not _in_base():
+		_pinned_until = Soldier._now() + PINNED_S  # hit: stop and get down
+	_last_blood = blood
+	var pinned := Soldier._now() < _pinned_until and _casevac == "" and not _treating
+	if _goal != null and not pinned:
 		var to: Vector3 = _goal
 		var d := _flat(me.global_position, to)
 		if d <= _goal_stop:
@@ -1112,7 +1158,15 @@ func _fight_tick(me: Soldier) -> void:
 		return
 	var target := _hostile_in_range(me, ENGAGE_M)
 	# Crouched while there is something to shoot at (a smaller target, as a player would be).
-	var stance := SoldierMovement.Stance.CROUCH_MID if target != null else SoldierMovement.Stance.STAND_HIGH
+	# Moving: crouched. Holding with a clear shot, or just hit: prone; else kneeling, to see over.
+	var stance := SoldierMovement.Stance.STAND_HIGH
+	if target != null or now < _pinned_until:
+		var holding := _goal == null or now < _pinned_until
+		stance = SoldierMovement.Stance.CROUCH_MID
+		if holding and (now < _pinned_until or now - _last_clear_shot < 2.0):
+			stance = SoldierMovement.Stance.PRONE
+		elif holding:
+			stance = SoldierMovement.Stance.CROUCH_LOW
 	if me.movement.stance != stance:
 		me.movement.set_stance(stance)
 	if target == null:
