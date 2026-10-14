@@ -1109,6 +1109,122 @@ func set_rolled(container: StringName, index: int, rolled: bool) -> bool:
 	return true
 
 
+# --- Refusals ---------------------------------------------------------------------------
+# Playtest S2 (P0339, P0331): "Not enough room in Sustainment Pouch", "No room for M110 DMR"
+# said no more than that, and kitting up took try after try. A refusal now says why, and
+# where it would go instead (places_for: the inventory screen lights those up).
+
+
+## Where one unit of `item` (with `state`) would go right now: [{"kind": "slot", "slot"},
+## {"kind": "point", "point"}, {"kind": "container", "container"}], body slot first, then free
+## attach points it fits, then pouches and containers with room (stow order).
+func places_for(item: ItemData, state := {}) -> Array:
+	var out: Array = []
+	if item == null:
+		return out
+	var slot := _free_slot_for(item)
+	if slot != &"":
+		out.append({"kind": "slot", "slot": slot})
+	if is_attachable(item):
+		for p: Dictionary in attach_points():
+			if attach_problem(item, StringName(p.id)) == "":
+				out.append({"kind": "point", "point": StringName(p.id)})
+	for c in stow_order(item):
+		if containers.has(c) and room_for(c, item, state) > 0:
+			out.append({"kind": "container", "container": c})
+	return out
+
+
+## places_for as words: "Vest, Backpack, Utility point (utility_1)".
+func places_text(places: Array) -> String:
+	var parts := PackedStringArray()
+	for p: Dictionary in places:
+		match String(p.kind):
+			"slot":
+				parts.append("%s slot" % String(p.slot).capitalize())
+			"point":
+				var at := attach_point(p.point)
+				parts.append("%s point (%s)" % [types_text(point_types(at), "/"), String(p.point)])
+			"container":
+				parts.append(container_label(p.container))
+	return ", ".join(parts)
+
+
+## A container's name for messages: "Vest", "Backpack", or the pouch's with its point
+## ("Sustainment Pouch on utility_1").
+func container_label(container: StringName) -> String:
+	if is_pouch_container(container):
+		var pouch := pouch_item(container)
+		return "%s on %s" % [pouch.name if pouch else "pouch", String(point_of(container))]
+	return String(container).capitalize()
+
+
+## Why `item` (with `state`) won't go into `target` (a container, a pouch's; or &"" for
+## anywhere), and where it would: "Not enough room in Backpack (M110 DMR needs 6.0 L, 2.3 L
+## free). It fits: Vest". "" if it goes in.
+func refusal(item: ItemData, state := {}, target: StringName = &"") -> String:
+	if item == null:
+		return "Nothing there"
+	var why := ""
+	if item.two_handed and not stows_loaded_packs:
+		why = "%s is carried in both hands" % item.name
+	elif target == &"":
+		if not places_for(item, state).is_empty():
+			return ""
+		why = "No room for %s (needs %.1f L)" % [item.name, unit_volume(item, state)]
+		var best: StringName = &""
+		for c in CONTAINERS:
+			if capacity(c) > 0.0 and (best == &"" or free_volume(c) > free_volume(best)):
+				best = c
+		if best != &"":
+			why += ": most free is %s, %.1f L" % [container_label(best), maxf(free_volume(best), 0.0)]
+	elif room_for(target, item, state) > 0:
+		return ""
+	elif pack_problem(target, item, state) != "":
+		why = pack_problem(target, item, state)
+	elif is_pouch_container(target):
+		var pouch := pouch_item(target)
+		if pouch == null:
+			why = "That pouch is gone"
+		elif not pouch_accepts(pouch, item):
+			var takes := _pouch_takes(pouch)
+			why = "%s doesn't take %s%s" % [pouch.name, item.name, " (it takes %s)" % takes if takes != "" else ""]
+		elif int(pouch.stats.get("max_units", 0)) > 0 and units_in(target) >= int(pouch.stats.max_units):
+			why = "%s is full (%d of %d)" % [container_label(target), units_in(target), int(pouch.stats.max_units)]
+		else:
+			why = "Not enough room in %s (%s needs %.1f L, %.1f L free)" % [container_label(target), item.name, unit_volume(item, state),
+				maxf(float(pouch.stats.get("capacity_l", 0.0)) - used(target), 0.0)]
+	elif capacity(target) <= 0.0:
+		why = "No %s worn" % String(target).capitalize() if target != &"pockets" else "No pockets"
+	else:
+		why = "Not enough room in %s (%s needs %.1f L, %.1f L free)" % [container_label(target), item.name, unit_volume(item, state),
+			maxf(free_volume(target), 0.0)]
+	return why + where_else(item, state, target)
+
+
+## ". It fits: Vest, Backpack" (what places_for finds, `target` left out), or ". Nowhere you
+## carry has room for it".
+func where_else(item: ItemData, state := {}, target: StringName = &"") -> String:
+	var places := places_for(item, state).filter(func(p: Dictionary) -> bool: return p.get("container", &"") != target or target == &"")
+	if places.is_empty():
+		return ". Nowhere you carry has room for it"
+	return ". It fits: " + places_text(places)
+
+
+## What a pouch takes, in words: "M4 Mag, M110 Mag", "medical items".
+static func _pouch_takes(pouch: ItemData) -> String:
+	var parts := PackedStringArray()
+	for rule: String in pouch.stats.get("accepts", []):
+		if rule.begins_with("type:"):
+			parts.append("%s items" % rule.substr(5))
+		elif rule.begins_with("tag:"):
+			parts.append("%ss" % rule.substr(4))
+		else:
+			var it := ItemDB.get_item(StringName(rule))
+			parts.append(it.name if it else rule)
+	return ", ".join(parts)
+
+
 # --- Internals --------------------------------------------------------------------------
 
 ## Puts `item` into body `slot` with `state` (no checks, no commit). A pack goes on unrolled,

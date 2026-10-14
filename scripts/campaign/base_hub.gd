@@ -798,6 +798,7 @@ func server_deploy(options := {}) -> String:
 	squad = squad.slice(0, maxi(SQUAD_SIZE - _player_count(), 0))
 	var stand_ins := _pick_stand_ins(squad)
 	var dep := RosterDeployment.begin(roster(), squad, zone_kind, zone_id, scene, day(), prep.get("contract", {}), stand_ins)
+	_record_loadouts(dep)  # S2: what everyone deploys in, for "Restock last loadout" back at the base
 	SessionLog.note("deployment started: zone %s (%s), contract %s, day %d; squad %s; %d player%s; %d free respawns" % [zone_id, zone_kind,
 		_contract_text(prep.get("contract", {})), day(), _callsigns(dep.squad), _player_count(), "" if _player_count() == 1 else "s",
 		int(dep.respawns_free)])
@@ -1320,12 +1321,156 @@ func _refresh_muster() -> void:
 		lvl.server_show_roster()
 
 
+# --- Restocking the last loadout (playtest S2) -----------------------------------------------
+# Kitting up at the base took 5-12 minutes a player (P0339, P0164, P0331, P0362). At deploy each
+# player's main character and each squadmate gets their kit written down ("loadout" on their
+# roster entry, Roster.record_loadout); back at the base one button rebuilds it from the stash
+# (Restock.build): what they wear now goes into the pool first, the loadout is drawn from it,
+# and what's left over lies in the armory as stash. What the stash is short of is listed.
+
+## Host (server_deploy): writes down what everyone deploys in: the squad's members and each
+## player's main character (not one sitting this one out: they play a stand-in).
+func _record_loadouts(dep: Dictionary) -> void:
+	for mid: Variant in dep.get("squad", []):
+		var m := member(String(mid))
+		if not m.is_empty():
+			Roster.record_loadout(m, m.get("gear", {}))
+	var keys: Array[String] = [player_key(1)]
+	for peer: int in _gear_applied:
+		if not player_key(peer) in keys:
+			keys.append(player_key(peer))
+	for key in keys:
+		if Roster.players(roster()).has(key) and not Roster.main_recovering(roster(), key):
+			var main := Roster.main_character(roster(), key)
+			Roster.record_loadout(main, main.get("gear", {}))
+
+
+## Host: rebuilds player `peer`'s last loadout on their body from the stash. Returns what it
+## did (Restock.report_text), or why not; the player sees it too.
+func server_restock_player(peer: int) -> String:
+	var lvl := level() as BaseLevel
+	if lvl == null or not campaign_running or RosterDeployment.is_running(roster()):
+		return "Only at the base"
+	var s := lvl.players.get_node_or_null(NodePath(str(peer))) as Soldier
+	if s == null or not s.vitals.is_up():
+		return "You can't kit up now"
+	var main := Roster.main_character(roster(), player_key(peer))
+	var loadout := Roster.loadout_of(main)
+	if Restock.is_blank(loadout):
+		return "No loadout yet: the kit you deploy in is written down for next time"
+	var text := _restock_body(lvl, s, loadout, "your loadout")
+	main["gear"] = Roster.json_safe(s.inventory.net_state.duplicate(true))
+	_changed(&"roster")
+	s._client_message.rpc_id(peer, text)
+	return text
+
+
+## Host: rebuilds member `mid`'s last loadout on them at the muster line. "" if they have none
+## or aren't standing there; else what it did.
+func server_restock_member(mid: String) -> String:
+	var lvl := level() as BaseLevel
+	var s: Soldier = lvl.muster_soldier(mid) if lvl and campaign_running and not RosterDeployment.is_running(roster()) else null
+	var m := member(mid)
+	if s == null or m.is_empty() or Restock.is_blank(Roster.loadout_of(m)):
+		return ""
+	var text := _restock_body(lvl, s, Roster.loadout_of(m), String(m.callsign))
+	server_store_member_gear(mid, s.inventory.net_state)
+	_changed(&"roster")
+	return text
+
+
+## Host (the squad leader's "Restock squad"): every AI squadmate picked for the next deployment
+## (everyone at the muster line when nobody is picked yet), one after the other, from the
+## stash. Returns one line each.
+func server_restock_squad() -> String:
+	if not in_base() or RosterDeployment.is_running(roster()):
+		return "Only at the base"
+	var picked: Array = _prep().get("squad", [])
+	var mids: Array = picked if not picked.is_empty() else Array(muster_ids())
+	var lines := PackedStringArray()
+	var none := PackedStringArray()
+	var lvl := level() as BaseLevel
+	for mid: Variant in mids:
+		if lvl.muster_soldier(String(mid)) == null:
+			continue  # not here: missing, dead, recovering
+		var text := server_restock_member(String(mid))
+		if text != "":
+			lines.append(text)
+		else:
+			none.append(String(member(String(mid)).callsign))
+	if not none.is_empty():
+		lines.append("No loadout yet for %s (written down when they deploy)" % ", ".join(none))
+	return "\n".join(lines) if not lines.is_empty() else "Nobody to restock"
+
+
+## Host: `s`'s kit becomes `loadout` drawn from the hub's stash (what they wear now goes into
+## the pool first); the armory's world items follow. Returns Restock.report_text.
+func _restock_body(lvl: BaseLevel, s: Soldier, loadout: Dictionary, who: String) -> String:
+	var before := lvl.server_collect_stash()
+	var pool: Array = before.duplicate(true)
+	var own := Inventory.new()
+	own.net_state = s.inventory.net_state
+	for e: Dictionary in own.strip():
+		BaseArmory.add(pool, StringName(e.id), int(e.count), e.get("state", {}))
+	own.free()
+	var res := Restock.build(loadout, pool)
+	s.inventory.net_state = GameState.from_json(res.gear)
+	_apply_stash(lvl, before, pool)
+	var text := Restock.report_text(who, res)
+	SessionLog.note("restock: %s: %s" % [SessionLog.who(s), text])
+	return text
+
+
+## Host: makes the hub's world items `after` where they were `before` (both stash entries):
+## what went is taken off the armory's items, what came back (old kit, pouches or an optic
+## swapped off) is put down at the armory counter.
+func _apply_stash(lvl: BaseLevel, before: Array, after: Array) -> void:
+	var had := Restock.stash_units(before)
+	var now := Restock.stash_units(after)
+	var gone := {}
+	for key: String in had:
+		if int(had[key]) > int(now.get(key, 0)):
+			gone[key] = int(had[key]) - int(now.get(key, 0))
+	for node: Node in lvl.items.get_children():
+		var w := node as WorldItem
+		if w == null or w.is_queued_for_deletion():
+			continue
+		var key := Restock.stash_key(w.item_id, w.state)
+		var n := mini(int(gone.get(key, 0)), w.count)
+		if n <= 0:
+			continue
+		gone[key] = int(gone[key]) - n
+		if n >= w.count:
+			GameState.item_taken(w.uid)
+			w.queue_free()
+		else:
+			w.count -= n
+	var come := {}
+	for key: String in now:
+		if int(now[key]) > int(had.get(key, 0)):
+			come[key] = int(now[key]) - int(had.get(key, 0))
+	var i := 0
+	for entry: Dictionary in after:
+		var key := Restock.stash_key(StringName(String(entry.id)), entry.get("state", {}))
+		var n := mini(int(come.get(key, 0)), int(entry.count))
+		if n <= 0:
+			continue
+		come[key] = int(come[key]) - n
+		var jitter := Vector3(randf_range(-0.6, 0.6), 0.0, randf_range(-0.3, 0.3))
+		lvl.spawn_item(StringName(String(entry.id)), n, BaseLevel.DELIVERY + jitter, "stash_r_%d_%d" % [Time.get_ticks_usec(), i],
+			GameState.from_json(entry.get("state", {})))
+		i += 1
+	base()["stash"] = Roster.json_safe(after)
+	_changed(&"base")
+
+
 # --- Requests from the base screen ---------------------------------------------------------
 
 ## Any peer: asks the host to do something at the base. `action`: "hire" [cid], "release"
 ## [mid], "medbay" [mid or "player:<key>"], "pick" [mid, bool], "role" [mid, role], "buy"
-## [item id, count], "rest" [days], "prep" [held contract id], "deploy" [], "save" []; "deploy",
-## "rest", "release", "prep" and "save" only from the host. The answer comes back as `note`.
+## [item id, count], "rest" [days], "prep" [held contract id], "deploy" [], "save" [], "restock"
+## [] (the sender's last loadout), "restock_squad" []; "deploy", "rest", "release", "prep",
+## "save" and "restock_squad" only from the host. The answer comes back as `note`.
 func request(action: String, args: Array = []) -> void:
 	_server_request.rpc_id(1, action, args)
 
@@ -1340,7 +1485,7 @@ func _server_request(action: String, args: Array) -> void:
 	var needs: int = {"hire": 1, "release": 1, "medbay": 1, "pick": 2, "role": 2, "buy": 1, "prep": 1}.get(action, 0)
 	if args.size() < needs:
 		why = "Bad request"
-	elif action in ["deploy", "rest", "release", "save", "prep"] and sender != 1:
+	elif action in ["deploy", "rest", "release", "save", "prep", "restock_squad"] and sender != 1:
 		why = "Only the host can do that"  # the company's big decisions are the host's
 	elif action not in ["save"] and not at_base:
 		why = "Only at the base"
@@ -1368,6 +1513,10 @@ func _server_request(action: String, args: Array) -> void:
 					why = "Prepping %s" % String(prep_contract().get("title", ""))
 			"save":
 				why = save_note(server_save())
+			"restock":
+				why = server_restock_player(sender if sender != 0 else 1)
+			"restock_squad":
+				why = server_restock_squad()
 			_:
 				why = "Unknown request"
 	if why != "":

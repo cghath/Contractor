@@ -1013,15 +1013,15 @@ func _server_inventory_action(action: String, container: StringName, index: int,
 			if index < 0 or index >= list.size() or target == container or not inventory.containers.has(target):
 				return
 			var item := ItemDB.get_item(list[index].id)
-			var n := mini(int(list[index].count), inventory.room_for(target, item, list[index].get("state", {})))
+			var moving_state: Dictionary = list[index].get("state", {})
+			var n := mini(int(list[index].count), inventory.room_for(target, item, moving_state))
 			if n <= 0:
-				var accepts := not Inventory.is_pouch_container(target) or Inventory.pouch_accepts(inventory.pouch_item(target), item)
-				_client_message.rpc_id(owner_peer(), ("Not enough room in %s" if accepts else "%s doesn't take that") % container_name(target))
+				_refuse(inventory.refusal(item, moving_state, target), item.id, moving_state)  # why, and where it fits (S2)
 				return
 			var entry := inventory.remove_entry(container, index, n)
 			if not inventory.insert_entry(target, entry):
 				inventory.insert_entry(container, entry)  # put it back
-				_client_message.rpc_id(owner_peer(), "Not enough room in %s" % container_name(target))
+				_refuse(inventory.refusal(item, moving_state, target), item.id, moving_state)
 		"equip_entry":
 			var list: Array = inventory.containers.get(container, [])
 			if index >= 0 and index < list.size() and Inventory.is_pack(ItemDB.get_item(list[index].id)) and inventory.slots[&"backpack"] != &"":
@@ -1044,7 +1044,10 @@ func _server_inventory_action(action: String, container: StringName, index: int,
 					return
 			inventory.take(removed.id, 1, removed.state)  # no room: straight back on
 			var why := inventory.pack_problem(target if target != &"" else &"backpack", ItemDB.get_item(removed.id), removed.state)
-			_client_message.rpc_id(owner_peer(), why if why != "" else "No room to stow that")
+			if why != "":
+				_client_message.rpc_id(owner_peer(), why)
+			else:
+				_refuse(inventory.refusal(ItemDB.get_item(removed.id), removed.state, target), removed.id, removed.state)  # S2
 		"roll_entry", "unroll_entry":
 			var rolled := action == "roll_entry"
 			var problem := inventory.roll_problem(container, index, rolled)
@@ -1070,8 +1073,10 @@ func _server_inventory_action(action: String, container: StringName, index: int,
 			var item := ItemDB.get_item(list[index].id)
 			var point := target if target != &"" else inventory.free_point_for(item)
 			var problem := inventory.attach_problem(item, point) if point != &"" else inventory.no_point_problem(item)
-			if problem != "" or not inventory.attach_entry(container, index, point):
-				_client_message.rpc_id(owner_peer(), problem if problem != "" else "Can't attach that")
+			if problem != "":
+				_refuse(problem + inventory.where_else(item, list[index].get("state", {}), container), item.id, list[index].get("state", {}))  # S2: and where it fits
+			elif not inventory.attach_entry(container, index, point):
+				_client_message.rpc_id(owner_peer(), "Can't attach that")
 		"detach":
 			var entry := inventory.detach(slot)
 			if entry.is_empty():
@@ -1084,7 +1089,9 @@ func _server_inventory_action(action: String, container: StringName, index: int,
 				if inventory.insert_entry(c, entry):
 					return
 			inventory.attach(slot, entry)  # no room: back on the carrier
-			_client_message.rpc_id(owner_peer(), "No room to stow that")
+			var detached := ItemDB.get_item(StringName(entry.id))
+			_refuse(inventory.refusal(detached, entry.get("state", {}), order[0] if target != &"" and not Inventory.is_pouch_container(target) else &""),
+				detached.id, entry.get("state", {}))  # S2
 		"equip_attachment":  # a disposable launcher off the top of the pack, onto the shoulder
 			var on_point := inventory.attachment(slot)
 			if on_point.is_empty():
@@ -1154,7 +1161,7 @@ func _server_interact(path: NodePath) -> void:
 		return
 	var taken := inventory.take(item.item_id, item.count, item.state)
 	if taken == 0:
-		_client_message.rpc_id(owner_peer(), "No room for %s" % ItemDB.get_item(item.item_id).name)
+		_refuse(inventory.refusal(ItemDB.get_item(item.item_id), item.state), item.item_id, item.state)  # S2: why, and the room there is
 		return
 	_server_took(item, taken)
 
@@ -1182,7 +1189,10 @@ func _server_pick_up_into(path: NodePath, into: StringName) -> void:
 	var taken := mini(item.count, inventory.room_for(into, data, item.state))
 	if taken <= 0 or not inventory.insert_entry(into, {"id": item.item_id, "count": taken, "state": item.state.duplicate(true)}):
 		var why := inventory.pack_problem(into, data, item.state)
-		_client_message.rpc_id(owner_peer(), why if why != "" else "No room for %s in %s" % [data.name, container_name(into)])
+		if why != "":
+			_client_message.rpc_id(owner_peer(), why)
+		else:
+			_refuse(inventory.refusal(data, item.state, into), data.id, item.state)  # S2: why, and where it fits
 		return
 	_server_took(item, taken)
 
@@ -2301,3 +2311,19 @@ func _client_shake(amount: float) -> void:
 func _client_message(text: String) -> void:
 	if multiplayer.get_remote_sender_id() == 1:
 		player_input.flash(text)
+
+
+## Host: tells the owner an item was refused (S2): `text` says why and where it fits, and the
+## inventory screen lights up the places that would take `id` (with `state`).
+func _refuse(text: String, id: StringName, state := {}) -> void:
+	_client_refused.rpc_id(owner_peer(), text, id, state)
+
+
+@rpc("any_peer", "call_local", "reliable")
+func _client_refused(text: String, id: StringName, state: Dictionary) -> void:
+	if multiplayer.get_remote_sender_id() != 1:
+		return
+	if player_input:
+		player_input.flash(text)
+	if _hud and is_instance_valid(_hud.inventory_screen):
+		_hud.inventory_screen.show_refusal(text, id, state)

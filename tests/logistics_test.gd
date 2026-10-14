@@ -42,6 +42,7 @@ func _ready() -> void:
 	await _test_loot_aid_bag()
 	await _test_screen_launcher()
 	await _test_screen_ground_pack()
+	await _test_refusals()
 	await _test_respawn_kit()
 	await _test_smoke_colours()
 	await _test_breach_navigation()
@@ -1029,3 +1030,82 @@ func _physics_frames(n: int) -> void:
 
 func _seconds(s: float) -> void:
 	await get_tree().create_timer(s).timeout
+
+
+## Playtest S2 (P0339, P0331): kitting up took try after try with "Every Mag point is taken",
+## "Sustainment Pouch doesn't take that", "No room for M110 DMR". A refusal now says why and
+## where the item would go, and the inventory screen lights those places up.
+func _test_refusals() -> void:
+	print("Refusals say why and light up where it fits (S2)")
+	var inv := player.inventory
+	inv.strip()
+	player.global_position = Vector3(0, 0.1, 18)
+	for pair: Array in [[&"plate_carrier", 1], [&"pouch_mag_double", 3], [&"pouch_ifak", 1], [&"assault_pack", 1]]:
+		inv.take(pair[0], pair[1])
+	var screen: InventoryScreen = player._hud.inventory_screen
+	screen._set_view(InventoryScreen.View.LOADOUT)
+	screen.visible = true
+	# A fourth double mag pouch: every mag point is taken; it would still stow.
+	inv.insert_entry(&"vest", {"id": &"pouch_mag_double", "count": 1})
+	await _frames(1)
+	player._server_inventory_action.rpc_id(1, "attach", &"vest", _index_in(inv, &"vest", &"pouch_mag_double"), &"", &"")
+	await _frames(3)
+	var text := String(screen._refusal.get("text", ""))
+	check(text.contains("Every Mag point") and text.contains("It fits:") and text.contains("Pockets") and text.contains("Backpack"),
+		"a pouch with no free point says so and where it would go: %s" % text)
+	check(screen._containers_box.get_node_or_null(^"RefusalNote") != null and screen._containers_box.get_child(0).name == "RefusalNote",
+		"the screen puts the refusal at the top of the containers")
+	var lit := _lit_containers(screen)
+	check(&"pockets" in lit and &"backpack" in lit, "and lights up the containers that take it (%s)" % [lit])
+	inv.remove_entry(&"vest", _index_in(inv, &"vest", &"pouch_mag_double"))
+	# A magazine into the IFAK pouch: it doesn't take magazines; the mag pouches light up.
+	var ifak_point := &""
+	for p: Dictionary in inv.attach_points():
+		if inv.attachment(StringName(p.id)).get("id", &"") == &"pouch_ifak":
+			ifak_point = StringName(p.id)
+	inv.insert_entry(&"vest", {"id": &"mag_556", "count": 1})
+	await _frames(1)
+	player._server_inventory_action.rpc_id(1, "move_entry", &"vest", _index_in(inv, &"vest", &"mag_556"), &"", Inventory.pouch_container(ifak_point))
+	await _frames(3)
+	text = String(screen._refusal.get("text", ""))
+	check(text.contains("IFAK Pouch doesn't take 5.56 Magazine") and text.contains("medical") and text.contains("Double M4 Mag Pouch on mag_1"),
+		"a pouch that doesn't take it says what it takes and which pouches do: %s" % text)
+	lit = _lit_containers(screen)
+	check(Inventory.pouch_container(&"mag_1") in lit and not Inventory.pouch_container(ifak_point) in lit,
+		"the mag pouches light up, the IFAK pouch doesn't (%s)" % [lit])
+	inv.remove_entry(&"vest", _index_in(inv, &"vest", &"mag_556"))
+	# An M110 with no room anywhere (an M4 slung, another in the pack): how much it needs, and
+	# the most room there is; dragged into the pack, how much it needs and has.
+	inv.take(&"m4a1")
+	inv.take(&"m4a1")
+	level.server_spawn_dropped(&"m110", 1, player.global_position + Vector3(0.5, 0.5, 0))
+	await _frames(3)
+	var dmr: Array = _ground(&"m110").filter(func(n: WorldItem) -> bool: return n.global_position.distance_to(player.global_position) < 1.5)
+	if dmr.is_empty():
+		check(false, "an M110 on the ground")
+	else:
+		player._server_interact.rpc_id(1, dmr[0].get_path())
+		await _frames(3)
+		text = String(screen._refusal.get("text", ""))
+		check(text.contains("No room for M110 DMR (needs 15.0 L)") and text.contains("most free is Backpack, 12.0 L") and screen.refusal_places.is_empty(),
+			"picking up an M110 with no room says what it needs and the most room there is: %s (primary %s, pack %s, %d on the ground)" % [text,
+				inv.slots[&"primary"], inv.containers[&"backpack"], _ground(&"m110").size()])
+		player._server_pick_up_into.rpc_id(1, dmr[0].get_path(), &"backpack")
+		await _frames(3)
+		text = String(screen._refusal.get("text", ""))
+		check(text.contains("Not enough room in Backpack (M110 DMR needs 15.0 L, 12.0 L free)") and text.contains("Nowhere you carry has room"),
+			"dragged into the pack: %s" % text)
+		GameState.item_taken(dmr[0].uid)
+		dmr[0].queue_free()
+	screen._refusal = {}
+	screen.visible = false
+	inv.strip()
+
+
+## The containers (pouches too) the inventory screen has lit up for a refusal.
+func _lit_containers(screen: InventoryScreen) -> Array:
+	var out: Array = []
+	for node: Node in screen._containers_box.find_children("*", "HFlowContainer", true, false):
+		if node.has_meta(&"container") and (node as CanvasItem).modulate == InventoryScreen.FITS_TINT:
+			out.append(node.get_meta(&"container"))
+	return out
