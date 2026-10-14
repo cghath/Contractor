@@ -9,6 +9,11 @@ const KEYS := {
 	&"move_right": [KEY_D],
 	&"jump": [KEY_SPACE],
 	&"sprint": [KEY_SHIFT],
+	# Hold the breath while aiming (SoldierMovement.update_arms; movement phase 1). Shift is
+	# sprint too, on purpose: there is no sprint while aiming, so the two never meet
+	# (GameSettings.SHARED lets them keep one key). Clear of B (vehicle view), J, F (fire mode,
+	# command menu), V and the side mouse buttons (optic zoom).
+	&"hold_breath": [KEY_SHIFT],
 	# Movement and weapon handling (design doc "Controls and feel", keys agreed since).
 	&"crouch": [KEY_X],  # toggle
 	&"prone": [KEY_Z],  # toggle

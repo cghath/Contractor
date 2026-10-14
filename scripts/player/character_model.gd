@@ -281,6 +281,11 @@ var _grip := Vector3.ZERO     # right hand, in _held's local space
 var _support := Vector3.ZERO  # left hand, in _held's local space
 var _last_position: Vector3
 var _speed := 0.0
+## Breathing (the torso's rise and fall): rate and depth multipliers, 1 at rest; the body's
+## owner raises them as the legs tire (Soldier._process, MovementRules.ANIM_BREATH_*).
+var breath_rate := 1.0
+var breath_depth := 1.0
+var _breath_t := 0.0
 var _phase := 0.0
 var _time := 0.0
 var _shown: Dictionary = {}   # bone -> Transform3D, easing towards the pose
@@ -988,7 +993,8 @@ func _process(delta: float) -> void:
 	# A knee folds as its leg swings through (forward), and straightens to take the weight.
 	_shin_left.transform = (_shown.knee_l as Transform3D) * Transform3D(Basis(Vector3.RIGHT, -STEP_KNEE * stride * maxf(cos(_phase), 0.0)), Vector3.ZERO)
 	_shin_right.transform = (_shown.knee_r as Transform3D) * Transform3D(Basis(Vector3.RIGHT, -STEP_KNEE * stride * maxf(-cos(_phase), 0.0)), Vector3.ZERO)
-	torso.transform = (_shown.torso as Transform3D).translated_local(Vector3(0, sin(_time * 2.0) * 0.003, 0))  # breathing
+	_breath_t = fmod(_breath_t + delta * 2.0 * breath_rate, TAU * 64.0)
+	torso.transform = (_shown.torso as Transform3D).translated_local(Vector3(0, sin(_breath_t) * 0.003 * breath_depth, 0))  # breathing
 	if casualty:
 		# Limp: the head hangs (carried) or lolls back (dragged) with the body.
 		head.rotation = Vector3(-CARRY_HEAD_DROOP if mode == CARRIED else DRAG_HEAD_LOLL, 0, 0)

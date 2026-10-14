@@ -53,7 +53,7 @@ const RANGES := {
 ## optic's zoom is on the side mouse buttons by default (Controls.BUTTONS; bindings: key_for).
 const BINDABLE := [
 	[&"move_forward", "Move forward"], [&"move_back", "Move back"], [&"move_left", "Move left"], [&"move_right", "Move right"],
-	[&"jump", "Jump"], [&"sprint", "Sprint"], [&"crouch", "Crouch (toggle)"], [&"prone", "Prone (toggle)"],
+	[&"jump", "Jump"], [&"sprint", "Sprint"], [&"hold_breath", "Hold breath (aiming)"], [&"crouch", "Crouch (toggle)"], [&"prone", "Prone (toggle)"],
 	[&"stance_adjust", "Adjust stance (hold)"], [&"lean_left", "Lean left"], [&"lean_right", "Lean right"],
 	[&"mount", "Rest weapon"], [&"fire_mode", "Fire mode"], [&"reload", "Reload"], [&"grenade", "Grenade"],
 	[&"medical_menu", "Medical menu"], [&"inventory", "Inventory"], [&"map", "Map"],
@@ -61,6 +61,10 @@ const BINDABLE := [
 	[&"get_out", "Get out of vehicle"], [&"vehicle_view", "Vehicle view (1st/3rd person)"], [&"quick_save", "Quick save"],
 	[&"zoom_in", "Optic zoom in / magnifier up"], [&"zoom_out", "Optic zoom out / magnifier down"],
 ]
+## Pairs of bindable actions that may share a key, because they never apply at the same time:
+## sprint and hold breath (no sprint while aiming; hold breath only aimed). Binding one of them
+## to a key never swaps the other away from it.
+const SHARED := [[&"sprint", &"hold_breath"]]
 ## The audio buses each volume sets (Sfx makes them; the room bus follows effects).
 const BUSES := {"master": [&"Master"], "effects": [&"SFX", &"SFX_Room"], "voice": [&"Voice"]}
 
@@ -301,13 +305,18 @@ static func bind(action: StringName, key: int) -> StringName:
 	var swapped := &""
 	for pair: Array in BINDABLE:
 		var other: StringName = pair[0]
-		if other != action and key_for(other) == key:
+		if other != action and key_for(other) == key and not shares_key(action, other):
 			_keys[other] = old
 			swapped = other
 	_keys[action] = key
 	_save()
 	apply_keys()
 	return swapped
+
+
+## Whether `a` and `b` may sit on one key (SHARED).
+static func shares_key(a: StringName, b: StringName) -> bool:
+	return SHARED.any(func(pair: Array) -> bool: return (pair[0] == a and pair[1] == b) or (pair[0] == b and pair[1] == a))
 
 
 ## Every key back to Controls.KEYS (saved).
