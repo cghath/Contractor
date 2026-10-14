@@ -195,19 +195,96 @@ func server_call(kind: String, caller: Soldier, arg: String, point: Vector3) -> 
 	return ""
 
 
-## Host (Briefing's "heli" insertion, hot zones): the squad (players and AI squadmates) starts
-## aboard a UH-60 flying in to `at` (x, z) and landing there (or within 100 m). Returns whether
-## it went; on false the caller puts the squad there on foot.
-static func server_insert(from: Node, at: Vector2) -> bool:
+## Host (Briefing's "heli" insertion): the squad (players and AI squadmates) starts aboard a
+## UH-60 flying in to `at` (x, z) and landing there (or within 100 m). `via` (x, z; a contract
+## zone's insertion point the LZ was planned from): it flies in low by there first. `objective`
+## (x, z): the LZ is dead ground near it, and a hot LZ is waved off for other dead ground round
+## it. Returns whether it went; on false the caller puts the squad there on foot.
+static func server_insert(from: Node, at: Vector2, via: Variant = null, objective: Variant = null) -> bool:
 	var node := HeliSupports.of(from)
 	if node == null or not node.multiplayer.is_server() or not Supports.can_fly(node.level()):
 		return false
 	var pos := node.level().ground_point(Vector3(at.x, 0.0, at.y))
 	var call := HeliCall.new(node, "insertion", null, {"source": "grid", "pos": pos})
+	if via is Vector2:
+		var v: Vector2 = via
+		var by := Vector3(v.x, 0.0, v.y)
+		if HeliCall._flat(by, pos) > HeliCall.ROUTE_PASS_M * 2.0:
+			call.route.append(by)
+	if objective is Vector2:
+		var o: Vector2 = objective
+		call.objective = Vector3(o.x, LandingZone.terrain_y(node.level(), Vector3(o.x, 0.0, o.y)), o.y)
 	if not call.server_launch():
 		return false
 	node.calls.append(call)
 	return true
+
+
+## Host (Briefing.server_open, a contract zone): every "dead_ground" helicopter insertion point
+## of `zone` (Briefing.with_heli_insertion) gets its LZ: dead ground 200-450 m from the
+## contract's objective, on the side of the insertion point it's planned from (DeadGround.find).
+## Its "pos" becomes the LZ, "from" keeps the point flown in by, "objective" the objective;
+## a point with no LZ that takes a landing is dropped. Returns the zone changed.
+static func plan_insertions(from: Node, zone: Dictionary, contract: Dictionary) -> Dictionary:
+	var lvl := CompoundLevel.current(from) if from and from.is_inside_tree() else null
+	var target: Variant = Briefing.objective_point(contract)
+	var points: Array = []
+	for point: Dictionary in zone.get("insertion_points", []):
+		if String(point.get("lz", "")) != "dead_ground":
+			points.append(point)
+			continue
+		var p: Array = point.get("pos", [])
+		if lvl == null or target == null or p.size() < 2:
+			continue
+		var obj: Vector2 = target
+		var centre := Vector3(obj.x, LandingZone.terrain_y(lvl, Vector3(obj.x, 0.0, obj.y)), obj.y)
+		var found := DeadGround.find(lvl, centre, DeadGround.OBJECTIVE_RING_M, Vector3(float(p[0]), 0.0, float(p[1])))
+		if not found.get("ok", false):
+			SessionLog.note("helicopter insertion from %s: no LZ near the objective" % String(point.get("name", "?")))
+			continue
+		var spot: Vector3 = found.spot
+		var out := point.duplicate(true)
+		out["from"] = [float(p[0]), float(p[1])]
+		out["pos"] = [spot.x, spot.z]
+		out["objective"] = [obj.x, obj.y]
+		out["hidden"] = bool(found.hidden)
+		out["name"] = "%s by helicopter (LZ %d m from the objective, %s)" % [String(point.get("name", "")),
+			roundi(Vector2(spot.x - obj.x, spot.z - obj.y).length()), "in dead ground" if found.hidden else "seen from %d post(s)" % int(found.seen_by)]
+		SessionLog.note("helicopter insertion LZ for %s at (%.0f, %.0f): %.0f m from the objective, %s (%d candidates checked, %d watchers)" % [
+			String(point.get("name", "?")), spot.x, spot.z, float(found.dist), "hidden" if found.hidden else "seen by %d" % int(found.seen_by),
+			int(found.get("checked", 0)), int(found.get("watchers", 0))])
+		points.append(out)
+	var copy := zone.duplicate(true)
+	copy["insertion_points"] = points
+	return copy
+
+
+## Host: where the squad of `caller` is: the players' (and their AI's) middle, or the caller.
+static func squad_centre(caller: Soldier) -> Vector3:
+	if caller == null or not caller.is_inside_tree():
+		return Vector3.ZERO
+	var sum := Vector3.ZERO
+	var n := 0
+	for s: Soldier in MapNodes.players(caller) + MapNodes.squad_ai(caller):
+		if not s.vitals.is_dead() and s.global_position.distance_to(caller.global_position) < 400.0:
+			sum += s.global_position
+			n += 1
+	return sum / n if n > 0 else caller.global_position
+
+
+## Host ("near": the pilot picks the LZ): dead ground near `caller`'s squad (DeadGround.find
+## round them, nearest first), else the nearest safe spot to them (LandingZone.find). The
+## result is a mark ({"source": "grid", "pos", "near": true, "hidden"}) or {"why"}.
+func near_lz(caller: Soldier, avoid: Array[Vector3] = []) -> Dictionary:
+	var lvl := level()
+	var centre := HeliSupports.squad_centre(caller)
+	var found := DeadGround.find(lvl, centre, DeadGround.SQUAD_RING_M, centre, avoid)
+	if found.get("ok", false):
+		return {"source": "grid", "pos": found.spot, "near": true, "hidden": bool(found.hidden)}
+	var plain := LandingZone.find(lvl, centre, [], DeadGround.SQUAD_RING_M.y)
+	if plain.ok:
+		return {"source": "grid", "pos": plain.spot, "near": true, "hidden": false}
+	return {"why": "No LZ within %d m of you: give a grid or pop smoke" % roundi(DeadGround.SQUAD_RING_M.y)}
 
 
 ## Host: a call's helicopter went down: that support is lost for the rest of the op.
@@ -268,6 +345,8 @@ func _resolve(caller: Soldier, arg: String, point: Vector3) -> Dictionary:
 	match how:
 		"", "smoke":
 			return {"source": "smoke"}
+		"near":
+			return near_lz(caller)
 		"here":
 			if not point.is_finite():
 				return {"why": "Look at a spot on the ground"}

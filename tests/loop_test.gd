@@ -20,8 +20,18 @@ extends Node
 const SEED := 5151
 ## The order the missions run in: the recovery right after the raid that leaves someone behind
 ## (its offer runs recovery_offer_days).
-const ORDER: Array[String] = ["intel_grab", "raid", "recovery", "hvt_capture", "hostage_rescue"]
+## "heli": an intel grab flown in and out by the UH-60 (the staged insertion and helicopter
+## extraction, design doc "Missions"): the briefing's helicopter insertion, its LZ in dead ground
+## 200-450 m from the objective, the squad seated aboard, flown in low, landed and out; the
+## intel taken; a squadmate knocked down and carried; the extraction called "near us", its first
+## LZ made hot by an enemy in sight of it (it waves off and picks another, as the radio says);
+## the casualty carried aboard, a dead hostile set by the door and a rifle set down in the
+## point loaded, a second body left in the point; lifting off ends the deployment; the debrief
+## pays, banks what was aboard and offers only what stayed on the ground as salvage.
+const ORDER: Array[String] = ["intel_grab", "raid", "recovery", "hvt_capture", "hostage_rescue", "heli"]
 const HIRES := 6
+## The heli mission's flights run this much faster (Helicopter.pace), so it fits the suite's time.
+const HELI_PACE := 3.0
 
 var failures := 0
 var tag := OS.get_environment("CONTRACTOR_TEST_TAG")
@@ -47,7 +57,10 @@ func _ready() -> void:
 	await _start_campaign()
 	if level is BaseLevel:
 		await _kit_up()
+		var only := OS.get_environment("CONTRACTOR_LOOP_ONLY")  # while iterating: "heli" runs only that mission
 		for type in ORDER:
+			if only != "" and type not in only.split(","):
+				continue
 			_failures_at_start = failures
 			var why: String = await _mission(type)
 			if why == "" and failures > _failures_at_start:
@@ -210,16 +223,21 @@ func _world_item(id: StringName) -> WorldItem:
 ## Runs mission `type` through the loop. Returns "" or what broke.
 func _mission(type: String) -> String:
 	print("Mission: %s" % type)
+	var heli := type == "heli"
 	var squad := _squad_for(type)
 	if squad.is_empty():
 		return "no squad to send"
+	if heli:
+		type = "intel_grab"
 	var cid := _take_offer(type)
 	if cid == "":
 		return "no offer taken from the board"
 	var c := Contracts.contract(cid)
 	var title := String(c.title)
-	if not await _deploy(cid, squad):
+	if not await _deploy(cid, squad, heli):
 		return "the deployment didn't start"
+	if heli and not await _heli_insert(squad):
+		return "the helicopter insertion"
 	var mates := {}
 	for mid in squad:
 		mates[mid] = _roster_soldier(mid)
@@ -245,22 +263,34 @@ func _mission(type: String) -> String:
 	var wounded := ""
 	var left := ""
 	var bring: Array = squad.duplicate()
-	if type == "intel_grab":
+	var casualty := ""
+	if heli:
+		casualty = squad[1]
+		bring.erase(casualty)  # back wounded: checked on its own below
+	elif type == "intel_grab":
 		wounded = squad[1]
 		(mates[wounded] as Soldier).vitals.server_burn(0.3)  # caught in a fire: burns sit them out
 	if type == "raid":
 		left = squad[squad.size() - 1]
 		bring.erase(left)
-	var deposit := type == "raid"  # the rifle set down at the point goes to the stash
+	var deposit := type == "raid" or heli  # the rifle set down at the point goes to the stash
 	var cash_before := Economy.cash()
 	var stash_before := BaseArmory.counts(BaseHub.stash())
 	var bills := [0]
 	var on_week := func(_week: int, bill: Dictionary) -> void: bills[0] += int(bill.total) - int(bill.get("loan_taken", 0))
 	Economy.week_paid.connect(on_week)
-	var out := await _extract(bring, done.get("cargo", []), left, deposit)
+	var out := await (_extract_heli(squad, casualty) if heli else _extract(bring, done.get("cargo", []), left, deposit))
 	Economy.week_paid.disconnect(on_week)
 	if not out.get("ok", false):
 		return "extraction: %s" % out.get("why", "")
+	if heli:
+		var m := BaseHub.member(casualty)
+		check(String(m.get("status", "")) not in [Roster.MIA, ""] and int(m.get("xp", 0)) == int(xp_before[casualty]) + Roster.XP_PER_MISSION,
+			"%s, carried aboard down, came home with the squad (%s, %d experience)" % [m.get("callsign", "?"), Roster.status_text(m), int(m.get("xp", 0))])
+		var left_body := String(out.get("left_body", ""))
+		var bodies_out: Array = (out.get("bodies", []) as Array).map(func(b: Dictionary) -> String: return String(b.get("uid", "")))
+		check(left_body != "" and left_body not in bodies_out and not bodies_out.is_empty(),  # ("none": only one body)
+			"the body left lying in the point didn't come out (only the one aboard is banked: %d)" % bodies_out.size())
 	# The debrief.
 	var debrief := Contracts.last_debrief()
 	var lines: Array = (debrief.get("contracts", []) as Array).filter(func(l: Dictionary) -> bool: return l.cid == cid)
@@ -352,7 +382,7 @@ func _mission(type: String) -> String:
 ## Member ids for `type`'s squad (who's available).
 func _squad_for(type: String) -> Array:
 	var ready: Array = _team.filter(func(mid: String) -> bool: return Roster.is_available(BaseHub.member(mid)))
-	var want := {"intel_grab": 2, "raid": 3, "recovery": 1, "hvt_capture": 2, "hostage_rescue": 2}
+	var want := {"intel_grab": 2, "raid": 3, "recovery": 1, "hvt_capture": 2, "hostage_rescue": 2, "heli": 3}
 	return ready.slice(0, mini(int(want.get(type, 2)), ready.size()))
 
 
@@ -385,7 +415,7 @@ func _take_offer(type: String) -> String:
 
 
 ## Prep, deploy, the briefing and its start. Returns whether the contract is live with the squad up.
-func _deploy(cid: String, squad: Array) -> bool:
+func _deploy(cid: String, squad: Array, heli := false) -> bool:
 	check(String(BaseHub.prep_contract().get("cid", "")) == cid, "accepting it starts the prep at the base")
 	for mid: String in (BaseHub._prep().squad as Array).duplicate():
 		BaseHub.server_pick(mid, false)
@@ -405,6 +435,8 @@ func _deploy(cid: String, squad: Array) -> bool:
 	check(open and up and player != null, "in the zone: the briefing is open and the squad is there (%s)" % ", ".join(PackedStringArray(
 		squad.map(func(mid: String) -> String: return String(BaseHub.member(mid).callsign)))))
 	if not open or not up or player == null:
+		return false
+	if heli and not _pick_heli_insertion(briefing):
 		return false
 	briefing.server_set_ready(1, true)
 	var started := briefing.server_start()
@@ -428,7 +460,7 @@ func _on_ai_added(n: Node) -> void:
 
 
 func _kill_hostile(s: Soldier) -> void:
-	if not is_instance_valid(s) or s.faction != &"hostile" or s.vitals.is_dead() or s.is_queued_for_deletion():
+	if not is_instance_valid(s) or s.faction != &"hostile" or s.vitals.is_dead() or s.is_queued_for_deletion() or s.has_meta(&"loop_keep"):
 		return
 	for i in 6:
 		if s.vitals.is_dead():
@@ -711,6 +743,240 @@ func _hostile_body() -> Soldier:
 		if s and s.faction == &"hostile" and not s.is_queued_for_deletion() and not Contracts.inventory_items(s.inventory).is_empty():
 			return s
 	return null
+
+
+# --- By helicopter ---------------------------------------------------------------------------------
+
+## The briefing offers a helicopter insertion from each insertion point on this contract zone,
+## each with its LZ in dead ground 200-450 m from the objective; the one nearest the objective
+## is picked. Returns whether it was.
+func _pick_heli_insertion(briefing: Briefing) -> bool:
+	var objective: Variant = Briefing.objective_point(briefing.contract)
+	var helis: Array = briefing.insertion_points().filter(func(p: Dictionary) -> bool: return p.get("method", "") == Briefing.HELI)
+	check(objective != null and not helis.is_empty() and helis.all(func(p: Dictionary) -> bool: return p.get("lz", "") == "dead_ground"),
+		"the briefing offers %d helicopter insertion(s) on this contract zone (%s)" % [helis.size(), ", ".join(PackedStringArray(helis.map(func(p: Dictionary) -> String: return String(p.name))))])
+	if objective == null or helis.is_empty():
+		return false
+	var obj: Vector2 = objective
+	var watch := DeadGround.watchers(level)
+	var lines := PackedStringArray()
+	var all_ok := true
+	var best: Dictionary = {}
+	for p: Dictionary in helis:
+		var at := Vector3(float(p.pos[0]), 0.0, float(p.pos[1]))
+		at.y = LandingZone.terrain_y(level, at)
+		var d := Vector2(at.x, at.z).distance_to(obj)
+		var seen := DeadGround.seen_by(level, at, watch)
+		var lz := LandingZone.check(level, at)
+		all_ok = all_ok and d >= DeadGround.OBJECTIVE_RING_M.x - 1.0 and d <= DeadGround.OBJECTIVE_RING_M.y + 1.0 and lz.ok and seen == 0
+		lines.append("%s: %.0f m from the objective, seen by %d of %d posts, slope %.0f°%s" % [p.id, d, seen, watch.size(), float(lz.slope_deg), "" if lz.ok else ", " + String(lz.why)])
+		if best.is_empty() or d < float(best.d):
+			best = {"id": String(p.id), "d": d}
+	check(all_ok, "every LZ is 200-450 m from the objective, takes a landing and no garrison post sees it (eye to eye, 1.7 m): %s" % "; ".join(lines))
+	check(briefing.server_set_insertion(String(best.id)), "the helicopter insertion %s is picked" % best.id)
+	return true
+
+
+## The squad starts seated in a UH-60 that flies in low by the insertion point, flares, lands
+## at the LZ, puts everyone out and leaves. Returns whether they're on the ground at the LZ.
+func _heli_insert(squad: Array) -> bool:
+	Helicopter.pace = HELI_PACE
+	var sup := HeliSupports.of(level)
+	var briefing := MapNodes.briefing(level)
+	var point := briefing.insertion()
+	var lz := Vector3(float(point.pos[0]), 0.0, float(point.pos[1]))
+	var c := sup.active("insertion") if sup else null
+	var mates: Array = squad.map(func(mid: String) -> Soldier: return _roster_soldier(mid))
+	var aboard := c != null and Vehicle.ride_of(player) == c.heli and mates.all(func(s: Soldier) -> bool: return s != null and Vehicle.ride_of(s) == c.heli)
+	check(aboard and c.heli.is_flying(), "the squad starts seated in a UH-60 in the air (%d aboard)" % (c.heli.occupants().size() if c else 0))
+	if c == null:
+		return false
+	var via: Vector3 = c.route[0] if not c.route.is_empty() else Vector3.INF
+	var low_agl := INF
+	var high_agl := 0.0
+	var passed_by := INF
+	var flare := 0.0
+	var t := 0.0
+	while t < 120.0 and is_instance_valid(c.heli) and not c.heli.is_landed():
+		await get_tree().physics_frame
+		t += get_physics_process_delta_time()
+		var h := c.heli
+		var far := Vector2(h.global_position.x - lz.x, h.global_position.z - lz.z).length()
+		if via != Vector3.INF:
+			passed_by = minf(passed_by, Vector2(h.global_position.x - via.x, h.global_position.z - via.z).length())
+		if far > 300.0:
+			var agl := h.global_position.y - LandingZone.terrain_y(level, h.global_position)
+			low_agl = minf(low_agl, agl)
+			high_agl = maxf(high_agl, agl)
+		elif far > 15.0:
+			flare = maxf(flare, rad_to_deg(asin(clampf(-h.global_basis.z.y, -1.0, 1.0))))  # nose up while slowing
+	var landed := is_instance_valid(c.heli) and c.heli.is_landed()
+	check(via == Vector3.INF or passed_by < HeliCall.ROUTE_PASS_M + 10.0, "it flew in by the insertion point (%.0f m from it)" % passed_by)
+	check(low_agl > 15.0 and high_agl < 120.0, "low over the terrain on the way in: %.0f-%.0f m above the ground" % [low_agl, high_agl])
+	check(flare > 3.0, "it flared, nose up, coming in to land (%.0f°)" % flare)
+	check(landed and Vector2(c.heli.global_position.x - lz.x, c.heli.global_position.z - lz.z).length() < 15.0,
+		"it lands at the LZ (%.0f s)" % t)
+	if not landed:
+		return false
+	await _wait_until(func() -> bool: return mates.all(func(s: Soldier) -> bool: return Vehicle.ride_of(s) == null), 10.0)
+	check(mates.all(func(s: Soldier) -> bool: return Vehicle.ride_of(s) == null), "the AI get out")
+	check(sup.heard_line("Out, out, out"), "the radio: on the ground, out, out, out")
+	c.heli.server_exit(player)  # the player's own get-out
+	await _frames(3)
+	check(Vehicle.ride_of(player) == null and Vector2(player.global_position.x - lz.x, player.global_position.z - lz.z).length() < 15.0,
+		"the player is out at the LZ")
+	var leaving := await _wait_until(func() -> bool: return c.phase in [HeliCall.Phase.TAKEOFF, HeliCall.Phase.LEAVING, HeliCall.Phase.GONE], 10.0)
+	check(leaving, "and the helicopter lifts off and leaves")
+	for s: Soldier in mates:
+		_hold(s)
+	return true
+
+
+## A spot `from` 150-350 m off `lz` where a man sees it (eye to eye, past the world), or INF.
+func _spot_seeing(lz: Vector3) -> Vector3:
+	for r: float in [180.0, 240.0, 300.0, 150.0, 350.0]:
+		for k in 16:
+			var a := TAU * k / 16.0
+			var at := lz + Vector3(cos(a), 0, sin(a)) * r
+			at.y = LandingZone.terrain_y(level, at)
+			if level.map_area().grow(-60.0).has_point(Vector2(at.x, at.z)) and DeadGround.sees(level, lz, at, true):
+				return at
+	return Vector3.INF
+
+
+## The helicopter extraction (see ORDER's note): returns _extract's shape plus "left_body".
+func _extract_heli(squad: Array, casualty: String) -> Dictionary:
+	var sup := HeliSupports.of(level)
+	var extraction := MapNodes.extraction(level)
+	HeliCall.board_direct_s = 2.0
+	HeliSupports.free_calls = 1  # (the bank check counts only what the debrief paid)
+	var hurt := _roster_soldier(casualty)
+	if hurt == null:
+		return {"why": "no casualty"}
+	_put(hurt, player.global_position + Vector3(2.0, 0, 0))
+	hurt.vitals.server_damage(70.0)
+	await _frames(3)
+	check(not hurt.vitals.is_up(), "%s goes down" % hurt.name)
+	# The call: the pilot picks an LZ near us.
+	var why := Supports.server_command(player, "support:extraction:near", player.global_position, PackedStringArray())
+	var c := sup.active("extraction")
+	check(why == "" and c != null and c.mark.has("pos"), "helicopter extraction called near us (%s)" % why)
+	if c == null:
+		return {"why": why}
+	var first := c.lz
+	check(_flat(first, player.global_position) <= DeadGround.SQUAD_RING_M.y + 10.0 and DeadGround.seen_by(level, first, DeadGround.watchers(level)) == 0,
+		"its LZ is %.0f m from us, out of the enemy's sight" % _flat(first, player.global_position))
+	# An enemy in sight of the LZ: hot.
+	var spot := _spot_seeing(first)
+	if spot == Vector3.INF:
+		check(false, "a spot that sees the LZ, for the enemy")
+		return {"why": "no spot to make the LZ hot from"}
+	var spotter := level.spawn_soldier({"name": "LoopSpotter", "faction": "hostile", "variant": "urban", "pos": level.ground_point(spot),
+		"loadout": ["mk18"], "combat": 0.1, "discipline": 0.5, "guard": true})
+	spotter.set_meta(&"loop_keep", true)
+	await _frames(2)
+	_hold(spotter)
+	var waved := await _wait_until(func() -> bool: return not c.waved_off.is_empty(), 90.0)
+	check(waved and sup.heard_line("is hot, enemy in sight of it. Waving off"), "the LZ is hot: it waves off (radio: %s)" % (sup.heard[-1] if not sup.heard.is_empty() else "nothing"))
+	var lz := c.lz
+	check(waved and _flat(lz, first) >= HeliCall.WAVE_OFF_AVOID_M and DeadGround.hot_watcher(level, lz) == null and not extraction.point_by_id(c.point_id).is_empty()
+		and Extraction.inside(extraction.point_by_id(c.point_id), lz), "and picks another LZ %.0f m off, out of his sight; the extraction point moves there" % _flat(lz, first))
+	spotter.vitals.server_kill()
+	var landed := await _wait_until(func() -> bool: return c.heli != null and is_instance_valid(c.heli) and c.heli.is_landed(), 90.0)
+	check(landed and _flat(c.heli.global_position, lz) < 15.0, "it lands at the new LZ")
+	if not landed:
+		return {"why": "never landed"}
+	check(sup.heard_line("Get everyone aboard"), "the radio: on the ground, get everyone aboard")
+	# The squad comes over; the player sets his rifle down in the point, carries the casualty in.
+	var door := c.heli.global_transform * Vector3(-2.2, 0.0, -2.4)
+	var by_door := level.ground_point(door)
+	_put(player, by_door + Vector3(-6.0, 0, 3.0))
+	var i := 0
+	for mid: String in squad:
+		if mid == casualty:
+			continue
+		i += 1
+		_put(_roster_soldier(mid), by_door + Vector3(-4.0 - 1.5 * i, 0, -3.0))
+	_put(hurt, player.global_position + Vector3(1.2, 0, 0))
+	player._server_drop.rpc_id(1, &"primary")
+	await _frames(3)
+	var bodies: Array = get_tree().get_nodes_in_group(Soldier.DEAD_GROUP).filter(func(n: Node) -> bool:
+		var s := n as Soldier
+		return s and s.faction == &"hostile" and s != spotter and not s.is_queued_for_deletion() and not Contracts.inventory_items(s.inventory).is_empty())
+	if bodies.is_empty():
+		check(false, "a dead hostile to bring")
+		return {"why": "no body to bring"}
+	var loot := bodies[0] as Soldier
+	var left := bodies[1] as Soldier if bodies.size() > 1 else null
+	if left == null:
+		info("only one dead hostile with gear: no body left lying in the point to check")
+	var body_items := {}
+	for e: Dictionary in Contracts.inventory_items(loot.inventory):
+		body_items[String(e.id)] = int(body_items.get(String(e.id), 0)) + int(e.get("count", 1))
+	_put(loot, by_door)  # set down by the door: loaded
+	if left:
+		_put(left, c.heli.global_position + Vector3(10.0, 0, 9.0))  # in the point, away from the doors: stays
+	await _frames(3)
+	var lifted := player.server_pick_up_body(hurt, Soldier.CARRY, 3.0)
+	check(lifted, "the player picks up the casualty")
+	await _seconds(2.0)
+	_put(player, by_door + Vector3(-1.0, 0, 0))
+	var loaded := await _wait_until(func() -> bool:
+		var hold := c.heli.cargo_hold.entries().map(func(x: Dictionary) -> String: return String(x.id))
+		return Vehicle.ride_of(hurt) == c.heli and Vehicle.ride_of(loot) == c.heli and "m4a1" in hold, 15.0)
+	check(Vehicle.ride_of(hurt) == c.heli, "the carried casualty is loaded aboard (%s)" % _kit_text(hurt))
+	check(Vehicle.ride_of(loot) == c.heli and (left == null or Vehicle.ride_of(left) == null), "the dead hostile by the door is loaded; the one lying off in the point isn't")
+	check("m4a1" in c.heli.cargo_hold.entries().map(func(x: Dictionary) -> String: return String(x.id)), "the rifle set down in the point goes into the hold")
+	if not loaded:
+		return {"why": "the casualty, the body or the rifle wasn't loaded"}
+	var mates_in := await _wait_until(func() -> bool: return squad.all(func(mid: String) -> bool: return Vehicle.ride_of(_roster_soldier(mid)) == c.heli), 20.0)
+	check(mates_in, "the squadmates board")
+	var field := _field_counts_heli(c.heli)
+	var report := {}
+	extraction.deployment_ended.connect(func(r: Dictionary) -> void: report.merge(r, true))
+	c.heli.server_enter(player)  # the player gets in last
+	var out := await _wait_until(func() -> bool: return not report.is_empty(), 20.0)
+	check(out and sup.heard_line("Everyone's aboard"), "everyone aboard: it lifts off and the deployment ends")
+	if not out:
+		return {"why": "the deployment never ended"}
+	var lz2 := Vector2(lz.x, lz.z)
+	var home := await _wait_until(func() -> bool: return CompoundLevel.current(self) is BaseLevel, 60.0)
+	level = CompoundLevel.current(self)
+	Helicopter.pace = 1.0
+	HeliCall.board_direct_s = 45.0
+	HeliSupports.free_calls = -1
+	check(home and not Contracts.is_deployed(), "flown out: the deployment ends and everyone is back at the base")
+	if not home:
+		return {"why": "never back at the base"}
+	await _wait_until(func() -> bool: return level.players.get_node_or_null(^"1") != null, 10.0)
+	player = level.players.get_node_or_null(^"1")
+	await _seconds(BaseHub.STASH_POLL_S + 0.3)
+	return {"ok": true, "deposited": report.get("deposited", []), "bodies": report.get("bodies", []), "body_items": body_items,
+		"field": field, "lz": lz2, "left_body": left.body_uid if left else "none"}
+
+
+## What's left in the zone, not aboard `heli`, by item id: loose items and what's on the dead.
+func _field_counts_heli(heli: Helicopter) -> Dictionary:
+	var out := {}
+	var add := func(entries: Array) -> void:
+		for e: Dictionary in entries:
+			out[String(e.id)] = int(out.get(String(e.id), 0)) + int(e.get("count", 1))
+	for n: Node in get_tree().get_nodes_in_group(WorldItem.GROUP):
+		var item := n as WorldItem
+		if item and not item.is_queued_for_deletion():
+			add.call(Contracts.flatten_entry({"id": item.item_id, "count": item.count, "state": item.state}))
+	var seen := {}
+	for n: Node in get_tree().get_nodes_in_group(&"combatants") + get_tree().get_nodes_in_group(Soldier.DEAD_GROUP):
+		var s := n as Soldier
+		if s == null or seen.has(s) or s.is_queued_for_deletion() or not s.vitals.is_dead() or s.has_meta(&"vehicle_crew") or Vehicle.ride_of(s) == heli:
+			continue
+		seen[s] = true
+		add.call(Contracts.inventory_items(s.inventory))
+	return out
+
+
+static func _flat(a: Vector3, b: Vector3) -> float:
+	return Vector2(a.x - b.x, a.z - b.z).length()
 
 
 ## What's left in the field outside the landing zone at `lz` (x, z), by item id: loose items

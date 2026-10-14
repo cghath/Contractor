@@ -91,9 +91,24 @@ const TAKEOFF_S := 3.0
 const TAKEOFF_AGL_M := 8.0
 ## "Taking fire" goes out at most this often.
 const UNDER_FIRE_RADIO_S := 20.0
+## Insertion with a route (a contract zone): it flies the legs this low over the terrain (m)
+## and counts a waypoint passed within ROUTE_PASS_M.
+const ROUTE_AGL_M := 40.0
+const ROUTE_PASS_M := 90.0
+## Insertion: the players get out themselves; after this long (s) anyone left is put out.
+const INSERT_DROP_WAIT_S := 20.0
+## Hot LZ (insertion and extraction): within this far of the LZ (m) it looks every HOT_CHECK_S
+## for an enemy who sees the LZ (DeadGround.hot_watcher) and waves off; a new LZ keeps
+## WAVE_OFF_AVOID_M from every LZ waved off.
+const HOT_CHECK_M := 700.0
+const HOT_CHECK_S := 1.0
+const WAVE_OFF_AVOID_M := 150.0
 
 ## Tests: AI ordered in get in directly after this long (s).
 static var board_direct_s := 45.0
+## Extraction: on the ground it waits this long (s) for everyone to board; then it lifts with
+## whoever is aboard if every player is, else it leaves without them (call it again).
+static var extract_wait_s := 180.0
 
 var sup: HeliSupports
 var kind := ""
@@ -120,6 +135,12 @@ var point_id := 0
 var rode_out := false
 ## Extraction: a campaign was running when it lifted off (it flies the squad home, not back down).
 var going_home := false
+## Insertion (a contract zone): points (x, z) it flies by, low, before going in to land.
+var route: Array[Vector3] = []
+## Insertion: the objective its dead-ground LZ was planned round (Vector3.INF: none).
+var objective := Vector3.INF
+## LZs it waved off (hot), newest last.
+var waved_off: Array[Vector3] = []
 
 var _t := 0.0
 var _check := 0.0
@@ -136,6 +157,9 @@ var _empty_since := -1.0
 var _smoke_failed := {}
 ## What the radio last said it's doing (_say): the same state isn't said twice in a row.
 var _radio_state := ""
+var _hot_check := 0.0
+var _wait_told := false
+var _late_seen := {}
 
 
 func _init(p_sup: HeliSupports, p_kind: String, p_caller: Soldier, p_mark: Dictionary) -> void:
@@ -174,7 +198,7 @@ func server_launch() -> bool:
 	var layer := VehicleLayer.of(lvl)
 	if lvl == null or layer == null:
 		return false
-	var toward: Vector3 = mark.pos if mark.has("pos") else _players_centre()
+	var toward: Vector3 = route[0] if not route.is_empty() else (mark.pos if mark.has("pos") else _players_centre())
 	var origin := Supports.origin_for(lvl, &"heli", toward, 0.0).origin
 	var away := Vector3(origin.x - toward.x, 0.0, origin.z - toward.z)
 	var dist := away.length()
@@ -222,11 +246,23 @@ func _go_in(why := "") -> void:
 	_rechecked = false
 	if mark.has("pos"):
 		if _choose_lz(mark.pos):
-			heli.server_land_at(lz)
+			var hot := _hot_at_lz()
+			if hot and _pick_other_lz(hot):
+				why = "LZ at %s is hot" % _grid(waved_off[-1])
+			_fly_in()
+			var metres := _flat(heli.global_position, lz)
+			if not route.is_empty():
+				metres = _flat(heli.global_position, route[0]) + _flat(route[0], lz)
 			var text := "%s to %s, ETA %d s" % ["Inbound" if kind != "insertion" else "Thirty seconds out, inbound", _grid(lz),
-				ceili(Helicopter.eta_s(_flat(heli.global_position, lz)))]
-			if lz_moved_m > 5.0:
+				ceili(Helicopter.eta_s(metres))]
+			if not route.is_empty():
+				text += ", coming in low by %s" % _grid(route[0])
+			if bool(mark.get("near", false)):
+				text += ". LZ %d m from you%s" % [roundi(_flat(lz, _players_centre())), ", in dead ground" if bool(mark.get("hidden", false)) else ""]
+			elif lz_moved_m > 5.0:
 				text += ". No LZ at the mark: landing %d m off" % roundi(lz_moved_m)
+			if why != "":
+				text = "%s, enemy in sight of it. New LZ: %s" % [why, text]
 			_say("landing %s" % _grid(lz), text)
 			return
 		why = "No safe LZ within %d m of %s" % [roundi(LandingZone.SEARCH_M), _grid(mark.pos)]
@@ -349,6 +385,9 @@ func step(delta: float) -> void:
 	_t += delta
 	_check -= delta
 	_orbit_next -= delta
+	_hot_check -= delta
+	if kind == "insertion" and stage == "drop" and (phase == Phase.INBOUND or phase == Phase.LOITER) and heli.is_airborne():
+		_board_late_players()
 	match phase:
 		Phase.INBOUND, Phase.LOITER:
 			_step_inbound()
@@ -398,6 +437,17 @@ func _step_inbound() -> void:
 		_on_landed()
 		return
 	if mark.has("pos"):
+		if not route.is_empty():  # flying in low by the insertion point first
+			if _flat(heli.global_position, route[0]) < ROUTE_PASS_M:
+				route.pop_front()
+				_fly_in()
+			return
+		if (kind == "insertion" or kind == "extraction") and _hot_check <= 0.0 and _flat(heli.global_position, lz) < HOT_CHECK_M:
+			_hot_check = HOT_CHECK_S
+			var hot := _hot_at_lz()
+			if hot:
+				_wave_off(hot)
+				return
 		if not _rechecked and _flat(heli.global_position, lz) < RECHECK_LZ_M and stage == "pickup":
 			_rechecked = true
 			var before := lz
@@ -481,7 +531,8 @@ func _on_landed() -> void:
 		"transport":
 			sup.server_radio(kind, "On the ground. Get in and give me a destination (Support > Helicopter transport > Fly to my map marker)")
 		"extraction":
-			sup.server_radio(kind, "On the ground at %s. Get everyone aboard" % _grid(heli.global_position))
+			_wait_told = false
+			sup.server_radio(kind, "On the ground at %s. Get everyone aboard: we wait %d s" % [_grid(heli.global_position), roundi(extract_wait_s)])
 
 
 func _step_ground() -> void:
@@ -491,7 +542,7 @@ func _step_ground() -> void:
 				_empty_since = _t
 			if _t - _empty_since >= DROP_GRACE_S:
 				_depart()
-		elif _t > DROP_WAIT_S:
+		elif _t > (INSERT_DROP_WAIT_S if kind == "insertion" else DROP_WAIT_S):
 			_unload(true)
 		return
 	match kind:
@@ -521,10 +572,12 @@ func _step_ground() -> void:
 				_board(extraction.required().ai if extraction else [])
 				if _all_required_aboard():
 					sup.server_radio(kind, "Everyone's aboard. Lifting off")
-					stage = "leave"
-					heli.server_take_off()
-					phase = Phase.LIFTING
-					_t = 0.0
+					_lift_out()
+				elif _t > extract_wait_s:
+					_stop_waiting()
+				elif not _wait_told and extract_wait_s >= 90.0 and _t > extract_wait_s - 60.0:
+					_wait_told = true
+					sup.server_radio(kind, "One minute on the ground, then we lift")
 
 
 # --- On the ground (host) ------------------------------------------------------------------------
@@ -631,12 +684,26 @@ func _load_people(hvts: bool) -> void:
 		everyone.append_array(parent.get_children())
 	if lvl.people:
 		everyone.append_array(lvl.people.people())  # civilians and HVTs live under People
+	if hvts:  # extraction: the enemy dead brought to it come out too (what's on them is loot)
+		for n: Node in sup.get_tree().get_nodes_in_group(Soldier.DEAD_GROUP):
+			if n not in everyone:
+				everyone.append(n)
+	var spare := _spare_seats(extraction) if hvts else 99
 	for n: Node in everyone:
 		var s := n as Soldier
 		if s == null or s.is_queued_for_deletion() or Vehicle.ride_of(s) != null:
 			continue
 		var hvt := Person.is_hvt(s)
 		if not hvt and s.faction != &"friendly":
+			# Extraction: an enemy body carried to a door, or set down by one, while the seats
+			# the squad still needs stay free.
+			if hvts and s.vitals.is_dead() and spare > 0 and not s.has_meta(&"vehicle_crew"):
+				var by: Vector3 = s.carried_by.global_position if is_instance_valid(s.carried_by) and s.carried_by.faction == &"friendly" else s.body_point()
+				if _by_door(by, LOAD_REACH_M + (1.0 if is_instance_valid(s.carried_by) else 0.0)) and heli.server_enter(s):
+					spare -= 1
+			continue
+		if hvts and s.vitals.is_up() and s.has_meta(&"recovery") and s.global_position.distance_to(heli.global_position) <= HVT_REACH_M:
+			heli.server_enter(s)  # a recovery contract's squadmate, found: out with us
 			continue
 		if is_instance_valid(s.carried_by):
 			if _by_door(s.carried_by.global_position, LOAD_REACH_M + 1.0):
@@ -650,6 +717,21 @@ func _load_people(hvts: bool) -> void:
 			var near := s.global_position.distance_to(heli.global_position) <= HVT_REACH_M
 			if near or (not point.is_empty() and Extraction.inside(point, s.global_position)):
 				heli.server_enter(s)
+
+
+## Extraction: passenger seats free beyond those the squad still out needs (players and the AI
+## they bring).
+func _spare_seats(extraction: Extraction) -> int:
+	var free := 0
+	for i in heli.seat_count():
+		if heli.occupant(i) == null and heli.seat_kind(i) == Vehicle.PASSENGER:
+			free += 1
+	if extraction:
+		var need := extraction.required()
+		for s: Soldier in need.players + need.ai:
+			if Vehicle.ride_of(s) != heli:
+				free -= 1
+	return free
 
 
 ## Extraction: items set down inside the point go into the hold (whole stacks that fit).
@@ -701,6 +783,134 @@ func _take_off() -> void:
 	heli.server_take_off()
 	phase = Phase.TAKEOFF
 	_t = 0.0
+
+
+## Extraction: off the ground with the squad; the deployment ends once it's up (LIFTING).
+func _lift_out() -> void:
+	stage = "leave"
+	heli.server_take_off()
+	phase = Phase.LIFTING
+	_t = 0.0
+
+
+## Extraction: it waited extract_wait_s on the ground. With every player aboard it lifts with
+## who's aboard (AI squadmates still out are left behind: Extraction reports them); otherwise
+## it puts everyone back out (and what it had loaded), and leaves: they call it again.
+func _stop_waiting() -> void:
+	var extraction := MapNodes.extraction(sup)
+	var need: Dictionary = extraction.required() if extraction else {"players": [], "ai": []}
+	var players: Array = need.players
+	if not players.is_empty() and players.all(func(p: Soldier) -> bool: return Vehicle.ride_of(p) == heli):
+		var left := PackedStringArray()
+		for s: Soldier in need.ai:
+			if Vehicle.ride_of(s) != heli:
+				extraction.server_set_bring(String(s.name), false)
+				left.append(s.display_name())
+		sup.server_radio(kind, "Can't hold the LZ any longer. Lifting with who's aboard%s" % (": %s stay%s behind" % [", ".join(left), "s" if left.size() == 1 else ""] if not left.is_empty() else ""))
+		_lift_out()
+		return
+	sup.server_radio(kind, "Can't hold the LZ any longer. Lifting off: call us again when you're ready")
+	_put_down_hold()
+	_depart()
+
+
+## Everything in the hold set down beside the cabin door (a call that leaves without the squad
+## doesn't fly off with their loot).
+func _put_down_hold() -> void:
+	if heli.cargo_hold == null:
+		return
+	var lvl := level()
+	var at := heli.global_transform * Vector3(-(VehicleArt.size_m(heli.model).x * 0.5 + 2.0), 0.0, -2.4)
+	var i := 0
+	for e: Dictionary in heli.cargo_hold.clear_all():
+		lvl.server_spawn_dropped(StringName(String(e.id)), int(e.get("count", 1)), lvl.ground_point(at + Vector3(0.0, 0.0, 0.5 * i)) + Vector3.UP * 0.3,
+			e.get("state", {}))
+		i += 1
+
+
+## Insertion: heads in, by the next point of its route (low and fast) or straight in to land.
+func _fly_in() -> void:
+	if not route.is_empty():
+		heli.server_fly_to(route[0], ROUTE_AGL_M, Helicopter.CRUISE_KMH, false)
+	else:
+		heli.server_land_at(lz)
+
+
+## An enemy who sees the LZ now (insertion and extraction), or null.
+func _hot_at_lz() -> Soldier:
+	if kind != "insertion" and kind != "extraction":
+		return null
+	return DeadGround.hot_watcher(level(), lz)
+
+
+## The LZ is hot (`hot` sees it): another in dead ground, away from every LZ waved off: round
+## the objective for an insertion planned on one, else round the squad (a hot zone's insertion:
+## round the old LZ). The extraction point moves there. Returns whether there was one.
+func _pick_other_lz(hot: Soldier) -> bool:
+	waved_off.append(lz)
+	var lvl := level()
+	var posts := DeadGround.watchers(lvl)
+	if is_instance_valid(hot) and hot.global_position not in posts:
+		posts.append(hot.global_position)
+	var centre := _players_centre()
+	var ring := DeadGround.SQUAD_RING_M
+	var prefer: Variant = centre
+	if kind == "insertion":
+		centre = objective if objective != Vector3.INF else lz
+		ring = DeadGround.OBJECTIVE_RING_M if objective != Vector3.INF else Vector2(150.0, 450.0)
+		prefer = heli.global_position
+	for attempt in 3:
+		var found := DeadGround.find(lvl, centre, ring, prefer, waved_off, WAVE_OFF_AVOID_M, posts, _ignore())
+		if not found.get("ok", false):
+			return false
+		var spot: Vector3 = found.spot
+		var also := DeadGround.hot_watcher(lvl, spot)
+		if also:
+			waved_off.append(spot)
+			continue
+		lz = spot
+		lz_moved_m = 0.0
+		mark = {"source": "grid", "pos": spot, "from": "wave_off", "hidden": bool(found.hidden), "near": kind == "extraction"}
+		_rechecked = true
+		if kind == "extraction" and stage == "pickup":
+			_place_point()
+		return true
+	return false
+
+
+## On the way in, the LZ turned hot (`hot` sees it): it waves off for another (the radio says
+## where), or, with none, loiters and asks for smoke or a grid.
+func _wave_off(hot: Soldier) -> void:
+	var old := lz
+	_radio_state = ""
+	SessionLog.note("%s helicopter: LZ (%.0f, %.0f) hot: %s sees it from %.0f m" % [kind, old.x, old.z, hot.display_name(), _flat(hot.global_position, old)])
+	if _pick_other_lz(hot):
+		_fly_in()
+		var dir := Vector2(lz.x - old.x, lz.z - old.z)
+		_say("landing %s" % _grid(lz), "LZ %s is hot, enemy in sight of it. Waving off: new LZ %s, %d m %s%s" % [_grid(old), _grid(lz),
+			roundi(dir.length()), _compass(dir),
+			" of it" if kind == "insertion" else ", %d m from you" % roundi(_flat(lz, _players_centre()))])
+		return
+	mark = {}
+	_go_in("LZ %s is hot and there's no other near" % _grid(old))
+
+
+## Insertion: a player who joined while it flies in (up, on foot) gets a seat aboard.
+func _board_late_players() -> void:
+	for p: Soldier in MapNodes.players(sup):
+		if p.vitals.is_up() and Vehicle.ride_of(p) == null and not p.is_queued_for_deletion() and not _late_seen.has(p.get_instance_id()):
+			_late_seen[p.get_instance_id()] = true
+			if heli.server_enter(p):
+				sup.server_radio(kind, "%s is aboard" % p.display_name())
+
+
+## "north", "south-west"... for a flat direction (x, z: -z is north).
+static func _compass(dir: Vector2) -> String:
+	if dir.length() < 0.01:
+		return "here"
+	var names := ["north", "north-east", "east", "south-east", "south", "south-west", "west", "north-west"]
+	var a := fposmod(rad_to_deg(atan2(dir.x, -dir.y)), 360.0)
+	return names[roundi(a / 45.0) % 8]
 
 
 ## Away to where it came from; gone there (step).
