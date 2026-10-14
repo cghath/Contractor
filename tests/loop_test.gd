@@ -279,7 +279,11 @@ func _mission(type: String) -> String:
 	var bills := [0]
 	var on_week := func(_week: int, bill: Dictionary) -> void: bills[0] += int(bill.total) - int(bill.get("loan_taken", 0))
 	Economy.week_paid.connect(on_week)
-	var out := await (_extract_heli(squad, casualty) if heli else _extract(bring, done.get("cargo", []), left, deposit))
+	var out: Dictionary
+	if heli:
+		out = await _extract_heli(squad, casualty)
+	else:
+		out = await _extract(bring, done.get("cargo", []), left, deposit)
 	Economy.week_paid.disconnect(on_week)
 	if not out.get("ok", false):
 		return "extraction: %s" % out.get("why", "")
@@ -768,13 +772,36 @@ func _pick_heli_insertion(briefing: Briefing) -> bool:
 		var d := Vector2(at.x, at.z).distance_to(obj)
 		var seen := DeadGround.seen_by(level, at, watch)
 		var lz := LandingZone.check(level, at)
-		all_ok = all_ok and d >= DeadGround.OBJECTIVE_RING_M.x - 1.0 and d <= DeadGround.OBJECTIVE_RING_M.y + 1.0 and lz.ok and seen == 0
-		lines.append("%s: %.0f m from the objective, seen by %d of %d posts, slope %.0f°%s" % [p.id, d, seen, watch.size(), float(lz.slope_deg), "" if lz.ok else ", " + String(lz.why)])
+		# Seen: only if the zone has no dead ground in the ring that takes a landing (the plan's
+		# fallback, named so in the briefing).
+		var missed: Variant = null if seen == 0 or bool(p.get("hidden", true)) else _dead_ground_in_ring(Vector3(obj.x, 0.0, obj.y), watch)
+		all_ok = all_ok and d >= DeadGround.OBJECTIVE_RING_M.x - 1.0 and d <= DeadGround.OBJECTIVE_RING_M.y + 1.0 and lz.ok 			and (seen == 0) == bool(p.get("hidden", false)) and missed == null
+		lines.append("%s: %.0f m from the objective, seen by %d of %d posts%s, slope %.0f°%s" % [p.id, d, seen, watch.size(),
+			"" if seen == 0 else (" (no dead ground in the ring)" if missed == null else " (missed dead ground at %s)" % str(missed)),
+			float(lz.slope_deg), "" if lz.ok else ", " + String(lz.why)])
 		if best.is_empty() or d < float(best.d):
 			best = {"id": String(p.id), "d": d}
-	check(all_ok, "every LZ is 200-450 m from the objective, takes a landing and no garrison post sees it (eye to eye, 1.7 m): %s" % "; ".join(lines))
+	check(all_ok, "every LZ is 200-450 m from the objective, takes a landing and no garrison post sees it (eye to eye, 1.7 m), or the zone has no such spot: %s" % "; ".join(lines))
 	check(briefing.server_set_insertion(String(best.id)), "the helicopter insertion %s is picked" % best.id)
 	return true
+
+
+## A spot in the insertion ring round `centre` that no post in `watch` sees and that takes a
+## landing (a coarse scan: every 25 m out, 32 round), or null.
+func _dead_ground_in_ring(centre: Vector3, watch: Array[Vector3]) -> Variant:
+	var inside: Rect2 = level.map_area().grow(-DeadGround.EDGE_KEEP_M)
+	var r := DeadGround.OBJECTIVE_RING_M.x
+	while r <= DeadGround.OBJECTIVE_RING_M.y:
+		for k in 32:
+			var a := TAU * k / 32.0
+			var at := centre + Vector3(cos(a), 0.0, sin(a)) * r
+			if not inside.has_point(Vector2(at.x, at.z)) or watch.any(func(q: Vector3) -> bool: return _flat(at, q) < DeadGround.POST_KEEP_M):
+				continue
+			at.y = LandingZone.terrain_y(level, at)
+			if DeadGround.seen_by(level, at, watch, 1) == 0 and LandingZone.check(level, at).ok:
+				return Vector2i(roundi(at.x), roundi(at.z))
+		r += 25.0
+	return null
 
 
 ## The squad starts seated in a UH-60 that flies in low by the insertion point, flares, lands
@@ -864,8 +891,10 @@ func _extract_heli(squad: Array, casualty: String) -> Dictionary:
 	if c == null:
 		return {"why": why}
 	var first := c.lz
-	check(_flat(first, player.global_position) <= DeadGround.SQUAD_RING_M.y + 10.0 and DeadGround.seen_by(level, first, DeadGround.watchers(level)) == 0,
-		"its LZ is %.0f m from us, out of the enemy's sight" % _flat(first, player.global_position))
+	var hidden := bool(c.mark.get("hidden", false))  # (no dead ground near: the fewest posts see it, the radio says so)
+	var seen_first := DeadGround.seen_by(level, first, DeadGround.watchers(level))
+	check(_flat(first, player.global_position) <= DeadGround.SQUAD_RING_M.y + 10.0 and (seen_first == 0) == hidden,
+		"its LZ is %.0f m from us, %s" % [_flat(first, player.global_position), "out of the enemy's sight" if hidden else "seen from %d post(s): no dead ground near" % seen_first])
 	# An enemy in sight of the LZ: hot.
 	var spot := _spot_seeing(first)
 	if spot == Vector3.INF:
@@ -898,6 +927,12 @@ func _extract_heli(squad: Array, casualty: String) -> Dictionary:
 		i += 1
 		_put(_roster_soldier(mid), by_door + Vector3(-4.0 - 1.5 * i, 0, -3.0))
 	_put(hurt, player.global_position + Vector3(1.2, 0, 0))
+	if player.inventory.slots[&"primary"] == &"":  # (the raid left his rifle at its point: the spare from the pack)
+		for container: StringName in player.inventory.search_containers():
+			var at: int = (player.inventory.containers.get(container, []) as Array).find_custom(func(e: Dictionary) -> bool: return e.id == &"m4a1")
+			if at >= 0 and player.inventory.equip_entry(container, at):
+				break
+	check(player.inventory.slots[&"primary"] == &"m4a1", "the player has a rifle to set down (%s)" % _kit_text(player))
 	player._server_drop.rpc_id(1, &"primary")
 	await _frames(3)
 	var bodies: Array = get_tree().get_nodes_in_group(Soldier.DEAD_GROUP).filter(func(n: Node) -> bool:
@@ -931,12 +966,16 @@ func _extract_heli(squad: Array, casualty: String) -> Dictionary:
 		return {"why": "the casualty, the body or the rifle wasn't loaded"}
 	var mates_in := await _wait_until(func() -> bool: return squad.all(func(mid: String) -> bool: return Vehicle.ride_of(_roster_soldier(mid)) == c.heli), 20.0)
 	check(mates_in, "the squadmates board")
-	var field := _field_counts_heli(c.heli)
+	var field := {}
 	var report := {}
-	extraction.deployment_ended.connect(func(r: Dictionary) -> void: report.merge(r, true))
+	var heard_all := [false]  # (read as the deployment ends: the zone and its supports go right after)
+	extraction.deployment_ended.connect(func(r: Dictionary) -> void:
+		heard_all[0] = is_instance_valid(sup) and sup.heard_line("Everyone's aboard")
+		field.merge(_field_counts_heli(c.heli), true)  # as it ends (the squad's AI may still drop someone while boarding)
+		report.merge(r, true))
 	c.heli.server_enter(player)  # the player gets in last
 	var out := await _wait_until(func() -> bool: return not report.is_empty(), 20.0)
-	check(out and sup.heard_line("Everyone's aboard"), "everyone aboard: it lifts off and the deployment ends")
+	check(out and heard_all[0], "everyone aboard: it lifts off and the deployment ends")
 	if not out:
 		return {"why": "the deployment never ended"}
 	var lz2 := Vector2(lz.x, lz.z)
