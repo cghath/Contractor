@@ -74,6 +74,7 @@ func _ready() -> void:
 	_ensure_bus(&"SFX")
 	_ensure_bus(&"Voice")
 	_ensure_bus(&"SFX_Room")
+	GameSettings.apply_audio()  # the player's volumes on the buses
 	var room := AudioServer.get_bus_index(&"SFX_Room")
 	if AudioServer.get_bus_effect_count(room) == 0:
 		var reverb := AudioEffectReverb.new()  # indoors: a small hard room

@@ -13,11 +13,16 @@ var role_picker: OptionButton
 var people_toggle: CheckBox
 var _address: LineEdit
 var _status: Label
+## The settings screen (GameSettings), over the menu.
+var settings_menu: SettingsMenu
 var _join_address := ""
 var _attempts_left := 0
 
 
 func _ready() -> void:
+	GameSettings.apply_all()  # the saved video, audio and key settings, from the start
+	settings_menu = SettingsMenu.new()
+	add_child(settings_menu)
 	# Centred in the window, and scrollable when the window is too small for it (audit L8-01:
 	# the panel used to start at the centre and run off a small window).
 	var scroll := ScrollContainer.new()
@@ -41,6 +46,7 @@ func _ready() -> void:
 	box.add_child(_hand_picker())
 	box.add_child(ControlOptions.get_out_toggle())  # the get-out key (an option, saved)
 	box.add_child(_people_toggle())
+	box.add_child(_button("Settings", func() -> void: settings_menu.open()))
 	box.add_child(_button("Play (host a session)", _plain_host))
 	box.add_child(_hint("Solo play is a session nobody else has joined."))
 	box.add_child(_button("Play the test contract (briefing, extraction)", host_with_briefing))
@@ -55,6 +61,9 @@ func _ready() -> void:
 	# the host into whatever it plays, the campaign included.
 	box.add_child(_button("Campaign: host at the base (FOB)", _campaign_host))
 	box.add_child(_button("Host test zone (2 km, world scale)", host_test_zone))
+	# Procedural towns to look at without waiting for the board to offer them (Captain, 2026-10-13).
+	box.add_child(_button("Host Old Quarter (city hot zone, test)", func() -> void: host_campaign_zone("city_hot")))
+	box.add_child(_button("Host Harbour yard (town, test)", func() -> void: host_campaign_zone("harbour_yard")))
 	box.add_child(_button("Host vehicle range (wave 5)", func() -> void: VehicleRange.host_from_menu(self)))
 	_status = Label.new()
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD
@@ -92,6 +101,23 @@ func host_test_zone() -> void:
 	if main and main.has_method(&"host_zone"):
 		GameState.zone_id = "zone_test"
 		main.host_zone(ZoneDef.get_def("test"))
+
+
+## Debug entry: hosts one of the campaign's zones (MissionRegistry.zone_def) on its own, no
+## contract, under a save of its own ("test_<zone>") so the campaign's zone save is untouched.
+func host_campaign_zone(zone_id: String) -> void:
+	BaseHub.cancel_session()  # never a leftover campaign
+	_clean_test_session()
+	var main := get_parent()
+	var def := MissionRegistry.zone_def(zone_id)
+	if main and main.has_method(&"host_zone") and not def.is_empty():
+		GameState.zone_id = "test_" + zone_id
+		main.host_zone(def)
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_APPLICATION_FOCUS_IN or what == NOTIFICATION_APPLICATION_FOCUS_OUT:
+		GameSettings.focus_changed(what == NOTIFICATION_APPLICATION_FOCUS_IN)
 
 
 func join(address: String) -> void:
