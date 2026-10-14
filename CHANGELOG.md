@@ -11,6 +11,19 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### The red dot is a micro red dot's size (Captain, 2026-10-14)
+
+#### Fixed
+- The red dot sight (the M4A1's and Mk18's own, `optic_red_dot`) was a 9 cm long box with a
+  3 x 4 cm window in a 4 x 5 cm housing, longer than the holographic sight, and in first person it
+  stood out as a big box on the right of the view (and filled the lower right when the weapon
+  pulls back near a wall). It is now an Aimpoint T-2 sized sight: a 3 cm tube 6.5 cm long round a
+  clear 2 cm window, with its caps and brightness knob, on a slim riser and rail clamp, 5.5 cm
+  from the rail to the top cap (`VoxelArt.optic_boxes`, `RED_DOT_LENGTH`). The line of sight,
+  where aiming puts your eye and the dot, is unchanged; other optics, the rifle and the
+  first-person view are unchanged. The gameplay suite checks its size and that its window is
+  clear front to back round the line of sight.
+
 ### Vehicle interiors and windows (Captain's side, 2026-10-13)
 
 #### Added
