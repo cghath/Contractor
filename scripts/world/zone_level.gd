@@ -383,6 +383,7 @@ func _spawn_garrison(module: ZoneModule) -> void:
 		if String(record.get("faction", "")) == "hostile":
 			fallen[String(record.get("label", ""))] = true
 	var spots: Array = ZoneModules.GARRISON.get(module.type, [])
+	var faces: Array = ZoneModules.GARRISON_FACE.get(module.type, [])  # the way a post looks out (towns)
 	if spots.is_empty():
 		return
 	var taken: Array[Vector3] = []
@@ -391,11 +392,12 @@ func _spawn_garrison(module: ZoneModule) -> void:
 		if fallen.has(callsign) or ai.get_node_or_null(NodePath(callsign)) != null:
 			continue
 		var pos := module.to_global(spots[i]) if i < spots.size() else _extra_post(module.to_global(spots[i % spots.size()]), taken)
+		var face: Vector3 = faces[i] if i < spots.size() and i < faces.size() else Vector3.ZERO
 		taken.append(pos)
 		if _garrison_queue.is_empty() and nav and not _garrison_nav_held:
 			nav.hold()  # the navigation's rebakes wait for the last of them (NavBuilder.hold)
 			_garrison_nav_held = true
-		_garrison_queue.append({"module_id": module.module_id, "i": i, "pos": pos})
+		_garrison_queue.append({"module_id": module.module_id, "i": i, "pos": pos, "face": face})
 		_garrison_pending[module.module_id] = garrison_pending(module.module_id) + 1
 	if garrison_pending(module.module_id) == 0:
 		_pair_garrison(module)  # nobody to wait for: the ones still up pair as they are
@@ -420,7 +422,8 @@ func _spawn_queued_garrison() -> void:
 				"loadout": HOSTILE_LOADOUT + ["enemy_radio"] if i % RADIO_EVERY == 0 else HOSTILE_LOADOUT, "combat": GARRISON_STATS.combat, "discipline": GARRISON_STATS.discipline, "guard": true,
 				"mode": alert.mode_at(pos) if alert else GARRISON_STATS.mode})
 			if s:
-				s.rotation.y = post_yaw(module, pos)
+				var look := module.global_basis * (q.get("face", Vector3.ZERO) as Vector3)  # a post's way out (towns)
+				s.rotation.y = post_yaw(module, pos) if look.length() < 0.1 else atan2(-look.x, -look.z)
 		var left := garrison_pending(String(q.module_id)) - 1
 		if left > 0:
 			_garrison_pending[q.module_id] = left
@@ -484,8 +487,9 @@ func site_down(module_id: String) -> bool:
 
 
 ## Host: a clear spot for an extra garrison post beside the post at `post` (world): the first
-## of EXTRA_POST_RINGS_M round it with room for a man (no wall, nobody already put in `taken`),
-## else the post itself nudged aside.
+## of EXTRA_POST_RINGS_M round it with room for a man (no wall, nobody already put in `taken`)
+## and a floor under him at the post's height (a post upstairs or on a roof: never out past the
+## wall in mid-air), else the post itself nudged aside.
 func _extra_post(post: Vector3, taken: Array[Vector3]) -> Vector3:
 	var space := get_world_3d().direct_space_state
 	var shape := CapsuleShape3D.new()
@@ -501,7 +505,10 @@ func _extra_post(post: Vector3, taken: Array[Vector3]) -> Vector3:
 			if taken.any(func(t: Vector3) -> bool: return t.distance_to(p) < EXTRA_POST_CLEAR_M * 2.5):
 				continue
 			query.transform = Transform3D(Basis.IDENTITY, p + Vector3.UP * 1.0)
-			if space.intersect_shape(query, 1).is_empty():
+			if not space.intersect_shape(query, 1).is_empty():
+				continue
+			var floor_hit := space.intersect_ray(PhysicsRayQueryParameters3D.create(p + Vector3.UP * 0.5, p + Vector3.DOWN * 0.6, 1))
+			if not floor_hit.is_empty() and absf((floor_hit.position as Vector3).y - p.y) < 0.5:
 				return p
 	return post + Vector3(0.9, 0.0, 0.9 * float(taken.size() % 3))
 

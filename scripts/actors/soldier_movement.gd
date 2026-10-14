@@ -58,6 +58,10 @@ const BODY_CLIMB_SPEED := 2.4
 ## this far (so a slow walk still gets its feet past the edge).
 const BODY_STEP_MARGIN := 0.04
 const BODY_STEP_AHEAD_M := 0.05
+## A step of the world (a stair's, a kerb) up to this high is stepped up the same way, from the
+## floor: the capsule's round bottom met a 0.2 m stair step as a wall (F-01: nobody got upstairs).
+## Under the capsule's radius, so a wall's foot (met at the radius) never counts.
+const WORLD_STEP_M := 0.27
 
 ## Side stances (Caps Lock + A/D): hips shift and the upper body tilts out; prone rolls
 ## onto a side. Slower to move in.
@@ -252,14 +256,16 @@ func update_pose(delta: float) -> void:
 ## by the contact's height, then on by this step's move, when both are clear. (Only lifting
 ## the velocity, as before, stuck soldiers at a pile's edge: the bump had stopped them and in
 ## the air they had AIR_CONTROL to get going again, so they hopped in place; R0142.)
+## A step of the world up to WORLD_STEP_M (a stair's) the same way, from the floor.
 ## `motion`: the horizontal velocity this step wanted, over `delta` seconds.
 func _climb_bodies(motion: Vector3, delta: float) -> void:
 	var feet := body.global_position.y
 	for i in body.get_slide_collision_count():
 		var hit := body.get_slide_collision(i)
-		if Ragdoll.body_of(hit.get_collider()) == null:
-			continue
 		var rise := hit.get_position().y - feet
+		var lying := Ragdoll.body_of(hit.get_collider()) != null
+		if not lying and (rise >= WORLD_STEP_M or rise < 0.02 or not body.is_on_floor() or not _is_world(hit.get_collider())):
+			continue  # not a body, and no stair step either
 		if rise >= BODY_STEP_M or hit.get_normal().y >= 0.7:
 			continue
 		var up := Vector3(0.0, minf(rise + BODY_STEP_MARGIN, BODY_STEP_M), 0.0)
@@ -272,9 +278,17 @@ func _climb_bodies(motion: Vector3, delta: float) -> void:
 			body.velocity.x = motion.x  # the bump doesn't cost the walk its speed
 			body.velocity.z = motion.z
 			body.velocity.y = maxf(body.velocity.y, 0.0)
-		else:
+		elif lying:
 			body.velocity.y = maxf(body.velocity.y, BODY_CLIMB_SPEED)  # no room: try a hop
+		else:
+			continue  # no room over that step: another contact may still be one
 		return
+
+
+## Whether `collider` is the world standing still (voxels, the ground, a static body), not a
+## soldier or a vehicle.
+static func _is_world(collider: Object) -> bool:
+	return collider != null and (not collider is PhysicsBody3D or collider is StaticBody3D)
 
 
 ## Every peer, every frame (from the body): the model, hitbox pose and capsule follow the

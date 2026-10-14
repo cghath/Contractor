@@ -12,11 +12,15 @@ extends RefCounted
 ## walled yards and courtyards.
 
 const CHUNKS_PATH := "res://data/building_chunks.json"
-## The narrowest a room may be (m), and how much wall a doorway keeps either side of it.
+## The narrowest a room may be (m), and how much wall a doorway keeps either side of it. A
+## doorway is DOOR_W wide (a type's outside door "door_w" at least as wide): the navmesh's
+## 0.25 m cells, a cell lost to a wall face lying on a cell edge and one eroded off each side
+## for the soldier's radius left a 0.9 m doorway no way through wherever an edge fell on a cell
+## edge (rooms cut off, AI never in them; F-01). 1.1 m always leaves a cell.
 const MIN_ROOM := 2.6
-const DOOR_W := 0.9
+const DOOR_W := 1.1
 const DOOR_H := 2.1
-const DOOR_EDGE := 0.3
+const DOOR_EDGE := 0.2
 ## Windows: width, sill and top (m); only on outer walls this long or longer.
 const WIN_W := 1.0
 const WIN_SILL := 1.0
@@ -33,12 +37,20 @@ const MIN_CHANCE := 0.6
 const MAX_VARY := 0.2
 ## Storeys (phase 3): a floor slab SLAB_T thick between them; a stair STAIR_W wide, its steps
 ## STAIR_RISE high at most (the navmesh climbs 0.25 m) and STAIR_TREAD deep, STAIR_LANDING
-## clear past its top, and a railing RAIL_H high round its stairwell above.
+## clear past its top, and a railing RAIL_H high round its stairwell above. The rise is whole
+## 0.1 m voxels (a 0.23 m rise, built as voxels, came out 0.2 or 0.3 m, and a soldier steps up
+## 0.27 m at most: SoldierMovement.WORLD_STEP_M). The navmesh doesn't bake the steps (a 0.25 m
+## tread, built as voxels, is 0.2 or 0.3 m deep, and a 0.25 m navmesh cell over three of them
+## climbs two steps at once, cutting the stair in two): it bakes ramp_faces() over them (F-01).
 const SLAB_T := 0.2
 const STAIR_W := 1.0
-const STAIR_RISE := 0.23
+const STAIR_RISE := 0.2
 const STAIR_TREAD := 0.25
 const STAIR_LANDING := 0.8
+## Floor left clear in front of a stair's first step, so one walks onto it head on: a foot right
+## against the end wall could only be stepped onto from the side, where the navmesh, eroded
+## along the wall and the stair's open side, left no way on (F-01).
+const STAIR_APPROACH := 0.5
 const RAIL_H := 1.0
 const RAIL_T := 0.1
 ## A flat roof with a stair up to it has a parapet round its edge.
@@ -69,7 +81,7 @@ const STYLES := {
 ## and of a stair up onto the roof of a single-storey one ("roof"; two storeys always have one).
 const TYPES := {
 	"house": {"w": [8.0, 13.0], "d": [7.0, 11.0], "rooms": [4, 6], "front": "living", "back": "kitchen",
-		"dark": ["bathroom", "storeroom"], "door_w": 0.9, "win_w": 1.0,
+		"dark": ["bathroom", "storeroom"], "door_w": 1.1, "win_w": 1.0,
 		"storeys": 0.3, "l_shape": 0.5, "yard": 0.4, "roof": 0.25,
 		"upper": {"front": "living", "fill": ["bedroom"], "smallest": "bathroom", "rest": "bedroom"}},
 	"shop": {"w": [7.0, 11.0], "d": [8.0, 12.0], "rooms": [3, 4], "front": "shopfront", "fill": ["storeroom", "office"],
@@ -102,10 +114,13 @@ static func house(seed: int, style := "") -> Dictionary:
 ## Returns {"boxes": [[lo, hi, Mat]], "rooms": [{"role", "rect" (Rect2, x/z inside its walls),
 ## "chunk", "floor" (0 the ground), "y" (its floor's height, m)}], "doors": [{"at": Vector3,
 ## "rooms": [i, j] (j -1: outside, -2: the roof), "stair" (a stair up: "at" its landing)}],
-## "loot": [{"at", "table"}], "stairs": [{"foot" (Rect2), "from_y", "to_y", "steps"}], "yards":
-## [{"rect" (Rect2 inside its walls), "gate" (Vector3, or null)}], "size": Vector2 (the lot,
-## yard and all), "storeys", "shape" ("rect" or "l"), "roof_access", "height" (m, its top),
-## "style", "type"}. The shell stands at the front (+z) of the lot, a yard behind it.
+## "windows": [{"at" (the middle of its opening's inner face, on its floor), "out" (Vector3 out
+## of it), "floor", "room"}], "roof_y" (the roof's top: where one stands on it), "loot":
+## [{"at", "table"}], "stairs": [{"foot" (Rect2), "from_y", "to_y", "steps", "low", "up",
+## "along_x" (as _stair)}], "yards": [{"rect" (Rect2 inside its walls), "gate" (Vector3, or
+## null)}], "size": Vector2 (the lot, yard and all), "storeys", "shape" ("rect" or "l"),
+## "roof_access", "height" (m, its top), "style", "type"}. The shell stands at the front (+z)
+## of the lot, a yard behind it.
 static func building(type: String, seed: int, style := "") -> Dictionary:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed
@@ -174,7 +189,7 @@ static func building(type: String, seed: int, style := "") -> Dictionary:
 		_doorways(rects, links, hub2, roles2.find("bathroom"), rng, floors[1].gaps, doors, n, fh)
 		var land: Vector2 = (up.land as Rect2).get_center()
 		doors.append({"at": Vector3(land.x, fh, land.y), "rooms": [int(up.room), n + hub2], "stair": true})
-		stairs.append({"foot": hole, "from_y": 0.0, "to_y": fh, "steps": int(up.steps)})
+		stairs.append({"foot": hole, "from_y": 0.0, "to_y": fh, "steps": int(up.steps), "low": up.low, "up": up.up, "along_x": up.along_x})
 		avoid["0:%d" % up.room] = [hole.grow(0.7)]
 		avoid["1:%d" % hub2] = [hole.grow(0.5), (up.land as Rect2).grow(0.3)]
 	# Up onto the roof: two storeys always, one now and then.
@@ -189,12 +204,15 @@ static func building(type: String, seed: int, style := "") -> Dictionary:
 		if not roof.is_empty():
 			var land: Vector2 = (roof.land as Rect2).get_center()
 			doors.append({"at": Vector3(land.x, roof_y + roof_t, land.y), "rooms": [int(top.first) + int(roof.room), -2], "stair": true})
-			stairs.append({"foot": roof.foot, "from_y": top.y, "to_y": roof_y + roof_t, "steps": int(roof.steps)})
+			stairs.append({"foot": roof.foot, "from_y": top.y, "to_y": roof_y + roof_t, "steps": int(roof.steps), "low": roof.low, "up": roof.up, "along_x": roof.along_x})
 			var key := "%d:%d" % [floors.size() - 1, roof.room]
 			avoid[key] = (avoid.get(key, []) as Array) + [(roof.foot as Rect2).grow(0.7)]
 	# Windows on outside walls, but not in the type's dark rooms (bathrooms, storerooms, an armoury).
 	var win_w: float = spec.win_w
-	for f: Dictionary in floors:
+	var windows: Array = []
+	var outward := {"n": Vector3(0, 0, -1), "s": Vector3(0, 0, 1), "w": Vector3(-1, 0, 0), "e": Vector3(1, 0, 0)}
+	for fi in floors.size():
+		var f: Dictionary = floors[fi]
 		var fr: Array[Rect2] = f.rects
 		for i in fr.size():
 			if f.roles[i] in (spec.dark as Array):
@@ -207,6 +225,9 @@ static func building(type: String, seed: int, style := "") -> Dictionary:
 				var key := _out_key(fr[i], side)
 				if not _overlaps(f.gaps.get(key, []), mid - win_w * 0.5 - 0.3, mid + win_w * 0.5 + 0.3):
 					_gap(f.gaps, key, mid - win_w * 0.5, mid + win_w * 0.5, WIN_SILL, WIN_TOP)
+					var line := _line(fr[i], side)
+					windows.append({"at": Vector3(mid, f.y, line) if side in ["n", "s"] else Vector3(line, f.y, mid),
+						"out": outward[side], "floor": fi, "room": int(f.first) + i})
 	# The walls, floor by floor; the slab between, the roof (with its parapet when it's used).
 	var boxes: Array = []
 	for f: Dictionary in floors:
@@ -252,7 +273,8 @@ static func building(type: String, seed: int, style := "") -> Dictionary:
 	var height := roof_y + roof_t + (maxf(PARAPET_H, RAIL_H) if not roof.is_empty() else 0.0)
 	return {"boxes": boxes, "rooms": rooms, "doors": doors, "loot": loot, "stairs": stairs, "yards": yards,
 		"size": Vector2(w, depth), "storeys": storeys, "shape": "l" if cut.has_area() else "rect",
-		"roof_access": not roof.is_empty(), "height": height, "style": style, "type": type}
+		"roof_access": not roof.is_empty(), "height": height, "style": style, "type": type,
+		"windows": windows, "roof_y": roof_y + roof_t}
 
 
 ## A style for a zone's region and terrain preset (TerrainPresets ids).
@@ -584,7 +606,8 @@ static func _door_clear(at: Vector3, room: Rect2) -> Rect2:
 
 ## A stair up `rise` m in one of a floor's rooms (`rects`, numbered from `first` in `doors`; not
 ## a bathroom; the biggest first): along a wall from a corner, clear of every doorway's floor
-## and of `keep` (Rect2s), with STAIR_LANDING free past its top in the same room. {"room",
+## and of `keep` (Rect2s), STAIR_APPROACH in front of its foot and STAIR_LANDING free past its
+## top in the same room. {"room",
 ## "foot" (Rect2), "side" (its wall), "along_x", "low" (where its foot is, along), "up" (1 or
 ## -1: which way it climbs), "steps", "land" (Rect2: the landing)}, or {} if none fits.
 static func _stair(rects: Array[Rect2], roles: Array, doors: Array, first: int, rise: float, keep: Array, rng: RandomNumberGenerator) -> Dictionary:
@@ -605,7 +628,7 @@ static func _stair(rects: Array[Rect2], roles: Array, doors: Array, first: int, 
 			var along_x := side in ["n", "s"]
 			var length := room.size.x if along_x else room.size.y
 			var across := room.size.y if along_x else room.size.x
-			if length >= run + STAIR_LANDING + FURNITURE_GAP * 2.0 and across >= STAIR_W + 0.9:
+			if length >= run + STAIR_LANDING + STAIR_APPROACH + FURNITURE_GAP and across >= STAIR_W + 0.9:
 				options.append([side, 1])
 				options.append([side, -1])
 		for k in range(options.size() - 1, 0, -1):
@@ -617,8 +640,8 @@ static func _stair(rects: Array[Rect2], roles: Array, doors: Array, first: int, 
 			var side: String = o[0]
 			var up: int = o[1]
 			var along_x := side in ["n", "s"]
-			var low := ((room.position.x if along_x else room.position.y) + FURNITURE_GAP) if up == 1 \
-				else ((room.end.x if along_x else room.end.y) - FURNITURE_GAP)
+			var low := ((room.position.x if along_x else room.position.y) + STAIR_APPROACH) if up == 1 \
+				else ((room.end.x if along_x else room.end.y) - STAIR_APPROACH)
 			var high := low + up * run
 			var c0: float
 			match side:
@@ -668,6 +691,35 @@ static func _rails(out: Array, s: Dictionary, y: float) -> void:
 		out.append([Vector3(l0, y, f.position.y), Vector3(l0 + RAIL_T, yt, f.end.y), mat])
 	else:
 		out.append([Vector3(f.position.x, y, l0), Vector3(f.end.x, yt, l0 + RAIL_T), mat])
+
+
+## For the navmesh bake only (NavBuilder, ZoneNav): a ramp over each of building `b`'s stairs,
+## in its own metres, as triangles facing up (two a stair). It lies a step's rise over the step
+## nosings, so it's over every tread, from that high at the foot to that high over its top
+## landing: one 0.2 m climb on and off, and a smooth slope between that a 0.25 m cell bakes
+## whole (the steps themselves, voxels, came out cut in two: see STAIR_RISE).
+static func ramp_faces(b: Dictionary) -> PackedVector3Array:
+	var faces := PackedVector3Array()
+	for st: Dictionary in b.get("stairs", []):
+		if not st.has("up"):
+			continue
+		var f: Rect2 = st.foot
+		var rise := (float(st.to_y) - float(st.from_y)) / maxf(float(st.steps), 1.0)
+		var y_low := float(st.from_y) + rise
+		var y_high := float(st.to_y) + rise
+		var up := int(st.up)
+		# Heights at the rect's low and high x (or z), whichever way it climbs.
+		var y0 := y_low if up == 1 else y_high
+		var y1 := y_high if up == 1 else y_low
+		var a := Vector3(f.position.x, 0, f.position.y)
+		var c := Vector3(f.end.x, 0, f.end.y)
+		var corners: Array[Vector3]
+		if st.along_x:
+			corners = [Vector3(a.x, y0, a.z), Vector3(c.x, y1, a.z), Vector3(c.x, y1, c.z), Vector3(a.x, y0, c.z)]
+		else:
+			corners = [Vector3(a.x, y0, a.z), Vector3(c.x, y0, a.z), Vector3(c.x, y1, c.z), Vector3(a.x, y1, c.z)]
+		faces.append_array([corners[0], corners[1], corners[2], corners[0], corners[2], corners[3]])
+	return faces
 
 
 # --- Walls -----------------------------------------------------------------------------------
@@ -937,6 +989,14 @@ const TOWN_LOOT := {
 const TOWN_LOOT_MAX := 10
 ## A town's weapons cache: a stack of crates this size (m).
 const TOWN_CACHE := Vector3(1.4, 1.0, 0.9)
+## Garrison posts (F-02): as many as one for every other building and two at the crossroads,
+## TOWN_HIGH_SHARE of them up high: at an upper floor's window onto the street, or behind a
+## roof's parapet (a roof is only ever reached by a stair, and every such roof has a parapet);
+## the rest just inside front doors. A post up high stands POST_IN_M in from the wall, on a floor
+## or a roof with nothing in a man's way (POST_CLEAR_M round, 1.7 m up).
+const TOWN_HIGH_SHARE := 1.0 / 3.0
+const POST_IN_M := 0.7
+const POST_CLEAR_M := 0.3
 ## Every TOWN_CIVILIAN_EVERY'th building has someone living or working there, walking between
 ## their front step, the street and the crossroads.
 const TOWN_CIVILIAN_EVERY := 3
@@ -946,7 +1006,10 @@ const TOWN_MIX := {"house": 6.0, "shop": 2.5, "warehouse": 1.0, "clinic": 0.6, "
 
 ## The town from `seed`: {"boxes", "buildings": [{"type", "origin" (Vector3), "turned" (180
 ## degrees), "data" (building())}], "half" (Vector2: footprint half-size, m), "points"
-## ({"objective", "cache", "intel"}: Array of Vector3), "garrison" (Array of Vector3), "loot"
+## ({"objective", "cache", "intel"}: Array of Vector3), "garrison" (Array of Vector3),
+## "garrison_face" (Vector3 for each post: the way it looks out, Vector3.ZERO: the default),
+## "garrison_high" (how many of the posts are up high), "ramps" (the stairs' ramp_faces for
+## the navmesh, town metres), "loot"
 ## (ZoneModules.LOOT entries: {"uid", "id", "count", "pos"}), "hvt" and "hostage" (Vector3: the
 ## middle of the room an HVT lives in, an office or a living room, and of the room a hostage is
 ## held in, the police cells or a bedroom), "cache" ([lo, hi] Vector3s: a weapons cache, crates
@@ -958,6 +1021,7 @@ static func town(seed: int, style := "") -> Dictionary:
 	if style == "":
 		style = STYLES.keys()[rng.randi() % STYLES.size()]
 	var boxes: Array = []
+	var ramps := PackedVector3Array()  # the stairs' ramps for the navmesh (ramp_faces), town metres
 	var buildings: Array = []
 	var once := {}
 	var deepest := 0.0
@@ -990,6 +1054,8 @@ static func town(seed: int, style := "") -> Dictionary:
 						lo = nlo
 						hi = nhi
 					boxes.append([lo + origin, hi + origin, bx[2]])
+				for p: Vector3 in ramp_faces(b):  # (turned round: a rotation, the faces still face up)
+					ramps.append((Vector3(-p.x, p.y, -p.z) if turned else p) + origin)
 				buildings.append({"type": type, "origin": origin, "turned": turned, "data": b})
 				deepest = maxf(deepest, size.y)
 				cursor += size.x + LOT_GAP
@@ -1025,25 +1091,116 @@ static func town(seed: int, style := "") -> Dictionary:
 					var corner := Vector3(signf(step.x) * CROSS_W * 0.3, 0, rng.randf_range(-STREET_W, STREET_W) * 0.3)
 					civilians.append({"pos": arr.call(step + Vector3(0, 0.1, 0)), "routine": [arr.call(step), arr.call(across), arr.call(corner)]})
 					break
-		# A post just inside the front door of every other building.
-		if buildings.find(b) % 2 == 0:
-			for dr: Dictionary in b.data.doors:
-				if dr.rooms[1] == -1 and (dr.at as Vector3).z > 0.0:
-					garrison.append(to_town.call((dr.at as Vector3) + Vector3(0, 0.1, -1.0)))
-					break
+	# Garrison posts (F-02): a share up high at upper windows and on roofs, the rest just inside
+	# front doors, two at the crossroads; in building order (posts pair off as buddies in turn).
+	var face: Array = []
+	var high := _town_posts(buildings, garrison, face)
 	for fallback: String in ["objective", "cache", "intel"]:
 		if (points[fallback] as Array).is_empty():
 			points[fallback].append(Vector3(0, 0, 0))
 	garrison.append(Vector3(-CROSS_W, 0.1, 0))
 	garrison.append(Vector3(CROSS_W, 0.1, 0))
+	face.append_array([Vector3.ZERO, Vector3.ZERO])
 	# The weapons cache: crates in the middle of the armoury or a store room (a raid's target).
 	var at := _town_room(buildings, ["armoury", "storeroom"], Vector3(0, 0.1, STREET_W * 0.5 + SETBACK + 3.0)) - Vector3(0, 0.1, 0)
 	var cache: Array = [at - Vector3(TOWN_CACHE.x * 0.5, 0, TOWN_CACHE.z * 0.5), at + Vector3(TOWN_CACHE.x * 0.5, TOWN_CACHE.y, TOWN_CACHE.z * 0.5)]
 	boxes.append([cache[0], cache[1], VoxelWorld.Mat.WOOD])
 	return {"boxes": boxes, "buildings": buildings, "half": half, "points": points, "garrison": garrison,
-		"loot": loot, "civilians": civilians, "style": style, "cache": cache,
+		"garrison_face": face, "garrison_high": high, "ramps": ramps, "loot": loot, "civilians": civilians, "style": style, "cache": cache,
 		"hvt": _town_room(buildings, ["office", "living"], Vector3(-CROSS_W, 0.1, 0)),
 		"hostage": _town_room(buildings, ["cells", "bedroom"], Vector3(CROSS_W, 0.1, 0))}
+
+
+## A town's building posts into `posts` (town metres) and the way each looks out into `face`:
+## as many as one for every other building, TOWN_HIGH_SHARE of them up high (spread over the
+## buildings with an upper floor or a roof to stand on), the rest inside front doors (spread
+## over the others). Returns how many are up high. No random numbers: the town's stay the same.
+static func _town_posts(buildings: Array, posts: Array, face: Array) -> int:
+	var total := (buildings.size() + 1) / 2 + 2  # with the two at the crossroads
+	var up_at := {}  # building index -> [post, face] up high
+	for i in buildings.size():
+		var p := _high_post(buildings[i].data, i)
+		if not p.is_empty():
+			up_at[i] = p
+	var want_high := mini(roundi(total * TOWN_HIGH_SHARE), up_at.size())
+	var high := {}
+	var keys: Array = up_at.keys()
+	for k in want_high:
+		high[keys[k * keys.size() / want_high]] = true
+	var rest: Array = range(buildings.size()).filter(func(i: int) -> bool: return not high.has(i))
+	var want_door := mini(total - 2 - want_high, rest.size())
+	var door := {}
+	for k in want_door:
+		door[rest[k * rest.size() / want_door]] = true
+	var count := 0
+	for i in buildings.size():
+		var b: Dictionary = buildings[i]
+		var turned: bool = b.turned
+		var turn := func(p: Vector3) -> Vector3: return Vector3(-p.x, p.y, -p.z) if turned else p
+		if door.has(i):
+			for dr: Dictionary in b.data.doors:
+				if dr.rooms[1] == -1 and (dr.at as Vector3).z > 0.0:
+					posts.append(turn.call((dr.at as Vector3) + Vector3(0, 0.1, -1.0)) + (b.origin as Vector3))
+					face.append(turn.call(Vector3(0, 0, 1)))  # out of the door, onto the street
+					break
+		if high.has(i):
+			posts.append(turn.call(up_at[i][0]) + (b.origin as Vector3))
+			face.append(turn.call(up_at[i][1]))
+			count += 1
+	return count
+
+
+## Building `b`'s post up high (in its own metres) and the way it looks: [post, face], [] for
+## none. A two-storey building's is at an upper window onto the street, a roof's behind its
+## parapet on the street side (a building with both: by `i`, every other one on its roof).
+static func _high_post(b: Dictionary, i: int) -> Array:
+	var tries: Array = []
+	var roof := func() -> void:
+		if not b.roof_access:
+			return
+		var front := -INF
+		var span := Vector2(INF, -INF)
+		for r: Dictionary in b.rooms:
+			if int(r.floor) == int(b.storeys) - 1:
+				var rect: Rect2 = r.rect
+				front = maxf(front, rect.end.y)
+				span = Vector2(minf(span.x, rect.position.x), maxf(span.y, rect.end.x))
+		var y := float(b.roof_y)
+		for k in 9:  # from the middle out, either way
+			var x := (span.x + span.y) * 0.5 + float((k + 1) / 2) * 1.2 * (1.0 if k % 2 == 1 else -1.0)
+			if x > span.x + 0.6 and x < span.y - 0.6:
+				tries.append([Vector3(x, y + 0.1, front - POST_IN_M), Vector3(0, 0, 1)])
+	var window := func() -> void:
+		# Onto the street (+z) only.
+		for w: Dictionary in (b.windows as Array).filter(func(w: Dictionary) -> bool: return int(w.floor) >= 1 and (w.out as Vector3).z > 0.5):
+			for back: float in [POST_IN_M, POST_IN_M + 0.4]:
+				tries.append([(w.at as Vector3) - (w.out as Vector3) * back + Vector3(0, 0.1, 0), w.out])
+	if int(b.storeys) == 2 and i % 2 == 0:
+		window.call()
+		roof.call()
+	else:
+		roof.call()
+		if int(b.storeys) == 2:
+			window.call()
+	for t: Array in tries:
+		if _clear_post(b.boxes, t[0]):
+			return t
+	return []
+
+
+## Whether a man fits at `p` (building metres, at his feet): nothing within POST_CLEAR_M of him
+## up to 1.7 m, and something under his feet (a floor, a slab, a roof).
+static func _clear_post(boxes: Array, p: Vector3) -> bool:
+	var body := AABB(p + Vector3(-POST_CLEAR_M, 0.05, -POST_CLEAR_M), Vector3(POST_CLEAR_M * 2.0, 1.65, POST_CLEAR_M * 2.0))
+	var under := false
+	for bx: Array in boxes:
+		var lo: Vector3 = bx[0]
+		var hi: Vector3 = bx[1]
+		if AABB(lo, hi - lo).intersects(body):
+			return false
+		if p.x >= lo.x and p.x <= hi.x and p.z >= lo.z and p.z <= hi.z and absf(hi.y - (p.y - 0.1)) < 0.05:
+			under = true
+	return under
 
 
 ## The middle of the first room (in town metres, on the floor) whose role is the earliest of

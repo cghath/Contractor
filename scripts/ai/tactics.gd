@@ -122,6 +122,16 @@ const STACK_WAIT_S := 8.0
 const ENTRY_GAP_S := 1.2
 ## The entry team: at most this many (two pairs); the rest stay outside with the base.
 const ENTRY_MAX := 4
+## Floor by floor (F-01): a floor's done once every man is at his corner on it, or
+## FLOOR_WAIT_S after the first got to his; then they go up the stair one after the other,
+## ENTRY_GAP_S apart (a stair is a chokepoint).
+const FLOOR_WAIT_S := 8.0
+## Garrisoning: a port above the ground floor scores HIGH_PORT_BONUS more (it sees further), a
+## roof's parapet ROOF_PORT_BONUS (overwatch); with GARRISON_DOOR_MIN or more men, one of the
+## first two takes a door.
+const HIGH_PORT_BONUS := 0.25
+const ROOF_PORT_BONUS := 0.35
+const GARRISON_DOOR_MIN := 3
 ## Searching: pairs go SEARCH_RING_M round the last known position.
 const SEARCH_RING_M := 8.0
 const SEARCH_S := 45.0
@@ -641,11 +651,25 @@ static func flank_route(node: Node3D, from: Vector3, enemy: Vector3, lead: Soldi
 
 
 ## Garrisoning building `b` against a threat at `threat`: its ports facing the threat first
-## (windows and doors), each to the nearest unit still free, and the rest inside, away from
-## the walls the threat faces. {SquadAI: {"kind": "garrison", "spot", "face", "port"}}.
+## (windows, a roof's parapet and doors, every floor; ports up high score a little more, and
+## with a few men one of the first two takes a door), each to the nearest unit still free, and
+## the rest inside, away from the walls the threat faces. {SquadAI: {"kind": "garrison",
+## "spot", "face", "port"}}.
 static func garrison_tasks(b: Dictionary, units: Array, threat: Vector3) -> Dictionary:
 	var ports: Array = b.ports.duplicate()
-	ports.sort_custom(func(a: Dictionary, c: Dictionary) -> bool: return _facing(a, threat) > _facing(c, threat))
+	var floors: Array = b.get("floors", [])
+	var score := func(p: Dictionary) -> float:
+		var fi := int(p.get("floor", 0))
+		var bonus := 0.0
+		if fi > 0:
+			bonus = ROOF_PORT_BONUS if fi < floors.size() and bool(floors[fi].get("roof", false)) else HIGH_PORT_BONUS
+		return _facing(p, threat) + bonus
+	ports.sort_custom(func(a: Dictionary, c: Dictionary) -> bool: return score.call(a) > score.call(c))
+	if units.size() >= GARRISON_DOOR_MIN and ports.size() > 2 and not ports.slice(0, 2).any(func(p: Dictionary) -> bool: return p.kind == "door"):
+		for i in range(2, ports.size()):
+			if ports[i].kind == "door" and _facing(ports[i], threat) > -0.3:
+				ports.insert(1, ports.pop_at(i))
+				break
 	var free: Array = units.duplicate()
 	var out := {}
 	for port: Dictionary in ports:
@@ -678,9 +702,12 @@ static func garrison_tasks(b: Dictionary, units: Array, threat: Vector3) -> Dict
 
 ## A clearance of building `b` by `units` (the entry team, in entry order): their places in the
 ## stack beside the entrance nearest them, on the side of the doorway they come from, and the
-## room corner each goes to (the first pair the first room's corners, the next pair the next
-## room). Shared by the units' tasks, which mark "ready" (in the stack), "go_at" (when the first
-## goes in) and "done" (at their corner) in it. {} if the building has no way in.
+## room corner each goes to on each floor, floor by floor from the ground up the stairs (the
+## first pair the floor's first room's corners, the next pair the next room). Shared by the
+## units' tasks, which mark "ready" (in the stack), "go_at" (when the first goes in), each
+## floor's "floor_done" (at their corner there; "floor_go" when the next floor's turn comes),
+## and "done" (at their corner on the last floor). "rooms": the first floor's corners. {} if
+## the building has no way in.
 static func clear_op(b: Dictionary, units: Array) -> Dictionary:
 	if units.is_empty() or b.get("rooms", []).is_empty():
 		return {}
@@ -696,15 +723,32 @@ static func clear_op(b: Dictionary, units: Array) -> Dictionary:
 	var side := 1.0 if (from - (e.door as Vector3)).dot(along) >= 0.0 else -1.0
 	var map := (units[0] as SquadAI).body.get_world_3d().navigation_map
 	var stack: Array[Vector3] = []
-	var rooms: Array[Vector3] = []
 	for i in units.size():
 		var p: Vector3 = e.door + normal * STACK_OUT_M + along * side * (STACK_FIRST_M + STACK_GAP_M * i)
 		stack.append(NavigationServer3D.map_get_closest_point(map, p))
-		var room: Dictionary = b.rooms[(i >> 1) % b.rooms.size()]
-		var corners: Array = room.corners
-		rooms.append(corners[i % corners.size()] if not corners.is_empty() else room.centre)
-	return {"building": b, "entrance": e, "stack": stack, "rooms": rooms, "units": units.size(),
-		"ready": {}, "first_ready_at": INF, "go_at": INF, "done": {}}
+	# Each floor's rooms (a building scanned before floors were kept is all one floor).
+	var per_floor: Array = []
+	for f: Dictionary in b.get("floors", []):
+		if not (f.rooms as Array).is_empty():
+			per_floor.append(f.rooms)
+	if per_floor.is_empty():
+		per_floor.append(range(b.rooms.size()))
+	var floors: Array = []
+	for list: Array in per_floor:
+		var corners: Array[Vector3] = []
+		for i in units.size():
+			var room: Dictionary = b.rooms[list[(i >> 1) % list.size()]]
+			var at: Array = room.corners
+			corners.append(at[i % at.size()] if not at.is_empty() else room.centre)
+		floors.append(corners)
+	var floor_done: Array = []
+	var floor_go: Array = []
+	for f in floors:
+		floor_done.append({})
+		floor_go.append(INF)
+	return {"building": b, "entrance": e, "stack": stack, "rooms": floors[0], "floors": floors, "units": units.size(),
+		"ready": {}, "first_ready_at": INF, "go_at": INF, "done": {}, "floor_of": {}, "floor_done": floor_done,
+		"floor_first": floor_go.duplicate(), "floor_go": floor_go}
 
 
 ## Where unit `index` of `count` falls back to from a threat at `threat`: BREAK_BEHIND_LEAD_M
