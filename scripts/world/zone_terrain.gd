@@ -250,6 +250,17 @@ func _wadi_weight(w: Dictionary, x: float, z: float) -> float:
 	return 1.0 - smoothstep(width * 0.3, width * 1.6, d)
 
 
+## 0 to 1: how deep in a wadi's riverbed (x, z) is, at the nearest height point (0 off the
+## beds or with no wadis). ZoneScatter grows its wadi groves on the banks (Captain, 2026-10-14:
+## groves near the watercourses).
+func bed_at(x: float, z: float) -> float:
+	if _bed.size() != heights.size() or points == 0:
+		return 0.0
+	var i := clampi(roundi((x + _half) / CELL_M), 0, points - 1)
+	var j := clampi(roundi((z + _half) / CELL_M), 0, points - 1)
+	return float(_bed[i + j * points]) / 255.0
+
+
 ## How far the coast at (x, z) is pushed inland (+) or out to sea (-) by the wobble: smooth,
 ## out to sea up to _wobble_m, inland only up to COAST_IN_M.
 func coast_shift(x: float, z: float) -> float:
