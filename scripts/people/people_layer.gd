@@ -183,7 +183,10 @@ func hvt(hvt_id: String) -> Soldier:
 # --- Host: spawning ------------------------------------------------------------------------
 
 func _on_hosted() -> void:
-	if not populate:
+	# The base hub isn't the compound: no placeholder civilians, HVT, hostage, intel or
+	# extraction point there (real campaigns started with them at the base, session P0362;
+	# the loop test caught it).
+	if not populate or level is BaseLevel:
 		return
 	var world := level.get_node_or_null(^"VoxelWorld") as VoxelWorld
 	if world and not world.is_built():

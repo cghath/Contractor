@@ -104,6 +104,7 @@ func _test_safe_offer() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = SEED
 	var dists: Array[float] = []
+	var nearest: Array[float] = []
 	var types := {}
 	var timed := 0
 	for i in 300:
@@ -112,16 +113,24 @@ func _test_safe_offer() -> void:
 		if int(def_limit(String(s.type))) > 0:
 			timed += 1
 		var layout := MissionRegistry.zone_def(String(s.zone_id))
-		var ins: Array = (layout.get("insertion", []) as Array)[0] if not (layout.get("insertion", []) as Array).is_empty() else []
+		var points: Array = layout.get("insertion", [])
 		for m: Dictionary in layout.get("modules", []):
-			if String(m.id) == String(s.module_id) and ins.size() == 2:
-				dists.append(Vector2(float(m.pos[0]), float(m.pos[1])).distance_to(Vector2(float(ins[0]), float(ins[1]))))
-	dists.sort()
-	var near := dists.filter(func(d: float) -> bool: return d <= 300.0).size()
+			if String(m.id) != String(s.module_id) or points.is_empty():
+				continue
+			var at := Vector2(float(m.pos[0]), float(m.pos[1]))
+			var first: Array = points[0]
+			dists.append(at.distance_to(Vector2(float(first[0]), float(first[1]))))
+			var best := INF
+			for p: Array in points:
+				best = minf(best, at.distance_to(Vector2(float(p[0]), float(p[1]))))
+			nearest.append(best)
 	info("300 safe offers: types %s; %d on the clock (HVT capture 90 min, hostage rescue 75 min)" % [types, timed])
-	if not dists.is_empty():
-		info("target to default insertion: min %.0f m, median %.0f m, max %.0f m; within 300 m: %d of %d" % [
-			dists[0], dists[dists.size() / 2], dists[-1], near, dists.size()])
+	for pair: Array in [["the default insertion", dists], ["the nearest insertion point (picked at the briefing)", nearest]]:
+		var d: Array[float] = pair[1]
+		d.sort()
+		if not d.is_empty():
+			info("target to %s: min %.0f m, median %.0f m, max %.0f m; within 300 m: %d of %d" % [
+				pair[0], d[0], d[d.size() / 2], d[-1], d.filter(func(x: float) -> bool: return x <= 300.0).size(), d.size()])
 	info("the safe offer is never placed by distance: any type, any contract zone, any module of its type (ContractGen.generate/mission_target)")
 
 
@@ -169,6 +178,9 @@ func _start_campaign() -> void:
 ## cuffs bought at the shop (they're delivered to the armory counter).
 func _kit_up() -> void:
 	print("Kitting up at the base")
+	info("the player starts with: %s" % _kit_text(player))
+	var charges := player.inventory.count_of(Objectives.CHARGE_ITEM)
+	var cuffs := player.inventory.count_of(Person.ZIP_CUFFS)
 	check(BaseHub.server_buy(Objectives.CHARGE_ITEM, 1) == "" and BaseHub.server_buy(Person.ZIP_CUFFS, 2) == "",
 		"the shop sells a breaching charge and zip cuffs")
 	await _frames(3)
@@ -181,8 +193,8 @@ func _kit_up() -> void:
 		await _frames(2)
 		player._server_interact.rpc_id(1, item.get_path())
 		await _frames(3)
-	check(player.inventory.slots[&"primary"] == &"m4a1" and player.inventory.count_of(Objectives.CHARGE_ITEM) == 1
-		and player.inventory.count_of(Person.ZIP_CUFFS) == 2, "the player takes a rifle, the charge and the cuffs from the armory (%s)" % _kit_text(player))
+	check(player.inventory.slots[&"primary"] == &"m4a1" and player.inventory.count_of(Objectives.CHARGE_ITEM) == charges + 1
+		and player.inventory.count_of(Person.ZIP_CUFFS) == cuffs + 2, "the player takes a rifle, the charge and the cuffs from the armory (%s)" % _kit_text(player))
 	await _seconds(BaseHub.STASH_POLL_S + 0.3)
 
 
@@ -562,6 +574,7 @@ func _do_hvt(cid: String) -> Dictionary:
 	# Cuffing takes PeopleLayer.CUFF_S standing still; a body set down against a wall can be
 	# pushed clear and interrupt it, so (as a player would) try again from another side.
 	var cuffed := false
+	var cuffs_before := player.inventory.count_of(Person.ZIP_CUFFS)
 	var tries: Array[String] = []
 	for side: Vector3 in [hvt.global_basis.z, hvt.global_basis.x, -hvt.global_basis.x, -hvt.global_basis.z]:
 		player.global_position = hvt.global_position + side * 1.2
@@ -575,7 +588,7 @@ func _do_hvt(cid: String) -> Dictionary:
 		tries.append("problem '%s', player moved %.1f m, HVT moved %.1f m" % [problem, player.global_position.distance_to(p0), hvt.global_position.distance_to(h0)])
 		if cuffed:
 			break
-	check(cuffed and player.inventory.count_of(Person.ZIP_CUFFS) == 1, "zip-cuffed, one pair used (%d tr%s: %s)" % [tries.size(), "y" if tries.size() == 1 else "ies", "; ".join(PackedStringArray(tries))])
+	check(cuffed and player.inventory.count_of(Person.ZIP_CUFFS) == cuffs_before - 1, "zip-cuffed, one pair used (%d tr%s: %s)" % [tries.size(), "y" if tries.size() == 1 else "ies", "; ".join(PackedStringArray(tries))])
 	people.request.rpc_id(1, "search", people.get_path_to(hvt))
 	await _frames(3)
 	check(player.inventory.count_of(&"intel_phone") == 1, "searched: his phone is ours")
