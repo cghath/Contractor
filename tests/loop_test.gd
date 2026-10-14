@@ -633,7 +633,7 @@ func _do_hvt(cid: String) -> Dictionary:
 	if hvt == null:
 		return {"why": "the HVT isn't in the zone"}
 	## He never takes his surrender back here: an uncuffed captive may bolt even while watched
-	## (HvtAI.BOLT_CHAOS, for COWER_S after any gunfire he heard), a coin toss every BOLT_CHECK_S
+	## (HvtAI.BOLT_CHAOS, for CHAOS_S after close gunfire; never with a player within NO_BOLT_M since 2026-10-14), a coin toss every BOLT_CHECK_S
 	## that walked him off mid-cuff (R0746: moved 3.9 m, then 7.2 m). Bolting is missions_test's.
 	var brain := hvt.get_node_or_null(^"PersonAI") as HvtAI
 	if brain:

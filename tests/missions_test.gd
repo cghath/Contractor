@@ -455,13 +455,49 @@ func _test_no_cuffs() -> void:
 	check(people.server_lead(player, hvt).ends_with("follows you") and not Person.is_cuffed(hvt), "he gave up: with no cuffs on him, he still follows when led")
 	await _seconds(3.0)
 	check(brain.bolts == 0 and Person.is_captive(hvt), "watched (someone within %.0f m), he stays" % HvtAI.WATCH_M)
-	# Left alone: he takes it back and runs.
 	people.server_order(player, hvt, "stop")
-	_place(player, spot + Vector3(40, 0, 0))
+	# Calmer (Captain, 2026-10-14): a fight right by him, odds forced up, but one of the squad
+	# within NO_BOLT_M: he stays.
 	brain.bolt_scale = 100.0
+	var fire := func() -> void: brain.hear(hvt.global_position + Vector3(0, 0, 5))
+	fire.call()
+	await _seconds(HvtAI.BOLT_CHECK_S * 2 + 0.5)
+	check(brain.bolts == 0 and Person.is_captive(hvt), "gunfire close but one of the squad within %.0f m: he never bolts (bolts %d)" % [HvtAI.NO_BOLT_M, brain.bolts])
+	# Grabbed: held until let go, even with his holder a step beyond NO_BOLT_M.
+	_place(player, hvt.global_position + Vector3(HvtAI.NO_BOLT_M + 1.0, 0, 0))
+	brain.held_by = player
+	fire.call()
+	await _seconds(HvtAI.BOLT_CHECK_S * 2 + 0.5)
+	check(brain.bolts == 0 and Person.is_captive(hvt) and brain.held(), "grabbed: he stays until let go (bolts %d)" % brain.bolts)
+	brain.held_by = null
+	# Left alone: he takes it back and runs.
+	_place(player, spot + Vector3(40, 0, 0))
 	await _wait_for(func() -> bool: return brain.bolts > 0, HvtAI.BOLT_GRACE_S + HvtAI.BOLT_CHECK_S * 2 + 1.0)
 	check(brain.bolts == 1 and not Person.is_captive(hvt) and String(Person.state(hvt).get("led_by", "")) == "",
 		"left alone, the uncuffed HVT takes his surrender back and bolts (bolts %d, watched %s, uncuffed captive %s, will %.2f, %.1f m, mode %d)" % [brain.bolts, brain.watched(), brain.uncuffed_captive(), brain.bolt_will(), hvt.global_position.distance_to(player.global_position), brain.mode])
+	# Chased: one of the squad within CAUGHT_M after BOLT_MIN_RUN_S and he gives up again.
+	await _seconds(1.0)
+	check(not Person.is_captive(hvt), "he runs a while first")
+	var bolted := brain.bolted_at
+	var chase := func() -> bool:
+		if not Person.is_captive(hvt):
+			_place(player, hvt.global_position + Vector3(HvtAI.CAUGHT_M - 2.0, 0, 0))
+		return Person.is_captive(hvt)
+	await _wait_for(chase, HvtAI.BOLT_MIN_RUN_S + 3.0)
+	var chase_s := Soldier._now() - bolted
+	check(Person.is_captive(hvt) and brain.bolted_at < 0.0 and chase_s >= HvtAI.BOLT_MIN_RUN_S - 0.5,
+		"chased (one of the squad within %.0f m), he gives up again %.1f s after bolting" % [HvtAI.CAUGHT_M, chase_s])
+	# At most one bolt a deployment: left alone again with the odds forced up, he stays.
+	_place(player, hvt.global_position + Vector3(40, 0, 0))
+	fire.call()
+	await _seconds(HvtAI.BOLT_GRACE_S + HvtAI.BOLT_CHECK_S * 3 + 0.5)
+	check(brain.bolts == 1 and Person.is_captive(hvt), "he bolts at most %d time(s) a deployment (bolts %d)" % [HvtAI.MAX_BOLTS, brain.bolts])
+	# Nobody chasing: he still gives up after BOLT_RUN_S on the run.
+	brain.bolt("test")
+	check(not Person.is_captive(hvt), "(made to bolt again)")
+	brain.bolted_at = Soldier._now() - HvtAI.BOLT_RUN_S + 0.5
+	await _wait_for(func() -> bool: return Person.is_captive(hvt), 3.0)
+	check(Person.is_captive(hvt) and brain.bolted_at < 0.0, "unchased, he gives up after %.0f s on the run" % HvtAI.BOLT_RUN_S)
 	brain.bolt_scale = 1.0
 	# Cornered again, led to the landing zone uncuffed: captured.
 	people.server_surrender(hvt, "test")
