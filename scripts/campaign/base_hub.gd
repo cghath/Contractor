@@ -745,7 +745,10 @@ func _apply_player_gear(peer: int, player: Soldier) -> void:
 ## gets it, once, on top of their (empty) saved gear. Waits until their gear is on
 ## (_apply_player_gear) and their squad role is known (CompoundLevel.rebalance_squad), in
 ## whichever order those come; a stand-in plays in the stand-in's own gear. Returns whether
-## the kit went on.
+## the kit went on. This is the campaign's only role-kit path: a test harness that kits its
+## players itself (tests/coop_soak.gd _kit_players on test/coop-soak, its B-23 workaround) must
+## stand down in a campaign when BaseHub.has_method(&"server_give_due_kit"), or a brand-new
+## player carries two kits (review of B-23, 2026-10-14).
 func server_give_due_kit(player: Soldier) -> bool:
 	if not campaign_running or not is_instance_valid(player) or player.role == &"":
 		return false
