@@ -96,6 +96,8 @@ var late := false
 var human := false
 var wait_human_s := 600.0
 const HUMAN_EXTRACT_S := 1200.0
+## Time at the FOB between contracts once the human is back (the debrief, kitting up).
+const HUMAN_BASE_S := 60.0
 ## With a human in (--human), the human leads each deployment: the bots keep a loose formation
 ## 10-25 m off them (FOLLOW: right, back in m, turned the way the human faces), fight what they
 ## see, treat them when they go down, board a vehicle or get in an extraction point with them.
@@ -360,6 +362,13 @@ func _host_main() -> void:
 			break
 		if cycle >= (40 if human else 12):
 			break
+		if human and not _humans().is_empty():
+			# S0758: the host took the next contract at once, and the human was left on the
+			# debrief in the old zone. Wait at the FOB until they're in it, then give them
+			# time to read the debrief and kit up before the next contract.
+			_say("back at the FOB: waiting for the human to arrive, then %d s before the next contract" % int(HUMAN_BASE_S))
+			await _wait_for(func() -> bool: return _in_base() and _human_lead() != 0, 600.0)
+			await _sleep(HUMAN_BASE_S)
 	_set_phase("quit", {"quit": true})
 	await _wait_for(func() -> bool: return multiplayer.get_peers().is_empty(), 30.0)
 	_finish(0 if _failures.is_empty() else 1)
