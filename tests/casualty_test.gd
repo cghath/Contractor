@@ -1400,6 +1400,39 @@ func _seconds(s: float) -> void:
 	await get_tree().create_timer(s).timeout
 
 
+## Physics ticks until `s` stands on the ground, at most `ticks`. A soldier spawns 0.1 m up, and
+## one shot before he lands goes down with that fall's speed (his ragdoll starts with it). Render
+## frames don't count here: headless, two frames can pass inside one physics tick on a fast
+## machine and span several on a slow one (CI), so a wait of frames gave each machine its own
+## start.
+func _until_on_floor(s: Soldier, ticks := 60) -> void:
+	for i in ticks:
+		await get_tree().physics_frame
+		if s.is_on_floor():
+			return
+
+
+## The lowest (x) and highest (y) point of a ragdoll's part shapes, world height, as they'd be
+## moved by `moved`.
+func _ragdoll_span(r: Ragdoll, moved := Transform3D.IDENTITY) -> Vector2:
+	var span := Vector2(INF, -INF)
+	for p: Node3D in r.parts.values():
+		var cs := p.get_child(0) as CollisionShape3D
+		var t := moved * cs.global_transform
+		var corners: Array[Vector3] = []
+		if cs.shape is BoxShape3D:
+			var h := (cs.shape as BoxShape3D).size / 2.0
+			for i in 8:
+				corners.append(t * Vector3(h.x if i & 1 else -h.x, h.y if i & 2 else -h.y, h.z if i & 4 else -h.z))
+		else:
+			var radius := (cs.shape as SphereShape3D).radius
+			corners.append(t.origin + Vector3.UP * radius)
+			corners.append(t.origin - Vector3.UP * radius)
+		for c in corners:
+			span = Vector2(minf(span.x, c.y), maxf(span.y, c.y))
+	return span
+
+
 ## Captain: bodies that fall on each other rest on each other (ragdolls), nothing shoves a body
 ## lying there, and the living step over them.
 func _test_ragdolls() -> void:
@@ -1408,7 +1441,7 @@ func _test_ragdolls() -> void:
 	var first := level.spawn_soldier({"name": "RagdollA", "faction": "hostile", "variant": "urban", "pos": spot,
 		"loadout": [], "combat": 0.5, "discipline": 0.5, "guard": true})
 	SquadAI.of(first).process_mode = Node.PROCESS_MODE_DISABLED
-	await _frames(2)
+	await _until_on_floor(first)  # shot standing, not still dropping from his spawn height
 	first.vitals.server_hit(Vitals.HEAD, {"round_class": Vitals.INTERMEDIATE})
 	var settled := await _wait_until(func() -> bool: return is_instance_valid(first.ragdoll) and first.ragdoll.frozen, 10.0)
 	check(settled and first.model.ragdolled(), "a dead body falls as a ragdoll and settles")
@@ -1419,24 +1452,45 @@ func _test_ragdolls() -> void:
 	var gap := (chest.global_transform * Vector3(0, 1.31, 0.11)).distance_to(torso_a.global_transform * Vector3(0, 0.41, 0.11))
 	check(gap < 0.1,
 		"its hitboxes lie with it (the chest %.2f m off its torso part)" % gap)
-	# A second one goes down right over the first: he comes to rest on top, not inside.
-	var over := Vector3(torso_a.global_position.x, spot.y, torso_a.global_position.z + 0.3)
-	var second := level.spawn_soldier({"name": "RagdollB", "faction": "hostile", "variant": "urban", "pos": over,
+	# A second one goes down onto the first and comes to rest on top of him: not inside him, not
+	# slid off. He dies a few metres off; then he's put lying along the first, torso over torso,
+	# a little clear of him, and let go. (He used to be shot standing over the first, but which
+	# way a standing body folds over one 0.34 m wide is chance: now and then on CI he fell
+	# beside him, 0.05-0.09 m up, CI runs 158-180. Locally, moving his spawn 3 cm took his
+	# highest part anywhere from 0.26 to 0.51 m, the torsos 0.31 to 1.30 m apart, R0454; laid
+	# like this, 0.24-0.27 and 0.21-0.22 every time, R0449.)
+	var second := level.spawn_soldier({"name": "RagdollB", "faction": "hostile", "variant": "urban", "pos": spot + Vector3(0, 0, -4.0),
 		"loadout": [], "combat": 0.5, "discipline": 0.5, "guard": true})
 	SquadAI.of(second).process_mode = Node.PROCESS_MODE_DISABLED
-	await _frames(2)
+	await _until_on_floor(second)
 	second.vitals.server_hit(Vitals.HEAD, {"round_class": Vitals.INTERMEDIATE})
 	settled = await _wait_until(func() -> bool: return is_instance_valid(second.ragdoll) and second.ragdoll.frozen, 10.0)
-	check(settled, "the second body settles too")
+	check(settled, "a second body goes down a few metres off")
+	var torso_b: Node3D = second.ragdoll.parts["torso"]
+	var along_a := Vector3(torso_a.global_basis.y.x, 0.0, torso_a.global_basis.y.z)  # pelvis to neck, flat
+	var along_b := Vector3(torso_b.global_basis.y.x, 0.0, torso_b.global_basis.y.z)
+	var turn := Basis(Vector3.UP, along_b.signed_angle_to(along_a, Vector3.UP))
+	var chest_a := (torso_a.get_child(0) as Node3D).global_position  # the torso box's middle
+	var lay := Transform3D(turn, chest_a - turn * (torso_b.get_child(0) as Node3D).global_position)
+	lay.origin.y += _ragdoll_span(first.ragdoll).y - _ragdoll_span(second.ragdoll, lay).x + 0.1
+	second.ragdoll.unfreeze()
+	for p: RigidBody3D in second.ragdoll.parts.values():
+		p.linear_velocity = Vector3.ZERO
+		p.angular_velocity = Vector3.ZERO
+	second.global_transform = lay * second.global_transform  # his ragdoll takes its parts along
+	settled = await _wait_until(func() -> bool: return second.ragdoll.frozen, 10.0)
+	check(settled, "laid over the first and let go, he settles too")
 	var top := -INF
 	for p: Node3D in second.ragdoll.parts.values():
 		top = maxf(top, p.global_position.y)
-	var torso_b: Node3D = second.ragdoll.parts["torso"]
-	var lowest_on_a := INF
-	for p: Node3D in first.ragdoll.parts.values():
-		lowest_on_a = minf(lowest_on_a, p.global_position.y)
 	check(top > torso_a.global_position.y + 0.1, "and rests on the first (his highest part %.2f m above the first's torso)" % (top - torso_a.global_position.y))
-	check(torso_a.global_position.distance_to(torso_b.global_position) > 0.2, "not inside him (torsos %.2f m apart)" % torso_a.global_position.distance_to(torso_b.global_position))
+	var down := PhysicsRayQueryParameters3D.create(chest_a + Vector3.UP * 1.5, chest_a + Vector3.DOWN * 0.5, Ragdoll.LAYER)
+	var met := first.get_world_3d().direct_space_state.intersect_ray(down)
+	var met_body: Soldier = Ragdoll.body_of(met.collider) if not met.is_empty() else null
+	check(met_body == second, "on top of him (straight down onto the first's chest, the first body met is %s)" % (met_body.name if met_body else "none"))
+	# Torso flat on torso, their pivots are a torso's depth apart (0.22 m) less the few
+	# millimetres physics lets bodies sink into each other; inside him, much less.
+	check(torso_a.global_position.distance_to(torso_b.global_position) > 0.17, "not inside him (torsos %.2f m apart)" % torso_a.global_position.distance_to(torso_b.global_position))
 	# Walking into the pile: the first body doesn't move. (The walker is one of ours: a hostile
 	# one was shot by the squad 25-30 m off mid-walk and lay down short of the pile, R0160.)
 	var before := torso_a.global_transform
