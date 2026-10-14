@@ -35,11 +35,21 @@ const AIMER_AT := Vector3(4, 0.1, 33)
 ## Rounds the aimer has left after firing some before the client joins: the counts
 ## (Inventory.net_ammo) say so, whatever snapshot (net_gear) came with them (playtest blocker B2).
 const AIMER_ROUNDS := 23
+## B-08 (S0743 lossy soak: an AI squadmate's inventory hash differed between host and clients
+## on marks taken mid-burst): an AI the host keeps firing while the client watches, reloading
+## and using an item mid-burst, so a snapshot (net_gear) goes out while counts (net_ammo) are
+## still in flight. Once it stops, the client's copy must be the host's exactly.
+const GUNNER := "Gunner"
+const GUNNER_AT := Vector3(-8, 0.1, 34)
+## Rounds the host fires in the burst (more than a magazine: it reloads on the way).
+const GUNNER_SHOTS := 40
 
 var failures := 0
 var level: CompoundLevel
 ## Host: its save fixture (SAVED_BODY, SAVED_EDITS) was there to load when hosting started.
 var _fixture_loaded := false
+## Client: the hash of the gunner's inventory the host had when its burst ended ("" until then).
+var _gunner_hash := ""
 
 
 func _ready() -> void:
@@ -107,6 +117,9 @@ func _stage_drag() -> void:
 	aimer.want_aim = true  # its rifle shouldered when the client shoots it
 	while aimer.inventory.rounds_in(&"primary") > AIMER_ROUNDS:
 		aimer.inventory.consume_round(&"primary")
+	var gunner: Soldier = make.call(GUNNER, GUNNER_AT)
+	gunner.inventory.take(&"mag_556", 2)
+	gunner.inventory.take(&"morphine")
 	# Smoke already out when the client joins (audit L2-01): it must see it too, as old as here.
 	# It starts SMOKE_AGE_S old, so the check doesn't hang on how long the client takes to join
 	# (a quick join reached the client at 1.6 s, under the old 2 s mark, and failed).
@@ -164,6 +177,7 @@ func _run_client() -> void:
 	me._server_reload.rpc_id(1, &"primary")
 	await _wait_for(func() -> bool: return me.inventory.rounds_in(&"primary") == 30, 5.0)
 	check(me.inventory.rounds_in(&"primary") == 30 and me.inventory.spare_rounds(&"mag_556") == 57, "reload over the network (30 loaded, 57 spare)")
+	await _check_gunner_burst()
 	# The host's K-style trauma (40): 24% of blood lost and 0.4 pain, plus a fragment wound in
 	# the left forearm, replicated in net_state.
 	await _wait_for(func() -> bool: return me.vitals.pain() > 0.45, 3.0)
@@ -268,6 +282,51 @@ func _check_looted_rifle(me: Soldier) -> void:
 	var left := _rifle_drawn(aimer)
 	check(aimer.inventory.slots[&"primary"] == &"" and left.is_empty(),
 		"looted over the network: nothing of the rifle stays drawn on the body here (%s)" % [left])
+
+
+## B-08: the host fires the gunner's rifle round after round, reloading and using an item on
+## the way; when it stops, this client's copy of its inventory is the host's (same hash as the
+## co-op soak takes), rounds and all.
+func _check_gunner_burst() -> void:
+	var gunner: Soldier = _combatant(GUNNER)
+	check(gunner != null and gunner.inventory.slots[&"primary"] == &"m4a1", "the host's gunner is here, rifle and all")
+	if gunner == null:
+		return
+	_server_gunner_burst.rpc_id(1)
+	await _wait_for(func() -> bool: return _gunner_hash != "" and _inv_hash(gunner) == _gunner_hash, 10.0)
+	check(_gunner_hash != "" and _inv_hash(gunner) == _gunner_hash and gunner.inventory.rounds_in(&"primary") == 60 - GUNNER_SHOTS
+		and gunner.inventory.count_of(&"morphine") == 0,
+		"B-08: a burst with a reload and an item used mid-burst: the client's copy ends as the host's (%s / host %s, %d rounds)"
+		% [_inv_hash(gunner), _gunner_hash, gunner.inventory.rounds_in(&"primary")])
+
+
+## Host: the gunner's burst (B-08). A round every frame or two, the reload when the magazine is
+## dry, the morphine used halfway; then the client gets the hash of the end state.
+@rpc("any_peer", "call_remote", "reliable")
+func _server_gunner_burst() -> void:
+	var gunner: Soldier = _combatant(GUNNER)
+	if gunner == null:
+		return
+	var inv := gunner.inventory
+	for shot in GUNNER_SHOTS:
+		if not inv.consume_round(&"primary"):
+			inv.reload(&"primary")
+			inv.consume_round(&"primary")
+		if shot == 20:  # halfway
+			inv.take_medical(&"morphine")
+		await get_tree().process_frame
+	_gunner_burst_done.rpc_id(multiplayer.get_remote_sender_id(), _inv_hash(gunner))
+	print("[host] gunner fired %d rounds, %d left" % [GUNNER_SHOTS, inv.rounds_in(&"primary")])
+
+
+@rpc("authority", "call_remote", "reliable")
+func _gunner_burst_done(host_hash: String) -> void:
+	_gunner_hash = host_hash
+
+
+## The co-op soak's inventory hash (tests/coop_soak_recorder.gd inv_hash).
+static func _inv_hash(s: Soldier) -> String:
+	return JSON.stringify(s.inventory.net_state, "", true).md5_text().left(10)
 
 
 ## The soldier named `callsign` (players and AI), or null.
