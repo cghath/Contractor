@@ -418,7 +418,8 @@ func _host_cycle(cycle: int) -> Dictionary:
 	_goal = null
 	extraction.server_add_point(Vector2(at.x, at.z))
 	_set_phase("extract", {"rally": [at.x, at.y, at.z]})
-	var gathered := await _wait_for(func() -> bool: return not extraction.point_with_squad().is_empty(), 180.0)
+	# Long enough for a player who respawned at the insertion (~1 km) to come back on foot.
+	var gathered := await _wait_for(func() -> bool: return not extraction.point_with_squad().is_empty(), 300.0)
 	var left_behind: Array = []
 	if not gathered:
 		var point := extraction._nearest_point()
@@ -660,10 +661,12 @@ func _client_phase(cycle: int, ph: String) -> void:
 					BaseHub.request("pick", [mid, true])
 				_say("asked to pick %s" % [_phase.get("pick", [])])
 		"briefing":
-			var briefing := MapNodes.briefing(_level())
-			await _wait_for(func() -> bool: return briefing != null and briefing.is_open(), 10.0)
+			# The zone may still be loading here: look the briefing up again until it's open.
+			var open := await _wait_for(func() -> bool: return _level() != null and MapNodes.briefing(_level()) != null 				and MapNodes.briefing(_level()).is_open(), 20.0)
+			var briefing := MapNodes.briefing(_level()) if _level() else null
 			if briefing:
 				briefing.request_set_ready(true)
+			_say("briefing: ready%s" % ("" if open else " (the briefing never showed open here)"))
 		"fight":
 			_fight = true
 			var down: Dictionary = _phase.get("down", {})
@@ -1003,8 +1006,8 @@ func _buddy_aid(me: Soldier, delta: float) -> void:
 	if _aid_left > 0.0:
 		return
 	_aid_left = 1.0
-	if _treating or _rejoining or _in_base() or not me.vitals.is_up() or not Contracts.is_deployed():
-		return
+	if _treating or _rejoining or _in_base() or not me.vitals.is_up() or not Contracts.is_deployed() 			or String(_phase.get("phase", "")) in ["extract", "confirm"] or _casevac != "":
+		return  # at the extraction a casualty is carried in instead (_casevac_tick)
 	var planned: Dictionary = _phase.get("down", {})
 	var players := _level().get_node_or_null(^"Players")
 	if players == null:
