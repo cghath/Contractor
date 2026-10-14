@@ -12,8 +12,9 @@ extends RefCounted
 ## a site whose garrison is all down no longer watches) and every hostile soldier up. A spot
 ## must also take a landing (LandingZone.check: level enough, nothing in the rotor's way).
 ##
-## A hot LZ (hot_watcher) is one an enemy soldier actually sees: up, not captive, within
-## HOT_SEE_M, eye to eye over the terrain and through the world's colliders (walls do hide).
+## A hot LZ (hot_watcher) is one an enemy soldier close by actually sees: up, not captive,
+## within HOT_CLOSE_M, eye to eye over the terrain and through the world's colliders (walls do
+## hide).
 ##
 ## lifted from tests/coop_soak.gd's dead-ground search (test/coop-soak), made a shared part.
 ## Numbers are Proposed.
@@ -37,8 +38,9 @@ const EDGE_KEEP_M := 80.0
 const POST_KEEP_M := 150.0
 ## Sight lines are worked out for at most this many candidates (the search's time cap).
 const MAX_SIGHT_CHECKS := 260
-## Hot LZ: an enemy soldier this close (m) who sees it.
-const HOT_SEE_M := 450.0
+## Hot LZ: an enemy soldier this close (m) who sees it. Captain, 2026-10-14 ("not landing": one
+## sentry 200-320 m off kept every LZ hot): real danger only, close by (was 450 m). Proposed.
+const HOT_CLOSE_M := 150.0
 
 
 ## Where the enemy watches from in `level`: the garrison posts of every zone module (whose
@@ -169,13 +171,13 @@ static func find(level: Node3D, centre: Vector3, ring := OBJECTIVE_RING_M, prefe
 	return {"ok": false, "checked": checked, "watchers": watch.size()}
 
 
-## An enemy soldier who sees `lz` now (up, not captive, within HOT_SEE_M, over the terrain and
+## An enemy soldier who sees `lz` now (up, not captive, within `within` m, over the terrain and
 ## past the world's colliders), or null: the LZ is hot.
-static func hot_watcher(level: Node3D, lz: Vector3) -> Soldier:
+static func hot_watcher(level: Node3D, lz: Vector3, within := HOT_CLOSE_M) -> Soldier:
 	if level == null or not level.is_inside_tree():
 		return null
 	for s in hostiles(level):
-		if Vehicle.ride_of(s) == null and Vector2(s.global_position.x - lz.x, s.global_position.z - lz.z).length() <= HOT_SEE_M \
+		if Vehicle.ride_of(s) == null and Vector2(s.global_position.x - lz.x, s.global_position.z - lz.z).length() <= within \
 				and sees(level, lz, s.global_position, true):
 			return s
 	return null

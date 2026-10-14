@@ -436,6 +436,11 @@ func display_name() -> String:
 	return String(spec.get("name", model))
 
 
+## The display name's first word ("UH-60M" for "UH-60M Black Hawk"): the squad HUD's.
+func short_name() -> String:
+	return display_name().get_slice(" ", 0)
+
+
 ## The seats: an Array of {"name", "kind" ("driver"|"gunner"|"passenger"|"pilot"),
 ## "occupant": Soldier or null, "open" (seen from outside)}.
 func seats() -> Array:
@@ -627,6 +632,10 @@ func server_enter(soldier: Node, index := -1) -> bool:
 	var brain := SquadAI.of(s)
 	if brain:
 		brain.process_mode = Node.PROCESS_MODE_DISABLED
+		## Captain, 2026-10-14: its brain is off while seated, so the squad HUD kept what it said
+		## before ("Waiting (briefing)" on the insertion helicopter): it says where it rides.
+		if s.vitals.is_up():
+			s.ai_status = "Aboard (%s)" % short_name()
 	if not _died_calls.has(s.get_instance_id()):
 		_died_calls[s.get_instance_id()] = _on_occupant_died.bind(s)
 		s.vitals.died.connect(_died_calls[s.get_instance_id()])
@@ -702,6 +711,10 @@ func exit_spot(index: int, s: Soldier = null) -> Vector3:
 	var defs: Array = spec.get("seats", [])
 	var seat_at := VehicleSpecs.vec(defs[index].at) if index >= 0 and index < defs.size() else Vector3.ZERO
 	var side := String(defs[index].get("exit", "left")) if index >= 0 and index < defs.size() else "left"
+	## Captain, 2026-10-14: a helicopter landed with a threat abeam (HeliCall._land) puts everyone
+	## out of the door on the far side, the fuselage between them and it.
+	if has_meta(&"exit_away") and (side == "left" or side == "right"):
+		side = "left" if to_local(get_meta(&"exit_away") as Vector3).x > 0.0 else "right"
 	var hx := size.x * 0.5 + EXIT_GAP_M
 	var hz := size.z * 0.5 + EXIT_GAP_M
 	var candidates: Array[Vector3] = []
@@ -832,7 +845,9 @@ func _place_occupants() -> void:
 		s.velocity = Vector3.ZERO
 		if s.collision_layer != 0:
 			s.collision_layer = 0
-		var open := bool(seat_def.get("open", false))
+		## "shown": inside the hull but in sight (a helicopter's open cabin: Captain, 2026-10-14,
+		## the UH-60M's squad didn't show, only the cabin seats did).
+		var open := bool(seat_def.get("open", false)) or bool(seat_def.get("shown", false))
 		if s.model.visible != open:
 			s.model.visible = open
 			s.gear.visible = open

@@ -936,9 +936,10 @@ func _heli_insert(squad: Array) -> bool:
 	return true
 
 
-## A spot `from` 150-350 m off `lz` where a man sees it (eye to eye, past the world), or INF.
+## A spot `from` 70-140 m off `lz` where a man sees it (eye to eye, past the world), or INF.
 func _spot_seeing(lz: Vector3) -> Vector3:
-	for r: float in [180.0, 240.0, 300.0, 150.0, 350.0]:
+	# (within DeadGround.HOT_CLOSE_M: since 2026-10-14 only an enemy close by makes an LZ hot)
+	for r: float in [110.0, 130.0, 90.0, 140.0, 70.0]:
 		for k in 16:
 			var a := TAU * k / 16.0
 			var at := lz + Vector3(cos(a), 0, sin(a)) * r
