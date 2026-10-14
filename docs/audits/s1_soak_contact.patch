@@ -1,5 +1,5 @@
 diff --git a/tests/coop_soak.gd b/tests/coop_soak.gd
-index a23d720..9de66f4 100644
+index a23d720..8196038 100644
 --- a/tests/coop_soak.gd
 +++ b/tests/coop_soak.gd
 @@ -46,8 +46,10 @@ const ADVANCE_S := 210.0
@@ -26,30 +26,91 @@ index a23d720..9de66f4 100644
  	# Fight, with a knock-out and a revive.
  	_fight = true
  	_set_phase("fight")
-@@ -583,7 +587,11 @@ func _host_cycle(cycle: int) -> Dictionary:
- 	if _bot_peer(1) == 0:
- 		victim_bot = 0
+@@ -585,8 +589,13 @@ func _host_cycle(cycle: int) -> Dictionary:
  		medic_bot = 2 if _bot_peer(2) != 0 else (3 if _bot_peer(3) != 0 else -1)
--	var victim_peer := 1 if victim_bot == 0 else _bot_peer(victim_bot)
-+	if medic_bot < 0:
-+		# Nobody else in the zone to bring them round (S1, S0755: the host knocked itself out
-+		# alone, "every player is down" after 45 s, gave up, and the cycle never regathered).
-+		victim_bot = -1
-+	var victim_peer := 0 if victim_bot < 0 else (1 if victim_bot == 0 else _bot_peer(victim_bot))
+ 	var victim_peer := 1 if victim_bot == 0 else _bot_peer(victim_bot)
  	var medic_peer := 1 if medic_bot == 0 else (_bot_peer(medic_bot) if medic_bot > 0 else 0)
- 	_set_phase("fight", {"down": {"victim": victim_peer, "medic": medic_peer, "victim_bot": victim_bot, "medic_bot": medic_bot}})
- 	var revive := await _down_and_revive(victim_peer, medic_peer)
-@@ -1124,6 +1132,9 @@ func _objective_point() -> Variant:
- ## them back up. Both are told through the phase; the host watches from the replicated state.
- func _down_and_revive(victim_peer: int, medic_peer: int) -> Dictionary:
- 	var out := {"victim": victim_peer, "medic": medic_peer}
-+	if victim_peer == 0:
-+		out["skipped"] = "no medic in the zone"
-+		return out
- 	if victim_peer == 1:
- 		_down_self()
+-	_set_phase("fight", {"down": {"victim": victim_peer, "medic": medic_peer, "victim_bot": victim_bot, "medic_bot": medic_bot}})
+-	var revive := await _down_and_revive(victim_peer, medic_peer)
++	var skip := _knockout_skip(victim_peer, medic_peer)
++	var revive := {"victim": victim_peer, "medic": medic_peer, "skipped": skip}
++	if skip == "":
++		_set_phase("fight", {"down": {"victim": victim_peer, "medic": medic_peer, "victim_bot": victim_bot, "medic_bot": medic_bot}})
++		revive = await _down_and_revive(victim_peer, medic_peer)
++	else:
++		_say("no planned knock-out this cycle: %s" % skip)
+ 	result["revive"] = revive
+ 	var left := FIGHT_S - (Recorder.now() - fight_start)
+ 	if left > 0.0:
+@@ -1136,7 +1145,15 @@ func _down_and_revive(victim_peer: int, medic_peer: int) -> Dictionary:
+ 	var t := Recorder.now()
+ 	await _wait_for(func() -> bool:
+ 		var v := _player(victim_peer)
+-		return v == null or v.vitals.is_up() or v.vitals.is_dead() or _medic_done(medic_peer, t), MEDIC_MAX_S + 30.0)
++		return v == null or v.vitals.is_up() or v.vitals.is_dead() or _medic_done(medic_peer, t) or _medic_lost(medic_peer), MEDIC_MAX_S + 30.0)
++	if _medic_lost(medic_peer):
++		# The hostiles put the medic down mid-treatment: hand the casualty to buddy aid, which
++		# skips the planned knock-out while "down" names it (S1 review).
++		out["medic_down"] = true
++		_set_phase("fight", {"down": {}})
++		await _wait_for(func() -> bool:
++			var v := _player(victim_peer)
++			return v == null or v.vitals.is_up() or v.vitals.is_dead(), MEDIC_MAX_S)
+ 	victim = _player(victim_peer)
+ 	out["up"] = victim != null and victim.vitals.is_up()
+ 	out["dead"] = victim != null and victim.vitals.is_dead()
+@@ -1147,6 +1164,33 @@ func _down_and_revive(victim_peer: int, medic_peer: int) -> Dictionary:
+ 	return out
+ 
+ 
++## Host: the planned knock-out stays off when it would stack on real casualties (S1 review: a
++## medic already down from fire leaves the victim untreated, since buddy aid skips the planned
++## victim, and that is the "every player is down" wipe again, made by the harness). Empty when
++## it can go ahead, else why not.
++func _knockout_skip(victim_peer: int, medic_peer: int) -> String:
++	if medic_peer == 0:
++		return "no medic in the zone"  # S1, S0755: the host knocked itself out alone
++	var medic := _player(medic_peer)
++	if medic == null or not medic.vitals.is_up():
++		return "the medic is down or not in the zone"
++	var victim := _player(victim_peer)
++	if victim == null or not victim.vitals.is_up():
++		return "the victim is already down or not in the zone"
++	if _players_down() > 0:
++		return "a player is already down from fire"  # S1, S0792: buddy aid is on it
++	return ""
++
++
++## Host: the planned medic is down or gone from the zone (not counting the host's own bot while
++## it is respawning: the null check covers that too).
++func _medic_lost(medic_peer: int) -> bool:
++	if medic_peer == 0:
++		return false
++	var medic := _player(medic_peer)
++	return medic == null or not medic.vitals.is_up()
++
++
+ ## Host: the medic's treatment loop has ended since `since` (it gave up, or the casualty is up).
+ func _medic_done(medic_peer: int, since: float) -> bool:
  	if medic_peer == 1:
-@@ -1580,6 +1591,37 @@ func _hostile_in_range(me: Soldier, within: float) -> Soldier:
+@@ -1319,6 +1363,16 @@ func _client_phase(cycle: int, ph: String) -> void:
+ 			if _phase.has("spawn"):
+ 				await _wait_for(func() -> bool: return _me() != null, 10.0)
+ 				_go_to_start()
++				# The deployment's own placement can land after ours: the host saw two clients
++				# still at the insertion 640 m away, running in past the checkpoint alone (S1,
++				# S0792). Check again and put them back on the line.
++				for _again in 3:
++					await _sleep(1.5)
++					var spot: Variant = _line_spot_at_start()
++					if _me() == null or spot == null or _flat(_me().global_position, spot) < 20.0:
++						break
++					_say("not at the start (%.0f m off): placing again" % _flat(_me().global_position, spot))
++					_go_to_start()
+ 		"items":
+ 			_fight = false
+ 			_stop_fighting()
+@@ -1580,6 +1634,55 @@ func _hostile_in_range(me: Soldier, within: float) -> Soldier:
  	return best
  
  
@@ -70,20 +131,163 @@ index a23d720..9de66f4 100644
 +		return false
 +	if not me.vitals.is_up() or me.vitals.blood_fraction() < 0.995:
 +		return true
++	if _players_down() > 0:
++		return true
++	# Any player, not only the host: a client off the line meets them first (S0792).
++	var players := _level().get_node_or_null(^"Players") if _level() else null
++	for node in (players.get_children() if players else []):
++		var s := node as Soldier
++		if s == null or not s.vitals.is_up():
++			continue
++		if s.vitals.blood_fraction() < 0.995:
++			return true
++		var foe := _hostile_in_range(s, ENGAGE_M)
++		if foe == null:
++			continue
++		var query := PhysicsRayQueryParameters3D.create(foe.camera.global_position, s.camera.global_position, 1)
++		query.exclude = [foe.get_rid()]
++		var hit := s.get_world_3d().direct_space_state.intersect_ray(query)
++		if hit.is_empty() or (hit.position as Vector3).distance_to(s.camera.global_position) < 1.0:
++			return true
++	return false
++
++
++## Players down (not dead) in the zone.
++func _players_down() -> int:
++	var n := 0
 +	var players := _level().get_node_or_null(^"Players") if _level() else null
 +	for node in (players.get_children() if players else []):
 +		var s := node as Soldier
 +		if s and not s.vitals.is_up() and not s.vitals.is_dead():
-+			return true
-+	var foe := _hostile_in_range(me, ENGAGE_M)
-+	if foe == null:
-+		return false
-+	var query := PhysicsRayQueryParameters3D.create(foe.camera.global_position, me.camera.global_position, 1)
-+	query.exclude = [foe.get_rid()]
-+	var hit := me.get_world_3d().direct_space_state.intersect_ray(query)
-+	return hit.is_empty() or (hit.position as Vector3).distance_to(me.camera.global_position) < 1.0
++			n += 1
++	return n
 +
 +
  func _stop_fighting() -> void:
  	var me := _me()
  	if me:
+diff --git a/tests/coop_soak_checks_test.gd b/tests/coop_soak_checks_test.gd
+new file mode 100644
+index 0000000..b874dc8
+--- /dev/null
++++ b/tests/coop_soak_checks_test.gd
+@@ -0,0 +1,73 @@
++extends Node
++## Headless checks for the co-op soak bots' own rules (tests/coop_soak.gd), on a real hosted
++## zone with no garrison: the planned knock-out stays off when it would stack on real
++## casualties (S1 review: a medic already down from fire left the victim untreated, since buddy
++## aid skips the planned victim), the medic counts as lost once down, and the advance ends at
++## the first casualty (S1, S0736).
++##   <voxel godot exe> --headless --path . res://tests/coop_soak_checks_test.tscn
++## Exits with the number of failures.
++
++const Probe := preload("res://tests/coop_soak_probe.gd")
++
++var failures := 0
++var level: CompoundLevel
++
++
++func _ready() -> void:
++	GameState.zone_id = "test_coop_soak_checks" + OS.get_environment("CONTRACTOR_TEST_TAG")  # never touch a real save
++	CompoundLevel.spawn_ai = false
++	GameState.delete_save()
++	get_tree().create_timer(150.0).timeout.connect(func() -> void:
++		print("COOP_SOAK_CHECKS TEST FAILED (timed out)")
++		get_tree().quit(99))
++	add_child(load("res://scenes/main.tscn").instantiate())
++	await get_tree().process_frame
++	$Main/Menu.host()
++	level = CompoundLevel.current(self)
++	while level.players.get_node_or_null(^"1") == null or not level.voxel_world.is_built():
++		await get_tree().process_frame
++	var host: Soldier = level.players.get_node(^"1")
++	host.set_physics_process(false)
++	var at := host.global_position
++	var medic := _spawn("Medic", at + Vector3(2.0, 0.0, 0.0))
++	var victim := _spawn("Victim", at + Vector3(-2.0, 0.0, 0.0))
++	var probe: Probe = Probe.new()
++	add_child(probe)
++	probe.stand_ins = {5: medic, 6: victim}
++	await get_tree().process_frame
++
++	check(probe._knockout_skip(6, 5) == "", "everyone up: the knock-out goes ahead (%s)" % probe._knockout_skip(6, 5))
++	check(probe._knockout_skip(6, 0) != "", "no medic in the zone: no knock-out (S0755)")
++	check(probe._knockout_skip(6, 7) != "", "a medic not in the zone: no knock-out")
++	check(not probe._medic_lost(5), "an up medic is not lost")
++	medic.vitals.downed = true
++	check(probe._knockout_skip(6, 5) != "", "the medic already down from fire: no knock-out (S1 review)")
++	check(probe._medic_lost(5), "a downed medic is lost: the casualty goes to buddy aid")
++	medic.vitals.downed = false
++	victim.vitals.downed = true
++	check(probe._knockout_skip(6, 5) != "", "the victim already down: no knock-out on top")
++	victim.vitals.downed = false
++	check(probe._knockout_skip(6, 5) == "", "all back up: the knock-out goes ahead again")
++	check(not probe._contact_while_advancing(), "nobody hurt and no hostile: no contact")
++	host.vitals.downed = true
++	check(probe._players_down() == 1, "a player down from fire counts (%d)" % probe._players_down())
++	check(probe._knockout_skip(6, 5) != "", "a player already down from fire: no knock-out (S0792)")
++	check(probe._me() != null and probe._contact_while_advancing(), "a player down: the advance is over (S0736)")
++	check(probe._advance_done(at + Vector3(0.0, 0.0, 500.0)), "a player down 500 m short: the advance still ends")
++	host.vitals.downed = false
++	GameState.delete_save()
++	print("COOP_SOAK_CHECKS TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
++	get_tree().quit(failures)
++
++
++func _spawn(callsign: String, pos: Vector3) -> Soldier:
++	var s := level.spawn_soldier({"name": callsign, "faction": "friendly", "variant": "multicam", "pos": pos,
++		"loadout": ["plate_carrier", "m4a1"], "combat": 0.5, "discipline": 0.5, "guard": true})
++	SquadAI.of(s).process_mode = Node.PROCESS_MODE_DISABLED  # staged by hand
++	return s
++
++
++func check(ok: bool, what: String) -> void:
++	print(("  ok   " if ok else "  FAIL ") + what)
++	if not ok:
++		failures += 1
+diff --git a/tests/coop_soak_checks_test.tscn b/tests/coop_soak_checks_test.tscn
+new file mode 100644
+index 0000000..491faf7
+--- /dev/null
++++ b/tests/coop_soak_checks_test.tscn
+@@ -0,0 +1,6 @@
++[gd_scene format=3]
++
++[ext_resource type="Script" path="res://tests/coop_soak_checks_test.gd" id="1_test"]
++
++[node name="CoopSoakChecksTest" type="Node"]
++script = ExtResource("1_test")
+diff --git a/tests/coop_soak_probe.gd b/tests/coop_soak_probe.gd
+new file mode 100644
+index 0000000..7709a7a
+--- /dev/null
++++ b/tests/coop_soak_probe.gd
+@@ -0,0 +1,15 @@
++extends "res://tests/coop_soak.gd"
++## The soak bot's rules without the soak: no _ready (nothing starts), and peers other than the
++## host's own (1) are stand-in soldiers (tests/coop_soak_checks_test.gd).
++
++var stand_ins := {}
++
++
++func _ready() -> void:
++	pass
++
++
++func _player(peer: int) -> Soldier:
++	if stand_ins.has(peer):
++		return stand_ins[peer]
++	return super(peer)
+diff --git a/tools/coop_soak_report.py b/tools/coop_soak_report.py
+index 1c7889f..60aedf5 100644
+--- a/tools/coop_soak_report.py
++++ b/tools/coop_soak_report.py
+@@ -298,6 +298,8 @@ def main():
+             "never went down" if rv.get("went_down") is False else ("died" if rv.get("dead") else f"still down ({rv.get('still_down', '?')}: {rv.get('why_unconscious', '')})" if rv else "-"))
+         if rv:
+             rv_text = f"peer {rv.get('victim')} by {rv.get('medic')}: " + rv_text
++        if rv.get("skipped"):  # S1 review: no knock-out on top of real casualties
++            rv_text = f"no knock-out ({rv['skipped']})"
+         ex = c.get("extract", {})
+         ex_text = ("gathered" if ex.get("gathered") else f"NOT gathered (missing {ex.get('missing')})") + (
+             f", left behind {ex.get('left_behind')}" if ex.get("left_behind") else "") + (f", confirmed by {ex.get('confirmed_by')}" if ex else "")
