@@ -82,18 +82,28 @@ func close() -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if not visible:
 		return
-	if _listening != &"" and event is InputEventKey and event.pressed and not event.echo:
+	if _listening != &"" and event is InputEventMouseButton and event.pressed \
+			and (event as InputEventMouseButton).button_index in [MOUSE_BUTTON_MIDDLE, MOUSE_BUTTON_XBUTTON1, MOUSE_BUTTON_XBUTTON2]:
+		# A side or middle mouse button (the left and right ones fire and aim; P0362).
+		get_viewport().set_input_as_handled()
+		var code := GameSettings.MOUSE_BIND | int((event as InputEventMouseButton).button_index)
+		var moved := GameSettings.bind(_listening, code)
+		_key_status.text = "%s on %s%s." % [_label_of(_listening), GameSettings.binding_name(code),
+			(", %s moved to %s" % [_label_of(moved), GameSettings.binding_name(GameSettings.key_for(moved))]) if moved != &"" else ""]
+		_listening = &""
+		_refresh_keys()
+	elif _listening != &"" and event is InputEventKey and event.pressed and not event.echo:
 		get_viewport().set_input_as_handled()
 		var key := (event as InputEventKey).physical_keycode
 		if key == KEY_ESCAPE:
-			_key_status.text = "Kept %s on %s." % [_label_of(_listening), OS.get_keycode_string(GameSettings.key_for(_listening))]
+			_key_status.text = "Kept %s on %s." % [_label_of(_listening), GameSettings.binding_name(GameSettings.key_for(_listening))]
 		elif key in [KEY_CTRL, KEY_ALT, KEY_META]:
 			_key_status.text = "Ctrl and Alt hold the interaction menus: pick another key."
 			return
 		else:
 			var swapped := GameSettings.bind(_listening, key)
 			_key_status.text = "%s on %s%s." % [_label_of(_listening), OS.get_keycode_string(key),
-				(", %s moved to %s" % [_label_of(swapped), OS.get_keycode_string(GameSettings.key_for(swapped))]) if swapped != &"" else ""]
+				(", %s moved to %s" % [_label_of(swapped), GameSettings.binding_name(GameSettings.key_for(swapped))]) if swapped != &"" else ""]
 		_listening = &""
 		_refresh_keys()
 	elif event.is_action_pressed(&"pause"):
@@ -177,7 +187,7 @@ func _controls_tab() -> Control:
 func _keys_tab() -> Control:
 	var page := _page("Keys")
 	_key_status = Label.new()
-	_key_status.text = "Click a key, then press the new one (Escape keeps it). Taken keys swap."
+	_key_status.text = "Click a key, then press the new one, or a side or middle mouse button (Escape keeps it). Taken keys swap."
 	_key_status.autowrap_mode = TextServer.AUTOWRAP_WORD
 	page.add_child(_key_status)
 	for pair: Array in GameSettings.BINDABLE:
@@ -193,7 +203,7 @@ func _keys_tab() -> Control:
 		_key_buttons[action] = button
 		page.add_child(row)
 	var fixed := Label.new()
-	fixed.text = "Fixed: Escape (menu), Left Ctrl / Ctrl+Alt (interaction), mouse buttons (fire, aim), Shift+H (treat yourself), F-keys (squad commands)."
+	fixed.text = "Fixed: Escape (menu), Left Ctrl / Ctrl+Alt (interaction), left and right mouse buttons (fire, aim), Shift+H (treat yourself), F-keys (squad commands)."
 	fixed.autowrap_mode = TextServer.AUTOWRAP_WORD
 	fixed.modulate = Color(1, 1, 1, 0.6)
 	page.add_child(fixed)
@@ -211,7 +221,7 @@ func _keys_tab() -> Control:
 
 func _refresh_keys() -> void:
 	for action: StringName in _key_buttons:
-		(_key_buttons[action] as Button).text = OS.get_keycode_string(GameSettings.key_for(action))
+		(_key_buttons[action] as Button).text = GameSettings.binding_name(GameSettings.key_for(action))
 
 
 func _label_of(action: StringName) -> String:

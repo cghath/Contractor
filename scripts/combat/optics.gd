@@ -109,6 +109,26 @@ static func _stow(inv: Inventory, optic_id: StringName, first: StringName) -> bo
 	return false
 
 
+## A gun's mass_kg and price are as it comes, with its own optic ("optic" in its stats). Mounting
+## another changes them by the difference: what `weapon` with `state` gains over that (kg; less
+## than 0 with irons in place of its optic).
+static func extra_mass(weapon: ItemData, state: Dictionary) -> float:
+	if not has_rail(weapon) or not state.has(STATE_KEY):
+		return 0.0
+	var own := ItemDB.get_item(StringName(String(weapon.stats.get("optic", ""))))
+	var on := mounted(weapon, state)
+	return (on.mass_kg if on else 0.0) - (own.mass_kg if own and is_optic(own) else 0.0)
+
+
+## As extra_mass, in shop dollars (Prices.price_of).
+static func extra_price(weapon: ItemData, state: Dictionary) -> int:
+	if not has_rail(weapon) or not state.has(STATE_KEY):
+		return 0
+	var own := StringName(String(weapon.stats.get("optic", "")))
+	var on := mounted_id(weapon, state)
+	return (Prices.price_of(on) if on != &"" else 0) - (Prices.price_of(own) if own != &"" else 0)
+
+
 ## The model kind (VoxelArt) of `optic`, or "" for irons.
 static func art_of(optic: ItemData) -> String:
 	return String(optic.stats.get("art", "dot")) if optic else ""

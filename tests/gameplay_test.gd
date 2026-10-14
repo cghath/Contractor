@@ -429,6 +429,41 @@ func _test_optics() -> void:
 		and zr.call(&"optic_dmr_8x") == Vector2(8, 8) and zr.call(&"optic_dmr_3_15") == Vector2(3, 15) and zr.call(&"optic_red_dot") == Vector2.ONE
 		and float(ItemDB.get_item(&"optic_holo").stats.magnifier) == 3.0, "LPVO 1-6x, 4x prism, 3.5-10x, 8x, 3-15x, a red dot at 1x, the holo's 3x magnifier")
 	check(is_equal_approx(GunSight.power(player, ItemDB.get_item(&"optic_dmr_3_5_10")), 6.0), "the 3.5-10x starts at 6x")
+	# Zoom on the side mouse buttons (rebindable): Mouse 5 in, Mouse 4 out; nothing else on them.
+	var on_button := func(action: StringName, button: MouseButton) -> bool:
+		return InputMap.action_get_events(action).any(func(e: InputEvent) -> bool: return e is InputEventMouseButton and (e as InputEventMouseButton).button_index == button)
+	var others := InputMap.get_actions().filter(func(a: StringName) -> bool:
+		return a != &"zoom_in" and a != &"zoom_out" and (on_button.call(a, MOUSE_BUTTON_XBUTTON1) or on_button.call(a, MOUSE_BUTTON_XBUTTON2)))
+	check(on_button.call(&"zoom_in", MOUSE_BUTTON_XBUTTON2) and on_button.call(&"zoom_out", MOUSE_BUTTON_XBUTTON1) and others.is_empty()
+		and GameSettings.key_for(&"zoom_in") == GameSettings.MOUSE_BIND | MOUSE_BUTTON_XBUTTON2 and GameSettings.binding_name(GameSettings.key_for(&"zoom_out")) == "Mouse 4"
+		and GameSettings.BINDABLE.any(func(p: Array) -> bool: return p[0] == &"zoom_in") and not InputMap.has_action(&"magnifier"),
+		"zoom in on Mouse 5, out on Mouse 4, in the Keys list (others on them: %s)" % [others])
+	var lpvo := ItemDB.get_item(&"optic_lpvo")
+	var holo := ItemDB.get_item(&"optic_holo")
+	var kept := inv.state_of(&"primary")
+	inv.set_slot_state(&"primary", Optics.with_optic(m4, kept, &"optic_lpvo"))
+	var at1 := GunSight.power(player, lpvo)
+	var told := GunSight.zoom_step(player, 1)
+	check(GunSight.of(player) != null and is_equal_approx(at1, 1.0) and is_equal_approx(GunSight.power(player, lpvo), 1.25) and told != "",
+		"zoom in steps the LPVO from 1x to 1.25x (%s)" % told)
+	for i in 20:
+		GunSight.zoom_step(player, 1)
+	check(is_equal_approx(GunSight.power(player, lpvo), 6.0) and GunSight.zoom_step(player, 1) == "", "and stops at 6x")
+	inv.set_slot_state(&"primary", Optics.with_optic(m4, kept, &"optic_holo"))
+	var up := GunSight.zoom_step(player, 1)
+	var magnified := GunSight.magnified(player, holo) and is_equal_approx(GunSight.power(player, holo), 3.0)
+	var down := GunSight.zoom_step(player, -1)
+	check(up != "" and magnified and down != "" and not GunSight.magnified(player, holo) and is_equal_approx(GunSight.power(player, holo), 1.0),
+		"the holo's magnifier flips up on zoom in (3x) and down on zoom out")
+	inv.set_slot_state(&"primary", kept)
+	# A gun's mass and price are with its own optic; another changes them by the difference.
+	var mass := func(state: Dictionary) -> float: return Inventory.entry_mass({"id": &"m4a1", "count": 1, "state": state})
+	var full := m4.default_state()
+	check(is_equal_approx(mass.call(Optics.with_optic(m4, full, &"optic_lpvo")) - mass.call(full), lpvo.mass_kg - 0.22)
+		and is_equal_approx(mass.call(Optics.with_optic(m4, full, &"")) - mass.call(full), -0.22),
+		"an LPVO adds its mass over the red dot's, irons take the red dot's off")
+	check(Prices.sell_price(&"m4a1") == 560 and Prices.sell_price(&"m4a1", 1, Optics.with_optic(m4, full, &"optic_lpvo")) == floori((1400 + 1500 - 600) * 0.4),
+		"and its price: an M4 with an LPVO sells for %d" % Prices.sell_price(&"m4a1", 1, Optics.with_optic(m4, full, &"optic_lpvo")))
 	# Mils read true at any power; a scale too crowded to read spaces out.
 	check(GunSight.mark_step(GunSight.px_per_mil(at10, 1080.0)) == 1.0 and GunSight.mark_step(GunSight.px_per_mil(GunSight.aimed_fov(m110, 80.0, 3.5), 1080.0)) > 1.0,
 		"mil marks a mil apart at 10x, wider apart at 3.5x")

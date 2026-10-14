@@ -25,7 +25,6 @@ const KEYS := {
 	&"weapon_primary": [KEY_1],
 	&"weapon_sidearm": [KEY_2],
 	&"weapon_launcher": [KEY_3],  # the anti-armour launcher (wave 5, Launchers)
-	&"magnifier": [KEY_B],  # a holographic sight's flip-up magnifier in and out (GunSight, P0362)
 	&"pause": [KEY_ESCAPE],
 	&"quick_save": [KEY_HOME],  # F-keys are the squad command menu
 	# Get out of the vehicle you sit in, when that option is on (ControlOptions; Captain, P0164
@@ -41,6 +40,13 @@ const SHIFT_KEYS := {
 const MOUSE := {
 	&"fire": MOUSE_BUTTON_LEFT,
 	&"aim": MOUSE_BUTTON_RIGHT,
+}
+## Rebindable actions on mouse buttons by default (GameSettings.BINDABLE; Captain, P0362): an
+## optic's zoom on the side buttons, forward (Mouse 5) in and back (Mouse 4) out; a
+## holographic sight's magnifier flips up on zoom in and down on zoom out (GunSight.zoom_step).
+const BUTTONS := {
+	&"zoom_in": MOUSE_BUTTON_XBUTTON2,
+	&"zoom_out": MOUSE_BUTTON_XBUTTON1,
 }
 ## Keys that only count on the left of the keyboard: [action, key, needs Ctrl held].
 ## Hold Left Ctrl for the interaction menu (InteractionMenu); add Left Alt while holding it
@@ -76,6 +82,11 @@ func _enter_tree() -> void:
 		var event := InputEventMouseButton.new()
 		event.button_index = MOUSE[action]
 		InputMap.action_add_event(action, event)
+	for action: StringName in BUTTONS:
+		_ensure(action)
+		var button := InputEventMouseButton.new()
+		button.button_index = BUTTONS[action]
+		InputMap.action_add_event(action, button)
 
 
 func _ensure(action: StringName) -> void:

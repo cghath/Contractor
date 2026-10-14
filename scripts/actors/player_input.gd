@@ -121,8 +121,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		return  # F-keys, and 1-9 / wheel / middle click while the command menu is open
 	elif event.is_action_pressed(&"debug_hurt") and DevTools.on():
 		body._server_debug_hurt.rpc_id(1, 40.0)
-	elif event is InputEventMouseButton and event.pressed and captured and _wheel(event) != 0 and GunSight.zoom_by(body, _wheel(event)):
-		return  # the wheel zooms a variable optic while aimed with it (P0362)
+	elif event.is_action_pressed(&"zoom_in") or event.is_action_pressed(&"zoom_out"):
+		# Side mouse buttons (P0362): a variable optic's power, a holographic sight's magnifier.
+		var told := GunSight.zoom_step(body, 1 if event.is_action_pressed(&"zoom_in") else -1)
+		if told != "":
+			hud.flash(told)
 	elif event.is_action_pressed(&"pause"):
 		pause_menu.open()  # Escape: resume, return to base, main menu, quit
 	elif event.is_action_pressed(&"fire") and not captured:
@@ -162,21 +165,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		body.select_weapon(&"primary")
 	elif event.is_action_pressed(&"weapon_sidearm"):
 		body.select_weapon(&"sidearm")
-	elif event.is_action_pressed(&"magnifier") and GunSight.optic_of(body) != null:
-		if GunSight.toggle_magnifier(body):  # a holographic sight's flip-up magnifier (P0362)
-			hud.flash("Magnifier in" if GunSight.magnified(body, GunSight.optic_of(body)) else "Magnifier out")
 	elif event.is_action_pressed(&"weapon_launcher") and body.inventory.slots.get(Launchers.SLOT, &"") != &"":
 		body.select_weapon(Launchers.SLOT)
-
-
-## +1 for a wheel step up, -1 down, 0 for any other button.
-static func _wheel(event: InputEventMouseButton) -> int:
-	match event.button_index:
-		MOUSE_BUTTON_WHEEL_UP:
-			return 1
-		MOUSE_BUTTON_WHEEL_DOWN:
-			return -1
-	return 0
 
 
 func _process(delta: float) -> void:

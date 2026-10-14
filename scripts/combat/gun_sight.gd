@@ -7,8 +7,8 @@ extends Control
 ##   PlayerInput.ads_view): a pistol's post and notch, a rifle's back-up aperture and post.
 ## - an open optic ("view": "open"): you look through it and its lit reticle sits in the
 ##   middle: a red dot ("dot", dot_moa across) or a holographic ring and dot ("holo"). A
-##   holographic sight's flip-up magnifier ("magnifier", its power) goes in and out on the
-##   magnifier key (toggle_magnifier), and while it's in you look through its glass.
+##   holographic sight's flip-up magnifier ("magnifier", its power) flips up on zoom in and
+##   down on zoom out (zoom_step), and while it's up you look through its glass.
 ## - a tube optic ("view": "tube": LPVO, prism, DMR scopes): once zoomed in you're behind the
 ##   glass: the view model goes and the scope picture is drawn, black outside the eyepiece
 ##   ring ("ring", a share of the screen's height) with the optic's reticle: "lpvo" (lit
@@ -17,7 +17,8 @@ extends Control
 ## Power (Captain, 2026-10-13) is against the player's own unaimed view: 10x makes things ten
 ## times bigger than the base field of view shows them (its tangent over 10: about 9.5 degrees
 ## at the default 80), the same rule for every magnified optic; at 1x the weapon's ads_fov.
-## A variable optic zooms with the mouse wheel (zoom_by) from its "magnification_start". Mils
+## A variable optic steps through its powers on zoom in and out (the side mouse buttons by
+## default, Controls.BUTTONS; zoom_step) from its "magnification_start". Mils
 ## and MOA are worked out from the field of view actually shown, so every reticle reads true
 ## at any power (a 1.8 m man at 300 m is 6 mils tall). The heavy posts start POST_SHARE of the
 ## way out to the ring, and the fine cross between carries mil marks a mil apart, or 2, 5, 10
@@ -27,7 +28,7 @@ extends Control
 ## How far a tube optic must have zoomed in (camera fov within this factor of its aimed fov at
 ## its lowest power) before you are behind the glass.
 const SCOPE_IN := 1.35
-## One mouse-wheel step of a variable optic's zoom (x or / this).
+## One zoom step of a variable optic (x or / this).
 const ZOOM_STEP := 1.25
 ## The eyepiece ring when an optic names none, and a magnifier's.
 const RING := 0.46
@@ -137,28 +138,27 @@ static func scoped(s: Soldier) -> bool:
 	return s.camera.fov <= aimed_fov(s.active_weapon(), GameSettings.fov(), lowest) * SCOPE_IN
 
 
-## Mouse wheel while aimed through a variable optic: `steps` up (in) or down (out) a
-## ZOOM_STEP each. True if it was taken (the wheel does nothing else then).
-static func zoom_by(s: Soldier, steps: int) -> bool:
+## Zoom in (`steps` > 0) or out on the optic in hand: a magnifier flips up on zoom in and down
+## on zoom out; a variable optic steps a ZOOM_STEP each, within its range. Returns what to show
+## ("LPVO 1-6x: 2.4x", "Magnifier up"), or "" when nothing changed.
+static func zoom_step(s: Soldier, steps: int) -> String:
 	var sight := of(s)
 	var optic := optic_of(s)
-	if sight == null or optic == null or not s.is_aiming or magnified(s, optic):
-		return false
+	if sight == null or optic == null or steps == 0:
+		return ""
+	if optic.stats.has("magnifier"):
+		var up := steps > 0
+		if up == magnified(s, optic):
+			return ""
+		sight._magnified[optic.id] = up
+		return "Magnifier up (%gx)" % float(optic.stats.magnifier) if up else "Magnifier down"
 	var zr := zoom_range(optic)
 	if zr.y <= zr.x:
-		return false
-	sight._zoom[optic.id] = clampf(power(s, optic) * pow(ZOOM_STEP, steps), zr.x, zr.y)
-	return true
-
-
-## The magnifier key: flips the optic's magnifier in or out. True if it has one.
-static func toggle_magnifier(s: Soldier) -> bool:
-	var sight := of(s)
-	var optic := optic_of(s)
-	if sight == null or optic == null or not optic.stats.has("magnifier"):
-		return false
-	sight._magnified[optic.id] = not magnified(s, optic)
-	return true
+		return ""
+	var was := power(s, optic)
+	sight._zoom[optic.id] = clampf(was * pow(ZOOM_STEP, steps), zr.x, zr.y)
+	var now := power(s, optic)
+	return "%s: %.1fx" % [optic.name, now] if not is_equal_approx(now, was) else ""
 
 
 ## Mouse turn scale for the zoom (P0362: sensitivity follows the magnification): behind glass,
