@@ -1109,7 +1109,10 @@ func _test_body_persistence() -> void:
 	check(_bodies().all(func(b: Soldier) -> bool: return not is_instance_valid(b.carried_by)), "nobody is carrying a body")
 	# A player who left the session while down leaves his body and a gear marker (a player who
 	# dies leaves none since Captain, 2026-10-14); stand one in for the save.
+	var stood := player.global_position
+	_place(player, Vector3(-4, 0.1, 30))  # where a dead player's body used to lie, out of the way
 	var left_body := player.server_leave_body()
+	_place(player, stood)
 	await _frames(2)
 	check(left_body != null and left_body.has_gear_marker, "a body left by a player who left while down")
 	var before := {}
@@ -1169,8 +1172,11 @@ func _test_downed_player() -> void:
 	check(player.vitals.downed and _bleeding(player, "arterial"), "the lead bleeds out from a femoral hit (%s)" % player.vitals.condition_text())
 	var stopped := await _wait_until(func() -> bool: return not _bleeding(player, "arterial"), 30.0)
 	var used: int = tourniquets - (_squad() + [player]).reduce(func(n: int, s: Soldier) -> int: return n + s.inventory.medical_count(&"tourniquet"), 0)
-	check(stopped and used >= 1 and is_instance_valid(player.care_by) and player.care_by.is_ai(),
-		"squadmates treat a downed player like anyone else (%s, by %s)" % [_wound_kinds(player), _name(player.care_by) if is_instance_valid(player.care_by) else "nobody"])
+	var carer: Soldier = player.care_by if is_instance_valid(player.care_by) else null
+	check(stopped and used >= 1 and carer != null and carer.is_ai(),
+		"squadmates treat a downed player like anyone else (%s, by %s; stopped %s, %d tourniquets used; %s %.1f m off, %s)" % [_wound_kinds(player),
+		_name(carer) if carer else "nobody", stopped, used, carer.ai_status if carer else "-",
+		_flat(carer.global_position, player.body_point()) if carer else -1.0, player.vitals.condition_text()])
 	player.vitals.server_reset_health()
 
 

@@ -717,24 +717,34 @@ func _rounds_in_container(inv: Inventory, container: StringName) -> Array:
 	return rounds
 
 
+## Captain, 2026-10-14: "respawn with the kit you had on". A dead player comes back with his
+## inventory exactly as it was: the rifle with what's left in it, spent and full magazines,
+## loose rounds and the rest, nothing added and nothing taken.
 func _test_respawn_kit() -> void:
 	print("Respawn kit")
 	player.global_position = Vector3(0, 0.1, 18)
+	var inv := player.inventory
+	inv.strip()
+	inv.take(&"plate_carrier")
+	inv.take(&"m4a1")
+	inv.take(&"mag_556", 2)
+	inv.take(&"rounds_556", 37)
+	inv.take(&"smoke_grenade")
+	for i in 7:
+		inv.consume_round(&"primary")
+	var rounds := inv.rounds_in(&"primary")
+	var before := JSON.stringify(Roster.json_safe(inv.net_state), "", true)
 	player.vitals.server_damage(500.0)
 	await _frames(2)
 	player.vitals.server_advance(Vitals.ARREST_WINDOW_S + 1.0)
 	await _frames(2)
-	var inv := player.inventory
+	inv = player.inventory
 	check(player.vitals.is_up(), "respawned")
-	check(inv.slots[&"primary"] == &"m4a1" and inv.rounds_in(&"primary") == 30, "an M4, loaded")
-	check(inv.count_of(&"mag_556") == 2 and inv.spare_rounds(&"mag_556") == 60, "2 spare magazines, full")
-	check(inv.count_of(&"rounds_556") == 90, "90 loose 5.56 rounds (%d)" % inv.count_of(&"rounds_556"))
-	check(inv.count_of(&"smoke_grenade") == 1 and inv.count_of(&"frag_grenade") == 1, "a smoke and a frag")
-	var kinds := 0
-	for container in Inventory.CONTAINERS:
-		kinds += inv.containers[container].size()
-	check(kinds == 4, "and nothing else (%d stowed entries)" % kinds)
-	check(inv.loadable_rounds(&"rounds_556") == 0, "the loose rounds wait for a magazine to empty")
+	check(inv.slots[&"primary"] == &"m4a1" and inv.rounds_in(&"primary") == rounds and rounds == 23, "his M4, with what was left in it (%d)" % inv.rounds_in(&"primary"))
+	check(inv.count_of(&"mag_556") == 2 and inv.count_of(&"rounds_556") == 37 and inv.count_of(&"smoke_grenade") == 1 and inv.count_of(&"frag_grenade") == 0,
+		"his magazines, 37 loose rounds and the smoke, and no frag handed out (%d rounds)" % inv.count_of(&"rounds_556"))
+	var after := JSON.stringify(Roster.json_safe(inv.net_state), "", true)
+	check(after == before, "nothing else added or taken%s" % ("" if after == before else " (%s -> %s)" % [before, after]))
 
 
 # --- Smokes ------------------------------------------------------------------------------
