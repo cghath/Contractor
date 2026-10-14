@@ -56,6 +56,7 @@ func _ready() -> void:
 	await _test_menu()
 	await _test_body_points()
 	await _test_declutter()
+	await _test_slid_body()
 	GameState.delete_save()
 	print("INTERACTION TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
@@ -590,6 +591,52 @@ func _test_declutter() -> void:
 	hostile.inventory.strip()
 	check(_ids(player, hostile) == [&"loot", &"carry", &"drag"] and _action(player, hostile, &"loot").disabled == "Nothing left on them",
 		"stripped: Loot greyed (nothing left on them), Loot all left out (%s)" % [_ids(player, hostile)])
+
+
+## Captain, P0331: the dead couldn't be looted. One shot on the run slides metres as a ragdoll
+## while its capsule stays where it fell, and the action point was at the capsule: looking at
+## the body showed nothing. The point is on the body as it lies, for a fresh kill and for the
+## same body back from the zone save.
+func _test_slid_body() -> void:
+	print("A body that slid from where it fell")
+	var runner := _spawn_ai("Runner", &"hostile", SPOT + Vector3(3.0, 0, -2.0), ["m4a1", "plate_carrier"])
+	await _frames(5)
+	runner.set_physics_process(false)  # keeps the run going into the fall
+	runner.velocity = Vector3(0, 0, -7.0)
+	runner.vitals.server_kill()
+	await _seconds(4.0)
+	var record := runner.body_record()  # (before it's looted)
+	await _check_slid_point(runner, "shot on the run")
+	record["uid"] = "slid_body"
+	record["pos"] = [SPOT.x, SPOT.y, SPOT.z - 2.0]
+	var restored := CompoundLevel.current(self).server_spawn_body(record)
+	await _seconds(4.0)
+	await _check_slid_point(restored, "back from the zone save")
+	runner.server_remove_body()
+	restored.server_remove_body()
+	await _frames(2)
+
+
+## Stands the player over `body`'s ragdoll, looking down at it, and checks it has its point
+## there with Loot and Loot all, and that Loot all reaches it.
+func _check_slid_point(body: Soldier, what: String) -> void:
+	var chest := body.body_point()
+	var gap := Vector2(chest.x - body.global_position.x, chest.z - body.global_position.z).length()
+	player.global_position = Vector3(chest.x, SPOT.y, chest.z + 1.5)
+	player.rotation = Vector3.ZERO
+	player.head.rotation = Vector3(-0.6, 0, 0)
+	player.velocity = Vector3.ZERO
+	await _frames(3)
+	var points := InteractionMenu.collect_points(player, player.camera).filter(func(p: Dictionary) -> bool: return p.target == body)
+	var ids: Array = (points[0].actions as Array).map(func(a: Dictionary) -> StringName: return a.id) if points.size() == 1 else []
+	check(gap > 2.0 and points.size() == 1 and ids.has(&"loot") and ids.has(&"loot_all"),
+		"%s, %.1f m from its capsule: its point is on the body, with Loot and Loot all (%d points, %s)" % [what, gap, points.size(), ids])
+	var before := player.inventory.net_state.duplicate(true)
+	player.inventory.strip()
+	InteractionMenu.perform(player, _action(player, body, &"loot_all"))
+	await _frames(3)
+	check(not body.has_gear() and player.inventory.slots[&"primary"] == &"m4a1", "and Loot all takes its gear")
+	player.inventory.net_state = before
 
 
 # --- Helpers -------------------------------------------------------------------------------
