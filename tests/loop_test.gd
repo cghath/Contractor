@@ -42,7 +42,7 @@ func _ready() -> void:
 		_cleanup()
 		get_tree().quit(99))
 	GameState.delete_save()
-	Campaign.reset_campaign()
+	BaseHub.delete_test_campaign_files()  # whatever a run cut short left behind
 	_test_safe_offer()
 	await _start_campaign()
 	if level is BaseLevel:
@@ -75,9 +75,7 @@ func info(what: String) -> void:
 
 func _cleanup() -> void:
 	Contracts.auto_show_debrief = true
-	if Net.is_hosting():
-		BaseHub._delete_zone_saves()
-	Campaign.reset_campaign()
+	BaseHub.delete_test_campaign_files()  # the game only sets saves aside: a test deletes its own
 	GameState.zone_id = "test_loop" + tag
 	GameState.delete_save()
 

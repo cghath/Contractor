@@ -152,8 +152,8 @@ func _build_squad(rows: VBoxContainer, v: Dictionary) -> void:
 		rows.add_child(_text("Last deployment: %d back, %d MIA, %d KIA, %d respawns (%d bought)" % [debrief.get("extracted", []).size(),
 			debrief.get("mia", []).size(), debrief.get("dead", []).size(), int(debrief.get("respawns_used", 0)), int(debrief.get("respawns_bought", 0))]))
 	var picked: Array = prep.get("squad", [])
-	rows.add_child(_heading("Squad for the next deployment (%d of %d AI; players take their own slots)" % [picked.size(), BaseHub.SQUAD_SIZE - 1]))
 	var members: Dictionary = roster.get("members", {})
+	rows.add_child(_heading("Squad for the next deployment (%d of %d AI; players take their own slots)" % [picked_count(picked, members), BaseHub.SQUAD_SIZE - 1]))
 	var ids := members.keys()
 	ids.sort()
 	for mid: String in ids:
@@ -333,6 +333,13 @@ func _role_picker(mid: String, current: StringName) -> OptionButton:
 			picker.select(picker.item_count - 1)
 	picker.item_selected.connect(func(i: int) -> void: BaseHub.request("role", [mid, picker.get_item_metadata(i)]))
 	return picker
+
+
+## How many of the picked squad (`picked`, member ids) can deploy, so are listed under the
+## heading: a pick whose member has since been killed, gone MIA or is recovering doesn't count
+## (Captain, 2026-10-14: "6 of 7 AI" over three names, the other three KIA).
+static func picked_count(picked: Array, members: Dictionary) -> int:
+	return picked.filter(func(mid: Variant) -> bool: return members.has(mid) and Roster.is_available(members[mid])).size()
 
 
 static func _skills_text(m: Dictionary) -> String:

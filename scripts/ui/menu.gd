@@ -6,6 +6,12 @@ extends CanvasLayer
 ## host (Debug > Customize Run Instances) still gets in.
 const JOIN_ATTEMPTS := 3
 const JOIN_RETRY_S := 1.0
+## "New campaign" asks for a second click within this many seconds before it archives.
+const CONFIRM_S := 5.0
+## The plain session's zone save (Play (host a session)), apart from any campaign's.
+const PLAIN_ZONE_ID := "compound_01"
+const NEW_CAMPAIGN_TEXT := "New campaign (archive current saves)"
+const NEW_CAMPAIGN_CONFIRM := "Click again to archive the campaign and start a new one"
 
 ## Main-menu role picker (sets Roles.local_choice).
 var role_picker: OptionButton
@@ -15,6 +21,9 @@ var _status: Label
 var settings_menu: SettingsMenu
 var _join_address := ""
 var _attempts_left := 0
+## The "New campaign" button; armed (waiting for the confirming click) until _armed_until.
+var new_campaign_button: Button
+var _armed_until := 0.0
 
 
 func _ready() -> void:
@@ -58,11 +67,17 @@ func _ready() -> void:
 	_address.placeholder_text = "Host address"
 	box.add_child(_address)
 	box.add_child(_button("Join someone's session", func() -> void: join(_address.text)))
-	box.add_child(_button("Reset compound save", _reset_save))
+	# Only the plain session's compound (the test contract starts fresh on its own); the
+	# campaign's saves are the "New campaign" button's (Captain, 2026-10-14: this button was
+	# taken for a campaign reset and left KIA mercs, bodies and vehicles in place).
+	box.add_child(_button("Reset plain-session compound save (not the campaign)", _reset_save))
 	box.add_child(_button("Contract board (offline)", func() -> void: Contracts.open_board()))  # wave 4 economy, on its own
 	# Wave 4 campaign (BaseHub): the company's FOB, its people and stash. Join (above) follows
 	# the host into whatever it plays, the campaign included.
 	box.add_child(_button("Campaign: host at the base (FOB)", _campaign_host))
+	new_campaign_button = _button(NEW_CAMPAIGN_TEXT, new_campaign_pressed)
+	new_campaign_button.tooltip_text = "Moves the campaign save and all its zone saves into an archive folder (nothing is deleted); the next campaign host starts a new company"
+	box.add_child(new_campaign_button)
 	box.add_child(_button("Host test zone (2 km, world scale)", host_test_zone))
 	# Procedural towns to look at without waiting for the board to offer them (Captain, 2026-10-13).
 	box.add_child(_button("Host Old Quarter (city hot zone, test)", func() -> void: host_campaign_zone("city_hot")))
@@ -169,9 +184,38 @@ func _campaign_host() -> void:
 		BaseHub.cancel_session()
 
 
+## Deletes the plain session's compound save (PLAIN_ZONE_ID), whatever zone the last session
+## left GameState.zone_id on. Never a campaign's.
 func _reset_save() -> void:
+	var was := GameState.zone_id
+	GameState.zone_id = PLAIN_ZONE_ID
 	GameState.delete_save()
-	_status.text = "Compound save deleted."
+	GameState.zone_id = was
+	_status.text = "Plain-session compound save deleted (the campaign is untouched)."
+
+
+## "New campaign (archive current saves)": the first click asks, a second within CONFIRM_S
+## archives the campaign (BaseHub.archive_campaign: moved, never deleted).
+func new_campaign_pressed() -> void:
+	var now := Time.get_ticks_msec() / 1000.0
+	if now > _armed_until:
+		_armed_until = now + CONFIRM_S
+		new_campaign_button.text = NEW_CAMPAIGN_CONFIRM
+		_status.text = "This archives the current campaign (its save and every zone save) and the next campaign host starts a new company. Click again within %d s to go ahead." % int(CONFIRM_S)
+		get_tree().create_timer(CONFIRM_S).timeout.connect(func() -> void:
+			if Time.get_ticks_msec() / 1000.0 >= _armed_until and is_instance_valid(new_campaign_button):
+				new_campaign_button.text = NEW_CAMPAIGN_TEXT)
+		return
+	_armed_until = 0.0
+	new_campaign_button.text = NEW_CAMPAIGN_TEXT
+	var done := BaseHub.archive_campaign()
+	if (done.moved as Array).is_empty() and (done.failed as Array).is_empty():
+		_status.text = "No campaign saves to archive: the next campaign host starts a new company."
+	elif (done.failed as Array).is_empty():
+		_status.text = "Campaign archived (%d files) in %s. The next campaign host starts a new company." % [(done.moved as Array).size(), done.dir]
+	else:
+		_status.text = "Archived %d files in %s, but %s couldn't be moved and stay in the saves folder." % [(done.moved as Array).size(), done.dir,
+			", ".join(PackedStringArray(done.failed))]
 
 
 ## Your role in the squad (Roles), picked before hosting or joining; the host gets it on join.

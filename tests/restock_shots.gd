@@ -23,8 +23,9 @@ func _ready() -> void:
 	if args.size() > 0:
 		out = String(args[0])
 	DirAccess.make_dir_recursive_absolute(out)
-	GameState.zone_id = "restock_shots"
-	Campaign.campaign_id = "restock_shots"  # never touch a real save
+	GameState.zone_id = "test_restock_shots"
+	Campaign.campaign_id = "test_restock_shots"  # never touch a real save (test_: BaseHub.delete_test_campaign_files)
+	BaseHub.delete_test_campaign_files()  # last run's, set aside by new_campaign otherwise
 	CompoundLevel.spawn_ai = true
 	Roles.local_choice = Roles.RIFLEMAN
 	BaseHub.local_profile = "shots"
@@ -116,6 +117,7 @@ func _ready() -> void:
 	await _seconds(0.6)
 	await _grab("base_screen_restock_squad")
 	print("[shots] done (%d)" % _shots)
+	BaseHub.delete_test_campaign_files()
 	get_tree().quit(0)
 
 
