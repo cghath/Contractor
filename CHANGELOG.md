@@ -11,6 +11,33 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Vehicle interiors and windows (Captain's side, 2026-10-13)
+
+#### Added
+- Seated in first person you see a cabin instead of the inside of a solid hull: the M-ATV,
+  MaxxPro, every technical (Hilux and Land Cruiser cabs), the AAV-7 and the UH-60 have their
+  cabins hollowed and furnished at the models' 5 cm voxels: a seat under each enclosed seat's eye,
+  a dash with the instrument cluster, radio and steering wheel before each driver, an instrument
+  panel, cyclic and collective before each pilot, and windows you can see out of (glazed through
+  the wall, tinted glass). The AAV's driver gets a vision slit in the bow and its cupolas' and
+  weapon station's vision blocks are see-through; gunners' hatches are cut in the M-ATV's and
+  MaxxPro's roofs (`scripts/art/vehicle_interiors.gd`).
+- A new see-through palette entry (`VehicleArt.P.WINDOW`) on its own surface with a glass
+  material; a burnt-out wreck's windows go opaque and dark with the rest of the hull.
+
+#### Changed
+- Hit volumes and protection are unchanged: interiors and see-through windows are drawn only in
+  the canvas's `look`; the voxels rounds and fragments meet (`VehicleHull.first_solid`) are the
+  same as before, windows included (still `P.GLASS`, still stopping what the hull stops). Damage
+  marks (scuffs, scorch, a hole's ring) are only drawn where the look has a voxel, so a hidden
+  solid cabin never shows as a black lump inside. The few visual-only differences: the M-ATV's
+  cab back wall (rounds still pass where they did), the gunners' hatches, the AAV driver's slit.
+- UH-60: the crew chief's and door gunner's eyes (x 0.95 to 0.72) and the four outer
+  passengers' (x 0.9 to 0.75) moved in from the fuselage wall, which they sat in or outside of.
+
+#### Known gaps
+- Bradley, Abrams and AH-1Z have no interiors yet (nothing spawns them for players).
+
 ### Audit fixes: 26 findings of the 2026-10-13 audit (cghath's side, 2026-10-13)
 
 The audit (`docs/audits/SUMMARY.md`, parts 1 to 3, at `fcae676`) found 3 high-priority and 23
