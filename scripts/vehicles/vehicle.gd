@@ -23,9 +23,10 @@ extends RigidBody3D
 ## Seats: whoever sits rides with the vehicle on every peer (_place_occupants): at the seat,
 ## crouched for a seat, standing for a gunner's hatch or a pickup bed, hidden inside an enclosed
 ## vehicle, with their hitboxes (so a round that gets through the hull finds them). A player's
-## view is their own head at the seat. Getting in, out, switching seats and loading bodies go
+## first-person view is their own head at the seat. Getting in, out, switching seats and loading bodies go
 ## through the Left Ctrl menu (VehicleActionPoint); AI squadmates are ordered in and out from the
-## command menu (VehicleLayer.server_order_mount).
+## command menu (VehicleLayer.server_order_mount). A seated player sees out through the chase
+## camera (VehicleCamera: third person, B switches to first person at the seat's eye).
 ##
 ## Damage: server_take_hit (Ballistics' rounds; V2's launchers) finds the 5 cm voxel the hit
 ## really meets, its hit zone and armour (VehicleDamage), wears the zone and the hull, carves the
@@ -1801,6 +1802,25 @@ func gun_info() -> Dictionary:
 		"rounds": cargo_hold.feed_rounds(StringName(data.feed)) if cargo_hold else 0, "rpm": float(data.get("rpm", 600))}
 
 
+## Where the gun sits (world): its muzzle point from the spec ("gun" "at").
+func gun_origin() -> Vector3:
+	return global_transform * VehicleSpecs.vec((spec.get("gun", {}) as Dictionary).get("at"), Vector3(0, 2, 0))
+
+
+## The way the local gunner `viewer` aims: along their view in first person; in the chase view
+## (VehicleCamera) from the gun to what the camera's crosshair is on, so the gun points where
+## the camera looks (Arma's third-person gunner).
+func gun_direction(viewer: Soldier) -> Vector3:
+	var cam := VehicleCamera.of(viewer)
+	if cam == null or not cam.active:
+		return -viewer.camera.global_basis.z
+	var fwd := -cam.global_basis.z
+	var to := cam.aim_point() - gun_origin()
+	if to.length() < 1.0 or to.normalized().dot(fwd) < 0.2:
+		return fwd  # the crosshair on something at the gun itself, or behind it: along the view
+	return to.normalized()
+
+
 ## The gunner fires along `direction` (from their view).
 @rpc("any_peer", "call_local", "reliable")
 func request_gun(direction: Vector3) -> void:
@@ -1812,7 +1832,6 @@ func request_gun(direction: Vector3) -> void:
 ## Host: one shot of the mounted gun by `shooter` along `direction` (its rate kept, a round
 ## drawn from the hold). Returns Ballistics' result, or {} if it didn't fire.
 func server_fire_gun(shooter: Soldier, direction: Vector3) -> Dictionary:
-	var g: Dictionary = spec.get("gun", {})
 	var info := gun_info()
 	if info.is_empty() or wrecked:
 		return {}
@@ -1824,7 +1843,7 @@ func server_fire_gun(shooter: Soldier, direction: Vector3) -> Dictionary:
 	if not cargo_hold.take_feed(info.feed):
 		_tell(shooter, "%s: no ammunition in the %s" % [info.name, display_name()])
 		return {}
-	var origin := global_transform * VehicleSpecs.vec(g.get("at"), Vector3(0, 2, 0))
+	var origin := gun_origin()
 	var spread := deg_to_rad(float(item.stats.get("spread_deg", 0.3)))
 	var dir := direction.normalized()
 	var side := dir.cross(Vector3.UP).normalized() if absf(dir.y) < 0.99 else Vector3.RIGHT
@@ -1870,7 +1889,7 @@ func _local_controls(delta: float) -> void:
 		var info := gun_info()
 		if not info.is_empty() and Soldier._now() >= _gun_local_next:
 			_gun_local_next = Soldier._now() + 60.0 / float(info.rpm)
-			request_gun.rpc_id(1, -me.camera.global_basis.z)
+			request_gun.rpc_id(1, gun_direction(me))
 	if _hud == null:
 		_hud = Label.new()
 		_hud.name = "VehicleReadout"
@@ -1882,8 +1901,9 @@ func _local_controls(delta: float) -> void:
 	_hud.text = readout(seat)
 
 
-## One line for the HUD: the vehicle, the seat, speed, fuel, damage, the gun's rounds, and
-## the get-out key when it's on (ControlOptions: the seat's menu has no Get out then).
+## One line for the HUD: the vehicle, the seat, speed, fuel, damage, the gun's rounds, the
+## view key (VehicleCamera: the view it switches to), and the get-out key when it's on
+## (ControlOptions: the seat's menu has no Get out then).
 func readout(seat: int) -> String:
 	var parts := PackedStringArray(["%s, %s" % [display_name(), seat_name(seat)]])
 	if seat_kind(seat) == DRIVER:
@@ -1901,6 +1921,7 @@ func readout(seat: int) -> String:
 		parts.append("ON FIRE: GET OUT")
 	elif not can_drive() and seat_kind(seat) == DRIVER:
 		parts.append("Won't drive")
+	parts.append("%s: %s" % [OS.get_keycode_string(GameSettings.key_for(VehicleCamera.ACTION)), "1st person" if VehicleCamera.chase else "3rd person"])
 	if ControlOptions.get_out_key():
 		parts.append("%s: get out" % ControlOptions.get_out_key_name())
 	return "  |  ".join(parts)

@@ -174,6 +174,8 @@ func _run_host(wait_for_client: bool) -> void:
 		await _test_carving_budget()
 	if _want("gun"):
 		await _test_gun()
+	if _want("chase_camera"):
+		await _test_chase_camera()
 	if _want("service"):
 		await _test_service()
 	if _want("fire"):
@@ -829,6 +831,150 @@ func _test_gun() -> void:
 	check(is_equal_approx(v.zone_health(Vehicle.ZONE_ENGINE), own), "a gunner firing down over the bonnet never hits their own vehicle")
 	v.server_exit(player)
 	target.queue_free()
+
+
+## Seated players see out through a chase camera (VehicleCamera; Captain, 2026-10-13: the
+## hulls are solid, so first person showed only the inside): on by default, B switches to first
+## person at the seat's eye and back, getting out gives the on-foot view back, the gunner's
+## rounds go where the chase camera looks, and the camera stays out of walls and the ground.
+func _test_chase_camera() -> void:
+	print("Chase camera")
+	var bound := InputMap.action_get_events(VehicleCamera.ACTION)
+	check(bound.size() == 1 and bound[0] is InputEventKey and (bound[0] as InputEventKey).physical_keycode == KEY_B
+		and GameSettings.BINDABLE.any(func(pair: Array) -> bool: return pair[0] == VehicleCamera.ACTION),
+		"the vehicle view is on B, and rebindable")
+	var clashes := InputMap.get_actions().filter(func(action: StringName) -> bool:
+		return action != VehicleCamera.ACTION and not String(action).begins_with("ui_") and InputMap.action_get_events(action).any(func(e: InputEvent) -> bool:
+			return e is InputEventKey and ((e as InputEventKey).physical_keycode == KEY_B or (e as InputEventKey).keycode == KEY_B)))
+	check(clashes.is_empty(), "and B does nothing else (%s)" % [clashes])
+	VehicleCamera.chase = not VehicleCamera.FIRST_PERSON_DEFAULT
+	check(VehicleCamera.chase, "a session starts in the chase view (first person waits for the interiors)")
+	var cam := VehicleCamera.of(player)
+	check(cam != null and not cam.active and player.camera.current, "on foot: the soldier's own camera")
+	if cam == null:
+		return
+	var v := _vehicle("range_matv")
+	await _reset(v, Vector3(-12, 0, 6))
+	check(v.server_enter(player, 0), "the player drives the M-ATV")
+	player.set_pitch(0.0)
+	for i in 3:
+		await get_tree().process_frame
+	var fwd := -v.global_basis.z
+	var rel := cam.global_position - v.global_position
+	var box := VehicleCamera.hull_box(v)
+	check(cam.active and cam.current and get_viewport().get_camera_3d() == cam, "seated: the chase camera is the view")
+	check(rel.dot(fwd) < -box.size.z * 0.5 and cam.global_position.y > v.global_position.y + box.end.y,
+		"behind the vehicle (%.1f m) and above its roof (%.1f m)" % [-rel.dot(fwd), cam.global_position.y - v.global_position.y])
+	check((-cam.global_basis.z).dot(fwd) > 0.99, "looking where the driver looks: ahead")
+	await get_tree().physics_frame
+	check(not player.view_model.visible, "no first-person weapon floating in the chase view")
+	var readout := v.readout(0)
+	check(readout.contains("B: 1st person"), "the HUD line names the key and the view it switches to (%s)" % readout)
+	# Turning the head orbits the camera round the vehicle.
+	player.rotation.y += deg_to_rad(90.0)
+	for i in 3:
+		await get_tree().process_frame
+	rel = cam.global_position - v.global_position
+	var right := v.global_basis.x
+	check(rel.dot(right) > 2.0 and (-cam.global_basis.z).dot(-right) > 0.95,
+		"looking left, the camera swings round to the right side (%.1f m)" % rel.dot(right))
+	player.rotation.y -= deg_to_rad(90.0)
+	var press := InputEventAction.new()
+	press.action = VehicleCamera.ACTION
+	press.pressed = true
+	player.player_input._unhandled_input(press)
+	for i in 2:
+		await get_tree().process_frame
+	await get_tree().physics_frame
+	check(not VehicleCamera.chase and not cam.active and player.camera.current and get_viewport().get_camera_3d() == player.camera,
+		"B: first person")
+	check(player.camera.global_position.distance_to(v.seat_eye_point(0)) < 0.15 and player.view_model.visible,
+		"at the seat's eye, as before (%.2f m off)" % player.camera.global_position.distance_to(v.seat_eye_point(0)))
+	player.player_input._unhandled_input(press)
+	for i in 2:
+		await get_tree().process_frame
+	check(VehicleCamera.chase and cam.active and cam.current, "B again: back to the chase view")
+	# The gunner's rounds go where the chase camera looks.
+	check(v.server_switch(player, 4) and v.gunner() == player, "over to the M2")
+	await get_tree().process_frame
+	var target := _soldier("hostile", v.global_transform * Vector3(-8, 0.1, -30), "ChaseTarget")
+	await _seconds(0.3)
+	var chest := (target.get_node(^"ChestHitbox/Shape") as Node3D).global_position
+	for i in 4:  # aim the camera's crosshair at the chest (the camera moves a little with the look)
+		var to := chest - cam.global_position
+		player.rotation.y = atan2(-to.x, -to.z)
+		player.set_pitch(atan2(to.y, Vector2(to.x, to.z).length()))
+		for k in 2:
+			await get_tree().process_frame
+	var aim := v.gun_direction(player)
+	var on := cam.aim_point()
+	var miss := ((on - v.gun_origin()) - aim * (on - v.gun_origin()).dot(aim)).length()
+	check(on.distance_to(chest) < 0.6, "the chase crosshair is on the target (%.2f m off)" % on.distance_to(chest))
+	check(miss < 0.05 and aim.dot(-cam.global_basis.z) > 0.95, "the gun aims from its mount at the crosshair, not along a parallel line (%.3f m off)" % miss)
+	var hits := 0
+	await _seconds(0.3)
+	for i in 6:
+		if v.server_fire_gun(player, v.gun_direction(player)).get("result", "") == "body":
+			hits += 1
+		await _seconds(0.12)
+	check(hits >= 1, "and its rounds hit what the camera looks at (%d of 6)" % hits)
+	target.queue_free()
+	VehicleCamera.chase = false
+	await get_tree().process_frame
+	check(v.gun_direction(player).dot(-player.camera.global_basis.z) > 0.999, "in first person the gun goes along the view, as before")
+	VehicleCamera.chase = true
+	v.server_switch(player, 0)
+	# Out of walls: a voxel wall just behind the vehicle pulls the camera in front of it.
+	var tool := level.voxel_world.terrain.get_voxel_tool()
+	tool.channel = VoxelBuffer.CHANNEL_COLOR
+	tool.mode = VoxelTool.MODE_SET
+	var back_z := v.global_position.z + box.end.z + 1.2
+	var lo := Vector3i(level.voxel_world.terrain.to_local(Vector3(-17, 0, back_z)).round())
+	var hi := Vector3i(level.voxel_world.terrain.to_local(Vector3(-7, 5, back_z + 0.6)).round())
+	tool.value = VoxelWorld.Mat.CONCRETE
+	tool.do_box(lo, hi)
+	var space := player.get_world_3d().direct_space_state
+	var probe := func() -> bool:
+		return not space.intersect_ray(PhysicsRayQueryParameters3D.create(Vector3(-12, 2.5, back_z - 2), Vector3(-12, 2.5, back_z + 2), 1)).is_empty()
+	await _wait_for(probe, 10.0)
+	check(probe.call(), "a 5 m concrete wall %.1f m behind the M-ATV's tail" % (back_z - v.global_position.z - box.end.z))
+	player.set_pitch(0.0)
+	player.rotation.y = _yaw(v)
+	for i in 30:
+		await get_tree().process_frame
+	var pivot := VehicleCamera.pivot_of(v)
+	var through := space.intersect_ray(PhysicsRayQueryParameters3D.create(pivot, cam.global_position, 1))
+	check(cam.global_position.z < back_z - VehicleCamera.ARM_RADIUS * 0.5 and through.is_empty(),
+		"the camera stays this side of it (%.2f m short), nothing between it and the vehicle" % (back_z - cam.global_position.z))
+	check(cam.global_position.distance_to(pivot) < VehicleCamera.arm_length(v) - 0.5, "pulled in (%.1f of %.1f m)" % [cam.global_position.distance_to(pivot), VehicleCamera.arm_length(v)])
+	tool.value = VoxelWorld.Mat.EMPTY
+	tool.do_box(lo, hi)
+	await _wait_for(func() -> bool: return not probe.call(), 10.0)
+	await _seconds(1.0)
+	check(cam.global_position.distance_to(VehicleCamera.pivot_of(v)) > VehicleCamera.arm_length(v) - 0.3, "the wall gone, the arm eases back out")
+	# Out of the ground: looking up from a helicopter (a long arm) keeps the camera above it.
+	var heli := layer.server_spawn("uh60", Transform3D(Basis(), Vector3(30, 0, 40)), "", &"player", "test_chase_heli")
+	await get_tree().physics_frame
+	check(heli != null and heli.server_enter(player, 2), "into a UH-60's crew seat")
+	if heli:
+		player.rotation.y = _yaw(heli)
+		player.set_pitch(Soldier.MAX_PITCH)
+		for i in 30:
+			await get_tree().process_frame
+		var ground := space.intersect_ray(PhysicsRayQueryParameters3D.create(cam.global_position + Vector3.UP * 20.0, cam.global_position + Vector3.DOWN * 20.0, 1, [heli.get_rid()]))
+		var above: float = cam.global_position.y - (ground.position.y if not ground.is_empty() else -INF)
+		check(cam.active and above > VehicleCamera.ARM_RADIUS * 0.5, "looking up, the camera stays above the ground (%.2f m)" % above)
+		var behind := (cam.global_position - heli.global_position).dot(heli.global_basis.z)
+		check(behind > 6.0, "behind a helicopter, further for its size (%.1f m)" % behind)
+		heli.server_exit(player)
+		heli.queue_free()
+	else:
+		v.server_exit(player)
+	for i in 3:
+		await get_tree().process_frame
+	check(Vehicle.ride_of(player) == null and not cam.active and player.camera.current and get_viewport().get_camera_3d() == player.camera,
+		"getting out: the on-foot camera again")
+	player.set_pitch(0.0)
 
 
 func _test_service() -> void:
