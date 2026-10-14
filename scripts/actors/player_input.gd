@@ -119,7 +119,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed(&"fire") and not captured:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	elif not body.vitals.is_up():
-		return  # downed: no giving up (handoff); you come round on your own, or the arrest window runs out
+		return  # downed: you come round on your own, the arrest window runs out, or you give up (_update_give_up)
+	elif body.respawn_state == Soldier.RESPAWN_WAITING:
+		return  # dead, waiting to respawn: nothing to do but wait
 	elif event.is_action_pressed(ControlOptions.GET_OUT_ACTION) and ControlOptions.get_out_key() and Vehicle.ride_of(body) != null:
 		Vehicle.ride_of(body).request_exit.rpc_id(1)  # the get-out key (an option; the seat's menu then has no Get out)
 	elif interaction.is_open() and event is InputEventMouseButton:
@@ -159,6 +161,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _process(delta: float) -> void:
 	_update_interaction(delta)
+	_update_give_up(delta)
 	if placing:
 		_update_ghost()
 	if body.view_yaw() != _view_yaw:
@@ -219,18 +222,42 @@ func _exit_tree() -> void:
 
 ## Runs after the body has moved this frame (children process after their parent).
 func _physics_process(delta: float) -> void:
-	_update_focus()
-	_update_aim(delta)
-	_try_fire()
+	var waiting := body.respawn_state == Soldier.RESPAWN_WAITING  # dead, waiting to respawn: no aiming or firing
+	if waiting:
+		body.is_aiming = false
+	else:
+		_update_focus()
+		_update_aim(delta)
+		_try_fire()
 	var tilt := minf(-0.7 if body.is_reloading else 0.0, -CharacterModel.VIEW_LOWER_PITCH * body.model.view_lower())
 	body.view_model.rotation.x = move_toward(body.view_model.rotation.x, tilt, delta * 6.0)
-	body.view_model.visible = body.carry_mode == &""  # both hands on the casualty: no weapon in view
+	body.view_model.visible = body.carry_mode == &"" and not waiting  # both hands on the casualty: no weapon in view
 	_hide_shouldered()
 	# Settle sway after a stop (W3, SoldierMovement.weapon_sway).
 	var sway := body.movement.weapon_sway()
 	body.view_model.rotation.y = sway.x
 	body.view_model.rotation.z = sway.y
 	hud.update_status(body)
+
+
+## How long the give-up key has been held (0 when it isn't, or giving up isn't open): the HUD's prompt.
+var give_up_held := 0.0
+var _give_up_sent := false
+
+
+## Downed: holding the give-up key (Controls "give_up") for Soldier.GIVE_UP_HOLD_S, while
+## Soldier.can_give_up(), asks the host to let this player die and respawn (Captain, P0362).
+func _update_give_up(delta: float) -> void:
+	var menus := pause_menu.is_open() or bug_report.is_open() or medical_menu.is_open() or hud.is_inventory_open() \
+		or (hud.map_screen != null and hud.map_screen.is_open())
+	if not body.can_give_up() or menus or not Input.is_action_pressed(&"give_up"):
+		give_up_held = 0.0
+		_give_up_sent = false
+		return
+	give_up_held += delta
+	if give_up_held >= Soldier.GIVE_UP_HOLD_S and not _give_up_sent:
+		_give_up_sent = true
+		body._server_give_up.rpc_id(1)
 
 
 ## Keeps the casualty this player has up on the shoulder out of their own camera (they still see
@@ -318,7 +345,7 @@ func _update_focus() -> void:
 ## Hold Left Ctrl for the interaction menu, Left Ctrl + Left Alt for yourself; letting go
 ## performs the highlighted action. Going down or opening the inventory cancels it.
 func _update_interaction(delta: float) -> void:
-	var allowed := _captured() and body.vitals.is_up() and not hud.is_inventory_open()
+	var allowed := _captured() and body.vitals.is_up() and body.respawn_state != Soldier.RESPAWN_WAITING and not hud.is_inventory_open()
 	if not allowed:
 		if interaction.is_open():
 			interaction.close()

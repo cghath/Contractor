@@ -47,6 +47,8 @@ var _sim_s := 0.0
 
 func _ready() -> void:
 	GameState.zone_id = "test_casualty" + OS.get_environment("CONTRACTOR_TEST_TAG")  # never touch a real save
+	Soldier.respawn_delay_s = 0.0  # these checks want the old instant respawn (the wait and spawn
+	Soldier.spawn_protect_s = 0.0  # protection have their own checks in gameplay and missions)
 	GameState.delete_save()
 	CompoundLevel.spawn_ai = true
 	get_tree().create_timer(600.0, true, false, true).timeout.connect(func() -> void:

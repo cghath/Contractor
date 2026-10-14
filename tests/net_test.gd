@@ -198,6 +198,14 @@ func _run_client() -> void:
 	me._server_debug_hurt.rpc_id(1, 140.0)
 	await _wait_for(func() -> bool: return me.vitals.downed, 3.0)
 	check(me.vitals.downed, "knocked out before leaving (%s)" % me.vitals.condition_text())
+	# Giving up (Captain, P0362): the host's player stands close by and he's only just down, so
+	# not yet (the client reads it from replicated state), and the host refuses one asked early.
+	await _wait_for(func() -> bool: return me.seconds_down() > 0.0, 1.0)
+	check(me.help_near() and not me.can_give_up() and me.respawn_state == Soldier.RESPAWN_NONE,
+		"down beside the host's player: no giving up yet (%.1f s down)" % me.seconds_down())
+	me._server_give_up.rpc_id(1)
+	await get_tree().create_timer(0.5).timeout
+	check(me.vitals.downed and not me.vitals.is_dead(), "the host refuses a give-up asked too early: still down")
 	_finish()
 
 

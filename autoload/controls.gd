@@ -30,6 +30,8 @@ const KEYS := {
 	# Get out of the vehicle you sit in, when that option is on (ControlOptions; Captain, P0164
 	# queue 8). V is free on foot and in a seat (proposed).
 	&"get_out": [KEY_V],
+	# Downed: hold to give up and respawn (Soldier.can_give_up; Captain, P0362). Proposed key.
+	&"give_up": [KEY_J],
 	&"debug_hurt": [KEY_K],  # dev tools only (DevTools.on): hurt yourself to test going down and dying
 }
 ## Keys pressed with Shift held. An action without Shift still matches with it held, so

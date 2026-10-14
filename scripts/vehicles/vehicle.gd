@@ -1830,6 +1830,8 @@ func server_fire_gun(shooter: Soldier, direction: Vector3) -> Dictionary:
 	var side := dir.cross(Vector3.UP).normalized() if absf(dir.y) < 0.99 else Vector3.RIGHT
 	var lift := side.cross(dir).normalized()
 	dir = (dir + side * randf_range(-1, 1) * tan(spread) + lift * randf_range(-1, 1) * tan(spread)).normalized()
+	if shooter:
+		shooter.server_end_spawn_protection()  # firing ends spawn protection (Soldier)
 	var result := Ballistics.fire(shooter, origin, dir, item)
 	var lvl := level()
 	if lvl:

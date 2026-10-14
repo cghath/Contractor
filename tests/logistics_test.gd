@@ -17,6 +17,8 @@ var _client_done := false
 func _ready() -> void:
 	var joining := "--join" in OS.get_cmdline_user_args()
 	GameState.zone_id = "test_logistics" + OS.get_environment("CONTRACTOR_TEST_TAG")  # never touch a real save
+	Soldier.respawn_delay_s = 0.0  # these checks want the old instant respawn (the wait and spawn
+	Soldier.spawn_protect_s = 0.0  # protection have their own checks in gameplay and missions)
 	CompoundLevel.spawn_ai = false  # squad AI has its own test
 	if not joining:
 		GameState.delete_save()

@@ -50,6 +50,7 @@ func _ready() -> void:
 	await _test_radio_chatter()
 	await _test_field_radio()
 	await _test_hq_posts()
+	await _test_respawn_points()
 	_finish()
 
 
@@ -883,6 +884,85 @@ func _test_hq_posts() -> void:
 		var forward := Vector3(-sin(yaw), 0.0, -cos(yaw))
 		facing = facing and forward.dot(Vector3(0, 0, 1)) > 0.7 and p.z < 15.6  # the gate is south (+z); sandbags from z 15.6
 	check(facing, "the gate guards stand behind the sandbags, facing the gate")
+
+
+## Captain, playtest P0362: a dead player respawned at once at the zone's first insertion point
+## with his killer standing on it. He now comes back (CompoundLevel.respawn_point) at the
+## briefing's chosen insertion point if no enemy is within RESPAWN_SAFE_M of it or can see it,
+## else at another insertion or extraction point, else the FOB, after the wait (Soldier).
+func _test_respawn_points() -> void:
+	print("Respawn points")
+	_free_new([])  # no hostiles about but ours
+	await _frames(2)
+	var saved_delay := Soldier.respawn_delay_s
+	var saved_protect := Soldier.spawn_protect_s
+	var ins := level.insertion_points()
+	var ext := level.extraction_points()
+	var briefing := MapNodes.briefing(level)
+	var saved_zone := briefing.zone
+	var saved_id := briefing.insertion_id
+	briefing.zone = {"insertion_points": [{"id": "a", "pos": [ins[0].x, ins[0].z]}, {"id": "b", "pos": [ins[1].x, ins[1].z]}]}
+	briefing.insertion_id = "b"  # the briefing chose the second one
+	var cands := level.respawn_candidates()
+	check(cands.size() == ins.size() + ext.size() and _flat_m(cands[0], ins[1]) < 1.0,
+		"candidates: the briefing's insertion first, then the zone's insertion and extraction points (%d)" % cands.size())
+	var p := level.respawn_point(player)
+	check(_flat_m(p, ins[1]) < 8.0, "nobody about: the briefing's insertion point (%.0f m off; %s)" % [_flat_m(p, ins[1]), level.last_respawn.get("why", "")])
+	var hostile := func(at: Vector3, callsign: String) -> Soldier:
+		var s := level.spawn_soldier({"name": callsign, "faction": "hostile", "variant": "woodland", "pos": at,
+			"loadout": ["m4a1"], "combat": 0.5, "discipline": 0.5, "guard": true})
+		SquadAI.of(s).process_mode = Node.PROCESS_MODE_DISABLED
+		s.set_physics_process(false)  # stays put, even in mid-air
+		return s
+	var camper: Soldier = hostile.call(level.ground_point(ins[1] + Vector3(6, 0, 0)), "RespawnCamper")
+	await _frames(2)
+	p = level.respawn_point(player)
+	var foes := level.respawn_enemies(player)
+	check(_flat_m(p, ins[1]) > CompoundLevel.RESPAWN_SAFE_M and level.respawn_clearance(level.last_respawn.point, foes) >= CompoundLevel.RESPAWN_SAFE_M,
+		"an enemy on it: another point, none near or in sight (%.0f m away; %s)" % [_flat_m(p, ins[1]), level.last_respawn.get("why", "")])
+	# One that can see a point from 200 m (high above the ground, nothing in the way) makes it hot too.
+	var next: Vector3 = level.last_respawn.point
+	var watcher: Soldier = hostile.call(next + Vector3(200, 60, 0), "RespawnWatcher")
+	await _frames(2)
+	foes = level.respawn_enemies(player)
+	check(level.respawn_clearance(next, foes) < CompoundLevel.RESPAWN_SAFE_M, "an enemy 200 m off who can see a point makes it hot (%.0f)" % level.respawn_clearance(next, foes))
+	p = level.respawn_point(player)
+	check(_flat_m(p, next) > 8.0 and _flat_m(p, ins[1]) > CompoundLevel.RESPAWN_SAFE_M, "so it goes to another (%s)" % level.last_respawn.get("why", ""))
+	# Every insertion and extraction point hot: the FOB, if it's safe; else the least dangerous.
+	var campers: Array[Soldier] = [camper, watcher]
+	for i in cands.size():
+		campers.append(hostile.call(level.ground_point(cands[i] + Vector3(6, 0, 6)), "RespawnCamper%d" % i))
+	await _frames(2)
+	foes = level.respawn_enemies(player)
+	var fob: Variant = level.respawn_fallback()
+	p = level.respawn_point(player)
+	if fob != null and level.respawn_clearance(fob, foes) >= CompoundLevel.RESPAWN_SAFE_M:
+		check(_flat_m(p, fob) < 8.0, "every insertion and extraction point hot: the FOB (%s)" % level.last_respawn.get("why", ""))
+	else:
+		check(String(level.last_respawn.get("why", "")).begins_with("every point hot"), "every point hot, the FOB too: the least dangerous (%s)" % level.last_respawn.get("why", ""))
+	for s in campers:
+		s.queue_free()
+	await _frames(2)
+	# The whole death: the wait, then the briefing's point (nobody about now), protected.
+	Soldier.respawn_delay_s = 1.0
+	Soldier.spawn_protect_s = 1.0
+	player.global_position = level.ground_point(ins[0] + Vector3(20, 0, 20))
+	await _frames(2)
+	player.vitals.server_kill()
+	await _frames(2)
+	check(player.respawn_state == Soldier.RESPAWN_WAITING and _flat_m(player.global_position, ins[1]) > 20.0, "killed: waiting, not moved yet")
+	await _wait_for(func() -> bool: return player.respawn_state != Soldier.RESPAWN_WAITING, 3.0)
+	check(player.respawn_state == Soldier.RESPAWN_PROTECTED and _flat_m(player.global_position, ins[1]) < 8.0,
+		"then back at the briefing's insertion point, protected (%.0f m off)" % _flat_m(player.global_position, ins[1]))
+	await _wait_for(func() -> bool: return player.respawn_state == Soldier.RESPAWN_NONE, 3.0)
+	Soldier.respawn_delay_s = saved_delay
+	Soldier.spawn_protect_s = saved_protect
+	briefing.zone = saved_zone
+	briefing.insertion_id = saved_id
+
+
+func _flat_m(a: Vector3, b: Vector3) -> float:
+	return Vector2(a.x - b.x, a.z - b.z).length()
 
 
 ## Back to calm: the alert's areas and the pressure points reset (no check-ins come due).

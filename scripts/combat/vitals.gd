@@ -122,6 +122,9 @@ var _published_at := -1000.0
 var _publish_pending := false  # host: a routine change held back by the rate limit
 var _shown_second := -1        # whole seconds of the arrest countdown last signalled
 var _died_sent := false
+## Host only: spawn protection (Soldier.respawn_state, after a respawn or while waiting for one):
+## rounds, impacts, blasts, falls, burns and trauma do nothing.
+var shielded := false
 
 
 ## A body part in words: "upper_arm_l" -> "left upper arm", TORSO -> "torso".
@@ -337,6 +340,8 @@ func server_exert() -> bool:
 ## Host only. A blast `distance` metres away (radius already doubled indoors); see
 ## WoundModel.add_blast.
 func server_blast(distance: float, radius: float, ear_pro := false) -> void:
+	if shielded:
+		return
 	_model.add_blast(distance, radius, ear_pro)
 	_last_hit_at = Time.get_ticks_msec() / 1000.0
 	last_cause = {"cause": "blast", "distance": distance}
@@ -345,6 +350,8 @@ func server_blast(distance: float, radius: float, ear_pro := false) -> void:
 
 ## Host only. A fall from `height` metres (see WoundModel.add_fall).
 func server_fall(height: float) -> void:
+	if shielded:
+		return
 	_model.add_fall(height)
 	last_cause = {"cause": "fall (%.1f m)" % height}
 	_after_change(true)
@@ -352,6 +359,8 @@ func server_fall(height: float) -> void:
 
 ## Host only. Burns over `share` of the body.
 func server_burn(share: float) -> void:
+	if shielded:
+		return
 	_model.add_burn(share)
 	last_cause = {"cause": "burn"}
 	_after_change(true)
@@ -717,7 +726,7 @@ func vision() -> Dictionary:
 ## position the channel goes in at a random spot on the part. ("damage" is ignored: the
 ## wound model has none.)
 func server_hit(part: StringName, hit: Dictionary) -> void:
-	if _m().dead:
+	if _m().dead or shielded:
 		return
 	var round_class := StringName(hit.get("round_class", INTERMEDIATE))
 	var channel_in := _rest_channel(part, hit)
@@ -752,6 +761,8 @@ func server_hit(part: StringName, hit: Dictionary) -> void:
 ## real). Head and face are helmet stops; anything else is a plate or vest. `energy_j` is
 ## the round's energy on arrival (Ballistics), or -1 if unknown.
 func server_impact(part: StringName, round_class: StringName, distance: float, energy_j := -1.0) -> void:
+	if shielded:
+		return
 	_last_hit_at = Time.get_ticks_msec() / 1000.0
 	_model.add_impact(part, round_class, distance, energy_j)
 	last_cause = {"cause": "round stopped by armor (%s)" % round_class, "part": part, "distance": distance}
@@ -761,6 +772,8 @@ func server_impact(part: StringName, round_class: StringName, distance: float, e
 ## Host only. Legacy damage (the debug K key and some tests): generic trauma that adds
 ## amount/100 pain and loses amount * 0.6% of blood volume at once.
 func server_damage(amount: float) -> void:
+	if shielded:
+		return
 	_model.add_trauma(amount * TRAUMA_PAIN_PER_DAMAGE, amount * TRAUMA_BLOOD_PER_DAMAGE)
 	last_cause = {"cause": "trauma (%.0f damage)" % amount}
 	_after_change()
