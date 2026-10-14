@@ -486,9 +486,12 @@ func _test_doctrine_ranges() -> void:
 	var origin := Vector3(300, 50.1, 300)  # up and away from everyone
 	var hostile := level.spawn_soldier({"name": "RangeHostile", "faction": "hostile", "variant": "urban", "pos": origin,
 		"loadout": CompoundLevel.HOSTILE_LOADOUT, "combat": 0.5, "discipline": 0.5, "guard": true})
-	await _frames(2)
 	var hai := SquadAI.of(hostile)
 	var mai := SquadAI.of(mate)
+	# His AI sets itself up on its first physics steps (SquadAI._setup: body), not by a render
+	# frame or two (R0572: _find_target on a null body).
+	await _wait_until(func() -> bool: return hai.body != null and mai.body != null, 5.0)
+	await _physics_frames(2)
 	hai.process_mode = Node.PROCESS_MODE_DISABLED
 	mai.process_mode = Node.PROCESS_MODE_DISABLED
 	hostile.global_transform = Transform3D(Basis.IDENTITY, origin)  # faces -z
