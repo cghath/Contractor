@@ -158,8 +158,8 @@ func stash() -> Array:
 ## a new economy and contract board (day 1, the starting cash), the starting stash, an empty
 ## roster and a hiring board drawn from `hiring_seed` (random if negative).
 func new_campaign(hiring_seed := -1) -> void:
-	Campaign.reset_campaign()
-	_delete_zone_saves()
+	_set_aside_old_saves()
+	Campaign.reset_campaign()  # its files are aside by now: this only empties it in memory
 	Contracts.new_full_campaign()
 	var b := base()
 	b["started"] = true
@@ -244,11 +244,17 @@ func base_zone_id() -> String:
 	return zone_save_id("fob")
 
 
-## Deletes every zone save of the current campaign (zone_save_id), with their backups and
-## interrupted writes (a backup left behind would load as the new campaign's zone).
-func _delete_zone_saves() -> void:
+## Whatever a new campaign in Campaign.campaign_id's name would otherwise load: the old save
+## (with backup and interrupted write) and every zone save of it (a backup left behind would
+## load as the new campaign's zone) are set aside (GameState.set_aside, "<file>.replaced-<date>-
+## <time>"), never deleted (Captain, 2026-10-14). Usually there's nothing: New campaign archives
+## first, and an unreadable save is kept aside by load_campaign.
+func _set_aside_old_saves() -> void:
+	for path: String in GameState.save_candidates(Campaign.save_path()):
+		if FileAccess.file_exists(path):
+			GameState.set_aside(path, "replaced")
 	for path in _zone_save_files():
-		DirAccess.remove_absolute(path)
+		GameState.set_aside(path, "replaced")
 
 
 ## Moves every zone save of the current campaign aside (GameState.set_aside): the campaign they
@@ -264,8 +270,9 @@ func set_aside_zone_saves() -> void:
 ## into user://saves/archive-<date>/ (archive-<date>-<time>/ when that already holds a file of
 ## the same name), and the campaign in memory empties, so the next campaign host starts a new
 ## one. Outside a session only. Returns {"dir": the archive folder (global path), "moved": file
-## names, "failed": file names that couldn't be moved and stay where they were}.
-func archive_campaign() -> Dictionary:
+## names, "failed": file names that couldn't be moved and stay where they were}. `into` (a
+## folder) instead of the dated one: for tests, which mustn't share the real archive folder.
+func archive_campaign(into := "") -> Dictionary:
 	var out := {"dir": "", "moved": [], "failed": []}
 	if Net.is_hosting():
 		push_warning("BaseHub: not archiving the campaign during a session")
@@ -275,7 +282,7 @@ func archive_campaign() -> Dictionary:
 		Campaign.restore({})
 		return out
 	var t := Time.get_datetime_dict_from_system()
-	var dir := "%s/archive-%04d-%02d-%02d" % [Campaign.SAVE_DIR, t.year, t.month, t.day]
+	var dir := into if into != "" else "%s/archive-%04d-%02d-%02d" % [Campaign.SAVE_DIR, t.year, t.month, t.day]
 	if files.any(func(f: String) -> bool: return FileAccess.file_exists("%s/%s" % [dir, f])):
 		dir += "-%02d%02d%02d" % [t.hour, t.minute, t.second]
 	DirAccess.make_dir_recursive_absolute(dir)
@@ -304,6 +311,24 @@ func _campaign_files() -> Array[String]:
 		if file == own or file.begins_with(own + ".") or file.begins_with(zones):
 			out.append(file)
 	return out
+
+
+## TEST ONLY: deletes every file of the current campaign (_campaign_files: its save and zone
+## saves, the FOB's included, with backups, interrupted writes and copies kept aside) and empties
+## it in memory. The game never deletes a save (Captain, 2026-10-14: new_campaign and each
+## deployment set the old ones aside), so tests would pile those up run after run without this.
+## Refuses (returns -1, deletes nothing) unless the campaign is a test's: campaign_id begins with
+## "test_", so a real save (campaign_01) is never touched. Returns how many files went.
+func delete_test_campaign_files() -> int:
+	if not Campaign.campaign_id.begins_with("test_"):
+		push_error("BaseHub: not deleting the files of '%s': only a test campaign's (test_...) are ever deleted" % Campaign.campaign_id)
+		return -1
+	var n := 0
+	for f in _campaign_files():
+		if DirAccess.remove_absolute("%s/%s" % [Campaign.SAVE_DIR, f]) == OK:
+			n += 1
+	Campaign.reset_campaign()  # nothing of it is left on disk: this only empties it in memory
+	return n
 
 
 ## The current campaign's zone save files: each save, backup and interrupted write.
@@ -855,28 +880,30 @@ func server_deploy(options := {}) -> String:
 	prep["contract"] = {}
 	prep["level"] = {}
 	_changed_all()
-	discard_zone_save(zone_id)  # every contract finds the zone fresh (Captain, 2026-10-14)
+	set_aside_zone_save(zone_id)  # every contract finds the zone fresh (Captain, 2026-10-14)
 	server_switch_level(info, zone_save_id(zone_id))
 	return ""
 
 
-## Host (server_deploy): the campaign's save of zone `zone_id` goes, with its backup and any
-## interrupted write, so the deployment starting there finds the zone as generated. Captain,
+## Host (server_deploy): the campaign's save of zone `zone_id`, with its backup and any
+## interrupted write, is set aside (GameState.set_aside, "<file>.earlier-deployment-<date>-<time>",
+## kept beside it and never loaded again; never deleted, Captain 2026-10-14), so the deployment
+## starting there finds the zone as generated. Captain,
 ## 2026-10-14: zones are fresh each contract: no bodies, vehicles, dropped gear, loot taken or
 ## voxel damage from earlier deployments. (The zone is still saved when a deployment ends, and
 ## by the host's quick save or quit; a campaign loaded with a deployment running ends that
 ## deployment at the base (load_or_new), so there is no mid-deployment save to resume into.)
-## Never the FOB's save. Returns how many files went.
-func discard_zone_save(zone_id: String) -> int:
+## Never the FOB's save. Returns how many files were set aside.
+func set_aside_zone_save(zone_id: String) -> int:
 	var path := "%s/%s.json" % [GameState.SAVE_DIR, zone_save_id(zone_id)]
 	if zone_save_id(zone_id) == base_zone_id():
 		return 0
 	var n := 0
 	for p: String in GameState.save_candidates(path):
-		if FileAccess.file_exists(p) and DirAccess.remove_absolute(p) == OK:
+		if FileAccess.file_exists(p) and GameState.set_aside(p, "earlier-deployment") != "":
 			n += 1
 	if n > 0:
-		SessionLog.note("zone %s starts fresh: its save from an earlier deployment is discarded" % zone_id)
+		SessionLog.note("zone %s starts fresh: its save from an earlier deployment is set aside" % zone_id)
 	return n
 
 
