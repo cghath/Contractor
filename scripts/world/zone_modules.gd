@@ -65,6 +65,8 @@ static var GARRISON := {
 ## from the module's middle, ZoneLevel.post_yaw). A town's posts at doors look onto the street,
 ## those up high (F-02: upper windows, roofs) out of their window or over their parapet.
 static var GARRISON_FACE := {}
+## A generated town's stair ramps for the navmesh (ramps()).
+static var RAMPS := {}
 
 ## Loot lying in each module (m from the origin; uids are made unique per module). A static
 ## var: a town adds its own (_town).
@@ -171,6 +173,7 @@ static func _town(type: String) -> bool:
 	POINTS[type] = t.points
 	GARRISON[type] = t.garrison
 	GARRISON_FACE[type] = t.garrison_face
+	RAMPS[type] = t.ramps
 	LOOT[type] = t.loot
 	var top := TOP_M
 	for bx: Array in t.boxes:
@@ -205,6 +208,14 @@ static func boxes(type: String) -> Array:
 				push_error("ZoneModules: unknown type %s" % type)
 				return []
 	return _cache[type]
+
+
+## The ramps over the module's stairs for the navmesh bake (BuildingGen.ramp_faces: triangles,
+## m from the origin; a generated town's), empty for a type without stairs.
+static func ramps(type: String) -> PackedVector3Array:
+	if type.begins_with(TOWN):
+		boxes(type)  # builds the town once
+	return RAMPS.get(type, PackedVector3Array())
 
 
 ## The base structure as AABBs in metres from the origin, snapped to the voxels as

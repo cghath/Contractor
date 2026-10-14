@@ -83,7 +83,8 @@ func _ground_source(chunk: Vector2i) -> NavigationMeshSourceGeometryData3D:
 
 
 ## Loaded modules' voxels as they are now (false while one isn't built yet); unloaded
-## modules' proxies (ZoneModule.proxy_boxes: the base boxes, less what was carved).
+## modules' proxies (ZoneModule.proxy_boxes: the base boxes, less what was carved); either's
+## stairs as ramps (ZoneModules.ramps).
 func _add_structures(source: NavigationMeshSourceGeometryData3D, bounds: AABB) -> bool:
 	var rect := Rect2(bounds.position.x, bounds.position.z, bounds.size.x, bounds.size.z)
 	for module in zone.modules():
@@ -102,6 +103,10 @@ func _add_structures(source: NavigationMeshSourceGeometryData3D, bounds: AABB) -
 			for box in module.proxy_boxes():  # with any breach made before it streamed out
 				if box.intersects(local):
 					source.add_faces(_box_faces(box.intersection(local.grow(0.01))), module.global_transform)
+		# Its stairs as ramps (the steps as voxels bake cut in two: BuildingGen.ramp_faces).
+		var ramps := ZoneModules.ramps(module.type)
+		if not ramps.is_empty():
+			source.add_faces(ramps, module.global_transform)
 	return true
 
 

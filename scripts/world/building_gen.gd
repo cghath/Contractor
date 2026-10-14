@@ -12,11 +12,15 @@ extends RefCounted
 ## walled yards and courtyards.
 
 const CHUNKS_PATH := "res://data/building_chunks.json"
-## The narrowest a room may be (m), and how much wall a doorway keeps either side of it.
+## The narrowest a room may be (m), and how much wall a doorway keeps either side of it. A
+## doorway is DOOR_W wide (a type's outside door "door_w" at least as wide): the navmesh's
+## 0.25 m cells, a cell lost to a wall face lying on a cell edge and one eroded off each side
+## for the soldier's radius left a 0.9 m doorway no way through wherever an edge fell on a cell
+## edge (rooms cut off, AI never in them; F-01). 1.1 m always leaves a cell.
 const MIN_ROOM := 2.6
-const DOOR_W := 0.9
+const DOOR_W := 1.1
 const DOOR_H := 2.1
-const DOOR_EDGE := 0.3
+const DOOR_EDGE := 0.2
 ## Windows: width, sill and top (m); only on outer walls this long or longer.
 const WIN_W := 1.0
 const WIN_SILL := 1.0
@@ -33,12 +37,20 @@ const MIN_CHANCE := 0.6
 const MAX_VARY := 0.2
 ## Storeys (phase 3): a floor slab SLAB_T thick between them; a stair STAIR_W wide, its steps
 ## STAIR_RISE high at most (the navmesh climbs 0.25 m) and STAIR_TREAD deep, STAIR_LANDING
-## clear past its top, and a railing RAIL_H high round its stairwell above.
+## clear past its top, and a railing RAIL_H high round its stairwell above. The rise is whole
+## 0.1 m voxels (a 0.23 m rise, built as voxels, came out 0.2 or 0.3 m, and a soldier steps up
+## 0.27 m at most: SoldierMovement.WORLD_STEP_M). The navmesh doesn't bake the steps (a 0.25 m
+## tread, built as voxels, is 0.2 or 0.3 m deep, and a 0.25 m navmesh cell over three of them
+## climbs two steps at once, cutting the stair in two): it bakes ramp_faces() over them (F-01).
 const SLAB_T := 0.2
 const STAIR_W := 1.0
-const STAIR_RISE := 0.23
+const STAIR_RISE := 0.2
 const STAIR_TREAD := 0.25
 const STAIR_LANDING := 0.8
+## Floor left clear in front of a stair's first step, so one walks onto it head on: a foot right
+## against the end wall could only be stepped onto from the side, where the navmesh, eroded
+## along the wall and the stair's open side, left no way on (F-01).
+const STAIR_APPROACH := 0.5
 const RAIL_H := 1.0
 const RAIL_T := 0.1
 ## A flat roof with a stair up to it has a parapet round its edge.
@@ -69,7 +81,7 @@ const STYLES := {
 ## and of a stair up onto the roof of a single-storey one ("roof"; two storeys always have one).
 const TYPES := {
 	"house": {"w": [8.0, 13.0], "d": [7.0, 11.0], "rooms": [4, 6], "front": "living", "back": "kitchen",
-		"dark": ["bathroom", "storeroom"], "door_w": 0.9, "win_w": 1.0,
+		"dark": ["bathroom", "storeroom"], "door_w": 1.1, "win_w": 1.0,
 		"storeys": 0.3, "l_shape": 0.5, "yard": 0.4, "roof": 0.25,
 		"upper": {"front": "living", "fill": ["bedroom"], "smallest": "bathroom", "rest": "bedroom"}},
 	"shop": {"w": [7.0, 11.0], "d": [8.0, 12.0], "rooms": [3, 4], "front": "shopfront", "fill": ["storeroom", "office"],
@@ -103,10 +115,12 @@ static func house(seed: int, style := "") -> Dictionary:
 ## "chunk", "floor" (0 the ground), "y" (its floor's height, m)}], "doors": [{"at": Vector3,
 ## "rooms": [i, j] (j -1: outside, -2: the roof), "stair" (a stair up: "at" its landing)}],
 ## "windows": [{"at" (the middle of its opening's inner face, on its floor), "out" (Vector3 out
-## of it), "floor", "room"}], "roof_y" (the roof's top: where one stands on it), "loot": [{"at", "table"}], "stairs": [{"foot" (Rect2), "from_y", "to_y", "steps"}], "yards":
-## [{"rect" (Rect2 inside its walls), "gate" (Vector3, or null)}], "size": Vector2 (the lot,
-## yard and all), "storeys", "shape" ("rect" or "l"), "roof_access", "height" (m, its top),
-## "style", "type"}. The shell stands at the front (+z) of the lot, a yard behind it.
+## of it), "floor", "room"}], "roof_y" (the roof's top: where one stands on it), "loot":
+## [{"at", "table"}], "stairs": [{"foot" (Rect2), "from_y", "to_y", "steps", "low", "up",
+## "along_x" (as _stair)}], "yards": [{"rect" (Rect2 inside its walls), "gate" (Vector3, or
+## null)}], "size": Vector2 (the lot, yard and all), "storeys", "shape" ("rect" or "l"),
+## "roof_access", "height" (m, its top), "style", "type"}. The shell stands at the front (+z)
+## of the lot, a yard behind it.
 static func building(type: String, seed: int, style := "") -> Dictionary:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed
@@ -175,7 +189,7 @@ static func building(type: String, seed: int, style := "") -> Dictionary:
 		_doorways(rects, links, hub2, roles2.find("bathroom"), rng, floors[1].gaps, doors, n, fh)
 		var land: Vector2 = (up.land as Rect2).get_center()
 		doors.append({"at": Vector3(land.x, fh, land.y), "rooms": [int(up.room), n + hub2], "stair": true})
-		stairs.append({"foot": hole, "from_y": 0.0, "to_y": fh, "steps": int(up.steps)})
+		stairs.append({"foot": hole, "from_y": 0.0, "to_y": fh, "steps": int(up.steps), "low": up.low, "up": up.up, "along_x": up.along_x})
 		avoid["0:%d" % up.room] = [hole.grow(0.7)]
 		avoid["1:%d" % hub2] = [hole.grow(0.5), (up.land as Rect2).grow(0.3)]
 	# Up onto the roof: two storeys always, one now and then.
@@ -190,7 +204,7 @@ static func building(type: String, seed: int, style := "") -> Dictionary:
 		if not roof.is_empty():
 			var land: Vector2 = (roof.land as Rect2).get_center()
 			doors.append({"at": Vector3(land.x, roof_y + roof_t, land.y), "rooms": [int(top.first) + int(roof.room), -2], "stair": true})
-			stairs.append({"foot": roof.foot, "from_y": top.y, "to_y": roof_y + roof_t, "steps": int(roof.steps)})
+			stairs.append({"foot": roof.foot, "from_y": top.y, "to_y": roof_y + roof_t, "steps": int(roof.steps), "low": roof.low, "up": roof.up, "along_x": roof.along_x})
 			var key := "%d:%d" % [floors.size() - 1, roof.room]
 			avoid[key] = (avoid.get(key, []) as Array) + [(roof.foot as Rect2).grow(0.7)]
 	# Windows on outside walls, but not in the type's dark rooms (bathrooms, storerooms, an armoury).
@@ -592,7 +606,8 @@ static func _door_clear(at: Vector3, room: Rect2) -> Rect2:
 
 ## A stair up `rise` m in one of a floor's rooms (`rects`, numbered from `first` in `doors`; not
 ## a bathroom; the biggest first): along a wall from a corner, clear of every doorway's floor
-## and of `keep` (Rect2s), with STAIR_LANDING free past its top in the same room. {"room",
+## and of `keep` (Rect2s), STAIR_APPROACH in front of its foot and STAIR_LANDING free past its
+## top in the same room. {"room",
 ## "foot" (Rect2), "side" (its wall), "along_x", "low" (where its foot is, along), "up" (1 or
 ## -1: which way it climbs), "steps", "land" (Rect2: the landing)}, or {} if none fits.
 static func _stair(rects: Array[Rect2], roles: Array, doors: Array, first: int, rise: float, keep: Array, rng: RandomNumberGenerator) -> Dictionary:
@@ -613,7 +628,7 @@ static func _stair(rects: Array[Rect2], roles: Array, doors: Array, first: int, 
 			var along_x := side in ["n", "s"]
 			var length := room.size.x if along_x else room.size.y
 			var across := room.size.y if along_x else room.size.x
-			if length >= run + STAIR_LANDING + FURNITURE_GAP * 2.0 and across >= STAIR_W + 0.9:
+			if length >= run + STAIR_LANDING + STAIR_APPROACH + FURNITURE_GAP and across >= STAIR_W + 0.9:
 				options.append([side, 1])
 				options.append([side, -1])
 		for k in range(options.size() - 1, 0, -1):
@@ -625,8 +640,8 @@ static func _stair(rects: Array[Rect2], roles: Array, doors: Array, first: int, 
 			var side: String = o[0]
 			var up: int = o[1]
 			var along_x := side in ["n", "s"]
-			var low := ((room.position.x if along_x else room.position.y) + FURNITURE_GAP) if up == 1 \
-				else ((room.end.x if along_x else room.end.y) - FURNITURE_GAP)
+			var low := ((room.position.x if along_x else room.position.y) + STAIR_APPROACH) if up == 1 \
+				else ((room.end.x if along_x else room.end.y) - STAIR_APPROACH)
 			var high := low + up * run
 			var c0: float
 			match side:
@@ -676,6 +691,35 @@ static func _rails(out: Array, s: Dictionary, y: float) -> void:
 		out.append([Vector3(l0, y, f.position.y), Vector3(l0 + RAIL_T, yt, f.end.y), mat])
 	else:
 		out.append([Vector3(f.position.x, y, l0), Vector3(f.end.x, yt, l0 + RAIL_T), mat])
+
+
+## For the navmesh bake only (NavBuilder, ZoneNav): a ramp over each of building `b`'s stairs,
+## in its own metres, as triangles facing up (two a stair). It lies a step's rise over the step
+## nosings, so it's over every tread, from that high at the foot to that high over its top
+## landing: one 0.2 m climb on and off, and a smooth slope between that a 0.25 m cell bakes
+## whole (the steps themselves, voxels, came out cut in two: see STAIR_RISE).
+static func ramp_faces(b: Dictionary) -> PackedVector3Array:
+	var faces := PackedVector3Array()
+	for st: Dictionary in b.get("stairs", []):
+		if not st.has("up"):
+			continue
+		var f: Rect2 = st.foot
+		var rise := (float(st.to_y) - float(st.from_y)) / maxf(float(st.steps), 1.0)
+		var y_low := float(st.from_y) + rise
+		var y_high := float(st.to_y) + rise
+		var up := int(st.up)
+		# Heights at the rect's low and high x (or z), whichever way it climbs.
+		var y0 := y_low if up == 1 else y_high
+		var y1 := y_high if up == 1 else y_low
+		var a := Vector3(f.position.x, 0, f.position.y)
+		var c := Vector3(f.end.x, 0, f.end.y)
+		var corners: Array[Vector3]
+		if st.along_x:
+			corners = [Vector3(a.x, y0, a.z), Vector3(c.x, y1, a.z), Vector3(c.x, y1, c.z), Vector3(a.x, y0, c.z)]
+		else:
+			corners = [Vector3(a.x, y0, a.z), Vector3(c.x, y0, a.z), Vector3(c.x, y1, c.z), Vector3(a.x, y1, c.z)]
+		faces.append_array([corners[0], corners[1], corners[2], corners[0], corners[2], corners[3]])
+	return faces
 
 
 # --- Walls -----------------------------------------------------------------------------------
@@ -964,7 +1008,8 @@ const TOWN_MIX := {"house": 6.0, "shop": 2.5, "warehouse": 1.0, "clinic": 0.6, "
 ## degrees), "data" (building())}], "half" (Vector2: footprint half-size, m), "points"
 ## ({"objective", "cache", "intel"}: Array of Vector3), "garrison" (Array of Vector3),
 ## "garrison_face" (Vector3 for each post: the way it looks out, Vector3.ZERO: the default),
-## "garrison_high" (how many of the posts are up high), "loot"
+## "garrison_high" (how many of the posts are up high), "ramps" (the stairs' ramp_faces for
+## the navmesh, town metres), "loot"
 ## (ZoneModules.LOOT entries: {"uid", "id", "count", "pos"}), "hvt" and "hostage" (Vector3: the
 ## middle of the room an HVT lives in, an office or a living room, and of the room a hostage is
 ## held in, the police cells or a bedroom), "cache" ([lo, hi] Vector3s: a weapons cache, crates
@@ -976,6 +1021,7 @@ static func town(seed: int, style := "") -> Dictionary:
 	if style == "":
 		style = STYLES.keys()[rng.randi() % STYLES.size()]
 	var boxes: Array = []
+	var ramps := PackedVector3Array()  # the stairs' ramps for the navmesh (ramp_faces), town metres
 	var buildings: Array = []
 	var once := {}
 	var deepest := 0.0
@@ -1008,6 +1054,8 @@ static func town(seed: int, style := "") -> Dictionary:
 						lo = nlo
 						hi = nhi
 					boxes.append([lo + origin, hi + origin, bx[2]])
+				for p: Vector3 in ramp_faces(b):  # (turned round: a rotation, the faces still face up)
+					ramps.append((Vector3(-p.x, p.y, -p.z) if turned else p) + origin)
 				buildings.append({"type": type, "origin": origin, "turned": turned, "data": b})
 				deepest = maxf(deepest, size.y)
 				cursor += size.x + LOT_GAP
@@ -1058,7 +1106,7 @@ static func town(seed: int, style := "") -> Dictionary:
 	var cache: Array = [at - Vector3(TOWN_CACHE.x * 0.5, 0, TOWN_CACHE.z * 0.5), at + Vector3(TOWN_CACHE.x * 0.5, TOWN_CACHE.y, TOWN_CACHE.z * 0.5)]
 	boxes.append([cache[0], cache[1], VoxelWorld.Mat.WOOD])
 	return {"boxes": boxes, "buildings": buildings, "half": half, "points": points, "garrison": garrison,
-		"garrison_face": face, "garrison_high": high, "loot": loot, "civilians": civilians, "style": style, "cache": cache,
+		"garrison_face": face, "garrison_high": high, "ramps": ramps, "loot": loot, "civilians": civilians, "style": style, "cache": cache,
 		"hvt": _town_room(buildings, ["office", "living"], Vector3(-CROSS_W, 0.1, 0)),
 		"hostage": _town_room(buildings, ["cells", "bedroom"], Vector3(CROSS_W, 0.1, 0))}
 

@@ -3,8 +3,9 @@ extends RefCounted
 ## Buildings the AI can garrison and clear (Captain, P0164 queue 17 core). They are found by
 ## probing what stands in the world now, not read from a list, so the compound's main building,
 ## a module's houses and a wall blown open all count as they are:
-## - Inside: a walkable spot (on the navmesh) with walls round it. Of PROBE_DIRS level rays at
-##   PROBE_HEIGHT (below a window's sill, so only doorways and breaches let them out), at most
+## - Inside: a walkable spot (navmesh over it; the spot is on the floor itself, the navmesh
+##   floats a little over it) with walls round it. Of PROBE_DIRS level rays at PROBE_HEIGHT
+##   (below a window's sill, so only doorways and breaches let them out), at most
 ##   MAX_OPEN reach PROBE_M without meeting a wall, and never two opposite ones (a gap between
 ##   two buildings is no room). Ground rising under a ray isn't a wall (hilly zones). Inside
 ##   spots next to each other make one building.
@@ -12,21 +13,25 @@ extends RefCounted
 ##   SCAN_DOWN_M below the query to SCAN_UP_M above it (found by casting down through the
 ##   building: ground floor, upper floor, roof), so a scan from any floor finds them all.
 ##   Neighbouring spots join when they're level (STEP_M) or, up to STAIR_STEP_M apart, when a
-##   short navmesh path links them (a stair's steps; never a bed's top). Heights where
+##   short navmesh path links them (a stair's steps; never a bed's top). Floors stacked over
+##   each other (LINK_OVERLAP cells in common) are one building when a navmesh path within
+##   their footprint runs from one to the other (a stair the 1 m grid misses). Heights where
 ##   FLOOR_MIN_SPOTS or more spots stand level are the building's floors; the spots between
 ##   them are stairs. A floor above the first with open sky over it is a roof (a flat roof with
 ##   a parapet: its edge spots are firing ports all round).
 ## - Entrances: where a navmesh path from inside the first floor out to the open leaves the
 ##   building (a doorway, or a breach the navmesh has been rebaked through).
-## - Firing ports: spots on a floor's edge against a wall with an opening in it (a wall at
-##   PROBE_HEIGHT, a clear view out at PORT_EYE): "window" with wall above it, "parapet" without
+## - Firing ports: spots on a floor's edge against a wall with an opening in it, looking out
+##   square to the wall (a wall at PROBE_HEIGHT, a clear view out at PORT_EYE): "window" with
+##   wall above it, "parapet" without
 ##   (a roof's parapet; a railing that only looks across the building's own floor isn't one);
 ##   and the doorways ("door").
 ## - Rooms: per floor, the inside spots that see each other, taken in turn from the way in (the
 ##   first entrance, or the stair up), each with the two corners the first two in take.
-## - Stairs: where two floors join, the spot at its foot and the one at its top: the way up
-##   is an inside entrance to the floor above (and a chokepoint).
-## A building is a Dictionary: "spots" (Array of Vector3 on the navmesh, every floor), "centre",
+## - Stairs: where two floors join (stair spots, or the path that linked them), the spot at its
+##   foot and the one at its top: the way up is an inside entrance to the floor above (and a
+##   chokepoint).
+## A building is a Dictionary: "spots" (Array of Vector3 on the floors, every floor), "centre",
 ## "entrances" ([{"door", "inside", "outside", "normal"}], "normal" pointing out), "ports"
 ## ([{"point", "dir", "kind": "window", "parapet" or "door", "floor"}]), "rooms" ([{"spots",
 ## "centre", "corners", "floor"}], floor by floor), "floors" ([{"y", "spots", "rooms" (indices
@@ -64,19 +69,26 @@ const CACHE_MAX := 48
 ## Floors (F-01): surfaces are looked for from SCAN_UP_M above the query down to SCAN_DOWN_M
 ## below it (a scan from the roof of a two-storey building reaches its ground floor), at most
 ## MAX_SURFACES of them over a cell; a surface is one whose normal.y is FLOOR_NORMAL_Y or more,
-## and a navmesh point within SURFACE_SNAP_M of it is walkable there. Each ray after the first
-## starts SURFACE_SKIP_M under the surface found (below a slab).
+## and a navmesh point from SURFACE_SNAP_BELOW_M under it to SURFACE_SNAP_M over it, with that
+## surface the first one under it, is walkable there (the baked navmesh sits up to two 0.25 m
+## cells over the floor it was baked on). Each ray after the first starts SURFACE_SKIP_M under
+## the surface found (below a slab).
 const SCAN_UP_M := 9.0
 const SCAN_DOWN_M := 8.0
 const MAX_SURFACES := 8
 const FLOOR_NORMAL_Y := 0.7
-const SURFACE_SNAP_M := 0.4
+const SURFACE_SNAP_M := 0.65
+const SURFACE_SNAP_BELOW_M := 0.2
 const SURFACE_SKIP_M := 0.3
 ## Neighbouring spots up to STEP_M apart in height are level; up to STAIR_STEP_M apart they
 ## join only when a navmesh path no longer than LINK_PATH_M runs from one to the other.
 const STEP_M := 0.35
 const STAIR_STEP_M := 1.25
 const LINK_PATH_M := 3.0
+## Floors that share LINK_OVERLAP or more cells of their footprints are linked when a navmesh
+## path no longer than LINK_PATH_MAX_M runs from one to the other within that footprint.
+const LINK_OVERLAP := 4
+const LINK_PATH_MAX_M := 40.0
 ## A floor: FLOOR_MIN_SPOTS or more spots level with each other; spots within FLOOR_BAND_M of
 ## its height are on it. A floor above the first is a roof when nothing stands ROOF_SKY_M over
 ## most of it.
@@ -206,16 +218,24 @@ static func _scan(world: World3D, centre: Vector3, radius: float) -> Array:
 			for y: float in surfaces:
 				var p := Vector3(x, y + 0.1, z)
 				var q := NavigationServer3D.map_get_closest_point(map, p)
-				if Vector2(q.x - p.x, q.z - p.z).length() > NAV_SNAP_M or absf(q.y - y) > SURFACE_SNAP_M:
+				if Vector2(q.x - p.x, q.z - p.z).length() > NAV_SNAP_M or q.y - y > SURFACE_SNAP_M or y - q.y > SURFACE_SNAP_BELOW_M:
 					continue
-				if here.any(func(s: Vector3) -> bool: return absf(s.y - q.y) < STEP_M):
+				# The floor under that navmesh point must be this surface: the navmesh floats a little
+				# over the floor, as high as a bed or a sofa (the floor's navmesh beside one is no
+				# spot on its top). The spot is on the floor itself.
+				var under := space.intersect_ray(PhysicsRayQueryParameters3D.create(q + Vector3.UP * 0.05, q + Vector3.DOWN * (SURFACE_SNAP_M + 0.3), Throwables.WORLD_MASK))
+				if under.is_empty() or absf((under.position as Vector3).y - y) > 0.15:
 					continue
-				if inside(world, q):
-					here.append(q)
+				var s := Vector3(q.x, (under.position as Vector3).y, q.z)
+				if here.any(func(o: Vector3) -> bool: return absf(o.y - s.y) < STEP_M):
+					continue
+				if inside(world, s):
+					here.append(s)
 			if not here.is_empty():
 				spots[cell] = here
 	# Spots next to each other (8 ways) and level, or linked up a stair, make one building.
 	var out: Array = []
+	var groups: Array = []  # Array[Vector3i] each: the spots of one floor (or more, up a stair)
 	var seen := {}
 	var joins := {}  # Vector3i -> Array of Vector3i: neighbours joined up a stair's rise
 	for cell: Vector2i in spots:
@@ -248,10 +268,138 @@ static func _scan(world: World3D, centre: Vector3, radius: float) -> Array:
 								seen[id] = true
 								queue.append(id)
 			if group.size() >= MIN_SPOTS:
-				var b := _building(world, spots, group, joins, ground)
-				if not b.is_empty():
-					out.append(b)
+				groups.append(group)
+	# Floors stacked over each other and linked by a navmesh path that never leaves their
+	# footprint (a stair inside: the grid's spots on a narrow stair can miss its navmesh) are
+	# one building; the path gives the stair between them.
+	var climbs := _link_floors(map, spots, groups)
+	for gi in groups.size():
+		if (groups[gi] as Array).is_empty():
+			continue
+		var b := _building(world, spots, groups[gi], joins, ground, climbs.get(gi, []))
+		if not b.is_empty():
+			out.append(b)
 	return out
+
+
+## Merges the groups (each an Array[Vector3i] of spots) that stand over each other, with
+## LINK_OVERLAP cells or more of their footprints in common, and are linked by a navmesh path
+## that stays within their footprint: the higher one's spots go into the lower one's group
+## (the group merged away is left empty). Returns {group index: [{"foot", "top", "spots"}]}:
+## each link's stair, from its path (the last point on the lower floor, the first on the upper).
+static func _link_floors(map: RID, spots: Dictionary, groups: Array) -> Dictionary:
+	var info: Array = []  # per group: {"cells": {Vector2i: true}, "y": mean height, "centre"}
+	for g: Array in groups:
+		var cells := {}
+		var sum := Vector3.ZERO
+		for id: Vector3i in g:
+			cells[Vector2i(id.x, id.z)] = true
+			sum += _spot(spots, id)
+		info.append({"cells": cells, "y": sum.y / g.size(), "centre": sum / g.size()})
+	var order: Array = range(groups.size())
+	order.sort_custom(func(a: int, c: int) -> bool: return float(info[a].y) < float(info[c].y))
+	var owner: Array = range(groups.size())  # each group's building: the group it's merged into
+	var climbs := {}
+	for oi in order.size():
+		var hi: int = order[oi]
+		for oj in range(oi - 1, -1, -1):
+			var lo: int = order[oj]
+			if float(info[hi].y) - float(info[lo].y) <= STEP_M or int(owner[lo]) == int(owner[hi]):
+				continue
+			var shared := 0
+			for c: Vector2i in info[hi].cells:
+				if info[lo].cells.has(c):
+					shared += 1
+			if shared < LINK_OVERLAP:
+				continue
+			var stair := _climb(map, spots, groups[lo], groups[hi], info[lo], info[hi])
+			if stair.is_empty():
+				continue
+			var root: int = owner[lo]
+			var gone: int = owner[hi]
+			for k in owner.size():
+				if int(owner[k]) == gone:
+					owner[k] = root
+			climbs[root] = (climbs.get(root, []) as Array) + (climbs.get(gone, []) as Array) + [stair]
+			climbs.erase(gone)
+			break
+	for k in groups.size():
+		var root: int = owner[k]
+		if root != k:
+			(groups[root] as Array).append_array(groups[k])
+	for k in groups.size():
+		if int(owner[k]) != k:
+			groups[k] = [] as Array[Vector3i]
+	return climbs
+
+
+## The stair from group `lo` up to group `hi` (see _link_floors): {"foot", "top", "spots"}, or
+## {} if no navmesh path within their footprint links them.
+static func _climb(map: RID, spots: Dictionary, lo: Array, hi: Array, lo_info: Dictionary, hi_info: Dictionary) -> Dictionary:
+	var from := _spot_nearest(spots, lo, hi_info.centre)
+	var to := _spot_nearest(spots, hi, lo_info.centre)
+	var path := NavigationServer3D.map_get_path(map, from, to, true)
+	if path.is_empty() or not _reached(path[path.size() - 1], to):
+		return {}
+	var cells: Dictionary = (lo_info.cells as Dictionary).duplicate()
+	cells.merge(hi_info.cells)
+	var samples: Array[Vector3] = [path[0]]
+	var length := 0.0
+	for i in range(1, path.size()):
+		var a: Vector3 = path[i - 1]
+		var z: Vector3 = path[i]
+		length += a.distance_to(z)
+		var steps := maxi(ceili(a.distance_to(z) / (GRID_M * 0.25)), 1)
+		for j in range(1, steps + 1):
+			samples.append(a.lerp(z, float(j) / steps))
+	if length > LINK_PATH_MAX_M:
+		return {}
+	for p in samples:
+		var c := Vector2i(floori(p.x / GRID_M), floori(p.z / GRID_M))
+		var near := false
+		for dx in [-1, 0, 1]:
+			for dz in [-1, 0, 1]:
+				if cells.has(c + Vector2i(dx, dz)):
+					near = true
+		if not near:
+			return {}  # out of the building and back in: no stair inside
+	# The path runs on the navmesh, a little over the floors: heights are taken from its ends,
+	# and the foot and top put back down on the floors.
+	var low_y := samples[0].y
+	var high_y := samples[samples.size() - 1].y
+	var foot := -1
+	for i in samples.size():
+		if samples[i].y <= low_y + FLOOR_BAND_M:
+			foot = i
+	var top := -1
+	for i in range(maxi(foot, 0), samples.size()):
+		if samples[i].y >= high_y - FLOOR_BAND_M:
+			top = i
+			break
+	if foot < 0 or top <= foot:
+		return {}
+	var sink := func(p: Vector3, floor_y: float, nav_y: float) -> Vector3: return Vector3(p.x, p.y - nav_y + floor_y, p.z)
+	var between: Array = samples.slice(foot + 1, top).map(func(p: Vector3) -> Vector3: return sink.call(p, from.y, low_y))
+	return {"foot": sink.call(samples[foot], from.y, low_y), "top": sink.call(samples[top], to.y, high_y), "spots": between}
+
+
+## Whether a path's last point `end` (on the navmesh, which floats up to SURFACE_SNAP_M over the
+## floor) got to `goal` (a spot on the floor).
+static func _reached(end: Vector3, goal: Vector3) -> bool:
+	return Vector2(end.x - goal.x, end.z - goal.z).length() <= 0.5 and end.y - goal.y <= SURFACE_SNAP_M + 0.1 and goal.y - end.y <= 0.5
+
+
+## The spot of `group` flat-nearest `point`.
+static func _spot_nearest(spots: Dictionary, group: Array, point: Vector3) -> Vector3:
+	var best := Vector3.INF
+	var best_d := INF
+	for id: Vector3i in group:
+		var s := _spot(spots, id)
+		var d := Vector2(s.x - point.x, s.z - point.z).length()
+		if d < best_d:
+			best = s
+			best_d = d
+	return best
 
 
 ## The upward surfaces straight down from `top` to height `bottom` (lowest first): floors,
@@ -275,7 +423,7 @@ static func _surfaces(space: PhysicsDirectSpaceState3D, top: Vector3, bottom: fl
 ## Whether a short navmesh path runs from `a` to `b` (a stair's steps between them).
 static func _linked(map: RID, a: Vector3, b: Vector3) -> bool:
 	var path := NavigationServer3D.map_get_path(map, a, b, true)
-	if path.is_empty() or path[path.size() - 1].distance_to(b) > 0.5:
+	if path.is_empty() or not _reached(path[path.size() - 1], b):
 		return false
 	var length := 0.0
 	for i in range(1, path.size()):
@@ -312,9 +460,16 @@ static func inside(world: World3D, q: Vector3) -> bool:
 
 ## A wall (an upright surface, not the ground rising) within `reach` from `from` along `dir`.
 static func _wall_within(world: World3D, from: Vector3, dir: Vector3, reach: float) -> bool:
+	return _wall_m(world, from, dir, reach) < INF
+
+
+## How far along `dir` from `from` a wall stands (see _wall_within), INF for none within `reach`.
+static func _wall_m(world: World3D, from: Vector3, dir: Vector3, reach: float) -> float:
 	var query := PhysicsRayQueryParameters3D.create(from, from + dir * reach, Throwables.WORLD_MASK)
 	var hit := world.direct_space_state.intersect_ray(query)
-	return not hit.is_empty() and absf((hit.normal as Vector3).y) < WALL_NORMAL_Y
+	if hit.is_empty() or absf((hit.normal as Vector3).y) >= WALL_NORMAL_Y:
+		return INF
+	return from.distance_to(hit.position)
 
 
 static func _dir(k: int) -> Vector3:
@@ -322,7 +477,7 @@ static func _dir(k: int) -> Vector3:
 	return Vector3(cos(a), 0.0, sin(a))
 
 
-static func _building(world: World3D, spots: Dictionary, group: Array[Vector3i], joins: Dictionary, ground: Dictionary) -> Dictionary:
+static func _building(world: World3D, spots: Dictionary, group: Array[Vector3i], joins: Dictionary, ground: Dictionary, climbs: Array = []) -> Dictionary:
 	var list: Array[Vector3] = []
 	var centre := Vector3.ZERO
 	var cells := {}  # Vector2i -> true: every cell the building covers, any floor
@@ -362,6 +517,13 @@ static func _building(world: World3D, spots: Dictionary, group: Array[Vector3i],
 	# The stairs: spots between floors joined to two floors, or two floors' spots joined directly.
 	var b := {"spots": list, "centre": centre, "entrances": [], "ports": [], "rooms": [], "floors": floors, "stairs": []}
 	b.stairs = _stairs(spots, group, joins, floors)
+	# And those found by a navmesh path between stacked floors (_link_floors).
+	for c: Dictionary in climbs:
+		var lo := _floor_index(floors, (c.foot as Vector3).y)
+		var hi := _floor_index(floors, (c.top as Vector3).y)
+		if lo >= 0 and hi > lo and not (b.stairs as Array).any(func(st: Dictionary) -> bool: return int(st.from) == lo and int(st.to) == hi):
+			(b.stairs as Array).append({"from": lo, "to": hi, "foot": c.foot, "top": c.top, "spots": c.spots})
+	(b.stairs as Array).sort_custom(func(p: Dictionary, q: Dictionary) -> bool: return int(p.to) < int(q.to))
 	b.entrances = _entrances(world, b, cells)
 	if b.entrances.is_empty():
 		var low := INF
@@ -543,9 +705,15 @@ static func _ports(world: World3D, b: Dictionary, cells: Dictionary) -> Array:
 			if not edge:
 				continue
 			var q: Vector3 = on[c]
+			if out.any(func(p: Dictionary) -> bool: return (p.point as Vector3).distance_to(q) < PORT_GAP_M):
+				continue
+			# Of the ways out of it, the one square to its wall (the wall nearest that way).
+			var best := {}
+			var best_m := INF
 			for k in PROBE_DIRS:
 				var d := _dir(k)
-				if not _wall_within(world, q + Vector3.UP * PROBE_HEIGHT, d, PORT_WALL_M):
+				var wall_m := _wall_m(world, q + Vector3.UP * PROBE_HEIGHT, d, PORT_WALL_M)
+				if wall_m >= best_m:
 					continue
 				var eye := q + Vector3.UP * PORT_EYE
 				if not Throwables.clear_line(world, eye, eye + d * PORT_VIEW_M):
@@ -554,9 +722,10 @@ static func _ports(world: World3D, b: Dictionary, cells: Dictionary) -> Array:
 				var far := eye + d * PORT_VIEW_M
 				if not window and on.has(Vector2i(floori(far.x / GRID_M), floori(far.z / GRID_M))):
 					continue  # a railing: across its own floor
-				if out.any(func(p: Dictionary) -> bool: return (p.point as Vector3).distance_to(q) < PORT_GAP_M):
-					continue
-				out.append({"point": q, "dir": d, "kind": "window" if window else "parapet", "floor": fi})
+				best = {"point": q, "dir": d, "kind": "window" if window else "parapet", "floor": fi}
+				best_m = wall_m
+			if not best.is_empty():
+				out.append(best)
 	return out
 
 

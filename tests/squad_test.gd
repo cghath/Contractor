@@ -503,7 +503,8 @@ func _test_multi_storey() -> void:
 	var solid := await _wait_until(func() -> bool:
 		var hit := space.intersect_ray(PhysicsRayQueryParameters3D.create(on_roof, on_roof + Vector3.DOWN * 3.0, 1))
 		return not hit.is_empty() and absf((hit.position as Vector3).y - roof_y) < 0.2, 15.0)
-	# Its navigation, as NavBuilder bakes a chunk: the ground and the voxels as they stand.
+	# Its navigation, as NavBuilder bakes a chunk: the ground and the voxels as they stand, and
+	# (as ZoneNav adds a town's) ramps over its stairs.
 	var nav := level.get_node(^"Navigation") as NavBuilder
 	var foot := Rect2(STOREY_AT.x - b.size.x * 0.5 - 3.0, STOREY_AT.z - b.size.y * 0.5 - 3.0, b.size.x + 6.0, b.size.y + 6.0)
 	var lo := NavBuilder.chunk_at(Vector3(foot.position.x, 0, foot.position.y))
@@ -516,6 +517,7 @@ func _test_multi_storey() -> void:
 			var local := world.global_transform.affine_inverse() * bounds
 			for box in world.solid_boxes_m(local):
 				source.add_faces(NavBuilder._box_faces(box), world.global_transform)
+			source.add_faces(BuildingGen.ramp_faces(b), world.global_transform)  # as ZoneNav bakes a town's
 			var mesh := NavBuilder._new_mesh(chunk)
 			NavigationServer3D.bake_from_source_geometry_data(mesh, source)
 			nav.region_of(chunk).navigation_mesh = mesh
@@ -524,7 +526,7 @@ func _test_multi_storey() -> void:
 	var street := NavigationServer3D.map_get_closest_point(map, STOREY_AT + Vector3(0, 0, b.size.y * 0.5 + 4.0))
 	var roof_goal := NavigationServer3D.map_get_closest_point(map, STOREY_AT + Vector3(0, roof_y + 0.2, b.size.y * 0.25))
 	var path := NavigationServer3D.map_get_path(map, street, roof_goal, true)
-	check(built and solid and absf(roof_goal.y - roof_y) < 0.4 and path.size() > 2 and path[-1].distance_to(roof_goal) < 0.5,
+	check(built and solid and roof_goal.y - roof_y > -0.2 and roof_goal.y - roof_y < Buildings.SURFACE_SNAP_M and path.size() > 2 and path[-1].distance_to(roof_goal) < 0.5,
 		"the house stands (%s, %s) and the navmesh runs from the street up the stairs onto its roof (%d points, ends %.1f m off, at %.2f m)"
 		% [built, solid, path.size(), path[-1].distance_to(roof_goal) if path.size() > 0 else INF, roof_goal.y])
 	# The scan: from the ground floor, three floors (the roof the top one), two stairs.
@@ -565,23 +567,20 @@ func _test_multi_storey() -> void:
 	var names := PackedStringArray(mates.map(func(ai: SquadAI) -> String: return String(ai.body.name)))
 	var why := squad.order_clear(player, front_room, names)
 	var op: Dictionary = mates[0].ordered.get("op", {}) if why == "" else {}
-	var first_up := -1.0
-	var gone_up_at := INF
-	var upstairs := ""
+	var up := {"first": -1.0, "gone_at": INF, "who": ""}  # (a lambda can't set the function's locals)
 	var visited := await _wait_until(func() -> bool:
 		for ai: SquadAI in mates:
-			if ai.body.global_position.y > upper - 0.5 and Buildings.contains(found, ai.body.global_position):
-				if first_up < 0.0:
-					first_up = Soldier._now()
-					gone_up_at = float((op.get("floor_go", [INF, INF]) as Array)[1]) if not op.is_empty() else INF
-					upstairs = String(ai.body.name)
+			if ai.body.global_position.y > upper - 0.15 and Buildings.contains(found, ai.body.global_position):
+				up.first = Soldier._now()
+				up.gone_at = float((op.get("floor_go", [INF, INF]) as Array)[1]) if not op.is_empty() else INF
+				up.who = String(ai.body.name)
 				return true
 		return false, 90.0)
 	var statuses := mates.map(func(ai: SquadAI) -> String: return "%s %s %.1f" % [ai.body.name, ai.body.ai_status, ai.body.global_position.y])
 	check(why == "" and visited and (op.get("floors", []) as Array).size() == 3,
-		"ordered to clear it, the team goes up the stairs: %s on the floor above (%s; %s)" % [upstairs, why, statuses])
-	check(is_finite(gone_up_at) and gone_up_at <= first_up,
-		"floor by floor: nobody goes up before the ground floor's rooms are done (went up at %.1f, first upstairs at %.1f)" % [gone_up_at, first_up])
+		"ordered to clear it, the team goes up the stairs: %s on the floor above (%s; %s)" % [up.who, why, statuses])
+	check(is_finite(float(up.gone_at)) and float(up.gone_at) <= float(up.first),
+		"floor by floor: nobody goes up before the ground floor's rooms are done (went up at %.1f, first upstairs at %.1f)" % [up.gone_at, up.first])
 	for ai: SquadAI in mates:
 		ai.give_tactic({})
 	squad.give_order(player, Squad.Order.FOLLOW, player.global_position)
@@ -609,6 +608,7 @@ func _test_multi_storey() -> void:
 		"loadout": CompoundLevel.HOSTILE_LOADOUT, "combat": 0.3, "discipline": 0.5, "guard": true})
 	await _frames(2)
 	SquadAI.of(hostile).process_mode = Node.PROCESS_MODE_DISABLED
+	hostile.set_physics_process(false)  # he stands where he was put (he walked up under the wall)
 	var engaged := await _wait_until(func() -> bool:
 		return not is_instance_valid(hostile) or not hostile.vitals.is_up() or gunner.target == hostile, 12.0)
 	var seen := is_instance_valid(hostile) and Squad.sees(gunner.body, hostile)

@@ -878,6 +878,12 @@ func _test_towns() -> void:
 		"a bad seed isn't a type; the same seed builds the same town")
 	check((ZoneModules.GARRISON_FACE.get(type, []) as Array).size() == (ZoneModules.GARRISON.get(type, []) as Array).size(),
 		"and the way each of its posts looks out (%d)" % (ZoneModules.GARRISON_FACE.get(type, []) as Array).size())
+	# Its stairs as ramps for the navmesh bake (ZoneNav): two triangles a stair, every stair.
+	var stairs := 0
+	for bt: Dictionary in BuildingGen.town(4409).buildings:
+		stairs += (bt.data.stairs as Array).size()
+	check(stairs > 0 and ZoneModules.ramps(type).size() == stairs * 6 and ZoneModules.ramps("village").is_empty(),
+		"its %d stairs have ramps for the navmesh (%d corners); a village has none" % [stairs, ZoneModules.ramps(type).size()])
 	# Navigation reaches the roofs (F-01): a zone chunk's bake keeps HEADROOM_M over its highest
 	# ground, room for the tallest building's roof and a soldier standing on it.
 	var tallest := 0.0
@@ -896,6 +902,8 @@ func _test_town_posts() -> void:
 	var seeds: Array = [5, 12, 77, 301, 4409, 9001, 23, 640]
 	var shares := []
 	var ok_share := true
+	var all_high := 0
+	var all_posts := 0
 	var ok_up := true
 	var ok_ground := true
 	var roofs := 0
@@ -937,14 +945,22 @@ func _test_town_posts() -> void:
 			if not (on_roof or upstairs) or not BuildingGen._clear_post(home.data.boxes, local) or out.dot(street) < 0.5:
 				ok_up = false
 				why.append("town %d: post %s (roof %s, upstairs %s, looks %s)" % [seed, local, on_roof, upstairs, out])
-		var share := float(high) / maxf(posts.size(), 1.0)
+		# A third of them, as far as the town has buildings with an upper floor or a roof to stand on.
+		var can := 0
+		for bi in (t.buildings as Array).size():
+			can += 0 if BuildingGen._high_post(t.buildings[bi].data, bi).is_empty() else 1
+		var total := ((t.buildings as Array).size() + 1) / 2 + 2  # as BuildingGen._town_posts counts them
+		var want := mini(roundi(total * BuildingGen.TOWN_HIGH_SHARE), can)
 		shares.append("%d/%d" % [high, posts.size()])
-		if share < 0.2 or share > 0.4 or high != int(t.garrison_high):
+		all_high += high
+		all_posts += posts.size()
+		if high != want or float(high) / maxf(posts.size(), 1.0) > 0.4 or high != int(t.garrison_high):
 			ok_share = false
 		if ground * 2 < posts.size() or faces.size() != posts.size():
 			ok_ground = false
-	check(ok_share and roofs >= 3 and windows >= 3,
-		"town garrisons (8 seeds): about a third of the posts up high (%s), at upper windows (%d) and on roofs (%d)" % [", ".join(shares), windows, roofs])
+	var all_share := float(all_high) / maxf(all_posts, 1.0)
+	check(ok_share and all_share >= 0.22 and roofs >= 3 and windows >= 3,
+		"town garrisons (8 seeds): about a third of the posts up high where the town has the buildings for it (%s, %.0f%% in all), at upper windows (%d) and on roofs (%d)" % [", ".join(shares), all_share * 100.0, windows, roofs])
 	check(ok_up, "each up high stands on a floor or a roof with a parapet, room round him, looking out onto the street %s" % [why.slice(0, 3)])
 	check(ok_ground, "the rest on the ground (doors and the crossroads), each with the way it looks")
 
