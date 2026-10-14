@@ -2,7 +2,7 @@
 # Runs the headless test suites. Set GODOT to the Voxel Tools editor executable, e.g.
 #   GODOT="$HOME/Downloads/GodotVoxel_1.7/godot.windows.editor.x86_64.exe" tools/run_tests.sh
 # With arguments, runs only those suites:  tools/run_tests.sh smoke gameplay
-# Suites are tests/<name>_test.tscn; "net", "world", "vehicles", "supports" and "aav" are two-process host/client tests.
+# Suites are tests/<name>_test.tscn; "net", "levelswitch", "world", "vehicles", "supports" and "aav" are two-process host/client tests.
 # Parallel runs (separate worktrees) should set CONTRACTOR_TEST_TAG (keeps test saves apart)
 # and CONTRACTOR_PORT (keeps the net test's port apart).
 #
@@ -32,7 +32,7 @@ cd "$(dirname "$0")/.."
 GODOT="${GODOT:-godot}"
 SUITE_TIMEOUT="${SUITE_TIMEOUT:-480}"
 SUITES=("$@")
-[ ${#SUITES[@]} -eq 0 ] && SUITES=(smoke gameplay squad net wounds armor movement interaction roles medical logistics casualty materials animations scavenge contracts people map base world missions vehicles antiarmor session_log supports aav sound loop)
+[ ${#SUITES[@]} -eq 0 ] && SUITES=(smoke gameplay squad net levelswitch wounds armor movement interaction roles medical logistics casualty materials animations scavenge contracts people map base world missions vehicles antiarmor session_log supports aav sound loop)
 status=0
 finished=""
 keep_root="$(run_log_parent)"
@@ -134,10 +134,11 @@ engine "$logs/import.log" --import
 judge import "$logs/import.log" $? ""
 [ "$status" -ne 0 ] && { finished=1; exit 1; }
 for suite in "${SUITES[@]}"; do
-	if [ "$suite" = net ] || [ "$suite" = world ] || [ "$suite" = vehicles ] || [ "$suite" = supports ] || [ "$suite" = aav ]; then
+	if [ "$suite" = net ] || [ "$suite" = levelswitch ] || [ "$suite" = world ] || [ "$suite" = vehicles ] || [ "$suite" = supports ] || [ "$suite" = aav ]; then
 		# Two processes over ENet on localhost. net: the client prints the summary, the host
 		# exits when the client leaves. world, vehicles and aav: the host runs its own checks first
-		# (refusing connections), then lets the client in; both print a summary.
+		# (refusing connections), then lets the client in; both print a summary. levelswitch: both
+		# print a summary too, and the host starts a third process itself (B-04).
 		summary="$(echo "$suite" | tr '[:lower:]' '[:upper:]') TEST PASSED"
 		host_arg="--host"; join_arg="--join"; host_summary=""
 		if [ "$suite" != net ]; then host_arg="--$suite-host"; join_arg="--$suite-join"; host_summary="$summary"; fi
