@@ -9,8 +9,6 @@ const JOIN_RETRY_S := 1.0
 
 ## Main-menu role picker (sets Roles.local_choice).
 var role_picker: OptionButton
-## People (wave 4): civilians, HVTs and intel in the compound when you host (PeopleLayer.populate).
-var people_toggle: CheckBox
 var _address: LineEdit
 var _status: Label
 ## The settings screen (GameSettings), over the menu.
@@ -20,6 +18,12 @@ var _attempts_left := 0
 
 
 func _ready() -> void:
+	# People (wave 4) are always on in play (Captain, 2026-10-13: no checkbox): civilians, HVTs
+	# and intel in the compound, and hostiles who may surrender. Contracts bring their own
+	# people either way. Headless runs (the test suites) keep them off unless a test sets them.
+	if DisplayServer.get_name() != "headless":
+		PeopleLayer.populate = true
+		PeopleLayer.surrender_enabled = true
 	GameSettings.apply_all()  # the saved video, audio and key settings, from the start
 	settings_menu = SettingsMenu.new()
 	add_child(settings_menu)
@@ -45,7 +49,6 @@ func _ready() -> void:
 	box.add_child(_role_picker())
 	box.add_child(_hand_picker())
 	box.add_child(ControlOptions.get_out_toggle())  # the get-out key (an option, saved)
-	box.add_child(_people_toggle())
 	box.add_child(_button("Settings", func() -> void: settings_menu.open()))
 	box.add_child(_button("Play (host a session)", _plain_host))
 	box.add_child(_hint("Solo play is a session nobody else has joined."))
@@ -203,18 +206,6 @@ func _hand_picker() -> Control:
 	picker.item_selected.connect(func(index: int) -> void: Handedness.set_local_left(index == 1))
 	row.add_child(picker)
 	return row
-
-
-## People (wave 4): host with the compound's civilians, HVTs and intel, and hostiles who may
-## surrender (PeopleLayer.populate and surrender_enabled). Off: the compound as before.
-func _people_toggle() -> CheckBox:
-	people_toggle = CheckBox.new()
-	people_toggle.text = "Civilians, HVTs and intel (wave 4 test)"
-	people_toggle.button_pressed = PeopleLayer.populate
-	people_toggle.toggled.connect(func(on: bool) -> void:
-		PeopleLayer.populate = on
-		PeopleLayer.surrender_enabled = on)
-	return people_toggle
 
 
 func _button(text: String, action: Callable) -> Button:

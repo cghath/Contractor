@@ -27,11 +27,11 @@ const GROUP := &"people_layers"
 const BRAIN := &"PersonAI"
 
 ## Spawn the compound's placeholder people and intel (COMPOUND) when hosting. Off by
-## default so the compound and the older test suites stay as they were; the main menu has a
-## checkbox for it (Menu), and a mission sets it.
+## default so the compound and the older test suites stay as they were; the main menu turns it
+## on for every windowed run (Menu), and a mission sets it.
 static var populate := false
 ## Let badly hurt, isolated hostiles surrender (proposed; optional in the spec). Off by default
-## for the same reason; the main menu's checkbox turns it on with populate.
+## for the same reason; the main menu turns it on with populate.
 static var surrender_enabled := false
 ## Put a contract's people and intel in the level when it goes live (Contracts.contract_live):
 ## its HVT or hostage, the intel it places, civilians in the zone's modules and delivery
