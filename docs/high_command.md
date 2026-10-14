@@ -1,20 +1,22 @@
 # High command: hero-led squads (proposal)
 
-**Status: Proposed** (2026-10-14). For the Captain to approve, change or turn down; nothing here is
-built. Every number is Proposed and tunable. Checked against dev `fc98665` (B0734), the co-op soak
-branch `test/coop-soak` (`33d3e87`, plus `test/coop-soak-stuckbots` `25dcf0c`) and the co-op fix
-branches in flight (`fix/respawn-own-kit`, `fix/coop-extraction`, `feat/fob-ready-up`).
+**Status: Proposed** (2026-10-14). For the Captain to approve, change or turn down. Nothing here
+is built, and every number is Proposed and tunable. Checked against dev `fc98665` (B0734), the
+co-op soak brain in `tests/coop_soak.gd` (`test/coop-soak` `33d3e87`, `test/coop-fakehuman-checks`
+`5858854`, `test/coop-soak-stuckbots` `10a41c3`), and the co-op fix branches in flight
+(`fix/respawn-own-kit` `4421481`, `fix/coop-extraction` `906053c`, `feat/fob-ready-up` `8ebcdc3`).
 
-On harder contracts the company fields more than the player squad: one to three **hero squads**,
-each led by a named roster member (the hero), deploy beside it. The player commands squads, not
-men, from the map or from the command menu. Each order runs on the host as a short phased plan
-built from squad orders that already work, the squad reports back over the radio, and its men come
-home with experience, wounds or losses that persist.
+On harder contracts the company fields more than the player squad. One to three **hero squads**
+deploy beside it, each led by a named roster member (the hero). The player commands squads, not
+men, from the map or from the command menu. Every order is a record with a lifecycle that ends
+`done`, `failed` with a reason, or `cancelled`. The host compiles it into squad orders that already
+work, the squad reports back over a company net, and its men come home with experience, wounds or
+losses that persist on the roster.
 
-Contractor learns from other games here and copies none of them: it is inspired by Arma 3's High
-Command bar and squad-leader AI, by LAMBS and VCOM group tasks and mutual support, and by
-Bannerlord's companions who lead their own parties. It also learns from where Arma's high command
-feels weak: little feedback, waypoints that fail silently, and no way to time squads together.
+Contractor learns from other games here. It is inspired by the Arma 3
+high command bar and squad-leader AI, by LAMBS and VCOM group tasks and mutual support, and by
+Bannerlord heroes who lead their own parties. It also learns from where Arma's high command feels
+weak: little feedback, waypoints that fail silently, and no way to time squads together.
 
 ## How this proposal was put together
 
@@ -23,216 +25,215 @@ one and grafts in the best parts of the other two.
 
 | Design | Rank | What it gives this proposal |
 |---|---|---|
-| **Command-First:** map orders, order model and comms | 1st (lead) | The order model (phase machines that end `done` or `failed` with a reason), go codes, risk levels, requests the commander approves or denies, the report catalogue, the RPC table with host checks, the replicated view and late-join snapshot, the map Command mode and HC panel, knowledge fairness, and "nothing fails silently" |
-| **AI-first:** the squad planner under a hero leader | 2nd | `Intent.LEAD` for the hero, frontage lanes, the support-by-fire spot rules and lift/shift, "Support me" and company mutual support, order biases as a table (with a new "hold" term), the AI LOD, "the order is law, autonomy lives inside it" |
-| **Heroes on the Books:** campaign-first | 3rd and 4th | The campaign side (hero rank, squads as company assets, cohesion, wages, history, debrief), the spawn seam (`_spawn_recovery_targets`), the support-budget charge, the friendly AI budget line, delegation, and the `stream_focus` gap the others missed |
+| **Command-first:** the high command map and order model | 1st (lead) | The order record and lifecycle (nothing fails silently), the verb-to-primitive compile table, the option mask on SquadTactics, progress watchdogs, the MapMarkers-shaped RPCs with host re-resolution and late-join snapshot, the ghost line until the host acks, map Command mode, the HC panel, knowledge fairness, the most complete Phase 0 list, and the buildable phasing |
+| **Campaign-first:** heroes as roster progression, squads as company assets | 2nd | Heroes earned from the Captain's own roster, standing squads (detachments) that keep their men, `squads_max` from the briefed rating, field promotion, MIA leading to recovery contracts, hero history lines, lazily migrated roster data with no save bump, one company commander with handover, `squad_for` kept as "the player squad" plus a new `squad_of`, and G1 landing alone with a test |
+| **AI-first:** a squad-level planner under a hero leader | 3rd | The tasking context (anchor, leash, sector, rally) that replaces the human-lead leash, sector boundaries so squads stay in their lanes, the `safe_to_fire` fan and lift/shift fire, support-by-fire spot rules, combat effectiveness (CE) colours, a company enemy picture with radio latency and "going dark" when the hero falls, the `assess()` player-count gap, and later reuse of the planner for enemy hunters |
 
-Corrections the judges found in the lead design, folded in below:
+What the judges found and how it is folded in:
 
-- **Streaming.** On the host, `ZoneLevel.stream_focus()` (zone_level.gd:633-647) streams modules in
-  only around players and around AI that are fighting. A hero squad defending a building 500 m out
-  would have its module streamed out under it (`STREAM_OUT_M` 340), and an attack would reach an
-  outpost whose garrison hasn't spawned. Hero squad leaders go into `stream_focus` (groundwork G8).
-- **The hero and the evaluator.** `SquadAI._tactic()` (squad_ai.gd:2367-2378) drops evaluator
-  moving tasks for any friendly whose order isn't FOLLOW, so a hero kept on MOVE or HOLD never
-  moves with the fight. This proposal keeps the hero on FOLLOW and gives him `Intent.LEAD`
-  instead of a follow slot (from the AI-first design), so he takes base-of-fire tasks and the leash
-  moves with him.
-- **Finished ordered tactics.** `_tactic_done` (squad_ai.gd:2421-2428) sets a friendly to HOLD,
-  which makes `assess()` report the squad as not free and stops flank, assault and break. The
-  order executor restores FOLLOW after every bound, garrison or suppress ends, unless the phase
-  wants the men held (defend, support by fire).
-- **UI before AI.** The lead design's MVP was UI-heavy. The MVP here keeps the map UI to a click
-  and a menu, and proves the orders headless first (Phase 1 acceptance).
-- **Initiative.** Biases alone can make squads feel like obedient order executors. The AI-first
-  planner pieces (lanes, SBF spots, Support me, requests) give them initiative inside the order.
+- **Persistent heroes arrive too late in the lead design** (its Phase 3). The Captain's direction
+  is named AI squad leaders, so the MVP hero here is a **real roster member** picked at prep, with
+  history and outcomes from day one. Promotion, traits and wages still wait for Phase 3, so the
+  MVP doesn't depend on the FOB economy (the campaign-first design's weakness: its MVP could not be
+  tried in a zone until promotion and assignment worked).
+- **A dev-tools spawn** exists from Phase 1 so the orders can be proven headless before any FOB
+  work.
+- **`SquadTactics.assess()` counts the human players for any friendly squad** (tactics.gd:285-292
+  checks only `squad.faction == &"friendly"`). A hero squad would think the humans are its own men.
+  Both top designs missed it; it is G4 below.
+- **Extraction and CCP** treat every friendly AI as the player squad (the lead design caught this;
+  the campaign-first design didn't). They are in Phase 0.
+- **Streaming.** On the host, `ZoneLevel.stream_focus()` (zone_level.gd:633) streams modules only
+  around players and fighting AI. A hero squad holding a building 500 m out would have its module
+  streamed out under it. Hero leaders join `stream_focus` (G8).
+- **Grid references** are already static: `MapGrid.grid_ref(point, area, digits)` and
+  `grid_ref_3d` (map_grid.gd:36, 47). No split of `MapView.reference_at` is needed.
+- **Doctrine weights are still PENDING** (audit A3-07). Hero traits and order biases use only the
+  wired channel (SquadTactics option biases through `doctrine()`) and the planner constants, and
+  are never presented as doing more.
+- **AI load.** Hero squads spawn when the deployment starts, not when the briefing opens; the
+  briefing shows their insertion markers only.
 
 ## 1. What already exists to build on
 
-- **Squad** (scripts/ai/squad.gd): host-side command state per side, with an enemy picture
-  (`known`, `note_enemy`, `clusters()`), `leader`, formations, `ccp`, and stable order wrappers
-  that take `from: Soldier`: `give_order` (FOLLOW / HOLD / MOVE), `order_suppress`, `order_bound`,
-  `order_garrison`, `order_clear`, `order_take_cover`, `order_fall_back`, `order_command`
-  ("watch", stance, heal, give ammo, treat, ccp) and `command` (formation, target, mode). Every
-  order sets `leader = from`; called with `from` = the hero, they become the hero's orders to his
-  own men.
+- **The order bus.** `CommandMenu` (scripts/ui/command_menu.gd) is local to each player: F1-F8
+  select men by `squad_slot`, 1-9/0 pick entries, and every order is a string verb plus a point
+  plus a set of names sent as `Soldier._server_squad_command.rpc_id(1, cmd, point, selected)`. On
+  the host `Squad.order_command()` runs first, then `give_order` / `set_hold_fire` / `command()` /
+  `Supports.server_command` (the `support:` prefix is a registry seam). High command reuses this
+  grammar one level up.
+- **Squad** (scripts/ai/squad.gd): host-side command state with an enemy picture (`known`,
+  `clusters()`), `leader`, `ccp`, formations, and order wrappers that take `from: Soldier`:
+  `give_order` (FOLLOW / HOLD / MOVE), `order_bound`, `order_suppress`, `order_garrison`,
+  `order_clear`, `order_take_cover`, `order_fall_back`, `order_command` ("watch", heal, give ammo,
+  ccp), `command` (formation, target, mode). Every order sets `leader = from`; called with `from` =
+  the hero they become the hero's orders to his own men.
 - **More than one Squad per side already works for the enemy.** `EnemyResponse._new_squad` /
-  `_spawn_team` (enemy_response.gd ~597-626) and `Reinforcements` (reinforcements.gd ~189-206)
-  create a `Squad`, spawn through `level.spawn_soldier`, then set each brain's `squad`. Hero
-  squads spawn the same way.
-- **SquadTactics** (scripts/ai/tactics.gd): runs per Squad, thinks every second. `score(sit, d)` is
-  pure and adds `doctrine()` biases (flank, assault, clear, defend, break, casualty, search).
-  `elements()`, `flank_route()`, `garrison_tasks()`, `clear_op()` and `fall_back_point()` are
-  static and reusable at squad scale. `_call_option()` already has a leader's voice.
-- **SquadAI** (scripts/ai/squad_ai.gd): ordered tactics win over the evaluator (`ORDERED_SCORE`
-  0.85 > `TACTIC_SCORE` 0.75); halt spots give all-round security when the lead stops; a leader
-  aura for morale (`MORALE_LEADER`); radio contact sharing between radio carriers
-  (`_share_contact`, `SHARE_RADIO_S` 2.5); `_friendly_in_line` already checks every friendly on the
-  side, so cross-squad fire discipline works today.
-- **Map**: `MapView` (right-click `_open_menu`, Ctrl+drag lines), `MapScreen` side panels,
-  `MapMarkers` (host-authoritative, `server_report_enemy` for intel, `_client_snapshot` on
-  `Net.peer_joined`), `MapGrid.grid_ref`, and `MapNodes.install(level)` for per-level nodes on
-  every peer.
-- **Comms**: `Callouts._show` to the side's players; `RadioChatter`'s rate-limited line queue
-  (`LINE_GAP_S` 5, `QUEUE_MAX` 3) with a non-soldier speaker name, the route hero squad radio
-  lines take.
-- **Roster and deployment**: `Roster.ai_stats` (aim to combat, nerve to discipline), `identity`,
-  `add_history`, `after_mission`. `RosterDeployment.resolve()` already settles any member in
-  `dep.spawned` as extracted, left behind (MIA plus a recovery contract) or killed.
-- **BaseHub**: `_spawn_recovery_targets()` (base_hub.gd:893, called from `_on_briefing_started`)
-  already spawns roster members outside the 8 slots (slot -1, meta `roster_id`, own gear,
-  identity, `ai_stats`); hero squads spawn the same way. Company decisions are host-only
-  `_server_request`s. `Campaign.snapshot()` before deploy means anything in the roster section
-  reverts for free.
-- **Economy and contracts**: `Economy.server_pay_support(kind, cid)` (economy.gd:313) draws on the
-  contract's support budget before cash; `data/prices.json` "supports". Contracts carry `rated`
-  (briefed, 1-5) and the hidden `true_rating`; hot zones are harder.
-- **Extraction**: on `fix/coop-extraction`, any player inside a point confirms, and AI squadmates
-  away from it don't block: the first confirm warns who would be left behind, a second one within
-  `LEAVE_CONFIRM_S` extracts without them and they are reported MIA (`can_leave_behind`,
-  `left_at_call`). Hero squads plug into that warning instead of a second mechanism.
-- **The co-op soak bot "player brain"** (tests/coop_soak.gd on `test/coop-soak`): `_follow_tick`
-  and `_follow_spot` (a loose place 10-25 m off the leader, turned his way; hold and fight in
-  contact; board or leave his vehicle with him; get inside the extraction point he stands in),
-  `_extract_with_human` (confirm once everyone is in, leave stragglers after 90 s), `_stuck_note`
-  (S0758: bots stood 400 m behind for 20 minutes with nothing logged), the stuck-bots branch's
-  `_track_wedge` (no headway, then a detour, then a catch-up), `_give_up_tick`, `_hunt`, and
-  `_dead_ground` / `_hidden_fraction`. It drives player bodies over RPCs from separate processes,
-  so it can't ship, but its decisions are the behaviour spec for "Follow me" and "Extract" and the
-  harness becomes the high command test bench. Section 9 is about lifting it into game code now.
+  `_spawn_team` and `Reinforcements` create a `Squad`, spawn through `level.spawn_soldier` and set
+  each brain's `squad`. Hero squads spawn the same way.
+- **SquadTactics** (scripts/ai/tactics.gd): HOLD, SUPPRESS_FLANK, ASSAULT, CLEAR, DEFEND,
+  BREAK_CONTACT, CASUALTY, SEARCH. `score()` is static and pure; `doctrine()` adds biases;
+  "orders always win". `elements()`, `flank_route()`, `garrison_tasks()`, `clear_op()` and
+  `fall_back_point()` are static and reusable. `OPTION_NAMES` and `CALLS` already give readable
+  state for reports. `FOLLOW_LEASH_M` is 30.
+- **SquadAI** (scripts/ai/squad_ai.gd): ordered tactics win over the evaluator; followers read
+  only `leader.global_position` and its basis, so an AI soldier as `squad.leader` already works for
+  them; `_friendly_in_line` checks every friendly on the side, so cross-squad fire discipline
+  exists as a last guard.
+- **Map**: `MapView` (right-click menu, Ctrl+drag lines, plan mode in briefings), `MapScreen` side
+  panels (`MapExtractionPanel` is the template), `MapMarkers` (host-authoritative `request_*` ->
+  `server_*` -> `_client_*`, `_client_snapshot` on `Net.peer_joined`, `server_report_enemy` for
+  intel), `MapGrid.grid_ref`, and `MapNodes.install(level)` for per-level nodes on every peer.
+- **Comms**: `Callouts._show` to the side's players; `RadioChatter`'s queue and gap rules
+  (`LINE_GAP_S`, `QUEUE_MAX`) with a non-soldier speaker name.
+- **Roster and deployment**: members carry callsign, identity, role, skills {aim, nerve, medical,
+  movement}, xp, missions, wage, gear, status, injuries and history. `Roster.ai_stats()` maps aim to
+  combat and nerve to discipline. `RosterDeployment.resolve()` keys outcomes by member id, so it
+  already settles any number of AI members as extracted, MIA (with a recovery contract) or KIA.
+- **BaseHub**: `server_spawn_roster_squadmate()` (base_hub.gd:854) and `_spawn_recovery_targets()`
+  (base_hub.gd:893) already spawn roster members with identity, own gear, `roster_id` and
+  `ai_stats`, the second one outside the 8 slots. Company decisions are host-only requests, and
+  `Campaign.snapshot()` before deploy means roster changes revert for free.
+- **Contracts**: a briefed `rated` 1-5, a hidden `true_rating`, `difficulty_pay`.
+- **Extraction** (on `fix/coop-extraction`): any player in a point confirms; AI away from it don't
+  block; the first confirm warns who would be left, a second within `LEAVE_CONFIRM_S` leaves them
+  MIA. Hero squads plug into that warning, not a second mechanism.
+- **The co-op soak "player brain"** (tests/coop_soak.gd): `_follow_tick` (850), `_stuck_note` (909),
+  `_extract_with_human` (938), `_follow_spot` (985), `_hidden_fraction` (1099), `_dead_ground`
+  (1118), `_treat_loop` (1586), `_wedge_spot` (1705), `_give_up_tick` (1727), `_casevac_tick`
+  (1762), `_hunt` (1825), `_fight_tick` (1981). It drives player bodies over RPCs from other
+  processes, so it can't ship, but its decisions are the behaviour spec for Follow, Support me and
+  Extract, and the harness becomes the high command test bench (section 9).
 
-**Why heroes are not soak bots.** A soak bot is a peer (`Net.MAX_CLIENTS` is 3), moves by stepping
-its position with no navmesh, and fights through raw fire RPCs. Heroes are host AI soldiers on the
-full SquadAI stack (cover, medical, morale, casualty care, scavenging). The bot's decision layer
-ports; its actuator doesn't.
-
-**One caution from the soak bot.** `_dead_ground` reads true hostile positions (every garrison post
-and hostile soldier). That is fine in a test harness and would be a cheat in game AI. Hero squads
-plan only from what our side knows (section 5.6).
+**Lessons taken from the soak bot:** progress watchdogs and detours, phase timeouts with "stuck"
+reports (S0758: bots stood 400 m behind for 20 minutes with nothing logged), points clamped inside
+the map (S0672, S0697), and the leave-behind rules. **Lesson avoided:** `_dead_ground` and
+`_hostile_posts` read true hostile positions. That is fine in a test and a cheat in game AI; heroes
+plan only from what our side knows (5.6).
 
 ## 2. Groundwork: a second friendly squad breaks one-squad assumptions
 
-These are fixed first (Phase 0), with no gameplay change and a regression check each. All were
-checked against fc98665.
+Fixed first (Phase 0), no gameplay change, a regression check each. All checked against fc98665.
 
-| # | Where | What breaks with a second friendly squad | Fix |
+| # | Where | What breaks | Fix |
 |---|---|---|---|
-| G1 | `Squad.members()` (squad.gd:187) | Takes every friendly AI by faction. Player orders with no names, `pick()`, `follow_point()` and `_share_contact()` would reach hero squad men | Keep only soldiers whose brain is on this squad, as `brains()` already does |
-| G2 | `CompoundLevel._squad_ai()` (compound_level.gd:658) and `rebalance_squad()` (640-642) | A hero squad man has slot -1, so the next join or leave calls `_remove_squadmate` on him | Exclude hero squad men |
-| G3 | `CommandMenu.roster()` (command_menu.gd:183-195) | F-keys, select-all and the HUD squad lines would list hero squad men | Player squad only |
-| G4 | `SquadTactics.assess()` (tactics.gd:286-292) | Every slotted player is counted into every friendly squad's up/down | Count players only for the main squad |
-| G5 | `Callouts.recipients()` (callouts.gd:151) | Every friendly line goes to every friendly player at any range: three squads talk over each other | Hero squad speakers reach players within `HC_VOICE_M` (40-60 m); their tactical calls are summarised on the net (section 6) |
-| G6 | `EnemyResponse._watchers()` (enemy_response.gd:558) | Players plus `MapNodes.squad_ai`: QRFs and hunters may spawn in a hero squad's face | Add hero squad men |
-| G7 | `CompoundLevel._make_soldier` (compound_level.gd:828) | Sets `brain.squad = squad_for(faction)` | Re-point to the hero squad after spawn, as `_spawn_team` does |
-| G8 | `ZoneLevel.stream_focus()` (zone_level.gd:633-647) | Hero squads out of contact don't keep modules (and garrisons) streamed in | Add each hero squad's leader on the host |
-| G9 | `Squad.follow_point()` (squad.gd:649) | Indexes `members()` including the leader: a hero on FOLLOW chases his own slot | Skip the leader; the hero walks `Intent.LEAD` (section 5.3) |
-| G10 | `SquadAI._tactic()` and `_tactic_done` (squad_ai.gd:2367-2378, 2421-2428) | Not a bug for the player squad, but the executor depends on it | `SquadOrders` restores FOLLOW after ordered tactics (section 5.2) |
-| G11 | Call sites on `MapNodes.squad_ai` / `squad_slot >= 0` (briefing.gd:329, extraction.gd:212 and 358, radio_chatter.gd:136, heli_call.gd:209/558/684/740, map_extraction_panel.gd:49, objective_helper.gd:403, map_view.gd:525, compound_level.gd:731, soldier.gd:1925) | Each assumes "friendly AI" means the player squad | Audit each: they stay player-squad-only (slot >= 0 already excludes hero squads); hero squads get their own path where it matters (extraction, map) |
+| G1 | `Squad.members()` (squad.gd:187) | Returns every friendly AI in the faction (filtered only by vehicle crew). Player orders, `pick()`, `follow_point()` would reach hero squad men | Keep only soldiers whose brain is on this squad, as `brains()` (squad.gd:108) does. **Lands alone first, with a test** |
+| G2 | `CompoundLevel._squad_ai()` and `rebalance_squad()` | A hero squad man (slot -1) could be removed on the next join or leave | Exclude hero squad men |
+| G3 | `CommandMenu.roster()` | F-keys, select-all and HUD squad lines would list hero squad men | Player squad only |
+| G4 | `SquadTactics.assess()` (tactics.gd:285-292) | Every slotted human is counted in every friendly squad's up/down | `Squad.is_player_squad()`; count humans only there |
+| G5 | `Callouts.recipients()` | Every friendly shout reaches every friendly player at any range | Hero squad shouts reach players within `HC_VOICE_M` (40-60 m); the rest is summarised on the net (section 6) |
+| G6 | `EnemyResponse._watchers()` | QRFs and hunters may spawn in a hero squad's face | Add hero squad men |
+| G7 | `CompoundLevel._make_soldier` | Sets `brain.squad = squad_for(faction)` | Re-point after spawn, as `_spawn_team` does |
+| G8 | `ZoneLevel.stream_focus()` (zone_level.gd:633) | Modules (and garrisons) stream out under a hero squad out of contact | Add each hero squad's leader on the host |
+| G9 | `Squad.follow_point()` (squad.gd:649) | Indexes `members()` including the leader: an AI hero on FOLLOW chases his own slot | Skip the hero; he walks `Intent.LEAD` (5.3) |
+| G10 | `SquadAI._tactic()` / `_tactic_done` | A friendly whose order isn't FOLLOW drops evaluator moving tasks; a finished ordered tactic leaves him on HOLD | The order executor restores FOLLOW after ordered tactics unless the phase wants men held (5.2) |
+| G11 | Extraction `required()` / `missing_at`, CCP, body carrying, respawn kit | Count every friendly AI as the player squad: extraction would wait for hero squads | Scope to the player squad; hero squads get their own path in the leave-behind warning |
+| G12 | Callers of `squad_for(faction)` (14 sites in 8 files: soldier.gd, callouts.gd, vehicle_layer.gd, aav_support.gd, heli_call.gd, base_hub.gd, compound_level.gd, zone_level.gd) and of `MapNodes.squad_ai` / `squad_slot >= 0` | Each assumes one friendly squad | `squad_for` keeps meaning **the player squad**, so most callers stay correct. Callers that mean "this soldier's squad" (vehicle mounting, callouts by speaker, supports) move to a new `CompoundLevel.squad_of(s)` = `SquadAI.of(s).squad`. Audit each |
 
-**One marker, not scattered checks.** Every hero squad soldier gets a replicated `Soldier.hc_id`
-(StringName, `&""` for the player squad), set from spawn data in `_make_soldier` and added to the
-server `SceneReplicationConfig` in scenes/soldier.tscn, so the HUD, map and command menu on clients
-can tell hero squad men apart (a meta wouldn't replicate). `Squad` gets `var hc_id := ""` and a
-static `Squad.hc_of(s)`. One predicate, `Squad.is_squadmate(s)` (friendly AI, player squad, not
-recovery, not vehicle crew), replaces the meta checks G2, G3 and G11 repeat today.
+**One marker, not scattered checks.** Each hero squad soldier gets a replicated `Soldier.hc_id`
+(StringName, `&""` for the player squad), set from spawn data and added to the soldier's
+`SceneReplicationConfig`, so the HUD, map and command menu on clients can tell hero squad men apart
+(a meta wouldn't replicate). `Squad` gets `hc_id`, `hero`, `is_player_squad()`, and one predicate
+`Squad.is_squadmate(s)` (friendly AI, player squad, not a recovery target, not vehicle crew) in
+place of the meta checks G2, G3 and G11 repeat today.
 
-**Sequencing.** G1, G9 and G10 touch squad.gd and squad_ai.gd, and G5 touches callouts.gd: the
-`fix/respawn-own-kit` agent (B:\Contractor-coop-respawn) is editing all three now (body carrying,
-`ccp_off`). Phase 0 starts after that branch lands on dev and is built on top of it.
+**Sequencing.** G1, G9, G10 touch squad.gd and squad_ai.gd, and G5 touches callouts.gd: the
+coop-respawn agent (B:\Contractor-coop-respawn: body carrying, `ccp_off`) is editing those now. G11
+touches extraction (coop-extract). Phase 0 starts after those branches land on dev and builds on
+them; anything needed sooner goes as an F-task in docs/audits/followups.md.
 
 ## 3. What the player does
 
 ### 3.1 A hard contract, end to end
 
-1. **Board.** A rated-4 raid shows "Squads authorized: 1". Authorization comes from the briefed
-   `rated`, not `true_rating`: rated 4 gives 1, rated 5 gives 2, a hot zone adds 1, at most 3
-   (the MVP caps it at 1). Because the client's rating can understate the threat, the player may
-   bring squads beyond what's authorized at the company's own cost.
+1. **Board.** A rated-4 raid shows "Squads: 1 + up to 1". `squads_max` comes from the **briefed**
+   `rated`, never the hidden `true_rating`: rated 1-3 gives 0, rated 4 gives 1, rated 5 gives 2, a
+   hot zone adds 1, at most 3 (the MVP caps it at 1). An understated contract is exactly where a
+   squad brought "just in case" pays off.
 2. **FOB prep.** The "Squad & deploy" page gets a **Hero squads** block: pick a hero and his men
-   from available roster members (roles auto-filled by `Roles.layout`, as `auto_squad` does),
-   see the cost and a **friendly AI budget** line ("AI: 7 + 4 + 4 = 15 of 20"). More co-op players
-   means fewer AI in the player squad and more room for hero squads, which keeps the 8-slot squad
-   player-scalable. Picks are part of prep, so they follow the FOB ready-up rules
-   (`feat/fob-ready-up`).
-3. **Briefing.** Hero squads show at their insertion points (picked from the zone's insertion
-   points). From Phase 2 the player can give **H-hour orders** that wait for the deployment to
-   start, any of them gated on a go code.
-4. **In the field.** The player commands squads from the map's **Command mode** or the command
-   menu's **Squads mode**. Hero squads acknowledge, report contact (which drops an intel marker),
-   casualties, "in position", "objective secure", "unable" with a reason, and requests:
+   from available roster members (roles auto-filled by `Roles.layout`, as `auto_squad` does), and
+   see a **friendly AI budget** line ("AI: 7 + 4 = 11 of 20"). More co-op players means fewer AI in
+   the player squad and room for more hero squads, which keeps the 8-slot squad player-scalable.
+   From Phase 3 these are standing detachments (section 8). Picks follow the FOB ready-up rules.
+3. **Briefing.** Hero squads show at their insertion markers (default: the next insertion
+   candidate, 80-150 m from the player squad). From Phase 2 the player can drag them and give
+   **H-hour orders** that start with the deployment, or wait on a go code.
+4. **In the field.** The player commands squads from the map's **Command mode** or (Phase 2) the
+   command menu's **Squads mode**. Squads acknowledge, report contact (dropping an intel marker),
+   casualties, "set", "objective secure", "held up", "unable" with a reason, and requests:
    - "Hawk 2, copy: moving to 041 053."
    - "Hawk 2, set at 041 053. Ready on Alpha."
-   - "Viper 3, contact: 6 enemy, north, 180 m."
-   - "Viper 3, two wounded, taking heavy fire: request to break contact." (Approve / Deny, 20 s.)
+   - "Viper 3, contact: 6 enemy, north, 180 m, engaging."
+   - "Viper 3, amber: two wounded, request to break contact." (Approve / Deny, 20 s.)
    - "Hawk 2, Mercer is down. Okafor has command."
-5. **Synchronising.** The player presses go code Alpha: Hawk 2 opens fire on the compound while
-   the player's squad assaults. When any friendly comes within `DANGER_CLOSE_M` of the target area,
-   Hawk shifts or lifts fire by itself ("Hawk 2, shifting fire").
-6. **Extraction.** "Extract" sends a squad to an extraction point with an avoid-contact posture.
-   Hero squads never block the player squad's extraction: the leave-behind warning from
-   `fix/coop-extraction` also names hero squad men away from the point ("Leaving behind: Viper 3,
-   2 men, 380 m out"), and a second confirm leaves them, MIA under the existing rules.
+5. **Synchronising** (Phase 2). The player presses go code Alpha: Hawk 2 opens fire on the compound
+   while the player squad assaults. When any friendly comes within `DANGER_CLOSE_M` of the target or
+   the fire fan, Hawk shifts or lifts by itself ("Hawk 2, shifting fire").
+6. **Extraction.** "Extract" sends a squad to a point with an avoid-contact posture. Hero squads
+   never confirm and never extract without the humans (the Captain's 2026-10-14 co-op rule). They
+   never block the player squad either: the leave-behind warning names them ("Leaving behind:
+   Viper 3, 2 men, 380 m out"), and a second confirm leaves them MIA under the existing rules.
 7. **Debrief.** Each hero squad gets a section: who came back, wounds, KIA, MIA, objectives it was
-   credited with, and the hero's growth. The hero's history gains "Led Hawk 2 at Outpost 2:
-   objective secure, 1 wounded".
+   credited with. The hero's history gains "Led Hawk 2 at Outpost 2: held the bridge, 1 wounded".
 
 ### 3.2 Orders
 
-| Order | The squad does | Built from (existing) | Done when | Phase |
+| Order | The squad does | Compiles to (existing) | Done when | Phase |
 |---|---|---|---|---|
-| **Move** (point; queued points later) | Hero walks the legs, members follow in the order's formation; on contact, react, fight, resume | `Intent.LEAD`, `FORMATIONS`, halt spots | Hero within `ARRIVE_M` of the last point | 1 (queues 2) |
-| **Hold** | Stop; halt spots; watch the threat axis | `give_order(HOLD)`, `_find_halt_spot` | Replaced | 1 |
-| **Defend** (point, facing) | Move; garrison a building within `DEFEND_BUILDING_M` (30 m), else a line across the facing with a watch sector per pair | `order_garrison`, `garrison_tasks`, "watch" | Replaced (reports "set") | 1 |
-| **Follow me / Support me** (a player) | Keep a loose station off the player, turned his way; hold and fight in contact. Follow is close (30-60 m); Support me is an echelon left, right or rear at 60-120 m that sets up a base of fire for the player's squad when it's hit | `FollowBrain` (section 9), Support-by-fire rules | Replaced | 1 (auto fire for the player 2) |
-| **Regroup** (on the hero, a point or a player) | Gather within `REGROUP_M`, set `ccp`, cross-load ammo, treat; report strength and ammo | `give_order`, `give_ammo`, `ccp` | All living men gathered | 1 |
-| **Extract** (point) | Route with a break-contact bias and return fire; hold inside; carry the downed | `Extraction.points`, `inside()`, casualty care | Every living man inside: "Hawk 2, at the LZ" | 1 |
-| **Attack** (area, building, objective or marker) | Route to an attack position; set; wait for a go code if gated; execute (base of fire plus assault, or clear a building); lift and shift; consolidate; abort past the risk threshold | `order_bound`, `order_clear`, `forced_plan`, biases | Objective clear for `CONSOLIDATE_S` with the squad inside: "objective secure" | 2 |
-| **Support by fire** (position, target) | Take the best SBF spot near the position; suppress the target while it holds known enemies, refreshed every `SUPPRESS_ORDER_S`; shift or lift for danger close; "fire on call" option | `order_suppress`, "watch", `_friendly_in_line` | Lifted, or target clear `SBF_IDLE_S` | 2 |
-| **Bound** (point) | Fire teams bound by pairs to the point | `order_bound`, `elements()` | Arrived | 2 |
-| **Fall back** (point or away) | Break contact by pairs with smoke, then hold | `order_fall_back` | Arrived | 2 |
+| **Move** (point; route later) | Hero walks the legs, men follow in formation; on contact react, fight, resume | `Intent.LEAD` legs, `FORMATIONS`, halt spots | Hero within `ARRIVE_M` of the last point | 1 |
+| **Hold** | Stop; halt spots; watch the threat axis | `give_order(HOLD)`, "watch" | Replaced | 1 |
+| **Defend** (point, facing) | Move; garrison a building within 30 m, else a line across the facing, a watch sector per buddy pair | `order_garrison`, `garrison_tasks`, "watch" | Replaced (reports "set") | 1 |
+| **Follow me / Support me** (a player) | Loose station off the player, turned his way; Follow 30-60 m, Support me in echelon at 60-120 m; hold and fight in contact | `FollowBrain` (section 9) | Replaced | 1 (fire for the player 2) |
+| **Regroup** (hero, point or player) | Gather within `REGROUP_M`, set `ccp`, cross-load ammo, treat; sitrep | `give_order`, `order_give_ammo`, `ccp` | All living men gathered | 1 |
+| **Extract** (point) | Route with a break-contact bias and return fire; hold inside | `Extraction.points`, `inside()` | Every living man inside: "Hawk 2, at the LZ" | 1 |
 | **Posture** (no point) | ROE, combat mode, formation, speed | `set_hold_fire`, `set_combat_mode`, `command("formation:")` | At once | 1 |
-| **Report status** (no point) | A sitrep | | At once | 1 |
+| **Report** (no point) | A sitrep | | At once | 1 |
+| **Attack** (area, building, objective, marker) | Approach to an attack position; set a base of fire; wait for a go code if gated; assault or clear; lift and shift; consolidate; abort past the risk threshold | `order_bound`, `order_clear`, `forced_plan`, biases | Objective clear for `CONSOLIDATE_S`: "objective secure" | 2 |
+| **Support by fire** (position, target) | Take the best SBF spot; suppress while the target holds known enemies; shift or lift for danger close; "fire on call" option | `order_suppress`, "watch", `safe_to_fire` | Lifted, or target quiet `SBF_IDLE_S` | 2 |
+| **Bound** (point) | Fire teams bound by pairs | `order_bound`, `elements()` | Arrived | 2 |
+| **Fall back** (point) | Break contact by pairs with smoke, then hold | `order_fall_back` | Arrived | 2 |
 
-Direct fire commands on an SBF order: Shift fire, Lift fire, Fire, Cancel. With two squads
-selected, Bound becomes a leapfrog (one overwatches, the other moves a leg) in Phase 4.
+On an SBF order: Shift fire, Lift fire, Fire, Cancel. With two squads selected, Bound becomes a
+leapfrog (one overwatches, the other moves a leg) in Phase 4.
 
 ### 3.3 Controls (all rebindable through `GameSettings.BINDABLE`)
 
 | Where | Input | Effect |
 |---|---|---|
-| Map | **Command** toolbar toggle, or the bindable `high_command` action | Command mode on or off. Marker editing is unchanged outside it |
-| Map, command mode | Left-click a squad icon (Shift adds, Tab cycles) | Select |
-| Map, command mode | Right-click (short) | Order menu for what's under the cursor (3.4). Right-drag still pans |
-| Map, command mode | Shift with an order | Queue it after the current one (Phase 2) |
+| Map | **Command** toolbar toggle or the `high_command` action | Command mode on or off; markers stay visible but aren't editable in it |
+| Map, command mode | Left-click a squad icon (Shift adds, Tab cycles, 1-4 pick squads) | Select |
+| Map, command mode | Short right-click | Order menu for what's under the cursor (3.4); right-drag still pans |
+| Map, command mode | Shift with an order | Queue it (Phase 2) |
 | Map, command mode | Ctrl+left-drag | A route (multi-point Move), reusing MapView's line capture (Phase 2) |
-| Map, command mode | Backspace / Del | Cancel the selected squad's order / the hovered one |
-| World | `high_command` action | The command menu enters **Squads mode**: F1-F4 select hero squads, entries aim with the crosshair, "Open map" opens Command mode (Phase 2) |
+| Map, command mode | Backspace | Cancel the selected squad's order |
+| World | `high_command` action | Command menu **Squads mode**: F1-F4 select hero squads, verbs aim with the crosshair (Phase 2) |
 | Map or world | Go-code buttons; `hc_approve` / `hc_deny` | Alpha / Bravo / Charlie; answer the latest request (Phase 2) |
 
-Ctrl and Alt combinations are avoided for new defaults: the Ctrl and Alt menus own those
-modifiers, Ctrl+F-key already adds to the command menu selection, and Alt+F4 closes the window.
+F1-F8 stay for men in the player squad. New defaults avoid Ctrl and Alt chords: the Ctrl and Alt
+menus own those modifiers, Ctrl+F-key already adds to the command menu selection, and Alt+F4 closes
+the window. Defaults are checked against `Controls.KEYS` before they ship.
 
 ### 3.4 The map order menu by what's under the cursor
 
-- **Open ground:** Move, Defend (drag for facing), Regroup here, Hold; later Bound, Support by fire
-  from here (second click picks the target), Fall back.
+- **Open ground:** Move, Hold here, Defend (drag for facing), Regroup here; later Bound, Fall back,
+  Support by fire from here (a second click picks the target).
 - **Building** (`Buildings.nearest`): Defend (garrison), Move; later Clear.
-- **Enemy intel marker, objective or hostile site:** later Attack, Support by fire on it.
+- **Enemy intel marker, objective or hostile site:** later Attack, Support by fire on it. Attack
+  snaps to an objective within 60 m.
 - **Extraction point:** Extract here.
-- **A player icon:** Follow, Support, Regroup on him.
-- **Another hero squad:** later Regroup with it, Reinforce.
-- **Always:** Report status; Posture (ROE, mode, formation, speed); later Risk (Careful,
-  Balanced, Press on) and Go code (none, Alpha, Bravo, Charlie) for the next order.
+- **A player icon:** Follow, Support me, Regroup on him.
+- **Always:** Report, Posture; later Risk (Careful, Balanced, Press on) and Go code for the next
+  order.
 
-The host re-checks every lookup.
+The host re-resolves every lookup and never trusts the client's.
 
 ## 4. The order model
 
-### 4.1 Order data (JSON-safe: it replicates, logs and survives the session log)
+### 4.1 HcOrder (JSON-safe: it replicates, goes in the session log and survives saves)
 
 ```
 {"id": int, "squad": "hawk2",
- "kind": "move|hold|defend|follow|support|regroup|extract|attack|sbf|bound|fall_back",
+ "verb": "move|hold|defend|follow|support|regroup|extract|attack|sbf|bound|fall_back",
  "points": [[x, z], ...],
  "target": {"kind": "area|building|objective|marker|player|squad|extraction", "pos": [x, z],
             "radius": m, "ref": "id"},
@@ -241,579 +242,592 @@ The host re-checks every lookup.
              "formation": "wedge|file|line|staggered column", "speed": "slow|normal|fast",
              "contact": "react|push|avoid"},
  "risk": "careful|balanced|press", "go": "" | "alpha" | "bravo" | "charlie" | "hhour",
- "after": 0, "state": "queued|waiting|active|set|done|failed|cancelled",
+ "after": 0, "state": "sent|queued|waiting|active|set|done|failed|cancelled",
  "phase": "route|set|execute|consolidate", "by": peer, "at": seconds, "why": ""}
 ```
 
-- **Lifecycle:** `queued`, then `waiting` when gated, `active` (route), `set` (in position,
-  waiting for a go code or "Fire"), `active` (execute), then `done`, `failed` (with `why`) or
-  `cancelled`. A new order that isn't queued cancels the queue, matching today's "latest order
-  wins".
+- **Lifecycle:** `sent` (client only, the ghost line), `queued`, `waiting` when gated, `active`
+  (route), `set` (in position, waiting for a go code or "Fire"), `active` (execute), then `done`,
+  `failed` (with `why`) or `cancelled`. **Latest order wins** unless shift-queued, matching
+  today's command menu.
 - **Contact on a Move** follows `posture.contact`: react (the hero halts, SquadTactics fights, the
-  move resumes 10 s after contact ends), push (keep moving; the discipline-weighted MOVE score
-  already does this), or avoid (break-contact bias and continue).
-- **Risk to a casualty threshold:** Careful is the first urgent casualty (`triage_tier`) or 25%
-  down; Balanced 35%; Press on 50%. Past it the hero requests to break contact; a Careful hero
-  breaks at once and reports.
-- **Go codes** are session-wide: one press launches every waiting order with that code, so
-  several squads move together. `hhour` orders start on `Briefing.deployment_started`. Phase 4
-  adds `after` ("Viper 3 moves when Hawk 2 is set").
-- **Commander's intent:** the kind is the task, the target the purpose, risk what the player will
-  pay. If an attack's enemy cluster drifts within `OBJ_DRIFT_M`, the hero re-aims instead of
-  failing.
+  move resumes 10 s after contact ends), push (keep moving), avoid (break-contact bias, continue).
+- **Risk sets the casualty threshold:** Careful is the first urgent casualty or 25% down, Balanced
+  35%, Press on 50%. Past it the hero requests to break contact; a Careful hero breaks at once and
+  reports.
+- **Go codes** (Phase 2) are session-wide: one press launches every `waiting` order with that code.
+  `hhour` orders start on `Briefing.deployment_started`. Phase 4 adds `after` ("Viper 3 moves when
+  Hawk 2 is set").
+- **Commander's intent:** if an attack's enemy cluster drifts within `OBJ_DRIFT_M`, the hero re-aims
+  instead of failing.
 
 ### 4.2 The order is law; autonomy lives inside it
 
-A hero squad never leaves its order on its own. When the hero wants to deviate (break contact
-under Defend, go and help another squad under Move) he asks. A request unanswered within its
-timeout (20 s at average leadership) is decided by the hero: his traits, then his risk level
-("Viper 3, no answer, breaking contact"). A broken squad may still fall back, as `SquadAI.broken()`
-does today; that stays honest.
+SquadTactics still fights every contact, but the verb narrows its options (an **option mask**) and
+biases what is left:
+
+| Verb / phase | Allowed options | Biases (Proposed: flank / assault / clear / defend / break / hold / search) |
+|---|---|---|
+| Move (react) | all but SEARCH | -0.15 / -0.2 / -0.3 / 0 / +0.05 / 0 / - |
+| Follow / Support me | all | 0 / -0.1 / -0.2 / 0 / 0 / 0 / -0.1 |
+| Defend | HOLD, DEFEND, CASUALTY (BREAK only as a request) | - / - / - / +0.3 / -0.15 x nerve / +0.15 / - |
+| Support by fire | HOLD (suppress task), CASUALTY | - / - / - / 0 / -0.05 / +0.2 / - |
+| Attack (execute) | all | +0.1 / +0.15 / +0.15 / -0.1 / -0.1 / 0 / 0 |
+| Regroup / Extract | HOLD, BREAK_CONTACT, CASUALTY | - / - / - / 0 / +0.15 / 0 / - |
+| Risk Press on / Careful | | break -0.1 / +0.1 |
+
+A "hold" term is new in `score()` (`+ d.get("hold", 0.0)`); Defend and SBF need one. Biases go
+through the same `doctrine()` seam the A3-07 doctrine weights are meant to use, so there is no
+second weight system.
+
+A hero squad never leaves its order on its own. A deviation (break contact on a Defend, go help
+another squad on a Move) is a **request** to the commander. Unanswered within its timeout (20 s at
+average leadership), the hero decides from his traits and the order's risk ("Viper 3, no answer,
+breaking contact"). A broken squad may still fall back, as `SquadAI.broken()` allows today.
 
 ### 4.3 Nothing fails silently (S0758)
 
-- **Held up:** less than 3 m of progress toward the current leg for `STUCK_S` (30 s, out of
-  contact): "Hawk 2, held up at 041 053, finding a way round". It tries a detour off the straight
-  line (the stuck-bots branch's lesson), then the nav path again, then an offset point.
+- **Held up:** less than 3 m of progress toward the current leg in `STUCK_S` (30 s) out of
+  contact: "Hawk 2, held up at 041 053, finding a way round". It tries a detour off the straight
+  line (a different side each time, the stuck-bots lesson), then the nav path again, then an
+  offset point.
 - **Unable:** after `UNABLE_S` (90 s) the order fails: "Hawk 2, unable: no route to 041 053.
   Holding." The next queued order starts.
-- Every failure has a `why` on the panel, in the net log and in the session log. The soak bot's
-  catch-up teleport stays test-only: a player would see it.
-- Order points are clamped into `map_area().grow(-80)`, as the soak learned (S0672, S0697 put bots
-  past the zone edge).
+- Every planner phase has a timeout and a fallback, and every failure has a `why` on the panel, in
+  the net log and in the session log (`[hc]` lines in the `[tactics]` style).
+- Order points are clamped into `map_area().grow(-80)`.
+- The soak bot's catch-up teleport stays test-only: a player would see it.
 
 ## 5. Execution on the host
 
 ```
-HighCommand (one per level)     registry, order intake, go codes, requests, the company net,
-   |                            cross-squad contact sharing, mutual support (Phase 3-4), view
-SquadOrders (one per hero Squad) order queue and phase machines; lanes and SBF spots (HcOrders)
+HighCommand (one per level)       registry, order intake, go codes, requests, company net,
+   |                              company enemy picture, mutual support (Phase 4), the view
+SquadOrders (one per hero Squad)  queue and phase machines, tasking (anchor, leash, sector,
+   |                              rally), SBF spots, CE, watchdogs
+SquadTactics (existing)           contact drill scoring, masked and biased by the order
    |
-SquadTactics (existing)         contact drill scoring, biased and bounded by the order
-   |
-SquadAI (existing)              hero: Intent.LEAD; members FOLLOW the hero as today
+SquadAI (existing)                hero: Intent.LEAD; men FOLLOW the hero as today
 ```
 
 ### 5.1 HighCommand (new `scripts/campaign/high_command.gd`, Node)
 
-Installed by `MapNodes.install` next to MapMarkers, Extraction and Reinforcements, so the same path
-exists on every peer; found with `MapNodes.high_command(from)`.
+Installed by `MapNodes.install` next to MapMarkers and Extraction, so the same path exists on every
+peer; found with `MapNodes.high_command(from)`.
 
-- Host: the registry `id -> {callsign, hero, squad: Squad, members, comms, orders}`; order intake
-  and validation (section 7); go codes and requests; the company net (section 6); and spawning:
-  `server_spawn_squad(def, at)` creates a `Squad` (name `HC_<id>`, faction friendly, `hc_id`) as
-  its child, the way `EnemyResponse._new_squad` does, and spawns members through
-  `level.spawn_soldier` with the same body set-up `_spawn_recovery_targets` and
-  `server_spawn_roster_squadmate` use (identity, own gear, `roster_id`, `ai_stats`), then
-  `brain.squad` and buddies.
-- Cross-squad contacts: a squad's contact report reaches the other squads' `known` as heard
-  (`note_enemy(who, pos, true)`) after `NET_DELAY_S` (2.5, like `SHARE_RADIO_S`), so the company
-  has one rough picture of the enemy.
-- Clients: only the replicated `view` and the net log.
+- **Host:** the registry `id -> {callsign, hero, squad, members, orders, queue, status}`; order
+  intake and validation (section 7); go codes and requests; the company net (section 6); spawning
+  through `server_spawn_squad(def, at)`, which creates a `Squad` (`HC_<id>`, friendly, `hc_id`) the
+  way `EnemyResponse._new_squad` does and spawns members with the body set-up
+  `server_spawn_roster_squadmate` uses (identity, own gear, `roster_id`, `ai_stats`), then
+  `brain.squad` and buddies. Called at deployment start.
+- **Company enemy picture** (from the AI-first design): a squad whose hero (or whoever has his
+  radio) is up passes fresh contacts to the other squads' `known` as heard, after `NET_DELAY_S`
+  (2-5 s, shorter with better leadership), and to `MapMarkers.server_report_enemy` as intel. A
+  squad whose hero is down and whose radio nobody has picked up **goes dark**: no reports, no shared
+  contacts, the icon greys. Losing an officer costs our side too, mirroring
+  `EnemyResponse.coordination()`.
+- **Clients:** only the replicated view and the net log.
 
 ### 5.2 SquadOrders (new `scripts/ai/squad_orders.gd`, RefCounted)
 
 One per hero Squad, like `SquadTactics`, ticked from `Squad._physics_process` every `THINK_S`
-(0.5 s) just before `tactics.think`. It holds the queue and the active order's phase machine, one
-small handler per kind mapping section 3.2 onto existing calls, always with `from` = the hero.
+(0.5 s; the planner re-plans every 3 s or on triggers) just before `tactics.think`. One small
+handler per verb maps section 3.2 onto existing calls, always with `from` = the hero. Its pure
+maths (spot scoring, frontage split, CE) is static, like `SquadTactics.score`, so tests stage it.
 
-- **Seams on Squad** (narrow): `hero` (Soldier), `leg` ({point, halt, face}) for the hero's LEAD
-  intent, `lane` ({a, b, half_w}), `order_bias` (Dictionary), plus `tactics.forced_plan` (a base
-  of fire and maneuver route the order chose; `_draw_flank` uses it when set).
-- **Resting order:** each tick, men whose order flipped to HOLD because an ordered tactic ended
-  (`_tactic_done`) get FOLLOW again when the phase wants them free; Defend and SBF phases keep HOLD
-  on purpose.
-- **Straggler control:** `leg.halt` while any man up is more than 25 m from his slot, or a
-  casualty is being carried.
-- **Order biases** (added to SquadTactics option scores through `doctrine()`, Proposed):
+- **Tasking** (the AI-first seam on Squad): `squad.tasking = {anchor, leash_m, sector: [left_dir,
+  right_dir], rally, axis}`. When set, it replaces the "follow the lead within `FOLLOW_LEASH_M`"
+  constraint: `_leashed()` uses the anchor and leash, `flank_route()` rejects flank points outside
+  the sector, and `fall_back_point()` / BREAK_CONTACT head for the rally point. Empty tasking means
+  exactly today's behaviour (a regression test compares `[tactics]` lines on a seeded run).
+- **Sectors:** every Attack, Defend or Move order gets a corridor around its axis, half-width
+  max(30 m, frontage / 2). HighCommand offsets a lane that overlaps another squad's or the player
+  squad's bubble, and warns when it can't ("Viper and Rook lanes cross: Rook shifted right").
+- **Defend frontage** (two points, Phase 2): split into one sector per buddy pair; each pair takes
+  cover or a building port near its sector midpoint with a watch on its bearing; the autorifleman
+  takes the likeliest approach. At 15-25 m per man; too wide and the hero says "frontage too wide,
+  covering the centre".
+- **Resting order** (G10): men whose order flipped to HOLD because an ordered tactic ended get
+  FOLLOW back when the phase wants them free; Defend and SBF keep HOLD on purpose.
+- **Straggler control:** the hero halts while any man up is more than 25 m from his slot, or a
+  casualty is being moved.
+- **Combat effectiveness:** `CE = clamp(up / size) x 0.5 + ammo x 0.25 + morale x 0.25 -
+  0.1 x urgent casualties`, from numbers `assess()` already produces. GREEN >= 0.7, AMBER >= 0.45,
+  RED below. RED aborts attack phases: consolidate and "Hawk 2 is red, request orders" (a
+  high-initiative hero falls back to the last rally point instead). CE is in the replicated view.
 
-  | Order / phase | flank | assault | clear | defend | break | hold | search |
-  |---|---|---|---|---|---|---|---|
-  | Move | -0.15 | -0.2 | -0.3 | 0 | +0.05 | 0 | -0.2 |
-  | Follow / Support me | 0 | -0.1 | -0.2 | 0 | 0 | 0 | -0.1 |
-  | Attack (execute) | +0.1 | +0.15 | +0.15 | -0.1 | -0.1 | 0 | 0 |
-  | Defend | -0.5 | -0.5 | -0.5 | +0.3 | -0.15 x nerve | +0.15 | -0.3 |
-  | Support by fire | -0.6 | -0.6 | -0.6 | 0 | -0.05 | +0.2 | -0.3 |
-  | Regroup / Extract | -0.5 | -0.5 | -0.6 | 0 | +0.15 | 0 | -0.5 |
-  | Risk Press on / Careful | | | | | -0.1 / +0.1 | | |
+### 5.3 The hero leads (small edits in squad_ai.gd and tactics.gd)
 
-  This goes through the same `doctrine()` seam the doctrine weights (audit A3-07, still pending)
-  are meant to use, so there is no second weight system.
-
-### 5.3 The hero leads (squad_ai.gd and tactics.gd, small edits)
-
-- **`Intent.LEAD`.** In the friendly branch of `_choose_intent`, `squad.hero == body` scores LEAD
-  in place of FOLLOW. Out of contact he walks `squad.leg.point` at the squad's pace; on `leg.halt`
-  he stops and faces `leg.face` from a halt spot; in contact he fights around the leg anchor, as
-  the FOLLOW fight branch does. His order stays FOLLOW, so `_tactic()` lets him take evaluator
-  tasks and the leash (`FOLLOW_LEASH_M` 30) moves with him. Status text: "Leading", "Waiting for
-  the squad".
-- **The hero stays in the base of fire:** `elements()` keeps `squad.hero` in the base, as the player
-  lead is today; `_call_option()`'s speaker is the hero.
-- **Lanes:** every order gets a lane, the axis from the squad to its objective with half-width
-  50 m. `flank_route()`, `fall_back_point()` and SBF spot search are clamped into it (a static
-  `_in_lane()` beside `_leashed()`). HighCommand offsets a new lane that overlaps another squad's
-  or the player squad's 30 m bubble, and warns when it can't ("Viper and Rook lanes cross: Rook
-  shifted right").
-- **A "hold" term** in `score()` (`+ d.get("hold", 0.0)`): Defend and SBF need one; none exists.
-- **Leader aura:** `MORALE_LEADER` and its range scale with the hero's leadership.
-- **If the 30 m leash proves too tight in attacks** (Phase 2): `Squad.lead_anchor()` returns the
-  objective during execute, used for the leash only.
+- **`Intent.LEAD`.** In the friendly branch of `_choose_intent`, `squad.hero == body` scores LEAD in
+  place of FOLLOW. Out of contact he walks the planner's current leg at the squad's pace; on a halt
+  he stops and faces the threat axis from a halt spot; in contact he fights around the tasking
+  anchor. His order stays FOLLOW, so `_tactic()` still hands him evaluator tasks. Status text:
+  "Leading", "Waiting for the squad".
+- **The hero stays in the base of fire:** `elements()` keeps him in the base, as it keeps the
+  player lead today; `_call_option()`'s speaker is the hero.
+- **Leader aura:** `MORALE_LEADER` and its range scale with the hero's leadership (a morale floor
+  for men within 30 m).
+- **Succession:** when the hero goes down, the other fire team's leader, else the man with the best
+  nerve then missions, becomes `hero` and `leader` and takes the current order, with plan quality
+  scaled (x 0.7 of his own skill). "Hawk 2, Mercer is down. Okafor has command." Each man takes a
+  morale hit. The radio passes when the new leader picks it up; until then the squad is dark. A
+  recovered hero takes command back. After the contract the company must promote a new leader or
+  the detachment disbands into the pool (Phase 3).
 
 ### 5.4 Support by fire and danger close
 
-- **SBF spot** (when the player gives only a rough position, or Attack sets its base): line of
-  sight to the target at three heights; on a ring 80-200 m from it; 30-120 degrees off the assault
-  axis so the assault lane isn't masked; the fire lane keeps 30 m from every current and planned
-  friendly position out to target + `DOWNRANGE_M` (60 m). No spot clears: "Hawk 2, can't fire,
-  friendlies in the lane", and it tries the next.
-- **Danger close:** every SBF tick checks for any friendly (players, the player squad, other hero
-  squads) within `DANGER_CLOSE_M` (35 m) of the target area or inside the fire cone; then it shifts
-  to an uncovered part of the area or lifts ("check fire, friendlies on target"). The assault
-  element closing within 50 m of the target, or within 15 degrees of the SBF line, lifts or shifts
-  fire too. `_friendly_in_line` stays as the last guard on each shot.
-- **Ammo:** below `AMMO_LOW` the squad lifts and reports "ammo red".
+- **SBF spot** (when the player gives only a rough position, or Attack sets its base): on a ring
+  80-250 m from the target and within `Doctrine.engage_m`; line of sight at `Squad.SIGHT_HEIGHTS`;
+  prefer cover and height; at least 45 degrees off the assault axis so the assault never walks into
+  its own fire; the fire lane clear of every current and planned friendly position out to target +
+  60 m. No spot clears: "Hawk 2, can't fire, friendlies in the lane", and it tries the next.
+- **`SquadOrders.safe_to_fire(shooter, target, friendlies)`** (static): no suppression with any
+  friendly (players, the player squad, other hero squads) inside a 10-degree fan around the shot
+  line out to the target + 30 m. The suppress task asks it before each burst; `_friendly_in_line`
+  stays as the last guard on each shot. This is the single most important safety rule once several
+  squads fight in one place, and a test asserts zero blue-on-blue damage.
+- **Lift and shift:** when the supported element comes within 40 m of the target, or any friendly
+  within `DANGER_CLOSE_M` (35 m) of the target area, fire shifts to the depth or flank of the
+  objective along the axis, or lifts ("check fire, friendlies on target").
+- **Ammo:** below two magazines a man the squad suppresses on call only and reports "ammo amber";
+  below `AMMO_LOW` it lifts and reports "ammo red".
 
-### 5.5 Succession and comms
-
-- **Succession:** when the hero goes down or dies, the other fire team's team leader, else the
-  member with the best nerve then missions, becomes `squad.hero` and `squad.leader` and takes the
-  current order. "Hawk 2, Mercer is down. Okafor has command." The hero's traits stop applying;
-  each man takes a morale hit (double for losing the leader). His history records it.
-- **Combat ineffective** (2 or fewer up, or most broken): report, then regroup on the nearest
-  friendly squad or extraction point.
-- **Comms** (Phase 3, setting `hc_needs_radio`, off in the MVP): the hero or someone within voice
-  range of him carries a `RADIO`. Without one the squad is **comms lost**: its icon greys, new
-  orders are refused ("No comms with Hawk 2"), it finishes its current order, holds, then extracts
-  when the player squad's extraction starts. The commander likewise needs a radio or a radio
-  carrier in voice range. A jammer cuts high command (Phase 4).
-
-### 5.6 Knowledge fairness
+### 5.5 Knowledge fairness
 
 Routes, attack positions, SBF spots and avoid areas use only the side's intel markers, each squad's
 `known`, the contract's `known_enemies` and terrain: never `EnemyResponse` internals or true
 soldier lists. That is how the AI bar (beat Arma 3 Veteran with LAMBS and VCOM) is met fairly. A
-test checks the planner's inputs (section 11).
+test checks the planner's inputs.
 
-### 5.7 Streaming and performance
+### 5.6 Streaming and performance
 
-- **Streaming:** each hero squad's leader joins `stream_focus()` on the host (G8), so modules and
-  their garrisons stream in as a squad approaches. Garrison spawns cost CPU; streaming stays
-  staggered.
-- **Budget:** each hero squad adds 4 (MVP) to 8 brains on a machine that is already loaded, on top
-  of hot-zone hostiles (`EnemyResponse.MAX_ALIVE` 40, reinforcement waves, garrisons). Mitigations:
-  one squad of 4 in the MVP; the friendly AI budget cap at prep; staggered think timers; an **AI
-  LOD** (Phase 3): a squad with no player within `HC_LOD_M` (350-400 m) and not in contact scans
-  every 1.0 s, thinks every 1.5 s and plans every 4 s; `FrameCost` keys `ai` and a new `hc`; a
-  `perf_timing` case with 8 + 8 + 8 friendly AI in a hot zone against a budget.
-- **Travel LOD** (Phase 4): a squad over 340 m from every player and not in contact moves as a
-  token along its route and re-materializes inside the stream radius. Fights are always real.
+- Each hero leader joins `stream_focus()` on the host (G8). Garrison spawns cost CPU, so streaming
+  stays staggered.
+- Each hero squad adds 4 (MVP) to 8 brains on a machine that is already loaded, on top of hot-zone
+  hostiles (`EnemyResponse.MAX_ALIVE` 40, waves, garrisons). Mitigations: one squad of 4 first, the
+  friendly AI budget at prep, staggered think timers, and an **AI LOD** (Phase 3): with no player
+  within 350-400 m and no contact, a squad scans every 1.0 s, thinks every 1.5 s and plans every
+  4 s. `FrameCost` gets an `hc` key; `perf_timing` gets an 8 + 8 + 8 friendly AI case against the
+  B0734 baseline.
+- **Travel LOD** (Phase 4): a squad far from every player and not in contact moves as a token along
+  its route and re-materializes inside the stream radius. Fights are always real.
 
 ## 6. The company net (reports)
 
 `HighCommand.radio(squad, kind, text, pos := null)` on the host:
 
 - appends to a replicated net log `{t, squad, kind, text, pos}` (last 50 lines);
-- shows a subtitle to the side's players through `Callouts._show` with the speaker "Hawk 2 (net)",
-  the route RadioChatter uses, so net lines read apart from shouted callouts;
-- writes `SessionLog.note("[hc] ...")` for playtest review, in the style of `[tactics]`.
+- shows a subtitle to the side's players through `Callouts._show` with the speaker "Hawk 2 (net)"
+  in its own colour, so net lines read apart from shouted callouts;
+- writes `SessionLog.note("[hc] ...")` for playtest review.
 
-**Rate limits:** one line per squad per `NET_GAP_S` (3 s), a queue of 4, casualty, request and
-unable lines first; a repeated contact report within 60 s and 40 m of the last is dropped. Hero
-squad shouts ("Reloading!", "Base of fire, suppress!") stay within voice range (G5); the net gets at
-most one tactics summary per squad per `TACTIC_REPORT_GAP_S` ("Hawk 2, in contact, suppressing and
-flanking left").
+**Rate limits:** one line per squad per `NET_GAP_S` (3 s), a queue of 4, priority casualty >
+request > unable > contact > set > moving. A repeated contact report within 60 s and 40 m is
+dropped. The net gets at most one tactics summary per squad per `TACTIC_REPORT_GAP_S` ("Hawk 2, in
+contact, suppressing and flanking left"); shouts stay within voice range (G5).
 
 | Trigger | Example | Side effect | Phase |
 |---|---|---|---|
-| Order accepted / refused | "Hawk 2, copy: moving to 041 053." / "Hawk 2, unable: no route." | Order active / failed with `why` | 1 |
-| Set, done | "Hawk 2, set at 041 053." / "objective secure" / "at the LZ" / "Hawk 2 is out." | Panel state | 1 |
-| First fresh cluster | "Viper 3, contact: 6 enemy, north, 180 m." | `MapMarkers.server_report_enemy(centre, "Viper 3: 6x", "intel")`; shared to other squads | 1 |
+| Accepted / refused | "Hawk 2, copy, from Player 2: moving to 041 053." / "Hawk 2, unable: no route." | Order active / failed with `why` | 1 |
+| Set, done | "Hawk 2, set at 041 053." / "at the LZ" | Panel state | 1 |
+| First fresh cluster | "Viper 3, contact: 6 enemy, north, 180 m, engaging." | Intel marker "Viper 3: 6x"; shared to other squads | 1 |
 | Man down | "Hawk 2, man down, one urgent." | Casualty count | 1 |
 | Succession | "Hawk 2, Mercer is down. Okafor has command." | Leader changes | 1 |
 | Held up | "Hawk 2, held up at 041 053, finding a way round." | Replan | 1 |
-| Sitrep (asked, idle every `SITREP_S`, order end) | "Hawk 2, 3 up, 1 wounded, ammo amber, holding at 041 053." | Panel refresh | 1 |
-| Ammo low | "Hawk 2, ammo red." | Lift fire; later a resupply request | 2 |
+| Sitrep (asked, at order end, idle every `SITREP_S`) | "Hawk 2, green, 4 up, ammo amber, holding at 041 053." | Panel refresh | 1 |
+| CE change | "Hawk 2 is red, request orders." | Attack phases abort | 2 |
 | Danger close | "Hawk 2, check fire, friendlies on target." | Lift or shift | 2 |
-| Request | "Viper 3, two wounded, taking heavy fire: request to break contact." | Pending request | 2 |
-| Initiative | "Viper 3, contact at Hawk 2's position, request to support." | One key turns it into a Support order | 3 |
-| Comms lost | (silence) | Icon grey, "no comms 2 min" | 3 |
+| Request | "Viper 3, amber: request to break contact." | Pending request | 2 |
+| Initiative offer | "Hawk 2 can support Viper 3, approve?" | One key turns it into an SBF order | 4 |
+| Going dark | (silence) | Icon grey, "no comms 2 min" | 2 |
 
-Grids come from `MapGrid.grid_ref` at 100 m; a hero with high leadership gives finer grids and exact
-counts, a low one "several". Ammo, morale and wounds are bands, not numbers, in keeping with the
-minimal HUD: ammo green above 0.6, amber 0.3-0.6, red below 0.3 (`ammo_share`); morale steady,
-shaken, breaking (`MORALE_SHAKEN`, `MORALE_BROKEN`).
-
-**Requests** `{id, squad, kind, text, at, until}`: break contact, reinforce, CASEVAC (bring the
-casualty to the CCP or the player: `ccp` / `ccp_me`), resupply (Phase 3). Answered with
-`HighCommand.request_answer(id, approve)` from the panel or the approve and deny keys.
+Grids from `MapGrid.grid_ref` at 100 m; a hero with high leadership gives finer grids and exact
+counts, a low one "several". Ammo and morale are bands, not numbers, in keeping with the minimal
+HUD. Clicking a log line centres the map on its grid.
 
 ## 7. Network and authority (host-authoritative co-op)
 
-**RPCs on HighCommand** (requests `any_peer`, `call_local`, reliable; the host validates; validation
-lives in pure statics, `HcOrders.validate`, so tests and the soak bot use the same rules):
+**RPCs on HighCommand**, shaped like MapMarkers: requests are `@rpc("any_peer", "call_local",
+"reliable")` to the host; validation lives in a pure static `HcOrder.clean()` so tests and the soak
+bot use the same rules.
 
 | RPC | Host checks | Effect |
 |---|---|---|
-| `_server_order(squad_id, order, append)` | Sender has a Soldier in Players, not AI, up; authority (below); the squad exists and has comms; kind whitelisted; points finite and inside `map_area()` grown by the pan margin; at most 16 route points and 8 queued orders; refs resolve on the host (building, objective, marker, player, extraction point); at most 4 orders a second per peer; text clamped | Order added; "copy" or "unable" on the net; a refusal to the sender |
-| `_server_cancel(squad_id, order_id)` | Authority | Cancelled |
-| `_server_go(code)` | Authority | Waiting orders with that code go active |
-| `_server_answer(request_id, approve)` | Authority; still pending | Resolved |
-| `_server_take_command()` / delegation | Setting, current commander | "Player 2 has command" |
+| `request_order(order, append)` | Sender owns a player Soldier that is up; has command authority; squad exists, is deployed and not dark; verb whitelisted; points finite, inside `map_area()`, through `Soldier.usable_point`; at most 16 route points and 8 queued; every ref re-resolved on the host; at most 4 orders a second per peer | Order added; "copy" or "unable" on the net; a refusal reason to the sender via `_client_message` |
+| `request_cancel(squad, id)` | Authority | Cancelled |
+| `request_go(code)` | Authority | Waiting orders with that code go active |
+| `request_answer(req_id, yes)` | Authority; still pending | Resolved |
+| `request_command()` | Setting | Commander token moves; "Player 2 has command" |
+
+The in-world Squads mode may instead send `hc:` commands through `_server_squad_command`, forwarded
+to HighCommand the way `support:` goes to Supports (two lines in soldier.gd).
 
 **Replication.**
-- Hero squad men are ordinary spawned Soldiers: positions replicate as now, and `Soldier.hc_id`
-  replicates with them (G-marker).
-- The host-only state (orders, phases, tactics option, requests, bands, comms, last report) goes
-  out as one compact **view**, on change only, at most 2 Hz (like `BaseHub._queue_broadcast`).
-  Per squad: `{id, callsign, hero_name, up, total, wounded, ammo_band, morale_band, comms,
-  last_report_t, last_pos, order: {id, kind, points, target, state, phase, go}, queue, tactic}`.
-- Late joiners get `_client_snapshot(view, net_log)` on `Net.peer_joined`, the MapMarkers pattern.
+- Hero squad men are ordinary Soldiers: positions replicate as now, and `Soldier.hc_id` with them.
+- `_client_order(dict)` reliable to all on every change, and a compact **status** view on change at
+  most 2 Hz (unreliable_ordered): per squad `{id, callsign, hero_name, up, total, wounded, ce,
+  ammo_band, morale_band, dark, order: {id, verb, points, state, phase, go}, queue, tactic,
+  last_line}`. Around 200 B a squad.
+- Late joiners and rejoiners get `_client_snapshot(view, orders, net_log)` on `Net.peer_joined`.
+- **Latency UX:** the client draws a dotted ghost line until the host's ack, then solid, or red with
+  the reason. 150-300 ms over the soak's lossy relay then feels responsive.
 - Clients never run SquadOrders or SquadTactics.
 
-**Authority** (host setting `hc_authority`):
-- `"anyone"` (MVP default): today's squad rule, any player may order and the latest order wins; the
-  author is shown on the order and in the net line.
-- `"commander"` (Phase 3): one commander seat, the host by default. The host can **delegate** a hero
-  squad to a co-op player at the briefing, keyed by `BaseHub.player_key` so it survives a
-  reconnect. A delegate who leaves: the squad holds, reports "lost comms with command", and falls
-  back to the host.
-- A player joining mid-deployment takes a player-squad slot (`rebalance_squad`); hero squads are
-  untouched (G2).
-- Phase 4 option: a co-op player **takes a hero squad's lead** (the hero becomes second in
-  command) or joins one of its slots, which keeps the player-scalable rule at squad level.
+**Who commands** (both top designs agree): one **commander token**, the host by default, stored in
+the deployment record by `BaseHub.player_key` so it survives a reconnect. It can be handed over at
+the FOB ready-up or from the map panel; a host setting chooses "anyone may take it" or "host
+approves". Other players see every squad read-only and can **Request support** (a ping to the
+commander). If the commander leaves or stays down past bleed-out, the token passes to the next
+player by key, with a net line. Every order carries `by`, and the net names who gave it. The HC
+panel always shows "Commander: Player 2", so clients never think orders are broken. The player
+squad keeps today's rule (anyone orders it). Phase 3 adds per-squad **delegation** to a co-op
+player.
 
-**Campaign data:** promote, form, assign and disband are host-only BaseHub requests (like
-"release"); picking hero squads in prep follows "pick". All of it travels in `BaseHub.view`.
+**Campaign data:** promote, form, assign and disband are host-only BaseHub requests, like
+"release"; picks at prep follow "pick". It all travels in `BaseHub.view`.
 
-**Fog option** (Phase 3, `hc_bft`): on, live member dots; off, hero squads are drawn at their last
-reported position with an age tag. A co-op honesty setting, not anti-cheat.
+**Determinism:** HighCommand ticks from `Soldier._now()` / the Alert clock, so tests can advance it
+(as with `EnemyResponse.server_tick`). It never reads files; the soak's phase.json stays a harness.
 
 ## 8. Campaign: heroes on the books
 
-Hero squads are company assets: hired, paid, kitted, risked and grown at the FOB like squadmates
-today. Losing Sgt Okafor's squad on a rated-5 hot zone costs a veteran, three trained hands, their
-gear and a recovery contract.
+From the campaign-first design: heroes are earned from the Captain's own roster, and squads are
+company assets that are hired, paid, kitted, risked and grown at the FOB. Losing Sgt Okafor's squad
+on a rated-5 hot zone costs a veteran, three trained hands, their gear and a recovery contract.
 
-**Roster member fields** (lazily defaulted by `Company.ensure_hero()`, as `ensure_identity` fills
-older saves; all JSON-safe in the roster section, so saves, revert and `BaseHub.view` work with no
-new plumbing):
-- `rank`: 0 contractor, 1 team leader (leads up to 4, himself included), 2 squad leader (up to 8).
-- `lead` (0..1, rank 1 and up): kept out of `Roster.SKILLS` so existing wages don't shift. It sets
-  planner cadence (1.5-3.0 s), request timeouts (10-30 s), grid precision and whether he re-aims on
-  his own.
-- `traits` (Phase 3), `squad` (the hero squad id or "").
+**Phase 1 (MVP, no economy):** the hero and his 3 men are available roster members picked at prep.
+They spawn like `server_spawn_roster_squadmate` with their own identity, gear and `ai_stats`, go
+into `dep.spawned`, and `resolve()` settles them already. History lines are written. No promotion,
+fee, wage change or traits yet.
 
-**Section key `"hc_squads"`:** id -> `{id, callsign, leader, members (in slot order), formed_day,
-missions, kills, losses, cohesion, standing: {roe, mode, formation}}`, plus `next_id`.
+**Phase 3 data** (JSON-safe in the roster section, lazily defaulted the way `ensure_identity` fills
+older saves, so no `SAVE_VERSION` bump):
 
-**`class_name Company`** (new scripts/campaign/company.gd, pure static like Roster):
-- `can_promote(m, rank)`: rank 1 at 6+ missions and nerve >= 0.55; rank 2 at 12+ missions and
-  lead >= 0.5. `promote()` charges a fee (2000 / 5000) and sets `lead` to 0.25 + 0.4 x nerve.
-- `form()`, `assign()`, `unassign()`, `disband()`, `rename()`, `size_of(rank)` ([0, 4, 8]). A member
-  belongs to at most one hero squad; members of one not deploying can still be picked for the
-  player squad.
-- `authorized(contract)`, `ai_stats(member, squad, leader_up)`: discipline = `Roster.ai_stats()` +
-  0.1 x cohesion + 0.1 x the leader's lead while he's up.
-- `after_deployment(squad, outcome, rng)`: lead closes on 0.95 by 3-8% (more with objectives done
-  and low losses); cohesion +0.1 a deployment, -0.15 per man lost or replaced; history lines.
-- `debrief_lines()`; Phase 3: the traits loader (data/hero_traits.json) and `exfil_roll()` if the
-  Captain wants it.
+- `member["hero"]` (only on promoted members): `{promoted_day, rank (1 team leader, 2 squad
+  leader), command: {leadership, tactics, initiative} (each 0..1), traits: [ids], ops, kills_led,
+  lost_led, detachment: "d01"}`. Command skills sit outside `Roster.SKILLS`, so existing wages
+  don't shift.
+- `roster["detachments"]`: id -> `{id, callsign: "2-1", leader: mid, members: [mids], formation,
+  doctrine, standing: {roe, mode}, formed_day, cohesion}`. `Campaign.SHAPES["roster"]` gains the
+  key.
+- `roster["deployment"]` gains `detachments`, `det_spawned` (mid -> det id), `det_orders` (the last
+  order each, for the debrief) and `commander`.
 
-**Money:** `Roster.wage_of` adds `RANK_WAGE[rank]` (0 / 40 / 90 a day). Each authorized hero squad
-costs an `hc_squad` support charge through `Economy.server_pay_support` (contract support budget
-first, then cash); squads beyond the authorization are cash only. A price sits in
-`data/prices.json` "supports" next to resupply (8000) and transport (6000): 5000 Proposed.
+**New `scripts/campaign/heroes.gd`** (`class_name Heroes`, pure statics on the roster section, like
+`Roster`, so host, tests and UI share one set of rules):
 
-**Deployment:** `RosterDeployment.begin(..., hc_squads := [])` records `dep.hc_squads` (id,
-callsign, hero, members, insertion, outcomes). Members go into `dep.spawned` through the existing
-`mark_spawned`, so `resolve()` already settles them. `auto_squad()` and `member_for_slot()` skip
-members of hero squads picked for this deployment. `BaseHub._on_briefing_started` spawns them beside
-`_spawn_recovery_targets` through `HighCommand.server_spawn_squad`; `server_end_deployment`
-collects `_outcome_of` for them. A squad that extracts on its own has its outcomes recorded then
-(`mark_hc_out`) and its men despawn ("Hawk 2 is out").
+- **Eligibility:** READY and either team_leader role with missions >= 4, or missions >= 8 and nerve
+  >= 0.6. `promote(data, mid, day)` charges a fee (10 days of wage), raises the wage 25%, makes the
+  hero block and a detachment, and writes "Day 14: Promoted to Squad Leader". `demote()`.
+- **Detachments:** `assign`, `unassign`, `detachment_of`, `strength` (ready / total), `disband`.
+  A member is in at most one detachment; the dead and MIA can't be assigned; detachment members
+  never fill the player squad's 8 slots (`auto_squad()` and `member_for_slot()` skip them via
+  `in_detachment()`). Size 4 (one fire team), 8 at rank 2 on `Roles.layout`.
+- **`command_stats(hero)`** gives what the runtime uses: planner cadence (1.5-3.0 s), score noise
+  (±0.15 x (1 - tactics), so a poor leader picks worse options), morale floor, `leash_m` from
+  initiative, request timeout (10-30 s), report delay and grid precision. Starting skills come from
+  nerve, xp and role; `after_op(hero, report, rng, day)` grows them like `Roster.after_mission`,
+  scaled by rating and success; cohesion +0.1 a deployment, -0.15 per man lost or replaced.
+- **Traits** (data in data/heroes.json, loaded like Doctrine with `_notes` and `_pending`): earned
+  from history, 6-8 of them, visible on the card. Each is a few option biases plus at most one
+  planner or stat tweak, never shooting:
 
-**Traits** (Phase 3, the Captain's call: the design doc lists deep personalities and perk trees as
-stretch). Each uses only knobs that act today:
+  | Trait | Earned by | Effect |
+  |---|---|---|
+  | Steady | no man lost in 3 ops | +0.08 discipline for his men; aura x1.5; denies break contact by default |
+  | Hard to kill | wounded 3 times and came back | morale floor up; slower CE abort |
+  | Aggressive | many Attack orders completed | assault +0.08, flank +0.05, break -0.1; shorter standoff |
+  | Cautious | broke contact and got everyone out | break +0.06, hold +0.05; bounds the last 150 m; asks to break sooner |
+  | Methodical | many Defend / SBF orders set | Attack always sets a base of fire first; longer standoff |
+  | Medic's eye | medical above 0.7 | casualty +0.08; sets the CCP at the first casualty |
+  | Good on the radio | many contact reports | finer grids, exact counts, net delay halved |
+  | Improviser / By-the-book | initiative high / low | adapts a stale order ("objective's empty, pushing to the next building") / always asks |
 
-| Trait | Effect |
-|---|---|
-| Aggressive | flank +0.08, assault +0.05; risk thresholds a step looser; may support without asking |
-| Cautious | break +0.06, defend and hold +0.05; the last 150 m toward known enemies becomes a bound; asks to break sooner |
-| Methodical | Attack always sets a base of fire first; bounds in contact; legs of 60 m |
-| Steady | +0.08 discipline for his men; leader aura x1.5; denies break contact by default |
-| Looks after his own | casualty +0.08; sets the CCP at the first casualty |
-| Good on the radio | finer grids and counts; relay delay halved |
-| Mentor | his men's skill growth x1.25 |
-| One flaw each | Glory hound (assault +0.1, break -0.1) or Expensive (wage x1.2) |
+- **Contracts:** `ContractsGen` adds public `squads_max` from the briefed rating (setting
+  `difficulty_squads` = [0, 0, 0, 0, 1, 2], hot zone +1, cap 3). Squads beyond it can be brought at
+  the company's cost.
+- **Money:** each authorized squad is an `hc_squad` charge through `Economy.server_pay_support`
+  (contract support budget first, then cash; 5000 Proposed in `data/prices.json` "supports"); extra
+  squads are cash only. Members are paid their own wages.
+- **Hiring:** 6 candidates every 3 days can't staff three squads. A rare ready-made SL from the top
+  experience tier, and (Proposed) a "fire team for hire" bundle as the safety valve.
+- **Resolve:** every detachment member goes through `resolve()` (extracted, MIA, KIA, wounds,
+  sit-out days); `Heroes.after_op` runs for each hero deployed, with "Led 2-1 at Outpost 3: held the
+  bridge, 1 KIA". A hero MIA creates a recovery contract exactly as today. A squad that extracts on
+  its own has its outcomes recorded then (`mark_hc_out`) and despawns ("Hawk 2 is out").
 
-Named veterans on the hiring board at higher reputation tiers, and memorial and history views,
-come with Phase 3 if the Captain wants them.
+**Phase 4, the company campaign:** a detachment sent alone on a low-rated contract is auto-resolved
+off-screen from its skills against the true rating (income, wound and MIA risk); "company op"
+contracts built for three squads; bonds and rivalries between heroes.
 
 ## 9. Build now so the co-op fixes stay reusable
 
 The co-op work in flight (the soak bot's player brain, the stuck-bots detour, the extraction
 leave-behind warning, FOB ready-up, own-kit respawn) already holds most of what hero squads need.
-These steps keep it reusable instead of rewriting it later. None needs a gameplay decision; each is
-a small branch of its own, after the owning branch lands on dev (the soak harness belongs to the
-coopsoak agent, extraction to coop-extract, squad.gd and squad_ai.gd to coop-respawn).
+These keep it reusable instead of rewritten. None needs a gameplay decision; each is a small branch
+after its owner's branch lands (the soak harness belongs to the coopsoak agent, extraction to
+coop-extract, ready-up to coop-ready, squad.gd and squad_ai.gd to coop-respawn). Until then they go
+to the owners as F-tasks in docs/audits/followups.md.
 
 1. **Lift the soak bot's follow brain into game code: `FollowBrain`** (new
-   scripts/ai/follow_brain.gd, pure static or RefCounted). Inputs: my position, the leader's
-   position, yaw and vehicle, whether I'm in contact, the active extraction points, an offset table
-   and near/far distances. Output: an action `{kind: walk|hold|board|exit|none, point, speed}`. It
-   holds the decisions of `_follow_tick` and `_follow_spot` (10-25 m off the leader, turned his
-   way; hold and fight in contact; board and leave his vehicle with him; get inside the point he
-   stands in). `coop_soak.gd` calls it and keeps its own RPC actuator; hero squads call it with
-   SquadAI as the actuator (the hero's `leg`) and bigger offsets (Follow 30-60 m, Support me
-   60-120 m). One brain, tested two ways.
+   scripts/ai/follow_brain.gd, pure). Inputs: my position, the leader's position, yaw and vehicle,
+   whether I'm in contact, the active extraction points, an offset table, near and far distances.
+   Output: `{kind: walk|hold|board|exit|none, point, speed}`. It holds the decisions of
+   `_follow_tick`, `_follow_spot` and `_wedge_spot` (a loose spot off the leader turned his way; hold
+   and fight in contact; board and leave his vehicle with him; get inside the point he stands in).
+   `coop_soak.gd` calls it with its RPC actuator; hero squads call it with SquadAI as the actuator
+   and bigger offsets (Follow 30-60 m, Support me 60-120 m). One brain, tested two ways.
 2. **Lift the stuck watch: `ProgressWatch`** (new scripts/ai/progress_watch.gd, pure). Feed it
-   position, goal and time; it reports headway, "wedged" after `WEDGED_S`, a detour bearing (a
-   different way each time, `DETOUR_DEG`), and "held up" / "unable" after its limits, with a state
-   line for the log. It holds `_stuck_note` and `_track_wedge`. The soak uses it (its catch-up
-   teleport stays in the test); SquadOrders uses it for section 4.3; later SquadAI followers can use
-   it for player squadmates left behind, the same S0758 failure in real AI.
-3. **Make dead ground knowledge-fair at the seam.** When `_dead_ground` / `_hidden_fraction` are
-   lifted (into `HcOrders`), they take the threat points as an argument: the soak passes true posts,
-   the game passes intel markers and `known` (section 5.6).
-4. **Extraction by group.** Once `fix/coop-extraction` is on dev, a follow-up gives Extraction a
-   group-shaped query, `missing_of(point, soldiers)` beside `missing_at`, and lets the leave-behind
-   warning list extra groups. The soak's `_extract_with_human` (leave stragglers after 90 s) and hero
-   squads then both use the game's rule, not their own.
-5. **One squad marker and predicate (Phase 0, after coop-respawn lands).** The replicated
-   `Soldier.hc_id`, `Squad.members()` scoped to its brains, and `Squad.is_squadmate(s)` in place of
-   the recovery and vehicle-crew meta checks. This also hardens recovery targets and AAV crews.
-6. **Command through the game's own seam.** Soak bots give squad orders through
-   `_server_squad_command` (the RPC the command menu uses), and later `HighCommand._server_order`,
-   so `coop_soak --hc` exercises the real validated path over the lossy relay.
-7. **Group records in the soak recorder.** The recorder and `coop_soak_report.py` key positions,
+   position, goal and time; it reports headway, "wedged", a detour bearing (a different side each
+   time), "held up" and "unable", with a log line. It holds `_stuck_note` and the stuck-bots
+   branch's wedge tracking. The soak uses it (its catch-up teleport stays in the test), SquadOrders
+   uses it for 4.3, and later player-squad followers can use it for the same S0758 failure in real
+   AI.
+3. **Lift the medic and give-up decisions** (`_treat_loop`, `_casevac_tick`, `_give_up_tick`) as
+   pure "who needs care next, when to give up" helpers next to the existing casualty care, so hero
+   squads and the soak share one rule. No reflex body-hauling: carrying stays a chosen, announced
+   act (Captain, 2026-10-14).
+4. **Make dead ground knowledge-fair at the seam.** When `_dead_ground` / `_hidden_fraction` are
+   lifted into `SquadOrders` statics, they take the threat points as an argument: the soak passes
+   true posts, the game passes intel markers and `known`.
+5. **Extraction by group.** Once `fix/coop-extraction` is on dev, give Extraction a group query,
+   `missing_of(point, soldiers)` beside `missing_at`, and let the leave-behind warning list extra
+   groups. The soak's `_extract_with_human` and hero squads then both use the game's rule.
+6. **One squad marker and predicate** (Phase 0, after coop-respawn lands): `Soldier.hc_id`,
+   `Squad.members()` scoped to its brains, `Squad.is_squadmate(s)`. This also hardens recovery
+   targets and AAV crews today.
+7. **Command through the game's own seam.** Soak bots give squad orders through
+   `_server_squad_command` (as the command menu does) and later `HighCommand.request_order`, so
+   `coop_soak --hc` exercises the real validated path over the lossy relay.
+8. **Group records in the soak recorder.** The recorder and `coop_soak_report.py` key positions,
    state and stuck notes by group (`hc_id`, "" for the player squad), so `--hc` needs no new report
-   format. `[hc]` session-log lines follow the `[tactics]` style so the report can grep them.
+   format.
 
 ## 10. UI
 
 - **Map** (`map_view.gd` gets narrow hooks; drawing and command-mode input live in a new
-  `scripts/ui/map_command.gd`, `MapCommandLayer`, so the 567-line view barely grows):
-  - **Squad icon:** a friendly frame inspired by APP-6 (22x14 px, `SQUAD_COLOUR`, infantry X),
-    callsign beside it ("HAWK 2"), strength under it ("4/4"), at the hero (members' centroid if he's
-    down). States: moving (heading arrow), set (bar), in contact (red outline pulsing at 1 Hz),
-    pending request (amber "!"), comms lost (grey dashed, "?"). Selected: yellow outline. Members as
-    dots at close zoom when BFT is on.
-  - **Order graphics:** move, a dashed blue line with arrowheads (queued legs at half alpha);
-    defend, a circle with a sector arc; later attack (red arrow to an objective circle, the attack
-    position as a small square), SBF (triangle, a red fan to the target, solid while firing), bound
-    (chevrons), fall back ("FB"), extract (purple arrow). Go-gated orders carry A / B / C. A failed
-    order flashes red for 3 s with its `why`. Phase 2 adds lanes as faint bands.
-- **HC panel** (new `scripts/ui/hc_panel.gd`, placed like `MapExtractionPanel`, 320 px): squad cards
-  (hero name, strength, bands, current order and phase); the selected squad's queue with cancel;
-  posture and risk quick-sets; requests with Approve / Deny and a timeout bar; go-code buttons with
-  waiting counts; the net log (clicking a line centres the map there). During the briefing the
-  briefing panel keeps priority, with a tab to switch.
-- **Command menu Squads mode** (Phase 2, `command_menu.gd`): an `HC_MENU` in the existing format;
-  `_pick` sends `HighCommand.request_order` instead of `_server_squad_command`. Root: Move there,
-  Attack there, Support by fire there, Defend there, Follow / Support me, Fall back, Extract,
-  Status, Go codes, Open map. "There" is `crosshair_ground()`.
-- **HUD:** a compact squads line under the squad lines ("HAWK 2 4/4 Moving | VIPER 3 2/4 Contact")
-  and request prompts with the approve and deny keys.
-- **Briefing:** per-squad insertion pick and H-hour orders (Phase 2); delegation (Phase 3).
-- **FOB** (`base_ui.gd`): the Hero squads block on "Squad & deploy" (Phase 1); a **Company** page
-  (Phase 3): squad cards, Promote, Form, Assign, Disband, callsign and standing orders.
-- **Extraction panel and debrief:** hero squads in the leave-behind warning; a debrief section each.
+  `scripts/ui/map_command.gd`, `MapCommandLayer`, so the view barely grows):
+  - **Squad icon:** a friendly unit frame inspired by APP-6 (infantry cross, callsign "HAWK 2",
+    strength "4/4", CE pip) at the hero, or the members' centroid if he's down. State glyphs:
+    moving (heading arrow), set (bar), contact (red outline pulsing), casualty (cross), pending
+    request (amber "!"), dark (grey dashed, "?"). Selected: yellow outline. Members as dots at close
+    zoom; hidden behind the frame zoomed out.
+  - **Order graphics:** current order solid, queued dashed, unacknowledged dotted ghost; move as a
+    line with arrowheads and numbered waypoints; defend as a facing arc (a hatched frontage in
+    Phase 2); attack as a red arrow to an objective circle; SBF as a fan to the target; lanes as
+    faint bands; go-gated orders tagged A / B / C. A failed order flashes red with its `why`.
+- **HC panel** (new `scripts/ui/map_hc_panel.gd`, modelled on `MapExtractionPanel`): a card per
+  squad (callsign, hero, strength, wounded, CE, ammo, order, phase, `why`, last 3 lines; Report /
+  Cancel / Regroup buttons); requests with Approve / Deny and a timeout bar; go-code buttons with
+  waiting counts; "Commander: <name>"; the net log.
+- **Command menu Squads mode** (Phase 2, `command_menu.gd`): an `HC_MENU` in the existing entry
+  format with a `squads_mode` flag; F1-F4 pick squads, entries are `"point": true` at the
+  crosshair; sent to HighCommand instead of `_server_squad_command`.
+- **HUD:** company net subtitles in their own colour; a squads strip shown only while hero squads
+  are deployed ("HAWK 2 ● green Set | VIPER 3 ● amber Contact"); request prompts with the keys.
+- **Briefing:** hero squad insertion markers (Phase 1); drag placement and H-hour orders (Phase 2).
+- **FOB** (`base_ui.gd`): the Hero squads block on "Squad & deploy" (Phase 1); a **Squads** page
+  (Phase 3): detachment cards (callsign, hero name tape and rank, command skills as bars, traits as
+  tags with tooltips, members with role, skills and status, strength, wages), Promote (eligible only,
+  showing the fee), Assign / Unassign (warns when the team has no medic), Disband; deploy checkboxes
+  capped by `squads_max` with the reason a squad can't go ("Doc recovering").
+- **Extraction panel and debrief:** hero squads in the leave-behind warning ("2-1: 3 of 4 not at
+  extraction, will be left: MIA"); a debrief section each.
 
 ## 11. Phases
 
-Each step lands on its own work branch and goes to dev only through the CI gate. Phase 0 and the
-section 9 lifts can go any time their owners' branches have landed. Phases 1 and up wait for the
-movement and performance phase 1, per the current priorities.
+Each step lands on its own work branch and reaches dev only through the CI gate. Phase 0 and the
+section 9 lifts can go when their owners' branches have landed. Phases 1 and up are sequenced after
+the movement and performance phase 1, per the current priorities.
 
 **Phase 0: groundwork, no gameplay change.**
-- G1-G11, the replicated `Soldier.hc_id`, `Squad.hc_id`, `Squad.is_squadmate`.
-- A test hook that spawns an extra friendly Squad of 4.
-- Acceptance: the player squad's orders, rebalance, HUD and F-keys ignore the extra squad; its own
-  SquadTactics fights from its own picture; every existing suite is unchanged.
+- G1 alone first, with a squad_test case: two friendly Squads give disjoint `members()`.
+- Then G2-G12, `Soldier.hc_id`, `Squad.hc_id` / `hero` / `is_player_squad()` / `is_squadmate()`,
+  `CompoundLevel.squad_of()`, and an empty `tasking` that changes nothing.
+- A test hook (and a dev-tools entry) that spawns an extra friendly Squad of 4.
+- Acceptance: the player squad's orders, rebalance, HUD, F-keys and extraction ignore the extra
+  squad; its own SquadTactics fights from its own picture; every existing suite is unchanged.
 
-**Build-now lifts (section 9).** `FollowBrain`, `ProgressWatch`, the knowledge-fair dead-ground
-seam, extraction by group, soak commands through the game's RPCs, group records. Acceptance: the
-soak's behaviour is unchanged in a short `--human` replay, and the pure pieces have unit tests.
+**Build-now lifts (section 9).** `FollowBrain`, `ProgressWatch`, care and give-up helpers, the
+knowledge-fair dead-ground seam, extraction by group, soak commands through the game's RPCs, group
+records. Acceptance: the soak's behaviour is unchanged in a short replay, and the pure pieces have
+unit tests.
 
-**Phase 1: MVP, one hero, one team.**
-- One hero squad of 4 roster members (the hero plus 3), picked in prep, on contracts rated 4 and
-  up; no promotion page, no traits, no cost yet.
-- HighCommand and SquadOrders with Move (one point), Hold, Defend, Follow me / Support me (station
-  keeping; no auto fire yet), Regroup, Extract, and Posture.
-- `Intent.LEAD`, the resting-order rule, order biases, lanes, the progress watch, succession.
+**Phase 1: MVP, one named hero, one fire team.**
+- One hero squad of 4 roster members (hero plus 3) picked at prep, on contracts rated 4 and up,
+  plus the dev-tools spawn. No promotion page, traits or cost yet.
+- HighCommand, HcOrder, SquadOrders with Move (one point), Hold, Defend, Follow / Support me
+  (station keeping), Regroup, Extract, Posture, Report.
+- `Intent.LEAD`, the resting-order rule, the option mask and biases, lanes, `ProgressWatch`,
+  succession.
 - Reports: copy, unable, set, done, contact (plus intel marker), man down, succession, held up,
-  sitrep, at the LZ, out. Cross-squad contact sharing.
-- Map Command mode with click-select and the right-click menu; the HC panel with cards and the net
-  log. Authority "anyone"; no radio requirement.
-- Extraction: hero squads in the leave-behind warning, then MIA; outcomes, history and debrief
-  lines.
+  sitrep, at the LZ. Cross-squad contact sharing.
+- Map Command mode with click-select and the right-click menu; the HC panel; ghost lines. The host
+  is the only commander.
+- Extraction warning, MIA, outcomes, history and debrief lines.
 - Acceptance: a headless test drives every MVP order to `done` or a clean `failed` with a reason
-  before any UI polish; a client can order through the RPC path; nothing stalls silently.
+  before any UI polish; a client can order through the RPC path; nothing stalls silently. Enough
+  for the Captain to try a rated-4 contract with Hawk's team holding a flank.
 
-**Phase 2: tactics orders.**
-- Attack (attack position, SBF set, `forced_plan` assault, lift and shift, consolidate, abort),
-  Support by fire (with danger close), Bound, Fall back.
-- Queues, routes, go codes, H-hour orders from the briefing; risk levels; requests (break contact,
-  reinforce, CASEVAC) with timeouts.
-- Support me sets up fire for the player's squad when it's hit.
-- Command menu Squads mode, the HUD squads line; `lead_anchor()` if needed.
+**Phase 2: real high command.**
+- Attack (approach, SBF set, assault, lift and shift, consolidate, CE abort), Support by fire with
+  `safe_to_fire` and danger close, Bound, Fall back, Defend frontage.
+- Queues, routes, go codes, H-hour orders and briefing placement; risk levels; requests (break
+  contact, reinforce, CASEVAC) with timeouts.
+- CE colours, going dark, the company enemy picture with net delay.
+- Commander handover; command menu Squads mode; the HUD strip; `squads_max` up to 2.
 
 **Phase 3: campaign heroes and several squads.**
-- The Company page: promotion (ranks 1 and 2, 8-man squads), forming and assigning, wages,
-  cohesion, history, traits and flaws (if approved).
-- Up to 3 squads by rating and zone; bringing extra at the company's cost; the support-budget
-  charge; the friendly AI budget.
-- Comms realism (`hc_needs_radio`, comms lost), the BFT setting, `hc_authority = "commander"` and
-  delegation, the AI LOD, the initiative request, resupply requests.
-- The abstract exfil roll for squads left in the field, if approved.
+- `Heroes`, detachments, the Squads page, promotion, command skills and traits wired into
+  SquadTactics (biases, noise, leash, morale floor), wages, cohesion, history.
+- Up to 3 squads by rating and zone; the support-budget charge; the friendly AI budget; 8-man
+  detachments on `Roles.layout` with their own casualty care once the coop-respawn work has landed.
+- The AI LOD; per-squad delegation; initiative requests; resupply requests; field promotion carried
+  into the roster; hiring of SLs and fire teams.
 
 **Phase 4: coordination and scale.**
-- The company mutual-support scorer (SBF for, flank for, reinforce, CASEVAC for another squad),
-  leapfrog between squads, `after` sequencing.
-- A knowledge-limited dead-ground route planner (corridor scoring) for Pathfinder heroes.
-- Squads boarding AAVs and helicopters (from `FollowBrain`'s boarding), helicopter extraction for a
-  squad, a jammer cutting high command.
-- Travel LOD and sync visibility filters; parallel tasking (send a squad to auto-resolve an easy
-  held contract: the design doc's LRRP "works another contract" seam).
-- A co-op player leading or joining a hero squad.
-- Reuse: wave 6 allied troops and the named, Nemesis-style hunter squads run on the same
-  Squad + SquadOrders.
+- A SupportBroker graph (who covers whom; "Hawk 2 can support Viper 3, approve?", never automatic),
+  leapfrog between squads, `after` sequencing, standing "Support squad 1".
+- Fog mode (squads at last reported position), a jammer cutting high command, squads boarding AAVs
+  and helicopters through `FollowBrain`.
+- Travel LOD; auto-resolved detachment contracts; company ops.
+- A co-op player leading or joining a hero squad (the player-scalable rule at squad level).
+- Point the same SquadOrders planner at EnemyResponse hunters, so the enemy plans at squad level
+  too: a large step toward beating Veteran + LAMBS + VCOM.
 
 ## 12. Tests
 
-Headless only, short scenarios, every suite under 5 minutes, run in the background with a hang
-watch; a failing suite is rerun alone once before blaming code. Most logic sits in pure classes so
-the in-level scenarios can stay few and short.
+Headless only, own worktree and port, R#### logs in B:\Contractor-test-logs. Every suite stays
+under 5 minutes, runs in the background with a hang watch, and a failing suite is rerun alone once
+before blaming code. Most logic sits in pure classes so in-level scenarios stay few and short.
 
 - **Pure, fast:**
-  - `HcOrders.validate` rejects unknown kinds, NaN and out-of-area points, a 17-point route, a ninth
-    queued order, unknown options.
-  - Lane clamping keeps flank and fall-back points inside the lane; the SBF spot search never picks
-    a spot whose fire lane crosses a friendly.
-  - `SquadTactics.score` with merged biases: Defend picks DEFEND where the unbiased score flanks;
-    Attack makes ASSAULT or SUPPRESS_FLANK win; Extract makes BREAK_CONTACT win.
+  - `HcOrder.clean` rejects unknown verbs, NaN and off-map points, a 17-point route, a ninth queued
+    order, a non-commander sender.
+  - Lane clamping keeps flank and fall-back points inside the sector; the SBF spot search never
+    picks a lane that crosses a friendly; `safe_to_fire` inside and outside the fan and beyond the
+    target; frontage split into pair sectors; CE colours from staged `assess()` dictionaries.
+  - `SquadTactics.score` with the mask and biases: Defend picks DEFEND where the unbiased score
+    flanks; Attack makes ASSAULT or SUPPRESS_FLANK win; Extract makes BREAK_CONTACT win. With empty
+    tasking, seeded `[tactics]` lines match today's.
   - `FollowBrain` and `ProgressWatch` on staged inputs (station, contact hold, boarding, wedged,
     detour, held up, unable).
-  - The planner's inputs are intel and `known` only (knowledge fairness).
-  - New `tests/company_test.gd`: promotion gates and fees; rank gates size; one squad per member and
-    exclusion from `auto_squad`; authorization by rating and zone; bounded cohesion and lead growth;
-    seeded traits deterministic; wages include `RANK_WAGE`; a JSON round trip; older saves get
-    defaults.
-- **New `tests/hc_test.gd`** (suite "hc", compound level, host, like squad_test), with a squad of 4
+  - The planner's inputs are intel and `known` only.
+  - New `tests/heroes_test.gd` (Phase 3): eligibility, promotion fee, wage and history, one
+    detachment per member, dead and MIA can't be assigned, trait earning from synthetic histories,
+    growth capped at `SKILL_MAX`, a JSON round trip, an old save without detachments loads.
+- **New `tests/high_command_test.gd`** (compound level, host, like squad_test), a squad of 4
   spawned 30 m from the player:
-  - Phase 0 scoping: `members()`, `CommandMenu.roster()` and `MapNodes.squad_ai` leave it out;
-    `rebalance_squad()` keeps it; its `assess().up` is 4; a "Reloading!" 200 m away doesn't reach
-    the player (`Callouts.sent[].to`); its leader is in `stream_focus()`.
-  - Validation: each bad order and sender (AI, downed, a second peer under "commander", 10 orders in
-    a second) is refused with a reason and no order added.
-  - Move: the hero arrives within the timeout, the men within `REGROUP_M`; the net log shows copy,
-    set, done in order.
-  - Stuck: an unreachable point gives "held up" then `failed` with a `why`, and the next queued
-    order starts.
-  - Defend at a building: the men get garrison tactics; the resting-order rule keeps them on HOLD.
-  - Contact: a hostile in sight gives an intel marker with "Hawk 2" within 5 s, not again within the
-    gap, and another squad's `known` gets it as heard after `NET_DELAY_S`.
+  - Phase 0 scoping: `members()`, `CommandMenu.roster()`, `MapNodes.squad_ai` and Extraction
+    `required()` leave it out; `rebalance_squad()` keeps it; its `assess().up` is 4; a shout 200 m
+    away doesn't reach the player; its leader is in `stream_focus()`; `squad_for(&"friendly")` is
+    still the player squad; `give_order` on squad 1 doesn't move squad 2.
+  - Validation: each bad order and sender (AI, downed, non-commander, unknown squad, flood) is
+    refused with a reason.
+  - Move: arrive within the timeout, men within `REGROUP_M`; the net log shows copy, set, done.
+  - Stuck: an unreachable point gives "held up" then `failed` with a `why`; the next order starts.
+  - Defend near a building: garrison tactics are used and the men stay on HOLD.
+  - Contact: an intel marker with "Hawk 2" within 5 s, not repeated within the gap, and another
+    squad's `known` gets it after `NET_DELAY_S`.
   - Succession: kill the hero; the leader changes, a net line, the order continues.
-  - Extract: the squad is despawned at the point and its outcomes recorded.
-  - Phase 2: a go code holds an order in `waiting`; SBF men suppress while the target is known and
-    lift with a friendly placed within `DANGER_CLOSE_M`; an attack on one known hostile ends
-    "objective secure"; a request timeout resolves by trait.
-  - Phase 3: removing the hero's radio refuses orders with "No comms"; the current order continues.
-- **base_test / contracts_test:** a rated-4 contract authorizes 1; the deployment records
-  `hc_squads`; the charge comes from the support budget then cash; a man outside the point goes MIA,
-  a dead one DEAD; the hero's history gains its line; `server_revert_deployment` restores squads.
-- **map_test:** in command mode a click selects; right-click on ground lists Move and Defend, on a
-  building Defend (garrison); with no squads nothing errors; marker editing outside command mode is
-  unchanged (`_test_map_mouse` still passes).
-- **net_test:** a client order is applied on the host and the client sees "copy"; a spoofed or
-  malformed order is dropped; a late joiner's snapshot holds the queue and net log;
-  `Soldier.hc_id` replicates.
+  - Extract: all members inside, and Extraction counts them; they never confirm.
+  - Phase 2: a go code holds an order `waiting`; SBF plus an assault reaches the objective with
+    zero blue-on-blue damage; a friendly within `DANGER_CLOSE_M` lifts fire; RED CE aborts; a
+    request timeout resolves by trait.
+- **base_test / contracts_test:** `squads_max` by rating and in `public_view`; the deployment
+  records the squads; the charge comes from the support budget then cash; outcomes extracted / MIA /
+  KIA and the hero's "led" line; `auto_squad` never returns detachment members;
+  `server_revert_deployment` restores them.
+- **map_test:** command mode selects on click; the context menu per cursor target; drawing with 0
+  and 3 squads; marker editing outside command mode unchanged.
+- **net_test:** a client order is applied and mirrored with "copy"; a non-commander is refused with
+  a message; a late joiner's snapshot holds orders and the net log; `Soldier.hc_id` replicates.
 - **loop_test:** one contract end to end with one hero squad, through the debrief.
-- **coop_soak `--hc`** (on the soak owner's terms): a bot commands a hero squad over the lossy relay;
-  checks: acknowledgement within 3 s, every order ends `done` or `failed` with a reason, no squad
-  stuck over 120 s, no friendly-fire hit between squads, nobody missing at extraction. Logs go to
-  R#### in B:\Contractor-test-logs.
-- **perf_timing:** an HC case (8 + 8 + 8 friendly AI in a hot zone) against a budget.
+- **coop_soak `--hc`** (proposed to the soak owner as an F-task, not edited): the host bot orders a
+  hero squad Move, Defend, Extract over the lossy relay; checks ack within 3 s, every order ends
+  `done` or `failed` with a reason, no squad stuck over 120 s, no friendly fire between squads, the
+  squad present (never confirming) at extraction.
+- **perf_timing:** 8 + 8 + 8 friendly AI plus hostiles against the frame-cost budget and B0734.
 
 ## 13. Risks
 
-1. **Scattered one-squad assumptions** leak orders, delete hero squad men or garble comms.
-   Mitigation: Phase 0 first with a test per item, one marker and predicate, and a grep audit of
-   `faction == &"friendly"`, `squad_slot >= 0` and `MapNodes.squad_ai`.
+1. **Scattered one-squad assumptions** leak orders, delete hero squad men, stall extraction or
+   garble comms. G1 alone would silently corrupt F-key selection. Mitigation: Phase 0 first, G1 on
+   its own, one marker and predicate, and a grep audit of `faction == &"friendly"`, `squad_slot >=
+   0`, `MapNodes.squad_ai` and `squad_for`.
 2. **Weak execution makes high command feel bad.** Mitigation: short phase machines over tested
-   primitives, a reason for every failure, the progress watch, requests that keep the player in the
-   loop, and the MVP proven headless before UI polish.
+   primitives, a reason for every failure, `ProgressWatch`, requests that keep the player in the
+   loop, and the MVP proven headless before UI polish. The soak brain was tuned for 2-4 bots behind
+   a human; as a leader it must meet the AI bar, so it reuses SquadTactics rather than a second
+   tactics stack.
 3. **An AI leader in follow logic built for a human lead** (leash, halt spots, `fall_back_point`).
-   Mitigation: `Intent.LEAD`, the hero kept in the base of fire, the resting-order rule, and
-   `lead_anchor()` if the 30 m leash is too tight.
-4. **Host CPU and bandwidth**, with no AI LOD today and per-soldier always-sync. Mitigation: one
-   squad of 4 first, the AI budget, the LOD, `FrameCost` and `perf_timing`, streaming staggered,
-   later visibility filters and the travel LOD.
-5. **Long routes on 2-4 km zones** (nav chunking, the zone edge). Mitigation: per-leg paths, points
-   clamped inside the map, the progress watch; road or module graph routing above the navmesh if
-   needed.
-6. **Friendly fire from support by fire.** Mitigation: lanes, the fire-lane check, danger close,
-   lift and shift, `_friendly_in_line`.
-7. **Radio and subtitle overload** with three squads. Mitigation: per-squad gaps, contact
-   de-duplication, urgent lines first, voice range for shouts, the full log on the panel.
-8. **Co-op command thrash.** Mitigation: the author on every order, the authority setting,
-   delegation; Phase 3 asks to confirm when a different peer changes an order within 2 s.
-9. **Economy and roster inflation** (wages for 16-24 members, MIA cascades, XP inflation).
-   Mitigation: rank wages, the support-budget charge, one grouped recovery contract per squad,
-   numbers in data files marked Proposed and set from playtests.
-10. **Agency:** hero squads could complete objectives for the player. The Captain decides credit or
-    a pay share (question 7).
-11. **File ownership and timing:** squad.gd, squad_ai.gd and callouts.gd (coop-respawn),
-    extraction.gd, roster_deployment.gd and base_hub.gd (coop-extract, coop-ready), the soak harness
-    (coopsoak). Mitigation: Phase 0 and the lifts wait for those branches, and edits stay at the
-    seams listed.
-12. **Scope:** this competes with bug fixes and the movement and performance phase. Phase 0 and the
-    lifts are cheap; the rest is sequenced after.
+   Mitigation: `Intent.LEAD`, tasking, the hero in the base of fire, the resting-order rule.
+4. **Host CPU and bandwidth.** Mitigation: one squad of 4 first, the AI budget, the AI LOD,
+   `FrameCost` and `perf_timing`, staggered streaming, later the travel LOD.
+5. **Long routes on 2-4 km zones** (nav chunking, the zone edge, unbuilt navmesh far from players).
+   Mitigation: per-leg paths, points clamped inside the map, `stream_focus`, the watchdog.
+6. **Friendly fire between squads.** Mitigation: sectors, the SBF lane rule, `safe_to_fire`, lift
+   and shift, `_friendly_in_line`, a zero-damage test.
+7. **Radio and subtitle overload** with three squads. Mitigation: per-squad gaps, de-duplication,
+   priorities, voice range for shouts, the full log on the panel.
+8. **Co-op command contention.** Mitigation: one commander token, "Commander: X" always shown, the
+   author named on every order, Request support for everyone else.
+9. **Economy and roster inflation** (wages for 16-24 members, MIA cascades). Mitigation: rank
+   wages, the support charge, numbers in data files marked Proposed; tune so a mid-campaign company
+   can field one detachment.
+10. **Losses unseen.** Deep medical means far-off squads can bleed out unseen. Mitigation: prompt
+    casualty reports, the Regroup verb, squad-level casualty care in Phase 3.
+11. **Agency:** hero squads could win the contract for the player. Mitigation: they support by
+    default (SBF, flanks), human-only objectives stay human-only, credit is the Captain's call.
+12. **Ownership and timing:** squad.gd, squad_ai.gd and callouts.gd (coop-respawn), extraction and
+    deployment (coop-extract, coop-ready), the soak harness (coopsoak). Mitigation: Phase 0 and the
+    lifts wait for those branches; F-tasks meanwhile; edits stay at the listed seams.
+13. **Scope** competes with bug fixes and the movement and performance phase. Phase 0 and the lifts
+    are cheap; the rest is sequenced after.
 
 ## 14. Open questions for the Captain
 
 Each has a recommendation; the Captain's answer replaces it.
 
-1. **Who are the men?** Roster members from the MVP (wages, permadeath, MIA: losses hurt), or
-   contractors attached per contract with no persistence? *Recommended: roster members from the
-   MVP; spawning roster members outside the slots and settling them already work.*
-2. **Where do heroes come from?** Promoted veterans only, or also named veterans hired from the
-   board at higher reputation? *Recommended: promotion first, the hiring board in Phase 3.*
-3. **Squad size:** 4 then 8 by rank, or 8 from the start? *Recommended: 4 in the MVP, 8 with rank 2.*
-4. **How many squads?** Rated 4 gives 1, rated 5 gives 2, hot +1, at most 3; bring extra at the
+1. **Who commands in co-op:** host only, a commander token anyone can take, or host-approves?
+   *Recommended: a token held by the host by default, handover at ready-up or the map panel.*
+2. **Who are the men?** Roster members from the MVP (wages, permadeath, MIA), or per-contract
+   attached men with no persistence? *Recommended: roster members from the MVP, because named
+   squad leaders are the point and spawning them already works.*
+3. **Where do heroes come from?** Promoted veterans only, or also SLs hired at higher reputation?
+   *Recommended: promotion first, a rare SL and fire-team offers on the hiring board in Phase 3.*
+4. **How many squads, and who pays?** Rated 4 gives 1, rated 5 gives 2, hot +1, cap 3; extra at the
    company's cost; does the client's support budget pay for authorized ones? *Recommended: as
    written.*
-5. **Who commands in co-op?** Anyone (today's squad rule) or one commander seat with delegation?
-   *Recommended: anyone in the MVP, the commander seat as a setting in Phase 3.*
-6. **A squad left in the field:** straight to MIA, or an abstract exfil roll (survivors home a day
-   late, the rest MIA with one grouped recovery contract)? *Recommended: MIA in the MVP, decide the
-   roll after playtests.*
-7. **Objective credit:** when a hero squad clears or destroys a target, full credit, a pay share, or
-   none?
-8. **Radio and fog:** does high command need a radio (commander and hero), and are live squad
-   positions shown by default with last-reported positions at higher difficulty? *Recommended: no
-   radio and live positions in the MVP; both as settings in Phase 3.*
-9. **Traits and flaws:** yes or no, and which? (The design doc lists personalities and perk trees
-   as stretch.)
-10. **Keys:** the `high_command` default (U proposed, checked against `Controls.KEYS`) and the
-    approve / deny keys, avoiding the Ctrl and Alt menus.
-11. **Callsigns:** the hero's own ("Hawk 2"), or the company's name plus a number ("Saber 2..4")
-    with the player squad "Saber 1"?
-12. **Later:** may a co-op player lead or join a hero squad, keeping the player-scalable rule at
-    squad level?
+5. **Squad size:** 4 in the MVP and 8 at rank 2, or 8 from the start? *Recommended: 4 then 8.*
+6. **Disobedience:** may a hero ever disobey by trait, or only request and then decide after the
+   timeout? *Recommended: request, then decide; never ignore a fresh order.*
+7. **Live squad positions or fog** by default on hard contracts? *Recommended: live in the MVP;
+   fog as a Phase 4 setting.*
+8. **Does high command need a radio** (commander and hero)? *Recommended: no in the MVP; going dark
+   when the hero falls from Phase 2.*
+9. **Squads mode in the world menu:** MVP or Phase 2? *Recommended: Phase 2; the map is enough to
+   prove it.*
+10. **A squad left in the field:** straight to MIA, or an abstract exfil roll? *Recommended: MIA in
+    the MVP, decide after playtests.*
+11. **Objective credit:** full, a pay share, or none when a hero squad clears a target?
+12. **Traits:** which, and do flaws (Glory hound, Expensive) come with them?
+13. **Callsigns and keys:** the hero's own ("Hawk 2") or company numbers ("2-1" with the player
+    squad as "1"); the `high_command` default key and the approve and deny keys.
+14. **Later:** may a co-op player lead or join a hero squad?
 
 ## Sources
 
-- The three judged designs (Command-First, AI-first, Heroes on the Books), 2026-10-14, and the
-  judges' notes.
+- The three judged designs (Command-first, Campaign-first, AI-first), 2026-10-14, and the judges'
+  notes.
 - dev `fc98665`: scripts/ai/squad.gd, tactics.gd, squad_ai.gd, doctrine.gd, roles.gd;
-  scripts/ui/command_menu.gd, map_view.gd, map_screen.gd, map_markers.gd, map_nodes.gd,
-  map_extraction_panel.gd, callouts.gd; scripts/player/hud.gd; scripts/actors/soldier.gd;
-  scripts/world/compound_level.gd, zone_level.gd; scripts/campaign/roster.gd,
-  roster_deployment.gd, base_hub.gd, contracts_gen.gd, economy.gd, enemy_response.gd,
-  reinforcements.gd, extraction.gd, briefing.gd, radio_chatter.gd; data/prices.json;
-  docs/squad_design.md, contractor_design_doc.md, mission_brainstorm.md, build_plan.md.
-- `test/coop-soak` `33d3e87` and `test/coop-soak-stuckbots` `25dcf0c`: tests/coop_soak.gd.
-- `fix/coop-extraction` `906053c`, `feat/fob-ready-up` `8ebcdc3`, `fix/respawn-own-kit` `2adab4f`
+  scripts/ui/command_menu.gd, map_view.gd, map_screen.gd, map_markers.gd, map_nodes.gd, map_grid.gd,
+  map_extraction_panel.gd, callouts.gd; scripts/actors/soldier.gd; scripts/world/compound_level.gd,
+  zone_level.gd; scripts/campaign/roster.gd, roster_deployment.gd, base_hub.gd, hiring.gd,
+  contracts_gen.gd, economy.gd, enemy_response.gd, reinforcements.gd, extraction.gd, briefing.gd,
+  radio_chatter.gd; data/prices.json; docs/squad_design.md.
+- tests/coop_soak.gd on `test/coop-soak` `33d3e87`, `test/coop-fakehuman-checks` `5858854` and
+  `test/coop-soak-stuckbots` `10a41c3`.
+- `fix/coop-extraction` `906053c`, `feat/fob-ready-up` `8ebcdc3`, `fix/respawn-own-kit` `4421481`
   (file lists and doc comments only).
