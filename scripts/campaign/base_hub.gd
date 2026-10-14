@@ -50,6 +50,10 @@ signal note(text: String)
 signal deployment_ended(report: Dictionary)
 ## Every peer: the session's level was swapped (server_switch_level).
 signal level_switched(new_level: CompoundLevel)
+## Client: everything the host put in the new level when it swapped (its players, world items
+## and bodies) is here, and the loading screen is gone (_client_level_synced; B-04). `summary`
+## is what the host had: {"level", "players": {name: [x, y, z]}, "items": count, "bodies": count}.
+signal level_synced(summary: Dictionary)
 
 const BASE_SCENE := "res://scenes/levels/base_fob.tscn"
 const COMPOUND_SCENE := "res://scenes/levels/compound.tscn"
@@ -74,6 +78,9 @@ const STARTING_STASH := [["plate_carrier", 2], ["plate_ceramic_l4", 4], ["helmet
 const DEBUG_EXTRACT_M := 60.0
 ## A level switch waits at most this long for clients to stop sending (server_switch_level).
 const SWITCH_WAIT_S := 1.0
+## Client: the loading screen after a level switch goes after this long even if the host's
+## "all sent" never came (_client_level_synced), so a lost session can't leave it up.
+const LOADING_MAX_S := 30.0
 ## A roster squadmate removed this frame comes back for a free slot after this long (their
 ## body's name is taken until it's freed).
 const REFILL_RETRY_S := 0.2
@@ -102,6 +109,10 @@ var _switch_waiting := {}  # host: peers not ready for it yet
 var _switch_serial := 0
 var _zone_before := ""     # host: GameState.zone_id before the campaign took over (restored after)
 var _host_notice := ""     # host: what loading the campaign has to tell the host (shown again on open_ui)
+var _loading: CanvasLayer  # client: the loading screen while a switched level arrives (B-04)
+var _loading_serial := 0
+## Client: the host's summary of the last level it switched to (level_synced), for tests.
+var last_switch_summary := {}
 
 
 func _ready() -> void:
@@ -444,7 +455,23 @@ func _do_switch() -> void:
 	if not (fresh is BaseLevel) and RosterDeployment.is_running(roster()):
 		_open_briefing(fresh)
 	_queue_broadcast()
+	# Last on the same reliable channel as everything the new level spawned above: a client
+	# that gets this has all of that, so its loading screen can go (B-04).
+	_client_level_synced.rpc(switch_summary(fresh))
 	level_switched.emit(fresh)
+
+
+## What `lvl` holds that a client must have before it plays (_client_level_synced): its players
+## where they stand, and how many world items and bodies.
+static func switch_summary(lvl: CompoundLevel) -> Dictionary:
+	var players := {}
+	for p: Node in lvl.players.get_children():
+		if p is Soldier and not p.is_queued_for_deletion():
+			var at := (p as Soldier).position
+			players[String(p.name)] = [at.x, at.y, at.z]
+	var live := func(n: Node) -> bool: return not n.is_queued_for_deletion()
+	return {"level": String(lvl.level_info().get("level", "")), "players": players,
+		"items": lvl.items.get_children().filter(live).size(), "bodies": lvl.bodies.get_children().filter(live).size()}
 
 
 ## Host: the squad arrived in the zone on a contract: the briefing opens for everyone on the
@@ -552,8 +579,58 @@ func _client_switch_level(info: Dictionary) -> void:
 	campaign_running = true
 	if is_instance_valid(_ui):
 		_ui.close()
+	_show_loading(String(info.get("level", "")))
 	var fresh := _swap_level(info)
 	level_switched.emit(fresh)
+
+
+## Client: the host sent everything the switched level started with (after
+## _client_switch_level, on the same reliable channel, so it all came first): the loading
+## screen goes.
+@rpc("authority", "call_remote", "reliable")
+func _client_level_synced(summary: Dictionary) -> void:
+	last_switch_summary = summary
+	_hide_loading()
+	level_synced.emit(summary)
+
+
+## Client: whether the loading screen is up (a level switch still arriving).
+func loading() -> bool:
+	return is_instance_valid(_loading)
+
+
+## Client: covers the screen while a switched level's players, items and objectives arrive, so
+## nobody plays in a half-sent level (players at the origin, items missing) on a slow link.
+func _show_loading(kind: String) -> void:
+	_hide_loading()
+	_loading = CanvasLayer.new()
+	_loading.name = "LevelLoading"
+	_loading.layer = 120
+	var shade := ColorRect.new()
+	shade.color = Color(0.05, 0.06, 0.05, 0.94)
+	shade.set_anchors_preset(Control.PRESET_FULL_RECT)
+	shade.mouse_filter = Control.MOUSE_FILTER_STOP
+	_loading.add_child(shade)
+	var label := Label.new()
+	label.text = "Loading %s..." % {"base": "the base", "zone": "the zone"}.get(kind, "the level")
+	label.set_anchors_preset(Control.PRESET_CENTER)
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	label.grow_vertical = Control.GROW_DIRECTION_BOTH
+	shade.add_child(label)
+	add_child(_loading)
+	_loading_serial += 1
+	var serial := _loading_serial
+	get_tree().create_timer(LOADING_MAX_S).timeout.connect(func() -> void:
+		if serial == _loading_serial and loading():
+			push_warning("BaseHub: the level switch's last spawns never arrived; loading screen taken down")
+			_hide_loading())
+
+
+func _hide_loading() -> void:
+	if is_instance_valid(_loading):
+		_loading.queue_free()
+	_loading = null
 
 
 ## Replaces the running level with a new one playing `info` (level_info()) under the same
@@ -692,6 +769,7 @@ func _on_peer_left(id: int) -> void:
 
 
 func _on_session_ended() -> void:
+	_hide_loading()
 	campaign_running = false
 	_hook_economy(false)
 	view = {}

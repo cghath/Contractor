@@ -895,9 +895,10 @@ func _on_join_role_timeout(id: int) -> void:
 
 func _on_peer_left(id: int) -> void:
 	var player := players.get_node_or_null(str(id)) as Soldier
-	if player:
-		if multiplayer.is_server():
-			_server_player_leaves(player)
+	# Only the host frees the player: its PlayerSpawner sends the despawn. A client freeing its
+	# copy first made that despawn land on nothing (B-04: an ERR_UNAUTHORIZED per leave).
+	if player and multiplayer.is_server():
+		_server_player_leaves(player)
 		player.queue_free()
 	if multiplayer.is_server():
 		player_roles.erase(id)
@@ -923,7 +924,9 @@ func _server_player_leaves(player: Soldier) -> void:
 func _add_player(id: int) -> void:
 	var player := PLAYER_SCENE.instantiate()
 	player.name = str(id)
-	player.position = next_spawn_point()
+	# Placed before it enters the tree: the spawn goes to the clients as it does, with its
+	# spawn_position (B-04: a level moving the player after that sent the old spot).
+	player.position = _player_start(id)
 	(player as Soldier).left_handed = bool(player_handed.get(id, false))
 	(player as Soldier).spawn_position = player.position  # a client's own player starts here too
 	players.add_child(player, true)
@@ -932,6 +935,11 @@ func _add_player(id: int) -> void:
 	(player as Soldier).vitals.went_down.connect(_on_soldier_down.bind(player))
 	BaseHub.server_player_added(self, player)  # campaign: their gear, the respawn pool (wave 4)
 	rebalance_squad()
+
+
+## Host: where the player of peer `id` comes in (the compound's gate; a zone's insertion).
+func _player_start(_id: int) -> Vector3:
+	return next_spawn_point()
 
 
 func _make_item(data: Dictionary) -> Node:

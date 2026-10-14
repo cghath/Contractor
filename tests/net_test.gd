@@ -4,7 +4,12 @@ extends Node
 ##   <exe> --headless --path . res://tests/net_test.tscn -- --host
 ##   <exe> --headless --path . res://tests/net_test.tscn -- --join 127.0.0.1
 ## The client prints NET TEST PASSED/FAILED and exits with the failure count; the host
-## exits when the client leaves.
+## exits when the client leaves while down (a leave on its feet is the rejoin check's).
+## Later checks: leaving and joining again, then dropping and picking up a helmet (B-07), and
+## the session switching level twice, compound -> zone -> compound, as the campaign's
+## deploy and return do (B-04): no despawn for a node the client never had, everything the
+## host had at the switch here once the loading screen goes, other players where the host put
+## them (not at the origin).
 
 const KIT: Array[StringName] = [&"plate_carrier", &"plate_ceramic_l4", &"m4a1", &"helmet", &"assault_pack"]
 ## A dead player's body in the zone save the host loads (as Soldier.body_record writes it), so
@@ -41,10 +46,32 @@ const AIMER_ROUNDS := 23
 const DRY_SHOT_S := 0.07
 const DRY_MAG_AT := 15
 
+## A player body the host adds after each level switch for a peer that isn't connected: its
+## position is its owner's to send, so only its spawn_position puts it where the host did.
+const GHOST := 4243
+
+
+## Counts the engine's errors whose text has one of `matches` in it.
+class ErrorCount extends Logger:
+	var matches: Array[String] = []
+	var counts := {}
+
+	func _log_error(_function: String, _file: String, _line: int, code: String, rationale: String, _editor_notify: bool,
+			_error_type: int, _script_backtraces: Array[ScriptBacktrace]) -> void:
+		for m in matches:
+			if m in code or m in rationale:
+				counts[m] = int(counts.get(m, 0)) + 1
+
+	func count(m: String) -> int:
+		return int(counts.get(m, 0))
+
 var failures := 0
 var level: CompoundLevel
 ## Host: its save fixture (SAVED_BODY, SAVED_EDITS) was there to load when hosting started.
 var _fixture_loaded := false
+## Client: where the host put GHOST in the level it switched to (_ghost_at).
+var _ghost_pos: Variant = null
+var _errors: ErrorCount
 
 
 func _ready() -> void:
@@ -63,7 +90,8 @@ func _ready() -> void:
 	if Net.is_hosting():
 		Net.peer_joined.connect(_give_kit)
 		Net.peer_left.connect(_on_client_left)
-		get_tree().create_timer(90.0).timeout.connect(func() -> void: get_tree().quit(1))
+		BaseHub.level_switched.connect(_on_host_switched)
+		get_tree().create_timer(240.0).timeout.connect(func() -> void: get_tree().quit(1))
 		_stage_drag()
 	else:
 		_run_client()
@@ -72,6 +100,10 @@ func _ready() -> void:
 ## Host: the client left while down (it knocks itself out first), so its body stays behind
 ## with its gear. The host's exit code says whether it did (run_tests.sh checks it).
 func _on_client_left(id: int) -> void:
+	var was: Soldier = level.players.get_node_or_null(str(id))
+	if was and was.vitals.is_up():
+		print("[host] peer %d left on its feet: the rejoin check" % id)
+		return
 	await get_tree().process_frame
 	var left := level.bodies.get_children().filter(func(b: Node) -> bool:
 		return b is Soldier and (b as Soldier).display_name() == "Player %d" % id and (b as Soldier).vitals.is_dead() \
@@ -121,11 +153,7 @@ func _stage_drag() -> void:
 func _give_kit(id: int) -> void:
 	await get_tree().create_timer(0.5).timeout  # let the player spawn
 	var player: Soldier = level.players.get_node_or_null(str(id))
-	for item in KIT:
-		player.inventory.take(item)
-	player.inventory.take(&"mag_556", 2)
-	player.inventory.take(&"ifak")
-	player.inventory.take(&"morphine")
+	_kit_up(player)
 	player.vitals.server_damage(40.0)
 	# A small fragment wound in the left forearm to treat (and maybe a fracture).
 	player.vitals.server_hit(Vitals.FOREARM_L, {"round_class": Vitals.FRAGMENT, "superficial": true})
@@ -150,6 +178,54 @@ func _fire_dragger_dry() -> void:
 	print("[host] fired the dragger's rifle dry: %d shots, %d left, counts %s" % [shots, dragger.inventory.rounds_in(&"primary"), dragger.inventory.net_ammo])
 
 
+func _kit_up(player: Soldier) -> void:
+	for item in KIT:
+		player.inventory.take(item)
+	player.inventory.take(&"mag_556", 2)
+	player.inventory.take(&"ifak")
+	player.inventory.take(&"morphine")
+
+
+## Host: the client asks for a level switch, as a deploy or a return to base does (BaseHub's
+## server_switch_level): to the test zone (its own zone save, emptied first) or back to the
+## compound (this test's save).
+@rpc("any_peer", "call_remote", "reliable")
+func _host_switch(kind: String) -> void:
+	if not multiplayer.is_server():
+		return
+	var tag := OS.get_environment("CONTRACTOR_TEST_TAG")
+	if kind == "zone":
+		var keep := GameState.zone_id
+		GameState.zone_id = "test_net_switch" + tag
+		GameState.delete_save()
+		GameState.zone_id = keep
+		BaseHub.server_switch_level({"level": "zone", "def": ZoneDef.get_def("test")}, "test_net_switch" + tag)
+	else:
+		BaseHub.server_switch_level({"level": "compound"}, "test_net" + tag)
+
+
+## Host: the session switched level: the players there get their kit again (a plain session
+## carries no gear across), and a player body for a peer that isn't here (GHOST) comes in near
+## the level's start.
+func _on_host_switched(fresh: CompoundLevel) -> void:
+	level = fresh
+	for p: Node in level.players.get_children():
+		if p is Soldier and p.name != &"1":
+			_kit_up(p as Soldier)
+	var ghost := CompoundLevel.PLAYER_SCENE.instantiate() as Soldier
+	ghost.name = str(GHOST)
+	ghost.position = level._player_start(GHOST) + Vector3(6.0, 0.0, 0.0)
+	ghost.spawn_position = ghost.position
+	level.players.add_child(ghost, true)
+	_ghost_at.rpc(ghost.position)
+	print("[host] switched to %s; stand-in player body at %s" % [level.level_info().level, ghost.position])
+
+
+@rpc("authority", "call_remote", "reliable")
+func _ghost_at(pos: Vector3) -> void:
+	_ghost_pos = pos
+
+
 func check(condition: bool, what: String) -> void:
 	print("  [%s] %s" % ["ok" if condition else "FAIL", what])
 	if not condition:
@@ -157,6 +233,9 @@ func check(condition: bool, what: String) -> void:
 
 
 func _run_client() -> void:
+	_errors = ErrorCount.new()
+	_errors.matches = ["recv_nodes", "Ignoring delta", "unknown peer"]
+	OS.add_logger(_errors)
 	var deadline := Time.get_ticks_msec() + 20000
 	var me: Soldier
 	while Time.get_ticks_msec() < deadline:
@@ -226,6 +305,11 @@ func _run_client() -> void:
 	await _check_saved_body(me)
 	await _check_looted_rifle(me)
 	await _check_world_edits()
+	me = await _check_rejoin_pickup(me)
+	me = await _check_level_switches(me)
+	if me == null:
+		_finish()
+		return
 	# Knocked out, then gone: the host keeps this player's body (see _on_client_left).
 	me._server_debug_hurt.rpc_id(1, 140.0)
 	await _wait_for(func() -> bool: return me.vitals.downed, 3.0)
@@ -373,6 +457,149 @@ func _check_late_drag() -> void:
 	check(dragged.collision_layer == 0, "and the dragged body doesn't block (no collision) for a late joiner either (audit L2-02)")
 
 
+## B-07 (co-op soak S0520, S0578, S0672: a rejoined client "never saw" its dropped helmet
+## picked up again): this client leaves on its feet and joins again (a new peer id; the host
+## kits the new body), sees the helmet it dropped and shot before leaving, damage and all,
+## then drops its new helmet and picks that one up again.
+func _check_rejoin_pickup(me: Soldier) -> Soldier:
+	print("Leaving and joining again (B-07)")
+	var old_helmet := _dropped_helmet()
+	var old_uid := old_helmet.uid if old_helmet else ""
+	var old_id := multiplayer.get_unique_id()
+	Net.leave()
+	await get_tree().create_timer(1.0).timeout
+	Net.join("127.0.0.1")
+	await _wait_for(func() -> bool: return multiplayer.get_unique_id() != old_id and 1 in multiplayer.get_peers(), 15.0)
+	level = CompoundLevel.current(self)
+	var found: Array = [null]
+	await _wait_for(func() -> bool:
+		found[0] = level.players.get_node_or_null(str(multiplayer.get_unique_id())) if level else null
+		return found[0] != null and (found[0] as Soldier).inventory.slots[&"helmet"] == &"helmet", 15.0)
+	me = found[0]
+	check(me != null and multiplayer.get_unique_id() != old_id and me.inventory.slots[&"helmet"] == &"helmet",
+		"left and joined again as a new peer (%d -> %d), kitted" % [old_id, multiplayer.get_unique_id()])
+	if me == null:
+		return null
+	me.set_physics_process(false)
+	await _wait_for(func() -> bool: return _item_by_uid(old_uid) != null, 5.0)
+	var seen := _item_by_uid(old_uid)
+	check(seen != null and seen.state.get("chips", []).size() == 1, "the helmet dropped before leaving lies here for the rejoined client, damage and all")
+	var before := _helmets_in_world()
+	me._server_inventory_action.rpc_id(1, "drop_slot", &"", -1, &"helmet", &"")
+	var dropped: Array = [null]
+	await _wait_for(func() -> bool:
+		for item: WorldItem in _helmets_in_world():
+			if not item in before:
+				dropped[0] = item
+		return dropped[0] != null and me.inventory.slots[&"helmet"] == &"", 5.0)
+	var helmet: WorldItem = dropped[0]
+	check(helmet != null and me.inventory.slots[&"helmet"] == &"", "dropped its helmet: off its head, on the ground here")
+	if helmet == null:
+		return me
+	me.global_position = helmet.global_position + Vector3(0.6, 0.0, 0.0)
+	await get_tree().create_timer(0.5).timeout  # the host sees us there
+	var uid := helmet.uid
+	me._server_interact.rpc_id(1, helmet.get_path())
+	await _wait_for(func() -> bool: return me.inventory.slots[&"helmet"] == &"helmet" and _item_by_uid(uid) == null, 5.0)
+	check(me.inventory.slots[&"helmet"] == &"helmet" and _item_by_uid(uid) == null, "picked it up again: on its head, gone from the ground, here too")
+	return me
+
+
+func _helmets_in_world() -> Array:
+	return get_tree().get_nodes_in_group(&"world_items").filter(func(n: Node) -> bool:
+		return n is WorldItem and n.item_id == &"helmet" and not n.is_queued_for_deletion())
+
+
+func _item_by_uid(uid: String) -> WorldItem:
+	for node in get_tree().get_nodes_in_group(&"world_items"):
+		if node is WorldItem and node.uid == uid and not node.is_queued_for_deletion():
+			return node
+	return null
+
+
+## B-04 (every co-op soak: after each switch between the base and a zone, clients saw other
+## players at (0, 0, 0), no objectives and half the world items for 5-15 s, and logged a burst
+## of "on_despawn_receive ... ERR_UNAUTHORIZED"): the host switches compound -> zone ->
+## compound. Each time: the host's despawns of the old level came before the switch (nothing
+## the host spawned is left in the old level as this client swaps); a loading screen until the
+## host's "all sent"; then every player the host had, where the host had them, and as many
+## world items and bodies; a player whose owner isn't here at its spawn, not the origin.
+## Returns this client's player in the last level.
+func _check_level_switches(me: Soldier) -> Soldier:
+	for kind: String in ["zone", "compound"]:
+		var old := level
+		var at_swap := {}
+		var at_synced := {}
+		var on_swap := func(_fresh: CompoundLevel) -> void:
+			at_swap["left"] = _replicated_in(old)
+			at_swap["loading"] = BaseHub.loading()
+		var on_synced := func(summary: Dictionary) -> void:
+			var lvl := CompoundLevel.current(self)
+			var players := {}
+			for p: Node in lvl.players.get_children():
+				if p is Soldier and not p.is_queued_for_deletion():
+					players[String(p.name)] = (p as Soldier).position
+			var live := func(n: Node) -> bool: return not n.is_queued_for_deletion()
+			at_synced["summary"] = summary
+			at_synced["players"] = players
+			at_synced["items"] = lvl.items.get_children().filter(live).size()
+			at_synced["bodies"] = lvl.bodies.get_children().filter(live).size()
+			at_synced["loading"] = BaseHub.loading()
+		BaseHub.level_switched.connect(on_swap, CONNECT_ONE_SHOT)
+		BaseHub.level_synced.connect(on_synced, CONNECT_ONE_SHOT)
+		_ghost_pos = null
+		_host_switch.rpc_id(1, kind)
+		await _wait_for(func() -> bool: return not at_synced.is_empty() and _ghost_pos != null, 40.0)
+		if BaseHub.level_switched.is_connected(on_swap):
+			BaseHub.level_switched.disconnect(on_swap)
+		if BaseHub.level_synced.is_connected(on_synced):
+			BaseHub.level_synced.disconnect(on_synced)
+		level = CompoundLevel.current(self)
+		print("Level switch to the %s (B-04)" % kind)
+		check(not at_swap.is_empty() and int(at_swap.left) == 0 and bool(at_swap.loading),
+			"  the old level's replicated nodes were despawned before the swap (%s left), and the loading screen is up" % [at_swap.get("left", "?")])
+		check(not at_synced.is_empty() and String(at_synced.summary.get("level", "")) == kind and not bool(at_synced.loading),
+			"  the host's \"all sent\" came and the loading screen went (%s)" % [at_synced.get("summary", {}).get("level", "nothing")])
+		if at_synced.is_empty():
+			return null
+		var off := []
+		var host_players: Dictionary = at_synced.summary.players
+		for pname: String in host_players:
+			var p: Array = host_players[pname]
+			var host_at := Vector3(float(p[0]), float(p[1]), float(p[2]))
+			if not at_synced.players.has(pname) or (at_synced.players[pname] as Vector3).distance_to(host_at) > 1.0:
+				off.append("%s: host %s, here %s" % [pname, host_at, at_synced.players.get(pname, "missing")])
+		check(off.is_empty() and host_players.size() == at_synced.players.size(),
+			"  every player the host had is here, where the host had them (%d; %s)" % [host_players.size(), off])
+		check(int(at_synced.items) == int(at_synced.summary.items) and int(at_synced.bodies) == int(at_synced.summary.bodies) and int(at_synced.summary.items) > 0,
+			"  as many world items (%d of %d) and bodies (%d of %d) as the host had" % [int(at_synced.items), int(at_synced.summary.items), int(at_synced.bodies), int(at_synced.summary.bodies)])
+		var found: Array = [null]
+		await _wait_for(func() -> bool:
+			found[0] = level.players.get_node_or_null(str(GHOST))
+			return found[0] != null, 5.0)
+		var ghost := found[0] as Soldier
+		check(ghost != null and _ghost_pos != null and ghost.position.distance_to(_ghost_pos) < 0.05,
+			"  a player whose owner sends no position stands where the host put it, not at the origin (%s, host %s)" % [ghost.position if ghost else "missing", _ghost_pos])
+		me = level.players.get_node_or_null(str(multiplayer.get_unique_id())) as Soldier
+	if me:
+		me.set_physics_process(false)
+		var mine := me
+		await _wait_for(func() -> bool: return mine.inventory.slots[&"primary"] == &"m4a1", 5.0)
+	return me
+
+
+## Nodes the host spawned that are still in `lvl` here (players, AI, bodies, world items).
+func _replicated_in(lvl: Node) -> int:
+	if not is_instance_valid(lvl):
+		return 0
+	var n := 0
+	for holder: String in ["Players", "AI", "Bodies", "Items"]:
+		var at := lvl.get_node_or_null(NodePath(holder))
+		if at:
+			n += at.get_children().filter(func(c: Node) -> bool: return not c.is_queued_for_deletion()).size()
+	return n
+
+
 func _dropped_helmet() -> WorldItem:
 	for node in get_tree().get_nodes_in_group(&"world_items"):
 		if node.item_id == &"helmet" and node.uid.begins_with("test_net"):
@@ -389,6 +616,12 @@ func _wait_for(condition: Callable, seconds: float) -> void:
 func _finish() -> void:
 	# Audit A1-06: the client shares the host's user data but never touches the host's saves.
 	check(FileAccess.file_exists(GameState.save_path()), "the host's zone save is still there: the client never deleted it")
+	if _errors:
+		OS.remove_logger(_errors)
+		check(_errors.count("recv_nodes") == 0 and _errors.count("unknown peer") == 0,
+			"no despawn for a node this client didn't have (ERR_UNAUTHORIZED: %d) and no RPC to a missing peer (%d) all session"
+			% [_errors.count("recv_nodes"), _errors.count("unknown peer")])
+		print("  (sync deltas ignored for a missing synchronizer: %d)" % _errors.count("Ignoring delta"))
 	print("NET TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	Net.leave()
 	get_tree().quit(failures)

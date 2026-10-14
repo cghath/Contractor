@@ -89,7 +89,8 @@ func _on_auth_data(id: int, data: PackedByteArray) -> void:
 ## while it shuts down), but it stops being the level at once: it leaves the "level" group
 ## (CompoundLevel.current), gives up its name (the new one takes it, for RPC and replication
 ## paths), stops processing, and it and everything in it let go of Net's signals (hosting
-## right after a swap would start it too).
+## right after a swap would start it too). On a host with clients, its replicated nodes go
+## at once (despawn_replicated).
 static func load_level(parent: Node, info: Dictionary, fresh := false) -> CompoundLevel:
 	var current: CompoundLevel = null
 	for child in parent.get_children():
@@ -120,4 +121,30 @@ static func _retire(old: CompoundLevel) -> void:
 	old.remove_from_group(&"level")
 	old.name = "%s_old_%d" % [old.name, old.get_instance_id()]
 	old.process_mode = Node.PROCESS_MODE_DISABLED
+	if old.multiplayer.is_server() and not old.multiplayer.get_peers().is_empty():
+		despawn_replicated(old)
 	old.queue_free()
+
+
+## Host, a level being retired with clients connected (B-04): everything its spawners put on
+## the clients goes now, so each client gets the despawns while it still has those nodes.
+## Left to the end of the frame, the despawns went out after the switch's RPC; a client that
+## had already swapped and freed its old level (the RPC and the despawns can arrive in
+## different frames on a slow link) logged a burst of "on_despawn_receive ... ERR_UNAUTHORIZED",
+## one per node. Taking the nodes out of the tree sends the despawns (MultiplayerSpawner drops
+## a node that leaves the tree), in order, ahead of the RPC on the same reliable channel; the
+## rest of the old level (nothing replicated left in it) stays to the end of the frame as
+## before. Returns how many nodes went.
+static func despawn_replicated(old: Node) -> int:
+	var count := 0
+	for spawner: MultiplayerSpawner in old.find_children("*", "MultiplayerSpawner", true, false):
+		var at := spawner.get_node_or_null(spawner.spawn_path)
+		if at == null or not at.is_inside_tree():
+			continue  # inside something already taken out
+		for child in at.get_children():
+			if child is MultiplayerSpawner:
+				continue
+			at.remove_child(child)
+			child.queue_free()
+			count += 1
+	return count

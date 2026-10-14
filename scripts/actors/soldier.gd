@@ -237,14 +237,24 @@ func stun(seconds: float, from: Vector3) -> void:
 
 func _ready() -> void:
 	add_to_group(&"combatants")
-	if is_local() and not multiplayer.is_server() and spawn_position != Vector3.ZERO:
-		position = spawn_position  # see spawn_position
+	if not is_ai() and not multiplayer.is_server() and spawn_position != Vector3.ZERO:
+		# See spawn_position. Another player's body too: its position is its owner's to send
+		# (its Sync isn't in the host's spawn), so until that first arrives it stood at the
+		# origin (B-04: other players at (0, 0, 0) for seconds after each level switch).
+		position = spawn_position
 	inventory.changed.connect(_on_inventory_changed)
 	vitals.died.connect(_on_died)
 	vitals.went_down.connect(_on_went_down)
 	_add_voxel_viewer()
 	_on_inventory_changed()
 	print("[%s] %s spawned on peer %d (local: %s)" % ["ai" if is_ai() else "player", name, multiplayer.get_unique_id(), is_local()])
+
+
+## Whether the peer that drives this body is in the session: always for an AI (the host), and
+## for a player until they leave. A body whose player has gone is the host's to move (B-06).
+func owner_connected() -> bool:
+	var peer := owner_peer()
+	return peer == multiplayer.get_unique_id() or peer in multiplayer.get_peers()
 
 
 ## True for the human player on their own machine.
@@ -496,7 +506,13 @@ func _update_carried(delta: float) -> void:
 		_carry_phase = &""  # up on the shoulder, or got hold: from here they come along
 		CharacterModel.server_carry(self, carrying, carry_mode)  # a plain hold (late joiners don't replay the lift)
 	if carry_holds() and not carrying.is_ai():
-		carrying._client_carried.rpc_id(carrying.owner_peer(), carry_transform().origin)
+		if carrying.owner_connected():
+			carrying._client_carried.rpc_id(carrying.owner_peer(), carry_transform().origin)
+		else:
+			# Its player has left (B-06: an RPC to the gone peer every tick, "unknown peer ID"):
+			# the host has the body now and moves it itself, like an AI's.
+			carrying.global_transform = carry_transform()
+			carrying.velocity = Vector3.ZERO
 
 
 ## Host only. Picks up (CARRY) or takes hold of (DRAG) a downed body within `reach`.
@@ -534,7 +550,7 @@ func server_put_down() -> void:
 		release_carried()
 		return
 	var spot := _put_down_spot()
-	if carrying.is_ai():
+	if carrying.is_ai() or not carrying.owner_connected():
 		carrying.global_position = spot
 		carrying.rotation = Vector3(0, rotation.y, 0)
 	else:
@@ -1263,6 +1279,10 @@ const UNDER_FIRE_SUPPRESSION := 0.3
 const LOG_TOURNIQUET_OFF := &"tourniquet removal"
 
 var _treat_serial := 0  # host: bumps with each timed treatment
+## Host: treatments under way, "<casualty's Vitals id>:<care_key>" -> the treater's instance id
+## (B-09): one treater at a time per site, so two (a player and an AI medic, say) can't both
+## start the same thing on the same casualty and both put it on.
+static var _care_claims := {}
 
 
 ## The first task on this body's own care_needed() that it carries an item for (loose or in
@@ -1405,6 +1425,9 @@ func _treat(target: Node3D, item_id: StringName, part: StringName, rushed: bool,
 		why = "Only a medic does that"
 	else:
 		why = other.treatment_problem(item_id, part)
+	var claim := "%d:%s" % [other.get_instance_id(), care_key(item_id, part)]
+	if why == "" and _care_taken(claim):
+		why = "Someone is already doing that"
 	if why != "":
 		_log_care(target, item_id, part, "refused: " + why)
 		_client_message.rpc_id(owner_peer(), why)
@@ -1413,7 +1436,11 @@ func _treat(target: Node3D, item_id: StringName, part: StringName, rushed: bool,
 	rushed = rushed and tourniquet
 	var hurried := tourniquet and under_fire()
 	var label := "%s%s, %s..." % [item.name, " (rushed)" if rushed else "", Vitals.part_name(part)]
-	if not await _timed_care(target, other, treat_seconds(target, item, rushed), label, part, item_id):
+	_care_claims[claim] = get_instance_id()
+	var finished: bool = await _timed_care(target, other, treat_seconds(target, item, rushed), label, part, item_id)
+	if _care_claims.get(claim) == get_instance_id():
+		_care_claims.erase(claim)
+	if not finished:
 		return
 	var kit := _kit_for(target, item_id, their_kit)  # (theirs may have run out meanwhile)
 	if not Vitals.has_item(kit, item_id):
@@ -1427,12 +1454,37 @@ func _treat(target: Node3D, item_id: StringName, part: StringName, rushed: bool,
 		return
 	if not item.stats.get("no_item", false) and not item.stats.get("reusable", false):
 		kit.take_medical(item_id)
-	_log_care(target, item_id, part, "done")
 	var note := other.care_note()
+	# The note says how it went where it isn't plain success ("Missed the vein": the catheter
+	# is used up and the casualty still needs a line), so the log doesn't read as the same
+	# treatment put on twice (B-09).
+	_log_care(target, item_id, part, "done" if note == "" else "done: " + note)
 	if note != "":
 		_client_message.rpc_id(owner_peer(), note)
 	if rushed:
 		_client_message.rpc_id(owner_peer(), "Tourniquet on in a hurry: it may still bleed (a second one fixes it)")
+
+
+## What a treatment occupies on a casualty, for _care_claims: their one line (any IV or IO),
+## their one bag, or the item on that part.
+static func care_key(item_id: StringName, part: StringName) -> String:
+	if item_id == WoundModel.IO_KIT or WoundModel.IV_GAUGES.has(item_id):
+		return "line"
+	if WoundModel.FLUID_BAGS.has(item_id):
+		return "bag"
+	return "%s@%s" % [item_id, part]
+
+
+## Host: whether another soldier is busy with the treatment `claim` names (one that has gone,
+## or is no longer busy, doesn't hold it).
+func _care_taken(claim: String) -> bool:
+	if not _care_claims.has(claim):
+		return false
+	var holder := instance_from_id(int(_care_claims[claim])) as Soldier
+	if holder == null or holder == self or not holder.is_inside_tree() or not holder._is_busy():
+		_care_claims.erase(claim)
+		return false
+	return true
 
 
 ## Host only. Runs a timed treatment on `target`: this soldier is busy for `seconds` and the
