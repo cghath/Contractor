@@ -298,7 +298,7 @@ a release:
 - Bullet holes in wood and sheet metal are decals (a voxel only breaks out after many rounds), so you can't see through them; concrete marks are small decals. No ricochets yet.
 - AI squadmates still use the older, looser movement momentum (the player's tighter grip got them stuck on door frames).
 - You can still fire during a pickup or equip animation. A dragged casualty eases back about 1 m when put down. An equip animation plays even when the action then fails.
-- Players don't start in their role's kit yet (`CompoundLevel.player_role_kits` is off); they kit out from the compound's loot. Autoriflemen and grenadiers carry M4s until there are LMG and launcher items.
+- The play entries start players in their role's kit (`CompoundLevel.player_role_kits`). In the campaign a player's own saved gear (their main character's) is what they carry and no role kit goes on top; a brand-new player gets their role's kit once (B-23). Autoriflemen and grenadiers carry M4s until there are LMG and launcher items.
 - Squad AI doesn't use the new stances, leaning or mounting yet, and callouts have no voice audio (subtitles only).
 - A player who joins while someone is being carried sees that body as solid until it's put down.
 ## Revised roadmap

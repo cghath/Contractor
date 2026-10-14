@@ -533,6 +533,7 @@ func _test_session() -> void:
 	var s0 := base.muster_soldier(ids[0])
 	check(s0 != null and String(s0.name) == String(member0.callsign) and Roster.gear_counts(Roster.json_safe(s0.inventory.net_state)) == Roster.gear_counts(member0.gear),
 		"each in their own gear, by callsign (%s)" % member0.callsign)
+	await _test_gear_vs_kit(base)
 	await _test_terminals(base)
 	var client := await _start_client(ids, stash_counts)
 	await _test_armory(base)
@@ -647,6 +648,51 @@ func _run_client() -> void:
 	_log.close()
 	Net.leave()
 	get_tree().quit(failures)
+
+
+## B-23: in a campaign the player's own saved gear is what they carry and no role kit is
+## stacked on it, whichever comes first (their role or their gear); a brand-new player gets
+## their role's kit once. The bug: with player_role_kits on, rebalance_squad put the kit on
+## first and _apply_player_gear then replaced the whole inventory, so a late joiner with no
+## saved gear deployed with nothing.
+func _test_gear_vs_kit(base: BaseLevel) -> void:
+	print("Campaign gear against the role kit (B-23)")
+	var player: Soldier = level.players.get_node(^"1")
+	var key := BaseHub.player_key(1)
+	var main := Roster.main_character(BaseHub.roster(), key)
+	var kit_counts := Roster.gear_counts(Roster.gear_for_kit(Roles.kit(player.role)))
+	check(player.role != &"" and Roster.gear_counts(Roster.json_safe(player.inventory.net_state)) == kit_counts,
+		"a brand-new player starts in their %s kit" % player.role)
+	check(not main.get("kit_due", false), "and owes no second one")
+	var before: Dictionary = player.inventory.net_state.duplicate(true)
+	# Someone with saved gear: the kit flag left on (as a stale play session would), the role
+	# arriving before the gear (a joiner's pick racing their hello).
+	var saved := Roster.gear_for_kit([[&"m17", 1]])
+	main["gear"] = saved.duplicate(true)
+	CompoundLevel.player_role_kits = true
+	BaseHub._gear_applied.erase(1)
+	base.rebalance_squad()
+	BaseHub._apply_player_gear(1, player)
+	base.rebalance_squad()
+	check(Roster.gear_counts(Roster.json_safe(player.inventory.net_state)) == Roster.gear_counts(saved),
+		"saved gear wins: no role kit on top of it (%s)" % Roster.gear_counts(Roster.json_safe(player.inventory.net_state)))
+	# A new player whose gear goes on before their role is known: the kit once, when it is.
+	var fresh_key := key
+	Roster.players(BaseHub.roster()).erase(fresh_key)
+	BaseHub._gear_applied.erase(1)
+	var role := player.role
+	player.role = &""
+	BaseHub._apply_player_gear(1, player)
+	check(Roster.gear_counts(Roster.json_safe(player.inventory.net_state)).is_empty(), "a new player waits for their role with nothing doubled")
+	player.role = role
+	base.rebalance_squad()
+	base.rebalance_squad()
+	check(Roster.gear_counts(Roster.json_safe(player.inventory.net_state)) == kit_counts, "then gets their kit exactly once")
+	CompoundLevel.player_role_kits = false
+	main = Roster.main_character(BaseHub.roster(), key)
+	main["gear"] = Roster.json_safe(before.duplicate(true))
+	player.inventory.net_state = before
+	await get_tree().process_frame
 
 
 ## The terminals open the base screen through the interaction menu, and every page draws.

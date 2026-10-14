@@ -713,18 +713,57 @@ func server_player_added(_lvl: CompoundLevel, player: Soldier) -> void:
 		player.vitals.died.connect(_on_player_died.bind(player))
 
 
+## B-23: in a campaign a player's saved gear (their main character's, or their stand-in's) is
+## the one source of what they carry: it replaces whatever the body had, and no role kit is
+## stacked on top (CompoundLevel.rebalance_squad leaves campaign players to server_give_due_kit).
+## A brand-new main character has no gear yet, so they owe their role's kit once ("kit_due"),
+## given as soon as their squad role is known.
 func _apply_player_gear(peer: int, player: Soldier) -> void:
 	if _gear_applied.has(peer):
 		return
 	_gear_applied[peer] = true
 	var key := player_key(peer)
+	var fresh := not Roster.players(roster()).has(key)
 	var main := Roster.main_character(roster(), key, Roles.local_choice if peer == 1 else Roles.RIFLEMAN)
+	if fresh:
+		main["kit_due"] = true
 	var gear: Dictionary = main.get("gear", {})
 	var dep := RosterDeployment.active(roster())
-	if dep.has("stand_ins") and dep.stand_ins.has(key) and not member(String(dep.stand_ins[key])).is_empty():
+	var stand_in: bool = dep.has("stand_ins") and dep.stand_ins.has(key) and not member(String(dep.stand_ins[key])).is_empty()
+	if stand_in:
 		gear = member(String(dep.stand_ins[key])).get("gear", {})
 		player._client_message.rpc_id(peer, "%s is recovering: you play %s" % [main.name, member(String(dep.stand_ins[key])).callsign])
+	elif main.get("kit_due", false) and not Restock.is_blank(Restock.template_of(gear)):
+		main.erase("kit_due")  # they already have gear of their own: that wins
 	player.inventory.net_state = GameState.from_json(gear.duplicate(true))
+	if fresh:
+		_changed(&"roster")
+	server_give_due_kit(player)
+
+
+## Host (B-23): a campaign player whose brand-new main character still owes their role's kit
+## gets it, once, on top of their (empty) saved gear. Waits until their gear is on
+## (_apply_player_gear) and their squad role is known (CompoundLevel.rebalance_squad), in
+## whichever order those come; a stand-in plays in the stand-in's own gear. Returns whether
+## the kit went on.
+func server_give_due_kit(player: Soldier) -> bool:
+	if not campaign_running or not is_instance_valid(player) or player.role == &"":
+		return false
+	var peer := player.name.to_int()
+	if not _gear_applied.has(peer):
+		return false
+	var key := player_key(peer)
+	var main: Dictionary = Roster.players(roster()).get(key, {})
+	if not main.get("kit_due", false):
+		return false
+	var dep := RosterDeployment.active(roster())
+	if dep.has("stand_ins") and dep.stand_ins.has(key) and not member(String(dep.stand_ins[key])).is_empty():
+		return false
+	main.erase("kit_due")
+	Roles.apply_kit(player.inventory, player.role)
+	SessionLog.note("%s is new to the company: their %s kit, once" % [SessionLog.who(player), player.role])
+	_changed(&"roster")
+	return true
 
 
 ## Host: a player died in a deployment: the respawn pool counts it (free ones first, then
