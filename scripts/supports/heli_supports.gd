@@ -192,6 +192,8 @@ func server_call(kind: String, caller: Soldier, arg: String, point: Vector3) -> 
 		return "No helicopter could take off"
 	calls.append(call)
 	_cooldown_until[kind] = Soldier._now() + cooldown_s(kind)
+	if kind == "extraction":
+		_show_heli_point()  # its LZ is the helicopter's at once, not from the next frame (Extraction.SOURCES)
 	return ""
 
 

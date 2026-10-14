@@ -56,7 +56,9 @@ const SMOKE_COLOUR := "purple"
 const LEAVE_CONFIRM_S := 10.0
 const SMOKE_CHECK_S := 0.5
 ## Sources of a point. One "grid" and one "smoke" point at a time: the newest replaces the
-## last, as a helicopter goes to the latest call; the zone's presets all stay.
+## last, as a helicopter goes to the latest call; the zone's presets all stay. While a
+## helicopter extraction has its LZ (heli_point), a newer one doesn't take the LZ away: it's
+## kept for after the call, when the newest of each source stands again (_keep_newest).
 const SOURCES: Array[String] = ["zone", "grid", "smoke"]
 
 var state := State.IDLE
@@ -172,13 +174,30 @@ func server_cancel() -> void:
 
 
 ## Host only. Adds an extraction point at a ground point (x, z) ("grid" or "smoke"); returns
-## its id (0 when no deployment is on).
+## its id (0 when no deployment is on). With a helicopter extraction called, its LZ stays the
+## point in use: this one is kept for after the call (see SOURCES).
 func server_add_point(pos: Vector2, source := "grid", point_name := "", radius := RADIUS_M) -> int:
+	return _server_add_point(pos, source, point_name, radius, false)
+
+
+## Host. server_add_point; `for_heli`: the extraction helicopter's own point (server_place_point),
+## which replaces the last of its source as any newest point does.
+func _server_add_point(pos: Vector2, source: String, point_name: String, radius: float, for_heli: bool) -> int:
 	if not multiplayer.is_server() or not is_active() or not pos.is_finite() or source not in SOURCES:
 		return 0
-	var id := _add_point(pos, source, point_name, radius)
+	# Reviewer finding, 2026-10-14: a grid picked on the map or a purple smoke thrown while the
+	# helicopter had its LZ replaced that LZ (same source), so no point was shown or usable and
+	# the helicopter stopped loading items. The helicopter's LZ is kept; the new point waits.
+	var keep := heli_point if not for_heli and heli_point > 0 and not point_by_id(heli_point).is_empty() else -1
+	var id := _add_point(pos, source, point_name, radius, keep)
 	_broadcast()
-	_client_message.rpc("Extraction point: %s (%s)" % [MapGrid.grid_ref(pos, MapNodes.area_of(self)), _source_text(source)])
+	var at := "%s (%s)" % [MapGrid.grid_ref(pos, MapNodes.area_of(self)), _source_text(source)]
+	if keep > 0:
+		_client_message.rpc("Extraction point %s kept for after the helicopter call: its LZ stays the one in use" % at)
+	elif not for_heli and heli_point == 0 and source == "grid":
+		_client_message.rpc("Extraction point %s kept for after the helicopter call: give the helicopter a grid (Support) or pop purple smoke" % at)
+	else:
+		_client_message.rpc("Extraction point: %s" % at)
 	return id
 
 
@@ -188,7 +207,7 @@ func server_add_point(pos: Vector2, source := "grid", point_name := "", radius :
 func server_place_point(id: int, pos: Vector2, source := "grid", point_name := "") -> int:
 	var point := point_by_id(id)
 	if point.is_empty() or point.source == "zone":
-		return server_add_point(pos, source, point_name)
+		return _server_add_point(pos, source, point_name, RADIUS_M, true)
 	if not multiplayer.is_server() or not is_active() or not pos.is_finite() or source not in SOURCES:
 		return 0
 	var moved: bool = (point.pos as Vector2).distance_to(pos) > 1.0 or point.source != source
@@ -649,6 +668,8 @@ func server_set_heli_point(id: int) -> void:
 	if not multiplayer.is_server() or id == heli_point:
 		return
 	heli_point = id
+	if id < 0:
+		_keep_newest()
 	SessionLog.note("extraction: %s" % ("every point shown again (no helicopter extraction)" if id < 0
 		else "helicopter extraction called, its LZ not set yet: no point shown" if id == 0 else "only the helicopter's LZ shown (point %d)" % id))
 	_broadcast()
@@ -665,15 +686,32 @@ func _nearest_point() -> Dictionary:
 	return best
 
 
-func _add_point(pos: Vector2, source: String, point_name: String, radius: float) -> int:
+## Host. A new point; one of `source` ("grid", "smoke") replaces the last of it, except point
+## `keep` (the helicopter's LZ: see SOURCES).
+func _add_point(pos: Vector2, source: String, point_name: String, radius: float, keep := -1) -> int:
 	if source != "zone":
-		points = points.filter(func(p: Dictionary) -> bool: return p.source != source)
+		points = points.filter(func(p: Dictionary) -> bool: return p.source != source or (keep > 0 and int(p.id) == keep))
 	var id := _next_id
 	_next_id += 1
 	if point_name == "":
 		point_name = {"grid": "Grid LZ", "smoke": "Purple smoke"}.get(source, "LZ %d" % id)
 	points.append({"id": id, "name": point_name, "pos": pos, "radius": radius, "source": source})
 	return id
+
+
+## Host. The helicopter extraction's over: one "grid" and one "smoke" point again, the newest
+## of each (its LZ was kept beside newer ones while it stood: _add_point). The point a
+## countdown runs at stays.
+func _keep_newest() -> void:
+	var newest := {}
+	for p: Dictionary in points:
+		if p.source != "zone":
+			newest[p.source] = maxi(int(newest.get(p.source, 0)), int(p.id))
+	var before := points.size()
+	points = points.filter(func(p: Dictionary) -> bool:
+		return p.source == "zone" or int(p.id) == int(newest[p.source]) or int(p.id) == countdown_point)
+	if points.size() != before:
+		SessionLog.note("extraction: %d older point(s) dropped after the helicopter call" % (before - points.size()))
 
 
 static func _source_text(source: String) -> String:

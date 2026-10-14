@@ -623,6 +623,19 @@ func _test_extraction() -> void:
 	_regroup()
 	var ext := MapNodes.extraction(level)
 	ext.server_begin({})
+	# Reviewer finding, 2026-10-14: a grid or purple smoke marked while a helicopter extraction has
+	# its LZ used to replace that LZ (same source), leaving no point shown or usable. The LZ stays
+	# the one point shown, the new one is kept for after the call, then the newest stands again.
+	var heli_lz := ext.server_add_point(Vector2(HOME.x - 300.0, HOME.z), "grid")
+	ext.server_set_heli_point(heli_lz)
+	var later := ext.server_add_point(Vector2(HOME.x - 250.0, HOME.z), "grid")
+	check(not ext.point_by_id(heli_lz).is_empty() and not ext.point_by_id(later).is_empty()
+		and ext.shown_points().map(func(p: Dictionary) -> int: return int(p.id)) == [heli_lz],
+		"a grid marked during a helicopter extraction keeps its LZ, still the one point shown; the new one kept for later")
+	ext.server_set_heli_point(-1)
+	check(ext.point_by_id(heli_lz).is_empty() and ext.shown_points().map(func(p: Dictionary) -> int: return int(p.id)) == [later],
+		"the call over: the newer grid replaces the helicopter's LZ")
+	ext.server_begin({})
 	var preset := ext.server_add_point(Vector2(HOME.x + 300.0, HOME.z), "zone", "Preset LZ")
 	var lzp := _ground(HOME + Vector3(0, 0, -45))
 	var hvt := level.people.server_spawn_person({"name": "HvtTest", "kind": "hvt", "side": "friendly", "pos": _ground(lzp + Vector3(12, 0, 4)),
@@ -647,6 +660,9 @@ func _test_extraction() -> void:
 		return
 	check(_called_points(ext) == 1 and not ext.point_by_id(e.point_id).is_empty(), "one extraction point, the helicopter's, after the LZ recheck (%d)" % _called_points(ext))
 	check(ext.shown_points().size() == 1 and int(ext.shown_points()[0].id) == e.point_id, "landed: the helicopter's LZ is the one point shown")
+	ext.server_add_point(Vector2(lzp.x + 150.0, lzp.z), "grid")  # a grid picked on the map meanwhile
+	check(ext.heli_point == e.point_id and not ext.point_by_id(e.point_id).is_empty() and ext.shown_points().size() == 1
+		and int(ext.shown_points()[0].id) == e.point_id, "a grid marked while it's down doesn't take its LZ away: still the one point shown")
 	await _wait_for(func() -> bool:
 		var hold := e.heli.cargo_hold.entries().map(func(x: Dictionary) -> String: return String(x.id))
 		return "intel_laptop" in hold and "electronics_salvage" in hold and _aboard(hvt, e), 15.0)
