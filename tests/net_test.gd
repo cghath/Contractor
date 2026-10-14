@@ -35,6 +35,11 @@ const AIMER_AT := Vector3(4, 0.1, 33)
 ## Rounds the aimer has left after firing some before the client joins: the counts
 ## (Inventory.net_ammo) say so, whatever snapshot (net_gear) came with them (playtest blocker B2).
 const AIMER_ROUNDS := 23
+## Fix B-08 (co-op soak S0706: clients a round above the host while it fired): once the client
+## is in, the host fires the dragger's rifle dry a round a frame or so, picking up a magazine
+## halfway (a whole new snapshot, net_gear, among the counts); the client must end on 0 too.
+const DRY_SHOT_S := 0.07
+const DRY_MAG_AT := 15
 
 var failures := 0
 var level: CompoundLevel
@@ -126,6 +131,23 @@ func _give_kit(id: int) -> void:
 	player.vitals.server_hit(Vitals.FOREARM_L, {"round_class": Vitals.FRAGMENT, "superficial": true})
 	level.voxel_world.server_mark(LIVE_MARK, Vector3.FORWARD, VoxelWorld.Mat.CONCRETE)
 	print("[host] gave peer %d a kit" % id)
+	_fire_dragger_dry()
+
+
+## Host: B-08. The dragger's rifle fired to empty while the client watches (see DRY_SHOT_S).
+func _fire_dragger_dry() -> void:
+	await get_tree().create_timer(1.0).timeout
+	var dragger: Soldier = _combatant(DRAGGER)
+	if dragger == null:
+		print("[host] no dragger to fire dry")
+		return
+	var shots := 0
+	while dragger.inventory.consume_round(&"primary"):
+		shots += 1
+		if dragger.inventory.rounds_in(&"primary") == DRY_MAG_AT:
+			dragger.inventory.take(&"mag_556")
+		await get_tree().create_timer(DRY_SHOT_S).timeout
+	print("[host] fired the dragger's rifle dry: %d shots, %d left, counts %s" % [shots, dragger.inventory.rounds_in(&"primary"), dragger.inventory.net_ammo])
 
 
 func check(condition: bool, what: String) -> void:
@@ -164,6 +186,11 @@ func _run_client() -> void:
 	me._server_reload.rpc_id(1, &"primary")
 	await _wait_for(func() -> bool: return me.inventory.rounds_in(&"primary") == 30, 5.0)
 	check(me.inventory.rounds_in(&"primary") == 30 and me.inventory.spare_rounds(&"mag_556") == 57, "reload over the network (30 loaded, 57 spare)")
+	var dry: Soldier = _combatant(DRAGGER)
+	await _wait_for(func() -> bool: return dry != null and dry.inventory.rounds_in(&"primary") == 0, 8.0)
+	check(dry != null and dry.inventory.rounds_in(&"primary") == 0 and dry.inventory.count_of(&"mag_556") == 1,
+		"B-08: a rifle the host fires dry, a magazine picked up halfway, ends on 0 here too (%s left, counts %s)" % [
+			dry.inventory.rounds_in(&"primary") if dry else -1, dry.inventory.net_ammo if dry else PackedInt32Array()])
 	# The host's K-style trauma (40): 24% of blood lost and 0.4 pain, plus a fragment wound in
 	# the left forearm, replicated in net_state.
 	await _wait_for(func() -> bool: return me.vitals.pain() > 0.45, 3.0)
