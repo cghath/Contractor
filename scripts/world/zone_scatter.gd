@@ -31,7 +31,7 @@ const BUILD_M := 1000.0
 const PER_FRAME := 2
 const CHECK_S := 0.5
 ## Draw distances (m): scrub, rocks, trunks and crowns.
-const SEE_SCRUB_M := 550.0  # bushes read at mid range (round 3: was 400)
+const SEE_SCRUB_M := 470.0  # bushes read at mid range (round 3: was 400)
 const SEE_ROCK_M := 650.0
 const SEE_TREE_M := 950.0
 
@@ -50,7 +50,7 @@ const FOLIAGE_PAD_M := 3.0
 const SEE_TUFT_M := 140.0
 const SEE_PEBBLE_M := 70.0
 ## Rock clusters (the preset's scatter "rock_clusters_per_km2"), visual only like the tufts.
-const SEE_OUTCROP_M := 420.0
+const SEE_OUTCROP_M := 300.0
 const CAP_TUFTS_PER_CELL := 1200
 
 ## Every item: {"kind", "pos" (Vector3), "yaw", "size" (Vector3), "colour" (Color), "solid"}.

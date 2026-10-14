@@ -53,7 +53,7 @@
 			"land": {"relief_scale": 0.85, "wavelength_m": 560, "octaves": 4, "gain": 0.44, "ridge": 0.2, "detail_m": 3.2, "detail_wavelength_m": 150},
 			"wadi": {"count": 2, "width_m": 55, "depth_m": 8.0, "meander_m": 140, "berm_m": 2.0},
 			"palette": {"grass": "a08f5a", "dry": "b3a068", "earth": "94785a", "rock": "7d6f5c", "sand": "c9b27a", "apron": "a08f5a"},
-			"scatter": {"conifer_share": 0.0, "rocks_per_km2": 90, "large_rock_share": 0.18, "scrub_per_km2": 600, "scrub_size": [0.7, 1.7], "trees_per_km2": 8, "tufts_per_km2": 32000, "pebbles_per_km2": 12000, "rock_clusters_per_km2": 120,
+			"scatter": {"conifer_share": 0.0, "rocks_per_km2": 90, "large_rock_share": 0.18, "scrub_per_km2": 600, "scrub_size": [0.7, 1.7], "trees_per_km2": 8, "tufts_per_km2": 24000, "pebbles_per_km2": 8000, "rock_clusters_per_km2": 120,
 				"colours": {"rock": ["8a7a64", "7a6c58"], "scrub": ["6f7040", "857b45"], "tuft": ["a89a5c", "94935a", "85884e"], "crown": ["5f6b35", "6b7338"], "trunk": "5e4a34"}}
 		},
 		"rocky_ridge": {
