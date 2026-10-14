@@ -22,8 +22,8 @@ extends Node
 ##   extract_confirm  (fix/coop-extraction) its confirm from outside every point is refused;
 ##                    from inside one, with the bots in, its confirm starts the countdown (the
 ##                    host doesn't confirm for it on such a build: tests/coop_soak.gd)
-##   respawn_kit      (fix/respawn-own-kit) it dies (dev tools' hurt), respawns in the kit it
-##                    died in, and no player body is left
+##   respawn_kit      (fix/respawn-own-kit) it dies (dev tools' hurt, then giving up), respawns
+##                    in the kit it died in, and no player body is left
 ##   leave_behind     (fix/coop-extraction) the host knocks out a bot player (asked through
 ##                    <run>/human_ask.json); it calls a point away from them: its first confirm
 ##                    warns "Leaving behind" naming them, a second one starts the countdown
@@ -637,8 +637,8 @@ func _check_extract_confirm() -> bool:
 
 
 ## respawn_kit (fix/respawn-own-kit, Captain 2026-10-14: "respawn with the kit you had on.
-## delete old player/bot bodies"): dies through dev tools' hurt (the K key's request), waits for
-## the respawn, and compares what it wears and carries with before (medical items a bot used on
+## delete old player/bot bodies"): goes down through dev tools' hurt (the K key's request) and
+## gives up (the give-up key's request), waits for the respawn, and compares what it wears and carries with before (medical items a bot used on
 ## it in between may be gone; the hands item drops); no new player body (one with a gear marker)
 ## may carry its name or lie where it fell.
 func _check_respawn_kit() -> void:
@@ -655,20 +655,19 @@ func _check_respawn_kit() -> void:
 	var bodies_before := _player_bodies()
 	var fell_at := me.global_position
 	var died := false
-	for attempt in 4:
+	var how := "dev tools' hurt"
+	for attempt in 3:
 		me = _me()
-		if me == null:
+		if me == null or not me.vitals.is_up():
 			break
-		if _respawn_state(me) == 1 or me.vitals.is_dead():
-			died = true
-			break
-		_say("dying (dev tools' hurt, 1000)")
+		_say("hurt (dev tools' hurt, 1000)")
 		me._server_debug_hurt.rpc_id(1, 1000.0)
-		died = await _wait_for(func() -> bool: return _me() != null and (_respawn_state(_me()) == 1 or _me().vitals.is_dead()), 4.0)
-		if died:
-			break
+		await _wait_for(func() -> bool: return _me() == null or not _me().vitals.is_up() or _respawn_state(_me()) == 1, 4.0)
+	died = await _wait_for(func() -> bool: return _me() != null and (_respawn_state(_me()) == 1 or _me().vitals.is_dead()), 2.0)
 	if not died and _me() != null and _me().has_method(&"can_give_up"):
-		# Only down: give up as the give-up key does, once it may.
+		# S0848: the hurt leaves you down, not dead. Give up as the give-up key does, once it may
+		# (down GIVE_UP_AFTER_S, or nobody near).
+		how = "down from dev tools' hurt, then the give-up key's request"
 		if await _wait_for(func() -> bool: return _me() != null and bool(_me().call(&"can_give_up")), 25.0):
 			_say("giving up (the give-up key's request)")
 			_me().rpc_id(1, &"_server_give_up")
@@ -703,8 +702,8 @@ func _check_respawn_kit() -> void:
 	var ok := slot_diff.is_empty() and changed.is_empty() and mine.is_empty()
 	var bodies_text := "none of it" if mine.is_empty() else "A PLAYER BODY of it: %s" % [
 		mine.map(func(b: Soldier) -> String: return "%s at %.0f m from where it fell" % [b.body_label, _flat(b.global_position, fell_at)])]
-	_check("respawn_kit", "PASS" if ok else "FAIL", "respawned %.0f m from where it fell; worn: %s; carried: %s%s; bodies: %s" % [
-		_flat(me.global_position, fell_at), "the same (%s)" % _slots_line(me) if slot_diff.is_empty() else "CHANGED %s" % [slot_diff],
+	_check("respawn_kit", "PASS" if ok else "FAIL", "died (%s), respawned %.0f m from where it fell; worn: %s; carried: %s%s; bodies: %s" % [
+		how, _flat(me.global_position, fell_at), "the same (%s)" % _slots_line(me) if slot_diff.is_empty() else "CHANGED %s" % [slot_diff],
 		"the same" if changed.is_empty() else "CHANGED %s" % [changed], " (medical used on it: %s)" % [used] if not used.is_empty() else "",
 		bodies_text])
 
@@ -822,16 +821,20 @@ func _check_leave_behind() -> bool:
 	var names_them := warning.contains("Player %s" % victim_name)
 	extraction.request_confirm()
 	var started := await _wait_for(func() -> bool: return not _in_zone() or extraction.state == Extraction.State.COUNTDOWN, 6.0)
-	var ok := warning != "" and names_them and held and started
+	var listed := true  # unknown (the report never reached this client) counts as no news
 	var report := ""
 	if started:
-		# Who the extraction left behind (Extraction.last_report, sent to every peer at the end).
+		# Who the extraction left behind (Extraction.last_report "left_behind", sent to every peer
+		# at the end): the player left at the call is reported left behind (MIA).
 		await _wait_for(func() -> bool: return not _in_zone() or not is_instance_valid(extraction) or not extraction.last_report.is_empty(), 20.0)
 		if is_instance_valid(extraction) and not extraction.last_report.is_empty():
-			var left: Array = extraction.last_report.get("left", [])
-			var listed := left.any(func(e: Dictionary) -> bool: return bool(e.get("player", false)) and str(e.get("peer", "")) == victim_name)
-			report = "; the report lists Player %s left behind: %s" % [victim_name, "yes" if listed else "NO (left: %s)" % [
+			var left: Array = extraction.last_report.get("left_behind", [])
+			listed = left.any(func(e: Dictionary) -> bool: return bool(e.get("player", false)) and str(e.get("peer", "")) == victim_name)
+			report = "; the report lists Player %s left behind: %s" % [victim_name, "yes" if listed else "NO (left behind: %s)" % [
 				left.map(func(e: Dictionary) -> String: return String(e.get("name", "?")))]]
+		else:
+			report = "; the extraction's report never reached this client"
+	var ok := warning != "" and names_them and held and started and listed
 	_ask("release")
 	_check("leave_behind", "PASS" if ok else "FAIL", "Player %s down %.0f m from the point's centre; first confirm: %s%s; second: %s%s (shown: %s)" % [
 		victim_name, off_m, "\"%s\"" % warning if warning != "" else "NO \"Leaving behind\" warning",
