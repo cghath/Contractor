@@ -291,4 +291,5 @@ func _check_give_up() -> bool:
 	if layer:
 		layer.server_surrender(body, "cornered")
 	mode = Mode.HOLD
+	_hold = body.global_position  # he stops where he gave up
 	return true
