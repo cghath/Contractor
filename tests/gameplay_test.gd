@@ -27,6 +27,7 @@ func _ready() -> void:
 	await _test_inventory_actions()
 	await _test_drop_and_pickup_keep_state()
 	await _test_spread()
+	await _test_optics()
 	await _test_downed()
 	await _test_throwables()
 	await _test_bad_input()
@@ -349,8 +350,134 @@ func _test_spread() -> void:
 		player.is_aiming = true
 		aimed = maxf(aimed, rad_to_deg(forward.angle_to(player._spread_direction(weapon))))
 	player.is_aiming = false
-	check(hip > 0.3 and hip <= 1.2 * 2.5 + 0.01, "hip-fire stays inside the cone (max %.2f deg)" % hip)
+	check(hip > 0.3 and hip <= Soldier.SHOOTER_HIP_DEG * 1.5 + 0.1, "hip-fire stays inside the cone (max %.2f deg)" % hip)
 	check(aimed < hip * 0.3, "aiming tightens it (max %.2f deg)" % aimed)
+	# Captain, P0362: a player's aimed rifle shot standing still lands within about 10 cm at
+	# 100 m (the weapon's own cone plus the trigger press); sway and recoil are the rest.
+	check(aimed <= 0.06, "aimed and still, an M4 groups tight (max %.3f deg, %.0f cm at 100 m)" % [aimed, tan(deg_to_rad(aimed)) * 10000.0])
+	# The AI keeps its own cone: the weapon's ai_spread_deg, its accuracy before P0362.
+	check(is_equal_approx(Soldier.ai_spread_deg(weapon), 1.2) and is_equal_approx(Soldier.ai_spread_deg(ItemDB.get_item(&"m110")), 1.6),
+		"the AI's cone is unchanged (M4 %.2f deg)" % Soldier.ai_spread_deg(weapon))
+	var ai_max := 0.0
+	player.is_aiming = true
+	for i in 200:
+		ai_max = maxf(ai_max, rad_to_deg(forward.angle_to(player.ai_spread_direction(weapon))))
+	player.is_aiming = false
+	check(ai_max > aimed * 1.5, "and stays wider than a player's aimed shot (AI %.3f, player %.3f deg)" % [ai_max, aimed])
+	# Recoil heat blooms the cone; it fades in about a second.
+	player.recoil_heat = 5.0
+	player._heat_at = Soldier._now()
+	player.is_aiming = true
+	var hot := player.spread_deg_now(weapon)
+	player.recoil_heat = 0.0
+	var cold := player.spread_deg_now(weapon)
+	player.is_aiming = false
+	check(hot > cold + 0.3, "auto fire blooms the cone (%.2f vs %.2f deg)" % [hot, cold])
+
+
+## Optics as attachments (Captain, P0362, 2026-10-13): the optic on a gun is in the gun's own
+## item state (so it's replicated, dropped, picked up and saved with it), swapped from the
+## inventory screen's actions; magnified power is against the unaimed view; the AI's cone is
+## the gun's whatever optic it carries.
+func _test_optics() -> void:
+	print("Optics (RPC)")
+	var inv := player.inventory
+	var m4 := ItemDB.get_item(&"m4a1")
+	var m110 := ItemDB.get_item(&"m110")
+	var on_gun := func() -> StringName:
+		var optic := Optics.on_slot(inv, &"primary")
+		return optic.id if optic else &""
+	check(on_gun.call() == &"optic_red_dot" and Optics.mounted(m110, {}).id == &"optic_dmr_3_5_10"
+		and not Optics.has_rail(ItemDB.get_item(&"m17")) and Optics.mounted(ItemDB.get_item(&"m17"), {}) == null,
+		"the M4 comes with its red dot, the M110 with its 3.5-10x, the M17 has irons only")
+	check(VoxelArt.model_for(m4, inv.state_of(&"primary")).ends_with(":dot"), "the M4's model shows its red dot")
+	var rounds := inv.rounds_in(&"primary")
+	check(inv.take(&"optic_lpvo") == 1, "an LPVO picked up")
+	var where := _find(inv, &"optic_lpvo")
+	player._server_inventory_action.rpc_id(1, "mount_optic", where[0], where[1], &"primary", &"")
+	check(on_gun.call() == &"optic_lpvo" and inv.count_of(&"optic_red_dot") == 1 and inv.count_of(&"optic_lpvo") == 0,
+		"the LPVO goes on the M4, its red dot into the kit")
+	check(String(inv.net_state.slot_state.primary.get("optic", "")) == "optic_lpvo" and inv.rounds_in(&"primary") == rounds,
+		"in the gun's replicated state, its rounds kept")
+	check(VoxelArt.model_for(m4, inv.state_of(&"primary")).ends_with(":lpvo"), "and its model shows the LPVO")
+	player._server_inventory_action.rpc_id(1, "remove_optic", &"", -1, &"primary", &"")
+	check(on_gun.call() == &"" and inv.count_of(&"optic_lpvo") == 1 and VoxelArt.model_for(m4, inv.state_of(&"primary")).ends_with(":irons"),
+		"taken off: back-up irons, the LPVO stowed")
+	where = _find(inv, &"optic_lpvo")
+	player._server_inventory_action.rpc_id(1, "mount_optic", where[0], where[1], &"primary", &"")
+	player._server_inventory_action.rpc_id(1, "drop_slot", &"", -1, &"primary", &"")
+	await _frames(2)
+	var rifle := _world_item(&"m4a1")
+	check(rifle != null and String(rifle.state.get("optic", "")) == "optic_lpvo", "a dropped M4 keeps its LPVO")
+	if rifle:
+		rifle.global_position = player.global_position + Vector3(0, 0.5, -0.6)
+		player._server_interact.rpc_id(1, rifle.get_path())
+	await _frames(2)
+	check(on_gun.call() == &"optic_lpvo", "and has it when picked up again")
+	where = _find(inv, &"optic_red_dot")
+	player._server_inventory_action.rpc_id(1, "mount_optic", where[0], where[1], &"primary", &"")
+	check(on_gun.call() == &"optic_red_dot" and not inv.state_of(&"primary").has("optic") and inv.count_of(&"optic_lpvo") == 1,
+		"the red dot back on: the M4 as it came")
+	player._server_inventory_action.rpc_id(1, "mount_optic", where[0], where[1], &"sidearm", &"")
+	check(inv.slots[&"sidearm"] == &"" or Optics.on_slot(inv, &"sidearm") == null, "nothing mounts on a pistol")
+	# Power against the unaimed view: 10x is a tenth of its tangent; 1x the weapon's ads_fov.
+	var at10 := GunSight.aimed_fov(m110, 80.0, 10.0)
+	check(absf(tan(deg_to_rad(40.0)) / tan(deg_to_rad(at10 * 0.5)) - 10.0) < 0.01 and is_equal_approx(GunSight.aimed_fov(m4, 80.0, 1.0), 50.0),
+		"10x shows a tenth of the unaimed view's tangent (%.1f deg at 80), 1x the weapon's aimed view" % at10)
+	var zr := func(id: StringName) -> Vector2: return GunSight.zoom_range(ItemDB.get_item(id))
+	check(zr.call(&"optic_lpvo") == Vector2(1, 6) and zr.call(&"optic_prism_4x") == Vector2(4, 4) and zr.call(&"optic_dmr_3_5_10") == Vector2(3.5, 10)
+		and zr.call(&"optic_dmr_8x") == Vector2(8, 8) and zr.call(&"optic_dmr_3_15") == Vector2(3, 15) and zr.call(&"optic_red_dot") == Vector2.ONE
+		and float(ItemDB.get_item(&"optic_holo").stats.magnifier) == 3.0, "LPVO 1-6x, 4x prism, 3.5-10x, 8x, 3-15x, a red dot at 1x, the holo's 3x magnifier")
+	check(is_equal_approx(GunSight.power(player, ItemDB.get_item(&"optic_dmr_3_5_10")), 6.0), "the 3.5-10x starts at 6x")
+	# Zoom on the side mouse buttons (rebindable): Mouse 5 in, Mouse 4 out; nothing else on them.
+	var on_button := func(action: StringName, button: MouseButton) -> bool:
+		return InputMap.action_get_events(action).any(func(e: InputEvent) -> bool: return e is InputEventMouseButton and (e as InputEventMouseButton).button_index == button)
+	var others := InputMap.get_actions().filter(func(a: StringName) -> bool:
+		return a != &"zoom_in" and a != &"zoom_out" and (on_button.call(a, MOUSE_BUTTON_XBUTTON1) or on_button.call(a, MOUSE_BUTTON_XBUTTON2)))
+	check(on_button.call(&"zoom_in", MOUSE_BUTTON_XBUTTON2) and on_button.call(&"zoom_out", MOUSE_BUTTON_XBUTTON1) and others.is_empty()
+		and GameSettings.key_for(&"zoom_in") == GameSettings.MOUSE_BIND | MOUSE_BUTTON_XBUTTON2 and GameSettings.binding_name(GameSettings.key_for(&"zoom_out")) == "Mouse 4"
+		and GameSettings.BINDABLE.any(func(p: Array) -> bool: return p[0] == &"zoom_in") and not InputMap.has_action(&"magnifier"),
+		"zoom in on Mouse 5, out on Mouse 4, in the Keys list (others on them: %s)" % [others])
+	var lpvo := ItemDB.get_item(&"optic_lpvo")
+	var holo := ItemDB.get_item(&"optic_holo")
+	var kept := inv.state_of(&"primary")
+	inv.set_slot_state(&"primary", Optics.with_optic(m4, kept, &"optic_lpvo"))
+	var at1 := GunSight.power(player, lpvo)
+	var told := GunSight.zoom_step(player, 1)
+	check(GunSight.of(player) != null and is_equal_approx(at1, 1.0) and is_equal_approx(GunSight.power(player, lpvo), 1.25) and told != "",
+		"zoom in steps the LPVO from 1x to 1.25x (%s)" % told)
+	for i in 20:
+		GunSight.zoom_step(player, 1)
+	check(is_equal_approx(GunSight.power(player, lpvo), 6.0) and GunSight.zoom_step(player, 1) == "", "and stops at 6x")
+	inv.set_slot_state(&"primary", Optics.with_optic(m4, kept, &"optic_holo"))
+	var up := GunSight.zoom_step(player, 1)
+	var magnified := GunSight.magnified(player, holo) and is_equal_approx(GunSight.power(player, holo), 3.0)
+	var down := GunSight.zoom_step(player, -1)
+	check(up != "" and magnified and down != "" and not GunSight.magnified(player, holo) and is_equal_approx(GunSight.power(player, holo), 1.0),
+		"the holo's magnifier flips up on zoom in (3x) and down on zoom out")
+	inv.set_slot_state(&"primary", kept)
+	# A gun's mass and price are with its own optic; another changes them by the difference.
+	var mass := func(state: Dictionary) -> float: return Inventory.entry_mass({"id": &"m4a1", "count": 1, "state": state})
+	var full := m4.default_state()
+	check(is_equal_approx(mass.call(Optics.with_optic(m4, full, &"optic_lpvo")) - mass.call(full), lpvo.mass_kg - 0.22)
+		and is_equal_approx(mass.call(Optics.with_optic(m4, full, &"")) - mass.call(full), -0.22),
+		"an LPVO adds its mass over the red dot's, irons take the red dot's off")
+	check(Prices.sell_price(&"m4a1") == 560 and Prices.sell_price(&"m4a1", 1, Optics.with_optic(m4, full, &"optic_lpvo")) == floori((1400 + 1500 - 600) * 0.4),
+		"and its price: an M4 with an LPVO sells for %d" % Prices.sell_price(&"m4a1", 1, Optics.with_optic(m4, full, &"optic_lpvo")))
+	# Mils read true at any power; a scale too crowded to read spaces out.
+	check(GunSight.mark_step(GunSight.px_per_mil(at10, 1080.0)) == 1.0 and GunSight.mark_step(GunSight.px_per_mil(GunSight.aimed_fov(m110, 80.0, 3.5), 1080.0)) > 1.0,
+		"mil marks a mil apart at 10x, wider apart at 3.5x")
+	# The AI's cone doesn't care what optic the gun carries.
+	check(is_equal_approx(Soldier.ai_spread_deg(m4), 1.2) and is_equal_approx(Soldier.ai_spread_deg(m110), 1.6), "the AI's cone is the gun's, whatever its optic")
+
+
+## [container, index] of the first stowed `id`, or [&"", -1].
+func _find(inv: Inventory, id: StringName) -> Array:
+	for c in inv.search_containers():
+		var i := _index_of(inv, c, id)
+		if i >= 0:
+			return [c, i]
+	return [&"", -1]
 
 
 func _test_downed() -> void:

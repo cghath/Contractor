@@ -172,7 +172,8 @@ func total_mass() -> float:
 	var total := 0.0
 	for slot in SLOTS:
 		if slots[slot] != &"":
-			total += ItemDB.get_item(slots[slot]).mass_kg + contents_mass(state_of(slot))  # a carrier's pouches
+			var worn := ItemDB.get_item(slots[slot])
+			total += worn.mass_kg + contents_mass(state_of(slot)) + Optics.extra_mass(worn, state_of(slot))  # a carrier's pouches, a gun's optic
 	for container in CONTAINERS:
 		for entry: Dictionary in containers[container]:
 			total += entry_mass(entry)
@@ -192,6 +193,7 @@ static func entry_mass(entry: Dictionary) -> float:
 		each = empty + (item.mass_kg - empty) * clampf(float(entry.state.get("rounds", full)) / full, 0.0, 1.0)
 	if entry.has("state"):
 		each += contents_mass(entry.state)  # a stowed carrier's pouches, a pouch's contents
+		each += Optics.extra_mass(item, entry.state)  # a gun with another optic on (P0362)
 	return each * entry.count
 
 

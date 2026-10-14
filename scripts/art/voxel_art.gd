@@ -147,12 +147,17 @@ static func fitted(model: String, body: String) -> String:
 	return model.replace("vest:", "vest_f:") if body == FEMALE and model.begins_with("vest:") else model
 
 
-## Model name for an item, or "" if it has no voxel model yet (it falls back to a box).
-static func model_for(item: ItemData) -> String:
+## Model name for an item, or "" if it has no voxel model yet (it falls back to a box). A
+## rifle's names the sight on it ("rifle:42:dot", "rifle:52:scope", "rifle:42:irons"): the
+## optic its item state `state` mounts (Optics), else its own.
+static func model_for(item: ItemData, state := {}) -> String:
+	if Optics.is_optic(item):
+		return "optic:" + Optics.art_of(item)
 	match item.slot:
 		&"primary":
 			var length: float = item.stats.get("size_m", [0, 0, 0.84])[2]
-			return "rifle:%d" % roundi(length / VOXEL_SIZE)
+			var art := Optics.art_of(Optics.mounted(item, state)) if Optics.has_rail(item) else "dot"
+			return "rifle:%d:%s" % [roundi(length / VOXEL_SIZE), art if art != "" else IRONS]
 		&"sidearm":
 			return "pistol"
 		&"vest":
@@ -184,16 +189,19 @@ static func hand_points(model: String) -> Dictionary:
 	return {"grip": (grip - centre) * VOXEL_SIZE, "support": (support - centre) * VOXEL_SIZE}
 
 
-## Top of the rear sight, in metres relative to the instance pivot (its centre). Aiming
-## puts this point just under the eye. Zero for non-weapons.
+## The line of sight's back end, in metres relative to the instance pivot (its centre):
+## aiming puts this point on the eye's line (PlayerInput.ads_view). A rifle's is the middle of
+## its optic's back end (you look through it: Captain, P0362) or of its rear aperture (irons),
+## a pistol's the top of its rear sight notch, level with the front post's top. Zero for
+## non-weapons.
 static func sight_point(model: String) -> Vector3:
 	var spec := _spec(model)
 	var centre := Vector3(spec.size) * 0.5
 	match model.get_slice(":", 0):
 		"rifle":
-			return (Vector3(1.5, 13, spec.size.z * 0.62) - centre) * VOXEL_SIZE  # back of the optic
+			return (Vector3(1.5, OPTIC_AXIS_Y, sight_back(_rifle_art(model), spec.size.z)) - centre) * VOXEL_SIZE
 		"pistol":
-			return (Vector3(1, 7, 9) - centre) * VOXEL_SIZE  # rear sight
+			return (Vector3(1, 7.0, 9.4) - centre) * VOXEL_SIZE  # rear sight notch
 	return Vector3.ZERO
 
 
@@ -525,7 +533,8 @@ static func _spec(model: String) -> Dictionary:
 		"vest_f": return _vest(arg, _torso_f(true), true)
 		"vest_f_front": return _vest(arg, _torso_f(true), true, true)
 		"backpack": return _backpack(arg)
-		"rifle": return _rifle(arg)
+		"rifle": return _rifle(arg, _rifle_art(model))
+		"optic": return _optic_model(model.get_slice(":", 1))
 		"pistol": return _pistol()
 		"head_f": return _head_f()
 		"torso_f": return _torso_f()
@@ -1067,14 +1076,134 @@ static func _fb(x0: float, y0: float, z0: float, x1: float, y1: float, z1: float
 	return [Vector3(x0, y0, z0), Vector3(x1, y1, z1), colour]
 
 
+## Height (voxels) of a rifle's line of sight: the middle of its optic, or its irons'
+## aperture and front post's top.
+const OPTIC_AXIS_Y := 11.8
+## A rifle with no optic: its back-up irons.
+const IRONS := "irons"
+## Rail top (voxels), where an optic's mount sits.
+const RAIL_Y := 9.95
+
+
+## The sight kind a rifle model names ("rifle:42:dot"), "dot" when it names none.
+static func _rifle_art(model: String) -> String:
+	var parts := model.split(":")
+	return parts[2] if parts.size() > 2 and parts[2] != "" else "dot"
+
+
+## Where (voxels along a rifle of `n`) the back end of sight `art` sits: compact sights over
+## the receiver's front, magnified tubes further back (eye relief), irons' rear aperture at
+## the rail's end.
+static func sight_back(art: String, n: float) -> float:
+	match art:
+		IRONS:
+			return n * 0.715
+		"lpvo", "scope", "scope_fixed", "scope_long":
+			return n * 0.68
+	return n * 0.64
+
+
+## An optic's length (voxels), front to back.
+static func optic_length(art: String) -> float:
+	match art:
+		"holo": return 3.6
+		"lpvo": return 13.0
+		"prism": return 7.0
+		"scope": return 17.0
+		"scope_fixed": return 15.0
+		"scope_long": return 19.0
+	return 4.6  # red dot
+
+
+## The boxes of optic `art` in a rifle's frame, its back end at z = `back` (voxels): on the rail
+## (RAIL_Y), its line of sight at OPTIC_AXIS_Y. Proposed shapes (Captain, P0362): a red dot's
+## open tube, a holographic window (its 3x magnifier flipped down beside the rail), an LPVO's
+## slim tube, a prism's squat body, and DMR scopes with their objective bells and turrets.
+static func optic_boxes(art: String, back: float) -> Array:
+	var front := back - optic_length(art)
+	match art:
+		"holo":
+			return [
+				_fb(0.7, RAIL_Y, front - 0.4, 2.3, 10.6, back, C.GUN),              # base and battery
+				_fb(0.4, 10.6, front, 2.6, 10.8, back, C.GUN),                      # window: floor
+				_fb(0.4, 12.8, front, 2.6, 13.0, back, C.GUN),                      # hood
+				_fb(0.4, 10.8, front, 0.65, 12.8, back, C.GUN),                     # sides
+				_fb(2.35, 10.8, front, 2.6, 12.8, back, C.GUN),
+				_fb(1.0, RAIL_Y, back + 0.4, 2.0, 10.3, back + 1.6, C.GUN_LIGHT),   # the magnifier's mount (it flips aside)
+			]
+		"lpvo", "scope", "scope_fixed", "scope_long":
+			var r := 0.65 if art == "lpvo" else 0.7  # the tube's half-width
+			var bell: float = {"lpvo": 0.9, "scope": 1.05, "scope_fixed": 0.95, "scope_long": 1.2}[art]
+			var bell_len := 2.5 if art == "lpvo" else 4.0
+			var y := OPTIC_AXIS_Y
+			var mid := (front + back) * 0.5
+			return [
+				_fb(1.5 - r, y - r, front, 1.5 + r, y + r, back, C.GUN),                          # tube
+				_fb(1.5 - bell, y - bell, front, 1.5 + bell, minf(y + bell, 13.0), front + bell_len, C.GUN),  # objective bell
+				_fb(0.6, y - 0.9, back - 3.0, 2.4, y + 0.9, back, C.GUN),                          # eyepiece
+				_fb(1.5 - r + 0.1, y - r + 0.1, front - 0.25, 1.5 + r - 0.1, y + r - 0.1, front, C.LENS),
+				_fb(1.1, y + r, mid - 0.6, 1.9, 13.0, mid + 0.6, C.GUN_LIGHT),                   # turrets
+				_fb(1.5 + r, y - 0.4, mid - 0.6, minf(1.5 + r + 0.45, 3.0), y + 0.4, mid + 0.6, C.GUN_LIGHT),
+				_fb(1.05, RAIL_Y, front + bell_len + 0.5, 1.95, y - r, front + bell_len + 1.5, C.GUN),  # rings
+				_fb(1.05, RAIL_Y, back - 4.5, 1.95, y - r, back - 3.5, C.GUN),
+			]
+		"prism":
+			return [
+				_fb(0.9, RAIL_Y, front + 1.0, 2.1, 10.4, back - 1.0, C.GUN),        # mount
+				_fb(0.6, 10.4, front + 1.0, 2.4, 12.75, back, C.GUN),               # body
+				_fb(0.5, 10.5, front, 2.5, 13.0, front + 1.5, C.GUN),               # objective hood
+				_fb(0.75, 10.75, front - 0.25, 2.25, 12.75, front, C.LENS),
+				_fb(1.25, 12.75, front + 2.0, 1.75, 13.0, back - 1.5, C.GUN_LIGHT),  # fibre on top
+			]
+	# Red dot: an open tube you look through when aimed.
+	return [
+		_fb(1.1, RAIL_Y, front, 1.9, 10.6, back - 0.6, C.GUN),                     # mount
+		_fb(0.55, 10.6, front, 2.45, 10.85, back, C.GUN),                          # floor
+		_fb(0.55, 12.75, front, 2.45, 13.0, back, C.GUN),                          # roof
+		_fb(0.55, 10.85, front, 0.75, 12.75, back, C.GUN),                         # sides
+		_fb(2.25, 10.85, front, 2.45, 12.75, back, C.GUN),
+	]
+
+
+## A rifle's back-up irons, up when it has no optic: a rear aperture at the rail's end and a
+## front post on the gas block, the post's top level with the aperture's middle. (Parts are
+## built in 0.5 cm voxels, a quarter of the spec's: nothing thinner than 0.25 survives.)
+static func iron_boxes(n: float) -> Array:
+	var rear := sight_back(IRONS, n)
+	var front := n * 0.13
+	return [
+		_fb(0.9, RAIL_Y, rear - 0.8, 2.1, 10.5, rear + 0.8, C.GUN),                 # rear: base
+		_fb(0.85, 10.5, rear - 0.15, 1.1, 12.45, rear + 0.15, C.GUN),               # a thin ring round a wide
+		_fb(1.9, 10.5, rear - 0.15, 2.15, 12.45, rear + 0.15, C.GUN),               # aperture (a ghost ring)
+		_fb(1.1, 10.5, rear - 0.15, 1.9, 11.4, rear + 0.15, C.GUN),
+		_fb(1.1, 12.2, rear - 0.15, 1.9, 12.45, rear + 0.15, C.GUN),
+		_fb(1.375, 9.9, front, 1.625, OPTIC_AXIS_Y, front + 0.5, C.GUN),           # front post (one 0.5 cm voxel)
+		_fb(0.95, 9.9, front, 1.15, 12.0, front + 0.5, C.GUN),                      # and its ears
+		_fb(1.85, 9.9, front, 2.05, 12.0, front + 0.5, C.GUN),
+	]
+
+
+## An optic on its own (lying loose, in the inventory): the same boxes as on a rifle, its
+## mount's foot at y = 0 and its front at z = 0.
+static func _optic_model(art: String) -> Dictionary:
+	var length := optic_length(art)
+	var tail := 2.0 if art == "holo" else 0.0  # the magnifier's mount behind
+	var boxes := []
+	for b: Array in optic_boxes(art, length + 0.5):
+		boxes.append([b[0] - Vector3(0, RAIL_Y, 0), b[1] - Vector3(0, RAIL_Y, 0), b[2]])
+	return {"size": Vector3i(3, 4, ceili(length + 1.0 + tail)), "sub": 4, "boxes": boxes}
+
+
 ## Rifle of `length` voxels, muzzle at z = 0, in a 2 cm frame built at 0.5 cm: muzzle
-## device, barrel, railed handguard, upper and lower receiver, optic, curved magazine,
-## angled pistol grip, buffer tube and stock. hand_points and sight_point read this frame
-## (pistol grip at 0.68, handguard underside at 0.38, the optic's back at 0.62).
-static func _rifle(length: int) -> Dictionary:
+## device, barrel, railed handguard, upper and lower receiver, curved magazine, angled pistol
+## grip, buffer tube and stock, and its sight `art` (optic_boxes; IRONS: iron_boxes).
+## hand_points and sight_point read this frame (pistol grip at 0.68, handguard underside at
+## 0.38, the sight's back: sight_back).
+static func _rifle(length: int, art := "dot") -> Dictionary:
 	var n := maxi(length, 20)
 	var f := func(t: float) -> float: return n * t
-	return {"size": Vector3i(3, 13, n), "sub": 4, "boxes": [
+	var sight := iron_boxes(n) if art == IRONS else optic_boxes(art, sight_back(art, n))
+	return {"size": Vector3i(3, 13, n), "sub": 4, "boxes": sight + [
 		_fb(1.25, 8.25, 0, 1.75, 8.75, f.call(0.3), C.GUN),                     # barrel
 		_fb(1.05, 7.95, 0, 1.95, 9.05, 1.5, C.GUN),                             # muzzle device
 		_fb(1.2, 8.75, f.call(0.13), 1.8, 9.9, f.call(0.15), C.GUN),            # gas block
@@ -1084,9 +1213,6 @@ static func _rifle(length: int) -> Dictionary:
 		_fb(2.15, 7.0, f.call(0.15), 2.4, 9.6, f.call(0.45), C.GUN),
 		_fb(0.7, 7.0, f.call(0.45), 2.3, 9.6, f.call(0.74), C.GUN),             # upper receiver
 		_fb(0.75, 5.6, f.call(0.47), 2.25, 7.0, f.call(0.72), C.GUN),           # lower receiver
-		_fb(1.1, 9.95, f.call(0.53), 1.9, 10.6, f.call(0.61), C.GUN),           # optic mount
-		_fb(0.85, 10.6, f.call(0.5), 2.15, 13.0, f.call(0.64), C.GUN),          # optic
-		_fb(1.05, 10.9, f.call(0.5) - 0.01, 1.95, 12.7, f.call(0.5) + 0.3, C.LENS),
 		_fb(0.9, 4.2, f.call(0.5), 2.1, 5.6, f.call(0.575), C.GUN_LIGHT),       # magazine, curving forward
 		_fb(0.9, 2.8, f.call(0.49), 2.1, 4.2, f.call(0.565), C.GUN_LIGHT),
 		_fb(0.9, 1.4, f.call(0.475), 2.1, 2.8, f.call(0.55), C.GUN_LIGHT),
@@ -1103,12 +1229,14 @@ static func _rifle(length: int) -> Dictionary:
 
 
 ## 0.04 x 0.14 x 0.20 m, muzzle at z = 0, built at 0.5 cm: slide, frame, raked grip,
-## trigger guard. hand_points: grip at (1, 2.5, 7.5); sight_point: rear sight (1, 7, 9).
+## trigger guard, a front post and a notched rear sight (Captain, P0362: readable irons).
+## hand_points: grip at (1, 2.5, 7.5); sight_point: the rear notch's top (1, 7.0, 9.4).
 static func _pistol() -> Dictionary:
 	return {"size": Vector3i(2, 7, 10), "sub": 4, "boxes": [
 		_fb(0.15, 4.6, 0, 1.85, 6.8, 10, C.GUN),             # slide
-		_fb(0.4, 6.8, 0.3, 1.6, 7.0, 0.8, C.GUN),            # front sight
-		_fb(0.3, 6.8, 8.8, 1.7, 7.0, 9.4, C.GUN),            # rear sight
+		_fb(0.85, 6.8, 0.3, 1.15, 7.0, 0.8, C.GUN),         # front post
+		_fb(0.3, 6.8, 8.8, 0.75, 7.0, 9.4, C.GUN),          # rear sight, either side of the notch
+		_fb(1.25, 6.8, 8.8, 1.7, 7.0, 9.4, C.GUN),
 		_fb(0.2, 3.6, 0.6, 1.8, 4.6, 9.2, C.GUN_LIGHT),      # frame
 		_fb(0.2, 2.4, 6.0, 1.8, 3.6, 9.2, C.GUN_LIGHT),      # grip, raked back
 		_fb(0.2, 1.2, 6.4, 1.8, 2.4, 9.5, C.GUN_LIGHT),
