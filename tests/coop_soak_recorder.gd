@@ -355,6 +355,11 @@ func _write_replay_frame(t: float, _delta: float) -> void:
 		_items_left = 1.0
 		frame["i"] = _items()
 		frame["v"] = _vehicles()
+		var objs: Array = []
+		for o: Dictionary in Contracts.objectives.list:
+			objs.append([String(o.get("text", o.get("oid", ""))), String(o.get("state", ""))])
+		frame["o"] = objs
+		_replay_file.flush()  # once a second: the live viewer (tools/coop_watch.sh) reads along
 		var extraction := MapNodes.extraction(lvl) if lvl else null
 		if extraction:
 			var points: Array = []

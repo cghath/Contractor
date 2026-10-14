@@ -11,6 +11,10 @@ extends Node
 ##   <godot> --path . --gpu-index 0 --resolution 1280x720 --fixed-fps 30 --write-movie out.avi \
 ##       res://tests/coop_replay.tscn -- --replay <run>/host/replay.jsonl [--compare <run>/client1/replay.jsonl] \
 ##       [--cut highlights|full] [--speed 4] [--from S --to S]
+## --live: watch a soak while it runs (tools/coop_watch.sh): follows the end of the replay files
+## as the host writes them, LIVE_DELAY_S behind. Nothing joins the session: the viewer reads the
+## host's recording, so it is no player, has no body and can't be shot. Keys: Tab next player,
+## 1-4 a player, O swaps the follow view and the overhead map, mouse wheel zoom, right-drag orbit.
 ## --cut highlights (default): first contact, a player going down and being treated back up,
 ## the reconnect, and the extraction, from the first two contracts; --cut full: the whole run at
 ## --speed (4 by default). Without --write-movie it plays in a window. Quits at the end.
@@ -49,6 +53,62 @@ var _start_t := 0.0
 ## Draw soldiers with the game's own body (soldier.tscn, nothing simulated: placed each frame,
 ## posed from the replay) instead of capsules (--capsules).
 var models := true
+var live := false
+const LIVE_DELAY_S := 1.0
+var _live_paths: Array[String] = []   # [host replay, compare replay or ""]
+var _live_pos: Array[int] = [0, 0]
+var _live_poll := 0.0
+var _orbit_yaw := 0.0
+var _orbit_pitch := 0.45
+var _orbit_dist := 7.0
+var _dragging := false
+var _swapped := false
+var _objectives: Array = []  # [[text, state]] from the latest frame that had them
+var _box: SubViewportContainer
+var _user_orbit := false
+var _held := false  # live: the viewer picked a player (Tab, 1-4): no automatic switching
+
+
+static func Recorder_now() -> float:
+	return Time.get_unix_time_from_system()
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if not live:
+		return
+	if event is InputEventKey and event.pressed and (event as InputEventKey).keycode == KEY_ESCAPE:
+		get_tree().quit(0)
+		return
+	var players: Array[String] = []
+	for key: String in puppets:
+		if key.begins_with("Players/"):
+			players.append(key)
+	players.sort_custom(func(a: String, b: String) -> bool: return _name_of(a) < _name_of(b))
+	if event is InputEventKey and event.pressed and not event.echo:
+		var k := (event as InputEventKey).keycode
+		if k == KEY_TAB and not players.is_empty():
+			_cam_target = players[(players.find(_cam_target) + 1) % players.size()]
+			_held = true
+		elif k >= KEY_1 and k <= KEY_4 and k - KEY_1 < players.size():
+			_cam_target = players[k - KEY_1]
+			_held = true
+		elif k == KEY_O:
+			_swapped = not _swapped
+			_box.offset_left = -1270.0 if _swapped else -330.0
+			_box.offset_bottom = 640.0 if _swapped else 250.0
+		elif k == KEY_A:
+			_held = false  # back to automatic
+	elif event is InputEventMouseButton and event.pressed:
+		var b := (event as InputEventMouseButton).button_index
+		if b == MOUSE_BUTTON_WHEEL_UP or b == MOUSE_BUTTON_WHEEL_DOWN:
+			_orbit_dist = clampf(_orbit_dist * (0.9 if b == MOUSE_BUTTON_WHEEL_UP else 1.1), 2.0, 80.0)
+			_user_orbit = true
+	if event is InputEventMouseButton and (event as InputEventMouseButton).button_index == MOUSE_BUTTON_RIGHT:
+		_dragging = event.pressed
+	elif event is InputEventMouseMotion and _dragging:
+		_orbit_yaw -= (event as InputEventMouseMotion).relative.x * 0.008
+		_orbit_pitch = clampf(_orbit_pitch + (event as InputEventMouseMotion).relative.y * 0.006, -0.2, 1.4)
+		_user_orbit = true
 ## "Players/<peer id>" -> the bot's name ("Host (bot 0)", "Bot 2"), from each client's own replay
 ## ("joined" events carry its peer id; a rejoin gets a new one).
 var names := {"Players/1": "Host (bot 0)"}
@@ -67,10 +127,19 @@ func _ready() -> void:
 	CompoundLevel.spawn_ai = false
 	Ragdoll.enabled = false  # a puppet lies down posed, not as physics
 	models = not args.has("--capsules")
-	frames = _load(path)
-	_load_names(path.get_base_dir().get_base_dir())
+	live = args.has("--live")
 	var cpath := _arg(args, "--compare", "")
-	if cpath != "" and FileAccess.file_exists(cpath):
+	if live:
+		_live_paths = [path, cpath if cpath != "" and FileAccess.file_exists(cpath) else ""]
+		var deadline := Time.get_ticks_msec() + 30000
+		while frames.is_empty() and Time.get_ticks_msec() < deadline:
+			_live_read()
+			if frames.is_empty():
+				OS.delay_msec(500)
+	else:
+		frames = _load(path)
+	_load_names(path.get_base_dir().get_base_dir())
+	if not live and cpath != "" and FileAccess.file_exists(cpath):
 		compare = _load(cpath)
 		for f: Dictionary in compare:
 			compare_t.append(float(f.t))
@@ -79,14 +148,17 @@ func _ready() -> void:
 		get_tree().quit(2)
 		return
 	_start_t = float(frames[0].t)
-	var last := -1
-	for i in frames.size():
-		if frames[i].has("info"):
-			last = i
-		info_at.append(last)
+	if not live:
+		var last := -1
+		for i in frames.size():
+			if frames[i].has("info"):
+				last = i
+			info_at.append(last)
 	var cut := _arg(args, "--cut", "highlights")
 	_speed = float(_arg(args, "--speed", "4" if cut == "full" else "1"))
-	if args.has("--from"):
+	if live:
+		segments = [{"from": float(frames[-1].t) - LIVE_DELAY_S, "to": INF, "speed": 1.0, "title": "LIVE", "focus": ""}]
+	elif args.has("--from"):
 		segments = [{"from": _start_t + float(_arg(args, "--from", "0")), "to": _start_t + float(_arg(args, "--to", "99999")),
 			"speed": _speed, "title": "", "focus": ""}]
 	elif cut == "full":
@@ -96,6 +168,8 @@ func _ready() -> void:
 	print("[replay] %d frames (%.0f s), %d segments: %s" % [frames.size(), float(frames[-1].t) - _start_t, segments.size(),
 		JSON.stringify(segments.map(func(s: Dictionary) -> String: return "%s %.0f-%.0f x%.1f" % [s.title, s.from - _start_t, s.to - _start_t, s.speed]))])
 	_build_view()
+	if live and get_window().size.x >= 2000:
+		get_window().content_scale_factor = 2.0  # a big screen: the labels and map at a readable size
 	_begin_segment(0)
 
 
@@ -116,6 +190,36 @@ func _load_names(run_dir: String) -> void:
 				for e: Array in d.get("e", []):
 					if e.size() > 1 and String(e[0]) == "joined":
 						names["Players/%d" % int(e[1])] = "Bot %d" % n
+
+
+## Live: reads what the host (and the compared client) wrote since the last read; a line still
+## being written is left for the next read.
+func _live_read() -> void:
+	for n in 2:
+		var path := _live_paths[n]
+		if path == "":
+			continue
+		var f := FileAccess.open(path, FileAccess.READ)
+		if f == null or f.get_length() <= _live_pos[n]:
+			continue
+		f.seek(_live_pos[n])
+		while true:
+			var at := f.get_position()
+			if at >= f.get_length():
+				break
+			var line := f.get_line()
+			var d: Variant = JSON.parse_string(line) if not line.is_empty() else null
+			if not line.is_empty() and d == null and f.get_position() >= f.get_length():
+				f.seek(at)  # half written
+				break
+			_live_pos[n] = f.get_position()
+			if d is Dictionary and d.has("t"):
+				if n == 0:
+					frames.append(d)
+					info_at.append(frames.size() - 1 if d.has("info") else (info_at[-1] if not info_at.is_empty() else -1))
+				else:
+					compare.append(d)
+					compare_t.append(float(d.t))
 
 
 static func _load(path: String) -> Array:
@@ -267,6 +371,7 @@ func _build_view() -> void:
 	box.offset_right = -10.0
 	box.offset_top = 10.0
 	box.offset_bottom = 250.0
+	_box = box
 	ui.add_child(box)
 	var sub := SubViewport.new()
 	sub.size = Vector2i(320, 240)
@@ -358,13 +463,24 @@ func _process(delta: float) -> void:
 	if _seg >= segments.size() or frames.is_empty():
 		return
 	var s: Dictionary = segments[_seg]
+	if live:
+		_live_poll -= delta
+		if _live_poll <= 0.0:
+			_live_poll = 0.5
+			_live_read()
 	if _hold > 0:
 		_hold -= 1
 		title.modulate.a = 1.0
 	else:
 		title.modulate.a = maxf(title.modulate.a - delta * 0.5, 0.0)
 		_t += delta * float(s.speed)
-	if _t >= float(s.to) or _i >= frames.size() - 1:
+	if live:
+		var newest := float(frames[-1].t) - LIVE_DELAY_S
+		if _t > newest:
+			_t = newest  # caught up: wait for the host
+		elif _t < newest - 5.0:
+			_t = newest  # fell behind (the window was busy): jump ahead
+	elif _t >= float(s.to) or _i >= frames.size() - 1:
 		_begin_segment(_seg + 1)
 		return
 	while _i < frames.size() - 1 and float(frames[_i + 1].t) <= _t:
@@ -431,6 +547,8 @@ func _clock(t: float) -> String:
 
 func _draw_frame(delta: float) -> void:
 	var a: Dictionary = frames[_i]
+	if a.has("o"):
+		_objectives = a.o
 	var b: Dictionary = frames[mini(_i + 1, frames.size() - 1)]
 	var span := maxf(float(b.t) - float(a.t), 0.001)
 	var w := clampf((_t - float(a.t)) / span, 0.0, 1.0)
@@ -506,6 +624,14 @@ func _draw_frame(delta: float) -> void:
 	var s: Dictionary = segments[_seg]
 	hud.text = "Co-op soak replay   %s   %s   x%.1f\nphase %s   level %s   soldiers %d%s" % [_clock(_t), String(s.title), float(s.speed),
 		_phase_at(_i), String(a.get("L", "")), a.get("s", []).size(), ("   client disagrees on %d" % flagged) if not client.is_empty() else ""]
+	var active: Array = _objectives.filter(func(o: Array) -> bool: return String(o[1]) == "active")
+	if not active.is_empty():
+		hud.text += "
+objective: " + "; ".join(active.map(func(o: Array) -> String: return String(o[0])))
+	if live:
+		hud.text += "
+LIVE, %.0f s behind the host   following %s   Tab/1-4 player, A auto, O map, wheel/right-drag camera, Esc quit" % [
+			Recorder_now() - _t, _name_of(_cam_target)]
 
 
 func _phase_at(i: int) -> String:
@@ -697,7 +823,7 @@ func _update_cameras(delta: float, players: Array[String]) -> void:
 	var s: Dictionary = segments[_seg]
 	if String(s.get("focus", "")) != "" and puppets.has(String(s.focus)):
 		_cam_target = String(s.focus)
-	elif _cam_left <= 0.0 or not puppets.has(_cam_target):
+	elif (_cam_left <= 0.0 and not _held) or not puppets.has(_cam_target):
 		_cam_left = CAM_TURN_S
 		if not players.is_empty():
 			var at := players.find(_cam_target)
@@ -717,6 +843,9 @@ func _update_cameras(delta: float, players: Array[String]) -> void:
 		back.y = 0.0
 		back = back.normalized() if back.length() > 0.01 else Vector3.BACK
 		var want := target.global_position + back * 6.0 + Vector3.UP * 3.2
+		if _user_orbit:  # live, after a right-drag or the wheel: the viewer's own orbit
+			want = target.global_position + Vector3.UP * 1.4 + Vector3(sin(_orbit_yaw) * cos(_orbit_pitch), sin(_orbit_pitch),
+				cos(_orbit_yaw) * cos(_orbit_pitch)) * _orbit_dist
 		cam.global_position = cam.global_position.lerp(want, minf(delta * 3.0, 1.0)) if cam.global_position.distance_to(want) < 30.0 else want
 		cam.look_at(target.global_position + Vector3.UP * 1.4, Vector3.UP)
 		centre = target.global_position
