@@ -1162,7 +1162,8 @@ func _test_downed_player() -> void:
 	_place(player, Vector3(-6, 0.1, 6))
 	await _seconds(3.0)
 	# He respawned in his own kit (Captain, 2026-10-14), IFAK included, and a carer uses the
-	# casualty's own IFAK first: count his tourniquets with the squad's.
+	# casualty's own IFAK first: count his tourniquets with the squad's (and the check is the
+	# tourniquet on his thigh: squadmates may pick one up off a body meanwhile).
 	var tourniquets: int = (_squad() + [player]).reduce(func(n: int, s: Soldier) -> int: return n + s.inventory.medical_count(&"tourniquet"), 0)
 	_shoot_femoral(player, 11)
 	var sim := 0.0
@@ -1173,9 +1174,9 @@ func _test_downed_player() -> void:
 	var stopped := await _wait_until(func() -> bool: return not _bleeding(player, "arterial"), 30.0)
 	var used: int = tourniquets - (_squad() + [player]).reduce(func(n: int, s: Soldier) -> int: return n + s.inventory.medical_count(&"tourniquet"), 0)
 	var carer: Soldier = player.care_by if is_instance_valid(player.care_by) else null
-	check(stopped and used >= 1 and carer != null and carer.is_ai(),
-		"squadmates treat a downed player like anyone else (%s, by %s; stopped %s, %d tourniquets used; %s %.1f m off, %s)" % [_wound_kinds(player),
-		_name(carer) if carer else "nobody", stopped, used, carer.ai_status if carer else "-",
+	check(stopped and player.vitals.tourniquets().has(Vitals.THIGH_R) and carer != null and carer.is_ai(),
+		"squadmates treat a downed player like anyone else (%s, by %s; stopped %s, %d tourniquets used, on %s; %s %.1f m off, %s)" % [_wound_kinds(player),
+		_name(carer) if carer else "nobody", stopped, used, player.vitals.tourniquets(), carer.ai_status if carer else "-",
 		_flat(carer.global_position, player.body_point()) if carer else -1.0, player.vitals.condition_text()])
 	player.vitals.server_reset_health()
 
