@@ -420,16 +420,22 @@ static func loadout_of(person: Dictionary) -> Dictionary:
 
 
 ## Writes down `person`'s kit (an Inventory.net_state) as their last loadout; an empty kit
-## leaves the last one as it was.
+## leaves the last one as it was. What their last restock couldn't give them and they still
+## haven't got stays in it, and stays noted (Restock.keep_short; review of S0743: deploying
+## short wrote the short kit down, so the next restock said "Nothing missing" and never
+## refilled it).
 static func record_loadout(person: Dictionary, gear: Dictionary) -> void:
 	var loadout := Restock.template_of(gear)
-	if not Restock.is_blank(loadout):
-		person["loadout"] = loadout
+	if Restock.is_blank(loadout):
+		return
+	var kept := Restock.keep_short(loadout, loadout_of(person), restock_short_of(person))
+	person["loadout"] = kept.loadout
+	record_restock_short(person, kept.short)
 
 
 ## What `person`'s last restock couldn't give them ({item id: units}; empty: nothing short).
 ## Restock left the medic short silently (S0743): it's kept on the roster entry and shown on
-## the squad page until a restock fills them or they deploy (BaseHub._record_loadouts).
+## the squad page until a restock fills them; deploying without it keeps it (record_loadout).
 static func restock_short_of(person: Dictionary) -> Dictionary:
 	return person.get("restock_short", {})
 

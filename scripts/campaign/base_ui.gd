@@ -192,7 +192,8 @@ func _build_squad(rows: VBoxContainer, v: Dictionary) -> void:
 
 
 ## S0743 (restock left the medic short silently): what someone's last restock couldn't give
-## them (Roster.restock_short_of), under their row until a restock fills them or they deploy.
+## them (Roster.restock_short_of), under their row until a restock fills them (deploying
+## without it keeps it: Roster.record_loadout).
 func _add_short_line(rows: VBoxContainer, who: String, person: Dictionary) -> void:
 	var short := Roster.restock_short_of(person)
 	if short.is_empty():
