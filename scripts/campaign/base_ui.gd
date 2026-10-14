@@ -170,6 +170,7 @@ func _build_squad(rows: VBoxContainer, v: Dictionary) -> void:
 		row.add_child(_role_picker(mid, StringName(m.role)))
 		row.add_child(_text(_skills_text(m)))
 		rows.add_child(row)
+		_add_short_line(rows, String(m.callsign), m)
 	rows.add_child(_heading("Players"))
 	var players: Dictionary = roster.get("players", {})
 	for peer: String in v.get("players", {}):
@@ -177,6 +178,7 @@ func _build_squad(rows: VBoxContainer, v: Dictionary) -> void:
 		var main: Dictionary = players.get(key, {})
 		var days := int(main.get("sit_out_days", 0))
 		rows.add_child(_text("%s: %s" % [key, "recovering %d days: plays a squadmate next time" % days if days > 0 else "ready"]))
+		_add_short_line(rows, key, main)
 	var buttons := HBoxContainer.new()
 	var deploy := _button("Deploy", func() -> void: BaseHub.request("deploy"))
 	deploy.name = "Deploy"
@@ -187,6 +189,18 @@ func _build_squad(rows: VBoxContainer, v: Dictionary) -> void:
 	buttons.add_child(_button("Save campaign", func() -> void: BaseHub.request("save")))
 	rows.add_child(buttons)
 	_add_restock_row(rows)
+
+
+## S0743 (restock left the medic short silently): what someone's last restock couldn't give
+## them (Roster.restock_short_of), under their row until a restock fills them or they deploy.
+func _add_short_line(rows: VBoxContainer, who: String, person: Dictionary) -> void:
+	var short := Roster.restock_short_of(person)
+	if short.is_empty():
+		return
+	var line := _text("      %s is short after restock: %s" % [who, Restock.list_text(short)])
+	line.name = "Short_" + who.validate_node_name()
+	line.modulate = Color(1.0, 0.75, 0.4)
+	rows.add_child(line)
 
 
 ## Playtest S2: kitting up from the stash in one go, the kit each deployed in last time

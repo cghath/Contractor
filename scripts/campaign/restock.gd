@@ -116,8 +116,10 @@ static func _add_count(out: Dictionary, id: String, n: int) -> void:
 ## Returns {"gear": an Inventory.net_state (JSON-safe), "missing": {item id: count} the pool
 ## didn't have, "no_room": {item id: count} drawn but with nowhere to go (back in the pool),
 ## "wanted": units the loadout names, "placed": units now on the body}.
-static func build(loadout: Dictionary, pool: Array) -> Dictionary:
-	var res := {"missing": {}, "no_room": {}, "wanted": 0, "placed": 0}
+## `caps` ({item id: units}, fair_caps): at most that many of an id are drawn, the rest is left
+## in the pool for the squadmates restocked with this one (counted missing here).
+static func build(loadout: Dictionary, pool: Array, caps := {}) -> Dictionary:
+	var res := {"missing": {}, "no_room": {}, "wanted": 0, "placed": 0, "caps": caps.duplicate()}
 	var inv := Inventory.new()
 	var slots: Dictionary = loadout.get("slots", {})
 	var optics: Dictionary = loadout.get("optics", {})
@@ -130,7 +132,7 @@ static func build(loadout: Dictionary, pool: Array) -> Dictionary:
 			continue
 		res.wanted += 1
 		var want_optic: Variant = String(optics[String(slot)]) if optics.has(String(slot)) else null
-		var entry := draw(pool, id, 1, want_optic, slot == &"vest" or slot == &"backpack")
+		var entry := _draw_capped(res, pool, id, 1, want_optic, slot == &"vest" or slot == &"backpack")
 		if entry.is_empty():
 			_add_count(res.missing, id, 1)
 			if want_optic != null and String(want_optic) != "":
@@ -159,7 +161,7 @@ static func build(loadout: Dictionary, pool: Array) -> Dictionary:
 		if item == null:
 			continue
 		res.wanted += 1
-		var entry := draw(pool, id, 1)
+		var entry := _draw_capped(res, pool, id, 1)
 		if entry.is_empty():
 			_add_count(res.missing, id, 1)
 			continue
@@ -189,7 +191,62 @@ static func build(loadout: Dictionary, pool: Array) -> Dictionary:
 	var gear: Dictionary = Roster.json_safe(inv.net_state.duplicate(true))
 	inv.free()
 	res["gear"] = gear
+	res.erase("caps")
 	return res
+
+
+## draw() within what `res.caps` still allows of `id` (no cap: as many as asked).
+static func _draw_capped(res: Dictionary, pool: Array, id: String, count: int, want_optic: Variant = null, carrier := false) -> Dictionary:
+	var caps: Dictionary = res.get("caps", {})
+	var n := mini(count, int(caps[id])) if caps.has(id) else count
+	var entry := draw(pool, id, n, want_optic, carrier)
+	if caps.has(id) and not entry.is_empty():
+		caps[id] = int(caps[id]) - int(entry.count)
+	return entry
+
+
+## Medic restock left short (S0736, S0743): restocked one after the other, the first squadmates
+## took the IVs, saline and epinephrine the last (often the medic) needed. Where `pool` can't
+## fill every loadout of `loadouts` (in the order given: the caller puts medics first), an id's
+## units are dealt out one at a time round the squad (everyone's first before anyone's second),
+## so the shortfall is shared. Returns one {item id: units} cap per loadout (only the scarce
+## ids; for build). What's on and in the pool's carriers and pouches, and the optics on its
+## guns, count as there.
+static func fair_caps(loadouts: Array, pool: Array) -> Array[Dictionary]:
+	var wants: Array[Dictionary] = []
+	var total := {}
+	for loadout: Dictionary in loadouts:
+		var c := counts(loadout)
+		wants.append(c)
+		for id: String in c:
+			total[id] = int(total.get(id, 0)) + int(c[id])
+	var have := BaseArmory.counts(pool)
+	var inside := BaseArmory.contents_counts(pool)
+	for id: String in inside:
+		have[id] = int(have.get(id, 0)) + int(inside[id])
+	for entry: Dictionary in pool:
+		var item := ItemDB.get_item(StringName(String(entry.id)))
+		if item and Optics.has_rail(item):
+			_add_count(have, String(Optics.mounted_id(item, entry.get("state", {}))), int(entry.count))
+	var out: Array[Dictionary] = []
+	for i in loadouts.size():
+		out.append({})
+	for id: String in total:
+		var left := int(have.get(id, 0))
+		if int(total[id]) <= left:
+			continue
+		for i in loadouts.size():
+			if wants[i].has(id):
+				out[i][id] = 0
+		var dealt := true
+		while left > 0 and dealt:
+			dealt = false
+			for i in loadouts.size():
+				if left > 0 and int(out[i].get(id, -1)) >= 0 and int(out[i][id]) < int(wants[i].get(id, 0)):
+					out[i][id] = int(out[i][id]) + 1
+					left -= 1
+					dealt = true
+	return out
 
 
 ## Draws `it` ({"id", "count", "optic"?}) from the pool into `into` (in order), then anywhere it
@@ -204,7 +261,7 @@ static func _fill(inv: Inventory, pool: Array, it: Dictionary, into: Array[Strin
 	var left := want
 	var want_optic: Variant = String(it.optic) if it.has("optic") else null
 	while left > 0:
-		var entry := draw(pool, id, left, want_optic)
+		var entry := _draw_capped(res, pool, id, left, want_optic)
 		if entry.is_empty():
 			_add_count(res.missing, id, left)
 			return
@@ -244,7 +301,7 @@ static func _fit_optic(item: ItemData, state: Dictionary, want: String, pool: Ar
 			res.placed += 1
 		return state
 	if want != "":
-		var optic := draw(pool, want, 1)
+		var optic := _draw_capped(res, pool, want, 1)
 		if optic.is_empty():
 			_add_count(res.missing, want, 1)
 			return state
@@ -338,16 +395,28 @@ static func score(item: ItemData, state: Dictionary, want_optic: Variant = null,
 ## "Restocked Hawk: 31 of 35. Missing: 5.56 Mag x3, Holo Sight. No room: ..." for the player.
 static func report_text(who: String, res: Dictionary) -> String:
 	var text := "Restocked %s: %d of %d" % [who, int(res.get("placed", 0)), int(res.get("wanted", 0))]
-	var missing := _list_text(res.get("missing", {}))
+	var missing := list_text(res.get("missing", {}))
 	if missing != "":
 		text += ". Missing from the stash: " + missing
-	var no_room := _list_text(res.get("no_room", {}))
+	var no_room := list_text(res.get("no_room", {}))
 	if no_room != "":
 		text += ". No room for: " + no_room
 	return text + ("" if missing != "" or no_room != "" else ". Nothing missing")
 
 
-static func _list_text(counts_by_id: Dictionary) -> String:
+## What a member ended up without after a restock ({item id: units}): missing from the stash
+## (or left for a squadmate) and drawn but with no room on them (Roster "restock_short").
+static func short_of(res: Dictionary) -> Dictionary:
+	var out := {}
+	for key: String in ["missing", "no_room"]:
+		var by_id: Dictionary = res.get(key, {})
+		for id: Variant in by_id:
+			_add_count(out, String(id), int(by_id[id]))
+	return out
+
+
+## "5.56 Mag x3, Holo Sight" ({item id: count}, by id).
+static func list_text(counts_by_id: Dictionary) -> String:
 	var ids := counts_by_id.keys().filter(func(id: Variant) -> bool: return int(counts_by_id[id]) > 0)
 	ids.sort()
 	var parts := PackedStringArray()

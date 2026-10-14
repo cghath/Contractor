@@ -1335,6 +1335,7 @@ func _record_loadouts(dep: Dictionary) -> void:
 		var m := member(String(mid))
 		if not m.is_empty():
 			Roster.record_loadout(m, m.get("gear", {}))
+			Roster.record_restock_short(m, {})  # they deploy with what they have: the squad page's "short" line goes
 	var keys: Array[String] = [player_key(1)]
 	for peer: int in _gear_applied:
 		if not player_key(peer) in keys:
@@ -1343,10 +1344,13 @@ func _record_loadouts(dep: Dictionary) -> void:
 		if Roster.players(roster()).has(key) and not Roster.main_recovering(roster(), key):
 			var main := Roster.main_character(roster(), key)
 			Roster.record_loadout(main, main.get("gear", {}))
+			Roster.record_restock_short(main, {})
 
 
 ## Host: rebuilds player `peer`'s last loadout on their body from the stash. Returns what it
-## did (Restock.report_text), or why not; the player sees it too.
+## did (Restock.report_text), or why not; the player sees it too. What it couldn't give them
+## stays on their roster entry for the squad page, and the host hears of it (S0743: a client
+## medic came back short and only he was told).
 func server_restock_player(peer: int) -> String:
 	var lvl := level() as BaseLevel
 	if lvl == null or not campaign_running or RosterDeployment.is_running(roster()):
@@ -1358,67 +1362,105 @@ func server_restock_player(peer: int) -> String:
 	var loadout := Roster.loadout_of(main)
 	if Restock.is_blank(loadout):
 		return "No loadout yet: the kit you deploy in is written down for next time"
-	var text := _restock_body(lvl, s, loadout, "your loadout")
+	var res: Dictionary = _restock_bodies(lvl, [{"soldier": s, "loadout": loadout, "who": "your loadout"}])[0]
 	main["gear"] = Roster.json_safe(s.inventory.net_state.duplicate(true))
+	var short := Restock.short_of(res)
+	Roster.record_restock_short(main, short)
 	_changed(&"roster")
-	s._client_message.rpc_id(peer, text)
-	return text
+	s._client_message.rpc_id(peer, String(res.text))
+	if peer != 1 and not short.is_empty():
+		note.emit("Restock: %s is short of %s" % [player_key(peer), Restock.list_text(short)])  # the host's status line
+	return String(res.text)
 
 
 ## Host: rebuilds member `mid`'s last loadout on them at the muster line. "" if they have none
 ## or aren't standing there; else what it did.
 func server_restock_member(mid: String) -> String:
-	var lvl := level() as BaseLevel
-	var s: Soldier = lvl.muster_soldier(mid) if lvl and campaign_running and not RosterDeployment.is_running(roster()) else null
-	var m := member(mid)
-	if s == null or m.is_empty() or Restock.is_blank(Roster.loadout_of(m)):
-		return ""
-	var text := _restock_body(lvl, s, Roster.loadout_of(m), String(m.callsign))
-	server_store_member_gear(mid, s.inventory.net_state)
-	_changed(&"roster")
-	return text
+	var lines := _restock_members([mid])
+	return lines[0] if not lines.is_empty() else ""
 
 
 ## Host (the squad leader's "Restock squad"): every AI squadmate picked for the next deployment
-## (everyone at the muster line when nobody is picked yet), one after the other, from the
-## stash. Returns one line each.
+## (everyone at the muster line when nobody is picked yet), together from one pool: everyone's
+## kit goes in first, and what the stash is short of is shared out fairly, medics first
+## (Restock.fair_caps; S0743: restocked one after the other, the medic came out short). Returns
+## one line each.
 func server_restock_squad() -> String:
 	if not in_base() or RosterDeployment.is_running(roster()):
 		return "Only at the base"
 	var picked: Array = _prep().get("squad", [])
 	var mids: Array = picked if not picked.is_empty() else Array(muster_ids())
-	var lines := PackedStringArray()
 	var none := PackedStringArray()
+	var here: Array[String] = []
 	var lvl := level() as BaseLevel
 	for mid: Variant in mids:
 		if lvl.muster_soldier(String(mid)) == null:
 			continue  # not here: missing, dead, recovering
-		var text := server_restock_member(String(mid))
-		if text != "":
-			lines.append(text)
-		else:
+		if Restock.is_blank(Roster.loadout_of(member(String(mid)))):
 			none.append(String(member(String(mid)).callsign))
+		else:
+			here.append(String(mid))
+	var lines := _restock_members(here)
 	if not none.is_empty():
 		lines.append("No loadout yet for %s (written down when they deploy)" % ", ".join(none))
 	return "\n".join(lines) if not lines.is_empty() else "Nobody to restock"
 
 
-## Host: `s`'s kit becomes `loadout` drawn from the hub's stash (what they wear now goes into
-## the pool first); the armory's world items follow. Returns Restock.report_text.
-func _restock_body(lvl: BaseLevel, s: Soldier, loadout: Dictionary, who: String) -> String:
+## Host: restocks members `mids` (at the muster line, with a loadout; others are skipped) from
+## one pool, medics first; each one's gear and what they're short of go on the roster. Returns
+## one line each (Restock.report_text).
+func _restock_members(mids: Array[String]) -> PackedStringArray:
+	var lines := PackedStringArray()
+	var lvl := level() as BaseLevel
+	if lvl == null or not campaign_running or RosterDeployment.is_running(roster()):
+		return lines
+	var people: Array = []
+	for mid in mids:
+		var m := member(mid)
+		var s: Soldier = lvl.muster_soldier(mid)
+		if s != null and not m.is_empty() and not Restock.is_blank(Roster.loadout_of(m)):
+			people.append({"mid": mid, "soldier": s, "loadout": Roster.loadout_of(m), "who": String(m.callsign),
+				"medic": StringName(m.get("role", "")) == Roles.MEDIC})
+	if people.is_empty():
+		return lines
+	# Medics first, the rest in the order asked (fair_caps deals each round starting with them).
+	people = people.filter(func(p: Dictionary) -> bool: return p.medic) + people.filter(func(p: Dictionary) -> bool: return not p.medic)
+	var results := _restock_bodies(lvl, people)
+	for i in people.size():
+		var mid := String(people[i].mid)
+		server_store_member_gear(mid, (people[i].soldier as Soldier).inventory.net_state)
+		Roster.record_restock_short(member(mid), Restock.short_of(results[i]))
+		lines.append(String(results[i].text))
+	_changed(&"roster")
+	return lines
+
+
+## Host: each of `people` ({"soldier", "loadout", "who"}) gets their kit rebuilt from the hub's
+## stash: what they all wear now goes into one pool first, what the pool can't fill for all of
+## them is shared (Restock.fair_caps, in their order), and the armory's world items follow.
+## Returns each one's Restock.build result with its report ("text").
+func _restock_bodies(lvl: BaseLevel, people: Array) -> Array:
 	var before := lvl.server_collect_stash()
 	var pool: Array = before.duplicate(true)
-	var own := Inventory.new()
-	own.net_state = s.inventory.net_state
-	for e: Dictionary in own.strip():
-		BaseArmory.add(pool, StringName(e.id), int(e.count), e.get("state", {}))
-	own.free()
-	var res := Restock.build(loadout, pool)
-	s.inventory.net_state = GameState.from_json(res.gear)
+	var loadouts: Array = []
+	for p: Dictionary in people:
+		var own := Inventory.new()
+		own.net_state = (p.soldier as Soldier).inventory.net_state
+		for e: Dictionary in own.strip():
+			BaseArmory.add(pool, StringName(e.id), int(e.count), e.get("state", {}))
+		own.free()
+		loadouts.append(p.loadout)
+	var caps: Array[Dictionary] = Restock.fair_caps(loadouts, pool)
+	var results: Array = []
+	for i in people.size():
+		var s: Soldier = people[i].soldier
+		var res := Restock.build(people[i].loadout, pool, caps[i])
+		s.inventory.net_state = GameState.from_json(res.gear)
+		res["text"] = Restock.report_text(String(people[i].who), res)
+		SessionLog.note("restock: %s: %s" % [SessionLog.who(s), res.text])
+		results.append(res)
 	_apply_stash(lvl, before, pool)
-	var text := Restock.report_text(who, res)
-	SessionLog.note("restock: %s: %s" % [SessionLog.who(s), text])
-	return text
+	return results
 
 
 ## Host: makes the hub's world items `after` where they were `before` (both stash entries):

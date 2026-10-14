@@ -427,6 +427,21 @@ static func record_loadout(person: Dictionary, gear: Dictionary) -> void:
 		person["loadout"] = loadout
 
 
+## What `person`'s last restock couldn't give them ({item id: units}; empty: nothing short).
+## Restock left the medic short silently (S0743): it's kept on the roster entry and shown on
+## the squad page until a restock fills them or they deploy (BaseHub._record_loadouts).
+static func restock_short_of(person: Dictionary) -> Dictionary:
+	return person.get("restock_short", {})
+
+
+## Writes down what a restock left `person` without (Restock.short_of); {} clears it.
+static func record_restock_short(person: Dictionary, short: Dictionary) -> void:
+	if short.is_empty():
+		person.erase("restock_short")
+	else:
+		person["restock_short"] = short.duplicate()
+
+
 ## An Inventory.net_state holding `kit` ([item id, count] pairs, as Roles.kit gives them).
 static func gear_for_kit(kit: Array) -> Dictionary:
 	var inv := Inventory.new()
