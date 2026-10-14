@@ -21,7 +21,7 @@ func _ready() -> void:
 	billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	no_depth_test = true
 	fixed_size = true
-	pixel_size = 0.0015
+	pixel_size = 0.00098  # about 35% smaller on screen than 0.0015 (Captain, P0362)
 	font_size = 28
 	outline_size = 8
 	modulate = Color("ffd166")
