@@ -32,7 +32,7 @@ const Recorder := preload("res://tests/coop_soak_recorder.gd")
 
 const SEED := 4711
 ## What the base's stash holds on top of the starting stash, so four players can kit up.
-const EXTRA_STASH := [["assault_pack", 4], ["m4a1", 4], ["plate_carrier", 2], ["helmet", 4], ["mag_556", 24], ["ifak", 6], ["iv_18", 4],
+const EXTRA_STASH := [["assault_pack", 4], ["plate_ceramic_l4", 8], ["m4a1", 4], ["plate_carrier", 2], ["helmet", 4], ["mag_556", 24], ["ifak", 6], ["iv_18", 4],
 	["saline_500", 6], ["epinephrine", 4], ["morphine", 4], ["tourniquet", 4]]
 ## What each bot picks up at the armory: id -> how many it wants on it.
 const KIT := {"assault_pack": 1, "ifak": 1, "iv_18": 1, "saline_500": 1, "epinephrine": 1, "plate_carrier": 1, "helmet": 1, "m4a1": 1, "mag_556": 3}
