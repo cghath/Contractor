@@ -413,12 +413,15 @@ func _test_tactics() -> void:
 	for s: Soldier in _squad():
 		if StringName(SquadAI.of(s).ordered.get("kind", &"")) == &"give_ammo":
 			bringer = SquadAI.of(s)
-	var status := "%s %s" % [bringer.body.name, bringer.ordered] if bringer else "nobody"
+	# An Array, so the lambda's update reaches the message (a captured local is a copy).
+	var status: Array[String] = ["%s %s" % [bringer.body.name, bringer.ordered] if bringer else "nobody"]
 	check(why == "" and await _wait_until(func() -> bool:
 			if bringer:
-				status = "%s: %s, %.1f m off, %s" % [bringer.body.name, bringer.body.ai_status, _flat(bringer.body.global_position, player.global_position), bringer.ordered]
+				status[0] = "%s: %s, %.1f m off, moving %.1f m/s, target %s, intent %s, %s" % [bringer.body.name, bringer.body.ai_status,
+					_flat(bringer.body.global_position, player.global_position), Vector2(bringer.body.velocity.x, bringer.body.velocity.z).length(),
+					bringer.target.name if is_instance_valid(bringer.target) else "none", bringer.intent, bringer.ordered]
 			return player.inventory.count_of(ammo) > had, 10.0),
-		"Give me ammo: a squadmate brings magazines (%s; %d -> %d; %s)" % [why, had, player.inventory.count_of(ammo), status])
+		"Give me ammo: a squadmate brings magazines (%s; %d -> %d; %s; the player: %s)" % [why, had, player.inventory.count_of(ammo), status[0], player.vitals.condition_text()])
 	squad.give_order(player, Squad.Order.FOLLOW, player.global_position)
 
 
