@@ -75,6 +75,12 @@ var last_report: Dictionary = {}
 ## Host (wave 5b): the helicopter the squad rides out in (HeliCall: server_ride_out). Whoever
 ## and whatever is aboard counts as out, and its cargo is the deposited items it lifted.
 var ride: Node = null
+## Every peer (Captain, 2026-10-14: "when heli extract is selected make sure it's the only one
+## shown"): -1, no helicopter extraction called; 0, one is called and its LZ isn't set yet; else
+## the id of its point (HeliCall.point_id). While it's 0 or more only the helicopter's point is
+## shown or used (shown_points): the zone's presets and older marks stay in `points`, back when
+## the call is over without a ride out (cancelled, shot down). HeliSupports keeps it current.
+var heli_point := -1
 ## Host (Captain, 2026-10-14): who the squad extracts without after a confirmed "Leaving behind"
 ## warning (players down or dead outside the point, AI squadmates away from it), by
 ## _soldier_name: {name: true}. Cleared when the countdown stops or a deployment begins.
@@ -144,6 +150,7 @@ func server_begin(plan: Dictionary) -> void:
 	last_report = {}
 	countdown_point = -1
 	ride = null
+	heli_point = -1
 	_smoke_points = {}
 	_clear_left()
 	for cloud in SmokeCloud.clouds_of(SMOKE_COLOUR):
@@ -245,7 +252,7 @@ static func can_leave_behind(s: Soldier) -> bool:
 func point_of_player(s: Soldier) -> Dictionary:
 	if s == null or not s.vitals.is_up() or s.respawn_state == Soldier.RESPAWN_WAITING:
 		return {}
-	for point: Dictionary in points:
+	for point: Dictionary in shown_points():
 		if inside(point, s.global_position):
 			return point
 	return {}
@@ -263,7 +270,7 @@ func missing_at(point: Dictionary) -> PackedStringArray:
 
 ## The first point with the whole squad inside, or {}.
 func point_with_squad() -> Dictionary:
-	for point: Dictionary in points:
+	for point: Dictionary in shown_points():
 		if missing_at(point).is_empty():
 			return point
 	return {}
@@ -283,7 +290,9 @@ static func inside(point: Dictionary, pos: Vector3) -> bool:
 func server_confirm(by_peer := 0) -> String:
 	if not multiplayer.is_server() or state != State.ACTIVE:
 		return "No extraction to confirm"
-	if points.is_empty():
+	if shown_points().is_empty():
+		if heli_point == 0:
+			return "The helicopter has no LZ yet: give it a grid or pop purple smoke"
 		return "No extraction point: pick one on the map or throw a purple smoke"
 	var point := {}
 	if by_peer > 0:
@@ -347,7 +356,7 @@ func _point_for_call() -> Dictionary:
 	var need := required()
 	var best := {}
 	var best_n := 0
-	for point: Dictionary in points:
+	for point: Dictionary in shown_points():
 		var n := 0
 		for s: Soldier in need.players + need.ai:
 			n += 1 if inside(point, s.body_point()) else 0
@@ -626,11 +635,31 @@ static func _soldier_name(s: Soldier) -> String:
 	return String(s.name) if s.is_ai() else "Player %s" % s.name
 
 
+## The points shown and used now: all of them, or with a helicopter extraction called only its
+## LZ (none while it has no LZ yet). See heli_point.
+func shown_points() -> Array:
+	if heli_point < 0:
+		return points
+	return points.filter(func(p: Dictionary) -> bool: return int(p.id) == heli_point)
+
+
+## Host only (HeliSupports): the helicopter extraction's point (heli_point: -1 none, 0 called
+## with no LZ yet, else its point id).
+func server_set_heli_point(id: int) -> void:
+	if not multiplayer.is_server() or id == heli_point:
+		return
+	heli_point = id
+	SessionLog.note("extraction: %s" % ("every point shown again (no helicopter extraction)" if id < 0
+		else "helicopter extraction called, its LZ not set yet: no point shown" if id == 0 else "only the helicopter's LZ shown (point %d)" % id))
+	_broadcast()
+
+
 func _nearest_point() -> Dictionary:
 	var me := MapNodes.players(self)
 	var from := Vector2(me[0].global_position.x, me[0].global_position.z) if not me.is_empty() else Vector2.ZERO
-	var best: Dictionary = points[0]
-	for p: Dictionary in points:
+	var shown := shown_points()
+	var best: Dictionary = shown[0]
+	for p: Dictionary in shown:
 		if from.distance_to(p.pos) < from.distance_to(best.pos):
 			best = p
 	return best
@@ -673,7 +702,7 @@ func _server_confirm() -> void:
 
 
 func _state() -> Dictionary:
-	return {"state": state, "points": points, "leave": leave.keys(), "countdown": countdown_left, "point": countdown_point}
+	return {"state": state, "points": points, "leave": leave.keys(), "countdown": countdown_left, "point": countdown_point, "heli": heli_point}
 
 
 func _broadcast() -> void:
@@ -699,6 +728,7 @@ func _client_state(s: Dictionary) -> void:
 		leave[mate] = true
 	countdown_left = float(s.get("countdown", 0.0))
 	countdown_point = int(s.get("point", -1))
+	heli_point = int(s.get("heli", -1))
 	changed.emit()
 
 

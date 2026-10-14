@@ -623,6 +623,7 @@ func _test_extraction() -> void:
 	_regroup()
 	var ext := MapNodes.extraction(level)
 	ext.server_begin({})
+	var preset := ext.server_add_point(Vector2(HOME.x + 300.0, HOME.z), "zone", "Preset LZ")
 	var lzp := _ground(HOME + Vector3(0, 0, -45))
 	var hvt := level.people.server_spawn_person({"name": "HvtTest", "kind": "hvt", "side": "friendly", "pos": _ground(lzp + Vector3(12, 0, 4)),
 		"label": "HVT (test)", "hvt_id": "hvt_test"})
@@ -634,12 +635,18 @@ func _test_extraction() -> void:
 		"extraction there: an extraction point at the spot (%s)" % why)
 	if e == null:
 		return
+	# Captain, 2026-10-14: with the helicopter called, its LZ is the only extraction point shown.
+	await _wait_for(func() -> bool: return ext.heli_point >= 0, 2.0)
+	var shown := ext.shown_points()
+	check(ext.heli_point >= 0 and not shown.any(func(p: Dictionary) -> bool: return int(p.id) == preset) and shown.size() <= 1 and not ext.point_by_id(preset).is_empty(),
+		"the helicopter called: only its LZ is shown, the zone's preset hidden but kept (%d shown)" % shown.size())
 	await _wait_for(func() -> bool: return _landed(e), FLY_S)
 	check(_landed(e) and _flat(e.heli.global_position, lzp) <= 100.0, "landed at the extraction point")
 	if not _landed(e):
 		sup.server_dismiss_all()
 		return
 	check(_called_points(ext) == 1 and not ext.point_by_id(e.point_id).is_empty(), "one extraction point, the helicopter's, after the LZ recheck (%d)" % _called_points(ext))
+	check(ext.shown_points().size() == 1 and int(ext.shown_points()[0].id) == e.point_id, "landed: the helicopter's LZ is the one point shown")
 	await _wait_for(func() -> bool:
 		var hold := e.heli.cargo_hold.entries().map(func(x: Dictionary) -> String: return String(x.id))
 		return "intel_laptop" in hold and "electronics_salvage" in hold and _aboard(hvt, e), 15.0)

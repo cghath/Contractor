@@ -468,7 +468,7 @@ func _draw_extraction() -> void:
 	var extraction := MapNodes.extraction(self)
 	if extraction == null or not extraction.is_active():
 		return
-	for point: Dictionary in extraction.points:
+	for point: Dictionary in extraction.shown_points():  # a helicopter extraction: its LZ only
 		var s := map_to_screen(point.pos)
 		var counting := extraction.state == Extraction.State.COUNTDOWN and int(point.id) == extraction.countdown_point
 		draw_arc(s, maxf(float(point.radius) * zoom, 10.0), 0.0, TAU, 48, EXTRACT_COLOUR, 4.0 if counting else 2.0)

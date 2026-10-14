@@ -44,7 +44,7 @@ func show_extraction(extraction: Extraction) -> void:
 		return
 	var area := MapNodes.area_of(self)
 	var lines := PackedStringArray()
-	for point: Dictionary in extraction.points:
+	for point: Dictionary in extraction.shown_points():  # a helicopter extraction: its LZ only
 		lines.append("%s  %s" % [point.name, MapGrid.grid_ref(point.pos, area)])
 	_points.text = "\n".join(lines) if not lines.is_empty() else "No extraction point yet"
 	var names := MapNodes.squad_ai(self).map(func(s: Soldier) -> String: return String(s.name))

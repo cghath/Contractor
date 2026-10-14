@@ -424,7 +424,7 @@ func situation() -> Dictionary:
 			sit.hvts[String(p.hvt)] = _hvt_now(layer, String(p.hvt), squad)
 	var ext := MapNodes.extraction(self)
 	if ext and ext.is_active():
-		for point: Dictionary in ext.points:
+		for point: Dictionary in ext.shown_points():  # a helicopter extraction: its LZ only
 			var v: Vector2 = point.pos
 			sit.lzs.append({"name": String(point.get("name", "")), "pos": _ground(v), "radius": float(point.get("radius", Extraction.RADIUS_M)),
 				"source": String(point.get("source", "zone"))})

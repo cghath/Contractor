@@ -303,7 +303,7 @@ func newest_marker(caller: Soldier) -> Variant:
 
 
 func _physics_process(delta: float) -> void:
-	if not multiplayer.is_server() or calls.is_empty():
+	if not multiplayer.is_server():
 		return
 	for c in calls.duplicate():
 		c.step(delta)
@@ -312,6 +312,28 @@ func _physics_process(delta: float) -> void:
 			for id: int in claimed.keys():
 				if claimed[id] == c:
 					claimed.erase(id)
+	_show_heli_point()
+
+
+## Captain, 2026-10-14: with a helicopter extraction called, its LZ is the only extraction
+## point shown (Extraction.heli_point): from the call (no LZ yet: none) until it's gone, or
+## leaving without having lifted the squad out (sent home, or turned back), when every point
+## shows again.
+func _show_heli_point() -> void:
+	if calls.is_empty() and not _heli_shown:
+		return  # nothing called, nothing hidden: no lookup every frame
+	var extraction := MapNodes.extraction(self)
+	if extraction == null or not extraction.is_active():
+		return
+	var id := -1
+	for c in calls:
+		if c.kind == "extraction" and not c.is_over() and (c.phase != HeliCall.Phase.LEAVING or c.rode_out):
+			id = c.point_id if not extraction.point_by_id(c.point_id).is_empty() else 0
+	extraction.server_set_heli_point(id)
+	_heli_shown = id >= 0
+
+
+var _heli_shown := false
 
 
 # --- Radio (every peer) ---------------------------------------------------------------------------
