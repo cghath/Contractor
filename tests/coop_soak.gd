@@ -889,6 +889,33 @@ func _stop_fighting() -> void:
 ## hostiles) gets treated by the nearest player still up, as a squad would.
 var _aid_left := 1.0
 var _last_clear_shot := 0.0
+var _down_for := 0.0
+var _give_up_left := 0.0
+## Down this long with every player down (nobody can help), a bot gives up: dev tools' hurt
+## until it dies and respawns. Dev has no give-up yet (B3, on gameplay/respawn); without
+## this a squad wipe leaves the soak waiting at an extraction nobody can reach.
+const GIVE_UP_S := 45.0
+
+
+func _give_up_tick(me: Soldier, delta: float) -> void:
+	if me.vitals.is_up() or me.vitals.is_dead() or _in_base():
+		_down_for = 0.0
+		return
+	_down_for += delta
+	_give_up_left -= delta
+	if _down_for < GIVE_UP_S or _give_up_left > 0.0:
+		return
+	_give_up_left = 5.0
+	var players := _level().get_node_or_null(^"Players")
+	for node in (players.get_children() if players else []):
+		var s := node as Soldier
+		if s and s.vitals.is_up():
+			return  # someone could still come
+	_say("B3: down %.0f s and every player is down: giving up (dev hurt until dead, then respawn)" % _down_for)
+	recorder.event(["give_up", "Players/%d" % multiplayer.get_unique_id()])
+	me._server_debug_hurt.rpc_id(1, 1000.0)
+
+
 var _casevac := ""          # the downed player this bot is carrying to the extraction, or ""
 var _casevac_since := 0.0
 var _casevac_left := 0.0
@@ -931,6 +958,8 @@ func _casevac_tick(me: Soldier, delta: float) -> void:
 	if _casevac_left > 0.0 or _treating or me.carry_mode != &"":
 		return
 	_casevac_left = 1.0
+	if role == "host" and _goal == null and _flat(me.global_position, at) > 4.0:
+		_walk(at, 2.0, RUN_SPEED)  # back to the rally point (after a respawn, say)
 	var players := _level().get_node_or_null(^"Players")
 	if players == null:
 		return
@@ -1008,6 +1037,7 @@ func _physics_process(delta: float) -> void:
 	if me == null or not me.is_local():
 		return
 	_buddy_aid(me, delta)
+	_give_up_tick(me, delta)
 	if me.vitals.is_up():
 		_hunt(me, delta)
 		_casevac_tick(me, delta)
