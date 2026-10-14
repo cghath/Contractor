@@ -133,10 +133,12 @@ const SPRINT_TURN_LOADED := 0.5
 # --- Weapon close to a wall (PlayerInput) -----------------------------------------------------
 
 ## The view model pulls back and down when a wall is closer ahead than this (metres from the eye)
-## and is fully pulled at WALL_PULL_MIN_M.
+## and is fully pulled at WALL_PULL_MIN_M. Pulled back 12 cm, not 20 (Captain, 2026-10-14: near
+## a wall the optic came to 6 cm from the eye at the hip, behind it aimed, and looked big; now
+## it stays 14 cm out at the hip and 7 aimed).
 const WALL_PULL_REACH_M := 0.85
 const WALL_PULL_MIN_M := 0.3
-const WALL_PULL_BACK := Vector3(0.02, -0.07, 0.2)
+const WALL_PULL_BACK := Vector3(0.02, -0.07, 0.12)
 
 # --- Animation (CharacterModel) -------------------------------------------------------------------
 

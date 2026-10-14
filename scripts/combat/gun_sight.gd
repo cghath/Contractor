@@ -16,7 +16,10 @@ extends Control
 ##   holds, "bdc") or "mil_dot".
 ## Power (Captain, 2026-10-13) is against the player's own unaimed view: 10x makes things ten
 ## times bigger than the base field of view shows them (its tangent over 10: about 9.5 degrees
-## at the default 80), the same rule for every magnified optic; at 1x the weapon's ads_fov.
+## at the default 80), the same rule for every magnified optic; at 1x the weapon's ads_fov, or
+## an open 1x optic's own wider "ads_fov" (red dot, holo; Captain, 2026-10-14: aimed through a
+## red dot it still looked big, the M4's 50 degrees drawing it twice its size at the hip, so a
+## 1x sight zooms in a little less).
 ## A variable optic steps through its powers on zoom in and out (the side mouse buttons by
 ## default, Controls.BUTTONS; zoom_step) from its "magnification_start". Mils
 ## and MOA are worked out from the field of view actually shown, so every reticle reads true
@@ -112,9 +115,12 @@ static func power(s: Soldier, optic: ItemData) -> float:
 
 
 ## The camera's (vertical) field of view aimed with `weapon` at power `mag`, from the unaimed
-## `base_fov`: the view's tangent over the power (no wider than the weapon's ads_fov).
-static func aimed_fov(weapon: ItemData, base_fov: float, mag := 1.0) -> float:
+## `base_fov`: the view's tangent over the power (no wider than the weapon's ads_fov). At 1x
+## `optic` may widen it to its own "ads_fov" (never wider than `base_fov`).
+static func aimed_fov(weapon: ItemData, base_fov: float, mag := 1.0, optic: ItemData = null) -> float:
 	var ads := float(weapon.stats.get("ads_fov", 55)) if weapon else base_fov
+	if optic and optic.stats.has("ads_fov"):
+		ads = maxf(ads, minf(float(optic.stats.ads_fov), base_fov))
 	if mag <= 1.0:
 		return ads
 	return minf(ads, rad_to_deg(2.0 * atan(tan(deg_to_rad(base_fov * 0.5)) / mag)))
@@ -122,7 +128,8 @@ static func aimed_fov(weapon: ItemData, base_fov: float, mag := 1.0) -> float:
 
 ## `s`'s aimed field of view with `weapon` right now (their optic's power).
 static func aimed_fov_of(s: Soldier, weapon: ItemData, base_fov: float) -> float:
-	return aimed_fov(weapon, base_fov, power(s, optic_of(s)))
+	var optic := optic_of(s)
+	return aimed_fov(weapon, base_fov, power(s, optic), optic)
 
 
 ## True while `s` is aimed through glass: a tube optic, or a magnifier that's in, zoomed in
@@ -135,7 +142,7 @@ static func scoped(s: Soldier) -> bool:
 	if view_of(optic) != "tube" and not magnifier:
 		return false
 	var lowest := float(optic.stats.magnifier) if magnifier else zoom_range(optic).x
-	return s.camera.fov <= aimed_fov(s.active_weapon(), GameSettings.fov(), lowest) * SCOPE_IN
+	return s.camera.fov <= aimed_fov(s.active_weapon(), GameSettings.fov(), lowest, optic) * SCOPE_IN
 
 
 ## Zoom in (`steps` > 0) or out on the optic in hand: a magnifier flips up on zoom in and down
@@ -167,7 +174,7 @@ static func zoom_step(s: Soldier, steps: int) -> String:
 static func zoom_turn(s: Soldier) -> float:
 	if not scoped(s):
 		return 1.0
-	var ads := aimed_fov(s.active_weapon(), GameSettings.fov())
+	var ads := aimed_fov(s.active_weapon(), GameSettings.fov(), 1.0, optic_of(s))
 	return minf(tan(deg_to_rad(s.camera.fov * 0.5)) / tan(deg_to_rad(ads * 0.5)), 1.0)
 
 
