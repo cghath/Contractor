@@ -512,6 +512,9 @@ func _events(f: Dictionary) -> void:
 				_feed("%s %s" % [_name(key), {"down": "is DOWN", "up": "is back up", "dead": "is dead"}[what]])
 			"obj":
 				_feed("objective %s: %s" % [key, String(e[2])])
+			"spawn_point":  # where the bots started: dead ground the host picked (coop_soak.gd)
+				if e.size() >= 5:
+					_mark_start(Vector3(float(e[1]), float(e[2]), float(e[3])), float(e[4]))
 			"phase":
 				_feed("phase %s" % key)
 			"join", "leave", "joined", "lost", "leave_on_purpose":
@@ -524,6 +527,39 @@ func _events(f: Dictionary) -> void:
 ## An event's subject as text: a soldier key, a note, or a peer id (JSON makes ids floats).
 static func _id(v: Variant) -> String:
 	return "%d" % int(v) if v is float or v is int else str(v)
+
+
+var _start_marker: Node3D
+
+
+## A tall orange post where the team started, seen from far off and on the map.
+func _mark_start(at: Vector3, score: float) -> void:
+	if is_instance_valid(_start_marker):
+		_start_marker.queue_free()
+	var m := MeshInstance3D.new()
+	var cyl := CylinderMesh.new()
+	cyl.top_radius = 0.6
+	cyl.bottom_radius = 0.6
+	cyl.height = 30.0
+	m.mesh = cyl
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(1.0, 0.55, 0.1)
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.material_override = mat
+	add_child(m)
+	m.global_position = at + Vector3.UP * 15.0
+	var label := Label3D.new()
+	label.text = "START (dead ground, score %.1f)" % score
+	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	label.no_depth_test = true
+	label.fixed_size = true
+	label.pixel_size = 0.0012
+	label.font_size = 30
+	label.modulate = Color(1.0, 0.7, 0.3)
+	label.position = Vector3.UP * 16.0
+	m.add_child(label)
+	_start_marker = m
+	_feed("team starts in dead ground (score %.1f)" % score)
 
 
 func _name(key: String) -> String:

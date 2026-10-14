@@ -58,6 +58,14 @@ const HUNT_AFTER_S := 4.0
 ## BOUND_S; a bot that was just hit stops and gets down for PINNED_S.
 const WEDGE := {1: Vector2(-8.0, 6.0), 2: Vector2(8.0, 6.0), 3: Vector2(-16.0, 12.0)}  # (right, back) m
 const BOUND_S := 8.0
+## Line abreast for the advance (the Captain): each bot's place right (+) or left of the
+## leader, facing the objective; the squad's AI on the game's own line formation.
+const LINE := {0: 0.0, 1: -9.0, 2: 9.0, 3: -18.0}
+## Dead ground: looked for this far from the objective (m), the rim measured this far out,
+## and only hostiles this close counted as watching (their sight is 200 m).
+const DEAD_RING_M := Vector2(200.0, 450.0)
+const DEAD_RIM_M := 35.0
+const SIGHT_M := 250.0
 const BOUND_M := 15.0
 const PINNED_S := 4.0
 ## The knock-out (a dev-tools hurt, like the K key): enough to go down, and more if not.
@@ -365,7 +373,7 @@ func _host_cycle(cycle: int) -> Dictionary:
 	# Kit up.
 	if cycle > 1:
 		_restock()
-	_set_phase("kit", {"down": {}, "cid": "", "pick": [], "rally": []})
+	_set_phase("kit", {"down": {}, "cid": "", "pick": [], "rally": [], "spawn": [], "facing": 0.0})
 	await _kit_up(cycle)
 	await _wait_for(func() -> bool: return _bots().values().all(func(s: Dictionary) -> bool: return int(s.get("kit", 0)) >= cycle), KIT_S)
 	result["kit"] = {"host": _kit_summary(_me())}
@@ -421,16 +429,32 @@ func _host_cycle(cycle: int) -> Dictionary:
 	if not Contracts.is_deployed():
 		result.why = "the contract never went live"
 		return result
-	await _sleep(3.0)
-	_set_phase("deployed", {"zone": String(Contracts.deployment().get("zone_id", ""))})
-	await _sleep(2.0)
-	# Advance toward the objective.
+	await _sleep(3.0)  # the garrisons come out over a few frames
 	var target: Variant = _objective_point()
 	result["objective"] = Recorder._v3(target) if target != null else null
+	# Start in dead ground out of the hostiles' sight (Captain: the insertion put the team in
+	# the open 50 m from the village, in contact at once), facing the objective.
+	_report_insertions(target)
+	var start := _dead_ground(target) if target != null else {}
+	var deployed := {"zone": String(Contracts.deployment().get("zone_id", ""))}
+	if not start.is_empty():
+		var at: Vector3 = start.pos
+		var to_obj := Vector3((target as Vector3).x - at.x, 0.0, (target as Vector3).z - at.z).normalized()
+		deployed["spawn"] = [at.x, at.y, at.z]
+		deployed["facing"] = atan2(-to_obj.x, -to_obj.z)
+		result["start"] = {"pos": Recorder._v3(at), "score": start.score, "rim": start.rim, "hidden": start.hidden,
+			"dist": start.dist, "nearest_hostile": start.nearest_hostile}
+		recorder.event(["spawn_point", snappedf(at.x, 0.1), snappedf(at.y, 0.1), snappedf(at.z, 0.1), start.score])
+	_set_phase("deployed", deployed)
+	if deployed.has("spawn"):
+		_go_to_start()
+		_line_up_squad()
+	await _sleep(4.0)
+	# Advance toward the objective: in line, at a walk.
 	_set_phase("advance")
 	var me := _me()
 	if target != null and me:
-		_walk(target, 40.0, RUN_SPEED)
+		_walk(target, 40.0, WALK_SPEED)
 		await _wait_for(func() -> bool: return _me() == null or _flat(_me().global_position, target) < 70.0 or _hostile_in_range(_me(), HUNT_STOP_M * 2.0) != null, ADVANCE_S)
 	# Fight, with a knock-out and a revive.
 	_fight = true
@@ -530,6 +554,155 @@ func _pick_insertion(briefing: Briefing) -> void:
 			best = String(point.get("id", ""))
 	if best != "" and briefing.server_set_insertion(best):
 		_say("insertion %s, %.0f m from the objective" % [best, best_d])
+
+
+## Host: every insertion point of this zone, how far from the objective and the nearest
+## hostile, and whether it is in dead ground (the Captain asked whether the real ones are).
+func _report_insertions(target: Variant) -> void:
+	var briefing := MapNodes.briefing(_level())
+	if briefing == null or target == null:
+		return
+	var posts := _hostile_posts()
+	for point: Dictionary in briefing.insertion_points():
+		var p: Array = point.get("pos", [])
+		if p.size() < 2:
+			continue
+		var at := Vector3(float(p[0]), 0.0, float(p[1]))
+		at.y = _ground_h(at)
+		var near := INF
+		var watching: Array[Vector3] = []
+		for q: Vector3 in posts:
+			near = minf(near, _flat(at, q))
+			if _flat(at, q) < SIGHT_M:
+				watching.append(q)
+		_say("insertion %s (%s): %.0f m from the objective, nearest hostile %.0f m, %d hostiles within %d m, hidden from %d%% of them, rim %+.1f m" % [
+			point.get("id", "?"), point.get("method", "foot"), _flat(at, target), near, watching.size(), int(SIGHT_M),
+			int(_hidden_fraction(at, watching) * 100.0), _rim(at)])
+
+
+## Where the hostiles watch from now: every hostile soldier up in the level.
+func _hostile_posts() -> Array[Vector3]:
+	var out: Array[Vector3] = []
+	for node in get_tree().get_nodes_in_group(&"combatants"):
+		var s := node as Soldier
+		if s and s.faction == &"hostile" and s.vitals.is_up() and not s.is_queued_for_deletion():
+			out.append(s.global_position)
+	return out
+
+
+func _ground_h(at: Vector3) -> float:
+	var lvl := _level()
+	return lvl.ground_point(at).y - 0.1 if lvl else at.y
+
+
+## How far the ground around `at` (DEAD_RIM_M out, 8 ways) rises above it at the lowest:
+## positive means a basin, rimmed on every side.
+func _rim(at: Vector3) -> float:
+	var lowest := INF
+	for k in 8:
+		var a := TAU * k / 8.0
+		lowest = minf(lowest, _ground_h(at + Vector3(cos(a), 0.0, sin(a)) * DEAD_RIM_M) - at.y)
+	return lowest
+
+
+## The share of `posts` that can't see a man standing at `at` (eye to eye, 1.7 m, over the
+## terrain's heights; buildings and trees aren't counted, so this is the ground's cover only).
+func _hidden_fraction(at: Vector3, posts: Array[Vector3]) -> float:
+	if posts.is_empty():
+		return 1.0
+	var hidden := 0
+	var eye := at + Vector3.UP * 1.7
+	for q: Vector3 in posts:
+		var other := q + Vector3.UP * 1.7
+		var steps := clampi(int(_flat(at, q) / 8.0), 4, 80)
+		for i in range(1, steps):
+			var p := eye.lerp(other, float(i) / steps)
+			if _ground_h(p) > p.y:
+				hidden += 1
+				break
+	return float(hidden) / posts.size()
+
+
+## Host: the best dead ground in a ring DEAD_RING_M around the objective: low (a basin with a
+## rim on every side), hidden from the hostiles within sight (SIGHT_M), about 325 m out, never
+## within 150 m of a hostile. {"pos", "score", "rim", "hidden", "dist", ...}, or {} off a zone.
+func _dead_ground(target: Vector3) -> Dictionary:
+	if not (_level() is ZoneLevel):
+		return {}
+	var posts := _hostile_posts()
+	var best := {}
+	var r := DEAD_RING_M.x
+	while r <= DEAD_RING_M.y:
+		for k in 48:
+			var a := TAU * k / 48.0
+			var at := target + Vector3(cos(a), 0.0, sin(a)) * r
+			at.y = _ground_h(at)
+			var near: Array[Vector3] = []
+			var nearest := INF
+			for q: Vector3 in posts:
+				var d := _flat(at, q)
+				nearest = minf(nearest, d)
+				if d < SIGHT_M:
+					near.append(q)
+			if nearest < 150.0:
+				continue
+			var rim := _rim(at)
+			var hidden := _hidden_fraction(at, near)
+			var score := hidden * 10.0 + clampf(rim, -3.0, 6.0) - absf(r - 325.0) / 100.0 + minf(nearest, 400.0) / 200.0
+			if best.is_empty() or score > float(best.score):
+				best = {"pos": at, "score": snappedf(score, 0.01), "rim": snappedf(rim, 0.1), "hidden": snappedf(hidden, 0.01),
+					"dist": snappedf(r, 1.0), "nearest_hostile": snappedf(nearest, 1.0), "watching": near.size()}
+		r += 25.0
+	if not best.is_empty():
+		_say("start in dead ground at %s: score %.2f, rim %+.1f m, hidden from %d%% of the %d hostiles within %d m, %.0f m from the objective, nearest hostile %.0f m" % [
+			Recorder._v3(best.pos), best.score, best.rim, int(float(best.hidden) * 100.0), best.watching, int(SIGHT_M), best.dist, best.nearest_hostile])
+	return best
+
+
+## Every bot: to its place in the line at the posted start, facing the objective.
+func _go_to_start() -> void:
+	var me := _me()
+	var spot: Variant = _line_spot_at_start()
+	if me == null or spot == null:
+		return
+	_goal = null
+	me.global_position = _level().ground_point(spot)
+	me.rotation.y = float(_phase.get("facing", 0.0))
+	_say("at the start, in line")
+
+
+func _line_spot_at_start() -> Variant:
+	var sp: Array = _phase.get("spawn", [])
+	if sp.size() != 3:
+		return null
+	return Vector3(float(sp[0]), float(sp[1]), float(sp[2])) + _line_right() * float(LINE.get(bot, 0.0))
+
+
+## Right of the line (the line faces the objective).
+func _line_right() -> Vector3:
+	var yaw := float(_phase.get("facing", 0.0))
+	return Vector3(cos(yaw), 0.0, -sin(yaw))
+
+
+## Host: the squad's AI to the start too, beside the bots, and on the line formation.
+func _line_up_squad() -> void:
+	var me := _me()
+	var lvl := _level()
+	if me == null or lvl == null:
+		return
+	var sp: Array = _phase.get("spawn", [])
+	var ai := lvl.get_node_or_null(^"AI")
+	var n := 0
+	for node in (ai.get_children() if ai else []):
+		var s := node as Soldier
+		if s and s.faction == &"friendly" and s.vitals.is_up():
+			var side := 1.0 if n % 2 == 0 else -1.0
+			var at := Vector3(float(sp[0]), float(sp[1]), float(sp[2])) + _line_right() * side * (18.0 + 9.0 * floorf(n / 2.0))
+			s.global_position = lvl.ground_point(at)
+			s.rotation.y = float(_phase.get("facing", 0.0))
+			n += 1
+	me._server_squad_command.rpc_id(1, "formation:line", me.global_position, PackedStringArray())
+	me._server_squad_command.rpc_id(1, "follow", me.global_position, PackedStringArray())
 
 
 func _pick_offer() -> Dictionary:
@@ -731,6 +904,10 @@ func _client_phase(cycle: int, ph: String) -> void:
 				var ok := await _rejoin(RECONNECT_GAP_S)
 				if not ok:
 					_fail("rejoining after leaving failed")
+		"deployed":
+			if _phase.has("spawn"):
+				await _wait_for(func() -> bool: return _me() != null, 10.0)
+				_go_to_start()
 		"items":
 			_fight = false
 			_stop_fighting()
@@ -761,7 +938,7 @@ func _client_tick(ph: String) -> void:
 	if ph in ["advance", "fight", "deployed", "items"]:
 		var leader := _player(1)
 		if leader:
-			var spot := _wedge_spot(leader)
+			var spot := leader.global_position + _line_right() * float(LINE.get(bot, 0.0)) if _phase.has("facing") else _wedge_spot(leader)
 			var off := _flat(me.global_position, spot)
 			# In contact only this bot's pair moves (or anyone left far behind).
 			var may_move := not _in_contact(me) or _pair_moving() or off > 25.0
