@@ -159,6 +159,35 @@ func _test_inventory(body: Soldier) -> void:
 			(entry[0] as Control).grab_focus()
 			await _frames(1)
 			check(screen._is_selected(entry[1]) and (entry[0] as Control).has_focus(), "%dx%d: focusing a tile (the arrow keys) selects it" % [layout.x, layout.y])
+			# Review, ui/inventory: the selected item going away (a mouse drag to the ground, or
+			# Drop) puts the focus back without selecting whatever tile it lands on.
+			var src: Dictionary = entry[1]
+			var list: Array = body.inventory.containers[src.container]
+			var removed := body.inventory.remove_entry(src.container, src.index, list[src.index].count)
+			screen._redraw()
+			await _frames(1)
+			var owner := screen.get_viewport().gui_get_focus_owner()
+			check(screen.selected.is_empty() and owner != null and screen.is_ancestor_of(owner),
+				"%dx%d: removing the selected item keeps the focus on the screen and selects nothing (%s)" % [layout.x, layout.y, "nothing" if screen.selected.is_empty() else String(screen.selected.get("id", ""))])
+			body.inventory.insert_entry(src.container, removed)
+			screen._redraw()
+			await _frames(1)
+		# Review, ui/inventory: every scroll follows the keyboard focus, so the last tile of the
+		# containers list is scrolled into view when it's focused.
+		var scrolls: Array = [screen._containers_box, screen._detail_box, screen._left_slots, screen._right_slots].map(
+			func(box: Control) -> ScrollContainer: return box.get_parent() as ScrollContainer)
+		check(scrolls.all(func(sc: ScrollContainer) -> bool: return sc != null and sc.follow_focus),
+			"%dx%d: the containers, details and both slot-column scrolls (%d) follow the focus" % [layout.x, layout.y, scrolls.size()])
+		var last: Control = null
+		for t: Array in screen._tiles:
+			if t[1].kind == "entry":
+				last = t[0]
+		if last:
+			last.grab_focus()
+			await _frames(3)
+			var sc := screen._containers_box.get_parent() as ScrollContainer
+			var shown := sc.get_global_rect().grow(1.0)
+			check(shown.encloses(last.get_global_rect()), "%dx%d: the focused last container tile is scrolled into view (%s in %s)" % [layout.x, layout.y, last.get_global_rect(), sc.get_global_rect()])
 		var left := screen._left_slots.get_parent() as Control
 		var right := screen._right_slots.get_parent() as Control
 		check(left.get_global_rect().end.x <= right.get_global_rect().position.x + 0.5 and screen._wide_w >= InventoryScreen.WIDE_TILE_MIN,

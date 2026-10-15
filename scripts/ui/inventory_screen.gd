@@ -80,6 +80,7 @@ var _turning := false
 var _nearby_key := ""
 var _nearby_clock := 0.0
 var _redraw_queued := false
+var _restoring_focus := false  # _restore_focus is moving the focus: the tile it lands on isn't selected
 var _left_column: Control
 var _right_column: Control
 ## The width of the wide tiles beside the soldier just now (_fit_columns).
@@ -251,6 +252,7 @@ func _build_left() -> Control:
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.follow_focus = true  # the arrow keys mustn't select a tile below the fold (review, ui/inventory)
 	column.add_child(scroll)
 	_containers_box = VBoxContainer.new()
 	_containers_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -315,6 +317,7 @@ func _slot_column(sides: HBoxContainer) -> VBoxContainer:
 	var scroll := ScrollContainer.new()
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	scroll.mouse_filter = Control.MOUSE_FILTER_PASS
+	scroll.follow_focus = true  # the arrow keys mustn't select a point below the fold (review, ui/inventory)
 	sides.add_child(scroll)
 	var box := VBoxContainer.new()
 	box.add_theme_constant_override(&"separation", 6)
@@ -334,6 +337,7 @@ func _build_right() -> Control:
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.follow_focus = true  # the arrow keys mustn't select a tile below the fold (review, ui/inventory)
 	column.add_child(scroll)
 	_detail_box = VBoxContainer.new()
 	_detail_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -493,7 +497,9 @@ func _redraw() -> void:
 
 ## The keyboard focus after a redraw freed the control that had it (audit item 6, P1-15: an
 ## action used from the keyboard mustn't leave it nowhere): the selected item's tile, else the
-## first tile, else the Loadout button.
+## first tile, else the Loadout button. Only puts the focus back, never selects: after a mouse
+## drag or Drop took the selected item away the first tile mustn't become the selection, which
+## would jump the details and Enter to an item the player never touched (review, ui/inventory).
 func _restore_focus() -> void:
 	var first: Control = null
 	for t: Array in _tiles:
@@ -505,7 +511,9 @@ func _restore_focus() -> void:
 			return
 		if first == null:
 			first = tile
+	_restoring_focus = true
 	(first if first else _view_buttons[View.LOADOUT] as Control).grab_focus()
+	_restoring_focus = false
 
 
 func _redraw_containers() -> void:
@@ -981,7 +989,7 @@ static func _drop_target_of(src: Dictionary) -> Dictionary:
 ## A tile took the keyboard focus: from the keyboard it's selected, as a click would (a click
 ## selects in _tile_input, which keeps the carrier's second click for the MOLLE view).
 func _tile_focused(src: Dictionary) -> void:
-	if Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) or Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT):
+	if _restoring_focus or Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) or Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT):
 		_restyle_tiles()
 		return
 	if not _is_selected(src):
