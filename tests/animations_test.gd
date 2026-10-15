@@ -55,6 +55,7 @@ func _ready() -> void:
 	await _frames(10)
 	_test_replication_config()
 	_test_gear_sway()
+	_test_seated_bones()
 	await _test_carry()
 	await _test_drag()
 	await _test_put_down()
@@ -122,6 +123,28 @@ func _test_gear_sway() -> void:
 		t.basis = Basis(Vector3.RIGHT, deg_to_rad(-88.0 + sin(i * 0.5) * 3.0))  # breathing, a little rock
 		pack.follow(t, 1.0 / 60.0)
 	check(absf(pack.offset().x) < 0.002, "lying prone it doesn't jitter side to side (%.4f m)" % pack.offset().x)
+
+
+## Captain, 2026-10-14: riders in a UH-60M stood in their seats with rifles across the cabin.
+## The seated pose: hips where it says, feet on its floor in front, the head at seated height,
+## and a rifle in the hands muzzle down, its muzzle off a low seat's floor.
+func _test_seated_bones() -> void:
+	print("Seated pose")
+	var pose := CharacterModel.seated_pose(0.55, -0.05, false)
+	var bones := CharacterModel.with_shins(CharacterModel.pose_bones(pose, false))
+	var shin := CharacterModel.LEG_LENGTH - CharacterModel.THIGH
+	var pelvis: Vector3 = (bones.pelvis as Transform3D).origin
+	var soles: Array[Vector3] = [(bones.shin_l as Transform3D) * Vector3(0, -shin, 0), (bones.shin_r as Transform3D) * Vector3(0, -shin, 0)]
+	var head: Vector3 = (bones.head as Transform3D).origin
+	check(absf(pelvis.y - 0.55) < 0.001, "the hips at the seat's height (%.2f)" % pelvis.y)
+	check(soles.all(func(p: Vector3) -> bool: return absf(p.y - (-0.05 + CharacterModel.SEAT_SOLE_UP)) < 0.03 and p.z < pelvis.z - 0.2),
+		"the feet on the floor, in front of the seat (%s)" % [soles])
+	check(head.y < CharacterModel.TORSO_PIVOT.y + CharacterModel.HEAD_PIVOT.y - 0.2, "the head at seated height (%.2f)" % head.y)
+	var art := VoxelArt.model_for(ItemDB.get_item(&"m4a1"))
+	var held := GearRig.seated_transform(art, false, 0.3)
+	var muzzle := held * (VoxelArt.butt_point(art) * Vector3(1, 1, -1))
+	check((-held.basis.z).normalized().dot(Vector3.DOWN) > 0.9, "a rifle seated: muzzle down (%s)" % [-held.basis.z])
+	check(CharacterModel.HANDS_ANCHOR.y + muzzle.y > -0.3, "and off a low seat's floor (muzzle %.2f over the hips)" % (CharacterModel.HANDS_ANCHOR.y + muzzle.y))
 
 
 func check(condition: bool, what: String) -> void:

@@ -221,6 +221,32 @@ const KNEEL_EYE_DROP := 0.6
 const VIEW_LOWER_OFFSET := Vector3(0.02, -0.2, 0.06)
 const VIEW_LOWER_PITCH := 0.9
 
+## Seated in a vehicle (seated_pose; Vehicle._place_occupants hands every peer the seat's,
+## Captain, 2026-10-14: the UH-60M's squad rode in standing poses, through each other and the
+## seats). Hips on the cushion, thighs forward, feet on the floor, the upper body a little
+## forward; a rider holds his rifle muzzle down between his knees (GearRig.seated_transform),
+## a driver, pilot or gunner has his hands forward on the controls. All Proposed:
+## the hip joint this far above the cushion (half a thigh's depth: the thigh lies on it),
+const SEAT_HIP_UP := 0.07
+## and this far back over it (the backside on the seat, not its front edge),
+const SEAT_HIP_BACK := 0.05
+## hips this high above the floor where the floor isn't known (an open bed seat),
+const SEAT_HEIGHT := 0.5
+## the feet this far forward of the hips and SEAT_SOLE_UP above the floor,
+const SEAT_FOOT := 0.38
+const SEAT_SOLE_UP := 0.01
+## the knees turned out this far (radians, each side) so the rifle stands between them,
+const SEAT_KNEE_SPLAY := 0.14
+## the upper body leaning this far forward (radians; negative leans forward),
+const SEAT_PITCH := -0.2
+## slumped this far, with the head hanging, if he's down or dead in the seat,
+const SEAT_SLUMP := -0.6
+const SEAT_HEAD_DROOP := 0.6
+## and the hands (root-local, from the hips; the right hand, mirrored for the left): on the
+## thighs riding, forward on the wheel or stick at a station.
+const SEAT_LAP := Vector3(0.13, 0.1, -0.3)
+const SEAT_CONTROLS := Vector3(0.2, 0.3, -0.42)
+
 ## Colour scheme from VoxelArt.VARIANTS. Set before the node enters the tree.
 @export var variant := "multicam"
 ## Body type (VoxelArt.BODIES): "male" or "female". A female soldier is drawn FEMALE_SCALE of
@@ -428,6 +454,8 @@ static func pose_bones(p: Dictionary, is_downed: bool) -> Dictionary:
 		var rest := rest_bones()
 		rest["root"] = Transform3D(Basis(Vector3.RIGHT, -PI / 2), Vector3(0, DOWNED_LIFT, 0))
 		return rest
+	if p.get("seated", false):
+		return _seated_bones(p)
 	var hip: float = p.get("hip", HIP.y)
 	var hip_x: float = p.get("hip_x", 0.0)
 	var hip_z: float = p.get("hip_z", 0.0)
@@ -459,6 +487,49 @@ static func pose_bones(p: Dictionary, is_downed: bool) -> Dictionary:
 		"knee_l": _knee(front.y),
 		"knee_r": _knee(back.y),
 	}
+
+
+## A seated pose (SEAT_*): the hip joint `hip` above the body's origin and the floor `floor_y`
+## (both body space, metres); `station`: a driver's, pilot's or gunner's seat (hands on the
+## controls, no rifle in them). Its "yaw" turns the drawn body to face the seat
+## (Vehicle._place_occupants keeps it up to date).
+static func seated_pose(hip: float, floor_y: float, station: bool) -> Dictionary:
+	return {"seated": true, "station": station, "hip": hip, "floor": floor_y, "hip_x": 0.0, "hip_z": SEAT_HIP_BACK,
+		"pitch": SEAT_PITCH, "roll": 0.0, "prone": false, "prone_roll": 0.0, "yaw": 0.0}
+
+
+## pose_bones for a seated pose: the thighs forward off the cushion and the shins down to the
+## floor (two-bone, knees forward and turned out a little), the upper body leaning on its pitch.
+static func _seated_bones(p: Dictionary) -> Dictionary:
+	var hip: float = p.get("hip", SEAT_HEIGHT)
+	var hip_z: float = p.get("hip_z", SEAT_HIP_BACK)
+	var floor_y: float = p.get("floor", hip - SEAT_HEIGHT)
+	var yaw: float = p.get("yaw", 0.0)
+	var root := Transform3D(Basis(Vector3.UP, yaw), Vector3.ZERO)
+	var leg := _leg_angles(maxf(hip - floor_y - SEAT_SOLE_UP, 0.05), SEAT_FOOT)
+	var torso_basis := Basis(Vector3.RIGHT, float(p.get("pitch", SEAT_PITCH)))
+	var torso := Transform3D(torso_basis, Vector3(0, hip, hip_z))
+	var head_basis := Basis(Vector3.RIGHT, -_upper_body_pitch(root.basis * torso_basis, yaw))
+	return {
+		"root": root,
+		"torso": torso,
+		"head": torso * Transform3D(head_basis, HEAD_PIVOT),
+		"pelvis": Transform3D(Basis(), Vector3(0, hip, hip_z)),
+		"leg_l": Transform3D(Basis(Vector3.UP, SEAT_KNEE_SPLAY) * Basis(Vector3.RIGHT, leg.x), Vector3(-HIP.x, hip, hip_z)),
+		"leg_r": Transform3D(Basis(Vector3.UP, -SEAT_KNEE_SPLAY) * Basis(Vector3.RIGHT, leg.x), Vector3(HIP.x, hip, hip_z)),
+		"knee_l": _knee(leg.y),
+		"knee_r": _knee(leg.y),
+	}
+
+
+## Whether the body is drawn seated (in a vehicle's seat).
+func is_seated() -> bool:
+	return bool(pose.get("seated", false))
+
+
+## Seated: how far the hip joint is above the floor (GearRig keeps a rifle's muzzle off it).
+func seat_room() -> float:
+	return float(pose.get("hip", SEAT_HEIGHT)) - float(pose.get("floor", 0.0))
 
 
 ## The bones of a casualty being carried (CARRIED: "root" in the carrier's torso space) or
@@ -973,7 +1044,10 @@ func _process(delta: float) -> void:
 	var target := _target_bones(carry)
 	var acting := mode != &"" or _action_active()
 	var limp := downed and not casualty and ragdolled()  # the physics moves it: no easing
-	var blend := 1.0 if limp else minf(delta * (ACTION_EASE if acting else POSE_EASE), 1.0)
+	## Seated: no easing either. The seat turns the drawn body against the body's own turn
+	## (a rider looking round), and eased the two would swing it about the seat.
+	var seated := is_seated() and not casualty
+	var blend := 1.0 if limp or seated else minf(delta * (ACTION_EASE if acting else POSE_EASE), 1.0)
 	for key: String in target:
 		_shown[key] = (_shown[key] as Transform3D).interpolate_with(target[key], blend)
 	var target_yaw := 0.0 if casualty or downed else float(_last_pose.get("yaw", 0.0))
@@ -982,8 +1056,8 @@ func _process(delta: float) -> void:
 	_twist_shown = lerpf(_twist_shown, target_twist, blend)
 	var prone: bool = pose.get("prone", false)
 	var stride := clampf(_speed / 4.0, 0.0, 1.0) * (0.55 + 0.25 * clampf((_speed - 4.0) / 2.5, 0.0, 1.0))
-	if downed or casualty:
-		stride = 0.0
+	if downed or casualty or seated:
+		stride = 0.0  # seated: the vehicle moves him, the legs don't walk (Captain, 2026-10-14)
 	elif prone:
 		stride *= 0.35  # crawling: small leg movements
 	var swing := sin(_phase) * stride
@@ -1011,6 +1085,11 @@ func _process(delta: float) -> void:
 		_aim_w = move_toward(_aim_w, 1.0 if aiming and _held_weapon and is_instance_valid(_held) else 0.0, delta * 6.0)
 		head.rotation.x = clampf(look_pitch, -0.7, 0.7) * 0.8 - lean - AIM_HEAD_DIP * smoothstep(0.0, 1.0, _aim_w)
 		hands_anchor.rotation.x = clampf(look_pitch, -0.8, 0.8) * 0.8 - lean
+		if seated:
+			# The rifle stands between the knees whichever way he looks; slumped, the head hangs.
+			hands_anchor.rotation.x = 0.0
+			if downed:
+				head.rotation.x = -SEAT_HEAD_DROOP
 	_update_arms(delta, carry, swing)
 
 
@@ -1063,6 +1142,10 @@ func _target_bones(carry: Dictionary) -> Dictionary:
 		if ph.is_empty() or _hold_weight(ph.phase, ph.u) > 0.05:
 			return casualty_bones(mode)
 		# Still on the ground (not yet lifted, or already put down): lying as it fell.
+	if downed and is_seated():
+		var slumped := pose.duplicate()  # down or dead in a seat: slumped in it, not lying across it
+		slumped["pitch"] = SEAT_SLUMP
+		return pose_bones(slumped, false)
 	if downed and ragdolled():
 		return ragdoll_bones()
 	if downed:
@@ -1075,7 +1158,7 @@ func _target_bones(carry: Dictionary) -> Dictionary:
 ## aiming: standing or crouched, the hands free of carries and actions.
 func _bladed(p: Dictionary, mode: StringName) -> Dictionary:
 	if hold != Hold.BOTH or not _held_weapon or not is_instance_valid(_held) or downed \
-			or p.get("prone", false) or mode != &"" or _action_active():
+			or p.get("prone", false) or p.get("seated", false) or mode != &"" or _action_active():
 		return p
 	var out := p.duplicate()
 	out["twist"] = blade_twist(left_handed)
@@ -1292,15 +1375,26 @@ func _arm_goals(carry: Dictionary) -> Array:
 
 func _held_goals() -> Array:
 	if not is_instance_valid(_held):
-		return [["swing", null], ["swing", null]]
+		return _seat_hands() if is_seated() else [["swing", null], ["swing", null]]
 	var key := "held:%d" % _held.get_instance_id()
 	var support := _support
+	if is_seated() and _held_weapon:
+		support = _grip + Vector3(0, 0.03, 0.11)  # the rifle stood up: the support hand over the firing hand
 	if reloading:
 		# Hand drops under the receiver and works the magazine.
 		support = _grip.lerp(_support, 0.35) + Vector3(0, -0.11 + sin(_time * 9.0) * 0.025, 0)
 	var firing := [key, torso.to_local(_held.to_global(_grip))]
 	var other := [key, torso.to_local(_held.to_global(support))]
 	return [other, firing] if left_handed and _held_weapon else [firing, other]
+
+
+## Seated with nothing in the hands: on the thighs, or forward on the controls at a station
+## (SEAT_LAP, SEAT_CONTROLS).
+func _seat_hands() -> Array:
+	var at: Vector3 = SEAT_CONTROLS if pose.get("station", false) else SEAT_LAP
+	var hips := Vector3(0, float(pose.get("hip", SEAT_HEIGHT)), float(pose.get("hip_z", SEAT_HIP_BACK)))
+	var root: Transform3D = _shown.root
+	return [["seat", _torso_point(root * (hips + at))], ["seat", _torso_point(root * (hips + at * Vector3(-1, 1, 1)))]]
 
 
 ## The hands for the current action, by phase; [] once its hand work is done.

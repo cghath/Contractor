@@ -67,6 +67,19 @@ const READY_TURN := 0.15
 const PISTOL_AIM := Vector3(0.0, 0.16, -0.44)
 const PISTOL_READY := Vector3(0.06, -0.12, -0.32)
 const PISTOL_READY_DIP := 0.45
+## Seated in a vehicle (CharacterModel.is_seated; Captain, 2026-10-14: the UH-60M's riders held
+## their rifles pointing across the cabin): a rifle stands muzzle down between the knees, the
+## butt up in front of the chest and the hands on it, pointing at the floor whichever way he
+## looks (hands_anchor follows the upper body then). Proposed: the muzzle's way (hands_anchor
+## space; the upper body's forward lean brings it near vertical), the butt (as the pockets
+## above), and how much it may rise so the muzzle stays SEATED_MUZZLE_CLEAR off a floor near
+## the seat (a low seat); a pistol points down at the floor in front.
+const SEATED_DIR := Vector3(0, -0.97, -0.24)
+const SEATED_BUTT := Vector3(0.0, 0.0, -0.3)
+const SEATED_LIFT_MAX := 0.12
+const SEATED_MUZZLE_CLEAR := 0.05
+const SEATED_PISTOL := Vector3(0.06, -0.3, -0.28)
+const SEATED_PISTOL_DIP := 1.2
 ## How fast a held weapon moves between the ready and aiming (per second).
 const HOLD_EASE := 12.0
 ## Name tape lettering: cap height in metres, and the ink.
@@ -784,7 +797,7 @@ func _put_in_hands(key: StringName) -> void:
 	if points.is_empty():
 		return
 	node.reparent(model.hands_anchor, false)
-	node.transform = held_transform(VoxelArt.model_for(ItemDB.get_item(_gear[key][0])), model.aiming, model.left_handed, model.twist_shown())
+	node.transform = _hold_goal(VoxelArt.model_for(ItemDB.get_item(_gear[key][0])))
 	model.set_held(node, points.grip, points.support)
 
 
@@ -886,12 +899,35 @@ static func held_transform(art: String, aiming: bool, left: bool, twist := NAN) 
 	return Transform3D(Basis(Vector3.RIGHT, -PISTOL_READY_DIP), PISTOL_READY * Vector3(s, 1, 1))
 
 
+## Where seated: a weapon held (VoxelArt model `art`) in hands_anchor space, muzzle down
+## (SEATED_*), its hip joint `room` above the floor.
+static func seated_transform(art: String, left: bool, room: float) -> Transform3D:
+	var s := -1.0 if left else 1.0
+	if not art.begins_with("rifle"):
+		return Transform3D(Basis(Vector3.RIGHT, -SEATED_PISTOL_DIP), SEATED_PISTOL * Vector3(s, 1, 1))
+	var basis := Basis.looking_at(SEATED_DIR, Vector3.BACK)  # the top towards him
+	var butt := VoxelArt.butt_point(art)
+	var at := SEATED_BUTT * Vector3(s, 1, 1)
+	# The muzzle's height over the hips (hands_anchor is HANDS_ANCHOR up the upper body; the
+	# butt is at the back end, the muzzle as far the other side of the middle).
+	var muzzle := CharacterModel.HANDS_ANCHOR.y + at.y + (basis * Vector3(0, 0, -2.0 * butt.z)).y
+	at.y += clampf(SEATED_MUZZLE_CLEAR - room - muzzle, 0.0, SEATED_LIFT_MAX)
+	return Transform3D(basis, at - basis * butt)
+
+
+## Where the weapon in the hands goes now: seated, aiming or at the ready.
+func _hold_goal(art: String) -> Transform3D:
+	if model.is_seated():
+		return seated_transform(art, model.left_handed, model.seat_room())
+	return held_transform(art, model.aiming, model.left_handed, model.twist_shown())
+
+
 ## Moves the weapon in the hands towards where it sits now (raised to aim, or at the ready).
 func _ease_held(delta: float) -> void:
 	if _held_key == &"" or _held_key == &"hands" or not _gear.has(_held_key):
 		return
 	var node: Node3D = _gear[_held_key][1]
-	var goal := held_transform(VoxelArt.model_for(ItemDB.get_item(_gear[_held_key][0])), model.aiming, model.left_handed, model.twist_shown())
+	var goal := _hold_goal(VoxelArt.model_for(ItemDB.get_item(_gear[_held_key][0])))
 	node.transform = node.transform.interpolate_with(goal, minf(delta * HOLD_EASE, 1.0))
 
 

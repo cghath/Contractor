@@ -339,7 +339,10 @@ static func _is_world(collider: Object) -> bool:
 ## Every peer, every frame (from the body): the model, hitbox pose and capsule follow the
 ## replicated stance.
 func apply_pose() -> void:
-	body.model.pose = pose_for(stance, side, lean)
+	# Seated in a vehicle the seat poses the body (Vehicle._place_occupants); the stance still
+	# sets the eye and the capsule.
+	var seated := not body.seat_pose.is_empty() and is_instance_valid(body.vehicle)
+	body.model.pose = body.seat_pose if seated else pose_for(stance, side, lean)
 	var key := -1 if not body.vitals.is_up() else stance
 	if key == _shape_key:
 		return

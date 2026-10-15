@@ -244,6 +244,7 @@ var salvaged := false
 var _zones := {}             # zone -> health 0..1
 var _seat_nodes: Array = []  # every peer: Soldier or null per seat
 var _seat_local: Array[Transform3D] = []  # each seat's body origin in the vehicle's frame
+var _seat_poses: Array[Dictionary] = []   # each seat's CharacterModel.seated_pose ({} standing)
 var _lost := false
 var _input := {"throttle": 0.0, "steer": 0.0, "brake": true, "at": -100.0}
 var _ai_input := {"throttle": 0.0, "steer": 0.0, "brake": true}
@@ -326,6 +327,7 @@ func setup(p_model: String, p_scheme := "", p_faction := &"player", id := "") ->
 	for seat: Dictionary in spec.get("seats", []):
 		var eye := Vehicle.seat_eye(String(seat.get("stance", "sit")))
 		_seat_local.append(Transform3D(Basis(), VehicleSpecs.vec(seat.at) - Vector3(0, eye, 0)))
+		_seat_poses.append(_seated_pose_for(seat, eye))
 	for i in (spec.get("points", []) as Array).size():
 		var p: Dictionary = spec.points[i]
 		add_child(VehicleActionPoint.new(self, String(p.kind), VehicleSpecs.vec(p.at), p.get("seats", []), -1, "Point%d" % i))
@@ -539,6 +541,39 @@ func seat_transform(seat: String) -> Transform3D:
 func seat_eye_point(index: int) -> Vector3:
 	var at := VehicleSpecs.vec(spec.seats[index].at)
 	return global_transform * (turret.carry(at) if index == _gun_seat else at)
+
+
+## The seated pose (CharacterModel.seated_pose) for a seat whose eye is `eye` above its body's
+## origin, or {} for a standing one (a hatch or a pickup bed: the stance poses him). The hips
+## go on the seat's cushion (VehicleInteriors.cushion_top) and the feet on the cabin floor
+## (VehicleInteriors.FLOORS; an open seat's isn't drawn there: CharacterModel.SEAT_HEIGHT under
+## the hips). Captain, 2026-10-14: the UH-60M's riders were posed standing in their seats.
+func _seated_pose_for(seat: Dictionary, eye: float) -> Dictionary:
+	if String(seat.get("stance", "sit")) == "stand":
+		return {}
+	var eye_y := VehicleSpecs.vec(seat.at).y
+	var origin_y := eye_y - eye
+	var floor_y := NAN if bool(seat.get("open", false)) else VehicleInteriors.floor_of(model)
+	var hip := VehicleInteriors.cushion_top(eye_y, floor_y) + CharacterModel.SEAT_HIP_UP - origin_y
+	var floor_rel := hip - CharacterModel.SEAT_HEIGHT if is_nan(floor_y) else floor_y - origin_y
+	return CharacterModel.seated_pose(hip, floor_rel, StringName(seat.get("kind", "")) in [DRIVER, PILOT, GUNNER])
+
+
+## Where seat `index`'s cushion is (the seated hips' spot), in the vehicle's frame, or null for
+## a standing seat.
+func seat_cushion(index: int) -> Variant:
+	if index < 0 or index >= _seat_poses.size() or _seat_poses[index].is_empty():
+		return null
+	var origin := _seat_at(index).origin
+	return origin + Vector3(0, float(_seat_poses[index].hip) - CharacterModel.SEAT_HIP_UP, 0)
+
+
+## Where seat `index`'s floor is (under the feet), metres up in the vehicle's frame, or NAN for a
+## standing seat.
+func seat_floor(index: int) -> float:
+	if index < 0 or index >= _seat_poses.size() or _seat_poses[index].is_empty():
+		return NAN
+	return _seat_at(index).origin.y + float(_seat_poses[index].floor)
 
 
 ## Where seat `index` puts its occupant's body, in the vehicle's frame: the turret's seat goes
@@ -776,6 +811,7 @@ func _release(s: Soldier) -> void:
 	s.remove_meta(&"turret_set")
 	s.model.visible = true
 	s.gear.visible = true
+	s.seat_pose = {}
 	s.remove_meta(&"seat_veh_yaw")
 	if s.vitals.is_up() and s.collision_layer == 0 and not is_instance_valid(s.ragdoll) and not is_instance_valid(s.carried_by):
 		s.collision_layer = Soldier.BODY_LAYER
@@ -841,6 +877,12 @@ func _place_occupants() -> void:
 		var seat_def: Dictionary = defs[i]
 		var t := global_transform * _seat_at(i)
 		s.vehicle = self
+		var f := -global_basis.z
+		var veh_yaw := atan2(-f.x, -f.z)
+		## "face": which way the seat faces, degrees from the vehicle's front (positive to the
+		## left; a bench facing aft or outboard). Riders face it; the drawn body does even while
+		## a player looks round (the seat pose turns it back by the difference).
+		var face := deg_to_rad(float(seat_def.get("face", 0.0)))
 		s.global_position = t.origin
 		s.velocity = Vector3.ZERO
 		if s.collision_layer != 0:
@@ -853,9 +895,7 @@ func _place_occupants() -> void:
 			s.gear.visible = open
 		if s.is_multiplayer_authority():
 			# This peer drives the body: it faces the way it looks, turning with the vehicle.
-			var f := -global_basis.z
-			var veh_yaw := atan2(-f.x, -f.z)
-			var rel := 0.0
+			var rel := face
 			if s.has_meta(&"seat_veh_yaw") and not s.is_ai():
 				rel = wrapf(s.rotation.y - float(s.get_meta(&"seat_veh_yaw")), -PI, PI)
 				if StringName(seat_def.kind) != GUNNER:
@@ -870,6 +910,11 @@ func _place_occupants() -> void:
 				s.movement.mounted = false
 			if s.vitals.is_up():
 				s.head.position.y = SoldierMovement.STANCE_EYE[stance]
+		var seated: Dictionary = _seat_poses[i] if i < _seat_poses.size() else {}
+		if not seated.is_empty():
+			# Every peer, from the synced turn; the gun's seat turns with its gunner (and the gun).
+			seated["yaw"] = 0.0 if i == _gun_seat else wrapf(veh_yaw + face - s.rotation.y, -PI, PI)
+		s.seat_pose = seated
 	for id: int in _seen.keys():
 		if not now_seen.has(id):
 			var gone: Variant = _seen.get(id)

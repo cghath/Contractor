@@ -22,6 +22,9 @@ const P := VehicleArt.P
 
 ## How far below the eye a seat's cushion top sits (seated).
 const CUSHION_DROP := 0.72
+## Each body's cabin floor (metres up in the vehicle's frame): the seats stand on it, and a seated
+## rider's feet rest on it (Vehicle: CharacterModel.seated_pose, Captain, 2026-10-14).
+const FLOORS := {"matv": 1.0, "maxxpro": 1.2, "hilux": 0.75, "lc79": 0.85, "aav7": 1.0, "uh60": 0.62}
 
 static var _seats := {}  # model -> Array of seat dictionaries (vehicles.json, "base" merged)
 static var _mutex := Mutex.new()
@@ -202,7 +205,7 @@ class Cab:
 	## A seat under `e` (the eye): cushion, backrest and a pedestal down to the floor.
 	## `floor_y`: the cabin floor, so a low eye's cushion still sits on it.
 	func seat(e: Vector3, floor_y: float, wide := 0.22) -> void:
-		var top := maxf(e.y - CUSHION_DROP, floor_y + 0.12)
+		var top := VehicleInteriors.cushion_top(e.y, floor_y)
 		fit(e.x - wide, top - 0.1, e.z - 0.25, e.x + wide, top, e.z + 0.2, P.SEAT)
 		fit(e.x - wide, top, e.z + 0.2, e.x + wide, e.y - 0.12, e.z + 0.3, P.SEAT)
 		fit(e.x - 0.12, floor_y, e.z - 0.12, e.x + 0.12, top - 0.1, e.z + 0.12, P.PAINT_DARK)
@@ -274,6 +277,17 @@ class Cab:
 
 # --- Seat data ------------------------------------------------------------------------------
 
+## `model`'s cabin floor (FLOORS), or NAN for a model with no cabin drawn here.
+static func floor_of(model: String) -> float:
+	return float(FLOORS.get(_body_of(model), NAN))
+
+
+## The top of the cushion under a seated eye at `eye_y` (vehicle frame), on a floor at
+## `floor_y` (NAN: not known): CUSHION_DROP below the eye, but on a low seat's pedestal.
+static func cushion_top(eye_y: float, floor_y: float) -> float:
+	return eye_y - CUSHION_DROP if is_nan(floor_y) else maxf(eye_y - CUSHION_DROP, floor_y + 0.12)
+
+
 ## A model's seats from data/vehicles.json ("base" merged), read here rather than through
 ## VehicleSpecs so building a canvas on a worker thread touches no shared tables.
 static func seats_of(model: String) -> Array:
@@ -312,7 +326,7 @@ static func _matv(k: Cab) -> void:
 	k.glaze(-0.95, 1.8, 1.9, 0.95, 2.42, 2.7, 2, true)
 	k.glaze_sides(1.3, 0.6, 1.75, 2.6, 2.3, 4.1)
 	_ogpk(k, 0.0, 2.48, 3.3, 0.88)
-	k.seats(1.0, -0.95, 0.95)
+	k.seats(FLOORS.matv, -0.95, 0.95)
 
 
 ## The O-GPK gun shield's armoured windows (VehicleArt._turret, same numbers): the front window,
@@ -360,7 +374,7 @@ static func _maxxpro(k: Cab) -> void:
 	k.glaze_sides(1.4, 0.9, 1.95, 2.0, 2.55, 6.1)
 	k.glaze(-0.3, 2.05, 6.0, 0.3, 2.4, 6.5, 2, false)
 	_ogpk(k, 0.0, 2.85, 3.0, 0.95)
-	k.seats(1.2, -1.0, 1.0)
+	k.seats(FLOORS.maxxpro, -1.0, 1.0)
 
 
 ## A technical's pickup cab (Hilux or Land Cruiser 79, VehicleArt._pickup), drawn solid:
@@ -371,7 +385,7 @@ static func _pickup(k: Cab, lc: bool) -> void:
 	var roof := 1.95 if lc else 1.68
 	var hood_top := 1.25 if lc else 1.05
 	var rake := 0.18 if lc else 0.5
-	var floor_y := 0.85 if lc else 0.75
+	var floor_y: float = FLOORS.lc79 if lc else FLOORS.hilux
 	var top := func(z: float) -> float:
 		var t := clampf((z - hood_end) / rake, 0.0, 1.0)
 		return lerpf(hood_top, roof, t) - (0.2 if t < 1.0 else 0.08)
@@ -407,7 +421,7 @@ static func _aav7(k: Cab) -> void:
 	for side: float in [-1.0, 1.0]:
 		for vz: float in [4.0, 5.2, 6.4]:
 			k.c.mbox(minf(side * 1.3, side * 1.55), 2.62, vz, maxf(side * 1.3, side * 1.55), 2.7, vz + 0.3, P.WINDOW)
-	k.seats(1.0, -1.5, -0.35)
+	k.seats(FLOORS.aav7, -1.5, -0.35)
 
 
 ## UH-60: the fuselage was drawn as a shell, but the upper deck's floor runs through the cabin's
@@ -425,4 +439,4 @@ static func _uh60(k: Cab) -> void:
 	# view): see-through within the window (visual only; they still stop rounds).
 	for side: float in [-1.0, 1.0]:
 		k.see_through(side * 0.75, 1.45, 2.95, side * 1.5, 2.08, 3.55, [P.GLASS, P.PAINT, P.GUN, P.METAL, P.SEAT])
-	k.seats(0.62, -0.85, 0.85)
+	k.seats(FLOORS.uh60, -0.85, 0.85)
