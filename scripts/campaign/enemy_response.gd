@@ -611,8 +611,12 @@ func _spawn_team(squad: Squad, callsign: String, size: int, at: Vector3, toward:
 	var soldiers: Array = []
 	for i in size:
 		var pos := _ground(at + across * TEAM_SPACING_M * (i - (size - 1) / 2.0))
+		var kit := loadout
+		if loadout.size() >= CompoundLevel.HOSTILE_LOADOUT.size() and loadout.slice(0, CompoundLevel.HOSTILE_LOADOUT.size()) == CompoundLevel.HOSTILE_LOADOUT:
+			# OPFOR: this team's mix of AKs, gunner and marksman (callsign picks where in the mix it starts)
+			kit = CompoundLevel.hostile_loadout(callsign.hash() + i) + loadout.slice(CompoundLevel.HOSTILE_LOADOUT.size())
 		var s: Soldier = level.call(&"spawn_soldier", {"name": "%s_%d" % [callsign, i + 1], "faction": "hostile",
-			"variant": "urban", "pos": pos, "loadout": loadout, "combat": combat, "discipline": discipline,
+			"variant": "urban", "pos": pos, "loadout": kit, "combat": combat, "discipline": discipline,
 			"guard": false, "mode": mode})
 		if s == null:
 			continue

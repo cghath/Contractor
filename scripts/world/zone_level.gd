@@ -533,7 +533,7 @@ func _spawn_queued_garrison() -> void:
 		var pos: Vector3 = q.pos
 		if module and ai.get_node_or_null(NodePath(_garrison_callsign(module, i))) == null:
 			var s := spawn_soldier({"name": _garrison_callsign(module, i), "faction": "hostile", "variant": "urban", "pos": pos,
-				"loadout": HOSTILE_LOADOUT + ["enemy_radio"] if i % RADIO_EVERY == 0 else HOSTILE_LOADOUT, "combat": GARRISON_STATS.combat, "discipline": GARRISON_STATS.discipline, "guard": true,
+				"loadout": hostile_loadout(i) + ["enemy_radio"] if i % RADIO_EVERY == 0 else hostile_loadout(i), "combat": GARRISON_STATS.combat, "discipline": GARRISON_STATS.discipline, "guard": true,
 				"mode": alert.mode_at(pos) if alert else GARRISON_STATS.mode})
 			if s:
 				var look := module.global_basis * (q.get("face", Vector3.ZERO) as Vector3)  # a post's way out (towns)

@@ -163,7 +163,7 @@ func _test_kits() -> void:
 	if grenadier.name == &"TestGrenadier":
 		grenadier.queue_free()
 	var ar: Soldier = _ai_in_role(Roles.AUTORIFLEMAN)[0]
-	check(ar.inventory.spare_rounds(&"mag_556") > rifleman.inventory.spare_rounds(&"mag_556"), "autorifleman: extra magazines (%d spare rounds)" % ar.inventory.spare_rounds(&"mag_556"))
+	check(ar.inventory.slots[&"primary"] == &"m249" and ar.inventory.spare_rounds(&"box_556") > rifleman.inventory.spare_rounds(&"mag_556"), "autorifleman: an M249 and more rounds than a rifleman (%d spare)" % ar.inventory.spare_rounds(&"box_556"))
 	for s: Soldier in _squad():
 		check(s.inventory.slots[&"vest"] == &"plate_carrier" and s.inventory.slots[&"helmet"] == &"helmet" and s.active_weapon() != null,
 			"%s (%s) wears the base kit and has a weapon" % [s.name, Roles.display_name(s.role)])

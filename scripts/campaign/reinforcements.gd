@@ -47,8 +47,8 @@ const DEFAULTS := {
 	"combat_max": 0.65,
 }
 ## Hostile kit when the level has none of its own (CompoundLevel.HOSTILE_LOADOUT).
-const LOADOUT := ["plate_carrier_light", "plate_pe_l3", "helmet_bump", "assault_pack", "mk18",
-	"mag_556", "mag_556", "mag_556", "mag_556", "ifak", "frag_grenade"]
+const LOADOUT := ["plate_carrier_light", "plate_pe_l3", "helmet_bump", "assault_pack", "akm",
+	"mag_762x39", "mag_762x39", "mag_762x39", "mag_762x39", "ifak", "frag_grenade"]
 ## How many spots along the map's edges are tried for a wave; the one furthest from every
 ## player wins.
 const EDGE_TRIES := 24
@@ -197,7 +197,7 @@ func _send_wave(index: int, origin := Vector3.INF, extra_pairs := 0) -> void:
 	for i in size:
 		var offset := across * PAIR_SPACING_M * (i - (size - 1) / 2.0)
 		var s: Soldier = level.call(&"spawn_soldier", {"name": "R%d_%d" % [index + 1, i + 1], "faction": "hostile",
-			"variant": "urban", "pos": _on_ground(edge + offset), "loadout": loadout if loadout is Array else LOADOUT,
+			"variant": "urban", "pos": _on_ground(edge + offset), "loadout": CompoundLevel.hostile_loadout(index + i) if loadout is Array and loadout == CompoundLevel.HOSTILE_LOADOUT else (loadout if loadout is Array else LOADOUT),
 			"combat": minf(float(params.combat) + float(params.combat_step) * index, float(params.combat_max)), "discipline": 0.5, "guard": false, "mode": "aware"})
 		if s == null:
 			continue
