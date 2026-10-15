@@ -235,4 +235,17 @@ func _server_repair(id: String) -> void:
 	var terminal := terminal_near(who)
 	var why := "Repairs are done at the base's motor pool" if terminal == null else MotorPool.server_repair(id)
 	var e := MotorPool.entry(id)
-	who._client_message.rpc_id(sender, why if why != "" else "%s: in the workshop until day %d" % [String(e.name), int(e.ready_day)])
+	var reply := why if why != "" else "%s: in the workshop until day %d" % [String(e.name), int(e.ready_day)]
+	## The answer goes to the base screen's status line too (review of ui/base-hub, audit P2-23):
+	## Service is pressed on BaseUI's page, whose panel (layer 20) covers the HUD flash.
+	BaseHub._client_note.rpc_id(sender, reply)
+	who._client_message.rpc_id(sender, reply)
+
+
+## Client: the local player is within reach of the base's motor pool terminal, the host's check
+## for Service (review of ui/base-hub: the page is a tab on every terminal's screen, and from
+## the ops desk the host only ever refused).
+func local_at_terminal() -> bool:
+	var lvl := get_parent() as CompoundLevel
+	var me := lvl.players.get_node_or_null(str(multiplayer.get_unique_id())) as Soldier if lvl else null
+	return me != null and terminal_near(me) != null

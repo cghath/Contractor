@@ -389,6 +389,10 @@ func _add_item_lines(rows: VBoxContainer, counts: Dictionary) -> void:
 		rows.add_child(label)
 
 
+## Why Service is off away from the motor pool's sign.
+const AWAY_FROM_POOL := "Service is booked at the motor pool's sign"
+
+
 ## The motor pool's page (audit P2-23: it had no page, only an interaction ring of one line per
 ## vehicle): each company vehicle (MotorPoolNode's copy of MotorPool.view()) with its state, and
 ## a Service button that books it into the workshop (MotorPoolNode.request_repair; the host
@@ -411,6 +415,11 @@ func _build_motor_pool(rows: VBoxContainer) -> void:
 		if why == "" and (int(quote.get("cost", 0)) > 0 or int(quote.get("days", 0)) > 0):
 			service.text = "Service: $%s, %d day%s" % [DebriefCalc.money(int(quote.cost)), int(quote.days), "" if int(quote.days) == 1 else "s"]
 			service.tooltip_text = "Fix every hit zone, the battery and the hull and fill the tank: %s" % service.text.trim_prefix("Service: ")
+			## Off away from the motor pool's sign (this page is a tab on every terminal's screen,
+			## and the host refuses a booking from anywhere else: review of ui/base-hub).
+			if not node.local_at_terminal():
+				service.disabled = true
+				service.tooltip_text = AWAY_FROM_POOL
 		else:
 			service.disabled = true
 			service.tooltip_text = why if why != "" else "Ready: nothing to fix"
