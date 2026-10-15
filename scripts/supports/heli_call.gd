@@ -155,6 +155,9 @@ var rode_out := false
 var going_home := false
 ## Insertion (a contract zone): points (x, z) it flies by, low, before going in to land.
 var route: Array[Vector3] = []
+## Insertion and extraction on a zone: where on its edge it comes in (HeliRoute.entry; the
+## briefing's plan for an insertion), Vector3.INF until launched without one.
+var entry := Vector3.INF
 ## Insertion: the objective its dead-ground LZ was planned round (Vector3.INF: none).
 var objective := Vector3.INF
 ## LZs it waved off (hot), newest last.
@@ -216,12 +219,15 @@ func wants_destination() -> bool:
 # --- Launch ------------------------------------------------------------------------------------
 
 ## Spawns the helicopter on its way in (from the LHD, the FOB or the map edge nearest where it
-## goes: Supports.origin_for). Returns whether it's up.
+## goes: Supports.origin_for; an insertion or extraction on a zone: from the edge nearest its
+## LZ, HeliRoute). Returns whether it's up.
 func server_launch() -> bool:
 	var lvl := level()
 	var layer := VehicleLayer.of(lvl)
 	if lvl == null or layer == null:
 		return false
+	if lvl is ZoneLevel and (kind == "insertion" or kind == "extraction"):
+		return _launch_from_edge(lvl as ZoneLevel, layer)
 	var toward: Vector3 = route[0] if not route.is_empty() else (mark.pos if mark.has("pos") else _players_centre())
 	var origin := Supports.origin_for(lvl, &"heli", toward, 0.0).origin
 	var away := Vector3(origin.x - toward.x, 0.0, origin.z - toward.z)
@@ -241,9 +247,53 @@ func server_launch() -> bool:
 		var area: Rect2 = lvl.map_area().grow(-HeliSupports.SPAWN_INSET_M)
 		start.x = clampf(start.x, area.position.x, area.end.x)
 		start.z = clampf(start.z, area.position.y, area.end.y)
+	return _spawn(lvl, layer, start, -dir)
+
+
+## Captain, 2026-10-14 ("came in from wrong side of the map", "it turned around"): an insertion
+## or extraction on a zone comes in from the edge nearest its LZ whose way in isn't watched
+## (HeliRoute.entry, or the briefing's planned `entry`), straight at the LZ, by a point on the
+## way (HeliRoute.waypoints: the planned insertion point only when it's on the way), never
+## from the support origin's side across the map and back.
+func _launch_from_edge(lvl: ZoneLevel, layer: VehicleLayer) -> bool:
+	var goal: Vector3 = mark.pos if mark.has("pos") else _players_centre()
+	var via: Variant = route[0] if not route.is_empty() else null
+	if entry == Vector3.INF:
+		entry = HeliRoute.entry(lvl, goal).at
+	var away := Vector3(entry.x - goal.x, 0.0, entry.z - goal.z)
+	var run := away.length()
+	var dir := away / run if run > 1.0 else Vector3(0, 0, 1)
+	var dist := run
+	if HeliSupports.start_m > 0.0:
+		dist = HeliSupports.start_m
+	elif kind == "insertion":
+		dist = minf(run, HeliSupports.INSERT_START_M)
+	var start := goal + dir * dist + Vector3(-dir.z, 0.0, dir.x) * SPAWN_SPACING_M * float(sup.calls.size())
+	var area := HeliRoute.inside(lvl)
+	start.x = clampf(start.x, area.position.x, area.end.x)
+	start.z = clampf(start.z, area.position.y, area.end.y)
+	var by: Array[Vector3] = []
+	if kind == "insertion":
+		by = HeliRoute.waypoints(start, goal, via)
+	route = by
+	var first: Vector3 = route[0] if not route.is_empty() else goal
+	var face := Vector3(first.x - start.x, 0.0, first.z - start.z)
+	if not _spawn(lvl, layer, start, face.normalized() if face.length() > 1.0 else -dir):
+		return false
+	var briefing := MapNodes.briefing(sup) if kind == "insertion" else null
+	if briefing and briefing.is_deployed():  # the maps draw the way it actually flies in
+		var line: Array[Vector3] = [start]
+		line.append_array(route)
+		briefing.server_set_insertion_route(HeliRoute.to_xz(line))
+	return true
+
+
+## Up at `start` (on the ground: its contour height added), nose along `facing`; the squad
+## aboard for an insertion; then on its way in (_go_in).
+func _spawn(lvl: Node, layer: VehicleLayer, start: Vector3, facing: Vector3) -> bool:
 	start.y = LandingZone.terrain_y(lvl, start) + Helicopter.CRUISE_AGL_M
 	exit = Vector3(start.x, start.y, start.z)
-	heli = layer.server_spawn(HeliSupports.MODEL, Transform3D(Basis.looking_at(-dir, Vector3.UP), start), "", &"player") as Helicopter
+	heli = layer.server_spawn(HeliSupports.MODEL, Transform3D(Basis.looking_at(facing, Vector3.UP), start), "", &"player") as Helicopter
 	if heli == null:
 		return false
 	heli.support = kind
@@ -560,6 +610,9 @@ func _on_landed() -> void:
 	_empty_since = -1.0
 	if stage == "drop":
 		_moved_insertion()
+		var briefing := MapNodes.briefing(sup) if kind == "insertion" else null
+		if briefing and briefing.is_deployed():
+			briefing.server_set_insertion_route([])  # down: the maps stop drawing its way in
 		_unload(false)
 		sup.server_radio(kind, "On the ground at %s. Out, out, out!" % _grid(heli.global_position))
 		return
@@ -1063,10 +1116,16 @@ static func _compass(dir: Vector2) -> String:
 	return names[roundi(a / 45.0) % 8]
 
 
-## Away to where it came from; gone there (step).
+## Away to where it came from; gone there (step). An insertion or extraction on a zone leaves by
+## the nearest edge whose way out isn't watched (Captain, 2026-10-14: not back across the map
+## to where it came in: HeliRoute.exit_for).
 func _leave() -> void:
 	stage = "leave"
 	phase = Phase.LEAVING
+	var lvl := level()
+	if lvl is ZoneLevel and (kind == "insertion" or kind == "extraction"):
+		var out := HeliRoute.exit_for(lvl, heli.global_position)
+		exit = Vector3(out.x, LandingZone.terrain_y(lvl, out) + Helicopter.CRUISE_AGL_M, out.z)
 	heli.server_fly_to(exit, Helicopter.CRUISE_AGL_M, Helicopter.CRUISE_KMH, false)
 
 

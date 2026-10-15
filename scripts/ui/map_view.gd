@@ -34,6 +34,10 @@ const LINE_STEP_PX := 8.0
 const OBJECTIVE_COLOURS := {"open": Color(1.0, 0.85, 0.2), "done": Color(0.35, 0.85, 0.35), "failed": Color(0.9, 0.3, 0.25)}
 const EXTRACT_COLOUR := Color(0.62, 0.36, 0.85)
 const INSERT_COLOUR := Color(0.3, 0.9, 0.45)
+## The helicopter insertion's way in (Captain, 2026-10-14: entry -> the point it flies in low by
+## -> LZ): a thin dashed line, the entry a small open circle on the edge. Proposed.
+const ROUTE_WIDTH := 1.5
+const ROUTE_DASH_PX := 7.0
 const SQUAD_COLOUR := Color(0.35, 0.6, 1.0)
 const SELF_COLOUR := Color(0.2, 1.0, 1.0)
 const GEAR_COLOUR := Color("ffd166")
@@ -457,6 +461,7 @@ func _draw() -> void:
 	_draw_grid()
 	draw_rect(map_rect, Color(0, 0, 0, 0.8), false, 2.0)
 	_draw_objectives()
+	_draw_routes()
 	_draw_insertion()
 	_draw_extraction()
 	_draw_markers()
@@ -552,6 +557,53 @@ func _draw_insertion() -> void:
 		draw_polyline(tri, INSERT_COLOUR.darkened(0.4), 2.0)
 		_label(s, "%s%s (%s)" % ["INSERT: " if chosen else "", String(point.get("name", "")), Briefing.method_text(point)], INSERT_COLOUR,
 			"insert_chosen" if chosen else "insert")  # Captain, 2026-10-14: foot at the edge, helicopter inside
+
+
+## The helicopter insertion's planned way in (HeliSupports.plan_routes), on every peer:
+## [{"points": PackedVector2Array (where it comes in on the zone's edge, the point it flies in
+## low by, the LZ), "id"}]. During the briefing, the chosen insertion's when it's by helicopter;
+## deployed, while its helicopter flies in (cleared when it lands: HeliCall._on_landed).
+static func insertion_routes(from: Node) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	var briefing := MapNodes.briefing(from)
+	if briefing == null or not (briefing.is_open() or briefing.is_deployed()):
+		return out
+	var point := briefing.insertion()
+	var route: Variant = point.get("route")
+	var lz: Array = point.get("pos", [])
+	if not (route is Array) or (route as Array).is_empty() or lz.size() < 2:
+		return out
+	if briefing.is_deployed() and not _insertion_flying(from):
+		return out
+	var line := PackedVector2Array()
+	for p: Variant in route:
+		if p is Array and (p as Array).size() >= 2:
+			line.append(Vector2(float(p[0]), float(p[1])))
+	line.append(Vector2(float(lz[0]), float(lz[1])))
+	if line.size() >= 2:
+		out.append({"points": line, "id": String(point.get("id", ""))})
+	return out
+
+
+## Whether an insertion helicopter is in the air (every peer: its replicated flight).
+static func _insertion_flying(from: Node) -> bool:
+	if from == null or not from.is_inside_tree():
+		return false
+	for v: Node in from.get_tree().get_nodes_in_group(Vehicle.GROUP):
+		var h := v as Helicopter
+		if h and String(h.net_flight.get("call", "")) == "insertion" and h.is_flying():
+			return true
+	return false
+
+
+func _draw_routes() -> void:
+	for r: Dictionary in insertion_routes(self):
+		var points: PackedVector2Array = r.points
+		for i in range(1, points.size()):
+			draw_dashed_line(map_to_screen(points[i - 1]), map_to_screen(points[i]), INSERT_COLOUR, ROUTE_WIDTH, ROUTE_DASH_PX, true)
+		var s := map_to_screen(points[0])
+		draw_arc(s, 5.0, 0.0, TAU, 16, INSERT_COLOUR, ROUTE_WIDTH, true)
+		_label(s, "IN", INSERT_COLOUR, "insert", 11)
 
 
 func _draw_extraction() -> void:
