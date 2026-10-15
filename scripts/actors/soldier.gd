@@ -194,6 +194,9 @@ var carriable_while_up := false
 ## Every peer: the vehicle this soldier rides in (wave 5: Vehicle sets it from its replicated
 ## seats), or null. While riding, the seat moves the body: no walking, no ragdoll.
 var vehicle: Vehicle = null
+## Every peer: the seated pose (CharacterModel.seated_pose) while riding in a seat he sits in,
+## kept up by the vehicle (Vehicle._place_occupants); {} otherwise (Captain, 2026-10-14).
+var seat_pose: Dictionary = {}
 
 
 func _enter_tree() -> void:
@@ -361,6 +364,8 @@ func _process(_delta: float) -> void:
 		model.hold = CharacterModel.Hold.RIGHT
 	else:
 		model.hold = CharacterModel.Hold.NONE
+	if inventory.hands == &"" and bool(seat_pose.get("station", false)) and is_instance_valid(vehicle):
+		model.hold = CharacterModel.Hold.NONE  # driving, flying or on the gun: the rifle stays slung
 
 
 func _physics_process(delta: float) -> void:

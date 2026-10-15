@@ -158,6 +158,8 @@ func _run_host(wait_for_client: bool) -> void:
 		await _test_drive_tracked()
 	if _want("seats"):
 		await _test_seats()
+	if _want("seated"):
+		await _test_seated()
 	if _want("cargo"):
 		await _test_cargo()
 	if _want("interaction"):
@@ -389,6 +391,104 @@ func _test_seats() -> void:
 		check(pilot_door == ["Get in (Aircraft are flown by AI pilots)", "Check vehicle ()"],
 			"the pilot's door: one greyed Get in saying why, no 'Get in as pilot' (%s)" % [pilot_door])
 		heli.queue_free()
+
+
+## Captain, 2026-10-14 (v0.4.0, inside a UH-60M): the riders stood in their seats, through each
+## other and the seat frames, rifles pointing across the cabin. Every sitting seat now seats its
+## rider: hips on the cushion, head at seated height, feet on the floor under the seat, a rifle
+## muzzle down (stations: slung, hands on the controls), and no two upper bodies overlapping.
+func _test_seated() -> void:
+	print("Seated riders")
+	var shin := CharacterModel.LEG_LENGTH - CharacterModel.THIGH
+	var standing_head := CharacterModel.TORSO_PIVOT.y + CharacterModel.HEAD_PIVOT.y
+	var spawned: Array[Vehicle] = []
+	var riders: Array[Soldier] = []
+	var k := 0
+	for m: String in ["uh60", "matv", "maxxpro", "technical_dshk", "aav7"]:
+		var v := layer.server_spawn(m, Transform3D(Basis(), Vector3(-40.0 + 14.0 * k, 0, 70)), "", &"player", "test_seated_" + m)
+		k += 1
+		if v == null:
+			check(false, "spawned a %s" % m)
+			continue
+		spawned.append(v)
+		var defs: Array = v.spec.seats
+		for i in mini(defs.size(), 15):
+			if String(defs[i].get("stance", "sit")) == "stand":
+				continue
+			var s := _soldier("friendly", v.global_position + Vector3(4.0, 0.1, -2.0 + 0.5 * i))
+			riders.append(s)
+			await get_tree().physics_frame
+			v.server_enter(s, i)
+	await _seconds(1.5)  # settled on their springs, rifles in hands
+	for v in spawned:
+		var label := v.short_name()
+		var cushion_err := 0.0
+		var head_over := -INF
+		var feet_ok := true
+		var muzzle_dot := INF
+		var stations_slung := true
+		var boxes: Array[AABB] = []
+		var seated := 0
+		var worst := ""
+		for i in v.seat_count():
+			var s := v.occupant(i)
+			var cushion: Variant = v.seat_cushion(i)
+			if s == null or cushion == null:
+				continue
+			seated += 1
+			var floor_y := v.seat_floor(i)
+			var pelvis := v.to_local(s.model.torso.global_position)  # the upper body's pivot is the hips
+			var err := pelvis.distance_to(cushion as Vector3)
+			if err > cushion_err:
+				cushion_err = err
+				worst = "seat %d at %s, hips at %s" % [i, cushion, pelvis]
+			head_over = maxf(head_over, v.to_local(s.model.head.global_position).y - (cushion as Vector3).y)
+			for leg: Node3D in [s.model._shin_left, s.model._shin_right]:
+				var sole := v.to_local(leg.global_transform * Vector3(0, -shin, 0))
+				if sole.y < floor_y - 0.04 or sole.y > (cushion as Vector3).y:
+					feet_ok = false
+					worst += " / seat %d sole %.2f (floor %.2f, cushion %.2f)" % [i, sole.y, floor_y, (cushion as Vector3).y]
+			if bool(v._seat_poses[i].get("station", false)):
+				stations_slung = stations_slung and s.model.hold == CharacterModel.Hold.NONE
+			else:
+				var held: Node3D = s.model._held
+				muzzle_dot = minf(muzzle_dot, (-held.global_basis.z).normalized().dot(Vector3.DOWN) if is_instance_valid(held) else -1.0)
+			# The torso's box (VoxelArt torso: 0.52 x 0.66 x 0.22 m about its pivot), in the vehicle's frame.
+			var t := v.global_transform.affine_inverse() * s.model.torso.global_transform
+			var box := AABB(t * Vector3(-0.26, -0.1, -0.11), Vector3.ZERO)
+			for c in 8:
+				box = box.expand(t * Vector3(0.26 if c & 1 else -0.26, 0.56 if c & 2 else -0.1, 0.11 if c & 4 else -0.11))
+			boxes.append(box)
+		var overlaps := 0
+		for a in boxes.size():
+			for b in range(a + 1, boxes.size()):
+				if boxes[a].grow(-0.005).intersects(boxes[b].grow(-0.005)):
+					overlaps += 1
+		check(seated > 0 and cushion_err < 0.15, "%s: %d riders' hips on their seats (worst %.2f m: %s)" % [label, seated, cushion_err, worst])
+		# Over the cushion, not the floor: a commander's seat is up in his cupola, over the cabin floor.
+		var stood := standing_head - (Vehicle.seat_eye("sit") - VehicleInteriors.CUSHION_DROP)  # standing where he sits: head over the cushion
+		check(head_over < stood - 0.2, "%s: their heads at seated height (%.2f m over the seat; standing %.2f)" % [label, head_over, stood])
+		check(feet_ok, "%s: feet on the floor, under the seat %s" % [label, worst])
+		if muzzle_dot != INF:
+			check(muzzle_dot > 0.5, "%s: rifles muzzle down (worst dot with down %.2f)" % [label, muzzle_dot])
+		check(stations_slung, "%s: drivers, pilots and gunners have their rifles slung" % label)
+		check(overlaps == 0, "%s: no two riders' upper bodies overlap (%d)" % [label, overlaps])
+	# Out again: standing, no seat pose left on them.
+	var heli := spawned[0] if not spawned.is_empty() else null
+	if heli:
+		var out := heli.occupant(5)
+		heli.server_exit(out)
+		for i in 3:
+			await get_tree().process_frame
+		check(out != null and out.seat_pose.is_empty() and not out.model.is_seated(), "out of the seat, not drawn seated")
+	for v in spawned:
+		for s: Soldier in v.occupants():
+			v.server_exit(s)
+	for s in riders:
+		s.queue_free()
+	for v in spawned:
+		v.queue_free()
+	await get_tree().physics_frame
 
 
 func _test_cargo() -> void:
