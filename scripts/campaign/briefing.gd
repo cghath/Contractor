@@ -133,6 +133,18 @@ func server_move_insertion(at: Vector2) -> void:
 	_broadcast()
 
 
+## Host, deployed: the chosen insertion's way in is `route` ([[x, z], ...]: where the
+## helicopter came in and the point it flies in low by; HeliCall's launch). Every peer's map
+## draws it while the helicopter flies in (MapView.insertion_routes).
+func server_set_insertion_route(route: Array) -> void:
+	if not multiplayer.is_server():
+		return
+	for point: Dictionary in insertion_points():
+		if String(point.get("id", "")) == insertion_id:
+			point["route"] = route
+	_broadcast()
+
+
 ## The chosen insertion point ({} if the zone has none).
 func insertion() -> Dictionary:
 	for point: Dictionary in insertion_points():
@@ -231,6 +243,8 @@ func server_open(p_contract: Dictionary, p_zone: Dictionary) -> void:
 	zone = Briefing.with_heli_insertion(p_zone, real_zone)
 	if real_zone and String(zone.get("kind", "contract")) != "hot":
 		zone = HeliSupports.plan_insertions(self, zone, contract)  # each one's LZ in dead ground near the objective
+	if real_zone:
+		zone = HeliSupports.plan_routes(self, zone)  # each one's way in, for the map and the flight
 	if MotorPool.in_use():  # wave 5b: the company's vehicles that can come along
 		zone["pool"] = MotorPool.list().filter(func(v: Dictionary) -> bool: return MotorPool.problem(String(v.id)) == "") \
 			.map(func(v: Dictionary) -> Dictionary: return {"id": String(v.id), "name": String(v.name)})
@@ -406,7 +420,7 @@ func _default_flow() -> void:
 		var at := Vector2(float(p[0]), float(p[1]))
 		var via: Variant = _xz(point.get("from"))
 		var objective: Variant = _xz(point.get("objective"))
-		if String(point.get("method", "foot")) != HELI or not HeliSupports.server_insert(self, at, via, objective):
+		if String(point.get("method", "foot")) != HELI or not HeliSupports.server_insert(self, at, via, objective, point.get("route")):
 			server_move_squad_to(at)
 	var extraction := MapNodes.extraction(self)
 	if extraction:

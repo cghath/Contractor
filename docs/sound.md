@@ -41,3 +41,13 @@ our world** rather than photo-real; a real recording can replace any of them lat
   `Sfx.server_play(id, pos)` from the host. **Vehicles (cghath's side):** engine, horn, hits and
   wrecks go the same way: add ids here and call Sfx from the vehicle code.
 - Tests: suite `sound`.
+
+## Infil music (temporary)
+
+Captain (2026-10-14): "can we add Ride of the Valkyries to the infils temporarily lol".
+`InfilMusic` (`scripts/audio/infil_music.gd`, one per level under `HeliSupports`) plays
+`audio/music/ride_of_the_valkyries_1921.mp3` (public domain, see `CREDITS.md`) on the `Music`
+bus to every player aboard a helicopter insertion: the host arms it at lift-off with the track
+position, it fades in over 1 s and out over 3 s at touchdown or on leaving the helicopter, and
+stops with the level. Settings > Audio: "Music" volume and "Infil music (Ride of the Valkyries)"
+(default on). Never on extraction or resupply. Tests: suite `supports` (insertion).

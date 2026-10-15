@@ -98,8 +98,14 @@ func _test_kit() -> void:
 		"a screen asked for 2000 px is fitted to an 800 px window (%.0f)" % box.custom_minimum_size.x)
 	check((box.get_parent() as PanelContainer) != null and (box.get_parent().get_parent().get_parent() as ScrollContainer).theme == UiKit.THEME,
 		"inside a themed, scrolling panel")
-	check(UiKit.heading("H").theme_type_variation == &"HeadingLabel" and UiKit.hint("h").autowrap_mode != TextServer.AUTOWRAP_OFF
-		and UiKit.text("t").autowrap_mode != TextServer.AUTOWRAP_OFF, "headings and hints in their styles; text wraps")
+	## Freed after: labels never put in the tree leaked at exit (with the font and styles they hold).
+	var heading := UiKit.heading("H")
+	var hint := UiKit.hint("h")
+	var text := UiKit.text("t")
+	check(heading.theme_type_variation == &"HeadingLabel" and hint.autowrap_mode != TextServer.AUTOWRAP_OFF
+		and text.autowrap_mode != TextServer.AUTOWRAP_OFF, "headings and hints in their styles; text wraps")
+	for label: Label in [heading, hint, text]:
+		label.free()
 	layer.queue_free()
 
 

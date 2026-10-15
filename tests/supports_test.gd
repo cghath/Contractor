@@ -48,6 +48,7 @@ func _ready() -> void:
 	var tag := OS.get_environment("CONTRACTOR_TEST_TAG")
 	GameState.zone_id = "test_supports" + tag  # never touch a real save
 	Campaign.campaign_id = "test_supports_campaign" + tag
+	GameSettings.use_file(OS.get_user_data_dir().path_join("test_supports_settings%s.cfg" % tag))  # never the player's
 	CompoundLevel.spawn_ai = false
 	PeopleLayer.contract_people = false
 	Contracts.auto_show_debrief = false
@@ -94,6 +95,7 @@ func _finish() -> void:
 	if Net.is_hosting() or multiplayer.is_server():
 		GameState.delete_save()
 	print("SUPPORTS TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
+	GameSettings.use_file("")
 	Net.leave()
 	get_tree().quit(failures)
 
@@ -296,6 +298,8 @@ func _run_host(wait_for_client: bool) -> void:
 		await _test_extraction()
 	if _want("extraction"):
 		await _test_extraction_home()
+	if _want("route"):
+		_test_routes()
 	if _want("insertion"):
 		await _test_insertion()
 	if _want("insertion"):
@@ -683,6 +687,8 @@ func _test_extraction() -> void:
 	e.heli.server_enter(player)
 	await _wait_for(func() -> bool: return ended[0], 40.0)
 	check(ended[0] and ext.state == Extraction.State.ENDED, "everyone aboard: lifting off ends the deployment")
+	var music := InfilMusic.of(level)
+	check(music != null and music.heli_name == "" and music.state == InfilMusic.State.IDLE, "no infil music on an extraction (Captain, 2026-10-14: insertions only)")
 	var report := ext.last_report
 	var squad_names: Array = (report.get("squad", []) as Array).map(func(s: Dictionary) -> String: return String(s.name))
 	var deposited: Array = (report.get("deposited", []) as Array).map(func(d: Dictionary) -> String: return String(d.id))
@@ -763,6 +769,90 @@ func _test_extraction_home() -> void:
 	_regroup()
 
 
+## Captain, 2026-10-14 (v0.3.1, harbour_yard: "came in from wrong side of the map and is trying
+## to land in the wrong area", then "it turned around"): on the campaign's zones (their real
+## ground and garrison sites), the way in to each LZ comes from the edge nearest it whose
+## corridor no watcher sees (a nearer one tried only when watched), at least
+## HeliRoute.MIN_APPROACH_M out; by a point between there and the LZ; at most 1.6 times the
+## straight line; no turn of more than 120 degrees before the hook; ending at the LZ.
+func _test_routes() -> void:
+	print("Helicopter routes on the campaign's zones")
+	for zone_id: String in ["harbour_yard", "wadi_farm", "ridge_hot", "coast_hot"]:
+		var def := MissionRegistry.zone_def(zone_id)
+		if def.is_empty():
+			check(false, "%s: its zone definition" % zone_id)
+			continue
+		var ground := RouteGround.new()
+		ground.terrain = ZoneTerrain.new()
+		ground.terrain.generate(def, [])
+		var half := float(def.get("size_m", 1920.0)) * 0.5
+		ground.area = Rect2(-half, -half, half * 2.0, half * 2.0)
+		var posts: Array[Vector3] = []
+		for m: Dictionary in def.get("modules", []):
+			var at := Vector3(float(m.pos[0]), 0.0, float(m.pos[1]))
+			for spot: Vector3 in ZoneModules.GARRISON.get(String(m.type), [Vector3.ZERO]):
+				var q := at + Vector3(spot.x, 0.0, spot.z)
+				posts.append(Vector3(q.x, ground.ground_height(q.x, q.z) + maxf(spot.y, 0.0), q.z))
+		var via: Variant = null
+		for p: Array in def.get("insertion", []):
+			via = Vector3(float(p[0]), 0.0, float(p[1]))
+			break
+		var cases: Array = []
+		for f: Vector2 in [Vector2(0.0, 0.85), Vector2(-0.85, 0.0), Vector2(0.85, -0.3), Vector2(0.0, -0.85), Vector2(-0.6, 0.86), Vector2(0.3, -0.3), Vector2.ZERO]:
+			cases.append([Vector3(f.x * half, 0.0, f.y * half), via])
+		if zone_id == "harbour_yard":  # the P0947 playtest's Insertion 1: LZ by the south edge, planned from the west edge
+			cases.append([Vector3(-245.0, 0.0, 662.0), Vector3(-673.0, 0.0, -87.0)])
+		var bad := PackedStringArray()
+		var worst_ratio := 0.0
+		var worst_turn := 0.0
+		for case: Array in cases:
+			var lz: Vector3 = case[0]
+			var plan := HeliRoute.plan(ground, lz, case[1], posts)
+			var e: Vector3 = plan.entry
+			var line: Array[Vector3] = [e]
+			line.append_array(plan.points)
+			line.append(lz)
+			var inside := HeliRoute.inside(ground)
+			var on_edge := absf(e.x - inside.position.x) < 1.0 or absf(e.x - inside.end.x) < 1.0 or absf(e.z - inside.position.y) < 1.0 or absf(e.z - inside.end.y) < 1.0
+			var run := _flat(e, lz)
+			var nearer_unwatched := (plan.checked as Array).any(func(d: Dictionary) -> bool: return int(d.watched) == 0 and float(d.run) < run - 0.5)
+			var watched := HeliRoute.corridor_watched(ground, e, lz, posts)
+			var between := (plan.points as Array).all(func(w: Vector3) -> bool: return _flat(w, lz) < run and _flat(w, e) < run)
+			var ratio := HeliRoute.path_ratio(line)
+			var turn := HeliRoute.max_turn_deg(line)
+			worst_ratio = maxf(worst_ratio, ratio)
+			worst_turn = maxf(worst_turn, turn)
+			if not on_edge or run < HeliRoute.MIN_APPROACH_M - 1.0 or nearer_unwatched or watched != int(plan.watched) or not between or ratio > 1.6 or turn > 120.0 \
+					or line[-1] != lz:
+				bad.append("LZ (%.0f, %.0f): in from (%.0f, %.0f) %s, run %.0f, %s, watched %d/%d, ratio %.2f, turn %.0f" % [lz.x, lz.z, e.x, e.z,
+					"on the edge" if on_edge else "OFF the edge", run, "a nearer unwatched edge" if nearer_unwatched else "nearest unwatched",
+					watched, int(plan.watched), ratio, turn])
+			if lz == Vector3(-245.0, 0.0, 662.0):
+				check(e.z > 0.0 and run < 900.0, "harbour_yard P0947 LZ (-245, 662): it comes in on the south side by the LZ, not across the map (in from (%.0f, %.0f), %.0f m run, %s)" % [
+					e.x, e.z, run, ("low by (%.0f, %.0f)" % [plan.points[0].x, plan.points[0].z]) if not (plan.points as Array).is_empty() else "straight in"])
+		check(bad.is_empty(), "%s (%d posts): %d LZs each in from the nearest unwatched edge, at least %.0f m out, by a point on the way, at most %.2f times the straight line, at most %.0f degrees of turn before the hook%s" % [
+			zone_id, posts.size(), cases.size(), HeliRoute.MIN_APPROACH_M, worst_ratio, worst_turn, (": " + "; ".join(bad)) if not bad.is_empty() else ""])
+		ground.terrain.free()
+		ground.free()
+	var far_via: Array[Vector3] = HeliRoute.waypoints(Vector3(0, 0, -700), Vector3(0, 0, 300), Vector3(-600, 0, 400))
+	check(far_via.size() == 1 and absf(far_via[0].x) < 0.01 and far_via[0].z > -700.0 and far_via[0].z < 300.0,
+		"a planned point off the way (behind the LZ) isn't flown by: the point it comes in low by is on the straight line (%s)" % [far_via])
+	var on_via: Array[Vector3] = HeliRoute.waypoints(Vector3(0, 0, -700), Vector3(0, 0, 300), Vector3(80, 0, -200))
+	check(on_via.size() == 1 and on_via[0] == Vector3(80, 0, -200), "a planned point on the way is flown by (%s)" % [on_via])
+
+
+## A zone's ground and edge without the zone (HeliRoute and DeadGround need only these).
+class RouteGround extends Node3D:
+	var terrain: ZoneTerrain
+	var area := Rect2()
+
+	func ground_height(x: float, z: float) -> float:
+		return terrain.height_at(x, z)
+
+	func map_area() -> Rect2:
+		return area
+
+
 func _test_insertion() -> void:
 	print("Helicopter insertion (hot zone briefing)")
 	sup.server_reset_limits()
@@ -773,13 +863,35 @@ func _test_insertion() -> void:
 		"insertion_points": [{"id": "west", "name": "West", "pos": [at.x, at.y], "method": "foot"}]}
 	briefing.server_open({"id": "test_c", "title": "Test", "reinforcements": {"first_wave_s": 3600.0}}, zone)
 	check(briefing.insertion_points().size() == 2 and briefing.server_set_insertion("west_heli"), "the briefing offers West by helicopter, and it's picked")
+	var planned := MapView.insertion_routes(level)
+	var line: PackedVector2Array = planned[0].points if not planned.is_empty() else PackedVector2Array()
+	var edge := HeliRoute.inside(level)
+	var on_edge := line.size() >= 2 and (absf(line[0].x - edge.position.x) < 1.0 or absf(line[0].x - edge.end.x) < 1.0
+		or absf(line[0].y - edge.position.y) < 1.0 or absf(line[0].y - edge.end.y) < 1.0)
+	check(planned.size() == 1 and on_edge and line[-1].distance_to(at) < 1.0,
+		"the briefing's map has the helicopter's way in: from the zone's edge to the LZ (%s)" % [line])
 	check(briefing.server_start(true), "the deployment starts")
 	var c := sup.active("insertion")
+	var flying := MapView.insertion_routes(level)
+	var flying_line: PackedVector2Array = flying[0].points if not flying.is_empty() else PackedVector2Array()
+	var spawned := Vector2(c.heli.global_position.x, c.heli.global_position.z) if c and is_instance_valid(c.heli) else Vector2.INF
+	check(flying_line.size() >= 2 and line.size() >= 2 and flying_line[0].distance_to(spawned) < HeliCall.SPAWN_SPACING_M + 1.0
+		and absf((flying_line[0] - at).angle_to(line[0] - at)) < 0.05,
+		"in flight the map draws the way it flies in, from where it came in, on the planned side (%s; it started at %s)" % [flying_line, spawned])
+	if c and not c.route.is_empty():
+		check(sup.heard_line("coming in low by %s" % c._grid(c.route[0])),
+			"the radio's \"coming in low by\" names the point on its way in (%s)" % c._grid(c.route[0]))
 	check(c != null and _aboard(player, c) and mates.all(func(m: Soldier) -> bool: return _aboard(m, c)) and c.heli.is_flying(),
 		"the squad starts aboard a UH-60 in the air")
 	if c == null:
 		return
 	await _frames(3)
+	# Captain, 2026-10-14 (temporary): Ride of the Valkyries on the way in, for the players aboard.
+	var track := load(InfilMusic.PATH) as AudioStreamMP3
+	check(track != null and not track.loop and track.get_length() > 60.0, "the infil music's track imports (MP3, not looped, %.0f s)" % (track.get_length() if track else -1.0))
+	var music := InfilMusic.of(level)
+	check(music != null and music.state == InfilMusic.State.PLAYING and music.heli_name == String(c.heli.name) and music.player.stream != null
+		and music.player.bus == InfilMusic.BUS, "lifted off with the player aboard: the infil music plays on the Music bus")
 	# Captain, 2026-10-14: the squad aboard showed "Waiting (briefing)" and wasn't drawn.
 	check(mates.all(func(m: Soldier) -> bool: return m.ai_status == "Aboard (UH-60M)"),
 		"the squad HUD says they're aboard (%s)" % ", ".join(mates.map(func(m: Soldier) -> String: return m.ai_status)))
@@ -789,6 +901,12 @@ func _test_insertion() -> void:
 	var at3 := Vector3(at.x, 0, at.y)
 	check(_landed(c) and _flat(c.heli.global_position, at3) <= 100.0, "it lands at the insertion point (%.0f m off)" % (_flat(c.heli.global_position, at3) if is_instance_valid(c.heli) else -1.0))
 	_check_flight(c, flight)
+	check(MapView.insertion_routes(level).is_empty(), "down: the map no longer draws its way in")
+	if music:
+		await _wait_for(func() -> bool: return music.state != InfilMusic.State.PLAYING, 3.0)
+		check(music.heli_name == "" and music.state == InfilMusic.State.FADING, "touchdown: the infil music fades out (%s)" % InfilMusic.State.keys()[music.state])
+		await _wait_for(func() -> bool: return music.state == InfilMusic.State.IDLE, InfilMusic.FADE_OUT_S + 2.0)
+		check(music.state == InfilMusic.State.IDLE and not music.player.playing, "and stops")
 	await _wait_for(func() -> bool: return mates.all(func(m: Soldier) -> bool: return Vehicle.ride_of(m) == null), 10.0)
 	check(mates.all(func(m: Soldier) -> bool: return Vehicle.ride_of(m) == null and _flat(m.global_position, at3) < 120.0), "the AI get out there")
 	if is_instance_valid(c.heli):
@@ -812,9 +930,16 @@ func _test_insertion_hot() -> void:
 		var a := TAU * k / 4.0 + 0.4
 		sentries.append(_sentry("FarSentry%d" % k, at3 + Vector3(cos(a), 0, sin(a)) * 260.0))
 	await _frames(2)
+	GameSettings.set_value("audio", "infil_music", false)  # Captain, 2026-10-14 (temporary): the toggle
 	var c := await _insert_at(at, "east")
 	if c == null:
+		GameSettings.set_value("audio", "infil_music", true)
 		return
+	await _frames(3)
+	var music := InfilMusic.of(level)
+	check(music != null and music.heli_name == String(c.heli.name) and music.state == InfilMusic.State.IDLE and not music.player.playing,
+		"infil music off in the settings: silent on the way in")
+	GameSettings.set_value("audio", "infil_music", true)
 	var flight := await _watch_flight(c, FLY_S)
 	check(_landed(c) and c.wave_offs == 0 and _flat(c.heli.global_position, at3) <= LandingZone.SEARCH_M,
 		"far sentries (260 m) in sight of the LZ: no wave-off, it lands (%d wave-offs, %.0f m off)" % [c.wave_offs, _flat(c.heli.global_position, at3) if is_instance_valid(c.heli) else -1.0])
@@ -880,16 +1005,35 @@ func _out_and_gone(c: HeliCall) -> void:
 ## stood taller near its track: climbing over that is allowed), the least (no clipping), how far
 ## its heading turned in the last 200 m, and where it touched down.
 func _watch_flight(c: HeliCall, seconds: float) -> Dictionary:
-	var out := {"max_over": -INF, "min_agl": INF, "turn_deg": 0.0, "frames": 0}
+	var out := {"max_over": -INF, "min_agl": INF, "turn_deg": 0.0, "frames": 0, "pre_hook_turn_deg": 0.0, "ratio": 1.0}
 	var deadline := Time.get_ticks_msec() + int(seconds * 1000)
 	var last := NAN
 	var turn := 0.0
+	# Captain, 2026-10-14 ("it turned around"): before the J-hook, no turn of more than 120 degrees
+	# from the way it set off, and the way flown at most 1.6 times the straight line.
+	var start := c.heli.global_position if is_instance_valid(c.heli) else Vector3.ZERO
+	var first_dir := Vector2.ZERO
+	var flown := 0.0
+	var prev := start
+	var hooked := false
 	while is_instance_valid(c.heli) and not c.heli.is_landed() and Time.get_ticks_msec() < deadline:
 		await get_tree().physics_frame
 		var h := c.heli
 		if not is_instance_valid(h) or h.flight_mode() != Helicopter.Mode.FLYING:
 			continue
 		var pos := h.global_position
+		if not hooked and h.has_meta(&"landing"):
+			hooked = true
+			out.ratio = (flown + _flat(pos, c.lz)) / maxf(_flat(start, c.lz), 1.0)
+		if not hooked:
+			flown += _flat(prev, pos)
+			var go := Vector2(pos.x - prev.x, pos.z - prev.z)
+			if go.length() > 0.05:
+				if first_dir == Vector2.ZERO and _flat(pos, start) > 30.0:
+					first_dir = Vector2(pos.x - start.x, pos.z - start.z).normalized()
+				elif first_dir != Vector2.ZERO:
+					out.pre_hook_turn_deg = maxf(float(out.pre_hook_turn_deg), rad_to_deg(absf(first_dir.angle_to(go))))
+		prev = pos
 		var vel := Vector3(h.linear_velocity.x, 0.0, h.linear_velocity.z)
 		var left := h.path_left_m()
 		var side := Vector3(-vel.z, 0.0, vel.x).normalized() * Helicopter.ROTOR_REACH_M if vel.length() > 0.5 else Vector3.ZERO
@@ -915,6 +1059,9 @@ func _check_flight(c: HeliCall, flight: Dictionary) -> void:
 		"it flew in contour-low: at most %.1f m over the ground (10 m, more only over what stands taller)" % float(flight.max_over))
 	check(float(flight.min_agl) >= 1.0, "and never lower than %.1f m before the final (no clipping)" % float(flight.min_agl))
 	check(float(flight.turn_deg) >= 120.0, "a J-hook: it turned %.0f degrees in the last 200 m" % float(flight.turn_deg))
+	check(float(flight.pre_hook_turn_deg) <= 120.0 and float(flight.ratio) <= 1.6,
+		"no turning back before the hook (at most %.0f degrees off the way it set off, 120 allowed), the way in %.2f times the straight line (1.6 allowed)" % [
+		float(flight.pre_hook_turn_deg), float(flight.ratio)])
 	check(_landed(c) and _flat(c.heli.global_position, c.lz) <= LandingZone.ROTOR_CLEAR_M,
 		"touching down on the LZ (%.1f m off)" % (_flat(c.heli.global_position, c.lz) if is_instance_valid(c.heli) else -1.0))
 

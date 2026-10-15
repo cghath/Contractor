@@ -144,6 +144,8 @@ func _audio_tab() -> Control:
 	page.add_child(_slider("Master volume", "audio", "master", pct))
 	page.add_child(_slider("Effects (guns, blasts, footsteps)", "audio", "effects", pct))
 	page.add_child(_slider("Voices and radio", "audio", "voice", pct))
+	page.add_child(_slider("Music", "audio", "music", pct))
+	page.add_child(_toggle("Infil music (Ride of the Valkyries)", "audio", "infil_music"))  # Captain, 2026-10-14: temporary
 	page.add_child(_toggle("Mute when the game window isn't in front", "audio", "mute_unfocused"))
 	return page.get_parent()
 

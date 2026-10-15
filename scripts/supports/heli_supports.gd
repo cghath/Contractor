@@ -69,6 +69,7 @@ func _init() -> void:
 
 func _ready() -> void:
 	HeliSupports.register_all()
+	add_child(InfilMusic.new())  # Captain, 2026-10-14: temporary infil music
 
 
 ## The level's HeliSupports node (or null).
@@ -201,8 +202,10 @@ func server_call(kind: String, caller: Soldier, arg: String, point: Vector3) -> 
 ## UH-60 flying in to `at` (x, z) and landing there (or within 100 m). `via` (x, z; a contract
 ## zone's insertion point the LZ was planned from): it flies in low by there first. `objective`
 ## (x, z): the LZ is dead ground near it, and a hot LZ is waved off for other dead ground round
-## it. Returns whether it went; on false the caller puts the squad there on foot.
-static func server_insert(from: Node, at: Vector2, via: Variant = null, objective: Variant = null) -> bool:
+## it. `route` ([[x, z], ...]: the briefing's planned way in, plan_routes): its first point is
+## where on the zone's edge it comes in. Returns whether it went; on false the caller puts the
+## squad there on foot.
+static func server_insert(from: Node, at: Vector2, via: Variant = null, objective: Variant = null, route: Variant = null) -> bool:
 	var node := HeliSupports.of(from)
 	if node == null or not node.multiplayer.is_server() or not Supports.can_fly(node.level()):
 		return false
@@ -213,6 +216,8 @@ static func server_insert(from: Node, at: Vector2, via: Variant = null, objectiv
 		var by := Vector3(v.x, 0.0, v.y)
 		if HeliCall._flat(by, pos) > HeliCall.ROUTE_PASS_M * 2.0:
 			call.route.append(by)
+	if route is Array and (route as Array).size() >= 1 and (route[0] as Array).size() >= 2:
+		call.entry = Vector3(float(route[0][0]), 0.0, float(route[0][1]))
 	if objective is Vector2:
 		var o: Vector2 = objective
 		call.objective = Vector3(o.x, LandingZone.terrain_y(node.level(), Vector3(o.x, 0.0, o.y)), o.y)
@@ -258,6 +263,36 @@ static func plan_insertions(from: Node, zone: Dictionary, contract: Dictionary) 
 		points.append(out)
 	var copy := zone.duplicate(true)
 	copy["insertion_points"] = points
+	return copy
+
+
+## Host (Briefing.server_open, a zone): every helicopter insertion point of `zone` gets its
+## planned way in, "route": [[x, z] where it comes in on the zone's edge, [x, z] the point it
+## flies in low by (none for a short run)] to its "pos" (the LZ), from HeliRoute.plan (by the
+## point's "from" when that's on the way). The briefing's map and the map in flight draw it
+## (MapView.insertion_routes); server_insert flies it. Returns the zone changed.
+## Captain, 2026-10-14: it came in from the wrong side of the map and turned around.
+static func plan_routes(from: Node, zone: Dictionary) -> Dictionary:
+	var lvl := CompoundLevel.current(from) if from and from.is_inside_tree() else null
+	if not (lvl is ZoneLevel):
+		return zone
+	var copy := zone.duplicate(true)
+	var posts := DeadGround.watchers(lvl)
+	for point: Dictionary in copy.get("insertion_points", []):
+		var p: Array = point.get("pos", [])
+		if String(point.get("method", "foot")) != Briefing.HELI or p.size() < 2:
+			continue
+		var lz := Vector3(float(p[0]), 0.0, float(p[1]))
+		var f: Variant = point.get("from")
+		var via: Variant = Vector3(float(f[0]), 0.0, float(f[1])) if f is Array and (f as Array).size() >= 2 else null
+		var plan := HeliRoute.plan(lvl, lz, via, posts)
+		var line: Array[Vector3] = [plan.entry]
+		line.append_array(plan.points)
+		point["route"] = HeliRoute.to_xz(line)
+		SessionLog.note("helicopter route for %s: in from (%.0f, %.0f), %s, LZ (%.0f, %.0f); %d corridor point(s) watched, %d edge(s) tried" % [
+			String(point.get("name", "?")), plan.entry.x, plan.entry.z,
+			"low by (%.0f, %.0f)" % [plan.points[0].x, plan.points[0].z] if not plan.points.is_empty() else "straight in", lz.x, lz.z,
+			int(plan.watched), (plan.checked as Array).size()])
 	return copy
 
 
@@ -390,6 +425,8 @@ func _physics_process(delta: float) -> void:
 		c.step(delta)
 		if c.is_finished():
 			calls.erase(c)
+			if c.kind == "insertion":
+				server_music_stop()  # shot down or gone without landing: the infil music stops
 			for id: int in claimed.keys():
 				if claimed[id] == c:
 					claimed.erase(id)
@@ -432,6 +469,32 @@ func _client_radio(text: String) -> void:
 		heard.pop_front()
 	MapNodes.flash_local(self, text)
 	radio_heard.emit(text)
+
+
+# --- Infil music (every peer; Captain, 2026-10-14: temporary) ------------------------------------
+
+## Host: the insertion `heli` is up with players aboard, `elapsed_s` into the track: every peer
+## arms its InfilMusic (its player hears it while aboard that helicopter).
+func server_music_start(heli: Helicopter, elapsed_s: float) -> void:
+	if multiplayer.is_server() and is_instance_valid(heli):
+		_client_music.rpc(String(heli.name), elapsed_s)
+
+
+## Host: touchdown (or the insertion's over): every peer fades its infil music out.
+func server_music_stop() -> void:
+	if multiplayer.is_server():
+		_client_music.rpc("", 0.0)
+
+
+@rpc("authority", "call_local", "reliable")
+func _client_music(heli: String, elapsed_s: float) -> void:
+	var music := get_node_or_null(NodePath(InfilMusic.NODE_NAME)) as InfilMusic
+	if music == null:
+		return
+	if heli == "":
+		music.disarm()
+	else:
+		music.arm(heli, elapsed_s)
 
 
 ## Whether a line containing `part` was heard here.

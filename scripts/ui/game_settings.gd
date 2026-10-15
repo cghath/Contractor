@@ -38,14 +38,15 @@ const SHADOW_LEVELS := {
 const DEFAULTS := {
 	"video": {"window_mode": "windowed", "resolution": "1600x900", "vsync": true, "fps_cap": 0,
 		"render_scale": 1.0, "antialiasing": "fxaa", "shadows": "medium", "fov": 80.0, "ui_scale": 1.0},
-	"audio": {"master": 0.8, "effects": 1.0, "voice": 1.0, "mute_unfocused": false},
+	# infil_music: Captain, 2026-10-14, temporary (InfilMusic: Ride of the Valkyries on helicopter insertions).
+	"audio": {"master": 0.8, "effects": 1.0, "voice": 1.0, "music": 0.8, "mute_unfocused": false, "infil_music": true},
 	"controls": {"mouse_sensitivity": 1.0, "aim_sensitivity": 0.75, "invert_y": false},
 	"hud": {"objective_markers": true},
 }
 ## Ranges for the sliders: [min, max, step].
 const RANGES := {
 	"render_scale": [0.5, 1.0, 0.05], "fov": [60.0, 110.0, 1.0], "ui_scale": [0.75, 1.5, 0.05],
-	"master": [0.0, 1.0, 0.01], "effects": [0.0, 1.0, 0.01], "voice": [0.0, 1.0, 0.01],
+	"master": [0.0, 1.0, 0.01], "effects": [0.0, 1.0, 0.01], "voice": [0.0, 1.0, 0.01], "music": [0.0, 1.0, 0.01],
 	"mouse_sensitivity": [0.2, 3.0, 0.05], "aim_sensitivity": [0.2, 1.5, 0.05],
 }
 ## The keys a player can rebind (Controls.KEYS, each one key): the label in the Keys list. The
@@ -67,7 +68,7 @@ const BINDABLE := [
 ## to a key never swaps the other away from it.
 const SHARED := [[&"sprint", &"hold_breath"]]
 ## The audio buses each volume sets (Sfx makes them; the room bus follows effects).
-const BUSES := {"master": [&"Master"], "effects": [&"SFX", &"SFX_Room"], "voice": [&"Voice"]}
+const BUSES := {"master": [&"Master"], "effects": [&"SFX", &"SFX_Room"], "voice": [&"Voice"], "music": [&"Music"]}
 
 static var _values := {}
 static var _keys := {}  # action -> physical keycode the player picked

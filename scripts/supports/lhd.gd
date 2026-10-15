@@ -8,9 +8,10 @@ extends Node3D
 ## built the same everywhere from the zone definition (so clients and late joiners have it with
 ## no traffic), and registers it with Supports:
 ## - A zone whose terrain has a coast: this node, the LHD (LhdArt), lying parallel to the coast
-##   "lhd_m" from the coast's edge (default half the shoreline's distance) and "lhd_along_m"
-##   along it; Supports.register_origin(&"lhd", its "Deck" marker): helicopters (V3) start on
-##   its flight deck; AAVs launch from its stern into the water (launch_transform).
+##   "lhd_m" from the coast's edge (default half the shoreline's distance), but never nearer
+##   the shore than OFFSHORE_M (ship_frame), and "lhd_along_m" along it;
+##   Supports.register_origin(&"lhd", its "Deck" marker): helicopters (V3) start on its flight
+##   deck; AAVs launch from its stern into the water (launch_transform).
 ## - Anywhere else: a plain marker on the ground FOB_INSET_M inside the map's edge on the FOB's
 ##   side (the zone's "fob_side", else the side nearest the default insertion point);
 ##   Supports.register_origin(&"fob", it). Ground supports drive in from that side (fob_entry).
@@ -19,6 +20,15 @@ const NODE_NAME := "SupportOrigin"
 const SIDES := ["north", "south", "east", "west"]
 ## Swimming round the ship, an AAV keeps this far off its side (m, Proposed).
 const CLEAR_M := 25.0
+## Anchored offshore: the hull's shoreward side at least this far seaward of the shoreline at
+## its nearest (m, Proposed: 150-250). Captain, 2026-10-14: on harbour_yard the LHD lay a few
+## metres off the sand, "way too close to shore". A ship is moored at a quay or anchored out,
+## never on the beach; a narrow sea puts it out past the zone's edge, over the apron's seabed.
+const OFFSHORE_M := 200.0
+## Water kept under the keel: the draft is the shallowest water under the hull less this (m, Proposed).
+const KEEL_CLEAR_M := 0.5
+## The hull's footprint is checked for water every this many metres along it (m).
+const FOOTPRINT_STEP_M := 16.0
 
 ## &"lhd" or &"fob".
 var kind := &"fob"
@@ -63,18 +73,44 @@ func _place_ship(terrain: ZoneTerrain, coast: Dictionary) -> void:
 	kind = &"lhd"
 	side = terrain.coast_side
 	var data: Dictionary = AavSupport.data().get("lhd", {})
+	var frame := Lhd.ship_frame(terrain, coast)
+	transform = frame.transform
+	add_child(LhdArt.build(frame.length, frame.beam, float(data.get("deck_m", LhdArt.DECK_M)), frame.draft))
+
+
+## Where the LHD lies on `terrain`'s coast (`coast`: the zone's "coast"), the same on every
+## peer and in tests: {"transform" (the middle of the ship at the waterline, the bow along the
+## coast), "length", "beam", "draft"}. Its centre line "lhd_m" from the coast's edge, pulled
+## seaward (past the edge if need be) until the hull's shoreward side is OFFSHORE_M out from
+## the shoreline's nearest point; the draft the data's, less where the water under the hull is
+## shallower (a shallow preset sea: TerrainPresets "sea" depth_m), so the keel stays off the seabed.
+static func ship_frame(terrain: ZoneTerrain, coast: Dictionary) -> Dictionary:
+	var data: Dictionary = AavSupport.data().get("lhd", {})
 	var length := float(data.get("length_m", LhdArt.LENGTH_M))
 	var beam := float(data.get("beam_m", LhdArt.BEAM_M))
 	var half := terrain.size_m * 0.5
 	var out := terrain.seaward()
 	var along := Vector3(absf(out.z), 0.0, absf(out.x))  # x along a north or south coast, z along an east or west one
-	var from_edge := clampf(float(coast.get("lhd_m", terrain.shore_m * 0.5)), beam, terrain.shore_m - beam)
+	var from_edge := minf(float(coast.get("lhd_m", terrain.shore_m * 0.5)), terrain.shore_m - OFFSHORE_M - beam * 0.5)
 	var at := out * (half - from_edge) + along * clampf(float(coast.get("lhd_along_m", 0.0)), -half + length * 0.5, half - length * 0.5)
-	transform = Transform3D(Basis.looking_at(along, Vector3.UP), Vector3(at.x, terrain.sea_level, at.z))
-	# A shallow preset sea (TerrainPresets "sea" depth_m): the hull stops short of the seabed under its keel.
-	var depth := terrain.sea_level - terrain.height_at(at.x, at.z)
-	var draft := clampf(depth - 0.5, 1.0, float(data.get("draft_m", LhdArt.DRAFT_M)))
-	add_child(LhdArt.build(length, beam, float(data.get("deck_m", LhdArt.DECK_M)), draft))
+	var xform := Transform3D(Basis.looking_at(along, Vector3.UP), Vector3(at.x, terrain.sea_level, at.z))
+	var shallow := INF
+	for p in Lhd.footprint(xform, length, beam):
+		shallow = minf(shallow, terrain.sea_level - terrain.height_at(p.x, p.z))
+	var draft := clampf(shallow - KEEL_CLEAR_M, 1.0, float(data.get("draft_m", LhdArt.DRAFT_M)))
+	return {"transform": xform, "length": length, "beam": beam, "draft": draft}
+
+
+## Points over the hull's footprint (a `length` by `beam` box about `xform`, the bow -z):
+## every FOOTPRINT_STEP_M along it, at both sides and the centre line, ends included.
+static func footprint(xform: Transform3D, length: float, beam: float) -> Array[Vector3]:
+	var pts: Array[Vector3] = []
+	var n := maxi(ceili(length / FOOTPRINT_STEP_M), 1)
+	for i in n + 1:
+		var z := -length * 0.5 + length * float(i) / n
+		for x: float in [-beam * 0.5, 0.0, beam * 0.5]:
+			pts.append(xform * Vector3(x, 0.0, z))
+	return pts
 
 
 func _place_fob(level: Node, def: Dictionary) -> void:

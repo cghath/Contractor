@@ -140,6 +140,7 @@ func _test_generation(mem_before: float) -> void:
 	_test_building_gen()
 	_test_towns()
 	_test_presets()
+	_test_ship_placement()
 	var ins := level.insertion_points()[0]
 	check(player.global_position.distance_to(ins) < 5.0 and absf(player.global_position.y - t.height_at(player.global_position.x, player.global_position.z) - 0.1) < 0.05,
 		"the player starts at the insertion point, on the ground (%s)" % player.global_position)
@@ -1057,6 +1058,60 @@ func _preset_terrain(def: Dictionary) -> ZoneTerrain:
 	return t
 
 
+## The salt pan's look (Captain, 2026-10-14, v0.3.1: "this terrain is an actual eye sore", a
+## near-white pan brighter than the sky with nothing on it): the ground darker than the sky,
+## the pan gently rolling but flat, a margin with mesas, scatter at the margins and round the
+## pads with the open middle bare. `t` and `s` are a salt_flats zone's terrain and scatter.
+func _check_salt_flats(t: ZoneTerrain, s: ZoneScatter) -> void:
+	var glare := ZoneLevel.ground_glare("salt_flats")
+	var palette: Dictionary = t.preset.palette
+	var lum := Color(String(palette.grass)).srgb_to_linear().get_luminance()
+	check(glare < 0.8 and lum < 0.35 and ZoneLevel.ground_glare("temperate") < 1.0,
+		"salt flats: the pan is darker than the sky (ground %.2f of the horizon's brightness, under 0.8; crust luminance %.2f linear, under 0.35)" % [glare, lum])
+	var inner := t.margin_m + 60.0
+	var pan := Rect2(-t.size_m * 0.5 + inner, -t.size_m * 0.5 + inner, t.size_m - 2.0 * inner, t.size_m - 2.0 * inner)
+	var r := t.height_range(pan)
+	var points_up := 0
+	var band := 0
+	for j in range(0, t.points, 2):
+		for i in range(0, t.points, 2):
+			var x := t.v_x(i)
+			var z := t.v_x(j)
+			var edge := minf(t.size_m * 0.5 - absf(x), t.size_m * 0.5 - absf(z))
+			if edge < t.margin_m:
+				band += 1
+				if t.height_at(x, z) > 6.0:
+					points_up += 1
+	var mesa_share := float(points_up) / maxf(band, 1.0)
+	check(r.y - r.x > 0.5 and r.y - r.x < 8.0 and t.max_height > 6.0 and t.max_height < 30.0 and mesa_share > 0.01 and mesa_share < 0.35,
+		"salt flats: the pan rolls gently (%.1f m from low to high) but is flat; mesas at the margin up to %.1f m (%.0f%% of the margin over 6 m)" % [r.y - r.x, t.max_height, mesa_share * 100.0])
+	var at_margin := 0
+	var in_open := 0
+	for item in s.items:
+		var p: Vector3 = item.pos
+		if s._open_weight(p.x, p.z) == 0.0:
+			in_open += 1
+		elif minf(t.size_m * 0.5 - absf(p.x), t.size_m * 0.5 - absf(p.z)) < t.margin_m:
+			at_margin += 1
+	check(at_margin > 100 and in_open == 0,
+		"salt flats: scatter at the margins and round the pads (%d of %d items in the margin band), none on the open pan" % [at_margin, s.total()])
+	# The campaign's Salt flats zone itself (4 km): most of the pan open, its scatter and mesas.
+	var def := MissionRegistry.zone_def("coast_hot")
+	var started := Time.get_ticks_usec()
+	var big := _preset_terrain(def)
+	var terrain_ms := (Time.get_ticks_usec() - started) / 1000.0
+	var bs := ZoneScatter.new()
+	bs.generate(big, def)
+	var bare := 0
+	for item in bs.items:
+		if bs._open_weight(item.pos.x, item.pos.z) == 0.0:
+			bare += 1
+	check(bs._open_share() < 0.6 and bare == 0 and bs.total() > 1000 and big.max_height > 6.0,
+		"salt flats zone (%d m): %.0f%% of it has scatter (%d items), the rest open; mesas to %.1f m; heights in %.0f ms" % [int(big.size_m), bs._open_share() * 100.0, bs.total(), big.max_height, terrain_ms])
+	bs.free()
+	big.free()
+
+
 func _test_presets() -> void:
 	ZoneScatter.clear_cache(true)  # layouts from this run's code, not an older run's disk cache
 	# Which preset a zone gets: explicit, name, region, default.
@@ -1108,6 +1163,13 @@ func _test_presets() -> void:
 		var want: Dictionary = a.preset.get("scatter", {})
 		check(want.is_empty() or sa.counts[ZoneScatter.Kind.SCRUB] + sa.counts[ZoneScatter.Kind.ROCK] > 0, "preset %s: has its scatter (%s)" % [id, sa.counts])
 		by_relief[id] = a.max_height - a.min_height
+		if a.margin_m > 0.0:
+			# The pan inside its margin is what has to stay flat; the margin has the berm and mesas.
+			var inner := a.margin_m + 60.0
+			var r := a.height_range(Rect2(-a.size_m * 0.5 + inner, -a.size_m * 0.5 + inner, a.size_m - 2.0 * inner, a.size_m - 2.0 * inner))
+			by_relief[id] = r.y - r.x
+		if id == "salt_flats":
+			_check_salt_flats(a, sa)
 		if id == "coastal_lowland":
 			var water := a.sea_side >= 0 and a.min_height < -3.0 and a.sea_depth_at(a.sea_rect().get_center().x, a.sea_rect().get_center().y) >= 0.0
 			var far := Vector2(-a.sea_rect().get_center().x, -a.sea_rect().get_center().y) * 1.0
@@ -1156,6 +1218,54 @@ func _test_presets() -> void:
 ## we'll use caching for performance if needed"): trees in clusters, the layout the same twice,
 ## cached in memory and on disk, nothing on pads, roads, insertion or extraction points, and a
 ## wood hides a standing man; far stand-ins.
+## Every coastal zone's ship (the LHD, Lhd.ship_frame) anchored offshore. Captain, 2026-10-14:
+## on harbour_yard it lay a few metres off the sand, "way too close to shore". Every ship's
+## footprint over water deeper than its draft and at least Lhd.OFFSHORE_M out from the
+## shoreline (none is moored at a quay yet), and its hull's collision no deeper than its draft.
+## The zones: every campaign zone, every data/zones.json zone, and each sea preset on a few seeds.
+func _test_ship_placement() -> void:
+	print("Ships anchored offshore")
+	var defs := {}
+	for z: Dictionary in MissionRegistry.zones():
+		var d := MissionRegistry.zone_def(String(z.zone_id))
+		if not d.is_empty():
+			defs[String(z.zone_id)] = d
+	for id: String in ZoneDef.ids():
+		defs["zones.json:" + id] = ZoneDef.get_def(id)
+	for preset: String in TerrainPresets.ids():
+		if not (TerrainPresets.get_preset(preset).get("sea", {}) as Dictionary).is_empty():
+			for seed_value: int in [777, 3301, 7712]:
+				defs["%s#%d" % [preset, seed_value]] = ZoneDef.normalize(ZoneDef.generate(seed_value, 1536.0).merged({"terrain": preset}, true))
+	var coastal: Array[String] = []
+	for key: String in defs:
+		var def: Dictionary = defs[key]
+		var t := _preset_terrain(def)
+		if not t.has_coast():
+			t.free()
+			continue
+		coastal.append(key)
+		var frame := Lhd.ship_frame(t, def.get("coast", {}))
+		var draft := float(frame.draft)
+		var nearest := INF
+		var shallow := INF
+		var wet := true
+		for p in Lhd.footprint(frame.transform, float(frame.length), float(frame.beam)):
+			wet = wet and t.water_height(p.x, p.z) == t.sea_level
+			nearest = minf(nearest, -t.shore_distance(p.x, p.z))
+			shallow = minf(shallow, t.sea_level - t.height_at(p.x, p.z))
+		check(wet and shallow > draft and nearest >= Lhd.OFFSHORE_M - 0.01 and absf((frame.transform as Transform3D).origin.y - t.sea_level) < 0.01,
+			"%s: the ship is afloat offshore (%.0f m off the shore at its nearest, water %.1f m deep under a %.1f m draft)" % [key, nearest, shallow, draft])
+		var art := LhdArt.build(float(frame.length), float(frame.beam), LhdArt.DECK_M, draft)
+		var keel := INF
+		for shape in art.get_node(^"Hull").get_children():
+			var c := shape as CollisionShape3D
+			keel = minf(keel, c.position.y - (c.shape as BoxShape3D).size.y * 0.5)
+		check(absf(keel + draft) < 0.01, "%s: the hull's collision ends at the keel (%.2f m, draft %.2f m)" % [key, keel, draft])
+		art.free()
+		t.free()
+	check(coastal.has("harbour_yard") and coastal.has("zones.json:coast"), "harbour_yard and the coast zone are coastal (%s)" % [coastal])
+
+
 func _test_woods() -> void:
 	ZoneScatter.clear_cache(true)
 	var hot := ZoneDef.generate_hot(4409)

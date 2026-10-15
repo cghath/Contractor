@@ -33,6 +33,8 @@ var _mouse_before := Input.MOUSE_MODE_VISIBLE
 var _collapsed := {}
 var _sort := "value"
 var _scroll_to := -1
+## The size fit() was last given (ZERO: this screen's own viewport, as in the game).
+var _view := Vector2.ZERO
 
 
 func _ready() -> void:
@@ -88,6 +90,11 @@ func _ready() -> void:
 	cont.pressed.connect(close)
 	footer.add_child(cont)
 	get_viewport().size_changed.connect(_fit)
+	## A container grows to its minimum but never shrinks back: the wrapped title and footer
+	## hint ask to be very tall while they're still narrow (before the first layout), and the
+	## panel kept that height, running off the bottom of the window until the window's size
+	## changed. So it's refitted whenever its minimum changes.
+	_panel.minimum_size_changed.connect(_fit, CONNECT_DEFERRED)
 	_fit()
 	Contracts.changed.connect(refresh)
 	refresh()
@@ -103,12 +110,14 @@ static func panel_rect(viewport: Vector2) -> Rect2:
 
 ## Sizes the panel to `viewport` (default: this screen's visible rect; tests pass sizes).
 func fit(viewport := Vector2.ZERO) -> void:
-	_fit(viewport)
+	_view = viewport
+	_fit()
 
 
-func _fit(viewport := Vector2.ZERO) -> void:
-	if not is_instance_valid(_panel):
+func _fit() -> void:
+	if not is_instance_valid(_panel) or not is_inside_tree():
 		return
+	var viewport := _view
 	if viewport == Vector2.ZERO:
 		viewport = get_viewport().get_visible_rect().size
 	var rect := panel_rect(viewport)

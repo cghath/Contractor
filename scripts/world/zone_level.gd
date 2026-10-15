@@ -31,6 +31,15 @@ const FOG_COLOUR := Color(0.72, 0.77, 0.83)
 const SUN_COLOUR := Color(1.0, 0.94, 0.84)
 const SKY_TOP := Color(0.24, 0.42, 0.68)
 const SKY_HORIZON := Color(0.70, 0.74, 0.78)
+const SUN_ENERGY := 1.25
+const FILL_ENERGY := 0.35
+const EXPOSURE := 1.05
+## The sun's elevation (degrees; see _build_environment) and the fill's, for ground_glare.
+const SUN_ELEVATION_DEG := 38.0
+const FILL_ELEVATION_DEG := 60.0
+const AMBIENT_ENERGY := 0.95
+## The sky with far ridges, for a preset with a "backdrop" (sky_for).
+const SKY_SHADER := preload("res://scripts/world/zone_sky.gdshader")
 ## Reinforcements (Reinforcements.edge_point): they come in this far inside the zone's edge
 ## (there is no ground beyond it), at the spot of REINFORCE_TRIES round the edge nearest the
 ## players but at least REINFORCE_MIN_M from every one of them (the furthest if none is).
@@ -222,11 +231,12 @@ func streamed_modules() -> Array[ZoneModule]:
 ## Sun, sky and haze, the terrain, and every module (as its proxy until it streams in).
 func _build_environment() -> void:
 	var started := Time.get_ticks_usec()
+	var look := sky_for(String(def.get("terrain", "plain")))
 	var sun := DirectionalLight3D.new()
 	# A mid-morning sun, lower than before, so slopes and scrub read in light and shade.
-	sun.rotation_degrees = Vector3(-38, -35, 0)
+	sun.rotation_degrees = Vector3(-SUN_ELEVATION_DEG, -35, 0)
 	sun.light_color = SUN_COLOUR
-	sun.light_energy = 1.25
+	sun.light_energy = float(look.sun_energy)
 	sun.shadow_bias = 0.15  # the lower sun streaks the gentle slopes with acne at the defaults
 	sun.shadow_normal_bias = 3.0
 	sun.shadow_enabled = true
@@ -237,34 +247,37 @@ func _build_environment() -> void:
 	# and walls read as rock and foliage instead of near-black.
 	var fill := DirectionalLight3D.new()
 	fill.name = "SkyFill"
-	fill.rotation_degrees = Vector3(-60, 145, 0)
+	fill.rotation_degrees = Vector3(-FILL_ELEVATION_DEG, 145, 0)
 	fill.light_color = Color(0.72, 0.80, 0.95)
-	fill.light_energy = 0.35
+	fill.light_energy = float(look.fill_energy)
 	fill.light_specular = 0.0
 	fill.shadow_enabled = false
 	add_child(fill)
 	var env := Environment.new()
 	env.background_mode = Environment.BG_SKY
 	env.sky = Sky.new()
-	var sky := ProceduralSkyMaterial.new()
-	sky.sky_top_color = SKY_TOP
-	sky.sky_horizon_color = SKY_HORIZON
-	sky.ground_horizon_color = SKY_HORIZON
-	sky.ground_bottom_color = SKY_HORIZON  # past the camera's far plane: haze, not a dark void
-	sky.sun_angle_max = 20.0
-	env.sky.sky_material = sky
+	if look.has("backdrop"):
+		env.sky.sky_material = _backdrop_sky(look)
+	else:
+		var sky := ProceduralSkyMaterial.new()
+		sky.sky_top_color = look.sky_top
+		sky.sky_horizon_color = look.sky_horizon
+		sky.ground_horizon_color = look.sky_horizon
+		sky.ground_bottom_color = look.sky_horizon  # past the camera's far plane: haze, not a dark void
+		sky.sun_angle_max = 20.0
+		env.sky.sky_material = sky
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
 	env.ambient_light_sky_contribution = 1.0
-	env.ambient_light_energy = 0.95  # with the lower, warmer sun: the shade side reads, the ground stops looking flat-lit
+	env.ambient_light_energy = AMBIENT_ENERGY  # with the lower, warmer sun: the shade side reads, the ground stops looking flat-lit
 	env.tonemap_mode = Environment.TONE_MAPPER_ACES
-	env.tonemap_exposure = 1.05
+	env.tonemap_exposure = float(look.exposure)
 	env.tonemap_white = 6.0
 	env.adjustment_enabled = true
 	env.adjustment_contrast = 1.06
 	env.adjustment_saturation = 1.0
 	env.fog_enabled = true
-	env.fog_light_color = FOG_COLOUR
-	env.fog_density = FOG_DENSITY
+	env.fog_light_color = look.fog_colour
+	env.fog_density = float(look.fog_density)
 	env.fog_sky_affect = 0.35
 	env.fog_aerial_perspective = 0.6  # distant ground takes the sky's colour, not a flat grey
 	env.fog_sun_scatter = 0.15
@@ -304,6 +317,61 @@ func _build_environment() -> void:
 		scatter.build_near(at, 4)
 	generate_ms = (Time.get_ticks_usec() - started) / 1000.0
 	print("[zone] '%s' (%d m, seed %d, %d modules) generated in %.0f ms" % [def.get("id", ""), int(terrain.size_m), terrain.seed_value, _modules.size(), generate_ms])
+
+
+## The zone's light for terrain preset `preset_id`: the preset's "sky" (sun_energy, fill_energy,
+## exposure, fog_density, and hex fog_colour, sky_top, sky_horizon) over the defaults above, and
+## its "backdrop" (far ridges in the sky: colour, near_deg, far_deg) if it has one. Captain,
+## 2026-10-14: the salt flats' pan was brighter than the sky ("an actual eye sore"); its preset
+## lowers the sun and exposure and hazes the horizon.
+static func sky_for(preset_id: String) -> Dictionary:
+	var preset := TerrainPresets.get_preset(preset_id)
+	var s: Dictionary = preset.get("sky", {})
+	var colour := func(key: String, fallback: Color) -> Color: return Color(String(s[key])) if s.has(key) else fallback
+	var out := {"sun_energy": float(s.get("sun_energy", SUN_ENERGY)), "fill_energy": float(s.get("fill_energy", FILL_ENERGY)),
+		"exposure": float(s.get("exposure", EXPOSURE)), "fog_density": float(s.get("fog_density", FOG_DENSITY)),
+		"fog_colour": colour.call("fog_colour", FOG_COLOUR), "sky_top": colour.call("sky_top", SKY_TOP), "sky_horizon": colour.call("sky_horizon", SKY_HORIZON)}
+	if preset.has("backdrop"):
+		out["backdrop"] = preset.backdrop
+	return out
+
+
+## Roughly how bright the lit flat ground of preset `preset_id` is against the sky at the
+## horizon (linear luminance, ratio; 1 is as bright): its palette's ground colours (by
+## Spotting's GROUND shares, without the scrub) lit by the sun, the fill and the sky's ambient.
+## Over 1 the ground outshines the sky and glares (salt_flats was 1.48 before 2026-10-14).
+static func ground_glare(preset_id: String) -> float:
+	var look := sky_for(preset_id)
+	var palette: Dictionary = TerrainPresets.get_preset(preset_id).get("palette", {})
+	var lum := func(c: Color) -> float: return c.srgb_to_linear().get_luminance()
+	var ground := 0.0
+	var weight := 0.0
+	for part: String in ["grass", "dry", "earth"]:
+		if palette.has(part):
+			ground += float(lum.call(Color(String(palette[part])))) * float(Spotting.GROUND[part])
+			weight += float(Spotting.GROUND[part])
+	ground /= maxf(weight, 0.001)
+	var horizon: float = lum.call(look.sky_horizon)
+	var ambient: float = AMBIENT_ENERGY * (horizon + float(lum.call(look.sky_top))) * 0.5
+	var light := float(look.sun_energy) * sin(deg_to_rad(SUN_ELEVATION_DEG)) + float(look.fill_energy) * sin(deg_to_rad(FILL_ELEVATION_DEG)) + ambient
+	return ground * light / maxf(horizon, 0.001)
+
+
+## The sky for a preset with a "backdrop" (zone_sky.gdshader): the sky's gradient and sun, and
+## far ridges round the horizon, seeded by the zone.
+func _backdrop_sky(look: Dictionary) -> ShaderMaterial:
+	var b: Dictionary = look.backdrop
+	var m := ShaderMaterial.new()
+	m.shader = SKY_SHADER
+	m.set_shader_parameter(&"sky_top", look.sky_top)
+	m.set_shader_parameter(&"sky_horizon", look.sky_horizon)
+	m.set_shader_parameter(&"ridge_colour", Color(String(b.get("colour", "8a8478"))))
+	var near: Array = b.get("near_deg", [0.25, 1.1])
+	var far: Array = b.get("far_deg", [0.6, 2.4])
+	m.set_shader_parameter(&"near_deg", Vector2(float(near[0]), float(near[1])))
+	m.set_shader_parameter(&"far_deg", Vector2(float(far[0]), float(far[1])))
+	m.set_shader_parameter(&"seed", float(int(def.get("seed", 0)) % 101))
+	return m
 
 
 ## Flat pads: each module's footprint, landing zones at the extraction candidates, and the
