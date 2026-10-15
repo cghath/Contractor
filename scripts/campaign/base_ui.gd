@@ -1,59 +1,75 @@
 class_name BaseUI
 extends CanvasLayer
 ## The base screen (wave 4): one window with a page per terminal at the hub (BaseTerminal):
-## squad and deploy (ops desk), roster, hiring board, medbay, shop and armory ledger. It
-## shows BaseHub.view (the host's copy, sent to every peer) and sends every change as a
-## request to the host (BaseHub.request). Esc or Close shuts it; the mouse goes back to the
+## squad and deploy (ops desk), roster, hiring board, medbay, shop, armory ledger and motor
+## pool. It shows BaseHub.view (the host's copy, sent to every peer) and sends every change as
+## a request to the host (BaseHub.request). Esc or Close shuts it; the mouse goes back to the
 ## view.
+##
+## Captain, 2026-10-14: "all the UIs need a pass" (docs/ui_audit.md, P0-1, P1-12, P2-23): the
+## screen is a UiKit.screen (a solid panel fitted to the window, scrolling when the window or the
+## Menu and HUD size leaves too little room) instead of a fixed 980x640 panel that ran off a
+## 1280x720 window at 1.2; rows cut long text with "..." and keep it whole in a tooltip (an
+## item's ItemInfo tooltip) instead of clipping it silently; the Shop tab is the base's shop
+## (filter, prices, Buy and Buy 5, support call prices) instead of a second, plainer shop; and
+## the motor pool has a page of its own (it was only an interaction ring).
 
-const PAGES: Array[String] = ["squad", "roster", "hiring", "medbay", "shop", "armory"]
+const PAGES: Array[String] = ["squad", "roster", "hiring", "medbay", "shop", "armory", "motor_pool"]
 const TITLES := {"squad": "Squad & deploy", "roster": "Roster", "hiring": "Hiring board", "medbay": "Medbay",
-	"shop": "Shop", "armory": "Armory"}
-const SIZE := Vector2(980, 640)
+	"shop": "Shop", "armory": "Armory", "motor_pool": "Motor pool"}
+## The panel's width and the pages' height when the window has room for them (UiKit fits both
+## to the window when it hasn't).
+const WIDTH := 1100.0
+const PAGE_HEIGHT := 620.0
+## What else is in the panel above and below the pages (header, status, key hint, margins), so
+## the pages leave room for it on a short window.
+const PAGE_RESERVE := 170.0
+## The shop's type filter (as ShopScreen's): "" is everything.
+const SHOP_TYPES: Array[String] = ["", "weapon", "ammo", "armor", "plate", "pouch", "backpack", "medical", "utility", "launcher"]
 
 var page := "squad"
+var _box: VBoxContainer
 var _tabs: TabContainer
 var _header: Label
 var _status: Label
 var _pages := {}  # page -> VBoxContainer (its rows)
+var _shop_type := ""
 
 
 func _ready() -> void:
 	layer = 20
-	var panel := PanelContainer.new()
-	panel.custom_minimum_size = SIZE
-	panel.size = SIZE
-	add_child(panel)
-	panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
-	panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	panel.grow_vertical = Control.GROW_DIRECTION_BOTH
-	var box := VBoxContainer.new()
-	box.add_theme_constant_override(&"separation", 6)
-	panel.add_child(box)
+	add_child(UiKit.dim(0.35))
+	_box = UiKit.screen(self, WIDTH, true)
 	var top := HBoxContainer.new()
-	_header = Label.new()
+	top.add_theme_constant_override(&"separation", UiKit.SPACE_M)
+	_header = UiKit.text("")
 	_header.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	top.add_child(_header)
-	top.add_child(_button("Close (Esc)", close))
-	box.add_child(top)
+	var close_button := UiKit.button("Close", close, "Close the base screen (Esc)")
+	close_button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	top.add_child(close_button)
+	_box.add_child(top)
 	_tabs = TabContainer.new()
 	_tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	box.add_child(_tabs)
+	_tabs.clip_tabs = true
+	UiKit.fit_height(_tabs, PAGE_HEIGHT, PAGE_RESERVE)
+	_box.add_child(_tabs)
 	for p in PAGES:
 		var scroll := ScrollContainer.new()
 		scroll.name = TITLES[p]
 		scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 		var rows := VBoxContainer.new()
 		rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		rows.add_theme_constant_override(&"separation", UiKit.SPACE_S)
 		scroll.add_child(rows)
 		_tabs.add_child(scroll)
 		_pages[p] = rows
 	_tabs.tab_changed.connect(func(i: int) -> void:
 		page = PAGES[i]
 		refresh())
-	_status = Label.new()
-	_status.autowrap_mode = TextServer.AUTOWRAP_WORD
-	box.add_child(_status)
+	_status = UiKit.text("")
+	_box.add_child(_status)
+	_box.add_child(UiKit.key_hint("Esc", "Close"))
 	BaseHub.view_changed.connect(refresh)
 	BaseHub.note.connect(func(text: String) -> void: _status.text = text)
 	visible = false
@@ -65,6 +81,21 @@ func open(p_page := "squad") -> void:
 	_tabs.current_tab = PAGES.find(page)
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	refresh()
+	_focus_page.call_deferred()
+
+
+## Focuses the open page's first button (UiKit.focus_first's rule), looked up once the frame's
+## work is done: a page opened and rebuilt again in the same frame (a tab change, a view
+## update) would leave a deferred grab_focus on a row already taken out of the tree.
+func _focus_page() -> void:
+	if not visible or not is_inside_tree():
+		return
+	for root: Control in [_pages[page], _box]:
+		for b in root.find_children("*", "BaseButton", true, false):
+			var c := b as Control
+			if c.is_visible_in_tree() and c.focus_mode != Control.FOCUS_NONE and not (c as BaseButton).disabled:
+				c.grab_focus()
+				return
 
 
 func close() -> void:
@@ -100,10 +131,13 @@ func refresh() -> void:
 	if not visible or not is_node_ready():
 		return
 	var v := BaseHub.view
+	var bill_days := int(v.get("bill_in_days", 7))
 	_header.text = "Day %d    Funds $%d    Wages $%d/day    Weekly bill $%d in %d day%s" % [int(v.get("day", 1)), int(v.get("funds", 0)),
-		int(v.get("daily_wages", 0)), int(v.get("weekly_bill", 0)), int(v.get("bill_in_days", 7)), "" if int(v.get("bill_in_days", 7)) == 1 else "s"]
+		int(v.get("daily_wages", 0)), int(v.get("weekly_bill", 0)), bill_days, "" if bill_days == 1 else "s"]
 	var rows: VBoxContainer = _pages[page]
+	## Out of the tree at once, not at the frame's end: focus_first and the tests look for the new rows.
 	for child in rows.get_children():
+		rows.remove_child(child)
 		child.queue_free()
 	match page:
 		"squad":
@@ -118,6 +152,8 @@ func refresh() -> void:
 			_build_shop(rows, v)
 		"armory":
 			_build_armory(rows, v)
+		"motor_pool":
+			_build_motor_pool(rows)
 
 
 # --- Pages -----------------------------------------------------------------------------------
@@ -128,32 +164,25 @@ func _build_squad(rows: VBoxContainer, v: Dictionary) -> void:
 	var contract: Dictionary = prep.get("contract", {})
 	var dep: Dictionary = roster.get("deployment", {})
 	if dep.get("active", false):
-		rows.add_child(_text("Deployed to %s (%s zone). Respawns used %d of %d free." % [dep.get("zone_id", "?"), dep.get("zone_kind", "contract"),
+		rows.add_child(UiKit.text("Deployed to %s (%s zone). Respawns used %d of %d free." % [dep.get("zone_id", "?"), dep.get("zone_kind", "contract"),
 			int(dep.get("respawns_used", 0)), int(dep.get("respawns_free", 0))]))
 		return
-	rows.add_child(_text("Contract: %s" % (String(contract.get("name", contract.get("title", ""))) + " (" + ContractGen.clawback_text(contract) + ")" if not contract.is_empty()
-		else "none in prep: prep one from the contract board to deploy")))
-	var board := Button.new()
-	board.text = "Contract board"
-	board.pressed.connect(_open_board)
-	rows.add_child(board)
+	var job := UiKit.section("Contract", rows)
+	job.add_child(UiKit.text(String(contract.get("name", contract.get("title", ""))) + " (" + ContractGen.clawback_text(contract) + ")" if not contract.is_empty()
+		else "None in prep: prep one from the contract board to deploy."))
 	if contract.is_empty():
 		for c: Dictionary in v.get("held", []):
-			var row := HBoxContainer.new()
-			row.add_child(_text("Held: %s (deploy by day %d)" % [c.title, int(c.deadline_day)]))
-			var prep_button := Button.new()
-			prep_button.text = "Prep"
+			var prep_button := UiKit.button("Prep", func() -> void: BaseHub.request("prep", [String(c.cid)]), "Prep this contract for the next deployment")
 			prep_button.disabled = not multiplayer.is_server()  # the host preps
-			prep_button.pressed.connect(func() -> void: BaseHub.request("prep", [String(c.cid)]))
-			row.add_child(prep_button)
-			rows.add_child(row)
+			job.add_child(_line("Held: %s (deploy by day %d)" % [c.title, int(c.deadline_day)], [prep_button]))
+	job.add_child(UiKit.button_row([UiKit.button("Contract board", _open_board)]))
 	var debrief: Dictionary = roster.get("last_debrief", {})
 	if not debrief.is_empty():
-		rows.add_child(_text("Last deployment: %d back, %d MIA, %d KIA, %d respawns (%d bought)" % [debrief.get("extracted", []).size(),
+		job.add_child(UiKit.hint("Last deployment: %d back, %d MIA, %d KIA, %d respawns (%d bought)" % [debrief.get("extracted", []).size(),
 			debrief.get("mia", []).size(), debrief.get("dead", []).size(), int(debrief.get("respawns_used", 0)), int(debrief.get("respawns_bought", 0))]))
 	var picked: Array = prep.get("squad", [])
 	var members: Dictionary = roster.get("members", {})
-	rows.add_child(_heading("Squad for the next deployment (%d of %d AI; players take their own slots)" % [picked_count(picked, members), BaseHub.SQUAD_SIZE - 1]))
+	var squad := UiKit.section("Squad for the next deployment (%d of %d AI; players take their own slots)" % [picked_count(picked, members), BaseHub.SQUAD_SIZE - 1], rows)
 	var ids := members.keys()
 	ids.sort()
 	for mid: String in ids:
@@ -161,17 +190,20 @@ func _build_squad(rows: VBoxContainer, v: Dictionary) -> void:
 		if not Roster.is_available(m):
 			continue
 		var row := HBoxContainer.new()
+		row.add_theme_constant_override(&"separation", UiKit.SPACE_M)
 		var check := CheckBox.new()
 		check.button_pressed = mid in picked
 		check.text = "%s  (%s)" % [m.callsign, m.name]
-		check.custom_minimum_size.x = 300
+		check.tooltip_text = "Take %s on the next deployment" % check.text
+		check.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		check.custom_minimum_size.x = 220
 		check.toggled.connect(func(on: bool) -> void: BaseHub.request("pick", [mid, on]))
 		row.add_child(check)
 		row.add_child(_role_picker(mid, StringName(m.role)))
-		row.add_child(_text(_skills_text(m)))
-		rows.add_child(row)
-		_add_short_line(rows, String(m.callsign), m)
-	rows.add_child(_heading("Players"))
+		row.add_child(_cut(_skills_text(m)))
+		squad.add_child(row)
+		_add_short_line(squad, String(m.callsign), m)
+	var people := UiKit.section("Players", rows)
 	var players: Dictionary = roster.get("players", {})
 	var me := multiplayer.get_unique_id()
 	for peer: String in v.get("players", {}):
@@ -181,31 +213,33 @@ func _build_squad(rows: VBoxContainer, v: Dictionary) -> void:
 		var id := int(peer)
 		# FOB ready-up (Captain, 2026-10-14), worded as the briefing's: the host's Deploy is their ready.
 		var readiness := "deploys" if id == 1 else ("ready" if BaseHub.is_ready(id) else "not ready")
-		rows.add_child(_text("%s (%s): %s; %s" % ["You" if id == me else "Player %d" % id, key, readiness,
+		people.add_child(UiKit.text("%s (%s): %s; %s" % ["You" if id == me else "Player %d" % id, key, readiness,
 			"recovering %d days: plays a squadmate next time" % days if days > 0 else "fit"]))
-		_add_short_line(rows, key, main)
-	var buttons := HBoxContainer.new()
+		_add_short_line(people, key, main)
+	var buttons: Array = []
 	if not multiplayer.is_server():
 		var ready_button := Button.new()
 		ready_button.name = "Ready"
 		ready_button.toggle_mode = true
 		ready_button.set_pressed_no_signal(BaseHub.is_ready(me))
 		ready_button.text = "Ready (click to stand down)" if ready_button.button_pressed else "Ready"
+		ready_button.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 		ready_button.tooltip_text = "The host can deploy once every player is ready"
 		ready_button.toggled.connect(func(on: bool) -> void: BaseHub.request("ready", [on]))
-		buttons.add_child(ready_button)
-	var deploy := _button("Deploy", func() -> void: BaseHub.request("deploy"))
+		buttons.append(ready_button)
+	var deploy := UiKit.button("Deploy", func() -> void: BaseHub.request("deploy"))
 	deploy.name = "Deploy"
 	var waiting := BaseHub.not_ready_names()
 	deploy.disabled = not multiplayer.is_server() or contract.is_empty()
 	deploy.tooltip_text = BaseHub.NO_CONTRACT if contract.is_empty() else (BaseHub.WAITING_FOR + ", ".join(PackedStringArray(waiting))
 		if not waiting.is_empty() else "The host deploys the squad")
-	buttons.add_child(deploy)
-	buttons.add_child(_button("Rest a day", func() -> void: BaseHub.request("rest", [1])))
-	buttons.add_child(_button("Save campaign", func() -> void: BaseHub.request("save")))
-	rows.add_child(buttons)
-	_add_restock_row(rows)
-	rows.add_child(_loadouts_button())
+	buttons.append(deploy)
+	buttons.append(UiKit.button("Rest a day", func() -> void: BaseHub.request("rest", [1])))
+	buttons.append(UiKit.button("Save campaign", func() -> void: BaseHub.request("save")))
+	var go := UiKit.section("Deploy", rows)
+	go.add_child(UiKit.button_row(buttons))
+	_add_restock_row(go)
+	go.add_child(UiKit.button_row([_loadouts_button()]))
 
 
 ## S0743 (restock left the medic short silently): what someone's last restock couldn't give
@@ -215,24 +249,21 @@ func _add_short_line(rows: VBoxContainer, who: String, person: Dictionary) -> vo
 	var short := Roster.restock_short_of(person)
 	if short.is_empty():
 		return
-	var line := _text("      %s is short after restock: %s" % [who, Restock.list_text(short)])
+	var line := UiKit.warn("%s is short after restock: %s" % [who, Restock.list_text(short)])
 	line.name = "Short_" + who.validate_node_name()
-	line.modulate = Color(1.0, 0.75, 0.4)
 	rows.add_child(line)
 
 
 ## Playtest S2: kitting up from the stash in one go, the kit each deployed in last time
 ## (BaseHub.server_restock_player / server_restock_squad). What it did shows in the status line.
 func _add_restock_row(rows: VBoxContainer) -> void:
-	var row := HBoxContainer.new()
-	row.name = "Restock"
-	var mine := _button("Restock my last loadout", func() -> void: BaseHub.request("restock"))
-	mine.tooltip_text = "Rebuild the kit you last deployed with from the stash; what the stash is short of is listed"
-	row.add_child(mine)
-	var squad := _button("Restock squad", func() -> void: BaseHub.request("restock_squad"))
+	var mine := UiKit.button("Restock my last loadout", func() -> void: BaseHub.request("restock"),
+		"Rebuild the kit you last deployed with from the stash; what the stash is short of is listed")
+	var squad := UiKit.button("Restock squad", func() -> void: BaseHub.request("restock_squad"),
+		"Rebuild every picked squadmate's last loadout (everyone at the muster line if nobody is picked) from the stash")
 	squad.disabled = not multiplayer.is_server()  # the squad leader (the host)
-	squad.tooltip_text = "Rebuild every picked squadmate's last loadout (everyone at the muster line if nobody is picked) from the stash"
-	row.add_child(squad)
+	var row := UiKit.button_row([mine, squad])
+	row.name = "Restock"
 	rows.add_child(row)
 
 
@@ -240,37 +271,36 @@ func _build_roster(rows: VBoxContainer, v: Dictionary) -> void:
 	var roster: Dictionary = v.get("roster", {})
 	var members: Dictionary = roster.get("members", {})
 	if members.is_empty():
-		rows.add_child(_text("Nobody on the books yet: hire at the hiring board."))
+		rows.add_child(UiKit.text("Nobody on the books yet: hire at the hiring board."))
 	var ids := members.keys()
 	ids.sort()
 	for mid: String in ids:
 		var m: Dictionary = members[mid]
-		var row := HBoxContainer.new()
-		row.add_child(_text("%s \"%s\"  %s  %s  %s  missions %d  $%d/day  %s" % [m.name, m.callsign, Roster.person_text(m), Roles.short_name(StringName(m.role)),
-			Roster.status_text(m), int(m.get("missions", 0)), int(m.get("wage", 0)), _skills_text(m)], 700))
-		row.add_child(_text("%d items" % _item_total(m.get("gear", {})), 80))
+		var extra: Array = []
+		var items := UiKit.hint("%d items" % _item_total(m.get("gear", {})))
+		items.autowrap_mode = TextServer.AUTOWRAP_OFF
+		extra.append(items)
 		if Roster.is_available(m):
-			row.add_child(_button("Let go", func() -> void: BaseHub.request("release", [mid])))
-		rows.add_child(row)
+			extra.append(UiKit.button("Let go", func() -> void: BaseHub.request("release", [mid]), "Release %s from the company" % m.callsign))
+		rows.add_child(_line("%s \"%s\"  %s  %s" % [m.name, m.callsign, Roles.short_name(StringName(m.role)), Roster.status_text(m)], extra))
 		var history: Array = m.get("history", [])
-		if not history.is_empty():
-			var last: Dictionary = history[-1]
-			rows.add_child(_text("      day %d: %s" % [int(last.day), last.text]))
+		var last := ("  Last: day %d, %s" % [int(history[-1].day), history[-1].text]) if not history.is_empty() else ""
+		rows.add_child(_indent(UiKit.hint("%s  missions %d  $%d/day  %s%s" % [Roster.person_text(m), int(m.get("missions", 0)), int(m.get("wage", 0)),
+			_skills_text(m), last])))
 
 
 func _build_hiring(rows: VBoxContainer, v: Dictionary) -> void:
 	var pool: Array = v.get("hiring", {}).get("pool", [])
-	rows.add_child(_text("The board turns over every %d days (last on day %d)." % [Hiring.REFRESH_DAYS, int(v.get("hiring", {}).get("refreshed_day", 1))]))
+	rows.add_child(UiKit.hint("The board turns over every %d days (last on day %d)." % [Hiring.REFRESH_DAYS, int(v.get("hiring", {}).get("refreshed_day", 1))]))
 	if pool.is_empty():
-		rows.add_child(_text("Nobody on the board."))
+		rows.add_child(UiKit.text("Nobody on the board."))
 	for c: Dictionary in pool:
-		var row := HBoxContainer.new()
 		var veteran := " (veteran)" if int(c.get("missions", 0)) >= 10 else ""
-		row.add_child(_text("%s \"%s\"  %s  %s%s  missions %d  %s  asks $%d/day" % [c.name, c.callsign, Roster.person_text(c), Roles.display_name(StringName(c.role)),
-			veteran, int(c.missions), _skills_text(c), int(c.demand)], 760))
 		var cid := String(c.cid)
-		row.add_child(_button("Hire ($%d)" % int(c.fee), func() -> void: BaseHub.request("hire", [cid])))
-		rows.add_child(row)
+		var hire := UiKit.button("Hire ($%d)" % int(c.fee), func() -> void: BaseHub.request("hire", [cid]),
+			"Hire %s for $%d up front, then $%d a day" % [c.callsign, int(c.fee), int(c.demand)])
+		rows.add_child(_line("%s \"%s\"  %s%s  asks $%d/day" % [c.name, c.callsign, Roles.display_name(StringName(c.role)), veteran, int(c.demand)], [hire]))
+		rows.add_child(_indent(UiKit.hint("%s  missions %d  %s" % [Roster.person_text(c), int(c.missions), _skills_text(c)])))
 
 
 func _build_medbay(rows: VBoxContainer, v: Dictionary) -> void:
@@ -286,63 +316,115 @@ func _build_medbay(rows: VBoxContainer, v: Dictionary) -> void:
 		if int(person.get("sit_out_days", 0)) <= 0 or String(person.get("status", Roster.READY)) != Roster.READY:
 			continue
 		anyone = true
-		var row := HBoxContainer.new()
-		row.add_child(_text("%s: %d days (%s)" % [p[2], int(person.sit_out_days), ", ".join(PackedStringArray(person.get("injuries", [])))], 640))
 		var quote := Roster.medbay_quote(person)
+		var extra: Array = []
 		if quote.is_empty():
-			row.add_child(_text("treated"))
+			extra.append(UiKit.hint("treated"))
 		else:
 			var who := String(p[0])
-			row.add_child(_button("Treat: %d days sooner ($%d)" % [int(quote.days_saved), int(quote.cost)], func() -> void: BaseHub.request("medbay", [who])))
-		rows.add_child(row)
+			extra.append(UiKit.button("Treat: %d days sooner ($%d)" % [int(quote.days_saved), int(quote.cost)], func() -> void: BaseHub.request("medbay", [who])))
+		rows.add_child(_line("%s: %d days (%s)" % [p[2], int(person.sit_out_days), ", ".join(PackedStringArray(person.get("injuries", [])))], extra))
 	if not anyone:
-		rows.add_child(_text("Nobody is recovering."))
+		rows.add_child(UiKit.text("Nobody is recovering."))
 	var mia: Array = []
 	for m: Dictionary in roster.get("members", {}).values():
 		if String(m.get("status", "")) == Roster.MIA:
 			mia.append("%s (%s)" % [m.callsign, m.get("mia_zone", "?")])
 	if not mia.is_empty():
-		rows.add_child(_text("Missing in action: %s. Recovery contracts are requested from the board." % ", ".join(PackedStringArray(mia))))
+		rows.add_child(UiKit.warn("Missing in action: %s. Recovery contracts are requested from the board." % ", ".join(PackedStringArray(mia))))
 
 
+## The base's shop (audit P1-12: this tab was a plainer second shop beside ShopScreen): ShopScreen's
+## type filter and support call prices, a row per item with its ItemInfo tooltip, bought through
+## the host (BaseHub.request "buy", delivered to the armory counter).
 func _build_shop(rows: VBoxContainer, v: Dictionary) -> void:
-	rows.add_child(_text("Bought items are delivered to the armory counter."))
+	rows.add_child(UiKit.hint("Bought items are delivered to the armory counter. Hover an item for what it is and how it's used."))
+	var filter := OptionButton.new()
+	for type in SHOP_TYPES:
+		filter.add_item("Everything" if type == "" else type.capitalize())
+		if type == _shop_type:
+			filter.select(filter.item_count - 1)
+	filter.item_selected.connect(func(i: int) -> void:
+		_shop_type = SHOP_TYPES[i]
+		refresh())
+	rows.add_child(UiKit.row("Show", filter, 120.0))
+	var shown := 0
 	for entry: Dictionary in v.get("catalog", []):
 		var id := StringName(entry.get("id", ""))
 		var item := ItemDB.get_item(id)
-		if item == null:
+		if item == null or (_shop_type != "" and String(item.type) != _shop_type):
 			continue
-		var row := HBoxContainer.new()
-		var label := _text("%s  $%d" % [item.name, int(entry.price)], 420)
-		ItemInfo.apply(label, id)  # hover: what it is and how to use it (Captain, 2026-10-14: "item descriptions plus uses also needed")
-		row.add_child(label)
-		row.add_child(_button("Buy", func() -> void: BaseHub.request("buy", [String(id), 1])))
-		row.add_child(_button("Buy 5", func() -> void: BaseHub.request("buy", [String(id), 5])))
-		rows.add_child(row)
+		shown += 1
+		var buy := UiKit.button("Buy", func() -> void: BaseHub.request("buy", [String(id), 1]), "Buy one %s ($%d)" % [item.name, int(entry.price)])
+		var buy5 := UiKit.button("Buy 5", func() -> void: BaseHub.request("buy", [String(id), 5]), "Buy five %s ($%d)" % [item.name, 5 * int(entry.price)])
+		var line := _line("%s  (%s)  $%d" % [item.name, item.type, int(entry.price)], [buy, buy5])
+		ItemInfo.apply(line.get_child(0), id)  # hover: what it is and how to use it (Captain, 2026-10-14: "item descriptions plus uses also needed")
+		rows.add_child(line)
+	if shown == 0:
+		rows.add_child(UiKit.text("Nothing of that kind for sale."))
+	rows.add_child(UiKit.hint("Support calls (paid when called, from the contract's support budget first): " + ", ".join(
+		Prices.support_kinds().map(func(k: Variant) -> String: return "%s $%s" % [String(k), DebriefCalc.money(Prices.support_price(String(k)))]))))
 
 
 func _build_armory(rows: VBoxContainer, v: Dictionary) -> void:
-	rows.add_child(_text("The company stash lies in the armory: pick up what you need, drop what you bring back. Anything left in the base counts."))
-	rows.add_child(_loadouts_button())
-	var counts := BaseArmory.counts(v.get("stash", []))
-	var ids := counts.keys()
-	ids.sort()
-	for id: String in ids:
-		var item := ItemDB.get_item(StringName(id))
-		var label := _text("%s x%d" % [item.name if item else id, int(counts[id])])
-		ItemInfo.apply(label, StringName(id))  # hover: what it is and how to use it (Captain, 2026-10-14: "item descriptions plus uses also needed")
-		rows.add_child(label)
+	rows.add_child(UiKit.text("The company stash lies in the armory: pick up what you need, drop what you bring back. Anything left in the base counts."))
+	rows.add_child(UiKit.button_row([_loadouts_button()]))
+	_add_item_lines(UiKit.section("In the stash", rows), BaseArmory.counts(v.get("stash", [])))
 	# Pouches on the stash's carriers and what's in them come with the carrier.
 	var inside := BaseArmory.contents_counts(v.get("stash", []))
 	if not inside.is_empty():
-		rows.add_child(_heading("On the carriers and in their pouches"))
-		var inside_ids := inside.keys()
-		inside_ids.sort()
-		for id: String in inside_ids:
-			var item := ItemDB.get_item(StringName(id))
-			var label := _text("%s x%d" % [item.name if item else id, int(inside[id])])
-			ItemInfo.apply(label, StringName(id))
-			rows.add_child(label)
+		_add_item_lines(UiKit.section("On the carriers and in their pouches", rows), inside)
+
+
+## One cut line per item (id -> count), each with its ItemInfo tooltip.
+func _add_item_lines(rows: VBoxContainer, counts: Dictionary) -> void:
+	var ids := counts.keys()
+	ids.sort()
+	if ids.is_empty():
+		rows.add_child(UiKit.hint("Nothing."))
+	for id: String in ids:
+		var item := ItemDB.get_item(StringName(id))
+		var label := _cut("%s x%d" % [item.name if item else id, int(counts[id])])
+		ItemInfo.apply(label, StringName(id))  # hover: what it is and how to use it (Captain, 2026-10-14: "item descriptions plus uses also needed")
+		rows.add_child(label)
+
+
+## Why Service is off away from the motor pool's sign.
+const AWAY_FROM_POOL := "Service is booked at the motor pool's sign"
+
+
+## The motor pool's page (audit P2-23: it had no page, only an interaction ring of one line per
+## vehicle): each company vehicle (MotorPoolNode's copy of MotorPool.view()) with its state, and
+## a Service button that books it into the workshop (MotorPoolNode.request_repair; the host
+## checks the asker is at the motor pool terminal, which only the base has).
+func _build_motor_pool(rows: VBoxContainer) -> void:
+	rows.add_child(UiKit.hint("The company's vehicles. Take one on a deployment from the briefing's supports; one left in a zone or destroyed there is gone from the pool. Service is booked at the motor pool's sign."))
+	var node := MotorPoolNode.of(self)
+	var pool: Array = node.pool if node else []
+	if pool.is_empty():
+		rows.add_child(UiKit.text("The company owns no vehicles."))
+		return
+	for e: Dictionary in pool:
+		var quote: Dictionary = e.get("quote", {})
+		var why := String(e.get("problem", ""))
+		var id := String(e.id)
+		var service := UiKit.button("Service", func() -> void:
+			node.request_repair(id)
+			get_tree().create_timer(0.5).timeout.connect(refresh))  # the pool comes back from the host
+		service.name = "Service_" + id.validate_node_name()
+		if why == "" and (int(quote.get("cost", 0)) > 0 or int(quote.get("days", 0)) > 0):
+			service.text = "Service: $%s, %d day%s" % [DebriefCalc.money(int(quote.cost)), int(quote.days), "" if int(quote.days) == 1 else "s"]
+			service.tooltip_text = "Fix every hit zone, the battery and the hull and fill the tank: %s" % service.text.trim_prefix("Service: ")
+			## Off away from the motor pool's sign (this page is a tab on every terminal's screen,
+			## and the host refuses a booking from anywhere else: review of ui/base-hub).
+			if not node.local_at_terminal():
+				service.disabled = true
+				service.tooltip_text = AWAY_FROM_POOL
+		else:
+			service.disabled = true
+			service.tooltip_text = why if why != "" else "Ready: nothing to fix"
+		rows.add_child(_line("%s: %d%% damaged, %d L fuel%s" % [String(e.name), roundi(float(e.get("damage", 0.0)) * 100.0), roundi(float(e.get("fuel", 0.0))),
+			"" if why == "" else "  (%s)" % why], [service]))
 
 
 # --- Bits ------------------------------------------------------------------------------------
@@ -350,9 +432,9 @@ func _build_armory(rows: VBoxContainer, v: Dictionary) -> void:
 ## The loadout menu (Captain, 2026-10-14: "a menu for equipping yourself better and your
 ## squadmates how you want to"): this screen steps aside while it's up and comes back after.
 func _loadouts_button() -> Button:
-	var b := _button("Loadouts: kit yourself and the squad from the stash", _open_loadouts)
+	var b := UiKit.button("Loadouts: kit yourself and the squad from the stash", _open_loadouts,
+		"Paper doll for you and each squadmate: weapons, optics, armour, pack, ammo, meds, grenades; standing loadouts for Restock")
 	b.name = "Loadouts"
-	b.tooltip_text = "Paper doll for you and each squadmate: weapons, optics, armour, pack, ammo, meds, grenades; standing loadouts for Restock"
 	return b
 
 
@@ -368,6 +450,7 @@ func _open_loadouts() -> void:
 
 func _role_picker(mid: String, current: StringName) -> OptionButton:
 	var picker := OptionButton.new()
+	picker.tooltip_text = "Role on the next deployment"
 	for role in Roles.ids():
 		picker.add_item(Roles.display_name(role))
 		picker.set_item_metadata(picker.item_count - 1, String(role))
@@ -397,23 +480,34 @@ static func _item_total(gear: Dictionary) -> int:
 	return n
 
 
-func _text(text: String, width := 0) -> Label:
+## One line of text that takes the row's spare width and cuts with "..." when there isn't
+## enough, the whole text in its tooltip (audit P1-12: rows were 640 to 760 px Labels with
+## clip_text, so wages and skills were cut off with no sign and no way to read them).
+static func _cut(text: String, tooltip := "") -> Label:
 	var label := Label.new()
 	label.text = text
-	if width > 0:
-		label.custom_minimum_size.x = width
-		label.clip_text = true
+	label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	label.tooltip_text = tooltip if tooltip != "" else text
+	label.mouse_filter = Control.MOUSE_FILTER_PASS
 	return label
 
 
-func _heading(text: String) -> Label:
-	var label := _text(text)
-	label.add_theme_color_override(&"font_color", Color("ffd35a"))
-	return label
+## A row: `text` cut to the room left (_cut), then `controls` (buttons) at its end.
+static func _line(text: String, controls: Array = []) -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override(&"separation", UiKit.SPACE_M)
+	row.add_child(_cut(text))
+	for c: Control in controls:
+		c.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		row.add_child(c)
+	return row
 
 
-func _button(text: String, action: Callable) -> Button:
-	var button := Button.new()
-	button.text = text
-	button.pressed.connect(action)
-	return button
+## A detail line (wrapping) indented under its row.
+static func _indent(label: Label) -> MarginContainer:
+	var m := MarginContainer.new()
+	m.add_theme_constant_override(&"margin_left", UiKit.SPACE_L)
+	m.add_child(label)
+	return m

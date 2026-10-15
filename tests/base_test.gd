@@ -857,8 +857,31 @@ func _test_terminals(base: BaseLevel) -> void:
 	await get_tree().process_frame
 	check(boards.size() == 1 and aside and held and ui.is_open() and ui.page == "squad",
 		"the contract board: the base screen steps aside, the board keeps the mouse, and the screen is back when it closes")
+	## The motor pool's sign opens its own page (audit P2-23: it was only an interaction ring).
 	var pool: Dictionary = InteractionMenu.actions_for(player, base.get_node(^"Terminal_motor_pool"))[0]
-	check(String(pool.disabled) != "", "the motor pool waits for wave 5's vehicles")
+	check(String(pool.label) == "Use Motor pool" and String(pool.disabled) == "" and pool.has("call"), "the motor pool offers Use in the interaction menu")
+	InteractionMenu.perform(player, pool)
+	check(ui.is_open() and ui.page == "motor_pool" and ui._pages["motor_pool"].get_child_count() > 0, "and opens the base screen on its page")
+	## Service is on only at the motor pool's sign (review of ui/base-hub: the page is a tab on
+	## every terminal's screen, and the host refused bookings from the ops desk unseen).
+	var hurt := MotorPool.add("matv", "", {"zones": {"hull": 0.5}, "fuel": 300.0})
+	var sign: Node3D = base.get_node(^"Terminal_motor_pool")
+	var was := player.global_transform
+	player.global_position = sign.global_position + Vector3(30, 0, 0)
+	await get_tree().process_frame
+	await get_tree().process_frame  # the pool's view comes over (MotorPoolNode._send, deferred)
+	ui.open("motor_pool")
+	await get_tree().process_frame
+	var service := ui._pages["motor_pool"].find_child("Service_" + hurt.validate_node_name(), true, false) as Button
+	check(service != null and service.disabled and service.tooltip_text == BaseUI.AWAY_FROM_POOL,
+		"away from the sign (the ops desk's Motor pool tab), Service is off: \"%s\"" % (service.tooltip_text if service else "no Service button"))
+	player.global_position = sign.global_position + Vector3(1.5, 0, 0)
+	ui.refresh()
+	await get_tree().process_frame
+	service = ui._pages["motor_pool"].find_child("Service_" + hurt.validate_node_name(), true, false) as Button
+	check(service != null and not service.disabled, "and on at the sign")
+	player.global_transform = was
+	MotorPool.remove(hurt)
 	ui.close()
 
 

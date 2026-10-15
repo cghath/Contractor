@@ -61,9 +61,9 @@ Headless fit is the result of `tests/ui_test.gd` (run R0969, before the fixes on
 | Contract board | `scripts/ui/contract_board.gd` | code | CanvasLayer 10 | default 16; sections 15 at 70% | full window inset 40; left column 460; bottom row of 7 buttons | **@1.5: 1280x720, 1366x768 overflow** |
 | Shop | `scripts/ui/shop.gd` | code | CanvasLayer 11 | default 16; notice `ffd35a` | fixed 620x560, placed by hand | **@1.5: 1280x720, 1366x768 overflow** |
 | Debrief | `scripts/ui/debrief.gd` | code | CanvasLayer 12 | title 22, headings 17, lines 15 | full window inset 80, scrolls | fits when empty (being reworked on ui/debrief-salvage) |
-| Base hub pages (squad / Ops desk, roster, hiring board, medbay, shop, armory) | `scripts/campaign/base_ui.gd` (page from `base_terminal.gd`) | code | CanvasLayer 20 | default 16; headings `ffd35a` | **fixed 980x640**, centred; rows 700 / 760 / 640 / 420 px with `clip_text` | **@1.2: 1280x720; @1.5: 1280x720, 1366x768, 1600x900 overflow** (all 6 pages) |
-| Motor pool | `base_hub.gd` `_motor_pool_actions` | interaction ring | n/a | n/a | no page of its own | n/a |
-| Base loading screen | `base_hub.gd:694` | code | CanvasLayer 120 | default 16 | full window | n/t |
+| Base hub pages (squad / Ops desk, roster, hiring board, medbay, shop, armory, motor pool) | `scripts/campaign/base_ui.gd` (page from `base_terminal.gd`) | code | CanvasLayer 20 | theme (UiKit) | `UiKit.screen` with SolidPanel, 1100 wide and pages 620 tall or the window; rows cut with "..." and tooltips | fits (fixed on ui/base-hub) |
+| Motor pool | `base_ui.gd` `_build_motor_pool` | the base screen's Motor pool page (from its sign) | CanvasLayer 20 | theme | one row per vehicle with a Service button | fits (ui/base-hub) |
+| Base loading screen | `base_hub.gd` `_show_loading` | code | CanvasLayer 120 | theme title over `UiKit.dim` | full window, wraps | n/t (themed on ui/base-hub) |
 | Extraction | `scripts/campaign/extraction.gd` | no UI (text for the map and HUD) | n/a | n/a | n/a | n/a |
 | Dev: AI overlay | `scripts/ui/ai_overlay.gd` | Label3D | 3D, on the player | 28 px fixed-size at 0.0007 | up to 16 three-line labels over the squad | n/a |
 | Dev: hot-zone readout | `scripts/ui/hot_zone_debug.gd` | code | CanvasLayer 50 | 13 px with outline | **absolute (12,120)**; 8 to 9 lines, no wrap | n/t |
@@ -142,6 +142,7 @@ Headless fit is the result of `tests/ui_test.gd` (run R0969, before the fixes on
     - The hot-zone readout is 13 px at an absolute position and overlaps the command menu.
     - Up to 16 AI labels pile up over the squad.
 23. **Design gaps, read.** The motor pool has no page (it is only an interaction ring), and the roster page has no terminal. These are design questions to settle when the base hub is restyled, not layout bugs.
+    - **Settled on ui/base-hub:** the motor pool's sign opens a Motor pool page of the base screen (each vehicle's state and a Service button; service is still booked only at the sign). The roster stays a tab of the ops desk's screen. BaseUI's Shop tab is now the base's shop (ShopScreen's type filter and support call prices, ItemInfo tooltips, bought through the host into the armory); the contract board's Shop button still opens ShopScreen, which ui/campaign-screens could point at `BaseHub.open_ui("shop")` at the base.
 
 ## The shared look
 
@@ -228,7 +229,7 @@ Sizes: S is about half a day, M about a day, L two or more days.
 | # | Branch | Screens | Fixes | Size |
 |---|---|---|---|---|
 | 1 | `ui/auto-scale` | GameSettings and the settings Video tab | P1-7. Choose the default UI scale from the window height (height / 1080, clamped 1.0 to 2.0) with the setting as a multiplier; raise the maximum to 2.0. Do this first: it changes what every later branch fits against. Keep `ui_test`'s scales in step. | S |
-| 2 | `ui/base-hub` | BaseUI (all six pages), the base loading label, the motor pool's page question | P0-1, P1-12, P2-23. Use `UiKit.screen` with SolidPanel; rows built with `row` and `button`, cut with "..." and tooltips; drop the duplicate Shop tab or make it the shop screen; take the base entries off KNOWN. Coordinate with feat/loadout-menu, since the armory page is where a loadout menu would hang. | M |
+| 2 | `ui/base-hub` (done) | BaseUI (all six pages), the base loading label, the motor pool's page question | P0-1, P1-12, P2-23. Use `UiKit.screen` with SolidPanel; rows built with `row` and `button`, cut with "..." and tooltips; drop the duplicate Shop tab or make it the shop screen; take the base entries off KNOWN. Coordinate with feat/loadout-menu, since the armory page is where a loadout menu would hang. | M |
 | 3 | `ui/campaign-screens` | contract board, shop | P0-4 (Esc, fit) and P0-5. Use `button_row` for the board's seven buttons; make the details scroll; `list()` with tooltips; take them off KNOWN. | M |
 | 4 | `ui/hud-pass` | Hud labels (crosshair, prompt, downed, respawn, flash), squad list, ammo readout, vehicle readout, objectives panel and hint, subtitles, hot-zone readout | P1-9, P1-10, P1-11, P1-13, P1-14, P2-22. Set out HUD zones (top-right objectives, bottom-left squad, bottom-right weapon, bottom-centre radio and vehicle, centre-left command), use one outlined text style from the theme, and split the vehicle readout into parts. Add a hosted-level HUD fit section to `ui_test`. | L |
 | 5 | `ui/medical-interaction` | medical menu, interaction rings (both drawn) | P0-2, P0-3. Clamp panels, rings and submenus to the visible rect; scroll long loot submenus; sizes from UiKit (14 px minimum). | L |

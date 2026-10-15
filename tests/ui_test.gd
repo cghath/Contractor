@@ -21,9 +21,7 @@ const UI_SCALES: Array[float] = [1.0, 1.2, 1.5, 2.0]
 ## (docs/ui_audit.md, "Follow-up branches"). Take an entry off when its branch fixes it.
 const KNOWN: Array[String] = [
 	"contract board @1.5", "contract board @2.0", "shop @1.5", "shop @2.0",  # ui/campaign-screens
-	"base: squad @1.2", "base: squad @1.5", "base: squad @2.0", "base: roster @1.2", "base: roster @1.5", "base: roster @2.0",
-	"base: hiring @1.2", "base: hiring @1.5", "base: hiring @2.0", "base: medbay @1.2", "base: medbay @1.5", "base: medbay @2.0",
-	"base: shop @1.2", "base: shop @1.5", "base: shop @2.0", "base: armory @1.2", "base: armory @1.5", "base: armory @2.0",  # ui/base-hub
+	"base: squad @2.0", "base: roster @2.0", "base: hiring @2.0", "base: medbay @2.0", "base: shop @2.0", "base: armory @2.0",  # ui/base-hub @2.0 (auto-scale)
 ]
 
 var failures := 0

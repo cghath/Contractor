@@ -492,12 +492,22 @@ func _test_motor_pool() -> void:
 	var desk := BaseTerminal.new(&"motor_pool")
 	level.add_child(desk)
 	desk.global_position = level.ground_point(player.global_position + Vector3(12, 0, 0))
+	## The host's answer reaches the base screen's status line (its panel covers the HUD flash:
+	## review of ui/base-hub), and the page knows when Service would be refused.
+	var notes: Array[String] = []
+	var heard := func(text: String) -> void: notes.append(text)
+	BaseHub.note.connect(heard)
+	check(not node.local_at_terminal(), "12 m from the motor pool terminal: the page's Service is off")
 	node.request_repair(hurt)
 	await _frames(2)
 	check(Economy.cash() == cash and int(MotorPool.entry(hurt).ready_day) == 0, "not booked from 12 m away from the motor pool terminal")
+	check(notes.has("Repairs are done at the base's motor pool"), "and the refusal shows in the base screen's status line (%s)" % str(notes))
 	desk.global_position = level.ground_point(player.global_position + Vector3(2, 0, 0))
+	check(node.local_at_terminal(), "at the terminal: Service is on")
 	node.request_repair(hurt)
 	await _frames(2)
+	BaseHub.note.disconnect(heard)
+	check(notes.size() == 2 and notes[1].contains("in the workshop until day"), "and the booking shows there too (%s)" % str(notes))
 	desk.queue_free()
 	var why := "" if Economy.cash() == cash - int(quote.cost) else "not booked at the terminal"
 	var fixed := MotorPool.entry(hurt)
