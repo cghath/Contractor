@@ -113,6 +113,47 @@ static func compute(contracts: Array, objectives: Array, civilians: int, report:
 	}
 
 
+## What a deployment cost on top of the contract: `run` (expenses already taken from the cash
+## during the run and since: respawns, supports, lost helicopters, weekly bills) summed by
+## what, plus the field costs per head and day, a death benefit per KIA and treatment per
+## wounded squadmate (Prices.operations). Returns {"lines": [{"what", "amount", "charge"}],
+## "total", "charge"}: "charge" marks the lines still to take from the cash.
+static func expenses(report: Dictionary, days: int, run: Array) -> Dictionary:
+	var lines: Array = []
+	var sums := {}
+	for e: Dictionary in run:
+		sums[String(e.what)] = int(sums.get(String(e.what), 0)) + int(e.amount)
+	for what: String in sums:
+		if int(sums[what]) != 0:
+			lines.append({"what": what, "amount": int(sums[what]), "charge": false})
+	var kia := 0
+	var wounded := 0
+	var heads: int = (report.get("extracted", []) as Array).size()
+	for c: Dictionary in report.get("casualties", []):
+		match String(c.get("status", "")):
+			"kia":
+				kia += 1
+				heads += 1
+			"mia":
+				heads += 1
+			"wounded":
+				wounded += 1
+	var field := heads * maxi(days, 1) * Prices.operations("per_head_day")
+	if field > 0:
+		lines.append({"what": "Field costs: ammo, meds, fuel, comms (%d people x %d days)" % [heads, maxi(days, 1)], "amount": field, "charge": true})
+	if kia > 0:
+		lines.append({"what": "Death benefit (%d KIA)" % kia, "amount": kia * Prices.operations("kia_benefit"), "charge": true})
+	if wounded > 0:
+		lines.append({"what": "Treatment (%d wounded)" % wounded, "amount": wounded * Prices.operations("wounded_care"), "charge": true})
+	var total := 0
+	var charge := 0
+	for l: Dictionary in lines:
+		total += int(l.amount)
+		if bool(l.charge):
+			charge += int(l.amount)
+	return {"lines": lines, "total": total, "charge": charge}
+
+
 static func _add(rep: Dictionary, faction: String, delta: int) -> void:
 	if faction == "" or delta == 0:
 		return
@@ -142,6 +183,10 @@ static func summary(debrief: Dictionary) -> PackedStringArray:
 		for l: String in c.get("objectives", []):
 			out.append("    " + l)
 	var totals: Dictionary = debrief.get("totals", {})
+	for l: Dictionary in debrief.get("expenses", []):
+		out.append("Expense: %s: -$%s" % [l.what, money(l.amount)])
+	if debrief.has("expenses_total"):
+		out.append("Expenses: -$%s; net after expenses: $%s" % [money(debrief.expenses_total), money(debrief.get("net", 0))])
 	if int(debrief.get("civilians", 0)) > 0:
 		out.append("Civilian casualties: %d, fines -$%s" % [debrief.civilians, money(debrief.fines)])
 	out.append("Paid now: $%s (contract value $%s)" % [money(totals.get("paid_now", 0)), money(totals.get("contract_value", 0))])

@@ -671,6 +671,14 @@ func server_end_deployment(report: Dictionary) -> Dictionary:
 	objectives.server_clear()
 	Economy.advance_days(int(debrief.days), "deployment to %s" % debrief.zone_name)
 	debrief["day"] = Economy.day()
+	# Expenses: what the run already cost (respawns, supports, lost helicopters, weekly bills) and
+	# the field costs, death benefits and treatment charged now.
+	var spent := DebriefCalc.expenses(calc_report, int(debrief.days), Economy.take_run_expenses())
+	if int(spent.charge) > 0:
+		Economy.add_cash(-int(spent.charge), "Deployment costs: %s" % debrief.zone_name)
+	debrief["expenses"] = spent.lines
+	debrief["expenses_total"] = spent.total
+	debrief["net"] = int(debrief.totals.contract_value) - int(spent.total)
 	SessionLog.note(debrief_log_line(debrief, report))
 	_commit()
 	_save()
