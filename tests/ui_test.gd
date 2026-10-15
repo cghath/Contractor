@@ -253,6 +253,45 @@ func _test_hud() -> void:
 		"and all four radio lines and every vehicle part ('%s'; radio %d lines, room %.0f, shown %s, window %s)" % [hud.vehicle_text(), hud._subtitles.text.count("\n") + 1, hud._subtitles.room, hud._subtitles.visible, root.get_visible_rect().size])
 	check(not hud._status.text.contains(" more") and hud._status.text.count("\n") + 1 == hud._status_lines.size(),
 		"at 1920x1080 with the command menu shut the whole squad list shows (%d lines)" % hud._status_lines.size())
+	# Review of ui/hud-pass, 2026-10-14: the squad list drew over the open inventory (it sits in
+	# the left zone, added after the inventory screen) and vanished, unsaid, under an open command
+	# menu on a short window - taking the F-key ">" marks with it while units were being picked.
+	var cut := Hud.status_cut(PackedStringArray(["Carrying crate (Alt+G to drop)", "SQUAD  [F-keys] select  [~] all", "  F1 You", "  F2 Golf: idle",
+		">  F3 Hotel: moving", "  F4 India: idle"]), 3)
+	check(cut == PackedStringArray(["Carrying crate (Alt+G to drop)", ">  F3 Hotel: moving", "+4 more"]),
+		"a short squad list keeps the selected members first, then what you carry, and says what it cut (%s)" % ", ".join(cut))
+	check(Hud.status_cut(PackedStringArray(["a", "b"]), 1) == PackedStringArray(["+2 more"]) and Hud.status_cut(PackedStringArray(["a", "b"]), 0).is_empty()
+		and Hud.status_cut(PackedStringArray(["a", "b"]), 2) == PackedStringArray(["a", "b"]), "one line left says '+n more'; none left, nothing")
+	hud.inventory_screen.visible = true
+	await _frames(2)
+	check(not hud._status.visible, "the squad list hides under the open inventory, as the weapon readout does")
+	hud.inventory_screen.visible = false
+	var picked := PackedStringArray()
+	for s in hud.command_menu.roster():
+		if s.is_ai():
+			picked.append(String(s.name))
+	for res: Vector2i in [Vector2i(1280, 720), Vector2i(1366, 768), Vector2i(3840, 2160)]:
+		for ui_scale: float in [1.5, 2.0]:
+			root.content_scale_size = Vector2i((Vector2(res) / GameSettings.ui_scale_for(res, ui_scale)).floor())
+			hud.command_menu.open()
+			hud.command_menu.selected = picked.slice(0, 2)
+			hud.update_status(player)
+			hud._status_lines = PackedStringArray(["Carrying Ammunition crate, 7.62x51 mm, linked (Alt+G to drop)", "Spawn protection 9 s - firing ends it"]) 				+ hud._status_lines
+			await _frames(3)
+			var shown := hud._status.text if hud._status.visible else ""
+			var marks := shown.count("
+>") + int(shown.begins_with(">"))
+			var whole := hud._status_lines.size() == shown.count("
+") + 1
+			var said := shown.contains(" more") or hud.command_menu._title.text.contains("squad lines below")
+			check(whole or (said and (marks == 2 or shown == "" or shown.count("
+") < 2)),
+				"%dx%d @%.1f, command menu open: the squad list shows the picked units' marks or says what it cut ('%s'; title '%s')"
+				% [res.x, res.y, ui_scale, shown.replace("
+", " | "), hud.command_menu._title.text])
+	hud.command_menu.close()
+	root.content_scale_size = Vector2i(1920, 1080)
+	await _frames(2)
 	check(hud.vehicle_text().contains("ON FIRE: GET OUT") and hud._vehicle.get_child_count() == vehicle.size(), "the vehicle readout is in parts, one label each")
 	check(hud._subtitles.theme_type_variation == &"HudLabel" and hud._status.theme_type_variation == &"HudLabel" and hud._downed.theme_type_variation == &"HudAlertLabel"
 		and UiKit.THEME.get_constant(&"outline_size", &"HudLabel") > 0 and UiKit.THEME.get_font_size(&"font_size", &"HudSmallLabel") >= UiKit.FONT_SMALL,

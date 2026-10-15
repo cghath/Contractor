@@ -149,6 +149,14 @@ var selected := PackedStringArray()
 var _stack: Array = []  # menu levels from the root down
 var _highlight := 0
 var _title: Label
+## A short note after the title (the HUD's "+n squad lines below" when the open menu leaves the
+## squad list no line at all; review of ui/hud-pass, 2026-10-14: cut to fit, never silently).
+var note := "":
+	set(value):
+		if note != value:
+			note = value
+			if visible and not _stack.is_empty():
+				_redraw()
 var _rows: VBoxContainer
 
 
@@ -464,7 +472,7 @@ func _redraw() -> void:
 	var path := PackedStringArray([_names()])
 	for i in range(1, _stack.size()):
 		path.append(_stack[i]["label"])
-	_title.text = "  >  ".join(path)
+	_title.text = "  >  ".join(path) + ("  (%s)" % note if note != "" else "")
 	for child in _rows.get_children():
 		child.queue_free()
 	var items := _level_items()

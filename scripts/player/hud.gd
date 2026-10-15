@@ -219,20 +219,66 @@ func _headless_size() -> bool:
 
 ## The squad list in the room the left column has under the command menu (P1-10: at 720 px tall
 ## the list and the menu ran into each other): what doesn't fit is cut, and says so.
+## Review of ui/hud-pass, 2026-10-14: never silently, and never the units being picked. When the
+## menu is open and short of room the list drops to the small HUD size; what is kept is the
+## selected members first, then what you carry and spawn protection, then the header, then the
+## rest (shown in their usual order, with "+n more"); with no line to spare at all the menu's
+## title says how many squad lines are hidden. Hidden under the inventory and map, as the
+## weapon and objective hint are (it drew over the inventory's bottom-left).
 func _fit_status() -> void:
-	var spacing := float(_status.get_theme_constant(&"line_spacing"))
-	var line := float(_status.get_line_height()) + spacing
+	var covered := is_inventory_open() or (map_screen != null and map_screen.visible)
+	var variation := &"HudLabel"
 	var room := 1.0e9 if _headless_size() else _left_height - UiKit.SPACE_S * 3.0 - (command_menu.get_combined_minimum_size().y if command_menu.visible else 0.0)
-	var fit := maxi(floori((room + spacing) / maxf(line, 1.0)), 0)
-	var lines := _status_lines
-	if lines.size() > fit:
-		lines = lines.slice(0, maxi(fit - 1, 0))
-		if fit > 0:
-			lines.append("+%d more" % (_status_lines.size() - lines.size()))
-	var text := "\n".join(lines)
+	var fit := _status_fit(room, variation)
+	if _status_lines.size() > fit and command_menu.visible:
+		variation = &"HudSmallLabel"
+		fit = _status_fit(room, variation)
+	var lines := status_cut(_status_lines, fit)
+	var hidden := _status_lines.size() if lines.is_empty() else 0
+	command_menu.note = "+%d squad lines below" % hidden if hidden > 0 and not covered else ""
+	var text := "
+".join(lines)
+	if _status.theme_type_variation != variation:
+		_status.theme_type_variation = variation
 	if _status.text != text:
 		_status.text = text
-	_status.visible = text != ""
+	_status.visible = text != "" and not covered
+
+
+## How many lines of the HUD label style `variation` fit in `room` px.
+func _status_fit(room: float, variation: StringName) -> int:
+	var spacing := float(UiKit.THEME.get_constant(&"line_spacing", variation)) if UiKit.THEME.has_constant(&"line_spacing", variation) 		else float(_status.get_theme_constant(&"line_spacing"))
+	var font := UiKit.THEME.get_font(&"font", variation) if UiKit.THEME.has_font(&"font", variation) else _status.get_theme_font(&"font")
+	var size := UiKit.THEME.get_font_size(&"font_size", variation) if UiKit.THEME.has_font_size(&"font_size", variation) else _status.get_theme_font_size(&"font_size")
+	var line := font.get_height(size) + spacing
+	return maxi(floori((room + spacing) / maxf(line, 1.0)), 0)
+
+
+## The squad list's `lines` cut to `fit` lines: all of them if they fit; else the most needed
+## (selected members, marked ">", then what you carry and spawn protection, then the SQUAD
+## header, then the rest) in their usual order, with a last "+n more" line. Empty if none fit.
+static func status_cut(lines: PackedStringArray, fit: int) -> PackedStringArray:
+	if lines.size() <= fit:
+		return lines
+	if fit <= 0:
+		return PackedStringArray()
+	var order: Array[int] = []
+	order.assign(range(lines.size()))
+	var rank := func(i: int) -> int:
+		var l := lines[i]
+		if l.begins_with(">"):
+			return 0
+		if l.begins_with("Carrying") or l.begins_with("Spawn protection"):
+			return 1
+		return 2 if l.begins_with("SQUAD") else 3
+	order.sort_custom(func(a: int, b: int) -> bool: return rank.call(a) < rank.call(b) or (rank.call(a) == rank.call(b) and a < b))
+	var keep: Array[int] = order.slice(0, fit - 1)
+	keep.sort()
+	var out := PackedStringArray()
+	for i in keep:
+		out.append(lines[i])
+	out.append("+%d more" % (lines.size() - keep.size()))
+	return out
 
 
 ## The bottom-centre zone in the room under the centre lines (prompt, downed text): the
