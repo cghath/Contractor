@@ -214,7 +214,61 @@ static func button(label: String, pressed: Callable, tooltip := "") -> Button:
 	b.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	b.tooltip_text = tooltip if tooltip != "" else label
 	b.pressed.connect(pressed)
+	fit_button_text(b)
 	return b
+
+
+## The widest a button asks to be for its text, in logical px: past it the text is cut with
+## "..." (the tooltip has it whole) and the button stretches to fill its row instead.
+const BUTTON_TEXT_CAP := 320.0
+
+
+## Gives a Button with text_overrun_behavior / clip_text a minimum width that fits its whole
+## text, up to BUTTON_TEXT_CAP. Godot leaves the text out of such a button's minimum size, so in
+## a wrapping row (HFlowContainer gives each child only its minimum) it shrank to its padding
+## and showed no text at all (v0.4.2 FOB screen, Captain's 2000x1250 co-op screenshot). Kept up
+## to date when the theme or the text changes.
+static func fit_button_text(b: Button, cap := BUTTON_TEXT_CAP) -> void:
+	if b.has_meta(&"_ui_kit_fitted"):
+		return
+	b.set_meta(&"_ui_kit_fitted", true)
+	var refit := func() -> void:
+		if not is_instance_valid(b):
+			return
+		# A width the caller set itself (not ours) stays the floor.
+		if not is_equal_approx(b.custom_minimum_size.x, float(b.get_meta(&"_ui_kit_width", -1.0))):
+			b.set_meta(&"_ui_kit_floor", b.custom_minimum_size.x)
+		var full := button_text_width(b, b.text) if b.text != "" else 0.0
+		var want := maxf(ceilf(minf(full, cap)), float(b.get_meta(&"_ui_kit_floor", 0.0)))
+		b.set_meta(&"_ui_kit_width", want)
+		if not is_equal_approx(b.custom_minimum_size.x, want):
+			b.custom_minimum_size.x = want
+		var stretch := full > cap
+		if stretch != b.has_meta(&"_ui_kit_stretch"):
+			if stretch:
+				b.set_meta(&"_ui_kit_stretch", true)
+				b.size_flags_horizontal |= Control.SIZE_EXPAND
+			else:
+				b.remove_meta(&"_ui_kit_stretch")
+				b.size_flags_horizontal &= ~Control.SIZE_EXPAND
+	b.theme_changed.connect(refit)
+	b.draw.connect(func() -> void: refit.call_deferred())  # a changed text redraws the button
+	refit.call()
+
+
+## How wide `b` must be to show `text` whole: the text in its font, its style's padding, and its
+## icon if it has one.
+static func button_text_width(b: Button, text: String) -> float:
+	var font := b.get_theme_font(&"font")
+	var w := 0.0
+	if font != null and text != "":
+		w = font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, b.get_theme_font_size(&"font_size")).x
+	var style := b.get_theme_stylebox(&"normal")
+	if style != null:
+		w += style.get_minimum_size().x
+	if b.icon != null and not b.expand_icon:
+		w += b.icon.get_width() + b.get_theme_constant(&"h_separation")
+	return w + 2.0
 
 
 ## A row of buttons that wraps onto more lines when the panel is too narrow for them (the
@@ -226,6 +280,8 @@ static func button_row(buttons: Array, align_end := false) -> HFlowContainer:
 	if align_end:
 		r.alignment = FlowContainer.ALIGNMENT_END
 	for b: Control in buttons:
+		if b is Button:
+			fit_button_text(b as Button)  # a plain Button (the co-op Ready) too
 		r.add_child(b)
 	return r
 
