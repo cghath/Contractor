@@ -192,7 +192,8 @@ func reinforcement_tuning(cid: String) -> Dictionary:
 	var first: Array = MissionRegistry.setting("reinforcement_first_wave_s", [420, 240])
 	var pairs: Array = MissionRegistry.setting("reinforcement_max_pairs", [2, 4])
 	var quality := float(force.quality)
-	return {"first_wave_s": lerpf(float(first[0]), float(first[1]), t), "max_pairs": roundi(lerpf(float(pairs[0]), float(pairs[1]), t)),
+	var own_waves := bool(MissionRegistry.type_def(String(contract(cid).get("type", ""))).get("own_waves", false))  # MissionScenario sends this type's waves itself
+	return {"first_wave_s": 1.0e9 if own_waves else lerpf(float(first[0]), float(first[1]), t), "max_pairs": roundi(lerpf(float(pairs[0]), float(pairs[1]), t)),
 		"first_pairs": 2 if int(force.count) >= 9 else 1,
 		"max_alive": mini(int(force.count) + MissionRegistry.setting_i("reinforcement_alive_extra", 8), MissionRegistry.setting_i("reinforcement_alive_max", 30)),
 		"combat": quality, "combat_max": minf(quality + 0.2, 0.9)}
@@ -637,6 +638,7 @@ func server_end_deployment(report: Dictionary) -> Dictionary:
 	for entry: Dictionary in report.get("driven_out", []):
 		out_items.append_array(flatten_entry(entry))
 	objectives.server_items_out(out_items)
+	objectives.server_deployment_ending()  # "never spotted" bonuses stand
 	for o: Dictionary in objectives.active():
 		objectives.server_set_state(o.oid, Objectives.FAILED)
 	var deployed: Array = (s.held as Array).filter(func(c: Dictionary) -> bool: return c.cid in dep.cids)

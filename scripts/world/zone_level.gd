@@ -463,7 +463,9 @@ func garrison_size(module_id: String) -> int:
 	var target := -1
 	for cid: String in Contracts.deployment().get("cids", []):
 		if String(Contracts.contract(cid).get("module_id", "")) == module_id:
-			target = maxi(target, int(Contracts.enemy_force(cid).get("count", 0)))
+			# A defend mission's position is ours to hold: no garrison (its enemies come as waves).
+			var held: bool = bool(MissionRegistry.type_def(String(Contracts.contract(cid).get("type", ""))).get("no_garrison", false))
+			target = maxi(target, 0 if held else int(Contracts.enemy_force(cid).get("count", 0)))
 	return target if target >= 0 else n
 
 

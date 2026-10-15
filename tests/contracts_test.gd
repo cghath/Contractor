@@ -125,8 +125,9 @@ func _test_generation() -> void:
 		if o.zone_kind == "hot":
 			hot += 1
 			hot_ok = hot_ok and o.employer == MissionRegistry.zone(o.zone_id).faction
-	check(seen.keys().size() == 4 and seen.has("raid") and seen.has("hvt_capture") and seen.has("hostage_rescue") and seen.has("intel_grab"),
-		"Captain's first four mission types come up (%s)" % [seen.keys()])
+	check(seen.keys().size() == 9 and seen.has("raid") and seen.has("hvt_capture") and seen.has("hostage_rescue") and seen.has("intel_grab")
+		and seen.has("convoy_ambush") and seen.has("defend_hold") and seen.has("crew_rescue") and seen.has("sabotage") and seen.has("recon"),
+		"Captain's first four mission types and the five of mission variety come up (%s)" % [seen.keys()])
 	check(hot > 30 and hot < 130 and hot_ok, "hot-zone contracts come up (%d of 300), each from the zone's own faction" % hot)
 	# A mission type added at runtime (Noah's types drop in the same way).
 	MissionRegistry.register_type({"type": "test_rescue", "name": "Hostage rescue", "module": "compound", "base_pay": 60000, "days": 1,
