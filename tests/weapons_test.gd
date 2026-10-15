@@ -193,4 +193,3 @@ func _test_roles() -> void:
 	print("Roles")
 	var ids := Roles.kit(Roles.AUTORIFLEMAN).map(func(p: Array) -> String: return String(p[0]))
 	check(ids.has("m249") and ids.has("box_556") and not ids.has("mag_556"), "the autorifleman's kit is an M249 and its boxes")
-	check(Roles.kit(Roles.TEAM_LEADER).any(func(p: Array) -> bool: return p[0] == "hk416"), "the team leader carries an HK416")

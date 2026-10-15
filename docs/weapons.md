@@ -44,7 +44,7 @@ new `C.WOOD`/`C.WOOD_DARK` palette slots.
 - Hostile faction: `CompoundLevel.HOSTILE_LOADOUT` is the AKM kit; `hostile_loadout(i)` gives the
   `HOSTILE_MIX` (AKM, AK-74, AKM, RPK, AK-74, SVD, AKM, PKM). Used by the compound's hostiles,
   zone garrisons, patrols, hunter teams and reinforcement waves. Their loot is their whole kit.
-- Roles (`data/roles.json`): autorifleman = M249 + 3 boxes; team leader = HK416. Others unchanged.
+- Roles (`data/roles.json`): autorifleman = M249 + 3 boxes; the team leader keeps the M4A1. Others unchanged.
 - Shop and arsenal list every priced item automatically (`data/prices.json`).
 
 Test: `tests/weapons_test.gd` (suite `weapons`).

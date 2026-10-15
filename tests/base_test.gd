@@ -424,7 +424,7 @@ func _check_kit_pouches(m: Dictionary) -> void:
 			if String(entry.id).begins_with("mag_"):
 				mags_in_pouches += int(entry.count)
 			tq_held = tq_held or (String(att.id) == "pouch_tq" and String(entry.id) == "tourniquet")
-	check(on == want_pouches and mags_in_pouches > 0 and tq_held,
+	check(on == want_pouches and (mags_in_pouches > 0 or not want.keys().any(func(k: String) -> bool: return k.begins_with("mag_"))) and tq_held,
 		"their carrier wears the kit's pouches (%d), with magazines (%d) and a tourniquet in them" % [molle.size(), mags_in_pouches])
 	var counts := Roster.gear_counts(m.gear)
 	var missing := want.keys().filter(func(id: String) -> bool: return int(counts.get(id, 0)) < int(want[id]))
