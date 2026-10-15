@@ -50,6 +50,7 @@ func _ready() -> void:
 	_test_archive()
 	_test_squad_count()
 	_test_hiring()
+	_test_callsigns()
 	_test_wages()
 	_test_growth()
 	_test_injuries_and_medbay()
@@ -2012,3 +2013,26 @@ func _deep_units(entries: Array, out := {}) -> Dictionary:
 		for i in n:
 			_deep_units(inner, out)
 	return out
+
+
+## Captain, 2026-10-14: "2"s are not an option for names: a taken callsign gets another one from
+## the list, never a number, and an old save's "Saint 2" is renamed on load.
+func _test_callsigns() -> void:
+	print("Callsigns: never numbered")
+	var data := {"members": {}}
+	var got: Array[String] = []
+	for i in Roster.CALLSIGNS.size() + 5:
+		var cs := Roster.unique_callsign(data, "Saint")
+		got.append(cs)
+		data.members["m%d" % i] = {"callsign": cs}
+	var numbered := got.filter(func(c: String) -> bool: return Roster._numbered(c) or c.is_valid_int())
+	var unique := {}
+	for c in got:
+		unique[c] = true
+	check(numbered.is_empty() and unique.size() == got.size(), "%d hires asking for \"Saint\": all different, none numbered (%s ... %s)" % [got.size(), got[1], got[got.size() - 1]])
+	var old := {"members": {"a": {"callsign": "Saint"}, "b": {"callsign": "Saint 2"}, "c": {"callsign": "Gunny 2"}}}
+	var renamed := Roster.rename_numbered_callsigns(old)
+	var names: Array = old.members.values().map(func(m: Dictionary) -> String: return String(m.callsign))
+	check(renamed == 2 and not names.any(func(c: String) -> bool: return Roster._numbered(c)) and names.has("Saint"),
+		"an old save's \"Saint 2\" and \"Gunny 2\" are renamed (%s)" % [names])
+

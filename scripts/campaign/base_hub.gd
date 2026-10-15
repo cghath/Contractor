@@ -209,6 +209,10 @@ func new_campaign(hiring_seed := -1) -> void:
 ## campaign start, its zone saves kept aside too, and the host is told (note, and on open_ui).
 func load_or_new() -> void:
 	var loaded := Campaign.load_campaign()
+	if loaded:
+		var renamed := Roster.rename_numbered_callsigns(roster())
+		if renamed > 0:
+			SessionLog.note("roster: %d numbered callsign(s) renamed (no \"Saint 2\"s)" % renamed)
 	_host_notice = Campaign.load_notice
 	if not loaded and Campaign.last_load == Campaign.Loaded.UNREADABLE:
 		set_aside_zone_saves()
