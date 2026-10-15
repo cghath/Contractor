@@ -916,7 +916,9 @@ func _heli_insert(squad: Array) -> bool:
 			flare = maxf(flare, rad_to_deg(asin(clampf(-h.global_basis.z.y, -1.0, 1.0))))  # nose up while slowing
 	var landed := is_instance_valid(c.heli) and c.heli.is_landed()
 	check(via == Vector3.INF or passed_by < HeliCall.ROUTE_PASS_M + 10.0, "it flew in by the insertion point (%.0f m from it)" % passed_by)
-	check(low_agl > 15.0 and high_agl < 120.0, "low over the terrain on the way in: %.0f-%.0f m above the ground" % [low_agl, high_agl])
+	# Captain, 2026-10-14: "fly in no higher than 10m" (contour flight; a little more only to clear
+	# what stands taller in its way), never down in the dirt.
+	check(low_agl > 1.0 and high_agl < 12.0, "low over the terrain on the way in: %.0f-%.0f m above the ground" % [low_agl, high_agl])
 	check(flare > 3.0, "it flared, nose up, coming in to land (%.0f°)" % flare)
 	check(landed and Vector2(c.heli.global_position.x - lz.x, c.heli.global_position.z - lz.z).length() < 15.0,
 		"it lands at the LZ (%.0f s)" % t)
@@ -936,9 +938,10 @@ func _heli_insert(squad: Array) -> bool:
 	return true
 
 
-## A spot `from` 150-350 m off `lz` where a man sees it (eye to eye, past the world), or INF.
+## A spot `from` 70-140 m off `lz` where a man sees it (eye to eye, past the world), or INF.
 func _spot_seeing(lz: Vector3) -> Vector3:
-	for r: float in [180.0, 240.0, 300.0, 150.0, 350.0]:
+	# (within DeadGround.HOT_CLOSE_M: since 2026-10-14 only an enemy close by makes an LZ hot)
+	for r: float in [110.0, 130.0, 90.0, 140.0, 70.0]:
 		for k in 16:
 			var a := TAU * k / 16.0
 			var at := lz + Vector3(cos(a), 0, sin(a)) * r

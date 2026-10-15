@@ -81,6 +81,11 @@ func _wait_for(condition: Callable, seconds: float) -> bool:
 	return condition.call()
 
 
+func _frames(n: int) -> void:
+	for i in n:
+		await get_tree().physics_frame
+
+
 func _seconds(s: float) -> void:
 	await get_tree().create_timer(s).timeout
 
@@ -293,6 +298,8 @@ func _run_host(wait_for_client: bool) -> void:
 		await _test_extraction_home()
 	if _want("insertion"):
 		await _test_insertion()
+	if _want("insertion"):
+		await _test_insertion_hot()
 	if _want("shot_down"):
 		await _test_shot_down()
 	if not wait_for_client:
@@ -529,7 +536,7 @@ func _test_grid_calls() -> void:
 	_marker(dest)
 	why = _call("support:transport:dest")
 	check(why == "" and sup.heard_line("taking you to"), "fly to my map marker: the destination (%s)" % why)
-	await _wait_for(func() -> bool: return t.phase == HeliCall.Phase.CARRY and t.heli.height_agl() > 15.0, 30.0)
+	await _wait_for(func() -> bool: return t.phase == HeliCall.Phase.CARRY and t.heli.height_agl() > 5.0, 30.0)
 	check(t.phase == HeliCall.Phase.CARRY and t.heli.occupants().size() == 3, "airborne with the player and two AI aboard")
 	check(player.global_position.distance_to(t.heli.global_position) < 8.0, "the player rides along in their seat")
 	var on_board := player.global_position
@@ -772,9 +779,16 @@ func _test_insertion() -> void:
 		"the squad starts aboard a UH-60 in the air")
 	if c == null:
 		return
-	await _wait_for(func() -> bool: return _landed(c), FLY_S)
+	await _frames(3)
+	# Captain, 2026-10-14: the squad aboard showed "Waiting (briefing)" and wasn't drawn.
+	check(mates.all(func(m: Soldier) -> bool: return m.ai_status == "Aboard (UH-60M)"),
+		"the squad HUD says they're aboard (%s)" % ", ".join(mates.map(func(m: Soldier) -> String: return m.ai_status)))
+	check(mates.all(func(m: Soldier) -> bool: return m.model.is_visible_in_tree() and m.gear.is_visible_in_tree() and (m.model.render_layers & 1) != 0),
+		"and they're drawn in their seats (bodies visible, on the main render layer)")
+	var flight := await _watch_flight(c, FLY_S)
 	var at3 := Vector3(at.x, 0, at.y)
 	check(_landed(c) and _flat(c.heli.global_position, at3) <= 100.0, "it lands at the insertion point (%.0f m off)" % (_flat(c.heli.global_position, at3) if is_instance_valid(c.heli) else -1.0))
+	_check_flight(c, flight)
 	await _wait_for(func() -> bool: return mates.all(func(m: Soldier) -> bool: return Vehicle.ride_of(m) == null), 10.0)
 	check(mates.all(func(m: Soldier) -> bool: return Vehicle.ride_of(m) == null and _flat(m.global_position, at3) < 120.0), "the AI get out there")
 	if is_instance_valid(c.heli):
@@ -783,6 +797,126 @@ func _test_insertion() -> void:
 	await _wait_for(func() -> bool: return c.is_over(), FLY_S)
 	check(c.phase == HeliCall.Phase.GONE, "then it left")
 	_regroup()
+
+
+## Captain, 2026-10-14 ("not landing"): one far sentry with a sight line kept waving the
+## insertion off, LZ after LZ, 550 m from the insertion marker. Far sentries who see every LZ
+## don't wave it off; close ones do, at most WAVE_OFF_MAX times, and it puts down near the
+## insertion point anyway, the briefing's INSERT marker moving to where it lands.
+func _test_insertion_hot() -> void:
+	print("Helicopter insertion with sentries in sight of the LZ")
+	var at := Vector2(-150.0, 120.0)
+	var at3 := _ground(Vector3(at.x, 0, at.y))
+	var sentries: Array[Soldier] = []
+	for k in 4:  # far: 260 m off, every LZ round the point in their sight (the suite's zone is flat)
+		var a := TAU * k / 4.0 + 0.4
+		sentries.append(_sentry("FarSentry%d" % k, at3 + Vector3(cos(a), 0, sin(a)) * 260.0))
+	await _frames(2)
+	var c := await _insert_at(at, "east")
+	if c == null:
+		return
+	var flight := await _watch_flight(c, FLY_S)
+	check(_landed(c) and c.wave_offs == 0 and _flat(c.heli.global_position, at3) <= LandingZone.SEARCH_M,
+		"far sentries (260 m) in sight of the LZ: no wave-off, it lands (%d wave-offs, %.0f m off)" % [c.wave_offs, _flat(c.heli.global_position, at3) if is_instance_valid(c.heli) else -1.0])
+	_check_flight(c, flight)
+	await _out_and_gone(c)
+	for k in 6:  # close: 100 m round the point, every LZ near it in sight of one
+		var a := TAU * k / 6.0
+		sentries.append(_sentry("CloseSentry%d" % k, at3 + Vector3(cos(a), 0, sin(a)) * 100.0))
+	await _frames(2)
+	c = await _insert_at(at, "east")
+	if c == null:
+		return
+	await _wait_for(func() -> bool: return _landed(c), FLY_S)
+	var briefing := MapNodes.briefing(level)
+	var marker: Array = briefing.insertion().get("pos", [])
+	var landed_at: Vector3 = c.heli.global_position if is_instance_valid(c.heli) else Vector3.INF
+	check(_landed(c) and c.wave_offs <= HeliCall.WAVE_OFF_MAX + 1 and sup.heard_line("best we've got"),
+		"close sentries: it waves off at most %d times, then puts down anyway (%d; radio: %s)" % [HeliCall.WAVE_OFF_MAX, c.wave_offs, sup.heard[-1] if not sup.heard.is_empty() else "nothing"])
+	check(_landed(c) and _flat(landed_at, at3) <= HeliCall.INSERT_WAVE_OFF_M + LandingZone.ROTOR_CLEAR_M,
+		"near the insertion point it was given (%.0f m off, at most %.0f)" % [_flat(landed_at, at3), HeliCall.INSERT_WAVE_OFF_M + LandingZone.ROTOR_CLEAR_M])
+	check(marker.size() >= 2 and Vector2(float(marker[0]) - landed_at.x, float(marker[1]) - landed_at.z).length() <= 15.0,
+		"the map's INSERT marker is where it landed")
+	await _out_and_gone(c)
+	for s in sentries:
+		if is_instance_valid(s):
+			s.vitals.server_kill()
+	_regroup()
+
+
+## A hostile sentry at `at` who only stands and looks (his AI off: the fight isn't checked here).
+func _sentry(sentry_name: String, at: Vector3) -> Soldier:
+	var s := level.spawn_soldier({"name": sentry_name, "faction": "hostile", "variant": "urban", "pos": _ground(at),
+		"loadout": ["mk18"], "combat": 0.1, "discipline": 0.5, "guard": true})
+	if s and SquadAI.of(s):
+		SquadAI.of(s).process_mode = Node.PROCESS_MODE_DISABLED
+	return s
+
+
+## A hot zone's briefing with one insertion point at `at`, by helicopter; returns its call.
+func _insert_at(at: Vector2, id: String) -> HeliCall:
+	sup.server_reset_limits()
+	_regroup()
+	var briefing := MapNodes.briefing(level)
+	var zone := {"id": "supports_test", "name": "Test", "kind": "hot",
+		"insertion_points": [{"id": id, "name": id.capitalize(), "pos": [at.x, at.y], "method": "foot"}]}
+	briefing.server_open({"id": "test_c", "title": "Test", "reinforcements": {"first_wave_s": 3600.0}}, zone)
+	check(briefing.server_set_insertion(id + "_heli") and briefing.server_start(true), "inserting by helicopter at (%.0f, %.0f)" % [at.x, at.y])
+	var c := sup.active("insertion")
+	check(c != null and is_instance_valid(c.heli) and c.heli.is_flying(), "the insertion helicopter is in the air")
+	return c
+
+
+## Everyone out of `c` and it gone.
+func _out_and_gone(c: HeliCall) -> void:
+	await _wait_for(func() -> bool: return mates.all(func(m: Soldier) -> bool: return Vehicle.ride_of(m) == null), 10.0)
+	if is_instance_valid(c.heli):
+		c.heli.server_exit(player)
+	await _wait_for(func() -> bool: return c.is_over(), FLY_S)
+
+
+## Captain, 2026-10-14: in low ("no higher than 10m") and a J-hook landing. Watches `c`'s flight
+## until it lands (or `seconds`): the most it flew over the ground before the final (less what
+## stood taller near its track: climbing over that is allowed), the least (no clipping), how far
+## its heading turned in the last 200 m, and where it touched down.
+func _watch_flight(c: HeliCall, seconds: float) -> Dictionary:
+	var out := {"max_over": -INF, "min_agl": INF, "turn_deg": 0.0, "frames": 0}
+	var deadline := Time.get_ticks_msec() + int(seconds * 1000)
+	var last := NAN
+	var turn := 0.0
+	while is_instance_valid(c.heli) and not c.heli.is_landed() and Time.get_ticks_msec() < deadline:
+		await get_tree().physics_frame
+		var h := c.heli
+		if not is_instance_valid(h) or h.flight_mode() != Helicopter.Mode.FLYING:
+			continue
+		var pos := h.global_position
+		var vel := Vector3(h.linear_velocity.x, 0.0, h.linear_velocity.z)
+		var left := h.path_left_m()
+		var side := Vector3(-vel.z, 0.0, vel.x).normalized() * Helicopter.ROTOR_REACH_M if vel.length() > 0.5 else Vector3.ZERO
+		if left > Helicopter.HOOK_FINAL_M * 1.5 or not h.has_meta(&"landing"):
+			out.frames += 1
+			out.min_agl = minf(out.min_agl, h.height_agl())
+			var taller := 0.0
+			for t: float in [-2.0, 0.0, 2.0, 4.0, 7.0, 10.0]:
+				var p := pos + vel * t
+				taller = maxf(taller, h.obstacle_top(p, side) + Helicopter.OBSTACLE_CLEAR_M - h.terrain_y(p) - Helicopter.CRUISE_AGL_M)
+			out.max_over = maxf(out.max_over, pos.y - h.terrain_y(pos) - taller)
+		if vel.length() > 2.0 * Helicopter.pace and left > 0.0 and left <= 200.0:
+			var heading := atan2(-vel.x, -vel.z)
+			if not is_nan(last):
+				turn += wrapf(heading - last, -PI, PI)
+			last = heading
+	out.turn_deg = rad_to_deg(absf(turn))
+	return out
+
+
+func _check_flight(c: HeliCall, flight: Dictionary) -> void:
+	check(int(flight.frames) > 30 and float(flight.max_over) <= 10.5,
+		"it flew in contour-low: at most %.1f m over the ground (10 m, more only over what stands taller)" % float(flight.max_over))
+	check(float(flight.min_agl) >= 1.0, "and never lower than %.1f m before the final (no clipping)" % float(flight.min_agl))
+	check(float(flight.turn_deg) >= 120.0, "a J-hook: it turned %.0f degrees in the last 200 m" % float(flight.turn_deg))
+	check(_landed(c) and _flat(c.heli.global_position, c.lz) <= LandingZone.ROTOR_CLEAR_M,
+		"touching down on the LZ (%.1f m off)" % (_flat(c.heli.global_position, c.lz) if is_instance_valid(c.heli) else -1.0))
 
 
 func _test_shot_down() -> void:
@@ -805,9 +939,9 @@ func _test_shot_down() -> void:
 	player.global_position = _ground(HOME + Vector3(0, 0, 100))  # stays behind: it goes once everyone near is in
 	_marker(Vector2(-300.0, -200.0))
 	check(_call("support:transport:dest") == "", "off to a destination")
-	await _wait_for(func() -> bool: return t.phase == HeliCall.Phase.CARRY and t.heli.height_agl() > 25.0, 40.0)
+	await _wait_for(func() -> bool: return t.phase == HeliCall.Phase.CARRY and t.heli.height_agl() > 5.0 and t.heli.path_left_m() > 150.0, 40.0)
 	var h := t.heli
-	if not is_instance_valid(h) or h.height_agl() < 20.0:
+	if not is_instance_valid(h) or h.height_agl() < 4.0:  # (contour-low since 2026-10-14)
 		check(false, "airborne for the shooting")
 		sup.server_dismiss_all()
 		return

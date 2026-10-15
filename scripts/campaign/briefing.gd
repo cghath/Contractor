@@ -114,6 +114,18 @@ func insertion_points() -> Array:
 	return zone.get("insertion_points", [])
 
 
+## Host, deployed: the chosen insertion point is now at `at` (x, z) (the insertion helicopter
+## landed elsewhere: HeliCall's wave-off). Every peer's map moves its INSERT marker there.
+## Captain, 2026-10-14: "but not at infil marker".
+func server_move_insertion(at: Vector2) -> void:
+	if not multiplayer.is_server():
+		return
+	for point: Dictionary in insertion_points():
+		if String(point.get("id", "")) == insertion_id:
+			point["pos"] = [at.x, at.y]
+	_broadcast()
+
+
 ## The chosen insertion point ({} if the zone has none).
 func insertion() -> Dictionary:
 	for point: Dictionary in insertion_points():

@@ -92,17 +92,32 @@ const TAKEOFF_AGL_M := 8.0
 ## "Taking fire" goes out at most this often.
 const UNDER_FIRE_RADIO_S := 20.0
 ## Insertion with a route (a contract zone): it flies the legs this low over the terrain (m)
-## and counts a waypoint passed within ROUTE_PASS_M.
-const ROUTE_AGL_M := 40.0
+## and counts a waypoint passed within ROUTE_PASS_M. (Captain, 2026-10-14: no higher than 10 m
+## on the way in: Helicopter's contour height, as every leg in and out.)
+const ROUTE_AGL_M := Helicopter.CRUISE_AGL_M
 const ROUTE_PASS_M := 90.0
 ## Insertion: the players get out themselves; after this long (s) anyone left is put out.
 const INSERT_DROP_WAIT_S := 20.0
 ## Hot LZ (insertion and extraction): within this far of the LZ (m) it looks every HOT_CHECK_S
-## for an enemy who sees the LZ (DeadGround.hot_watcher) and waves off; a new LZ keeps
-## WAVE_OFF_AVOID_M from every LZ waved off.
+## for an enemy close by who sees the LZ (DeadGround.hot_watcher, DeadGround.HOT_CLOSE_M), or
+## one shooting at it there, and waves off; a new LZ keeps WAVE_OFF_AVOID_M from every LZ
+## waved off.
 const HOT_CHECK_M := 700.0
 const HOT_CHECK_S := 1.0
 const WAVE_OFF_AVOID_M := 150.0
+## Captain, 2026-10-14 ("not landing": the P0947 insertion waved off LZ after LZ, each seen by one
+## sentry 200-320 m off, and landed 550 m from the insertion marker). Proposed: it waves off at
+## most WAVE_OFF_MAX times, then puts down at the best LZ it has ("Putting you down, best we've
+## got"); an insertion's new LZ stays within INSERT_WAVE_OFF_M of the briefing's insertion point
+## (dead ground near it first), INSERT_AVOID_M from the LZs waved off.
+const WAVE_OFF_MAX := 2
+const INSERT_WAVE_OFF_M := 150.0
+const INSERT_AVOID_M := 60.0
+## Shot at within this long (s) and this far from the LZ (m): the LZ is hot.
+const HOT_FIRE_S := 10.0
+const HOT_FIRE_M := 450.0
+## A threat known this close to the LZ (m) turns the landing: the doors away from it.
+const DOORS_AWAY_M := 800.0
 ## Extraction wave-off with no other LZ round the squad (DeadGround.SQUAD_RING_M): it looks
 ## out to this far from them (m) before asking for smoke or a grid (2026-10-14: the loop test's wave-off found none within 300 m).
 const WAVE_OFF_WIDE_M := 500.0
@@ -144,6 +159,10 @@ var route: Array[Vector3] = []
 var objective := Vector3.INF
 ## LZs it waved off (hot), newest last.
 var waved_off: Array[Vector3] = []
+## Insertion: the briefing's insertion point (its LZ as planned): wave-offs stay near it.
+var planned := Vector3.INF
+## Wave-offs so far; past WAVE_OFF_MAX it lands whatever it sees.
+var wave_offs := 0
 
 var _t := 0.0
 var _check := 0.0
@@ -163,6 +182,8 @@ var _radio_state := ""
 var _hot_check := 0.0
 var _wait_told := false
 var _late_seen := {}
+var _shooter: Soldier = null
+var _hot_seen := Vector3.INF  # where the last enemy who made an LZ hot was
 
 
 func _init(p_sup: HeliSupports, p_kind: String, p_caller: Soldier, p_mark: Dictionary) -> void:
@@ -226,6 +247,8 @@ func server_launch() -> bool:
 	if heli == null:
 		return false
 	heli.support = kind
+	if kind == "insertion" and mark.has("pos"):
+		planned = mark.pos
 	heli.server_start_airborne()
 	heli.went_down.connect(_on_down)
 	heli.damaged.connect(_on_hit)
@@ -253,11 +276,11 @@ func _go_in(why := "") -> void:
 			if hot and _pick_other_lz(hot):
 				why = "LZ at %s is hot" % _grid(waved_off[-1])
 			_fly_in()
-			var metres := _flat(heli.global_position, lz)
+			# The ETA flies the J-hook (Captain, 2026-10-14), low by the route's point first.
+			var eta := heli.landing_eta_s()
 			if not route.is_empty():
-				metres = _flat(heli.global_position, route[0]) + _flat(route[0], lz)
-			var text := "%s to %s, ETA %d s" % ["Inbound" if kind != "insertion" else "Thirty seconds out, inbound", _grid(lz),
-				ceili(Helicopter.eta_s(metres))]
+				eta = _flat(heli.global_position, route[0]) / (Helicopter.CRUISE_KMH / 3.6 * Helicopter.pace) + Helicopter.eta_land_s(route[0], lz)
+			var text := "%s to %s, ETA %d s" % [_inbound_words(eta), _grid(lz), ceili(eta)]
 			if not route.is_empty():
 				text += ", coming in low by %s" % _grid(route[0])
 			if bool(mark.get("near", false)):
@@ -279,6 +302,18 @@ func _go_in(why := "") -> void:
 		_say("on station " + why, lead + "On station, orbiting. " + ask)
 	else:
 		_say("looking " + why, lead + "Inbound. " + ask)
+
+
+## "Inbound"; an insertion's pilot calls the time out ("Thirty seconds out, inbound", "Two
+## minutes out, inbound") from its ETA (s).
+func _inbound_words(eta: float) -> String:
+	if kind != "insertion":
+		return "Inbound"
+	if eta <= 45.0:
+		return "Thirty seconds out, inbound"
+	if eta <= 75.0:
+		return "One minute out, inbound"
+	return "%s minutes out, inbound" % ["Two", "Three", "Four", "Five"][clampi(roundi(eta / 60.0) - 2, 0, 3)] if eta < 330.0 else "Inbound"
 
 
 ## Whether it's close enough to the players to be on station (orbiting, looking for smoke).
@@ -348,7 +383,7 @@ func server_set_destination(where: Dictionary) -> String:
 	sup.server_radio(kind, "Copy, taking you to %s%s" % [_grid(dest_lz), "" if float(found.moved_m) < 5.0 else " (%d m off the mark: no LZ at it)" % roundi(float(found.moved_m))])
 	if stage == "carry" and phase == Phase.CARRY:
 		lz = dest_lz
-		heli.server_land_at(lz)
+		_land()
 	return ""
 
 
@@ -401,7 +436,7 @@ func step(delta: float) -> void:
 				_t = 0.0
 				if stage == "carry":
 					lz = dest_lz
-					heli.server_land_at(lz)
+					_land()
 					phase = Phase.CARRY
 				else:
 					_leave()
@@ -424,7 +459,7 @@ func step(delta: float) -> void:
 				sup.server_radio(kind, "Nowhere to take you: putting you back down")
 				stage = "drop"
 				mark = {"pos": lz}
-				heli.server_land_at(lz)
+				_land()
 				phase = Phase.INBOUND
 				_rechecked = true
 		Phase.LEAVING:
@@ -460,7 +495,7 @@ func _step_inbound() -> void:
 				_go_in(why)
 				return
 			if lz.distance_to(before) > 1.0:
-				heli.server_land_at(lz)
+				_land()
 		if _should_abort():
 			sup.server_radio(kind, "Taking heavy fire, aborting!")
 			_leave()
@@ -494,7 +529,7 @@ func _land_on_smoke(cloud: SmokeCloud) -> void:
 	sup.claimed[cloud.get_instance_id()] = self
 	_rechecked = false
 	phase = Phase.INBOUND
-	heli.server_land_at(lz)
+	_land()
 	sup.server_radio(kind, "I see %s. Coming in%s" % [cloud.colour, "" if lz_moved_m < 5.0 else ", landing %d m off it" % roundi(lz_moved_m)])
 
 
@@ -513,7 +548,7 @@ func _step_carry() -> void:
 			if found.ok:
 				dest_lz = found.spot
 				lz = dest_lz
-				heli.server_land_at(lz)
+				_land()
 				sup.server_radio(kind, "I see %s, setting down there" % cloud.colour)
 
 
@@ -524,6 +559,7 @@ func _on_landed() -> void:
 	_check = 0.0
 	_empty_since = -1.0
 	if stage == "drop":
+		_moved_insertion()
 		_unload(false)
 		sup.server_radio(kind, "On the ground at %s. Out, out, out!" % _grid(heli.global_position))
 		return
@@ -836,14 +872,55 @@ func _fly_in() -> void:
 	if not route.is_empty():
 		heli.server_fly_to(route[0], ROUTE_AGL_M, Helicopter.CRUISE_KMH, false)
 	else:
+		_land()
+
+
+## Lands at the LZ by the J-hook (Helicopter.server_land_at). Captain, 2026-10-14: the squad's
+## doors face away from the last known threat: with one known near the LZ (it shot at the
+## helicopter, or made an LZ hot) the hook ends with the threat abeam, the fuselage between it
+## and the door everyone gets out of (Vehicle.exit_spot's "exit_away"); else it hooks back the
+## way it came.
+func _land() -> void:
+	var threat := _known_threat()
+	if threat == Vector3.INF:
 		heli.server_land_at(lz)
+		heli.remove_meta(&"exit_away")
+		return
+	var t := Vector2(threat.x - lz.x, threat.z - lz.z).normalized()
+	var natural := Vector2(heli.global_position.x - lz.x, heli.global_position.z - lz.z).normalized()
+	var right := Vector2(t.y, -t.x)  # its nose this way: the threat on its right
+	var left := -right
+	var f := right if right.dot(natural) >= left.dot(natural) else left
+	heli.server_land_at(lz, atan2(-f.x, -f.y))
+	heli.set_meta(&"exit_away", threat)
 
 
-## An enemy who sees the LZ now (insertion and extraction), or null.
+## Where the last known threat to the landing is (Vector3.INF: none known): who shot at it
+## lately, else who made an LZ hot; within DOORS_AWAY_M of the LZ.
+func _known_threat() -> Vector3:
+	var out := Vector3.INF
+	if Soldier._now() < _threat_until:
+		out = _threat
+	elif _hot_seen != Vector3.INF:
+		out = _hot_seen
+	if out != Vector3.INF and _flat(out, lz) > DOORS_AWAY_M:
+		return Vector3.INF
+	return out
+
+
+## An enemy endangering the LZ now (insertion and extraction), or null: one close by who sees
+## it (DeadGround.hot_watcher), or one who shot at the helicopter lately from near it. Captain,
+## 2026-10-14: one far sentry with a sight line isn't a hot LZ.
 func _hot_at_lz() -> Soldier:
 	if kind != "insertion" and kind != "extraction":
 		return null
-	return DeadGround.hot_watcher(level(), lz)
+	var close := DeadGround.hot_watcher(level(), lz)
+	if close:
+		return close
+	if is_instance_valid(_shooter) and _shooter.vitals.is_up() and Soldier._now() - (_threat_until - AVOID_S) < HOT_FIRE_S \
+			and _flat(_shooter.global_position, lz) <= HOT_FIRE_M:
+		return _shooter
+	return null
 
 
 ## The LZ is hot (`hot` sees it): another in dead ground, away from every LZ waved off: round
@@ -862,13 +939,16 @@ func _pick_other_lz(hot: Soldier) -> bool:
 	var centre := _players_centre()
 	var rings: Array[Vector2] = [DeadGround.SQUAD_RING_M, Vector2(DeadGround.SQUAD_RING_M.x, WAVE_OFF_WIDE_M)]
 	var prefer: Variant = centre
+	var avoid_m := WAVE_OFF_AVOID_M
 	if kind == "insertion":
-		centre = objective if objective != Vector3.INF else lz
-		rings = [DeadGround.OBJECTIVE_RING_M if objective != Vector3.INF else Vector2(150.0, 450.0)]
-		prefer = heli.global_position
+		# Captain, 2026-10-14: near the insertion point the squad planned on, not drifting away.
+		centre = planned if planned != Vector3.INF else lz
+		rings = [Vector2(0.0, INSERT_WAVE_OFF_M)]
+		prefer = centre
+		avoid_m = INSERT_AVOID_M
 	for ring in rings:
 		for attempt in 3:
-			var found := DeadGround.find(lvl, centre, ring, prefer, waved_off, WAVE_OFF_AVOID_M, posts, _ignore(), spotters)
+			var found := DeadGround.find(lvl, centre, ring, prefer, waved_off, avoid_m, posts, _ignore(), spotters)
 			if not found.get("ok", false):
 				_log("%s helicopter: no other LZ round (%.0f, %.0f), %.0f-%.0f m (%d checked, %d watchers)" % [kind, centre.x, centre.z,
 					ring.x, ring.y, int(found.get("checked", 0)), int(found.get("watchers", 0))])
@@ -897,16 +977,66 @@ func _pick_other_lz(hot: Soldier) -> bool:
 func _wave_off(hot: Soldier) -> void:
 	var old := lz
 	_radio_state = ""
-	_log("%s helicopter: LZ (%.0f, %.0f) hot: %s sees it from %.0f m" % [kind, old.x, old.z, hot.display_name(), _flat(hot.global_position, old)])
+	_hot_seen = hot.global_position
+	_log("%s helicopter: LZ (%.0f, %.0f) hot: %s %s from %.0f m" % [kind, old.x, old.z, hot.display_name(),
+		"shot at us" if hot == _shooter else "sees it", _flat(hot.global_position, old)])
+	if wave_offs >= WAVE_OFF_MAX:
+		_put_down_anyway()
+		return
+	wave_offs += 1
 	if _pick_other_lz(hot):
+		_moved_insertion()
 		_fly_in()
 		var dir := Vector2(lz.x - old.x, lz.z - old.z)
 		_say("landing %s" % _grid(lz), "LZ %s is hot, enemy in sight of it. Waving off: new LZ %s, %d m %s%s" % [_grid(old), _grid(lz),
 			roundi(dir.length()), _compass(dir),
 			" of it" if kind == "insertion" else ", %d m from you" % roundi(_flat(lz, _players_centre()))])
 		return
+	if kind == "insertion":  # an insertion always ends: there's nowhere else to take them
+		_put_down_anyway()
+		return
 	mark = {}
 	_go_in("LZ %s is hot and there's no other near" % _grid(old))
+
+
+## Waved off enough (WAVE_OFF_MAX) or nowhere else for an insertion: it lands at the best LZ
+## it has (the one whose nearest enemy in sight of it is farthest) and stops looking.
+func _put_down_anyway() -> void:
+	var best := lz
+	var best_d := -1.0
+	var options: Array[Vector3] = waved_off.duplicate()
+	options.append(lz)
+	for at in options:
+		var d := INF
+		for s in DeadGround.hostiles(level()):
+			var f := _flat(s.global_position, at)
+			if f < d and DeadGround.sees(level(), at, s.global_position, true):
+				d = f
+		if d > best_d:
+			best_d = d
+			best = at
+	var done := wave_offs
+	lz = best
+	lz_moved_m = 0.0
+	mark = {"source": "grid", "pos": lz, "from": "wave_off", "near": kind == "extraction"}
+	_rechecked = true
+	_hot_check = INF
+	wave_offs = WAVE_OFF_MAX + 1
+	if kind == "extraction" and stage == "pickup":
+		_place_point()
+	_moved_insertion()
+	_land()
+	_log("%s helicopter: putting down at (%.0f, %.0f) after %d wave-off(s)" % [kind, lz.x, lz.z, done])
+	_say("landing %s" % _grid(lz), "Putting you down, best we've got: LZ %s" % _grid(lz))
+
+
+## Insertion: the briefing's INSERT marker moves to where it lands now (the map shows it).
+func _moved_insertion() -> void:
+	if kind != "insertion":
+		return
+	var briefing := MapNodes.briefing(sup)
+	if briefing and briefing.is_deployed():
+		briefing.server_move_insertion(Vector2(lz.x, lz.z))
 
 
 ## A line for the session log and the console (the wave-off's reasoning, for playtests and tests).
@@ -1108,6 +1238,8 @@ func _on_hit(_zone: StringName, hit: Dictionary) -> void:
 	var dir: Vector3 = hit.get("direction", Vector3.ZERO)
 	_threat = (shooter as Node3D).global_position if is_instance_valid(shooter) and shooter is Node3D else pos - dir.normalized() * 150.0
 	_threat_until = Soldier._now() + AVOID_S
+	if is_instance_valid(shooter) and shooter is Soldier and (shooter as Soldier).faction == &"hostile":
+		_shooter = shooter
 	if Soldier._now() - _fire_radio_at > UNDER_FIRE_RADIO_S and not heli.is_down():
 		_fire_radio_at = Soldier._now()
 		sup.server_radio(kind, "Taking fire!")
