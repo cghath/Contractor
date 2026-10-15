@@ -48,6 +48,7 @@ func _ready() -> void:
 	var tag := OS.get_environment("CONTRACTOR_TEST_TAG")
 	GameState.zone_id = "test_supports" + tag  # never touch a real save
 	Campaign.campaign_id = "test_supports_campaign" + tag
+	GameSettings.use_file(OS.get_user_data_dir().path_join("test_supports_settings%s.cfg" % tag))  # never the player's
 	CompoundLevel.spawn_ai = false
 	PeopleLayer.contract_people = false
 	Contracts.auto_show_debrief = false
@@ -94,6 +95,7 @@ func _finish() -> void:
 	if Net.is_hosting() or multiplayer.is_server():
 		GameState.delete_save()
 	print("SUPPORTS TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
+	GameSettings.use_file("")
 	Net.leave()
 	get_tree().quit(failures)
 
@@ -683,6 +685,8 @@ func _test_extraction() -> void:
 	e.heli.server_enter(player)
 	await _wait_for(func() -> bool: return ended[0], 40.0)
 	check(ended[0] and ext.state == Extraction.State.ENDED, "everyone aboard: lifting off ends the deployment")
+	var music := InfilMusic.of(level)
+	check(music != null and music.heli_name == "" and music.state == InfilMusic.State.IDLE, "no infil music on an extraction (Captain, 2026-10-14: insertions only)")
 	var report := ext.last_report
 	var squad_names: Array = (report.get("squad", []) as Array).map(func(s: Dictionary) -> String: return String(s.name))
 	var deposited: Array = (report.get("deposited", []) as Array).map(func(d: Dictionary) -> String: return String(d.id))
@@ -780,6 +784,12 @@ func _test_insertion() -> void:
 	if c == null:
 		return
 	await _frames(3)
+	# Captain, 2026-10-14 (temporary): Ride of the Valkyries on the way in, for the players aboard.
+	var track := load(InfilMusic.PATH) as AudioStreamMP3
+	check(track != null and not track.loop and track.get_length() > 60.0, "the infil music's track imports (MP3, not looped, %.0f s)" % (track.get_length() if track else -1.0))
+	var music := InfilMusic.of(level)
+	check(music != null and music.state == InfilMusic.State.PLAYING and music.heli_name == String(c.heli.name) and music.player.stream != null
+		and music.player.bus == InfilMusic.BUS, "lifted off with the player aboard: the infil music plays on the Music bus")
 	# Captain, 2026-10-14: the squad aboard showed "Waiting (briefing)" and wasn't drawn.
 	check(mates.all(func(m: Soldier) -> bool: return m.ai_status == "Aboard (UH-60M)"),
 		"the squad HUD says they're aboard (%s)" % ", ".join(mates.map(func(m: Soldier) -> String: return m.ai_status)))
@@ -789,6 +799,11 @@ func _test_insertion() -> void:
 	var at3 := Vector3(at.x, 0, at.y)
 	check(_landed(c) and _flat(c.heli.global_position, at3) <= 100.0, "it lands at the insertion point (%.0f m off)" % (_flat(c.heli.global_position, at3) if is_instance_valid(c.heli) else -1.0))
 	_check_flight(c, flight)
+	if music:
+		await _wait_for(func() -> bool: return music.state != InfilMusic.State.PLAYING, 3.0)
+		check(music.heli_name == "" and music.state == InfilMusic.State.FADING, "touchdown: the infil music fades out (%s)" % InfilMusic.State.keys()[music.state])
+		await _wait_for(func() -> bool: return music.state == InfilMusic.State.IDLE, InfilMusic.FADE_OUT_S + 2.0)
+		check(music.state == InfilMusic.State.IDLE and not music.player.playing, "and stops")
 	await _wait_for(func() -> bool: return mates.all(func(m: Soldier) -> bool: return Vehicle.ride_of(m) == null), 10.0)
 	check(mates.all(func(m: Soldier) -> bool: return Vehicle.ride_of(m) == null and _flat(m.global_position, at3) < 120.0), "the AI get out there")
 	if is_instance_valid(c.heli):
@@ -812,9 +827,16 @@ func _test_insertion_hot() -> void:
 		var a := TAU * k / 4.0 + 0.4
 		sentries.append(_sentry("FarSentry%d" % k, at3 + Vector3(cos(a), 0, sin(a)) * 260.0))
 	await _frames(2)
+	GameSettings.set_value("audio", "infil_music", false)  # Captain, 2026-10-14 (temporary): the toggle
 	var c := await _insert_at(at, "east")
 	if c == null:
+		GameSettings.set_value("audio", "infil_music", true)
 		return
+	await _frames(3)
+	var music := InfilMusic.of(level)
+	check(music != null and music.heli_name == String(c.heli.name) and music.state == InfilMusic.State.IDLE and not music.player.playing,
+		"infil music off in the settings: silent on the way in")
+	GameSettings.set_value("audio", "infil_music", true)
 	var flight := await _watch_flight(c, FLY_S)
 	check(_landed(c) and c.wave_offs == 0 and _flat(c.heli.global_position, at3) <= LandingZone.SEARCH_M,
 		"far sentries (260 m) in sight of the LZ: no wave-off, it lands (%d wave-offs, %.0f m off)" % [c.wave_offs, _flat(c.heli.global_position, at3) if is_instance_valid(c.heli) else -1.0])
