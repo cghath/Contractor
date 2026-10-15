@@ -133,9 +133,30 @@ func _video_tab() -> Control:
 	page.add_child(_choice("Anti-aliasing", "video", "antialiasing", GameSettings.ANTIALIASING))
 	page.add_child(_choice("Shadows", "video", "shadows", GameSettings.SHADOWS))
 	page.add_child(_slider("Field of view", "video", "fov", func(v: float) -> String: return "%d deg" % roundi(v)))
-	page.add_child(_slider("Menu and HUD size", "video", "ui_scale", func(v: float) -> String: return "%d%%" % roundi(v * 100.0)))
+	page.add_child(_ui_scale_row())
 	page.add_child(_toggle("Objective markers on screen (the hint line always shows)", "hud", "objective_markers"))
 	return page.get_parent()
+
+
+## The Menu and HUD size slider and, under it, what this window picks by itself and the size
+## that makes (docs/ui_audit.md P1-7: the window height sets the UI scale, the setting
+## multiplies it; GameSettings.ui_scale_for).
+func _ui_scale_row() -> Control:
+	var box := VBoxContainer.new()
+	var row := _slider("Menu and HUD size (times the window's own)", "video", "ui_scale", func(v: float) -> String: return "%d%%" % roundi(v * 100.0))
+	box.add_child(row)
+	var note := Label.new()
+	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	note.modulate = Color(1, 1, 1, 0.7)
+	box.add_child(note)
+	var show := func(v: float) -> void:
+		var window := get_tree().root.size if is_inside_tree() else DisplayServer.window_get_size()
+		note.text = "This %d x %d window picks %d%% by itself, so the menus and HUD are at %d%%." % [
+			window.x, window.y, roundi(GameSettings.auto_ui_scale(window) * 100.0), roundi(GameSettings.ui_scale_for(window, v) * 100.0)]
+	var slider := row.get_child(1) as HSlider
+	slider.value_changed.connect(show)
+	show.call(slider.value)
+	return box
 
 
 func _audio_tab() -> Control:

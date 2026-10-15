@@ -45,10 +45,19 @@ const DEFAULTS := {
 }
 ## Ranges for the sliders: [min, max, step].
 const RANGES := {
-	"render_scale": [0.5, 1.0, 0.05], "fov": [60.0, 110.0, 1.0], "ui_scale": [0.75, 1.5, 0.05],
+	"render_scale": [0.5, 1.0, 0.05], "fov": [60.0, 110.0, 1.0], "ui_scale": [0.75, 2.0, 0.05],
 	"master": [0.0, 1.0, 0.01], "effects": [0.0, 1.0, 0.01], "voice": [0.0, 1.0, 0.01], "music": [0.0, 1.0, 0.01],
 	"mouse_sensitivity": [0.2, 3.0, 0.05], "aim_sensitivity": [0.2, 1.5, 0.05],
 }
+## The UI scale (docs/ui_audit.md P1-7, "no automatic UI scale": on 1440p and 4K every screen
+## was laid out for 1600x900 and its text was physically tiny). The window height over
+## AUTO_UI_HEIGHT, within AUTO_UI_SCALE, picks the scale, and the Menu and HUD size setting
+## ("ui_scale") multiplies it. The result never shrinks the logical window below MIN_UI_SIZE,
+## the smallest one tests/ui_test.gd fits screens at (1280x720 at the setting's old 1.5 most).
+const AUTO_UI_HEIGHT := 1080.0
+const AUTO_UI_SCALE := Vector2(1.0, 2.0)
+const MIN_UI_SIZE := Vector2(1280.0, 720.0) / 1.5
+
 ## The keys a player can rebind (Controls.KEYS, each one key): the label in the Keys list. The
 ## rest stay fixed (Escape, the Ctrl/Alt menus, fire and aim, Shift combinations, dev keys). An
 ## optic's zoom is on the side mouse buttons by default (Controls.BUTTONS; bindings: key_for).
@@ -206,13 +215,38 @@ static func apply_video() -> void:
 	var aa := String(get_value("video", "antialiasing"))
 	root.screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA if aa == "fxaa" else Viewport.SCREEN_SPACE_AA_DISABLED
 	root.msaa_3d = {"msaa2": Viewport.MSAA_2X, "msaa4": Viewport.MSAA_4X, "msaa8": Viewport.MSAA_8X}.get(aa, Viewport.MSAA_DISABLED)
-	root.content_scale_factor = float(get_value("video", "ui_scale"))
+	apply_ui_scale()
+	if not root.size_changed.is_connected(apply_ui_scale):
+		root.size_changed.connect(apply_ui_scale)  # the auto scale follows the window size
 	var shadows := String(get_value("video", "shadows"))
 	if SHADOW_LEVELS.has(shadows):
 		RenderingServer.directional_shadow_atlas_set_size(int(SHADOW_LEVELS[shadows].atlas), true)
 		RenderingServer.directional_soft_shadow_filter_set_quality(SHADOW_LEVELS[shadows].soft)
 	for sun: Node in root.find_children("*", "DirectionalLight3D", true, false):
 		apply_sun(sun as DirectionalLight3D)
+
+
+## The root's content scale from its window size and the Menu and HUD size setting (apply_video,
+## and again whenever the window is resized).
+static func apply_ui_scale() -> void:
+	var tree := Engine.get_main_loop() as SceneTree
+	if tree == null:
+		return
+	tree.root.content_scale_factor = ui_scale_for(tree.root.size, float(get_value("video", "ui_scale")))
+
+
+## The UI scale a window of `window` pixels picks by itself: its height over 1080, 1.0 to 2.0.
+static func auto_ui_scale(window: Vector2i) -> float:
+	return clampf(float(window.y) / AUTO_UI_HEIGHT, AUTO_UI_SCALE.x, AUTO_UI_SCALE.y)
+
+
+## The UI scale used in a window of `window` pixels with the setting at `setting`: the auto
+## scale times the setting, kept so the logical window stays at least MIN_UI_SIZE.
+static func ui_scale_for(window: Vector2i, setting: float) -> float:
+	var scale := auto_ui_scale(window) * setting
+	if window.x > 0 and window.y > 0:
+		scale = minf(scale, maxf(1.0, minf(window.x / MIN_UI_SIZE.x, window.y / MIN_UI_SIZE.y)))
+	return scale
 
 
 ## A level's sun under the shadow setting (each level calls it when it makes its sun).
