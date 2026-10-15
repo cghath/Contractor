@@ -139,6 +139,14 @@ func _ready() -> void:
 	var people := PeopleLayer.find(level)
 	if people and people.people().is_empty():
 		people._spawn_civilians()
+	# The town's voxels drawn as for a player standing in it (the host's own body stands back, out
+	# of the fire; medics would drag it about): a viewer of the host's kind at the town's middle.
+	var eyes := VoxelViewer.new()
+	eyes.view_distance = VoxelWorld.VIEW_DISTANCE
+	eyes.requires_visuals = true
+	eyes.requires_collisions = false
+	add_child(eyes)
+	eyes.global_position = _centre + Vector3.UP * 1.7
 	# The host's own body behind the squad, out of the fire (a downed host blacks the screen out).
 	var behind := rect.size.y * 0.5 + 30.0
 	me.global_position = level.ground_point(_centre + Vector3(4.0, 0, behind)) + Vector3.UP * 0.2
@@ -209,11 +217,42 @@ func _ready() -> void:
 				var img := get_viewport().get_texture().get_image()
 				img.save_png(out_dir.path_join("%s.png" % name))
 				last = Time.get_ticks_usec()  # the save isn't the game's frame
+	if "--lod-shots" in args:
+		await _lod_shots()
 	if not "--no-probe" in args:
 		await _probe()
 		_unit_costs()
 	_report()
 	_end(0)
+
+
+## Screenshots of one soldier from either side of each level-of-detail distance
+## (VoxelArt.LOD_M), zoomed so he fills the frame ("lod_<m>m_zoom.png": what a pop would look
+## like through an optic), and at the normal field of view ("lod_<m>m.png").
+func _lod_shots() -> void:
+	# A soldier of his own, standing on open ground away from the fight, brainless.
+	var spot := level.ground_point(_centre + Vector3(0, 0, town.footprint().size.y * 0.5 + 200.0))
+	var who := level.spawn_soldier({"name": "BenchModel", "faction": "friendly", "variant": "multicam", "pos": spot + Vector3.UP * 0.2,
+		"loadout": CompoundLevel.HOSTILE_LOADOUT, "combat": 0.6, "discipline": 0.6, "guard": true})
+	if who == null:
+		return
+	var brain := SquadAI.of(who)
+	if brain:
+		brain.process_mode = Node.PROCESS_MODE_DISABLED
+	for k in 30:
+		await get_tree().process_frame
+	var chest := who.global_position + Vector3.UP * 1.0
+	var away := Vector3(-0.5, 0.0, -0.85).normalized()  # from in front of him, a little to his side
+	for d: float in [6.0, 11.5, 12.5, 38.0, 39.5, 40.5, 145.0, 155.0, 300.0]:
+		for zoom: bool in [true, false]:
+			cam.fov = rad_to_deg(2.0 * atan(1.3 / d)) if zoom else GameSettings.fov()
+			cam.global_position = chest + (who.global_basis * away) * d + Vector3.UP * (0.3 + d * 0.03)  # over the rises between
+			cam.look_at(chest, Vector3.UP)
+			for k in 4:
+				await get_tree().process_frame
+			_hide_hud()
+			get_viewport().get_texture().get_image().save_png(out_dir.path_join("lod_%04.1fm%s.png" % [d, "_zoom" if zoom else ""]))
+	cam.fov = GameSettings.fov()
 
 
 ## Where the frame goes: from the orbit's 18 s spot, PROBE_S seconds with each part of the
@@ -228,6 +267,17 @@ func _probe() -> void:
 	var frozen := {}
 	var phases := [
 		["all on", func(_on: bool) -> void: pass],
+		["all on (vis ranges re-set)", func(on: bool) -> void:
+			if not on:
+				for g: Node in get_tree().root.find_children("*", "GeometryInstance3D", true, false):
+					var gi := g as GeometryInstance3D
+					if gi.visibility_range_end > 0.0 or gi.visibility_range_begin > 0.0:
+						var b := gi.visibility_range_begin
+						var e := gi.visibility_range_end
+						gi.visibility_range_begin = b + 0.001
+						gi.visibility_range_end = e + 0.001 if e > 0.0 else 0.0
+						gi.visibility_range_begin = b
+						gi.visibility_range_end = e],
 		["AI brains off", func(on: bool) -> void:
 			for n: Node in of.call(SquadAI) + of.call(CivilianAI):
 				n.set_physics_process(on)],
@@ -257,6 +307,27 @@ func _probe() -> void:
 		["people hidden", func(on: bool) -> void:
 			for n: Node in of.call(Soldier):
 				(n as Node3D).visible = on],
+		["voxel structures hidden", func(on: bool) -> void:
+			for n: Node in get_tree().root.find_children("*", "VoxelTerrain", true, false):
+				(n as Node3D).visible = on],
+		["scatter hidden", func(on: bool) -> void:
+			var scatter := level.get_node_or_null(^"Scatter") as Node3D
+			if scatter:
+				scatter.visible = on],
+		["ground mesh hidden", func(on: bool) -> void:
+			var ground := level.get_node_or_null(^"Terrain") as Node3D
+			if ground:
+				ground.visible = on],
+		["smoke clouds hidden", func(on: bool) -> void:
+			for n: Node in of.call(SmokeCloud):
+				(n as Node3D).visible = on],
+		["a smoke cloud added", func(on: bool) -> void:
+			if not on:
+				level.spawn_smoke(_centre + Vector3(0, 0.2, 0), "white", 5.0)
+			else:
+				for n: Node in of.call(SmokeCloud):
+					if (n as SmokeCloud).age < 30.0 and (n as Node3D).global_position.distance_to(_centre + Vector3(0, 0.2, 0)) < 0.5:
+						n.queue_free()],
 		["sun shadows off", func(on: bool) -> void:
 			if sun:
 				sun.shadow_enabled = on],
@@ -355,7 +426,9 @@ func _sample(usec: int) -> Dictionary:
 		"gpu_ms": RenderingServer.viewport_get_measured_render_time_gpu(vp),
 		"draws": Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME),
 		"prims": Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME),
-		"objects": Performance.get_monitor(Performance.RENDER_TOTAL_OBJECTS_IN_FRAME)}
+		"objects": Performance.get_monitor(Performance.RENDER_TOTAL_OBJECTS_IN_FRAME),
+		"shadow_draws": RenderingServer.viewport_get_render_info(vp, RenderingServer.VIEWPORT_RENDER_INFO_TYPE_SHADOW, RenderingServer.VIEWPORT_RENDER_INFO_DRAW_CALLS_IN_FRAME),
+		"main_draws": RenderingServer.viewport_get_render_info(vp, RenderingServer.VIEWPORT_RENDER_INFO_TYPE_VISIBLE, RenderingServer.VIEWPORT_RENDER_INFO_DRAW_CALLS_IN_FRAME)}
 	_t.phys_ticks = 0
 	_t.phys_script = 0
 	# The game's own counted systems (FrameCost) since the session log last took them (in its
@@ -386,6 +459,32 @@ func _place_camera(t: float) -> void:
 		var d := lerpf(40.0, 150.0, k)
 		cam.global_position = _centre + Vector3(d * 0.6, lerpf(10.0, 25.0, k), d * 0.8)
 		cam.look_at(_centre + Vector3.UP * 1.5, Vector3.UP)
+
+
+## Visible geometry by what it belongs to (a soldier, an item on the ground, a smoke cloud...,
+## else the level's child it's under): where the draw calls come from.
+func _owners() -> String:
+	var count := {}
+	for g: Node in get_tree().root.find_children("*", "GeometryInstance3D", true, false):
+		if not (g as GeometryInstance3D).is_visible_in_tree():
+			continue
+		var kind := "other"
+		var n: Node = g.get_parent()
+		while n:
+			if n is Soldier:
+				kind = "soldiers"
+				break
+			if n is WorldItem or n is SmokeCloud or n is Ragdoll:
+				kind = n.get_script().get_global_name()
+				break
+			if n.get_parent() == level:
+				kind = "level/" + String(n.name).rstrip("0123456789")
+				break
+			n = n.get_parent()
+		count[kind] = int(count.get(kind, 0)) + 1
+	var keys := count.keys()
+	keys.sort_custom(func(a: String, b: String) -> bool: return int(count[a]) > int(count[b]))
+	return ", ".join(PackedStringArray(keys.map(func(k: String) -> String: return "%s %d" % [k, count[k]])))
 
 
 ## The HUD and menus off: the bench measures the 3D scene, and its screenshots show it.
@@ -421,12 +520,12 @@ func _stats(frames: Array) -> Dictionary:
 		"low1_fps": 1000.0 / maxf(worst_total / worst_n, 0.001), "worst_ms": ms[n - 1] if n > 0 else 0.0,
 		"process_ms": avg.call("process_ms"), "ticks": avg.call("ticks"), "phys_script_ms": avg.call("phys_script_ms"), "phys_all_ms": avg.call("phys_all_ms"),
 		"ai_ms": avg.call("ai_ms"), "nav_ms": avg.call("nav_ms"), "models_ms": avg.call("models_ms"), "models_worst": frames.reduce(func(a: float, f: Dictionary) -> float: return maxf(a, f.models_ms), 0.0), "render_cpu_ms": avg.call("render_cpu_ms"),
-		"gpu_ms": avg.call("gpu_ms"), "draws": avg.call("draws"), "prims": avg.call("prims"), "objects": avg.call("objects")}
+		"gpu_ms": avg.call("gpu_ms"), "draws": avg.call("draws"), "prims": avg.call("prims"), "objects": avg.call("objects"), "shadow_draws": avg.call("shadow_draws"), "main_draws": avg.call("main_draws")}
 
 
 func _line(name: String, s: Dictionary) -> String:
-	return "%-20s %5d frames  avg %6.2f ms (%5.0f fps)  1%% low %5.0f fps  worst %6.1f ms | physics %4.1f ticks: scripts %6.2f, all %6.2f ms (%5.2f a tick) | ai %5.2f nav %4.2f models %4.2f (worst %5.1f) | process %5.2f  render-cpu %5.2f  gpu %5.2f ms | draws %6.0f  prims %9.0f  objects %6.0f" % [
-		name, s.n, s.avg_ms, s.fps, s.low1_fps, s.worst_ms, s.ticks, s.phys_script_ms, s.phys_all_ms, s.phys_all_ms / maxf(s.ticks, 0.01), s.ai_ms, s.nav_ms, s.models_ms, s.models_worst, s.process_ms, s.render_cpu_ms, s.gpu_ms, s.draws, s.prims, s.objects]
+	return "%-20s %5d frames  avg %6.2f ms (%5.0f fps)  1%% low %5.0f fps  worst %6.1f ms | physics %4.1f ticks: scripts %6.2f, all %6.2f ms (%5.2f a tick) | ai %5.2f nav %4.2f models %4.2f (worst %5.1f) | process %5.2f  render-cpu %5.2f  gpu %5.2f ms | draws %6.0f (main %5.0f, shadows %5.0f)  prims %9.0f  objects %6.0f" % [
+		name, s.n, s.avg_ms, s.fps, s.low1_fps, s.worst_ms, s.ticks, s.phys_script_ms, s.phys_all_ms, s.phys_all_ms / maxf(s.ticks, 0.01), s.ai_ms, s.nav_ms, s.models_ms, s.models_worst, s.process_ms, s.render_cpu_ms, s.gpu_ms, s.draws, s.main_draws, s.shadow_draws, s.prims, s.objects]
 
 
 func _report() -> void:
@@ -460,6 +559,11 @@ func _report() -> void:
 	lines.append("BENCH scene: %d soldiers up (incl. %d player bodies), %d civilians, %d bodies, %d hostiles spawned in all, %d friendly reinforcements; %d MeshInstance3D, %d nodes, %d objects" % [
 		alive, level.players.get_child_count() + _puppets.size(), civs, dead, _spawned, _reinforced, meshes,
 		Performance.get_monitor(Performance.OBJECT_NODE_COUNT), Performance.get_monitor(Performance.OBJECT_COUNT)])
+	var streamed := level.modules().filter(func(m: ZoneModule) -> bool: return m.is_streamed())
+	lines.append("BENCH modules streamed in: %d of %d (%s); VoxelTerrain nodes %d" % [streamed.size(), level.modules().size(),
+		", ".join(PackedStringArray(streamed.map(func(m: ZoneModule) -> String: return "%s %.0f m" % [m.module_id, m.distance_to(_centre)]))),
+		get_tree().root.find_children("*", "VoxelTerrain", true, false).size()])
+	lines.append("BENCH drawn things by owner (visible GeometryInstance3D): %s" % _owners())
 	lines.append("BENCH " + _line("all", _stats(_frames)))
 	for seg: Array in SEGMENTS:
 		lines.append("BENCH " + _line(seg[0], _stats(_frames.filter(func(f: Dictionary) -> bool: return f.seg == seg[0]))))
