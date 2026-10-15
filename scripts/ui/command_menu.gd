@@ -86,6 +86,17 @@ const MENU := {
 			{"key": "2", "label": "File", "cmd": "formation:file"},
 			{"key": "3", "label": "Line", "cmd": "formation:line"},
 			{"key": "4", "label": "Staggered column", "cmd": "formation:staggered column"},
+			# Captain, 2026-10-14: "so long as I can set them to be dynamic": Dynamic (the default)
+			# lets the squad pick by where it is (Squad._update_context). For the squad, or the
+			# fire team selected.
+			{"key": "5", "label": "Column", "cmd": "formation:column"},
+			{"key": "6", "label": "Dynamic", "cmd": "formation:dynamic"},
+			{"key": "7", "label": "Spacing", "items": [
+				{"key": "1", "label": "Tight", "cmd": "spacing:tight"},
+				{"key": "2", "label": "Normal", "cmd": "spacing:normal"},
+				{"key": "3", "label": "Wide", "cmd": "spacing:wide"},
+				{"key": "4", "label": "Dynamic", "cmd": "spacing:dynamic"},
+			]},
 		]},
 		{"key": "9", "label": "Team", "items": [
 			{"key": "1", "label": "Select fire team A", "select": "fire:0"},

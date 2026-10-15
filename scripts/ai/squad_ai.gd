@@ -150,6 +150,15 @@ const FLOOR_DY_M := 1.6
 const REPATH_S := 1.0
 const COVER_RINGS: Array[float] = [2.0, 4.0, 6.0, 8.0, 10.0]
 const COVER_SEARCH_S := 1.0
+## Proposed (Captain, 2026-10-14: they bunched up): no two take cover, or a halt spot, within
+## COVER_GAP_M of each other (was 1.2 m: the same rock); a long wall still takes several.
+const COVER_GAP_M := 2.5
+## Proposed (Captain, 2026-10-14): keeping apart while following or fighting in formation. A
+## squadmate moving steers off anyone within SEPARATION_M (more the closer); one standing still
+## steps away from anyone within STACK_M (squadmates pass through each other, so nothing else
+## stops two standing in one spot). Not while boarding, at a casualty, in a stack or a room.
+const SEPARATION_M := 3.0
+const STACK_M := 1.5
 ## Cover that only hides you (wood or sheet metal a rifle round goes through, see
 ## VoxelWorld.MATERIALS) scores this much worse than cover that stops a round arriving with
 ## SOFT_COVER_TEST_J (an M855 at close range), so AI picks concrete when it has the choice.
@@ -299,6 +308,13 @@ const ESCORT_SCORE := 0.75
 const ESCORT_GUARD_M := 1.8
 ## The escort leading him waits for him beyond this.
 const ESCORT_WAIT_M := 4.0
+## Proposed (casualty suite, 2026-10-14: hit while bounding to cover, a squadmate started his
+## own tourniquet at a run and lost it): self-treatment starts once he's below this speed.
+const SELF_CARE_STILL_MPS := 2.0
+## The escort leading him keeps this close to the lead, from his side (proposed; Captain,
+## 2026-10-14: formation slots are wider now, and the HVT stays with the lead, not out on a
+## wing or at the back of the second fire team).
+const ESCORT_LEAD_M := 5.0
 const ESCORT_LEASH_M := 3.0
 const ESCORT_REACT_S := Vector2(1.6, 0.6)
 const ESCORT_SUPPRESSED_S := 1.0
@@ -875,6 +891,8 @@ func status_text() -> String:
 			return "Falling back"
 		Intent.TACTIC:
 			return _tactic_text()
+	if _friendly() and squad and is_instance_valid(squad.leader):
+		return "Following (%s)" % squad.formation_text(body.fire_team if body.fire_team >= 0 else 0)
 	return "Following"
 
 
@@ -992,7 +1010,7 @@ func _act() -> void:
 		Intent.FOLLOW:
 			if fighting():
 				_halt_spot = null
-				_fight(squad.leader.global_position if squad and is_instance_valid(squad.leader) else body.global_position, 8.0)
+				_fight(_formation_anchor(), 8.0)
 			else:
 				var spot := _follow_spot()
 				_go(spot)
@@ -1086,7 +1104,16 @@ func _fight_from_context() -> void:
 		Squad.Order.MOVE:
 			_fight(_move_point, 5.0)
 		_:
-			_fight(squad.leader.global_position if squad and is_instance_valid(squad.leader) else body.global_position, 8.0)
+			_fight(_formation_anchor(), 8.0)
+
+
+## Where a following squadmate fights from: his formation slot (Captain, 2026-10-14: everyone
+## used to fight from cover within 8 m of the lead, and in the open with none found came back
+## to 4 m off him: the whole squad on the lead after every contact).
+func _formation_anchor() -> Vector3:
+	if squad == null or not is_instance_valid(squad.leader):
+		return body.global_position
+	return squad.follow_point(body)
 
 
 ## Fight from cover near `anchor`, within `leash` metres of it. Buddies take turns moving.
@@ -1129,6 +1156,8 @@ func _follow_spot() -> Vector3:
 	if not _friendly() or combat_mode == Squad.CombatMode.SAFE or not _lead_halted():
 		_halt_spot = null
 		return slot
+	if _halt_spot != null and _flat_between(_halt_spot, slot) > HALT_COVER_M + 0.5:
+		_halt_spot = null  # the slot moved on (his team leader got to his place): find one by it again
 	if _halt_spot == null:
 		var found: Variant = _find_halt_spot(slot)
 		_halt_spot = found if found != null else slot  # nothing solid near: wait at the slot
@@ -1197,7 +1226,7 @@ func _find_halt_spot(slot: Vector3) -> Variant:
 func _halt_spot_taken(point: Vector3) -> bool:
 	for n in get_tree().get_nodes_in_group(&"combatants"):
 		var other := SquadAI.of(n)
-		if other and other != self and other._halt_spot != null and (other._halt_spot as Vector3).distance_to(point) < 1.2:
+		if other and other != self and other._halt_spot != null and (other._halt_spot as Vector3).distance_to(point) < COVER_GAP_M:
 			return true
 	return false
 
@@ -1971,7 +2000,7 @@ func _do_escort() -> void:
 		if _flat_distance(anchor) > ESCORT_WAIT_M:
 			_has_destination = false  # let him catch up
 		else:
-			_go(squad.follow_point(body) if squad else body.global_position)  # he follows this unit
+			_go(_escort_lead_spot())  # he follows this unit
 		return
 	var ref := squad.leader.global_position if squad and is_instance_valid(squad.leader) else body.global_position
 	var back := anchor - ref
@@ -2373,6 +2402,8 @@ func _do_self_care() -> void:
 	body.want_crouch = true
 	if _being_treated() or _treat_until >= 0.0 or Soldier._now() < body._busy_until:
 		return
+	if Vector2(body.velocity.x, body.velocity.z).length() > SELF_CARE_STILL_MPS:
+		return  # still running from a bound: a treatment started on the move is lost ("you moved")
 	var task := _self_task()
 	if not task.is_empty():
 		_start_treatment(body, task)
@@ -2988,7 +3019,7 @@ func _cover_protects(point: Vector3) -> bool:
 func _cover_taken(point: Vector3) -> bool:
 	for n in get_tree().get_nodes_in_group(&"combatants"):
 		var other := SquadAI.of(n)
-		if other and other != self and other._has_cover and other._cover_point.distance_to(point) < 1.2:
+		if other and other != self and other._has_cover and other._cover_point.distance_to(point) < COVER_GAP_M:
 			return true
 	return false
 
@@ -3434,6 +3465,8 @@ func _steer(delta: float) -> void:
 		dir = next - body.global_position
 		dir.y = 0.0
 		dir = dir.normalized() if dir.length() > 0.05 else Vector3.ZERO
+	if _keeps_apart():
+		dir = _apart(dir)
 	var local := body.global_basis.inverse() * dir
 	body.move_input = Vector2(local.x, local.z)
 	var foe := _foe()
@@ -3447,6 +3480,56 @@ func _steer(delta: float) -> void:
 		_aim_at(body.threat_pos + Vector3.UP * 1.2)
 	elif foe == null and dir == Vector3.ZERO and suspecting() and intent != Intent.CASUALTY:
 		_aim_at(_suspect_pos + Vector3.UP * 1.0)  # something there: look (Spotting)
+
+
+## Whether this unit keeps its distance from squadmates now (SEPARATION_M): following, or
+## fighting while following, on its feet and carrying nobody.
+func _keeps_apart() -> bool:
+	if squad == null or not _friendly() or body.carrying != null or body.stunned_s > 0.0:
+		return false
+	return intent == Intent.FOLLOW or (intent == Intent.FIGHT and order == Squad.Order.FOLLOW)
+
+
+## `dir` (flat, unit or zero) turned off squadmates within SEPARATION_M (Captain, 2026-10-14:
+## they bunched up). Standing still, it steps off one within STACK_M, unless it's in cover.
+func _apart(dir: Vector3) -> Vector3:
+	var push := Vector3.ZERO
+	var stacked := false
+	var at := body.global_position
+	for other: Soldier in squad.neighbours():
+		if other == body or not is_instance_valid(other) or not other.vitals.is_up():
+			continue
+		var away := Vector3(at.x - other.global_position.x, 0.0, at.z - other.global_position.z)
+		var d := away.length()
+		if d >= SEPARATION_M:
+			continue
+		if d < 0.05:
+			var a := float(body.get_instance_id() % 628) / 100.0  # right on top: each his own way out
+			away = Vector3(cos(a), 0.0, sin(a))
+			d = 0.05
+		push += away / d * (1.0 - d / SEPARATION_M)
+		stacked = stacked or d < STACK_M
+	if push == Vector3.ZERO:
+		return dir
+	if dir != Vector3.ZERO:
+		if squad.resolved(body.fire_team if body.fire_team >= 0 else 0).spacing == "tight":
+			return dir  # a town, a doorway: two side by side pushed apart walk into the jambs (casualty soak, Echo and Foxtrot)
+		var turned := dir + push
+		return turned.normalized() if turned.length() > 0.2 else dir
+	if stacked and not _at_cover():
+		return push.normalized()
+	return dir
+
+
+## Where the escort leading an HVT walks: ESCORT_LEAD_M off the lead, on this unit's side.
+func _escort_lead_spot() -> Vector3:
+	if squad == null or not is_instance_valid(squad.leader):
+		return body.global_position
+	var lead := squad.leader.global_position
+	var off := Vector3(body.global_position.x - lead.x, 0.0, body.global_position.z - lead.z)
+	if off.length() < 0.5:
+		off = -squad.heading if squad.heading != Vector3.ZERO else Vector3.BACK
+	return NavigationServer3D.map_get_closest_point(body.get_world_3d().navigation_map, lead + off.normalized() * ESCORT_LEAD_M)
 
 
 ## Safe units only run to catch up from far behind; Stealth units never sprint.
