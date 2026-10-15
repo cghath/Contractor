@@ -225,6 +225,9 @@ func _test_senses() -> void:
 	var spots := _squad().filter(func(s: Soldier) -> bool:
 		var ai := SquadAI.of(s)
 		return ai._halt_spot != null and _flat(ai._halt_spot, squad.follow_point(s)) <= SquadAI.HALT_COVER_M + 0.7)
+	for s: Soldier in _squad():
+		if s not in spots:
+			print("    %s at %s, halt spot %s, slot %s, %s" % [s.name, s.global_position, SquadAI.of(s)._halt_spot, squad.follow_point(s), s.ai_status])
 	check(spots.size() == _squad().size(), "halted with the lead, each takes a spot by its slot (%d of %d)" % [spots.size(), _squad().size()])
 	await _seconds(1.5)
 	var out := _squad().filter(func(s: Soldier) -> bool:

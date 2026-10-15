@@ -308,6 +308,10 @@ const ESCORT_SCORE := 0.75
 const ESCORT_GUARD_M := 1.8
 ## The escort leading him waits for him beyond this.
 const ESCORT_WAIT_M := 4.0
+## The escort leading him keeps this close to the lead, from his side (proposed; Captain,
+## 2026-10-14: formation slots are wider now, and the HVT stays with the lead, not out on a
+## wing or at the back of the second fire team).
+const ESCORT_LEAD_M := 5.0
 const ESCORT_LEASH_M := 3.0
 const ESCORT_REACT_S := Vector2(1.6, 0.6)
 const ESCORT_SUPPRESSED_S := 1.0
@@ -1149,6 +1153,8 @@ func _follow_spot() -> Vector3:
 	if not _friendly() or combat_mode == Squad.CombatMode.SAFE or not _lead_halted():
 		_halt_spot = null
 		return slot
+	if _halt_spot != null and _flat_between(_halt_spot, slot) > HALT_COVER_M + 0.5:
+		_halt_spot = null  # the slot moved on (his team leader got to his place): find one by it again
 	if _halt_spot == null:
 		var found: Variant = _find_halt_spot(slot)
 		_halt_spot = found if found != null else slot  # nothing solid near: wait at the slot
@@ -1991,7 +1997,7 @@ func _do_escort() -> void:
 		if _flat_distance(anchor) > ESCORT_WAIT_M:
 			_has_destination = false  # let him catch up
 		else:
-			_go(squad.follow_point(body) if squad else body.global_position)  # he follows this unit
+			_go(_escort_lead_spot())  # he follows this unit
 		return
 	var ref := squad.leader.global_position if squad and is_instance_valid(squad.leader) else body.global_position
 	var back := anchor - ref
@@ -3501,11 +3507,24 @@ func _apart(dir: Vector3) -> Vector3:
 	if push == Vector3.ZERO:
 		return dir
 	if dir != Vector3.ZERO:
+		if squad.resolved(body.fire_team if body.fire_team >= 0 else 0).spacing == "tight":
+			return dir  # a town, a doorway: two side by side pushed apart walk into the jambs (casualty soak, Echo and Foxtrot)
 		var turned := dir + push
 		return turned.normalized() if turned.length() > 0.2 else dir
 	if stacked and not _at_cover():
 		return push.normalized()
 	return dir
+
+
+## Where the escort leading an HVT walks: ESCORT_LEAD_M off the lead, on this unit's side.
+func _escort_lead_spot() -> Vector3:
+	if squad == null or not is_instance_valid(squad.leader):
+		return body.global_position
+	var lead := squad.leader.global_position
+	var off := Vector3(body.global_position.x - lead.x, 0.0, body.global_position.z - lead.z)
+	if off.length() < 0.5:
+		off = -squad.heading if squad.heading != Vector3.ZERO else Vector3.BACK
+	return NavigationServer3D.map_get_closest_point(body.get_world_3d().navigation_map, lead + off.normalized() * ESCORT_LEAD_M)
 
 
 ## Safe units only run to catch up from far behind; Stealth units never sprint.

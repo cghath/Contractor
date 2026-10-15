@@ -93,6 +93,8 @@ const ROAD_WEIGHT := 0.5
 ## he looks: updated each time he has gone HEADING_STEP_M, by HEADING_BLEND of the new way.
 ## A lead turning to look round no longer swings every slot through the squad. Proposed.
 const HEADING_STEP_M := 2.0
+## A slot behind a wall from where its team forms comes this far back off the wall (_this_side).
+const WALL_CLEAR_M := 1.0
 const HEADING_BLEND := 0.5
 
 @export var faction := &"friendly"
@@ -979,14 +981,18 @@ func _work_out_slots() -> Dictionary:
 				if _flat(NavigationServer3D.map_get_closest_point(map, other), other) < _flat(NavigationServer3D.map_get_closest_point(map, origin), origin):
 					origin = other
 					mirror = -mirror
+			origin = _this_side(leader.global_position, origin)
 			for s: Soldier in list:
 				if s.vitals.is_up():
 					guide = s
 					break
 		var guide_k := list.find(guide)
 		var guide_ai := SquadAI.of(guide) if guide and guide.is_ai() else null
-		# The team forms on its own leader while he's with it (following, near his place).
-		var on_guide := guide_ai != null and guide_ai.intent == SquadAI.Intent.FOLLOW and _flat(guide.global_position, origin) < float(r.team)
+		# The team forms on its own leader while he's with it (following, off his place by more
+		# than a man's gap but within the team's): it keeps with him when he's held up or
+		# pushed round; at his place (or his halt spot by it) the slots stay put.
+		var guide_off := _flat(guide.global_position, origin) if guide else 0.0
+		var on_guide := guide_ai != null and guide_ai.intent == SquadAI.Intent.FOLLOW and guide_off > gap and guide_off < float(r.team)
 		var g_local := Vector3.ZERO
 		if guide != null:
 			g_local = team_shape(String(r.formation), guide_k, gap)
@@ -999,10 +1005,25 @@ func _work_out_slots() -> Dictionary:
 			if guide != null:
 				local -= g_local
 				base = guide.global_position if on_guide and k != guide_k else origin
-			var p := base + right * local.x - fwd * local.z
+			var p := _this_side(base, base + right * local.x - fwd * local.z)
 			out[s] = NavigationServer3D.map_get_closest_point(map, p) if map.is_valid() else p
 	out.erase(leader)
 	return out
+
+
+## `to`, or with a wall or building between it and `from` (where its team forms), the near side
+## of that: a slot is never across a wall from the lead (Captain, 2026-10-14: with wider
+## spacing, slots fell inside compounds the lead walked past, and men went round for them).
+func _this_side(from: Vector3, to: Vector3) -> Vector3:
+	if from.distance_to(to) < 0.5:
+		return to
+	var query := PhysicsRayQueryParameters3D.create(from + Vector3.UP, to + Vector3.UP, SquadAI.WORLD_MASK)
+	var hit := leader.get_world_3d().direct_space_state.intersect_ray(query)
+	if hit.is_empty():
+		return to
+	var back := Vector3(from.x - to.x, 0.0, from.z - to.z).normalized()
+	var at: Vector3 = hit.position
+	return Vector3(at.x, to.y, at.z) + back * WALL_CLEAR_M
 
 
 static func _flat(a: Vector3, b: Vector3) -> float:
