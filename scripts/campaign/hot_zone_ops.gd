@@ -243,7 +243,9 @@ func target_site(types: Array, pos: Vector3) -> ZoneModule:
 
 func _on_tier_changed(tier: int) -> void:
 	if multiplayer.is_server() and _deployed_here() and tier > int(Contracts.deployment().get("hazard_tier", 0)):
-		Contracts.server_note_deployment("hazard_tier", tier)
+		# Deferred: a tier reached inside Objectives' `changed` (an objective done) must not
+		# commit the campaign before Objectives has stored the change (the commit restores it).
+		Contracts.server_note_deployment.call_deferred("hazard_tier", tier)
 
 
 ## A new deployment here: nothing carried over from the last one.

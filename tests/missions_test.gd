@@ -990,8 +990,10 @@ func _test_hot_zone_ops() -> void:
 	# A QRF base taken out: "you hit their QRF, now hit the HQ".
 	var base: ZoneModule = null
 	for m: ZoneModule in level.modules():
-		if m.type == "qrf_base" and not ops._seen.has(m.module_id) and not sites.has(m.module_id):
-			base = m
+		if m.type == "qrf_base" and not sites.has(m.module_id):
+			base = m  # one the tests before took out is taken out again here
+	if base:
+		ops._seen.erase(base.module_id)
 	if base == null:
 		check(false, "a QRF base to take out")
 	else:
@@ -1066,6 +1068,7 @@ func _test_hot_zone_ops() -> void:
 	_calm()
 	alert.advance(Pressure.STAY_FLOOR_S * 4.0 + 1.0)
 	pressure.server_tick()
+	await _frames(1)
 	check(pressure.points >= Pressure.STAY_FLOOR * 4.0 - 0.01 and pressure.tier() >= 1,
 		"two quiet hours in the zone: the enemy still commits more (%.1f, tier %d)" % [pressure.points, pressure.tier()])
 	check(int(Contracts.deployment().get("hazard_tier", 0)) >= 1, "the deployment notes the tier reached, for hazard pay")
