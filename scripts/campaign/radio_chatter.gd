@@ -78,6 +78,10 @@ func _ready() -> void:
 		alert.reported.connect(_on_reported)
 		alert.state_changed.connect(_on_state_changed)
 		_zone_state = alert.zone_state
+	var er := level.get_node_or_null(^"EnemyResponse") as EnemyResponse if level else null
+	if er:
+		er.look_sent.connect(_on_look_sent)
+		er.checkpoints_changed.connect(_on_checkpoints)
 
 
 ## The radio chatter of the level `from` is in (null outside a hot zone).
@@ -233,6 +237,18 @@ func _on_wave(_index: int, soldiers: Array) -> void:
 		if is_instance_valid(s):
 			_say("%s: QRF moving out, %s side." % [_callsign_at((s as Node3D).global_position, true), compass(Vector3.ZERO, (s as Node3D).global_position)])
 			return
+
+
+## A patrol sent to look: the order goes out on the net (design: chatter sometimes gives away
+## patrol moves).
+func _on_look_sent(pos: Vector3) -> void:
+	if tuned and randf() < HEAR_CHANCE:
+		_say("%s: %s, go and check it out, %s side." % [NET_CALLSIGN, FIELD_CALLSIGN.to_lower(), compass(Vector3.ZERO, pos)])
+
+
+func _on_checkpoints(closed: bool) -> void:
+	if tuned:
+		_say("%s: all checkpoints, %s." % [NET_CALLSIGN, "close the roads. Nobody passes" if closed else "open the roads"])
 
 
 func _hook_reinforcements() -> void:

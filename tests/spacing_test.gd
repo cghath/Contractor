@@ -50,7 +50,9 @@ func _ready() -> void:
 	_place(player, Vector3(0, 0.1, 30))
 	await _seconds(1.0)
 	_clear_contact()
-	await _test_long_follow()
+	if OS.get_environment("SPACING_ONLY") != "wall":
+		await _test_long_follow()
+	await _test_wall_follow()
 	GameState.delete_save()
 	print("SPACING TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
@@ -170,6 +172,108 @@ func _test_long_follow() -> void:
 	check(open_teams >= 12.0 and open_teams <= 36.0, "the fire teams keep about 15-30 m apart (median %.1f m)" % open_teams)
 	check(town_nn >= 2.5 and town_nn < open_nn, "in the town they close up, to about 3-5 m (median %.1f m, open %.1f m)" % [town_nn, open_nn])
 	check(on_lead <= 0.05, "nobody walks on the lead's heels (%.2f a second within %.1f m)" % [on_lead, STACK_M])
+
+
+## Beside a long wall (Captain, 2026-10-15, v0.4.3 harbour_yard screenshot, "dynamic: wedge"):
+## the squad piled into a single file pressed on the building wall, one man stood in the player,
+## and they stayed there when he moved on. The lead walks a metre off the outside of the
+## compound's west wall (40 m of 2.6 m concrete) in a wedge, normal spacing, the wall on the
+## wedge's left arm, halts beside it, then walks away into the open.
+func _test_wall_follow() -> void:
+	print("Wall follow: walking beside a long wall, nobody piles on the wall or the lead, nobody stays stuck")
+	var squad := level.squad_for(&"friendly")
+	squad.formation = "wedge"
+	squad.spacing = "normal"
+	Engine.physics_ticks_per_second = roundi(60 * SCALE)
+	Engine.time_scale = SCALE
+	var wall_x := -CompoundLevel.COMPOUND_HALF  # the west wall's outer face
+	var start := Vector3(wall_x - 1.0, 0.1, -30.0)
+	_route = PackedVector3Array()
+	_place(player, start)
+	player.rotation.y = 0.0  # facing -z; the walk turns him north
+	squad.heading = Vector3(0, 0, 1)
+	squad._heading_from = start
+	squad.set(&"_trail", PackedVector3Array())  # (a fresh start: no trail from the long follow)
+	await _frames(2)
+	for s: Soldier in _squad():
+		if s.vitals.is_up():
+			_place(s, squad.follow_point(s) + Vector3.UP * 0.1)
+	await _seconds(2.0)
+	_sim_s = 0.0
+	_paused_until = -1.0
+	_route = PackedVector3Array([Vector3(wall_x - 1.0, 0.0, 16.0)])
+	_route_index = 0
+	var on_lead := 0
+	var stacked := 0
+	var on_wall_max := 0
+	var samples := 0
+	var close_before := {}
+	var phase := "walk"
+	var halt_end := -1.0
+	var t := 0.0  # (_sim_s stops when the route ends)
+	while phase != "done" and t < 120.0:
+		await _seconds(0.5)
+		t += 0.5
+		if phase == "walk" and _route_index >= _route.size():
+			phase = "halt"
+			halt_end = t + 8.0
+		elif phase == "halt" and t >= halt_end:
+			phase = "done"
+		samples += 1
+		var up: Array[Soldier] = []
+		for s: Soldier in _squad():
+			if s.vitals.is_up():
+				up.append(s)
+		var on_wall := 0
+		var close := {}
+		for i in up.size():
+			var a := up[i]
+			if _flat(a.global_position, player.global_position) < STACK_M:
+				on_lead += 1
+			if a.global_position.x > wall_x - 1.6 and absf(a.global_position.z - player.global_position.z) < 14.0:
+				on_wall += 1  # right up on the wall, along the lead's stretch of it
+			for j in range(i + 1, up.size()):
+				if _flat(a.global_position, up[j].global_position) < STACK_M:
+					var key := "%s|%s" % [a.name, up[j].name]
+					close[key] = true
+					if close_before.has(key):
+						stacked += 1
+		close_before = close
+		on_wall_max = maxi(on_wall_max, on_wall)
+		if OS.get_environment("SPACING_DEBUG") != "" and samples % 4 == 0:
+			_dump()
+	print("    %d samples: %d on the lead, %d stacked, at most %d on the wall at once" % [samples, on_lead, stacked, on_wall_max])
+	check(on_lead <= 1, "nobody stands on the lead beside the wall (%d half-second samples within %.1f m)" % [on_lead, STACK_M])
+	check(stacked <= 2, "nobody stacks on anyone beside the wall (%d samples)" % stacked)
+	check(on_wall_max <= 3, "the squad doesn't pile into a line on the wall (at most %d men within 0.6 m of it)" % on_wall_max)
+	# The slots themselves, halted: apart from each other and the lead.
+	var slots: Array[Vector3] = []
+	var nearest := INF
+	for s: Soldier in _squad():
+		if s.vitals.is_up():
+			var p := squad.follow_point(s)
+			nearest = minf(nearest, _flat(p, player.global_position))
+			for q in slots:
+				nearest = minf(nearest, _flat(p, q))
+			slots.append(p)
+	check(nearest >= 2.0, "halted by the wall, every slot is 2 m or more from the lead and the others (closest %.1f m)" % nearest)
+	# Then off into the open: everyone comes along.
+	_sim_s = 0.0
+	_route = PackedVector3Array([Vector3(wall_x - 24.0, 0.0, 16.0), Vector3(wall_x - 24.0, 0.0, 40.0)])
+	_route_index = 0
+	while _route_index < _route.size() and _sim_s < 60.0:
+		await _seconds(0.5)
+	await _seconds(12.0)
+	var behind := PackedStringArray()
+	for s: Soldier in _squad():
+		if s.vitals.is_up() and _flat(s.global_position, squad.follow_point(s)) > SETTLING_M:
+			behind.append("%s %.0f m off" % [s.name, _flat(s.global_position, squad.follow_point(s))])
+	check(behind.is_empty(), "walking away from the wall, nobody stays stuck on it (%s)" % (", ".join(behind) if not behind.is_empty() else "all with their slots"))
+	Engine.time_scale = 1.0
+	Engine.physics_ticks_per_second = 60
+	_route = PackedVector3Array()
+	squad.formation = Squad.DYNAMIC
+	squad.spacing = Squad.DYNAMIC
 
 
 ## One second's spacing: the median of each judged squadmate's nearest neighbour, pairs closer

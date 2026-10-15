@@ -93,6 +93,16 @@ static func support_kinds() -> Array:
 	return (data().get("supports", {}) as Dictionary).keys()
 
 
+## What a helicopter support lost this op costs to replace (0 for a kind with no helicopter).
+static func lost_support_price(kind: String) -> int:
+	return int((data().get("lost_supports", {}) as Dictionary).get(kind, 0))
+
+
+## A deployment's running costs (data/prices.json "operations"): per_head_day, kia_benefit, wounded_care.
+static func operations(key: String) -> int:
+	return int((data().get("operations", {}) as Dictionary).get(key, 0))
+
+
 static func weekly_upkeep() -> int:
 	return int(data().get("weekly_upkeep", 0))
 

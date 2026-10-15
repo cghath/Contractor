@@ -160,6 +160,11 @@ const COVER_GAP_M := 2.5
 ## steps away from anyone within STACK_M (squadmates pass through each other, so nothing else
 ## stops two standing in one spot). Not while boarding, at a casualty, in a stack or a room.
 const SEPARATION_M := 3.0
+## A unit keeps its crouch (or stands) at least this long before changing again, unless pinned
+## or stunned (down at once). Captain, 2026-10-15: squadmates bounced up and down; a follower
+## crouched each time he reached his moving slot and stood to catch up, and a base of fire
+## stood for every burst and crouched in every pause.
+const CROUCH_HOLD_S := 1.2
 const STACK_M := 1.5
 ## Cover that only hides you (wood or sheet metal a rifle round goes through, see
 ## VoxelWorld.MATERIALS) scores this much worse than cover that stops a round arriving with
@@ -169,6 +174,33 @@ const SOFT_COVER_TEST_J := 1650.0
 const ADVANCE_AFTER_S := 6.0
 const ADVANCE_STEP := 8.0
 const WORLD_MASK := 1
+## Line of fire (Captain, v0.4.6 playtest: "friendlies shoot at and try to shoot through walls,
+## enemies too"): no round leaves unless it would get there (_fire_line). Fire at a point
+## (suppression, covering fire) may be stopped by the world up to FIRE_LINE_SLACK_M short of
+## the point (the cover the enemy hides behind is a fair mark; a wall in front of the shooter
+## isn't); fire at a foe, up to FIRE_LINE_FOE_SLACK_M short of him. A round that would go
+## through what's in the way (wood, sheet metal: VoxelWorld.stops_round_in, with the round's
+## energy at that range) counts as getting there; concrete and brick never let it. The check
+## is kept FIRE_LINE_CACHE_S (one ray or so a burst, not one a frame).
+const FIRE_LINE_SLACK_M := 4.5
+const FIRE_LINE_FOE_SLACK_M := 0.5
+const FIRE_LINE_CACHE_S := 0.3
+## Eye heights a fire position is judged from (SoldierMovement's crouched and standing heads).
+const FIRE_EYE_CROUCH_M := 1.0
+const FIRE_EYE_STAND_M := 1.6
+## A base of fire or a "Suppress" order with no line of fire for NO_SHOT_MOVE_S looks for a fire
+## position (_find_fire_spot): a navmesh spot on FIRE_SPOT_RINGS round him (a path no longer than
+## FIRE_SPOT_PATH_M) with a line to the aim from a crouch or on his feet, the shortest move
+## first, in cover from the aim if it can, nobody else's. None: he holds, says "No shot!" and
+## looks again FIRE_SPOT_RETRY_S later.
+const NO_SHOT_MOVE_S := 2.5
+const FIRE_SPOT_RINGS: Array[float] = [2.0, 4.0, 6.0, 8.0, 10.0, 12.5, 15.0, 18.0]
+const FIRE_SPOT_PATH_M := 26.0
+const FIRE_SPOT_RETRY_S := 6.0
+## A fire position goes with its aim: the aim moving this far means looking again.
+const FIRE_SPOT_AIM_M := 4.0
+## What _fire_line_state found: a clear line, one clear only from his feet (he is crouched), none.
+enum FireLine { CLEAR, STAND, BLOCKED }
 const TURN_RATE := 7.0
 ## Proposed (Captain, P0362: close-range hostiles were lasers): how fast the aim can swing
 ## (degrees a second) at combat skill 0 and 1. Below this _aim_at turns as it always did; a
@@ -450,6 +482,8 @@ var task: Dictionary = {}
 var ordered: Dictionary = {}
 ## A stance order (STANCE_ORDERS; -1: the unit's own choice) and a "Heal up" order's end.
 var stance_order := -1
+var _crouch_kept := false  # the crouch the body was last given (_hold_crouch)
+var _crouch_kept_at := -1000.0
 var _heal_until := -1000.0
 ## Self-care put this unit prone (out in the open under fire); _act stands him back up once
 ## he's done.
@@ -545,6 +579,12 @@ var _treat_before := 0
 var _failures := {}  # task key -> treatments that changed nothing
 var _suppressing := false  # pinned while the casualty lies in the open: fire on the threat first
 var _cover_medic := false  # a squadmate nearby is out reaching or dragging a casualty (refreshed each think)
+var _fire_line := {}  # the last line-of-fire check (_fire_line): {"at", "from", "to", "state"}
+var _no_shot_since := -1.0  # when this unit last found it had a mark but no line of fire (-1: it has one)
+var _fire_spot: Variant = null  # where a base of fire / Suppress unit moves to get its shot (_find_fire_spot)
+var _fire_spot_aim := Vector3.INF  # the aim that spot was found for
+var _fire_spot_stand := false  # the line there is from his feet, not a crouch
+var _fire_spot_at := -1000.0  # when he last looked for one
 var _asked_medic := false
 var _answered := false
 var _medic_called_at := -1000.0
@@ -654,6 +694,7 @@ func _tick(delta: float) -> void:
 	_act()
 	_steer(delta)
 	_shoot()
+	_hold_crouch()
 	body.ai_status = status_text()
 
 
@@ -846,6 +887,9 @@ func destination() -> Vector3:
 
 
 func status_text() -> String:
+	var no_shot := _no_shot_text()
+	if no_shot != "":
+		return no_shot
 	var who := _name_of(casualty)
 	match intent:
 		Intent.CASUALTY:
@@ -1050,6 +1094,7 @@ func _act() -> void:
 			_do_fall_back()
 		Intent.TACTIC:
 			_do_tactic(_tactic())
+	_keep_to_fire_spot()  # a base of fire with no line of fire: to where it has one
 	_apply_combat_mode()
 	if _care_prone and intent != Intent.HEAL:
 		_care_prone = false
@@ -1070,10 +1115,26 @@ func _apply_combat_mode() -> void:
 				body.want_aim = false  # weapon lowered
 				body.want_crouch = false
 		Squad.CombatMode.COMBAT:
-			if not fight and _halted():
+			# Following: only once the lead has halted (_halt_spot), not each time he reaches
+			# his slot while the lead walks on (that bounced him up and down).
+			if not fight and _halted() and (intent != Intent.FOLLOW or _halt_spot != null):
 				body.want_crouch = true
 		Squad.CombatMode.STEALTH:
 			body.want_crouch = true
+
+
+## Stance hysteresis (CROUCH_HOLD_S): what this tick wants, held to the last change for a
+## moment, except going down when pinned or stunned.
+func _hold_crouch() -> void:
+	var want := body.want_crouch
+	if want == _crouch_kept:
+		return
+	var now := Soldier._now()
+	if (want and (body.suppression >= PINNED or body.stunned_s > 0.0)) or now - _crouch_kept_at >= CROUCH_HOLD_S:
+		_crouch_kept = want
+		_crouch_kept_at = now
+	else:
+		body.want_crouch = _crouch_kept
 
 
 ## Standing still: no destination, or already there.
@@ -3264,17 +3325,20 @@ func _shoot() -> void:
 		return
 	var foe := _foe()
 	var aim_at: Variant = null
+	var tactic_fire := false  # a base of fire's or a Suppress order's point
 	if foe != null:
 		aim_at = _cqb_aim_point(foe, get_physics_process_delta_time())
 	elif _suppressing:
 		aim_at = body.threat_pos + Vector3.UP * 1.0  # keep their heads down before going out to the casualty
 	elif _suppress_point() != null:
 		aim_at = _suppress_point()
+		tactic_fire = true
 	elif intent != Intent.CASUALTY and (_buddy_bounding() or _cover_medic) and in_contact() and now - _last_contact < 5.0:
 		aim_at = body.threat_pos + Vector3.UP * 1.0  # covering fire while the buddy (or a medic) moves
 	elif intent == Intent.FIGHT:
 		_maybe_frag()
 	if aim_at == null:
+		_no_shot_since = -1.0
 		return
 	var error := _aim_for_shot(aim_at, foe)
 	if body.want_crouch and _at_cover() and foe != null:
@@ -3282,6 +3346,17 @@ func _shoot() -> void:
 		return
 	if now < _next_shot or now < _pause_until or now < body._busy_until or not _gate_open(foe, error, aim_at):
 		return
+	# Nothing of the world in the way (v0.4.6: rounds went into the compound wall in front of them).
+	var line := _fire_line_state(aim_at, foe)
+	if line != FireLine.CLEAR:
+		if line == FireLine.STAND:
+			body.want_crouch = false  # on his feet the line is clear: up to fire over it
+		if _no_shot_since < 0.0:
+			_no_shot_since = now
+		if tactic_fire and now - _no_shot_since >= NO_SHOT_MOVE_S and now - _fire_spot_at >= FIRE_SPOT_RETRY_S:
+			_seek_fire_spot()
+		return
+	_no_shot_since = -1.0
 	if body.inventory.rounds_in(body.active_slot) <= 0 or _friendly_in_line(aim_at):
 		return
 	var auto: bool = weapon.stats.get("auto", false)
@@ -3298,6 +3373,159 @@ func _shoot() -> void:
 	var extra := deg_to_rad(_aim_error_deg(foe != null))
 	dir = (dir + Vector3(randf_range(-1, 1), randf_range(-1, 1), randf_range(-1, 1)) * tan(extra) * 0.6).normalized()
 	body._server_fire.rpc_id(1, body.camera.global_position, dir, body.active_slot)
+
+
+## Whether a round from here would get to `aim` (FireLine.CLEAR), would only from his feet while
+## he's crouched (STAND), or wouldn't (BLOCKED): the world may stop it up to FIRE_LINE_SLACK_M
+## short of a point, FIRE_LINE_FOE_SLACK_M short of a foe who is up (his aim point, not the
+## burst's hold off it) or 1 m short of one lying down (_fire_line_from). Kept for
+## FIRE_LINE_CACHE_S while he and the aim stay put.
+func _fire_line_state(aim: Vector3, foe: Soldier) -> FireLine:
+	var from := body.camera.global_position
+	if foe != null and foe.vitals.is_up():
+		aim = foe.aim_point()  # the man himself: a burst's hold low into the cover in front of him is a fair miss
+	var now := Soldier._now()
+	var c := _fire_line
+	if not c.is_empty() and now - float(c.at) < FIRE_LINE_CACHE_S and (c.from as Vector3).distance_to(from) < 0.3 \
+			and (c.to as Vector3).distance_to(aim) < 1.0 and bool(c.foe) == (foe != null):
+		return c.state
+	# A foe lying down: the ground round him isn't a wall (a dead-check aims at his belly).
+	var slack := FIRE_LINE_SLACK_M if foe == null else (FIRE_LINE_FOE_SLACK_M if foe.vitals.is_up() else 1.0)
+	var state := FireLine.CLEAR
+	if not _fire_line_from(from, aim, slack):
+		state = FireLine.BLOCKED
+		var feet := body.global_position + Vector3.UP * FIRE_EYE_STAND_M
+		if from.y < feet.y - 0.25 and _fire_line_from(feet, aim, slack):
+			state = FireLine.STAND
+	_fire_line = {"at": now, "from": from, "to": aim, "foe": foe != null, "state": state}
+	return state
+
+
+## Whether a round of the weapon in hand fired from `from` at `to` gets to within `slack` metres
+## of it: nothing of the world in the way, or only what it goes through with the energy it has
+## at that range (wood, sheet metal: VoxelWorld.stops_round_in), never concrete or the ground.
+func _fire_line_from(from: Vector3, to: Vector3, slack: float) -> bool:
+	var d := from.distance_to(to)
+	if d <= slack + 0.05:
+		return true
+	var end := from.lerp(to, (d - slack) / d)
+	var weapon := body.active_weapon()
+	if weapon == null or weapon.type != "weapon":
+		return Throwables.clear_line(body.get_world_3d(), from, end)
+	return not VoxelWorld.stops_round_in(body, from, end, Ballistics.world_energy(weapon, d))
+
+
+## A base of fire (or a Suppress order) that has had no line of fire for NO_SHOT_MOVE_S: a fire
+## position to move to (_find_fire_spot), or, with none, it holds and says so. A "[tactics]" line either way.
+func _seek_fire_spot() -> void:
+	_fire_spot_at = Soldier._now()
+	var aim: Vector3 = _tactic().get("aim", Vector3.INF)
+	if not aim.is_finite():
+		return
+	var found: Variant = _find_fire_spot(aim)
+	if found == null:
+		_fire_spot = null
+		print("[tactics] %s: no line of fire on (%.0f, %.0f) and no fire position within %.0f m: holds fire" % [body.name, aim.x, aim.z, FIRE_SPOT_RINGS[-1]])
+		_callout(&"no_shot")
+		return
+	_fire_spot = found.spot
+	_fire_spot_aim = aim
+	_fire_spot_stand = found.stand
+	print("[tactics] %s: no line of fire on (%.0f, %.0f) from here: moves %.0f m to a fire position at (%.0f, %.0f), %s" % [body.name,
+		aim.x, aim.z, found.walk, found.spot.x, found.spot.z, "standing" if found.stand else "crouched"])
+
+
+## The spot on the navmesh round him (FIRE_SPOT_RINGS) with a line of fire to `aim` from a crouch,
+## else on his feet, that is the shortest walk (at most FIRE_SPOT_PATH_M), one in cover from the
+## aim and a crouch preferred; none another squadmate holds. {"spot", "stand", "walk"} or null.
+func _find_fire_spot(aim: Vector3) -> Variant:
+	var world := body.get_world_3d()
+	var map := world.navigation_map
+	var here := body.global_position
+	# The baked mesh sits above the ground (by what it does under his feet): eyes go from the ground.
+	var lift := NavigationServer3D.map_get_closest_point(map, here).y - here.y
+	var found: Array[Dictionary] = []
+	for ring in FIRE_SPOT_RINGS:
+		for k in 12:
+			var angle := TAU * k / 12.0 + ring
+			var p := here + Vector3(cos(angle), 0.0, sin(angle)) * ring
+			var q := NavigationServer3D.map_get_closest_point(map, p)
+			if Vector2(q.x - p.x, q.z - p.z).length() > 0.8 or _fire_spot_taken(q):
+				continue
+			var stand := false
+			var ground := q + Vector3.DOWN * clampf(lift, 0.0, 1.0)
+			if not _fire_line_from(ground + Vector3.UP * FIRE_EYE_CROUCH_M, aim, FIRE_LINE_SLACK_M):
+				if not _fire_line_from(ground + Vector3.UP * FIRE_EYE_STAND_M, aim, FIRE_LINE_SLACK_M):
+					continue
+				stand = true
+			var extra := 3.0 if stand else 0.0
+			if Throwables.clear_line(world, aim, ground + Vector3.UP * 0.6):
+				extra += 6.0  # nothing between him and them even down low
+			found.append({"spot": q, "stand": stand, "extra": extra, "score": _flat_distance(q) + extra})
+	# The likeliest few by the flat distance, then by the walk there (round a wall, out a gate).
+	found.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return float(a.score) < float(b.score))
+	var best: Variant = null
+	for c in found.slice(0, 12):
+		var path := NavigationServer3D.map_get_path(map, here, c.spot, true)
+		if path.is_empty() or _flat_between(path[path.size() - 1], c.spot) > 0.8:
+			continue
+		var length := 0.0
+		for i in range(1, path.size()):
+			length += path[i - 1].distance_to(path[i])
+		c.walk = length
+		c.score = length + float(c.extra)
+		if length <= FIRE_SPOT_PATH_M and (best == null or float(c.score) < float(best.score)):
+			best = c
+	return best
+
+
+## Someone else holds `point` (his cover, his fire position, or he stands there).
+func _fire_spot_taken(point: Vector3) -> bool:
+	if _cover_taken(point):
+		return true
+	for n in get_tree().get_nodes_in_group(&"combatants"):
+		var s := n as Soldier
+		if s == null or s == body or not s.vitals.is_up():
+			continue
+		if _flat_between(s.global_position, point) < 1.0:
+			return true
+		var other := SquadAI.of(s)
+		if other and other._fire_spot != null and _flat_between(other._fire_spot, point) < COVER_GAP_M:
+			return true
+	return false
+
+
+## A base of fire or Suppress unit with a fire position (_seek_fire_spot) goes there and fires from
+## it while it suppresses; the spot goes when the tactic or its aim does. Other intents (care,
+## reloading, a moving tactic), a foe in sight or being pinned leave it be for now.
+func _keep_to_fire_spot() -> void:
+	if _fire_spot == null:
+		return
+	var aim: Vector3 = _tactic().get("aim", Vector3.INF)
+	var kind := StringName(_tactic().get("kind", &""))
+	if (kind != &"base" and kind != &"suppress") or not aim.is_finite() or aim.distance_to(_fire_spot_aim) > FIRE_SPOT_AIM_M:
+		_fire_spot = null
+		return
+	if intent not in [Intent.FOLLOW, Intent.HOLD, Intent.FIGHT] or _suppress_point() == null or _foe() != null \
+			or body.suppression >= PINNED or body.stunned_s > 0.0:
+		return
+	var spot: Vector3 = _fire_spot
+	if _flat_distance(spot) > ARRIVE + 0.2:
+		_go(spot, true)
+	else:
+		_has_destination = false
+		body.want_crouch = not _fire_spot_stand
+
+
+## Status words for a unit with a mark and no line of fire (_shoot), or "" for none.
+func _no_shot_text() -> String:
+	if body == null or intent not in [Intent.FOLLOW, Intent.HOLD, Intent.FIGHT] or body.stunned_s > 0.0 or body.suppression >= PINNED:
+		return ""
+	if _fire_spot != null and _has_destination and _destination == _fire_spot:
+		return "Moving to a fire position"
+	if _no_shot_since >= 0.0 and Soldier._now() - _no_shot_since >= NO_SHOT_MOVE_S:
+		return "No shot"
+	return ""
 
 
 ## The aim error (degrees) this unit adds to its weapon's own spread: less skill, suppression,

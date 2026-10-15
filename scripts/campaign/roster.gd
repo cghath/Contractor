@@ -36,9 +36,9 @@ const SKILLS: Array[String] = ["aim", "nerve", "medical", "movement"]
 
 ## Proposed: a day's wage is WAGE_BASE + WAGE_PER_SKILL x the mean skill + WAGE_PER_MISSION
 ## per mission survived (counted up to WAGE_MISSION_CAP).
-const WAGE_BASE := 40
-const WAGE_PER_SKILL := 100
-const WAGE_PER_MISSION := 4
+const WAGE_BASE := 300
+const WAGE_PER_SKILL := 150
+const WAGE_PER_MISSION := 6
 const WAGE_MISSION_CAP := 30
 ## Proposed: experience per mission survived, and how much each skill closes on 1.0 per
 ## mission (a random share between these, of what's left to learn).

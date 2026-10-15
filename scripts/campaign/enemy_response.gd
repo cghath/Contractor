@@ -77,6 +77,11 @@ const REINFORCE_MAX := 4
 const REINFORCE_TYPES: Array[String] = ["outpost", "checkpoint"]
 const TEAM_SPACING_M := 1.6
 
+## Host: a patrol was sent to look round `pos` (RadioChatter: the order on the net).
+signal look_sent(pos: Vector3)
+## Host: the checkpoints closed (or opened again).
+signal checkpoints_changed(closed: bool)
+
 var level: Node3D
 var alert: Alert
 var pressure: Pressure
@@ -92,6 +97,7 @@ var hunters: Array[Dictionary] = []
 ## HQ reinforcement pairs: {"k", "to" (module id), "squad", "soldiers", "at"}.
 var reinforcement_pairs: Array[Dictionary] = []
 var _officers_dead := {}   # soldier name -> true
+var _look_credit := 0.0    # officers dead: only coordination()'s share of looks gets ordered
 var _last_qrf := -INF
 var _qrf_due := INF      # a cold QRF's turnout time
 var _turnout := false    # the zone just went straight to engaged
@@ -244,7 +250,10 @@ func server_tick() -> void:
 		_qrf_due = INF
 		_launch_qrf()  # turned out
 	_tick_patrols(alerted or tier >= 1)
-	checkpoints_closed = alerted or tier >= 2
+	var closed := alerted or tier >= 2
+	if closed != checkpoints_closed:
+		checkpoints_changed.emit(closed)
+	checkpoints_closed = closed
 	if checkpoints_closed and alert:
 		for m: ZoneModule in level.call(&"modules"):
 			if m.type == "checkpoint":
@@ -355,8 +364,15 @@ func _launch_qrf() -> void:
 		_last_qrf = now()
 
 
-## The nearest patrol out (not already looking) goes to look round `pos` for LOOK_S.
+## The nearest patrol out (not already looking) goes to look round `pos` for LOOK_S. With
+## officers dead the net is less coordinated (design: killed officers make patrols less
+## coordinated): only coordination()'s share of the looks gets ordered (every one at full, one
+## in five at the floor), evenly, not by chance.
 func _send_look(pos: Vector3) -> void:
+	_look_credit += coordination()
+	if _look_credit < 1.0 - 1e-6:
+		return
+	_look_credit -= 1.0
 	var best: Dictionary = {}
 	var best_d := INF
 	var best_living: Array = []
@@ -380,6 +396,7 @@ func _send_look(pos: Vector3) -> void:
 		var a := start + TAU * k / LOOK_POINTS
 		route.append(_ground(pos + Vector3(cos(a), 0.0, sin(a)) * LOOK_RING_M))
 	_set_route(best.squad, best_living, route)
+	look_sent.emit(pos)
 
 
 func _on_tier_changed(_tier_now: int) -> void:

@@ -24,6 +24,7 @@ func _ready() -> void:
 	Campaign.campaign_id = "test_missions_campaign" + tag
 	CompoundLevel.spawn_ai = false
 	Contracts.auto_show_debrief = false
+	HotZoneOps.enabled = false  # one contract at a time below; _test_hot_zone_ops turns it on
 	GameState.delete_save()
 	Campaign.reset_campaign()
 	_test_generation()
@@ -49,6 +50,7 @@ func _ready() -> void:
 	await _test_enemy_response()
 	await _test_radio_chatter()
 	await _test_field_radio()
+	await _test_hot_zone_ops()
 	await _test_hq_posts()
 	await _test_respawn_points()
 	_finish()
@@ -950,6 +952,140 @@ func _test_field_radio() -> void:
 		player.inventory.take(&"radio", had)
 	Contracts.server_end_deployment({})
 	Contracts.server_finish_debrief()
+	await _frames(2)
+
+
+## Captain (2026-10-15: "flesh out HZs too, remember multiple missions per and our design"):
+## several of the faction's contracts live at once, follow-ups over the radio reacting to what
+## the squad did, the alert easing and the checkpoints with it, pressure rising with time, and
+## extraction lapsing what's left (hazard pay on what's done).
+func _test_hot_zone_ops() -> void:
+	print("Hot zone: several contracts, radio follow-ups, alert, staying")
+	var ops := HotZoneOps.of(level)
+	var alert := Alert.of(level)
+	var pressure := Pressure.of(level)
+	var er := EnemyResponse.of(level)
+	check(ops != null, "a hot zone runs its ops")
+	if ops == null or alert == null or pressure == null or er == null:
+		return
+	HotZoneOps.enabled = true
+	_calm()
+	var cid := _add(_offer("raid"))
+	Contracts.server_accept(cid, ContractGen.default_terms())
+	check(Contracts.server_start_deployment([], ZONE) == "", "deployed to the hot zone on one contract from the board")
+	await _frames(5)
+	var cids: Array = Contracts.deployment().cids
+	var sites := {}
+	for c: String in cids:
+		sites[String(Contracts.contract(c).module_id)] = true
+	var faction := String(MissionRegistry.zone(ZONE).faction)
+	check(cids.size() >= HotZoneOps.LIVE_RANGE.x and cids.size() <= HotZoneOps.LIVE_RANGE.y and cid in cids and sites.size() == cids.size()
+		and cids.all(func(c: String) -> bool: return Contracts.contract(c).employer == faction),
+		"the zone's faction has %d contracts live at once, each at a site of its own (%s)" % [cids.size(), sites.keys()])
+	var had := player.inventory.count_of(&"radio")
+	if had == 0:
+		player.inventory.take(&"radio")
+	ops.server_tick()  # sites taken out by the tests before: not ours
+	ops.queue.clear()
+	# A QRF base taken out: "you hit their QRF, now hit the HQ".
+	var base: ZoneModule = null
+	for m: ZoneModule in level.modules():
+		if m.type == "qrf_base" and not sites.has(m.module_id):
+			base = m  # one the tests before took out is taken out again here
+	if base:
+		ops._seen.erase(base.module_id)
+	if base == null:
+		check(false, "a QRF base to take out")
+	else:
+		for s: Soldier in _garrison(base):
+			_kill(s)
+		level._garrisoned[base.module_id] = maxi(1, int(level._garrisoned.get(base.module_id, 0)))
+		ops.server_tick()
+		check(level.site_down(base.module_id) and ops.queue.size() == 1 and ops.queue[0].trigger == "qrf_base" and ops.follow_ups.is_empty(),
+			"the QRF base taken out: a follow-up is on its way over the radio, not at once")
+		alert.advance(HotZoneOps.FOLLOW_UP_DELAY_S + 1.0)
+		ops.server_tick()
+		var f: Dictionary = ops.follow_ups.back() if not ops.follow_ups.is_empty() else {}
+		var at := level.get_module(String(f.get("site", "")))
+		check(not f.is_empty() and f.trigger == "qrf_base" and String(f.cid) in Contracts.deployment().cids and at != null
+			and at.type in ["hq", "outpost"] and String(Contracts.contract(String(f.cid)).module_id) == at.module_id,
+			"%.0f s later the employer radios a new contract at the %s (%s)" % [HotZoneOps.FOLLOW_UP_DELAY_S, at.type if at else "?",
+				Contracts.contract(String(f.get("cid", ""))).get("title", "none")])
+		check(not er._living_sites("qrf_base", base.global_position).has(base), "and the base taken out sends no more QRF waves")
+	# A contract done sets one off too; without a field radio it waits.
+	var done_cid := ""
+	for c: String in Contracts.deployment().cids:
+		if not ops._seen.has(String(Contracts.contract(c).module_id)) and not Contracts.objectives.contract_done(c):
+			done_cid = c
+			break
+	check(done_cid != "", "a live contract to finish")
+	if done_cid != "":
+		for o: Dictionary in Contracts.objectives.for_contract(done_cid):
+			if not o.optional:
+				Contracts.objectives.server_set_state(String(o.oid), Objectives.DONE)
+		_drop_all(player, &"radio")
+		var n := ops.follow_ups.size()
+		ops.server_tick()
+		alert.advance(HotZoneOps.FOLLOW_UP_DELAY_S + HotZoneOps.FOLLOW_UP_GAP_S + 1.0)
+		ops.server_tick()
+		check(ops.follow_ups.size() == n and ops.queue.size() == 1 and ops.queue[0].trigger == "contract",
+			"a contract done: its follow-up waits while the squad has no field radio")
+		player.inventory.take(&"radio")
+		ops.server_tick()
+		check(ops.follow_ups.size() == n + 1 and ops.follow_ups.back().trigger == "contract", "the field radio back: it comes in")
+	# The comms site's mast down: reports slow, and a follow-up.
+	var a := level.spawn_soldier({"name": "OpsGuard", "faction": "hostile", "variant": "urban",
+		"pos": level.ground_point(player.global_position + Vector3(60, 0, 0)), "loadout": [], "combat": 0.5, "discipline": 1.0, "guard": true})
+	alert._pending.clear()
+	alert._perceive(a, &"shot", a.global_position)
+	var quick := float(alert._pending.back().due) - alert.now() if not alert._pending.is_empty() else 0.0
+	alert._pending.clear()
+	alert._last_report.clear()
+	alert.comms_down = true
+	alert._perceive(a, &"shot", a.global_position)
+	var slow := float(alert._pending.back().due) - alert.now() if not alert._pending.is_empty() else 0.0
+	check(quick > 0.0 and is_equal_approx(slow, quick * Alert.COMMS_DOWN_MULT),
+		"the comms site down: reports reach the net %.0fx slower (%.0f s, not %.0f)" % [Alert.COMMS_DOWN_MULT, slow, quick])
+	alert._pending.clear()
+	a.queue_free()
+	var n2 := ops.follow_ups.size()
+	ops.server_tick()
+	alert.advance(HotZoneOps.FOLLOW_UP_DELAY_S + HotZoneOps.FOLLOW_UP_GAP_S + 1.0)
+	ops.server_tick()
+	check(ops.follow_ups.size() == n2 + 1 and ops.follow_ups.back().trigger == "comms", "and the employer radios what to hit while their net is down")
+	# The alert eases when the squad goes quiet, and the checkpoints with it.
+	_calm()
+	var outpost: ZoneModule = level.modules().filter(func(m: ZoneModule) -> bool: return m.type == "outpost")[0]
+	alert._receive({"kind": &"body", "pos": outpost.global_position, "area": outpost.module_id, "by": ""})
+	er.server_tick()
+	check(alert.zone_state == Alert.State.ALERTED and er.checkpoints_closed, "a body found: the zone alerted, checkpoints closed")
+	alert.advance(Alert.ALERTED_COOL_S + 10.0)
+	pressure.points = 0.0
+	pressure._tier = 0
+	er.server_tick()
+	check(alert.zone_state == Alert.State.SUSPICIOUS and not er.checkpoints_closed, "quiet for hours: the zone eases to suspicious and the roads open again")
+	# Staying: pressure rises with time even when quiet, and pays.
+	_calm()
+	alert.advance(Pressure.STAY_FLOOR_S * 4.0 + 1.0)
+	pressure.server_tick()
+	await _frames(1)
+	check(pressure.points >= Pressure.STAY_FLOOR * 4.0 - 0.01 and pressure.tier() >= 1,
+		"two quiet hours in the zone: the enemy still commits more (%.1f, tier %d)" % [pressure.points, pressure.tier()])
+	check(int(Contracts.deployment().get("hazard_tier", 0)) >= 1, "the deployment notes the tier reached, for hazard pay")
+	# Extraction ends it: what's done pays (with hazard pay), the rest lapses.
+	var d := Contracts.server_end_deployment({})
+	var lines: Array = d.get("contracts", [])
+	var done_lines := lines.filter(func(l: Dictionary) -> bool: return l.outcome == "completed")
+	var lapsed := lines.filter(func(l: Dictionary) -> bool: return l.outcome == "lapsed")
+	check(not Contracts.is_deployed() and not done_lines.is_empty() and lapsed.size() == lines.size() - done_lines.size()
+		and done_lines.all(func(l: Dictionary) -> bool: return (l.bonuses as Array).any(func(b: Dictionary) -> bool: return String(b.text).begins_with("Hazard pay"))),
+		"extracted: %d done with hazard pay, %d unfinished lapse" % [done_lines.size(), lapsed.size()])
+	Contracts.server_finish_debrief()
+	_drop_all(player, &"radio")
+	if had > 0:
+		player.inventory.take(&"radio", had)
+	HotZoneOps.enabled = false
+	_calm()
 	await _frames(2)
 
 

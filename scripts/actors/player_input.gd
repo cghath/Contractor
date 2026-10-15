@@ -13,6 +13,16 @@ const BASE_FOV := 80.0
 ## (Captain, P0362: a sight picture you can use). ADS_EYE back out from 16 to 19 cm (Captain,
 ## 2026-10-14: aimed, the red dot still looked big; a little further from the eye).
 const HIP_VIEW := Vector3(0.14, -0.16, -0.38)
+## First person on the move (docs/animation.md), in step with the drawn legs (CharacterModel's
+## gait): the view rides this share of the hips' bob and sways HEAD_SWAY (m) side to side a
+## cycle at a sprint (less slower; off with the "head_bob" setting, and while aiming); the
+## weapon bobs WEAPON_BOB (m: across, down) at a sprint, and sprinting comes down and across
+## by SPRINT_VIEW (m) and SPRINT_TILT (radians: muzzle down, turned in, canted).
+const HEAD_BOB := 0.5
+const HEAD_SWAY := 0.008
+const WEAPON_BOB := Vector2(0.012, 0.012)
+const SPRINT_VIEW := Vector3(-0.03, -0.05, 0.05)
+const SPRINT_TILT := Vector3(-0.5, 0.35, 0.25)
 const ADS_EYE := Vector3(0.0, 0.0, -0.19)
 const ADS_EYE_PISTOL := Vector3(0.0, 0.0, -0.5)
 ## Recoil settling back (Soldier.RECOIL_SETTLE), per second: most of it within a quarter second.
@@ -46,6 +56,9 @@ var _view_model_id: StringName = &""
 ## fill it): drawn on LOCAL_ONLY_LAYER like their own body, so everyone else still sees it.
 var _shouldered: Soldier = null
 var _shake := 0.0
+var _vm_base := HIP_VIEW   # the view model's place before its bob
+var _bob_w := 0.0          # 0..1: how much the steps move the view (not aiming, on the ground)
+var _sprint_w := 0.0       # 0..1: the weapon in its sprint carry
 var _deaf := false
 ## Placing a breaching charge (Charges): the ghost follows the view until Fire commits it.
 var placing := false
@@ -246,6 +259,31 @@ func _process(delta: float) -> void:
 	body.camera.h_offset = randf_range(-1.0, 1.0) * _shake * 0.08
 	body.camera.v_offset = randf_range(-1.0, 1.0) * _shake * 0.08
 	_update_hearing()
+	_update_bob(delta)
+
+
+## The view and weapon move with the steps (HEAD_BOB, WEAPON_BOB), the weapon comes down to
+## carry at a sprint (SPRINT_VIEW, SPRINT_TILT); none of it aimed.
+func _update_bob(delta: float) -> void:
+	var walking := body.is_on_floor() and body.vitals.is_up() and not is_instance_valid(body.vehicle) and body.carry_mode == &""
+	var w := body.model.gait_weight() if walking and not body.is_aiming else 0.0
+	_bob_w = move_toward(_bob_w, w, delta * 4.0)
+	_sprint_w = move_toward(_sprint_w, 1.0 if body.movement.is_sprinting and walking else 0.0, delta * 5.0)
+	var pace := clampf(body.model.gait_speed() / SoldierMovement.SPRINT_SPEED, 0.0, 1.0) * _bob_w
+	var phase := TAU * body.model.gait_phase()
+	if GameSettings.head_bob():
+		body.camera.position = Vector3(sin(phase) * HEAD_SWAY * pace, body.model.gait_bob() * HEAD_BOB * _bob_w, 0.0)
+	else:
+		body.camera.position = Vector3.ZERO
+
+
+## The weapon's bob this frame (camera-local), on top of where it sits.
+func weapon_bob() -> Vector3:
+	var pace := clampf(body.model.gait_speed() / SoldierMovement.SPRINT_SPEED, 0.0, 1.0) * _bob_w
+	var phase := TAU * body.model.gait_phase()
+	var side := -1.0 if body.left_handed else 1.0
+	return Vector3(sin(phase) * WEAPON_BOB.x * pace, -absf(cos(phase)) * WEAPON_BOB.y * pace, 0.0) \
+		+ SPRINT_VIEW * Vector3(side, 1, 1) * _sprint_w
 
 
 ## Muffled hearing (blasts, flashbangs, indoor gunfire): a low-pass on the master bus while
@@ -301,7 +339,7 @@ func _physics_process(delta: float) -> void:
 		_update_focus()
 		_update_aim(delta)
 		_try_fire()
-	var tilt := minf(-0.7 if body.is_reloading else 0.0, -CharacterModel.VIEW_LOWER_PITCH * body.model.view_lower())
+	var tilt := minf(minf(-0.7 if body.is_reloading else 0.0, -CharacterModel.VIEW_LOWER_PITCH * body.model.view_lower()), SPRINT_TILT.x * _sprint_w)
 	body.view_model.rotation.x = move_toward(body.view_model.rotation.x, tilt, delta * 6.0)
 	# Both hands on the casualty: no weapon in view; through a scope: only the glass (P0362); nor
 	# seated in a vehicle (no firing your own from a seat, and in first person it hid the cabin and
@@ -312,8 +350,9 @@ func _physics_process(delta: float) -> void:
 	_hide_shouldered()
 	# Settle sway after a stop (W3, SoldierMovement.weapon_sway).
 	var sway := body.movement.weapon_sway()
-	body.view_model.rotation.y = sway.x
-	body.view_model.rotation.z = sway.y
+	var side := -1.0 if body.left_handed else 1.0
+	body.view_model.rotation.y = sway.x + SPRINT_TILT.y * side * _sprint_w
+	body.view_model.rotation.z = sway.y + SPRINT_TILT.z * side * _sprint_w
 	hud.update_status(body)
 
 
@@ -513,7 +552,7 @@ func _update_aim(delta: float) -> void:
 	var weapon := body.active_weapon()
 	body.is_aiming = _captured() and body.vitals.is_up() and weapon != null and (weapon.type == "weapon" or Launchers.is_launcher(weapon)) \
 		and body.inventory.hands == &"" and not body.is_reloading and Input.is_action_pressed(&"aim")
-	var fov := GunSight.aimed_fov_of(body, weapon, GameSettings.fov()) if body.is_aiming else GameSettings.fov()
+	var fov := GunSight.aimed_fov_of(body, weapon, GameSettings.view_fov()) if body.is_aiming else GameSettings.view_fov()
 	# Up to the eye in the weapon's ADS time (its mass with optic, slower on tired arms:
 	# MovementRules.ads_seconds); lowering stays quick.
 	var rate := MovementRules.ADS_EASE_K / body.movement.ads_seconds() if body.is_aiming else 14.0
@@ -523,7 +562,8 @@ func _update_aim(delta: float) -> void:
 	var lowered := CharacterModel.VIEW_LOWER_OFFSET * body.model.view_lower()  # ducks while the hands are busy
 	wall_pull = move_toward(wall_pull, wall_pull_at(), delta * 6.0)
 	var pulled := MovementRules.WALL_PULL_BACK * Vector3(-1.0 if body.left_handed else 1.0, 1, 1) * wall_pull  # a wall ahead: weapon back
-	body.view_model.position = body.view_model.position.lerp((aimed_view if body.is_aiming else hip_view) + lowered + pulled, minf(delta * rate, 1.0))
+	_vm_base = _vm_base.lerp((aimed_view if body.is_aiming else hip_view) + lowered + pulled, minf(delta * rate, 1.0))
+	body.view_model.position = _vm_base + weapon_bob()
 
 
 ## How far a wall ahead pushes the weapon back now: 0 clear (past WALL_PULL_REACH_M from the eye)

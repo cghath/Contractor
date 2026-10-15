@@ -531,7 +531,7 @@ func _test_respawn_pool() -> void:
 	# Cash first, then the deployed contract's support budget (Captain), then credit.
 	var offer: Dictionary = Contracts.board().filter(func(c: Dictionary) -> bool: return c.source != "recovery")[0]
 	var terms := ContractGen.default_terms()
-	terms["support_points"] = 1
+	terms["support_points"] = 2
 	var cid := String(offer.cid)
 	check(Contracts.server_accept(cid, terms) == "" and Contracts.server_start_deployment([cid]) == "", "(a contract with a support budget is deployed)")
 	var budget := Contracts.support_left(cid)
@@ -1303,7 +1303,7 @@ func _test_contract_loop() -> void:
 	check(home and String(line.get("cid", "")) == cid and line.get("outcome") == "completed", "extraction ends it once: the debrief (%s) and back at the base" % line.get("outcome", "none"))
 	Economy.week_paid.disconnect(on_week)
 	_check_story(cid, String(BaseHub.member(lost).callsign))
-	check(Economy.cash() == cash_before + int(debrief.totals.paid_now) - bills[0] and int(line.get("pay", 0)) > 0,
+	check(Economy.cash() == cash_before + int(debrief.totals.paid_now) - bills[0] - (debrief.expenses as Array).reduce(func(a: int, l: Dictionary) -> int: return a + (int(l.amount) if bool(l.charge) else 0), 0) and int(line.get("pay", 0)) > 0,
 		"the pay lands in the one bank (+$%s)" % DebriefCalc.money(debrief.totals.paid_now))
 	check(Economy.day() == day0 + int(debrief.days) and BaseHub.day() == Economy.day(), "the days pass once, on one clock (%d -> %d)" % [day0, Economy.day()])
 	check(String(BaseHub.member(stay).status) != Roster.MIA and String(BaseHub.member(lost).status) == Roster.MIA,

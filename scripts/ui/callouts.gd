@@ -42,6 +42,7 @@ const LINES := {
 	&"flash_out": "Flashbang out!",
 	&"moving": "Moving!",
 	&"covering": "Covering!",
+	&"no_shot": "No shot!",
 	&"medic": "Medic!",
 }
 ## Callout ids for thrown items.
