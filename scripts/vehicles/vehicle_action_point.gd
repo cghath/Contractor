@@ -158,6 +158,9 @@ func _cargo_actions(actor: Soldier) -> Array[Dictionary]:
 	var hold := v.cargo() as VehicleCargo
 	if hold == null:
 		return [_check()]
+	out.append(_entry(&"open_hold", "Open hold", func() -> void:
+		if actor._hud:
+			actor._hud.open_loot(v)))
 	var take_items: Array[Dictionary] = []
 	var entries := hold.entries()
 	for i in mini(entries.size(), MAX_ENTRIES):

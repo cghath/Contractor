@@ -2311,6 +2311,162 @@ func _loot_one(other: Soldier, where: StringName, index: int) -> Dictionary:
 	return {"moved": moved, "name": entry_name, "why": ""}
 
 
+# --- The loot window (LootWindow, docs/loot_window.md) ------------------------------------
+# A session is the host's note of what this player is searching and when the search ends; the
+# moves are checked against it and against the current state, one request at a time on the
+# host, so two players at one body can't both get the same item.
+
+## Seconds the search of a body takes (the dead: quick; a downed or captured enemy resists
+## it), and of a vehicle's hold (rummaging through stowed kit).
+const LOOT_SEARCH_BODY_S := 1.5
+const LOOT_SEARCH_CAPTIVE_S := 2.5
+const LOOT_SEARCH_HOLD_S := 3.0
+const LOOT_CLASSES := {&"ammo": ["ammo"], &"medical": ["medical"], &"all": []}
+
+var _loot_node: Node  # host: what this player is searching
+var _loot_ready_at := 0.0  # host: when that search ends
+var _loot_searched := {}  # host: instance ids searched to the end (reopening is instant)
+
+
+static func loot_search_seconds(target: Node) -> float:
+	if target is Soldier:
+		return LOOT_SEARCH_BODY_S if (target as Soldier).vitals.is_dead() else LOOT_SEARCH_CAPTIVE_S
+	return LOOT_SEARCH_HOLD_S
+
+
+## The body or vehicle at `path` this player may search now (up, lootable, in reach), else null.
+func _loot_target(path: NodePath) -> Node:
+	var node := get_node_or_null(path)
+	if node is Soldier:
+		return _lootable(path)
+	if node is Vehicle and _from_owner() and vitals.is_up():
+		var v := node as Vehicle
+		if v.cargo() == null or v.is_queued_for_deletion():
+			return null
+		if not v.in_reach(self):
+			_client_message.rpc_id(owner_peer(), "Too far away")
+			return null
+		return v
+	return null
+
+
+## True once the search of `target` is over (and remembers it); else tells the player.
+func _loot_session_ok(target: Node) -> bool:
+	if _loot_searched.has(target.get_instance_id()):
+		return true
+	if _loot_node != target:
+		return false
+	if _now() < _loot_ready_at:
+		_client_message.rpc_id(owner_peer(), "Still searching")
+		return false
+	_loot_searched[target.get_instance_id()] = true
+	return true
+
+
+## Opens a search of the body or hold at `path`; the owner's window starts its timer.
+@rpc("any_peer", "call_local", "reliable")
+func _server_loot_open(path: NodePath) -> void:
+	var target := _loot_target(path)
+	if target == null:
+		return
+	var secs := 0.0 if _loot_searched.has(target.get_instance_id()) else loot_search_seconds(target)
+	_loot_node = target
+	_loot_ready_at = _now() + secs
+	if target is Soldier and secs > 0.0:
+		model.server_loot(target as Soldier)  # kneeling at the body
+	_client_loot_open.rpc_id(owner_peer(), path, secs)
+
+
+@rpc("any_peer", "call_local", "reliable")
+func _client_loot_open(_path: NodePath, secs: float) -> void:
+	if multiplayer.get_remote_sender_id() in [0, 1] and _hud and is_instance_valid(_hud.loot_window):
+		_hud.loot_window.begin_search(secs)
+
+
+@rpc("any_peer", "call_local", "reliable")
+func _server_loot_close() -> void:
+	if _from_owner():
+		_loot_node = null
+
+
+## One thing from the body or hold at `path` to you: slot or stowed entry `index` of container
+## `where` on a body (as _server_loot_item), entry `index` of the hold on a vehicle. `id` is what
+## the player saw; if it changed since, nothing moves.
+@rpc("any_peer", "call_local", "reliable")
+func _server_loot_move(path: NodePath, where: StringName, index: int, id: StringName) -> void:
+	var target := _loot_target(path)
+	if target == null or not _loot_session_ok(target):
+		return
+	if target is Vehicle:
+		var told := (target as Vehicle).server_unload(self, index, id)
+		_client_message.rpc_id(owner_peer(), told if told != "" else "Nothing there any more")
+		return
+	var other := target as Soldier
+	if _loot_id_at(other, where, index) != id:
+		_client_message.rpc_id(owner_peer(), "Nothing there any more")
+		return
+	var result := _loot_one(other, where, index)
+	if result.why != "":
+		_client_message.rpc_id(owner_peer(), result.why)
+	elif int(result.moved) > 0:
+		_client_message.rpc_id(owner_peer(), "Took %s%s" % [result.name, " x%d" % result.moved if int(result.moved) > 1 else ""])
+
+
+## One stowed entry of yours (container, index, id) into the body or hold at `path`; what
+## doesn't fit stays with you. container &"" is the two-handed item in your hands (a hold only).
+@rpc("any_peer", "call_local", "reliable")
+func _server_loot_put(path: NodePath, container: StringName, index: int, id: StringName) -> void:
+	var target := _loot_target(path)
+	if target == null or not _loot_session_ok(target):
+		return
+	if target is Vehicle:
+		var v := target as Vehicle
+		if v.wrecked:
+			return
+		var told := v.server_load(self, container, index, id)
+		_client_message.rpc_id(owner_peer(), told if told != "" else "Nothing there any more")
+		return
+	var list: Array = inventory.containers.get(container, [])
+	if index < 0 or index >= list.size() or list[index].id != id:
+		_client_message.rpc_id(owner_peer(), "Nothing there any more")
+		return
+	var other := target as Soldier
+	var entry := inventory.remove_entry(container, index, int(list[index].count))
+	var moved := other.inventory.take(entry.id, int(entry.count), entry.get("state", {}))
+	if moved < int(entry.count):
+		var rest := entry.duplicate(true)
+		rest.count = int(entry.count) - moved
+		inventory.insert_entry(container, rest)  # it was just there, so it fits
+		_client_message.rpc_id(owner_peer(), "No room on them for %s" % ItemDB.get_item(entry.id).name)
+
+
+## "Take all ammo" / "Take all meds" (kind &"ammo", &"medical"; &"all" for every stowed entry):
+## sweeps the stowed entries of that kind off the body or out of the hold.
+@rpc("any_peer", "call_local", "reliable")
+func _server_loot_take_class(path: NodePath, kind: StringName) -> void:
+	var target := _loot_target(path)
+	if target == null or not LOOT_CLASSES.has(kind) or not _loot_session_ok(target):
+		return
+	var types: Array = LOOT_CLASSES[kind]
+	var moved := 0
+	if target is Vehicle:
+		var v := target as Vehicle
+		for i in range(v.cargo_hold.entries().size() - 1, -1, -1):
+			var entry: Dictionary = v.cargo_hold.entries()[i]
+			if types.is_empty() or ItemDB.get_item(entry.id).type in types:
+				if v.server_unload(self, i, entry.id).begins_with("Took"):
+					moved += 1
+	else:
+		var other := target as Soldier
+		for where_index: Array in _loot_order(other):
+			if int(where_index[1]) < 0:
+				continue
+			var id := _loot_id_at(other, where_index[0], where_index[1])
+			if id != &"" and (types.is_empty() or ItemDB.get_item(id).type in types):
+				moved += int(_loot_one(other, where_index[0], where_index[1]).moved > 0)
+	_client_message.rpc_id(owner_peer(), "Took %d stack%s" % [moved, "" if moved == 1 else "s"] if moved > 0 else "Nothing to take")
+
+
 ## Host only. Empties the inventory onto the ground around this body, item state and all
 ## (only for a body the body cap removes).
 func _server_drop_everything() -> void:

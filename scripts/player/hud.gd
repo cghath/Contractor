@@ -23,6 +23,7 @@ const CENTRE_WIDTH := 760.0
 ## Set by the owning Soldier before the HUD enters the tree.
 var player: Soldier
 var inventory_screen: InventoryScreen
+var loot_window: LootWindow
 var command_menu: CommandMenu
 ## The map (M) and briefing (MapScreen).
 var map_screen: MapScreen
@@ -111,6 +112,8 @@ func _ready() -> void:
 	inventory_screen = InventoryScreen.new(player)
 	inventory_screen.visible = false
 	add_child(inventory_screen)
+	loot_window = LootWindow.new(player)
+	add_child(loot_window)
 	# Left column: the command menu in the middle of the room left above the squad list.
 	zone_left = _zone("LeftZone")
 	zone_left.add_child(_spacer())
@@ -500,10 +503,29 @@ func flash(text: String) -> void:
 
 
 func is_inventory_open() -> bool:
-	return inventory_screen.visible
+	return inventory_screen.visible or loot_window.visible
+
+
+## Opens the loot window on a body or a vehicle's hold: asks the host to start the search.
+func open_loot(target: Node) -> void:
+	if target == null or loot_window.visible:
+		return
+	inventory_screen.visible = false
+	loot_window.open(target)
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	player.rpc_id(1, &"_server_loot_open", target.get_path())
+
+
+func release_mouse_if_clear() -> void:
+	if not is_inventory_open():
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 
 func toggle_detail() -> void:
+	if loot_window.visible:
+		loot_window.close()
+		release_mouse_if_clear()
+		return
 	inventory_screen.visible = not inventory_screen.visible
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if inventory_screen.visible else Input.MOUSE_MODE_CAPTURED
 
