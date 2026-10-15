@@ -120,7 +120,9 @@ static func report(v: Vehicle) -> String:
 func _door_actions(actor: Soldier) -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	if vehicle.wrecked:
-		return [_check()]
+		var wreck_out: Array[Dictionary] = _tag_entries(actor)
+		wreck_out.append(_check())
+		return wreck_out
 	var v := vehicle
 	if actor.carry_mode != &"":
 		var free := _first_free(Vehicle.PASSENGER)
@@ -148,8 +150,18 @@ func _door_actions(actor: Soldier) -> Array[Dictionary]:
 			entry["group"] = "Pull out"
 			entry["group_label"] = s.display_name()
 			out.append(entry)
+	out.append_array(_tag_entries(actor))
 	out.append(_check())
 	return out
+
+
+## Tag to sell / Tag for... on an abandoned or captured vehicle (feat/pallet-tagging: not the
+## company's own, nobody aboard; PalletField).
+func _tag_entries(actor: Soldier) -> Array[Dictionary]:
+	var field := PalletField.of(vehicle)
+	if field == null or vehicle.faction == &"player" or not vehicle.occupants().is_empty():
+		return []
+	return field.tag_entries(PalletField.vehicle_key(vehicle), self, actor)
 
 
 func _cargo_actions(actor: Soldier) -> Array[Dictionary]:

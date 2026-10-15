@@ -1,0 +1,64 @@
+{
+	"_note": "Supply pallets and the FOB's own stocks (feat/pallet-tagging, Captain 2026-10-15). Everything here is Proposed. A pallet holds STOCK UNITS of one or more stock kinds; its cash value is units x unit_value. Players tag pallets and captured vehicles in the field (sell, or gift to a faction); tagged lots are hauled home with the squad and offered at the debrief: sell now (quick price), keep in FOB storage, gift, or KEEP as the FOB's own stocks. See docs/pallets.md.",
+	"stock_kinds": {
+		"fuel": {"name": "Fuel", "unit_value": 90, "offset_per_unit": 120},
+		"ammo": {"name": "Ammunition", "unit_value": 140, "offset_per_unit": 180},
+		"parts": {"name": "Spare parts", "unit_value": 220, "offset_per_unit": 300},
+		"supplies": {"name": "General supplies", "unit_value": 80, "offset_per_unit": 100},
+		"medical": {"name": "Medical supplies", "unit_value": 180, "offset_per_unit": 220}
+	},
+	"kinds": {
+		"fuel_drums": {"name": "Fuel drums", "contents": {"fuel": 12}, "colour": "5f6b3a"},
+		"fuel_bladder": {"name": "Fuel bladder", "contents": {"fuel": 30}, "colour": "3d4a2a"},
+		"supplies": {"name": "General supplies", "contents": {"supplies": 14}, "colour": "8a7a55"},
+		"ammo": {"name": "Ammunition crates", "contents": {"ammo": 10}, "colour": "7a6a3a"},
+		"parts": {"name": "Spare parts", "contents": {"parts": 8}, "colour": "5a5f66"},
+		"medical": {"name": "Medical supplies", "contents": {"medical": 8}, "colour": "b8c2c4"},
+		"mixed": {"name": "Mixed load", "contents": {"fuel": 4, "ammo": 4, "supplies": 5, "parts": 3, "medical": 2}, "colour": "6e6a5c"}
+	},
+	"variance": [0.7, 1.3],
+	"sell_now_ratio": 0.5,
+	"sell_stored_ratio": 0.8,
+	"gift_rep_per": 1500,
+	"gift_rep_max": 8,
+	"gift_min_rep": -100,
+	"reach_m": 7.0,
+	"vehicle_values": {"default": 14000, "technical_dshk": 9000, "matv": 38000, "maxxpro": 42000, "aav7": 60000},
+	"wreck_ratio": 0.25,
+	"_sites": "Pallets at enemy sites, in each module's own space (metres from its origin on the ground): kind, x, z. A site's vehicle is parked abandoned (the faction is hostile; nobody drives it) and can be tagged like a pallet.",
+	"sites": {
+		"outpost": [["ammo", 5.5, 2.5], ["fuel_drums", -1.0, -1.5]],
+		"checkpoint": [["supplies", -5.0, 0.5], ["fuel_drums", 12.0, -3.0]],
+		"village": [["mixed", 5.0, 2.0], ["medical", 6.0, -3.0]],
+		"qrf_base": [["ammo", 5.0, -6.0], ["parts", 9.0, -6.0], ["fuel_bladder", 0.0, 3.0]],
+		"hq": [["mixed", 10.0, -2.0], ["ammo", 4.0, 3.0], ["medical", -8.0, 3.0], ["parts", 13.0, 4.0]],
+		"comms": [["parts", -2.0, 0.5]]
+	},
+	"site_vehicles": {
+		"checkpoint": [{"model": "technical_dshk", "x": -3.0, "z": -7.0, "yaw": 90.0}],
+		"qrf_base": [{"model": "technical_dshk", "x": 8.0, "z": -5.0, "yaw": 0.0, "off": true}]
+	},
+	"stock_effects": {
+		"_note": "A share of a cost one stock kind can cover, at offset_per_unit per unit. Stock is only used up for what it actually offsets.",
+		"support": {
+			"transport": {"fuel": 0.3},
+			"extraction": {"fuel": 0.3},
+			"aav": {"fuel": 0.25, "parts": 0.1},
+			"resupply": {"ammo": 0.4, "supplies": 0.2, "medical": 0.2}
+		},
+		"repair": {"parts": 0.6},
+		"field_costs": {"fuel": 0.25, "ammo": 0.25, "supplies": 0.15, "medical": 0.15}
+	},
+	"draw": {
+		"_note": "Draw from stocks into the armory stash: one unit of a stock kind becomes these items.",
+		"ammo": [{"id": "mag_556", "count": 4}],
+		"supplies": [{"id": "smoke_grenade", "count": 1}, {"id": "zip_cuffs", "count": 2}],
+		"medical": [{"id": "ifak", "count": 1}]
+	},
+	"sale_mission": {
+		"_note": "LATER (a hook only): convoy a lot to a fixer at a meeting point. Offer price ratio is above sell_stored_ratio; below betrayal_rep the fixer may rob the convoy.",
+		"price_ratio": 1.1,
+		"betrayal_rep": 10,
+		"betrayal_max": 0.6
+	}
+}

@@ -31,6 +31,7 @@ const TERMINALS := [
 	[&"hiring", Vector3(-6.0, 0, 6.0), 90.0],
 	[&"ops", Vector3(-6.0, 0, 8.2), 90.0],
 	[&"motor_pool", Vector3(5.0, 0, 8.0), -90.0],
+	[&"stores", Vector3(3.0, 0, -6.6), 0.0],
 ]
 const PERIMETER_HALF := 19.5
 const GATE_HALF := 3.0

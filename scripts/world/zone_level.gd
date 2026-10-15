@@ -95,6 +95,10 @@ func _ready() -> void:
 		def = ZoneDef.get_def("test")
 	super._ready()
 	squad_for(&"hostile").patrol = []  # garrisons hold their ground
+	if not def.get("no_pallets", false):  # supply pallets at the sites, taggable (feat/pallet-tagging)
+		var pallet_field := PalletField.new()
+		add_child(pallet_field)
+		pallet_field.build(_modules, ground_point)
 	if String(def.get("kind", "")) == "hot":
 		add_child(Alert.new())  # the enemy's alert: what they see, hear and report (4B part 3)
 		add_child(Pressure.new())  # what the squad has done here, long term
@@ -415,6 +419,9 @@ func _on_hosted() -> void:
 				spawn_item(StringName(loot.id), loot.get("count", 1), module.to_global(loot.pos), uid)
 	if def.get("insertion_kit", false):
 		_spawn_insertion_kit()
+	var pallet_node := get_node_or_null(^"PalletField") as PalletField
+	if pallet_node:
+		pallet_node.server_spawn_vehicles(_modules)  # abandoned vehicles at the sites
 	for uid: String in GameState.dropped:
 		var d: Dictionary = GameState.dropped[uid]
 		spawn_item(StringName(d.id), int(d.count), Vector3(d.pos[0], d.pos[1], d.pos[2]), uid, GameState.from_json(d.get("state", {})))

@@ -645,6 +645,7 @@ func server_end_deployment(report: Dictionary) -> Dictionary:
 	var debrief := DebriefCalc.compute(deployed, objectives.list, int(dep.civilians), calc_report)
 	debrief["zone_name"] = dep.zone_name
 	debrief["extracted"] = report.get("extracted", [])
+	debrief["tagged"] = (report.get("tagged", []) as Array).duplicate(true)  # lots to sell, store, gift or keep (Pallets)
 	s.debriefs = int(s.get("debriefs", 0)) + 1
 	debrief["serial"] = s.debriefs
 	debrief["key"] = "%d:%d" % [int(s.get("tag", 0)), int(s.debriefs)]  # clients show each debrief once, across campaign resets
@@ -767,6 +768,46 @@ func server_sell_intel(index: int, faction: String) -> String:
 	return ""
 
 
+## Host: acts on lot `index` of the debrief ("debrief") or of FOB storage ("store") with
+## `action` ("sell", "gift" with `faction`, "keep", "store"; Pallets.server_act). Returns "" or why not.
+func server_pallet(scope: String, index: int, action: String, faction := "") -> String:
+	if scope == "store":
+		var store: Array = Economy.pallet_store()
+		if index < 0 or index >= store.size():
+			return "Nothing there"
+		var why := Pallets.server_act(store[index], action, faction, true)
+		if why == "" and action != "store":
+			Economy.server_unstore_lot(index)
+		return why
+	var d: Dictionary = _s().debrief
+	var lots: Array = d.get("tagged", [])
+	if d.is_empty() or d.get("finished", false) or index < 0 or index >= lots.size():
+		return "Nothing there"
+	var lot: Dictionary = lots[index]
+	if String(lot.get("status", "pending")) != "pending":
+		return "Already dealt with"
+	var gift_to := faction if faction != "" else String(lot.get("faction", ""))
+	var why2 := Pallets.server_act(lot, action, gift_to)
+	if why2 == "":
+		lot["status"] = {"sell": "sold", "gift": "gifted", "keep": "kept", "store": "stored"}[action]
+		if action == "gift":
+			lot["gifted_to"] = gift_to
+		_commit()
+	return why2
+
+
+## Host: lots nobody decided on when the debrief closes: a gift tag goes to its faction, the rest
+## waits in FOB storage.
+func _settle_tagged(d: Dictionary) -> void:
+	var lots: Array = d.get("tagged", [])
+	for i in lots.size():
+		if String(lots[i].get("status", "pending")) != "pending":
+			continue
+		var gift: bool = String(lots[i].get("tag", "")) == "gift" and String(lots[i].get("faction", "")) != ""
+		if server_pallet("debrief", i, "gift" if gift else "store") != "":
+			server_pallet("debrief", i, "store")
+
+
 ## Host: closes the debrief: the salvage picks are banked and intel nobody decided on goes
 ## to the client.
 func server_finish_debrief() -> void:
@@ -780,6 +821,7 @@ func server_finish_debrief() -> void:
 	for i: int in d.salvage.picked:
 		picks.append(d.salvage.pool[i])
 	Economy.bank_items(picks, "salvage")
+	_settle_tagged(d)
 	d.finished = true
 	_commit()
 	_save()
@@ -822,7 +864,9 @@ static func report_from_level(level: CompoundLevel, extracted: Array, banked := 
 			field.append_array(inventory_items(s.inventory))
 		if s.faction == &"friendly":
 			casualties.append({"name": s.display_name(), "status": "kia" if s.vitals.is_dead() else "mia", "injury": s.vitals.condition_text()})
-	return {"items": items, "field_items": field, "extracted": names, "casualties": casualties}
+	var pallet_field := PalletField.of(level)  # tagged pallets and vehicles are hauled home (feat/pallet-tagging)
+	return {"items": items, "field_items": field, "extracted": names, "casualties": casualties,
+		"tagged": pallet_field.lots() if pallet_field else []}
 
 
 ## Everything on a body: worn items (a carrier's MOLLE pouches and what's in them as entries
@@ -893,6 +937,16 @@ func sell_intel(index: int, faction: String) -> void:
 	_request("sell", [index, faction])
 
 
+## Any peer: a tagged lot (scope "debrief" or "store") to "sell", "gift" (to `faction`), "keep" or "store".
+func pallet_action(scope: String, index: int, action: String, faction := "") -> void:
+	_request("pallet", [scope, index, action, faction])
+
+
+## Any peer: draws `units` of FOB stock `kind` into the armory stash.
+func draw_stock(kind: String, units: int) -> void:
+	_request("draw", [kind, units])
+
+
 func finish_debrief() -> void:
 	_request("finish", [])
 
@@ -906,7 +960,8 @@ func _request(what: String, args: Array) -> void:
 
 ## What each request's arguments must be (audit A1-05), checked before any is read.
 const REQUEST_ARGS := {"accept": [TYPE_STRING, TYPE_DICTIONARY], "renegotiate": [TYPE_STRING], "abort": [TYPE_STRING],
-	"pick": [TYPE_INT], "unpick": [TYPE_INT], "turn_in": [TYPE_INT], "sell": [TYPE_INT, TYPE_STRING], "finish": []}
+	"pick": [TYPE_INT], "unpick": [TYPE_INT], "turn_in": [TYPE_INT], "sell": [TYPE_INT, TYPE_STRING], "finish": [],
+	"pallet": [TYPE_STRING, TYPE_INT, TYPE_STRING, TYPE_STRING], "draw": [TYPE_STRING, TYPE_INT]}
 
 
 ## Untyped on purpose: whatever a client sends reaches _handle, which checks it.
@@ -954,6 +1009,10 @@ func _handle(what: Variant, args: Variant, peer: int) -> void:
 			why = server_turn_in_intel(int(args[0]))
 		"sell":
 			why = server_sell_intel(int(args[0]), String(args[1]))
+		"pallet":
+			why = server_pallet(String(args[0]), int(args[1]), String(args[2]), String(args[3]))
+		"draw":
+			why = Pallets.server_draw(String(args[0]), int(args[1]))
 		"finish":
 			if peer == 1:  # only the host closes the debrief (it banks the picks and the intel)
 				server_finish_debrief()
