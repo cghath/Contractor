@@ -890,8 +890,10 @@ func _test_insertion() -> void:
 	var track := load(InfilMusic.PATH) as AudioStreamMP3
 	check(track != null and not track.loop and track.get_length() > 60.0, "the infil music's track imports (MP3, not looped, %.0f s)" % (track.get_length() if track else -1.0))
 	var music := InfilMusic.of(level)
+	if music:
+		await _wait_for(func() -> bool: return music.state == InfilMusic.State.PLAYING, 2.0)
 	check(music != null and music.state == InfilMusic.State.PLAYING and music.heli_name == String(c.heli.name) and music.player.stream != null
-		and music.player.bus == InfilMusic.BUS, "lifted off with the player aboard: the infil music plays on the Music bus")
+		and music.player.bus == InfilMusic.BUS, "lifted off with the player aboard: the infil music plays on the Music bus (%s)" % _music_state(music, c))
 	# Captain, 2026-10-14: the squad aboard showed "Waiting (briefing)" and wasn't drawn.
 	check(mates.all(func(m: Soldier) -> bool: return m.ai_status == "Aboard (UH-60M)"),
 		"the squad HUD says they're aboard (%s)" % ", ".join(mates.map(func(m: Soldier) -> String: return m.ai_status)))
@@ -915,6 +917,14 @@ func _test_insertion() -> void:
 	await _wait_for(func() -> bool: return c.is_over(), FLY_S)
 	check(c.phase == HeliCall.Phase.GONE, "then it left")
 	_regroup()
+
+
+## The infil music's state, for a failed check.
+func _music_state(music: InfilMusic, c: HeliCall) -> String:
+	if music == null:
+		return "no InfilMusic"
+	return "state %s, armed %s, aboard %s, on %s, can process %s, local player %s, heli %s, bus %s, stream %s" % [InfilMusic.State.keys()[music.state], music.heli_name, music._aboard(), InfilMusic.enabled(), music.can_process(), MapNodes.local_player(music) != null,
+		c.heli.name if c and is_instance_valid(c.heli) else "?", music.player.bus, music.player.stream != null]
 
 
 ## Captain, 2026-10-14 ("not landing"): one far sentry with a sight line kept waving the

@@ -67,6 +67,8 @@ func arm(heli: String, elapsed_s: float) -> void:
 	heli_name = heli
 	_offset_s = maxf(elapsed_s, 0.0)
 	_armed_at = Time.get_ticks_msec()
+	if is_inside_tree() and state != State.PLAYING and _aboard() and enabled():
+		_start()  # aboard already (the host's own player): at once, not from the next frame
 
 
 ## Every peer: touchdown (or the call's over): fades out what plays.
