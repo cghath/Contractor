@@ -93,6 +93,7 @@ const INTERACTABLES := &"interactables"
 ##   container, index; used by submenu entries), "treatment" (target path, item, part,
 ##   rushed), "target_part" (target path, part) and "target_loot" (target path, a slot or
 ##   container, the entry's index or -1 for a slot, and the item id the host checks).
+## - window: opens the loot window on the target (LootWindow) instead of sending a request.
 ## - show: a local readout instead of a request ("condition" or "wounds").
 ## - submenu: a list built at runtime: "stowed_items" and "body_items" (what's on a body you
 ##   can loot, like the inventory screen; entries take the parent's request) or "treatments" (entries
@@ -114,7 +115,7 @@ const ACTIONS := {
 	DOWNED: [
 		{"id": &"put_down", "label": "Put down", "needs": &"moving_body", "request": &"_server_release_body", "with": &"none"},
 		{"id": &"treat", "label": "Treat", "needs": &"treatable", "submenu": &"treatments"},
-		{"id": &"loot", "label": "Loot", "needs": &"lootable", "submenu": &"body_items", "request": &"_server_loot_item", "with": &"target_loot"},
+		{"id": &"loot", "label": "Loot", "needs": &"lootable", "window": true},
 		{"id": &"loot_all", "label": "Loot all", "needs": &"lootable", "request": &"_server_loot_body", "with": &"target"},
 		{"id": &"carry", "label": "Carry", "needs": &"can_carry", "request": &"_server_carry_body", "with": &"target"},
 		{"id": &"drag", "label": "Drag", "needs": &"can_drag", "request": &"_server_drag_body", "with": &"target"},
@@ -124,7 +125,7 @@ const ACTIONS := {
 	],
 	DEAD: [
 		{"id": &"put_down", "label": "Put down", "needs": &"moving_body", "request": &"_server_release_body", "with": &"none"},
-		{"id": &"loot", "label": "Loot", "needs": &"has_gear", "submenu": &"body_items", "request": &"_server_loot_item", "with": &"target_loot"},
+		{"id": &"loot", "label": "Loot", "needs": &"has_gear", "window": true},
 		{"id": &"loot_all", "label": "Loot all", "needs": &"has_gear", "request": &"_server_loot_body", "with": &"target"},
 		{"id": &"carry", "label": "Carry", "needs": &"can_carry", "request": &"_server_carry_body", "with": &"target"},
 		{"id": &"drag", "label": "Drag", "needs": &"can_drag", "request": &"_server_drag_body", "with": &"target"},
@@ -137,7 +138,7 @@ const ACTIONS := {
 	PERSON: [
 		{"id": &"put_down", "label": "Put down", "needs": &"moving_body", "request": &"_server_release_body", "with": &"none"},
 		{"id": &"cuff", "label": "Zip-cuff", "needs": &"cuffable", "people": &"cuff"},
-		{"id": &"loot", "label": "Loot", "needs": &"lootable", "submenu": &"body_items", "request": &"_server_loot_item", "with": &"target_loot"},
+		{"id": &"loot", "label": "Loot", "needs": &"lootable", "window": true},
 		{"id": &"loot_all", "label": "Loot all", "needs": &"lootable", "request": &"_server_loot_body", "with": &"target"},
 		{"id": &"lead", "label": "Follow me", "needs": &"follow_order", "people": &"lead"},
 		{"id": &"stop", "label": "Stop", "needs": &"stop_order", "people": &"stop"},
@@ -653,6 +654,10 @@ static func perform(actor: Soldier, action: Dictionary) -> String:
 			return wound_report(actor.vitals, true, has_oximeter(actor))
 		&"part":
 			return part_report(target, action.region, actor)
+	if action.get("window", false):
+		if actor._hud:
+			actor._hud.open_loot(target)
+		return ""
 	if action.has("people"):
 		var layer := PeopleLayer.find(actor)
 		if layer:

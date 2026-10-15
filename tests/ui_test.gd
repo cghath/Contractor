@@ -91,6 +91,18 @@ func _ready() -> void:
 	var body := _inventory_body()
 	await _fit("inventory", func() -> Node: return _in_layer(InventoryScreen.new(body)))
 	await _test_inventory(body)
+	# The loot window (feat/loot-window): a body's gear on the left, yours on the right.
+	var corpse := _inventory_body()
+	corpse.name = "UiTestCorpse"
+	corpse.inventory.take(&"ifak", 3)
+	await _fit("loot window", func() -> Node:
+		var win := LootWindow.new(body)
+		win.ready.connect(func() -> void:
+			win.open(corpse)
+			win.begin_search(0.0)
+			win.process_mode = Node.PROCESS_MODE_DISABLED)
+		return _in_layer(win))
+	corpse.queue_free()
 	body.queue_free()
 	await _frames(2)
 	await _test_hud()

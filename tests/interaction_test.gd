@@ -58,6 +58,7 @@ func _ready() -> void:
 	await _test_declutter()
 	await _test_slid_body()
 	await _test_downed_enemy()  # last: the hostile ends up a prisoner
+	await _test_loot_window()
 	GameState.delete_save()
 	print("INTERACTION TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
@@ -805,8 +806,7 @@ func _test_downed_enemy() -> void:
 	check(not _ids(player, alpha).has(&"loot"), "a downed squadmate can't be looted (%s)" % [_ids(player, alpha)])
 	alpha.vitals.server_reset_health()
 	var loot := _action(player, hostile, &"loot")
-	check(loot.get("disabled") == "" and loot.get("items", []).any(func(e: Dictionary) -> bool: return e.item == &"m4a1"),
-		"Loot lists what he has (%s)" % [loot.get("items", []).map(func(e: Dictionary) -> String: return e.label)])
+	check(loot.get("disabled") == "" and loot.get("window", false), "Loot opens the loot window (no more instant list)")
 	var mags := player.inventory.count_of(&"mag_556")
 	InteractionMenu.perform(player, _action(player, hostile, &"loot_all"))
 	await _frames(3)
@@ -818,3 +818,81 @@ func _test_downed_enemy() -> void:
 	check(cuffed and Person.is_captive(hostile) and SquadAI.of(hostile) == null,
 		"Zip-cuff takes him prisoner: cuffed, a captive, no squad brain to fight on with")
 	check(_ids(player, hostile).has(&"loot") and _ids(player, hostile).has(&"carry"), "and he can still be searched and carried (%s)" % [_ids(player, hostile)])
+
+
+## The loot window (LootWindow, docs/loot_window.md): Loot opens it, contents wait for the
+## search time, moves go each way through host requests, "Take all ammo" sweeps the mags, a stale
+## or out-of-reach request moves nothing, and nothing is duplicated.
+func _test_loot_window() -> void:
+	print("The loot window")
+	var body := _spawn_ai("Searched", &"hostile", SPOT + Vector3(-4.0, 0, 3.0), ["plate_carrier", "m4a1"])
+	body.inventory.take(&"mag_556", 3)
+	body.inventory.take(&"ifak", 2)
+	body.vitals.server_kill()
+	await _frames(4)
+	player.global_position = body.body_point() + Vector3(0, 0, 1.2)
+	player.global_position.y = SPOT.y
+	await _frames(2)
+	var hud: Hud = player._hud
+	var win := hud.loot_window
+	player.inventory.strip()
+	player.inventory.take(&"plate_carrier")
+	var total_ifak := body.inventory.count_of(&"ifak")
+	var total_mags := body.inventory.count_of(&"mag_556")
+	InteractionMenu.perform(player, _action(player, body, &"loot"))
+	await _frames(3)
+	check(win.is_open() and win.source == body and hud.is_inventory_open(), "Loot opens the window on the body")
+	check(win.searching() and win.search_s >= Soldier.LOOT_SEARCH_BODY_S, "it searches first (%.1f s)" % win.search_s)
+	var ifak_at := _find_entry(body.inventory, &"ifak")
+	check(not ifak_at.is_empty(), "the body has the ifaks stowed")
+	player.rpc_id(1, &"_server_loot_move", body.get_path(), ifak_at.container, ifak_at.index, &"ifak")
+	await _frames(3)
+	check(body.inventory.count_of(&"ifak") == total_ifak and player.inventory.count_of(&"ifak") == 0, "a move during the search is refused")
+	await _seconds(win.search_s + 0.4)
+	win._process(0.0)
+	check(not win.searching(), "the contents show after the search time")
+	win.move({"side": &"src", "where": ifak_at.container, "index": ifak_at.index, "id": &"ifak"})
+	win.move({"side": &"src", "where": ifak_at.container, "index": ifak_at.index, "id": &"ifak"})  # a second, stale request
+	await _frames(4)
+	check(player.inventory.count_of(&"ifak") + body.inventory.count_of(&"ifak") == total_ifak and player.inventory.count_of(&"ifak") == total_ifak,
+		"a body item moves to you, and the repeat request duplicates nothing (%d + %d of %d)" % [player.inventory.count_of(&"ifak"), body.inventory.count_of(&"ifak"), total_ifak])
+	var mine := _find_entry(player.inventory, &"ifak")
+	win.move({"side": &"me", "where": mine.container, "index": mine.index, "id": &"ifak"})
+	await _frames(4)
+	check(body.inventory.count_of(&"ifak") == total_ifak and player.inventory.count_of(&"ifak") == 0, "and yours moves to the body")
+	win.take_class(&"ammo")
+	await _frames(4)
+	check(body.inventory.count_of(&"mag_556") == 0 and player.inventory.count_of(&"mag_556") == total_mags, "Take all ammo sweeps the magazines (%d of %d)" % [player.inventory.count_of(&"mag_556"), total_mags])
+	check(body.inventory.count_of(&"ifak") == total_ifak, "and leaves the meds")
+	win.take_class(&"medical")
+	await _frames(4)
+	check(body.inventory.count_of(&"ifak") == 0 and player.inventory.count_of(&"ifak") == total_ifak, "Take all meds takes the ifaks")
+	check(win.why_close() == "", "still in reach: the window stays")
+	player.global_position = body.body_point() + Vector3(8, 0, 0)
+	player.global_position.y = SPOT.y
+	check(win.why_close() == "Moved away", "walking off closes it")
+	player.rpc_id(1, &"_server_loot_move", body.get_path(), &"primary", -1, &"m4a1")
+	await _frames(3)
+	check(body.inventory.slots[&"primary"] == &"m4a1", "a request out of reach moves nothing")
+	win.close()
+	player.global_position = body.body_point() + Vector3(0, 0, 1.2)
+	player.global_position.y = SPOT.y
+	await _frames(2)
+	InteractionMenu.perform(player, _action(player, body, &"loot"))
+	await _frames(3)
+	check(win.is_open() and not win.searching(), "reopening a searched body is instant")
+	player.vitals.server_damage(10.0)
+	await _frames(3)
+	check(not win.is_open(), "being hit closes it")
+	win.close()
+	check(not win.is_open() and not hud.is_inventory_open(), "closed")
+
+
+## {container, index} of the first stowed entry of `id` in `inv`, or {}.
+func _find_entry(inv: Inventory, id: StringName) -> Dictionary:
+	for container in inv.search_containers():
+		var list: Array = inv.containers[container]
+		for i in list.size():
+			if list[i].id == id:
+				return {"container": container, "index": i}
+	return {}
