@@ -187,6 +187,7 @@ var _wait_told := false
 var _late_seen := {}
 var _shooter: Soldier = null
 var _hot_seen := Vector3.INF  # where the last enemy who made an LZ hot was
+var _music_at := -1  # insertion: Time.get_ticks_msec() when the infil music started (-1: not yet)
 
 
 func _init(p_sup: HeliSupports, p_kind: String, p_caller: Soldier, p_mark: Dictionary) -> void:
@@ -309,6 +310,7 @@ func _spawn(lvl: Node, layer: VehicleLayer, start: Vector3, facing: Vector3) -> 
 		for a: Soldier in MapNodes.squad_ai(lvl):
 			if a.vitals.is_up():
 				heli.server_enter(a)
+		_music_start()
 	_go_in()
 	return true
 
@@ -615,6 +617,8 @@ func _on_landed() -> void:
 			briefing.server_set_insertion_route([])  # down: the maps stop drawing its way in
 		_unload(false)
 		sup.server_radio(kind, "On the ground at %s. Out, out, out!" % _grid(heli.global_position))
+		if kind == "insertion":
+			sup.server_music_stop()
 		return
 	match kind:
 		"resupply":
@@ -1105,6 +1109,18 @@ func _board_late_players() -> void:
 			_late_seen[p.get_instance_id()] = true
 			if heli.server_enter(p):
 				sup.server_radio(kind, "%s is aboard" % p.display_name())
+				_music_start()
+
+
+## Captain, 2026-10-14 ("can we add Ride of the Valkyries to the infils temporarily lol";
+## temporary): the infil music, armed on every peer once players are aboard the insertion
+## (InfilMusic), with how far into the track it is (a late boarder joins it there).
+func _music_start() -> void:
+	if _music_at < 0:
+		if _players_aboard() == 0:
+			return
+		_music_at = Time.get_ticks_msec()
+	sup.server_music_start(heli, float(Time.get_ticks_msec() - _music_at) / 1000.0)
 
 
 ## "north", "south-west"... for a flat direction (x, z: -z is north).

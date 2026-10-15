@@ -69,6 +69,7 @@ func _init() -> void:
 
 func _ready() -> void:
 	HeliSupports.register_all()
+	add_child(InfilMusic.new())  # Captain, 2026-10-14: temporary infil music
 
 
 ## The level's HeliSupports node (or null).
@@ -424,6 +425,8 @@ func _physics_process(delta: float) -> void:
 		c.step(delta)
 		if c.is_finished():
 			calls.erase(c)
+			if c.kind == "insertion":
+				server_music_stop()  # shot down or gone without landing: the infil music stops
 			for id: int in claimed.keys():
 				if claimed[id] == c:
 					claimed.erase(id)
@@ -466,6 +469,32 @@ func _client_radio(text: String) -> void:
 		heard.pop_front()
 	MapNodes.flash_local(self, text)
 	radio_heard.emit(text)
+
+
+# --- Infil music (every peer; Captain, 2026-10-14: temporary) ------------------------------------
+
+## Host: the insertion `heli` is up with players aboard, `elapsed_s` into the track: every peer
+## arms its InfilMusic (its player hears it while aboard that helicopter).
+func server_music_start(heli: Helicopter, elapsed_s: float) -> void:
+	if multiplayer.is_server() and is_instance_valid(heli):
+		_client_music.rpc(String(heli.name), elapsed_s)
+
+
+## Host: touchdown (or the insertion's over): every peer fades its infil music out.
+func server_music_stop() -> void:
+	if multiplayer.is_server():
+		_client_music.rpc("", 0.0)
+
+
+@rpc("authority", "call_local", "reliable")
+func _client_music(heli: String, elapsed_s: float) -> void:
+	var music := get_node_or_null(NodePath(InfilMusic.NODE_NAME)) as InfilMusic
+	if music == null:
+		return
+	if heli == "":
+		music.disarm()
+	else:
+		music.arm(heli, elapsed_s)
 
 
 ## Whether a line containing `part` was heard here.
