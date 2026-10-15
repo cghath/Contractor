@@ -513,7 +513,7 @@ func _update_aim(delta: float) -> void:
 	var weapon := body.active_weapon()
 	body.is_aiming = _captured() and body.vitals.is_up() and weapon != null and (weapon.type == "weapon" or Launchers.is_launcher(weapon)) \
 		and body.inventory.hands == &"" and not body.is_reloading and Input.is_action_pressed(&"aim")
-	var fov := GunSight.aimed_fov_of(body, weapon, GameSettings.fov()) if body.is_aiming else GameSettings.fov()
+	var fov := GunSight.aimed_fov_of(body, weapon, GameSettings.view_fov()) if body.is_aiming else GameSettings.view_fov()
 	# Up to the eye in the weapon's ADS time (its mass with optic, slower on tired arms:
 	# MovementRules.ads_seconds); lowering stays quick.
 	var rate := MovementRules.ADS_EASE_K / body.movement.ads_seconds() if body.is_aiming else 14.0
