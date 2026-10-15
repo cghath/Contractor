@@ -383,6 +383,17 @@ func _test_debrief_totals() -> void:
 		and failed.rep.get("meridian") == -6, "failed: only the advance, no salvage share, -6 reputation")
 	var hot := DebriefCalc.compute([c.merged({"zone_kind": "hot"}, true)], [objs[0].merged({"state": "failed"}, true)], 0, report)
 	check(hot.contracts[0].outcome == "lapsed" and hot.rep.get("meridian") == -3, "a hot-zone contract left unfinished lapses (-3)")
+	# Hot zones (Captain 2026-10-15): staying pays more; several contracts live at once.
+	var stayed := DebriefCalc.compute([c.merged({"zone_kind": "hot"}, true)], objs, 0, report.merged({"hazard_tier": 2}, true))
+	var hazard: Array = (stayed.contracts[0].bonuses as Array).filter(func(b: Dictionary) -> bool: return String(b.text).begins_with("Hazard pay"))
+	check(hazard.size() == 1 and int(hazard[0].amount) == roundi(100000 * HotZoneOps.HAZARD_SHARE_PER_TIER * 2) and stayed.contracts[0].pay == line.pay + int(hazard[0].amount),
+		"a hot-zone contract done at pressure tier 2: hazard pay of %d%% on top ($%d)" % [roundi(HotZoneOps.HAZARD_SHARE_PER_TIER * 200), int(hazard[0].amount) if not hazard.is_empty() else 0])
+	var plain := DebriefCalc.compute([c], objs, 0, report.merged({"hazard_tier": 2}, true))
+	check(plain.contracts[0].pay == line.pay, "no hazard pay outside a hot zone")
+	var targets := [1, 2, 3, 4].map(func(held: int) -> int: return HotZoneOps.live_target(7, 3, "ridge_hot", held))
+	check(targets[0] >= HotZoneOps.LIVE_RANGE.x and targets[0] <= HotZoneOps.LIVE_RANGE.y and targets[0] == targets[1] and targets[2] == 3 and targets[3] == 4
+		and HotZoneOps.live_target(7, 3, "ridge_hot", 1) == targets[0],
+		"a hot zone keeps 3-6 contracts live: fewer taken are topped up (to %d, the same every time), 3 or more stay as taken" % targets[0])
 	var voided := DebriefCalc.compute([c.merged({"state": "voided"}, true)], objs, 8, report)
 	check(voided.contracts[0].outcome == "voided" and voided.totals.completion == 0 and voided.totals.bonuses == 0 and voided.fines == 20000
 		and voided.contracts[0].clawback == 30000 and voided.totals.paid_now == -50000 and voided.totals.contract_value == -20000,
