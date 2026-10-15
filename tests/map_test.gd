@@ -81,6 +81,7 @@ func _ready() -> void:
 	await _test_briefing_and_markers()
 	await _test_extraction()
 	await _test_coop_extraction()
+	await _test_edge_rules()
 	await _test_reinforcements()
 	_kill_clients()
 	GameState.delete_save()
@@ -640,6 +641,114 @@ func _test_coop_extraction() -> void:
 	_place(player, Vector3(0, 0.1, 10))
 	_client_go.rpc_id(c_peer, "done")
 	await _wait_for(func() -> bool: return level.players.get_child_count() == 1, 15.0)
+
+
+## Captain, 2026-10-14: "on foot exfils should only be possible at the edge zones. otherwise it
+## should be vehicle or helicopter infils/exfils". Every zone (hand-made, generated, hot, urban)
+## has an insertion and an extraction point at its edge, and the briefing offers a foot insertion
+## there and only there; on the compound, a foot confirm at a point away from the edge is
+## refused and allowed at the edge; the squad aboard a vehicle driven to the edge is out (the
+## report counts them), and with a squadmate not aboard the leave-behind rule applies.
+func _test_edge_rules() -> void:
+	print("Edge rules: walk in and out only at the edge, drive out, every zone's edge points")
+	var defs: Array = []
+	for id: String in ZoneDef.ids():
+		defs.append(ZoneDef.get_def(id))
+	for seed: int in [11, 4242, 90210]:
+		defs.append(ZoneDef.generate(seed))
+	defs.append(ZoneDef.generate_hot(77))
+	defs.append(ZoneDef.generate_hot(78, ZoneDef.HOT_SIZE_M, true))
+	for z: Dictionary in MissionRegistry.data().get("zones", []):  # the campaign's zones
+		defs.append(MissionRegistry.zone_def(String(z.zone_id)))
+	for def: Dictionary in defs:
+		var size := float(def.size_m)
+		var area := Rect2(-size * 0.5, -size * 0.5, size, size)
+		var edge := func(p: Array) -> bool: return Extraction.at_edge(area, Vector2(float(p[0]), float(p[1])))
+		var zone := {"kind": String(def.get("kind", "contract")), "insertion_points": []}
+		for p: Array in def.insertion:
+			zone.insertion_points.append({"id": "i%d" % zone.insertion_points.size(), "name": "Insertion", "pos": p, "method": "foot"})
+		var offered: Array = Briefing.edge_insertions(Briefing.with_heli_insertion(zone, true), area).insertion_points
+		var foot := offered.filter(func(o: Dictionary) -> bool: return o.method == "foot")
+		var interior_foot := foot.filter(func(o: Dictionary) -> bool: return not edge.call(o.pos))
+		check((def.insertion as Array).any(edge) and (def.extraction as Array).any(edge) and not foot.is_empty() and interior_foot.is_empty(),
+			"zone %s: insertion and extraction points at its edge; the briefing offers %d foot insertion(s), all at the edge, of %d" % [def.id, foot.size(), offered.size()])
+	var compound := level.map_area()
+	var with_middle := ZONE.duplicate(true)
+	with_middle.insertion_points.append({"id": "yard", "name": "Yard", "pos": [0.0, 0.0], "method": "foot"})
+	var briefed: Array = Briefing.edge_insertions(with_middle, compound).insertion_points
+	var yard := briefed.filter(func(o: Dictionary) -> bool: return o.id == "yard")
+	check(briefed.size() == 4 and yard.size() == 1 and yard[0].method == Briefing.HELI and briefed.filter(func(o: Dictionary) -> bool: return o.get("edge", false)).size() == 3,
+		"on the compound the roads and fields are at the edge (on foot); the yard inside the walls is offered by helicopter only (%s)" % [yard])
+	# Walking out: refused in the middle, allowed at the edge.
+	var ext := MapNodes.extraction(level)
+	_place(player, Vector3(0, 0.1, 0))
+	ext.server_begin({"zone": ZONE, "contract": CONTRACT})
+	for s: Soldier in MapNodes.squad_ai(level):
+		ext.server_set_bring(String(s.name), false)
+	ext.countdown_s = 60.0
+	var mid := ext.point_by_id(ext.server_add_point(Vector2(0, 0), "grid"))
+	var south: Array = ext.points.filter(func(p: Dictionary) -> bool: return p.source == "zone")
+	check(not mid.is_empty() and not mid.foot and String(mid.name).ends_with(Extraction.HELI_SUFFIX) and south.size() == 1 and south[0].foot and south[0].name == "LZ South",
+		"a grid in the middle of the compound is a helicopter LZ (%s); LZ South at the edge is on foot" % mid.get("name", "?"))
+	var why := ext.server_confirm(1)
+	check(why == Extraction.HELI_ONLY_TEXT and ext.state == Extraction.State.ACTIVE, "a foot confirm at the helicopter LZ is refused: %s" % why)
+	_place(player, Vector3(0, 0.1, 34))
+	await _frames(2)
+	why = ext.server_confirm(1)
+	check(why == "" and ext.state == Extraction.State.COUNTDOWN, "at LZ South (the edge) it starts the countdown (%s)" % why)
+	_place(player, Vector3(0, 0.1, 0))
+	await _wait_for(func() -> bool: return ext.state == Extraction.State.ACTIVE, 2.0)  # (a physics tick: CI's frames can be quicker)
+	check(ext.state == Extraction.State.ACTIVE, "walking off stops it")
+	# Driving out.
+	var mate: Soldier = MapNodes.squad_ai(level)[0]
+	ext.server_set_bring(String(mate.name), true)
+	# Held still in the air over the yard (no driving here: what counts is where it is).
+	var truck := VehicleLayer.of(level).server_spawn("matv", Transform3D(Basis(), Vector3(0, 14, 0)), "", &"player", "test_edge_truck")
+	if truck:
+		truck.freeze_mode = RigidBody3D.FREEZE_MODE_STATIC
+		truck.freeze = true
+	await _frames(3)
+	check(truck != null and truck.server_enter(player) and truck.server_enter(mate), "the host and %s get in an M-ATV in the compound" % mate.name)
+	if truck == null:
+		return
+	await _seconds(1.2)
+	check(ext.state == Extraction.State.ACTIVE, "aboard away from the edge, the squad is still in the zone")
+	var ended_before := _ended.size()
+	truck.global_position = Vector3(46, 14, 0)
+	await _wait_for(func() -> bool: return ext.state == Extraction.State.ENDED, 3.0)
+	var report: Dictionary = _ended.back() if _ended.size() > ended_before else {}
+	var squad_names: Array = report.get("squad", []).map(func(r: Dictionary) -> String: return r.name)
+	check(ext.state == Extraction.State.ENDED and report.get("point", {}).get("source") == "vehicle" and report.get("players", []).size() == 1
+		and squad_names == [String(mate.name)] and report.get("vehicles", []).size() == 1,
+		"driven to the zone edge, the deployment ends with the squad aboard counted out (%s; squad %s)" % [report.get("point", {}).get("name", "not ended"), squad_names])
+	# The leave-behind rule: a squadmate not aboard is warned about, then left at a second confirm.
+	ext.server_begin({"zone": ZONE, "contract": CONTRACT})
+	for s: Soldier in MapNodes.squad_ai(level):
+		ext.server_set_bring(String(s.name), s == mate)
+	await _seconds(1.2)
+	check(ext.state == Extraction.State.ACTIVE, "aboard at the edge but not driven in this deployment (as at an insertion point), it doesn't end")
+	truck.server_exit(mate)
+	_place(mate, Vector3(-30, 0.1, 30))  # on the ground, not out of the truck in the air
+	truck.global_position = Vector3(0, 14, 0)
+	await _seconds(1.0)
+	truck.global_position = Vector3(46, 14, 0)
+	await _seconds(1.2)
+	check(ext.state == Extraction.State.ACTIVE, "driven in and out again with %s not aboard, nobody drives out on their own" % mate.name)
+	why = ext.server_confirm(1)
+	check(why.contains("Leaving behind: %s" % mate.name) and ext.state == Extraction.State.ACTIVE, "a confirm aboard at the edge warns who'd be left: %s" % why)
+	ended_before = _ended.size()
+	why = ext.server_confirm(1)
+	report = _ended.back() if _ended.size() > ended_before else {}
+	var left: Array = report.get("left_behind", []).map(func(e: Dictionary) -> String: return e.name)
+	check(why == "" and ext.state == Extraction.State.ENDED and String(mate.name) in left and report.get("players", []).size() == 1,
+		"a second drives out without them, reported left behind (%s)" % [left])
+	truck.server_exit(player)
+	await _frames(2)
+	truck.queue_free()
+	player.set_physics_process(false)
+	_place(player, Vector3(0, 0.1, 10))
+	player.vitals.server_reset_health()
+	await _frames(2)
 
 
 ## Joins mid-deployment for the co-op extraction: confirms from outside the LZ (refused, and

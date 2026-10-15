@@ -19,6 +19,14 @@ extends Node
 ## economy (END_GROUP) and to deployment_ended. State replicates to every peer and late
 ## joiners. Wave 5b: a called extraction helicopter (HeliCall) lands at a point and, with the
 ## squad aboard, ends the deployment by lifting off (server_ride_out): what's aboard is out.
+## Captain, 2026-10-14: "on foot exfils should only be possible at the edge zones. otherwise it
+## should be vehicle or helicopter infils/exfils". A point within edge_reach of the level's
+## edge is a foot point ("foot": true): the countdown runs there. Any other (interior presets,
+## grids and smokes away from the edge) is a helicopter LZ only, named "... (helicopter)": a
+## foot confirm there is refused (HELI_ONLY_TEXT). The squad aboard ground vehicles at the
+## edge (within VEHICLE_OUT_M of it, or seated inside a foot point) drives out: that ends the
+## deployment like the helicopter's ride out (server_drive_out), with the leave-behind rule,
+## once that vehicle has carried them further in than the edge (_driven_in).
 ##
 ## The report (Dictionary, JSON-safe):
 ##   "contract_id", "zone_id", "point" ({"name", "pos": [x, z], "source"}), "duration_s",
@@ -31,7 +39,8 @@ extends Node
 ##   the holds of motor-pool vehicles going home with the squad; it stays in them),
 ##   "items": {item id: count} (all of it together: carried, on bodies, deposited, driven out,
 ##   and what's on a carrier's MOLLE points and in its pouches), "objectives": [map objectives
-##   at the end].
+##   at the end], "vehicles": [[x, z]] (where the vehicles driven out were; point "source"
+##   "vehicle").
 ##   A soldier is {"name", "node", "peer" (players; 0 for AI), "role", "slot", "downed",
 ##   "condition", "items"}; an item is {"id", "count", "where", "state"?}. A carrier's pouches
 ##   and their contents stay in its state ("molle"), as the inventory keeps them, so the vest
@@ -62,6 +71,19 @@ const SMOKE_CHECK_S := 0.5
 ## helicopter extraction has its LZ (heli_point), a newer one doesn't take the LZ away: it's
 ## kept for after the call, when the newest of each source stands again (_keep_newest).
 const SOURCES: Array[String] = ["zone", "grid", "smoke"]
+## Captain, 2026-10-14 (foot exfil only at the edge). Proposed: a point is a foot point within
+## EDGE_EXFIL_M of the level's map area's boundary; on a small level (the compound's stand-in,
+## 108 m) at most EDGE_SHARE of its narrower side, so its middle (inside the walls) isn't edge.
+const EDGE_EXFIL_M := 75.0
+const EDGE_SHARE := 0.25
+## Proposed: vehicles carrying the squad are out when within VEHICLE_OUT_M of the boundary (the
+## zone's walls stand just past it), checked every VEHICLE_CHECK_S.
+const VEHICLE_OUT_M := 25.0
+const VEHICLE_CHECK_S := 0.5
+const HELI_ONLY_TEXT := "Too far from the zone edge to walk out: call the helicopter or drive out"
+const HELI_SUFFIX := " (helicopter)"
+## The warning key (_warned_point) of a drive out (points' ids start at 1).
+const DRIVE_OUT_KEY := 0
 
 var state := State.IDLE
 ## Every peer: [{"id", "name", "pos": Vector2 (x, z), "radius", "source"}].
@@ -79,6 +101,9 @@ var last_report: Dictionary = {}
 ## Host (wave 5b): the helicopter the squad rides out in (HeliCall: server_ride_out). Whoever
 ## and whatever is aboard counts as out, and its cargo is the deposited items it lifted.
 var ride: Node = null
+## Host (Captain, 2026-10-14): the ground vehicles the squad drove out in (server_drive_out).
+## Like `ride`: who and what is aboard them counts as out.
+var rides: Array = []
 ## Every peer (Captain, 2026-10-14: "when heli extract is selected make sure it's the only one
 ## shown"): -1, no helicopter extraction called; 0, one is called and its LZ isn't set yet; else
 ## the id of its point (HeliCall.point_id). While it's 0 or more only the helicopter's point is
@@ -100,6 +125,12 @@ var _last_whole := -1
 var _warned := PackedStringArray()  # host: who the last "Leaving behind" warning named
 var _warned_point := -1  # host: and at which point
 var _warned_msec := -1  # host: and when (Time.get_ticks_msec)
+var _vehicle_check := 0.0
+var _vehicle_notice := ""  # host: the last "drive out without them" notice, said once
+## Host: instance ids of vehicles that carried any of the squad further in than edge_reach this
+## deployment. Only those drive out: the motor pool's arrive beside the insertion point at the
+## edge, and getting in there to drive into the zone mustn't end it.
+var _driven_in := {}
 
 
 func _init() -> void:
@@ -154,6 +185,9 @@ func server_begin(plan: Dictionary) -> void:
 	last_report = {}
 	countdown_point = -1
 	ride = null
+	rides = []
+	_vehicle_notice = ""
+	_driven_in = {}
 	heli_point = -1
 	_smoke_points = {}
 	_clear_left()
@@ -194,6 +228,8 @@ func _server_add_point(pos: Vector2, source: String, point_name: String, radius:
 	var id := _add_point(pos, source, point_name, radius, keep)
 	_broadcast()
 	var at := "%s (%s)" % [MapGrid.grid_ref(pos, MapNodes.area_of(self)), _source_text(source)]
+	if not point_by_id(id).get("foot", true):  # Captain, 2026-10-14: away from the edge, a helicopter LZ only
+		at += ", a helicopter LZ: too far from the zone edge to walk out"
 	if keep > 0:
 		_client_message.rpc("Extraction point %s kept for after the helicopter call: its LZ stays the one in use" % at)
 	elif not for_heli and heli_point == 0 and source == "grid":
@@ -216,8 +252,8 @@ func server_place_point(id: int, pos: Vector2, source := "grid", point_name := "
 	points = points.filter(func(p: Dictionary) -> bool: return p.id == id or p.source != source)
 	point.pos = pos
 	point.source = source
-	if point_name != "":
-		point.name = point_name
+	point.foot = is_edge(pos)
+	point.name = _named(point_name if point_name != "" else String(point.name), point.foot)
 	if moved:
 		_broadcast()
 		_client_message.rpc("Extraction point moved: %s (%s)" % [MapGrid.grid_ref(pos, MapNodes.area_of(self)), _source_text(source)])
@@ -269,14 +305,47 @@ static func can_leave_behind(s: Soldier) -> bool:
 	return s.is_ai() or not s.vitals.is_up() or s.respawn_state == Soldier.RESPAWN_WAITING
 
 
-## The point player `s` can confirm at (up, not waiting to respawn, standing inside it), or {}.
+## The point player `s` can confirm at (up, not waiting to respawn, standing inside it), or {};
+## a foot point before a helicopter LZ where they overlap.
 func point_of_player(s: Soldier) -> Dictionary:
 	if s == null or not s.vitals.is_up() or s.respawn_state == Soldier.RESPAWN_WAITING:
 		return {}
+	var found := {}
 	for point: Dictionary in shown_points():
 		if inside(point, s.global_position):
-			return point
-	return {}
+			if point.get("foot", true):
+				return point
+			if found.is_empty():
+				found = point
+	return found
+
+
+## Captain, 2026-10-14: how far in from `area`'s edge the foot points reach (EDGE_EXFIL_M, at
+## most EDGE_SHARE of its narrower side).
+static func edge_reach(area: Rect2) -> float:
+	return minf(EDGE_EXFIL_M, minf(area.size.x, area.size.y) * EDGE_SHARE)
+
+
+## How far (x, z) `pos` is inside `area`'s boundary (0 or less: on it or past it).
+static func edge_distance(area: Rect2, pos: Vector2) -> float:
+	return minf(minf(pos.x - area.position.x, area.end.x - pos.x), minf(pos.y - area.position.y, area.end.y - pos.y))
+
+
+## Whether (x, z) `pos` is at `area`'s edge, where the squad can walk in or out (no area, no
+## level: anywhere).
+static func at_edge(area: Rect2, pos: Vector2) -> bool:
+	return not area.has_area() or edge_distance(area, pos) <= edge_reach(area)
+
+
+## Whether (x, z) `pos` is at the current level's edge (at_edge).
+func is_edge(pos: Vector2) -> bool:
+	return at_edge(MapNodes.area_of(self), pos)
+
+
+## A point's name: a helicopter LZ only (not `foot`) says so ("LZ 2 (helicopter)").
+static func _named(base: String, foot: bool) -> String:
+	base = base.trim_suffix(HELI_SUFFIX)
+	return base if foot else base + HELI_SUFFIX
 
 
 ## Names of those required who aren't inside `point`.
@@ -289,12 +358,16 @@ func missing_at(point: Dictionary) -> PackedStringArray:
 	return missing
 
 
-## The first point with the whole squad inside, or {}.
+## The first point with the whole squad inside (a foot point first), or {}.
 func point_with_squad() -> Dictionary:
+	var found := {}
 	for point: Dictionary in shown_points():
 		if missing_at(point).is_empty():
-			return point
-	return {}
+			if point.get("foot", true):
+				return point
+			if found.is_empty():
+				found = point
+	return found
 
 
 static func inside(point: Dictionary, pos: Vector3) -> bool:
@@ -311,6 +384,13 @@ static func inside(point: Dictionary, pos: Vector3) -> bool:
 func server_confirm(by_peer := 0) -> String:
 	if not multiplayer.is_server() or state != State.ACTIVE:
 		return "No extraction to confirm"
+	# Captain, 2026-10-14: a player aboard a vehicle at the zone edge confirms driving out (the
+	# leave-behind warning, then out); without a confirmer, when nobody's in a point but players
+	# are aboard at the edge.
+	var me := _player_of(by_peer) if by_peer > 0 else null
+	if (me and aboard_at_edge(me)) or (by_peer <= 0 and point_with_squad().is_empty()
+			and MapNodes.players(self).any(func(s: Soldier) -> bool: return aboard_at_edge(s))):
+		return _confirm_drive_out()
 	if shown_points().is_empty():
 		if heli_point == 0:
 			return "The helicopter has no LZ yet: give it a grid or pop purple smoke"
@@ -327,6 +407,13 @@ func server_confirm(by_peer := 0) -> String:
 		point = point_with_squad()
 		if point.is_empty():
 			point = _point_for_call()
+	if not point.get("foot", true):  # Captain, 2026-10-14: walk out only at the zone's edge
+		if by_peer > 0:
+			_client_message.rpc_id(by_peer, HELI_ONLY_TEXT)
+		else:
+			_client_message.rpc(HELI_ONLY_TEXT)
+		SessionLog.note("extraction: confirm at %s refused (a helicopter LZ, not at the zone edge)" % point.name)
+		return HELI_ONLY_TEXT
 	if not missing_at(point).is_empty():
 		return _confirm_without(point)
 	return _start_countdown(point)
@@ -355,20 +442,145 @@ func _confirm_without(point: Dictionary) -> String:
 	if why != "":
 		_client_message.rpc(why)
 		return why
-	var again := _warned == leaving and _warned_point == int(point.id) and _warned_msec >= 0 \
+	why = _leave_or_warn(leaving, int(point.id), String(point.name))
+	return why if why != "" else _start_countdown(point)
+
+
+## Host. Those named in `leaving` can be left behind: the first confirm (at `key`, a point's id
+## or DRIVE_OUT_KEY) warns everyone and returns the warning; a second within LEAVE_CONFIRM_S
+## leaves them (left_at_call) and returns "".
+func _leave_or_warn(leaving: PackedStringArray, key: int, where: String) -> String:
+	var again := _warned == leaving and _warned_point == key and _warned_msec >= 0 \
 		and Time.get_ticks_msec() - _warned_msec <= int(LEAVE_CONFIRM_S * 1000.0)
 	if not again:
 		_warned = leaving
-		_warned_point = int(point.id)
+		_warned_point = key
 		_warned_msec = Time.get_ticks_msec()
-		why = "Leaving behind: %s. Confirm again to extract without them" % ", ".join(leaving)
+		var why := "Leaving behind: %s. Confirm again to extract without them" % ", ".join(leaving)
 		_client_message.rpc(why)
-		SessionLog.note("extraction at %s: warned, leaving behind %s" % [point.name, ", ".join(leaving)])
+		SessionLog.note("extraction at %s: warned, leaving behind %s" % [where, ", ".join(leaving)])
 		return why
 	for who in leaving:
 		left_at_call[who] = true
-	SessionLog.note("extraction at %s: confirmed again, leaving behind %s" % [point.name, ", ".join(leaving)])
-	return _start_countdown(point)
+	SessionLog.note("extraction at %s: confirmed again, leaving behind %s" % [where, ", ".join(leaving)])
+	return ""
+
+
+# --- Driving out (Captain, 2026-10-14) ------------------------------------------------------------
+
+## Whether ground vehicle `v` can drive the squad out: not a helicopter (HeliCall's ride out),
+## not a wreck or burning, driven into the zone this deployment (_driven_in), and ours (the
+## company's or friendly) or driven by one of the squad.
+func can_drive_out(v: Vehicle) -> bool:
+	if v == null or v.is_queued_for_deletion() or v.kind == Vehicle.HELICOPTER or v.wrecked or v.is_burning() \
+			or not _driven_in.has(v.get_instance_id()):
+		return false
+	if v.faction == &"player" or v.faction == &"friendly":
+		return true
+	var d := v.driver()
+	return d != null and (d in MapNodes.players(self) or d in MapNodes.squad_ai(self))
+
+
+## Whether vehicle `v` is at the zone's edge for driving out: within VEHICLE_OUT_M of the
+## boundary, or inside a foot point.
+func vehicle_at_edge(v: Vehicle) -> bool:
+	var at := Vector2(v.global_position.x, v.global_position.z)
+	var area := MapNodes.area_of(self)
+	if area.has_area() and edge_distance(area, at) <= VEHICLE_OUT_M:
+		return true
+	for point: Dictionary in shown_points():
+		if point.get("foot", true) and inside(point, v.global_position):
+			return true
+	return false
+
+
+## Whether soldier `s` sits in a vehicle that can drive out and is at the edge.
+func aboard_at_edge(s: Soldier) -> bool:
+	var v := Vehicle.ride_of(s) if s else null
+	return v != null and can_drive_out(v) and vehicle_at_edge(v)
+
+
+## Host. Who's needed and not aboard at the edge: {"blockers": [name] (players up: they can get
+## in), "leaving": [name] (can_leave_behind), "vehicles": [Vehicle] (those carrying anyone needed),
+## "players_aboard": int}.
+func _drive_out_state() -> Dictionary:
+	var need := required()
+	var out := {"blockers": PackedStringArray(), "leaving": PackedStringArray(), "vehicles": [], "players_aboard": 0}
+	for s: Soldier in need.players + need.ai:
+		if aboard_at_edge(s):
+			var v := Vehicle.ride_of(s)
+			if v not in out.vehicles:
+				out.vehicles.append(v)
+			out.players_aboard += 0 if s.is_ai() else 1
+		elif can_leave_behind(s):
+			out.leaving.append(_soldier_name(s))
+		else:
+			out.blockers.append(_soldier_name(s))
+	return out
+
+
+## Host. A confirm aboard a vehicle at the edge: out with everyone needed aboard, else the
+## leave-behind rule (_leave_or_warn). Returns "" when the squad drove out, or why not.
+func _confirm_drive_out() -> String:
+	var st := _drive_out_state()
+	var why := ""
+	if not (st.blockers as PackedStringArray).is_empty():
+		why = "Not everyone is aboard at the zone edge. Waiting for: %s" % ", ".join(st.blockers)
+	elif int(st.players_aboard) == 0:
+		why = "Nobody is aboard at the zone edge"
+	if why != "":
+		_client_message.rpc(why)
+		return why
+	if not (st.leaving as PackedStringArray).is_empty():
+		why = _leave_or_warn(st.leaving, DRIVE_OUT_KEY, "the zone edge (driving out)")
+		if why != "":
+			return why
+	server_drive_out(st.vehicles)
+	return ""
+
+
+## Host. Every VEHICLE_CHECK_S: with everyone needed aboard vehicles at the edge, the squad
+## drives out; with only those who could be left behind missing, it says once how to go without
+## them (a confirm: _confirm_drive_out).
+func _check_drive_out() -> void:
+	if state != State.ACTIVE or MapNodes.players(self).is_empty():
+		return
+	var area := MapNodes.area_of(self)
+	var need := required()
+	for s: Soldier in need.players + need.ai:
+		var v := Vehicle.ride_of(s)
+		if v and not _driven_in.has(v.get_instance_id()) and area.has_area() \
+				and edge_distance(area, Vector2(v.global_position.x, v.global_position.z)) > edge_reach(area):
+			_driven_in[v.get_instance_id()] = true
+	var st := _drive_out_state()
+	if not (st.blockers as PackedStringArray).is_empty() or int(st.players_aboard) == 0:
+		_vehicle_notice = ""
+		return
+	if (st.leaving as PackedStringArray).is_empty():
+		server_drive_out(st.vehicles)
+		return
+	var notice := "Aboard at the zone edge. %s not aboard: Extract to drive out without them" % ", ".join(st.leaving)
+	if notice != _vehicle_notice:
+		_vehicle_notice = notice
+		_client_message.rpc(notice)
+
+
+## Host only (Captain, 2026-10-14): the squad drives out of the zone aboard `vehicles` (ground
+## vehicles at the edge): the deployment ends as at the helicopter's ride out (_finish), with
+## what's aboard them counted out. Returns whether it ended.
+func server_drive_out(vehicles: Array) -> bool:
+	if not multiplayer.is_server() or not is_active() or vehicles.is_empty():
+		return false
+	rides = vehicles.duplicate()
+	var at := Vector2.ZERO
+	var names := PackedStringArray()
+	for v: Vehicle in rides:
+		at += Vector2(v.global_position.x, v.global_position.z)
+		names.append(v.display_name())
+	at /= rides.size()
+	countdown_point = -1
+	_finish({"id": DRIVE_OUT_KEY, "name": "Driven out (%s)" % ", ".join(names), "pos": at, "radius": RADIUS_M, "source": "vehicle", "foot": false})
+	return true
 
 
 ## Host: the point a call without a confirmer is about: the one with the most of the squad
@@ -434,6 +646,8 @@ func server_ride_out(point_id: int, p_ride: Node) -> bool:
 func _out_at(point: Dictionary, node: Node3D) -> bool:
 	if is_instance_valid(ride) and ride is Vehicle:
 		return Vehicle.ride_of(node) == ride
+	if not rides.is_empty():  # driven out (server_drive_out): aboard one of them
+		return Vehicle.ride_of(node) in rides
 	var at := (node as Soldier).body_point() if node is Soldier else node.global_position
 	return inside(point, at)
 
@@ -445,6 +659,10 @@ func _physics_process(delta: float) -> void:
 	if _smoke_check <= 0.0:
 		_smoke_check = SMOKE_CHECK_S
 		_check_smoke()
+	_vehicle_check -= delta
+	if _vehicle_check <= 0.0:
+		_vehicle_check = VEHICLE_CHECK_S
+		_check_drive_out()
 	if state == State.COUNTDOWN:
 		_run_countdown(delta)
 
@@ -488,7 +706,7 @@ func _finish(point: Dictionary) -> void:
 	var report := build_report(point)
 	last_report = report
 	SessionLog.note("extraction complete at %s (%s) after %d s: %s" % [point.get("name", "?"),
-		"aboard %s" % ride.name if is_instance_valid(ride) else "countdown", int(report.get("duration_s", 0)), summary(report)])
+		"aboard %s" % ride.name if is_instance_valid(ride) else "driven out" if not rides.is_empty() else "countdown", int(report.get("duration_s", 0)), summary(report)])
 	var reinforcements := MapNodes.reinforcements(self)
 	if reinforcements:
 		reinforcements.server_stop()
@@ -563,16 +781,22 @@ func build_report(point: Dictionary) -> Dictionary:
 		if n.has_method(&"hvt_record"):
 			record.merge(n.call(&"hvt_record"), true)
 		hvts.append(record)
-	if is_instance_valid(ride) and ride is Vehicle:  # wave 5b: HVTs and hostages aboard the helicopter
-		for s: Soldier in (ride as Vehicle).occupants():
+	for v: Vehicle in _rides():  # wave 5b: HVTs and hostages aboard the helicopter (or the vehicles driven out)
+		for s: Soldier in v.occupants():
 			if Person.is_hvt(s):
 				hvts.append({"name": String(s.name), "hvt": String(Person.state(s).get("hvt_id", s.name)), "alive": not s.vitals.is_dead(),
 					"faction": String(s.faction), "aboard": true})
 	var deposited: Array = []
-	var hold: VehicleCargo = (ride as Vehicle).cargo() as VehicleCargo if is_instance_valid(ride) and ride is Vehicle else null
+	var pool := MotorPoolNode.of(self)
 	# Wave 5b: with a ride, what's deposited is what it lifted (its hold, below), not what was
-	# left in the point.
-	var left_in_point: Array[Node] = get_tree().get_nodes_in_group(WorldItem.GROUP) if hold == null else ([] as Array[Node])
+	# left in the point. Captain, 2026-10-14: driven out, the holds of the vehicles that aren't
+	# the motor pool's (those go home with what's in them: driven_out, below).
+	var holds: Array[VehicleCargo] = []
+	for v: Vehicle in _rides():
+		var h := v.cargo() as VehicleCargo
+		if h and (v == ride or MotorPool.pool_id(v) == ""):
+			holds.append(h)
+	var left_in_point: Array[Node] = get_tree().get_nodes_in_group(WorldItem.GROUP) if _rides().is_empty() else ([] as Array[Node])
 	for node in left_in_point:
 		var item := node as WorldItem
 		if item and not item.is_queued_for_deletion() and inside(point, item.global_position):
@@ -580,7 +804,7 @@ func build_report(point: Dictionary) -> Dictionary:
 			if not item.state.is_empty():
 				entry["state"] = item.state.duplicate(true)
 			deposited.append(entry)
-	if hold:  # wave 5b: what the helicopter lifted from the point
+	for hold in holds:  # wave 5b: what the helicopter lifted from the point (or the vehicles drove out)
 		for e: Dictionary in hold.entries():
 			var entry := {"id": String(e.id), "count": int(e.get("count", 1)), "where": "deposited"}
 			if not e.get("state", {}).is_empty():
@@ -589,8 +813,12 @@ func build_report(point: Dictionary) -> Dictionary:
 	# B-18: the holds of motor-pool vehicles going home with the squad (MotorPoolNode.server_settle)
 	# came out too, though what's in them stays in the vehicle, not deposited (not banked).
 	var at: Vector2 = point.get("pos", Vector2.ZERO)
-	var pool := MotorPoolNode.of(self)
-	var driven: Array = pool.cargo_going_home([Vector3(at.x, 0.0, at.y)], ride) if pool else []
+	var home_points: Array = [Vector3(at.x, 0.0, at.y)]
+	var vehicles: Array = []
+	for v: Vehicle in rides:  # driven out: each vehicle's own place counts (MotorPoolNode settles by "vehicles")
+		home_points.append(Vector3(v.global_position.x, 0.0, v.global_position.z))
+		vehicles.append([v.global_position.x, v.global_position.z])
+	var driven: Array = pool.cargo_going_home(home_points, ride) if pool else []
 	for entry: Dictionary in driven:
 		entry["where"] = "vehicle"
 	var totals := {}
@@ -607,7 +835,7 @@ func build_report(point: Dictionary) -> Dictionary:
 		"point": {"name": String(point.get("name", "")), "pos": [pos.x, pos.y], "source": String(point.get("source", ""))},
 		"duration_s": (Time.get_ticks_msec() - _started_msec) / 1000.0,
 		"players": players, "squad": squad, "left_behind": left, "bodies": bodies, "bodies_left": bodies_left,
-		"hvts": hvts, "deposited": deposited, "driven_out": driven, "items": totals, "objectives": objectives}
+		"hvts": hvts, "deposited": deposited, "driven_out": driven, "items": totals, "objectives": objectives, "vehicles": vehicles}
 
 
 ## Everything an inventory holds, one entry per slot, stack and the hands:
@@ -666,6 +894,13 @@ static func _soldier_name(s: Soldier) -> String:
 	return String(s.name) if s.is_ai() else "Player %s" % s.name
 
 
+## The vehicles the squad left in: the helicopter (server_ride_out) or those driven out.
+func _rides() -> Array:
+	if is_instance_valid(ride) and ride is Vehicle:
+		return [ride]
+	return rides.filter(func(v: Variant) -> bool: return is_instance_valid(v))
+
+
 ## The points shown and used now: all of them, or with a helicopter extraction called only its
 ## LZ (none while it has no LZ yet). See heli_point.
 func shown_points() -> Array:
@@ -707,7 +942,8 @@ func _add_point(pos: Vector2, source: String, point_name: String, radius: float,
 	_next_id += 1
 	if point_name == "":
 		point_name = {"grid": "Grid LZ", "smoke": "Purple smoke"}.get(source, "LZ %d" % id)
-	points.append({"id": id, "name": point_name, "pos": pos, "radius": radius, "source": source})
+	var foot := is_edge(pos)  # Captain, 2026-10-14: away from the edge, a helicopter LZ only
+	points.append({"id": id, "name": _named(point_name, foot), "pos": pos, "radius": radius, "source": source, "foot": foot})
 	return id
 
 

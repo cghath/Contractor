@@ -19,8 +19,12 @@ extends Node
 ##   "known_enemies": [{"pos": [x, z], "text"}], "supports": [support ids] (optional),
 ##   "reinforcements": {Reinforcements tuning} (optional).
 ## zone (Dictionary): "id", "name", "kind" ("contract" or "hot"), "insertion_points":
-##   [{"id", "name", "pos": [x, z], "method" ("foot", "helicopter"...)}], "extraction_points":
+##   [{"id", "name", "pos": [x, z], "method" ("foot", "heli")}], "extraction_points":
 ##   [{"name", "pos": [x, z], "radius"}] (optional, preset LZs), "supports" (optional).
+## Captain, 2026-10-14 ("on foot exfils should only be possible at the edge zones. otherwise it
+## should be vehicle or helicopter infils/exfils"): a foot insertion only at the zone's edge
+## (Extraction.at_edge); one further in is offered by helicopter only (edge_insertions). There's
+## no vehicle insertion: motor pool vehicles wait at whichever insertion point is chosen.
 
 signal changed
 ## Host and every peer: the deployment started. `plan`: "contract", "zone", "insertion"
@@ -43,6 +47,9 @@ const POOL_PREFIX := "pool:"
 const INSERT_SPACING_M := 2.0
 ## An insertion point's method when a Black Hawk flies the squad in (wave 5b, hot zones).
 const HELI := "heli"
+## Proposed (Captain, 2026-10-14): a foot insertion added at the edge (edge_insertions) stands
+## this far in from it.
+const EDGE_SPOT_IN_M := 45.0
 
 ## The compound's stand-in contract and zone, for the debug path (Menu: briefing test).
 const DEBUG_CONTRACT := {
@@ -231,8 +238,13 @@ func server_open(p_contract: Dictionary, p_zone: Dictionary) -> void:
 	ready_peers = {}
 	supports = []
 	plan = {}
+	zone = Briefing.edge_insertions(zone, MapNodes.area_of(self))
 	var points := insertion_points()
 	insertion_id = String(points[0].get("id", "")) if not points.is_empty() else ""
+	for point: Dictionary in points:  # the default: walking in at the edge (the first on foot)
+		if String(point.get("method", "foot")) == "foot":
+			insertion_id = String(point.get("id", ""))
+			break
 	var markers := MapNodes.markers(self)
 	if markers:
 		markers.server_clear("intel")
@@ -321,6 +333,57 @@ static func with_heli_insertion(p_zone: Dictionary, contract_zones := false) -> 
 			points.append(heli)
 	out["insertion_points"] = points
 	return out
+
+
+## Captain, 2026-10-14: a copy of `p_zone` where a foot insertion point away from `area`'s edge
+## (Extraction.at_edge) goes: by helicopter only (its "heli" twin from with_heli_insertion stays,
+## or it becomes one). Foot points left get "edge": true. With none left on foot, one is added at
+## the edge nearest the first point ("Zone edge"), so the squad can always walk in.
+static func edge_insertions(p_zone: Dictionary, area: Rect2) -> Dictionary:
+	var out := p_zone.duplicate(true)
+	var listed: Array = out.get("insertion_points", [])
+	var ids := {}
+	for point: Dictionary in listed:
+		ids[String(point.get("id", ""))] = true
+	var points: Array = []
+	var foot := 0
+	for point: Dictionary in listed:
+		var at: Variant = _xz(point.get("pos"))
+		if String(point.get("method", "foot")) != "foot" or at == null:
+			points.append(point)
+		elif Extraction.at_edge(area, at):
+			point["edge"] = true
+			points.append(point)
+			foot += 1
+		elif not ids.has("%s_heli" % point.get("id", "")):
+			points.append(point.merged({"method": HELI, "name": "%s by helicopter" % point.get("name", "")}, true))
+	if foot == 0 and area.has_area() and not listed.is_empty():
+		var from: Variant = _xz(listed[0].get("pos"))
+		var at := Briefing.edge_spot(area, from if from != null else area.get_center())
+		points.append({"id": "zone_edge", "name": "Zone edge", "pos": [at.x, at.y], "method": "foot", "edge": true})
+	out["insertion_points"] = points
+	return out
+
+
+## How an insertion point is reached, for the briefing and the map (Captain, 2026-10-14: foot
+## at the edge, helicopter further in).
+static func method_text(point: Dictionary) -> String:
+	var method := String(point.get("method", "foot"))
+	return "Black Hawk" if method == HELI else "on foot, zone edge" if method == "foot" else method
+
+
+## The point EDGE_SPOT_IN_M of `area`'s edge (but inside its foot reach) nearest (x, z) `from`.
+static func edge_spot(area: Rect2, from: Vector2) -> Vector2:
+	var inset := minf(EDGE_SPOT_IN_M, Extraction.edge_reach(area) * 0.6)
+	var c := area.grow(-inset)
+	var p := Vector2(clampf(from.x, c.position.x, c.end.x), clampf(from.y, c.position.y, c.end.y))
+	var gaps := [p.x - c.position.x, c.end.x - p.x, p.y - c.position.y, c.end.y - p.y]
+	match gaps.find(gaps.min()):
+		0: p.x = c.position.x
+		1: p.x = c.end.x
+		2: p.y = c.position.y
+		_: p.y = c.end.y
+	return p
 
 
 ## The contract's objective on the map (x, z): its first objective with a position, else the

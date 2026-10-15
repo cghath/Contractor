@@ -520,7 +520,10 @@ func _test_motor_pool() -> void:
 	# The briefing offers it; starting brings it to the insertion; extraction takes it home.
 	var briefing := MapNodes.briefing(level)
 	briefing.auto_flow = false
-	var zone := {"id": COAST_ZONE, "name": "Coast", "kind": "contract", "insertion_points": [{"id": "beach", "name": "Beach", "pos": [level.insertion_points()[0].x, level.insertion_points()[0].z], "method": "foot"}]}
+	# Captain, 2026-10-14: the squad walks in (with the pool's vehicles beside it) only at the
+	# zone's edge: the beach is the coast's insertion point there.
+	var beach: Vector3 = level.insertion_points().filter(func(p: Vector3) -> bool: return Extraction.at_edge(level.map_area(), Vector2(p.x, p.z)))[0]
+	var zone := {"id": COAST_ZONE, "name": "Coast", "kind": "contract", "insertion_points": [{"id": "beach", "name": "Beach", "pos": [beach.x, beach.z], "method": "foot"}]}
 	briefing.server_open({"id": "test", "title": "Test job"}, zone)
 	var ids := briefing.available_supports()
 	check(ids.has(Briefing.POOL_PREFIX + hurt) and briefing.support_name(Briefing.POOL_PREFIX + hurt).contains("M-ATV") and ids.has("aav") and not ids.has("transport"),
@@ -528,11 +531,11 @@ func _test_motor_pool() -> void:
 	check(briefing.server_set_support(Briefing.POOL_PREFIX + hurt, true) and briefing.server_start(true), "picked; the deployment starts")
 	await _frames(3)
 	var brought := level.get_node(^"Vehicles").find("pool_" + hurt) as Vehicle
-	check(brought != null and _flat(brought.global_position, level.insertion_points()[0]) < 25.0, "the M-ATV waits at the insertion point")
+	check(brought != null and _flat(brought.global_position, beach) < 25.0, "the M-ATV waits at the insertion point")
 	if brought:
 		brought.server_set_zone(Vehicle.ZONE_HULL, 0.8)
 	var ext := MapNodes.extraction(level)
-	var lz := level.insertion_points()[0]
+	var lz := beach
 	ext.deployment_ended.emit({"point": {"name": "LZ", "pos": [lz.x, lz.z]}})
 	await _frames(2)
 	check(MotorPool.entry(hurt).out == "" and absf(float(MotorPool.entry(hurt).record.zones.hull) - 0.8) < 0.01, "extracting beside it takes it home with its damage")

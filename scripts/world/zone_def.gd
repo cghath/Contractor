@@ -49,6 +49,13 @@ const HOT_PATROLS := Vector2i(2, 4)
 ## A shoreline (_choose_sea) is at least this wide and keeps this far from any pad (m).
 const SEA_MIN_M := 80.0
 const SEA_PAD_KEEP_M := 60.0
+## Captain, 2026-10-14 ("on foot exfils should only be possible at the edge zones"): the squad
+## walks in and out only within Extraction.edge_reach of the edge, so generated insertion and
+## extraction points stand EDGE_POINT_IN_M in from it, and normalize adds one there to a zone
+## with none at the edge (_ensure_edge), EDGE_POINT_CLEAR_M clear of any module's footprint.
+## Proposed.
+const EDGE_POINT_IN_M := 45.0
+const EDGE_POINT_CLEAR_M := 40.0
 
 static var _defs := {}
 
@@ -109,7 +116,48 @@ static func normalize(def: Dictionary) -> Dictionary:
 		out.insertion = [[0.0, half - 80.0]]
 	out["terrain"] = TerrainPresets.choose(out)
 	_choose_sea(out)
+	_ensure_edge(out, "insertion")
+	_ensure_edge(out, "extraction")
 	return out
+
+
+## Captain, 2026-10-14: `def` (normalized, its sea chosen) gets a point of `key` ("insertion",
+## "extraction") at the edge when none of its own is (Extraction.at_edge): EDGE_POINT_IN_M in
+## from the side nearest its first point, not the sea's, slid along it clear of the modules.
+## Added last: the default insertion (the first) stays.
+static func _ensure_edge(def: Dictionary, key: String) -> void:
+	var size := float(def.size_m)
+	var half := size * 0.5
+	var area := Rect2(-half, -half, size, size)
+	var points: Array = def[key]
+	for p: Array in points:
+		if Extraction.at_edge(area, Vector2(float(p[0]), float(p[1]))):
+			return
+	var from := Vector2(float(points[0][0]), float(points[0][1])) if not points.is_empty() else Vector2.ZERO
+	var pads: Array[Rect2] = []
+	for m: Dictionary in def.modules:
+		var h: Vector2 = ZoneModules.HALF.get(String(m.type), ZoneModules.HALF.get(ZoneModules.base(String(m.type)), Vector2(40, 40)))
+		pads.append(Rect2(Vector2(float(m.pos[0]), float(m.pos[1])) - h, h * 2.0).grow(EDGE_POINT_CLEAR_M))
+	var sea := int(def.get("sea_side", -1))
+	var keep := half - maxf(EDGE_POINT_IN_M, float(def.get("sea_m", 0.0)) + SEA_PAD_KEEP_M if sea >= 0 else EDGE_POINT_IN_M)
+	var inset := half - EDGE_POINT_IN_M
+	# Sides (0 north -z, 1 south +z, 2 west -x, 3 east +x, as sea_side), nearest `from` first.
+	var sides: Array = [0, 1, 2, 3].filter(func(side: int) -> bool: return side != sea)
+	var gap := func(side: int) -> float: return [from.y + half, half - from.y, from.x + half, half - from.x][side]
+	sides.sort_custom(func(a: int, b: int) -> bool: return gap.call(a) < gap.call(b))
+	var first: Variant = null
+	for side: int in sides:
+		var along := from.x if side < 2 else from.y
+		for slide: float in [0.0, 120.0, -120.0, 240.0, -240.0, 480.0, -480.0, 720.0, -720.0]:
+			var a := clampf(along + slide, -keep, keep)
+			var p: Vector2 = [Vector2(a, -inset), Vector2(a, inset), Vector2(-inset, a), Vector2(inset, a)][side]
+			if first == null:
+				first = p
+			if not pads.any(func(r: Rect2) -> bool: return r.has_point(p)):
+				points.append([snappedf(p.x, 1.0), snappedf(p.y, 1.0)])
+				return
+	if first != null:
+		points.append([snappedf(first.x, 1.0), snappedf(first.y, 1.0)])
 
 
 ## The shoreline of a preset with a sea (TerrainPresets "sea"): a side picked by the seed from
@@ -180,7 +228,7 @@ static func generate(seed: int, size_m := 1920.0, types: Array = ["compound", "o
 				break
 			var side := rng.randi_range(0, 3)
 			var along := rng.randf_range(-reach, reach)
-			var inset := half - 90.0
+			var inset := half - EDGE_POINT_IN_M  # Captain, 2026-10-14: at the edge, where the squad walks in and out
 			var p: Vector2 = [Vector2(along, -inset), Vector2(along, inset), Vector2(-inset, along), Vector2(inset, along)][side]
 			if placed.any(func(q: Vector2) -> bool: return q.distance_to(p) < INSERTION_CLEAR_M):
 				continue
@@ -282,7 +330,7 @@ static func generate_hot(seed: int, size_m := HOT_SIZE_M, urban := false) -> Dic
 				break
 			var side := rng.randi_range(0, 3)
 			var along := rng.randf_range(-reach, reach)
-			var inset := half - 90.0
+			var inset := half - EDGE_POINT_IN_M  # Captain, 2026-10-14: at the edge, where the squad walks in and out
 			var p: Vector2 = [Vector2(along, -inset), Vector2(along, inset), Vector2(-inset, along), Vector2(inset, along)][side]
 			if placed.any(func(q: Vector2) -> bool: return q.distance_to(p) < clear):
 				continue
