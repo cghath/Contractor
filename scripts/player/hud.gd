@@ -166,6 +166,8 @@ func _layout() -> void:
 	var right := clampf(view.x * 0.3, 240.0, ObjectivesPanel.WIDTH)
 	var left_top := MARGIN + MedicalMenu.FIGURE_SIZE.y * BleedSilhouette.SCALE + UiKit.SPACE_S  # under the bleed silhouette
 	_set_rect(zone_left, Vector4(0, 0, 0, 1), Vector4(MARGIN, left_top, MARGIN + side, -MARGIN))
+	# The command menu's path wraps inside the left column, so the open menu stays in it.
+	command_menu.title_width = minf(CommandMenu.TITLE_W, side - command_menu.get_theme_stylebox(&"panel").get_minimum_size().x)
 	_set_rect(zone_top_right, Vector4(1, 0, 1, 0), Vector4(-MARGIN - right, MARGIN, -MARGIN, MARGIN))
 	zone_top_right.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 	_left_height = view.y - left_top - MARGIN

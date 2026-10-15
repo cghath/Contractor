@@ -172,6 +172,13 @@ var note := "":
 			if visible and not _stack.is_empty():
 				_redraw()
 var _rows: VBoxContainer
+## The width the selection path wraps at: TITLE_W, or less in the HUD's left column (Hud._layout
+## sets it) so the open menu stays out of the centre column at a big UI scale.
+var title_width := TITLE_W:
+	set(value):
+		if not is_equal_approx(title_width, value):
+			title_width = value
+			_fit_title()
 
 
 func _init(p_player: Soldier) -> void:
@@ -188,8 +195,8 @@ func _ready() -> void:
 	box.add_theme_constant_override(&"separation", UiKit.SPACE_S)
 	add_child(box)
 	_title = UiKit.heading("")
-	## Eight names in the path ran the panel off a small window; it wraps at TITLE_W instead.
-	UiKit.fit_width(_title, TITLE_W)
+	## Eight names in the path ran the panel off a small window; it wraps at title_width instead.
+	UiKit._follow_window(_title, _fit_title)
 	box.add_child(_title)
 	_rows = VBoxContainer.new()
 	_rows.add_theme_constant_override(&"separation", UiKit.SPACE_XS)
@@ -200,6 +207,14 @@ func _ready() -> void:
 	grow_vertical = Control.GROW_DIRECTION_BOTH
 	position.x += UiKit.EDGE
 	visible = false
+
+
+## The title's wrap width: title_width, cut to the window (as UiKit.fit_width).
+func _fit_title() -> void:
+	if _title == null or not _title.is_inside_tree():
+		return
+	var room := get_viewport().get_visible_rect().size.x - UiKit.EDGE * 2.0 - 40.0
+	_title.custom_minimum_size.x = maxf(minf(title_width, room), 120.0)
 
 
 func is_open() -> bool:

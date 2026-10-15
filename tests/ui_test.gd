@@ -19,10 +19,7 @@ const SIZES: Array[Vector2i] = [Vector2i(1280, 720), Vector2i(1366, 768), Vector
 const UI_SCALES: Array[float] = [1.0, 1.2, 1.5, 2.0]
 ## "<screen> @<scale>" entries known to overflow, each waiting for its follow-up branch
 ## (docs/ui_audit.md, "Follow-up branches"). Take an entry off when its branch fixes it.
-const KNOWN: Array[String] = [
-	"contract board @2.0", "shop @2.0",  # ui/campaign-screens @2.0 (auto-scale)
-	"base: squad @2.0", "base: roster @2.0", "base: hiring @2.0", "base: medbay @2.0", "base: shop @2.0", "base: armory @2.0",  # ui/base-hub @2.0 (auto-scale)
-]
+const KNOWN: Array[String] = []  # every follow-up branch is in (v0.4.0 integrate, 2026-10-14)
 
 var failures := 0
 var tag := OS.get_environment("CONTRACTOR_TEST_TAG")
@@ -467,7 +464,7 @@ func _fit_drawn(screen: String, make: Callable, rects: Callable) -> void:
 	for ui_scale: float in UI_SCALES:
 		var bad := PackedStringArray()
 		for res in SIZES:
-			_vp.size = Vector2i((Vector2(res) / ui_scale).floor())
+			_vp.size = Vector2i((Vector2(res) / GameSettings.ui_scale_for(res, ui_scale)).floor())  # the auto scale, as _fit
 			await _frames(2)
 			var window := Rect2(Vector2.ZERO, Vector2(_vp.size)).grow(1.0)
 			var off := PackedStringArray()
