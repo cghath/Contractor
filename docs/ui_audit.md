@@ -56,7 +56,7 @@ Headless fit is the result of `tests/ui_test.gd` (run R0969, before the fixes on
 | Command menu | `scripts/ui/command_menu.gd` | code | Hud | theme panel, heading, key-chip rows (fixed on ui/small-screens) | centre-left, EDGE in, grows both ways; path wraps at 300 | fits (`ui_test`, no level needed) |
 | Medical / treatment menu | `scripts/ui/medical_menu.gd` | drawn | Hud | 14 to 20 px, UiKit colours (was 11 to 20) | 1080x620 at most, shrinks to the window; figure scales, columns narrow, rows scroll (ui/medical-interaction) | fits (its drawn layout) |
 | Interaction menu (rings) | `scripts/ui/interaction_menu.gd` | drawn | Hud | entries 16, point names and hints 14, UiKit colours | ring radius 120; entries 180x26; rings and submenus kept inside the window, long submenus scroll (ui/medical-interaction) | fits (rings at every edge, a 20-entry Loot list) |
-| Inventory and loot | `scripts/ui/inventory_screen.gd` | code | Hud | **9 to 22 px; teal palette** | margin 18; columns 330 and 300 fixed; tiles 96x112 | n/t |
+| Inventory and loot | `scripts/ui/inventory_screen.gd` | code | Hud | theme; 14 to 26 px (was 9 to 22 px, teal) | columns flex with the window; slot tiles narrow to fit; tiles 112x120 | fits (fixed on ui/inventory; built on a test body) |
 | Map, briefing panel, extraction panel | `scripts/ui/map_*.gd`, `briefing_screen.gd` | code and drawn | Hud | 12 to 20 px | being reworked on fix/briefing-map-ui | covered by `map_test` |
 | Contract board | `scripts/ui/contract_board.gd` | code | CanvasLayer 10 | default 16; sections 15 at 70% | full window inset 40; left column 460; bottom row of 7 buttons | **@1.5: 1280x720, 1366x768 overflow** |
 | Shop | `scripts/ui/shop.gd` | code | CanvasLayer 11 | default 16; notice `ffd35a` | fixed 620x560, placed by hand | **@1.5: 1280x720, 1366x768 overflow** |
@@ -94,7 +94,7 @@ Headless fit is the result of `tests/ui_test.gd` (run R0969, before the fixes on
 ### P1
 
 7. **No automatic UI scale, read.** On 2560x1440, 3440x1440 and 3840x2160 every screen is laid out for 1600x900 pixels. HUD, inventory and medical text at 11 to 14 px is physically tiny, and the 1.5 maximum isn't enough for 4K (which needs about 2.0).
-8. **Inventory screen, read.**
+8. **Inventory screen, read. Fixed on ui/inventory.** It now uses the theme and UiKit's palette, has no text under 14 px, side columns that take a share of the width (and slot columns that narrow and scroll), and keyboard focus: the arrow keys walk the tiles and buttons, focusing a tile selects it, Enter uses it, the Menu key (or Shift+F10) lists its actions, and Tab and Esc close the screen even with a tile focused. `ui_test` builds it on a test body and checks the fit, text sizes and focus. The notes below are from before.
    - Text is 9 to 12 px (captions 9, tile names 11, readouts 10).
    - Muted teal on dark is low contrast.
    - The fixed columns take 694 px, which leaves about 160 px for the doll and grid at 1280x720 with 1.5.
@@ -221,7 +221,8 @@ func open() -> void:
   - objectives panel
   - ammo readout
   - the medical menu and the interaction menu (drawn: their `layout_rects` and ring and submenu rects, with a ring at every edge and a 20-entry Loot list; plus the long list scrolling to its end)
-- **Not covered yet:** the HUD, the command and inventory screens, and the vehicle readout all need a player. ui/hud-pass should add a hosted-level fit section for them, the way `map_test` hosts a level.
+- **Inventory:** built on an AI test body (`_inventory_body`), with the theme, text-size, focus and column checks in `_test_inventory`.
+- **Not covered yet:** the HUD and the vehicle readout need a player. ui/hud-pass should add a hosted-level fit section for them, the way `map_test` hosts a level.
 
 ## Follow-up branches
 
