@@ -21,45 +21,28 @@ func _init() -> void:
 
 
 func _ready() -> void:
-	var dim := ColorRect.new()
-	dim.color = Color(0, 0, 0, 0.7)
-	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	add_child(dim)
-	var centre := CenterContainer.new()
-	centre.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	add_child(centre)
-	var panel := PanelContainer.new()
-	var style := StyleBoxFlat.new()  # opaque: whatever opened it doesn't show through
-	style.bg_color = Color(0.11, 0.12, 0.11)
-	style.set_content_margin_all(14)
-	style.set_corner_radius_all(4)
-	panel.add_theme_stylebox_override(&"panel", style)
-	centre.add_child(panel)
-	var box := VBoxContainer.new()
-	box.custom_minimum_size = Vector2(620, 560)
-	box.add_theme_constant_override(&"separation", 8)
-	panel.add_child(box)
-	var title := Label.new()
-	title.text = "Settings"
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	box.add_child(title)
+	# The shared look (UiKit; Captain, 2026-10-14: "all of the UIs need a pass"). Opaque (solid):
+	# whatever opened it doesn't show through. Its size follows the window: the old fixed 620x560
+	# ran off a 1280x720 or 1366x768 window at a 150% Menu and HUD size (tests/ui_test.gd).
+	add_child(UiKit.dim(0.7))
+	var box := UiKit.screen(self, 680.0, true)
+	UiKit.fit_height(box, 560.0, 40.0)
+	box.add_child(UiKit.title("Settings"))
 	_tabs = TabContainer.new()
 	_tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	box.add_child(_tabs)
 	_build()
-	var row := HBoxContainer.new()
-	row.alignment = BoxContainer.ALIGNMENT_END
-	row.add_theme_constant_override(&"separation", 8)
-	var reset := Button.new()
-	reset.text = "Reset everything to defaults"
-	reset.pressed.connect(func() -> void:
+	var reset := UiKit.button("Reset everything to defaults", func() -> void:
 		GameSettings.reset_all()
 		_rebuild())
-	row.add_child(reset)
-	var done := Button.new()
-	done.text = "Close"
-	done.pressed.connect(close)
-	row.add_child(done)
+	var done := UiKit.button("Close", close)
+	var row := HBoxContainer.new()
+	var keys := UiKit.key_hint("Esc", "Close")
+	keys.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	keys.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(keys)
+	row.add_child(UiKit.button_row([reset, done], true))
+	(row.get_child(1) as Control).size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	box.add_child(row)
 
 
@@ -205,7 +188,7 @@ func _keys_tab() -> Control:
 	var fixed := Label.new()
 	fixed.text = "Fixed: Escape (menu), Left Ctrl / Ctrl+Alt (interaction), left and right mouse buttons (fire, aim), Shift+H (treat yourself), F-keys (squad commands)."
 	fixed.autowrap_mode = TextServer.AUTOWRAP_WORD
-	fixed.modulate = Color(1, 1, 1, 0.6)
+	fixed.theme_type_variation = &"HintLabel"
 	page.add_child(fixed)
 	var reset := Button.new()
 	reset.text = "Reset keys to defaults"
@@ -237,8 +220,9 @@ func _row(text: String) -> HBoxContainer:
 	var row := HBoxContainer.new()
 	var label := Label.new()
 	label.text = text
-	label.custom_minimum_size = Vector2(260, 0)
-	label.autowrap_mode = TextServer.AUTOWRAP_WORD
+	label.custom_minimum_size = Vector2(240, 0)
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	row.add_child(label)
 	return row
 

@@ -23,64 +23,43 @@ func _init() -> void:
 
 
 func _ready() -> void:
-	var dim := ColorRect.new()
-	dim.color = Color(0, 0, 0, 0.45)
-	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	add_child(dim)
-	var centre := CenterContainer.new()
-	centre.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	add_child(centre)
-	_panel = PanelContainer.new()
-	centre.add_child(_panel)
-	var box := VBoxContainer.new()
-	box.add_theme_constant_override(&"separation", 8)
-	box.custom_minimum_size = Vector2(320, 0)
-	_panel.add_child(box)
-	var title := Label.new()
-	title.text = "Paused (the game keeps running)"
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	box.add_child(title)
+	# The shared look (UiKit; Captain, 2026-10-14: "all of the UIs need a pass"): a themed panel
+	# that scrolls rather than running off a small window at a big Menu and HUD size.
+	add_child(UiKit.dim(0.45))
+	var box := UiKit.screen(self, 380.0)
+	_panel = box.get_parent() as PanelContainer
+	box.add_child(UiKit.title("Paused"))
+	box.add_child(UiKit.hint("The game keeps running behind this menu (co-op: nothing pauses).", true))
+	box.add_child(_button("Resume", close))
+	box.add_child(_button("Settings", _open_settings))
+	get_out_toggle = ControlOptions.get_out_toggle()  # changeable mid-game
+	box.add_child(get_out_toggle)
+	var leave := UiKit.section("Leave", box)
+	_base_button = _button("Return to Base (revert)", _ask_return_to_base)
+	leave.add_child(_base_button)
+	leave.add_child(_button("Return to main menu", _to_main_menu))
+	leave.add_child(_button("Quit game", _quit))
+	_status = UiKit.text("")
+	box.add_child(_status)
+	_confirm = VBoxContainer.new()
+	_confirm.visible = false
+	_confirm.add_child(UiKit.warn("Revert to just before you deployed? Everything from this deployment is undone: cash, the squad and their gear, contracts and the stash go back to how they were, and everyone is at the base."))
+	var row := UiKit.button_row([_button("Yes, revert to base", _return_to_base), _button("Cancel", func() -> void: _confirm.visible = false)])
+	_confirm.add_child(row)
+	box.add_child(_confirm)
 	if SessionLog.session_id != "":  # playtests: which session log to send with a report
-		var session := Label.new()
-		session.text = "Session %s (logged); Insert: bug report" % SessionLog.session_id
-		session.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		session.modulate = Color(1, 1, 1, 0.6)
-		box.add_child(session)
+		var logs := UiKit.section("Playtest logs", box)
+		logs.add_child(UiKit.hint("Session %s (logged). Insert: bug report." % SessionLog.session_id))
 		# Where the logs are, so a friend can send them (P0331 triage: nobody knew where to look).
-		var where := Label.new()
-		where.text = "Session logs (send the %s folder):" % SessionLog.session_id
-		where.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		where.modulate = Color(1, 1, 1, 0.6)
-		box.add_child(where)
+		logs.add_child(UiKit.hint("Session logs (send the %s folder):" % SessionLog.session_id))
 		var path := LineEdit.new()
 		path.name = "SessionLogFolder"
 		path.text = SessionLog.logs_folder()
 		path.editable = false  # still selectable, to copy
 		path.tooltip_text = path.text
-		box.add_child(path)
-		box.add_child(_button("Open the log folder", func() -> void: OS.shell_open(SessionLog.logs_folder())))
-	box.add_child(_button("Resume", close))
-	box.add_child(_button("Settings", _open_settings))
-	get_out_toggle = ControlOptions.get_out_toggle()  # changeable mid-game
-	box.add_child(get_out_toggle)
-	_base_button = _button("Return to Base (revert)", _ask_return_to_base)
-	box.add_child(_base_button)
-	box.add_child(_button("Return to main menu", _to_main_menu))
-	box.add_child(_button("Quit game", _quit))
-	_status = Label.new()
-	_status.autowrap_mode = TextServer.AUTOWRAP_WORD
-	box.add_child(_status)
-	_confirm = VBoxContainer.new()
-	_confirm.visible = false
-	var ask := Label.new()
-	ask.text = "Revert to just before you deployed? Everything from this deployment is undone: cash, the squad and their gear, contracts and the stash go back to how they were, and everyone is at the base."
-	ask.autowrap_mode = TextServer.AUTOWRAP_WORD
-	_confirm.add_child(ask)
-	var row := HBoxContainer.new()
-	row.add_child(_button("Yes, revert to base", _return_to_base))
-	row.add_child(_button("Cancel", func() -> void: _confirm.visible = false))
-	_confirm.add_child(row)
-	box.add_child(_confirm)
+		logs.add_child(path)
+		logs.add_child(_button("Open the log folder", func() -> void: OS.shell_open(SessionLog.logs_folder())))
+	box.add_child(UiKit.key_hint("Esc", "Resume"))
 
 
 func is_open() -> bool:
@@ -105,6 +84,7 @@ func open() -> void:
 	_base_button.visible = can_return_to_base()
 	get_out_toggle.set_pressed_no_signal(ControlOptions.get_out_key())
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	UiKit.focus_first(_panel)  # keyboard: Tab/arrows and Enter work at once
 
 
 func close() -> void:
@@ -163,7 +143,4 @@ func _save() -> void:
 
 
 func _button(text: String, pressed: Callable) -> Button:
-	var b := Button.new()
-	b.text = text
-	b.pressed.connect(pressed)
-	return b
+	return UiKit.button(text, pressed)
