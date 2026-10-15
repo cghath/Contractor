@@ -351,23 +351,28 @@ func _smooths() -> bool:
 
 
 ## Every frame: offsets the model from the body to where the smoother says the body was a
-## moment ago (RemoteSmoother.delay), or puts it back on the body.
+## moment ago (RemoteSmoother.delay), or puts it back on the body. The offset goes in through
+## CharacterModel.net_offset: the model owns its transform (body scale, a carried casualty in
+## its carrier's frame).
 func _smooth_remote() -> void:
 	var now := Time.get_ticks_usec() / 1e6  # finer than _now: updates can come a few ms apart
-	if not _smooths() or not _smoother.has_data() or now - _smoother.newest_time() > SMOOTH_STALE_S:
-		if not _smooths():
-			_smoother.reset()
-		if model.transform != Transform3D.IDENTITY:
-			model.transform = Transform3D.IDENTITY
-		return
-	var at := _smoother.sample(now)
-	var offset: Vector3 = (at.pos as Vector3) - global_position
-	if offset.length() > RemoteSmoother.SNAP_M:
+	var smooths := _smooths()
+	if not smooths:
 		_smoother.reset()
-		model.transform = Transform3D.IDENTITY
+	var offset := Transform3D.IDENTITY
+	if smooths and _smoother.has_data() and now - _smoother.newest_time() <= SMOOTH_STALE_S:
+		var at := _smoother.sample(now)
+		var shift: Vector3 = (at.pos as Vector3) - global_position
+		if shift.length() > RemoteSmoother.SNAP_M:
+			_smoother.reset()
+		else:
+			var turn := wrapf(float(at.yaw) - rotation.y, -PI, PI)
+			offset = Transform3D(Basis(Vector3.UP, turn), global_basis.inverse() * shift)
+	if model.net_offset == offset:
 		return
-	var turn := wrapf(float(at.yaw) - rotation.y, -PI, PI)
-	model.transform = Transform3D(Basis(Vector3.UP, turn), global_basis.inverse() * offset)
+	model.net_offset = offset
+	if smooths:
+		model.transform = model.base_transform()  # now, for this frame's hitbox pose (the model keeps it after)
 
 
 func _process(_delta: float) -> void:

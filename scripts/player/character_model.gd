@@ -401,9 +401,14 @@ func body_scale() -> float:
 	return FEMALE_SCALE if body == VoxelArt.FEMALE else 1.0
 
 
-## The model's own transform when nothing moves it: its size (body_scale).
+## Another player's body drawn smoothed between network updates (Soldier._smooth_remote,
+## RemoteSmoother): where the model sits off the body, body-local. Identity otherwise.
+var net_offset := Transform3D.IDENTITY
+
+
+## The model's own transform when nothing moves it: its size (body_scale), moved by net_offset.
 func base_transform() -> Transform3D:
-	return Transform3D(Basis.from_scale(Vector3.ONE * body_scale()), Vector3.ZERO)
+	return net_offset * Transform3D(Basis.from_scale(Vector3.ONE * body_scale()), Vector3.ZERO)
 
 
 ## A plate carrier is on (or off) this body: a woman's torso is then the one held flat by it
