@@ -242,7 +242,7 @@ func _fit_bottom_centre() -> void:
 	if _vehicle.visible:
 		room -= _fit_vehicle(room, zone_bottom_centre.size.x) + UiKit.SPACE_S
 	_subtitles.room = room
-	_subtitles.refit()
+	_subtitles.refit(zone_bottom_centre.size.x)
 
 
 ## Shows the vehicle's parts, as many as fit `room` px tall in rows `width` wide; returns the

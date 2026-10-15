@@ -311,15 +311,27 @@ class Subtitles extends Label:
 		var callouts := Callouts.of(self)
 		feed = callouts.current_lines() if callouts else PackedStringArray()
 
-	func refit() -> void:
-		var key := "%s|%d|%d" % ["\n".join(feed), int(minf(room, 99999.0)), int(size.x)]
+	## Shows the newest callouts that fit `room` px tall in a column `width` wide (measured with
+	## the font, not the label: a hidden label keeps a stale width).
+	func refit(width: float) -> void:
+		var key := "%s|%d|%d" % ["
+".join(feed), int(minf(room, 99999.0)), int(width)]
 		if key == _shown:
 			return
 		_shown = key
+		var font := get_theme_font(&"font")
+		var font_size := get_theme_font_size(&"font_size")
 		var spacing := float(get_theme_constant(&"line_spacing"))
-		var line := float(get_line_height()) + spacing
-		for n in range(feed.size(), -1, -1):
-			text = "\n".join(feed.slice(feed.size() - n))
-			if n == 0 or get_line_count() * line - spacing <= room:
+		var line := font.get_height(font_size)
+		var shown := PackedStringArray()
+		var lines := 0
+		for k in range(feed.size() - 1, -1, -1):
+			var h := font.get_multiline_string_size(feed[k], HORIZONTAL_ALIGNMENT_CENTER, maxf(width, 1.0), font_size).y
+			var more := maxi(roundi(h / line), 1)
+			if (lines + more) * (line + spacing) - spacing > room:
 				break
+			lines += more
+			shown.insert(0, feed[k])
+		text = "
+".join(shown)
 		visible = text != ""

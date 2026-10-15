@@ -194,7 +194,7 @@ func _test_hud() -> void:
 	for ui_scale: float in UI_SCALES:
 		var bad := PackedStringArray()
 		for res in SIZES:
-			var view := (Vector2(res) / ui_scale).floor()
+			var view := (Vector2(res) / GameSettings.ui_scale_for(res, ui_scale)).floor()  # the auto scale, as _fit
 			root.content_scale_size = Vector2i(view)
 			for downed in [false, true]:
 				hud._downed.text = "UNCONSCIOUS" if downed else ""
@@ -250,7 +250,7 @@ func _test_hud() -> void:
 	hud.show_vehicle(vehicle)
 	await _frames(3)
 	check(hud._subtitles.visible and hud._subtitles.text.count("\n") == 3 and hud.vehicle_text().ends_with("F: get out"),
-		"and all four radio lines and every vehicle part ('%s')" % hud.vehicle_text())
+		"and all four radio lines and every vehicle part ('%s'; radio %d lines, room %.0f, shown %s, window %s)" % [hud.vehicle_text(), hud._subtitles.text.count("\n") + 1, hud._subtitles.room, hud._subtitles.visible, root.get_visible_rect().size])
 	check(not hud._status.text.contains(" more") and hud._status.text.count("\n") + 1 == hud._status_lines.size(),
 		"at 1920x1080 with the command menu shut the whole squad list shows (%d lines)" % hud._status_lines.size())
 	check(hud.vehicle_text().contains("ON FIRE: GET OUT") and hud._vehicle.get_child_count() == vehicle.size(), "the vehicle readout is in parts, one label each")
