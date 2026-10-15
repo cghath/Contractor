@@ -42,6 +42,18 @@ var results := {}
 var _team: Array[String] = []  # hired member ids
 var _mia := ""                  # the member left behind on the raid
 var _failures_at_start := 0
+## The launch watch (CI run 38666966001: the player was 1420 m up at the hostage rescue's
+## landing zone, a moment after being put on the ground there): anyone in a zone, outside a
+## vehicle, higher than LAUNCH_M above the ground at any tick is a body thrown or put where
+## nobody can be. The first time each one is, by instance id -> what was seen.
+const LAUNCH_M := 50.0
+var _launched := {}
+## Each body's position on the tick before (instance id -> Vector3): a launch or a teleport.
+var _last_at := {}
+var _mission_type := ""
+var _trace_n := 0  # TEMP trace
+var _ring: Array[String] = []
+var _ring_done := false
 
 
 func _ready() -> void:
@@ -62,7 +74,11 @@ func _ready() -> void:
 			if only != "" and type not in only.split(","):
 				continue
 			_failures_at_start = failures
+			var launched_before := _launched.size()
 			var why: String = await _mission(type)
+			var thrown: Array = _launched.values().slice(launched_before)
+			check(thrown.is_empty(), "%s: nobody outside a vehicle was ever more than %d m above the ground (%s)" % [
+				type, int(LAUNCH_M), "; ".join(PackedStringArray(thrown)) if not thrown.is_empty() else "none"])
 			if why == "" and failures > _failures_at_start:
 				why = "%d check(s) failed" % (failures - _failures_at_start)
 			results[type] = "completed end to end" if why == "" else why
@@ -74,6 +90,49 @@ func _ready() -> void:
 	_cleanup()
 	print("LOOP TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
+
+
+## The launch watch, every physics tick in a zone: everyone outside a vehicle, up or down.
+func _physics_process(_delta: float) -> void:
+	var zone: ZoneLevel = level as ZoneLevel if is_instance_valid(level) else null
+	if zone == null or not zone.is_inside_tree() or zone.terrain == null:
+		_last_at.clear()
+		return
+	_trace_n += 1  # TEMP trace
+	if _trace_n % 30 == 0 and is_instance_valid(player):
+		var p := player.global_position
+		print("    TRACE %s t%d player (%.1f, %.1f, %.1f) ground %.1f vel %s veh %s" % [_mission_type, _trace_n, p.x, p.y, p.z, zone.ground_height(p.x, p.z), player.velocity, is_instance_valid(player.vehicle)])
+	if is_instance_valid(player):  # TEMP trace
+		var col := player.get_last_slide_collision()
+		var fl: Variant = col.get_collider() if col else null
+		_ring.append("t%d pos %s vel %s floor %s plat %s col %s rv %s" % [_trace_n, player.global_position, player.velocity, player.is_on_floor(), player.get_platform_velocity(),
+			(fl as Node).get_path() if fl is Node else str(fl), col.get_collider_velocity() if col else Vector3.ZERO])
+		if _ring.size() > 40:
+			_ring.remove_at(0)
+		if player.global_position.y - zone.ground_height(player.global_position.x, player.global_position.z) > LAUNCH_M and not _ring_done:
+			_ring_done = true
+			print("    TRACE RING:
+      " + "
+      ".join(PackedStringArray(_ring)))
+	for group in [&"combatants", Soldier.DEAD_GROUP]:
+		for node in get_tree().get_nodes_in_group(group):
+			var s := node as Soldier
+			if s == null or s.is_queued_for_deletion():
+				continue
+			var key := s.get_instance_id()
+			var at := s.global_position
+			var before: Vector3 = _last_at.get(key, at)
+			_last_at[key] = at
+			if is_instance_valid(s.vehicle) or _launched.has(key):
+				continue
+			var above := at.y - zone.ground_height(at.x, at.z)
+			if above > LAUNCH_M:
+				_launched[key] = "%s %.0f m above the ground at (%.0f, %.1f, %.0f) in %s (the tick before at (%.0f, %.1f, %.0f), velocity %s%s)" % [
+					s.log_name(), above, at.x, at.y, at.z, _mission_type, before.x, before.y, before.z, s.velocity,
+					", ragdoll" if is_instance_valid(s.ragdoll) else ""]
+				if s == player:  # TEMP trace
+					_launched[key] += " RING " + " | ".join(PackedStringArray(_ring.slice(-14)))
+				print("  [info] launched: %s" % _launched[key])
 
 
 func check(condition: bool, what: String) -> void:
@@ -221,6 +280,7 @@ func _world_item(id: StringName) -> WorldItem:
 ## Runs mission `type` through the loop. Returns "" or what broke.
 func _mission(type: String) -> String:
 	print("Mission: %s" % type)
+	_mission_type = type
 	var heli := type == "heli"
 	var squad := _squad_for(type)
 	if squad.is_empty():
