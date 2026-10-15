@@ -472,7 +472,7 @@ func _test_callout_rules() -> void:
 		"and shown here as a subtitle")
 	await _frames(2)
 	var subtitles: Label = null
-	for child in player._hud.get_children():
+	for child in player._hud.find_children("*", "Label", true, false):  # in the HUD's bottom-centre zone (ui/hud-pass)
 		if child is Callouts.Subtitles:
 			subtitles = child
 	check(subtitles != null and subtitles.text.contains(line), "the HUD shows it")
