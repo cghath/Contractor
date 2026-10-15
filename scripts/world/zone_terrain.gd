@@ -332,12 +332,15 @@ func _h(i: int, j: int) -> float:
 
 ## The ground's height at (x, z), exactly on the mesh and the collision (each cell is two
 ## triangles split along the diagonal from its (1, 0) corner to its (0, 1) corner, as Jolt's
-## height fields are; measured: within 0.1 mm of a raycast). Outside the zone: 0 (the apron).
+## height fields are; measured: within 0.1 mm of a raycast). Outside the zone: the apron's,
+## 0, or beyond the sea's edge its seabed (sea_level - sea_depth, as _apron() lowers it).
+## Captain, 2026-10-14: the LHD now anchors out there on a narrow sea, so the water's depth
+## past the edge has to be the seabed's, not a dry 0.
 func height_at(x: float, z: float) -> float:
 	var gx := (x + _half) / CELL_M
 	var gz := (z + _half) / CELL_M
 	if gx < 0.0 or gz < 0.0 or gx > points - 1 or gz > points - 1:
-		return 0.0
+		return _apron_height(x, z)
 	var i := mini(floori(gx), points - 2)
 	var j := mini(floori(gz), points - 2)
 	var fx := gx - i
@@ -349,6 +352,17 @@ func height_at(x: float, z: float) -> float:
 		return h00 + (h10 - h00) * fx + (h01 - h00) * fz
 	var h11 := _h(i + 1, j + 1)
 	return h11 + (h01 - h11) * (1.0 - fx) + (h10 - h11) * (1.0 - fz)
+
+
+## The apron's height at (x, z) outside the zone: the seabed on the sea side's quad (the full
+## width for a north or south sea, between the corners for a west or east one, as _apron()
+## lays them), else 0.
+func _apron_height(x: float, z: float) -> float:
+	if sea_side < 0 or sea_edge_distance(x, z) >= 0.0:
+		return 0.0
+	if sea_side >= 2 and absf(z) > _half:
+		return 0.0
+	return sea_level - sea_depth
 
 
 ## The ground's surface normal at (x, z) (from the grid around it).
