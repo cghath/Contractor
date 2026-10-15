@@ -30,6 +30,11 @@ const GENTLE_AT := Vector3(-420, 0, 40)
 const PACE := 2.0
 const START_M := 450.0
 const FLY_S := 90.0
+## The flight checks' measures (Captain, 2026-10-14: the bump on infil).
+const HeliFlight := preload("res://tests/heli_flight_check.gd")
+## The way in, for the flight's height checks: until this many metres of the J-hook are left
+## (then it glides down to the LZ).
+const INBOUND_LEFT_M := 120.0
 
 var failures := 0
 var main: Node
@@ -1010,12 +1015,16 @@ func _out_and_gone(c: HeliCall) -> void:
 	await _wait_for(func() -> bool: return c.is_over(), FLY_S)
 
 
-## Captain, 2026-10-14: in low ("no higher than 10m") and a J-hook landing. Watches `c`'s flight
-## until it lands (or `seconds`): the most it flew over the ground before the final (less what
-## stood taller near its track: climbing over that is allowed), the least (no clipping), how far
-## its heading turned in the last 200 m, and where it touched down.
+## Captain, 2026-10-14: in low ("no higher than 10m", then after a bump on infil "lets do 12 or
+## 13 m") and a J-hook landing. Watches `c`'s flight until it lands (or `seconds`): on the way in
+## (before the hook's glide down) the least and the most it flew over the ground (less what it
+## climbed for: what stood taller near its track, or ground rising ahead), the least clearance of
+## the airframe (fuselage and rotor tips) over the ground or what stands on it before the last
+## FINAL_LOW_M of the final, anything it touched before touchdown, how far its heading turned in
+## the last 200 m, and where it touched down.
 func _watch_flight(c: HeliCall, seconds: float) -> Dictionary:
-	var out := {"max_over": -INF, "min_agl": INF, "turn_deg": 0.0, "frames": 0, "pre_hook_turn_deg": 0.0, "ratio": 1.0}
+	var out := {"max_over": -INF, "min_agl": INF, "min_clear": INF, "clear_at": "", "contacts": [], "turn_deg": 0.0, "frames": 0,
+		"pre_hook_turn_deg": 0.0, "ratio": 1.0}
 	var deadline := Time.get_ticks_msec() + int(seconds * 1000)
 	var last := NAN
 	var turn := 0.0
@@ -1029,10 +1038,19 @@ func _watch_flight(c: HeliCall, seconds: float) -> Dictionary:
 	while is_instance_valid(c.heli) and not c.heli.is_landed() and Time.get_ticks_msec() < deadline:
 		await get_tree().physics_frame
 		var h := c.heli
-		if not is_instance_valid(h) or h.flight_mode() != Helicopter.Mode.FLYING:
+		if not is_instance_valid(h) or not h.is_flying():
 			continue
 		var pos := h.global_position
-		if not hooked and h.has_meta(&"landing"):
+		var vel := Vector3(h.linear_velocity.x, 0.0, h.linear_velocity.z)
+		var left := h.path_left_m()
+		var landing := h.has_meta(&"landing")
+		if h.height_agl() > Helicopter.TOUCH_M + 0.3:
+			for body in HeliFlight.touching(h):
+				if (out.contacts as Array).size() < 4:
+					(out.contacts as Array).append("%s at (%.0f, %.1f, %.0f), %.0f m to go" % [body.name, pos.x, pos.y, pos.z, left])
+		if h.flight_mode() != Helicopter.Mode.FLYING:
+			continue
+		if not hooked and landing:
 			hooked = true
 			out.ratio = (flown + _flat(pos, c.lz)) / maxf(_flat(start, c.lz), 1.0)
 		if not hooked:
@@ -1044,17 +1062,16 @@ func _watch_flight(c: HeliCall, seconds: float) -> Dictionary:
 				elif first_dir != Vector2.ZERO:
 					out.pre_hook_turn_deg = maxf(float(out.pre_hook_turn_deg), rad_to_deg(absf(first_dir.angle_to(go))))
 		prev = pos
-		var vel := Vector3(h.linear_velocity.x, 0.0, h.linear_velocity.z)
-		var left := h.path_left_m()
-		var side := Vector3(-vel.z, 0.0, vel.x).normalized() * Helicopter.ROTOR_REACH_M if vel.length() > 0.5 else Vector3.ZERO
-		if left > Helicopter.HOOK_FINAL_M * 1.5 or not h.has_meta(&"landing"):
+		if not landing or left > Helicopter.FINAL_LOW_M:
+			var clear := HeliFlight.airframe_clearance(h)
+			if clear < float(out.min_clear):
+				out.min_clear = clear
+				out.clear_at = "(%.0f, %.1f, %.0f), %.0f m to go" % [pos.x, pos.y, pos.z, left]
+		if not landing or left > INBOUND_LEFT_M:
 			out.frames += 1
-			out.min_agl = minf(out.min_agl, h.height_agl())
-			var taller := 0.0
-			for t: float in [-2.0, 0.0, 2.0, 4.0, 7.0, 10.0]:
-				var p := pos + vel * t
-				taller = maxf(taller, h.obstacle_top(p, side) + Helicopter.OBSTACLE_CLEAR_M - h.terrain_y(p) - Helicopter.CRUISE_AGL_M)
-			out.max_over = maxf(out.max_over, pos.y - h.terrain_y(pos) - taller)
+			var agl := pos.y - h.terrain_y(pos)
+			out.min_agl = minf(out.min_agl, agl)
+			out.max_over = maxf(out.max_over, agl - HeliFlight.climb_allowance(h, pos, vel))
 		if vel.length() > 2.0 * Helicopter.pace and left > 0.0 and left <= 200.0:
 			var heading := atan2(-vel.x, -vel.z)
 			if not is_nan(last):
@@ -1065,9 +1082,13 @@ func _watch_flight(c: HeliCall, seconds: float) -> Dictionary:
 
 
 func _check_flight(c: HeliCall, flight: Dictionary) -> void:
-	check(int(flight.frames) > 30 and float(flight.max_over) <= 10.5,
-		"it flew in contour-low: at most %.1f m over the ground (10 m, more only over what stands taller)" % float(flight.max_over))
-	check(float(flight.min_agl) >= 1.0, "and never lower than %.1f m before the final (no clipping)" % float(flight.min_agl))
+	check(int(flight.frames) > 30 and float(flight.min_agl) >= 8.0 and float(flight.max_over) <= 16.0,
+		"it flew in contour-low: %.1f-%.1f m over the ground (8-16 m; more only to climb over what stands taller or ground rising ahead)" % [
+		float(flight.min_agl), float(flight.max_over)])
+	check(float(flight.min_clear) >= Helicopter.MIN_CLEAR_M,
+		"its airframe at least %.0f m clear of the ground and what stands on it until the final: %.1f m at the least (at %s)" % [
+		Helicopter.MIN_CLEAR_M, float(flight.min_clear), flight.clear_at])
+	check((flight.contacts as Array).is_empty(), "it touched nothing before touchdown (%s)" % ("; ".join(PackedStringArray(flight.contacts)) if not (flight.contacts as Array).is_empty() else "nothing"))
 	check(float(flight.turn_deg) >= 120.0, "a J-hook: it turned %.0f degrees in the last 200 m" % float(flight.turn_deg))
 	check(float(flight.pre_hook_turn_deg) <= 120.0 and float(flight.ratio) <= 1.6,
 		"no turning back before the hook (at most %.0f degrees off the way it set off, 120 allowed), the way in %.2f times the straight line (1.6 allowed)" % [
