@@ -297,6 +297,7 @@ func _spawn(lvl: Node, layer: VehicleLayer, start: Vector3, facing: Vector3) -> 
 	heli = layer.server_spawn(HeliSupports.MODEL, Transform3D(Basis.looking_at(facing, Vector3.UP), start), "", &"player") as Helicopter
 	if heli == null:
 		return false
+	heli.server_rearm()  # Captain, 2026-10-15: its M240H door guns go up loaded
 	heli.support = kind
 	if kind == "insertion" and mark.has("pos"):
 		planned = mark.pos

@@ -176,6 +176,8 @@ func _run_host(wait_for_client: bool) -> void:
 		await _test_carving_budget()
 	if _want("gun"):
 		await _test_gun()
+	if _want("vehicle_guns"):
+		await _test_vehicle_guns()
 	if _want("chase_camera"):
 		await _test_chase_camera()
 	if _want("turret"):
@@ -221,7 +223,7 @@ func _test_data() -> void:
 	check(counts.aav7 == {"driver": 1, "passenger": 22, "gunner": 1}, "AAV-7: 3 crew and 21 troops (%s)" % [counts.aav7])
 	check(counts.bradley == {"driver": 1, "gunner": 1, "passenger": 7}, "Bradley: 3 crew and 6 troops (%s)" % [counts.bradley])
 	check(VehicleSpecs.spec("abrams").seats.size() == 4, "Abrams: 4 crew")
-	check(counts.uh60 == {"pilot": 2, "passenger": 13}, "UH-60: 2 pilots, 2 crew and 11 passengers (%s)" % [counts.uh60])
+	check(counts.uh60 == {"pilot": 2, "gunner": 2, "passenger": 11}, "UH-60: 2 pilots, 2 door gunners and 11 passengers (%s)" % [counts.uh60])
 	check(VehicleSpecs.round_tier(&"556_m855") == 0 and VehicleSpecs.round_tier(&"762x51_m80") == 0 and VehicleSpecs.round_tier(&"762x54r_lps") == 1
 		and VehicleSpecs.round_tier(&"50bmg_m33") == 2, "vehicle threat tiers: small arms 0, 7.62x54R 1, .50 BMG 2 (Captain: 7.62x54R and up)")
 
@@ -938,6 +940,99 @@ func _test_gun() -> void:
 	v.server_exit(player)
 	VehicleCamera.chase = true
 	target.queue_free()
+
+
+## Captain, 2026-10-15 (v0.4.3 co-op): the UH-60M's door guns couldn't be fired from their
+## seats, the .50 cal made no sound, and AI squadmates boarded the M-ATV as passengers and left
+## the M2 empty. Now: a mounted gun's shot plays its report (Sfx), a door gunner's fire input
+## fires his M240H out of his own door from the hold's rounds, an AI on a door gun engages, and
+## an AI squad getting in puts its autorifleman (never the medic) on the M2, which fires at an
+## enemy in view; "Take the gun" sends a chosen squadmate to it.
+func _test_vehicle_guns() -> void:
+	print("Door guns, mounted-gun sound, AI gunners")
+	var v := _vehicle("range_matv")
+	await _reset(v, Vector3(-12, 0, 6))
+	v.server_rearm()
+	VehicleCamera.chase = false
+	check(v.server_enter(player, 4) and v.gunner() == player, "the player mans the M-ATV's M2")
+	await _seconds(0.3)
+	Sfx.listener_override = v.global_position
+	var heard := Sfx.heard_count()
+	var shot := v.server_fire_gun(player, v.barrel_direction())
+	var ids := Sfx.heard_after(heard)
+	check(not shot.is_empty() and (&"shot_hmg" in ids or &"shot_hmg_far" in ids), "an M2 shot plays the heavy gun's report (%s)" % [ids])
+	v.server_exit(player)
+	# The Black Hawk's door guns.
+	var heli := layer.server_spawn("uh60", Transform3D(Basis(), Vector3(30, 0, 40)), "", &"player", "test_door_guns")
+	await _seconds(0.5)
+	heli.server_rearm()
+	var rounds := heli.cargo_hold.feed_rounds(&"rounds_762")
+	check(heli.gun_seats().size() == 2 and heli.seat_gun(2) == "m240h" and heli.seat_gun(3) == "m240h" and rounds == 1600,
+		"the UH-60M's crew chief and door gunner each man an M240H, 1600 rounds in the hold (%s, %d)" % [heli.gun_seats(), rounds])
+	check(heli.server_enter(player, 3), "the player sits at the right door gun")
+	var foe := _soldier("hostile", heli.global_transform * Vector3(25, 0, -4.5) + Vector3(0, 0.1, 0), "DoorFoe")
+	await _seconds(0.3)
+	heard = Sfx.heard_count()
+	Sfx.listener_override = heli.global_position
+	heli.request_gun((foe.aim_point() - heli.gun_origin(3)).normalized())  # the seat's fire input (on the host)
+	ids = Sfx.heard_after(heard)
+	check(heli.cargo_hold.feed_rounds(&"rounds_762") == rounds - 1 and (&"shot_rifle" in ids or &"shot_rifle_far" in ids),
+		"its fire input fires the M240H out of the right door: a round from the hold, heard (%d left, %s)" % [heli.cargo_hold.feed_rounds(&"rounds_762"), ids])
+	await _seconds(0.3)
+	var hits := 0
+	for i in 6:
+		if heli.server_fire_gun(player, (foe.aim_point() - heli.gun_origin(3)).normalized()).get("result", "") == "body":
+			hits += 1
+		await _seconds(0.12)
+	check(hits >= 1, "and its rounds reach the enemy 25 m out (%d of 6 hit)" % hits)
+	await _seconds(0.3)
+	check(heli.server_fire_gun(player, -heli.global_basis.x).is_empty(), "but never back through the cabin out of the left door")
+	heli.server_exit(player)
+	foe.queue_free()  # downed by those hits: a fresh one for the AI
+	foe = _soldier("hostile", heli.global_transform * Vector3(-30, 0, -4.5) + Vector3(0, 0.1, 0), "DoorFoe2")
+	var chief := _soldier("friendly", heli.global_transform * Vector3(-3, 0, -2.4) + Vector3(0, 0.1, 0), "DoorChief")
+	check(heli.server_enter(chief, 2), "an AI crew chief on the left door gun")
+	var hg := heli.get_node_or_null(NodePath(AavGunner.NODE_NAME)) as AavGunner
+	await _wait_for(func() -> bool: return hg != null and hg.fired > 0, 8.0)
+	check(hg != null and hg.fired > 0, "engages the enemy out of his door (%d rounds)" % (hg.fired if hg else 0))
+	heli.server_exit(chief)
+	chief.queue_free()
+	heli.queue_free()
+	# The squad mounts the M-ATV: the autorifleman takes the M2, never the medic.
+	await _reset(v, Vector3(-12, 0, 6))
+	var door := layer._nearest_door(v, v.global_position - v.global_basis.x * 4.0)
+	var team: Array[Soldier] = []
+	for p: Array in [["GunA_Medic", Roles.MEDIC], ["GunB_Rifle", Roles.RIFLEMAN], ["GunC_AR", Roles.AUTORIFLEMAN]]:
+		var s := _soldier("friendly", door + Vector3(0, 0.1, 0.4 * team.size()), String(p[0]))
+		s.role = p[1]
+		team.append(s)
+	await get_tree().physics_frame
+	foe.queue_free()
+	foe = _soldier("hostile", v.global_position + Vector3(0, 0.1, -30), "GunFoe")
+	var names := PackedStringArray(["GunA_Medic", "GunB_Rifle", "GunC_AR"])
+	check(layer.server_order_mount(player, v.global_position, names) == "" and v.gunner() == team[2] and team.all(func(s: Soldier) -> bool: return v.seat_of(s) >= 0),
+		"Mount > Get in: all three aboard, the autorifleman on the M2 (gunner %s)" % [v.gunner().name if v.gunner() else "none"])
+	var g := v.get_node_or_null(NodePath(AavGunner.NODE_NAME)) as AavGunner
+	var belt := v.cargo_hold.feed_rounds(&"belt_50bmg")
+	await _wait_for(func() -> bool: return g != null and g.fired > 0, 10.0)
+	check(g != null and g.fired > 0 and v.cargo_hold.feed_rounds(&"belt_50bmg") < belt, "and fires at an enemy in view (%d rounds)" % (g.fired if g else 0))
+	check(layer.server_order_mount(player, v.global_position, PackedStringArray(["GunB_Rifle"]), true) == "Someone's already on the gun",
+		"Take the gun: refused while someone's on it")
+	v.server_exit(team[2])
+	check(layer.server_order_mount(player, v.global_position, PackedStringArray(["GunB_Rifle"]), true) == "" and v.gunner() == team[1],
+		"Take the gun: the rifleman, aboard, moves over to the M2")
+	for s in team:
+		v.server_exit(s)
+	check(v.server_enter(player, 4), "a player on the M2")
+	check(layer.server_order_mount(player, v.global_position, names) == "" and v.gunner() == player, "then the squad gets in and leaves him on it")
+	for s in team:
+		v.server_exit(s)
+		s.queue_free()
+	v.server_exit(player)
+	foe.queue_free()
+	Sfx.listener_override = null
+	VehicleCamera.chase = true
+	await _reset(v, Vector3(-12, 0, 6))
 
 
 ## Turrets turn (VehicleTurret; Captain, 2026-10-13): at the mount's speed, within its

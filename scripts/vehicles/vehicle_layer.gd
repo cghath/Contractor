@@ -23,6 +23,10 @@ const BOARD_TIMEOUT_S := 60.0
 const BOARD_CHECK_S := 0.3
 ## "Get in" takes the vehicle nearest the point under the crosshair, this close.
 const MOUNT_PICK_M := 10.0
+## Captain, 2026-10-15 (v0.4.3 co-op): the AI squad boarded an M-ATV as passengers and left
+## the M2 empty. Who of the squadmates getting in takes a free main gun, best first; a medic
+## never does (unless he's the one told to "Take the gun").
+const GUNNER_ROLES: Array[StringName] = [Roles.AUTORIFLEMAN, Roles.GRENADIER, Roles.RIFLEMAN, Roles.MARKSMAN, Roles.TEAM_LEADER]
 
 var spawner: MultiplayerSpawner
 var _boarding := {}  # host: soldier instance id -> {"soldier", "vehicle", "until"}
@@ -162,8 +166,10 @@ func _restore_record(record: Dictionary) -> Vehicle:
 # --- AI squadmates in and out (command menu: Mount) ------------------------------------------
 
 ## Host: the named squadmates (all selected if empty) get into the vehicle nearest `point`:
-## those close by at once, the rest walk to its nearest door first. Returns "" or why not.
-func server_order_mount(from: Soldier, point: Vector3, names: PackedStringArray) -> String:
+## those close by at once, the rest walk to its nearest door first; one of them takes its main
+## gun while nobody mans it (pick_gunner). `take_gun` (the command menu's "Take the gun"): only
+## the one picked goes, to the gun (moving over to it if already aboard). Returns "" or why not.
+func server_order_mount(from: Soldier, point: Vector3, names: PackedStringArray, take_gun := false) -> String:
 	var lvl := get_parent() as CompoundLevel
 	var squad := lvl.squad_for(from.faction) if lvl else null
 	if squad == null:
@@ -177,19 +183,64 @@ func server_order_mount(from: Soldier, point: Vector3, names: PackedStringArray)
 			best_d = d
 	if best == null:
 		return "No vehicle there"
-	var sent := 0
+	var gun_seat := int(best.gun_info().get("seat", -1))
+	if gun_seat >= 0 and (best.occupant(gun_seat) != null or _gun_claimed(best)):
+		gun_seat = -1  # someone (a player, say) mans it, or is on the way to
+	var team: Array[Soldier] = []
 	for s: Soldier in squad.pick(names):
-		if not s.is_ai() or not s.vitals.is_up() or Vehicle.ride_of(s) == best:
+		if s.is_ai() and s.vitals.is_up() and (take_gun or Vehicle.ride_of(s) != best):
+			team.append(s)
+	var gunner := pick_gunner(team, take_gun) if gun_seat >= 0 else null
+	if take_gun:
+		if best.gun_info().is_empty():
+			return "That vehicle has no gun"
+		if gunner == null:
+			return "Someone's already on the gun" if gun_seat < 0 else "Nobody to send"
+		team.clear()
+		team.append(gunner)
+	var sent := 0
+	for s in team:
+		var seat := gun_seat if s == gunner else -1
+		if Vehicle.ride_of(s) == best:
+			if best.server_switch(s, seat):
+				sent += 1
 			continue
 		var door := _nearest_door(best, s.global_position)
 		if s.global_position.distance_to(door) <= BOARD_REACH_M:
-			if best.server_enter(s):
+			if (seat >= 0 and best.server_enter(s, seat)) or best.server_enter(s):
 				sent += 1
 			continue
 		squad.give_order(from, Squad.Order.MOVE, door, PackedStringArray([String(s.name)]))
-		_boarding[s.get_instance_id()] = {"soldier": s, "vehicle": best, "until": Soldier._now() + BOARD_TIMEOUT_S}
+		_boarding[s.get_instance_id()] = {"soldier": s, "vehicle": best, "until": Soldier._now() + BOARD_TIMEOUT_S, "seat": seat}
 		sent += 1
 	return "" if sent > 0 else "Nobody to send"
+
+
+## Who of `team` (AI squadmates) takes a vehicle's gun: by GUNNER_ROLES, never a medic, or null.
+## `told` (the "Take the gun" order): the medic too, when he's the only one told.
+static func pick_gunner(team: Array[Soldier], told := false) -> Soldier:
+	var best: Soldier = null
+	var best_rank := INF
+	for s in team:
+		var rank := GUNNER_ROLES.find(s.role)
+		if s.role == Roles.MEDIC:
+			if not told:
+				continue
+			rank = GUNNER_ROLES.size() + 1
+		elif rank < 0:
+			rank = GUNNER_ROLES.size()
+		if rank < best_rank:
+			best_rank = rank
+			best = s
+	return best
+
+
+## Whether a squadmate is on the way to `v`'s gun seat.
+func _gun_claimed(v: Vehicle) -> bool:
+	for b: Dictionary in _boarding.values():
+		if b.vehicle == v and int(b.get("seat", -1)) >= 0:
+			return true
+	return false
 
 
 ## Host: the named squadmates (all if empty) get out of whatever they ride, and fall in.
@@ -241,7 +292,9 @@ func _physics_process(delta: float) -> void:
 			continue
 		if s.global_position.distance_to(_nearest_door(v, s.global_position)) <= BOARD_REACH_M:
 			_boarding.erase(id)
-			v.server_enter(s)
+			var seat := int(b.get("seat", -1))
+			if not (seat >= 0 and v.server_enter(s, seat)):
+				v.server_enter(s)
 
 
 ## Host (tests): squadmates still on their way to a vehicle.

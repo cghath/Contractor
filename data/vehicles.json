@@ -20,10 +20,11 @@
 		"50bmg_m33": 2
 	},
 	"guns": {
-		"_note": "Mounted weapons the gunner seat fires through Ballistics: the round (data/rounds.json), rate, spread and what feeds it from the vehicle's cargo (feed: an item id; belts hold rounds in their state, loose rounds count one each). load: what a motor-pool vehicle deploys with and is refilled to back at the FOB (MotorPool; Captain, 2026-10-14: the pool M-ATV's M2 had 0 rounds), in units of the feed: full belts, or loose rounds. Proposed. The DShK fires the .50 BMG round's numbers until a 12.7x108 round is in rounds.json.",
-		"m2hb": {"name": "M2 .50 cal", "round": "50bmg_m33", "rpm": 550, "spread_deg": 0.3, "feed": "belt_50bmg", "load": 2},
-		"dshk": {"name": "DShK 12.7 mm", "round": "50bmg_m33", "rpm": 600, "spread_deg": 0.45, "feed": "belt_127x108", "load": 2},
-		"m240c": {"name": "M240 coax", "round": "762x51_m80", "rpm": 750, "spread_deg": 0.2, "feed": "rounds_762", "load": 800}
+		"_note": "Mounted weapons the gunner seat fires through Ballistics: the round (data/rounds.json), rate, spread and what feeds it from the vehicle's cargo (feed: an item id; belts hold rounds in their state, loose rounds count one each). sound: the shot's Sfx kind (data/sounds.json shot_<sound>; rifle when not given; Captain, 2026-10-15: the .50 cal was silent). A seat's own weapon (and gun_at, its muzzle) is a door gun its occupant fires (the UH-60M's M240Hs). load: what a motor-pool vehicle deploys with and is refilled to back at the FOB (MotorPool; Captain, 2026-10-14: the pool M-ATV's M2 had 0 rounds), in units of the feed: full belts, or loose rounds. Proposed. The DShK fires the .50 BMG round's numbers until a 12.7x108 round is in rounds.json.",
+		"m2hb": {"sound": "hmg", "name": "M2 .50 cal", "round": "50bmg_m33", "rpm": 550, "spread_deg": 0.3, "feed": "belt_50bmg", "load": 2},
+		"dshk": {"sound": "hmg", "name": "DShK 12.7 mm", "round": "50bmg_m33", "rpm": 600, "spread_deg": 0.45, "feed": "belt_127x108", "load": 2},
+		"m240c": {"name": "M240 coax", "round": "762x51_m80", "rpm": 750, "spread_deg": 0.2, "feed": "rounds_762", "load": 800},
+		"m240h": {"name": "M240H", "round": "762x51_m80", "rpm": 650, "spread_deg": 0.35, "feed": "rounds_762", "load": 800}
 	},
 	"models": {
 		"matv": {
@@ -286,8 +287,8 @@
 			"seats": [
 				{"name": "Pilot", "kind": "pilot", "at": [0.55, 1.9, -5.3], "stance": "sit", "exit": "right", "shown": true},
 				{"name": "Co-pilot", "kind": "pilot", "at": [-0.55, 1.9, -5.3], "stance": "sit", "exit": "left", "shown": true},
-				{"name": "Crew chief", "kind": "passenger", "at": [-0.72, 1.85, -4.65], "stance": "sit", "exit": "left", "shown": true},
-				{"name": "Door gunner", "kind": "passenger", "at": [0.72, 1.85, -4.65], "stance": "sit", "exit": "right", "shown": true},
+				{"name": "Crew chief", "kind": "gunner", "weapon": "m240h", "gun_at": [-1.3, 1.95, -4.55], "at": [-0.72, 1.85, -4.65], "stance": "sit", "exit": "left", "shown": true},
+				{"name": "Door gunner", "kind": "gunner", "weapon": "m240h", "gun_at": [1.3, 1.95, -4.55], "at": [0.72, 1.85, -4.65], "stance": "sit", "exit": "right", "shown": true},
 				{"name": "Passenger 1", "kind": "passenger", "at": [-0.58, 1.85, -3.3], "stance": "sit", "exit": "left", "shown": true},
 				{"name": "Passenger 2", "kind": "passenger", "at": [0.0, 1.85, -3.3], "stance": "sit", "exit": "left", "shown": true},
 				{"name": "Passenger 3", "kind": "passenger", "at": [0.58, 1.85, -3.3], "stance": "sit", "exit": "right", "shown": true},

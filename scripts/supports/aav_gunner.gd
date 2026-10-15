@@ -10,20 +10,22 @@ extends Node
 ## A turret (VehicleTurret) turns to the target at its own speeds and within its limits, as a
 ## player's does (Vehicle.server_aim), and fires once its barrel is on (Vehicle.gun_on); the
 ## gunner's own unsteadiness goes into where it aims.
+## Captain, 2026-10-15 (v0.4.3 co-op): every gun seat (Vehicle.gun_seats) has its own: the
+## M-ATV's M2 and a Black Hawk's two M240H door guns, each at the enemies in its own arc. Every
+## armed vehicle gets one (Vehicle._ready), so an AI squadmate on the gun engages.
 
 const NODE_NAME := "AIGunner"
 ## Aim at the chest; a little below for a target lying down.
 const LOW_TARGET_M := 0.4
 
 var vehicle: Vehicle
-## The soldier being fired at (tests, the session log).
+## The soldier being fired at (tests, the session log): the main gun's, else the last picked.
 var target: Soldier
-## Rounds fired so far (tests).
+## Rounds fired so far, all its guns (tests).
 var fired := 0
-var _check := 0.0
-var _burst_left := 0
-var _pause := 0.0
 var _cfg := {}
+## Per gun seat: {"target", "check", "burst", "pause"}.
+var _seats := {}
 
 
 ## Host: gives `v` an AI gunner (once). Returns it.
@@ -45,56 +47,71 @@ func _ready() -> void:
 func _physics_process(delta: float) -> void:
 	if not multiplayer.is_server() or not is_instance_valid(vehicle) or vehicle.wrecked or vehicle.is_burning():
 		return
-	var gunner := vehicle.gunner()
-	if gunner == null or not gunner.is_ai() or not gunner.vitals.is_up() or vehicle.gun_info().is_empty():
+	var main := vehicle.gunner()
+	if main == null or not main.is_ai() or not main.vitals.is_up():
 		target = null
+	for seat in vehicle.gun_seats():
+		_seat_step(seat, delta)
+
+
+func _seat_step(seat: int, delta: float) -> void:
+	var gunner := vehicle.occupant(seat)
+	var st: Dictionary = _seats.get(seat, {})
+	_seats[seat] = st
+	var brain := SquadAI.of(gunner) if gunner else null
+	if gunner == null or not gunner.is_ai() or not gunner.vitals.is_up() or vehicle.gun_info(seat).is_empty() or (brain and brain.hold_fire):
+		st.erase("target")  # a squadmate told to hold fire holds it on the gun too
 		return
-	_check -= delta
-	if _check <= 0.0:
-		_check = float(_cfg.get("check_s", 0.5))
-		target = _pick(gunner)
-	if target == null or not target.vitals.is_up():
-		_burst_left = 0
+	st.check = float(st.get("check", 0.0)) - delta
+	if st.check <= 0.0:
+		st.check = float(_cfg.get("check_s", 0.5))
+		st.target = _pick(gunner, seat)
+		if st.target or seat == vehicle.gun_info().get("seat", -1):
+			target = st.target
+	var foe: Soldier = st.get("target") if is_instance_valid(st.get("target")) else null
+	if foe == null or not foe.vitals.is_up():
+		st.burst = 0
 		return
-	if _pause > 0.0:
-		_pause -= delta
+	if float(st.get("pause", 0.0)) > 0.0:
+		st.pause = float(st.pause) - delta
 		return
-	if _burst_left <= 0:
+	if int(st.get("burst", 0)) <= 0:
 		var burst: Array = _cfg.get("burst", [4, 9])
-		_burst_left = randi_range(int(burst[0]), int(burst[1]))
-	var muzzle := _muzzle()
-	var aim := target.aim_point() if target.vitals.is_up() else target.body_point() + Vector3.UP * LOW_TARGET_M
+		st.burst = randi_range(int(burst[0]), int(burst[1]))
+	var muzzle := vehicle.gun_origin(seat)
+	var aim := foe.aim_point() if foe.vitals.is_up() else foe.body_point() + Vector3.UP * LOW_TARGET_M
 	var exact := (aim - muzzle).normalized()
 	var spread := deg_to_rad(float(_cfg.get("spread_deg", 0.8)))
 	var side := exact.cross(Vector3.UP).normalized() if absf(exact.y) < 0.99 else Vector3.RIGHT
 	var dir := (exact + side * randf_range(-1, 1) * tan(spread) + side.cross(exact) * randf_range(-1, 1) * tan(spread)).normalized()
-	vehicle.server_aim(dir)
-	if not vehicle.gun_on(exact):
-		return  # still turning onto it
+	var main := seat == int(vehicle.gun_info().get("seat", -1))
+	if main:
+		vehicle.server_aim(dir)
+	if not vehicle.gun_on(exact, VehicleTurret.ON_TARGET_DEG, -1 if main else seat):
+		return  # still turning onto it (a door gun: it went out of the arc)
+	if not main and not vehicle.door_arc_ok(seat, dir):
+		dir = exact  # the spread took it past the door's edge
 	var shot := vehicle.server_fire_gun(gunner, dir)
 	if shot.is_empty():
-		if vehicle.gun_info().get("rounds", 0) <= 0:
-			target = null  # dry: nothing more to do until the hold is restocked
+		if vehicle.gun_info(seat).get("rounds", 0) <= 0:
+			st.erase("target")  # dry: nothing more to do until the hold is restocked
 		return
 	fired += 1
 	_noise(gunner, muzzle)
-	_burst_left -= 1
-	if _burst_left <= 0:
+	st.burst = int(st.burst) - 1
+	if st.burst <= 0:
 		var pause: Array = _cfg.get("pause_s", [0.8, 1.8])
-		_pause = randf_range(float(pause[0]), float(pause[1]))
+		st.pause = randf_range(float(pause[0]), float(pause[1]))
 
 
-## The gun's muzzle in the world (where the turret has it now).
-func _muzzle() -> Vector3:
-	return vehicle.gun_origin()
-
-
-## The nearest enemy in range, in clear sight of the muzzle, with no friend near the line.
-func _pick(gunner: Soldier) -> Soldier:
+## The nearest enemy in range of gun seat `seat` (a door gun: in its arc), in clear sight of
+## the muzzle, with no friend near the line.
+func _pick(gunner: Soldier, seat: int) -> Soldier:
 	var lvl := vehicle.level()
 	if lvl == null:
 		return null
-	var muzzle := _muzzle()
+	var muzzle := vehicle.gun_origin(seat)
+	var door := seat != int(vehicle.gun_info().get("seat", -1))
 	var reach := float(_cfg.get("range_m", 600.0))
 	var everyone: Array[Soldier] = []
 	for holder: Node in [lvl.players, lvl.ai]:
@@ -110,6 +127,8 @@ func _pick(gunner: Soldier) -> Soldier:
 		if ride and not bool(ride.seats()[ride.seat_of(s)].get("open", false)):
 			continue  # shut inside a vehicle: the gun can't see them
 		var d := muzzle.distance_to(s.global_position)
+		if door and not vehicle.door_arc_ok(seat, s.aim_point() - muzzle):
+			continue
 		if d <= reach:
 			foes.append([d, s])
 	foes.sort_custom(func(a: Array, b: Array) -> bool: return a[0] < b[0])
