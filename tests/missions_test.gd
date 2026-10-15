@@ -44,6 +44,7 @@ func _ready() -> void:
 	await _test_clear_unvisited()
 	await _test_charges()
 	await _test_failures()
+	await _test_scenarios()
 	await _test_no_cuffs()
 	await _test_alert()
 	await _test_pressure()
@@ -73,9 +74,9 @@ func check(condition: bool, what: String) -> void:
 
 func _test_generation() -> void:
 	print("Mission types in the zones")
-	var four: Array[String] = ["raid", "hvt_capture", "hostage_rescue", "intel_grab"]
-	check(MissionRegistry.types() == four,
-		"Captain's first four mission types (%s)" % [MissionRegistry.types()])
+	var nine: Array[String] = ["raid", "hvt_capture", "hostage_rescue", "intel_grab", "convoy_ambush", "defend_hold", "crew_rescue", "sabotage", "recon"]
+	check(MissionRegistry.types() == nine,
+		"Captain's first four mission types, then mission variety's convoy ambush, hold the line, crew rescue, sabotage and recon (%s)" % [MissionRegistry.types()])
 	var sound := true
 	var zones_ok := true
 	for z: Dictionary in MissionRegistry.zones():
@@ -90,7 +91,7 @@ func _test_generation() -> void:
 	rng.seed = 4242
 	var sites := {}
 	for i in 200:
-		var c := ContractGen.generate(rng, {"day": 1, "source": "board"})
+		var c := ContractGen.generate(rng, {"day": 1, "source": "board", "type": ["raid", "hvt_capture", "hostage_rescue", "intel_grab"][i % 4]})
 		var layout := MissionRegistry.zone_def(String(c.zone_id))
 		var module: Array = (layout.modules as Array).filter(func(m: Dictionary) -> bool: return m.id == c.module_id)
 		sound = sound and module.size() == 1 and module[0].type == c.module and ZoneModules.base(c.module) in MissionRegistry.type_modules(MissionRegistry.type_def(c.type))
@@ -1266,3 +1267,279 @@ func _kill(s: Soldier) -> void:
 func _drop_all(s: Soldier, id: StringName) -> void:
 	while s.inventory.count_of(id) > 0:
 		s.inventory.remove_one(id)
+
+
+# --- Mission variety: convoy, hold, crew rescue, sabotage, recon ----------------------------------
+
+const NEW_TYPES: Array[String] = ["convoy_ambush", "defend_hold", "crew_rescue", "sabotage", "recon"]
+
+
+## Deploys a new contract of `type` in the zone and returns {"cid", "why", "objectives"}.
+func _deploy_new(type: String) -> Dictionary:
+	var cid := _add(_offer(type))
+	Contracts.server_accept(cid, ContractGen.default_terms())
+	var why := Contracts.server_start_deployment([cid], ZONE)
+	await _frames(3)
+	return {"cid": cid, "why": why, "objectives": Contracts.objectives.for_contract(cid)}
+
+
+func _kind(list: Array, kind: String, optional := false) -> Dictionary:
+	for o: Dictionary in list:
+		if o.kind == kind and bool(o.optional) == optional:
+			return Contracts.objectives.get_objective(String(o.oid))
+	return {}
+
+
+## Ends the deployment as the squad leaving with `player`, finishes the debrief and returns it.
+func _end_deployment() -> Dictionary:
+	var d := Contracts.server_end_deployment(Contracts.report_from_level(level, [player]))
+	Contracts.server_finish_debrief()
+	return d
+
+
+func _bonus_texts(d: Dictionary) -> String:
+	var out := PackedStringArray()
+	for line: Dictionary in d.contracts:
+		for b: Dictionary in line.bonuses:
+			out.append(String(b.text))
+	return " | ".join(out)
+
+
+func _clean_scenario(before: Array) -> void:
+	_clear_waves()
+	_free_new(before)
+	var layer := level.get_node_or_null(^"Vehicles") as VehicleLayer
+	if layer:
+		for v in layer.vehicles():
+			if v.faction in [&"hostile", &"friendly"]:
+				v.queue_free()
+	for n in level.people.people():
+		if String(n.name).begins_with("Person_crew"):
+			n.queue_free()
+	await _frames(3)
+
+
+func _test_scenarios() -> void:
+	print("Mission variety")
+	var scen := MissionScenario.of(level)
+	check(scen != null, "the level has its MissionScenario node")
+	_test_scenario_generation()
+	if scen == null:
+		return
+	Contracts.new_full_campaign(88, 900000)
+	var r := MapNodes.reinforcements(level)
+	r.params.max_alive = 8  # keep the waves small: this is a check, not a siege
+	r.params.max_pairs = 1
+	var before := level.ai.get_children()
+	var zone_half := float(MissionRegistry.zone_def(ZONE).size_m) * 0.5
+	_place(player, level.insertion_points()[0])
+
+	# Convoy ambush: sets out after its time, stopped when the cargo trucks are out, crate seized.
+	var d := await _deploy_new("convoy_ambush")
+	var main := _kind(d.objectives, Objectives.CONVOY)
+	check(d.why == "" and not main.is_empty() and String(main.progress).contains("due in"), "a convoy contract deploys: waiting for the convoy (%s)" % main.get("progress", ""))
+	var run := scen.run_of(String(main.oid))
+	check(String(run.get("phase", "")) == "waiting" and (run.vehicles as Array).is_empty(), "no convoy yet")
+	scen.server_advance(float(main.params.depart_s) + 2.0)
+	run = scen.run_of(String(main.oid))
+	var vehicles: Array = run.vehicles
+	var hostile_crews := vehicles.all(func(e: Dictionary) -> bool: return (e.v as Vehicle).faction == &"hostile" and not (e.crew as Array).is_empty())
+	check(String(run.phase) == "rolling" and vehicles.size() >= 2 and hostile_crews,
+		"it sets out on time: %d hostile vehicles with crews, driving the route" % vehicles.size())
+	var cargo: Array = vehicles.filter(func(e: Dictionary) -> bool: return bool(e.cargo))
+	check(not cargo.is_empty() and Contracts.objectives.get_objective(main.oid).state == Objectives.ACTIVE,
+		"%d cargo truck%s still moving, the objective open" % [cargo.size(), "" if cargo.size() == 1 else "s"])
+	scen.server_neutralize_convoy(String(main.oid))
+	scen.server_advance(1.0)
+	check(Contracts.objectives.get_objective(main.oid).state == Objectives.DONE, "every cargo truck out of action: the convoy is stopped")
+	var crate_id := String(main.params.cargo_ids[0])
+	check(bool(run.dropped) and _item(crate_id) != null, "the cargo crate is on the ground to seize")
+	var bonus := _kind(d.objectives, Objectives.EXTRACT_ITEM, true)
+	Contracts.objectives.server_items_out([{"id": "hvt_case", "count": 1, "state": {"intel_id": crate_id}}])
+	check(Contracts.objectives.get_objective(bonus.oid).state == Objectives.DONE, "carrying the crate out earns the bonus")
+	var debrief := _end_deployment()
+	check(debrief.contracts[0].outcome == "completed" and _bonus_texts(debrief).contains("cargo"),
+		"debrief: convoy stopped and cargo out is completed with the cargo bonus (%s)" % _bonus_texts(debrief))
+	await _clean_scenario(before)
+	# The convoy that gets away.
+	d = await _deploy_new("convoy_ambush")
+	main = _kind(d.objectives, Objectives.CONVOY)
+	scen.server_advance(float(main.params.depart_s) + 2.0)
+	run = scen.run_of(String(main.oid))
+	var end := _v(main.params.route[(main.params.route as Array).size() - 1])
+	for e: Dictionary in run.vehicles:
+		if bool(e.cargo):
+			(e.v as Vehicle).global_position = level.ground_point(end)
+	scen.server_advance(1.0)
+	check(Contracts.objectives.get_objective(main.oid).state == Objectives.FAILED and String(Contracts.objectives.get_objective(main.oid).progress).contains("got away"),
+		"a cargo truck that reaches the far end has got away: the objective fails")
+	debrief = _end_deployment()
+	check(debrief.contracts[0].outcome != "completed" and int(debrief.contracts[0].pay) == 0,
+		"debrief: the convoy got away, no completion pay (%s)" % debrief.contracts[0].outcome)
+	await _clean_scenario(before)
+
+	# Hold the line: the clock runs while we hold, waves from several sides, the position can fall.
+	d = await _deploy_new("defend_hold")
+	main = _kind(d.objectives, Objectives.HOLD_POINT)
+	var point := _v(main.params.pos)
+	var module := level.get_module(String(Contracts.contract(d.cid).module_id))
+	check(not main.is_empty() and module != null and level.garrison_size(module.module_id) == 0 and module.distance_to(point) <= 0.5,
+		"a hold contract: the position is its module's (%s), which has no garrison" % Contracts.contract(d.cid).module_id)
+	var waves_before := r.waves.size()
+	_place(player, point)
+	scen.server_advance(float(main.params.hold_s) * 0.6)
+	var edges := {}
+	for w in range(waves_before, r.waves.size()):
+		var e: Vector3 = r.waves[w].edge
+		edges[int(roundf(rad_to_deg(atan2(e.z - point.z, e.x - point.x)) / 40.0))] = true
+	check(Contracts.objectives.get_objective(main.oid).state == Objectives.ACTIVE and r.waves.size() - waves_before >= 3 and edges.size() >= 3,
+		"holding: the clock runs, %d waves came from %d directions (%s)" % [r.waves.size() - waves_before, edges.size(), Contracts.objectives.get_objective(main.oid).progress])
+	scen.server_advance(float(main.params.hold_s) * 0.5)
+	check(Contracts.objectives.get_objective(main.oid).state == Objectives.DONE, "the time held: done")
+	debrief = _end_deployment()
+	check(debrief.contracts[0].outcome == "completed" and int(debrief.contracts[0].completion) > 0, "debrief: the line held is completed and paid")
+	await _clean_scenario(before)
+	d = await _deploy_new("defend_hold")
+	main = _kind(d.objectives, Objectives.HOLD_POINT)
+	point = _v(main.params.pos)
+	_place(player, point)
+	scen.server_advance(5.0)
+	_place(player, point + Vector3(zone_half * 0.5, 0, 0))
+	var foe := level.spawn_soldier({"name": "Intruder", "faction": "hostile", "variant": "urban", "pos": level.ground_point(point + Vector3(3, 0, 0)),
+		"loadout": [], "combat": 0.5, "discipline": 0.5, "guard": true})
+	SquadAI.of(foe).process_mode = Node.PROCESS_MODE_DISABLED
+	scen.server_advance(MissionScenario.LOSE_S + 2.0)
+	check(Contracts.objectives.get_objective(main.oid).state == Objectives.FAILED and String(Contracts.objectives.get_objective(main.oid).progress).contains("fell"),
+		"nobody of ours in it and the enemy standing there: the position falls")
+	debrief = _end_deployment()
+	check(debrief.contracts[0].outcome != "completed" and int(debrief.contracts[0].pay) == 0, "debrief: a lost position pays nothing (%s)" % debrief.contracts[0].outcome)
+	foe.queue_free()
+	await _clean_scenario(before)
+
+	# Downed crew: the wreck, the crew (some hurt), waves converging, need N out.
+	d = await _deploy_new("crew_rescue")
+	main = _kind(d.objectives, Objectives.RESCUE_CREW)
+	var all := _kind(d.objectives, Objectives.RESCUE_CREW, true)
+	run = scen.run_of(String(main.oid))
+	var crew: Array = main.params.crew
+	var wreck := run.get("wreck") as Vehicle
+	var hurt := 0
+	for s: Soldier in run.crew:
+		if s.vitals.injury() > 0.0:
+			hurt += 1
+	check(wreck != null and wreck.wrecked and wreck.model == "uh60" and (run.crew as Array).size() == crew.size() and crew.size() >= 2 and crew.size() <= 4 and hurt >= 1,
+		"a rescue: the UH-60 as a wreck with %d crew, %d of them wounded" % [crew.size(), hurt])
+	check(level.people.hvt(String(crew[0].hvt)) != null and level.people.hvt(String(crew[0].hvt)).faction == Person.FACTION,
+		"the crew are people of the friendly side, each their own HVT id")
+	var waves_start := r.waves.size()
+	scen.server_advance(float(main.params.first_wave_s) + 1.0)
+	check(r.waves.size() > waves_start, "enemies converge on the site: a wave in after %.0f s" % float(main.params.first_wave_s))
+	for i in crew.size() - 1:
+		Contracts.server_hvt_delivered(String(crew[i].hvt), true)
+	check(Contracts.objectives.get_objective(main.oid).state == Objectives.DONE and Contracts.objectives.get_objective(all.oid).state == Objectives.ACTIVE,
+		"all but one out: the rescue is done, the whole-crew bonus still open (%s)" % Contracts.objectives.get_objective(all.oid).progress)
+	Contracts.server_hvt_delivered(String(crew[crew.size() - 1].hvt), true)
+	check(Contracts.objectives.get_objective(all.oid).state == Objectives.DONE, "the last one out: the bonus too")
+	debrief = _end_deployment()
+	check(debrief.contracts[0].outcome == "completed" and _bonus_texts(debrief).contains("whole crew"), "debrief: completed with the whole-crew bonus (%s)" % _bonus_texts(debrief))
+	await _clean_scenario(before)
+	d = await _deploy_new("crew_rescue")
+	main = _kind(d.objectives, Objectives.RESCUE_CREW)
+	run = scen.run_of(String(main.oid))
+	for i in 2:
+		_kill(run.crew[i])
+	await _frames(3)
+	check(Contracts.objectives.get_objective(main.oid).state == Objectives.FAILED, "two of the crew dead: the rescue fails (%s)" % Contracts.objectives.get_objective(main.oid).progress)
+	debrief = _end_deployment()
+	check(debrief.contracts[0].outcome != "completed" and int(debrief.contracts[0].pay) == 0, "debrief: no pay for a lost crew (%s)" % debrief.contracts[0].outcome)
+	await _clean_scenario(before)
+
+	# Recon: observe the sites; the bonus for never being spotted.
+	d = await _deploy_new("recon")
+	var sites: Array = d.objectives.filter(func(o: Dictionary) -> bool: return o.kind == Objectives.RECON_SITE)
+	var unseen := _kind(d.objectives, Objectives.UNDETECTED, true)
+	check(sites.size() >= 2 and not unseen.is_empty() and Contracts.contract(d.cid).module_id == "",
+		"a recon contract: %d sites to observe and a never-spotted bonus" % sites.size())
+	var first_site := Contracts.objectives.get_objective(String(sites[0].oid))
+	_place(player, _v(first_site.params.pos) + Vector3(0, 0, 18))
+	scen.server_advance(float(first_site.params.dwell_s) + 1.0)
+	check(Contracts.objectives.get_objective(first_site.oid).state == Objectives.DONE or float(scen.run_of(String(first_site.oid)).get("dwell", 0.0)) > 0.0,
+		"standing in sight of a site long enough marks it (%s)" % Contracts.objectives.get_objective(first_site.oid).progress)
+	for o: Dictionary in sites:
+		scen.server_mark_site(String(o.oid))
+	check(Contracts.objectives.contract_done(d.cid), "every site observed: the required objectives are done")
+	debrief = _end_deployment()
+	check(debrief.contracts[0].outcome == "completed" and _bonus_texts(debrief).contains("never spotted"), "debrief: completed, with the never-spotted bonus (%s)" % _bonus_texts(debrief))
+	await _clean_scenario(before)
+	d = await _deploy_new("recon")
+	sites = d.objectives.filter(func(o: Dictionary) -> bool: return o.kind == Objectives.RECON_SITE)
+	scen.server_spotted()
+	for o: Dictionary in sites:
+		scen.server_mark_site(String(o.oid))
+	debrief = _end_deployment()
+	check(debrief.contracts[0].outcome == "completed" and not _bonus_texts(debrief).contains("never spotted"), "spotted: still completed, but no bonus (%s)" % _bonus_texts(debrief))
+	d = await _deploy_new("recon")
+	debrief = _end_deployment()
+	check(debrief.contracts[0].outcome != "completed" and int(debrief.contracts[0].pay) == 0, "no site observed: not completed (%s)" % debrief.contracts[0].outcome)
+	await _clean_scenario(before)
+
+	# Sabotage: destroy the target; the unseen bonus.
+	d = await _deploy_new("sabotage")
+	main = _kind(d.objectives, Objectives.DESTROY_CACHE)
+	unseen = _kind(d.objectives, Objectives.UNDETECTED, true)
+	check(not main.is_empty() and not unseen.is_empty(), "a sabotage contract: a target to destroy (%s) and an unseen bonus" % main.get("text", ""))
+	Contracts.server_cache_destroyed(String(main.params.cache))
+	debrief = _end_deployment()
+	check(debrief.contracts[0].outcome == "completed" and _bonus_texts(debrief).contains("unseen"), "debrief: target destroyed and never spotted: completed with the bonus (%s)" % _bonus_texts(debrief))
+	d = await _deploy_new("sabotage")
+	main = _kind(d.objectives, Objectives.DESTROY_CACHE)
+	scen.server_spotted()
+	Contracts.server_cache_destroyed(String(main.params.cache))
+	debrief = _end_deployment()
+	check(debrief.contracts[0].outcome == "completed" and not _bonus_texts(debrief).contains("unseen"), "spotted: the target down but no bonus (%s)" % _bonus_texts(debrief))
+	d = await _deploy_new("sabotage")
+	debrief = _end_deployment()
+	check(debrief.contracts[0].outcome != "completed" and int(debrief.contracts[0].pay) == 0, "target left standing: not completed (%s)" % debrief.contracts[0].outcome)
+	await _clean_scenario(before)
+	r.params = Reinforcements.DEFAULTS.duplicate()
+
+
+## Generation, no deployment: every new type in every zone, positions inside the zone, text filled
+## in, pay and rating in range.
+func _test_scenario_generation() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 31337
+	var sound := true
+	var bad := {}
+	var kinds := {}
+	for type: String in NEW_TYPES:
+		for z: Dictionary in MissionRegistry.zones():
+			for i in 6:
+				var was := sound
+				var c := ContractGen.generate(rng, {"day": 1, "source": "board", "type": type, "zone_id": z.zone_id})
+				var half := float(MissionRegistry.zone_def(String(z.zone_id)).size_m) * 0.5
+				sound = sound and c.type == type and (c.objectives as Array).size() >= 1 and int(c.rated) >= 1 and int(c.rated) <= 5 and int(c.base_pay) > 0
+				for o: Dictionary in c.objectives:
+					kinds[o.kind] = true
+					sound = sound and not String(o.text).contains("{") and String(o.text) != ""
+					var pos: Array = (o.get("params", {}) as Dictionary).get("pos", [0, 0, 0])
+					sound = sound and absf(float(pos[0])) <= half and absf(float(pos[2])) <= half
+				if type == "convoy_ambush":
+					var route: Array = c.objectives[0].params.route
+					sound = sound and route.size() >= 3 and route.all(func(p: Array) -> bool: return absf(float(p[0])) <= half and absf(float(p[2])) <= half)
+				if type == "recon":
+					var sites := (c.objectives as Array).filter(func(o: Dictionary) -> bool: return o.kind == Objectives.RECON_SITE)
+					var ids := {}
+					for o: Dictionary in sites:
+						ids[o.params.module_id] = true
+					sound = sound and sites.size() >= 2 and ids.size() == sites.size()
+				if was and not sound:
+					bad["%s in %s" % [type, z.zone_id]] = c.objectives.map(func(o: Dictionary) -> Variant: return [o.kind, o.get("params", {}).get("pos")])
+	check(sound, "convoy, hold, rescue, sabotage and recon generate in every zone: objectives with positions inside the zone, text filled in, a 1-5 rating (%s)" % [bad])
+	check(["convoy", "hold_point", "rescue_crew", "recon_site", "undetected", "destroy_cache", "extract_item"].all(func(k: String) -> bool: return kinds.has(k)),
+		"their objective kinds (%s)" % [kinds.keys()])
+	var board := {}
+	for seed_i in 40:
+		for o: Dictionary in ContractGen.generate_board(500 + seed_i, 1, {}, 6):
+			board[o.type] = true
+	check(NEW_TYPES.all(func(t: String) -> bool: return board.has(t)), "the contract board offers all of them (%s)" % [board.keys()])

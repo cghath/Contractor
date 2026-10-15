@@ -234,6 +234,14 @@ static func _objective_step(o: Dictionary, all: Array, sit: Dictionary) -> Dicti
 				text = "%s gave up: cuff them, take them to the LZ" % who
 			else:
 				text = "Capture %s: cuff them, take them to the LZ" % who
+		Objectives.CONVOY:
+			text = "Ambush the convoy on its route%s" % (": " + progress if progress != "" else "")
+		Objectives.HOLD_POINT:
+			text = "Hold the %s%s" % [String(p.get("name", "position")), ": " + progress if progress != "" else ""]
+		Objectives.RESCUE_CREW:
+			text = "Treat and carry the downed crew to the LZ%s" % (" (" + progress + ")" if progress != "" else "")
+		Objectives.RECON_SITE:
+			text = "Observe the %s from within %d m%s" % [String(p.get("name", "site")), roundi(float(p.get("observe_m", 75.0))), " (" + progress + ")" if progress != "" else ""]
 		_:
 			text = String(o.get("text", ""))
 	return {"text": text, "targets": [target]}
@@ -327,6 +335,14 @@ static func short_label(o: Dictionary, sit: Dictionary) -> String:
 			label = item_name(o)
 		Objectives.DESTROY_CACHE:
 			label = String((o.get("params", {}) as Dictionary).get("name", "cache"))
+		Objectives.CONVOY:
+			label = "convoy ambush point"
+		Objectives.HOLD_POINT:
+			label = "hold " + String((o.get("params", {}) as Dictionary).get("name", "position"))
+		Objectives.RESCUE_CREW:
+			label = "crash site"
+		Objectives.RECON_SITE:
+			label = "observe " + String((o.get("params", {}) as Dictionary).get("name", "site"))
 		_:
 			label = site_name(o, sit)
 	if label == "":

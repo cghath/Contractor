@@ -97,7 +97,7 @@ func _test_generation() -> void:
 		var zone := MissionRegistry.zone(o.zone_id)
 		var def := MissionRegistry.type_def(o.type)
 		valid = valid and int(o.rated) >= 1 and int(o.rated) <= 5 and int(o.true_rating) >= int(o.rated) and int(o.base_pay) > 0 \
-			and not (o.objectives as Array).is_empty() and ZoneModules.base(o.module) in MissionRegistry.type_modules(def) and ZoneModules.base(o.module) in zone.modules and String(o.module_id) != "" \
+			and not (o.objectives as Array).is_empty() and ZoneModules.base(o.module) in MissionRegistry.type_modules(def) and ZoneModules.base(o.module) in zone.modules and (String(o.module_id) != "" or def.has("scenario")) \
 			and o.employer in MissionRegistry.employers() and o.target in MissionRegistry.enemies() and o.zone_kind == zone.kind
 	check(valid, "every offer is sound: rating 1-5, the briefing never overstates, pay, objectives, a target module in the zone's layout")
 	check(a[0].source == "safe" and int(a[0].rated) == 1 and not a[0].understated and a[0].zone_kind == "contract",
@@ -126,8 +126,9 @@ func _test_generation() -> void:
 		if o.zone_kind == "hot":
 			hot += 1
 			hot_ok = hot_ok and o.employer == MissionRegistry.zone(o.zone_id).faction
-	check(seen.keys().size() == 4 and seen.has("raid") and seen.has("hvt_capture") and seen.has("hostage_rescue") and seen.has("intel_grab"),
-		"Captain's first four mission types come up (%s)" % [seen.keys()])
+	check(seen.keys().size() == 9 and seen.has("raid") and seen.has("hvt_capture") and seen.has("hostage_rescue") and seen.has("intel_grab")
+		and seen.has("convoy_ambush") and seen.has("defend_hold") and seen.has("crew_rescue") and seen.has("sabotage") and seen.has("recon"),
+		"Captain's first four mission types and the five of mission variety come up (%s)" % [seen.keys()])
 	check(hot > 30 and hot < 130 and hot_ok, "hot-zone contracts come up (%d of 300), each from the zone's own faction" % hot)
 	# A mission type added at runtime (Noah's types drop in the same way).
 	MissionRegistry.register_type({"type": "test_rescue", "name": "Hostage rescue", "module": "compound", "base_pay": 60000, "days": 1,

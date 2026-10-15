@@ -42,7 +42,21 @@ const CLEAR_AREA := "clear_area"
 const EXTRACT_ITEM := "extract_item"
 const DELIVER_HVT := "deliver_hvt"
 const DESTROY_CACHE := "destroy_cache"
-const KINDS: Array[String] = [CLEAR_AREA, EXTRACT_ITEM, DELIVER_HVT, DESTROY_CACHE]
+## Scenario kinds (mission variety, 2026-10-15): MissionScenario plays them in the level and
+## marks them done or failed (server_set_state); ScenarioGen builds their "params".
+## - CONVOY: an enemy convoy drives "route"; done when every cargo truck is halted (destroyed,
+##   disabled or its driver down), failed when one gets out the far end.
+## - HOLD_POINT: hold "pos" ("radius" m) for "hold_s" seconds against waves; failed when lost.
+## - RESCUE_CREW: the "crew" (people of the downed helicopter); done when "need" of them are out
+##   (delivered alive: server_hvt_delivered), failed when too many are lost.
+## - RECON_SITE: someone of ours observed "pos" from "observe_m" for "dwell_s" with a line of sight.
+## - UNDETECTED (a bonus): done at the end of the deployment unless a hostile was in contact with us.
+const CONVOY := "convoy"
+const HOLD_POINT := "hold_point"
+const RESCUE_CREW := "rescue_crew"
+const RECON_SITE := "recon_site"
+const UNDETECTED := "undetected"
+const KINDS: Array[String] = [CLEAR_AREA, EXTRACT_ITEM, DELIVER_HVT, DESTROY_CACHE, CONVOY, HOLD_POINT, RESCUE_CREW, RECON_SITE, UNDETECTED]
 ## The breaching charge item that destroys a cache when placed on it.
 const CHARGE_ITEM := &"breaching_charge"
 const POLL_S := 0.5
@@ -276,6 +290,7 @@ static func item_matches(params: Dictionary, item_id: StringName) -> bool:
 ## Host: an HVT was delivered (to extraction or a vehicle seat that extracts). An HVT
 ## objective with that "hvt" id (or none) completes, or fails if they arrive dead.
 func server_hvt_delivered(hvt_id: String, alive := true) -> void:
+	_crew_event(hvt_id, true, alive)
 	for o: Dictionary in active():
 		if o.kind == DELIVER_HVT and String(o.params.get("hvt", hvt_id)) == hvt_id:
 			server_set_state(o.oid, DONE if alive else FAILED)
@@ -283,9 +298,48 @@ func server_hvt_delivered(hvt_id: String, alive := true) -> void:
 
 ## Host: an HVT died or got away for good.
 func server_hvt_lost(hvt_id: String) -> void:
+	_crew_event(hvt_id, false, false)
 	for o: Dictionary in active():
 		if o.kind == DELIVER_HVT and String(o.params.get("hvt", hvt_id)) == hvt_id:
 			server_set_state(o.oid, FAILED)
+
+
+## Host: a downed crew member was delivered (alive: out; dead: lost) or lost (died): RESCUE_CREW
+## objectives with that person in their "crew" count them, and finish when enough are out or too
+## many are gone.
+func _crew_event(hvt_id: String, delivered: bool, alive: bool) -> void:
+	for o: Dictionary in active():
+		if o.kind != RESCUE_CREW:
+			continue
+		var crew: Array = (o.params as Dictionary).get("crew", [])
+		if not crew.any(func(c: Dictionary) -> bool: return String(c.hvt) == hvt_id):
+			continue
+		var out: Array = (o.params as Dictionary).get("out", [])
+		var lost: Array = (o.params as Dictionary).get("lost", [])
+		if hvt_id in out or hvt_id in lost:
+			continue
+		if delivered and alive:
+			out.append(hvt_id)
+		else:
+			lost.append(hvt_id)
+		o.params["out"] = out
+		o.params["lost"] = lost
+		var need := int(o.params.get("need", crew.size()))
+		var progress := "%d of %d out%s" % [out.size(), crew.size(), (", %d lost" % lost.size()) if not lost.is_empty() else ""]
+		if out.size() >= need:
+			server_set_state(o.oid, DONE, progress)
+		elif crew.size() - lost.size() < need:
+			server_set_state(o.oid, FAILED, progress)
+		else:
+			server_set_state(o.oid, ACTIVE, progress)
+
+
+## Host: the deployment is ending (extraction): a bonus that asked only for the squad to stay
+## unseen stands if nobody spotted them (MissionScenario fails it the moment someone does).
+func server_deployment_ending() -> void:
+	for o: Dictionary in active():
+		if o.kind == UNDETECTED:
+			server_set_state(o.oid, DONE)
 
 
 ## Host: a cache was destroyed (by whatever means the caller saw).

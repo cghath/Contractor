@@ -215,6 +215,8 @@ static func generate(rng: RandomNumberGenerator, ctx: Dictionary) -> Dictionary:
 static func mission_target(rng: RandomNumberGenerator, def: Dictionary, zone_id: String, target := "", at_module := "", avoid: Array = []) -> Dictionary:
 	var pick := RandomNumberGenerator.new()
 	pick.seed = hash([rng.state, "mission"])
+	if def.has("scenario"):  # convoy, defend, rescue, recon: ScenarioGen builds the objectives with their positions
+		return ScenarioGen.build(pick, def, zone_id, target)
 	var allowed := MissionRegistry.type_modules(def)
 	var module_type: String = String(allowed[0]) if not allowed.is_empty() else ""
 	var module_id := ""
