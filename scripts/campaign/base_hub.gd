@@ -1913,12 +1913,218 @@ func _apply_stash(lvl: BaseLevel, before: Array, after: Array) -> void:
 	_changed(&"base")
 
 
+# --- The loadout menu (Captain, 2026-10-14; docs/loadout_menu.md) ----------------------------
+# "We need a menu for equipping yourself better and your squadmates how you want to as well."
+# Every change is a template edit rebuilt from the stash (Loadouts.rebuild: the kits go into one
+# pool with the stash, Restock.build draws the edited ones from it), applied to the bodies and to
+# the armory's world items (_apply_stash), so nothing is made or lost and a short stash is named
+# in Restock's words.
+
+## Ops that change only the standing loadout (what Restock refills to), not the kit worn now.
+const STANDING_OPS: Array[String] = ["save", "standing_role", "copy_standing", "restock"]
+
+
+## Host: `who` at the hub (a member id at the muster line, or "player:<key>" for a player here):
+## {"who", "name", "role", "person" (roster entry), "soldier", "peer" (players; 0 for a member)},
+## or {} if they aren't standing here.
+func loadout_person(who: String) -> Dictionary:
+	var lvl := level() as BaseLevel
+	if lvl == null:
+		return {}
+	if who.begins_with("player:"):
+		var key := who.trim_prefix("player:")
+		for p: Node in lvl.players.get_children():
+			var peer := p.name.to_int()
+			if p is Soldier and not p.is_queued_for_deletion() and player_key(peer) == key:
+				var main := Roster.main_character(roster(), key)
+				return {"who": who, "name": key, "role": StringName(main.get("role", Roles.RIFLEMAN)), "person": main, "soldier": p, "peer": peer}
+		return {}
+	var m := member(who)
+	var s := lvl.muster_soldier(who)
+	if m.is_empty() or s == null:
+		return {}
+	return {"who": who, "name": String(m.callsign), "role": StringName(m.get("role", Roles.RIFLEMAN)), "person": m, "soldier": s, "peer": 0}
+
+
+## Whether player `sender` may change `a`'s kit or standing loadout: their own and any AI
+## squadmate's, never another player's.
+static func may_change_loadout(sender: int, a: Dictionary) -> bool:
+	return int(a.get("peer", 0)) == 0 or int(a.peer) == sender
+
+
+## Host: the loadout menu's request `op` on `who` from player `sender` (docs/loadout_menu.md,
+## Network). Returns what happened, or why not.
+func server_loadout(sender: int, who: String, op: String, p: Dictionary) -> String:
+	var lvl := level() as BaseLevel
+	if lvl == null or not campaign_running or RosterDeployment.is_running(roster()):
+		return "Only at the base"
+	if op == "sync":
+		var gear := lvl.server_read_muster_gear()
+		for mid: String in gear:
+			server_store_member_gear(mid, gear[mid])
+		_changed(&"roster")
+		return ""
+	var a := loadout_person(who)
+	if a.is_empty():
+		return "They aren't at the base"
+	if not may_change_loadout(sender, a):
+		return "%s sets their own kit" % a.name
+	var s: Soldier = a.soldier
+	if not s.vitals.is_up():
+		return "%s can't kit up now" % a.name
+	if op in STANDING_OPS:
+		return _server_standing(sender, a, op, p)
+	var t := Loadouts.template_of(Roster.json_safe(s.inventory.net_state))
+	var people: Array = [a]
+	var what := ""
+	match op:
+		"slot":
+			var slot := StringName(String(p.get("slot", "")))
+			var id := String(p.get("id", ""))
+			if not slot in Loadouts.DOLL_SLOTS or (id != "" and not Loadouts.fits_slot(ItemDB.get_item(StringName(id)), slot)):
+				return "That doesn't go there"
+			t = Loadouts.set_slot(t, slot, id)
+			what = "%s: %s" % [Loadouts.SLOT_NAMES[slot], ItemDB.get_item(StringName(id)).name if id != "" else "back to the stash"]
+		"optic":
+			var slot := StringName(String(p.get("slot", "")))
+			var id := String(p.get("id", ""))
+			if not slot in Inventory.WEAPON_SLOTS or (id != "" and not Optics.is_optic(ItemDB.get_item(StringName(id)))):
+				return "That isn't an optic"
+			t = Loadouts.set_optic(t, slot, id)
+			what = "%s on the %s" % [ItemDB.get_item(StringName(id)).name if id != "" else "Irons", String(Loadouts.SLOT_NAMES[slot]).to_lower()]
+		"add", "remove", "give":
+			var id := String(p.get("id", ""))
+			var n := clampi(int(p.get("count", 1)), 1, 50)
+			if not ItemDB.has_item(StringName(id)):
+				return "No such item"
+			var item_name := ItemDB.get_item(StringName(id)).name
+			if op == "add":
+				t = Loadouts.add_units(t, id, n)
+				what = "+%d %s" % [n, item_name]
+			else:
+				var took := Loadouts.remove_units(t, id, n)
+				if int(took.removed) <= 0:
+					return "%s has no %s" % [a.name, item_name]
+				t = took.template
+				what = "%d %s back to the stash" % [int(took.removed), item_name]
+				if op == "give":
+					var b := loadout_person(String(p.get("to", "")))
+					if b.is_empty() or b.who == a.who:
+						return "Nobody to give it to"
+					b["template"] = Loadouts.add_units(Loadouts.template_of(Roster.json_safe((b.soldier as Soldier).inventory.net_state)), id, int(took.removed))
+					people.append(b)
+					what = "gave %d %s to %s" % [int(took.removed), item_name, b.name]
+		"fill_ammo":
+			t = Loadouts.fill_ammo(t, a.role)
+			what = "ammo filled"
+		"medic_kit":
+			t = Loadouts.medic_kit(t)
+			what = "medic kit"
+		"role_kit":
+			var role := StringName(String(p.get("role", a.role)))
+			if not Roles.has(role):
+				return "No such role"
+			t = Loadouts.role_template(role)
+			what = "%s kit" % Roles.display_name(role)
+		"copy_kit":
+			var c := loadout_person(String(p.get("from", "")))
+			if c.is_empty():
+				return "Nobody to copy"
+			t = Loadouts.template_of(Roster.json_safe((c.soldier as Soldier).inventory.net_state))
+			what = "kit copied from %s" % c.name
+		_:
+			return "Unknown request"
+	a["template"] = t
+	var lines := _loadout_apply(lvl, people)
+	var text := "%s: %s%s" % [a.name, what, (". " + lines[0]) if lines[0] != "" else ""]
+	if people.size() > 1 and lines[1] != "":
+		text += "\n%s: %s" % [people[1].name, lines[1]]
+	return text
+
+
+## Host: `people` (loadout_person entries with their edited "template") rebuilt from the hub's
+## stash together; their bodies, roster gear and the armory follow. One short_text each.
+func _loadout_apply(lvl: BaseLevel, people: Array) -> PackedStringArray:
+	var before := lvl.server_collect_stash()
+	var pool: Array = before.duplicate(true)
+	var jobs: Array = people.map(func(a: Dictionary) -> Dictionary:
+		return {"gear": Roster.json_safe((a.soldier as Soldier).inventory.net_state), "template": a.template})
+	var results := Loadouts.rebuild(jobs, pool)
+	var lines := PackedStringArray()
+	for i in people.size():
+		var a: Dictionary = people[i]
+		var s: Soldier = a.soldier
+		s.inventory.net_state = GameState.from_json(results[i].gear)
+		if int(a.peer) == 0:
+			server_store_member_gear(String(a.who), s.inventory.net_state)
+		else:
+			a.person["gear"] = Roster.json_safe(s.inventory.net_state.duplicate(true))
+		lines.append(Loadouts.short_text(results[i]))
+		SessionLog.note("loadout: %s: %s" % [SessionLog.who(s), lines[i] if lines[i] != "" else "changed"])
+	_apply_stash(lvl, before, pool)
+	_changed(&"roster")
+	return lines
+
+
+## Host: the standing-loadout ops (what Restock refills to): "save" (the kit worn now),
+## "standing_role" [role] (a role's kit, whatever the stash has), "copy_standing" [to: whos]
+## (this one's standing loadout for them too), "restock" (rebuild the kit to it).
+func _server_standing(sender: int, a: Dictionary, op: String, p: Dictionary) -> String:
+	var person: Dictionary = a.person
+	match op:
+		"save":
+			var t := Loadouts.template_of(Roster.json_safe((a.soldier as Soldier).inventory.net_state))
+			if Restock.is_blank(t):
+				return "%s carries nothing to save" % a.name
+			person["loadout"] = t
+			Roster.record_restock_short(person, {})
+			_changed(&"roster")
+			return "Saved %s's standing loadout: Restock refills to this (%d items)" % [a.name, _units_in(t)]
+		"standing_role":
+			var role := StringName(String(p.get("role", a.role)))
+			if not Roles.has(role):
+				return "No such role"
+			person["loadout"] = Loadouts.role_template(role)
+			Roster.record_restock_short(person, {})
+			_changed(&"roster")
+			return "%s's standing loadout is the %s kit: Restock draws it from the stash" % [a.name, Roles.display_name(role)]
+		"copy_standing":
+			var from := Roster.loadout_of(person)
+			if Restock.is_blank(from):
+				return "%s has no standing loadout to copy" % a.name
+			var done := PackedStringArray()
+			for to: Variant in p.get("to", []):
+				var b := loadout_person(String(to))
+				if b.is_empty() or b.who == a.who or not may_change_loadout(sender, b):
+					continue
+				b.person["loadout"] = from.duplicate(true)
+				Roster.record_restock_short(b.person, {})
+				done.append(String(b.name))
+			_changed(&"roster")
+			return "%s's standing loadout copied to %s" % [a.name, ", ".join(done)] if not done.is_empty() else "Nobody to copy it to"
+		"restock":
+			if Restock.is_blank(Roster.loadout_of(person)):
+				return "%s has no standing loadout yet: Save one first" % a.name
+			if int(a.peer) != 0:
+				return server_restock_player(int(a.peer))
+			return server_restock_member(String(a.who))
+	return "Unknown request"
+
+
+static func _units_in(t: Dictionary) -> int:
+	var n := 0
+	for c: Variant in Restock.counts(t).values():
+		n += int(c)
+	return n
+
+
 # --- Requests from the base screen ---------------------------------------------------------
 
 ## Any peer: asks the host to do something at the base. `action`: "hire" [cid], "release"
 ## [mid], "medbay" [mid or "player:<key>"], "pick" [mid, bool], "role" [mid, role], "buy"
 ## [item id, count], "rest" [days], "prep" [held contract id], "deploy" [], "save" [], "restock"
-## [] (the sender's last loadout), "restock_squad" [], "ready" [bool] (the sender, FOB ready-up); "deploy", "rest", "release", "prep",
+## [] (the sender's last loadout), "restock_squad" [], "ready" [bool] (the sender, FOB ready-up), "loadout" [who, op,
+## params] (the loadout menu: server_loadout); "deploy", "rest", "release", "prep",
 ## "save" and "restock_squad" only from the host. The answer comes back as `note`.
 func request(action: String, args: Array = []) -> void:
 	_server_request.rpc_id(1, action, args)
@@ -1931,7 +2137,7 @@ func _server_request(action: String, args: Array) -> void:
 	var sender := multiplayer.get_remote_sender_id()
 	var why := ""
 	var at_base := in_base() and not RosterDeployment.is_running(roster())
-	var needs: int = {"hire": 1, "release": 1, "medbay": 1, "pick": 2, "role": 2, "buy": 1, "prep": 1, "ready": 1}.get(action, 0)
+	var needs: int = {"hire": 1, "release": 1, "medbay": 1, "pick": 2, "role": 2, "buy": 1, "prep": 1, "ready": 1, "loadout": 3}.get(action, 0)
 	if args.size() < needs:
 		why = "Bad request"
 	elif action in ["deploy", "rest", "release", "save", "prep", "restock_squad"] and sender != 1:
@@ -1968,6 +2174,8 @@ func _server_request(action: String, args: Array) -> void:
 				why = server_restock_squad()
 			"ready":
 				server_set_ready(sender if sender != 0 else 1, bool(args[0]))
+			"loadout":
+				why = server_loadout(sender if sender != 0 else 1, String(args[0]), String(args[1]), args[2] if args[2] is Dictionary else {})
 			_:
 				why = "Unknown request"
 	if why != "":
@@ -2049,6 +2257,23 @@ func open_ui(page := "squad") -> void:
 	if _host_notice != "":
 		note.emit(_host_notice)  # loading had something to say before the screen existed (load_or_new)
 		_host_notice = ""
+
+
+## This machine: opens the loadout menu (LoadoutScreen) on its own layer over everything, and
+## returns it (closed: it frees itself and its layer). Only at the base between deployments.
+func open_loadout() -> LoadoutScreen:
+	if not campaign_running or not in_base() or RosterDeployment.is_running(view.get("roster", {})):
+		note.emit("Loadouts are at the base, between deployments")
+		return null
+	var layer := CanvasLayer.new()
+	layer.name = "LoadoutLayer"
+	layer.layer = 21  # over the base screen (20)
+	get_tree().root.add_child(layer)
+	var screen := LoadoutScreen.new()
+	screen.name = "LoadoutScreen"
+	screen.closed.connect(layer.queue_free)
+	layer.add_child(screen)
+	return screen
 
 
 func _unhandled_input(event: InputEvent) -> void:

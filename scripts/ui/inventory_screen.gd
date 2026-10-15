@@ -1328,3 +1328,10 @@ func _add_restock_button() -> void:
 	b.name = "RestockButton"
 	b.tooltip_text = "Rebuild the kit you last deployed with from the armory's stash: same carrier, pouches on the same points, mags, meds, weapons and optics. What the stash is short of is listed."
 	_quick_box.add_child(b)
+	# The loadout menu (Captain, 2026-10-14): kit yourself and your squadmates from one screen.
+	var menu := _button("Loadout menu", func() -> void:
+		visible = false
+		BaseHub.open_loadout())
+	menu.name = "LoadoutMenuButton"
+	menu.tooltip_text = "You and each squadmate: swap weapons, optics, armour and packs, add ammo, meds and grenades from the stash, save standing loadouts"
+	_quick_box.add_child(menu)
