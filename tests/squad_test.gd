@@ -41,6 +41,7 @@ func _ready() -> void:
 	_test_flash_stuns()
 	await _test_spotting()
 	await _test_fire_discipline()
+	await _test_no_fire_into_walls()
 	await _test_close_range_aim()
 	await _test_tactics()
 	_test_doctrine_pending()
@@ -1125,6 +1126,85 @@ func _test_fire_discipline() -> void:
 	check(behind and not ahead and not aside, "no rocket with a squadmate in the backblast (behind %s, ahead %s, off to the side %s)" % [behind, ahead, aside])
 	alpha.global_transform = saved[0]
 	bravo.global_transform = saved[1]
+	_clear_contact()
+
+
+## Captain, v0.4.6 playtest: "friendlies shoot at and try to shoot through walls, enemies too"
+## (the squad inside the compound firing into the 2.6 m concrete wall at a contact 160 m out).
+## Suppressive fire on a point outside the compound: with a clear line (through the gate) the
+## rounds go; behind the perimeter wall none go, and within a few seconds he moves to a spot
+## with a line (by the gate) and fires from there; in a corner with no such spot near, he holds
+## fire. Hostiles run the same SquadAI fire code.
+func _test_no_fire_into_walls() -> void:
+	print("Line of fire: no rounds into walls, a fire position or hold fire")
+	_clear_contact()
+	var squad := level.squad_for(&"friendly")
+	var s := _standing_mate([])
+	var ai := SquadAI.of(s)
+	var names := PackedStringArray([String(s.name)])
+	var saved_player := player.global_transform
+	_place(player, Vector3(10, 0.1, -16))  # the rest of the squad follows him, out of every line here
+	var rounds := func() -> int: return s.inventory.rounds_in(s.active_slot)
+	var trial := func(at: Vector3, aim: Vector3) -> void:
+		ai._fire_spot = null
+		ai._fire_spot_at = -1000.0
+		ai._no_shot_since = -1.0
+		ai._fire_line = {}
+		_place(s, at)
+		squad.give_order(player, Squad.Order.HOLD, at, names)
+		var st := s.inventory.state_of(s.active_slot)
+		if not st.is_empty():
+			st["rounds"] = 30  # a full magazine: no reload in the middle of it
+		squad.order_suppress(player, aim, names)
+	# (c) A clear line, out through the gate: he suppresses.
+	var gate_aim := Vector3(0, 0, 70)
+	trial.call(Vector3(0, 0.1, 15), gate_aim)
+	var before: int = rounds.call()
+	var fired := await _wait_until(func() -> bool: return rounds.call() < before, 5.0)
+	check(fired and ai._fire_spot == null, "Suppress through the gate, a clear line: the rounds go (%d -> %d, %s)" % [before, rounds.call(), s.ai_status])
+	# (a) Behind the perimeter wall: nothing goes into it, then (b) he moves to a fire position.
+	var wall_aim := Vector3(-10, 0, 70)
+	trial.call(Vector3(-10, 0.1, 12), wall_aim)
+	before = rounds.call()
+	await _seconds(SquadAI.NO_SHOT_MOVE_S - 0.3)
+	var held: int = rounds.call()
+	var blocked := ai._no_shot_since >= 0.0
+	check(held == before and blocked and _flat(s.global_position, Vector3(-10, 0, 12)) < 1.5,
+		"Suppress a point behind the compound wall: not one round into the wall while he holds there (%d -> %d, no shot %s, %s)" % [before, held, blocked, s.ai_status])
+	var moved := await _wait_until(func() -> bool: return ai._fire_spot != null, 3.0)
+	var spot: Vector3 = ai._fire_spot if moved else Vector3.INF
+	var spot_ok: bool = moved and ai._fire_line_from(Vector3(spot.x, 0.1, spot.z) + Vector3.UP * (SquadAI.FIRE_EYE_STAND_M if ai._fire_spot_stand else SquadAI.FIRE_EYE_CROUCH_M),
+		wall_aim + Vector3.UP, SquadAI.FIRE_LINE_SLACK_M) and _flat(spot, Vector3(-10, 0, 12)) <= SquadAI.FIRE_SPOT_RINGS[-1] + 1.0
+	check(spot_ok, "no line for %.1f s: he picks a fire position with one, close by (%s)" % [SquadAI.NO_SHOT_MOVE_S, spot])
+	# Every round from here on leaves along a clear line, and some do once he's there.
+	var into_wall := 0
+	var shots := 0
+	var last: int = rounds.call()
+	var left := 12.0
+	while left > 0.0 and shots < 3:
+		await _physics_frames(2)
+		left -= 2.0 / Engine.physics_ticks_per_second
+		var now_rounds: int = rounds.call()
+		if now_rounds < last:
+			shots += last - now_rounds
+			if not ai._fire_line_from(s.camera.global_position, wall_aim + Vector3.UP, SquadAI.FIRE_LINE_SLACK_M + SquadAI.SUPPRESS_SPREAD_M * 1.5):
+				into_wall += last - now_rounds
+		last = now_rounds
+	check(shots > 0 and into_wall == 0 and spot_ok and _flat(s.global_position, spot) < 2.0,
+		"he goes there and suppresses from it: %d round(s), %d with the wall in the way (%.1f m from the spot, %s)" % [shots, into_wall,
+			_flat(s.global_position, spot) if spot_ok else -1.0, s.ai_status])
+	# In the north-west corner, the north wall in the way and nowhere near with a line: he holds fire.
+	var corner_aim := Vector3(-14, 0, -70)
+	trial.call(Vector3(-14, 0.1, -16), corner_aim)
+	before = rounds.call()
+	await _seconds(SquadAI.NO_SHOT_MOVE_S + 1.5)
+	check(rounds.call() == before and ai._fire_spot == null and ai._fire_spot_at > 0.0 and s.ai_status == "No shot"
+		and _flat(s.global_position, Vector3(-14, 0, -16)) < 1.5,
+		"in the corner with no fire position near: he holds fire where he is (%d -> %d, %s)" % [before, rounds.call(), s.ai_status])
+	ai.give_tactic({})
+	ai._fire_spot = null
+	squad.give_order(player, Squad.Order.FOLLOW, player.global_position)
+	player.global_transform = saved_player
 	_clear_contact()
 
 
