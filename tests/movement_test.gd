@@ -47,6 +47,7 @@ func _ready() -> void:
 	_test_fire_modes()
 	await _test_momentum()
 	await _test_falls()
+	await _test_teleport_off_platform()
 	await _test_stamina()
 	await _test_load_tiers()
 	_test_directions()
@@ -369,6 +370,55 @@ func _test_falls() -> void:
 	player.vitals.server_reset_health()
 	player.global_position = SPOT
 	await _frames(2)
+
+
+## CI run 38666966001: a body stood on something turning (a dead man's limb) and was then
+## moved by the game far away; move_and_slide took the old floor's velocity at the new spot,
+## its spin times the distance, and launched it 1420 m up. Moved, it starts without that floor
+## (SoldierMovement._slide).
+func _test_teleport_off_platform() -> void:
+	print("Moved off something turning")
+	var deck := RigidBody3D.new()
+	deck.collision_layer = 1
+	deck.gravity_scale = 0.0
+	deck.can_sleep = false
+	deck.angular_damp_mode = RigidBody3D.DAMP_MODE_REPLACE
+	deck.angular_damp = 0.0
+	deck.mass = 500.0
+	var shape := CollisionShape3D.new()
+	shape.shape = BoxShape3D.new()
+	(shape.shape as BoxShape3D).size = Vector3(3, 0.3, 3)
+	deck.add_child(shape)
+	level.add_child(deck)
+	deck.global_position = SPOT + Vector3(0, 20, 30)  # up in the open, 36 m from SPOT
+	deck.angular_velocity = Vector3(0, 3.0, 0)
+	player.global_position = deck.global_position + Vector3(0.8, 0.2, 0)  # off its axis: carried round
+	player.velocity = Vector3.ZERO
+	var on_deck := false
+	for i in 60:
+		await get_tree().physics_frame
+		move.step(get_physics_process_delta_time())
+		var hit := player.get_last_slide_collision()
+		on_deck = player.is_on_floor() and hit != null and hit.get_collider() == deck
+		if on_deck and i > 5:
+			break
+	check(on_deck and player.get_platform_velocity().length() > 0.0, "stood on a deck turning at 3 rad/s (platform %s)" % player.get_platform_velocity())
+	player.global_position = SPOT
+	player.velocity = Vector3.ZERO
+	var furthest := 0.0
+	var fastest := 0.0
+	for i in 10:
+		await get_tree().physics_frame
+		move.step(get_physics_process_delta_time())
+		furthest = maxf(furthest, player.global_position.distance_to(SPOT))
+		fastest = maxf(fastest, player.velocity.length())
+	check(furthest < 0.5 and fastest < 5.0, "moved 36 m away, the deck doesn't fling the body: it stays put (%.2f m off, %.1f m/s at most)" % [furthest, fastest])
+	deck.free()
+	player.global_position = SPOT
+	player.velocity = Vector3.ZERO
+	for i in 5:
+		await get_tree().physics_frame
+		move.step(get_physics_process_delta_time())
 
 
 ## Puts the player `height` metres up over SPOT and steps them until they land.

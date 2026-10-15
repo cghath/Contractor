@@ -160,6 +160,7 @@ var _winded := false
 var _exerting := false    # sprinting, jumping or moving under an extreme load (report_exertion)
 var _air_top := -INF      # highest point since leaving the ground (_track_fall)
 var _last_y := 0.0
+var _slid_at := Vector3.ZERO  # where the last move_and_slide left the body (_slide)
 var _before_prone: int = Stance.STAND_HIGH
 var _lean_held := 0       # the lean key held now
 var _lean_latched := 0    # double-tapped: stays leaned
@@ -254,7 +255,7 @@ func step(delta: float) -> void:
 	var after := next_velocity(before, target, delta, body.is_on_floor(), not body.is_ai())
 	body.velocity.x = after.x
 	body.velocity.z = after.z
-	body.move_and_slide()
+	_slide()
 	if not down and target != Vector3.ZERO:
 		_climb_bodies(Vector3(after.x, 0.0, after.z), delta)
 	_track_fall()
@@ -264,6 +265,28 @@ func step(delta: float) -> void:
 	if mounted and (input != Vector2.ZERO or after.length() > MOUNT_MAX_SPEED or not body.is_on_floor() or not _has_weapon_up()):
 		mounted = false
 	update_pose(delta)
+
+
+## move_and_slide, without the floor it stood on when the game has moved the body since its
+## last step (placed, respawned, out of a seat, put back on the ground: more than TELEPORT_M).
+## The body keeps that floor as its platform and move_and_slide takes the platform's velocity
+## at the body's new spot: its spin times the distance moved, which a ragdoll's limb still
+## turning a little turns into a launch (CI run 38666966001: the loop's player, stood on a
+## dead guard's forearm, put at a landing zone 1 km off, went up at 1360 m/s, 1420 m high a
+## moment later). For that one step no platform counts (platform layers 0): no carry, no
+## velocity added on leaving it; the step finds the floor under the new spot.
+func _slide() -> void:
+	var moved := body.global_position.distance_to(_slid_at) > TELEPORT_M
+	var floor_layers := body.platform_floor_layers
+	var wall_layers := body.platform_wall_layers
+	if moved:
+		body.platform_floor_layers = 0
+		body.platform_wall_layers = 0
+	body.move_and_slide()
+	if moved:
+		body.platform_floor_layers = floor_layers
+		body.platform_wall_layers = wall_layers
+	_slid_at = body.global_position
 
 
 ## Owner-side: the highest point since leaving the ground; on landing, a drop of
