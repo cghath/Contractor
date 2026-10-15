@@ -111,6 +111,12 @@ static func generate(rng: RandomNumberGenerator, ctx: Dictionary) -> Dictionary:
 		var fits := type_ids.filter(func(t: String) -> bool: return ZoneModules.base(at_type) in MissionRegistry.type_modules(MissionRegistry.type_def(t)))
 		if not fits.is_empty():
 			type_ids = fits
+	if ctx.has("avoid_modules") and ctx.get("type", "") == "":
+		# A hot zone's live contracts each hold a site of their own: the scenario types that are
+		# not tied to a site (convoy, crew rescue, recon) stay off the board there.
+		var sited := type_ids.filter(func(t: String) -> bool: return String(MissionRegistry.type_def(t).get("scenario", "")) not in [ScenarioGen.CONVOY, ScenarioGen.RESCUE, ScenarioGen.RECON])
+		if not sited.is_empty():
+			type_ids = sited
 	if type_ids.is_empty():
 		type_ids = MissionRegistry.types()
 	var type_id: String = type_ids[rng.randi() % type_ids.size()]
@@ -216,7 +222,7 @@ static func mission_target(rng: RandomNumberGenerator, def: Dictionary, zone_id:
 	var pick := RandomNumberGenerator.new()
 	pick.seed = hash([rng.state, "mission"])
 	if def.has("scenario"):  # convoy, defend, rescue, recon: ScenarioGen builds the objectives with their positions
-		return ScenarioGen.build(pick, def, zone_id, target)
+		return ScenarioGen.build(pick, def, zone_id, target, at_module, avoid)
 	var allowed := MissionRegistry.type_modules(def)
 	var module_type: String = String(allowed[0]) if not allowed.is_empty() else ""
 	var module_id := ""
