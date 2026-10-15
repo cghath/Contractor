@@ -18,6 +18,22 @@
 			"insertion": [[-120, 780], [780, -600]],
 			"extraction": [[-700, -700], [360, 720], [720, -120]]
 		},
+		"forest_experimental": {
+			"_note": "Captain, 2026-10-14 (\"include experimental forest mission like we dev'd\", \"make it a button on the menu, not a regular mission\"): EXPERIMENTAL. The denser woods (terrain forest_experimental: copses as cover, thickets, the woods' edge belt) on their own, hosted only from the main menu's Test zones button (Menu.host_forest_zone, a stand-in raid briefing); never in the campaign (not in data/contracts.json zones, so never on the board). 2.56 km a side, rolling hills, a village, a compound and a checkpoint in their clearings (pads keep the trees off), a few roads. Layout Proposed.",
+			"name": "Experimental forest (test)",
+			"size_m": 2560,
+			"seed": 8819,
+			"relief_m": 22,
+			"terrain": "forest_experimental",
+			"modules": [
+				{"id": "village", "type": "village", "pos": [-384, 312]},
+				{"id": "compound", "type": "compound", "pos": [348, -288]},
+				{"id": "checkpoint", "type": "checkpoint", "pos": [-36, -24]}
+			],
+			"roads": [[[-1236, 312], [-384, 312]], [[-384, 312], [-36, -24]], [[-36, -24], [348, -288]], [[-36, -24], [-36, -1236]]],
+			"insertion": [[1235, 840], [-1235, -600]],
+			"extraction": [[840, 1235], [-1235, 900], [1235, -900]]
+		},
 		"coast": {
 			"_note": "Wave 5b (V4): a contract zone on the coast, for the AAV support's tests and the debug path (--zone coast). Its sea is the terrain preset's (amphibious_coast: 360 m of water, 14 m deep at the edge; ZoneDef picks the side), and the second insertion and extraction points sit by the north, west and east edges so the south is the only side it can pick. \"coast\": the company's LHD lies offshore lhd_m from the sea's edge, lhd_along_m along it (Lhd).",
 			"name": "Coast test zone",
