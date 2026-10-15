@@ -697,7 +697,7 @@ func _test_edge_rules() -> void:
 	why = ext.server_confirm(1)
 	check(why == "" and ext.state == Extraction.State.COUNTDOWN, "at LZ South (the edge) it starts the countdown (%s)" % why)
 	_place(player, Vector3(0, 0.1, 0))
-	await _frames(3)
+	await _wait_for(func() -> bool: return ext.state == Extraction.State.ACTIVE, 2.0)  # (a physics tick: CI's frames can be quicker)
 	check(ext.state == Extraction.State.ACTIVE, "walking off stops it")
 	# Driving out.
 	var mate: Soldier = MapNodes.squad_ai(level)[0]
