@@ -205,6 +205,7 @@ func _build_squad(rows: VBoxContainer, v: Dictionary) -> void:
 	buttons.add_child(_button("Save campaign", func() -> void: BaseHub.request("save")))
 	rows.add_child(buttons)
 	_add_restock_row(rows)
+	rows.add_child(_loadouts_button())
 
 
 ## S0743 (restock left the medic short silently): what someone's last restock couldn't give
@@ -320,6 +321,7 @@ func _build_shop(rows: VBoxContainer, v: Dictionary) -> void:
 
 func _build_armory(rows: VBoxContainer, v: Dictionary) -> void:
 	rows.add_child(_text("The company stash lies in the armory: pick up what you need, drop what you bring back. Anything left in the base counts."))
+	rows.add_child(_loadouts_button())
 	var counts := BaseArmory.counts(v.get("stash", []))
 	var ids := counts.keys()
 	ids.sort()
@@ -338,6 +340,25 @@ func _build_armory(rows: VBoxContainer, v: Dictionary) -> void:
 
 
 # --- Bits ------------------------------------------------------------------------------------
+
+## The loadout menu (Captain, 2026-10-14: "a menu for equipping yourself better and your
+## squadmates how you want to"): this screen steps aside while it's up and comes back after.
+func _loadouts_button() -> Button:
+	var b := _button("Loadouts: kit yourself and the squad from the stash", _open_loadouts)
+	b.name = "Loadouts"
+	b.tooltip_text = "Paper doll for you and each squadmate: weapons, optics, armour, pack, ammo, meds, grenades; standing loadouts for Restock"
+	return b
+
+
+func _open_loadouts() -> void:
+	var screen := BaseHub.open_loadout()
+	if screen == null:
+		return
+	visible = false
+	screen.closed.connect(func() -> void:
+		if is_inside_tree():
+			open(page))
+
 
 func _role_picker(mid: String, current: StringName) -> OptionButton:
 	var picker := OptionButton.new()
