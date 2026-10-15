@@ -95,6 +95,7 @@ const ROAD_WEIGHT := 0.5
 const HEADING_STEP_M := 2.0
 ## A slot behind a wall from where its team forms comes this far back off the wall (_this_side).
 const WALL_CLEAR_M := 1.0
+const SIDE_HOLD_S := 2.0
 const HEADING_BLEND := 0.5
 
 @export var faction := &"friendly"
@@ -113,6 +114,7 @@ var _heading_from := Vector3.INF
 var _context_cd := 0.0
 var _slots := {}  # Soldier -> its formation slot, worked out once a physics frame
 var _slots_frame := -1
+var _sides := {}  # slot key -> {"pulled", "since", "offset"} (_this_side)
 ## Hostile squads: points to walk between when nothing is happening.
 var patrol: Array[Vector3] = []
 ## When a member was last fired upon (Soldier._now() seconds).
@@ -981,7 +983,7 @@ func _work_out_slots() -> Dictionary:
 				if _flat(NavigationServer3D.map_get_closest_point(map, other), other) < _flat(NavigationServer3D.map_get_closest_point(map, origin), origin):
 					origin = other
 					mirror = -mirror
-			origin = _this_side(leader.global_position, origin)
+			origin = _this_side(leader.global_position, origin, t)
 			for s: Soldier in list:
 				if s.vitals.is_up():
 					guide = s
@@ -1005,7 +1007,7 @@ func _work_out_slots() -> Dictionary:
 			if guide != null:
 				local -= g_local
 				base = guide.global_position if on_guide and k != guide_k else origin
-			var p := _this_side(base, base + right * local.x - fwd * local.z)
+			var p := _this_side(base, base + right * local.x - fwd * local.z, s)
 			out[s] = NavigationServer3D.map_get_closest_point(map, p) if map.is_valid() else p
 	out.erase(leader)
 	return out
@@ -1014,16 +1016,30 @@ func _work_out_slots() -> Dictionary:
 ## `to`, or with a wall or building between it and `from` (where its team forms), the near side
 ## of that: a slot is never across a wall from the lead (Captain, 2026-10-14: with wider
 ## spacing, slots fell inside compounds the lead walked past, and men went round for them).
-func _this_side(from: Vector3, to: Vector3) -> Vector3:
-	if from.distance_to(to) < 0.5:
-		return to
-	var query := PhysicsRayQueryParameters3D.create(from + Vector3.UP, to + Vector3.UP, SquadAI.WORLD_MASK)
-	var hit := leader.get_world_3d().direct_space_state.intersect_ray(query)
-	if hit.is_empty():
-		return to
-	var back := Vector3(from.x - to.x, 0.0, from.z - to.z).normalized()
-	var at: Vector3 = hit.position
-	return Vector3(at.x, to.y, at.z) + back * WALL_CLEAR_M
+## Each slot (`key`) keeps its side for SIDE_HOLD_S: walking past a doorway, the line through it
+## opens and shuts, and a slot flipping between the room and the near side of its wall had a
+## man running in and out (casualty soak, Charlie in the compound's building).
+func _this_side(from: Vector3, to: Vector3, key: Variant) -> Vector3:
+	var now := Soldier._now()
+	var was: Dictionary = _sides.get(key, {})
+	var pulled := false
+	var point := to
+	if from.distance_to(to) >= 0.5:
+		var query := PhysicsRayQueryParameters3D.create(from + Vector3.UP, to + Vector3.UP, SquadAI.WORLD_MASK)
+		var hit := leader.get_world_3d().direct_space_state.intersect_ray(query)
+		if not hit.is_empty():
+			pulled = true
+			var back := Vector3(from.x - to.x, 0.0, from.z - to.z).normalized()
+			var at: Vector3 = hit.position
+			point = Vector3(at.x, to.y, at.z) + back * WALL_CLEAR_M
+	if was.is_empty() or bool(was.pulled) == pulled or now - float(was.since) >= SIDE_HOLD_S:
+		if was.is_empty() or bool(was.pulled) != pulled:
+			was = {"pulled": pulled, "since": now}
+		was.offset = point - from
+		_sides[key] = was
+		return point
+	# Held to the side it was on.
+	return from + (was.offset as Vector3) if bool(was.pulled) else to
 
 
 static func _flat(a: Vector3, b: Vector3) -> float:

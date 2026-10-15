@@ -308,6 +308,9 @@ const ESCORT_SCORE := 0.75
 const ESCORT_GUARD_M := 1.8
 ## The escort leading him waits for him beyond this.
 const ESCORT_WAIT_M := 4.0
+## Proposed (casualty suite, 2026-10-14: hit while bounding to cover, a squadmate started his
+## own tourniquet at a run and lost it): self-treatment starts once he's below this speed.
+const SELF_CARE_STILL_MPS := 2.0
 ## The escort leading him keeps this close to the lead, from his side (proposed; Captain,
 ## 2026-10-14: formation slots are wider now, and the HVT stays with the lead, not out on a
 ## wing or at the back of the second fire team).
@@ -2399,6 +2402,8 @@ func _do_self_care() -> void:
 	body.want_crouch = true
 	if _being_treated() or _treat_until >= 0.0 or Soldier._now() < body._busy_until:
 		return
+	if Vector2(body.velocity.x, body.velocity.z).length() > SELF_CARE_STILL_MPS:
+		return  # still running from a bound: a treatment started on the move is lost ("you moved")
 	var task := _self_task()
 	if not task.is_empty():
 		_start_treatment(body, task)

@@ -743,7 +743,7 @@ func _test_soak() -> void:
 				var ai := SquadAI.of(s)
 				stuck[who] = "%s at %s (%s) slot %s dest %s path %d/%d next %s input %s vel %s lead %s" % [who, s.global_position, s.ai_status, squad.follow_point(s),
 					ai._destination, ai._path_index, ai._path.size(), ai._path[ai._path_index] if ai._path_index < ai._path.size() else Vector3.INF,
-					s.move_input, s.velocity, player.global_position]
+					s.move_input, s.velocity, player.global_position] + " path %s; last %s" % [ai._path, list.slice(-STUCK_WINDOW_S).map(func(v: Vector3) -> String: return "(%.1f, %.1f)" % [v.x, v.z])]
 	var walked := _sim_s
 	await _seconds(12.0)  # let them settle in formation at the end
 	var settled := _squad().filter(func(s: Soldier) -> bool: return _flat(s.global_position, squad.follow_point(s)) > 4.0)
@@ -991,6 +991,9 @@ func _test_dead_bodies() -> void:
 	if not carried:
 		print("    squad: %s" % [_squad().map(func(s: Soldier) -> String: return "%s %s %s/%s contact %s" % [s.name, s.ai_status,
 			SquadAI.Intent.keys()[SquadAI.of(s).intent], SquadAI.Care.keys()[SquadAI.of(s).care], SquadAI.of(s).in_contact()])])
+		var a0 := SquadAI.of(_squad()[0])
+		print("    body at %s; dest %s; carer %s; bearer %s; can bear %s; quiet %s" % [echo.body_point(), a0._body_destination(echo.body_point()), SquadAI._carer_of(echo), a0._bearer_for(echo),
+			_squad().map(func(s: Soldier) -> bool: return SquadAI.of(s)._can_bear(echo)), _squad().map(func(s: Soldier) -> float: return Soldier._now() - SquadAI.of(s)._last_contact)])
 	_place(player, Vector3(-12, 0.1, 4))
 	var laid_there := func() -> bool: return _flat(echo.global_position, ccp_at) < SquadAI.BODY_THERE_M + 1.0 and not is_instance_valid(echo.carried_by)
 	var along := await _wait_until(laid_there, 40.0)

@@ -14,7 +14,7 @@ extends Node
 ## How much faster than real time the walk runs, and the lead's pace (a walk).
 const SCALE := 3.0
 const LEADER_SPEED := 2.0
-## Closer than this two squadmates count as stacked on each other.
+## Closer than this two squadmates, two samples (seconds) running, count as stacked.
 const STACK_M := 1.5
 ## Squadmates further than this from their formation spot are still getting there: not judged.
 const SETTLING_M := 12.0
@@ -26,6 +26,7 @@ var _route := PackedVector3Array()
 var _route_index := 0
 var _sim_s := 0.0
 var _paused_until := -1.0
+var _close_before := {}  # pairs closer than STACK_M at the last sample
 
 
 func _ready() -> void:
@@ -198,11 +199,17 @@ func _measure() -> Dictionary:
 		nn.append(best)
 		if _flat(s.global_position, player.global_position) < STACK_M:
 			on_lead += 1
+	# Stacked: still that close a second later (two passing each other aren't stacked).
 	var stacked := 0
+	var close := {}
 	for i in judged.size():
 		for j in range(i + 1, judged.size()):
 			if _flat(judged[i].global_position, judged[j].global_position) < STACK_M:
-				stacked += 1
+				var key := "%s|%s" % [judged[i].name, judged[j].name]
+				close[key] = true
+				if _close_before.has(key):
+					stacked += 1
+	_close_before = close
 	var centres := [Vector3.ZERO, Vector3.ZERO]
 	var counts := [0, 0]
 	for s in up:
