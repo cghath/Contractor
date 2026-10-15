@@ -53,10 +53,10 @@ func _test_settings() -> void:
 	GameSettings.use_file(file)
 	check(GameSettings.settings_path() == file, "on a settings file of its own (%s), never the player's" % GameSettings.settings_path())
 	var base := 0.0025
-	check(is_equal_approx(GameSettings.fov(), 80.0) and is_equal_approx(GameSettings.mouse_turn(base, false), base)
+	check(is_equal_approx(GameSettings.fov(), 90.0) and absf(GameSettings.view_fov() - 58.72) < 0.01 and is_equal_approx(GameSettings.mouse_turn(base, false), base)
 		and is_equal_approx(GameSettings.mouse_turn(base, true), base * 0.75) and not GameSettings.invert_y(),
-		"defaults: 80 deg view, sensitivity 1x, 0.75x down sights, not inverted")
-	GameSettings.set_value("video", "fov", 95.0)
+		"defaults: 90 deg across 16:9 (58.7 vertical), sensitivity 1x, 0.75x down sights, not inverted")
+	GameSettings.set_value("video", "hfov", 95.0)
 	GameSettings.set_value("controls", "mouse_sensitivity", 1.5)
 	GameSettings.reload()
 	var cfg := ConfigFile.new()

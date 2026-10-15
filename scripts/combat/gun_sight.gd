@@ -15,8 +15,8 @@ extends Control
 ##   centre dot, crosshair with mil hashes, heavy posts), "chevron" (a lit chevron and its BDC
 ##   holds, "bdc") or "mil_dot".
 ## Power (Captain, 2026-10-13) is against the player's own unaimed view: 10x makes things ten
-## times bigger than the base field of view shows them (its tangent over 10: about 9.5 degrees
-## at the default 80), the same rule for every magnified optic; at 1x the weapon's ads_fov, or
+## times bigger than the base field of view shows them (its tangent over 10: about 6.4 degrees
+## at the default 58.7 vertical, 90 across 16:9), the same rule for every magnified optic; at 1x the weapon's ads_fov, or
 ## an open 1x optic's own wider "ads_fov" (red dot, holo; Captain, 2026-10-14: aimed through a
 ## red dot it still looked big, the M4's 50 degrees drawing it twice its size at the hip, so a
 ## 1x sight zooms in a little less).
@@ -142,7 +142,7 @@ static func scoped(s: Soldier) -> bool:
 	if view_of(optic) != "tube" and not magnifier:
 		return false
 	var lowest := float(optic.stats.magnifier) if magnifier else zoom_range(optic).x
-	return s.camera.fov <= aimed_fov(s.active_weapon(), GameSettings.fov(), lowest, optic) * SCOPE_IN
+	return s.camera.fov <= aimed_fov(s.active_weapon(), GameSettings.view_fov(), lowest, optic) * SCOPE_IN
 
 
 ## Zoom in (`steps` > 0) or out on the optic in hand: a magnifier flips up on zoom in and down
@@ -174,7 +174,7 @@ static func zoom_step(s: Soldier, steps: int) -> String:
 static func zoom_turn(s: Soldier) -> float:
 	if not scoped(s):
 		return 1.0
-	var ads := aimed_fov(s.active_weapon(), GameSettings.fov(), 1.0, optic_of(s))
+	var ads := aimed_fov(s.active_weapon(), GameSettings.view_fov(), 1.0, optic_of(s))
 	return minf(tan(deg_to_rad(s.camera.fov * 0.5)) / tan(deg_to_rad(ads * 0.5)), 1.0)
 
 

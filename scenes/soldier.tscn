@@ -296,7 +296,7 @@ script = ExtResource("5_model")
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.65, 0)
 
 [node name="Camera" type="Camera3D" parent="Head"]
-fov = 80.0
+fov = 58.72
 near = 0.03
 
 [node name="ViewModel" type="Node3D" parent="Head/Camera"]
