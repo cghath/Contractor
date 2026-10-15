@@ -1165,8 +1165,8 @@ func _test_presets() -> void:
 func _test_ship_placement() -> void:
 	print("Ships anchored offshore")
 	var defs := {}
-	for z: Dictionary in Missions.zones():
-		var d := Missions.zone_def(String(z.zone_id))
+	for z: Dictionary in MissionRegistry.zones():
+		var d := MissionRegistry.zone_def(String(z.zone_id))
 		if not d.is_empty():
 			defs[String(z.zone_id)] = d
 	for id: String in ZoneDef.ids():
