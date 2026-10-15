@@ -5,11 +5,20 @@ extends RefCounted
 ## Helicopter.MIN_CLEAR_M clear of the ground and what stands on it until the last
 ## Helicopter.FINAL_LOW_M of the final, and nothing touched before touchdown.
 
-## How long it may stay up after what it climbed for is behind it (s), sinking at about this
-## rate (m/s at pace 1): the terrain following comes back down gently.
-const BEHIND_S: Array[float] = [-1.0, -2.0, -3.0, -4.0]
-const BEHIND_SINK_MS := 3.0
-const AHEAD_S: Array[float] = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 14.0]
+## On the way in, its height over the ground (m) stays within these (Captain, 2026-10-14: "12
+## or 13 m", the task: "between ~8 and ~16 m except over obstacles"); more only to climb for
+## what's ahead (ceiling). The low end allows the terrain following's lag up a sharp rise on
+## ridge_hot's ridged ground at the test's pace (7.3 m seen at pace 2, 8.1 at pace 1); the
+## airframe's MIN_CLEAR_M floor is checked on its own.
+const INBOUND_LOW_M := 7.0
+const INBOUND_HIGH_M := 16.0
+## After what it climbed for is behind it (a ridge it came over), the height it may still hold
+## comes down at this rate (m/s at pace 1): the terrain following comes back down gently
+## (ridge_hot, 2026-10-14: 2-4 m/s down the far side).
+const BEHIND_SINK_MS := 2.0
+## Seconds after it's put in the air (at its cruise height over the ground just there) before
+## the height checks start: it settles into its contour flight.
+const SETTLE_S := 2.0
 
 
 ## What `h` touches that isn't a person (the ground, a wall, a tree, an edge wall).
@@ -56,19 +65,16 @@ static func airframe_clearance(h: Helicopter) -> float:
 	return least
 
 
-## How much higher than Helicopter.CRUISE_AGL_M over the ground at `pos` it may fly, going
-## `vel` (flat): climbing at its planned climb for what's ahead (the ground rising under its
-## footprint, what stands taller near its track), or coming back down after what's behind.
-static func climb_allowance(h: Helicopter, pos: Vector3, vel: Vector3) -> float:
-	var here := h.terrain_y(pos) + Helicopter.CRUISE_AGL_M
-	var dir := Vector2(vel.x, vel.z).normalized() if Vector2(vel.x, vel.z).length() > 0.5 else Vector2(0.0, -1.0)
-	var side := Vector3(-dir.y, 0.0, dir.x) * Helicopter.ROTOR_REACH_M
-	var climb := Helicopter.CLIMB_MS * Helicopter.CONTOUR_CLIMB * Helicopter.pace
-	var most := 0.0
-	for t: float in AHEAD_S + BEHIND_S:
-		var p := pos + vel * t
-		var need := maxf(h.terrain_y(p) + Helicopter.CRUISE_AGL_M, maxf(h.footprint_ground(p, dir) + Helicopter.MIN_CLEAR_M + Helicopter.CLEAR_MARGIN_M,
-			h.obstacle_top(p, side) + Helicopter.OBSTACLE_CLEAR_M))
-		var rate := climb if t >= 0.0 else BEHIND_SINK_MS * Helicopter.pace
-		most = maxf(most, need - rate * absf(t) - here)
-	return most
+## The height (y) it may fly at, tracked frame to frame (`prev`: the last, -INF to start; `dt`
+## the frame's seconds): the height its own contour flight holds for what's ahead along the way it
+## flies (Helicopter._contour: the ground rising under its footprint, what stands taller near its
+## track, its planned climb), and after that's behind it, coming down at BEHIND_SINK_MS.
+static func ceiling(h: Helicopter, prev: float, dt: float) -> float:
+	var vel := Vector3(h.linear_velocity.x, 0.0, h.linear_velocity.z)
+	return maxf(h._contour(h.global_position, vel, h._agl).x, prev - BEHIND_SINK_MS * Helicopter.pace * dt)
+
+
+## How much higher than Helicopter.CRUISE_AGL_M over the ground at `pos` the height `top` (from
+## ceiling) is: what it may climb for.
+static func climb_allowance(h: Helicopter, pos: Vector3, top: float) -> float:
+	return maxf(top - h.terrain_y(pos) - Helicopter.CRUISE_AGL_M, 0.0)

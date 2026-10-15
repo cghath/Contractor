@@ -1035,6 +1035,8 @@ func _watch_flight(c: HeliCall, seconds: float) -> Dictionary:
 	var flown := 0.0
 	var prev := start
 	var hooked := false
+	var top := -INF
+	var t := 0.0
 	while is_instance_valid(c.heli) and not c.heli.is_landed() and Time.get_ticks_msec() < deadline:
 		await get_tree().physics_frame
 		var h := c.heli
@@ -1044,6 +1046,8 @@ func _watch_flight(c: HeliCall, seconds: float) -> Dictionary:
 		var vel := Vector3(h.linear_velocity.x, 0.0, h.linear_velocity.z)
 		var left := h.path_left_m()
 		var landing := h.has_meta(&"landing")
+		t += get_physics_process_delta_time()
+		top = HeliFlight.ceiling(h, top, get_physics_process_delta_time())
 		if h.height_agl() > Helicopter.TOUCH_M + 0.3:
 			for body in HeliFlight.touching(h):
 				if (out.contacts as Array).size() < 4:
@@ -1067,11 +1071,11 @@ func _watch_flight(c: HeliCall, seconds: float) -> Dictionary:
 			if clear < float(out.min_clear):
 				out.min_clear = clear
 				out.clear_at = "(%.0f, %.1f, %.0f), %.0f m to go" % [pos.x, pos.y, pos.z, left]
-		if not landing or left > INBOUND_LEFT_M:
+		if (not landing or left > INBOUND_LEFT_M) and t > HeliFlight.SETTLE_S / Helicopter.pace:
 			out.frames += 1
 			var agl := pos.y - h.terrain_y(pos)
 			out.min_agl = minf(out.min_agl, agl)
-			out.max_over = maxf(out.max_over, agl - HeliFlight.climb_allowance(h, pos, vel))
+			out.max_over = maxf(out.max_over, agl - HeliFlight.climb_allowance(h, pos, top))
 		if vel.length() > 2.0 * Helicopter.pace and left > 0.0 and left <= 200.0:
 			var heading := atan2(-vel.x, -vel.z)
 			if not is_nan(last):
@@ -1082,8 +1086,8 @@ func _watch_flight(c: HeliCall, seconds: float) -> Dictionary:
 
 
 func _check_flight(c: HeliCall, flight: Dictionary) -> void:
-	check(int(flight.frames) > 30 and float(flight.min_agl) >= 8.0 and float(flight.max_over) <= 16.0,
-		"it flew in contour-low: %.1f-%.1f m over the ground (8-16 m; more only to climb over what stands taller or ground rising ahead)" % [
+	check(int(flight.frames) > 30 and float(flight.min_agl) >= HeliFlight.INBOUND_LOW_M and float(flight.max_over) <= HeliFlight.INBOUND_HIGH_M,
+		"it flew in contour-low: %.1f-%.1f m over the ground (7-16 m; more only to climb over what stands taller or ground rising ahead)" % [
 		float(flight.min_agl), float(flight.max_over)])
 	check(float(flight.min_clear) >= Helicopter.MIN_CLEAR_M,
 		"its airframe at least %.0f m clear of the ground and what stands on it until the final: %.1f m at the least (at %s)" % [

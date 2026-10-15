@@ -444,6 +444,11 @@ func server_start_airborne(speed_kmh := CRUISE_KMH * 0.5) -> void:
 	_heading = Helicopter.yaw_of(self)
 	linear_velocity = -global_basis.z * speed_kmh / 3.6 * pace
 	mode = Mode.FLYING
+	# Never put in the air lower than its contour flight holds there (Captain, 2026-10-14, the
+	# bump on infil: put in at cruise height over the ground just there, it met ground rising
+	# ahead before it could climb).
+	if is_inside_tree():
+		global_position.y = maxf(global_position.y, _contour(global_position, Vector3(linear_velocity.x, 0.0, linear_velocity.z), CRUISE_AGL_M).x)
 	_target = global_position
 	_publish_flight()
 
@@ -705,8 +710,11 @@ func _contour(pos: Vector3, vel_h: Vector3, agl: float) -> Vector2:
 		if y > want:
 			want = y
 			binding = t
-	# Held to a point ahead, the height to hold rises as it comes on: at the planned climb.
-	return Vector2(want, next - now if binding == 0.0 else climb)
+	# Held to a point ahead, the height to hold rises as it comes on: at the planned climb (only
+	# once it's down to that height: higher, it comes down to it first).
+	if binding == 0.0:
+		return Vector2(want, next - now)
+	return Vector2(want, climb if pos.y < want + 1.0 else 0.0)
 
 
 ## Metres it can rise in `t` seconds from a vertical speed of `vy` (m/s), getting to `climb`
@@ -753,15 +761,17 @@ func _ahead(pos: Vector3, vel_h: Vector3, s: float) -> Array:
 ## of the J-hook from the LZ there (INF: not landing): `agl` over the ground below; MIN_CLEAR_M
 ## (and CLEAR_MARGIN_M) over the highest ground under its footprint; OBSTACLE_CLEAR_M over what
 ## stands on it under the rotor. Landing, it comes down the glide slope (GLIDE) to hover height
-## over the spot, never below the ground's own slope down to it; in the last FINAL_LOW_M of the
-## final the clearances taper to nothing at the spot (Captain, 2026-10-14).
+## over the spot once that's below its cruise over the ground there (an LZ up on a rise doesn't
+## hold it high all the way in), never below the ground's own slope down to it; in the last
+## FINAL_LOW_M of the final the clearances taper to nothing at the spot (Captain, 2026-10-14).
 func _need_y(at: Vector3, dir: Vector2, left: float, agl: float) -> float:
 	var ground := terrain_y(at)
 	var want := ground + agl
 	var clear := MIN_CLEAR_M + CLEAR_MARGIN_M
 	var over := OBSTACLE_CLEAR_M
 	if left < INF:
-		want = maxf(ground + clampf(left * GLIDE, 0.0, agl), _target.y + clampf(left * GLIDE, HOVER_AGL_M, maxf(agl, HOVER_AGL_M)))
+		var slope := _target.y + maxf(left * GLIDE, HOVER_AGL_M)  # the glide slope up from the spot
+		want = maxf(ground + clampf(left * GLIDE, 0.0, agl), minf(want, slope))
 		if left < FINAL_LOW_M:
 			clear *= left / FINAL_LOW_M
 			over *= left / FINAL_LOW_M

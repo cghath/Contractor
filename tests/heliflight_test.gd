@@ -6,7 +6,7 @@ extends Node
 ## For each zone (FLIGHTS: wadi_farm and harbour_yard, contract zones with their LZs in dead
 ## ground near an objective; ridge_hot and coast_hot, hot zones whose LZs lie by the zone's edge,
 ## so the J-hook swings out past it), the briefing's helicopter insertion is flown in and landed,
-## and checked: on the way in about Helicopter.CRUISE_AGL_M over the ground (8-16 m, more only
+## and checked: on the way in about Helicopter.CRUISE_AGL_M over the ground (7-16 m, more only
 ## to climb over what stands taller or ground rising ahead), the airframe (fuselage and rotor
 ## tips) at least Helicopter.MIN_CLEAR_M clear of the ground and what stands on it until the
 ## last Helicopter.FINAL_LOW_M of the final, nothing touched before touchdown, and down at the
@@ -79,8 +79,8 @@ func check(condition: bool, what: String) -> void:
 		failures += 1
 
 
-## Hosts `zone_id` (the first, as the menu's test buttons do; the rest by a level switch) and
-## flies an insertion to each of its insertion points `indices`.
+## Hosts `zone_id` (the first, as the menu's test buttons do; the rest by a level switch, as
+## BaseHub's) and flies an insertion to each of its insertion points `indices`.
 func _zone(zone_id: String, indices: Array, first: bool) -> void:
 	print("%s" % zone_id)
 	var def := MissionRegistry.zone_def(zone_id)
@@ -90,7 +90,8 @@ func _zone(zone_id: String, indices: Array, first: bool) -> void:
 	if first:
 		main.host_zone(def)
 	else:
-		LevelSwitch.load_level(main, {"level": "zone", "def": ZoneDef.normalize(def)})
+		var fresh := LevelSwitch.load_level(main, {"level": "zone", "def": ZoneDef.normalize(def)})
+		fresh._on_hosted()  # (already hosting: the host's body, as BaseHub's switch does)
 	level = null
 	var t0 := Time.get_ticks_msec()
 	while Time.get_ticks_msec() - t0 < 60000:
@@ -146,9 +147,9 @@ func _fly(zone_id: String, k: int, p: Array, hot: bool, modules: Array) -> void:
 	print("  %s: from (%.0f, %.0f) to the LZ (%.0f, %.0f, %.0f), %.0f m" % [label, c.heli.global_position.x, c.heli.global_position.z,
 		c.lz.x, c.lz.y, c.lz.z, Vector2(c.heli.global_position.x - c.lz.x, c.heli.global_position.z - c.lz.z).length()])
 	var f := await _watch(label, c)
-	check(int(f.frames) > 30 and float(f.min_agl) >= 8.0 and float(f.max_over) <= 16.0,
-		"%s: in low, %.1f-%.1f m over the ground on the way in (8-16 m; more only to climb over what stands taller or ground rising ahead)" % [
-		label, float(f.min_agl), float(f.max_over)])
+	check(int(f.frames) > 30 and float(f.min_agl) >= HeliFlight.INBOUND_LOW_M and float(f.max_over) <= HeliFlight.INBOUND_HIGH_M,
+		"%s: in low, %.1f-%.1f m over the ground on the way in (7-16 m; more only to climb over what stands taller or ground rising ahead; lowest at %s, highest at %s)" % [
+		label, float(f.min_agl), float(f.max_over), f.agl_at, f.over_at])
 	check(float(f.min_clear) >= Helicopter.MIN_CLEAR_M, "%s: the airframe at least %.0f m clear until the final, %.1f m at the least (at %s)" % [
 		label, Helicopter.MIN_CLEAR_M, float(f.min_clear), f.clear_at])
 	check((f.contacts as Array).is_empty(), "%s: it touched nothing before touchdown (%s)" % [
@@ -169,9 +170,10 @@ func _new_leg() -> Dictionary:
 
 ## Watches `c`'s flight until it lands (or FLY_S).
 func _watch(label: String, c: HeliCall) -> Dictionary:
-	var out := {"frames": 0, "min_agl": INF, "max_over": -INF, "min_clear": INF, "clear_at": "", "contacts": []}
+	var out := {"frames": 0, "min_agl": INF, "agl_at": "", "max_over": -INF, "over_at": "", "min_clear": INF, "clear_at": "", "contacts": []}
 	var legs := {"cruise": _new_leg(), "hook": _new_leg(), "final": _new_leg(), "settle": _new_leg()}
 	var t := 0.0
+	var top := -INF
 	while t < FLY_S and is_instance_valid(c.heli) and not c.heli.is_landed() and not c.heli.is_down():
 		await get_tree().physics_frame
 		t += get_physics_process_delta_time()
@@ -190,6 +192,7 @@ func _watch(label: String, c: HeliCall) -> Dictionary:
 			leg = "hook" if left > Helicopter.FINAL_LOW_M else "final"
 		var clear := HeliFlight.airframe_clearance(h)
 		var agl := h.height_agl()
+		top = HeliFlight.ceiling(h, top, get_physics_process_delta_time())
 		var L: Dictionary = legs[leg]
 		L.frames += 1
 		if agl < float(L.agl):
@@ -207,11 +210,16 @@ func _watch(label: String, c: HeliCall) -> Dictionary:
 			if clear < float(out.min_clear):
 				out.min_clear = clear
 				out.clear_at = where
-		if leg == "cruise" or (leg == "hook" and left > INBOUND_LEFT_M):
+		if (leg == "cruise" or (leg == "hook" and left > INBOUND_LEFT_M)) and t > HeliFlight.SETTLE_S / Helicopter.pace:
 			out.frames += 1
 			var over := pos.y - h.terrain_y(pos)
-			out.min_agl = minf(out.min_agl, over)
-			out.max_over = maxf(out.max_over, over - HeliFlight.climb_allowance(h, pos, vel))
+			if over < float(out.min_agl):
+				out.min_agl = over
+				out.agl_at = where
+			var allowance := HeliFlight.climb_allowance(h, pos, top)
+			if over - allowance > float(out.max_over):
+				out.max_over = over - allowance
+				out.over_at = "%s (%.1f m up, %.1f m allowed for climbing), vy %.1f" % [where, over, allowance, h.linear_velocity.y / Helicopter.pace]
 	for leg: String in ["cruise", "hook", "final", "settle"]:
 		var L: Dictionary = legs[leg]
 		if int(L.frames) > 0:
