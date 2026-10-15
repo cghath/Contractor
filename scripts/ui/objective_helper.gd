@@ -47,15 +47,16 @@ const STEP_S := 0.25
 ## from the screen's edge for the edge arrows, and the colours.
 const FADE_M := 1500.0
 const ALPHA_NEAR := 0.7
-const ALPHA_FAR := 0.3
-const SIZE_NEAR := 6.0
-const SIZE_FAR := 3.5
+## docs/ui_audit.md P1-13: far diamonds were 3.5 px at 30%, too faint to find.
+const ALPHA_FAR := 0.45
+const SIZE_NEAR := 7.0
+const SIZE_FAR := 5.0
 const EDGE_PX := 26.0
 const OBJECTIVE_COLOUR := Color(1.0, 0.9, 0.55)
 const EXTRACT_COLOUR := Color(0.82, 0.7, 1.0)
-const HINT_COLOUR := Color(0.92, 0.92, 0.88, 0.85)
-## The hint line's width (px): wider than the panel, so a long name still fits on one line.
-const HINT_WIDTH := 480.0
+## The hint line's width (px) on its own: the objectives panel's (it poked 116 px out to the left
+## of the panel at 480, P1-13). In the Hud it goes in the top-right zone, under the panel.
+const HINT_WIDTH := ObjectivesPanel.WIDTH
 const COMPASS: Array[String] = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
 
 var player: Soldier
@@ -80,15 +81,14 @@ func _init(p: Soldier = null) -> void:
 
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_hint = Label.new()
-	_hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hint = UiKit.hud_label("", &"HudSmallLabel")
 	_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_hint.add_theme_font_size_override(&"font_size", 14)
-	_hint.add_theme_color_override(&"font_color", HINT_COLOUR)
-	_hint.add_theme_color_override(&"font_outline_color", Color(0, 0, 0, 0.8))
-	_hint.add_theme_constant_override(&"outline_size", 3)
-	add_child(_hint)
+	var hud := Hud.of(self)
+	if hud and hud.zone_top_right:
+		hud.zone_top_right.add_child(_hint)
+	else:
+		add_child(_hint)
 	Contracts.objectives.changed.connect(refresh)
 
 
@@ -121,6 +121,8 @@ func _process(delta: float) -> void:
 
 ## Under the objectives panel, right-aligned with it (the corner itself without one).
 func _place_hint() -> void:
+	if _hint.get_parent() != self:
+		return  # in the Hud's top-right zone, which places it
 	if (_panel == null or not is_instance_valid(_panel)) and get_parent():
 		for sibling in get_parent().get_children():
 			if sibling is ObjectivesPanel:
@@ -136,7 +138,7 @@ func _place_hint() -> void:
 func _shown() -> bool:
 	if player == null or not is_instance_valid(player) or not player.vitals.is_up():
 		return false
-	var hud := get_parent() as Hud
+	var hud := Hud.of(self)
 	return hud == null or not (hud.is_inventory_open() or (hud.map_screen and hud.map_screen.visible))
 
 
@@ -561,10 +563,10 @@ func _draw() -> void:
 		draw_colored_polygon(diamond, colour)
 		var label := String(m.label)
 		if label != "":
-			var w := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
-			draw_string_outline(font, at + Vector2(-w * 0.5, -s - 5.0), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, 3, shadow)
-			draw_string(font, at + Vector2(-w * 0.5, -s - 5.0), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, colour)
+			var w := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, UiKit.FONT_SMALL).x
+			draw_string_outline(font, at + Vector2(-w * 0.5, -s - 5.0), label, HORIZONTAL_ALIGNMENT_LEFT, -1, UiKit.FONT_SMALL, 3, shadow)
+			draw_string(font, at + Vector2(-w * 0.5, -s - 5.0), label, HORIZONTAL_ALIGNMENT_LEFT, -1, UiKit.FONT_SMALL, colour)
 		var dist := distance_text(float(m.distance))
-		var dw := font.get_string_size(dist, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
-		draw_string_outline(font, at + Vector2(-dw * 0.5, s + 13.0), dist, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, 3, shadow)
-		draw_string(font, at + Vector2(-dw * 0.5, s + 13.0), dist, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, colour)
+		var dw := font.get_string_size(dist, HORIZONTAL_ALIGNMENT_LEFT, -1, UiKit.FONT_SMALL).x
+		draw_string_outline(font, at + Vector2(-dw * 0.5, s + 15.0), dist, HORIZONTAL_ALIGNMENT_LEFT, -1, UiKit.FONT_SMALL, 3, shadow)
+		draw_string(font, at + Vector2(-dw * 0.5, s + 15.0), dist, HORIZONTAL_ALIGNMENT_LEFT, -1, UiKit.FONT_SMALL, colour)

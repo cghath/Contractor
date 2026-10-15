@@ -35,6 +35,11 @@ const FONT_SMALL := 14
 const FONT_BODY := 16
 const FONT_HEADING := 20
 const FONT_TITLE := 26
+## The HUD's text over the 3D view (docs/ui_audit.md item 4, P1-9/P1-11): 18 px with a black
+## outline (HudLabel), 14 px for its small lines (HudSmallLabel), 26 px warn-red for the downed
+## and killed titles (HudAlertLabel). One outlined style, readable over bright ground.
+const FONT_HUD := 18
+const FONT_HUD_ALERT := 26
 
 
 ## Gives `root` (and so everything under it) the shared theme. A CanvasLayer can't hold a
@@ -159,6 +164,18 @@ static func hint(value: String, centred := false) -> Label:
 static func warn(value: String) -> Label:
 	var label := text(value)
 	label.theme_type_variation = &"WarnLabel"
+	return label
+
+
+## A HUD line in the one outlined HUD style (`variation`: HudLabel, HudSmallLabel, HudAlertLabel
+## or HudWarnLabel). It carries the theme itself, as HUD labels sit straight on a CanvasLayer,
+## and never takes the mouse.
+static func hud_label(value := "", variation := &"HudLabel") -> Label:
+	var label := Label.new()
+	label.text = value
+	apply(label)
+	label.theme_type_variation = variation
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	return label
 
 

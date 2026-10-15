@@ -1,4 +1,4 @@
-[gd_resource type="Theme" load_steps=14 format=3]
+[gd_resource type="Theme" load_steps=15 format=3]
 
 [sub_resource type="StyleBoxFlat" id="panel"]
 content_margin_left = 16.0
@@ -171,6 +171,17 @@ corner_radius_top_right = 2
 corner_radius_bottom_right = 2
 corner_radius_bottom_left = 2
 
+[sub_resource type="StyleBoxFlat" id="hud_panel"]
+content_margin_left = 10.0
+content_margin_top = 8.0
+content_margin_right = 10.0
+content_margin_bottom = 8.0
+bg_color = Color(0.05, 0.07, 0.05, 0.6)
+corner_radius_top_left = 3
+corner_radius_top_right = 3
+corner_radius_bottom_right = 3
+corner_radius_bottom_left = 3
+
 [resource]
 default_font_size = 16
 Label/colors/font_color = Color(0.9, 0.91, 0.87, 1)
@@ -194,6 +205,24 @@ KeyLabel/colors/font_shadow_color = Color(0, 0, 0, 0)
 KeyLabel/font_sizes/font_size = 14
 KeyLabel/styles/normal = SubResource("bar_fill")
 PanelContainer/styles/panel = SubResource("panel")
+HudLabel/base_type = &"Label"
+HudLabel/colors/font_color = Color(0.92, 0.92, 0.88, 1)
+HudLabel/colors/font_outline_color = Color(0, 0, 0, 0.85)
+HudLabel/colors/font_shadow_color = Color(0, 0, 0, 0)
+HudLabel/constants/outline_size = 4
+HudLabel/font_sizes/font_size = 18
+HudSmallLabel/base_type = &"HudLabel"
+HudSmallLabel/colors/font_color = Color(0.86, 0.87, 0.82, 1)
+HudSmallLabel/constants/outline_size = 3
+HudSmallLabel/font_sizes/font_size = 14
+HudAlertLabel/base_type = &"HudLabel"
+HudAlertLabel/colors/font_color = Color(0.93, 0.45, 0.36, 1)
+HudAlertLabel/constants/outline_size = 5
+HudAlertLabel/font_sizes/font_size = 26
+HudWarnLabel/base_type = &"HudLabel"
+HudWarnLabel/colors/font_color = Color(0.93, 0.45, 0.36, 1)
+HudPanel/base_type = &"PanelContainer"
+HudPanel/styles/panel = SubResource("hud_panel")
 SolidPanel/base_type = &"PanelContainer"
 SolidPanel/styles/panel = SubResource("panel_solid")
 Button/colors/font_color = Color(0.9, 0.91, 0.87, 1)

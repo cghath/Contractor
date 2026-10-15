@@ -18,10 +18,16 @@ const NEARLY_EMPTY := "Nearly empty"
 const EMPTY := "Empty"
 ## Pips past this many show as "+n".
 const MAX_PIPS := 8
-const PIP := Vector2(4, 10)
+## Sizes and colours (docs/ui_audit.md P1-14: the pips were 4 px wide, the fill word 14 px at
+## 75% and the grenade line 12 px at 40%, drawn under the control's own box).
+const PIP := Vector2(6, 14)
 const PIP_GAP := 3.0
-const COLOUR := Color(0.92, 0.92, 0.88, 0.75)
-const DIM_COLOUR := Color(0.92, 0.92, 0.88, 0.4)
+const COLOUR := Color(UiKit.TEXT, 0.95)
+const DIM_COLOUR := Color(UiKit.TEXT, 0.7)
+const OUTLINE := Color(0, 0, 0, 0.7)
+## Its box (logical px) in the HUD's bottom-right zone: the pips and fill word over the grenades.
+const WIDTH := 280.0
+const HEIGHT := 56.0
 
 var player: Soldier
 ## What's shown (summary()), worked out a few times a second.
@@ -40,10 +46,10 @@ func _ready() -> void:
 	anchor_right = 1.0
 	anchor_top = 1.0
 	anchor_bottom = 1.0
-	offset_left = -276.0
-	offset_right = -16.0
-	offset_top = -60.0
-	offset_bottom = -16.0
+	offset_left = -Hud.MARGIN - WIDTH
+	offset_right = -Hud.MARGIN
+	offset_top = -Hud.MARGIN - HEIGHT
+	offset_bottom = -Hud.MARGIN
 
 
 ## The word for a magazine with `rounds` of `full` in it.
@@ -138,7 +144,7 @@ func _process(delta: float) -> void:
 	if _refresh > 0.0:
 		return
 	_refresh = 0.2
-	var hud := get_parent() as Hud
+	var hud := Hud.of(self)
 	var up := player != null and is_instance_valid(player) and player.vitals.is_up()
 	var was := shown
 	shown = summary(player) if up else {}
@@ -152,7 +158,9 @@ func _draw() -> void:
 		return
 	var font := get_theme_default_font()
 	var right := size.x
-	var y := size.y - 24.0
+	var y := 4.0  # the pips' top; the word sits on their baseline, the grenades a line under
+	var body := UiKit.FONT_BODY
+	var small := UiKit.FONT_SMALL
 	if shown.has("loaded"):
 		# Pips, right to left: fullest on the right; a part-used one dimmer, an empty one hollow.
 		var spares: Array = shown.spares
@@ -160,32 +168,33 @@ func _draw() -> void:
 		var n := mini(spares.size(), MAX_PIPS)
 		if spares.size() > MAX_PIPS:
 			var more := "+%d" % (spares.size() - MAX_PIPS)
-			var mw := font.get_string_size(more, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
+			var mw := font.get_string_size(more, HORIZONTAL_ALIGNMENT_LEFT, -1, small).x
 			x -= mw
-			draw_string(font, Vector2(x, y + PIP.y), more, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, DIM_COLOUR)
+			draw_string_outline(font, Vector2(x, y + PIP.y), more, HORIZONTAL_ALIGNMENT_LEFT, -1, small, 3, OUTLINE)
+			draw_string(font, Vector2(x, y + PIP.y), more, HORIZONTAL_ALIGNMENT_LEFT, -1, small, DIM_COLOUR)
 			x -= PIP_GAP + 2.0
 		for i in n:
 			var f: float = spares[i]
 			x -= PIP.x
 			var r := Rect2(Vector2(x, y), PIP)
-			draw_rect(r.grow(1.0), Color(0, 0, 0, 0.35), false, 1.0)  # a faint edge, so a pip shows on bright ground
+			draw_rect(r.grow(1.0), Color(0, 0, 0, 0.5), false, 1.0)  # a faint edge, so a pip shows on bright ground
 			if f <= 0.0:
 				draw_rect(r, DIM_COLOUR, false, 1.0)
 			else:
-				var c := COLOUR if f >= 0.95 else Color(COLOUR, lerpf(0.3, 0.6, f))
+				var c := COLOUR if f >= 0.95 else Color(COLOUR, lerpf(0.4, 0.7, f))
 				draw_rect(r, c)
 			x -= PIP_GAP
 		var word := String(shown.loaded)
-		var ww := font.get_string_size(word, HORIZONTAL_ALIGNMENT_LEFT, -1, 14).x
+		var ww := font.get_string_size(word, HORIZONTAL_ALIGNMENT_LEFT, -1, body).x
 		var wx := x - 6.0 - ww
-		draw_string_outline(font, Vector2(wx, y + PIP.y), word, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, 3, Color(0, 0, 0, 0.6))
-		draw_string(font, Vector2(wx, y + PIP.y), word, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, COLOUR)
+		draw_string_outline(font, Vector2(wx, y + PIP.y), word, HORIZONTAL_ALIGNMENT_LEFT, -1, body, 4, OUTLINE)
+		draw_string(font, Vector2(wx, y + PIP.y), word, HORIZONTAL_ALIGNMENT_LEFT, -1, body, COLOUR)
 	var grenades: Dictionary = shown.get("grenades", {})
 	if not grenades.is_empty():
 		var g := PackedStringArray()
 		for kind: String in grenades:
 			g.append("%d %s" % [int(grenades[kind]), kind])
 		var line := ", ".join(g)
-		var gw := font.get_string_size(line, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
-		draw_string_outline(font, Vector2(right - gw, y + PIP.y + 17.0), line, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, 3, Color(0, 0, 0, 0.5))
-		draw_string(font, Vector2(right - gw, y + PIP.y + 17.0), line, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, DIM_COLOUR)
+		var gw := font.get_string_size(line, HORIZONTAL_ALIGNMENT_LEFT, -1, small).x
+		draw_string_outline(font, Vector2(right - gw, y + PIP.y + 22.0), line, HORIZONTAL_ALIGNMENT_LEFT, -1, small, 3, OUTLINE)
+		draw_string(font, Vector2(right - gw, y + PIP.y + 22.0), line, HORIZONTAL_ALIGNMENT_LEFT, -1, small, DIM_COLOUR)

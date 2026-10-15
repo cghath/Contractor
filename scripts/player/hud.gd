@@ -1,6 +1,24 @@
 class_name Hud
 extends CanvasLayer
 ## Minimal local HUD: crosshair, interact prompt, messages, and the Tab inventory screen.
+##
+## HUD zones (Captain, 2026-10-14: "all the UIs need a pass"; docs/ui_audit.md item 4, P1-9 to
+## P1-11, P2-22): each part of the screen holds one kind of thing, so nothing stacks on anything
+## else at any window size or UI scale (tests/ui_test.gd hosts a level and checks):
+##   top-right: the objectives panel, the objective hint under it (and the dev hot-zone readout)
+##   left: the command menu (centre-left) over the squad list (bottom-left), one column
+##   bottom-right: the weapon (AmmoReadout)
+##   bottom-centre: the radio feed and subtitles over the vehicle readout (in parts)
+##   centre: crosshair, prompt, and the downed or killed text; top-centre: flash messages
+## Every HUD line uses the theme's one outlined style (HudLabel and its variations, UiKit.hud_label).
+
+## The gap kept from the window's edge.
+const MARGIN := 16.0
+## The top-right zone's group (HotZoneDebug, on its own layer, sits under it).
+const TOP_RIGHT_GROUP := &"hud_top_right"
+## Widths (logical px) of the centre lines; each is cut to the window less UiKit.EDGE a side.
+const PROMPT_WIDTH := 640.0
+const CENTRE_WIDTH := 760.0
 
 ## Set by the owning Soldier before the HUD enters the tree.
 var player: Soldier
@@ -12,11 +30,30 @@ var map_screen: MapScreen
 var objective_helper: ObjectiveHelper
 ## The magazines and their rough fill (AmmoReadout).
 var ammo_readout: AmmoReadout
+## The zones (see the top): the right column, the left column, and the bottom-centre stack.
+var zone_top_right: VBoxContainer
+var zone_left: VBoxContainer
+var zone_bottom_centre: VBoxContainer
 var _crosshair: Label
 var _prompt: Label
 var _status: Label
+## The downed or killed title (HudAlertLabel) and the lines under it, which wrap.
+var _downed_box: VBoxContainer
 var _downed: Label
+var _downed_detail: Label
 var _message: Label
+var _subtitles: Label
+## The vehicle readout: one label per part (Vehicle.readout_parts), flowing onto more lines.
+var _vehicle: HFlowContainer
+var _vehicle_parts: Array = []
+var _vehicle_left := 0.0  # seconds until it hides unless its vehicle shows it again
+## The squad list's lines (update_status); _fit_status shows as many as the left column has room for.
+var _status_lines := PackedStringArray()
+## The centre column's lines: [control, y from the middle (or the top), grow direction], kept
+## snug to their text every frame (_snug), as a wrapping label never shrinks back on its own.
+var _centred: Array = []
+## The left column's height (logical px), from _layout.
+var _left_height := 0.0
 var _message_time := 0.0
 var _white: ColorRect
 var _white_left := 0.0  # seconds of whiteout remaining
@@ -60,38 +97,271 @@ func _ready() -> void:
 	_white.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_white)
 	_white.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_crosshair = _label("+", Control.PRESET_CENTER)
+	_crosshair = _add(UiKit.hud_label("+")) as Label
 	_crosshair.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_downed = _label("", Control.PRESET_CENTER)
-	_downed.position.y -= 80
-	_downed.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_downed.add_theme_font_size_override(&"font_size", 28)
-	_downed.add_theme_color_override(&"font_color", Color("ff6b5e"))
-	_prompt = _label("", Control.PRESET_CENTER)
-	_prompt.position.y += 40
-	_prompt.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_status = _label("", Control.PRESET_BOTTOM_LEFT)
-	_status.grow_vertical = Control.GROW_DIRECTION_BEGIN
-	_status.position += Vector2(16, -16)
+	_downed_box = VBoxContainer.new()
+	_downed_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_downed_box.add_theme_constant_override(&"separation", UiKit.SPACE_S)
+	_add(_downed_box)
+	_downed = _wrapping(UiKit.hud_label("", &"HudAlertLabel"))
+	_downed_box.add_child(_downed)
+	_downed_detail = _wrapping(UiKit.hud_label())
+	_downed_box.add_child(_downed_detail)
+	_prompt = _add(_wrapping(UiKit.hud_label())) as Label
 	inventory_screen = InventoryScreen.new(player)
 	inventory_screen.visible = false
 	add_child(inventory_screen)
+	# Left column: the command menu in the middle of the room left above the squad list.
+	zone_left = _zone("LeftZone")
+	zone_left.add_child(_spacer())
 	command_menu = CommandMenu.new(player)
-	add_child(command_menu)
-	add_child(Callouts.Subtitles.new())  # squadmates' callouts
-	add_child(ObjectivesPanel.new())  # the deployment's objectives (wave 4, Contracts)
+	zone_left.add_child(command_menu)
+	zone_left.add_child(_spacer())
+	_status = UiKit.hud_label()
+	_status.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS  # a long line cuts with "...", never runs under the radio
+	zone_left.add_child(_status)
+	# Bottom-centre: the radio feed and subtitles over the vehicle readout.
+	zone_bottom_centre = _zone("BottomCentreZone")
+	zone_bottom_centre.alignment = BoxContainer.ALIGNMENT_END
+	_subtitles = _wrapping(Callouts.Subtitles.new())  # squadmates' callouts
+	zone_bottom_centre.add_child(_subtitles)
+	_vehicle = HFlowContainer.new()
+	_vehicle.name = "VehicleReadout"
+	_vehicle.alignment = FlowContainer.ALIGNMENT_CENTER
+	_vehicle.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_vehicle.add_theme_constant_override(&"h_separation", UiKit.SPACE_L)
+	_vehicle.add_theme_constant_override(&"v_separation", UiKit.SPACE_XS)
+	_vehicle.visible = false
+	zone_bottom_centre.add_child(_vehicle)
+	# Top-right: the objectives, then the hint under them (ObjectiveHelper puts it here).
+	zone_top_right = _zone("TopRightZone")
+	zone_top_right.add_to_group(TOP_RIGHT_GROUP)
+	zone_top_right.add_child(ObjectivesPanel.new())  # the deployment's objectives (wave 4, Contracts)
 	objective_helper = ObjectiveHelper.new(player)  # what to do now, and small markers on its target
 	add_child(objective_helper)
 	ammo_readout = AmmoReadout.new(player)  # mags and roughly how full, not a count
 	add_child(ammo_readout)
-	_message = _label("", Control.PRESET_CENTER_TOP)
-	_message.position.y += 60
-	_message.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_message = _add(_wrapping(UiKit.hud_label())) as Label
 	# The map (M) and the briefing, over everything else (W13).
 	add_child(BleedSilhouette.new(player))
 	map_screen = MapScreen.new(player)
 	add_child(map_screen)
 	move_child(_message, -1)  # messages stay readable over the map
+	get_viewport().size_changed.connect(_layout)
+	_layout()
+
+
+## The HUD from any node under it (or null).
+static func of(node: Node) -> Hud:
+	while node != null and not node is Hud:
+		node = node.get_parent()
+	return node as Hud
+
+
+## Places the zones and the centre lines for the window's visible size (logical px, so the
+## Menu and HUD size setting counts): runs at the start and on every resize.
+func _layout() -> void:
+	var view := get_viewport().get_visible_rect().size
+	var side := clampf(view.x * 0.28, 220.0, 400.0)
+	var right := clampf(view.x * 0.3, 240.0, ObjectivesPanel.WIDTH)
+	var left_top := MARGIN + MedicalMenu.FIGURE_SIZE.y * BleedSilhouette.SCALE + UiKit.SPACE_S  # under the bleed silhouette
+	_set_rect(zone_left, Vector4(0, 0, 0, 1), Vector4(MARGIN, left_top, MARGIN + side, -MARGIN))
+	_set_rect(zone_top_right, Vector4(1, 0, 1, 0), Vector4(-MARGIN - right, MARGIN, -MARGIN, MARGIN))
+	zone_top_right.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	_left_height = view.y - left_top - MARGIN
+	# Three columns: left, centre and right. The centre one (prompt, downed text, messages,
+	# radio, vehicle) is what the side columns leave, so nothing in it runs under them.
+	var centre := minf(CENTRE_WIDTH, view.x - 2.0 * (maxf(maxf(side, right), AmmoReadout.WIDTH) + MARGIN + UiKit.SPACE_M))
+	_set_rect(zone_bottom_centre, Vector4(0.5, 1, 0.5, 1), Vector4(-centre * 0.5, -MARGIN, centre * 0.5, -MARGIN))
+	zone_bottom_centre.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	zone_bottom_centre.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	# Top to bottom: [control, width, y (from the top for the message, else from the middle), grow].
+	_centred = [[_message, centre, 60.0, Control.GROW_DIRECTION_END], [_downed_box, centre, -60.0, Control.GROW_DIRECTION_BOTH],
+		[_crosshair, 0.0, 0.0, Control.GROW_DIRECTION_BOTH], [_prompt, minf(PROMPT_WIDTH, centre), 40.0, Control.GROW_DIRECTION_END]]
+	for c: Array in _centred:
+		_centre(c[0], c[1], c[2], c[3])
+	_message.anchor_top = 0.0
+	_message.anchor_bottom = 0.0
+	_snug()
+
+
+## Fits each centre line's height to its text (a wrapping label grows as its text gets longer
+## but never shrinks back by itself), and stacks them down the centre column without running
+## into each other: the flash message from the top, the downed or killed text over the middle
+## (pushed under the message), the crosshair in the middle, the prompt under it (or under the
+## downed text).
+func _snug() -> void:
+	var mid := get_viewport().get_visible_rect().size.y * 0.5
+	var below := 0.0  # the lowest edge so far, from the top
+	for c: Array in _centred:
+		var control: Control = c[0]
+		var h := control.get_combined_minimum_size().y
+		var y: float = c[2]
+		var top := y
+		if control != _message:
+			top = mid + (y - h * 0.5 if c[3] == Control.GROW_DIRECTION_BOTH else y)
+			if control != _crosshair:
+				top = maxf(top, below)
+		var label := control as Label
+		if control != _crosshair and control.visible and h > 0.0 and (label == null or label.text != ""):
+			below = top + h + UiKit.SPACE_S
+		var origin := 0.0 if control == _message else mid
+		control.offset_top = top - origin
+		control.offset_bottom = top - origin + h
+
+
+## The squad list in the room the left column has under the command menu (P1-10: at 720 px tall
+## the list and the menu ran into each other): what doesn't fit is cut, and says so.
+func _fit_status() -> void:
+	var spacing := float(_status.get_theme_constant(&"line_spacing"))
+	var line := float(_status.get_line_height()) + spacing
+	var room := _left_height - UiKit.SPACE_S * 3.0 - (command_menu.get_combined_minimum_size().y if command_menu.visible else 0.0)
+	var fit := maxi(floori((room + spacing) / maxf(line, 1.0)), 0)
+	var lines := _status_lines
+	if lines.size() > fit:
+		lines = lines.slice(0, maxi(fit - 1, 0))
+		if fit > 0:
+			lines.append("+%d more" % (_status_lines.size() - lines.size()))
+	var text := "\n".join(lines)
+	if _status.text != text:
+		_status.text = text
+	_status.visible = text != ""
+
+
+## The bottom-centre zone in the room under the centre lines (prompt, downed text): the
+## vehicle readout first (on a short window its key hints go, then its plainer parts; the
+## vehicle, the seat and any warning stay), then the newest radio lines that still fit.
+func _fit_bottom_centre() -> void:
+	var view := get_viewport().get_visible_rect().size
+	var top := view.y * 0.5 + 40.0
+	for c: Control in [_prompt, _downed_box]:
+		if c.visible and c.get_combined_minimum_size().y > 0.0:
+			top = maxf(top, c.get_global_rect().end.y)
+	var room := view.y - MARGIN - top - UiKit.SPACE_M
+	_vehicle.visible = _vehicle_left > 0.0 and not _vehicle_parts.is_empty()
+	if _vehicle.visible:
+		room -= _fit_vehicle(room, zone_bottom_centre.size.x) + UiKit.SPACE_S
+	_subtitles.room = room
+	_subtitles.refit()
+
+
+## Shows the vehicle's parts, as many as fit `room` px tall in rows `width` wide; returns the
+## height they take.
+func _fit_vehicle(room: float, width: float) -> float:
+	while _vehicle.get_child_count() < _vehicle_parts.size():
+		_vehicle.add_child(UiKit.hud_label())
+	var keys: Array = []  # what goes first when there's no room: key hints, then plain parts
+	var plain: Array = []
+	for i in _vehicle.get_child_count():
+		var label := _vehicle.get_child(i) as Label
+		label.visible = i < _vehicle_parts.size()
+		if label.visible:
+			var part: Dictionary = _vehicle_parts[i]
+			label.text = String(part.text)
+			var style := StringName(part.get("style", &""))
+			label.theme_type_variation = &"HudWarnLabel" if style == &"warn" else (&"HudSmallLabel" if style == &"key" else &"HudLabel")
+			if style == &"key":
+				keys.append(i)
+			elif style != &"warn" and i > 0:
+				plain.push_front(i)  # the last first
+	var order: Array = keys + plain
+	var height := _flow_height(width)
+	while height > room and not order.is_empty():
+		(_vehicle.get_child(order.pop_front()) as Label).visible = false
+		height = _flow_height(width)
+	return height
+
+
+## How tall the vehicle readout's shown parts are when they flow in rows `width` wide.
+func _flow_height(width: float) -> float:
+	var sep := float(_vehicle.get_theme_constant(&"h_separation"))
+	var row_h := 0.0
+	var rows := 0
+	var x := 0.0
+	for label: Label in _vehicle.get_children():
+		if not label.visible:
+			continue
+		var m := label.get_combined_minimum_size()
+		row_h = maxf(row_h, m.y)
+		if rows == 0 or x + sep + m.x > width:
+			rows += 1
+			x = m.x
+		else:
+			x += sep + m.x
+	return rows * row_h + maxi(rows - 1, 0) * float(_vehicle.get_theme_constant(&"v_separation"))
+
+
+static func _set_rect(c: Control, anchors: Vector4, offsets: Vector4) -> void:
+	c.anchor_left = anchors.x
+	c.anchor_top = anchors.y
+	c.anchor_right = anchors.z
+	c.anchor_bottom = anchors.w
+	c.offset_left = offsets.x
+	c.offset_top = offsets.y
+	c.offset_right = offsets.z
+	c.offset_bottom = offsets.w
+
+
+## `c` centred across the window, `width` wide (0: as wide as its text), `y` from the middle,
+## growing both ways sideways (a longer line stays centred, P1-11) and down (or both).
+static func _centre(c: Control, width: float, y: float, grow: Control.GrowDirection) -> void:
+	_set_rect(c, Vector4(0.5, 0.5, 0.5, 0.5), Vector4(-width * 0.5, y, width * 0.5, y))
+	c.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	c.grow_vertical = grow
+
+
+func _add(c: Control) -> Control:
+	add_child(c)
+	return c
+
+
+static func _wrapping(label: Label) -> Label:
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	return label
+
+
+func _zone(zone_name: String) -> VBoxContainer:
+	var box := VBoxContainer.new()
+	box.name = zone_name
+	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	box.add_theme_constant_override(&"separation", UiKit.SPACE_S)
+	add_child(box)
+	return box
+
+
+static func _spacer() -> Control:
+	var c := Control.new()
+	c.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	c.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	return c
+
+
+## The vehicle readout for the seat the local player sits in (Vehicle._local_controls, every
+## frame): `parts` are {"text", "style": &"" | &"warn" | &"key"} (Vehicle.readout_parts), one
+## label each, flowing onto another line instead of one run-on line (P1-9). It hides itself
+## when its vehicle stops showing it.
+func show_vehicle(parts: Array) -> void:
+	_vehicle_left = 0.5
+	_vehicle_parts = parts
+	_fit_bottom_centre()
+
+
+func hide_vehicle() -> void:
+	_vehicle_left = 0.0
+	_vehicle_parts = []
+	_vehicle.visible = false
+
+
+## The vehicle readout as shown ("" when hidden; tests read it).
+func vehicle_text() -> String:
+	if not _vehicle.visible:
+		return ""
+	var parts := PackedStringArray()
+	for label: Label in _vehicle.get_children():
+		if label.visible:
+			parts.append(label.text)
+	return "  |  ".join(parts)
 
 
 ## A small body silhouette in the top-left corner while the local player has an untreated bleed,
@@ -123,6 +393,10 @@ class BleedSilhouette extends Control:
 func _process(delta: float) -> void:
 	_message_time -= delta
 	_message.visible = _message_time > 0.0
+	_vehicle_left -= delta
+	_fit_status()
+	_snug()
+	_fit_bottom_centre()
 	_white_left = maxf(_white_left - delta, 0.0)
 	_white.color.a = clampf(_white_left / 1.5, 0.0, 1.0)
 	_update_vision()
@@ -183,19 +457,26 @@ func toggle_detail() -> void:
 ## litres, exact rounds loaded and armor damage are on the inventory screen (Tab); the HUD
 ## only says roughly how full the magazine is and how many are left (AmmoReadout).
 func update_status(player: Soldier) -> void:
+	# What you carry and spawn protection first: if the column is short, the squad's last lines go.
 	var lines := PackedStringArray()
-	var squad := _squad_lines(player)
-	if squad != "":
-		lines.append(squad)
 	if player.inventory.hands != &"":
 		lines.append("Carrying %s (Alt+G to drop)" % ItemDB.get_item(player.inventory.hands).name)
 	if player.respawn_state == Soldier.RESPAWN_PROTECTED:
 		lines.append("Spawn protection%s - firing ends it" % (" %d s" % ceili(player.protect_eta - Soldier._now()) if player.protect_eta > Soldier._now() else ""))
-	_status.text = "\n".join(lines)
+	var squad := _squad_lines(player).strip_edges(false, true)
+	if squad != "":
+		lines.append_array(squad.split("\n"))
+	_status_lines = lines
 	_crosshair.visible = not player.is_aiming and player.vitals.is_up() and player.respawn_state != Soldier.RESPAWN_WAITING
 	var held: float = player.player_input.give_up_held if player.player_input else 0.0
-	_downed.text = respawn_text(player) if player.respawn_state == Soldier.RESPAWN_WAITING \
+	var down := respawn_text(player) if player.respawn_state == Soldier.RESPAWN_WAITING \
 		else downed_text(player.vitals) + give_up_text(player, held)
+	# The title alone in the big alert style, the rest under it, wrapping (P1-11: the 28 px
+	# "Your team can treat you..." line was wider than a 1280 window at UI scale 1.5).
+	_downed.text = down.get_slice("\n", 0)
+	_downed_detail.text = down.substr(_downed.text.length() + 1).strip_edges() if down.contains("\n") else ""
+	_downed.visible = _downed.text != ""
+	_downed_detail.visible = _downed_detail.text != ""
 
 
 ## The countdown while a dead player waits to respawn (Soldier.RESPAWN_WAITING).
@@ -249,14 +530,3 @@ func _squad_lines(player: Soldier) -> String:
 		else:
 			lines.append("  F%d %s%s" % [i + 1, "You" if s == player else "Player %s" % s.name, tag])
 	return "SQUAD  [F-keys] select  [~] all\n" + "\n".join(lines) + "\n"
-
-
-func _label(text: String, preset: Control.LayoutPreset) -> Label:
-	var label := Label.new()
-	label.text = text
-	label.add_theme_font_size_override(&"font_size", 18)
-	label.add_theme_color_override(&"font_outline_color", Color.BLACK)
-	label.add_theme_constant_override(&"outline_size", 4)
-	add_child(label)
-	label.set_anchors_and_offsets_preset(preset)
-	return label
