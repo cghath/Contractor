@@ -177,6 +177,18 @@ static func near(from: Node3D, centre: Vector3, radius := SCAN_M) -> Array:
 
 ## Which world and level `from` is in: its World3D and the level node above it (none for a
 ## node outside any level), as a cache key.
+## Drops every cached scan, probe, building and link: for when the walls or the navmesh change
+## under them at once (a test building a house and baking its navmesh mid-run). The cell probes
+## (perf/town-physics) are shared by every ask nearby for CACHE_S, so one probe made before a
+## bake would otherwise keep the old answer for every scan round it.
+static func forget() -> void:
+	_cache.clear()
+	_areas.clear()
+	_cells.clear()
+	_built.clear()
+	_links.clear()
+
+
 static func _scope(from: Node3D) -> String:
 	var level: Node = from
 	while level and not level.is_in_group(&"level"):

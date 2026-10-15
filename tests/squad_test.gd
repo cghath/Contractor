@@ -730,6 +730,7 @@ func _test_multi_storey() -> void:
 			NavigationServer3D.bake_from_source_geometry_data(mesh, source)
 			nav.region_of(chunk).navigation_mesh = mesh
 	await _physics_frames(4)
+	Buildings.forget()  # the house and its navmesh are new: no probe made before them counts
 	var map := player.get_world_3d().navigation_map
 	var street := NavigationServer3D.map_get_closest_point(map, STOREY_AT + Vector3(0, 0, b.size.y * 0.5 + 4.0))
 	var roof_goal := NavigationServer3D.map_get_closest_point(map, STOREY_AT + Vector3(0, roof_y + 0.2, b.size.y * 0.25))
