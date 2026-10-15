@@ -63,15 +63,20 @@ func _ready() -> void:
 			return ui)
 	await _fit("objectives panel", func() -> Node: return _in_layer(ObjectivesPanel.new()))
 	await _fit("ammo readout", func() -> Node: return _in_layer(AmmoReadout.new()))
-	## The command menu needs no level to draw (ui/small-screens, P2-19): its longest level
-	## (Move, eight orders) under the selection path.
-	await _fit("command menu", func() -> Node:
-		var menu := CommandMenu.new(null)
-		menu.ready.connect(func() -> void:
-			menu.open()
-			menu._stack.append(CommandMenu.MENU["items"][0])
-			menu._redraw())
-		return _in_layer(menu))
+	## The command menu needs no level to draw (ui/small-screens, P2-19). Every level is fitted,
+	## not one picked as the longest: the root (ten rows, what opens first) is the tallest, and
+	## the deep ones carry the longest selection path (review of ui/small-screens).
+	for stack: Array in _menu_levels(CommandMenu.MENU, [CommandMenu.MENU]):
+		var labels := PackedStringArray()
+		for i in range(1, stack.size()):
+			labels.append(stack[i]["label"])
+		await _fit("command menu" + ("" if labels.is_empty() else ": " + " > ".join(labels)), func() -> Node:
+			var menu := CommandMenu.new(null)
+			menu.ready.connect(func() -> void:
+				menu.open()
+				menu._stack = stack.duplicate()
+				menu._redraw())
+			return _in_layer(menu))
 	_summary()
 	GameSettings.reset_all()
 	GameSettings.use_file("")
@@ -130,6 +135,15 @@ func _in_layer(control: Control) -> CanvasLayer:
 
 
 ## Opens `make`'s screen at every size and UI scale and records what runs off the window.
+## Every level of a command menu tree as the stack that opens it, the root first.
+func _menu_levels(level: Dictionary, stack: Array) -> Array:
+	var out: Array = [stack]
+	for item: Dictionary in level["items"]:
+		if item.has("items") and not (item["items"] as Array).is_empty():
+			out.append_array(_menu_levels(item, stack + [item]))
+	return out
+
+
 func _fit(screen: String, make: Callable) -> void:
 	print(screen)
 	_vp.size = SIZES[0]
