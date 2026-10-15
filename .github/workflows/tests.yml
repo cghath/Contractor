@@ -29,13 +29,14 @@ jobs:
         run: bash tools/test_runner_check.sh
 
   suite:
-    name: ${{ matrix.suite }}
+    name: ${{ matrix.suite }} ${{ matrix.rep }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        suite: [smoke, gameplay, squad, net, levelswitch, wounds, armor, movement, interaction, roles, medical, logistics, casualty, materials, animations, scavenge, contracts, people, map, base, world, missions, vehicles, antiarmor, session_log, supports, aav, sound, loop, ui, loadout]
+        suite: [loop]
+        rep: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     steps:
       - uses: actions/checkout@v4
 
@@ -94,6 +95,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-logs-${{ matrix.suite }}-attempt-${{ github.run_attempt }}
+          name: test-logs-${{ matrix.suite }}-${{ matrix.rep }}-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/contractor-test-logs
           if-no-files-found: warn

@@ -131,8 +131,23 @@ func _physics_process(_delta: float) -> void:
 					s.log_name(), above, at.x, at.y, at.z, _mission_type, before.x, before.y, before.z, s.velocity,
 					", ragdoll" if is_instance_valid(s.ragdoll) else ""]
 				if s == player:  # TEMP trace
-					_launched[key] += " RING " + " | ".join(PackedStringArray(_ring.slice(-14)))
+					_launched[key] += " NEAR " + _near_dump(before) + " RING " + " | ".join(PackedStringArray(_ring.slice(-14)))
 				print("  [info] launched: %s" % _launched[key])
+
+
+func _near_dump(at: Vector3) -> String:  # TEMP trace
+	var shape := SphereShape3D.new()
+	shape.radius = 3.0
+	var q := PhysicsShapeQueryParameters3D.new()
+	q.shape = shape
+	q.transform = Transform3D(Basis(), at + Vector3.UP)
+	q.collision_mask = 0xFFFFFFFF
+	var out := PackedStringArray()
+	for hit: Dictionary in level.get_world_3d().direct_space_state.intersect_shape(q, 24):
+		var c: Object = hit.collider
+		var v := (c as RigidBody3D).linear_velocity if c is RigidBody3D else Vector3.ZERO
+		out.append("%s[%s] at %s v %s" % [(c as Node).get_path() if c is Node else str(c), c.get_class() if c else "?", (c as Node3D).global_position if c is Node3D else Vector3.ZERO, v])
+	return ", ".join(out)
 
 
 func check(condition: bool, what: String) -> void:
