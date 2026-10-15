@@ -616,3 +616,31 @@ func _draw() -> void:
 	if shown > 0:  # the newest lines, as many as fit above the panel's foot
 		draw_multiline_string(font, log_top + Vector2(0, 22), "\n".join(log_lines.slice(log_lines.size() - shown)), HORIZONTAL_ALIGNMENT_LEFT, 340, 12,
 			shown, Color(0.8, 0.8, 0.8))
+	# The row under the mouse: what that treatment does, over the right-hand column.
+	if _hover >= 0 and _hover < options.size() and row_shown(_hover):
+		var hint := row_hint(options[_hover])
+		if hint != "":
+			var text_h := font.get_multiline_string_size(hint, HORIZONTAL_ALIGNMENT_LEFT, 340.0, 12).y
+			var box := Rect2(Vector2(top.x + 712, _row_rect(_hover).position.y), Vector2(356, text_h + 16))
+			box.position.y = minf(box.position.y, panel.end.y - box.size.y - 4)
+			draw_rect(box, Color(0.04, 0.06, 0.07, 0.97))
+			draw_rect(box, Color(0.33, 0.85, 0.95), false, 1.0)
+			draw_multiline_string(font, box.position + Vector2(8, 18), hint, HORIZONTAL_ALIGNMENT_LEFT, box.size.x - 16, 12,
+				-1, Color(0.85, 0.92, 0.94))
+
+
+## What a row does, in words, for the hover box (Captain, 2026-10-14: "item descriptions plus
+## uses also needed"): an item's description and uses (ItemInfo), or Remove tourniquet's rule.
+## Kept short: one line per use, wrapped by the box.
+static func row_hint(entry: Dictionary) -> String:
+	if entry.get("id", &"") == &"remove_tourniquet":
+		var tq := ItemDB.get_item(WoundModel.TOURNIQUET)
+		return "Takes the tourniquets off this limb (%.0f s) once every arterial bleed under them is packed with gauze. They go back in your kit." % float(tq.stats.get("remove_s", 3.0))
+	var id: StringName = entry.get("item", &"")
+	var item := ItemDB.get_item(id) if id != &"" and ItemDB.has_item(id) else null
+	if item == null:
+		return ""
+	var lines := PackedStringArray([item.desc]) if item.desc != "" else PackedStringArray()
+	for use in item.uses:
+		lines.append("- " + use)
+	return "\n".join(lines)

@@ -312,7 +312,9 @@ func _build_shop(rows: VBoxContainer, v: Dictionary) -> void:
 		if item == null:
 			continue
 		var row := HBoxContainer.new()
-		row.add_child(_text("%s  $%d" % [item.name, int(entry.price)], 420))
+		var label := _text("%s  $%d" % [item.name, int(entry.price)], 420)
+		ItemInfo.apply(label, id)  # hover: what it is and how to use it (Captain, 2026-10-14: "item descriptions plus uses also needed")
+		row.add_child(label)
 		row.add_child(_button("Buy", func() -> void: BaseHub.request("buy", [String(id), 1])))
 		row.add_child(_button("Buy 5", func() -> void: BaseHub.request("buy", [String(id), 5])))
 		rows.add_child(row)
@@ -325,7 +327,9 @@ func _build_armory(rows: VBoxContainer, v: Dictionary) -> void:
 	ids.sort()
 	for id: String in ids:
 		var item := ItemDB.get_item(StringName(id))
-		rows.add_child(_text("%s x%d" % [item.name if item else id, int(counts[id])]))
+		var label := _text("%s x%d" % [item.name if item else id, int(counts[id])])
+		ItemInfo.apply(label, StringName(id))  # hover: what it is and how to use it (Captain, 2026-10-14: "item descriptions plus uses also needed")
+		rows.add_child(label)
 	# Pouches on the stash's carriers and what's in them come with the carrier.
 	var inside := BaseArmory.contents_counts(v.get("stash", []))
 	if not inside.is_empty():
@@ -334,7 +338,9 @@ func _build_armory(rows: VBoxContainer, v: Dictionary) -> void:
 		inside_ids.sort()
 		for id: String in inside_ids:
 			var item := ItemDB.get_item(StringName(id))
-			rows.add_child(_text("%s x%d" % [item.name if item else id, int(inside[id])]))
+			var label := _text("%s x%d" % [item.name if item else id, int(inside[id])])
+			ItemInfo.apply(label, StringName(id))
+			rows.add_child(label)
 
 
 # --- Bits ------------------------------------------------------------------------------------

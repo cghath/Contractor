@@ -19,6 +19,11 @@ var capacity_l: float = 0.0
 var tags: PackedStringArray
 ## Type-specific numbers: weapon damage and fire rate, plate material, visual size...
 var stats: Dictionary
+## What it is, in one or two plain sentences, and what it's for and how to use it in this
+## game, one short line each (Captain, 2026-10-14: "item descriptions plus uses also needed").
+## Shown by ItemInfo; ItemDB.describe gathers them with the numbers.
+var desc: String = ""
+var uses: PackedStringArray
 
 
 ## State a fresh copy of this item starts with: weapons come loaded, armor undamaged.
@@ -67,4 +72,6 @@ static func from_dict(d: Dictionary) -> ItemData:
 	item.capacity_l = float(d.get("capacity_l", 0.0))
 	item.tags = PackedStringArray(d.get("tags", []))
 	item.stats = d.get("stats", {})
+	item.desc = d.get("desc", "")
+	item.uses = PackedStringArray(d.get("uses", []))
 	return item

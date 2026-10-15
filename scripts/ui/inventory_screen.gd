@@ -585,6 +585,12 @@ func _redraw_details() -> void:
 	var title := _label(item.name, 18, COL_TEXT)
 	title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_detail_box.add_child(title)
+	# What it is and what it's for, before the numbers (Captain, 2026-10-14: "item descriptions
+	# plus uses also needed"; ItemInfo).
+	if item.desc != "":
+		_detail_box.add_child(_wrapped(item.desc, COL_TEXT))
+	for use in item.uses:
+		_detail_box.add_child(_wrapped("• " + use, COL_TEXT))
 	var state := _selected_state()
 	var count := int(_selected_entry().get("count", 1))
 	var lines := PackedStringArray()
@@ -864,6 +870,8 @@ func _tile(src: Dictionary, title: String, readout: String, id: StringName, plac
 		readout_label.custom_minimum_size.x = name_label.custom_minimum_size.x
 		(text_box if wide else box).add_child(readout_label)
 	tile.tooltip_text = title + ("\n" + readout if readout != "" else "")
+	if not empty:  # what it is and how to use it (ItemInfo; Captain, 2026-10-14: "item descriptions plus uses also needed")
+		tile.tooltip_text += "\n\n" + ItemInfo.tooltip(id)
 	var dst := _drop_target_of(src)
 	tile.set_drag_forwarding(_get_drag.bind(src, tile), _can_drop.bind(dst), _drop.bind(dst))
 	tile.gui_input.connect(_tile_input.bind(src, tile))
