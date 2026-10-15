@@ -50,6 +50,10 @@ const FOLLOW_UPS := {
 		"line": "Good work. While you're in there: the %s."},
 }
 
+## Tests: false turns off the arrival top-up and the radio follow-ups (suites testing one
+## contract at a time in a hot zone).
+static var enabled := true
+
 var level: Node3D
 var alert: Alert
 var pressure: Pressure
@@ -101,7 +105,7 @@ static func live_target(campaign_seed: int, day: int, zone_id: String, held: int
 	var r: Variant = _knob("hot_zone_live", [LIVE_RANGE.x, LIVE_RANGE.y])
 	var lo := int(r[0]) if r is Array else LIVE_RANGE.x
 	var hi := int(r[1]) if r is Array else LIVE_RANGE.y
-	if held >= lo:
+	if held >= lo or not enabled:
 		return held
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash([campaign_seed, day, zone_id, "live"])
@@ -134,7 +138,7 @@ func _process(delta: float) -> void:
 
 ## Host: looks for sites taken out and contracts done, and sends what's due. Every SCAN_S.
 func server_tick() -> void:
-	if not multiplayer.is_server() or not _deployed_here():
+	if not multiplayer.is_server() or not enabled or not _deployed_here():
 		return
 	_watch_sites()
 	_watch_contracts()
