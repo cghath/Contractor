@@ -1315,6 +1315,9 @@ func _test_medical_menu_scrolls() -> void:
 	casualty.vitals._after_change(true)
 	await _frames(2)
 	var menu := player.player_input.medical_menu
+	var root := get_tree().root
+	var old_size := root.size
+	await _window(1600, 900)  # the menu fits itself to the window (P0-2): a real one, not headless 64 x 64
 	menu.open(casualty)
 	menu.select_part(&"forearm_l")
 	var panel := menu._panel()
@@ -1360,16 +1363,13 @@ func _test_medical_menu_scrolls() -> void:
 	await _seconds(player.treat_seconds(casualty, ItemDB.get_item(item)) + 0.3)
 	# In a short window (the panel at its least height) the activity log, full, still ends
 	# above the panel's foot: only the newest lines that fit are drawn.
-	var root := get_tree().root
-	var old_size := root.size
-	root.size = Vector2i(old_size.x, int(MedicalMenu.PANEL_MIN_H))
-	await _frames(2)
+	await _window(1600, 0)  # the shortest window the layout is made for
 	for n in MedicalMenu.MAX_LOG + 4:
 		menu._add_log("Test line %d" % n)
 	var font := menu.get_theme_default_font()
 	panel = menu._panel()
 	var shown := menu.log_lines_shown(font)
-	var log_end := panel.position.y + MedicalMenu.LOG_Y + 22.0 + (shown - 1) * font.get_height(12) + font.get_descent(12)
+	var log_end := panel.position.y + MedicalMenu.LOG_Y + 22.0 + (shown - 1) * font.get_height(MedicalMenu.LOG_FONT) + font.get_descent(MedicalMenu.LOG_FONT)
 	check(shown >= 1 and log_end <= panel.end.y and menu.log_lines.size() == MedicalMenu.MAX_LOG,
 		"a full activity log in a %.0f px panel: %d of %d lines drawn, ending %.0f px above its foot" % [panel.size.y, shown, menu.log_lines.size(), panel.end.y - log_end])
 	root.size = old_size
@@ -1434,7 +1434,10 @@ func _test_medical_menu() -> void:
 	check(casualty.vitals.triage() == Vitals.TRIAGE_IMMEDIATE and casualty.vitals.net_state.get("tg") == "immediate",
 		"the menu puts a red triage card on him, replicated in net_state (%s)" % casualty.vitals.triage())
 	check(InteractionMenu.condition_report(casualty, player).contains("Immediate (red)"), "Check condition shows the card")
+	var old_size := get_tree().root.size
+	await _window(1600, 900)  # laid out in a real window, not headless 64 x 64
 	check(menu.triage_at(menu._triage_rect(2).get_center()) == Vitals.TRIAGE_DELAYED, "the triage buttons are hit-tested")
+	get_tree().root.size = old_size
 	player.global_position += Vector3(30, 0, 0)
 	player._server_set_triage.rpc_id(1, casualty.get_path(), Vitals.TRIAGE_MINIMAL)
 	await _frames(3)
@@ -1674,3 +1677,12 @@ func _frames(n: int) -> void:
 
 func _seconds(s: float) -> void:
 	await get_tree().create_timer(s).timeout
+
+
+## Sizes the root window so its visible rect (after the UI scale) is `w` x `h` logical px; `h`
+## 0: the shortest the medical menu is made for (MedicalMenu.PANEL_MIN_H and its margins).
+func _window(w: int, h: int) -> void:
+	var root := get_tree().root
+	var tall := float(h) if h > 0 else MedicalMenu.PANEL_MIN_H + MedicalMenu.PANEL_MARGIN * 2.0
+	root.size = Vector2i(ceili(w * root.content_scale_factor), ceili(tall * root.content_scale_factor))
+	await _frames(2)

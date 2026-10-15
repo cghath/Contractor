@@ -63,6 +63,10 @@ func _ready() -> void:
 			return ui)
 	await _fit("objectives panel", func() -> Node: return _in_layer(ObjectivesPanel.new()))
 	await _fit("ammo readout", func() -> Node: return _in_layer(AmmoReadout.new()))
+	# The drawn menus (P0-2, P0-3): what they draw, by name, laid out at each size.
+	await _fit_drawn("medical menu", func() -> Node: return _in_layer(MedicalMenu.new()), _medical_rects)
+	await _fit_drawn("interaction menu", func() -> Node: return _in_layer(InteractionMenu.new()), _interaction_rects)
+	await _test_long_submenu()
 	_summary()
 	GameSettings.reset_all()
 	GameSettings.use_file("")
@@ -143,6 +147,138 @@ func _fit(screen: String, make: Callable) -> void:
 		else:
 			check(bad.is_empty(), "%s fits at %d window sizes%s" % [key, SIZES.size(), "" if bad.is_empty() else ": " + "; ".join(bad)])
 	node.queue_free()
+	await _frames(2)
+
+
+## Like _fit, for a menu drawn by hand (no Controls to walk): `rects` gives the boxes it draws
+## text and buttons in, by name, for the menu under `node` at the viewport's current size.
+func _fit_drawn(screen: String, make: Callable, rects: Callable) -> void:
+	print(screen)
+	_vp.size = SIZES[0]
+	var node: Node = make.call()
+	_vp.add_child(node)
+	await _frames(3)
+	var menu: Control = node.get_child(0).get_child(0)
+	for ui_scale: float in UI_SCALES:
+		var bad := PackedStringArray()
+		for res in SIZES:
+			_vp.size = Vector2i((Vector2(res) / ui_scale).floor())
+			await _frames(2)
+			var window := Rect2(Vector2.ZERO, Vector2(_vp.size)).grow(1.0)
+			var off := PackedStringArray()
+			var boxes: Dictionary = rects.call(menu)
+			for name: String in boxes:
+				var r: Rect2 = boxes[name]
+				if r.size.x <= 0.0 or r.size.y <= 0.0 or not window.encloses(r):
+					off.append("%s %s" % [name, r])
+			if not off.is_empty():
+				bad.append("%dx%d: %s" % [res.x, res.y, ", ".join(off.slice(0, 3)) + (" (+%d more)" % (off.size() - 3) if off.size() > 3 else "")])
+		var key := "%s @%.1f" % [screen, ui_scale]
+		_report[key] = bad
+		if key in KNOWN:
+			print("  [known] %s: %s" % [key, "fits everywhere" if bad.is_empty() else "; ".join(bad)])
+			check(not bad.is_empty(), "%s is listed as KNOWN but now fits at every size: take it off KNOWN" % key)
+		else:
+			check(bad.is_empty(), "%s fits at %d window sizes%s" % [key, SIZES.size(), "" if bad.is_empty() else ": " + "; ".join(bad)])
+	node.queue_free()
+	await _frames(2)
+
+
+## The medical menu's boxes (MedicalMenu.layout_rects): each inside the panel too.
+func _medical_rects(menu: MedicalMenu) -> Dictionary:
+	var out := menu.layout_rects()
+	var panel: Rect2 = out.panel
+	for name: String in out.keys():
+		if name != "panel" and not panel.grow(0.5).encloses(out[name]):
+			out[name + " (outside the panel)"] = Rect2(-1, -1, 0, 0)
+	return out
+
+
+## A ring of RING_MAX entries, one with a full body's Loot list (MAX_LOOT_ENTRIES) and one with
+## a short submenu, opened on a point in the middle, at each corner and edge, and where the
+## self menu puts each body region (InteractionMenu.SELF_LAYOUT): every ring entry, submenu
+## entry and "more" row.
+func _interaction_rects(menu: InteractionMenu) -> Dictionary:
+	var out := {}
+	var size := menu.get_viewport_rect().size
+	var spots: Array[Vector2] = [size * 0.5, Vector2(4, 4), Vector2(size.x - 4, 4), Vector2(4, size.y - 4), size - Vector2(4, 4),
+		Vector2(size.x * 0.5, 4), Vector2(size.x * 0.5, size.y - 4), Vector2(4, size.y * 0.5), Vector2(size.x - 4, size.y * 0.5)]
+	for region: StringName in InteractionMenu.SELF_LAYOUT:
+		spots.append(size * 0.5 + InteractionMenu.SELF_LAYOUT[region])
+	var actions := _ring_actions()
+	for spot in spots:
+		menu.open_object()
+		var points: Array[Dictionary] = [{"target": menu, "screen": spot, "actions": actions}]
+		menu.set_points(points)
+		menu.set_cursor(spot)
+		var ring := menu.entry_rects()
+		if ring.size() != actions.size():
+			out["ring at %s didn't open" % spot] = Rect2(-1, -1, 0, 0)
+			continue
+		for i in ring.size():
+			out["ring %d at %s" % [i, spot]] = ring[i]
+			if actions[i].has("items"):
+				menu.close()  # fresh, so another submenu still open can't sit over this entry
+				menu.open_object()
+				menu.set_points(points)
+				menu.set_cursor(spot)
+				menu.set_cursor(ring[i].get_center())
+				var sub := menu.submenu_rects(i) + menu.submenu_arrows(i)
+				if sub.is_empty():
+					out["submenu %d at %s didn't open" % [i, spot]] = Rect2(-1, -1, 0, 0)
+				for j in sub.size():
+					out["submenu %d.%d at %s" % [i, j, spot]] = sub[j]
+	menu.close()
+	return out
+
+
+func _ring_actions() -> Array[Dictionary]:
+	var loot := []
+	for j in InteractionMenu.MAX_LOOT_ENTRIES:
+		loot.append({"id": &"loot_item", "label": "Loot entry %d with a long name" % j, "disabled": ""})
+	var actions: Array[Dictionary] = [{"id": &"loot", "label": "Loot", "disabled": "", "items": loot}]
+	for i in InteractionMenu.RING_MAX - 2:
+		actions.append({"id": StringName("entry_%d" % i), "label": "Entry %d" % i, "disabled": ""})
+	actions.append({"id": &"group", "label": "More", "disabled": "", "items": [{"id": &"a", "label": "A", "disabled": ""}, {"id": &"b", "label": "B", "disabled": ""}]})
+	return actions
+
+
+## In the shortest window (1280 x 720 at UI scale 1.5) a full Loot list doesn't fit: it shows
+## what does with a "more" row each way, scrolls to its last entry, and the cursor on an entry
+## highlights that entry (P0-3: it used to run off the window, its last rows out of reach).
+func _test_long_submenu() -> void:
+	print("A long Loot list in a short window")
+	_vp.size = Vector2i((Vector2(SIZES[0]) / UI_SCALES[-1]).floor())
+	var layer := _in_layer(InteractionMenu.new())
+	_vp.add_child(layer)
+	await _frames(2)
+	var menu: InteractionMenu = layer.get_child(0).get_child(0)
+	var actions := _ring_actions()
+	var loot: Array = actions[0].items
+	var spot := Vector2(_vp.size) * 0.5
+	menu.open_object()
+	var points: Array[Dictionary] = [{"target": menu, "screen": spot, "actions": actions}]
+	menu.set_points(points)
+	menu.set_cursor(spot)
+	menu.set_cursor(menu.entry_rects()[0].get_center())
+	var shown := menu.submenu_rects(0).size()
+	check(shown < loot.size() and menu.submenu_arrows(0).size() == 2,
+		"%d loot entries in a %d px window: %d shown, with a more row each way" % [loot.size(), _vp.size.y, shown])
+	var steps := 0
+	while menu.scroll_submenu(1) and steps < loot.size():
+		steps += 1
+	var rects := menu.submenu_rects(0)
+	menu.set_cursor(rects[-1].get_center())
+	check(menu.sub_scroll + rects.size() == loot.size() and menu.highlighted() == loot[-1],
+		"scrolled %d rows: the last entry is shown and highlighted (%s)" % [steps, menu.highlighted().get("label")])
+	menu.set_cursor(menu.submenu_arrows(0)[0].get_center())
+	var before := menu.sub_scroll
+	menu._process(InteractionMenu.SUB_SCROLL_STEP_S + 0.01)
+	check(menu.sub_scroll == before - 1 and menu.highlighted().is_empty(), "resting on the more-above row scrolls back up, and picks nothing")
+	check(MedicalMenu.LOG_FONT >= UiKit.FONT_SMALL and InteractionMenu.ENTRY_FONT >= UiKit.FONT_SMALL and InteractionMenu.POINT_FONT >= UiKit.FONT_SMALL
+		and InteractionMenu.HINT_FONT >= UiKit.FONT_SMALL, "the drawn menus' text is 14 px or more")
+	menu.close()
+	layer.queue_free()
 	await _frames(2)
 
 

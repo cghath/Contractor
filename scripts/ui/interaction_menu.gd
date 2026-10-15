@@ -163,13 +163,25 @@ const KIND_TEXT := {
 }
 const _HIDE := "-"
 
-const COLOUR_BG := Color(0.05, 0.07, 0.05, 0.82)
-const COLOUR_TEXT := Color(1, 1, 1)
-const COLOUR_HIGHLIGHT := Color("ffd35a")
-const COLOUR_DISABLED := Color(0.55, 0.55, 0.55)
-const COLOUR_POINT := Color("c8d6a0")
+## Colours and text sizes from the shared look (UiKit; Captain, 2026-10-14: "all the UIs need
+## a pass", P0-3 in docs/ui_audit.md): nothing under 14 px.
+const COLOUR_BG := UiKit.PANEL_BG
+const COLOUR_TEXT := UiKit.TEXT
+const COLOUR_HIGHLIGHT := UiKit.ACCENT
+const COLOUR_DISABLED := UiKit.TEXT_DIM
+const COLOUR_POINT := UiKit.TEXT
+const ENTRY_FONT := UiKit.FONT_BODY
+const POINT_FONT := UiKit.FONT_SMALL
+const HINT_FONT := UiKit.FONT_SMALL
 ## Width of the item hint under the cursor (entry_hint).
 const HINT_W := 320.0
+## Rings and submenus keep this far inside the visible rect (P0-3: they were never clamped, so
+## a point near an edge, the self ring's head at UI scale 1.5, or a 20-entry Loot list ran off
+## the window).
+const SCREEN_MARGIN := UiKit.SPACE_S
+## A submenu taller than the window shows what fits and scrolls: the mouse wheel, or resting
+## the cursor on its "more above" / "more below" row steps it once every this long.
+const SUB_SCROLL_STEP_S := 0.12
 
 var player: Soldier
 var mode := Mode.CLOSED
@@ -184,6 +196,9 @@ var _open_target: Node        # whose actions are showing
 var _open_region := &""       # and which of its points (a region, WAIST, or &"" for a single point)
 var _expanded := -1           # the ring entry whose submenu is showing
 var _held_s := -1.0           # how long Left Ctrl has been held (< 0: not held)
+## The first entry of the open submenu shown, when it's longer than the window (P0-3).
+var sub_scroll := 0
+var _sub_step_left := 0.0
 
 
 func _init(p_player: Soldier = null) -> void:
@@ -882,6 +897,7 @@ func open_object() -> void:
 	points = []
 	_open_target = null
 	_expanded = -1
+	sub_scroll = 0
 	queue_redraw()
 
 
@@ -892,6 +908,7 @@ func open_self() -> void:
 	_open_target = player
 	_open_region = WAIST
 	_expanded = -1
+	sub_scroll = 0
 	refresh_self()
 	cursor = _open_point().get("screen", _centre())
 
@@ -912,6 +929,7 @@ func set_points(new_points: Array[Dictionary]) -> void:
 	if _open_point().is_empty():
 		_open_target = null
 		_expanded = -1
+	sub_scroll = 0
 	_update_hover()
 	queue_redraw()
 
@@ -939,6 +957,7 @@ func close() -> void:
 	points = []
 	_open_target = null
 	_expanded = -1
+	sub_scroll = 0
 	queue_redraw()
 
 
@@ -953,7 +972,10 @@ func highlighted() -> Dictionary:
 		var sub_rects := _sub_rects(point, _expanded)
 		for j in sub_rects.size():
 			if sub_rects[j].has_point(cursor):
-				return sub[j]
+				return sub[sub_scroll + j]
+		for arrow in _sub_arrows(point, _expanded):
+			if arrow.has_point(cursor):
+				return {}  # a "more" row: it scrolls, it isn't an action
 	var rects := _ring_rects(point)
 	for i in rects.size():
 		if rects[i].has_point(cursor):
@@ -966,9 +988,45 @@ func entry_rects() -> Array[Rect2]:
 	return _ring_rects(_open_point())
 
 
-## Screen rects of a ring entry's submenu.
+## Screen rects of a ring entry's submenu: the entries shown, from sub_scroll on (all of them
+## unless it's taller than the window).
 func submenu_rects(index: int) -> Array[Rect2]:
 	return _sub_rects(_open_point(), index)
+
+
+## The open submenu's "more above" and "more below" rows ([] when it all fits).
+func submenu_arrows(index: int) -> Array[Rect2]:
+	return _sub_arrows(_open_point(), index)
+
+
+## Scrolls the open submenu by `rows` (negative: up), kept within it. Returns whether it moved.
+func scroll_submenu(rows: int) -> bool:
+	var point := _open_point()
+	if point.is_empty() or _expanded < 0 or _expanded >= point.actions.size():
+		return false
+	var total: int = point.actions[_expanded].get("items", []).size()
+	var before := sub_scroll
+	sub_scroll = clampi(sub_scroll + rows, 0, maxi(total - _sub_fit(total), 0))
+	if sub_scroll != before:
+		queue_redraw()
+	return sub_scroll != before
+
+
+## The cursor resting on a submenu's "more" row scrolls it a step at a time.
+func _process(delta: float) -> void:
+	if not is_open() or _expanded < 0:
+		return
+	var arrows := submenu_arrows(_expanded)
+	var dir := 0
+	if arrows.size() == 2:
+		dir = -1 if arrows[0].has_point(cursor) else (1 if arrows[1].has_point(cursor) else 0)
+	if dir == 0:
+		_sub_step_left = 0.0
+		return
+	_sub_step_left -= delta
+	if _sub_step_left <= 0.0:
+		_sub_step_left = SUB_SCROLL_STEP_S
+		scroll_submenu(dir)
 
 
 func _open_point() -> Dictionary:
@@ -985,13 +1043,16 @@ func _update_hover() -> void:
 	if not point.is_empty():
 		var actions: Array = point.actions
 		if _expanded >= 0 and _expanded < actions.size():
-			for r in _sub_rects(point, _expanded):
+			for r in _sub_rects(point, _expanded) + _sub_arrows(point, _expanded):
 				if r.has_point(cursor):
 					return  # inside the open submenu
 		var rects := _ring_rects(point)
 		for i in rects.size():
 			if rects[i].has_point(cursor):
-				_expanded = i if actions[i].has("items") and not actions[i].items.is_empty() else -1
+				var expand := i if actions[i].has("items") and not actions[i].items.is_empty() else -1
+				if expand != _expanded:
+					_expanded = expand
+					sub_scroll = 0
 				return
 	# Over an action point: open it (the nearest one wins).
 	var best := {}
@@ -1006,32 +1067,101 @@ func _update_hover() -> void:
 		_open_target = best.target
 		_open_region = best.get("region", &"")
 		_expanded = -1
+	sub_scroll = 0
 
 
+## The ring around `point`, moved as a whole to stay inside the window (P0-3): a point near an
+## edge, or the self ring's head at a big UI scale, keeps every entry on screen; the spokes
+## still run from the point.
 func _ring_rects(point: Dictionary) -> Array[Rect2]:
 	var rects: Array[Rect2] = []
 	if point.is_empty():
 		return rects
 	var n: int = point.actions.size()
+	var bounds := Rect2()
 	for i in n:
 		var angle := -PI * 0.5 + TAU * i / n if n > 1 else 0.0
 		var centre: Vector2 = point.screen + Vector2.from_angle(angle) * RING_RADIUS_PX
-		rects.append(Rect2(centre - ENTRY_SIZE * 0.5, ENTRY_SIZE))
+		var rect := Rect2(centre - ENTRY_SIZE * 0.5, ENTRY_SIZE)
+		bounds = rect if i == 0 else bounds.merge(rect)
+		rects.append(rect)
+	var shift := keep_inside(bounds, _area())
+	for i in n:
+		rects[i].position += shift
 	return rects
 
 
+## How far to move `box` to put it inside `area` (its top left wins when it can't fit).
+static func keep_inside(box: Rect2, area: Rect2) -> Vector2:
+	var to := box.position
+	to.x = maxf(minf(to.x, area.end.x - box.size.x), area.position.x)
+	to.y = maxf(minf(to.y, area.end.y - box.size.y), area.position.y)
+	return to - box.position
+
+
+## Where the menu may draw: the visible rect less SCREEN_MARGIN.
+func _area() -> Rect2:
+	return Rect2(Vector2.ZERO, _screen_size()).grow(-SCREEN_MARGIN)
+
+
+## How many of a `total`-entry submenu show at once: all, or what fits in the window less a
+## "more" row above and below.
+func _sub_fit(total: int) -> int:
+	var slots := int(floor((_area().size.y + 2.0) / (ENTRY_SIZE.y + 2.0)))
+	return total if total <= slots else maxi(slots - 2, 1)
+
+
+## The submenu's column: beside its ring entry on the side away from the point, or the other
+## side when that would leave the window (then pushed inside it).
+func _sub_x(point: Dictionary, parent: Rect2) -> float:
+	var area := _area()
+	var right := parent.get_center().x >= (point.screen as Vector2).x
+	var x := parent.end.x + SUB_GAP_PX if right else parent.position.x - SUB_GAP_PX - ENTRY_SIZE.x
+	if x + ENTRY_SIZE.x > area.end.x or x < area.position.x:
+		x = parent.position.x - SUB_GAP_PX - ENTRY_SIZE.x if right else parent.end.x + SUB_GAP_PX
+	return clampf(x, area.position.x, maxf(area.end.x - ENTRY_SIZE.x, area.position.x))
+
+
+## The submenu's top (its "more above" row when it scrolls): centred on its ring entry, kept
+## inside the window.
+func _sub_top(parent: Rect2, rows: int) -> float:
+	var area := _area()
+	var h := (ENTRY_SIZE.y + 2.0) * rows - 2.0
+	var top := parent.get_center().y - h * 0.5
+	return maxf(minf(top, area.end.y - h), area.position.y)
+
+
+## The entries shown of ring entry `index`'s submenu (from sub_scroll on).
 func _sub_rects(point: Dictionary, index: int) -> Array[Rect2]:
 	var rects: Array[Rect2] = []
 	if point.is_empty() or index < 0 or index >= point.actions.size():
 		return rects
-	var sub: Array = point.actions[index].get("items", [])
+	var total: int = point.actions[index].get("items", []).size()
+	var shown := _sub_fit(total)
+	var scrolls := shown < total
 	var parent := _ring_rects(point)[index]
-	var screen: Vector2 = point.screen
-	var right := parent.get_center().x >= screen.x
-	var x := parent.end.x + SUB_GAP_PX if right else parent.position.x - SUB_GAP_PX - ENTRY_SIZE.x
-	var top := parent.get_center().y - (ENTRY_SIZE.y + 2.0) * sub.size() * 0.5
-	for j in sub.size():
+	var x := _sub_x(point, parent)
+	var top := _sub_top(parent, shown + (2 if scrolls else 0)) + (ENTRY_SIZE.y + 2.0 if scrolls else 0.0)
+	var first := sub_scroll if index == _expanded else 0
+	for j in mini(shown, total - first):
 		rects.append(Rect2(Vector2(x, top + (ENTRY_SIZE.y + 2.0) * j), ENTRY_SIZE))
+	return rects
+
+
+## A scrolling submenu's "more above" and "more below" rows, or [] when it all fits.
+func _sub_arrows(point: Dictionary, index: int) -> Array[Rect2]:
+	var rects: Array[Rect2] = []
+	if point.is_empty() or index < 0 or index >= point.actions.size():
+		return rects
+	var total: int = point.actions[index].get("items", []).size()
+	var shown := _sub_fit(total)
+	if shown >= total:
+		return rects
+	var parent := _ring_rects(point)[index]
+	var x := _sub_x(point, parent)
+	var top := _sub_top(parent, shown + 2)
+	rects.append(Rect2(Vector2(x, top), ENTRY_SIZE))
+	rects.append(Rect2(Vector2(x, top + (ENTRY_SIZE.y + 2.0) * (shown + 1)), ENTRY_SIZE))
 	return rects
 
 
@@ -1047,7 +1177,7 @@ func _draw() -> void:
 	if not is_open():
 		return
 	var font := get_theme_default_font()
-	var font_size := 15
+	var font_size := ENTRY_FONT
 	var lit := highlighted()
 	for p in points:
 		var open: bool = p.target == _open_target and p.get("region", &"") == _open_region
@@ -1055,7 +1185,12 @@ func _draw() -> void:
 		draw_arc(p.screen, 9.0, 0.0, TAU, 20, Color(0, 0, 0, 0.6), 1.5)
 		var region: StringName = p.get("region", &"")
 		if region != &"" and not open:  # name the body points so they read like ACE's
-			draw_string(font, p.screen + Vector2(11, 5), REGION_NAMES[region].capitalize(), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, COLOUR_POINT)
+			var region_name := String(REGION_NAMES[region]).capitalize()
+			var w := font.get_string_size(region_name, HORIZONTAL_ALIGNMENT_LEFT, -1, POINT_FONT).x
+			var at: Vector2 = p.screen + Vector2(11, 5)
+			if at.x + w > _area().end.x:
+				at.x = p.screen.x - 11.0 - w  # near the right edge: to the point's left
+			draw_string(font, at, region_name, HORIZONTAL_ALIGNMENT_LEFT, -1, POINT_FONT, COLOUR_POINT)
 	var point := _open_point()
 	if not point.is_empty():
 		var actions: Array = point.actions
@@ -1067,7 +1202,14 @@ func _draw() -> void:
 			var sub: Array = actions[_expanded].get("items", [])
 			var sub_rects := _sub_rects(point, _expanded)
 			for j in sub_rects.size():
-				_draw_entry(font, font_size, sub_rects[j], sub[j], lit, false)
+				_draw_entry(font, font_size, sub_rects[j], sub[sub_scroll + j], lit, false)
+			var arrows := _sub_arrows(point, _expanded)
+			if arrows.size() == 2:  # a long Loot list: how many more each way
+				var below := sub.size() - sub_scroll - sub_rects.size()
+				_draw_entry(font, POINT_FONT, arrows[0], {"label": "^  %d more" % sub_scroll, "disabled": "" if sub_scroll > 0 else "-"}, {},
+					arrows[0].has_point(cursor) and sub_scroll > 0)
+				_draw_entry(font, POINT_FONT, arrows[1], {"label": "v  %d more" % below, "disabled": "" if below > 0 else "-"}, {},
+					arrows[1].has_point(cursor) and below > 0)
 	draw_circle(cursor, 3.0, Color.WHITE)
 	draw_arc(cursor, 5.0, 0.0, TAU, 16, Color.BLACK, 1.0)
 	# The highlighted entry names an item (a treatment, loot, a gift, a ground item): what it
@@ -1075,13 +1217,12 @@ func _draw() -> void:
 	# uses also needed").
 	var hint := entry_hint(lit)
 	if hint != "":
-		var size := font.get_multiline_string_size(hint, HORIZONTAL_ALIGNMENT_LEFT, HINT_W, 13)
+		var size := font.get_multiline_string_size(hint, HORIZONTAL_ALIGNMENT_LEFT, HINT_W, HINT_FONT)
 		var box := Rect2(cursor + Vector2(14, 14), size + Vector2(12, 10))
-		var screen := _screen_size()
-		box.position = box.position.min(screen - box.size - Vector2(4, 4))
+		box.position += keep_inside(box, _area())
 		draw_rect(box, COLOUR_BG)
-		draw_rect(box, COLOUR_POINT, false, 1.0)
-		draw_multiline_string(font, box.position + Vector2(6, 4 + font.get_ascent(13)), hint, HORIZONTAL_ALIGNMENT_LEFT, HINT_W, 13, -1, COLOUR_TEXT)
+		draw_rect(box, COLOUR_HIGHLIGHT, false, 1.0)
+		draw_multiline_string(font, box.position + Vector2(6, 4 + font.get_ascent(HINT_FONT)), hint, HORIZONTAL_ALIGNMENT_LEFT, HINT_W, HINT_FONT, -1, COLOUR_TEXT)
 
 
 ## The item a menu entry names, or &"": a treatment's or loot entry's "item", a gift's stowed
@@ -1113,5 +1254,6 @@ func _draw_entry(font: Font, font_size: int, rect: Rect2, action: Dictionary, li
 		draw_rect(rect, COLOUR_HIGHLIGHT, false, 1.5)
 	var colour := COLOUR_DISABLED if disabled else (COLOUR_HIGHLIGHT if on else COLOUR_TEXT)
 	var text := String(action.label) + ("  >" if action.has("items") and not action.items.is_empty() else "")
+	text = MedicalMenu.elide(font, text, rect.size.x - 8.0, font_size)  # a long loot name cuts with "...", the hint has it whole
 	var baseline := rect.position + Vector2(0.0, (rect.size.y + font.get_ascent(font_size) - font.get_descent(font_size)) * 0.5)
 	draw_string(font, baseline, text, HORIZONTAL_ALIGNMENT_CENTER, rect.size.x, font_size, colour)
