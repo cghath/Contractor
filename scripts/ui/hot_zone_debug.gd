@@ -11,6 +11,8 @@ const REFRESH_S := 0.5
 
 var _label: Label
 var _refresh := 0.0
+## The readout's width when there's no HUD zone to follow.
+const WIDTH := 364.0
 
 
 func _init() -> void:
@@ -19,11 +21,10 @@ func _init() -> void:
 
 
 func _ready() -> void:
-	_label = Label.new()
-	_label.position = Vector2(12, 120)
-	_label.add_theme_font_size_override(&"font_size", 13)
-	_label.add_theme_color_override(&"font_outline_color", Color.BLACK)
-	_label.add_theme_constant_override(&"outline_size", 4)
+	# The HUD's small outlined style, wrapping, under the HUD's top-right zone (docs/ui_audit.md
+	# P2-22: it was 13 px at (12,120), over the command menu and the squad list).
+	_label = UiKit.hud_label("", &"HudSmallLabel")
+	_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_label.visible = false
 	add_child(_label)
 
@@ -63,6 +64,26 @@ func _process(delta: float) -> void:
 		return
 	_refresh = REFRESH_S
 	_label.text = text()
+	place()
+
+
+## Puts the readout under the HUD's top-right zone (objectives and hint), as wide as it.
+func place() -> void:
+	var zone := get_tree().get_first_node_in_group(Hud.TOP_RIGHT_GROUP) as Control
+	var view := get_viewport().get_visible_rect().size
+	var width := zone.size.x if zone and zone.size.x > 0.0 else WIDTH
+	var top := (zone.get_global_rect().end.y + UiKit.SPACE_M) if zone else Hud.MARGIN
+	_label.max_lines_visible = -1
+	for i in 2:  # twice: a wrapping label works its height out from the width it had
+		_label.size = Vector2(width, 0.0)
+	_label.position = Vector2(view.x - Hud.MARGIN - width, top)
+	# Only as many lines as there's room for above the weapon readout (it's a dev readout).
+	var room := view.y - Hud.MARGIN - AmmoReadout.HEIGHT - UiKit.SPACE_M - top
+	var spacing := float(_label.get_theme_constant(&"line_spacing"))
+	var fit := maxi(floori((room + spacing) / maxf(float(_label.get_line_height()) + spacing, 1.0)), 1)
+	if _label.get_line_count() > fit:
+		_label.max_lines_visible = fit
+		_label.size = Vector2(width, 0.0)
 
 
 ## The readout: zone and area states, the last known position, pressure, the enemy's moves.

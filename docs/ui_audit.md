@@ -99,27 +99,27 @@ Headless fit is the result of `tests/ui_test.gd` (run R0969, before the fixes on
    - Muted teal on dark is low contrast.
    - The fixed columns take 694 px, which leaves about 160 px for the doll and grid at 1280x720 with 1.5.
    - Buttons are `FOCUS_NONE`, so the screen is mouse only.
-9. **Vehicle readout, read.**
+9. **Vehicle readout, read. Fixed on ui/hud-pass:** one outlined label per part in the bottom-centre zone, flowing onto more lines (key hints go first on a short window).
    - It is one run-on line of up to 8 parts ("Humvee, Gunner | Fuel 40 L | Engine 55% | ... | F: get out"), 800 to 900 px wide, with no wrap.
    - It has **no outline**, so it is unreadable over bright ground.
    - It sits 17 px under the subtitles.
-10. **HUD left edge overlap, read.** Three things stack at x = 12 to 16:
+10. **HUD left edge overlap, read. Fixed on ui/hud-pass:** one left column (command menu over the squad list, which cuts with "+n more" when short); the hot-zone readout moved under the objectives. Three things stack at x = 12 to 16:
     - the squad list (bottom-left, growing up to about 280 px with 8 squadmates);
     - the command menu (centre-left);
     - the hot-zone readout at the absolute position (12,120).
 
     At 720 px tall the squad list and the command menu overlap.
-11. **HUD centre labels drift and run on, read.**
+11. **HUD centre labels drift and run on, read. Fixed on ui/hud-pass:** a centre column, grow both, wrapping; the downed title (26 px) and its lines (18 px) are separate labels.
     - The prompt, the downed text and the flash message use `PRESET_CENTER` without `grow_horizontal = BOTH`, so longer text grows to the right of centre.
     - The 28 px downed line "Your team can treat you; you'll come round when your body recovers" is about 900 px wide with no wrap, wider than an 853 px layout.
 12. **Base pages clip text silently, read.**
     - Roster, hiring and medbay rows are 700, 760 and 640 px Labels with `clip_text`, so wages and skills are cut with no "..." and no tooltip.
     - The armory intro (about 130 characters) and the header are single unwrapped lines.
     - BaseUI's own Shop tab duplicates the shop screen in a different style.
-13. **Objective hint and markers, read.**
+13. **Objective hint and markers, read. Fixed on ui/hud-pass:** the hint is as wide as the panel, under it in the top-right zone; marker text 14 px, diamonds 5 to 7 px at 45 to 70%.
     - The hint is 480 px wide under a 364 px objectives panel, so its left edge pokes out 116 px.
     - Marker labels are 11 to 12 px, and diamonds are 3.5 px at 30% alpha.
-14. **Ammo readout, read.** The grenade line is 12 px at 40% alpha, the fill word is 14 px at 75%, and the pips are 4 px wide. The grenade line is drawn 3 px below the control's own box.
+14. **Ammo readout, read. Fixed on ui/hud-pass:** pips 6x14, fill word 16 px, grenades 14 px at 70%, all inside its 280x56 box. The grenade line is 12 px at 40% alpha, the fill word is 14 px at 75%, and the pips are 4 px wide. The grenade line is drawn 3 px below the control's own box.
 15. **Keyboard, read.** No screen took focus until this branch: Tab, the arrow keys and Enter did nothing until the first click. The menu, the pause menu and the inventory are mouse only. There is no gamepad support anywhere.
 16. **Debrief, read.** It is being reworked on ui/debrief-salvage; these are notes for that branch.
     - Intel rows (label, Turn in, faction picker, Sell) don't wrap.
@@ -138,7 +138,7 @@ Headless fit is the result of `tests/ui_test.gd` (run R0969, before the fixes on
     - medical.
 20. **Briefing panel, read.** Its 12 to 13 px help and section text is at 60% alpha. It belongs to fix/briefing-map-ui (merged); adopt `HintLabel` and `HeadingLabel` from the kit when it is next touched.
 21. **Bug report, read. Fixed on ui/small-screens.** Its title (about 440 px) is wider than its 420 px box, and it uses the default theme.
-22. **Hot-zone and AI dev overlays, read.**
+22. **Hot-zone and AI dev overlays, read. Hot-zone part fixed on ui/hud-pass** (14 px HudSmallLabel, under the top-right zone, cut to the room above the weapon readout).
     - The hot-zone readout is 13 px at an absolute position and overlaps the command menu.
     - Up to 16 AI labels pile up over the squad. (Thinned on ui/small-screens: 8 labels, the nearest 3 in full.)
 23. **Design gaps, read.** The motor pool has no page (it is only an interaction ring), and the roster page has no terminal. These are design questions to settle when the base hub is restyled, not layout bugs.
@@ -222,7 +222,9 @@ func open() -> void:
   - ammo readout
   - the medical menu and the interaction menu (drawn: their `layout_rects` and ring and submenu rects, with a ring at every edge and a 20-entry Loot list; plus the long list scrolling to its end)
 - **Inventory:** built on an AI test body (`_inventory_body`), with the theme, text-size, focus and column checks in `_test_inventory`.
-- **Not covered yet:** the HUD and the vehicle readout need a player. ui/hud-pass should add a hosted-level fit section for them, the way `map_test` hosts a level.
+- **The HUD (`_test_hud`, ui/hud-pass):** hosts a level the way `map_test` does and fills the HUD in at its longest (squad list and open command menu, objectives and hint, the dev hot-zone readout, four radio lines over a nine-part vehicle readout, prompt, flash message; then downed). At every size and scale nothing may run off the window and no two zones may overlap (`FIT hud @<scale>`).
+- **HUD zones** (`scripts/player/hud.gd`): top-right objectives, hint and hot-zone readout; left column command menu over squad list; bottom-right weapon; bottom-centre radio over vehicle; a centre column for the message, downed text, crosshair and prompt. Every HUD line uses the theme's `HudLabel` (18 px, outline 4), `HudSmallLabel` (14), `HudAlertLabel` (26, warn) or `HudWarnLabel`, through `UiKit.hud_label`; the objectives panel uses `HudPanel`. With the command menu open on a short window the squad list drops to the small HUD size and keeps the selected (">") members first, then the carry and spawn-protection lines, then the header, with "+n more"; at 1280x720 with UI scale 1.5 (or 2.0, and 1366x768 at 2.0) no line is left, so the menu's title says "+n squad lines below" until it shuts. The squad list hides under the open inventory and map, as the weapon and objective hint do.
+- **Not covered yet:** the medical, interaction and inventory screens are fitted on their own (above), not yet inside `_test_hud`'s hosted level.
 
 ## Follow-up branches
 

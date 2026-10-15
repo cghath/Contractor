@@ -5,24 +5,27 @@ extends PanelContainer
 ## there's no deployment. Contract messages (signed, voided, civilian casualties) flash on
 ## the HUD while it's up.
 
+## Its width (logical px); the Hud's top-right zone is this wide, or less on a narrow window.
+const WIDTH := 364.0
+
 var _label: Label
 
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	# Placed by the Hud's top-right zone; these anchors only count on its own (ui_test).
 	anchor_left = 1.0
 	anchor_right = 1.0
-	offset_left = -380.0
+	offset_left = -16.0 - WIDTH
 	offset_right = -16.0
 	offset_top = 16.0
 	grow_horizontal = Control.GROW_DIRECTION_BEGIN
-	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.05, 0.07, 0.05, 0.6)
-	style.set_content_margin_all(8)
-	add_theme_stylebox_override(&"panel", style)
+	# The theme's translucent HUD panel and body text (docs/ui_audit.md P2-19: its own StyleBox
+	# and 15 px text before).
+	UiKit.apply(self)
+	theme_type_variation = &"HudPanel"
 	_label = Label.new()
 	_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_label.add_theme_font_size_override(&"font_size", 15)
 	add_child(_label)
 	Contracts.objectives.changed.connect(refresh)
 	Contracts.notice.connect(_on_notice)
@@ -44,6 +47,6 @@ func text() -> String:
 
 
 func _on_notice(text: String) -> void:
-	var hud := get_parent() as Hud
+	var hud := Hud.of(self)
 	if hud and visible:
 		hud.flash(text)

@@ -264,7 +264,7 @@ var _seen := {}              # every peer: instance id -> Soldier seated last fr
 var _snaps: Array = []       # clients: [host time, position, rotation]
 var _clock := INF            # clients: local time minus host time
 var _fire_fx: Node3D
-var _hud: Label              # the local occupant's readout
+var _hud: Hud                # the local occupant's HUD, while it shows this vehicle's readout
 var _send_left := 0.0
 var _last_sent := {}
 var _gun_local_next := 0.0
@@ -2020,7 +2020,8 @@ func _local_controls(delta: float) -> void:
 	var seat := seat_of(me) if me else -1
 	if seat < 0 or not Vehicle.local_input or not me.is_local() or me.player_input == null or me.player_input.hud == null:
 		if _hud:
-			_hud.queue_free()
+			if is_instance_valid(_hud):
+				_hud.hide_vehicle()
 			_hud = null
 		return
 	var free := Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and me.vitals.is_up() and not me.player_input.interaction.is_open() \
@@ -2042,41 +2043,43 @@ func _local_controls(delta: float) -> void:
 		if not info.is_empty() and Soldier._now() >= _gun_local_next:
 			_gun_local_next = Soldier._now() + 60.0 / float(info.rpm)
 			request_gun.rpc_id(1, gun_direction(me))
-	if _hud == null:
-		_hud = Label.new()
-		_hud.name = "VehicleReadout"
-		_hud.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
-		_hud.position.y -= 70
-		_hud.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		_hud.grow_horizontal = Control.GROW_DIRECTION_BOTH
-		me.player_input.hud.add_child(_hud)
-	_hud.text = readout(seat)
+	_hud = me.player_input.hud
+	_hud.show_vehicle(readout_parts(seat))
 
 
-## One line for the HUD: the vehicle, the seat, speed, fuel, damage, the gun's rounds, the
-## view key (VehicleCamera: the view it switches to), and the get-out key when it's on
-## (ControlOptions: the seat's menu has no Get out then).
-func readout(seat: int) -> String:
-	var parts := PackedStringArray(["%s, %s" % [display_name(), seat_name(seat)]])
+## The HUD's readout in parts (Hud.show_vehicle lays them out in its bottom-centre zone, each
+## its own label, flowing onto another line; docs/ui_audit.md P1-9: one run-on line of up to 8
+## parts, 800 to 900 px wide, with no outline): the vehicle and seat, speed, fuel, damage, the
+## gun's rounds, a warning (style "warn"), the view key (VehicleCamera: the view it switches to)
+## and the get-out key when it's on (ControlOptions: the seat's menu has no Get out then; both
+## style "key"). Each is {"text", "style"}.
+func readout_parts(seat: int) -> Array[Dictionary]:
+	var parts: Array[Dictionary] = [{"text": "%s, %s" % [display_name(), seat_name(seat)], "style": &""}]
 	if seat_kind(seat) == DRIVER:
-		parts.append("%d km/h" % roundi(absf(forward_speed()) * 3.6))
-	parts.append("Fuel %d L" % roundi(fuel_litres()))
+		parts.append({"text": "%d km/h" % roundi(absf(forward_speed()) * 3.6), "style": &""})
+	parts.append({"text": "Fuel %d L" % roundi(fuel_litres()), "style": &""})
 	for z: StringName in [ZONE_ENGINE, ZONE_WHEELS, ZONE_HULL]:
 		var h := zone_health(z)
 		if h < 0.999:
-			parts.append("%s %d%%" % [VehicleService.zone_name(z, kind).capitalize(), roundi(h * 100.0)])
+			parts.append({"text": "%s %d%%" % [VehicleService.zone_name(z, kind).capitalize(), roundi(h * 100.0)], "style": &"warn" if h < 0.35 else &""})
 	if seat_kind(seat) == GUNNER:
 		var info := gun_info()
 		if not info.is_empty():
-			parts.append("%s: %d rounds" % [info.name, int(info.rounds)])
+			parts.append({"text": "%s: %d rounds" % [info.name, int(info.rounds)], "style": &""})
 	if is_burning():
-		parts.append("ON FIRE: GET OUT")
+		parts.append({"text": "ON FIRE: GET OUT", "style": &"warn"})
 	elif not can_drive() and seat_kind(seat) == DRIVER:
-		parts.append("Won't drive")
-	parts.append("%s: %s" % [OS.get_keycode_string(GameSettings.key_for(VehicleCamera.ACTION)), "1st person" if VehicleCamera.chase else "3rd person"])
+		parts.append({"text": "Won't drive", "style": &"warn"})
+	parts.append({"text": "%s: %s" % [OS.get_keycode_string(GameSettings.key_for(VehicleCamera.ACTION)), "1st person" if VehicleCamera.chase else "3rd person"],
+		"style": &"key"})
 	if ControlOptions.get_out_key():
-		parts.append("%s: get out" % ControlOptions.get_out_key_name())
-	return "  |  ".join(parts)
+		parts.append({"text": "%s: get out" % ControlOptions.get_out_key_name(), "style": &"key"})
+	return parts
+
+
+## The readout as one line (tests and logs read it): the parts joined with " | ".
+func readout(seat: int) -> String:
+	return "  |  ".join(PackedStringArray(readout_parts(seat).map(func(p: Dictionary) -> String: return String(p.text))))
 
 
 # --- Saving ------------------------------------------------------------------------------------

@@ -291,19 +291,47 @@ func _show(speaker_path: NodePath, speaker_name: String, id: String, text: Strin
 
 ## The subtitle display the HUD adds: the latest callouts, bottom centre.
 class Subtitles extends Label:
+	## The HUD's one outlined style, wrapping; the Hud puts it in its bottom-centre zone over the
+	## vehicle readout (docs/ui_audit.md item 4: it sat 17 px over the readout, unwrapped).
 	func _ready() -> void:
+		UiKit.apply(self)
+		theme_type_variation = &"HudLabel"
 		horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
+		autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		mouse_filter = Control.MOUSE_FILTER_IGNORE
-		add_theme_font_size_override(&"font_size", 17)
-		add_theme_color_override(&"font_color", Color("e8e4c8"))
-		add_theme_color_override(&"font_outline_color", Color.BLACK)
-		add_theme_constant_override(&"outline_size", 4)
-		set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
-		grow_horizontal = Control.GROW_DIRECTION_BOTH
-		grow_vertical = Control.GROW_DIRECTION_BEGIN
-		position.y -= 110
+
+	## The callouts to show (current_lines), and the height (px) the Hud has room for: the
+	## newest lines that fit are shown, whole.
+	var feed := PackedStringArray()
+	var room := INF
+	var _shown := ""
 
 	func _process(_delta: float) -> void:
 		var callouts := Callouts.of(self)
-		text = "\n".join(callouts.current_lines()) if callouts else ""
+		feed = callouts.current_lines() if callouts else PackedStringArray()
+
+	## Shows the newest callouts that fit `room` px tall in a column `width` wide (measured with
+	## the font, not the label: a hidden label keeps a stale width).
+	func refit(width: float) -> void:
+		var key := "%s|%d|%d" % ["
+".join(feed), int(minf(room, 99999.0)), int(width)]
+		if key == _shown:
+			return
+		_shown = key
+		var font := get_theme_font(&"font")
+		var font_size := get_theme_font_size(&"font_size")
+		var spacing := float(get_theme_constant(&"line_spacing"))
+		var line := font.get_height(font_size)
+		var shown := PackedStringArray()
+		var lines := 0
+		for k in range(feed.size() - 1, -1, -1):
+			var h := font.get_multiline_string_size(feed[k], HORIZONTAL_ALIGNMENT_CENTER, maxf(width, 1.0), font_size).y
+			var more := maxi(roundi(h / line), 1)
+			if (lines + more) * (line + spacing) - spacing > room:
+				break
+			lines += more
+			shown.insert(0, feed[k])
+		text = "
+".join(shown)
+		visible = text != ""
