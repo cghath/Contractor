@@ -247,6 +247,7 @@ func _ready() -> void:
 	vitals.went_down.connect(_on_went_down)
 	_add_voxel_viewer()
 	_on_inventory_changed()
+	$Sync.synchronized.connect(_on_synced)
 	print("[%s] %s spawned on peer %d (local: %s)" % ["ai" if is_ai() else "player", name, multiplayer.get_unique_id(), is_local()])
 
 
@@ -325,6 +326,50 @@ func select_weapon(slot: StringName) -> void:
 	_on_inventory_changed()
 
 
+## Another player's body on this machine: snapshots of where their Sync put it
+## (RemoteSmoother), so the model walks between updates instead of jumping (Captain,
+## 2026-10-15). Only the model moves (and the hitboxes and worn armor, which follow it); the
+## body, capsule and camera stay where the owner last said, so the host's shot-origin check
+## (_server_fire) still measures from the real spot.
+var _smoother := RemoteSmoother.new()
+## A newest snapshot older than this (s) means the updates stopped (the owner left and the host
+## moves the body, B-06): the model goes back onto the body.
+const SMOOTH_STALE_S := 0.5
+
+
+## Every Sync update: remember where it put another player's body.
+func _on_synced() -> void:
+	if _smooths():
+		_smoother.push(global_position, rotation.y, Time.get_ticks_usec() / 1e6)
+
+
+## Whether this body's model is drawn smoothed: another player's, up and on foot, still
+## sending. Riding, carried, down or a ragdoll: the body is placed by something else.
+func _smooths() -> bool:
+	return not is_ai() and not is_multiplayer_authority() and owner_connected() and vitals.is_up() \
+			and not is_instance_valid(vehicle) and not is_instance_valid(carried_by) and not is_instance_valid(ragdoll)
+
+
+## Every frame: offsets the model from the body to where the smoother says the body was a
+## moment ago (RemoteSmoother.delay), or puts it back on the body.
+func _smooth_remote() -> void:
+	var now := Time.get_ticks_usec() / 1e6  # finer than _now: updates can come a few ms apart
+	if not _smooths() or not _smoother.has_data() or now - _smoother.newest_time() > SMOOTH_STALE_S:
+		if not _smooths():
+			_smoother.reset()
+		if model.transform != Transform3D.IDENTITY:
+			model.transform = Transform3D.IDENTITY
+		return
+	var at := _smoother.sample(now)
+	var offset: Vector3 = (at.pos as Vector3) - global_position
+	if offset.length() > RemoteSmoother.SNAP_M:
+		_smoother.reset()
+		model.transform = Transform3D.IDENTITY
+		return
+	var turn := wrapf(float(at.yaw) - rotation.y, -PI, PI)
+	model.transform = Transform3D(Basis(Vector3.UP, turn), global_basis.inverse() * offset)
+
+
 func _process(_delta: float) -> void:
 	# Runs on every peer: active_slot, inventory and head rotation are replicated.
 	model.look_pitch = head.rotation.x
@@ -332,6 +377,7 @@ func _process(_delta: float) -> void:
 	model.aiming = is_aiming
 	model.left_handed = left_handed
 	model.name_tape = person_name.to_upper()
+	_smooth_remote()  # before apply_pose: the hitboxes follow the model's transform
 	movement.apply_pose()  # model pose, hitbox pose and capsule from the replicated stance
 	if is_local() or (is_ai() and multiplayer.is_server()):
 		# Breathing quickens and deepens as the legs tire (stamina is the owner's, so other peers

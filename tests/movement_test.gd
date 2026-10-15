@@ -55,6 +55,7 @@ func _ready() -> void:
 	_test_turn_cap()
 	await _test_wall_pull()
 	await _test_ai_body()
+	_test_remote_smoother()
 	GameState.delete_save()
 	print("MOVEMENT TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
@@ -833,6 +834,37 @@ func _test_ai_body() -> void:
 
 
 # --- Helpers ----------------------------------------------------------------------------
+
+## Another player's updates arriving in bursts (RemoteSmoother, Captain 2026-10-15: "when my
+## buddy walks around on my end he teleports"): the drawn spot moves a little each frame
+## between updates, a jump over SNAP_M starts afresh, and with no new updates it holds.
+func _test_remote_smoother() -> void:
+	var sm := RemoteSmoother.new()
+	# Walking 5 m/s along x, one update every 0.1 s (a slow, bursty sender).
+	for i in 10:
+		sm.push(Vector3(i * 0.5, 0, 0), 0.0, i * 0.1)
+	check(sm.delay() > RemoteSmoother.MIN_DELAY_S and sm.delay() <= RemoteSmoother.MAX_DELAY_S,
+			"smoother delay follows the update gap (%.3f s)" % sm.delay())
+	var last_x := -1.0
+	var worst_step := 0.0
+	var t := 0.9
+	while t < 1.0:  # 60 fps frames between the last update and the next
+		var x := (sm.sample(t).pos as Vector3).x
+		if last_x >= 0.0:
+			worst_step = maxf(worst_step, absf(x - last_x))
+		last_x = x
+		t += 1.0 / 60.0
+	check(worst_step < 0.2, "smoothed body moves a little each frame between updates (worst %.2f m, update gap 0.5 m)" % worst_step)
+	var mid := sm.sample(0.9 + sm.delay() - 0.05)
+	check(absf((mid.pos as Vector3).x - 4.25) < 0.05, "smoothed body sits between the two updates around the delay (x %.2f)" % (mid.pos as Vector3).x)
+	sm.push(Vector3(100, 0, 0), 1.0, 1.0)  # a respawn or a seat: far away
+	check((sm.sample(1.5).pos as Vector3).is_equal_approx(Vector3(100, 0, 0)), "a jump over SNAP_M starts afresh at the new spot")
+	sm.push(Vector3(100.5, 0, 0), 1.0, 1.1)
+	check((sm.sample(5.0).pos as Vector3).x <= 100.5 + 5.0 * RemoteSmoother.EXTRAPOLATE_S + 0.01,
+			"with no new updates the smoothed body stops after EXTRAPOLATE_S")
+	var turn := sm.sample(1.05)
+	check(is_equal_approx(float(turn.yaw), 1.0), "smoothed facing follows the updates")
+
 
 func _keys(action: StringName) -> Array:
 	var keys := []
