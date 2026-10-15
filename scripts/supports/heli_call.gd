@@ -459,6 +459,8 @@ func server_dismiss() -> void:
 			heli.server_exit(s)
 		heli.queue_free()
 	phase = Phase.GONE
+	if kind == "insertion":
+		sup.server_music_stop()  # Captain, 2026-10-14 (temporary): the infil music stops with it
 
 
 # --- Each step (host) ----------------------------------------------------------------------------
