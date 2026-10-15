@@ -88,7 +88,7 @@ static func _convoy(pick: RandomNumberGenerator, def: Dictionary, module: Dictio
 	var points: Array = [_v3(start)]
 	var length := start.distance_to(finish)
 	var step := float(knobs.get("waypoint_m", 160.0))
-	var n := maxi(floori(length / step), 1)
+	var n := maxi(floori(length / step), 2)
 	for i in range(1, n):
 		var p := start.lerp(finish, float(i) / n)
 		p += side * sin(float(i) * 0.9) * 14.0  # the road bends a little
