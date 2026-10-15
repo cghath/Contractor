@@ -896,6 +896,33 @@ func _heli_insert(squad: Array) -> bool:
 	if c == null:
 		return false
 	var via: Vector3 = c.route[0] if not c.route.is_empty() else Vector3.INF
+	# Captain, 2026-10-14 (harbour_yard: "came in from wrong side of the map", "it turned
+	# around"): it comes in from the zone's edge nearest the LZ (HeliRoute.entry), by a point
+	# between there and the LZ, no turn of more than 120 degrees before the hook, the way in at
+	# most 1.6 times the straight line; the map draws that way in.
+	var start := c.heli.global_position
+	var inside := HeliRoute.inside(level)
+	var on_edge := absf(start.x - inside.position.x) < 1.0 or absf(start.x - inside.end.x) < 1.0 \
+		or absf(start.z - inside.position.y) < 1.0 or absf(start.z - inside.end.y) < 1.0
+	var far_post: Array[Vector3] = [Vector3(1e6, 0.0, 1e6)]  # (nobody watching: the nearest edge)
+	var nearest := HeliRoute.entry(level, lz, far_post)
+	check(on_edge and _flat(start, lz) <= float(nearest.run) + HeliRoute.ENTRY_SLACK_M + HeliCall.SPAWN_SPACING_M + 1.0,
+		"it comes in from the zone's edge by the LZ, not across the map (started at (%.0f, %.0f), %.0f m out; the nearest edge %.0f m)" % [
+		start.x, start.z, _flat(start, lz), float(nearest.run)])
+	var line: Array[Vector3] = [Vector3(start.x, 0.0, start.z)]
+	line.append_array(c.route)
+	line.append(lz)
+	check(HeliRoute.path_ratio(line) <= 1.6 and HeliRoute.max_turn_deg(line) <= 120.0,
+		"its route: %.2f times the straight line, at most %.0f degrees of turn before the hook" % [HeliRoute.path_ratio(line), HeliRoute.max_turn_deg(line)])
+	var drawn := MapView.insertion_routes(level)
+	check(not drawn.is_empty() and (drawn[0].points as PackedVector2Array).size() == line.size()
+		and (drawn[0].points as PackedVector2Array)[0].distance_to(Vector2(start.x, start.z)) < 1.0,
+		"the map draws its way in: entry, the point it comes in low by, the LZ (%s)" % [drawn[0].points if not drawn.is_empty() else "nothing"])
+	var first_dir := Vector2.ZERO
+	var reversal := 0.0
+	var flown := 0.0
+	var ratio := 0.0
+	var prev := start
 	var low_agl := INF
 	var high_agl := 0.0
 	var passed_by := INF
@@ -906,6 +933,16 @@ func _heli_insert(squad: Array) -> bool:
 		t += get_physics_process_delta_time()
 		var h := c.heli
 		var far := Vector2(h.global_position.x - lz.x, h.global_position.z - lz.z).length()
+		if ratio == 0.0 and h.has_meta(&"landing"):  # the J-hook from here
+			ratio = (flown + far) / maxf(_flat(start, lz), 1.0)
+		elif ratio == 0.0:
+			var go := Vector2(h.global_position.x - prev.x, h.global_position.z - prev.z)
+			flown += go.length()
+			if first_dir == Vector2.ZERO and _flat(h.global_position, start) > 30.0:
+				first_dir = Vector2(h.global_position.x - start.x, h.global_position.z - start.z).normalized()
+			elif first_dir != Vector2.ZERO and go.length() > 0.05:
+				reversal = maxf(reversal, rad_to_deg(absf(first_dir.angle_to(go))))
+		prev = h.global_position
 		if via != Vector3.INF:
 			passed_by = minf(passed_by, Vector2(h.global_position.x - via.x, h.global_position.z - via.z).length())
 		if far > 300.0:
@@ -920,6 +957,8 @@ func _heli_insert(squad: Array) -> bool:
 	# what stands taller in its way), never down in the dirt.
 	check(low_agl > 1.0 and high_agl < 12.0, "low over the terrain on the way in: %.0f-%.0f m above the ground" % [low_agl, high_agl])
 	check(flare > 3.0, "it flared, nose up, coming in to land (%.0f°)" % flare)
+	check(ratio > 0.0 and ratio <= 1.6 and reversal <= 120.0,
+		"flown in without turning back: %.2f times the straight line before the hook, at most %.0f degrees off the way it set off" % [ratio, reversal])
 	check(landed and Vector2(c.heli.global_position.x - lz.x, c.heli.global_position.z - lz.z).length() < 15.0,
 		"it lands at the LZ (%.0f s)" % t)
 	if not landed:
