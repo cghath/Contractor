@@ -426,17 +426,18 @@ static func _aav7(k: Cab) -> void:
 
 ## UH-60: the fuselage was drawn as a shell, but the upper deck's floor runs through the cabin's
 ## ceiling. Cleared back to the shell from the cockpit's back to the aft cabin, then the
-## windscreen, overhead, cockpit door, gunner's and cabin door windows glazed (the door
-## guns' middles in the gunners' windows too).
+## windscreen, overhead, cockpit door, gunner's and cabin door windows glazed. The door guns
+## stay solid (Captain, 2026-10-14: "clear guns on the blackhawk").
 static func _uh60(k: Cab) -> void:
 	var cabin := VehicleArt.Section.new(0.5, 2.22, 1.18, 0.94, 0.3, 0.45)
 	k.carve_section(cabin, 2.45, 7.95, 0.62, 2.1, 0.13)
 	k.glaze(-1.0, 1.6, 0.9, 1.0, 2.18, 2.2, 2, true)
 	k.glaze(-0.55, 2.0, 2.1, 0.55, 2.4, 2.45, 1, false)
 	k.glaze_sides(1.45, 0.75, 0.78, 1.3, 2.14, 6.3)
-	# Each gunner's window (the fuselage narrows there, past the side glazing's reach) and the
-	# M240H and its can stowed across it at the gunner's eye (a dark bar through the middle of the
-	# view): see-through within the window (visual only; they still stop rounds).
+	# Each gunner's window (the fuselage narrows there, past the side glazing's reach):
+	# see-through within the window (visual only; it still stops rounds). Not the M240H, its mount
+	# and its ammo bag across it: Captain, 2026-10-14, "clear guns on the blackhawk" (they drew
+	# in the window's tinted glass, the gunner and the ground showing through the gun).
 	for side: float in [-1.0, 1.0]:
-		k.see_through(side * 0.75, 1.45, 2.95, side * 1.5, 2.08, 3.55, [P.GLASS, P.PAINT, P.GUN, P.METAL, P.SEAT])
+		k.see_through(side * 0.75, 1.45, 2.95, side * 1.5, 2.08, 3.55, [P.GLASS, P.PAINT])
 	k.seats(FLOORS.uh60, -0.85, 0.85)

@@ -8,9 +8,10 @@ extends RefCounted
 ##
 ## - add() / remove() / list() / entry(): the records.
 ## - server_bring(id, level, xform): the vehicle at a deployment's insertion, as the record has
-##   it (Vehicle id "pool_<id>", meta "pool_id"); it's out until it comes back.
-## - server_return(vehicle): it extracted with the squad: its record takes the vehicle's state
-##   now (damage, fuel, cargo) and it's home. Destroyed, or left behind: removed (remove()).
+##   it (Vehicle id "pool_<id>", meta "pool_id"), its mounted gun loaded (Vehicle.server_rearm);
+##   it's out until it comes back.
+## - server_return(vehicle): it extracted with the squad: its gun's ammo is refilled from the
+##   FOB's stores and its record takes the vehicle's state now (damage, fuel, cargo); it's home. Destroyed, or left behind: removed (remove()).
 ## - server_reconcile(level): one marked out whose vehicle no longer exists (the campaign was saved
 ##   mid-deployment and loaded again) is home as it left, like the roster's people.
 ## - repair_quote(id) / server_repair(id): the workshop fixes every hit zone, the battery and
@@ -127,6 +128,8 @@ static func server_bring(id: String, level: Node, xform: Transform3D) -> Vehicle
 	if v == null:
 		return null
 	v.set_meta(&"pool_id", id)
+	## Captain, 2026-10-14: the pool M-ATV deployed with its M2 on 0 rounds. It goes out loaded.
+	v.server_rearm()
 	v.set_meta(&"no_save", true)  # it goes home with the squad; left behind, MotorPoolNode lets the zone keep it
 	e.out = GameState.zone_id
 	Campaign.mark_changed(SECTION)
@@ -178,6 +181,7 @@ static func server_return(v: Vehicle) -> bool:
 	if v.wrecked or v.is_burning():
 		remove(id)
 		return false
+	v.server_rearm()  # home at the FOB: the gun's belts refilled (Captain, 2026-10-14)
 	var rec := v.to_save()
 	for k: String in PLACE_KEYS:
 		rec.erase(k)

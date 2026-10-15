@@ -980,6 +980,82 @@ func _test_turret() -> void:
 						hit[(part.buffer as VoxelBuffer).get_voxel(x + 1, y + 1, z + 1, VoxelBuffer.CHANNEL_COLOR)] = true
 		check(seen.has(VehicleArt.P.WINDOW) and not seen.has(VehicleArt.P.GLASS) and not seen.has(VehicleArt.P.BLACK) and hit.has(VehicleArt.P.GLASS) and not hit.has(VehicleArt.P.WINDOW),
 			"%s: the turret's glass is see-through in its look, still glass to rounds" % model)
+	## Captain, 2026-10-14 ("part of the turret doesn't move on the matv"): the whole gun shield
+	## (front plate, angled wings, side plates, windows; the AAV's vision blocks) turns with the
+	## ring, none of it left standing on the roof: no hull voxel above the ring in the shield's
+	## footprint ([half width, front, back] about the pivot, metres), and the Turret part spans it.
+	var shields := {"matv": [0.88, -0.88, 0.35], "maxxpro": [0.95, -0.95, 0.38], "aav7": [0.62, -0.75, 0.62]}
+	for model: String in shields:
+		var cv := VehicleHull.canvas(model)
+		var vs: float = cv.vs
+		var csize: Vector3i = cv.size
+		var piv := VehicleSpecs.vec(VehicleSpecs.spec(model).turret.pivot)
+		var top := float(VehicleSpecs.spec(model).turret.get("top", piv.y + 1.0))
+		var box: Array = shields[model]
+		var left := 0
+		for buf: VoxelBuffer in [cv.buffer, cv.look]:
+			for x in csize.x:
+				var mx := (x + 0.5 - csize.x * 0.5) * vs
+				if absf(mx - piv.x) > float(box[0]):
+					continue
+				for z in csize.z:
+					var mz := (z + 0.5) * vs - csize.z * vs * 0.5 - piv.z
+					if mz < float(box[1]) or mz > float(box[2]):
+						continue
+					for y in range(floori(piv.y / vs), mini(ceili(top / vs), csize.y)):
+						if (y + 0.5) * vs >= piv.y and buf.get_voxel(x + 1, y + 1, z + 1, VoxelBuffer.CHANNEL_COLOR) != VehicleArt.P.EMPTY:
+							left += 1
+		var span := 0.0
+		for part: Dictionary in cv.parts:
+			if part.name == "Turret":
+				span = (part.size as Vector3i).x * vs
+		check(left == 0 and span >= float(box[0]) * 2.0 - vs, "%s: the whole shield turns with the turret (%d voxels left on the roof, part %.2f m wide)" % [model, left, span])
+	## Captain, 2026-10-14 ("clear guns on the blackhawk"): a mounted gun is never drawn in the
+	## windows' see-through glass, on any vehicle: no voxel that is gun metal to rounds is
+	## P.WINDOW in the look, the turning guns' look has no P.WINDOW, and their meshes' materials
+	## are opaque.
+	for model: String in VehicleArt.MODELS:
+		var gc := VehicleHull.canvas(model)
+		var gsize: Vector3i = gc.size
+		var clear_gun := 0
+		var hit_buf: VoxelBuffer = gc.buffer
+		var look_buf: VoxelBuffer = gc.look
+		if look_buf != hit_buf:
+			for x in gsize.x:
+				for y in gsize.y:
+					for z in gsize.z:
+						if hit_buf.get_voxel(x + 1, y + 1, z + 1, VoxelBuffer.CHANNEL_COLOR) == VehicleArt.P.GUN 								and look_buf.get_voxel(x + 1, y + 1, z + 1, VoxelBuffer.CHANNEL_COLOR) == VehicleArt.P.WINDOW:
+							clear_gun += 1
+		for part: Dictionary in gc.parts:
+			if part.name != "Gun":
+				continue
+			var psz: Vector3i = part.size
+			for x in psz.x:
+				for y in psz.y:
+					for z in psz.z:
+						if (part.look as VoxelBuffer).get_voxel(x + 1, y + 1, z + 1, VoxelBuffer.CHANNEL_COLOR) == VehicleArt.P.WINDOW:
+							clear_gun += 1
+		check(clear_gun == 0, "%s: its guns are solid, not see-through glass (%d clear gun voxels)" % [model, clear_gun])
+	for id: String in ["range_matv", "range_maxxpro", "range_aav7"]:
+		var gun_mesh := _vehicle(id).hull.art.get_node_or_null(^"Turret/Gun/Mesh") as MeshInstance3D
+		var see_through := 0
+		if gun_mesh and gun_mesh.mesh:
+			for si in gun_mesh.mesh.get_surface_count():
+				var mat := gun_mesh.get_active_material(si) as BaseMaterial3D
+				if mat and (mat.transparency != BaseMaterial3D.TRANSPARENCY_DISABLED or mat.albedo_color.a < 1.0):
+					see_through += 1
+		check(gun_mesh != null and see_through == 0, "%s: the mounted gun's materials are opaque (%d see-through surfaces)" % [id, see_through])
+	# And it turns as one: the shield's mesh follows the ring's yaw.
+	var sv := _vehicle("range_maxxpro")
+	sv.turret.aim(deg_to_rad(70.0), 0.0)
+	sv.turret.settle()
+	sv.hull.pose_turret()
+	var shield_mesh := sv.hull.art.get_node(^"Turret/Mesh") as Node3D
+	var want := (sv.hull.art as Node3D).global_basis.orthonormalized() * Basis(Vector3.UP, sv.turret.yaw)
+	check(shield_mesh.global_basis.orthonormalized().z.dot(want.z) > 0.999, "the shield's mesh turns with the gun's yaw (70 degrees)")
+	sv.turret.aim(0.0, 0.0)
+	sv.turret.settle()
+	sv.hull.pose_turret()
 	var v := _vehicle("range_matv")
 	await _reset(v, Vector3(-12, 0, 6))
 	VehicleCamera.chase = false

@@ -20,10 +20,10 @@
 		"50bmg_m33": 2
 	},
 	"guns": {
-		"_note": "Mounted weapons the gunner seat fires through Ballistics: the round (data/rounds.json), rate, spread and what feeds it from the vehicle's cargo (feed: an item id; belts hold rounds in their state, loose rounds count one each). The DShK fires the .50 BMG round's numbers until a 12.7x108 round is in rounds.json.",
-		"m2hb": {"name": "M2 .50 cal", "round": "50bmg_m33", "rpm": 550, "spread_deg": 0.3, "feed": "belt_50bmg"},
-		"dshk": {"name": "DShK 12.7 mm", "round": "50bmg_m33", "rpm": 600, "spread_deg": 0.45, "feed": "belt_127x108"},
-		"m240c": {"name": "M240 coax", "round": "762x51_m80", "rpm": 750, "spread_deg": 0.2, "feed": "rounds_762"}
+		"_note": "Mounted weapons the gunner seat fires through Ballistics: the round (data/rounds.json), rate, spread and what feeds it from the vehicle's cargo (feed: an item id; belts hold rounds in their state, loose rounds count one each). load: what a motor-pool vehicle deploys with and is refilled to back at the FOB (MotorPool; Captain, 2026-10-14: the pool M-ATV's M2 had 0 rounds), in units of the feed: full belts, or loose rounds. Proposed. The DShK fires the .50 BMG round's numbers until a 12.7x108 round is in rounds.json.",
+		"m2hb": {"name": "M2 .50 cal", "round": "50bmg_m33", "rpm": 550, "spread_deg": 0.3, "feed": "belt_50bmg", "load": 2},
+		"dshk": {"name": "DShK 12.7 mm", "round": "50bmg_m33", "rpm": 600, "spread_deg": 0.45, "feed": "belt_127x108", "load": 2},
+		"m240c": {"name": "M240 coax", "round": "762x51_m80", "rpm": 750, "spread_deg": 0.2, "feed": "rounds_762", "load": 800}
 	},
 	"models": {
 		"matv": {
@@ -52,7 +52,7 @@
 				{"name": "Gunner", "kind": "gunner", "at": [0.0, 3.04, 0.3], "stance": "stand", "exit": "left", "open": true}
 			],
 			"gun": {"weapon": "m2hb", "seat": 4, "at": [0.0, 2.835, -1.88]},
-			"turret": {"pivot": [0.0, 2.6, 0.1], "radius": 0.99, "top": 3.4,
+			"turret": {"pivot": [0.0, 2.6, 0.1], "radius": 1.12, "top": 3.4,
 				"gun": {"trunnion": [2.835, -0.76], "box": [-0.09, 2.7, -1.95, 0.24, 2.94, 0.12], "colours": ["gun", "seat"]},
 				"elevation_deg": [-10, 35], "traverse_dps": 60, "elevation_dps": 40},
 			"points": [
@@ -92,7 +92,7 @@
 				{"name": "Gunner", "kind": "gunner", "at": [0.0, 3.41, -0.1], "stance": "stand", "exit": "rear", "open": true}
 			],
 			"gun": {"weapon": "m2hb", "seat": 6, "at": [0.0, 3.205, -2.35]},
-			"turret": {"pivot": [0.0, 2.97, -0.3], "radius": 1.06, "top": 3.75,
+			"turret": {"pivot": [0.0, 2.97, -0.3], "radius": 1.2, "top": 3.75,
 				"gun": {"trunnion": [3.205, -1.23], "box": [-0.09, 3.07, -2.42, 0.24, 3.31, -0.28], "colours": ["gun", "seat"]},
 				"elevation_deg": [-10, 35], "traverse_dps": 60, "elevation_dps": 40},
 			"points": [
@@ -194,7 +194,7 @@
 				{"name": "Troop 21", "kind": "passenger", "at": [1.05, 2.15, 3.4], "stance": "sit", "exit": "rear"}
 			],
 			"gun": {"weapon": "m2hb", "seat": 2, "at": [0.945, 2.905, -3.8]},
-			"turret": {"pivot": [0.82, 2.7, -1.9], "radius": 0.72, "top": 3.35,
+			"turret": {"pivot": [0.82, 2.7, -1.9], "radius": 0.9, "top": 3.35,
 				"gun": {"trunnion": [2.93, -2.5], "box": [0.36, 2.78, -3.85, 1.01, 3.08, -2.33], "colours": ["gun", "paint_dark"]},
 				"elevation_deg": [-8, 45], "traverse_dps": 45, "elevation_dps": 30},
 			"points": [

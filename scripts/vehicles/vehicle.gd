@@ -1930,6 +1930,39 @@ func gun_info() -> Dictionary:
 		"rounds": cargo_hold.feed_rounds(StringName(data.feed)) if cargo_hold else 0, "rpm": float(data.get("rpm", 600))}
 
 
+## Host: the mounted gun's feed in the hold topped up to its "load" (data/vehicles.json "guns":
+## full belts, or loose rounds); spent and part-used belts go for full ones, extra full ones stay.
+## Captain, 2026-10-14: the pool M-ATV came out with its M2 on 0 rounds (a new pool vehicle's
+## record has no cargo, and nothing refilled one): MotorPool rearms a vehicle as it deploys and
+## as it comes home. Returns the gun's rounds in the hold now.
+func server_rearm() -> int:
+	var info := gun_info()
+	if info.is_empty() or cargo_hold == null:
+		return int(info.get("rounds", 0))
+	var feed: StringName = info.feed
+	var item := ItemDB.get_item(feed)
+	var want := int(VehicleSpecs.gun(String(info.id)).get("load", 0))
+	if item == null or want <= 0:
+		return int(info.rounds)
+	var per := item.magazine_rounds()
+	if per > 0:
+		var full := 0
+		var list := cargo_hold.entries()
+		for i in range(list.size() - 1, -1, -1):
+			var e: Dictionary = list[i]
+			if e.id != feed:
+				continue
+			if int(e.get("state", {}).get("rounds", per)) >= per:
+				full += int(e.count)
+			else:
+				cargo_hold.remove_entry(VehicleCargo.HOLD, i, int(e.count))
+		if full < want:
+			cargo_hold.take(feed, want - full)
+	elif cargo_hold.count_of(feed) < want:
+		cargo_hold.take(feed, want - cargo_hold.count_of(feed))
+	return cargo_hold.feed_rounds(feed)
+
+
 ## Where the gun's rounds start (world): its muzzle ("gun" "at"), where the turret has it now.
 func gun_origin() -> Vector3:
 	if turret:
