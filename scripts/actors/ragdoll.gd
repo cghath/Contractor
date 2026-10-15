@@ -65,7 +65,7 @@ const SEND_EPSILON := 0.003
 ## at SUPPORT_ALONG of its length each way, and its middle) for anything within SUPPORT_GAP_M
 ## below the box; with nothing there it lets go and falls again (has_support, _check_support).
 const SUPPORT_CHECK_S := 0.5
-const SUPPORT_GAP_M := 0.2
+const SUPPORT_GAP_M := 0.1  # less than a torso's depth: a body lying on another one has support, one left above it hasn't
 const SUPPORT_ALONG := 0.4
 
 ## Turn off for a session (the older suites that check the fixed downed pose).
