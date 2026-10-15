@@ -210,12 +210,19 @@ func _snug() -> void:
 		control.offset_bottom = top - origin + h
 
 
+## Whether the window is far smaller than any the HUD is laid out for (GameSettings.MIN_UI_SIZE):
+## a headless test's 64x64 root. Nothing is cut to fit then, so tests still read every line.
+func _headless_size() -> bool:
+	var view := get_viewport().get_visible_rect().size
+	return view.x < GameSettings.MIN_UI_SIZE.x * 0.75 or view.y < GameSettings.MIN_UI_SIZE.y * 0.75
+
+
 ## The squad list in the room the left column has under the command menu (P1-10: at 720 px tall
 ## the list and the menu ran into each other): what doesn't fit is cut, and says so.
 func _fit_status() -> void:
 	var spacing := float(_status.get_theme_constant(&"line_spacing"))
 	var line := float(_status.get_line_height()) + spacing
-	var room := _left_height - UiKit.SPACE_S * 3.0 - (command_menu.get_combined_minimum_size().y if command_menu.visible else 0.0)
+	var room := 1.0e9 if _headless_size() else _left_height - UiKit.SPACE_S * 3.0 - (command_menu.get_combined_minimum_size().y if command_menu.visible else 0.0)
 	var fit := maxi(floori((room + spacing) / maxf(line, 1.0)), 0)
 	var lines := _status_lines
 	if lines.size() > fit:
@@ -237,7 +244,7 @@ func _fit_bottom_centre() -> void:
 	for c: Control in [_prompt, _downed_box]:
 		if c.visible and c.get_combined_minimum_size().y > 0.0:
 			top = maxf(top, c.get_global_rect().end.y)
-	var room := view.y - MARGIN - top - UiKit.SPACE_M
+	var room := 1.0e9 if _headless_size() else view.y - MARGIN - top - UiKit.SPACE_M
 	_vehicle.visible = _vehicle_left > 0.0 and not _vehicle_parts.is_empty()
 	if _vehicle.visible:
 		room -= _fit_vehicle(room, zone_bottom_centre.size.x) + UiKit.SPACE_S
