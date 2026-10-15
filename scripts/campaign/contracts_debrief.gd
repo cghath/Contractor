@@ -161,3 +161,174 @@ static func money(amount: Variant) -> String:
 		out = "," + digits.substr(digits.length() - 3) + out
 		digits = digits.substr(0, digits.length() - 3)
 	return ("-" if n < 0 else "") + digits + out
+
+
+# --- Grouping for the debrief screen -------------------------------------------------------
+## Captain, 2026-10-14 (v0.3.1): "this ui needs a pass for sure. its hard to select the items
+## you want": the carried-out list was one run-on line per item and the salvage pool one row
+## per field lot, the same item many times over. The screen groups both by item type; the
+## claim rules stay per pool lot (host-authoritative pick/unpick by index, as before).
+
+## The categories the screen groups by, in display order.
+const CATEGORIES := ["weapons", "armour", "ammo", "medical", "grenades", "intel", "other"]
+const CATEGORY_NAMES := {"weapons": "Weapons", "armour": "Armour and kit", "ammo": "Ammo and magazines", "medical": "Medical",
+	"grenades": "Grenades and explosives", "intel": "Intel and salvage", "other": "Other"}
+
+
+## Which CATEGORIES entry item `id` falls under (from its item type and tags).
+static func category_of(id: Variant) -> String:
+	var sid := StringName(id)
+	if MissionRegistry.is_intel(sid):
+		return "intel"
+	var item: ItemData = ItemDB.get_item(sid) if ItemDB.has_item(sid) else null
+	if item == null:
+		return "other"
+	if "throwable" in item.tags or "explosive" in item.tags:
+		return "grenades"
+	match item.type:
+		"weapon", "launcher", "optic":
+			return "weapons"
+		"armor", "plate", "backpack", "pouch":
+			return "armour"
+		"ammo", "mag":
+			return "ammo"
+		"medical", "aid_bag", "tq":
+			return "medical"
+		"intel", "salvage", "objective":
+			return "intel"
+	if "salvage" in item.tags:
+		return "intel"
+	return "other"
+
+
+static func item_name(id: Variant) -> String:
+	var item: ItemData = ItemDB.get_item(StringName(id)) if ItemDB.has_item(StringName(id)) else null
+	return item.name if item else String(id)
+
+
+## `items` ([{"id", "count"}]) summed per item type: [{"id", "name", "category", "count"}],
+## by category (CATEGORIES order) then name. The counts add up to the raw list's.
+static func group_items(items: Array) -> Array:
+	var by_id := {}
+	for e: Dictionary in items:
+		var id := String(e.get("id", ""))
+		if not by_id.has(id):
+			by_id[id] = {"id": id, "name": item_name(id), "category": category_of(id), "count": 0}
+		by_id[id].count = int(by_id[id].count) + int(e.get("count", 1))
+	var out: Array = by_id.values()
+	out.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		var ca := CATEGORIES.find(a.category)
+		var cb := CATEGORIES.find(b.category)
+		return ca < cb if ca != cb else String(a.name).naturalnocasecmp_to(String(b.name)) < 0)
+	return out
+
+
+## The salvage pool summed per item type: [{"id", "name", "category", "lots": [pool indices],
+## "picked": [picked pool indices], "count", "value", "picked_count", "picked_value", "each"
+## (value per unit, averaged over the lots)}]. Sorted by `sort`: "value" (total, highest
+## first), "category" or "name".
+static func salvage_groups(debrief: Dictionary, sort := "value") -> Array:
+	var salvage: Dictionary = debrief.get("salvage", {})
+	var pool: Array = salvage.get("pool", [])
+	var picked: Array = salvage.get("picked", [])
+	var by_id := {}
+	for i in pool.size():
+		var e: Dictionary = pool[i]
+		var id := String(e.get("id", ""))
+		if not by_id.has(id):
+			by_id[id] = {"id": id, "name": item_name(id), "category": category_of(id), "lots": [], "picked": [],
+				"count": 0, "value": 0, "picked_count": 0, "picked_value": 0, "each": 0}
+		var g: Dictionary = by_id[id]
+		g.lots.append(i)
+		g.count += int(e.get("count", 1))
+		g.value += int(e.get("value", 0))
+		if i in picked:
+			g.picked.append(i)
+			g.picked_count += int(e.get("count", 1))
+			g.picked_value += int(e.get("value", 0))
+	var out: Array = by_id.values()
+	for g: Dictionary in out:
+		g.each = roundi(float(g.value) / maxf(1.0, float(g.count)))
+	out.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		match sort:
+			"category":
+				var ca := CATEGORIES.find(a.category)
+				var cb := CATEGORIES.find(b.category)
+				if ca != cb:
+					return ca < cb
+			"name":
+				pass
+			_:
+				if int(a.value) != int(b.value):
+					return int(a.value) > int(b.value)
+		return String(a.name).naturalnocasecmp_to(String(b.name)) < 0)
+	return out
+
+
+## Pool indices to claim for `n` more lots of item `id` (-1: as many as fit), cheapest lot
+## first, each fitting what's left of the budget after the ones before it (so the host, which
+## checks every pick, takes them all in order).
+static func picks_for(debrief: Dictionary, id: String, n := 1) -> Array:
+	var salvage: Dictionary = debrief.get("salvage", {})
+	var pool: Array = salvage.get("pool", [])
+	var picked: Array = salvage.get("picked", [])
+	var left := int(salvage.get("budget", 0)) - int(salvage.get("spent", 0))
+	var lots: Array = []
+	for i in pool.size():
+		if String(pool[i].get("id", "")) == id and not i in picked:
+			lots.append(i)
+	lots.sort_custom(func(a: int, b: int) -> bool: return int(pool[a].value) < int(pool[b].value))
+	var out: Array = []
+	for i: int in lots:
+		if n >= 0 and out.size() >= n:
+			break
+		if int(pool[i].value) > left:
+			break
+		out.append(i)
+		left -= int(pool[i].value)
+	return out
+
+
+## Pool indices to return for `n` claimed lots of item `id` (-1: all), dearest first.
+static func unpicks_for(debrief: Dictionary, id: String, n := 1) -> Array:
+	var salvage: Dictionary = debrief.get("salvage", {})
+	var pool: Array = salvage.get("pool", [])
+	var lots: Array = (salvage.get("picked", []) as Array).filter(func(i: int) -> bool: return String(pool[i].get("id", "")) == id)
+	lots.sort_custom(func(a: int, b: int) -> bool: return int(pool[a].value) > int(pool[b].value))
+	return lots if n < 0 else lots.slice(0, n)
+
+
+## The "claim best value" helper: pool indices to add to what's claimed, dearest lot first
+## while it fits the budget left (greedy: fills the budget with the most valuable kit).
+static func best_value_picks(debrief: Dictionary) -> Array:
+	var salvage: Dictionary = debrief.get("salvage", {})
+	var pool: Array = salvage.get("pool", [])
+	var picked: Array = salvage.get("picked", [])
+	var left := int(salvage.get("budget", 0)) - int(salvage.get("spent", 0))
+	var lots: Array = range(pool.size()).filter(func(i: int) -> bool: return not i in picked)
+	lots.sort_custom(func(a: int, b: int) -> bool: return int(pool[a].value) > int(pool[b].value))
+	var out: Array = []
+	for i: int in lots:
+		if int(pool[i].value) <= left:
+			out.append(i)
+			left -= int(pool[i].value)
+	return out
+
+
+## Why no more of item `id` can be claimed ("" when one more lot fits).
+static func pick_block_reason(debrief: Dictionary, id: String) -> String:
+	if debrief.get("finished", false):
+		return "The debrief is closed"
+	var salvage: Dictionary = debrief.get("salvage", {})
+	var pool: Array = salvage.get("pool", [])
+	var picked: Array = salvage.get("picked", [])
+	var cheapest := -1
+	for i in pool.size():
+		if String(pool[i].get("id", "")) == id and not i in picked:
+			cheapest = int(pool[i].value) if cheapest < 0 else mini(cheapest, int(pool[i].value))
+	if cheapest < 0:
+		return "All of it is claimed"
+	var left := int(salvage.get("budget", 0)) - int(salvage.get("spent", 0))
+	if cheapest > left:
+		return "Over budget: the cheapest lot is $%s, $%s of the budget left" % [money(cheapest), money(left)]
+	return ""
