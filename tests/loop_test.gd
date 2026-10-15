@@ -395,6 +395,22 @@ func _mission(type: String) -> String:
 	return ""
 
 
+## A refused confirm on a slow CI runner (CI run 38661497369: "Waiting for: Player 1" at LZ 3,
+## passing locally) said nothing of where anyone was: where each one required stands from `lz`,
+## and the points shown, so the [FAIL] line itself tells.
+func _where_all(extraction: Extraction, lz: Vector2) -> String:
+	var need := extraction.required()
+	var out := PackedStringArray()
+	for s: Soldier in need.players + need.ai:
+		var at := s.body_point()
+		out.append("%s %.1f m off at (%.0f, %.1f, %.0f)%s%s%s%s" % [Extraction._soldier_name(s), Vector2(at.x, at.z).distance_to(lz), at.x, at.y, at.z,
+			"" if s.is_ai() or s == player else " (not the test's player)", " aboard" if is_instance_valid(s.vehicle) else "",
+			" ragdoll" if is_instance_valid(s.ragdoll) else "", "" if s.vitals.is_up() else " down"])
+	var shown := PackedStringArray(extraction.shown_points().map(func(p: Dictionary) -> String:
+		return "%s %.0f m off" % [p.name, (p.pos as Vector2).distance_to(lz)]))
+	return "; %s; shown: %s; heli point %d" % [", ".join(out), ", ".join(shown), extraction.heli_point]
+
+
 ## Member ids for `type`'s squad (who's available).
 func _squad_for(type: String) -> Array:
 	var ready: Array = _team.filter(func(mid: String) -> bool: return Roster.is_available(BaseHub.member(mid)))
@@ -774,7 +790,7 @@ func _extract(bring: Array, cargo: Array, left: String, deposit: bool, stow: Arr
 	extraction.deployment_ended.connect(func(r: Dictionary) -> void: report.merge(r, true))
 	extraction.countdown_s = 0.5
 	var why := extraction.server_confirm()
-	check(why == "" and deposited_ok, "at %s with everyone who's coming: extraction confirmed (%s)" % [zone_points[0].name, why])
+	check(why == "" and deposited_ok, "at %s with everyone who's coming: extraction confirmed (%s)" % [zone_points[0].name, why + (_where_all(extraction, lz) if why != "" else "")])
 	if why != "":
 		return {"why": why}
 	var home := await _wait_until(func() -> bool: return CompoundLevel.current(self) is BaseLevel, 30.0)
