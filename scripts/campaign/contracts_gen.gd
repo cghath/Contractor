@@ -94,7 +94,9 @@ static func generate_board(board_seed: int, day: int, rep: Dictionary, count: in
 
 
 ## One contract. `ctx`: "day", "source" ("board", "safe", "fixer", "lead"), and optionally
-## "fixer" (a fixers entry), "type", "zone_kind", "zone_id", "employer".
+## "fixer" (a fixers entry), "type", "zone_kind", "zone_id", "employer"; for a hot zone's
+## in-zone and radio contracts (HotZoneOps) also "module_id" (play at that site) and
+## "avoid_modules" (sites other live contracts already hold).
 static func generate(rng: RandomNumberGenerator, ctx: Dictionary) -> Dictionary:
 	var source: String = ctx.get("source", "board")
 	var fixer: Dictionary = ctx.get("fixer", {})
@@ -103,6 +105,12 @@ static func generate(rng: RandomNumberGenerator, ctx: Dictionary) -> Dictionary:
 	var kind: String = ctx.get("zone_kind", "contract" if safe or source == "fixer" or rng.randf() >= S("hot_zone_chance") else "hot")
 	var type_ids: Array = fixer.get("types", MissionRegistry.types()) if ctx.get("type", "") == "" else [ctx.type]
 	type_ids = type_ids.filter(func(t: String) -> bool: return not MissionRegistry.type_def(t).is_empty())
+	var at_module := String(ctx.get("module_id", ""))
+	if at_module != "" and ctx.get("type", "") == "":
+		var at_type := HotZoneOps.module_type(String(ctx.get("zone_id", "")), at_module)
+		var fits := type_ids.filter(func(t: String) -> bool: return ZoneModules.base(at_type) in MissionRegistry.type_modules(MissionRegistry.type_def(t)))
+		if not fits.is_empty():
+			type_ids = fits
 	if type_ids.is_empty():
 		type_ids = MissionRegistry.types()
 	var type_id: String = type_ids[rng.randi() % type_ids.size()]
@@ -175,7 +183,7 @@ static func generate(rng: RandomNumberGenerator, ctx: Dictionary) -> Dictionary:
 	var step := maxi(MissionRegistry.setting_i("pay_round", 500), 1)
 	var base_pay := maxi(step, roundi(float(def.get("base_pay", 40000)) * pay_mult / step) * step)
 	var day := int(ctx.get("day", 1))
-	var mission := mission_target(rng, def, String(zone.get("zone_id", "")), target)
+	var mission := mission_target(rng, def, String(zone.get("zone_id", "")), target, at_module, ctx.get("avoid_modules", []))
 	var limit_min := int(def.get("time_limit_min", 0))
 	return {
 		"cid": "", "type": type_id, "title": "%s%s: %s" % [def.get("name", type_id), mission.title_extra, zone.get("name", "")],
@@ -201,8 +209,10 @@ static func generate(rng: RandomNumberGenerator, ctx: Dictionary) -> Dictionary:
 ## optional one whose site the module lacks is left out), {name} and {module} filled in, a
 ## person's real name for an HVT (from the `target` faction's nation) or a hostage (Names.mission_person), and the time limit on the required ones. Picked on a
 ## generator of its own (seeded from `rng`, which it leaves alone) so the boards stay as they
-## were. {"module", "module_id", "objectives", "title_extra"}.
-static func mission_target(rng: RandomNumberGenerator, def: Dictionary, zone_id: String, target := "") -> Dictionary:
+## were. {"module", "module_id", "objectives", "title_extra"}. Hot zones (HotZoneOps):
+## `at_module` picks that module when the type plays there; `avoid` leaves out modules other
+## live contracts hold while any other is left.
+static func mission_target(rng: RandomNumberGenerator, def: Dictionary, zone_id: String, target := "", at_module := "", avoid: Array = []) -> Dictionary:
 	var pick := RandomNumberGenerator.new()
 	pick.seed = hash([rng.state, "mission"])
 	var allowed := MissionRegistry.type_modules(def)
@@ -210,6 +220,12 @@ static func mission_target(rng: RandomNumberGenerator, def: Dictionary, zone_id:
 	var module_id := ""
 	var options: Array = (MissionRegistry.zone_def(zone_id).get("modules", []) as Array).filter(
 		func(m: Dictionary) -> bool: return ZoneModules.base(String(m.type)) in allowed)
+	var exact := options.filter(func(m: Dictionary) -> bool: return String(m.id) == at_module)
+	var fresh := options.filter(func(m: Dictionary) -> bool: return String(m.id) not in avoid)
+	if not exact.is_empty():
+		options = exact
+	elif not fresh.is_empty():
+		options = fresh
 	if not options.is_empty():
 		var m: Dictionary = options[pick.randi() % options.size()]
 		module_type = String(m.type)
