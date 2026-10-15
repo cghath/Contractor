@@ -25,22 +25,27 @@ const LEFT_SLOTS: Array[StringName] = [&"helmet", &"vest", &"backpack", &"launch
 const RIGHT_SLOTS: Array[StringName] = [&"primary", &"sidearm", &"plate_front", &"plate_back", &"plate_right"]
 ## How far the ground panel looks for items (metres): about the interaction reach.
 const NEARBY_M := Soldier.INTERACT_RANGE + 0.8
-const TILE := Vector2(96, 112)
-const WIDE_TILE := Vector2(178, 58)
+## Tile sizes: room for 14 px text at the least (docs/ui_audit.md item 6, P1-8: names were 11
+## px, readouts 10, captions 9). A wide tile (the slots and attach points beside the soldier)
+## narrows towards WIDE_TILE_MIN when the window is (_fit_columns).
+const TILE := Vector2(112, 120)
+const WIDE_TILE := Vector2(200, 66)
+const WIDE_TILE_MIN := 150.0
 const ICON := 64
-const WIDE_ICON := 44
+const WIDE_ICON := 48
 
-const COL_BG := Color(0.03, 0.06, 0.08, 0.93)
-const COL_PANEL := Color(0.06, 0.11, 0.14, 0.95)
-const COL_TILE := Color(0.08, 0.14, 0.18, 1.0)
-const COL_EDGE := Color(0.17, 0.32, 0.38)
-const COL_ACCENT := Color(0.33, 0.85, 0.95)
-const COL_TEXT := Color(0.82, 0.9, 0.92)
-const COL_MUTED := Color(0.5, 0.62, 0.67)
+## The shared look (Captain, 2026-10-14: "all the UIs need a pass"; audit item 6, P1-8: the
+## teal palette was the inventory's own, and low contrast): UiKit's palette and the theme's
+## panels and buttons. Only the full-window backing is set here, a touch more opaque than a
+## panel since the world behind is busy.
+const COL_BG := Color(0.05, 0.06, 0.05, 0.94)
+const COL_ACCENT := UiKit.ACCENT
+const COL_TEXT := UiKit.TEXT
+const COL_MUTED := UiKit.TEXT_DIM
+const COL_WARN := UiKit.WARN
 ## Attach points while a pouch is selected or dragged: the free ones it fits, and the rest.
 const FITS_TINT := Color(0.6, 1.0, 0.65)
 const DIMMED_ALPHA := 0.35
-const COL_WARN := Color(0.95, 0.7, 0.3)
 
 enum View { LOADOUT, MOLLE }
 
@@ -75,6 +80,10 @@ var _turning := false
 var _nearby_key := ""
 var _nearby_clock := 0.0
 var _redraw_queued := false
+var _left_column: Control
+var _right_column: Control
+## The width of the wide tiles beside the soldier just now (_fit_columns).
+var _wide_w := WIDE_TILE.x
 
 
 func _init(p_player: Soldier) -> void:
@@ -84,6 +93,7 @@ func _init(p_player: Soldier) -> void:
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_STOP
+	UiKit.apply(self)
 	var bg := ColorRect.new()
 	bg.color = COL_BG
 	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -93,27 +103,70 @@ func _ready() -> void:
 	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	for side in ["left", "right", "top", "bottom"]:
-		margin.add_theme_constant_override("margin_" + side, 18)
+		margin.add_theme_constant_override("margin_" + side, UiKit.SPACE_L)
 	add_child(margin)
 	var root := VBoxContainer.new()
-	root.add_theme_constant_override(&"separation", 10)
+	root.add_theme_constant_override(&"separation", UiKit.SPACE_M)
 	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	margin.add_child(root)
 	root.add_child(_build_header())
 	var body := HBoxContainer.new()
 	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	body.add_theme_constant_override(&"separation", 14)
+	body.add_theme_constant_override(&"separation", UiKit.SPACE_M)
 	body.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(body)
-	body.add_child(_build_left())
+	_left_column = _build_left()
+	body.add_child(_left_column)
 	body.add_child(_build_centre())
-	body.add_child(_build_right())
+	_right_column = _build_right()
+	body.add_child(_right_column)
 	_menu = PopupMenu.new()
 	_menu.id_pressed.connect(_on_menu)
 	add_child(_menu)
 	player.inventory.changed.connect(_queue_redraw)
 	visibility_changed.connect(_on_visibility)
+	resized.connect(_fit_columns)
+	_doll_area.resized.connect(_fit_wide_tiles)
+	_fit_columns()
 	_redraw()
+
+
+## Columns that flex with the window (audit item 6, P1-8: the fixed 330 and 300 px side columns
+## left about 160 px for the soldier at 1280x720 with the UI at 1.5): the side columns take a
+## share of the width between a floor (one tile; readable details) and their old widths, and
+## the centre the rest.
+func _fit_columns() -> void:
+	if _left_column == null:
+		return
+	var w := size.x - UiKit.SPACE_L * 2.0
+	_left_column.custom_minimum_size.x = clampf(w * 0.22, TILE.x + 56.0, 330.0)
+	_right_column.custom_minimum_size.x = clampf(w * 0.2, 200.0, 300.0)
+
+
+## The slot and attach-point tiles beside the soldier narrow with the centre column, so the two
+## sides don't cover him (or each other) in a small window.
+func _fit_wide_tiles() -> void:
+	var want := clampf((_doll_area.size.x - 16.0 - 48.0) / 2.0, WIDE_TILE_MIN, WIDE_TILE.x)
+	if is_equal_approx(want, _wide_w):
+		return
+	_wide_w = want
+	for column: Control in [_left_slots, _right_slots]:
+		for tile: Control in column.get_children():
+			tile.custom_minimum_size.x = _wide_w
+
+
+## Tab and Esc close the screen before the GUI sees them (audit item 6, P1-15: with keyboard
+## focus on a tile or a button, Tab would only move the focus and the screen wouldn't close).
+func _input(event: InputEvent) -> void:
+	if not visible or not (event.is_action_pressed(&"inventory") or event.is_action_pressed(&"pause")):
+		return
+	if _menu and _menu.visible:
+		return  # the actions menu closes first
+	var hud: Hud = player._hud if player else null
+	if hud == null or (hud.map_screen and hud.map_screen.visible):
+		return  # the map, open over the inventory, has the keys
+	get_viewport().set_input_as_handled()
+	hud.toggle_detail()
 
 
 func _process(delta: float) -> void:
@@ -135,6 +188,11 @@ func _on_visibility() -> void:
 	if visible:
 		_ensure_doll()
 		_redraw()
+		# Keyboard from the moment it opens (audit item 6, P1-15): the arrow keys walk the tiles
+		# and buttons, Enter uses. On the Loadout view button, which does nothing harmful if a
+		# reflex Space presses it.
+		if is_inside_tree():
+			_view_buttons[View.LOADOUT].call_deferred(&"grab_focus")
 	else:
 		_turning = false
 
@@ -155,37 +213,40 @@ func _deferred_redraw() -> void:
 
 func _build_header() -> Control:
 	var header := HBoxContainer.new()
-	header.add_theme_constant_override(&"separation", 16)
-	header.add_child(_label("PERSONAL INVENTORY", 22, COL_ACCENT))
-	var spacer := Control.new()
-	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	header.add_child(spacer)
-	_mass_label = _label("", 15, COL_TEXT)
-	header.add_child(_mass_label)
+	header.add_theme_constant_override(&"separation", UiKit.SPACE_L)
+	header.add_child(_label("Personal inventory", &"TitleLabel"))
+	# The mass and the key hints wrap under each other in a narrow window instead of pushing
+	# the header off it.
+	var right := HFlowContainer.new()
+	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	right.alignment = FlowContainer.ALIGNMENT_END
+	right.add_theme_constant_override(&"h_separation", UiKit.SPACE_M)
+	right.add_theme_constant_override(&"v_separation", UiKit.SPACE_XS)
+	right.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	header.add_child(right)
+	_mass_label = _label("", &"")
+	right.add_child(_mass_label)
 	_mass_bar = ProgressBar.new()
-	_mass_bar.custom_minimum_size = Vector2(180, 14)
+	_mass_bar.custom_minimum_size = Vector2(140, 14)
 	_mass_bar.show_percentage = false
 	_mass_bar.max_value = 45.0
 	_mass_bar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_mass_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var fill := StyleBoxFlat.new()
-	fill.bg_color = COL_ACCENT
-	_mass_bar.add_theme_stylebox_override(&"fill", fill)
-	_mass_bar.add_theme_stylebox_override(&"background", _box(COL_TILE, COL_EDGE, 1))
-	header.add_child(_mass_bar)
-	header.add_child(_label("TAB / ESC  CLOSE", 13, COL_MUTED))
+	right.add_child(_mass_bar)
+	for hint: Array in [["Tab / Esc", "Close"], ["Arrows", "Move"], ["Enter", "Use"], ["Menu", "Actions"]]:
+		var key := UiKit.key_hint(hint[0], hint[1])
+		key.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		right.add_child(key)
 	return header
 
 
 func _build_left() -> Control:
 	var column := VBoxContainer.new()
-	column.custom_minimum_size.x = 330
 	column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	column.size_flags_stretch_ratio = 0.9
 	column.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	column.add_child(_label("CONTAINERS", 15, COL_ACCENT))
-	_quick_box = HFlowContainer.new()
+	column.add_child(_label("Containers", &"HeadingLabel"))
+	_quick_box = UiKit.button_row([])
 	column.add_child(_quick_box)
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -193,7 +254,7 @@ func _build_left() -> Control:
 	column.add_child(scroll)
 	_containers_box = VBoxContainer.new()
 	_containers_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_containers_box.add_theme_constant_override(&"separation", 8)
+	_containers_box.add_theme_constant_override(&"separation", UiKit.SPACE_S)
 	scroll.add_child(_containers_box)
 	return column
 
@@ -201,12 +262,12 @@ func _build_left() -> Control:
 func _build_centre() -> Control:
 	var column := VBoxContainer.new()
 	column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	column.size_flags_stretch_ratio = 1.25
+	column.size_flags_stretch_ratio = 1.5
 	column.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var buttons := HBoxContainer.new()
 	buttons.alignment = BoxContainer.ALIGNMENT_CENTER
 	for v: View in [View.LOADOUT, View.MOLLE]:
-		var b := _button("LOADOUT" if v == View.LOADOUT else "MOLLE", _set_view.bind(v))
+		var b := _button("Loadout" if v == View.LOADOUT else "MOLLE", _set_view.bind(v))
 		b.toggle_mode = true
 		b.tooltip_text = "Equipment slots" if v == View.LOADOUT else "The carrier's attach points: drag pouches, a knife or a radio pouch onto them"
 		buttons.add_child(b)
@@ -219,10 +280,9 @@ func _build_centre() -> Control:
 	column.add_child(_doll_area)
 	_doll_area.set_drag_forwarding(Callable(), _can_drop.bind({"kind": "doll"}), _drop.bind({"kind": "doll"}))
 	_doll_area.gui_input.connect(_doll_input)
-	var frame := Panel.new()
+	var frame := UiKit.panel()  # the theme's panel behind the soldier
 	frame.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	frame.add_theme_stylebox_override(&"panel", _box(Color(0.04, 0.08, 0.1, 0.6), COL_EDGE, 1))
 	_doll_area.add_child(frame)
 	_overlay = Control.new()
 	_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -237,34 +297,40 @@ func _build_centre() -> Control:
 	sides.offset_bottom = -8
 	sides.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_doll_area.add_child(sides)
-	_left_slots = VBoxContainer.new()
-	_left_slots.add_theme_constant_override(&"separation", 6)
-	_left_slots.alignment = BoxContainer.ALIGNMENT_CENTER
-	_left_slots.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	sides.add_child(_left_slots)
+	_left_slots = _slot_column(sides)
 	var middle := Control.new()
 	middle.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	middle.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	sides.add_child(middle)
-	_right_slots = VBoxContainer.new()
-	_right_slots.add_theme_constant_override(&"separation", 6)
-	_right_slots.alignment = BoxContainer.ALIGNMENT_CENTER
-	_right_slots.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	sides.add_child(_right_slots)
-	var hint := _label("Drag items between slots, pouches and containers; onto the soldier to equip, onto the ground to drop. Right-click for actions. Drag the soldier to turn him.", 12, COL_MUTED)
-	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_right_slots = _slot_column(sides)
+	var hint := UiKit.hint("Drag items between slots, pouches and containers; onto the soldier to equip, onto the ground to drop. Right-click (or the Menu key) for actions. Drag the soldier to turn him.", true)
+	hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	column.add_child(hint)
 	return column
 
 
+## A column of slot or attach-point tiles beside the soldier, which scrolls when there are more
+## than the window is tall for (a carrier's MOLLE points at 1280x720 and a big UI scale).
+func _slot_column(sides: HBoxContainer) -> VBoxContainer:
+	var scroll := ScrollContainer.new()
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.mouse_filter = Control.MOUSE_FILTER_PASS
+	sides.add_child(scroll)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override(&"separation", 6)
+	box.alignment = BoxContainer.ALIGNMENT_CENTER
+	box.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	scroll.add_child(box)
+	return box
+
+
 func _build_right() -> Control:
 	var column := VBoxContainer.new()
-	column.custom_minimum_size.x = 300
 	column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	column.size_flags_stretch_ratio = 0.8
 	column.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	column.add_child(_label("DETAILS", 15, COL_ACCENT))
+	column.add_child(_label("Details", &"HeadingLabel"))
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -373,11 +439,14 @@ func _draw_overlay() -> void:
 			continue
 		var target: Vector2 = on_screen
 		var rect := tile.get_global_rect()
+		var column := tile.get_parent().get_parent() as Control  # its side's scroll
+		if column and not column.get_global_rect().grow(1.0).encloses(rect):
+			continue  # scrolled out of sight
 		rect.position -= origin
 		var from := Vector2(rect.end.x if rect.get_center().x < target.x else rect.position.x, rect.get_center().y)
 		var colour := COL_ACCENT if not inv.attachment(StringName(p.id)).is_empty() else COL_MUTED
 		if _is_selected({"kind": "point", "point": StringName(p.id)}):
-			colour = COL_WARN
+			colour = COL_TEXT  # the selected point's line stands out bright
 		_overlay.draw_line(from, target, Color(colour, 0.7), 1.5, true)
 		_overlay.draw_circle(target, 4.0, colour)
 
@@ -396,9 +465,11 @@ func _redraw() -> void:
 	if inv.attach_points().is_empty() and view == View.MOLLE:
 		view = View.LOADOUT
 	_validate_selection()
+	var focus := get_viewport().gui_get_focus_owner() if is_inside_tree() else null
+	var had_focus := focus != null and is_ancestor_of(focus)
 	_tiles.clear()
 	var mass := inv.total_mass()
-	_mass_label.text = "MASS  %.1f kg" % mass
+	_mass_label.text = "Mass  %.1f kg" % mass
 	_mass_bar.value = mass
 	for v: View in _view_buttons:
 		_view_buttons[v].set_pressed_no_signal(v == view)
@@ -416,6 +487,25 @@ func _redraw() -> void:
 	_mark_refused()
 	if _overlay:
 		_overlay.queue_redraw()
+	if had_focus and not (is_instance_valid(focus) and focus.is_inside_tree()):
+		_restore_focus()
+
+
+## The keyboard focus after a redraw freed the control that had it (audit item 6, P1-15: an
+## action used from the keyboard mustn't leave it nowhere): the selected item's tile, else the
+## first tile, else the Loadout button.
+func _restore_focus() -> void:
+	var first: Control = null
+	for t: Array in _tiles:
+		var tile: Control = t[0]
+		if not is_instance_valid(tile) or not tile.is_visible_in_tree():
+			continue
+		if _is_selected(t[1]):
+			tile.grab_focus()
+			return
+		if first == null:
+			first = tile
+	(first if first else _view_buttons[View.LOADOUT] as Control).grab_focus()
 
 
 func _redraw_containers() -> void:
@@ -423,22 +513,22 @@ func _redraw_containers() -> void:
 	_clear(_containers_box)
 	var pouches := inv.pouch_containers()
 	if not pouches.is_empty():
-		var panel := _section("POUCHES", "%d attached" % (inv.attachment_count() + inv.attachment_count(&"backpack")), {})
+		var panel := _section("Pouches", "%d attached" % (inv.attachment_count() + inv.attachment_count(&"backpack")), {})
 		var body: VBoxContainer = panel.get_meta(&"body")
 		for c in pouches:
 			var point := inv.attach_point(Inventory.point_of(c))
 			var pouch := inv.pouch_item(c)
-			body.add_child(_label("%s  ·  %s point  ·  %s" % [pouch.name, Inventory.POINT_TYPES.get(point.get("type", ""), ""), _fill_text(c)], 12, COL_MUTED))
+			body.add_child(_wrapped("%s  ·  %s point  ·  %s" % [pouch.name, Inventory.POINT_TYPES.get(point.get("type", ""), ""), _fill_text(c)], &"HintLabel"))
 			body.add_child(_entry_grid(c, true))
 		_containers_box.add_child(panel)
 	for c in Inventory.CONTAINERS:
 		if inv.capacity(c) <= 0.0:
 			continue
-		var panel := _section(String(c).to_upper(), "%.1f / %.1f L" % [inv.used(c), inv.capacity(c)], {"kind": "container", "container": c})
+		var panel := _section(String(c).capitalize(), "%.1f / %.1f L" % [inv.used(c), inv.capacity(c)], {"kind": "container", "container": c})
 		panel.get_meta(&"body").add_child(_entry_grid(c, false))
 		_containers_box.add_child(panel)
 	if inv.hands != &"":
-		var panel := _section("HANDS", "", {})
+		var panel := _section("Hands", "", {})
 		var grid := _grid()
 		var item := ItemDB.get_item(inv.hands)
 		grid.add_child(_tile({"kind": "hands", "id": inv.hands}, item.name, "%.1f kg" % item.mass_kg, inv.hands))
@@ -446,14 +536,14 @@ func _redraw_containers() -> void:
 		_containers_box.add_child(panel)
 	var nearby := _nearby_items()
 	_nearby_key = _nearby_signature()
-	var ground := _section("NEARBY (GROUND)", "drop here", {"kind": "nearby"})
+	var ground := _section("Nearby (ground)", "drop here", {"kind": "nearby"})
 	var grid := _grid()
 	for node: WorldItem in nearby:
 		var item := ItemDB.get_item(node.item_id)
 		var src := {"kind": "nearby", "path": node.get_path(), "id": node.item_id}
 		grid.add_child(_tile(src, item.name, "x%d" % node.count if node.count > 1 else _condition(item, node.state), node.item_id))
 	if nearby.is_empty():
-		grid.add_child(_label("Nothing within reach", 12, COL_MUTED))
+		grid.add_child(_wrapped("Nothing within reach", &"HintLabel"))
 	ground.get_meta(&"body").add_child(grid)
 	_containers_box.add_child(ground)
 
@@ -471,7 +561,7 @@ func _entry_grid(container: StringName, compact: bool) -> HFlowContainer:
 		var src := {"kind": "entry", "container": container, "index": i, "id": entry.id}
 		grid.add_child(_tile(src, ItemDB.get_item(entry.id).name, _entry_readout(entry), entry.id))
 	if entries.is_empty():
-		grid.add_child(_label("empty" if compact else "(empty)  drag items here", 12, COL_MUTED))
+		grid.add_child(_wrapped("empty" if compact else "(empty)  drag items here", &"HintLabel"))
 		grid.custom_minimum_size.y = 26
 	return grid
 
@@ -564,33 +654,31 @@ func _redraw_details() -> void:
 	_clear(_detail_box)
 	var inv := player.inventory
 	if selected.is_empty():
-		_detail_box.add_child(_wrapped("Select an item to see it here.", COL_MUTED))
-		_detail_box.add_child(_wrapped("Carrying %.1f kg. Pockets %.1f / %.1f L." % [inv.total_mass(), inv.used(&"pockets"), Inventory.POCKETS_L], COL_TEXT))
+		_detail_box.add_child(_wrapped("Select an item to see it here.", &"HintLabel"))
+		_detail_box.add_child(_wrapped("Carrying %.1f kg. Pockets %.1f / %.1f L." % [inv.total_mass(), inv.used(&"pockets"), Inventory.POCKETS_L]))
 		if view == View.MOLLE:
-			_detail_box.add_child(_wrapped("MOLLE: drag a pouch, a knife or a radio pouch from your containers onto a free point that fits it, then drag magazines and gear into the pouch. Reloads pull from mag pouches first.", COL_MUTED))
+			_detail_box.add_child(_wrapped("MOLLE: drag a pouch, a knife or a radio pouch from your containers onto a free point that fits it, then drag magazines and gear into the pouch. Reloads pull from mag pouches first.", &"HintLabel"))
 		return
 	var id: StringName = selected.get("id", &"")
 	var item := ItemDB.get_item(id) if id != &"" else null
 	if item == null:
 		if selected.kind == "point":
 			var p := inv.attach_point(selected.point)
-			_detail_box.add_child(_label("Empty %s point" % Inventory.POINT_TYPES.get(p.get("type", ""), ""), 18, COL_TEXT))
-			_detail_box.add_child(_wrapped("Fits: %s." % ", ".join(_fits_point(Inventory.point_types(p))), COL_MUTED))
+			_detail_box.add_child(_wrapped("Empty %s point" % Inventory.POINT_TYPES.get(p.get("type", ""), ""), &"HeadingLabel"))
+			_detail_box.add_child(_wrapped("Fits: %s." % ", ".join(_fits_point(Inventory.point_types(p))), &"HintLabel"))
 		else:
-			_detail_box.add_child(_label("Empty %s" % SLOT_NAMES.get(selected.get("slot", &""), "slot"), 18, COL_TEXT))
+			_detail_box.add_child(_wrapped("Empty %s" % SLOT_NAMES.get(selected.get("slot", &""), "slot"), &"HeadingLabel"))
 		return
 	var big := _icon(id, 150)
 	big.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	_detail_box.add_child(big)
-	var title := _label(item.name, 18, COL_TEXT)
-	title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_detail_box.add_child(title)
+	_detail_box.add_child(_wrapped(item.name, &"HeadingLabel"))
 	# What it is and what it's for, before the numbers (Captain, 2026-10-14: "item descriptions
 	# plus uses also needed"; ItemInfo).
 	if item.desc != "":
-		_detail_box.add_child(_wrapped(item.desc, COL_TEXT))
+		_detail_box.add_child(_wrapped(item.desc))
 	for use in item.uses:
-		_detail_box.add_child(_wrapped("• " + use, COL_TEXT))
+		_detail_box.add_child(_wrapped("• " + use))
 	var state := _selected_state()
 	var count := int(_selected_entry().get("count", 1))
 	var lines := PackedStringArray()
@@ -608,25 +696,22 @@ func _redraw_details() -> void:
 	if item.stats.has("molle"):
 		lines.append("%d MOLLE attach points" % item.stats.molle.size())
 	for line in lines:
-		_detail_box.add_child(_wrapped(line, COL_MUTED))
+		_detail_box.add_child(_wrapped(line, &"HintLabel"))
 	var actions := _actions_for(selected)
 	if not actions.is_empty():
-		var flow := HFlowContainer.new()
-		for action: Array in actions:
-			flow.add_child(_button(action[0], action[1]))
-		_detail_box.add_child(flow)
+		_detail_box.add_child(UiKit.button_row(actions.map(func(action: Array) -> Button: return _button(action[0], action[1]))))
 	if selected.kind == "point" and Inventory.is_pouch(item):
 		# A pouch on the carrier: what's in it, and a place to drop more.
 		var c := Inventory.pouch_container(selected.point)
-		_detail_box.add_child(_label("CONTENTS  %s" % _fill_text(c), 14, COL_ACCENT))
+		_detail_box.add_child(_wrapped("Contents  %s" % _fill_text(c), &"HeadingLabel"))
 		_detail_box.add_child(_entry_grid(c, false))
 	elif not state.get("molle", {}).is_empty():
-		_detail_box.add_child(_label("ATTACHED", 14, COL_ACCENT))
+		_detail_box.add_child(_wrapped("Attached", &"HeadingLabel"))
 		for point: String in state.molle:
 			var att: Dictionary = state.molle[point]
 			var held: Array = att.get("held", [])
 			var att_item := ItemDB.get_item(StringName(att.get("id", "")))
-			_detail_box.add_child(_label("%s: %s%s" % [point, att_item.name if att_item else "?", "  (%d inside)" % held.size() if not held.is_empty() else ""], 12, COL_MUTED))
+			_detail_box.add_child(_wrapped("%s: %s%s" % [point, att_item.name if att_item else "?", "  (%d inside)" % held.size() if not held.is_empty() else ""], &"HintLabel"))
 
 
 # --- Actions --------------------------------------------------------------------------------
@@ -828,53 +913,58 @@ func drop_action(src: Dictionary, dst: Dictionary) -> Callable:
 ## An item tile: preview image, name and a readout (`placeholder` text instead of an image
 ## for an empty slot or point; `caption` above, `wide` for the slots round the soldier).
 ## Click selects, double-click does its first action, right-click lists them; it drags, and
-## takes drops where it stands (its slot, its point, its container, the ground).
+## takes drops where it stands (its slot, its point, its container, the ground). From the
+## keyboard (audit item 6, P1-15) it takes focus: the arrow keys move between tiles, focusing
+## one selects it, Enter does its first action and the Menu key (or Shift+F10) lists them.
 func _tile(src: Dictionary, title: String, readout: String, id: StringName, placeholder := "", caption := "", wide := false) -> Control:
 	var tile := PanelContainer.new()
-	tile.custom_minimum_size = WIDE_TILE if wide else TILE
+	tile.custom_minimum_size = Vector2(_wide_w, WIDE_TILE.y) if wide else TILE
 	tile.mouse_filter = Control.MOUSE_FILTER_STOP
+	tile.focus_mode = Control.FOCUS_ALL
 	var empty := id == &""
-	_style_tile(tile, _is_selected(src), empty)
 	_tiles.append([tile, src, empty])
+	_style_tile(tile, _is_selected(src), empty)
 	var box: BoxContainer = HBoxContainer.new() if wide else VBoxContainer.new()
 	box.add_theme_constant_override(&"separation", 6 if wide else 1)
 	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	tile.add_child(box)
-	var text_box := VBoxContainer.new()
-	text_box.add_theme_constant_override(&"separation", 0)
-	text_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	# A wide tile's lines go in a column beside the picture; a square tile's under it, in `box`
+	# (the column is made only when used: one left out of the tree leaked at exit).
+	var text_box: BoxContainer = box
+	if wide:
+		text_box = VBoxContainer.new()
+		text_box.add_theme_constant_override(&"separation", 0)
+		text_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var edge_px := WIDE_ICON if wide else ICON
 	var picture: Control
 	if empty:
 		picture = CenterContainer.new()
 		picture.custom_minimum_size = Vector2(edge_px, edge_px)
 		picture.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		picture.add_child(_label(placeholder.left(6) if wide else placeholder, 9, COL_MUTED))
+		if not wide:  # a wide tile's caption already names the slot
+			picture.add_child(_label(placeholder, &"HintLabel"))
 	else:
 		picture = _icon(id, edge_px)
 		picture.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	# Every line is at least 14 px (UiKit.FONT_SMALL) and cut with "..." to the tile, the whole
+	# of it in the tooltip (audit item 6: captions were 9 px, names 11, readouts 10).
 	if caption != "":
-		(text_box if wide else box).add_child(_label(caption.to_upper(), 9, COL_ACCENT))
+		text_box.add_child(_cut(caption, &"HintLabel"))
 	box.add_child(picture)
 	if wide:
 		text_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		box.add_child(text_box)
-	var name_label := _label(title, 11, COL_TEXT if not empty else COL_MUTED)
-	name_label.clip_text = true
-	name_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	name_label.custom_minimum_size.x = (WIDE_TILE.x - WIDE_ICON - 24) if wide else (TILE.x - 12)
-	(text_box if wide else box).add_child(name_label)
+	text_box.add_child(_cut(title, &"HintLabel" if empty else &""))
 	if readout != "":
-		var readout_label := _label(readout, 10, COL_MUTED)
-		readout_label.clip_text = true
-		readout_label.custom_minimum_size.x = name_label.custom_minimum_size.x
-		(text_box if wide else box).add_child(readout_label)
+		text_box.add_child(_cut(readout, &"HintLabel"))
 	tile.tooltip_text = title + ("\n" + readout if readout != "" else "")
 	if not empty:  # what it is and how to use it (ItemInfo; Captain, 2026-10-14: "item descriptions plus uses also needed")
 		tile.tooltip_text += "\n\n" + ItemInfo.tooltip(id)
 	var dst := _drop_target_of(src)
 	tile.set_drag_forwarding(_get_drag.bind(src, tile), _can_drop.bind(dst), _drop.bind(dst))
 	tile.gui_input.connect(_tile_input.bind(src, tile))
+	tile.focus_entered.connect(_tile_focused.bind(src))
+	tile.focus_exited.connect(_restyle_tiles)
 	return tile
 
 
@@ -888,7 +978,36 @@ static func _drop_target_of(src: Dictionary) -> Dictionary:
 	return {"kind": "none"}
 
 
+## A tile took the keyboard focus: from the keyboard it's selected, as a click would (a click
+## selects in _tile_input, which keeps the carrier's second click for the MOLLE view).
+func _tile_focused(src: Dictionary) -> void:
+	if Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) or Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT):
+		_restyle_tiles()
+		return
+	if not _is_selected(src):
+		selected = src
+		_redraw_details()
+	_restyle_tiles()
+
+
 func _tile_input(event: InputEvent, src: Dictionary, tile: Control) -> void:
+	if event is InputEventKey and event.pressed and not event.echo:
+		var key := event as InputEventKey
+		if key.keycode in [KEY_ENTER, KEY_KP_ENTER]:  # not Space: a reflex jump mustn't drop things
+			selected = src
+			var actions := _actions_for(src)
+			if not actions.is_empty():
+				actions[0][1].call()
+			_redraw()
+			tile.accept_event()
+		elif key.keycode == KEY_MENU or (key.keycode == KEY_F10 and key.shift_pressed):
+			selected = src
+			_redraw_details()
+			_menu_src = src.duplicate()
+			var rect := tile.get_global_rect()
+			_open_menu(_actions_for(src), Vector2(rect.position.x + rect.size.x * 0.5, rect.end.y))
+			tile.accept_event()
+		return
 	if not event is InputEventMouseButton or not event.pressed:
 		return
 	var mb := event as InputEventMouseButton
@@ -916,16 +1035,18 @@ func _tile_input(event: InputEvent, src: Dictionary, tile: Control) -> void:
 	tile.accept_event()
 
 
-func _open_menu(actions: Array) -> void:
+## The actions menu, at the mouse (or at `at_point`, in the screen's coordinates, for the
+## keyboard).
+func _open_menu(actions: Array, at_point: Variant = null) -> void:
 	if actions.is_empty():
 		return
 	_menu.clear()
 	_menu_actions = actions
 	for i in actions.size():
 		_menu.add_item(actions[i][0], i)
-	var at := Vector2i(get_viewport().get_mouse_position())
+	var at := Vector2i(get_viewport().get_mouse_position() if at_point == null else at_point)
 	if not get_viewport().gui_embed_subwindows:
-		at = DisplayServer.mouse_get_position()
+		at = DisplayServer.mouse_get_position() if at_point == null else at + DisplayServer.window_get_position()
 	_menu.reset_size()
 	_menu.popup(Rect2i(at, Vector2i.ZERO))
 
@@ -957,7 +1078,7 @@ func _icon(id: StringName, edge: int) -> Control:
 	var item := ItemDB.get_item(id)
 	var swatch := ColorRect.new()
 	swatch.custom_minimum_size = Vector2(edge, edge)
-	swatch.color = WorldItem.color_for(item).darkened(0.25) if item else COL_TILE
+	swatch.color = WorldItem.color_for(item).darkened(0.25) if item else UiKit.PANEL_BG
 	swatch.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var text := Label.new()
 	text.text = String(item.stats.get("short", item.name.get_slice(" ", 0))) if item else "?"
@@ -965,7 +1086,7 @@ func _icon(id: StringName, edge: int) -> Control:
 	text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	text.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	text.add_theme_font_size_override(&"font_size", 10 if edge < 100 else 18)
+	text.add_theme_font_size_override(&"font_size", UiKit.FONT_SMALL if edge < 100 else UiKit.FONT_HEADING)  # on a swatch: the kit's sizes
 	text.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	swatch.add_child(text)
 	return swatch
@@ -977,22 +1098,25 @@ func _on_icon_ready(_id: StringName) -> void:
 
 # --- Helpers --------------------------------------------------------------------------------
 
+## A container's panel (the theme's) with a heading and a note (its fill) that wraps under the
+## heading in a narrow column instead of widening it.
 func _section(title: String, info: String, dst: Dictionary) -> PanelContainer:
-	var panel := PanelContainer.new()
-	panel.add_theme_stylebox_override(&"panel", _box(COL_PANEL, COL_EDGE, 1))
+	var panel := UiKit.panel()
 	panel.mouse_filter = Control.MOUSE_FILTER_STOP if not dst.is_empty() else Control.MOUSE_FILTER_PASS
 	var box := VBoxContainer.new()
-	box.add_theme_constant_override(&"separation", 4)
+	box.add_theme_constant_override(&"separation", UiKit.SPACE_XS)
 	box.mouse_filter = Control.MOUSE_FILTER_PASS
 	panel.add_child(box)
-	var head := HBoxContainer.new()
+	var head := HFlowContainer.new()
+	head.add_theme_constant_override(&"h_separation", UiKit.SPACE_S)
 	head.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	head.add_child(_label(title, 14, COL_ACCENT))
-	var spacer := Control.new()
-	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	head.add_child(spacer)
-	head.add_child(_label(info, 12, COL_MUTED))
+	head.add_child(_label(title, &"HeadingLabel"))
+	if info != "":
+		var note := _label(info, &"HintLabel")
+		note.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		note.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		note.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		head.add_child(note)
 	box.add_child(head)
 	panel.set_meta(&"body", box)
 	if not dst.is_empty():
@@ -1009,46 +1133,59 @@ func _grid() -> HFlowContainer:
 	return grid
 
 
-func _label(text: String, font_size: int, colour: Color) -> Label:
+## A one-line label in one of the theme's styles (`variation`: "" for body text, or
+## HeadingLabel, HintLabel, WarnLabel, TitleLabel); no sizes or colours by hand (audit rule).
+func _label(text: String, variation: StringName = &"") -> Label:
 	var label := Label.new()
 	label.text = text
-	label.add_theme_font_size_override(&"font_size", font_size)
-	label.add_theme_color_override(&"font_color", colour)
+	label.theme_type_variation = variation
 	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	return label
 
 
-func _wrapped(text: String, colour: Color) -> Label:
-	var label := _label(text, 12, colour)
-	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	label.custom_minimum_size.x = 260
+## A one-line label cut with "..." to the room it has (a tile's lines).
+func _cut(text: String, variation: StringName = &"") -> Label:
+	var label := _label(text, variation)
+	label.clip_text = true
+	label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	return label
 
 
+## A label that wraps to its column, however narrow the window makes it.
+func _wrapped(text: String, variation: StringName = &"") -> Label:
+	var label := _label(text, variation)
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	return label
+
+
+## A themed button the keyboard can reach (audit item 6, P1-15: they were FOCUS_NONE, so the
+## screen was mouse only); long text is cut with "..." and kept whole in the tooltip (UiKit).
 func _button(text: String, action: Callable) -> Button:
-	var button := Button.new()
-	button.text = text
-	button.focus_mode = Control.FOCUS_NONE
-	button.pressed.connect(action)
-	return button
+	return UiKit.button(text, action)
 
 
-static func _box(bg: Color, edge: Color, width: int) -> StyleBoxFlat:
-	var box := StyleBoxFlat.new()
-	box.bg_color = bg
-	box.border_color = edge
-	box.set_border_width_all(width)
-	box.set_corner_radius_all(2)
+## A tile's box, from the theme's button style: the selected tile's edge in the accent, the
+## keyboard's tile lit as a hovered button, an empty slot faded.
+static func _tile_box(chosen: bool, focused: bool, empty: bool) -> StyleBoxFlat:
+	var base := UiKit.THEME.get_stylebox(&"hover" if focused else &"normal", &"Button") as StyleBoxFlat
+	var box := base.duplicate() as StyleBoxFlat
 	box.content_margin_left = 6
 	box.content_margin_right = 6
 	box.content_margin_top = 4
 	box.content_margin_bottom = 4
+	if empty and not focused:
+		box.bg_color.a *= 0.5
+		box.border_color.a *= 0.6
+	if chosen or focused:
+		box.border_color = COL_ACCENT
+		box.set_border_width_all(2)
 	return box
 
 
 func _style_tile(tile: PanelContainer, chosen: bool, empty: bool) -> void:
-	var edge := COL_WARN if chosen else (COL_EDGE if not empty else Color(COL_EDGE, 0.6))
-	tile.add_theme_stylebox_override(&"panel", _box(COL_TILE if not empty else Color(COL_TILE, 0.5), edge, 2 if chosen else 1))
+	tile.add_theme_stylebox_override(&"panel", _tile_box(chosen, tile.has_focus(), empty))
 
 
 func _restyle_tiles() -> void:
@@ -1306,13 +1443,16 @@ func _mark_refused() -> void:
 				lit_points.append(String(p.point))
 				lit_slots.append(inv.point_slot(p.point))  # the carrier or pack it's on, in the loadout view
 			"slot": lit_slots.append(p.slot)
-	var note := _section("WON'T GO THERE", item.name if item else "", {})
-	note.add_theme_stylebox_override(&"panel", _box(COL_PANEL, COL_WARN, 2))
+	var note := _section("Won't go there", item.name if item else "", {})
+	var edge := (UiKit.THEME.get_stylebox(&"panel", &"PanelContainer") as StyleBoxFlat).duplicate() as StyleBoxFlat
+	edge.border_color = COL_WARN  # the theme's panel, edged in its warning colour
+	edge.set_border_width_all(2)
+	note.add_theme_stylebox_override(&"panel", edge)
 	var body: VBoxContainer = note.get_meta(&"body")
-	body.add_child(_wrapped(String(_refusal.text), COL_WARN))
+	body.add_child(_wrapped(String(_refusal.text), &"WarnLabel"))
 	var where := inv.places_text(refusal_places)
 	body.add_child(_wrapped("Lit up: %s%s" % [where, "  (MOLLE view shows the points)" if not lit_points.is_empty() and view == View.LOADOUT else ""] if where != ""
-		else "Nothing you carry has room for it: make room, or put on a bigger carrier or pack.", COL_TEXT))
+		else "Nothing you carry has room for it: make room, or put on a bigger carrier or pack."))
 	note.name = "RefusalNote"
 	_containers_box.add_child(note)
 	_containers_box.move_child(note, 0)

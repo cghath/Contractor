@@ -63,6 +63,11 @@ func _ready() -> void:
 			return ui)
 	await _fit("objectives panel", func() -> Node: return _in_layer(ObjectivesPanel.new()))
 	await _fit("ammo readout", func() -> Node: return _in_layer(AmmoReadout.new()))
+	var body := _inventory_body()
+	await _fit("inventory", func() -> Node: return _in_layer(InventoryScreen.new(body)))
+	await _test_inventory(body)
+	body.queue_free()
+	await _frames(2)
 	_summary()
 	GameSettings.reset_all()
 	GameSettings.use_file("")
@@ -107,6 +112,59 @@ func _test_kit() -> void:
 	for label: Label in [heading, hint, text]:
 		label.free()
 	layer.queue_free()
+
+
+## A body for the inventory screen (docs/ui_audit.md item 6): an AI soldier in the test's own
+## tree with its processing off (there's no level to stand in), in a carrier with two pouches,
+## a pack, a rifle, magazines and loose rounds, so every kind of tile and section is built.
+func _inventory_body() -> Soldier:
+	var body: Soldier = load("res://scenes/soldier.tscn").instantiate()
+	body.name = "UiTestBody"
+	add_child(body)
+	body.process_mode = Node.PROCESS_MODE_DISABLED
+	for pair: Array in [[&"plate_carrier", 1], [&"pouch_mag_double", 2], [&"assault_pack", 1], [&"m4a1", 1], [&"mag_556", 4], [&"rounds_556", 60]]:
+		body.inventory.take(pair[0], pair[1])
+	return body
+
+
+## The inventory screen in the shared look (audit item 6, P1-8 and P1-15): themed, nothing under
+## 14 px, every button and tile reachable from the keyboard (focusing a tile selects it), and
+## the soldier's two tile columns not overlapping, from the smallest layout (1280x720 at 1.5)
+## to the biggest (3840x2160 at 1.0).
+func _test_inventory(body: Soldier) -> void:
+	print("Inventory screen: theme, text sizes, keyboard, columns")
+	for layout: Vector2i in [Vector2i((Vector2(1280, 720) / 1.5).floor()), Vector2i(3840, 2160)]:
+		_vp.size = layout
+		var layer := _in_layer(InventoryScreen.new(body))
+		_vp.add_child(layer)
+		await _frames(3)
+		var screen := layer.get_child(0).get_child(0) as InventoryScreen
+		var small := PackedStringArray()
+		for label: Label in screen.find_children("*", "Label", true, false):
+			if label.is_visible_in_tree() and label.text.strip_edges() != "" and label.get_theme_font_size(&"font_size") < UiKit.FONT_SMALL:
+				small.append("'%s' %d px" % [label.text.left(24), label.get_theme_font_size(&"font_size")])
+		check(screen.theme == UiKit.THEME and small.is_empty(), "%dx%d: themed, no text under %d px%s" % [layout.x, layout.y, UiKit.FONT_SMALL, "" if small.is_empty() else ": " + ", ".join(small)])
+		var unreachable := PackedStringArray()
+		for b: BaseButton in screen.find_children("*", "BaseButton", true, false):
+			if b.focus_mode == Control.FOCUS_NONE:
+				unreachable.append((b as Button).text if b is Button else String(b.name))
+		var tiles_focus := screen._tiles.all(func(t: Array) -> bool: return (t[0] as Control).focus_mode == Control.FOCUS_ALL)
+		check(unreachable.is_empty() and tiles_focus and screen._tiles.size() >= 6,
+			"every button and all %d tiles take keyboard focus%s" % [screen._tiles.size(), "" if unreachable.is_empty() else " (not: %s)" % ", ".join(unreachable)])
+		var entry: Array = []
+		for t: Array in screen._tiles:
+			if t[1].kind == "entry" and entry.is_empty():
+				entry = t
+		if not entry.is_empty():
+			(entry[0] as Control).grab_focus()
+			await _frames(1)
+			check(screen._is_selected(entry[1]) and (entry[0] as Control).has_focus(), "%dx%d: focusing a tile (the arrow keys) selects it" % [layout.x, layout.y])
+		var left := screen._left_slots.get_parent() as Control
+		var right := screen._right_slots.get_parent() as Control
+		check(left.get_global_rect().end.x <= right.get_global_rect().position.x + 0.5 and screen._wide_w >= InventoryScreen.WIDE_TILE_MIN,
+			"%dx%d: the soldier's two tile columns don't overlap (%.0f..%.0f, tiles %.0f px)" % [layout.x, layout.y, left.get_global_rect().end.x, right.get_global_rect().position.x, screen._wide_w])
+		layer.queue_free()
+		await _frames(2)
 
 
 ## Wraps a HUD Control in a CanvasLayer with a full-window frame, as the Hud holds it.
