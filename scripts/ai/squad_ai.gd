@@ -45,9 +45,11 @@ extends Node
 ##   until they wake on their own. Anyone who lacks an item asks for a medic ("Need a medic
 ##   on Charlie"); a free medic with what's missing takes over (medic_for).
 ## - Self-care: a conscious wounded unit tourniquets its own arterial bleed at once, even
-##   under fire, and does the rest (bandages, seals, splints, morphine) out of contact or in
-##   cover. What it can't fix itself, it calls "Medic!" for. A medic doesn't use on itself
-##   an item nobody else on its side carries (massive bleeding aside).
+##   under fire (stopped, and prone if he's out in the open), and does the rest (bandages,
+##   seals, splints, morphine) out of contact or in cover. What it can't fix itself, it calls
+##   "Medic!" for, once its own tourniquet is on; a squadmate who comes meanwhile sees to the
+##   other wounds and never holds up his own tourniquet. A medic doesn't use on itself an item
+##   nobody else on its side carries (massive bleeding aside).
 ## - Dead friendlies (players' bodies too) stay where they fell; out of contact a squadmate
 ##   (their buddy first) carries the body after the squad leader.
 ## - Unconscious foes are ignored, except for a dead-check while clearing or assaulting
@@ -449,6 +451,9 @@ var ordered: Dictionary = {}
 ## A stance order (STANCE_ORDERS; -1: the unit's own choice) and a "Heal up" order's end.
 var stance_order := -1
 var _heal_until := -1000.0
+## Self-care put this unit prone (out in the open under fire); _act stands him back up once
+## he's done.
+var _care_prone := false
 var _suppress_jitter := Vector3.ZERO
 ## "Drop packs here": the pack this unit left on the ground ({"id", "uid", "pos"}: its item,
 ## that very WorldItem's uid, where it went down), {} for none.
@@ -1046,7 +1051,10 @@ func _act() -> void:
 		Intent.TACTIC:
 			_do_tactic(_tactic())
 	_apply_combat_mode()
-	if stance_order >= 0:
+	if _care_prone and intent != Intent.HEAL:
+		_care_prone = false
+		body.want_stance = stance_order  # done treating himself: back to his own (or ordered) stance
+	if stance_order >= 0 and not _care_prone:
 		body.want_stance = stance_order if intent != Intent.CASUALTY else -1  # (casualty care kneels as it needs)
 
 
@@ -2171,16 +2179,19 @@ func _end_scavenge() -> void:
 
 ## The next treatment this unit can give `c` now, in the care order (under fire: massive
 ## bleeding only), with an item it carries (loose or in a kit) that hasn't failed TREAT_TRIES
-## times, not one the casualty is doing on themselves right now, and (on itself) not one a
-## medic keeps for the squad (_kept_for_squad), nor an IV or IO on itself; {} for none. Where
+## times, not one the casualty is doing on themselves right now (on itself: not one its carer
+## is doing on it right now), and (on itself) not one a medic keeps for the squad (_kept_for_squad), nor an IV or IO on itself; {} for none. Where
 ## several items would do, the task's "item" becomes the first one carried (Vitals.pick_item),
 ## out of the casualty's own kit first ("their_kit": _pick_for).
 func _next_task(c: Soldier, under_fire: bool) -> Dictionary:
 	var conscious := c.vitals.is_up() or c.vitals.why_unconscious().has(&"pain")  # morphine wakes one out from pain
 	var their := SquadAI.of(c) if c != body else null
+	var carer := SquadAI.of(c.care_by) if c == body and is_instance_valid(c.care_by) else null
 	for task in plan_care(c.vitals.care_needed(), under_fire, conscious):
 		if their and their._treat_until >= 0.0 and their._treat_key == _task_key(c, task):
 			continue
+		if carer and carer._treat_until >= 0.0 and carer._treat_target == c and carer._treat_key == _task_key(c, task):
+			continue  # his carer is doing that one on him now
 		if String(task.kind) == "pain" and c.vitals.pain() < MORPHINE_PAIN:
 			continue
 		var pick := _pick_for(c, task)
@@ -2380,13 +2391,15 @@ func _do_fall_back() -> void:
 func _self_care_score() -> float:
 	if _treat_until >= 0.0 and _treat_target == body:
 		return 0.98  # finish what you started
+	var own := _self_task()
+	if _own_tourniquet(own):
+		return 0.97  # bleeding out: his own tourniquet, even with a squadmate on the way to him
 	if _being_treated():
 		return 0.92
-	var own := _self_task()
 	if own.is_empty():
 		return 0.0
-	if String(own.kind) in UNDER_FIRE_KINDS or Soldier._now() < _heal_until:
-		return 0.97  # bleeding out, or told to patch up now
+	if Soldier._now() < _heal_until:
+		return 0.97  # told to patch up now
 	return 0.75 if in_contact() else 0.62
 
 
@@ -2400,15 +2413,30 @@ func _self_task() -> Dictionary:
 func _do_self_care() -> void:
 	_has_destination = false
 	body.want_crouch = true
-	if _being_treated() or _treat_until >= 0.0 or Soldier._now() < body._busy_until:
+	var task := _self_task()
+	# Out in the open under fire he gets down where he is to put his tourniquet on: running
+	# on for cover first costs blood, and a tourniquet started on the move is lost.
+	if _own_tourniquet(task) and in_contact() and not _at_cover():
+		_care_prone = true
+		body.want_stance = SoldierMovement.Stance.PRONE
+	if _treat_until >= 0.0 or Soldier._now() < body._busy_until:
 		return
+	if _being_treated() and not _own_tourniquet(task):
+		return  # a squadmate is seeing to him: hold still (his own tourniquet never waits for one)
 	if Vector2(body.velocity.x, body.velocity.z).length() > SELF_CARE_STILL_MPS:
 		return  # still running from a bound: a treatment started on the move is lost ("you moved")
-	var task := _self_task()
+	if _care_prone and not body.movement.is_prone():
+		return  # down first (a tick): the stance change doesn't land mid-treatment
 	if not task.is_empty():
 		_start_treatment(body, task)
 		return
 	_think_cd = 0.0
+
+
+## `task` (one of _self_task's) is massive bleeding he stops himself, at once and before
+## anything else: his own tourniquet.
+static func _own_tourniquet(task: Dictionary) -> bool:
+	return not task.is_empty() and String(task.kind) in UNDER_FIRE_KINDS
 
 
 ## A squadmate is with this conscious unit to treat it: hold still.
@@ -2422,13 +2450,16 @@ func _being_treated() -> bool:
 
 
 ## A conscious wounded unit that needs what it doesn't carry (or, a medic, keeps for the
-## squad) calls "Medic!" (at most every MEDIC_CALL_S) and lists what it needs in `wanted`.
+## squad) calls "Medic!" (at most every MEDIC_CALL_S) and lists what it needs in `wanted`,
+## once his own tourniquet (if he has one to put on) is on.
 func _maybe_call_medic() -> void:
 	if care != Care.NONE and care != Care.BODY:
 		return
 	var now := Soldier._now()
 	if now - _medic_called_at < MEDIC_CALL_S or _being_treated() or not body.vitals.is_up():
 		return
+	if (_treat_until >= 0.0 and _treat_target == body) or _own_tourniquet(_self_task()):
+		return  # his own tourniquet first: a medic called now reaches him mid-tourniquet and takes it over
 	var missing := _missing_items(body)
 	if missing.is_empty():
 		return

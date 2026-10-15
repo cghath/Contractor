@@ -15,6 +15,10 @@ const TOURNIQUET_WITHIN_S := 25.0
 const TREATED_WITHIN_S := 90.0  # bleeding, airway, chest, then a line, a bag and a pressure bag
 ## Where the lead stands in the engagement: beside the formation's way to Delta at (-3, 15).
 const ENGAGEMENT_LEAD := Vector3(8, 0.1, 24)
+## Where the medic Golf starts the engagement, near the lead and ~11 m from Delta: in the wide
+## formation (ai/squad-spacing) his own slot put him 36-38 m out, just inside MEDIC_FAR_M, so
+## whether he or Delta's buddy answered came down to where the bound left him (R1151-R1153).
+const ENGAGEMENT_MEDIC := Vector3(6, 0.1, 22)
 ## Delta bleeds down to this share of his blood (past the 40% lost that knocks you out), so
 ## once treated he's stable but won't wake soon: he's carried with the squad.
 const ENGAGEMENT_BLOOD := 0.58
@@ -788,20 +792,32 @@ func _test_self_tourniquet() -> void:
 	check(alpha.vitals.is_up() and _bleeding(alpha, "arterial"), "Alpha takes a femoral hit and stays conscious (%s)" % [_wound_kinds(alpha)])
 	var needs := _kinds(alpha.vitals.care_needed())
 	check("venous" in needs, "the seeded hit also opens a vein he has no bandage for (%s)" % [needs])
-	var statuses := {}
-	var own := await _wait_until(func() -> bool:
-		statuses[alpha.ai_status] = true
-		return alpha.inventory.count_of(&"tourniquet") == 0 and alpha.vitals.tourniquets().has(Vitals.THIGH_R), 10.0)
-	check(own and statuses.has("Treating self"),
-		"under fire, he puts his own tourniquet on at once (%s, %s, %s)" % [alpha.ai_status, statuses.keys(), alpha.vitals.tourniquets()])
+	# Watched every physics tick, not on _wait_until's quarter seconds: whether the call came
+	# before the tourniquet was on, and who had him meanwhile, mustn't depend on the frame rate.
+	var watch := {"statuses": {}, "called_early": false, "carers": {}, "prone": false}
+	var own := await _until_ticks(func() -> bool:
+		watch.statuses[alpha.ai_status] = true
+		if alpha.movement.is_prone():
+			watch.prone = true
+		if is_instance_valid(alpha.care_by):
+			watch.carers[String(alpha.care_by.name)] = true
+		var on := alpha.inventory.count_of(&"tourniquet") == 0 and alpha.vitals.tourniquets().has(Vitals.THIGH_R)
+		if not on and _said(sent_from, "Alpha", &"medic"):
+			watch.called_early = true
+		return on, 10.0)
+	check(own and watch.statuses.has("Treating self"),
+		"under fire, he puts his own tourniquet on at once (%s, %s, %s; carers meanwhile %s)" % [alpha.ai_status, watch.statuses.keys(),
+		alpha.vitals.tourniquets(), watch.carers.keys()])
+	check(watch.prone, "out in the open, he gets down to do it (%s)" % [watch.statuses.keys()])
+	check(not watch.called_early, "and holds his \"Medic!\" until it's on (%s)" % [_lines(sent_from)])
 	var call := await _wait_until(func() -> bool: return _said(sent_from, "Alpha", &"medic"), 8.0)
-	check(call, "and he calls \"Medic!\" for what he can't fix himself (%s)" % [_lines(sent_from)])
+	check(call, "then calls \"Medic!\" for what he can't fix himself (%s)" % [_lines(sent_from)])
+	var coming := await _wait_until(func() -> bool: return _said(sent_from, "Charlie", &"moving_to"), 8.0)
+	check(coming, "his team's medic Charlie comes to him while the shooting is still going on (%s)" % [_lines(sent_from)])
 	# Put on in a hurry under fire, his tourniquet may still let some through: the medic,
 	# who comes under fire too, adds the second one.
 	var stopped := await _wait_until(func() -> bool: return not _bleeding(alpha, "arterial"), 20.0)
 	check(stopped, "and the arterial bleeding stops (%s)" % [alpha.vitals.tourniquets()])
-	check(_said(sent_from, "Charlie", &"moving_to"),
-		"his team's medic Charlie comes to him while the shooting is still going on (%s)" % [_lines(sent_from)])
 	_firing = false
 	var helped := await _wait_until(func() -> bool:
 		return alpha.vitals.care_needed().is_empty(), 40.0)
@@ -828,6 +844,10 @@ func _test_engagement() -> void:
 	await _seconds(3.0)
 	var delta := _ai("Delta")
 	var golf := _ai("Golf")
+	# The scene before may leave someone still seeing to a squadmate: Golf answers Delta only
+	# if he's free, so start once nobody is busy with a casualty (rather than after a fixed wait).
+	var free := await _wait_until(func() -> bool: return _caring().is_empty(), 20.0)
+	check(free, "nobody is still busy with a casualty from the scene before (%s)" % [_caring()])
 	var counts := {}
 	var his := {}  # Delta's own kit: a carer uses it first (queue 17)
 	for id: StringName in [&"tourniquet", &"pressure_bandage", &"smoke_grenade", &"splint", &"npa"]:
@@ -841,6 +861,10 @@ func _test_engagement() -> void:
 	level.callouts.sent.clear()  # the log keeps only its last LOG_SIZE lines: start empty so sent_from stays valid as the scene's chatter trims it
 	var sent_from := level.callouts.sent.size()
 	_place(delta, Vector3(-3, 0.1, 15))
+	_place(golf, ENGAGEMENT_MEDIC)
+	# Shot once he stands where he was put: shot the same frame, his ragdoll (body_point, which
+	# responder_for measures the medic's distance from) could start where he was before.
+	await _until_on_floor(delta)
 	_shoot_femoral(delta, 5)
 	delta.vitals.rng.seed = 9
 	delta.vitals.server_hit(Vitals.FOREARM_L, {"round_class": Vitals.FRAGMENT, "superficial": true})
@@ -861,7 +885,9 @@ func _test_engagement() -> void:
 	var going := await _wait_until(func() -> bool:
 		watch.call()
 		return SquadAI.of(golf).casualty == delta, 2.0)
-	check(going, "under fire his team's medic Golf goes to him at once (%s)" % [seen.status.keys()])
+	check(going, "under fire his team's medic Golf goes to him at once (%s; responder %s; Golf %s, %.1f m)" % [seen.status.keys(),
+		_name(SquadAI.responder_for(delta)), _care_of(golf), golf.global_position.distance_to(delta.body_point())]
+		+ " Golf at %s, Delta at %s, lying at %s" % [golf.global_position, delta.global_position, delta.body_point()])
 	var other_open_at_tq := []
 	var tq := await _wait_until(func() -> bool:
 		watch.call()
@@ -1318,6 +1344,20 @@ func _lines(from: int) -> Array:
 	return sent.slice(mini(from, sent.size())).map(func(l: Dictionary) -> String: return "%s: %s" % [l.speaker, l.text])
 
 
+## Squadmates looking after a casualty (or asking for a medic), as "name: care state".
+func _caring() -> Array:
+	var busy := _squad().filter(func(s: Soldier) -> bool:
+		var ai := SquadAI.of(s)
+		return ai.care not in [SquadAI.Care.NONE, SquadAI.Care.BODY] or ai.asking_for_medic())
+	return busy.map(func(s: Soldier) -> String: return "%s: %s" % [s.name, _care_of(s)])
+
+
+func _care_of(s: Soldier) -> String:
+	var ai := SquadAI.of(s)
+	return "%s care %s on %s, skipping Delta %s, %s" % [s.ai_status, SquadAI.Care.keys()[ai.care], _name(ai.casualty),
+		ai._skipping(_ai("Delta")), "asking" if ai.asking_for_medic() else "not asking"]
+
+
 func _squad() -> Array:
 	return level.ai.get_children().filter(func(s: Node) -> bool: return s is Soldier and s.faction == &"friendly" and not s.is_queued_for_deletion() and not s.vitals.is_dead())
 
@@ -1413,6 +1453,16 @@ func _wait_until(cond: Callable, timeout: float) -> bool:
 			return true
 		await _seconds(0.25)
 		left -= 0.25
+	return cond.call()
+
+
+## As _wait_until, but checks `cond` every physics tick (`timeout` in game seconds).
+func _until_ticks(cond: Callable, timeout: float) -> bool:
+	var end := Soldier._now() + timeout
+	while Soldier._now() < end:
+		if cond.call():
+			return true
+		await get_tree().physics_frame
 	return cond.call()
 
 
