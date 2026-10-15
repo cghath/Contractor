@@ -20,7 +20,7 @@ const UI_SCALES: Array[float] = [1.0, 1.2, 1.5, 2.0]
 ## "<screen> @<scale>" entries known to overflow, each waiting for its follow-up branch
 ## (docs/ui_audit.md, "Follow-up branches"). Take an entry off when its branch fixes it.
 const KNOWN: Array[String] = [
-	"contract board @1.5", "contract board @2.0", "shop @1.5", "shop @2.0",  # ui/campaign-screens
+	"contract board @2.0", "shop @2.0",  # ui/campaign-screens @2.0 (auto-scale)
 	"base: squad @2.0", "base: roster @2.0", "base: hiring @2.0", "base: medbay @2.0", "base: shop @2.0", "base: armory @2.0",  # ui/base-hub @2.0 (auto-scale)
 ]
 
@@ -56,6 +56,13 @@ func _ready() -> void:
 		return b)
 	await _fit("contract board", func() -> Node: return ContractBoard.new())
 	await _fit("shop", func() -> Node: return ShopScreen.new())
+	# A full board with an offer picked (details and negotiation up), as the Captain sees it
+	# (ui/campaign-screens, docs/ui_audit.md P0-5).
+	Contracts.new_full_campaign(71, 100000)
+	await _fit("contract board (offer picked)", func() -> Node:
+		var b := ContractBoard.new()
+		b.ready.connect(func() -> void: b.select_offer(0))
+		return b)
 	await _fit("debrief (empty)", func() -> Node: return DebriefScreen.new())
 	BaseHub.new_campaign(7)
 	BaseHub.view = BaseHub.build_view()

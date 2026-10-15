@@ -12,6 +12,8 @@ var _filter: OptionButton
 var _list: ItemList
 var _count: SpinBox
 var _notice: Label
+## The picked item's one-line summary (ItemInfo), under the list.
+var _info: Label
 var _ids: Array[StringName] = []
 var _mouse_before := Input.MOUSE_MODE_VISIBLE
 
@@ -20,15 +22,13 @@ func _ready() -> void:
 	layer = 11
 	_mouse_before = Input.mouse_mode
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-	var panel := PanelContainer.new()
-	add_child(panel)
-	panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
-	panel.custom_minimum_size = Vector2(620, 560)
-	panel.position -= panel.custom_minimum_size * 0.5
-	var box := VBoxContainer.new()
-	box.add_theme_constant_override(&"separation", 8)
-	panel.add_child(box)
-	_cash = Label.new()
+	# The shared look (UiKit; Captain, 2026-10-14: "all of the UIs need a pass"; docs/ui_audit.md
+	# P0-4): an opaque themed panel over the contract board, fitted to the window (the fixed
+	# 620x560 box put its title and filter above a 1280x720 window at a 1.5 Menu and HUD size).
+	add_child(UiKit.dim(0.45))
+	var box := UiKit.screen(self, 620.0, true)
+	box.add_child(UiKit.title("Base shop"))
+	_cash = UiKit.text("")
 	box.add_child(_cash)
 	_filter = OptionButton.new()
 	_filter.add_item("Everything")
@@ -36,35 +36,39 @@ func _ready() -> void:
 		_filter.add_item(type.capitalize())
 		_filter.set_item_metadata(_filter.item_count - 1, type)
 	_filter.item_selected.connect(func(_i: int) -> void: refresh())
-	box.add_child(_filter)
-	_list = ItemList.new()
-	_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	box.add_child(UiKit.row("Show", _filter, 80.0))
+	_list = UiKit.list(120.0)
+	UiKit.fit_height(_list, 320.0, 330.0)  # the list gives way first on a short window
+	_list.item_selected.connect(_show_info)
 	box.add_child(_list)
-	var row := HBoxContainer.new()
-	box.add_child(row)
+	_info = UiKit.hint("Hover an item for what it is and how to use it.")
+	box.add_child(_info)
 	_count = SpinBox.new()
 	_count.min_value = 1
 	_count.max_value = 100
-	row.add_child(_count)
-	var buy := Button.new()
-	buy.text = "Buy"
-	buy.pressed.connect(buy_selected)
-	row.add_child(buy)
-	var close_button := Button.new()
-	close_button.text = "Close"
-	close_button.pressed.connect(close)
-	row.add_child(close_button)
-	var supports := Label.new()
-	supports.text = "Support calls (paid when called, from the contract's support budget first): " + ", ".join(
-		Prices.support_kinds().map(func(k: Variant) -> String: return "%s $%s" % [String(k), DebriefCalc.money(Prices.support_price(String(k)))]))
-	supports.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	box.add_child(supports)
-	_notice = Label.new()
-	_notice.modulate = Color("ffd35a")
+	_count.tooltip_text = "How many to buy"
+	box.add_child(UiKit.button_row([_count, UiKit.button("Buy", buy_selected), UiKit.button("Close", close)]))
+	box.add_child(UiKit.hint("Support calls (paid when called, from the contract's support budget first): " + ", ".join(
+		Prices.support_kinds().map(func(k: Variant) -> String: return "%s $%s" % [String(k), DebriefCalc.money(Prices.support_price(String(k)))]))))
+	_notice = UiKit.text("")
 	box.add_child(_notice)
+	box.add_child(UiKit.key_hint("Esc", "Close"))
 	Economy.changed.connect(refresh)
 	Economy.notice.connect(func(text: String) -> void: _notice.text = text)
 	refresh()
+	UiKit.focus_first(box.get_parent())  # keyboard: Tab/arrows and Enter work at once
+
+
+## Esc closes the shop only, not the contract board under it (P0-4: it fell through).
+func _unhandled_input(event: InputEvent) -> void:
+	if event.is_action_pressed(&"pause"):
+		get_viewport().set_input_as_handled()
+		close()
+
+
+func _show_info(index: int) -> void:
+	if index >= 0 and index < _ids.size():
+		_info.text = ItemInfo.summary(_ids[index])
 
 
 func refresh() -> void:
@@ -93,6 +97,7 @@ func select(id: StringName) -> void:
 	var i := _ids.find(id)
 	if i >= 0:
 		_list.select(i)
+		_show_info(i)
 
 
 func buy_selected() -> void:

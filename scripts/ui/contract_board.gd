@@ -18,6 +18,11 @@ var _header: Label
 var _offers: ItemList
 var _held: ItemList
 var _details: Label
+## The details' scroll area (P0-5: a long briefing ran the panel off a small window).
+var _details_scroll: ScrollContainer
+## Offers / held and details side by side on a wide window, one above the other on a narrow one.
+var _body: BoxContainer
+var _left: VBoxContainer
 var _pay: SpinBox
 var _salvage: SpinBox
 var _support: SpinBox
@@ -28,7 +33,10 @@ var _accept: Button
 var _renegotiate: Button
 var _abort: Button
 var _deploy: Button
-var _host_row: HBoxContainer
+## The host's buttons in the bottom row (wait, and offline the debug ones).
+var _host_buttons: Array[Button] = []
+## The shop opened from here: Esc closes it first, and it goes when the board does (P0-4).
+var _shop: ShopScreen
 var _selected := ""          # cid
 var _selected_held := false
 var _offer_ids: Array[String] = []
@@ -37,79 +45,122 @@ var _mouse_before := Input.MOUSE_MODE_VISIBLE
 var _refreshing := false
 
 
+## Below this logical width (window / Menu and HUD size) the lists go above the details.
+const NARROW_WIDTH := 1000.0
+
+
 func _ready() -> void:
 	layer = 10
 	_mouse_before = Input.mouse_mode
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-	var panel := PanelContainer.new()
-	add_child(panel)
-	panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	# The shared look (UiKit; Captain, 2026-10-14: "all of the UIs need a pass"; docs/ui_audit.md
+	# P0-5): a themed full-window panel whose middle scrolls, the lists beside the details on a wide
+	# window and above them on a narrow one, and the bottom row of buttons wrapping, so nothing
+	# runs off a 1280x720 window at a 1.5 Menu and HUD size.
+	var frame := Control.new()
+	frame.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	UiKit.apply(frame)
+	add_child(frame)
+	frame.add_child(UiKit.dim(0.45))
+	var margin := MarginContainer.new()
+	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	for side: String in ["left", "right", "top", "bottom"]:
-		panel.set("offset_" + side, 40.0 if side in ["left", "top"] else -40.0)
+		margin.add_theme_constant_override("margin_" + side, UiKit.EDGE)
+	frame.add_child(margin)
+	var panel := UiKit.panel()
+	margin.add_child(panel)
 	var root := VBoxContainer.new()
-	root.add_theme_constant_override(&"separation", 8)
+	root.add_theme_constant_override(&"separation", UiKit.SPACE_S)
 	panel.add_child(root)
-	_header = Label.new()
-	_header.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	root.add_child(UiKit.title("Contract board"))
+	_header = UiKit.text("")
 	root.add_child(_header)
-	var body := HBoxContainer.new()
-	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	body.add_theme_constant_override(&"separation", 16)
-	root.add_child(body)
-	var left := VBoxContainer.new()
-	left.custom_minimum_size = Vector2(460, 0)
-	body.add_child(left)
-	left.add_child(_title("Offers (board, fixers, leads)"))
-	_offers = _list(left)
+	var scroll := ScrollContainer.new()
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	root.add_child(scroll)
+	_body = BoxContainer.new()
+	_body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_body.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_body.add_theme_constant_override(&"separation", UiKit.SPACE_L)
+	scroll.add_child(_body)
+	_left = VBoxContainer.new()
+	_left.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_body.add_child(_left)
+	_left.add_child(UiKit.heading("Offers (board, fixers, leads)"))
+	_offers = UiKit.list(140.0)
+	_left.add_child(_offers)
 	_offers.item_selected.connect(func(i: int) -> void: _select(_offer_ids[i], false))
-	left.add_child(_title("Held contracts"))
-	_held = _list(left)
+	_left.add_child(UiKit.heading("Held contracts"))
+	_held = UiKit.list(140.0)
+	_left.add_child(_held)
 	_held.item_selected.connect(func(i: int) -> void: _select(_held_ids[i], true))
 	var right := VBoxContainer.new()
 	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	body.add_child(right)
-	_details = Label.new()
-	_details.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_details.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	right.add_child(_details)
-	right.add_child(_title("Negotiation"))
-	var grid := GridContainer.new()
-	grid.columns = 4
-	right.add_child(grid)
-	_pay = _spin(grid, "Pay points", 0, 10, 1)
-	_salvage = _spin(grid, "Salvage points", 0, 10, 1)
-	_support = _spin(grid, "Support points", 0, 10, 1)
-	_advance = _spin(grid, "Advance %", 10, 50, 10)
-	_deal = Label.new()
-	_deal.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	right.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_body.add_child(right)
+	var details := UiKit.scroll(160.0)
+	_details_scroll = details.get_parent() as ScrollContainer
+	_details = UiKit.text("")
+	details.add_child(_details)
+	right.add_child(_details_scroll)
+	right.add_child(UiKit.heading("Negotiation"))
+	var fields := HFlowContainer.new()  # the four fields wrap two by two (or one) when narrow
+	fields.add_theme_constant_override(&"h_separation", UiKit.SPACE_L)
+	fields.add_theme_constant_override(&"v_separation", UiKit.SPACE_S)
+	right.add_child(fields)
+	_pay = _spin(fields, "Pay points", 0, 10, 1)
+	_salvage = _spin(fields, "Salvage points", 0, 10, 1)
+	_support = _spin(fields, "Support points", 0, 10, 1)
+	_advance = _spin(fields, "Advance %", 10, 50, 10)
+	_deal = UiKit.text("")
 	right.add_child(_deal)
-	var actions := HBoxContainer.new()
-	right.add_child(actions)
-	_accept = _button(actions, "Accept contract", accept_selected)
-	_renegotiate = _button(actions, "Renegotiate", func() -> void: Contracts.renegotiate(_selected))
-	_abort = _button(actions, "Abort", func() -> void: Contracts.abort(_selected))
-	_deploy = _button(actions, "Prepare deployment" if BaseHub.campaign_running else "Deploy (debug)", _deploy_selected)
-	var bottom := HBoxContainer.new()
-	root.add_child(bottom)
-	_button(bottom, "Shop", func() -> void: get_tree().root.add_child(ShopScreen.new()))
-	_button(bottom, "Take a loan", func() -> void: Economy.take_loan())
-	_host_row = HBoxContainer.new()
-	bottom.add_child(_host_row)
-	_button(_host_row, "Wait a day", func() -> void: Economy.advance_days(1, "waiting at base"))
-	_button(_host_row, "Wait a week", func() -> void: Economy.advance_days(MissionRegistry.setting_i("week_days", 7), "waiting at base"))
+	_accept = UiKit.button("Accept contract", accept_selected)
+	_renegotiate = UiKit.button("Renegotiate", func() -> void: Contracts.renegotiate(_selected))
+	_abort = UiKit.button("Abort", func() -> void: Contracts.abort(_selected))
+	_deploy = UiKit.button("Prepare deployment" if BaseHub.campaign_running else "Deploy (debug)", _deploy_selected)
+	right.add_child(UiKit.button_row([_accept, _renegotiate, _abort, _deploy]))
+	# The bottom row's seven buttons wrap onto a second line rather than off the window (P0-5).
+	var bottom: Array = [UiKit.button("Shop", open_shop), UiKit.button("Take a loan", func() -> void: Economy.take_loan())]
+	_host_buttons.append(UiKit.button("Wait a day", func() -> void: Economy.advance_days(1, "waiting at base")))
+	_host_buttons.append(UiKit.button("Wait a week", func() -> void: Economy.advance_days(MissionRegistry.setting_i("week_days", 7), "waiting at base")))
 	if not BaseHub.campaign_running:  # a campaign deploys from the base and ends at extraction
-		_button(_host_row, "End deployment (debug)", _debug_extract)
-		_button(_host_row, "Reset campaign", func() -> void: Contracts.new_full_campaign())
-	_button(bottom, "Close", close)
-	_notice = Label.new()
-	_notice.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_notice.modulate = Color("ffd35a")
+		_host_buttons.append(UiKit.button("End deployment (debug)", _debug_extract))
+		_host_buttons.append(UiKit.button("Reset campaign", func() -> void: Contracts.new_full_campaign()))
+	bottom.append_array(_host_buttons)
+	bottom.append(UiKit.button("Close", close))
+	root.add_child(UiKit.button_row(bottom))
+	_notice = UiKit.text("")
 	root.add_child(_notice)
+	root.add_child(UiKit.key_hint("Esc", "Close"))
+	_layout()
+	get_viewport().size_changed.connect(_layout)
 	Contracts.changed.connect(refresh)
 	Economy.changed.connect(refresh)
 	Contracts.notice.connect(_on_notice)
 	Economy.notice.connect(_on_notice)
 	refresh()
+	UiKit.focus_first(panel)  # keyboard: Tab/arrows and Enter work at once
+
+
+## Lists beside the details on a wide window (the left column up to 460 px), above them on a
+## narrow one; follows window resizes and the Menu and HUD size.
+func _layout() -> void:
+	if not is_inside_tree():
+		return
+	var width := get_viewport().get_visible_rect().size.x
+	var narrow := width < NARROW_WIDTH
+	_body.vertical = narrow
+	_left.custom_minimum_size.x = 0.0 if narrow else clampf(width * 0.4, 320.0, 460.0)
+
+
+## Opens the shop over the board (one at a time) and returns it.
+func open_shop() -> ShopScreen:
+	if not is_instance_valid(_shop) or _shop.is_queued_for_deletion():
+		_shop = ShopScreen.new()
+		get_tree().root.add_child(_shop)
+	return _shop
 
 
 ## A screen to click on: whatever else opens or closes under it, the mouse stays free while
@@ -120,15 +171,22 @@ func _process(_delta: float) -> void:
 
 
 func close() -> void:
+	if is_instance_valid(_shop) and not _shop.is_queued_for_deletion():
+		_shop.close()
 	Input.mouse_mode = _mouse_before
 	closed.emit()
 	queue_free()
 
 
+## Esc closes the top-most screen only: the shop opened from here first, then the board (P0-4:
+## Esc fell through the shop and closed the board under it).
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed(&"pause"):
 		get_viewport().set_input_as_handled()
-		close()
+		if is_instance_valid(_shop) and not _shop.is_queued_for_deletion():
+			_shop.close()
+		else:
+			close()
 
 
 ## Rebuilds the lists and the details from the replicated state.
@@ -137,13 +195,14 @@ func refresh() -> void:
 		return
 	_refreshing = true
 	var host := Contracts.is_host()
-	_host_row.visible = host
+	for b: Button in _host_buttons:
+		b.visible = host
 	_deploy.visible = host
 	var e := Economy
 	var reps := PackedStringArray()
 	for f: String in MissionRegistry.faction_ids():
 		reps.append("%s %+d (tier %d)" % [MissionRegistry.faction_name(f), e.reputation(f), e.tier(f)])
-	_header.text = "CONTRACT BOARD   Day %d (week %d, bill in %d days)   Cash $%s   Owed $%s%s\nReputation: %s   Locals %+d" % [
+	_header.text = "Day %d (week %d, bill in %d days)   Cash $%s   Owed $%s%s\nReputation: %s   Locals %+d" % [
 		e.day(), e.week(), e.days_to_bill(), DebriefCalc.money(e.cash()), DebriefCalc.money(e.loans_owed()),
 		"   DEPLOYED: %s" % Contracts.deployment().zone_name if Contracts.is_deployed() else "", "   ".join(reps), e.locals()]
 	_offer_ids.clear()
@@ -151,15 +210,22 @@ func refresh() -> void:
 	for c: Dictionary in Contracts.board():
 		_offer_ids.append(String(c.cid))
 		_offers.add_item(offer_line(c))
+		_offers.set_item_tooltip(_offers.item_count - 1, _tooltip(c))  # the whole line (cut with "..." when narrow) and the brief
 	_held_ids.clear()
 	_held.clear()
 	for c: Dictionary in Contracts.held():
 		_held_ids.append(String(c.cid))
 		_held.add_item("%s  [%s]" % [offer_line(c), String(c.state).to_upper()])
+		_held.set_item_tooltip(_held.item_count - 1, "[%s] %s" % [String(c.state).to_upper(), _tooltip(c)])
 	if _selected != "" and Contracts.contract(_selected).is_empty():
 		_selected = ""
 	_show_details()
 	_refreshing = false
+
+
+## A list row's tooltip: the whole line (the list cuts it with "...") and the brief.
+static func _tooltip(c: Dictionary) -> String:
+	return "%s\n%s" % [offer_line(c), String(c.get("brief", ""))]
 
 
 ## One offer in a line: rating, zone kind, title, employer, pay.
@@ -179,7 +245,7 @@ func _select(cid: String, from_held: bool) -> void:
 func _show_details() -> void:
 	var c: Dictionary = Contracts.contract(_selected) if _selected != "" else {}
 	var offer: bool = not c.is_empty() and c.get("state") == "offered"
-	for w: Control in [_pay, _salvage, _support, _advance, _accept]:
+	for w: Control in [_pay.get_parent(), _salvage.get_parent(), _support.get_parent(), _advance.get_parent(), _accept]:  # a field with its label
 		w.visible = offer
 	_renegotiate.visible = not offer and c.get("revealed", false) and not c.get("renegotiated", false)
 	_abort.visible = not c.is_empty() and c.get("state") in [Contracts.ACCEPTED, Contracts.DEPLOYED]
@@ -304,39 +370,20 @@ func _on_notice(text: String) -> void:
 		_notice.text = text
 
 
-func _title(text: String) -> Label:
-	var label := Label.new()
-	label.text = text
-	label.add_theme_font_size_override(&"font_size", 15)
-	label.modulate = Color(1, 1, 1, 0.7)
-	return label
-
-
-func _list(parent: Control) -> ItemList:
-	var list := ItemList.new()
-	list.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	list.custom_minimum_size = Vector2(0, 160)
-	parent.add_child(list)
-	return list
-
-
+## A negotiation field: its label and SpinBox together, so the pair wraps as one.
 func _spin(parent: Control, label_text: String, lo: float, hi: float, step: float) -> SpinBox:
+	var pair := HBoxContainer.new()
+	pair.add_theme_constant_override(&"separation", UiKit.SPACE_S)
+	parent.add_child(pair)
 	var label := Label.new()
 	label.text = label_text
-	parent.add_child(label)
+	pair.add_child(label)
 	var spin := SpinBox.new()
 	spin.min_value = lo
 	spin.max_value = hi
 	spin.step = step
 	spin.value = lo if label_text != "Advance %" else roundi(MissionRegistry.setting_f("advance_share", 0.3) * 100.0)
 	spin.value_changed.connect(func(_v: float) -> void: _update_deal())
-	parent.add_child(spin)
+	pair.add_child(spin)
 	return spin
 
-
-func _button(parent: Control, text: String, action: Callable) -> Button:
-	var button := Button.new()
-	button.text = text
-	button.pressed.connect(action)
-	parent.add_child(button)
-	return button
