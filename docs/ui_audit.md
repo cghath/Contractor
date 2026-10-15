@@ -20,6 +20,7 @@ These screens are being reworked on other branches, so this one does not redo th
 - **The only scaling is the "Menu and HUD size" setting.** That is GameSettings `video/ui_scale`, which sets the root's `content_scale_factor`. Its range is 0.75 to 1.5 and it defaults to 1.0.
   - At 1.5, a 1280x720 window lays out as 853x480. That is where fixed-size panels break.
   - At 1.0 on a 4K screen, the 11 to 14 px text drawn by the HUD, inventory and medical menu is physically tiny. Even the maximum of 1.5 only makes 12 px into 18 px.
+- **Since `ui/auto-scale` (P1-7):** the window picks its own scale, its height / 1080 kept within 1.0 to 2.0 (`GameSettings.auto_ui_scale`), and the setting (now 0.75 to 2.0) multiplies it (`GameSettings.ui_scale_for`). The result never shrinks the logical window below 853x480 (1280x720 at 1.5), so 2.0 on a small window acts as 1.5. It follows window resizes, and the settings Video tab shows what the window picks and the size that makes.
 - **No theme.** Nothing sets a theme, so every screen uses Godot's default and then overrides sizes and colours one control at a time. The result is:
   - **Three text styles:**
     - HUD labels: 18 px with an outline.
@@ -202,7 +203,7 @@ func open() -> void:
 
 ## The fit test (`ui` suite)
 
-`tests/ui_test.gd` builds each screen that needs no level inside a SubViewport. The viewport is sized to each of the 10 window sizes divided by each UI scale (1.0, 1.2 and 1.5), which matches what `content_scale_factor` does to the root. The test then checks that every visible button, field, slider, list, tab set, non-empty label and scroll area is inside the viewport.
+`tests/ui_test.gd` builds each screen that needs no level inside a SubViewport. The viewport is sized to each of the 10 window sizes divided by the UI scale each setting gives there (`GameSettings.ui_scale_for` with the setting at 1.0, 1.2, 1.5 and 2.0), which matches what `content_scale_factor` does to the root. The test then checks that every visible button, field, slider, list, tab set, non-empty label and scroll area is inside the viewport.
 
 - **Scroll areas count as one item**, because their content can scroll.
 - **Screens waiting for a follow-up branch are in `KNOWN`.** Their overflows are printed as `[known]` instead of failing.

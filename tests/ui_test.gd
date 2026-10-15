@@ -12,14 +12,18 @@ extends Node
 
 const SIZES: Array[Vector2i] = [Vector2i(1280, 720), Vector2i(1366, 768), Vector2i(1600, 900), Vector2i(1920, 1080), Vector2i(1920, 1200),
 	Vector2i(2000, 1250), Vector2i(2560, 1440), Vector2i(2560, 1600), Vector2i(3440, 1440), Vector2i(3840, 2160)]
-## The Menu and HUD size setting at its default, the Captain's 1.2, and its maximum.
-const UI_SCALES: Array[float] = [1.0, 1.2, 1.5]
+## The Menu and HUD size setting at its default, the Captain's 1.2, 1.5 and its maximum. It
+## multiplies the window's own scale (GameSettings.ui_scale_for: height / 1080, 1.0 to 2.0;
+## docs/ui_audit.md P1-7), so each window is divided by that, as the root's
+## content_scale_factor does.
+const UI_SCALES: Array[float] = [1.0, 1.2, 1.5, 2.0]
 ## "<screen> @<scale>" entries known to overflow, each waiting for its follow-up branch
 ## (docs/ui_audit.md, "Follow-up branches"). Take an entry off when its branch fixes it.
 const KNOWN: Array[String] = [
-	"contract board @1.5", "shop @1.5",  # ui/campaign-screens
-	"base: squad @1.2", "base: squad @1.5", "base: roster @1.2", "base: roster @1.5", "base: hiring @1.2", "base: hiring @1.5",
-	"base: medbay @1.2", "base: medbay @1.5", "base: shop @1.2", "base: shop @1.5", "base: armory @1.2", "base: armory @1.5",  # ui/base-hub
+	"contract board @1.5", "contract board @2.0", "shop @1.5", "shop @2.0",  # ui/campaign-screens
+	"base: squad @1.2", "base: squad @1.5", "base: squad @2.0", "base: roster @1.2", "base: roster @1.5", "base: roster @2.0",
+	"base: hiring @1.2", "base: hiring @1.5", "base: hiring @2.0", "base: medbay @1.2", "base: medbay @1.5", "base: medbay @2.0",
+	"base: shop @1.2", "base: shop @1.5", "base: shop @2.0", "base: armory @1.2", "base: armory @1.5", "base: armory @2.0",  # ui/base-hub
 ]
 
 var failures := 0
@@ -38,6 +42,7 @@ func _ready() -> void:
 	_vp.gui_disable_input = true
 	add_child(_vp)
 	_test_kit()
+	_test_auto_scale()
 	await _fit("pause menu", func() -> Node:
 		var p := PauseMenu.new()
 		p.ready.connect(p.open)
@@ -80,6 +85,18 @@ func check(condition: bool, what: String) -> void:
 
 
 ## The theme loads with its styles, and the kit's builders make what they say.
+## The window picks its own UI scale and the setting multiplies it (docs/ui_audit.md P1-7).
+func _test_auto_scale() -> void:
+	print("The automatic UI scale")
+	check(is_equal_approx(GameSettings.auto_ui_scale(Vector2i(1280, 720)), 1.0) and is_equal_approx(GameSettings.auto_ui_scale(Vector2i(2560, 1440)), 1440.0 / 1080.0)
+		and is_equal_approx(GameSettings.auto_ui_scale(Vector2i(3840, 2160)), 2.0) and is_equal_approx(GameSettings.auto_ui_scale(Vector2i(7680, 4320)), 2.0),
+		"the window's own scale is its height / 1080, 1.0 to 2.0")
+	check(is_equal_approx(GameSettings.ui_scale_for(Vector2i(3840, 2160), 1.2), 2.4) and is_equal_approx(GameSettings.ui_scale_for(Vector2i(1920, 1080), 1.2), 1.2),
+		"the Menu and HUD size multiplies it")
+	check(is_equal_approx(GameSettings.ui_scale_for(Vector2i(1280, 720), 2.0), 1.5), "but never shrinks the logical window below 1280x720 at 150%")
+	check(is_equal_approx(float(GameSettings.RANGES.ui_scale[1]), 2.0), "the Menu and HUD size goes up to 200%")
+
+
 func _test_kit() -> void:
 	print("The shared look (UiKit, themes/contractor_ui.tres)")
 	var theme := UiKit.THEME
@@ -269,7 +286,7 @@ func _fit(screen: String, make: Callable) -> void:
 	for ui_scale: float in UI_SCALES:
 		var bad := PackedStringArray()
 		for res in SIZES:
-			_vp.size = Vector2i((Vector2(res) / ui_scale).floor())
+			_vp.size = Vector2i((Vector2(res) / GameSettings.ui_scale_for(res, ui_scale)).floor())
 			await _frames(2)
 			var off := _off_screen(node, Rect2(Vector2.ZERO, Vector2(_vp.size)).grow(1.0))
 			if not off.is_empty():
