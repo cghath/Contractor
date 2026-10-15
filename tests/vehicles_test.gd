@@ -988,7 +988,8 @@ func _test_vehicle_guns() -> void:
 	await _seconds(0.3)
 	check(heli.server_fire_gun(player, -heli.global_basis.x).is_empty(), "but never back through the cabin out of the left door")
 	heli.server_exit(player)
-	foe.global_position = heli.global_transform * Vector3(-30, 0, -4.5) + Vector3(0, 0.1, 0)
+	foe.queue_free()  # downed by those hits: a fresh one for the AI
+	foe = _soldier("hostile", heli.global_transform * Vector3(-30, 0, -4.5) + Vector3(0, 0.1, 0), "DoorFoe2")
 	var chief := _soldier("friendly", heli.global_transform * Vector3(-3, 0, -2.4) + Vector3(0, 0.1, 0), "DoorChief")
 	check(heli.server_enter(chief, 2), "an AI crew chief on the left door gun")
 	var hg := heli.get_node_or_null(NodePath(AavGunner.NODE_NAME)) as AavGunner
@@ -1006,7 +1007,8 @@ func _test_vehicle_guns() -> void:
 		s.role = p[1]
 		team.append(s)
 	await get_tree().physics_frame
-	foe.global_position = v.global_position + Vector3(0, 0.1, -30)
+	foe.queue_free()
+	foe = _soldier("hostile", v.global_position + Vector3(0, 0.1, -30), "GunFoe")
 	var names := PackedStringArray(["GunA_Medic", "GunB_Rifle", "GunC_AR"])
 	check(layer.server_order_mount(player, v.global_position, names) == "" and v.gunner() == team[2] and team.all(func(s: Soldier) -> bool: return v.seat_of(s) >= 0),
 		"Mount > Get in: all three aboard, the autorifleman on the M2 (gunner %s)" % [v.gunner().name if v.gunner() else "none"])
