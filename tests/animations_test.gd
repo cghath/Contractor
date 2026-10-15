@@ -56,6 +56,8 @@ func _ready() -> void:
 	_test_replication_config()
 	_test_gear_sway()
 	_test_seated_bones()
+	_test_world_scale()
+	_test_locomotion()
 	await _test_carry()
 	await _test_drag()
 	await _test_put_down()
@@ -145,6 +147,90 @@ func _test_seated_bones() -> void:
 	var muzzle := held * (VoxelArt.butt_point(art) * Vector3(1, 1, -1))
 	check((-held.basis.z).normalized().dot(Vector3.DOWN) > 0.9, "a rifle seated: muzzle down (%s)" % [-held.basis.z])
 	check(CharacterModel.HANDS_ANCHOR.y + muzzle.y > -0.3, "and off a low seat's floor (muzzle %.2f over the hips)" % (CharacterModel.HANDS_ANCHOR.y + muzzle.y))
+
+
+## World scale (docs/animation.md): the eye where a 1.80 m man's is, under a doorway's
+## head; the view setting horizontal at 16:9, the camera's vertical angle from it.
+func _test_world_scale() -> void:
+	print("World scale")
+	var eye := func(st: int) -> float: return CharacterModel.eye_position(SoldierMovement.pose_for(st, 0, 0.0)).y
+	var stand: float = eye.call(SoldierMovement.Stance.STAND_HIGH)
+	var crouch: float = eye.call(SoldierMovement.Stance.CROUCH_MID)
+	var prone: float = eye.call(SoldierMovement.Stance.PRONE)
+	var head := VoxelArt.instance(VoxelArt.body_part("head", VoxelArt.MALE), "multicam")
+	var mesh := head.get_child(0) as MeshInstance3D
+	var top := CharacterModel.TORSO_PIVOT.y + CharacterModel.HEAD_PIVOT.y + (mesh.transform * mesh.mesh.get_aabb()).end.y  # the head's top
+	head.free()
+	check(absf(stand - 1.65) < 0.02 and stand / top > 0.9 and stand / top < 0.95 and stand < BuildingGen.DOOR_H - 0.3,
+		"standing eye %.2f m on a %.2f m man (%.0f%%; real 91-94%%), under a %.1f m door" % [stand, top, stand / top * 100.0, BuildingGen.DOOR_H])
+	check(crouch > 0.9 and crouch < 1.15 and prone > 0.2 and prone < 0.45, "crouched eye %.2f m, prone %.2f m" % [crouch, prone])
+	check(bool(GameSettings.DEFAULTS.video.head_bob) and player.camera.position.length() < 0.001, "head bob on by default (a settings toggle), the view still standing still")
+	check(is_equal_approx(float(GameSettings.DEFAULTS.video.hfov), 90.0) and absf(GameSettings.vertical_fov(90.0) - 58.72) < 0.01
+		and absf(GameSettings.vertical_fov(112.33) - 80.0) < 0.05,
+		"the view: 90 deg across 16:9 by default, a %.1f deg vertical camera (the old 80 vertical was 112 across)" % GameSettings.vertical_fov(90.0))
+
+
+## Locomotion (docs/animation.md): a model walked along by hand at each pace and stance shows
+## its cycle, and a planted foot stays where it landed (no sliding) whatever the direction.
+func _test_locomotion() -> void:
+	print("Locomotion")
+	var stand := SoldierMovement.Stance.STAND_HIGH
+	var crouch := SoldierMovement.Stance.CROUCH_MID
+	for c: Array in [
+			[stand, 1.4, Vector3.FORWARD, "male", CharacterModel.WALK],
+			[stand, SoldierMovement.WALK_SPEED, Vector3.FORWARD, "male", CharacterModel.JOG],
+			[stand, SoldierMovement.SPRINT_SPEED, Vector3.FORWARD, "male", CharacterModel.SPRINT],
+			[stand, SoldierMovement.WALK_SPEED, Vector3.RIGHT, "male", CharacterModel.JOG],
+			[stand, SoldierMovement.WALK_SPEED, Vector3.BACK, "male", CharacterModel.JOG],
+			[stand, 3.0, Vector3(-1, 0, -1).normalized(), "male", CharacterModel.JOG],
+			[stand, SoldierMovement.SPRINT_SPEED, Vector3.FORWARD, "female", CharacterModel.SPRINT],
+			[crouch, SoldierMovement.CROUCH_SPEED, Vector3.FORWARD, "male", CharacterModel.CROUCH_WALK],
+			[crouch, SoldierMovement.CROUCH_SPEED, Vector3.LEFT, "male", CharacterModel.CROUCH_WALK]]:
+		var seen := _walk_model(c[0], c[1], c[2], c[3])
+		check(seen.gait == c[4] and seen.planted >= 2 and seen.slide < 0.02,
+			"%s %s at %.1f m/s %s: %s cycle (%s), %d footfalls, a planted foot slides %.3f m at most" % [c[3], "standing" if c[0] == stand else "crouched", c[1], c[2], c[4], seen.gait, seen.planted, seen.slide])
+	var crawl := _walk_model(SoldierMovement.Stance.PRONE, SoldierMovement.PRONE_SPEED, Vector3.FORWARD, "male")
+	var idle := _walk_model(stand, 0.0, Vector3.FORWARD, "male")
+	check(crawl.gait == CharacterModel.CRAWL and idle.gait == CharacterModel.IDLE and idle.weight == 0.0,
+		"prone it crawls (%s); stood still, idle (%s, cycle shown %.2f)" % [crawl.gait, idle.gait, idle.weight])
+
+
+## Walks a fresh model `speed` m/s along `dir` (its own space; it faces -Z) in `stance` for
+## 4 s, by hand at 60 frames a second, and reports its cycle, how many times a foot was put
+## down in the last 2.5 s, and the furthest a planted foot moved.
+func _walk_model(stance: int, speed: float, dir: Vector3, body: String) -> Dictionary:
+	var holder := Node3D.new()
+	holder.position = Vector3(400, 0, 400)
+	holder.rotation.y = 0.7
+	add_child(holder)
+	var model := CharacterModel.new()
+	model.body = body
+	model.lod = false
+	holder.add_child(model)
+	model.set_process(false)
+	model.pose = SoldierMovement.pose_for(stance, 0, 0.0)
+	var dt := 1.0 / 60.0
+	var world_dir := holder.global_basis * dir
+	var slide := 0.0
+	var planted := 0
+	var down_at: Array = [null, null]
+	for i in 240:
+		holder.position += world_dir * speed * dt
+		model._process(dt)
+		if i < 90:
+			continue
+		for f in 2:
+			var sole := model.foot_position(f == 0)
+			if sole.y - holder.position.y < 0.002:
+				if down_at[f] == null:
+					down_at[f] = sole
+					planted += 1
+				slide = maxf(slide, _flat(sole, down_at[f]))
+			else:
+				down_at[f] = null
+	var out := {"gait": model.gait(), "slide": slide, "planted": planted, "weight": model.gait_weight()}
+	holder.queue_free()
+	return out
 
 
 func check(condition: bool, what: String) -> void:

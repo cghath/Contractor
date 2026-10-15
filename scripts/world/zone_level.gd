@@ -100,6 +100,7 @@ func _ready() -> void:
 		add_child(Pressure.new())  # what the squad has done here, long term
 		add_child(EnemyResponse.new())  # patrols, QRF waves, hunters: the enemy's answer
 		add_child(RadioChatter.new())  # what a looted enemy radio lets the squad hear
+		add_child(HotZoneOps.new())  # several contracts live, radio follow-ups, hazard pay
 		if DevTools.on():
 			add_child(HotZoneDebug.new())  # playtests: PgUp readout, PgDn skips the enemy's clock
 	Contracts.contract_live.connect(_on_contract_live)

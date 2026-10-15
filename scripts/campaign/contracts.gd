@@ -372,13 +372,15 @@ func server_open_lead(faction: String) -> String:
 
 ## Host: accepts an offer on `terms` (ContractGen.default_terms() shape). Pays the advance.
 ## Returns "" or why not.
-func server_accept(cid: String, terms: Dictionary, peer_id := 1) -> String:
+## `over_cap` (a hot zone's in-zone and radio contracts, HotZoneOps): taken during the
+## deployment, so the company's "max_held" doesn't stop it.
+func server_accept(cid: String, terms: Dictionary, peer_id := 1, over_cap := false) -> String:
 	var s := _s()
 	var c := _find(s.board, cid)
 	var why := ""
 	if c.is_empty():
 		why = "That offer is gone"
-	elif (s.held as Array).size() >= MissionRegistry.setting_i("max_held", 4):
+	elif not over_cap and (s.held as Array).size() >= MissionRegistry.setting_i("max_held", 4):
 		why = "The company can't hold more than %d contracts" % MissionRegistry.setting_i("max_held", 4)
 	else:
 		why = ContractGen.terms_problem(terms, Economy.reputation(String(c.employer)))
@@ -478,6 +480,8 @@ func server_start_deployment(cids: Array = [], zone_id := "", origin := Vector3.
 	var first: Dictionary = ready[0]
 	if first.zone_kind != "hot":
 		ready = [first]
+	else:
+		ready.append_array(_hot_zone_extras(ready, zone_id))  # several contracts live at once
 	var list: Array = []
 	var live := {}
 	for c: Dictionary in ready:
@@ -496,6 +500,50 @@ func server_start_deployment(cids: Array = [], zone_id := "", origin := Vector3.
 	for cid: String in live:
 		contract_live.emit(cid, live[cid])
 	return ""
+
+
+## A hot zone has several of its faction's contracts live at once (Captain: 3-6, taken in any
+## order). When the squad took fewer than HotZoneOps' minimum from the board, the faction hands
+## it more on arrival (standard terms, advance paid), each at a site no other contract holds.
+## Returns the new contracts (held, ACCEPTED).
+func _hot_zone_extras(ready: Array, zone_id: String) -> Array:
+	var want := HotZoneOps.live_target(int(_s().seed), Economy.day(), zone_id, ready.size())
+	var out: Array = []
+	var employer := String(MissionRegistry.zone(zone_id).get("faction", ""))
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash([int(_s().seed), Economy.day(), zone_id, "in_zone"])
+	var taken: Array = ready.map(func(c: Dictionary) -> String: return String(c.get("module_id", "")))
+	while ready.size() + out.size() < want:
+		var c := _add_offer(ContractGen.generate(rng, {"day": Economy.day(), "source": "board", "zone_id": zone_id,
+			"employer": employer, "avoid_modules": taken}))
+		c["in_zone"] = "arrival"
+		if server_accept(c.cid, ContractGen.default_terms(), 1, true) != "":
+			(_s().board as Array).erase(c)
+			break
+		taken.append(String(c.module_id))
+		out.append(c)
+	return out
+
+
+## Host: notes `key` on the deployment under way (HotZoneOps: "hazard_tier", the highest
+## pressure tier reached, for the debrief's hazard pay).
+func server_note_deployment(key: String, value: Variant) -> void:
+	var dep: Dictionary = _s().deployment
+	if dep.is_empty():
+		return
+	dep[key] = value
+	_commit()
+
+
+## The open (not yet done) deployed contracts' sites, by module id (HotZoneOps: a radio
+## contract goes to a site no other live contract holds).
+func live_sites() -> Array:
+	var dep: Dictionary = _s().deployment
+	var out: Array = []
+	for c: Dictionary in _s().held:
+		if c.cid in dep.get("cids", []) and not objectives.contract_done(c.cid) and String(c.get("module_id", "")) != "":
+			out.append(String(c.module_id))
+	return out
 
 
 ## Host: a deployment that never ended (a campaign saved mid-deployment and loaded again,
@@ -528,8 +576,9 @@ func radio_contract_problem() -> String:
 
 ## Host: in a hot zone, a new contract comes in over the radio and the squad takes it on the
 ## spot (standard terms, advance paid); its objectives join the deployment. Returns its id, or
-## "" when radio_contract_problem() says no.
-func server_radio_contract(type_id := "") -> String:
+## "" when radio_contract_problem() says no. HotZoneOps' follow-ups pass the site (`module_id`)
+## and the employer's words (`why`, said to everyone with the contract's title).
+func server_radio_contract(type_id := "", module_id := "", why := "") -> String:
 	if radio_contract_problem() != "":
 		return ""
 	var dep: Dictionary = _s().deployment
@@ -537,14 +586,18 @@ func server_radio_contract(type_id := "") -> String:
 	rng.seed = hash([int(_s().seed), Economy.day(), int(_s().next_id), "radio"])
 	var employer := String(MissionRegistry.zone(dep.zone_id).get("faction", ""))
 	var c := _add_offer(ContractGen.generate(rng, {"day": Economy.day(), "source": "board", "zone_id": dep.zone_id,
-		"type": type_id, "employer": employer}))
-	if server_accept(c.cid, ContractGen.default_terms()) != "":
+		"type": type_id, "employer": employer, "module_id": module_id, "avoid_modules": live_sites()}))
+	c["in_zone"] = "radio"
+	if server_accept(c.cid, ContractGen.default_terms(), 1, true) != "":
+		(_s().board as Array).erase(c)
 		return ""
 	c.state = DEPLOYED
 	(dep.cids as Array).append(c.cid)
 	var o: Array = dep.get("origin", [0, 0, 0])
 	var added := Objectives.from_contract(c, module_origin(c, Vector3(float(o[0]), float(o[1]), float(o[2]))))
 	objectives.server_add(added)
+	if why != "":
+		_notify_all("Radio, %s: %s New contract: %s" % [MissionRegistry.faction_name(employer), why, c.title])
 	_commit()
 	contract_live.emit(c.cid, added)
 	return c.cid
@@ -644,6 +697,7 @@ func server_end_deployment(report: Dictionary) -> Dictionary:
 	var deployed: Array = (s.held as Array).filter(func(c: Dictionary) -> bool: return c.cid in dep.cids)
 	var calc_report := report.duplicate(true)
 	calc_report["items"] = out_items
+	calc_report["hazard_tier"] = int(dep.get("hazard_tier", 0))  # a hot zone's hazard pay (HotZoneOps)
 	var debrief := DebriefCalc.compute(deployed, objectives.list, int(dep.civilians), calc_report)
 	debrief["zone_name"] = dep.zone_name
 	debrief["extracted"] = report.get("extracted", [])
@@ -673,6 +727,14 @@ func server_end_deployment(report: Dictionary) -> Dictionary:
 	objectives.server_clear()
 	Economy.advance_days(int(debrief.days), "deployment to %s" % debrief.zone_name)
 	debrief["day"] = Economy.day()
+	# Expenses: what the run already cost (respawns, supports, lost helicopters, weekly bills) and
+	# the field costs, death benefits and treatment charged now.
+	var spent := DebriefCalc.expenses(calc_report, int(debrief.days), Economy.take_run_expenses())
+	if int(spent.charge) > 0:
+		Economy.add_cash(-int(spent.charge), "Deployment costs: %s" % debrief.zone_name)
+	debrief["expenses"] = spent.lines
+	debrief["expenses_total"] = spent.total
+	debrief["net"] = int(debrief.totals.contract_value) - int(spent.total)
 	SessionLog.note(debrief_log_line(debrief, report))
 	_commit()
 	_save()

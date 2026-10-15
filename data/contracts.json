@@ -196,7 +196,7 @@
 		"offer_days": 5,
 		"accept_window_days": 7,
 		"max_held": 4,
-		"difficulty_pay": [0, 0.6, 0.85, 1.1, 1.4, 1.8],
+		"difficulty_pay": [0, 0.5, 0.7, 0.9, 1.15, 1.45],
 		"pay_round": 500,
 		"intel_accuracy": [0.3, 0.95],
 		"fixer_intel_accuracy": [0.6, 0.95],

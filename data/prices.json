@@ -35,10 +35,13 @@
 	"_launchers": "Wave 5 (V2) launchers and rounds, proposed: AT4 1800, NLAW 4000, rounds 200-600, Javelin missile 12000 (catalogue plan); the RPG-7 and its rounds are loot, sell-only. The Javelin is buyable until wave 6 gates it behind reputation.",
 	"not_for_sale": ["enemy_radio", "hvt_case", "supply_crate", "supply_pallet", "electronics_salvage", "cpr", "intel_laptop", "intel_phone", "intel_documents", "belt_127x108", "rpg7", "pg7v_round", "og7v_round"],
 	"repair": {"share_per_integrity": 0.8, "per_chip": 12, "max_share": 0.8},
-	"supports": {"resupply": 8000, "transport": 6000, "aav": 12000, "extraction": 10000},
-	"respawn": 1000,
+	"supports": {"resupply": 12000, "transport": 9000, "aav": 18000, "extraction": 14000},
+	"lost_supports": {"resupply": 30000, "transport": 40000, "extraction": 40000},
+	"respawn": 4000,
 	"respawn_rise": 0.5,
 	"_respawn": "A player respawn past the deployment's free ones (4 in a contract zone, 8 in a hot zone), paid from cash first, then the contract's support budget (Captain), then on credit; each one bought costs respawn_rise more of it than the last (1000, 1500, 2000...). Proposed.",
-	"weekly_upkeep": 4000,
-	"default_wage_bill": 10500
+	"weekly_upkeep": 21000,
+	"default_wage_bill": 24000,
+	"operations": {"per_head_day": 700, "kia_benefit": 15000, "wounded_care": 1200},
+	"_operations": "Charged at each debrief (docs/economy.md): field costs (ammo, meds, fuel, comms) per head per campaign day deployed, a death benefit per KIA squadmate, treatment per wounded one. Lost helicopters (lost_supports) and bought supports/respawns are charged the moment they happen. Proposed."
 }

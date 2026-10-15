@@ -556,6 +556,9 @@ func _update_head(delta: float, down: bool) -> void:
 			target = CharacterModel.DRAG_EYE  # bent over the casualty, head up
 		target.y -= CharacterModel.KNEEL_EYE_DROP * body.model.carry_kneel()  # down on a knee to lift or lay them
 		roll = pose.roll * CAMERA_ROLL if not pose.prone else pose.prone_roll * CAMERA_PRONE_ROLL - lean * 0.1
+	# The eye is drawn at the body's scale (CharacterModel.body_scale): a female soldier's 1.53 m,
+	# not the male 1.65 m near the top of her 1.68 m head (docs/animation.md, "World scale").
+	target *= body.model.body_scale()
 	body.head.position = body.head.position.move_toward(target, HEAD_SPEED * delta)
 	body.head.rotation.z = move_toward(body.head.rotation.z, roll, ROLL_SPEED * delta)
 
