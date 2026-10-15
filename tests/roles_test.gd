@@ -417,8 +417,8 @@ func _test_team() -> void:
 	_menu(KEY_F4, [KEY_9, KEY_3, KEY_5])  # slot 4 to White
 	check(b.color_team == "" and a.color_team == "red", "White takes %s out of the red team" % b.name)
 	var mount: Array = CommandMenu.MENU["items"].filter(func(i: Dictionary) -> bool: return i["label"] == "Mount")
-	check(mount.size() == 1 and (mount[0]["items"] as Array).map(func(i: Dictionary) -> String: return i["cmd"]) == ["mount", "dismount"],
-		"Mount has Get in and Get out (wave 5 vehicles)")
+	check(mount.size() == 1 and (mount[0]["items"] as Array).map(func(i: Dictionary) -> String: return i["cmd"]) == ["mount", "dismount", "take_gun"],
+		"Mount has Get in, Get out and Take the gun (wave 5 vehicles; Captain, 2026-10-15)")
 
 
 func _test_roster() -> void:
