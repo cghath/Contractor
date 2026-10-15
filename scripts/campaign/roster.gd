@@ -77,7 +77,19 @@ const LAST_NAMES: Array[String] = ["Mercer", "Okafor", "Brandt", "Haddad", "Nova
 const CALLSIGNS: Array[String] = ["Hawk", "Viper", "Ghost", "Rook", "Saint", "Tank", "Ox", "Doc", "Spider", "Mako",
 	"Raven", "Bishop", "Hammer", "Cobra", "Moose", "Wolf", "Jester", "Reaper", "Atlas", "Boone", "Dutch", "Nomad",
 	"Smokey", "Torch", "Gunny", "Kodiak", "Lynx", "Maverick", "Patch", "Sparrow", "Tex", "Zulu", "Badger", "Coyote",
-	"Falcon", "Grizzly", "Husky", "Mustang", "Ranger", "Sarge"]
+	"Falcon", "Grizzly", "Husky", "Mustang", "Ranger", "Sarge",
+	# Captain, 2026-10-14: no "Saint 2"s; a longer list so a company rarely runs out.
+	"Ace", "Anvil", "Apache", "Archer", "Arrow", "Axe", "Bandit", "Banjo", "Bear", "Blade", "Bolt", "Bones",
+	"Brick", "Bronco", "Buck", "Bulldog", "Butcher", "Cajun", "Canuck", "Chaps", "Chief", "Chisel", "Cinder",
+	"Clutch", "Comet", "Cowboy", "Crow", "Cutter", "Dagger", "Deacon", "Diesel", "Dingo", "Dozer", "Drifter",
+	"Duke", "Echo", "Edge", "Ember", "Fang", "Fox", "Frost", "Gator", "Gecko", "Gonzo", "Granite", "Gravel",
+	"Gunner", "Hatchet", "Havoc", "Hoss", "Hunter", "Iceman", "Iron", "Jackal", "Jinx", "Judge", "Kilo",
+	"Kingpin", "Knuckles", "Lancer", "Lefty", "Lucky", "Mace", "Magpie", "Mantis", "Marlin", "Mojo", "Monk",
+	"Mule", "Ninja", "Novak", "Onyx", "Outlaw", "Ozark", "Padre", "Panther", "Pilgrim", "Pistol", "Preacher",
+	"Puma", "Rambler", "Rascal", "Rebel", "Rhino", "Rico", "Rifle", "Rocket", "Rooster", "Rusty", "Sable",
+	"Sabre", "Scout", "Shadow", "Shark", "Sheriff", "Skipper", "Slate", "Slick", "Sniper", "Spike", "Stinger",
+	"Stone", "Striker", "Tango", "Thor", "Thunder", "Tiger", "Titan", "Trapper", "Trigger", "Tusk", "Vandal",
+	"Vegas", "Venom", "Viking", "Warden", "Whiskey", "Wildcat", "Wizard", "Yankee", "Yeti", "Zero"]
 
 
 # --- Members ---------------------------------------------------------------------------
@@ -200,17 +212,49 @@ static func identity(member: Dictionary) -> Dictionary:
 		"body": String(member.body)}
 
 
-## `wanted`, or "wanted 2", "wanted 3"... whichever no member holds yet.
+## `wanted`, or (Captain, 2026-10-14: numbered names like "Saint 2" are not an option) the next
+## callsign in CALLSIGNS after it that no member holds; with every one taken, two of them joined
+## ("Hawk Viper"). Never a number.
 static func unique_callsign(data: Dictionary, wanted: String) -> String:
 	var taken := {}
 	for m: Dictionary in members(data).values():
 		taken[String(m.get("callsign", ""))] = true
-	var callsign := wanted
-	var lap := 2
-	while taken.has(callsign) or callsign.is_valid_int():
-		callsign = "%s %d" % [wanted, lap]
-		lap += 1
-	return callsign
+	if not taken.has(wanted) and not wanted.is_valid_int() and not _numbered(wanted):
+		return wanted
+	var start := maxi(CALLSIGNS.find(_unnumbered(wanted)), 0)
+	for i in CALLSIGNS.size():
+		var c := CALLSIGNS[(start + i) % CALLSIGNS.size()]
+		if not taken.has(c):
+			return c
+	for a in CALLSIGNS.size():
+		for b in CALLSIGNS.size():
+			var c := "%s %s" % [CALLSIGNS[(start + a) % CALLSIGNS.size()], CALLSIGNS[b]]
+			if a != b and not taken.has(c):
+				return c
+	return wanted
+
+
+## "Saint 2" -> true (an old save's numbered callsign).
+static func _numbered(callsign: String) -> bool:
+	var last := callsign.get_slice(" ", callsign.get_slice_count(" ") - 1)
+	return callsign.get_slice_count(" ") > 1 and last.is_valid_int()
+
+
+static func _unnumbered(callsign: String) -> String:
+	return callsign.substr(0, callsign.rfind(" ")) if _numbered(callsign) else callsign
+
+
+## Old saves (Captain, 2026-10-14): a member called "Saint 2" gets a proper callsign of his own.
+## Returns how many were renamed. Call before any member's body is spawned.
+static func rename_numbered_callsigns(data: Dictionary) -> int:
+	var n := 0
+	for m: Dictionary in members(data).values():
+		var cs := String(m.get("callsign", ""))
+		if _numbered(cs):
+			m["callsign"] = ""
+			m["callsign"] = unique_callsign(data, _unnumbered(cs))
+			n += 1
+	return n
 
 
 static func add_history(person: Dictionary, day: int, text: String) -> void:
