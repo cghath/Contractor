@@ -298,6 +298,8 @@ def main():
             "never went down" if rv.get("went_down") is False else ("died" if rv.get("dead") else f"still down ({rv.get('still_down', '?')}: {rv.get('why_unconscious', '')})" if rv else "-"))
         if rv:
             rv_text = f"peer {rv.get('victim')} by {rv.get('medic')}: " + rv_text
+        if rv.get("skipped"):  # S1 review: no knock-out on top of real casualties
+            rv_text = f"no knock-out ({rv['skipped']})"
         ex = c.get("extract", {})
         ex_text = ("gathered" if ex.get("gathered") else f"NOT gathered (missing {ex.get('missing')})") + (
             f", left behind {ex.get('left_behind')}" if ex.get("left_behind") else "") + (f", confirmed by {ex.get('confirmed_by')}" if ex else "")

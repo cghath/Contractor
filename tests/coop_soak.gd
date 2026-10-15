@@ -46,8 +46,10 @@ const ADVANCE_S := 210.0
 const FIGHT_S := 120.0
 const ITEMS_S := 25.0
 const EXTRACT_S := 150.0
-## Engage hostiles this close (m), firing about this often (s).
-const ENGAGE_M := 140.0
+## Engage hostiles this close (m), firing about this often (s). The garrison's own reach
+## (SquadAI.SIGHT_RANGE, 200 m; S1, S0736: at 140 m the bots walked upright through 60 m of
+## fire from a checkpoint they never answered, and three went down before the fight began).
+const ENGAGE_M := 200.0
 const SHOT_GAP_S := 0.28
 ## In the fight the host's bot (the others follow it) closes in on the nearest hostile when it
 ## has had no clear shot for HUNT_AFTER_S, stopping this far from it (m).
@@ -572,7 +574,9 @@ func _host_cycle(cycle: int) -> Dictionary:
 	var me := _me()
 	if target != null and me:
 		_walk(target, 40.0, WALK_SPEED)
-		await _wait_for(func() -> bool: return _me() == null or _flat(_me().global_position, target) < 70.0 or _hostile_in_range(_me(), HUNT_STOP_M * 2.0) != null, ADVANCE_S)
+		# The fight starts at the first contact, not only 90 m out (S1, S0736: hit and down at
+		# 112-160 m, the phase stayed "advance" for its full 210 s, nobody fired back).
+		await _wait_for(func() -> bool: return _advance_done(target), ADVANCE_S)
 	# Fight, with a knock-out and a revive.
 	_fight = true
 	_set_phase("fight")
@@ -585,8 +589,13 @@ func _host_cycle(cycle: int) -> Dictionary:
 		medic_bot = 2 if _bot_peer(2) != 0 else (3 if _bot_peer(3) != 0 else -1)
 	var victim_peer := 1 if victim_bot == 0 else _bot_peer(victim_bot)
 	var medic_peer := 1 if medic_bot == 0 else (_bot_peer(medic_bot) if medic_bot > 0 else 0)
-	_set_phase("fight", {"down": {"victim": victim_peer, "medic": medic_peer, "victim_bot": victim_bot, "medic_bot": medic_bot}})
-	var revive := await _down_and_revive(victim_peer, medic_peer)
+	var skip := _knockout_skip(victim_peer, medic_peer)
+	var revive := {"victim": victim_peer, "medic": medic_peer, "skipped": skip}
+	if skip == "":
+		_set_phase("fight", {"down": {"victim": victim_peer, "medic": medic_peer, "victim_bot": victim_bot, "medic_bot": medic_bot}})
+		revive = await _down_and_revive(victim_peer, medic_peer)
+	else:
+		_say("no planned knock-out this cycle: %s" % skip)
 	result["revive"] = revive
 	var left := FIGHT_S - (Recorder.now() - fight_start)
 	if left > 0.0:
@@ -1136,7 +1145,15 @@ func _down_and_revive(victim_peer: int, medic_peer: int) -> Dictionary:
 	var t := Recorder.now()
 	await _wait_for(func() -> bool:
 		var v := _player(victim_peer)
-		return v == null or v.vitals.is_up() or v.vitals.is_dead() or _medic_done(medic_peer, t), MEDIC_MAX_S + 30.0)
+		return v == null or v.vitals.is_up() or v.vitals.is_dead() or _medic_done(medic_peer, t) or _medic_lost(medic_peer), MEDIC_MAX_S + 30.0)
+	if _medic_lost(medic_peer):
+		# The hostiles put the medic down mid-treatment: hand the casualty to buddy aid, which
+		# skips the planned knock-out while "down" names it (S1 review).
+		out["medic_down"] = true
+		_set_phase("fight", {"down": {}})
+		await _wait_for(func() -> bool:
+			var v := _player(victim_peer)
+			return v == null or v.vitals.is_up() or v.vitals.is_dead(), MEDIC_MAX_S)
 	victim = _player(victim_peer)
 	out["up"] = victim != null and victim.vitals.is_up()
 	out["dead"] = victim != null and victim.vitals.is_dead()
@@ -1145,6 +1162,33 @@ func _down_and_revive(victim_peer: int, medic_peer: int) -> Dictionary:
 		out["still_down"] = victim.vitals.condition_text()
 		out["why_unconscious"] = Array(victim.vitals.why_unconscious())
 	return out
+
+
+## Host: the planned knock-out stays off when it would stack on real casualties (S1 review: a
+## medic already down from fire leaves the victim untreated, since buddy aid skips the planned
+## victim, and that is the "every player is down" wipe again, made by the harness). Empty when
+## it can go ahead, else why not.
+func _knockout_skip(victim_peer: int, medic_peer: int) -> String:
+	if medic_peer == 0:
+		return "no medic in the zone"  # S1, S0755: the host knocked itself out alone
+	var medic := _player(medic_peer)
+	if medic == null or not medic.vitals.is_up():
+		return "the medic is down or not in the zone"
+	var victim := _player(victim_peer)
+	if victim == null or not victim.vitals.is_up():
+		return "the victim is already down or not in the zone"
+	if _players_down() > 0:
+		return "a player is already down from fire"  # S1, S0792: buddy aid is on it
+	return ""
+
+
+## Host: the planned medic is down or gone from the zone (not counting the host's own bot while
+## it is respawning: the null check covers that too).
+func _medic_lost(medic_peer: int) -> bool:
+	if medic_peer == 0:
+		return false
+	var medic := _player(medic_peer)
+	return medic == null or not medic.vitals.is_up()
 
 
 ## Host: the medic's treatment loop has ended since `since` (it gave up, or the casualty is up).
@@ -1319,6 +1363,16 @@ func _client_phase(cycle: int, ph: String) -> void:
 			if _phase.has("spawn"):
 				await _wait_for(func() -> bool: return _me() != null, 10.0)
 				_go_to_start()
+				# The deployment's own placement can land after ours: the host saw two clients
+				# still at the insertion 640 m away, running in past the checkpoint alone (S1,
+				# S0792). Check again and put them back on the line.
+				for _again in 3:
+					await _sleep(1.5)
+					var spot: Variant = _line_spot_at_start()
+					if _me() == null or spot == null or _flat(_me().global_position, spot) < 20.0:
+						break
+					_say("not at the start (%.0f m off): placing again" % _flat(_me().global_position, spot))
+					_go_to_start()
 		"items":
 			_fight = false
 			_stop_fighting()
@@ -1578,6 +1632,55 @@ func _hostile_in_range(me: Soldier, within: float) -> Soldier:
 			best_d = d
 			best = s
 	return best
+
+
+## The advance is over: this bot is gone, near the objective, a hostile is close, or there was
+## contact on the way in (S1).
+func _advance_done(target: Variant) -> bool:
+	var me := _me()
+	if me == null:
+		return true
+	return _flat(me.global_position, target) < 70.0 or _hostile_in_range(me, HUNT_STOP_M * 2.0) != null or _contact_while_advancing()
+
+
+## Contact on the way in (S1): a player down or hurt, or a hostile within ENGAGE_M with a
+## clear line to this bot's head.
+func _contact_while_advancing() -> bool:
+	var me := _me()
+	if me == null:
+		return false
+	if not me.vitals.is_up() or me.vitals.blood_fraction() < 0.995:
+		return true
+	if _players_down() > 0:
+		return true
+	# Any player, not only the host: a client off the line meets them first (S0792).
+	var players := _level().get_node_or_null(^"Players") if _level() else null
+	for node in (players.get_children() if players else []):
+		var s := node as Soldier
+		if s == null or not s.vitals.is_up():
+			continue
+		if s.vitals.blood_fraction() < 0.995:
+			return true
+		var foe := _hostile_in_range(s, ENGAGE_M)
+		if foe == null:
+			continue
+		var query := PhysicsRayQueryParameters3D.create(foe.camera.global_position, s.camera.global_position, 1)
+		query.exclude = [foe.get_rid()]
+		var hit := s.get_world_3d().direct_space_state.intersect_ray(query)
+		if hit.is_empty() or (hit.position as Vector3).distance_to(s.camera.global_position) < 1.0:
+			return true
+	return false
+
+
+## Players down (not dead) in the zone.
+func _players_down() -> int:
+	var n := 0
+	var players := _level().get_node_or_null(^"Players") if _level() else null
+	for node in (players.get_children() if players else []):
+		var s := node as Soldier
+		if s and not s.vitals.is_up() and not s.vitals.is_dead():
+			n += 1
+	return n
 
 
 func _stop_fighting() -> void:
