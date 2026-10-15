@@ -26,7 +26,7 @@
 	},
 
 	"lhd": {
-		"_note": "The LHD (a Wasp/America-class amphibious assault ship, about 257 m by 32 m). lhd_m (zone \"coast\"): its centre line's distance from the coast's edge, default half the shoreline's; lhd_along_m: along the coast from the middle. deck_m: the flight deck above the water; draft_m below it. fob_inset_m: inland, supports come in from the friendly FOB's side of the map this far inside its edge.",
+		"_note": "The LHD (a Wasp/America-class amphibious assault ship, about 257 m by 32 m). lhd_m (zone \"coast\"): its centre line's distance from the coast's edge, default half the shoreline's, but never nearer the shore than Lhd.OFFSHORE_M (Captain, 2026-10-14: anchored offshore, never by the beach; past the zone's edge if the sea is narrow); lhd_along_m: along the coast from the middle. deck_m: the flight deck above the water; draft_m below it. fob_inset_m: inland, supports come in from the friendly FOB's side of the map this far inside its edge.",
 		"length_m": 257.0,
 		"beam_m": 32.0,
 		"deck_m": 18.0,
