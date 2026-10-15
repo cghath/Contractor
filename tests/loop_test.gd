@@ -900,7 +900,7 @@ func _heli_insert(squad: Array) -> bool:
 	# around"): it comes in from the zone's edge nearest the LZ (HeliRoute.entry), by a point
 	# between there and the LZ, no turn of more than 120 degrees before the hook, the way in at
 	# most 1.6 times the straight line; the map draws that way in.
-	var start := c.heli.global_position
+	var start := c.exit  # where it was put in the air (the edge: its way out until it leaves), a few frames back
 	var inside := HeliRoute.inside(level)
 	var on_edge := absf(start.x - inside.position.x) < 1.0 or absf(start.x - inside.end.x) < 1.0 \
 		or absf(start.z - inside.position.y) < 1.0 or absf(start.z - inside.end.y) < 1.0
