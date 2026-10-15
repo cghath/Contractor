@@ -32,14 +32,16 @@ func _ready() -> void:
 	add_child(load("res://scenes/main.tscn").instantiate())
 	await get_tree().process_frame
 	_test_data()
-	$Main/Menu.host()
+	$Main/Menu.host_forest_zone()  # a real zone: village, compound and checkpoint modules
 	level = CompoundLevel.current(self)
-	while level.players.get_node_or_null(^"1") == null or not level.voxel_world.is_built():
+	var deadline := Time.get_ticks_msec() + 120000
+	while (level.players.get_node_or_null(^"1") == null) and Time.get_ticks_msec() < deadline:
 		await get_tree().process_frame
 	player = level.players.get_node(^"1")
 	player.set_physics_process(false)
-	for i in 10:
+	for i in 30:
 		await get_tree().process_frame
+	await _test_zone_sites()
 	await _test_tagging()
 	await _test_debrief_and_fob()
 	_test_stock_effects()
@@ -85,6 +87,39 @@ func _test_data() -> void:
 
 # --- Tagging -----------------------------------------------------------------------------------
 
+## The zone builds its own pallets and parks an abandoned vehicle at the checkpoint.
+func _test_zone_sites() -> void:
+	print("Pallets and an abandoned vehicle at the zone's sites")
+	var zone := level as ZoneLevel
+	check(zone != null, "the forest is a zone level")
+	var built := PalletField.of(level)
+	check(built != null and built.pallets.size() == 4 and built.pallets.has("village_pal0") and built.pallets.has("checkpoint_pal1"),
+		"every site has its pallets (%s)" % [built.pallets.keys() if built else "no field"])
+	var a := built.pallets["village_pal0"] as SupplyPallet
+	var ground := zone.ground_height(a.global_position.x, a.global_position.z)
+	check(absf(a.global_position.y - ground) < 0.5, "a pallet stands on the ground (%.2f m off)" % absf(a.global_position.y - ground))
+	var layer := level.get_node(^"Vehicles") as VehicleLayer
+	var abandoned := layer.find("checkpoint_abv0")
+	check(abandoned != null and abandoned.has_meta(&"abandoned") and abandoned.faction == &"hostile" and abandoned.occupants().is_empty(), "an abandoned technical sits at the checkpoint")
+	if abandoned == null:
+		return
+	var key := PalletField.vehicle_key(abandoned)
+	player.global_position = abandoned.global_position + Vector3(4, 0.5, 0)
+	check(built.server_tag(key, "sell", "") == "" and built.tag_text(key) == "TAG: SELL" and abandoned.get_node_or_null(^"TagLabel") != null, "it can be tagged to sell, with a marker on it")
+	var points := abandoned.find_children("*", "VehicleActionPoint", true, false)
+	var labels: Array = []
+	for pt: Node in points:
+		for act: Dictionary in InteractionMenu.actions_for(player, pt):
+			labels.append(String(act.label))
+	check(labels.any(func(l: String) -> bool: return l.begins_with("Untag")) and "Tag for..." in labels, "its action points offer Tag for... and Untag: %s" % [labels])
+	var lot: Dictionary = built.lots()[0]
+	check(lot.kind == "vehicle" and lot.what == "technical_dshk" and int(lot.value) > 0, "and it is a vehicle lot worth $%d" % int(lot.value))
+	built.server_tag(key, "none", "")
+	player.global_position = a.global_position + Vector3(2, 1, 0)
+	check(built.server_tag("village_pal0", "sell", "") == "" and built.lots().size() == 1, "a zone pallet tags too")
+	built.server_tag("village_pal0", "none", "")
+
+
 func _pallet(uid: String, kind: String, offset: Vector3) -> SupplyPallet:
 	var p := SupplyPallet.new(uid, kind)
 	p.field = field
@@ -96,8 +131,7 @@ func _pallet(uid: String, kind: String, offset: Vector3) -> SupplyPallet:
 
 func _test_tagging() -> void:
 	print("Tagging a pallet")
-	field = PalletField.new()
-	level.add_child(field)
+	field = PalletField.of(level)  # the zone's own field: the pallets set out by hand sit beside its
 	var fuel := _pallet("t_fuel", "fuel_drums", Vector3(2, 0, 0))
 	var far := _pallet("t_far", "ammo", Vector3(60, 0, 0))
 	var employers := Pallets.gift_factions()

@@ -19,7 +19,7 @@
 	"variance": [0.7, 1.3],
 	"sell_now_ratio": 0.5,
 	"sell_stored_ratio": 0.8,
-	"gift_rep_per": 1500,
+	"gift_rep_per": 600,
 	"gift_rep_max": 8,
 	"gift_min_rep": -100,
 	"reach_m": 7.0,
