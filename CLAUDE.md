@@ -15,7 +15,11 @@
   purpose and the right-handed pin in `_ready` (a player's left-handed `settings.cfg` broke
   the pistol draw) stay. Never rewrite the commit (no rebase, amend or force-push over it).
   If this code needs work: say what and why in the commit, keep the "Looting" checks passing,
-  and run the full suite (cite the run number).
+  and run the full suite (cite the run number). The same goes for its follow-up: when the
+  ragdoll goes (revived, lifted), the body stands where it lay (`Ragdoll.rest_spot`,
+  `Soldier._stand_where_ragdoll_lay`), and a ragdoll carries its parts along with any
+  placement, even before its first physics step (`_root_last` set in `Ragdoll.start`); keep the
+  animations checks "Standing up where the ragdoll lay" and "takes its ragdoll along".
 - Plans and who owns what: [docs/build_plan.md](docs/build_plan.md) and
   [docs/ChrisPlan_handoff.md](docs/ChrisPlan_handoff.md) (cghath's agent: the note at the top
   of "Wave 5").

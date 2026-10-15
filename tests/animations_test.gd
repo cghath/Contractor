@@ -421,6 +421,10 @@ func _test_loot() -> void:
 	check(hostile.vitals.is_dead(), "a dead body with gear")
 	_place(hostile, SPOT + Vector3(-1.0, 0, -0.8))
 	await _settled(hostile)
+	# Placed before its ragdoll's first physics step: the parts still go with it (they stayed
+	# behind once, and the body later stood up metres from where it was put).
+	var placed_at: Vector3 = (hostile.ragdoll.parts["torso"] as Node3D).global_position if is_instance_valid(hostile.ragdoll) else Vector3.INF
+	check(_flat(placed_at, hostile.global_position) < 1.5, "the body put somewhere takes its ragdoll along (%.1f m)" % _flat(placed_at, hostile.global_position))
 	# A ragdoll can slide or roll metres from the capsule, which stays where it fell (this
 	# flaked when it did by chance): put it 6 m off, and loot it where it lies.
 	check(is_instance_valid(hostile.ragdoll) and hostile.ragdoll.frozen, "it lies as a ragdoll, at rest")
