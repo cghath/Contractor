@@ -1010,6 +1010,41 @@ func _test_turret() -> void:
 			if part.name == "Turret":
 				span = (part.size as Vector3i).x * vs
 		check(left == 0 and span >= float(box[0]) * 2.0 - vs, "%s: the whole shield turns with the turret (%d voxels left on the roof, part %.2f m wide)" % [model, left, span])
+	## Captain, 2026-10-14 ("clear guns on the blackhawk"): a mounted gun is never drawn in the
+	## windows' see-through glass, on any vehicle: no voxel that is gun metal to rounds is
+	## P.WINDOW in the look, the turning guns' look has no P.WINDOW, and their meshes' materials
+	## are opaque.
+	for model: String in VehicleArt.MODELS:
+		var gc := VehicleHull.canvas(model)
+		var gsize: Vector3i = gc.size
+		var clear_gun := 0
+		var hit_buf: VoxelBuffer = gc.buffer
+		var look_buf: VoxelBuffer = gc.look
+		if look_buf != hit_buf:
+			for x in gsize.x:
+				for y in gsize.y:
+					for z in gsize.z:
+						if hit_buf.get_voxel(x + 1, y + 1, z + 1, VoxelBuffer.CHANNEL_COLOR) == VehicleArt.P.GUN 								and look_buf.get_voxel(x + 1, y + 1, z + 1, VoxelBuffer.CHANNEL_COLOR) == VehicleArt.P.WINDOW:
+							clear_gun += 1
+		for part: Dictionary in gc.parts:
+			if part.name != "Gun":
+				continue
+			var psz: Vector3i = part.size
+			for x in psz.x:
+				for y in psz.y:
+					for z in psz.z:
+						if (part.look as VoxelBuffer).get_voxel(x + 1, y + 1, z + 1, VoxelBuffer.CHANNEL_COLOR) == VehicleArt.P.WINDOW:
+							clear_gun += 1
+		check(clear_gun == 0, "%s: its guns are solid, not see-through glass (%d clear gun voxels)" % [model, clear_gun])
+	for id: String in ["range_matv", "range_maxxpro", "range_aav7"]:
+		var gun_mesh := _vehicle(id).hull.art.get_node_or_null(^"Turret/Gun/Mesh") as MeshInstance3D
+		var see_through := 0
+		if gun_mesh and gun_mesh.mesh:
+			for si in gun_mesh.mesh.get_surface_count():
+				var mat := gun_mesh.get_active_material(si) as BaseMaterial3D
+				if mat and (mat.transparency != BaseMaterial3D.TRANSPARENCY_DISABLED or mat.albedo_color.a < 1.0):
+					see_through += 1
+		check(gun_mesh != null and see_through == 0, "%s: the mounted gun's materials are opaque (%d see-through surfaces)" % [id, see_through])
 	# And it turns as one: the shield's mesh follows the ring's yaw.
 	var sv := _vehicle("range_maxxpro")
 	sv.turret.aim(deg_to_rad(70.0), 0.0)
