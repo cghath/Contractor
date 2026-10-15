@@ -50,7 +50,7 @@
 		 "scenario_knobs": {"site_offset_m": 220, "crew": [2, 4], "first_wave_s": [150, 240], "gap_s": 150, "approach_m": 260, "all_bonus_share": 0.15},
 		 "objectives": []},
 		{"type": "sabotage", "name": "Sabotage", "brief": "Take out the enemy's radio mast or supply stock at a site in the zone with a placed charge or grenades (charges from the base shop), and an AA gun there too if you can. Bonus pay if no hostile ever got eyes on the squad.",
-		 "modules": ["comms", "hq", "outpost", "qrf_base"], "base_pay": 48000, "days": 1, "enemy_count": [4, 10], "enemy_quality": [0.3, 0.7],
+		 "modules": ["comms", "hq", "outpost"], "base_pay": 48000, "days": 1, "enemy_count": [4, 10], "enemy_quality": [0.3, 0.7],
 		 "threat_pool": ["mg_nest", "qrf", "sniper"],
 		 "objectives": [
 			{"kind": "destroy_cache", "site": "cache", "text": "Sabotage: destroy the {name}"},

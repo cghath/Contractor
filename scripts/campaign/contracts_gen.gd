@@ -111,6 +111,11 @@ static func generate(rng: RandomNumberGenerator, ctx: Dictionary) -> Dictionary:
 		var fits := type_ids.filter(func(t: String) -> bool: return ZoneModules.base(at_type) in MissionRegistry.type_modules(MissionRegistry.type_def(t)))
 		if not fits.is_empty():
 			type_ids = fits
+	if safe and ctx.get("type", "") == "":
+		# The safe offer is plain low-risk work: one of the four first types, as before mission variety.
+		var plain := type_ids.filter(func(t: String) -> bool: return t in ["raid", "hvt_capture", "hostage_rescue", "intel_grab"])
+		if not plain.is_empty():
+			type_ids = plain
 	if ctx.has("avoid_modules") and ctx.get("type", "") == "":
 		# A hot zone's live contracts each hold a site of their own: the scenario types that are
 		# not tied to a site (convoy, crew rescue, recon) stay off the board there.
