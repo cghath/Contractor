@@ -84,10 +84,10 @@ Headless fit is the result of `tests/ui_test.gd` (run R0969, before the fixes on
 3. **Interaction menu, read.** Rings and submenus are never clamped to the screen.
    - A 20-entry loot submenu is about 560 px tall and runs off a 720 px window unless its parent entry is near the middle.
    - At 1.5 the self-interaction ring's head entry is at centre −303 px, which is off the top.
-4. **Shop, measured and read.**
+4. **Shop, measured and read. Fixed on ui/campaign-screens:** a themed, window-fitted solid panel that closes on Esc (the board closes a shop it opened first), item tooltips and a summary line from ItemInfo.
    - **Esc is not handled.** It falls through and closes the contract board **underneath**, leaving the shop open.
    - At 1.5, 1280x720 and 1366x768, its title and filter are above the window.
-5. **Contract board, measured.** At 1.5, 1280x720 and 1366x768, 12 controls are outside the window: the header, both offer lists and the details. The bottom row of seven buttons doesn't wrap.
+5. **Contract board, measured. Fixed on ui/campaign-screens:** a themed full-window panel whose middle scrolls, lists beside the details (above them under 1000 logical px), details in their own scroll, list tooltips, and the bottom buttons in a wrapping `button_row`. `ui_test` also fits a full board with an offer picked. At 1.5, 1280x720 and 1366x768, 12 controls are outside the window: the header, both offer lists and the details. The bottom row of seven buttons doesn't wrap.
 6. **Settings, measured. Fixed on this branch.** The fixed 620x560 box overflowed at 1.5 on 1280x720 and 1366x768. It is now sized to the window.
 
 ### P1

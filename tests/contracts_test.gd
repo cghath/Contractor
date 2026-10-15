@@ -734,7 +734,20 @@ func _test_board_ui() -> void:
 	await _frames(2)
 	check(board.held_count() == 1 and Contracts.contract(cid).state == "accepted" and board.offer_count() == Contracts.board().size(),
 		"accepting from the board signs the contract")
-	board.close()
+	# Esc closes the top-most screen only: the shop over the board first, then the board
+	# (docs/ui_audit.md P0-4: Esc fell through the shop and closed the board under it).
+	var over := board.open_shop()
+	await _frames(1)
+	var esc := InputEventAction.new()
+	esc.action = &"pause"
+	esc.pressed = true
+	get_viewport().push_input(esc)
+	await _frames(2)
+	check(not is_instance_valid(over) and is_instance_valid(board) and not board.is_queued_for_deletion(),
+		"Esc closes the shop opened over the board, not the board")
+	get_viewport().push_input(esc)
+	await _frames(2)
+	check(not is_instance_valid(board), "a second Esc closes the board")
 	var shop := ShopScreen.new()
 	add_child(shop)
 	await _frames(1)
