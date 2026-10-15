@@ -57,7 +57,7 @@ thickets 8000, solid 6800. Set as:
 | preset | woods | copses | hedgerows | road_trees | wadi groves | lone trees |
 | --- | --- | --- | --- | --- | --- | --- |
 | temperate | 1.5 | 5 | 4 | 0.4 | - | 12 |
-| forest_experimental (copse_cover) | 3.0 (70-170 m) | 6 (24-60 trees) | 2 | 0.6 | - | 16 |
+| forest_experimental (copse_cover) | 2.4 (70-170 m, thicket_share 0.35) | 6 (24-60 trees) | 2 | 0.6 | - | 16 |
 | coastal_lowland (harbour_yard) | 0.8 | 6 | 5 | 0.5 | - | 10 |
 | amphibious_coast | 0.4 | 4 | 3 | 0.3 | - | 8 |
 | desert_wadi | 0 | 1.5 (6-16 trees) | 0.5 | - | 6 (6-16 trees) | 4 |
