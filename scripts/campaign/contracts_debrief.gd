@@ -58,6 +58,10 @@ static func compute(contracts: Array, objectives: Array, civilians: int, report:
 				for o: Dictionary in mine:
 					if o.optional and o.state == Objectives.DONE and float(o.get("bonus_share", 0.0)) > 0.0:
 						line.bonuses.append({"text": "Bonus: %s" % String(o.text).trim_prefix("Bonus: "), "amount": roundi(pay_total * float(o.bonus_share))})
+				var hazard := int(report.get("hazard_tier", 0))
+				if hazard > 0 and c.get("zone_kind") == "hot":  # staying longer pays more (Captain)
+					line.bonuses.append({"text": "Hazard pay (enemy pressure, tier %d)" % hazard,
+						"amount": roundi(pay_total * HotZoneOps.hazard_share(hazard))})
 				if civilians == 0 and S.call("clean_bonus_share") > 0.0:
 					line.bonuses.append({"text": "No civilian casualties", "amount": roundi(pay_total * S.call("clean_bonus_share"))})
 				line.salvage_share = float(deal.get("salvage_share", 0.0))
