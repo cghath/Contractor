@@ -155,7 +155,11 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed(ControlOptions.GET_OUT_ACTION) and ControlOptions.get_out_key() and Vehicle.ride_of(body) != null:
 		Vehicle.ride_of(body).request_exit.rpc_id(1)  # the get-out key (an option; the seat's menu then has no Get out)
 	elif interaction.is_open() and event is InputEventMouseButton:
-		return  # clicks don't fire through the interaction menu
+		# The wheel scrolls a submenu longer than the window (a full body's Loot list; P0-3,
+		# docs/ui_audit.md); clicks don't fire through the interaction menu.
+		if event.pressed and (event.button_index == MOUSE_BUTTON_WHEEL_UP or event.button_index == MOUSE_BUTTON_WHEEL_DOWN):
+			interaction.scroll_submenu(-1 if event.button_index == MOUSE_BUTTON_WHEEL_UP else 1)
+		return
 	elif event.is_action_pressed(&"inspect"):
 		toggle_inspect()  # the item under the crosshair: what it is and how to use it (ItemInfo)
 	elif placing and event.is_action_pressed(&"fire"):

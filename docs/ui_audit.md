@@ -54,8 +54,8 @@ Headless fit is the result of `tests/ui_test.gd` (run R0969, before the fixes on
 | Objective hint and markers | `scripts/ui/objective_helper.gd` | drawn and code | Hud | hint 14; markers 11 to 12 px, diamonds 3.5 to 6 px at 30 to 70% | hint 480 px wide under a 364 px panel | n/t |
 | Radio feed and subtitles | `scripts/ui/callouts.gd` (Subtitles) | code | Hud | 17 px `e8e4c8` with outline 4 | centre-bottom, 110 px up; 4 lines, no wrap | n/t |
 | Command menu | `scripts/ui/command_menu.gd` | code | Hud | theme panel, heading, key-chip rows (fixed on ui/small-screens) | centre-left, EDGE in, grows both ways; path wraps at 300 | fits (`ui_test`, no level needed) |
-| Medical / treatment menu | `scripts/ui/medical_menu.gd` | drawn | Hud | 11 to 20 px; legend 11; log 12 | **fixed 1080x620 panel**, min height 540 | n/t (needs Vitals) |
-| Interaction menu (rings) | `scripts/ui/interaction_menu.gd` | drawn | Hud | entries 15, point names 12 | ring radius 120; entries 180x26; submenus up to 20 entries; **nothing clamped to the screen** | n/t |
+| Medical / treatment menu | `scripts/ui/medical_menu.gd` | drawn | Hud | 14 to 20 px, UiKit colours (was 11 to 20) | 1080x620 at most, shrinks to the window; figure scales, columns narrow, rows scroll (ui/medical-interaction) | fits (its drawn layout) |
+| Interaction menu (rings) | `scripts/ui/interaction_menu.gd` | drawn | Hud | entries 16, point names and hints 14, UiKit colours | ring radius 120; entries 180x26; rings and submenus kept inside the window, long submenus scroll (ui/medical-interaction) | fits (rings at every edge, a 20-entry Loot list) |
 | Inventory and loot | `scripts/ui/inventory_screen.gd` | code | Hud | **9 to 22 px; teal palette** | margin 18; columns 330 and 300 fixed; tiles 96x112 | n/t |
 | Map, briefing panel, extraction panel | `scripts/ui/map_*.gd`, `briefing_screen.gd` | code and drawn | Hud | 12 to 20 px | being reworked on fix/briefing-map-ui | covered by `map_test` |
 | Contract board | `scripts/ui/contract_board.gd` | code | CanvasLayer 10 | default 16; sections 15 at 70% | full window inset 40; left column 460; bottom row of 7 buttons | **@1.5: 1280x720, 1366x768 overflow** |
@@ -81,8 +81,8 @@ Headless fit is the result of `tests/ui_test.gd` (run R0969, before the fixes on
 1. **Base hub screen (`base_ui.gd`), measured.** The fixed 980x640 panel is centred with grow both.
    - At 1280x720 with the Captain's 1.2, the header (day, funds, wages) and the Close (Esc) button are above the top of the window.
    - At 1.5, all six pages are cut off at 1280x720, 1366x768 and 1600x900.
-2. **Medical menu, read.** Its fixed 1080x620 panel is wider than a 1280x720 window at 1.2 (which lays out as 1067x600), and its minimum height of 540 is more than 480 at 1.5. The signs column and the treatment log, drawn at +720 px, are cut off on the right.
-3. **Interaction menu, read.** Rings and submenus are never clamped to the screen.
+2. **Medical menu, read. Fixed on ui/medical-interaction:** the panel shrinks to the window, the body diagram draws smaller in a short one, the columns narrow (text wraps or cuts with "...", the hover box has a greyed row's whole reason) and the log stops above the triage cards. Its fixed 1080x620 panel is wider than a 1280x720 window at 1.2 (which lays out as 1067x600), and its minimum height of 540 is more than 480 at 1.5. The signs column and the treatment log, drawn at +720 px, are cut off on the right.
+3. **Interaction menu, read. Fixed on ui/medical-interaction:** a ring moves as a whole to stay inside the window, a submenu flips side at an edge and is kept inside it, and one taller than the window scrolls (the wheel, or resting the cursor on its "more" row). Rings and submenus were never clamped to the screen.
    - A 20-entry loot submenu is about 560 px tall and runs off a 720 px window unless its parent entry is near the middle.
    - At 1.5 the self-interaction ring's head entry is at centre −303 px, which is off the top.
 4. **Shop, measured and read. Fixed on ui/campaign-screens:** a themed, window-fitted solid panel that closes on Esc (the board closes a shop it opened first), item tooltips and a summary line from ItemInfo.
@@ -220,7 +220,8 @@ func open() -> void:
   - the six base pages
   - objectives panel
   - ammo readout
-- **Not covered yet:** the HUD, the medical, interaction, command and inventory screens, and the vehicle readout all need a player. ui/hud-pass should add a hosted-level fit section for them, the way `map_test` hosts a level.
+  - the medical menu and the interaction menu (drawn: their `layout_rects` and ring and submenu rects, with a ring at every edge and a 20-entry Loot list; plus the long list scrolling to its end)
+- **Not covered yet:** the HUD, the command and inventory screens, and the vehicle readout all need a player. ui/hud-pass should add a hosted-level fit section for them, the way `map_test` hosts a level.
 
 ## Follow-up branches
 
