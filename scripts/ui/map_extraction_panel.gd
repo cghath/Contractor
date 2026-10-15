@@ -35,6 +35,8 @@ func _ready() -> void:
 			_extraction.request_confirm())
 	_box.add_child(_confirm)
 	_add_label("Right click the map for a grid extraction point, or throw a purple smoke.", 12).modulate = Color(1, 1, 1, 0.6)
+	# Captain, 2026-10-14: walking out only at the zone's edge.
+	_add_label("On foot only at the zone edge; further in a point is a helicopter LZ. Or drive out across the edge.", 12).modulate = Color(1, 1, 1, 0.6)
 
 
 ## Shows `extraction`'s state (call again whenever it changes).

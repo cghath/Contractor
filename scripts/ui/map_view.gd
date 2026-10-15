@@ -550,7 +550,8 @@ func _draw_insertion() -> void:
 			draw_colored_polygon(tri, INSERT_COLOUR)
 		tri.append(tri[0])
 		draw_polyline(tri, INSERT_COLOUR.darkened(0.4), 2.0)
-		_label(s, ("INSERT: " if chosen else "") + String(point.get("name", "")), INSERT_COLOUR, "insert_chosen" if chosen else "insert")
+		_label(s, "%s%s (%s)" % ["INSERT: " if chosen else "", String(point.get("name", "")), Briefing.method_text(point)], INSERT_COLOUR,
+			"insert_chosen" if chosen else "insert")  # Captain, 2026-10-14: foot at the edge, helicopter inside
 
 
 func _draw_extraction() -> void:

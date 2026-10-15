@@ -83,11 +83,16 @@ func server_bring_near(id: String, at: Vector3, index := 0) -> Vehicle:
 	return MotorPool.server_bring(id, lvl, Transform3D(Basis.looking_at(inward, Vector3.UP), spot + Vector3.UP * 0.2))
 
 
-## Host: the squad extracted at `report.point`: pool vehicles near it go home.
+## Host: the squad extracted at `report.point`: pool vehicles near it go home, and (Captain,
+## 2026-10-14: driving out at the zone's edge) those near each vehicle they drove out in
+## (report "vehicles": [[x, z]]).
 func _on_extracted(report: Dictionary) -> void:
-	var p: Array = report.get("point", {}).get("pos", [])
-	if p.size() >= 2:
-		server_settle([Vector3(float(p[0]), 0.0, float(p[1]))])
+	var at: Array = []
+	for p: Array in [report.get("point", {}).get("pos", [])] + report.get("vehicles", []):
+		if p.size() >= 2:
+			at.append(Vector3(float(p[0]), 0.0, float(p[1])))
+	if not at.is_empty():
+		server_settle(at)
 
 
 ## Host: the debug extraction (BaseHub) ends a deployment without Extraction: what's near a
