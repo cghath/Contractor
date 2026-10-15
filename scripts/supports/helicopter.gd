@@ -12,8 +12,9 @@ extends Vehicle
 ##   a saved wreck's neighbour), rotors still.
 ## - FLYING: the autopilot flies to a point (arriving: slowing down to a hover over it; passing:
 ##   at speed) or orbits one, contour-flying low over the ground and whatever stands on it ahead
-##   (_contour). It steers its velocity (accelerations limited) and tilts into its acceleration
-##   the way a rotor's thrust does, nose down to speed up, flaring nose up to stop. Landing, it
+##   along the way it will actually fly, under its whole footprint (_contour). It steers its
+##   velocity (accelerations limited) and tilts into its acceleration the way a rotor's thrust
+##   does, nose down to speed up, flaring nose up to stop. Landing, it
 ##   flies a J-hook (hook_plan): past the LZ on one side, a slowing turn back onto a short final,
 ##   the flare, and settles.
 ## - LANDING: straight down over a spot, slowing for the touchdown; LANDED: on the ground,
@@ -40,18 +41,34 @@ enum Mode { PARKED, FLYING, LANDING, LANDED, CRASHING, CRASHED }
 ## Proposed flight numbers: cruise and loiter speeds, the height above the ground it cruises
 ## at, and the hover height over a landing spot before it goes straight down.
 ## Captain, 2026-10-14 (riding a UH-60M insertion into wadi_farm): "fly in no higher than
-## 10m". It contour-flies CRUISE_AGL_M over the ground (under 10 m with room for the terrain
-## following's lag), and OBSTACLE_CLEAR_M over anything taller standing in its way (structures
-## and trees with colliders, within ROTOR_REACH_M of its track: the rotor), climbing just enough
-## and coming back down. CONTOUR_CLIMB of CLIMB_MS is the climb it plans with for what's ahead,
-## so it starts up in time. Proposed.
+## 10m"; then (v0.4.0 playtest): "the heli bumped into the ground on infil so maybe 10 is just a
+## tiny bit too low", "lets do 12 or 13 m". It contour-flies CRUISE_AGL_M over the ground, and
+## OBSTACLE_CLEAR_M over anything taller standing in its way (structures and trees with
+## colliders, within ROTOR_REACH_M of its rotor hub: the disc), climbing just enough and coming
+## back down. CONTOUR_CLIMB of CLIMB_MS is the climb it plans with for what's ahead, so it
+## starts up in time. Proposed.
 const CRUISE_KMH := 250.0
 const LOITER_KMH := 120.0
-const CRUISE_AGL_M := 7.0
+const CRUISE_AGL_M := 12.5
 const HOVER_AGL_M := 3.0
-const OBSTACLE_CLEAR_M := 4.0
-const ROTOR_REACH_M := 8.0
+const OBSTACLE_CLEAR_M := 6.0
+const ROTOR_REACH_M := 9.0
 const CONTOUR_CLIMB := 0.6
+## Captain, 2026-10-14 (the bump on infil): the airframe (its footprint: the main rotor's disc,
+## the nose, the tail and the tail rotor) never comes within MIN_CLEAR_M of the ground or what
+## stands on it, cruising, round the J-hook or on the approach; only the last FINAL_LOW_M of the
+## final goes lower, tapering to the hover over the spot. It plans CLEAR_MARGIN_M above that
+## for the terrain following's lag. Proposed.
+const MIN_CLEAR_M := 5.0
+const FINAL_LOW_M := 40.0
+const CLEAR_MARGIN_M := 1.0
+## The UH-60's main rotor radius (m) and, where the art isn't built, its hub and tail rotor
+## (x, z from the origin, nose along -z) and the nose: its footprint (_footprint_points).
+const ROTOR_RADIUS_M := 8.18
+const FOOTPRINT_RING := 8
+const HUB_AT := Vector3(0.0, 0.0, -2.2)
+const TAIL_ROTOR_AT := Vector3(0.0, 0.0, 9.0)
+const NOSE_AT := Vector3(0.0, 0.0, -7.6)
 ## What stands on the ground is looked for this far up from it (m).
 const OBSTACLE_SCAN_M := 60.0
 ## Taking off: up to this height over the ground before it goes (Proposed).
@@ -93,9 +110,12 @@ const MAX_TILT_DEG := 24.0
 const ATTITUDE_S := 0.45
 const MAX_ROTATE_RAD_S := 1.6
 const DRAG_TILT := 0.03
-## Terrain following: the ground is sampled this many seconds ahead along the way (1.0 gives
-## the slope it climbs or sinks with, _contour).
-const LOOKAHEAD_S: Array[float] = [0.0, 1.0, 2.0, 3.5, 5.0, 7.0, 10.0]
+## Terrain following: the ground is sampled this many seconds ahead along the way it will fly
+## (1.0 gives the slope it climbs or sinks with, _contour), at no less than LOOKAHEAD_MIN_MS.
+## Captain, 2026-10-14 (the bump): further and closer together than before, so a slope is seen
+## in time to climb it at CONTOUR_CLIMB from however fast it's sinking. Proposed.
+const LOOKAHEAD_S: Array[float] = [0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.5, 10.0, 12.0, 14.0]
+const LOOKAHEAD_MIN_MS := 5.0
 ## Rotors (Proposed): turning rpm, and seconds to spin up or down.
 const ROTOR_RPM := 260.0
 const SPOOL_S := 5.0
@@ -140,6 +160,9 @@ var _path_v: Array[float] = []
 var _path_i := 0
 var _final_dir := Vector2.ZERO
 var _path_left := 0.0
+## Its footprint (_footprint_points), once the art it's read from is built.
+var _footprint: Array[Vector3] = []
+var _edge_walls_ignored := false
 
 
 ## A new helicopter of `p_model` (a "helicopter" kind in data/vehicles.json), ready for the tree.
@@ -279,6 +302,45 @@ func obstacle_top(at: Vector3, side := Vector3.ZERO) -> float:
 	return top
 
 
+## Its footprint, as offsets from its origin (x right, z back, y 0): the origin, the nose, the
+## main rotor's hub, the tail rotor and FOOTPRINT_RING points round the rotor's disc. From the
+## art (the MainRotor and TailRotor nodes) once it's built, else the UH-60's numbers.
+func _footprint_points() -> Array[Vector3]:
+	if not _footprint.is_empty():
+		return _footprint
+	var hub := HUB_AT
+	var tail := TAIL_ROTOR_AT
+	var from_art := false
+	if hull and is_instance_valid(hull.art) and is_inside_tree():
+		var main_rotor := hull.art.get_node_or_null(^"MainRotor") as Node3D
+		var tail_rotor := hull.art.get_node_or_null(^"TailRotor") as Node3D
+		if main_rotor and tail_rotor:
+			var inv := global_transform.affine_inverse()
+			hub = inv * main_rotor.global_position
+			tail = inv * tail_rotor.global_position
+			from_art = true
+	hub.y = 0.0
+	tail.y = 0.0
+	var out: Array[Vector3] = [Vector3.ZERO, NOSE_AT, hub, tail]
+	for i in FOOTPRINT_RING:
+		var a := TAU * float(i) / float(FOOTPRINT_RING)
+		out.append(hub + Vector3(cos(a), 0.0, sin(a)) * ROTOR_RADIUS_M)
+	if from_art:
+		_footprint = out
+	return out
+
+
+## The highest terrain under its footprint at `at` (x, z) with its nose along `dir` (x, z).
+func footprint_ground(at: Vector3, dir: Vector2) -> float:
+	var f := dir.normalized() if dir.length() > 0.01 else Vector2(-sin(_heading), -cos(_heading))
+	var right := Vector2(-f.y, f.x)
+	var top := -INF
+	for off: Vector3 in _footprint_points():
+		var p := Vector2(at.x, at.z) + right * off.x - f * off.z
+		top = maxf(top, terrain_y(Vector3(p.x, at.y, p.y)))
+	return top
+
+
 ## Landing: metres still to fly along its J-hook (0 when not flying one).
 func path_left_m() -> float:
 	return _path_left if not _path.is_empty() else 0.0
@@ -382,6 +444,11 @@ func server_start_airborne(speed_kmh := CRUISE_KMH * 0.5) -> void:
 	_heading = Helicopter.yaw_of(self)
 	linear_velocity = -global_basis.z * speed_kmh / 3.6 * pace
 	mode = Mode.FLYING
+	# Never put in the air lower than its contour flight holds there (Captain, 2026-10-14, the
+	# bump on infil: put in at cruise height over the ground just there, it met ground rising
+	# ahead before it could climb).
+	if is_inside_tree():
+		global_position.y = maxf(global_position.y, _contour(global_position, Vector3(linear_velocity.x, 0.0, linear_velocity.z), CRUISE_AGL_M).x)
 	_target = global_position
 	_publish_flight()
 
@@ -522,6 +589,8 @@ func _wake_bodies_ahead() -> void:
 # --- Flight (host, Vehicle's _drive_step seam) --------------------------------------------------
 
 func _drive_step(delta: float) -> void:
+	if mode == Mode.FLYING or mode == Mode.LANDING:
+		_ignore_edge_walls()
 	match mode:
 		Mode.PARKED:
 			gravity_scale = 1.0
@@ -534,6 +603,23 @@ func _drive_step(delta: float) -> void:
 			_fall(delta)
 		Mode.CRASHED:
 			gravity_scale = 1.0
+
+
+## The zone's edge walls (ZoneTerrain's EdgeWalls, there to keep people on foot in) are no
+## wall to an aircraft: it comes in from beyond the edge and leaves past it. 2026-10-14 (the
+## infil probe for the Captain's bump: a J-hook swinging out past the edge of ridge_hot and
+## coast_hot stuck against them and never landed).
+func _ignore_edge_walls() -> void:
+	if _edge_walls_ignored:
+		return
+	var lvl := level()
+	if lvl == null:
+		return
+	_edge_walls_ignored = true
+	var terrain: Variant = lvl.get(&"terrain")
+	var walls := (terrain as Node).get_node_or_null(^"EdgeWalls") as PhysicsBody3D if terrain is Node else null
+	if walls:
+		add_collision_exception_with(walls)
 
 
 func _physics_process(delta: float) -> void:
@@ -584,7 +670,7 @@ func _fly(delta: float) -> void:
 		if dist < OVER_SPOT_M * 3.0:
 			speed = minf(speed, dist * 0.8 * pace)
 	var v_h := Vector3(dir.x, 0.0, dir.y) * speed
-	# Height: contour flight over what's below and ahead (Captain, 2026-10-14: no higher than 10 m).
+	# Height: contour flight over what's below and ahead (Captain, 2026-10-14: 12-13 m up).
 	var vel_h := Vector3(linear_velocity.x, 0.0, linear_velocity.z)
 	var contour := _contour(pos, vel_h, _agl)
 	_steer(Vector3(v_h.x, _climb_to(contour.x, contour.y, pos.y), v_h.z), delta)
@@ -598,32 +684,111 @@ func _fly(delta: float) -> void:
 		_publish_flight()
 
 
-## Contour flight: the height (y) to hold at `pos` flying `vel_h` (m/s, flat), `agl` over the
-## ground and OBSTACLE_CLEAR_M over what stands on it, starting up early enough for what's
-## ahead at the climb it plans with; and how fast that height changes under it (m/s: x the
-## height, y the rate).
+## Contour flight: the height (y) to hold at `pos` flying `vel_h` (m/s, flat), and how fast
+## that height changes (m/s): x the height, y the rate. Captain, 2026-10-14 (the bump on infil):
+## it looks along the way it will actually fly (the J-hook's points when landing, _ahead) at
+## what's under its whole footprint there (_need_y), and holds high enough now to make each
+## point ahead at the climb it plans with (CONTOUR_CLIMB of CLIMB_MS), counting the time it
+## takes to stop sinking and get to that climb (_rise).
 func _contour(pos: Vector3, vel_h: Vector3, agl: float) -> Vector2:
-	var side := Vector3(-vel_h.z, 0.0, vel_h.x).normalized() * ROTOR_REACH_M if vel_h.length() > 0.5 else global_basis.x * ROTOR_REACH_M
+	var speed := maxf(vel_h.length(), LOOKAHEAD_MIN_MS * pace)
 	var climb := CLIMB_MS * CONTOUR_CLIMB * pace
+	var accel := VERTICAL_ACCEL_MS2 * pace * pace
+	var vy := linear_velocity.y
 	var want := -INF
+	var binding := 0.0
 	var now := 0.0
 	var next := 0.0
 	for t: float in LOOKAHEAD_S:
-		var at := pos + vel_h * t
-		var floor_y := maxf(terrain_y(at) + agl, obstacle_top(at, side) + OBSTACLE_CLEAR_M)
+		var ahead := _ahead(pos, vel_h, speed * t)
+		var need := _need_y(ahead[0], ahead[1], ahead[2], agl)
 		if t == 0.0:
-			now = floor_y
+			now = need
 		elif t == 1.0:
-			next = floor_y
-		want = maxf(want, floor_y - climb * t)
-	return Vector2(want, next - now)
+			next = need
+		var y := need - Helicopter._rise(t, vy, climb, accel)
+		if y > want:
+			want = y
+			binding = t
+	# Held to a point ahead, the height to hold rises as it comes on: at the planned climb (only
+	# once it's down to that height: higher, it comes down to it first).
+	if binding == 0.0:
+		return Vector2(want, next - now)
+	return Vector2(want, climb if pos.y < want + 1.0 else 0.0)
+
+
+## Metres it can rise in `t` seconds from a vertical speed of `vy` (m/s), getting to `climb`
+## (m/s) at `accel` (m/s2).
+static func _rise(t: float, vy: float, climb: float, accel: float) -> float:
+	if vy >= climb:
+		return climb * t
+	var t_up := (climb - vy) / accel
+	if t <= t_up:
+		return vy * t + 0.5 * accel * t * t
+	return (climb * climb - vy * vy) / (2.0 * accel) + climb * (t - t_up)
+
+
+## The point `s` metres ahead along the way it flies: [where (Vector3), its heading there (x, z),
+## metres of the J-hook still to go from there (INF: not landing)]. Landing, along the J-hook's
+## points (to the LZ, no further); else straight on along its velocity (its nose when slow).
+func _ahead(pos: Vector3, vel_h: Vector3, s: float) -> Array:
+	if has_meta(&"landing") and _path.size() >= 2 and _path_i < _path.size() - 1:
+		var a0 := _path[_path_i]
+		var seg := _path[_path_i + 1] - a0
+		var dir := seg.normalized() if seg.length() > 0.01 else Vector2(-sin(_heading), -cos(_heading))
+		var left := maxf(_path_left - s, 0.0)
+		if s <= 0.0:
+			return [pos, dir, left]
+		var here := Vector2(pos.x, pos.z)
+		var from := a0 + seg * clampf((here - a0).dot(seg) / maxf(seg.length_squared(), 0.01), 0.0, 1.0)
+		var to_go := s
+		for k in range(_path_i + 1, _path.size()):
+			var d := from.distance_to(_path[k])
+			if d > 0.01:
+				dir = (_path[k] - from) / d
+			if d >= to_go:
+				var p := from + dir * to_go
+				return [Vector3(p.x, pos.y, p.y), dir, left]
+			to_go -= d
+			from = _path[k]
+		return [Vector3(from.x, pos.y, from.y), dir, left]
+	var flat := Vector2(vel_h.x, vel_h.z)
+	var d2 := flat.normalized() if flat.length() > 0.5 else Vector2(-sin(_heading), -cos(_heading))
+	return [pos + Vector3(d2.x, 0.0, d2.y) * s, d2, INF]
+
+
+## The least height (y) for its origin over `at` (x, z) with its nose along `dir`, `left` metres
+## of the J-hook from the LZ there (INF: not landing): `agl` over the ground below; MIN_CLEAR_M
+## (and CLEAR_MARGIN_M) over the highest ground under its footprint; OBSTACLE_CLEAR_M over what
+## stands on it under the rotor. Landing, it comes down the glide slope (GLIDE) to hover height
+## over the spot once that's below its cruise over the ground there (an LZ up on a rise doesn't
+## hold it high all the way in), never below the ground's own slope down to it; in the last
+## FINAL_LOW_M of the final the clearances taper to nothing at the spot (Captain, 2026-10-14).
+func _need_y(at: Vector3, dir: Vector2, left: float, agl: float) -> float:
+	var ground := terrain_y(at)
+	var want := ground + agl
+	var clear := MIN_CLEAR_M + CLEAR_MARGIN_M
+	var over := OBSTACLE_CLEAR_M
+	if left < INF:
+		var slope := _target.y + maxf(left * GLIDE, HOVER_AGL_M)  # the glide slope up from the spot
+		want = maxf(ground + clampf(left * GLIDE, 0.0, agl), minf(want, slope))
+		if left < FINAL_LOW_M:
+			clear *= left / FINAL_LOW_M
+			over *= left / FINAL_LOW_M
+	var f := dir.normalized() if dir.length() > 0.01 else Vector2(-sin(_heading), -cos(_heading))
+	var hub := _footprint_points()[2]
+	var hub_at := at + Vector3(-f.y * hub.x - f.x * hub.z, 0.0, f.x * hub.x - f.y * hub.z)
+	var side := Vector3(-f.y, 0.0, f.x) * ROTOR_REACH_M
+	return maxf(want, maxf(footprint_ground(at, f) + clear, obstacle_top(hub_at, side) + over))
 
 
 ## The climb (m/s, + up) that takes it to `want_y` from `y`, following the ground's `rate`.
+## Coming down, never faster than it can stop by `want_y` at half its vertical acceleration
+## (Captain, 2026-10-14, the bump on infil: it sank through its floor onto the final).
 func _climb_to(want_y: float, rate: float, y: float) -> float:
 	var lim_up := CLIMB_MS * pace
-	var lim_down := SINK_MS * pace
-	return clampf((want_y - y) * 0.8 * pace + clampf(rate, -lim_down, lim_up), -lim_down, lim_up)
+	var lim_down := minf(SINK_MS * pace, sqrt(VERTICAL_ACCEL_MS2 * pace * pace * maxf(y - want_y, 0.0)))
+	return clampf((want_y - y) * 0.8 * pace + clampf(rate, -SINK_MS * pace, lim_up), -lim_down, lim_up)
 
 
 ## Landing: flies the J-hook (_path): toward a point a little way along it from where it is,
@@ -672,15 +837,11 @@ func _fly_hook(delta: float) -> void:
 		dir = (end - here).normalized() if here.distance_to(end) > 0.01 else Vector2.ZERO
 		limit = minf(limit, here.distance_to(end) * 0.8)
 	var v_h := Vector3(dir.x, 0.0, dir.y) * limit * pace
-	# Height: contour flight; on the final, down the glide slope to hover height over the spot.
-	var glide := _target.y + clampf(_path_left * GLIDE, HOVER_AGL_M, maxf(_agl, HOVER_AGL_M))
-	var want_y := glide
-	var rate := 0.0
-	if _path_left > HOOK_FINAL_M * 1.5:
-		var contour := _contour(pos, vel_h, _agl)
-		want_y = maxf(glide, contour.x)
-		rate = contour.y
-	_steer(Vector3(v_h.x, _climb_to(want_y, rate, pos.y), v_h.z), delta)
+	# Height: contour flight round the hook; on the final, down the glide slope to hover height
+	# over the spot (_need_y), clear of the ground and what stands on it until the last
+	# FINAL_LOW_M (Captain, 2026-10-14: the bump on infil).
+	var contour := _contour(pos, vel_h, _agl)
+	_steer(Vector3(v_h.x, _climb_to(contour.x, contour.y, pos.y), v_h.z), delta)
 	# Nose along the way it goes; slow on the final, round to the final's heading (no snap).
 	if vel_h.length() > 4.0 * pace:
 		_heading = atan2(-vel_h.x, -vel_h.z)

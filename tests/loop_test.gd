@@ -32,6 +32,8 @@ const ORDER: Array[String] = ["intel_grab", "raid", "recovery", "hvt_capture", "
 const HIRES := 6
 ## The heli mission's flights run this much faster (Helicopter.pace), so it fits the suite's time.
 const HELI_PACE := 3.0
+## The helicopter flight checks' measures (Captain, 2026-10-14: the bump on infil).
+const HeliFlight := preload("res://tests/heli_flight_check.gd")
 
 var failures := 0
 var tag := OS.get_environment("CONTRACTOR_TEST_TAG")
@@ -981,7 +983,11 @@ func _heli_insert(squad: Array) -> bool:
 	var ratio := 0.0
 	var prev := start
 	var low_agl := INF
-	var high_agl := 0.0
+	var high_over := 0.0
+	var min_clear := INF
+	var clear_at := ""
+	var contacts: Array[String] = []
+	var top := -INF
 	var passed_by := INF
 	var flare := 0.0
 	var t := 0.0
@@ -990,6 +996,8 @@ func _heli_insert(squad: Array) -> bool:
 		t += get_physics_process_delta_time()
 		var h := c.heli
 		var far := Vector2(h.global_position.x - lz.x, h.global_position.z - lz.z).length()
+		if h.is_flying():
+			top = HeliFlight.ceiling(h, top, get_physics_process_delta_time())
 		if ratio == 0.0 and h.has_meta(&"landing"):  # the J-hook from here
 			ratio = (flown + far) / maxf(_flat(start, lz), 1.0)
 		elif ratio == 0.0:
@@ -1002,17 +1010,30 @@ func _heli_insert(squad: Array) -> bool:
 		prev = h.global_position
 		if via != Vector3.INF:
 			passed_by = minf(passed_by, Vector2(h.global_position.x - via.x, h.global_position.z - via.z).length())
-		if far > 300.0:
+		if h.is_flying() and h.height_agl() > Helicopter.TOUCH_M + 0.3:
+			for body in HeliFlight.touching(h):
+				if contacts.size() < 4:
+					contacts.append("%s at (%.0f, %.1f, %.0f), %.0f m to go" % [body.name, h.global_position.x, h.global_position.y, h.global_position.z, h.path_left_m()])
+		if h.flight_mode() == Helicopter.Mode.FLYING and (not h.has_meta(&"landing") or h.path_left_m() > Helicopter.FINAL_LOW_M):
+			var clear := HeliFlight.airframe_clearance(h)
+			if clear < min_clear:
+				min_clear = clear
+				clear_at = "(%.0f, %.1f, %.0f), %.0f m to go" % [h.global_position.x, h.global_position.y, h.global_position.z, h.path_left_m()]
+		if far > 300.0 and t > HeliFlight.SETTLE_S / Helicopter.pace:
 			var agl := h.global_position.y - LandingZone.terrain_y(level, h.global_position)
 			low_agl = minf(low_agl, agl)
-			high_agl = maxf(high_agl, agl)
+			high_over = maxf(high_over, agl - HeliFlight.climb_allowance(h, h.global_position, top))
 		elif far > 15.0:
 			flare = maxf(flare, rad_to_deg(asin(clampf(-h.global_basis.z.y, -1.0, 1.0))))  # nose up while slowing
 	var landed := is_instance_valid(c.heli) and c.heli.is_landed()
 	check(via == Vector3.INF or passed_by < HeliCall.ROUTE_PASS_M + 10.0, "it flew in by the insertion point (%.0f m from it)" % passed_by)
-	# Captain, 2026-10-14: "fly in no higher than 10m" (contour flight; a little more only to clear
-	# what stands taller in its way), never down in the dirt.
-	check(low_agl > 1.0 and high_agl < 12.0, "low over the terrain on the way in: %.0f-%.0f m above the ground" % [low_agl, high_agl])
+	# Captain, 2026-10-14: "fly in no higher than 10m", then after a bump on infil "lets do 12 or
+	# 13 m" (contour flight; more only to climb over what stands taller or ground rising ahead),
+	# the airframe never within 5 m of the ground or what stands on it until the final, and
+	# nothing touched before touchdown.
+	check(low_agl >= HeliFlight.INBOUND_LOW_M and high_over <= HeliFlight.INBOUND_HIGH_M, "low over the terrain on the way in: %.1f-%.1f m above the ground (7-16 m)" % [low_agl, high_over])
+	check(min_clear >= Helicopter.MIN_CLEAR_M, "its airframe at least %.0f m clear until the final: %.1f m at the least (at %s)" % [Helicopter.MIN_CLEAR_M, min_clear, clear_at])
+	check(contacts.is_empty(), "it touched nothing before touchdown (%s)" % ("; ".join(PackedStringArray(contacts)) if not contacts.is_empty() else "nothing"))
 	check(flare > 3.0, "it flared, nose up, coming in to land (%.0f°)" % flare)
 	check(ratio > 0.0 and ratio <= 1.6 and reversal <= 120.0,
 		"flown in without turning back: %.2f times the straight line before the hook, at most %.0f degrees off the way it set off" % [ratio, reversal])
