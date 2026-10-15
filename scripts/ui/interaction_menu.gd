@@ -94,8 +94,8 @@ const INTERACTABLES := &"interactables"
 ##   rushed), "target_part" (target path, part) and "target_loot" (target path, a slot or
 ##   container, the entry's index or -1 for a slot, and the item id the host checks).
 ## - show: a local readout instead of a request ("condition" or "wounds").
-## - submenu: a list built at runtime: "stowed_items" and "body_items" (what's on a dead body,
-##   like the inventory screen; entries take the parent's request) or "treatments" (entries
+## - submenu: a list built at runtime: "stowed_items" and "body_items" (what's on a body you
+##   can loot, like the inventory screen; entries take the parent's request) or "treatments" (entries
 ##   carry their own request: see treatments).
 ## - people: a people action (PeopleLayer.request: "cuff", "lead", "stop", "cover", "search")
 ##   on the target, instead of a Soldier request; its conditions are Person.MENU_NEEDS.
@@ -103,7 +103,10 @@ const INTERACTABLES := &"interactables"
 ##   it (see grouped).
 ## Menu order is what you most likely want there (Captain, P0164 queue 8): on a body you're
 ## moving, letting go; on a casualty, treat, carry and drag; on the dead, loot; on yourself,
-## letting go of who you carry, then your wounds.
+## letting go of who you carry, then your wounds. Captain, 2026-10-14 ("cant loot" a downed
+## hostile): an enemy who's down or gave up (Soldier.lootable_by) can be searched and stripped
+## too, Loot and Loot all first on a downed one (Treat is left out for an enemy), after Zip-cuff
+## on a captive; never a squadmate or a civilian.
 const ACTIONS := {
 	ITEM: [
 		{"id": &"pick_up", "label": "Pick up", "request": &"_server_interact", "with": &"target"},
@@ -111,6 +114,8 @@ const ACTIONS := {
 	DOWNED: [
 		{"id": &"put_down", "label": "Put down", "needs": &"moving_body", "request": &"_server_release_body", "with": &"none"},
 		{"id": &"treat", "label": "Treat", "needs": &"treatable", "submenu": &"treatments"},
+		{"id": &"loot", "label": "Loot", "needs": &"lootable", "submenu": &"body_items", "request": &"_server_loot_item", "with": &"target_loot"},
+		{"id": &"loot_all", "label": "Loot all", "needs": &"lootable", "request": &"_server_loot_body", "with": &"target"},
 		{"id": &"carry", "label": "Carry", "needs": &"can_carry", "request": &"_server_carry_body", "with": &"target"},
 		{"id": &"drag", "label": "Drag", "needs": &"can_drag", "request": &"_server_drag_body", "with": &"target"},
 		{"id": &"cuff", "label": "Zip-cuff", "needs": &"cuffable", "people": &"cuff"},
@@ -132,6 +137,8 @@ const ACTIONS := {
 	PERSON: [
 		{"id": &"put_down", "label": "Put down", "needs": &"moving_body", "request": &"_server_release_body", "with": &"none"},
 		{"id": &"cuff", "label": "Zip-cuff", "needs": &"cuffable", "people": &"cuff"},
+		{"id": &"loot", "label": "Loot", "needs": &"lootable", "submenu": &"body_items", "request": &"_server_loot_item", "with": &"target_loot"},
+		{"id": &"loot_all", "label": "Loot all", "needs": &"lootable", "request": &"_server_loot_body", "with": &"target"},
 		{"id": &"lead", "label": "Follow me", "needs": &"follow_order", "people": &"lead"},
 		{"id": &"stop", "label": "Stop", "needs": &"stop_order", "people": &"stop"},
 		{"id": &"cover", "label": "Get in cover", "needs": &"cover_order", "people": &"cover"},
@@ -404,6 +411,10 @@ static func _check(need: StringName, actor: Soldier, target: Node) -> String:
 			return _order_check(need, actor, target)
 		&"has_gear":
 			return "" if target is Soldier and (target as Soldier).has_gear() else "Nothing left on them"
+		&"lootable":  # the living: an enemy who's down or gave up (Soldier.lootable_by)
+			if not (target is Soldier and (target as Soldier).lootable_by(actor)):
+				return _HIDE
+			return "" if (target as Soldier).has_gear() else "Nothing left on them"
 		&"held_item":
 			return "" if actor.inventory.hands != &"" or actor.active_weapon() != null else _HIDE
 		&"field_radio":  # your own field radio (not a looted enemy set), in a hot zone
@@ -492,7 +503,7 @@ static func _submenu(def: Dictionary, actor: Soldier, target: Node) -> Array[Dic
 	return items
 
 
-## What's on a dead body, as the Loot submenu lists it (like the inventory screen): what's
+## What's on a body you can loot (Soldier.lootable_by), as the Loot submenu lists it (like the inventory screen): what's
 ## worn ("Primary: M4A1 Carbine (30 rds)"), what's on the carrier's MOLLE ("Carrier: Double
 ## Mag Pouch"), then each container's entries, pouches first ("2x Mag pouch: 7.62 Magazine x2",
 ## "Vest: 5.56 Magazine x4"). Each is {"label", "where" (a slot, pouch container or

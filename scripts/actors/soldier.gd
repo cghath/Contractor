@@ -2091,7 +2091,8 @@ func server_remove_body() -> void:
 	queue_free()
 
 
-## Interaction menu "Loot all": everything on a dead body that fits goes into your own gear.
+## Interaction menu "Loot all": everything on a body you may loot (lootable_by: the dead, a
+## downed or captured enemy) that fits goes into your own gear.
 ## Worn gear goes first (a carrier or pack you lack is put on, so what was in it follows it),
 ## then plates, weapons and the rest, then what was stowed. What doesn't fit stays on the
 ## body; nothing goes on the ground.
@@ -2201,9 +2202,9 @@ func gear_entries() -> Array[Dictionary]:
 	return out
 
 
-## Interaction menu "Loot" > one item: takes one thing off a dead body into your own gear:
-## what's in slot `where` (index -1), or the whole stowed entry `index` of container `where`
-## (as much of the stack as fits; the rest stays on the body). `id` is the item the looter
+## Interaction menu "Loot" > one item: takes one thing off a body you may loot (lootable_by)
+## into your own gear: what's in slot `where` (index -1), or the whole stowed entry `index` of
+## container `where` (as much of the stack as fits; the rest stays on the body). `id` is the item the looter
 ## picked: if someone else took it first and something else is there now, nothing moves.
 @rpc("any_peer", "call_local", "reliable")
 func _server_loot_item(path: NodePath, where: StringName, index: int, id: StringName) -> void:
@@ -2232,12 +2233,27 @@ static func _loot_id_at(other: Soldier, where: StringName, index: int) -> String
 	return list[index].id if index < list.size() else &""
 
 
-## The dead body at `path` if this player may loot it now (up, the body in reach), else null.
+## Whether `actor` may loot this body: the dead, and an enemy who can't stop it: down
+## (unconscious) or given up (surrendered or cuffed; People). Captain, 2026-10-14 ("cant loot"
+## a downed hostile): a downed or captured enemy is searched and disarmed (weapons, mags,
+## grenades, intel), not only the dead. Never a squadmate, a civilian or a friendly HVT. Works on
+## every peer (replicated vitals and people state).
+func lootable_by(actor: Soldier) -> bool:
+	if vitals.is_dead():
+		return true
+	if actor == null or actor == self or faction == actor.faction:
+		return false
+	var enemy := faction != Person.FACTION or Person.side_of(self) == Person.HOSTILE  # a hostile HVT is a civilian-faction person
+	return enemy and (not vitals.is_up() or Person.is_captive(self))
+
+
+## The body at `path` if this player may loot it now (up, the body lootable_by them and in
+## reach), else null.
 func _lootable(path: NodePath) -> Soldier:
 	if not _from_owner() or not vitals.is_up():
 		return null
 	var other := get_node_or_null(path) as Soldier
-	if other == null or other == self or other.is_queued_for_deletion() or not other.vitals.is_dead():
+	if other == null or other == self or other.is_queued_for_deletion() or not other.lootable_by(self):
 		return null
 	if other.body_point().distance_to(global_position) > INTERACT_REACH + INTERACT_SLACK:
 		_client_message.rpc_id(owner_peer(), "Too far away")

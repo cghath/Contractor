@@ -83,12 +83,15 @@ static func is_cuffed(s: Node) -> bool:
 	return bool(state(s).get("cuffed", false))
 
 
-## Someone zip cuffs can go on: a hostile HVT or a hostile who surrendered, not yet cuffed
-## and still alive.
+## Someone zip cuffs can go on: a hostile HVT, a hostile who surrendered, or a hostile soldier
+## lying downed (Captain, 2026-10-14: a downed enemy is captured, searched and disarmed; cuffing
+## him makes him a captive: PeopleLayer.server_cuff), not yet cuffed and still alive.
 static func cuffable(s: Node) -> bool:
 	if not s is Soldier or (s as Soldier).vitals.is_dead() or is_cuffed(s):
 		return false
 	var st := state(s)
+	if (s as Soldier).faction == HOSTILE and not (s as Soldier).vitals.is_up():
+		return true
 	return (StringName(st.get("kind", "")) == HVT and StringName(st.get("side", "")) == HOSTILE) or bool(st.get("surrendered", false))
 
 
@@ -104,7 +107,7 @@ static func leadable(s: Node) -> bool:
 
 
 ## Someone whose pockets can be searched for intel while alive: a captive, or an HVT lying
-## unconscious. (A downed hostile soldier is searched by cuffing him first, or looted dead.)
+## unconscious. (A downed hostile soldier is looted (Soldier.lootable_by), or cuffed first.)
 static func searchable(actor: Soldier, s: Node) -> bool:
 	if not s is Soldier or (s as Soldier).vitals.is_dead() or s == actor:
 		return false

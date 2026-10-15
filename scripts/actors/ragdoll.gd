@@ -58,6 +58,15 @@ const SETTLE_S := 0.6
 const SETTLE_MAX_S := 8.0
 ## A pose change smaller than this (metres) isn't sent.
 const SEND_EPSILON := 0.003
+## Captain, 2026-10-14 ("weird ragdoll": a downed man lying in the air at chest height, legs
+## hanging): a settled ragdoll is frozen (static), so when what it came to rest on went (a body
+## under it carried off, standing up or gone with the body cap, a wall blown away) it stayed
+## where it was, in the air. Every SUPPORT_CHECK_S a frozen one looks under its torso (along it
+## at SUPPORT_ALONG of its length each way, and its middle) for anything within SUPPORT_GAP_M
+## below the box; with nothing there it lets go and falls again (has_support, _check_support).
+const SUPPORT_CHECK_S := 0.5
+const SUPPORT_GAP_M := 0.1  # less than a torso's depth: a body lying on another one has support, one left above it hasn't
+const SUPPORT_ALONG := 0.4
 
 ## Turn off for a session (the older suites that check the fixed downed pose).
 static var enabled := true
@@ -70,6 +79,8 @@ var _still_s := 0.0
 var _age_s := 0.0
 var _sent := PackedFloat32Array()
 var _root_last: Variant = null  # the body's transform last step (host)
+var _support_left := SUPPORT_CHECK_S
+var _woke_at: Variant = null  # where the torso was when it last fell again for want of support
 
 
 ## Host: starts a ragdoll for `soldier` from the pose it's drawn in (or its saved ragdoll pose).
@@ -282,6 +293,7 @@ func _physics_process(delta: float) -> void:
 		return
 	_carry_along()
 	if frozen:
+		_check_support(delta)
 		return
 	_age_s += delta
 	var still := true
@@ -310,6 +322,50 @@ func _carry_along() -> void:
 	for p: Node3D in parts.values():
 		p.global_transform = moved * p.global_transform
 	_send(true)
+
+
+## Host, frozen: every SUPPORT_CHECK_S, with nothing under the torso any more it falls again.
+## Not twice from the same spot: a torso that settled where it can't find support under its
+## middle line (hanging over an edge it rests on) stays.
+func _check_support(delta: float) -> void:
+	_support_left -= delta
+	if _support_left > 0.0:
+		return
+	_support_left = SUPPORT_CHECK_S
+	if has_support():
+		return
+	var torso := parts.get("torso") as Node3D
+	if torso == null or (_woke_at != null and torso.global_position.distance_to(_woke_at) < 0.05):
+		return
+	_woke_at = torso.global_position
+	unfreeze()
+
+
+## Whether anything (the world, or another body's parts) is within SUPPORT_GAP_M under the
+## torso box: straight down from its middle and from SUPPORT_ALONG of its length towards
+## each end.
+func has_support() -> bool:
+	var torso := parts.get("torso") as Node3D
+	if torso == null or not torso.is_inside_tree() or torso.get_child_count() == 0:
+		return true
+	var shape := torso.get_child(0) as CollisionShape3D
+	var box := shape.shape as BoxShape3D
+	if box == null:
+		return true
+	var t := shape.global_transform
+	var half := box.size * 0.5
+	# How far the box reaches down from its middle, as it lies.
+	var reach := absf(t.basis.x.y) * half.x + absf(t.basis.y.y) * half.y + absf(t.basis.z.y) * half.z
+	var exclude: Array[RID] = [body.get_rid()]
+	for p: PhysicsBody3D in parts.values():
+		exclude.append(p.get_rid())
+	var space := torso.get_world_3d().direct_space_state
+	for along: float in [0.0, SUPPORT_ALONG, -SUPPORT_ALONG]:
+		var from := t * Vector3(0.0, box.size.y * along, 0.0)
+		var query := PhysicsRayQueryParameters3D.create(from, from + Vector3.DOWN * (reach + SUPPORT_GAP_M), MASK, exclude)
+		if not space.intersect_ray(query).is_empty():
+			return true
+	return false
 
 
 ## Host: holds it where it lies (static: nothing shoves it; falling bodies rest on it).
