@@ -503,12 +503,12 @@ func flash(text: String) -> void:
 
 
 func is_inventory_open() -> bool:
-	return inventory_screen.visible or loot_window.visible
+	return inventory_screen.visible or loot_window.is_open()
 
 
 ## Opens the loot window on a body or a vehicle's hold: asks the host to start the search.
 func open_loot(target: Node) -> void:
-	if target == null or loot_window.visible:
+	if target == null or loot_window.is_open():
 		return
 	inventory_screen.visible = false
 	loot_window.open(target)
@@ -522,7 +522,7 @@ func release_mouse_if_clear() -> void:
 
 
 func toggle_detail() -> void:
-	if loot_window.visible:
+	if loot_window.is_open():
 		loot_window.close()
 		release_mouse_if_clear()
 		return
