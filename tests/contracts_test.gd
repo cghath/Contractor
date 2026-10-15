@@ -332,8 +332,9 @@ func _test_wages_and_floor() -> void:
 	var bill := Economy.weekly_bill()
 	var owed := Economy.loans_owed()
 	check(bill.wages == 2500 and bill.loans == ceili(owed / 8.0), "wages as lines from the roster ($%d), and the loan installment ($%d)" % [bill.wages, bill.loans])
+	Economy.add_cash(100000 - Economy.cash(), "test")
 	Economy.advance_days(7, "test")
-	check(Economy.loans_owed() == owed - bill.loans and Economy.cash() == 20000 - bill.total, "the installment comes off the loan")
+	check(Economy.loans_owed() == owed - bill.loans and Economy.cash() == 100000 - bill.total, "the installment comes off the loan")
 	var lent := 0
 	for i in 5:
 		lent += Economy.server_take_loan()
@@ -585,8 +586,8 @@ func _test_shop() -> void:
 	var cid := _make_offer("raid", "compound_01")
 	Contracts.server_accept(cid, {"pay_points": 0, "salvage_points": 0, "support_points": 1, "advance_share": 0.3})
 	cash = Economy.cash()
-	check(Economy.server_pay_support("resupply", cid) and Contracts.support_left(cid) == 0 and Economy.cash() == cash - 3000,
-		"a $8,000 resupply call: $5,000 from the support budget, $3,000 cash")
+	check(Economy.server_pay_support("resupply", cid) and Contracts.support_left(cid) == 0 and Economy.cash() == cash - (Prices.support_price("resupply") - 5000),
+		"a resupply call: $5,000 from the support budget, the rest cash")
 
 
 func _test_intel_and_salvage() -> void:
@@ -600,7 +601,7 @@ func _test_intel_and_salvage() -> void:
 	var d := Contracts.server_end_deployment({"items": [{"id": "hvt_case", "count": 1}],
 		"field_items": [{"id": "m4a1", "count": 1}, {"id": "rounds_556", "count": 30}], "extracted": ["You"]})
 	var deal: Dictionary = Contracts.history().back()
-	check(d.contracts[0].outcome == "completed" and Economy.cash() == cash + int(d.totals.paid_now) and int(d.totals.paid_now) > 0,
+	check(d.contracts[0].outcome == "completed" and Economy.cash() == cash + int(d.totals.paid_now) - (d.expenses as Array).reduce(func(a: int, l: Dictionary) -> int: return a + (int(l.amount) if bool(l.charge) else 0), 0) and int(d.totals.paid_now) > 0,
 		"the case carried out completes the contract and pays ($%d)" % int(d.totals.paid_now))
 	check(d.salvage.budget == floori(1430 * 0.5) and Contracts.server_pick_salvage(1) and not Contracts.server_pick_salvage(0) and d.salvage.spent == 30,
 		"a 50%% share of $1,430 in the field: the rounds can be claimed, the rifle can't")
@@ -969,7 +970,7 @@ func _test_live_objectives() -> void:
 	check(report.items.any(func(e: Dictionary) -> bool: return e.id == "plate_carrier") and report.field_items.any(func(e: Dictionary) -> bool: return e.id == "m4a1")
 		and report.extracted.size() == 1 and report.casualties.is_empty(), "an extraction report from the level: what the player carries, what's left lying about")
 	var d := Contracts.server_end_deployment(report)
-	check(d.contracts.size() == 3 and d.contracts.all(func(l: Dictionary) -> bool: return l.outcome == "completed") and Economy.cash() == cash + int(d.totals.paid_now)
+	check(d.contracts.size() == 3 and d.contracts.all(func(l: Dictionary) -> bool: return l.outcome == "completed") and Economy.cash() == cash + int(d.totals.paid_now) - (d.expenses as Array).reduce(func(a: int, l: Dictionary) -> int: return a + (int(l.amount) if bool(l.charge) else 0), 0)
 		and int(d.salvage.pool_value) > 0, "all three completed and paid ($%d); salvage pool $%d" % [int(d.totals.paid_now), int(d.salvage.pool_value)])
 	check(Contracts.objectives.list.is_empty() and (panel == null or panel.text() == ""), "after extraction the objective list clears")
 	Contracts.server_finish_debrief()
