@@ -56,7 +56,7 @@ const SEE_TREE_M := 950.0
 ## Far stand-ins: past SEE_TREE_M each FAR_GROUP_M square of trees is one low canopy blob.
 const FAR_GROUP_M := 24.0
 ## Layout format: bump when the layout code changes, so old cached layouts are not used.
-const LAYOUT_VERSION := 5
+const LAYOUT_VERSION := 6
 ## Zones kept in memory (layouts), the newest of them also keep their built cell meshes, and
 ## files kept in the disk cache.
 const CACHE_ZONES := 4
@@ -175,13 +175,17 @@ func _lay_out() -> void:
 	_scrubs = _colours(colours.get("scrub", ["55633a"]))
 	_crowns = _colours(colours.get("crown", ["46602f"]))
 	var large_share := float(_spec.get("large_rock_share", 0.15))
+	# An open middle (scatter "margin_m", the salt pan): items only at the margins and round
+	# the pads and roads, so the tries go up by how little of the zone that is.
+	var open := float(_spec.get("margin_m", 0.0)) > 0.0
+	var tries_per := 4.0 / maxf(_open_share(), 0.05) if open else 4.0
 	var scrub_size: Array = _spec.get("scrub_size", [0.6, 1.5])
 	_scrub_lo = float(scrub_size[0])
 	_scrub_hi = float(scrub_size[1])
 	_tree_grid = {}
 	# Rocks.
 	var want := mini(int(round(float(_spec.get("rocks_per_km2", 0.0)) * area_km2)), CAP_ROCKS)
-	var attempts := want * 4
+	var attempts := int(want * tries_per)
 	while counts[Kind.ROCK] < want and attempts > 0:
 		attempts -= 1
 		var x := rng.randf_range(-_half + EDGE_KEEP_M, _half - EDGE_KEEP_M)
@@ -191,6 +195,8 @@ func _lay_out() -> void:
 		var variation := rng.randf()
 		var scale_roll := rng.randf()
 		var squash_roll := rng.randf()
+		if open and rng.randf() > _open_weight(x, z):
+			continue
 		if _blocked(x, z, _keep, _roads):
 			continue
 		var h := terrain.height_at(x, z)
@@ -207,7 +213,7 @@ func _lay_out() -> void:
 	_lay_out_trees(area_km2)
 	want = mini(int(round(float(_spec.get("trees_per_km2", 0.0)) * area_km2)), CAP_TREES - counts[Kind.TREE])
 	var lone := 0
-	attempts = want * 4
+	attempts = int(want * tries_per)
 	while lone < want and attempts > 0:
 		attempts -= 1
 		var x := rng.randf_range(-_half + EDGE_KEEP_M, _half - EDGE_KEEP_M)
@@ -215,21 +221,67 @@ func _lay_out() -> void:
 		var roll := rng.randf()
 		if roll > clampf(_cluster.get_noise_2d(x + 500.0, z - 500.0) * 2.2 + 0.6, 0.05, 1.0):
 			continue
+		if open and rng.randf() > _open_weight(x, z):
+			continue
 		if _try_tree(rng, x, z, 0.8, 1.45):
 			lone += 1
 	# Scrub everywhere, in clumps: denser where the cluster noise is high.
 	want = mini(int(round(float(_spec.get("scrub_per_km2", 0.0)) * area_km2)), CAP_SCRUB - counts[Kind.SCRUB])
 	var bushes := 0
-	attempts = want * 4
+	attempts = int(want * tries_per)
 	while bushes < want and attempts > 0:
 		attempts -= 1
 		var x := rng.randf_range(-_half + EDGE_KEEP_M, _half - EDGE_KEEP_M)
 		var z := rng.randf_range(-_half + EDGE_KEEP_M, _half - EDGE_KEEP_M)
 		if rng.randf() > clampf(_cluster.get_noise_2d(x, z) * 1.6 + 0.8, 0.1, 1.0):
 			continue
+		if open and rng.randf() > _open_weight(x, z):
+			continue
 		if _try_bush(rng, x, z, Kind.SCRUB, _scrub_lo, _scrub_hi):
 			bushes += 1
 	_tree_grid = {}
+
+
+## How much scatter a preset with an open middle (scatter "margin_m"; Captain, 2026-10-14: the
+## salt flats were an empty white plate) puts at (x, z), 0 to 1: 1 within "margin_m" of the
+## zone's edge (where the terrain's margin has its berm and mesas), fading to 0 over
+## "margin_fade_m" further in, and 1 near a pad ("near_pad_m": compounds, landing zones) or a
+## road ("near_road_m"), fading out over half that again. The pan's middle stays open, as a pan
+## is and for spotting. 1 everywhere for every other preset.
+func _open_weight(x: float, z: float) -> float:
+	var margin := float(_spec.get("margin_m", 0.0))
+	if margin <= 0.0:
+		return 1.0
+	var half := _terrain.size_m * 0.5
+	var edge := minf(half - absf(x), half - absf(z))
+	var w := 1.0 - smoothstep(margin, margin + float(_spec.get("margin_fade_m", 200.0)), edge)
+	if w >= 1.0:
+		return 1.0
+	var p := Vector2(x, z)
+	var near_pad := float(_spec.get("near_pad_m", 0.0))
+	if near_pad > 0.0:
+		for r in _keep:
+			var dx := maxf(maxf(r.position.x - p.x, p.x - r.end.x), 0.0)
+			var dz := maxf(maxf(r.position.y - p.y, p.y - r.end.y), 0.0)
+			w = maxf(w, 1.0 - smoothstep(near_pad, near_pad * 1.5, Vector2(dx, dz).length()))
+	var near_road := float(_spec.get("near_road_m", 0.0))
+	if near_road > 0.0:
+		for road: Array in _roads:
+			var a := Vector2(float(road[0][0]), float(road[0][1]))
+			var b := Vector2(float(road[1][0]), float(road[1][1]))
+			var d := Geometry2D.get_closest_point_to_segment(p, a, b).distance_to(p)
+			w = maxf(w, 1.0 - smoothstep(near_road, near_road * 1.5, d))
+	return w
+
+
+## The mean of _open_weight over the zone (a 32 x 32 grid of samples).
+func _open_share() -> float:
+	var half := _terrain.size_m * 0.5
+	var sum := 0.0
+	for j in 32:
+		for i in 32:
+			sum += _open_weight(-half + (i + 0.5) * _terrain.size_m / 32.0, -half + (j + 0.5) * _terrain.size_m / 32.0)
+	return sum / 1024.0
 
 
 ## The clustered trees, from the preset's scatter (all optional, per km2 of zone unless said):
@@ -1088,6 +1140,7 @@ func _ground_cover(cell: Vector2i, groups: Dictionary) -> void:
 	var colours: Dictionary = _spec.get("colours", {})
 	var tuft_colours := _colours(colours.get("tuft", colours.get("scrub", ["6f7040"])))
 	var rock_colours := _colours(colours.get("rock", ["77736a"]))
+	var open := float(_spec.get("margin_m", 0.0)) > 0.0
 	for n in tufts + pebbles:
 		var pebble := n >= tufts
 		var x := x0 + rng.randf() * CELL_M
@@ -1100,6 +1153,8 @@ func _ground_cover(cell: Vector2i, groups: Dictionary) -> void:
 			continue
 		if not pebble and roll > clampf(_cluster.get_noise_2d(x * 3.0, z * 3.0) * 1.4 + 0.7, 0.15, 1.0):
 			continue  # tufts in patches
+		if open and roll > _open_weight(x, z):
+			continue  # an open pan's middle stays bare
 		if _ground_blocked(x, z):
 			continue
 		var h := _terrain.height_at(x, z)
@@ -1128,6 +1183,8 @@ func _ground_cover(cell: Vector2i, groups: Dictionary) -> void:
 		var stones := rng.randi_range(3, 7)
 		if absf(cx) > half - EDGE_KEEP_M or absf(cz) > half - EDGE_KEEP_M or _ground_blocked(cx, cz):
 			continue
+		if open and _open_weight(cx, cz) < 0.5:
+			continue  # rubble at the margins and round the compounds, not on the open pan
 		var ch := _terrain.height_at(cx, cz)
 		if (_terrain.sea_side >= 0 and ch < _terrain.sea_level + 0.5) or _terrain.normal_at(cx, cz).y < 0.6:
 			continue

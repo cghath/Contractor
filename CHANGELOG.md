@@ -11,6 +11,18 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### The salt flats stop glaring (Captain, 2026-10-14)
+
+#### Changed
+- The Salt flats zone ("this terrain is an actual eye sore": a near-white pan brighter than the
+  sky, meeting it at a hard line, nothing on it) is a grey-beige salt pan darker than the sky:
+  damp patches, crust polygons and tyre tracks near you, shallow damp channels, gentle swells,
+  mud, a berm and low rocky mesas round the edge, dead bushes, rocks and rubble at the margins
+  and round the compounds and roads (the middle of the pan stays open), a softer sun and lower
+  exposure, a warm horizon haze, and far ridges along the horizon. Other zones are unchanged.
+  Numbers in docs/terrain_presets.md (Proposed); the world suite checks the pan's brightness
+  against the sky, its relief and where its scatter goes.
+
 ### The red dot is a micro red dot's size (Captain, 2026-10-14)
 
 #### Fixed
