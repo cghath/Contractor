@@ -33,6 +33,8 @@ func _ready() -> void:
 	_test_command_menu()
 	_test_navigation()
 	await _test_follow()
+	await _test_formation_orders()
+	_test_distinct_cover()
 	await _test_senses()
 	await _test_buddy_carries_buddy()
 	await _test_contact()
@@ -112,7 +114,7 @@ func _test_command_menu() -> void:
 	_press(menu, KEY_QUOTELEFT)
 	_press(menu, KEY_1)
 	_press(menu, KEY_1)  # Move > Return to formation
-	squad.formation = "wedge"
+	squad.formation = Squad.DYNAMIC
 	check(not SquadAI.of(_ai("Golf")).hold_fire and SquadAI.of(_ai("Bravo")).order == Squad.Order.FOLLOW, "and back to open fire, in formation")
 
 
@@ -146,6 +148,70 @@ func _test_follow() -> void:
 	for s: Soldier in far:
 		print("    %s at %s, slot %s, %s" % [s.name, s.global_position, squad.follow_point(s), s.ai_status])
 	check(far.is_empty(), "the whole squad follows the lead through the gate into formation (%d not there)" % far.size())
+
+
+## Formation and spacing (Captain, 2026-10-14: "ai are bunching up after a while in mission",
+## then "so long as I can set them to be dynamic"): Dynamic picks tighter in a town than in the
+## open; a spacing order spreads the slots and is acknowledged; a fire team's own formation
+## order leaves the other team's alone; the HUD shows it.
+func _test_formation_orders() -> void:
+	print("Formation and spacing orders")
+	var squad := level.squad_for(&"friendly")
+	squad._update_context()
+	var town: Dictionary = squad.context.duplicate()
+	_place(player, Vector3(0, 0.1, 45))  # open ground north of the compound
+	squad._update_context()
+	var open: Dictionary = squad.context.duplicate()
+	check(town.spacing == "tight" and open.spacing == "normal" and float(Squad.SPACINGS[town.spacing].man) < float(Squad.SPACINGS[open.spacing].man),
+		"Dynamic: tighter in the town (%s, %s) than in the open (%s, %s)" % [town.spacing, town.why, open.spacing, open.why])
+	check(town.formation == "staggered column" and open.formation == "wedge", "a staggered column in the town, a wedge in the open (%s, %s)" % [town.formation, open.formation])
+	var alpha := _ai("Alpha")
+	var bravo := _ai("Bravo")
+	var before := _flat(squad.follow_point(alpha), squad.follow_point(bravo))
+	var said_from: int = level.callouts.sent.size()
+	check(squad.command(player, "spacing:wide", player.global_position), "Spacing > Wide is an order")
+	var wide := _flat(squad.follow_point(alpha), squad.follow_point(bravo))
+	check(squad.spacing == "wide" and wide > before * 1.3, "it spreads the slots (Alpha to Bravo %.1f m, was %.1f m)" % [wide, before])
+	var acks := level.callouts.sent.slice(said_from).filter(func(l: Dictionary) -> bool: return String(l.text).begins_with("Copy,") and String(l.text).contains("wide"))
+	check(not acks.is_empty(), "and is acknowledged (%s)" % [level.callouts.sent.slice(said_from).map(func(l: Dictionary) -> String: return String(l.text))])
+	check(not squad.command(player, "spacing:huge", player.global_position) and not squad.command(player, "formation:blob", player.global_position), "nonsense isn't an order")
+	var team_b := PackedStringArray()
+	for s: Soldier in _squad():
+		if s.fire_team == 1:
+			team_b.append(String(s.name))
+	check(squad.command(player, "formation:file", player.global_position, team_b), "team B alone: Formation > File")
+	check(squad.ordered_formation(1) == "file" and squad.ordered_formation(0) == Squad.DYNAMIC, "team B takes it, team A keeps its own (%s, %s)" % [squad.ordered_formation(1), squad.ordered_formation(0)])
+	var right := squad.heading.cross(Vector3.UP).normalized()
+	var across: Array = Array(team_b).map(func(n: String) -> float: return (squad.follow_point(_ai(n)) - player.global_position).dot(right))
+	check(across.max() - across.min() < 2.5, "team B's slots in single file (across %.1f m)" % (across.max() - across.min()))
+	await _seconds(0.3)
+	var echo := _ai("Echo")
+	check(echo.ai_status.contains("file") and alpha.ai_status.contains("dynamic"), "the squad HUD shows it (%s; %s)" % [echo.ai_status, alpha.ai_status])
+	check(squad.command(player, "formation:dynamic", player.global_position) and squad.command(player, "spacing:dynamic", player.global_position)
+		and squad.ordered_formation(1) == Squad.DYNAMIC and squad.ordered_spacing(0) == Squad.DYNAMIC, "the whole squad back to Dynamic clears team B's order")
+	_place(player, Vector3(0, 0.1, 12))
+	await _seconds(12.0)
+
+
+## No two squadmates pick the same cover from the same spot (Captain, 2026-10-14: they bunched up).
+func _test_distinct_cover() -> void:
+	print("Distinct cover")
+	var a := SquadAI.of(_ai("Alpha"))
+	var b := SquadAI.of(_ai("Bravo"))
+	var anchor := a.body.global_position
+	var threat := anchor + Vector3(0, 0, -15)
+	a.body.threat_pos = threat
+	b.body.threat_pos = threat
+	b._has_cover = false
+	a._has_cover = false
+	var first: Variant = a.find_cover(anchor, 10.0)
+	if first != null:
+		a._cover_point = first
+		a._has_cover = true
+	var second: Variant = b.find_cover(anchor, 10.0)
+	check(first != null and second != null and _flat(first, second) >= SquadAI.COVER_GAP_M,
+		"from the same spot, two squadmates take cover %.1f m apart" % (_flat(first, second) if first != null and second != null else -1.0))
+	a._has_cover = false
 
 
 ## The squad's senses and habits (Captain, 2026-10-12: they seemed a bit unintelligent):

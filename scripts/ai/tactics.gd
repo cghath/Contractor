@@ -92,6 +92,9 @@ const FLANK_FAR_M := 45.0
 const PLAN_SNAP_M := 4.0
 ## Following its lead, the squad's tactical moves stay this close to him.
 const FOLLOW_LEASH_M := 30.0
+## Proposed (Captain, 2026-10-14: they bunched up): the maneuver element's men each take their
+## own lane round the flank, this far apart side by side, instead of all running to one point.
+const LANE_GAP_M := 5.0
 ## The plan is drawn again when the cluster it's against has moved this far.
 const REPLAN_M := 8.0
 const ASSAULT_M := 35.0
@@ -104,7 +107,7 @@ const DEFEND_M := 20.0
 ## BREAK_BEHIND_LEAD_M behind the lead; pairs BREAK_SPREAD_M apart.
 const BREAK_M := 35.0
 const BREAK_BEHIND_LEAD_M := 10.0
-const BREAK_SPREAD_M := 2.5
+const BREAK_SPREAD_M := 5.0  # (was 2.5; Captain, 2026-10-14: they bunched up)
 ## Morale under MORALE_LOW and ammunition under AMMO_LOW (a share of AMMO_FULL_MAGS magazines)
 ## count against fighting on.
 const MORALE_LOW := 0.45
@@ -465,7 +468,7 @@ func _flank(units: Array[SquadAI], enemy: Vector3, aim: Vector3, id: String, now
 		_log_plan(now)
 	for ai in units:
 		if ai in plan.moving:
-			ai.set_task({"kind": &"maneuver", "route": plan.route, "aim": aim, "id": id})
+			ai.set_task({"kind": &"maneuver", "route": (plan.get("lanes", {}) as Dictionary).get(ai, plan.route), "aim": aim, "id": id})
 		else:
 			ai.set_task({"kind": &"base", "aim": aim, "id": id})
 
@@ -485,7 +488,30 @@ func _draw_flank(units: Array[SquadAI], enemy: Vector3, now: float) -> Dictionar
 		moving = []
 		_no_flank = {"enemy": enemy, "at": now}
 	_plan_at = now
-	return {"enemy": enemy, "names": names, "base": base, "moving": moving, "route": route.get("route", []), "side": route.get("side", "")}
+	var path: Array = route.get("route", [])
+	return {"enemy": enemy, "names": names, "base": base, "moving": moving, "route": path, "side": route.get("side", ""),
+		"lanes": lanes(moving, path)}
+
+
+## Each of `units` its own lane along `route`: the route moved sideways (across its start to end)
+## LANE_GAP_M apart, man by man, kept on the navmesh. {SquadAI: Array[Vector3]}.
+static func lanes(units: Array, route: Array) -> Dictionary:
+	var out := {}
+	if units.is_empty() or route.size() < 2:
+		return out
+	var along: Vector3 = route[route.size() - 1] - route[0]
+	along.y = 0.0
+	if along.length() < 0.5:
+		return out
+	var across := along.normalized().cross(Vector3.UP)
+	var map := (units[0] as SquadAI).body.get_world_3d().navigation_map
+	for i in units.size():
+		var shift := across * (i - (units.size() - 1) / 2.0) * LANE_GAP_M
+		var lane: Array[Vector3] = []
+		for p: Vector3 in route:
+			lane.append(NavigationServer3D.map_get_closest_point(map, p + shift))
+		out[units[i]] = lane
+	return out
 
 
 ## The drill's "[tactics]" line, when who does what changed since the last one (or PLAN_LOG_S on).

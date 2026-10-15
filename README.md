@@ -182,7 +182,7 @@ scripts/
   world/          VoxelWorld (10 cm destructible structures), CompoundLevel, NavBuilder, GearMarker, TargetDummy
   ui/             Menu (with role picker), InventoryScreen and ItemIcons (item previews), CommandMenu, InteractionMenu, Callouts
 data/             items.json, factions.json (placeholder), missions.json (placeholder)
-tests/            smoke, gameplay, squad, net, wounds, armor, movement, interaction, roles (headless), screenshot_tour
+tests/            smoke, gameplay, squad, spacing, net, wounds, armor, movement, interaction, roles (headless), screenshot_tour
 tools/            run_tests.sh, make_build.sh
 ```
 

@@ -49,7 +49,8 @@ const CLUSTER_M := 10.0
 ## crosshair ("suppress:known" suppresses the densest known cluster instead).
 const TACTIC_COMMANDS: Array[String] = ["suppress", "bound", "garrison", "clear", "take_cover", "fall_back"]
 
-## Follow positions in the leader's space (x right, +z behind), per formation.
+## Spawn positions in the leader's space (x right, +z behind), per formation (the squad's
+## first places; following uses formation slots, follow_point).
 const FORMATIONS := {
 	"wedge": [Vector3(-1.8, 0, 2.2), Vector3(1.8, 0, 2.6), Vector3(-3.4, 0, 4.4), Vector3(3.4, 0, 4.8),
 		Vector3(-5.0, 0, 6.6), Vector3(5.0, 0, 7.0), Vector3(0, 0, 6.0)],
@@ -61,10 +62,55 @@ const FORMATIONS := {
 		Vector3(-1.5, 0, 12.5), Vector3(1.5, 0, 15.0), Vector3(-1.5, 0, 17.5)],
 }
 
+## Formation and spacing (Captain, 2026-10-14, playtesting v0.3.1: "ai are bunching up after a
+## while in mission"; then "that sounds fantastic so long as I can set them to be dynamic").
+## Each fire team keeps its own formation slots (follow_point): the lead's team round the lead,
+## the other team round its own team leader, placed its spacing's "team" metres off. The
+## command menu sets a formation and a spacing for the squad or a fire team (set_formation);
+## DYNAMIC (the default) picks them from where the squad is (_update_context): a town tighter,
+## open ground wider, under fire wider still, low visibility a step tighter; a column on a
+## road, a staggered column in a town, a line in contact in the open, else a wedge.
+const DYNAMIC := "dynamic"
+## The formations a fire team can take (team_shape; "column" is two files side by side).
+const FORMATION_NAMES: Array[String] = ["wedge", "line", "column", "file", "staggered column"]
+## Proposed (Captain, 2026-10-14): metres between men in a fire team ("man"), and between the
+## fire teams ("team": centre to centre in a wedge; twice the gap behind the lead team in a
+## column). Open ground 6-12 m between men and 15-30 m between fire teams, a town 3-5 m.
+const SPACINGS := {
+	"tight": {"man": 4.0, "team": 12.0},
+	"normal": {"man": 8.0, "team": 20.0},
+	"wide": {"man": 12.0, "team": 28.0},
+}
+const SPACING_ORDER: Array[String] = ["tight", "normal", "wide"]
+## Dynamic (proposed): how often the squad looks at where it is; buildings within TOWN_M of
+## the lead make it a town (looked up on a TOWN_GRID_M grid, so a walk doesn't rescan every
+## step); road under the lead from ROAD_WEIGHT (ZoneTerrain.road_weight).
+const CONTEXT_S := 1.0
+const TOWN_M := 18.0
+const TOWN_GRID_M := 8.0
+const ROAD_WEIGHT := 0.5
+## The squad's heading (which way its formation faces) follows the lead's travel, not where
+## he looks: updated each time he has gone HEADING_STEP_M, by HEADING_BLEND of the new way.
+## A lead turning to look round no longer swings every slot through the squad. Proposed.
+const HEADING_STEP_M := 2.0
+const HEADING_BLEND := 0.5
+
 @export var faction := &"friendly"
 
 var leader: Soldier
-var formation := "wedge"
+## The squad's formation and spacing orders (DYNAMIC: chosen by context, the default), and
+## per fire team orders over them: {team: {"formation": String, "spacing": String}}.
+var formation := DYNAMIC
+var spacing := DYNAMIC
+var team_orders := {}
+## What DYNAMIC resolves to now (host, _update_context): {"formation", "spacing", "why"}.
+var context := {"formation": "wedge", "spacing": "normal", "why": "open ground"}
+## Flat unit direction the formation faces (see HEADING_STEP_M).
+var heading := Vector3.ZERO
+var _heading_from := Vector3.INF
+var _context_cd := 0.0
+var _slots := {}  # Soldier -> its formation slot, worked out once a physics frame
+var _slots_frame := -1
 ## Hostile squads: points to walk between when nothing is happening.
 var patrol: Array[Vector3] = []
 ## When a member was last fired upon (Soldier._now() seconds).
@@ -100,6 +146,11 @@ var _tactics_cd := 0.0
 func _physics_process(delta: float) -> void:
 	if not multiplayer.is_server():
 		return
+	_update_heading()
+	_context_cd -= delta
+	if _context_cd <= 0.0:
+		_context_cd = CONTEXT_S
+		_update_context()
 	_tactics_cd -= delta
 	if _tactics_cd > 0.0:
 		return
@@ -542,7 +593,8 @@ func _able(names: PackedStringArray) -> Array[SquadAI]:
 	return out
 
 
-## The command-menu commands with an argument: "formation:<name>", "target:<enemy name>"
+## The command-menu commands with an argument: "formation:<name>" and "spacing:<level>" (each
+## also "dynamic"), "target:<enemy name>"
 ## ("target:" clears it), "mode:<combat mode>" and "team:<colour>", and the tactic orders
 ## (TACTIC_COMMANDS) on `point`. False if the command or its argument isn't valid, or the
 ## order couldn't be given.
@@ -551,11 +603,9 @@ func command(from: Soldier, cmd: String, point: Vector3, names := PackedStringAr
 	var arg := parts[1] if parts.size() > 1 else ""
 	match parts[0]:
 		"formation":
-			if not FORMATIONS.has(arg):
-				return false
-			leader = from
-			formation = arg
-			return true
+			return set_formation(from, "formation", arg, names)
+		"spacing":
+			return set_formation(from, "spacing", arg, names)
 		"target":
 			return set_target(from, arg, names)
 		"escort":
@@ -664,10 +714,296 @@ func find_soldier(soldier_name: String) -> Soldier:
 	return null
 
 
-## Where `member` stands when following: its slot in the formation behind the leader.
+# --- Formation and spacing ----------------------------------------------------------------
+
+## Command menu "Formation" / "Spacing" (Captain, 2026-10-14: "so long as I can set them to be
+## dynamic"): `kind` "formation" (FORMATION_NAMES) or "spacing" (SPACINGS), each also DYNAMIC.
+## The named units' fire teams take it; the whole squad (or nobody named) sets the squad's own
+## and clears the fire teams' orders. It stands until changed. The named squadmate nearest the
+## one ordering acknowledges it ("Copy, wedge, wide"). False for a value that isn't one.
+func set_formation(from: Soldier, kind: String, value: String, names := PackedStringArray()) -> bool:
+	var allowed: Array = FORMATION_NAMES if kind == "formation" else (SPACINGS.keys() if kind == "spacing" else [])
+	if allowed.is_empty() or (value != DYNAMIC and value not in allowed):
+		return false
+	leader = from
+	var units := pick(names)
+	var teams := {}
+	for s in units:
+		teams[s.fire_team if s.fire_team >= 0 else 0] = true
+	var all_teams := {}
+	for s in members():
+		all_teams[s.fire_team if s.fire_team >= 0 else 0] = true
+	if names.is_empty() or teams.size() >= all_teams.size():
+		set(kind, value)
+		for t: int in team_orders.keys():
+			(team_orders[t] as Dictionary).erase(kind)
+	else:
+		for t: int in teams:
+			if not team_orders.has(t):
+				team_orders[t] = {}
+			team_orders[t][kind] = value
+	_slots_frame = -1
+	if not units.is_empty():
+		units.sort_custom(func(a: Soldier, b: Soldier) -> bool: return a.global_position.distance_to(from.global_position) < b.global_position.distance_to(from.global_position))
+		var who := units[0]
+		var callouts := Callouts.of(who)
+		var line := acknowledgement(who.fire_team)
+		if callouts:
+			callouts.say(who, &"tactic", line, "formation:" + line)
+	return true
+
+
+## The formation and spacing ordered for fire team `team` (its own order, else the squad's;
+## either may be DYNAMIC).
+func ordered_formation(team: int) -> String:
+	return String((team_orders.get(team, {}) as Dictionary).get("formation", formation))
+
+
+func ordered_spacing(team: int) -> String:
+	return String((team_orders.get(team, {}) as Dictionary).get("spacing", spacing))
+
+
+## What fire team `team` keeps now: {"formation", "spacing", "man", "team", "dynamic": bool}.
+func resolved(team: int) -> Dictionary:
+	var f := ordered_formation(team)
+	var sp := ordered_spacing(team)
+	var dynamic := f == DYNAMIC or sp == DYNAMIC
+	if f == DYNAMIC:
+		f = String(context.formation)
+	if sp == DYNAMIC:
+		sp = String(context.spacing)
+	var gaps: Dictionary = SPACINGS.get(sp, SPACINGS["normal"])
+	return {"formation": f, "spacing": sp, "man": float(gaps.man), "team": float(gaps.team), "dynamic": dynamic}
+
+
+## "Copy, wedge, wide"; a dynamic choice says so: "Copy, dynamic (wedge), wide".
+func acknowledgement(team: int) -> String:
+	var r := resolved(team)
+	var f := ordered_formation(team)
+	var sp := ordered_spacing(team)
+	return "Copy, %s, %s" % ["dynamic (%s)" % r.formation if f == DYNAMIC else f, "dynamic (%s)" % r.spacing if sp == DYNAMIC else sp]
+
+
+## The squad HUD's word on a following squadmate's formation: "wedge, wide", or "dynamic:
+## wedge, normal" when the squad picks either.
+func formation_text(team: int) -> String:
+	var r := resolved(team)
+	return "%s%s, %s" % ["dynamic: " if r.dynamic else "", r.formation, r.spacing]
+
+
+## The heading follows the lead's travel (HEADING_STEP_M); _update_context turns it to face the
+## enemy in contact.
+func _update_heading() -> void:
+	if leader == null or not is_instance_valid(leader) or not leader.is_inside_tree():
+		return
+	var at := leader.global_position
+	if heading == Vector3.ZERO or not _heading_from.is_finite():
+		var f := -leader.global_basis.z
+		f.y = 0.0
+		heading = f.normalized() if f.length() > 0.01 else Vector3.FORWARD
+		_heading_from = at
+		return
+	var moved := Vector3(at.x - _heading_from.x, 0.0, at.z - _heading_from.z)
+	if moved.length() >= HEADING_STEP_M:
+		var blended := heading.lerp(moved.normalized(), HEADING_BLEND)
+		heading = blended.normalized() if blended.length() > 0.3 else moved.normalized()  # (turned right round)
+		_heading_from = at
+
+
+## Dynamic: what the squad keeps where it is now (context). Spacing tight in a town, normal in
+## the open, wide in the open in contact, a step tighter in low visibility; a staggered column
+## in a town, a column on a road, a line in contact in the open, else a wedge. In contact the
+## formation faces the enemy.
+func _update_context() -> void:
+	if leader == null or not is_instance_valid(leader) or not leader.is_inside_tree():
+		return
+	var at := leader.global_position
+	var grid := Vector3(snappedf(at.x, TOWN_GRID_M), at.y, snappedf(at.z, TOWN_GRID_M))
+	var town := not Buildings.near(leader, grid, TOWN_M).is_empty()
+	var road := false
+	var level := CompoundLevel.current(leader)
+	var terrain: Variant = level.get(&"terrain") if level and &"terrain" in level else null
+	if terrain is Object and is_instance_valid(terrain) and (terrain as Object).has_method(&"road_weight"):
+		road = float(terrain.road_weight(at.x, at.z)) >= ROAD_WEIGHT
+	var contact := is_engaged()
+	var threat := Vector3.INF
+	for ai in brains():
+		if ai.in_contact():
+			contact = true
+			threat = ai.body.threat_pos
+			break
+	if contact:
+		var found := clusters()
+		if not found.is_empty():
+			threat = found[0].centre
+	var dark := _low_visibility()
+	var step := 0 if town else (2 if contact else 1)
+	if dark:
+		step = maxi(step - 1, 0)
+	var why := PackedStringArray(["town" if town else "open ground"])
+	if road and not town:
+		why.append("road")
+	if contact:
+		why.append("contact")
+	if dark:
+		why.append("low visibility")
+	_slots_frame = -1  # the slots change with it
+	context = {"formation": "staggered column" if town else ("line" if contact else ("column" if road else "wedge")),
+		"spacing": SPACING_ORDER[step], "why": ", ".join(why)}
+	if contact and threat.is_finite():
+		var to := Vector3(threat.x - at.x, 0.0, threat.z - at.z)
+		if to.length() > 1.0:
+			heading = to.normalized()
+			_heading_from = at
+
+
+## Low visibility (night, thick weather) closes the spacing up a step. The zones have no night
+## yet (day and night come with wave 7): a level with `low_visibility` set true gets it.
+func _low_visibility() -> bool:
+	var level := CompoundLevel.current(leader) if leader and leader.is_inside_tree() else null
+	if level == null or not &"low_visibility" in level:
+		return false
+	return bool(level.get(&"low_visibility"))
+
+
+## A fire team's formation in its own space (x right, +z behind, metres): man `k` (0, the team
+## leader, at the origin) with `gap` metres between men. Each man stands at least `gap` from
+## the others (Captain, 2026-10-14: they bunched up).
+static func team_shape(kind: String, k: int, gap: float) -> Vector3:
+	var side := -1.0 if k % 2 == 1 else 1.0  # odd to the left, even to the right
+	var depth := floorf((k + 1) / 2.0)
+	match kind:
+		"line":
+			return Vector3(side * depth * gap, 0.0, 0.0)
+		"file":
+			return Vector3(0.0, 0.0, k * gap)
+		"staggered column":
+			return Vector3((0.0 if k % 2 == 0 else -0.7) * gap, 0.0, k * 0.75 * gap)
+		"column":
+			return Vector3((0.0 if k % 2 == 0 else -1.0) * gap, 0.0, floorf(k / 2.0) * gap)
+	return Vector3(side * depth * 0.7 * gap, 0.0, depth * 0.7 * gap)  # wedge
+
+
+## Where the second fire team's leader stands in the lead's space, for formation `kind` with
+## `gap` between men and `team_gap` between the teams, `lead_count` men in the lead's team. A
+## wedge puts it back and to the right, a line beside it (its men out to the right), the
+## columns and files behind.
+static func team_offset(kind: String, gap: float, team_gap: float, lead_count: int) -> Vector3:
+	match kind:
+		"line":
+			return Vector3(2.0 * gap + maxf(team_gap * 0.5, gap), 0.0, 0.0)
+		"file", "staggered column", "column":
+			return Vector3(0.0, 0.0, team_shape(kind, maxi(lead_count - 1, 0), gap).z + maxf(team_gap * 0.5, gap))
+	return Vector3(0.6 * team_gap, 0.0, 0.8 * team_gap)
+
+
+## Where `member` stands when following: its own formation slot in its fire team (Captain,
+## 2026-10-14: they bunched up; before, all seven took one tight wedge within 7 m of the lead,
+## 2.5 m apart). The lead's team forms on the lead; the other team on its team leader (its
+## first man up, while he follows), who keeps his place off the lead (team_offset). Slots go by
+## squad slot, so a man keeps his place when another goes down, and lie on the navmesh.
 func follow_point(member: Soldier) -> Vector3:
 	if leader == null or not is_instance_valid(leader):
 		return member.global_position
-	var slots: Array = FORMATIONS.get(formation, FORMATIONS["wedge"])
-	var i := members().find(member)
-	return leader.global_transform * (slots[maxi(i, 0) % slots.size()] as Vector3)
+	var frame := Engine.get_physics_frames()
+	if frame != _slots_frame or not _slots.has(member):
+		_slots = _work_out_slots()
+		_slots_frame = frame
+	return _slots.get(member, member.global_position)
+
+
+## The squad as it stands this frame, the lead and players too (who squadmates keep apart from,
+## SquadAI._apart).
+func neighbours() -> Array:
+	if leader == null or not is_instance_valid(leader):
+		return members()
+	if Engine.get_physics_frames() != _slots_frame:
+		_slots = _work_out_slots()
+		_slots_frame = Engine.get_physics_frames()
+	return _slots.keys() + [leader]
+
+
+## Every member's formation slot now: {Soldier: Vector3}.
+func _work_out_slots() -> Dictionary:
+	var out := {}
+	if heading == Vector3.ZERO:
+		_update_heading()
+	var fwd := heading if heading != Vector3.ZERO else Vector3.FORWARD
+	var right := fwd.cross(Vector3.UP).normalized()
+	var lead_team := leader.fire_team if leader.fire_team >= 0 else 0
+	var everyone: Array[Soldier] = members()
+	for n in get_tree().get_nodes_in_group(&"combatants"):
+		var p := n as Soldier
+		if p and not p.is_ai() and p.faction == faction and p.squad_slot >= 0 and not p.is_queued_for_deletion() and not p.vitals.is_dead():
+			everyone.append(p)
+	if leader not in everyone:
+		everyone.append(leader)
+	var teams := {}  # team -> [Soldier], by squad slot (the lead first in his)
+	for s in everyone:
+		var t := s.fire_team if s.fire_team >= 0 else lead_team
+		if s == leader:
+			t = lead_team
+		if not teams.has(t):
+			teams[t] = []
+		(teams[t] as Array).append(s)
+	for t: int in teams:
+		var list: Array = teams[t]
+		list.sort_custom(func(a: Soldier, b: Soldier) -> bool:
+			if a.squad_slot != b.squad_slot:
+				return (a.squad_slot if a.squad_slot >= 0 else 99) < (b.squad_slot if b.squad_slot >= 0 else 99)
+			return String(a.name) < String(b.name))
+	(teams[lead_team] as Array).erase(leader)
+	(teams[lead_team] as Array).push_front(leader)
+	var lead_count: int = (teams[lead_team] as Array).size()
+	var map := leader.get_world_3d().navigation_map
+	var lead_r := resolved(lead_team)
+	var others: Array = teams.keys().filter(func(t: int) -> bool: return t != lead_team)
+	others.sort()
+	for t: int in [lead_team] + others:
+		var list: Array = teams[t]
+		var r := lead_r if t == lead_team else resolved(t)
+		var gap: float = r.man
+		var mirror := 1.0
+		var origin := leader.global_position
+		var guide: Soldier = null
+		if t != lead_team:
+			var place := team_offset(String(lead_r.formation), float(lead_r.man), float(lead_r.team), lead_count)
+			place.z += others.find(t) * float(lead_r.team) * 0.8  # a third team (more players' AI) further back
+			origin = leader.global_position + right * place.x - fwd * place.z
+			if String(lead_r.formation) == "line":
+				mirror = -1.0  # the second team's men out to the right, away from the lead's
+			if place.x != 0.0 and map.is_valid() and _flat(NavigationServer3D.map_get_closest_point(map, origin), origin) > gap:
+				# No ground there (the sea, a cliff, the map's edge): the other side, rather than
+				# the whole team on the one spot nearest it.
+				var other := leader.global_position - right * place.x - fwd * place.z
+				if _flat(NavigationServer3D.map_get_closest_point(map, other), other) < _flat(NavigationServer3D.map_get_closest_point(map, origin), origin):
+					origin = other
+					mirror = -mirror
+			for s: Soldier in list:
+				if s.vitals.is_up():
+					guide = s
+					break
+		var guide_k := list.find(guide)
+		var guide_ai := SquadAI.of(guide) if guide and guide.is_ai() else null
+		# The team forms on its own leader while he's with it (following, near his place).
+		var on_guide := guide_ai != null and guide_ai.intent == SquadAI.Intent.FOLLOW and _flat(guide.global_position, origin) < float(r.team)
+		var g_local := Vector3.ZERO
+		if guide != null:
+			g_local = team_shape(String(r.formation), guide_k, gap)
+			g_local.x *= mirror
+		for k in list.size():
+			var s: Soldier = list[k]
+			var local := team_shape(String(r.formation), k, gap)
+			local.x *= mirror
+			var base := origin
+			if guide != null:
+				local -= g_local
+				base = guide.global_position if on_guide and k != guide_k else origin
+			var p := base + right * local.x - fwd * local.z
+			out[s] = NavigationServer3D.map_get_closest_point(map, p) if map.is_valid() else p
+	out.erase(leader)
+	return out
+
+
+static func _flat(a: Vector3, b: Vector3) -> float:
+	return Vector2(a.x - b.x, a.z - b.z).length()
