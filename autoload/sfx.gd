@@ -168,8 +168,8 @@ func _play_everywhere(id: StringName, pos: Vector3) -> void:
 	play_at(id, pos)
 
 
-## Host only: a shot from `origin` whose round ended at `end`, of kind "rifle", "pistol" or
-## "suppressed", on every peer: the shot (near or far) and, for a listener the round passed
+## Host only: a shot from `origin` whose round ended at `end`, of kind "rifle", "pistol",
+## "suppressed" or "hmg" (a vehicle's heavy machine gun: Vehicle.server_fire_gun), on every peer: the shot (near or far) and, for a listener the round passed
 ## close to, a crack.
 func server_shot(origin: Vector3, end: Vector3, kind: String) -> void:
 	if multiplayer.has_multiplayer_peer() and multiplayer.is_server():

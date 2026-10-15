@@ -47,6 +47,8 @@ const MENU := {
 		{"key": "4", "label": "Mount", "items": [  # wave 5 (VehicleLayer); the full set is V4's
 			{"key": "1", "label": "Get in that vehicle", "cmd": "mount", "point": true},
 			{"key": "2", "label": "Get out", "cmd": "dismount"},
+			## Captain, 2026-10-15: a selected squadmate mans that vehicle's gun.
+			{"key": "3", "label": "Take the gun", "cmd": "take_gun", "point": true},
 		]},
 		{"key": "5", "label": "Status", "items": [
 			{"key": "1", "label": "Report status", "cmd": "report"},

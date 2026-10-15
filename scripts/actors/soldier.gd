@@ -837,9 +837,9 @@ func _server_squad_command(cmd: String, point: Vector3, names: PackedStringArray
 				_client_message.rpc_id(owner_peer(), why)
 		"scavenge_on", "scavenge_off":
 			squad.set_scavenge(self, cmd == "scavenge_on", names)
-		"mount", "dismount":  # wave 5: vehicles (VehicleLayer)
+		"mount", "dismount", "take_gun":  # wave 5: vehicles (VehicleLayer)
 			var layer := VehicleLayer.of(self)
-			var why := "No vehicles here" if layer == null else (layer.server_order_mount(self, point, names) if cmd == "mount" else layer.server_order_dismount(self, names))
+			var why := "No vehicles here" if layer == null else (layer.server_order_mount(self, point, names, cmd == "take_gun") if cmd != "dismount" else layer.server_order_dismount(self, names))
 			if why != "":
 				_client_message.rpc_id(owner_peer(), why)
 		"fire_launcher":  # wave 5: a squadmate with a launcher fires at the vehicle there, or the spot

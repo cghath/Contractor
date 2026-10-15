@@ -178,6 +178,10 @@ const EXIT_GAP_M := 0.7
 const EXIT_GRACE_S := 0.6
 ## Mounted guns: shots may arrive bunched up this much (network jitter) and still count.
 const GUN_BUNCH_S := 0.15
+## A door gun's arc (door_arc_ok): how far outwards a shot must point (its dot with the side:
+## 0.15, within about 80 degrees of square out) and how far up at most (sine: 30 degrees).
+const DOOR_ARC_OUT := 0.15
+const DOOR_ARC_UP := 0.5
 ## Interaction: how near a door or other point someone must be to use it (m).
 const USE_REACH_M := 4.0
 ## A wreck yields this when salvaged (Proposed).
@@ -254,7 +258,7 @@ var _state_left := 0.0
 var _state_dirty := false
 var _leak := 0.0             # litres a second
 var _fire_tick := 0.0
-var _gun_next := 0.0
+var _gun_next := {}          # host: gun seat -> when it may fire next
 var _run_over_at := {}          # soldier instance id -> time last run over
 var _pushed_at := {}             # host: player soldier instance id -> time last sent a push
 var _blocked_s := 0.0            # host: driven but held still against a body
@@ -369,6 +373,11 @@ func _ready() -> void:
 		contact_monitor = true
 		max_contacts_reported = 6
 		body_entered.connect(_on_body_entered)
+		## Captain, 2026-10-15 (v0.4.3 co-op): an AI squadmate in the M-ATV's gun seat (or a
+		## Black Hawk's door gun) never fired: only the support AAV and the QRF technical had an
+		## AI gunner. Every armed vehicle has one; it does nothing while no AI mans a gun.
+		if not gun_seats().is_empty():
+			AavGunner.attach(self)
 		if wrecked:
 			freeze_mode = RigidBody3D.FREEZE_MODE_STATIC
 			freeze = true
@@ -1918,16 +1927,46 @@ func _tell(actor: Soldier, text: String) -> void:
 
 # --- Mounted gun ----------------------------------------------------------------------------------
 
-## The gunner seat's weapon: {"id", "name", "feed", "rounds" (in the hold)} or {} if none fires.
-func gun_info() -> Dictionary:
+## The seats that fire a gun: the main gun's ("gun" "seat") and any seat with its own "weapon"
+## (Captain, 2026-10-15: the UH-60M's crew chief and door gunner man M240H door guns).
+func gun_seats() -> Array[int]:
+	var out: Array[int] = []
+	var main := _main_gun_seat()
+	if main >= 0:
+		out.append(main)
+	var defs: Array = spec.get("seats", [])
+	for i in defs.size():
+		if (defs[i] as Dictionary).has("weapon") and not i in out:
+			out.append(i)
+	return out
+
+
+## The weapon id seat `seat` fires ("" if none).
+func seat_gun(seat: int) -> String:
+	if seat >= 0 and seat == _main_gun_seat():
+		return String((spec.gun as Dictionary).weapon)
+	var defs: Array = spec.get("seats", [])
+	return String((defs[seat] as Dictionary).get("weapon", "")) if seat >= 0 and seat < defs.size() else ""
+
+
+## The main gun's seat, or -1.
+func _main_gun_seat() -> int:
 	var g: Dictionary = spec.get("gun", {})
-	if g.is_empty() or not g.has("weapon"):
-		return {}
-	var data := VehicleSpecs.gun(String(g.weapon))
+	return int(g.get("seat", -1)) if g.has("weapon") else -1
+
+
+## A gun seat's weapon (the main gun's when `seat` is -1): {"id", "name", "feed", "seat",
+## "rounds" (in the hold), "rpm", "sound"} or {} if none fires.
+func gun_info(seat := -1) -> Dictionary:
+	if seat < 0:
+		seat = _main_gun_seat()
+	var id := seat_gun(seat)
+	var data := VehicleSpecs.gun(id) if id != "" else {}
 	if data.is_empty():
 		return {}
-	return {"id": String(g.weapon), "name": String(data.name), "feed": StringName(data.feed), "seat": int(g.seat),
-		"rounds": cargo_hold.feed_rounds(StringName(data.feed)) if cargo_hold else 0, "rpm": float(data.get("rpm", 600))}
+	return {"id": id, "name": String(data.name), "feed": StringName(data.feed), "seat": seat,
+		"rounds": cargo_hold.feed_rounds(StringName(data.feed)) if cargo_hold else 0, "rpm": float(data.get("rpm", 600)),
+		"sound": String(data.get("sound", "rifle"))}
 
 
 ## Host: the mounted gun's feed in the hold topped up to its "load" (data/vehicles.json "guns":
@@ -1935,15 +1974,23 @@ func gun_info() -> Dictionary:
 ## Captain, 2026-10-14: the pool M-ATV came out with its M2 on 0 rounds (a new pool vehicle's
 ## record has no cargo, and nothing refilled one): MotorPool rearms a vehicle as it deploys and
 ## as it comes home. Returns the gun's rounds in the hold now.
+## Every gun's feed is topped up (two door guns on one feed: both loads).
 func server_rearm() -> int:
-	var info := gun_info()
-	if info.is_empty() or cargo_hold == null:
-		return int(info.get("rounds", 0))
-	var feed: StringName = info.feed
+	var wants := {}
+	for seat in gun_seats():
+		var g := gun_info(seat)
+		if not g.is_empty():
+			wants[g.feed] = int(wants.get(g.feed, 0)) + int(VehicleSpecs.gun(String(g.id)).get("load", 0))
+	if cargo_hold:
+		for feed: StringName in wants:
+			_rearm_feed(feed, int(wants[feed]))
+	return int(gun_info().get("rounds", 0))
+
+
+func _rearm_feed(feed: StringName, want: int) -> void:
 	var item := ItemDB.get_item(feed)
-	var want := int(VehicleSpecs.gun(String(info.id)).get("load", 0))
 	if item == null or want <= 0:
-		return int(info.rounds)
+		return
 	var per := item.magazine_rounds()
 	if per > 0:
 		var full := 0
@@ -1960,11 +2007,14 @@ func server_rearm() -> int:
 			cargo_hold.take(feed, want - full)
 	elif cargo_hold.count_of(feed) < want:
 		cargo_hold.take(feed, want - cargo_hold.count_of(feed))
-	return cargo_hold.feed_rounds(feed)
 
 
-## Where the gun's rounds start (world): its muzzle ("gun" "at"), where the turret has it now.
-func gun_origin() -> Vector3:
+## Where the gun's rounds start (world): its muzzle ("gun" "at"), where the turret has it now;
+## a door gun's at its seat's "gun_at".
+func gun_origin(seat := -1) -> Vector3:
+	if seat >= 0 and seat != _main_gun_seat():
+		var def: Dictionary = spec.seats[seat]
+		return global_transform * VehicleSpecs.vec(def.get("gun_at", def.at))
 	if turret:
 		return global_transform * turret.muzzle_local()
 	return global_transform * VehicleSpecs.vec((spec.get("gun", {}) as Dictionary).get("at"), Vector3(0, 2, 0))
@@ -1982,9 +2032,23 @@ func server_aim(direction: Vector3) -> void:
 		turret.aim_local(global_basis.inverse() * direction)
 
 
-## Whether the barrel points within `within_deg` of `direction` (world); true on a fixed gun.
-func gun_on(direction: Vector3, within_deg := VehicleTurret.ON_TARGET_DEG) -> bool:
+## Whether the barrel points within `within_deg` of `direction` (world); true on a fixed gun;
+## a door gun: whether `direction` is in its arc (door_arc_ok).
+func gun_on(direction: Vector3, within_deg := VehicleTurret.ON_TARGET_DEG, seat := -1) -> bool:
+	if seat >= 0 and seat != _main_gun_seat():
+		return door_arc_ok(seat, direction)
 	return turret == null or turret.on_target(global_basis.inverse() * direction, within_deg)
+
+
+## A door gun fires out of its own side only (outwards from its seat's "gun_at" side, never
+## back through the cabin), and from well below level to a little above it.
+func door_arc_ok(seat: int, direction: Vector3) -> bool:
+	if direction.length_squared() < 0.000001:
+		return false
+	var def: Dictionary = spec.seats[seat]
+	var side := signf(VehicleSpecs.vec(def.get("gun_at", def.at)).x)
+	var local := (global_basis.inverse() * direction).normalized()
+	return local.x * side >= DOOR_ARC_OUT and local.y <= DOOR_ARC_UP
 
 
 ## The gunner's peer: where it wants the turret (the vehicle's frame, radians).
@@ -2041,7 +2105,7 @@ func gun_direction(viewer: Soldier) -> Vector3:
 	if cam == null or not cam.active:
 		return -viewer.camera.global_basis.z
 	var fwd := -cam.global_basis.z
-	var to := cam.aim_point() - gun_origin()
+	var to := cam.aim_point() - gun_origin(seat_of(viewer))
 	if to.length() < 1.0 or to.normalized().dot(fwd) < 0.2:
 		return fwd  # the crosshair on something at the gun itself, or behind it: along the view
 	return to.normalized()
@@ -2051,35 +2115,48 @@ func gun_direction(viewer: Soldier) -> Vector3:
 @rpc("any_peer", "call_local", "reliable")
 func request_gun(direction: Vector3) -> void:
 	var actor := _sender()
-	if multiplayer.is_server() and actor and actor.vitals.is_up() and gunner() == actor and Soldier.usable_direction(direction):
+	if multiplayer.is_server() and actor and actor.vitals.is_up() and seat_of(actor) in gun_seats() and Soldier.usable_direction(direction):
 		server_fire_gun(actor, direction)
 
 
 ## Host: one shot of the mounted gun by `shooter` along `direction` (its rate kept, a round
 ## drawn from the hold); a turret's along its barrel, whatever `direction` says. Returns
 ## Ballistics' result, or {} if it didn't fire.
+## The shooter's own gun seat fires (a door gun: along `direction`, within its arc); someone
+## not in a gun seat (tests, scripted fire) fires the main gun.
 func server_fire_gun(shooter: Soldier, direction: Vector3) -> Dictionary:
-	var info := gun_info()
+	var seat := seat_of(shooter)
+	if not seat in gun_seats():
+		seat = _main_gun_seat()
+	var info := gun_info(seat)
 	if info.is_empty() or wrecked:
 		return {}
+	var main := seat == _main_gun_seat()
+	if not main and not door_arc_ok(seat, direction):
+		return {}
 	var now := Soldier._now()
-	if now < _gun_next:
+	var next := float(_gun_next.get(seat, 0.0))
+	if now < next:
 		return {}
 	var item := VehicleSpecs.gun_item(info.id)
-	_gun_next = maxf(_gun_next, now - GUN_BUNCH_S) + 60.0 / float(info.rpm)
+	_gun_next[seat] = maxf(next, now - GUN_BUNCH_S) + 60.0 / float(info.rpm)
 	if not cargo_hold.take_feed(info.feed):
 		_tell(shooter, "%s: no ammunition in the %s" % [info.name, display_name()])
 		return {}
-	var origin := gun_origin()
+	var origin := gun_origin(seat)
 	var spread := deg_to_rad(float(item.stats.get("spread_deg", 0.3)))
 	# A turret's rounds go where its barrel points (the gunner turns it: request_aim, server_aim).
-	var dir := barrel_direction() if turret else direction.normalized()
+	var dir := barrel_direction() if turret and main else direction.normalized()
 	var side := dir.cross(Vector3.UP).normalized() if absf(dir.y) < 0.99 else Vector3.RIGHT
 	var lift := side.cross(dir).normalized()
 	dir = (dir + side * randf_range(-1, 1) * tan(spread) + lift * randf_range(-1, 1) * tan(spread)).normalized()
 	if shooter:
 		shooter.server_end_spawn_protection()  # firing ends spawn protection (Soldier)
 	var result := Ballistics.fire(shooter, origin, dir, item)
+	## Captain, 2026-10-15 (v0.4.3): the .50 cal made no sound: mounted guns never called Sfx.
+	## Every peer hears each shot (the gun's "sound": "hmg" for the heavy guns, else a rifle's).
+	var round_end: Variant = result.get("position")
+	Sfx.server_shot(origin, round_end if round_end is Vector3 else origin + dir * 400.0, String(info.sound))
 	var lvl := level()
 	if lvl:
 		PeopleLayer.server_noise(shooter, origin)
@@ -2117,7 +2194,7 @@ func _local_controls(delta: float) -> void:
 			_send_left = 0.1
 			request_drive.rpc_id(1, throttle, steer, brake)
 	elif k == GUNNER and free and Input.is_action_pressed(&"fire"):
-		var info := gun_info()
+		var info := gun_info(seat)
 		if not info.is_empty() and Soldier._now() >= _gun_local_next:
 			_gun_local_next = Soldier._now() + 60.0 / float(info.rpm)
 			request_gun.rpc_id(1, gun_direction(me))
@@ -2141,7 +2218,7 @@ func readout_parts(seat: int) -> Array[Dictionary]:
 		if h < 0.999:
 			parts.append({"text": "%s %d%%" % [VehicleService.zone_name(z, kind).capitalize(), roundi(h * 100.0)], "style": &"warn" if h < 0.35 else &""})
 	if seat_kind(seat) == GUNNER:
-		var info := gun_info()
+		var info := gun_info(seat)
 		if not info.is_empty():
 			parts.append({"text": "%s: %d rounds" % [info.name, int(info.rounds)], "style": &""})
 	if is_burning():
