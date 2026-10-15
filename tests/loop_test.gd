@@ -356,7 +356,7 @@ func _mission(type: String) -> String:
 	else:
 		check(pay > 0 and ledger_has, "pay credited: $%s (completion $%s + bonuses %s), in the ledger" % [
 			DebriefCalc.money(pay), DebriefCalc.money(line.get("completion", 0)), (line.get("bonuses", []) as Array).map(func(b: Dictionary) -> String: return "%s $%s" % [b.text, DebriefCalc.money(b.amount)])])
-	check(Economy.cash() == cash_before + int(debrief.totals.paid_now) - bills[0],
+	check(Economy.cash() == cash_before + int(debrief.totals.paid_now) - bills[0] - (debrief.expenses as Array).reduce(func(a: int, l: Dictionary) -> int: return a + (int(l.amount) if bool(l.charge) else 0), 0),
 		"the bank moved by what the debrief paid ($%s, bills $%s)" % [DebriefCalc.money(debrief.totals.paid_now), DebriefCalc.money(bills[0])])
 	check(Contracts.history().any(func(h: Dictionary) -> bool: return h.cid == cid and h.outcome == "completed"), "the contract closes as completed in the history")
 	if not stow.is_empty():

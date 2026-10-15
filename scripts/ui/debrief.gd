@@ -168,10 +168,18 @@ func _header(d: Dictionary) -> void:
 	_stat(stats, "Paid now", "$" + DebriefCalc.money(totals.get("paid_now", 0)))
 	_stat(stats, "Fines", ("-$" + DebriefCalc.money(d.get("fines", 0))) if int(d.get("fines", 0)) > 0 else "none")
 	_stat(stats, "Days", str(int(d.get("days", 0))))
+	if d.has("expenses_total"):
+		_stat(stats, "Expenses", "-$" + DebriefCalc.money(d.expenses_total))
+		_stat(stats, "Net after expenses", "$" + DebriefCalc.money(d.get("net", 0)))
 	_line("Got out: %s" % ", ".join(PackedStringArray(d.get("extracted", []))) if not (d.get("extracted", []) as Array).is_empty() else "Got out: (not reported)")
 	var casualties: Array = d.get("casualties", [])
 	_line("Casualties and injuries: %s" % ("none" if casualties.is_empty() else ", ".join(PackedStringArray(casualties.map(func(c: Dictionary) -> String:
 		return "%s (%s%s)" % [c.get("name", "?"), String(c.get("status", "")).to_upper(), ": " + String(c.injury) if String(c.get("injury", "")) != "" else ""])))))
+	if d.has("expenses_total") and _section("expenses", "WHERE THE MONEY WENT: -$%s" % DebriefCalc.money(d.expenses_total), 15):
+		for l: Dictionary in d.get("expenses", []):
+			_line("  %s: -$%s" % [l.what, DebriefCalc.money(l.amount)], 14)
+		var bill := Economy.weekly_bill()
+		_line("  Next weekly bill: $%s in %d days (wages $%s, upkeep $%s)" % [DebriefCalc.money(bill.total), Economy.days_to_bill(), DebriefCalc.money(bill.wages), DebriefCalc.money(bill.upkeep)], 14)
 	if _section("details", "Contract details, pay and reputation", 15):
 		for l: String in DebriefCalc.summary(d):
 			_line(l, 14)
