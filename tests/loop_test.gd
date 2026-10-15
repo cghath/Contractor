@@ -42,6 +42,17 @@ var results := {}
 var _team: Array[String] = []  # hired member ids
 var _mia := ""                  # the member left behind on the raid
 var _failures_at_start := 0
+## The launch watch (CI run 38666966001: the player was 1420 m up at the hostage rescue's
+## landing zone, a moment after being put on the ground there; he had stood on a dead guard's
+## forearm, and move_and_slide took that limb's spin times the 1 km he was moved as his
+## velocity, SoldierMovement._slide): anyone in a zone, outside a vehicle, higher than LAUNCH_M
+## above the ground at any tick is a body thrown or put where nobody can be. The first time
+## each one is, by instance id -> what was seen.
+const LAUNCH_M := 50.0
+var _launched := {}
+## Each body's position on the tick before (instance id -> Vector3): a launch or a teleport.
+var _last_at := {}
+var _mission_type := ""
 
 
 func _ready() -> void:
@@ -62,7 +73,11 @@ func _ready() -> void:
 			if only != "" and type not in only.split(","):
 				continue
 			_failures_at_start = failures
+			var launched_before := _launched.size()
 			var why: String = await _mission(type)
+			var thrown: Array = _launched.values().slice(launched_before)
+			check(thrown.is_empty(), "%s: nobody outside a vehicle was ever more than %d m above the ground (%s)" % [
+				type, int(LAUNCH_M), "; ".join(PackedStringArray(thrown)) if not thrown.is_empty() else "none"])
 			if why == "" and failures > _failures_at_start:
 				why = "%d check(s) failed" % (failures - _failures_at_start)
 			results[type] = "completed end to end" if why == "" else why
@@ -74,6 +89,31 @@ func _ready() -> void:
 	_cleanup()
 	print("LOOP TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
+
+
+## The launch watch, every physics tick in a zone: everyone outside a vehicle, up or down.
+func _physics_process(_delta: float) -> void:
+	var zone: ZoneLevel = level as ZoneLevel if is_instance_valid(level) else null
+	if zone == null or not zone.is_inside_tree() or zone.terrain == null:
+		_last_at.clear()
+		return
+	for group in [&"combatants", Soldier.DEAD_GROUP]:
+		for node in get_tree().get_nodes_in_group(group):
+			var s := node as Soldier
+			if s == null or s.is_queued_for_deletion():
+				continue
+			var key := s.get_instance_id()
+			var at := s.global_position
+			var before: Vector3 = _last_at.get(key, at)
+			_last_at[key] = at
+			if is_instance_valid(s.vehicle) or _launched.has(key):
+				continue
+			var above := at.y - zone.ground_height(at.x, at.z)
+			if above > LAUNCH_M:
+				_launched[key] = "%s %.0f m above the ground at (%.0f, %.1f, %.0f) in %s (the tick before at (%.0f, %.1f, %.0f), velocity %s%s)" % [
+					s.log_name(), above, at.x, at.y, at.z, _mission_type, before.x, before.y, before.z, s.velocity,
+					", ragdoll" if is_instance_valid(s.ragdoll) else ""]
+				print("  [info] launched: %s" % _launched[key])
 
 
 func check(condition: bool, what: String) -> void:
@@ -221,6 +261,7 @@ func _world_item(id: StringName) -> WorldItem:
 ## Runs mission `type` through the loop. Returns "" or what broke.
 func _mission(type: String) -> String:
 	print("Mission: %s" % type)
+	_mission_type = type
 	var heli := type == "heli"
 	var squad := _squad_for(type)
 	if squad.is_empty():
