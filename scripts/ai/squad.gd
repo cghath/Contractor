@@ -96,6 +96,23 @@ const HEADING_STEP_M := 2.0
 ## A slot behind a wall from where its team forms comes this far back off the wall (_this_side).
 const WALL_CLEAR_M := 1.0
 const SIDE_HOLD_S := 2.0
+## A slot across a wall from where its team forms, on the lead, or on another slot is picked
+## again on open ground (_refit): the other side, else back along the lead's trail. Captain,
+## 2026-10-15 (v0.4.3, harbour_yard): beside a long wall every wall-side slot was pulled back
+## along one diagonal to the same spot, so the squad piled into a line on the wall and one man
+## stood in the player. A re-picked slot keeps SLOT_APART_MULT of the gap (at least
+## SLOT_APART_MIN_M) from every other slot and LEAD_CLEAR_M from the lead and the players.
+const SLOT_APART_MIN_M := 2.0
+const SLOT_APART_MULT := 0.75
+const LEAD_CLEAR_M := 2.0
+## Two kept slots closer than this: the later one is picked again.
+const SLOT_STACK_M := 1.5
+## The lead's trail (where he walked, so ground a man can stand on, on this side of every
+## wall): a point each TRAIL_STEP_M, the last TRAIL_MAX of them; a jump of more than
+## TRAIL_JUMP_M (a respawn, a ride, a new lead) starts it over.
+const TRAIL_STEP_M := 1.0
+const TRAIL_MAX := 90
+const TRAIL_JUMP_M := 6.0
 const HEADING_BLEND := 0.5
 
 @export var faction := &"friendly"
@@ -114,7 +131,9 @@ var _heading_from := Vector3.INF
 var _context_cd := 0.0
 var _slots := {}  # Soldier -> its formation slot, worked out once a physics frame
 var _slots_frame := -1
-var _sides := {}  # slot key -> {"pulled", "since", "offset"} (_this_side)
+var _sides := {}  # slot key -> {"pulled", "since"} (_blocked)
+var _trail := PackedVector3Array()  # the lead's trail, oldest first (_update_trail)
+var _refits := {}  # soldier instance id -> his last re-pick {"kind": "mirror"/"trail", "s": metres back}
 ## Hostile squads: points to walk between when nothing is happening.
 var patrol: Array[Vector3] = []
 ## When a member was last fired upon (Soldier._now() seconds).
@@ -151,6 +170,7 @@ func _physics_process(delta: float) -> void:
 	if not multiplayer.is_server():
 		return
 	_update_heading()
+	_update_trail()
 	_context_cd -= delta
 	if _context_cd <= 0.0:
 		_context_cd = CONTEXT_S
@@ -962,6 +982,7 @@ func _work_out_slots() -> Dictionary:
 	var map := leader.get_world_3d().navigation_map
 	var lead_r := resolved(lead_team)
 	var others: Array = teams.keys().filter(func(t: int) -> bool: return t != lead_team)
+	var slots: Array[Dictionary] = []  # every man's wanted slot, in team and squad-slot order
 	others.sort()
 	for t: int in [lead_team] + others:
 		var list: Array = teams[t]
@@ -983,7 +1004,16 @@ func _work_out_slots() -> Dictionary:
 				if _flat(NavigationServer3D.map_get_closest_point(map, other), other) < _flat(NavigationServer3D.map_get_closest_point(map, origin), origin):
 					origin = other
 					mirror = -mirror
-			origin = _this_side(leader.global_position, origin, t)
+			if _blocked(leader.global_position, origin, "team%d" % t):
+				# Its place is across a wall: the other side if that's clear, else back on the
+				# lead's trail about as far as the place is behind him.
+				var flip := leader.global_position - right * place.x - fwd * place.z
+				if place.x != 0.0 and not _wall_between(leader.global_position, flip):
+					origin = flip
+					mirror = -mirror
+				else:
+					var back: Variant = _trail_point(maxf(place.z, place.length() * 0.5))
+					origin = back if back != null else _pulled(leader.global_position, origin)
 			for s: Soldier in list:
 				if s.vitals.is_up():
 					guide = s
@@ -1001,45 +1031,157 @@ func _work_out_slots() -> Dictionary:
 			g_local.x *= mirror
 		for k in list.size():
 			var s: Soldier = list[k]
+			if s == leader:
+				continue
 			var local := team_shape(String(r.formation), k, gap)
 			local.x *= mirror
 			var base := origin
 			if guide != null:
 				local -= g_local
 				base = guide.global_position if on_guide and k != guide_k else origin
-			var p := _this_side(base, base + right * local.x - fwd * local.z, s)
-			out[s] = NavigationServer3D.map_get_closest_point(map, p) if map.is_valid() else p
+			var want := base + right * local.x - fwd * local.z
+			slots.append({"who": s, "base": base, "want": want, "gap": gap, "blocked": _blocked(base, want, s)})
+	# The lead and the players stand where they stand: nobody's slot on them.
+	var people: Array[Vector3] = [leader.global_position]
+	for s in everyone:
+		if s != leader and not s.is_ai():
+			people.append(s.global_position)
+	var taken: Array[Vector3] = []
+	var refit: Array[Dictionary] = []
+	for e: Dictionary in slots:
+		var p: Vector3 = e.want
+		if e.blocked or _near_any(p, people, LEAD_CLEAR_M) or _near_any(p, taken, SLOT_STACK_M):
+			refit.append(e)
+			continue
+		_refits.erase((e.who as Soldier).get_instance_id())
+		taken.append(p)
+		out[e.who] = p
+	for e: Dictionary in refit:
+		var p := _refit(e, right, fwd, people, taken)
+		taken.append(p)
+		out[e.who] = p
+	for s: Soldier in out:
+		var p: Vector3 = out[s]
+		out[s] = NavigationServer3D.map_get_closest_point(map, p) if map.is_valid() else p
 	out.erase(leader)
 	return out
 
 
-## `to`, or with a wall or building between it and `from` (where its team forms), the near side
-## of that: a slot is never across a wall from the lead (Captain, 2026-10-14: with wider
-## spacing, slots fell inside compounds the lead walked past, and men went round for them).
-## Each slot (`key`) keeps its side for SIDE_HOLD_S: walking past a doorway, the line through it
-## opens and shuts, and a slot flipping between the room and the near side of its wall had a
-## man running in and out (casualty soak, Charlie in the compound's building).
-func _this_side(from: Vector3, to: Vector3, key: Variant) -> Vector3:
+## A slot picked again on open ground (SLOT_APART_MIN_M above): its mirror across the team's
+## line if nothing stands between it and where the team forms (`e.base`), else the first point
+## back along the lead's trail from about as far back as the slot was, clear of the lead, the
+## players and the other slots. Each man keeps his last pick while it still does, so a slot
+## doesn't hop between the two. Past the trail's end (the lead has only just set off): the near
+## side of the wall, as before, but never on the lead.
+func _refit(e: Dictionary, right: Vector3, fwd: Vector3, people: Array[Vector3], taken: Array[Vector3]) -> Vector3:
+	var who: Soldier = e.who
+	var base: Vector3 = e.base
+	var want: Vector3 = e.want
+	var apart := maxf(SLOT_APART_MIN_M, SLOT_APART_MULT * float(e.gap))
+	var id := who.get_instance_id()
+	var was: Dictionary = _refits.get(id, {})
+	var ok := func(p: Vector3) -> bool:
+		return not _near_any(p, people, LEAD_CLEAR_M) and not _near_any(p, taken, apart)
+	var side := (want - base).dot(right)
+	var mirrored := want - right * (2.0 * side)
+	var mirror_ok := bool(e.blocked) and absf(side) > 0.5
+	if String(was.get("kind", "")) == "trail":
+		var held: Variant = _trail_point(float(was.s))
+		if held != null and ok.call(held):
+			return held
+	if mirror_ok and ok.call(mirrored) and not _wall_between(base, mirrored):
+		_refits[id] = {"kind": "mirror"}
+		return mirrored
+	var from := maxf(_flat(leader.global_position, want), apart)
+	var step := 0.0
+	while step < 40.0:
+		var p: Variant = _trail_point(from + step)
+		if p == null:
+			break
+		if ok.call(p):
+			_refits[id] = {"kind": "trail", "s": from + step}
+			return p
+		step += TRAIL_STEP_M
+	_refits.erase(id)
+	var pulled := _pulled(base, want) if bool(e.blocked) else want
+	if _near_any(pulled, people, LEAD_CLEAR_M):
+		pulled = leader.global_position - fwd * maxf(apart, LEAD_CLEAR_M)  # never on the lead
+	return pulled
+
+
+static func _near_any(p: Vector3, points: Array[Vector3], within: float) -> bool:
+	for q in points:
+		if _flat(p, q) < within:
+			return true
+	return false
+
+
+## The lead's trail: where he has walked, a point each TRAIL_STEP_M (the last TRAIL_MAX).
+func _update_trail() -> void:
+	if leader == null or not is_instance_valid(leader) or not leader.is_inside_tree():
+		return
+	var at := leader.global_position
+	if not _trail.is_empty():
+		var last := _trail[_trail.size() - 1]
+		var d := _flat(last, at)
+		if d > TRAIL_JUMP_M or absf(last.y - at.y) > TRAIL_JUMP_M:
+			_trail.clear()
+		elif d < TRAIL_STEP_M:
+			return
+	_trail.append(at)
+	if _trail.size() > TRAIL_MAX:
+		_trail.remove_at(0)
+
+
+## The point `metres` back along the lead's trail from where he stands now, or null past its end.
+func _trail_point(metres: float) -> Variant:
+	if leader == null or not is_instance_valid(leader):
+		return null
+	var at := leader.global_position
+	var left := metres
+	for i in range(_trail.size() - 1, -1, -1):
+		var p := _trail[i]
+		var seg := _flat(at, p)
+		if seg >= left and seg > 0.001:
+			return at.lerp(p, left / seg)
+		left -= seg
+		at = p
+	return null
+
+
+## Whether a wall or building stands between `from` (where a team forms) and `to` (a slot): a
+## slot is never across a wall from the lead (Captain, 2026-10-14: with wider spacing, slots
+## fell inside compounds the lead walked past, and men went round for them). Each slot (`key`)
+## keeps its answer for SIDE_HOLD_S: walking past a doorway, the line through it opens and
+## shuts, and a slot flipping between the room and this side of its wall had a man running in
+## and out (casualty soak, Charlie in the compound's building).
+func _blocked(from: Vector3, to: Vector3, key: Variant) -> bool:
 	var now := Soldier._now()
+	var blocked := _wall_between(from, to)
 	var was: Dictionary = _sides.get(key, {})
-	var pulled := false
-	var point := to
-	if from.distance_to(to) >= 0.5:
-		var query := PhysicsRayQueryParameters3D.create(from + Vector3.UP, to + Vector3.UP, SquadAI.WORLD_MASK)
-		var hit := leader.get_world_3d().direct_space_state.intersect_ray(query)
-		if not hit.is_empty():
-			pulled = true
-			var back := Vector3(from.x - to.x, 0.0, from.z - to.z).normalized()
-			var at: Vector3 = hit.position
-			point = Vector3(at.x, to.y, at.z) + back * WALL_CLEAR_M
-	if was.is_empty() or bool(was.pulled) == pulled or now - float(was.since) >= SIDE_HOLD_S:
-		if was.is_empty() or bool(was.pulled) != pulled:
-			was = {"pulled": pulled, "since": now}
-		was.offset = point - from
-		_sides[key] = was
-		return point
-	# Held to the side it was on.
-	return from + (was.offset as Vector3) if bool(was.pulled) else to
+	if was.is_empty() or bool(was.pulled) == blocked or now - float(was.since) >= SIDE_HOLD_S:
+		if was.is_empty() or bool(was.pulled) != blocked:
+			_sides[key] = {"pulled": blocked, "since": now}
+		return blocked
+	return bool(was.pulled)  # held to the side it was on
+
+
+func _wall_between(from: Vector3, to: Vector3) -> bool:
+	if from.distance_to(to) < 0.5:
+		return false
+	var query := PhysicsRayQueryParameters3D.create(from + Vector3.UP, to + Vector3.UP, SquadAI.WORLD_MASK)
+	return not leader.get_world_3d().direct_space_state.intersect_ray(query).is_empty()
+
+
+## The near side of whatever stands between `from` and `to`, WALL_CLEAR_M off it (or `to`).
+func _pulled(from: Vector3, to: Vector3) -> Vector3:
+	var query := PhysicsRayQueryParameters3D.create(from + Vector3.UP, to + Vector3.UP, SquadAI.WORLD_MASK)
+	var hit := leader.get_world_3d().direct_space_state.intersect_ray(query)
+	if hit.is_empty():
+		return to
+	var back := Vector3(from.x - to.x, 0.0, from.z - to.z).normalized()
+	var at: Vector3 = hit.position
+	return Vector3(at.x, to.y, at.z) + back * WALL_CLEAR_M
 
 
 static func _flat(a: Vector3, b: Vector3) -> float:

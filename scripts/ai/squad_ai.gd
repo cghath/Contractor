@@ -160,6 +160,11 @@ const COVER_GAP_M := 2.5
 ## steps away from anyone within STACK_M (squadmates pass through each other, so nothing else
 ## stops two standing in one spot). Not while boarding, at a casualty, in a stack or a room.
 const SEPARATION_M := 3.0
+## A unit keeps its crouch (or stands) at least this long before changing again, unless pinned
+## or stunned (down at once). Captain, 2026-10-15: squadmates bounced up and down; a follower
+## crouched each time he reached his moving slot and stood to catch up, and a base of fire
+## stood for every burst and crouched in every pause.
+const CROUCH_HOLD_S := 1.2
 const STACK_M := 1.5
 ## Cover that only hides you (wood or sheet metal a rifle round goes through, see
 ## VoxelWorld.MATERIALS) scores this much worse than cover that stops a round arriving with
@@ -450,6 +455,8 @@ var task: Dictionary = {}
 var ordered: Dictionary = {}
 ## A stance order (STANCE_ORDERS; -1: the unit's own choice) and a "Heal up" order's end.
 var stance_order := -1
+var _crouch_kept := false  # the crouch the body was last given (_hold_crouch)
+var _crouch_kept_at := -1000.0
 var _heal_until := -1000.0
 ## Self-care put this unit prone (out in the open under fire); _act stands him back up once
 ## he's done.
@@ -654,6 +661,7 @@ func _tick(delta: float) -> void:
 	_act()
 	_steer(delta)
 	_shoot()
+	_hold_crouch()
 	body.ai_status = status_text()
 
 
@@ -1070,10 +1078,26 @@ func _apply_combat_mode() -> void:
 				body.want_aim = false  # weapon lowered
 				body.want_crouch = false
 		Squad.CombatMode.COMBAT:
-			if not fight and _halted():
+			# Following: only once the lead has halted (_halt_spot), not each time he reaches
+			# his slot while the lead walks on (that bounced him up and down).
+			if not fight and _halted() and (intent != Intent.FOLLOW or _halt_spot != null):
 				body.want_crouch = true
 		Squad.CombatMode.STEALTH:
 			body.want_crouch = true
+
+
+## Stance hysteresis (CROUCH_HOLD_S): what this tick wants, held to the last change for a
+## moment, except going down when pinned or stunned.
+func _hold_crouch() -> void:
+	var want := body.want_crouch
+	if want == _crouch_kept:
+		return
+	var now := Soldier._now()
+	if (want and (body.suppression >= PINNED or body.stunned_s > 0.0)) or now - _crouch_kept_at >= CROUCH_HOLD_S:
+		_crouch_kept = want
+		_crouch_kept_at = now
+	else:
+		body.want_crouch = _crouch_kept
 
 
 ## Standing still: no destination, or already there.
