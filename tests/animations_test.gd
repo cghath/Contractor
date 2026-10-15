@@ -157,8 +157,10 @@ func _test_world_scale() -> void:
 	var stand: float = eye.call(SoldierMovement.Stance.STAND_HIGH)
 	var crouch: float = eye.call(SoldierMovement.Stance.CROUCH_MID)
 	var prone: float = eye.call(SoldierMovement.Stance.PRONE)
-	var head := VoxelArt.mesh(VoxelArt.body_part("head", VoxelArt.MALE), "multicam").get_aabb()
-	var top := CharacterModel.TORSO_PIVOT.y + CharacterModel.HEAD_PIVOT.y + head.end.y  # the head's top
+	var head := VoxelArt.instance(VoxelArt.body_part("head", VoxelArt.MALE), "multicam")
+	var mesh := head.get_child(0) as MeshInstance3D
+	var top := CharacterModel.TORSO_PIVOT.y + CharacterModel.HEAD_PIVOT.y + (mesh.transform * mesh.mesh.get_aabb()).end.y  # the head's top
+	head.free()
 	check(absf(stand - 1.65) < 0.02 and stand / top > 0.9 and stand / top < 0.95 and stand < BuildingGen.DOOR_H - 0.3,
 		"standing eye %.2f m on a %.2f m man (%.0f%%; real 91-94%%), under a %.1f m door" % [stand, top, stand / top * 100.0, BuildingGen.DOOR_H])
 	check(crouch > 0.9 and crouch < 1.15 and prone > 0.2 and prone < 0.45, "crouched eye %.2f m, prone %.2f m" % [crouch, prone])
@@ -218,7 +220,7 @@ func _walk_model(stance: int, speed: float, dir: Vector3, body: String) -> Dicti
 			continue
 		for f in 2:
 			var sole := model.foot_position(f == 0)
-			if sole.y - holder.position.y < 0.005:
+			if sole.y - holder.position.y < 0.002:
 				if down_at[f] == null:
 					down_at[f] = sole
 					planted += 1
