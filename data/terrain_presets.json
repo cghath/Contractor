@@ -23,6 +23,14 @@
 			"scatter": {"conifer_share": 0.35, "rocks_per_km2": 50, "large_rock_share": 0.15, "scrub_per_km2": 250, "trees_per_km2": 12, "woods_per_km2": 1.5, "copses_per_km2": 5, "hedgerows_per_km2": 4, "road_trees": 0.4,
 				"colours": {"rock": ["77736a", "6a665e"], "scrub": ["55633a", "6d6f40"], "crown": ["46602f", "52672f"], "trunk": "4f3e2c"}}
 		},
+		"forest_experimental": {
+			"name": "Forest (experimental)",
+			"_note": "Captain, 2026-10-14: \"include experimental forest mission like we dev'd\": the denser woods to try without changing the normal zones (their woods have a perf problem; a perf pass is queued). Temperate base, rolling hills; \"copse_cover\": the copses-as-cover layout (ZoneScatter: 20-60 trees ~3.2 m apart, thicket skirt, rocks, woods' edge belt, the higher caps). Only the Experimental forest test zone (data/zones.json forest_experimental, the main menu's Test zones) uses it. Numbers Proposed.",
+			"land": {"relief_scale": 0.9, "wavelength_m": 520, "octaves": 4, "gain": 0.42},
+			"palette": {"grass": "56633a", "dry": "6f6c45", "earth": "6f5f45", "rock": "6a665e"},
+			"scatter": {"copse_cover": true, "conifer_share": 0.45, "rocks_per_km2": 60, "large_rock_share": 0.18, "scrub_per_km2": 420, "trees_per_km2": 16, "woods_per_km2": 3.0, "wood_radius_m": [70, 170], "thicket_share": 0.6, "copses_per_km2": 6, "copse_trees": [24, 60], "hedgerows_per_km2": 2, "road_trees": 0.6,
+				"colours": {"rock": ["77736a", "6a665e"], "scrub": ["4f5e36", "63693c"], "crown": ["3f592b", "4a622d", "526a30"], "trunk": "4a3a2a"}}
+		},
 		"coastal_lowland": {
 			"name": "Coastal lowland",
 			"land": {"relief_scale": 0.55, "wavelength_m": 700, "octaves": 4, "gain": 0.4, "offset_m": 3.0, "detail_m": 2.4, "detail_wavelength_m": 190},

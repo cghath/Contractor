@@ -46,22 +46,45 @@ Round 4 (Captain, 2026-10-14: "we need copses and groves and such. the terrain i
 clusters** (`ZoneScatter._lay_out_trees`), each optional in a preset's scatter, per km2 of zone: `woods_per_km2`
 (ragged woods `wood_radius_m` [min, max] across, default 50-130, trees `wood_spacing_m` apart, default 6.5, with
 clearings; `thicket_share` (default 0.5) of the sites also get a thicket: tall undergrowth, 1.8-2.5 m, that hides a
-standing man), `copses_per_km2` (tight clumps of `copse_trees` [min, max], default 10-40), `hedgerows_per_km2` (tree and bush
+standing man), `copses_per_km2` (tight clumps of `copse_trees` [min, max], default 10-40, 20-60 with `copse_cover`; see Copses as cover below), `hedgerows_per_km2` (tree and bush
 lines along the edges of a `field_m` field grid, default 120 m), `road_trees` (0..1, the share of the roads' sides
 lined), `wadi_groves_per_km2` (clumps of `wadi_grove_trees` on the wadis' banks, `ZoneTerrain.bed_at`), and
 `edge_scrub_per_m` (bushes a metre round each wood, copse and grove, default 0.5). `trees_per_km2` is now only the
 few lone trees. Caps: trees 5000 (woods at most 60% of it, woods with copses and groves 82%, so a 16 km2 zone's woods leave
-trees for its copses, hedgerows and roadsides), thickets 5000, solid 5600. Set as:
+trees for its copses, hedgerows and roadsides), thickets 5000, solid 5600; a `copse_cover` preset: trees 6000 (50% / 80%),
+thickets 8000, solid 6800. Set as:
 
 | preset | woods | copses | hedgerows | road_trees | wadi groves | lone trees |
 | --- | --- | --- | --- | --- | --- | --- |
 | temperate | 1.5 | 5 | 4 | 0.4 | - | 12 |
+| forest_experimental (copse_cover) | 3.0 (70-170 m) | 6 (24-60 trees) | 2 | 0.6 | - | 16 |
 | coastal_lowland (harbour_yard) | 0.8 | 6 | 5 | 0.5 | - | 10 |
 | amphibious_coast | 0.4 | 4 | 3 | 0.3 | - | 8 |
 | desert_wadi | 0 | 1.5 (6-16 trees) | 0.5 | - | 6 (6-16 trees) | 4 |
 | rocky_ridge | 1.0 | 4 | - | - | - | 8 |
 | scrubland | 0.3 | 3 | - | - | - | 6 |
 | salt_flats | - | - | - | - | - | 0 |
+
+**Copses as cover** (Captain, 2026-10-14, playtesting v0.4.0: "the copses of trees are too small and spread out to be
+cover", "but they look fantastic": the trees' look is unchanged). EXPERIMENTAL, only in a preset whose scatter says
+`"copse_cover": true` (forest_experimental, the main menu's "Host Experimental forest (dense woods, test)"; Captain,
+2026-10-14: "include experimental forest mission like we dev'd", "make it a button on the menu, not a regular
+mission"). Every other preset keeps round 4's copses and caps (the normal zones' woods have a perf problem; a perf pass
+is queued). Fewer but bigger, denser copses (Proposed numbers, `ZoneScatter._copse`, layout version 7): 20-60 trees in a compact blob of radius `COPSE_SPREAD` (1.9) x sqrt(trees) + 2 m
+(20 trees ~10.5 m, 60 ~16.7 m; round 4: 2.3 sqrt(n) + 3), trees ~3.2 m from the nearest (round 4: ~3.7);
+`copse_thicket_share` (default 0.9) thickets a tree inside (round 4: one per two trees); a skirt of thickets every
+`COPSE_SKIRT_M` (2.2 m) round the edge, the edge scrub outside it; 1-3 big solid rocks inside (`COPSE_ROCKS`) as low
+cover. Wadi groves are built the same way. Woods get an edge belt: a thicket every `WOOD_BELT_M` (3.5 m) just inside
+their ragged edge. Measured on hot zone 4409 on art/denser-copses, where every preset had it (fewer copses a km2 there) (eye-height lines, 1.6 m; hidden = `Spotting.FOLIAGE_OPAQUE_M` or more):
+
+| preset | copses (before -> after) | trees a copse | lines through the middle blocked | man at the middle hidden from 50 m |
+| --- | --- | --- | --- | --- |
+| temperate | 59 -> 51 | 22 -> 37 | 68% -> 100% | 43% -> 98% |
+| coastal_lowland | 76 -> 43 | 26 -> 40 | 71% -> 98% | 46% -> 93% |
+| amphibious_coast | 52 -> 29 | 23 -> 37 | 65% -> 93% | 42% -> 85% |
+| rocky_ridge | 67 -> 42 | 23 -> 38 | 72% -> 99% | 46% -> 97% |
+| scrubland | 50 -> 33 | 27 -> 38 | 75% -> 100% | 50% -> 97% |
+| desert_wadi | 124 -> 17 (copses alone; groves were counted before) | 11 -> 18 | 56% -> 97% | 33% -> 92% |
 
 **Caching** ("we'll use caching for performance if needed"): the layout is kept in memory per zone (`CACHE_ZONES`,
 4) and on disk (`user://cache/scatter_*.bin`, the newest 24), keyed by everything it comes from (layout version,

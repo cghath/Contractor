@@ -25,15 +25,29 @@ enum Kind { ROCK, SCRUB, TREE, THICKET }
 
 ## Most items of each kind in a zone (a 16 km2 hot zone hits them). Round 4 raised the trees
 ## for the woods; a nav chunk is 12 m (ZoneNav), so more trunk boxes cost little per bake.
+## Captain, 2026-10-14 (v0.4.0): "the copses of trees are too small and spread out to be
+## cover": bigger, denser copses, so trees 5000 -> 6000, thickets 5000 -> 8000 (visual only,
+## no collision) and solid 5600 -> 6800 (Proposed).
 const CAP_ROCKS := 2600
 const CAP_SCRUB := 9000
-const CAP_TREES := 5000
-const CAP_THICKETS := 5000
-## The shares of CAP_TREES woods, then woods with copses and groves, may take.
-const WOODS_SHARE := 0.6
-const COPSES_SHARE := 0.82
+const CAP_TREES := 6000
+const CAP_THICKETS := 8000
+## The shares of CAP_TREES woods, then woods with copses and groves, may take (Proposed: woods
+## keep their 3000 trees, round 4's 0.6 of 5000; copses get the most of the rest).
+const WOODS_SHARE := 0.5
+const COPSES_SHARE := 0.8
 ## Most items with collision (large rocks and trees) in a zone.
-const CAP_SOLID := 5600
+const CAP_SOLID := 6800
+## Captain, 2026-10-14 ("include experimental forest mission like we dev'd"; the normal zones'
+## woods have a perf problem, a perf pass is queued): the copses-as-cover layout (the caps above,
+## COPSE_SPREAD's copses, the woods' edge belt) only for a preset whose scatter says
+## "copse_cover": true (forest_experimental). Every other preset keeps round 4's layout and these
+## caps, so the normal zones keep today's density.
+const ROUND4_CAP_TREES := 5000
+const ROUND4_CAP_THICKETS := 5000
+const ROUND4_WOODS_SHARE := 0.6
+const ROUND4_COPSES_SHARE := 0.82
+const ROUND4_CAP_SOLID := 5600
 ## Items keep this far outside every pad (the pad's own margin is already in its rect), the
 ## edge of the zone, and a road's line (m).
 const PAD_KEEP_M := 10.0
@@ -42,6 +56,17 @@ const ROAD_KEEP_M := 9.0
 ## Trees keep this far apart (trunk to trunk, m), and stand on ground at least this level
 ## (the up component of its normal).
 const TREE_GAP_M := 2.6
+## Copses (Captain, 2026-10-14: "the copses of trees are too small and spread out to be
+## cover"; Proposed numbers): a compact blob of radius COPSE_SPREAD x sqrt(trees) + 2 m (20 trees
+## ~10.5 m, 60 ~16.7 m; trees ~3-3.5 m apart), "copse_thicket_share" thickets a tree inside, a
+## ring of thickets every COPSE_SKIRT_M round its edge (no gap to see through at eye height),
+## the edge scrub outside that, and COPSE_ROCKS [min, max] big rocks inside as low cover.
+const COPSE_SPREAD := 1.9
+const COPSE_SKIRT_M := 2.2
+const COPSE_ROCKS := [1, 3]
+## Woods' edge belt (Proposed): a thicket every WOOD_BELT_M round a wood's ragged edge, just
+## inside it, so a wood's edge hides like a copse's.
+const WOOD_BELT_M := 3.5
 const TREE_UP := 0.88
 ## Cells are this wide (m); visuals build for cells within BUILD_M of the camera, this many a
 ## frame, checked every CHECK_S.
@@ -56,7 +81,8 @@ const SEE_TREE_M := 950.0
 ## Far stand-ins: past SEE_TREE_M each FAR_GROUP_M square of trees is one low canopy blob.
 const FAR_GROUP_M := 24.0
 ## Layout format: bump when the layout code changes, so old cached layouts are not used.
-const LAYOUT_VERSION := 6
+## 7: denser copses with a thicket skirt and rocks, woods' edge belt (Captain, 2026-10-14).
+const LAYOUT_VERSION := 7
 ## Zones kept in memory (layouts), the newest of them also keep their built cell meshes, and
 ## files kept in the disk cache.
 const CACHE_ZONES := 4
@@ -97,6 +123,9 @@ var counts := {Kind.ROCK: 0, Kind.SCRUB: 0, Kind.TREE: 0, Kind.THICKET: 0}
 var solid_count := 0
 ## Where the last generate's layout came from: "generated", "memory" or "disk" ("" none).
 var cache_source := ""
+## The copses and groves the last fresh layout made (not kept in the cache: empty when the
+## layout came from memory or disk), for tests: {"centre" (Vector2), "r" (m), "trees", "grove"}.
+var copse_sites: Array[Dictionary] = []
 
 var _terrain: ZoneTerrain
 var _spec := {}
@@ -119,9 +148,17 @@ var _crowns: Array[Color] = []
 var _scrubs: Array[Color] = []
 var _scrub_lo := 0.6
 var _scrub_hi := 1.5
+var _rock_colours: Array[Color] = []
 var _tree_grid := {}
 var _outline: FastNoiseLite
 var _tree_limit := CAP_TREES  # the trees allowed so far in the layout (woods leave room for the rest)
+## This layout's caps: CAP_* with "copse_cover", else ROUND4_CAP_* (_set_caps).
+var _cover := false
+var _cap_trees := ROUND4_CAP_TREES
+var _cap_thickets := ROUND4_CAP_THICKETS
+var _cap_solid := ROUND4_CAP_SOLID
+var _woods_share := ROUND4_WOODS_SHARE
+var _copses_share := ROUND4_COPSES_SHARE
 
 
 ## Lays the items out. `terrain` must be generated; `def` is the zone's def ("roads" in it
@@ -135,7 +172,10 @@ func generate(terrain: ZoneTerrain, def: Dictionary) -> void:
 	counts = {Kind.ROCK: 0, Kind.SCRUB: 0, Kind.TREE: 0, Kind.THICKET: 0}
 	solid_count = 0
 	cache_source = ""
+	var sites: Array[Dictionary] = []
+	copse_sites = sites
 	_spec = terrain.preset.get("scatter", {})
+	_set_caps()
 	if _spec.is_empty():
 		return
 	var keep: Array[Rect2] = []
@@ -157,6 +197,16 @@ func generate(terrain: ZoneTerrain, def: Dictionary) -> void:
 	_to_disk()
 
 
+## The caps for this preset: the copses-as-cover ones with "copse_cover", else round 4's.
+func _set_caps() -> void:
+	_cover = bool(_spec.get("copse_cover", false))
+	_cap_trees = CAP_TREES if _cover else ROUND4_CAP_TREES
+	_cap_thickets = CAP_THICKETS if _cover else ROUND4_CAP_THICKETS
+	_cap_solid = CAP_SOLID if _cover else ROUND4_CAP_SOLID
+	_woods_share = WOODS_SHARE if _cover else ROUND4_WOODS_SHARE
+	_copses_share = COPSES_SHARE if _cover else ROUND4_COPSES_SHARE
+
+
 func _lay_out() -> void:
 	var terrain := _terrain
 	_half = terrain.size_m * 0.5
@@ -172,6 +222,7 @@ func _lay_out() -> void:
 					_cells[Vector2i(cx, cz)] = []
 	var colours: Dictionary = _spec.get("colours", {})
 	var rock_colours := _colours(colours.get("rock", ["77736a"]))
+	_rock_colours = rock_colours
 	_scrubs = _colours(colours.get("scrub", ["55633a"]))
 	_crowns = _colours(colours.get("crown", ["46602f"]))
 	var large_share := float(_spec.get("large_rock_share", 0.15))
@@ -204,14 +255,14 @@ func _lay_out() -> void:
 			continue
 		if terrain.normal_at(x, z).y < 0.55:
 			continue
-		var large := pick < large_share and solid_count < CAP_SOLID
+		var large := pick < large_share and solid_count < _cap_solid
 		var s := lerpf(1.6, 3.4, scale_roll) if large else lerpf(0.35, 1.1, scale_roll)
 		var size := Vector3(s, s * lerpf(0.55, 0.85, squash_roll), s * lerpf(0.8, 1.2, squash_roll))
 		_add({"kind": Kind.ROCK, "yaw": yaw, "solid": large, "size": size, "pos": Vector3(x, h + size.y * 0.3, z),
 			"colour": rock_colours[int(variation * rock_colours.size()) % rock_colours.size()]})
 	# Trees in clusters, with their edge scrub and thickets, then the few lone trees.
 	_lay_out_trees(area_km2)
-	want = mini(int(round(float(_spec.get("trees_per_km2", 0.0)) * area_km2)), CAP_TREES - counts[Kind.TREE])
+	want = mini(int(round(float(_spec.get("trees_per_km2", 0.0)) * area_km2)), _cap_trees - counts[Kind.TREE])
 	var lone := 0
 	attempts = int(want * tries_per)
 	while lone < want and attempts > 0:
@@ -303,12 +354,12 @@ func _lay_out_trees(area_km2: float) -> void:
 	var radius: Array = _spec.get("wood_radius_m", [50.0, 130.0])
 	# Woods take at most WOODS_SHARE of the tree cap and copses and groves up to COPSES_SHARE, so
 	# a big zone's woods leave trees for its copses, hedgerows and roadsides.
-	_tree_limit = int(CAP_TREES * WOODS_SHARE)
+	_tree_limit = int(_cap_trees * _woods_share)
 	for n in _how_many(rng, float(_spec.get("woods_per_km2", 0.0)) * area_km2):
 		var at := _cluster_site(rng, inner)
 		_wood(rng, at.x, at.y, rng.randf_range(float(radius[0]), float(radius[1])) * 0.5)
-	_tree_limit = int(CAP_TREES * COPSES_SHARE)
-	var copse: Array = _spec.get("copse_trees", [10, 40])
+	_tree_limit = int(_cap_trees * _copses_share)
+	var copse: Array = _spec.get("copse_trees", [20, 60] if _cover else [10, 40])  # Proposed (round 4: 10-40)
 	for n in _how_many(rng, float(_spec.get("copses_per_km2", 0.0)) * area_km2):
 		var at := _cluster_site(rng, inner)
 		_copse(rng, at.x, at.y, rng.randi_range(int(copse[0]), int(copse[1])))
@@ -323,9 +374,9 @@ func _lay_out_trees(area_km2: float) -> void:
 		var bed := _terrain.bed_at(x, z)
 		if bed < 0.06 or bed > 0.45:
 			continue
-		_copse(rng, x, z, rng.randi_range(int(grove[0]), int(grove[1])))
+		_copse(rng, x, z, rng.randi_range(int(grove[0]), int(grove[1])), true)
 		groves -= 1
-	_tree_limit = CAP_TREES
+	_tree_limit = _cap_trees
 	_hedgerows(rng, _how_many(rng, float(_spec.get("hedgerows_per_km2", 0.0)) * area_km2))
 	_road_lines(rng, float(_spec.get("road_trees", 0.0)))
 
@@ -374,11 +425,58 @@ func _wood(rng: RandomNumberGenerator, cx: float, cz: float, r: float) -> void:
 				_try_tree(rng, x, z, 0.75, 1.3)
 			if roll > 1.0 - thickets or roll < thickets * 0.4:
 				_try_bush(rng, x + spacing * 0.5, z + spacing * 0.3, Kind.THICKET, 2.2, 3.4)
+	# The edge belt: thickets just inside the ragged edge (Captain, 2026-10-14: cover at the
+	# woods' edge, where a fight meets them). Copses-as-cover presets only (_cover).
+	for k in (int(TAU * r / WOOD_BELT_M) if _cover else 0):
+		var a := rng.randf() * TAU
+		var d := _edge_r(cx, cz, r, a) - rng.randf_range(0.5, 4.0)
+		_try_bush(rng, cx + cos(a) * d, cz + sin(a) * d, Kind.THICKET, 2.0, 3.0)
 	_edge_scrub(rng, cx, cz, r, true)
 
 
-## A copse: `n` trees close together round (cx, cz), thickets among them, scrub round it.
-func _copse(rng: RandomNumberGenerator, cx: float, cz: float, n: int) -> void:
+## A copse (or a wadi grove, `grove`): `n` trees close together round (cx, cz), thickets among
+## them, a thicket skirt and scrub round it, a few big rocks inside. Captain, 2026-10-14: "the
+## copses of trees are too small and spread out to be cover" (round 4 had r 2.3 sqrt(n) + 3,
+## trees ~3.8 m apart, n / 2 thickets and no skirt: a man at the middle was hidden from 50 m on
+## under half the lines). The trees look as before (Captain: "but they look fantastic").
+func _copse(rng: RandomNumberGenerator, cx: float, cz: float, n: int, grove := false) -> void:
+	if not _cover:
+		_round4_copse(rng, cx, cz, n, grove)
+		return
+	var r := COPSE_SPREAD * sqrt(float(n)) + 2.0
+	var placed := 0
+	var tries := n * 10
+	while placed < n and tries > 0:
+		tries -= 1
+		var a := rng.randf() * TAU
+		var d := r * sqrt(rng.randf())
+		if _try_tree(rng, cx + cos(a) * d, cz + sin(a) * d, 0.8, 1.4):
+			placed += 1
+	if placed > 0:
+		# Undergrowth through it (round 4: n / 5, then n / 2, left copses see-through at eye height).
+		for k in int(n * float(_spec.get("copse_thicket_share", 0.9))):
+			var a := rng.randf() * TAU
+			var d := r * 0.9 * sqrt(rng.randf())
+			_try_bush(rng, cx + cos(a) * d, cz + sin(a) * d, Kind.THICKET, 1.8, 2.8)
+		# The skirt: thickets evenly round the edge, so no line in misses them all.
+		var skirt := int(TAU * r / COPSE_SKIRT_M)
+		var turn := rng.randf() * TAU
+		for k in skirt:
+			var a := turn + (k + rng.randf_range(-0.3, 0.3)) * TAU / skirt
+			var d := r + rng.randf_range(-1.5, 0.5)
+			_try_bush(rng, cx + cos(a) * d, cz + sin(a) * d, Kind.THICKET, 2.0, 2.8)
+		_edge_scrub(rng, cx, cz, r, false)
+		# Low cover inside: a few big rocks (solid), between the trunks.
+		for k in rng.randi_range(int(COPSE_ROCKS[0]), int(COPSE_ROCKS[1])):
+			var a := rng.randf() * TAU
+			var d := r * 0.7 * sqrt(rng.randf())
+			_copse_rock(rng, cx + cos(a) * d, cz + sin(a) * d)
+	copse_sites.append({"centre": Vector2(cx, cz), "r": r, "trees": placed, "grove": grove})
+
+
+## Round 4's copse (every preset without "copse_cover"; the normal zones keep it until the
+## perf pass): `n` trees round (cx, cz), n / 2 thickets among them, scrub round it.
+func _round4_copse(rng: RandomNumberGenerator, cx: float, cz: float, n: int, grove: bool) -> void:
 	var r := 2.3 * sqrt(float(n)) + 3.0
 	var placed := 0
 	var tries := n * 6
@@ -394,6 +492,29 @@ func _copse(rng: RandomNumberGenerator, cx: float, cz: float, n: int) -> void:
 		_try_bush(rng, cx + cos(a) * d, cz + sin(a) * d, Kind.THICKET, 1.8, 2.8)
 	if placed > 0:
 		_edge_scrub(rng, cx, cz, r, false)
+	copse_sites.append({"centre": Vector2(cx, cz), "r": r, "trees": placed, "grove": grove})
+
+
+## A big rock (1.4 to 2.2 m, solid) at (x, z) for low cover in a copse, unless it's off the zone,
+## blocked, wet, steep, or on a trunk (within TREE_GAP_M of a tree); whether it did.
+func _copse_rock(rng: RandomNumberGenerator, x: float, z: float) -> bool:
+	var s := lerpf(1.4, 2.2, rng.randf())
+	var squash := rng.randf()
+	var yaw := rng.randf() * TAU
+	var tint := rng.randf()
+	if counts[Kind.ROCK] >= CAP_ROCKS or solid_count >= _cap_solid or absf(x) > _half - EDGE_KEEP_M or absf(z) > _half - EDGE_KEEP_M:
+		return false
+	if _crowded(x, z) or _blocked(x, z, _keep, _roads):
+		return false
+	var h := _terrain.height_at(x, z)
+	if _terrain.sea_side >= 0 and h < _terrain.sea_level + 0.35:
+		return false
+	if _terrain.normal_at(x, z).y < 0.55:
+		return false
+	var size := Vector3(s, s * lerpf(0.55, 0.85, squash), s * lerpf(0.8, 1.2, squash))
+	_add({"kind": Kind.ROCK, "yaw": yaw, "solid": true, "size": size, "pos": Vector3(x, h + size.y * 0.3, z),
+		"colour": _rock_colours[int(tint * _rock_colours.size()) % _rock_colours.size()]})
+	return true
 
 
 ## Bushes round a wood's (ragged) or a copse's (round) edge: "edge_scrub_per_m" a metre, the
@@ -477,7 +598,7 @@ func _try_tree(rng: RandomNumberGenerator, x: float, z: float, lo: float, hi: fl
 	if _terrain.normal_at(x, z).y < TREE_UP:
 		return false
 	_add({"kind": Kind.TREE, "pos": Vector3(x, h, z), "yaw": yaw, "size": Vector3(s, s, s),
-		"colour": _crowns[int(tint * _crowns.size()) % _crowns.size()], "solid": solid_count < CAP_SOLID})
+		"colour": _crowns[int(tint * _crowns.size()) % _crowns.size()], "solid": solid_count < _cap_solid})
 	var g := Vector2i(floori(x / TREE_GAP_M), floori(z / TREE_GAP_M))
 	if not _tree_grid.has(g):
 		_tree_grid[g] = []
@@ -506,7 +627,7 @@ func _try_bush(rng: RandomNumberGenerator, x: float, z: float, kind: int, lo: fl
 	var squash := rng.randf()
 	var yaw := rng.randf() * TAU
 	var tint := rng.randf()
-	var cap := CAP_THICKETS if kind == Kind.THICKET else CAP_SCRUB
+	var cap := _cap_thickets if kind == Kind.THICKET else CAP_SCRUB
 	if counts[kind] >= cap or absf(x) > _half - EDGE_KEEP_M or absf(z) > _half - EDGE_KEEP_M:
 		return false
 	if _blocked(x, z, _keep, _roads):

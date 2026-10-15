@@ -1352,6 +1352,11 @@ func _test_woods() -> void:
 			if through >= Spotting.FOLIAGE_OPAQUE_M:
 				hidden += 1
 	check(lines >= 40 and hidden >= lines * 0.65, "woods: %d of %d eye-height lines 40 m through woods and copses are hidden (%.1f m of foliage or more)" % [hidden, lines, Spotting.FOLIAGE_OPAQUE_M])
+	# Captain, 2026-10-14: the copses-as-cover layout is the experimental forest's only; the
+	# normal presets keep round 4's copses and caps (their woods' perf pass is queued).
+	check(not a._cover and a._cap_trees == ZoneScatter.ROUND4_CAP_TREES and a._cap_thickets == ZoneScatter.ROUND4_CAP_THICKETS and a._cap_solid == ZoneScatter.ROUND4_CAP_SOLID
+		and a.counts[ZoneScatter.Kind.TREE] <= ZoneScatter.ROUND4_CAP_TREES,
+		"woods: temperate keeps round 4's copses and caps (%d trees, %d copses)" % [a.counts[ZoneScatter.Kind.TREE], a.copse_sites.size()])
 	# Far stand-ins: one blob per 24 m square of trees, one MultiMesh per cell (built with the visuals).
 	a.build_visuals()
 	var far := a.far_counts()
@@ -1368,3 +1373,104 @@ func _test_woods() -> void:
 		sc.free()
 	t.free()
 	ZoneScatter.clear_cache()  # the big layouts out of memory before the frame-time checks
+	_test_forest_copses()
+
+
+## The Experimental forest (Captain, 2026-10-14: "include experimental forest mission like we
+## dev'd"; data/zones.json forest_experimental, its own preset with "copse_cover"): its copses
+## are cover (_test_copse_cover), laid out fresh twice the same.
+func _test_forest_copses() -> void:
+	var def := ZoneDef.get_def(Menu.FOREST_ZONE)
+	check(String(def.get("terrain", "")) == "forest_experimental" and (def.modules as Array).size() == 3,
+		"forest: the Experimental forest zone uses the forest_experimental preset (%s, %d modules, %.0f m)" % [def.get("terrain", "?"), (def.get("modules", []) as Array).size(), float(def.get("size_m", 0))])
+	var t := _preset_terrain(def)
+	ZoneScatter.clear_cache(true)
+	var a := ZoneScatter.new()
+	a.generate(t, def)
+	ZoneScatter.clear_cache(true)
+	var b := ZoneScatter.new()
+	b.generate(t, def)
+	var trees: Array[Vector2] = []
+	for item in a.items:
+		if int(item.kind) == ZoneScatter.Kind.TREE:
+			trees.append(Vector2(item.pos.x, item.pos.z))
+	check(a._cover and a._cap_trees == ZoneScatter.CAP_TREES and a.checksum() == b.checksum() and trees.size() > 2000,
+		"forest: copses-as-cover layout (%d trees, %d thickets, %d solid; %s)" % [trees.size(), a.counts[ZoneScatter.Kind.THICKET], a.solid_count, a.cache_source])
+	_test_copse_cover(a, b, t, trees)
+	a.free()
+	b.free()
+	t.free()
+	ZoneScatter.clear_cache()
+
+
+## Copses are cover (Captain, 2026-10-14, v0.4.0: "the copses of trees are too small and spread
+## out to be cover"): every copse of the fresh layout `a` (its copse_sites; `b` the same zone
+## laid out again) holds 20-60 trees (Proposed; a few cut short by a road, a pad or the tree
+## cap) about 3-3.5 m apart in a compact blob, eye-height lines (1.6 m) through its middle meet
+## at least FOLIAGE_OPAQUE_M of foliage at most angles, and a man standing at its middle is
+## hidden from 50 m out from most directions.
+func _test_copse_cover(a: ZoneScatter, b: ZoneScatter, t: ZoneTerrain, trees: Array[Vector2]) -> void:
+	var copses := 0
+	var in_bounds := 0
+	var tree_sum := 0
+	var nn_sum := 0.0
+	var nn_n := 0
+	var lines := 0
+	var blocked := 0
+	var views := 0
+	var hidden := 0
+	var most_r := 0.0
+	for site: Dictionary in a.copse_sites:
+		if site.grove or int(site.trees) == 0:
+			continue
+		copses += 1
+		var n := int(site.trees)
+		tree_sum += n
+		if n >= 20 and n <= 60:
+			in_bounds += 1
+		var c: Vector2 = site.centre
+		var r := float(site.r)
+		most_r = maxf(most_r, r)
+		var mine: Array[Vector2] = []
+		for q in trees:
+			if q.distance_to(c) <= r + 0.5:
+				mine.append(q)
+		for q in mine:
+			var best := INF
+			for o in mine:
+				if o != q:
+					best = minf(best, o.distance_to(q))
+			if best < INF:
+				nn_sum += best
+				nn_n += 1
+		for k in 8:
+			var dir := Vector2.from_angle(k * PI / 8.0)
+			lines += 1
+			if _eye_foliage(a, t, c - dir * (r + 12.0), c + dir * (r + 12.0)) >= Spotting.FOLIAGE_OPAQUE_M:
+				blocked += 1
+		for k in 12:
+			var dir := Vector2.from_angle(k * TAU / 12.0)
+			views += 1
+			if _eye_foliage(a, t, c + dir * 50.0, c) >= Spotting.FOLIAGE_OPAQUE_M:
+				hidden += 1
+	var nn := nn_sum / maxi(nn_n, 1)
+	check(copses >= 20 and in_bounds >= copses * 0.8 and tree_sum <= copses * 60 and most_r <= ZoneScatter.COPSE_SPREAD * sqrt(60.0) + 2.01 and nn >= 2.8 and nn <= 3.6,
+		"copses: %d copses, %d with 20-60 trees (%.1f a copse), at most %.1f m in radius, trees %.2f m from the nearest (Proposed 3-3.5)" % [copses, in_bounds, float(tree_sum) / maxi(copses, 1), most_r, nn])
+	check(lines > 0 and blocked >= lines * 0.85,
+		"copses: %d of %d eye-height lines through a copse's middle meet %.1f m of foliage or more" % [blocked, lines, Spotting.FOLIAGE_OPAQUE_M])
+	check(views > 0 and hidden >= views * 0.8,
+		"copses: a man standing in a copse's middle is hidden from 50 m out on %d of %d lines" % [hidden, views])
+	check(a.copse_sites.size() > 0 and str(a.copse_sites) == str(b.copse_sites),
+		"copses: the same zone lays its copses out the same twice (%d)" % a.copse_sites.size())
+
+
+## Metres of foliage on the eye-height line (1.6 m above the ground all along, in 5 m pieces)
+## from `p0` to `p1`.
+func _eye_foliage(sc: ZoneScatter, t: ZoneTerrain, p0: Vector2, p1: Vector2) -> float:
+	var pieces := maxi(1, ceili(p0.distance_to(p1) / 5.0))
+	var sum := 0.0
+	for k in pieces:
+		var u := p0.lerp(p1, float(k) / pieces)
+		var v := p0.lerp(p1, float(k + 1) / pieces)
+		sum += sc.foliage_between(Vector3(u.x, t.height_at(u.x, u.y) + 1.6, u.y), Vector3(v.x, t.height_at(v.x, v.y) + 1.6, v.y))
+	return sum

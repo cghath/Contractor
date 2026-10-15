@@ -12,6 +12,11 @@ const CONFIRM_S := 5.0
 const PLAIN_ZONE_ID := "compound_01"
 const NEW_CAMPAIGN_TEXT := "New campaign (archive current saves)"
 const NEW_CAMPAIGN_CONFIRM := "Click again to archive the campaign and start a new one"
+## Captain, 2026-10-14 ("include experimental forest mission like we dev'd", "make it a button
+## on the menu, not a regular mission"): the denser woods' test zone (data/zones.json), its
+## button and its own save. Never in the campaign: hosted only from the Test zones button.
+const FOREST_ZONE := "forest_experimental"
+const FOREST_BUTTON_TEXT := "Host Experimental forest (dense woods, test)"
 
 ## Main-menu role picker (sets Roles.local_choice).
 var role_picker: OptionButton
@@ -85,6 +90,7 @@ func _ready() -> void:
 	# Procedural towns to look at without waiting for the board to offer them (Captain, 2026-10-13).
 	tests.add_child(_button("Host Old Quarter (city hot zone, test)", func() -> void: host_campaign_zone("city_hot")))
 	tests.add_child(_button("Host Harbour yard (town, test)", func() -> void: host_campaign_zone("harbour_yard")))
+	tests.add_child(_button(FOREST_BUTTON_TEXT, host_forest_zone))
 	tests.add_child(_button("Host vehicle range (wave 5)", func() -> void: VehicleRange.host_from_menu(self)))
 	_status = UiKit.text("")
 	box.add_child(_status)
@@ -134,6 +140,46 @@ func host_campaign_zone(zone_id: String) -> void:
 	if main and main.has_method(&"host_zone") and not def.is_empty():
 		GameState.zone_id = "test_" + zone_id
 		main.host_zone(def)
+
+
+## Debug entry (Captain, 2026-10-14): hosts the Experimental forest (data/zones.json
+## FOREST_ZONE, the forest_experimental terrain preset) fresh every time under its own save, and
+## opens a stand-in raid briefing on its map (forest_contract: objectives at its modules,
+## insertion and extraction from the zone, then the reinforcement timer). No campaign contract:
+## nothing goes on the board or into the campaign save.
+func host_forest_zone() -> void:
+	BaseHub.cancel_session()  # never a leftover campaign
+	_clean_test_session()
+	var main := get_parent()
+	var def := ZoneDef.get_def(FOREST_ZONE)
+	if not main or not main.has_method(&"host_zone") or def.is_empty():
+		return
+	GameState.zone_id = "test_" + FOREST_ZONE
+	GameState.delete_save()  # fresh every time: no bodies or drops from last time
+	main.host_zone(def)
+	var lvl := CompoundLevel.current(self)
+	var briefing := MapNodes.briefing(self)
+	if Net.is_hosting() and lvl and briefing:
+		briefing.server_open(forest_contract(def), BaseHub.briefing_zone(lvl, {"zone_id": FOREST_ZONE, "zone_name": String(def.name), "zone_kind": "contract"}))
+
+
+## The Experimental forest's stand-in raid (Briefing's contract shape, not a campaign
+## contract): clear the checkpoint, raid the compound, sweep the village. Marked experimental.
+static func forest_contract(def: Dictionary) -> Dictionary:
+	var at := {}
+	for m: Dictionary in def.get("modules", []):
+		at[String(m.type)] = [float(m.pos[0]), float(m.pos[1])]
+	var objectives: Array = []
+	var enemies: Array = []
+	for step: Array in [["checkpoint", "Clear the checkpoint", "Take the road checkpoint in the clearing."],
+			["compound", "Raid the compound", "Clear the walled compound in the woods."],
+			["village", "Sweep the village", "Clear the village at the woods' edge."]]:
+		if at.has(step[0]):
+			objectives.append({"id": step[0], "title": step[1], "text": step[2], "pos": at[step[0]], "radius": 30.0})
+			enemies.append({"pos": at[step[0]], "text": "Hostiles at the %s" % step[0]})
+	return {"id": "forest_raid", "title": "EXPERIMENTAL: Forest raid (test)", "type": "raid", "employer": "meridian",
+		"summary": "EXPERIMENTAL test zone: the denser woods (copses that are cover, thickets, the woods' edge belt). Not a campaign contract: nothing is paid or saved. Move through the woods, clear the checkpoint, raid the compound, sweep the village and extract.",
+		"difficulty": 2, "objectives": objectives, "known_enemies": enemies, "reinforcements": {"first_wave_s": 300.0}}
 
 
 func _notification(what: int) -> void:
