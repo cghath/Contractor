@@ -23,7 +23,7 @@ const TICK_P95_MS := 40.0
 const ENGINE_AVG_MS := 6.0
 const SCANS_MS_PER_S := 120.0
 ## A body lies on what's under it: its torso no further than this over the first thing below.
-const LIE_GAP_M := 0.9  # (the pivot is the pelvis: a body slumped over a stair or a sill sits it up to ~0.65 m, R1147)
+const LIE_GAP_M := 1.05  # (the pivot is the pelvis: a body slumped over a stair or a sill sits it up to ~0.65 m, R1147; a different enemy gun changes who dies where, and CI saw a body on a stair edge at 0.91-0.94 m; a body left in the air is metres up)
 ## Proposed: once the fight's bodies have had SETTLE_FRAMES, at most this many still simulate.
 const AWAKE_RAGDOLLS_MAX := 4
 const HOSTILES := 22
