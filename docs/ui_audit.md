@@ -44,7 +44,7 @@ Headless fit is the result of `tests/ui_test.gd` (run R0969, before the fixes on
 | Main menu | `scripts/ui/menu.gd` (Menu) | code | CanvasLayer in `main.tscn` | default 16; hint 13 at 60% | scrolling, centred, min width 380; 20 controls in one column | fits (it scrolls) |
 | Settings | `scripts/ui/settings_menu.gd` | code | CanvasLayer 30 | default 16; own opaque StyleBox | fixed 620x560, centred; 4 tabs, each scrolling | **@1.5: 1280x720, 1366x768 overflow** (fixed here) |
 | Pause menu | `scripts/ui/pause_menu.gd` | code | CanvasLayer 20, on the player | default 16; session lines at 60% | min width 320, centred | fits |
-| Bug report | `scripts/ui/bug_report.gd` | code | CanvasLayer 21 | default 16 | min width 420, centred; title about 440 px, not wrapped | fits |
+| Bug report | `scripts/ui/bug_report.gd` | code | CanvasLayer 21 | theme (fixed on ui/small-screens) | `UiKit.screen` 460, wrapping title and key hints | fits |
 | HUD: crosshair, prompt, downed, killed, respawn wait, flash message | `scripts/player/hud.gd` | code | CanvasLayer 1, on the player | 18 px with outline 4; downed text 28 px `ff6b5e` | `PRESET_CENTER` without grow BOTH | n/t |
 | HUD: status and squad list | `scripts/player/hud.gd` `_squad_lines` | code | Hud | 18 px with outline | bottom-left, grows up; about 11 lines with 8 squadmates | n/t |
 | Bleed silhouette | `scripts/player/hud.gd` | code | Hud | drawn | fixed (16,16), about 48x88 | n/t |
@@ -53,7 +53,7 @@ Headless fit is the result of `tests/ui_test.gd` (run R0969, before the fixes on
 | Objectives panel | `scripts/ui/objectives_panel.gd` | code | Hud | 15 px; own StyleBox at 60% | top-right, 364 px wide | fits |
 | Objective hint and markers | `scripts/ui/objective_helper.gd` | drawn and code | Hud | hint 14; markers 11 to 12 px, diamonds 3.5 to 6 px at 30 to 70% | hint 480 px wide under a 364 px panel | n/t |
 | Radio feed and subtitles | `scripts/ui/callouts.gd` (Subtitles) | code | Hud | 17 px `e8e4c8` with outline 4 | centre-bottom, 110 px up; 4 lines, no wrap | n/t |
-| Command menu | `scripts/ui/command_menu.gd` | code | Hud | default 16; own StyleBox | centre-left, x+16 | n/t |
+| Command menu | `scripts/ui/command_menu.gd` | code | Hud | theme panel, heading, key-chip rows (fixed on ui/small-screens) | centre-left, EDGE in, grows both ways; path wraps at 300 | fits (`ui_test`, no level needed) |
 | Medical / treatment menu | `scripts/ui/medical_menu.gd` | drawn | Hud | 11 to 20 px; legend 11; log 12 | **fixed 1080x620 panel**, min height 540 | n/t (needs Vitals) |
 | Interaction menu (rings) | `scripts/ui/interaction_menu.gd` | drawn | Hud | entries 15, point names 12 | ring radius 120; entries 180x26; submenus up to 20 entries; **nothing clamped to the screen** | n/t |
 | Inventory and loot | `scripts/ui/inventory_screen.gd` | code | Hud | **9 to 22 px; teal palette** | margin 18; columns 330 and 300 fixed; tiles 96x112 | n/t |
@@ -65,7 +65,7 @@ Headless fit is the result of `tests/ui_test.gd` (run R0969, before the fixes on
 | Motor pool | `base_ui.gd` `_build_motor_pool` | the base screen's Motor pool page (from its sign) | CanvasLayer 20 | theme | one row per vehicle with a Service button | fits (ui/base-hub) |
 | Base loading screen | `base_hub.gd` `_show_loading` | code | CanvasLayer 120 | theme title over `UiKit.dim` | full window, wraps | n/t (themed on ui/base-hub) |
 | Extraction | `scripts/campaign/extraction.gd` | no UI (text for the map and HUD) | n/a | n/a | n/a | n/a |
-| Dev: AI overlay | `scripts/ui/ai_overlay.gd` | Label3D | 3D, on the player | 28 px fixed-size at 0.0007 | up to 16 three-line labels over the squad | n/a |
+| Dev: AI overlay | `scripts/ui/ai_overlay.gd` | Label3D | 3D, on the player | 26 px near, 20 px far at 65% | up to 8 labels; only the nearest 3 in full (thinned on ui/small-screens) | n/a |
 | Dev: hot-zone readout | `scripts/ui/hot_zone_debug.gd` | code | CanvasLayer 50 | 13 px with outline | **absolute (12,120)**; 8 to 9 lines, no wrap | n/t |
 
 ## Problems, ranked
@@ -133,14 +133,14 @@ Headless fit is the result of `tests/ui_test.gd` (run R0969, before the fixes on
 19. **Inconsistent styles, read.** There are three text styles, two palettes and three heading styles (see "How the UI scales today"), plus five different hand-made StyleBoxes:
     - settings,
     - objectives,
-    - command menu,
+    - command menu (fixed on ui/small-screens),
     - inventory,
     - medical.
 20. **Briefing panel, read.** Its 12 to 13 px help and section text is at 60% alpha. It belongs to fix/briefing-map-ui (merged); adopt `HintLabel` and `HeadingLabel` from the kit when it is next touched.
-21. **Bug report, read.** Its title (about 440 px) is wider than its 420 px box, and it uses the default theme.
+21. **Bug report, read. Fixed on ui/small-screens.** Its title (about 440 px) is wider than its 420 px box, and it uses the default theme.
 22. **Hot-zone and AI dev overlays, read.**
     - The hot-zone readout is 13 px at an absolute position and overlaps the command menu.
-    - Up to 16 AI labels pile up over the squad.
+    - Up to 16 AI labels pile up over the squad. (Thinned on ui/small-screens: 8 labels, the nearest 3 in full.)
 23. **Design gaps, read.** The motor pool has no page (it is only an interaction ring), and the roster page has no terminal. These are design questions to settle when the base hub is restyled, not layout bugs.
     - **Settled on ui/base-hub:** the motor pool's sign opens a Motor pool page of the base screen (each vehicle's state and a Service button; service is still booked only at the sign). The roster stays a tab of the ops desk's screen. BaseUI's Shop tab is now the base's shop (ShopScreen's type filter and support call prices, ItemInfo tooltips, bought through the host into the armory); the contract board's Shop button still opens ShopScreen, which ui/campaign-screens could point at `BaseHub.open_ui("shop")` at the base.
 

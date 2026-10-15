@@ -154,6 +154,9 @@ const F_KEYS := [KEY_F1, KEY_F2, KEY_F3, KEY_F4, KEY_F5, KEY_F6, KEY_F7, KEY_F8,
 ## How far "Target that enemy" looks under the crosshair.
 const AIM_RANGE := 300.0
 
+## The selection path wraps past this width (logical px).
+const TITLE_W := 300.0
+
 var player: Soldier
 ## Names of the selected squadmates.
 var selected := PackedStringArray()
@@ -169,19 +172,25 @@ func _init(p_player: Soldier) -> void:
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.05, 0.07, 0.05, 0.78)
-	style.set_content_margin_all(10)
-	add_theme_stylebox_override(&"panel", style)
+	## The shared look (Captain, 2026-10-14: "all the UIs need a pass"; docs/ui_audit.md P2-19):
+	## the theme's panel instead of a hand-made StyleBox, a heading for the selection path, and
+	## rows of a key chip and a label in the theme's colours.
+	UiKit.apply(self)
 	var box := VBoxContainer.new()
+	box.add_theme_constant_override(&"separation", UiKit.SPACE_S)
 	add_child(box)
-	_title = Label.new()
-	_title.add_theme_color_override(&"font_color", Color("c8d6a0"))
+	_title = UiKit.heading("")
+	## Eight names in the path ran the panel off a small window; it wraps at TITLE_W instead.
+	UiKit.fit_width(_title, TITLE_W)
 	box.add_child(_title)
 	_rows = VBoxContainer.new()
+	_rows.add_theme_constant_override(&"separation", UiKit.SPACE_XS)
 	box.add_child(_rows)
 	set_anchors_and_offsets_preset(Control.PRESET_CENTER_LEFT)
-	position.x += 16
+	## Grows both ways from the left middle (a long submenu stayed below the centre line), kept
+	## UiKit.EDGE from the window's edge.
+	grow_vertical = Control.GROW_DIRECTION_BOTH
+	position.x += UiKit.EDGE
 	visible = false
 
 
@@ -194,8 +203,8 @@ func is_open() -> bool:
 ## isn't listed (it left the squad: Squad.members).
 func roster() -> Array[Soldier]:
 	var out: Array[Soldier] = []
-	var level := CompoundLevel.current(player)
-	if level == null:
+	var level := CompoundLevel.current(self) if is_inside_tree() else null
+	if level == null or player == null:
 		return out
 	for h in level.players.get_children():
 		if h is Soldier and not h.is_queued_for_deletion():
@@ -481,11 +490,19 @@ func _redraw() -> void:
 	var items := _level_items()
 	for i in items.size():
 		var item: Dictionary = items[i]
-		var row := Label.new()
 		var disabled: bool = (item.has("items") and (item["items"] as Array).is_empty()) or (item.has("cmd") and item["cmd"] == "")
-		row.text = "%s  %s%s" % [item["key"], item["label"], "  >" if item.has("items") and not disabled else ""]
-		var colour := Color(1, 1, 1) if not disabled else Color(0.55, 0.55, 0.55)
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override(&"separation", UiKit.SPACE_S)
+		var chip := Label.new()
+		chip.text = " %s " % item["key"]
+		chip.theme_type_variation = &"KeyLabel"
+		row.add_child(chip)
+		var label := Label.new()
+		label.text = "%s%s" % [item["label"], "  >" if item.has("items") and not disabled else ""]
+		## Theme colours: text, dim when it can't be picked, the accent on the highlighted row.
+		var colour := UiKit.TEXT if not disabled else UiKit.TEXT_DIM
 		if i == _highlight:
-			colour = Color("ffd35a") if not disabled else Color(0.75, 0.68, 0.45)
-		row.add_theme_color_override(&"font_color", colour)
+			colour = UiKit.ACCENT if not disabled else UiKit.ACCENT.lerp(UiKit.TEXT_DIM, 0.5)
+		label.add_theme_color_override(&"font_color", colour)
+		row.add_child(label)
 		_rows.add_child(row)

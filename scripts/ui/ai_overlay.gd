@@ -6,7 +6,15 @@ extends Node3D
 ## REFRESH_S apart; labels follow their soldiers every frame.
 
 const RANGE_M := 80.0
-const MAX_LABELS := 16
+## Thinned out (Captain, 2026-10-14: "all the UIs need a pass"; docs/ui_audit.md P2-22, branch
+## ui/small-screens): up to 16 three-line labels piled up over the squad. Now the nearest
+## MAX_LABELS get one, only the nearest DETAIL_LABELS get all three lines (the rest just intent
+## and status), and the farther labels are smaller and fainter.
+const MAX_LABELS := 8
+const DETAIL_LABELS := 3
+const FONT_NEAR := 26
+const FONT_FAR := 20
+const FAR_ALPHA := 0.65
 const REFRESH_S := 0.25
 const KEY := KEY_DELETE
 
@@ -87,7 +95,8 @@ func refresh() -> void:
 			labels.erase(s)
 	_mesh.clear_surfaces()
 	var drawing := false
-	for s in near:
+	for rank in near.size():
+		var s := near[rank]
 		var ai := SquadAI.of(s)
 		if ai == null:
 			continue
@@ -99,13 +108,16 @@ func refresh() -> void:
 			label.no_depth_test = true
 			label.fixed_size = true
 			label.pixel_size = 0.0007
-			label.font_size = 28
 			label.outline_size = 8
 			add_child(label)
 			labels[s] = label
 			label.global_position = s.global_position + Vector3(0, 2.3, 0)
-		label.text = text_for(s, ai)
+		var detail := rank < DETAIL_LABELS
+		label.text = text_for(s, ai) if detail else headline(ai)
+		label.font_size = FONT_NEAR if detail else FONT_FAR
 		label.modulate = Color(1, 0.5, 0.4) if ai.intent == SquadAI.Intent.FIGHT else Color(0.8, 1, 0.8)
+		if not detail:
+			label.modulate.a = FAR_ALPHA
 		var dest := ai.destination()
 		if dest.is_finite():
 			if not drawing:
@@ -118,8 +130,13 @@ func refresh() -> void:
 		_mesh.surface_end()
 
 
+## The first line, all a farther AI's label shows: its intent and status.
+static func headline(ai: SquadAI) -> String:
+	return "%s: %s" % [SquadAI.Intent.keys()[ai.intent], ai.status_text()]
+
+
 static func text_for(s: Soldier, ai: SquadAI) -> String:
-	var lines: Array[String] = ["%s: %s" % [SquadAI.Intent.keys()[ai.intent], ai.status_text()]]
+	var lines: Array[String] = [headline(ai)]
 	lines.append("target %s; %s; suppr %.1f" % [ai.target.display_name() if is_instance_valid(ai.target) else "none",
 		Squad.CombatMode.keys()[ai.combat_mode], s.suppression])
 	# What it's half-spotted (SquadAI._aware, Spotting: 1 is a full spot) and, in a hot zone, the

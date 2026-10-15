@@ -7,6 +7,8 @@ extends CanvasLayer
 ## report-<n>.png, a screenshot taken before the panel showed. Any build, any peer.
 
 const KEY := KEY_INSERT
+## The panel's width (logical px; narrower on a small window or a big UI scale).
+const WIDTH := 460.0
 
 var _panel: PanelContainer
 var _edit: LineEdit
@@ -20,18 +22,13 @@ func _init() -> void:
 
 
 func _ready() -> void:
-	var centre := CenterContainer.new()
-	centre.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	centre.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(centre)
-	_panel = PanelContainer.new()
-	centre.add_child(_panel)
-	var box := VBoxContainer.new()
-	box.custom_minimum_size = Vector2(420, 0)
-	_panel.add_child(box)
-	var title := Label.new()
-	title.text = "Bug report: what went wrong? (Enter saves, Esc cancels)"
-	box.add_child(title)
+	## The shared look (Captain, 2026-10-14: "all the UIs need a pass"; docs/ui_audit.md P2-21):
+	## a kit screen (themed, fitted to the window, scrolling if it must) with a wrapping title and
+	## key hints, instead of a default-theme box whose 440 px title ran past its 420 px panel.
+	var box := UiKit.screen(self, WIDTH)
+	_panel = box.get_parent() as PanelContainer
+	box.add_child(UiKit.title("Bug report"))
+	box.add_child(UiKit.hint("What went wrong? The note, a screenshot and the game's state are saved in this session's folder."))
 	_edit = LineEdit.new()
 	_edit.placeholder_text = "a short note"
 	_edit.text_submitted.connect(func(text: String) -> void: _submit(text))
@@ -40,6 +37,11 @@ func _ready() -> void:
 			get_viewport().set_input_as_handled()
 			close())
 	box.add_child(_edit)
+	var keys := HFlowContainer.new()
+	keys.add_theme_constant_override(&"h_separation", UiKit.SPACE_L)
+	keys.add_child(UiKit.key_hint("Enter", "Save"))
+	keys.add_child(UiKit.key_hint("Esc", "Cancel"))
+	box.add_child(keys)
 
 
 func is_open() -> bool:
