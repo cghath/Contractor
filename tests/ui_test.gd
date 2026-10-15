@@ -439,6 +439,7 @@ func _fit(screen: String, make: Callable) -> void:
 			_vp.size = Vector2i((Vector2(res) / GameSettings.ui_scale_for(res, ui_scale)).floor())
 			await _frames(2)
 			var off := _off_screen(node, Rect2(Vector2.ZERO, Vector2(_vp.size)).grow(1.0))
+			off.append_array(_blank_buttons(node))
 			if not off.is_empty():
 				bad.append("%dx%d: %s" % [res.x, res.y, ", ".join(off.slice(0, 3)) + (" (+%d more)" % (off.size() - 3) if off.size() > 3 else "")])
 		var key := "%s @%.1f" % [screen, ui_scale]
@@ -621,6 +622,29 @@ func _off_screen(node: Node, window: Rect2) -> PackedStringArray:
 			if c is ScrollContainer or c.clip_contents:
 				continue
 		out.append_array(_off_screen(child, window))
+	return out
+
+
+## How many characters of its text every button must show (or all of it, if shorter).
+const BUTTON_MIN_CHARS := 6
+
+
+## Visible buttons too narrow to show the first BUTTON_MIN_CHARS characters of their text (v0.4.2:
+## the FOB screen's UiKit buttons shrank to empty boxes in their wrapping rows, cut to nothing
+## by text_overrun_behavior, and nothing here noticed: they were on screen, just blank).
+func _blank_buttons(node: Node) -> PackedStringArray:
+	var out := PackedStringArray()
+	for child in node.get_children():
+		if (child is CanvasItem and not (child as CanvasItem).visible) or (child is CanvasLayer and not (child as CanvasLayer).visible):
+			continue  # a shut screen (the main menu's settings layer) isn't laid out
+		if child is Button:
+			var b := child as Button
+			var text := b.text.strip_edges()
+			if text != "" and b.size.y > 0.0:
+				var need := UiKit.button_text_width(b, text.left(BUTTON_MIN_CHARS)) - 2.0
+				if b.size.x + 0.5 < need:
+					out.append("button '%s' too narrow for its text (%.0f px, needs %.0f)" % [text.left(32), b.size.x, need])
+		out.append_array(_blank_buttons(child))
 	return out
 
 
