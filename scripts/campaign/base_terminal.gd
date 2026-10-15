@@ -2,7 +2,7 @@ class_name BaseTerminal
 extends StaticBody3D
 ## A desk, board or kiosk at the base hub that opens one page of the base screen (BaseUI):
 ## the hiring board, the medbay desk, the shop terminal, the ops desk (squad, roster,
-## deploy), the armory ledger, and the motor pool's sign (vehicles come in wave 5). Built
+## deploy), the armory ledger, and the motor pool's sign (the company's vehicles). Built
 ## locally on every peer like the voxel structures. Use it from the interaction menu (hold
 ## Left Ctrl and look at it): it's in the "interactables" group and offers its actions.
 ##
@@ -16,7 +16,7 @@ const KINDS := {
 	&"shop": {"title": "Shop terminal", "page": "shop", "colour": Color("5d7fa3")},
 	&"ops": {"title": "Ops desk", "page": "squad", "colour": Color("6f7d5c")},
 	&"armory": {"title": "Armory ledger", "page": "armory", "colour": Color("7a6a4f")},
-	&"motor_pool": {"title": "Motor pool", "page": "", "colour": Color("4f5559")},
+	&"motor_pool": {"title": "Motor pool", "page": "motor_pool", "colour": Color("4f5559")},
 }
 const SIZE := Vector3(1.0, 1.2, 0.5)
 ## The action point sits this far above the top, so the sight check clears the desk itself.
@@ -79,29 +79,9 @@ func action_point() -> Vector3:
 ## (a local Callable the menu runs)}.
 func interaction_actions(_actor: Node) -> Array[Dictionary]:
 	var page := String(KINDS.get(kind, {}).get("page", ""))
-	if kind == &"motor_pool":
-		return _motor_pool_actions()
 	if page == "":
-		return [{"id": &"use", "label": "%s (vehicles in wave 5)" % title(), "disabled": "No vehicles yet"}]
+		return [{"id": &"use", "label": "%s (not open yet)" % title(), "disabled": "Nothing here yet"}]
+	## The motor pool opens its page of the base screen like the other terminals (Captain,
+	## 2026-10-14: "all the UIs need a pass"; audit P2-23): its ring of one entry per vehicle
+	## (wave 5b, V4) is now the page's list, with the workshop's Service button on each.
 	return [{"id": &"use", "label": "Use %s" % title(), "disabled": "", "call": BaseHub.open_ui.bind(page)}]
-
-
-## Wave 5b (V4): the motor pool's sign lists the company's vehicles (MotorPoolNode's copy of the
-## pool) and books one into the workshop: every hit zone, the battery and the hull fixed and the
-## tank filled, for money and days (MotorPool.server_repair, on the host).
-func _motor_pool_actions() -> Array[Dictionary]:
-	var node := MotorPoolNode.of(self)
-	var out: Array[Dictionary] = []
-	var pool: Array = node.pool if node else []
-	if pool.is_empty():
-		return [{"id": &"use", "label": "Motor pool: no vehicles", "disabled": "The company owns no vehicles"}]
-	for v: Dictionary in pool:
-		var quote: Dictionary = v.get("quote", {})
-		var why := String(v.get("problem", ""))
-		var label := "%s: %d%% damaged, %d L" % [String(v.name), roundi(float(v.get("damage", 0.0)) * 100.0), roundi(float(v.get("fuel", 0.0)))]
-		if why == "" and (int(quote.get("cost", 0)) > 0 or int(quote.get("days", 0)) > 0):
-			label += " | Service: $%s, %d day%s" % [DebriefCalc.money(int(quote.cost)), int(quote.days), "" if int(quote.days) == 1 else "s"]
-		elif why == "":
-			why = "Ready"
-		out.append({"id": StringName("repair_" + String(v.id)), "label": label, "disabled": why, "call": node.request_repair.bind(String(v.id))})
-	return out

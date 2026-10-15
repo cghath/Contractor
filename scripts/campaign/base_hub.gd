@@ -698,17 +698,16 @@ func _show_loading(kind: String) -> void:
 	_loading = CanvasLayer.new()
 	_loading.name = "LevelLoading"
 	_loading.layer = 120
-	var shade := ColorRect.new()
-	shade.color = Color(0.05, 0.06, 0.05, 0.94)
-	shade.set_anchors_preset(Control.PRESET_FULL_RECT)
-	shade.mouse_filter = Control.MOUSE_FILTER_STOP
+	## In the shared look (Captain, 2026-10-14: "all the UIs need a pass"; docs/ui_audit.md
+	## branch 2): the theme's title text, wrapping across the whole window and centred in it,
+	## over the kit's dim, instead of a default-theme label anchored at the centre.
+	var shade := UiKit.dim(0.94)
+	UiKit.apply(shade)
 	_loading.add_child(shade)
-	var label := Label.new()
-	label.text = "Loading %s..." % {"base": "the base", "zone": "the zone"}.get(kind, "the level")
-	label.set_anchors_preset(Control.PRESET_CENTER)
-	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	label.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	label.grow_vertical = Control.GROW_DIRECTION_BOTH
+	var label := UiKit.title("Loading %s..." % {"base": "the base", "zone": "the zone"}.get(kind, "the level"))
+	label.name = "Label"
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	shade.add_child(label)
 	add_child(_loading)
 	_loading_serial += 1

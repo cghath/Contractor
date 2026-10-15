@@ -857,8 +857,11 @@ func _test_terminals(base: BaseLevel) -> void:
 	await get_tree().process_frame
 	check(boards.size() == 1 and aside and held and ui.is_open() and ui.page == "squad",
 		"the contract board: the base screen steps aside, the board keeps the mouse, and the screen is back when it closes")
+	## The motor pool's sign opens its own page (audit P2-23: it was only an interaction ring).
 	var pool: Dictionary = InteractionMenu.actions_for(player, base.get_node(^"Terminal_motor_pool"))[0]
-	check(String(pool.disabled) != "", "the motor pool waits for wave 5's vehicles")
+	check(String(pool.label) == "Use Motor pool" and String(pool.disabled) == "" and pool.has("call"), "the motor pool offers Use in the interaction menu")
+	InteractionMenu.perform(player, pool)
+	check(ui.is_open() and ui.page == "motor_pool" and ui._pages["motor_pool"].get_child_count() > 0, "and opens the base screen on its page")
 	ui.close()
 
 
