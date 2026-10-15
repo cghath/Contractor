@@ -3495,7 +3495,7 @@ func _keep_to_fire_spot() -> void:
 
 ## Status words for a unit with a mark and no line of fire (_shoot), or "" for none.
 func _no_shot_text() -> String:
-	if intent not in [Intent.FOLLOW, Intent.HOLD, Intent.FIGHT] or body.stunned_s > 0.0 or body.suppression >= PINNED:
+	if body == null or intent not in [Intent.FOLLOW, Intent.HOLD, Intent.FIGHT] or body.stunned_s > 0.0 or body.suppression >= PINNED:
 		return ""
 	if _fire_spot != null and _has_destination and _destination == _fire_spot:
 		return "Moving to a fire position"
