@@ -362,8 +362,13 @@ func _test_bug_report(player: Soldier, level: CompoundLevel, faller: Soldier) ->
 	overlay.set_shown(true)
 	overlay.refresh()
 	var label: Label3D = overlay.labels.get(scout)
-	check(label != null and SquadAI.Intent.keys()[SquadAI.of(scout).intent] in label.text and "suppr" in label.text and "aware" in label.text,
+	## Only the nearest AiOverlay.DETAIL_LABELS show all three lines (ui/small-screens thinned
+	## the labels out), so the spotting line is checked on the full text.
+	var full := AiOverlay.text_for(scout, SquadAI.of(scout))
+	check(label != null and SquadAI.Intent.keys()[SquadAI.of(scout).intent] in label.text and "suppr" in full and "aware" in full,
 		"it has a label with the intent and what it's spotting over a nearby AI (%s)" % [label.text.replace("\n", " | ") if label else "none"])
+	check(overlay.labels.size() <= AiOverlay.MAX_LABELS and overlay.labels.values().filter(func(l: Label3D) -> bool: return l.text.count("\n") >= 2).size() <= AiOverlay.DETAIL_LABELS,
+		"no more than %d labels, %d of them in full" % [AiOverlay.MAX_LABELS, AiOverlay.DETAIL_LABELS])
 	check(not overlay.labels.has(faller), "and none over one far away")
 	overlay.set_shown(false)
 	check(overlay.labels.is_empty(), "switched off, the labels go")

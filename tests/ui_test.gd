@@ -63,6 +63,15 @@ func _ready() -> void:
 			return ui)
 	await _fit("objectives panel", func() -> Node: return _in_layer(ObjectivesPanel.new()))
 	await _fit("ammo readout", func() -> Node: return _in_layer(AmmoReadout.new()))
+	## The command menu needs no level to draw (ui/small-screens, P2-19): its longest level
+	## (Move, eight orders) under the selection path.
+	await _fit("command menu", func() -> Node:
+		var menu := CommandMenu.new(null)
+		menu.ready.connect(func() -> void:
+			menu.open()
+			menu._stack.append(CommandMenu.MENU["items"][0])
+			menu._redraw())
+		return _in_layer(menu))
 	_summary()
 	GameSettings.reset_all()
 	GameSettings.use_file("")
