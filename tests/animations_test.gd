@@ -164,6 +164,7 @@ func _test_world_scale() -> void:
 	check(absf(stand - 1.65) < 0.02 and stand / top > 0.9 and stand / top < 0.95 and stand < BuildingGen.DOOR_H - 0.3,
 		"standing eye %.2f m on a %.2f m man (%.0f%%; real 91-94%%), under a %.1f m door" % [stand, top, stand / top * 100.0, BuildingGen.DOOR_H])
 	check(crouch > 0.9 and crouch < 1.15 and prone > 0.2 and prone < 0.45, "crouched eye %.2f m, prone %.2f m" % [crouch, prone])
+	check(bool(GameSettings.DEFAULTS.video.head_bob) and player.camera.position.length() < 0.001, "head bob on by default (a settings toggle), the view still standing still")
 	check(is_equal_approx(float(GameSettings.DEFAULTS.video.hfov), 90.0) and absf(GameSettings.vertical_fov(90.0) - 58.72) < 0.01
 		and absf(GameSettings.vertical_fov(112.33) - 80.0) < 0.05,
 		"the view: 90 deg across 16:9 by default, a %.1f deg vertical camera (the old 80 vertical was 112 across)" % GameSettings.vertical_fov(90.0))

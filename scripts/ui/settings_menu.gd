@@ -133,6 +133,7 @@ func _video_tab() -> Control:
 	page.add_child(_choice("Anti-aliasing", "video", "antialiasing", GameSettings.ANTIALIASING))
 	page.add_child(_choice("Shadows", "video", "shadows", GameSettings.SHADOWS))
 	page.add_child(_slider("Field of view (across, 16:9)", "video", "hfov", func(v: float) -> String: return "%d deg" % roundi(v)))
+	page.add_child(_toggle("Head bob (the view moves with your steps)", "video", "head_bob"))
 	page.add_child(_ui_scale_row())
 	page.add_child(_toggle("Objective markers on screen (the hint line always shows)", "hud", "objective_markers"))
 	return page.get_parent()

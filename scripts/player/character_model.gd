@@ -1307,6 +1307,11 @@ func gait_weight() -> float:
 	return _gait_w
 
 
+## The hips' bob this frame (m, up), the view's to follow.
+func gait_bob() -> float:
+	return _gait_bob
+
+
 ## The ground speed the legs are walking at (m/s, the model's space).
 func gait_speed() -> float:
 	return _speed

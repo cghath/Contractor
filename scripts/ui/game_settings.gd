@@ -37,7 +37,7 @@ const SHADOW_LEVELS := {
 }
 const DEFAULTS := {
 	"video": {"window_mode": "windowed", "resolution": "1600x900", "vsync": true, "fps_cap": 0,
-		"render_scale": 1.0, "antialiasing": "fxaa", "shadows": "medium", "hfov": 90.0, "ui_scale": 1.0},
+		"render_scale": 1.0, "antialiasing": "fxaa", "shadows": "medium", "hfov": 90.0, "ui_scale": 1.0, "head_bob": true},
 	# infil_music: Captain, 2026-10-14, temporary (InfilMusic: Ride of the Valkyries on helicopter insertions).
 	"audio": {"master": 0.8, "effects": 1.0, "voice": 1.0, "music": 0.8, "mute_unfocused": false, "infil_music": true},
 	"controls": {"mouse_sensitivity": 1.0, "aim_sensitivity": 0.75, "invert_y": false},
@@ -273,6 +273,11 @@ static func resolution_size(text: String) -> Vector2i:
 ## 112 deg across on 16:9, which made the world look small and far and every pace look fast.
 static func fov() -> float:
 	return float(get_value("video", "hfov"))
+
+
+## Whether the view bobs with the steps (docs/animation.md, "First person").
+static func head_bob() -> bool:
+	return bool(get_value("video", "head_bob"))
 
 
 ## The camera's (vertical) field of view for the setting: what Camera3D.fov takes. Hor+: wider
