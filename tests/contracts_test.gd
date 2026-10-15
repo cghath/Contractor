@@ -56,6 +56,7 @@ func _ready() -> void:
 	_test_intel_and_salvage()
 	_test_set_down_at_the_point()
 	await _test_board_ui()
+	await _test_debrief_screen()
 	$Main/Menu.host()
 	level = CompoundLevel.current(self)
 	while level.players.get_node_or_null(^"1") == null or not level.voxel_world.is_built():
@@ -754,6 +755,95 @@ func _test_board_ui() -> void:
 	screen.close()
 	await _frames(1)
 	check(Contracts.last_debrief().finished, "Continue on the host closes the debrief")
+
+
+## Captain, 2026-10-14 (v0.3.1): "its hard to select the items you want". The debrief screen
+## groups what came out and the salvage pool per item type; the sums must match the raw lists,
+## claiming N of a type must stay in the budget (the host still checks each lot), and the panel
+## must fit the screen at every resolution and UI scale.
+func _test_debrief_screen() -> void:
+	print("Debrief screen (grouped salvage, budget, fit)")
+	Contracts.new_full_campaign(62, 100000)
+	Economy.take_unbanked()
+	var cid := _make_offer("intel_grab", "harbour_yard")
+	Contracts.server_accept(cid, {"pay_points": 0, "salvage_points": 4, "support_points": 0, "advance_share": 0.3})
+	Contracts.server_start_deployment([cid])
+	var out_items := [{"id": "hvt_case", "count": 1}]
+	for i in 6:  # what six soldiers carried, one entry each, as the Captain's screenshot had it
+		out_items.append_array([{"id": "m4a1", "count": 1}, {"id": "m17", "count": 1}, {"id": "mag_556", "count": 3}, {"id": "ifak", "count": 1}, {"id": "frag_grenade", "count": 2}])
+	var field := [{"id": "m4a1", "count": 1}, {"id": "m4a1", "count": 1}, {"id": "rounds_556", "count": 30}]
+	for i in 4:
+		field.append_array([{"id": "ifak", "count": 1}, {"id": "electronics_salvage", "count": 4}, {"id": "mag_556", "count": 3}])
+	var d := Contracts.server_end_deployment({"items": out_items, "field_items": field, "extracted": ["You", "Alpha", "Bravo"]})
+	var raw := {}
+	for e: Dictionary in d.items_out:
+		raw[String(e.id)] = int(raw.get(String(e.id), 0)) + int(e.get("count", 1))
+	var grouped := DebriefCalc.group_items(d.items_out)
+	var grouped_ok := grouped.size() == raw.size()
+	for g: Dictionary in grouped:
+		grouped_ok = grouped_ok and int(raw.get(g.id, -1)) == int(g.count) and g.category in DebriefCalc.CATEGORIES
+	check(grouped_ok and grouped.filter(func(g: Dictionary) -> bool: return g.id == "m4a1")[0].count == 6
+		and grouped.filter(func(g: Dictionary) -> bool: return g.id == "m4a1")[0].category == "weapons"
+		and grouped.filter(func(g: Dictionary) -> bool: return g.id == "frag_grenade")[0].category == "grenades",
+		"what was carried out, summed per item type, adds up to the raw list (%d kinds)" % grouped.size())
+	var pool: Array = d.salvage.pool
+	var groups := DebriefCalc.salvage_groups(d)
+	var lots: Array = []
+	var count := 0
+	var value := 0
+	for g: Dictionary in groups:
+		lots.append_array(g.lots)
+		count += int(g.count)
+		value += int(g.value)
+	lots.sort()
+	check(lots == range(pool.size()) and value == int(d.salvage.pool_value) and count == pool.reduce(func(acc: int, e: Dictionary) -> int: return acc + int(e.count), 0)
+		and groups.size() == 5 and int(groups[0].value) >= int(groups[-1].value),
+		"the salvage pool, one row per item type: every lot once, counts and values add up, sorted by value")
+	var budget := int(d.salvage.budget)
+	var three := DebriefCalc.picks_for(d, "mag_556", 3)
+	var took := three.all(func(i: int) -> bool: return Contracts.server_pick_salvage(i))
+	check(three.size() == 3 and took and int(d.salvage.spent) <= budget and DebriefCalc.salvage_groups(d).filter(func(g: Dictionary) -> bool: return g.id == "mag_556")[0].picked.size() == 3,
+		"claiming three lots of magazines: the host takes them all, $%s of $%s" % [DebriefCalc.money(d.salvage.spent), DebriefCalc.money(budget)])
+	var most := DebriefCalc.picks_for(d, "electronics_salvage", -1)
+	took = most.all(func(i: int) -> bool: return Contracts.server_pick_salvage(i))
+	check(took and int(d.salvage.spent) <= budget and (DebriefCalc.picks_for(d, "electronics_salvage", 1).is_empty()),
+		"claiming as many electronics as fit stays in the budget ($%s of $%s)" % [DebriefCalc.money(d.salvage.spent), DebriefCalc.money(budget)])
+	var best := DebriefCalc.best_value_picks(d)
+	took = best.all(func(i: int) -> bool: return Contracts.server_pick_salvage(i))
+	var left := budget - int(d.salvage.spent)
+	var any_fits := false
+	for i in pool.size():
+		any_fits = any_fits or (not i in d.salvage.picked and int(pool[i].value) <= left)
+	check(took and int(d.salvage.spent) <= budget and not any_fits, "claim best value fills the budget: nothing else fits ($%s left)" % DebriefCalc.money(left))
+	var blocked := groups.filter(func(g: Dictionary) -> bool: return (g.picked as Array).size() < (g.lots as Array).size() and DebriefCalc.pick_block_reason(d, g.id) != "")
+	check(DebriefCalc.pick_block_reason(d, "m4a1").begins_with("Over budget") or DebriefCalc.pick_block_reason(d, "m4a1") == "All of it is claimed",
+		"a row that won't fit says why (%d rows blocked)" % blocked.size())
+	var spent := int(d.salvage.spent)
+	var back := DebriefCalc.unpicks_for(d, "mag_556", 1)
+	check(back.size() == 1 and Contracts.server_unpick_salvage(back[0]) and int(d.salvage.spent) == spent - int(pool[back[0]].value)
+		and DebriefCalc.picks_for(d, "mag_556", 1) == back, "returning one lot gives its value back, and it can be claimed again")
+	var screen := Contracts.show_debrief()
+	await _frames(2)
+	var text := screen.text()
+	check(text.contains("CARRIED OUT") and text.contains("6 x M4A1") and text.contains("Claimed / qty") and text.contains("Paid now") and text.contains("SALVAGE"),
+		"the screen shows the grouped carry-out and the salvage table")
+	var name_rows := 0
+	for node in screen.panel().find_children("*", "Label", true, false):
+		if (node as Label).text == DebriefCalc.item_name("ifak"):
+			name_rows += 1
+	check(name_rows == 1, "one salvage row for the four IFAK lots (%d)" % name_rows)
+	var bad := PackedStringArray()
+	for res: Vector2 in [Vector2(1280, 720), Vector2(1366, 768), Vector2(1600, 900), Vector2(1920, 1080), Vector2(1920, 1200),
+			Vector2(2000, 1250), Vector2(2560, 1440), Vector2(2560, 1600), Vector2(3440, 1440), Vector2(3840, 2160)]:
+		for scale: float in [0.75, 1.0, 1.5]:
+			var view := res / scale
+			screen.fit(view)
+			var rect := screen.panel().get_rect()
+			if not Rect2(Vector2.ZERO, view).encloses(rect) or rect.size.x < 600.0 or rect.size.y < 400.0:
+				bad.append("%dx%d@%.2f: %s" % [res.x, res.y, scale, rect])
+	check(bad.is_empty(), "the debrief panel fits inside the screen at 10 resolutions and 3 UI scales%s" % ("" if bad.is_empty() else ": " + ", ".join(bad)))
+	screen.close()
+	await _frames(1)
 
 
 # --- Live objectives in the level --------------------------------------------------------------
