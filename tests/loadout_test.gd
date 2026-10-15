@@ -242,6 +242,24 @@ func _test_session() -> void:
 	check(_hub_units() == stocked, "the medic kit came out of the stash: nothing made")
 	check(got <= int(stocked.get("iv_18", 0)) and got == had and not _notes.is_empty() and String(_notes.back()).contains("Missing from the stash: ")
 		and String(_notes.back()).contains("IV"), "with the stash's IVs gone (%d before), only what was there; the note says what's missing (%s)" % [ivs, _notes])
+	# Buying what the edit is short of: the IVs the stash ran out of, at the shop's price.
+	print("Buy missing")
+	var miss: Dictionary = BaseHub.member(who).get("edit_missing", {})
+	check(miss.has("iv_18"), "the short medic kit is written on the roster entry (%s)" % [miss])
+	var cost := int(BaseHub.missing_cost(miss).cost)
+	Economy.add_cash(-Economy.cash(), "test: broke")
+	Economy.add_cash(cost - 1, "test: a dollar short")
+	_notes.clear()
+	BaseHub.request("loadout", [who, "buy_missing", {}])
+	await _frames(3)
+	check(not _notes.is_empty() and String(_notes.back()).contains("Not enough cash") and Economy.cash() == cost - 1,
+		"a dollar short: refused, nothing spent (%s)" % [_notes])
+	Economy.add_cash(1, "test: enough")
+	BaseHub.request("loadout", [who, "buy_missing", {}])
+	await _frames(3)
+	var bought := int(Roster.gear_counts(Roster.json_safe(s2.inventory.net_state)).get("iv_18", 0))
+	check(bought >= 3 and Economy.cash() < cost and not BaseHub.member(who).has("edit_missing"),
+		"buying fills the shortfall (%d IVs on him) and takes the money (%d left of %d)" % [bought, Economy.cash(), cost])
 	# The host can't change another player's kit (a client is peer 2 here).
 	check(BaseHub.server_loadout(2, me, "add", {"id": "smoke_grenade"}).contains("their own kit"), "a client's request on the host's kit is refused")
 	await _test_fit(ids)

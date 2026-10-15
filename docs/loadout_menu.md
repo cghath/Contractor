@@ -52,6 +52,12 @@ never another player's (they can give to another player). Ops: `slot`, `optic`, 
 `copy_standing`, `restock`, `sync` (read the muster line's gear into the roster for the view).
 The answer comes back as the usual note; the roster and stash broadcast with the view.
 
+Buying (2026-10-15): an edit the stash can't fill writes `edit_missing` on the roster entry; the
+Kit column then shows "Buy missing (N items, $X)" (and one button per item), disabled with the
+reason when cash is short. Op `buy_missing` [params `id` optional] buys at shop prices through
+Economy.server_buy and redoes the edit. The armory lays the stash out in category bands
+(BaseArmory.BANDS); deliveries and returns take the next free slot of their band.
+
 ## Numbers (Proposed)
 
 - Fill ammo: each gun's magazines up to the role kit's count for that magazine, else 6 for a

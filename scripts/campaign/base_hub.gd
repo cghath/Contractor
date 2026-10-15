@@ -1901,17 +1901,13 @@ func _apply_stash(lvl: BaseLevel, before: Array, after: Array) -> void:
 	for key: String in now:
 		if int(now[key]) > int(had.get(key, 0)):
 			come[key] = int(now[key]) - int(had.get(key, 0))
-	var i := 0
 	for entry: Dictionary in after:
 		var key := Restock.stash_key(StringName(String(entry.id)), entry.get("state", {}))
 		var n := mini(int(come.get(key, 0)), int(entry.count))
 		if n <= 0:
 			continue
 		come[key] = int(come[key]) - n
-		var jitter := Vector3(randf_range(-0.6, 0.6), 0.0, randf_range(-0.3, 0.3))
-		lvl.spawn_item(StringName(String(entry.id)), n, BaseLevel.DELIVERY + jitter, "stash_r_%d_%d" % [Time.get_ticks_usec(), i],
-			GameState.from_json(entry.get("state", {})))
-		i += 1
+		lvl.server_deliver(StringName(String(entry.id)), n, GameState.from_json(entry.get("state", {})))
 	base()["stash"] = Roster.json_safe(after)
 	_changed(&"base")
 
@@ -1975,6 +1971,8 @@ func server_loadout(sender: int, who: String, op: String, p: Dictionary) -> Stri
 	var s: Soldier = a.soldier
 	if not s.vitals.is_up():
 		return "%s can't kit up now" % a.name
+	if op == "buy_missing":
+		return _server_buy_missing(lvl, sender, a, String(p.get("id", "")))
 	if op in STANDING_OPS:
 		return _server_standing(sender, a, op, p)
 	var t := Loadouts.template_of(Roster.json_safe(s.inventory.net_state))
@@ -2063,6 +2061,7 @@ func _loadout_apply(lvl: BaseLevel, people: Array) -> PackedStringArray:
 		else:
 			a.person["gear"] = Roster.json_safe(s.inventory.net_state.duplicate(true))
 		lines.append(Loadouts.short_text(results[i]))
+		_note_edit_missing(a, results[i])
 		SessionLog.note("loadout: %s: %s" % [SessionLog.who(s), lines[i] if lines[i] != "" else "changed"])
 	_apply_stash(lvl, before, pool)
 	_changed(&"roster")
@@ -2294,3 +2293,65 @@ func _unhandled_input(event: InputEvent) -> void:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_CLOSE_REQUEST and campaign_running and Net.is_hosting():
 		server_save()
+
+
+# --- Buying what an edit is short of (Captain, 2026-10-15) ----------------------------------
+# "Need the purchase option in the loadout editor so we aren't constrained by a lack of items
+# but have to buy them." What the last edit could not draw from the stash is written on the
+# roster entry ("edit_missing", {item id: units}, replicated with the roster so every client's
+# menu can price it) with the edit's template kept here on the host; "buy_missing" buys it at
+# the shop's prices with company money and redoes the edit.
+
+var _edit_wants := {}  # who -> the template the last short edit asked for
+
+
+func _note_edit_missing(a: Dictionary, res: Dictionary) -> void:
+	var missing: Dictionary = {}
+	for id: Variant in res.get("missing", {}):
+		if int(res.missing[id]) > 0:
+			missing[String(id)] = int(res.missing[id])
+	if missing.is_empty():
+		a.person.erase("edit_missing")
+		_edit_wants.erase(a.who)
+	else:
+		a.person["edit_missing"] = missing
+		_edit_wants[a.who] = a.template.duplicate(true)
+
+
+## What buying `missing` ({id: units}) costs, over the items the shop sells ({"cost", "units",
+## "unbuyable": [ids]}).
+static func missing_cost(missing: Dictionary) -> Dictionary:
+	var cost := 0
+	var units := 0
+	var unbuyable: Array = []
+	for id: String in missing:
+		var price := BaseEconomy.item_price(StringName(id))
+		if price <= 0:
+			unbuyable.append(id)
+			continue
+		cost += price * int(missing[id])
+		units += int(missing[id])
+	return {"cost": cost, "units": units, "unbuyable": unbuyable}
+
+
+## Host: buys what `a`'s last edit was short of (only `only_id` when given), then redoes the
+## edit. Returns what happened, or why not.
+func _server_buy_missing(lvl: BaseLevel, sender: int, a: Dictionary, only_id := "") -> String:
+	var missing: Dictionary = a.person.get("edit_missing", {})
+	if missing.is_empty() or not _edit_wants.has(a.who):
+		return "Nothing missing to buy"
+	var want := {}
+	for id: String in missing:
+		if only_id == "" or only_id == id:
+			want[id] = int(missing[id])
+	var price := missing_cost(want)
+	if int(price.units) <= 0:
+		return "The shop doesn't sell that"
+	if BaseEconomy.funds() < int(price.cost):
+		return "Not enough cash: $%d needed" % int(price.cost)
+	for id: String in want:
+		if id not in price.unbuyable:
+			Economy.server_buy(StringName(id), int(want[id]), sender)
+	a["template"] = _edit_wants[a.who]
+	var lines := _loadout_apply(lvl, [a])
+	return "%s: bought %d items for $%d%s" % [a.name, int(price.units), int(price.cost), (". " + lines[0]) if lines[0] != "" else ""]

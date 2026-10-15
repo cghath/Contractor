@@ -15,6 +15,9 @@ const SPACING := Vector2(0.65, 0.75)
 const DROP_HEIGHT := 0.35
 const OVERFLOW_ORIGIN := Vector2(-15.0, -6.0)
 const OVERFLOW_COLUMNS := 12
+## The armory floor's row bands, back wall first: [name, rows]. Each category of item lies in
+## its own band (band_of), left to right; what doesn't fit goes on to the overflow rows.
+const BANDS: Array = [["weapons", 1], ["armor", 1], ["gear", 1], ["ammo", 1], ["medical", 2], ["grenades", 1], ["other", 1]]
 
 
 ## Equal entries stack: same item and same state (plain items, magazines holding the same
@@ -116,6 +119,93 @@ static func slot_position(i: int) -> Vector3:
 		return Vector3(AREA.position.x + (i % columns + 0.5) * SPACING.x, DROP_HEIGHT, AREA.position.y + (i / columns + 0.5) * SPACING.y)
 	var j := i - columns * rows
 	return Vector3(OVERFLOW_ORIGIN.x + (j % OVERFLOW_COLUMNS) * SPACING.x, DROP_HEIGHT, OVERFLOW_ORIGIN.y + (j / OVERFLOW_COLUMNS) * SPACING.y)
+
+
+## The band an item belongs in: weapons (and optics), armour (plates, helmets, carriers), gear
+## (packs, pouches, rigs), ammo (mags and rounds), medical, grenades (throwables), other.
+static func band_of(id: StringName) -> int:
+	var group := Loadouts.group_of(ItemDB.get_item(id) if ItemDB.has_item(id) else null)
+	var name: String = {"optics": "weapons", "packs": "gear", "pouches": "gear"}.get(group, group)
+	for b in BANDS.size():
+		if BANDS[b][0] == name:
+			return b
+	return BANDS.size() - 1
+
+
+static func columns() -> int:
+	return maxi(floori(AREA.size.x / SPACING.x), 1)
+
+
+static func grid_slots() -> int:
+	return columns() * maxi(floori(AREA.size.y / SPACING.y), 1)
+
+
+## The slot index (slot_position) of the k-th place of `band`, or -1 past the band's rows (the
+## overflow rows take it from there).
+static func band_slot(band: int, k: int) -> int:
+	var first := 0
+	for b in band:
+		first += int(BANDS[b][1])
+	if k < int(BANDS[band][1]) * columns():
+		return first * columns() + k
+	return -1
+
+
+## Slot index of every stash entry, in stash order: grouped by band, each band sorted by item
+## id (then stash order), overflowing into the overflow rows. Deterministic.
+static func layout(stash: Array) -> Array:
+	var order: Array = range(stash.size())
+	order.sort_custom(func(a: int, b: int) -> bool:
+		var ba := band_of(StringName(String(stash[a].id)))
+		var bb := band_of(StringName(String(stash[b].id)))
+		if ba != bb:
+			return ba < bb
+		var ia := String(stash[a].id)
+		var ib := String(stash[b].id)
+		return ia < ib if ia != ib else a < b)
+	var out: Array = []
+	out.resize(stash.size())
+	var used := {}
+	var overflow := grid_slots()
+	for idx: int in order:
+		var band := band_of(StringName(String(stash[idx].id)))
+		var k: int = used.get(band, 0)
+		used[band] = k + 1
+		var slot := band_slot(band, k)
+		if slot < 0:
+			slot = overflow
+			overflow += 1
+		out[idx] = slot
+	return out
+
+
+## The slot a floor position is on (the grid cell it is in, or the nearest overflow place), or -1.
+static func slot_at(p: Vector3) -> int:
+	var cols := columns()
+	var cx := floori((p.x - AREA.position.x) / SPACING.x)
+	var cz := floori((p.z - AREA.position.y) / SPACING.y)
+	if cx >= 0 and cx < cols and cz >= 0 and cz < grid_slots() / cols:
+		return cz * cols + cx
+	var ox := roundi((p.x - OVERFLOW_ORIGIN.x) / SPACING.x)
+	var oz := roundi((p.z - OVERFLOW_ORIGIN.y) / SPACING.y)
+	if ox >= 0 and ox < OVERFLOW_COLUMNS and oz >= 0 and oz < 40:
+		return grid_slots() + oz * OVERFLOW_COLUMNS + ox
+	return -1
+
+
+## The first free slot for `id` (not in `occupied`, {slot: true}): its band's, else the first
+## free overflow slot.
+static func free_slot(id: StringName, occupied: Dictionary) -> int:
+	var band := band_of(id)
+	var k := 0
+	while band_slot(band, k) >= 0:
+		if not occupied.has(band_slot(band, k)):
+			return band_slot(band, k)
+		k += 1
+	var j := grid_slots()
+	while occupied.has(j):
+		j += 1
+	return j
 
 
 static func _same_state(a: Dictionary, b: Dictionary) -> bool:

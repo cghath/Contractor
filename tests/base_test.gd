@@ -629,6 +629,48 @@ func _test_session() -> void:
 		"the hub's map covers the FOB (%.0f m across)" % base.map_area().size.x)
 	var up := await _wait_until(func() -> bool: return ids.all(func(mid: String) -> bool: return base.muster_soldier(mid) != null), 30.0)
 	check(up, "the company's people stand at the muster line")
+	# The armory is organised: bands per category, no shared slot; deliveries take free slots.
+	var stash_now := BaseHub.stash()
+	var slots := BaseArmory.layout(stash_now)
+	var seen := {}
+	var bands_ok := true
+	for k in stash_now.size():
+		bands_ok = bands_ok and not seen.has(slots[k])
+		seen[slots[k]] = true
+	check(bands_ok, "the stash is laid out one item to a slot (%d entries)" % stash_now.size())
+	var band_rows := {}
+	for k in stash_now.size():
+		if slots[k] < BaseArmory.grid_slots():
+			var b := BaseArmory.band_of(StringName(String(stash_now[k].id)))
+			var row: int = slots[k] / BaseArmory.columns()
+			band_rows[row] = band_rows.get(row, b)
+			bands_ok = bands_ok and band_rows[row] == b
+	check(bands_ok, "each armory row holds one category")
+	var occupied_before := {}
+	for node: Node in base.items.get_children():
+		if node is WorldItem and BaseArmory.slot_at((node as WorldItem).global_position) >= 0:
+			occupied_before[BaseArmory.slot_at((node as WorldItem).global_position)] = true
+	var fresh: Array[StringName] = []
+	for gid: StringName in [&"flashbang", &"smoke_grenade", &"frag_grenade"]:
+		if BaseArmory.count_of(BaseHub.stash(), gid) == 0:
+			fresh.append(gid)
+			base.server_deliver(gid, 2, {})
+	var landed := {}
+	var clash := false
+	for node: Node in base.items.get_children():
+		var w := node as WorldItem
+		if w and BaseArmory.slot_at(w.global_position) >= 0:
+			var sl := BaseArmory.slot_at(w.global_position)
+			if landed.has(sl):
+				clash = true
+			landed[sl] = true
+	check(not clash, "a delivery lands on a free slot, never on top of another item")
+	check(BaseArmory.band_of(&"flashbang") == BaseArmory.band_of(&"frag_grenade"), "grenades share a band")
+	for node: Node in base.items.get_children():  # the test's deliveries go again: the stash is what it was
+		var w := node as WorldItem
+		if w and w.item_id in fresh:
+			GameState.item_taken(w.uid)
+			w.queue_free()
 	var stash_counts := BaseArmory.counts(BaseHub.stash())
 	check(BaseArmory.counts(base.server_collect_stash()) == stash_counts, "the stash lies in the armory as world items (%d kinds)" % stash_counts.size())
 	var member0 := BaseHub.member(ids[0])

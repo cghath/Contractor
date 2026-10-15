@@ -237,6 +237,8 @@ func _build_doll(p: Dictionary) -> void:
 	doll_box.add_child(_wrap("Load %.1f kg: %s (movement: %s)" % [float(load.kg), Loadouts.tier_name(int(load.tier)), _tier_hint(int(load.tier))]))
 	if not editable:
 		doll_box.add_child(_wrap("View only: other players set their own kit (you can give them items).", COL_DIM))
+	if editable:
+		_build_buy(who)
 	var stash: Array = BaseHub.view.get("stash", [])
 	var have := BaseArmory.counts(stash)
 	# Worn: each slot with what the stash has for it.
@@ -554,3 +556,35 @@ static func _sorted(ids: Array) -> Array:
 	var out := ids.duplicate()
 	out.sort_custom(func(a: Variant, b: Variant) -> bool: return _name(String(a)) < _name(String(b)))
 	return out
+
+
+## What the last edit was short of, with a Buy button for all of it (company money, the shop's
+## prices, through the host) and one per item; disabled with the reason when funds fall short.
+func _build_buy(who: String) -> void:
+	var missing: Dictionary = entry_of(who).get("edit_missing", {})
+	if missing.is_empty():
+		return
+	var funds := int(BaseHub.view.get("funds", 0))
+	var all := BaseHub.missing_cost(missing)
+	doll_box.add_child(_wrap("Short of: " + Restock.list_text(missing), COL_SHORT))
+	if int(all.units) <= 0:
+		doll_box.add_child(_wrap("The shop doesn't sell these.", COL_DIM))
+		return
+	var buy := _button("Buy missing (%d items, $%d)" % [int(all.units), int(all.cost)], func() -> void: ask("buy_missing"))
+	buy.name = "BuyMissing"
+	buy.disabled = funds < int(all.cost)
+	buy.tooltip_text = "Not enough cash: $%d of $%d" % [funds, int(all.cost)] if buy.disabled else "Buy it all from the shop, then redo the change"
+	doll_box.add_child(buy)
+	if buy.disabled:
+		doll_box.add_child(_wrap("Not enough cash: $%d of the $%d needed." % [funds, int(all.cost)], COL_SHORT))
+	if missing.size() > 1:
+		var row := _flow()
+		for id: String in _sorted(missing.keys()):
+			var price := BaseEconomy.item_price(StringName(id)) * int(missing[id])
+			if price <= 0:
+				continue
+			var one := _button("Buy %s x%d ($%d)" % [_name(id), int(missing[id]), price], func() -> void: ask("buy_missing", {"id": id}))
+			one.name = "BuyOne_" + id
+			one.disabled = funds < price
+			row.add_child(one)
+		doll_box.add_child(row)

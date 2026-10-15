@@ -89,9 +89,10 @@ func _on_built() -> void:
 
 ## Host: lays the stash out as world items (armory floor first).
 func server_spawn_stash(stash: Array) -> void:
+	var slots := BaseArmory.layout(stash)
 	for i in stash.size():
 		var entry: Dictionary = stash[i]
-		spawn_item(StringName(entry.id), int(entry.count), BaseArmory.slot_position(i), "stash_%d_%d" % [i, Time.get_ticks_usec()],
+		spawn_item(StringName(entry.id), int(entry.count), BaseArmory.slot_position(slots[i]), "stash_%d_%d" % [i, Time.get_ticks_usec()],
 			GameState.from_json(entry.get("state", {})))
 
 
@@ -100,10 +101,26 @@ func server_collect_stash() -> Array:
 	return BaseArmory.from_world_items(items.get_children())
 
 
-## Host: puts a new item into the stash where it can be seen (a delivery from the shop).
+## Host: puts a new item into the stash where it can be seen (a delivery from the shop, an
+## item back from a loadout change): onto an existing pile of the very same item if one lies
+## in the armory, else into the next free slot of its category's band (BaseArmory.BANDS), then
+## the overflow rows. Never on top of something else.
 func server_deliver(id: StringName, count: int, state := {}) -> void:
-	var jitter := Vector3(randf_range(-0.6, 0.6), 0.0, randf_range(-0.3, 0.3))
-	spawn_item(id, count, DELIVERY + jitter, "stash_d_%d" % Time.get_ticks_usec(), state)
+	var key := Restock.stash_key(id, state)
+	var occupied := {}
+	for node: Node in items.get_children():
+		var w := node as WorldItem
+		if w == null or w.is_queued_for_deletion():
+			continue
+		var slot := BaseArmory.slot_at(w.global_position)
+		if slot < 0:
+			continue
+		if Restock.stash_key(w.item_id, w.state) == key and (state.is_empty() or ItemDB.get_item(id).type == "ammo"):
+			w.count += count
+			return
+		occupied[slot] = true
+	spawn_item(id, count, BaseArmory.slot_position(BaseArmory.free_slot(id, occupied)), "stash_d_%d" % Time.get_ticks_usec(), state)
+
 
 
 # --- The muster line ----------------------------------------------------------------------
