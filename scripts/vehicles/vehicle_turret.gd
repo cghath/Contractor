@@ -20,6 +20,8 @@ extends RefCounted
 ## muzzle is "gun" "at", at rest):
 ##   "pivot": [x, y, z]   the ring's axis (x, z) and its top (y): voxels above it within
 ##                        "radius" of the axis, up to "top", turn with the turret
+##                        ("radius" reaches the shield's far corners, the wing tips: Captain,
+##                        2026-10-14, "part of the turret doesn't move on the matv")
 ##   "gun": {"trunnion": [y, z], "box": [x0, y0, z0, x1, y1, z1], "colours": ["gun", ...]}
 ##                        the gun's voxels (in the box, of these VehicleArt.P colours) elevate
 ##                        about the trunnion's line (across x)

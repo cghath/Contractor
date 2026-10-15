@@ -35,6 +35,12 @@ extends Control
 
 ## The settings menu's switch for the markers (the hint line stays).
 static var markers_on := true
+## The local HUD's helper joins this group: a world label for a point it marks hides
+## (DeliveryPoint; Captain, 2026-10-14: aimed through a red dot at "LZ 2", the LZ's own label
+## showed small in the sight as well as the marker below it).
+const GROUP := &"objective_helper"
+## A marker this close (m, flat) to a point counts as marking it (marks()).
+const MARKS_M := 3.0
 
 ## Within this far (m, flat) of a site the hint switches from "Head to" to what to do there.
 const AT_SITE_M := 50.0
@@ -80,6 +86,7 @@ func _init(p: Soldier = null) -> void:
 
 
 func _ready() -> void:
+	add_to_group(GROUP)
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_hint = UiKit.hud_label("", &"HudSmallLabel")
 	_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
@@ -95,6 +102,15 @@ func _ready() -> void:
 ## The hint line as shown ("" when hidden; tests read it).
 func hint_text() -> String:
 	return _hint.text if _hint.visible else ""
+
+
+## Whether a marker is drawn now on `pos` (within MARKS_M, flat): its label is on the HUD, so a
+## label in the world for the same point would only say it twice.
+func marks(pos: Vector3) -> bool:
+	for m: Dictionary in drawn:
+		if _flat(m.pos, pos) <= MARKS_M:
+			return true
+	return false
 
 
 ## Works the step out now (it also does so a few times a second on its own).

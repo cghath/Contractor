@@ -433,6 +433,13 @@ func _test_motor_pool() -> void:
 	if v == null:
 		return
 	await _seconds(1.0)
+	## Captain, 2026-10-14: the pool M-ATV's M2 showed 0 rounds. A pool vehicle deploys loaded
+	## (data/vehicles.json "guns" "load": 2 belts), then the squad shoots most of it off.
+	var loaded := int(v.gun_info().get("rounds", 0))
+	check(loaded == 200 and v.cargo_hold.count_of(&"belt_50bmg") == 2, "it deploys with its M2 loaded: 2 belts, %d rounds" % loaded)
+	for i in 150:
+		v.cargo_hold.take_feed(&"belt_50bmg")
+	check(int(v.gun_info().rounds) == 50, "150 rounds fired: 50 left")
 	v.server_set_zone(Vehicle.ZONE_ENGINE, 0.4)
 	v.server_set_zone(Vehicle.ZONE_WHEELS, 0.7)
 	v.server_set_fuel(100.0)
@@ -459,6 +466,8 @@ func _test_motor_pool() -> void:
 	check(again != null and absf(again.zone_health(Vehicle.ZONE_ENGINE) - 0.4) < 0.01 and absf(again.fuel_litres() - 100.0) < 1.0 and not again.battery_ok
 		and again.cargo_hold.count_of(&"jerrycan") == 1 and again.net_carves.size() == 1,
 		"brought again as it was: engine 40%, 100 L, its jerrycan, its hole")
+	check(again != null and int(again.gun_info().rounds) == 200 and again.cargo_hold.count_of(&"belt_50bmg") == 2,
+		"its M2's belts refilled at the FOB: full again (%d rounds)" % (int(again.gun_info().rounds) if again else 0))
 	# Left behind: gone from the pool, the zone keeps it.
 	node.server_settle([at + Vector3(500, 0, 0)])
 	check(MotorPool.entry(id).is_empty() and is_instance_valid(again) and not again.is_queued_for_deletion() and not again.has_meta(&"no_save"),

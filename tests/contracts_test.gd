@@ -1070,6 +1070,31 @@ func _test_objective_helper() -> void:
 	var lz_at: Vector3 = helper.current.targets[0].pos if not helper.current.targets.is_empty() else Vector3.INF
 	check(helper.hint_text() == "All done: call extraction (map, M) or walk to an LZ" and helper.current.targets.size() == 1
 		and Vector2(lz_at.x, lz_at.z).is_equal_approx(Vector2(0, 34)), "the cache gone: extraction, the marker on the LZ ('%s')" % helper.hint_text())
+	# Captain, 2026-10-14: aimed through a red dot at "LZ 2" its name showed twice, small on the
+	# LZ's own label in the world (inside the sight) and on the HUD marker. One name at a time:
+	# while the HUD marks the point, its world label stands down.
+	var dp := DeliveryPoint.new()
+	dp.label = "LZ South"
+	level.add_child(dp)
+	dp.global_position = Vector3(lz_at.x, 0.0, lz_at.z)
+	var stood := player.global_position
+	player.global_position = Vector3(lz_at.x, 0.1, lz_at.z + 25.0)
+	player.is_aiming = true
+	var keep_cam := cam.global_transform
+	cam.global_transform = Transform3D(Basis.IDENTITY, player.global_position + Vector3.UP * 1.6).looking_at(lz_at + Vector3.UP * 2.2)
+	helper.drawn = helper.layout_markers()
+	dp._process(0.0)
+	var lz_marks := helper.drawn.filter(func(m: Dictionary) -> bool: return not bool(m.edge) and String(m.label) != "")
+	check(lz_marks.size() == 1 and dp.text_label != null and not dp.text_label.visible,
+		"aiming at the LZ from 25 m: its name once, on the HUD marker (%d marked, world label %s)" % [lz_marks.size(), "shown" if dp.text_label and dp.text_label.visible else "hidden"])
+	player.global_position = Vector3(lz_at.x, 0.1, lz_at.z + 4.0)
+	helper.drawn = helper.layout_markers()
+	dp._process(0.0)
+	check(helper.drawn.is_empty() and dp.text_label.visible, "in at the LZ the marker hides and the world label is back")
+	player.is_aiming = false
+	player.global_position = stood
+	cam.global_transform = keep_cam
+	dp.queue_free()
 	ext.server_cancel()
 	Contracts.server_end_deployment({})
 	Contracts.server_finish_debrief()
