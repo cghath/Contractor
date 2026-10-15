@@ -4,6 +4,11 @@
 // - fine grain (~1 m, ~0.2 m) near the camera (faded out by detail_end_m), part-faceted normals,
 // - rock on steep faces picked per pixel (with layered bands), not only per vertex.
 // All procedural (value noise): no textures to load, a handful of ALU ops per pixel.
+// Salt pans (ZoneTerrain sets these from the preset's "ground"; 0 elsewhere, so other
+// presets look as before. Captain, 2026-10-14: the salt flats were "an actual eye sore"):
+// - damp_strength: large darker damp patches (~350 m and ~70 m),
+// - crust_strength: the crust's polygons (~1.8 m, raised lighter rims) near the camera,
+// - track_strength: a few long tyre tracks (two ruts each) across the pan, seen to ~320 m.
 shader_type spatial;
 render_mode cull_back, diffuse_burley, specular_schlick_ggx;
 
@@ -14,6 +19,9 @@ uniform float seed_offset = 0.0;
 uniform float macro_strength = 1.0;
 uniform float detail_end_m = 140.0;
 uniform float facet_share = 0.4;
+uniform float damp_strength = 0.0;
+uniform float crust_strength = 0.0;
+uniform float track_strength = 0.0;
 
 varying vec3 w_pos;
 varying vec3 w_nrm;
@@ -33,6 +41,33 @@ float vnoise(vec2 p) {
 	float c = hash12(i + vec2(0.0, 1.0));
 	float d = hash12(i + vec2(1.0, 1.0));
 	return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+// The hex grid's cell for p: xy the offset from its centre, zw its id.
+vec4 hex_cell(vec2 p) {
+	const vec2 s = vec2(1.0, 1.7320508);
+	vec4 hc = floor(vec4(p, p - vec2(0.5, 1.0)) / s.xyxy) + 0.5;
+	vec4 h = vec4(p - hc.xy * s, p - (hc.zw + 0.5) * s);
+	return dot(h.xy, h.xy) < dot(h.zw, h.zw) ? vec4(h.xy, hc.xy) : vec4(h.zw, hc.zw + 0.5);
+}
+
+// How far from the centre of its hex cell an offset is: 0.5 on the rim.
+float hex_rim(vec2 h) {
+	h = abs(h);
+	return max(dot(h, vec2(0.5, 0.8660254)), h.x);
+}
+
+// 0 to 1: how much of a tyre track's two ruts p is on. Track k (seeded) is a long gentle curve
+// across the zone, there along part of its length (the noise), its ruts 1.8 m apart.
+float track(vec2 p, float k) {
+	float a = hash12(vec2(k, seed_offset)) * 3.14159;
+	vec2 dir = vec2(cos(a), sin(a));
+	vec2 side = vec2(-dir.y, dir.x);
+	float along = dot(p, dir);
+	float off = dot(p, side) - (hash12(vec2(seed_offset, k)) - 0.5) * 1600.0;
+	off -= sin(along / 190.0 + k * 2.3) * 30.0 + sin(along / 61.0 + k) * 4.0;
+	float ruts = 1.0 - smoothstep(0.16, 0.34, abs(abs(off) - 0.9));
+	return ruts * smoothstep(0.42, 0.55, vnoise(vec2(along / 420.0, k * 7.0)));
 }
 
 vec3 to_linear(vec3 c) {
@@ -67,6 +102,34 @@ void fragment() {
 	col *= mix(0.74, 1.14, macro) * mix(0.86, 1.08, mid);
 	col *= mix(1.0, mix(0.80, 1.12, fine), near);
 	col *= mix(1.0, mix(0.84, 1.10, grain), close);
+
+	if (damp_strength > 0.0) {
+		// Damp patches: the crust darker and a touch greyer where the brine sits under it.
+		float damp = vnoise(q / 350.0 + 11.0) * 0.65 + vnoise(p / 70.0 + 5.0) * 0.35;
+		col *= mix(vec3(1.0), vec3(0.70, 0.71, 0.73), smoothstep(0.50, 0.78, damp) * damp_strength);
+	}
+	if (crust_strength > 0.0) {
+		// The crust's polygons: a warped hex grid ~1.8 m across, lighter raised rims, each
+		// plate its own shade; faded out before it can shimmer.
+		float crust_near = 1.0 - smoothstep(30.0, 75.0, dist);
+		if (crust_near > 0.0) {
+			vec2 cp = p / 1.8 + vec2(vnoise(p * 0.45), vnoise(q * 0.45 + 3.0)) * 0.55;
+			vec4 cell = hex_cell(cp);
+			float rim = smoothstep(0.40, 0.48, hex_rim(cell.xy));
+			float plate = mix(0.93, 1.04, hash12(cell.zw + seed_offset));
+			col *= mix(1.0, mix(plate, 1.10, rim), crust_near * crust_strength);
+		}
+	}
+	if (track_strength > 0.0) {
+		float track_near = 1.0 - smoothstep(220.0, 320.0, dist);
+		if (track_near > 0.0) {
+			float on = 0.0;
+			for (int k = 0; k < 5; k++) {
+				on = max(on, track(p, float(k)));
+			}
+			col *= mix(1.0, 0.80, on * track_near * track_strength);
+		}
+	}
 
 	// Rock on steep faces, per pixel, with horizontal strata.
 	float slope = 1.0 - clamp(w_nrm.y, 0.0, 1.0);

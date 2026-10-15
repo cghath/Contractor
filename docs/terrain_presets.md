@@ -70,3 +70,27 @@ seed, preset, ground checksum, pads, roads), so coming back to a zone skips the 
 MultiMeshes are kept for the 2 newest zones. Thickets draw with the scrub mesh to 950 m, no shadows. **Far
 stand-ins**: past 940 m each 24 m square of trees is one low canopy blob (one MultiMesh per 128 m cell, no shadows),
 out to the horizon, built with the visuals (never on a headless server; `far_counts()`).
+
+**Salt flats** (Captain, 2026-10-14, v0.3.1, first person on an HVT capture: "this terrain is an actual eye sore": a
+near-white pan, brighter than the sky, meeting it at a hard line with nothing on it). Numbers Proposed; judged in the
+next build (no windowed look was possible while the Captain was playing).
+- **Ground**: palette crust `9a9587` / dry `a39e90` (sRGB ~0.59-0.62, was `cfc9b4` / `b9b095`), mud `7d7464`, damp
+  channels `8a8577`. `ZoneLevel.ground_glare` (lit flat ground against the horizon sky, linear luminance) is 0.68, was
+  1.38: the pan no longer outshines the sky. The shader's preset `ground` switches: `damp` (darker patches ~350 m and
+  ~70 m), `crust` (a warped hex grid of crust plates ~1.8 m with lighter raised rims, faded out 30-75 m from the
+  camera), `tracks` (5 long tyre tracks of two ruts each, seen to ~320 m); `mud_margin_m` (300) darkens the ground
+  toward the edge. All 0 on the other presets, so they look as before.
+- **Relief**: land `detail_m` 0.9 over 240 m (swells), `wadi` 3 shallow channels (0.7 m deep, 24 m wide, damp-coloured),
+  and land `margin` (new, `ZoneTerrain`): in a 420 m band inside the edge a 3.5 m berm and flat-topped two-tier mesas
+  6-15 m high (noise over 150 m), rising from 25 m in so the apron stays level, kept 110 m (+60 m blend) off every pad
+  and road. `ground.rock_above_m` 5 paints the mesa tops rock; their sides are rock from the shader's slope.
+- **Scatter**: rocks 40, scrub (dead bushes, 0.5-1.3 m, grey-browns) 160, rock clusters 60, pebbles 3000 per km2, but
+  only where `ZoneScatter._open_weight` allows: within scatter `margin_m` (380 m) of the edge, fading over
+  `margin_fade_m` (220 m), and within `near_pad_m` (110 m) of a pad or `near_road_m` (35 m) of a road. The pan's middle
+  stays bare (open for spotting); the tries scale up by the share of the zone that has scatter.
+- **Light**: the preset's `sky` (any preset can have one; `ZoneLevel.sky_for`): sun 1.05 (was 1.25), fill 0.3, exposure
+  0.92 (was 1.05), a warm haze `c2bfb5` as horizon and fog colour, fog 0.00045 (64% clear at 1 km), so the far pan
+  fades into the horizon instead of ending in a hard white line. The preset's `backdrop` swaps the procedural sky for
+  `zone_sky.gdshader`: the same gradient and sun plus two bands of low-poly ridges and mesas round the horizon (near
+  0.25-1.1 degrees, far 0.6-2.4, `8a8478` mixed into the haze), seeded by the zone; part of the sky, so never clipped
+  and nearly free.

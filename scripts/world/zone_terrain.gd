@@ -52,6 +52,15 @@ const ROCK := Color("6f6a60")
 ## ROAD_CORE_M, fading out by ROAD_VERGE_M).
 const ROAD_CORE_M := 3.0
 const ROAD_VERGE_M := 7.0
+## The land's "margin" (a berm and mesas round the edge, salt_flats): it rises from this far in
+## from the edge (the apron stays level with it), and the pads and roads it keeps clear of are
+## measured on a grid this coarse (m). Proposed.
+const MARGIN_FROM_M := 25.0
+const MARGIN_RISE_M := 90.0
+const MARGIN_KEEP_STEP_M := 32.0
+## Mesas stand where their noise is above MESA_FROM (a lower tier) and MESA_TOP (the top).
+const MESA_FROM := 0.34
+const MESA_TOP := 0.50
 
 var size_m := 2048.0
 var seed_value := 0
@@ -85,6 +94,14 @@ var c_apron := GRASS
 var c_road := EARTH
 var sand_below_m := -1000.0
 var rock_above_m := 1.0e9
+## The preset's ground (salt_flats): mud toward the edge over this band (m, 0 none), and the
+## shader's damp patches, crust polygons and tyre tracks (0..1, 0 none).
+var mud_margin_m := 0.0
+var damp := 0.0
+var crust := 0.0
+var tracks := 0.0
+## Where the land's "margin" stands (m in from the edge, 0 none): ZoneScatter's margins.
+var margin_m := 0.0
 var _bed := PackedByteArray()  # riverbed weight (0..255) per height
 var _coast: FastNoiseLite
 var _wobble_m := 0.0
@@ -159,6 +176,24 @@ func generate(def: Dictionary, flat: Array) -> void:
 	detail.fractal_octaves = 2
 	detail.frequency = 1.0 / float(land.get("detail_wavelength_m", 160.0))
 	var berm_m := float((preset.get("wadi", {}) as Dictionary).get("berm_m", 0.0))
+	# The margin (land "margin"; Captain, 2026-10-14: the salt flats were a flat white plate
+	# meeting the sky): a low berm and flat-topped, two-tier mesas in a band inside the edge,
+	# kept off the pads and roads, so the edge has landmarks and the horizon a silhouette.
+	var margin: Dictionary = land.get("margin", {})
+	margin_m = float(margin.get("width_m", 0.0))
+	var margin_berm := float(margin.get("berm_m", 0.0))
+	var mesa_m: Array = margin.get("mesa_m", [0.0, 0.0])
+	var mesa := FastNoiseLite.new()
+	mesa.seed = seed_value + 4
+	mesa.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+	mesa.fractal_type = FastNoiseLite.FRACTAL_FBM
+	mesa.fractal_octaves = 2
+	mesa.frequency = 1.0 / float(margin.get("mesa_wavelength_m", 150.0))
+	var lift := FastNoiseLite.new()
+	lift.seed = seed_value + 5
+	lift.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+	lift.frequency = 1.0 / 400.0
+	var keep := _margin_keep(flat, float(margin.get("keep_m", 110.0))) if margin_m > 0.0 else PackedFloat32Array()
 	# The coast (sea "coast_wobble_m"): the shoreline pushed in and out along its length, so
 	# it isn't a ruled line. Inland at most COAST_IN_M (pads keep ZoneDef.SEA_PAD_KEEP_M clear).
 	_wobble_m = minf(float(sea.get("coast_wobble_m", 0.0)), sea_m * 0.45)
@@ -194,6 +229,15 @@ func generate(def: Dictionary, flat: Array) -> void:
 			h += berm * berm_m * (1.0 - carve)
 			var fade := smoothstep(0.0, EDGE_FADE_M, edge)
 			h *= fade
+			if margin_m > 0.0 and edge < margin_m:
+				var band := smoothstep(MARGIN_FROM_M, MARGIN_RISE_M, edge) * (1.0 - smoothstep(margin_m * 0.55, margin_m, edge))
+				if band > 0.0:
+					var l := lift.get_noise_2d(x, z) * 0.5 + 0.5
+					h += band * margin_berm * (0.55 + 0.45 * l)
+					var mv := mesa.get_noise_2d(x, z)
+					if mv > MESA_FROM:
+						var tier := smoothstep(MESA_FROM, MESA_FROM + 0.06, mv) * 0.55 + smoothstep(MESA_TOP, MESA_TOP + 0.05, mv) * 0.45
+						h += tier * lerpf(float(mesa_m[0]), float(mesa_m[1]), l) * band * _keep_weight(keep, x, z)
 			if sea_side >= 0:
 				var d: float = [z + _half, _half - z, x + _half, _half - x][sea_side]
 				d -= coast_shift(x, z)
@@ -215,6 +259,44 @@ func generate(def: Dictionary, flat: Array) -> void:
 		min_height = minf(min_height, h)
 		max_height = maxf(max_height, h)
 	_measure_shore()  # wave 5b (V4): the coast the LHD and AAVs use, from the sea above
+
+
+## The margin's clearance round the pads (`flat`) and roads: per MARGIN_KEEP_STEP_M grid node in
+## the margin band, 0 within `keep_m` of one, rising to 1 by 60 m further (1 elsewhere).
+func _margin_keep(flat: Array, keep_m: float) -> PackedFloat32Array:
+	var n := ceili(size_m / MARGIN_KEEP_STEP_M) + 1
+	var out := PackedFloat32Array()
+	out.resize(n * n)
+	out.fill(1.0)
+	for j in n:
+		var z := j * MARGIN_KEEP_STEP_M - _half
+		for i in n:
+			var x := i * MARGIN_KEEP_STEP_M - _half
+			var edge := minf(minf(x + _half, _half - x), minf(z + _half, _half - z))
+			if edge > margin_m + MARGIN_KEEP_STEP_M:
+				continue
+			var p := Vector2(x, z)
+			var d := INF
+			for rect: Rect2 in flat:
+				d = minf(d, _distance_to_rect(p, rect))
+			for r: Array in _roads:
+				d = minf(d, Geometry2D.get_closest_point_to_segment(p, r[0], r[1]).distance_to(p))
+			out[i + j * n] = smoothstep(keep_m, keep_m + 60.0, d)
+	return out
+
+
+## The margin's clearance at (x, z) (_margin_keep), between its grid nodes.
+func _keep_weight(keep: PackedFloat32Array, x: float, z: float) -> float:
+	var n := ceili(size_m / MARGIN_KEEP_STEP_M) + 1
+	var gx := clampf((x + _half) / MARGIN_KEEP_STEP_M, 0.0, n - 1.001)
+	var gz := clampf((z + _half) / MARGIN_KEEP_STEP_M, 0.0, n - 1.001)
+	var i := floori(gx)
+	var j := floori(gz)
+	var fx := gx - i
+	var fz := gz - j
+	var top := lerpf(keep[i + j * n], keep[i + 1 + j * n], fx)
+	var bottom := lerpf(keep[i + (j + 1) * n], keep[i + 1 + (j + 1) * n], fx)
+	return lerpf(top, bottom, fz)
 
 
 ## The dry riverbeds of a preset's "wadi": `count` lines across the zone (seeded), each a
@@ -295,6 +377,10 @@ func _read_palette() -> void:
 	var g: Dictionary = preset.get("ground", {})
 	sand_below_m = float(g.get("sand_below_m", -1000.0))
 	rock_above_m = float(g.get("rock_above_m", 1.0e9))
+	mud_margin_m = float(g.get("mud_margin_m", 0.0))
+	damp = float(g.get("damp", 0.0))
+	crust = float(g.get("crust", 0.0))
+	tracks = float(g.get("tracks", 0.0))
 
 
 ## The height of the noise ground (before pads) is what a pad takes: the grid's height at
@@ -501,6 +587,9 @@ func ground_material() -> ShaderMaterial:
 	m.set_shader_parameter(&"rock_colour", c_rock)
 	m.set_shader_parameter(&"earth_colour", c_earth)
 	m.set_shader_parameter(&"seed_offset", float(seed_value % 97) * 3.1)  # small: the noise keeps its float precision
+	m.set_shader_parameter(&"damp_strength", damp)
+	m.set_shader_parameter(&"crust_strength", crust)
+	m.set_shader_parameter(&"track_strength", tracks)
 	return m
 
 
@@ -619,6 +708,10 @@ func _ground_colour(i: int, j: int, n: Vector3) -> Color:
 	var steep := clampf((1.0 - n.y) * 12.0, 0.0, 1.0)
 	var patch := float(absi(hash(Vector2i(i / 3, j / 3) + Vector2i(seed_value, 0))) % 1000) / 1000.0
 	var colour := c_grass.lerp(c_dry, patch * 0.25)  # the shader adds the larger, smoother patches
+	if mud_margin_m > 0.0:
+		# Mud toward the edge: the pan's margin, where the crust gives way to wet ground.
+		var edge := minf(minf(p.x + _half, _half - p.x), minf(p.y + _half, _half - p.y)) + patch * 40.0
+		colour = colour.lerp(c_earth, (1.0 - smoothstep(40.0, mud_margin_m, edge)) * 0.6)
 	var h := _h(i, j)
 	# Rock on the high ground; sand in riverbeds and on the beach.
 	colour = colour.lerp(c_rock, clampf((h - rock_above_m) / 8.0, 0.0, 0.8))
