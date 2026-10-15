@@ -264,9 +264,13 @@ func _test_long_submenu() -> void:
 	var shown := menu.submenu_rects(0).size()
 	check(shown < loot.size() and menu.submenu_arrows(0).size() == 2,
 		"%d loot entries in a %d px window: %d shown, with a more row each way" % [loot.size(), _vp.size.y, shown])
+	## Object mode refreshes the points every frame (PlayerInput._update_interaction): the scroll
+	## has to survive that, or the list never leaves its first page (review of P0-3).
 	var steps := 0
 	while menu.scroll_submenu(1) and steps < loot.size():
 		steps += 1
+		menu.set_points(points)
+	check(steps > 0 and menu.sub_scroll == steps, "the scroll keeps across a per-frame set_points (%d rows)" % menu.sub_scroll)
 	var rects := menu.submenu_rects(0)
 	menu.set_cursor(rects[-1].get_center())
 	check(menu.sub_scroll + rects.size() == loot.size() and menu.highlighted() == loot[-1],
@@ -275,6 +279,22 @@ func _test_long_submenu() -> void:
 	var before := menu.sub_scroll
 	menu._process(InteractionMenu.SUB_SCROLL_STEP_S + 0.01)
 	check(menu.sub_scroll == before - 1 and menu.highlighted().is_empty(), "resting on the more-above row scrolls back up, and picks nothing")
+	## A shorter list (an item taken) clamps the scroll: no short page, no negative "more" count.
+	while menu.scroll_submenu(1):
+		pass
+	var shorter := actions.duplicate(true)
+	(shorter[0].items as Array).resize(loot.size() - 3)
+	var fewer: Array[Dictionary] = [{"target": menu, "screen": spot, "actions": shorter}]
+	menu.set_points(fewer)
+	var left: int = shorter[0].items.size()
+	var sub_rects := menu.submenu_rects(0)
+	check(menu.sub_scroll + sub_rects.size() == left and left - menu.sub_scroll - sub_rects.size() >= 0,
+		"3 loot entries taken at the bottom: the scroll clamps to %d, the page still full" % menu.sub_scroll)
+	(shorter[0].items as Array).resize(2)
+	menu.set_points(fewer)
+	check(menu.sub_scroll == 0 and menu.submenu_rects(0).size() == 2 and menu.submenu_arrows(0).is_empty(),
+		"the list cut to 2 entries: back to the top, both shown, no more rows")
+	menu.set_points(points)
 	check(MedicalMenu.LOG_FONT >= UiKit.FONT_SMALL and InteractionMenu.ENTRY_FONT >= UiKit.FONT_SMALL and InteractionMenu.POINT_FONT >= UiKit.FONT_SMALL
 		and InteractionMenu.HINT_FONT >= UiKit.FONT_SMALL, "the drawn menus' text is 14 px or more")
 	menu.close()

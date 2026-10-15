@@ -920,18 +920,43 @@ func refresh_self() -> void:
 	for region in REGIONS:
 		points.append({"target": player, "region": region, "screen": centre + SELF_LAYOUT[region],
 			"actions": grouped(region_actions(player, player, region))})
+	_clamp_sub_scroll()
 	queue_redraw()
 
 
 ## Replaces the action points (object mode, once a frame), keeping the open one if it's still there.
+## The open submenu keeps its scroll while it stays the same entry (review of P0-3: resetting it
+## every frame held a long Loot list on its first page), clamped if its list got shorter.
 func set_points(new_points: Array[Dictionary]) -> void:
+	var was := _expanded_id()
 	points = new_points.duplicate()  # never share the caller's array
 	if _open_point().is_empty():
 		_open_target = null
 		_expanded = -1
-	sub_scroll = 0
 	_update_hover()
+	if _expanded_id() != was:
+		sub_scroll = 0
+	_clamp_sub_scroll()
 	queue_redraw()
+
+
+## The open submenu's entry id (&"" when none is open), to tell whether it's still the same one.
+func _expanded_id() -> StringName:
+	var point := _open_point()
+	if point.is_empty() or _expanded < 0 or _expanded >= point.actions.size():
+		return &""
+	return StringName(point.actions[_expanded].get("id", &""))
+
+
+## Keeps sub_scroll inside the open submenu: a list that got shorter (an item taken) would
+## otherwise draw short, or show a negative "more" count (review of P0-3).
+func _clamp_sub_scroll() -> void:
+	var point := _open_point()
+	if point.is_empty() or _expanded < 0 or _expanded >= point.actions.size():
+		sub_scroll = 0
+		return
+	var total: int = point.actions[_expanded].get("items", []).size()
+	sub_scroll = clampi(sub_scroll, 0, maxi(total - _sub_fit(total), 0))
 
 
 func move_cursor(relative: Vector2) -> void:
@@ -1067,7 +1092,7 @@ func _update_hover() -> void:
 		_open_target = best.target
 		_open_region = best.get("region", &"")
 		_expanded = -1
-	sub_scroll = 0
+		sub_scroll = 0
 
 
 ## The ring around `point`, moved as a whole to stay inside the window (P0-3): a point near an
