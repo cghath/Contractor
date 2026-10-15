@@ -8,6 +8,7 @@ var failures := 0
 
 func _ready() -> void:
 	_test_item_db()
+	_test_item_info()
 	_test_inventory()
 	await _test_armor()
 	await _test_voxel_world()
@@ -33,6 +34,75 @@ func _test_item_db() -> void:
 	check(ItemDB.all_ids().size() >= 20, "loaded %d items" % ItemDB.all_ids().size())
 	check(ItemDB.get_item(&"m4a1").slot == &"primary", "m4a1 is a primary")
 
+
+## Every item says what it is and how to use it in the game (Captain, 2026-10-14: "item
+## descriptions plus uses also needed"): data/items.json's desc and uses, ItemDB.describe and
+## the ItemInfo tooltip and inspect panel for every id, and the medical lines agree with the
+## treatment rules (WoundModel).
+func _test_item_info() -> void:
+	print("Item descriptions and uses")
+	var no_desc := []
+	var no_uses := []
+	var no_tip := []
+	var no_rich := []
+	var bad_describe := []
+	for id in ItemDB.all_ids():
+		var item := ItemDB.get_item(StringName(id))
+		if item.desc.strip_edges() == "":
+			no_desc.append(id)
+		if item.uses.is_empty() or Array(item.uses).any(func(u: String) -> bool: return u.strip_edges() == ""):
+			no_uses.append(id)
+		var tip := ItemInfo.tooltip(StringName(id))
+		if tip == "" or not tip.contains(item.desc) or not tip.contains(item.uses[0] if not item.uses.is_empty() else "?"):
+			no_tip.append(id)
+		if ItemInfo.bbcode(StringName(id)) == "" or ItemInfo.summary(StringName(id)) == "":
+			no_rich.append(id)
+		var info := ItemDB.describe(StringName(id))
+		if info.get("name", "") != item.name or not info.get("stats", {}).has("weight") or (info.get("uses", []) as Array).size() != item.uses.size():
+			bad_describe.append(id)
+	check(no_desc.is_empty(), "every item (%d) has a description %s" % [ItemDB.all_ids().size(), no_desc])
+	check(no_uses.is_empty(), "every item has at least one uses line %s" % [no_uses])
+	check(no_tip.is_empty(), "the tooltip helper gives every item its name, description and uses %s" % [no_tip])
+	check(no_rich.is_empty(), "and every item has inspect text and a one-line summary %s" % [no_rich])
+	check(bad_describe.is_empty(), "ItemDB.describe gives name, uses and stats for every item %s" % [bad_describe])
+	check(ItemDB.describe(&"no_such_item").is_empty() and ItemInfo.tooltip(&"no_such_item") == "", "an unknown id describes as nothing")
+	var m4 := ItemDB.describe(&"m4a1")
+	check(m4.stats.get("ammo", "") == "5.56 Magazine (30)" and m4.stats.get("slot", "") == "primary" and int(m4.stats.value) > 0,
+		"describe: the M4A1's magazine, slot and value (%s)" % [m4.stats])
+	check(is_equal_approx(float(ItemDB.describe(&"optic_dmr_3_5_10").stats.get("magnification_max", 0.0)), 10.0), "describe: a variable scope's top power")
+	check(ItemDB.describe(&"ifak").stats.get("contents", {}).get("Tourniquet", 0) == 1, "describe: what's in an IFAK")
+	# The medical uses agree with the treatment rules.
+	var uses := func(id: StringName) -> String: return " ".join(ItemDB.get_item(id).uses).to_lower()
+	var model := WoundModel.new()
+	check(uses.call(&"tourniquet").contains("arm or leg") and uses.call(&"tourniquet").contains("arterial")
+		and Array(ItemDB.get_item(&"tourniquet").stats.treats) == ["arterial"]
+		and WoundModel.LIMB_BELOW.has(&"thigh_l") and WoundModel.LIMB_BELOW.has(&"forearm_r") and not WoundModel.LIMB_BELOW.has(&"chest")
+		and model.treatment_problem(WoundModel.TOURNIQUET, &"chest") == "Tourniquets go on arms and legs",
+		"tourniquet: arterial bleeds on an arm or leg, as the rules say")
+	check(uses.call(&"chest_seal").contains("open chest wound") and Array(ItemDB.get_item(&"chest_seal").stats.treats) == ["chest"],
+		"chest seal: an open chest wound")
+	check(uses.call(&"npa").contains("unconscious") and uses.call(&"npa").contains("airway")
+		and model.treatment_problem(WoundModel.NPA, &"head") == "Only for an unconscious casualty", "NPA: an unconscious casualty's airway, and not on someone awake")
+	check(uses.call(&"iv_18").contains("forearm or lower leg") and WoundModel.IV_SITES.has(&"forearm_l") and WoundModel.IV_SITES.has(&"shin_r")
+		and uses.call(&"iv_18").contains("someone else") and Vitals.needs_other_hands(&"iv_18"), "IV: a forearm or lower leg, placed by someone else")
+	check(uses.call(&"io_kit").contains("sternum") and WoundModel.IO_PART == &"chest", "IO: the sternum")
+	check(uses.call(&"morphine").contains("pain") and uses.call(&"morphine").contains("cracked rib")
+		and Array(ItemDB.get_item(&"morphine").stats.treats).has("rib"), "morphine: pain and a cracked rib")
+	check(uses.call(&"hemostatic_gauze").contains("junctional") and uses.call(&"splint").contains("not the pelvis")
+		and uses.call(&"pelvic_binder").contains("pelvis"), "gauze, splint and binder name what they treat")
+	# Each treatment row in the medical menu, and each item named in the interaction menu, says what it does.
+	check(MedicalMenu.row_hint({"id": &"treat_item", "item": &"tourniquet"}).contains("arm or leg")
+		and MedicalMenu.row_hint({"id": &"remove_tourniquet"}).contains("packed"), "medical menu rows explain the treatment")
+	check(InteractionMenu.entry_hint({"id": &"loot_item", "item": &"frag_grenade"}).begins_with("Frag Grenade:")
+		and InteractionMenu.entry_hint({"id": &"carry"}) == "", "interaction entries that name an item get a hint, others none")
+	var box := ItemInfo.show_inspect(self, &"tourniquet", "I to close")
+	check(ItemInfo.inspected(self) == &"tourniquet" and (box.get_node(^"Text") as RichTextLabel).text.contains("Tourniquet"), "the inspect panel shows an item")
+	ItemInfo.hide_inspect(self)
+	check(ItemInfo.inspected(self) == &"", "and goes away")
+	var label := Label.new()
+	ItemInfo.apply(label, &"chest_seal")
+	check(label.tooltip_text.contains("Vented Chest Seal") and label.mouse_filter != Control.MOUSE_FILTER_IGNORE, "apply() gives a label the tooltip and lets the mouse reach it")
+	label.free()
 
 func _test_inventory() -> void:
 	print("Inventory")

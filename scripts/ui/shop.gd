@@ -79,6 +79,7 @@ func refresh() -> void:
 			continue
 		_ids.append(id)
 		_list.add_item("%s  (%s)  $%s" % [item.name, item.type, DebriefCalc.money(Prices.price_of(id))])
+		_list.set_item_tooltip(_list.item_count - 1, ItemInfo.tooltip(id))  # hover: what it is and how to use it (Captain, 2026-10-14: "item descriptions plus uses also needed")
 	if not keep.is_empty() and keep[0] < _list.item_count:
 		_list.select(keep[0])
 

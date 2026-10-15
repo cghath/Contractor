@@ -156,6 +156,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		Vehicle.ride_of(body).request_exit.rpc_id(1)  # the get-out key (an option; the seat's menu then has no Get out)
 	elif interaction.is_open() and event is InputEventMouseButton:
 		return  # clicks don't fire through the interaction menu
+	elif event.is_action_pressed(&"inspect"):
+		toggle_inspect()  # the item under the crosshair: what it is and how to use it (ItemInfo)
 	elif placing and event.is_action_pressed(&"fire"):
 		_commit_charge()  # Fire puts the charge where the ghost sits
 	elif placing and (event.is_action_pressed(&"aim") or (event.is_action_pressed(&"grenade") and not (event is InputEventKey and (event.shift_pressed or event.alt_pressed)))):
@@ -390,6 +392,7 @@ func _update_focus() -> void:
 	_focus = null
 	if not body.vitals.is_up() or interaction.is_open():
 		hud.set_prompt("")
+		hud.hide_item_info()
 		return
 	var camera := body.camera
 	var from := camera.global_position
@@ -408,9 +411,22 @@ func _update_focus() -> void:
 		hud.set_prompt("[Ctrl] %s (down)" % InteractionMenu.display_name(_focus))
 	elif collider is WorldItem:
 		_focus = collider
-		hud.set_prompt("[Ctrl] %s" % (collider as WorldItem).describe())
+		hud.set_prompt("[Ctrl] %s    [%s] Inspect" % [(collider as WorldItem).describe(), OS.get_keycode_string(GameSettings.key_for(&"inspect"))])
 	else:
 		hud.set_prompt("")
+	# The inspect panel goes once the crosshair leaves its item.
+	if hud.inspected() != &"" and not (_focus is WorldItem and (_focus as WorldItem).item_id == hud.inspected()):
+		hud.hide_item_info()
+
+
+## The inspect key (I; Captain, 2026-10-14: "item descriptions plus uses also needed"): shows
+## the item under the crosshair's description, uses and numbers (ItemInfo) in the middle of the
+## HUD, or takes it away again. Looking away from the item takes it away too (_update_focus).
+func toggle_inspect() -> void:
+	if hud.inspected() != &"":
+		hud.hide_item_info()
+	elif _focus is WorldItem:
+		hud.show_item_info((_focus as WorldItem).item_id)
 
 
 ## Hold Left Ctrl for the interaction menu, Left Ctrl + Left Alt for yourself; letting go

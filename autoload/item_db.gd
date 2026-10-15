@@ -37,3 +37,50 @@ func has_item(id: StringName) -> bool:
 
 func all_ids() -> Array:
 	return _items.keys()
+
+
+## Everything a player is told about item `id` (Captain, 2026-10-14: "item descriptions plus
+## uses also needed"): {"name", "desc", "uses": [lines], "stats": {...}} where stats holds only
+## what applies, in plain units: "type", "slot", "weight" (kg), "volume" (L), "stack", "value"
+## ($, Prices), "two_handed", "capacity" (L), "ammo" (the magazine's name), "rounds",
+## "calibre", "magnification" (and "magnification_max"), "rating", "material", "fits",
+## "treats" (wound kinds), "treat_s", "contents" (a kit's: name -> count), "fuse_s",
+## "reload_s". {} for an unknown id. ItemInfo turns it into tooltips and the inspect panel.
+func describe(id: StringName) -> Dictionary:
+	var item := get_item(id)
+	if item == null:
+		return {}
+	var s := item.stats
+	var stats := {"type": item.type, "weight": item.mass_kg, "volume": item.volume_l, "value": Prices.price_of(id)}
+	if item.slot != &"":
+		stats["slot"] = String(item.slot)
+	if item.stack > 1:
+		stats["stack"] = item.stack
+	if item.two_handed:
+		stats["two_handed"] = true
+	if item.capacity_l > 0.0:
+		stats["capacity"] = item.capacity_l
+	elif s.has("capacity_l"):  # a pouch counted in litres
+		stats["capacity"] = float(s.capacity_l)
+	if s.has("ammo") and has_item(StringName(s.ammo)):
+		stats["ammo"] = get_item(StringName(s.ammo)).name
+	if item.magazine_rounds() > 0:
+		stats["rounds"] = item.magazine_rounds()
+	for key: String in ["calibre", "rating", "material", "fuse_s", "reload_s", "treat_s"]:
+		if s.has(key):
+			stats[key] = s[key]
+	if s.has("magnification"):
+		stats["magnification"] = float(s.magnification)
+		if s.has("magnification_max"):
+			stats["magnification_max"] = float(s.magnification_max)
+	if s.has("fits"):
+		stats["fits"] = PackedStringArray(s.fits)
+	if s.has("treats"):
+		stats["treats"] = PackedStringArray(s.treats)
+	if s.has("contents"):
+		var inside := {}
+		for kit_id: String in s.contents:
+			var kit_item := get_item(StringName(kit_id))
+			inside[kit_item.name if kit_item else kit_id] = int(s.contents[kit_id])
+		stats["contents"] = inside
+	return {"name": item.name, "desc": item.desc, "uses": Array(item.uses), "stats": stats}

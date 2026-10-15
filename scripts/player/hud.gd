@@ -149,6 +149,22 @@ func set_prompt(text: String) -> void:
 	_prompt.text = text
 
 
+## The inspect panel (ItemInfo) for item `id` over the middle of the view: a ground item's
+## description, uses and numbers (PlayerInput.toggle_inspect). Mouse stays captured.
+func show_item_info(id: StringName) -> void:
+	var box := ItemInfo.show_inspect(self, id, "%s again or look away to close" % OS.get_keycode_string(GameSettings.key_for(&"inspect")))
+	box.position.x += 260.0  # right of the crosshair, clear of the prompt
+
+
+func hide_item_info() -> void:
+	ItemInfo.hide_inspect(self)
+
+
+## The item the inspect panel shows, or &"".
+func inspected() -> StringName:
+	return ItemInfo.inspected(self)
+
+
 func flash(text: String) -> void:
 	_message.text = text
 	_message_time = 2.5

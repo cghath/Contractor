@@ -168,6 +168,8 @@ const COLOUR_TEXT := Color(1, 1, 1)
 const COLOUR_HIGHLIGHT := Color("ffd35a")
 const COLOUR_DISABLED := Color(0.55, 0.55, 0.55)
 const COLOUR_POINT := Color("c8d6a0")
+## Width of the item hint under the cursor (entry_hint).
+const HINT_W := 320.0
 
 var player: Soldier
 var mode := Mode.CLOSED
@@ -492,7 +494,7 @@ static func _submenu(def: Dictionary, actor: Soldier, target: Node) -> Array[Dic
 					var item := ItemDB.get_item(entry.id)
 					var detail := " (%d rds)" % int(entry.state.rounds) if entry.has("state") and entry.state.has("rounds") else ""
 					items.append({"id": def.id, "label": item.name + detail, "request": def.request, "with": def.with,
-						"target": target, "container": container, "index": i, "disabled": ""})
+						"target": target, "container": container, "index": i, "item": entry.id, "disabled": ""})
 		&"treatments":
 			items = treatments(actor, target)
 		&"body_items":
@@ -1068,6 +1070,39 @@ func _draw() -> void:
 				_draw_entry(font, font_size, sub_rects[j], sub[j], lit, false)
 	draw_circle(cursor, 3.0, Color.WHITE)
 	draw_arc(cursor, 5.0, 0.0, TAU, 16, Color.BLACK, 1.0)
+	# The highlighted entry names an item (a treatment, loot, a gift, a ground item): what it
+	# is and how to use it, under the cursor (Captain, 2026-10-14: "item descriptions plus
+	# uses also needed").
+	var hint := entry_hint(lit)
+	if hint != "":
+		var size := font.get_multiline_string_size(hint, HORIZONTAL_ALIGNMENT_LEFT, HINT_W, 13)
+		var box := Rect2(cursor + Vector2(14, 14), size + Vector2(12, 10))
+		var screen := _screen_size()
+		box.position = box.position.min(screen - box.size - Vector2(4, 4))
+		draw_rect(box, COLOUR_BG)
+		draw_rect(box, COLOUR_POINT, false, 1.0)
+		draw_multiline_string(font, box.position + Vector2(6, 4 + font.get_ascent(13)), hint, HORIZONTAL_ALIGNMENT_LEFT, HINT_W, 13, -1, COLOUR_TEXT)
+
+
+## The item a menu entry names, or &"": a treatment's or loot entry's "item", a gift's stowed
+## entry, or the ground item a point stands for.
+static func item_of(action: Dictionary) -> StringName:
+	var id: StringName = action.get("item", &"")
+	if id == &"" and action.get("target") is WorldItem:
+		id = (action.target as WorldItem).item_id
+	return id if id != &"" and ItemDB.has_item(id) else &""
+
+
+## The hint shown under the cursor for `action`: the item's one-line summary and what it's for
+## (ItemInfo), or "".
+static func entry_hint(action: Dictionary) -> String:
+	if action.is_empty():
+		return ""
+	var id := item_of(action)
+	if id == &"":
+		return ""
+	var item := ItemDB.get_item(id)
+	return "%s: %s\n%s" % [item.name, ItemInfo.summary(id), ItemInfo.use_hint(id)]
 
 
 func _draw_entry(font: Font, font_size: int, rect: Rect2, action: Dictionary, lit: Dictionary, expanded: bool) -> void:
