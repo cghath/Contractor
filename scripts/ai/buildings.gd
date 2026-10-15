@@ -153,22 +153,13 @@ static func near(from: Node3D, centre: Vector3, radius := SCAN_M) -> Array:
 	if _cache.size() >= CACHE_MAX:
 		_cache.clear()
 	var t := Time.get_ticks_usec()
-	# The area scan: from the middle of centre's AREA_SNAP_M square (and its 2 m height step),
-	# wide enough to hold this ask's whole circle from anywhere in the square.
-	var mid := Vector3(snappedf(centre.x, AREA_SNAP_M), roundi(centre.y / 2.0) * 2.0, snappedf(centre.z, AREA_SNAP_M))
-	var reach := radius + AREA_SNAP_M * 0.75
-	var area_key := "%d,%d,%d,%d" % [roundi(mid.x), roundi(mid.y), roundi(mid.z), roundi(reach * 4.0)]
-	var area: Dictionary = _areas.get(area_key, {})
-	if area.is_empty() or now - float(area.at) >= CACHE_S:
-		if _areas.size() >= AREA_MAX:
-			_areas.clear()
-		area = _scan(from.get_world_3d(), mid, reach, now)
-		_areas[area_key] = area
-	# This ask's buildings: those with an inside spot within its circle and height range.
-	var list := (area.list as Array).filter(func(b: Dictionary) -> bool:
-		return (b.spots as Array).any(func(sp: Vector3) -> bool:
-			return Vector2(sp.x - centre.x, sp.z - centre.z).length() <= radius + GRID_M * 0.5 \
-				and sp.y <= centre.y + SCAN_UP_M and sp.y >= centre.y - SCAN_DOWN_M))
+	# Scanned from exactly this centre and radius, as an uncached scan would be (an earlier
+	# AREA_SNAP_M square scan handed back whole buildings from a wider circle, which changed
+	# answers: casualty's "out in the open" soldier found cover the plain scan doesn't). The
+	# speed-up is in the parts below that don't change the answer: each cell's probes, each
+	# building made of the same spots, and each stair link, all kept for CACHE_S.
+	var area := _scan(from.get_world_3d(), centre, radius, now)
+	var list: Array = area.list
 	FrameCost.spent(&"buildings", t)  # (inside "ai" too when an AI's tick asked)
 	spent_usec += Time.get_ticks_usec() - t
 	_cache[key] = {"at": area.at, "list": list}
