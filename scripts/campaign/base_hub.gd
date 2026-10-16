@@ -571,6 +571,7 @@ static func switch_summary(lvl: CompoundLevel) -> Dictionary:
 func _open_briefing(lvl: CompoundLevel) -> void:
 	var c: Dictionary = RosterDeployment.active(roster()).get("contract", {})
 	var briefing := MapNodes.briefing(lvl)
+	Contracts.heal_module_id(Contracts.contract(String(c.get("cid", ""))), lvl)  # an older build's contract may name a module this layout lacks
 	if c.is_empty() or briefing == null:
 		return
 	briefing.server_open(briefing_contract(String(c.get("cid", ""))), briefing_zone(lvl, c))

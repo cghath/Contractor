@@ -63,6 +63,7 @@ func _ready() -> void:
 		if String(stale.get("module_id", "")) != "":
 			var want := ZoneModules.base(String(stale.module))
 			stale["module_id"] = "gone_99"
+			Contracts.heal_module_id(stale, level)
 			var healed := Contracts.module_origin(stale)
 			var ok := level.get_module(String(stale.module_id)) != null and ZoneModules.base(level.get_module(String(stale.module_id)).type) == want \
 				and healed == level.get_module(String(stale.module_id)).position and healed != Vector3.ZERO
