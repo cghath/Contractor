@@ -131,6 +131,7 @@ func _test_questions() -> void:
 	check(VoiceQuestions.resolve("what's the weather").is_empty(), "garbage question text matches nothing")
 
 	var alpha := _ai("Alpha")
+	SquadAI.of(alpha).process_mode = Node.PROCESS_MODE_DISABLED  # we hand-place Alpha; don't fight the AI for it
 	await _place_looking_at(alpha)
 	check(voice.askable_target() == alpha, "a friendly under the crosshair is askable")
 	voice.run("how much ammo do you have")
