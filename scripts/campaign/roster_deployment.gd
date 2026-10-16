@@ -212,6 +212,13 @@ static func resolve(data: Dictionary, outcomes: Dictionary, rng: RandomNumberGen
 			report.mia.append(String(stand_in.mid))
 		elif stand_ins.has(key) and not Roster.get_member(data, String(stand_ins[key])).is_empty():
 			_came_back(Roster.get_member(data, String(stand_ins[key])), o, rng, day, what, report)
+			# The player played the stand-in in his own kit (BaseHub._apply_player_gear): that
+			# kit goes home on his main character, the stand-in gets their own gear back.
+			var saved: Dictionary = dep.get("stand_in_gear", {})
+			if saved.has(key):
+				var back := Roster.get_member(data, String(stand_ins[key]))
+				Roster.main_character(data, key)["gear"] = back.get("gear", {})
+				back["gear"] = saved[key]
 		else:
 			var main := Roster.main_character(data, key)
 			main["gear"] = Roster.json_safe(o.get("gear", {}))

@@ -518,6 +518,7 @@ func _test_respawn_pool() -> void:
 	print("Respawn pool")
 	BaseHub.new_campaign(SEED)
 	var roster := BaseHub.roster()
+	var roster_before := roster.duplicate(true)
 	RosterDeployment.begin(roster, [], RosterDeployment.CONTRACT, "z", "", 1)
 	for i in 4:
 		BaseHub.server_count_respawn()
@@ -556,6 +557,7 @@ func _test_resolve() -> void:
 		BaseHub.server_hire(String(_cheapest(Hiring.pool(BaseHub.hiring(), 1)).cid))
 	var ids := Roster.ids(BaseHub.roster())
 	var roster := BaseHub.roster()
+	var roster_before := roster.duplicate(true)
 	RosterDeployment.begin(roster, ids, RosterDeployment.CONTRACT, "zone_x", "", 1)
 	for mid in ids:
 		RosterDeployment.mark_spawned(roster, mid)
@@ -857,6 +859,50 @@ func _test_gear_vs_kit(base: BaseLevel) -> void:
 	main["gear"] = Roster.json_safe(before.duplicate(true))
 	player.inventory.net_state = before
 	await get_tree().process_frame
+	await _test_stand_in_own_kit(player, key)
+
+
+## Captain, 2026-10-15 (loadouts reset when infiltrating): a player whose main character is
+## recovering plays a stand-in, but in HIS OWN armory kit; the kit moves (never copies) onto the
+## stand-in and comes home on his main character, the stand-in getting their own gear back.
+func _test_stand_in_own_kit(player: Soldier, key: String) -> void:
+	print("A recovering player keeps his own kit")
+	var inv_before: Dictionary = player.inventory.net_state.duplicate(true)
+	var roster := BaseHub.roster()
+	var roster_before := roster.duplicate(true)
+	var ids := Roster.ids(roster)
+	if ids.is_empty():
+		BaseHub.server_hire(String(_cheapest(Hiring.pool(BaseHub.hiring(), 1)).cid))
+		ids = Roster.ids(roster)
+	var mid: String = ids[0]
+	var sm := BaseHub.member(mid)
+	var own := Roster.gear_for_kit([[&"m17", 1], [&"helmet", 1]])
+	var theirs: Dictionary = (sm.get("gear", {}) as Dictionary).duplicate(true)
+	var main := Roster.main_character(roster, key)
+	var main_before: Dictionary = (main.get("gear", {}) as Dictionary).duplicate(true)
+	main["gear"] = own.duplicate(true)
+	main["sit_out_days"] = 3
+	RosterDeployment.begin(roster, [], RosterDeployment.CONTRACT, "test", "", BaseHub.day(), {}, {key: mid})
+	BaseHub._gear_applied.erase(1)
+	BaseHub._apply_player_gear(1, player)
+	check(Roster.gear_counts(Roster.json_safe(player.inventory.net_state)) == Roster.gear_counts(own),
+		"he plays the stand-in in his own kit, not theirs (%s)" % Roster.gear_counts(Roster.json_safe(player.inventory.net_state)))
+	check((BaseHub.member(mid).gear as Dictionary).hash() == own.hash() and (Roster.main_character(roster, key).get("gear", {}) as Dictionary).is_empty(),
+		"the kit moved onto the stand-in: never on two people at once")
+	BaseHub._gear_applied.erase(1)  # a rejoin in the same deployment: still his kit, still one copy
+	BaseHub._apply_player_gear(1, player)
+	check(Roster.gear_counts(Roster.json_safe(player.inventory.net_state)) == Roster.gear_counts(own), "applied again (a rejoin): still his own kit")
+	var came_home := Roster.gear_for_kit([[&"m17", 1], [&"helmet", 1], [&"smoke_purple", 1]])
+	var outcomes := {"members": {}, "players": {key: {"state": RosterDeployment.EXTRACTED, "gear": came_home, "pos": [0.0, 0.0, 0.0]}}}
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 7
+	RosterDeployment.resolve(roster, outcomes, rng, BaseHub.day())
+	check((Roster.main_character(roster, key).get("gear", {}) as Dictionary).hash() == came_home.hash() and (BaseHub.member(mid).gear as Dictionary).hash() == theirs.hash(),
+		"extracted: the kit (and what he picked up) is home on him, the stand-in has their own gear back")
+	roster.clear()  # the roster as it was: nothing of this stays for the checks after it
+	roster.merge(roster_before)
+	BaseHub._gear_applied[1] = true
+	player.inventory.net_state = inv_before
 
 
 ## The terminals open the base screen through the interaction menu, and every page draws.
@@ -1027,6 +1073,13 @@ func _test_deployment(client: Dictionary) -> void:
 	player.inventory.strip()
 	player.inventory.take(&"plate_carrier")
 	player.inventory.take(&"helmet")
+	# A co-op client's own kit (Captain, 2026-10-15: loadouts reset when infiltrating): what the
+	# client stands in at the FOB is what it deploys in, under the profile it played at the base.
+	var client_body := level.players.get_node_or_null(str(multiplayer.get_peers()[0]) if not multiplayer.get_peers().is_empty() else "0") as Soldier
+	var client_before := {}
+	if client_body != null:
+		client_body.inventory.take(&"smoke_purple", 2)
+		client_before = Roster.gear_counts(Roster.json_safe(client_body.inventory.net_state))
 	for mid: String in squad:
 		BaseHub.server_pick(mid, true)
 	var wage_a := int(BaseHub.member(a).wage)
@@ -1075,6 +1128,10 @@ func _test_deployment(client: Dictionary) -> void:
 	check(is_equal_approx(SquadAI.of(sa).combat, Roster.ai_stats(BaseHub.member(a)).combat), "their aim skill drives the AI (combat %.2f)" % SquadAI.of(sa).combat)
 	player = level.players.get_node(^"1")
 	check(player.inventory.slots[&"vest"] == &"plate_carrier" and player.inventory.slots[&"helmet"] == &"helmet", "the player deploys in the kit from the armory")
+	var client_after := level.players.get_node_or_null(str(multiplayer.get_peers()[0]) if not multiplayer.get_peers().is_empty() else "0") as Soldier
+	check(client_after != null and not client_before.is_empty()
+		and Roster.gear_counts(Roster.json_safe(client_after.inventory.net_state)) == client_before,
+		"the client deploys in its own kit, not a default one (%s vs %s)" % [client_before, Roster.gear_counts(Roster.json_safe(client_after.inventory.net_state)) if client_after else "none"])
 	# A player death counts against the pool.
 	var deployed_kit := Roster.gear_counts(Roster.json_safe(player.inventory.net_state))
 	var bodies_before := level.bodies.get_child_count()

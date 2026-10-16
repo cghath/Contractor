@@ -979,8 +979,22 @@ func _apply_player_gear(peer: int, player: Soldier) -> void:
 	var dep := RosterDeployment.active(roster())
 	var stand_in: bool = dep.has("stand_ins") and dep.stand_ins.has(key) and not member(String(dep.stand_ins[key])).is_empty()
 	if stand_in:
-		gear = member(String(dep.stand_ins[key])).get("gear", {})
-		player._client_message.rpc_id(peer, "%s is recovering: you play %s" % [main.name, member(String(dep.stand_ins[key])).callsign])
+		var sm := member(String(dep.stand_ins[key]))
+		var own: Dictionary = main.get("gear", {})
+		var own_kit := not Restock.is_blank(Restock.template_of(own))
+		if own_kit and not (dep.get("stand_in_gear", {}) as Dictionary).has(key):
+			# Captain, 2026-10-15 (loadouts reset on infiltration): a recovering player plays the
+			# stand-in in his OWN kit, not the stand-in's. It moves (never copies) onto the
+			# stand-in for the deployment; RosterDeployment.resolve moves it home again.
+			if not dep.has("stand_in_gear"):
+				dep["stand_in_gear"] = {}
+			dep.stand_in_gear[key] = Roster.json_safe((sm.get("gear", {}) as Dictionary).duplicate(true))
+			sm["gear"] = own.duplicate(true)
+			main["gear"] = {}
+		gear = sm.get("gear", {})
+		var msg := "%s is recovering: you play %s%s" % [main.name, sm.callsign, ", in your own kit" if (dep.get("stand_in_gear", {}) as Dictionary).has(key) else ""]
+		SessionLog.note("%s: %s" % [player_key(peer), msg])
+		player._client_message.rpc_id(peer, msg)
 	elif main.get("kit_due", false) and not Restock.is_blank(Restock.template_of(gear)):
 		main.erase("kit_due")  # they already have gear of their own: that wins
 	player.inventory.net_state = GameState.from_json(gear.duplicate(true))
