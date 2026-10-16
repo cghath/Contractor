@@ -24,7 +24,7 @@ const P := VehicleArt.P
 const CUSHION_DROP := 0.72
 ## Each body's cabin floor (metres up in the vehicle's frame): the seats stand on it, and a seated
 ## rider's feet rest on it (Vehicle: CharacterModel.seated_pose, Captain, 2026-10-14).
-const FLOORS := {"matv": 1.0, "maxxpro": 1.2, "hilux": 0.75, "lc79": 0.85, "aav7": 1.0, "uh60": 0.62, "vtol_petrel": 0.6}
+const FLOORS := {"matv": 1.0, "maxxpro": 1.2, "hilux": 0.75, "lc79": 0.85, "aav7": 1.0, "uh60": 0.62, "vtol_petrel": 0.6, "vtol_razorback": 1.0}
 
 static var _seats := {}  # model -> Array of seat dictionaries (vehicles.json, "base" merged)
 static var _mutex := Mutex.new()
@@ -34,7 +34,7 @@ static var _mutex := Mutex.new()
 ## threads too (VehicleHull.prewarm): touches only `c` and this class's own seat table.
 static func furnish(model: String, c: VehicleArt.Canvas) -> void:
 	var body := _body_of(model)
-	if not body in ["matv", "maxxpro", "hilux", "lc79", "aav7", "uh60", "vtol_petrel"]:
+	if not body in ["matv", "maxxpro", "hilux", "lc79", "aav7", "uh60", "vtol_petrel", "vtol_razorback"]:
 		return
 	var hit := c.buffer
 	var look := VoxelBuffer.new()
@@ -51,6 +51,7 @@ static func furnish(model: String, c: VehicleArt.Canvas) -> void:
 		"aav7": _aav7(cab)
 		"uh60": _uh60(cab)
 		"vtol_petrel": _vtol_petrel(cab)
+		"vtol_razorback": _vtol_razorback(cab)
 	c.buffer = hit
 	c.look = look
 
@@ -451,13 +452,27 @@ static func _uh60(k: Cab) -> void:
 ## a follow-up, not required for the model to fly and carry passengers).
 static func _vtol_petrel(k: Cab) -> void:
 	var o: float = VehicleArt.PETREL_NOSE_OFFSET
-	var cabin := VehicleArt.Section.new(0.55, 2.3, 1.3, 1.196, 0.05, 0.03)
-	# Stops where the hull starts tapering (data z 4.6): this full-width section carved past it
-	# cut through the narrowing tail walls and left the last slice standing as a loose frame.
-	k.carve_section(cabin, o - 5.0, o + 4.6, 0.6, 2.2, 0.12)
-	k.glaze(-0.95, 1.7, o - 6.3, 0.95, 2.16, o - 5.15, 2, true)
-	k.glaze(-0.95, 2.16, o - 5.9, 0.95, 2.3, o - 5.3, 1, false)
-	k.glaze_sides(1.5, 0.9, 1.5, o - 3.7, 2.05, o - 2.3)  # gunner windows
-	for wz: float in [o - 0.6, o + 1.1, o + 2.6]:  # cabin windows
-		k.glaze_sides(1.5, 0.9, 1.45, wz - 0.1, 2.0, wz + 1.0)
+	var cabin := VehicleArt.Section.new(0.5, 2.9, 1.45, 1.0, 0.04, 0.03)
+	# Runs only between the nose and tail tapers (data z -4.6..4.4): this full-width section carved
+	# past them cut through the narrowing walls (ragged flanks, a loose frame left at the tail).
+	k.carve_section(cabin, o - 4.6, o + 4.4, 0.6, 2.8, 0.12)
+	k.glaze(-1.3, 1.7, o - 7.0, 1.3, 2.95, o - 4.5, 2, true)  # the big canopy
+	k.glaze(-1.3, 2.3, o - 6.6, 1.3, 2.95, o - 4.6, 1, false)
+	k.glaze_sides(1.55, 0.95, 1.7, o - 4.0, 2.2, o - 2.7)  # gunner windows
+	k.glaze_sides(1.55, 0.95, 1.6, o - 2.2, 2.2, o - 1.2)  # door windows
+	for wz: float in [o + 1.1, o + 2.6]:  # cabin windows
+		k.glaze_sides(1.55, 0.95, 1.6, wz - 0.1, 2.1, wz + 1.0)
 	k.seats(FLOORS.vtol_petrel, -0.85, 0.85)
+
+
+## Razorback VTOL (VehicleArt._vtol_razorback): the big troop bay cleared from behind the
+## cockpit to where the tail sweeps up, the many-paned nose glazed from inside, cabin windows.
+static func _vtol_razorback(k: Cab) -> void:
+	var o: float = VehicleArt.RAZORBACK_NOSE_OFFSET
+	var cabin := VehicleArt.Section.new(0.95, 4.0, 2.2, 1.85, 0.35, 0.3)
+	k.carve_section(cabin, o - 7.0, o + 5.0, 1.0, 3.9, 0.16)
+	k.glaze(-2.2, 2.2, o - 11.0, 2.2, 3.95, o - 7.4, 2, true)
+	k.glaze_sides(2.4, 1.6, 2.9, o - 6.7, 3.6, o - 5.1)  # crew windows
+	for wz: float in [o + 0.5, o + 2.2, o + 3.9]:  # cabin windows
+		k.glaze_sides(2.4, 1.6, 3.0, wz - 0.1, 3.55, wz + 0.9)
+	k.seats(FLOORS.vtol_razorback, -1.6, 1.6)

@@ -3,16 +3,25 @@ extends Node3D
 ## photographed from a few angles (needs a real window; with --headless it only builds them).
 ##   <voxel godot exe> --path . res://tests/vtol_shots.tscn -- <output folder>
 ## Saves petrel_*.png (front 3/4, side, rear 3/4, top, cabin-level close-up) and compare_*.png
-## (both airframes side by side). Keep the output as an S run (docs/debugging.md).
+## (both airframes side by side), razorback_*.png and compare_all_three.png. Keep the output as an S run (docs/debugging.md).
 
 const SHOTS := [
 	# [file, look-at offset from the Petrel, camera offset, fov]
-	["petrel_front34", Vector3(0, 1.6, 0), Vector3(-11, 4.5, 13), 50.0],
+	["petrel_rear34", Vector3(0, 1.6, 0), Vector3(-11, 4.5, 13), 50.0],
 	["petrel_side", Vector3(0, 1.6, 0), Vector3(-17, 2.2, 0), 45.0],
-	["petrel_rear34", Vector3(0, 1.6, 0), Vector3(10, 5.0, -13), 50.0],
+	["petrel_front34", Vector3(0, 1.6, 0), Vector3(10, 5.0, -13), 50.0],
 	["petrel_top", Vector3(0, 0, 0), Vector3(0.01, 24, 0), 45.0],
-	["petrel_nose_close", Vector3(0, 1.8, 4), Vector3(-4, 2.4, 9), 55.0],
-	["petrel_pod_close", Vector3(4, 2.4, 0), Vector3(9, 3.8, 5), 50.0],
+	["petrel_nose_close", Vector3(0, 1.8, -4), Vector3(-4, 2.4, -9), 55.0],
+	["petrel_pod_close", Vector3(5.6, 2.4, 0), Vector3(9, 5.5, 5), 50.0],
+]
+## The Razorback sits at RAZORBACK_AT; same layout, offsets from it.
+const RAZORBACK_AT := Vector3(-30, 0, 0)
+const RAZORBACK_SHOTS := [
+	["razorback_front34", Vector3(0, 3.0, 0), Vector3(-15, 6.5, -19), 50.0],
+	["razorback_side", Vector3(0, 3.0, 0), Vector3(-26, 3.5, 0), 45.0],
+	["razorback_rear34", Vector3(0, 3.0, 0), Vector3(14, 8.0, 18), 50.0],
+	["razorback_top", Vector3(0, 0, 0), Vector3(0.01, 34, 0), 45.0],
+	["razorback_nose_close", Vector3(0, 2.6, -9), Vector3(-5, 3.2, -16), 55.0],
 ]
 
 
@@ -52,6 +61,10 @@ func _ready() -> void:
 
 	var petrel := VehicleArt.instance("vtol_petrel")
 	add_child(petrel)
+	var razorback := VehicleArt.instance("vtol_razorback")
+	razorback.position = RAZORBACK_AT
+	add_child(razorback)
+	print("[vtol] razorback size_m=%s" % VehicleArt.size_m("vtol_razorback"))
 	var uh60 := VehicleArt.instance("uh60")
 	uh60.position = Vector3(22, 0, 0)
 	add_child(uh60)
@@ -70,6 +83,13 @@ func _ready() -> void:
 		_aim(camera, s[1], s[2], s[3])
 		await _settle()
 		_save(out, s[0])
+	for s: Array in RAZORBACK_SHOTS:
+		_aim(camera, RAZORBACK_AT + s[1], s[2], s[3])
+		await _settle()
+		_save(out, s[0])
+	_aim(camera, Vector3(-4, 2.5, 0), Vector3(0, 16, 52), 50.0)
+	await _settle()
+	_save(out, "compare_all_three")
 	# Side by side: Petrel (left) and UH-60 (right).
 	_aim(camera, Vector3(11, 1.8, 0), Vector3(11, 9, 34), 50.0)
 	await _settle()

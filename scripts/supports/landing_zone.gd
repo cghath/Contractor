@@ -18,7 +18,7 @@ const ROTOR_CLEAR_M := 9.5
 ## ducted wingtip pods (VehicleArt._vtol_petrel), not one long exposed main-rotor disc, so its
 ## clearance is set from its wingtip-to-centreline reach (about 6.7 m) plus margin, tighter than
 ## the UH-60's.
-const MODEL_CLEAR_M := {"vtol_petrel": 8.0}
+const MODEL_CLEAR_M := {"vtol_petrel": 8.0, "vtol_razorback": 11.5}
 ## Clear from this high above the ground (m) to CLEAR_TOP_M: low grass and the ground's own
 ## rise on a slope don't count.
 const CLEAR_FROM_M := 0.6
