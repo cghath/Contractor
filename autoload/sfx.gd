@@ -415,8 +415,12 @@ func _update_engines(ear: Vector3, delta: float) -> void:
 		var effort := clampf(float(e.speed) / ENGINE_TOP_SPEED, 0.0, 1.0)
 		var player: AudioStreamPlayer3D = e.player
 		player.global_position = pos
-		player.pitch_scale = 0.8 + effort * 0.8
-		player.volume_db = float(def.get("volume_db", 0.0)) + effort * 5.0
+		if def.get("engine_flat", false):  # a rotor: near-constant, whatever the speed (a heli is always past ENGINE_TOP_SPEED)
+			player.pitch_scale = 0.95 + effort * 0.1
+			player.volume_db = float(def.get("volume_db", 0.0))
+		else:
+			player.pitch_scale = 0.8 + effort * 0.8
+			player.volume_db = float(def.get("volume_db", 0.0)) + effort * 5.0
 		alive[key] = true
 	for key in _engines.keys():
 		if not alive.has(key):
