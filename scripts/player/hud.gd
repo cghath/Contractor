@@ -25,6 +25,7 @@ var player: Soldier
 var inventory_screen: InventoryScreen
 var loot_window: LootWindow
 var command_menu: CommandMenu
+var voice_order: VoiceOrder
 ## The map (M) and briefing (MapScreen).
 var map_screen: MapScreen
 ## The "what to do now" line and the objective markers (ObjectiveHelper).
@@ -121,6 +122,8 @@ func _ready() -> void:
 	command_menu = CommandMenu.new(player)
 	zone_left.add_child(command_menu)
 	zone_left.add_child(_spacer())
+	voice_order = VoiceOrder.new(command_menu)
+	add_child(voice_order)
 	_status = UiKit.hud_label()
 	_status.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS  # a long line cuts with "...", never runs under the radio
 	zone_left.add_child(_status)
@@ -609,4 +612,4 @@ func _squad_lines(player: Soldier) -> String:
 			lines.append("%s F%d %s%s: %s" % [mark, i + 1, s.display_name(), tag, s.ai_status])
 		else:
 			lines.append("  F%d %s%s" % [i + 1, "You" if s == player else "Player %s" % s.name, tag])
-	return "SQUAD  [F-keys] select  [~] all\n" + "\n".join(lines) + "\n"
+	return "SQUAD  [F-keys] select  [~] all  [T] voice order\n" + "\n".join(lines) + "\n"
