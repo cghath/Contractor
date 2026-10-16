@@ -861,6 +861,11 @@ func _server_fire(origin: Vector3, direction: Vector3, slot: StringName) -> void
 func _server_squad_command(cmd: String, point: Vector3, names: PackedStringArray) -> void:
 	if not _from_owner() or is_ai() or not vitals.is_up() or not usable_point(point):
 		return
+	server_squad_command(cmd, point, names)
+
+
+## Host: the command once the sender is checked (_server_squad_command; tests call it).
+func server_squad_command(cmd: String, point: Vector3, names: PackedStringArray) -> void:
 	var squad := CompoundLevel.current(self).squad_for(faction)
 	if squad == null:
 		return
