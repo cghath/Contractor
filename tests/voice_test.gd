@@ -26,6 +26,7 @@ func _ready() -> void:
 	while level.ai.get_node_or_null(^"Alpha") == null:
 		await get_tree().process_frame
 	player = level.players.get_node(^"1")
+	player.set_physics_process(false)  # we place the player by hand for the question tests
 	voice = player._hud.voice_order
 	_remove_hostiles()
 	await _frames(10)
@@ -33,6 +34,7 @@ func _ready() -> void:
 	await _test_push_to_talk_box()
 	await _test_order_dispatch()
 	_test_unmatched_phrase()
+	await _test_questions()
 	GameState.delete_save()
 	print("VOICE TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
@@ -121,7 +123,59 @@ func _test_unmatched_phrase() -> void:
 	check(player._hud._message.text.begins_with("Didn't catch"), "and the player is told (%s)" % player._hud._message.text)
 
 
+func _test_questions() -> void:
+	print("Asking a question (VoiceQuestions)")
+	check(VoiceQuestions.resolve("How's your ammo?") == &"ammo", "ammo phrase")
+	check(VoiceQuestions.resolve("You okay") == &"status", "status phrase")
+	check(VoiceQuestions.resolve("any contacts") == &"contact", "contact phrase")
+	check(VoiceQuestions.resolve("what's the weather").is_empty(), "garbage question text matches nothing")
+
+	var alpha := _ai("Alpha")
+	await _place_looking_at(alpha)
+	check(voice.askable_target() == alpha, "a friendly under the crosshair is askable")
+	voice.run("how much ammo do you have")
+	var expect := "%s: %s" % [alpha.display_name(), AmmoReadout.text_of(AmmoReadout.summary(alpha))]
+	check(player._hud._message.text == expect, "ammo answers with Alpha's real loadout (%s)" % player._hud._message.text)
+
+	voice.run("whats your status")
+	check(player._hud._message.text.begins_with(alpha.display_name() + ": "), "status answers too (%s)" % player._hud._message.text)
+
+	alpha.threat_time = -1000.0
+	voice.run("any contacts")
+	check(player._hud._message.text == "%s: Nothing to report." % alpha.display_name(), "no recent contact: nothing to report")
+
+	alpha.threat_pos = alpha.global_position + Vector3(10.0, 0, 0)
+	alpha.threat_time = Soldier._now()
+	voice.run("any contacts")
+	check(player._hud._message.text.begins_with(alpha.display_name() + ": Contact,"), "a recent contact is reported (%s)" % player._hud._message.text)
+
+	# Orders still work even with a squadmate in the crosshair: only a recognized question
+	# phrase takes the "ask" path (askable_target alone isn't enough).
+	voice.run("select all")
+	check(player._hud.command_menu.selected.size() == level.ai.get_children().size(), "an order phrase still dispatches as an order, not a question")
+
+	var civ := level.spawn_soldier({"name": "Civ1", "faction": "civilian", "variant": "multicam",
+		"pos": alpha.global_position, "loadout": [], "combat": 0.0, "discipline": 0.0, "guard": false})
+	await _frames(3)
+	await _place_looking_at(civ)
+	check(voice.askable_target() == civ, "a civilian under the crosshair is askable too")
+	voice.run("whats your status")
+	check(player._hud._message.text.begins_with(civ.display_name() + ": "), "a civilian answers too (%s)" % player._hud._message.text)
+	civ.queue_free()
+
+
 # --- Helpers --------------------------------------------------------------
+
+## Stands the player 3 m from `target` (if any), looking straight at it, both level, and
+## waits a couple of frames for the new transforms to reach the physics server.
+func _place_looking_at(target: Soldier) -> void:
+	player.global_position = Vector3(0, 0.1, 30)
+	player.rotation = Vector3.ZERO
+	player.head.rotation = Vector3.ZERO
+	if target:
+		target.global_position = player.global_position + Vector3(0, 0, -3.0)
+	await _frames(3)
+
 
 func _ai(callsign: String) -> Soldier:
 	var s := level.ai.get_node_or_null(NodePath(callsign)) as Soldier

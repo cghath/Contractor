@@ -612,4 +612,4 @@ func _squad_lines(player: Soldier) -> String:
 			lines.append("%s F%d %s%s: %s" % [mark, i + 1, s.display_name(), tag, s.ai_status])
 		else:
 			lines.append("  F%d %s%s" % [i + 1, "You" if s == player else "Player %s" % s.name, tag])
-	return "SQUAD  [F-keys] select  [~] all  [T] voice order\n" + "\n".join(lines) + "\n"
+	return "SQUAD  [F-keys] select  [~] all  [T] voice order/ask\n" + "\n".join(lines) + "\n"
