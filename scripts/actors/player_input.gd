@@ -148,6 +148,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		body.set_pitch(body.head.rotation.x - event.relative.y * turn * (-1.0 if GameSettings.invert_y() else 1.0))
 	elif hud.map_screen and hud.map_screen.is_open():
 		return  # the map (M) has the mouse and the keys: no reloading or throwing behind it
+	elif hud.voice_order.listening and event.is_action_pressed(&"pause"):
+		hud.voice_order.cancel()  # Esc cancels the voice order box instead of opening the pause menu
+	elif hud.voice_order.listening:
+		return  # the voice order box has the keys (not the mouse: you can still aim a pointed order)
 	elif event.is_action_pressed(&"inventory") or (event.is_action_pressed(&"pause") and hud.is_inventory_open()):
 		hud.toggle_detail()
 	elif hud.is_inventory_open():
@@ -271,6 +275,7 @@ func _process(delta: float) -> void:
 	advance_turn(delta)
 	_check_nade()
 	_update_interaction(delta)
+	_update_voice()
 	_update_give_up(delta)
 	if placing:
 		_update_ghost()
@@ -515,6 +520,14 @@ func _update_interaction(delta: float) -> void:
 			interaction.set_points(InteractionMenu.collect_points(body, body.camera))
 		InteractionMenu.Mode.SELF:
 			interaction.refresh_self()
+
+
+## Hold T (`voice_order`) for a push-to-talk squad order; see VoiceOrder. Blocked while down,
+## respawning, with the inventory open, or the mouse isn't captured.
+func _update_voice() -> void:
+	var allowed := _captured() and body.vitals.is_up() and body.respawn_state != Soldier.RESPAWN_WAITING \
+		and not hud.is_inventory_open() and not interaction.is_open()
+	hud.voice_order.update_key(allowed and Input.is_action_pressed(&"voice_order"))
 
 
 func _try_fire() -> void:

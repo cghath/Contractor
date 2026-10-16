@@ -48,6 +48,7 @@ const KEYS := {
 	# 2026-10-14: "item descriptions plus uses also needed"). I is free on foot (proposed).
 	&"inspect": [KEY_I],
 	&"debug_hurt": [KEY_K],  # dev tools only (DevTools.on): hurt yourself to test going down and dying
+	&"voice_order": [KEY_T],  # hold: push-to-talk a squad order (VoiceOrder, voice_commands.gd)
 }
 ## Keys pressed with Shift held. An action without Shift still matches with it held, so
 ## PlayerInput checks these first.

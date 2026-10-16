@@ -48,6 +48,24 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   could attach themselves. `VoxelArt._with_suppressor` adds the can to a rifle's muzzle
   generically, over every silhouette at once, so a new one never needs its own suppressor boxes.
 
+### Squad callouts know what's actually going on (2026-10-16)
+
+#### Added
+- Contact calls are pre-rendered per clock position, close range getting its own urgent line
+  (`Contact, two o'clock, 80 m`, voiced "contact_<clock>[_close]"); the subtitle keeps the exact
+  distance, same as before. Enemies' contact calls get the same treatment and fall back to their
+  plain line in Russian/Farsi (not translated for this pass).
+- A squad member who's carrying intel calls out the kind of enemy site it just revealed ("Got
+  the HQ marked!"), voiced per site type (IntelReveal.intel_found, Callouts).
+- Reloading on the last magazine of a weapon's ammo gets an ammo-status line naming the weapon's
+  class, not its caliber ("Last mag for the rifle!"): rifle, mg (belt-fed/LMG) or pistol.
+- `Callouts.voiced_path` falls back from a dynamic id to its less specific prefix (down to the
+  bare category) when no pre-rendered line exists yet, so a new template slot degrades to the
+  old generic line instead of going silent; `tools/voices/gen_callouts.py`'s `LINES["en"]` has
+  the new combos (contact x8 clock positions x2 ranges, 5 intel site types, 3 ammo classes) to
+  render with Piper. Scope stays bounded ("nothing insane"): these three categories, English
+  only, one phrasing each.
+
 ### The salt flats stop glaring (Captain, 2026-10-14)
 
 #### Changed
