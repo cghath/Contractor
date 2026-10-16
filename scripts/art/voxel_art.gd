@@ -205,7 +205,9 @@ static func sight_point(model: String) -> Vector3:
 	var centre := Vector3(spec.size) * 0.5
 	match model.get_slice(":", 0):
 		"rifle":
-			return (Vector3(1.5, OPTIC_AXIS_Y, sight_back(_rifle_art(model), spec.size.z)) - centre) * VOXEL_SIZE
+			var art := _rifle_art(model)
+			var back := sight_back(art, spec.size.z) + (IRON_EYE_RELIEF if art == IRONS else 0.0)
+			return (Vector3(1.5, OPTIC_AXIS_Y, back) - centre) * VOXEL_SIZE
 		"pistol":
 			return (Vector3(1, 7.0, 9.4) - centre) * VOXEL_SIZE  # rear sight notch
 	return Vector3.ZERO
@@ -1108,6 +1110,8 @@ static func _fb(x0: float, y0: float, z0: float, x1: float, y1: float, z1: float
 const OPTIC_AXIS_Y := 11.8
 ## A rifle with no optic: its back-up irons.
 const IRONS := "irons"
+## How far (voxels) behind the irons' rear aperture the eye sits when aiming (about 9 cm).
+const IRON_EYE_RELIEF := 4.5
 ## Rail top (voxels), where an optic's mount sits.
 const RAIL_Y := 9.95
 
@@ -1225,11 +1229,15 @@ static func iron_boxes(n: float) -> Array:
 	var rear := sight_back(IRONS, n)
 	var front := n * 0.13
 	return [
-		_fb(0.9, RAIL_Y, rear - 0.8, 2.1, 10.5, rear + 0.8, C.GUN),                 # rear: base
-		_fb(0.85, 10.5, rear - 0.15, 1.1, 12.45, rear + 0.15, C.GUN),               # a thin ring round a wide
-		_fb(1.9, 10.5, rear - 0.15, 2.15, 12.45, rear + 0.15, C.GUN),               # aperture (a ghost ring)
-		_fb(1.1, 10.5, rear - 0.15, 1.9, 11.4, rear + 0.15, C.GUN),
-		_fb(1.1, 12.2, rear - 0.15, 1.9, 12.45, rear + 0.15, C.GUN),
+		# Captain, 2026-10-16 (screenshot: the rear sight a big block, the hole small and the post low):
+		# a low base, a thin stalk, and a thin ghost ring round a wide hole centred on OPTIC_AXIS_Y;
+		# the eye sits IRON_EYE_RELIEF behind it (sight_point), so it frames the post instead.
+		_fb(1.0, RAIL_Y, rear - 0.6, 2.0, 10.3, rear + 0.6, C.GUN),                 # rear: base
+		_fb(1.375, 10.3, rear - 0.15, 1.625, 10.95, rear + 0.15, C.GUN),            # stalk
+		_fb(0.8, 10.95, rear - 0.15, 0.95, 12.65, rear + 0.15, C.GUN),              # ring: left
+		_fb(2.05, 10.95, rear - 0.15, 2.2, 12.65, rear + 0.15, C.GUN),              # right
+		_fb(0.8, 10.95, rear - 0.15, 2.2, 11.1, rear + 0.15, C.GUN),                # bottom
+		_fb(0.8, 12.5, rear - 0.15, 2.2, 12.65, rear + 0.15, C.GUN),                # top
 		_fb(1.375, 9.9, front, 1.625, OPTIC_AXIS_Y, front + 0.5, C.GUN),           # front post (one 0.5 cm voxel)
 		_fb(0.95, 9.9, front, 1.15, 12.0, front + 0.5, C.GUN),                      # and its ears
 		_fb(1.85, 9.9, front, 2.05, 12.0, front + 0.5, C.GUN),
