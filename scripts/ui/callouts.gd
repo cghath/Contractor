@@ -37,6 +37,9 @@ const LOG_SIZE := 64
 ## Fixed lines by callout id; contact and man down build theirs.
 const LINES := {
 	&"reloading": "Reloading!",
+	&"reloading_last_rifle": "Last mag for the rifle!",
+	&"reloading_last_mg": "Last mag for the gun!",
+	&"reloading_last_pistol": "Last mag for the pistol!",
 	&"frag_out": "Frag out!",
 	&"smoke_out": "Smoke out!",
 	&"flash_out": "Flashbang out!",
@@ -48,6 +51,19 @@ const LINES := {
 ## Callout ids for thrown items.
 const THROW_IDS := {&"frag_grenade": &"frag_out", &"smoke_grenade": &"smoke_out", &"flashbang": &"flash_out"}
 const DIRECTIONS: Array[String] = ["front", "front right", "right", "back right", "back", "back left", "left", "front left"]
+## Clock positions for the same 8-way bucket as DIRECTIONS (mil radio convention: the odd hours
+## are skipped, same as real callouts).
+const CLOCK: Array[String] = ["twelve", "two", "three", "five", "six", "eight", "nine", "eleven"]
+## A contact this close (m) gets the voiced "close" line (contact() voice id).
+const CLOSE_RANGE_M := 30.0
+## Subtitles for an intel reveal, by the enemy site type it gave away (IntelReveal.intel_found).
+const INTEL_LINES := {
+	&"hq": "Got the HQ marked!",
+	&"qrf_base": "Got a QRF base marked!",
+	&"aa": "Got an AA site marked!",
+	&"outpost": "Got an outpost marked!",
+	&"checkpoint": "Got a checkpoint marked!",
+}
 
 ## Host: what was said, newest last: {"speaker", "id", "text", "to": PackedInt32Array, "time"}.
 var sent: Array[Dictionary] = []
@@ -179,9 +195,12 @@ func recipients(speaker: Soldier) -> PackedInt32Array:
 	return out
 
 
-## Host only. "Contact, front, 80 m": direction and distance from the squad leader's view
-## (the speaker's own when there's no leader), as Arma calls them. Only the first spotter
-## calls a given enemy; the rest of the side stays quiet for SQUAD_CONTACT_GAP_S.
+## Host only. "Contact, two o'clock, 80 m": clock position and distance from the squad
+## leader's view (the speaker's own when there's no leader), as Arma calls them. The voiced
+## line is pre-rendered per clock position, close range (CLOSE_RANGE_M) getting its own
+## urgent-sounding line (gen_callouts.py "contact_<clock>[_close]"); the subtitle keeps the
+## exact distance either way. Only the first spotter calls a given enemy; the rest of the
+## side stays quiet for SQUAD_CONTACT_GAP_S.
 func contact(speaker: Soldier, enemy: Soldier) -> bool:
 	if enemy == null:
 		return false
@@ -189,8 +208,10 @@ func contact(speaker: Soldier, enemy: Soldier) -> bool:
 	var squad := level.squad_for(speaker.faction) if level else null
 	var from: Node3D = squad.leader if squad and is_instance_valid(squad.leader) else speaker
 	var distance := from.global_position.distance_to(enemy.global_position)
-	return say(speaker, &"contact", "Contact, %s, %d m" % [direction_word(from, enemy.global_position), round_distance(distance)],
-		"", "contact/%s" % enemy.name, SQUAD_CONTACT_GAP_S)
+	var clock := clock_word(from, enemy.global_position)
+	var voice_id := StringName("contact_%s%s" % [clock, "_close" if distance <= CLOSE_RANGE_M else ""])
+	return say(speaker, voice_id, "Contact, %s o'clock, %d m" % [clock, round_distance(distance)],
+		"contact", "contact/%s" % enemy.name, SQUAD_CONTACT_GAP_S)
 
 
 ## Host only. The casualty's battle buddy, or the nearest squadmate in range, calls
@@ -252,6 +273,16 @@ func scavenging(speaker: Soldier, dead: Soldier) -> bool:
 	return say(speaker, &"scavenging", line, "scavenging/%s" % dead.name)
 
 
+## Host only. Whoever's carrying the intel calls out the kind of enemy site it just gave away
+## (IntelReveal.server_reveal_for): "Got the HQ marked!". Lines are pre-rendered per site type
+## (gen_callouts.py "intel_<type>"); an unlisted type (none currently) says nothing.
+func intel_found(speaker: Soldier, site_type: String) -> bool:
+	var id := StringName(site_type)
+	if speaker == null or not INTEL_LINES.has(id):
+		return false
+	return say(speaker, StringName("intel_%s" % site_type), String(INTEL_LINES[id]), "intel")
+
+
 ## Who sees `casualty` go down: their AI buddy if close, else the nearest AI on their side.
 func witness(casualty: Soldier) -> Soldier:
 	var buddy := casualty.buddy
@@ -271,11 +302,22 @@ func witness(casualty: Soldier) -> Soldier:
 	return best
 
 
+## The 8-way bucket `point` is seen in from `from` (0 ahead, 90 to the right), shared by
+## direction_word and clock_word.
+static func _octant(from: Node3D, point: Vector3) -> int:
+	var local := from.global_basis.inverse() * (point - from.global_position)
+	var angle := rad_to_deg(atan2(local.x, -local.z))
+	return posmod(roundi(angle / 45.0), 8)
+
+
 ## "front", "front right", ... "left", "front left": where `point` is seen from `from`.
 static func direction_word(from: Node3D, point: Vector3) -> String:
-	var local := from.global_basis.inverse() * (point - from.global_position)
-	var angle := rad_to_deg(atan2(local.x, -local.z))  # 0 ahead, 90 to the right
-	return DIRECTIONS[posmod(roundi(angle / 45.0), DIRECTIONS.size())]
+	return DIRECTIONS[_octant(from, point)]
+
+
+## "twelve", "two", ... "nine", "eleven" o'clock: where `point` is seen from `from`.
+static func clock_word(from: Node3D, point: Vector3) -> String:
+	return CLOCK[_octant(from, point)]
 
 
 ## Distances as said over the radio: metres up to 10, then to the nearest 10.
@@ -376,13 +418,23 @@ static func voiced_path(id: StringName, speaker: Node) -> String:
 		dir = AUDIO_DIR + lang + "/"
 		count = int(ENEMY_VOICES[lang])
 	var voice := int(speaker.get_meta(&"voice", h % count)) % count
-	var options: Array[String] = []
-	for n in range(1, PHRASINGS + 1):
-		var p := "%sv%d/%s_%d.wav" % [dir, voice, id, n]
-		if ResourceLoader.exists(p):
-			options.append(p)
-	if not options.is_empty():
-		return options[randi() % options.size()]
+	# A dynamic id (e.g. "contact_two_close") with no pre-rendered line yet, or that never gets
+	# one (a hostile's tongue, say), falls back to its less specific prefix down to the bare
+	# category ("contact"), so a new template slot degrades to the old generic line instead of
+	# going silent.
+	var base := String(id)
+	while true:
+		var options: Array[String] = []
+		for n in range(1, PHRASINGS + 1):
+			var p := "%sv%d/%s_%d.wav" % [dir, voice, base, n]
+			if ResourceLoader.exists(p):
+				options.append(p)
+		if not options.is_empty():
+			return options[randi() % options.size()]
+		var cut := base.rfind("_")
+		if cut <= 0:
+			break
+		base = base.substr(0, cut)
 	var single := AUDIO_DIR + String(id) + ".ogg"
 	return single if ResourceLoader.exists(single) else ""
 
