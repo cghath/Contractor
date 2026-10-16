@@ -156,8 +156,10 @@ static func model_for(item: ItemData, state := {}) -> String:
 	match item.slot:
 		&"primary":
 			var length: float = item.stats.get("size_m", [0, 0, 0.84])[2]
-			var art := Optics.art_of(Optics.mounted(item, state)) if Optics.has_rail(item) else "dot"
 			var style := String(item.stats.get("model_style", ""))  # "ak", "mg": a different silhouette
+			# No rail: the old fixed dot for the AR family, but AKs and MGs carry irons only
+			# (Captain, 2026-10-15: the AK showed a red-dot block that did nothing).
+			var art := Optics.art_of(Optics.mounted(item, state)) if Optics.has_rail(item) else ("dot" if style == "" else IRONS)
 			return "rifle:%d:%s%s" % [roundi(length / VOXEL_SIZE), art if art != "" else IRONS, (":" + style) if style != "" else ""]
 		&"sidearm":
 			return "pistol"

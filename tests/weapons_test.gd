@@ -142,6 +142,8 @@ func _test_models() -> void:
 		check(not VoxelArt.hand_points(model).is_empty() and VoxelArt.butt_point(model) != Vector3.ZERO, "%s has hand points and a butt" % id)
 	check(VoxelArt.model_for(ItemDB.get_item(&"akm")).ends_with(":ak") and VoxelArt.model_for(ItemDB.get_item(&"pkm")).ends_with(":mg"), "AKs and machine guns have their own silhouettes")
 	check(not VoxelArt.model_for(ItemDB.get_item(&"m4a1")).ends_with(":ak"), "the M4 keeps its own")
+	check(VoxelArt.model_for(ItemDB.get_item(&"akm")).contains(":irons:") and VoxelArt.model_for(ItemDB.get_item(&"pkm")).contains(":irons:"),
+		"an AK or MG with no rail shows iron sights, not a dead red-dot block (%s)" % VoxelArt.model_for(ItemDB.get_item(&"akm")))
 
 
 func _test_fire_and_reload(id: String) -> void:
