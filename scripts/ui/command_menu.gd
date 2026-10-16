@@ -13,6 +13,9 @@ extends PanelContainer
 ## enemy under it; "hvt": at the HVT under it; "squadmate": at the squadmate under it); entries with "select" change the selection (fire team or colour team)
 ## and keep the menu open. Status > Report enemy position ("radio_report", people, wave 4)
 ## reports the enemies under the crosshair by radio (PeopleLayer.request_report).
+##
+## Holding T and saying an order (VoiceOrder, voice_commands.gd) is an alternate way to send
+## the same key presses through handle_input() - it isn't a second command path.
 
 const MENU := {
 	"title": "Command",
