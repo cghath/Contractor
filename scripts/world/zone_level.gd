@@ -426,6 +426,7 @@ func _on_hosted() -> void:
 			var uid := "%s_%s" % [module.module_id, loot.uid]
 			if not GameState.is_looted(uid):
 				spawn_item(StringName(loot.id), loot.get("count", 1), module.to_global(loot.pos), uid)
+	WorldValuables.server_spawn_all(self)  # caches, crates, wrecks with kit and dead drops out in the open terrain
 	if def.get("insertion_kit", false):
 		_spawn_insertion_kit()
 	var pallet_node := get_node_or_null(^"PalletField") as PalletField

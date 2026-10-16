@@ -273,6 +273,8 @@ static func _fallback(item: ItemData) -> Shape:
 		"objective": colour = K.YELLOW
 		"vehicle": colour = K.OD
 		"intel": colour = K.MANILA
+		"valuable": colour = K.GOLD
+		"salvage": colour = K.COPPER
 	var cut := minf(1.0, minf(size.x, minf(size.y, size.z)) * 0.25)
 	s.prism(Axis.Z, 0, size.y * 0.5, size.x * 0.5, size.y * 0.5, cut, 0, size.z, colour)
 	return s

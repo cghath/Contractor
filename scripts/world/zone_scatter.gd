@@ -20,8 +20,13 @@ extends Node3D
 ## The layout is cached (Captain, 2026-10-14: "we'll use caching for performance if needed"):
 ## in memory per zone (seed, preset, ground, pads, roads) with the cells' built meshes, and on
 ## disk (user://cache), so coming back to a zone costs nothing.
+##
+## Ruins and wrecks (Captain, 2026-10-16, playtest B1399 on Red Mesa: "open terrain reads nearly
+## empty"): bigger, rougher PROP clutter out in the open terrain, not just roadside. VALUABLE
+## marks where WorldValuables spawns real lootable pickups (caches, crates, wrecks with kit, dead
+## drops) — a placement kind with no mesh of its own; see valuable_sites().
 
-enum Kind { ROCK, SCRUB, TREE, THICKET, PROP }
+enum Kind { ROCK, SCRUB, TREE, THICKET, PROP, VALUABLE }
 
 ## Most items of each kind in a zone (a 16 km2 hot zone hits them). Round 4 raised the trees
 ## for the woods; a nav chunk is 12 m (ZoneNav), so more trunk boxes cost little per bake.
@@ -40,8 +45,20 @@ const COPSES_SHARE := 0.8
 const CAP_SOLID := 8800  # (was 6800; the extra trees)
 ## Man-made clutter (Captain, 2026-10-16: "the terrains need more objects too"): crates and
 ## debris, sparser than rocks/scrub and only near a road or a pad ("props_near_m"), not out in
-## open wilderness.
-const CAP_PROPS := 600
+## open wilderness; shares this cap with the ruins and wrecks below (both Kind.PROP).
+const CAP_PROPS := 1000
+## Ruins and wrecks (Captain, 2026-10-16, playtest B1399 on Red Mesa: "open terrain reads
+## nearly empty", "nothing to loot out in the world"): broken man-made clutter out in the open
+## terrain too, not just roadside ("ruins_per_km2"), placed like the rocks are (anywhere open,
+## away from the pads and roads' own keep-out, no "near a road" requirement). Bigger and rougher
+## than the roadside crates, so they read as ruins and wrecks, not more debris.
+const RUIN_SIZE_LO := 1.2
+const RUIN_SIZE_HI := 3.0
+## Lootable value out in the open terrain, well away from a mission site or a road (caches,
+## crates, wrecks with kit, dead drops): WorldValuables spawns the real pickups at these marked
+## spots (ZoneScatter.valuable_sites), so this is only placement, no mesh of its own.
+const CAP_VALUABLES := 40
+const VALUABLE_AVOID_M := 70.0
 ## Captain, 2026-10-14 ("include experimental forest mission like we dev'd"; the normal zones'
 ## woods have a perf problem, a perf pass is queued): the copses-as-cover layout (the caps above,
 ## COPSE_SPREAD's copses, the woods' edge belt) only for a preset whose scatter says
@@ -86,7 +103,8 @@ const SEE_TREE_M := 950.0
 const FAR_GROUP_M := 24.0
 ## Layout format: bump when the layout code changes, so old cached layouts are not used.
 ## 7: denser copses with a thicket skirt and rocks, woods' edge belt (Captain, 2026-10-14).
-const LAYOUT_VERSION := 7
+## 8: ruins and wrecks off the roads, and the VALUABLE placement kind (Captain, 2026-10-16).
+const LAYOUT_VERSION := 8
 ## Zones kept in memory (layouts), the newest of them also keep their built cell meshes, and
 ## files kept in the disk cache.
 const CACHE_ZONES := 4
@@ -123,7 +141,7 @@ static var _shared_material: StandardMaterial3D
 
 ## Every item: {"kind", "pos" (Vector3), "yaw", "size" (Vector3), "colour" (Color), "solid"}.
 var items: Array[Dictionary] = []
-var counts := {Kind.ROCK: 0, Kind.SCRUB: 0, Kind.TREE: 0, Kind.THICKET: 0, Kind.PROP: 0}
+var counts := {Kind.ROCK: 0, Kind.SCRUB: 0, Kind.TREE: 0, Kind.THICKET: 0, Kind.PROP: 0, Kind.VALUABLE: 0}
 var solid_count := 0
 ## Where the last generate's layout came from: "generated", "memory" or "disk" ("" none).
 var cache_source := ""
@@ -173,7 +191,7 @@ func generate(terrain: ZoneTerrain, def: Dictionary) -> void:
 	items = fresh  # new arrays, never clear(): a cached layout may share the old ones
 	_cells = {}
 	_built = {}
-	counts = {Kind.ROCK: 0, Kind.SCRUB: 0, Kind.TREE: 0, Kind.THICKET: 0, Kind.PROP: 0}
+	counts = {Kind.ROCK: 0, Kind.SCRUB: 0, Kind.TREE: 0, Kind.THICKET: 0, Kind.PROP: 0, Kind.VALUABLE: 0}
 	solid_count = 0
 	cache_source = ""
 	var sites: Array[Dictionary] = []
@@ -286,6 +304,50 @@ func _lay_out() -> void:
 		var size := Vector3(rng.randf_range(0.5, 1.1), rng.randf_range(0.4, 0.8), rng.randf_range(0.5, 1.1))
 		_add({"kind": Kind.PROP, "yaw": rng.randf() * TAU, "solid": true, "size": size, "pos": Vector3(x, h + size.y * 0.5, z),
 			"colour": prop_colours[rng.randi() % prop_colours.size()]})
+	# Ruins and wrecks: bigger, rougher man-made clutter out in the open terrain too
+	# (Captain, 2026-10-16, playtest B1399 on Red Mesa: "open terrain reads nearly empty"),
+	# not gated to a road or a pad like the crates above — placed like the rocks are.
+	var ruin_colours := _colours(colours.get("ruin", ["5a5648", "6b645a", "4a4038", "68503c"]))
+	want = mini(int(round(float(_spec.get("ruins_per_km2", 0.0)) * area_km2)), CAP_PROPS - counts[Kind.PROP])
+	attempts = int(want * tries_per)
+	while want > 0 and attempts > 0:
+		attempts -= 1
+		var x := rng.randf_range(-_half + EDGE_KEEP_M, _half - EDGE_KEEP_M)
+		var z := rng.randf_range(-_half + EDGE_KEEP_M, _half - EDGE_KEEP_M)
+		if _blocked(x, z, _keep, _roads):
+			continue
+		if open and rng.randf() > _open_weight(x, z):
+			continue
+		var h := terrain.height_at(x, z)
+		if terrain.sea_side >= 0 and h < terrain.sea_level + 0.35:
+			continue
+		if terrain.normal_at(x, z).y < 0.6:
+			continue
+		var size := Vector3(rng.randf_range(RUIN_SIZE_LO, RUIN_SIZE_HI), rng.randf_range(RUIN_SIZE_LO, RUIN_SIZE_HI) * 0.6, rng.randf_range(RUIN_SIZE_LO, RUIN_SIZE_HI))
+		_add({"kind": Kind.PROP, "yaw": rng.randf() * TAU, "solid": true, "size": size, "pos": Vector3(x, h + size.y * 0.5, z),
+			"colour": ruin_colours[rng.randi() % ruin_colours.size()]})
+		want -= 1
+	# Valuable sites: where WorldValuables (host) will spawn real lootable pickups (caches,
+	# crates, wrecks with kit, dead drops) — well away from a site or a road (VALUABLE_AVOID_M,
+	# more than the bare pad/road keep-out), so this never marks a spot right by a mission.
+	# No mesh of its own: ZoneScatter only places the marker, deterministic like everything else.
+	want = mini(int(round(float(_spec.get("valuables_per_km2", 0.0)) * area_km2)), CAP_VALUABLES)
+	attempts = int(want * tries_per)
+	while counts[Kind.VALUABLE] < want and attempts > 0:
+		attempts -= 1
+		var x := rng.randf_range(-_half + EDGE_KEEP_M, _half - EDGE_KEEP_M)
+		var z := rng.randf_range(-_half + EDGE_KEEP_M, _half - EDGE_KEEP_M)
+		if _near_road_or_pad(x, z, VALUABLE_AVOID_M) or _blocked(x, z, _keep, _roads):
+			continue
+		if open and rng.randf() > _open_weight(x, z):
+			continue
+		var h := terrain.height_at(x, z)
+		if terrain.sea_side >= 0 and h < terrain.sea_level + 0.35:
+			continue
+		if terrain.normal_at(x, z).y < 0.6:
+			continue
+		_add({"kind": Kind.VALUABLE, "yaw": rng.randf() * TAU, "solid": false, "size": Vector3.ONE * 0.6,
+			"pos": Vector3(x, h, z), "colour": Color.WHITE})
 	# Trees in clusters, with their edge scrub and thickets, then the few lone trees.
 	_lay_out_trees(area_km2)
 	want = mini(int(round(float(_spec.get("trees_per_km2", 0.0)) * area_km2)), _cap_trees - counts[Kind.TREE])
@@ -853,6 +915,17 @@ func total() -> int:
 	return items.size()
 
 
+## The VALUABLE sites this zone's scatter marked (pos, yaw; no mesh): where WorldValuables spawns
+## the real lootable pickups, deterministic like the rest of the scatter (every peer, and this
+## zone's cache, agree on where).
+func valuable_sites() -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	for item: Dictionary in items:
+		if int(item.kind) == Kind.VALUABLE:
+			out.append(item)
+	return out
+
+
 ## The footprints (world AABBs) of the solid items overlapping `area` (x, z in metres), for
 ## the navigation mesh.
 func boxes_in(area: Rect2) -> Array[AABB]:
@@ -894,7 +967,7 @@ func foliage_least(from: Vector3, to_a: Vector3, to_b: Vector3) -> float:
 			for index: int in _cells.get(Vector2i(cx, cz), []):
 				var item: Dictionary = items[index]
 				var kind := int(item.kind)
-				if kind == Kind.ROCK:
+				if kind == Kind.ROCK or kind == Kind.VALUABLE:
 					continue
 				var p: Vector3 = item.pos
 				if Vector2(p.x - from.x, p.z - from.z).length() > _see_m(kind):
@@ -963,7 +1036,7 @@ func foliage_between(from: Vector3, to: Vector3) -> float:
 			for index: int in _cells.get(Vector2i(cx, cz), []):
 				var item: Dictionary = items[index]
 				var kind := int(item.kind)
-				if kind == Kind.ROCK:
+				if kind == Kind.ROCK or kind == Kind.VALUABLE:
 					continue
 				var p: Vector3 = item.pos
 				if Vector2(p.x - from.x, p.z - from.z).length() > _see_m(kind):
