@@ -106,8 +106,25 @@ environments don't. Root-caused below; queue at the bottom.
     a wider scorch/impact mark, flattened scatter/vegetation around it — distinct from a ground
     vehicle's in-place burnt wreck. Ties into #7 (crash-landing mission entrance: could reuse the
     same wreck art for a pre-placed crashed heli as an infil variant) and the AV-damage bug
-    (#10/the fix/heli-rpg-damage branch) — same vehicle-destruction code, worth doing together
-    next time rather than in this session.
+    (item 12, the fix/heli-rpg-damage branch) — same vehicle-destruction code, worth doing
+    together next time rather than in this session.
+
+12. **Bug/balance: anti-vehicle damage too weak** — Captain, 2026-10-16: "rpgs and such dont do
+    enough damage, the infil heli took a hit earlier today and it did almost nothing."
+    Investigated in B:/Contractor-avdamage, branch fix/heli-rpg-damage: the damage formula
+    itself checks out (a PG-7V's 260 mm penetration vs the UH-60M's 6 mm "aircraft" armour does
+    ~150 kJ against its 120 kJ hull — plenty) and `Vehicle.server_take_hit`'s hull-voxel probe
+    (can report a shot "missed" if it finds no solid voxel within PROBE_M, 0.4 m — already known
+    to happen through an open vehicle bed, `tests/antiarmor_test.gd` `_real_open_bed`) works
+    correctly for a direct hit on a *parked* helicopter: added `_real_uh60()` to
+    antiarmor_test.gd (zero helicopter antiarmor coverage existed before) firing a PG-7V at the
+    fuel cell — it penetrates and hurts the hull as expected (ANTIARMOR TEST PASSED). So the
+    reported "did almost nothing" isn't the core formula or probe being broken outright; it's
+    likely specific to a scenario a static test can't reproduce — hitting a *moving/flying*
+    helicopter (hit-registration timing between the round's recorded position and the aircraft's
+    current hull transform) or a hit landing on a thin/open part of the airframe (rotor, open
+    cabin) rather than solid fuselage. Needs a repro with the heli actually flying to pin down
+    further. Ties into #11 (heli crash wrecks) — same code area.
 
 ## Open
 
