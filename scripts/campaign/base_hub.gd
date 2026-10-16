@@ -1175,7 +1175,15 @@ func _pick_stand_ins(squad: Array) -> Dictionary:
 			continue
 		var role := StringName(Roster.main_character(roster(), key).get("role", Roles.RIFLEMAN))
 		var pick := ""
+		# The same stand-in as last time first (Captain, 2026-10-15: a new free hire every
+		# deployment piled up "copies of us", in the players' kit, at the muster line).
 		for mid in Roster.available_ids(roster()):
+			if String(member(mid).get("stand_in_for", "")) == key and mid not in squad and mid not in out.values():
+				pick = mid
+				break
+		for mid in Roster.available_ids(roster()):
+			if pick != "" and String(member(pick).get("stand_in_for", "")) == key:
+				break
 			if mid in squad or mid in out.values():
 				continue
 			if pick == "" or StringName(member(mid).role) == role:
@@ -1184,6 +1192,8 @@ func _pick_stand_ins(squad: Array) -> Dictionary:
 					break
 		if pick == "":
 			pick = Hiring.provide_free(roster(), role, day(), int(hiring().get("seed", 0)))
+		if pick != "" and not member(pick).is_empty():
+			member(pick)["stand_in_for"] = key
 		out[key] = pick
 	return out
 
