@@ -562,6 +562,7 @@ static func _spec(model: String) -> Dictionary:
 			match _rifle_style(model):
 				"ak": return _rifle_ak(arg, _rifle_art(model))
 				"mg": return _rifle_mg(arg, _rifle_art(model))
+				"pk": return _rifle_mg(arg, _rifle_art(model), true)
 			return _rifle(arg, _rifle_art(model))
 		"optic": return _optic_model(model.get_slice(":", 1))
 		"pistol": return _pistol()
@@ -1344,10 +1345,11 @@ static func _rifle_ak(length: int, art := IRONS) -> Dictionary:
 
 ## A belt-fed light machine gun (M249, M240B, PKM): heavy barrel with a carry handle, a bipod
 ## folded under the barrel, a box of belt under the receiver, a fixed stock.
-static func _rifle_mg(length: int, art := IRONS) -> Dictionary:
+static func _rifle_mg(length: int, art := IRONS, russian := false) -> Dictionary:
 	var n := maxi(length, 20)
 	var f := func(t: float) -> float: return n * t
-	var sight := iron_boxes(n) if art == IRONS else optic_boxes(art, sight_back(art, n))
+	# A PKM ("pk") has an AK's sights (notched leaf, hooded post); the M240 / M249 a rear aperture.
+	var sight := (ak_iron_boxes(n) if russian else iron_boxes(n)) if art == IRONS else optic_boxes(art, sight_back(art, n))
 	return {"size": Vector3i(3, 13, n), "sub": 4, "boxes": sight + [
 		_fb(1.1, 8.0, 0, 1.9, 8.9, f.call(0.34), C.GUN),                        # heavy barrel
 		_fb(0.9, 7.7, 0, 2.1, 9.2, 1.5, C.GUN),                                 # flash hider
