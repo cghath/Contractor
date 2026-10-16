@@ -40,6 +40,7 @@ func _ready() -> void:
 	_test_data()
 	_test_rounds_and_rules()
 	_test_models()
+	_test_muzzle_point()
 	add_child(load("res://scenes/main.tscn").instantiate())
 	await get_tree().process_frame
 	$Main/Menu.host()
@@ -195,3 +196,16 @@ func _test_roles() -> void:
 	print("Roles")
 	var ids := Roles.kit(Roles.AUTORIFLEMAN).map(func(p: Array) -> String: return String(p[0]))
 	check(ids.has("m249") and ids.has("box_556") and not ids.has("mag_556"), "the autorifleman's kit is an M249 and its boxes")
+
+
+## Tracers and the shot sound start at the muzzle, not the eye (Captain, 2026-10-16: "bullets
+## come from eyes not from guns"): ahead along the aim, to the firing hand's side, below the eye.
+func _test_muzzle_point() -> void:
+	var eye := Vector3(10, 2, 5)
+	var north := Vector3(0, 0, -1)
+	var m := Soldier.muzzle_point(eye, north, false, false)
+	check((m - eye).dot(north) > 0.3, "the muzzle is ahead of the eye along the aim")
+	check(m.x > eye.x and m.y < eye.y, "right-handed: the muzzle sits right of and below the eye")
+	check(Soldier.muzzle_point(eye, north, false, true).x < eye.x, "left-handed: mirrored to the left")
+	check(eye.distance_to(Soldier.muzzle_point(eye, north, true, false)) < eye.distance_to(m), "a sidearm's muzzle sits closer than a rifle's")
+	check(Soldier.muzzle_point(eye, Vector3.DOWN, false, false).is_finite(), "straight down still gives a usable point")

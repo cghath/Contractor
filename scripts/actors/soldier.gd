@@ -70,6 +70,12 @@ const THROW_BUSY_S := 0.7
 ## dropped correctly paced shots under 150 ms jitter). After a pause, at most
 ## 1 + FIRE_BUNCH_S x rate shots land at once (2 at 750 rpm).
 const FIRE_BUNCH_S := 0.15
+## Where the muzzle sits off the eye along the aim (m: right, up, forward; mirrored for a
+## left-handed shooter), about the hip view model's (PlayerInput.HIP_VIEW). Visual only: the
+## tracer and the shot sound start here; the round itself still flies from the eye (Ballistics).
+## Captain, 2026-10-16: "bullets come from eyes not from guns".
+const MUZZLE_FROM_EYE := Vector3(0.14, -0.16, 0.45)
+const SIDEARM_MUZZLE_FROM_EYE := Vector3(0.12, -0.14, 0.32)
 ## Dead bodies (AI and players alike) stay in the world in this group (host only), lying,
 ## gear and all: lootable, carriable, saved with the zone. See "Death and bodies".
 const DEAD_GROUP := &"dead_bodies"
@@ -819,6 +825,18 @@ static func usable_direction(d: Vector3) -> bool:
 	return d.is_finite() and d.length_squared() > 0.000001
 
 
+## The muzzle's world point for a shot from `eye` along `dir` (MUZZLE_FROM_EYE).
+static func muzzle_point(eye: Vector3, dir: Vector3, sidearm: bool, lefty: bool) -> Vector3:
+	var offset := SIDEARM_MUZZLE_FROM_EYE if sidearm else MUZZLE_FROM_EYE
+	var forward := dir.normalized()
+	var right := forward.cross(Vector3.UP)
+	if right.length_squared() < 0.0001:
+		right = Vector3.RIGHT  # straight up or down
+	right = right.normalized()
+	var up := right.cross(forward)
+	return eye + right * offset.x * (-1.0 if lefty else 1.0) + up * offset.y + forward * offset.z
+
+
 @rpc("any_peer", "call_local", "reliable")
 func _server_fire(origin: Vector3, direction: Vector3, slot: StringName) -> void:
 	if not _from_owner() or not vitals.is_up() or inventory.hands != &"" or is_instance_valid(vehicle):  # riding: the seat's gun instead (Vehicle)
@@ -847,9 +865,12 @@ func _server_fire(origin: Vector3, direction: Vector3, slot: StringName) -> void
 	last_shot_suppressed = suppressed
 	var round_end: Variant = result.get("position")
 	var round_point: Vector3 = round_end if round_end is Vector3 else origin + direction.normalized() * 400.0
-	Sfx.server_shot(origin, round_point,
+	var muzzle := muzzle_point(origin, direction.normalized(), weapon.slot == &"sidearm", left_handed)
+	if muzzle.distance_to(origin) >= origin.distance_to(round_point):
+		muzzle = origin  # the round stopped before the muzzle (pressed against a wall)
+	Sfx.server_shot(muzzle, round_point,
 		"suppressed" if suppressed else ("pistol" if weapon.slot == &"sidearm" else "rifle"))  # every peer hears it (Sfx)
-	CompoundLevel.current(self).show_tracer.rpc(origin, round_point, suppressed)  # and sees it (Tracer)
+	CompoundLevel.current(self).show_tracer.rpc(muzzle, round_point, suppressed)  # and sees it (Tracer)
 	PeopleLayer.server_noise(self, origin)  # people nearby hear it (wave 4)
 	if faction != &"hostile":
 		Alert.server_noise(self, origin, Alert.SHOT, suppressed)  # hot zones: the enemy hears it (4B part 3)
