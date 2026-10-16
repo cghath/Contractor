@@ -1250,6 +1250,8 @@ static func iron_boxes(n: float) -> Array:
 ## eye's usual aperture spot, a wide flat plate with a U-notch whose top is the sight line; and
 ## out at the muzzle a post inside a hood, its tip level with the notch's top.
 const AK_REAR_FORWARD := 6.0
+## The front post is about this many times further from the eye than the notch: that much wider.
+const AK_POST_SCALE := 3.1
 
 
 static func ak_iron_boxes(n: float) -> Array:
@@ -1258,13 +1260,19 @@ static func ak_iron_boxes(n: float) -> Array:
 	var top := OPTIC_AXIS_Y
 	return [
 		_fb(1.0, RAIL_Y, rear - 1.0, 2.0, 10.6, rear + 1.0, C.GUN),                   # the leaf's base on the receiver
-		_fb(0.6, 10.6, rear - 0.2, 1.3, top, rear + 0.2, C.GUN),                       # leaf: left of the notch
-		_fb(1.7, 10.6, rear - 0.2, 2.4, top, rear + 0.2, C.GUN),                       # right of the notch
-		_fb(1.3, 10.6, rear - 0.2, 1.7, top - 0.55, rear + 0.2, C.GUN),                # under the notch
-		_fb(1.375, 9.9, front, 1.625, top, front + 0.5, C.GUN),                        # front post
-		_fb(0.85, 9.9, front, 1.05, top + 0.6, front + 0.5, C.GUN),                    # hood: sides
-		_fb(1.95, 9.9, front, 2.15, top + 0.6, front + 0.5, C.GUN),
-		_fb(0.85, top + 0.45, front, 2.15, top + 0.6, front + 0.5, C.GUN),             # hood: top
+		# Captain, 2026-10-16 (PKM screenshot; "the center post is supposed to be as wide as the gap
+		# and your sights will half cover the point you're aiming at"): seen from the eye the post
+		# fills the notch (the post is about AK_POST_SCALE times further off, so that much wider),
+		# its tip on the sight line (OPTIC_AXIS_Y: the aim point sits on it, the post below), a
+		# hood round it and a sight block down to the barrel so nothing floats.
+		_fb(0.6, 10.6, rear - 0.2, 1.35, top, rear + 0.2, C.GUN),                      # leaf: left of the notch
+		_fb(1.65, 10.6, rear - 0.2, 2.4, top, rear + 0.2, C.GUN),                      # right of the notch
+		_fb(1.35, 10.6, rear - 0.2, 1.65, top - 0.7, rear + 0.2, C.GUN),               # under the notch (a U 0.3 wide)
+		_fb(1.0, 7.9, front, 2.0, 10.3, front + 0.5, C.GUN),                           # front sight block, from the barrel
+		_fb(1.5 - 0.15 * AK_POST_SCALE, 10.3, front, 1.5 + 0.15 * AK_POST_SCALE, top, front + 0.5, C.GUN),  # front post
+		_fb(0.55, 10.3, front, 0.7, top + 0.5, front + 0.5, C.GUN),                    # hood: sides
+		_fb(2.3, 10.3, front, 2.45, top + 0.5, front + 0.5, C.GUN),
+		_fb(0.55, top + 0.37, front, 2.45, top + 0.5, front + 0.5, C.GUN),             # hood: top
 	]
 
 
