@@ -585,7 +585,7 @@ static func treatments(actor: Soldier, target: Node, region := &"") -> Array[Dic
 		if task.has("items"):  # a line, a bag, a seal or a clamp: one entry per kind you carry, or the usual pick greyed out
 			if target == actor and Vitals.needs_other_hands(task.item):
 				continue
-			var carried := Vitals.task_items(task).filter(func(id: StringName) -> bool: return Vitals.has_item(actor.inventory, id))
+			var carried := Vitals.task_items(task).filter(func(id: StringName) -> bool: return Soldier.kit_has(actor, target, id))
 			for id: StringName in (carried if not carried.is_empty() else [task.item]):
 				var option := ItemDB.get_item(id)
 				var sites: Array = [task.part]
@@ -621,7 +621,7 @@ static func treatments(actor: Soldier, target: Node, region := &"") -> Array[Dic
 
 
 static func _treat_entry(actor: Soldier, target: Node, item: ItemData, part: StringName, rushed: bool, label: String) -> Dictionary:
-	var have := Vitals.has_item(actor.inventory, item.id)
+	var have := Soldier.kit_has(actor, target, item.id)
 	return {"id": &"treat_item", "label": label, "request": &"_server_treat", "with": &"treatment", "target": target,
 		"item": item.id, "part": part, "rushed": rushed, "disabled": "" if have else "You have no %s" % item.name}
 
@@ -674,7 +674,7 @@ static func perform(actor: Soldier, action: Dictionary) -> String:
 		&"target_entry":
 			actor.rpc_id(1, request, target.get_path(), action.container, action.index)
 		&"treatment":
-			actor.rpc_id(1, request, target.get_path(), action.item, action.part, action.rushed)
+			actor.rpc_id(1, request, target.get_path(), action.item, action.part, action.rushed, true)
 		&"target_part":
 			actor.rpc_id(1, request, target.get_path(), action.part)
 		&"target_loot":

@@ -49,6 +49,7 @@ func _ready() -> void:
 	await _test_dead_leave_squad()
 	await _test_buildings_per_world()
 	await _test_multi_storey()
+	await _test_human_team_lead()
 	GameState.delete_save()
 	print("SQUAD TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
@@ -1579,3 +1580,47 @@ func _physics_frames(n: int) -> void:
 
 func _seconds(s: float) -> void:
 	await get_tree().create_timer(s).timeout
+
+
+## A human leading fire team B (Captain, co-op playtest 2026-10-15: "B team doesn't follow him
+## or his orders very well"): his team forms on him 60 m from the squad lead, and his order
+## goes to his team only, without handing the squad's lead to him.
+func _test_human_team_lead() -> void:
+	print("A human team leader")
+	var squad := level.squad_for(&"friendly")
+	var lead := squad.leader
+	var other := _squad().filter(func(s: Soldier) -> bool: return s.fire_team != (lead.fire_team if lead.fire_team >= 0 else 0) and s.fire_team >= 0)
+	check(not other.is_empty(), "there is a second fire team")
+	if other.is_empty():
+		return
+	var team: int = (other[0] as Soldier).fire_team
+	var slot := 99
+	for s: Soldier in other:
+		if s.fire_team == team:
+			slot = mini(slot, s.squad_slot) if s.squad_slot >= 0 else slot
+	var guest: Soldier = load("res://scenes/soldier.tscn").instantiate()
+	guest.name = "2"
+	level.players.add_child(guest)
+	_place(lead, Vector3(0, 0.1, 12))
+	_place(guest, Vector3(60, 0.1, 40))
+	guest.fire_team = team
+	guest.squad_slot = slot
+	guest.global_basis = Basis.looking_at(Vector3(0, 0, -1))
+	await _seconds(45.0)
+	var mates := _squad().filter(func(s: Soldier) -> bool: return s.fire_team == team and s.squad_slot >= 0)
+	var near := mates.filter(func(s: Soldier) -> bool: return _flat(s.global_position, guest.global_position) < 30.0)
+	print("    lead %s t%d, guest t%d slot %d ai %s up %s, mates %s" % [lead.name, lead.fire_team, guest.fire_team, guest.squad_slot, guest.is_ai(), guest.vitals.is_up(), mates.map(func(s: Soldier) -> String: return "%s s%d t%d" % [s.name, s.squad_slot, s.fire_team])])
+	check(squad.human_team_lead_of(guest) == team, "the guest is recognised as team %d's leader" % team)
+	for m: Soldier in mates:
+		print("    %s %.1f m from guest, %.1f from lead, slot %s %s" % [m.name, _flat(m.global_position, guest.global_position), _flat(m.global_position, lead.global_position), squad.follow_point(m), m.ai_status])
+	check(near.size() == mates.size(), "his team gathers round him, 60 m from the lead (%d of %d within 30 m)" % [near.size(), mates.size()])
+	var point := guest.global_position + Vector3(0, 0, -20)
+	guest.server_squad_command("hold", point, PackedStringArray())
+	check(squad.leader == lead, "his order doesn't make him the squad's lead")
+	var held := mates.filter(func(s: Soldier) -> bool: return SquadAI.of(s).order == Squad.Order.HOLD)
+	var others_held := _squad().filter(func(s: Soldier) -> bool: return s.fire_team != team and SquadAI.of(s).order == Squad.Order.HOLD)
+	check(held.size() == mates.size() and others_held.is_empty(), "his team holds and the lead's team doesn't (%d of %d, %d others)" % [held.size(), mates.size(), others_held.size()])
+	await _seconds(3.0)
+	check(mates.all(func(s: Soldier) -> bool: return SquadAI.of(s).order == Squad.Order.HOLD), "and keeps holding while the lead is elsewhere")
+	guest.queue_free()
+	await _frames(2)
