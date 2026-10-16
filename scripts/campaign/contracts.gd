@@ -168,15 +168,48 @@ func support_left(cid: String) -> int:
 
 ## Where a contract's target module sits in the running level: its zone module's origin (a
 ## world-scale zone, by the contract's "module_id"), else `fallback` (the test compound sits
-## at the origin).
+## at the origin). A contract held from an older build (or a layout that changed since) may name
+## a module the zone no longer has, or one of another type: heal_module_id points it at a module
+## of its type first, so the markers never fall back to the zone's centre (Captain, 2026-10-15:
+## HVT, bonus and "Hostiles at" markers ~400 m off the village).
 func module_origin(c: Dictionary, fallback := Vector3.ZERO) -> Vector3:
-	var module_id := String(c.get("module_id", ""))
 	var lvl := CompoundLevel.current(self) if is_inside_tree() else null
-	if module_id != "" and lvl and lvl.has_method(&"get_module"):
-		var m := lvl.call(&"get_module", module_id) as Node3D
+	if lvl and lvl.has_method(&"get_module"):
+		heal_module_id(c, lvl)
+		var m := lvl.call(&"get_module", String(c.get("module_id", ""))) as Node3D
 		if m:
 			return m.position
 	return fallback
+
+
+## Host: contract `c` names a target module that the level `lvl` lacks, or has as another type
+## (a contract saved by an older build, or a zone layout that changed): it is pointed at a module
+## of its type, one no other held contract uses first. Returns whether it changed. A contract with
+## no module_id (scenarios, recovery) is left be.
+func heal_module_id(c: Dictionary, lvl: Node) -> bool:
+	var id := String(c.get("module_id", ""))
+	if not _is_host() or id == "" or not lvl.has_method(&"get_module") or not lvl.has_method(&"modules"):
+		return false
+	var want := ZoneModules.base(String(c.get("module", "")))
+	var have := lvl.call(&"get_module", id) as ZoneModule
+	if have != null and (want == "" or ZoneModules.base(have.type) == want):
+		return false
+	var used := {}
+	for other: Dictionary in board() + held():
+		if other != c and String(other.get("module_id", "")) != "":
+			used[String(other.module_id)] = true
+	var pick: ZoneModule = null
+	for m: ZoneModule in lvl.call(&"modules"):
+		if want != "" and ZoneModules.base(m.type) != want:
+			continue
+		if pick == null or (used.has(pick.module_id) and not used.has(m.module_id)):
+			pick = m
+	if pick == null:
+		return false
+	push_warning("Contracts: %s named module %s, which this zone lacks; now %s" % [String(c.get("cid", "?")), id, pick.module_id])
+	c["module_id"] = pick.module_id
+	c["module"] = pick.type
+	return true
 
 
 ## Host: the reinforcement timer's tuning (Reinforcements) for a contract, from its true force
