@@ -76,7 +76,6 @@ func _ready() -> void:
 			var p := ObjectivesPanel.new()
 			p.ready.connect(func() -> void:
 				p.visible = true
-				p.set_process(false)
 				var lines := PackedStringArray(["OBJECTIVES - Kessler Farm compound  ([O] list  [N] next)"])
 				if expanded:
 					for c in 3:
@@ -86,8 +85,10 @@ func _ready() -> void:
 				else:
 					lines.append("> [ ] Find Amir Haddad and bring them out alive (69 min left)")
 					lines.append("+5 more")
-				p._label.text = "
-".join(lines))
+				p.preview = "
+".join(lines)
+				p.set_process(true)
+				p.refresh())
 			return _in_layer(p))
 		GameSettings.use_file("")
 	await _fit("objectives panel", func() -> Node: return _in_layer(ObjectivesPanel.new()))

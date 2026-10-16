@@ -10,6 +10,8 @@ const WIDTH := 364.0
 
 var _label: Label
 var _poll := 0.0
+## A test stand-in for the whole text (ui_test fits long lists without a deployment).
+var preview := ""
 
 
 func _ready() -> void:
@@ -29,11 +31,16 @@ func _ready() -> void:
 	_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	add_child(_label)
 	Contracts.objectives.changed.connect(refresh)
+	get_viewport().size_changed.connect(refresh)
 	Contracts.notice.connect(_on_notice)
 	refresh()
 
 
 func refresh() -> void:
+	if preview != "":
+		_label.text = preview
+		_fit_height()
+		return
 	var list: Array = Contracts.objectives.list
 	visible = not list.is_empty()
 	var dep := Contracts.deployment()
@@ -74,6 +81,32 @@ func refresh() -> void:
 	_label.text = "%s  (%s)
 %s" % [head, keys, "
 ".join(body)]
+	_fit_height()
+
+
+## The full list never grows past the window: lines past what fits are cut (the active
+## objective's line stays: it's moved first), the panel says so on its last line.
+func _fit_height() -> void:
+	var view := get_viewport().get_visible_rect().size if is_inside_tree() else Vector2(1600, 900)
+	var font := _label.get_theme_font(&"font")
+	var fs := _label.get_theme_font_size(&"font_size")
+	var width := clampf(view.x * 0.3, 240.0, WIDTH) - get_theme_stylebox(&"panel").get_minimum_size().x
+	var room := maxf(view.y - 150.0, 200.0)  # the hint line and the corner margin below and above
+	var lines := _label.text.split("
+")
+	var used := 0.0
+	var keep := 0
+	for line: String in lines:
+		var h := font.get_multiline_string_size(line, HORIZONTAL_ALIGNMENT_LEFT, width, fs).y
+		if used + h > room - (font.get_height(fs) if keep < lines.size() - 1 else 0.0):
+			break
+		used += h
+		keep += 1
+	if keep < lines.size():
+		keep = maxi(keep, 2)
+		_label.text = "
+".join(lines.slice(0, keep)) + "
++%d more (%s: next)" % [lines.size() - keep, _key("objectives_next")]
 
 
 ## Compact mode: only the active objective, and how many more there are.

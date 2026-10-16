@@ -953,14 +953,14 @@ func _test_live_objectives() -> void:
 ") < full_lines, "compact is shorter than the full list")
 	GameSettings.reload()
 	check(not bool(GameSettings.get_value("hud", "objectives_expanded")), "the compact state persists in the settings file")
-	var before := String(helper.current.get("oid", ""))
+	var before := String(_helper().current.get("oid", ""))
 	panel.cycle()
 	var picked := Objectives.chosen_oid
-	check(picked != "" and String(helper.current.get("oid", "")) == picked and panel.active_oid() == picked and panel.text().contains(Objectives.line(Contracts.objectives.get_objective(picked))),
+	check(picked != "" and String(_helper().current.get("oid", "")) == picked and panel.active_oid() == picked and panel.text().contains(Objectives.line(Contracts.objectives.get_objective(picked))),
 		"N picks an objective: the helper's step and the panel follow (auto was %s, now %s)" % [before, picked])
-	check(helper.current.targets.is_empty() or helper.current.targets[0].label != "", "the marker target is the picked objective's")
-	var again := ObjectiveHelper.next_choice(Contracts.objectives.list, picked)
-	check(again != picked, "the next pick differs from the last")
+	check(_helper().current.targets.is_empty() or _helper().current.targets[0].label != "", "the marker target is the picked objective's")
+	var after := ObjectiveHelper.next_choice(Contracts.objectives.list, picked)
+	check(after != picked, "the next pick differs from the last")
 	Objectives.chosen_oid = ""
 	panel.toggle_compact()
 	check(not panel.compact(), "O again expands it")
@@ -1051,9 +1051,11 @@ func _test_objective_helper() -> void:
 	check(String(ObjectiveHelper.step_for([area, area2], sit).oid) == "t_o9" and ObjectiveHelper.step_for([area2, area], sit).targets[0].pos.z > 400.0,
 		"a picked objective beats the nearest one, and the marker follows it")
 	sit["chosen"] = ""
+	sit.pos = at.call(5, 5)
 	check(String(ObjectiveHelper.step_for([area, area2], sit).oid) == "t_o1", "no pick: the nearest")
 	check(ObjectiveHelper.next_choice([area, area2], "") == "t_o1" and ObjectiveHelper.next_choice([area, area2], "t_o1") == "t_o9"
 		and ObjectiveHelper.next_choice([area, area2], "t_o9") == "", "N cycles through the live objectives, then back to auto")
+	sit.pos = at.call(0, 300)
 	check(step.call([area], sit) == "Head to the compound (N, 300 m)", "away from the site: head there, with the direction and distance")
 	sit.pos = at.call(5, 5)
 	check(step.call([area], sit) == "Clear the compound: search it for hostiles", "in the area: clear it")
