@@ -332,6 +332,11 @@ func server_lost(kind: String) -> void:
 		_lost[kind] = true
 
 
+## Host: `kind` can be called again at once (a call sent home, or that left without the squad).
+func server_clear_cooldown(kind: String) -> void:
+	_cooldown_until.erase(kind)
+
+
 ## Host (tests): forget cooldowns and losses.
 func server_reset_limits() -> void:
 	_cooldown_until.clear()

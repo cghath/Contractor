@@ -303,6 +303,8 @@ func _run_host(wait_for_client: bool) -> void:
 		await _test_extraction()
 	if _want("extraction"):
 		await _test_extraction_home()
+	if _want("recall"):
+		await _test_recall()
 	if _want("route"):
 		_test_routes()
 	if _want("insertion"):
@@ -771,6 +773,54 @@ func _test_extraction_home() -> void:
 	for node in get_tree().get_nodes_in_group(WorldItem.GROUP):
 		if (node as WorldItem).item_id == &"intel_documents":
 			node.queue_free()
+	_regroup()
+
+
+## Captain, 2026-10-15: once sent home, the extraction sometimes couldn't be called back: on its
+## way out a new call was refused ("already on its way out") until it had flown off the map, and
+## then the call's cooldown (from the first call) refused it again. Sent home it turns back on a
+## new call (mid-flight, the same helicopter, free), and once gone it can be called at once.
+func _test_recall() -> void:
+	print("Extraction: sent home, called back (mid-flight and after it's gone)")
+	await _clear_smoke()
+	sup.server_dismiss_all()
+	sup.server_reset_limits()
+	_regroup()
+	var ext := MapNodes.extraction(level)
+	ext.server_begin({})
+	var lzp := _ground(HOME + Vector3(0, 0, -45))
+	for kind: String in ["extraction", "transport"]:
+		var cmd := "support:%s:here" % kind
+		check(_call(cmd, lzp) == "", "%s called" % kind)
+		var e := sup.active(kind)
+		if e == null:
+			continue
+		await _seconds(2.0)
+		var why := _call("support:%s:cancel" % kind)
+		check(why == "" and e.phase == HeliCall.Phase.LEAVING and sup.cooldown_left(kind) == 0.0,
+			"%s sent home mid-flight: leaving, no cooldown (%s)" % [kind, why])
+		await _seconds(1.0)
+		why = _call(cmd, lzp)
+		check(why == "" and sup.active(kind) == e and e.phase == HeliCall.Phase.INBOUND and e.stage == "pickup",
+			"%s called again on its way out: the same helicopter turns back (%s, %s)" % [kind, why, e.describe()])
+		await _wait_for(func() -> bool: return _landed(e), FLY_S)
+		check(_landed(e), "%s turned back and landed" % kind)
+		why = _call("support:%s:cancel" % kind)
+		check(why == "", "%s sent home from the ground (%s)" % [kind, why])
+		await _seconds(1.0)
+		check(e.can_turn_back() or e.phase == HeliCall.Phase.LEAVING, "%s taking off for home" % kind)
+		await _wait_for(func() -> bool: return e.is_over(), FLY_S)
+		await _frames(2)
+		check(e.is_over() and sup.active(kind) == null, "%s gone off the map" % kind)
+		why = _call(cmd, lzp)
+		var again := sup.active(kind)
+		check(why == "" and again != null and again != e, "%s gone: a new call goes at once (%s)" % [kind, why])
+		sup.server_dismiss_all()
+		await _frames(2)
+		why = _call(cmd, lzp)
+		check(why == "" and sup.active(kind) != null, "%s despawned: called again (%s)" % [kind, why])
+		sup.server_dismiss_all()
+	sup.server_reset_limits()
 	_regroup()
 
 
