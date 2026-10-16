@@ -1244,6 +1244,29 @@ static func iron_boxes(n: float) -> Array:
 	]
 
 
+## An AK's irons (Captain, 2026-10-16, with a photo: "you should be able to see the front and
+## rear sights"): the tangent leaf on the front of the receiver, AK_REAR_FORWARD ahead of the
+## eye's usual aperture spot, a wide flat plate with a U-notch whose top is the sight line; and
+## out at the muzzle a post inside a hood, its tip level with the notch's top.
+const AK_REAR_FORWARD := 6.0
+
+
+static func ak_iron_boxes(n: float) -> Array:
+	var rear := sight_back(IRONS, n) - AK_REAR_FORWARD
+	var front := n * 0.06
+	var top := OPTIC_AXIS_Y
+	return [
+		_fb(1.0, RAIL_Y, rear - 1.0, 2.0, 10.6, rear + 1.0, C.GUN),                   # the leaf's base on the receiver
+		_fb(0.6, 10.6, rear - 0.2, 1.3, top, rear + 0.2, C.GUN),                       # leaf: left of the notch
+		_fb(1.7, 10.6, rear - 0.2, 2.4, top, rear + 0.2, C.GUN),                       # right of the notch
+		_fb(1.3, 10.6, rear - 0.2, 1.7, top - 0.55, rear + 0.2, C.GUN),                # under the notch
+		_fb(1.375, 9.9, front, 1.625, top, front + 0.5, C.GUN),                        # front post
+		_fb(0.85, 9.9, front, 1.05, top + 0.6, front + 0.5, C.GUN),                    # hood: sides
+		_fb(1.95, 9.9, front, 2.15, top + 0.6, front + 0.5, C.GUN),
+		_fb(0.85, top + 0.45, front, 2.15, top + 0.6, front + 0.5, C.GUN),             # hood: top
+	]
+
+
 ## An optic on its own (lying loose, in the inventory): the same boxes as on a rifle, its
 ## mount's foot at y = 0 and its front at z = 0.
 static func _optic_model(art: String) -> Dictionary:
@@ -1295,7 +1318,7 @@ static func _rifle(length: int, art := "dot") -> Dictionary:
 static func _rifle_ak(length: int, art := IRONS) -> Dictionary:
 	var n := maxi(length, 20)
 	var f := func(t: float) -> float: return n * t
-	var sight := iron_boxes(n) if art == IRONS else optic_boxes(art, sight_back(art, n))
+	var sight := ak_iron_boxes(n) if art == IRONS else optic_boxes(art, sight_back(art, n))
 	return {"size": Vector3i(3, 13, n), "sub": 4, "boxes": sight + [
 		_fb(1.25, 8.25, 0, 1.75, 8.75, f.call(0.3), C.GUN),                     # barrel
 		_fb(1.0, 7.9, 0, 2.0, 9.1, 1.5, C.GUN),                                 # slant muzzle brake
