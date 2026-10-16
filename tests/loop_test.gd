@@ -177,6 +177,36 @@ func _test_safe_offer() -> void:
 			for p: Array in points:
 				best = minf(best, at.distance_to(Vector2(float(p[0]), float(p[1]))))
 			nearest.append(best)
+	var bad: Array[String] = []
+	var singles := 0
+	var checked := 0
+	var seen_zone := {}
+	for zrow: Dictionary in MissionRegistry.data().get("zones", []):
+		var zid := String(zrow.zone_id)
+		var zd := MissionRegistry.zone_def(zid)
+		if zd.is_empty() or float(zd.size_m) > 2400.0:  # (a hot zone's foot walk is edge-only and long: heli there)
+			continue
+		for m: Dictionary in zd.get("modules", []):
+			var tgt := Vector2(float(m.pos[0]), float(m.pos[1]))
+			var opts := ZoneDef.insertion_options(zd, tgt)
+			checked += 1
+			if opts.is_empty():
+				bad.append("%s/%s: no insertion option" % [zid, m.id])
+				continue
+			if opts.size() < 2:
+				singles += 1
+			var half := float(zd.size_m) * 0.5
+			for o in opts:
+				var sea := int(zd.get("sea_side", -1))
+				if sea >= 0 and [o.y + half, half - o.y, o.x + half, half - o.x][sea] < float(zd.get("sea_m", 0.0)) + 10.0:
+					bad.append("%s/%s: %s is in the sea strip" % [zid, m.id, o])
+				for mm: Dictionary in zd.modules:
+					var h: Vector2 = ZoneModules.HALF.get(String(mm.type), ZoneModules.HALF.get(ZoneModules.base(String(mm.type)), Vector2(40, 40)))
+					if ZoneDef._rect_gap(Rect2(Vector2(float(mm.pos[0]), float(mm.pos[1])) - h, h * 2.0), o) < ZoneDef.INSERT_CLEAR_M - 1.0:
+						bad.append("%s/%s: %s inside module %s" % [zid, m.id, o, mm.id])
+				if o.distance_to(tgt) > ZoneDef.INSERT_BAND_M.y + 450.0:
+					bad.append("%s/%s: %s is %.0f m from the target" % [zid, m.id, o, o.distance_to(tgt)])
+	check(bad.is_empty(), "insertion options: on land, clear of modules, near the target (%d zone targets, %d with one option; %s)" % [checked, singles, "; ".join(PackedStringArray(bad.slice(0, 5)))])
 	info("300 safe offers: types %s; %d on the clock (HVT capture 90 min, hostage rescue 75 min)" % [types, timed])
 	for pair: Array in [["the default insertion", dists], ["the nearest insertion point (picked at the briefing)", nearest]]:
 		var d: Array[float] = pair[1]

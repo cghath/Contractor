@@ -356,3 +356,69 @@ static func _clearance(p: Vector2, sites: Array[Vector2]) -> float:
 	for q in sites:
 		best = minf(best, p.distance_to(q))
 	return best
+
+
+## Captain, 2026-10-15 (coastal zone): the foot insertion sat on the shore a km from the target.
+## Edge points (EDGE_POINT_IN_M in, so Extraction.at_edge) of a generated zone for a contract at
+## `target` (x, z): on land (not the sea side, not the shoreline strip), outside every module's
+## footprint grown by INSERT_CLEAR_M, nearest the INSERT_BAND_M walk to the target first. Returns
+## [closer, safer] (Vector2; safer is further from the modules, INSERT_SPLIT_M or more from the
+## closer), or one, or none. Proposed.
+const INSERT_BAND_M := Vector2(300.0, 800.0)
+const INSERT_CLEAR_M := 150.0
+const INSERT_SPLIT_M := 150.0
+const SHORE_KEEP_M := 40.0
+
+static func insertion_options(def: Dictionary, target: Vector2) -> Array[Vector2]:
+	var half := float(def.size_m) * 0.5
+	var sea := int(def.get("sea_side", -1))
+	var sea_m := float(def.get("sea_m", 0.0))
+	var pads: Array[Rect2] = []
+	for m: Dictionary in def.modules:
+		var h: Vector2 = ZoneModules.HALF.get(String(m.type), ZoneModules.HALF.get(ZoneModules.base(String(m.type)), Vector2(40, 40)))
+		pads.append(Rect2(Vector2(float(m.pos[0]), float(m.pos[1])) - h, h * 2.0))
+	var inset := half - EDGE_POINT_IN_M
+	var keep := half - (maxf(EDGE_POINT_IN_M, sea_m + SHORE_KEEP_M) if sea >= 0 else EDGE_POINT_IN_M)
+	var cands: Array = []  # [point, distance to target, clearance from modules]
+	for side in 4:
+		if side == sea:
+			continue
+		var a := -keep
+		while a <= keep:
+			var p: Vector2 = [Vector2(a, -inset), Vector2(a, inset), Vector2(-inset, a), Vector2(inset, a)][side]
+			a += 40.0
+			if sea >= 0 and sea_m > 0.0:  # a side next to the sea: stay off its shoreline strip
+				var depth: float = [p.y + half, half - p.y, p.x + half, half - p.x][sea]
+				if depth < sea_m + SHORE_KEEP_M:
+					continue
+			var clear := INF
+			for r in pads:
+				clear = minf(clear, _rect_gap(r, p))
+			if clear < INSERT_CLEAR_M:
+				continue
+			cands.append([p, p.distance_to(target), clear])
+	var off := func(c: Array) -> float: return maxf(0.0, maxf(INSERT_BAND_M.x - float(c[1]), float(c[1]) - INSERT_BAND_M.y))
+	cands.sort_custom(func(a: Array, b: Array) -> bool:
+		var oa: float = off.call(a)
+		var ob: float = off.call(b)
+		return oa < ob if absf(oa - ob) > 1.0 else float(a[1]) < float(b[1]))
+	var out: Array[Vector2] = []
+	if cands.is_empty():
+		return out
+	var near: Array = cands[0]
+	out.append(near[0])
+	var safe: Variant = null
+	for c: Array in cands:
+		if (c[0] as Vector2).distance_to(near[0]) < INSERT_SPLIT_M or off.call(c) > off.call(near) + 250.0:
+			continue
+		if safe == null or float(c[2]) > float(safe[2]):
+			safe = c
+	if safe != null:
+		out.append(safe[0])
+	return out
+
+
+static func _rect_gap(r: Rect2, p: Vector2) -> float:
+	var dx := maxf(maxf(r.position.x - p.x, p.x - r.end.x), 0.0)
+	var dy := maxf(maxf(r.position.y - p.y, p.y - r.end.y), 0.0)
+	return sqrt(dx * dx + dy * dy)
