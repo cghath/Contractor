@@ -86,7 +86,10 @@ func server_spawn(p_model: String, xform: Transform3D, scheme := "", faction := 
 		var q := xform.basis.get_rotation_quaternion()
 		data["pos"] = [xform.origin.x, xform.origin.y, xform.origin.z]
 		data["rot"] = [q.x, q.y, q.z, q.w]
-	return spawner.spawn(data) as Vehicle
+	var v := spawner.spawn(data) as Vehicle
+	if v and not record.has("cargo") and StringName(String(data.faction)) == &"hostile":  # (ours rearm at the motor pool)
+		v.server_rearm()  # a new armed vehicle comes with its gun's load (Captain, 2026-10-15: technicals spawned out of ammo)
+	return v
 
 
 func _make(data: Dictionary) -> Node:
