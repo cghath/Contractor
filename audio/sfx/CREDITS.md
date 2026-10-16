@@ -24,6 +24,8 @@ trimmed, mono, faded, normalised; `m2` and `dshk` pitched down 20% and driven ha
 | pistol | M17 | Walther PPQ 9mm (X_39P / X_31P) |
 | m2 | M2 .50 cal | Springfield 1917, pitched down |
 | dshk | DShK | Mosin Nagant, pitched down |
+| mosin | Mosin-Nagant 91/30 | Mosin Nagant 7.62x54R (M_21P / M_26P; placeholder take, same as svd/pkm) |
+| springfield_hs | Springfield Heatseeker | Springfield 1917 .30-06 (B_24P / B_16P; placeholder — swap for a real Tikka take once its filenames are known, a better thematic match for a modern precision chassis rifle than a WWII Enfield) |
 
 Everything else in the game's sound is generated in code (autoload/sfx.gd, data/sounds.json).
 

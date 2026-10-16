@@ -29,6 +29,14 @@ SLOTS = {
     "pistol": ("Walther PPQ", "X_39P.wav", "X_31P.wav", False),
     "m2": ("1917", "B_24P.wav", "B_16P.wav", True),
     "dshk": ("Mosin Nagant", "M_21P.wav", "M_26P.wav", True),
+    # Bolt-action snipers (2026-10-16): the Mosin-Nagant 91/30 reuses its own folder's near/far
+    # take (the same one svd/pkm already use is fine for a placeholder; swap in a different take
+    # from this folder once there's a reason to want it distinct from those two). The Springfield
+    # Heatseeker is a modern 6.5 Creedmoor chassis rifle, not the WWII 1917 Enfield the folder
+    # name suggests, but its heavy bolt-gun crack is the closest match the library has; replace
+    # with a real Tikka take (the Captain says the library has one) when its filenames are known.
+    "mosin": ("Mosin Nagant", "M_21P.wav", "M_26P.wav", False),
+    "springfield_hs": ("1917", "B_24P.wav", "B_16P.wav", False),
 }
 NEAR_S, FAR_S = 1.6, 3.0
 PRE_S = 0.008
