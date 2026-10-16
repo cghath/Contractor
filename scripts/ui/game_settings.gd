@@ -41,7 +41,7 @@ const DEFAULTS := {
 	# infil_music: Captain, 2026-10-14, temporary (InfilMusic: Ride of the Valkyries on helicopter insertions).
 	"audio": {"master": 0.8, "effects": 1.0, "voice": 1.0, "music": 0.8, "mute_unfocused": false, "infil_music": true},
 	"controls": {"mouse_sensitivity": 1.0, "aim_sensitivity": 0.75, "invert_y": false},
-	"hud": {"objective_markers": true},
+	"hud": {"objective_markers": true, "objectives_expanded": true},
 }
 ## Ranges for the sliders: [min, max, step].
 const RANGES := {
@@ -67,6 +67,7 @@ const BINDABLE := [
 	[&"stance_adjust", "Adjust stance (hold)"], [&"lean_left", "Lean left"], [&"lean_right", "Lean right"],
 	[&"mount", "Rest weapon"], [&"fire_mode", "Fire mode"], [&"reload", "Reload"], [&"grenade", "Grenade"],
 	[&"medical_menu", "Medical menu"], [&"inventory", "Inventory"], [&"map", "Map"],
+	[&"objectives_toggle", "Objectives list (compact / full)"], [&"objectives_next", "Next objective (picks the active one)"],
 	[&"weapon_primary", "Primary weapon"], [&"weapon_sidearm", "Sidearm"], [&"weapon_launcher", "Launcher"],
 	[&"get_out", "Get out of vehicle"], [&"vehicle_view", "Vehicle view (1st/3rd person)"], [&"quick_save", "Quick save"],
 	[&"zoom_in", "Optic zoom in / magnifier up"], [&"zoom_out", "Optic zoom out / magnifier down"],

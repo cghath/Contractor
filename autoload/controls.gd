@@ -27,6 +27,10 @@ const KEYS := {
 	&"grenade": [KEY_G],  # throw; Shift+G switches type, Alt+G drops; carrying or dragging a body, lets go
 	&"inventory": [KEY_TAB],
 	&"map": [KEY_M],  # the map (MapScreen): grid, markers, squad, extraction
+	# The objectives panel (ObjectivesPanel; Captain, 2026-10-15: "compress that big ahh mission
+	# list and choose an obj"): O collapses/expands it, N picks the next active objective.
+	&"objectives_toggle": [KEY_O],
+	&"objectives_next": [KEY_N],
 	&"weapon_primary": [KEY_1],
 	&"weapon_sidearm": [KEY_2],
 	&"weapon_launcher": [KEY_3],  # the anti-armour launcher (wave 5, Launchers)
