@@ -906,7 +906,7 @@ func _server_squad_command(cmd: String, point: Vector3, names: PackedStringArray
 
 
 @rpc("any_peer", "call_local", "reliable")
-func _server_throw(origin: Vector3, direction: Vector3, id: StringName) -> void:
+func _server_throw(origin: Vector3, direction: Vector3, id: StringName, power := 1.0) -> void:
 	if not _from_owner() or not vitals.is_up() or inventory.hands != &"" or _now() < _server_busy_until - 0.1 \
 			or not usable_point(origin) or not usable_direction(direction) or respawn_state == RESPAWN_WAITING:
 		return
@@ -920,7 +920,8 @@ func _server_throw(origin: Vector3, direction: Vector3, id: StringName) -> void:
 		origin = camera.global_position
 	var dir := direction.normalized()
 	var carried := velocity if velocity.is_finite() else Vector3.ZERO  # the owner replicates its own velocity
-	CompoundLevel.current(self).server_throw(id, origin + dir * 0.5, carried + dir * THROW_SPEED + Vector3.UP * 2.0, self)
+	var p := clampf(power, 0.3, 1.0) if is_finite(power) else 1.0  # an underhand lob goes shorter
+	CompoundLevel.current(self).server_throw(id, origin + dir * 0.5, carried + dir * THROW_SPEED * p + Vector3.UP * 2.0 * p, self)
 
 
 @rpc("any_peer", "call_local", "reliable")

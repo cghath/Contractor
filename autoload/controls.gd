@@ -24,7 +24,7 @@ const KEYS := {
 	&"fire_mode": [KEY_F],
 	&"reload": [KEY_R],
 	&"medical_menu": [KEY_H],  # the medical menu (MedicalMenu); Shift+H quick-treats yourself (SHIFT_KEYS)
-	&"grenade": [KEY_G],  # throw; Shift+G switches type, Alt+G drops; carrying or dragging a body, lets go
+	&"grenade": [KEY_G],  # takes the grenade in hand (Fire throws, Aim lobs, G again puts it away); Shift+G switches type, Alt+G drops; carrying or dragging a body, lets go
 	&"inventory": [KEY_TAB],
 	&"map": [KEY_M],  # the map (MapScreen): grid, markers, squad, extraction
 	&"weapon_primary": [KEY_1],

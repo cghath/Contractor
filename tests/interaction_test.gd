@@ -59,6 +59,7 @@ func _ready() -> void:
 	await _test_slid_body()
 	await _test_downed_enemy()  # last: the hostile ends up a prisoner
 	await _test_loot_window()
+	await _test_grenade_equip()
 	GameState.delete_save()
 	print("INTERACTION TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
@@ -896,3 +897,75 @@ func _find_entry(inv: Inventory, id: StringName) -> Dictionary:
 			if list[i].id == id:
 				return {"container": container, "index": i}
 	return {}
+
+
+func _act(action: StringName, shift := false) -> void:
+	var e: InputEvent
+	if shift:
+		var k := InputEventKey.new()
+		k.keycode = KEY_G
+		k.physical_keycode = KEY_G
+		k.shift_pressed = true
+		k.pressed = true
+		e = k
+		if not e.is_action(action):
+			e = InputEventAction.new()
+			(e as InputEventAction).action = action
+			e.pressed = true
+	else:
+		e = InputEventAction.new()
+		(e as InputEventAction).action = action
+		e.pressed = true
+	player.player_input._unhandled_input(e)
+
+
+func _test_grenade_equip() -> void:
+	print("Grenade equip")
+	_place_player()
+	player.inventory.take(&"frag_grenade", 2)
+	player.inventory.take(&"flashbang", 1)
+	player._busy_until = 0.0
+	player._server_busy_until = 0.0
+	var pi: PlayerInput = player.player_input
+	pi.throwable = &"frag_grenade"
+	var frags := player.inventory.count_of(&"frag_grenade")
+	_act(&"grenade")
+	await _frames(3)
+	check(pi.nade_up and player.inventory.count_of(&"frag_grenade") == frags, "the grenade key equips it and throws nothing (count %d)" % player.inventory.count_of(&"frag_grenade"))
+	check(player.view_model.get_node_or_null(^"HeldGrenade") != null, "the grenade is in your hand in first person")
+	# Aiming and reloading don't break it.
+	_act(&"reload")
+	check(not player.is_reloading, "reloading does nothing with a grenade up")
+	_act(&"grenade")
+	await _frames(2)
+	check(not pi.nade_up and player.inventory.count_of(&"frag_grenade") == frags and player.view_model.get_node_or_null(^"HeldGrenade") == null, "the key again puts it away, nothing thrown, weapon back")
+	_act(&"grenade")
+	_act(&"weapon_primary")
+	await _frames(2)
+	check(not pi.nade_up and player.inventory.count_of(&"frag_grenade") == frags, "a weapon key puts it away, nothing thrown")
+	_act(&"grenade")
+	var wheel := InputEventMouseButton.new()
+	wheel.button_index = MOUSE_BUTTON_WHEEL_UP
+	wheel.pressed = true
+	pi._unhandled_input(wheel)
+	check(not pi.nade_up and player.inventory.count_of(&"frag_grenade") == frags, "the wheel puts it away, nothing thrown")
+	# Cycling while it is up.
+	_act(&"grenade")
+	var before := pi.throwable
+	_act(&"grenade", true)
+	check(pi.nade_up and pi.throwable != before, "Shift+G cycles the type with it up (%s)" % pi.throwable)
+	pi.throwable = &"frag_grenade"
+	player._busy_until = 0.0
+	# Left click throws one.
+	pi._try_throw(1.0)  # (a click: headless has no captured mouse for the input path)
+	await _frames(4)
+	check(player.inventory.count_of(&"frag_grenade") == frags - 1, "Fire throws exactly one (count %d)" % player.inventory.count_of(&"frag_grenade"))
+	check(pi.nade_up, "the next one stays up")
+	# Right click lobs (a second one), then the last one puts the weapon back.
+	player._busy_until = 0.0
+	player._server_busy_until = 0.0
+	pi._try_throw(PlayerInput.LOB_POWER)
+	await _frames(4)
+	check(player.inventory.count_of(&"frag_grenade") == frags - 2 and not pi.nade_up, "Aim lobs one and the weapon comes back after the last")
+	await _seconds(5.0)  # let them go off
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
