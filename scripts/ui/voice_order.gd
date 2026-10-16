@@ -1,13 +1,13 @@
 class_name VoiceOrder
 extends Control
-## Push-to-talk squad orders. Hold `voice_order` (V) and say a command; VoiceCommands looks
+## Push-to-talk squad orders. Hold `voice_order` (T) and say a command; VoiceCommands looks
 ## it up in its bounded vocabulary and this replays the matching key sequence into the
 ## command menu through CommandMenu.handle_input, exactly as if it had been typed - see
 ## VoiceCommands for why that means a voice order can't do anything a key press couldn't.
 ##
 ## No offline speech recognition is wired up yet (next step - see docs/contractor_handoff.md
-## for the chosen approach and why). Standing in for it, holding V opens a small text box:
-## type the order and press Enter to send it, or let go of V (or Esc) to cancel without
+## for the chosen approach and why). Standing in for it, holding T opens a small text box:
+## type the order and press Enter to send it, or let go of T (or Esc) to cancel without
 ## sending anything. Swap `run()`'s caller for a real recognizer's output without touching
 ## CommandMenu, VoiceCommands, or the tests - they all go through run() already.
 
