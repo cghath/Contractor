@@ -2835,6 +2835,10 @@ static func preferred_breach(units: Array) -> String:
 	return ""
 
 
+## How far inside the doorway each man steps before his corner (the threshold).
+const DOORWAY_STEP_M := 0.9
+
+
 ## Clearing (SquadTactics.clear_op): to this unit's place in the stack, wait for the rest (or
 ## STACK_WAIT_S), then in one after the other ENTRY_GAP_S apart, each to its room corner; then
 ## floor by floor (F-01): once everyone has his corner on this floor (or FLOOR_WAIT_S after the
@@ -2868,10 +2872,26 @@ func _tactic_clear(t: Dictionary, now: float) -> void:
 	var floors: Array = op.get("floors", [op.rooms])
 	var level: int = (op.get("floor_of", {}) as Dictionary).get(slot, 0)
 	var corner: Vector3 = floors[level][slot]
+	# Through the doorway first (Captain, 2026-10-16: CQB): on the ground floor each man goes in
+	# by the threshold, a step inside, then hooks or crosses to his corner, instead of cutting
+	# the wall line to it.
+	var through: Dictionary = op.get("through", {})
+	op["through"] = through
+	if level == 0 and not through.has(slot):
+		var inside: Vector3 = (op.entrance.door as Vector3) - (op.entrance.normal as Vector3) * DOORWAY_STEP_M
+		if _flat_distance(inside) > ARRIVE + 0.2 and _flat_distance(corner) > _flat_between(inside, corner):
+			_go(inside, true)
+			return
+		through[slot] = true
 	if _flat_distance(corner) > ARRIVE + 0.3:
 		_go(corner, true)
 		return
 	_has_destination = false
+	if not (op.get("cleared", {}) as Dictionary).has("%d/%d" % [level, slot]) and not in_contact():
+		var cleared: Dictionary = op.get("cleared", {})
+		op["cleared"] = cleared
+		cleared["%d/%d" % [level, slot]] = true
+		_callout(&"clear", "Clear!")  # his corner, nobody there (voiced: audio/callouts clear_*)
 	# His sector (Captain, 2026-10-16: breaching, entry): from his corner, into the room past
 	# the middle of where the team's corners are, weapon up.
 	var mid := Vector3.ZERO
