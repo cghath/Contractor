@@ -399,7 +399,7 @@ func _say(state: String, text: String) -> void:
 ## Picks the landing spot for `at` (LandingZone: the nearest safe spot within 100 m). An
 ## extraction's point moves there. Returns false when there's none.
 func _choose_lz(at: Vector3) -> bool:
-	var found := LandingZone.find(level(), at, _ignore())
+	var found := LandingZone.find(level(), at, _ignore(), LandingZone.SEARCH_M, LandingZone.clear_for(HeliSupports.MODEL))
 	if not found.ok:
 		return false
 	lz = found.spot
@@ -456,7 +456,7 @@ func can_turn_back() -> bool:
 func server_set_destination(where: Dictionary) -> String:
 	if not where.has("pos"):
 		return "Give me a grid for the drop-off: a marker on the map"
-	var found := LandingZone.find(level(), where.pos, _ignore())
+	var found := LandingZone.find(level(), where.pos, _ignore(), LandingZone.SEARCH_M, LandingZone.clear_for(HeliSupports.MODEL))
 	if not found.ok:
 		return "No safe LZ within %d m of %s: pick another" % [roundi(LandingZone.SEARCH_M), _grid(where.pos)]
 	dest = where
@@ -633,7 +633,7 @@ func _step_carry() -> void:
 		if cloud:
 			var at := level().ground_point(cloud.global_position)
 			sup.claimed[cloud.get_instance_id()] = self
-			var found := LandingZone.find(level(), at, _ignore())
+			var found := LandingZone.find(level(), at, _ignore(), LandingZone.SEARCH_M, LandingZone.clear_for(HeliSupports.MODEL))
 			if found.ok:
 				dest_lz = found.spot
 				lz = dest_lz

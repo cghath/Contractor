@@ -11,8 +11,14 @@ extends RefCounted
 ## Numbers are Proposed, except the 15° slope and the 100 m search (Captain, decided: "Safe to
 ## land": unsafe is a slope over 15°, water, buildings or trees).
 
-## The UH-60's main rotor is 8.2 m: the disc plus a margin must be clear.
+## The UH-60's main rotor is 8.2 m: the disc plus a margin must be clear. Default for any model
+## not in MODEL_CLEAR_M.
 const ROTOR_CLEAR_M := 9.5
+## Per-model overrides (docs/near_future_hardware.md): the VT-14 Petrel's lift comes from two
+## ducted wingtip pods (VehicleArt._vtol_petrel), not one long exposed main-rotor disc, so its
+## clearance is set from its wingtip-to-centreline reach (about 6.7 m) plus margin, tighter than
+## the UH-60's.
+const MODEL_CLEAR_M := {"vtol_petrel": 8.0}
 ## Clear from this high above the ground (m) to CLEAR_TOP_M: low grass and the ground's own
 ## rise on a slope don't count.
 const CLEAR_FROM_M := 0.6
@@ -35,10 +41,16 @@ const EDGE_KEEP_M := 30.0
 const RAY_UP_M := 150.0
 
 
+## The clearance radius (m) to check for `model` (MODEL_CLEAR_M, else ROTOR_CLEAR_M).
+static func clear_for(model: String) -> float:
+	return float(MODEL_CLEAR_M.get(model, ROTOR_CLEAR_M))
+
+
 ## Whether a helicopter can land at `at` (x, z; any height) in `level`, ignoring the bodies in
 ## `ignore` (the helicopter itself, its passengers). {"ok": bool, "why": String (when not),
-## "spot": Vector3 (the ground there), "slope_deg": float}.
-static func check(level: Node3D, at: Vector3, ignore: Array[RID] = []) -> Dictionary:
+## "spot": Vector3 (the ground there), "slope_deg": float}. `clear_m` overrides ROTOR_CLEAR_M
+## (clear_for) for a model whose rotor or lift-pod footprint differs from the UH-60's.
+static func check(level: Node3D, at: Vector3, ignore: Array[RID] = [], clear_m := ROTOR_CLEAR_M) -> Dictionary:
 	var out := {"ok": false, "why": "", "spot": at, "slope_deg": 0.0}
 	if level == null or not level.is_inside_tree():
 		out.why = "no level"
@@ -71,10 +83,10 @@ static func check(level: Node3D, at: Vector3, ignore: Array[RID] = []) -> Dictio
 	if steepest > MAX_SLOPE_DEG:
 		out.why = "too steep (%.0f°)" % steepest
 		return out
-	if _unloaded_site(level, spot):
+	if _unloaded_site(level, spot, clear_m):
 		out.why = "buildings there"
 		return out
-	if _blocked(level, space, spot, ROTOR_CLEAR_M, CLEAR_FROM_M, CLEAR_TOP_M, 1 | Vehicle.LAYER, ignore):
+	if _blocked(level, space, spot, clear_m, CLEAR_FROM_M, CLEAR_TOP_M, 1 | Vehicle.LAYER, ignore):
 		out.why = "obstacles in the rotor's way"
 		return out
 	if _blocked(level, space, spot, PEOPLE_CLEAR_M, 0.1, PEOPLE_TOP_M, Soldier.BODY_LAYER | Ragdoll.LAYER, ignore):
@@ -87,8 +99,8 @@ static func check(level: Node3D, at: Vector3, ignore: Array[RID] = []) -> Dictio
 ## The nearest safe spot to `at` within SEARCH_M (`at` itself when it's safe):
 ## {"ok", "spot", "moved_m", "why" (why `at` itself wasn't safe, or "")}. Not ok when there's
 ## none within SEARCH_M.
-static func find(level: Node3D, at: Vector3, ignore: Array[RID] = [], search_m := SEARCH_M) -> Dictionary:
-	var first := check(level, at, ignore)
+static func find(level: Node3D, at: Vector3, ignore: Array[RID] = [], search_m := SEARCH_M, clear_m := ROTOR_CLEAR_M) -> Dictionary:
+	var first := check(level, at, ignore, clear_m)
 	if first.ok:
 		return {"ok": true, "spot": first.spot, "moved_m": 0.0, "why": ""}
 	var r := RING_STEP_M
@@ -97,7 +109,7 @@ static func find(level: Node3D, at: Vector3, ignore: Array[RID] = [], search_m :
 		for i in n:
 			var ang := TAU * float(i) / float(n) + r * 0.37
 			var cand := at + Vector3(cos(ang), 0.0, sin(ang)) * r
-			var c := check(level, cand, ignore)
+			var c := check(level, cand, ignore, clear_m)
 			if c.ok:
 				return {"ok": true, "spot": c.spot, "moved_m": Vector2(cand.x - at.x, cand.z - at.z).length(), "why": String(first.why)}
 		r += RING_STEP_M
@@ -145,12 +157,12 @@ static func _blocked(level: Node3D, space: PhysicsDirectSpaceState3D, spot: Vect
 
 ## A zone's building site (module) round `spot` that isn't loaded on the host: its buildings
 ## have no collision yet, so it counts as built up.
-static func _unloaded_site(level: Node, spot: Vector3) -> bool:
+static func _unloaded_site(level: Node, spot: Vector3, clear_m := ROTOR_CLEAR_M) -> bool:
 	if not level.has_method(&"modules"):
 		return false
 	for m: Variant in level.call(&"modules"):
 		var module := m as ZoneModule
-		if module and not module.is_streamed() and module.distance_to(spot) <= ROTOR_CLEAR_M:
+		if module and not module.is_streamed() and module.distance_to(spot) <= clear_m:
 			return true
 	return false
 

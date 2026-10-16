@@ -24,7 +24,7 @@ const P := VehicleArt.P
 const CUSHION_DROP := 0.72
 ## Each body's cabin floor (metres up in the vehicle's frame): the seats stand on it, and a seated
 ## rider's feet rest on it (Vehicle: CharacterModel.seated_pose, Captain, 2026-10-14).
-const FLOORS := {"matv": 1.0, "maxxpro": 1.2, "hilux": 0.75, "lc79": 0.85, "aav7": 1.0, "uh60": 0.62}
+const FLOORS := {"matv": 1.0, "maxxpro": 1.2, "hilux": 0.75, "lc79": 0.85, "aav7": 1.0, "uh60": 0.62, "vtol_petrel": 0.6}
 
 static var _seats := {}  # model -> Array of seat dictionaries (vehicles.json, "base" merged)
 static var _mutex := Mutex.new()
@@ -34,7 +34,7 @@ static var _mutex := Mutex.new()
 ## threads too (VehicleHull.prewarm): touches only `c` and this class's own seat table.
 static func furnish(model: String, c: VehicleArt.Canvas) -> void:
 	var body := _body_of(model)
-	if not body in ["matv", "maxxpro", "hilux", "lc79", "aav7", "uh60"]:
+	if not body in ["matv", "maxxpro", "hilux", "lc79", "aav7", "uh60", "vtol_petrel"]:
 		return
 	var hit := c.buffer
 	var look := VoxelBuffer.new()
@@ -50,6 +50,7 @@ static func furnish(model: String, c: VehicleArt.Canvas) -> void:
 		"hilux", "lc79": _pickup(cab, body == "lc79")
 		"aav7": _aav7(cab)
 		"uh60": _uh60(cab)
+		"vtol_petrel": _vtol_petrel(cab)
 	c.buffer = hit
 	c.look = look
 
@@ -441,3 +442,20 @@ static func _uh60(k: Cab) -> void:
 	for side: float in [-1.0, 1.0]:
 		k.see_through(side * 0.75, 1.45, 2.95, side * 1.5, 2.08, 3.55, [P.GLASS, P.PAINT])
 	k.seats(FLOORS.uh60, -0.85, 0.85)
+
+
+## VT-14 Petrel (docs/near_future_hardware.md): the same shell-then-glaze approach as the UH-60,
+## matched to VehicleArt._vtol_petrel's flatter, lower cross-section (near-sharp corners) and
+## PETREL_NOSE_OFFSET. Cleared from behind the cockpit canopy back to the aft cabin, short of the
+## tapering tail so the ramp end stays a solid bulkhead for this first pass (the open-ramp look is
+## a follow-up, not required for the model to fly and carry passengers).
+static func _vtol_petrel(k: Cab) -> void:
+	var o: float = VehicleArt.PETREL_NOSE_OFFSET
+	var cabin := VehicleArt.Section.new(0.55, 2.3, 1.3, 1.196, 0.05, 0.03)
+	k.carve_section(cabin, o - 5.0, o + 6.5, 0.6, 2.2, 0.12)
+	k.glaze(-0.95, 1.7, o - 6.3, 0.95, 2.16, o - 5.15, 2, true)
+	k.glaze(-0.95, 2.16, o - 5.9, 0.95, 2.3, o - 5.3, 1, false)
+	k.glaze_sides(1.5, 0.9, 1.5, o - 3.7, 2.05, o - 2.3)  # gunner windows
+	for wz: float in [o - 0.6, o + 1.1, o + 2.6]:  # cabin windows
+		k.glaze_sides(1.5, 0.9, 1.45, wz - 0.1, 2.0, wz + 1.0)
+	k.seats(FLOORS.vtol_petrel, -0.85, 0.85)

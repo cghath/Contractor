@@ -32,7 +32,11 @@ signal radio_heard(text: String)
 const NODE_NAME := "HeliSupports"
 const DATA_PATH := "res://data/supports.json"
 const KINDS: Array[String] = ["resupply", "transport", "extraction", "medevac", "cargo"]
-const MODEL := "uh60"
+## The player faction's transport (docs/near_future_hardware.md: replaces the Black Hawk). The
+## UH-60 model and data entry stay in the game (mission_scenario.gd's crew_rescue wreck, other
+## factions) - only the player's own support calls moved off it. A Razorback-tier upgrade (bigger
+## capacity, unlock-gated) is a later pass, not wired here yet.
+const MODEL := "vtol_petrel"
 ## Proposed: on a zone, helicopters appear this far inside the edge (its invisible wall) and
 ## leave by it; on a small map (the vehicle range) at least MIN_INBOUND_M from where they go.
 const SPAWN_INSET_M := 80.0

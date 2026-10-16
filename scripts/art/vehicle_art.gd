@@ -18,6 +18,7 @@ enum P {
 
 ## Paint schemes: body colour, darker panels, lighter trim, and markings.
 const SCHEMES := {
+	"stealth": {"paint": "1c1e20", "marking": "0b0c0d"},
 	"army": {"paint": "3e4536", "marking": "1d1f1a"},
 	"marine_gray": {"paint": "5a6168", "marking": "2a2e33"},
 	"od": {"paint": "4c5a38", "marking": "1e2318"},
@@ -29,6 +30,7 @@ const SCHEMES := {
 ## Models and the schemes they come in (the first is the default).
 const MODELS := {
 	"uh60": ["army", "od"],
+	"vtol_petrel": ["stealth"],
 	"ah1z": ["marine_gray"],
 	"aav7": ["od", "desert"],
 	"maxxpro": ["desert", "od"],
@@ -173,6 +175,7 @@ static func _canvas_for(model: String) -> Canvas:
 static func _shape_for(model: String) -> Canvas:
 	match model:
 		"uh60": return _uh60()
+		"vtol_petrel": return _vtol_petrel()
 		"ah1z": return _ah1z()
 		"aav7": return _aav7()
 		"maxxpro": return _maxxpro()
@@ -657,6 +660,85 @@ static func _uh60() -> Canvas:
 	return c
 
 
+
+
+## VT-14 Petrel (near-future hardware, docs/near_future_hardware.md): a low, flat, angular
+## fuselage under a cargo-first design logic learned from the V-22 Osprey's tiltrotor layout and
+## faceted stealth aircraft generally (acknowledged inspiration, not a copy of either: same spirit
+## as movement_rules.gd's Tarkov note). No overhead main rotor or tail boom: lift comes from two
+## ducted rotor pods on stub wings at mid-fuselage, each a squared-off shroud (mloft, shell: a
+## hollow ring) round a short, fast fan (c.rotor). Angular hull sections (near-zero corner
+## radius) for the faceted panel look the reference art asks for, flat low top deck, a two-pane
+## cockpit canopy, and fixed skid legs (no wheels, no retraction gear modelled). Data in
+## data/vehicles.json's vtol_petrel entry: JSON frame origin (the footprint's middle) maps to
+## this canvas's z - NOSE_OFFSET.
+const PETREL_NOSE_OFFSET := 7.75  # data_z = canvas_z - this (vtol_petrel's hull spans data z -7.3..7.0)
+
+
+static func _vtol_petrel() -> Canvas:
+	var c := Canvas.new(Vector3i(284, 72, 310), 0.05)
+	var o := PETREL_NOSE_OFFSET
+	var body := func(z: float) -> Section:
+		var dz := z - o  # data-frame z, for readable breakpoints matching the JSON hull boxes
+		var bottom := 0.55
+		var top := 2.3
+		var hw := 1.3
+		var r := 0.05  # near-sharp panel edges; the reference art is faceted, not rounded
+		if dz < -5.0:  # nose taper into the cockpit
+			var k := clampf((dz + 7.3) / 2.3, 0.0, 1.0)
+			bottom = lerpf(0.75, 0.55, k)
+			top = lerpf(1.1, 2.1, sqrt(k))
+			hw = lerpf(0.15, 1.2, sqrt(k))
+			r = lerpf(0.12, 0.06, k)
+		elif dz > 4.6:  # aft cabin narrowing towards the open ramp
+			var k := clampf((dz - 4.6) / 2.2, 0.0, 1.0)
+			bottom = lerpf(0.55, 0.65, k)
+			top = lerpf(2.3, 2.0, k)
+			hw = lerpf(1.3, 0.95, k)
+		var s := Section.new(bottom, top, hw, hw * 0.92, r, r * 0.6)
+		if dz < -7.1:
+			s = s.scaled(maxf(sqrt(1.0 - pow((-7.1 - dz) / 0.25, 2.0)), 0.15), (top + bottom) * 0.5)
+		return s
+	c.mhull(0.3, o + 6.8, body, P.PAINT, 0.12)
+	# Flat top deck panel (reads as one faceted plate from the canopy back to the wing root).
+	c.mbox(-1.1, 2.26, o - 5.0, 1.1, 2.42, o + 1.2, P.PAINT_DARK)
+	# Two-pane angular cockpit canopy.
+	c.mskin(-0.95, 1.7, o - 6.3, 0.95, 2.16, o - 5.15, P.GLASS)
+	c.mskin(-0.04, 1.7, o - 6.3, 0.04, 2.3, o - 5.15, P.PAINT_DARK)  # centre post
+	c.mskin(-0.95, 2.16, o - 5.9, 0.95, 2.3, o - 5.3, P.GLASS)  # overhead strip
+	# Cabin side windows (crew and passenger bay), both sides.
+	for side: float in [-1.0, 1.0]:
+		var ox := side * 1.22
+		var ix := side * 1.32
+		c.mskin(minf(ox, ix), 1.55, o - 3.6, maxf(ox, ix), 2.0, o - 2.4, P.GLASS)  # gunner window
+		for wz: float in [o - 0.6, o + 1.1, o + 2.6]:
+			c.mskin(minf(ox, ix), 1.5, wz, maxf(ox, ix), 1.95, wz + 0.9, P.GLASS)
+	# Stub wings and the ducted rotor pods at each wingtip (lift pods, no exposed blades).
+	for side: float in [-1.0, 1.0]:
+		var root := side * 1.3
+		var tip := side * 4.6
+		c.mbox(minf(root, tip), 2.1, o - 1.3, maxf(root, tip), 2.55, o + 1.3, P.PAINT)
+		c.mskin(minf(root, tip), 2.5, o - 1.25, maxf(root, tip), 2.56, o + 1.25, P.PAINT_DARK, P.PAINT)
+		var pod := func(z: float) -> Vector4:
+			return Vector4(side * 5.6, 2.33, 1.05, 1.05)
+		c.mloft(o - 1.25, o + 1.25, pod, P.PAINT_DARK, 4.5, 0.18)  # hollow squared duct ring
+		c.mskin(side * 4.5, 1.3, o - 1.3, side * 6.7, 3.4, o + 1.3, P.PAINT, P.PAINT_DARK)  # outer shroud face lighter
+		c.rotor("Rotor%s" % ("L" if side < 0.0 else "R"), Vector3(side * 5.6, 2.33, o), 0.95, 0.14, 5, Vector3.UP)
+		# Skid leg: an angled strut from the belly down to a short foot, under the wing root.
+		var leg_z := o - 5.75 if side < 0.0 else o + 5.3  # left leg forward, right leg aft (visual stagger, Proposed)
+		c.mbar(Vector3(side * 0.9, 0.55, leg_z), Vector3(side * 1.15, 0.05, leg_z), 0.09, P.METAL)
+		c.mbox(side * 0.95, 0.0, leg_z - 0.55, side * 1.35, 0.08, leg_z + 0.55, P.METAL)
+	# Forward and aft skid legs (under the cockpit and the aft cabin, matching vehicles.json's
+	# four "wheels" ground-contact points).
+	for gz: float in [o - 6.3, o + 5.8]:
+		for side: float in [-1.0, 1.0]:
+			c.mbar(Vector3(side * 0.85, 0.55, gz), Vector3(side * 1.1, 0.05, gz), 0.08, P.METAL)
+			c.mbox(side * 0.9, 0.0, gz - 0.4, side * 1.3, 0.08, gz + 0.4, P.METAL)
+	# Nav lights and a tail beacon, for readability at a distance (same convention as _uh60).
+	for side: float in [-1.0, 1.0]:
+		c.mbox(side * 1.26, 2.2, o - 4.6, side * 1.34, 2.3, o - 4.4, P.LIGHT_RED if side < 0.0 else P.LIGHT_GREEN)
+	c.mbox(-0.04, 2.0, o + 6.7, 0.04, 2.1, o + 6.8, P.LIGHT_RED)
+	return c
 
 
 ## AH-1Z Viper: a narrow, tall fuselage (under 1 m wide) with avionics bays bulging its lower
