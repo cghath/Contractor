@@ -846,8 +846,10 @@ func _server_fire(origin: Vector3, direction: Vector3, slot: StringName) -> void
 	last_shot_at = now
 	last_shot_suppressed = suppressed
 	var round_end: Variant = result.get("position")
-	Sfx.server_shot(origin, round_end if round_end is Vector3 else origin + direction.normalized() * 400.0,
+	var round_point: Vector3 = round_end if round_end is Vector3 else origin + direction.normalized() * 400.0
+	Sfx.server_shot(origin, round_point,
 		"suppressed" if suppressed else ("pistol" if weapon.slot == &"sidearm" else "rifle"))  # every peer hears it (Sfx)
+	CompoundLevel.current(self).show_tracer.rpc(origin, round_point, suppressed)  # and sees it (Tracer)
 	PeopleLayer.server_noise(self, origin)  # people nearby hear it (wave 4)
 	if faction != &"hostile":
 		Alert.server_noise(self, origin, Alert.SHOT, suppressed)  # hot zones: the enemy hears it (4B part 3)

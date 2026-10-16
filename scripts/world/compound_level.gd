@@ -514,6 +514,15 @@ func _restore_bodies() -> void:
 		vehicles.server_restore()
 
 
+## Host only. A visible tracer streak from `origin` to `end` on every peer (Captain, 2026-10-16:
+## "we dont have tracers or bullets that can be seen in game yet"). Purely cosmetic (Sfx.
+## server_shot already carries the sound); suppressed shots get a faint one, not none, since the
+## round still flies even if the bang is quiet.
+@rpc("authority", "call_local", "unreliable")
+func show_tracer(origin: Vector3, end: Vector3, suppressed: bool) -> void:
+	Tracer.spawn(self, origin, end, suppressed)
+
+
 @rpc("authority", "call_local", "unreliable")
 func show_impact(pos: Vector3, normal: Vector3, kind: String) -> void:
 	Sfx.play_at({"plate": &"impact_plate", "vehicle": &"impact_plate", "body": &"impact_body"}.get(kind, &"impact_dirt"), pos)
