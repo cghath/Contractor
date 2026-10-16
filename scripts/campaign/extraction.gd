@@ -622,6 +622,9 @@ func _start_countdown(point: Dictionary) -> String:
 	_last_whole = -1
 	_broadcast()
 	_client_message.rpc("Extracting from %s in %d s: stay inside" % [point.name, ceili(countdown_s)])
+	var response := EnemyResponse.of(self)
+	if response:
+		response.server_alert_extraction(Vector3(point.pos.x, 0.0, point.pos.y))  # not quiet
 	return ""
 
 

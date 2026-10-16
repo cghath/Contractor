@@ -364,6 +364,26 @@ func _launch_qrf() -> void:
 		_last_qrf = now()
 
 
+## Host: extraction starting at `pos` draws attention — at least the nearest patrol's, more if
+## the zone has earned it by then (Captain, 2026-10-16: exfil was risk-free once the squad
+## reached the point; then "potentially larger forces depending on factors?"). A quiet, never-
+## spotted run gets one patrol's look (a heli landing or a squad leaving still isn't silent); a
+## zone that's alerted or under pressure by extraction time gets a second patrol too; past
+## engaged, an actual QRF wave converges (no-ops with no living QRF base — mostly a hot-zone
+## thing, same as the rest of EnemyResponse). Skips _send_look's coordination trickle (meant for
+## noise reports competing for attention): the first look is guaranteed, not a maybe.
+func server_alert_extraction(pos: Vector3) -> void:
+	_look_credit = maxf(_look_credit, 1.0)
+	_send_look(pos)
+	var state := _zone_state()
+	var tier := _tier()
+	if state >= Alert.State.ALERTED or tier >= 1:
+		_look_credit = maxf(_look_credit, 1.0)
+		_send_look(pos)  # the next-nearest free patrol converges too
+	if state >= Alert.State.ENGAGED or tier >= 2:
+		_launch_qrf()
+
+
 ## The nearest patrol out (not already looking) goes to look round `pos` for LOOK_S. With
 ## officers dead the net is less coordinated (design: killed officers make patrols less
 ## coordinated): only coordination()'s share of the looks gets ordered (every one at full, one
