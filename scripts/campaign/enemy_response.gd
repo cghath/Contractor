@@ -58,10 +58,12 @@ const SPAWN_BUDGET: Array[int] = [20, 24, 28, 32, 36]
 const WAVE_HUNT_S := 600.0
 ## Escalation over a long stay (Captain, 2026-10-16: "the whole map doesnt come after me at the
 ## same time, just a steady patrol or two that escalates", "suitable for an hour or two of
-## play"): the budget starts at RAMP_START (a patrol or two) and eases up to the tier's
-## SPAWN_BUDGET over ESCALATE_S of the zone's clock (smoothstep: slow at first, slow at the top).
-## Pressure tier still caps it, so a quiet squad stays light however long it stays.
-const RAMP_START := 4
+## play"): the budget starts at RAMP_START and eases up to the tier's SPAWN_BUDGET over
+## ESCALATE_S of the zone's clock (smoothstep: slow at first, slow at the top). Pressure tier
+## still caps it, so a quiet squad stays light however long it stays.
+## Raised from 4 (a patrol or two) to 8 (four pairs): playtest B1399 on Red Mesa found the open
+## ground too quiet in the first few minutes ("contacts come too slowly at mission start").
+const RAMP_START := 8
 const ESCALATE_S := 5400.0
 const HUNTER_GAP_S := 600.0
 const HUNTER_SIZE := Vector2i(4, 6)

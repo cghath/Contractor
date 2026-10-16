@@ -657,8 +657,11 @@ func _test_hot_layout() -> void:
 			count.call("qrf_base"), count.call("outpost"), count.call("checkpoint"), count.call("village"), count.call("town")])
 		check(spaced and clear and first_best and (hot.insertion as Array).size() == 3 and (hot.extraction as Array).size() == 3,
 			"seed %d: sites spaced out, 3 insertion points %d m clear of every site (the default the furthest), 3 extractions" % [seed, int(ZoneDef.HOT_INSERTION_CLEAR_M)])
-		check((hot.roads as Array).size() == count.call("outpost") and (hot.patrols as Array).size() >= 2
-			and ZoneDef.generate_hot(seed).hash() == hot.hash(), "seed %d: roads to every outpost, %d patrol routes, the same every time" % [seed, (hot.patrols as Array).size()])
+		# Captain, 2026-10-16: trails now cross every zone too (ZoneDef._add_trails, TRAILS of
+		# them), each adding its own road segments on top of the one straight to each outpost, so
+		# roads no longer land one-for-one with outposts (just at least one each).
+		check((hot.roads as Array).size() >= count.call("outpost") and (hot.patrols as Array).size() >= 2
+			and ZoneDef.generate_hot(seed).hash() == hot.hash(), "seed %d: roads to every outpost and %d trails (%d roads for %d outposts), %d patrol routes, the same every time" % [seed, ZoneDef.TRAILS, (hot.roads as Array).size(), count.call("outpost"), (hot.patrols as Array).size()])
 	# The town is a real module type, with people, loot and a callsign of its own.
 	var town: Dictionary = (ZoneDef.generate_hot(4409).modules as Array).filter(func(m: Dictionary) -> bool: return ZoneModules.base(m.type) == "town")[0]
 	var ttype := String(town.type)
@@ -1454,8 +1457,11 @@ func _test_copse_cover(a: ZoneScatter, b: ZoneScatter, t: ZoneTerrain, trees: Ar
 			if _eye_foliage(a, t, c + dir * 50.0, c) >= Spotting.FOLIAGE_OPAQUE_M:
 				hidden += 1
 	var nn := nn_sum / maxi(nn_n, 1)
-	check(copses >= 20 and in_bounds >= copses * 0.8 and tree_sum <= copses * 60 and most_r <= ZoneScatter.COPSE_SPREAD * sqrt(60.0) + 2.01 and nn >= 2.8 and nn <= 3.6,
-		"copses: %d copses, %d with 20-60 trees (%.1f a copse), at most %.1f m in radius, trees %.2f m from the nearest (Proposed 3-3.5)" % [copses, in_bounds, float(tree_sum) / maxi(copses, 1), most_r, nn])
+	# Captain, 2026-10-16: COPSE_SPREAD 1.9 -> 2.6 ("sprawling more") widened a copse's radius
+	# without changing its tree count, so trees sit a bit further apart on average (was 3-3.5,
+	# now 3-3.8); the upper bound here follows that, not a regression.
+	check(copses >= 20 and in_bounds >= copses * 0.8 and tree_sum <= copses * 60 and most_r <= ZoneScatter.COPSE_SPREAD * sqrt(60.0) + 2.01 and nn >= 2.8 and nn <= 3.8,
+		"copses: %d copses, %d with 20-60 trees (%.1f a copse), at most %.1f m in radius, trees %.2f m from the nearest (Proposed 3-3.8)" % [copses, in_bounds, float(tree_sum) / maxi(copses, 1), most_r, nn])
 	check(lines > 0 and blocked >= lines * 0.85,
 		"copses: %d of %d eye-height lines through a copse's middle meet %.1f m of foliage or more" % [blocked, lines, Spotting.FOLIAGE_OPAQUE_M])
 	check(views > 0 and hidden >= views * 0.8,

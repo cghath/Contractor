@@ -117,3 +117,24 @@ next build (no windowed look was possible while the Captain was playing).
   `zone_sky.gdshader`: the same gradient and sun plus two bands of low-poly ridges and mesas round the horizon (near
   0.25-1.1 degrees, far 0.6-2.4, `8a8478` mixed into the haze), seeded by the zone; part of the sky, so never clipped
   and nearly free.
+
+**Open terrain fill and world loot** (Captain, 2026-10-16, playtest B1399 on Red Mesa, `rocky_ridge`: "open terrain
+reads nearly empty", "nothing to loot out in the world"; a general problem across most maps, not just the desert
+example): three related fixes, layout version 8.
+- **Ruins and wrecks**: `ruins_per_km2` places bigger, rougher `Kind.PROP` clutter (`RUIN_SIZE_LO`-`RUIN_SIZE_HI`, 1.2-3.0 m,
+  colours `colours.ruin`, else a rust/concrete default) out in the open terrain, placed like the rocks are (anywhere
+  open, away from pads and roads, no "near a road" requirement) — unlike the roadside crates (`props_per_km2`,
+  `props_near_m`), which keep their own gating. Both share `CAP_PROPS` (1000, up from 600).
+- **Ground cover filled in**: `temperate`, `rocky_ridge` and `scrubland` had no `tufts_per_km2` / `pebbles_per_km2` /
+  `rock_clusters_per_km2` at all (only `coastal_lowland`, `amphibious_coast`, `desert_wadi` and `salt_flats` did) —
+  a big share of "feels empty", since those are visual-only and laid out everywhere, not just at the margins. All
+  four (plus `forest_experimental`) now have modest values; `rocky_ridge` gets the most rock clusters (it's a ridge).
+- **Valuable sites**: `valuables_per_km2` places a new placement-only kind, `Kind.VALUABLE` (no mesh — `ZoneScatter`
+  only marks where), well clear of a site or a road (`VALUABLE_AVOID_M`, 70 m, more than the bare pad/road keep-out).
+  `ZoneScatter.valuable_sites()` hands the marked spots to `WorldValuables` (`scripts/world/world_valuables.gd`),
+  which spawns the real pickups the first time a zone hosts (`ZoneLevel._on_hosted`): a dead drop (one piece of cash
+  or intel) or a small wreck/cache (a weapon, its mags, a medical or salvage item), rolled deterministically per
+  site. Ordinary `WorldItem`s with a stable uid, so they drop into the existing flow — `GameState.is_looted` keeps a
+  taken one from respawning, selling one feeds `Prices`, and carrying intel out already trips `IntelReveal`.
+- Both `ruins_per_km2` and `valuables_per_km2` are capped sparse (`CAP_PROPS`, `CAP_VALUABLES` 40) and set on every
+  preset except `plain` (the empty test zone, left alone).

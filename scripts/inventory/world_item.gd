@@ -141,4 +141,6 @@ static func color_for(item: ItemData) -> Color:
 		"medical": return Color("c23b3b")
 		"utility": return Color("3f5f7a")
 		"objective": return Color("d9a400")
+		"valuable": return Color("c9a443")
+		"intel": return Color("d2b77c")
 		_: return Color("8a8a8a")

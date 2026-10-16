@@ -21,7 +21,8 @@
 			"land": {"relief_scale": 1.0, "wavelength_m": 650, "octaves": 4, "gain": 0.42},
 			"palette": {"grass": "5f6a3c", "dry": "7d7748", "earth": "7f6d4f", "rock": "6f6a60"},
 			"scatter": {"conifer_share": 0.35, "rocks_per_km2": 50, "large_rock_share": 0.15, "scrub_per_km2": 250, "trees_per_km2": 12, "woods_per_km2": 1.5, "copses_per_km2": 5, "hedgerows_per_km2": 4, "road_trees": 0.4,
-				"props_per_km2": 2.0, "props_near_m": 50,
+				"props_per_km2": 2.0, "props_near_m": 50, "ruins_per_km2": 1.0, "valuables_per_km2": 1.5,
+				"tufts_per_km2": 55000, "pebbles_per_km2": 3000, "rock_clusters_per_km2": 25,
 				"colours": {"rock": ["77736a", "6a665e"], "scrub": ["55633a", "6d6f40"], "crown": ["46602f", "52672f"], "trunk": "4f3e2c"}}
 		},
 		"forest_experimental": {
@@ -30,6 +31,7 @@
 			"land": {"relief_scale": 0.9, "wavelength_m": 520, "octaves": 4, "gain": 0.42},
 			"palette": {"grass": "56633a", "dry": "6f6c45", "earth": "6f5f45", "rock": "6a665e"},
 			"scatter": {"copse_cover": true, "conifer_share": 0.45, "rocks_per_km2": 60, "large_rock_share": 0.18, "scrub_per_km2": 420, "trees_per_km2": 16, "woods_per_km2": 2.4, "wood_radius_m": [70, 170], "thicket_share": 0.35, "copses_per_km2": 6, "copse_trees": [24, 60], "hedgerows_per_km2": 2, "road_trees": 0.6,
+				"ruins_per_km2": 0.8, "valuables_per_km2": 1.2, "tufts_per_km2": 45000, "pebbles_per_km2": 2500, "rock_clusters_per_km2": 20,
 				"colours": {"rock": ["77736a", "6a665e"], "scrub": ["4f5e36", "63693c"], "crown": ["3f592b", "4a622d", "526a30"], "trunk": "4a3a2a"}}
 		},
 		"coastal_lowland": {
@@ -39,7 +41,7 @@
 			"palette": {"grass": "6a7440", "dry": "8a8650", "earth": "86744f", "rock": "7a7468", "sand": "c2b583"},
 			"ground": {"sand_below_m": 1.6},
 			"scatter": {"conifer_share": 0.15, "rocks_per_km2": 35, "large_rock_share": 0.12, "scrub_per_km2": 750, "scrub_size": [0.7, 1.7], "trees_per_km2": 10, "woods_per_km2": 0.8, "copses_per_km2": 6, "hedgerows_per_km2": 5, "road_trees": 0.5, "tufts_per_km2": 70000, "pebbles_per_km2": 4000, "rock_clusters_per_km2": 40,
-				"props_per_km2": 2.5, "props_near_m": 55,
+				"props_per_km2": 2.5, "props_near_m": 55, "ruins_per_km2": 1.2, "valuables_per_km2": 1.5,
 				"colours": {"rock": ["8a8576", "7a7568"], "scrub": ["627a3e", "7a8040"], "tuft": ["5a7436", "68803e", "788545"], "crown": ["4f6e30", "5b7a34"], "trunk": "5a4632"}}
 		},
 		"amphibious_coast": {
@@ -49,6 +51,7 @@
 			"palette": {"grass": "6a7440", "dry": "8a8650", "earth": "86744f", "rock": "7a7468", "sand": "c2b583"},
 			"ground": {"sand_below_m": 1.6},
 			"scatter": {"conifer_share": 0.15, "rocks_per_km2": 35, "large_rock_share": 0.12, "scrub_per_km2": 750, "trees_per_km2": 8, "woods_per_km2": 0.4, "copses_per_km2": 4, "hedgerows_per_km2": 3, "road_trees": 0.3, "tufts_per_km2": 70000, "pebbles_per_km2": 4000, "rock_clusters_per_km2": 40,
+				"ruins_per_km2": 1.0, "valuables_per_km2": 1.2,
 				"colours": {"rock": ["8a8576", "7a7568"], "scrub": ["627a3e", "7a8040"], "tuft": ["5a7436", "68803e", "788545"], "crown": ["4f6e30", "5b7a34"], "trunk": "5a4632"}}
 		},
 		"salt_flats": {
@@ -62,7 +65,7 @@
 			"sky": {"sun_energy": 1.05, "exposure": 0.92, "fog_density": 0.00045, "fog_colour": "c2bfb5", "sky_top": "4d75ad", "sky_horizon": "c2bfb5", "fill_energy": 0.3},
 			"backdrop": {"colour": "8a8478", "near_deg": [0.25, 1.1], "far_deg": [0.6, 2.4]},
 			"scatter": {"rocks_per_km2": 40, "large_rock_share": 0.14, "scrub_per_km2": 160, "scrub_size": [0.5, 1.3], "trees_per_km2": 0, "rock_clusters_per_km2": 60, "pebbles_per_km2": 3000,
-				"props_per_km2": 1.5, "props_near_m": 50,
+				"props_per_km2": 1.5, "props_near_m": 50, "ruins_per_km2": 1.2, "valuables_per_km2": 1.0,
 				"margin_m": 380, "margin_fade_m": 220, "near_pad_m": 110, "near_road_m": 35,
 				"colours": {"rock": ["857b6a", "746c5e", "8e8676"], "scrub": ["6f6857", "7a7158", "5e5a4c"], "crown": ["6e6c4a"], "trunk": "5a4a36"}}
 		},
@@ -72,7 +75,7 @@
 			"wadi": {"count": 2, "width_m": 55, "depth_m": 8.0, "meander_m": 140, "berm_m": 2.0},
 			"palette": {"grass": "a08f5a", "dry": "b3a068", "earth": "94785a", "rock": "7d6f5c", "sand": "c9b27a", "apron": "a08f5a"},
 			"scatter": {"conifer_share": 0.0, "rocks_per_km2": 90, "large_rock_share": 0.18, "scrub_per_km2": 600, "scrub_size": [0.7, 1.7], "trees_per_km2": 4, "woods_per_km2": 0, "copses_per_km2": 1.5, "copse_trees": [6, 16], "hedgerows_per_km2": 0.5, "wadi_groves_per_km2": 6, "wadi_grove_trees": [6, 16], "tufts_per_km2": 24000, "pebbles_per_km2": 8000, "rock_clusters_per_km2": 120,
-				"props_per_km2": 1.5, "props_near_m": 50,
+				"props_per_km2": 1.5, "props_near_m": 50, "ruins_per_km2": 1.5, "valuables_per_km2": 1.2,
 				"colours": {"rock": ["8a7a64", "7a6c58"], "scrub": ["6f7040", "857b45"], "tuft": ["a89a5c", "94935a", "85884e"], "crown": ["5f6b35", "6b7338"], "trunk": "5e4a34"}}
 		},
 		"rocky_ridge": {
@@ -80,16 +83,18 @@
 			"land": {"relief_scale": 1.3, "wavelength_m": 480, "octaves": 4, "gain": 0.42, "ridge": 0.5},
 			"palette": {"grass": "5d6540", "dry": "7a7650", "earth": "7a6a52", "rock": "6f6a62", "apron": "5d6540"},
 			"ground": {"rock_above_m": 20.0},
-			"scatter": {"conifer_share": 0.7, "rocks_per_km2": 150, "large_rock_share": 0.25, "scrub_per_km2": 210, "trees_per_km2": 8, "woods_per_km2": 1.0, "copses_per_km2": 4,
-				"props_per_km2": 1.5, "props_near_m": 50,
+			"scatter": {"conifer_share": 0.7, "rocks_per_km2": 150, "large_rock_share": 0.25, "scrub_per_km2": 210, "trees_per_km2": 8, "woods_per_km2": 1.0, "copses_per_km2": 4, "road_trees": 0.3,
+				"props_per_km2": 1.5, "props_near_m": 50, "ruins_per_km2": 1.4, "valuables_per_km2": 1.2,
+				"tufts_per_km2": 18000, "pebbles_per_km2": 5000, "rock_clusters_per_km2": 150,
 				"colours": {"rock": ["7c776d", "68645c"], "scrub": ["5a6338", "6c6e3e"], "crown": ["44582f", "4f6330"], "trunk": "4f3e2c"}}
 		},
 		"scrubland": {
 			"name": "Scrubland",
 			"land": {"relief_scale": 0.7, "wavelength_m": 600, "octaves": 4, "gain": 0.42, "ridge": 0.1},
 			"palette": {"grass": "76753f", "dry": "8f8650", "earth": "857049", "rock": "746d5e"},
-			"scatter": {"conifer_share": 0.05, "rocks_per_km2": 60, "large_rock_share": 0.12, "scrub_per_km2": 520, "trees_per_km2": 6, "woods_per_km2": 0.3, "copses_per_km2": 3,
-				"props_per_km2": 2.0, "props_near_m": 55,
+			"scatter": {"conifer_share": 0.05, "rocks_per_km2": 60, "large_rock_share": 0.12, "scrub_per_km2": 520, "trees_per_km2": 6, "woods_per_km2": 0.3, "copses_per_km2": 3, "road_trees": 0.3,
+				"props_per_km2": 2.0, "props_near_m": 55, "ruins_per_km2": 1.0, "valuables_per_km2": 1.3,
+				"tufts_per_km2": 32000, "pebbles_per_km2": 3000, "rock_clusters_per_km2": 35,
 				"colours": {"rock": ["80796a", "6e6858"], "scrub": ["6a7040", "7f7a40"], "crown": ["56662f", "62702f"], "trunk": "5a4632"}}
 		}
 	}
