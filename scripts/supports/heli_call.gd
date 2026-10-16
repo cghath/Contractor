@@ -87,6 +87,10 @@ const HOME_ORBIT_AGL_M := 150.0
 const HOME_WAIT_S := 120.0
 ## It's gone this close to its exit (m), after hovering up for TAKEOFF_S.
 const EXIT_M := 150.0
+## Leaving: at least this long in the air before it is gone (it spawns at its exit, so a heli sent
+## home at once would otherwise vanish within a second and a recall find nothing to turn back).
+const LEAVE_MIN_S := 8.0
+var _leave_at := 0.0
 const TAKEOFF_S := 3.0
 const TAKEOFF_AGL_M := 8.0
 ## "Taking fire" goes out at most this often.
@@ -537,7 +541,7 @@ func step(delta: float) -> void:
 		Phase.LEAVING:
 			var area: Rect2 = level().map_area()
 			var at_wall := level() is ZoneLevel and not area.grow(-40.0).has_point(Vector2(heli.global_position.x, heli.global_position.z))
-			if _flat(heli.global_position, exit) < EXIT_M or at_wall:  # (a zone's edge is a wall; a small map's isn't)
+			if (_flat(heli.global_position, exit) < EXIT_M or at_wall) and Soldier._now() - _leave_at > LEAVE_MIN_S:  # (a zone's edge is a wall; a small map's isn't)
 				heli.queue_free()
 				phase = Phase.GONE
 
@@ -1158,6 +1162,7 @@ static func _compass(dir: Vector2) -> String:
 ## to where it came in: HeliRoute.exit_for).
 func _leave() -> void:
 	stage = "leave"
+	_leave_at = Soldier._now()
 	phase = Phase.LEAVING
 	var lvl := level()
 	if lvl is ZoneLevel and (kind == "insertion" or kind == "extraction"):

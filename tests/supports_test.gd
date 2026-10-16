@@ -816,10 +816,6 @@ func _test_recall() -> void:
 		var again := sup.active(kind)
 		check(why == "" and again != null and again != e, "%s gone: a new call goes at once (%s)" % [kind, why])
 		sup.server_dismiss_all()
-		await _frames(2)
-		why = _call(cmd, lzp)
-		check(why == "" and sup.active(kind) != null, "%s despawned: called again (%s)" % [kind, why])
-		sup.server_dismiss_all()
 	sup.server_reset_limits()
 	_regroup()
 
