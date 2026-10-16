@@ -68,6 +68,34 @@ environments don't. Root-caused below; queue at the bottom.
    (or a `"war_torn": true` layer any preset can take) rather than a whole new generator. "some
    other stuff" — more environment ideas likely to keep landing here as they come up.
 
+9. **Unused enemy vehicle variety — LATER (Captain, 2026-10-16: "unused techs too" (later)).**
+   Found: no faction has its own vehicle roster — every hostile faction shares one global pool
+   (`data/ground_supports.json` "vehicle_qrf"), which only ever spawns `technical_dshk`/
+   `technical`. The five other technical variants (ZU-23-2, SPG-9, M40, Type 63 rockets, ZPU-2 —
+   `data/vehicles.json:147-151`) have their own art colour schemes but turned out NOT just
+   unwired: their `"gun": {}` override is a shallow replace (`VehicleSpecs.spec`,
+   scripts/vehicles/vehicle_specs.gd:63-69 merges top-level keys, not deep), so they currently
+   have no weapon at all — none of ZU-23/SPG-9/M40/rockets/ZPU has a real gun entry in
+   `data/vehicles.json`'s "guns" dict, and no matching rounds in `data/rounds.json` either.
+   Bigger than "wire them in": needs real weapon stats (round, rpm, spread, feed) per variant
+   first. Parked for later.
+
+10. **Enemy PMC faction — LATER (Captain, 2026-10-16: "can you make the enemy pmc faction with
+    those assets?", then "pmc isnt this run thing", "pmc will be later down").** Found while
+    scoping it: `Soldier.faction` is only ever "hostile"/"friendly" — the named factions in
+    `data/factions.json` (meridian/black_ridge/salvage_union) are economy/rep-only labels
+    (`Contracts.gd`, `MissionRegistry.zone(...).get("faction")`) and never reach AI spawning.
+    Every hostile, in every zone, gets the same AKM-pattern kit (`CompoundLevel.HOSTILE_*`,
+    compound_level.gd:147-165) and the same vehicle pool — there is no faction-aware kit or
+    vehicle selection mechanism to hook into yet. A real PMC faction (Western gear/M4-pattern
+    kit, M-ATV/MaxxPro/Bradley/Abrams/Black Hawk/Viper roster — vehicle models aren't
+    faction-locked in the data, so this is legitimately doable) needs: (a) a new named faction
+    entry, (b) a parallel kit constant block alongside HOSTILE_BODY/HOSTILE_GUNS/HOSTILE_MIX,
+    (c) threading the zone's named faction from the contract/hot-zone record into the runtime
+    ZoneDef/ZoneLevel (it doesn't flow there today) so garrison/patrol spawns and vehicle_qrf can
+    pick a faction-specific profile, (d) a zone actually assigned to it. Real feature, correctly
+    sized for its own session — parked for later, not this run.
+
 ## Open
 
 - Does #1's patrol/alert system for regular zones get the full `EnemyResponse` feature set
