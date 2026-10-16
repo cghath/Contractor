@@ -103,7 +103,10 @@ func _add_structures(source: NavigationMeshSourceGeometryData3D, bounds: AABB) -
 		if not module.footprint().grow(1.0).intersects(rect):
 			continue
 		var world := module.voxel_world
-		if world:
+		# A town builds its voxels in slices over many frames: until it's built its proxy (base boxes)
+		# stands in, so its streets bake now instead of the AI walking blind into it (Captain,
+		# 2026-10-16: "ai arent entering towns").
+		if world and world.is_built():
 			var local := world.global_transform.affine_inverse() * bounds
 			var voxels := AABB(local.position / VoxelWorld.VOXEL_SIZE, local.size / VoxelWorld.VOXEL_SIZE)
 			if not world.is_area_readable(voxels):
