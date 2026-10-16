@@ -21,7 +21,7 @@ extends Node3D
 ## in memory per zone (seed, preset, ground, pads, roads) with the cells' built meshes, and on
 ## disk (user://cache), so coming back to a zone costs nothing.
 
-enum Kind { ROCK, SCRUB, TREE, THICKET }
+enum Kind { ROCK, SCRUB, TREE, THICKET, PROP }
 
 ## Most items of each kind in a zone (a 16 km2 hot zone hits them). Round 4 raised the trees
 ## for the woods; a nav chunk is 12 m (ZoneNav), so more trunk boxes cost little per bake.
@@ -38,6 +38,10 @@ const WOODS_SHARE := 0.5
 const COPSES_SHARE := 0.8
 ## Most items with collision (large rocks and trees) in a zone.
 const CAP_SOLID := 6800
+## Man-made clutter (Captain, 2026-10-16: "the terrains need more objects too"): crates and
+## debris, sparser than rocks/scrub and only near a road or a pad ("props_near_m"), not out in
+## open wilderness.
+const CAP_PROPS := 600
 ## Captain, 2026-10-14 ("include experimental forest mission like we dev'd"; the normal zones'
 ## woods have a perf problem, a perf pass is queued): the copses-as-cover layout (the caps above,
 ## COPSE_SPREAD's copses, the woods' edge belt) only for a preset whose scatter says
@@ -119,7 +123,7 @@ static var _shared_material: StandardMaterial3D
 
 ## Every item: {"kind", "pos" (Vector3), "yaw", "size" (Vector3), "colour" (Color), "solid"}.
 var items: Array[Dictionary] = []
-var counts := {Kind.ROCK: 0, Kind.SCRUB: 0, Kind.TREE: 0, Kind.THICKET: 0}
+var counts := {Kind.ROCK: 0, Kind.SCRUB: 0, Kind.TREE: 0, Kind.THICKET: 0, Kind.PROP: 0}
 var solid_count := 0
 ## Where the last generate's layout came from: "generated", "memory" or "disk" ("" none).
 var cache_source := ""
@@ -169,7 +173,7 @@ func generate(terrain: ZoneTerrain, def: Dictionary) -> void:
 	items = fresh  # new arrays, never clear(): a cached layout may share the old ones
 	_cells = {}
 	_built = {}
-	counts = {Kind.ROCK: 0, Kind.SCRUB: 0, Kind.TREE: 0, Kind.THICKET: 0}
+	counts = {Kind.ROCK: 0, Kind.SCRUB: 0, Kind.TREE: 0, Kind.THICKET: 0, Kind.PROP: 0}
 	solid_count = 0
 	cache_source = ""
 	var sites: Array[Dictionary] = []
@@ -260,6 +264,28 @@ func _lay_out() -> void:
 		var size := Vector3(s, s * lerpf(0.55, 0.85, squash_roll), s * lerpf(0.8, 1.2, squash_roll))
 		_add({"kind": Kind.ROCK, "yaw": yaw, "solid": large, "size": size, "pos": Vector3(x, h + size.y * 0.3, z),
 			"colour": rock_colours[int(variation * rock_colours.size()) % rock_colours.size()]})
+	# Man-made clutter: crates and debris, only near a road or pad (props_near_m), not loose
+	# in the wilderness like rocks.
+	var prop_colours := _colours(colours.get("prop", ["5a5440", "6b4f33", "767166"]))
+	var props_near := float(_spec.get("props_near_m", 0.0))
+	want = mini(int(round(float(_spec.get("props_per_km2", 0.0)) * area_km2)), CAP_PROPS)
+	attempts = int(want * tries_per)
+	while counts[Kind.PROP] < want and attempts > 0 and props_near > 0.0:
+		attempts -= 1
+		var x := rng.randf_range(-_half + EDGE_KEEP_M, _half - EDGE_KEEP_M)
+		var z := rng.randf_range(-_half + EDGE_KEEP_M, _half - EDGE_KEEP_M)
+		if not _near_road_or_pad(x, z, props_near):
+			continue
+		if _blocked(x, z, _keep, _roads):
+			continue
+		var h := terrain.height_at(x, z)
+		if terrain.sea_side >= 0 and h < terrain.sea_level + 0.35:
+			continue
+		if terrain.normal_at(x, z).y < 0.7:
+			continue
+		var size := Vector3(rng.randf_range(0.5, 1.1), rng.randf_range(0.4, 0.8), rng.randf_range(0.5, 1.1))
+		_add({"kind": Kind.PROP, "yaw": rng.randf() * TAU, "solid": true, "size": size, "pos": Vector3(x, h + size.y * 0.5, z),
+			"colour": prop_colours[rng.randi() % prop_colours.size()]})
 	# Trees in clusters, with their edge scrub and thickets, then the few lone trees.
 	_lay_out_trees(area_km2)
 	want = mini(int(round(float(_spec.get("trees_per_km2", 0.0)) * area_km2)), _cap_trees - counts[Kind.TREE])
@@ -793,6 +819,23 @@ func _blocked(x: float, z: float, keep: Array[Rect2], roads: Array) -> bool:
 	return false
 
 
+## True within `near_m` of a road or a pad (props: man-made clutter belongs near where people
+## are, not scattered through open wilderness like rocks).
+func _near_road_or_pad(x: float, z: float, near_m: float) -> bool:
+	var p := Vector2(x, z)
+	for r in _keep:
+		var dx := maxf(maxf(r.position.x - p.x, p.x - r.end.x), 0.0)
+		var dz := maxf(maxf(r.position.y - p.y, p.y - r.end.y), 0.0)
+		if Vector2(dx, dz).length() <= near_m:
+			return true
+	for road: Array in _roads:
+		var a := Vector2(float(road[0][0]), float(road[0][1]))
+		var b := Vector2(float(road[1][0]), float(road[1][1]))
+		if Geometry2D.get_closest_point_to_segment(p, a, b).distance_to(p) <= near_m:
+			return true
+	return false
+
+
 func _cell_of(x: float, z: float) -> Vector2i:
 	return Vector2i(floori((x + _terrain.size_m * 0.5) / CELL_M), floori((z + _terrain.size_m * 0.5) / CELL_M))
 
@@ -1041,6 +1084,7 @@ func _shared_meshes(trunk_hex: String) -> Dictionary:
 	if _shapes.is_empty():
 		_shapes = {
 			Kind.ROCK: _blocky(Vector3(1, 1, 1), Color.WHITE, 0.22, 1, true),
+			Kind.PROP: _blocky(Vector3(1, 1, 1), Color.WHITE, 0.08, 11, true),
 			Kind.SCRUB: _scrub_mesh(),
 			"crown": _crown_mesh(),
 			"conifer": _conifer_mesh(),
@@ -1116,12 +1160,12 @@ func _build_cell(cell: Vector2i) -> void:
 
 ## Draw distance by group key.
 const _RANGES := {Kind.ROCK: SEE_ROCK_M, Kind.SCRUB: SEE_SCRUB_M, "thicket": SEE_TREE_M, "trunk": SEE_TREE_M, "crown": SEE_TREE_M,
-	"conifer": SEE_TREE_M, "tuft": SEE_TUFT_M, "pebble": SEE_PEBBLE_M, "outcrop": SEE_OUTCROP_M}
+	"conifer": SEE_TREE_M, "tuft": SEE_TUFT_M, "pebble": SEE_PEBBLE_M, "outcrop": SEE_OUTCROP_M, Kind.PROP: SEE_ROCK_M}
 
 
 ## Cell `cell`'s MultiMeshes: [[group key, MultiMesh], ...].
 func _cell_parts(cell: Vector2i) -> Array:
-	var groups := {Kind.ROCK: [], Kind.SCRUB: [], "thicket": [], "trunk": [], "crown": [], "conifer": []}
+	var groups := {Kind.ROCK: [], Kind.SCRUB: [], "thicket": [], "trunk": [], "crown": [], "conifer": [], Kind.PROP: []}
 	for index: int in _cells[cell]:
 		var item: Dictionary = items[index]
 		var basis := Basis(Vector3.UP, float(item.yaw))
@@ -1131,6 +1175,8 @@ func _cell_parts(cell: Vector2i) -> Array:
 				groups[Kind.ROCK].append([xf, item.colour])
 			Kind.SCRUB:
 				groups[Kind.SCRUB].append([xf, item.colour])
+			Kind.PROP:
+				groups[Kind.PROP].append([xf, item.colour])
 			Kind.THICKET:
 				# The scrub mesh (0.58 high), its height scaled so the thicket stands size.y * SCRUB_TOP
 				# tall, as foliage_between counts it.
