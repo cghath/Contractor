@@ -968,15 +968,19 @@ func _heli_insert(squad: Array) -> bool:
 	check(on_edge and _flat(start, lz) <= float(nearest.run) + HeliRoute.ENTRY_SLACK_M + HeliCall.SPAWN_SPACING_M + 1.0,
 		"it comes in from the zone's edge by the LZ, not across the map (started at (%.0f, %.0f), %.0f m out; the nearest edge %.0f m)" % [
 		start.x, start.z, _flat(start, lz), float(nearest.run)])
+	# The way in as planned, from the briefing's record: the helicopter's own `route` shrinks as
+	# it passes each point, and it may be past the low point by now (a slow frame or two).
 	var line: Array[Vector3] = [Vector3(start.x, 0.0, start.z)]
-	line.append_array(c.route)
+	for p: Variant in (point.get("route", []) as Array).slice(1):
+		line.append(Vector3(float(p[0]), 0.0, float(p[1])))
+	var left_to_fly := c.route.all(func(r: Vector3) -> bool: return line.any(func(l: Vector3) -> bool: return _flat(l, r) < 1.0))
 	line.append(lz)
 	check(HeliRoute.path_ratio(line) <= 1.6 and HeliRoute.max_turn_deg(line) <= 120.0,
 		"its route: %.2f times the straight line, at most %.0f degrees of turn before the hook" % [HeliRoute.path_ratio(line), HeliRoute.max_turn_deg(line)])
 	var drawn := MapView.insertion_routes(level)
-	check(not drawn.is_empty() and (drawn[0].points as PackedVector2Array).size() == line.size()
+	check(left_to_fly and not drawn.is_empty() and (drawn[0].points as PackedVector2Array).size() == line.size()
 		and (drawn[0].points as PackedVector2Array)[0].distance_to(Vector2(start.x, start.z)) < 1.0,
-		"the map draws its way in: entry, the point it comes in low by, the LZ (%s)" % [drawn[0].points if not drawn.is_empty() else "nothing"])
+		"the map draws its way in: entry, the point it comes in low by, the LZ (drawn %s, flown %s)" % [drawn[0].points if not drawn.is_empty() else "nothing", line])
 	var first_dir := Vector2.ZERO
 	var reversal := 0.0
 	var flown := 0.0

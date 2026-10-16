@@ -513,14 +513,24 @@ func _hot_zone_extras(ready: Array, zone_id: String) -> Array:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash([int(_s().seed), Economy.day(), zone_id, "in_zone"])
 	var taken: Array = ready.map(func(c: Dictionary) -> String: return String(c.get("module_id", "")))
+	# The zone's first QRF base stays free of arrival contracts (soft: only while another site is
+	# left): its fall is what the radio follow-up "you hit their QRF, now hit the HQ" reacts to.
+	var reserve := ""
+	for m: Dictionary in MissionRegistry.zone_def(zone_id).get("modules", []):
+		if ZoneModules.base(String(m.type)) == "qrf_base" and String(m.id) not in taken:
+			reserve = String(m.id)
+			break
+	var avoid: Array = taken.duplicate()
+	if reserve != "":
+		avoid.append(reserve)
 	while ready.size() + out.size() < want:
 		var c := _add_offer(ContractGen.generate(rng, {"day": Economy.day(), "source": "board", "zone_id": zone_id,
-			"employer": employer, "avoid_modules": taken}))
+			"employer": employer, "avoid_modules": avoid}))
 		c["in_zone"] = "arrival"
 		if server_accept(c.cid, ContractGen.default_terms(), 1, true) != "":
 			(_s().board as Array).erase(c)
 			break
-		taken.append(String(c.module_id))
+		avoid.append(String(c.module_id))
 		out.append(c)
 	return out
 

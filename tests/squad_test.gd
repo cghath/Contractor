@@ -1154,7 +1154,9 @@ func _test_no_fire_into_walls() -> void:
 		squad.give_order(player, Squad.Order.HOLD, at, names)
 		var st := s.inventory.state_of(s.active_slot)
 		if not st.is_empty():
-			st["rounds"] = 30  # a full magazine: no reload in the middle of it
+			var wid: StringName = s.inventory.slots.get(s.active_slot, &"")
+			var ammo_id := StringName(ItemDB.get_item(wid).stats.get("ammo", "")) if wid != &"" else &""
+			st["rounds"] = ItemDB.get_item(ammo_id).magazine_rounds() if ItemDB.has_item(ammo_id) else 30  # his own full magazine (an M4 holds 30, an M249 box 200): no reload in the middle of it
 		squad.order_suppress(player, aim, names)
 	# (c) A clear line, out through the gate: he suppresses.
 	var gate_aim := Vector3(0, 0, 70)
