@@ -390,6 +390,8 @@ func _process(_delta: float) -> void:
 		var tired := 1.0 - movement.stamina
 		model.breath_rate = lerpf(1.0, MovementRules.ANIM_BREATH_RATE_WINDED, tired)
 		model.breath_depth = lerpf(1.0, MovementRules.ANIM_BREATH_DEPTH_WINDED, tired)
+	if vitals.is_dead():
+		model.breath_depth = 0.0  # the dead don't breathe (Captain, 2026-10-15), on every peer
 	_update_ragdoll()
 	if vitals.is_up() or vitals.is_dead():
 		_down_since = -1.0
