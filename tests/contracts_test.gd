@@ -936,6 +936,36 @@ func _test_live_objectives() -> void:
 	check(panel != null and panel.text().contains("OBJECTIVES") and panel.text().contains("[ ] Clear the compound of hostiles (2 hostiles left)"),
 		"the HUD lists the objectives")
 	check(Contracts.objectives.markers().size() == 6 and Contracts.objectives.markers()[0].pos is Vector3, "and the map gets markers")
+	# Compact / full list and picking the active objective (feat/objective-list).
+	GameSettings.use_file(OS.get_user_data_dir().path_join("test_objlist_settings.cfg"))
+	GameSettings.set_value("hud", "objectives_expanded", true)
+	panel.refresh()
+	check(panel.text().contains("-- ") and panel.text().contains("[O] compact") and panel.text().contains("> "), "full list: grouped by contract, the active one marked (%s)" % panel.text().replace("
+", " | "))
+	var full_lines := panel.text().count("
+")
+	panel.toggle_compact()
+	check(panel.compact() and panel.text().count("
+") == 2 and panel.text().contains("+5 more") and panel.text().contains("> [ ]"),
+		"compact: the active objective on one line and '+5 more' (%s)" % panel.text().replace("
+", " | "))
+	check(panel.text().count("
+") < full_lines, "compact is shorter than the full list")
+	GameSettings.reload()
+	check(not bool(GameSettings.get_value("hud", "objectives_expanded")), "the compact state persists in the settings file")
+	var before := String(_helper().current.get("oid", ""))
+	panel.cycle()
+	var picked := Objectives.chosen_oid
+	check(picked != "" and String(_helper().current.get("oid", "")) == picked and panel.active_oid() == picked and panel.text().contains(Objectives.line(Contracts.objectives.get_objective(picked))),
+		"N picks an objective: the helper's step and the panel follow (auto was %s, now %s)" % [before, picked])
+	check(_helper().current.targets.is_empty() or _helper().current.targets[0].label != "", "the marker target is the picked objective's")
+	var after := ObjectiveHelper.next_choice(Contracts.objectives.list, picked)
+	check(after != picked, "the next pick differs from the last")
+	Objectives.chosen_oid = ""
+	panel.toggle_compact()
+	check(not panel.compact(), "O again expands it")
+	GameSettings.set_value("hud", "objectives_expanded", true)
+	GameSettings.use_file("")
 	h1.vitals.server_kill()
 	h2.vitals.server_kill()
 	await _seconds(1.2)
@@ -1013,6 +1043,19 @@ func _test_objective_helper() -> void:
 		"progress": "", "params": {"rect": [-20, -20, 40, 40]}, "pos": [0, 0, 0]}
 	var sit := {"pos": at.call(0, 300), "sites": {"t": "compound"}}
 	check(step.call([], sit) == "", "no deployment, no hint")
+	var area2 := area.duplicate(true)
+	area2.oid = "t_o9"
+	area2.pos = [0, 0, 500]
+	area2.params = {"rect": [-20, 480, 40, 40]}
+	sit["chosen"] = "t_o9"
+	check(String(ObjectiveHelper.step_for([area, area2], sit).oid) == "t_o9" and ObjectiveHelper.step_for([area2, area], sit).targets[0].pos.z > 400.0,
+		"a picked objective beats the nearest one, and the marker follows it")
+	sit["chosen"] = ""
+	sit.pos = at.call(5, 5)
+	check(String(ObjectiveHelper.step_for([area, area2], sit).oid) == "t_o1", "no pick: the nearest")
+	check(ObjectiveHelper.next_choice([area, area2], "") == "t_o1" and ObjectiveHelper.next_choice([area, area2], "t_o1") == "t_o9"
+		and ObjectiveHelper.next_choice([area, area2], "t_o9") == "", "N cycles through the live objectives, then back to auto")
+	sit.pos = at.call(0, 300)
 	check(step.call([area], sit) == "Head to the compound (N, 300 m)", "away from the site: head there, with the direction and distance")
 	sit.pos = at.call(5, 5)
 	check(step.call([area], sit) == "Clear the compound: search it for hostiles", "in the area: clear it")

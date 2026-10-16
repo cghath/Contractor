@@ -61,6 +61,11 @@ const KINDS: Array[String] = [CLEAR_AREA, EXTRACT_ITEM, DELIVER_HVT, DESTROY_CAC
 const CHARGE_ITEM := &"breaching_charge"
 const POLL_S := 0.5
 
+## The objective this player picked as the one to work on (ObjectivesPanel's N key): drives
+## the HUD hint and marker (ObjectiveHelper). Local to each player; "" lets the helper choose
+## the nearest. Objectives themselves stay host-authoritative.
+static var chosen_oid := ""
+
 ## Every objective of the deployment (every peer; the host's is the truth).
 var list: Array = []
 var _poll := 0.0
