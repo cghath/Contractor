@@ -72,6 +72,31 @@ LINES = {
     },
 }
 
+# Context-aware template slots (Captain, 2026-10-16: "nothing insane" -- a bounded pass, not a
+# full rewrite): each combo below is a discrete, fully pre-rendered line (not live TTS), so the
+# game just picks the id that matches what it knows (direction, site type, weapon class) and
+# falls back to the bare category (voiced_path in scripts/ui/callouts.gd) if a combo isn't
+# rendered yet. English only: enemies' contact lines fall back to their plain "contact" line in
+# ru/fa rather than doubling the translation work for a bounded pass.
+CLOCK = ["twelve", "two", "three", "five", "six", "eight", "nine", "eleven"]
+for _clock in CLOCK:
+    LINES["en"]["contact_%s" % _clock] = ["Contact, %s o'clock!" % _clock]
+    LINES["en"]["contact_%s_close" % _clock] = ["Contact, %s o'clock, close!" % _clock]
+
+INTEL_SITES = {
+    "hq": "the HQ",
+    "qrf_base": "a QRF base",
+    "aa": "an AA site",
+    "outpost": "an outpost",
+    "checkpoint": "a checkpoint",
+}
+for _site, _label in INTEL_SITES.items():
+    LINES["en"]["intel_%s" % _site] = ["Got %s marked!" % _label]
+
+AMMO_CLASSES = {"rifle": "rifle", "mg": "gun", "pistol": "pistol"}
+for _cls, _label in AMMO_CLASSES.items():
+    LINES["en"]["reloading_last_%s" % _cls] = ["Last mag for the %s!" % _label]
+
 lines = LINES[LANG]
 for k, spk in enumerate(SPEAKERS):
     folder = OUT / ("v%d" % (START + k))

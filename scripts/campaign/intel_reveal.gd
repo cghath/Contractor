@@ -41,7 +41,7 @@ func _process(delta: float) -> void:
 			var key := "%s|%s" % [piece.id, piece.intel_id]
 			if not _seen.has(key):
 				_seen[key] = true
-				server_reveal_for(StringName(piece.id))
+				server_reveal_for(StringName(piece.id), s)
 
 
 ## The intel items `s` carries: [{"id", "intel_id"}] (one entry per piece: its intel_id, else its slot).
@@ -72,17 +72,21 @@ static func _intel_on(s: Soldier) -> Array:
 	return out
 
 
-## Host: a piece of intel `item_id` gives away its share of enemy sites. Returns how many.
-func server_reveal_for(item_id: StringName) -> int:
+## Host: a piece of intel `item_id` gives away its share of enemy sites; `by`, if given, calls
+## it out (Callouts.intel_found) for the first (most telling) one. Returns how many.
+func server_reveal_for(item_id: StringName, by: Soldier = null) -> int:
 	var data := ItemDB.get_item(item_id)
 	var worth := int(data.stats.get("intel_value", 1000)) if data else 1000
 	var count := clampi(int(round(worth * SITES_PER_VALUE)), 1, MAX_SITES)
 	var markers := MapNodes.markers(self)
 	var told := PackedStringArray()
+	var first_type := ""
 	for site: ZoneModule in _sites():
 		if told.size() >= count:
 			break
 		_revealed[site.module_id] = true
+		if first_type == "":
+			first_type = site.type
 		var label := String(NAMES.get(site.type, site.type.capitalize()))
 		if markers:
 			markers.server_report_enemy(site.global_position, "%s (intel)" % label)
@@ -90,6 +94,9 @@ func server_reveal_for(item_id: StringName) -> int:
 	if told.is_empty():
 		return 0
 	Economy._notify_all("Intel (%s): %s marked on the map" % [data.name if data else "intel", ", ".join(told)])
+	var callouts := Callouts.of(self) if by else null
+	if callouts:
+		callouts.intel_found(by, first_type)
 	return told.size()
 
 

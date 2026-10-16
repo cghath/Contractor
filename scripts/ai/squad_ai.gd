@@ -1349,7 +1349,7 @@ func _do_reload() -> void:
 	body.is_reloading = true
 	body._server_reload.rpc_id(1, body.active_slot)
 	_think_cd = body.reload_seconds(weapon)
-	_callout(&"reloading")
+	_callout_reload(weapon)
 
 
 # --- Casualty care --------------------------------------------------------
@@ -3796,6 +3796,25 @@ func _callout(id: StringName, text := "") -> void:
 	var callouts := Callouts.of(body)
 	if callouts:
 		callouts.say(body, id, text)
+
+
+## "Reloading!", or "Last mag for the rifle!" (etc.) when this reload uses the last of the
+## weapon's ammo this soldier carries: a bounded ammo-status call, templated by weapon class
+## (not caliber, which Piper would need far too many pre-rendered lines for) so it stays a
+## handful of lines, not one per gun.
+func _callout_reload(weapon: ItemData) -> void:
+	var mag := _mag_size(weapon)
+	if mag > 0 and body.inventory.spare_rounds(Soldier._ammo_of(weapon)) <= mag:
+		_callout(StringName("reloading_last_%s" % _weapon_class(weapon)))
+	else:
+		_callout(&"reloading")
+
+
+## "rifle", "mg" (belt-fed or LMG) or "pistol": `weapon`'s class for ammo-status callouts.
+static func _weapon_class(weapon: ItemData) -> String:
+	if weapon.tags.has("lmg"):
+		return "mg"
+	return "pistol" if weapon.tags.has("pistol") else "rifle"
 
 
 ## Bounding in contact: "Moving!", and the battle buddy answers "Covering!".
