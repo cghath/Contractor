@@ -150,6 +150,12 @@ if [ ! -s "$dir/Contractor.exe" ]; then
 	# No exe: play.bat's own command, with the dev tools on.
 	printf '@echo off\r\nrem Plays this build with the dev tools on (docs/debugging.md: K, Shift+End, Insert, Delete...).\r\ncall "%%~dp0play.bat" --dev %%*\r\n' > "$dir/Contractor (dev tools).bat"
 fi
+# One-click co-op hosting (Captain, 2026-10-15: "always ready for local play" over LAN/ZeroTier):
+# host the campaign at the FOB on UDP 24680, or archive it (moved, never deleted) and host a new one.
+if [ -s "$dir/Contractor.exe" ]; then
+	printf '@echo off\r\nrem Hosts the campaign at the FOB (UDP 24680). Friends join with Contractor.exe and the host IP.\r\nstart "" "%%~dp0Contractor.exe" -- --campaign %%*\r\n' > "$dir/Host campaign.bat"
+	printf '@echo off\r\nrem Archives the current campaign (moved, never deleted) and hosts a NEW one at the FOB.\r\nstart "" "%%~dp0Contractor.exe" -- --new-campaign %%*\r\n' > "$dir/Host NEW campaign.bat"
+fi
 {
 	if [ -n "$version" ]; then
 		echo "Contractor v$version (test build $id): $label"
