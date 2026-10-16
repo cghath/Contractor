@@ -611,6 +611,15 @@ static func briefing_zone(lvl: Node, c: Dictionary) -> Dictionary:
 		var lzs: Array = []
 		for p: Vector3 in lvl.call(&"extraction_points"):
 			lzs.append({"name": "LZ %d" % (lzs.size() + 1), "pos": [p.x, p.z], "radius": Extraction.RADIUS_M})
+		if lvl is ZoneLevel and String(c.get("module_id", "")) != "":  # Captain, 2026-10-15: within a sensible walk of the target
+			var at := Contracts.module_origin(c)
+			var near := ZoneDef.insertion_options((lvl as ZoneLevel).def, Vector2(at.x, at.z))
+			if not near.is_empty():
+				ins = []
+				for i in near.size():
+					var spot := near[i]
+					ins.append({"id": "insertion_%d" % (i + 1), "name": "Insertion %d (%s, %d m from the target)" % [i + 1, "closer" if i == 0 else "safer", roundi(spot.distance_to(Vector2(at.x, at.z)))],
+						"pos": [spot.x, spot.y], "method": "foot"})
 		if not ins.is_empty():
 			zone.insertion_points = ins
 			zone.extraction_points = lzs
