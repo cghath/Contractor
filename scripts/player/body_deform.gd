@@ -40,9 +40,11 @@ const WIDEN := 0.6
 const DEAD_SIZE := 1.25
 ## Points a round scores on the part it hits, by class (unknown: intermediate).
 const DAMAGE := {&"pistol": 0.5, &"intermediate": 1.0, &"full_power": 2.5, &"fragment": 0.6}
-const SEVER_ALIVE := 10.0
-const SEVER_DEAD := 4.0
-const HEAD_DEAD := 3.0
+## Captain, 2026-10-16: "dismembering happens way too easily with just shooting" (were 10 \/ 4 \/ 3,
+## and a dead limb needed no break).
+const SEVER_ALIVE := 20.0
+const SEVER_DEAD := 10.0
+const HEAD_DEAD := 7.0
 const SEVER_SLAB := 2
 const LIMBS: Array[StringName] = [Vitals.THIGH_L, Vitals.THIGH_R, Vitals.SHIN_L, Vitals.SHIN_R,
 	Vitals.UPPER_ARM_L, Vitals.UPPER_ARM_R, Vitals.FOREARM_L, Vitals.FOREARM_R]
@@ -137,7 +139,7 @@ func _rebuild() -> void:
 			continue
 		# Alive: only what the host tore off (it bleeds, a tourniquet saves him). Dead: enough
 		# damage, cut by the round that tipped it (not the moment he dies).
-		if amputated.has(part) or (dead and fresh and float(score.get(part, 0.0)) >= _threshold(part, true)):
+		if amputated.has(part) or (dead and fresh and (part == Vitals.HEAD or broken.has(part)) and float(score.get(part, 0.0)) >= _threshold(part, true)):
 			_severed[part] = true
 			_queue_sever(part)
 
