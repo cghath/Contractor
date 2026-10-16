@@ -689,7 +689,61 @@ func server_enter(soldier: Node, index := -1) -> bool:
 			people.server_seat_in_vehicle(s, self, str(index))
 	_publish_state(true)
 	seats_changed.emit()
+	if not Person.is_person(s) and s.vitals.is_up() and s.faction == &"friendly":
+		_board_followers(s)
 	return true
+
+
+## Captain, 2026-10-15 (v0.4.11: HVTs and hostages wouldn't get into AAVs or M-ATVs): the people
+## `leader` leads (Follow me) or escorts (Squad.order_escort), up and within FOLLOWER_BOARD_M,
+## get in with him, into free passenger seats, and remember who they rode with so they get out
+## when he does (_dismount_followers). Host only (server_enter).
+const FOLLOWER_BOARD_M := 12.0
+
+func _board_followers(leader: Soldier) -> void:
+	var people := PeopleLayer.find(leader)
+	if people == null:
+		return
+	var key := people.key_of(leader)
+	var brain := SquadAI.of(leader)
+	var escorted: Soldier = brain.escorting if brain and brain.escort_valid() else null
+	for p: Soldier in people.people():
+		if p == leader or not is_instance_valid(p) or p.is_queued_for_deletion() or not p.vitals.is_up() 				or Vehicle.ride_of(p) != null or is_instance_valid(p.carried_by):
+			continue
+		var st := people.state_of(p)
+		if bool(st.get("delivered", false)):
+			continue
+		var led := String(st.get("led_by", "")) == key
+		if not led and p != escorted:
+			continue
+		if p.global_position.distance_to(leader.global_position) > FOLLOWER_BOARD_M:
+			continue
+		var seat := _first_free_passenger()
+		if seat < 0:
+			_tell(leader, "No seat for %s" % p.display_name())
+			return
+		if server_enter(p, seat):
+			people.server_set_state(p, {"rode_with": key, "rode_led": led})
+
+
+## Host: `leader` got out: the people who got in with him (_board_followers) get out too, and
+## those he led follow him again.
+func _dismount_followers(leader: Soldier) -> void:
+	var people := PeopleLayer.find(leader)
+	if people == null:
+		return
+	var key := people.key_of(leader)
+	for p: Soldier in occupants():
+		if not Person.is_person(p) or not p.vitals.is_up():
+			continue
+		var st := people.state_of(p)
+		if String(st.get("rode_with", "")) != key:
+			continue
+		var led := bool(st.get("rode_led", false))
+		server_exit(p)
+		people.server_set_state(p, {"rode_with": "", "rode_led": false})
+		if led:
+			people.server_set_state(p, {"led_by": key, "order": "follow"})
 
 
 func _first_free_passenger() -> int:
@@ -730,6 +784,8 @@ func server_exit(soldier: Node) -> void:
 		_client_exit.rpc_id(s.owner_peer(), level().get_path_to(s), spot)
 	_publish_state(true)
 	seats_changed.emit()
+	if not Person.is_person(s) and s.vitals.is_up() and s.faction == &"friendly":
+		_dismount_followers(s)
 
 
 ## Host: move `soldier` to seat `index` of this vehicle (they must be in it already).
