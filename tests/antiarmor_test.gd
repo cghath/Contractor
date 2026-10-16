@@ -327,6 +327,7 @@ func _test_real_vehicles() -> void:
 	await _real_technical()
 	await _real_mrap()
 	await _real_open_bed()
+	await _real_uh60()
 	Vehicle.fire_rolls = rolls
 	await _frames(2)
 
@@ -482,6 +483,27 @@ func _real_open_bed() -> void:
 		"an AT4 through the technical's open bed flies on and bursts on the wall behind (%s, at x %+.1f m)" % [r.get("how", "?"), at.x - through.x])
 	wall.queue_free()
 	await _clear(tech, [])
+
+
+## Captain, 2026-10-16: "rpgs and such dont do enough damage, the infil heli took a hit earlier
+## today and it did almost nothing". PG-7V (260 mm) into the UH-60M's side, at the fuel cell
+## (aircraft armour, 6 mm): checks whether it's really a clean penetration (the formula says it
+## should wreck the zone and take a good share of the 120 kJ hull) or a hull-probe miss
+## (server_take_hit's PROBE_M, 0.4 m: a helicopter's thin, open-sided voxel hull may not have a
+## solid voxel that close to the collision box, same as the technical's open bed above).
+func _real_uh60() -> void:
+	var heli := await _real("uh60", Vector3(-50, 0, 10))
+	var fuel := heli.global_transform * Vector3(1.2, 0.95, -0.2)
+	var hull_before := heli.zone_health(Vehicle.ZONE_HULL)
+	var r := await _shot(&"rpg7", &"pg7v", Vector3(fuel.x - 25.0, _ground(fuel) + 0.1, fuel.z), fuel)
+	var b: Dictionary = r.get("burst", {})
+	var res: Dictionary = b.get("vehicle_result", {})
+	print("    [uh60] vehicle=%s missed=%s penetrated=%s zone=%s hull %.0f%% -> %.0f%% (%s)" % [b.get("vehicle") == heli,
+		res.get("missed", "-"), res.get("penetrated", "-"), res.get("zone", "-"), hull_before * 100.0,
+		heli.zone_health(Vehicle.ZONE_HULL) * 100.0, _describe(r, b.get("vehicle_hit", {}))])
+	check(b.get("vehicle") == heli and not bool(res.get("missed", true)) and bool(res.get("penetrated", false)) and heli.zone_health(Vehicle.ZONE_HULL) < hull_before,
+		"a PG-7V (260 mm) on the UH-60M's side (aircraft, 6 mm) really penetrates and hurts the hull (hull %.0f%% -> %.0f%%; %s)" % [hull_before * 100.0, heli.zone_health(Vehicle.ZONE_HULL) * 100.0, _describe(r, b.get("vehicle_hit", {}))])
+	await _clear(heli, [])
 
 
 ## The most spall wounds V1's Vehicle._spall gives anyone (3 to 6 fragments).
