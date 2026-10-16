@@ -16,6 +16,16 @@ extends RefCounted
 ## GameState.is_looted keeps a taken one from coming back; a cache's contents are rolled fresh
 ## each time the zone hosts instead (WorldCache's own doc comment) - simpler than tracking what
 ## was taken from inside it across a reload.
+##
+## Site boxes (Captain, 2026-10-16, three asks that are really one mechanic): 1-4 WorldCaches at
+## every hand-built module (compound, outpost, village, checkpoint, hq, qrf_base, comms), not out
+## in the open terrain - "common sense" places a player would actually search (offices, safes,
+## command posts, desks), reusing that module's own proven-safe loot spots (ZoneModules.LOOT, a
+## small offset off each one so a box doesn't sit on top of the WorldItem already there). How
+## many: weighted toward 1-2, more at a site worth more trouble (IMPORTANT_TYPES). Most boxes
+## roll a common find (one piece of cash or intel); RARE_SHARE of them roll something better
+## instead - half the time a rarer weapon and its mags, half the time more intel and an optic
+## ("a couple maps plus a scope").
 
 const DEAD_DROP_SHARE := 0.55
 const CACHE_GUNS: Array[String] = ["akm", "ak74", "rpk"]
@@ -24,6 +34,17 @@ const VALUABLE_ITEMS: Array[String] = ["cash_bundle", "gold_bars", "jewelry_case
 const INTEL_ITEMS: Array[String] = ["intel_documents", "intel_phone", "intel_usb_drive", "intel_ledger"]
 const SALVAGE_ITEMS: Array[String] = ["scrap_copper", "machine_parts", "electronics_salvage"]
 const LIFT_M := 0.35
+## A site box's chance of a rare roll (a better weapon, or more intel and an optic) instead of
+## the common one, and the even split between those two rare outcomes.
+const RARE_SHARE := 0.18
+const RARE_OPTICS: Array[String] = ["optic_lpvo", "optic_prism_4x", "optic_dmr_3_5_10"]
+const RARE_GUNS: Array[String] = ["svd", "pkm", "rpk"]
+const RARE_INTEL_COUNT := 2
+## Off each used ZoneModules.LOOT spot (module space, m), clear of the WorldItem already there
+## and of each other; at most this many boxes a site.
+const SITE_BOX_OFFSETS: Array[Vector3] = [Vector3(0.8, 0.0, 0.5), Vector3(-0.8, 0.0, 0.5), Vector3(0.8, 0.0, -0.5), Vector3(-0.8, 0.0, -0.5)]
+## Sites worth more trouble: weighted toward more boxes.
+const IMPORTANT_TYPES: Array[String] = ["hq", "qrf_base", "compound"]
 
 
 ## Host: every VALUABLE site the zone's scatter marked.
@@ -58,3 +79,61 @@ static func _spawn_site(level: ZoneLevel, site: Dictionary, uid: String, index: 
 	var cache := level.cache_spawner.spawn({"uid": uid, "pos": ground, "yaw": float(site.yaw), "label": "Cache"}) as WorldCache
 	if cache:
 		cache.server_seed(items)
+
+
+## Host: 1-4 valuables/intel boxes at every real module (not a generated town, which has its own
+## loot through BuildingGen), near spots already proven safe (ZoneModules.LOOT places a
+## WorldItem there today).
+static func server_spawn_site_boxes(level: ZoneLevel) -> void:
+	if not level.multiplayer.is_server() or level.cache_spawner == null:
+		return
+	for module: ZoneModule in level.modules():
+		var spots: Array = ZoneModules.LOOT.get(module.type, [])
+		if spots.is_empty():
+			continue
+		var rng := RandomNumberGenerator.new()
+		rng.seed = hash("%s|valbox" % module.module_id)
+		var count := mini(_site_box_count(rng, module.type), mini(spots.size(), SITE_BOX_OFFSETS.size()))
+		for k in count:
+			var anchor: Vector3 = (spots[spots.size() - 1 - k] as Dictionary).pos
+			var cache := level.cache_spawner.spawn({"uid": "%s_valbox%d" % [module.module_id, k],
+				"pos": module.to_global(anchor + SITE_BOX_OFFSETS[k]), "yaw": 0.0, "label": "Cache"}) as WorldCache
+			if cache:
+				cache.server_seed(_roll_site_box(rng))
+
+
+## How many boxes a site gets: weighted toward 1-2, a point more (capped at 4) for an
+## IMPORTANT_TYPES site.
+static func _site_box_count(rng: RandomNumberGenerator, module_type: String) -> int:
+	var roll := rng.randf()
+	var count := 1
+	if roll < 0.15:
+		count = 4
+	elif roll < 0.35:
+		count = 3
+	elif roll < 0.65:
+		count = 2
+	if module_type in IMPORTANT_TYPES or ZoneModules.base(module_type) in IMPORTANT_TYPES:
+		count = mini(count + 1, 4)
+	return count
+
+
+## One box's contents: usually one piece of cash or intel; RARE_SHARE of the time something
+## better instead, half a rarer weapon and its mags, half more intel and an optic.
+static func _roll_site_box(rng: RandomNumberGenerator) -> Array:
+	var roll := rng.randf()
+	if roll < RARE_SHARE * 0.5:
+		var gun := RARE_GUNS[rng.randi() % RARE_GUNS.size()]
+		var kit: Array = CompoundLevel.HOSTILE_GUNS.get(gun, [gun])
+		var items: Array = [{"id": gun, "count": 1}]
+		if kit.size() > 1:
+			items.append({"id": String(kit[1]), "count": kit.size() - 1})
+		return items
+	if roll < RARE_SHARE:
+		var items: Array = []
+		for i in RARE_INTEL_COUNT:
+			items.append({"id": INTEL_ITEMS[rng.randi() % INTEL_ITEMS.size()], "count": 1})
+		items.append({"id": RARE_OPTICS[rng.randi() % RARE_OPTICS.size()], "count": 1})
+		return items
+	var pool := INTEL_ITEMS if rng.randf() < 0.5 else VALUABLE_ITEMS
+	return [{"id": pool[rng.randi() % pool.size()], "count": 1}]

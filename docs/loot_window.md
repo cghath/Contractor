@@ -28,4 +28,13 @@ Captain, 2026-10-15: "a loot menu that opens, kind of like Tarkov" (inspired by 
   `_take_class`) treat it as a third case alongside a body and a vehicle hold, not a parallel
   system. Spawned through the zone's `CacheSpawner` (`ZoneLevel._make_cache`) so a late joiner
   gets it too; its contents are rolled fresh each time the zone hosts, not saved across a reload.
+- **Site boxes** (Captain, 2026-10-16, three asks that are one mechanic): `WorldValuables.
+  server_spawn_site_boxes` puts 1-4 `WorldCache`s at every hand-built module (compound, outpost,
+  village, checkpoint, hq, qrf_base, comms) — "common sense" places a player would search
+  (offices, safes, command posts, desks), reusing each module's own proven-safe
+  `ZoneModules.LOOT` spots (a small offset off each, clear of the WorldItem already there)
+  instead of open-terrain scatter; more boxes at a site worth more trouble (`IMPORTANT_TYPES`:
+  hq, qrf_base, compound). Most boxes roll one piece of cash or intel; 18% roll something better
+  instead - half the time a rarer weapon and its mags (svd, pkm, rpk), half the time more intel
+  and an optic ("a couple maps plus a scope").
 - Tests: `tests/interaction_test.gd` ("The loot window"), `tests/ui_test.gd` ("loot window" fit).
