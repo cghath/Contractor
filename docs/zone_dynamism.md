@@ -50,16 +50,37 @@ environments don't. Root-caused below; queue at the bottom.
    2026-10-16: "the terrains need more objects too").
 5. **Tracers / visible bullets**: client-side effect off the existing `Sfx.server_shot` call;
    self-contained, no new network wiring.
-6. **Entrenching tool — diggable fighting positions** (Captain, 2026-10-16): an E-tool item that
-   digs a fighting position/foxhole into the terrain; the dug earth/spoil takes the colour of
-   whatever ground it came from (desert dirt looks like desert dirt, not one generic brown).
-   Needs: a dig action/animation, a voxel carve into the terrain mesh (or a pre-shaped pit
-   stamped in, like a pad), a spoil-pile prop coloured from the terrain's own palette at that
-   point (`ZoneTerrain` ground colour lookup already exists for the shader — reuse it), save/
-   persistence if the zone keeps it.
-7. **Trench maps** (Captain, 2026-10-16, "wait also trench maps"): a zone/terrain preset built
-   around WWI-style trench lines — needs design (static trench network like a module, or
-   player/AI-dug via the E-tool above scaled up, or both). Not scoped yet.
+6. **Entrenching tool — diggable fighting positions** (Captain, 2026-10-16, refined same day:
+   "fighting positions choice plus ai digging fighting positions, ideally a fighting position
+   fits the whole squad so we arent spread out/easy to pick off. only one ai builds one and we
+   garrison it etc."). Took a step back on this one (2026-10-16) rather than start coding: the
+   ground is a real Voxel Tools terrain, not a shader-only heightmap — explosions already carve
+   it persistently (`CompoundLevel.server_blast` -> `VoxelWorld.server_blast` ->
+   `_server_edit({"op": "blast", ...})`), so digging isn't new terrain tech, just a controlled
+   excavation shape through the same voxel-edit path instead of a blast sphere, plus sampling
+   `ZoneTerrain`'s existing ground-colour function (used by the shader) for the spoil pile.
+   Scoped design:
+   - One shared excavation sized for the WHOLE squad (a firing-position line/pit with several
+     firing slots), not one hole per man — the point is the squad fighting from one defensible
+     position instead of spread out and picked off piecemeal.
+     - Player gets a **choice** of fighting-position shape/size (a straight firing line, an
+       L-shaped or circular pit, size by squad count) before digging.
+   - **AI digs one themselves**: on an order (or doctrine's own call when told to hold/defend),
+     ONE soldier digs the shared position (the others cover him while he works, not everyone
+     digging their own hole) using the same carve + player E-tool would.
+   - Once dug, the squad **garrisons it** like a building: reuse the existing
+     `Squad.order_garrison` / `SquadTactics.garrison_tasks` pattern (scripts/ai/squad.gd:435,
+     already assigns each unit a post in a found building) but pointed at firing slots along the
+     dug position instead of building rooms — the task-assignment mechanics already exist, only
+     the "where are the posts" source (a dug position instead of `Buildings.nearest`) is new.
+   - Spoil pile: a prop at the dig site, coloured from `ZoneTerrain`'s ground colour at that
+     point (desert dirt looks like desert dirt), from the existing shader-feeding function.
+   - Save/persistence if the zone keeps a dug position between visits: open question.
+7. **Trench maps** (Captain, 2026-10-16, "wait also trench maps"): same carve primitive as #6,
+   run at zone-generation time along a connected network of trench nodes instead of one spot —
+   the same nearest-neighbour connection pattern just built for regular-zone roads (#1,
+   `ZoneDef._add_roads_and_patrols`) applies directly to laying out a trench network, pre-baked
+   into the zone's terrain rather than built at runtime. Not scoped further yet.
 
 8. **Warzone / war-torn terrain preset** (Captain, 2026-10-16: "warzone maps and some other
    stuff would be good too"): a battle-damaged aesthetic distinct from the clean generated
