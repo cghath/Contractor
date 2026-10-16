@@ -1233,12 +1233,12 @@ static func iron_boxes(n: float) -> Array:
 		# Captain, 2026-10-16 (screenshot: the rear sight a big block, the hole small and the post low):
 		# a low base, a thin stalk, and a thin ghost ring round a wide hole centred on OPTIC_AXIS_Y;
 		# the eye sits IRON_EYE_RELIEF behind it (sight_point), so it frames the post instead.
-		_fb(1.0, RAIL_Y, rear - 0.6, 2.0, 10.3, rear + 0.6, C.GUN),                 # rear: base
-		_fb(1.375, 10.3, rear - 0.15, 1.625, 10.95, rear + 0.15, C.GUN),            # stalk
-		_fb(0.8, 10.95, rear - 0.15, 0.95, 12.65, rear + 0.15, C.GUN),              # ring: left
-		_fb(2.05, 10.95, rear - 0.15, 2.2, 12.65, rear + 0.15, C.GUN),              # right
-		_fb(0.8, 10.95, rear - 0.15, 2.2, 11.1, rear + 0.15, C.GUN),                # bottom
-		_fb(0.8, 12.5, rear - 0.15, 2.2, 12.65, rear + 0.15, C.GUN),                # top
+		# Captain, 2026-10-16 (M4 screenshot): an AR-style peep, a chunky housing round a small hole
+		# centred on the sight line, sitting on a solid base (no thin stalk in the way).
+		_fb(0.9, RAIL_Y, rear - 0.6, 2.1, 11.2, rear + 0.6, C.GUN),                 # rear: base, up to the hole
+		_fb(0.7, 11.2, rear - 0.2, 1.15, 12.75, rear + 0.2, C.GUN),                 # housing: left
+		_fb(1.85, 11.2, rear - 0.2, 2.3, 12.75, rear + 0.2, C.GUN),                 # right
+		_fb(0.7, 12.4, rear - 0.2, 2.3, 12.75, rear + 0.2, C.GUN),                  # top (hole 1.15-1.85 x 11.2-12.4)
 		_fb(1.375, 9.9, front, 1.625, OPTIC_AXIS_Y, front + 0.5, C.GUN),           # front post (one 0.5 cm voxel)
 		_fb(0.95, 9.9, front, 1.15, 12.0, front + 0.5, C.GUN),                      # and its ears
 		_fb(1.85, 9.9, front, 2.05, 12.0, front + 0.5, C.GUN),
