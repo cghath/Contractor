@@ -11,6 +11,43 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### MG/AR silhouettes, bolt-action snipers, suppressors (Captain, 2026-10-16)
+
+#### Changed
+- The PKM, M240B and M249 no longer share one `_rifle_mg` silhouette. Each has its own
+  (`_rifle_pkm`, `_rifle_m240`, `_rifle_m249`, `VoxelArt`; `model_style` "pk"/"m240"/"m249" in
+  `data/items.json`), built from reference photos: the PKM is wood-furnitured (handguard, grip,
+  skeleton stock) with a perforated barrel jacket and its ammo box slung off the receiver's LEFT
+  side; the M240B is all-black, the longest and bulkiest of the three, with a top-mounted carry
+  handle over a top/right feed tray cover and a side-folding skeletonized stock; the M249 feeds
+  from a box directly UNDER the receiver, has large top-mounted heat-shield vents, a small
+  STANAG mag-well door, and a slimmer collapsible CAR-style stock. Irons are unchanged (AK-leaf
+  for the PKM, rear aperture for the other two).
+- The L85A2, C8 and HK416 no longer fall through to the generic AR silhouette they shared with
+  the M27 (none set a `model_style` before). The L85A2 is a bullpup (`model_style: "bullpup"`):
+  its magazine and long receiver sit behind the pistol grip, running to the shoulder plate with
+  no stock past it, on a modern-upgrade flat full-length rail (a low red dot replaces its old
+  prism sight). The C8 (`"carbine_short"`) is a shorter-barrel M4-pattern carbine with a longer
+  exposed, notched buffer tube reading as collapsible. The HK416 (`"piston_ar"`) carries a
+  piston rod over its handguard from a taller gas block, instead of the AR family's hidden
+  direct-impingement tube.
+
+#### Added
+- Two bolt-action rifles: the Mosin-Nagant 91/30 (`mosin9130`, 7.62x54R, a PU scope, 5-round
+  stripper clips — `clip_762x54r` — and its own wood-stocked voxel model with a visible bolt
+  handle, `model_style: "mosin"`) and the Springfield Heatseeker (`springfield_hs`, a modern
+  6.5 Creedmoor precision chassis rifle — a new `65cm_eldm` round, `data/rounds.json` — with a
+  detachable 10-round box magazine, a folding chassis stock, an M-LOK handguard and a big
+  precision scope, `model_style: "chassis_bolt"`). Both use a new `"bolt"` fire mode at 40 rpm;
+  no new firing code was needed; the engine's existing per-shot rpm pacing already gates the
+  next shot the bolt-cycle delay represents.
+- Suppressors: an attachment (`Suppressors`, mirroring `Optics`) that mounts on a threaded
+  weapon's muzzle from the inventory, the same way an optic mounts on a rail. Mounted, a shot
+  is treated as suppressed — the quieter sound, a dimmer tracer and a much shorter alert radius
+  the engine already had for a static "suppressed" stat, just never wired to anything players
+  could attach themselves. `VoxelArt._with_suppressor` adds the can to a rifle's muzzle
+  generically, over every silhouette at once, so a new one never needs its own suppressor boxes.
+
 ### Squad callouts know what's actually going on (2026-10-16)
 
 #### Added

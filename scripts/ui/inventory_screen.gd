@@ -743,6 +743,8 @@ func _actions_for(src: Dictionary) -> Array:
 			for gun: StringName in [&"primary", &"sidearm"]:  # an optic onto a gun's rail (P0362)
 				if Optics.is_optic(item) and Optics.mount_problem(inv, c, i, gun) == "":
 					out.append(["Mount on " + ItemDB.get_item(inv.slots[gun]).name, _action.bind("mount_optic", c, i, gun, &"")])
+				if Suppressors.is_suppressor(item) and Suppressors.mount_problem(inv, c, i, gun) == "":
+					out.append(["Mount on " + ItemDB.get_item(inv.slots[gun]).name, _action.bind("mount_suppressor", c, i, gun, &"")])
 			var use := _medical_use(item)
 			if use.is_valid():
 				out.append(["Use", use])
@@ -765,6 +767,9 @@ func _actions_for(src: Dictionary) -> Array:
 				out.append(["Stow", _action.bind("stow_slot", &"", -1, slot, &"")])
 			if Optics.on_slot(inv, slot) != null:  # P0362
 				out.append(["Remove " + Optics.on_slot(inv, slot).name, _action.bind("remove_optic", &"", -1, slot, &"")])
+			var mounted_sup := Suppressors.mounted(ItemDB.get_item(inv.slots[slot]), inv.state_of(slot))
+			if mounted_sup != null:
+				out.append(["Remove " + mounted_sup.name, _action.bind("remove_suppressor", &"", -1, slot, &"")])
 			var gear := ItemDB.get_item(inv.slots[slot])
 			if Inventory.is_attachable(gear) and inv.free_point_for(gear) != &"":  # a disposable launcher onto the pack's top
 				out.append(["Pack on top", _action.bind("attach_slot", &"", -1, slot, &"")])

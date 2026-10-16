@@ -30,6 +30,7 @@ func _ready() -> void:
 	await _test_drop_and_pickup_keep_state()
 	await _test_spread()
 	await _test_optics()
+	await _test_suppressors()
 	await _test_downed()
 	await _test_throwables()
 	await _test_bad_input()
@@ -560,7 +561,7 @@ func _test_optics() -> void:
 	check(on_gun.call() == &"optic_red_dot" and Optics.mounted(m110, {}).id == &"optic_dmr_3_5_10"
 		and not Optics.has_rail(ItemDB.get_item(&"m17")) and Optics.mounted(ItemDB.get_item(&"m17"), {}) == null,
 		"the M4 comes with its red dot, the M110 with its 3.5-10x, the M17 has irons only")
-	check(VoxelArt.model_for(m4, inv.state_of(&"primary")).ends_with(":dot"), "the M4's model shows its red dot")
+	check(VoxelArt.model_for(m4, inv.state_of(&"primary")).contains(":dot:"), "the M4's model shows its red dot")
 	_check_red_dot_size()
 	var rounds := inv.rounds_in(&"primary")
 	check(inv.take(&"optic_lpvo") == 1, "an LPVO picked up")
@@ -570,9 +571,9 @@ func _test_optics() -> void:
 		"the LPVO goes on the M4, its red dot into the kit")
 	check(String(inv.net_state.slot_state.primary.get("optic", "")) == "optic_lpvo" and inv.rounds_in(&"primary") == rounds,
 		"in the gun's replicated state, its rounds kept")
-	check(VoxelArt.model_for(m4, inv.state_of(&"primary")).ends_with(":lpvo"), "and its model shows the LPVO")
+	check(VoxelArt.model_for(m4, inv.state_of(&"primary")).contains(":lpvo:"), "and its model shows the LPVO")
 	player._server_inventory_action.rpc_id(1, "remove_optic", &"", -1, &"primary", &"")
-	check(on_gun.call() == &"" and inv.count_of(&"optic_lpvo") == 1 and VoxelArt.model_for(m4, inv.state_of(&"primary")).ends_with(":irons"),
+	check(on_gun.call() == &"" and inv.count_of(&"optic_lpvo") == 1 and VoxelArt.model_for(m4, inv.state_of(&"primary")).contains(":irons:"),
 		"taken off: back-up irons, the LPVO stowed")
 	where = _find(inv, &"optic_lpvo")
 	player._server_inventory_action.rpc_id(1, "mount_optic", where[0], where[1], &"primary", &"")
@@ -646,6 +647,39 @@ func _test_optics() -> void:
 		"mil marks a mil apart at 10x, wider apart at 3.5x")
 	# The AI's cone doesn't care what optic the gun carries.
 	check(is_equal_approx(Soldier.ai_spread_deg(m4), 1.2) and is_equal_approx(Soldier.ai_spread_deg(m110), 1.6), "the AI's cone is the gun's, whatever its optic")
+
+
+## Suppressors as attachments (2026-10-16, alongside the weapon-model rework): a muzzle
+## attachment mirroring Optics, mounted/removed from the inventory the same way, wired into
+## Soldier._server_fire's suppressed-shot handling (quieter sound, dimmer tracer, shorter alert
+## radius — all pre-existing, just never wired to anything a player could attach) and into
+## weapon mass/price everywhere Optics already was.
+func _test_suppressors() -> void:
+	print("Suppressors (RPC)")
+	var inv := player.inventory
+	var m4 := ItemDB.get_item(&"m4a1")
+	check(Suppressors.has_muzzle(m4) and Suppressors.mounted(m4, inv.state_of(&"primary")) == null,
+		"the M4 is threaded but carries no suppressor as it comes")
+	check(not VoxelArt.model_for(m4, inv.state_of(&"primary")).ends_with(":sup"), "and its model shows no can")
+	check(inv.take(&"suppressor_rifle") == 1, "a suppressor picked up")
+	var where := _find(inv, &"suppressor_rifle")
+	player._server_inventory_action.rpc_id(1, "mount_suppressor", where[0], where[1], &"primary", &"")
+	check(Suppressors.mounted_id(m4, inv.state_of(&"primary")) == &"suppressor_rifle" and inv.count_of(&"suppressor_rifle") == 0,
+		"mounted: the M4 carries it, none spare")
+	check(VoxelArt.model_for(m4, inv.state_of(&"primary")).ends_with(":sup"), "and its model shows the can")
+	var mass := func(state: Dictionary) -> float: return Inventory.entry_mass({"id": &"m4a1", "count": 1, "state": state})
+	var full := m4.default_state()
+	check(is_equal_approx(mass.call(Suppressors.with_suppressor(full, &"suppressor_rifle")) - mass.call(full), ItemDB.get_item(&"suppressor_rifle").mass_kg),
+		"a mounted suppressor adds its mass")
+	var rounds := inv.rounds_in(&"primary")
+	player._server_busy_until = 0.0
+	player._server_next_shot = 0.0
+	player._server_fire.rpc_id(1, player.head.global_position, -player.global_basis.z, &"primary")
+	check(inv.rounds_in(&"primary") == rounds - 1 and player.last_shot_suppressed, "firing it mounted: the shot is suppressed")
+	player._server_inventory_action.rpc_id(1, "remove_suppressor", &"", -1, &"primary", &"")
+	check(Suppressors.mounted(m4, inv.state_of(&"primary")) == null and inv.count_of(&"suppressor_rifle") == 1,
+		"taken off: back to bare, the can stowed")
+	check(not VoxelArt.model_for(m4, inv.state_of(&"primary")).ends_with(":sup"), "and its model shows no can again")
 
 
 ## The red dot is a micro red dot's size (Captain, 2026-10-14: its 9 cm box housing, longer than

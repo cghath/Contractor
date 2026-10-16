@@ -205,11 +205,12 @@ static func sprint_direction_ok(input: Vector2) -> bool:
 	return -input.normalized().y >= cos(deg_to_rad(SPRINT_ARC_DEG)) - 0.001  # W+A / W+D still sprint
 
 
-## Mass of `weapon` as held, with the optic its `state` has on (Optics.extra_mass).
+## Mass of `weapon` as held, with the optic and suppressor its `state` has on (Optics.extra_mass,
+## Suppressors.extra_mass).
 static func weapon_mass(weapon: ItemData, state := {}) -> float:
 	if weapon == null:
 		return 0.0
-	return weapon.mass_kg + Optics.extra_mass(weapon, state)
+	return weapon.mass_kg + Optics.extra_mass(weapon, state) + Suppressors.extra_mass(weapon, state)
 
 
 ## Seconds to aim a weapon of `kg`, with `arms` stamina (0..1) left.

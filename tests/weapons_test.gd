@@ -19,11 +19,13 @@ const GUNS := {
 	"hk416": ["mag_556", "556_m855", "rounds_556", "III++", "intermediate"],
 	"l85a2": ["mag_556", "556_m855", "rounds_556", "III++", "intermediate"],
 	"c8": ["mag_556", "556_m855", "rounds_556", "III++", "intermediate"],
+	"mosin9130": ["clip_762x54r", "762x54r_lps", "rounds_762x54r", "III++", "full_power"],
+	"springfield_hs": ["mag_65cm", "65cm_eldm", "rounds_65cm", "III+", "full_power"],
 }
 ## Magazines and belts: capacity.
-const CAPACITY := {"mag_762x39": 30, "mag_545": 30, "mag_rpk40": 40, "mag_svd": 10, "belt_762x54r": 100, "box_556": 200, "belt_762x51": 100}
+const CAPACITY := {"mag_762x39": 30, "mag_545": 30, "mag_rpk40": 40, "mag_svd": 10, "belt_762x54r": 100, "box_556": 200, "belt_762x51": 100, "clip_762x54r": 5, "mag_65cm": 10}
 ## Guns fired and reloaded for real on the host player.
-const FIRED: Array[String] = ["akm", "ak74", "rpk", "pkm", "svd", "m249", "m240b"]
+const FIRED: Array[String] = ["akm", "ak74", "rpk", "pkm", "svd", "m249", "m240b", "mosin9130", "springfield_hs"]
 const OPFOR: Array[String] = ["akm", "ak74", "rpk", "pkm", "svd"]
 
 var failures := 0
@@ -141,8 +143,24 @@ func _test_models() -> void:
 		var mesh := VoxelArt.mesh(model, "multicam")
 		check(model.begins_with("rifle:") and mesh != null and mesh.get_surface_count() > 0, "%s builds a model (%s)" % [id, model])
 		check(not VoxelArt.hand_points(model).is_empty() and VoxelArt.butt_point(model) != Vector3.ZERO, "%s has hand points and a butt" % id)
-	check(VoxelArt.model_for(ItemDB.get_item(&"akm")).ends_with(":ak") and VoxelArt.model_for(ItemDB.get_item(&"m240b")).ends_with(":mg") and VoxelArt.model_for(ItemDB.get_item(&"pkm")).ends_with(":pk"), "AKs and machine guns have their own silhouettes")
-	check(not VoxelArt.model_for(ItemDB.get_item(&"m4a1")).ends_with(":ak"), "the M4 keeps its own")
+	check(VoxelArt.model_for(ItemDB.get_item(&"akm")).contains(":ak:") and VoxelArt.model_for(ItemDB.get_item(&"m240b")).contains(":m240:") and VoxelArt.model_for(ItemDB.get_item(&"pkm")).contains(":pk:"), "AKs and machine guns have their own silhouettes")
+	check(not VoxelArt.model_for(ItemDB.get_item(&"m4a1")).contains(":ak:"), "the M4 keeps its own")
+	# The MG trio no longer shares one silhouette (Captain, reference photos, 2026-10-16): the
+	# PKM, M240B and M249 each get their own model_style now, not two of them sharing "mg".
+	check(VoxelArt.model_for(ItemDB.get_item(&"m249")).contains(":m249:") and not VoxelArt.model_for(ItemDB.get_item(&"m249")).contains(":m240:"),
+		"the M249 has its own silhouette, not the M240B's")
+	# The AR trio: L85A2 (bullpup), C8 (short carbine) and HK416 (piston) no longer fall through
+	# to the generic AR silhouette they shared with the M27.
+	check(VoxelArt.model_for(ItemDB.get_item(&"l85a2")).contains(":bullpup:"), "the L85A2 is a bullpup")
+	check(VoxelArt.model_for(ItemDB.get_item(&"c8")).contains(":carbine_short:"), "the C8 is a short carbine")
+	check(VoxelArt.model_for(ItemDB.get_item(&"hk416")).contains(":piston_ar:"), "the HK416 is piston-driven")
+	check(VoxelArt.model_for(ItemDB.get_item(&"m27")).contains("::"), "the M27 still falls through to the generic AR silhouette (no model_style)")
+	# The two bolt-action snipers: the Mosin-Nagant (vintage, "mosin") and the Springfield
+	# Heatseeker (modern precision chassis, "chassis_bolt") have their own silhouettes too.
+	check(VoxelArt.model_for(ItemDB.get_item(&"mosin9130")).contains(":mosin:"), "the Mosin-Nagant has its own silhouette")
+	check(VoxelArt.model_for(ItemDB.get_item(&"springfield_hs")).contains(":chassis_bolt:"), "the Springfield Heatseeker has its own silhouette")
+	check(ItemDB.get_item(&"mosin9130").stats.get("fire_modes", []) == ["bolt"] and ItemDB.get_item(&"springfield_hs").stats.get("fire_modes", []) == ["bolt"],
+		"both bolt-action snipers only cycle between shots")
 	check(VoxelArt.model_for(ItemDB.get_item(&"akm")).contains(":irons:") and VoxelArt.model_for(ItemDB.get_item(&"pkm")).contains(":irons:"),
 		"an AK or MG with no rail shows iron sights, not a dead red-dot block (%s)" % VoxelArt.model_for(ItemDB.get_item(&"akm")))
 

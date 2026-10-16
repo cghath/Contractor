@@ -876,7 +876,7 @@ func _server_fire(origin: Vector3, direction: Vector3, slot: StringName) -> void
 	if not get_world_3d().direct_space_state.intersect_ray(wall_q).is_empty():
 		muzzle = origin
 	var result := Ballistics.fire(self, muzzle, direction.normalized(), weapon)
-	var suppressed := bool(weapon.stats.get("suppressed", false))
+	var suppressed := bool(weapon.stats.get("suppressed", false)) or Suppressors.mounted_id(weapon, inventory.state_of(slot)) != &""
 	last_shot_at = now
 	last_shot_suppressed = suppressed
 	var round_end: Variant = result.get("position")
@@ -1202,6 +1202,17 @@ func _server_inventory_action(action: String, container: StringName, index: int,
 				_client_message.rpc_id(owner_peer(), problem)
 		"remove_optic":
 			var problem := Optics.server_remove(inventory, slot, target)
+			if problem != "":
+				_client_message.rpc_id(owner_peer(), problem)
+		# Suppressors (2026-10-16): an attachment entry onto a threaded weapon's muzzle (the
+		# one it had goes into your containers), or off (into `target` if named). Same pattern
+		# as optics, above.
+		"mount_suppressor":
+			var problem := Suppressors.server_mount(inventory, container, index, slot)
+			if problem != "":
+				_client_message.rpc_id(owner_peer(), problem)
+		"remove_suppressor":
+			var problem := Suppressors.server_remove(inventory, slot, target)
 			if problem != "":
 				_client_message.rpc_id(owner_peer(), problem)
 		# MOLLE: `target` (attach) and `slot` (detach, move, drop) name attach points of the
