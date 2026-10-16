@@ -96,6 +96,19 @@ environments don't. Root-caused below; queue at the bottom.
     pick a faction-specific profile, (d) a zone actually assigned to it. Real feature, correctly
     sized for its own session — parked for later, not this run.
 
+11. **Helicopters don't crash — they just freeze** (Captain, 2026-10-16, with reference photos of
+    real crash sites: scattered wreckage, a snapped-off tail/rotor, impact scarring).
+    `Vehicle._become_wreck()` (scripts/vehicles/vehicle.gd:1613) is generic for every vehicle:
+    on destruction it goes `FREEZE_MODE_STATIC` right where it was, with two scorch marks — a
+    helicopter destroyed mid-flight just hangs there, inert, instead of falling and crashing.
+    Needs: unfreeze and let a destroyed heli fall/tumble (maybe a short uncontrolled spin first),
+    then on ground impact a real crash wreck — broken-off rotor/tail pieces as separate debris,
+    a wider scorch/impact mark, flattened scatter/vegetation around it — distinct from a ground
+    vehicle's in-place burnt wreck. Ties into #7 (crash-landing mission entrance: could reuse the
+    same wreck art for a pre-placed crashed heli as an infil variant) and the AV-damage bug
+    (#10/the fix/heli-rpg-damage branch) — same vehicle-destruction code, worth doing together
+    next time rather than in this session.
+
 ## Open
 
 - Does #1's patrol/alert system for regular zones get the full `EnemyResponse` feature set
