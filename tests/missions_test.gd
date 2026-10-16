@@ -850,6 +850,24 @@ func _test_enemy_response() -> void:
 	check(hsquad != null and hsquad.patrol.any(func(p: Vector3) -> bool: return Vector2(p.x - lk.x, p.z - lk.z).length() < 2.0)
 		and hunters.all(func(s: Soldier) -> bool: return s.inventory.count_of(EnemyResponse.SMOKE) > 0),
 		"the hunters head for the last known position, carrying smoke")
+	# One shared budget (Captain, 2026-10-16: "too many ai in hot zones spawning and coming for the player").
+	check(er.alive_total() <= er.spawn_budget(),
+		"everything spawned (patrols, hunters, HQ pairs, QRF waves) within the shared budget (%d of %d)" % [er.alive_total(), er.spawn_budget()])
+	var launched := er.qrf_launches.size()
+	er._last_qrf = er.now()
+	alert.zone_state = Alert.State.ENGAGED
+	er.server_alert_extraction(lk)
+	check(er.qrf_launches.size() == launched, "extraction right after a QRF: no second QRF inside QRF_RELAUNCH_S")
+	var old: Dictionary = {}
+	for w: Dictionary in er.reinforcements.waves:
+		if is_instance_valid(w.squad) and not (w.soldiers as Array).filter(func(s: Variant) -> bool: return is_instance_valid(s) and not (s as Soldier).vitals.is_dead()).is_empty():
+			old = w
+			break
+	if not old.is_empty():
+		old.sent_at = er.now() - EnemyResponse.WAVE_HUNT_S - 1.0
+		var kept: Array[Vector3] = (old.squad as Squad).patrol.duplicate()
+		er.reinforcements._retarget_waves()
+		check((old.squad as Squad).patrol == kept, "a wave out longer than WAVE_HUNT_S stops being pointed at the last known position")
 	await _end_response(er, before)
 
 

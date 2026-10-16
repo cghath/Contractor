@@ -21,7 +21,7 @@ extends Node
 ##   only one base is left). A destroyed QRF base removes its waves: none at all with every
 ##   base gone.
 ## - Nothing spawns where the squad would see it (_unseen): a QRF, hunters or HQ pair whose
-##   every gate is in sight waits. Living EnemyResponse spawns are capped at MAX_ALIVE.
+##   every gate is in sight waits. Everything spawned (QRF waves too) shares SPAWN_BUDGET[tier].
 ## - Tier 3 (35): hunter teams (4 to 6 good troops) from the HQ go to the last known position:
 ##   they flank, track (retargeted every HUNTER_RETARGET_S), search round it and throw smoke.
 ##   Tier 4 (50): two teams at once, and the HQ sends a pair to each of its sites without one
@@ -47,9 +47,15 @@ const LOOK_S := 600.0
 const LOOK_POINTS := 2
 const LOOK_RING_M := 30.0
 const LOOK_KINDS: Array[StringName] = [&"shot", &"blast", &"body", &"missed_checkin"]
-## Living soldiers this node has spawned (patrols, hunters, HQ pairs) never go past this; QRF
-## waves have Reinforcements' own cap.
-const MAX_ALIVE := 40
+## One shared budget (Captain, 2026-10-16: "too many ai in hot zones spawning and coming for the
+## player"): every living soldier the zone's answer has spawned (patrols, hunters, HQ pairs AND
+## the QRF waves, which used to have a separate cap of their own, so up to 40 + 20 on top of the
+## garrisons) stays within SPAWN_BUDGET[tier]. Every spawn path checks it (_room); a QRF wave is
+## cut down to what's left. Garrisons don't count (they come with their sites).
+const SPAWN_BUDGET: Array[int] = [20, 24, 28, 32, 36]
+## A QRF wave hunts the last known position for this long after it set out, then holds round the
+## last spot it was sent to (Reinforcements.hunt_s) instead of every wave converging forever.
+const WAVE_HUNT_S := 600.0
 const HUNTER_GAP_S := 600.0
 const HUNTER_SIZE := Vector2i(4, 6)
 const HUNTER_COMBAT := 0.7
@@ -122,6 +128,8 @@ func _ready() -> void:
 	if reinforcements:
 		reinforcements.driven = true
 		reinforcements.aim = _aim
+		reinforcements.clock = now
+		reinforcements.hunt_s = WAVE_HUNT_S
 	if alert:
 		alert.state_changed.connect(_on_state_changed)
 		alert.reported.connect(_on_reported)
@@ -205,7 +213,7 @@ func _gate(m: ZoneModule, toward: Vector3) -> Vector3:
 ## there). False (still pending) if every point is in sight of a player.
 func _try_patrol(record: Dictionary) -> bool:
 	var route: Array[Vector3] = record.route
-	if _alive_spawned() + PATROL_SIZE > MAX_ALIVE:
+	if PATROL_SIZE > _room():
 		return false
 	for j in route.size():
 		if not _unseen(route[j]):
@@ -358,7 +366,10 @@ func _launch_qrf() -> void:
 		var gate := _unseen_gate(m, lkp)
 		if not gate.is_finite():
 			continue
-		var soldiers := reinforcements.server_send(gate, 1 if tier >= 1 else 0)
+		var room := _room()
+		if room < 2:
+			break  # the zone's answer is out in full already (SPAWN_BUDGET)
+		var soldiers := reinforcements.server_send(gate, 1 if tier >= 1 else 0, room)
 		VehicleQrf.server_mount(level, m, gate, lkp, soldiers)  # wave 5b (V4): some QRFs ride in a technical
 		qrf_launches.append({"from": m.module_id, "at": now(), "soldiers": soldiers})
 		_last_qrf = now()
@@ -381,7 +392,8 @@ func server_alert_extraction(pos: Vector3) -> void:
 		_look_credit = maxf(_look_credit, 1.0)
 		_send_look(pos)  # the next-nearest free patrol converges too
 	if state >= Alert.State.ENGAGED or tier >= 2:
-		_launch_qrf()
+		if now() - _last_qrf >= QRF_RELAUNCH_S:
+			_launch_qrf()  # still one QRF per QRF_RELAUNCH_S: reaching the LZ doesn't skip the gap
 
 
 ## The nearest patrol out (not already looking) goes to look round `pos` for LOOK_S. With
@@ -448,7 +460,7 @@ func _tick_hunters(tier: int) -> void:
 					team.smoked = true
 					break
 	if tier < 3 or lk.is_empty() or teams >= (2 if tier >= 4 else 1) or now() - _last_hunter < HUNTER_GAP_S \
-			or _alive_spawned() + HUNTER_SIZE.y > MAX_ALIVE:
+			or HUNTER_SIZE.y > _room():
 		return
 	_send_hunters(lk.pos, float(lk.radius))
 
@@ -530,7 +542,7 @@ func _set_route(squad: Squad, living: Array, route: Array[Vector3]) -> void:
 
 ## Every REINFORCE_GAP_S (the first at once): a pair from the HQ to each garrisoned outpost and
 ## checkpoint still up that has no living pair of the HQ's yet, REINFORCE_MAX at most a round,
-## never past MAX_ALIVE. The pair is named under the site ("<site>_HR<k>_<i>"): it counts as
+## never past SPAWN_BUDGET. The pair is named under the site ("<site>_HR<k>_<i>"): it counts as
 ## its garrison (ZoneLevel.garrison_alive, Alert's check-ins).
 func _reinforce_sites() -> void:
 	var hq := _hq()
@@ -542,7 +554,7 @@ func _reinforce_sites() -> void:
 	var sent := 0
 	var stats: Dictionary = ZoneLevel.GARRISON_STATS
 	for m: ZoneModule in level.call(&"modules"):
-		if sent >= REINFORCE_MAX or _alive_spawned() + 2 > MAX_ALIVE:
+		if sent >= REINFORCE_MAX or 2 > _room():
 			break
 		if not (m.type in REINFORCE_TYPES) or had == null or int(had.get(m.module_id, 0)) <= 0 or level.call(&"site_down", m.module_id):
 			continue
@@ -620,6 +632,21 @@ func _ground(pos: Vector3) -> Vector3:
 func _living(soldiers: Array) -> Array:
 	return soldiers.filter(func(s: Variant) -> bool:
 		return is_instance_valid(s) and (s as Soldier).vitals.is_up() and not (s as Soldier).is_in_group(Soldier.DEAD_GROUP))
+
+
+## Living soldiers the zone's answer has out: this node's (_alive_spawned) and the QRF waves'.
+func alive_total() -> int:
+	return _alive_spawned() + (reinforcements.capped_alive() if reinforcements else 0)
+
+
+## SPAWN_BUDGET at the current tier.
+func spawn_budget() -> int:
+	return SPAWN_BUDGET[clampi(_tier(), 0, SPAWN_BUDGET.size() - 1)]
+
+
+## How many more may spawn now (0 at or over the budget).
+func _room() -> int:
+	return maxi(spawn_budget() - alive_total(), 0)
 
 
 ## Living soldiers this node spawned (patrols, hunters, HQ pairs).

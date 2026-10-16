@@ -70,6 +70,11 @@ var waves: Array[Dictionary] = []
 var driven := false
 ## Where waves head (returns a Vector3, or Vector3.INF for "stay put"); unset: the players.
 var aim := Callable()
+## Driven waves: how long after it set out (by `clock`) a wave keeps being pointed at `aim`;
+## after that it keeps its last route (holds round the last spot it was sent to). INF: always.
+var hunt_s := INF
+## The clock hunt_s runs on (returns seconds); unset: `elapsed`.
+var clock := Callable()
 
 var _next_at := 0.0
 var _retarget := 0.0
@@ -165,23 +170,25 @@ func capped_alive() -> int:
 
 ## Host only (hot zones: EnemyResponse). Sends the next wave now from `origin` (a QRF base's
 ## gate), `extra_pairs` buddy pairs bigger than its turn; returns its soldiers.
-func server_send(origin: Vector3, extra_pairs := 0) -> Array:
+func server_send(origin: Vector3, extra_pairs := 0, cap := -1) -> Array:
 	if not multiplayer.is_server():
 		return []
 	var index := waves_sent
 	waves_sent += 1
-	_send_wave(index, origin, extra_pairs)
+	_send_wave(index, origin, extra_pairs, cap)
 	return waves.back().soldiers if not waves.is_empty() and int(waves.back().index) == index else []
 
 
-func _send_wave(index: int, origin := Vector3.INF, extra_pairs := 0) -> void:
+func _send_wave(index: int, origin := Vector3.INF, extra_pairs := 0, cap := -1) -> void:
 	var level := MapNodes.level_of(self)
 	if level == null or not level.has_method(&"spawn_soldier"):
 		return
 	var size := mini(wave_size(index, params) + 2 * extra_pairs, maxi(int(params.max_alive) - capped_alive(), 0))
+	if cap >= 0:
+		size = mini(size, cap)  # the caller's budget (EnemyResponse.SPAWN_BUDGET)
 	size -= size % 2  # whole buddy pairs
 	var edge := origin if origin.is_finite() else edge_point(level)
-	var record := {"index": index, "at_s": elapsed, "size": size, "edge": edge, "squad": null, "soldiers": []}
+	var record := {"index": index, "at_s": elapsed, "sent_at": _now(), "size": size, "edge": edge, "squad": null, "soldiers": []}
 	waves.append(record)
 	if size <= 0:
 		wave_spawned.emit(index, [])
@@ -279,8 +286,11 @@ func _retarget_waves() -> void:
 	var level := MapNodes.level_of(self)
 	if level == null:
 		return
+	var t := _now()
 	for wave: Dictionary in waves:
 		var squad := wave.squad as Squad
+		if t - float(wave.get("sent_at", t)) > hunt_s:
+			continue  # done hunting: holds round the last spot it was sent to
 		var living: Array = wave.soldiers.filter(func(s: Variant) -> bool:
 			return is_instance_valid(s) and not (s as Soldier).vitals.is_dead())
 		if is_instance_valid(squad) and not living.is_empty():
@@ -309,3 +319,8 @@ func _on_ground(pos: Vector3) -> Vector3:
 		if Vector2(snapped.x - at.x, snapped.z - at.z).length() < NAV_SNAP_M:
 			return snapped + Vector3.UP * 0.1
 	return at
+
+
+## The clock hunt_s runs on: `clock` if set (a hot zone's Alert clock), else `elapsed`.
+func _now() -> float:
+	return float(clock.call()) if clock.is_valid() else elapsed
