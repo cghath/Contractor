@@ -38,9 +38,13 @@ func _test_streams() -> void:
 	var bad := []
 	for id: String in Sfx.defs:
 		var options := Sfx.streams(StringName(id))
+		if ResourceLoader.exists(Sfx.AUDIO_DIR + id + ".wav") or ResourceLoader.exists(Sfx.AUDIO_DIR + id + ".ogg"):
+			if options.is_empty():
+				bad.append(id)  # a recording (audio/sfx/CREDITS.md) that didn't load
+			continue
 		if options.size() != Sfx.SYNTH_VARIANTS or (options[0] as AudioStreamWAV).data.size() < 400:
 			bad.append(id)
-	check(bad.is_empty(), "each has %d generated variants (bad: %s)" % [Sfx.SYNTH_VARIANTS, bad])
+	check(bad.is_empty(), "each has a recording or %d generated variants (bad: %s)" % [Sfx.SYNTH_VARIANTS, bad])
 	check(Sfx.is_prebuilt() and Sfx.prebuild_ms > 0.0
 		and (Sfx.streams(&"explosion")[1] as AudioStreamWAV).data == Sfx.synth(Sfx.defs["explosion"].synth, hash("explosion") + 7919).data,
 		"they were built on worker threads at boot (%.0f ms), the same as built on the main thread" % Sfx.prebuild_ms)
@@ -71,7 +75,8 @@ func _test_distance() -> void:
 	Sfx.listener_override = Vector3.ZERO
 	check(Sfx.play_at(&"shot_rifle", Vector3(0, 0, 20)) == &"shot_rifle", "a rifle shot 20 m away: near")
 	check(Sfx.play_at(&"shot_rifle", Vector3(0, 0, 120)) == &"shot_rifle_far", "120 m away: the far variant")
-	check(Sfx.play_at(&"shot_rifle", Vector3(0, 0, 300)) == &"", "300 m away: past what the AI hears, silent")
+	check(Sfx.play_at(&"shot_rifle", Vector3(0, 0, 900)) == &"shot_rifle_far", "900 m away: still heard, far off (Captain, 2026-10-16: shots carry)")
+	check(Sfx.play_at(&"shot_rifle", Vector3(0, 0, 1700)) == &"", "1.7 km away: silent")
 	check(Sfx.play_at(&"shot_suppressed", Vector3(0, 0, 30)) == &"shot_suppressed", "a suppressed shot 30 m away: heard")
 	check(Sfx.play_at(&"shot_suppressed", Vector3(0, 0, 60)) == &"", "60 m away: not")
 	check(Sfx.play_at(&"no_such_sound", Vector3.ZERO) == &"", "an unknown id plays nothing")
@@ -113,7 +118,7 @@ func _test_in_level() -> void:
 	player._server_fire.rpc_id(1, player.camera.global_position, Vector3(0, -0.4, -1).normalized(), &"primary")
 	await _frames(3)
 	var heard := Sfx.heard_after(t)
-	check(&"shot_rifle" in heard, "firing: the shot is heard (%s)" % [heard])
+	check(&"shot_ar" in heard, "firing an M4: the AR's shot is heard (%s)" % [heard])
 	check(heard.any(func(id: StringName) -> bool: return String(id).begins_with("impact_")), "and where it lands")
 	t = Sfx.heard_count()
 	player._server_reload.rpc_id(1, &"primary")

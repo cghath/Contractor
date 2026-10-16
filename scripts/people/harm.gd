@@ -26,6 +26,11 @@ static func note_hit(victim: Node, attacker: Node) -> void:
 	var info := info_of(attacker)
 	info["at"] = Soldier._now()
 	victim.set_meta(META, info)
+	var hurt := victim as Soldier
+	if hurt and hurt.vitals and not hurt.vitals.is_dead():  # a cry when hit, a scream now and then (Callouts.server_vocal)
+		var callouts := Callouts.of(hurt)
+		if callouts:
+			callouts.server_vocal(hurt, &"scream" if randf() < 0.3 or not hurt.vitals.is_up() else &"hit")
 	var people := victim.get_node_or_null(^"/root/People")
 	if people:
 		people.server_harmed(victim, info)
