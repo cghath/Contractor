@@ -492,7 +492,7 @@ static func stand_off(op: Dictionary) -> void:
 ## building down the street"): the buildings within TOWN_RADIUS_M of the point, nearest-next
 ## from the squad, cleared one after another the same way (stack, breach, in); the next starts
 ## once every man of the last is at his corner. Another clear order ends it.
-const TOWN_RADIUS_M := 90.0
+const TOWN_RADIUS_M := 40.0
 const CHARGE_STANDOFF_M := 3.0
 var _town: Array = []        # buildings still to clear
 var _town_names := PackedStringArray()
@@ -503,9 +503,16 @@ var _town_units := 0
 
 func order_clear_town(from: Soldier, point: Vector3, names: PackedStringArray, breach: String) -> String:
 	leader = from
-	var found: Array = Buildings.near(from, point, TOWN_RADIUS_M)
+	# Buildings are found on the baked navmesh, which reaches ~48 m round the player (ZoneNav):
+	# scan TOWN_RADIUS_M round a point at most that far toward where he points.
+	var centre := from.global_position + (point - from.global_position).limit_length(TOWN_RADIUS_M)
+	var found: Array = Buildings.near(from, centre, TOWN_RADIUS_M)
 	if found.is_empty():
-		return "No buildings there"
+		var one := Buildings.nearest(from, point, 30.0)
+		if not one.is_empty():
+			found = [one]
+	if found.is_empty():
+		return "No buildings there: move closer to the town"
 	var ordered: Array = []
 	var at := from.global_position
 	while not found.is_empty():
@@ -536,7 +543,7 @@ func _next_town_building() -> String:
 func _tick_town() -> void:
 	if _town_op.is_empty() or _town.is_empty():
 		return
-	if (_town_op.get("done", {}) as Dictionary).size() >= _town_units:
+	if (_town_op.get("done", {}) as Dictionary).size() >= mini(_town_units, _able(_town_names).size()):  # one down mid-clear doesn't stall it
 		_town_op = {}
 		_next_town_building()
 
