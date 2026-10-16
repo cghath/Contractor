@@ -162,6 +162,8 @@
 		{"zone_id": "wadi_farm", "name": "Wadi farm", "region": "inland", "kind": "contract", "def": {"seed": 2207, "size_m": 1920}},
 		{"zone_id": "harbour_yard", "name": "Harbour yard", "region": "coast", "kind": "contract", "def": {"seed": 3301, "size_m": 1536, "types": ["checkpoint", "compound", "outpost", "village", "town"]}},
 		{"zone_id": "pinewood_ridge", "name": "Pinewood Ridge", "region": "inland", "kind": "contract", "terrain": "temperate", "def": {"seed": 7701, "size_m": 1920, "types": ["compound", "outpost", "village", "checkpoint"]}},
+		{"zone_id": "red_mesa", "name": "Red Mesa", "region": "inland", "kind": "contract", "terrain": "rocky_ridge", "def": {"seed": 8801, "size_m": 1920, "types": ["compound", "outpost", "checkpoint", "village"]}},
+		{"zone_id": "cove_outpost", "name": "Cove outpost", "region": "coast", "kind": "contract", "terrain": "coastal_lowland", "def": {"seed": 9901, "size_m": 1536, "types": ["checkpoint", "compound", "outpost", "village"]}},
 		{"zone_id": "ridge_hot", "name": "Black Ridge hills", "region": "inland", "kind": "hot", "faction": "meridian", "def": {"seed": 4409, "size_m": 4096, "layout": "hot"}},
 		{"zone_id": "coast_hot", "name": "Salt flats", "region": "coast", "kind": "hot", "faction": "salvage_union", "def": {"seed": 5503, "size_m": 4096, "layout": "hot"}},
 		{"zone_id": "city_hot", "name": "Old Quarter", "region": "inland", "kind": "hot", "faction": "meridian", "terrain": "scrubland", "def": {"seed": 6607, "size_m": 4096, "layout": "hot", "urban": true}}
