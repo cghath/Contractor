@@ -163,7 +163,8 @@ static func model_for(item: ItemData, state := {}) -> String:
 			# No rail: the old fixed dot for the AR family, but AKs and MGs carry irons only
 			# (Captain, 2026-10-15: the AK showed a red-dot block that did nothing).
 			var art := Optics.art_of(Optics.mounted(item, state)) if Optics.has_rail(item) else ("dot" if style == "" else IRONS)
-			return "rifle:%d:%s%s" % [roundi(length / VOXEL_SIZE), art if art != "" else IRONS, (":" + style) if style != "" else ""]
+			var sup := Suppressors.mounted_id(item, state) != &""
+			return "rifle:%d:%s:%s:%s" % [roundi(length / VOXEL_SIZE), art if art != "" else IRONS, style, "sup" if sup else ""]
 		&"sidearm":
 			return "pistol"
 		&"vest":
@@ -559,11 +560,20 @@ static func _spec(model: String) -> Dictionary:
 		"vest_f_front": return _vest(arg, _torso_f(true), true, true)
 		"backpack": return _backpack(arg)
 		"rifle":
+			var art := _rifle_art(model)
+			var out: Dictionary
 			match _rifle_style(model):
-				"ak": return _rifle_ak(arg, _rifle_art(model))
-				"mg": return _rifle_mg(arg, _rifle_art(model))
-				"pk": return _rifle_mg(arg, _rifle_art(model), true)
-			return _rifle(arg, _rifle_art(model))
+				"ak": out = _rifle_ak(arg, art)
+				"pk": out = _rifle_pkm(arg, art)
+				"m240": out = _rifle_m240(arg, art)
+				"m249": out = _rifle_m249(arg, art)
+				"bullpup": out = _rifle_bullpup(arg, art)
+				"carbine_short": out = _rifle_carbine_short(arg, art)
+				"piston_ar": out = _rifle_piston_ar(arg, art)
+				"mosin": out = _rifle_bolt(arg, art, false)
+				"chassis_bolt": out = _rifle_chassis_bolt(arg, art)
+				_: out = _rifle(arg, art)
+			return _with_suppressor(out) if _rifle_suppressed(model) else out
 		"optic": return _optic_model(model.get_slice(":", 1))
 		"pistol": return _pistol()
 		"head_f": return _head_f()
@@ -1129,6 +1139,12 @@ static func _rifle_style(model: String) -> String:
 	return parts[3] if parts.size() > 3 else ""
 
 
+## True for a rifle model with a suppressor on its muzzle ("rifle:42:irons:ak:sup").
+static func _rifle_suppressed(model: String) -> bool:
+	var parts := model.split(":")
+	return parts.size() > 4 and parts[4] == "sup"
+
+
 ## Where (voxels along a rifle of `n`) the back end of sight `art` sits: compact sights over
 ## the receiver's front, magnified tubes further back (eye relief), irons' rear aperture at
 ## the rail's end.
@@ -1353,31 +1369,308 @@ static func _rifle_ak(length: int, art := IRONS) -> Dictionary:
 	]}
 
 
-## A belt-fed light machine gun (M249, M240B, PKM): heavy barrel with a carry handle, a bipod
-## folded under the barrel, a box of belt under the receiver, a fixed stock.
-static func _rifle_mg(length: int, art := IRONS, russian := false) -> Dictionary:
+## A PKM: the odd one out of the trio (Captain, reference photo, 2026-10-16) — wood furniture
+## throughout (handguard, grip, skeleton stock) unlike the all-metal M240/M249, a perforated
+## barrel jacket, the ammo box slung off the LEFT side of the receiver (not underneath), a
+## bipod that folds forward near the muzzle, and the AK-pattern leaf-and-post sight (an older
+## sibling of the same action family) sitting mid-receiver.
+static func _rifle_pkm(length: int, art := IRONS) -> Dictionary:
 	var n := maxi(length, 20)
 	var f := func(t: float) -> float: return n * t
-	# A PKM ("pk") has an AK's sights (notched leaf, hooded post); the M240 / M249 a rear aperture.
-	var sight := (ak_iron_boxes(n) if russian else iron_boxes(n)) if art == IRONS else optic_boxes(art, sight_back(art, n))
+	var sight := ak_iron_boxes(n) if art == IRONS else optic_boxes(art, sight_back(art, n))
+	var boxes := sight + [
+		_fb(1.1, 8.0, 0, 1.9, 8.9, f.call(0.32), C.GUN),                        # barrel
+		_fb(0.9, 7.7, 0, 2.1, 9.2, 1.5, C.GUN),                                 # flash hider / cone
+		_fb(0.35, 5.2, f.call(0.02), 0.8, 7.0, f.call(0.18), C.GUN),            # bipod, folded forward near the muzzle
+		_fb(2.2, 5.2, f.call(0.02), 2.65, 7.0, f.call(0.18), C.GUN),
+		_fb(0.4, 6.4, f.call(0.18), 2.6, 7.6, f.call(0.34), C.WOOD),            # wood foregrip, ahead of the receiver
+		_fb(0.5, 6.8, f.call(0.34), 2.5, 9.9, f.call(0.72), C.GUN),             # receiver and hinged top cover
+	]
+	# Perforated barrel jacket: a vented tube the fore-end of the exposed barrel, holes (EMPTY)
+	# punched through top and bottom rather than one solid shroud.
+	boxes.append(_fb(0.3, 7.6, f.call(0.04), 2.7, 9.3, f.call(0.32), C.GUN_LIGHT))
+	var z: float = f.call(0.06)
+	while z < f.call(0.3):
+		boxes.append(_fb(0.3, 9.0, z, 2.7, 9.25, z + n * 0.015, C.EMPTY))        # top row of vents
+		boxes.append(_fb(0.3, 7.7, z, 2.7, 7.95, z + n * 0.015, C.EMPTY))        # bottom row
+		z += n * 0.035
+	boxes.append_array([
+		_fb(-0.5, 4.2, f.call(0.4), 0.5, 6.8, f.call(0.56), C.GUN_LIGHT),       # ammo box, slung off the LEFT side (not underneath)
+		_fb(-0.5, 4.2, f.call(0.4), 0.5, 4.6, f.call(0.56), C.GUN),
+		_fb(1.25, 5.8, f.call(0.6), 1.75, 6.2, f.call(0.66), C.GUN),            # trigger guard
+		_fb(0.9, 4.4, f.call(0.66), 2.1, 6.8, f.call(0.71), C.WOOD),            # wood pistol grip
+		_fb(0.9, 3.0, f.call(0.67), 2.1, 4.4, f.call(0.72), C.WOOD_DARK),
+		# Skeleton stock: a hollow wood frame (top rail, bottom rail, front strut) round a big
+		# cut-out, closed off by a solid butt pad at the very end (the real PKM's shape).
+		_fb(1.0, 8.4, f.call(0.68), 2.0, 8.9, n, C.WOOD),                       # top rail
+		_fb(1.0, 5.6, f.call(0.68), 2.0, 6.1, n, C.WOOD),                       # bottom rail
+		_fb(1.0, 5.6, f.call(0.68), 2.0, 8.9, f.call(0.72), C.WOOD_DARK),       # front strut, closes the frame
+		_fb(0.8, 5.0, n - 0.5, 2.2, 9.0, n, C.GUN),                             # butt pad
+	])
+	return {"size": Vector3i(3, 13, n), "sub": 4, "boxes": boxes}
+
+
+## An M240B: all black/olive, no wood anywhere (Captain, reference photo). A long, bulky
+## receiver (longer than the M249's), a top-mounted carry handle over a top/right feed tray
+## cover, a gas tube that runs below the barrel, a bipod folded near the muzzle, and a
+## side-folding skeletonized stock (angled off-centre, not a straight fixed block). Rear
+## aperture irons, like the M249 (neither is the AK-pattern family's leaf and post).
+static func _rifle_m240(length: int, art := IRONS) -> Dictionary:
+	var n := maxi(length, 20)
+	var f := func(t: float) -> float: return n * t
+	var sight := iron_boxes(n) if art == IRONS else optic_boxes(art, sight_back(art, n))
 	return {"size": Vector3i(3, 13, n), "sub": 4, "boxes": sight + [
-		_fb(1.1, 8.0, 0, 1.9, 8.9, f.call(0.34), C.GUN),                        # heavy barrel
+		_fb(1.1, 8.0, 0, 1.9, 8.9, f.call(0.3), C.GUN),                         # heavy barrel
 		_fb(0.9, 7.7, 0, 2.1, 9.2, 1.5, C.GUN),                                 # flash hider
-		_fb(0.3, 9.2, f.call(0.2), 2.7, 9.6, f.call(0.34), C.GUN_LIGHT),        # barrel shroud top
-		_fb(0.4, 6.4, f.call(0.12), 2.6, 8.0, f.call(0.33), C.GUN_LIGHT),       # handguard
-		_fb(0.4, 5.6, f.call(0.1), 0.8, 6.4, f.call(0.3), C.GUN),               # bipod, folded under
-		_fb(2.2, 5.6, f.call(0.1), 2.6, 6.4, f.call(0.3), C.GUN),
-		_fb(0.5, 6.8, f.call(0.34), 2.5, 9.9, f.call(0.7), C.GUN),              # receiver and feed cover
-		_fb(1.0, 9.9, f.call(0.46), 2.0, 10.8, f.call(0.52), C.GUN),            # carry handle
-		_fb(0.4, 3.4, f.call(0.42), 2.6, 6.8, f.call(0.6), C.GUN_LIGHT),        # belt box
-		_fb(0.4, 3.4, f.call(0.42), 2.6, 3.8, f.call(0.6), C.GUN),
-		_fb(1.25, 5.8, f.call(0.62), 1.75, 6.2, f.call(0.68), C.GUN),           # trigger guard
-		_fb(0.9, 4.4, f.call(0.68), 2.1, 6.8, f.call(0.73), C.GUN),             # pistol grip
-		_fb(0.9, 3.0, f.call(0.69), 2.1, 4.4, f.call(0.74), C.GUN),
-		_fb(0.8, 5.6, f.call(0.7), 2.2, 9.0, n, C.GUN_LIGHT),                   # fixed stock
-		_fb(0.8, 5.0, f.call(0.9), 2.2, 6.0, n, C.GUN),
-		_fb(0.8, 4.8, n - 0.5, 2.2, 9.0, n, C.GUN),                             # butt pad
+		_fb(0.35, 5.0, f.call(0.05), 0.9, 8.0, f.call(0.2), C.GUN),             # bipod, folded near the muzzle
+		_fb(2.1, 5.0, f.call(0.05), 2.65, 8.0, f.call(0.2), C.GUN),
+		_fb(1.2, 7.7, f.call(0.06), 1.8, 8.0, f.call(0.4), C.GUN_LIGHT),        # gas tube, below the barrel
+		_fb(0.4, 6.6, f.call(0.2), 2.6, 7.7, f.call(0.36), C.GUN_LIGHT),        # handguard over the gas system
+		_fb(0.5, 6.8, f.call(0.36), 2.5, 9.6, f.call(0.84), C.GUN),             # long receiver (the M240's is the longest of the three)
+		_fb(0.65, 9.6, f.call(0.42), 2.35, 10.4, f.call(0.8), C.GUN_LIGHT),     # raised feed tray cover, top/right feed
+		_fb(1.0, 10.4, f.call(0.5), 2.0, 11.1, f.call(0.6), C.GUN),             # carry handle, on top of the feed cover
+		_fb(0.4, 4.6, f.call(0.52), 2.6, 6.6, f.call(0.66), C.GUN_LIGHT),       # ammo box, below the feed cover
+		_fb(1.25, 5.8, f.call(0.7), 1.75, 6.2, f.call(0.76), C.GUN),            # trigger guard
+		_fb(0.9, 4.4, f.call(0.76), 2.1, 6.8, f.call(0.81), C.GUN),             # black synthetic pistol grip
+		_fb(0.9, 3.0, f.call(0.77), 2.1, 4.4, f.call(0.82), C.GUN),
+		# Side-folding skeletonized stock: offset toward +x (it folds along the side, not a
+		# straight block), an angular cut-out frame rather than a solid stock.
+		_fb(1.3, 7.8, f.call(0.84), 2.5, 8.4, n, C.GUN),                        # top rail, offset to one side
+		_fb(1.3, 5.8, f.call(0.84), 2.5, 6.3, n, C.GUN),                        # bottom rail
+		_fb(1.3, 5.8, f.call(0.84), 2.5, 8.4, f.call(0.88), C.GUN_LIGHT),       # front strut
+		_fb(1.2, 5.6, n - 0.5, 2.6, 8.6, n, C.GUN),                             # butt pad
 	]}
+
+
+## An M249 SAW: the ammo box hangs directly under the receiver (not off to the side, like the
+## PKM's), a full-length heat-shielded barrel with large oval vents along its TOP, a small
+## magazine-well door on the left of the receiver (the STANAG-mag feed option neither the PKM
+## nor the M240 have), and a collapsible CAR-style stock — slimmer than either's and shorter
+## overall than the M240's. Rear aperture irons.
+static func _rifle_m249(length: int, art := IRONS) -> Dictionary:
+	var n := maxi(length, 20)
+	var f := func(t: float) -> float: return n * t
+	var sight := iron_boxes(n) if art == IRONS else optic_boxes(art, sight_back(art, n))
+	var boxes := sight + [
+		_fb(1.15, 8.1, 0, 1.85, 8.8, f.call(0.28), C.GUN),                      # barrel, shorter than the M240's
+		_fb(0.95, 7.8, 0, 2.05, 9.1, 1.3, C.GUN),                               # flash hider
+		_fb(0.4, 5.6, f.call(0.08), 0.85, 6.4, f.call(0.24), C.GUN),            # bipod, folded under near the front of the handguard
+		_fb(2.15, 5.6, f.call(0.08), 2.6, 6.4, f.call(0.24), C.GUN),
+		_fb(0.3, 9.0, f.call(0.18), 2.7, 9.6, f.call(0.56), C.GUN_LIGHT),       # heat shield, full length of the exposed barrel
+		_fb(0.6, 6.8, f.call(0.56), 2.4, 9.6, f.call(0.64), C.GUN),             # receiver
+		_fb(1.0, 9.6, f.call(0.4), 2.0, 10.3, f.call(0.5), C.GUN),              # integrated carry handle, top rear
+		_fb(0.4, 6.8, f.call(0.6), 0.6, 8.2, f.call(0.68), C.GUN_LIGHT),        # magazine-well door, left side of the receiver
+		_fb(0.5, 4.0, f.call(0.34), 2.5, 6.8, f.call(0.52), C.GUN_LIGHT),       # ammo box, directly under the receiver
+		_fb(0.5, 4.0, f.call(0.34), 2.5, 4.4, f.call(0.52), C.GUN),
+		_fb(1.25, 5.6, f.call(0.68), 1.75, 6.0, f.call(0.74), C.GUN),           # trigger guard
+		_fb(0.9, 4.2, f.call(0.74), 2.1, 6.8, f.call(0.79), C.GUN),             # pistol grip
+		_fb(0.9, 2.8, f.call(0.75), 2.1, 4.2, f.call(0.8), C.GUN),
+		_fb(1.15, 7.5, f.call(0.82), 1.85, 8.3, f.call(0.95), C.GUN_LIGHT),     # buffer tube, exposed
+		_fb(1.0, 6.4, f.call(0.95), 2.0, 8.9, n, C.GUN_LIGHT),                  # slim collapsible stock
+		_fb(1.0, 6.0, n - 0.4, 2.0, 8.9, n, C.GUN),                             # butt pad
+	]
+	# Oval vent holes along the TOP of the heat shield (not the sides: Captain's reference).
+	var z: float = f.call(0.2)
+	while z < f.call(0.54):
+		boxes.append(_fb(1.0, 9.35, z, 2.0, 9.55, z + n * 0.02, C.EMPTY))
+		z += n * 0.04
+	return {"size": Vector3i(3, 13, n), "sub": 4, "boxes": boxes}
+
+
+## An L85A2: a bullpup — the magazine and the long receiver that feeds it sit BEHIND the
+## pistol grip and trigger, running on to the shoulder plate with no separate stock past it
+## (Captain, reference photo: the family's single most distinct trait — should read as a
+## different gun at a glance). The grip itself stays at the AR family's usual spot
+## (hand_points reads a fixed fraction of the model's length for every rifle style, not this
+## one specially), so the shift the eye catches is the magazine moving in behind it and the
+## stock disappearing. A flat full-length rail replaces the old carry-handle sight housing
+## (the modern upgrade Captain's photo shows, not the original SUSAT hump).
+static func _rifle_bullpup(length: int, art := IRONS) -> Dictionary:
+	var n := maxi(length, 20)
+	var f := func(t: float) -> float: return n * t
+	var sight := iron_boxes(n) if art == IRONS else optic_boxes(art, sight_back(art, n))
+	return {"size": Vector3i(3, 13, n), "sub": 4, "boxes": sight + [
+		_fb(1.25, 8.25, 0, 1.75, 8.75, f.call(0.26), C.GUN),                    # barrel (most of it is inside the long receiver)
+		_fb(1.05, 7.95, 0, 1.95, 9.05, 1.5, C.GUN),                             # muzzle device
+		_fb(0.8, 8.9, 0.5, 1.1, 9.3, 1.3, C.GUN_LIGHT),                         # front sling ring, near the muzzle
+		_fb(1.2, 8.75, f.call(0.1), 1.8, 9.9, f.call(0.12), C.GUN),             # gas block
+		_fb(0.6, 7.0, f.call(0.12), 2.4, 9.6, f.call(0.33), C.GUN_LIGHT),       # short handguard, angular lines
+		_fb(0.9, 9.6, f.call(0.12), 2.1, 9.95, f.call(0.9), C.GUN),             # flat full-length rail, replacing the old carry handle
+		_fb(0.7, 7.0, f.call(0.33), 2.3, 9.6, f.call(0.92), C.GUN),             # the long receiver, running past the grip to the shoulder plate
+		_fb(0.9, 4.2, f.call(0.73), 2.1, 5.8, f.call(0.88), C.GUN_LIGHT),       # magazine, curved, hanging BEHIND the grip
+		_fb(0.9, 2.8, f.call(0.735), 2.1, 4.2, f.call(0.875), C.GUN_LIGHT),
+		_fb(1.25, 4.6, f.call(0.6), 1.75, 5.0, f.call(0.66), C.GUN),            # trigger guard, well forward of the magazine
+		_fb(0.9, 4.4, f.call(0.66), 2.1, 6.8, f.call(0.71), C.GUN),             # pistol grip (the AR family's usual spot: hand_points)
+		_fb(0.9, 3.0, f.call(0.67), 2.1, 4.4, f.call(0.72), C.GUN),
+		_fb(0.9, 1.6, f.call(0.68), 2.1, 3.0, f.call(0.735), C.GUN),
+		_fb(0.7, 6.0, n - 0.5, 2.3, 9.6, n, C.GUN),                             # shoulder plate: the receiver's own back end, no stock past it
+	]}
+
+
+## A C8: the standard AR/M4-pattern upper and lower (no piston tube: unlike the HK416, just the
+## thin direct-impingement gas tube under the rail), a shorter barrel and handguard than the
+## full-size AR family, and a collapsible Magpul-style stock on a longer exposed buffer tube
+## with position notches (it telescopes), not a fixed one.
+static func _rifle_carbine_short(length: int, art := IRONS) -> Dictionary:
+	var n := maxi(length, 20)
+	var f := func(t: float) -> float: return n * t
+	var sight := iron_boxes(n) if art == IRONS else optic_boxes(art, sight_back(art, n))
+	var boxes := sight + [
+		_fb(1.25, 8.25, 0, 1.75, 8.75, f.call(0.2), C.GUN),                     # short barrel
+		_fb(1.05, 7.95, 0, 1.95, 9.05, 1.5, C.GUN),                             # muzzle device
+		_fb(1.2, 8.75, f.call(0.09), 1.8, 9.9, f.call(0.11), C.GUN),            # gas block, close behind the short barrel
+		_fb(0.6, 7.0, f.call(0.11), 2.4, 9.6, f.call(0.3), C.GUN_LIGHT),        # short M-LOK handguard
+		_fb(0.9, 9.6, f.call(0.11), 2.1, 9.95, f.call(0.6), C.GUN),             # top rail, bare further back than the handguard
+		_fb(0.6, 7.0, f.call(0.11), 0.85, 9.6, f.call(0.3), C.GUN),             # side rails
+		_fb(2.15, 7.0, f.call(0.11), 2.4, 9.6, f.call(0.3), C.GUN),
+		_fb(0.7, 7.0, f.call(0.3), 2.3, 9.6, f.call(0.6), C.GUN),               # upper receiver
+		_fb(0.75, 5.6, f.call(0.47), 2.25, 7.0, f.call(0.72), C.GUN),           # lower receiver
+		_fb(0.9, 4.2, f.call(0.5), 2.1, 5.6, f.call(0.575), C.GUN_LIGHT),       # magazine, curving forward
+		_fb(0.9, 2.8, f.call(0.49), 2.1, 4.2, f.call(0.565), C.GUN_LIGHT),
+		_fb(0.9, 1.4, f.call(0.475), 2.1, 2.8, f.call(0.55), C.GUN_LIGHT),
+		_fb(0.85, 1.0, f.call(0.47), 2.15, 1.4, f.call(0.55), C.GUN),
+		_fb(1.25, 4.6, f.call(0.6), 1.75, 5.0, f.call(0.66), C.GUN),            # trigger guard
+		_fb(0.9, 4.4, f.call(0.66), 2.1, 5.6, f.call(0.71), C.GUN),             # pistol grip
+		_fb(0.9, 3.0, f.call(0.67), 2.1, 4.4, f.call(0.72), C.GUN),
+		_fb(0.9, 1.6, f.call(0.68), 2.1, 3.0, f.call(0.735), C.GUN),
+		_fb(1.1, 7.5, f.call(0.74), 1.9, 8.7, f.call(0.95), C.GUN_LIGHT),       # buffer tube, exposed further than a fixed-stock AR's
+	]
+	var z: float = f.call(0.77)
+	while z < f.call(0.92):
+		boxes.append(_fb(1.1, 8.3, z, 1.9, 8.5, z + n * 0.008, C.EMPTY))        # position notches: it telescopes, not fixed
+		z += n * 0.04
+	boxes.append_array([
+		_fb(0.85, 6.6, f.call(0.88), 2.15, 9.0, n, C.GUN_LIGHT),                # collapsible stock, slimmer than a fixed one
+		_fb(0.85, 5.8, n - 0.4, 2.15, 9.0, n, C.GUN),                           # butt pad
+	])
+	return {"size": Vector3i(3, 13, n), "sub": 4, "boxes": boxes}
+
+
+## An HK416: piston-driven, not direct-impingement — a return-rod tube running along the top of
+## the handguard from a taller gas block back toward the upper receiver (where the DI family's
+## slim gas tube hides under the rail, out of sight). Everything else matches the M4 pattern.
+static func _rifle_piston_ar(length: int, art := IRONS) -> Dictionary:
+	var n := maxi(length, 20)
+	var f := func(t: float) -> float: return n * t
+	var sight := iron_boxes(n) if art == IRONS else optic_boxes(art, sight_back(art, n))
+	return {"size": Vector3i(3, 13, n), "sub": 4, "boxes": sight + [
+		_fb(1.25, 8.25, 0, 1.75, 8.75, f.call(0.3), C.GUN),                     # barrel
+		_fb(1.05, 7.95, 0, 1.95, 9.05, 1.5, C.GUN),                             # muzzle device
+		_fb(1.1, 8.75, f.call(0.12), 1.9, 10.0, f.call(0.16), C.GUN),           # gas block tower, taller than the DI family's
+		_fb(1.2, 9.95, f.call(0.16), 1.8, 10.25, f.call(0.44), C.GUN_LIGHT),    # piston rod, riding above the rail
+		_fb(0.6, 7.0, f.call(0.15), 2.4, 9.6, f.call(0.45), C.GUN_LIGHT),       # handguard
+		_fb(0.9, 9.6, f.call(0.15), 2.1, 9.95, f.call(0.45), C.GUN),            # top rail
+		_fb(0.6, 7.0, f.call(0.15), 0.85, 9.6, f.call(0.45), C.GUN),            # side rails
+		_fb(2.15, 7.0, f.call(0.15), 2.4, 9.6, f.call(0.45), C.GUN),
+		_fb(0.7, 7.0, f.call(0.45), 2.3, 9.6, f.call(0.74), C.GUN),             # upper receiver
+		_fb(0.75, 5.6, f.call(0.47), 2.25, 7.0, f.call(0.72), C.GUN),           # lower receiver
+		_fb(0.9, 4.2, f.call(0.5), 2.1, 5.6, f.call(0.575), C.GUN_LIGHT),       # magazine, curving forward
+		_fb(0.9, 2.8, f.call(0.49), 2.1, 4.2, f.call(0.565), C.GUN_LIGHT),
+		_fb(0.9, 1.4, f.call(0.475), 2.1, 2.8, f.call(0.55), C.GUN_LIGHT),
+		_fb(0.85, 1.0, f.call(0.47), 2.15, 1.4, f.call(0.55), C.GUN),
+		_fb(1.25, 4.6, f.call(0.6), 1.75, 5.0, f.call(0.66), C.GUN),            # trigger guard
+		_fb(0.9, 4.4, f.call(0.66), 2.1, 5.6, f.call(0.71), C.GUN),             # pistol grip
+		_fb(0.9, 3.0, f.call(0.67), 2.1, 4.4, f.call(0.72), C.GUN),
+		_fb(0.9, 1.6, f.call(0.68), 2.1, 3.0, f.call(0.735), C.GUN),
+		_fb(1.1, 7.6, f.call(0.74), 1.9, 8.8, f.call(0.82), C.GUN_LIGHT),       # buffer tube
+		_fb(0.8, 6.0, f.call(0.8), 2.2, 9.4, n, C.GUN_LIGHT),                   # stock
+		_fb(0.95, 9.4, f.call(0.82), 2.05, 9.8, f.call(0.95), C.GUN_LIGHT),     # cheek rest
+		_fb(0.8, 5.6, n - 0.5, 2.2, 9.8, n, C.GUN),                             # butt pad
+	]}
+
+
+## A bolt-action rifle (Mosin-Nagant 91/30): a one-piece wood stock running nearly the barrel's
+## full length (unlike the AR/AK families' separate handguard and receiver), a straight,
+## uncurved wrist (no pistol grip), no visible magazine (it feeds internally, loaded from
+## 5-round stripper clips, flush under the receiver), and a bolt handle sticking out to the
+## right — the one thing that cycles it between shots. `art` is almost always IRONS: the PU
+## scope mounts low and offset to the rifle's left in reality (its bolt handle needs the
+## centreline clear), but this engine's rail always mounts an optic centred like every other
+## rifle's (Optics has no per-weapon offset), so it rides centred here too.
+static func _rifle_bolt(length: int, art := IRONS, turned_grip := false) -> Dictionary:
+	var n := maxi(length, 20)
+	var f := func(t: float) -> float: return n * t
+	var sight := ak_iron_boxes(n) if art == IRONS else optic_boxes(art, sight_back(art, n))
+	var wrist_end: float = f.call(0.76) if turned_grip else f.call(0.73)
+	return {"size": Vector3i(3, 13, n), "sub": 4, "boxes": sight + [
+		_fb(1.3, 8.3, 0, 1.7, 8.7, f.call(0.9), C.GUN),                         # thin barrel, most of it under the stock
+		_fb(1.1, 8.1, 0, 1.9, 8.9, 2.0, C.GUN),                                 # muzzle / front barrel band
+		_fb(0.6, 6.6, f.call(0.04), 2.4, 9.0, f.call(0.08), C.WOOD_DARK),       # nose cap
+		_fb(0.55, 6.6, f.call(0.08), 2.45, 9.0, f.call(0.86), C.WOOD),          # one-piece wood stock, nearly full length
+		_fb(0.55, 6.6, f.call(0.42), 2.45, 7.0, f.call(0.46), C.WOOD_DARK),     # middle barrel band / sling swivel
+		_fb(0.7, 7.0, f.call(0.5), 2.3, 9.3, f.call(0.84), C.GUN),              # receiver, sitting in the stock's cut
+		_fb(0.6, 6.4, f.call(0.52), 2.4, 7.0, f.call(0.62), C.GUN_LIGHT),       # flush floorplate: an internal box magazine, nothing sticking out
+		_fb(1.25, 5.6, f.call(0.62), 1.75, 6.0, f.call(0.68), C.GUN),           # trigger guard
+		_fb(2.3, 8.0, f.call(0.68), 2.75, 8.5, f.call(0.74), C.GUN),            # bolt shaft, sticking out to the right
+		_fb(2.6, 7.6, f.call(0.71), 3.0, 9.0, f.call(0.78), C.GUN_LIGHT),       # bolt handle's knob
+		_fb(0.85, 4.0, f.call(0.65), 2.15, 7.0, wrist_end, C.WOOD_DARK if turned_grip else C.WOOD),  # stock's wrist
+		_fb(0.8, 5.6, f.call(0.84), 2.2, 9.0, n, C.WOOD),                       # long buttstock
+		_fb(0.8, 5.0, f.call(0.95), 2.2, 6.0, n, C.WOOD_DARK),
+		_fb(0.8, 4.8, n - 0.4, 2.2, 9.0, n, C.METAL),                           # steel butt plate (no recoil pad on a milsurp bolt gun)
+	]}
+
+
+## A modern precision bolt-action rifle (the "Springfield Heatseeker": tan/FDE chassis, not the
+## vintage wood rifle — Captain, reference photos, 2026-10-16): a folding, adjustable chassis
+## stock instead of wood, an M-LOK handguard with lightening cuts, a DETACHABLE black box
+## magazine (not stripper clips: this one's a modern precision chassis gun), an adjustable
+## bipod, a threaded muzzle (suppressor-ready: _with_suppressor), and the same bolt-handle
+## cue as the Mosin, since it's still a manually-cycled action.
+static func _rifle_chassis_bolt(length: int, art := IRONS) -> Dictionary:
+	var n := maxi(length, 20)
+	var f := func(t: float) -> float: return n * t
+	var sight := iron_boxes(n) if art == IRONS else optic_boxes(art, sight_back(art, n))
+	var boxes := sight + [
+		_fb(1.2, 8.2, 0, 1.8, 8.8, f.call(0.5), C.GUN),                         # heavy precision barrel
+		_fb(1.0, 8.0, 0, 2.0, 9.0, 1.5, C.GUN),                                 # threaded muzzle device
+		_fb(0.4, 5.2, f.call(0.1), 0.85, 7.6, f.call(0.24), C.GUN),             # adjustable bipod, extended
+		_fb(2.15, 5.2, f.call(0.1), 2.6, 7.6, f.call(0.24), C.GUN),
+		_fb(0.5, 6.6, f.call(0.12), 2.5, 8.6, f.call(0.56), C.GUN_LIGHT),       # M-LOK handguard
+		_fb(0.9, 8.6, f.call(0.12), 2.1, 8.95, f.call(0.72), C.GUN),            # full-length top rail, for the scope
+		_fb(0.7, 7.0, f.call(0.56), 2.3, 8.6, f.call(0.74), C.GUN),             # receiver, in the chassis
+		_fb(0.9, 4.0, f.call(0.6), 2.1, 7.0, f.call(0.68), C.GUN),              # detachable box magazine, protruding below
+		_fb(0.9, 4.0, f.call(0.6), 2.1, 4.4, f.call(0.68), C.GUN_LIGHT),
+		_fb(1.25, 5.8, f.call(0.68), 1.75, 6.2, f.call(0.73), C.GUN),           # trigger guard
+		_fb(0.9, 4.4, f.call(0.73), 2.1, 7.0, f.call(0.78), C.GUN_LIGHT),       # chassis pistol grip
+		_fb(2.3, 8.3, f.call(0.69), 2.7, 8.7, f.call(0.74), C.GUN),             # bolt shaft
+		_fb(2.6, 7.9, f.call(0.72), 2.95, 9.1, f.call(0.78), C.GUN_LIGHT),      # bolt handle's knob
+	]
+	# M-LOK lightening cuts along the handguard's sides (EMPTY slots, not solid polymer).
+	var z: float = f.call(0.18)
+	while z < f.call(0.52):
+		boxes.append(_fb(0.5, 7.0, z, 0.65, 8.2, z + n * 0.012, C.EMPTY))
+		boxes.append(_fb(2.35, 7.0, z, 2.5, 8.2, z + n * 0.012, C.EMPTY))
+		z += n * 0.045
+	boxes.append_array([
+		# Folding, adjustable chassis stock: an open skeleton frame (not solid, not wood) with
+		# an adjustable cheek riser block on top.
+		_fb(1.0, 7.8, f.call(0.8), 2.0, 8.3, n, C.GUN_LIGHT),                   # cheek riser, raised above the frame
+		_fb(1.0, 7.2, f.call(0.78), 2.0, 7.6, n, C.GUN),                        # top rail of the folding frame
+		_fb(1.0, 5.4, f.call(0.78), 2.0, 5.9, n, C.GUN),                        # bottom rail
+		_fb(1.0, 5.4, f.call(0.78), 2.0, 7.6, f.call(0.82), C.GUN),             # front strut, closes the frame
+		_fb(0.9, 5.2, n - 0.6, 2.1, 8.4, n, C.GUN_LIGHT),                       # adjustable buttpad / spacer stack
+	])
+	return {"size": Vector3i(3, 13, n), "sub": 4, "boxes": boxes}
+
+
+## A suppressor stacked on the muzzle: every other box shifts back by its length (so the model's
+## muzzle, and everything behind it, keeps its usual place — grip/stock points, iron sights,
+## optic mount), and a plain can fills the new gap at the front. Generic over every rifle style
+## (_spec applies it after building whichever style ran), so adding it to a new silhouette
+## never needs its own suppressor geometry.
+const SUPPRESSOR_FRAC := 0.2
+
+static func _with_suppressor(spec: Dictionary) -> Dictionary:
+	var n: float = spec.size.z
+	var shift := n * SUPPRESSOR_FRAC
+	var boxes: Array = []
+	for b: Array in spec.boxes:
+		boxes.append([b[0] + Vector3(0, 0, shift), b[1] + Vector3(0, 0, shift), b[2]])
+	boxes.append(_fb(1.0, 7.9, 0, 2.0, 9.1, shift, C.GUN_LIGHT))                # suppressor body
+	boxes.append(_fb(1.1, 8.0, 0, 1.9, 9.0, shift * 0.1, C.GUN))                # end cap
+	var size: Vector3i = spec.size
+	size.z += ceili(shift)
+	return {"size": size, "sub": spec.get("sub", 1), "boxes": boxes}
 
 
 ## 0.04 x 0.14 x 0.20 m, muzzle at z = 0, built at 0.5 cm: slide, frame, raked grip,

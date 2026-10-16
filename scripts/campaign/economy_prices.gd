@@ -64,7 +64,8 @@ static func condition_of(state: Dictionary) -> float:
 ## What `count` of `item_id` are worth (salvage picks and the value of what's left in the
 ## field), by their condition.
 static func value_of(item_id: StringName, count := 1, state := {}) -> int:
-	var each := price_of(item_id) + Optics.extra_price(ItemDB.get_item(item_id), state) if ItemDB.has_item(item_id) else price_of(item_id)  # a gun's optic (P0362)
+	var item: ItemData = ItemDB.get_item(item_id) if ItemDB.has_item(item_id) else null
+	var each := price_of(item_id) + Optics.extra_price(item, state) + Suppressors.extra_price(item, state) if item else price_of(item_id)  # a gun's optic/suppressor
 	return roundi(each * count * condition_of(state))
 
 

@@ -19,6 +19,7 @@
 		{"id": "556_m995", "name": "5.56x45mm M995 AP", "level": "IV", "class": "intermediate", "calibre_mm": 5.7, "mass_g": 3.4, "muzzle_mps": 1000, "bc": 0.16, "drag": "G7"},
 		{"id": "762x51_m993", "name": "7.62x51mm M993 AP", "level": "IV", "class": "full_power", "calibre_mm": 7.8, "mass_g": 8.2, "muzzle_mps": 910, "bc": 0.2, "drag": "G7"},
 		{"id": "3006_m2ap", "name": ".30-06 M2 AP", "level": "IV", "class": "full_power", "calibre_mm": 7.8, "mass_g": 10.8, "muzzle_mps": 850, "bc": 0.19, "drag": "G7"},
+		{"id": "65cm_eldm", "name": "6.5 Creedmoor 143gr ELD-M", "level": "III+", "class": "full_power", "calibre_mm": 6.7, "mass_g": 9.3, "muzzle_mps": 823, "bc": 0.3, "drag": "G7"},
 		{"id": "50bmg_m33", "name": ".50 BMG M33 ball", "level": "ABOVE_IV", "class": "full_power", "calibre_mm": 12.9, "mass_g": 42.9, "muzzle_mps": 890, "bc": 0.33, "drag": "G7"}
 	]
 }
