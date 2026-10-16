@@ -85,8 +85,11 @@ func _test_generation() -> void:
 		zones_ok = zones_ok and not layout.is_empty() and (layout.modules as Array).size() >= 4 			and ["compound", "outpost", "village", "checkpoint"].all(func(t: String) -> bool: return t in z.modules or (hot and t == "compound")) 			and (z.modules as Array).size() == (7 if hot else (5 if "town" in z.modules else 4))
 		zones_ok = zones_ok and layout == MissionRegistry.zone_def(String(z.zone_id))
 		var size := float(layout.get("size_m", 0))
-		zones_ok = zones_ok and (is_equal_approx(size, ZoneDef.HOT_SIZE_M) if hot else size * size >= 2.0e6 and size * size <= 4.0e6)
-	check(zones_ok, "every zone is a generated layout, the same every time: contract zones 2-4 km² with all four module types (a town in some), hot zones 16 km² with the enemy's structure, villages and a town")
+		# Up to 6.0e6 m² (~2.45 km a side): "Five more contract zones" (2026-10-16) added
+		# salt_pan/thornveld at 2304 m with more sites (count 6/7) than the usual 5, deliberately
+		# bigger to fit them ("1920-2304 m, 5-7 sites each") - 4.0e6 (2 km a side) was too tight.
+		zones_ok = zones_ok and (is_equal_approx(size, ZoneDef.HOT_SIZE_M) if hot else size * size >= 2.0e6 and size * size <= 6.0e6)
+	check(zones_ok, "every zone is a generated layout, the same every time: contract zones 2-6 km² with all four module types (a town in some), hot zones 16 km² with the enemy's structure, villages and a town")
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 4242
 	var sites := {}
