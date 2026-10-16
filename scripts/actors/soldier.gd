@@ -864,6 +864,21 @@ func _server_squad_command(cmd: String, point: Vector3, names: PackedStringArray
 	var squad := CompoundLevel.current(self).squad_for(faction)
 	if squad == null:
 		return
+	var own_team := squad.human_team_lead_of(self)
+	if own_team >= 0:
+		# A human team leader orders his own fire team and doesn't take the squad's lead.
+		var keep := squad.leader
+		names = squad.team_names(own_team, names)
+		if names.is_empty():
+			return
+		_squad_command_as(squad, cmd, point, names)
+		if is_instance_valid(keep):
+			squad.leader = keep
+		return
+	_squad_command_as(squad, cmd, point, names)
+
+
+func _squad_command_as(squad: Squad, cmd: String, point: Vector3, names: PackedStringArray) -> void:
 	var ordered_why := squad.order_command(self, cmd, point, names)  # the command menu's orders (queue 12)
 	if ordered_why != "?":
 		if ordered_why != "":
@@ -1455,9 +1470,18 @@ func _log_care(target: Node, item_id: StringName, part: StringName, outcome: Str
 ## next casualty: Captain, P0164 queue 17), otherwise this soldier's.
 func _kit_for(target: Node3D, item_id: StringName, their_kit: bool) -> Inventory:
 	var casualty := target as Soldier
-	if their_kit and casualty and casualty != self and Vitals.has_item(casualty.inventory, item_id):
+	if casualty and casualty != self and Vitals.has_item(casualty.inventory, item_id) 			and (their_kit or not Vitals.has_item(inventory, item_id)):
 		return casualty.inventory
 	return inventory
+
+
+## `actor` can treat `target` with `item_id` from its own kit or the casualty's (players and
+## AI both may use the casualty's own items; the host takes it from theirs first: _kit_for).
+static func kit_has(actor: Soldier, target: Node, item_id: StringName) -> bool:
+	if Vitals.has_item(actor.inventory, item_id):
+		return true
+	var casualty := target as Soldier
+	return casualty != null and casualty != actor and Vitals.has_item(casualty.inventory, item_id)
 
 
 ## Host side of a treatment (_server_treat, _server_use_medical).
