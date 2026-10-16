@@ -78,6 +78,9 @@ const FIRE_BUNCH_S := 0.15
 ## Captain, 2026-10-16: "bullets come from eyes not from guns".
 const MUZZLE_FROM_EYE := Vector3(0.14, -0.16, 0.45)
 const SIDEARM_MUZZLE_FROM_EYE := Vector3(0.12, -0.14, 0.32)
+## Aimed down the sights the muzzle is right under the eye, not out at the hip (Captain,
+## 2026-10-16: "rounds coming from the right of the m4" when aiming).
+const AIMED_MUZZLE_FROM_EYE := Vector3(0.0, -0.07, 0.5)
 ## One round in TRACER_EVERY is a tracer (a weapon's "tracer_every" stat overrides; 0: none),
 ## red for our side, green for the enemy (Tracer.Kind); the rest show as faint ball streaks.
 const TRACER_EVERY := 5
@@ -832,8 +835,8 @@ static func usable_direction(d: Vector3) -> bool:
 
 
 ## The muzzle's world point for a shot from `eye` along `dir` (MUZZLE_FROM_EYE).
-static func muzzle_point(eye: Vector3, dir: Vector3, sidearm: bool, lefty: bool) -> Vector3:
-	var offset := SIDEARM_MUZZLE_FROM_EYE if sidearm else MUZZLE_FROM_EYE
+static func muzzle_point(eye: Vector3, dir: Vector3, sidearm: bool, lefty: bool, aimed := false) -> Vector3:
+	var offset := AIMED_MUZZLE_FROM_EYE if aimed else (SIDEARM_MUZZLE_FROM_EYE if sidearm else MUZZLE_FROM_EYE)
 	var forward := dir.normalized()
 	var right := forward.cross(Vector3.UP)
 	if right.length_squared() < 0.0001:
@@ -871,7 +874,7 @@ func _server_fire(origin: Vector3, direction: Vector3, slot: StringName) -> void
 	last_shot_suppressed = suppressed
 	var round_end: Variant = result.get("position")
 	var round_point: Vector3 = round_end if round_end is Vector3 else origin + direction.normalized() * 400.0
-	var muzzle := muzzle_point(origin, direction.normalized(), weapon.slot == &"sidearm", left_handed)
+	var muzzle := muzzle_point(origin, direction.normalized(), weapon.slot == &"sidearm", left_handed, is_aiming)
 	if muzzle.distance_to(origin) >= origin.distance_to(round_point):
 		muzzle = origin  # the round stopped before the muzzle (pressed against a wall)
 	Sfx.server_shot(muzzle, round_point,
