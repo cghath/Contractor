@@ -2872,6 +2872,14 @@ func _tactic_clear(t: Dictionary, now: float) -> void:
 		_go(corner, true)
 		return
 	_has_destination = false
+	# His sector (Captain, 2026-10-16: breaching, entry): from his corner, into the room past
+	# the middle of where the team's corners are, weapon up.
+	var mid := Vector3.ZERO
+	for p: Vector3 in floors[level]:
+		mid += p
+	mid /= maxf((floors[level] as Array).size(), 1.0)
+	_face(corner + (mid - corner) * 2.0)
+	body.want_aim = true
 	if level + 1 < floors.size():
 		# This floor done: up the stair once the rest are done here too, one after the other.
 		var marks: Dictionary = op.floor_done[level]
@@ -2879,7 +2887,7 @@ func _tactic_clear(t: Dictionary, now: float) -> void:
 		op.floor_first[level] = minf(float(op.floor_first[level]), now)
 		if not is_finite(float(op.floor_go[level + 1])) and (marks.size() >= int(op.units) or now - float(op.floor_first[level]) >= SquadTactics.FLOOR_WAIT_S):
 			op.floor_go[level + 1] = now
-			_callout(&"tactic", "Moving up!")
+			_callout(&"tactic", "Clear! Moving up!")
 		if is_finite(float(op.floor_go[level + 1])) and now >= float(op.floor_go[level + 1]) + slot * SquadTactics.ENTRY_GAP_S:
 			op.floor_of[slot] = level + 1
 		return

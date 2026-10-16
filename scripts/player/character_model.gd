@@ -324,6 +324,11 @@ var reloading := false
 ## Lying face down, head forward (see lay_down). Overrides `pose`.
 var downed := false
 var _flinch := 0.0      # a hit's jolt, decaying (flinch)
+var _was_downed := false
+var _downed_t := 99.0   # seconds since the body went down or got up (the slump)
+## Going down: over SLUMP_S the pose eases at SLUMP_EASE (slow) instead of POSE_EASE.
+const SLUMP_S := 1.1
+const SLUMP_EASE := 2.6
 var _flinch_side := 1.0
 ## The stance to show (keys as in REST_POSE). Set every frame by the body that owns it.
 var pose: Dictionary = REST_POSE.duplicate()
@@ -1129,6 +1134,12 @@ func _process(frame_delta: float) -> void:
 	## (a rider looking round), and eased the two would swing it about the seat.
 	var seated := is_seated() and not casualty
 	var blend := 1.0 if limp or seated else minf(delta * (ACTION_EASE if acting else POSE_EASE), 1.0)
+	if downed != _was_downed:
+		_was_downed = downed
+		_downed_t = 0.0
+	_downed_t += delta
+	if downed and not limp and _downed_t < SLUMP_S:
+		blend = minf(delta * SLUMP_EASE, 1.0)  # sinking down (Captain: wounded/dying anims), not a snap
 	for key: String in target:
 		_shown[key] = (_shown[key] as Transform3D).interpolate_with(target[key], blend)
 	var target_yaw := 0.0 if casualty or downed else float(_last_pose.get("yaw", 0.0))
@@ -1847,14 +1858,20 @@ func _wounded_extras(delta: float) -> void:
 	var vitals: Vitals = body.get_node_or_null(^"Vitals") if body else null
 	if vitals == null or vitals.is_dead() or vitals.is_unconscious():
 		return
-	var t := _time * TAU * WRITHE_HZ
+	# Dying (Captain: "the wounded and such ... they do when dying"): as the blood goes the writhe
+	# slows and weakens (strength), the head lolls, and now and then the free hand reaches out.
+	var strength := clampf((vitals.blood_fraction() - 0.35) / 0.4, 0.15, 1.0)
+	var t := _time * TAU * WRITHE_HZ * lerpf(0.45, 1.0, strength)
 	var phase := float(absi(hash(String(body.name))) % 100) * 0.1  # not everyone in step
-	_upper[0].rotation.z += PRESS_ARM + sin(t + phase) * WRITHE_ARM * 0.4  # right hand in over the wound
-	_upper[0].rotation.x += 0.4
-	_upper[1].rotation.z += sin(t * 0.8 + phase) * WRITHE_ARM
-	_leg_left.rotation.x += sin(t * 0.7 + phase) * WRITHE_LEG
-	_leg_right.rotation.x += sin(t * 0.6 + phase + 1.7) * WRITHE_LEG
-	head.rotation.y += sin(t * 0.5 + phase) * WRITHE_HEAD
+	_upper[0].rotation.z += PRESS_ARM * strength + sin(t + phase) * WRITHE_ARM * 0.4 * strength  # right hand in over the wound
+	_upper[0].rotation.x += 0.4 * strength
+	var reach := maxf(sin(_time * 0.35 + phase), 0.0) * (1.0 - strength)  # the weaker, the more he reaches
+	_upper[1].rotation.z += sin(t * 0.8 + phase) * WRITHE_ARM * strength - reach * 1.1
+	_upper[1].rotation.x += reach * 0.9
+	_leg_left.rotation.x += sin(t * 0.7 + phase) * WRITHE_LEG * strength
+	_leg_right.rotation.x += sin(t * 0.6 + phase + 1.7) * WRITHE_LEG * strength
+	head.rotation.y += sin(t * 0.5 + phase) * WRITHE_HEAD * strength + (1.0 - strength) * 0.5  # lolling to the side
+	head.rotation.x += (1.0 - strength) * 0.3
 
 
 ## A limp on a wounded leg: on that foot's step the body dips and leans over it (LIMP_*), by how
