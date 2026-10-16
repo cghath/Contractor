@@ -452,7 +452,9 @@ static func _uh60(k: Cab) -> void:
 static func _vtol_petrel(k: Cab) -> void:
 	var o: float = VehicleArt.PETREL_NOSE_OFFSET
 	var cabin := VehicleArt.Section.new(0.55, 2.3, 1.3, 1.196, 0.05, 0.03)
-	k.carve_section(cabin, o - 5.0, o + 6.5, 0.6, 2.2, 0.12)
+	# Stops where the hull starts tapering (data z 4.6): this full-width section carved past it
+	# cut through the narrowing tail walls and left the last slice standing as a loose frame.
+	k.carve_section(cabin, o - 5.0, o + 4.6, 0.6, 2.2, 0.12)
 	k.glaze(-0.95, 1.7, o - 6.3, 0.95, 2.16, o - 5.15, 2, true)
 	k.glaze(-0.95, 2.16, o - 5.9, 0.95, 2.3, o - 5.3, 1, false)
 	k.glaze_sides(1.5, 0.9, 1.5, o - 3.7, 2.05, o - 2.3)  # gunner windows

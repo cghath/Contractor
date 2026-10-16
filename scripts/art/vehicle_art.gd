@@ -700,6 +700,7 @@ static func _vtol_petrel() -> Canvas:
 			s = s.scaled(maxf(sqrt(1.0 - pow((-7.1 - dz) / 0.25, 2.0)), 0.15), (top + bottom) * 0.5)
 		return s
 	c.mhull(0.3, o + 6.8, body, P.PAINT, 0.12)
+	c.mhull(o + 6.55, o + 6.8, body, P.PAINT_DARK)  # solid aft bulkhead: the shell is open-ended
 	# Flat top deck panel (reads as one faceted plate from the canopy back to the wing root).
 	c.mbox(-1.1, 2.26, o - 5.0, 1.1, 2.42, o + 1.2, P.PAINT_DARK)
 	# Two-pane angular cockpit canopy.
