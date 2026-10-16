@@ -650,6 +650,9 @@ func _tick(delta: float) -> void:
 	if not body.vitals.is_up():
 		_stop()
 		if care != Care.NONE:
+			if squad != null and care in [Care.REACH, Care.DRAG, Care.TREAT, Care.CARRY]:
+				squad.rescuer_down_at = now  # the next one doesn't walk into the same fire
+				squad.rescuer_down_point = body.global_position
 			_end_care()
 		if loot_body != null:
 			_end_scavenge()  # let go of the body, so a bearer waiting on it isn't stuck
@@ -825,6 +828,8 @@ func _foe() -> Soldier:
 func _medic_needs_cover() -> bool:
 	if not in_contact() or intent == Intent.CASUALTY:
 		return false
+	if Soldier._now() - _hold_for_cover_at < 1.0:
+		return true  # holding back from a casualty in the kill zone: suppress the shooter
 	for n in get_tree().get_nodes_in_group(&"combatants"):
 		var other := SquadAI.of(n)
 		if other and other != self and other.body != null and other.body.faction == body.faction and other.body.vitals.is_up() \
@@ -832,6 +837,24 @@ func _medic_needs_cover() -> bool:
 				and other.body.global_position.distance_to(body.global_position) <= COVER_MEDIC_M:
 			return true
 	return false
+
+
+## Going for `c` now would feed the squad into the fire on them: a rescuer went down near
+## them lately (REACH_HOT_S), or this is a casualty in the open to a known shooter and no one
+## has smoked, suppressed or flanked it yet. The first rescuer of an uncovered casualty still
+## goes (smoking first, _care_reach); anyone else waits for the threat to be dealt with.
+func _rescue_hot(c: Soldier) -> bool:
+	if not in_contact() or squad == null or _sheltered(c) or _screened(c.global_position):
+		return false
+	var now := Soldier._now()
+	var down := now - squad.rescuer_down_at < HOT_DOWN_S and squad.rescuer_down_point.distance_to(c.global_position) < HOT_DOWN_M
+	if not down:
+		return false
+	for n in get_tree().get_nodes_in_group(&"combatants"):
+		var f := n as Soldier
+		if f != null and f.faction != body.faction and f.vitals.is_up() and f.global_position.distance_to(body.threat_pos) < 4.0 				and f.suppression >= PINNED:
+			return false  # base of fire has them pinned
+	return true
 
 
 ## This unit, or its squad, was fired upon recently.
@@ -1439,6 +1462,11 @@ static func medic_for(c: Soldier, wanted: Array[StringName]) -> Soldier:
 
 ## Up, set up, and not looking after anyone but `c` (a body being carried can be put down),
 ## and not leaving `c` to others after failing to reach them (_give_up_casualty).
+var _hold_for_cover_at := -1000.0
+const HOT_DOWN_S := 25.0
+const HOT_DOWN_M := 25.0
+
+
 func _free_for(c: Soldier) -> bool:
 	return _ready_done and body != null and body != c and body.vitals.is_up() and not body.is_queued_for_deletion() \
 		and (care == Care.NONE or care == Care.BODY or casualty == c) and not _skipping(c) \
@@ -1494,6 +1522,9 @@ func _find_casualty() -> Soldier:
 			var asked: Array[StringName] = ai.wanted if ai and not s.vitals.downed else ([] as Array[StringName])
 			if responder_for(s, asked) != body:
 				continue
+			if _rescue_hot(s):
+				_hold_for_cover_at = Soldier._now()
+				continue  # secure first: base of fire, smoke or a flank, then one goes in
 		var d := body.global_position.distance_to(s.global_position)
 		if body.role == Roles.MEDIC and s.fire_team == body.fire_team:
 			d *= 0.5
