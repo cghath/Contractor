@@ -329,8 +329,10 @@ func server_sell(item_id: StringName, count := 1, item_state := {}) -> int:
 ## the clock for them.
 func server_repair(item_id: StringName, item_state: Dictionary) -> Dictionary:
 	var cost := Prices.repair_cost(item_id, item_state)
-	if cost > 0 and not spend(cost, "Repaired %s" % ItemDB.get_item(item_id).name):
+	var stocked := Pallets.offset_preview(cost, "repair")  # spare parts in the FOB's stocks cover part of it
+	if cost > 0 and not spend(cost - int(stocked.offset), "Repaired %s" % ItemDB.get_item(item_id).name):
 		return {}
+	Pallets.take_stock(stocked.used)
 	return ItemDB.get_item(item_id).default_state()
 
 
@@ -343,8 +345,12 @@ func server_pay_support(kind: String, cid := "") -> bool:
 	var from_budget := Contracts.server_draw_support(cid, price) if cid != "" else 0
 	if from_budget >= price:
 		return true
-	if spend(price - from_budget, "Support call: %s" % kind):
-		note_run_expense(price - from_budget, "Support call: %s" % kind)
+	# FOB stocks cover part of it (fuel for the lift, parts, ammo; Pallets.offset_preview).
+	var stocked := Pallets.offset_preview(price - from_budget, "support:" + kind)
+	var paid := price - from_budget - int(stocked.offset)
+	if spend(paid, "Support call: %s" % kind):
+		Pallets.take_stock(stocked.used)
+		note_run_expense(paid, "Support call: %s" % kind)
 		return true
 	if from_budget > 0:
 		Contracts.server_draw_support(cid, -from_budget)  # give the budget back
@@ -369,6 +375,63 @@ func take_unbanked() -> Array:
 	_section().unbanked = []
 	_commit()
 	return items
+
+
+# --- FOB stocks and pallet storage (feat/pallet-tagging; Pallets, docs/pallets.md) --------------
+
+## The FOB's own stocks: {"fuel", "ammo", "parts", "supplies", "medical": units}. Saved with the
+## campaign (this section), copied to every peer. Stocks offset costs (Pallets.offset_preview).
+func stocks() -> Dictionary:
+	return state().get("stocks", {})
+
+
+func stock(kind: String) -> int:
+	return int(stocks().get(kind, 0))
+
+
+## Host: adds `units` of a stock kind.
+func server_add_stock(kind: String, units: int) -> void:
+	if units <= 0:
+		return
+	var s := _section()
+	if not s.has("stocks"):
+		s["stocks"] = {}
+	s.stocks[kind] = int(s.stocks.get(kind, 0)) + units
+	_commit()
+
+
+## Host: uses up to `units` of a stock kind; returns how many were there to use.
+func server_take_stock(kind: String, units: int) -> int:
+	var used := mini(maxi(units, 0), stock(kind))
+	if used > 0:
+		_section().stocks[kind] = stock(kind) - used
+		_commit()
+	return used
+
+
+## Tagged lots waiting in FOB storage (Pallets lots with status "stored").
+func pallet_store() -> Array:
+	return state().get("pallet_store", [])
+
+
+## Host: puts a lot into FOB storage.
+func server_store_lot(lot: Dictionary) -> void:
+	var s := _section()
+	if not s.has("pallet_store"):
+		s["pallet_store"] = []
+	(s.pallet_store as Array).append(lot)
+	_commit()
+
+
+## Host: takes lot `index` out of storage ({} for none).
+func server_unstore_lot(index: int) -> Dictionary:
+	var store: Array = _section().get("pallet_store", [])
+	if index < 0 or index >= store.size():
+		return {}
+	var lot: Dictionary = store[index]
+	store.remove_at(index)
+	_commit()
+	return lot
 
 
 # --- Requests (any peer) -----------------------------------------------------------------

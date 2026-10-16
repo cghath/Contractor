@@ -149,6 +149,7 @@ func refresh() -> void:
 	_header(d)
 	_carried(d)
 	_salvage(d)
+	_tagged(d)
 	_intel(d)
 
 
@@ -387,6 +388,62 @@ func _pick(indices: Array) -> void:
 func _unpick(indices: Array) -> void:
 	for i: int in indices:
 		Contracts.unpick_salvage(i)
+
+
+## Tagged pallets and vehicles hauled home (feat/pallet-tagging, Pallets): sell now at the quick
+## price, store, gift to a faction, or keep as the FOB's own stocks.
+func _tagged(d: Dictionary) -> void:
+	var lots: Array = d.get("tagged", [])
+	if lots.is_empty():
+		return
+	_line("")
+	_line("TAGGED PALLETS AND VEHICLES hauled home", 17, TITLE_COLOR)
+	for i in lots.size():
+		var lot: Dictionary = lots[i]
+		var status := String(lot.get("status", "pending"))
+		var tag := "tagged to sell" if String(lot.get("tag", "")) == "sell" else "tagged for %s" % MissionRegistry.faction_name(String(lot.get("faction", "")))
+		var verdict: String = {"pending": "undecided", "sold": "sold", "gifted": "gifted to %s" % MissionRegistry.faction_name(String(lot.get("gifted_to", ""))),
+			"kept": "kept for the FOB's stocks", "stored": "in FOB storage"}.get(status, status)
+		var row := HBoxContainer.new()
+		_box.add_child(row)
+		var label := Label.new()
+		label.text = "%s, %s: %s" % [Pallets.lot_text(lot), tag, verdict]
+		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		label.custom_minimum_size = Vector2(160, 0)
+		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(label)
+		if status != "pending" or d.get("finished", false):
+			continue
+		var sell := Button.new()
+		sell.text = "Sell now ($%s)" % DebriefCalc.money(Pallets.sell_price(lot))
+		sell.tooltip_text = "The quick price. In FOB storage it sells for more later ($%s)." % DebriefCalc.money(Pallets.sell_price(lot, true))
+		sell.pressed.connect(func() -> void: Contracts.pallet_action("debrief", i, "sell"))
+		row.add_child(sell)
+		var store := Button.new()
+		store.text = "Store"
+		store.tooltip_text = "Keep it in FOB storage to sell, gift or keep later."
+		store.pressed.connect(func() -> void: Contracts.pallet_action("debrief", i, "store"))
+		row.add_child(store)
+		if Pallets.can_keep(lot):
+			var keep := Button.new()
+			keep.text = "Keep for FOB"
+			keep.tooltip_text = "Add it to the FOB's stocks: fuel and parts cut support and repair costs, ammo, supplies and medical restock the stash."
+			keep.pressed.connect(func() -> void: Contracts.pallet_action("debrief", i, "keep"))
+			row.add_child(keep)
+		var factions := OptionButton.new()
+		for f: String in Pallets.gift_factions():
+			factions.add_item(MissionRegistry.faction_name(f))
+			factions.set_item_metadata(factions.item_count - 1, f)
+			if f == String(lot.get("faction", "")):
+				factions.select(factions.item_count - 1)
+		row.add_child(factions)
+		var gift := Button.new()
+		gift.text = "Gift (+%d rep)" % Pallets.gift_rep(lot)
+		gift.pressed.connect(func() -> void:
+			if factions.item_count > 0:
+				Contracts.pallet_action("debrief", i, "gift", String(factions.get_item_metadata(factions.selected))))
+		row.add_child(gift)
+	_line("Anything undecided when you continue: a gift tag is gifted, the rest goes to FOB storage.", 14)
 
 
 func _intel(d: Dictionary) -> void:

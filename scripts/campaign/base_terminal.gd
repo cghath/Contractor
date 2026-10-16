@@ -17,6 +17,7 @@ const KINDS := {
 	&"ops": {"title": "Ops desk", "page": "squad", "colour": Color("6f7d5c")},
 	&"armory": {"title": "Armory ledger", "page": "armory", "colour": Color("7a6a4f")},
 	&"motor_pool": {"title": "Motor pool", "page": "motor_pool", "colour": Color("4f5559")},
+	&"stores": {"title": "Supply cage", "page": "stores", "colour": Color("6b7a4f")},
 }
 const SIZE := Vector3(1.0, 1.2, 0.5)
 ## The action point sits this far above the top, so the sight check clears the desk itself.

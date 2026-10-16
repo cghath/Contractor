@@ -122,7 +122,8 @@ static func compute(contracts: Array, objectives: Array, civilians: int, report:
 ## what, plus the field costs per head and day, a death benefit per KIA and treatment per
 ## wounded squadmate (Prices.operations). Returns {"lines": [{"what", "amount", "charge"}],
 ## "total", "charge"}: "charge" marks the lines still to take from the cash.
-static func expenses(report: Dictionary, days: int, run: Array) -> Dictionary:
+static func expenses(report: Dictionary, days: int, run: Array, use_stocks := false) -> Dictionary:
+	var used := {}
 	var lines: Array = []
 	var sums := {}
 	for e: Dictionary in run:
@@ -145,6 +146,12 @@ static func expenses(report: Dictionary, days: int, run: Array) -> Dictionary:
 	var field := heads * maxi(days, 1) * Prices.operations("per_head_day")
 	if field > 0:
 		lines.append({"what": "Field costs: ammo, meds, fuel, comms (%d people x %d days)" % [heads, maxi(days, 1)], "amount": field, "charge": true})
+		if use_stocks:
+			# FOB stocks cover part of the field costs (Pallets.offset_preview).
+			var stocked := Pallets.offset_preview(field, "field_costs")
+			if int(stocked.offset) > 0:
+				used = stocked.used
+				lines.append({"what": "Covered by FOB stocks", "amount": -int(stocked.offset), "charge": true})
 	if kia > 0:
 		lines.append({"what": "Death benefit (%d KIA)" % kia, "amount": kia * Prices.operations("kia_benefit"), "charge": true})
 	if wounded > 0:
@@ -155,7 +162,7 @@ static func expenses(report: Dictionary, days: int, run: Array) -> Dictionary:
 		total += int(l.amount)
 		if bool(l.charge):
 			charge += int(l.amount)
-	return {"lines": lines, "total": total, "charge": charge}
+	return {"lines": lines, "total": total, "charge": charge, "used": used}
 
 
 static func _add(rep: Dictionary, faction: String, delta: int) -> void:

@@ -14,9 +14,9 @@ extends CanvasLayer
 ## (filter, prices, Buy and Buy 5, support call prices) instead of a second, plainer shop; and
 ## the motor pool has a page of its own (it was only an interaction ring).
 
-const PAGES: Array[String] = ["squad", "roster", "hiring", "medbay", "shop", "armory", "motor_pool"]
+const PAGES: Array[String] = ["squad", "roster", "hiring", "medbay", "shop", "armory", "motor_pool", "stores"]
 const TITLES := {"squad": "Squad & deploy", "roster": "Roster", "hiring": "Hiring board", "medbay": "Medbay",
-	"shop": "Shop", "armory": "Armory", "motor_pool": "Motor pool"}
+	"shop": "Shop", "armory": "Armory", "motor_pool": "Motor pool", "stores": "Supply cage"}
 ## The panel's width and the pages' height when the window has room for them (UiKit fits both
 ## to the window when it hasn't).
 const WIDTH := 1100.0
@@ -71,6 +71,7 @@ func _ready() -> void:
 	_box.add_child(_status)
 	_box.add_child(UiKit.key_hint("Esc", "Close"))
 	BaseHub.view_changed.connect(refresh)
+	Economy.changed.connect(refresh)  # the supply cage shows the FOB stocks
 	BaseHub.note.connect(func(text: String) -> void: _status.text = text)
 	visible = false
 
@@ -154,6 +155,8 @@ func refresh() -> void:
 			_build_armory(rows, v)
 		"motor_pool":
 			_build_motor_pool(rows)
+		"stores":
+			_build_stores(rows)
 
 
 # --- Pages -----------------------------------------------------------------------------------
@@ -425,6 +428,41 @@ func _build_motor_pool(rows: VBoxContainer) -> void:
 			service.tooltip_text = why if why != "" else "Ready: nothing to fix"
 		rows.add_child(_line("%s: %d%% damaged, %d L fuel%s" % [String(e.name), roundi(float(e.get("damage", 0.0)) * 100.0), roundi(float(e.get("fuel", 0.0))),
 			"" if why == "" else "  (%s)" % why], [service]))
+
+
+## The supply cage (feat/pallet-tagging, Pallets): the FOB's own stocks (fuel, parts, ammo,
+## supplies, medical), what they do, drawing ammo/supplies/medical into the armory stash, and
+## the tagged lots waiting in storage (sell for the better price, gift, or keep as stocks).
+func _build_stores(rows: VBoxContainer) -> void:
+	rows.add_child(UiKit.hint("Stocks from pallets kept at the FOB. Fuel and parts cover part of support calls and repairs automatically; ammo, supplies and medical can be drawn into the armory stash."))
+	for kind: String in Pallets.stock_kinds():
+		var n := Economy.stock(kind)
+		var controls: Array = []
+		if not ((Pallets.data().get("draw", {}) as Dictionary).get(kind, []) as Array).is_empty():
+			controls.append(UiKit.button("Draw 1", func() -> void: Contracts.draw_stock(kind, 1), "Move one unit into the armory stash"))
+			controls.append(UiKit.button("Draw 5", func() -> void: Contracts.draw_stock(kind, 5), "Move five units into the armory stash"))
+			for c: Variant in controls:
+				(c as Button).disabled = n <= 0
+		rows.add_child(_line("%s: %d units  (covers $%d each)" % [Pallets.stock_name(kind), n, Pallets.offset_per_unit(kind)], controls))
+	var store: Array = Economy.pallet_store()
+	rows.add_child(UiKit.text("In storage: %s" % ("nothing" if store.is_empty() else "%d lot%s" % [store.size(), "" if store.size() == 1 else "s"])))
+	for i in store.size():
+		var lot: Dictionary = store[i]
+		var factions := OptionButton.new()
+		for f: String in Pallets.gift_factions():
+			factions.add_item(MissionRegistry.faction_name(f))
+			factions.set_item_metadata(factions.item_count - 1, f)
+			if f == String(lot.get("faction", "")):
+				factions.select(factions.item_count - 1)
+		var controls2: Array = [UiKit.button("Sell ($%s)" % DebriefCalc.money(Pallets.sell_price(lot, true)), func() -> void: Contracts.pallet_action("store", i, "sell"),
+			"The storage price, better than the quick sale")]
+		if Pallets.can_keep(lot):
+			controls2.append(UiKit.button("Keep", func() -> void: Contracts.pallet_action("store", i, "keep"), "Add it to the FOB's stocks"))
+		controls2.append(factions)
+		controls2.append(UiKit.button("Gift (+%d rep)" % Pallets.gift_rep(lot), func() -> void:
+			if factions.item_count > 0:
+				Contracts.pallet_action("store", i, "gift", String(factions.get_item_metadata(factions.selected))), "Gift it to the faction chosen"))
+		rows.add_child(_line(Pallets.lot_text(lot), controls2))
 
 
 # --- Bits ------------------------------------------------------------------------------------
