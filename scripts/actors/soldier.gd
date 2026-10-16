@@ -73,8 +73,8 @@ const THROW_BUSY_S := 0.7
 ## 1 + FIRE_BUNCH_S x rate shots land at once (2 at 750 rpm).
 const FIRE_BUNCH_S := 0.15
 ## Where the muzzle sits off the eye along the aim (m: right, up, forward; mirrored for a
-## left-handed shooter), about the hip view model's (PlayerInput.HIP_VIEW). Visual only: the
-## tracer and the shot sound start here; the round itself still flies from the eye (Ballistics).
+## left-handed shooter), about the hip view model's (PlayerInput.HIP_VIEW). The round, its
+## tracer and the shot sound all start here (since 2026-10-16; before, only the tracer).
 ## Captain, 2026-10-16: "bullets come from eyes not from guns".
 const MUZZLE_FROM_EYE := Vector3(0.14, -0.16, 0.45)
 const SIDEARM_MUZZLE_FROM_EYE := Vector3(0.12, -0.14, 0.32)
@@ -868,15 +868,19 @@ func _server_fire(origin: Vector3, direction: Vector3, slot: StringName) -> void
 	_server_next_shot = maxf(_server_next_shot, now - FIRE_BUNCH_S) + 60.0 / float(weapon.stats.get("rpm", 600))
 	if origin.distance_to(camera.global_position) > 1.0:
 		origin = camera.global_position  # don't trust a far-off muzzle
-	var result := Ballistics.fire(self, origin, direction.normalized(), weapon)
+	# The round leaves the muzzle along the barrel and deviates from there (spread, drop, drag;
+	# Captain, 2026-10-16: "bullets should come from the muzzles ... then deviate"). A muzzle
+	# pushed into a wall fires from the eye instead (no shooting through what you lean on).
+	var muzzle := muzzle_point(origin, direction.normalized(), weapon.slot == &"sidearm", left_handed, is_aiming)
+	var wall_q := PhysicsRayQueryParameters3D.create(origin, muzzle, 1, [get_rid()])
+	if not get_world_3d().direct_space_state.intersect_ray(wall_q).is_empty():
+		muzzle = origin
+	var result := Ballistics.fire(self, muzzle, direction.normalized(), weapon)
 	var suppressed := bool(weapon.stats.get("suppressed", false))
 	last_shot_at = now
 	last_shot_suppressed = suppressed
 	var round_end: Variant = result.get("position")
 	var round_point: Vector3 = round_end if round_end is Vector3 else origin + direction.normalized() * 400.0
-	var muzzle := muzzle_point(origin, direction.normalized(), weapon.slot == &"sidearm", left_handed, is_aiming)
-	if muzzle.distance_to(origin) >= origin.distance_to(round_point):
-		muzzle = origin  # the round stopped before the muzzle (pressed against a wall)
 	Sfx.server_shot(muzzle, round_point,
 		"suppressed" if suppressed else String(weapon.stats.get("sound", "pistol" if weapon.slot == &"sidearm" else "rifle")))  # every peer hears it (Sfx): its family's sound (AR, AK, ...)
 	_rounds_fired += 1
