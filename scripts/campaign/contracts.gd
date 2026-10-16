@@ -175,7 +175,6 @@ func support_left(cid: String) -> int:
 func module_origin(c: Dictionary, fallback := Vector3.ZERO) -> Vector3:
 	var lvl := CompoundLevel.current(self) if is_inside_tree() else null
 	if lvl and lvl.has_method(&"get_module"):
-		heal_module_id(c, lvl)
 		var m := lvl.call(&"get_module", String(c.get("module_id", ""))) as Node3D
 		if m:
 			return m.position
