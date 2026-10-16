@@ -519,11 +519,11 @@ func _test_no_cuffs() -> void:
 
 # --- Helpers ------------------------------------------------------------------------------------
 
-func _offer(type: String) -> Dictionary:
+func _offer(type: String, avoid: Array = []) -> Dictionary:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 900 + _made
 	_made += 1
-	var c := ContractGen.generate(rng, {"day": Economy.day(), "source": "board", "type": type, "zone_id": ZONE})
+	var c := ContractGen.generate(rng, {"day": Economy.day(), "source": "board", "type": type, "zone_id": ZONE, "avoid_modules": avoid})
 	c.understated = false
 	c.true_rating = c.rated
 	c.enemy_count = c.enemy_est
@@ -971,7 +971,9 @@ func _test_hot_zone_ops() -> void:
 		return
 	HotZoneOps.enabled = true
 	_calm()
-	var cid := _add(_offer("raid"))
+	# Not at the zone's QRF base: the follow-up below needs one no live contract holds.
+	var qrf_ids: Array = level.modules().filter(func(m: ZoneModule) -> bool: return m.type == "qrf_base").map(func(m: ZoneModule) -> String: return m.module_id)
+	var cid := _add(_offer("raid", qrf_ids))
 	Contracts.server_accept(cid, ContractGen.default_terms())
 	check(Contracts.server_start_deployment([], ZONE) == "", "deployed to the hot zone on one contract from the board")
 	await _frames(5)
@@ -996,7 +998,7 @@ func _test_hot_zone_ops() -> void:
 	if base:
 		ops._seen.erase(base.module_id)
 	if base == null:
-		check(false, "a QRF base to take out")
+		check(false, "a QRF base to take out (QRF bases %s, held by live contracts %s)" % [level.modules().filter(func(m: ZoneModule) -> bool: return m.type == "qrf_base").map(func(m: ZoneModule) -> String: return m.module_id), sites.keys()])
 	else:
 		for s: Soldier in _garrison(base):
 			_kill(s)

@@ -21,11 +21,14 @@ const EDGE_KEEP_M := 140.0
 ## `zone_id` (see ContractGen.mission_target). `module` is a module the scenario is built
 ## around (the convoy's landmark, the held point, the first recon site); "module_id" is set
 ## only where the zone's garrison logic should know the module (the defended one).
-static func build(pick: RandomNumberGenerator, def: Dictionary, zone_id: String, target: String) -> Dictionary:
+static func build(pick: RandomNumberGenerator, def: Dictionary, zone_id: String, target: String, avoid: Array = []) -> Dictionary:
 	var layout := MissionRegistry.zone_def(zone_id)
 	var allowed := MissionRegistry.type_modules(def)
 	var options: Array = (layout.get("modules", []) as Array).filter(
 		func(m: Dictionary) -> bool: return ZoneModules.base(String(m.type)) in allowed)
+	var fresh := options.filter(func(m: Dictionary) -> bool: return String(m.id) not in avoid)  # sites other live contracts (or the reserve) hold: only while another is left
+	if not fresh.is_empty():
+		options = fresh
 	var half := float(layout.get("size_m", 1536.0)) * 0.5
 	var knobs: Dictionary = def.get("scenario_knobs", {})
 	var module: Dictionary = options[pick.randi() % options.size()] if not options.is_empty() else {"id": "", "type": String(allowed[0]) if not allowed.is_empty() else "", "pos": [0.0, 0.0]}
