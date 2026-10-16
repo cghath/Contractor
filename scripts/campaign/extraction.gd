@@ -622,7 +622,11 @@ func _start_countdown(point: Dictionary) -> String:
 	_last_whole = -1
 	_broadcast()
 	_client_message.rpc("Extracting from %s in %d s: stay inside" % [point.name, ceili(countdown_s)])
-	var response := EnemyResponse.of(self)
+	# get_parent(), not EnemyResponse.of(self)/CompoundLevel.current(self): those find the level
+	# by "first node in the level group", which can grab a stale or wrong one during a rapid
+	# zone transition (replaying the same zone id for a recovery deployment, R1357). Extraction
+	# is always a direct child of its own level (MapNodes.install), so this is unambiguous.
+	var response := get_parent().get_node_or_null(^"EnemyResponse") as EnemyResponse
 	if response:
 		response.server_alert_extraction(Vector3(point.pos.x, 0.0, point.pos.y))  # not quiet
 	return ""
