@@ -75,11 +75,23 @@ static func display_name(s: Soldier) -> String:
 ## Plays res://audio/callouts/<id>.ogg from `speaker` if that file exists; silent (null)
 ## otherwise.
 static func play(id: StringName, speaker: Node3D) -> AudioStreamPlayer3D:
-	var path := AUDIO_DIR + String(id) + ".ogg"
-	if speaker == null or not is_instance_valid(speaker) or not speaker.is_inside_tree() or not ResourceLoader.exists(path):
+	if speaker == null or not is_instance_valid(speaker) or not speaker.is_inside_tree():
+		return null
+	var path := voiced_path(id, speaker)
+	if path == "":
 		return null
 	var stream := load(path) as AudioStream
 	if stream == null:
+		return null
+	# A squadmate further than RADIO_M off comes over the net: in your ear, filtered (Sfx "Radio").
+	var ear: Variant = Sfx.listener()
+	if speaker is Soldier and (speaker as Soldier).faction != &"hostile" and ear is Vector3 and (ear as Vector3).distance_to(speaker.global_position) > RADIO_M:
+		var net := AudioStreamPlayer.new()
+		net.stream = stream
+		net.bus = &"Radio"
+		speaker.add_child(net)
+		net.finished.connect(net.queue_free)
+		net.play()
 		return null
 	var audio := AudioStreamPlayer3D.new()
 	audio.stream = stream
@@ -114,6 +126,8 @@ func say(speaker: Soldier, id: StringName, text := "", key := "", side_key := ""
 			"shared": shared, "side_gap": side_gap, "until": now + PENDING_S}
 		return false
 	_send(speaker, id, line, repeat_key, shared)
+	if speaker.faction == &"hostile":
+		server_vocal(speaker, id)  # the enemy is heard, in his own tongue (voiced_path), never subtitled
 	return true
 
 
@@ -336,3 +350,65 @@ class Subtitles extends Label:
 		text = "
 ".join(shown)
 		visible = text != ""
+
+## Voiced callouts (Captain, 2026-10-16: "a free way to do voices", "several game safe voices"):
+## Piper TTS lines (audio/sfx/CREDITS.md) in AUDIO_DIR v<k>/<id>_<n>.wav, one folder per voice.
+## Each speaker keeps one voice (by name, so every peer picks the same) and a phrasing at random;
+## no voiced line: the old single file <id>.ogg, else "" (subtitle only).
+const VOICES := 8
+## Squadmates further than this from you are heard over the radio instead (play).
+const RADIO_M := 30.0
+## Enemy languages (a soldier's by his name; Russian twice as often) and how many voices each has.
+const ENEMY_LANGS: Array[String] = ["ru", "ru", "fa"]
+const ENEMY_VOICES := {"ru": 2, "fa": 1}
+const FEMALE_VOICES := 4  # female soldiers' voices, in AUDIO_DIR female/v<k>/ (Captain: "female voices for female soldiers")
+const PHRASINGS := 2
+
+
+static func voiced_path(id: StringName, speaker: Node) -> String:
+	var female := speaker is Soldier and (speaker as Soldier).model != null and (speaker as Soldier).model.body == VoxelArt.FEMALE
+	var count := FEMALE_VOICES if female else VOICES
+	var dir := AUDIO_DIR + ("female/" if female else "")
+	var h := absi(hash(String(speaker.name)))
+	if speaker is Soldier and (speaker as Soldier).faction == &"hostile":
+		# Enemies call out in their own tongue (Captain, 2026-10-16): Russian or Farsi, per soldier.
+		var lang: String = ENEMY_LANGS[h % ENEMY_LANGS.size()]
+		dir = AUDIO_DIR + lang + "/"
+		count = int(ENEMY_VOICES[lang])
+	var voice := int(speaker.get_meta(&"voice", h % count)) % count
+	var options: Array[String] = []
+	for n in range(1, PHRASINGS + 1):
+		var p := "%sv%d/%s_%d.wav" % [dir, voice, id, n]
+		if ResourceLoader.exists(p):
+			options.append(p)
+	if not options.is_empty():
+		return options[randi() % options.size()]
+	var single := AUDIO_DIR + String(id) + ".ogg"
+	return single if ResourceLoader.exists(single) else ""
+
+
+## Host only: `speaker` cries out (VOCAL_IDS: hit, scream) where everyone near can hear it, either
+## side, no subtitle (Captain, 2026-10-16: "add screams too"). Rate-limited per speaker.
+const VOCAL_IDS: Array[StringName] = [&"hit", &"scream"]
+const VOCAL_GAP_S := 2.5
+var _last_vocal := {}
+
+
+func server_vocal(speaker: Soldier, id: StringName) -> void:
+	if not multiplayer.is_server() or speaker == null or not is_instance_valid(speaker) or not speaker.is_inside_tree():
+		return
+	var now := Soldier._now()
+	if now - float(_last_vocal.get(speaker.name, -100.0)) < VOCAL_GAP_S:
+		return
+	_last_vocal[speaker.name] = now
+	_vocal.rpc(get_path_to(speaker), String(id))
+
+
+@rpc("authority", "call_local", "unreliable")
+func _vocal(speaker_path: NodePath, id: String) -> void:
+	var speaker := get_node_or_null(speaker_path) as Node3D
+	if speaker:
+		play(StringName(id), speaker)
+		var model := speaker.get_node_or_null(^"Model")
+		if model and model.has_method(&"flinch"):
+			model.call(&"flinch", 1.0 if id == "scream" else 0.7)  # the hit shows too (CharacterModel.flinch)

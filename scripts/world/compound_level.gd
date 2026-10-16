@@ -519,8 +519,8 @@ func _restore_bodies() -> void:
 ## server_shot already carries the sound); suppressed shots get a faint one, not none, since the
 ## round still flies even if the bang is quiet.
 @rpc("authority", "call_local", "unreliable")
-func show_tracer(origin: Vector3, end: Vector3, suppressed: bool) -> void:
-	Tracer.spawn(self, origin, end, suppressed)
+func show_tracer(origin: Vector3, end: Vector3, suppressed: bool, kind: int = Tracer.Kind.RED) -> void:
+	Tracer.spawn(self, origin, end, suppressed, kind)
 
 
 @rpc("authority", "call_local", "unreliable")

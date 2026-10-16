@@ -76,6 +76,9 @@ const FIRE_BUNCH_S := 0.15
 ## Captain, 2026-10-16: "bullets come from eyes not from guns".
 const MUZZLE_FROM_EYE := Vector3(0.14, -0.16, 0.45)
 const SIDEARM_MUZZLE_FROM_EYE := Vector3(0.12, -0.14, 0.32)
+## One round in TRACER_EVERY is a tracer (a weapon's "tracer_every" stat overrides; 0: none),
+## red for our side, green for the enemy (Tracer.Kind); the rest show as faint ball streaks.
+const TRACER_EVERY := 5
 ## Dead bodies (AI and players alike) stay in the world in this group (host only), lying,
 ## gear and all: lootable, carriable, saved with the zone. See "Death and bodies".
 const DEAD_GROUP := &"dead_bodies"
@@ -182,6 +185,7 @@ var color_team := ""
 ## Shoots from the left shoulder (Handedness). Set by the host (a player's pick, an AI's roll)
 ## and replicated by ServerSync; the model mirrors the weapon holds.
 var left_handed := false
+var _rounds_fired := 0  # host: rounds this soldier has fired (every TRACER_EVERY-th a tracer)
 ## An AI soldier's surname and nationality (Names), set by the host when it spawns and
 ## replicated by ServerSync. display_name() shows the name; the node keeps its callsign.
 var person_name := ""
@@ -869,8 +873,12 @@ func _server_fire(origin: Vector3, direction: Vector3, slot: StringName) -> void
 	if muzzle.distance_to(origin) >= origin.distance_to(round_point):
 		muzzle = origin  # the round stopped before the muzzle (pressed against a wall)
 	Sfx.server_shot(muzzle, round_point,
-		"suppressed" if suppressed else ("pistol" if weapon.slot == &"sidearm" else "rifle"))  # every peer hears it (Sfx)
-	CompoundLevel.current(self).show_tracer.rpc(muzzle, round_point, suppressed)  # and sees it (Tracer)
+		"suppressed" if suppressed else String(weapon.stats.get("sound", "pistol" if weapon.slot == &"sidearm" else "rifle")))  # every peer hears it (Sfx): its family's sound (AR, AK, ...)
+	_rounds_fired += 1
+	var every := int(weapon.stats.get("tracer_every", TRACER_EVERY))
+	var tracer := every > 0 and _rounds_fired % every == 0
+	var kind: int = (Tracer.Kind.GREEN if faction == &"hostile" else Tracer.Kind.RED) if tracer else Tracer.Kind.BALL
+	CompoundLevel.current(self).show_tracer.rpc(muzzle, round_point, suppressed, kind)  # and sees it (Tracer)
 	PeopleLayer.server_noise(self, origin)  # people nearby hear it (wave 4)
 	if faction != &"hostile":
 		Alert.server_noise(self, origin, Alert.SHOT, suppressed)  # hot zones: the enemy hears it (4B part 3)

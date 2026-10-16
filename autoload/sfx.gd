@@ -41,8 +41,8 @@ const STEP_VOICES := 3
 const STEP_OTHERS_DB := -3.0
 ## A round passing within this distance of the listener cracks (when fired from further
 ## than CRACK_MIN_SHOOTER_M, so you don't hear your own rounds crack).
-const CRACK_PASS_M := 6.0
-const CRACK_MIN_SHOOTER_M := 25.0
+const CRACK_PASS_M := 10.0
+const CRACK_MIN_SHOOTER_M := 8.0
 ## Placeholder variants per sound.
 const SYNTH_VARIANTS := 3
 ## The last sounds played on this peer (id, pos, variant), for tests and the session log.
@@ -85,6 +85,20 @@ func _ready() -> void:
 	_ensure_bus(&"Voice")
 	_ensure_bus(&"SFX_Room")
 	_ensure_bus(&"Music")  # the infil music (InfilMusic; Captain, 2026-10-14: temporary)
+	_ensure_bus(&"Radio")  # far squadmates over the net (Callouts.play): into Voice, filtered like a handset
+	var radio := AudioServer.get_bus_index(&"Radio")
+	AudioServer.set_bus_send(radio, &"Voice")
+	if AudioServer.get_bus_effect_count(radio) == 0:
+		var hp := AudioEffectHighPassFilter.new()
+		hp.cutoff_hz = 350.0
+		var lp := AudioEffectLowPassFilter.new()
+		lp.cutoff_hz = 3200.0
+		var crunch := AudioEffectDistortion.new()
+		crunch.mode = AudioEffectDistortion.MODE_OVERDRIVE
+		crunch.drive = 0.35
+		crunch.post_gain = -4.0
+		for fx: AudioEffect in [hp, lp, crunch]:
+			AudioServer.add_bus_effect(radio, fx)
 	GameSettings.apply_audio()  # the player's volumes on the buses
 	var room := AudioServer.get_bus_index(&"SFX_Room")
 	if AudioServer.get_bus_effect_count(room) == 0:
@@ -185,7 +199,10 @@ func _shot_everywhere(origin: Vector3, end: Vector3, kind: String) -> void:
 
 ## This peer hears a shot (see server_shot).
 func hear_shot(origin: Vector3, end: Vector3, kind: String) -> void:
-	play_at(StringName("shot_" + kind), origin)
+	var id := "shot_" + kind
+	if not defs.has(id):
+		id = "shot_pistol" if kind == "pistol" else ("shot_hmg" if kind in ["m2", "dshk"] else "shot_rifle")  # a family with no sound of its own yet
+	play_at(StringName(id), origin)
 	var ear: Variant = listener()
 	if ear == null or kind == "suppressed_subsonic":
 		return
@@ -193,8 +210,9 @@ func hear_shot(origin: Vector3, end: Vector3, kind: String) -> void:
 	if e.distance_to(origin) < CRACK_MIN_SHOOTER_M:
 		return
 	var close := Geometry3D.get_closest_point_to_segment(e, origin, end)
-	if close.distance_to(e) <= CRACK_PASS_M and close.distance_to(origin) > 2.0:
-		play_at(&"crack", close)
+	var miss := close.distance_to(e)
+	if miss <= CRACK_PASS_M and close.distance_to(origin) > 2.0:
+		play_at(&"crack", close, lerpf(3.0, -6.0, miss / CRACK_PASS_M))  # Captain, 2026-10-16: "i dont hear snaps when they snap past"
 
 
 func _start(id: StringName, pos: Vector3, volume_db: float) -> void:
@@ -430,13 +448,14 @@ func streams(id: StringName) -> Array:
 			FrameCost.spent(&"sfx", started)
 			return _streams[id]
 	var out: Array = []
-	var single := AUDIO_DIR + String(id) + ".ogg"
-	if ResourceLoader.exists(single):
-		out.append(load(single))
-	var i := 1
-	while ResourceLoader.exists("%s%s_%d.ogg" % [AUDIO_DIR, id, i]):
-		out.append(load("%s%s_%d.ogg" % [AUDIO_DIR, id, i]))
-		i += 1
+	for ext: String in [".ogg", ".wav"]:  # recordings (audio/sfx/CREDITS.md) over the generated placeholder
+		var single := AUDIO_DIR + String(id) + ext
+		if ResourceLoader.exists(single):
+			out.append(load(single))
+		var i := 1
+		while ResourceLoader.exists("%s%s_%d%s" % [AUDIO_DIR, id, i, ext]):
+			out.append(load("%s%s_%d%s" % [AUDIO_DIR, id, i, ext]))
+			i += 1
 	if out.is_empty():
 		var recipe: Dictionary = defs.get(String(id), {}).get("synth", {})
 		if not recipe.is_empty():
