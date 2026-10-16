@@ -64,6 +64,9 @@ const RADIO_EVERY := 4
 var def: Dictionary = {}
 var terrain: ZoneTerrain
 var scatter: ZoneScatter  # rocks, scrub and trees on it
+## Spawns WorldCache nodes at the scatter's VALUABLE sites (WorldValuables): one per peer, the
+## host's spawn (with its seeded loot) replicates to everyone, late joiners included.
+var cache_spawner: MultiplayerSpawner
 ## Host only: the navigation (null on clients).
 var nav: ZoneNav
 ## How long generating the zone took on this peer (ms): terrain heights, collision and,
@@ -307,6 +310,14 @@ func _build_environment() -> void:
 	add_child(scatter)
 	scatter.generate(terrain, def)
 	scatter.build_collision()
+	var cache_holder := Node3D.new()
+	cache_holder.name = "Caches"
+	add_child(cache_holder)
+	cache_spawner = MultiplayerSpawner.new()
+	cache_spawner.name = "CacheSpawner"
+	cache_spawner.spawn_path = cache_holder.get_path()
+	cache_spawner.spawn_function = _make_cache
+	add_child(cache_spawner)
 	var holder := Node3D.new()
 	holder.name = "Modules"
 	add_child(holder)
@@ -410,6 +421,16 @@ func _build_structures() -> void:
 
 func _exit_tree() -> void:
 	BodyVolume.finish_warm()
+
+
+## The CacheSpawner's spawn_function: a WorldCache at `data` ("uid", "pos", "yaw", "label").
+func _make_cache(data: Dictionary) -> Node:
+	var cache := WorldCache.new(String(data.get("label", "Cache")))
+	cache.name = String(data.uid)
+	cache.uid = String(data.uid)
+	cache.position = data.pos
+	cache.rotation.y = float(data.get("yaw", 0.0))
+	return cache
 
 
 func _on_hosted() -> void:

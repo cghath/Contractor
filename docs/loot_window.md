@@ -19,6 +19,13 @@ Captain, 2026-10-15: "a loot menu that opens, kind of like Tarkov" (inspired by 
   Each re-checks reach, the search session and that the item at that spot is still the one
   the player saw, then moves it in one host step, so two players at one body never duplicate
   anything. Peers see changes through the inventories' normal replication.
-- **Not done:** the FOB arsenal stash does not use it yet; crates other than vehicle holds
-  don't exist as lootable nodes yet.
+- **Not done:** the FOB arsenal stash does not use it yet.
+- **World caches** (Captain, 2026-10-16, follow-up to the Red Mesa world-feel pass): `WorldCache`
+  (`scripts/world/world_cache.gd`) is a crate out in the open terrain (ZoneScatter's VALUABLE
+  sites, `WorldValuables`) that opens through this same window, like a vehicle's hold — the same
+  `cargo()`/`in_reach()`/`server_load()`/`server_unload()` interface `Vehicle` offers, so
+  `LootWindow` and `Soldier`'s loot RPCs (`_loot_target`, `_server_loot_move`/`_put`/
+  `_take_class`) treat it as a third case alongside a body and a vehicle hold, not a parallel
+  system. Spawned through the zone's `CacheSpawner` (`ZoneLevel._make_cache`) so a late joiner
+  gets it too; its contents are rolled fresh each time the zone hosts, not saved across a reload.
 - Tests: `tests/interaction_test.gd` ("The loot window"), `tests/ui_test.gd` ("loot window" fit).
