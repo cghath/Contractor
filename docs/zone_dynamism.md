@@ -61,6 +61,13 @@ environments don't. Root-caused below; queue at the bottom.
    around WWI-style trench lines — needs design (static trench network like a module, or
    player/AI-dug via the E-tool above scaled up, or both). Not scoped yet.
 
+8. **Warzone / war-torn terrain preset** (Captain, 2026-10-16: "warzone maps and some other
+   stuff would be good too"): a battle-damaged aesthetic distinct from the clean generated
+   zones — craters, rubble, wrecked/burnt-out vehicles, collapsed or shelled structures, downed
+   power lines. Overlaps #4's man-made props and #7's trenches; probably its own terrain preset
+   (or a `"war_torn": true` layer any preset can take) rather than a whole new generator. "some
+   other stuff" — more environment ideas likely to keep landing here as they come up.
+
 ## Open
 
 - Does #1's patrol/alert system for regular zones get the full `EnemyResponse` feature set

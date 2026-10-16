@@ -99,11 +99,17 @@ func _ready() -> void:
 		var pallet_field := PalletField.new()
 		add_child(pallet_field)
 		pallet_field.build(_modules, ground_point)
+	# Captain, 2026-10-16 ("its boring ... missions are repetitive", "roads or paths across the
+	# map enemies like to patrol"): Alert/Pressure/EnemyResponse/RadioChatter used to be hot-zone
+	# only, so a regular contract zone's garrison just held its ground with no roads, no roaming
+	# patrols and no escalation. Every zone gets them now; EnemyResponse degrades gracefully with
+	# no "hq"/"qrf_base" modules (no hunters, no QRF waves — those stay a hot-zone thing). Only
+	# HotZoneOps (multi-contract radio follow-ups, hazard pay) and the debug overlay stay hot-only.
+	add_child(Alert.new())  # the enemy's alert: what they see, hear and report (4B part 3)
+	add_child(Pressure.new())  # what the squad has done here, long term
+	add_child(EnemyResponse.new())  # patrols, QRF waves, hunters: the enemy's answer
+	add_child(RadioChatter.new())  # what a looted enemy radio lets the squad hear
 	if String(def.get("kind", "")) == "hot":
-		add_child(Alert.new())  # the enemy's alert: what they see, hear and report (4B part 3)
-		add_child(Pressure.new())  # what the squad has done here, long term
-		add_child(EnemyResponse.new())  # patrols, QRF waves, hunters: the enemy's answer
-		add_child(RadioChatter.new())  # what a looted enemy radio lets the squad hear
 		add_child(HotZoneOps.new())  # several contracts live, radio follow-ups, hazard pay
 		if DevTools.on():
 			add_child(HotZoneDebug.new())  # playtests: PgUp readout, PgDn skips the enemy's clock

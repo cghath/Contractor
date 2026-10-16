@@ -234,8 +234,55 @@ static func generate(seed: int, size_m := 1920.0, types: Array = ["compound", "o
 				continue
 			out.append([snappedf(p.x, 1.0), snappedf(p.y, 1.0)])
 		return out
-	return normalize({"id": "generated_%d" % seed, "name": "Zone %d" % seed, "seed": seed, "size_m": size,
+	var def := normalize({"id": "generated_%d" % seed, "name": "Zone %d" % seed, "seed": seed, "size_m": size,
 		"relief_m": 18.0, "modules": modules, "insertion": edge_points.call(2), "extraction": edge_points.call(3)})
+	_add_roads_and_patrols(def, rng)
+	return def
+
+
+## Roads (a simple network: each site to its nearest already-connected one, so there is always a
+## way between every site) and 1-2 roaming patrols (between neighbouring sites, skipping villages
+## and towns: civilians, not patrol anchors) for a regular contract zone's modules. Captain,
+## 2026-10-16: regular zones had neither (only hot zones did), so the enemy never patrolled and
+## the zone never had roads to draw or drive on.
+static func _add_roads_and_patrols(def: Dictionary, rng: RandomNumberGenerator) -> void:
+	var sites: Array[Vector2] = []
+	for m: Dictionary in def.modules:
+		sites.append(Vector2(m.pos[0], m.pos[1]))
+	var roads: Array = []
+	if sites.size() >= 2:
+		var connected: Array[int] = [0]
+		var remaining := range(1, sites.size())
+		while not remaining.is_empty():
+			var best_i := -1
+			var best_j := -1
+			var best_d := INF
+			for i in connected:
+				for j in remaining:
+					var d: float = sites[i].distance_to(sites[j])
+					if d < best_d:
+						best_d = d
+						best_i = i
+						best_j = j
+			roads.append([[sites[best_i].x, sites[best_i].y], [sites[best_j].x, sites[best_j].y]])
+			connected.append(best_j)
+			remaining.erase(best_j)
+	var patrol_sites: Array = (def.modules as Array).filter(func(m: Dictionary) -> bool:
+		return ZoneModules.base(m.type) != "village" and ZoneModules.base(m.type) != "town")
+	var patrols: Array = []
+	if patrol_sites.size() >= 3:
+		for i in rng.randi_range(1, 2):
+			var a: Dictionary = patrol_sites[rng.randi() % patrol_sites.size()]
+			var pa := Vector2(a.pos[0], a.pos[1])
+			var near: Array = patrol_sites.filter(func(m: Dictionary) -> bool: return m != a)
+			near.sort_custom(func(m: Dictionary, n: Dictionary) -> bool:
+				return pa.distance_to(Vector2(m.pos[0], m.pos[1])) < pa.distance_to(Vector2(n.pos[0], n.pos[1])))
+			var route: Array = [[pa.x, pa.y]]
+			for m: Dictionary in near.slice(0, 2):
+				route.append([float(m.pos[0]), float(m.pos[1])])
+			patrols.append(route)
+	def["roads"] = roads
+	def["patrols"] = patrols
 
 
 ## A hot zone made from a seed (4B part 3): a `size_m` square (HOT_SIZE_M: 16 km²) holding the
