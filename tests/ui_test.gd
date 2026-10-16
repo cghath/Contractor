@@ -68,6 +68,29 @@ func _ready() -> void:
 			var ui := BaseUI.new()
 			ui.ready.connect(func() -> void: ui.open(page))
 			return ui)
+	# Full and compact, with several contracts' worth of lines (feat/objective-list).
+	for expanded: bool in [true, false]:
+		GameSettings.use_file(OS.get_user_data_dir().path_join("test_ui_objlist_settings.cfg"))
+		GameSettings.set_value("hud", "objectives_expanded", expanded)
+		await _fit("objectives panel (%s, six objectives)" % ("full" if expanded else "compact"), func() -> Node:
+			var p := ObjectivesPanel.new()
+			p.ready.connect(func() -> void:
+				p.visible = true
+				var lines := PackedStringArray(["OBJECTIVES - Kessler Farm compound  ([O] list  [N] next)"])
+				if expanded:
+					for c in 3:
+						lines.append("-- Recover the field laptop from the farm compound %d --" % c)
+						lines.append("> [ ] Find Amir Haddad and bring them out alive (69 min left)")
+						lines.append("[ ] Bonus: destroy the weapons cache in the farmhouse cellar")
+				else:
+					lines.append("> [ ] Find Amir Haddad and bring them out alive (69 min left)")
+					lines.append("+5 more")
+				p.preview = "
+".join(lines)
+				p.set_process(true)
+				p.refresh())
+			return _in_layer(p))
+		GameSettings.use_file("")
 	await _fit("objectives panel", func() -> Node: return _in_layer(ObjectivesPanel.new()))
 	await _fit("ammo readout", func() -> Node: return _in_layer(AmmoReadout.new()))
 	## The command menu needs no level to draw (ui/small-screens, P2-19). Every level is fitted,
@@ -91,6 +114,18 @@ func _ready() -> void:
 	var body := _inventory_body()
 	await _fit("inventory", func() -> Node: return _in_layer(InventoryScreen.new(body)))
 	await _test_inventory(body)
+	# The loot window (feat/loot-window): a body's gear on the left, yours on the right.
+	var corpse := _inventory_body()
+	corpse.name = "UiTestCorpse"
+	corpse.inventory.take(&"ifak", 3)
+	await _fit("loot window", func() -> Node:
+		var win := LootWindow.new(body)
+		win.ready.connect(func() -> void:
+			win.open(corpse)
+			win.begin_search(0.0)
+			win.process_mode = Node.PROCESS_MODE_DISABLED)
+		return _in_layer(win))
+	corpse.queue_free()
 	body.queue_free()
 	await _frames(2)
 	await _test_hud()
@@ -272,6 +307,7 @@ func _test_hud() -> void:
 	hud.command_menu.open()
 	var panel := hud.zone_top_right.get_child(0) as ObjectivesPanel
 	panel.visible = true
+	panel.set_process(false)
 	panel._label.text = "OBJECTIVES - Kessler Farm compound\n[ ] Destroy the weapons cache in the farmhouse cellar\n[ ] Recover the field laptop" \
 		+ "\n[x] Clear the checkpoint on the north road\n[-] Capture the courier alive\nCivilian casualties: 2 of 8"
 	hud.objective_helper._hint.text = "Head to the farmhouse cellar (NW, 1.2 km); the cache is under the stairs"

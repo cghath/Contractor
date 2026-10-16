@@ -393,7 +393,7 @@ static func item_options(treater: Soldier, who: Node3D, p: StringName) -> Array[
 		return usable
 	var reach := "" if treater._in_treat_reach(who) else "Too far away"
 	for id in medical_ids():
-		if not Vitals.has_item(treater.inventory, id):
+		if not Soldier.kit_has(treater, who, id):
 			continue
 		var item := ItemDB.get_item(id)
 		var at := WoundModel.IO_PART if id == WoundModel.IO_KIT else p

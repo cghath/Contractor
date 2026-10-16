@@ -116,7 +116,10 @@ func marks(pos: Vector3) -> bool:
 ## Works the step out now (it also does so a few times a second on its own).
 func refresh() -> void:
 	_step_left = STEP_S
-	current = step_for(_objectives(), situation())
+	var objs := _objectives()
+	if Objectives.chosen_oid != "" and not pickable(objs).any(func(o: Dictionary) -> bool: return String(o.oid) == Objectives.chosen_oid):
+		Objectives.chosen_oid = ""  # done, failed or gone: back to the nearest
+	current = step_for(objs, situation())
 	_hint.text = String(current.text)
 	_hint.visible = _hint.text != "" and _shown()
 	_place_hint()
@@ -182,13 +185,47 @@ static func step_for(objectives: Array, sit: Dictionary) -> Dictionary:
 			return {"text": "Bring %s to %s (%s)" % [who, _lz_name(lz), where_text(from, lz.pos)], "targets": [_lz_target(lz)]}
 	var pending := todo.filter(func(o: Dictionary) -> bool:
 		return not (String(o.kind) == Objectives.EXTRACT_ITEM and String(o.oid) in sit.get("held", [])))
+	var chosen := String(sit.get("chosen", ""))
+	if chosen != "":
+		for o: Dictionary in live:
+			if String(o.get("oid", "")) == chosen and o in pending:
+				return _with_oid(_objective_step(o, objectives, sit), o)
 	if not pending.is_empty():
 		var best: Dictionary = pending[0]
 		for o: Dictionary in pending:
 			if _flat(from, target_pos(o, sit)) < _flat(from, target_pos(best, sit)):
 				best = o
-		return _objective_step(best, objectives, sit)
+		return _with_oid(_objective_step(best, objectives, sit), best)
 	return _extraction_step(objectives, sit)
+
+
+static func _with_oid(step: Dictionary, o: Dictionary) -> Dictionary:
+	step["oid"] = String(o.get("oid", ""))
+	return step
+
+
+## The objectives the player can pick between (the live ones, in list order).
+static func pickable(objectives: Array) -> Array:
+	return objectives.filter(func(o: Dictionary) -> bool: return o.get("state", "") == Objectives.ACTIVE and String(o.get("kind", "")) != "briefing")
+
+
+## The next pick after `chosen`: auto ("") -> first -> ... -> last -> auto.
+static func next_choice(objectives: Array, chosen: String) -> String:
+	var live := pickable(objectives)
+	if live.is_empty():
+		return ""
+	if chosen == "":
+		return String(live[0].oid)
+	for i in live.size():
+		if String(live[i].oid) == chosen:
+			return String(live[i + 1].oid) if i + 1 < live.size() else ""
+	return ""
+
+
+## Cycles this player's pick (the N key); refreshes the hint and marker at once.
+func cycle_choice() -> void:
+	Objectives.chosen_oid = next_choice(_objectives(), Objectives.chosen_oid)
+	refresh()
 
 
 ## What to do about objective `o`: head for its site, or the job there.
@@ -234,6 +271,14 @@ static func _objective_step(o: Dictionary, all: Array, sit: Dictionary) -> Dicti
 				text = "%s gave up: cuff them, take them to the LZ" % who
 			else:
 				text = "Capture %s: cuff them, take them to the LZ" % who
+		Objectives.CONVOY:
+			text = "Ambush the convoy on its route%s" % (": " + progress if progress != "" else "")
+		Objectives.HOLD_POINT:
+			text = "Hold the %s%s" % [String(p.get("name", "position")), ": " + progress if progress != "" else ""]
+		Objectives.RESCUE_CREW:
+			text = "Treat and carry the downed crew to the LZ%s" % (" (" + progress + ")" if progress != "" else "")
+		Objectives.RECON_SITE:
+			text = "Observe the %s from within %d m%s" % [String(p.get("name", "site")), roundi(float(p.get("observe_m", 75.0))), " (" + progress + ")" if progress != "" else ""]
 		_:
 			text = String(o.get("text", ""))
 	return {"text": text, "targets": [target]}
@@ -327,6 +372,14 @@ static func short_label(o: Dictionary, sit: Dictionary) -> String:
 			label = item_name(o)
 		Objectives.DESTROY_CACHE:
 			label = String((o.get("params", {}) as Dictionary).get("name", "cache"))
+		Objectives.CONVOY:
+			label = "convoy ambush point"
+		Objectives.HOLD_POINT:
+			label = "hold " + String((o.get("params", {}) as Dictionary).get("name", "position"))
+		Objectives.RESCUE_CREW:
+			label = "crash site"
+		Objectives.RECON_SITE:
+			label = "observe " + String((o.get("params", {}) as Dictionary).get("name", "site"))
 		_:
 			label = site_name(o, sit)
 	if label == "":
@@ -412,7 +465,7 @@ func _objectives() -> Array:
 ## cuffs), "lzs" ([{"name", "pos", "radius", "source"}]) and "extraction" ({"countdown",
 ## "left"}).
 func situation() -> Dictionary:
-	var sit := {"pos": player.global_position if player and is_instance_valid(player) else Vector3.ZERO,
+	var sit := {"chosen": Objectives.chosen_oid, "pos": player.global_position if player and is_instance_valid(player) else Vector3.ZERO,
 		"sites": {}, "where": {}, "indoors": [], "hvts": {}, "held": [], "lzs": [], "extraction": {}}
 	if player and is_instance_valid(player):
 		sit["cuffs"] = player.inventory.count_of(Person.ZIP_CUFFS) > 0

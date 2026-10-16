@@ -144,8 +144,33 @@ const HOSTILES := [
 	{"name": "Hostile3", "pos": Vector3(-12, 0.1, -2), "buddy": "Hostile4", "guard": false, "rank": "squad leader", "intel": ["intel_documents"]},
 	{"name": "Hostile4", "pos": Vector3(-10, 0.1, -3), "buddy": "Hostile3", "guard": false},
 ]
-const HOSTILE_LOADOUT := ["plate_carrier_light", "plate_pe_l3", "helmet_bump", "assault_pack", "mk18",
-	"mag_556", "mag_556", "mag_556", "mag_556", "ifak", "frag_grenade"]
+## OPFOR small arms (weapon pack 1): the hostile faction carries Eastern-bloc stand-ins, not M4s.
+## HOSTILE_LOADOUT is the AKM kit; hostile_loadout(i) hands a team or garrison its mix.
+const HOSTILE_BODY := ["plate_carrier_light", "plate_pe_l3", "helmet_bump", "assault_pack"]
+const HOSTILE_TAIL := ["ifak", "frag_grenade"]
+const HOSTILE_GUNS := {
+	"akm": ["akm", "mag_762x39", "mag_762x39", "mag_762x39", "mag_762x39"],
+	"ak74": ["ak74", "mag_545", "mag_545", "mag_545", "mag_545"],
+	"rpk": ["rpk", "mag_rpk40", "mag_rpk40", "mag_rpk40"],
+	"pkm": ["pkm", "belt_762x54r", "belt_762x54r"],
+	"svd": ["svd", "mag_svd", "mag_svd", "mag_svd", "mag_svd", "mag_svd"],
+}
+## Who in a group of eight carries what: mostly AKs, a gunner, a marksman, a machine-gunner.
+const HOSTILE_MIX: Array[String] = ["akm", "ak74", "akm", "rpk", "ak74", "svd", "akm", "pkm"]
+const HOSTILE_LOADOUT := HOSTILE_BODY + HOSTILE_GUNS.akm + HOSTILE_TAIL
+
+
+## The OPFOR kit for the `index`-th soldier of a team, wave or garrison.
+static func hostile_loadout(index: int) -> Array:
+	return HOSTILE_BODY + (HOSTILE_GUNS[HOSTILE_MIX[posmod(index, HOSTILE_MIX.size())]] as Array) + HOSTILE_TAIL
+
+
+## True for HOSTILE_LOADOUT and every kit hostile_loadout hands out.
+static func is_hostile_kit(kit: Array) -> bool:
+	for i in HOSTILE_MIX.size():
+		if kit == hostile_loadout(i):
+			return true
+	return false
 const HOSTILE_PATROL: Array[Vector3] = [Vector3(-12, 0, -2), Vector3(-12, 0, -16), Vector3(12, 0, -16), Vector3(12, 0, 0), Vector3(-4, 0, 2)]
 
 @onready var players: Node3D = $Players
@@ -611,7 +636,7 @@ func _spawn_ai() -> void:
 	var spawned := {}
 	for h: Dictionary in hostiles:
 		spawned[h.name] = spawn_soldier({"name": h.name, "faction": "hostile", "variant": "urban", "pos": h.pos,
-			"loadout": HOSTILE_LOADOUT, "combat": 0.45, "discipline": 0.5, "guard": h.guard, "mode": "aware"})
+			"loadout": hostile_loadout(HOSTILES.find(h)), "combat": 0.45, "discipline": 0.5, "guard": h.guard, "mode": "aware"})
 	for h: Dictionary in hostiles:
 		spawned[h.name].buddy = spawned.get(h.buddy)  # null if the buddy's body is in the save
 		for intel_id: String in h.get("intel", []):  # people (wave 4): officers' intel
@@ -841,7 +866,7 @@ func _make_soldier(data: Dictionary) -> Node:
 		var inventory: Inventory = soldier.get_node(^"Inventory")
 		for id: String in data.loadout:
 			inventory.take(StringName(id))
-		if soldier.faction == &"hostile" and data.loadout == HOSTILE_LOADOUT:
+		if soldier.faction == &"hostile" and is_hostile_kit(data.loadout):
 			for id: StringName in LauncherAI.insurgent_kit(self):  # wave 5: some carry an RPG-7
 				inventory.take(id)
 		if soldier.role != &"":

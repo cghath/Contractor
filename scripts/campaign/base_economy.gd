@@ -22,7 +22,7 @@ static func credit(amount: int, reason: String) -> void:
 
 ## A cost that goes through even into debt (a respawn the company couldn't afford).
 static func charge(amount: int, reason: String) -> void:
-	Economy.add_cash(-amount, reason)
+	Economy.charge_run(amount, reason)
 
 
 ## The shop's price for one (0: not sold).

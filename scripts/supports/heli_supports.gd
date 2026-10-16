@@ -327,7 +327,14 @@ func near_lz(caller: Soldier, avoid: Array[Vector3] = []) -> Dictionary:
 ## Host: a call's helicopter went down: that support is lost for the rest of the op.
 func server_lost(kind: String) -> void:
 	if kind in KINDS:
+		if not _lost.has(kind):
+			Economy.charge_run(Prices.lost_support_price(kind), "Lost helicopter (%s support): replacement" % kind)
 		_lost[kind] = true
+
+
+## Host: `kind` can be called again at once (a call sent home, or that left without the squad).
+func server_clear_cooldown(kind: String) -> void:
+	_cooldown_until.erase(kind)
 
 
 ## Host (tests): forget cooldowns and losses.
@@ -360,6 +367,7 @@ static func _refund(kind: String, cid: String, budget_before: int) -> void:
 		if from_budget > 0:
 			Contracts.server_draw_support(cid, -from_budget)
 	Economy.add_cash(price - from_budget, "Support refund: %s" % kind)
+	Economy.note_run_expense(-(price - from_budget), "Support refund: %s" % kind)
 
 
 ## The deployment's contract with the most support budget left ("" outside a deployment).

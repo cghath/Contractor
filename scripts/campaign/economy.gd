@@ -137,7 +137,7 @@ func new_campaign(start_cash := -1) -> void:
 		rep[String(f.id)] = int(f.get("start_rep", 0))
 	s.merge({"cash": start_cash if start_cash >= 0 else MissionRegistry.setting_i("start_cash", 150000),
 		"day": MissionRegistry.setting_i("start_day", 1), "rep": rep, "locals": 0, "loans": [], "ledger": [],
-		"unbanked": [], "week": 0})
+		"unbanked": [], "week": 0, "run_expenses": []})
 	_commit()
 
 
@@ -159,6 +159,31 @@ func spend(amount: int, what: String) -> bool:
 		return false
 	add_cash(-amount, what)
 	return true
+
+
+## Host: a cost of the run in progress (a bought respawn, a lost helicopter): comes off the
+## cash even into debt and is listed in the next debrief's expenses.
+func charge_run(amount: int, what: String) -> void:
+	if amount <= 0:
+		return
+	add_cash(-amount, what)
+	note_run_expense(amount, what)
+
+
+## Host: lists an expense already taken from the cash (negative: a refund) for the debrief.
+func note_run_expense(amount: int, what: String) -> void:
+	var s := _section()
+	if not s.has("run_expenses"):
+		s["run_expenses"] = []
+	(s.run_expenses as Array).append({"what": what, "amount": amount})
+
+
+## Host: the expenses listed since the last debrief, emptied.
+func take_run_expenses() -> Array:
+	var s := _section()
+	var out: Array = (s.get("run_expenses", []) as Array).duplicate(true)
+	s["run_expenses"] = []
+	return out
 
 
 func change_reputation(faction: String, delta: int, why := "") -> void:
@@ -234,6 +259,7 @@ func pay_week() -> Dictionary:
 		var short := int(bill.total) - cash() + MissionRegistry.setting_i("safety_floor_cash", 0)
 		loan_taken = _lend(best_lender(), short, "emergency loan")
 	add_cash(-int(bill.total), "Week %d: wages %d, upkeep %d, loans %d" % [int(_section().week), bill.wages, bill.upkeep, bill.loans])
+	note_run_expense(int(bill.total), "Week %d bill (wages %s, upkeep %s, loans %s)" % [int(_section().week), DebriefCalc.money(bill.wages), DebriefCalc.money(bill.upkeep), DebriefCalc.money(bill.loans)])
 	bill["loan_taken"] = loan_taken
 	week_paid.emit(int(_section().week), bill)
 	if loan_taken > 0:
@@ -321,8 +347,10 @@ func server_pay_support(kind: String, cid := "") -> bool:
 		return true
 	# FOB stocks cover part of it (fuel for the lift, parts, ammo; Pallets.offset_preview).
 	var stocked := Pallets.offset_preview(price - from_budget, "support:" + kind)
-	if spend(price - from_budget - int(stocked.offset), "Support call: %s" % kind):
+	var paid := price - from_budget - int(stocked.offset)
+	if spend(paid, "Support call: %s" % kind):
 		Pallets.take_stock(stocked.used)
+		note_run_expense(paid, "Support call: %s" % kind)
 		return true
 	if from_budget > 0:
 		Contracts.server_draw_support(cid, -from_budget)  # give the budget back

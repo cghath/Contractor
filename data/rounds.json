@@ -12,6 +12,7 @@
 		{"id": "12g_slug", "name": "12 ga slug", "level": "IIIA", "class": "pistol", "calibre_mm": 18.5, "mass_g": 28.3, "muzzle_mps": 480, "bc": 0.1, "drag": "G1"},
 		{"id": "556_m193", "name": "5.56x45mm M193 ball", "level": "III", "class": "intermediate", "calibre_mm": 5.7, "mass_g": 3.56, "muzzle_mps": 990, "bc": 0.121, "drag": "G7"},
 		{"id": "762x39_msc", "name": "7.62x39mm mild steel core", "level": "III+", "class": "intermediate", "calibre_mm": 7.9, "mass_g": 7.9, "muzzle_mps": 715, "bc": 0.137, "drag": "G7"},
+		{"id": "545x39_7n6", "name": "5.45x39mm 7N6 steel core", "level": "III++", "class": "intermediate", "calibre_mm": 5.6, "mass_g": 3.43, "muzzle_mps": 900, "bc": 0.168, "drag": "G7", "level_drop_mps": 700, "level_drop_to": "III"},
 		{"id": "762x51_m80", "name": "7.62x51mm M80 ball", "level": "III+", "class": "full_power", "calibre_mm": 7.8, "mass_g": 9.53, "muzzle_mps": 840, "bc": 0.2, "drag": "G7"},
 		{"id": "556_m855", "name": "5.56x45mm M855 green tip", "level": "III++", "class": "intermediate", "calibre_mm": 5.7, "mass_g": 4.02, "muzzle_mps": 910, "bc": 0.151, "drag": "G7", "level_drop_mps": 700, "level_drop_to": "III"},
 		{"id": "762x54r_lps", "name": "7.62x54mmR LPS steel core", "level": "III++", "class": "full_power", "calibre_mm": 7.9, "mass_g": 9.6, "muzzle_mps": 830, "bc": 0.19, "drag": "G7"},

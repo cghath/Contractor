@@ -247,6 +247,7 @@ func _ready() -> void:
 	vitals.went_down.connect(_on_went_down)
 	_add_voxel_viewer()
 	_on_inventory_changed()
+	$Sync.synchronized.connect(_on_synced)
 	print("[%s] %s spawned on peer %d (local: %s)" % ["ai" if is_ai() else "player", name, multiplayer.get_unique_id(), is_local()])
 
 
@@ -325,6 +326,55 @@ func select_weapon(slot: StringName) -> void:
 	_on_inventory_changed()
 
 
+## Another player's body on this machine: snapshots of where their Sync put it
+## (RemoteSmoother), so the model walks between updates instead of jumping (Captain,
+## 2026-10-15). Only the model moves (and the hitboxes and worn armor, which follow it); the
+## body, capsule and camera stay where the owner last said, so the host's shot-origin check
+## (_server_fire) still measures from the real spot.
+var _smoother := RemoteSmoother.new()
+## A newest snapshot older than this (s) means the updates stopped (the owner left and the host
+## moves the body, B-06): the model goes back onto the body.
+const SMOOTH_STALE_S := 0.5
+
+
+## Every Sync update: remember where it put another player's body.
+func _on_synced() -> void:
+	if _smooths():
+		_smoother.push(global_position, rotation.y, Time.get_ticks_usec() / 1e6)
+
+
+## Whether this body's model is drawn smoothed: another player's, up and on foot, still
+## sending. Riding, carried, down or a ragdoll: the body is placed by something else.
+func _smooths() -> bool:
+	return not is_ai() and not is_multiplayer_authority() and owner_connected() and vitals.is_up() \
+			and not is_instance_valid(vehicle) and not is_instance_valid(carried_by) and not is_instance_valid(ragdoll)
+
+
+## Every frame: offsets the model from the body to where the smoother says the body was a
+## moment ago (RemoteSmoother.delay), or puts it back on the body. The offset goes in through
+## CharacterModel.net_offset: the model owns its transform (body scale, a carried casualty in
+## its carrier's frame).
+func _smooth_remote() -> void:
+	var now := Time.get_ticks_usec() / 1e6  # finer than _now: updates can come a few ms apart
+	var smooths := _smooths()
+	if not smooths:
+		_smoother.reset()
+	var offset := Transform3D.IDENTITY
+	if smooths and _smoother.has_data() and now - _smoother.newest_time() <= SMOOTH_STALE_S:
+		var at := _smoother.sample(now)
+		var shift: Vector3 = (at.pos as Vector3) - global_position
+		if shift.length() > RemoteSmoother.SNAP_M:
+			_smoother.reset()
+		else:
+			var turn := wrapf(float(at.yaw) - rotation.y, -PI, PI)
+			offset = Transform3D(Basis(Vector3.UP, turn), global_basis.inverse() * shift)
+	if model.net_offset == offset:
+		return
+	model.net_offset = offset
+	if smooths:
+		model.transform = model.base_transform()  # now, for this frame's hitbox pose (the model keeps it after)
+
+
 func _process(_delta: float) -> void:
 	# Runs on every peer: active_slot, inventory and head rotation are replicated.
 	model.look_pitch = head.rotation.x
@@ -332,6 +382,7 @@ func _process(_delta: float) -> void:
 	model.aiming = is_aiming
 	model.left_handed = left_handed
 	model.name_tape = person_name.to_upper()
+	_smooth_remote()  # before apply_pose: the hitboxes follow the model's transform
 	movement.apply_pose()  # model pose, hitbox pose and capsule from the replicated stance
 	if is_local() or (is_ai() and multiplayer.is_server()):
 		# Breathing quickens and deepens as the legs tire (stamina is the owner's, so other peers
@@ -810,9 +861,29 @@ func _server_fire(origin: Vector3, direction: Vector3, slot: StringName) -> void
 func _server_squad_command(cmd: String, point: Vector3, names: PackedStringArray) -> void:
 	if not _from_owner() or is_ai() or not vitals.is_up() or not usable_point(point):
 		return
+	server_squad_command(cmd, point, names)
+
+
+## Host: the command once the sender is checked (_server_squad_command; tests call it).
+func server_squad_command(cmd: String, point: Vector3, names: PackedStringArray) -> void:
 	var squad := CompoundLevel.current(self).squad_for(faction)
 	if squad == null:
 		return
+	var own_team := squad.human_team_lead_of(self)
+	if own_team >= 0:
+		# A human team leader orders his own fire team and doesn't take the squad's lead.
+		var keep := squad.leader
+		names = squad.team_names(own_team, names)
+		if names.is_empty():
+			return
+		_squad_command_as(squad, cmd, point, names)
+		if is_instance_valid(keep):
+			squad.leader = keep
+		return
+	_squad_command_as(squad, cmd, point, names)
+
+
+func _squad_command_as(squad: Squad, cmd: String, point: Vector3, names: PackedStringArray) -> void:
 	var ordered_why := squad.order_command(self, cmd, point, names)  # the command menu's orders (queue 12)
 	if ordered_why != "?":
 		if ordered_why != "":
@@ -855,7 +926,7 @@ func _server_squad_command(cmd: String, point: Vector3, names: PackedStringArray
 
 
 @rpc("any_peer", "call_local", "reliable")
-func _server_throw(origin: Vector3, direction: Vector3, id: StringName) -> void:
+func _server_throw(origin: Vector3, direction: Vector3, id: StringName, power := 1.0) -> void:
 	if not _from_owner() or not vitals.is_up() or inventory.hands != &"" or _now() < _server_busy_until - 0.1 \
 			or not usable_point(origin) or not usable_direction(direction) or respawn_state == RESPAWN_WAITING:
 		return
@@ -869,7 +940,8 @@ func _server_throw(origin: Vector3, direction: Vector3, id: StringName) -> void:
 		origin = camera.global_position
 	var dir := direction.normalized()
 	var carried := velocity if velocity.is_finite() else Vector3.ZERO  # the owner replicates its own velocity
-	CompoundLevel.current(self).server_throw(id, origin + dir * 0.5, carried + dir * THROW_SPEED + Vector3.UP * 2.0, self)
+	var p := clampf(power, 0.3, 1.0) if is_finite(power) else 1.0  # an underhand lob goes shorter
+	CompoundLevel.current(self).server_throw(id, origin + dir * 0.5, carried + dir * THROW_SPEED * p + Vector3.UP * 2.0 * p, self)
 
 
 @rpc("any_peer", "call_local", "reliable")
@@ -1403,9 +1475,18 @@ func _log_care(target: Node, item_id: StringName, part: StringName, outcome: Str
 ## next casualty: Captain, P0164 queue 17), otherwise this soldier's.
 func _kit_for(target: Node3D, item_id: StringName, their_kit: bool) -> Inventory:
 	var casualty := target as Soldier
-	if their_kit and casualty and casualty != self and Vitals.has_item(casualty.inventory, item_id):
+	if casualty and casualty != self and Vitals.has_item(casualty.inventory, item_id) 			and (their_kit or not Vitals.has_item(inventory, item_id)):
 		return casualty.inventory
 	return inventory
+
+
+## `actor` can treat `target` with `item_id` from its own kit or the casualty's (players and
+## AI both may use the casualty's own items; the host takes it from theirs first: _kit_for).
+static func kit_has(actor: Soldier, target: Node, item_id: StringName) -> bool:
+	if Vitals.has_item(actor.inventory, item_id):
+		return true
+	var casualty := target as Soldier
+	return casualty != null and casualty != actor and Vitals.has_item(casualty.inventory, item_id)
 
 
 ## Host side of a treatment (_server_treat, _server_use_medical).
@@ -2309,6 +2390,162 @@ func _loot_one(other: Soldier, where: StringName, index: int) -> Dictionary:
 		var why := "No room for %s" % entry_name if moved == 0 else "Took %d %s, no room for the rest" % [moved, entry_name]
 		return {"moved": moved, "name": entry_name, "why": why}
 	return {"moved": moved, "name": entry_name, "why": ""}
+
+
+# --- The loot window (LootWindow, docs/loot_window.md) ------------------------------------
+# A session is the host's note of what this player is searching and when the search ends; the
+# moves are checked against it and against the current state, one request at a time on the
+# host, so two players at one body can't both get the same item.
+
+## Seconds the search of a body takes (the dead: quick; a downed or captured enemy resists
+## it), and of a vehicle's hold (rummaging through stowed kit).
+const LOOT_SEARCH_BODY_S := 1.5
+const LOOT_SEARCH_CAPTIVE_S := 2.5
+const LOOT_SEARCH_HOLD_S := 3.0
+const LOOT_CLASSES := {&"ammo": ["ammo"], &"medical": ["medical"], &"all": []}
+
+var _loot_node: Node  # host: what this player is searching
+var _loot_ready_at := 0.0  # host: when that search ends
+var _loot_searched := {}  # host: instance ids searched to the end (reopening is instant)
+
+
+static func loot_search_seconds(target: Node) -> float:
+	if target is Soldier:
+		return LOOT_SEARCH_BODY_S if (target as Soldier).vitals.is_dead() else LOOT_SEARCH_CAPTIVE_S
+	return LOOT_SEARCH_HOLD_S
+
+
+## The body or vehicle at `path` this player may search now (up, lootable, in reach), else null.
+func _loot_target(path: NodePath) -> Node:
+	var node := get_node_or_null(path)
+	if node is Soldier:
+		return _lootable(path)
+	if node is Vehicle and _from_owner() and vitals.is_up():
+		var v := node as Vehicle
+		if v.cargo() == null or v.is_queued_for_deletion():
+			return null
+		if not v.in_reach(self):
+			_client_message.rpc_id(owner_peer(), "Too far away")
+			return null
+		return v
+	return null
+
+
+## True once the search of `target` is over (and remembers it); else tells the player.
+func _loot_session_ok(target: Node) -> bool:
+	if _loot_searched.has(target.get_instance_id()):
+		return true
+	if _loot_node != target:
+		return false
+	if _now() < _loot_ready_at:
+		_client_message.rpc_id(owner_peer(), "Still searching")
+		return false
+	_loot_searched[target.get_instance_id()] = true
+	return true
+
+
+## Opens a search of the body or hold at `path`; the owner's window starts its timer.
+@rpc("any_peer", "call_local", "reliable")
+func _server_loot_open(path: NodePath) -> void:
+	var target := _loot_target(path)
+	if target == null:
+		return
+	var secs := 0.0 if _loot_searched.has(target.get_instance_id()) else loot_search_seconds(target)
+	_loot_node = target
+	_loot_ready_at = _now() + secs
+	if target is Soldier and secs > 0.0:
+		model.server_loot(target as Soldier)  # kneeling at the body
+	_client_loot_open.rpc_id(owner_peer(), path, secs)
+
+
+@rpc("any_peer", "call_local", "reliable")
+func _client_loot_open(_path: NodePath, secs: float) -> void:
+	if multiplayer.get_remote_sender_id() in [0, 1] and _hud and is_instance_valid(_hud.loot_window):
+		_hud.loot_window.begin_search(secs)
+
+
+@rpc("any_peer", "call_local", "reliable")
+func _server_loot_close() -> void:
+	if _from_owner():
+		_loot_node = null
+
+
+## One thing from the body or hold at `path` to you: slot or stowed entry `index` of container
+## `where` on a body (as _server_loot_item), entry `index` of the hold on a vehicle. `id` is what
+## the player saw; if it changed since, nothing moves.
+@rpc("any_peer", "call_local", "reliable")
+func _server_loot_move(path: NodePath, where: StringName, index: int, id: StringName) -> void:
+	var target := _loot_target(path)
+	if target == null or not _loot_session_ok(target):
+		return
+	if target is Vehicle:
+		var told := (target as Vehicle).server_unload(self, index, id)
+		_client_message.rpc_id(owner_peer(), told if told != "" else "Nothing there any more")
+		return
+	var other := target as Soldier
+	if _loot_id_at(other, where, index) != id:
+		_client_message.rpc_id(owner_peer(), "Nothing there any more")
+		return
+	var result := _loot_one(other, where, index)
+	if result.why != "":
+		_client_message.rpc_id(owner_peer(), result.why)
+	elif int(result.moved) > 0:
+		_client_message.rpc_id(owner_peer(), "Took %s%s" % [result.name, " x%d" % result.moved if int(result.moved) > 1 else ""])
+
+
+## One stowed entry of yours (container, index, id) into the body or hold at `path`; what
+## doesn't fit stays with you. container &"" is the two-handed item in your hands (a hold only).
+@rpc("any_peer", "call_local", "reliable")
+func _server_loot_put(path: NodePath, container: StringName, index: int, id: StringName) -> void:
+	var target := _loot_target(path)
+	if target == null or not _loot_session_ok(target):
+		return
+	if target is Vehicle:
+		var v := target as Vehicle
+		if v.wrecked:
+			return
+		var told := v.server_load(self, container, index, id)
+		_client_message.rpc_id(owner_peer(), told if told != "" else "Nothing there any more")
+		return
+	var list: Array = inventory.containers.get(container, [])
+	if index < 0 or index >= list.size() or list[index].id != id:
+		_client_message.rpc_id(owner_peer(), "Nothing there any more")
+		return
+	var other := target as Soldier
+	var entry := inventory.remove_entry(container, index, int(list[index].count))
+	var moved := other.inventory.take(entry.id, int(entry.count), entry.get("state", {}))
+	if moved < int(entry.count):
+		var rest := entry.duplicate(true)
+		rest.count = int(entry.count) - moved
+		inventory.insert_entry(container, rest)  # it was just there, so it fits
+		_client_message.rpc_id(owner_peer(), "No room on them for %s" % ItemDB.get_item(entry.id).name)
+
+
+## "Take all ammo" / "Take all meds" (kind &"ammo", &"medical"; &"all" for every stowed entry):
+## sweeps the stowed entries of that kind off the body or out of the hold.
+@rpc("any_peer", "call_local", "reliable")
+func _server_loot_take_class(path: NodePath, kind: StringName) -> void:
+	var target := _loot_target(path)
+	if target == null or not LOOT_CLASSES.has(kind) or not _loot_session_ok(target):
+		return
+	var types: Array = LOOT_CLASSES[kind]
+	var moved := 0
+	if target is Vehicle:
+		var v := target as Vehicle
+		for i in range(v.cargo_hold.entries().size() - 1, -1, -1):
+			var entry: Dictionary = v.cargo_hold.entries()[i]
+			if types.is_empty() or ItemDB.get_item(entry.id).type in types:
+				if v.server_unload(self, i, entry.id).begins_with("Took"):
+					moved += 1
+	else:
+		var other := target as Soldier
+		for where_index: Array in _loot_order(other):
+			if int(where_index[1]) < 0:
+				continue
+			var id := _loot_id_at(other, where_index[0], where_index[1])
+			if id != &"" and (types.is_empty() or ItemDB.get_item(id).type in types):
+				moved += int(_loot_one(other, where_index[0], where_index[1]).moved > 0)
+	_client_message.rpc_id(owner_peer(), "Took %d stack%s" % [moved, "" if moved == 1 else "s"] if moved > 0 else "Nothing to take")
 
 
 ## Host only. Empties the inventory onto the ground around this body, item state and all

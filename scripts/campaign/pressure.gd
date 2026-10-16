@@ -8,7 +8,11 @@ extends Node
 ##   counted as destroyed, below, isn't counted again: in practice the comms site and villages);
 ## - an objective done +5; an outpost, checkpoint, QRF base or the HQ taken out (its garrison
 ##   gone: ZoneLevel.site_down) +8; an alarm raised (the zone reaching ALERTED) +3;
-## - quiet: -1 per QUIET_S without a gain; time alone: +1 per TIME_S.
+## - quiet: -1 per QUIET_S without a gain; time alone: +1 per TIME_S;
+## - staying (Captain 2026-10-15: "pressure rises the longer the squad stays"): quiet never
+##   takes the points below stay_floor(), STAY_FLOOR for every STAY_FLOOR_S in the zone, and
+##   they rise to it ("stay") when under it: about tier 1 after 2 hours, tier 2 after 4, quiet
+##   or not. Staying pays more too (HotZoneOps' hazard pay).
 ## A destroyed comms site (Alert.comms_down) halves every gain. Tiers at TIERS (10, 20, 35, 50):
 ## what each brings is EnemyResponse's. No meter on screen. Host only; one node per hot zone
 ## ("Pressure", ZoneLevel). It runs on the Alert's clock (tests jump it with Alert.advance and
@@ -27,6 +31,8 @@ const FIREFIGHT_GAP_S := 90.0
 const FIREFIGHT_LONG_S := 180.0
 const QUIET_S := 600.0
 const QUIET_LOSS := 1.0
+const STAY_FLOOR_S := 1800.0
+const STAY_FLOOR := 2.5
 const TIME_S := 1800.0
 const COMMS_DOWN_GAIN := 0.5
 ## Sites whose loss counts as one destroyed.
@@ -141,11 +147,18 @@ func server_tick() -> void:
 	_count_sites()
 	while t - _last_quiet >= QUIET_S:
 		_last_quiet += QUIET_S
-		_change(-QUIET_LOSS, "quiet")
+		_change(-minf(QUIET_LOSS, maxf(points - stay_floor(), 0.0)), "quiet")
 	var due := floori((t - _start) / TIME_S)
 	if due > _times_paid:
 		server_add("time", due - _times_paid)
 		_times_paid = due
+	if points < stay_floor():
+		_change(stay_floor() - points, "stay")
+
+
+## The least pressure the squad has after this long in the zone: STAY_FLOOR per STAY_FLOOR_S.
+func stay_floor() -> float:
+	return floorf(maxf(now() - _start, 0.0) / STAY_FLOOR_S) * STAY_FLOOR
 
 
 ## Contact (`contact`: any hostile fighting the squad at `t`): a new firefight, or a long one.

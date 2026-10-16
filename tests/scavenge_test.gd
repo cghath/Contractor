@@ -315,11 +315,16 @@ func _role(role: StringName) -> Soldier:
 	return null
 
 
-## A freshly killed enemy with HOSTILE_LOADOUT lying at `pos`.
+## The Mk18 kit these scavenging checks were written around (OPFOR now carries AKs).
+const MK18_KIT := ["plate_carrier_light", "plate_pe_l3", "helmet_bump", "assault_pack", "mk18",
+	"mag_556", "mag_556", "mag_556", "mag_556", "ifak", "frag_grenade"]
+
+
+## A freshly killed enemy with an Mk18 kit lying at `pos`.
 func _dead_hostile(pos: Vector3) -> Soldier:
 	_spawned += 1
 	var s := level.spawn_soldier({"name": "ScavHostile%d" % _spawned, "faction": "hostile", "variant": "urban", "pos": pos,
-		"loadout": CompoundLevel.HOSTILE_LOADOUT, "combat": 0.5, "discipline": 0.5, "guard": true})
+		"loadout": MK18_KIT, "combat": 0.5, "discipline": 0.5, "guard": true})
 	SquadAI.of(s).set_physics_process(false)
 	s.vitals.server_hit(Vitals.HEAD, {"round_class": Vitals.INTERMEDIATE})
 	return s

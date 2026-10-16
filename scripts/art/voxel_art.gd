@@ -31,7 +31,7 @@ const FEMALE_CARRIER_BACK := 2
 enum C {
 	EMPTY, CAMO, CAMO_A, CAMO_B, CAMO_C, CAMO_D, SKIN, SKIN_SHADE, HAIR, EYE, MOUTH,
 	BOOT, SOLE, GLOVE, BELT, METAL, PAD, PATCH, GEAR, GEAR_DARK, PACK, PACK_DARK,
-	GUN, GUN_LIGHT, LENS, LIP, LIP_SHADE,
+	GUN, GUN_LIGHT, LENS, LIP, LIP_SHADE, WOOD, WOOD_DARK,
 }
 
 const VARIANTS := {
@@ -156,8 +156,11 @@ static func model_for(item: ItemData, state := {}) -> String:
 	match item.slot:
 		&"primary":
 			var length: float = item.stats.get("size_m", [0, 0, 0.84])[2]
-			var art := Optics.art_of(Optics.mounted(item, state)) if Optics.has_rail(item) else "dot"
-			return "rifle:%d:%s" % [roundi(length / VOXEL_SIZE), art if art != "" else IRONS]
+			var style := String(item.stats.get("model_style", ""))  # "ak", "mg": a different silhouette
+			# No rail: the old fixed dot for the AR family, but AKs and MGs carry irons only
+			# (Captain, 2026-10-15: the AK showed a red-dot block that did nothing).
+			var art := Optics.art_of(Optics.mounted(item, state)) if Optics.has_rail(item) else ("dot" if style == "" else IRONS)
+			return "rifle:%d:%s%s" % [roundi(length / VOXEL_SIZE), art if art != "" else IRONS, (":" + style) if style != "" else ""]
 		&"sidearm":
 			return "pistol"
 		&"vest":
@@ -496,6 +499,7 @@ static func _get_mesher(variant: String) -> VoxelMesherCubes:
 			C.GEAR: Color(v.gear), C.GEAR_DARK: Color(v.gear).darkened(0.25),
 			C.PACK: Color(v.pack), C.PACK_DARK: Color(v.pack).darkened(0.25),
 			C.GUN: Color("262626"), C.GUN_LIGHT: Color("3b3b37"), C.LENS: Color("3a6f8f"),
+			C.WOOD: Color("8a5530"), C.WOOD_DARK: Color("5e3a1e"),
 			C.LIP: skin.lerp(Color("9a4a44"), 0.3).darkened(0.12), C.LIP_SHADE: skin.lerp(Color("9a4a44"), 0.2),
 		}
 		var palette := VoxelColorPalette.new()
@@ -533,7 +537,11 @@ static func _spec(model: String) -> Dictionary:
 		"vest_f": return _vest(arg, _torso_f(true), true)
 		"vest_f_front": return _vest(arg, _torso_f(true), true, true)
 		"backpack": return _backpack(arg)
-		"rifle": return _rifle(arg, _rifle_art(model))
+		"rifle":
+			match _rifle_style(model):
+				"ak": return _rifle_ak(arg, _rifle_art(model))
+				"mg": return _rifle_mg(arg, _rifle_art(model))
+			return _rifle(arg, _rifle_art(model))
 		"optic": return _optic_model(model.get_slice(":", 1))
 		"pistol": return _pistol()
 		"head_f": return _head_f()
@@ -1091,6 +1099,12 @@ static func _rifle_art(model: String) -> String:
 	return parts[2] if parts.size() > 2 and parts[2] != "" else "dot"
 
 
+## The silhouette a rifle model names ("rifle:42:irons:ak"): "" for the AR-15 family.
+static func _rifle_style(model: String) -> String:
+	var parts := model.split(":")
+	return parts[3] if parts.size() > 3 else ""
+
+
 ## Where (voxels along a rifle of `n`) the back end of sight `art` sits: compact sights over
 ## the receiver's front, magnified tubes further back (eye relief), irons' rear aperture at
 ## the rail's end.
@@ -1245,6 +1259,62 @@ static func _rifle(length: int, art := "dot") -> Dictionary:
 		_fb(0.8, 6.0, f.call(0.8), 2.2, 9.4, n, C.GUN_LIGHT),                   # stock
 		_fb(0.95, 9.4, f.call(0.82), 2.05, 9.8, f.call(0.95), C.GUN_LIGHT),     # cheek rest
 		_fb(0.8, 5.6, n - 0.5, 2.2, 9.8, n, C.GUN),                             # butt pad
+	]}
+
+
+## An AK-pattern rifle (AKM, AK-74, RPK): slab receiver with a top cover, gas tube over a wooden
+## handguard, a banana magazine, a straight wooden stock. Iron sights only. Same size, grip and
+## shoulder points as the AR model (hand_points, butt_point use the box size, not the shape).
+static func _rifle_ak(length: int, art := IRONS) -> Dictionary:
+	var n := maxi(length, 20)
+	var f := func(t: float) -> float: return n * t
+	var sight := iron_boxes(n) if art == IRONS else optic_boxes(art, sight_back(art, n))
+	return {"size": Vector3i(3, 13, n), "sub": 4, "boxes": sight + [
+		_fb(1.25, 8.25, 0, 1.75, 8.75, f.call(0.3), C.GUN),                     # barrel
+		_fb(1.0, 7.9, 0, 2.0, 9.1, 1.5, C.GUN),                                 # slant muzzle brake
+		_fb(1.2, 8.75, f.call(0.13), 1.8, 9.9, f.call(0.15), C.GUN),            # gas block and front sight base
+		_fb(1.2, 9.0, f.call(0.15), 1.8, 9.5, f.call(0.46), C.GUN),             # gas tube
+		_fb(0.55, 6.6, f.call(0.16), 2.45, 8.9, f.call(0.46), C.WOOD),          # wooden handguard
+		_fb(0.55, 6.6, f.call(0.16), 2.45, 7.0, f.call(0.46), C.WOOD_DARK),
+		_fb(0.7, 7.0, f.call(0.46), 2.3, 9.6, f.call(0.76), C.GUN),             # receiver and dust cover
+		_fb(0.75, 5.8, f.call(0.48), 2.25, 7.0, f.call(0.72), C.GUN),
+		_fb(0.9, 4.2, f.call(0.51), 2.1, 5.8, f.call(0.6), C.GUN_LIGHT),        # magazine: a banana curving forward
+		_fb(0.9, 2.8, f.call(0.485), 2.1, 4.2, f.call(0.59), C.GUN_LIGHT),
+		_fb(0.9, 1.4, f.call(0.46), 2.1, 2.8, f.call(0.57), C.GUN_LIGHT),
+		_fb(0.9, 0.6, f.call(0.43), 2.1, 1.4, f.call(0.54), C.GUN),
+		_fb(1.25, 4.6, f.call(0.62), 1.75, 5.0, f.call(0.68), C.GUN),           # trigger guard
+		_fb(0.9, 4.4, f.call(0.68), 2.1, 5.8, f.call(0.73), C.WOOD),            # pistol grip, raked back
+		_fb(0.9, 3.0, f.call(0.69), 2.1, 4.4, f.call(0.74), C.WOOD),
+		_fb(0.9, 1.6, f.call(0.7), 2.1, 3.0, f.call(0.75), C.WOOD_DARK),
+		_fb(0.8, 5.8, f.call(0.76), 2.2, 8.6, n, C.WOOD),                       # straight stock
+		_fb(0.8, 5.0, f.call(0.9), 2.2, 6.0, n, C.WOOD_DARK),
+		_fb(0.8, 4.8, n - 0.5, 2.2, 8.8, n, C.GUN),                             # butt plate
+	]}
+
+
+## A belt-fed light machine gun (M249, M240B, PKM): heavy barrel with a carry handle, a bipod
+## folded under the barrel, a box of belt under the receiver, a fixed stock.
+static func _rifle_mg(length: int, art := IRONS) -> Dictionary:
+	var n := maxi(length, 20)
+	var f := func(t: float) -> float: return n * t
+	var sight := iron_boxes(n) if art == IRONS else optic_boxes(art, sight_back(art, n))
+	return {"size": Vector3i(3, 13, n), "sub": 4, "boxes": sight + [
+		_fb(1.1, 8.0, 0, 1.9, 8.9, f.call(0.34), C.GUN),                        # heavy barrel
+		_fb(0.9, 7.7, 0, 2.1, 9.2, 1.5, C.GUN),                                 # flash hider
+		_fb(0.3, 9.2, f.call(0.2), 2.7, 9.6, f.call(0.34), C.GUN_LIGHT),        # barrel shroud top
+		_fb(0.4, 6.4, f.call(0.12), 2.6, 8.0, f.call(0.33), C.GUN_LIGHT),       # handguard
+		_fb(0.4, 5.6, f.call(0.1), 0.8, 6.4, f.call(0.3), C.GUN),               # bipod, folded under
+		_fb(2.2, 5.6, f.call(0.1), 2.6, 6.4, f.call(0.3), C.GUN),
+		_fb(0.5, 6.8, f.call(0.34), 2.5, 9.9, f.call(0.7), C.GUN),              # receiver and feed cover
+		_fb(1.0, 9.9, f.call(0.46), 2.0, 10.8, f.call(0.52), C.GUN),            # carry handle
+		_fb(0.4, 3.4, f.call(0.42), 2.6, 6.8, f.call(0.6), C.GUN_LIGHT),        # belt box
+		_fb(0.4, 3.4, f.call(0.42), 2.6, 3.8, f.call(0.6), C.GUN),
+		_fb(1.25, 5.8, f.call(0.62), 1.75, 6.2, f.call(0.68), C.GUN),           # trigger guard
+		_fb(0.9, 4.4, f.call(0.68), 2.1, 6.8, f.call(0.73), C.GUN),             # pistol grip
+		_fb(0.9, 3.0, f.call(0.69), 2.1, 4.4, f.call(0.74), C.GUN),
+		_fb(0.8, 5.6, f.call(0.7), 2.2, 9.0, n, C.GUN_LIGHT),                   # fixed stock
+		_fb(0.8, 5.0, f.call(0.9), 2.2, 6.0, n, C.GUN),
+		_fb(0.8, 4.8, n - 0.5, 2.2, 9.0, n, C.GUN),                             # butt pad
 	]}
 
 

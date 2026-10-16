@@ -289,6 +289,32 @@ func pick(names: PackedStringArray) -> Array[Soldier]:
 	return out
 
 
+## The fire team `p` leads as a human who is not the squad lead's team's leader (the first man
+## up in a team other than the lead's, by squad slot), or -1. His orders apply to his own team
+## and don't hand the squad's lead to him (Soldier._server_squad_command); his team forms on
+## him (_work_out_slots).
+func human_team_lead_of(p: Soldier) -> int:
+	if p == null or p.is_ai() or leader == null or not is_instance_valid(leader) or p == leader or p.fire_team < 0:
+		return -1
+	var lead_team := leader.fire_team if leader.fire_team >= 0 else 0
+	if p.fire_team == lead_team:
+		return -1
+	var mine := p.squad_slot if p.squad_slot >= 0 else 99
+	for m in members():
+		if m.fire_team == p.fire_team and m.vitals.is_up() and (m.squad_slot if m.squad_slot >= 0 else 99) < mine:
+			return -1
+	return p.fire_team
+
+
+## The units of fire team `t` among `names` (all of the team if `names` is empty), as names.
+func team_names(t: int, names := PackedStringArray()) -> PackedStringArray:
+	var out := PackedStringArray()
+	for s in members():
+		if s.fire_team == t and (names.is_empty() or String(s.name) in names):
+			out.append(String(s.name))
+	return out
+
+
 ## A movement order (follow, hold, move to `point`) for the named units.
 func give_order(from: Soldier, order: Order, point: Vector3, names := PackedStringArray()) -> void:
 	leader = from
@@ -1014,10 +1040,20 @@ func _work_out_slots() -> Dictionary:
 				else:
 					var back: Variant = _trail_point(maxf(place.z, place.length() * 0.5))
 					origin = back if back != null else _pulled(leader.global_position, origin)
+		if t != lead_team:
 			for s: Soldier in list:
 				if s.vitals.is_up():
 					guide = s
 					break
+		var t_right := right
+		var t_fwd := fwd
+		if guide != null and t != lead_team and not guide.is_ai():
+			# A human team leader anchors his own team: it forms on him, headed the way he
+			# moves (or faces), wherever the squad lead is.
+			origin = guide.global_position
+			mirror = 1.0
+			t_fwd = _human_heading(guide, fwd)
+			t_right = t_fwd.cross(Vector3.UP).normalized()
 		var guide_k := list.find(guide)
 		var guide_ai := SquadAI.of(guide) if guide and guide.is_ai() else null
 		# The team forms on its own leader while he's with it (following, off his place by more
@@ -1039,8 +1075,9 @@ func _work_out_slots() -> Dictionary:
 			if guide != null:
 				local -= g_local
 				base = guide.global_position if on_guide and k != guide_k else origin
-			var want := base + right * local.x - fwd * local.z
-			slots.append({"who": s, "base": base, "want": want, "gap": gap, "blocked": _blocked(base, want, s)})
+			var want := base + t_right * local.x - t_fwd * local.z
+			slots.append({"who": s, "base": base, "want": want, "gap": gap, "blocked": _blocked(base, want, s),
+				"right": t_right, "fwd": t_fwd})
 	# The lead and the players stand where they stand: nobody's slot on them.
 	var people: Array[Vector3] = [leader.global_position]
 	for s in everyone:
@@ -1057,7 +1094,7 @@ func _work_out_slots() -> Dictionary:
 		taken.append(p)
 		out[e.who] = p
 	for e: Dictionary in refit:
-		var p := _refit(e, right, fwd, people, taken)
+		var p := _refit(e, e.right, e.fwd, people, taken)
 		taken.append(p)
 		out[e.who] = p
 	for s: Soldier in out:
@@ -1065,6 +1102,17 @@ func _work_out_slots() -> Dictionary:
 		out[s] = NavigationServer3D.map_get_closest_point(map, p) if map.is_valid() else p
 	out.erase(leader)
 	return out
+
+
+## The way a human team leader is heading: his horizontal velocity when he's moving, else the
+## way he faces, else `fallback`.
+func _human_heading(who: Soldier, fallback: Vector3) -> Vector3:
+	var v := Vector3(who.velocity.x, 0.0, who.velocity.z) if "velocity" in who else Vector3.ZERO
+	if v.length() > 1.0:
+		return v.normalized()
+	var f := -who.global_transform.basis.z
+	f.y = 0.0
+	return f.normalized() if f.length() > 0.1 else fallback
 
 
 ## A slot picked again on open ground (SLOT_APART_MIN_M above): its mirror across the team's

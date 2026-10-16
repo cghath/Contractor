@@ -20,6 +20,12 @@ func _ready() -> void:
 		var id := args[i + 1] if i + 1 < args.size() and not args[i + 1].begins_with("--") else "test"
 		GameState.zone_id = "zone_%s" % id
 		host_zone(ZoneDef.get_def(id))
+	elif "--new-campaign" in args or "--campaign" in args:
+		# Host the campaign at the base (FOB), as the menu's "Campaign: host" does; with
+		# --new-campaign the current campaign is archived first (moved, never deleted).
+		if "--new-campaign" in args:
+			BaseHub.archive_campaign()
+		menu._campaign_host()
 	elif "--host" in args:
 		menu.host()
 	elif "--join" in args:

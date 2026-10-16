@@ -44,6 +44,7 @@ func _ready() -> void:
 	await _test_completed_treatments()
 	await _test_interruptions()
 	await _test_one_treater_per_site()
+	await _test_casualty_kit_for_players()
 	await _test_care_plan_moves_on()
 	await _test_use_medical()
 	await _test_menu_and_removal()
@@ -1686,3 +1687,30 @@ func _window(w: int, h: int) -> void:
 	var tall := float(h) if h > 0 else MedicalMenu.PANEL_MIN_H + MedicalMenu.PANEL_MARGIN * 2.0
 	root.size = Vector2i(ceili(w * root.content_scale_factor), ceili(tall * root.content_scale_factor))
 	await _frames(2)
+
+
+## Players treat with the casualty's own kit when they carry none (Captain, co-op playtest
+## 2026-10-15: "unable to use the other's medical items"): taken from theirs, host-side.
+func _test_casualty_kit_for_players() -> void:
+	print("Treating from the casualty's kit")
+	_restock()
+	_reset(casualty)
+	var was := casualty.global_position
+	player.global_position = casualty.global_position + Vector3(0.8, 0, 0)
+	_wound(casualty.vitals, Vitals.FOREARM_L, "muscle", 0.25)
+	player.inventory.strip()
+	for id: StringName in [&"plate_carrier", &"assault_pack"]:
+		player.inventory.take(id)
+	if casualty.inventory.count_of(&"assault_pack") == 0 and casualty.inventory.slots.get(&"backpack", &"") == &"":
+		casualty.inventory.take(&"assault_pack")
+	casualty.inventory.take(&"pressure_bandage")
+	var theirs := casualty.inventory.medical_count(&"pressure_bandage")
+	check(player.inventory.medical_count(&"pressure_bandage") == 0 and theirs > 0, "setup: only the casualty carries a bandage")
+	check(Soldier.kit_has(player, casualty, &"pressure_bandage") and not Soldier.kit_has(player, player, &"pressure_bandage"),
+		"the menus count the casualty's bandage as usable")
+	player._server_busy_until = 0.0
+	player._server_treat.rpc_id(1, casualty.get_path(), &"pressure_bandage", Vitals.FOREARM_L, false, true)
+	await _seconds(5.3)
+	var w: Dictionary = casualty.vitals.wound_list()[0]
+	check(w.treated and casualty.inventory.medical_count(&"pressure_bandage") == theirs - 1 and player.inventory.medical_count(&"pressure_bandage") == 0,
+		"treated with the casualty's own bandage, used up from theirs (%d left)" % casualty.inventory.medical_count(&"pressure_bandage"))

@@ -55,8 +55,6 @@ const THIGH := 0.45
 ## per metre the hips have dropped. The back knee comes down to the ground in a kneel.
 const FRONT_FOOT := 0.55
 const BACK_FOOT := 0.85
-## Walking: how far a knee folds (radians, at full stride) as its leg swings through.
-const STEP_KNEE := 0.9
 ## The eyes, torso-local: hips to eye level (the camera follows this point).
 const EYE := Vector3(0, 0.75, 0)
 ## Prone: lifted by half the torso depth, and shifted back so the body lies centred on the
@@ -69,6 +67,57 @@ const PRONE_LEG_SPREAD := 0.12
 const DOWNED_LIFT := 0.12
 ## How fast the drawn body eases into a new pose (per second).
 const POSE_EASE := 8.0
+
+## Locomotion (docs/animation.md). The legs walk a gait cycle set by ground speed (model space,
+## m/s): GAIT_SPEED's anchors, each column a cycle (idle, walk, jog, run at WALK_SPEED, sprint)
+## and between them blended. GAIT_HZ: cycles (two steps) a second; GAIT_DUTY: the share of
+## a cycle each foot is on the ground; GAIT_DROP: how far the hips sink from the stance's
+## height (soft knees, more for a run); GAIT_LIFT: how high a swinging foot comes up;
+## GAIT_LEAN: the upper body's lean into the pace (radians); GAIT_ARM: free arms' swing.
+## A planted foot moves back under the body at exactly the ground speed (it covers
+## duty * speed / hz while down), so it stays where it landed; where the legs can't reach that
+## far at GAIT_HZ the cadence goes up instead (gait_hz), so feet never slide.
+const GAIT_SPEED: Array[float] = [0.0, 1.4, 2.5, 4.0, 6.5]
+const GAIT_HZ: Array[float] = [0.9, 1.0, 1.25, 1.42, 1.6]
+const GAIT_DUTY: Array[float] = [0.55, 0.5, 0.36, 0.26, 0.2]
+const GAIT_DROP: Array[float] = [0.0, 0.06, 0.07, 0.08, 0.1]
+const GAIT_LIFT: Array[float] = [0.06, 0.1, 0.16, 0.24, 0.32]
+const GAIT_LEAN: Array[float] = [0.0, 0.03, 0.06, 0.1, 0.2]
+const GAIT_ARM: Array[float] = [0.15, 0.3, 0.45, 0.6, 0.85]
+## The hips bob this much (m) per step at a stroll, plus GAIT_BOB_RUN at a sprint: up over a
+## planted leg walking, down onto it running.
+const GAIT_BOB := 0.012
+const GAIT_BOB_RUN := 0.02
+## Strafing, the legs turn this share of the way towards the way they move (the upper body
+## keeps facing the aim), so a sidestep is a run at an angle, not a splits.
+const GAIT_HIP_TURN := 0.5
+## How fast the measured ground velocity settles (per second), and the speeds the cycle fades
+## in over (below it the stance pose stands).
+const GAIT_EASE := 10.0
+const GAIT_IN := Vector2(0.1, 0.5)
+## Hips this low or lower (m, body space) walk as a crouch-walk: no extra hip drop, less lift.
+const CROUCH_GAIT_HIP := 0.65
+## Prone crawl: the body moves this far a cycle, a knee drawn up and out each half.
+const CRAWL_STRIDE := 0.55
+const CRAWL_KNEE := 1.3
+const CRAWL_THIGH := 0.6
+const CRAWL_SPLAY := 0.5
+## The cycles, by name (gait()).
+const IDLE := &"idle"
+const WALK := &"walk"
+const JOG := &"jog"
+const SPRINT := &"sprint"
+const CROUCH_WALK := &"crouch_walk"
+const CRAWL := &"crawl"
+## Ground speeds (m/s) between the named cycles: walk below JOG_AT, sprint from SPRINT_AT.
+const JOG_AT := 2.0
+const SPRINT_AT := 5.0
+## Level of detail: past these distances (m) from the view, or behind it past LOD_NEAR_M, the
+## body is drawn every LOD_* frames (with the time since, so cycles keep their pace).
+const LOD_NEAR_M := 30.0
+const LOD_FAR_M := 70.0
+const LOD_MID := 2
+const LOD_FAR := 4
 
 ## A standing pose. hip: hips above the feet (lower bends the legs); hip_x, hip_z: hips shifted
 ## sideways and back; pitch: upper body lean (negative leans forward); roll: upper body tilt
@@ -312,7 +361,6 @@ var _speed := 0.0
 var breath_rate := 1.0
 var breath_depth := 1.0
 var _breath_t := 0.0
-var _phase := 0.0
 var _time := 0.0
 var _shown: Dictionary = {}   # bone -> Transform3D, easing towards the pose
 var _yaw_shown := 0.0         # the drawn body's turn (pose "yaw"), eased with the bones
@@ -336,6 +384,16 @@ var _hand_from: Array[Vector3] = [Vector3.ZERO, Vector3.ZERO]
 var _hand_blend: Array[float] = [1.0, 1.0]
 var _arms_posed := false
 var _carrier_worn := false
+var _gait_phase := 0.0          # 0..1 through the cycle: the left foot lands at 0, the right at 0.5
+var _move := Vector3.ZERO       # ground velocity in the model's space (m/s), eased
+var _gait_w := 0.0              # how much the cycle shows over the stance pose, 0..1
+var _gait := &"idle"
+var _gait_lean := 0.0
+var _gait_bob := 0.0            # the hips' bob this frame (m)
+## Level of detail on (tests drawing a body by hand turn it off).
+var lod := true
+var _lod_n := 0
+var _lod_dt := 0.0
 
 
 ## How big this body is drawn: FEMALE_SCALE for a female soldier, else 1.
@@ -343,9 +401,14 @@ func body_scale() -> float:
 	return FEMALE_SCALE if body == VoxelArt.FEMALE else 1.0
 
 
-## The model's own transform when nothing moves it: its size (body_scale).
+## Another player's body drawn smoothed between network updates (Soldier._smooth_remote,
+## RemoteSmoother): where the model sits off the body, body-local. Identity otherwise.
+var net_offset := Transform3D.IDENTITY
+
+
+## The model's own transform when nothing moves it: its size (body_scale), moved by net_offset.
 func base_transform() -> Transform3D:
-	return Transform3D(Basis.from_scale(Vector3.ONE * body_scale()), Vector3.ZERO)
+	return net_offset * Transform3D(Basis.from_scale(Vector3.ONE * body_scale()), Vector3.ZERO)
 
 
 ## A plate carrier is on (or off) this body: a woman's torso is then the one held flat by it
@@ -1015,15 +1078,27 @@ static func _bone_of(area: Area3D) -> String:
 	return bone
 
 
-func _process(delta: float) -> void:
-	# Speed from position change works the same for local, remote and AI bodies.
+func _process(frame_delta: float) -> void:
+	# Level of detail: far off or behind the view, drawn every few frames.
+	_lod_dt += frame_delta
+	_lod_n += 1
+	if lod and _lod_n < _lod_every():
+		return
+	_lod_n = 0
+	var delta := _lod_dt
+	_lod_dt = 0.0
+	# Speed from position change works the same for local, remote and AI bodies; measured in
+	# the model's own space (its turn and scale), so strides match what the model is drawn at.
 	var moved := global_position - _last_position
 	_last_position = global_position
 	moved.y = 0.0
-	var speed := minf(moved.length() / maxf(delta, 0.0001), MAX_SPEED)
-	_speed = lerpf(_speed, speed, minf(delta * 10.0, 1.0))
+	var vel := global_transform.basis.inverse() * (moved / maxf(delta, 0.0001))
+	vel.y = 0.0
+	if vel.length() > MAX_SPEED * 1.5:
+		vel = Vector3.ZERO  # placed, not walked
+	_move = _move.lerp(vel, minf(delta * GAIT_EASE, 1.0))
+	_speed = _move.length()
 	_time += delta
-	_phase += delta * (2.0 + _speed * 1.6)
 	var carry_key := "%s/%s/%s" % [carry_net.get("mode", ""), carry_net.get("phase", ""), carry_net.get("n", 0)]
 	if carry_key != _carry_key:
 		_carry_key = carry_key
@@ -1055,20 +1130,29 @@ func _process(delta: float) -> void:
 	var target_twist := 0.0 if casualty or downed else float(_last_pose.get("twist", 0.0))
 	_twist_shown = lerpf(_twist_shown, target_twist, blend)
 	var prone: bool = pose.get("prone", false)
-	var stride := clampf(_speed / 4.0, 0.0, 1.0) * (0.55 + 0.25 * clampf((_speed - 4.0) / 2.5, 0.0, 1.0))
-	if downed or casualty or seated:
-		stride = 0.0  # seated: the vehicle moves him, the legs don't walk (Captain, 2026-10-14)
+	# seated: the vehicle moves him, the legs don't walk (Captain, 2026-10-14)
+	var still := downed or casualty or seated
+	var swing := 0.0
+	if still:
+		_gait = IDLE
+		_gait_w = 0.0
+		_gait_lean = 0.0
+		_gait_bob = 0.0
+		_root.transform = _shown.root
+		_leg_left.transform = _shown.leg_l
+		_leg_right.transform = _shown.leg_r
+		_shin_left.transform = _shown.knee_l
+		_shin_right.transform = _shown.knee_r
 	elif prone:
-		stride *= 0.35  # crawling: small leg movements
-	var swing := sin(_phase) * stride
-	_root.transform = (_shown.root as Transform3D).translated(Vector3(0, absf(sin(_phase)) * 0.03 * stride, 0))
-	_leg_left.transform = (_shown.leg_l as Transform3D) * Transform3D(Basis(Vector3.RIGHT, swing), Vector3.ZERO)
-	_leg_right.transform = (_shown.leg_r as Transform3D) * Transform3D(Basis(Vector3.RIGHT, -swing), Vector3.ZERO)
-	# A knee folds as its leg swings through (forward), and straightens to take the weight.
-	_shin_left.transform = (_shown.knee_l as Transform3D) * Transform3D(Basis(Vector3.RIGHT, -STEP_KNEE * stride * maxf(cos(_phase), 0.0)), Vector3.ZERO)
-	_shin_right.transform = (_shown.knee_r as Transform3D) * Transform3D(Basis(Vector3.RIGHT, -STEP_KNEE * stride * maxf(-cos(_phase), 0.0)), Vector3.ZERO)
+		swing = _crawl(delta)
+	else:
+		swing = _walk(delta)
 	_breath_t = fmod(_breath_t + delta * 2.0 * breath_rate, TAU * 64.0)
-	torso.transform = (_shown.torso as Transform3D).translated_local(Vector3(0, sin(_breath_t) * 0.003 * breath_depth, 0))  # breathing
+	var torso_t := (_shown.torso as Transform3D).translated_local(Vector3(0, sin(_breath_t) * 0.003 * breath_depth, 0))  # breathing
+	if _gait_lean != 0.0 or swing != 0.0:
+		# Leaning into the pace, the shoulders turning a little against the stride.
+		torso_t.basis = torso_t.basis * Basis(Vector3.RIGHT, -_gait_lean) * Basis(Vector3.UP, -swing * 0.12)
+	torso.transform = torso_t
 	if casualty:
 		# Limp: the head hangs (carried) or lolls back (dragged) with the body.
 		head.rotation = Vector3(-CARRY_HEAD_DROOP if mode == CARRIED else DRAG_HEAD_LOLL, 0, 0)
@@ -1081,7 +1165,7 @@ func _process(delta: float) -> void:
 		# and twist (rotation.y, applied outside the pitch: the turn the torso's twist undoes).
 		head.rotation.y = -_twist_shown
 		hands_anchor.rotation.y = -_twist_shown
-		var lean := 0.0 if downed else _upper_body_pitch((_shown.root as Transform3D).basis * (_shown.torso as Transform3D).basis, _yaw_shown)
+		var lean := 0.0 if downed else _upper_body_pitch((_shown.root as Transform3D).basis * (_shown.torso as Transform3D).basis, _yaw_shown) - _gait_lean
 		_aim_w = move_toward(_aim_w, 1.0 if aiming and _held_weapon and is_instance_valid(_held) else 0.0, delta * 6.0)
 		head.rotation.x = clampf(look_pitch, -0.7, 0.7) * 0.8 - lean - AIM_HEAD_DIP * smoothstep(0.0, 1.0, _aim_w)
 		hands_anchor.rotation.x = clampf(look_pitch, -0.8, 0.8) * 0.8 - lean
@@ -1091,6 +1175,173 @@ func _process(delta: float) -> void:
 			if downed:
 				head.rotation.x = -SEAT_HEAD_DROOP
 	_update_arms(delta, carry, swing)
+
+
+## Locomotion: the gait cycle at ground speed (see GAIT_*), blended over the stance pose by
+## how fast the body moves. Returns the free arms' swing (radians, the right arm forward).
+func _walk(delta: float) -> float:
+	var v := _speed
+	var w := smoothstep(GAIT_IN.x, GAIT_IN.y, v)
+	_gait_w = w
+	var leg_l: Transform3D = _shown.leg_l
+	var leg_r: Transform3D = _shown.leg_r
+	var hip0 := leg_l.origin.y
+	var high := clampf((hip0 - CROUCH_GAIT_HIP) / 0.25, 0.0, 1.0)  # 0 crouched .. 1 standing
+	var duty := _gait_at(GAIT_DUTY, v)
+	var lift := _gait_at(GAIT_LIFT, v) * (0.5 + 0.5 * high)
+	var bob := (GAIT_BOB + GAIT_BOB_RUN * clampf(v / GAIT_SPEED[4], 0.0, 1.0)) * high
+	var drop := _gait_at(GAIT_DROP, v) * high
+	var hz := gait_hz(v, hip0 - drop * w + bob * w, duty)
+	var half := duty * v / hz * 0.5
+	_gait_phase = fposmod(_gait_phase + delta * hz, 1.0)
+	if w <= 0.0:
+		_gait = IDLE
+	elif high < 0.5:
+		_gait = CROUCH_WALK
+	else:
+		_gait = WALK if v < JOG_AT else (JOG if v < SPRINT_AT else SPRINT)
+	# Hips: up over the planted leg walking, down onto it running (twice a cycle).
+	var run := smoothstep(1.5, 2.5, v)
+	_gait_bob = bob * lerpf(1.0, -1.0, run) * cos(TAU * 2.0 * (_gait_phase - duty * 0.5)) * w
+	var dy := _gait_bob - drop * w
+	_gait_lean = _gait_at(GAIT_LEAN, v) * w * high
+	var root: Transform3D = _shown.root
+	_root.transform = root.translated(Vector3(0, dy, 0))
+	if w <= 0.0:
+		_leg_left.transform = leg_l
+		_leg_right.transform = leg_r
+		_shin_left.transform = _shown.knee_l
+		_shin_right.transform = _shown.knee_r
+		return 0.0
+	# The way it moves, in the root's space (an action may turn the drawn body).
+	var dir := root.basis.inverse() * _move
+	dir.y = 0.0
+	dir = dir.normalized() if dir.length() > 0.001 else Vector3.FORWARD
+	# Strafing: the legs turn part way towards the movement (backwards: towards its reverse).
+	var turn := atan2(-dir.x, -dir.z)
+	if turn > PI * 0.5:
+		turn -= PI
+	elif turn < -PI * 0.5:
+		turn += PI
+	var yaw_b := Basis(Vector3.UP, turn * GAIT_HIP_TURN * w)
+	var centre := Vector3((leg_l.origin.x + leg_r.origin.x) * 0.5, 0.0, (leg_l.origin.z + leg_r.origin.z) * 0.5)
+	for i in 2:
+		var base: Transform3D = leg_l if i == 0 else leg_r
+		var q := fposmod(_gait_phase - 0.5 * i, 1.0)
+		var along := 0.0
+		var up := 0.0
+		if q < duty:
+			along = half * (1.0 - 2.0 * q / duty)  # planted: moving back at ground speed
+		else:
+			var s := (q - duty) / (1.0 - duty)
+			along = -half + 2.0 * half * (0.5 - 0.5 * cos(PI * s))
+			up = lift * sin(PI * s)
+		var pivot := base.origin - centre
+		pivot.y = 0.0
+		pivot = centre + yaw_b * pivot
+		pivot.y = base.origin.y
+		# Hip to foot (root space, the ground `dy` below the root): the foot on the ground under
+		# the hip, `along` the way it moves.
+		var to_foot := Vector3(dir.x * along, up - pivot.y - dy, dir.z * along)
+		var d := yaw_b.inverse() * to_foot
+		var roll := atan2(d.x, -d.y)
+		var a := _leg_angles(Vector2(d.x, d.y).length(), -d.z)
+		var gait_leg := Transform3D(yaw_b * Basis(Vector3.BACK, roll) * Basis(Vector3.RIGHT, a.x), pivot)
+		var knee := _knee(a.y)
+		if i == 0:
+			_leg_left.transform = base.interpolate_with(gait_leg, w)
+			_shin_left.transform = (_shown.knee_l as Transform3D).interpolate_with(knee, w)
+		else:
+			_leg_right.transform = base.interpolate_with(gait_leg, w)
+			_shin_right.transform = (_shown.knee_r as Transform3D).interpolate_with(knee, w)
+	# Arms swing against the legs: the right forward as the left foot lands.
+	return cos(TAU * _gait_phase) * _gait_at(GAIT_ARM, v) * w
+
+
+## Prone: a crawl, one knee drawn up and out each half cycle (CRAWL_*). Returns the free
+## arms' swing.
+func _crawl(delta: float) -> float:
+	var v := _speed
+	var w := smoothstep(0.05, 0.3, v)
+	_gait_w = w
+	_gait = CRAWL if w > 0.0 else IDLE
+	_gait_lean = 0.0
+	_gait_bob = 0.0
+	_gait_phase = fposmod(_gait_phase + delta * v / CRAWL_STRIDE, 1.0)
+	_root.transform = _shown.root
+	var draw := sin(TAU * _gait_phase) * w
+	var left := maxf(draw, 0.0)
+	var right := maxf(-draw, 0.0)
+	_leg_left.transform = (_shown.leg_l as Transform3D) * Transform3D(Basis(Vector3.BACK, -CRAWL_SPLAY * left) * Basis(Vector3.RIGHT, CRAWL_THIGH * left), Vector3.ZERO)
+	_leg_right.transform = (_shown.leg_r as Transform3D) * Transform3D(Basis(Vector3.BACK, CRAWL_SPLAY * right) * Basis(Vector3.RIGHT, CRAWL_THIGH * right), Vector3.ZERO)
+	_shin_left.transform = (_shown.knee_l as Transform3D) * Transform3D(Basis(Vector3.RIGHT, -CRAWL_KNEE * left), Vector3.ZERO)
+	_shin_right.transform = (_shown.knee_r as Transform3D) * Transform3D(Basis(Vector3.RIGHT, -CRAWL_KNEE * right), Vector3.ZERO)
+	return draw * 0.6
+
+
+## Cycles a second at ground speed `v` for hips `hip` above the ground (at their highest) and
+## a foot down `duty` of the cycle: GAIT_HZ, or faster where a planted foot would otherwise
+## have to reach further than the leg does.
+static func gait_hz(v: float, hip: float, duty: float) -> float:
+	var reach := LEG_LENGTH * 0.995
+	var half_max := sqrt(maxf(reach * reach - hip * hip, 0.0004))
+	return maxf(_gait_at(GAIT_HZ, v), duty * v / (2.0 * half_max))
+
+
+## `table` (one value per GAIT_SPEED anchor) at speed `v`, straight between anchors.
+static func _gait_at(table: Array[float], v: float) -> float:
+	var last := GAIT_SPEED.size() - 1
+	for i in last:
+		if v < GAIT_SPEED[i + 1]:
+			return lerpf(table[i], table[i + 1], (maxf(v, 0.0) - GAIT_SPEED[i]) / (GAIT_SPEED[i + 1] - GAIT_SPEED[i]))
+	return table[last]
+
+
+## The cycle the legs show: IDLE, WALK, JOG, SPRINT, CROUCH_WALK or CRAWL.
+func gait() -> StringName:
+	return _gait
+
+
+## 0..1 through the gait cycle (the left foot lands at 0, the right at 0.5).
+func gait_phase() -> float:
+	return _gait_phase
+
+
+## How much the cycle shows (0 standing still .. 1 at pace).
+func gait_weight() -> float:
+	return _gait_w
+
+
+## The hips' bob this frame (m, up), the view's to follow.
+func gait_bob() -> float:
+	return _gait_bob
+
+
+## The ground speed the legs are walking at (m/s, the model's space).
+func gait_speed() -> float:
+	return _speed
+
+
+## The sole of a foot (world space): the bottom of its shin.
+func foot_position(left: bool) -> Vector3:
+	var shin := _shin_left if left else _shin_right
+	return shin.global_transform * Vector3(0, -(LEG_LENGTH - THIGH), 0)
+
+
+## Frames between draws for this body (level of detail): every frame near the view, fewer far
+## off or behind it; every frame with no 3D view.
+func _lod_every() -> int:
+	var viewport := get_viewport()
+	var camera := viewport.get_camera_3d() if viewport else null
+	if camera == null:
+		return 1
+	var to := global_position - camera.global_position
+	var d2 := to.length_squared()
+	if d2 < LOD_NEAR_M * LOD_NEAR_M:
+		return 1
+	if d2 > LOD_FAR_M * LOD_FAR_M or to.dot(-camera.global_basis.z) < 0.0:
+		return LOD_FAR
+	return LOD_MID
 
 
 ## The parts a ragdoll pose holds, in order: the bones it stands in for (the pelvis rides the

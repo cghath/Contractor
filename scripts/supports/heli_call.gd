@@ -87,6 +87,10 @@ const HOME_ORBIT_AGL_M := 150.0
 const HOME_WAIT_S := 120.0
 ## It's gone this close to its exit (m), after hovering up for TAKEOFF_S.
 const EXIT_M := 150.0
+## Leaving: at least this long in the air before it is gone (it spawns at its exit, so a heli sent
+## home at once would otherwise vanish within a second and a recall find nothing to turn back).
+const LEAVE_MIN_S := 8.0
+var _leave_at := 0.0
 const TAKEOFF_S := 3.0
 const TAKEOFF_AGL_M := 8.0
 ## "Taking fire" goes out at most this often.
@@ -411,7 +415,13 @@ func _place_point() -> void:
 
 ## A new mark while it's on its way or loitering: it goes there instead. Returns "" or why not.
 func server_redirect(new_mark: Dictionary) -> String:
-	if phase != Phase.INBOUND and phase != Phase.LOITER:
+	if can_turn_back():
+		# Captain, 2026-10-15: sent home (or done waiting) and still in the air on its way out,
+		# empty: a new call turns it back, free, rather than "already on its way out" until it
+		# has flown off the map (and then the call's cooldown on top).
+		stage = "pickup"
+		sup.server_radio(kind, "Copy, turning back")
+	elif phase != Phase.INBOUND and phase != Phase.LOITER:
 		return "%s is already %s" % [HeliSupports.callsign(kind), "down" if phase == Phase.GROUND else "on its way out"]
 	_radio_state = ""  # a new order: it answers
 	if not new_mark.has("pos"):
@@ -421,6 +431,16 @@ func server_redirect(new_mark: Dictionary) -> String:
 	mark = new_mark
 	_go_in()
 	return ""
+
+
+## Whether a new call turns this one back (server_redirect): a transport or extraction sent home
+## (or leaving after it waited) without people aboard, taking off or on its way out.
+func can_turn_back() -> bool:
+	if kind != "transport" and kind != "extraction":
+		return false
+	if stage != "leave" or rode_out or not is_instance_valid(heli) or heli.is_down():
+		return false
+	return (phase == Phase.LEAVING or phase == Phase.TAKEOFF) and heli.occupants().is_empty()
 
 
 ## Transport: where to take the squad. Returns "" or why not.
@@ -445,6 +465,7 @@ func server_cancel() -> String:
 	if not heli.occupants().is_empty() and heli.is_airborne():
 		return "Not with people aboard: give it a destination"
 	sup.server_radio(kind, "Copy, returning to base")
+	sup.server_clear_cooldown(kind)  # sent home: it can be called again at once (Captain, 2026-10-15)
 	if phase == Phase.GROUND:
 		_depart()
 	else:
@@ -520,7 +541,7 @@ func step(delta: float) -> void:
 		Phase.LEAVING:
 			var area: Rect2 = level().map_area()
 			var at_wall := level() is ZoneLevel and not area.grow(-40.0).has_point(Vector2(heli.global_position.x, heli.global_position.z))
-			if _flat(heli.global_position, exit) < EXIT_M or at_wall:  # (a zone's edge is a wall; a small map's isn't)
+			if (_flat(heli.global_position, exit) < EXIT_M or at_wall) and Soldier._now() - _leave_at > LEAVE_MIN_S:  # (a zone's edge is a wall; a small map's isn't)
 				heli.queue_free()
 				phase = Phase.GONE
 
@@ -909,6 +930,7 @@ func _stop_waiting() -> void:
 		_lift_out()
 		return
 	sup.server_radio(kind, "Can't hold the LZ any longer. Lifting off: call us again when you're ready")
+	sup.server_clear_cooldown(kind)  # "call us again": and it can be, at once
 	_put_down_hold()
 	_depart()
 
@@ -1140,6 +1162,7 @@ static func _compass(dir: Vector2) -> String:
 ## to where it came in: HeliRoute.exit_for).
 func _leave() -> void:
 	stage = "leave"
+	_leave_at = Soldier._now()
 	phase = Phase.LEAVING
 	var lvl := level()
 	if lvl is ZoneLevel and (kind == "insertion" or kind == "extraction"):

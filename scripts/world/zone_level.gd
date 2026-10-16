@@ -104,6 +104,7 @@ func _ready() -> void:
 		add_child(Pressure.new())  # what the squad has done here, long term
 		add_child(EnemyResponse.new())  # patrols, QRF waves, hunters: the enemy's answer
 		add_child(RadioChatter.new())  # what a looted enemy radio lets the squad hear
+		add_child(HotZoneOps.new())  # several contracts live, radio follow-ups, hazard pay
 		if DevTools.on():
 			add_child(HotZoneDebug.new())  # playtests: PgUp readout, PgDn skips the enemy's clock
 	Contracts.contract_live.connect(_on_contract_live)
@@ -470,7 +471,9 @@ func garrison_size(module_id: String) -> int:
 	var target := -1
 	for cid: String in Contracts.deployment().get("cids", []):
 		if String(Contracts.contract(cid).get("module_id", "")) == module_id:
-			target = maxi(target, int(Contracts.enemy_force(cid).get("count", 0)))
+			# A defend mission's position is ours to hold: no garrison (its enemies come as waves).
+			var held: bool = bool(MissionRegistry.type_def(String(Contracts.contract(cid).get("type", ""))).get("no_garrison", false))
+			target = maxi(target, 0 if held else int(Contracts.enemy_force(cid).get("count", 0)))
 	return target if target >= 0 else n
 
 
@@ -540,7 +543,7 @@ func _spawn_queued_garrison() -> void:
 		var pos: Vector3 = q.pos
 		if module and ai.get_node_or_null(NodePath(_garrison_callsign(module, i))) == null:
 			var s := spawn_soldier({"name": _garrison_callsign(module, i), "faction": "hostile", "variant": "urban", "pos": pos,
-				"loadout": HOSTILE_LOADOUT + ["enemy_radio"] if i % RADIO_EVERY == 0 else HOSTILE_LOADOUT, "combat": GARRISON_STATS.combat, "discipline": GARRISON_STATS.discipline, "guard": true,
+				"loadout": hostile_loadout(i) + ["enemy_radio"] if i % RADIO_EVERY == 0 else hostile_loadout(i), "combat": GARRISON_STATS.combat, "discipline": GARRISON_STATS.discipline, "guard": true,
 				"mode": alert.mode_at(pos) if alert else GARRISON_STATS.mode})
 			if s:
 				var look := module.global_basis * (q.get("face", Vector3.ZERO) as Vector3)  # a post's way out (towns)

@@ -92,6 +92,7 @@ func _ready() -> void:
 	await _test_surrender()
 	await _test_scavenge_intel()
 	await _test_escort()
+	await _test_ride_with_leader()
 	await _test_carried_owner_gone()
 	await _test_client()
 	await _test_compound_content()
@@ -806,6 +807,44 @@ func _test_escort() -> void:
 	check(SquadAI.of(e1).escorting == null and SquadAI.of(e2).escorting == hvt, "a movement order takes a squadmate off the escort")
 	for s: Soldier in [e1, e2, medic, hvt]:
 		s.queue_free()
+	await _frames(3)
+
+
+## Captain, 2026-10-15 (v0.4.11): HVTs and hostages didn't get into AAVs or M-ATVs. Whoever a
+## squadmate leads or escorts gets in with him (a free passenger seat) and out with him.
+func _test_ride_with_leader() -> void:
+	print("Riding with the squad")
+	var vl := level.get_node(^"Vehicles") as VehicleLayer
+	var at := Vector3(-60, 0.1, -30)
+	var matv := vl.server_spawn("matv", Transform3D(Basis(), at + Vector3(6, 0, 0)), "", &"player", "ride_matv")
+	var aav := vl.server_spawn("aav7", Transform3D(Basis(), at + Vector3(-10, 0, 0)), "", &"player", "ride_aav")
+	await _frames(3)
+	var hvt := _person({"name": "HvtTestPilot", "kind": "hvt", "side": "friendly", "hvt_id": "hvt_test_pilot",
+		"label": "HVT (the Pilot)", "pos": at})
+	_place(player, at + Vector3(2, 0, 0))
+	await _frames(3)
+	layer.server_lead(player, hvt)
+	check(matv.server_enter(player), "the player gets into the M-ATV")
+	check(Vehicle.ride_of(hvt) == matv and matv.seat_kind(matv.seat_of(hvt)) == Vehicle.PASSENGER
+		and String(Person.state(hvt).get("seated_in", "")) == layer.key_of(matv), "the HVT he leads gets in with him, in the back")
+	matv.server_exit(player)
+	await _frames(2)
+	check(Vehicle.ride_of(hvt) == null and String(Person.state(hvt).get("led_by", "")) == layer.key_of(player),
+		"he gets out when the player does, and follows him again")
+	# A hostage escorted by a squadmate: into the AAV with his escort, out with him.
+	var hostage := _person({"name": "HostageTest", "kind": "hvt", "side": "friendly", "hvt_id": "hvt_test_hostage",
+		"label": "Hostage", "pos": at + Vector3(-4, 0, 3)})
+	var esc := _squadmate("RideEsc", Roles.RIFLEMAN, at + Vector3(-5, 0, 3))
+	await _frames(3)
+	SquadAI.of(esc).set_escort(hostage)
+	check(aav.server_enter(esc), "the escort gets into the AAV")
+	check(Vehicle.ride_of(hostage) == aav and aav.seat_kind(aav.seat_of(hostage)) == Vehicle.PASSENGER, "the hostage he escorts gets in with him")
+	check(Vehicle.ride_of(hvt) == null, "someone nobody leads stays out")
+	vl.server_order_dismount(player, PackedStringArray(["RideEsc"]))
+	await _frames(2)
+	check(Vehicle.ride_of(esc) == null and Vehicle.ride_of(hostage) == null, "Dismount: the hostage gets out with his escort")
+	for n: Node in [esc, hostage, hvt, matv, aav]:
+		n.queue_free()
 	await _frames(3)
 
 

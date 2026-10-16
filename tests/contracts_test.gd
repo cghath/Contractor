@@ -48,6 +48,7 @@ func _ready() -> void:
 	_test_malformed_requests()
 	_test_reveal_renegotiate_abort()
 	_test_wages_and_floor()
+	_test_economy_balance()
 	_test_lapse()
 	_test_debrief_totals()
 	_test_civilians_void()
@@ -96,7 +97,7 @@ func _test_generation() -> void:
 		var zone := MissionRegistry.zone(o.zone_id)
 		var def := MissionRegistry.type_def(o.type)
 		valid = valid and int(o.rated) >= 1 and int(o.rated) <= 5 and int(o.true_rating) >= int(o.rated) and int(o.base_pay) > 0 \
-			and not (o.objectives as Array).is_empty() and ZoneModules.base(o.module) in MissionRegistry.type_modules(def) and ZoneModules.base(o.module) in zone.modules and String(o.module_id) != "" \
+			and not (o.objectives as Array).is_empty() and ZoneModules.base(o.module) in MissionRegistry.type_modules(def) and ZoneModules.base(o.module) in zone.modules and (String(o.module_id) != "" or def.has("scenario")) \
 			and o.employer in MissionRegistry.employers() and o.target in MissionRegistry.enemies() and o.zone_kind == zone.kind
 	check(valid, "every offer is sound: rating 1-5, the briefing never overstates, pay, objectives, a target module in the zone's layout")
 	check(a[0].source == "safe" and int(a[0].rated) == 1 and not a[0].understated and a[0].zone_kind == "contract",
@@ -125,8 +126,9 @@ func _test_generation() -> void:
 		if o.zone_kind == "hot":
 			hot += 1
 			hot_ok = hot_ok and o.employer == MissionRegistry.zone(o.zone_id).faction
-	check(seen.keys().size() == 4 and seen.has("raid") and seen.has("hvt_capture") and seen.has("hostage_rescue") and seen.has("intel_grab"),
-		"Captain's first four mission types come up (%s)" % [seen.keys()])
+	check(seen.keys().size() == 9 and seen.has("raid") and seen.has("hvt_capture") and seen.has("hostage_rescue") and seen.has("intel_grab")
+		and seen.has("convoy_ambush") and seen.has("defend_hold") and seen.has("crew_rescue") and seen.has("sabotage") and seen.has("recon"),
+		"Captain's first four mission types and the five of mission variety come up (%s)" % [seen.keys()])
 	check(hot > 30 and hot < 130 and hot_ok, "hot-zone contracts come up (%d of 300), each from the zone's own faction" % hot)
 	# A mission type added at runtime (Noah's types drop in the same way).
 	MissionRegistry.register_type({"type": "test_rescue", "name": "Hostage rescue", "module": "compound", "base_pay": 60000, "days": 1,
@@ -307,28 +309,33 @@ func _test_reveal_renegotiate_abort() -> void:
 
 func _test_wages_and_floor() -> void:
 	print("Weekly wages and the safety floor")
-	Contracts.new_full_campaign(7, 50000)
+	Contracts.new_full_campaign(7, 100000)
+	var up := Prices.weekly_upkeep()
 	Economy.wages_provider = func() -> int: return 20000
-	check(Economy.days_to_bill() == 7 and Economy.weekly_bill().total == 24000, "the bill: $20,000 wages from the roster + $4,000 upkeep, due in 7 days")
+	check(Economy.days_to_bill() == 7 and Economy.weekly_bill().total == 20000 + up, "the bill: $20,000 wages from the roster + $%d upkeep, due in 7 days" % up)
 	Economy.advance_days(6, "test")
-	check(Economy.cash() == 50000 and Economy.day() == 7, "nothing due before the week is out")
+	check(Economy.cash() == 100000 and Economy.day() == 7, "nothing due before the week is out")
 	Economy.advance_days(1, "test")
-	check(Economy.cash() == 26000 and Economy.day() == 8 and int(Economy.ledger().back().amount) == -24000, "day 8: the week's bill is paid ($26,000 left)")
-	Economy.wages_provider = func() -> int: return 60000
+	var left := 100000 - 20000 - up
+	check(Economy.cash() == left and Economy.day() == 8 and int(Economy.ledger().back().amount) == -(20000 + up), "day 8: the week's bill is paid once")
+	Economy.advance_days(6, "test")
+	check(Economy.cash() == left, "and not again in the days after it")
+	Economy.wages_provider = func() -> int: return 100000
 	var notices: Array = []
 	var on_notice := func(text: String) -> void: notices.append(text)
 	Economy.notice.connect(on_notice)
 	Economy.advance_days(7, "test")
 	Economy.notice.disconnect(on_notice)
-	check(Economy.cash() == MissionRegistry.setting_i("safety_floor_cash", 20000) and Economy.loans_owed() == roundi(58000 * 1.1)
+	check(Economy.cash() == MissionRegistry.setting_i("safety_floor_cash", 20000) and Economy.loans_owed() == roundi((100000 + up - left + MissionRegistry.setting_i("safety_floor_cash", 20000)) * 1.1)
 		and notices.any(func(t: String) -> bool: return t.contains("Emergency loan")),
-		"a $64,000 bill on $26,000: an emergency loan covers it and leaves the floor ($%d cash, $%d owed)" % [Economy.cash(), Economy.loans_owed()])
+		"a bill beyond the cash: an emergency loan covers it and leaves the floor ($%d cash, $%d owed)" % [Economy.cash(), Economy.loans_owed()])
 	Economy.wages_provider = func() -> Array: return [{"what": "Alpha", "amount": 1000}, {"what": "Bravo", "amount": 1500}]
 	var bill := Economy.weekly_bill()
 	var owed := Economy.loans_owed()
 	check(bill.wages == 2500 and bill.loans == ceili(owed / 8.0), "wages as lines from the roster ($%d), and the loan installment ($%d)" % [bill.wages, bill.loans])
+	Economy.add_cash(100000 - Economy.cash(), "test")
 	Economy.advance_days(7, "test")
-	check(Economy.loans_owed() == owed - bill.loans and Economy.cash() == 20000 - bill.total, "the installment comes off the loan")
+	check(Economy.loans_owed() == owed - bill.loans and Economy.cash() == 100000 - bill.total, "the installment comes off the loan")
 	var lent := 0
 	for i in 5:
 		lent += Economy.server_take_loan()
@@ -337,6 +344,39 @@ func _test_wages_and_floor() -> void:
 	check(Contracts.board().any(func(o: Dictionary) -> bool: return o.source == "safe" and int(o.rated) == 1), "the board always keeps a low-risk job")
 	Economy.wages_provider = Callable()
 	check(Economy.weekly_bill().wages == Prices.default_wage_bill(), "without a roster, the stand-in wage bill")
+
+
+func _test_economy_balance() -> void:
+	print("Economy balance")
+	var report := {"extracted": ["A", "B", "C", "D", "E", "F"], "casualties": []}
+	var base := {"cid": "E1", "title": "Typical", "employer": "meridian", "target": "black_ridge", "zone_kind": "contract", "region": "coast",
+		"days": 1, "state": "deployed", "deal": {"pay_total": 40000, "advance": 12000, "completion": 28000, "salvage_share": 0.1}}
+	var objs := [{"oid": "E1_o1", "cid": "E1", "kind": "clear_area", "state": "done", "optional": false, "bonus_share": 0.0, "text": "x"}]
+	var d := DebriefCalc.compute([base], objs, 0, report)
+	var e := DebriefCalc.expenses(report, int(d.days), [])
+	var wages := 8 * 400 * int(d.days)
+	var upkeep := Prices.weekly_upkeep() * int(d.days) / 7
+	var net := int(d.totals.contract_value) - int(e.total) - wages - upkeep
+	var share := float(net) / float(d.totals.contract_value)
+	check(net > 0 and share >= 0.1 and share <= 0.6, "a standard contract nets a modest profit: $%d of $%d (%d%%)" % [net, d.totals.contract_value, roundi(share * 100.0)])
+	var bad_report := {"extracted": ["A", "B", "C"], "casualties": [{"name": "D", "status": "kia"}, {"name": "E", "status": "kia"}, {"name": "F", "status": "wounded"}]}
+	var bad_run := [{"what": "Support call: resupply", "amount": 12000}, {"what": "Support call: extraction", "amount": 14000}, {"what": "Lost helicopter", "amount": 40000}]
+	var failed := DebriefCalc.compute([base], [objs[0].merged({"state": "failed"}, true)], 0, bad_report)
+	var be := DebriefCalc.expenses(bad_report, int(failed.days), bad_run)
+	var bad_net := int(failed.totals.contract_value) - int(be.total) - wages - upkeep
+	check(bad_net < 0, "a disastrous one (2 KIA, a lost helicopter, supports, failed) loses money: $%d" % bad_net)
+	check(be.lines.any(func(l: Dictionary) -> bool: return String(l.what).begins_with("Death benefit")) and int(be.charge) < int(be.total),
+		"the expense lines list the death benefit and the run's own costs")
+	# Weekly bills are listed once each, and a bought respawn costs money.
+	Contracts.new_full_campaign(7, 500000)
+	Economy.take_run_expenses()
+	Economy.advance_days(14, "test")
+	var weeks := Economy.take_run_expenses().filter(func(x: Dictionary) -> bool: return String(x.what).begins_with("Week "))
+	check(weeks.size() == 2, "two weeks pass: two weekly bills listed")
+	var before := Economy.cash()
+	Economy.charge_run(Prices.respawn_price(), "Respawn")
+	var run := Economy.take_run_expenses()
+	check(Economy.cash() == before - Prices.respawn_price() and run.size() == 1 and int(run[0].amount) == Prices.respawn_price(), "a bought respawn costs $%d and is listed" % Prices.respawn_price())
 
 
 func _test_lapse() -> void:
@@ -383,6 +423,17 @@ func _test_debrief_totals() -> void:
 		and failed.rep.get("meridian") == -6, "failed: only the advance, no salvage share, -6 reputation")
 	var hot := DebriefCalc.compute([c.merged({"zone_kind": "hot"}, true)], [objs[0].merged({"state": "failed"}, true)], 0, report)
 	check(hot.contracts[0].outcome == "lapsed" and hot.rep.get("meridian") == -3, "a hot-zone contract left unfinished lapses (-3)")
+	# Hot zones (Captain 2026-10-15): staying pays more; several contracts live at once.
+	var stayed := DebriefCalc.compute([c.merged({"zone_kind": "hot"}, true)], objs, 0, report.merged({"hazard_tier": 2}, true))
+	var hazard: Array = (stayed.contracts[0].bonuses as Array).filter(func(b: Dictionary) -> bool: return String(b.text).begins_with("Hazard pay"))
+	check(hazard.size() == 1 and int(hazard[0].amount) == roundi(100000 * HotZoneOps.HAZARD_SHARE_PER_TIER * 2) and stayed.contracts[0].pay == line.pay + int(hazard[0].amount),
+		"a hot-zone contract done at pressure tier 2: hazard pay of %d%% on top ($%d)" % [roundi(HotZoneOps.HAZARD_SHARE_PER_TIER * 200), int(hazard[0].amount) if not hazard.is_empty() else 0])
+	var plain := DebriefCalc.compute([c], objs, 0, report.merged({"hazard_tier": 2}, true))
+	check(plain.contracts[0].pay == line.pay, "no hazard pay outside a hot zone")
+	var targets := [1, 2, 3, 4].map(func(held: int) -> int: return HotZoneOps.live_target(7, 3, "ridge_hot", held))
+	check(targets[0] >= HotZoneOps.LIVE_RANGE.x and targets[0] <= HotZoneOps.LIVE_RANGE.y and targets[0] == targets[1] and targets[2] == 3 and targets[3] == 4
+		and HotZoneOps.live_target(7, 3, "ridge_hot", 1) == targets[0],
+		"a hot zone keeps 3-6 contracts live: fewer taken are topped up (to %d, the same every time), 3 or more stay as taken" % targets[0])
 	var voided := DebriefCalc.compute([c.merged({"state": "voided"}, true)], objs, 8, report)
 	check(voided.contracts[0].outcome == "voided" and voided.totals.completion == 0 and voided.totals.bonuses == 0 and voided.fines == 20000
 		and voided.contracts[0].clawback == 30000 and voided.totals.paid_now == -50000 and voided.totals.contract_value == -20000,
@@ -547,8 +598,8 @@ func _test_shop() -> void:
 	var cid := _make_offer("raid", "compound_01")
 	Contracts.server_accept(cid, {"pay_points": 0, "salvage_points": 0, "support_points": 1, "advance_share": 0.3})
 	cash = Economy.cash()
-	check(Economy.server_pay_support("resupply", cid) and Contracts.support_left(cid) == 0 and Economy.cash() == cash - 3000,
-		"a $8,000 resupply call: $5,000 from the support budget, $3,000 cash")
+	check(Economy.server_pay_support("resupply", cid) and Contracts.support_left(cid) == 0 and Economy.cash() == cash - (Prices.support_price("resupply") - 5000),
+		"a resupply call: $5,000 from the support budget, the rest cash")
 
 
 func _test_intel_and_salvage() -> void:
@@ -562,7 +613,7 @@ func _test_intel_and_salvage() -> void:
 	var d := Contracts.server_end_deployment({"items": [{"id": "hvt_case", "count": 1}],
 		"field_items": [{"id": "m4a1", "count": 1}, {"id": "rounds_556", "count": 30}], "extracted": ["You"]})
 	var deal: Dictionary = Contracts.history().back()
-	check(d.contracts[0].outcome == "completed" and Economy.cash() == cash + int(d.totals.paid_now) and int(d.totals.paid_now) > 0,
+	check(d.contracts[0].outcome == "completed" and Economy.cash() == cash + int(d.totals.paid_now) - (d.expenses as Array).reduce(func(a: int, l: Dictionary) -> int: return a + (int(l.amount) if bool(l.charge) else 0), 0) and int(d.totals.paid_now) > 0,
 		"the case carried out completes the contract and pays ($%d)" % int(d.totals.paid_now))
 	check(d.salvage.budget == floori(1430 * 0.5) and Contracts.server_pick_salvage(1) and not Contracts.server_pick_salvage(0) and d.salvage.spent == 30,
 		"a 50%% share of $1,430 in the field: the rounds can be claimed, the rifle can't")
@@ -885,6 +936,36 @@ func _test_live_objectives() -> void:
 	check(panel != null and panel.text().contains("OBJECTIVES") and panel.text().contains("[ ] Clear the compound of hostiles (2 hostiles left)"),
 		"the HUD lists the objectives")
 	check(Contracts.objectives.markers().size() == 6 and Contracts.objectives.markers()[0].pos is Vector3, "and the map gets markers")
+	# Compact / full list and picking the active objective (feat/objective-list).
+	GameSettings.use_file(OS.get_user_data_dir().path_join("test_objlist_settings.cfg"))
+	GameSettings.set_value("hud", "objectives_expanded", true)
+	panel.refresh()
+	check(panel.text().contains("-- ") and panel.text().contains("[O] compact") and panel.text().contains("> "), "full list: grouped by contract, the active one marked (%s)" % panel.text().replace("
+", " | "))
+	var full_lines := panel.text().count("
+")
+	panel.toggle_compact()
+	check(panel.compact() and panel.text().count("
+") == 2 and panel.text().contains("+5 more") and panel.text().contains("> [ ]"),
+		"compact: the active objective on one line and '+5 more' (%s)" % panel.text().replace("
+", " | "))
+	check(panel.text().count("
+") < full_lines, "compact is shorter than the full list")
+	GameSettings.reload()
+	check(not bool(GameSettings.get_value("hud", "objectives_expanded")), "the compact state persists in the settings file")
+	var before := String(_helper().current.get("oid", ""))
+	panel.cycle()
+	var picked := Objectives.chosen_oid
+	check(picked != "" and String(_helper().current.get("oid", "")) == picked and panel.active_oid() == picked and panel.text().contains(Objectives.line(Contracts.objectives.get_objective(picked))),
+		"N picks an objective: the helper's step and the panel follow (auto was %s, now %s)" % [before, picked])
+	check(_helper().current.targets.is_empty() or _helper().current.targets[0].label != "", "the marker target is the picked objective's")
+	var after := ObjectiveHelper.next_choice(Contracts.objectives.list, picked)
+	check(after != picked, "the next pick differs from the last")
+	Objectives.chosen_oid = ""
+	panel.toggle_compact()
+	check(not panel.compact(), "O again expands it")
+	GameSettings.set_value("hud", "objectives_expanded", true)
+	GameSettings.use_file("")
 	h1.vitals.server_kill()
 	h2.vitals.server_kill()
 	await _seconds(1.2)
@@ -931,7 +1012,7 @@ func _test_live_objectives() -> void:
 	check(report.items.any(func(e: Dictionary) -> bool: return e.id == "plate_carrier") and report.field_items.any(func(e: Dictionary) -> bool: return e.id == "m4a1")
 		and report.extracted.size() == 1 and report.casualties.is_empty(), "an extraction report from the level: what the player carries, what's left lying about")
 	var d := Contracts.server_end_deployment(report)
-	check(d.contracts.size() == 3 and d.contracts.all(func(l: Dictionary) -> bool: return l.outcome == "completed") and Economy.cash() == cash + int(d.totals.paid_now)
+	check(d.contracts.size() == 3 and d.contracts.all(func(l: Dictionary) -> bool: return l.outcome == "completed") and Economy.cash() == cash + int(d.totals.paid_now) - (d.expenses as Array).reduce(func(a: int, l: Dictionary) -> int: return a + (int(l.amount) if bool(l.charge) else 0), 0)
 		and int(d.salvage.pool_value) > 0, "all three completed and paid ($%d); salvage pool $%d" % [int(d.totals.paid_now), int(d.salvage.pool_value)])
 	check(Contracts.objectives.list.is_empty() and (panel == null or panel.text() == ""), "after extraction the objective list clears")
 	Contracts.server_finish_debrief()
@@ -962,6 +1043,19 @@ func _test_objective_helper() -> void:
 		"progress": "", "params": {"rect": [-20, -20, 40, 40]}, "pos": [0, 0, 0]}
 	var sit := {"pos": at.call(0, 300), "sites": {"t": "compound"}}
 	check(step.call([], sit) == "", "no deployment, no hint")
+	var area2 := area.duplicate(true)
+	area2.oid = "t_o9"
+	area2.pos = [0, 0, 500]
+	area2.params = {"rect": [-20, 480, 40, 40]}
+	sit["chosen"] = "t_o9"
+	check(String(ObjectiveHelper.step_for([area, area2], sit).oid) == "t_o9" and ObjectiveHelper.step_for([area2, area], sit).targets[0].pos.z > 400.0,
+		"a picked objective beats the nearest one, and the marker follows it")
+	sit["chosen"] = ""
+	sit.pos = at.call(5, 5)
+	check(String(ObjectiveHelper.step_for([area, area2], sit).oid) == "t_o1", "no pick: the nearest")
+	check(ObjectiveHelper.next_choice([area, area2], "") == "t_o1" and ObjectiveHelper.next_choice([area, area2], "t_o1") == "t_o9"
+		and ObjectiveHelper.next_choice([area, area2], "t_o9") == "", "N cycles through the live objectives, then back to auto")
+	sit.pos = at.call(0, 300)
 	check(step.call([area], sit) == "Head to the compound (N, 300 m)", "away from the site: head there, with the direction and distance")
 	sit.pos = at.call(5, 5)
 	check(step.call([area], sit) == "Clear the compound: search it for hostiles", "in the area: clear it")

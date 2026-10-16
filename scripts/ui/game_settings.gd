@@ -37,15 +37,15 @@ const SHADOW_LEVELS := {
 }
 const DEFAULTS := {
 	"video": {"window_mode": "windowed", "resolution": "1600x900", "vsync": true, "fps_cap": 0,
-		"render_scale": 1.0, "antialiasing": "fxaa", "shadows": "medium", "fov": 80.0, "ui_scale": 1.0},
+		"render_scale": 1.0, "antialiasing": "fxaa", "shadows": "medium", "hfov": 90.0, "ui_scale": 1.0, "head_bob": true},
 	# infil_music: Captain, 2026-10-14, temporary (InfilMusic: Ride of the Valkyries on helicopter insertions).
 	"audio": {"master": 0.8, "effects": 1.0, "voice": 1.0, "music": 0.8, "mute_unfocused": false, "infil_music": true},
 	"controls": {"mouse_sensitivity": 1.0, "aim_sensitivity": 0.75, "invert_y": false},
-	"hud": {"objective_markers": true},
+	"hud": {"objective_markers": true, "objectives_expanded": true},
 }
 ## Ranges for the sliders: [min, max, step].
 const RANGES := {
-	"render_scale": [0.5, 1.0, 0.05], "fov": [60.0, 110.0, 1.0], "ui_scale": [0.75, 2.0, 0.05],
+	"render_scale": [0.5, 1.0, 0.05], "hfov": [70.0, 120.0, 1.0], "ui_scale": [0.75, 2.0, 0.05],
 	"master": [0.0, 1.0, 0.01], "effects": [0.0, 1.0, 0.01], "voice": [0.0, 1.0, 0.01], "music": [0.0, 1.0, 0.01],
 	"mouse_sensitivity": [0.2, 3.0, 0.05], "aim_sensitivity": [0.2, 1.5, 0.05],
 }
@@ -67,6 +67,7 @@ const BINDABLE := [
 	[&"stance_adjust", "Adjust stance (hold)"], [&"lean_left", "Lean left"], [&"lean_right", "Lean right"],
 	[&"mount", "Rest weapon"], [&"fire_mode", "Fire mode"], [&"reload", "Reload"], [&"grenade", "Grenade"],
 	[&"medical_menu", "Medical menu"], [&"inventory", "Inventory"], [&"map", "Map"],
+	[&"objectives_toggle", "Objectives list (compact / full)"], [&"objectives_next", "Next objective (picks the active one)"],
 	[&"weapon_primary", "Primary weapon"], [&"weapon_sidearm", "Sidearm"], [&"weapon_launcher", "Launcher"],
 	[&"get_out", "Get out of vehicle"], [&"vehicle_view", "Vehicle view (1st/3rd person)"], [&"quick_save", "Quick save"],
 	[&"zoom_in", "Optic zoom in / magnifier up"], [&"zoom_out", "Optic zoom out / magnifier down"],
@@ -267,9 +268,28 @@ static func resolution_size(text: String) -> Vector2i:
 	return Vector2i(int(parts[0]), int(parts[1]))
 
 
-## The view's field of view (degrees, not aiming).
+## The field of view setting (degrees, not aiming): HORIZONTAL, as seen on a 16:9 screen
+## (docs/animation.md, "World scale"). Its key is "hfov": the old "fov" was the camera's
+## vertical angle (Godot's Camera3D keeps the height), and its default of 80 vertical was about
+## 112 deg across on 16:9, which made the world look small and far and every pace look fast.
 static func fov() -> float:
-	return float(get_value("video", "fov"))
+	return float(get_value("video", "hfov"))
+
+
+## Whether the view bobs with the steps (docs/animation.md, "First person").
+static func head_bob() -> bool:
+	return bool(get_value("video", "head_bob"))
+
+
+## The camera's (vertical) field of view for the setting: what Camera3D.fov takes. Hor+: wider
+## screens see more to the sides, the same up and down.
+static func view_fov() -> float:
+	return vertical_fov(fov())
+
+
+## Vertical degrees for `horizontal` degrees across a 16:9 view.
+static func vertical_fov(horizontal: float) -> float:
+	return rad_to_deg(2.0 * atan(tan(deg_to_rad(horizontal) * 0.5) * 9.0 / 16.0))
 
 
 ## The volumes on their buses (Sfx calls this once it has made them; muted in the background

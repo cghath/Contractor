@@ -168,15 +168,48 @@ func support_left(cid: String) -> int:
 
 ## Where a contract's target module sits in the running level: its zone module's origin (a
 ## world-scale zone, by the contract's "module_id"), else `fallback` (the test compound sits
-## at the origin).
+## at the origin). A contract held from an older build (or a layout that changed since) may name
+## a module the zone no longer has, or one of another type: heal_module_id points it at a module
+## of its type first, so the markers never fall back to the zone's centre (Captain, 2026-10-15:
+## HVT, bonus and "Hostiles at" markers ~400 m off the village).
 func module_origin(c: Dictionary, fallback := Vector3.ZERO) -> Vector3:
-	var module_id := String(c.get("module_id", ""))
 	var lvl := CompoundLevel.current(self) if is_inside_tree() else null
-	if module_id != "" and lvl and lvl.has_method(&"get_module"):
-		var m := lvl.call(&"get_module", module_id) as Node3D
+	if lvl and lvl.has_method(&"get_module"):
+		heal_module_id(c, lvl)
+		var m := lvl.call(&"get_module", String(c.get("module_id", ""))) as Node3D
 		if m:
 			return m.position
 	return fallback
+
+
+## Host: contract `c` names a target module that the level `lvl` lacks, or has as another type
+## (a contract saved by an older build, or a zone layout that changed): it is pointed at a module
+## of its type, one no other held contract uses first. Returns whether it changed. A contract with
+## no module_id (scenarios, recovery) is left be.
+func heal_module_id(c: Dictionary, lvl: Node) -> bool:
+	var id := String(c.get("module_id", ""))
+	if not _is_host() or id == "" or not lvl.has_method(&"get_module") or not lvl.has_method(&"modules"):
+		return false
+	var want := ZoneModules.base(String(c.get("module", "")))
+	var have := lvl.call(&"get_module", id) as ZoneModule
+	if have != null and (want == "" or ZoneModules.base(have.type) == want):
+		return false
+	var used := {}
+	for other: Dictionary in board() + held():
+		if other != c and String(other.get("module_id", "")) != "":
+			used[String(other.module_id)] = true
+	var pick: ZoneModule = null
+	for m: ZoneModule in lvl.call(&"modules"):
+		if want != "" and ZoneModules.base(m.type) != want:
+			continue
+		if pick == null or (used.has(pick.module_id) and not used.has(m.module_id)):
+			pick = m
+	if pick == null:
+		return false
+	push_warning("Contracts: %s named module %s, which this zone lacks; now %s" % [String(c.get("cid", "?")), id, pick.module_id])
+	c["module_id"] = pick.module_id
+	c["module"] = pick.type
+	return true
 
 
 ## Host: the reinforcement timer's tuning (Reinforcements) for a contract, from its true force
@@ -192,7 +225,8 @@ func reinforcement_tuning(cid: String) -> Dictionary:
 	var first: Array = MissionRegistry.setting("reinforcement_first_wave_s", [420, 240])
 	var pairs: Array = MissionRegistry.setting("reinforcement_max_pairs", [2, 4])
 	var quality := float(force.quality)
-	return {"first_wave_s": lerpf(float(first[0]), float(first[1]), t), "max_pairs": roundi(lerpf(float(pairs[0]), float(pairs[1]), t)),
+	var own_waves := bool(MissionRegistry.type_def(String(contract(cid).get("type", ""))).get("own_waves", false))  # MissionScenario sends this type's waves itself
+	return {"first_wave_s": 1.0e9 if own_waves else lerpf(float(first[0]), float(first[1]), t), "max_pairs": roundi(lerpf(float(pairs[0]), float(pairs[1]), t)),
 		"first_pairs": 2 if int(force.count) >= 9 else 1,
 		"max_alive": mini(int(force.count) + MissionRegistry.setting_i("reinforcement_alive_extra", 8), MissionRegistry.setting_i("reinforcement_alive_max", 30)),
 		"combat": quality, "combat_max": minf(quality + 0.2, 0.9)}
@@ -371,13 +405,15 @@ func server_open_lead(faction: String) -> String:
 
 ## Host: accepts an offer on `terms` (ContractGen.default_terms() shape). Pays the advance.
 ## Returns "" or why not.
-func server_accept(cid: String, terms: Dictionary, peer_id := 1) -> String:
+## `over_cap` (a hot zone's in-zone and radio contracts, HotZoneOps): taken during the
+## deployment, so the company's "max_held" doesn't stop it.
+func server_accept(cid: String, terms: Dictionary, peer_id := 1, over_cap := false) -> String:
 	var s := _s()
 	var c := _find(s.board, cid)
 	var why := ""
 	if c.is_empty():
 		why = "That offer is gone"
-	elif (s.held as Array).size() >= MissionRegistry.setting_i("max_held", 4):
+	elif not over_cap and (s.held as Array).size() >= MissionRegistry.setting_i("max_held", 4):
 		why = "The company can't hold more than %d contracts" % MissionRegistry.setting_i("max_held", 4)
 	else:
 		why = ContractGen.terms_problem(terms, Economy.reputation(String(c.employer)))
@@ -477,6 +513,8 @@ func server_start_deployment(cids: Array = [], zone_id := "", origin := Vector3.
 	var first: Dictionary = ready[0]
 	if first.zone_kind != "hot":
 		ready = [first]
+	else:
+		ready.append_array(_hot_zone_extras(ready, zone_id))  # several contracts live at once
 	var list: Array = []
 	var live := {}
 	for c: Dictionary in ready:
@@ -495,6 +533,60 @@ func server_start_deployment(cids: Array = [], zone_id := "", origin := Vector3.
 	for cid: String in live:
 		contract_live.emit(cid, live[cid])
 	return ""
+
+
+## A hot zone has several of its faction's contracts live at once (Captain: 3-6, taken in any
+## order). When the squad took fewer than HotZoneOps' minimum from the board, the faction hands
+## it more on arrival (standard terms, advance paid), each at a site no other contract holds.
+## Returns the new contracts (held, ACCEPTED).
+func _hot_zone_extras(ready: Array, zone_id: String) -> Array:
+	var want := HotZoneOps.live_target(int(_s().seed), Economy.day(), zone_id, ready.size())
+	var out: Array = []
+	var employer := String(MissionRegistry.zone(zone_id).get("faction", ""))
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash([int(_s().seed), Economy.day(), zone_id, "in_zone"])
+	var taken: Array = ready.map(func(c: Dictionary) -> String: return String(c.get("module_id", "")))
+	# The zone's first QRF base stays free of arrival contracts (soft: only while another site is
+	# left): its fall is what the radio follow-up "you hit their QRF, now hit the HQ" reacts to.
+	var reserve := ""
+	for m: Dictionary in MissionRegistry.zone_def(zone_id).get("modules", []):
+		if ZoneModules.base(String(m.type)) == "qrf_base" and String(m.id) not in taken:
+			reserve = String(m.id)
+			break
+	var avoid: Array = taken.duplicate()
+	if reserve != "":
+		avoid.append(reserve)
+	while ready.size() + out.size() < want:
+		var c := _add_offer(ContractGen.generate(rng, {"day": Economy.day(), "source": "board", "zone_id": zone_id,
+			"employer": employer, "avoid_modules": avoid}))
+		c["in_zone"] = "arrival"
+		if server_accept(c.cid, ContractGen.default_terms(), 1, true) != "":
+			(_s().board as Array).erase(c)
+			break
+		avoid.append(String(c.module_id))
+		out.append(c)
+	return out
+
+
+## Host: notes `key` on the deployment under way (HotZoneOps: "hazard_tier", the highest
+## pressure tier reached, for the debrief's hazard pay).
+func server_note_deployment(key: String, value: Variant) -> void:
+	var dep: Dictionary = _s().deployment
+	if dep.is_empty():
+		return
+	dep[key] = value
+	_commit()
+
+
+## The open (not yet done) deployed contracts' sites, by module id (HotZoneOps: a radio
+## contract goes to a site no other live contract holds).
+func live_sites() -> Array:
+	var dep: Dictionary = _s().deployment
+	var out: Array = []
+	for c: Dictionary in _s().held:
+		if c.cid in dep.get("cids", []) and not objectives.contract_done(c.cid) and String(c.get("module_id", "")) != "":
+			out.append(String(c.module_id))
+	return out
 
 
 ## Host: a deployment that never ended (a campaign saved mid-deployment and loaded again,
@@ -527,8 +619,9 @@ func radio_contract_problem() -> String:
 
 ## Host: in a hot zone, a new contract comes in over the radio and the squad takes it on the
 ## spot (standard terms, advance paid); its objectives join the deployment. Returns its id, or
-## "" when radio_contract_problem() says no.
-func server_radio_contract(type_id := "") -> String:
+## "" when radio_contract_problem() says no. HotZoneOps' follow-ups pass the site (`module_id`)
+## and the employer's words (`why`, said to everyone with the contract's title).
+func server_radio_contract(type_id := "", module_id := "", why := "") -> String:
 	if radio_contract_problem() != "":
 		return ""
 	var dep: Dictionary = _s().deployment
@@ -536,14 +629,18 @@ func server_radio_contract(type_id := "") -> String:
 	rng.seed = hash([int(_s().seed), Economy.day(), int(_s().next_id), "radio"])
 	var employer := String(MissionRegistry.zone(dep.zone_id).get("faction", ""))
 	var c := _add_offer(ContractGen.generate(rng, {"day": Economy.day(), "source": "board", "zone_id": dep.zone_id,
-		"type": type_id, "employer": employer}))
-	if server_accept(c.cid, ContractGen.default_terms()) != "":
+		"type": type_id, "employer": employer, "module_id": module_id, "avoid_modules": live_sites()}))
+	c["in_zone"] = "radio"
+	if server_accept(c.cid, ContractGen.default_terms(), 1, true) != "":
+		(_s().board as Array).erase(c)
 		return ""
 	c.state = DEPLOYED
 	(dep.cids as Array).append(c.cid)
 	var o: Array = dep.get("origin", [0, 0, 0])
 	var added := Objectives.from_contract(c, module_origin(c, Vector3(float(o[0]), float(o[1]), float(o[2]))))
 	objectives.server_add(added)
+	if why != "":
+		_notify_all("Radio, %s: %s New contract: %s" % [MissionRegistry.faction_name(employer), why, c.title])
 	_commit()
 	contract_live.emit(c.cid, added)
 	return c.cid
@@ -637,11 +734,13 @@ func server_end_deployment(report: Dictionary) -> Dictionary:
 	for entry: Dictionary in report.get("driven_out", []):
 		out_items.append_array(flatten_entry(entry))
 	objectives.server_items_out(out_items)
+	objectives.server_deployment_ending()  # "never spotted" bonuses stand
 	for o: Dictionary in objectives.active():
 		objectives.server_set_state(o.oid, Objectives.FAILED)
 	var deployed: Array = (s.held as Array).filter(func(c: Dictionary) -> bool: return c.cid in dep.cids)
 	var calc_report := report.duplicate(true)
 	calc_report["items"] = out_items
+	calc_report["hazard_tier"] = int(dep.get("hazard_tier", 0))  # a hot zone's hazard pay (HotZoneOps)
 	var debrief := DebriefCalc.compute(deployed, objectives.list, int(dep.civilians), calc_report)
 	debrief["zone_name"] = dep.zone_name
 	debrief["extracted"] = report.get("extracted", [])
@@ -672,6 +771,15 @@ func server_end_deployment(report: Dictionary) -> Dictionary:
 	objectives.server_clear()
 	Economy.advance_days(int(debrief.days), "deployment to %s" % debrief.zone_name)
 	debrief["day"] = Economy.day()
+	# Expenses: what the run already cost (respawns, supports, lost helicopters, weekly bills) and
+	# the field costs, death benefits and treatment charged now.
+	var spent := DebriefCalc.expenses(calc_report, int(debrief.days), Economy.take_run_expenses(), true)
+	Pallets.take_stock(spent.used)
+	if int(spent.charge) > 0:
+		Economy.add_cash(-int(spent.charge), "Deployment costs: %s" % debrief.zone_name)
+	debrief["expenses"] = spent.lines
+	debrief["expenses_total"] = spent.total
+	debrief["net"] = int(debrief.totals.contract_value) - int(spent.total)
 	SessionLog.note(debrief_log_line(debrief, report))
 	_commit()
 	_save()

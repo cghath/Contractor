@@ -13,6 +13,16 @@ const BASE_FOV := 80.0
 ## (Captain, P0362: a sight picture you can use). ADS_EYE back out from 16 to 19 cm (Captain,
 ## 2026-10-14: aimed, the red dot still looked big; a little further from the eye).
 const HIP_VIEW := Vector3(0.14, -0.16, -0.38)
+## First person on the move (docs/animation.md), in step with the drawn legs (CharacterModel's
+## gait): the view rides this share of the hips' bob and sways HEAD_SWAY (m) side to side a
+## cycle at a sprint (less slower; off with the "head_bob" setting, and while aiming); the
+## weapon bobs WEAPON_BOB (m: across, down) at a sprint, and sprinting comes down and across
+## by SPRINT_VIEW (m) and SPRINT_TILT (radians: muzzle down, turned in, canted).
+const HEAD_BOB := 0.5
+const HEAD_SWAY := 0.008
+const WEAPON_BOB := Vector2(0.012, 0.012)
+const SPRINT_VIEW := Vector3(-0.03, -0.05, 0.05)
+const SPRINT_TILT := Vector3(-0.5, 0.35, 0.25)
 const ADS_EYE := Vector3(0.0, 0.0, -0.19)
 const ADS_EYE_PISTOL := Vector3(0.0, 0.0, -0.5)
 ## Recoil settling back (Soldier.RECOIL_SETTLE), per second: most of it within a quarter second.
@@ -38,14 +48,23 @@ var hud: Hud
 var interaction: InteractionMenu
 ## The medical menu (H: MedicalMenu); Shift+H quick-treats yourself.
 var medical_menu: MedicalMenu
-## The grenade type G throws.
+## The grenade type G equips and Shift+G cycles.
 var throwable: StringName = &"frag_grenade"
+## A grenade is up in your hand (G): the weapon is lowered, Fire throws, Aim lobs, G / the wheel /
+## the weapon keys put it away with nothing thrown. Nothing throws until it is up.
+var nade_up := false
+var _nade_label: Label
+## An underhand lob goes at this fraction of the throw speed (and a bit less up).
+const LOB_POWER := 0.45
 var _focus: Node3D  # an item or downed body under the crosshair, for the prompt
 var _view_model_id: StringName = &""
 ## The casualty on this player's shoulder, kept out of their own first-person view (it would
 ## fill it): drawn on LOCAL_ONLY_LAYER like their own body, so everyone else still sees it.
 var _shouldered: Soldier = null
 var _shake := 0.0
+var _vm_base := HIP_VIEW   # the view model's place before its bob
+var _bob_w := 0.0          # 0..1: how much the steps move the view (not aiming, on the ground)
+var _sprint_w := 0.0       # 0..1: the weapon in its sprint carry
 var _deaf := false
 ## Placing a breaching charge (Charges): the ghost follows the view until Fire commits it.
 var placing := false
@@ -160,6 +179,12 @@ func _unhandled_input(event: InputEvent) -> void:
 		if event.pressed and (event.button_index == MOUSE_BUTTON_WHEEL_UP or event.button_index == MOUSE_BUTTON_WHEEL_DOWN):
 			interaction.scroll_submenu(-1 if event.button_index == MOUSE_BUTTON_WHEEL_UP else 1)
 		return
+	elif nade_up and event.is_action_pressed(&"fire"):
+		_try_throw(1.0)  # overhand
+	elif nade_up and event.is_action_pressed(&"aim"):
+		_try_throw(LOB_POWER)  # underhand lob
+	elif nade_up and event is InputEventMouseButton and event.pressed and (event.button_index == MOUSE_BUTTON_WHEEL_UP or event.button_index == MOUSE_BUTTON_WHEEL_DOWN):
+		put_nade_away("Grenade put away")  # scroll: nothing thrown
 	elif event.is_action_pressed(&"inspect"):
 		toggle_inspect()  # the item under the crosshair: what it is and how to use it (ItemInfo)
 	elif placing and event.is_action_pressed(&"fire"):
@@ -176,11 +201,20 @@ func _unhandled_input(event: InputEvent) -> void:
 			body._server_drop.rpc_id(1, body.active_slot)
 		elif event is InputEventKey and event.shift_pressed:
 			throwable = next_throwable(throwable, body.inventory)
-			hud.flash("%s (%d)" % [ItemDB.get_item(throwable).name, body.inventory.count_of(throwable)])
+			if nade_up and throwable == Charges.ITEM:
+				put_nade_away()
+				_start_placing()
+			elif nade_up:
+				_show_nade()
+				_update_view_model()
+			else:
+				hud.flash("%s (%d)" % [ItemDB.get_item(throwable).name, body.inventory.count_of(throwable)])
+		elif nade_up:
+			put_nade_away("Grenade put away")  # G again: nothing thrown
 		elif throwable == Charges.ITEM:
 			_start_placing()
 		else:
-			_try_throw()
+			equip_nade()
 	elif event.is_action_pressed(&"reload"):
 		_try_reload()
 	elif event.is_action_pressed(&"quick_treat"):  # before H: H alone also matches with Shift held
@@ -188,10 +222,13 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed(&"medical_menu"):
 		medical_menu.open(MedicalMenu.looked_at(body, body.camera))
 	elif event.is_action_pressed(&"weapon_primary"):
+		put_nade_away()
 		body.select_weapon(&"primary")
 	elif event.is_action_pressed(&"weapon_sidearm"):
+		put_nade_away()
 		body.select_weapon(&"sidearm")
 	elif event.is_action_pressed(&"weapon_launcher") and body.inventory.slots.get(Launchers.SLOT, &"") != &"":
+		put_nade_away()
 		body.select_weapon(Launchers.SLOT)
 
 
@@ -232,6 +269,7 @@ func _spend_turn() -> void:
 
 func _process(delta: float) -> void:
 	advance_turn(delta)
+	_check_nade()
 	_update_interaction(delta)
 	_update_give_up(delta)
 	if placing:
@@ -246,6 +284,31 @@ func _process(delta: float) -> void:
 	body.camera.h_offset = randf_range(-1.0, 1.0) * _shake * 0.08
 	body.camera.v_offset = randf_range(-1.0, 1.0) * _shake * 0.08
 	_update_hearing()
+	_update_bob(delta)
+
+
+## The view and weapon move with the steps (HEAD_BOB, WEAPON_BOB), the weapon comes down to
+## carry at a sprint (SPRINT_VIEW, SPRINT_TILT); none of it aimed.
+func _update_bob(delta: float) -> void:
+	var walking := body.is_on_floor() and body.vitals.is_up() and not is_instance_valid(body.vehicle) and body.carry_mode == &""
+	var w := body.model.gait_weight() if walking and not body.is_aiming else 0.0
+	_bob_w = move_toward(_bob_w, w, delta * 4.0)
+	_sprint_w = move_toward(_sprint_w, 1.0 if body.movement.is_sprinting and walking else 0.0, delta * 5.0)
+	var pace := clampf(body.model.gait_speed() / SoldierMovement.SPRINT_SPEED, 0.0, 1.0) * _bob_w
+	var phase := TAU * body.model.gait_phase()
+	if GameSettings.head_bob():
+		body.camera.position = Vector3(sin(phase) * HEAD_SWAY * pace, body.model.gait_bob() * HEAD_BOB * _bob_w, 0.0)
+	else:
+		body.camera.position = Vector3.ZERO
+
+
+## The weapon's bob this frame (camera-local), on top of where it sits.
+func weapon_bob() -> Vector3:
+	var pace := clampf(body.model.gait_speed() / SoldierMovement.SPRINT_SPEED, 0.0, 1.0) * _bob_w
+	var phase := TAU * body.model.gait_phase()
+	var side := -1.0 if body.left_handed else 1.0
+	return Vector3(sin(phase) * WEAPON_BOB.x * pace, -absf(cos(phase)) * WEAPON_BOB.y * pace, 0.0) \
+		+ SPRINT_VIEW * Vector3(side, 1, 1) * _sprint_w
 
 
 ## Muffled hearing (blasts, flashbangs, indoor gunfire): a low-pass on the master bus while
@@ -301,7 +364,7 @@ func _physics_process(delta: float) -> void:
 		_update_focus()
 		_update_aim(delta)
 		_try_fire()
-	var tilt := minf(-0.7 if body.is_reloading else 0.0, -CharacterModel.VIEW_LOWER_PITCH * body.model.view_lower())
+	var tilt := minf(minf(-0.7 if body.is_reloading else 0.0, -CharacterModel.VIEW_LOWER_PITCH * body.model.view_lower()), SPRINT_TILT.x * _sprint_w)
 	body.view_model.rotation.x = move_toward(body.view_model.rotation.x, tilt, delta * 6.0)
 	# Both hands on the casualty: no weapon in view; through a scope: only the glass (P0362); nor
 	# seated in a vehicle (no firing your own from a seat, and in first person it hid the cabin and
@@ -312,8 +375,9 @@ func _physics_process(delta: float) -> void:
 	_hide_shouldered()
 	# Settle sway after a stop (W3, SoldierMovement.weapon_sway).
 	var sway := body.movement.weapon_sway()
-	body.view_model.rotation.y = sway.x
-	body.view_model.rotation.z = sway.y
+	var side := -1.0 if body.left_handed else 1.0
+	body.view_model.rotation.y = sway.x + SPRINT_TILT.y * side * _sprint_w
+	body.view_model.rotation.z = sway.y + SPRINT_TILT.z * side * _sprint_w
 	hud.update_status(body)
 
 
@@ -454,7 +518,7 @@ func _update_interaction(delta: float) -> void:
 
 
 func _try_fire() -> void:
-	if not _captured() or placing or body.inventory.hands != &"" or not body.vitals.is_up() or interaction.is_open() \
+	if not _captured() or placing or nade_up or body.inventory.hands != &"" or not body.vitals.is_up() or interaction.is_open() \
 			or body.carry_mode != &"" or is_instance_valid(body.vehicle):  # both hands on the casualty; or riding (the seat's gun fires: Vehicle)
 		return
 	var weapon := body.active_weapon()
@@ -511,9 +575,9 @@ static func ads_view(weapon: ItemData, state := {}) -> Vector3:
 
 func _update_aim(delta: float) -> void:
 	var weapon := body.active_weapon()
-	body.is_aiming = _captured() and body.vitals.is_up() and weapon != null and (weapon.type == "weapon" or Launchers.is_launcher(weapon)) \
+	body.is_aiming = _captured() and not nade_up and body.vitals.is_up() and weapon != null and (weapon.type == "weapon" or Launchers.is_launcher(weapon)) \
 		and body.inventory.hands == &"" and not body.is_reloading and Input.is_action_pressed(&"aim")
-	var fov := GunSight.aimed_fov_of(body, weapon, GameSettings.fov()) if body.is_aiming else GameSettings.fov()
+	var fov := GunSight.aimed_fov_of(body, weapon, GameSettings.view_fov()) if body.is_aiming else GameSettings.view_fov()
 	# Up to the eye in the weapon's ADS time (its mass with optic, slower on tired arms:
 	# MovementRules.ads_seconds); lowering stays quick.
 	var rate := MovementRules.ADS_EASE_K / body.movement.ads_seconds() if body.is_aiming else 14.0
@@ -523,7 +587,8 @@ func _update_aim(delta: float) -> void:
 	var lowered := CharacterModel.VIEW_LOWER_OFFSET * body.model.view_lower()  # ducks while the hands are busy
 	wall_pull = move_toward(wall_pull, wall_pull_at(), delta * 6.0)
 	var pulled := MovementRules.WALL_PULL_BACK * Vector3(-1.0 if body.left_handed else 1.0, 1, 1) * wall_pull  # a wall ahead: weapon back
-	body.view_model.position = body.view_model.position.lerp((aimed_view if body.is_aiming else hip_view) + lowered + pulled, minf(delta * rate, 1.0))
+	_vm_base = _vm_base.lerp((aimed_view if body.is_aiming else hip_view) + lowered + pulled, minf(delta * rate, 1.0))
+	body.view_model.position = _vm_base + weapon_bob()
 
 
 ## How far a wall ahead pushes the weapon back now: 0 clear (past WALL_PULL_REACH_M from the eye)
@@ -546,7 +611,7 @@ func _try_reload() -> void:
 	if Launchers.is_launcher(weapon):
 		LauncherSight.of(body).try_reload()  # load or swap its round (wave 5)
 		return
-	if weapon == null or weapon.type != "weapon" or now < body._busy_until or body.inventory.hands != &"" or not body.vitals.is_up():
+	if nade_up or weapon == null or weapon.type != "weapon" or now < body._busy_until or body.inventory.hands != &"" or not body.vitals.is_up():
 		return
 	var ammo := Soldier._ammo_of(weapon)
 	var full := ItemDB.get_item(ammo).magazine_rounds() if ItemDB.has_item(ammo) else 0
@@ -571,14 +636,73 @@ static func next_throwable(current: StringName, inventory: Inventory) -> StringN
 	return current
 
 
-func _try_throw() -> void:
-	if Soldier._now() < body._busy_until or body.inventory.hands != &"" or not body.vitals.is_up():
+## G: takes the selected grenade in hand (the weapon lowers); nothing is thrown.
+func equip_nade() -> void:
+	if nade_up or Soldier._now() < body._busy_until or body.inventory.hands != &"" or not body.vitals.is_up() or body.carry_mode != &"" \
+			or body.is_reloading or is_instance_valid(body.vehicle):
 		return
 	if body.inventory.count_of(throwable) <= 0:
 		hud.flash("No %s left" % ItemDB.get_item(throwable).name)
 		return
+	nade_up = true
+	body.is_aiming = false
+	_show_nade()
+	_update_view_model()
+
+
+## Puts the grenade away (nothing thrown) and brings the weapon back.
+func put_nade_away(note := "") -> void:
+	if not nade_up:
+		return
+	nade_up = false
+	if is_instance_valid(_nade_label):
+		_nade_label.visible = false
+	_update_view_model()
+	if note != "" and hud:
+		hud.flash(note)
+
+
+func _show_nade() -> void:
+	var text := "%s (%d) - Fire throws, Aim lobs, Shift+G type, G puts away" % [ItemDB.get_item(throwable).name, body.inventory.count_of(throwable)]
+	if not is_instance_valid(_nade_label):
+		_nade_label = UiKit.hud_label()
+		_nade_label.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
+		_nade_label.offset_top = -150.0
+		_nade_label.offset_bottom = -120.0
+		_nade_label.offset_left = -300.0
+		_nade_label.offset_right = 300.0
+		_nade_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		_nade_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		hud.add_child(_nade_label)
+	_nade_label.text = text
+	_nade_label.visible = true
+
+
+## Each frame: the grenade goes back in the pouch when you can't hold it any more.
+func _check_nade() -> void:
+	if nade_up and (not body.vitals.is_up() or body.carry_mode != &"" or body.inventory.hands != &"" or is_instance_valid(body.vehicle) or body.inventory.count_of(throwable) <= 0):
+		put_nade_away()
+
+
+## Throws the held grenade (Fire: power 1, overhand; Aim: LOB_POWER, underhand). Host-checked.
+func _try_throw(power := 1.0) -> void:
+	if not nade_up or Soldier._now() < body._busy_until or body.inventory.hands != &"" or not body.vitals.is_up():
+		return
+	if body.inventory.count_of(throwable) <= 0:
+		hud.flash("No %s left" % ItemDB.get_item(throwable).name)
+		put_nade_away()
+		return
 	body._busy_until = Soldier._now() + Soldier.THROW_BUSY_S
-	body._server_throw.rpc_id(1, body.camera.global_position, -body.camera.global_basis.z, throwable)
+	body._server_throw.rpc_id(1, body.camera.global_position, -body.camera.global_basis.z, throwable, power)
+	# The next one stays up (the count shows), or the weapon comes back when that was the last.
+	_after_throw.call_deferred()
+
+
+func _after_throw() -> void:
+	if nade_up:
+		_check_nade()  # the last one: the weapon comes back
+		if nade_up:
+			_show_nade()
 
 
 ## First-person weapon: the same voxel model others see, parented to the camera, with the
@@ -586,14 +710,17 @@ func _try_throw() -> void:
 ## firing hand on the grip, the other on the support point, mirrored for a left-handed shooter.
 func _update_view_model() -> void:
 	var weapon := body.active_weapon()
-	var id: StringName = weapon.id if weapon and body.inventory.hands == &"" else &""
+	var id: StringName = weapon.id if weapon and body.inventory.hands == &"" and not nade_up else &""
 	var art := VoxelArt.model_for(weapon, body.inventory.state_of(body.active_slot)) if id != &"" else ""  # its optic (P0362)
-	var key := StringName("%s|%s|%s|%s|%s" % [id, art, body.left_handed, body.model.variant, body.model.body])
+	var key := StringName("%s|%s|%s|%s|%s|%s" % [id, art, body.left_handed, body.model.variant, body.model.body, throwable if nade_up else &""])
 	if key == _view_model_id:
 		return
 	_view_model_id = key
 	for child in body.view_model.get_children():
 		child.queue_free()
+	if nade_up:
+		_build_nade_view()
+		return
 	if id == &"":
 		return
 	if Launchers.is_launcher(weapon):
@@ -616,6 +743,26 @@ func _update_view_model() -> void:
 		var basis := Basis(across, up, across.cross(up)).orthonormalized()
 		forearm.transform = Transform3D(basis.scaled(Vector3.ONE * palm.distance_to(elbow) / CharacterModel.FOREARM), elbow)
 		body.view_model.add_child(forearm)
+
+
+## The held grenade in first person: the throwables' own voxel art and a forearm and hand
+## holding it, low in the firing hand's corner of the view.
+func _build_nade_view() -> void:
+	var side := -1.0 if body.left_handed else 1.0
+	var item := ItemDB.get_item(throwable)
+	var palm := Vector3(0.0, -0.02, -0.1)
+	var nade := ItemArt.ground_node(item)
+	nade.name = "HeldGrenade"
+	nade.position = palm + Vector3(0.0, 0.03, 0.0)
+	body.view_model.add_child(nade)
+	var elbow := palm + Vector3(0.09 * side, -0.12, 0.2)
+	var forearm := VoxelArt.instance(VoxelArt.body_part("forearm", body.model.body), body.model.variant)
+	forearm.name = "ViewForearm"
+	var up := (elbow - palm).normalized()
+	var across := up.cross(Vector3.BACK).normalized()
+	var basis := Basis(across, up, across.cross(up)).orthonormalized()
+	forearm.transform = Transform3D(basis.scaled(Vector3.ONE * palm.distance_to(elbow) / CharacterModel.FOREARM), elbow)
+	body.view_model.add_child(forearm)
 
 
 # --- Placing a charge (Charges: like Arma Reforger's explosives) --------------------------
