@@ -162,6 +162,9 @@ var hold_casualties := false
 ## The squad's last screening smoke (SquadAI._screened): when and where it went up.
 var screen_at := -1000.0
 var screen_point := Vector3.ZERO
+## A rescuer went down going to / treating a casualty here, then (SquadAI._rescue_hot).
+var rescuer_down_at := -1000.0
+var rescuer_down_point := Vector3.ZERO
 var _tactics_cd := 0.0
 
 

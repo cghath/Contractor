@@ -87,6 +87,7 @@ func _ready() -> void:
 	await _test_blocked_route()
 	await _test_self_tourniquet()
 	await _test_engagement()
+	await _test_no_feeding()
 	await _test_dead_bodies()
 	await _test_player_and_enemy_bodies()
 	await _test_body_persistence()
@@ -833,6 +834,38 @@ func _test_self_tourniquet() -> void:
 
 
 # --- Engagement ---------------------------------------------------------------
+
+func _test_no_feeding() -> void:
+	print("No feeding: nobody follows a rescuer into the same fire")
+	_clear_contact()
+	_freeze()
+	var delta := _ai("Delta")
+	var golf := _ai("Golf")
+	var g := SquadAI.of(golf)
+	_place(delta, Vector3(-3, 0.1, 15))
+	_place(golf, ENGAGEMENT_MEDIC)
+	await _until_on_floor(delta)
+	delta.vitals.server_damage(65.0)
+	delta.vitals.server_advance(WoundModel.PAIN_KNOCKOUT_S + 0.1)
+	await _frames(2)
+	golf.threat_pos = Vector3(-3, 1.5, 0)
+	g._last_contact = Soldier._now()
+	var sq := g.squad
+	sq.rescuer_down_at = -1000.0
+	check(not g._rescue_hot(delta), "no rescuer down yet: the first goes in (smoking first)")
+	sq.rescuer_down_at = Soldier._now()
+	sq.rescuer_down_point = delta.global_position
+	check(g._rescue_hot(delta) and g._find_casualty() != delta, "a rescuer went down by him under LOS: the next waits")
+	sq.screen_at = Soldier._now()
+	sq.screen_point = delta.global_position
+	check(not g._rescue_hot(delta), "smoke between them and the shooter: rescue allowed")
+	sq.screen_at = -1000.0
+	g._last_contact = -1000.0
+	check(not g._rescue_hot(delta), "no enemy in contact: rescue goes ahead promptly")
+	sq.rescuer_down_at = -1000.0
+	delta.vitals.server_reset_health()
+	_unfreeze()
+
 
 func _test_engagement() -> void:
 	print("Engagement: a squadmate down in the open under fire")
