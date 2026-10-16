@@ -50,13 +50,13 @@
 
 	"vehicle_qrf": {
 		"_note": "Hot zones: a QRF from a base rides in an enemy technical this share of the time (decided per launch from the zone's seed, the base and the count, so a replay is the same); the soldiers get out dismount_m short of where they're sent, or sooner if it's stuck stuck_s or hit; it's only worth it for min_drive_m and up. At most max_vehicles per wave; a wave too big for them walks the rest.",
-		"share": 0.5,
+		"share": 0.85,
 		"models": ["technical_dshk", "technical"],
 		"scheme": "",
 		"cargo": [["belt_127x108", 2]],
 		"speed_kmh": 55.0,
 		"dismount_m": 180.0,
-		"min_drive_m": 250.0,
+		"min_drive_m": 150.0,
 		"max_vehicles": 2,
 		"stuck_s": 8.0,
 		"timeout_s": 240.0
