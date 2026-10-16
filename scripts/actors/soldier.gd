@@ -55,8 +55,10 @@ const SWAY_MOVE_MULT := 3.0
 const SWAY_TIRED_MULT := 1.5
 const BULKY_SPEED_MULT := 0.7
 const ITEM_MASK := 1 << 2
-## Camo variants for players, picked from the peer id so every peer agrees.
-const PLAYER_VARIANTS: Array[String] = ["multicam", "woodland", "desert", "urban"]
+## Camo variants for players, picked from the peer id so every peer agrees. Never "urban": that's
+## the enemy's (CompoundLevel hostiles), and a client's big random peer id landed on it (Captain,
+## 2026-10-15: "buddy drawn in enemy blue-grey camo").
+const PLAYER_VARIANTS: Array[String] = ["multicam", "woodland", "desert"]
 ## Loading magazines from loose rounds (_server_load_mags): seconds per round (proposed:
 ## 1 s per 5 rounds), and how far you can move before it stops.
 const LOAD_ROUND_S := 0.2
@@ -920,6 +922,14 @@ func _squad_command_as(squad: Squad, cmd: String, point: Vector3, names: PackedS
 		"fire_launcher":  # wave 5: a squadmate with a launcher fires at the vehicle there, or the spot
 			if LauncherAI.order_squad(squad, self, point, names) == "":
 				_client_message.rpc_id(owner_peer(), "Nobody selected has a loaded launcher or rounds")
+		_ when cmd.begins_with("fireteam:"):  # Captain, 2026-10-16: put any squadmate in A or B ("so i dont have to have 8 people for a b team")
+			var team := clampi(cmd.get_slice(":", 1).to_int(), 0, 1)
+			var moved := 0
+			for s: Soldier in squad.members():
+				if s.is_ai() and String(s.name) in names and s.fire_team != team:
+					s.fire_team = team  # kept through rebalance_squad (only new squadmates take their slot's team)
+					moved += 1
+			_client_message.rpc_id(owner_peer(), "%d moved to fire team %s" % [moved, "AB"[team]] if moved > 0 else "Select squadmates first (F1-F8)")
 		_ when cmd.begins_with("support:"):  # wave 5b: helicopter supports and AAVs (Supports)
 			var why := Supports.server_command(self, cmd, point, names)
 			if why != "":

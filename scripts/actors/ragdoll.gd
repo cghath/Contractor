@@ -40,13 +40,15 @@ const PARTS := {
 ## Joints: [parent, child, angular limits (radians, lower and upper about x, y, z, measured from
 ## rest, where each child lines up with its parent)]. Thighs swing forward on +x, knees bend on
 ## -x (CharacterModel's pose_bones and _knee); arms swing on x, a right arm lifts out on +z (a
-## left on -z), elbows bend on +x.
+## left on -z), elbows bend on +x. Captain, 2026-10-16 ("propping up so often on the knees ... is
+## annoying"; elbows fine): knees bend at most 1.5 (was 2.4) and thighs swing forward 1.35 (was 1.8),
+## so a body falls flat or on its side more than it kneels.
 const JOINTS := [
 	["torso", "head", Vector3(-0.6, -0.8, -0.4), Vector3(0.7, 0.8, 0.4)],
-	["torso", "leg_l", Vector3(-0.5, -0.3, -0.6), Vector3(1.8, 0.3, 0.6)],
-	["torso", "leg_r", Vector3(-0.5, -0.3, -0.6), Vector3(1.8, 0.3, 0.6)],
-	["leg_l", "shin_l", Vector3(-2.4, -0.05, -0.05), Vector3(0.0, 0.05, 0.05)],
-	["leg_r", "shin_r", Vector3(-2.4, -0.05, -0.05), Vector3(0.0, 0.05, 0.05)],
+	["torso", "leg_l", Vector3(-0.5, -0.3, -0.6), Vector3(1.35, 0.3, 0.6)],
+	["torso", "leg_r", Vector3(-0.5, -0.3, -0.6), Vector3(1.35, 0.3, 0.6)],
+	["leg_l", "shin_l", Vector3(-1.5, -0.05, -0.05), Vector3(0.0, 0.05, 0.05)],
+	["leg_r", "shin_r", Vector3(-1.5, -0.05, -0.05), Vector3(0.0, 0.05, 0.05)],
 	["torso", "arm_r", Vector3(-2.2, -0.9, -0.15), Vector3(2.6, 0.9, 1.6)],
 	["torso", "arm_l", Vector3(-2.2, -0.9, -1.6), Vector3(2.6, 0.9, 0.15)],
 	["arm_r", "fore_r", Vector3(0.0, -0.6, -0.05), Vector3(2.5, 0.6, 0.05)],

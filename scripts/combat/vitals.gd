@@ -524,7 +524,7 @@ func wound_list() -> Array[Dictionary]:
 			"tourniquet": m.tourniquet_factor(w.part) < 1.0, "packed": w.get("packed", false), "tension": w.get("tension", false),
 			"clamped": w.get("clamped", false), "closed": w.get("closed", false), "pneumo": w.get("pneumo", false),
 			"open": w.get("open", false), "bandaged": m.open_bandaged(w),
-			"at": w.get("at"), "out": w.get("out")})
+			"at": w.get("at"), "out": w.get("out"), "round_class": w.get("rc", &""), "dmg": float(w.get("dmg", 0.0))})
 	return list
 
 
@@ -759,9 +759,24 @@ func vision() -> Dictionary:
 ## stops short of vessels and organs: a small muscle wound, maybe a fracture). Without a
 ## position the channel goes in at a random spot on the part. ("damage" is ignored: the
 ## wound model has none.)
+## A round arriving with this much energy or more kills whatever it hits (.50 BMG class; a .338
+## at ~6.7 kJ doesn't). Captain, 2026-10-16.
+const LETHAL_J := 9000.0
+## Joules that score one point of BodyDeform damage (a 5.56 at fighting range ~1).
+const DAMAGE_J := 1650.0
+
+
+## A round's BodyDeform damage: its energy over DAMAGE_J (7.62x51 ~2, 7.62x54R ~2, .338 ~4, .50
+## ~10), or by class when the energy isn't known.
+static func round_damage(round_class: StringName, energy_j: float) -> float:
+	if energy_j > 0.0:
+		return snappedf(energy_j / DAMAGE_J, 0.1)
+	return {PISTOL: 0.5, INTERMEDIATE: 1.0, FULL_POWER: 2.0, FRAGMENT: 0.6}.get(round_class, 1.0)
+
 func server_hit(part: StringName, hit: Dictionary) -> void:
-	if _m().dead or shielded:
+	if shielded:
 		return
+	var was_dead := _m().dead  # a corpse still takes holes (BodyDeform), nothing else
 	var round_class := StringName(hit.get("round_class", INTERMEDIATE))
 	var channel_in := _rest_channel(part, hit)
 	var entry: Vector3 = channel_in[0]
@@ -777,18 +792,70 @@ func server_hit(part: StringName, hit: Dictionary) -> void:
 		channel.vessels = []
 		channel.organs = []
 	_last_hit_at = Time.get_ticks_msec() / 1000.0
-	var added := _model.add_hit(part, channel, round_class)
-	last_cause = {"cause": "fragment" if round_class == FRAGMENT else "round (%s)" % round_class, "part": part, "distance": float(hit.get("distance", -1.0))}
+	var added: Array = []
+	if was_dead:
+		if not hit.has("position"):
+			return
+		var mark := {"part": part, "kind": "postmortem", "rate": 0.0, "treated": false, "name": &"postmortem", "tension_in": -1.0, "arrest_in": -1.0}
+		_model.wounds.append(mark)
+		added = [mark]
+	else:
+		added = _model.add_hit(part, channel, round_class)
+	if not was_dead:
+		last_cause = {"cause": "fragment" if round_class == FRAGMENT else "round (%s)" % round_class, "part": part, "distance": float(hit.get("distance", -1.0))}
 	if hit.has("position"):
 		# Where it went in, and out if it went through (the body ended before the channel
 		# did), in the rest pose: the wound marks on the model (CharacterModel) show them.
-		var exits: bool = round_class != FRAGMENT and hit.has("channel_depth") and depth < BodyMap.CHANNEL_MAX_M - 0.001 and not channel.graze
+		var exits: bool = round_class != FRAGMENT and hit.has("channel_depth") and not hit.get("stays_in", false) and depth < BodyMap.CHANNEL_MAX_M - 0.001 and not channel.graze
 		for w: Dictionary in added:
+			w["rc"] = round_class  # what made it (BodyDeform: a .308 tears more than a 5.56)
+			w["dmg"] = round_damage(round_class, float(hit.get("energy_j", -1.0)))
 			w["at"] = channel.from
 			if exits:
 				w["out"] = channel.to
+	if was_dead:
+		_publish(true)  # _after_change goes quiet once he's dead: the corpse's new holes still go out
+		return
+	if not was_dead:
+		_check_amputation(part)
+	if not was_dead and float(hit.get("energy_j", -1.0)) >= LETHAL_J and round_class != FRAGMENT:
+		server_kill()  # a .50 hit (Captain, 2026-10-16: ".50 cal is insta death")
+		return
 	_after_change()
 
+
+
+## Host only. A limb torn off while he lives (Captain, 2026-10-16: "make it so surviving losing arms
+## or legs is possible with a good medic"): once a limb part has a broken bone and
+## BodyDeform.SEVER_ALIVE points of rounds in it, it comes off: an "amputation" wound, a heavy
+## arterial bleed at the stump (AMPUTATION_RATE). It's an arterial limb bleed like any other, so a
+## tourniquet above it stops it; quick hands and fluids and he lives. BodyDeform cuts the limb
+## where the replicated wound says.
+const AMPUTATION := &"amputation"
+const AMPUTATION_RATE := {"leg": 1.4, "arm": 0.9}  # L/min
+
+
+func _check_amputation(part: StringName) -> void:
+	if not part in BodyDeform.LIMBS:
+		return
+	var broken := false
+	var score := 0.0
+	var rounds := {}
+	for w: Dictionary in _model.wounds:
+		if w.part != part:
+			continue
+		if w.get("name") == AMPUTATION:
+			return  # gone already
+		if String(w.kind) == "fracture":
+			broken = true
+		var at: Variant = w.get("at")
+		if at is Vector3 and not rounds.has(at):
+			rounds[at] = true
+			score += BodyDeform._points(w, StringName(w.get("rc", &"")))
+	if not broken or score < BodyDeform.SEVER_ALIVE:
+		return
+	var leg := part in [THIGH_L, THIGH_R, SHIN_L, SHIN_R]
+	_model._add_wound(part, "arterial", float(AMPUTATION_RATE["leg" if leg else "arm"]), AMPUTATION)
 
 ## Host only. A round that armor stopped still lands on `part` (impact: pain, stagger,
 ## winded, concussion, cracked ribs by range, a fatal head injury only where it would be

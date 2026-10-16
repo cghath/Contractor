@@ -401,6 +401,13 @@ func _build_stash(p: Dictionary) -> void:
 						var bulk := _button("+%d" % Loadouts.BULK, func() -> void: ask("add", {"id": id, "count": Loadouts.BULK}))
 						bulk.name = "AddBulk_" + id
 						flow.add_child(bulk)
+			var sell_flow: HFlowContainer = row.get_meta(&"flow")
+			var price := Prices.sell_price(StringName(id), 1, {})
+			if sell_flow and price > 0:
+				var sell := _button("Sell $%s" % DebriefCalc.money(price), func() -> void: Economy.sell_from_stash(StringName(id), 1))
+				sell.name = "Sell_" + id
+				sell.tooltip_text = "Sell one to the shop (Captain: loot means money)"
+				sell_flow.add_child(sell)
 			stash_box.add_child(row)
 	var inside := BaseArmory.contents_counts(stash)
 	if not inside.is_empty():

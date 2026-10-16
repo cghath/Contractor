@@ -1644,6 +1644,27 @@ func server_add_to_stash(id: StringName, count := 1, state := {}) -> void:
 	_changed(&"base")
 
 
+## Host: sells `count` of `id` out of the stash to the shop (Captain, 2026-10-16: "sell loot";
+## Economy.server_sell prices it, a damaged piece for less). At the hub the armory's items go
+## (_apply_stash); elsewhere the stash list. Returns what it fetched, 0 if none was there.
+func server_sell_from_stash(id: StringName, count := 1) -> int:
+	var lvl := level() as BaseLevel
+	var took := 0
+	if lvl and campaign_running:
+		var before := lvl.server_collect_stash()
+		var pool: Array = before.duplicate(true)
+		took = BaseArmory.remove(pool, id, count)
+		if took > 0:
+			_apply_stash(lvl, before, pool)
+	else:
+		took = BaseArmory.remove(stash(), id, count)
+	if took <= 0:
+		return 0
+	var got := Economy.server_sell(id, took)
+	_changed(&"base")
+	return got
+
+
 ## Host: puts a member in or out of the squad picked for the next deployment.
 func server_pick(mid: String, in_squad: bool) -> String:
 	_prune_prep_squad()  # the dead and missing don't hold a slot ("The squad is full" over three names)

@@ -68,6 +68,13 @@ const FEMUR_STRAIN_MAX := 0.15
 ## A fall breaks it with FALL_PELVIS_SHARE of the fractures it causes, a blast near enough
 ## with BLAST_PELVIS_CHANCE at the centre.
 const PELVIS_RATE := 0.15
+## Massive neck damage depends on medevac (Captain, 2026-10-16): a neck arterial or junctional wound
+## packed or clamped in the field still bleeds this share of its rate (no tourniquet for a neck),
+## so the casualty has minutes, not hours: get him on a Dustoff (HeliCall medevac). Only a massive one
+## (NECK_MASSIVE_RATE L/min or more), and a surgical clamp stops it (Captain: "neck bleed rule isnt
+## mandatory": a good medic can still save him; packing alone can't).
+const NECK_LEAK := 0.12
+const NECK_MASSIVE_RATE := 0.8
 const PELVIS_BINDER_LEAK := 0.2
 const PELVIS_SPEED := 0.5
 const FALL_PELVIS_SHARE := 0.2
@@ -616,6 +623,8 @@ func tourniquet_factor(part: StringName, skip_segment: StringName = &"") -> floa
 func rate_now(w: Dictionary) -> float:
 	if w.kind == "fracture" and w.name == BodyMap.PELVIS_BONE and w.treated:
 		return float(w.rate) * PELVIS_BINDER_LEAK  # a binder cuts the bleed, it doesn't stop it
+	if not is_bleeding(w) and w.part == &"neck" and String(w.kind) in ["arterial", "junctional"] and float(w.rate) >= NECK_MASSIVE_RATE and not w.get("clamped", false):
+		return float(w.rate) * NECK_LEAK  # packed or clamped, a neck bleed still runs: it needs the medevac
 	return float(w.rate) * tourniquet_factor(w.part) if is_bleeding(w) else 0.0
 
 
@@ -1736,13 +1745,16 @@ func update_state(dt: float) -> void:
 ## left fluid, right collapse, right fluid]. Flag 64 (coming round) only makes the start of the wake
 ## countdown go out at once; clients read the countdown itself from "t". Flag 128: pain has
 ## been held over the knockout threshold long enough (pain_knocks_out).
+## Round classes on the wire (entry 8 of a wound; -1 unknown).
+const RC_CODES: Array[StringName] = [&"pistol", &"intermediate", &"full_power", &"fragment"]
+
 func to_net() -> Dictionary:
 	var list: Array = []
 	for w in wounds:
 		var wound_flags := (1 if w.get("packed", false) else 0) | (2 if w.get("tension", false) else 0) \
 			| (4 if w.get("clamped", false) else 0) | (8 if w.get("closed", false) else 0) | (16 if w.get("pneumo", false) else 0) | (32 if w.get("open", false) else 0)
 		list.append([String(w.part), w.kind, snappedf(float(w.rate), 0.001), 1 if w.treated else 0, String(w.name), wound_flags,
-			_half_cm(w.get("at")), _half_cm(w.get("out"))])
+			_half_cm(w.get("at")), _half_cm(w.get("out")), RC_CODES.find(StringName(w.get("rc", &""))), snappedf(float(w.get("dmg", 0.0)), 0.1)])
 	var flags := (1 if unconscious else 0) | (2 if arrest else 0) | (4 if dead else 0) | (16 if npa else 0) | (32 if airway_blocked else 0) \
 		| (64 if wake_left > 0.0 else 0) | (128 if _pain_over_s >= PAIN_KNOCKOUT_S - 0.001 else 0) \
 		| (256 if hypothermic() else 0) | (512 if blast_lung else 0) | (1024 if blanket else 0)
@@ -1828,6 +1840,10 @@ func apply_net(state: Dictionary) -> void:
 				var p: Array = entry[i]
 				if p.size() == 3:
 					wounds[-1]["at" if i == 6 else "out"] = Vector3(p[0], p[1], p[2]) * 0.005
+		if entry.size() > 8 and int(entry[8]) >= 0 and int(entry[8]) < RC_CODES.size():
+			wounds[-1]["rc"] = RC_CODES[int(entry[8])]
+		if entry.size() > 9:
+			wounds[-1]["dmg"] = float(entry[9])
 	tourniquets.clear()
 	var tq: Dictionary = state.get("q", {})
 	for part: String in tq:

@@ -59,6 +59,14 @@ const UNLOAD_S := 4.0
 ## this close to it are ordered in (again every BOARD_ORDER_S); once the destination's given it
 ## goes with whoever is aboard after BOARD_WAIT_S, or as soon as everyone near is in.
 const PICKUP_WAIT_S := 300.0
+## Medevac: it lifts this long after the last casualty is aboard (time for the next to be carried up).
+const MEDEVAC_LIFT_S := 20.0
+## A heli shot down: its crew turn up hurt by the wreck CRASH_SETTLE_S later.
+const CRASH_SETTLE_S := 4.0
+const CREW_SURVIVORS := 2
+## Cargo run: it takes what lies within CARGO_REACH_M of it and lifts after CARGO_WAIT_S.
+const CARGO_REACH_M := 15.0
+const CARGO_WAIT_S := 150.0
 const BOARD_RADIUS_M := 150.0
 const BOARD_ORDER_S := 10.0
 const BOARD_WAIT_S := 60.0
@@ -173,6 +181,7 @@ var wave_offs := 0
 
 var _t := 0.0
 var _check := 0.0
+var _last_load := 0.0  # medevac: when the last casualty came aboard (_t)
 var _rechecked := false
 var _orbit_next := 0.0
 var _threat := Vector3.ZERO
@@ -542,6 +551,10 @@ func step(delta: float) -> void:
 			var area: Rect2 = level().map_area()
 			var at_wall := level() is ZoneLevel and not area.grow(-40.0).has_point(Vector2(heli.global_position.x, heli.global_position.z))
 			if (_flat(heli.global_position, exit) < EXIT_M or at_wall) and Soldier._now() - _leave_at > LEAVE_MIN_S:  # (a zone's edge is a wall; a small map's isn't)
+				if kind == "medevac":
+					_evacuate()
+				elif kind == "cargo":
+					_bank_cargo()
 				heli.queue_free()
 				phase = Phase.GONE
 
@@ -653,6 +666,11 @@ func _on_landed() -> void:
 		"extraction":
 			_wait_told = false
 			sup.server_radio(kind, "On the ground at %s. Get everyone aboard: we wait %d s" % [_grid(heli.global_position), roundi(extract_wait_s)])
+		"cargo":
+			sup.server_radio(kind, "Packhorse down at %s. Drop the loot within %d m of us: we lift in %d s, or when you send us home" % [_grid(heli.global_position), roundi(CARGO_REACH_M), roundi(CARGO_WAIT_S)])
+		"medevac":
+			_last_load = 0.0
+			sup.server_radio(kind, "Dustoff on the ground at %s. Bring the wounded to the doors" % _grid(heli.global_position))
 
 
 func _step_ground() -> void:
@@ -683,6 +701,33 @@ func _step_ground() -> void:
 				sup.server_radio(kind, "Lifting off, %d aboard" % heli.occupants().size())
 				stage = "carry"
 				_take_off()
+		"cargo":
+			if _check <= 0.0:
+				_check = LOAD_CHECK_S
+				_load_items_near(heli.global_position, CARGO_REACH_M)
+			if _t > CARGO_WAIT_S:
+				var loads := heli.cargo_hold.entries().size() if heli.cargo_hold else 0
+				sup.server_radio(kind, "Packhorse lifting with %d loads aboard" % loads)
+				stage = "leave"
+				_take_off()
+		"medevac":
+			# Captain, 2026-10-16 ("medevacs are now a concern", "massive neck damage depends on medevac"):
+			# loads the downed and carried by its doors; MEDEVAC_LIFT_S after the last one is aboard
+			# it lifts, and once it's off the map they're out of the fight alive (_evacuate).
+			if _check <= 0.0:
+				_check = LOAD_CHECK_S
+				var before := _casualties_aboard()
+				_load_people(false)
+				if _casualties_aboard() > before:
+					_last_load = _t
+			var aboard := _casualties_aboard()
+			if aboard > 0 and _t - _last_load > MEDEVAC_LIFT_S:
+				sup.server_radio(kind, "%d casualt%s aboard. Dustoff lifting" % [aboard, "y" if aboard == 1 else "ies"])
+				stage = "leave"
+				_take_off()
+			elif aboard == 0 and _t > PICKUP_WAIT_S:
+				sup.server_radio(kind, "No casualties brought to us. Heading home")
+				_depart()
 		"extraction":
 			if _check <= 0.0:
 				_check = LOAD_CHECK_S
@@ -719,16 +764,26 @@ func _drop_pallet() -> void:
 		i += 1
 
 
-## The pallet's load: [[item id, count], ...]: for every weapon the squad carries (players and
-## squad AI, primary and sidearm) its magazines and loose rounds (data "per_weapon"), then the
-## fixed list.
+## The pallet's load: [[item id, count], ...] (Captain, 2026-10-16: "it needs to bring supplies for
+## the squads roles and it needs to be enough for everyone"): for EACH soldier of the squad
+## (players and squad AI) magazines and loose rounds for every weapon they carry ("per_weapon"),
+## their share of medical kit and grenades ("per_head") and their role's extras ("per_role": a
+## medic's trauma kit, fluids and seals...), then the "fixed" list once.
 func resupply_load() -> Array:
 	var data: Dictionary = HeliSupports.data().get("resupply", {})
 	var per: Dictionary = data.get("per_weapon", {})
 	var lvl := level()
 	var counts := {}
 	var order: Array = []
+	var add := func(id: String, n: int) -> void:
+		if n <= 0 or ItemDB.get_item(StringName(id)) == null:
+			return
+		if not counts.has(id):
+			counts[id] = 0
+			order.append(id)
+		counts[id] += n
 	var squad: Array = MapNodes.players(lvl) + MapNodes.squad_ai(lvl)
+	var roles: Dictionary = data.get("per_role", {})
 	for s: Soldier in squad:
 		for slot: String in per:
 			var weapon_id: StringName = s.inventory.slots.get(StringName(slot), &"")
@@ -737,20 +792,20 @@ func resupply_load() -> Array:
 				continue
 			var mag := String(weapon.stats.get("ammo", ""))
 			var amounts: Array = per[slot]
-			if mag != "" and ItemDB.get_item(StringName(mag)) and not counts.has(mag):
-				counts[mag] = int(amounts[0])
-				order.append(mag)
+			if mag != "":
+				add.call(mag, int(amounts[0]))
 				var loose := HeliCall.loose_rounds_for(StringName(mag))
-				if loose != "" and int(amounts[1]) > 0 and not counts.has(loose):
-					counts[loose] = int(amounts[1])
-					order.append(loose)
+				if loose != "":
+					add.call(loose, int(amounts[1]))
+		for entry: Array in data.get("per_head", []):
+			add.call(String(entry[0]), int(entry[1]))
+		for entry: Array in roles.get(String(s.role), []):
+			add.call(String(entry[0]), int(entry[1]))
+	for entry: Array in data.get("fixed", []):
+		add.call(String(entry[0]), int(entry[1]))
 	var out: Array = []
 	for id: String in order:
-		if int(counts[id]) > 0:
-			out.append([id, int(counts[id])])
-	for entry: Array in data.get("fixed", []):
-		if ItemDB.get_item(StringName(String(entry[0]))):
-			out.append([String(entry[0]), int(entry[1])])
+		out.append([id, int(counts[id])])
 	return out
 
 
@@ -892,6 +947,67 @@ func _unload(players: bool) -> void:
 
 
 ## Everyone out (it's leaving), then off the ground and away.
+## Cargo run: items lying within `reach` of `at` go into the hold while there's room.
+func _load_items_near(at: Vector3, reach: float) -> void:
+	if heli.cargo() == null:
+		return
+	for node in sup.get_tree().get_nodes_in_group(WorldItem.GROUP):
+		var item := node as WorldItem
+		if item == null or item.is_queued_for_deletion() or item.global_position.distance_to(at) > reach:
+			continue
+		var data := ItemDB.get_item(item.item_id)
+		if data == null:
+			continue
+		if heli.cargo_hold.room_for(VehicleCargo.HOLD, data, item.state) >= item.count:
+			heli.cargo_hold.take(item.item_id, item.count, item.state)
+			if item.uid != "":
+				GameState.item_taken(item.uid)
+			item.queue_free()
+		elif not _no_room.has(item.uid):
+			_no_room[item.uid] = true
+			sup.server_radio(kind, "No room aboard for the %s" % data.name)
+
+
+## Cargo run off the map: what's aboard goes into the base stash (BaseHub.server_add_to_stash).
+func _bank_cargo() -> void:
+	if heli.cargo_hold == null:
+		return
+	var n := 0
+	for e: Dictionary in heli.cargo_hold.clear_all():
+		BaseHub.server_add_to_stash(StringName(e.id), int(e.count), e.get("state", {}))
+		n += 1
+	sup.server_radio(kind, "Packhorse is home: %d loads in the stash" % n)
+
+## Medevac: the downed, dead and carried aboard.
+func _casualties_aboard() -> int:
+	var n := 0
+	for s: Variant in heli.occupants():
+		if s is Soldier and not (s as Soldier).vitals.is_up():
+			n += 1
+	return n
+
+
+## Medevac off the map: everyone aboard is out of the fight. A squadmate alive goes home to
+## recover (BaseHub.server_squadmate_leaving: gear kept, injuries, Recovering in the roster); a
+## body is brought home; a player is back in the fight, respawned in his own kit, patched up.
+func _evacuate() -> void:
+	var lvl := level() as CompoundLevel
+	for occupant: Variant in heli.occupants():
+		var s := occupant as Soldier
+		if s == null or not is_instance_valid(s):
+			continue
+		heli.server_exit(s)
+		if not s.is_ai():
+			s.vitals.server_reset_health()
+			if lvl:
+				s._server_respawn_now(lvl)
+			continue
+		if s.vitals.is_dead():
+			s.remove_from_group(Soldier.DEAD_GROUP)
+		else:
+			BaseHub.server_squadmate_leaving(s)
+		s.queue_free()
+
 func _depart() -> void:
 	_unload(true)
 	stage = "leave"
@@ -1352,6 +1468,33 @@ func _on_down(_h: Helicopter) -> void:
 	phase = Phase.LOST
 	sup.server_lost(kind)
 	sup.server_radio(kind, "Mayday, mayday, %s going down!" % HeliSupports.callsign(kind))
+	# Captain, 2026-10-16 ("if they get hot down we have to do a rescue"): the crew live through
+	# it, hurt, by the wreck, for the squad to reach, treat, carry or Dustoff out.
+	var tree := sup.get_tree()
+	if tree and is_instance_valid(heli):
+		tree.create_timer(CRASH_SETTLE_S).timeout.connect(_crew_survive.bind(heli.global_position))
+
+
+## The downed heli's crew, CREW_SURVIVORS of them, by `at` (where it came down): friendly, hurt, one down.
+func _crew_survive(at: Vector3) -> void:
+	var lvl := level() as CompoundLevel
+	if lvl == null or not lvl.is_inside_tree():
+		return
+	var callsign := String(HeliSupports.callsign(kind)).replace(" ", "")
+	var placed := 0
+	for i in CREW_SURVIVORS:
+		var spot := lvl.ground_point(at + Vector3(randf_range(-5.0, 5.0), 0.0, randf_range(-5.0, 5.0)))
+		var crew := lvl.spawn_soldier({"name": ("%s_Crew%d" % [callsign, i + 1]).validate_node_name(), "faction": "friendly",
+			"variant": "multicam", "pos": spot, "loadout": ["helmet", "m17", "mag_9mm"], "combat": 0.3, "discipline": 0.6,
+			"guard": true, "mode": "aware"})
+		if crew == null:
+			continue
+		placed += 1
+		crew.vitals.server_hit(Vitals.THIGH_L if i == 0 else Vitals.UPPER_ARM_R, {"round_class": Vitals.FRAGMENT})
+		if i == 0:
+			crew.vitals.server_damage(60.0)  # the pilot took the worst of it
+	if placed > 0:
+		sup.server_radio(kind, "%s crew are alive at %s: %d hurt. Get to them" % [HeliSupports.callsign(kind), _grid(at), placed])
 
 
 # --- Helpers --------------------------------------------------------------------------------------

@@ -30,14 +30,14 @@ enum Kind { ROCK, SCRUB, TREE, THICKET, PROP }
 ## no collision) and solid 5600 -> 6800 (Proposed).
 const CAP_ROCKS := 2600
 const CAP_SCRUB := 9000
-const CAP_TREES := 6000
+const CAP_TREES := 8000  # Captain, 2026-10-16: "forests still are too small" (was 6000)
 const CAP_THICKETS := 8000
 ## The shares of CAP_TREES woods, then woods with copses and groves, may take (Proposed: woods
 ## keep their 3000 trees, round 4's 0.6 of 5000; copses get the most of the rest).
 const WOODS_SHARE := 0.5
 const COPSES_SHARE := 0.8
 ## Most items with collision (large rocks and trees) in a zone.
-const CAP_SOLID := 6800
+const CAP_SOLID := 8800  # (was 6800; the extra trees)
 ## Man-made clutter (Captain, 2026-10-16: "the terrains need more objects too"): crates and
 ## debris, sparser than rocks/scrub and only near a road or a pad ("props_near_m"), not out in
 ## open wilderness.
@@ -65,7 +65,7 @@ const TREE_GAP_M := 2.6
 ## ~10.5 m, 60 ~16.7 m; trees ~3-3.5 m apart), "copse_thicket_share" thickets a tree inside, a
 ## ring of thickets every COPSE_SKIRT_M round its edge (no gap to see through at eye height),
 ## the edge scrub outside that, and COPSE_ROCKS [min, max] big rocks inside as low cover.
-const COPSE_SPREAD := 1.9
+const COPSE_SPREAD := 2.6  # sprawling more (Captain, 2026-10-16; was 1.9)
 const COPSE_SKIRT_M := 2.2
 const COPSE_ROCKS := [1, 3]
 ## Woods' edge belt (Proposed): a thicket every WOOD_BELT_M round a wood's ragged edge, just
@@ -385,7 +385,7 @@ func _lay_out_trees(area_km2: float) -> void:
 		var at := _cluster_site(rng, inner)
 		_wood(rng, at.x, at.y, rng.randf_range(float(radius[0]), float(radius[1])) * 0.5)
 	_tree_limit = int(_cap_trees * _copses_share)
-	var copse: Array = _spec.get("copse_trees", [20, 60] if _cover else [10, 40])  # Proposed (round 4: 10-40)
+	var copse: Array = _spec.get("copse_trees", [35, 110] if _cover else [25, 90])  # bigger woods (Captain, 2026-10-16; was 20-60 / 10-40)  # Proposed (round 4: 10-40)
 	for n in _how_many(rng, float(_spec.get("copses_per_km2", 0.0)) * area_km2):
 		var at := _cluster_site(rng, inner)
 		_copse(rng, at.x, at.y, rng.randi_range(int(copse[0]), int(copse[1])))

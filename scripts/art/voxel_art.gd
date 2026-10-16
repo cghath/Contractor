@@ -32,6 +32,7 @@ enum C {
 	EMPTY, CAMO, CAMO_A, CAMO_B, CAMO_C, CAMO_D, SKIN, SKIN_SHADE, HAIR, EYE, MOUTH,
 	BOOT, SOLE, GLOVE, BELT, METAL, PAD, PATCH, GEAR, GEAR_DARK, PACK, PACK_DARK,
 	GUN, GUN_LIGHT, LENS, LIP, LIP_SHADE, WOOD, WOOD_DARK,
+	WOUND, WOUND_DARK,  # torn flesh round a hole BodyDeform carved
 }
 
 const VARIANTS := {
@@ -119,6 +120,8 @@ static func instance(model: String, variant: String, layers := 1) -> Node3D:
 	var spec := _spec(model)
 	var pivot := Node3D.new()
 	pivot.name = model.get_slice(":", 0).trim_suffix(FEMALE_SUFFIX)  # "torso_f" is still the torso
+	pivot.set_meta(&"voxel_model", model)  # BodyDeform re-rasterises it to carve into
+	pivot.set_meta(&"voxel_variant", variant)
 	var mesh_instance := MeshInstance3D.new()
 	mesh_instance.mesh = mesh(model, variant)
 	mesh_instance.material_override = _get_material()
@@ -225,6 +228,21 @@ static func mesh(model: String, variant: String) -> Mesh:
 	if not _meshes.has(key):
 		_meshes[key] = _build(_spec(model), variant, model.hash())
 	return _meshes[key]
+
+
+## A fresh raster of `model` for `variant`, the soldier's own to carve (BodyDeform). Thread-safe
+## like warm(): the same rasterising, nothing shared written.
+static func raster_copy(model: String, variant: String) -> VoxelBuffer:
+	if variant.begins_with(CIV_PREFIX):
+		variant = _civ_part(model, variant)
+	return _rasterize(_spec(model), variant, model.hash())
+
+
+## The mesher for `variant` (main thread: it may make one), for meshing a raster_copy elsewhere.
+static func mesher_for(model: String, variant: String) -> VoxelMesherCubes:
+	if variant.begins_with(CIV_PREFIX):
+		variant = _civ_part(model, variant)
+	return _get_mesher(variant)
 
 
 static func _build(spec: Dictionary, variant: String, salt: int) -> Mesh:
@@ -501,6 +519,7 @@ static func _get_mesher(variant: String) -> VoxelMesherCubes:
 			C.GUN: Color("262626"), C.GUN_LIGHT: Color("3b3b37"), C.LENS: Color("3a6f8f"),
 			C.WOOD: Color("8a5530"), C.WOOD_DARK: Color("5e3a1e"),
 			C.LIP: skin.lerp(Color("9a4a44"), 0.3).darkened(0.12), C.LIP_SHADE: skin.lerp(Color("9a4a44"), 0.2),
+			C.WOUND: Color("6e1712"), C.WOUND_DARK: Color("2a0605"),
 		}
 		var palette := VoxelColorPalette.new()
 		for index: int in colours:

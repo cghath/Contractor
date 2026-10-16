@@ -60,7 +60,9 @@ const END_GROUP := &"deployment_end_handlers"
 const HVT_GROUP := &"hvt"
 ## Proposed: an extraction point's radius (m) and the countdown once the host confirms.
 const RADIUS_M := 20.0
-const COUNTDOWN_S := 10.0
+## Exfil takes time (Captain, 2026-10-16: "exfil heli isnt instant, it takes time, as any support"):
+## the ride is this long out once it's called. Was 10 s.
+const COUNTDOWN_S := 90.0
 const SMOKE_COLOUR := "purple"
 ## Captain, 2026-10-14: how long a "Leaving behind" warning stands; a second confirm within it
 ## extracts without those named.
@@ -621,7 +623,7 @@ func _start_countdown(point: Dictionary) -> String:
 	countdown_left = countdown_s
 	_last_whole = -1
 	_broadcast()
-	_client_message.rpc("Extracting from %s in %d s: stay inside" % [point.name, ceili(countdown_s)])
+	_client_message.rpc("Exfil inbound to %s, ETA %d s: hold inside the point" % [point.name, ceili(countdown_s)])
 	# get_parent(), not EnemyResponse.of(self)/CompoundLevel.current(self): those find the level
 	# by "first node in the level group", which can grab a stale or wrong one during a rapid
 	# zone transition (replaying the same zone id for a recovery deployment, R1357). Extraction

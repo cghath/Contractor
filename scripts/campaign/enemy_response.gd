@@ -56,6 +56,13 @@ const SPAWN_BUDGET: Array[int] = [20, 24, 28, 32, 36]
 ## A QRF wave hunts the last known position for this long after it set out, then holds round the
 ## last spot it was sent to (Reinforcements.hunt_s) instead of every wave converging forever.
 const WAVE_HUNT_S := 600.0
+## Escalation over a long stay (Captain, 2026-10-16: "the whole map doesnt come after me at the
+## same time, just a steady patrol or two that escalates", "suitable for an hour or two of
+## play"): the budget starts at RAMP_START (a patrol or two) and eases up to the tier's
+## SPAWN_BUDGET over ESCALATE_S of the zone's clock (smoothstep: slow at first, slow at the top).
+## Pressure tier still caps it, so a quiet squad stays light however long it stays.
+const RAMP_START := 4
+const ESCALATE_S := 5400.0
 const HUNTER_GAP_S := 600.0
 const HUNTER_SIZE := Vector2i(4, 6)
 const HUNTER_COMBAT := 0.7
@@ -114,6 +121,7 @@ var _hunter_teams := 0
 var _reinforce_rounds := 0
 var _tick := 0.0
 var _started := false
+var _started_at := 0.0  # the zone's clock when the response started (the escalation ramp)
 
 
 func _init() -> void:
@@ -176,6 +184,7 @@ func server_start() -> void:
 	if not multiplayer.is_server() or _started:
 		return
 	_started = true
+	_started_at = now()
 	var routes: Array = (level.get(&"def") as Dictionary).get("patrols", []) if level else []
 	for r: Array in routes:
 		var route := _patrol_route(r)
@@ -231,6 +240,7 @@ func _try_patrol(record: Dictionary) -> bool:
 		record.walk = turned
 		record.pending = false
 		record.last_pos = turned[0]
+		_maybe_ride(record, turned)
 		return true
 	return false
 
@@ -639,9 +649,15 @@ func alive_total() -> int:
 	return _alive_spawned() + (reinforcements.capped_alive() if reinforcements else 0)
 
 
-## SPAWN_BUDGET at the current tier.
+## The budget now: SPAWN_BUDGET at the current tier, eased in from RAMP_START over ESCALATE_S.
 func spawn_budget() -> int:
-	return SPAWN_BUDGET[clampi(_tier(), 0, SPAWN_BUDGET.size() - 1)]
+	var cap := SPAWN_BUDGET[clampi(_tier(), 0, SPAWN_BUDGET.size() - 1)]
+	return mini(cap, RAMP_START + int(round((SPAWN_BUDGET.back() - RAMP_START) * escalation())))
+
+
+## How far into the escalation ramp the zone is, 0 to 1 (smoothstep over ESCALATE_S).
+func escalation() -> float:
+	return smoothstep(0.0, ESCALATE_S, now() - _started_at) if _started else 0.0
 
 
 ## How many more may spawn now (0 at or over the budget).
@@ -692,3 +708,27 @@ func _spawn_team(squad: Squad, callsign: String, size: int, at: Vector3, toward:
 		soldiers[i].buddy = soldiers[i + 1]
 		soldiers[i + 1].buddy = soldiers[i]
 	return soldiers
+
+
+## Enemy vehicles beyond the QRFs (Captain's queue, 2026-10-15): a patrol with a long way to go
+## (PATROL_RIDE_MIN_M of route) rides a technical PATROL_RIDE_SHARE of the time (by the zone's
+## patrol number, so a zone plays the same): it drives toward the far end of its route, gets out
+## and walks the rest (VehicleQrf.server_mount, no base: parked by its first point).
+const PATROL_RIDE_MIN_M := 400.0
+const PATROL_RIDE_SHARE := 0.3
+
+
+func _maybe_ride(record: Dictionary, route: Array[Vector3]) -> void:
+	if route.size() < 2 or record.get("second", false):
+		return
+	var length := 0.0
+	for i in range(1, route.size()):
+		length += route[i - 1].distance_to(route[i])
+	var roll := float(absi(hash("%s|patrol%d" % [level.name, int(record.k)])) % 1000) / 1000.0
+	if length < PATROL_RIDE_MIN_M or roll >= PATROL_RIDE_SHARE:
+		return
+	var far: Vector3 = route[0]
+	for p: Vector3 in route:
+		if p.distance_to(route[0]) > far.distance_to(route[0]):
+			far = p
+	VehicleQrf.server_mount(level, null, route[0], far, record.soldiers)

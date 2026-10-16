@@ -1104,6 +1104,16 @@ func _test_ballistics_routing() -> void:
 		await get_tree().process_frame
 	check(wound_marks.blood_on(Vitals.THIGH_R) > 4 and wound_marks.pool_size() > 0,
 		"the thigh wound bleeds onto the skin and the ground (%d voxels on the leg, %d in the pool)" % [wound_marks.blood_on(Vitals.THIGH_R), wound_marks.pool_size()])
+	# Procedural deform (Captain, 2026-10-16): both holes carved out of the thigh's own voxels.
+	var deform: BodyDeform = model.get_node(^"BodyDeform")
+	var thigh_mesh := model.part_node(Vitals.THIGH_R).get_child(0) as MeshInstance3D
+	var shared := VoxelArt.mesh(String(model.part_node(Vitals.THIGH_R).get_meta(&"voxel_model")), model.variant)
+	check(deform.craters_on(Vitals.THIGH_R) == 2 and thigh_mesh.mesh != shared,
+		"the round carved an entry and an exit crater out of the thigh itself (%d craters)" % deform.craters_on(Vitals.THIGH_R))
+	var raster := VoxelArt.raster_copy("thigh", "multicam")
+	var mid := Vector3(raster.get_size()) * 0.5
+	check(BodyDeform.carve(raster, mid, BodyDeform.EXIT_R, 7) > 0 and BodyDeform.carve(raster, mid, BodyDeform.EXIT_R, 7) == 0,
+		"a crater knocks voxels out, and carving the same spot twice takes nothing more")
 	# Lying down, the channel still follows the part: a shot down into the back of the chest.
 	dummy.vitals.server_reset_health()
 	dummy.vitals.server_damage(70.0)

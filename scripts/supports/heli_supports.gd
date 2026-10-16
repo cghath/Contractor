@@ -31,7 +31,7 @@ signal radio_heard(text: String)
 
 const NODE_NAME := "HeliSupports"
 const DATA_PATH := "res://data/supports.json"
-const KINDS: Array[String] = ["resupply", "transport", "extraction"]
+const KINDS: Array[String] = ["resupply", "transport", "extraction", "medevac", "cargo"]
 const MODEL := "uh60"
 ## Proposed: on a zone, helicopters appear this far inside the edge (its invisible wall) and
 ## leave by it; on a small map (the vehicle range) at least MIN_INBOUND_M from where they go.

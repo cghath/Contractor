@@ -38,8 +38,8 @@ const FONT_TITLE := 26
 ## The HUD's text over the 3D view (docs/ui_audit.md item 4, P1-9/P1-11): 18 px with a black
 ## outline (HudLabel), 14 px for its small lines (HudSmallLabel), 26 px warn-red for the downed
 ## and killed titles (HudAlertLabel). One outlined style, readable over bright ground.
-const FONT_HUD := 18
-const FONT_HUD_ALERT := 26
+const FONT_HUD := 20  # Captain, 2026-10-16: HUD "sized up a tiny bit" (was 18)
+const FONT_HUD_ALERT := 28  # (was 26)
 
 
 ## Gives `root` (and so everything under it) the shared theme. A CanvasLayer can't hold a

@@ -25,7 +25,14 @@ const MENU := {
 			{"key": "5", "label": "Take cover", "cmd": "take_cover"},
 			{"key": "6", "label": "Fall back", "cmd": "fall_back"},
 			{"key": "7", "label": "Garrison that building", "cmd": "garrison", "point": true},
-			{"key": "8", "label": "Clear that building", "cmd": "clear", "point": true},
+			{"key": "8", "label": "Clear", "items": [  # Captain, 2026-10-16: stack, breach, clear; whole towns
+				{"key": "1", "label": "That building (quiet)", "cmd": "clear", "point": true},
+				{"key": "2", "label": "That building, flashbang first", "cmd": "clear:flash", "point": true},
+				{"key": "3", "label": "That building, frag first", "cmd": "clear:frag", "point": true},
+				{"key": "4", "label": "That building, blow a way in (charge)", "cmd": "clear:charge", "point": true},
+				{"key": "5", "label": "The town there, building by building", "cmd": "clear_town", "point": true},
+				{"key": "6", "label": "The town there, flashbangs", "cmd": "clear_town:flash", "point": true},
+			]},
 		]},
 		{"key": "2", "label": "Target", "items": [
 			{"key": "1", "label": "Target that enemy", "cmd": "target", "aim": true},
@@ -103,6 +110,10 @@ const MENU := {
 		{"key": "9", "label": "Team", "items": [
 			{"key": "1", "label": "Select fire team A", "select": "fire:0"},
 			{"key": "2", "label": "Select fire team B", "select": "fire:1"},
+			{"key": "5", "label": "Move selected to fire team", "items": [  # Captain, 2026-10-16: any split, not 4 + 4
+				{"key": "1", "label": "Fire team A (with me)", "cmd": "fireteam:0"},
+				{"key": "2", "label": "Fire team B", "cmd": "fireteam:1"},
+			]},
 			{"key": "3", "label": "Assign to team", "items": [
 				{"key": "1", "label": "Red", "cmd": "team:red"},
 				{"key": "2", "label": "Green", "cmd": "team:green"},
@@ -138,6 +149,19 @@ const MENU := {
 				{"key": "3", "label": "On purple smoke", "cmd": "support:extraction:smoke"},
 				{"key": "4", "label": "Near us: the pilot picks an LZ in dead ground", "cmd": "support:extraction:near"},
 				{"key": "5", "label": "Send it home", "cmd": "support:extraction:cancel"},
+			]},
+			{"key": "6", "label": "Medevac (Dustoff)", "items": [  # Captain, 2026-10-16: loads the downed and carried, flies them out alive
+				{"key": "1", "label": "At my map marker", "cmd": "support:medevac:marker"},
+				{"key": "2", "label": "There", "cmd": "support:medevac:here", "point": true},
+				{"key": "3", "label": "On smoke (yellow, green)", "cmd": "support:medevac:smoke"},
+				{"key": "4", "label": "Near us: the pilot picks an LZ", "cmd": "support:medevac:near"},
+				{"key": "5", "label": "Send it home", "cmd": "support:medevac:cancel"},
+			]},
+			{"key": "7", "label": "Cargo run (loot home)", "items": [  # Captain, 2026-10-16: a chopper to send loot back to base
+				{"key": "1", "label": "At my map marker", "cmd": "support:cargo:marker"},
+				{"key": "2", "label": "There", "cmd": "support:cargo:here", "point": true},
+				{"key": "3", "label": "On smoke (green, blue)", "cmd": "support:cargo:smoke"},
+				{"key": "4", "label": "Send it home with what's aboard", "cmd": "support:cargo:cancel"},
 			]},
 			{"key": "5", "label": "AAV", "items": [
 				{"key": "1", "label": "Call an AAV", "cmd": "support:aav_call"},

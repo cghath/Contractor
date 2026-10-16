@@ -719,6 +719,19 @@ func _test_enemy_response() -> void:
 	CompoundLevel.spawn_ai = true
 	level._ai_ready = true
 	er.server_start()
+	# Escalation ramp (Captain, 2026-10-16: "a steady patrol or two that escalates"): fresh, a patrol
+	# or two; then the rest of this test plays a zone the squad has been in a long while.
+	check(er.spawn_budget() == EnemyResponse.RAMP_START and er.alive_total() <= EnemyResponse.RAMP_START,
+		"just in: the zone's answer is a patrol or two (%d out, budget %d)" % [er.alive_total(), er.spawn_budget()])
+	var fresh_at := er._started_at
+	er._started_at = fresh_at - EnemyResponse.ESCALATE_S * 0.5
+	var midway := er.spawn_budget()
+	er._started_at = fresh_at - EnemyResponse.ESCALATE_S
+	check(midway > EnemyResponse.RAMP_START and midway < EnemyResponse.SPAWN_BUDGET.back(),
+		"halfway through the ramp the budget is partway up (%d)" % midway)
+	for record: Dictionary in er.patrols:
+		if record.pending:
+			er._try_patrol(record)  # the rest set out now the budget allows
 	var routes: Array = level.def.get("patrols", [])
 	var out := er.patrols.filter(func(r: Dictionary) -> bool: return not r.pending)
 	check(not routes.is_empty() and er.patrols.size() == routes.size() and not out.is_empty()
@@ -1065,7 +1078,7 @@ func _test_hot_zone_ops() -> void:
 	alert.comms_down = true
 	alert._perceive(a, &"shot", a.global_position)
 	var slow := float(alert._pending.back().due) - alert.now() if not alert._pending.is_empty() else 0.0
-	check(quick > 0.0 and is_equal_approx(slow, quick * Alert.COMMS_DOWN_MULT),
+	check(quick > 0.0 and absf(slow - quick * Alert.COMMS_DOWN_MULT) < 0.5,  # read a moment apart on a live clock: not exact
 		"the comms site down: reports reach the net %.0fx slower (%.0f s, not %.0f)" % [Alert.COMMS_DOWN_MULT, slow, quick])
 	alert._pending.clear()
 	a.queue_free()

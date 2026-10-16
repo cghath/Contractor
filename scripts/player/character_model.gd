@@ -323,6 +323,8 @@ var name_tape := ""
 var reloading := false
 ## Lying face down, head forward (see lay_down). Overrides `pose`.
 var downed := false
+var _flinch := 0.0      # a hit's jolt, decaying (flinch)
+var _flinch_side := 1.0
 ## The stance to show (keys as in REST_POSE). Set every frame by the body that owns it.
 var pose: Dictionary = REST_POSE.duplicate()
 ## Replicated (the body's ServerSync; set on the host by server_carry): {"mode": CARRY,
@@ -462,6 +464,10 @@ func _ready() -> void:
 			marks.name = "WoundMarks"
 			add_child(marks)
 			marks.setup(self, vitals)
+			var deform := BodyDeform.new()  # holes carved out of the parts themselves
+			deform.name = "BodyDeform"
+			add_child(deform)
+			deform.setup(self, vitals)
 
 
 ## Puts a body's model and its hitboxes in or out of the downed pose, so shots hit where
@@ -1175,6 +1181,7 @@ func _process(frame_delta: float) -> void:
 			if downed:
 				head.rotation.x = -SEAT_HEAD_DROOP
 	_update_arms(delta, carry, swing)
+	_wounded_extras(delta)
 
 
 ## Locomotion: the gait cycle at ground speed (see GAIT_*), blended over the stance pose by
@@ -1801,3 +1808,82 @@ static func _segment_basis(v: Vector3) -> Basis:
 		x = Vector3.FORWARD - y * Vector3.FORWARD.dot(y)
 	x = x.normalized()
 	return Basis(x, y, x.cross(y))
+
+
+## Hit and hurt (Captain, 2026-10-16: "anims for wounded/dying that arent unconscious ... goes with
+## hit anims"): drawn over whatever pose the frame built (each frame starts from the pose again,
+## so nothing piles up).
+## - flinch(): a hit jolts the upper body and head (FLINCH_*), gone in about FLINCH_DECAY_S.
+## - Downed but awake (not ragdolled, not unconscious): a slow writhe (WRITHE_*): arms and legs
+##   shift, the head rolls, the right hand pulled in over the body as if pressing a wound.
+const FLINCH_PITCH := 0.32
+const FLINCH_TWIST := 0.22
+const FLINCH_DECAY_S := 0.35
+const WRITHE_HZ := 0.45
+const WRITHE_ARM := 0.28
+const WRITHE_LEG := 0.16
+const WRITHE_HEAD := 0.25
+const PRESS_ARM := 0.9
+
+
+## A hit (every peer: Callouts._vocal calls it with the cry). `strength` 0..1.
+func flinch(strength := 1.0) -> void:
+	_flinch = maxf(_flinch, clampf(strength, 0.0, 1.0))
+	_flinch_side = -1.0 if randf() < 0.5 else 1.0
+
+
+func _wounded_extras(delta: float) -> void:
+	if _flinch > 0.0:
+		var k := _flinch * _flinch
+		torso.rotation.x -= FLINCH_PITCH * k
+		torso.rotation.y += FLINCH_TWIST * k * _flinch_side
+		head.rotation.x += FLINCH_PITCH * 0.6 * k
+		_flinch = maxf(_flinch - delta / FLINCH_DECAY_S, 0.0)
+	if not downed and _gait_w > 0.1:
+		_limp(delta)
+	if not downed or ragdolled():
+		return
+	var body := get_parent()
+	var vitals: Vitals = body.get_node_or_null(^"Vitals") if body else null
+	if vitals == null or vitals.is_dead() or vitals.is_unconscious():
+		return
+	var t := _time * TAU * WRITHE_HZ
+	var phase := float(absi(hash(String(body.name))) % 100) * 0.1  # not everyone in step
+	_upper[0].rotation.z += PRESS_ARM + sin(t + phase) * WRITHE_ARM * 0.4  # right hand in over the wound
+	_upper[0].rotation.x += 0.4
+	_upper[1].rotation.z += sin(t * 0.8 + phase) * WRITHE_ARM
+	_leg_left.rotation.x += sin(t * 0.7 + phase) * WRITHE_LEG
+	_leg_right.rotation.x += sin(t * 0.6 + phase + 1.7) * WRITHE_LEG
+	head.rotation.y += sin(t * 0.5 + phase) * WRITHE_HEAD
+
+
+## A limp on a wounded leg: on that foot's step the body dips and leans over it (LIMP_*), by how
+## much of the walk cycle shows. Which leg (a wound on a thigh or shin, worse with a break) is
+## looked up every LIMP_CHECK_S.
+const LIMP_DIP := 0.045
+const LIMP_LEAN := 0.12
+const LIMP_CHECK_S := 0.5
+var _limp_leg := 0.0     # -1 left, 1 right, 0 none; times 1.6 with a break
+var _limp_check := 0.0
+
+
+func _limp(delta: float) -> void:
+	_limp_check -= delta
+	if _limp_check <= 0.0:
+		_limp_check = LIMP_CHECK_S
+		_limp_leg = 0.0
+		var vitals: Vitals = get_parent().get_node_or_null(^"Vitals") if get_parent() else null
+		if vitals:
+			for w: Dictionary in vitals.wound_list():
+				var side := -1.0 if w.part in [Vitals.THIGH_L, Vitals.SHIN_L] else (1.0 if w.part in [Vitals.THIGH_R, Vitals.SHIN_R] else 0.0)
+				if side != 0.0 and not w.treated:
+					_limp_leg = side * (1.6 if String(w.kind) == "fracture" else 1.0)
+	if _limp_leg == 0.0:
+		return
+	var land := 0.0 if _limp_leg < 0.0 else 0.5  # the bad foot's stance starts here in the cycle
+	var into := fposmod(_gait_phase - land, 1.0)
+	if into > 0.5:
+		return
+	var k := sin(into / 0.5 * PI) * _gait_w * absf(_limp_leg)
+	_root.position.y -= LIMP_DIP * k
+	torso.rotation.z += LIMP_LEAN * k * signf(_limp_leg)

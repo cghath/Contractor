@@ -36,6 +36,19 @@ const POOL_HEIGHT := 0.006
 const MAX_POOL := 400
 ## Drops thrown out of an exit wound when the round goes through.
 const SPATTER_DROPS := 14
+## Brain matter thrown out of a head exit (Captain, 2026-10-16: "also brains from headshots"):
+## pinkish-grey chunks that fly with the spatter and lie where they land.
+const BRAIN_DROPS := 12
+const BRAIN_SIZE := 0.018
+const BRAIN_COLOUR := Color("b8908b")
+const BRAIN_DARK := Color("7e5552")
+const MAX_CHUNKS := 60
+## How long what lands on the ground stays (Captain, 2026-10-16: "3-4 minutes for most small blood
+## and 7-9 mins for pools", "~6-7 minutes ... for most things"), seconds; checked every EXPIRE_TICK_S.
+const SPECK_LIFE_S := Vector2(180.0, 240.0)
+const POOL_LIFE_S := Vector2(420.0, 540.0)
+const CHUNK_LIFE_S := Vector2(360.0, 420.0)
+const EXPIRE_TICK_S := 10.0
 ## What a drop can land on: the world, hitboxes, items, armour and bodies. On anything but the
 ## world it sticks to that (Charges.rider_of) and rides along. A pool spills only over ground
 ## within POOL_STEP of its cell.
@@ -59,6 +72,8 @@ var _pool: Dictionary = {}  # Vector2i -> {"y", "amount"}
 var _pool_mesh: MultiMeshInstance3D
 var _pool_centre: Variant = null  # the cell the first drip landed in: the pool spreads out from it
 var _pool_dirty := false
+var _chunks: Array[Dictionary] = []  # brain on the ground: {"pos", "size", "colour", "until"}
+var _chunk_mesh: MultiMeshInstance3D
 var _stuck: Dictionary = {}  # holder instance id -> {"inst" (a MultiMeshInstance3D on the holder), "count"}
 var _own_rids_cache: Array[RID] = []
 var _own_rids_children := -1
@@ -70,6 +85,11 @@ func setup(p_model: CharacterModel, p_vitals: Vitals) -> void:
 	vitals = p_vitals
 	body = BodyVolume.body_of(p_model)
 	vitals.changed.connect(_rebuild)
+	var expire := Timer.new()
+	expire.wait_time = EXPIRE_TICK_S
+	expire.autostart = true
+	expire.timeout.connect(_expire)
+	add_child(expire)
 	set_process(false)
 	_rebuild()
 
@@ -311,6 +331,11 @@ func _spatter(spot: Dictionary) -> void:
 		var spread := Vector3(rng.randf_range(-0.35, 0.35), rng.randf_range(-0.2, 0.35), rng.randf_range(-0.35, 0.35))
 		var speed := rng.randf_range(0.8, 2.6)
 		_drips.append({"pos": from, "vel": (dir + spread).normalized() * speed, "floor": floor_y, "speck": true})
+	if spot.part in [Vitals.HEAD, Vitals.FACE]:
+		for i in BRAIN_DROPS:
+			var spread := Vector3(rng.randf_range(-0.5, 0.5), rng.randf_range(-0.25, 0.45), rng.randf_range(-0.5, 0.5))
+			_drips.append({"pos": from, "vel": (dir + spread).normalized() * rng.randf_range(1.0, 3.2), "floor": floor_y, "speck": true,
+				"brain": true, "size": BRAIN_SIZE * rng.randf_range(0.6, 1.4)})
 	set_process(true)
 
 
@@ -335,7 +360,10 @@ func _move_drips(delta: float) -> void:
 	var landed: Array = []  # [drop, hit] (hit empty: it reached its floor)
 	for d: Dictionary in _drips:
 		var was: Vector3 = d.pos
-		d.vel += Vector3.DOWN * 9.8 * delta
+		if d.get("slide", false):
+			d.vel = Vector3.DOWN * SLIDE_MPS  # running down a wall, not falling
+		else:
+			d.vel += Vector3.DOWN * 9.8 * delta
 		d.pos += d.vel * delta
 		var hit := _surface_between(space, was, d.pos) if space else {}
 		if not hit.is_empty() or d.pos.y <= d.floor:
@@ -345,16 +373,29 @@ func _move_drips(delta: float) -> void:
 		var hit: Dictionary = pair[1]
 		_drips.erase(d)
 		var rider: Node3D = Charges.rider_of(hit.collider) if not hit.is_empty() and hit.collider is Node else null
+		if rider == null and not hit.is_empty() and absf((hit.normal as Vector3).y) < WALL_NORMAL_Y and not d.get("slide", false):
+			# A wall (Captain, 2026-10-16: "chunks and stuff slide down walls if they hit"): a stain
+			# where it struck, then it runs down the wall to the ground and lands there.
+			_add_stain(hit.position, hit.normal, float(d.get("size", DRIP_SIZE)) * (1.6 if d.get("brain", false) else 1.0), d.get("brain", false))
+			var slid := d.duplicate()
+			slid["pos"] = (hit.position as Vector3) + (hit.normal as Vector3) * 0.01
+			slid["slide"] = true
+			_drips.append(slid)
+			continue
+		if d.get("brain", false):
+			_add_chunk(Vector3(d.pos.x, hit.position.y if not hit.is_empty() else d.floor, d.pos.z), float(d.size))
+			continue
 		if rider:
 			_stick(rider, hit.position, d.get("speck", false))
 		else:
 			_add_pool(Vector3(d.pos.x, hit.position.y if not hit.is_empty() else d.floor, d.pos.z), d.get("speck", false))
 	if _drip_mesh == null:
-		_drip_mesh = _world_multimesh("Drips", MAX_DRIPS)
+		_drip_mesh = _world_multimesh("Drips", MAX_DRIPS + BRAIN_DROPS)
 	var mm := _drip_mesh.multimesh
 	for i in _drips.size():
-		mm.set_instance_transform(i, Transform3D(Basis.from_scale(Vector3(1, 1.6, 1) * DRIP_SIZE), _drips[i].pos))
-		mm.set_instance_color(i, FRESH_COLOUR)
+		var brain: bool = _drips[i].get("brain", false)
+		mm.set_instance_transform(i, Transform3D(Basis.from_scale(Vector3.ONE * float(_drips[i].size) if brain else Vector3(1, 1.6, 1) * DRIP_SIZE), _drips[i].pos))
+		mm.set_instance_color(i, BRAIN_COLOUR if brain else FRESH_COLOUR)
 	mm.visible_instance_count = _drips.size()
 
 
@@ -445,9 +486,12 @@ func _add_pool(at: Vector3, speck := false) -> void:
 			var ground: Variant = at.y if i == 0 else _ground_at(cell, at.y)
 			if ground == null:
 				return
-			_pool[cell] = {"y": float(ground), "amount": 0}
+			var life: Vector2 = SPECK_LIFE_S if speck else POOL_LIFE_S
+			_pool[cell] = {"y": float(ground), "amount": 0, "until": _now() + randf_range(life.x, life.y)}
 		if _pool[cell].amount < (1 if speck else 2):
 			_pool[cell].amount += 1
+			if not speck:
+				_pool[cell].until = maxf(float(_pool[cell].until), _now() + POOL_LIFE_S.x)  # a pool now, not a speck
 			_pool_dirty = true
 			return
 		if speck:
@@ -565,3 +609,79 @@ static func _multimesh_instance(count: int) -> MultiMeshInstance3D:
 		_material.roughness = 0.45
 	inst.material_override = _material
 	return inst
+
+
+static func _now() -> float:
+	return Time.get_ticks_msec() / 1000.0
+
+
+## Brain matter landed at `at` (BRAIN_DROPS): lies there CHUNK_LIFE_S.
+func _add_chunk(at: Vector3, size: float) -> void:
+	if _chunks.size() >= MAX_CHUNKS:
+		_chunks.pop_front()
+	_chunks.append({"pos": at + Vector3.UP * size * 0.3, "size": size, "colour": BRAIN_COLOUR if randf() < 0.65 else BRAIN_DARK,
+		"until": _now() + randf_range(CHUNK_LIFE_S.x, CHUNK_LIFE_S.y)})
+	_redraw_chunks()
+
+
+func _redraw_chunks() -> void:
+	if _chunk_mesh == null:
+		_chunk_mesh = _world_multimesh("Brain", MAX_CHUNKS)
+	var mm := _chunk_mesh.multimesh
+	for i in _chunks.size():
+		var c: Dictionary = _chunks[i]
+		mm.set_instance_transform(i, Transform3D(Basis.from_scale(Vector3(1.0, 0.6, 1.0) * float(c.size)), c.pos))
+		mm.set_instance_color(i, c.colour)
+	mm.visible_instance_count = _chunks.size()
+
+
+## What lay on the ground long enough goes: specks, pools, brain (the *_LIFE_S lifetimes).
+func _expire() -> void:
+	var now := _now()
+	var gone := false
+	for cell: Vector2i in _pool.keys():
+		if float(_pool[cell].get("until", INF)) <= now:
+			_pool.erase(cell)
+			gone = true
+	if gone:
+		if _pool.is_empty():
+			_pool_centre = null
+		_redraw_pool()
+	var before := _chunks.size()
+	_chunks = _chunks.filter(func(c: Dictionary) -> bool: return float(c.until) > now)
+	if _chunks.size() != before:
+		_redraw_chunks()
+	var stains_before := _stains.size()
+	_stains = _stains.filter(func(st: Dictionary) -> bool: return float(st.until) > now)
+	if _stains.size() != stains_before:
+		_redraw_stains()
+
+
+## Wall stains (where a drop or chunk struck a wall before running down it), lying
+## SPECK_LIFE_S like the small blood: {"pos", "normal", "size", "colour", "until"}.
+const WALL_NORMAL_Y := 0.5   # a surface steeper than this is a wall
+const SLIDE_MPS := 0.5
+const MAX_STAINS := 60
+var _stains: Array[Dictionary] = []
+var _stain_mesh: MultiMeshInstance3D
+
+
+func _add_stain(at: Vector3, normal: Vector3, size: float, brain: bool) -> void:
+	if _stains.size() >= MAX_STAINS:
+		_stains.pop_front()
+	_stains.append({"pos": at + normal * 0.004, "normal": normal, "size": maxf(size * 2.2, CELL),
+		"colour": BRAIN_DARK if brain else FRESH_COLOUR, "until": _now() + randf_range(SPECK_LIFE_S.x, SPECK_LIFE_S.y)})
+	_redraw_stains()
+
+
+func _redraw_stains() -> void:
+	if _stain_mesh == null:
+		_stain_mesh = _world_multimesh("WallStains", MAX_STAINS)
+	var mm := _stain_mesh.multimesh
+	for i in _stains.size():
+		var st: Dictionary = _stains[i]
+		var n: Vector3 = st.normal
+		var basis := Basis.looking_at(-n, Vector3.UP if absf(n.y) < 0.95 else Vector3.RIGHT)  # flat on the wall
+		mm.set_instance_transform(i, Transform3D(basis.scaled(Vector3(float(st.size), float(st.size) * 1.4, 0.003)), st.pos))
+		mm.set_instance_color(i, st.colour)
+	mm.visible_instance_count = _stains.size()

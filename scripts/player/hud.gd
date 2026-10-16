@@ -31,6 +31,7 @@ var map_screen: MapScreen
 var objective_helper: ObjectiveHelper
 ## The magazines and their rough fill (AmmoReadout).
 var ammo_readout: AmmoReadout
+var armor_readout: ArmorReadout
 ## The zones (see the top): the right column, the left column, and the bottom-centre stack.
 var zone_top_right: VBoxContainer
 var zone_left: VBoxContainer
@@ -144,6 +145,8 @@ func _ready() -> void:
 	add_child(objective_helper)
 	ammo_readout = AmmoReadout.new(player)  # mags and roughly how full, not a count
 	add_child(ammo_readout)
+	armor_readout = ArmorReadout.new(player)  # plates and helmet: what's left of each
+	add_child(armor_readout)
 	_message = _add(_wrapping(UiKit.hud_label())) as Label
 	# The map (M) and the briefing, over everything else (W13).
 	add_child(BleedSilhouette.new(player))

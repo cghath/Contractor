@@ -11,9 +11,19 @@ extends RefCounted
 ## Rounds come from res://data/rounds.json: threat level, round class and ACE3-style ballistic
 ## values (muzzle velocity, ballistic coefficient against G1 or G7 drag, bullet mass). A
 ## weapon fires the round its magazine names, so velocity_at() and energy_at() at any range
-## come from that data. Hitscan: no bullet drop or flight time yet.
+## come from that data. Trajectories (Captain, 2026-10-16: "if we can ballistics pleaseeee"): the
+## round flies a curved path, PATH_STEP_M at a time, slowing by the drag model and falling by
+## gravity, out to RANGE; the sights are zeroed at ZERO_M (a weapon's "zero_m" stat overrides), so
+## close in it lands where you aim and far out it drops (the optics' BDC holds are for that). No
+## flight time yet: the whole path is traced at once.
 
-const RANGE := 300.0
+const RANGE := 1200.0
+const PATH_STEP_M := 20.0
+## Past PATH_FAR_M the steps lengthen (fewer ray casts on a long shot; the curve is gentle there).
+const PATH_FAR_M := 300.0
+const PATH_STEP_FAR_M := 50.0
+const ZERO_M := 100.0
+const GRAVITY := Vector3(0.0, -9.8, 0.0)
 const MASK := (1 << 0) | (1 << 1) | (1 << 3) | Vehicle.LAYER  # world, hitboxes, armor, vehicles (wave 5)
 ## How many things (armor pieces, walls) one round can pass through.
 const MAX_PENETRATIONS := 8
@@ -66,20 +76,37 @@ static func _trace(shooter: CollisionObject3D, origin: Vector3, direction: Vecto
 	var ride := Vehicle.ride_of(shooter)
 	if ride:
 		exclude.append(ride.get_rid())  # ...or the vehicle you ride in (a mounted gun)
+	direction = zeroed(direction, weapon)
 	var from := origin
-	var to := origin + direction * RANGE
+	var path := 0.0  # metres flown to the start of this step
+	var seg_start := origin
+	var velocity := direction * _speed_at(weapon, 0.0)
+	var step := _path_step(seg_start, velocity, weapon, path)
+	var to: Vector3 = step[0]
 	var lost_j := 0.0  # energy lost in walls on the way
-	for i in MAX_PENETRATIONS:
+	var passed: Dictionary = {}  # the first body it went through (the shooter's result from then on)
+	var hits := 0
+	while hits < MAX_PENETRATIONS:
 		var query := PhysicsRayQueryParameters3D.create(from, to, MASK, exclude)
 		query.collide_with_areas = true
 		var hit := space.intersect_ray(query)
 		if hit.is_empty():
-			break
+			path += seg_start.distance_to(to)
+			if path >= RANGE:
+				break
+			velocity = step[1]
+			seg_start = to
+			from = to
+			direction = velocity.normalized()  # falling a little more each step
+			step = _path_step(seg_start, velocity, weapon, path)
+			to = step[0]
+			continue
+		hits += 1
 		var collider: Object = hit.collider
 		var distance := origin.distance_to(hit.position)
 		if collider is VoxelArmor:
 			if collider.server_try_stop(hit.position, direction, weapon, equivalent_distance(weapon, distance, lost_j)):
-				return _result("plate", hit)
+				return passed if not passed.is_empty() else _result("plate", hit)
 			exclude.append(collider.get_rid())
 			from = hit.position
 			continue
@@ -123,24 +150,107 @@ static func _trace(shooter: CollisionObject3D, origin: Vector3, direction: Vecto
 				"hitbox": collider,  # the wound channel follows the hitbox's pose
 				"channel_depth": body_hit.depth,  # how much body the round crosses
 				"distance": distance,
+				"energy_j": energy,  # on arrival, after any plate (BodyDeform scores a round by it; .50 kills)
 			}
 			if lost_j > 0.0:
 				_spend(hit_info, world_energy(weapon, distance) - lost_j)
+			# Through and out, or in to stay (Captain, 2026-10-16: rounds through the front armour
+			# "can also pass through the backside or hit the backside if they pass all the way
+			# through the body", "rounds dont always have to pass through either"): the round can
+			# cross tissue_reach of body; less body than that and it comes out the far side with
+			# what it has left and flies on, into the back plate or helmet (which may stop it), the
+			# wall behind or whoever is there.
+			var arriving := energy if energy >= 0.0 else world_energy(weapon, distance) - lost_j
+			var reach := tissue_reach(weapon, arriving)
+			var crosses: bool = round_class(weapon) != Vitals.FRAGMENT and not hit_info.get("superficial", false) and body_hit.depth < reach
+			if not crosses:
+				hit_info["channel_depth"] = minf(body_hit.depth, reach)
+				hit_info["stays_in"] = true
 			Harm.note_hit(vitals.get_parent(), shooter)  # who hit whom (people: civilian casualties)
 			vitals.server_hit(part, hit_info)
-			return _result("body", hit)
+			if not crosses:
+				return _result("body", hit)
+			if passed.is_empty():
+				passed = _result("body", hit)  # what the shooter sees: he hit someone
+			lost_j += arriving * clampf(body_hit.depth / reach, TISSUE_LOSS.x, TISSUE_LOSS.y)
+			for box in vitals.get_parent().get_children():
+				if box is Area3D:
+					exclude.append(box.get_rid())  # out of this body: it doesn't hit him twice
+			from = body_hit.position + direction * (body_hit.depth + 0.01)
+			continue
 		var world := VoxelWorld.find_on(collider)
 		if world == null:
-			return _result("world", hit)  # the ground
+			return passed if not passed.is_empty() else _result("world", hit)  # the ground
 		var through := world.trace_round(hit.position, direction, world_energy(weapon, distance) - lost_j)
 		if through.stopped:
 			world.server_mark(hit.position, hit.normal, int(through.material))
-			return _result("world", hit)
+			return passed if not passed.is_empty() else _result("world", hit)
 		world.server_shot(hit.position, hit.normal, through.exit, through.exit_normal, calibre_m(weapon), through.voxels, int(through.material))
 		lost_j += float(through.lost_j)
 		from = (through.exit as Vector3) + direction * 0.01
-	return {"result": "none", "position": to, "normal": Vector3.ZERO}
+	return passed if not passed.is_empty() else {"result": "none", "position": to, "normal": Vector3.ZERO}
 
+
+## `direction` (the line of sight) tilted up so the path crosses it again at the weapon's zero
+## (stat "zero_m", else ZERO_M): the drop by then over that distance.
+static func zeroed(direction: Vector3, weapon: ItemData) -> Vector3:
+	var zero := float(weapon.stats.get("zero_m", ZERO_M)) if weapon else ZERO_M
+	var axis := direction.cross(Vector3.UP)
+	if zero <= 0.0 or axis.length_squared() < 0.0001:
+		return direction
+	var t := zero / maxf(_speed_at(weapon, zero * 0.5), 50.0)
+	return direction.rotated(axis.normalized(), atan2(0.5 * -GRAVITY.y * t * t, zero))
+
+
+## The round's speed `distance` metres out (velocity_at), or its class's usual without data.
+static func _speed_at(weapon: ItemData, distance: float) -> float:
+	var v := velocity_at(weapon, distance) if weapon else -1.0
+	if v > 0.0:
+		return v
+	return {Vitals.PISTOL: 370.0, Vitals.INTERMEDIATE: 880.0, Vitals.FULL_POWER: 820.0}.get(round_class(weapon) if weapon else Vitals.INTERMEDIATE, 850.0)
+
+
+## One PATH_STEP_M of flight from `from` at `velocity`, `path` metres out: [where it gets to,
+## its velocity there] (gravity bends it; drag slows it to _speed_at).
+static func _path_step(from: Vector3, velocity: Vector3, weapon: ItemData, path: float) -> Array:
+	var length := PATH_STEP_M if path < PATH_FAR_M else PATH_STEP_FAR_M
+	var speed := maxf(velocity.length(), 50.0)
+	var dt := length / speed
+	var end := from + velocity * dt + 0.5 * GRAVITY * dt * dt
+	var slowed := velocity_after(weapon, speed, length) if weapon else speed
+	var next := (velocity + GRAVITY * dt).normalized() * maxf(slowed, 50.0)
+	return [end, next]
+
+
+## Speed `v` slowed by drag over `distance` metres (velocity_at's integration, from where it is
+## rather than from the muzzle). Unchanged without drag data.
+static func velocity_after(round_or_weapon: Variant, v: float, distance: float) -> float:
+	var data := round_data(round_or_weapon)
+	var bc := float(data.get("bc", 0.0)) * BC_TO_SI
+	if v <= 0.0 or bc <= 0.0:
+		return v
+	var curve: Array[Vector2] = DRAG_G1 if String(data.get("drag", "G7")) == "G1" else DRAG_G7
+	var travelled := 0.0
+	while travelled < distance - 0.001 and v > 1.0:
+		var step := minf(DRAG_STEP_M * 2.0, distance - travelled)
+		var half := v - _deceleration(v, bc, curve) * step * 0.5
+		v = maxf(v - _deceleration(half, bc, curve) * step, 0.0)
+		travelled += step
+	return v
+
+## Metres of body a round crosses before it stops in it, by class (a random spread: yaw,
+## fragmenting, bone), longer with more energy than the class's usual (sqrt, 0.6..1.5x).
+const TISSUE_REACH_M := {Vitals.PISTOL: Vector2(0.15, 0.40), Vitals.INTERMEDIATE: Vector2(0.28, 0.62), Vitals.FULL_POWER: Vector2(0.50, 0.95)}
+## A round that crosses the body loses this share of its energy (by how much of its reach it used).
+const TISSUE_LOSS := Vector2(0.3, 0.9)
+
+
+static func tissue_reach(weapon: ItemData, energy_j: float) -> float:
+	var rc := round_class(weapon)
+	var span: Vector2 = TISSUE_REACH_M.get(rc, TISSUE_REACH_M[Vitals.INTERMEDIATE])
+	var usual := float(FALLBACK_ENERGY_J.get(rc, 1650.0))
+	var scale := clampf(sqrt(maxf(energy_j, 1.0) / usual), 0.6, 1.5)
+	return randf_range(span.x, span.y) * scale
 
 ## The round's energy (J) `distance` metres out for the world (energy_at, or by round class
 ## from FALLBACK_ENERGY_J when the round has no data).

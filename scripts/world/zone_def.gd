@@ -245,6 +245,11 @@ static func generate(seed: int, size_m := 1920.0, types: Array = ["compound", "o
 ## and towns: civilians, not patrol anchors) for a regular contract zone's modules. Captain,
 ## 2026-10-16: regular zones had neither (only hot zones did), so the enemy never patrolled and
 ## the zone never had roads to draw or drive on.
+const TRAILS := 3
+const TRAIL_POINTS := 5
+const TRAIL_EDGE_SHARE := 0.85  # trails start and end this far out toward the edge (inside the wall)
+
+
 static func _add_roads_and_patrols(def: Dictionary, rng: RandomNumberGenerator) -> void:
 	var sites: Array[Vector2] = []
 	for m: Dictionary in def.modules:
@@ -281,8 +286,28 @@ static func _add_roads_and_patrols(def: Dictionary, rng: RandomNumberGenerator) 
 			for m: Dictionary in near.slice(0, 2):
 				route.append([float(m.pos[0]), float(m.pos[1])])
 			patrols.append(route)
+	_add_trails(def, roads, patrols, rng)
 	def["roads"] = roads
 	def["patrols"] = patrols
+
+## Trails right across the map (Captain, 2026-10-16: "paths that they patrol too, all across the
+## map"): TRAILS of them, edge to edge through a jittered middle, added to `roads` (tracks) and
+## `patrols` (a patrol walks each).
+static func _add_trails(def: Dictionary, roads: Array, patrols: Array, rng: RandomNumberGenerator) -> void:
+	var half := float(def.get("size_m", 1920.0)) * 0.5 * TRAIL_EDGE_SHARE
+	for t in TRAILS:
+		var a := rng.randf() * TAU
+		var start := Vector2(cos(a), sin(a)) * half
+		var finish := -start.rotated(rng.randf_range(-0.6, 0.6))
+		var trail: Array = [[start.x, start.y]]
+		for k in range(1, TRAIL_POINTS):
+			var p := start.lerp(finish, float(k) / TRAIL_POINTS) + Vector2(rng.randf_range(-1.0, 1.0), rng.randf_range(-1.0, 1.0)) * half * 0.25
+			trail.append([p.x, p.y])
+		trail.append([finish.x, finish.y])
+		for k in range(1, trail.size()):
+			roads.append([trail[k - 1], trail[k]])
+		patrols.append(trail)
+
 
 
 ## A hot zone made from a seed (4B part 3): a `size_m` square (HOT_SIZE_M: 16 km²) holding the
@@ -392,6 +417,7 @@ static func generate_hot(seed: int, size_m := HOT_SIZE_M, urban := false) -> Dic
 	def["kind"] = "hot"
 	if urban:
 		def["urban"] = true
+	_add_trails(def, roads, patrols, rng)
 	def["roads"] = roads
 	def["patrols"] = patrols
 	return def

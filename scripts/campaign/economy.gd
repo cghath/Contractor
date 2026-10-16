@@ -443,6 +443,25 @@ func buy(item_id: StringName, count := 1) -> void:
 		_rq_buy.rpc_id(1, String(item_id), count)
 
 
+## Sells `count` of `id` from the company stash (BaseHub.server_sell_from_stash).
+func sell_from_stash(item_id: StringName, count := 1) -> void:
+	if _is_host():
+		_sold(1, item_id, BaseHub.server_sell_from_stash(item_id, count))
+	else:
+		_rq_sell.rpc_id(1, String(item_id), count)
+
+
+func _sold(peer_id: int, item_id: StringName, got: int) -> void:
+	var item_name := ItemDB.get_item(item_id).name if ItemDB.has_item(item_id) else String(item_id)
+	_notify(peer_id, ("Sold %s for $%s" % [item_name, DebriefCalc.money(got)]) if got > 0 else "No %s in the stash to sell" % item_name)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _rq_sell(item_id: String, count: int) -> void:
+	if multiplayer.is_server():
+		_sold(multiplayer.get_remote_sender_id(), StringName(item_id), BaseHub.server_sell_from_stash(StringName(item_id), clampi(count, 1, 50)))
+
+
 func take_loan() -> void:
 	if _is_host():
 		var lent := server_take_loan()

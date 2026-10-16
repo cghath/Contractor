@@ -47,7 +47,7 @@ const HEARD_KEEP_S := 4.0
 const CLUSTER_M := 10.0
 ## Tactic orders by command string (command()): "<name>" acts on the point under the
 ## crosshair ("suppress:known" suppresses the densest known cluster instead).
-const TACTIC_COMMANDS: Array[String] = ["suppress", "bound", "garrison", "clear", "take_cover", "fall_back"]
+const TACTIC_COMMANDS: Array[String] = ["suppress", "bound", "garrison", "clear", "clear_town", "take_cover", "fall_back"]
 
 ## Spawn positions in the leader's space (x right, +z behind), per formation (the squad's
 ## first places; following uses formation slots, follow_point).
@@ -174,6 +174,7 @@ func _physics_process(delta: float) -> void:
 		return
 	_update_heading()
 	_update_trail()
+	_tick_town()
 	_context_cd -= delta
 	if _context_cd <= 0.0:
 		_context_cd = CONTEXT_S
@@ -451,7 +452,7 @@ func order_garrison(from: Soldier, point: Vector3, names := PackedStringArray())
 ## "Clear that building": the named units stack beside the building's entrance nearest them,
 ## then go in one after the other, pair by pair, room by room (SquadTactics.clear_op), and
 ## hold inside once it's clear.
-func order_clear(from: Soldier, point: Vector3, names := PackedStringArray()) -> String:
+func order_clear(from: Soldier, point: Vector3, names := PackedStringArray(), breach := "") -> String:
 	leader = from
 	var b := Buildings.nearest(from, point, ORDER_BUILDING_M)
 	if b.is_empty():
@@ -459,12 +460,85 @@ func order_clear(from: Soldier, point: Vector3, names := PackedStringArray()) ->
 	var units := _able(names)
 	if units.is_empty():
 		return "Nobody selected can"
+	return _start_clear(b, units, breach)
+
+
+## The stack on building `b` (SquadTactics.clear_op) with `breach` ("", "flash", "frag",
+## "charge": SquadAI._breach).
+func _start_clear(b: Dictionary, units: Array[SquadAI], breach: String) -> String:
 	var op := SquadTactics.clear_op(b, units)
 	if op.is_empty():
 		return "No way in found"
+	op["breach"] = breach
+	if breach == "charge":
+		stand_off(op)
 	for i in units.size():
 		units[i].give_tactic({"kind": &"clear", "op": op, "slot": i})
+	_town_op = op
+	_town_units = units.size()
 	return ""
+
+
+## A charge's stack stands CHARGE_STANDOFF_M further along the wall, clear of the blast.
+static func stand_off(op: Dictionary) -> void:
+	var door: Vector3 = op.entrance.door
+	for i in (op.stack as Array).size():
+		var away := Vector3((op.stack[i] as Vector3).x - door.x, 0.0, (op.stack[i] as Vector3).z - door.z)
+		if away.length() > 0.05:
+			op.stack[i] = (op.stack[i] as Vector3) + away.normalized() * CHARGE_STANDOFF_M
+
+
+## Clearing a town (Captain, 2026-10-16: "an order for clearing towns so they move building by
+## building down the street"): the buildings within TOWN_RADIUS_M of the point, nearest-next
+## from the squad, cleared one after another the same way (stack, breach, in); the next starts
+## once every man of the last is at his corner. Another clear order ends it.
+const TOWN_RADIUS_M := 90.0
+const CHARGE_STANDOFF_M := 3.0
+var _town: Array = []        # buildings still to clear
+var _town_names := PackedStringArray()
+var _town_breach := ""
+var _town_op: Dictionary = {}
+var _town_units := 0
+
+
+func order_clear_town(from: Soldier, point: Vector3, names: PackedStringArray, breach: String) -> String:
+	leader = from
+	var found: Array = Buildings.near(from, point, TOWN_RADIUS_M)
+	if found.is_empty():
+		return "No buildings there"
+	var ordered: Array = []
+	var at := from.global_position
+	while not found.is_empty():
+		found.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return Buildings.distance_to(a, at) < Buildings.distance_to(b, at))
+		var next: Dictionary = found.pop_front()
+		ordered.append(next)
+		at = next.centre
+	_town = ordered
+	_town_names = names
+	_town_breach = breach
+	_town_op = {}
+	return _next_town_building()
+
+
+func _next_town_building() -> String:
+	while not _town.is_empty():
+		var b: Dictionary = _town.pop_front()
+		var units := _able(_town_names)
+		if units.is_empty():
+			_town.clear()
+			return "Nobody selected can"
+		if _start_clear(b, units, _town_breach) == "":
+			return ""
+	_town_op = {}
+	return "No way into any building there"
+
+
+func _tick_town() -> void:
+	if _town_op.is_empty() or _town.is_empty():
+		return
+	if (_town_op.get("done", {}) as Dictionary).size() >= _town_units:
+		_town_op = {}
+		_next_town_building()
 
 
 ## "Take cover": each named unit takes the best cover near it from its last known threat and
@@ -519,7 +593,10 @@ func order_command(from: Soldier, cmd: String, point: Vector3, names := PackedSt
 		"garrison":
 			return order_garrison(from, point, names)
 		"clear":
-			return order_clear(from, point, names)
+			_town.clear()
+			return order_clear(from, point, names, arg)
+		"clear_town":
+			return order_clear_town(from, point, names, arg)
 		"take_cover":
 			return order_take_cover(from, names)
 		"fall_back":
@@ -1057,6 +1134,16 @@ func _work_out_slots() -> Dictionary:
 			mirror = 1.0
 			t_fwd = _human_heading(guide, fwd)
 			t_right = t_fwd.cross(Vector3.UP).normalized()
+		elif guide != null and t != lead_team:
+			# The lead ordered this team's AI leader somewhere (Captain, 2026-10-16: "make sure i can
+			# command the tl for b team and b team follows"): the team goes with him and forms on
+			# him there, the way it forms on a human team leader, not back on the squad lead.
+			var ordered := SquadAI.of(guide)
+			if ordered and ordered.intent in [SquadAI.Intent.MOVE_TO, SquadAI.Intent.HOLD]:
+				origin = guide.global_position
+				mirror = 1.0
+				t_fwd = _human_heading(guide, fwd)
+				t_right = t_fwd.cross(Vector3.UP).normalized()
 		var guide_k := list.find(guide)
 		var guide_ai := SquadAI.of(guide) if guide and guide.is_ai() else null
 		# The team forms on its own leader while he's with it (following, off his place by more

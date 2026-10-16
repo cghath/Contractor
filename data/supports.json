@@ -1,11 +1,16 @@
 {
 	"_note": "Wave 5b V3, helicopter supports (HeliSupports, HeliCall). Everything here is Proposed. Prices are in data/prices.json \"supports\" (Economy.server_pay_support). cooldown_s: after a call, how long before that support can be called again. resupply: the pallet's load (HeliSupports.resupply_load): per_weapon gives, for every weapon the squad carries (players and squad AI, primary and sidearm), its magazines ([mags, loose rounds of that calibre]); fixed lists the rest as [item id, count]; pallet is the item it all sits on.",
-	"cooldown_s": {"resupply": 600, "transport": 180, "extraction": 300},
-	"callsigns": {"resupply": "Mule 1-1", "transport": "Hawk 2-1", "extraction": "Exodus 3-1", "insertion": "Hawk 2-2"},
-	"smoke": {"resupply": ["green", "yellow"], "transport": ["green", "blue"], "extraction": ["purple"]},
+	"cooldown_s": {"resupply": 600, "transport": 180, "extraction": 300, "medevac": 240, "cargo": 300},
+	"callsigns": {"resupply": "Mule 1-1", "transport": "Hawk 2-1", "extraction": "Exodus 3-1", "insertion": "Hawk 2-2", "medevac": "Dustoff 4-1", "cargo": "Packhorse 5-1"},
+	"smoke": {"resupply": ["green", "yellow"], "transport": ["green", "blue"], "extraction": ["purple"], "medevac": ["yellow", "green"], "cargo": ["green", "blue"]},
 	"resupply": {
 		"pallet": "supply_pallet",
-		"per_weapon": {"primary": [6, 120], "sidearm": [3, 0]},
-		"fixed": [["ifak", 4], ["pressure_bandage", 6], ["tourniquet", 4], ["frag_grenade", 6], ["smoke_grenade", 4], ["smoke_green", 1], ["smoke_purple", 1]]
+		"_note": "Captain, 2026-10-16: enough for everyone, by role. per_weapon: mags and loose rounds for EACH soldier's weapon; per_head: for each soldier; per_role: extra for a soldier of that role; fixed: once.",
+		"per_weapon": {"primary": [5, 60], "sidearm": [2, 0], "launcher": [2, 0]},
+		"per_head": [["ifak", 1], ["pressure_bandage", 2], ["tourniquet", 1], ["frag_grenade", 2], ["smoke_grenade", 1]],
+		"per_role": {"medic": [["trauma_kit", 1], ["hemostatic_gauze", 4], ["chest_seal", 2], ["splint", 2], ["saline_500", 2], ["iv_18", 2], ["morphine", 2], ["npa", 2],
+				["decompression_needle", 2], ["pelvic_binder", 1], ["pressure_bag", 1], ["surgical_clamp", 2], ["iv_14", 1], ["blood_500", 2], ["hypothermia_blanket", 1]],
+			"grenadier": [["frag_grenade", 2]], "autorifleman": [["smoke_grenade", 1]], "team_leader": [["smoke_green", 1], ["smoke_purple", 1]]},
+		"fixed": [["smoke_green", 1], ["smoke_purple", 1]]
 	}
 }

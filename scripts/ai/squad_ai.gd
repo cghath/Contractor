@@ -2791,6 +2791,50 @@ func _tactic_maneuver(t: Dictionary) -> void:
 		_call_bound()
 
 
+## Breaching (Captain, 2026-10-16: "actually stacking before entry", "add one for breach charges";
+## "they are for making a door"): the op's "breach" goes in before the stack does: "flash" or
+## "frag" thrown BREACH_INSIDE_M through the doorway; "charge" set on the wall beside the stack,
+## CHARGE_ALONG_M from the doorway, blowing a way in of its own (Charges' carve). Returns how long
+## the stack waits for it (0: this man has nothing to breach with; they go in quiet).
+const BREACH_ITEMS := {"flash": &"flashbang", "frag": &"frag_grenade", "charge": &"breaching_charge"}
+const BREACH_WAIT_S := {"flash": 1.6, "frag": 2.5}
+const BREACH_INSIDE_M := 2.5
+const CHARGE_ALONG_M := 2.0
+
+
+func _breach(op: Dictionary) -> float:
+	var how := String(op.get("breach", ""))
+	var item: StringName = BREACH_ITEMS.get(how, &"")
+	if item == &"" or not Vitals.has_item(body.inventory, item):
+		return 0.0
+	var door: Vector3 = op.entrance.door
+	var normal: Vector3 = op.entrance.normal
+	if how == "charge":
+		var charges := Charges.of(body)
+		if charges == null:
+			return 0.0
+		var along := Vector3((op.stack[0] as Vector3).x - door.x, 0.0, (op.stack[0] as Vector3).z - door.z)
+		along = along.normalized() if along.length() > 0.05 else normal.cross(Vector3.UP)
+		var at := door + along * CHARGE_ALONG_M + Vector3.UP * 1.0 + normal * Charges.SURFACE_OFFSET_M
+		charges.server_place_at(body, Transform3D(Basis.looking_at(-normal, Vector3.UP), at))
+		op.entrance.door = door + along * CHARGE_ALONG_M  # in through the new hole
+		return MissionRegistry.setting_f("charge_fuse_s", 10.0) + 0.8
+	if order_throw(item, door - normal * BREACH_INSIDE_M + Vector3.UP * 0.5):
+		return float(BREACH_WAIT_S.get(how, 2.0))
+	return 0.0
+
+
+## The breach this unit's team would choose itself against a building the enemy holds (Captain:
+## "ai may prefer to if enemies are holed up"): a charge if anyone carries one, then a flashbang,
+## then a frag; "" for none.
+static func preferred_breach(units: Array) -> String:
+	for how: String in ["charge", "flash", "frag"]:
+		for ai: SquadAI in units:
+			if Vitals.has_item(ai.body.inventory, BREACH_ITEMS[how]):
+				return how
+	return ""
+
+
 ## Clearing (SquadTactics.clear_op): to this unit's place in the stack, wait for the rest (or
 ## STACK_WAIT_S), then in one after the other ENTRY_GAP_S apart, each to its room corner; then
 ## floor by floor (F-01): once everyone has his corner on this floor (or FLOOR_WAIT_S after the
@@ -2808,9 +2852,14 @@ func _tactic_clear(t: Dictionary, now: float) -> void:
 		_face(door)
 		op.ready[slot] = true
 		op.first_ready_at = minf(float(op.first_ready_at), now)
+		body.want_crouch = true  # low in the stack
 		if (op.ready as Dictionary).size() >= int(op.units) or now - float(op.first_ready_at) >= SquadTactics.STACK_WAIT_S:
-			op.go_at = now
-			_callout(&"tactic", "Going in!")
+			var wait := 0.0
+			if String(op.get("breach", "")) != "" and not op.get("breached", false):
+				op.breached = true
+				wait = _breach(op)
+			op.go_at = now + wait
+			_callout(&"tactic", "Breaching!" if wait > 0.0 else "Going in!")
 		return
 	if now < float(op.go_at) + slot * SquadTactics.ENTRY_GAP_S:
 		_has_destination = false

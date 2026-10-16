@@ -169,6 +169,15 @@ const RAGDOLL_MARGIN_M := 0.4
 ## of it (as wheels would roll over it).
 const RIDE_OVER_AFTER_S := 0.4
 const RIDE_OVER_S := 3.0
+## Hood ornaments (Captain, 2026-10-16: "running over soldiers shouldnt stop vehicles", "i want to
+## be able to acquire some hood ornaments instead of feeling like im nailing a tree every time"):
+## a soldier knocked down by a moving vehicle is flung with it (FLING_FORWARD x its speed, FLING_UP
+## x that upward), and at RUN_OVER_MIN_MS or more any part of a body lying below BUMPER_M (vehicle
+## space, the origin on the ground) is driven over at once instead of holding the vehicle up; what
+## lands higher, on the hood or roof, rides there until it slides off.
+const FLING_FORWARD := 1.05
+const FLING_UP := 0.35
+const BUMPER_M := 0.7
 ## Rounds: how far past a collision box's face the hull's voxels are looked for.
 const PROBE_M := 0.4
 ## Most damage operations one vehicle keeps (net_carves).
@@ -1261,6 +1270,8 @@ func _run_over(s: Soldier, speed: float) -> void:
 	if s.is_ai() and s.vitals.is_up():
 		var side := global_basis.x * signf((s.global_position - global_position).dot(global_basis.x) + 0.001)
 		s.global_position += side * 0.8  # thrown aside
+	if not s.vitals.is_up():
+		Vehicle._fling(s, linear_velocity, speed, 6)  # down: thrown with the vehicle (its ragdoll may start next frame)
 
 
 ## Host: a body wedged under the chassis that holds a driven vehicle still is driven over (its
@@ -1281,6 +1292,11 @@ func _ride_over(speed: float, pushing: bool) -> void:
 		for b in get_colliding_bodies():
 			if Ragdoll.body_of(b) != null:
 				wedged.append(b)
+	if speed >= RUN_OVER_MIN_MS:
+		for b in get_colliding_bodies():
+			if Ragdoll.body_of(b) != null and not _ridden.has(b) and to_local((b as Node3D).global_position).y < BUMPER_M:
+				add_collision_exception_with(b)  # under the bumper at speed: over it, not stopped by it
+				_ridden[b] = now + RIDE_OVER_S
 	_blocked_s = _blocked_s + get_physics_process_delta_time() if not wedged.is_empty() else 0.0
 	if _blocked_s < RIDE_OVER_AFTER_S:
 		return
@@ -1292,6 +1308,23 @@ func _ride_over(speed: float, pushing: bool) -> void:
 				add_collision_exception_with(part)
 				_ridden[part] = now + RIDE_OVER_S
 
+
+## A downed or dead `s` thrown by a vehicle moving at `velocity`: every ragdoll part gets the
+## vehicle's velocity (a bit more) and a lift. The ragdoll may not have started yet: it tries
+## again a few times a moment apart.
+static func _fling(s: Soldier, velocity: Vector3, speed: float, tries: int) -> void:
+	if not is_instance_valid(s) or not s.is_inside_tree():
+		return
+	if not is_instance_valid(s.ragdoll):
+		if tries > 0:
+			s.get_tree().create_timer(0.05).timeout.connect(Vehicle._fling.bind(s, velocity, speed, tries - 1))
+		return
+	if s.ragdoll.frozen:
+		s.ragdoll.unfreeze()
+	for part: Variant in s.ragdoll.parts.values():
+		var rb := part as RigidBody3D
+		if rb:
+			rb.linear_velocity = velocity * FLING_FORWARD + Vector3.UP * speed * FLING_UP + Vector3(randf() - 0.5, randf() * 0.3, randf() - 0.5) * 0.6
 
 func _on_body_entered(body: Node) -> void:
 	var lying := Ragdoll.body_of(body)

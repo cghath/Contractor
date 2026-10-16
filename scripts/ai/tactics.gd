@@ -554,6 +554,10 @@ func _clear(units: Array[SquadAI], aim: Vector3, id: String, now: float) -> void
 			if ai not in base and entry.size() < ENTRY_MAX and (not ai._friendly() or ai.order == Squad.Order.FOLLOW):
 				entry.append(ai)
 		var op := clear_op(b, entry) if not entry.is_empty() else {}
+		if not op.is_empty():
+			op["breach"] = SquadAI.preferred_breach(entry)
+			if op.breach == "charge":
+				Squad.stand_off(op)
 		plan = {"base": base, "entry": entry, "op": op}
 		if not op.is_empty():
 			print("[tactics] %s: %s stack at (%.0f, %.0f) to clear %d room(s), %s cover" % [squad.name, _names(entry),
@@ -598,6 +602,30 @@ func _search(units: Array[SquadAI], enemy: Vector3, id: String, now: float) -> v
 ## `enemy` is the base). The autorifleman stays with the base whatever his team. Returns
 ## [base, maneuver]; with nobody to spare the maneuver element is empty.
 static func elements(units: Array, enemy: Vector3) -> Array:
+	# A fire team a player leads is his to move (Captain, 2026-10-15: the AI sent a human-led B
+	# team to flank while he held): its AI stay with the base of fire, by him; only all-AI teams
+	# (or pairs) maneuver.
+	var human_teams := {}
+	if not units.is_empty():
+		for p: Soldier in MapNodes.players((units[0] as SquadAI).body):
+			if p.faction == (units[0] as SquadAI).body.faction and p.fire_team >= 0:
+				human_teams[p.fire_team] = true
+	var held: Array = []
+	var free_units: Array = []
+	for ai: SquadAI in units:
+		if human_teams.has(ai.body.fire_team):
+			held.append(ai)
+		else:
+			free_units.append(ai)
+	if not held.is_empty():
+		var split := elements_ai(free_units, enemy)
+		(split[0] as Array).append_array(held)
+		return split
+	return elements_ai(units, enemy)
+
+
+## elements for units no player leads.
+static func elements_ai(units: Array, enemy: Vector3) -> Array:
 	var teams := {}
 	var loose: Array = []
 	for ai: SquadAI in units:
