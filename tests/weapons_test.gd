@@ -163,6 +163,55 @@ func _test_models() -> void:
 		"both bolt-action snipers only cycle between shots")
 	check(VoxelArt.model_for(ItemDB.get_item(&"akm")).contains(":irons:") and VoxelArt.model_for(ItemDB.get_item(&"pkm")).contains(":irons:"),
 		"an AK or MG with no rail shows iron sights, not a dead red-dot block (%s)" % VoxelArt.model_for(ItemDB.get_item(&"akm")))
+	# Captain, 2026-10-16 (v0.4.26 on the ground: "the 249 is just missing a lot of its model"):
+	# every gun is one solid piece, whatever sits on it (irons, an optic, a suppressor), with no
+	# part floating free of the rest.
+	for id: String in GUNS.keys() + ["m4a1", "m27"]:
+		var parts := VoxelArt.model_for(ItemDB.get_item(StringName(id))).split(":")
+		for art: String in ["irons", "dot", "holo", "lpvo", "scope_long"]:
+			for sup: String in ["", "sup"]:
+				var model := "%s:%s:%s:%s:%s" % [parts[0], parts[1], art, parts[3], sup]
+				var pieces := _pieces(model)
+				check(pieces.size() == 1, "%s is one solid piece (%s: %s)" % [id, model, pieces])
+
+
+## The separate (face-connected) pieces of model `model`'s voxels: each one's voxel count and
+## bounding box, in the spec's voxels.
+func _pieces(model: String) -> Array:
+	var spec := VoxelArt._spec(model)
+	var s: int = spec.get("sub", 1)
+	var buffer := VoxelArt._rasterize(spec, "multicam", 0)
+	var size := buffer.get_size()
+	var seen := PackedByteArray()
+	seen.resize(size.x * size.y * size.z)
+	var out: Array = []
+	for z in size.z:
+		for y in size.y:
+			for x in size.x:
+				var start := Vector3i(x, y, z)
+				if seen[(z * size.y + y) * size.x + x] or buffer.get_voxel(x, y, z, VoxelBuffer.CHANNEL_COLOR) == VoxelArt.C.EMPTY:
+					continue
+				var count := 0
+				var lo := start
+				var hi := start
+				var stack: Array[Vector3i] = [start]
+				seen[(z * size.y + y) * size.x + x] = 1
+				while not stack.is_empty():
+					var p: Vector3i = stack.pop_back()
+					count += 1
+					lo = lo.min(p)
+					hi = hi.max(p)
+					for d: Vector3i in [Vector3i.LEFT, Vector3i.RIGHT, Vector3i.UP, Vector3i.DOWN, Vector3i.FORWARD, Vector3i.BACK]:
+						var q := p + d
+						if q.x < 0 or q.y < 0 or q.z < 0 or q.x >= size.x or q.y >= size.y or q.z >= size.z:
+							continue
+						var i := (q.z * size.y + q.y) * size.x + q.x
+						if seen[i] or buffer.get_voxel(q.x, q.y, q.z, VoxelBuffer.CHANNEL_COLOR) == VoxelArt.C.EMPTY:
+							continue
+						seen[i] = 1
+						stack.append(q)
+				out.append("%d vox y %.2f-%.2f z %.2f-%.2f" % [count, (lo.y - 1) / float(s), hi.y / float(s), (lo.z - 1) / float(s), hi.z / float(s)])
+	return out
 
 
 func _test_fire_and_reload(id: String) -> void:

@@ -367,6 +367,10 @@ func _launch_qrf() -> void:
 	var bases := _living_sites("qrf_base", lkp)
 	if bases.is_empty():
 		return  # a destroyed QRF base sends no waves
+	var command := EnemyCommand.of(self)
+	if command and not command.approve("qrf", lkp):
+		_last_qrf = now()  # turned down: asked again after QRF_RELAUNCH_S, not every report
+		return
 	var from: Array[ZoneModule] = [bases[0]]
 	if tier >= 2:
 		var hq := _hq()
@@ -481,6 +485,10 @@ func _tick_hunters(tier: int) -> void:
 ## first if it's coordinated enough, then the position and a search round it. Waits (tries again
 ## next tick) while every way out is in sight.
 func _send_hunters(lkp: Vector3, radius: float) -> void:
+	var command := EnemyCommand.of(self)
+	if command and not command.approve("hunters", lkp):
+		_last_hunter = now()  # turned down: asked again after HUNTER_GAP_S
+		return
 	var c := coordination()
 	var origin := _hunter_origin(lkp)
 	if not origin.is_finite():
