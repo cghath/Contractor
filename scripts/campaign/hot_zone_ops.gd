@@ -14,6 +14,7 @@ extends Node
 ##   comes in FOLLOW_UP_DELAY_S later, at the nearest live site of those types no other
 ##   contract holds, at most MAX_FOLLOW_UPS a deployment and FOLLOW_UP_GAP_S apart. It needs
 ##   a field radio in the squad (Contracts.radio_contract_problem): without one it waits.
+##   The enemy's commander killed (EnemyCommand.commander_down) sets one off too ("commander").
 ## - Hazard pay: staying longer pays more (Captain). The highest Pressure tier reached is
 ##   noted on the deployment ("hazard_tier") and every contract completed there pays
 ##   HAZARD_SHARE_PER_TIER of its pay per tier on top (DebriefCalc).
@@ -46,6 +47,8 @@ const FOLLOW_UPS := {
 		"line": "The road's open. The %s past it holds their plans: take them."},
 	"hq": {"sites": ["qrf_base", "outpost", "comms"], "types": ["raid"],
 		"line": "Their command is gone. Clear the %s before they regroup."},
+	"commander": {"sites": ["qrf_base", "outpost", "comms"], "types": ["raid"],
+		"line": "Their commander's dead and they're blind for a while. Hit the %s before his deputy gets a grip."},
 	"contract": {"sites": ["outpost", "comms", "qrf_base", "checkpoint", "hq"], "types": [],
 		"line": "Good work. While you're in there: the %s."},
 }
@@ -64,6 +67,7 @@ var queue: Array[Dictionary] = []
 var _seen := {}        # module id or "cid:<cid>" -> true: already set one off
 var _last_follow := -INF
 var _scan := 0.0
+var _command: EnemyCommand
 
 
 func _init() -> void:
@@ -140,9 +144,27 @@ func _process(delta: float) -> void:
 func server_tick() -> void:
 	if not multiplayer.is_server() or not enabled or not _deployed_here():
 		return
+	_hook_command()
 	_watch_sites()
 	_watch_contracts()
 	_send_due()
+
+
+## EnemyCommand comes in after this node (ZoneLevel): hooked on the first tick.
+func _hook_command() -> void:
+	if _command and is_instance_valid(_command):
+		return
+	_command = level.get_node_or_null(^"EnemyCommand") as EnemyCommand if level else null
+	if _command and not _command.commander_down.is_connected(_on_commander_down):
+		_command.commander_down.connect(_on_commander_down)
+
+
+func _on_commander_down(deputy: bool) -> void:
+	if deputy or _seen.has("commander"):
+		return
+	_seen["commander"] = true
+	var hq := _command._hq_module()
+	_queue("commander", hq.module_id if hq else "", hq.global_position if hq else Vector3.ZERO)
 
 
 func _deployed_here() -> bool:

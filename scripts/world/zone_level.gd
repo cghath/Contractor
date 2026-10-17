@@ -594,13 +594,15 @@ func _garrison_callsign(module: ZoneModule, i: int) -> String:
 	return ("%s_H%d" % [module.module_id, i + 1]).validate_node_name()
 
 
-## Host: module `module_id`'s garrison still up (spawned and alive).
+## Host: module `module_id`'s garrison still up (spawned and alive; men EnemyCommand put back on
+## a retaken site count too: meta "garrison_of").
 func garrison_alive(module_id: String) -> int:
 	var prefix := ("%s_H" % module_id).validate_node_name()
 	var count := 0
 	for n in ai.get_children():
 		var s := n as Soldier
-		if s and String(s.name).begins_with(prefix) and not s.is_queued_for_deletion() and s.vitals.is_up() \
+		if s and (String(s.name).begins_with(prefix) or String(s.get_meta(&"garrison_of", "")) == module_id) \
+				and not s.is_queued_for_deletion() and s.vitals.is_up() \
 				and not s.is_in_group(Soldier.DEAD_GROUP):
 			count += 1
 	return count

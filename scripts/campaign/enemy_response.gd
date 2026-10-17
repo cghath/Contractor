@@ -463,7 +463,7 @@ func _tick_hunters(tier: int) -> void:
 		if living.is_empty():
 			continue
 		teams += 1
-		if not lk.is_empty() and now() >= float(team.retarget_at):
+		if not lk.is_empty() and now() >= float(team.retarget_at) and not team.get("recalled", false):  # EnemyCommand called it home
 			team.retarget_at = now() + HUNTER_RETARGET_S / c
 			var route: Array[Vector3] = [_ground(lk.pos)]
 			route.append_array(_search_ring(lk.pos, float(lk.radius)))
@@ -583,6 +583,9 @@ func _reinforce_sites() -> void:
 		var from := _unseen_gate(hq, m.global_position)
 		if not from.is_finite():
 			break  # the HQ is watched: no one leaves it this round
+		var command := EnemyCommand.of(self)
+		if command and not command.request_men(2, "pair to %s" % m.module_id):
+			break  # the commander says no (reserves, consolidating, or nobody in command)
 		sent += 1
 		var k := reinforcement_pairs.size() + 1
 		var callsign := ("%s_HR%d" % [m.module_id, k]).validate_node_name()
