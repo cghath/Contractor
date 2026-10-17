@@ -62,6 +62,8 @@ func _ready() -> void:
 	await _shot(camera, out, "exo_leg_closeup", player.global_position + Vector3(-0.35, 0.55, 0.9), player.global_position + Vector3(-0.1, 0.5, 0.0))
 	await _shot(camera, out, "exo_arms_closeup", c + Vector3(0.0, -0.1, -1.0), c + Vector3(0, -0.2, 0))
 	await _shot(camera, out, "exo_arms_side", c + Vector3(-1.0, -0.1, -0.3), c + Vector3(0, -0.2, 0))
+	await _shot(camera, out, "exo_shoulder_closeup", c + Vector3(0.9, 0.3, -0.9), c + Vector3(0.22, 0.28, 0.0))
+	await _shot(camera, out, "exo_shoulder_front", c + Vector3(0.0, 0.3, -1.1), c + Vector3(0.1, 0.3, 0.0))
 
 	# Disable the frame (run it to 0 hp) and shoot the same set again: the light goes red.
 	ExoFrame.server_damage(player, 1000.0)

@@ -11,6 +11,42 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Near-future hardware: VTOL dropship, VT-14/Razorback tiers, light exosuit (Captain, 2026-10-16)
+
+Design doc: [docs/near_future_hardware.md](docs/near_future_hardware.md). Contractor's setting is
+near-future sci-fi, not present-day only (Captain, 2026-10-16) — this is the first deliberate
+near-future content, learned from *Call of Duty: Advanced Warfare*'s Warbird/Goliath reference art
+the way `movement_rules.gd` learns from Tarkov's inertia; no COD:AW trademarked name ships.
+
+#### Added
+- VT-14 Petrel: a twin-ducted-rotor VTOL (`vtol_petrel`) replaces the UH-60M Black Hawk for every
+  player-faction support call (resupply, transport, extraction, medevac, cargo). Flies through the
+  existing generic `Helicopter` class unchanged (J-hook landing, contour flight) — new stats and
+  voxel art only, no new propulsion physics. The UH-60 stays in the game as world content (rescue
+  wrecks). Walk-in cabin, toggleable bay doors, folding boarding ramps, FFV door seats for players
+  and AI gunners.
+- Razorback VTOL (`vtol_razorback`, Captain's own name): a bigger, higher-capacity second VTOL
+  tier, same bay/door/ramp/FFV treatment as the Petrel.
+- LX-3 Assist Frame (`exo_frame_light`): the first exosuit tier, a new `exo` inventory slot worn
+  over the vest/plates/pack (armor untouched). Working, it carries 30 kg of the load (speed/
+  stamina see that much less load). Its struts can take rounds (into an arm/leg, or the spine pack
+  from behind): worn down, it's disabled — no assist, full load back on the legs, its status light
+  red instead of green. Its struts, hinges, cuffs, spine pack and shoulder pylons are drawn on the
+  body (`ExoFrame`, `GearRig`).
+- `tests/vtol_shots.gd`, `tests/exo_shots.gd` and `tests/shot_window.gd`: windowed screenshot
+  scripts for vehicle/gear art that never take focus or the mouse (`ShotWindow.stay_out_of_the_way`),
+  safe to run alongside someone else at the keyboard; `--headless` runs the same script as a quick
+  sanity check with no window.
+
+#### Changed
+- Landing-zone ground clearance is now per-model (`LandingZone.clear_for`), not one constant: the
+  Petrel's ducted pods clear the ground at 8.0 m, tighter than the UH-60's 9.5 m.
+
+Suites: `vtol_shots`/`bay`/`heliflight`/`exo`/`mantle`/`smoke`/`armor` green. `vehicles` has 3
+pre-existing failures unrelated to this work (none of the touched files differ from `dev`): 2
+stale sound-name assertions fixed in this pass; one open-bed hit check diagnosed but left for a
+follow-up (diagonal shot vs. the technical's bed wall geometry, not a VTOL/exo regression).
+
 ### MG/AR silhouettes, bolt-action snipers, suppressors (Captain, 2026-10-16)
 
 #### Changed

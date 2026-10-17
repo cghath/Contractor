@@ -132,6 +132,10 @@ static func dress(model: CharacterModel, item: ItemData, disabled: bool, layers:
 		var shin := model.part_node(Vitals.SHIN_R if r else Vitals.SHIN_L)
 		_box(upper, Vector3(0.025, 0.26, 0.035), Vector3(side * 0.072, -0.15, 0.0), STRUT, layers)
 		_box(upper, Vector3(0.05, 0.05, 0.05), Vector3(side * 0.072, -0.31, 0.0), JOINT, layers)  # elbow hinge
+		# Captain, 2026-10-16 ("connected arm to shoulder"): a shoulder joint housing at the arm's
+		# own pivot (part_node's origin), so it always sits at the joint as the arm swings, bridging
+		# the upper-arm strut up to the torso-mounted pylon above it.
+		_box(upper, Vector3(0.065, 0.09, 0.065), Vector3(side * 0.072, 0.02, 0.0), JOINT, layers)
 		_box(fore, Vector3(0.022, 0.19, 0.03), Vector3(side * 0.066, -0.11, 0.0), STRUT, layers)
 		_box(fore, Vector3(0.09, 0.03, 0.09), Vector3(0.0, -0.2, 0.0), JOINT, layers)  # wrist cuff
 		_box(thigh, Vector3(0.06, 0.06, 0.06), Vector3(side * 0.1, -0.02, 0.0), JOINT, layers)  # hip joint
@@ -139,13 +143,18 @@ static func dress(model: CharacterModel, item: ItemData, disabled: bool, layers:
 		_box(thigh, Vector3(0.06, 0.06, 0.06), Vector3(side * 0.1, -0.45, 0.0), JOINT, layers)  # knee hinge
 		_box(shin, Vector3(0.03, 0.38, 0.04), Vector3(side * 0.095, -0.22, 0.0), STRUT, layers)
 		_box(shin, Vector3(0.12, 0.035, 0.14), Vector3(0.0, -0.4, 0.0), JOINT, layers)  # ankle cuff
-		# Shoulder actuator pylon, up over the shoulder from the spine pack.
-		_box(model.torso, Vector3(0.05, 0.16, 0.05), Vector3(side * 0.14, 0.57, 0.19), STRUT, layers)
-		_box(model.torso, Vector3(0.06, 0.04, 0.12), Vector3(side * 0.14, 0.64, 0.14), JOINT, layers)
-		# Captain, 2026-10-16 ("we need links for the shoulders to the back"): a yoke bridging the
-		# pylon's base in to the spine pack's shoulder - without it the pylon reads as a floating,
-		# disconnected piece.
-		_box(model.torso, Vector3(0.09, 0.05, 0.06), Vector3(side * 0.1, 0.49, 0.195), STRUT, layers)
+		# Shoulder actuator pylon, up over the shoulder from the spine pack. Captain, 2026-10-16
+		# ("these weird things V", a screenshot of the old strut+cap reading as a disconnected V):
+		# one straight column, its base overlapping the pack and its cap stacked directly on top
+		# (same footprint, no forward jut) rather than two misaligned pieces.
+		_box(model.torso, Vector3(0.1, 0.26, 0.08), Vector3(side * 0.09, 0.4, 0.195), STRUT, layers)
+		_box(model.torso, Vector3(0.11, 0.035, 0.09), Vector3(side * 0.09, 0.535, 0.195), JOINT, layers)
+		# Captain, 2026-10-16 ("way better but we still need something that goes from the shoulder
+		# point to the back"): a strap over the top of the shoulder, from the pylon down to the
+		# front of the chest - on the torso (not the arm), so it reads right in any arm pose, the
+		# way a real backpack strap rests on the shoulder rather than binding to the arm itself.
+		_box(model.torso, Vector3(0.07, 0.05, 0.22), Vector3(side * 0.08, 0.57, 0.08), STRUT, layers)
+		_box(model.torso, Vector3(0.06, 0.16, 0.055), Vector3(side * 0.08, 0.47, -0.04), STRUT, layers)
 	# Spine power pack, the hip belt round the waist, the status light.
 	_box(model.torso, Vector3(0.16, 0.36, 0.07), Vector3(0.0, 0.3, 0.2), JOINT, layers)
 	_box(model.torso, Vector3(0.12, 0.3, 0.02), Vector3(0.0, 0.3, 0.237), STRUT, layers)

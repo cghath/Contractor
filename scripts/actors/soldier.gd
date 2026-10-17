@@ -913,6 +913,13 @@ func server_squad_command(cmd: String, point: Vector3, names: PackedStringArray)
 	var squad := CompoundLevel.current(self).squad_for(faction)
 	if squad == null:
 		return
+	# Support calls (helicopters, AAVs) aren't fire-team orders - they name no squadmates, so the
+	# "a team lead orders his own team" narrowing below doesn't apply: a lone team lead (his own
+	# team's other members dead or not yet a member, e.g. a client who just joined) would have
+	# team_names come back empty and his own resupply/transport/extraction call silently dropped.
+	if cmd.begins_with("support:"):
+		_squad_command_as(squad, cmd, point, names)
+		return
 	var own_team := squad.human_team_lead_of(self)
 	if own_team >= 0:
 		# A human team leader orders his own fire team and doesn't take the squad's lead.
