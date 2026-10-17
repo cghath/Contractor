@@ -113,6 +113,7 @@ func _ready() -> void:
 	add_child(IntelReveal.new())  # intel picked up gives away enemy sites on the map
 	if String(def.get("kind", "")) == "hot":
 		add_child(HotZoneOps.new())  # several contracts live, radio follow-ups, hazard pay
+		add_child(EnemyCommand.new())  # the enemy's high command: what it sends, and whether (docs/enemy_high_command.md)
 		if DevTools.on():
 			add_child(HotZoneDebug.new())  # playtests: PgUp readout, PgDn skips the enemy's clock
 	Contracts.contract_live.connect(_on_contract_live)
