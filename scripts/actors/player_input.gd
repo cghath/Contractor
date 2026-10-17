@@ -733,7 +733,8 @@ func _update_view_model() -> void:
 	var weapon := body.active_weapon()
 	var id: StringName = weapon.id if weapon and body.inventory.hands == &"" and not nade_up else &""
 	var art := VoxelArt.model_for(weapon, body.inventory.state_of(body.active_slot)) if id != &"" else ""  # its optic (P0362)
-	var key := StringName("%s|%s|%s|%s|%s|%s" % [id, art, body.left_handed, body.model.variant, body.model.body, throwable if nade_up else &""])
+	var frame := ExoFrame.worn(body.inventory)  # its forearm armour shows in first person too
+	var key := StringName("%s|%s|%s|%s|%s|%s|%s" % [id, art, body.left_handed, body.model.variant, body.model.body, throwable if nade_up else &"", frame.id if frame else &""])
 	if key == _view_model_id:
 		return
 	_view_model_id = key
@@ -763,6 +764,7 @@ func _update_view_model() -> void:
 		var across := up.cross(Vector3.BACK).normalized() if absf(up.dot(Vector3.BACK)) < 0.95 else Vector3.RIGHT
 		var basis := Basis(across, up, across.cross(up)).orthonormalized()
 		forearm.transform = Transform3D(basis.scaled(Vector3.ONE * palm.distance_to(elbow) / CharacterModel.FOREARM), elbow)
+		ExoFrame.dress_view_forearm(forearm, frame, (hand[1] == VIEW_FIRING_ELBOW) != body.left_handed, GearRig.armor_color_for(body.model.variant))
 		body.view_model.add_child(forearm)
 
 
@@ -783,6 +785,7 @@ func _build_nade_view() -> void:
 	var across := up.cross(Vector3.BACK).normalized()
 	var basis := Basis(across, up, across.cross(up)).orthonormalized()
 	forearm.transform = Transform3D(basis.scaled(Vector3.ONE * palm.distance_to(elbow) / CharacterModel.FOREARM), elbow)
+	ExoFrame.dress_view_forearm(forearm, ExoFrame.worn(body.inventory), not body.left_handed, GearRig.armor_color_for(body.model.variant))
 	body.view_model.add_child(forearm)
 
 

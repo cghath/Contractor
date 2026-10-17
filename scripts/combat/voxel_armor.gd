@@ -87,16 +87,16 @@ func setup(p_item: ItemData, p_slot: StringName, p_inventory: Inventory, render_
 	apply_damage([])
 
 
-## An undamaged mesh of the piece, positioned so its pivot is at the origin. Also used to
-## show armor lying in the world.
-static func make_mesh_instance(p_item: ItemData, render_layers := 1) -> MeshInstance3D:
+## An undamaged mesh of the piece, positioned so its pivot is at the origin, under `cover`
+## (alpha 0: none). Also used to show armor lying in the world, and an exo pad in first person.
+static func make_mesh_instance(p_item: ItemData, render_layers := 1, cover := Color(0, 0, 0, 0)) -> MeshInstance3D:
 	var base := _get_base(p_item)
 	var mesh_instance := MeshInstance3D.new()
 	mesh_instance.material_override = _get_material()
 	mesh_instance.layers = render_layers
 	mesh_instance.scale = Vector3.ONE * VOXEL_SIZE
 	mesh_instance.position = -base.pivot * VOXEL_SIZE
-	mesh_instance.mesh = _get_mesher(p_item).build_mesh(base.buffer, [])
+	mesh_instance.mesh = _get_mesher(p_item, cover).build_mesh(base.buffer, [])
 	return mesh_instance
 
 

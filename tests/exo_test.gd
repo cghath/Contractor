@@ -62,6 +62,10 @@ func _run() -> bool:
 	var parts := _parts()
 	check(parts.size() >= 25, "its struts, hinges, cuffs, spine pack and pylons are on the body (%d parts)" % parts.size())
 	check(_light_is(ExoFrame.LIGHT_ON), "the status light is green")
+	inv.take(&"m4a1")
+	await _frames(3)
+	var fp := player.view_model.find_children(ExoFrame.PART_NAME + "*", "", true, false).filter(func(n: Node) -> bool: return not n.is_queued_for_deletion())
+	check(fp.size() >= 8, "first person: the forearm armour, struts and cuffs on the view model's arms (%d parts)" % fp.size())
 	await _test_pads()
 	# Struck in the thigh.
 	ExoFrame.roll_override = 0.0
