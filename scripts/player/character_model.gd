@@ -601,6 +601,13 @@ func is_seated() -> bool:
 	return bool(pose.get("seated", false))
 
 
+## Seated in a fire-from-vehicle seat (Vehicle._seated_pose_for "ffv"; Captain, 2026-10-17:
+## "characters sit in the ffv seats like this", "scopes dont work in ffv"): the weapon is held
+## and aimed as standing (head, hands and sights follow the look), only the legs sit.
+func is_ffv() -> bool:
+	return is_seated() and bool(pose.get("ffv", false))
+
+
 ## Seated: how far the hip joint is above the floor (GearRig keeps a rifle's muzzle off it).
 func seat_room() -> float:
 	return float(pose.get("hip", SEAT_HEIGHT)) - float(pose.get("floor", 0.0))
@@ -1191,7 +1198,7 @@ func _process(frame_delta: float) -> void:
 		_aim_w = move_toward(_aim_w, 1.0 if aiming and _held_weapon and is_instance_valid(_held) else 0.0, delta * 6.0)
 		head.rotation.x = clampf(look_pitch, -0.7, 0.7) * 0.8 - lean - AIM_HEAD_DIP * smoothstep(0.0, 1.0, _aim_w)
 		hands_anchor.rotation.x = clampf(look_pitch, -0.8, 0.8) * 0.8 - lean
-		if seated:
+		if seated and not is_ffv():
 			# The rifle stands between the knees whichever way he looks; slumped, the head hangs.
 			hands_anchor.rotation.x = 0.0
 			if downed:
@@ -1663,7 +1670,7 @@ func _held_goals() -> Array:
 		return _seat_hands() if is_seated() else [["swing", null], ["swing", null]]
 	var key := "held:%d" % _held.get_instance_id()
 	var support := _support
-	if is_seated() and _held_weapon:
+	if is_seated() and not is_ffv() and _held_weapon:
 		support = _grip + Vector3(0, 0.03, 0.11)  # the rifle stood up: the support hand over the firing hand
 	if reloading:
 		# Hand drops under the receiver and works the magazine.

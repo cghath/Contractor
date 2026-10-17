@@ -195,7 +195,7 @@ static func mark_step(px: float, reach := 0.0) -> float:
 func _active() -> bool:
 	var weapon := body.active_weapon()
 	return body.is_aiming and weapon != null and weapon.type == "weapon" and not Launchers.is_launcher(weapon) \
-		and not is_instance_valid(body.vehicle)
+		and (not is_instance_valid(body.vehicle) or body.vehicle.ffv_seat(body))  # a fire-from-vehicle seat: the scope's glass too (Captain, 2026-10-17: "scopes dont work in ffv")
 
 
 func _process(_delta: float) -> void:

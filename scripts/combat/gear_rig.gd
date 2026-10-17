@@ -1000,7 +1000,7 @@ static func seated_transform(art: String, left: bool, room: float) -> Transform3
 
 ## Where the weapon in the hands goes now: seated, aiming or at the ready.
 func _hold_goal(art: String) -> Transform3D:
-	if model.is_seated():
+	if model.is_seated() and not model.is_ffv():
 		return seated_transform(art, model.left_handed, model.seat_room())
 	return held_transform(art, model.aiming, model.left_handed, model.twist_shown())
 
