@@ -106,9 +106,12 @@ func _test_thin_walls() -> void:
 		and world.holes_through(Vector3(17.05, 1.35, -7.05)) == 1 and world.holes_through(Vector3(17.05, 1.35, -10.95)) == 1,
 		"no whole 10 cm voxel knocked out: the planks are still there, one round through each")
 	var ops := GameState.voxel_edits.slice(edits).map(func(e: Dictionary) -> String: return e.op)
-	check(ops == ["shot", "shot"], "two shots in the edit log (%s)" % [ops])
-	var hole_size := float(GameState.voxel_edits[-1].d) * VoxelWorld.HOLE_DECAL_SCALE
-	check(absf(float(GameState.voxel_edits[-1].d) - 0.0057) < 0.0001 and hole_size < 0.02, "the hole's core is the 5.56's diameter (%.1f mm), the decal %.1f cm" % [float(GameState.voxel_edits[-1].d) * 1000.0, hole_size * 100.0])
+	var shots := GameState.voxel_edits.slice(edits).filter(func(e: Dictionary) -> bool: return e.op == "shot")
+	check(shots.size() == 2 and ops.all(func(op: String) -> bool: return op in ["shot", "mark"]),
+		"two penetration records, with any downstream impact marks (%s)" % [ops])
+	var calibre: float = float(shots.back().get("d", 0.0)) if not shots.is_empty() else 0.0
+	var hole_size := calibre * VoxelWorld.HOLE_DECAL_SCALE
+	check(absf(calibre - 0.0057) < 0.0001 and hole_size < 0.02, "the hole's core is the 5.56's diameter (%.1f mm), the decal %.1f cm" % [calibre * 1000.0, hole_size * 100.0])
 	for i in VoxelWorld.HOLES_TO_BREAK[VoxelWorld.Mat.WOOD] - 1:
 		_fire(Vector3(17.05, 1.35, -3), Vector3(17.05, 1.35, -6), &"m4a1")
 	check(world.material_at(Vector3(17.05, 1.35, -7.05)) == VoxelWorld.Mat.EMPTY and world.material_at(Vector3(17.25, 1.35, -7.05)) == VoxelWorld.Mat.WOOD,
