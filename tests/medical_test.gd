@@ -135,7 +135,9 @@ func _test_bandage_and_gauze() -> void:
 	_wound(v, Vitals.NECK, "junctional", 0.8, &"common_carotid_l")
 	check(v.care_needed()[0].item == &"hemostatic_gauze" and v.care_needed()[0].part == Vitals.NECK, "a junctional bleed asks for gauze")
 	check(not v.server_apply_treatment(&"pressure_bandage", Vitals.NECK), "a bandage doesn't fix it")
-	check(v.server_apply_treatment(&"hemostatic_gauze", Vitals.NECK) and v.bleed_rate() == 0.0 and v.wound_list()[0].packed, "gauze packs it")
+	check(v.server_apply_treatment(&"hemostatic_gauze", Vitals.NECK) and is_equal_approx(v.bleed_rate(), 0.8 * WoundModel.NECK_LEAK)
+		and v.wound_list()[0].packed, "gauze packs a massive neck wound, leaving its defined residual bleed")
+	check(v.server_apply_treatment(&"surgical_clamp", Vitals.NECK) and v.bleed_rate() == 0.0, "a clamp stops the remaining massive neck bleed")
 	v.server_reset_health()
 	_wound(v, Vitals.ABDOMEN, "internal", 1.5, &"aorta")
 	check(v.care_needed().map(func(t: Dictionary) -> StringName: return t.item) == [&"surgical_clamp"], "internal bleeding: only a surgery kit's clamp")
@@ -1262,6 +1264,10 @@ func _test_menu_and_removal() -> void:
 	_wound(casualty.vitals, Vitals.THIGH_L, "arterial", 1.2, &"femoral_l")
 	casualty.vitals.server_damage(70.0)  # 42% lost: down
 	await _frames(2)
+	# Earlier treatments may have left the casualty at its ragdoll's resting place.
+	# Stand beside the visible body before testing the menu's item progression.
+	var at := casualty.body_point()
+	player.global_position = Vector3(at.x, SPOT.y, at.z + 1.0)
 	var treat := _action(player, casualty, &"treat")
 	var labels: Array = treat.get("items", []).map(func(e: Dictionary) -> String: return e.label)
 	check(labels.size() >= 3 and labels[0] == "Tourniquet, left thigh" and labels[1] == "Tourniquet (rushed, 1.5 s), left thigh" and labels[2] == "NPA Airway, head",
@@ -1275,7 +1281,11 @@ func _test_menu_and_removal() -> void:
 	labels = _action(player, casualty, &"treat").items.map(func(e: Dictionary) -> String: return e.label)
 	check(labels.has("Hemostatic Gauze (pack under tourniquet), left thigh") and not labels.any(func(l: String) -> bool: return l.begins_with("Remove")),
 		"tourniquet on: packing offered, no removal yet (%s)" % [labels])
-	var pack: Dictionary = _action(player, casualty, &"treat").items.filter(func(e: Dictionary) -> bool: return e.label.begins_with("Hemostatic"))[0]
+	var packing: Array = _action(player, casualty, &"treat").items.filter(func(e: Dictionary) -> bool: return e.label.begins_with("Hemostatic"))
+	if packing.is_empty():
+		_reset(casualty)  # the progression assertion above failed; keep later sections independent
+		return
+	var pack: Dictionary = packing[0]
 	InteractionMenu.perform(player, pack)
 	await _seconds(8.2)
 	var remove: Array = _action(player, casualty, &"treat").items.filter(func(e: Dictionary) -> bool: return e.id == &"remove_tourniquet")
@@ -1481,6 +1491,15 @@ func _test_menu_prefers_living() -> void:
 	var start := Time.get_ticks_msec()
 	while not (is_instance_valid(body.ragdoll) and body.ragdoll.frozen) and Time.get_ticks_msec() - start < 8000:
 		await get_tree().physics_frame
+	# Keep both actual bodies within treatment reach after they settle, even when a
+	# ragdoll slid away from its capsule. Retain the nearer-to-crosshair dead body.
+	var living_at := casualty.body_point()
+	var shift := living_at + Vector3(0.7, 0, 0.5) - body.body_point()
+	body.global_position += Vector3(shift.x, 0, shift.z)
+	for frame in 2:
+		await get_tree().physics_frame
+	player.global_position = Vector3(living_at.x, SPOT.y, living_at.z + 1.5)
+	check(player._in_treat_reach(casualty) and player._in_treat_reach(body), "both settled bodies are in treatment reach")
 	var aim := body.body_point()
 	player.look_at(Vector3(aim.x, player.global_position.y, aim.z), Vector3.UP)
 	await _frames(1)
