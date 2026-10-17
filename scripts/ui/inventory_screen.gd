@@ -17,11 +17,11 @@ extends Control
 const SLOT_NAMES := {
 	&"primary": "Primary", &"sidearm": "Sidearm", &"helmet": "Helmet", &"vest": "Carrier",
 	&"backpack": "Backpack", &"plate_front": "Front plate", &"plate_back": "Back plate",
-	&"plate_left": "Left plate", &"plate_right": "Right plate", &"launcher": "Launcher",
+	&"plate_left": "Left plate", &"plate_right": "Right plate", &"launcher": "Launcher", &"exo": "Exo frame",
 }
 ## Slots down each side of the soldier: every slot in Inventory.SLOTS has a tile (audit A2-06:
 ## the launcher had none). The launcher sits under the pack it's slung beside.
-const LEFT_SLOTS: Array[StringName] = [&"helmet", &"vest", &"backpack", &"launcher", &"plate_left"]
+const LEFT_SLOTS: Array[StringName] = [&"helmet", &"vest", &"backpack", &"launcher", &"plate_left", &"exo"]
 const RIGHT_SLOTS: Array[StringName] = [&"primary", &"sidearm", &"plate_front", &"plate_back", &"plate_right"]
 ## How far the ground panel looks for items (metres): about the interaction reach.
 const NEARBY_M := Soldier.INTERACT_RANGE + 0.8
@@ -641,6 +641,8 @@ func _slot_tile(slot: StringName) -> Control:
 	var readout := _condition(item, inv.state_of(slot))
 	if slot == &"vest":
 		readout = "%d / %d attached" % [inv.attachment_count(), inv.attach_points().size()]
+	elif slot == ExoFrame.SLOT:
+		readout = ExoFrame.summary(inv).trim_prefix("Frame ")  # its integrity, or DISABLED
 	return _tile(src, item.name, readout if readout != "" else "%.1f kg" % item.mass_kg, id, "", SLOT_NAMES[slot], true)
 
 

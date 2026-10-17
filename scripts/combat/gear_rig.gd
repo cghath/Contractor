@@ -171,6 +171,9 @@ func armor_integrity(slot: StringName) -> float:
 ## left, a ceramic plate's cracks or "shattered"); "" with no armor.
 func armor_summary(separator := "  ") -> String:
 	var parts := PackedStringArray()
+	var frame := ExoFrame.summary(inventory)
+	if frame != "":
+		parts.append(frame)
 	for slot: StringName in ARMOR_SLOTS:
 		var integrity := armor_integrity(slot)
 		if integrity < 0.0:
@@ -218,7 +221,8 @@ func _rebuild() -> void:
 	_fit_front_panel(carrier)
 	var pack: StringName = inventory.slots[&"backpack"]
 	var pack_size := VoxelArt.size_m(VoxelArt.model_for(ItemDB.get_item(pack))) if pack != &"" else Vector3.ZERO
-	_pack_rest = carrier_fit("back") * Transform3D(Basis.IDENTITY, Vector3(0, PACK_CENTRE_Y, 0.165 + pack_size.z * 0.5))
+	var spine := EXO_SPINE_DEPTH if inventory.slots.get(ExoFrame.SLOT, &"") != &"" else 0.0  # an exo's spine pack under it
+	_pack_rest = carrier_fit("back") * Transform3D(Basis.IDENTITY, Vector3(0, PACK_CENTRE_Y, 0.165 + spine + pack_size.z * 0.5))
 	_pack_pivot = carrier_fit("back") * Vector3(0, 0.3 + pack_size.y * 0.5, 0.165)
 	_set_gear(&"backpack", pack, &"torso", _pack_rest)
 	var held := inventory.hands
@@ -228,6 +232,20 @@ func _rebuild() -> void:
 	_set_pack_straps(pack)
 	_set_name_tape(carrier)
 	_refresh_plate_damage()
+	_set_exo_frame()
+
+
+## The light exo frame's struts on the body (ExoFrame.dress), rebuilt when it's put on, taken
+## off, or goes from working to disabled.
+const EXO_SPINE_DEPTH := 0.07
+var _exo_key := ""
+func _set_exo_frame() -> void:
+	var item := ExoFrame.worn(inventory)
+	var key := "" if item == null else "%s:%s" % [item.id, ExoFrame.working(inventory)]
+	if key == _exo_key:
+		return
+	_exo_key = key
+	ExoFrame.dress(model, item, item != null and not ExoFrame.working(inventory), render_layers)
 
 
 ## MOLLE attachments on the worn carrier and pack, drawn as small boxes on their attach points

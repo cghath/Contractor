@@ -182,6 +182,10 @@
 		  "soft_rating": "IIA", "soft_faces": ["front"], "soft_parts": ["chest"], "spall_cover": []},
 		 "desc": "A low-profile plate carrier: one front plate over IIA soft armour on the chest front. Light, little storage.",
 		 "uses": ["Carrier slot; holds 3 L in its pouches", "Plate pockets: front only, and only plates that fit a light carrier (PE Plate)", "Soft armour (IIA) stops fragments and pistol rounds on the chest front, even behind a failed plate", "7 MOLLE points (3 mag, pistol, radio, utility, tourniquet): drag pouches onto them in the inventory's MOLLE view"]},
+		{"id": "exo_frame_light", "name": "LX-3 Assist Frame", "type": "armor", "slot": "exo", "volume_l": 30.0, "mass_kg": 9.0, "tags": ["exo", "near_future"],
+		 "desc": "A powered strut frame worn over your kit: it carries 30 kg of your load. Rounds that hit its struts wear it down; disabled, you carry everything yourself.",
+		 "uses": ["Exo frame slot, worn over your carrier, plates and pack", "Carries 30 kg of your load: you move, sprint and tire as if that much lighter", "Rounds into its struts (arms, legs; the spine pack from behind) wear it down; at 0 it's disabled and you carry everything yourself again"],
+		 "stats": {"assist_kg": 30.0, "frame_hp": 120.0}},
 		{"id": "plate_carrier", "name": "Plate Carrier (Medium)", "type": "armor", "slot": "vest", "volume_l": 8.0, "mass_kg": 2.0, "capacity_l": 6.0, "tags": ["vest", "medium"],
 		 "stats": {"tier": "medium", "plate_slots": ["plate_front", "plate_back"], "plate_depth": 0.14,
 		  "molle": [

@@ -808,7 +808,7 @@ func load_tier() -> int:
 
 
 func _on_inventory_changed() -> void:
-	load_kg = inventory.total_mass()
+	load_kg = maxf(inventory.total_mass() - ExoFrame.assist_kg(inventory), 0.0)  # a working exo frame carries some (ExoFrame)
 	load_mult = MovementRules.load_speed_mult(load_kg) * (BULKY_SPEED_MULT if inventory.hands != &"" else 1.0)
 	if active_weapon() == null:
 		for slot: StringName in [&"primary", &"sidearm"]:

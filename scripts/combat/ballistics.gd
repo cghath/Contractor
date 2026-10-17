@@ -167,6 +167,7 @@ static func _trace(shooter: CollisionObject3D, origin: Vector3, direction: Vecto
 				hit_info["channel_depth"] = minf(body_hit.depth, reach)
 				hit_info["stays_in"] = true
 			Harm.note_hit(vitals.get_parent(), shooter)  # who hit whom (people: civilian casualties)
+			ExoFrame.server_round(vitals.get_parent(), part, hit_info)  # a strut in the way takes some of it (light exo)
 			vitals.server_hit(part, hit_info)
 			if not crosses:
 				return _result("body", hit)

@@ -38,7 +38,8 @@ extends Node
 signal changed
 
 ## "launcher" (wave 5): an anti-armour launcher slung on the back (Launchers.SLOT; key 3).
-const SLOTS: Array[StringName] = [&"primary", &"sidearm", &"helmet", &"vest", &"backpack", &"plate_front", &"plate_back", &"plate_left", &"plate_right", &"launcher"]
+## "exo": a light exoskeleton frame worn over the rest (ExoFrame.SLOT).
+const SLOTS: Array[StringName] = [&"primary", &"sidearm", &"helmet", &"vest", &"backpack", &"plate_front", &"plate_back", &"plate_left", &"plate_right", &"launcher", &"exo"]
 const PLATE_SLOTS: Array[StringName] = [&"plate_front", &"plate_back", &"plate_left", &"plate_right"]
 const WEAPON_SLOTS: Array[StringName] = [&"primary", &"sidearm", &"launcher"]
 ## Containers, in the order auto-stow fills them (and reloads search them).
