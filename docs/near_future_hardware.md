@@ -316,10 +316,15 @@ HX-1 Assault Frame (`exo_mech_heavy`) as the Captain decided above. What the sli
   AW's punch-out scene): the release panel on its back unzips it, the power pack and back plates
   splitting at the spine, then the thighs' and shins' backs; the pilot is in it, arms pushed into
   the sleeves, and it zips shut. Out: it unzips and he steps back out.
-- **Downed suits** (that scene's other half): a squadmate punches a downed or dead pilot out (the
-  same release); the suit is left lying face down, open; you kneel at the release, lie down into
-  it, and it zips shut and pushes itself up. Next pass could make the push-up knees-first rather
-  than a pivot at the feet.
+- **Downed suits** (that scene's other half): a squadmate can still just punch a downed or dead
+  pilot out (the same release, left in the DOWNED/DEAD menu's More submenu) if they only want the
+  body back; but the main action on one now is **Climb in** straight on the body (Captain,
+  2026-10-17: "that's the on-ground push-up anim for a new pilot getting in the suit... it needs
+  to include pulling the old pilot out") — one continuous move: the release, the old pilot left
+  lying beside it, the new pilot lying face down into the vacated suit as it zips shut and pushes
+  up (`ExoMech.server_climb_in_body`). The push-up itself is knees-first, not a pivot at the feet
+  (`CharacterModel.base_transform`'s `MECH_RISE` pitch now pauses on its knees, `MECH_KNEEL_PITCH`,
+  before standing the rest of the way, with a matching hip dip in `_action_pose`).
 - **Plates:** fifteen `VoxelArmor` pads (`stats.pads`, reusing the LX-3's per-part pad system):
   all AR500 steel (Captain, 2026-10-17): IV on the chest, head unit, shoulders and back, steel III on the belly, steel III++ on the arms and legs
   (Captain, 2026-10-17: the chest "should be steel 3", then "some of the armor to level 4 steel"), the head unit's
@@ -331,33 +336,43 @@ HX-1 Assault Frame (`exo_mech_heavy`) as the Captain decided above. What the sli
 - **Weapon:** the WG-50 Walker Gun (.50 BMG), pilot-only, kept on the suit between pilots (the
   pilot's own rifle goes on its rack). Held low and ready at the hip; aimed from the shoulder.
 - **Movement:** 260 kg assist, fixed 0.75 pace, no sprint/jump/climb/prone, no vehicle seats.
-- **Not built (needs the Captain):** price, repair cost and pilot training (below); AI piloting;
-  climbing a dead pilot's suit off his body; a dedicated rig. Numbers are proposed.
+- **Not built:** a dedicated rig; a functional back launcher (next section); AI squadmates
+  choosing on their own to climb into a suit (below).
+- **AI pilots (Captain, 2026-10-17): not blocked, not yet decided for them.** Nothing in
+  `squad_ai.gd` references `ExoMech` at all today, but nothing needs to: climbing in/out and
+  fighting from the suit are all plain `ExoMech`/`Soldier` host functions, the same shape as every
+  other server-side action squad AI already calls directly (no owner/RPC gate in the way) — an AI
+  soldier placed in or ordered into an HX-1 would move and fight from it correctly (the 0.75 pace,
+  the WG-50 in its hands) with no further plumbing. What's genuinely not built is the *decision*:
+  no command-menu order and no autonomous squad-AI behaviour picks "go climb into that mech" on its
+  own. That's its own scoped piece (a new order type, pathing to the suit, picking the moment),
+  bigger than this pass, and deliberately left for later rather than guessed at here.
 
-### 2.3a Repair cost and pilot training (proposed, Captain's call — flagged as a worry, not a spec)
+### 2.3a Repair cost and pilot training (Captain, 2026-10-17: resolved)
 
 Two separate asks, two very different costs to build:
 
-- **Repair cost: close to free.** `Prices.repair_cost(item_id, state)` (`economy_prices.gd`) already
-  prices any item back to new from its `"integrity"` state (a share of its price for lost
-  integrity, a fee per `chips` entry, capped at a max share) — exactly what every plate and vest
-  already uses. Once the heavy exo's per-zone plates carry `"integrity"` state like any other armor
-  item (2.3's per-part `ArmorRules` work), they're repairable through the existing field-service/
-  shop flow for free; no new mechanic needed here, just making sure the new items' data entries have
-  sane `price`/`repair` numbers in `data/prices.json`.
-- **Pilot training/certification: genuinely new**, nothing in the roster system gates equipment by
-  who's allowed to wear it today. Three shapes, roughly rising in cost to build, Captain's call:
-  1. **Cash-gated only**: a one-time "certify" purchase per roster soldier (`Economy`), no new state
-     beyond a bool on the roster entry. Cheapest to build, weakest as a mechanic (no time pressure).
-  2. **Cash + time**: the same bool, but set after a timed base-side activity (mirrors how field
-     repairs are already timed jobs) — a soldier is "in training" for some in-game days before the
-     flag flips, during which they can't deploy.
-  3. **Tied to an existing roster stat** (if one already tracks experience/missions per soldier —
-     not confirmed, needs a quick check before promising this shape) rather than a bespoke flag:
-     reads as "only veterans get the mech," no new persistent state at all if such a stat exists.
-  Recommend starting from shape 2 (cash + time) as the middle ground — mirrors a pattern the game
-  already has (timed field-service jobs) rather than inventing a new one, and gives the cost real
-  teeth without a new stat system — but this is Captain's call, not decided here.
+- **Repair cost: close to free, done.** `Prices.repair_cost(item_id, state)` (`economy_prices.gd`)
+  already prices any item back to new from its `"integrity"` state — exactly what every plate and
+  vest already uses, so the per-zone plates built in 2.3 are repairable through the existing
+  field-service/shop flow for free. `exo_mech_heavy` ($150,000) and `wg50_walker` ($24,000) now
+  have real prices in `data/prices.json` for that math (and for salvage valuation) — both stay
+  `not_for_sale` either way: the suit is issued and certified onto a roster soldier, not bought.
+  Priced at roughly 3x the LX-3 frame ($45,000): a full piloted chassis and its own weapon mount,
+  not an add-on worn over existing kit.
+- **Pilot training/certification: built, cash + veteran status, no new timed state.** Of the three
+  shapes this doc floated (cash-gated only; cash + time, mirroring timed field-service jobs; tied
+  to an existing roster stat), roster members already track `missions` survived
+  (`Roster.after_mission`) — reusing it avoids inventing a bespoke "in training for N days" timer
+  for a mechanic this is still a first slice of. `Roster.hx1_eligible` requires
+  `HX1_CERT_MISSIONS` (8) missions behind a soldier; `BaseHub.server_certify_hx1(mid)` then charges
+  `HX1_CERT_COST` ($8,000) through `Economy.spend` and sets `Roster.certify_hx1`'s `hx1_certified`
+  flag. `ExoMech.cert_problem` gates `enter_problem` and the new `climb_in_body_problem` on it for
+  any soldier with a roster identity (`"roster_id"` meta: set only on a real deployment, so tests
+  and the vehicle range are ungated, same as today). A "Certify HX-1 ($8,000)" button sits on the
+  base's squad-prep roster row (`base_ui.gd`'s `_hx1_cert_button`), next to the role picker: a
+  note instead once certified or short of the missions, so the row stays short for anyone who'll
+  never fly it.
 
 ### 2.4 Naming (proposed, Captain's call to confirm or rename)
 
@@ -382,11 +397,16 @@ COD:AW's trademarked names and the real aircraft/exoskeleton names they might ot
    mapped to the reference art, shootable through, no abstracted pool** — see 2.3.
 4. Heavy exo rig: new `CharacterModel` variant needed; not scoped in this doc, needs its own pass
    before that tier is buildable.
-5. **New**: repair cost and pilot training/certification for the heavy exo (Captain, 2026-10-16,
-   flagged as a worry alongside the damage-model answer, not a confirmed spec) — needs a concrete
-   mechanic proposed (not guessed at) before it's built: repair cost scaling, what gates a roster
-   soldier from being able to equip the suit, whether training costs time/cash/both.
-5. Proposed names in 2.4 — confirm, or Captain's own names (as he did for the Razorback).
+5. ~~repair cost and pilot training/certification for the heavy exo~~ **Decided and built
+   (2026-10-17): cash + veteran status (missions survived), no new timed state, with a button
+   on the base's squad-prep screen** — see 2.3a.
+6. Proposed names in 2.4 — confirm, or Captain's own names (as he did for the Razorback).
+7. **New**: the back launcher pod from the Captain's second reference pair (arm-mounted rotary,
+   launcher pod on the back) never came through as a file (`Contractor-refs/README.txt`) — the
+   suit already has a back power-pack/plate unit (`HATCH`'s `back_r`/`back_l`) that reads as that
+   pod visually, so **decided for now: it stays cosmetic, no weapon behind it.** A functional
+   back launcher (ammo, targeting, blast) is a real new weapon system — scope it once the actual
+   reference art arrives, not guessed at from a description alone.
 
 ## 4. What shipped this session
 

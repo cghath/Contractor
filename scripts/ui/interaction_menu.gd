@@ -115,7 +115,8 @@ const ACTIONS := {
 	],
 	DOWNED: [
 		{"id": &"put_down", "label": "Put down", "needs": &"moving_body", "request": &"_server_release_body", "with": &"none"},
-		{"id": &"punch_out", "label": "Punch out", "needs": &"mech_pilot", "request": &"_server_punch_out", "with": &"target"},
+		{"id": &"climb_in_body", "label": "Climb in", "needs": &"mech_pilot", "request": &"_server_climb_in_body", "with": &"target"},
+		{"id": &"punch_out", "label": "Punch out", "needs": &"mech_pilot", "request": &"_server_punch_out", "with": &"target", "group": MORE},
 		{"id": &"treat", "label": "Treat", "needs": &"treatable", "submenu": &"treatments"},
 		{"id": &"loot", "label": "Loot", "needs": &"lootable", "window": true},
 		{"id": &"loot_all", "label": "Loot all", "needs": &"lootable", "request": &"_server_loot_body", "with": &"target"},
@@ -127,7 +128,8 @@ const ACTIONS := {
 	],
 	DEAD: [
 		{"id": &"put_down", "label": "Put down", "needs": &"moving_body", "request": &"_server_release_body", "with": &"none"},
-		{"id": &"punch_out", "label": "Punch out", "needs": &"mech_pilot", "request": &"_server_punch_out", "with": &"target"},
+		{"id": &"climb_in_body", "label": "Climb in", "needs": &"mech_pilot", "request": &"_server_climb_in_body", "with": &"target"},
+		{"id": &"punch_out", "label": "Punch out", "needs": &"mech_pilot", "request": &"_server_punch_out", "with": &"target", "group": MORE},
 		{"id": &"loot", "label": "Loot", "needs": &"has_gear", "window": true},
 		{"id": &"loot_all", "label": "Loot all", "needs": &"has_gear", "request": &"_server_loot_body", "with": &"target"},
 		{"id": &"carry", "label": "Carry", "needs": &"can_carry", "request": &"_server_carry_body", "with": &"target"},

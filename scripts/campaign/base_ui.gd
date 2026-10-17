@@ -204,6 +204,7 @@ func _build_squad(rows: VBoxContainer, v: Dictionary) -> void:
 		check.toggled.connect(func(on: bool) -> void: BaseHub.request("pick", [mid, on]))
 		row.add_child(check)
 		row.add_child(_role_picker(mid, StringName(m.role)))
+		row.add_child(_hx1_cert_button(mid, m))
 		row.add_child(_cut(_skills_text(m)))
 		squad.add_child(row)
 		_add_short_line(squad, String(m.callsign), m)
@@ -544,6 +545,21 @@ func _role_picker(mid: String, current: StringName) -> OptionButton:
 			picker.select(picker.item_count - 1)
 	picker.item_selected.connect(func(i: int) -> void: BaseHub.request("role", [mid, picker.get_item_metadata(i)]))
 	return picker
+
+
+## HX-1 certification (Roster.hx1_certified/hx1_eligible, BaseHub.server_certify_hx1): a
+## button to spend the cash once a member's missions clear the bar, a plain note once they're
+## certified, nothing once there's neither (keeps the row short for everyone who'll never fly
+## the heavy exo).
+func _hx1_cert_button(mid: String, m: Dictionary) -> Control:
+	if Roster.hx1_certified(m):
+		return UiKit.hint("HX-1 certified")
+	if not Roster.hx1_eligible(m):
+		return UiKit.hint("HX-1: %d/%d missions" % [int(m.get("missions", 0)), Roster.HX1_CERT_MISSIONS])
+	var button := UiKit.button("Certify HX-1 ($%d)" % Roster.HX1_CERT_COST,
+		func() -> void: BaseHub.request("certify_hx1", [mid]), "Certify %s to pilot the HX-1 Assault Frame" % m.name)
+	button.disabled = not multiplayer.is_server()  # the host's call, same as hiring and release
+	return button
 
 
 ## How many of the picked squad (`picked`, member ids) can deploy, so are listed under the

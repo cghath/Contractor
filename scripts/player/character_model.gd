@@ -154,10 +154,14 @@ const LOOT_ALL_S := 1.6
 const MECH_RELEASE := &"mech_release"
 const MECH_IN := &"mech_in"
 ## Into a suit lying face down (ExoMech.RISE_S): the body drawn lying on its front, open round
-## him, zipping shut, then the whole suit pushes itself up onto its feet (base_transform), the
-## arms pushing off the ground.
+## him, zipping shut, then the whole suit pushes itself up (base_transform): a push-up, not a
+## sit-up, so it comes up onto its knees first (arms pushing off the ground, hip dipped to a
+## kneeling height, MECH_KNEEL_PITCH) and only then stands the rest of the way up.
 const MECH_RISE := &"mech_rise"
 const MECH_PUSH: Array[Vector3] = [Vector3(0.3, 0.42, -0.5), Vector3(-0.3, 0.42, -0.5)]
+## The pause point on the way up (base_transform's pitch): propped on its knees, not yet
+## standing (Captain, 2026-10-17: knees-first, not pivoting straight up at the feet).
+const MECH_KNEEL_PITCH := -PI / 5.0
 const MECH_OPEN := &"mech_open"
 const MECH_OUT := &"mech_out"
 const MECH_GRAB: Array[Vector3] = [Vector3(0.21, 0.28, -0.38), Vector3(-0.21, 0.28, -0.38)]
@@ -445,8 +449,12 @@ var net_offset := Transform3D.IDENTITY
 ## and, pushing up out of lying face down in a heavy exo (MECH_RISE), turned onto its front.
 func base_transform() -> Transform3D:
 	if action_shown() == MECH_RISE:
-		var lying := 1.0 - smoothstep(0.45, 0.95, action_progress())
-		var turn := Transform3D(Basis(Vector3.RIGHT, -PI / 2 * lying), Vector3.UP * ExoMech.LIE_LIFT * lying)
+		var u := action_progress()
+		var to_knees := smoothstep(0.45, 0.65, u)   # flat on its front -> propped on its knees
+		var to_stand := smoothstep(0.78, 0.95, u)   # holds on its knees, then finishes standing
+		var pitch := lerpf(lerpf(-PI / 2.0, MECH_KNEEL_PITCH, to_knees), 0.0, to_stand)
+		var lift := ExoMech.LIE_LIFT * clampf(-pitch / (PI / 2.0), 0.0, 1.0)
+		var turn := Transform3D(Basis(Vector3.RIGHT, pitch), Vector3.UP * lift)
 		return net_offset * turn * Transform3D(Basis.from_scale(Vector3.ONE * body_scale()), Vector3.ZERO)
 	return net_offset * Transform3D(Basis.from_scale(Vector3.ONE * body_scale()), Vector3.ZERO)
 
@@ -1534,6 +1542,16 @@ func _action_pose(mode: StringName) -> Dictionary:
 			hip += MECH_STEP_UP * (1.0 - smoothstep(0.25, 0.65, u))
 		stepping["hip"] = hip
 		return stepping
+	if clip == MECH_RISE:
+		# Knees-first (base_transform's pitch): the hip sits low, as if kneeling, once it's up
+		# off the ground, then rises back to standing height as it finishes getting up.
+		var u := action_progress()
+		var up_on_knees := smoothstep(0.45, 0.65, u)
+		var to_stand := smoothstep(0.78, 0.95, u)
+		var rising := pose.duplicate()
+		var rest_hip := float(pose.get("hip", REST_POSE.hip))
+		rising["hip"] = lerpf(rest_hip, lerpf(rest_hip * 0.5, rest_hip, to_stand), up_on_knees)
+		return rising
 	if _reaching.is_empty() or not _action_active():
 		return pose
 	var s := float(action_net.get("s", 0.0))

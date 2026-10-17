@@ -336,6 +336,32 @@ static func after_mission(member: Dictionary, rng: RandomNumberGenerator, day: i
 	add_history(member, day, "Came back from %s" % what)
 
 
+# --- HX-1 pilot certification (Captain, 2026-10-17: the heavy exo's training/repair worry,
+# docs/near_future_hardware.md 2.3a) -----------------------------------------------------
+
+## Proposed: a one-time cash certification, gated on being a veteran (missions survived)
+## rather than a new timed "in training" state — reuses the missions count every member
+## already has, so there's no new persistent state beyond the "hx1_certified" flag itself.
+const HX1_CERT_MISSIONS := 8
+const HX1_CERT_COST := 8000
+
+## Whether `member` has enough missions behind them to be worth certifying (doesn't mean
+## they are certified yet: hx1_certified for that).
+static func hx1_eligible(member: Dictionary) -> bool:
+	return int(member.get("missions", 0)) >= HX1_CERT_MISSIONS
+
+
+static func hx1_certified(member: Dictionary) -> bool:
+	return bool(member.get("hx1_certified", false))
+
+
+## Marks `member` certified (the cash charge is the caller's job, e.g. BaseHub.server_certify_hx1,
+## so it can refuse when the company can't afford it).
+static func certify_hx1(member: Dictionary, day: int) -> void:
+	member["hx1_certified"] = true
+	add_history(member, day, "Certified on the HX-1 Assault Frame")
+
+
 # --- Injuries and recovery --------------------------------------------------------------
 
 ## The serious injuries in a body's wounds (Vitals.wound_list()), blood (Vitals.blood_fraction()),

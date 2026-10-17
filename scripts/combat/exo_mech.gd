@@ -22,7 +22,9 @@ extends RefCounted
 ##   swaps the pilot's own rifle onto the suit's rack ("rack" in its state) and the gun into his
 ##   hands; climbing out puts it back on the suit ("gun") and the rifle in his hands. It is held
 ##   low and ready at the hip (GearRig.held_transform).
-## Numbers proposed. Repair cost and pilot training are open (doc 2.3a): not built.
+## Numbers proposed. Repair cost and pilot training (doc 2.3a, Captain, 2026-10-17): priced in
+## data/prices.json and gated by Roster.hx1_certified/cert_problem below; no armory UI to spend
+## the certification cost yet.
 
 const SLOT := ExoFrame.SLOT
 ## Tag on the suit's item; "mech_only" on a weapon only its pilot can carry.
@@ -171,6 +173,18 @@ static func describe(item: ItemData, state: Dictionary) -> String:
 
 # --- Climbing in and out (host) -----------------------------------------------------------
 
+## In the campaign (a roster member: "roster_id" meta, set only on a real deployment), whether
+## `s` is certified to pilot the HX-1 (Roster.hx1_certified); "" outside the campaign (tests,
+## the vehicle range), where nothing gates it.
+static func cert_problem(s: Soldier) -> String:
+	if not s.has_meta(&"roster_id"):
+		return ""
+	var m := Roster.get_member(BaseHub.roster(), String(s.get_meta(&"roster_id")))
+	if m.is_empty() or Roster.hx1_certified(m):
+		return ""
+	return "Not certified on the HX-1 (see the base)"
+
+
 ## Why `s` can't climb into `suit` now ("" if it can); `reach`: check the distance too.
 static func enter_problem(s: Soldier, suit: WorldItem, reach := true) -> String:
 	if s.inventory.slots.get(SLOT, &"") != &"":
@@ -183,7 +197,7 @@ static func enter_problem(s: Soldier, suit: WorldItem, reach := true) -> String:
 		return "Get out of the vehicle first"
 	if reach and parked_point(suit).distance_to(s.global_position + Vector3.UP * 1.2) > REACH_M:
 		return "Too far away"
-	return ""
+	return cert_problem(s)
 
 
 ## Host: `s` climbs into the suit standing at `suit` (check enter_problem first). He hits the
@@ -299,6 +313,50 @@ static func server_punch_out(actor: Soldier, body: Soldier) -> void:
 		return
 	server_leave_lying(body)
 	SessionLog.note("%s punches %s out of the %s" % [actor.log_name(), body.log_name(), item.name])
+
+
+## Why `actor` can't climb straight into downed or dead pilot `body`'s suit now ("" if he
+## can): the same manual release as punching him out (punch_out_problem) — climbing in pulls
+## the old pilot out as part of getting in, so needs exactly what punching out needs, plus
+## `actor`'s own certification (cert_problem) since he's the one piloting it after.
+static func climb_in_body_problem(actor: Soldier, body: Soldier) -> String:
+	var why := punch_out_problem(actor, body)
+	return why if why != "" else cert_problem(actor)
+
+
+## Host: `actor` hits the manual release on downed or dead pilot `body`'s suit and climbs
+## straight into it himself (Captain, 2026-10-17: the new pilot's own get-in, not a separate
+## punch-out first) — the old pilot comes out of it, left lying beside it, and `actor` lies
+## face down into the vacated suit as it zips shut and pushes itself up (as server_enter's
+## lying branch does for a suit already left on the ground).
+static func server_climb_in_body(actor: Soldier, body: Soldier) -> void:
+	var item := worn(body.inventory)
+	actor.server_busy(RELEASE_S, "Climbing into the %s" % item.name)
+	actor.model.server_play(CharacterModel.MECH_RELEASE, RELEASE_S, actor.to_local(body.body_point() + Vector3.UP * 0.3), &"", &"", true)
+	await actor.get_tree().create_timer(RELEASE_S).timeout
+	if not is_instance_valid(actor) or not actor.is_inside_tree() or not actor.vitals.is_up() or not is_instance_valid(body) \
+			or body.is_queued_for_deletion() or worn(body.inventory) != item or climb_in_body_problem(actor, body) != "":
+		return
+	var state := _suit_off(body)
+	var yaw := body.global_rotation.y
+	var feet := body.global_position
+	var aside := Basis(Vector3.UP, yaw).x * (PRONE_SIZE.x * 0.5 + 0.45)
+	body.server_place(feet + aside, yaw)  # the old pilot out of it, left lying beside it
+	var gun: Dictionary = state.get("gun", {})
+	for key: String in ["gun", "yaw", "camo", "open", "prone"]:
+		state.erase(key)
+	if not gun.is_empty():
+		var own := actor.inventory.unequip(&"primary")
+		if not own.is_empty():
+			state["rack"] = own
+	actor.inventory.put_on(SLOT, item.id, state)
+	if not gun.is_empty():
+		actor.inventory.put_on(&"primary", StringName(gun.id), gun.get("state", {}))
+	actor.server_place(feet, yaw)
+	actor.server_busy(RISE_S, "Climbing into the %s" % item.name)
+	actor.model.server_play(CharacterModel.MECH_RISE, RISE_S)
+	Sfx.server_play(&"impact_plate", feet + Vector3.UP * 1.2)
+	SessionLog.note("%s climbs into %s's %s" % [actor.log_name(), body.log_name(), item.name])
 
 
 ## Host: the suit `body` wears comes off him and is left lying face down where he is, facing

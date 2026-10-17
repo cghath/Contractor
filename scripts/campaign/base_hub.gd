@@ -1708,6 +1708,24 @@ func server_set_role(mid: String, role: StringName) -> String:
 	return ""
 
 
+## Host: certifies roster member `mid` to pilot the HX-1 Assault Frame (Captain, 2026-10-17:
+## pilot training/certification, docs/near_future_hardware.md 2.3a) — a one-time cash cost,
+## gated on being a veteran (Roster.hx1_eligible: missions survived), not a new timed state.
+func server_certify_hx1(mid: String) -> String:
+	var m := member(mid)
+	if m.is_empty():
+		return "No such member"
+	if Roster.hx1_certified(m):
+		return "Already certified"
+	if not Roster.hx1_eligible(m):
+		return "Not experienced enough yet (%d missions)" % Roster.HX1_CERT_MISSIONS
+	if not Economy.spend(Roster.HX1_CERT_COST, "HX-1 certification: %s" % m.name):
+		return "Can't afford it"
+	Roster.certify_hx1(m, day())
+	_changed(&"roster")
+	return ""
+
+
 func _refresh_muster() -> void:
 	var lvl := level() as BaseLevel
 	if lvl and campaign_running and lvl.voxel_world.is_built():
@@ -2194,7 +2212,7 @@ func _server_request(action: String, args: Array) -> void:
 	var sender := multiplayer.get_remote_sender_id()
 	var why := ""
 	var at_base := in_base() and not RosterDeployment.is_running(roster())
-	var needs: int = {"hire": 1, "release": 1, "medbay": 1, "pick": 2, "role": 2, "buy": 1, "prep": 1, "ready": 1, "loadout": 3}.get(action, 0)
+	var needs: int = {"hire": 1, "release": 1, "medbay": 1, "pick": 2, "role": 2, "buy": 1, "prep": 1, "ready": 1, "loadout": 3, "certify_hx1": 1}.get(action, 0)
 	if args.size() < needs:
 		why = "Bad request"
 	elif action in ["deploy", "rest", "release", "save", "prep", "restock_squad"] and sender != 1:
@@ -2213,6 +2231,8 @@ func _server_request(action: String, args: Array) -> void:
 				why = server_pick(String(args[0]), bool(args[1]))
 			"role":
 				why = server_set_role(String(args[0]), StringName(args[1]))
+			"certify_hx1":
+				why = server_certify_hx1(String(args[0]))
 			"buy":
 				why = server_buy(StringName(args[0]), int(args[1]) if args.size() > 1 else 1, sender)
 			"rest":
