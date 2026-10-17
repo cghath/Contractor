@@ -52,11 +52,13 @@ func _ready() -> void:
 	player.inventory.take(&"exo_frame_light")
 	await get_tree().physics_frame
 	check(absf(player.movement.mantle_reach() - SoldierMovement.MANTLE_MAX_M - 1.3) < 0.01, "the LX-3's legs reach 1.3 m higher (%.1f m)" % player.movement.mantle_reach())
-	await _case("2.3 m wall in the LX-3", 2.3, -1.0, true)
+	await _case("2.3 m block (a roof) in the LX-3", 2.3, -1.0, true)
+	await _leap_over_wall()
 	player.inventory.unequip(ExoFrame.SLOT)
 	await _ai_climb("1.7 m block", 1.7, false, true)
 	await _ai_climb("2.3 m wall in the LX-3", 2.3, true, true)
 	await _ai_climb("2.3 m wall", 2.3, false, false)
+	await _follow_onto_roof()
 	_finish()
 
 
@@ -133,8 +135,9 @@ func _case(label: String, h: float, roof: float, climbs: bool) -> void:
 	var t0 := Time.get_ticks_msec()
 	await _wait_for(func() -> bool: return not player.movement.mantling, 4.0)
 	var took := (Time.get_ticks_msec() - t0) / 1000.0
-	var want := SoldierMovement.MANTLE_BASE_S + SoldierMovement.MANTLE_PER_M_S * h
-	check(absf(took - want) < 0.35, "%s: took %.2f s (about %.2f)" % [label, took, want])
+	var leap := ExoFrame.working(player.inventory)  # the LX-3 leaps: one quick arc
+	var want := (SoldierMovement.LEAP_BASE_S + SoldierMovement.LEAP_PER_M_S * h) if leap else (SoldierMovement.MANTLE_BASE_S + SoldierMovement.MANTLE_PER_M_S * h)
+	check(absf(took - want) < 0.35, "%s: %s in %.2f s (about %.2f)" % [label, "leapt" if leap else "took", took, want])
 	await _seconds(0.3)
 	var feet := player.global_position.y - ground
 	check(absf(feet - h) < 0.15 and player.global_position.z < AT.z - 1.0, "%s: on top (feet %.2f m up, z %.2f)" % [label, feet, player.global_position.z - AT.z])
@@ -169,6 +172,44 @@ func _ai_climb(label: String, h: float, exo: bool, climbs: bool) -> void:
 		check(ai.ordered.is_empty() and ai.order == Squad.Order.HOLD, "AI, %s: and holds up there (%s)" % [label, ai.status_text()])
 	else:
 		check(not saw_mantle[0] and feet < 0.3 and ai.ordered.is_empty(), "AI, %s: out of reach, the order ends at the wall (feet %.2f m up, %.1f m from the spot, %s)" % [label, feet, Vector2(mate.global_position.x - top.x, mate.global_position.z - top.z).length(), ai.status_text()])
+	mate.queue_free()
+	await get_tree().physics_frame
+
+
+## In the LX-3, a 2.2 m compound wall 0.25 m thick: the leap clears it and lands on the far side
+## (Captain, 2026-10-17: "we jump over the compound walls, not on top of them").
+func _leap_over_wall() -> void:
+	for b in _blocks:
+		b.queue_free()
+	_blocks.clear()
+	var ground := level.ground_point(AT).y
+	_blocks.append(_box(Vector3(12, 1, 12), AT + Vector3(0, ground - 0.5, 0)))
+	_blocks.append(_box(Vector3(3, 2.2, 0.25), AT + Vector3(0, ground + 1.1, -1.125)))  # its face 0.6 m ahead
+	await get_tree().physics_frame
+	await _stand_facing(ground)
+	check(player.movement.try_mantle(), "2.2 m compound wall in the LX-3: a leap")
+	await _wait_for(func() -> bool: return not player.movement.mantling, 4.0)
+	await _seconds(0.3)
+	var feet := player.global_position.y - ground
+	check(player.movement.last_over and player.global_position.z < AT.z - 1.4 and feet < 0.3,
+		"over it, landing on the far side (feet %.2f m up, z %.2f past the wall's face)" % [feet, -(player.global_position.z - (AT.z - 1.0))])
+
+
+## Captain, 2026-10-17: "make sure squaddies also follow you onto the rooftop you jump onto if
+## they can": the player up on a 1.7 m block (no stairs), a squadmate following him climbs up too.
+func _follow_onto_roof() -> void:
+	var ground := _course(1.7, -1.0)
+	await get_tree().physics_frame
+	player.global_position = AT + Vector3(0, ground + 1.75, -2.0)  # on top of the block
+	player.velocity = Vector3.ZERO
+	var mate := level.spawn_soldier({"name": "Follower", "faction": "friendly", "variant": "multicam", "pos": AT + Vector3(0, ground + 0.05, 2.5),
+		"loadout": ["m4a1"], "role": "rifleman", "team": 0, "slot": 1, "combat": 0.5, "discipline": 0.6, "guard": false})
+	await _wait_for(func() -> bool: return SquadAI.of(mate) != null and SquadAI.of(mate)._ready_done and mate.is_on_floor() and player.is_on_floor(), 5.0)
+	var squad := level.squad_for(&"friendly")
+	squad.give_order(player, Squad.Order.FOLLOW, player.global_position, PackedStringArray([String(mate.name)]))
+	var up := await _wait_for(func() -> bool: return mate.global_position.y - ground > 1.5, 25.0)
+	var ai := SquadAI.of(mate)
+	check(up, "a squadmate following the player up on a 1.7 m roof climbs up after him (feet %.2f m up, %s)" % [mate.global_position.y - ground, ai.status_text()])
 	mate.queue_free()
 	await get_tree().physics_frame
 

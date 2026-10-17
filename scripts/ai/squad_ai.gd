@@ -1141,7 +1141,7 @@ func _act() -> void:
 			if fighting():
 				_halt_spot = null
 				_fight(_formation_anchor(), 8.0)
-			else:
+			elif not _follow_up_to_lead():
 				var spot := _follow_spot()
 				_go(spot)
 				if _halt_spot != null and _flat_distance(spot) <= ARRIVE + 0.3:
@@ -2790,36 +2790,98 @@ func _do_tactic(t: Dictionary) -> void:
 
 ## Climb order: to the spot, up every ledge in the way (the jump key's mantle), then hold.
 func _tactic_climb(t: Dictionary) -> void:
+	if _climb_toward(t, CLIMB_DONE_M) != CLIMB_GOING:
+		_tactic_done(t)
+
+
+## Climbing to t.point ("Climb up there", and a follower going up after its lead): walks to it,
+## climbs (or, in a working LX-3, leaps) every ledge in the way. CLIMB_THERE once up there within
+## `done_m` (or over a wall it leapt), CLIMB_CANT at a wall too high for it after
+## CLIMB_GIVE_UP_S, else CLIMB_GOING.
+const CLIMB_GOING := 0
+const CLIMB_THERE := 1
+const CLIMB_CANT := 2
+
+
+func _climb_toward(t: Dictionary, done_m: float) -> int:
 	var point: Vector3 = t.point
 	var mv := body.movement
 	if mv.mantling:
 		_has_destination = false
-		return
+		return CLIMB_GOING
+	if t.get("leapt", false) and mv.last_over:
+		return CLIMB_THERE  # an LX-3 leapt the wall: over it is where it was going (not back)
 	var up_there := body.global_position.y >= point.y - CLIMB_UP_M
 	var d := point - body.global_position
 	var flat := Vector2(d.x, d.z).length()  # (not _flat_distance: the spot is a floor up, on purpose)
-	if up_there and flat <= CLIMB_DONE_M:
-		_tactic_done(t)
-		return
+	if up_there and flat <= done_m:
+		return CLIMB_THERE
 	if up_there:
 		_go(point)
-		return
-	# Below it: at the wall it turns to face the spot, and a ledge ahead is climbed.
-	var at_wall := flat <= CLIMB_AT_WALL_M
+		return CLIMB_GOING
+	# Below it: at the wall (near the spot, or at the end of the walkable way toward it) it turns
+	# to face the spot, and a ledge ahead is climbed.
+	var stuck := not _path.is_empty() and _flat_distance(_path[_path.size() - 1]) < 1.0
+	var at_wall := flat <= CLIMB_AT_WALL_M or stuck
 	if at_wall and flat > 0.2:
 		body.rotation.y = atan2(-d.x, -d.z)
 	var ledge := mv.find_ledge() if mv.can_mantle() else {}
 	if not ledge.is_empty() and (ledge.top as Vector3).y > body.global_position.y + 0.3:
 		_has_destination = false
 		body.want_mantle = true
-		return
+		t.leapt = true
+		if not t.has("tries_from"):
+			t.tries_from = Soldier._now()
+		if Soldier._now() - float(t.tries_from) > CLIMB_GIVE_UP_S * 2.0:
+			return CLIMB_CANT  # the climb won't start (a capsule in the way): don't freeze trying
+		return CLIMB_GOING
 	if at_wall:
 		if not t.has("at_wall"):
 			t.at_wall = Soldier._now()
-		if Soldier._now() - float(t.at_wall) > CLIMB_GIVE_UP_S:  # too high for these legs (or no room on top): it holds here
-			_tactic_done(t)
-			return
+		if Soldier._now() - float(t.at_wall) > CLIMB_GIVE_UP_S:
+			return CLIMB_CANT  # too high for these legs (or no room on top): it holds here
 	_go(point, true)
+	return CLIMB_GOING
+
+
+## Following, the lead is up on a roof (FOLLOW_CLIMB_DY or more above, within FOLLOW_CLIMB_M)
+## no walkable way reaches (Captain, 2026-10-17: "make sure squaddies also follow you onto the
+## rooftop you jump onto if they can"): this unit climbs or leaps up after him (_climb_toward),
+## stopping FOLLOW_CLIMB_NEAR_M off him. A roof out of its reach: it waits below and tries again
+## after FOLLOW_CLIMB_RETRY_S. True while it's busy getting up there.
+const FOLLOW_CLIMB_DY := 1.2
+const FOLLOW_CLIMB_M := 25.0
+const FOLLOW_CLIMB_NEAR_M := 3.0
+const FOLLOW_CLIMB_RETRY_S := 20.0
+var _follow_climb := {}
+var _follow_climb_retry := -1000.0
+
+
+func _follow_up_to_lead() -> bool:
+	var lead := squad.leader if squad else null
+	if lead == null or not is_instance_valid(lead) or lead == body or not lead.vitals.is_up() or not lead.is_on_floor():
+		_follow_climb = {}
+		return false
+	var at := lead.global_position
+	var flat := Vector2(at.x - body.global_position.x, at.z - body.global_position.z).length()
+	if at.y - body.global_position.y < FOLLOW_CLIMB_DY or flat > FOLLOW_CLIMB_M or Soldier._now() < _follow_climb_retry:
+		if not body.movement.mantling:
+			_follow_climb = {}
+		return body.movement.mantling
+	if _follow_climb.is_empty() and not ExoFrame.working(body.inventory):  # (in an LX-3 it leaps up, stairs or not)
+		var path := NavigationServer3D.map_get_path(body.get_world_3d().navigation_map, body.global_position, at, true)
+		if not path.is_empty() and absf(path[path.size() - 1].y - at.y) < 1.0 and Vector2(path[path.size() - 1].x - at.x, path[path.size() - 1].z - at.z).length() < 3.0:
+			return false  # stairs or a ramp up there: the usual follow walks it
+	if _follow_climb.is_empty():
+		_follow_climb = {"point": at}
+	_follow_climb.point = at
+	var r := _climb_toward(_follow_climb, FOLLOW_CLIMB_NEAR_M)
+	if r == CLIMB_CANT:
+		_follow_climb_retry = Soldier._now() + FOLLOW_CLIMB_RETRY_S
+	if r != CLIMB_GOING:
+		_follow_climb = {}
+		return false
+	return true
 
 
 ## Host: "Drop packs here": the worn pack goes on the ground in front, still loaded, and this
