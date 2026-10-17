@@ -374,7 +374,8 @@ func _physics_process(delta: float) -> void:
 	# Both hands on the casualty: no weapon in view; through a scope: only the glass (P0362); nor
 	# seated in a vehicle (no firing your own from a seat, and in first person it hid the cabin and
 	# poked through the dash); nor dead, waiting to respawn.
-	body.view_model.visible = body.carry_mode == &"" and not GunSight.scoped(body) and not waiting 		and (not is_instance_valid(body.vehicle) or body.vehicle.ffv_seat(body))  # a fire-from-vehicle seat: your own weapon up (VehicleBay)
+	body.view_model.visible = body.carry_mode == &"" and not GunSight.scoped(body) and not waiting \
+		and (not is_instance_valid(body.vehicle) or body.vehicle.ffv_seat(body))  # a fire-from-vehicle seat: your own weapon up (VehicleBay)
 	_settle_recoil(delta)
 	_update_sway(delta)
 	_hide_shouldered()
