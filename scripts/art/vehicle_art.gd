@@ -937,7 +937,7 @@ static func _vtol_razorback() -> Canvas:
 	# swings on VehicleBay, from the cabin floor's aft edge down to the ground).
 	c.mbox(-0.4, 2.4, o + 9.5, 0.4, 2.7, o + 10.6, P.METAL)
 	var rz := o + 5.0
-	while rz < o + 8.15:  # just the belly skin along its upsweep, the tail's sides left whole
+	while rz < o + 8.7:  # just the belly skin along its upsweep, the tail's sides left whole (to the ramp's length)
 		var belly := lerpf(0.95, 2.7, clampf((rz - o - 5.0) / 5.5, 0.0, 1.0))
 		c.mbox(-1.2, 0.85, rz, 1.2, belly + 0.3, rz + 0.08, P.EMPTY)
 		rz += 0.08

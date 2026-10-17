@@ -80,12 +80,27 @@ func _seconds(s: float) -> void:
 
 func _model(m: String, at: Vector3) -> void:
 	print(m)
+	# A solid floor plate under it at the ground its gear stands on (local y 0): on the range the
+	# drawn ground stands ~1 m over the collision plane, so a body put on it dropped a metre (a
+	# range quirk, not the bay's business); it's moved under the vehicle once that has settled.
+	var plate := StaticBody3D.new()
+	var plate_col := CollisionShape3D.new()
+	var plate_box := BoxShape3D.new()
+	plate_box.size = Vector3(40, 1, 50)
+	plate_col.shape = plate_box
+	plate.add_child(plate_col)
+	level.add_child(plate)
+	plate.global_position = level.ground_point(at) + Vector3.DOWN * 0.5
+	player.global_position = level.ground_point(at + Vector3(0, 0, 14)) + Vector3.UP * 0.1
+	await _seconds(0.5)
 	var v := layer.server_spawn(m, Transform3D(Basis(), at), "", &"player", "test_bay_" + m)
 	check(v != null and v.bay != null, "%s spawns with a bay" % m)
 	if v == null or v.bay == null:
 		return
 	await _wait_for(func() -> bool: return VehicleHull.is_ready(m), 30.0)
 	await _seconds(1.5)  # settle on the gear
+	plate.global_transform = Transform3D(v.global_basis, v.global_transform * Vector3(0, -0.5, 0))
+	await get_tree().physics_frame
 	var bay := v.bay
 	var spec: Dictionary = v.spec.bay
 	var cabin := VehicleSpecs.box(spec.cabin)
@@ -105,12 +120,14 @@ func _model(m: String, at: Vector3) -> void:
 		check(not bay.inside(got) or _local(v, got).z > 5.2, "%s shut: no way in up the ramp (stopped at %s)" % [m, _local(v, got)])
 		got.queue_free()
 	# Open: in through each door, out again; up the ramp.
+	var sat_at := v.global_position.y
 	v.server_set_bay(true)
 	check(bool(v.net_state.get("bay", false)), "%s: the bay's open state goes out to every peer" % m)
-	await _seconds(maxf(VehicleBay.PANEL_S, VehicleBay.STEP_S) + 0.3)
+	await _seconds(maxf(VehicleBay.PANEL_S, VehicleBay.STEP_S) + 0.8)
+	check(absf(v.global_position.y - sat_at) < 0.1, "%s: the ramps down on the ground don't lift it (%.2f m)" % [m, v.global_position.y - sat_at])
 	var ramps_down := true
 	for i in (spec.get("steps", []) as Array).size():
-		var shape := v.get_node_or_null(NodePath("BayStep%d" % i)) as CollisionShape3D
+		var shape := v.get_node_or_null(NodePath("BayDeck/BayStep%d" % i)) as CollisionShape3D
 		ramps_down = ramps_down and shape != null and not shape.disabled
 	check(ramps_down, "%s open, landed: the boarding ramps are out and down" % m)
 	for d: Dictionary in spec.doors:
@@ -127,6 +144,14 @@ func _model(m: String, at: Vector3) -> void:
 		check(not bay.inside(got) and absf(flat.x) > 3.0 and flat.y < 0.4, "%s open: back out of the %s door to the ground (at %s)" % [m, d.name, flat])
 		got.queue_free()
 	if spec.has("ramp"):
+		if OS.get_environment("BAY_TRACE") != "":
+			var e := v.global_basis.get_euler() * 180.0 / PI
+			print("    tilt deg %s, origin %s" % [e.snapped(Vector3.ONE * 0.1), v.global_position.snapped(Vector3.ONE * 0.01)])
+			for gz: float in [-8.0, 1.5, 5.0, 8.5, 11.0]:
+				var gp := level.ground_point(v.global_transform * Vector3(0, 0, gz))
+				print("    ground at local z %.1f: local y %.2f" % [gz, (v.global_transform.affine_inverse() * gp).y])
+			var rs := v.get_node(^"BayDeck/BayRamp") as CollisionShape3D
+			print("    ramp shape %s disabled=%s" % [rs.transform.origin.snapped(Vector3.ONE * 0.01), rs.disabled])
 		var got := await _walk(v, [Vector3(0, 0, cabin.end.z + 4.0), Vector3(0, 0, cabin.end.z - 1.0), middle])
 		check(bay.inside(got) and _local(v, got).y > cabin.position.y - 0.3, "%s open: up the ramp into the cabin (at %s)" % [m, _local(v, got)])
 		got.queue_free()
@@ -134,6 +159,7 @@ func _model(m: String, at: Vector3) -> void:
 	await _stand_and_lift(v, m)
 	await _ai_ffv(v, m)
 	v.queue_free()
+	plate.queue_free()
 	await get_tree().physics_frame
 
 
@@ -152,8 +178,7 @@ func _walk(v: Vehicle, points: Array) -> CharacterBody3D:
 	b.collision_mask = SoldierMovement.UP_MASK
 	b.floor_snap_length = 0.3
 	level.add_child(b)
-	var start := v.global_transform * (points[0] as Vector3)
-	start.y = level.ground_point(start).y + 0.05 if (points[0] as Vector3).y <= 0.01 else start.y
+	var start := v.global_transform * ((points[0] as Vector3) + Vector3.UP * 0.1)  # on the plate (local y 0)
 	b.global_position = start
 	await get_tree().physics_frame
 	await _walk_on(v, b, points.slice(1))
@@ -181,7 +206,7 @@ func _walk_on(v: Vehicle, b: CharacterBody3D, points: Array) -> void:
 					var sh := "?"
 					if co:
 						sh = String((co.shape_owner_get_owner(co.shape_find_owner(c.get_collider_shape_index())) as Node).name)
-					hits.append("%s n=%s" % [sh, c.get_normal().snapped(Vector3.ONE * 0.01)])
+					hits.append("%s(%s L%d) n=%s" % [sh, co.get_path() if co else "?", co.collision_layer if co else -1, c.get_normal().snapped(Vector3.ONE * 0.01)])
 				print("    trace %s floor=%s %s" % [_local(v, b), b.is_on_floor(), ", ".join(hits)])
 			await get_tree().physics_frame
 
@@ -256,18 +281,23 @@ func _stand_and_lift(v: Vehicle, m: String) -> void:
 	check(v.seat_of(player) < 0 and v.bay.inside(player), "%s: getting up with the bay open, the player stands in the aisle (at %s)" % [m, _local(v, player)])
 	var heli := v as Helicopter
 	var was := heli.mode
-	heli.mode = Helicopter.Mode.FLYING  # lifting off (the flight itself isn't this test's)
+	var parked_at := v.global_transform
+	v.freeze = true  # held where it is: FLYING would fly it off (the flight itself isn't this test's)
+	heli.mode = Helicopter.Mode.FLYING  # lifting off
 	await _wait_for(func() -> bool: return v.seat_of(player) >= 0, 2.0)
 	check(v.seat_of(player) >= 0, "%s: at liftoff the player standing in the bay is seated (%s)" % [m, v.seat_name(v.seat_of(player)) if v.seat_of(player) >= 0 else "no seat"])
 	await _seconds(VehicleBay.STEP_S + 0.2)
 	var stowed := true
 	for i in (v.spec.bay.get("steps", []) as Array).size():
-		var shape := v.get_node_or_null(NodePath("BayStep%d" % i)) as CollisionShape3D
+		var shape := v.get_node_or_null(NodePath("BayDeck/BayStep%d" % i)) as CollisionShape3D
 		stowed = stowed and shape != null and shape.disabled
 	check(stowed, "%s: in the air the boarding ramps are stowed (the bay still open for FFV)" % m)
 	heli.mode = was
+	v.global_transform = parked_at
+	v.freeze = false
+	heli.mode = was
 	v.server_exit(player)
-	player.global_position = Vector3(0, 0.1, 30)
+	player.global_position = v.global_transform * Vector3(0, 0.1, 14)
 	await _seconds(0.5)
 
 

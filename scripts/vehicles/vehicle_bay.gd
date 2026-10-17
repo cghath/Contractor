@@ -24,12 +24,20 @@ extends Node3D
 ## The open state is the host's and goes out in Vehicle.net_state ("bay").
 ## The shell's shapes are the vehicle body's own (the living walk on vehicles: SoldierMovement.
 ## UP_MASK), standing in for the solid cabin boxes a vehicle without a bay has, so rounds and
-## blasts meet the bay's walls as the hull.
+## blasts meet the bay's walls as the hull. The ramps that reach the ground (the boarding ramps,
+## the rear ramp) are on `deck` instead: a body on the vehicles' layer that meets nothing itself,
+## so soldiers walk it and rounds hit it, but resting on (or a little into) the ground it never
+## lifts the vehicle, which shapes of the vehicle's own body there did (it rose 0.85 m).
 
 const PANEL_S := 0.8  ## doors slide and the ramp swings over this long
 const STEP_S := 1.1  ## a boarding ramp slides out and angles down over this long (half each)
 const STEP_SLOT_DROP_M := 0.1  ## stowed, a boarding ramp sits this far under its sill
 const STEP_GRIP_EVERY_M := 0.3
+## Deploying, the ramps find the ground under their tips (how high a vehicle sits on its gear
+## varies, and so does the ground) and angle down to meet it, sunk this far in so there's no
+## lip (and to cover a ground ray meeting the terrain a little above where feet stand), no steeper than MAX_RAMP_DEG (past that the data's angle stands).
+const GROUND_SINK_M := 0.3
+const MAX_RAMP_DEG := 40.0
 ## Above this height over the ground (m), a helicopter counts as off the ground whatever its
 ## flight mode says (its origin sits up to ~0.5 m over the ground on its gear when parked).
 const LIFT_M := 1.2
@@ -37,6 +45,8 @@ const SEAT_CHECK_S := 0.2
 
 var vehicle: Vehicle
 var spec := {}
+## The ground-reaching ramps' body (see above).
+var deck: AnimatableBody3D
 
 var open := false
 var _doors: Array = []  ## [{"shape", "mesh", "closed": Vector3, "slide": Vector3}]
@@ -47,6 +57,7 @@ var _cabin := AABB()
 var _blend := 0.0  ## 0 shut .. 1 open, eased towards `open`
 var _steps: Array = []  ## [{"shape", "mesh", "a", "b"}]
 var _deploy := 0.0  ## boarding ramps: 0 stowed .. 0.5 slid out .. 1 down on the ground
+var _ramp_open_deg := NAN  ## the rear ramp's open angle, fitted to the ground (_fit_to_ground)
 var _check_left := 0.0
 
 
@@ -60,6 +71,12 @@ func _init(p_vehicle: Vehicle = null) -> void:
 ## Builds the shapes (children of the vehicle body, so they collide as part of it) and the
 ## panels. Called from Vehicle.setup before it enters the tree.
 func build() -> void:
+	deck = AnimatableBody3D.new()
+	deck.name = "BayDeck"
+	deck.collision_layer = Vehicle.LAYER
+	deck.collision_mask = 0
+	deck.sync_to_physics = false
+	vehicle.add_child(deck)
 	var colour := Color(VehicleArt.SCHEMES.get(vehicle.scheme, VehicleArt.SCHEMES["od"]).paint).darkened(0.08)
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = colour
@@ -84,7 +101,7 @@ func build() -> void:
 		var box := BoxShape3D.new()
 		box.size = size
 		col.shape = box
-		vehicle.add_child(col)
+		deck.add_child(col)
 		var mesh := MeshInstance3D.new()
 		mesh.name = "BayStepPanel%d" % i
 		var bm := BoxMesh.new()
@@ -102,7 +119,7 @@ func build() -> void:
 			mesh.add_child(strip)
 			z += STEP_GRIP_EVERY_M
 		add_child(mesh)
-		_steps.append({"shape": col, "mesh": mesh, "a": a, "b": b})
+		_steps.append({"shape": col, "mesh": mesh, "a": a, "b": b, "b_spec": b})
 	for d: Dictionary in spec.get("doors", []):
 		var aabb := VehicleSpecs.box(d.box)
 		var shape := _add_box("BayDoor_%s" % String(d.get("name", "door")), aabb)
@@ -124,7 +141,7 @@ func build() -> void:
 		_ramp_shape = CollisionShape3D.new()
 		_ramp_shape.name = "BayRamp"
 		_ramp_shape.shape = box
-		vehicle.add_child(_ramp_shape)
+		deck.add_child(_ramp_shape)
 		_ramp_mesh = MeshInstance3D.new()
 		_ramp_mesh.name = "BayRampPanel"
 		var bm := BoxMesh.new()
@@ -171,18 +188,58 @@ func set_open(value: bool) -> void:
 
 
 func _ready() -> void:
+	vehicle.add_collision_exception_with(deck)  # its own deck never shoves the hull
 	set_process(true)  # the boarding ramps follow landed-or-not on every peer (Helicopter.flight_mode)
 
 
 func _process(delta: float) -> void:
 	var want := 1.0 if open else 0.0
 	if _blend != want:
+		if open and _blend == 0.0:
+			_fit_to_ground()
 		_blend = move_toward(_blend, want, delta / PANEL_S)
 		_pose_panels()
 	var deploy := 1.0 if open and landed() else 0.0
 	if _deploy != deploy and not _steps.is_empty():
+		if deploy > 0.0 and _deploy == 0.0:
+			_fit_to_ground()
 		_deploy = move_toward(_deploy, deploy, delta / STEP_S)
 		_pose_steps()
+
+
+## The ground's height under the vehicle-frame point `at` (the vehicle's frame), or NAN.
+func _ground_local(at: Vector3) -> float:
+	if not vehicle.is_inside_tree():
+		return NAN
+	var top := vehicle.global_transform * (at + Vector3.UP * 2.0)
+	var q := PhysicsRayQueryParameters3D.create(top, top + Vector3.DOWN * 8.0, 1, [vehicle.get_rid(), deck.get_rid()])
+	var hit := vehicle.get_world_3d().direct_space_state.intersect_ray(q)
+	return NAN if hit.is_empty() else (vehicle.global_transform.affine_inverse() * (hit.position as Vector3)).y
+
+
+## Fits the boarding ramps' tips and the rear ramp's open angle to the ground under them.
+func _fit_to_ground() -> void:
+	var steep := sin(deg_to_rad(MAX_RAMP_DEG))
+	for st: Dictionary in _steps:
+		var a: Vector3 = st.a
+		var b: Vector3 = st.b_spec
+		var g := _ground_local(b)
+		if is_nan(g):
+			continue
+		var length := a.distance_to(b)
+		var drop := clampf(maxf(a.y - (g - GROUND_SINK_M), a.y - b.y), 0.0, length * steep)  # never shallower than the data's
+		var run := sqrt(maxf(length * length - drop * drop, 0.0))
+		var out := Vector3(b.x - a.x, 0.0, b.z - a.z).normalized()
+		st.b = a + out * run + Vector3.DOWN * drop
+	var ramp: Dictionary = spec.get("ramp", {})
+	if not ramp.is_empty():
+		var hinge: Array = ramp.get("hinge", [1.0, 5.0])
+		var length := float(ramp.get("length", 3.0))
+		var deg := deg_to_rad(float(ramp.get("open_deg", 19.0)))
+		var g := _ground_local(Vector3(0.0, float(hinge[0]), float(hinge[1]) + length * cos(deg)))
+		if not is_nan(g):
+			var drop := clampf(float(hinge[0]) - (g - GROUND_SINK_M), 0.0, length * steep)
+			_ramp_open_deg = maxf(rad_to_deg(asin(drop / length)), rad_to_deg(deg))  # never shallower than the data's
 
 
 ## Whether the vehicle sits on the ground (a helicopter: not flying, not lifted off).
@@ -224,7 +281,8 @@ func _pose_panels() -> void:
 	if _ramp_shape:
 		var hinge: Array = ramp.get("hinge", [1.0, 5.0])
 		var length := float(ramp.get("length", 3.0))
-		_ramp_angle = deg_to_rad(lerpf(float(ramp.get("closed_deg", -17.0)), float(ramp.get("open_deg", 19.0)), t))
+		var open_deg := _ramp_open_deg if not is_nan(_ramp_open_deg) else float(ramp.get("open_deg", 19.0))
+		_ramp_angle = deg_to_rad(lerpf(float(ramp.get("closed_deg", -17.0)), open_deg, t))
 		var h := Vector3(0.0, float(hinge[0]), float(hinge[1]))
 		var dir := Vector3(0.0, -sin(_ramp_angle), cos(_ramp_angle))  # aft from the hinge, down by the angle
 		var xf := _slab(h, h + dir * length)

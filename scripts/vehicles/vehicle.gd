@@ -934,7 +934,7 @@ func ffv_clear(from: Vector3, direction: Vector3) -> bool:
 		var hit := space.intersect_ray(q)
 		if hit.is_empty():
 			return true
-		if hit.collider == self:
+		if hit.collider == self or (bay != null and hit.collider == bay.deck):
 			return false
 		exclude.append((hit.collider as CollisionObject3D).get_rid())
 	return true

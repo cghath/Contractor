@@ -408,7 +408,7 @@
 					{"name": "left", "box": [-2.38, 1.0, -4.1, -2.3, 3.6, -1.5], "slide": [0.0, 0.0, 2.7]},
 					{"name": "right", "box": [2.3, 1.0, -4.1, 2.38, 3.6, -1.5], "slide": [0.0, 0.0, 2.7]}
 				],
-				"ramp": {"hinge": [1.0, 5.0], "length": 3.2, "half_width": 1.35, "thick": 0.14, "closed_deg": -17.0, "open_deg": 18.0},
+				"ramp": {"hinge": [1.0, 5.0], "length": 3.8, "half_width": 1.35, "thick": 0.14, "closed_deg": -17.0, "open_deg": 30.0},
 				"steps": [
 					{"from": [-2.25, 1.0, -2.8], "to": [-4.5, -0.7, -2.8], "half_width": 1.2},
 					{"from": [2.25, 1.0, -2.8], "to": [4.5, -0.7, -2.8], "half_width": 1.2}
