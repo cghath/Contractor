@@ -1180,6 +1180,11 @@ func _process(frame_delta: float) -> void:
 	else:
 		# Head and weapon keep facing where the owner looks, whatever the upper body's lean
 		# and twist (rotation.y, applied outside the pitch: the turn the torso's twist undoes).
+		# Back on its pivot with no roll: a ragdoll (limp, above) set the whole transform, and
+		# only pitch and yaw are set here (Captain, 2026-10-17: "woke up from being down, head
+		# sideways").
+		head.position = HEAD_PIVOT
+		head.rotation.z = 0.0
 		head.rotation.y = -_twist_shown
 		hands_anchor.rotation.y = -_twist_shown
 		var lean := 0.0 if downed else _upper_body_pitch((_shown.root as Transform3D).basis * (_shown.torso as Transform3D).basis, _yaw_shown) - _gait_lean
@@ -1562,6 +1567,9 @@ func _update_attachment(delta: float, carry: Dictionary) -> void:
 
 ## Arms: each hand goes to its goal (blending from where it was when the goal changes), or
 ## swings free.
+var _arms_ragdolled := false  # _update_arms: the ragdoll had the arms last frame
+
+
 func _update_arms(delta: float, carry: Dictionary, swing: float) -> void:
 	var mode: StringName = carry.get("mode", &"")
 	if downed and ragdolled() and mode != CARRIED and mode != DRAGGED:
@@ -1573,7 +1581,15 @@ func _update_arms(delta: float, carry: Dictionary, swing: float) -> void:
 			var arm: Transform3D = parts["arm_" + side]
 			_upper[i].transform = torso_t.affine_inverse() * arm
 			_forearm[i].transform = arm.affine_inverse() * (parts["fore_" + side] as Transform3D)
+		_arms_ragdolled = true
 		return
+	if _arms_ragdolled:
+		# Out of the ragdoll: its parts set the arms' whole transforms; back on their joints at
+		# once (the rest below only turns them, and the shoulders would ease back for seconds).
+		_arms_ragdolled = false
+		for i in 2:
+			_upper[i].position = shoulder() * Vector3(1.0 if i == 0 else -1.0, 1, 1)
+			_forearm[i].position = Vector3(0, -UPPER_ARM, 0)
 	var goals := _arm_goals(carry)
 	_place_shoulders(delta)
 	for i in 2:

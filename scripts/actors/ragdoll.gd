@@ -70,6 +70,29 @@ const SUPPORT_CHECK_S := 0.5
 const SUPPORT_GAP_M := 0.1  # less than a torso's depth: a body lying on another one has support, one left above it hasn't
 const SUPPORT_ALONG := 0.4
 
+## Captain, 2026-10-17 ("make them unsettlingly true to life. ragdolls fall realistically"):
+## - The shot that dropped him pushes the part it hit (HIT_IMPULSE by round, N s, at the hit
+##   point, along the shot) if it landed within HIT_FRESH_S of the fall: he folds the way he
+##   was hit, a headshot snaps the head back.
+## - No muscle left: the knees give at once (BUCKLE_RAD_S, shins folding back, thighs forward),
+##   so a body drops onto its knees and folds rather than toppling stiff like a plank.
+## - Limbs swing freely (LIMB_ANGULAR_DAMP; the torso TORSO_ANGULAR_DAMP), and the parts grip and
+##   don't bounce (RAGDOLL_FRICTION, no bounce): it lands heavy and stays where it lands.
+const HIT_IMPULSE := {&"pistol": 9.0, &"intermediate": 14.0, &"full_power": 22.0, &"fragment": 12.0}
+const HIT_FRESH_S := 0.5
+const BUCKLE_RAD_S := 3.5
+const LIMB_ANGULAR_DAMP := 0.5
+const TORSO_ANGULAR_DAMP := 0.9
+const RAGDOLL_FRICTION := 0.95
+## No kneeling or sitting corpses (Captain, 2026-10-17 screenshot: "sometimes they drop like
+## this", bodies settled upright on their knees on a slope): about to freeze with the torso
+## still upright (its up within acos(UPRIGHT_DOT) of the world's), it's pushed over at the
+## shoulders (TOPPLE_IMPULSE, N s: along the dropping shot, else the way it faces), at most
+## TOPPLE_MAX times; then it freezes as it lies.
+const UPRIGHT_DOT := 0.6
+const TOPPLE_IMPULSE := 30.0
+const TOPPLE_MAX := 2
+
 ## Turn off for a session (the older suites that check the fixed downed pose).
 static var enabled := true
 
@@ -83,6 +106,8 @@ var _sent := PackedFloat32Array()
 var _root_last: Variant = null  # the body's transform last step (host)
 var _support_left := SUPPORT_CHECK_S
 var _woke_at: Variant = null  # where the torso was when it last fell again for want of support
+var _topples := 0
+var _hit_dir := Vector3.ZERO  # the dropping shot's way (flat), for _topple
 
 
 ## Host: starts a ragdoll for `soldier` from the pose it's drawn in (or its saved ragdoll pose).
@@ -100,7 +125,39 @@ static func start(soldier: Soldier) -> Ragdoll:
 	var push := soldier.velocity if soldier.velocity.is_finite() else Vector3.ZERO
 	for p: RigidBody3D in r.parts.values():
 		p.linear_velocity = push
+	if not soldier.model.ragdolled():  # a fresh fall (not a saved pose put back)
+		r._buckle()
+		r._take_hit(soldier.vitals.last_hit if soldier.vitals else {})
 	return r
+
+
+## The knees give: shins fold back about the thighs' x, thighs swing forward about the torso's.
+func _buckle() -> void:
+	var torso := parts.get("torso") as RigidBody3D
+	for side: String in ["l", "r"]:
+		var leg := parts.get("leg_" + side) as RigidBody3D
+		var shin := parts.get("shin_" + side) as RigidBody3D
+		if leg and torso:
+			leg.angular_velocity += torso.global_basis.x * BUCKLE_RAD_S * 0.5
+		if shin and leg:
+			shin.angular_velocity += leg.global_basis.x * -BUCKLE_RAD_S
+
+
+## The dropping shot's push on the part nearest where it hit.
+func _take_hit(hit: Dictionary) -> void:
+	if hit.is_empty() or Time.get_ticks_msec() / 1000.0 - float(hit.get("time", -INF)) > HIT_FRESH_S:
+		return
+	var at: Vector3 = hit.position
+	var dir: Vector3 = hit.direction
+	if not at.is_finite() or dir.length() < 0.01:
+		return
+	_hit_dir = Vector3(dir.x, 0.0, dir.z)
+	var best: RigidBody3D = null
+	for p: RigidBody3D in parts.values():
+		if best == null or (p.global_transform * p.center_of_mass).distance_to(at) < (best.global_transform * best.center_of_mass).distance_to(at):
+			best = p
+	if best:
+		best.apply_impulse(dir.normalized() * float(HIT_IMPULSE.get(hit.get("round_class", &"intermediate"), 14.0)), at - best.global_position)
 
 
 ## Other peers: static parts that follow the body's ragdoll_net.
@@ -237,7 +294,12 @@ func _build(bones: Dictionary) -> void:
 			rb.continuous_cd = true
 			rb.freeze_mode = RigidBody3D.FREEZE_MODE_STATIC
 			rb.linear_damp = 0.1
-			rb.angular_damp = 1.5
+			rb.angular_damp = TORSO_ANGULAR_DAMP if key == "torso" else LIMB_ANGULAR_DAMP
+			var mat := PhysicsMaterial.new()
+			mat.friction = RAGDOLL_FRICTION
+			mat.rough = true
+			mat.bounce = 0.0
+			rb.physics_material_override = mat
 		add_child(part)
 		part.global_transform = _world(bones[key], m)
 		parts[key] = part
@@ -305,8 +367,27 @@ func _physics_process(delta: float) -> void:
 			break
 	_still_s = _still_s + delta if still else 0.0
 	_send()
+	if _still_s >= SETTLE_S and _age_s < SETTLE_MAX_S and _topple():
+		return  # came to rest upright: over it goes (still frozen by SETTLE_MAX_S whatever happens)
 	if _still_s >= SETTLE_S or _age_s >= SETTLE_MAX_S:
 		freeze()
+
+
+## Settled upright: pushed over (see TOPPLE_*). True if it was (it falls on, not frozen yet).
+func _topple() -> bool:
+	var torso := parts.get("torso") as RigidBody3D
+	if torso == null or _topples >= TOPPLE_MAX or torso.global_basis.y.dot(Vector3.UP) < UPRIGHT_DOT:
+		return false
+	_topples += 1
+	var way := _hit_dir
+	if way.length() < 0.1:
+		way = -torso.global_basis.z
+		way.y = 0.0
+	if way.length() < 0.01:
+		way = Vector3.FORWARD
+	torso.apply_impulse(way.normalized() * TOPPLE_IMPULSE, torso.global_basis.y * 0.5)
+	_still_s = 0.0
+	return true
 
 
 ## Host: the body itself only moves while it's a ragdoll when something puts it somewhere (a

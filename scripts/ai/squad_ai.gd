@@ -186,6 +186,11 @@ const SEPARATION_M := 3.0
 ## crouched each time he reached his moving slot and stood to catch up, and a base of fire
 ## stood for every burst and crouched in every pause.
 const CROUCH_HOLD_S := 1.2
+## Back down from standing only after this long (Captain, 2026-10-17: "fix ai crouch bouncing
+## still": at cover it stood for each burst and ducked between them, CROUCH_HOLD_S being barely
+## longer than the 0.5-1.1 s pause, so it bobbed every second in a firefight). Pinned or stunned
+## still goes down at once.
+const CROUCH_DOWN_HOLD_S := 2.5
 const STACK_M := 1.5
 ## Cover that only hides you (wood or sheet metal a rifle round goes through, see
 ## VoxelWorld.MATERIALS) scores this much worse than cover that stops a round arriving with
@@ -1211,7 +1216,8 @@ func _hold_crouch() -> void:
 	if want == _crouch_kept:
 		return
 	var now := Soldier._now()
-	if (want and (body.suppression >= PINNED or body.stunned_s > 0.0)) or now - _crouch_kept_at >= CROUCH_HOLD_S:
+	var hold := CROUCH_DOWN_HOLD_S if want else CROUCH_HOLD_S
+	if (want and (body.suppression >= PINNED or body.stunned_s > 0.0)) or now - _crouch_kept_at >= hold:
 		_crouch_kept = want
 		_crouch_kept_at = now
 	else:

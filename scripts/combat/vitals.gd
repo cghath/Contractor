@@ -773,9 +773,17 @@ static func round_damage(round_class: StringName, energy_j: float) -> float:
 		return snappedf(energy_j / DAMAGE_J, 0.1)
 	return {PISTOL: 0.5, INTERMEDIATE: 1.0, FULL_POWER: 2.0, FRAGMENT: 0.6}.get(round_class, 1.0)
 
+## Host: the last hit that landed ({"position", "direction" (world), "round_class", "time"}): the
+## ragdoll takes its push when this one drops the body (Ragdoll.start).
+var last_hit := {}
+
+
 func server_hit(part: StringName, hit: Dictionary) -> void:
 	if shielded:
 		return
+	if hit.has("position") and hit.has("direction"):
+		last_hit = {"position": hit.position, "direction": hit.direction, "round_class": StringName(hit.get("round_class", INTERMEDIATE)),
+			"time": Time.get_ticks_msec() / 1000.0}
 	var was_dead := _m().dead  # a corpse still takes holes (BodyDeform), nothing else
 	var round_class := StringName(hit.get("round_class", INTERMEDIATE))
 	var channel_in := _rest_channel(part, hit)
