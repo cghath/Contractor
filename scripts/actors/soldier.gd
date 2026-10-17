@@ -2478,19 +2478,19 @@ static func loot_search_seconds(target: Node) -> float:
 	return LOOT_SEARCH_HOLD_S
 
 
-## The body or vehicle at `path` this player may search now (up, lootable, in reach), else null.
+## The body, vehicle or world cache at `path` this player may search now (up, lootable, in
+## reach), else null.
 func _loot_target(path: NodePath) -> Node:
 	var node := get_node_or_null(path)
 	if node is Soldier:
 		return _lootable(path)
-	if node is Vehicle and _from_owner() and vitals.is_up():
-		var v := node as Vehicle
-		if v.cargo() == null or v.is_queued_for_deletion():
+	if (node is Vehicle or node is WorldCache) and _from_owner() and vitals.is_up():
+		if node.call(&"cargo") == null or node.is_queued_for_deletion():
 			return null
-		if not v.in_reach(self):
+		if not bool(node.call(&"in_reach", self)):
 			_client_message.rpc_id(owner_peer(), "Too far away")
 			return null
-		return v
+		return node
 	return null
 
 
@@ -2541,8 +2541,8 @@ func _server_loot_move(path: NodePath, where: StringName, index: int, id: String
 	var target := _loot_target(path)
 	if target == null or not _loot_session_ok(target):
 		return
-	if target is Vehicle:
-		var told := (target as Vehicle).server_unload(self, index, id)
+	if target is Vehicle or target is WorldCache:
+		var told := String(target.call(&"server_unload", self, index, id))
 		_client_message.rpc_id(owner_peer(), told if told != "" else "Nothing there any more")
 		return
 	var other := target as Soldier
@@ -2563,11 +2563,10 @@ func _server_loot_put(path: NodePath, container: StringName, index: int, id: Str
 	var target := _loot_target(path)
 	if target == null or not _loot_session_ok(target):
 		return
-	if target is Vehicle:
-		var v := target as Vehicle
-		if v.wrecked:
+	if target is Vehicle or target is WorldCache:
+		if bool(target.get(&"wrecked")):
 			return
-		var told := v.server_load(self, container, index, id)
+		var told := String(target.call(&"server_load", self, container, index, id))
 		_client_message.rpc_id(owner_peer(), told if told != "" else "Nothing there any more")
 		return
 	var list: Array = inventory.containers.get(container, [])
@@ -2593,12 +2592,12 @@ func _server_loot_take_class(path: NodePath, kind: StringName) -> void:
 		return
 	var types: Array = LOOT_CLASSES[kind]
 	var moved := 0
-	if target is Vehicle:
-		var v := target as Vehicle
-		for i in range(v.cargo_hold.entries().size() - 1, -1, -1):
-			var entry: Dictionary = v.cargo_hold.entries()[i]
+	if target is Vehicle or target is WorldCache:
+		var hold := target.call(&"cargo") as VehicleCargo
+		for i in range(hold.entries().size() - 1, -1, -1):
+			var entry: Dictionary = hold.entries()[i]
 			if types.is_empty() or ItemDB.get_item(entry.id).type in types:
-				if v.server_unload(self, i, entry.id).begins_with("Took"):
+				if String(target.call(&"server_unload", self, i, entry.id)).begins_with("Took"):
 					moved += 1
 	else:
 		var other := target as Soldier

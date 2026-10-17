@@ -3,14 +3,29 @@ extends RefCounted
 ## Lootable value out in the open terrain, away from the mission sites (Captain, 2026-10-16,
 ## playtest B1399 on Red Mesa: "nothing to loot out in the world"): at each VALUABLE site
 ## ZoneScatter marked (same placement rules as its rocks and trees, well clear of a road or a
-## pad), either a dead drop (one piece of cash or intel) or a small wreck/cache (a weapon, its
-## mags, and a medical item) left lying in the open.
+## pad), either a dead drop (one piece of cash or intel, a plain WorldItem) or a small cache —
+## a real WorldCache (docs/loot_window.md: "crates other than vehicle holds don't exist as
+## lootable nodes yet") holding a weapon, its mags, and a medical or salvage item, opened
+## through the same two-pane LootWindow a vehicle's hold uses.
 ##
-## Ordinary WorldItems, so these drop into the existing flow rather than a parallel one: picking
-## one up already feeds the economy (Prices.sell_price) and, for intel, IntelReveal's reveal
-## scan. Host only, spawned once a zone hosts (ZoneLevel._on_hosted); each pickup gets a stable
-## uid from its site's index, so GameState.is_looted keeps a taken one from coming back and a
-## zone reload doesn't duplicate what's already gone.
+## Both drop into the existing flow rather than a parallel one: a dead drop is an ordinary
+## WorldItem (picking one up feeds Prices/Economy and, for intel, IntelReveal's reveal scan
+## automatically); a cache is spawned through the zone's CacheSpawner (ZoneLevel.cache_spawner,
+## _make_cache) like a vehicle would be, so every peer and a late joiner get it the same way.
+## Host only, spawned once a zone hosts (ZoneLevel._on_hosted). A dead drop gets a stable uid so
+## GameState.is_looted keeps a taken one from coming back; a cache's contents are rolled fresh
+## each time the zone hosts instead (WorldCache's own doc comment) - simpler than tracking what
+## was taken from inside it across a reload.
+##
+## Site boxes (Captain, 2026-10-16, three asks that are really one mechanic): 1-4 WorldCaches at
+## every hand-built module (compound, outpost, village, checkpoint, hq, qrf_base, comms), not out
+## in the open terrain - "common sense" places a player would actually search (offices, safes,
+## command posts, desks), reusing that module's own proven-safe loot spots (ZoneModules.LOOT, a
+## small offset off each one so a box doesn't sit on top of the WorldItem already there). How
+## many: weighted toward 1-2, more at a site worth more trouble (IMPORTANT_TYPES). Most boxes
+## roll a common find (one piece of cash or intel); RARE_SHARE of them roll something better
+## instead - half the time a rarer weapon and its mags, half the time more intel and an optic
+## ("a couple maps plus a scope").
 
 const DEAD_DROP_SHARE := 0.55
 const CACHE_GUNS: Array[String] = ["akm", "ak74", "rpk"]
@@ -18,40 +33,107 @@ const CACHE_MEDICAL: Array[String] = ["ifak", "trauma_kit", "tourniquet"]
 const VALUABLE_ITEMS: Array[String] = ["cash_bundle", "gold_bars", "jewelry_case", "smuggled_relic"]
 const INTEL_ITEMS: Array[String] = ["intel_documents", "intel_phone", "intel_usb_drive", "intel_ledger"]
 const SALVAGE_ITEMS: Array[String] = ["scrap_copper", "machine_parts", "electronics_salvage"]
-const CLUSTER_SPREAD_M := 0.5
 const LIFT_M := 0.35
+## A site box's chance of a rare roll (a better weapon, or more intel and an optic) instead of
+## the common one, and the even split between those two rare outcomes.
+const RARE_SHARE := 0.18
+const RARE_OPTICS: Array[String] = ["optic_lpvo", "optic_prism_4x", "optic_dmr_3_5_10"]
+const RARE_GUNS: Array[String] = ["svd", "pkm", "rpk"]
+const RARE_INTEL_COUNT := 2
+## Off each used ZoneModules.LOOT spot (module space, m), clear of the WorldItem already there
+## and of each other; at most this many boxes a site.
+const SITE_BOX_OFFSETS: Array[Vector3] = [Vector3(0.8, 0.0, 0.5), Vector3(-0.8, 0.0, 0.5), Vector3(0.8, 0.0, -0.5), Vector3(-0.8, 0.0, -0.5)]
+## Sites worth more trouble: weighted toward more boxes.
+const IMPORTANT_TYPES: Array[String] = ["hq", "qrf_base", "compound"]
 
 
-## Host: every VALUABLE site the zone's scatter marked (skips any already looted).
+## Host: every VALUABLE site the zone's scatter marked.
 static func server_spawn_all(level: ZoneLevel) -> void:
-	if not level.multiplayer.is_server() or level.scatter == null or level.terrain == null:
+	if not level.multiplayer.is_server() or level.scatter == null or level.terrain == null or level.cache_spawner == null:
 		return
 	var sites := level.scatter.valuable_sites()
 	for i in sites.size():
 		_spawn_site(level, sites[i], "scatter_val%d" % i, i)
 
 
-## One site: a dead drop (one item) or a small cache (gun, its mags, a medical item), rolled
-## deterministically from the zone's seed and the site's index (so it's the same roll every time
-## this zone hosts; only which parts are already taken differs, by uid).
+## One site: a dead drop (one item) or a small cache (gun, its mags, a medical or salvage item),
+## rolled deterministically from the zone's seed and the site's index (so it's the same roll
+## every time this zone hosts).
 static func _spawn_site(level: ZoneLevel, site: Dictionary, uid: String, index: int) -> void:
 	var pos: Vector3 = site.pos
-	var ground: Vector3 = level.ground_point(Vector3(pos.x, 0.0, pos.z)) + Vector3.UP * LIFT_M
+	var ground: Vector3 = level.ground_point(Vector3(pos.x, 0.0, pos.z))
 	var rng := RandomNumberGenerator.new()
 	rng.seed = level.terrain.seed_value ^ 0x7A1E ^ index
 	if rng.randf() < DEAD_DROP_SHARE:
 		var pool := INTEL_ITEMS if rng.randf() < 0.5 else VALUABLE_ITEMS
-		_spawn_one(level, pool[rng.randi() % pool.size()], 1, ground, "%s_d" % uid)
+		var drop_uid := "%s_d" % uid
+		if not GameState.is_looted(drop_uid):
+			level.spawn_item(StringName(pool[rng.randi() % pool.size()]), 1, ground + Vector3.UP * LIFT_M, drop_uid)
 		return
 	var gun := CACHE_GUNS[rng.randi() % CACHE_GUNS.size()]
 	var kit: Array = CompoundLevel.HOSTILE_GUNS.get(gun, [gun])
-	_spawn_one(level, gun, 1, ground, "%s_g" % uid)
+	var items: Array = [{"id": gun, "count": 1}]
 	if kit.size() > 1:
-		_spawn_one(level, String(kit[1]), kit.size() - 1, ground + Vector3(CLUSTER_SPREAD_M, 0, 0.2), "%s_m" % uid)
-	var extra := SALVAGE_ITEMS[rng.randi() % SALVAGE_ITEMS.size()] if rng.randf() < 0.4 else CACHE_MEDICAL[rng.randi() % CACHE_MEDICAL.size()]
-	_spawn_one(level, extra, 1, ground + Vector3(-CLUSTER_SPREAD_M, 0, -0.2), "%s_k" % uid)
+		items.append({"id": String(kit[1]), "count": kit.size() - 1})
+	items.append({"id": SALVAGE_ITEMS[rng.randi() % SALVAGE_ITEMS.size()] if rng.randf() < 0.4 else CACHE_MEDICAL[rng.randi() % CACHE_MEDICAL.size()], "count": 1})
+	var cache := level.cache_spawner.spawn({"uid": uid, "pos": ground, "yaw": float(site.yaw), "label": "Cache"}) as WorldCache
+	if cache:
+		cache.server_seed(items)
 
 
-static func _spawn_one(level: ZoneLevel, id: String, count: int, pos: Vector3, uid: String) -> void:
-	if not GameState.is_looted(uid):
-		level.spawn_item(StringName(id), count, pos, uid)
+## Host: 1-4 valuables/intel boxes at every real module (not a generated town, which has its own
+## loot through BuildingGen), near spots already proven safe (ZoneModules.LOOT places a
+## WorldItem there today).
+static func server_spawn_site_boxes(level: ZoneLevel) -> void:
+	if not level.multiplayer.is_server() or level.cache_spawner == null:
+		return
+	for module: ZoneModule in level.modules():
+		var spots: Array = ZoneModules.LOOT.get(module.type, [])
+		if spots.is_empty():
+			continue
+		var rng := RandomNumberGenerator.new()
+		rng.seed = hash("%s|valbox" % module.module_id)
+		var count := mini(_site_box_count(rng, module.type), mini(spots.size(), SITE_BOX_OFFSETS.size()))
+		for k in count:
+			var anchor: Vector3 = (spots[spots.size() - 1 - k] as Dictionary).pos
+			var cache := level.cache_spawner.spawn({"uid": "%s_valbox%d" % [module.module_id, k],
+				"pos": module.to_global(anchor + SITE_BOX_OFFSETS[k]), "yaw": 0.0, "label": "Cache"}) as WorldCache
+			if cache:
+				cache.server_seed(_roll_site_box(rng))
+
+
+## How many boxes a site gets: weighted toward 1-2, a point more (capped at 4) for an
+## IMPORTANT_TYPES site.
+static func _site_box_count(rng: RandomNumberGenerator, module_type: String) -> int:
+	var roll := rng.randf()
+	var count := 1
+	if roll < 0.15:
+		count = 4
+	elif roll < 0.35:
+		count = 3
+	elif roll < 0.65:
+		count = 2
+	if module_type in IMPORTANT_TYPES or ZoneModules.base(module_type) in IMPORTANT_TYPES:
+		count = mini(count + 1, 4)
+	return count
+
+
+## One box's contents: usually one piece of cash or intel; RARE_SHARE of the time something
+## better instead, half a rarer weapon and its mags, half more intel and an optic.
+static func _roll_site_box(rng: RandomNumberGenerator) -> Array:
+	var roll := rng.randf()
+	if roll < RARE_SHARE * 0.5:
+		var gun := RARE_GUNS[rng.randi() % RARE_GUNS.size()]
+		var kit: Array = CompoundLevel.HOSTILE_GUNS.get(gun, [gun])
+		var items: Array = [{"id": gun, "count": 1}]
+		if kit.size() > 1:
+			items.append({"id": String(kit[1]), "count": kit.size() - 1})
+		return items
+	if roll < RARE_SHARE:
+		var items: Array = []
+		for i in RARE_INTEL_COUNT:
+			items.append({"id": INTEL_ITEMS[rng.randi() % INTEL_ITEMS.size()], "count": 1})
+		items.append({"id": RARE_OPTICS[rng.randi() % RARE_OPTICS.size()], "count": 1})
+		return items
+	var pool := INTEL_ITEMS if rng.randf() < 0.5 else VALUABLE_ITEMS
+	return [{"id": pool[rng.randi() % pool.size()], "count": 1}]

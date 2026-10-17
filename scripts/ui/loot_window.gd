@@ -182,12 +182,14 @@ func searching() -> bool:
 	return _awaiting or Time.get_ticks_msec() < _search_end_ms
 
 
-## The inventory a loot target holds: a body's, or a vehicle's hold.
+## The inventory a loot target holds: a body's, a vehicle's hold, or a world cache's.
 static func inventory_of(target: Node) -> Inventory:
 	if target is Soldier:
 		return (target as Soldier).inventory
 	if target is Vehicle:
 		return (target as Vehicle).cargo() as Inventory
+	if target is WorldCache:
+		return (target as WorldCache).cargo() as Inventory
 	return null
 
 
@@ -212,6 +214,8 @@ func why_close() -> String:
 		if body.body_point().distance_to(player.global_position) > Soldier.INTERACT_REACH + Soldier.INTERACT_SLACK:
 			return "Moved away"
 	elif source is Vehicle and not (source as Vehicle).in_reach(player):
+		return "Moved away"
+	elif source is WorldCache and not (source as WorldCache).in_reach(player):
 		return "Moved away"
 	return ""
 
@@ -287,6 +291,8 @@ func source_name() -> String:
 		return (source as Soldier).display_name()
 	if source is Vehicle:
 		return "%s (hold)" % (source as Vehicle).display_name()
+	if source is WorldCache:
+		return (source as WorldCache).display_name()
 	return "Container"
 
 
@@ -296,9 +302,8 @@ func _fill(box: VBoxContainer, owner: Node, side: StringName) -> void:
 	var inv := inventory_of(owner)
 	if inv == null:
 		return
-	if owner is Vehicle:
-		var hold := owner as Vehicle
-		var cargo := hold.cargo() as VehicleCargo
+	if owner is Vehicle or owner is WorldCache:
+		var cargo := owner.call(&"cargo") as VehicleCargo
 		var tiles: Array = []
 		for i in cargo.entries().size():
 			tiles.append(_entry_tile(side, VehicleCargo.HOLD, i, cargo.entries()[i]))
@@ -320,7 +325,7 @@ func _fill(box: VBoxContainer, owner: Node, side: StringName) -> void:
 			worn.append(tile)
 	if not worn.is_empty():
 		_section(box, "Worn", worn)
-	if owner == player and inv.hands != &"" and source is Vehicle:
+	if owner == player and inv.hands != &"" and (source is Vehicle or source is WorldCache):
 		_section(box, "Hands", [_tile(side, &"", 0, inv.hands, ItemDB.get_item(inv.hands).name)])
 	for container in inv.search_containers():
 		var tiles: Array = []
