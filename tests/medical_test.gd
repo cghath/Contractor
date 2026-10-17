@@ -137,6 +137,9 @@ func _test_bandage_and_gauze() -> void:
 	check(not v.server_apply_treatment(&"pressure_bandage", Vitals.NECK), "a bandage doesn't fix it")
 	check(v.server_apply_treatment(&"hemostatic_gauze", Vitals.NECK) and is_equal_approx(v.bleed_rate(), 0.8 * WoundModel.NECK_LEAK)
 		and v.wound_list()[0].packed, "gauze packs a massive neck wound, leaving its defined residual bleed")
+	check(v.care_needed().any(func(t: Dictionary) -> bool: return t.part == Vitals.NECK and t.item == &"surgical_clamp")
+		and not v.care_needed().any(func(t: Dictionary) -> bool: return t.part == Vitals.NECK and t.item == &"hemostatic_gauze"),
+		"the care plan advances to a clamp instead of repeatedly requesting ineffective packing")
 	check(v.server_apply_treatment(&"surgical_clamp", Vitals.NECK) and v.bleed_rate() == 0.0, "a clamp stops the remaining massive neck bleed")
 	v.server_reset_health()
 	_wound(v, Vitals.ABDOMEN, "internal", 1.5, &"aorta")

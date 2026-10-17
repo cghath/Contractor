@@ -1076,7 +1076,10 @@ func care_tasks() -> Array[Dictionary]:
 				tourniquet_parts[w.part] = true
 				tasks.append(_task(w.part, "arterial", TOURNIQUET))
 		elif w.kind == "junctional" or w.kind == "arterial":
-			tasks.append(_task(w.part, w.kind, &"", _options(HEMOSTATIC_GAUZE, SURGICAL_CLAMP)))
+			if w.treated:
+				tasks.append(_task(w.part, w.kind, SURGICAL_CLAMP))  # packed massive neck bleed: more gauze cannot help
+			else:
+				tasks.append(_task(w.part, w.kind, &"", _options(HEMOSTATIC_GAUZE, SURGICAL_CLAMP)))
 		elif w.kind == "internal":
 			tasks.append(_task(w.part, "internal", SURGICAL_CLAMP))
 		elif w.kind == "fracture" and w.name == BodyMap.PELVIS_BONE and not w.treated:
@@ -1304,7 +1307,7 @@ func remove_tourniquets(part: StringName) -> int:
 func _clamp_target(part: StringName) -> Dictionary:
 	var best := {}
 	for w in wounds:
-		if w.part == part and String(w.kind) in CLAMPED_KINDS and is_bleeding(w) \
+		if w.part == part and String(w.kind) in CLAMPED_KINDS and (is_bleeding(w) or rate_now(w) > 0.0) \
 				and (best.is_empty() or float(w.rate) > float(best.rate)):
 			best = w
 	if not best.is_empty():
