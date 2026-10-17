@@ -11,10 +11,10 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
-### Heavy exo: the Atlas-pattern Walker, first playable slice (Captain, 2026-10-16/17)
+### Heavy exo: the HX-1 Assault Frame, first playable slice (Captain, 2026-10-16/17)
 
 #### Added
-- `exo_mech_heavy`, the Atlas-pattern Walker (`ExoMech`, `scripts/combat/exo_mech.gd`;
+- `exo_mech_heavy`, the HX-1 Assault Frame (`ExoMech`, `scripts/combat/exo_mech.gd`;
   docs/near_future_hardware.md 2.3): a heavy mech-class exo in the `exo` slot that is never picked
   up or put on from the inventory. Climb in from the interaction menu where it stands (3 s: you're
   put where it stood, facing its way, the hatch closing round you) and Climb out on yourself (the
@@ -52,6 +52,14 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   inside until it zips shut (`CharacterModel.MECH_RELEASE`/`MECH_IN`). Climbing out it unzips and
   you step back out behind it; it's left standing open. The back and the legs' backs are now
   their own AR500 plates (`back_r`/`back_l`, `thigh_back_*`, `shin_back_*`).
+
+- Renamed the HX-1 Assault Frame (Captain, 2026-10-17: after the LX-3; the first name echoed AW's
+  own Atlas).
+- A downed suit, as in the scene (Captain, 2026-10-17): on a downed or dead pilot, a squadmate can
+  **Punch out** (the release on its back; `ExoMech.server_punch_out`): the pilot comes out beside
+  it and the suit is left lying face down, its back open (state "prone"). Kneel at its release,
+  lie down into it, and it zips shut and pushes itself up onto its feet
+  (`CharacterModel.MECH_RISE`, `ExoMech.RISE_S`). One lies face down on the vehicle range.
 
 #### Fixed
 - A round that met an armour piece's box but none of its voxels now carries on from just before

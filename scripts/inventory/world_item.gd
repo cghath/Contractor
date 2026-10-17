@@ -61,7 +61,7 @@ func _ready() -> void:
 		rotation = Vector3(0.0, float(state.get("yaw", rotation.y)), 0.0)
 		_suit = ExoMech.parked_node(item, state, self)
 		add_child(_suit)
-		size = ExoMech.PARKED_SIZE
+		size = ExoMech.parked_size(state)
 	elif is_armor:
 		# The real voxel piece, with any damage it carries; rounds hit it (see server_add_armor_hit).
 		size = VoxelArmor.size_m(item)

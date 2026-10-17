@@ -153,6 +153,11 @@ const LOOT_ALL_S := 1.6
 ## he steps back down from where it stands to where he's put (MECH_STEP, MECH_STEP_UP).
 const MECH_RELEASE := &"mech_release"
 const MECH_IN := &"mech_in"
+## Into a suit lying face down (ExoMech.RISE_S): the body drawn lying on its front, open round
+## him, zipping shut, then the whole suit pushes itself up onto its feet (base_transform), the
+## arms pushing off the ground.
+const MECH_RISE := &"mech_rise"
+const MECH_PUSH: Array[Vector3] = [Vector3(0.3, 0.42, -0.5), Vector3(-0.3, 0.42, -0.5)]
 const MECH_OPEN := &"mech_open"
 const MECH_OUT := &"mech_out"
 const MECH_GRAB: Array[Vector3] = [Vector3(0.21, 0.28, -0.38), Vector3(-0.21, 0.28, -0.38)]
@@ -436,8 +441,13 @@ func body_scale() -> float:
 var net_offset := Transform3D.IDENTITY
 
 
-## The model's own transform when nothing moves it: its size (body_scale), moved by net_offset.
+## The model's own transform when nothing moves it: its size (body_scale), moved by net_offset,
+## and, pushing up out of lying face down in a heavy exo (MECH_RISE), turned onto its front.
 func base_transform() -> Transform3D:
+	if action_shown() == MECH_RISE:
+		var lying := 1.0 - smoothstep(0.45, 0.95, action_progress())
+		var turn := Transform3D(Basis(Vector3.RIGHT, -PI / 2 * lying), Vector3.UP * ExoMech.LIE_LIFT * lying)
+		return net_offset * turn * Transform3D(Basis.from_scale(Vector3.ONE * body_scale()), Vector3.ZERO)
 	return net_offset * Transform3D(Basis.from_scale(Vector3.ONE * body_scale()), Vector3.ZERO)
 
 
@@ -1535,6 +1545,8 @@ func _action_pose(mode: StringName) -> Dictionary:
 			w = _envelope(_action_t, s, REACH_RISE_S, REACH_FALL_S)
 		TREAT:
 			w = _envelope(_action_t, 0.0, REACH_RISE_S, REACH_FALL_S)  # until it's stopped
+		MECH_RELEASE:
+			w = _envelope(_action_t, s, REACH_RISE_S, REACH_FALL_S)
 	return blend_pose(pose, _reaching, w) if w > 0.0 else pose
 
 
@@ -1555,7 +1567,7 @@ func _update_action(delta: float) -> void:
 		_action_t = 0.0
 		_reaching = {}
 		var id := StringName(action_net.get("id", &""))
-		if id in [PICK_UP, LOOT, TREAT]:
+		if id in [PICK_UP, LOOT, TREAT, MECH_RELEASE]:
 			var kneel := bool(action_net.get("kneel", false))
 			# Treating without a kneel is treating yourself (server_treat): no turning to it.
 			_reaching = reach_pose(pose, action_net.get("at", Vector3.ZERO), kneel, id != TREAT or kneel, body)
@@ -1766,6 +1778,11 @@ func _action_goals(held: Array) -> Array:
 				return [["mech", MECH_GRAB[0]], ["mech", MECH_GRAB[1]]]  # arms pushed into its sleeves
 		MECH_OPEN:
 			return [["mech", MECH_GRAB[0]], ["mech", MECH_GRAB[1]]]
+		MECH_RISE:
+			if t < s * 0.45:
+				return [["mech", MECH_GRAB[0]], ["mech", MECH_GRAB[1]]]  # arms pushed into its sleeves
+			if t < s * 0.85:
+				return [["push", MECH_PUSH[0]], ["push", MECH_PUSH[1]]]  # pushing off the ground
 		MECH_OUT:
 			if t < s * 0.35:
 				return [["mech", MECH_GRAB[0]], ["mech", MECH_GRAB[1]]]  # drawing the arms back out

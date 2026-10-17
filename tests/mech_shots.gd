@@ -1,5 +1,5 @@
 extends Node
-## The Atlas-pattern Walker (ExoMech) for art review: standing open on the vehicle range, a
+## The HX-1 Assault Frame (ExoMech) for art review: standing open on the vehicle range, a
 ## soldier climbing in (hatch half shut), piloted from all round with its WG-50 low and ready,
 ## close-ups of the gun, legs and head unit, plates after a few hits, climbing out, and first
 ## person. Needs a real window, but never takes focus or the mouse (ShotWindow:
@@ -139,13 +139,33 @@ func _ready() -> void:
 		await _shot(String(step[1]), c + Vector3(2.0, 0.2, -1.8), c + Vector3(0, -0.3, -0.4))
 	await get_tree().create_timer(ExoMech.OUT_S * 0.3 + 0.5).timeout
 	await _shot("left_standing_open", c + Vector3(1.6, 0.4, -3.0), c)
+
+	# The one lying face down (punched out), its back open: kneel at the release, lie down into
+	# it, it zips shut and pushes itself up.
+	var lying := _suit(true)
+	if lying:
+		var lf := ExoMech.parked_feet(lying)
+		var mid := lf + Vector3(0, 0.5, 1.2)  # (it lies along +Z from its feet)
+		await _shot("lying_punched_out", mid + Vector3(2.4, 1.4, -0.6), mid)
+		await _shot("lying_back_open", mid + Vector3(0.4, 2.4, -1.2), mid)
+		player.global_position = Vector3(ExoMech.parked_point(lying).x + 0.9, lf.y, ExoMech.parked_point(lying).z)
+		player.rotation.y = -PI / 2
+		await _frames(3)
+		player._server_enter_mech.rpc_id(1, lying.get_path())
+		for step: Array in [[CharacterModel.MECH_RELEASE, 0.5, "lying_1_release"], [CharacterModel.MECH_RISE, 0.1, "lying_2_in_it"],
+				[CharacterModel.MECH_RISE, 0.45, "lying_3_shut"], [CharacterModel.MECH_RISE, 0.7, "lying_4_pushing_up"], [CharacterModel.MECH_RISE, 0.9, "lying_5_up"]]:
+			while player.model.action_shown() != step[0]:
+				await get_tree().process_frame
+			await _wait_progress(float(step[1]))
+			print("[mech] %s at %.2f" % [step[2], player.model.action_progress()])
+			await _shot(String(step[2]), mid + Vector3(2.6, 1.0, -0.8), mid + Vector3(0, 0.3, -0.6))
 	print("[mech] saved to %s" % ProjectSettings.globalize_path(out))
 	get_tree().quit(0)
 
 
-func _suit() -> WorldItem:
+func _suit(prone := false) -> WorldItem:
 	for n: Node in get_tree().get_nodes_in_group(WorldItem.GROUP):
-		if n is WorldItem and (n as WorldItem).item_id == &"exo_mech_heavy":
+		if n is WorldItem and (n as WorldItem).item_id == &"exo_mech_heavy" and bool((n as WorldItem).state.get("prone", false)) == prone:
 			return n
 	return null
 

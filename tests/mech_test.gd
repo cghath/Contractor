@@ -1,5 +1,5 @@
 extends Node
-## The heavy exo, the Atlas-pattern Walker (ExoMech; Captain 2026-10-16: real ArmorRules plates
+## The heavy exo, the HX-1 Assault Frame (ExoMech; Captain 2026-10-16: real ArmorRules plates
 ## on the suit, entry and exit animations, re-enter a damaged suit left on the ground). On the
 ## vehicle range, where one stands open with its WG-50 on it, the host's player:
 ## - can't pick it up or put it on from the inventory, nor carry its gun outside one;
@@ -57,9 +57,9 @@ func _ready() -> void:
 
 func _run() -> void:
 	var inv := player.inventory
-	var atlas := ItemDB.get_item(&"exo_mech_heavy")
+	var suit_item := ItemDB.get_item(&"exo_mech_heavy")
 	var gun := ItemDB.get_item(&"wg50_walker")
-	check(atlas != null and atlas.name == "Atlas-pattern Walker" and atlas.slot == ExoMech.SLOT and ExoMech.is_mech(atlas), "the Atlas-pattern Walker is an exo-slot item")
+	check(suit_item != null and suit_item.name == "HX-1 Assault Frame" and suit_item.slot == ExoMech.SLOT and ExoMech.is_mech(suit_item), "the HX-1 Assault Frame is an exo-slot item")
 	check(gun != null and ExoMech.mech_only(gun) and String(gun.stats.ammo) == "belt_50bmg", "its WG-50 is a mech-only .50 cal")
 	check(not Prices.for_sale(&"exo_mech_heavy") and not Prices.for_sale(&"wg50_walker"), "neither is sold yet (no price: Captain's call)")
 	var suit := _suit()
@@ -67,7 +67,7 @@ func _run() -> void:
 	if suit == null:
 		return
 	var pieces := suit.find_children("MechPad_*", "VoxelArmor", true, false)
-	check(pieces.size() == ExoFrame.pad_items(atlas).size() and pieces.size() >= 14, "its plates are real armour pieces (%d)" % pieces.size())
+	check(pieces.size() == ExoFrame.pad_items(suit_item).size() and pieces.size() >= 14, "its plates are real armour pieces (%d)" % pieces.size())
 	check(pieces.all(func(p: VoxelArmor) -> bool: return p.camo == "multicam"), "painted in camo")
 	check(suit.freeze and absf(angle_difference(suit.global_rotation.y, PI)) < 0.01, "standing, facing the spawn (yaw %.2f)" % suit.global_rotation.y)
 	# Not an inventory item.
@@ -107,8 +107,8 @@ func _run() -> void:
 	# The back is the hatch (ExoMech.HATCH): open round him, the legs' backs too, then it zips shut.
 	var back: VoxelArmor = gear.pads().get("back_r")
 	var shin_back: VoxelArmor = gear.pads().get("shin_back_l")
-	var back_at: Transform3D = ExoFrame.pad_items(atlas).filter(func(p: Dictionary) -> bool: return p.id == "back_r")[0].at
-	var shin_back_at: Transform3D = ExoFrame.pad_items(atlas).filter(func(p: Dictionary) -> bool: return p.id == "shin_back_l")[0].at
+	var back_at: Transform3D = ExoFrame.pad_items(suit_item).filter(func(p: Dictionary) -> bool: return p.id == "back_r")[0].at
+	var shin_back_at: Transform3D = ExoFrame.pad_items(suit_item).filter(func(p: Dictionary) -> bool: return p.id == "shin_back_l")[0].at
 	await _frames(2)
 	check(back != null and not back.transform.is_equal_approx(back_at) and not shin_back.transform.is_equal_approx(shin_back_at), "its back open round him, down the legs")
 	check((player.model.part_node(Vitals.CHEST).get_child(0) as Node3D).visible, "him inside it, seen through the open back")
@@ -176,6 +176,48 @@ func _run() -> void:
 		player._server_enter_mech.rpc_id(1, suit.get_path())
 		await _seconds(ExoMech.RELEASE_S + 0.3)
 		check(inv.slots[ExoMech.SLOT] == &"exo_mech_heavy", "and a disabled suit can be climbed into too")
+	await _seconds(ExoMech.ENTER_S + 0.4)
+	await _test_lying()
+
+
+## Punched out (the manual release on a downed pilot's back): the suit left lying face down, open;
+## lying down into it, it zips shut and pushes itself up (Captain, 2026-10-17, AW's punch-out scene).
+func _test_lying() -> void:
+	var inv := player.inventory
+	check(ExoMech.punch_out_problem(player, player).begins_with("Only a downed"), "a pilot who's up isn't punched out")
+	var feet := player.global_position
+	var yaw := player.global_rotation.y
+	ExoMech.server_leave_lying(player)
+	await _frames(3)
+	var lying: WorldItem = null
+	for n: Node in get_tree().get_nodes_in_group(WorldItem.GROUP):
+		if n is WorldItem and (n as WorldItem).item_id == &"exo_mech_heavy" and bool((n as WorldItem).state.get("prone", false)) 				and ExoMech.parked_feet(n).distance_to(feet) < 0.1:
+			lying = n
+	check(lying != null and inv.slots[ExoMech.SLOT] == &"" and String(lying.state.get("gun", {}).get("id", "")) == "wg50_walker",
+		"punched out: the suit lies where he was, its gun on it, him out of it")
+	if lying == null:
+		return
+	var bones := lying.get_node(^"ParkedSuit/Bones") as Node3D
+	check(bones.global_basis.y.normalized().dot(Vector3.UP) < 0.1 and bones.global_basis.z.normalized().dot(Vector3.UP) > 0.9,
+		"lying on its front, its back (and the release) up")
+	check(ExoMech.parked_point(lying).y < 1.2 and absf(angle_difference(lying.global_rotation.y, yaw)) < 0.01, "the release within reach, low down (%.2f m)" % ExoMech.parked_point(lying).y)
+	check(player.global_position.distance_to(feet) > 0.8, "he's beside it")
+	# Lie down into it.
+	player.global_position = ExoMech.parked_point(lying) - Vector3.UP * ExoMech.parked_point(lying).y + Basis(Vector3.UP, yaw).x * 0.9
+	await _frames(2)
+	check(ExoMech.enter_problem(player, lying) == "", "beside it, in reach of the release")
+	player._server_enter_mech.rpc_id(1, lying.get_path())
+	await _frames(3)
+	check(player.model.action_shown() == CharacterModel.MECH_RELEASE and bool(player.model.action_net.get("kneel", false)), "down on a knee at the release")
+	await _seconds(ExoMech.RELEASE_S + 0.15)
+	check(inv.slots[ExoMech.SLOT] == &"exo_mech_heavy" and player.global_position.distance_to(feet) < 0.05, "he's in it, lying where it lay")
+	check(player.model.action_shown() == CharacterModel.MECH_RISE and player.model.transform.basis.y.normalized().dot(Vector3.UP) < 0.2,
+		"lying face down in it (%s)" % player.model.action_shown())
+	await _seconds(ExoMech.RISE_S * 0.7)
+	check(player.model.transform.basis.y.normalized().dot(Vector3.UP) > 0.2, "pushing itself up")
+	await _seconds(ExoMech.RISE_S * 0.3 + 0.4)
+	check(not ExoMech.transitioning(player) and player.model.transform.basis.y.normalized().dot(Vector3.UP) > 0.99, "and up on its feet, shut")
+	check(inv.slots[&"primary"] == &"wg50_walker", "its gun back in his hands")
 
 
 func _test_movement() -> void:
@@ -257,7 +299,7 @@ func _test_no_seat() -> void:
 
 func _suit() -> WorldItem:
 	for n: Node in get_tree().get_nodes_in_group(WorldItem.GROUP):
-		if n is WorldItem and (n as WorldItem).item_id == &"exo_mech_heavy" and not n.is_queued_for_deletion():
+		if n is WorldItem and (n as WorldItem).item_id == &"exo_mech_heavy" and not n.is_queued_for_deletion() 				and not bool((n as WorldItem).state.get("prone", false)):  # (the standing one: another lies face down)
 			return n
 	return null
 

@@ -1353,6 +1353,21 @@ func _server_enter_mech(path: NodePath) -> void:
 	ExoMech.server_enter(self, suit)
 
 
+## Heavy exo: punch the downed or dead pilot at `path` out of his suit (ExoMech.server_punch_out).
+@rpc("any_peer", "call_local", "reliable")
+func _server_punch_out(path: NodePath) -> void:
+	if not _from_owner() or not vitals.is_up() or _is_busy():
+		return
+	var body := get_node_or_null(path) as Soldier
+	if body == null or body == self:
+		return
+	var why := ExoMech.punch_out_problem(self, body)
+	if why != "":
+		_client_message.rpc_id(owner_peer(), why)
+		return
+	ExoMech.server_punch_out(self, body)
+
+
 ## Heavy exo: climb out, leaving it standing (ExoMech.server_exit).
 @rpc("any_peer", "call_local", "reliable")
 func _server_exit_mech() -> void:

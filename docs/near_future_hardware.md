@@ -306,7 +306,7 @@ repair it train ew pilots etc." Parsed into what this means to build:
   model question above. Not scoped further here; flagged as the reason this tier ships last.
 
 **Built, first playable slice (2026-10-17, `ExoMech`, branch `claude/heavy-exo-55eabf`):** the
-Atlas-pattern Walker (`exo_mech_heavy`) as the Captain decided above. What the slice is, and why:
+HX-1 Assault Frame (`exo_mech_heavy`) as the Captain decided above. What the slice is, and why:
 - **Not a new skeleton (open question 4):** the suit is built round the normal `CharacterModel`
   rig, drawn 1.25x while piloted (`suit_size`: plates, hitboxes, eye and capsule all scale, about
   2.3 m tall; most doors are too low for it), so wounds, ragdolls, poses and networking keep
@@ -315,8 +315,11 @@ Atlas-pattern Walker (`exo_mech_heavy`) as the Captain decided above. What the s
 - **Entry and exit through the back, with the manual release** (Captain, 2026-10-17, pointing at
   AW's punch-out scene): the release panel on its back unzips it, the power pack and back plates
   splitting at the spine, then the thighs' and shins' backs; the pilot is in it, arms pushed into
-  the sleeves, and it zips shut. Out: it unzips and he steps back out. A downed suit lying face
-  down (as in that scene) that you climb into and that pushes itself up is not built yet.
+  the sleeves, and it zips shut. Out: it unzips and he steps back out.
+- **Downed suits** (that scene's other half): a squadmate punches a downed or dead pilot out (the
+  same release); the suit is left lying face down, open; you kneel at the release, lie down into
+  it, and it zips shut and pushes itself up. Next pass could make the push-up knees-first rather
+  than a pivot at the feet.
 - **Plates:** fifteen `VoxelArmor` pads (`stats.pads`, reusing the LX-3's per-part pad system):
   all AR500 steel (Captain, 2026-10-17): IV on the chest, head unit, shoulders and back, steel III on the belly, steel III++ on the arms and legs
   (Captain, 2026-10-17: the chest "should be steel 3", then "some of the armor to level 4 steel"), the head unit's
@@ -368,7 +371,7 @@ COD:AW's trademarked names and the real aircraft/exoskeleton names they might ot
 | Base VTOL | `vtol_petrel` | VT-14 Petrel |
 | Upgrade VTOL | `vtol_razorback` | Razorback (Captain's own name; designator optional) |
 | Light infantry exo | `exo_frame_light` | Strider Exoskeleton |
-| Heavy mech-class exo | `exo_mech_heavy` | Atlas-pattern Walker |
+| Heavy mech-class exo | `exo_mech_heavy` | HX-1 Assault Frame (Captain, 2026-10-17: after the LX-3; the first proposal echoed AW's own Atlas) |
 
 ## 3. Open questions for Captain
 

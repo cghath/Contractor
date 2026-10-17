@@ -115,6 +115,7 @@ const ACTIONS := {
 	],
 	DOWNED: [
 		{"id": &"put_down", "label": "Put down", "needs": &"moving_body", "request": &"_server_release_body", "with": &"none"},
+		{"id": &"punch_out", "label": "Punch out", "needs": &"mech_pilot", "request": &"_server_punch_out", "with": &"target"},
 		{"id": &"treat", "label": "Treat", "needs": &"treatable", "submenu": &"treatments"},
 		{"id": &"loot", "label": "Loot", "needs": &"lootable", "window": true},
 		{"id": &"loot_all", "label": "Loot all", "needs": &"lootable", "request": &"_server_loot_body", "with": &"target"},
@@ -126,6 +127,7 @@ const ACTIONS := {
 	],
 	DEAD: [
 		{"id": &"put_down", "label": "Put down", "needs": &"moving_body", "request": &"_server_release_body", "with": &"none"},
+		{"id": &"punch_out", "label": "Punch out", "needs": &"mech_pilot", "request": &"_server_punch_out", "with": &"target"},
 		{"id": &"loot", "label": "Loot", "needs": &"has_gear", "window": true},
 		{"id": &"loot_all", "label": "Loot all", "needs": &"has_gear", "request": &"_server_loot_body", "with": &"target"},
 		{"id": &"carry", "label": "Carry", "needs": &"can_carry", "request": &"_server_carry_body", "with": &"target"},
@@ -444,6 +446,10 @@ static func _check(need: StringName, actor: Soldier, target: Node) -> String:
 			if not (target is WorldItem and ExoMech.is_mech(ItemDB.get_item((target as WorldItem).item_id))):
 				return _HIDE
 			return ExoMech.enter_problem(actor, target, false)
+		&"mech_pilot":  # a downed or dead heavy exo pilot: the manual release on its back
+			if not (target is Soldier and ExoMech.piloting((target as Soldier).inventory)):
+				return _HIDE
+			return ExoMech.punch_out_problem(actor, target)
 		&"in_mech":
 			if not ExoMech.piloting(actor.inventory):
 				return _HIDE

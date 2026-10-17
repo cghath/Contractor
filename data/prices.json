@@ -39,7 +39,7 @@
 		"javelin_missile": 12000, "pg7v_round": 300, "og7v_round": 250
 	},
 	"_launchers": "Wave 5 (V2) launchers and rounds, proposed: AT4 1800, NLAW 4000, rounds 200-600, Javelin missile 12000 (catalogue plan); the RPG-7 and its rounds are loot, sell-only. The Javelin is buyable until wave 6 gates it behind reputation.",
-	"_heavy_exo": "The Atlas-pattern Walker and its WG-50 have no price yet (Captain's call: docs/near_future_hardware.md 2.3a); not sold until they do.",
+	"_heavy_exo": "The HX-1 Assault Frame and its WG-50 have no price yet (Captain's call: docs/near_future_hardware.md 2.3a); not sold until they do.",
 	"not_for_sale": ["enemy_radio", "hvt_case", "supply_crate", "supply_pallet", "electronics_salvage", "cpr", "intel_laptop", "intel_phone", "intel_documents", "intel_usb_drive", "intel_ledger", "belt_127x108", "rpg7", "pg7v_round", "og7v_round", "exo_mech_heavy", "wg50_walker"],
 	"repair": {"share_per_integrity": 0.8, "per_chip": 12, "max_share": 0.8},
 	"supports": {"resupply": 12000, "transport": 9000, "aav": 18000, "extraction": 14000, "medevac": 8000, "cargo": 6000},

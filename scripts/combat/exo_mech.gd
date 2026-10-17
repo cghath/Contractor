@@ -1,6 +1,6 @@
 class_name ExoMech
 extends RefCounted
-## The heavy mech-class exo, the "Atlas-pattern Walker" (docs/near_future_hardware.md 2.3;
+## The heavy mech-class exo, the HX-1 Assault Frame (docs/near_future_hardware.md 2.3;
 ## Captain, 2026-10-16): a powered chassis the soldier climbs into and pilots, learned from the
 ## Captain's reference art (a bulky biped with an integrated head unit, thick hydraulic legs, a
 ## power pack on the back and a two-handed heavy weapon held low and ready, in real camo).
@@ -41,8 +41,16 @@ const OUT_S := 1.6
 const REACH_M := 2.0
 ## How far behind the suit he stands once out.
 const STEP_OUT_M := 0.7  # CharacterModel.MECH_STEP: the clip walks him out that far
-## A parked suit's box (and the WorldItem's collision).
+## A parked suit's box (and the WorldItem's collision): standing, and lying face down ("prone").
 const PARKED_SIZE := Vector3(1.2, 2.35, 1.1)
+const PRONE_SIZE := Vector3(1.2, 0.95, 2.35)
+## A suit lying face down (Captain, 2026-10-17, the AW scene he pointed to: a downed suit "still
+## looks functional", the manual punch-out, the soldier lies down into it and it pushes itself
+## up): its bones turned onto its front, this high off the ground (its chest plate's depth).
+const LIE_LIFT := 0.36
+## Lying in and pushing up: open round him, zipping shut, then up onto its feet
+## (CharacterModel.MECH_RISE).
+const RISE_S := 3.6
 
 ## The back is the hatch (Captain, 2026-10-17, from the punch-out scene he pointed to: you get in
 ## from the back, "the full back opens, the legs too", it opens like a zipper): the back armour
@@ -119,7 +127,7 @@ static func hide_pilot(model: CharacterModel, gear_nodes: Array, hidden: bool) -
 ## Whether `body` is climbing into or out of a suit now (no moving meanwhile).
 static func transitioning(body: Node) -> bool:
 	var model := body.get(&"model") as CharacterModel if body else null
-	return model != null and model.action_shown() in [CharacterModel.MECH_RELEASE, CharacterModel.MECH_IN, CharacterModel.MECH_OPEN, CharacterModel.MECH_OUT]
+	return model != null and model.action_shown() in [CharacterModel.MECH_RELEASE, CharacterModel.MECH_IN, CharacterModel.MECH_RISE, CharacterModel.MECH_OPEN, CharacterModel.MECH_OUT]
 
 
 ## How far the worn suit's back stands open now (0 shut .. 1 open), from the clip playing:
@@ -129,6 +137,8 @@ static func hatch_open(model: CharacterModel) -> float:
 	match model.action_shown():
 		CharacterModel.MECH_IN:
 			return 1.0 - smoothstep(0.3, 0.92, u)
+		CharacterModel.MECH_RISE:
+			return 1.0 - smoothstep(0.12, 0.42, u)
 		CharacterModel.MECH_OPEN:
 			return smoothstep(0.05, 0.9, u)
 	return 0.0
@@ -141,7 +151,7 @@ static func piece_open(id: String, open: float) -> float:
 	return clampf(open * (1.0 + ZIP_STEP * 2.0) - ZIP_STEP * order, 0.0, 1.0)
 
 
-## "Climb into the Atlas-pattern Walker  [chest 64%, gun]" for the interaction menu.
+## "Climb into the HX-1 Assault Frame  [chest 64%, gun]" for the interaction menu.
 static func describe(item: ItemData, state: Dictionary) -> String:
 	var parts := PackedStringArray()
 	var worst := 1.0
@@ -185,7 +195,8 @@ static func server_enter(s: Soldier, suit: WorldItem) -> void:
 	var item := ItemDB.get_item(suit.item_id)
 	var from := s.global_position
 	s.server_busy(RELEASE_S + ENTER_S, "Climbing into the %s" % item.name)
-	s.model.server_play(CharacterModel.MECH_RELEASE, RELEASE_S, s.to_local(parked_point(suit)))
+	var lying := bool(suit.state.get("prone", false))
+	s.model.server_play(CharacterModel.MECH_RELEASE, RELEASE_S, s.to_local(parked_point(suit)), &"", &"", lying)  # (down on a knee to one lying there)
 	if not bool(suit.state.get("open", false)):
 		var opening := suit.state.duplicate(true)
 		opening["open"] = true
@@ -198,12 +209,12 @@ static func server_enter(s: Soldier, suit: WorldItem) -> void:
 			or suit.is_queued_for_deletion() or s.global_position.distance_to(from) > 0.5 or enter_problem(s, suit) != "":
 		return
 	var state := suit.state.duplicate(true)
-	var feet := suit.global_position - suit.global_basis.y * PARKED_SIZE.y * 0.5
+	var feet := parked_feet(suit)
 	var yaw := suit.global_rotation.y
 	GameState.item_taken(suit.uid)
 	suit.queue_free()
 	var gun: Dictionary = state.get("gun", {})
-	for key: String in ["gun", "yaw", "camo", "open"]:
+	for key: String in ["gun", "yaw", "camo", "open", "prone"]:
 		state.erase(key)
 	if not gun.is_empty():
 		var own := s.inventory.unequip(&"primary")
@@ -213,7 +224,11 @@ static func server_enter(s: Soldier, suit: WorldItem) -> void:
 	if not gun.is_empty():
 		s.inventory.put_on(&"primary", StringName(gun.id), gun.get("state", {}))
 	s.server_place(feet, yaw)
-	s.model.server_play(CharacterModel.MECH_IN, ENTER_S)
+	if lying:  # he lies down into it, it zips shut and pushes itself up
+		s.server_busy(RISE_S, "Climbing into the %s" % item.name)
+		s.model.server_play(CharacterModel.MECH_RISE, RISE_S)
+	else:
+		s.model.server_play(CharacterModel.MECH_IN, ENTER_S)
 	Sfx.server_play(&"impact_plate", feet + Vector3.UP * 1.2)  # the back, shutting (a placeholder)
 	SessionLog.note("%s climbs into the %s" % [s.log_name(), item.name])
 
@@ -241,15 +256,7 @@ static func server_exit(s: Soldier) -> void:
 	await s.get_tree().create_timer(OPEN_S).timeout
 	if not is_instance_valid(s) or not s.is_inside_tree() or not s.vitals.is_up() or worn(s.inventory) != item:
 		return
-	var removed := s.inventory.unequip(SLOT)
-	var state: Dictionary = removed.get("state", {}).duplicate(true)
-	var primary: StringName = s.inventory.slots.get(&"primary", &"")
-	if primary != &"" and mech_only(ItemDB.get_item(primary)):
-		state["gun"] = s.inventory.unequip(&"primary")
-	var rack: Dictionary = state.get("rack", {})
-	state.erase("rack")
-	if not rack.is_empty():
-		s.inventory.put_on(&"primary", StringName(rack.id), rack.get("state", {}))
+	var state := _suit_off(s)
 	var yaw := s.global_rotation.y
 	state["yaw"] = yaw
 	state["camo"] = String(s.model.variant)
@@ -264,12 +271,102 @@ static func server_exit(s: Soldier) -> void:
 	SessionLog.note("%s climbs out of the %s" % [s.log_name(), item.name])
 
 
+## Why `actor` can't punch the pilot `body` out of his suit now ("" if he can): a squadmate's
+## manual release, on a pilot who's down or dead.
+static func punch_out_problem(actor: Soldier, body: Soldier) -> String:
+	if body == null or not piloting(body.inventory) or body.vitals.is_up():
+		return "Only a downed or dead pilot is punched out"
+	if actor.inventory.hands != &"":
+		return "Your hands are full"
+	if actor.carry_mode != &"":
+		return "You're already moving someone"
+	if body.body_point().distance_to(actor.global_position) > REACH_M + 0.5:
+		return "Too far away"
+	return ""
+
+
+## Host: `actor` hits the manual release on the back of downed or dead pilot `body`'s suit
+## ("hit the manual punch out"): its back unzips (RELEASE_S, down on a knee at it), the pilot
+## comes out of it, lying beside it, and the suit is left lying face down where he lay, open,
+## its damage and gun on it (his rifle back on him), for someone to climb into.
+static func server_punch_out(actor: Soldier, body: Soldier) -> void:
+	var item := worn(body.inventory)
+	actor.server_busy(RELEASE_S, "Punching out the %s" % item.name)
+	actor.model.server_play(CharacterModel.MECH_RELEASE, RELEASE_S, actor.to_local(body.body_point() + Vector3.UP * 0.3), &"", &"", true)
+	await actor.get_tree().create_timer(RELEASE_S).timeout
+	if not is_instance_valid(actor) or not actor.vitals.is_up() or not is_instance_valid(body) or body.is_queued_for_deletion() \
+			or worn(body.inventory) != item:
+		return
+	server_leave_lying(body)
+	SessionLog.note("%s punches %s out of the %s" % [actor.log_name(), body.log_name(), item.name])
+
+
+## Host: the suit `body` wears comes off him and is left lying face down where he is, facing
+## his way, its back open (the punch-out's end); him beside it.
+static func server_leave_lying(body: Soldier) -> void:
+	var item := worn(body.inventory)
+	if item == null:
+		return
+	var state := _suit_off(body)
+	var yaw := body.global_rotation.y
+	var feet := body.global_position
+	state["yaw"] = yaw
+	state["camo"] = String(body.model.variant)
+	state["open"] = true
+	state["prone"] = true
+	var level := CompoundLevel.current(body)
+	if level:
+		level.server_spawn_dropped(item.id, 1, prone_centre(feet, yaw), state)
+	var aside := Basis(Vector3.UP, yaw).x * (PRONE_SIZE.x * 0.5 + 0.45)
+	body.server_place(feet + aside, yaw)  # the pilot out of it, beside it
+	Sfx.server_play(&"impact_plate", feet + Vector3.UP * 0.5)
+
+
+## Host: takes the suit off `s` (its state: his own rifle back on him off its rack, its gun
+## back on it).
+static func _suit_off(s: Soldier) -> Dictionary:
+	var removed := s.inventory.unequip(SLOT)
+	var state: Dictionary = removed.get("state", {}).duplicate(true)
+	var primary: StringName = s.inventory.slots.get(&"primary", &"")
+	if primary != &"" and mech_only(ItemDB.get_item(primary)):
+		state["gun"] = s.inventory.unequip(&"primary")
+	var rack: Dictionary = state.get("rack", {})
+	state.erase("rack")
+	if not rack.is_empty():
+		s.inventory.put_on(&"primary", StringName(rack.id), rack.get("state", {}))
+	return state
+
+
 # --- A suit left standing (WorldItem) -------------------------------------------------------
 
-## Where a parked suit's interaction point is: at the release on its back (world).
-static func parked_point(suit: Node3D) -> Vector3:
+## A parked suit's box: lying face down, or standing.
+static func parked_size(state: Dictionary) -> Vector3:
+	return PRONE_SIZE if bool(state.get("prone", false)) else PARKED_SIZE
+
+
+## Where a suit lying face down with its feet at `feet`, facing `yaw`, has its box's centre.
+static func prone_centre(feet: Vector3, yaw: float) -> Vector3:
+	return feet + Vector3.UP * PRONE_SIZE.y * 0.5 - Basis(Vector3.UP, yaw).z * PRONE_SIZE.z * 0.5
+
+
+## Where a parked suit's feet are (world): under it standing, at the back end of it lying.
+static func parked_feet(suit: Node3D) -> Vector3:
 	var b := suit.global_basis
-	return suit.global_position + b.y * 0.35 + b.z * 0.5
+	if suit is WorldItem and bool((suit as WorldItem).state.get("prone", false)):
+		return suit.global_position - b.y * PRONE_SIZE.y * 0.5 + b.z * PRONE_SIZE.z * 0.5
+	return suit.global_position - b.y * PARKED_SIZE.y * 0.5
+
+## Where a parked suit's interaction point is: at the release on its back (world), standing or
+## lying.
+static func parked_point(suit: Node3D) -> Vector3:
+	var bones := suit.get_node_or_null(^"ParkedSuit/Bones") as Node3D
+	if bones:
+		return bones.to_global(RELEASE_AT)
+	return suit.global_position + suit.global_basis.y * 0.35 + suit.global_basis.z * 0.5
+
+
+## The release panel on its back, in its bones' space (dress: the right lid's panel).
+const RELEASE_AT := Vector3(0.1, 1.32, 0.46)
 
 
 ## A parked suit: the chassis standing open on a bare skeleton (its rest pose, arms a little
@@ -278,9 +375,15 @@ static func parked_point(suit: Node3D) -> Vector3:
 static func parked_node(item: ItemData, state: Dictionary, suit: WorldItem) -> Node3D:
 	var root := Node3D.new()
 	root.name = "ParkedSuit"
-	root.position = Vector3.DOWN * PARKED_SIZE.y * 0.5
 	var bones := Skeleton.new()
-	bones.scale = Vector3.ONE * float(item.stats.get("size", 1.25))  # the suit's own size, as worn (size)
+	var size := Vector3.ONE * float(item.stats.get("size", 1.25))  # the suit's own size, as worn (size)
+	if bool(state.get("prone", false)):
+		# Lying face down: its feet at the box's back end, turned onto its front, up off the ground.
+		root.position = Vector3(0, -PRONE_SIZE.y * 0.5, PRONE_SIZE.z * 0.5)
+		bones.transform = Transform3D(Basis(Vector3.RIGHT, -PI / 2).scaled(size), Vector3.UP * LIE_LIFT)
+	else:
+		root.position = Vector3.DOWN * PARKED_SIZE.y * 0.5
+		bones.scale = size
 	root.add_child(bones)
 	var variant := String(state.get("camo", "multicam"))
 	for pad: Dictionary in ExoFrame.pad_items(item):
