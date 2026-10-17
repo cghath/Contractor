@@ -241,6 +241,7 @@ func _build_doll(p: Dictionary) -> void:
 		_build_buy(who)
 	var stash: Array = BaseHub.view.get("stash", [])
 	var have := BaseArmory.counts(stash)
+	var _buyable := _buyable_prices() if editable else {}
 	# Worn: each slot with what the stash has for it.
 	doll_box.add_child(_heading("Worn"))
 	var slots: Dictionary = gear.get("slots", {})
@@ -265,6 +266,12 @@ func _build_doll(p: Dictionary) -> void:
 				var it := ItemDB.get_item(StringName(sid))
 				if Loadouts.fits_slot(it, slot) and sid != id:
 					choices.append(["%s (x%d)" % [it.name, int(have[sid])], sid])
+			for sid: String in _sorted(_buyable.keys()):
+				if have.has(sid) or sid == id:
+					continue
+				var it := ItemDB.get_item(StringName(sid))
+				if Loadouts.fits_slot(it, slot):
+					choices.append(["%s ($%d)" % [it.name, int(_buyable[sid])], sid])
 			if choices.size() > 1:
 				var s := slot
 				row.get_meta(&"flow").add_child(_picker("Swap_" + String(slot), choices, func(v: String) -> void:
@@ -274,6 +281,11 @@ func _build_doll(p: Dictionary) -> void:
 				for sid: String in _sorted(have.keys()):
 					if Optics.is_optic(ItemDB.get_item(StringName(sid))):
 						optics.append(["%s (x%d)" % [ItemDB.get_item(StringName(sid)).name, int(have[sid])], sid])
+				for sid: String in _sorted(_buyable.keys()):
+					if have.has(sid):
+						continue
+					if Optics.is_optic(ItemDB.get_item(StringName(sid))):
+						optics.append(["%s ($%d)" % [ItemDB.get_item(StringName(sid)).name, int(_buyable[sid])], sid])
 				var s2 := slot
 				row.get_meta(&"flow").add_child(_picker("Optic_" + String(slot), optics, func(v: String) -> void:
 					ask("optic", {"slot": String(s2), "id": "" if v == "-" else v})))
@@ -557,6 +569,15 @@ func _heading(text: String) -> Label:
 static func _name(id: String) -> String:
 	var item := ItemDB.get_item(StringName(id))
 	return item.name if item else id
+
+
+## Every item id the shop sells (excludes not_for_sale, same as the shop screen), to id's price:
+## catalog items the stash has none of, so a picker can offer them to buy, not just top up.
+static func _buyable_prices() -> Dictionary:
+	var out := {}
+	for id: StringName in Prices.shop_items():
+		out[String(id)] = BaseEconomy.item_price(id)
+	return out
 
 
 static func _sorted(ids: Array) -> Array:
