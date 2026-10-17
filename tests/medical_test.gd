@@ -1270,7 +1270,7 @@ func _test_menu_and_removal() -> void:
 	# Earlier treatments may have left the casualty at its ragdoll's resting place.
 	# Stand beside the visible body before testing the menu's item progression.
 	var at := casualty.body_point()
-	player.global_position = Vector3(at.x, SPOT.y, at.z + 1.0)
+	player.global_position = Vector3(at.x, SPOT.y, at.z - 1.0)  # courtyard side of the perimeter wall
 	var treat := _action(player, casualty, &"treat")
 	var labels: Array = treat.get("items", []).map(func(e: Dictionary) -> String: return e.label)
 	check(labels.size() >= 3 and labels[0] == "Tourniquet, left thigh" and labels[1] == "Tourniquet (rushed, 1.5 s), left thigh" and labels[2] == "NPA Airway, head",
@@ -1497,11 +1497,11 @@ func _test_menu_prefers_living() -> void:
 	# Keep both actual bodies within treatment reach after they settle, even when a
 	# ragdoll slid away from its capsule. Retain the nearer-to-crosshair dead body.
 	var living_at := casualty.body_point()
-	var shift := living_at + Vector3(0.7, 0, 0.5) - body.body_point()
+	var shift := living_at + Vector3(0.7, 0, -0.5) - body.body_point()
 	body.global_position += Vector3(shift.x, 0, shift.z)
 	for frame in 2:
 		await get_tree().physics_frame
-	player.global_position = Vector3(living_at.x, SPOT.y, living_at.z + 1.5)
+	player.global_position = Vector3(living_at.x, SPOT.y, living_at.z - 1.5)
 	check(player._in_treat_reach(casualty) and player._in_treat_reach(body), "both settled bodies are in treatment reach")
 	var aim := body.body_point()
 	player.look_at(Vector3(aim.x, player.global_position.y, aim.z), Vector3.UP)
