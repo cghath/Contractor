@@ -307,13 +307,14 @@ repair it train ew pilots etc." Parsed into what this means to build:
 
 **Built, first playable slice (2026-10-17, `ExoMech`, branch `claude/heavy-exo-55eabf`):** the
 Atlas-pattern Walker (`exo_mech_heavy`) as the Captain decided above. What the slice is, and why:
-- **Not a new skeleton (open question 4, deferred):** the suit is built round the normal
-  `CharacterModel` rig, so hitboxes, wounds, ragdolls, poses and networking all keep working. Its
-  bulk is plates and chassis pieces on the human bones (power pack, hip ring, hydraulic leg
-  actuators, gauntlets, boots, head unit). A taller dedicated rig is still open if the Captain
-  wants the silhouette bigger than a human's.
+- **Not a new skeleton (open question 4):** the suit is built round the normal `CharacterModel`
+  rig, drawn 1.25x while piloted (`suit_size`: plates, hitboxes, eye and capsule all scale, about
+  2.3 m tall; most doors are too low for it), so wounds, ragdolls, poses and networking keep
+  working. The pilot's body and kit are hidden inside dark mechanical cores; only his head shows,
+  low between the shoulders (Captain's refs, 2026-10-17). Entry and exit are through the front.
 - **Plates:** fifteen `VoxelArmor` pads (`stats.pads`, reusing the LX-3's per-part pad system):
-  ceramic IV chest and belly plates (they crack), steel III++ everywhere else, the head unit's
+  all AR500 steel (Captain, 2026-10-17): IV on the chest, head unit, shoulders and back, steel III on the belly, steel III++ on the arms and legs
+  (Captain, 2026-10-17: the chest "should be steel 3", then "some of the armor to level 4 steel"), the head unit's
   visor III. Penetration reaches the pilot's real wounds. Painted in the wearer's camo.
 - **Worn, but only by climbing in:** the `exo` slot, so it travels with the soldier like any item
   (state, saves, net), but `Inventory` never puts it on or takes it (no pick-up, no loot, no

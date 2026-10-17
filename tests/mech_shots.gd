@@ -64,7 +64,7 @@ func _ready() -> void:
 	camera.current = true
 
 	# Standing open on the range (it faces +Z, the spawn).
-	var c := feet + Vector3(0, 1.15, 0)
+	var c := feet + Vector3(0, 1.4, 0)
 	await _shot("parked_front", c + Vector3(1.0, 0.25, 2.4), c)
 	await _shot("parked_side", c + Vector3(2.6, 0.1, 0.0), c)
 	await _shot("parked_rear", c + Vector3(-0.8, 0.3, -2.4), c)
@@ -83,7 +83,7 @@ func _ready() -> void:
 		player.model.find_children(ExoMech.PART_NAME + "*", "", true, false).size()])
 
 	# Piloted, all round (he faces +Z now: the suit's way).
-	c = player.global_position + Vector3(0, 1.15, 0)
+	c = player.global_position + Vector3(0, 1.4, 0)
 	await _shot("piloted_front", c + Vector3(0.9, 0.2, 2.6), c)
 	await _shot("piloted_front_straight", c + Vector3(0.0, 0.1, 2.8), c)
 	await _shot("piloted_side", c + Vector3(2.8, 0.0, 0.2), c)
@@ -124,7 +124,16 @@ func _ready() -> void:
 	player._server_exit_mech.rpc_id(1)
 	await get_tree().create_timer(ExoMech.OPEN_S * 0.8).timeout
 	await _shot("exiting_open", c + Vector3(1.0, 0.25, 2.4), c)
-	await get_tree().create_timer(ExoMech.OPEN_S * 0.2 + ExoMech.OUT_S + 0.5).timeout
+	await get_tree().create_timer(ExoMech.OPEN_S * 0.2 + 0.05).timeout
+	# Stepping down and out: early, halfway, nearly out (from the side, to see him walk out).
+	var t0 := Time.get_ticks_msec()
+	for step: Array in [[0.2, "exiting_step_1"], [0.5, "exiting_step_2"], [0.8, "exiting_step_3"]]:
+		var wait := float(step[0]) * ExoMech.OUT_S - (Time.get_ticks_msec() - t0) / 1000.0
+		if wait > 0.0:
+			await get_tree().create_timer(wait).timeout
+		print("[mech] %s at %.2f of the step out" % [step[1], player.model.action_progress()])
+		await _shot(String(step[1]), c + Vector3(2.4, 0.1, 1.2), c + Vector3(0, -0.2, 0.4))
+	await get_tree().create_timer(ExoMech.OUT_S * 0.3 + 0.5).timeout
 	await _shot("left_standing", c + Vector3(1.6, 0.4, 3.2), c)
 	print("[mech] saved to %s" % ProjectSettings.globalize_path(out))
 	get_tree().quit(0)
@@ -143,7 +152,7 @@ func _frames(n: int) -> void:
 
 
 func _shot(file: String, eye: Vector3, target: Vector3) -> void:
-	camera.global_position = eye
+	camera.global_position = target + (eye - target) * 1.45  # the suit stands 2.3 m: step back for it
 	camera.look_at(target)
 	await _frames(6)
 	await RenderingServer.frame_post_draw

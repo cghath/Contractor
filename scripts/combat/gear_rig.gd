@@ -279,6 +279,12 @@ func _rebuild() -> void:
 	_set_exo_pads()
 	_refresh_plate_damage()
 	_set_exo_frame()
+	# Inside a heavy exo, the pilot's body and kit don't show (ExoMech.hide_pilot): his head does.
+	var kit: Array = [_gear.get(&"vest", [&"", null])[1], _gear.get(&"sidearm", [&"", null])[1], _pouches, _straps, _tape]
+	for slot: StringName in _armor:
+		if slot != &"helmet":
+			kit.append(_armor[slot])
+	ExoMech.hide_pilot(model, kit, ExoMech.piloting(inventory))
 
 
 ## The worn exo frame's armour pads (ExoFrame.pad_items): VoxelArmor pieces on the bones of
@@ -320,6 +326,7 @@ func _set_exo_frame() -> void:
 		return
 	_exo_key = key
 	var mech := ExoMech.is_mech(item)  # the heavy exo's chassis (ExoMech), or the LX-3's struts
+	model.suit_size = ExoMech.size(inventory) if mech else 0.0
 	ExoFrame.dress(model, null if mech else item, item != null and not ExoFrame.working(inventory), render_layers)
 	ExoMech.dress(model, item if mech else null, item != null and not ExoFrame.working(inventory), render_layers, model.variant)
 

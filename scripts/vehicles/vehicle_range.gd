@@ -30,7 +30,7 @@ const RANGE_LOOT := [
 	{"uid": "rng_m110", "id": "m110", "pos": Vector3(3, 0.5, 14)},
 	{"uid": "rng_mags762", "id": "mag_762", "count": 4, "pos": Vector3(4, 0.5, 14)},
 	# An Atlas-pattern Walker standing open, facing the spawn, its WG-50 on it (ExoMech).
-	{"uid": "rng_atlas", "id": "exo_mech_heavy", "pos": Vector3(8, 0.95, 15), "state": {"yaw": PI, "gun": {"id": "wg50_walker"}}},
+	{"uid": "rng_atlas", "id": "exo_mech_heavy", "pos": Vector3(8, 1.175, 15), "state": {"yaw": PI, "gun": {"id": "wg50_walker"}}},
 ]
 ## Obstacles down the range (from, to, material).
 const BLOCKS := [

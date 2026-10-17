@@ -7,9 +7,10 @@ extends Node
 ##   over the climb, standing still meanwhile; its gun in his hands, his rifle on its rack;
 ## - in it: the suit carries 260 kg, he never sprints, jumps, climbs or goes prone, walks at
 ##   three quarters pace, and holds the gun low and ready at the hip; no vehicle seat takes him;
-## - its plates are real armour: an M855 and an AP (IV) round stop on the ceramic IV chest
-##   plate, an M855 on the steel III++ shin plate, while AP and .50 BMG go through the shin
-##   plate into the leg; each hit is in the suit's own state;
+## - its plates are real AR500 steel armour (Captain, 2026-10-17): an M855 and an AP (IV) round
+##   stop on the IV chest plate, an M855 goes through the III belly plate, an M855 stops on the
+##   III++ shin plate while AP and .50 BMG go through it into the leg; each hit is in the
+##   suit's own state;
 ## - climbs out (Climb out): the hatch opens, the suit is left standing where he was with its
 ##   damage and its gun, his rifle back in his hands, him a step in front of it;
 ## - the suit left standing still takes rounds on its plates (into its state), and climbing
@@ -136,15 +137,16 @@ func _run() -> void:
 	# Shot standing empty.
 	var back: VoxelArmor = suit.find_children("MechPad_back", "VoxelArmor", true, false)[0]
 	var m855 := _m855()
+	var back_before := (suit.state.get("pads", {}).get("back", {}).get("chips", []) as Array).size()  # (the belly round went on out through it)
 	var r := Ballistics.fire(shooter, back.to_global(Vector3(0.03, 0.05, -0.8)), back.global_basis.z, m855)
 	await _frames(2)
-	check(r.result == "plate" and (suit.state.pads.get("back", {}).get("chips", []) as Array).size() == 1, "standing empty, its plates still stop rounds, into its state (%s)" % r.result)
+	check(r.result == "plate" and (suit.state.pads.get("back", {}).get("chips", []) as Array).size() == back_before + 1, "standing empty, its plates still stop rounds, into its state (%s, %s)" % [r.result, (suit.state.pads as Dictionary).keys().map(func(k: String) -> String: return "%s:%d" % [k, (suit.state.pads[k].get("chips", []) as Array).size()])])
 	# Back in: every chip comes with it.
 	player.global_position = left_feet - suit.global_basis.z * 1.2
 	await _frames(2)
 	player._server_enter_mech.rpc_id(1, suit.get_path())
 	await _seconds(ExoMech.ENTER_S + 0.4)
-	check(inv.slots[ExoMech.SLOT] == &"exo_mech_heavy" and inv.chips_in(ExoMech.SLOT, "chest").size() == chips_in and inv.chips_in(ExoMech.SLOT, "back").size() == 1,
+	check(inv.slots[ExoMech.SLOT] == &"exo_mech_heavy" and inv.chips_in(ExoMech.SLOT, "chest").size() == chips_in and inv.chips_in(ExoMech.SLOT, "back").size() == back_before + 1,
 		"climbing back into the damaged suit brings every chip with it")
 	# Disabled: climb out, and in again.
 	ExoFrame.server_damage(player, 10000.0)
@@ -187,13 +189,15 @@ func _test_low_ready() -> void:
 	check(not hands.is_empty() and (hands.grip as Vector3).distance_to(hands.support) > 0.2, "two hands on it: pistol grip and foregrip")
 
 
-## The plates: ceramic IV chest, steel III++ shins, rounds into the pilot through them.
+## The plates (AR500 steel): IV chest, III belly, III++ shins, rounds into the pilot through them.
 func _test_plates() -> void:
 	var inv := player.inventory
 	var gear := player.get_node(^"Gear") as GearRig
 	var chest: VoxelArmor = gear.pads().get("chest")
 	var shin: VoxelArmor = gear.pads().get("shin_r")
-	check(ArmorRules.rating(chest.item) == &"IV" and ArmorRules.material(chest.item) == ArmorRules.CERAMIC, "chest plate: ceramic IV")
+	var belly: VoxelArmor = gear.pads().get("abdomen")
+	check(ArmorRules.rating(chest.item) == &"IV" and ArmorRules.material(chest.item) == ArmorRules.STEEL and String(chest.item.stats.get("grade", "")) == "AR500", "chest plate: AR500 steel IV")
+	check(ArmorRules.rating(belly.item) == &"III" and ArmorRules.material(belly.item) == ArmorRules.STEEL, "belly plate: steel III")
 	check(ArmorRules.rating(shin.item) == &"III++" and ArmorRules.material(shin.item) == ArmorRules.STEEL, "shin plate: steel III++")
 	check((gear.pads().values() as Array).all(func(p: VoxelArmor) -> bool: return p.get_rid() in gear.armor_rids()), "the pilot's own shots skip them")
 	await get_tree().physics_frame
@@ -210,6 +214,10 @@ func _test_plates() -> void:
 	check(ap_front.result == "plate" and inv.chips_in(ExoMech.SLOT, "chest").size() == 2, "and an AP (IV) round (%s)" % ap_front.result)
 	# (A stop at point blank can still crack a rib, WoundModel.add_impact: blunt trauma, not a hole.)
 	check(not player.vitals.wound_list().any(func(w: Dictionary) -> bool: return w.part == Vitals.CHEST and w.get("kind", "") != "rib"), "no wound in the chest behind it")
+	var low := Ballistics.fire(shooter, belly.to_global(Vector3(0.04, 0.0, -0.075)), belly.global_basis.z, m855)  # (from just in front: his arms hold the gun across it)
+	await _frames(2)
+	check(low.result == "body" and inv.chips_in(ExoMech.SLOT, "abdomen").size() == 1, "an M855 (III++) goes through the III belly plate (%s)" % low.result)
+	player.vitals.server_reset_health()
 	var side := Ballistics.fire(shooter, shin.to_global(Vector3(0.8, 0.04, 0.0)), -shin.global_basis.x, m855)
 	await _frames(2)
 	check(side.result == "plate" and inv.chips_in(ExoMech.SLOT, "shin_r").size() == 1, "an M855 stops on the shin plate (%s)" % side.result)

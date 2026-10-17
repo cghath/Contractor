@@ -207,7 +207,7 @@ var mantling := false
 var _mantle := {}  # "from", "up", "to", "t", "s", "stance"
 var _collision: CollisionShape3D
 var _capsule: CapsuleShape3D
-var _shape_key := -99
+var _shape_key := -99.0
 
 
 func _ready() -> void:
@@ -421,9 +421,10 @@ func apply_pose() -> void:
 	var seated := not body.seat_pose.is_empty() and is_instance_valid(body.vehicle)
 	body.model.pose = body.seat_pose if seated else pose_for(stance, side, lean)
 	var key := -1 if not body.vitals.is_up() else stance
-	if key == _shape_key:
+	var size := ExoMech.size(body.inventory)  # a heavy exo's capsule is its size (ExoMech)
+	if key + size * 100.0 == _shape_key:
 		return
-	_shape_key = key
+	_shape_key = key + size * 100.0
 	# A downed or dead body's capsule only meets the world: other bodies can't shove it (its
 	# own move_and_slide pushed it out of anyone who walked into it); lying bodies meet each
 	# other as ragdolls (Ragdoll). The living meet bodies lying there too, and step over them.
@@ -434,9 +435,9 @@ func apply_pose() -> void:
 		_collision.transform = Transform3D(Basis(Vector3.RIGHT, PI / 2),
 			Vector3(0, LYING_RADIUS, DOWNED_CAPSULE_Z if key == -1 else PRONE_CAPSULE_Z))
 	else:
-		_capsule.radius = CAPSULE_RADIUS
-		_capsule.height = STANCE_CAPSULE[key]
-		_collision.transform = Transform3D(Basis(), Vector3(0, STANCE_CAPSULE[key] * 0.5, 0))
+		_capsule.radius = CAPSULE_RADIUS * size
+		_capsule.height = STANCE_CAPSULE[key] * size
+		_collision.transform = Transform3D(Basis(), Vector3(0, STANCE_CAPSULE[key] * size * 0.5, 0))
 
 
 ## The body pose (CharacterModel.REST_POSE keys) for a stance, side stance and lean.
@@ -718,9 +719,10 @@ func shift_side(direction: int) -> void:
 func has_room(for_stance: int) -> bool:
 	if for_stance == Stance.PRONE or not body.is_inside_tree():
 		return true
-	var height: float = STANCE_CAPSULE[for_stance] - ROOM_MARGIN * 2.0
+	var size := ExoMech.size(body.inventory)
+	var height: float = STANCE_CAPSULE[for_stance] * size - ROOM_MARGIN * 2.0
 	var shape := CapsuleShape3D.new()
-	shape.radius = CAPSULE_RADIUS - ROOM_MARGIN
+	shape.radius = CAPSULE_RADIUS * size - ROOM_MARGIN
 	shape.height = height
 	var query := PhysicsShapeQueryParameters3D.new()
 	query.shape = shape

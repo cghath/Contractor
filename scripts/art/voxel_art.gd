@@ -1267,10 +1267,10 @@ static func iron_boxes(n: float) -> Array:
 
 
 ## The WG-50 Walker Gun (a heavy exo's own weapon, ExoMech; learned from the Captain's reference
-## art: a two-handed heavy weapon "sized beyond what a normal soldier could carry"): a .50 cal
-## with a long ventilated cooling jacket round a heavy barrel and a muzzle brake, a deep slab
-## receiver with a belt box hung on its left and a feed chute up into it, a vertical foregrip
-## and a pistol grip under it, and a stubby buffer stock. Wider than a rifle: its centre line
+## art, 2026-10-17: a rotary gun held low on the right arm): six .50 cal barrels round a spindle
+## in a front and a middle clamp, a drive motor housing behind them, a deep slab receiver with a
+## belt box hung on its left and a feed chute up into it, a vertical foregrip and a pistol grip
+## under it, and a stubby buffer stock. Wider than a rifle: its centre line
 ## is WALKER_AXIS_X (hand_points, sight_point and butt_point follow it), its irons the rifles'
 ## moved over to it.
 const WALKER_AXIS_X := 3.5
@@ -1283,12 +1283,10 @@ static func _rifle_walker(length: int, art := IRONS) -> Dictionary:
 	var sight: Array = (iron_boxes(n) if art == IRONS else optic_boxes(art, sight_back(art, n))).map(
 		func(b: Array) -> Array: return [b[0] + Vector3(shift, 0, 0), b[1] + Vector3(shift, 0, 0)] + b.slice(2))
 	var boxes := sight + [
-		_fb(2.4, 7.2, 0, 4.6, 9.4, 3.0, C.GUN),                                 # muzzle brake
-		_fb(2.4, 7.0, 1.0, 4.6, 7.5, 2.0, C.EMPTY),                             # and its ports
-		_fb(2.9, 7.7, 0, 4.1, 8.9, f.call(0.45), C.GUN),                        # heavy barrel, on into the receiver
-		_fb(2.1, 6.6, f.call(0.08), 4.9, 10.0, f.call(0.4), C.GUN_LIGHT),       # cooling jacket
-		_fb(1.9, 6.4, f.call(0.08), 5.1, 10.2, f.call(0.08) + 1.0, C.GUN),      # its front collar
-		_fb(1.9, 6.4, f.call(0.4) - 1.0, 5.1, 10.2, f.call(0.4), C.GUN),        # and back collar
+		_fb(3.2, 8.0, 0.5, 3.8, 8.6, f.call(0.42), C.GUN_LIGHT),                # spindle, on into the motor
+		_fb(1.6, 6.4, 1.0, 5.4, 10.2, 2.0, C.GUN),                              # front clamp
+		_fb(1.6, 6.4, f.call(0.2), 5.4, 10.2, f.call(0.2) + 1.0, C.GUN),        # middle clamp
+		_fb(1.5, 6.2, f.call(0.32), 5.5, 10.4, f.call(0.42), C.GUN_LIGHT),      # drive motor housing
 		_fb(1.0, 3.5, f.call(0.38), 6.0, 10.5, f.call(0.82), C.GUN),            # slab receiver
 		_fb(0.8, 5.0, f.call(0.45), 1.0, 9.5, f.call(0.75), C.GUN_LIGHT),       # its side plate
 		_fb(2.0, 10.5, f.call(0.42), 5.0, 11.0, f.call(0.7), C.GUN_LIGHT),      # top cover
@@ -1301,11 +1299,10 @@ static func _rifle_walker(length: int, art := IRONS) -> Dictionary:
 		_fb(2.0, 4.0, f.call(0.82), 5.0, 9.0, n - 1.0, C.GUN_LIGHT),            # buffer stock
 		_fb(1.8, 3.5, n - 1.0, 5.2, 10.0, n, C.GUN),                            # butt pad
 	]
-	var z: float = f.call(0.11)
-	while z < f.call(0.37):  # vents down both sides of the jacket
-		boxes.append(_fb(2.0, 7.6, z, 2.3, 9.0, z + 1.0, C.EMPTY))
-		boxes.append(_fb(4.7, 7.6, z, 5.0, 9.0, z + 1.0, C.EMPTY))
-		z += 2.5
+	for k in 6:  # the six barrels round the spindle
+		var a := k * TAU / 6.0
+		var c := Vector2(WALKER_AXIS_X + cos(a) * 1.35, 8.3 + sin(a) * 1.35)
+		boxes.append(_fb(c.x - 0.35, c.y - 0.35, 0, c.x + 0.35, c.y + 0.35, f.call(0.33), C.GUN))
 	return {"size": Vector3i(7, 13, n), "sub": 4, "boxes": boxes}
 
 

@@ -22,8 +22,8 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   are `CharacterModel.MECH_IN`/`MECH_OPEN`/`MECH_OUT`; the hatch (chest up, belly down, head unit
   back) follows them on every peer (`ExoMech.HatchRig`).
 - Its armour is real `ArmorRules` armour (Captain's call over the doc's integrity pool): fifteen
-  `VoxelArmor` plates on the parts they cover (ceramic IV chest and belly; steel III++ head unit,
-  back, shoulders and caps, forearms, thighs and shins; a III visor), their chips and integrity in
+  `VoxelArmor` plates on the parts they cover (Captain, 2026-10-17: AR500 steel throughout, IV chest, head unit, shoulders, caps and back;
+  steel III belly; steel III++ forearms, thighs and shins; a III visor), their chips and integrity in
   the suit's state, like the LX-3's pads. A suit left standing is a `WorldItem` whose plates still
   take hits (into its state's "pads"), and climbing back in brings every chip.
 - Real camo on armour: a `VoxelArmor` whose item says `"camo"` is painted in the wearer's camo
@@ -38,6 +38,13 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 - One stands open on the vehicle range with its gun. Neither is sold yet: their price, repair cost
   and pilot training are the Captain's call (doc 2.3a).
 - `mech` suite (`tests/mech_test.gd`) and `tests/mech_shots.gd` (art review shots).
+- Captain's art round (2026-10-17, his refs): the suit is drawn 1.25x a soldier (about 2.3 m:
+  `CharacterModel.suit_size`; its plates, hitboxes, eye and capsule grow with it, so it won't fit
+  most doors), the pilot's body and kit hidden inside dark mechanical cores with only his head
+  showing, the head unit sunk low between high shoulder humps and big pauldrons, heavier forearms,
+  thighs and feet, a launcher pod on the back (art only), and the WG-50 redrawn as a six-barrel
+  rotary. Climbing in he walks back into the open front; climbing out he walks down and out of it
+  (`CharacterModel.MECH_STEP`).
 
 ### Floating site-box lootboxes, scope PIP black flash (Captain, 2026-10-16 playtest of v0.4.26)
 

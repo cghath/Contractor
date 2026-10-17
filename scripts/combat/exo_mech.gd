@@ -10,8 +10,8 @@ extends RefCounted
 ##   standing is a WorldItem: anyone can climb into it again, damage and all.
 ## - Its armour is real ArmorRules armour (Captain, 2026-10-16: "armor plates are where they are
 ##   seen ... pilots can be wounded, shot through it eventually"): its "pads" are VoxelArmor
-##   plates on the body parts they cover, rated per part (ceramic IV over the chest and belly,
-##   steel III++ on the back, shoulders, arms, legs and the head unit), with their chips and
+##   plates on the body parts they cover, rated per part (Captain, 2026-10-17: AR500 steel, IV on the chest, head
+##   unit, shoulders and back, steel III over the belly, steel III++ on the arms and legs), with their chips and
 ##   integrity in the suit's state like the LX-3's (ExoFrame.pad_items, GearRig). A round that
 ##   gets through goes on into the pilot. A parked suit's plates are hit targets too.
 ## - It carries "assist_kg" (Soldier.load_kg; itself and a heavy load) but never runs: no
@@ -33,13 +33,13 @@ const GUN_TAG := "mech_only"
 const ENTER_S := 3.0
 ## Climbing out: the hatch opens (MECH_OPEN), then he steps down out of it (MECH_OUT).
 const OPEN_S := 1.2
-const OUT_S := 1.0
+const OUT_S := 1.6
 ## How near a standing suit (its action point) you must be to climb in.
 const REACH_M := 2.0
 ## How far in front of the suit he stands once out.
-const STEP_OUT_M := 0.85
+const STEP_OUT_M := 0.7  # CharacterModel.MECH_STEP: the clip walks him out that far
 ## A parked suit's box (and the WorldItem's collision).
-const PARKED_SIZE := Vector3(0.95, 1.9, 0.85)
+const PARKED_SIZE := Vector3(1.2, 2.35, 1.1)
 
 ## The hatch (Captain's ref: the chest swings up, the belly plate down, the head unit back):
 ## pad id -> [hinge point on its bone, open angle about X (radians)].
@@ -80,6 +80,28 @@ static func speed_mult(inventory: Inventory) -> float:
 static func spine_depth(inventory: Inventory) -> float:
 	var item := worn(inventory)
 	return float(item.stats.get("spine_depth", 0.25)) if item else -1.0
+
+
+## How big a body piloting the suit `inventory` wears is drawn (stats "size": the whole model,
+## plates, hitboxes and capsule; CharacterModel.suit_size), 1 with none.
+static func size(inventory: Inventory) -> float:
+	var item := worn(inventory)
+	return float(item.stats.get("size", 1.25)) if item else 1.0
+
+
+## The pilot's own body (all but his head, which looks out of the cockpit) and his kit (carrier,
+## pouches, straps, holster) shown or hidden inside the suit: GearRig, every rebuild. His armour
+## stays armour, only its look goes.
+static func hide_pilot(model: CharacterModel, gear_nodes: Array, hidden: bool) -> void:
+	for part: StringName in [Vitals.CHEST, Vitals.UPPER_ARM_R, Vitals.UPPER_ARM_L, Vitals.FOREARM_R, Vitals.FOREARM_L,
+			Vitals.THIGH_R, Vitals.THIGH_L, Vitals.SHIN_R, Vitals.SHIN_L]:
+		var bone := model.part_node(part)
+		var flesh := bone.get_child(0) as MeshInstance3D if bone and bone.get_child_count() > 0 else null
+		if flesh:
+			flesh.visible = not hidden
+	for n: Variant in gear_nodes:
+		if n is Node3D and is_instance_valid(n):
+			(n as Node3D).visible = not hidden
 
 
 ## Whether `body` is climbing into or out of a suit now (no moving meanwhile).
@@ -226,6 +248,7 @@ static func parked_node(item: ItemData, state: Dictionary, suit: WorldItem) -> N
 	root.name = "ParkedSuit"
 	root.position = Vector3.DOWN * PARKED_SIZE.y * 0.5
 	var bones := Skeleton.new()
+	bones.scale = Vector3.ONE * float(item.stats.get("size", 1.25))  # the suit's own size, as worn (size)
 	root.add_child(bones)
 	var variant := String(state.get("camo", "multicam"))
 	for pad: Dictionary in ExoFrame.pad_items(item):
@@ -323,21 +346,34 @@ static func dress(rig: Node3D, item: ItemData, disabled: bool, layers: int, vari
 		return
 	var shell := GearRig.armor_color_for(variant)
 	var torso: Node3D = rig.torso
-	# The power pack on the back (its armour plate, "back", over its rear face), exhausts on top,
-	# vents down its sides, the actuators that carry it up over the shoulders.
-	_box(torso, Vector3(0.46, 0.5, 0.2), Vector3(0, 0.33, 0.24), shell, layers)
-	_box(torso, Vector3(0.36, 0.08, 0.16), Vector3(0, 0.62, 0.22), JOINT, layers)
+	# Captain's refs (2026-10-17, "its not it"): a big hunched chassis, much bigger than a man, the
+	# head sunk low between high shoulders, huge pauldrons and forearms, thick legs on big feet,
+	# a power pack with a launcher pod on the back. Under the plates, dark mechanical cores in
+	# place of the pilot's body (hide_pilot), so the gaps read as machinery, not uniform.
+	_box(torso, Vector3(0.36, 0.56, 0.26), Vector3(0, 0.3, 0.0), JOINT, layers)  # torso core
+	_box(torso, Vector3(0.26, 0.2, 0.22), Vector3(0, -0.02, 0.0), STRUT, layers)  # waist core
+	# The power pack (its armour plate, "back", over its rear face), exhausts, vents, and the
+	# actuators that carry it up over the shoulders.
+	_box(torso, Vector3(0.52, 0.56, 0.24), Vector3(0, 0.33, 0.25), shell, layers)
+	_box(torso, Vector3(0.4, 0.08, 0.18), Vector3(0, 0.65, 0.23), JOINT, layers)
 	for side: float in [1.0, -1.0]:
-		_rod(torso, 0.032, 0.16, Vector3(side * 0.14, 0.7, 0.27), JOINT, layers)  # exhaust stack
+		_rod(torso, 0.035, 0.18, Vector3(side * 0.15, 0.74, 0.3), JOINT, layers)  # exhaust stack
 		for i in 4:
-			_box(torso, Vector3(0.012, 0.035, 0.15), Vector3(side * 0.236, 0.2 + i * 0.07, 0.24), JOINT, layers)  # vent slats
-		_box(torso, Vector3(0.1, 0.14, 0.22), Vector3(side * 0.27, 0.57, 0.11), STRUT, layers)  # shoulder actuator
-		_box(torso, Vector3(0.05, 0.09, 0.3), Vector3(side * 0.215, 0.0, 0.0), JOINT, layers)  # hip ring, side
-		_box(torso, Vector3(0.14, 0.15, 0.035), Vector3(side * 0.11, -0.1, -0.175), shell, layers)  # tasset
-	_box(torso, Vector3(0.44, 0.09, 0.05), Vector3(0, 0.0, -0.16), JOINT, layers)  # hip ring, front
-	_box(torso, Vector3(0.44, 0.09, 0.05), Vector3(0, 0.0, 0.16), JOINT, layers)  # hip ring, back
-	_box(torso, Vector3(0.3, 0.06, 0.26), Vector3(0, 0.555, 0.02), JOINT, layers)  # neck collar
-	var light := _box(torso, Vector3(0.03, 0.03, 0.012), Vector3(0, 0.6, 0.41), ExoFrame.LIGHT_OFF if disabled else ExoFrame.LIGHT_ON, layers)
+			_box(torso, Vector3(0.012, 0.035, 0.17), Vector3(side * 0.266, 0.2 + i * 0.07, 0.25), JOINT, layers)  # vent slats
+		_box(torso, Vector3(0.14, 0.16, 0.26), Vector3(side * 0.27, 0.6, 0.08), STRUT, layers)  # shoulder actuator
+		_box(torso, Vector3(0.17, 0.17, 0.3), Vector3(side * 0.2, 0.66, 0.0), shell, layers)  # shoulder hump, up beside the head
+		_box(torso, Vector3(0.06, 0.1, 0.32), Vector3(side * 0.2, 0.0, 0.0), JOINT, layers)  # hip ring, side
+		_box(torso, Vector3(0.16, 0.18, 0.04), Vector3(side * 0.12, -0.1, -0.18), shell, layers)  # tasset
+		_box(torso, Vector3(0.05, 0.2, 0.2), Vector3(side * 0.205, -0.08, 0.0), shell, layers)  # hip plate
+	_box(torso, Vector3(0.42, 0.1, 0.05), Vector3(0, 0.0, -0.165), JOINT, layers)  # hip ring, front
+	_box(torso, Vector3(0.42, 0.1, 0.05), Vector3(0, 0.0, 0.165), JOINT, layers)  # hip ring, back
+	_box(torso, Vector3(0.3, 0.1, 0.3), Vector3(0, 0.59, 0.03), JOINT, layers)  # collar the head sits down in
+	# The launcher pod on the right of the back (art: it doesn't fire yet), four tubes facing up
+	# and forward.
+	_box(torso, Vector3(0.15, 0.36, 0.18), Vector3(0.2, 0.72, 0.33), shell, layers)
+	for i in 4:
+		_box(torso, Vector3(0.05, 0.012, 0.05), Vector3(0.2 + (i % 2 - 0.5) * 0.07, 0.905, 0.3 + (floorf(i / 2.0) - 0.5) * 0.07), JOINT, layers)
+	var light := _box(torso, Vector3(0.03, 0.03, 0.012), Vector3(-0.08, 0.6, 0.42), ExoFrame.LIGHT_OFF if disabled else ExoFrame.LIGHT_ON, layers)
 	_glow(light, 1.5)
 	for side: float in [1.0, -1.0]:
 		var r := side > 0.0
@@ -345,24 +381,28 @@ static func dress(rig: Node3D, item: ItemData, disabled: bool, layers: int, vari
 		var fore: Node3D = rig.part_node(Vitals.FOREARM_R if r else Vitals.FOREARM_L)
 		var thigh: Node3D = rig.part_node(Vitals.THIGH_R if r else Vitals.THIGH_L)
 		var shin: Node3D = rig.part_node(Vitals.SHIN_R if r else Vitals.SHIN_L)
-		_box(upper, Vector3(0.11, 0.12, 0.12), Vector3(side * 0.06, -0.01, 0), JOINT, layers)  # shoulder joint
-		_rod(upper, 0.012, 0.22, Vector3(side * 0.11, -0.18, 0.05), PISTON, layers)
-		_drum(upper, 0.045, 0.06, Vector3(side * 0.08, -0.32, 0), JOINT, layers)  # elbow
-		_box(fore, Vector3(0.12, 0.09, 0.13), Vector3(0, -0.265, -0.01), shell.darkened(0.25), layers)  # gauntlet
-		_box(fore, Vector3(0.1, 0.03, 0.11), Vector3(0, -0.215, -0.01), JOINT, layers)  # its cuff
-		_rod(fore, 0.01, 0.17, Vector3(side * 0.1, -0.11, 0.045), PISTON, layers)
-		_drum(thigh, 0.05, 0.06, Vector3(side * 0.165, -0.02, 0), JOINT, layers)  # hip
-		_box(thigh, Vector3(0.05, 0.3, 0.07), Vector3(side * 0.18, -0.23, 0.035), STRUT, layers)  # thigh actuator
-		_rod(thigh, 0.015, 0.3, Vector3(side * 0.18, -0.24, -0.02), PISTON, layers)
-		_drum(thigh, 0.06, 0.08, Vector3(side * 0.16, -0.45, 0), JOINT, layers)  # knee
-		_box(thigh, Vector3(0.15, 0.1, 0.045), Vector3(side * 0.025, -0.46, -0.13), shell, layers)  # knee cap
-		_box(shin, Vector3(0.05, 0.3, 0.07), Vector3(side * 0.16, -0.2, 0.04), STRUT, layers)  # shin actuator
-		_rod(shin, 0.014, 0.3, Vector3(side * 0.16, -0.2, -0.01), PISTON, layers)
-		_box(shin, Vector3(0.1, 0.22, 0.06), Vector3(0, -0.19, 0.135), STRUT, layers)  # calf hydraulics
-		_drum(shin, 0.045, 0.2, Vector3(0, -0.36, 0.0), JOINT, layers)  # ankle
-		_box(shin, Vector3(0.19, 0.1, 0.34), Vector3(0, -0.4, -0.05), JOINT, layers)  # boot
-		_box(shin, Vector3(0.18, 0.045, 0.11), Vector3(0, -0.355, -0.18), shell, layers)  # toe plate
-		_box(shin, Vector3(0.11, 0.05, 0.07), Vector3(0, -0.42, 0.13), STRUT, layers)  # heel spur
+		_box(upper, Vector3(0.12, 0.3, 0.12), Vector3(0, -0.16, 0), JOINT, layers)  # arm core
+		_box(upper, Vector3(0.14, 0.14, 0.14), Vector3(side * 0.05, -0.01, 0), JOINT, layers)  # shoulder joint
+		_rod(upper, 0.014, 0.22, Vector3(side * 0.13, -0.18, 0.06), PISTON, layers)
+		_drum(upper, 0.055, 0.07, Vector3(side * 0.08, -0.32, 0), JOINT, layers)  # elbow
+		_box(fore, Vector3(0.11, 0.24, 0.11), Vector3(0, -0.12, 0), JOINT, layers)  # forearm core
+		_box(fore, Vector3(0.15, 0.11, 0.16), Vector3(0, -0.275, -0.01), shell.darkened(0.25), layers)  # mechanical fist
+		_box(fore, Vector3(0.13, 0.035, 0.14), Vector3(0, -0.215, -0.01), JOINT, layers)  # its cuff
+		_rod(fore, 0.012, 0.17, Vector3(side * 0.12, -0.11, 0.05), PISTON, layers)
+		_box(thigh, Vector3(0.15, 0.42, 0.15), Vector3(side * 0.02, -0.22, 0), JOINT, layers)  # thigh core
+		_drum(thigh, 0.06, 0.07, Vector3(side * 0.17, -0.02, 0), JOINT, layers)  # hip
+		_box(thigh, Vector3(0.05, 0.3, 0.08), Vector3(side * 0.19, -0.23, 0.04), STRUT, layers)  # thigh actuator
+		_rod(thigh, 0.017, 0.3, Vector3(side * 0.19, -0.24, -0.025), PISTON, layers)
+		_drum(thigh, 0.07, 0.09, Vector3(side * 0.17, -0.45, 0), JOINT, layers)  # knee
+		_box(thigh, Vector3(0.17, 0.13, 0.06), Vector3(side * 0.03, -0.46, -0.14), shell, layers)  # knee cap
+		_box(shin, Vector3(0.14, 0.38, 0.14), Vector3(side * 0.02, -0.19, 0), JOINT, layers)  # shin core
+		_box(shin, Vector3(0.05, 0.28, 0.08), Vector3(side * 0.17, -0.2, 0.045), STRUT, layers)  # shin actuator
+		_rod(shin, 0.016, 0.28, Vector3(side * 0.17, -0.2, -0.015), PISTON, layers)
+		_box(shin, Vector3(0.14, 0.26, 0.08), Vector3(side * 0.02, -0.19, 0.15), STRUT, layers)  # calf hydraulics
+		_drum(shin, 0.05, 0.22, Vector3(side * 0.02, -0.36, 0.0), JOINT, layers)  # ankle
+		_box(shin, Vector3(0.23, 0.11, 0.4), Vector3(side * 0.02, -0.395, -0.06), JOINT, layers)  # big armoured foot
+		_box(shin, Vector3(0.22, 0.05, 0.14), Vector3(side * 0.02, -0.34, -0.2), shell, layers)  # toe plate
+		_box(shin, Vector3(0.13, 0.06, 0.08), Vector3(side * 0.02, -0.42, 0.16), STRUT, layers)  # heel spur
 	# The head unit's sensors: three eyes across the visor, side pods, an antenna.
 	var head: Node3D = rig.part_node(Vitals.HEAD)
 	# On the head unit's own plate when it's there (GearRig's ExoPad_head, a parked suit's
@@ -379,10 +419,10 @@ static func dress(rig: Node3D, item: ItemData, disabled: bool, layers: int, vari
 			head = holder
 			break
 	for i in 3:
-		_glow(_box(head, Vector3(0.028, 0.022, 0.012), Vector3((i - 1) * 0.055, 0.17, -0.242), SENSOR, layers), 2.0)
+		_glow(_box(head, Vector3(0.028, 0.022, 0.012), Vector3((i - 1) * 0.055, 0.145, -0.225), SENSOR, layers), 2.0)
 	for side: float in [1.0, -1.0]:
-		_box(head, Vector3(0.04, 0.09, 0.11), Vector3(side * 0.235, 0.16, 0.0), STRUT, layers)
-	_rod(head, 0.005, 0.22, Vector3(0.16, 0.37, 0.13), JOINT, layers)
+		_box(head, Vector3(0.04, 0.09, 0.11), Vector3(side * 0.225, 0.13, 0.0), STRUT, layers)
+	_rod(head, 0.005, 0.22, Vector3(0.15, 0.33, 0.12), JOINT, layers)
 	if rig is CharacterModel:
 		var hatch := HatchRig.new()
 		hatch.name = PART_NAME + "Hatch"

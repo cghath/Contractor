@@ -154,6 +154,12 @@ const MECH_OPEN := &"mech_open"
 const MECH_OUT := &"mech_out"
 const MECH_GRAB: Array[Vector3] = [Vector3(0.22, 0.66, -0.08), Vector3(-0.22, 0.66, -0.08)]
 const MECH_DIP := 0.16
+## The walk into the suit and out of it (model space): climbing in, the body is drawn this far
+## in front of where it's put (the suit's spot) and walks back into it; stepping out, it starts
+## this far back, inside the suit and up on its step (MECH_STEP_UP), and walks down and out to
+## where it's put.
+const MECH_STEP := 0.7
+const MECH_STEP_UP := 0.14
 ## Picking up: the hand is at the item until this fraction of the clip, then stows it.
 const PICK_REACH_END := 0.55
 ## Equipping: the hand is at the `from` mount until EQUIP_FROM_END, at `to` until EQUIP_TO_END.
@@ -411,8 +417,15 @@ var _lod_n := 0
 var _lod_dt := 0.0
 
 
-## How big this body is drawn: FEMALE_SCALE for a female soldier, else 1.
+## A heavy exo's size (ExoMech.size; GearRig sets it): the whole body, its gear, plates and
+## hitboxes drawn this big while it's piloted, 0 for its own.
+var suit_size := 0.0
+
+
+## How big this body is drawn: a heavy exo's size, FEMALE_SCALE for a female soldier, else 1.
 func body_scale() -> float:
+	if suit_size > 0.0:
+		return suit_size
 	return FEMALE_SCALE if body == VoxelArt.FEMALE else 1.0
 
 
@@ -1499,9 +1512,17 @@ func _action_pose(mode: StringName) -> Dictionary:
 		return blend_pose(leaning, _carry_reach, k) if not _carry_reach.is_empty() else leaning
 	var clip := action_shown()
 	if clip == MECH_IN or clip == MECH_OUT:
-		# A step up into the suit (or down out of it): a dip at the knees, then up again.
+		# A step up into the suit (or down out of it): a dip at the knees, then up again, while
+		# the body walks back into it (or forward out of it).
+		var u := action_progress()
 		var stepping := pose.duplicate()
-		stepping["hip"] = float(pose.get("hip", REST_POSE.hip)) - sin(clampf((action_progress() - 0.05) / 0.55, 0.0, 1.0) * PI) * MECH_DIP
+		var hip := float(pose.get("hip", REST_POSE.hip)) - sin(clampf((u - 0.05) / 0.55, 0.0, 1.0) * PI) * MECH_DIP
+		if clip == MECH_IN:
+			stepping["hip_z"] = float(pose.get("hip_z", 0.0)) - MECH_STEP * (1.0 - smoothstep(0.0, 0.4, u))
+		else:
+			stepping["hip_z"] = float(pose.get("hip_z", 0.0)) + MECH_STEP * (1.0 - smoothstep(0.1, 0.8, u))
+			hip += MECH_STEP_UP * (1.0 - smoothstep(0.25, 0.65, u))
+		stepping["hip"] = hip
 		return stepping
 	if _reaching.is_empty() or not _action_active():
 		return pose
