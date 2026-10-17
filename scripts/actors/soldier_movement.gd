@@ -244,6 +244,11 @@ func step(delta: float) -> void:
 			set_stance(want)
 		input = body.move_input.limit_length(1.0)
 		sprint = body.want_sprint
+		if body.want_mantle:  # SquadAI's climb order: the jump key's mantle
+			body.want_mantle = false
+			if try_mantle():
+				update_pose(delta)
+				return
 	elif _captured():
 		var adjusting := Input.is_action_pressed(&"stance_adjust")
 		_read_keys(adjusting)
@@ -469,12 +474,15 @@ func jump() -> void:
 
 # --- Mantle ------------------------------------------------------------------------------
 
-## The highest ledge this body can climb now (m above the feet): by load, 0 when it can't.
+## The highest ledge this body can climb now (m above the feet): by load, 0 when it can't. A
+## working exo frame's legs reach higher (ExoFrame.climb_assist_m; Captain, 2026-10-16: over
+## compound walls and onto roofs, "especially exo-equipped soldiers").
 func mantle_reach() -> float:
 	var tier := body.load_tier()
 	if not MovementRules.can_jump_at(tier):
 		return 0.0
-	return MANTLE_MAX_OVERLOADED_M if tier >= MovementRules.Tier.OVERLOADED else MANTLE_MAX_M
+	var reach := MANTLE_MAX_OVERLOADED_M if tier >= MovementRules.Tier.OVERLOADED else MANTLE_MAX_M
+	return reach + ExoFrame.climb_assist_m(body.inventory)
 
 
 ## Whether it can start a mantle now: on its feet (standing or crouched), on the ground, up,
@@ -542,9 +550,11 @@ func _capsule_fits(at: Vector3, height: float, exclude: Array[RID]) -> bool:
 	return body.get_world_3d().direct_space_state.intersect_shape(q, 1).is_empty()
 
 
-## The leg stamina a mantle of `height` metres costs at this load.
+## The leg stamina a mantle of `height` metres costs at this load (a working exo frame's
+## legs do the climb past what bare legs reach).
 func mantle_cost(height: float) -> float:
-	return jump_cost() * MANTLE_STAMINA_PER_M * maxf(height, MANTLE_MIN_M)
+	var own := minf(height, MANTLE_MAX_M) if ExoFrame.working(body.inventory) else height
+	return jump_cost() * MANTLE_STAMINA_PER_M * maxf(own, MANTLE_MIN_M)
 
 
 ## Jump key, owner-side: climbs the ledge ahead if there is one it can (find_ledge), paying

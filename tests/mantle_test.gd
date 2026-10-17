@@ -6,7 +6,11 @@ extends Node
 ## - a 0.3 m kerb: no mantle (a step-up's or a jump's);
 ## - a 2.3 m wall: no mantle (out of reach);
 ## - a 1.0 m block under a ceiling 0.5 m over it: no mantle (no room on top);
-## - prone: no mantle.
+## - prone: no mantle;
+## - wearing a working LX-3 Assist Frame (ExoFrame.climb_assist_m), the 2.3 m wall is climbed;
+## - the squad's "Climb up there" order (Squad.order_climb): an AI squadmate walks to the block,
+##   climbs it and holds on top; with the frame it climbs the 2.3 m wall; without, at the wall
+##   it can't climb, the order ends where it stands.
 ##   <godot> --headless --path . res://tests/mantle_test.tscn
 
 const AT := Vector3(40, 0, -40)
@@ -45,6 +49,14 @@ func _ready() -> void:
 	await _case("2.3 m wall", 2.3, -1.0, false)
 	await _case("1.0 m block under a roof", 1.0, 0.5, false)
 	await _prone()
+	player.inventory.take(&"exo_frame_light")
+	await get_tree().physics_frame
+	check(absf(player.movement.mantle_reach() - SoldierMovement.MANTLE_MAX_M - 1.3) < 0.01, "the LX-3's legs reach 1.3 m higher (%.1f m)" % player.movement.mantle_reach())
+	await _case("2.3 m wall in the LX-3", 2.3, -1.0, true)
+	player.inventory.unequip(ExoFrame.SLOT)
+	await _ai_climb("1.7 m block", 1.7, false, true)
+	await _ai_climb("2.3 m wall in the LX-3", 2.3, true, true)
+	await _ai_climb("2.3 m wall", 2.3, false, false)
 	_finish()
 
 
@@ -129,6 +141,36 @@ func _case(label: String, h: float, roof: float, climbs: bool) -> void:
 	check(player.movement.stance == SoldierMovement.Stance.STAND_HIGH, "%s: standing on top" % label)
 	check(player.movement.stamina < stamina - 0.01, "%s: it cost leg stamina (%.2f -> %.2f)" % [label, stamina, player.movement.stamina])
 	check(player.inventory.rounds_in(player.active_slot) == rounds, "%s: nothing fired on the way" % label)
+
+
+## The squad's climb order for an AI squadmate 1.5 m behind the player's spot: up `h` (in the
+## LX-3 if `exo`), or (`climbs` false) not, the order ending at the wall.
+func _ai_climb(label: String, h: float, exo: bool, climbs: bool) -> void:
+	var ground := _course(h, -1.0)
+	player.global_position = AT + Vector3(4, ground + 0.05, 2)  # out of the way
+	await get_tree().physics_frame
+	var mate := level.spawn_soldier({"name": "Climber", "faction": "friendly", "variant": "multicam", "pos": AT + Vector3(0, ground + 0.05, 1.5),
+		"loadout": ["m4a1"], "role": "rifleman", "team": 0, "slot": 1, "combat": 0.5, "discipline": 0.6, "guard": false})
+	await _wait_for(func() -> bool: return SquadAI.of(mate) != null and SquadAI.of(mate)._ready_done and mate.is_on_floor(), 5.0)
+	if exo:
+		mate.inventory.take(&"exo_frame_light")
+	await _seconds(0.3)
+	var top := AT + Vector3(0, ground + h, -2.0)
+	player.server_squad_command("climb", top, PackedStringArray([String(mate.name)]))
+	var ai := SquadAI.of(mate)
+	check(StringName(ai.ordered.get("kind", &"")) == &"climb", "AI, %s: the climb order taken (%s)" % [label, ai.status_text()])
+	var saw_mantle := [false]
+	await _wait_for(func() -> bool:
+		saw_mantle[0] = saw_mantle[0] or mate.movement.mantling
+		return ai.ordered.is_empty(), 20.0)
+	var feet := mate.global_position.y - ground
+	if climbs:
+		check(saw_mantle[0] and absf(feet - h) < 0.2, "AI, %s: climbed it, on top (feet %.2f m up)" % [label, feet])
+		check(ai.ordered.is_empty() and ai.order == Squad.Order.HOLD, "AI, %s: and holds up there (%s)" % [label, ai.status_text()])
+	else:
+		check(not saw_mantle[0] and feet < 0.3 and ai.ordered.is_empty(), "AI, %s: out of reach, the order ends at the wall (feet %.2f m up, %.1f m from the spot, %s)" % [label, feet, Vector2(mate.global_position.x - top.x, mate.global_position.z - top.z).length(), ai.status_text()])
+	mate.queue_free()
+	await get_tree().physics_frame
 
 
 func _prone() -> void:

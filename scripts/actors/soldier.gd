@@ -149,6 +149,9 @@ var want_crouch := false
 var want_aim := false
 ## AI stance intent: a SoldierMovement.Stance, or -1 to follow want_crouch.
 var want_stance := -1
+## AI intent: climb the ledge ahead now (SoldierMovement.try_mantle, the jump key's mantle);
+## cleared once tried.
+var want_mantle := false
 ## Owner-side: fire-selector position per weapon, keyed "slot:item id" ("semi", "auto").
 var _fire_modes := {}
 ## Host only: who is dragging or carrying this body while it is down.

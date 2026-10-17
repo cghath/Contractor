@@ -77,7 +77,14 @@ const THINK_S := 0.5
 ## over open ground), "bound" (to "point" by bounding overwatch), "search" (to "point", looking),
 ## "give_ammo" (to "who", hands over magazines), "pick_pack" (back for the pack it dropped). An ordered one that ends (cover, break, bound,
 ## clear, give_ammo) leaves the unit holding where it got to; a timed one ("until") just ends.
-const MOVING_TACTICS: Array[StringName] = [&"maneuver", &"assault", &"clear", &"garrison", &"cover", &"break", &"bound", &"search", &"give_ammo", &"pick_pack"]
+const MOVING_TACTICS: Array[StringName] = [&"maneuver", &"assault", &"clear", &"garrison", &"cover", &"break", &"bound", &"search", &"give_ammo", &"pick_pack", &"climb"]
+## Climb order (Squad.order_climb): up there once its feet are within CLIMB_UP_M below the
+## spot and CLIMB_DONE_M of it; at the wall (CLIMB_AT_WALL_M of the spot) with no ledge it
+## can climb for CLIMB_GIVE_UP_S, the order ends where it stands.
+const CLIMB_UP_M := 0.6
+const CLIMB_DONE_M := 1.5
+const CLIMB_AT_WALL_M := 2.5
+const CLIMB_GIVE_UP_S := 3.0
 ## How long "Suppress" lasts (Squad.order_suppress).
 const SUPPRESS_ORDER_S := 20.0
 ## An evaluator task that moves the unit scores above fighting where it stands and below falling
@@ -2723,6 +2730,42 @@ func _do_tactic(t: Dictionary) -> void:
 			_tactic_give_ammo(t)
 		&"pick_pack":
 			_tactic_pick_pack()
+		&"climb":
+			_tactic_climb(t)
+
+
+## Climb order: to the spot, up every ledge in the way (the jump key's mantle), then hold.
+func _tactic_climb(t: Dictionary) -> void:
+	var point: Vector3 = t.point
+	var mv := body.movement
+	if mv.mantling:
+		_has_destination = false
+		return
+	var up_there := body.global_position.y >= point.y - CLIMB_UP_M
+	var d := point - body.global_position
+	var flat := Vector2(d.x, d.z).length()  # (not _flat_distance: the spot is a floor up, on purpose)
+	if up_there and flat <= CLIMB_DONE_M:
+		_tactic_done(t)
+		return
+	if up_there:
+		_go(point)
+		return
+	# Below it: at the wall it turns to face the spot, and a ledge ahead is climbed.
+	var at_wall := flat <= CLIMB_AT_WALL_M
+	if at_wall and flat > 0.2:
+		body.rotation.y = atan2(-d.x, -d.z)
+	var ledge := mv.find_ledge() if mv.can_mantle() else {}
+	if not ledge.is_empty() and (ledge.top as Vector3).y > body.global_position.y + 0.3:
+		_has_destination = false
+		body.want_mantle = true
+		return
+	if at_wall:
+		if not t.has("at_wall"):
+			t.at_wall = Soldier._now()
+		if Soldier._now() - float(t.at_wall) > CLIMB_GIVE_UP_S:  # too high for these legs (or no room on top): it holds here
+			_tactic_done(t)
+			return
+	_go(point, true)
 
 
 ## Host: "Drop packs here": the worn pack goes on the ground in front, still loaded, and this
@@ -3032,6 +3075,8 @@ func _tactic_text() -> String:
 			return "Breaking contact"
 		&"bound":
 			return "Bounding"
+		&"climb":
+			return "Climbing" if body.movement.mantling else "Going to climb"
 		&"search":
 			return "Searching"
 		&"give_ammo":

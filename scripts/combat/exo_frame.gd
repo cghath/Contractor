@@ -102,6 +102,12 @@ static func working(inventory: Inventory) -> bool:
 	return worn(inventory) != null and not bool(inventory.state_of(SLOT).get("disabled", false)) and integrity(inventory) > 0.0
 
 
+## How much higher a working frame's legs climb (m over SoldierMovement's mantle reach), 0
+## otherwise.
+static func climb_assist_m(inventory: Inventory) -> float:
+	return float(worn(inventory).stats.get("climb_assist_m", 0.0)) if working(inventory) else 0.0
+
+
 ## How much of the load a working frame carries (kg), 0 otherwise.
 static func assist_kg(inventory: Inventory) -> float:
 	return float(worn(inventory).stats.get("assist_kg", 0.0)) if working(inventory) else 0.0
