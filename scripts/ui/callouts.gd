@@ -105,6 +105,7 @@ static func play(id: StringName, speaker: Node3D) -> AudioStreamPlayer3D:
 		var net := AudioStreamPlayer.new()
 		net.stream = stream
 		net.bus = &"Radio"
+		net.volume_db = RADIO_DB
 		speaker.add_child(net)
 		net.finished.connect(net.queue_free)
 		net.play()
@@ -112,6 +113,7 @@ static func play(id: StringName, speaker: Node3D) -> AudioStreamPlayer3D:
 	var audio := AudioStreamPlayer3D.new()
 	audio.stream = stream
 	audio.bus = &"Voice"  # Sfx makes the bus
+	audio.volume_db = VOICE_DB
 	speaker.add_child(audio)
 	audio.position = Vector3.UP * 1.6
 	audio.finished.connect(audio.queue_free)
@@ -400,6 +402,11 @@ class Subtitles extends Label:
 const VOICES := 8
 ## Squadmates further than this from you are heard over the radio instead (play).
 const RADIO_M := 30.0
+## Voice levels (Captain, 2026-10-17: the voices were "annoyingly loud... louder than the
+## environment"): a spoken callout nearby, and one over the net, under the gunfire and ambience
+## rather than over it. The player's Voice slider scales both (GameSettings.BUSES).
+const VOICE_DB := -10.0
+const RADIO_DB := -13.0
 ## Enemy languages (a soldier's by his name; Russian twice as often) and how many voices each has.
 const ENEMY_LANGS: Array[String] = ["ru", "ru", "fa"]
 const ENEMY_VOICES := {"ru": 2, "fa": 1}
