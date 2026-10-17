@@ -582,7 +582,9 @@ func _seated_pose_for(seat: Dictionary, eye: float) -> Dictionary:
 	var floor_y := NAN if bool(seat.get("open", false)) else VehicleInteriors.floor_of(model)
 	var hip := VehicleInteriors.cushion_top(eye_y, floor_y) + CharacterModel.SEAT_HIP_UP - origin_y
 	var floor_rel := hip - CharacterModel.SEAT_HEIGHT if is_nan(floor_y) else floor_y - origin_y
-	return CharacterModel.seated_pose(hip, floor_rel, StringName(seat.get("kind", "")) in [DRIVER, PILOT, GUNNER])
+	var pose := CharacterModel.seated_pose(hip, floor_rel, StringName(seat.get("kind", "")) in [DRIVER, PILOT, GUNNER])
+	pose["ffv"] = String(seat.get("ffv", "")) != ""  # a fire-from-vehicle seat: the rifle in the hands, not between the knees
+	return pose
 
 
 ## Where seat `index`'s cushion is (the seated hips' spot), in the vehicle's frame, or null for
