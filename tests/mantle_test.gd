@@ -58,6 +58,7 @@ func _ready() -> void:
 	await _ai_climb("1.7 m block", 1.7, false, true)
 	await _ai_climb("2.3 m wall in the LX-3", 2.3, true, true)
 	await _ai_climb("2.3 m wall", 2.3, false, false)
+	await _follow_onto_roof()
 	_finish()
 
 
@@ -192,6 +193,25 @@ func _leap_over_wall() -> void:
 	var feet := player.global_position.y - ground
 	check(player.movement.last_over and player.global_position.z < AT.z - 1.4 and feet < 0.3,
 		"over it, landing on the far side (feet %.2f m up, z %.2f past the wall's face)" % [feet, -(player.global_position.z - (AT.z - 1.0))])
+
+
+## Captain, 2026-10-17: "make sure squaddies also follow you onto the rooftop you jump onto if
+## they can": the player up on a 1.7 m block (no stairs), a squadmate following him climbs up too.
+func _follow_onto_roof() -> void:
+	var ground := _course(1.7, -1.0)
+	await get_tree().physics_frame
+	player.global_position = AT + Vector3(0, ground + 1.75, -2.0)  # on top of the block
+	player.velocity = Vector3.ZERO
+	var mate := level.spawn_soldier({"name": "Follower", "faction": "friendly", "variant": "multicam", "pos": AT + Vector3(0, ground + 0.05, 2.5),
+		"loadout": ["m4a1"], "role": "rifleman", "team": 0, "slot": 1, "combat": 0.5, "discipline": 0.6, "guard": false})
+	await _wait_for(func() -> bool: return SquadAI.of(mate) != null and SquadAI.of(mate)._ready_done and mate.is_on_floor() and player.is_on_floor(), 5.0)
+	var squad := level.squad_for(&"friendly")
+	squad.give_order(player, Squad.Order.FOLLOW, player.global_position, PackedStringArray([String(mate.name)]))
+	var up := await _wait_for(func() -> bool: return mate.global_position.y - ground > 1.5, 25.0)
+	var ai := SquadAI.of(mate)
+	check(up, "a squadmate following the player up on a 1.7 m roof climbs up after him (feet %.2f m up, %s)" % [mate.global_position.y - ground, ai.status_text()])
+	mate.queue_free()
+	await get_tree().physics_frame
 
 
 func _prone() -> void:
