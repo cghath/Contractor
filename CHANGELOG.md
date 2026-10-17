@@ -11,7 +11,23 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
-### MG/AR silhouettes, bolt-action snipers, suppressors (Captain, 2026-10-16)
+### Floating site-box lootboxes, scope PIP black flash (Captain, 2026-10-16 playtest of v0.4.26)
+
+#### Fixed
+- Valuables/intel boxes at module loot spots (offices, command posts, desks -
+  `WorldValuables.server_spawn_site_boxes`) floated about half a metre above the floor. They were
+  placed at the same `ZoneModules.LOOT` anchor a `WorldItem` already rests at, but that anchor is
+  a *drop* height for the `WorldItem` (a `RigidBody3D` that falls and settles onto the real floor
+  on its own) - a `WorldCache` never falls, so it stayed exactly at the drop height instead of the
+  floor. Open-terrain caches (`_spawn_site`) were never affected - they're placed straight on
+  `ground_point()`, which `WorldCache`'s own shape already accounts for, same as `SupplyPallet`.
+- A tube scope's or a flipped-up magnifier's picture-in-picture could flash black for a frame on
+  a magnifier flip, an optic swap, or a window/viewport resize - all three resize the scope's
+  `SubViewport`, and Godot doesn't repaint one in the same frame as a resize or its first creation,
+  so `_draw_scope_pip` could read a stale or blank texture that frame (`GunSight._scope_stale`).
+  Distinct from the by-design black ring mask around the glass (`_draw_ring`), which is untouched.
+
+
 
 #### Changed
 - The PKM, M240B and M249 no longer share one `_rifle_mg` silhouette. Each has its own

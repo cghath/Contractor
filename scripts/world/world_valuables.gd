@@ -43,6 +43,12 @@ const RARE_INTEL_COUNT := 2
 ## Off each used ZoneModules.LOOT spot (module space, m), clear of the WorldItem already there
 ## and of each other; at most this many boxes a site.
 const SITE_BOX_OFFSETS: Array[Vector3] = [Vector3(0.8, 0.0, 0.5), Vector3(-0.8, 0.0, 0.5), Vector3(0.8, 0.0, -0.5), Vector3(-0.8, 0.0, -0.5)]
+## Every ZoneModules.LOOT (and BuildingGen.town loot) anchor sits this high above the floor it's
+## on: clearance for the WorldItem already there, a RigidBody3D that drops and settles onto that
+## floor on its own. A WorldCache never falls (StaticBody3D, placed once), so a site box built on
+## one of these anchors has to come back down by the same amount or it floats at the WorldItem's
+## drop height instead of resting on the floor (Captain, 2026-10-16: "lootboxes float").
+const LOOT_ANCHOR_LIFT_M := 0.5
 ## Sites worth more trouble: weighted toward more boxes.
 const IMPORTANT_TYPES: Array[String] = ["hq", "qrf_base", "compound"]
 
@@ -96,8 +102,9 @@ static func server_spawn_site_boxes(level: ZoneLevel) -> void:
 		var count := mini(_site_box_count(rng, module.type), mini(spots.size(), SITE_BOX_OFFSETS.size()))
 		for k in count:
 			var anchor: Vector3 = (spots[spots.size() - 1 - k] as Dictionary).pos
+			var floor_spot := anchor - Vector3(0, LOOT_ANCHOR_LIFT_M, 0)
 			var cache := level.cache_spawner.spawn({"uid": "%s_valbox%d" % [module.module_id, k],
-				"pos": module.to_global(anchor + SITE_BOX_OFFSETS[k]), "yaw": 0.0, "label": "Cache"}) as WorldCache
+				"pos": module.to_global(floor_spot + SITE_BOX_OFFSETS[k]), "yaw": 0.0, "label": "Cache"}) as WorldCache
 			if cache:
 				cache.server_seed(_roll_site_box(rng))
 

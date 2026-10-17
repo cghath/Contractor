@@ -74,6 +74,12 @@ var _glass_fov := 0.0
 ## camera every frame while behind a tube optic's glass, instead of the whole screen zooming.
 var _scope_vp: SubViewport
 var _scope_cam: Camera3D
+## True for the one _draw() right after _scope_vp is made or resized: Godot doesn't repaint a
+## SubViewport in the same frame as that, so its texture is stale or blank that frame (Captain,
+## playtest v0.4.26: scopes "sometimes go black" on a magnifier flip, an optic swap, or a window
+## resize - all of which resize it). Skip compositing it that one frame rather than draw the bad
+## texture; the ring mask (by-design black) still draws either way.
+var _scope_stale := false
 
 
 func _init(s: Soldier) -> void:
@@ -275,7 +281,7 @@ func _draw() -> void:
 ## PIP) picture shows through undecorated rather than nothing at all.
 func _draw_scope_pip(centre: Vector2, ring: float) -> void:
 	_sync_scope_viewport(ring)
-	if _scope_vp:
+	if _scope_vp and not _scope_stale:
 		draw_texture_rect(_scope_vp.get_texture(), Rect2(centre - Vector2.ONE * ring, Vector2.ONE * ring * 2.0), false)
 	_draw_ring(centre, ring, ring * sqrt(2.0) + 2.0 if _scope_vp else centre.length() + 2.0)
 
@@ -287,6 +293,7 @@ func _draw_scope_pip(centre: Vector2, ring: float) -> void:
 ## doesn't show up (huge, in the way) inside its own magnified picture. No-ops where nothing
 ## can render (headless runs: ItemIcons.can_render()).
 func _sync_scope_viewport(ring: float) -> void:
+	_scope_stale = false
 	if _scope_vp == null:
 		if not ItemIcons.can_render():
 			return
@@ -298,9 +305,11 @@ func _sync_scope_viewport(ring: float) -> void:
 		_scope_cam.cull_mask = body.camera.cull_mask & ~PlayerInput.VIEW_MODEL_LAYER
 		_scope_cam.near = body.camera.near
 		_scope_cam.current = true
+		_scope_stale = true  # not rendered even once yet
 	var side := maxi(roundi(ring * 2.0 * SCOPE_RENDER_SCALE), 2)
 	if _scope_vp.size.x != side:
 		_scope_vp.size = Vector2i(side, side)
+		_scope_stale = true  # resized: repaints next frame, not this one
 	_scope_vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	_scope_cam.fov = clampf(_glass_fov if _glass_fov > 0.0 else body.camera.fov, 0.1, 170.0)
 	_scope_cam.global_transform = body.camera.global_transform

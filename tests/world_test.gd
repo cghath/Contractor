@@ -350,6 +350,10 @@ func _test_loot_and_care() -> void:
 	check(item != null and Vector2(item.global_position.x - spot.x, item.global_position.z - spot.z).length() < 0.6 \
 		and absf(item.global_position.y - m.global_position.y) < 0.6,
 		"the village's IFAK lies on the floor of its cinder-block house (%s)" % (m.to_local(item.global_position) if item else "missing"))
+	var cache := level.get_node_or_null(^"Caches/village_e_valbox0") as WorldCache
+	check(cache != null and absf(cache.global_position.y - m.global_position.y) < 0.3,
+		"village_e's valuables box sits on the floor, not floating at the IFAK's drop height (%s)" \
+		% (m.to_local(cache.global_position) if cache else "missing"))
 	if item:
 		player.global_position = m.to_global(Vector3(1, 0.1, -8.6))
 		player._server_interact.rpc_id(1, item.get_path())
