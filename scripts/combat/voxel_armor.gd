@@ -187,7 +187,9 @@ func server_try_stop(hit_position: Vector3, direction: Vector3, weapon: ItemData
 		return false
 	var state := item_state()
 	var round_class := Ballistics.round_class(weapon)
-	var stopped := ArmorRules.piece_stops(item, state, impact, Ballistics.threat_level_at(weapon, distance))
+	# A visor has its own rating where it has one ("visor_rating": the LX-3's stops fragments only).
+	var own := StringName(item.stats.get("visor_rating", "")) if _voxel_at(impact) == VISOR else &""
+	var stopped := ArmorRules.piece_stops(item, state, impact, Ballistics.threat_level_at(weapon, distance), own)
 	var wear := float(weapon.stats.get("plate_wear", 1.0))
 	var radius: float
 	if stopped:
@@ -501,7 +503,7 @@ static func _get_base(p_item: ItemData) -> Dictionary:
 ## The pivot is the centre of the dome's base, which sits at head-local y = 0.20 m.
 ## "face_guard" (the LX-3 helmet; Captain, 2026-10-16/17: "face protection with metal plates like
 ## modern systems on modern helmets", then "a black visor and protection for the back of the
-## head, a modern futuristic pass"): under the shell's rim a closed ring hugging the head (JAW_R)
+## head, a modern futuristic pass"): a closed ring bolted on below the shell's rim (RIM_R to JAW_R)
 ## - a black visor over the eyes (VISOR, "visor_color") with a lit seam along its top and
 ## bottom (GLOW), metal cheek plates, a nape guard round the back, and a mandible over the mouth
 ## and chin with a raised centre ridge; the shell above gets a ridge down its crown and
@@ -617,9 +619,19 @@ static func guard_side(d: Vector3) -> String:
 	return "back" if d.z > 0.0 else "front"
 
 
-## A face guard's half-width (x) and half-depth (z) round the jaw, voxels: the head's 0.22 m
-## width and 0.12 m face inside a 3-voxel plate.
-const JAW_R := Vector2(14.5, 15.5)
+## A face guard's half-width (x) and half-depth (z), voxels: at the shell's rim (RIM_R, flush
+## with its outer edge: the guard comes off the helmet, Captain 2026-10-17: "it needs to look
+## like it comes off of the helmet not in it") sweeping in to the jaw at the chin (JAW_R).
+const RIM_R := Vector2(17.0, 18.0)
+const JAW_R := Vector2(12.5, 13.5)
+## The side hinge hubs: how far below the rim, and their radius (voxels).
+const HINGE_DOWN := 3.5
+const HINGE_R := 3.0
+
+
+## A face guard's half-width and half-depth `y` voxels below the shell's rim (y <= 0).
+static func guard_jaw(y: float) -> Vector2:
+	return RIM_R.lerp(JAW_R, clampf(-y / -GUARD_LOW, 0.0, 1.0))
 ## Face guard heights (voxels from the dome's base, the eyes at about -3..0): the visor from the
 ## brow (VISOR_TOP) down to VISOR_BOTTOM, the mandible below it to the chin (GUARD_LOW), the nape
 ## guard round the back down to NAPE_LOW.
@@ -641,8 +653,8 @@ const NECK_R_Z := 1.5
 static func _guard_dome_cell(d: Vector3, r: Vector3, v: int) -> int:
 	var front := d.z < -r.z * 0.45
 	if v != ACCENT and front and d.y < BROW_TOP:  # (the goggle band and brow sit inside the opening, round the face)
-		var e := (d.x / JAW_R.x) ** 2 + (d.z / JAW_R.y) ** 2
-		if e <= 1.0 and (d.x / (JAW_R.x - 2.0)) ** 2 + (d.z / (JAW_R.y - 2.0)) ** 2 > 1.0:  # 2 voxels thick
+		var e := (d.x / RIM_R.x) ** 2 + (d.z / RIM_R.y) ** 2
+		if e <= 1.0 and (d.x / (RIM_R.x - 2.0)) ** 2 + (d.z / (RIM_R.y - 2.0)) ** 2 > 1.0:  # 2 voxels thick
 			return VISOR if d.y < VISOR_TOP else INTACT  # the brow plate, in the shell's colour
 		if v == EMPTY and e > 1.0 and d.y < r.y * 0.3:
 			return INTACT  # the opening's edges, outside the band, closed: no skin at the temples
@@ -667,7 +679,7 @@ static func _guard_ring_cell(d: Vector3, th: float) -> int:
 		var e_neck_in := (d.x / (NECK_R.x - 2.0)) ** 2 + ((d.z - NECK_R_Z) / (NECK_R.y - 2.0)) ** 2
 		if e_neck <= 1.0:
 			return INTERIOR if e_neck_in <= 1.0 else ACCENT
-	var jaw := JAW_R * (1.0 - clampf((-d.y - 9.0) / 7.0, 0.0, 1.0) * 0.18)
+	var jaw := guard_jaw(d.y)
 	var e_out := (d.x / jaw.x) ** 2 + (d.z / jaw.y) ** 2
 	var e_in := (d.x / (jaw.x - th)) ** 2 + (d.z / (jaw.y - th)) ** 2
 	if e_in <= 1.0:
@@ -680,6 +692,10 @@ static func _guard_ring_cell(d: Vector3, th: float) -> int:
 		return ACCENT if outer and absf(d.x) < 3.5 and int(floor(d.y)) % 2 == 0 else FACEPLATE
 	if e_out > 1.0:
 		return EMPTY
+	if d.y >= -1.0:
+		return ACCENT  # the seam where the guard meets the shell's rim: a part bolted on, not the shell
+	if absf(d.x) > jaw.x - 1.5 and (d.y + HINGE_DOWN) ** 2 + d.z ** 2 <= HINGE_R * HINGE_R:
+		return ACCENT  # the side hinge hubs it hangs from
 	if front:
 		if d.y >= VISOR_BOTTOM:
 			var thin := (d.x / (jaw.x - 2.0)) ** 2 + (d.z / (jaw.y - 2.0)) ** 2 > 1.0  # a visor is 2 voxels thick
@@ -708,7 +724,10 @@ static func _get_mesher(p_item: ItemData, p_cover := Color(0, 0, 0, 0)) -> Voxel
 		palette.set_color(ACCENT, colour.darkened(0.35))
 		palette.set_color(VISOR, Color(p_item.stats.get("visor_color", "4d6f80")))  # tinted polycarbonate
 		palette.set_color(GLOW, Color(p_item.stats.get("glow_color", "37c8d8")))  # a lit seam
-		palette.set_color(FACEPLATE, Color(p_item.stats.get("plate_color", "3f4446")))  # a face guard's metal
+		# A face guard's metal: on a helmet in its side's colours ("faction_color", GearRig) a darker
+		# shade of the shell's colour (Captain, 2026-10-17: so it "doesn't pop so much"), else its own.
+		var faction := p_cover.a > 0.0 and bool(p_item.stats.get("faction_color", false))
+		palette.set_color(FACEPLATE, p_cover.darkened(0.3) if faction else Color(p_item.stats.get("plate_color", "3f4446")))
 		var mesher := VoxelMesherCubes.new()
 		mesher.palette = palette
 		mesher.color_mode = VoxelMesherCubes.COLOR_MESHER_PALETTE

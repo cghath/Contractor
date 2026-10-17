@@ -168,9 +168,10 @@ static func worn_through(item: ItemData, state: Dictionary, cell: Vector3i) -> b
 
 ## Host only. Whether the plate or helmet `item` (with item state `state`) stops a round of
 ## `threat` landing on voxel `cell` (where the round met material, not a hole). Rolls the
-## ceramic crack chance.
-static func piece_stops(item: ItemData, state: Dictionary, cell: Vector3i, threat: StringName) -> bool:
-	if is_shattered(state) or not stops(rating(item), threat) or worn_through(item, state, cell):
+## ceramic crack chance. `own_rating` is the rating of the part of the piece it met, where that
+## differs from the piece's (a helmet's visor, VoxelArmor), or &"".
+static func piece_stops(item: ItemData, state: Dictionary, cell: Vector3i, threat: StringName, own_rating := &"") -> bool:
+	if is_shattered(state) or not stops(own_rating if own_rating != &"" else rating(item), threat) or worn_through(item, state, cell):
 		return false
 	if material(item) == CERAMIC:
 		return roll(ceramic_stop_chance(state, cell))

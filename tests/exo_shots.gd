@@ -69,6 +69,14 @@ func _ready() -> void:
 	await _shot(camera, out, "helmet_lx3_front", head + Vector3(0.35, 0.05, -0.75), head)
 	await _shot(camera, out, "helmet_lx3_side", head + Vector3(-0.8, 0.05, -0.1), head)
 	await _shot(camera, out, "exo_pads_front_low", c + Vector3(0.4, -0.6, -1.4), c + Vector3(0, -0.6, 0))
+	# Holed: a pistol round through the visor (fragments only), a rifle round through the mask.
+	for piece: VoxelArmor in player.find_children("*", "VoxelArmor", true, false):
+		if piece.slot == &"helmet":
+			piece.server_try_stop(piece.to_global(Vector3(0.04, -0.02, -0.185)), -piece.global_basis.z * -1.0, ItemDB.get_item(&"m17"), 10.0)
+			piece.server_try_stop(piece.to_global(Vector3(-0.04, -0.12, -0.185)), -piece.global_basis.z * -1.0, ItemDB.get_item(&"m4a1"), 10.0)
+	for i in 3:
+		await get_tree().process_frame
+	await _shot(camera, out, "helmet_lx3_holed", head + Vector3(0.35, 0.05, -0.75), head)
 
 	# Disable the frame (run it to 0 hp) and shoot the same set again: the light goes red.
 	ExoFrame.server_damage(player, 1000.0)
