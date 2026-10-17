@@ -852,7 +852,26 @@ func _test_no_feeding() -> void:
 	g._last_contact = Soldier._now()
 	var sq := g.squad
 	sq.rescuer_down_at = -1000.0
-	check(not g._rescue_hot(delta), "no rescuer down yet: the first goes in (smoking first)")
+	sq.engaged_at = -1000.0
+	check(not g._rescue_hot(delta), "no rescuer down, no fire lately: the first goes in (smoking first)")
+	# Captain, 2026-10-17: "rescuers going for dangerous rescues instead of kills or cover".
+	sq.engaged_at = Soldier._now()
+	var smokes := golf.inventory.count_of(SquadAI.SCREEN_SMOKE)
+	if smokes > 0:
+		check(not g._rescue_hot(delta), "still trading fire, but he carries smoke: he goes, screening his way in")
+		for i in smokes:
+			golf.inventory.remove_one(SquadAI.SCREEN_SMOKE)
+	for m: Soldier in sq.members():
+		m.last_shot_at = -1000.0
+	check(g._rescue_hot(delta) and g._find_casualty() != delta, "still trading fire, no smoke, no covering fire: even the first waits")
+	check(g._medic_needs_cover(), "and puts fire on the shooter meanwhile")
+	var cover_man: Soldier = sq.members().filter(func(m: Soldier) -> bool: return m != golf and m != delta and m.vitals.is_up())[0]
+	cover_man.last_shot_at = Soldier._now()
+	check(not g._rescue_hot(delta), "a squadmate puts fire on the shooter: covered, he goes")
+	cover_man.last_shot_at = -1000.0
+	if smokes > 0:
+		golf.inventory.take(SquadAI.SCREEN_SMOKE, smokes)
+	sq.engaged_at = -1000.0
 	sq.rescuer_down_at = Soldier._now()
 	sq.rescuer_down_point = delta.global_position
 	check(g._rescue_hot(delta) and g._find_casualty() != delta, "a rescuer went down by him under LOS: the next waits")

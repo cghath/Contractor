@@ -87,10 +87,24 @@ const CLIMB_AT_WALL_M := 2.5
 const CLIMB_GIVE_UP_S := 3.0
 ## How long "Suppress" lasts (Squad.order_suppress).
 const SUPPRESS_ORDER_S := 20.0
-## An evaluator task that moves the unit scores above fighting where it stands and below falling
-## back broken; an ordered tactic above that, below casualty care and an empty magazine.
+## Who decides what a unit does (Captain, 2026-10-17: "Player orders -> squad tactics -> buddy
+## team tactics -> indiv tactics"; B team "not responding" was its own fighting and casualty care
+## outscoring a player's orders):
+## - a player's order: an ordered tactic (ORDERED_SCORE) or a move or hold (PLAYER_ORDER_SCORE)
+##   comes first, below only survival reflexes (an empty magazine, its own bleeding). A move
+##   order rules until it gets there; a hold keeps fighting from its spot (HOLD's act fights)
+##   and still treats casualties near the spot (HOLD_CARE_M);
+## - the squad's own tactics next (TACTIC_SCORE: an evaluator task, by fire team or buddy pair,
+##   Tactics.elements);
+## - then the unit's own: going to a casualty (in contact CASUALTY_CONTACT_SCORE: above fighting
+##   where it stands, 0.7, by more than HYSTERESIS so a medic who's shooting does break off; out
+##   of contact 0.9), only when the rescue is covered (_rescue_hot: smoke, covering fire, or the
+##   shooter pinned), then fighting where it stands.
 const TACTIC_SCORE := 0.75
-const ORDERED_SCORE := 0.85
+const ORDERED_SCORE := 0.93
+const PLAYER_ORDER_SCORE := 0.93
+const CASUALTY_CONTACT_SCORE := 0.82
+const HOLD_CARE_M := 12.0
 ## Suppressive rounds wander this far round the point (a position, not a pixel), a new spot each burst.
 const SUPPRESS_SPREAD_M := 1.5
 ## Bounding overwatch: legs of at most BOUND_LEG_M, cover to cover (within BOUND_COVER_M of the
@@ -146,7 +160,7 @@ const FALL_BACK_COVER_M := 8.0
 ## Hostiles see this far (Captain, 2026-10-13: engagement ranges up; was 60 m). Doctrine's
 ## engage_m fits it (insurgents 180 m, regulars 200 m) and Doctrine.engage_m never goes past
 ## it (audit F-03; still pending, A3-07).
-const SIGHT_RANGE := 200.0
+const SIGHT_RANGE := 300.0  # (was 200; Captain, 2026-10-17: they "don't engage far enough out")
 const SUPPRESSED := 0.5
 const PINNED := 0.85
 const HYSTERESIS := 0.1
@@ -178,8 +192,16 @@ const STACK_M := 1.5
 ## SOFT_COVER_TEST_J (an M855 at close range), so AI picks concrete when it has the choice.
 const SOFT_COVER_PENALTY := 6.0
 const SOFT_COVER_TEST_J := 1650.0
-const ADVANCE_AFTER_S := 6.0
+## A hostile out of sight of the enemy this long pushes one bound toward where it was seen, to
+## cover (Captain, 2026-10-17: "enemies also feed the meat grinder too much... they need to be
+## capable fighters, not cattle that run around and die"; was 6 s, into the open): only to a
+## covered spot within ADVANCE_COVER_M of the bound's end, and only while its morale holds
+## (ADVANCE_MORALE: losses and suppression nearby hold it back; Captain: firefights "end
+## really fast").
+const ADVANCE_AFTER_S := 15.0
 const ADVANCE_STEP := 8.0
+const ADVANCE_COVER_M := 6.0
+const ADVANCE_MORALE := 0.6
 const WORLD_MASK := 1
 ## Line of fire (Captain, v0.4.6 playtest: "friendlies shoot at and try to shoot through walls,
 ## enemies too"): no round leaves unless it would get there (_fire_line). Fire at a point
@@ -538,6 +560,8 @@ var _destination := Vector3.ZERO
 var _has_destination := false
 var _run := false
 var _cover_point := Vector3.ZERO
+## How fast a carrier or dragger turns to the way it goes, of TURN_RATE.
+const CARRY_TURN_MULT := 0.45
 ## Dragging (Care.DRAG): the nearest it got to _cover_point, when it last got nearer, and when
 ## contact was last seen (_drag_stalled).
 var _drag_best := INF
@@ -847,16 +871,35 @@ func _medic_needs_cover() -> bool:
 
 
 ## Going for `c` now would feed the squad into the fire on them: a rescuer went down near
-## them lately (REACH_HOT_S), or this is a casualty in the open to a known shooter and no one
-## has smoked, suppressed or flanked it yet. The first rescuer of an uncovered casualty still
-## goes (smoking first, _care_reach); anyone else waits for the threat to be dealt with.
+## them lately (HOT_DOWN_S), or (Captain, 2026-10-17: "rescuers going for dangerous rescues
+## instead of kills or cover") the casualty lies in the open to a known shooter the squad is
+## still trading fire with (fired on within RESCUE_QUIET_S), with nothing covering the rescue:
+## no smoke on them, the shooter not pinned, no squadmate putting fire on it (shot within
+## COVERING_FIRE_S), and this unit carries no smoke to screen its own way in (_care_reach throws
+## it). Then even the first rescuer waits: it puts fire on the shooter from cover
+## (_medic_needs_cover) until one of those changes.
+const RESCUE_QUIET_S := 6.0
+const COVERING_FIRE_S := 3.0
+
+
+## A squadmate (not this unit) fired within COVERING_FIRE_S: the rescue has covering fire.
+func _covering_fire() -> bool:
+	for m: Soldier in squad.members():
+		if m != body and is_instance_valid(m) and m.vitals.is_up() and Soldier._now() - m.last_shot_at < COVERING_FIRE_S:
+			return true
+	return false
+
+
 func _rescue_hot(c: Soldier) -> bool:
 	if not in_contact() or squad == null or _sheltered(c) or _screened(c.global_position):
 		return false
 	var now := Soldier._now()
 	var down := now - squad.rescuer_down_at < HOT_DOWN_S and squad.rescuer_down_point.distance_to(c.global_position) < HOT_DOWN_M
-	if not down:
+	var under_fire := now - squad.engaged_at < RESCUE_QUIET_S
+	if not down and not under_fire:
 		return false
+	if not down and (body.inventory.count_of(SCREEN_SMOKE) > 0 or _covering_fire()):
+		return false  # it can screen its own way in, or the squad has the shooter's head down
 	for n in get_tree().get_nodes_in_group(&"combatants"):
 		var f := n as Soldier
 		if f != null and f.faction != body.faction and f.vitals.is_up() and f.global_position.distance_to(body.threat_pos) < 4.0 				and f.suppression >= PINNED:
@@ -1018,10 +1061,12 @@ func _choose_intent() -> void:
 			Squad.Order.FOLLOW:
 				scores[Intent.FOLLOW] = 0.5
 			Squad.Order.HOLD:
-				scores[Intent.HOLD] = 0.5
+				# (An ordered tactic is the newer order: Suppress plays out by fighting from here.)
+				scores[Intent.HOLD] = PLAYER_ORDER_SCORE if ordered.is_empty() else 0.5
 			Squad.Order.MOVE:
-				# Disciplined soldiers keep moving under fire a little longer.
-				scores[Intent.MOVE_TO] = 0.5 + (0.25 * discipline if contact else 0.0)
+				# A player's move order rules until it gets there; then it holds like 0.5 did.
+				var there := body.global_position.distance_to(_move_point) <= ARRIVE + 0.5
+				scores[Intent.MOVE_TO] = 0.5 if there or not ordered.is_empty() else PLAYER_ORDER_SCORE
 		if escort_valid():
 			scores[Intent.ESCORT] = ESCORT_SCORE
 		elif escorting != null:
@@ -1029,12 +1074,17 @@ func _choose_intent() -> void:
 	else:
 		scores[Intent.PATROL] = 0.3
 		if Soldier._now() - _last_contact < INVESTIGATE_MEMORY_S or suspecting():
-			scores[Intent.INVESTIGATE] = 0.55
+			# Shaken (losses, suppression), it stays put in cover rather than searching the kill zone.
+			scores[Intent.INVESTIGATE] = 0.55 if morale >= MORALE_SHAKEN + 0.2 or suspecting() else 0.2
 	# Casualty care, both sides: a living casualty comes before almost anything; a fallen
 	# friendly's body is carried only out of contact.
 	_candidate = _find_casualty() if care == Care.NONE or care == Care.BODY else null
 	if (care != Care.NONE and care != Care.BODY) or _candidate != null:
-		scores[Intent.CASUALTY] = 0.9
+		# In contact a casualty waits on the squad's tactics; ordered to hold, one near the spot
+		# is still seen to (above the hold), farther ones wait on the order.
+		var who: Soldier = casualty if care != Care.NONE and care != Care.BODY and is_instance_valid(casualty) else _candidate
+		var near_hold := order == Squad.Order.HOLD and who != null and who.global_position.distance_to(_hold_point) <= HOLD_CARE_M
+		scores[Intent.CASUALTY] = PLAYER_ORDER_SCORE + 0.01 if near_hold else (CASUALTY_CONTACT_SCORE if contact else 0.9)
 	elif not contact and (care == Care.BODY or _find_body() != null):
 		scores[Intent.CASUALTY] = BODY_RECOVER_SCORE
 	_maybe_call_medic()
@@ -1067,8 +1117,9 @@ func _choose_intent() -> void:
 	if best != intent and best_score < current + HYSTERESIS:
 		return
 	if best != intent:
-		if intent == Intent.CASUALTY and care != Care.NONE and care != Care.BODY and best_score < 0.95:
-			return  # don't abandon a casualty for anything short of an empty magazine or your own bleed
+		var player_order := _friendly() and (best == Intent.MOVE_TO or best == Intent.HOLD or (best == Intent.TACTIC and not ordered.is_empty()))
+		if intent == Intent.CASUALTY and care != Care.NONE and care != Care.BODY and best_score < 0.95 and not player_order:
+			return  # don't abandon a casualty for anything short of an empty magazine, your own bleed or a player's order
 		intent = best
 		_score = best_score
 		if intent != Intent.CASUALTY and care == Care.BODY:
@@ -1186,11 +1237,14 @@ func _notice_fire(now: float) -> void:
 func _fight_from_context() -> void:
 	if body.faction != &"friendly":
 		if target == null and _no_los_s > ADVANCE_AFTER_S and not _buddy_bounding() and not _advancing:
-			# Push one bound toward where the enemy was last seen.
-			_advancing = true
-			_advance_anchor = body.global_position.move_toward(body.threat_pos, ADVANCE_STEP)
-			_has_cover = false
 			_no_los_s = 0.0
+			# Push one bound toward where the enemy was last seen: to cover, and only in good heart.
+			var spot: Variant = find_cover(body.global_position.move_toward(body.threat_pos, ADVANCE_STEP), ADVANCE_COVER_M) if morale >= ADVANCE_MORALE else null
+			if spot != null:
+				_advancing = true
+				_advance_anchor = spot
+				_cover_point = spot
+				_has_cover = true
 		if target != null and target.vitals.is_up():
 			_advancing = false  # a dead-check doesn't end the push through the position
 		_fight(_advance_anchor if _advancing else (_cover_point if _has_cover else body.global_position), 6.0)
@@ -1769,7 +1823,7 @@ func _care_reach(contact: bool) -> void:
 	_has_destination = false
 	# (Never lift someone another is treating: it cut the Captain's IV short, P0164.)
 	if exposed and not is_instance_valid(casualty.carried_by) and not casualty.vitals.is_healing():
-		var spot: Variant = find_cover(body.global_position, 10.0)
+		var spot: Variant = find_drag_cover(body.global_position, 10.0)
 		if spot != null and body.server_pick_up_body(casualty, Soldier.DRAG):
 			_cover_point = spot
 			_has_cover = true
@@ -1907,7 +1961,7 @@ func _care_carry(contact: bool) -> void:
 	if contact:
 		if body.carrying == casualty:
 			body._set_carry_mode(Soldier.DRAG, &"grab")
-			var spot: Variant = find_cover(body.global_position, 10.0)
+			var spot: Variant = find_drag_cover(body.global_position, 10.0)
 			_has_cover = spot != null
 			if spot != null:
 				_cover_point = spot
@@ -3257,6 +3311,46 @@ func find_cover(anchor: Vector3, leash: float) -> Variant:
 	return best
 
 
+## Where to drag a casualty to (Captain, 2026-10-17: they "drag illogical ways"): not a firing
+## position (find_cover likes low cover you can shoot over, and doesn't mind the way there) but
+## the nearest spot that hides someone lying down from the threat, away from it rather than
+## toward it or across its line, with the way there clear enough to drag along.
+func find_drag_cover(anchor: Vector3, leash: float) -> Variant:
+	var map := body.get_world_3d().navigation_map
+	var world := body.get_world_3d()
+	var to_threat := body.threat_pos - anchor
+	to_threat.y = 0.0
+	to_threat = to_threat.normalized() if to_threat.length() > 0.1 else Vector3.ZERO
+	var best: Variant = null
+	var best_score := INF
+	for ring in COVER_RINGS:
+		if ring > leash + 0.1:
+			break
+		for k in 12:
+			var angle := TAU * k / 12.0 + ring
+			var p := anchor + Vector3(cos(angle), 0.0, sin(angle)) * ring
+			var q := NavigationServer3D.map_get_closest_point(map, p)
+			if Vector2(q.x - p.x, q.z - p.z).length() > 0.6 or _cover_taken(q):
+				continue
+			if Throwables.clear_line(world, body.threat_pos + Vector3.UP * 1.5, q + Vector3.UP * 0.35):
+				continue  # someone lying there is still in its sight
+			var way := q - anchor
+			way.y = 0.0
+			var path := NavigationServer3D.map_get_path(map, anchor, q, true)
+			var length := 0.0
+			for i in range(1, path.size()):
+				length += path[i - 1].distance_to(path[i])
+			if path.size() < 2 or length > way.length() * 1.6 + 2.0:
+				continue  # a long way round (a wall between): not a drag
+			var score := length
+			if to_threat != Vector3.ZERO and way.length() > 0.1:
+				score += maxf(way.normalized().dot(to_threat), 0.0) * 6.0  # toward the shooter: worse
+			if score < best_score:
+				best = q
+				best_score = score
+	return best
+
+
 func _cover_protects(point: Vector3) -> bool:
 	return not Throwables.clear_line(body.get_world_3d(), body.threat_pos + Vector3.UP * 1.5, point + Vector3.UP * 0.9)
 
@@ -3905,6 +3999,12 @@ func _steer(delta: float) -> void:
 	if foe == null and dir != Vector3.ZERO and body.carrying == null:
 		body.rotation.y = lerp_angle(body.rotation.y, atan2(-dir.x, -dir.z), 1.0 - exp(-TURN_RATE * get_physics_process_delta_time()))
 		body.head.rotation.x = lerpf(body.head.rotation.x, 0.0, 0.1)
+	elif dir != Vector3.ZERO and body.carrying != null:
+		# Carrying or dragging (Captain, 2026-10-17: "they tend to face the way they should be
+		# dragging their teammate and freeze up"): the body turns to the way it goes, slower than
+		# empty-handed, so the casualty trails behind it (Soldier.carry_transform) instead of the
+		# carrier walking sideways or backwards into them.
+		body.rotation.y = lerp_angle(body.rotation.y, atan2(-dir.x, -dir.z), 1.0 - exp(-TURN_RATE * CARRY_TURN_MULT * get_physics_process_delta_time()))
 	elif foe == null and dir == Vector3.ZERO and _watch_point() != null and intent != Intent.CASUALTY:
 		_aim_at(_watch_point())  # suppressing, or watching a sector
 	elif foe == null and dir == Vector3.ZERO and in_contact() and not (intent == Intent.CASUALTY and care == Care.TREAT):

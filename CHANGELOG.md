@@ -29,6 +29,28 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 
 
+### AI orders and rescues, dragging, enemy AI, voices, shop (Captain, 2026-10-17)
+
+#### Changed
+- Squad AI follows the order of command: a player's Move (until it gets there), Hold and
+  ordered tactics come before fighting and casualty care ("B team not responding" was its own
+  fighting and casualty care outscoring the player's orders). Holding, casualties near the spot
+  are still seen to.
+- Rescues under fire only when covered: the rescuer goes if it can throw smoke, a squadmate is
+  putting fire on the shooter, the shooter is pinned or smoke is down; otherwise it fights and
+  covers until one of those is true.
+- Dragging and carrying: the AI turns to the way it's going (the casualty trails behind), and
+  drags to the nearest spot that hides someone lying down, away from the shooter, without long
+  detours.
+- Enemy AI: sees and engages out to 300 m (was 200; insurgents open up at 240 m, regulars at
+  280 m); pushes toward you only after 15 s out of sight (was 6), only to cover and only while
+  its morale holds; shaken, it holds its cover instead of searching the kill zone.
+- Voice callouts sit under the gunfire and ambience: 10 dB down spoken, 13 dB over the radio.
+
+#### Added
+- Shop: a search box (filters what's for sale and what you can sell as you type) and a "Sell
+  from the stash" list with Sell and Sell all.
+
 ### LX-3 armour and helmet, the climb order, supports runner budget (Captain, 2026-10-16/17)
 
 #### Added
