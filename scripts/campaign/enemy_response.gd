@@ -91,6 +91,9 @@ const REINFORCE_GAP_S := 1200.0
 const REINFORCE_MAX := 4
 const REINFORCE_TYPES: Array[String] = ["outpost", "checkpoint"]
 const TEAM_SPACING_M := 1.6
+## A team this big brings a medic (its TEAM_MEDIC_INDEX'th man; Captain 2026-10-17: more enemy medics).
+const TEAM_MEDIC_MIN := 4
+const TEAM_MEDIC_INDEX := 2
 
 ## Host: a patrol was sent to look round `pos` (RadioChatter: the order on the net).
 signal look_sent(pos: Vector3)
@@ -710,7 +713,7 @@ func _spawn_team(squad: Squad, callsign: String, size: int, at: Vector3, toward:
 			kit = CompoundLevel.hostile_loadout(callsign.hash() + i) + loadout.slice(CompoundLevel.HOSTILE_LOADOUT.size())
 		var s: Soldier = level.call(&"spawn_soldier", {"name": "%s_%d" % [callsign, i + 1], "faction": "hostile",
 			"variant": "urban", "pos": pos, "loadout": kit, "combat": combat, "discipline": discipline,
-			"guard": false, "mode": mode})
+			"guard": false, "mode": mode, "role": "medic" if size >= TEAM_MEDIC_MIN and i == TEAM_MEDIC_INDEX else ""})
 		if s == null:
 			continue
 		var brain := SquadAI.of(s)
