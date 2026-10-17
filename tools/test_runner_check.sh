@@ -8,8 +8,32 @@
 #   tools/test_runner_check.sh      (prints each case; exits non-zero if the runner misjudges one)
 set -u
 cd "$(dirname "$0")/.."
-dir="$(mktemp -d)"
-trap 'rm -rf "$dir"' EXIT
+bash tools/check_ci_suites.sh || exit 1
+. tools/run_log.sh
+check_root="$(run_log_parent)"
+[ -n "$check_root" ] || check_root="${RUNNER_TEMP:-/tmp}/contractor-test-logs"
+check_id="$(printf 'S%04d' "$(run_log_number "$check_root")")"
+check_day="$check_root/$(date +%Y-%m-%d)"
+check_time="$(date +%H%M%S)"
+dir="$check_day/$check_id-$check_time-RUNNING-runner-check-$(git rev-parse --short HEAD)"
+mkdir -p "$dir"
+# Normalize a Windows drive path for PATH/shebangs in the fake engine and exporter.
+dir="$(cd "$dir" && pwd)"
+exec 3>&1
+exec > >(tee "$dir/check.log") 2>&1
+log_pid=$!
+finish_check() {
+	code=$?
+	verdict=PASS
+	[ "$code" -eq 0 ] || verdict=FAIL
+	# Close tee before renaming its directory (Windows locks an open output file).
+	exec 1>&3 2>&3
+	wait "$log_pid"
+	mv "$dir" "${dir/RUNNING/$verdict}" || exit 1
+	echo "$check_id $(date +%Y-%m-%d) $check_time $verdict runner-check" >>"$check_root/index.txt"
+	echo "$check_id: $verdict (${dir/RUNNING/$verdict})"
+}
+trap finish_check EXIT
 fake="$dir/fake-engine.sh"
 cat >"$fake" <<'FAKE'
 #!/usr/bin/env bash

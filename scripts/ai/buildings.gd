@@ -65,7 +65,7 @@ const OUTSIDE_M := 1.5
 const EXIT_PROBE_M := 8.0
 const ROOM_EYE := 1.2
 const CACHE_S := 20.0
-const CACHE_MAX := 48
+const CACHE_MAX := 256
 ## Floors (F-01): surfaces are looked for from SCAN_UP_M above the query down to SCAN_DOWN_M
 ## below it (a scan from the roof of a two-storey building reaches its ground floor), at most
 ## MAX_SURFACES of them over a cell; a surface is one whose normal.y is FLOOR_NORMAL_Y or more,
@@ -103,28 +103,29 @@ const RAISED_M := 1.5
 ## the squads' tactics and context ask for the buildings round their centre and the enemy's
 ## every second, and both move, so nearly every ask missed the cache (keyed to 2 m) and scanned
 ## afresh: 150-960 ms a squad think in a town (R1130-R1136: three quarters of it the per-cell
-## probes, half of those navmesh closest-point queries). Now a scan covers an AREA_SNAP_M grid
-## square's worth of centres (scanned that much wider from the square's middle, and each ask's
-## buildings picked out of it), and each 1 m cell's probes are kept too, so a scan of the next
-## square over reuses what it overlaps (a cell is probed for scans from three CELL_BAND_M height
-## bands at once, its own and one each side, so scans from heights near each other share it); so is each building made of the same
-## spots (its floors, stairs, entrances, ports and rooms) and each stair-step link. Everything
-## still goes after
+## probes, half of those navmesh closest-point queries). Exact scans share each 1 m cell's
+## probes across three CELL_BAND_M height bands, and buildings made of the same actual spots
+## share their floors, stairs, entrances, ports and rooms. Closest-surface probes use a spatial
+## index of navigation regions, refreshed when the map changes. Everything still goes after
 ## CACHE_S: an answer is never older than that (its "at" is the oldest probe it was built
 ## from), and a building is made afresh once any of its cells was probed again.
-## Proposed: the area grid (m), and how many areas, cells, buildings and links are kept.
-const AREA_SNAP_M := 4.0
+## Proposed: the height band (m), and how many cells, buildings and links are kept.
 const CELL_BAND_M := 6.0
-const AREA_MAX := 64
 const CELL_MAX := 60000
 const BUILT_MAX := 512
 const LINK_MAX := 20000
+## Closest-surface probes only accept points less than a metre away. Index navigation
+## region bounds on this grid so they query nearby regions instead of the whole zone.
+const REGION_GRID_M := 16.0
+const REGION_MARGIN_M := 1.0
 
 static var _cache := {}
-static var _areas := {}  # snapped centre and reach -> {"at", "list"}: a wider scan's buildings
 static var _cells := {}  # Vector3i (cell x, z, height band) -> [at, surfaces, spots] (_probe_cell)
-static var _built := {}  # the scan's height and a group's spots -> [built at, oldest probe, building]
+static var _built := {}  # a group's actual spots -> [built at, oldest probe, building]
 static var _links := {}  # [a, b] -> [at, linked]: _linked's answers
+static var _region_grid := {}
+static var _region_map := RID()
+static var _region_iteration := 0
 ## Tests: how long scans have taken so far (usec, every world).
 static var spent_usec := 0
 ## The world and level the cached scans belong to (_scope); another one empties the cache.
@@ -142,21 +143,28 @@ static var _budget_used := 0
 ## The buildings with an inside spot within `radius` of `centre` (see the class notes).
 ## Cached per world and level: another level at the same coordinates (the next zone, a
 ## second world) never gets this one's buildings.
-static func near(from: Node3D, centre: Vector3, radius := SCAN_M) -> Array:
+static func near(from: Node3D, centre: Vector3, radius := SCAN_M, details := true) -> Array:
 	if from == null or not from.is_inside_tree():
 		return []
+	if NavigationServer3D.map_get_iteration_id(from.get_world_3d().navigation_map) == 0:
+		return []  # not synchronized yet; don't cache a false empty result
 	var scope := _scope(from)
 	if scope != _cache_scope:
 		_cache.clear()  # a new level (or world): the old one's scans mean nothing here
-		_areas.clear()
 		_cells.clear()
 		_built.clear()
 		_links.clear()
+		_region_grid.clear()
+		_region_iteration = 0
 		_cache_scope = scope
 	var key := "%s|%d,%d,%d,%d" % [scope, roundi(centre.x / 2.0), roundi(centre.y / 2.0), roundi(centre.z / 2.0), roundi(radius)]
+	if not details:
+		key += "|presence"
 	var now := Soldier._now()
 	var hit: Dictionary = _cache.get(key, {})
 	if not hit.is_empty() and now - float(hit.at) < CACHE_S:
+		_cache.erase(key)
+		_cache[key] = hit  # least recently used first, without a full-cache purge
 		return hit.list
 	var frame := Engine.get_process_frames()
 	if frame != _budget_frame:
@@ -165,20 +173,26 @@ static func near(from: Node3D, centre: Vector3, radius := SCAN_M) -> Array:
 	if _budget_used >= FRAME_BUDGET_USEC and DisplayServer.get_name() != "headless":
 		return hit.list if not hit.is_empty() else []  # over this frame's budget: what it knew
 	if _cache.size() >= CACHE_MAX:
-		_cache.clear()
+		_cache.erase(_cache.keys()[0])
 	var t := Time.get_ticks_usec()
 	# Scanned from exactly this centre and radius, as an uncached scan would be (an earlier
-	# AREA_SNAP_M square scan handed back whole buildings from a wider circle, which changed
+	# A wider square scan handed back whole buildings from outside the circle, which changed
 	# answers: casualty's "out in the open" soldier found cover the plain scan doesn't). The
 	# speed-up is in the parts below that don't change the answer: each cell's probes, each
 	# building made of the same spots, and each stair link, all kept for CACHE_S.
-	var area := _scan(from.get_world_3d(), centre, radius, now)
+	var area := _scan(from.get_world_3d(), centre, radius, now, details)
 	var list: Array = area.list
 	FrameCost.spent(&"buildings", t)  # (inside "ai" too when an AI's tick asked)
 	spent_usec += Time.get_ticks_usec() - t
 	_budget_used += Time.get_ticks_usec() - t
 	_cache[key] = {"at": area.at, "list": list}
 	return list
+
+
+## A formation only needs to know whether buildings are present. Keep the same probes,
+## floor links and entrance/raised-surface validation, without computing every room and port.
+static func has_near(from: Node3D, centre: Vector3, radius := SCAN_M) -> bool:
+	return not near(from, centre, radius, false).is_empty()
 
 
 ## Which world and level `from` is in: its World3D and the level node above it (none for a
@@ -189,10 +203,11 @@ static func near(from: Node3D, centre: Vector3, radius := SCAN_M) -> Array:
 ## bake would otherwise keep the old answer for every scan round it.
 static func forget() -> void:
 	_cache.clear()
-	_areas.clear()
 	_cells.clear()
 	_built.clear()
 	_links.clear()
+	_region_grid.clear()
+	_region_iteration = 0
 
 
 static func _scope(from: Node3D) -> String:
@@ -267,8 +282,10 @@ static func entrance_near(b: Dictionary, point: Vector3) -> Dictionary:
 ## it used was made}), with each cell's surfaces and spots from SCAN_UP_M over `centre` down to
 ## SCAN_DOWN_M under it. Each cell's probes are kept for CACHE_S under the cell and the height
 ## band `centre` is in (_cells), for the scans that overlap it.
-static func _scan(world: World3D, centre: Vector3, radius: float, now := Soldier._now()) -> Dictionary:
+static func _scan(world: World3D, centre: Vector3, radius: float, now := Soldier._now(), details := true) -> Dictionary:
+	var started := Time.get_ticks_usec()
 	var map := world.navigation_map
+	_index_regions(map)
 	var space := world.direct_space_state
 	var spots := {}  # Vector2i grid cell -> Array of Vector3 on the navmesh, lowest first
 	var ground := {}  # Vector2i grid cell -> the lowest surface found over it (y)
@@ -306,7 +323,8 @@ static func _scan(world: World3D, centre: Vector3, radius: float, now := Soldier
 			var here: Array = (kept[2] as Array).filter(func(sp: Vector3) -> bool: return sp.y >= bottom - 0.15 and sp.y <= top + 0.15)
 			if not here.is_empty():
 				spots[cell] = here
-	return {"list": _group(world, map, spots, ground, probed, height, now), "at": oldest}
+	FrameCost.spent(&"building_probes", started)
+	return {"list": _group(world, map, spots, ground, probed, height, now, details), "at": oldest}
 
 
 ## One cell's probes (see the class notes), from height `top` down to `bottom`: [its upward
@@ -320,7 +338,7 @@ static func _probe_cell(world: World3D, map: RID, space: PhysicsDirectSpaceState
 		return [surfaces, here]
 	for y: float in surfaces:
 		var p := Vector3(x, y + 0.1, z)
-		var q := NavigationServer3D.map_get_closest_point(map, p)
+		var q := _closest_nav_point(p)
 		if Vector2(q.x - p.x, q.z - p.z).length() > NAV_SNAP_M or q.y - y > SURFACE_SNAP_M or y - q.y > SURFACE_SNAP_BELOW_M:
 			continue
 		# The floor under that navmesh point must be this surface: the navmesh floats a little
@@ -337,9 +355,47 @@ static func _probe_cell(world: World3D, map: RID, space: PhysicsDirectSpaceState
 	return [surfaces, here]
 
 
+static func _index_regions(map: RID) -> void:
+	var iteration := NavigationServer3D.map_get_iteration_id(map)
+	if map == _region_map and iteration == _region_iteration:
+		return
+	_region_map = map
+	_region_iteration = iteration
+	_region_grid.clear()
+	for region: RID in NavigationServer3D.map_get_regions(map):
+		if not NavigationServer3D.region_get_enabled(region) or NavigationServer3D.region_get_iteration_id(region) == 0:
+			continue
+		var bounds := NavigationServer3D.region_get_bounds(region)
+		if bounds.size.length_squared() == 0.0:
+			continue
+		bounds = bounds.grow(REGION_MARGIN_M)
+		var lo := Vector2i(floori(bounds.position.x / REGION_GRID_M), floori(bounds.position.z / REGION_GRID_M))
+		var hi := Vector2i(floori(bounds.end.x / REGION_GRID_M), floori(bounds.end.z / REGION_GRID_M))
+		for z in range(lo.y, hi.y + 1):
+			for x in range(lo.x, hi.x + 1):
+				var key := Vector2i(x, z)
+				if not _region_grid.has(key):
+					_region_grid[key] = []
+				(_region_grid[key] as Array).append(region)
+
+
+static func _closest_nav_point(p: Vector3) -> Vector3:
+	var key := Vector2i(floori(p.x / REGION_GRID_M), floori(p.z / REGION_GRID_M))
+	var best := Vector3.INF
+	var distance := INF
+	for region: RID in _region_grid.get(key, []):
+		var q := NavigationServer3D.region_get_closest_point(region, p)
+		var d := p.distance_squared_to(q)
+		if d < distance:
+			distance = d
+			best = q
+	return best
+
+
 ## The scanned cells' spots (`spots`, `ground`, `probed`: see _scan; `height`: the scan's)
 ## made into buildings.
-static func _group(world: World3D, map: RID, spots: Dictionary, ground: Dictionary, probed := {}, height := 0, now := 0.0) -> Array:
+static func _group(world: World3D, map: RID, spots: Dictionary, ground: Dictionary, probed := {}, _height := 0, now := 0.0, details := true) -> Array:
+	var started := Time.get_ticks_usec()
 	# Spots next to each other (8 ways) and level, or linked up a stair, make one building.
 	var out: Array = []
 	var groups: Array = []  # Array[Vector3i] each: the spots of one floor (or more, up a stair)
@@ -380,6 +436,7 @@ static func _group(world: World3D, map: RID, spots: Dictionary, ground: Dictiona
 	# footprint (a stair inside: the grid's spots on a narrow stair can miss its navmesh) are
 	# one building; the path gives the stair between them.
 	var climbs := _link_floors(map, spots, groups)
+	FrameCost.spent(&"building_groups", started)
 	for gi in groups.size():
 		if (groups[gi] as Array).is_empty():
 			continue
@@ -392,20 +449,26 @@ static func _group(world: World3D, map: RID, spots: Dictionary, ground: Dictiona
 			var at := float(probed.get(Vector2i(id.x, id.z), now))
 			newest = maxf(newest, at)
 			first = minf(first, at)
-			ids.append("%d,%d,%d" % [id.x, id.y, id.z])
+			ids.append("%d,%s,%d" % [id.x, str(_spot(spots, id)), id.z])
 		ids.sort()
-		var key := "%d|%s" % [height, ",".join(ids)]
+		# The same geometry can be queried from different heights (slopes, stairs, a
+		# moving soldier). Key its actual surfaces, not the querying soldier's height.
+		var key := ",".join(ids)
+		if not details:
+			key += "|presence"
 		var kept: Array = _built.get(key, [])
 		var b: Dictionary
 		if not kept.is_empty() and float(kept[0]) >= newest and now - float(kept[1]) < CACHE_S:
 			b = kept[2]
 		else:
-			b = _building(world, spots, groups[gi], joins, ground, climbs.get(gi, []))
+			b = _building(world, spots, groups[gi], joins, ground, climbs.get(gi, []), details)
 			if _built.size() >= BUILT_MAX:
 				_built.clear()
 			_built[key] = [now, first, b]
 		if not b.is_empty():
 			out.append(b)
+			if not details:
+				return out
 	return out
 
 
@@ -613,7 +676,7 @@ static func _dir(k: int) -> Vector3:
 	return Vector3(cos(a), 0.0, sin(a))
 
 
-static func _building(world: World3D, spots: Dictionary, group: Array[Vector3i], joins: Dictionary, ground: Dictionary, climbs: Array = []) -> Dictionary:
+static func _building(world: World3D, spots: Dictionary, group: Array[Vector3i], joins: Dictionary, ground: Dictionary, climbs: Array = [], details := true) -> Dictionary:
 	var list: Array[Vector3] = []
 	var centre := Vector3.ZERO
 	var cells := {}  # Vector2i -> true: every cell the building covers, any floor
@@ -660,16 +723,23 @@ static func _building(world: World3D, spots: Dictionary, group: Array[Vector3i],
 		if lo >= 0 and hi > lo and not (b.stairs as Array).any(func(st: Dictionary) -> bool: return int(st.from) == lo and int(st.to) == hi):
 			(b.stairs as Array).append({"from": lo, "to": hi, "foot": c.foot, "top": c.top, "spots": c.spots})
 	(b.stairs as Array).sort_custom(func(p: Dictionary, q: Dictionary) -> bool: return int(p.to) < int(q.to))
+	var entrances_started := Time.get_ticks_usec()
 	b.entrances = _entrances(world, b, cells)
+	FrameCost.spent(&"building_entrances", entrances_started)
 	if b.entrances.is_empty():
 		var low := INF
 		for id in group:
 			low = minf(low, float(ground.get(Vector2i(id.x, id.z), INF)))
 		if float(floors[0].y) - low >= RAISED_M:
 			return {}  # up on something with no way in: no building
+	if not details:
+		return b
+	var started := Time.get_ticks_usec()
 	for fi in range(1, floors.size()):
 		floors[fi].roof = _open_sky(world, floors[fi].spots)
 	b.ports = _ports(world, b, cells)
+	FrameCost.spent(&"building_ports", started)
+	started = Time.get_ticks_usec()
 	var rooms: Array = []
 	for fi in floors.size():
 		var f: Dictionary = floors[fi]
@@ -685,6 +755,7 @@ static func _building(world: World3D, spots: Dictionary, group: Array[Vector3i],
 			(f.rooms as Array).append(rooms.size())
 			rooms.append(r)
 	b.rooms = rooms
+	FrameCost.spent(&"building_rooms", started)
 	for f: Dictionary in floors:
 		f.erase("cells")
 	return b

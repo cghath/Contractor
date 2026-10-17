@@ -27,6 +27,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Check tools/run_tests.sh
         run: bash tools/test_runner_check.sh
+      - name: Check draft release publishing
+        run: bash tools/test_publish_release.sh
 
   suite:
     name: ${{ matrix.suite }}
@@ -35,7 +37,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [smoke, gameplay, squad, spacing, net, levelswitch, wounds, armor, exo, movement, mantle, interaction, roles, medical, logistics, casualty, materials, animations, scavenge, contracts, people, map, base, world, missions, vehicles, antiarmor, session_log, supports, heliflight, bay, aav, sound, loop, ui, loadout, weapons, forest, townperf, markers, pallets]
+        suite: [smoke, gameplay, squad, spacing, net, levelswitch, wounds, armor, exo, movement, mantle, interaction, roles, medical, logistics, casualty, materials, animations, scavenge, contracts, people, map, base, world, missions, vehicles, antiarmor, session_log, supports, heliflight, bay, aav, sound, loop, ui, loadout, weapons, forest, townperf, markers, pallets, voice, compass, audit_fixes]
     steps:
       - uses: actions/checkout@v4
 

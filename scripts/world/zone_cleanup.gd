@@ -46,7 +46,7 @@ func server_sweep(now := -1.0) -> void:
 		var b := n as Soldier
 		if b == null or b.is_queued_for_deletion() or is_instance_valid(b.carried_by):
 			continue
-		if now - b.died_at < life_of(b.body_uid) or _near(b.global_position, players):
+		if now - b.died_at < life_of(b.body_uid) or _near(b.body_point(), players):
 			continue
 		b.remove_from_group(Soldier.DEAD_GROUP)
 		b.queue_free()

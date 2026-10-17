@@ -182,14 +182,23 @@ func server_send(origin: Vector3, extra_pairs := 0, cap := -1, target := Vector3
 	return waves.back().soldiers if not waves.is_empty() and int(waves.back().index) == index else []
 
 
+## Plan exactly the next wave, including both the caller's and this spawner's limits.
+func next_wave_size(extra_pairs := 0, cap := -1) -> int:
+	return _wave_count(waves_sent, extra_pairs, cap)
+
+
+func _wave_count(index: int, extra_pairs: int, cap: int) -> int:
+	var size := mini(wave_size(index, params) + 2 * extra_pairs, maxi(int(params.max_alive) - capped_alive(), 0))
+	if cap >= 0:
+		size = mini(size, cap)
+	return size - size % 2
+
+
 func _send_wave(index: int, origin := Vector3.INF, extra_pairs := 0, cap := -1, target := Vector3.INF) -> void:
 	var level := MapNodes.level_of(self)
 	if level == null or not level.has_method(&"spawn_soldier"):
 		return
-	var size := mini(wave_size(index, params) + 2 * extra_pairs, maxi(int(params.max_alive) - capped_alive(), 0))
-	if cap >= 0:
-		size = mini(size, cap)  # the caller's budget (EnemyResponse.SPAWN_BUDGET)
-	size -= size % 2  # whole buddy pairs
+	var size := _wave_count(index, extra_pairs, cap)
 	var edge := origin if origin.is_finite() else edge_point(level)
 	var record := {"index": index, "at_s": elapsed, "sent_at": _now(), "size": size, "edge": edge, "squad": null, "soldiers": [], "target": target}
 	waves.append(record)

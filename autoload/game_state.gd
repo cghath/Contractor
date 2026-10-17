@@ -16,9 +16,24 @@ var voxel_edits: Array = []
 ## Dead bodies lying in the zone with everything on them (Soldier.body_record), restored by
 ## CompoundLevel on load. Rebuilt from the live bodies (Soldier.DEAD_GROUP) on every save.
 var bodies: Array = []
+## Original hostile posts that fell, retained after their bodies leave the zone.
+var fallen_posts: Dictionary = {}
 ## Vehicles in the zone, wrecks included (Vehicle.to_save), put back by VehicleLayer on load
 ## (wave 5). Rebuilt from the live vehicles (group "vehicles") on every save.
 var vehicles: Array = []
+
+
+func post_fell(spawn_id: String) -> void:
+	if spawn_id != "":
+		fallen_posts[spawn_id] = true
+
+
+func post_is_fallen(spawn_id: String) -> bool:
+	if fallen_posts.has(spawn_id):
+		return true
+	# Also accept in-memory legacy records (load_zone migrates these to the ledger).
+	return bodies.any(func(b: Dictionary) -> bool:
+		return b.get("faction", "") == "hostile" and String(b.get("spawn_id", b.get("label", ""))) == spawn_id)
 
 
 func new_uid() -> String:
@@ -66,6 +81,7 @@ func save_zone() -> bool:
 		"dropped": dropped,
 		"voxel_edits": voxel_edits,
 		"bodies": bodies,
+		"fallen_posts": fallen_posts.keys(),
 		"vehicles": vehicles,
 	}, "", true, true)  # full precision: item state (plate and helmet integrity) comes back exactly
 	if not write_safely(save_path(), text):
@@ -82,6 +98,7 @@ func load_zone() -> void:
 	dropped.clear()
 	voxel_edits.clear()
 	bodies.clear()
+	fallen_posts.clear()
 	vehicles.clear()
 	var zone := {}
 	for path: String in save_candidates(save_path()):
@@ -99,6 +116,7 @@ func load_zone() -> void:
 	dropped = zone.dropped
 	voxel_edits = zone.voxel_edits
 	bodies = zone.bodies
+	fallen_posts = zone.fallen_posts
 	vehicles = zone.get("vehicles", [])
 
 
@@ -187,7 +205,7 @@ static func write_safely(path: String, text: String) -> bool:
 ## record doesn't have is fine): a dropped item's, a body's (Soldier.body_record, read back by
 ## CompoundLevel.server_spawn_body) and a vehicle's (Vehicle.to_save, read back by from_save).
 const DROPPED_FIELDS := {"id": TYPE_STRING, "count": TYPE_FLOAT, "state": TYPE_DICTIONARY}
-const BODY_FIELDS := {"label": TYPE_STRING, "faction": TYPE_STRING, "variant": TYPE_STRING, "body": TYPE_STRING,
+const BODY_FIELDS := {"spawn_id": TYPE_STRING, "label": TYPE_STRING, "faction": TYPE_STRING, "variant": TYPE_STRING, "body": TYPE_STRING,
 	"person_name": TYPE_STRING, "nation": TYPE_STRING, "left": TYPE_BOOL, "role": TYPE_STRING, "rot_y": TYPE_FLOAT,
 	"age_s": TYPE_FLOAT, "marker": TYPE_BOOL, "gear": TYPE_DICTIONARY, "ragdoll": [TYPE_ARRAY, TYPE_FLOAT]}
 const VEHICLE_FIELDS := {"scheme": TYPE_STRING, "faction": TYPE_STRING, "wrecked": TYPE_BOOL, "rot": [TYPE_ARRAY, TYPE_FLOAT],
@@ -218,11 +236,15 @@ static func read_save(path: String) -> Dictionary:
 	var edits_in: Variant = data.get("voxel_edits", [])
 	var bodies_in: Variant = data.get("bodies", [])  # saves from before bodies were kept have none
 	var vehicles_in: Variant = data.get("vehicles", [])  # nor vehicles before wave 5
+	var fallen_in: Variant = data.get("fallen_posts", [])
 	if typeof(looted_in) != TYPE_ARRAY or typeof(dropped_in) != TYPE_DICTIONARY or typeof(edits_in) != TYPE_ARRAY \
-			or typeof(bodies_in) != TYPE_ARRAY or typeof(vehicles_in) != TYPE_ARRAY:
+			or typeof(bodies_in) != TYPE_ARRAY or typeof(vehicles_in) != TYPE_ARRAY or typeof(fallen_in) != TYPE_ARRAY:
 		push_warning("GameState: ignoring save %s: a section has the wrong type" % path)
 		return {}
-	var out := {"looted": {}, "dropped": {}, "voxel_edits": [], "bodies": [], "vehicles": []}
+	var out := {"looted": {}, "dropped": {}, "voxel_edits": [], "bodies": [], "vehicles": [], "fallen_posts": {}}
+	for post: Variant in fallen_in:
+		if typeof(post) == TYPE_STRING and post != "":
+			out.fallen_posts[post] = true
 	for uid: Variant in looted_in:
 		if typeof(uid) == TYPE_STRING:
 			out.looted[uid] = true
@@ -241,6 +263,12 @@ static func read_save(path: String) -> Dictionary:
 	for b: Variant in bodies_in:
 		if typeof(b) == TYPE_DICTIONARY and _finite_pos(b.get("pos")) and typeof(b.get("uid")) == TYPE_STRING and fields_ok(b, BODY_FIELDS):
 			out.bodies.append(b)
+			if b.get("faction", "") == "hostile":
+				# Older saves used callsigns as labels. New saves keep the post independently
+				# of the generated display name and the restored body's node name.
+				var post := String(b.get("spawn_id", b.get("label", "")))
+				if post != "":
+					out.fallen_posts[post] = true
 		else:
 			push_warning("GameState: %s: skipping a bad body record" % path)
 	for v: Variant in vehicles_in:

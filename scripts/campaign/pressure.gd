@@ -169,7 +169,8 @@ func note_contact(contact: bool, t: float) -> void:
 		_contact_since = t
 		_long_paid = 0
 		server_add("firefight")
-	var long := floori((t - _contact_since) / FIREFIGHT_LONG_S)
+	# Absolute clocks can lose a fraction of a microsecond when subtracted at the boundary.
+	var long := floori((t - _contact_since + 0.000001) / FIREFIGHT_LONG_S)
 	if long > _long_paid:
 		server_add("firefight_long", long - _long_paid)
 		_long_paid = long

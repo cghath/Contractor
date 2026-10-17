@@ -371,9 +371,6 @@ func _launch_qrf() -> void:
 	if bases.is_empty():
 		return  # a destroyed QRF base sends no waves
 	var command := EnemyCommand.of(self)
-	if command and not command.approve("qrf", lkp):
-		_last_qrf = now()  # turned down: asked again after QRF_RELAUNCH_S, not every report
-		return
 	var from: Array[ZoneModule] = [bases[0]]
 	if tier >= 2:
 		var hq := _hq()
@@ -386,9 +383,20 @@ func _launch_qrf() -> void:
 		if not gate.is_finite():
 			continue
 		var room := _room()
+		if command:
+			room = mini(room, floori(command.available_cp()))
 		if room < 2:
 			break  # the zone's answer is out in full already (SPAWN_BUDGET)
-		var soldiers := reinforcements.server_send(gate, 1 if tier >= 1 else 0, room)
+		var extra := 1 if tier >= 1 else 0
+		var planned := reinforcements.next_wave_size(extra, room)
+		if planned < 2:
+			break
+		if command and not command.approve("qrf", lkp, planned):
+			_last_qrf = now()
+			break
+		var soldiers := reinforcements.server_send(gate, extra, planned)
+		if command:
+			command.refund_men(planned - soldiers.size())
 		VehicleQrf.server_mount(level, m, gate, lkp, soldiers)  # wave 5b (V4): some QRFs ride in a technical
 		qrf_launches.append({"from": m.module_id, "at": now(), "soldiers": soldiers})
 		_last_qrf = now()
@@ -489,12 +497,17 @@ func _tick_hunters(tier: int) -> void:
 ## next tick) while every way out is in sight.
 func _send_hunters(lkp: Vector3, radius: float) -> void:
 	var command := EnemyCommand.of(self)
-	if command and not command.approve("hunters", lkp):
-		_last_hunter = now()  # turned down: asked again after HUNTER_GAP_S
-		return
 	var c := coordination()
 	var origin := _hunter_origin(lkp)
 	if not origin.is_finite():
+		return
+	var count := mini(randi_range(HUNTER_SIZE.x, HUNTER_SIZE.y), _room())
+	if command:
+		count = mini(count, floori(command.available_cp()))
+	if count < HUNTER_SIZE.x:
+		return
+	if command and not command.approve("hunters", lkp, count):
+		_last_hunter = now()
 		return
 	_hunter_teams += 1
 	_last_hunter = now()
@@ -513,8 +526,10 @@ func _send_hunters(lkp: Vector3, radius: float) -> void:
 	var loadout: Array = CompoundLevel.HOSTILE_LOADOUT.duplicate()
 	for i in HUNTER_SMOKES:
 		loadout.append(String(SMOKE))
-	var soldiers := _spawn_team(squad, callsign, randi_range(HUNTER_SIZE.x, HUNTER_SIZE.y), origin, route[0], loadout,
+	var soldiers := _spawn_team(squad, callsign, count, origin, route[0], loadout,
 		HUNTER_COMBAT, HUNTER_DISCIPLINE * c, "combat")
+	if command:
+		command.refund_men(count - soldiers.size())
 	hunters.append({"k": _hunter_teams, "squad": squad, "soldiers": soldiers, "at": now(),
 		"retarget_at": now() + HUNTER_RETARGET_S / c, "smoked": false})
 	print("[response] hunters %s: %d from (%.0f, %.0f), coordination %.1f" % [callsign, soldiers.size(), origin.x, origin.z, c])
@@ -598,6 +613,8 @@ func _reinforce_sites() -> void:
 		squad.patrol = to_route
 		var soldiers := _spawn_team(squad, callsign, 2, from, to, CompoundLevel.HOSTILE_LOADOUT,
 			float(stats.combat), float(stats.discipline), alert.mode_at(from) if alert else "aware")
+		if command:
+			command.refund_men(2 - soldiers.size())
 		reinforcement_pairs.append({"k": k, "to": m.module_id, "squad": squad, "soldiers": soldiers, "at": now()})
 
 

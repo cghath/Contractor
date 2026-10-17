@@ -114,6 +114,7 @@ func _ready() -> void:
 		if town.is_ready() and nav and nav.is_settled():
 			break
 	check(town.is_ready(), "the town (%s, %d boxes) streamed in" % [town.type, ZoneModules.boxes(town.type).size()])
+	_check_chunk_connections(nav, outside)
 	# The garrison on the town's posts, the attackers 50 m out past the player.
 	var posts: Array = ZoneModules.GARRISON.get(town.type, [])
 	var hostiles: Array[Soldier] = []
@@ -196,6 +197,35 @@ func _check_bodies_lie() -> void:
 			bad.append("%s %.2f m up%s" % [s.name, gap, " (frozen, no support)" if s.ragdoll.frozen and not s.ragdoll.has_support() else ""])
 	check(bodies >= DOWNED / 2 and high >= 1 and bad.is_empty(),
 		"%d bodies (%d up on floors or roofs) all lie on something %s" % [bodies, high, bad])
+
+
+## Aligned chunk vertices must still join when proximity edge matching is disabled.
+func _check_chunk_connections(nav: ZoneNav, centre: Vector3) -> void:
+	var map := level.get_world_3d().navigation_map
+	var chunk := nav._chunk_of(centre)
+	var tested := 0
+	var connected := true
+	for x in range(-2, 3):
+		for z in range(-2, 3):
+			var cell := chunk + Vector2i(x, z)
+			if nav.region_of(cell) == null:
+				continue
+			var rect := nav._rect_of(cell)
+			for dir: Vector2i in [Vector2i.RIGHT, Vector2i.DOWN]:
+				if nav.region_of(cell + dir) == null:
+					continue
+				var seam := rect.get_center() + Vector2(dir) * ZoneNav.ZONE_CHUNK_M * 0.5
+				var offset := Vector3(dir.x, 0, dir.y)
+				var at := level.ground_point(Vector3(seam.x, 0, seam.y))
+				var a := NavigationServer3D.map_get_closest_point(map, at - offset)
+				var b := NavigationServer3D.map_get_closest_point(map, at + offset)
+				if nav._chunk_of(a) == nav._chunk_of(b) or a.distance_to(b) > 3.0 or a.distance_to(b) < 1.0 or absf(a.y - b.y) > 0.5 \
+						or not Throwables.clear_line(level.get_world_3d(), a + Vector3.UP, b + Vector3.UP):
+					continue
+				var path := NavigationServer3D.map_get_path(map, a, b, true)
+				connected = connected and not path.is_empty() and path[-1].distance_to(b) < 0.5
+				tested += 1
+	check(tested >= 6 and connected, "navigation crosses aligned chunk seams (%d unobstructed pairs)" % tested)
 
 
 func _finish() -> void:

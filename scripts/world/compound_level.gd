@@ -490,6 +490,7 @@ func _make_body(data: Dictionary) -> Node:
 	corpse.nation = String(data.get("nation", ""))
 	corpse.left_handed = bool(data.get("left", false))
 	corpse.body_uid = String(data.uid)
+	corpse.spawn_id = String(data.get("spawn_id", ""))
 	corpse.collision_layer = 0
 	# Lies as it lay (its ragdoll pose; older saves and fresh bodies: none, it falls from where it is drawn).
 	(corpse.get_node(^"Model") as CharacterModel).ragdoll_net = PackedFloat32Array(data.get("ragdoll", []))
@@ -656,11 +657,7 @@ func _spawn_ai() -> void:
 ## The HOSTILES to spawn: all but those whose bodies the zone save holds (GameState.bodies).
 ## A hostile killed before the save stays dead; its body and gear come back instead.
 func hostiles_to_spawn() -> Array:
-	var fallen := {}
-	for record: Dictionary in GameState.bodies:
-		if String(record.get("faction", "")) == "hostile":
-			fallen[String(record.get("label", ""))] = true
-	return HOSTILES.filter(func(h: Dictionary) -> bool: return not fallen.has(h.name))
+	return HOSTILES.filter(func(h: Dictionary) -> bool: return not GameState.post_is_fallen(h.name))
 
 
 ## Host only. The player squad is SQUAD_SIZE slots in two fire teams of four, each with a
@@ -861,6 +858,7 @@ func _names_on(faction: StringName) -> Dictionary:
 func _make_soldier(data: Dictionary) -> Node:
 	var soldier: Soldier = PLAYER_SCENE.instantiate()
 	soldier.name = data.name
+	soldier.spawn_id = String(data.get("spawn_id", data.name))
 	soldier.faction = StringName(data.faction)
 	soldier.variant = data.variant
 	soldier.body = String(data.get("body", ""))

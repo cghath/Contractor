@@ -651,6 +651,7 @@ func _test_buildings_per_world() -> void:
 	print("Buildings: one world's scans stay in it")
 	var inside := Vector3(-3, 0.1, -6)  # in the main building
 	var here := Buildings.at(player, inside)
+	check(Buildings.has_near(player, inside, 3.0), "formation presence scan finds the compound building")
 	var viewport := SubViewport.new()
 	viewport.own_world_3d = true
 	add_child(viewport)
@@ -664,6 +665,7 @@ func _test_buildings_per_world() -> void:
 	other.add_child(floor_region)
 	await _frames(4)
 	var there := Buildings.at(other, inside)
+	check(not Buildings.has_near(other, inside, 3.0), "presence scan rejects open ground in another world")
 	var again := Buildings.at(player, inside)
 	check(not here.is_empty() and there.is_empty() and not again.is_empty(),
 		"the main building is found in the compound (%d spots); an open floor at the same spot in another world has none (%d); the compound's is still found"
@@ -742,7 +744,21 @@ func _test_multi_storey() -> void:
 		% [built, solid, path.size(), path[-1].distance_to(roof_goal) if path.size() > 0 else INF, roof_goal.y])
 	# The scan: from the ground floor, three floors (the roof the top one), two stairs.
 	var front_room := STOREY_AT + Vector3(0, 0.1, b.size.y * 0.5 - 2.0)
+	check(Buildings.has_near(player, front_room, 3.0), "presence scan recognizes a multi-storey building before detailed queries")
 	var found := Buildings.nearest(player, front_room, 3.0)
+	var same_surfaces := true
+	var surface_samples := 0
+	Buildings._index_regions(map)
+	for y: float in [0.1, upper + 0.1, roof_y + 0.1]:
+		for x: float in [-6.0, -2.0, 2.0, 6.0]:
+			for z: float in [-6.0, -2.0, 2.0, 6.0]:
+				var p := STOREY_AT + Vector3(x, y, z)
+				var original := NavigationServer3D.map_get_closest_point(map, p)
+				if original.distance_to(p) < Buildings.REGION_MARGIN_M:
+					var indexed := Buildings._closest_nav_point(p)
+					same_surfaces = same_surfaces and indexed.is_finite() and absf(indexed.distance_to(p) - original.distance_to(p)) < 0.001
+					surface_samples += 1
+	check(same_surfaces and surface_samples >= 16, "indexed probes agree with the original map query across floors and tile boundaries (%d samples)" % surface_samples)
 	var floors: Array = found.get("floors", [])
 	var heights: Array = floors.map(func(f: Dictionary) -> String: return "%.2f%s" % [f.y, " roof" if f.roof else ""])
 	var stairs: Array = (found.get("stairs", []) as Array).map(func(s: Dictionary) -> String: return "%d-%d" % [s.from, s.to])

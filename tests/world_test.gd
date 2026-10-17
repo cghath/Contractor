@@ -118,7 +118,7 @@ func _test_generation(mem_before: float) -> void:
 	check(level.generate_ms < BUDGET_GENERATE_MS, "generated in %.0f ms (budget %.0f)" % [level.generate_ms, BUDGET_GENERATE_MS])
 	check(t.max_slope_deg() < 30.0 and t.max_height - t.min_height > 8.0,
 		"rolling hills: %.1f to %.1f m, steepest %.0f degrees" % [t.min_height, t.max_height, t.max_slope_deg()])
-	check(level.modules().size() == 5 and level.get_module("compound").type == "compound" and level.get_module("village_e").type == "village",
+	check(level.modules().size() == 5 and ZoneModules.base(level.get_module("compound").type) == "compound" and ZoneModules.base(level.get_module("village_e").type) == "village",
 		"five modules from the definition (%s)" % [level.modules().map(func(m: ZoneModule) -> String: return m.module_id)])
 	var flat := true
 	for m in level.modules():
@@ -730,7 +730,7 @@ func _test_hot_layout() -> void:
 				var ra := Rect2(Vector2(a.pos[0], a.pos[1]) - ha, ha * 2.0)
 				apart = apart and not ra.intersects(Rect2(Vector2(b.pos[0], b.pos[1]) - hb, hb * 2.0))
 		check(bool(city.get("urban", false)) and towns.size() >= ZoneDef.URBAN_TOWNS.x and towns.size() <= ZoneDef.URBAN_TOWNS.y and near and roads_in and apart
-			and patrolled and mods.any(func(m: Dictionary) -> bool: return m.type == "village") and ZoneDef.generate_hot(seed, ZoneDef.HOT_SIZE_M, true).hash() == city.hash(),
+			and patrolled and mods.any(func(m: Dictionary) -> bool: return ZoneModules.base(m.type) == "village") and ZoneDef.generate_hot(seed, ZoneDef.HOT_SIZE_M, true).hash() == city.hash(),
 			"urban seed %d: %d towns within %d m of the HQ, apart, a road into each, patrols in their streets, a village outside, the same every time" % [seed,
 			towns.size(), int(ZoneDef.URBAN_REACH_M.y)])
 	var old_quarter := MissionRegistry.zone_def("city_hot")
@@ -918,7 +918,9 @@ func _test_towns() -> void:
 		var bs: Array = t.buildings
 		counts.append(bs.size())
 		var types: Array = bs.map(func(b: Dictionary) -> String: return b.type)
-		if bs.size() < 12 or bs.size() > 20 or types.count("clinic") > 1 or types.count("police") > 1:
+		var fronts := bs.filter(func(b: Dictionary) -> bool: return not b.get("back", false)).size()
+		var backs := bs.size() - fronts
+		if fronts < 12 or fronts > 20 or backs <= 0 or backs > 20 or types.count("clinic") > 1 or types.count("police") > 1:
 			ok_mix = false
 			why.append("town %d: %d buildings %s" % [seed, bs.size(), types])
 		var rects: Array[Rect2] = []
@@ -936,7 +938,7 @@ func _test_towns() -> void:
 					or (r.position.y < BuildingGen.STREET_W * 0.5 and r.end.y > -BuildingGen.STREET_W * 0.5):
 				ok_inside = false
 				why.append("town %d: %s outside or in the street" % [seed, b.type])
-			# The front door opens onto its street: toward z = 0.
+			# Front rows face the main street; back rows face the outer street.
 			var front := (b.data.doors as Array).filter(func(dr: Dictionary) -> bool: return dr.rooms[1] == -1)
 			front.sort_custom(func(p: Dictionary, q: Dictionary) -> bool: return (p.at as Vector3).z > (q.at as Vector3).z)  # the front wall's door first
 			if front.is_empty():
@@ -944,10 +946,10 @@ func _test_towns() -> void:
 			else:
 				var at: Vector3 = front[0].at
 				var world_z: float = (-at.z if b.turned else at.z) + o.z
-				if absf(world_z) > absf(o.z):
+				if (world_z - o.z) * signf(o.z) * (-1.0 if b.get("back", false) else 1.0) > 0.0:
 					ok_facing = false
 					why.append("town %d: %s faces away" % [seed, b.type])
-	check(ok_mix, "towns (8 seeds): 12 to 20 buildings each (%s), a clinic and a police station at most once %s" % [counts, why.slice(0, 2)])
+	check(ok_mix, "towns (8 seeds): 12 to 20 front buildings plus back rows (%s), a clinic and a police station at most once %s" % [counts, why.slice(0, 2)])
 	check(ok_apart and ok_inside, "lots don't overlap, inside the town's footprint and off the street %s" % [why.slice(0, 2)])
 	check(ok_facing, "every building's front door opens onto its street %s" % [why.slice(0, 2)])
 	_test_town_posts()
@@ -987,6 +989,7 @@ func _test_town_posts() -> void:
 	var ok_share := true
 	var all_high := 0
 	var all_posts := 0
+	var all_front_posts := 0
 	var ok_up := true
 	var ok_ground := true
 	var roofs := 0
@@ -1031,19 +1034,21 @@ func _test_town_posts() -> void:
 		# A third of them, as far as the town has buildings with an upper floor or a roof to stand on.
 		var can := 0
 		for bi in (t.buildings as Array).size():
-			can += 0 if BuildingGen._high_post(t.buildings[bi].data, bi).is_empty() else 1
-		var total := ((t.buildings as Array).size() + 1) / 2 + 2  # as BuildingGen._town_posts counts them
+			can += 0 if t.buildings[bi].get("back", false) or BuildingGen._high_post(t.buildings[bi].data, bi).is_empty() else 1
+		var front_count := (t.buildings as Array).filter(func(b: Dictionary) -> bool: return not b.get("back", false)).size()
+		var total := (front_count + 1) / 2 + 2  # as BuildingGen._town_posts counts them
 		var want := mini(roundi(total * BuildingGen.TOWN_HIGH_SHARE), can)
 		shares.append("%d/%d" % [high, posts.size()])
 		all_high += high
 		all_posts += posts.size()
+		all_front_posts += total
 		if high != want or float(high) / maxf(posts.size(), 1.0) > 0.4 or high != int(t.garrison_high):
 			ok_share = false
 		if ground * 2 < posts.size() or faces.size() != posts.size():
 			ok_ground = false
 	var all_share := float(all_high) / maxf(all_posts, 1.0)
-	check(ok_share and all_share >= 0.22 and roofs >= 3 and windows >= 3,
-		"town garrisons (8 seeds): about a third of the posts up high where the town has the buildings for it (%s, %.0f%% in all), at upper windows (%d) and on roofs (%d)" % [", ".join(shares), all_share * 100.0, windows, roofs])
+	check(ok_share and float(all_high) / maxf(all_front_posts, 1.0) >= 0.3 and roofs >= 3 and windows >= 3,
+		"town garrisons (8 seeds): the intended share of street posts up high, plus indoor posts where the town has the buildings for it (%s, %.0f%% in all), at upper windows (%d) and on roofs (%d)" % [", ".join(shares), all_share * 100.0, windows, roofs])
 	check(ok_up, "each up high stands on a floor or a roof with a parapet, room round him, looking out onto the street %s" % [why.slice(0, 3)])
 	check(ok_ground, "the rest on the ground (doors and the crossroads), each with the way it looks")
 

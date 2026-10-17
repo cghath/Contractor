@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# No network or GitHub mutation: records what the real helper would request.
+printf '%s\n' "$*" >> "$AUDIT_RELEASE_KEEP/gh-calls.log"
+if [ "$1 $2" = 'release view' ]; then
+  printf '%s\n' '{"isDraft":false,"tagName":"v0.4.36"}'
+  exit 0
+fi
+if [ "$1 $2" = 'release upload' ]; then
+  exit 0
+fi
+exit 1

@@ -129,7 +129,10 @@ static func generate(rng: RandomNumberGenerator, ctx: Dictionary) -> Dictionary:
 	var employer: String = ctx.get("employer", "")
 	if employer == "":
 		employer = fixer.get("faction", zone.get("faction", employers[rng.randi() % employers.size()] if not employers.is_empty() else ""))
+	if not employers.has(employer):
+		employer = employers[rng.randi() % employers.size()] if not employers.is_empty() else ""
 	var enemies := MissionRegistry.enemies()
+	enemies = enemies.filter(func(id: String) -> bool: return id != employer)
 	var target: String = enemies[rng.randi() % enemies.size()] if not enemies.is_empty() else ""
 	# The real force.
 	var count_range: Array = def.get("enemy_count", [4, 8])
