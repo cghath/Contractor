@@ -99,7 +99,7 @@ static func setting_i(key: String, default := 0) -> int:
 ## A module type's entry ("name", "sites", "civilians").
 static func module(module_type: String) -> Dictionary:
 	var entry: Dictionary = (data().get("modules", {}) as Dictionary).get(ZoneModules.base(module_type), {})
-	if module_type != ZoneModules.base(module_type):  # a generated town: its own civilians and sites
+	if module_type.begins_with(ZoneModules.TOWN):  # a generated town: its own civilians and sites (a grown module keeps its base type's)
 		entry = entry.duplicate()
 		entry["name"] = entry.get("name", "town")
 		entry["civilians"] = ZoneModules.civilians(module_type)

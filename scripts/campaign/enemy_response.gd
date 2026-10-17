@@ -576,7 +576,7 @@ func _reinforce_sites() -> void:
 	for m: ZoneModule in level.call(&"modules"):
 		if sent >= REINFORCE_MAX or 2 > _room():
 			break
-		if not (m.type in REINFORCE_TYPES) or had == null or int(had.get(m.module_id, 0)) <= 0 or level.call(&"site_down", m.module_id):
+		if not (ZoneModules.base(m.type) in REINFORCE_TYPES) or had == null or int(had.get(m.module_id, 0)) <= 0 or level.call(&"site_down", m.module_id):
 			continue
 		if reinforcement_pairs.any(func(p: Dictionary) -> bool: return p.to == m.module_id and not _living(p.soldiers).is_empty()):
 			continue  # already has one

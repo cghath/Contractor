@@ -115,7 +115,9 @@ static var _counts := {}  # solid_voxels_in
 ## A module type's base type: "town" for a generated town ("town#<seed>"), else the type. The
 ## mission data (contracts.json "modules"), callsigns and the like are by base type.
 static func base(type: String) -> String:
-	return "town" if type.begins_with(TOWN) else type
+	if type.begins_with(TOWN):
+		return "town"
+	return type.get_slice(GROWN, 0) if GROWN in type else type
 
 
 ## A generated town's civilians (BuildingGen.town "civilians"); none for other types (theirs
@@ -150,9 +152,21 @@ static func town_sites(type: String) -> Dictionary:
 static var _towns := {}
 
 
+## A generated town's reserve: its garrison post indices (UrbanDefence); [] for other types.
+static func town_reserve(type: String) -> Array:
+	return (_towns.get(type, {}) as Dictionary).get("reserve", []) if type.begins_with(TOWN) and has_type(type) else []
+
+
+## A generated town's fallback points (every building's back room, m from the origin; UrbanDefence).
+static func town_fallback(type: String) -> Array:
+	return (_towns.get(type, {}) as Dictionary).get("fallback", []) if type.begins_with(TOWN) and has_type(type) else []
+
+
 static func has_type(type: String) -> bool:
 	if type.begins_with(TOWN):
 		return _town(type)
+	if GROWN in type:
+		return _grown(type)
 	return type in TYPES
 
 
@@ -179,7 +193,93 @@ static func _town(type: String) -> bool:
 	for bx: Array in t.boxes:
 		top = maxf(top, (bx[1] as Vector3).y + 0.5)
 	TOP[type] = top
-	_towns[type] = {"civilians": t.civilians, "half": t.half, "points": t.points, "hvt": t.hvt, "hostage": t.hostage, "cache": t.cache}
+	_towns[type] = {"civilians": t.civilians, "half": t.half, "points": t.points, "hvt": t.hvt, "hostage": t.hostage, "cache": t.cache,
+		"reserve": t.garrison_reserve, "fallback": t.fallback}
+	return true
+
+
+## Grown modules (Captain, 2026-10-17: "2 or 3 new buildings for the outposts, then enlargify
+## the really small villages to varying extents", "compounds should be a little larger"):
+## "<type>+<seed>" for a type in GROW is the hand-built module with generated buildings
+## (BuildingGen.building) in rows north and south of it, fronts facing it, GROW_GAP_M off its
+## footprint. Each brings a garrison post inside its front door, loot by its rooms
+## (BuildingGen.TOWN_LOOT) and its stair ramps; the footprint grows to fit. Mission data,
+## callsigns and the rest go by the base type (base()). ZoneDef.normalize grows modules
+## where there's room.
+const GROWN := "+"
+const GROW := {
+	"outpost": {"count": [2, 3], "types": ["warehouse", "house", "police"]},
+	"village": {"count": [1, 6], "types": ["house", "house", "house", "shop"]},
+	"compound": {"count": [1, 2], "types": ["house", "warehouse"]},
+}
+const GROW_GAP_M := 3.0
+const GROW_LOOT_MAX := 6
+
+
+static func _grown(type: String) -> bool:
+	if _cache.has(type):
+		return true
+	var core := type.get_slice(GROWN, 0)
+	var seed_text := type.get_slice(GROWN, 1)
+	if not GROW.has(core) or not seed_text.is_valid_int():
+		return false
+	var rng := RandomNumberGenerator.new()
+	rng.seed = int(seed_text)
+	var spec: Dictionary = GROW[core]
+	var core_half: Vector2 = HALF[core]
+	var out: Array = (boxes(core) as Array).duplicate()
+	var garrison: Array = (GARRISON.get(core, []) as Array).duplicate()
+	var face: Array = []
+	for i in garrison.size():
+		face.append(Vector3.ZERO)
+	var loot: Array = (LOOT.get(core, []) as Array).duplicate(true)
+	var ramps := PackedVector3Array()
+	var rows := [[], []]  # north (-z, as built: front to +z, toward the core), south (turned)
+	var count := rng.randi_range(int(spec.count[0]), int(spec.count[1]))
+	for k in count:
+		var b := BuildingGen.building(spec.types[rng.randi() % spec.types.size()], int(seed_text) * 131 + k)
+		rows[k % 2].append(b)
+	var half := core_half
+	var top := TOP_M
+	for side in 2:
+		var row: Array = rows[side]
+		var width := 0.0
+		for b: Dictionary in row:
+			width += (b.size as Vector2).x + BuildingGen.LOT_GAP
+		var cursor := -width * 0.5
+		var turned := side == 1
+		for b: Dictionary in row:
+			var size: Vector2 = b.size
+			var z := (core_half.y + GROW_GAP_M + size.y * 0.5) * (1.0 if turned else -1.0)
+			var origin := Vector3(cursor + size.x * 0.5, 0, z)
+			cursor += size.x + BuildingGen.LOT_GAP
+			var place := func(p: Vector3) -> Vector3: return (Vector3(-p.x, p.y, -p.z) if turned else p) + origin
+			for bx: Array in b.boxes:
+				var a: Vector3 = place.call(bx[0])
+				var c: Vector3 = place.call(bx[1])
+				out.append([a.min(c), a.max(c), bx[2]])
+				top = maxf(top, maxf(a.y, c.y) + 0.5)
+			for f: Vector3 in BuildingGen.ramp_faces(b):
+				ramps.append(place.call(f))
+			for dr: Dictionary in b.doors:
+				if int(dr.rooms[1]) == -1:
+					garrison.append(place.call((dr.at as Vector3) + Vector3(0, 0.1, -1.0)))  # just inside the front door
+					face.append(Vector3.ZERO)
+					break
+			for l: Dictionary in b.loot:
+				if BuildingGen.TOWN_LOOT.has(l.table) and loot.size() < (LOOT.get(core, []) as Array).size() + GROW_LOOT_MAX:
+					var choices: Array = BuildingGen.TOWN_LOOT[l.table]
+					var pick: Array = choices[rng.randi() % choices.size()]
+					loot.append({"uid": "grown%d" % loot.size(), "id": pick[0], "count": int(pick[1]), "pos": place.call(l.at) + Vector3(0, 0.5, 0)})
+			half = Vector2(maxf(half.x, absf(origin.x) + size.x * 0.5 + 1.0), maxf(half.y, absf(z) + size.y * 0.5 + 1.0))
+	_cache[type] = out
+	HALF[type] = half
+	POINTS[type] = POINTS[core]
+	GARRISON[type] = garrison
+	GARRISON_FACE[type] = face
+	RAMPS[type] = ramps
+	LOOT[type] = loot
+	TOP[type] = top
 	return true
 
 
@@ -204,6 +304,8 @@ static func boxes(type: String) -> Array:
 				_cache[type] = _comms()
 			_ when type.begins_with(TOWN) and _town(type):
 				pass
+			_ when GROWN in type and _grown(type):
+				pass
 			_:
 				push_error("ZoneModules: unknown type %s" % type)
 				return []
@@ -213,8 +315,8 @@ static func boxes(type: String) -> Array:
 ## The ramps over the module's stairs for the navmesh bake (BuildingGen.ramp_faces: triangles,
 ## m from the origin; a generated town's), empty for a type without stairs.
 static func ramps(type: String) -> PackedVector3Array:
-	if type.begins_with(TOWN):
-		boxes(type)  # builds the town once
+	if type.begins_with(TOWN) or GROWN in type:
+		boxes(type)  # builds the town (or grown module) once
 	return RAMPS.get(type, PackedVector3Array())
 
 

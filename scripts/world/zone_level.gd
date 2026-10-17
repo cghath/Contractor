@@ -109,6 +109,7 @@ func _ready() -> void:
 	add_child(Pressure.new())  # what the squad has done here, long term
 	add_child(EnemyResponse.new())  # patrols, QRF waves, hunters: the enemy's answer
 	add_child(RadioChatter.new())  # what a looted enemy radio lets the squad hear
+	add_child(UrbanDefence.new())  # towns fought from inside: reserves, falling back, relief (Captain, 2026-10-17)
 	add_child(ZoneCleanup.new())  # bodies and dropped loot go after ~6-7 min (blood on its own clock)
 	add_child(IntelReveal.new())  # intel picked up gives away enemy sites on the map
 	if String(def.get("kind", "")) == "hot":

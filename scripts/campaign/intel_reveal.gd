@@ -86,8 +86,8 @@ func server_reveal_for(item_id: StringName, by: Soldier = null) -> int:
 			break
 		_revealed[site.module_id] = true
 		if first_type == "":
-			first_type = site.type
-		var label := String(NAMES.get(site.type, site.type.capitalize()))
+			first_type = ZoneModules.base(site.type)
+		var label := String(NAMES.get(ZoneModules.base(site.type), ZoneModules.base(site.type).capitalize()))
 		if markers:
 			markers.server_report_enemy(site.global_position, "%s (intel)" % label)
 		told.append(label)
@@ -110,7 +110,7 @@ func _sites() -> Array[ZoneModule]:
 			continue
 		out.append(m)
 	out.sort_custom(func(a: ZoneModule, b: ZoneModule) -> bool:
-		var pa := PRIORITY.find(a.type)
-		var pb := PRIORITY.find(b.type)
+		var pa := PRIORITY.find(ZoneModules.base(a.type))
+		var pb := PRIORITY.find(ZoneModules.base(b.type))
 		return (pa if pa >= 0 else 99) < (pb if pb >= 0 else 99))
 	return out

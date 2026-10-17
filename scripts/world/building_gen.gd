@@ -994,7 +994,7 @@ const TOWN_CACHE := Vector3(1.4, 1.0, 0.9)
 ## roof's parapet (a roof is only ever reached by a stair, and every such roof has a parapet);
 ## the rest just inside front doors. A post up high stands POST_IN_M in from the wall, on a floor
 ## or a roof with nothing in a man's way (POST_CLEAR_M round, 1.7 m up).
-const TOWN_HIGH_SHARE := 1.0 / 3.0
+const TOWN_HIGH_SHARE := 0.45  # of the street-front posts (2026-10-17: was a third; deep posts are on top)
 const POST_IN_M := 0.7
 const POST_CLEAR_M := 0.3
 ## Every TOWN_CIVILIAN_EVERY'th building has someone living or working there, walking between
@@ -1002,6 +1002,13 @@ const POST_CLEAR_M := 0.3
 const TOWN_CIVILIAN_EVERY := 3
 ## Lot types by where they are along the street (0 the middle .. 1 the end): weights.
 const TOWN_MIX := {"house": 6.0, "shop": 2.5, "warehouse": 1.0, "clinic": 0.6, "police": 0.6}
+## Back rows (town): the alley between a row and the one behind it (m), and the share of the back
+## lots left open. Street barricades and rubble piles [min, max] a town. Proposed.
+const ALLEY_W := 4.0
+const BACK_GAP_SHARE := 0.25
+const TOWN_BARRICADES := Vector2i(4, 7)
+## A deep post (_deep_posts) in every this-many'th building.
+const TOWN_DEEP_EVERY := 4
 
 
 ## The town from `seed`: {"boxes", "buildings": [{"type", "origin" (Vector3), "turned" (180
@@ -1059,7 +1066,65 @@ static func town(seed: int, style := "") -> Dictionary:
 				buildings.append({"type": type, "origin": origin, "turned": turned, "data": b})
 				deepest = maxf(deepest, size.y)
 				cursor += size.x + LOT_GAP
-	var half := Vector2(TOWN_HALF_X + 2.0, STREET_W * 0.5 + SETBACK + deepest + 2.0)
+	# Back rows (Captain, 2026-10-17: "urban combat feels not urban, its mostly firefights from
+	# outside to into the town"): a second row behind each, across an ALLEY_W alley, facing out
+	# onto a back street; BACK_GAP_SHARE of its lots left open (yards, rubble). Blocks, not a strip.
+	var front_d := STREET_W * 0.5 + SETBACK + deepest
+	var back_deepest := 0.0
+	for side: int in [-1, 1]:
+		for dir: int in [-1, 1]:
+			var cursor := CROSS_W * 0.5 + LOT_GAP
+			while true:
+				var along := cursor / TOWN_HALF_X
+				var type := _town_type(rng, along, once)
+				var b := building(type, seed * 97 + k, style)
+				k += 1
+				var size: Vector2 = b.size
+				if cursor + size.x > TOWN_HALF_X:
+					if type == "house":
+						break
+					continue
+				if rng.randf() < BACK_GAP_SHARE:
+					cursor += size.x + LOT_GAP  # an open lot
+					continue
+				if type in ["clinic", "police"]:
+					once[type] = true
+				var x := dir * (cursor + size.x * 0.5)
+				var z := side * (front_d + ALLEY_W + SETBACK + size.y * 0.5)
+				var turned := side == -1  # faces out, away from the main street
+				var origin := Vector3(x, 0, z)
+				for bx: Array in b.boxes:
+					var lo: Vector3 = bx[0]
+					var hi: Vector3 = bx[1]
+					if turned:
+						var nlo := Vector3(-hi.x, lo.y, -hi.z)
+						var nhi := Vector3(-lo.x, hi.y, -lo.z)
+						lo = nlo
+						hi = nhi
+					boxes.append([lo + origin, hi + origin, bx[2]])
+				for p: Vector3 in ramp_faces(b):
+					ramps.append((Vector3(-p.x, p.y, -p.z) if turned else p) + origin)
+				buildings.append({"type": type, "origin": origin, "turned": turned, "data": b, "back": true})
+				back_deepest = maxf(back_deepest, size.y)
+				cursor += size.x + LOT_GAP
+	var outer := front_d + ALLEY_W + SETBACK + back_deepest
+	# Street barricades and rubble: TOWN_BARRICADES [min, max], each across part of a street.
+	for n in rng.randi_range(TOWN_BARRICADES.x, TOWN_BARRICADES.y):
+		var on_cross := rng.randf() < 0.3
+		var len := rng.randf_range(2.4, 4.0)
+		var c: Vector3
+		var across_x: bool
+		if on_cross:
+			c = Vector3(rng.randf_range(-CROSS_W, CROSS_W) * 0.25, 0, rng.randf_range(STREET_W, outer - 2.0) * (1.0 if rng.randf() < 0.5 else -1.0))
+			across_x = true
+		else:
+			c = Vector3(rng.randf_range(CROSS_W + 3.0, TOWN_HALF_X - 4.0) * (1.0 if rng.randf() < 0.5 else -1.0), 0, rng.randf_range(-STREET_W, STREET_W) * 0.25)
+			across_x = false
+		var rubble := rng.randf() < 0.4
+		var size := Vector3(rng.randf_range(1.4, 2.2), rng.randf_range(0.7, 1.2), rng.randf_range(1.2, 2.0)) if rubble 			else (Vector3(len, 1.1, 0.8) if across_x else Vector3(0.8, 1.1, len))
+		boxes.append([c - Vector3(size.x * 0.5, 0, size.z * 0.5), c + Vector3(size.x * 0.5, size.y, size.z * 0.5),
+			VoxelWorld.Mat.CONCRETE if rubble else VoxelWorld.Mat.SANDBAG])
+	var half := Vector2(TOWN_HALF_X + 2.0, outer + 2.0)
 	# Named points: where loot of a kind lies, in town metres.
 	var points := {"objective": [], "cache": [], "intel": []}
 	var garrison: Array = []
@@ -1098,15 +1163,22 @@ static func town(seed: int, style := "") -> Dictionary:
 	for fallback: String in ["objective", "cache", "intel"]:
 		if (points[fallback] as Array).is_empty():
 			points[fallback].append(Vector3(0, 0, 0))
+	var deep := _deep_posts(buildings, garrison, face)
+	var reserve: Array = [garrison.size(), garrison.size() + 1]  # the two at the crossroads: the town's reserve
 	garrison.append(Vector3(-CROSS_W, 0.1, 0))
 	garrison.append(Vector3(CROSS_W, 0.1, 0))
 	face.append_array([Vector3.ZERO, Vector3.ZERO])
+	var fallback: Array = []  # every building's back room: where defenders fall back to
+	for b: Dictionary in buildings:
+		var back_room := _back_room(b.data)
+		if back_room.is_finite():
+			fallback.append((Vector3(-back_room.x, back_room.y, -back_room.z) if b.turned else back_room) + (b.origin as Vector3))
 	# The weapons cache: crates in the middle of the armoury or a store room (a raid's target).
 	var at := _town_room(buildings, ["armoury", "storeroom"], Vector3(0, 0.1, STREET_W * 0.5 + SETBACK + 3.0)) - Vector3(0, 0.1, 0)
 	var cache: Array = [at - Vector3(TOWN_CACHE.x * 0.5, 0, TOWN_CACHE.z * 0.5), at + Vector3(TOWN_CACHE.x * 0.5, TOWN_CACHE.y, TOWN_CACHE.z * 0.5)]
 	boxes.append([cache[0], cache[1], VoxelWorld.Mat.WOOD])
 	return {"boxes": boxes, "buildings": buildings, "half": half, "points": points, "garrison": garrison,
-		"garrison_face": face, "garrison_high": high, "ramps": ramps, "loot": loot, "civilians": civilians, "style": style, "cache": cache,
+		"garrison_face": face, "garrison_high": high, "garrison_deep": deep, "garrison_reserve": reserve, "fallback": fallback, "ramps": ramps, "loot": loot, "civilians": civilians, "style": style, "cache": cache,
 		"hvt": _town_room(buildings, ["office", "living"], Vector3(-CROSS_W, 0.1, 0)),
 		"hostage": _town_room(buildings, ["cells", "bedroom"], Vector3(CROSS_W, 0.1, 0))}
 
@@ -1116,9 +1188,12 @@ static func town(seed: int, style := "") -> Dictionary:
 ## buildings with an upper floor or a roof to stand on), the rest inside front doors (spread
 ## over the others). Returns how many are up high. No random numbers: the town's stay the same.
 static func _town_posts(buildings: Array, posts: Array, face: Array) -> int:
-	var total := (buildings.size() + 1) / 2 + 2  # with the two at the crossroads
+	var front_rows := buildings.filter(func(b: Dictionary) -> bool: return not b.get("back", false)).size()
+	var total := (front_rows + 1) / 2 + 2  # with the two at the crossroads (back rows: deep posts only, _deep_posts)
 	var up_at := {}  # building index -> [post, face] up high
 	for i in buildings.size():
+		if buildings[i].get("back", false):
+			continue  # a back row faces out of town: no overwatch out of it (fights start inside)
 		var p := _high_post(buildings[i].data, i)
 		if not p.is_empty():
 			up_at[i] = p
@@ -1127,7 +1202,7 @@ static func _town_posts(buildings: Array, posts: Array, face: Array) -> int:
 	var keys: Array = up_at.keys()
 	for k in want_high:
 		high[keys[k * keys.size() / want_high]] = true
-	var rest: Array = range(buildings.size()).filter(func(i: int) -> bool: return not high.has(i))
+	var rest: Array = range(buildings.size()).filter(func(i: int) -> bool: return not high.has(i) and not buildings[i].get("back", false))
 	var want_door := mini(total - 2 - want_high, rest.size())
 	var door := {}
 	for k in want_door:
@@ -1148,6 +1223,38 @@ static func _town_posts(buildings: Array, posts: Array, face: Array) -> int:
 			face.append(turn.call(up_at[i][1]))
 			count += 1
 	return count
+
+
+## Defence in depth (Captain, 2026-10-17: "small bits of action when clearing the few remaining
+## enemies"): a post in the back room of every TOWN_DEEP_EVERY'th building, front rows and back,
+## so the town is held from inside its blocks, not only its street fronts. Returns the posts'
+## indices in `posts`.
+static func _deep_posts(buildings: Array, posts: Array, face: Array) -> Array:
+	var out: Array = []
+	for i in buildings.size():
+		if i % TOWN_DEEP_EVERY != 1:
+			continue
+		var b: Dictionary = buildings[i]
+		var p := _back_room(b.data)
+		if not p.is_finite():
+			continue
+		out.append(posts.size())
+		posts.append((Vector3(-p.x, p.y, -p.z) if b.turned else p) + (b.origin as Vector3))
+		face.append(Vector3.ZERO)
+	return out
+
+
+## The middle of building `b`'s backmost room that isn't a bathroom (its own metres, on its
+## floor), Vector3.INF with none.
+static func _back_room(b: Dictionary) -> Vector3:
+	var best := Vector3.INF
+	for r: Dictionary in b.rooms:
+		if String(r.role) == "bathroom":
+			continue
+		var c: Vector2 = (r.rect as Rect2).get_center()
+		if not best.is_finite() or c.y < best.z:
+			best = Vector3(c.x, float(r.get("y", 0.0)) + 0.1, c.y)
+	return best
 
 
 ## Building `b`'s post up high (in its own metres) and the way it looks: [post, face], [] for

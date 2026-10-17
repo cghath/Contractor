@@ -35,14 +35,14 @@ enum Kind { ROCK, SCRUB, TREE, THICKET, PROP, VALUABLE }
 ## no collision) and solid 5600 -> 6800 (Proposed).
 const CAP_ROCKS := 2600
 const CAP_SCRUB := 9000
-const CAP_TREES := 8000  # Captain, 2026-10-16: "forests still are too small" (was 6000)
-const CAP_THICKETS := 8000
+const CAP_TREES := 9000  # Captain, 2026-10-16: "forests still are too small" (was 6000); 2026-10-17: sprawling woods (was 8000)
+const CAP_THICKETS := 11000  # sprawling woods take more (2026-10-17; was 8000): copses keep their thicket skirts
 ## The shares of CAP_TREES woods, then woods with copses and groves, may take (Proposed: woods
 ## keep their 3000 trees, round 4's 0.6 of 5000; copses get the most of the rest).
 const WOODS_SHARE := 0.5
 const COPSES_SHARE := 0.8
 ## Most items with collision (large rocks and trees) in a zone.
-const CAP_SOLID := 8800  # (was 6800; the extra trees)
+const CAP_SOLID := 9800  # (was 6800, then 8800; the extra trees)
 ## Man-made clutter (Captain, 2026-10-16: "the terrains need more objects too"): crates and
 ## debris, sparser than rocks/scrub and only near a road or a pad ("props_near_m"), not out in
 ## open wilderness; shares this cap with the ruins and wrecks below (both Kind.PROP).
@@ -82,12 +82,23 @@ const TREE_GAP_M := 2.6
 ## ~10.5 m, 60 ~16.7 m; trees ~3-3.5 m apart), "copse_thicket_share" thickets a tree inside, a
 ## ring of thickets every COPSE_SKIRT_M round its edge (no gap to see through at eye height),
 ## the edge scrub outside that, and COPSE_ROCKS [min, max] big rocks inside as low cover.
-const COPSE_SPREAD := 2.6  # sprawling more (Captain, 2026-10-16; was 1.9)
+const COPSE_SPREAD := 2.6  # sprawling more (Captain, 2026-10-16; was 1.9). Kept tight for cover: the woods sprawl instead (WOOD_SPRAWL)
 const COPSE_SKIRT_M := 2.2
 const COPSE_ROCKS := [1, 3]
 ## Woods' edge belt (Proposed): a thicket every WOOD_BELT_M round a wood's ragged edge, just
 ## inside it, so a wood's edge hides like a copse's.
 const WOOD_BELT_M := 3.5
+## Captain, 2026-10-17: "wooded areas on maps are too small, too compacted per se. they need to
+## sprawl a bit more". Woods are WOOD_SPRAWL times the preset's "wood_radius_m"; full density out
+## to WOOD_CORE of the radius, thinning to WOOD_EDGE_DENSITY at the ragged edge (straggling
+## trees, not a wall); and WOOD_OUTLIERS [min, max] small copses (WOOD_OUTLIER_TREES) scattered
+## WOOD_OUTLIER_R [min, max] radii out round each, so a wood frays into the open. Proposed.
+const WOOD_SPRAWL := 1.35
+const WOOD_CORE := 0.85
+const WOOD_EDGE_DENSITY := 0.65
+const WOOD_OUTLIERS := [1, 3]
+const WOOD_OUTLIER_TREES := [6, 18]
+const WOOD_OUTLIER_R := [1.05, 1.7]
 const TREE_UP := 0.88
 ## Cells are this wide (m); visuals build for cells within BUILD_M of the camera, this many a
 ## frame, checked every CHECK_S.
@@ -104,7 +115,8 @@ const FAR_GROUP_M := 24.0
 ## Layout format: bump when the layout code changes, so old cached layouts are not used.
 ## 7: denser copses with a thicket skirt and rocks, woods' edge belt (Captain, 2026-10-14).
 ## 8: ruins and wrecks off the roads, and the VALUABLE placement kind (Captain, 2026-10-16).
-const LAYOUT_VERSION := 8
+## 9: sprawling woods (WOOD_SPRAWL, thinning edges, outlier copses) (Captain, 2026-10-17).
+const LAYOUT_VERSION := 9
 ## Zones kept in memory (layouts), the newest of them also keep their built cell meshes, and
 ## files kept in the disk cache.
 const CACHE_ZONES := 4
@@ -445,7 +457,12 @@ func _lay_out_trees(area_km2: float) -> void:
 	_tree_limit = int(_cap_trees * _woods_share)
 	for n in _how_many(rng, float(_spec.get("woods_per_km2", 0.0)) * area_km2):
 		var at := _cluster_site(rng, inner)
-		_wood(rng, at.x, at.y, rng.randf_range(float(radius[0]), float(radius[1])) * 0.5)
+		var r := rng.randf_range(float(radius[0]), float(radius[1])) * 0.5 * WOOD_SPRAWL
+		_wood(rng, at.x, at.y, r)
+		for k in rng.randi_range(int(WOOD_OUTLIERS[0]), int(WOOD_OUTLIERS[1])):
+			var a := rng.randf() * TAU
+			var d := r * rng.randf_range(float(WOOD_OUTLIER_R[0]), float(WOOD_OUTLIER_R[1]))
+			_copse(rng, at.x + cos(a) * d, at.y + sin(a) * d, rng.randi_range(int(WOOD_OUTLIER_TREES[0]), int(WOOD_OUTLIER_TREES[1])), false, false)
 	_tree_limit = int(_cap_trees * _copses_share)
 	var copse: Array = _spec.get("copse_trees", [35, 110] if _cover else [25, 90])  # bigger woods (Captain, 2026-10-16; was 20-60 / 10-40)  # Proposed (round 4: 10-40)
 	for n in _how_many(rng, float(_spec.get("copses_per_km2", 0.0)) * area_km2):
@@ -505,8 +522,12 @@ func _wood(rng: RandomNumberGenerator, cx: float, cz: float, r: float) -> void:
 			var z := cz + (j + rng.randf_range(-0.42, 0.42)) * spacing
 			var roll := rng.randf()
 			var d := Vector2(x - cx, z - cz)
-			if d.length() > _edge_r(cx, cz, r, d.angle()):
+			var edge := _edge_r(cx, cz, r, d.angle())
+			if d.length() > edge:
 				continue
+			var out := inverse_lerp(edge * WOOD_CORE, edge, d.length())
+			if out > 0.0 and rng.randf() > lerpf(1.0, WOOD_EDGE_DENSITY, out):
+				continue  # thinning toward the edge: straggling trees
 			if _cluster.get_noise_2d(x * 4.0, z * 4.0) < -0.45:
 				continue  # a clearing
 			if roll < 0.85:
@@ -527,9 +548,9 @@ func _wood(rng: RandomNumberGenerator, cx: float, cz: float, r: float) -> void:
 ## copses of trees are too small and spread out to be cover" (round 4 had r 2.3 sqrt(n) + 3,
 ## trees ~3.8 m apart, n / 2 thickets and no skirt: a man at the middle was hidden from 50 m on
 ## under half the lines). The trees look as before (Captain: "but they look fantastic").
-func _copse(rng: RandomNumberGenerator, cx: float, cz: float, n: int, grove := false) -> void:
+func _copse(rng: RandomNumberGenerator, cx: float, cz: float, n: int, grove := false, record := true) -> void:
 	if not _cover:
-		_round4_copse(rng, cx, cz, n, grove)
+		_round4_copse(rng, cx, cz, n, grove, record)
 		return
 	var r := COPSE_SPREAD * sqrt(float(n)) + 2.0
 	var placed := 0
@@ -559,12 +580,13 @@ func _copse(rng: RandomNumberGenerator, cx: float, cz: float, n: int, grove := f
 			var a := rng.randf() * TAU
 			var d := r * 0.7 * sqrt(rng.randf())
 			_copse_rock(rng, cx + cos(a) * d, cz + sin(a) * d)
-	copse_sites.append({"centre": Vector2(cx, cz), "r": r, "trees": placed, "grove": grove})
+	if record:  # a wood's outlier clumps are the wood's, not copses of their own
+		copse_sites.append({"centre": Vector2(cx, cz), "r": r, "trees": placed, "grove": grove})
 
 
 ## Round 4's copse (every preset without "copse_cover"; the normal zones keep it until the
 ## perf pass): `n` trees round (cx, cz), n / 2 thickets among them, scrub round it.
-func _round4_copse(rng: RandomNumberGenerator, cx: float, cz: float, n: int, grove: bool) -> void:
+func _round4_copse(rng: RandomNumberGenerator, cx: float, cz: float, n: int, grove: bool, record := true) -> void:
 	var r := 2.3 * sqrt(float(n)) + 3.0
 	var placed := 0
 	var tries := n * 6
@@ -580,7 +602,8 @@ func _round4_copse(rng: RandomNumberGenerator, cx: float, cz: float, n: int, gro
 		_try_bush(rng, cx + cos(a) * d, cz + sin(a) * d, Kind.THICKET, 1.8, 2.8)
 	if placed > 0:
 		_edge_scrub(rng, cx, cz, r, false)
-	copse_sites.append({"centre": Vector2(cx, cz), "r": r, "trees": placed, "grove": grove})
+	if record:  # a wood's outlier clumps are the wood's, not copses of their own
+		copse_sites.append({"centre": Vector2(cx, cz), "r": r, "trees": placed, "grove": grove})
 
 
 ## A big rock (1.4 to 2.2 m, solid) at (x, z) for low cover in a copse, unless it's off the zone,

@@ -85,7 +85,7 @@ const MAX_OPS_HIGH := 3
 ## Combat power of one of the squad: armoured contractors; in a working exo frame, more.
 const SQUAD_MAN_CP := 1.5
 const EXO_CP := 1.0
-const SITE_TYPES: Array[String] = ["outpost", "checkpoint", "qrf_base", "comms", "hq"]
+const SITE_TYPES: Array[String] = ["outpost", "checkpoint", "qrf_base", "comms", "hq", "town"]
 ## Fog.
 const SEEN_FADE_PER_MIN := 0.1
 const LOSS_WINDOW_S := 600.0
@@ -580,7 +580,7 @@ func _watch_sites() -> void:
 	if had == null:
 		return
 	for m: ZoneModule in level.call(&"modules"):
-		if not (m.type in SITE_TYPES) or int(had.get(m.module_id, 0)) <= 0 or _handled.has(m.module_id):
+		if not (ZoneModules.base(m.type) in SITE_TYPES) or int(had.get(m.module_id, 0)) <= 0 or _handled.has(m.module_id):
 			continue
 		if level.call(&"site_down", m.module_id):
 			_handled[m.module_id] = true
@@ -850,7 +850,7 @@ func _abandon_outposts() -> void:
 	if ai == null:
 		return
 	for m: ZoneModule in level.call(&"modules"):
-		if m.type in HELD_AFTER_WITHDRAW or not (m.type in SITE_TYPES):
+		if ZoneModules.base(m.type) in HELD_AFTER_WITHDRAW or not (ZoneModules.base(m.type) in SITE_TYPES):
 			continue
 		var prefix := ("%s_H" % m.module_id).validate_node_name()
 		var leaving: Array = []
