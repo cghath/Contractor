@@ -104,6 +104,19 @@ const TACTIC_SCORE := 0.75
 const ORDERED_SCORE := 0.93
 const PLAYER_ORDER_SCORE := 0.93
 const CASUALTY_CONTACT_SCORE := 0.82
+## Captain, 2026-10-17: "enemy medics are still medicing under fire, and the new teams even come in
+## and start aid on downed enemy teams instead of focusing on player teams". The enemy fights
+## first: in contact its casualty care scores HOSTILE_CARE_CONTACT_SCORE, under fighting (0.7),
+## and it leaves a casualty it was treating when fire comes in; within HOSTILE_CARE_HOT_S of
+## contact it only sees to its own squad's casualties (an arriving team fights, not nurses).
+const HOSTILE_CARE_CONTACT_SCORE := 0.6
+const HOSTILE_CARE_HOT_S := 30.0
+## Captain, same night: "medics should focus on combat casualty care but only where they can". An
+## enemy medic, not pinned, scores care above fighting in contact (HOSTILE_MEDIC_CONTACT_SCORE;
+## _find_casualty already skips a casualty the squad's fire covers: _rescue_hot) and also sees
+## to other teams' casualties within HOSTILE_MEDIC_REACH_M while it's hot.
+const HOSTILE_MEDIC_CONTACT_SCORE := 0.85
+const HOSTILE_MEDIC_REACH_M := 25.0
 const HOLD_CARE_M := 12.0
 ## Suppressive rounds wander this far round the point (a position, not a pixel), a new spot each burst.
 const SUPPRESS_SPREAD_M := 1.5
@@ -756,6 +769,11 @@ func _friendly() -> bool:
 	return body != null and body.faction == &"friendly"
 
 
+## An enemy medic able to work: not pinned or stunned.
+func _enemy_medic_free() -> bool:
+	return not _friendly() and body.role == Roles.MEDIC and body.suppression < PINNED and body.stunned_s <= 0.0
+
+
 func _contact_memory() -> float:
 	return SQUAD_CONTACT_MEMORY_S if _friendly() else CONTACT_MEMORY_S
 
@@ -1089,7 +1107,8 @@ func _choose_intent() -> void:
 		# is still seen to (above the hold), farther ones wait on the order.
 		var who: Soldier = casualty if care != Care.NONE and care != Care.BODY and is_instance_valid(casualty) else _candidate
 		var near_hold := order == Squad.Order.HOLD and who != null and who.global_position.distance_to(_hold_point) <= HOLD_CARE_M
-		scores[Intent.CASUALTY] = PLAYER_ORDER_SCORE + 0.01 if near_hold else (CASUALTY_CONTACT_SCORE if contact else 0.9)
+		var in_fire := CASUALTY_CONTACT_SCORE if _friendly() else (HOSTILE_MEDIC_CONTACT_SCORE if _enemy_medic_free() else HOSTILE_CARE_CONTACT_SCORE)
+		scores[Intent.CASUALTY] = PLAYER_ORDER_SCORE + 0.01 if near_hold else (in_fire if contact else 0.9)
 	elif not contact and (care == Care.BODY or _find_body() != null):
 		scores[Intent.CASUALTY] = BODY_RECOVER_SCORE
 	_maybe_call_medic()
@@ -1123,7 +1142,8 @@ func _choose_intent() -> void:
 		return
 	if best != intent:
 		var player_order := _friendly() and (best == Intent.MOVE_TO or best == Intent.HOLD or (best == Intent.TACTIC and not ordered.is_empty()))
-		if intent == Intent.CASUALTY and care != Care.NONE and care != Care.BODY and best_score < 0.95 and not player_order:
+		var enemy_under_fire := not _friendly() and in_contact() and not _enemy_medic_free()  # the enemy leaves him to fight (a free medic stays)
+		if intent == Intent.CASUALTY and care != Care.NONE and care != Care.BODY and best_score < 0.95 and not player_order and not enemy_under_fire:
 			return  # don't abandon a casualty for anything short of an empty magazine, your own bleed or a player's order
 		intent = best
 		_score = best_score
@@ -1572,6 +1592,8 @@ func _find_casualty() -> Soldier:
 		var s := n as Soldier
 		if s == null or s == body or not _cares_for(s) or not needs_help(s):
 			continue
+		if not _friendly() and (in_contact() or Soldier._now() - _last_contact < HOSTILE_CARE_HOT_S) 				and SquadAI.of(s) != null and SquadAI.of(s).squad != squad 				and not (_enemy_medic_free() and body.global_position.distance_to(s.global_position) <= HOSTILE_MEDIC_REACH_M):
+			continue  # the enemy in a fight: only its own team's casualties (a medic: anyone close)
 		var carer := _carer_of(s)
 		if carer == body:
 			return s

@@ -59,6 +59,9 @@ const EXTRA_POST_CLEAR_M := 0.4
 ## One man in this many of a garrison (its first, then every RADIO_EVERY-th) carries the
 ## site's handheld radio ("enemy_radio"; looted, RadioChatter). Proposed.
 const RADIO_EVERY := 4
+## Captain, 2026-10-17: "the enemy does need some more medics ... we never see them": every
+## ENEMY_MEDIC_EVERY'th garrison post is a medic (Roles kit: aid bag and the rest).
+const ENEMY_MEDIC_EVERY := 5
 
 ## The zone definition (ZoneDef), set before the node enters the tree (configure()).
 var def: Dictionary = {}
@@ -577,7 +580,8 @@ func _spawn_queued_garrison() -> void:
 		if module and ai.get_node_or_null(NodePath(_garrison_callsign(module, i))) == null:
 			var s := spawn_soldier({"name": _garrison_callsign(module, i), "faction": "hostile", "variant": "urban", "pos": pos,
 				"loadout": hostile_loadout(i) + ["enemy_radio"] if i % RADIO_EVERY == 0 else hostile_loadout(i), "combat": GARRISON_STATS.combat, "discipline": GARRISON_STATS.discipline, "guard": true,
-				"mode": alert.mode_at(pos) if alert else GARRISON_STATS.mode})
+				"mode": alert.mode_at(pos) if alert else GARRISON_STATS.mode,
+				"role": "medic" if i % ENEMY_MEDIC_EVERY == ENEMY_MEDIC_EVERY - 1 else ""})
 			if s:
 				var look := module.global_basis * (q.get("face", Vector3.ZERO) as Vector3)  # a post's way out (towns)
 				s.rotation.y = post_yaw(module, pos) if look.length() < 0.1 else atan2(-look.x, -look.z)
