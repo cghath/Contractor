@@ -142,10 +142,22 @@ static func dress(model: CharacterModel, item: ItemData, disabled: bool, layers:
 		# Shoulder actuator pylon, up over the shoulder from the spine pack.
 		_box(model.torso, Vector3(0.05, 0.16, 0.05), Vector3(side * 0.14, 0.57, 0.19), STRUT, layers)
 		_box(model.torso, Vector3(0.06, 0.04, 0.12), Vector3(side * 0.14, 0.64, 0.14), JOINT, layers)
+		# Captain, 2026-10-16 ("we need links for the shoulders to the back"): a yoke bridging the
+		# pylon's base in to the spine pack's shoulder - without it the pylon reads as a floating,
+		# disconnected piece.
+		_box(model.torso, Vector3(0.09, 0.05, 0.06), Vector3(side * 0.1, 0.49, 0.195), STRUT, layers)
 	# Spine power pack, the hip belt round the waist, the status light.
 	_box(model.torso, Vector3(0.16, 0.36, 0.07), Vector3(0.0, 0.3, 0.2), JOINT, layers)
 	_box(model.torso, Vector3(0.12, 0.3, 0.02), Vector3(0.0, 0.3, 0.237), STRUT, layers)
-	_box(model.torso, Vector3(0.39, 0.045, 0.25), Vector3(0.0, 0.02, 0.0), JOINT, layers)
+	# Captain, 2026-10-16 ("the hip/waist area shouldn't be a flat pane"): a proper belt, built
+	# from front, back and side plates round the waist, not one flat slab spanning it.
+	_box(model.torso, Vector3(0.34, 0.09, 0.055), Vector3(0.0, 0.03, -0.11), JOINT, layers)  # front
+	_box(model.torso, Vector3(0.34, 0.09, 0.055), Vector3(0.0, 0.03, 0.1), JOINT, layers)  # back
+	for side: float in [1.0, -1.0]:
+		_box(model.torso, Vector3(0.055, 0.09, 0.22), Vector3(side * 0.165, 0.03, 0.0), JOINT, layers)  # side plate
+	# Captain, 2026-10-16 ("and the back to the hips"): a spine strut down the lower back, closing
+	# the gap between the power pack's base and the belt's back plate.
+	_box(model.torso, Vector3(0.1, 0.1, 0.12), Vector3(0.0, 0.07, 0.15), STRUT, layers)
 	var light := _box(model.torso, Vector3(0.025, 0.025, 0.012), Vector3(0.0, 0.43, 0.25), LIGHT_OFF if disabled else LIGHT_ON, layers)
 	var lm := light.material_override as StandardMaterial3D
 	lm.emission_enabled = true

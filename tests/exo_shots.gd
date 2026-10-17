@@ -38,6 +38,8 @@ func _ready() -> void:
 	for id: StringName in [&"plate_carrier", &"helmet", &"m4a1"]:
 		player.inventory.take(id)
 	player.inventory.take(&"exo_frame_light")
+	for i in 90:  # the draw animation (DRAW_S) and the hand easing onto the grip need real time
+		await get_tree().process_frame
 	for i in 6:
 		await get_tree().process_frame
 	print("[exo] frame on: %s  working=%s  parts=%d" % [player.inventory.slots.get(ExoFrame.SLOT, &""),
@@ -58,6 +60,8 @@ func _ready() -> void:
 	await _shot(camera, out, "exo_rear", c + Vector3(0.0, 0.0, 1.6), c)
 	await _shot(camera, out, "exo_spine_closeup", c + Vector3(0.1, 0.05, 0.6), c + Vector3(0, -0.05, 0.3))
 	await _shot(camera, out, "exo_leg_closeup", player.global_position + Vector3(-0.35, 0.55, 0.9), player.global_position + Vector3(-0.1, 0.5, 0.0))
+	await _shot(camera, out, "exo_arms_closeup", c + Vector3(0.0, -0.1, -1.0), c + Vector3(0, -0.2, 0))
+	await _shot(camera, out, "exo_arms_side", c + Vector3(-1.0, -0.1, -0.3), c + Vector3(0, -0.2, 0))
 
 	# Disable the frame (run it to 0 hp) and shoot the same set again: the light goes red.
 	ExoFrame.server_damage(player, 1000.0)
