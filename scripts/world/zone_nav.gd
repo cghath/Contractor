@@ -44,9 +44,6 @@ static func build_zone(p_zone: ZoneLevel) -> ZoneNav:
 	# never reached the map (measured: whole chunks missing from paths while their regions
 	# held the right meshes). Synchronous updates (map and regions) cost well under 1 ms.
 	NavigationServer3D.map_set_use_async_iterations(nav.get_world_3d().navigation_map, false)
-	# Chunks share the same voxel grid and bake border: their matching vertices connect
-	# directly. Avoid the map-wide proximity pass over every remaining free edge.
-	NavigationServer3D.map_set_use_edge_connections(nav.get_world_3d().navigation_map, false)
 	return nav
 
 
@@ -162,6 +159,9 @@ func _physics_process(_delta: float) -> void:
 		if _regions.has(chunk) or not _wanted.has(chunk):
 			continue
 		var region := NavigationRegion3D.new()
+		# These chunks share a voxel grid and bake border: their matching vertices join
+		# directly. Skip costly proximity-edge matching only for these zone regions.
+		region.use_edge_connections = false
 		region.name = "Chunk_%d_%d" % [chunk.x, chunk.y]
 		add_child(region)
 		NavigationServer3D.region_set_use_async_iterations(region.get_rid(), false)
