@@ -28,6 +28,32 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   Distinct from the by-design black ring mask around the glass (`_draw_ring`), which is untouched.
 
 
+### Enemy high command, fuller zones, urban fights (Captain, 2026-10-17 night)
+
+#### Added
+- Enemy high command, Phase 2 (docs/enemy_high_command.md): the enemy commander judges you
+  from what his men report (loud fire reads as more of you; noise far from a sighting gets a
+  probe, not a hunt), spends finite reserves, probes and reoccupies lost sites, retakes ones you
+  left a defender on, falls back when half his men are gone (outposts abandoned), and remembers
+  how the zone went across deployments (cautious after losses, bolder after wins, easing back
+  over the days). His orders go out on the enemy net (looted radios hear them).
+- The commander is a person: the HQ's officer, or an HVT at the HQ in the enemy's uniform and
+  medium armour with two bodyguards; hit the HQ and they run for a QRF base while he calls a
+  relief force. Capture or kill him and the zone goes headless for 10 minutes. After you take
+  out a QRF base, the follow-up contract is to capture him; the employer also warns you when a
+  counterattack is massing. Dev tools: PgUp readout shows the commander's state.
+- Eleven new contract zones, four on new terrains (highland moor, river valley, badlands),
+  three on procedural terrains (two presets blended by the zone's seed), and two hot zones
+  (Crow's Pass, Reed Delta).
+
+#### Changed
+- Outposts gain 2-3 buildings, villages 1-6 more houses and shops, compounds 1-2 buildings
+  (generated round the hand-built core, where there's room).
+- Woods sprawl: bigger, thinning to straggling trees at the edge, with outlying clumps.
+- Towns are blocks, not a strip: back rows across alleys onto back streets, open lots,
+  sandbag barricades and rubble in the streets. Defenders hold deep inside (back rooms), a
+  reserve moves to the side being hit, hurt or isolated defenders fall back building to
+  building, and in hot zones the commander sends a relief force into the streets.
 
 ### AI orders and rescues, dragging, enemy AI, voices, shop (Captain, 2026-10-17)
 

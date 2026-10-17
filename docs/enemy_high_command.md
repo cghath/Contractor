@@ -1,7 +1,7 @@
 # Enemy high command (proposal)
 
-**Status: Proposed** (2026-10-17, for the Captain to approve, change or turn down). Nothing here
-is built. Every number is proposed and tunable. Not to be confused with `docs/high_command.md`,
+**Status: Phase 1 and Phase 2 part one built** (2026-10-17, untested; Captain's answers below).
+Every number is proposed and tunable. Not to be confused with `docs/high_command.md`,
 which is the *friendly* side (hero-led squads the player commands).
 
 Captain, 2026-10-17: "enemy forces also need a high command that kind of dictates the flow of
@@ -121,17 +121,45 @@ only by a force that can actually retake it. Otherwise the rest of the map doesn
    suite): a lost outpost is retaken only with 3:1 (and the task force arrives together); with
    less it's contained and no wave heads for the squad; at most `MAX_OPS` at once; the budget
    still holds.
-2. **Probe, Hunt, Consolidate, Reoccupy**, decapitation and comms friction, radio chatter
-   lines.
+2. **Part one (built 2026-10-17, simple on purpose, NOT tested: Captain "dont fix the tests")**:
+   fog (contact reports carry how many were seen, `Alert._seen_at`; the estimate fades unseen,
+   raised by recent losses; a site counts it only with a fresh LKP near it), finite reserves
+   with slow refill (a lost base takes its share), Probe (stale LKP or a lost site nobody was
+   seen at), Hunt gate (hunters need a fresh LKP, else a probe), Reoccupy (a probe finds the
+   site clear, stays, `REOCCUPY_MIN` hold it; retaken men count as garrison via meta
+   `garrison_of` in `ZoneLevel.garrison_alive`), Consolidate (past 50% lost: hunters and task
+   forces home, no new hunts/probes, only HQ and QRF bases fought for), decapitation (HQ post 0;
+   `HEADLESS_S` with no decisions, then the deputy at half pace; `commander_name()` for a
+   contract), comms friction (slower tick and assembly, probes silent), orders on the net
+   (`RadioChatter.order`), and hot zones: `HotZoneOps` answers the commander's death with a
+   radio follow-up contract ("commander" in `FOLLOW_UPS`).
+   **Part two (2b), built the same night**: per-site fog (a site counts the most any fresh
+   contact report near it saw); the 2:1 retake (`REOCCUPY_RATIO`) when a probe meets fewer at a
+   site than the squad is thought to be (a defender left on it); QRF waves recalled on
+   Consolidate; the HQ's pairs to its sites ask the commander (`request_men`, paid from
+   reserves); hunts have a stop (`HUNT_STOP_S`, recalled teams aren't retargeted).
+   Then: outposts and checkpoints abandoned on Consolidate (garrisons regrouped into a squad,
+   meta `left_post`, walk to the nearest base); the employer tips the squad off over its field
+   radio when a counterattack masses (`HotZoneOps._on_operation`, `TIP_CHANCE` 0.6,
+   `EnemyCommand.operation_started`).
+   Commander capture missions: a hostile HVT at the HQ (an hvt_capture contract there) IS the
+   commander (`_find_commander_hvt`, within `COMMANDER_HVT_M`); captured, delivered or dead,
+   the zone goes headless. HotZoneOps' QRF-base follow-up is now an hvt_capture at the HQ
+   ("their commander's there, take him alive"), raid as the fallback.
+   **Still to do**: in-situ interrogation of captured squad leads/commanders for intel and
+   missions (Captain's idea, parked: "lets not worry about interrogation yet"); an enemy_command
+   test suite and missions_test's QRF checks updated to the 2:1 gate.
 3. Vehicles in task forces (`VehicleQrf` technicals), mortars or air when they exist, named
    enemy commanders (wave 6).
 
-## Open questions for the Captain
+## The Captain's answers (2026-10-17)
 
-1. Ratios: counterattack at 3:1, call off under 1.5:1. Right feel?
-2. Reserves: finite per deployment and refilled slowly by tier (proposed), or effectively
-   endless but slow?
-3. Should the commander be a person you can hunt (the HQ officer, proposed) and decapitate,
-   possibly as a contract target?
-4. Reoccupy after you leave a lost site for 20 minutes: yes, or should taken sites stay taken
-   for the deployment?
+1. Ratios: **keep** counterattack at 3:1, call off under 1.5:1.
+2. Reserves: **finite per deployment, refilled slowly by tier.**
+3. Decapitation: **yes**, the HQ officer is huntable, **and can be a contract target** (an HVT
+   contract on the zone's commander; contract side is a follow-up).
+4. Reoccupy: **no timer; the commander decides.** Retaking a site is an operation like any other:
+   a Probe goes first, then a Reoccupy at 2:1 or better (`REOCCUPY_RATIO`), paid from the finite
+   reserves. A site with a defender (a squadmate or rebel left on it) counts that defender in the
+   threat at the site; a site handed to the rebels must be taken out of rebel hands (rebels count
+   as the threat there). No squad near it and no defender: a cheap one-pair Reoccupy is enough.

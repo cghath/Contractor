@@ -114,11 +114,53 @@ static func normalize(def: Dictionary) -> Dictionary:
 		out[key] = points
 	if (out.insertion as Array).is_empty():
 		out.insertion = [[0.0, half - 80.0]]
+	out["grow"] = bool(def.get("grow", true))
+	_grow(out, half)
 	out["terrain"] = TerrainPresets.choose(out)
 	_choose_sea(out)
 	_ensure_edge(out, "insertion")
 	_ensure_edge(out, "extraction")
 	return out
+
+
+## Captain, 2026-10-17 ("lets use the systems we already made to fill the zones up a bit better and
+## make them feel a bit more alive"): each outpost, village and compound in `def` grows
+## (ZoneModules.GROW: "<type>+<seed>", generated buildings round the hand-built core, the seed
+## from the zone's and the module's id) when the bigger footprint stays GROW_KEEP_M clear of
+## every other module and every insertion and extraction point, and GROW_EDGE_M inside the edge.
+## A def with "grow": false keeps them as built (tests, hand layouts that want it).
+const GROW_KEEP_M := 12.0
+const GROW_EDGE_M := 60.0
+
+
+static func _grow(def: Dictionary, half: float) -> void:
+	if not bool(def.get("grow", true)):
+		return
+	var mods: Array = def.modules
+	var rect_of := func(m: Dictionary) -> Rect2:
+		var h: Vector2 = ZoneModules.HALF.get(String(m.type), Vector2(20, 20))
+		return Rect2(float(m.pos[0]) - h.x, float(m.pos[1]) - h.y, h.x * 2.0, h.y * 2.0)
+	for m: Dictionary in mods:
+		var type := String(m.type)
+		if not ZoneModules.GROW.has(type):
+			continue
+		var grown := "%s%s%d" % [type, ZoneModules.GROWN, absi(hash([int(def.seed), String(m.id)])) % 1000000]
+		if not ZoneModules.has_type(grown):
+			continue
+		var h: Vector2 = ZoneModules.HALF[grown]
+		var r := Rect2(float(m.pos[0]) - h.x, float(m.pos[1]) - h.y, h.x * 2.0, h.y * 2.0)
+		var keep := half - GROW_EDGE_M
+		var fits := r.position.x >= -keep and r.position.y >= -keep and r.end.x <= keep and r.end.y <= keep
+		var wide := r.grow(GROW_KEEP_M)
+		for other: Dictionary in mods:
+			if fits and other != m and wide.intersects(rect_of.call(other)):
+				fits = false
+		for key in ["insertion", "extraction"]:
+			for pt: Array in def.get(key, []):
+				if fits and wide.has_point(Vector2(float(pt[0]), float(pt[1]))):
+					fits = false
+		if fits:
+			m.type = grown
 
 
 ## Captain, 2026-10-14: `def` (normalized, its sea chosen) gets a point of `key` ("insertion",

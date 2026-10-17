@@ -259,6 +259,13 @@ func _hook_reinforcements() -> void:
 		_reinforcements.wave_spawned.connect(_on_wave)
 
 
+## Host: an order of the enemy's high command (EnemyCommand) goes out on the net, from
+## `speaker`: heard while tuned (HEAR_CHANCE).
+func order(text: String, speaker := NET_CALLSIGN) -> void:
+	if tuned and randf() < HEAR_CHANCE:
+		_say("%s: %s" % [speaker, text])
+
+
 ## A report as the squad hears it: "Outpost 2: shots heard, to the north."
 func report_line(r: Dictionary) -> String:
 	var area := String(r.get("area", Alert.FIELD))

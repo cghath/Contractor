@@ -112,6 +112,7 @@ func _ready() -> void:
 	add_child(Pressure.new())  # what the squad has done here, long term
 	add_child(EnemyResponse.new())  # patrols, QRF waves, hunters: the enemy's answer
 	add_child(RadioChatter.new())  # what a looted enemy radio lets the squad hear
+	add_child(UrbanDefence.new())  # towns fought from inside: reserves, falling back, relief (Captain, 2026-10-17)
 	add_child(ZoneCleanup.new())  # bodies and dropped loot go after ~6-7 min (blood on its own clock)
 	add_child(IntelReveal.new())  # intel picked up gives away enemy sites on the map
 	if String(def.get("kind", "")) == "hot":
@@ -616,13 +617,15 @@ func _garrison_callsign(module: ZoneModule, i: int) -> String:
 	return ("%s_H%d" % [module.module_id, i + 1]).validate_node_name()
 
 
-## Host: module `module_id`'s garrison still up (spawned and alive).
+## Host: module `module_id`'s garrison still up (spawned and alive; men EnemyCommand put back on
+## a retaken site count too: meta "garrison_of"; men who abandoned it don't: meta "left_post").
 func garrison_alive(module_id: String) -> int:
 	var prefix := ("%s_H" % module_id).validate_node_name()
 	var count := 0
 	for n in ai.get_children():
 		var s := n as Soldier
-		if s and String(s.name).begins_with(prefix) and not s.is_queued_for_deletion() and s.vitals.is_up() \
+		if s and (String(s.name).begins_with(prefix) or String(s.get_meta(&"garrison_of", "")) == module_id) \
+				and not s.get_meta(&"left_post", false) and not s.is_queued_for_deletion() and s.vitals.is_up() \
 				and not s.is_in_group(Soldier.DEAD_GROUP):
 			count += 1
 	return count

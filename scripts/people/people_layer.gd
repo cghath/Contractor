@@ -21,6 +21,9 @@ extends Node3D
 ## - Gunfire (Soldier._server_fire) and grenades (Grenade) make noise (server_noise) that
 ##   frightens people nearby.
 
+## The zone commander HVT (_is_commander): enemy uniform, medium carrier with steel plates.
+const COMMANDER_LOOK := "urban"
+const COMMANDER_KIT: Array[String] = ["plate_carrier", "plate_steel_l3", "plate_steel_l3", "helmet_bump"]
 const PLAYER_SCENE := preload("res://scenes/soldier.tscn")
 const GROUP := &"people_layers"
 ## The brain's node name on a person's body (CivilianAI or HvtAI).
@@ -373,6 +376,9 @@ func hvts_out(centre: Vector2, radius: float, extracted: Array) -> Array:
 func server_spawn_person(data: Dictionary) -> Soldier:
 	var d := data.duplicate(true)
 	d["type"] = "person"
+	var commander := _is_commander(d)
+	if commander:
+		d["look"] = COMMANDER_LOOK  # the enemy's uniform: he stands out from civilians
 	if not d.has("look"):  # what they wear, picked once here and sent with the spawn (PersonLook)
 		var site: Variant = level.call(&"module_at", d.pos) if level and level.has_method(&"module_at") else null
 		d["look"] = PersonLook.outfit(StringName(d.get("kind", Person.CIVILIAN)), StringName(d.get("side", Person.NEUTRAL)),
@@ -386,7 +392,20 @@ func server_spawn_person(data: Dictionary) -> Soldier:
 	server_set_state(s, st)
 	for id: String in d.get("intel", []):
 		server_give_intel(s, StringName(id), "HVT %s" % s.display_name())
+	if commander:
+		for id: String in COMMANDER_KIT:
+			s.inventory.take(StringName(id))  # worn: the carrier, its plates in it
 	return s
+
+
+## A hostile HVT spawned at the HQ is the zone's commander (EnemyCommand): uniformed and in
+## medium armour (Captain, 2026-10-17: "dressed as an enemy, in medium armor so hes a bit more
+## identifyable").
+func _is_commander(d: Dictionary) -> bool:
+	if StringName(d.get("kind", "")) != Person.HVT or StringName(d.get("side", "")) != Person.HOSTILE:
+		return false
+	var site: Variant = level.call(&"module_at", d.pos) if level and level.has_method(&"module_at") and d.has("pos") else null
+	return site != null and ZoneModules.base(String(site.type)) == "hq"
 
 
 ## Host only. An extraction point for people and intel (DeliveryPoint), seen on every peer.

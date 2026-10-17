@@ -463,7 +463,7 @@ func _tick_hunters(tier: int) -> void:
 		if living.is_empty():
 			continue
 		teams += 1
-		if not lk.is_empty() and now() >= float(team.retarget_at):
+		if not lk.is_empty() and now() >= float(team.retarget_at) and not team.get("recalled", false):  # EnemyCommand called it home
 			team.retarget_at = now() + HUNTER_RETARGET_S / c
 			var route: Array[Vector3] = [_ground(lk.pos)]
 			route.append_array(_search_ring(lk.pos, float(lk.radius)))
@@ -576,13 +576,16 @@ func _reinforce_sites() -> void:
 	for m: ZoneModule in level.call(&"modules"):
 		if sent >= REINFORCE_MAX or 2 > _room():
 			break
-		if not (m.type in REINFORCE_TYPES) or had == null or int(had.get(m.module_id, 0)) <= 0 or level.call(&"site_down", m.module_id):
+		if not (ZoneModules.base(m.type) in REINFORCE_TYPES) or had == null or int(had.get(m.module_id, 0)) <= 0 or level.call(&"site_down", m.module_id):
 			continue
 		if reinforcement_pairs.any(func(p: Dictionary) -> bool: return p.to == m.module_id and not _living(p.soldiers).is_empty()):
 			continue  # already has one
 		var from := _unseen_gate(hq, m.global_position)
 		if not from.is_finite():
 			break  # the HQ is watched: no one leaves it this round
+		var command := EnemyCommand.of(self)
+		if command and not command.request_men(2, "pair to %s" % m.module_id):
+			break  # the commander says no (reserves, consolidating, or nobody in command)
 		sent += 1
 		var k := reinforcement_pairs.size() + 1
 		var callsign := ("%s_HR%d" % [m.module_id, k]).validate_node_name()

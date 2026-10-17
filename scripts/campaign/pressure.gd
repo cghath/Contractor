@@ -207,7 +207,7 @@ func _count_sites() -> void:
 	if level == null or not level.has_method(&"site_down"):
 		return
 	for m: ZoneModule in level.call(&"modules"):
-		if m.type in SITE_TYPES and not _down.has(m.module_id) and level.call(&"site_down", m.module_id):
+		if ZoneModules.base(m.type) in SITE_TYPES and not _down.has(m.module_id) and level.call(&"site_down", m.module_id):
 			_down[m.module_id] = true
 			server_add("site_destroyed")
 

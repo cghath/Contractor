@@ -30,6 +30,8 @@ const RAISES := {&"shot": State.SUSPICIOUS, &"blast": State.ALERTED, &"contact":
 	&"body": State.ALERTED, &"missed_checkin": State.ALERTED}
 
 const SHOT_HEARD_M := 600.0
+## A contact report counts the squad within this of what was seen (EnemyCommand's fog).
+const SEEN_GROUP_M := 25.0
 const SUPPRESSED_HEARD_M := 80.0
 const BLAST_HEARD_M := 1200.0
 ## Seconds from hearing or seeing to the report arriving: lerp by discipline (high is quick).
@@ -137,8 +139,25 @@ func _perceive(s: Soldier, kind: StringName, pos: Vector3) -> void:
 		delay *= REPORT_UNDER_FIRE_MULT
 	if comms_down:
 		delay *= COMMS_DOWN_MULT
-	_pending.append({"by": s, "due": now() + delay,
-		"report": {"kind": kind, "pos": pos, "area": area, "by": String(s.name)}})
+	var report := {"kind": kind, "pos": pos, "area": area, "by": String(s.name)}
+	if kind == &"contact":
+		report.merge(_seen_at(pos))
+	_pending.append({"by": s, "due": now() + delay, "report": report})
+
+
+## What a contact report says it saw at `pos` (EnemyCommand's fog): how many of the squad
+## (players and squad AI) up within SEEN_GROUP_M, and how many of those in a working exo frame.
+func _seen_at(pos: Vector3) -> Dictionary:
+	var men := 0
+	var exo := 0
+	var squad := MapNodes.players(self)
+	squad.append_array(MapNodes.squad_ai(self))
+	for p: Soldier in squad:
+		if p.vitals.is_up() and p.global_position.distance_to(pos) <= SEEN_GROUP_M:
+			men += 1
+			if ExoFrame.working(p.inventory):
+				exo += 1
+	return {"seen": maxi(men, 1), "exo": exo}
 
 
 # --- The radio net (host) ------------------------------------------------------------------------
