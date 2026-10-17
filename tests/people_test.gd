@@ -797,6 +797,16 @@ func _test_escort() -> void:
 	# Wounded: the escorts see to him, a medic is pulled to him and takes over.
 	hvt.vitals.server_damage(70.0)
 	await _wait_until(func() -> bool: return not hvt.vitals.is_up(), 3.0)
+	# Remembered contact must not keep an escort on the escort intent: care beats
+	# escorting, including the intent-switch hysteresis. No live shooter is needed.
+	var responder := SquadAI.of(SquadAI.responder_for(hvt))
+	if responder != null and responder.escorting == hvt:
+		responder._last_contact = Soldier._now()
+		responder.intent = SquadAI.Intent.ESCORT
+		responder._choose_intent()
+		check(responder.intent == SquadAI.Intent.CASUALTY, "remembered contact: an escort switches to his wounded HVT's care")
+	else:
+		check(false, "a wounded HVT has an escort responder")
 	await _wait_until(func() -> bool: return is_instance_valid(hvt.care_by), 6.0)
 	var first: Soldier = hvt.care_by
 	check(first == e1 or first == e2, "down: an escort is on him first (%s)" % (first.name if first else "nobody"))

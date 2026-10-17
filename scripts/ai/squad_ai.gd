@@ -1138,7 +1138,10 @@ func _choose_intent() -> void:
 			best = key
 			best_score = scores[key]
 	var current: float = scores.get(intent, -1.0)
-	if best != intent and best_score < current + HYSTERESIS:
+	# The escort's own wounded HVT takes priority even while contact is remembered:
+	# care's 0.82 beats escort's 0.75, but not its usual switching margin of 0.1.
+	var escort_care := intent == Intent.ESCORT and best == Intent.CASUALTY and _candidate == escorting and escort_valid()
+	if best != intent and best_score < current + HYSTERESIS and not escort_care:
 		return
 	if best != intent:
 		var player_order := _friendly() and (best == Intent.MOVE_TO or best == Intent.HOLD or (best == Intent.TACTIC and not ordered.is_empty()))
