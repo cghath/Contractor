@@ -41,6 +41,10 @@ extends Node
 ##   No HQ in the zone: an unseen commander, never killed. A hostile HVT at the HQ (an
 ##   hvt_capture contract there: HotZoneOps sends one after the QRF base falls) IS the
 ##   commander: captured (cuffed or surrendered), delivered or dead, the zone is headless.
+##   He has GUARD_SIZE bodyguards (HvtAI keeps him behind the nearest hostile up). The HQ hit
+##   (a contact report near it, or its area ENGAGED): the guards take him to the nearest QRF base
+##   (none left: they hold at the HQ) and he calls for help, one relief counterattack on the HQ
+##   at COUNTER_RATIO. Guards dead and the squad on him, HvtAI has him give up (cornered).
 ## - Comms down (Alert.comms_down): the tick is COMMS_TICK_MULT slower, task forces take
 ##   COMMS_ASSEMBLE_MULT longer to assemble, probes don't report.
 ## - Its orders go out on the net (RadioChatter.order): a looted radio hears them.
@@ -94,6 +98,9 @@ const PROBE_DECIDE_S := 120.0
 const HEADLESS_S := 600.0
 ## A hostile HVT this close to the HQ is the commander.
 const COMMANDER_HVT_M := 80.0
+## His bodyguards (spawned beside him, out of the squad's sight), and how far they let him get.
+const GUARD_SIZE := 2
+const GUARD_CLOSE_M := 6.0
 const DEPUTY_TICK_MULT := 2.0
 const COMMS_TICK_MULT := 2.0
 const COMMS_ASSEMBLE_MULT := 2.0
@@ -124,6 +131,8 @@ var _bases_start := -1
 var _bases_had := -1
 var _headless_until := INF
 var _commander_hvt := ""  # hvt_id of the HVT who is the commander, once seen
+var _guards := {}         # his bodyguard team: {"squad", "soldiers"}
+var _fell_back := false   # the HQ was hit: he's left for a base (or holds at the HQ)
 var _last_probe := -INF
 var _probes := 0
 var _teams := 0
@@ -331,6 +340,40 @@ func _find_commander_hvt() -> bool:
 	return false
 
 
+## The HVT commander's guards and fallback (see the header).
+func _tend_commander() -> void:
+	if not _find_commander_hvt() or not can_decide():
+		return
+	var layer := PeopleLayer.find(self)
+	var hvt := layer.hvt(_commander_hvt) if layer else null
+	var hq := _hq_module()
+	if hvt == null or hvt.vitals.is_dead() or Person.is_captive(hvt) or hq == null:
+		return
+	if _guards.is_empty():
+		if not response._unseen(hvt.global_position) or available_cp() < GUARD_SIZE:
+			return  # not where the squad would see them pop in
+		var beside := hvt.global_position + hvt.global_transform.basis.x * 2.0
+		_guards = _send_team("BG", GUARD_SIZE, beside, hvt.global_position)
+		_record("bodyguard", hvt.global_position, "done", "%d guard the commander" % (_guards.soldiers as Array).size())
+	var guards: Array = response._living(_guards.soldiers)
+	if not _fell_back and (threat_cp(hq.global_position, SITE_THREAT_M) > 0.0 or (alert and alert.state_of(hq.module_id) >= Alert.State.ENGAGED)):
+		_fell_back = true
+		var bases := response._living_sites("qrf_base", hq.global_position)
+		if not bases.is_empty() and not guards.is_empty():
+			var to := response._ground(bases[0].global_position)
+			var route: Array[Vector3] = [to]
+			response._set_route(_guards.squad, guards, route)
+			_record("fallback", to, "done", "the commander falls back on %s" % bases[0].module_id)
+			_order("this is Command, we're relocating to %s. Hold them off." % _callsign(bases[0]))
+		else:
+			_record("fallback", hq.global_position, "done", "the commander holds at the HQ")
+			_order("this is Command, we're holding here. All units, to me.")
+		_launch_counterattack(hq, maxf(threat_cp(hq.global_position, SITE_THREAT_M), SQUAD_MAN_CP), COUNTER_RATIO, "relief of the HQ", false)
+	elif not _fell_back and not guards.is_empty() and (guards[0] as Soldier).global_position.distance_to(hvt.global_position) > GUARD_CLOSE_M:
+		var route: Array[Vector3] = [response._ground(hvt.global_position)]
+		response._set_route(_guards.squad, guards, route)
+
+
 ## Whether officer post `post` of the HQ is dead (spawned and down, or fallen on an earlier
 ## visit). Post 0 with an HVT commander: whether he's captured, delivered or dead.
 func _officer_down(post: int) -> bool:
@@ -409,6 +452,7 @@ func server_tick() -> void:
 	_tick_reserves(maxf(dt, 0.0))
 	_count_losses()
 	_watch_command()
+	_tend_commander()
 	for op: Dictionary in operations:
 		if op.state == "approved" and now() - float(op.at) > 60.0:
 			op.state = "done"  # a hunt is EnemyResponse's from here on
@@ -459,16 +503,29 @@ func _decide_lost(m: ZoneModule, probed := false) -> void:
 		return
 	# a probe met fewer than it thinks the squad is: someone left on the site, retaken at 2:1
 	var ratio := REOCCUPY_RATIO if probed and threat_cp() > threat else COUNTER_RATIO
+	_launch_counterattack(m, threat, ratio, "%s lost" % m.module_id)
+
+
+## A counterattack on site `m` at `ratio` of `threat` (assembling out of sight), or Contain
+## when it can't field it. Also the HQ's relief when the commander calls for help.
+func _launch_counterattack(m: ZoneModule, threat: float, ratio: float, what: String, contain := true) -> void:
 	var need := ceili(threat * ratio)
 	var have := available_cp()
 	var base := _nearest_base(m.global_position)
-	var why := "%s lost: %.0f CP against %.1f there (needs %d at %.0f:1)" % [m.module_id, have, threat, need, ratio]
+	if base == m:
+		var others := response._living_sites("qrf_base", m.global_position).filter(func(b: ZoneModule) -> bool: return b != m)
+		base = others[0] if not others.is_empty() else null
+	var why := "%s: %.0f CP against %.1f there (needs %d at %.0f:1)" % [what, have, threat, need, ratio]
 	if base == null or have < need or _active_ops() >= max_ops():
-		_contain(m, why + (", no base" if base == null else ""))
+		if contain:
+			_contain(m, why + (", no base" if base == null else ""))
+		else:
+			_record("relief", m.global_position, "denied", why)
 		return
 	var gate := response._unseen_gate(base, m.global_position)
 	if not gate.is_finite():
-		_contain(m, why + ", every gate watched")
+		if contain:
+			_contain(m, why + ", every gate watched")
 		return
 	var rally := response._ground(m.global_position.move_toward(gate, RALLY_M))
 	var team := _send_team("CA_%s" % m.module_id, need, gate, rally)

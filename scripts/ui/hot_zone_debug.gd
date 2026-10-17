@@ -121,6 +121,15 @@ static func readout(from: Node) -> String:
 		lines.append("QRF launches: %d%s  hunter teams: %d  HQ pairs: %d  coordination %.1f" % [response.qrf_launches.size(), turnout,
 			response.hunters.size(), response.reinforcement_pairs.size(), response.coordination()])
 	var lvl := CompoundLevel.current(from) if from.is_inside_tree() else null
+	var command := lvl.get_node_or_null(^"EnemyCommand") as EnemyCommand if lvl else null
+	if command:
+		var active := command.operations.filter(func(o: Dictionary) -> bool:
+			return o.state in ["assembling", "attacking", "approved", "moving", "looking", "containing"])
+		lines.append("Command: %s%s  reserves %.1f  threat %.1f (seen %.1f, losses %d)  ops %d/%d" % [command.commander_state,
+			"  CONSOLIDATED" if command.consolidated else "", command.reserves, command.threat_cp(), command.seen_now(),
+			command.recent_losses(), active.size(), command.max_ops()])
+		for o: Dictionary in active.slice(-4):
+			lines.append("  %s %s: %s" % [o.kind, o.state, o.get("why", "")])
 	var chatter := lvl.get_node_or_null(^"RadioChatter") if lvl else null
 	if chatter:
 		lines.append("Enemy radio: %s" % ("listening" if chatter.get(&"tuned") else "not tuned in"))
