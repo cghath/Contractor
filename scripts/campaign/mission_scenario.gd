@@ -172,7 +172,7 @@ func _send_wave(centre: Vector3, index: int, dirs: int, bearing: float, approach
 	var area: Rect2 = level.call(&"ground_area") if level.has_method(&"ground_area") else Rect2(-400, -400, 800, 800)
 	area = area.grow(-50.0)
 	spot = Vector3(clampf(spot.x, area.position.x, area.end.x), 0.0, clampf(spot.z, area.position.y, area.end.y))
-	return r.server_send(_ground(spot))
+	return r.server_send(_ground(spot), 0, -1, _ground(centre))  # it assaults the point, not the squad's last known spot
 
 
 func _ground(p: Vector3) -> Vector3:

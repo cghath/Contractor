@@ -170,16 +170,19 @@ func capped_alive() -> int:
 
 ## Host only (hot zones: EnemyResponse). Sends the next wave now from `origin` (a QRF base's
 ## gate), `extra_pairs` buddy pairs bigger than its turn; returns its soldiers.
-func server_send(origin: Vector3, extra_pairs := 0, cap := -1) -> Array:
+## `target`: an objective the wave assaults whatever `aim` says (MissionScenario's hold-the-line
+## and rescue waves; Captain, 2026-10-17: "enemies dont attack on hold compound objs": EnemyResponse
+## drives every zone's waves at the last known position, none before the squad is reported).
+func server_send(origin: Vector3, extra_pairs := 0, cap := -1, target := Vector3.INF) -> Array:
 	if not multiplayer.is_server():
 		return []
 	var index := waves_sent
 	waves_sent += 1
-	_send_wave(index, origin, extra_pairs, cap)
+	_send_wave(index, origin, extra_pairs, cap, target)
 	return waves.back().soldiers if not waves.is_empty() and int(waves.back().index) == index else []
 
 
-func _send_wave(index: int, origin := Vector3.INF, extra_pairs := 0, cap := -1) -> void:
+func _send_wave(index: int, origin := Vector3.INF, extra_pairs := 0, cap := -1, target := Vector3.INF) -> void:
 	var level := MapNodes.level_of(self)
 	if level == null or not level.has_method(&"spawn_soldier"):
 		return
@@ -188,7 +191,7 @@ func _send_wave(index: int, origin := Vector3.INF, extra_pairs := 0, cap := -1) 
 		size = mini(size, cap)  # the caller's budget (EnemyResponse.SPAWN_BUDGET)
 	size -= size % 2  # whole buddy pairs
 	var edge := origin if origin.is_finite() else edge_point(level)
-	var record := {"index": index, "at_s": elapsed, "sent_at": _now(), "size": size, "edge": edge, "squad": null, "soldiers": []}
+	var record := {"index": index, "at_s": elapsed, "sent_at": _now(), "size": size, "edge": edge, "squad": null, "soldiers": [], "target": target}
 	waves.append(record)
 	if size <= 0:
 		wave_spawned.emit(index, [])
@@ -216,7 +219,7 @@ func _send_wave(index: int, origin := Vector3.INF, extra_pairs := 0, cap := -1) 
 		soldiers[i].buddy = soldiers[i + 1]
 		soldiers[i + 1].buddy = soldiers[i]
 	record.soldiers = soldiers
-	_route(squad, level, edge)
+	_route(squad, level, edge, target)
 	print("[reinforcements] wave %d: %d hostiles from (%.0f, %.0f) at %.0f s" % [index + 1, soldiers.size(), edge.x, edge.z, elapsed])
 	wave_spawned.emit(index, soldiers)
 
@@ -266,9 +269,11 @@ static func _perimeter_point(rect: Rect2, t: float) -> Vector2:
 
 ## A wave's patrol leads from where it came in to its aim (the players, or in a hot zone the
 ## last known position) and round it.
-func _route(squad: Squad, level: Node, from: Vector3) -> void:
+func _route(squad: Squad, level: Node, from: Vector3, target := Vector3.INF) -> void:
 	var centre := _players_centre(level)
-	if aim.is_valid():
+	if target.is_finite():
+		centre = target  # an objective's wave: it goes for the objective
+	elif aim.is_valid():
 		centre = aim.call()
 		if not centre.is_finite():
 			return  # nothing to go on: they keep the route they have
@@ -289,6 +294,9 @@ func _retarget_waves() -> void:
 	var t := _now()
 	for wave: Dictionary in waves:
 		var squad := wave.squad as Squad
+		var target: Vector3 = wave.get("target", Vector3.INF)
+		if target.is_finite():
+			continue  # an objective's wave keeps going for it
 		if t - float(wave.get("sent_at", t)) > hunt_s:
 			continue  # done hunting: holds round the last spot it was sent to
 		var living: Array = wave.soldiers.filter(func(s: Variant) -> bool:
