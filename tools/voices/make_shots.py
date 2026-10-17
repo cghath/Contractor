@@ -1,6 +1,10 @@
 """Cuts the CC0 Free Firearm Sound Library recordings into the game's shot sounds.
 
 usage: python -I make_shots.py <library dir> <out dir>
+The library (opengameart.org/content/the-free-firearm-sound-library, "Prepared SFX Library.7z")
+is kept downloaded and extracted outside the repo so sessions don't need to re-fetch it:
+B:/Contractor-sound-library/extracted/Prepared SFX Library (2026-10-16). Its own Prepared Master
+Sheet.csv names each file's weapon and near/mid distance, if a new slot's take needs checking.
 Each slot: the near take -> shot_<family>.wav, the mid-distance take -> shot_<family>_far.wav.
 Mono, 16-bit, from just before the shot, trimmed and faded, peak-normalised. "heavy" slots are
 pitched down and driven harder (the M2 and DShK from the rifle recordings, per the Captain).
@@ -30,13 +34,12 @@ SLOTS = {
     "m2": ("1917", "B_24P.wav", "B_16P.wav", True),
     "dshk": ("Mosin Nagant", "M_21P.wav", "M_26P.wav", True),
     # Bolt-action snipers (2026-10-16): the Mosin-Nagant 91/30 reuses its own folder's near/far
-    # take (the same one svd/pkm already use is fine for a placeholder; swap in a different take
-    # from this folder once there's a reason to want it distinct from those two). The Springfield
-    # Heatseeker is a modern 6.5 Creedmoor chassis rifle, not the WWII 1917 Enfield the folder
-    # name suggests, but its heavy bolt-gun crack is the closest match the library has; replace
-    # with a real Tikka take (the Captain says the library has one) when its filenames are known.
+    # take (the library has only the one pair for this folder — the same one svd/pkm already
+    # use). The Springfield Heatseeker is a modern precision bolt gun, not the WWII rifles the
+    # other folders are; the library's Tikka Model T3 (also a modern bolt-action hunting/
+    # precision rifle) is the real thematic match, confirmed against the master sheet.
     "mosin": ("Mosin Nagant", "M_21P.wav", "M_26P.wav", False),
-    "springfield_hs": ("1917", "B_24P.wav", "B_16P.wav", False),
+    "springfield_hs": ("Tikka", "W_29P.wav", "W_24P.wav", False),
 }
 NEAR_S, FAR_S = 1.6, 3.0
 PRE_S = 0.008
