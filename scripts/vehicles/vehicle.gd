@@ -246,6 +246,8 @@ var spec: Dictionary = {}
 var kind := WHEELED
 var hull: VehicleHull
 var cargo_hold: VehicleCargo
+## A walk-in troop bay (VehicleBay: doors, ramp, walkable cabin, FFV seats), or null.
+var bay: VehicleBay
 ## Host: the AI driver, made by server_drive_to / server_follow_path.
 var ai: VehicleAI
 
@@ -325,6 +327,10 @@ func setup(p_model: String, p_scheme := "", p_faction := &"player", id := "") ->
 		col.shape = Vehicle.hull_shape(aabb)
 		col.position = aabb.get_center()
 		add_child(col)
+	if spec.has("bay"):
+		bay = VehicleBay.new(self)
+		bay.build()
+		add_child(bay)
 	hull = VehicleHull.new(model, scheme)
 	turret = VehicleTurret.of(spec)
 	hull.turret = turret
@@ -387,6 +393,8 @@ func _ready() -> void:
 		## AI gunner. Every armed vehicle has one; it does nothing while no AI mans a gun.
 		if not gun_seats().is_empty():
 			AavGunner.attach(self)
+		if bay:
+			FfvGunner.attach(self)  # AI in its fire-from-vehicle seats fight out of the open bay
 		if wrecked:
 			freeze_mode = RigidBody3D.FREEZE_MODE_STATIC
 			freeze = true
@@ -467,7 +475,7 @@ func seats() -> Array:
 	var out: Array = []
 	var defs: Array = spec.get("seats", [])
 	for i in defs.size():
-		out.append({"name": String(defs[i].name), "kind": StringName(defs[i].kind), "occupant": occupant(i), "open": bool(defs[i].get("open", false))})
+		out.append({"name": String(defs[i].name), "kind": StringName(defs[i].kind), "occupant": occupant(i), "open": seat_open(i)})
 	return out
 
 
@@ -814,8 +822,12 @@ func server_switch(soldier: Node, index: int) -> bool:
 
 
 ## Where seat `index`'s occupant gets out: a spot by their door with room to stand, on the
-## ground (the first clear one round the vehicle if that's blocked).
+## ground (the first clear one round the vehicle if that's blocked). With a walk-in bay open
+## and landed, a bay seat's occupant stands up in the aisle beside it instead (VehicleBay).
 func exit_spot(index: int, s: Soldier = null) -> Vector3:
+	var aisle: Variant = _bay_aisle(index, s)
+	if aisle != null:
+		return aisle
 	var size := VehicleArt.size_m(model)
 	var defs: Array = spec.get("seats", [])
 	var seat_at := VehicleSpecs.vec(defs[index].at) if index >= 0 and index < defs.size() else Vector3.ZERO
@@ -855,6 +867,99 @@ func exit_spot(index: int, s: Soldier = null) -> Vector3:
 			return ground + Vector3.UP * 0.05
 	var fallback := global_transform * candidates[0]
 	return Vector3(fallback.x, global_position.y + 0.05, fallback.z)
+
+
+## The aisle spot by bay seat `index` (world), or null: no bay, shut, flying, not a bay seat, or
+## an AI (they walk the navmesh, which doesn't run inside a vehicle: out by the door for them).
+func _bay_aisle(index: int, s: Soldier) -> Variant:
+	if bay == null or not bay.open or not bay.has_cabin() or s == null or s.is_ai():
+		return null
+	var heli := self as Node as Helicopter
+	if heli and (heli.is_airborne() or heli.height_agl() > VehicleBay.LIFT_M):
+		return null
+	var defs: Array = spec.get("seats", [])
+	if index < 0 or index >= defs.size() or seat_kind(index) == PILOT:
+		return null
+	var at := VehicleSpecs.vec(defs[index].at)
+	var spot: Variant = bay.aisle_by(at)
+	if spot == null:
+		return null
+	return global_transform * (spot as Vector3)
+
+
+## Host: `s`, standing, put out by the nearest door (VehicleBay: nobody stays on their feet in
+## a bay that lifts off with no seat free).
+func server_put_out(s: Soldier) -> void:
+	var spot := exit_spot(-1, s)
+	if s.is_ai() or s.owner_peer() == multiplayer.get_unique_id():
+		_put_out(s, spot)
+	else:
+		_client_exit.rpc_id(s.owner_peer(), level().get_path_to(s), spot)
+
+
+## Whether seat `index`'s occupant is out in the open (seen and hit from outside): an "open"
+## seat, or a fire-from-vehicle seat with the bay open.
+func seat_open(index: int) -> bool:
+	var defs: Array = spec.get("seats", [])
+	if index < 0 or index >= defs.size():
+		return false
+	return bool((defs[index] as Dictionary).get("open", false)) or (bay != null and bay.ffv_active(index))
+
+
+## Whether `s` may fire their own weapon from their seat along `direction` (world): a fire-
+## from-vehicle seat, the bay open, the line out of its door, and clear of this aircraft.
+## Captain, 2026-10-16: "make sure safety checks ensure they dont shoot our helo". Ballistics
+## leaves the vehicle you ride out of a round's path, so this is the check: a ray from the eye
+## along the shot, FFV_CLEAR_M out, against this vehicle's own collision (the bay walls round
+## the door, wings, nacelles, rotor and sponson boxes) must meet none of it.
+const FFV_CLEAR_M := 16.0
+func ffv_ok(s: Soldier, direction: Vector3, origin: Variant = null) -> bool:
+	if bay == null or s == null or not bay.ffv_arc_ok(seat_of(s), direction):
+		return false
+	var from: Vector3 = origin if origin != null else s.camera.global_position
+	return ffv_clear(from, direction)
+
+
+## Whether a line from `from` along `direction` stays off this vehicle's own collision for
+## FFV_CLEAR_M: its boxes and the bay's shell (the walls either side of the door: the eye sits
+## in the hollow cabin, so they count).
+func ffv_clear(from: Vector3, direction: Vector3) -> bool:
+	if not is_inside_tree() or direction.length_squared() < 0.000001:
+		return false
+	var space := get_world_3d().direct_space_state
+	var to := from + direction.normalized() * FFV_CLEAR_M
+	var exclude: Array[RID] = []
+	for _i in 4:  # other vehicles first in line don't hide our own hull behind them
+		var q := PhysicsRayQueryParameters3D.create(from, to, LAYER, exclude)
+		var hit := space.intersect_ray(q)
+		if hit.is_empty():
+			return true
+		if hit.collider == self:
+			return false
+		exclude.append((hit.collider as CollisionObject3D).get_rid())
+	return true
+
+
+## Whether `s` sits in a fire-from-vehicle seat that's live now (their weapon up, in hand).
+func ffv_seat(s: Soldier) -> bool:
+	return bay != null and bay.ffv_active(seat_of(s))
+
+
+## Host: opens or shuts the bay (doors and ramp).
+func server_set_bay(value: bool) -> void:
+	if bay == null or wrecked or bay.open == value:
+		return
+	bay.set_open(value)
+	Sfx.server_play(&"reload", global_position + Vector3.UP)  # a panel's clunk (no own sound yet)
+	_publish_state(true)
+
+
+## Anyone aboard, in the bay or by a door: open or shut the bay.
+@rpc("any_peer", "call_local", "reliable")
+func request_bay(value: bool) -> void:
+	var actor := _sender()
+	if multiplayer.is_server() and actor and actor.vitals.is_up() and (seat_of(actor) >= 0 or in_reach(actor)):
+		server_set_bay(value)
 
 
 ## Every peer: the body this peer drives (the local player, the host's AI) goes to `spot`.
@@ -1036,6 +1141,8 @@ func _server_step(delta: float) -> void:
 	if burning_s > 0.0:
 		_fire_step(delta)
 	_job_step()
+	if bay:
+		bay.server_step(delta)
 	if turret and not wrecked:
 		turret.step(delta)
 	_pose_left -= delta
@@ -1424,6 +1531,8 @@ func _apply_state() -> void:
 	for i in _seat_nodes.size():
 		var path := String(seats_in[i]) if i < seats_in.size() else ""
 		_seat_nodes[i] = lvl.get_node_or_null(NodePath(path)) if lvl and path != "" else null
+	if bay:
+		bay.set_open(bool(net_state.get("bay", false)))
 	var was := wrecked
 	wrecked = bool(net_state.get("wrecked", false))
 	if hull and wrecked != was:
@@ -1459,7 +1568,7 @@ func _publish_state(now := false) -> void:
 	for z: StringName in _zones:
 		zones_out[String(z)] = snappedf(float(_zones[z]), 0.001)
 	net_state = {"seats": seats_out, "zones": zones_out, "fuel": snappedf(fuel, 0.1), "burning": snappedf(burning_s, 0.1),
-		"wrecked": wrecked, "battery": battery_ok, "salvaged": salvaged, "lost": _lost,
+		"wrecked": wrecked, "battery": battery_ok, "salvaged": salvaged, "lost": _lost, "bay": bay != null and bay.open,
 		"speed": snappedf(linear_velocity.dot(-global_basis.z), 0.1) if is_inside_tree() else 0.0}
 
 
@@ -1751,6 +1860,8 @@ func _sender() -> Soldier:
 func in_reach(actor: Node3D) -> bool:
 	if actor == null:
 		return false
+	if bay and bay.inside(actor):
+		return true  # standing in the bay: every seat is in reach
 	for p in get_children():
 		if p is VehicleActionPoint and (p as VehicleActionPoint).kind != VehicleActionPoint.SEAT \
 				and actor.global_position.distance_to((p as Node3D).global_position) <= USE_REACH_M:

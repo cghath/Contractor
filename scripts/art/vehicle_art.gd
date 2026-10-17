@@ -728,7 +728,9 @@ static func _vtol_petrel() -> Canvas:
 		c.mskin(minf(ox, ix), 1.7, o - 3.9, maxf(ox, ix), 2.2, o - 2.8, P.GLASS, P.PAINT)  # gunner window
 		c.mskin(minf(ox, ix), 0.6, o - 2.4, maxf(ox, ix), 2.5, o + 0.6, P.PAINT_DARK, P.PAINT)  # door frame
 		c.mskin(minf(ox, ix), 0.7, o - 2.3, maxf(ox, ix), 2.4, o + 0.5, P.PAINT, P.PAINT_DARK)
-		c.mskin(minf(ox, ix), 1.6, o - 2.1, maxf(ox, ix), 2.2, o - 1.3, P.GLASS, P.PAINT)  # door window
+		c.mbox(minf(side * 0.9, side * 1.55), 0.65, o - 2.3, maxf(side * 0.9, side * 1.55), 2.55, o + 0.5, P.EMPTY)  # the doorway (its panel: VehicleBay)
+		# The boarding ramp's slot under the sill (the ramp: VehicleBay, out and down on landing).
+		c.mskin(minf(side * 1.1, side * 1.5), 0.5, o - 2.3, maxf(side * 1.1, side * 1.5), 0.58, o + 0.5, P.BLACK, P.PAINT)
 		for wz: float in [o + 1.1, o + 2.6]:
 			c.mskin(minf(ox, ix), 1.6, wz, maxf(ox, ix), 2.1, wz + 0.9, P.GLASS, P.PAINT)
 		c.mskin(minf(ox, ix), 1.3, o - 4.6, maxf(ox, ix), 1.36, o + 4.4, P.PAINT_DARK, P.PAINT)  # chine line
@@ -866,10 +868,14 @@ static func _vtol_razorback() -> Canvas:
 	for side: float in [-1.0, 1.0]:
 		var x0 := side * 2.0
 		var x1 := side * 3.0
-		c.mbox(minf(x0, x1), 1.0, o - 2.5, maxf(x0, x1), 1.9, o + 4.5, P.PAINT)
-		c.mbox(minf(x0, x1), 1.9, o - 2.0, maxf(x0, x1), 2.1, o + 4.0, P.PAINT_DARK)
-		c.mbox(minf(side * 2.2, side * 2.9), 1.15, o - 3.4, maxf(side * 2.2, side * 2.9), 1.75, o - 2.5, P.PAINT_DARK)
-		c.mbox(minf(side * 2.3, side * 2.8), 1.25, o - 3.45, maxf(side * 2.3, side * 2.8), 1.65, o - 3.4, P.BLACK)
+		# (aft of the cabin door: the boarding stair comes down in front of them, VehicleBay)
+		c.mbox(minf(x0, x1), 1.0, o - 1.2, maxf(x0, x1), 1.9, o + 4.5, P.PAINT)
+		c.mbox(minf(x0, x1), 1.9, o - 1.0, maxf(x0, x1), 2.1, o + 4.0, P.PAINT_DARK)
+		c.mbox(minf(side * 2.2, side * 2.9), 1.15, o + 4.5, maxf(side * 2.2, side * 2.9), 1.75, o + 5.4, P.PAINT_DARK)
+		c.mbox(minf(side * 2.3, side * 2.8), 1.25, o + 5.4, maxf(side * 2.3, side * 2.8), 1.65, o + 5.45, P.BLACK)
+		# The boarding ramp's slot under the door sill (the ramp itself: VehicleBay, it slides out
+		# of here and angles down to the ground on landing).
+		c.mskin(minf(side * 2.0, side * 2.3), 0.8, o - 4.0, maxf(side * 2.0, side * 2.3), 0.95, o - 1.6, P.BLACK, P.PAINT)
 		# Main gear: strut down from the sponson to a twin-wheel bogie.
 		c.mbar(Vector3(side * 2.5, 1.0, o + 1.5), Vector3(side * 2.5, 0.45, o + 1.5), 0.16, P.METAL)
 		c.mwheel(minf(side * 2.15, side * 2.35), maxf(side * 2.15, side * 2.35), 0.45, o + 1.5, 0.45)
@@ -881,8 +887,8 @@ static func _vtol_razorback() -> Canvas:
 	for side: float in [-1.0, 1.0]:
 		var a := side * 1.9
 		var b := side * 2.3
-		c.mskin(minf(a, b), 2.0, o - 4.2, maxf(a, b), 3.7, o - 1.4, P.PAINT_DARK, P.PAINT)
-		c.mbox(minf(a, b), 2.1, o - 4.1, maxf(a, b), 3.6, o - 1.5, P.EMPTY)  # slid open, the bay showing
+		c.mskin(minf(a, b), 0.95, o - 4.2, maxf(a, b), 3.7, o - 1.4, P.PAINT_DARK, P.PAINT)
+		c.mbox(minf(a, b), 1.05, o - 4.1, maxf(a, b), 3.6, o - 1.5, P.EMPTY)  # the doorway down to the floor (its panel: VehicleBay)
 		c.mbox(minf(side * 1.9, side * 2.38), 3.6, o - 4.3, maxf(side * 1.9, side * 2.38), 3.75, o - 1.3, P.METAL)  # door rail
 		c.mskin(minf(a, b), 2.3, o - 1.2, maxf(a, b), 3.1, o - 0.3, P.MARKING, P.PAINT)
 		for wz: float in [o + 0.5, o + 2.2, o + 3.9]:  # cabin windows
@@ -927,9 +933,14 @@ static func _vtol_razorback() -> Canvas:
 	c.mbox(-2.6, 3.3, o + 8.8, 2.6, 3.5, o + 10.2, P.PAINT)
 	for side: float in [-1.0, 1.0]:
 		c.mbox(minf(side * 2.45, side * 2.65), 2.9, o + 8.8, maxf(side * 2.45, side * 2.65), 3.9, o + 10.2, P.PAINT_DARK)
-	# Tail bumper and a rear ramp seam.
+	# Tail bumper, and the rear ramp's opening under the upswept tail (the ramp panel itself
+	# swings on VehicleBay, from the cabin floor's aft edge down to the ground).
 	c.mbox(-0.4, 2.4, o + 9.5, 0.4, 2.7, o + 10.6, P.METAL)
-	c.mskin(-1.4, 1.9, o + 7.6, 1.4, 2.2, o + 7.7, P.PAINT_DARK, P.PAINT)
+	var rz := o + 5.0
+	while rz < o + 8.15:  # just the belly skin along its upsweep, the tail's sides left whole
+		var belly := lerpf(0.95, 2.7, clampf((rz - o - 5.0) / 5.5, 0.0, 1.0))
+		c.mbox(-1.2, 0.85, rz, 1.2, belly + 0.3, rz + 0.08, P.EMPTY)
+		rz += 0.08
 	# --- Detail pass (Captain's reference set) ---
 	# Nose: diagonal mullions breaking the panes into faceted hex-ish shapes.
 	for d in 6:
@@ -962,8 +973,6 @@ static func _vtol_razorback() -> Canvas:
 			c.mbox(minf(a, b), 2.2, pz, maxf(a, b), 2.85, pz + 1.5, P.PAINT)
 			c.mskin(minf(a, b), 2.2, pz, maxf(a, b), 2.85, pz + 0.05, P.PAINT_DARK, P.PAINT)
 		c.mbox(minf(side * 2.18, side * 2.28), 2.95, o - 6.9, maxf(side * 2.18, side * 2.28), 3.15, o - 6.7, P.METAL)
-		for ry: float in [1.25, 1.65]:
-			c.mbox(minf(side * 2.2, side * 2.45), ry, o - 3.6, maxf(side * 2.2, side * 2.45), ry + 0.06, o - 2.6, P.METAL)
 	# Nacelles: spinner in each intake, side vanes, raised top spine, exhaust nozzle; fins on
 	# the aft pair, unit numbers on the fore pair.
 	for ni in nacelles.size():

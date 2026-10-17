@@ -848,8 +848,10 @@ static func muzzle_point(eye: Vector3, dir: Vector3, sidearm: bool, lefty: bool,
 
 @rpc("any_peer", "call_local", "reliable")
 func _server_fire(origin: Vector3, direction: Vector3, slot: StringName) -> void:
-	if not _from_owner() or not vitals.is_up() or inventory.hands != &"" or is_instance_valid(vehicle):  # riding: the seat's gun instead (Vehicle)
+	if not _from_owner() or not vitals.is_up() or inventory.hands != &"":
 		return
+	if is_instance_valid(vehicle) and not vehicle.ffv_ok(self, direction, origin):
+		return  # riding: the seat's gun instead (Vehicle), unless it's a fire-from-vehicle seat out of an open bay (VehicleBay)
 	if not usable_point(origin) or not usable_direction(direction) or respawn_state == RESPAWN_WAITING:
 		return
 	var id: StringName = inventory.slots.get(slot, &"")

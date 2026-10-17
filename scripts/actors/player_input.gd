@@ -374,7 +374,7 @@ func _physics_process(delta: float) -> void:
 	# Both hands on the casualty: no weapon in view; through a scope: only the glass (P0362); nor
 	# seated in a vehicle (no firing your own from a seat, and in first person it hid the cabin and
 	# poked through the dash); nor dead, waiting to respawn.
-	body.view_model.visible = body.carry_mode == &"" and not GunSight.scoped(body) and not is_instance_valid(body.vehicle) and not waiting
+	body.view_model.visible = body.carry_mode == &"" and not GunSight.scoped(body) and not waiting 		and (not is_instance_valid(body.vehicle) or body.vehicle.ffv_seat(body))  # a fire-from-vehicle seat: your own weapon up (VehicleBay)
 	_settle_recoil(delta)
 	_update_sway(delta)
 	_hide_shouldered()
@@ -532,8 +532,15 @@ func _update_voice() -> void:
 
 func _try_fire() -> void:
 	if not _captured() or placing or nade_up or body.inventory.hands != &"" or not body.vitals.is_up() or interaction.is_open() \
-			or body.carry_mode != &"" or is_instance_valid(body.vehicle):  # both hands on the casualty; or riding (the seat's gun fires: Vehicle)
+			or body.carry_mode != &"":  # both hands on the casualty
 		return
+	if is_instance_valid(body.vehicle):
+		if not body.vehicle.ffv_seat(body):
+			return  # riding: the seat's gun fires (Vehicle)
+		if not body.vehicle.ffv_ok(body, -body.camera.global_basis.z):
+			if Input.is_action_just_pressed(&"fire"):
+				hud.flash("No line out of the door")
+			return
 	var weapon := body.active_weapon()
 	if Launchers.is_launcher(weapon):
 		LauncherSight.of(body).try_fire()  # its own fire path (wave 5)

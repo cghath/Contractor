@@ -55,6 +55,8 @@ func interaction_actions(actor: Soldier) -> Array[Dictionary]:
 		return out
 	var inside := vehicle.seat_of(actor)
 	if kind == SEAT:
+		if inside < 0 and vehicle.bay and vehicle.bay.inside(actor):
+			return _walk_up_actions()  # standing in the bay (VehicleBay): sit down here
 		if inside != seat_index:
 			return out
 		return _seat_actions(actor)
@@ -142,6 +144,8 @@ func _door_actions(actor: Soldier) -> Array[Dictionary]:
 		elif seat_list.all(func(i: int) -> bool: return v.seat_kind(i) == Vehicle.PILOT):
 			why = "Aircraft are flown by AI pilots"
 		out.append(_entry(&"enter", "Get in", Callable(), why))
+	if v.bay:
+		out.append(_bay_entry())
 	for i: int in seat_list:
 		var s := v.occupant(i)
 		if s and not s.vitals.is_up():
@@ -239,6 +243,8 @@ func _seat_actions(_actor: Soldier) -> Array[Dictionary]:
 	var v := vehicle
 	if not ControlOptions.get_out_key():
 		out.append(_entry(&"exit", "Get out", func() -> void: v.request_exit.rpc_id(1)))
+	if v.bay:
+		out.append(_bay_entry())
 	var moves: Array[Dictionary] = []
 	for i in v.seat_count():
 		if i == seat_index or v.occupant(i) != null or v.seat_kind(i) == Vehicle.PILOT:
@@ -247,6 +253,26 @@ func _seat_actions(_actor: Soldier) -> Array[Dictionary]:
 		moves.append(_entry(&"switch", v.seat_name(i), func() -> void: v.request_switch.rpc_id(1, index)))
 	out.append({"id": &"move_seat", "label": "Move to", "disabled": "" if not moves.is_empty() else "No free seat", "items": moves, "target": self})
 	out.append(_check())
+	return out
+
+
+## Open or shut a walk-in bay's doors and ramp (VehicleBay), from a seat, a door or inside.
+func _bay_entry() -> Dictionary:
+	var v := vehicle
+	var to_open: bool = not v.bay.open
+	return _entry(&"bay", "Open bay doors" if to_open else "Close bay doors", func() -> void: v.request_bay.rpc_id(1, to_open))
+
+
+## Standing in a walk-in bay by this seat: sit in it (a pilot's is the AI's), or work the doors.
+func _walk_up_actions() -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	var v := vehicle
+	var index := seat_index
+	if v.seat_kind(index) != Vehicle.PILOT:
+		var why := "" if v.occupant(index) == null else "Taken"
+		var label := "Sit here" if v.bay.ffv_side(index) == 0.0 else "Sit here (fires out of the door)"
+		out.append(_entry(&"sit", label, func() -> void: v.request_enter.rpc_id(1, index), why))
+	out.append(_bay_entry())
 	return out
 
 

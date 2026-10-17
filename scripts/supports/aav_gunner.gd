@@ -124,7 +124,7 @@ func _pick(gunner: Soldier, seat: int) -> Soldier:
 		if s.faction == gunner.faction or Person.is_noncombatant(s) or s.faction == Person.FACTION:
 			continue
 		var ride := Vehicle.ride_of(s)
-		if ride and not bool(ride.seats()[ride.seat_of(s)].get("open", false)):
+		if ride and not ride.seat_open(ride.seat_of(s)):
 			continue  # shut inside a vehicle: the gun can't see them
 		var d := muzzle.distance_to(s.global_position)
 		if door and not vehicle.door_arc_ok(seat, s.aim_point() - muzzle):

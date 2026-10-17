@@ -317,7 +317,7 @@ static func vehicle_occupants(tree: SceneTree) -> Dictionary:
 		var defs: Array = v.spec.get("seats", [])
 		for o in v.occupants():
 			var seat := v.seat_of(o)
-			if seat < 0 or seat >= defs.size() or not bool((defs[seat] as Dictionary).get("open", false)):
+			if seat < 0 or seat >= defs.size() or not v.seat_open(seat):  # an FFV seat out of an open bay is out in it (VehicleBay)
 				out[o] = true
 	return out
 
