@@ -369,7 +369,7 @@ func _physics_process(delta: float) -> void:
 		_update_focus()
 		_update_aim(delta)
 		_try_fire()
-	var tilt := minf(minf(-0.7 if body.is_reloading else 0.0, -CharacterModel.VIEW_LOWER_PITCH * body.model.view_lower()), SPRINT_TILT.x * _sprint_w)
+	var tilt := minf(minf(-0.7 if body.is_reloading or body.movement.mantling else 0.0, -CharacterModel.VIEW_LOWER_PITCH * body.model.view_lower()), SPRINT_TILT.x * _sprint_w)  # mantling: weapon down
 	body.view_model.rotation.x = move_toward(body.view_model.rotation.x, tilt, delta * 6.0)
 	# Both hands on the casualty: no weapon in view; through a scope: only the glass (P0362); nor
 	# seated in a vehicle (no firing your own from a seat, and in first person it hid the cabin and
@@ -533,7 +533,7 @@ func _update_voice() -> void:
 
 func _try_fire() -> void:
 	if not _captured() or placing or nade_up or body.inventory.hands != &"" or not body.vitals.is_up() or interaction.is_open() \
-			or body.carry_mode != &"":  # both hands on the casualty
+			or body.carry_mode != &"" or body.movement.mantling:  # both hands on the casualty, or on the ledge
 		return
 	if is_instance_valid(body.vehicle):
 		if not body.vehicle.ffv_seat(body):

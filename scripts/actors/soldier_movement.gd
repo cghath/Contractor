@@ -129,6 +129,25 @@ const MOUNT_REST_AHEAD := 0.45
 const MOUNT_REST_DROP := 0.3
 const MOUNT_MAX_SPEED := 0.4
 
+## Mantle (Captain, 2026-10-16: "now is a good time to put mantle in the game"): the jump key,
+## facing a ledge, climbs up and over it instead of jumping. A ledge is a wall ahead within
+## MANTLE_REACH_M whose top (a walkable surface: the world or a vehicle's hull, never a soldier)
+## is MANTLE_MIN_M..the load's limit above the feet, with room for the body on top. Under
+## MANTLE_MIN_M the step-ups and a jump do it. Heavier loads reach lower (MANTLE_MAX_M light or
+## burdened, MANTLE_MAX_OVERLOADED_M overloaded, none critical, as jumping), and it costs leg
+## stamina by height (a jump's cost x MANTLE_STAMINA_PER_M x the height). Up straight, then
+## onto the top, crouched (it stands up after if there's room); the weapon lowers and nothing
+## fires on the way. Proposed numbers.
+const MANTLE_MIN_M := 0.45
+const MANTLE_MAX_M := 1.9
+const MANTLE_MAX_OVERLOADED_M := 1.2
+const MANTLE_REACH_M := 0.75
+const MANTLE_ONTO_M := 0.45
+const MANTLE_BASE_S := 0.35
+const MANTLE_PER_M_S := 0.4
+const MANTLE_STAMINA_PER_M := 1.2
+const MANTLE_MASK := WORLD_MASK | Vehicle.LAYER
+
 @onready var body: Soldier = get_parent()
 
 ## Replicated (owner-driven). One of Stance.
@@ -167,6 +186,9 @@ var _lean_latched := 0    # double-tapped: stays leaned
 var _lean_last_tap := {-1: -10.0, 1: -10.0}
 ## Owner-side: held this step because nothing is under the body (no_ground_below).
 var holding := false
+## Owner-side: climbing a ledge now (mantle): the step moves the body along the climb.
+var mantling := false
+var _mantle := {}  # "from", "up", "to", "t", "s", "stance"
 var _collision: CollisionShape3D
 var _capsule: CapsuleShape3D
 var _shape_key := -99
@@ -199,6 +221,10 @@ func step(delta: float) -> void:
 		body.velocity += body.get_gravity() * delta
 	holding = false
 	var down := not body.vitals.is_up()
+	if mantling:
+		_mantle_step(delta, down)
+		update_pose(delta)
+		return
 	if not down and not body.vitals.can_stand() and stance != Stance.PRONE:
 		set_stance(Stance.PRONE)  # a broken pelvis: no standing, crawl (or be carried)
 	var jumped := false
@@ -229,9 +255,13 @@ func step(delta: float) -> void:
 			input = Vector2(-input.x, minf(-input.y, 0.0))
 		sprint = Input.is_action_pressed(&"sprint")
 		hold = Input.is_action_pressed(&"hold_breath")
-		if Input.is_action_just_pressed(&"jump") and can_jump():
-			jump()
-			jumped = true
+		if Input.is_action_just_pressed(&"jump"):
+			if try_mantle():
+				update_pose(delta)
+				return
+			if can_jump():
+				jump()
+				jumped = true
 	else:
 		_lean_held = 0  # keys released while the mouse was free
 	# Sprint: forward only (MovementRules.SPRINT_ARC_DEG), never aimed (the sprint key aimed is
@@ -435,6 +465,134 @@ func jump() -> void:
 	mounted = false
 	stamina -= jump_cost()
 	_settle_winded()
+
+
+# --- Mantle ------------------------------------------------------------------------------
+
+## The highest ledge this body can climb now (m above the feet): by load, 0 when it can't.
+func mantle_reach() -> float:
+	var tier := body.load_tier()
+	if not MovementRules.can_jump_at(tier):
+		return 0.0
+	return MANTLE_MAX_OVERLOADED_M if tier >= MovementRules.Tier.OVERLOADED else MANTLE_MAX_M
+
+
+## Whether it can start a mantle now: on its feet (standing or crouched), on the ground, up,
+## hands free, not winded, not riding.
+func can_mantle() -> bool:
+	return body.vitals.is_up() and body.is_on_floor() and stance != Stance.PRONE and not is_instance_valid(body.vehicle) \
+		and body.inventory.hands == &"" and body.carry_speed_mult() >= 1.0 and not _winded and mantle_reach() > 0.0
+
+
+## The ledge ahead to climb: {"top": the point on top to end on (world), "h": its height over
+## the feet, "stance": the stance it ends in (STAND_HIGH, or CROUCH_HIGH under a low roof)}, or {}.
+func find_ledge() -> Dictionary:
+	if not body.is_inside_tree():
+		return {}
+	var space := body.get_world_3d().direct_space_state
+	var feet := body.global_position
+	var fwd := -body.global_basis.z
+	fwd.y = 0.0
+	if fwd.length_squared() < 0.0001:
+		return {}
+	fwd = fwd.normalized()
+	var reach := mantle_reach()
+	var exclude: Array[RID] = [body.get_rid()]
+	# A wall ahead: something not walkable within reach, low down (so the top is a ledge).
+	var wall_d := INF
+	for h: float in [MANTLE_MIN_M - 0.15, 0.7, 1.0, 1.4]:
+		if h > reach:
+			break
+		var from := feet + Vector3.UP * h
+		var hit := space.intersect_ray(PhysicsRayQueryParameters3D.create(from, from + fwd * (CAPSULE_RADIUS + MANTLE_REACH_M), MANTLE_MASK, exclude))
+		if not hit.is_empty() and (hit.normal as Vector3).y < 0.7:
+			wall_d = minf(wall_d, from.distance_to(hit.position))
+	if is_inf(wall_d):
+		return {}
+	# Its top, just past the face, looking down from over the highest reach.
+	var over := feet + fwd * (wall_d + 0.2) + Vector3.UP * (reach + 0.4)
+	var top_hit := space.intersect_ray(PhysicsRayQueryParameters3D.create(over, over + Vector3.DOWN * (reach + 0.4 - MANTLE_MIN_M + 0.05), MANTLE_MASK, exclude))
+	if top_hit.is_empty() or (top_hit.normal as Vector3).y < 0.7:
+		return {}
+	var top: Vector3 = top_hit.position
+	var height := top.y - feet.y
+	if height < MANTLE_MIN_M or height > reach:
+		return {}
+	# Room to rise straight up beside the face (crouched), then on top to crouch at least.
+	var land := top + fwd * maxf(MANTLE_ONTO_M - 0.2, 0.1)
+	if not _capsule_fits(Vector3(feet.x, top.y + 0.05, feet.z), STANCE_CAPSULE[Stance.CROUCH_HIGH], exclude):
+		return {}
+	if not _capsule_fits(land + Vector3.UP * 0.05, STANCE_CAPSULE[Stance.CROUCH_HIGH], exclude):
+		return {}
+	var ends := Stance.STAND_HIGH if _capsule_fits(land + Vector3.UP * 0.05, STANCE_CAPSULE[Stance.STAND_HIGH], exclude) else Stance.CROUCH_HIGH
+	return {"top": land, "h": height, "stance": ends}
+
+
+## Whether a capsule `height` tall (a hair under the body's radius), its bottom at `at`, meets
+## nothing solid (the world, vehicles, other soldiers).
+func _capsule_fits(at: Vector3, height: float, exclude: Array[RID]) -> bool:
+	var cap := CapsuleShape3D.new()
+	cap.radius = CAPSULE_RADIUS - 0.02
+	cap.height = height
+	var q := PhysicsShapeQueryParameters3D.new()
+	q.shape = cap
+	q.transform = Transform3D(Basis(), at + Vector3.UP * (height * 0.5))
+	q.collision_mask = MANTLE_MASK | Soldier.BODY_LAYER
+	q.exclude = exclude
+	return body.get_world_3d().direct_space_state.intersect_shape(q, 1).is_empty()
+
+
+## The leg stamina a mantle of `height` metres costs at this load.
+func mantle_cost(height: float) -> float:
+	return jump_cost() * MANTLE_STAMINA_PER_M * maxf(height, MANTLE_MIN_M)
+
+
+## Jump key, owner-side: climbs the ledge ahead if there is one it can (find_ledge), paying
+## for it. Returns whether it started.
+func try_mantle() -> bool:
+	if not can_mantle():
+		return false
+	var ledge := find_ledge()
+	if ledge.is_empty():
+		return false
+	var cost := mantle_cost(float(ledge.h))
+	if stamina < cost:
+		return false
+	var feet := body.global_position
+	var top: Vector3 = ledge.top
+	set_stance(Stance.CROUCH_HIGH)
+	mounted = false
+	mantling = true
+	_mantle = {"from": feet, "up": Vector3(feet.x, top.y + 0.05, feet.z), "to": top + Vector3.UP * 0.02, "t": 0.0,
+		"s": MANTLE_BASE_S + MANTLE_PER_M_S * float(ledge.h), "stance": int(ledge.stance)}
+	stamina -= cost
+	_settle_winded()
+	body.report_exertion()
+	body.velocity = Vector3.ZERO
+	return true
+
+
+## One step of a mantle: up beside the face for the first 60%, then onto the top.
+func _mantle_step(delta: float, down: bool) -> void:
+	body.velocity = Vector3.ZERO
+	if down:
+		mantling = false  # knocked down on the way: it drops where it is
+		return
+	var t := minf(float(_mantle.t) + delta / float(_mantle.s), 1.0)
+	_mantle.t = t
+	var from: Vector3 = _mantle.from
+	var up: Vector3 = _mantle.up
+	var to: Vector3 = _mantle.to
+	if t < 0.6:
+		body.global_position = from.lerp(up, smoothstep(0.0, 1.0, t / 0.6))
+	else:
+		body.global_position = up.lerp(to, smoothstep(0.0, 1.0, (t - 0.6) / 0.4))
+	_slid_at = body.global_position
+	_air_top = -INF  # a climb, not a fall
+	_last_y = body.global_position.y
+	if t >= 1.0:
+		mantling = false
+		set_stance(int(_mantle.stance))
 
 
 ## Changes stance if there's room (a taller stance needs headroom). Unmounts the weapon.
