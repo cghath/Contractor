@@ -293,7 +293,9 @@ func _test_combat_modes() -> void:
 	check(_count(func(s: Soldier) -> bool: return s.want_crouch) == 0, "Aware: they stand while halted")
 	_menu(KEY_QUOTELEFT, [KEY_7, KEY_4])  # Stealth
 	_place(player, Vector3(0, 0.1, 55))
-	await _seconds(1.5)
+	# Respect the stance hold introduced to stop repeated ducking between bursts.
+	await _wait_for(func() -> bool: return _squad().all(func(s: Soldier) -> bool: return s.want_crouch and not s.want_sprint),
+		SquadAI.CROUCH_DOWN_HOLD_S + SquadAI.THINK_S + 0.5)
 	check(_count(func(s: Soldier) -> bool: return s.want_crouch) == 7 and _count(func(s: Soldier) -> bool: return s.want_sprint) == 0,
 		"Stealth: everyone stays crouched and nobody sprints, even moving up")
 	_menu(KEY_QUOTELEFT, [KEY_7, KEY_1])  # Safe
@@ -511,7 +513,9 @@ func _test_callout_rules() -> void:
 	check(callouts.contact(spotters[2], other), "a different enemy is still called")
 	_free(other)
 	_free(hostile)
-	check(Callouts.play(&"reloading", first) == null, "no audio file yet: Callouts.play stays silent")
+	check(Callouts.play(&"__test_missing_audio__", first) == null, "an unavailable voice line stays silent")
+	var voiced := Callouts.voiced_path(&"reloading", first)
+	check(voiced != "" and ResourceLoader.exists(voiced), "Reloading resolves to its installed voice recording")
 	var origin := Node3D.new()
 	add_child(origin)
 	check(Callouts.direction_word(origin, Vector3(0, 0, -80)) == "front" and Callouts.direction_word(origin, Vector3(30, 0, 0)) == "right"
@@ -542,9 +546,9 @@ func _test_callout_events() -> void:
 	callouts.sent.clear()
 	var hostile := _spawn_test_hostile("ContactTest", Vector3(0, 0.1, -1))
 	# Spotting takes time (queue 17): the one squadmate with a line to him may be facing away.
-	await _wait_for(func() -> bool: return not _said(&"contact").is_empty(), 8.0)
-	var contact := _said(&"contact")
-	check(not contact.is_empty() and contact[0].text.begins_with("Contact, front, ") and contact[0].text.ends_with(" m"),
+	await _wait_for(func() -> bool: return not _said(&"contact_twelve_close").is_empty(), 8.0)
+	var contact := _said(&"contact_twelve_close")
+	check(not contact.is_empty() and contact[0].text.begins_with("Contact, twelve o'clock, ") and contact[0].text.ends_with(" m"),
 		"contact: %s" % (contact[0].text if not contact.is_empty() else "nothing"))
 	await _wait_for(func() -> bool: return not _said(&"moving").is_empty(), 10.0)
 	var moving := _said(&"moving")
