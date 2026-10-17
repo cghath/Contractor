@@ -31,6 +31,17 @@ cd "$(dirname "$0")/.."
 . tools/run_log.sh
 GODOT="${GODOT:-godot}"
 SUITE_TIMEOUT="${SUITE_TIMEOUT:-480}"
+# Suites that need longer than SUITE_TIMEOUT. supports: its host runs ~160 checks of its own
+# (about 460 s) before it lets the late-joining client in, and the client's resupply then
+# flies in, drops its pallet and leaves (about 2 min more), all inside each process's one
+# timeout, so 480 s killed both mid-flight and it read as a hang (R1500, R1503).
+suite_timeout() {
+	case "$1" in
+		supports) echo $(( SUITE_TIMEOUT > 780 ? SUITE_TIMEOUT : 780 )) ;;
+		*) echo "$SUITE_TIMEOUT" ;;
+	esac
+}
+timeout_s="$SUITE_TIMEOUT"
 SUITES=("$@")
 [ ${#SUITES[@]} -eq 0 ] && SUITES=(smoke gameplay squad spacing net levelswitch wounds armor exo movement mantle interaction roles medical logistics casualty materials animations scavenge contracts people map base world missions vehicles antiarmor session_log supports heliflight bay aav sound loop ui loadout weapons forest townperf markers pallets voice)
 status=0
@@ -77,7 +88,7 @@ note "suites: ${SUITES[*]}  (port ${CONTRACTOR_PORT:-default}, timeout ${SUITE_T
 # (124 or 137: timed out).
 engine() {
 	local log="$1"; shift
-	timeout -k 10 "$SUITE_TIMEOUT" "$GODOT" --headless --path . "$@" >"$log" 2>&1
+	timeout -k 10 "$timeout_s" "$GODOT" --headless --path . "$@" >"$log" 2>&1
 }
 
 # Judges a finished process: `name`, its log, its exit code, and the summary line it must
@@ -89,7 +100,7 @@ judge() {
 	grep -E '\[FAIL\]|TEST (PASSED|FAILED)|SCRIPT ERROR|Parse Error' "$log" | sed "s/^/$prefix/"
 	local why=""
 	if [ "$code" -eq 124 ] || [ "$code" -eq 137 ]; then
-		why="timed out after ${SUITE_TIMEOUT}s (hung?)"
+		why="timed out after ${timeout_s}s (hung?)"
 	elif grep -qE 'SCRIPT ERROR|Parse Error' "$log"; then
 		why="script error (see above)"
 	elif grep -q 'TEST FAILED' "$log"; then
@@ -134,6 +145,7 @@ engine "$logs/import.log" --import
 judge import "$logs/import.log" $? ""
 [ "$status" -ne 0 ] && { finished=1; exit 1; }
 for suite in "${SUITES[@]}"; do
+	timeout_s="$(suite_timeout "$suite")"
 	if [ "$suite" = net ] || [ "$suite" = levelswitch ] || [ "$suite" = world ] || [ "$suite" = vehicles ] || [ "$suite" = supports ] || [ "$suite" = aav ]; then
 		# Two processes over ENet on localhost. net: the client prints the summary, the host
 		# exits when the client leaves. world, vehicles and aav: the host runs its own checks first
