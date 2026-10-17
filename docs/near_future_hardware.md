@@ -193,7 +193,19 @@ genuinely different things wearing them:
   (not a sci-fi monochrome look). Reads as a semi-autonomous heavy-weapons platform, menacing and
   industrial.
 
-### 2.2 Light infantry exo: new slot, existing armor untouched
+### 2.2 Light infantry exo: new slot, its own armour pads
+
+**Superseded in part (Captain, 2026-10-16/17; built on `claude/near-future-vtol-exosuits-cont2`):**
+the "armor stays exactly where it is" bullet below no longer holds. The LX-3 carries twelve Steel
+III++ pads (shoulders/upper arms, forearms, thighs, shins, stomach, collarbones, upper back, spine
+pack) that are real `ArmorRules` armour: `VoxelArmor` pieces on their body parts' bones, with
+their chips and integrity in the frame's item state (`ExoFrame.pad_items`, `GearRig._set_exo_pads`,
+`Inventory.add_armor_hit(slot, chip, changes, pad)`). They're spall-coated, and the frame's
+`spall_cover` keeps spall off arms and neck. A working frame also climbs 1.3 m higher
+(`ExoFrame.climb_assist_m`). It pairs with the LX-3 Visor Helmet (`helmet_lx3`: IIIA shell,
+bolted-on face guard, a visor rated for fragments only). Prices: frame $45,000, helmet $6,500. A
+dedicated LX-3 plate carrier is planned (Captain: "later we'll add a dedicated lx-3 plate carrier").
+The original recommendation follows for the record.
 
 Recommendation: one new `Inventory` slot (e.g. `&"exo_frame"`), separate from `vest`/`helmet`/
 `plate_*`, because the reference art shows it layering with those, not replacing them.

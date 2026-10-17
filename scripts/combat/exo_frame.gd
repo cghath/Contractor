@@ -281,6 +281,26 @@ static func _part(parent: Node3D, mesh: Mesh, at: Vector3, basis: Basis, colour:
 	return m
 
 
+## First person (Captain, 2026-10-17: "make sure exo armor is visible in the first person
+## view"): the frame's forearm pad, strut, piston and wrist cuff on a view-model forearm
+## (PlayerInput._update_view_model), the right or left one, in the wearer's kit colour `cover`.
+## Art only: rounds meet the body's own pads (GearRig).
+static func dress_view_forearm(forearm: Node3D, frame: ItemData, right: bool, cover: Color) -> void:
+	if frame == null:
+		return
+	var side := 1.0 if right else -1.0
+	for pad: Dictionary in pad_items(frame):
+		if pad.part == (Vitals.FOREARM_R if right else Vitals.FOREARM_L):
+			var holder := Node3D.new()
+			holder.name = PART_NAME
+			holder.transform = pad.at
+			holder.add_child(VoxelArmor.make_mesh_instance(pad.item, 1, cover))
+			forearm.add_child(holder)
+	_box(forearm, Vector3(0.018, 0.19, 0.024), Vector3(side * 0.085, -0.11, 0.0), STRUT, 1)
+	_rod(forearm, 0.007, 0.15, Vector3(side * 0.085, -0.1, 0.022), PISTON, 1)
+	_box(forearm, Vector3(0.075, 0.022, 0.075), Vector3(0.0, -0.2, 0.0), JOINT, 1)  # wrist cuff
+
+
 static func _box(parent: Node3D, size: Vector3, at: Vector3, colour: Color, layers: int) -> MeshInstance3D:
 	var m := MeshInstance3D.new()
 	m.name = PART_NAME

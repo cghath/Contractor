@@ -49,6 +49,12 @@ func _ready() -> void:
 		get_tree().quit(0)
 		return
 	player._hud.visible = false
+	# The local player's first-person view model (its own rifle and forearms, on its camera) is
+	# only ever seen through that camera; this script's camera sees every layer, so it showed as a
+	# second rifle floating at the face ("i see a second gun", Captain 2026-10-16). Off for shots.
+	player.player_input.set_process(false)
+	player.player_input.set_physics_process(false)  # (it shows the view model there)
+	player.view_model.visible = false
 
 	var camera := Camera3D.new()
 	camera.fov = 45
@@ -77,6 +83,20 @@ func _ready() -> void:
 	for i in 3:
 		await get_tree().process_frame
 	await _shot(camera, out, "helmet_lx3_holed", head + Vector3(0.35, 0.05, -0.75), head)
+	# First person: through the player's own eyes (its body hidden, as its own camera hides it),
+	# the view model's forearms in the LX-3's forearm armour.
+	player.view_model.visible = true
+	camera.cull_mask = 0xFFFFF & ~PlayerInput.LOCAL_ONLY_LAYER
+	camera.global_transform = player.camera.global_transform
+	camera.fov = 75
+	for i in 6:
+		await get_tree().process_frame
+	await RenderingServer.frame_post_draw
+	get_viewport().get_texture().get_image().save_png(out.path_join("exo_first_person.png"))
+	print("[exo] saved first person")
+	player.view_model.visible = false
+	camera.cull_mask = 0xFFFFF
+	camera.fov = 45
 
 	# Disable the frame (run it to 0 hp) and shoot the same set again: the light goes red.
 	ExoFrame.server_damage(player, 1000.0)

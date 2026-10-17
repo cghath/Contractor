@@ -29,6 +29,34 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 
 
+### LX-3 armour and helmet, the climb order, supports runner budget (Captain, 2026-10-16/17)
+
+#### Added
+- LX-3 armour pads: twelve Steel III++ pads on the frame (shoulders/upper arms, forearms, thighs,
+  shins, stomach, collarbones, upper back, spine pack) that are real per-part armour, not art:
+  each is a `VoxelArmor` piece on its body part's bone, chipping, denting, holing and wearing
+  through under `ArmorRules` like any plate. A stop lands its impact on the part under it; a round
+  that gets through goes on into the body. Their damage lives in the frame's item state, so it
+  travels with the frame and repairs cover it. Spall-coated, and the frame keeps spall off arms
+  and neck. Limb pads are rounded sleeves over front, outer side and back.
+- LX-3 Visor Helmet (`helmet_lx3`, $6,500): a medium IIIA shell with a face guard bolted on below
+  its rim (cheek plates on side hinges, a mask with a respirator block, a nape guard, a neck
+  seal) and a black visor that stops fragments and spall only. Bullets hole the visor and plates
+  like any armour, and the face shows through.
+- Squad order "Climb up there" (Move > 9): selected AI squadmates go to a wall top or roof, climb
+  every ledge in the way and hold up there. The jump key's mantle now works for AI too, and a
+  working LX-3 frame climbs 1.3 m higher (3.2 m: compound walls, low roofs).
+- The LX-3 and its armour take the wearer's side's kit colour (coyote with the contractors'
+  multicam, matching the plate carrier), with panel seams and ridges.
+
+#### Changed
+- LX-3 Assist Frame: $45,000 (was $6,500), 14 kg with its pads (was 9). A starting company
+  ($150,000) can field two LX-3 sets with money left over, not three.
+- LX-3 frame art: slimmer and darker, hinge drums, pistons, boot stirrups and a jointed spine.
+- `tools/run_tests.sh`: the supports suite gets 780 s (`suite_timeout`). Its host's own checks
+  take about 460 s before the late-joining client's resupply flies, so 480 s killed it mid-flight
+  and it read as a hang (R1500, R1503; green with the budget: R1504).
+
 ### Near-future hardware: VTOL dropship, VT-14/Razorback tiers, light exosuit (Captain, 2026-10-16)
 
 Design doc: [docs/near_future_hardware.md](docs/near_future_hardware.md). Contractor's setting is

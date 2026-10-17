@@ -174,7 +174,11 @@ func pad_integrity(pad: String) -> float:
 ## contractors' multicam, ranger green for woodland, black for urban...), a shade darker, the
 ## way a painted shell reads beside fabric.
 func faction_armor_color() -> Color:
-	return Color(VoxelArt.spec(model.variant).gear).darkened(0.22)
+	return armor_color_for(model.variant)
+
+
+static func armor_color_for(variant: String) -> Color:
+	return Color(VoxelArt.spec(variant).gear).darkened(0.22)
 
 
 ## The worn exo frame's pads, by id.

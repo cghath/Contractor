@@ -529,9 +529,14 @@ This list covers what is built and in the game today (2026-10-12). Work still un
 ## Exosuits
 
 - LX-3 Assist Frame: a light infantry exoskeleton, its own `exo` slot worn over the vest, plates
-  and pack (armour unchanged). Working, it carries 30 kg of the load. A round into an arm, leg or
+  and pack (it adds its own armour pads, below). Working, it carries 30 kg of the load. A round into an arm, leg or
   the spine pack from behind can strike its struts; worn down, it disables (no assist, full load
   back on the legs, its status light red instead of green).
+- LX-3 armour: twelve Steel III++ pads on the frame, real per-part armour (chips, dents, holes,
+  wear-through), coloured to the wearer's side; the LX-3 Visor Helmet (IIIA shell, bolted-on face
+  guard, fragments-only visor). A set (frame and helmet) costs $51,500.
+- Climb order: AI squadmates climb walls and onto roofs on command (Move > 9); the LX-3 climbs
+  1.3 m higher than bare legs.
 
 ## Inventory and gear
 
