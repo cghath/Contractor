@@ -5,7 +5,7 @@ extends Node
 ##   MANTLE_PER_M_S, paying leg stamina, the weapon down and no firing on the way;
 ## - a 0.3 m kerb: no mantle (a step-up's or a jump's);
 ## - a 2.3 m wall: no mantle (out of reach);
-## - a 1.0 m block under a roof 0.5 m over it: no mantle (no room on top);
+## - a 1.0 m block under a ceiling 0.5 m over it: no mantle (no room on top);
 ## - prone: no mantle.
 ##   <godot> --headless --path . res://tests/mantle_test.tscn
 
@@ -82,7 +82,7 @@ func _course(h: float, roof: float) -> float:
 	_blocks.append(_box(Vector3(12, 1, 12), AT + Vector3(0, ground - 0.5, 0)))
 	_blocks.append(_box(Vector3(3, h, 2), AT + Vector3(0, ground + h * 0.5, -2.0)))
 	if roof > 0.0:
-		_blocks.append(_box(Vector3(3, 0.2, 2), AT + Vector3(0, ground + h + roof + 0.1, -2.0)))
+		_blocks.append(_box(Vector3(3, 2.0, 2), AT + Vector3(0, ground + h + roof + 1.0, -2.0)))  # a thick ceiling: its own top out of reach
 	return ground
 
 
