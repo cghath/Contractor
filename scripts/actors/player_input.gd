@@ -34,6 +34,10 @@ const VIEW_FIRING_ELBOW := Vector3(0.09, -0.12, 0.2)
 const VIEW_SUPPORT_ELBOW := Vector3(-0.07, -0.15, 0.2)
 ## Render layer for your own body and gear; your camera skips it.
 const LOCAL_ONLY_LAYER := 1 << 1
+## Render layer for the first-person weapon and arms (the view model, still on your own
+## camera's mask): a tube optic's scope picture is a separate camera (GunSight PIP) that skips
+## it, so the gun you're looking past doesn't show up huge and in the way of the magnified glass.
+const VIEW_MODEL_LAYER := 1 << 2
 ## Throwables in the order Shift+G cycles them (next_throwable): frag and flashbang always,
 ## then each smoke colour you carry, then the breaching charge if you carry one (G with it
 ## picked places it: Charges).
@@ -371,10 +375,13 @@ func _physics_process(delta: float) -> void:
 		_try_fire()
 	var tilt := minf(minf(-0.7 if body.is_reloading else 0.0, -CharacterModel.VIEW_LOWER_PITCH * body.model.view_lower()), SPRINT_TILT.x * _sprint_w)
 	body.view_model.rotation.x = move_toward(body.view_model.rotation.x, tilt, delta * 6.0)
-	# Both hands on the casualty: no weapon in view; through a scope: only the glass (P0362); nor
-	# seated in a vehicle (no firing your own from a seat, and in first person it hid the cabin and
-	# poked through the dash); nor dead, waiting to respawn.
-	body.view_model.visible = body.carry_mode == &"" and not GunSight.scoped(body) and not waiting 		and (not is_instance_valid(body.vehicle) or body.vehicle.ffv_seat(body))  # a fire-from-vehicle seat: your own weapon up (VehicleBay)
+	# Both hands on the casualty: no weapon in view; nor seated in a vehicle (no firing your own
+	# from a seat, and in first person it hid the cabin and poked through the dash), unless it's a
+	# fire-from-vehicle seat (VehicleBay: your own weapon up); nor dead, waiting to respawn.
+	# Through a scope the gun still shows peripherally (P0362 PIP rework: the magnified glass is
+	# GunSight's own SubViewport, which skips it on VIEW_MODEL_LAYER instead).
+	body.view_model.visible = body.carry_mode == &"" and not waiting \
+		and (not is_instance_valid(body.vehicle) or body.vehicle.ffv_seat(body))
 	_settle_recoil(delta)
 	_update_sway(delta)
 	_hide_shouldered()
@@ -601,7 +608,16 @@ func _update_aim(delta: float) -> void:
 	# Up to the eye in the weapon's ADS time (its mass with optic, slower on tired arms:
 	# MovementRules.ads_seconds); lowering stays quick.
 	var rate := MovementRules.ADS_EASE_K / body.movement.ads_seconds() if body.is_aiming else 14.0
-	body.camera.fov = lerpf(body.camera.fov, fov, minf(delta * (rate if body.is_aiming else 12.0), 1.0))
+	var fov_k := minf(delta * (rate if body.is_aiming else 12.0), 1.0)
+	# `fov` is what the sight shows: its own eased "glass" field of view (GunSight.ease_glass),
+	# which drives SCOPE_IN (scoped) and the scope's SubViewport camera. The player's real camera
+	# only follows it for irons and open optics (the whole screen zooms, as before); behind a tube
+	# optic's glass (or a flipped-up magnifier) it eases back to the peripheral view instead — a
+	# real PIP (GunSight), not the whole screen narrowing, so the gun's surroundings stay visible
+	# around the scope picture (Captain: "better scopes and PIP").
+	GunSight.ease_glass(body, fov, fov_k)
+	var peripheral := GameSettings.view_fov() if GunSight.scoped(body) else fov
+	body.camera.fov = lerpf(body.camera.fov, peripheral, fov_k)
 	var hip_view := HIP_VIEW * Vector3(-1.0 if body.left_handed else 1.0, 1, 1)  # off the firing shoulder
 	var aimed_view := ads_view(weapon, body.inventory.state_of(body.active_slot)) if weapon and not Launchers.is_launcher(weapon) else hip_view
 	var lowered := CharacterModel.VIEW_LOWER_OFFSET * body.model.view_lower()  # ducks while the hands are busy
@@ -747,7 +763,7 @@ func _update_view_model() -> void:
 		body.view_model.add_child(LauncherSight.view_node(weapon))  # placeholder launcher (wave 5)
 		return
 	var model := art
-	body.view_model.add_child(VoxelArt.instance(model, body.model.variant))
+	body.view_model.add_child(VoxelArt.instance(model, body.model.variant, VIEW_MODEL_LAYER))
 	var points := VoxelArt.hand_points(model)
 	if points.is_empty():
 		return
@@ -755,7 +771,7 @@ func _update_view_model() -> void:
 	for hand: Array in [[points.grip, VIEW_FIRING_ELBOW], [points.support, VIEW_SUPPORT_ELBOW]]:
 		var palm: Vector3 = hand[0]
 		var elbow: Vector3 = palm + (hand[1] as Vector3) * Vector3(side, 1, 1)
-		var forearm := VoxelArt.instance(VoxelArt.body_part("forearm", body.model.body), body.model.variant)
+		var forearm := VoxelArt.instance(VoxelArt.body_part("forearm", body.model.body), body.model.variant, VIEW_MODEL_LAYER)
 		forearm.name = "ViewForearm"
 		# The forearm's pivot is the elbow and its palm FOREARM down its -y: point -y at the palm.
 		var up := (elbow - palm).normalized()

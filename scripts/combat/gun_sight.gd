@@ -10,10 +10,13 @@ extends Control
 ##   holographic sight's flip-up magnifier ("magnifier", its power) flips up on zoom in and
 ##   down on zoom out (zoom_step), and while it's up you look through its glass.
 ## - a tube optic ("view": "tube": LPVO, prism, DMR scopes): once zoomed in you're behind the
-##   glass: the view model goes and the scope picture is drawn, black outside the eyepiece
-##   ring ("ring", a share of the screen's height) with the optic's reticle: "lpvo" (lit
-##   centre dot, crosshair with mil hashes, heavy posts), "chevron" (a lit chevron and its BDC
-##   holds, "bdc") or "mil_dot".
+##   glass: a real picture-in-picture (P0362 PIP rework, Captain: "better scopes and PIP") — a
+##   SubViewport with its own Camera3D at the optic's actual magnification, synced to the eye
+##   every frame, composited into the eyepiece ring ("ring", a share of the screen's height) with
+##   the optic's reticle drawn over it: "lpvo" (lit centre dot, crosshair with mil hashes, heavy
+##   posts), "chevron" (a lit chevron and its BDC holds, "bdc") or "mil_dot". The player's own
+##   camera stays at the peripheral (unaimed) field of view the whole time, so the gun and its
+##   surroundings around the scope picture don't narrow with it — only the glass magnifies.
 ## Power (Captain, 2026-10-13) is against the player's own unaimed view: 10x makes things ten
 ## times bigger than the base field of view shows them (its tangent over 10: about 6.4 degrees
 ## at the default 58.7 vertical, 90 across 16:9), the same rule for every magnified optic; at 1x the weapon's ads_fov, or
@@ -52,6 +55,10 @@ const LIT_GLOW := Color(1.0, 0.2, 0.1, 0.25)
 ## A man's shoulders (m): a BDC hold's stadia line is this wide at its range.
 const SHOULDERS_M := 0.48
 const MOA_PER_MIL := 3.4377
+## The scope SubViewport's render size against the ring it's shown at (PIP rework): a scope is
+## read through a narrow, slightly soft tube anyway, so rendering it a little under the
+## displayed size (and letting the texture stretch up) costs less for no real loss of clarity.
+const SCOPE_RENDER_SCALE := 0.65
 
 var body: Soldier
 var _drawn := false
@@ -59,6 +66,14 @@ var _drawn := false
 var _zoom := {}
 ## Flip-up magnifiers that are in, per optic id.
 var _magnified := {}
+## The sight's own eased "behind the glass" field of view (ease_glass): drives SCOPE_IN and the
+## scope SubViewport's camera. 0 until first aimed. Not the player's real camera.fov, which a
+## tube optic keeps at the peripheral view (PIP rework) instead of narrowing with this.
+var _glass_fov := 0.0
+## The scope's own render (PIP rework): a SubViewport with a Camera3D synced to the player's
+## camera every frame while behind a tube optic's glass, instead of the whole screen zooming.
+var _scope_vp: SubViewport
+var _scope_cam: Camera3D
 
 
 func _init(s: Soldier) -> void:
@@ -133,16 +148,33 @@ static func aimed_fov_of(s: Soldier, weapon: ItemData, base_fov: float) -> float
 
 
 ## True while `s` is aimed through glass: a tube optic, or a magnifier that's in, zoomed in
-## far enough (SCOPE_IN) to be behind it.
+## far enough (SCOPE_IN) to be behind it. Checked against the sight's own eased "glass" field of
+## view (ease_glass), not the real camera: a tube optic's periphery no longer narrows with it
+## (PIP rework), only the scope's own SubViewport does.
 static func scoped(s: Soldier) -> bool:
-	if not s.is_aiming:
+	if not s.is_aiming or is_instance_valid(s.vehicle):
 		return false
 	var optic := optic_of(s)
 	var magnifier := magnified(s, optic)
 	if view_of(optic) != "tube" and not magnifier:
 		return false
 	var lowest := float(optic.stats.magnifier) if magnifier else zoom_range(optic).x
-	return s.camera.fov <= aimed_fov(s.active_weapon(), GameSettings.view_fov(), lowest, optic) * SCOPE_IN
+	var sight := of(s)
+	var glass := sight._glass_fov if sight and sight._glass_fov > 0.0 else GameSettings.view_fov()
+	return glass <= aimed_fov(s.active_weapon(), GameSettings.view_fov(), lowest, optic) * SCOPE_IN
+
+
+## Eases `s`'s sight's "glass" field of view toward `target` by `k` (0–1, this frame's lerp
+## weight): called from the real camera.fov's own lerp (PlayerInput._update_aim) so the two stay
+## in step, but kept apart from it — a tube optic's camera.fov eases to the peripheral view
+## instead once scoped (PIP rework), while this keeps easing to the full magnified target.
+static func ease_glass(s: Soldier, target: float, k: float) -> void:
+	var sight := of(s)
+	if sight == null:
+		return
+	if sight._glass_fov <= 0.0:
+		sight._glass_fov = target
+	sight._glass_fov = lerpf(sight._glass_fov, target, k)
 
 
 ## Zoom in (`steps` > 0) or out on the optic in hand: a magnifier flips up on zoom in and down
@@ -170,12 +202,16 @@ static func zoom_step(s: Soldier, steps: int) -> String:
 
 ## Mouse turn scale for the zoom (P0362: sensitivity follows the magnification): behind glass,
 ## how much the view's tangent has shrunk from the weapon's plain aimed view (the settings'
-## aim sensitivity covers that); 1 otherwise.
+## aim sensitivity covers that); 1 otherwise. Against the sight's own "glass" field of view
+## (ease_glass), not the real camera, which no longer narrows for a tube optic (PIP rework) —
+## the picture inside the scope still turns fast relative to the (unmagnified) mouse motion.
 static func zoom_turn(s: Soldier) -> float:
 	if not scoped(s):
 		return 1.0
+	var sight := of(s)
+	var glass := sight._glass_fov if sight and sight._glass_fov > 0.0 else s.camera.fov
 	var ads := aimed_fov(s.active_weapon(), GameSettings.view_fov(), 1.0, optic_of(s))
-	return minf(tan(deg_to_rad(s.camera.fov * 0.5)) / tan(deg_to_rad(ads * 0.5)), 1.0)
+	return minf(tan(deg_to_rad(glass * 0.5)) / tan(deg_to_rad(ads * 0.5)), 1.0)
 
 
 ## Pixels per mil at camera field of view `fov` on a screen `height` pixels tall.
@@ -203,6 +239,8 @@ func _process(_delta: float) -> void:
 	if on or _drawn:
 		queue_redraw()
 	_drawn = on
+	if _scope_vp and not (on and scoped(body)):
+		_scope_vp.render_target_update_mode = SubViewport.UPDATE_DISABLED  # not behind glass: don't pay for the extra render
 
 
 func _draw() -> void:
@@ -213,28 +251,67 @@ func _draw() -> void:
 		return  # irons: the view model's own
 	var size := get_viewport_rect().size
 	var centre := size * 0.5
-	var px := px_per_mil(body.camera.fov, size.y)
 	var reticle := String(optic.stats.get("reticle", "dot"))
 	if scoped(body):
 		var magnifier := magnified(body, optic)
 		var ring := size.y * (MAGNIFIER_RING if magnifier else float(optic.stats.get("ring", RING)))
-		_draw_ring(size, centre, ring)
+		var px := px_per_mil(_glass_fov, ring * 2.0)  # the magnified picture's own scale, not the (now peripheral) real camera's
+		_draw_scope_pip(centre, ring)
 		match reticle:
 			"lpvo": _draw_lpvo(centre, ring, px)
 			"chevron": _draw_chevron(centre, ring, px, optic.stats.get("bdc", []))
 			"mil_dot": _draw_scale(centre, ring, px, true)
 			_: _draw_lit(centre, px, optic)  # a magnified red dot or holographic reticle
 	elif view_of(optic) == "open":
+		var px := px_per_mil(body.camera.fov, size.y)
 		_draw_lit(centre, px, optic)
 
 
-## Black beyond the eyepiece ring (`ring` pixels across the middle): the screen's edges, then
-## a thick circle out to the corners.
-func _draw_ring(size: Vector2, centre: Vector2, ring: float) -> void:
-	var reach := centre.length() + 2.0
+## The scope's magnified picture (PIP rework): a SubViewport with its own Camera3D, synced to
+## the player's every frame and rendered at SCOPE_RENDER_SCALE of the ring's screen size,
+## composited into the eyepiece ring with the same black-corner mask the old whole-screen ring
+## used, just over a render sized to the ring instead of the full screen. Falls back to the old
+## bare mask where nothing can render (headless runs): the real camera's own (unmagnified, with
+## PIP) picture shows through undecorated rather than nothing at all.
+func _draw_scope_pip(centre: Vector2, ring: float) -> void:
+	_sync_scope_viewport(ring)
+	if _scope_vp:
+		draw_texture_rect(_scope_vp.get_texture(), Rect2(centre - Vector2.ONE * ring, Vector2.ONE * ring * 2.0), false)
+	_draw_ring(centre, ring, ring * sqrt(2.0) + 2.0 if _scope_vp else centre.length() + 2.0)
+
+
+## Makes (once) the scope's SubViewport and its own Camera3D, sized to the ring and kept in
+## step with the player's real camera (same place and look — weapon sway only moves the view
+## model, not the camera itself, so a plain transform copy lines the glass up) at the sight's
+## own magnified field of view (_glass_fov). Its cull_mask drops VIEW_MODEL_LAYER so the gun
+## doesn't show up (huge, in the way) inside its own magnified picture. No-ops where nothing
+## can render (headless runs: ItemIcons.can_render()).
+func _sync_scope_viewport(ring: float) -> void:
+	if _scope_vp == null:
+		if not ItemIcons.can_render():
+			return
+		_scope_vp = SubViewport.new()
+		_scope_vp.name = "ScopeView"
+		add_child(_scope_vp)
+		_scope_cam = Camera3D.new()
+		_scope_vp.add_child(_scope_cam)
+		_scope_cam.cull_mask = body.camera.cull_mask & ~PlayerInput.VIEW_MODEL_LAYER
+		_scope_cam.near = body.camera.near
+		_scope_cam.current = true
+	var side := maxi(roundi(ring * 2.0 * SCOPE_RENDER_SCALE), 2)
+	if _scope_vp.size.x != side:
+		_scope_vp.size = Vector2i(side, side)
+	_scope_vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	_scope_cam.fov = clampf(_glass_fov if _glass_fov > 0.0 else body.camera.fov, 0.1, 170.0)
+	_scope_cam.global_transform = body.camera.global_transform
+
+
+## Black beyond the eyepiece ring (`ring` pixels across the middle) out to `reach`: a thick
+## circle, then a thin ring at the boundary.
+func _draw_ring(centre: Vector2, ring: float, reach: float) -> void:
 	var band := reach - ring
 	draw_arc(centre, ring + band * 0.5, 0.0, TAU, 128, Color.BLACK, band + 2.0, true)
-	draw_arc(centre, ring, 0.0, TAU, 128, Color(0.1, 0.1, 0.1), maxf(size.y * 0.006, 3.0), true)
+	draw_arc(centre, ring, 0.0, TAU, 128, Color(0.1, 0.1, 0.1), maxf(get_viewport_rect().size.y * 0.006, 3.0), true)
 
 
 ## A lit dot (dot_moa across), and a holographic sight's ring (ring_moa) around it.

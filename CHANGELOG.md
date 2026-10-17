@@ -48,6 +48,22 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   could attach themselves. `VoxelArt._with_suppressor` adds the can to a rifle's muzzle
   generically, over every silhouette at once, so a new one never needs its own suppressor boxes.
 
+### Scopes are a real picture-in-picture (Captain: "better scopes and PIP", 2026-10-16)
+
+#### Changed
+- A tube optic's (LPVO, prism, DMR scope) magnified picture is now a genuine PIP: a `SubViewport`
+  with its own `Camera3D`, synced to the player's eye every frame and composited into the
+  eyepiece ring (`GunSight._draw_scope_pip`). The player's own camera no longer narrows its field
+  of view while behind the glass — it eases back to the normal (peripheral) view instead, so the
+  gun and its surroundings stay visible around the scope picture, the way a real scope only
+  magnifies what you see through it. The reticle (mil-dot, LPVO cross, chevron/BDC) still reads
+  true at any power; the glass picture renders at `GunSight.SCOPE_RENDER_SCALE` (0.65x of the
+  ring's screen size, stretched to fit) rather than full resolution, to bound the added render
+  cost. The first-person weapon/arms are on their own render layer
+  (`PlayerInput.VIEW_MODEL_LAYER`) so they don't show up (huge, in the way) inside the magnified
+  picture, and stay visible in the player's own (now unzoomed-while-scoped) peripheral view
+  instead of vanishing entirely, as before.
+
 ### Squad callouts know what's actually going on (2026-10-16)
 
 #### Added
