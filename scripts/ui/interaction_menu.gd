@@ -154,6 +154,7 @@ const ACTIONS := {
 		{"id": &"treat", "label": "Treat yourself", "needs": &"treatable", "submenu": &"treatments"},
 		{"id": &"drop_held", "label": "Drop held item", "needs": &"held_item", "request": &"_server_drop", "with": &"slot"},
 		{"id": &"radio_contract", "label": "Radio for a contract", "needs": &"field_radio", "request": &"_server_radio_contract", "with": &"none", "group": MORE},
+		{"id": &"spoof_radio", "label": "Fake a contact report", "needs": &"enemy_net", "request": &"_server_spoof_radio", "with": &"none", "group": MORE},
 	],
 }
 ## Wound kinds in words, for Check wounds.
@@ -441,6 +442,12 @@ static func _check(need: StringName, actor: Soldier, target: Node) -> String:
 			if not (def is Dictionary and String(def.get("kind", "")) == "hot"):
 				return _HIDE
 			return "" if RadioChatter.carried(actor, "radio", "enemy_radio") > 0 else "You have no field radio"
+		&"enemy_net":  # a looted enemy radio, in a hot zone (EnemyCommand.server_spoof; the host says if it's dead air)
+			var lvl := CompoundLevel.current(actor)
+			var def: Variant = lvl.get(&"def") if lvl else null
+			if not (def is Dictionary and String(def.get("kind", "")) == "hot"):
+				return _HIDE
+			return "" if RadioChatter.carried(actor, RadioChatter.ENEMY_TAG) > 0 else _HIDE
 	if need in Person.MENU_NEEDS:
 		return Person.menu_check(need, actor, target)  # people (wave 4)
 	return ""
