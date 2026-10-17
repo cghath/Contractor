@@ -125,8 +125,8 @@ static func readout(from: Node) -> String:
 	if command:
 		var active := command.operations.filter(func(o: Dictionary) -> bool:
 			return o.state in ["assembling", "attacking", "approved", "moving", "looking", "containing"])
-		lines.append("Command: %s%s  reserves %.1f  threat %.1f (seen %.1f, losses %d)  ops %d/%d" % [command.commander_state,
-			"  CONSOLIDATED" if command.consolidated else "", command.reserves, command.threat_cp(), command.seen_now(),
+		lines.append("Command: %s%s  caution %+.2f  reserves %.1f  threat %.1f (seen %.1f, losses %d)  ops %d/%d" % [command.commander_state,
+			"  CONSOLIDATED" if command.consolidated else "", command.caution, command.reserves, command.threat_cp(), command.seen_now(),
 			command.recent_losses(), active.size(), command.max_ops()])
 		for o: Dictionary in active.slice(-4):
 			lines.append("  %s %s: %s" % [o.kind, o.state, o.get("why", "")])

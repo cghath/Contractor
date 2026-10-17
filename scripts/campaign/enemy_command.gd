@@ -47,6 +47,16 @@ extends Node
 ##   at COUNTER_RATIO. Guards dead and the squad on him, HvtAI has him give up (cornered).
 ## - Comms down (Alert.comms_down): the tick is COMMS_TICK_MULT slower, task forces take
 ##   COMMS_ASSEMBLE_MULT longer to assemble, probes don't report.
+## - Deception (Captain, 2026-10-17): noise (shots, blasts) reported farther than NOISE_FAR_M
+##   from the last sighting is unconfirmed: hunts and QRFs toward it are turned down for a probe.
+##   Loud fire is over-reported: every shot (SHOT_CP) and blast (BLAST_CP) reported within
+##   NOISE_NEAR_M in NOISE_WINDOW_S reads as more men (to NOISE_CP_MAX), so a loud squad gets a
+##   cautious enemy. With a looted radio the squad can call in a fake contact (server_spoof);
+##   after the first, each may be caught (SPOOF_CATCH_CHANCE): the net switches frequency.
+## - Memory: a commander who keeps losing grows cautious, one who keeps winning bold (`caution`,
+##   -1..1: every ratio × 1 + CAUTION_RATIO × caution). Kept per zone across deployments in the
+##   campaign (section "enemy_command"), drifting back toward 0 by CAUTION_DRIFT_PER_DAY a
+##   campaign day so a beaten zone recovers.
 ## - Its orders go out on the net (RadioChatter.order): a looted radio hears them.
 ## - At most MAX_OPS operations moving or attacking at once (MAX_OPS_HIGH from tier 3).
 ## Every decision is a record in `operations` ({"kind", "target", "state", "why", "at", ...}).
@@ -94,6 +104,21 @@ const PROBE_LOOK_S := 20.0
 const PROBE_GIVE_UP_S := 600.0
 ## Seconds after a probe's contact before the commander decides again (the report's on its way).
 const PROBE_DECIDE_S := 120.0
+## Deception.
+const NOISE_FAR_M := 150.0
+const NOISE_WINDOW_S := 60.0
+const NOISE_NEAR_M := 100.0
+const SHOT_CP := 0.75
+const BLAST_CP := 1.5
+const NOISE_CP_MAX := 9.0
+const SPOOF_CATCH_CHANCE := 0.25
+## Memory (per zone, across deployments).
+const CAUTION_FAIL := 0.15
+const CAUTION_WIN := 0.1
+const CAUTION_DECAPITATED := 0.3
+const CAUTION_DRIFT_PER_DAY := 0.3
+const CAUTION_RATIO := 0.3
+const MEMORY_SECTION := &"enemy_command"
 ## Decapitation and friction.
 const HEADLESS_S := 600.0
 ## A hostile HVT this close to the HQ is the commander.
@@ -119,6 +144,12 @@ var reserves := 0.0
 ## "commanding", "headless", "deputy" or "leaderless".
 var commander_state := "commanding"
 var consolidated := false
+## -1 (bold) .. 1 (cautious): what this zone's commander learned (see the header).
+var caution := 0.0
+var spoofs := 0
+var _memory_loaded := false
+var _last_contact := {}            # {"pos", "time"} of the last sighting reported
+var _noise: Array[Dictionary] = []  # recent shots and blasts reported: {"pos", "time", "blast"}
 var _tick := 0.0
 var _last_tick := INF
 var _seen_at := -INF
@@ -180,13 +211,75 @@ func _comms_down() -> bool:
 # --- The picture --------------------------------------------------------------------------------
 
 func _on_reported(r: Dictionary) -> void:
+	if r.kind == &"shot" or r.kind == &"blast":
+		_on_noise(r)
+		return
 	if r.kind != &"contact":
 		return
+	_last_contact = {"pos": r.pos, "time": now()}
 	var cp := float(r.get("seen", 1)) * SQUAD_MAN_CP + float(r.get("exo", 0)) * EXO_CP
 	seen_cp = maxf(seen_now(), cp)
 	_seen_at = now()
 	_contacts = _contacts.filter(func(c: Dictionary) -> bool: return now() - float(c.time) <= LKP_FRESH_S)
 	_contacts.append({"pos": r.pos, "time": now(), "cp": cp})
+
+
+## Loud fire reads as more men: the shots and blasts reported near this one lately.
+func _on_noise(r: Dictionary) -> void:
+	_noise = _noise.filter(func(n: Dictionary) -> bool: return now() - float(n.time) <= NOISE_WINDOW_S)
+	_noise.append({"pos": r.pos, "time": now(), "blast": r.kind == &"blast"})
+	var cp := 0.0
+	for n: Dictionary in _noise:
+		if (n.pos as Vector3).distance_to(r.pos) <= NOISE_NEAR_M:
+			cp += BLAST_CP if n.blast else SHOT_CP
+	cp = minf(cp, NOISE_CP_MAX)
+	if cp > seen_now():
+		seen_cp = cp
+		_seen_at = now()
+	_contacts.append({"pos": r.pos, "time": now(), "cp": cp})
+
+
+## Whether `target` is only noise: no sighting reported within NOISE_FAR_M of it lately.
+func unconfirmed(target: Vector3) -> bool:
+	return _last_contact.is_empty() or now() - float(_last_contact.time) > LKP_FRESH_S 		or (_last_contact.pos as Vector3).distance_to(target) > NOISE_FAR_M
+
+
+## Host: the squad, on a looted enemy radio (RadioChatter tuned in), calls in a fake contact
+## of `men` at `pos`; the commander takes it as real. After the first, each may be caught
+## (SPOOF_CATCH_CHANCE): the enemy switches frequency. True if it went in.
+func server_spoof(pos: Vector3, men := 4) -> bool:
+	var radio := level.get_node_or_null(^"RadioChatter") as RadioChatter if level else null
+	if radio == null or not radio.tuned or alert == null:
+		return false
+	spoofs += 1
+	if spoofs > 1 and randf() < SPOOF_CATCH_CHANCE:
+		_order("all stations, that last report is false. Go to alternate.")
+		radio._switch()
+		_record("spoof", pos, "caught", "spoof %d caught" % spoofs)
+		return false
+	alert._receive({"kind": &"contact", "pos": pos, "area": alert.area_of(pos), "by": "", "seen": men, "exo": 0})
+	_record("spoof", pos, "believed", "spoof %d: %d men" % [spoofs, men])
+	return true
+
+
+## `base` ratio as this commander applies it (memory: caution raises it, boldness lowers it).
+func applied_ratio(base: float) -> float:
+	return base * (1.0 + CAUTION_RATIO * caution)
+
+
+func _load_memory() -> void:
+	if _memory_loaded:
+		return
+	_memory_loaded = true
+	var z: Dictionary = Campaign.section(MEMORY_SECTION).get(GameState.zone_id, {})
+	var days := maxf(float(Economy.day()) - float(z.get("day", Economy.day())), 0.0)
+	caution = clampf(float(z.get("caution", 0.0)) * pow(1.0 - CAUTION_DRIFT_PER_DAY, days), -1.0, 1.0)
+
+
+func _learn(delta: float) -> void:
+	caution = clampf(caution + delta, -1.0, 1.0)
+	Campaign.section(MEMORY_SECTION)[GameState.zone_id] = {"caution": caution, "day": float(Economy.day())}
+	Campaign.mark_changed(MEMORY_SECTION)
 
 
 ## The reported strength now, faded since the last sighting.
@@ -368,7 +461,7 @@ func _tend_commander() -> void:
 		else:
 			_record("fallback", hq.global_position, "done", "the commander holds at the HQ")
 			_order("this is Command, we're holding here. All units, to me.")
-		_launch_counterattack(hq, maxf(threat_cp(hq.global_position, SITE_THREAT_M), SQUAD_MAN_CP), COUNTER_RATIO, "relief of the HQ", false)
+		_launch_counterattack(hq, maxf(threat_cp(hq.global_position, SITE_THREAT_M), SQUAD_MAN_CP), applied_ratio(COUNTER_RATIO), "relief of the HQ", false)
 	elif not _fell_back and not guards.is_empty() and (guards[0] as Soldier).global_position.distance_to(hvt.global_position) > GUARD_CLOSE_M:
 		var route: Array[Vector3] = [response._ground(hvt.global_position)]
 		response._set_route(_guards.squad, guards, route)
@@ -399,6 +492,7 @@ func _watch_command() -> void:
 				commander_state = "headless"
 				_headless_until = now() + HEADLESS_S
 				_record("decapitated", Vector3.INF, "headless", "the commander is down")
+				_learn(CAUTION_DECAPITATED)
 				_order("Command, respond. Command, come in.", _callsign_at(Vector3.ZERO, true), true)
 				commander_down.emit(false)
 		"headless":
@@ -424,7 +518,7 @@ func approve(kind: String, target: Vector3) -> bool:
 	var threat := maxf(threat_cp(), 1.0)
 	var have := available_cp()
 	var why := "%.0f CP against %.1f (%.1f:1)" % [have, threat, have / threat]
-	var ok := have >= threat * HUNT_RATIO and _active_ops() < max_ops()
+	var ok := have >= threat * applied_ratio(HUNT_RATIO) and _active_ops() < max_ops()
 	if not can_decide():
 		ok = false
 		why = "no commander"
@@ -435,6 +529,11 @@ func approve(kind: String, target: Vector3) -> bool:
 		ok = false
 		why = "LKP stale: a probe instead"
 		_maybe_probe()
+	elif unconfirmed(target):
+		ok = false
+		why = "unconfirmed noise: a probe first"
+		if now() - _last_probe >= PROBE_GAP_S:
+			_send_probe(target)
 	_record("hunt:" + kind, target, "approved" if ok else "denied", why)
 	if ok:
 		_spend(int(HUNT_COST.get(kind, 4)))
@@ -449,6 +548,7 @@ func server_tick() -> void:
 		return
 	var dt := now() - _last_tick if _last_tick != INF else 0.0
 	_last_tick = now()
+	_load_memory()
 	_tick_reserves(maxf(dt, 0.0))
 	_count_losses()
 	_watch_command()
@@ -502,8 +602,8 @@ func _decide_lost(m: ZoneModule, probed := false) -> void:
 			_contain(m, "%s lost, nobody seen there, no probe to send" % m.module_id, false)
 		return
 	# a probe met fewer than it thinks the squad is: someone left on the site, retaken at 2:1
-	var ratio := REOCCUPY_RATIO if probed and threat_cp() > threat else COUNTER_RATIO
-	_launch_counterattack(m, threat, ratio, "%s lost" % m.module_id)
+	var r := REOCCUPY_RATIO if probed and threat_cp() > threat else COUNTER_RATIO
+	_launch_counterattack(m, threat, applied_ratio(r), "%s lost" % m.module_id)
 
 
 ## A counterattack on site `m` at `ratio` of `threat` (assembling out of sight), or Contain
@@ -567,6 +667,7 @@ func _step_task_force(op: Dictionary) -> void:
 		op.state = "failed"
 		op.why = "task force lost"
 		_handled.erase(op.target_id)  # still down: decided again
+		_learn(CAUTION_FAIL)
 		return
 	if op.state == "assembling":
 		if not can_decide():
@@ -586,6 +687,7 @@ func _step_task_force(op: Dictionary) -> void:
 		op.why = "%d left against %.1f" % [living.size(), threat]
 		_send_home(op.squad, living, op.get("base", ""), op.rally)
 		_handled.erase(op.target_id)
+		_learn(CAUTION_FAIL)
 		_order("pull back, pull back. Break contact.")
 		return
 	if squad_cp(op.target, SITE_THREAT_M) <= 0.0 and living.any(func(s: Soldier) -> bool: return s.global_position.distance_to(op.target) <= ARRIVED_M):
@@ -594,6 +696,7 @@ func _step_task_force(op: Dictionary) -> void:
 		for s: Soldier in living:
 			s.set_meta(&"garrison_of", op.target_id)  # the site's garrison again (ZoneLevel.garrison_alive)
 		_handled.erase(op.target_id)
+		_learn(-CAUTION_WIN)
 		_order("%s is ours. Hold it." % _callsign(level.call(&"get_module", op.target_id)))
 
 
