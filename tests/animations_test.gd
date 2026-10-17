@@ -334,6 +334,10 @@ func _test_put_down() -> void:
 func _test_from_replicated_state() -> void:
 	print("Poses from replicated state only")
 	_down(hostile)
+	# A late joiner's first snapshot is already down and being dragged. It must not
+	# replay a new fall instead of taking the held pose.
+	hostile.model._was_downed = false
+	hostile.model._downed_t = 0.0
 	hostile.global_position = bravo.global_position + Vector3(0, 0, 1.1)
 	await _frames(2)
 	check(hostile.carried_by == null and bravo.carrying == null and bravo.carry_mode == &"", "no host-side carry at all")

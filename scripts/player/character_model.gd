@@ -1145,7 +1145,7 @@ func _process(frame_delta: float) -> void:
 		_was_downed = downed
 		_downed_t = 0.0
 	_downed_t += delta
-	if downed and not limp and _downed_t < SLUMP_S:
+	if downed and not casualty and not limp and _downed_t < SLUMP_S:
 		blend = minf(delta * SLUMP_EASE, 1.0)  # sinking down (Captain: wounded/dying anims), not a snap
 	for key: String in target:
 		_shown[key] = (_shown[key] as Transform3D).interpolate_with(target[key], blend)

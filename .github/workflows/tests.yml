@@ -23,12 +23,21 @@ jobs:
     name: test runner
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    env:
+      CONTRACTOR_TEST_LOGS: ${{ runner.temp }}/contractor-test-logs
     steps:
       - uses: actions/checkout@v4
       - name: Check tools/run_tests.sh
         run: bash tools/test_runner_check.sh
       - name: Check draft release publishing
         run: bash tools/test_publish_release.sh
+      - name: Keep runner and publishing logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-runner
+          path: ${{ runner.temp }}/contractor-test-logs
+          if-no-files-found: warn
 
   suite:
     name: ${{ matrix.suite }}

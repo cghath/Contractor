@@ -8,7 +8,6 @@
 #   tools/test_runner_check.sh      (prints each case; exits non-zero if the runner misjudges one)
 set -u
 cd "$(dirname "$0")/.."
-bash tools/check_ci_suites.sh || exit 1
 . tools/run_log.sh
 check_root="$(run_log_parent)"
 [ -n "$check_root" ] || check_root="${RUNNER_TEMP:-/tmp}/contractor-test-logs"
@@ -34,6 +33,7 @@ finish_check() {
 	echo "$check_id: $verdict (${dir/RUNNING/$verdict})"
 }
 trap finish_check EXIT
+bash tools/check_ci_suites.sh || exit 1
 fake="$dir/fake-engine.sh"
 cat >"$fake" <<'FAKE'
 #!/usr/bin/env bash

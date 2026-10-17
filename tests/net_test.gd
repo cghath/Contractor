@@ -363,11 +363,18 @@ func _check_looted_rifle(me: Soldier) -> void:
 	await get_tree().create_timer(0.4).timeout  # the host sees us there
 	for shot in 5:
 		var head := CharacterModel.part_position(aimer, Vitals.HEAD)
-		me._server_fire.rpc_id(1, me.camera.global_position, (head - me.camera.global_position).normalized(), &"primary")
+		var eye := me.camera.global_position
+		var direction := (head - eye).normalized()
+		# Rounds leave the muzzle. At 2.5 m a parallel camera ray misses a head-sized
+		# target; solve the barrel direction while retaining the real network fire RPC.
+		for correction in 4:
+			var muzzle := Soldier.muzzle_point(eye, direction, false, me.left_handed, me.is_aiming)
+			direction = (head - muzzle).normalized()
+		me._server_fire.rpc_id(1, eye, direction, &"primary")
 		await _wait_for(func() -> bool: return aimer.vitals.is_dead(), 1.0)
 		if aimer.vitals.is_dead():
 			break
-	check(aimer.vitals.is_dead() and not _rifle_drawn(aimer).is_empty(), "shot dead while aiming, its rifle still on the body")
+	check(aimer.vitals.is_dead() and not _rifle_drawn(aimer).is_empty(), "shot dead while aiming, its rifle still on the body (dead: %s)" % aimer.vitals.is_dead())
 	await get_tree().create_timer(1.0).timeout  # it falls
 	var chest := aimer.body_point()
 	me.global_position = Vector3(chest.x + 0.8, AIMER_AT.y, chest.z)
