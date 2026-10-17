@@ -146,18 +146,20 @@ const PICK_UP_S := 0.6
 const EQUIP_S := 0.8
 const LOOT_S := 1.0
 const LOOT_ALL_S := 1.6
-## Climbing into a heavy exo (ExoMech.server_enter), opening it and stepping down out of it
-## (server_exit): the knees dip and the body rises as it steps up (or down), the hands on the
-## grab bars over the shoulders (MECH_GRAB, torso-local) while the hatch moves round it.
+## Climbing into a heavy exo from behind (ExoMech.server_enter), opening it and stepping back
+## out of it (server_exit): standing behind it, the right hand hits the release on its back
+## (MECH_RELEASE, at the clip's "at"); in it, the knees settle and the arms push forward into its
+## sleeves (MECH_GRAB, torso-local) while its back zips shut round him (or unzips); out of it,
+## he steps back down from where it stands to where he's put (MECH_STEP, MECH_STEP_UP).
+const MECH_RELEASE := &"mech_release"
 const MECH_IN := &"mech_in"
 const MECH_OPEN := &"mech_open"
 const MECH_OUT := &"mech_out"
-const MECH_GRAB: Array[Vector3] = [Vector3(0.22, 0.66, -0.08), Vector3(-0.22, 0.66, -0.08)]
+const MECH_GRAB: Array[Vector3] = [Vector3(0.21, 0.28, -0.38), Vector3(-0.21, 0.28, -0.38)]
+
 const MECH_DIP := 0.16
-## The walk into the suit and out of it (model space): climbing in, the body is drawn this far
-## in front of where it's put (the suit's spot) and walks back into it; stepping out, it starts
-## this far back, inside the suit and up on its step (MECH_STEP_UP), and walks down and out to
-## where it's put.
+## The step back out (model space): the body starts this far forward, inside the suit and up
+## on its step (MECH_STEP_UP), and walks back down and out to where it's put, behind it.
 const MECH_STEP := 0.7
 const MECH_STEP_UP := 0.14
 ## Picking up: the hand is at the item until this fraction of the clip, then stows it.
@@ -1516,11 +1518,9 @@ func _action_pose(mode: StringName) -> Dictionary:
 		# the body walks back into it (or forward out of it).
 		var u := action_progress()
 		var stepping := pose.duplicate()
-		var hip := float(pose.get("hip", REST_POSE.hip)) - sin(clampf((u - 0.05) / 0.55, 0.0, 1.0) * PI) * MECH_DIP
-		if clip == MECH_IN:
-			stepping["hip_z"] = float(pose.get("hip_z", 0.0)) - MECH_STEP * (1.0 - smoothstep(0.0, 0.4, u))
-		else:
-			stepping["hip_z"] = float(pose.get("hip_z", 0.0)) + MECH_STEP * (1.0 - smoothstep(0.1, 0.8, u))
+		var hip := float(pose.get("hip", REST_POSE.hip)) - sin(clampf((u - 0.05) / 0.4, 0.0, 1.0) * PI) * MECH_DIP
+		if clip == MECH_OUT:  # (in, the suit hangs on these same bones: it never walks)
+			stepping["hip_z"] = float(pose.get("hip_z", 0.0)) - MECH_STEP * (1.0 - smoothstep(0.1, 0.8, u))
 			hip += MECH_STEP_UP * (1.0 - smoothstep(0.25, 0.65, u))
 		stepping["hip"] = hip
 		return stepping
@@ -1758,9 +1758,17 @@ func _action_goals(held: Array) -> Array:
 				return [["stow", to], ["work", at - spread]]
 		TREAT:
 			return _treat_goals(StringName(action_net.get("tech", WORK)), at, t, s)
-		MECH_IN, MECH_OPEN, MECH_OUT:
-			if t < s * 0.85:
-				return [["mech", MECH_GRAB[0]], ["mech", MECH_GRAB[1]]]
+		MECH_RELEASE:
+			if t < s * 0.75:
+				return [["release", at], held[1]]  # the manual release on its back
+		MECH_IN:
+			if t < s * 0.9:
+				return [["mech", MECH_GRAB[0]], ["mech", MECH_GRAB[1]]]  # arms pushed into its sleeves
+		MECH_OPEN:
+			return [["mech", MECH_GRAB[0]], ["mech", MECH_GRAB[1]]]
+		MECH_OUT:
+			if t < s * 0.35:
+				return [["mech", MECH_GRAB[0]], ["mech", MECH_GRAB[1]]]  # drawing the arms back out
 	return []
 
 

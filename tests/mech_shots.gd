@@ -68,15 +68,22 @@ func _ready() -> void:
 	await _shot("parked_front", c + Vector3(1.0, 0.25, 2.4), c)
 	await _shot("parked_side", c + Vector3(2.6, 0.1, 0.0), c)
 	await _shot("parked_rear", c + Vector3(-0.8, 0.3, -2.4), c)
-	await _shot("parked_cockpit", c + Vector3(0.3, 0.35, 1.2), c + Vector3(0, 0.1, 0))
+	await _shot("parked_release", c + Vector3(0.5, -0.1, -1.1), c + Vector3(0.1, -0.1, -0.5))
 
-	# Climbing in: the hatch half shut round him.
-	player.global_position = feet + Vector3(0, 0, 1.2)
+	# Climbing in from behind: the release, the back unzipping down the legs, the step in, shut.
+	player.global_position = feet + Vector3(0, 0, -0.8)
+	player.rotation.y = PI
 	await _frames(3)
 	player._server_enter_mech.rpc_id(1, suit.get_path())
-	await get_tree().create_timer(ExoMech.ENTER_S * 0.5).timeout
-	await _shot("entering", c + Vector3(1.0, 0.25, 2.4), c)
-	await get_tree().create_timer(ExoMech.ENTER_S * 0.5 + 1.5).timeout  # in, and the gun drawn
+	for step: Array in [[CharacterModel.MECH_RELEASE, 0.35, "entering_1_release"], [CharacterModel.MECH_RELEASE, 0.8, "entering_2_unzipped"],
+			[CharacterModel.MECH_IN, 0.1, "entering_3_in_it_open"], [CharacterModel.MECH_IN, 0.6, "entering_4_zipping_shut"]]:
+		while player.model.action_shown() != step[0]:
+			await get_tree().process_frame
+		await _wait_progress(float(step[1]))
+		print("[mech] %s at %.2f" % [step[2], player.model.action_progress()])
+		var eye: Vector3 = c + (Vector3(1.4, 0.3, -2.3) if step[0] == CharacterModel.MECH_RELEASE else Vector3(0.25, 0.6, -2.2))  # (in it: from straight behind)
+		await _shot(String(step[2]), eye, c + Vector3(0, -0.3, 0))
+	await get_tree().create_timer(ExoMech.ENTER_S * 0.4 + 1.5).timeout  # in, and the gun drawn
 	for i in 90:
 		await get_tree().process_frame
 	print("[mech] piloting: %s  gun %s  parts %d" % [player.inventory.slots.get(ExoMech.SLOT, &""), player.inventory.slots.get(&"primary", &""),
@@ -120,21 +127,18 @@ func _ready() -> void:
 	camera.cull_mask = 0xFFFFF
 	camera.fov = 45
 
-	# Climbing out: the hatch opening, then the suit left standing.
+	# Climbing out: the back unzipping, then he steps back out of it, and it's left standing open.
 	player._server_exit_mech.rpc_id(1)
-	await get_tree().create_timer(ExoMech.OPEN_S * 0.8).timeout
-	await _shot("exiting_open", c + Vector3(1.0, 0.25, 2.4), c)
-	await get_tree().create_timer(ExoMech.OPEN_S * 0.2 + 0.05).timeout
-	# Stepping down and out: early, halfway, nearly out (from the side, to see him walk out).
-	var t0 := Time.get_ticks_msec()
-	for step: Array in [[0.2, "exiting_step_1"], [0.5, "exiting_step_2"], [0.8, "exiting_step_3"]]:
-		var wait := float(step[0]) * ExoMech.OUT_S - (Time.get_ticks_msec() - t0) / 1000.0
-		if wait > 0.0:
-			await get_tree().create_timer(wait).timeout
-		print("[mech] %s at %.2f of the step out" % [step[1], player.model.action_progress()])
-		await _shot(String(step[1]), c + Vector3(2.4, 0.1, 1.2), c + Vector3(0, -0.2, 0.4))
+	for step: Array in [[0.4, "exiting_1_unzipping"], [0.95, "exiting_2_open"]]:
+		await _wait_progress(float(step[0]))
+		await _shot(String(step[1]), c + Vector3(0.25, 0.6, -2.2), c + Vector3(0, -0.3, 0))
+	while player.model.action_shown() != CharacterModel.MECH_OUT:
+		await get_tree().process_frame
+	for step: Array in [[0.3, "exiting_3_stepping_out"], [0.7, "exiting_4_out"]]:
+		await _wait_progress(float(step[0]))
+		await _shot(String(step[1]), c + Vector3(2.0, 0.2, -1.8), c + Vector3(0, -0.3, -0.4))
 	await get_tree().create_timer(ExoMech.OUT_S * 0.3 + 0.5).timeout
-	await _shot("left_standing", c + Vector3(1.6, 0.4, 3.2), c)
+	await _shot("left_standing_open", c + Vector3(1.6, 0.4, -3.0), c)
 	print("[mech] saved to %s" % ProjectSettings.globalize_path(out))
 	get_tree().quit(0)
 
@@ -144,6 +148,12 @@ func _suit() -> WorldItem:
 		if n is WorldItem and (n as WorldItem).item_id == &"exo_mech_heavy":
 			return n
 	return null
+
+
+## Until the clip playing reaches `u` of its length (or ends).
+func _wait_progress(u: float) -> void:
+	while player.model.action_progress() >= 0.0 and player.model.action_progress() < u:
+		await get_tree().process_frame
 
 
 func _frames(n: int) -> void:

@@ -3,16 +3,17 @@ extends Node
 ## on the suit, entry and exit animations, re-enter a damaged suit left on the ground). On the
 ## vehicle range, where one stands open with its WG-50 on it, the host's player:
 ## - can't pick it up or put it on from the inventory, nor carry its gun outside one;
-## - climbs in (Climb in): put where it stood, facing its way, the hatch closing round him
-##   over the climb, standing still meanwhile; its gun in his hands, his rifle on its rack;
+## - climbs in from behind (Climb in): he hits the manual release and the standing suit's back
+##   unzips (down the legs too); then he's in it, put where it stood, facing its way, seen inside
+##   until it zips shut round him, standing still meanwhile; its gun in his hands, his rifle on its rack;
 ## - in it: the suit carries 260 kg, he never sprints, jumps, climbs or goes prone, walks at
 ##   three quarters pace, and holds the gun low and ready at the hip; no vehicle seat takes him;
 ## - its plates are real AR500 steel armour (Captain, 2026-10-17): an M855 and an AP (IV) round
 ##   stop on the IV chest plate, an M855 goes through the III belly plate, an M855 stops on the
 ##   III++ shin plate while AP and .50 BMG go through it into the leg; each hit is in the
 ##   suit's own state;
-## - climbs out (Climb out): the hatch opens, the suit is left standing where he was with its
-##   damage and its gun, his rifle back in his hands, him a step in front of it;
+## - climbs out (Climb out): its back opens, the suit is left standing (open) where he was with
+##   its damage and its gun, his rifle back in his hands, him a step behind it;
 ## - the suit left standing still takes rounds on its plates (into its state), and climbing
 ##   back in brings every chip with it; a disabled suit can be climbed into too.
 ##   <godot> --headless --path . res://tests/mech_test.tscn
@@ -78,7 +79,7 @@ func _run() -> void:
 	inv.take(&"m4a1")
 	await _frames(2)
 	# The menu.
-	player.global_position = suit.global_position - suit.global_basis.y * ExoMech.PARKED_SIZE.y * 0.5 - suit.global_basis.z * 1.3
+	player.global_position = suit.global_position - suit.global_basis.y * ExoMech.PARKED_SIZE.y * 0.5 + suit.global_basis.z * 1.3  # behind it, at the release
 	await _frames(2)
 	var actions := InteractionMenu.actions_for(player, suit)
 	var ids := actions.map(func(a: Dictionary) -> StringName: return a.id)
@@ -87,21 +88,34 @@ func _run() -> void:
 	# Climb in.
 	var feet := suit.global_position - suit.global_basis.y * ExoMech.PARKED_SIZE.y * 0.5
 	var yaw := suit.global_rotation.y
+	var parked_shin: VoxelArmor = suit.find_children("MechPad_shin_back_l", "VoxelArmor", true, false)[0]
+	var parked_shin_at := parked_shin.transform
 	player._server_enter_mech.rpc_id(1, suit.get_path())
 	await _frames(3)
+	check(player.model.action_shown() == CharacterModel.MECH_RELEASE and ExoMech.transitioning(player) and inv.slots[ExoMech.SLOT] == &"",
+		"from behind, he hits the manual release (%s)" % player.model.action_shown())
+	check(bool(suit.state.get("open", false)), "and the standing suit's back unzips")
+	await _seconds(ExoMech.RELEASE_S * 0.8)
+	check(not parked_shin.transform.is_equal_approx(parked_shin_at), "down the legs too")
+	await _seconds(ExoMech.RELEASE_S * 0.2 + 0.15)
 	check(inv.slots[ExoMech.SLOT] == &"exo_mech_heavy" and _suit() == null, "he climbs in: the suit is worn, gone from the ground")
 	check(inv.slots[&"primary"] == &"wg50_walker" and String(inv.state_of(ExoMech.SLOT).get("rack", {}).get("id", "")) == "m4a1",
 		"its gun in his hands, his M4 on its rack (%s)" % inv.slots[&"primary"])
 	check(player.global_position.distance_to(feet) < 0.05 and absf(angle_difference(player.global_rotation.y, yaw)) < 0.01, "put where it stood, facing its way")
 	check(player.model.action_shown() == CharacterModel.MECH_IN and ExoMech.transitioning(player), "climbing in (%s)" % player.model.action_shown())
 	var gear := player.get_node(^"Gear") as GearRig
-	var chest: VoxelArmor = gear.pads().get("chest")
-	var chest_at: Transform3D = ExoFrame.pad_items(atlas).filter(func(p: Dictionary) -> bool: return p.id == "chest")[0].at
-	check(chest != null and not chest.transform.is_equal_approx(chest_at), "the hatch stands open as he steps in")
-	await _seconds(ExoMech.ENTER_S * 0.5)
-	check(player._is_busy(), "busy while it closes")
-	await _seconds(ExoMech.ENTER_S * 0.5 + 0.4)
-	check(not ExoMech.transitioning(player) and chest.transform.is_equal_approx(chest_at), "and shut round him once in")
+	# The back is the hatch (ExoMech.HATCH): open round him, the legs' backs too, then it zips shut.
+	var back: VoxelArmor = gear.pads().get("back_r")
+	var shin_back: VoxelArmor = gear.pads().get("shin_back_l")
+	var back_at: Transform3D = ExoFrame.pad_items(atlas).filter(func(p: Dictionary) -> bool: return p.id == "back_r")[0].at
+	var shin_back_at: Transform3D = ExoFrame.pad_items(atlas).filter(func(p: Dictionary) -> bool: return p.id == "shin_back_l")[0].at
+	await _frames(2)
+	check(back != null and not back.transform.is_equal_approx(back_at) and not shin_back.transform.is_equal_approx(shin_back_at), "its back open round him, down the legs")
+	check((player.model.part_node(Vitals.CHEST).get_child(0) as Node3D).visible, "him inside it, seen through the open back")
+	check(player._is_busy(), "busy meanwhile")
+	await _seconds(ExoMech.ENTER_S + 0.4)
+	check(not ExoMech.transitioning(player) and back.transform.is_equal_approx(back_at) and shin_back.transform.is_equal_approx(shin_back_at), "and zipped shut round him once in")
+	check(not (player.model.part_node(Vitals.CHEST).get_child(0) as Node3D).visible, "him hidden in it then")
 	check(gear.pads().size() == pieces.size() and (gear.pads().values() as Array).all(func(p: VoxelArmor) -> bool: return p.camo == player.model.variant),
 		"its %d plates on his body, in his side's camo (%s)" % [gear.pads().size(), player.model.variant])
 	check(player.model.find_children(ExoMech.PART_NAME + "*", "", true, false).size() >= 50, "the chassis on his body: pack, actuators, boots, head unit")
@@ -122,7 +136,7 @@ func _run() -> void:
 	await _frames(3)
 	check(player.model.action_shown() == CharacterModel.MECH_OPEN, "climbing out: the hatch opens")
 	await _seconds(ExoMech.OPEN_S * 0.7)
-	check(not chest.transform.is_equal_approx(chest_at), "(open)")
+	check(not back.transform.is_equal_approx(back_at), "(its back open)")
 	await _seconds(ExoMech.OPEN_S * 0.3 + 0.2)
 	suit = _suit()
 	check(inv.slots[ExoMech.SLOT] == &"" and suit != null, "out: the suit stands on the ground")
@@ -135,18 +149,18 @@ func _run() -> void:
 	check((suit.state.get("pads", {}).get("chest", {}).get("chips", []) as Array).size() == chips_in and chips_in >= 2, "its plates keep their damage (%d chips in the chest)" % chips_in)
 	await _seconds(ExoMech.OUT_S + 0.3)
 	# Shot standing empty.
-	var back: VoxelArmor = suit.find_children("MechPad_back", "VoxelArmor", true, false)[0]
+	var parked_back: VoxelArmor = suit.find_children("MechPad_back_r", "VoxelArmor", true, false)[0]
 	var m855 := _m855()
-	var back_before := (suit.state.get("pads", {}).get("back", {}).get("chips", []) as Array).size()  # (the belly round went on out through it)
-	var r := Ballistics.fire(shooter, back.to_global(Vector3(0.03, 0.05, -0.8)), back.global_basis.z, m855)
+	var back_before := (suit.state.get("pads", {}).get("back_r", {}).get("chips", []) as Array).size()  # (the belly round went on out through it)
+	var r := Ballistics.fire(shooter, parked_back.to_global(Vector3(0.03, 0.05, -0.8)), parked_back.global_basis.z, m855)
 	await _frames(2)
-	check(r.result == "plate" and (suit.state.pads.get("back", {}).get("chips", []) as Array).size() == back_before + 1, "standing empty, its plates still stop rounds, into its state (%s, %s)" % [r.result, (suit.state.pads as Dictionary).keys().map(func(k: String) -> String: return "%s:%d" % [k, (suit.state.pads[k].get("chips", []) as Array).size()])])
+	check(r.result == "plate" and (suit.state.pads.get("back_r", {}).get("chips", []) as Array).size() == back_before + 1, "standing empty, its plates still stop rounds, into its state (%s, %s)" % [r.result, (suit.state.pads as Dictionary).keys().map(func(k: String) -> String: return "%s:%d" % [k, (suit.state.pads[k].get("chips", []) as Array).size()])])
 	# Back in: every chip comes with it.
-	player.global_position = left_feet - suit.global_basis.z * 1.2
+	player.global_position = left_feet + suit.global_basis.z * 1.2
 	await _frames(2)
 	player._server_enter_mech.rpc_id(1, suit.get_path())
-	await _seconds(ExoMech.ENTER_S + 0.4)
-	check(inv.slots[ExoMech.SLOT] == &"exo_mech_heavy" and inv.chips_in(ExoMech.SLOT, "chest").size() == chips_in and inv.chips_in(ExoMech.SLOT, "back").size() == back_before + 1,
+	await _seconds(ExoMech.RELEASE_S + ExoMech.ENTER_S + 0.4)
+	check(inv.slots[ExoMech.SLOT] == &"exo_mech_heavy" and inv.chips_in(ExoMech.SLOT, "chest").size() == chips_in and inv.chips_in(ExoMech.SLOT, "back_r").size() == back_before + 1,
 		"climbing back into the damaged suit brings every chip with it")
 	# Disabled: climb out, and in again.
 	ExoFrame.server_damage(player, 10000.0)
@@ -157,10 +171,10 @@ func _run() -> void:
 	suit = _suit()
 	check(suit != null and bool(suit.state.get("disabled", false)) and suit.describe().contains("DISABLED"), "left standing disabled (%s)" % (suit.describe() if suit else "none"))
 	if suit:
-		player.global_position = suit.global_position - suit.global_basis.y * ExoMech.PARKED_SIZE.y * 0.5 - suit.global_basis.z * 1.2
+		player.global_position = suit.global_position - suit.global_basis.y * ExoMech.PARKED_SIZE.y * 0.5 + suit.global_basis.z * 1.2
 		await _frames(2)
 		player._server_enter_mech.rpc_id(1, suit.get_path())
-		await _frames(3)
+		await _seconds(ExoMech.RELEASE_S + 0.3)
 		check(inv.slots[ExoMech.SLOT] == &"exo_mech_heavy", "and a disabled suit can be climbed into too")
 
 

@@ -43,8 +43,20 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   most doors), the pilot's body and kit hidden inside dark mechanical cores with only his head
   showing, the head unit sunk low between high shoulder humps and big pauldrons, heavier forearms,
   thighs and feet, a launcher pod on the back (art only), and the WG-50 redrawn as a six-barrel
-  rotary. Climbing in he walks back into the open front; climbing out he walks down and out of it
-  (`CharacterModel.MECH_STEP`).
+  rotary.
+- You get in from the back with the manual release (Captain, 2026-10-17, from AW's punch-out
+  scene: "the full back opens, the legs too", like a zipper): standing behind it you hit the
+  release panel (green button, warning triangle) and its back unzips, the power pack and back
+  plates splitting at the spine, then the backs of the thighs, then the shins
+  (`ExoMech.HATCH`, `ParkedHatch`); you're in it with your arms pushed into its sleeves, seen
+  inside until it zips shut (`CharacterModel.MECH_RELEASE`/`MECH_IN`). Climbing out it unzips and
+  you step back out behind it; it's left standing open. The back and the legs' backs are now
+  their own AR500 plates (`back_r`/`back_l`, `thigh_back_*`, `shin_back_*`).
+
+#### Fixed
+- A round that met an armour piece's box but none of its voxels now carries on from just before
+  that point, so a second piece whose box starts at the same spot is still met (`Ballistics`;
+  found with the heavy exo's split leg plates).
 
 ### Floating site-box lootboxes, scope PIP black flash (Captain, 2026-10-16 playtest of v0.4.26)
 

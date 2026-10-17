@@ -29,26 +29,38 @@ const SLOT := ExoFrame.SLOT
 const TAG := "mech"
 const GUN_TAG := "mech_only"
 
-## Climbing in: one clip (CharacterModel.MECH_IN), the hatch closing over its middle.
-const ENTER_S := 3.0
-## Climbing out: the hatch opens (MECH_OPEN), then he steps down out of it (MECH_OUT).
-const OPEN_S := 1.2
+## Climbing in, from behind: he hits the manual release on its back (CharacterModel.MECH_RELEASE)
+## and the standing suit's back unzips (RELEASE_S); then he's in it, his arms pushed into its
+## sleeves, and it zips shut round him (MECH_IN, ENTER_S).
+const RELEASE_S := 1.3
+const ENTER_S := 2.2
+## Climbing out: the back opens (MECH_OPEN), then he steps back out of it (MECH_OUT).
+const OPEN_S := 1.4
 const OUT_S := 1.6
 ## How near a standing suit (its action point) you must be to climb in.
 const REACH_M := 2.0
-## How far in front of the suit he stands once out.
+## How far behind the suit he stands once out.
 const STEP_OUT_M := 0.7  # CharacterModel.MECH_STEP: the clip walks him out that far
 ## A parked suit's box (and the WorldItem's collision).
 const PARKED_SIZE := Vector3(1.2, 2.35, 1.1)
 
-## The hatch (Captain's ref: the chest swings up, the belly plate down, the head unit back):
-## pad id -> [hinge point on its bone, open angle about X (radians)].
+## The back is the hatch (Captain, 2026-10-17, from the punch-out scene he pointed to: you get in
+## from the back, "the full back opens, the legs too", it opens like a zipper): the back armour
+## and power pack split down the spine, each half swinging out on a hinge at its outer edge, then
+## the backs of the thighs, then of the shins, each a beat after the one above. Pad (or the
+## torso's lid, LID) id -> [hinge point on its bone, hinge axis, open angle (radians), order].
 const HATCH := {
-	"chest": [Vector3(0, 0.57, -0.2), 1.55],
-	"abdomen": [Vector3(0, 0.05, -0.19), -1.2],
-	"head": [Vector3(0, 0.0, 0.22), -1.05],
-	"head_top": [Vector3(0, 0.0, 0.22), -1.05],
+	"back_r": [Vector3(0.27, 0, 0.3), Vector3.UP, 1.9, 0],
+	"back_l": [Vector3(-0.27, 0, 0.3), Vector3.UP, -1.9, 0],
+	"thigh_back_r": [Vector3(0.13, 0, 0.12), Vector3.UP, 1.6, 1],
+	"thigh_back_l": [Vector3(-0.13, 0, 0.12), Vector3.UP, -1.6, 1],
+	"shin_back_r": [Vector3(0.12, 0, 0.11), Vector3.UP, 1.6, 2],
+	"shin_back_l": [Vector3(-0.12, 0, 0.11), Vector3.UP, -1.6, 2],
 }
+## The power pack's halves (art: dress) ride on the back plate's halves.
+const LID := {"r": "back_r", "l": "back_l"}
+## The zipper: each step of HATCH's order starts this share of the way later.
+const ZIP_STEP := 0.3
 
 
 static func is_mech(item: ItemData) -> bool:
@@ -107,18 +119,26 @@ static func hide_pilot(model: CharacterModel, gear_nodes: Array, hidden: bool) -
 ## Whether `body` is climbing into or out of a suit now (no moving meanwhile).
 static func transitioning(body: Node) -> bool:
 	var model := body.get(&"model") as CharacterModel if body else null
-	return model != null and model.action_shown() in [CharacterModel.MECH_IN, CharacterModel.MECH_OPEN, CharacterModel.MECH_OUT]
+	return model != null and model.action_shown() in [CharacterModel.MECH_RELEASE, CharacterModel.MECH_IN, CharacterModel.MECH_OPEN, CharacterModel.MECH_OUT]
 
 
-## How far the worn suit's hatch stands open now (0 shut .. 1 open), from the clip playing.
+## How far the worn suit's back stands open now (0 shut .. 1 open), from the clip playing:
+## climbing in, open as he settles in, then zipping shut; climbing out, unzipping.
 static func hatch_open(model: CharacterModel) -> float:
 	var u := model.action_progress()
 	match model.action_shown():
 		CharacterModel.MECH_IN:
-			return 1.0 - smoothstep(0.35, 0.8, u)
+			return 1.0 - smoothstep(0.3, 0.92, u)
 		CharacterModel.MECH_OPEN:
-			return smoothstep(0.1, 0.85, u)
+			return smoothstep(0.05, 0.9, u)
 	return 0.0
+
+
+## How far hatch piece `id` is open when the zipper as a whole is `open` of the way: the upper
+## back first, then the thighs, then the shins (ZIP_STEP).
+static func piece_open(id: String, open: float) -> float:
+	var order := float(HATCH[id][3])
+	return clampf(open * (1.0 + ZIP_STEP * 2.0) - ZIP_STEP * order, 0.0, 1.0)
 
 
 ## "Climb into the Atlas-pattern Walker  [chest 64%, gun]" for the interaction menu.
@@ -156,21 +176,34 @@ static func enter_problem(s: Soldier, suit: WorldItem, reach := true) -> String:
 	return ""
 
 
-## Host: `s` climbs into the suit standing at `suit`. Returns "" once it has started, else why
-## not. He's put where it stood, facing its way, wearing it with its damage; its gun goes into
-## his hands, his own rifle onto its rack; the hatch closes round him over ENTER_S.
-static func server_enter(s: Soldier, suit: WorldItem) -> String:
-	var why := enter_problem(s, suit)
-	if why != "":
-		return why
+## Host: `s` climbs into the suit standing at `suit` (check enter_problem first). He hits the
+## release on its back and it unzips (RELEASE_S, every peer: the WorldItem's "open"); then he's
+## put where it stood, facing its way, wearing it with its damage; its gun goes into his hands,
+## his own rifle onto its rack; it zips shut round him over ENTER_S. Interrupted (he went down
+## or moved off, it's gone or taken), it stays standing, open.
+static func server_enter(s: Soldier, suit: WorldItem) -> void:
 	var item := ItemDB.get_item(suit.item_id)
+	var from := s.global_position
+	s.server_busy(RELEASE_S + ENTER_S, "Climbing into the %s" % item.name)
+	s.model.server_play(CharacterModel.MECH_RELEASE, RELEASE_S, s.to_local(parked_point(suit)))
+	if not bool(suit.state.get("open", false)):
+		var opening := suit.state.duplicate(true)
+		opening["open"] = true
+		suit.state = opening  # every peer's parked suit unzips (ParkedHatch)
+		if GameState.dropped.has(suit.uid):
+			GameState.dropped[suit.uid]["state"] = opening.duplicate(true)
+		Sfx.server_play(&"impact_plate", parked_point(suit))  # the release (a placeholder)
+	await s.get_tree().create_timer(RELEASE_S).timeout
+	if not is_instance_valid(s) or not s.is_inside_tree() or not s.vitals.is_up() or not is_instance_valid(suit) \
+			or suit.is_queued_for_deletion() or s.global_position.distance_to(from) > 0.5 or enter_problem(s, suit) != "":
+		return
 	var state := suit.state.duplicate(true)
 	var feet := suit.global_position - suit.global_basis.y * PARKED_SIZE.y * 0.5
 	var yaw := suit.global_rotation.y
 	GameState.item_taken(suit.uid)
 	suit.queue_free()
 	var gun: Dictionary = state.get("gun", {})
-	for key: String in ["gun", "yaw", "camo"]:
+	for key: String in ["gun", "yaw", "camo", "open"]:
 		state.erase(key)
 	if not gun.is_empty():
 		var own := s.inventory.unequip(&"primary")
@@ -180,11 +213,9 @@ static func server_enter(s: Soldier, suit: WorldItem) -> String:
 	if not gun.is_empty():
 		s.inventory.put_on(&"primary", StringName(gun.id), gun.get("state", {}))
 	s.server_place(feet, yaw)
-	s.server_busy(ENTER_S, "Climbing into the %s" % item.name)
 	s.model.server_play(CharacterModel.MECH_IN, ENTER_S)
-	Sfx.server_play(&"impact_plate", feet + Vector3.UP * 1.2)  # the hatch, shutting (a placeholder)
+	Sfx.server_play(&"impact_plate", feet + Vector3.UP * 1.2)  # the back, shutting (a placeholder)
 	SessionLog.note("%s climbs into the %s" % [s.log_name(), item.name])
-	return ""
 
 
 ## Why `s` can't climb out now ("" if it can).
@@ -222,11 +253,12 @@ static func server_exit(s: Soldier) -> void:
 	var yaw := s.global_rotation.y
 	state["yaw"] = yaw
 	state["camo"] = String(s.model.variant)
+	state["open"] = true  # left standing with its back open, as he climbed out
 	var feet := s.global_position
 	var level := CompoundLevel.current(s)
 	if level:
 		level.server_spawn_dropped(item.id, 1, feet + Vector3.UP * PARKED_SIZE.y * 0.5, state)
-	s.server_place(feet - Basis(Vector3.UP, yaw).z * STEP_OUT_M, yaw)
+	s.server_place(feet + Basis(Vector3.UP, yaw).z * STEP_OUT_M, yaw)  # behind it, out of its back
 	s.model.server_play(CharacterModel.MECH_OUT, OUT_S)
 	Sfx.server_play(&"impact_plate", feet + Vector3.UP * 1.2)
 	SessionLog.note("%s climbs out of the %s" % [s.log_name(), item.name])
@@ -234,10 +266,10 @@ static func server_exit(s: Soldier) -> void:
 
 # --- A suit left standing (WorldItem) -------------------------------------------------------
 
-## Where a parked suit's interaction point is: at its open cockpit (world).
+## Where a parked suit's interaction point is: at the release on its back (world).
 static func parked_point(suit: Node3D) -> Vector3:
 	var b := suit.global_basis
-	return suit.global_position + b.y * 0.35 - b.z * 0.35
+	return suit.global_position + b.y * 0.35 + b.z * 0.5
 
 
 ## A parked suit: the chassis standing open on a bare skeleton (its rest pose, arms a little
@@ -262,28 +294,52 @@ static func parked_node(item: ItemData, state: Dictionary, suit: WorldItem) -> N
 		bone.add_child(piece)
 		piece.setup(pad.item, &"", null, 1)
 		piece.name = "MechPad_" + pad.id
-		piece.transform = hatched(pad.id, pad.at, 1.0)
+		piece.transform = pad.at
 		piece.set_camo(variant)
 	show_parked_damage(root, state)
 	dress(bones, item, bool(state.get("disabled", false)), 1, variant)
+	var hatch := ParkedHatch.new()
+	hatch.name = "ParkedHatch"
+	hatch.item = item
+	hatch.bones = bones
+	hatch.shown = 1.0 if bool(state.get("open", false)) else 0.0
+	hatch.target = hatch.shown
+	root.add_child(hatch)
+	hatch.apply()
 	return root
 
 
-## Redraws a parked suit's plates from `state` (its "pads": chips, integrity).
+## Redraws a parked suit's plates from `state` (its "pads": chips, integrity), and has its back
+## unzip (or zip up) to `state`'s "open".
 static func show_parked_damage(root: Node3D, state: Dictionary) -> void:
+	var hatch := root.get_node_or_null(^"ParkedHatch") as ParkedHatch
+	if hatch:
+		hatch.target = 1.0 if bool(state.get("open", false)) else 0.0
 	var pads: Dictionary = state.get("pads", {})
 	for piece: VoxelArmor in root.find_children("MechPad_*", "VoxelArmor", true, false):
 		var pad: Dictionary = pads.get(piece.pad, {})
 		piece.apply_damage(pad.get("chips", []), ArmorRules.is_shattered(pad))
 
 
-## A pad's transform with the hatch `open` (0..1) of the way open (HATCH; others as they are).
+## A pad's transform with the back `open` (0..1, the whole zipper) of the way open (HATCH,
+## piece_open; others as they are).
 static func hatched(pad: String, at: Transform3D, open: float) -> Transform3D:
-	if not HATCH.has(pad) or open <= 0.0:
+	if not HATCH.has(pad):
+		return at
+	var o := piece_open(pad, open)
+	if o <= 0.0:
 		return at
 	var hinge: Vector3 = HATCH[pad][0]
-	var swing := Transform3D(Basis(Vector3.RIGHT, float(HATCH[pad][1]) * open), Vector3.ZERO)
+	var swing := Transform3D(Basis(HATCH[pad][1] as Vector3, float(HATCH[pad][2]) * o), Vector3.ZERO)
 	return Transform3D(Basis.IDENTITY, hinge) * swing * Transform3D(Basis.IDENTITY, -hinge) * at
+
+
+## The power pack's halves on `torso` (dress's lids) swung with the back plate's halves.
+static func set_lids(torso: Node3D, open: float) -> void:
+	for side: String in LID:
+		var lid := torso.get_node_or_null(NodePath(PART_NAME + "Lid_" + side)) as Node3D
+		if lid:
+			lid.transform = hatched(LID[side], Transform3D.IDENTITY, open)
 
 
 ## The bones of an empty suit (a parked one): CharacterModel's rest layout, arms hanging a
@@ -350,16 +406,34 @@ static func dress(rig: Node3D, item: ItemData, disabled: bool, layers: int, vari
 	# head sunk low between high shoulders, huge pauldrons and forearms, thick legs on big feet,
 	# a power pack with a launcher pod on the back. Under the plates, dark mechanical cores in
 	# place of the pilot's body (hide_pilot), so the gaps read as machinery, not uniform.
-	_box(torso, Vector3(0.36, 0.56, 0.26), Vector3(0, 0.3, 0.0), JOINT, layers)  # torso core
-	_box(torso, Vector3(0.26, 0.2, 0.22), Vector3(0, -0.02, 0.0), STRUT, layers)  # waist core
-	# The power pack (its armour plate, "back", over its rear face), exhausts, vents, and the
-	# actuators that carry it up over the shoulders.
-	_box(torso, Vector3(0.52, 0.56, 0.24), Vector3(0, 0.33, 0.25), shell, layers)
-	_box(torso, Vector3(0.4, 0.08, 0.18), Vector3(0, 0.65, 0.23), JOINT, layers)
+	_core(_box(torso, Vector3(0.36, 0.56, 0.26), Vector3(0, 0.3, 0.0), JOINT, layers))  # torso core
+	_core(_box(torso, Vector3(0.26, 0.2, 0.22), Vector3(0, -0.02, 0.0), STRUT, layers))  # waist core
+	# The power pack in two halves split down the spine (its armour plates, "back_r" and "back_l",
+	# over their rear faces): the back hatch, each half on a lid that swings out with its plate
+	# (HATCH, set_lids), padded inside.
 	for side: float in [1.0, -1.0]:
-		_rod(torso, 0.035, 0.18, Vector3(side * 0.15, 0.74, 0.3), JOINT, layers)  # exhaust stack
+		var lid := Node3D.new()
+		lid.name = PART_NAME + "Lid_" + ("r" if side > 0.0 else "l")
+		torso.add_child(lid)
+		_box(lid, Vector3(0.26, 0.56, 0.2), Vector3(side * 0.13, 0.33, 0.27), shell, layers)  # its half of the pack
+		_box(lid, Vector3(0.22, 0.5, 0.02), Vector3(side * 0.12, 0.33, 0.16), Color("2b2c27"), layers)  # its padded lining
+		_box(lid, Vector3(0.2, 0.08, 0.16), Vector3(side * 0.1, 0.65, 0.25), JOINT, layers)
+		_rod(lid, 0.035, 0.18, Vector3(side * 0.15, 0.74, 0.3), JOINT, layers)  # exhaust stack
 		for i in 4:
-			_box(torso, Vector3(0.012, 0.035, 0.17), Vector3(side * 0.266, 0.2 + i * 0.07, 0.25), JOINT, layers)  # vent slats
+			_box(lid, Vector3(0.012, 0.035, 0.17), Vector3(side * 0.266, 0.2 + i * 0.07, 0.27), JOINT, layers)  # vent slats
+		if side > 0.0:
+			# The launcher pod (art: it doesn't fire yet), four tubes up top, and the manual
+			# release: a panel with a green button and a warning triangle.
+			_box(lid, Vector3(0.15, 0.36, 0.18), Vector3(0.2, 0.72, 0.33), shell, layers)
+			for i in 4:
+				_box(lid, Vector3(0.05, 0.012, 0.05), Vector3(0.2 + (i % 2 - 0.5) * 0.07, 0.905, 0.3 + (floorf(i / 2.0) - 0.5) * 0.07), JOINT, layers)
+			_box(lid, Vector3(0.1, 0.12, 0.012), Vector3(0.1, 0.42, 0.444), STRUT, layers)  # release panel
+			_glow(_box(lid, Vector3(0.03, 0.03, 0.01), Vector3(0.08, 0.44, 0.452), Color(0.2, 0.9, 0.5), layers), 1.2)  # its button
+			_box(lid, Vector3(0.035, 0.03, 0.01), Vector3(0.125, 0.4, 0.452), Color(0.95, 0.75, 0.15), layers)  # the warning triangle
+		else:
+			var light := _box(lid, Vector3(0.03, 0.03, 0.012), Vector3(-0.08, 0.6, 0.44), ExoFrame.LIGHT_OFF if disabled else ExoFrame.LIGHT_ON, layers)
+			_glow(light, 1.5)
+	for side: float in [1.0, -1.0]:
 		_box(torso, Vector3(0.14, 0.16, 0.26), Vector3(side * 0.27, 0.6, 0.08), STRUT, layers)  # shoulder actuator
 		_box(torso, Vector3(0.17, 0.17, 0.3), Vector3(side * 0.2, 0.66, 0.0), shell, layers)  # shoulder hump, up beside the head
 		_box(torso, Vector3(0.06, 0.1, 0.32), Vector3(side * 0.2, 0.0, 0.0), JOINT, layers)  # hip ring, side
@@ -368,34 +442,27 @@ static func dress(rig: Node3D, item: ItemData, disabled: bool, layers: int, vari
 	_box(torso, Vector3(0.42, 0.1, 0.05), Vector3(0, 0.0, -0.165), JOINT, layers)  # hip ring, front
 	_box(torso, Vector3(0.42, 0.1, 0.05), Vector3(0, 0.0, 0.165), JOINT, layers)  # hip ring, back
 	_box(torso, Vector3(0.3, 0.1, 0.3), Vector3(0, 0.59, 0.03), JOINT, layers)  # collar the head sits down in
-	# The launcher pod on the right of the back (art: it doesn't fire yet), four tubes facing up
-	# and forward.
-	_box(torso, Vector3(0.15, 0.36, 0.18), Vector3(0.2, 0.72, 0.33), shell, layers)
-	for i in 4:
-		_box(torso, Vector3(0.05, 0.012, 0.05), Vector3(0.2 + (i % 2 - 0.5) * 0.07, 0.905, 0.3 + (floorf(i / 2.0) - 0.5) * 0.07), JOINT, layers)
-	var light := _box(torso, Vector3(0.03, 0.03, 0.012), Vector3(-0.08, 0.6, 0.42), ExoFrame.LIGHT_OFF if disabled else ExoFrame.LIGHT_ON, layers)
-	_glow(light, 1.5)
 	for side: float in [1.0, -1.0]:
 		var r := side > 0.0
 		var upper: Node3D = rig.part_node(Vitals.UPPER_ARM_R if r else Vitals.UPPER_ARM_L)
 		var fore: Node3D = rig.part_node(Vitals.FOREARM_R if r else Vitals.FOREARM_L)
 		var thigh: Node3D = rig.part_node(Vitals.THIGH_R if r else Vitals.THIGH_L)
 		var shin: Node3D = rig.part_node(Vitals.SHIN_R if r else Vitals.SHIN_L)
-		_box(upper, Vector3(0.12, 0.3, 0.12), Vector3(0, -0.16, 0), JOINT, layers)  # arm core
+		_core(_box(upper, Vector3(0.12, 0.3, 0.12), Vector3(0, -0.16, 0), JOINT, layers))  # arm core
 		_box(upper, Vector3(0.14, 0.14, 0.14), Vector3(side * 0.05, -0.01, 0), JOINT, layers)  # shoulder joint
 		_rod(upper, 0.014, 0.22, Vector3(side * 0.13, -0.18, 0.06), PISTON, layers)
 		_drum(upper, 0.055, 0.07, Vector3(side * 0.08, -0.32, 0), JOINT, layers)  # elbow
-		_box(fore, Vector3(0.11, 0.24, 0.11), Vector3(0, -0.12, 0), JOINT, layers)  # forearm core
+		_core(_box(fore, Vector3(0.11, 0.24, 0.11), Vector3(0, -0.12, 0), JOINT, layers))  # forearm core
 		_box(fore, Vector3(0.15, 0.11, 0.16), Vector3(0, -0.275, -0.01), shell.darkened(0.25), layers)  # mechanical fist
 		_box(fore, Vector3(0.13, 0.035, 0.14), Vector3(0, -0.215, -0.01), JOINT, layers)  # its cuff
 		_rod(fore, 0.012, 0.17, Vector3(side * 0.12, -0.11, 0.05), PISTON, layers)
-		_box(thigh, Vector3(0.15, 0.42, 0.15), Vector3(side * 0.02, -0.22, 0), JOINT, layers)  # thigh core
+		_core(_box(thigh, Vector3(0.15, 0.42, 0.15), Vector3(side * 0.02, -0.22, 0), JOINT, layers))  # thigh core
 		_drum(thigh, 0.06, 0.07, Vector3(side * 0.17, -0.02, 0), JOINT, layers)  # hip
 		_box(thigh, Vector3(0.05, 0.3, 0.08), Vector3(side * 0.19, -0.23, 0.04), STRUT, layers)  # thigh actuator
 		_rod(thigh, 0.017, 0.3, Vector3(side * 0.19, -0.24, -0.025), PISTON, layers)
 		_drum(thigh, 0.07, 0.09, Vector3(side * 0.17, -0.45, 0), JOINT, layers)  # knee
 		_box(thigh, Vector3(0.17, 0.13, 0.06), Vector3(side * 0.03, -0.46, -0.14), shell, layers)  # knee cap
-		_box(shin, Vector3(0.14, 0.38, 0.14), Vector3(side * 0.02, -0.19, 0), JOINT, layers)  # shin core
+		_core(_box(shin, Vector3(0.14, 0.38, 0.14), Vector3(side * 0.02, -0.19, 0), JOINT, layers))  # shin core
 		_box(shin, Vector3(0.05, 0.28, 0.08), Vector3(side * 0.17, -0.2, 0.045), STRUT, layers)  # shin actuator
 		_rod(shin, 0.016, 0.28, Vector3(side * 0.17, -0.2, -0.015), PISTON, layers)
 		_box(shin, Vector3(0.14, 0.26, 0.08), Vector3(side * 0.02, -0.19, 0.15), STRUT, layers)  # calf hydraulics
@@ -430,8 +497,30 @@ static func dress(rig: Node3D, item: ItemData, disabled: bool, layers: int, vari
 		rig.add_child(hatch)
 
 
+## A parked suit's back unzipping (or zipping up) to its state's "open" over RELEASE_S, on
+## every peer: its plates and the power pack's halves swing on their hinges (HATCH).
+class ParkedHatch extends Node:
+	var item: ItemData
+	var bones: Node3D
+	var shown := 0.0
+	var target := 0.0
+
+	func _process(delta: float) -> void:
+		if shown != target:
+			shown = move_toward(shown, target, delta / ExoMech.RELEASE_S)
+			apply()
+
+	func apply() -> void:
+		for piece: VoxelArmor in bones.find_children("MechPad_*", "VoxelArmor", true, false):
+			for pad: Dictionary in ExoFrame.pad_items(item):
+				if pad.id == piece.pad:
+					piece.transform = ExoMech.hatched(pad.id, pad.at, shown)
+		ExoMech.set_lids(bones.torso, shown)
+
+
 ## Animates a worn suit's hatch (HATCH) while its pilot climbs in or out: the pads GearRig
-## put on the bones swing on their hinges, and settle shut once the clip is over.
+## put on the bones swing on their hinges, and settle shut once the clip is over. While it
+## stands open, the pilot's body shows inside it (hide_pilot hides it the rest of the time).
 class HatchRig extends Node:
 	var item: ItemData
 	var _shown := 0.0
@@ -444,12 +533,24 @@ class HatchRig extends Node:
 		var open := ExoMech.hatch_open(model)
 		if open == _shown:
 			return
+		if (open > 0.02) != (_shown > 0.02):
+			ExoMech.hide_pilot(model, [], open <= 0.02)  # him, inside it while it's open
+			for n: Node in model.find_children(ExoMech.PART_NAME + "*", "MeshInstance3D", true, false):
+				if n.has_meta(&"mech_core"):
+					(n as Node3D).visible = open <= 0.02  # (its machinery cores out of the way meanwhile)
 		_shown = open
 		var pads := gear.pads()
 		for pad: Dictionary in ExoFrame.pad_items(item):
 			var piece: VoxelArmor = pads.get(pad.id)
 			if piece and ExoMech.HATCH.has(pad.id):
 				piece.transform = ExoMech.hatched(pad.id, pad.at, open)
+		ExoMech.set_lids(model.torso, open)
+
+
+## Marks a dark machinery core (in place of the pilot's body): HatchRig hides it while the back
+## stands open, so he's seen inside.
+static func _core(m: MeshInstance3D) -> void:
+	m.set_meta(&"mech_core", true)
 
 
 static func _glow(m: MeshInstance3D, energy: float) -> void:

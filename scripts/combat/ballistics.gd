@@ -108,7 +108,10 @@ static func _trace(shooter: CollisionObject3D, origin: Vector3, direction: Vecto
 			if collider.server_try_stop(hit.position, direction, weapon, equivalent_distance(weapon, distance, lost_j)):
 				return passed if not passed.is_empty() else _result("plate", hit)
 			exclude.append(collider.get_rid())
-			from = hit.position
+			# On from a hair before where it met this piece's box, not on its surface: a piece
+			# whose box starts at that very spot (a heavy exo's split leg plates, ExoMech) would
+			# not be met by a ray starting on its face.
+			from = hit.position - direction * 0.002
 			continue
 		var vehicle := Vehicle.find_on(collider)
 		if vehicle:

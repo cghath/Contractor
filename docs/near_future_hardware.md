@@ -311,7 +311,12 @@ Atlas-pattern Walker (`exo_mech_heavy`) as the Captain decided above. What the s
   rig, drawn 1.25x while piloted (`suit_size`: plates, hitboxes, eye and capsule all scale, about
   2.3 m tall; most doors are too low for it), so wounds, ragdolls, poses and networking keep
   working. The pilot's body and kit are hidden inside dark mechanical cores; only his head shows,
-  low between the shoulders (Captain's refs, 2026-10-17). Entry and exit are through the front.
+  low between the shoulders (Captain's refs, 2026-10-17).
+- **Entry and exit through the back, with the manual release** (Captain, 2026-10-17, pointing at
+  AW's punch-out scene): the release panel on its back unzips it, the power pack and back plates
+  splitting at the spine, then the thighs' and shins' backs; the pilot is in it, arms pushed into
+  the sleeves, and it zips shut. Out: it unzips and he steps back out. A downed suit lying face
+  down (as in that scene) that you climb into and that pushes itself up is not built yet.
 - **Plates:** fifteen `VoxelArmor` pads (`stats.pads`, reusing the LX-3's per-part pad system):
   all AR500 steel (Captain, 2026-10-17): IV on the chest, head unit, shoulders and back, steel III on the belly, steel III++ on the arms and legs
   (Captain, 2026-10-17: the chest "should be steel 3", then "some of the armor to level 4 steel"), the head unit's

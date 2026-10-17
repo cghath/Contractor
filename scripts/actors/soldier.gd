@@ -1346,9 +1346,11 @@ func _server_enter_mech(path: NodePath) -> void:
 	var suit := get_node_or_null(path) as WorldItem
 	if suit == null or suit.is_queued_for_deletion() or not ExoMech.is_mech(ItemDB.get_item(suit.item_id)):
 		return
-	var why := ExoMech.server_enter(self, suit)
+	var why := ExoMech.enter_problem(self, suit)
 	if why != "":
 		_client_message.rpc_id(owner_peer(), why)
+		return
+	ExoMech.server_enter(self, suit)
 
 
 ## Heavy exo: climb out, leaving it standing (ExoMech.server_exit).
