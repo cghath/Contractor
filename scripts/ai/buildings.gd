@@ -129,6 +129,14 @@ static var _links := {}  # [a, b] -> [at, linked]: _linked's answers
 static var spent_usec := 0
 ## The world and level the cached scans belong to (_scope); another one empties the cache.
 static var _cache_scope := ""
+## Captain, 2026-10-17 playtest P1591 (stutters "dependant on ai presence"): the session log's
+## worst frames were building scans, 46-400 ms, several AI asking in the same frame. A frame's
+## scans stop at FRAME_BUDGET_USEC (the first always runs): later asks that frame get the last
+## answer for that spot, however old, or none (they ask again next tick). Not when headless (the
+## suites and a dedicated host keep exact, synchronous answers).
+const FRAME_BUDGET_USEC := 4000
+static var _budget_frame := -1
+static var _budget_used := 0
 
 
 ## The buildings with an inside spot within `radius` of `centre` (see the class notes).
@@ -150,6 +158,12 @@ static func near(from: Node3D, centre: Vector3, radius := SCAN_M) -> Array:
 	var hit: Dictionary = _cache.get(key, {})
 	if not hit.is_empty() and now - float(hit.at) < CACHE_S:
 		return hit.list
+	var frame := Engine.get_process_frames()
+	if frame != _budget_frame:
+		_budget_frame = frame
+		_budget_used = 0
+	if _budget_used >= FRAME_BUDGET_USEC and DisplayServer.get_name() != "headless":
+		return hit.list if not hit.is_empty() else []  # over this frame's budget: what it knew
 	if _cache.size() >= CACHE_MAX:
 		_cache.clear()
 	var t := Time.get_ticks_usec()
@@ -162,6 +176,7 @@ static func near(from: Node3D, centre: Vector3, radius := SCAN_M) -> Array:
 	var list: Array = area.list
 	FrameCost.spent(&"buildings", t)  # (inside "ai" too when an AI's tick asked)
 	spent_usec += Time.get_ticks_usec() - t
+	_budget_used += Time.get_ticks_usec() - t
 	_cache[key] = {"at": area.at, "list": list}
 	return list
 

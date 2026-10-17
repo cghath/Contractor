@@ -301,6 +301,9 @@ func _process(delta: float) -> void:
 	if _perf_left <= 0.0:
 		_perf_left = PERF_S
 		_write(perf_line())
+		var near := people_near_line()
+		if near != "":
+			_write(near)
 	_mutex.lock()
 	var pending := _pending.duplicate()
 	_pending.clear()
@@ -400,6 +403,40 @@ func _dump(what: String, text: String) -> void:
 ## nav rebakes 2; memory 512 MB; worst frame: ai 30.1 ms, nav 2.0 ms; engine physics ...".
 ## The worst frame's part (costs_text) names what it went on: the systems FrameCost counts, and
 ## the engine's own counts read in that frame.
+## Captain, 2026-10-17 ("were also being consistently followed by civvies throughout all
+## playtests", "walk after us"): every perf line, the people (civilians, HVTs) within
+## PEOPLE_NEAR_M of a player, with what their brain is doing, its order and who leads them, so
+## the next playtest's log shows why they trail the squad. "" with nobody near.
+const PEOPLE_NEAR_M := 30.0
+
+
+func people_near_line() -> String:
+	var tree := get_tree()
+	var layer := PeopleLayer.find(self) if tree else null
+	if layer == null:
+		return ""
+	var players: Array = []
+	for n in tree.get_nodes_in_group(&"combatants"):
+		var s := n as Soldier
+		if s and not s.is_ai() and not Person.is_person(s):
+			players.append(s)
+	var parts := PackedStringArray()
+	for p: Soldier in layer.people():
+		if not p.vitals.is_up():
+			continue
+		var d := INF
+		for pl: Soldier in players:
+			d = minf(d, pl.global_position.distance_to(p.global_position))
+		if d > PEOPLE_NEAR_M:
+			continue
+		var st := layer.state_of(p)
+		var brain := p.get_node_or_null(NodePath(String(PeopleLayer.BRAIN)))
+		parts.append("%s %.0f m: %s, order '%s', led_by '%s'%s" % [p.display_name(), d,
+			String(brain.call(&"status_text")) if brain and brain.has_method(&"status_text") else "?",
+			String(st.get("order", "")), String(st.get("led_by", "")), ", captive" if Person.is_captive(p) else ""])
+	return "people near: " + "; ".join(parts) if not parts.is_empty() else ""
+
+
 func perf_line() -> String:
 	var avg := _perf_sum / maxi(_perf_frames, 1)
 	var ai := 0
