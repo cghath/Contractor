@@ -146,6 +146,20 @@ const MANTLE_ONTO_M := 0.45
 const MANTLE_BASE_S := 0.35
 const MANTLE_PER_M_S := 0.4
 const MANTLE_STAMINA_PER_M := 1.2
+## The LX-3's leap (Captain, 2026-10-17: "make it so its a jump up there like i originally
+## intended", "onto rooves to then clear down buildings, ergo we jump over the compound walls,
+## not on top of them"): with a working exo frame the jump key at a ledge throws the body up in
+## one arc, LEAP_BASE_S + LEAP_PER_M_S a metre, peaking LEAP_APEX_M over the top, instead of the
+## climb. A wide top (a roof) it lands on; a wall (ground LEAP_DROP_M or more below the top
+## within LEAP_OVER_M past its face) it clears, landing on the far side. Same reach, cost and
+## checks as the mantle (find_ledge, can_mantle).
+const LEAP_BASE_S := 0.3
+const LEAP_PER_M_S := 0.06
+const LEAP_OVER_S := 0.15
+const LEAP_APEX_M := 0.6
+const LEAP_OVER_M := 0.9
+const LEAP_DROP_M := 0.9
+const LEAP_LAND_M := 0.45
 const MANTLE_MASK := WORLD_MASK | Vehicle.LAYER
 
 @onready var body: Soldier = get_parent()
@@ -186,6 +200,8 @@ var _lean_latched := 0    # double-tapped: stays leaned
 var _lean_last_tap := {-1: -10.0, 1: -10.0}
 ## Owner-side: held this step because nothing is under the body (no_ground_below).
 var holding := false
+## Whether the last mantle was an LX-3 leap over a wall (landing on its far side).
+var last_over := false
 ## Owner-side: climbing a ledge now (mantle): the step moves the body along the climb.
 var mantling := false
 var _mantle := {}  # "from", "up", "to", "t", "s", "stance"
@@ -526,6 +542,11 @@ func find_ledge() -> Dictionary:
 	var height := top.y - feet.y
 	if height < MANTLE_MIN_M or height > reach:
 		return {}
+	if ExoFrame.working(body.inventory):
+		var vault := _leap_over(top, fwd, exclude)
+		if not vault.is_empty():
+			vault.h = height
+			return vault
 	# Room to rise straight up beside the face (crouched), then on top to crouch at least.
 	var land := top + fwd * maxf(MANTLE_ONTO_M - 0.2, 0.1)
 	if not _capsule_fits(Vector3(feet.x, top.y + 0.05, feet.z), STANCE_CAPSULE[Stance.CROUCH_HIGH], exclude):
@@ -534,6 +555,32 @@ func find_ledge() -> Dictionary:
 		return {}
 	var ends := Stance.STAND_HIGH if _capsule_fits(land + Vector3.UP * 0.05, STANCE_CAPSULE[Stance.STAND_HIGH], exclude) else Stance.CROUCH_HIGH
 	return {"top": land, "h": height, "stance": ends}
+
+
+## A leap over the wall whose top is at `top`: the far side's ground (LEAP_DROP_M or more below the
+## top within LEAP_OVER_M past the face), landing LEAP_LAND_M beyond it with room to stand or
+## crouch, and room to pass over the top; {} for a wide top (a roof: land on it) or no landing.
+func _leap_over(top: Vector3, fwd: Vector3, exclude: Array[RID]) -> Dictionary:
+	var space := body.get_world_3d().direct_space_state
+	for d: float in [0.45, LEAP_OVER_M]:
+		var from := top + fwd * d + Vector3.UP * 0.3
+		var hit := space.intersect_ray(PhysicsRayQueryParameters3D.create(from, from + Vector3.DOWN * 6.0, MANTLE_MASK, exclude))
+		if hit.is_empty():
+			continue
+		var ground: Vector3 = hit.position
+		if ground.y > top.y - LEAP_DROP_M:
+			return {}  # the top goes on: a roof, landed on
+		var land := ground + fwd * LEAP_LAND_M
+		var probe := space.intersect_ray(PhysicsRayQueryParameters3D.create(land + Vector3.UP * 1.0, land + Vector3.DOWN * 1.5, MANTLE_MASK, exclude))
+		if not probe.is_empty():
+			land = probe.position
+		if not _capsule_fits(top + Vector3.UP * 0.1, STANCE_CAPSULE[Stance.CROUCH_HIGH], exclude):
+			return {}  # no room over the top
+		if not _capsule_fits(land + Vector3.UP * 0.05, STANCE_CAPSULE[Stance.CROUCH_HIGH], exclude):
+			return {}
+		var ends := Stance.STAND_HIGH if _capsule_fits(land + Vector3.UP * 0.05, STANCE_CAPSULE[Stance.STAND_HIGH], exclude) else Stance.CROUCH_HIGH
+		return {"top": land, "edge": top, "over": true, "stance": ends}
+	return {}
 
 
 ## Whether a capsule `height` tall (a hair under the body's radius), its bottom at `at`, meets
@@ -573,8 +620,13 @@ func try_mantle() -> bool:
 	set_stance(Stance.CROUCH_HIGH)
 	mounted = false
 	mantling = true
+	var leap := ExoFrame.working(body.inventory)
+	last_over = leap and ledge.get("over", false)
+	var seconds := MANTLE_BASE_S + MANTLE_PER_M_S * float(ledge.h)
+	if leap:
+		seconds = LEAP_BASE_S + LEAP_PER_M_S * float(ledge.h) + (LEAP_OVER_S if ledge.get("over", false) else 0.0)
 	_mantle = {"from": feet, "up": Vector3(feet.x, top.y + 0.05, feet.z), "to": top + Vector3.UP * 0.02, "t": 0.0,
-		"s": MANTLE_BASE_S + MANTLE_PER_M_S * float(ledge.h), "stance": int(ledge.stance)}
+		"s": seconds, "stance": int(ledge.stance), "leap": leap, "edge": ledge.get("edge", top)}
 	stamina -= cost
 	_settle_winded()
 	body.report_exertion()
@@ -593,7 +645,17 @@ func _mantle_step(delta: float, down: bool) -> void:
 	var from: Vector3 = _mantle.from
 	var up: Vector3 = _mantle.up
 	var to: Vector3 = _mantle.to
-	if t < 0.6:
+	if _mantle.get("leap", false):
+		# One arc (a curve through a high control point): onto a roof it's pulled up over the
+		# take-off spot, so the body rises first and then carries over the edge; over a wall it's
+		# over the wall, high enough that the arc's middle clears the top by LEAP_APEX_M.
+		var edge: Vector3 = _mantle.edge
+		var peak := Vector3(from.x, to.y + LEAP_APEX_M * 2.0, from.z)
+		if to.y < edge.y - 0.1:
+			peak = Vector3(edge.x, 2.0 * (edge.y + LEAP_APEX_M) - 0.5 * (from.y + to.y), edge.z)
+		var u := 1.0 - t
+		body.global_position = from * (u * u) + peak * (2.0 * u * t) + to * (t * t)
+	elif t < 0.6:
 		body.global_position = from.lerp(up, smoothstep(0.0, 1.0, t / 0.6))
 	else:
 		body.global_position = up.lerp(to, smoothstep(0.0, 1.0, (t - 0.6) / 0.4))

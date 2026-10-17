@@ -52,7 +52,8 @@ func _ready() -> void:
 	player.inventory.take(&"exo_frame_light")
 	await get_tree().physics_frame
 	check(absf(player.movement.mantle_reach() - SoldierMovement.MANTLE_MAX_M - 1.3) < 0.01, "the LX-3's legs reach 1.3 m higher (%.1f m)" % player.movement.mantle_reach())
-	await _case("2.3 m wall in the LX-3", 2.3, -1.0, true)
+	await _case("2.3 m block (a roof) in the LX-3", 2.3, -1.0, true)
+	await _leap_over_wall()
 	player.inventory.unequip(ExoFrame.SLOT)
 	await _ai_climb("1.7 m block", 1.7, false, true)
 	await _ai_climb("2.3 m wall in the LX-3", 2.3, true, true)
@@ -133,8 +134,9 @@ func _case(label: String, h: float, roof: float, climbs: bool) -> void:
 	var t0 := Time.get_ticks_msec()
 	await _wait_for(func() -> bool: return not player.movement.mantling, 4.0)
 	var took := (Time.get_ticks_msec() - t0) / 1000.0
-	var want := SoldierMovement.MANTLE_BASE_S + SoldierMovement.MANTLE_PER_M_S * h
-	check(absf(took - want) < 0.35, "%s: took %.2f s (about %.2f)" % [label, took, want])
+	var leap := ExoFrame.working(player.inventory)  # the LX-3 leaps: one quick arc
+	var want := (SoldierMovement.LEAP_BASE_S + SoldierMovement.LEAP_PER_M_S * h) if leap else (SoldierMovement.MANTLE_BASE_S + SoldierMovement.MANTLE_PER_M_S * h)
+	check(absf(took - want) < 0.35, "%s: %s in %.2f s (about %.2f)" % [label, "leapt" if leap else "took", took, want])
 	await _seconds(0.3)
 	var feet := player.global_position.y - ground
 	check(absf(feet - h) < 0.15 and player.global_position.z < AT.z - 1.0, "%s: on top (feet %.2f m up, z %.2f)" % [label, feet, player.global_position.z - AT.z])
@@ -171,6 +173,25 @@ func _ai_climb(label: String, h: float, exo: bool, climbs: bool) -> void:
 		check(not saw_mantle[0] and feet < 0.3 and ai.ordered.is_empty(), "AI, %s: out of reach, the order ends at the wall (feet %.2f m up, %.1f m from the spot, %s)" % [label, feet, Vector2(mate.global_position.x - top.x, mate.global_position.z - top.z).length(), ai.status_text()])
 	mate.queue_free()
 	await get_tree().physics_frame
+
+
+## In the LX-3, a 2.2 m compound wall 0.25 m thick: the leap clears it and lands on the far side
+## (Captain, 2026-10-17: "we jump over the compound walls, not on top of them").
+func _leap_over_wall() -> void:
+	for b in _blocks:
+		b.queue_free()
+	_blocks.clear()
+	var ground := level.ground_point(AT).y
+	_blocks.append(_box(Vector3(12, 1, 12), AT + Vector3(0, ground - 0.5, 0)))
+	_blocks.append(_box(Vector3(3, 2.2, 0.25), AT + Vector3(0, ground + 1.1, -1.125)))  # its face 0.6 m ahead
+	await get_tree().physics_frame
+	await _stand_facing(ground)
+	check(player.movement.try_mantle(), "2.2 m compound wall in the LX-3: a leap")
+	await _wait_for(func() -> bool: return not player.movement.mantling, 4.0)
+	await _seconds(0.3)
+	var feet := player.global_position.y - ground
+	check(player.movement.last_over and player.global_position.z < AT.z - 1.4 and feet < 0.3,
+		"over it, landing on the far side (feet %.2f m up, z %.2f past the wall's face)" % [feet, -(player.global_position.z - (AT.z - 1.0))])
 
 
 func _prone() -> void:

@@ -2795,6 +2795,9 @@ func _tactic_climb(t: Dictionary) -> void:
 	if mv.mantling:
 		_has_destination = false
 		return
+	if t.get("leapt", false) and mv.last_over:
+		_tactic_done(t)  # an LX-3 leapt the wall: over it is where it was going (not back)
+		return
 	var up_there := body.global_position.y >= point.y - CLIMB_UP_M
 	var d := point - body.global_position
 	var flat := Vector2(d.x, d.z).length()  # (not _flat_distance: the spot is a floor up, on purpose)
@@ -2812,6 +2815,7 @@ func _tactic_climb(t: Dictionary) -> void:
 	if not ledge.is_empty() and (ledge.top as Vector3).y > body.global_position.y + 0.3:
 		_has_destination = false
 		body.want_mantle = true
+		t.leapt = true
 		return
 	if at_wall:
 		if not t.has("at_wall"):
