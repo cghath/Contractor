@@ -1823,6 +1823,36 @@ func _server_radio_contract() -> void:
 	_client_message.rpc_id(owner_peer(), text)
 
 
+## Captain, 2026-10-17 (deception): on a looted enemy radio, this player calls in a fake contact
+## SPOOF_RANGE_M out the way he faces, as one of theirs (EnemyCommand.server_spoof). He's told
+## whether they bought it, caught it (the net switches frequency) or there's nobody listening.
+const SPOOF_RANGE_M := 250.0
+const SPOOF_MEN := 4
+
+
+@rpc("any_peer", "call_local", "reliable")
+func _server_spoof_radio() -> void:
+	if not multiplayer.is_server() or not _from_owner() or not vitals.is_up():
+		return
+	var command := EnemyCommand.of(self)
+	var radio := CompoundLevel.current(self).get_node_or_null(^"RadioChatter") as RadioChatter if CompoundLevel.current(self) else null
+	var text := "Dead air: nobody on that net"
+	if command and radio and radio.tuned and RadioChatter.carried(self, RadioChatter.ENEMY_TAG) > 0:
+		var ahead := -global_transform.basis.z
+		ahead.y = 0.0
+		var at := global_position + ahead.normalized() * SPOOF_RANGE_M
+		var lvl := CompoundLevel.current(self)
+		if lvl and lvl.has_method(&"ground_point"):
+			at = lvl.call(&"ground_point", at)
+		var before := command.spoofs
+		var ok := command.server_spoof(at, SPOOF_MEN)
+		if ok:
+			text = "They bought it: contact reported %s, %.0f m out" % [RadioChatter.compass(global_position, at), SPOOF_RANGE_M]
+		elif command.spoofs > before:
+			text = "They caught it: the net's gone quiet (they changed frequency)"
+	_client_message.rpc_id(owner_peer(), text)
+
+
 ## Puts down the body this soldier carries or drags.
 @rpc("any_peer", "call_local", "reliable")
 func _server_release_body() -> void:

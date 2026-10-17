@@ -2852,6 +2852,8 @@ func _climb_toward(t: Dictionary, done_m: float) -> int:
 const FOLLOW_CLIMB_DY := 1.2
 const FOLLOW_CLIMB_M := 25.0
 const FOLLOW_CLIMB_NEAR_M := 3.0
+## Beside the lead (m) where a follower climbs up, not onto him (_follow_up_to_lead).
+const FOLLOW_CLIMB_SIDE_M := 1.5
 const FOLLOW_CLIMB_RETRY_S := 20.0
 var _follow_climb := {}
 var _follow_climb_retry := -1000.0
@@ -2872,9 +2874,14 @@ func _follow_up_to_lead() -> bool:
 		var path := NavigationServer3D.map_get_path(body.get_world_3d().navigation_map, body.global_position, at, true)
 		if not path.is_empty() and absf(path[path.size() - 1].y - at.y) < 1.0 and Vector2(path[path.size() - 1].x - at.x, path[path.size() - 1].z - at.z).length() < 3.0:
 			return false  # stairs or a ramp up there: the usual follow walks it
+	# Not onto the lead himself: his capsule stands on the landing, so the mantle never starts. A
+	# spot FOLLOW_CLIMB_SIDE_M beside him along the edge (left or right by squad slot).
+	var toward := Vector3(at.x - body.global_position.x, 0.0, at.z - body.global_position.z)
+	var side := toward.normalized().cross(Vector3.UP) * (FOLLOW_CLIMB_SIDE_M if body.squad_slot % 2 == 0 else -FOLLOW_CLIMB_SIDE_M)
+	var spot := at + side
 	if _follow_climb.is_empty():
-		_follow_climb = {"point": at}
-	_follow_climb.point = at
+		_follow_climb = {"point": spot}
+	_follow_climb.point = spot
 	var r := _climb_toward(_follow_climb, FOLLOW_CLIMB_NEAR_M)
 	if r == CLIMB_CANT:
 		_follow_climb_retry = Soldier._now() + FOLLOW_CLIMB_RETRY_S
