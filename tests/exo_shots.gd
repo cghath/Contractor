@@ -35,7 +35,7 @@ func _ready() -> void:
 	player.set_physics_process(false)
 	player.global_position = Vector3(12, 0.1, 31)
 	player.rotation.y = 0.0
-	for id: StringName in [&"plate_carrier", &"helmet", &"m4a1"]:
+	for id: StringName in [&"plate_carrier", &"plate_steel_l3", &"helmet_lx3", &"m4a1"]:
 		player.inventory.take(id)
 	player.inventory.take(&"exo_frame_light")
 	for i in 90:  # the draw animation (DRAW_S) and the hand easing onto the grip need real time
@@ -64,6 +64,11 @@ func _ready() -> void:
 	await _shot(camera, out, "exo_arms_side", c + Vector3(-1.0, -0.1, -0.3), c + Vector3(0, -0.2, 0))
 	await _shot(camera, out, "exo_shoulder_closeup", c + Vector3(0.9, 0.3, -0.9), c + Vector3(0.22, 0.28, 0.0))
 	await _shot(camera, out, "exo_shoulder_front", c + Vector3(0.0, 0.3, -1.1), c + Vector3(0.1, 0.3, 0.0))
+	# The LX-3 Faceguard Helmet: cheek plates and mandible (front three-quarter, side).
+	var head: Vector3 = player.global_position + Vector3(0, 1.62, 0)
+	await _shot(camera, out, "helmet_lx3_front", head + Vector3(0.35, 0.05, -0.75), head)
+	await _shot(camera, out, "helmet_lx3_side", head + Vector3(-0.8, 0.05, -0.1), head)
+	await _shot(camera, out, "exo_pads_front_low", c + Vector3(0.4, -0.6, -1.4), c + Vector3(0, -0.6, 0))
 
 	# Disable the frame (run it to 0 hp) and shoot the same set again: the light goes red.
 	ExoFrame.server_damage(player, 1000.0)

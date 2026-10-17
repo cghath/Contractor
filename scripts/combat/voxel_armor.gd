@@ -525,13 +525,17 @@ static func _helmet_shape(stats: Dictionary) -> Dictionary:
 				elif absf(d.x) > r.x - 3.0 and d.y > r.y * 0.2 and d.y < r.y * 0.35:
 					v = ACCENT  # side rails
 		elif guard:
-			var flat := Vector3(d.x, 0.0, d.z)
-			if _superellipse(flat / inner) <= 1.0:
+			# Hugging the jaw (JAW_R, an ellipse, rounder than the dome), tucked in under the
+			# shell's rim the way a mandible hangs off the rails, narrowing to the chin.
+			var jaw := JAW_R * (1.0 - clampf((-d.y - 9.0) / 7.0, 0.0, 1.0) * 0.18)
+			var e_out := (d.x / jaw.x) ** 2 + (d.z / jaw.y) ** 2
+			var e_in := (d.x / (jaw.x - th)) ** 2 + (d.z / (jaw.y - th)) ** 2
+			if e_in <= 1.0:
 				v = INTERIOR
-			elif _superellipse(flat / r) <= 1.0:
-				if d.z > -r.z * 0.6 and d.z < r.z * 0.1 and d.y >= -14.0:
+			elif e_out <= 1.0:
+				if d.z > -jaw.y * 0.55 and d.z < r.z * 0.1 and d.y >= -14.0:
 					v = FACEPLATE  # cheek plates, down from the side rails over the ears
-				elif d.z <= -r.z * 0.6 and d.y >= -16.0 and d.y < -5.0:
+				elif d.z <= -jaw.y * 0.55 and d.y >= -16.0 and d.y < -5.0:
 					v = FACEPLATE  # the mandible, over the mouth and chin (the eyes stay open)
 		else:
 			var flat := Vector3(d.x, 0.0, d.z)
@@ -565,10 +569,19 @@ static func _guard_shape(stats: Dictionary) -> Dictionary:
 		var d := Vector3(c.x + 0.5 - pivot.x, 0.0, c.z + 0.5 - pivot.z)
 		if absf(d.x) < hx and absf(d.z) < hz:
 			return INTERIOR
+		if absf(d.x) >= hx + th - 1.0 and absf(d.z) >= hz + th - 1.0:
+			return EMPTY  # its outer corners chamfered: a pad, not a box
+		if (c.y == 0 or c.y == h - 1) and (absf(d.x) >= hx + th - 1.0 or absf(d.z) >= hz + th - 1.0):
+			return EMPTY  # and its outer edges stepped at the ends
 		if (d.x >= hx and "+x" in walls) or (d.x <= -hx and "-x" in walls) 				or (d.z <= -hz and "front" in walls) or (d.z >= hz and "back" in walls):
 			return INTACT
 		return EMPTY
 	return {"dims": dims, "pivot": pivot, "cells": cells}
+
+
+## A face guard's half-width (x) and half-depth (z) round the jaw, voxels: the head's 0.22 m
+## width and 0.12 m face inside a 3-voxel plate.
+const JAW_R := Vector2(14.5, 15.5)
 
 
 static func _superellipse(v: Vector3) -> float:
