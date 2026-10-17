@@ -15,8 +15,9 @@ extends Area3D
 ## travel with the plate or helmet. The mesh is rebuilt by replaying them, so every peer,
 ## including late joiners, sees the same damage.
 ##
-## Shapes come from the item's stats: "shape": "plate" (width/height/thickness_vox) or
-## "helmet" (tier light/medium/heavy). The strike face of a plate is -Z. "dent_radius" and
+## Shapes come from the item's stats: "shape": "plate" (width/height/thickness_vox),
+## "helmet" (tier light/medium/heavy) or "guard" (an exo frame's limb pad: a sleeve round a
+## limb, see _guard_shape). The strike face of a plate is -Z. "dent_radius" and
 ## "chip_radius" (voxels, scaled by the weapon's "plate_wear") size a stop's dent and a
 ## penetration's hole.
 
@@ -49,6 +50,11 @@ var item: ItemData
 var cover := Color(0, 0, 0, 0)
 var slot: StringName
 var inventory: Inventory
+## An exo frame's pad (ExoFrame.pad_items): its id, whose state lives in the frame slot's
+## state under "pads" (so it travels with the frame), and the body part it covers ("" for
+## plates and helmets, which work theirs out).
+var pad := ""
+var body_part: StringName = &""
 
 var _base: Dictionary
 var _buffer: VoxelBuffer
@@ -206,6 +212,8 @@ static func make_chip(cell: Vector3i, radius: float, kind: int, local_dir: Vecto
 ## The item state this piece shows: its slot's in the wearer's inventory, or the state of
 ## the WorldItem it lies in.
 func item_state() -> Dictionary:
+	if inventory and pad != "":
+		return ExoFrame.pad_state(inventory, pad)
 	if inventory:
 		return inventory.state_of(slot)
 	var loose := get_parent() as WorldItem
@@ -222,7 +230,7 @@ func wearer() -> Node3D:
 ## redraws it), or this piece alone.
 func _record_hit(new_chip: Array, changes: Dictionary) -> void:
 	if inventory:
-		inventory.add_armor_hit(slot, new_chip, changes)
+		inventory.add_armor_hit(slot, new_chip, changes, pad)
 		return
 	var loose := get_parent() as WorldItem
 	if loose:
@@ -235,9 +243,11 @@ func _record_hit(new_chip: Array, changes: Dictionary) -> void:
 	apply_damage(chips, ArmorRules.is_shattered(_own_state))
 
 
-## The body part behind the strike point: HEAD for a helmet, else the torso part (CHEST or
-## ABDOMEN) at that height.
+## The body part behind the strike point: an exo pad's own part, HEAD for a helmet, else the
+## torso part (CHEST or ABDOMEN) at that height.
 func part_behind(hit_position: Vector3) -> StringName:
+	if body_part != &"":
+		return body_part
 	if slot == &"helmet":
 		return Vitals.HEAD
 	var body := wearer()
@@ -337,6 +347,9 @@ func _dent(center: Vector3i, radius: float, dir: Vector3) -> void:
 ## helmet the main axis of the shell's normal there (the superellipsoid's gradient, flat for
 ## the ear covers below the dome's base; a visor is Z).
 func _thickness_axis(c: Vector3i) -> int:
+	if item and item.stats.get("shape", "plate") == "guard":
+		var hollow: Array = item.stats.get("hollow_vox", [12, 12])
+		return 0 if absf(c.x + 0.5 - _base.pivot.x) >= float(hollow[0]) * 0.5 else 2
 	if item == null or item.stats.get("shape", "plate") != "helmet":
 		return 2
 	var pivot: Vector3 = _base.pivot
@@ -458,6 +471,8 @@ static func _get_base(p_item: ItemData) -> Dictionary:
 	var shape: Dictionary
 	if stats.get("shape", "plate") == "helmet":
 		shape = _helmet_shape(stats)
+	elif stats.get("shape", "plate") == "guard":
+		shape = _guard_shape(stats)
 	else:
 		var dims := Vector3i(int(stats.get("width_vox", 25)), int(stats.get("height_vox", 30)), int(stats.get("thickness_vox", 2)))
 		shape = {"dims": dims, "pivot": Vector3(dims) * 0.5, "cells": func(_c: Vector3i) -> int: return INTACT}
@@ -517,6 +532,30 @@ static func _helmet_shape(stats: Dictionary) -> Dictionary:
 			v = ACCENT if frame else VISOR
 		return v
 	return {"dims": dims, "pivot": Vector3(r.x, below, r.z), "cells": cells}
+
+
+## An exo frame's limb pad (ExoFrame): a sleeve of "height_vox" along the limb (Y) round a
+## hollow of "hollow_vox" [x, z] where the limb is, with walls "thickness_vox" thick on the
+## sides "walls" names ("+x", "-x", "front" = -Z, "back" = +Z); the other sides are open. The
+## hollow is the limb's space (like a helmet's head space): a round that reaches it, through an
+## open side or a hole, has met no armour. The pivot is the middle of the hollow.
+static func _guard_shape(stats: Dictionary) -> Dictionary:
+	var hollow: Array = stats.get("hollow_vox", [12, 12])
+	var th := int(stats.get("thickness_vox", 2))
+	var h := int(stats.get("height_vox", 12))
+	var walls: Array = stats.get("walls", ["+x", "-x", "front", "back"])
+	var hx := float(hollow[0]) * 0.5
+	var hz := float(hollow[1]) * 0.5
+	var dims := Vector3i(int(hollow[0]) + th * 2, h, int(hollow[1]) + th * 2)
+	var pivot := Vector3(dims.x * 0.5, h * 0.5, dims.z * 0.5)
+	var cells := func(c: Vector3i) -> int:
+		var d := Vector3(c.x + 0.5 - pivot.x, 0.0, c.z + 0.5 - pivot.z)
+		if absf(d.x) < hx and absf(d.z) < hz:
+			return INTERIOR
+		if (d.x >= hx and "+x" in walls) or (d.x <= -hx and "-x" in walls) 				or (d.z <= -hz and "front" in walls) or (d.z >= hz and "back" in walls):
+			return INTACT
+		return EMPTY
+	return {"dims": dims, "pivot": pivot, "cells": cells}
 
 
 static func _superellipse(v: Vector3) -> float:

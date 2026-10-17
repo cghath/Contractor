@@ -103,6 +103,8 @@ const PACK_SWAY := [2.4, 0.35, 0.04, 1.0, 0.25, 0.32]  # freq, damping, reach, g
 const POUCH_SWAY := [4.0, 0.3, 0.012, 1.0, 0.0, 0.06]
 
 var _armor: Dictionary = {}        # slot -> VoxelArmor
+var _pads: Dictionary = {}         # exo pad id -> VoxelArmor (ExoFrame.pad_items)
+var _pads_for: StringName = &""    # the frame they were built for
 var _chip_counts: Dictionary = {}  # slot -> chips already applied to the mesh
 var _gear: Dictionary = {}    # key -> [item id, Node3D]
 var _held_key: StringName = &""  # which _gear entry is in the hands
@@ -154,7 +156,22 @@ func armor_rids() -> Array[RID]:
 	var rids: Array[RID] = []
 	for piece: VoxelArmor in _armor.values():
 		rids.append(piece.get_rid())
+	for piece: VoxelArmor in _pads.values():
+		rids.append(piece.get_rid())
 	return rids
+
+
+## Remaining fraction of exo pad `pad`'s protection (as armor_integrity), or -1 if none.
+func pad_integrity(pad: String) -> float:
+	var piece: VoxelArmor = _pads.get(pad)
+	if piece == null:
+		return -1.0
+	return minf(ArmorRules.integrity(ExoFrame.pad_state(inventory, pad)), piece.integrity())
+
+
+## The worn exo frame's pads, by id.
+func pads() -> Dictionary:
+	return _pads
 
 
 ## Remaining fraction of an armor slot's protection, or -1 if nothing is worn there: the
@@ -174,6 +191,12 @@ func armor_summary(separator := "  ") -> String:
 	var frame := ExoFrame.summary(inventory)
 	if frame != "":
 		parts.append(frame)
+	if not _pads.is_empty():  # the weakest pad: "Pads III++ 71%"
+		var worst := 1.0
+		for pad: String in _pads:
+			worst = minf(worst, pad_integrity(pad))
+		var any: VoxelArmor = _pads.values()[0]
+		parts.append("Pads %s %s" % [ArmorRules.rating(any.item), ArmorRules.failed_text(any.item) if worst <= 0.0 else "%d%%" % roundi(worst * 100.0)])
 	for slot: StringName in ARMOR_SLOTS:
 		var integrity := armor_integrity(slot)
 		if integrity < 0.0:
@@ -231,13 +254,40 @@ func _rebuild() -> void:
 	_set_pouches()
 	_set_pack_straps(pack)
 	_set_name_tape(carrier)
+	_set_exo_pads()
 	_refresh_plate_damage()
 	_set_exo_frame()
 
 
+## The worn exo frame's armour pads (ExoFrame.pad_items): VoxelArmor pieces on the bones of
+## the parts they cover, rebuilt when the frame changes.
+func _set_exo_pads() -> void:
+	var frame := ExoFrame.worn(inventory)
+	var id: StringName = frame.id if frame else &""
+	if id == _pads_for:
+		return
+	_pads_for = id
+	for piece: VoxelArmor in _pads.values():
+		piece.queue_free()
+	_pads.clear()
+	for pad: Dictionary in ExoFrame.pad_items(frame):
+		var bone := model.part_node(pad.part)
+		if bone == null:
+			continue
+		var piece := VoxelArmor.new()
+		piece.pad = pad.id
+		piece.body_part = pad.part
+		bone.add_child(piece)
+		piece.setup(pad.item, ExoFrame.SLOT, inventory, render_layers)
+		piece.name = "ExoPad_" + pad.id
+		piece.transform = pad.at
+		_pads[pad.id] = piece
+		_chip_counts["pad:" + pad.id] = 0
+
+
 ## The light exo frame's struts on the body (ExoFrame.dress), rebuilt when it's put on, taken
 ## off, or goes from working to disabled.
-const EXO_SPINE_DEPTH := 0.07
+const EXO_SPINE_DEPTH := 0.095  # the spine pack and its armour pad
 var _exo_key := ""
 func _set_exo_frame() -> void:
 	var item := ExoFrame.worn(inventory)
@@ -956,6 +1006,11 @@ func _refresh_plate_damage() -> void:
 		if chips.size() != _chip_counts.get(slot, -1):
 			_armor[slot].apply_damage(chips, ArmorRules.is_shattered(inventory.state_of(slot)))
 			_chip_counts[slot] = chips.size()
+	for pad: String in _pads:
+		var chips := inventory.chips_in(ExoFrame.SLOT, pad)
+		if chips.size() != _chip_counts.get("pad:" + pad, -1):
+			_pads[pad].apply_damage(chips, ArmorRules.is_shattered(ExoFrame.pad_state(inventory, pad)))
+			_chip_counts["pad:" + pad] = chips.size()
 
 
 ## `state`: the item's state, for a model that shows it (a rifle's optic, P0362).
@@ -994,6 +1049,10 @@ func _clear() -> void:
 	for piece: VoxelArmor in _armor.values():
 		piece.queue_free()
 	_armor.clear()
+	for piece: VoxelArmor in _pads.values():
+		piece.queue_free()
+	_pads.clear()
+	_pads_for = &""
 	for entry: Array in _gear.values():
 		entry[1].queue_free()
 	_gear.clear()

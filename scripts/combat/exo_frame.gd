@@ -14,8 +14,17 @@ extends RefCounted
 ##   round goes on into the body, a little slowed (STRUT_ENERGY_LOSS). At 0 it's disabled: no
 ##   assist, so the wearer is back to normal walking with the normal weight debuffs, frame and
 ##   all ("slowing the user down to normal walk speed with the regular weight debuffs").
-## Its integrity lives in the slot's state ("hp"; "disabled"), so it travels with the item and
-## every peer sees it (Inventory.net_state). Numbers proposed.
+## - Armour pads (Captain, 2026-10-16: "they'll use the armor chipping system we already use,
+##   be Steel III++ rated and absorb all spall"): its "pads" (shoulders, forearms, thighs,
+##   shins, stomach, spine pack) are real armour, VoxelArmor pieces on the body like plates
+##   (GearRig), with the frame's "pad_armor" stats (steel III++: ArmorRules dents, wear-through
+##   and integrity). A pad that stops a round lands an impact on the part under it; one the
+##   round gets through lets it on into the body. They're spall-coated (they throw none), and
+##   the frame's "spall_cover" keeps a plate's spall off the arms and neck. Working or not,
+##   the pads still protect.
+## Its integrity lives in the slot's state ("hp"; "disabled"; each pad's chips and integrity
+## under "pads"), so it travels with the item and every peer sees it (Inventory.net_state).
+## Numbers proposed.
 
 const SLOT := &"exo"
 ## Chance a round into this part strikes the frame (the back: only from behind).
@@ -29,6 +38,45 @@ const FRAGMENT_HP := 6.0
 const STRUT_ENERGY_LOSS := 0.1
 ## Tests: the strut roll (0..1) instead of randf(), or NAN.
 static var roll_override := NAN
+
+
+static var _pad_items: Dictionary = {}  # "<frame id>:<pad id>" -> ItemData
+
+
+## The pads of `frame` (its stats' "pads"): [{"id", "part" (a Vitals part), "item" (an
+## ItemData with the frame's "pad_armor" stats and the pad's shape, "outer" walls turned to
+## the limb's own side), "at" (Transform3D on the part's bone, CharacterModel.part_node)}].
+static func pad_items(frame: ItemData) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	if frame == null:
+		return out
+	for spec: Dictionary in frame.stats.get("pads", []):
+		var key := "%s:%s" % [frame.id, spec.id]
+		if not _pad_items.has(key):
+			var stats: Dictionary = (frame.stats.get("pad_armor", {}) as Dictionary).duplicate(true)
+			for k: String in spec:
+				if not k in ["id", "part", "at", "facing"]:
+					stats[k] = spec[k]
+			var side := "-x" if String(spec.part).ends_with("_l") else "+x"
+			stats["walls"] = (spec.get("walls", []) as Array).map(func(w: String) -> String: return side if w == "outer" else w)
+			stats["thickness_vox"] = int(stats.get("thickness_vox", 2))
+			_pad_items[key] = ItemData.from_dict({"id": key, "name": "%s pad" % frame.name, "type": "plate", "stats": stats})
+		var at: Array = spec.get("at", [0, 0, 0])
+		var basis := Basis(Vector3.UP, PI) if spec.get("facing", "front") == "back" else Basis.IDENTITY
+		out.append({"id": String(spec.id), "part": StringName(spec.part), "item": _pad_items[key],
+			"at": Transform3D(basis, Vector3(float(at[0]), float(at[1]), float(at[2])))})
+	return out
+
+
+## The state of pad `pad` of the frame `inventory` wears (its chips and integrity).
+static func pad_state(inventory: Inventory, pad: String) -> Dictionary:
+	return inventory.state_of(SLOT).get("pads", {}).get(pad, {}) if inventory else {}
+
+
+## Body areas (ArmorRules.SPALL_AREAS) the worn frame keeps spall off.
+static func spall_cover(inventory: Inventory) -> Array:
+	var item := worn(inventory)
+	return item.stats.get("spall_cover", []) if item else []
 
 
 ## The frame `inventory` wears, or null.
@@ -130,18 +178,19 @@ static func dress(model: CharacterModel, item: ItemData, disabled: bool, layers:
 		var fore := model.part_node(Vitals.FOREARM_R if r else Vitals.FOREARM_L)
 		var thigh := model.part_node(Vitals.THIGH_R if r else Vitals.THIGH_L)
 		var shin := model.part_node(Vitals.SHIN_R if r else Vitals.SHIN_L)
-		_box(upper, Vector3(0.025, 0.26, 0.035), Vector3(side * 0.072, -0.15, 0.0), STRUT, layers)
-		_box(upper, Vector3(0.05, 0.05, 0.05), Vector3(side * 0.072, -0.31, 0.0), JOINT, layers)  # elbow hinge
+		# The struts ride on the outside of the armour pads (pad_items, GearRig), bolted over them.
+		_box(upper, Vector3(0.025, 0.26, 0.035), Vector3(side * 0.097, -0.15, 0.0), STRUT, layers)
+		_box(upper, Vector3(0.05, 0.05, 0.05), Vector3(side * 0.09, -0.31, 0.0), JOINT, layers)  # elbow hinge
 		# Captain, 2026-10-16 ("connected arm to shoulder"): a shoulder joint housing at the arm's
 		# own pivot (part_node's origin), so it always sits at the joint as the arm swings, bridging
 		# the upper-arm strut up to the torso-mounted pylon above it.
 		_box(upper, Vector3(0.065, 0.09, 0.065), Vector3(side * 0.072, 0.02, 0.0), JOINT, layers)
-		_box(fore, Vector3(0.022, 0.19, 0.03), Vector3(side * 0.066, -0.11, 0.0), STRUT, layers)
+		_box(fore, Vector3(0.022, 0.19, 0.03), Vector3(side * 0.09, -0.11, 0.0), STRUT, layers)
 		_box(fore, Vector3(0.09, 0.03, 0.09), Vector3(0.0, -0.2, 0.0), JOINT, layers)  # wrist cuff
-		_box(thigh, Vector3(0.06, 0.06, 0.06), Vector3(side * 0.1, -0.02, 0.0), JOINT, layers)  # hip joint
-		_box(thigh, Vector3(0.03, 0.36, 0.04), Vector3(side * 0.1, -0.22, 0.0), STRUT, layers)
-		_box(thigh, Vector3(0.06, 0.06, 0.06), Vector3(side * 0.1, -0.45, 0.0), JOINT, layers)  # knee hinge
-		_box(shin, Vector3(0.03, 0.38, 0.04), Vector3(side * 0.095, -0.22, 0.0), STRUT, layers)
+		_box(thigh, Vector3(0.06, 0.06, 0.06), Vector3(side * 0.11, -0.02, 0.0), JOINT, layers)  # hip joint
+		_box(thigh, Vector3(0.03, 0.36, 0.04), Vector3(side * 0.11, -0.22, 0.0), STRUT, layers)
+		_box(thigh, Vector3(0.06, 0.06, 0.06), Vector3(side * 0.11, -0.45, 0.0), JOINT, layers)  # knee hinge
+		_box(shin, Vector3(0.03, 0.38, 0.04), Vector3(side * 0.1, -0.22, 0.0), STRUT, layers)
 		_box(shin, Vector3(0.12, 0.035, 0.14), Vector3(0.0, -0.4, 0.0), JOINT, layers)  # ankle cuff
 		# Shoulder actuator pylon, up over the shoulder from the spine pack. Captain, 2026-10-16
 		# ("these weird things V", a screenshot of the old strut+cap reading as a disconnected V):
@@ -155,9 +204,9 @@ static func dress(model: CharacterModel, item: ItemData, disabled: bool, layers:
 		# way a real backpack strap rests on the shoulder rather than binding to the arm itself.
 		_box(model.torso, Vector3(0.07, 0.05, 0.22), Vector3(side * 0.08, 0.57, 0.08), STRUT, layers)
 		_box(model.torso, Vector3(0.06, 0.16, 0.055), Vector3(side * 0.08, 0.47, -0.04), STRUT, layers)
-	# Spine power pack, the hip belt round the waist, the status light.
+	# Spine power pack (its armour pad, "spine", covers its back face), the hip belt round the
+	# waist, the status light.
 	_box(model.torso, Vector3(0.16, 0.36, 0.07), Vector3(0.0, 0.3, 0.2), JOINT, layers)
-	_box(model.torso, Vector3(0.12, 0.3, 0.02), Vector3(0.0, 0.3, 0.237), STRUT, layers)
 	# Captain, 2026-10-16 ("the hip/waist area shouldn't be a flat pane"): a proper belt, built
 	# from front, back and side plates round the waist, not one flat slab spanning it.
 	_box(model.torso, Vector3(0.34, 0.09, 0.055), Vector3(0.0, 0.03, -0.11), JOINT, layers)  # front
@@ -167,7 +216,7 @@ static func dress(model: CharacterModel, item: ItemData, disabled: bool, layers:
 	# Captain, 2026-10-16 ("and the back to the hips"): a spine strut down the lower back, closing
 	# the gap between the power pack's base and the belt's back plate.
 	_box(model.torso, Vector3(0.1, 0.1, 0.12), Vector3(0.0, 0.07, 0.15), STRUT, layers)
-	var light := _box(model.torso, Vector3(0.025, 0.025, 0.012), Vector3(0.0, 0.43, 0.25), LIGHT_OFF if disabled else LIGHT_ON, layers)
+	var light := _box(model.torso, Vector3(0.025, 0.025, 0.012), Vector3(0.0, 0.43, 0.263), LIGHT_OFF if disabled else LIGHT_ON, layers)
 	var lm := light.material_override as StandardMaterial3D
 	lm.emission_enabled = true
 	lm.emission = lm.albedo_color

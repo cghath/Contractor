@@ -304,6 +304,23 @@ static func spall_parts(vest: ItemData) -> Array[StringName]:
 	return parts
 
 
+## Spall areas (SPALL_AREAS keys) what `body` wears keeps covered: its vest's "spall_cover",
+## its exo frame's (ExoFrame.spall_cover: the LX-3's pads cover the arms and neck) and its
+## helmet's (a face plate covers the face).
+static func spall_cover_of(body: Node) -> Array:
+	var covered: Array = []
+	var inventory := inventory_of(body)
+	var vest := vest_of(body)
+	if vest:
+		covered.append_array(vest.stats.get("spall_cover", []))
+	if inventory:
+		covered.append_array(ExoFrame.spall_cover(inventory))
+		var helmet: StringName = inventory.slots.get(&"helmet", &"")
+		if helmet != &"":
+			covered.append_array(ItemDB.get_item(helmet).stats.get("spall_cover", []))
+	return covered
+
+
 ## Chance a stopped round of `round_class` throws spall that reaches the wearer.
 static func spall_chance(round_class: StringName) -> float:
 	return float(SPALL_CHANCE.get(round_class, SPALL_CHANCE[Vitals.INTERMEDIATE]))
@@ -315,8 +332,7 @@ static func spall_chance(round_class: StringName) -> float:
 ## or one).
 static func server_spall(body: Node3D, vitals: Vitals, position: Vector3, direction: Vector3, round_class := Vitals.INTERMEDIATE) -> Array[StringName]:
 	var hit: Array[StringName] = []
-	var vest := vest_of(body)
-	var covered: Array = vest.stats.get("spall_cover", []) if vest else []
+	var covered := spall_cover_of(body)
 	var areas: Array[StringName] = []
 	for area: StringName in SPALL_AREAS:
 		if not String(area) in covered:
