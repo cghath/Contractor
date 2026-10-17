@@ -160,7 +160,7 @@ const FALL_BACK_COVER_M := 8.0
 ## Hostiles see this far (Captain, 2026-10-13: engagement ranges up; was 60 m). Doctrine's
 ## engage_m fits it (insurgents 180 m, regulars 200 m) and Doctrine.engage_m never goes past
 ## it (audit F-03; still pending, A3-07).
-const SIGHT_RANGE := 200.0
+const SIGHT_RANGE := 300.0  # (was 200; Captain, 2026-10-17: they "don't engage far enough out")
 const SUPPRESSED := 0.5
 const PINNED := 0.85
 const HYSTERESIS := 0.1
@@ -192,8 +192,16 @@ const STACK_M := 1.5
 ## SOFT_COVER_TEST_J (an M855 at close range), so AI picks concrete when it has the choice.
 const SOFT_COVER_PENALTY := 6.0
 const SOFT_COVER_TEST_J := 1650.0
-const ADVANCE_AFTER_S := 6.0
+## A hostile out of sight of the enemy this long pushes one bound toward where it was seen, to
+## cover (Captain, 2026-10-17: "enemies also feed the meat grinder too much... they need to be
+## capable fighters, not cattle that run around and die"; was 6 s, into the open): only to a
+## covered spot within ADVANCE_COVER_M of the bound's end, and only while its morale holds
+## (ADVANCE_MORALE: losses and suppression nearby hold it back; Captain: firefights "end
+## really fast").
+const ADVANCE_AFTER_S := 15.0
 const ADVANCE_STEP := 8.0
+const ADVANCE_COVER_M := 6.0
+const ADVANCE_MORALE := 0.6
 const WORLD_MASK := 1
 ## Line of fire (Captain, v0.4.6 playtest: "friendlies shoot at and try to shoot through walls,
 ## enemies too"): no round leaves unless it would get there (_fire_line). Fire at a point
@@ -552,6 +560,8 @@ var _destination := Vector3.ZERO
 var _has_destination := false
 var _run := false
 var _cover_point := Vector3.ZERO
+## How fast a carrier or dragger turns to the way it goes, of TURN_RATE.
+const CARRY_TURN_MULT := 0.45
 ## Dragging (Care.DRAG): the nearest it got to _cover_point, when it last got nearer, and when
 ## contact was last seen (_drag_stalled).
 var _drag_best := INF
@@ -1064,7 +1074,8 @@ func _choose_intent() -> void:
 	else:
 		scores[Intent.PATROL] = 0.3
 		if Soldier._now() - _last_contact < INVESTIGATE_MEMORY_S or suspecting():
-			scores[Intent.INVESTIGATE] = 0.55
+			# Shaken (losses, suppression), it stays put in cover rather than searching the kill zone.
+			scores[Intent.INVESTIGATE] = 0.55 if morale >= MORALE_SHAKEN + 0.2 or suspecting() else 0.2
 	# Casualty care, both sides: a living casualty comes before almost anything; a fallen
 	# friendly's body is carried only out of contact.
 	_candidate = _find_casualty() if care == Care.NONE or care == Care.BODY else null
@@ -1226,11 +1237,14 @@ func _notice_fire(now: float) -> void:
 func _fight_from_context() -> void:
 	if body.faction != &"friendly":
 		if target == null and _no_los_s > ADVANCE_AFTER_S and not _buddy_bounding() and not _advancing:
-			# Push one bound toward where the enemy was last seen.
-			_advancing = true
-			_advance_anchor = body.global_position.move_toward(body.threat_pos, ADVANCE_STEP)
-			_has_cover = false
 			_no_los_s = 0.0
+			# Push one bound toward where the enemy was last seen: to cover, and only in good heart.
+			var spot: Variant = find_cover(body.global_position.move_toward(body.threat_pos, ADVANCE_STEP), ADVANCE_COVER_M) if morale >= ADVANCE_MORALE else null
+			if spot != null:
+				_advancing = true
+				_advance_anchor = spot
+				_cover_point = spot
+				_has_cover = true
 		if target != null and target.vitals.is_up():
 			_advancing = false  # a dead-check doesn't end the push through the position
 		_fight(_advance_anchor if _advancing else (_cover_point if _has_cover else body.global_position), 6.0)
@@ -1809,7 +1823,7 @@ func _care_reach(contact: bool) -> void:
 	_has_destination = false
 	# (Never lift someone another is treating: it cut the Captain's IV short, P0164.)
 	if exposed and not is_instance_valid(casualty.carried_by) and not casualty.vitals.is_healing():
-		var spot: Variant = find_cover(body.global_position, 10.0)
+		var spot: Variant = find_drag_cover(body.global_position, 10.0)
 		if spot != null and body.server_pick_up_body(casualty, Soldier.DRAG):
 			_cover_point = spot
 			_has_cover = true
@@ -1947,7 +1961,7 @@ func _care_carry(contact: bool) -> void:
 	if contact:
 		if body.carrying == casualty:
 			body._set_carry_mode(Soldier.DRAG, &"grab")
-			var spot: Variant = find_cover(body.global_position, 10.0)
+			var spot: Variant = find_drag_cover(body.global_position, 10.0)
 			_has_cover = spot != null
 			if spot != null:
 				_cover_point = spot
@@ -3297,6 +3311,46 @@ func find_cover(anchor: Vector3, leash: float) -> Variant:
 	return best
 
 
+## Where to drag a casualty to (Captain, 2026-10-17: they "drag illogical ways"): not a firing
+## position (find_cover likes low cover you can shoot over, and doesn't mind the way there) but
+## the nearest spot that hides someone lying down from the threat, away from it rather than
+## toward it or across its line, with the way there clear enough to drag along.
+func find_drag_cover(anchor: Vector3, leash: float) -> Variant:
+	var map := body.get_world_3d().navigation_map
+	var world := body.get_world_3d()
+	var to_threat := body.threat_pos - anchor
+	to_threat.y = 0.0
+	to_threat = to_threat.normalized() if to_threat.length() > 0.1 else Vector3.ZERO
+	var best: Variant = null
+	var best_score := INF
+	for ring in COVER_RINGS:
+		if ring > leash + 0.1:
+			break
+		for k in 12:
+			var angle := TAU * k / 12.0 + ring
+			var p := anchor + Vector3(cos(angle), 0.0, sin(angle)) * ring
+			var q := NavigationServer3D.map_get_closest_point(map, p)
+			if Vector2(q.x - p.x, q.z - p.z).length() > 0.6 or _cover_taken(q):
+				continue
+			if Throwables.clear_line(world, body.threat_pos + Vector3.UP * 1.5, q + Vector3.UP * 0.35):
+				continue  # someone lying there is still in its sight
+			var way := q - anchor
+			way.y = 0.0
+			var path := NavigationServer3D.map_get_path(map, anchor, q, true)
+			var length := 0.0
+			for i in range(1, path.size()):
+				length += path[i - 1].distance_to(path[i])
+			if path.size() < 2 or length > way.length() * 1.6 + 2.0:
+				continue  # a long way round (a wall between): not a drag
+			var score := length
+			if to_threat != Vector3.ZERO and way.length() > 0.1:
+				score += maxf(way.normalized().dot(to_threat), 0.0) * 6.0  # toward the shooter: worse
+			if score < best_score:
+				best = q
+				best_score = score
+	return best
+
+
 func _cover_protects(point: Vector3) -> bool:
 	return not Throwables.clear_line(body.get_world_3d(), body.threat_pos + Vector3.UP * 1.5, point + Vector3.UP * 0.9)
 
@@ -3945,6 +3999,12 @@ func _steer(delta: float) -> void:
 	if foe == null and dir != Vector3.ZERO and body.carrying == null:
 		body.rotation.y = lerp_angle(body.rotation.y, atan2(-dir.x, -dir.z), 1.0 - exp(-TURN_RATE * get_physics_process_delta_time()))
 		body.head.rotation.x = lerpf(body.head.rotation.x, 0.0, 0.1)
+	elif dir != Vector3.ZERO and body.carrying != null:
+		# Carrying or dragging (Captain, 2026-10-17: "they tend to face the way they should be
+		# dragging their teammate and freeze up"): the body turns to the way it goes, slower than
+		# empty-handed, so the casualty trails behind it (Soldier.carry_transform) instead of the
+		# carrier walking sideways or backwards into them.
+		body.rotation.y = lerp_angle(body.rotation.y, atan2(-dir.x, -dir.z), 1.0 - exp(-TURN_RATE * CARRY_TURN_MULT * get_physics_process_delta_time()))
 	elif foe == null and dir == Vector3.ZERO and _watch_point() != null and intent != Intent.CASUALTY:
 		_aim_at(_watch_point())  # suppressing, or watching a sector
 	elif foe == null and dir == Vector3.ZERO and in_contact() and not (intent == Intent.CASUALTY and care == Care.TREAT):

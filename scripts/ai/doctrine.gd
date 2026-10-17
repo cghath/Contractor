@@ -12,7 +12,7 @@ extends RefCounted
 ## PENDING (audit A3-07, 2026-10-13): today only the doctrine's id acts, through SquadTactics'
 ## option biases (SquadTactics.DOCTRINES). The numeric weights below and in the file are
 ## proposals for Captain's tactics work that no AI code reads yet: the squad AI still uses its
-## own constants (hostiles pick targets out to SquadAI.SIGHT_RANGE, 200 m, the squad out to
+## own constants (hostiles pick targets out to SquadAI.SIGHT_RANGE, 300 m, the squad out to
 ## SQUAD_SIGHT_RANGE, 300 m, whatever engage_m says; morale uses SquadAI.MORALE_SHAKEN/BROKEN...). Changing them changes nothing in a
 ## fight until each is wired into the decision its note names, with a check, and taken off
 ## PENDING and the file's "_pending". A per-unit doctrine (SquadAI.doctrine) is pending too.

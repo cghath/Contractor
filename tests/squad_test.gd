@@ -566,7 +566,7 @@ func _test_doctrine_pending() -> void:
 ## Audit F-03: the doctrines' engage_m fits the sight ranges (hostiles SIGHT_RANGE, the squad
 ## SQUAD_SIGHT_RANGE): no doctrine engages past what its shooter can see, and none sits so far
 ## inside it that the AI spots targets it then won't engage. And the ranges act: a hostile picks
-## a target he sees 180 m off (not one 210 m off, past his sight), the squad one 280 m off.
+## a target he sees 180 m off (not one 310 m off, past his 300 m sight), the squad one 280 m off.
 ## Staged up in the air like the fire discipline checks, all in one frame (_find_target builds
 ## awareness one scan per call).
 func _test_doctrine_ranges() -> void:
@@ -616,11 +616,11 @@ func _test_doctrine_ranges() -> void:
 	mate.global_transform = Transform3D(Basis.IDENTITY.rotated(Vector3.UP, PI), origin + Vector3(0, 0, -180))  # faces the hostile
 	var at_180 := _picks(hai, mate)
 	hai._aware.clear()
-	_place(mate, origin + Vector3(0, 0, -210))
+	_place(mate, origin + Vector3(0, 0, -310))
 	var at_210 := _picks(hai, mate)
 	_place(mate, origin + Vector3(0, 0, -280))
 	var squad_280 := _picks(mai, hostile)
-	check(at_180 >= 0 and at_210 < 0, "a hostile engages a target he sees 180 m off (after %d scans), not one 210 m off, past his %.0f m sight"
+	check(at_180 >= 0 and at_210 < 0, "a hostile engages a target he sees 180 m off (after %d scans), not one 310 m off, past his %.0f m sight"
 		% [at_180, SquadAI.SIGHT_RANGE])
 	var why := "%s stunned %.1f s, sees him %s, %.0f m, leaves %.1f m, spot %.1f s, aware %.2f, focus %s" % [mate.name, mate.stunned_s,
 		mai.can_see(hostile), mate.global_position.distance_to(hostile.global_position), Spotting.foliage_m(mai._zone_scatter(), mate, hostile),
