@@ -1034,6 +1034,21 @@ func _test_spotting() -> void:
 	ai._choose_intent()
 	ai._choose_intent()
 	check(ai.intent != SquadAI.Intent.FALL_BACK, "but a Hold order wins (%s)" % ai.status_text())
+	# Player orders first (Captain, 2026-10-17: "Player orders -> squad tactics -> buddy team
+	# tactics -> indiv tactics"; B team "not responding" was this): in contact, a Move order
+	# beats fighting where he stands, until he gets there.
+	ai.morale = steady
+	var move_was := ai._move_point
+	ai.order = Squad.Order.MOVE
+	ai._move_point = alpha.global_position + Vector3(0, 0, 40)
+	ai._choose_intent()
+	ai._choose_intent()
+	check(ai.fighting() and ai.intent == SquadAI.Intent.MOVE_TO, "in contact, a player's Move order beats fighting where he stands (%s)" % ai.status_text())
+	ai._move_point = alpha.global_position
+	ai._choose_intent()
+	ai._choose_intent()
+	check(ai.intent == SquadAI.Intent.FIGHT, "and once there, he fights again (%s)" % ai.status_text())
+	ai._move_point = move_was
 	ai.order = order_was
 	ai.morale = steady
 	ai._fall_back_point = null

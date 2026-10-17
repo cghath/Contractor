@@ -87,10 +87,24 @@ const CLIMB_AT_WALL_M := 2.5
 const CLIMB_GIVE_UP_S := 3.0
 ## How long "Suppress" lasts (Squad.order_suppress).
 const SUPPRESS_ORDER_S := 20.0
-## An evaluator task that moves the unit scores above fighting where it stands and below falling
-## back broken; an ordered tactic above that, below casualty care and an empty magazine.
+## Who decides what a unit does (Captain, 2026-10-17: "Player orders -> squad tactics -> buddy
+## team tactics -> indiv tactics"; B team "not responding" was its own fighting and casualty care
+## outscoring a player's orders):
+## - a player's order: an ordered tactic (ORDERED_SCORE) or a move or hold (PLAYER_ORDER_SCORE)
+##   comes first, below only survival reflexes (an empty magazine, its own bleeding). A move
+##   order rules until it gets there; a hold keeps fighting from its spot (HOLD's act fights)
+##   and still treats casualties near the spot (HOLD_CARE_M);
+## - the squad's own tactics next (TACTIC_SCORE: an evaluator task, by fire team or buddy pair,
+##   Tactics.elements);
+## - then the unit's own: going to a casualty (in contact CASUALTY_CONTACT_SCORE: above fighting
+##   where it stands, 0.7, by more than HYSTERESIS so a medic who's shooting does break off; out
+##   of contact 0.9), only when the rescue is covered (_rescue_hot: smoke, covering fire, or the
+##   shooter pinned), then fighting where it stands.
 const TACTIC_SCORE := 0.75
-const ORDERED_SCORE := 0.85
+const ORDERED_SCORE := 0.93
+const PLAYER_ORDER_SCORE := 0.93
+const CASUALTY_CONTACT_SCORE := 0.82
+const HOLD_CARE_M := 12.0
 ## Suppressive rounds wander this far round the point (a position, not a pixel), a new spot each burst.
 const SUPPRESS_SPREAD_M := 1.5
 ## Bounding overwatch: legs of at most BOUND_LEG_M, cover to cover (within BOUND_COVER_M of the
@@ -847,16 +861,35 @@ func _medic_needs_cover() -> bool:
 
 
 ## Going for `c` now would feed the squad into the fire on them: a rescuer went down near
-## them lately (REACH_HOT_S), or this is a casualty in the open to a known shooter and no one
-## has smoked, suppressed or flanked it yet. The first rescuer of an uncovered casualty still
-## goes (smoking first, _care_reach); anyone else waits for the threat to be dealt with.
+## them lately (HOT_DOWN_S), or (Captain, 2026-10-17: "rescuers going for dangerous rescues
+## instead of kills or cover") the casualty lies in the open to a known shooter the squad is
+## still trading fire with (fired on within RESCUE_QUIET_S), with nothing covering the rescue:
+## no smoke on them, the shooter not pinned, no squadmate putting fire on it (shot within
+## COVERING_FIRE_S), and this unit carries no smoke to screen its own way in (_care_reach throws
+## it). Then even the first rescuer waits: it puts fire on the shooter from cover
+## (_medic_needs_cover) until one of those changes.
+const RESCUE_QUIET_S := 6.0
+const COVERING_FIRE_S := 3.0
+
+
+## A squadmate (not this unit) fired within COVERING_FIRE_S: the rescue has covering fire.
+func _covering_fire() -> bool:
+	for m: Soldier in squad.members():
+		if m != body and is_instance_valid(m) and m.vitals.is_up() and Soldier._now() - m.last_shot_at < COVERING_FIRE_S:
+			return true
+	return false
+
+
 func _rescue_hot(c: Soldier) -> bool:
 	if not in_contact() or squad == null or _sheltered(c) or _screened(c.global_position):
 		return false
 	var now := Soldier._now()
 	var down := now - squad.rescuer_down_at < HOT_DOWN_S and squad.rescuer_down_point.distance_to(c.global_position) < HOT_DOWN_M
-	if not down:
+	var under_fire := now - squad.engaged_at < RESCUE_QUIET_S
+	if not down and not under_fire:
 		return false
+	if not down and (body.inventory.count_of(SCREEN_SMOKE) > 0 or _covering_fire()):
+		return false  # it can screen its own way in, or the squad has the shooter's head down
 	for n in get_tree().get_nodes_in_group(&"combatants"):
 		var f := n as Soldier
 		if f != null and f.faction != body.faction and f.vitals.is_up() and f.global_position.distance_to(body.threat_pos) < 4.0 				and f.suppression >= PINNED:
@@ -1018,10 +1051,12 @@ func _choose_intent() -> void:
 			Squad.Order.FOLLOW:
 				scores[Intent.FOLLOW] = 0.5
 			Squad.Order.HOLD:
-				scores[Intent.HOLD] = 0.5
+				# (An ordered tactic is the newer order: Suppress plays out by fighting from here.)
+				scores[Intent.HOLD] = PLAYER_ORDER_SCORE if ordered.is_empty() else 0.5
 			Squad.Order.MOVE:
-				# Disciplined soldiers keep moving under fire a little longer.
-				scores[Intent.MOVE_TO] = 0.5 + (0.25 * discipline if contact else 0.0)
+				# A player's move order rules until it gets there; then it holds like 0.5 did.
+				var there := body.global_position.distance_to(_move_point) <= ARRIVE + 0.5
+				scores[Intent.MOVE_TO] = 0.5 if there or not ordered.is_empty() else PLAYER_ORDER_SCORE
 		if escort_valid():
 			scores[Intent.ESCORT] = ESCORT_SCORE
 		elif escorting != null:
@@ -1034,7 +1069,11 @@ func _choose_intent() -> void:
 	# friendly's body is carried only out of contact.
 	_candidate = _find_casualty() if care == Care.NONE or care == Care.BODY else null
 	if (care != Care.NONE and care != Care.BODY) or _candidate != null:
-		scores[Intent.CASUALTY] = 0.9
+		# In contact a casualty waits on the squad's tactics; ordered to hold, one near the spot
+		# is still seen to (above the hold), farther ones wait on the order.
+		var who: Soldier = casualty if care != Care.NONE and care != Care.BODY and is_instance_valid(casualty) else _candidate
+		var near_hold := order == Squad.Order.HOLD and who != null and who.global_position.distance_to(_hold_point) <= HOLD_CARE_M
+		scores[Intent.CASUALTY] = PLAYER_ORDER_SCORE + 0.01 if near_hold else (CASUALTY_CONTACT_SCORE if contact else 0.9)
 	elif not contact and (care == Care.BODY or _find_body() != null):
 		scores[Intent.CASUALTY] = BODY_RECOVER_SCORE
 	_maybe_call_medic()
@@ -1067,8 +1106,9 @@ func _choose_intent() -> void:
 	if best != intent and best_score < current + HYSTERESIS:
 		return
 	if best != intent:
-		if intent == Intent.CASUALTY and care != Care.NONE and care != Care.BODY and best_score < 0.95:
-			return  # don't abandon a casualty for anything short of an empty magazine or your own bleed
+		var player_order := _friendly() and (best == Intent.MOVE_TO or best == Intent.HOLD or (best == Intent.TACTIC and not ordered.is_empty()))
+		if intent == Intent.CASUALTY and care != Care.NONE and care != Care.BODY and best_score < 0.95 and not player_order:
+			return  # don't abandon a casualty for anything short of an empty magazine, your own bleed or a player's order
 		intent = best
 		_score = best_score
 		if intent != Intent.CASUALTY and care == Care.BODY:
