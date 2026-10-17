@@ -33,6 +33,8 @@ var objective_helper: ObjectiveHelper
 ## The magazines and their rough fill (AmmoReadout).
 var ammo_readout: AmmoReadout
 var armor_readout: ArmorReadout
+## The bearing strip across the top of the screen (Compass).
+var compass: Compass
 ## The zones (see the top): the right column, the left column, and the bottom-centre stack.
 var zone_top_right: VBoxContainer
 var zone_left: VBoxContainer
@@ -150,6 +152,8 @@ func _ready() -> void:
 	add_child(ammo_readout)
 	armor_readout = ArmorReadout.new(player)  # plates and helmet: what's left of each
 	add_child(armor_readout)
+	compass = Compass.new(player)  # the bearing strip, top-centre
+	add_child(compass)
 	_message = _add(_wrapping(UiKit.hud_label())) as Label
 	# The map (M) and the briefing, over everything else (W13).
 	add_child(BleedSilhouette.new(player))
@@ -179,6 +183,9 @@ func _layout() -> void:
 	command_menu.title_width = minf(CommandMenu.TITLE_W, side - command_menu.get_theme_stylebox(&"panel").get_minimum_size().x)
 	_set_rect(zone_top_right, Vector4(1, 0, 1, 0), Vector4(-MARGIN - right, MARGIN, -MARGIN, MARGIN))
 	zone_top_right.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	# Top-centre: the bearing strip, clear of the squad list and objectives on either side.
+	var compass_w := clampf(view.x * 0.22, 240.0, 420.0)
+	_set_rect(compass, Vector4(0.5, 0, 0.5, 0), Vector4(-compass_w * 0.5, MARGIN, compass_w * 0.5, MARGIN + Compass.HEIGHT))
 	_left_height = view.y - left_top - MARGIN
 	# Three columns: left, centre and right. The centre one (prompt, downed text, messages,
 	# radio, vehicle) is what the side columns leave, so nothing in it runs under them.
@@ -612,4 +619,4 @@ func _squad_lines(player: Soldier) -> String:
 			lines.append("%s F%d %s%s: %s" % [mark, i + 1, s.display_name(), tag, s.ai_status])
 		else:
 			lines.append("  F%d %s%s" % [i + 1, "You" if s == player else "Player %s" % s.name, tag])
-	return "SQUAD  [F-keys] select  [~] all  [T] voice order\n" + "\n".join(lines) + "\n"
+	return "SQUAD  [F-keys] select  [~] all  [T] voice order/ask\n" + "\n".join(lines) + "\n"

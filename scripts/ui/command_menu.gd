@@ -15,7 +15,8 @@ extends PanelContainer
 ## reports the enemies under the crosshair by radio (PeopleLayer.request_report).
 ##
 ## Holding T and saying an order (VoiceOrder, voice_commands.gd) is an alternate way to send
-## the same key presses through handle_input() - it isn't a second command path.
+## the same key presses through handle_input() - it isn't a second command path. Holding T
+## while looking at a friendly or civilian instead asks them a question (VoiceQuestions).
 
 const MENU := {
 	"title": "Command",
