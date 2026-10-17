@@ -55,7 +55,7 @@ static func pad_items(frame: ItemData) -> Array[Dictionary]:
 		if not _pad_items.has(key):
 			var stats: Dictionary = (frame.stats.get("pad_armor", {}) as Dictionary).duplicate(true)
 			for k: String in spec:
-				if not k in ["id", "part", "at", "facing"]:
+				if not k in ["id", "part", "at", "facing", "tilt_deg"]:
 					stats[k] = spec[k]
 			var side := "-x" if String(spec.part).ends_with("_l") else "+x"
 			stats["walls"] = (spec.get("walls", []) as Array).map(func(w: String) -> String: return side if w == "outer" else w)
@@ -63,6 +63,7 @@ static func pad_items(frame: ItemData) -> Array[Dictionary]:
 			_pad_items[key] = ItemData.from_dict({"id": key, "name": "%s pad" % frame.name, "type": "plate", "stats": stats})
 		var at: Array = spec.get("at", [0, 0, 0])
 		var basis := Basis(Vector3.UP, PI) if spec.get("facing", "front") == "back" else Basis.IDENTITY
+		basis = basis * Basis(Vector3.RIGHT, deg_to_rad(float(spec.get("tilt_deg", 0.0))))  # (+: its top lies back)
 		out.append({"id": String(spec.id), "part": StringName(spec.part), "item": _pad_items[key],
 			"at": Transform3D(basis, Vector3(float(at[0]), float(at[1]), float(at[2])))})
 	return out
@@ -160,8 +161,11 @@ static func server_damage(s: Soldier, hp: float) -> void:
 # --- Art (every peer: GearRig) ---------------------------------------------------------
 
 const PART_NAME := "ExoFramePart"
-const STRUT := Color("6b6e69")
-const JOINT := Color("2b2d2b")
+## Captain, 2026-10-17 ("tone the light sand robotic feel down"): dark, matte, close to the kit.
+const STRUT := Color("464a45")
+const JOINT := Color("262826")
+## The actuators' bare metal (pistons, hinge drums).
+const PISTON := Color("767a74")
 const LIGHT_ON := Color(0.25, 1.0, 0.4)
 const LIGHT_OFF := Color(1.0, 0.18, 0.12)
 
@@ -179,48 +183,96 @@ static func dress(model: CharacterModel, item: ItemData, disabled: bool, layers:
 		var thigh := model.part_node(Vitals.THIGH_R if r else Vitals.THIGH_L)
 		var shin := model.part_node(Vitals.SHIN_R if r else Vitals.SHIN_L)
 		# The struts ride on the outside of the armour pads (pad_items, GearRig), bolted over them.
-		_box(upper, Vector3(0.025, 0.26, 0.035), Vector3(side * 0.097, -0.15, 0.0), STRUT, layers)
-		_box(upper, Vector3(0.05, 0.05, 0.05), Vector3(side * 0.09, -0.31, 0.0), JOINT, layers)  # elbow hinge
+		_box(upper, Vector3(0.02, 0.26, 0.028), Vector3(side * 0.091, -0.15, 0.0), STRUT, layers)
+		# Captain, 2026-10-17 ("go back to AW a bit more"): a more mechanical, exposed frame - hinge
+		# drums at the elbows, hips and knees, pistons along the struts, stirrups under the boots
+		# and a jointed spine on the back.
+		_drum(upper, 0.024, 0.05, Vector3(side * 0.085, -0.31, 0.0), JOINT, layers)  # elbow drum
+		_rod(upper, 0.008, 0.2, Vector3(side * 0.091, -0.17, 0.026), PISTON, layers)
 		# Captain, 2026-10-16 ("connected arm to shoulder"): a shoulder joint housing at the arm's
 		# own pivot (part_node's origin), so it always sits at the joint as the arm swings, bridging
 		# the upper-arm strut up to the torso-mounted pylon above it.
-		_box(upper, Vector3(0.065, 0.09, 0.065), Vector3(side * 0.072, 0.02, 0.0), JOINT, layers)
-		_box(fore, Vector3(0.022, 0.19, 0.03), Vector3(side * 0.09, -0.11, 0.0), STRUT, layers)
-		_box(fore, Vector3(0.09, 0.03, 0.09), Vector3(0.0, -0.2, 0.0), JOINT, layers)  # wrist cuff
-		_box(thigh, Vector3(0.06, 0.06, 0.06), Vector3(side * 0.11, -0.02, 0.0), JOINT, layers)  # hip joint
-		_box(thigh, Vector3(0.03, 0.36, 0.04), Vector3(side * 0.11, -0.22, 0.0), STRUT, layers)
-		_box(thigh, Vector3(0.06, 0.06, 0.06), Vector3(side * 0.11, -0.45, 0.0), JOINT, layers)  # knee hinge
-		_box(shin, Vector3(0.03, 0.38, 0.04), Vector3(side * 0.1, -0.22, 0.0), STRUT, layers)
-		_box(shin, Vector3(0.12, 0.035, 0.14), Vector3(0.0, -0.4, 0.0), JOINT, layers)  # ankle cuff
+		_box(upper, Vector3(0.055, 0.08, 0.055), Vector3(side * 0.072, 0.02, 0.0), JOINT, layers)
+		_box(fore, Vector3(0.018, 0.19, 0.024), Vector3(side * 0.085, -0.11, 0.0), STRUT, layers)
+		_box(fore, Vector3(0.075, 0.022, 0.075), Vector3(0.0, -0.2, 0.0), JOINT, layers)  # wrist cuff
+		_rod(fore, 0.007, 0.15, Vector3(side * 0.085, -0.1, 0.022), PISTON, layers)
+		_drum(thigh, 0.032, 0.05, Vector3(side * 0.1, -0.02, 0.0), JOINT, layers)  # hip drum
+		_box(thigh, Vector3(0.022, 0.36, 0.03), Vector3(side * 0.101, -0.22, 0.0), STRUT, layers)
+		_drum(thigh, 0.03, 0.05, Vector3(side * 0.1, -0.45, 0.0), JOINT, layers)  # knee drum
+		_rod(thigh, 0.01, 0.28, Vector3(side * 0.101, -0.24, 0.03), PISTON, layers)
+		_box(shin, Vector3(0.022, 0.38, 0.03), Vector3(side * 0.092, -0.22, 0.0), STRUT, layers)
+		_box(shin, Vector3(0.105, 0.026, 0.12), Vector3(0.0, -0.4, 0.0), JOINT, layers)  # ankle cuff
+		_rod(shin, 0.009, 0.26, Vector3(side * 0.092, -0.21, 0.028), PISTON, layers)
+		_box(shin, Vector3(0.022, 0.05, 0.03), Vector3(side * 0.092, -0.435, 0.0), STRUT, layers)  # down to the stirrup
+		_box(shin, Vector3(0.11, 0.012, 0.2), Vector3(0.0, -0.466, -0.005), JOINT, layers)  # stirrup under the boot
 		# Shoulder actuator pylon, up over the shoulder from the spine pack. Captain, 2026-10-16
 		# ("these weird things V", a screenshot of the old strut+cap reading as a disconnected V):
 		# one straight column, its base overlapping the pack and its cap stacked directly on top
 		# (same footprint, no forward jut) rather than two misaligned pieces.
-		_box(model.torso, Vector3(0.1, 0.26, 0.08), Vector3(side * 0.09, 0.4, 0.195), STRUT, layers)
-		_box(model.torso, Vector3(0.11, 0.035, 0.09), Vector3(side * 0.09, 0.535, 0.195), JOINT, layers)
+		_box(model.torso, Vector3(0.07, 0.24, 0.06), Vector3(side * 0.085, 0.4, 0.19), STRUT, layers)
+		_box(model.torso, Vector3(0.08, 0.03, 0.07), Vector3(side * 0.085, 0.525, 0.19), JOINT, layers)
 		# Captain, 2026-10-16 ("way better but we still need something that goes from the shoulder
 		# point to the back"): a strap over the top of the shoulder, from the pylon down to the
 		# front of the chest - on the torso (not the arm), so it reads right in any arm pose, the
 		# way a real backpack strap rests on the shoulder rather than binding to the arm itself.
-		_box(model.torso, Vector3(0.07, 0.05, 0.22), Vector3(side * 0.08, 0.57, 0.08), STRUT, layers)
-		_box(model.torso, Vector3(0.06, 0.16, 0.055), Vector3(side * 0.08, 0.47, -0.04), STRUT, layers)
+		_box(model.torso, Vector3(0.05, 0.035, 0.2), Vector3(side * 0.085, 0.565, 0.08), STRUT, layers)
+		_box(model.torso, Vector3(0.045, 0.14, 0.04), Vector3(side * 0.085, 0.47, -0.035), STRUT, layers)
 	# Spine power pack (its armour pad, "spine", covers its back face), the hip belt round the
 	# waist, the status light.
-	_box(model.torso, Vector3(0.16, 0.36, 0.07), Vector3(0.0, 0.3, 0.2), JOINT, layers)
+	_box(model.torso, Vector3(0.14, 0.34, 0.06), Vector3(0.0, 0.3, 0.195), JOINT, layers)
 	# Captain, 2026-10-16 ("the hip/waist area shouldn't be a flat pane"): a proper belt, built
 	# from front, back and side plates round the waist, not one flat slab spanning it.
-	_box(model.torso, Vector3(0.34, 0.09, 0.055), Vector3(0.0, 0.03, -0.11), JOINT, layers)  # front
-	_box(model.torso, Vector3(0.34, 0.09, 0.055), Vector3(0.0, 0.03, 0.1), JOINT, layers)  # back
+	_box(model.torso, Vector3(0.32, 0.07, 0.035), Vector3(0.0, 0.03, -0.105), JOINT, layers)  # front
+	_box(model.torso, Vector3(0.32, 0.07, 0.035), Vector3(0.0, 0.03, 0.098), JOINT, layers)  # back
 	for side: float in [1.0, -1.0]:
-		_box(model.torso, Vector3(0.055, 0.09, 0.22), Vector3(side * 0.165, 0.03, 0.0), JOINT, layers)  # side plate
+		_box(model.torso, Vector3(0.035, 0.07, 0.2), Vector3(side * 0.16, 0.03, 0.0), JOINT, layers)  # side plate
 	# Captain, 2026-10-16 ("and the back to the hips"): a spine strut down the lower back, closing
 	# the gap between the power pack's base and the belt's back plate.
-	_box(model.torso, Vector3(0.1, 0.1, 0.12), Vector3(0.0, 0.07, 0.15), STRUT, layers)
-	var light := _box(model.torso, Vector3(0.025, 0.025, 0.012), Vector3(0.0, 0.43, 0.263), LIGHT_OFF if disabled else LIGHT_ON, layers)
+	_box(model.torso, Vector3(0.08, 0.1, 0.1), Vector3(0.0, 0.07, 0.15), STRUT, layers)
+	for i in 6:  # the jointed spine, down the spine pack's armour
+		_box(model.torso, Vector3(0.07, 0.04, 0.025), Vector3(0.0, 0.14 + i * 0.06, 0.288), JOINT, layers)
+	var light := _box(model.torso, Vector3(0.025, 0.025, 0.012), Vector3(0.0, 0.5, 0.29), LIGHT_OFF if disabled else LIGHT_ON, layers)
 	var lm := light.material_override as StandardMaterial3D
 	lm.emission_enabled = true
 	lm.emission = lm.albedo_color
 	lm.emission_energy_multiplier = 1.5
+
+
+## A piston rod (a cylinder along the bone, Y).
+static func _rod(parent: Node3D, radius: float, length: float, at: Vector3, colour: Color, layers: int) -> MeshInstance3D:
+	var cm := CylinderMesh.new()
+	cm.top_radius = radius
+	cm.bottom_radius = radius
+	cm.height = length
+	cm.radial_segments = 8
+	cm.rings = 1
+	return _part(parent, cm, at, Basis.IDENTITY, colour, layers)
+
+
+## A hinge drum (a short cylinder across the joint, X).
+static func _drum(parent: Node3D, radius: float, width: float, at: Vector3, colour: Color, layers: int) -> MeshInstance3D:
+	var cm := CylinderMesh.new()
+	cm.top_radius = radius
+	cm.bottom_radius = radius
+	cm.height = width
+	cm.radial_segments = 12
+	cm.rings = 1
+	return _part(parent, cm, at, Basis(Vector3.FORWARD, PI / 2), colour, layers)
+
+
+static func _part(parent: Node3D, mesh: Mesh, at: Vector3, basis: Basis, colour: Color, layers: int) -> MeshInstance3D:
+	var m := MeshInstance3D.new()
+	m.name = PART_NAME
+	m.mesh = mesh
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = colour
+	mat.roughness = 0.45
+	mat.metallic = 0.6
+	m.material_override = mat
+	m.transform = Transform3D(basis, at)
+	m.layers = layers
+	parent.add_child(m, true)
+	return m
 
 
 static func _box(parent: Node3D, size: Vector3, at: Vector3, colour: Color, layers: int) -> MeshInstance3D:

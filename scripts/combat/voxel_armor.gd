@@ -22,7 +22,7 @@ extends Area3D
 ## penetration's hole.
 
 const VOXEL_SIZE := 0.01
-enum { EMPTY, INTACT, SCARRED, INTERIOR, ACCENT, VISOR, FACEPLATE }
+enum { EMPTY, INTACT, SCARRED, INTERIOR, ACCENT, VISOR, FACEPLATE, GLOW }
 const MISS := Vector3i(-1, -1, -1)
 ## Chip kinds, a chip's fifth entry. Chips saved before kinds existed ([x, y, z, radius])
 ## are holes, carved the old way.
@@ -349,7 +349,9 @@ func _dent(center: Vector3i, radius: float, dir: Vector3) -> void:
 func _thickness_axis(c: Vector3i) -> int:
 	if item and item.stats.get("shape", "plate") == "guard":
 		var hollow: Array = item.stats.get("hollow_vox", [12, 12])
-		return 0 if absf(c.x + 0.5 - _base.pivot.x) >= float(hollow[0]) * 0.5 else 2
+		var dx := absf(c.x + 0.5 - _base.pivot.x) / float(hollow[0])
+		var dz := absf(c.z + 0.5 - _base.pivot.z) / float(hollow[1])
+		return 0 if dx >= dz else 2
 	if item == null or item.stats.get("shape", "plate") != "helmet":
 		return 2
 	var pivot: Vector3 = _base.pivot
@@ -474,8 +476,7 @@ static func _get_base(p_item: ItemData) -> Dictionary:
 	elif stats.get("shape", "plate") == "guard":
 		shape = _guard_shape(stats)
 	else:
-		var dims := Vector3i(int(stats.get("width_vox", 25)), int(stats.get("height_vox", 30)), int(stats.get("thickness_vox", 2)))
-		shape = {"dims": dims, "pivot": Vector3(dims) * 0.5, "cells": func(_c: Vector3i) -> int: return INTACT}
+		shape = _plate_shape(stats)
 	var dims: Vector3i = shape.dims
 	var buffer := VoxelBuffer.new()
 	buffer.set_channel_depth(VoxelBuffer.CHANNEL_COLOR, VoxelBuffer.DEPTH_8_BIT)
@@ -498,15 +499,19 @@ static func _get_base(p_item: ItemData) -> Dictionary:
 
 ## Rounded-box shell (a superellipsoid, which fits a blocky head better than a sphere).
 ## The pivot is the centre of the dome's base, which sits at head-local y = 0.20 m.
-## "face_guard" (the LX-3 helmet; Captain, 2026-10-16: "face protection with metal plates like
-## modern systems on modern helmets"): metal cheek plates down from the side rails and a
-## mandible over the mouth and chin, the eyes left open between them.
+## "face_guard" (the LX-3 helmet; Captain, 2026-10-16/17: "face protection with metal plates like
+## modern systems on modern helmets", then "a black visor and protection for the back of the
+## head, a modern futuristic pass"): under the shell's rim a closed ring hugging the head (JAW_R)
+## - a black visor over the eyes (VISOR, "visor_color") with a lit seam along its top and
+## bottom (GLOW), metal cheek plates, a nape guard round the back, and a mandible over the mouth
+## and chin with a raised centre ridge; the shell above gets a ridge down its crown and
+## angular brow and temple plates (ACCENT) in place of the NVG shroud and rails.
 static func _helmet_shape(stats: Dictionary) -> Dictionary:
 	var tier: String = stats.get("tier", "medium")
 	var th := float(stats.get("thickness_vox", 2))
 	var r := Vector3(16, 14, 17) if tier == "light" else Vector3(17, 16, 18)
 	var guard := bool(stats.get("face_guard", false))
-	var below := 20 if tier == "heavy" else (16 if guard else 0)  # heavy: ear covers and a visor down to the chin
+	var below := 20 if tier == "heavy" or guard else 0  # heavy: ear covers and a visor down to the chin
 	var dims := Vector3i(int(r.x * 2), int(r.y) + below, int(r.z * 2))
 	var inner := r - Vector3.ONE * th
 	var cells := func(c: Vector3i) -> int:
@@ -519,24 +524,15 @@ static func _helmet_shape(stats: Dictionary) -> Dictionary:
 				v = INTACT
 			if tier != "heavy" and v == INTACT and d.y < r.y * 0.3 and d.z < -r.z * 0.45:
 				v = EMPTY  # face opening at the brow
-			if v == INTACT and tier == "medium":
+			if guard:
+				v = _guard_dome_cell(d, r, v)
+			elif v == INTACT and tier == "medium":
 				if d.z < -r.z + 3.0 and absf(d.x) < 3.0 and d.y > r.y * 0.4 and d.y < r.y * 0.7:
 					v = ACCENT  # NVG shroud
 				elif absf(d.x) > r.x - 3.0 and d.y > r.y * 0.2 and d.y < r.y * 0.35:
 					v = ACCENT  # side rails
 		elif guard:
-			# Hugging the jaw (JAW_R, an ellipse, rounder than the dome), tucked in under the
-			# shell's rim the way a mandible hangs off the rails, narrowing to the chin.
-			var jaw := JAW_R * (1.0 - clampf((-d.y - 9.0) / 7.0, 0.0, 1.0) * 0.18)
-			var e_out := (d.x / jaw.x) ** 2 + (d.z / jaw.y) ** 2
-			var e_in := (d.x / (jaw.x - th)) ** 2 + (d.z / (jaw.y - th)) ** 2
-			if e_in <= 1.0:
-				v = INTERIOR
-			elif e_out <= 1.0:
-				if d.z > -jaw.y * 0.55 and d.z < r.z * 0.1 and d.y >= -14.0:
-					v = FACEPLATE  # cheek plates, down from the side rails over the ears
-				elif d.z <= -jaw.y * 0.55 and d.y >= -16.0 and d.y < -5.0:
-					v = FACEPLATE  # the mandible, over the mouth and chin (the eyes stay open)
+			v = _guard_ring_cell(d, th)
 		else:
 			var flat := Vector3(d.x, 0.0, d.z)
 			if _superellipse(flat / inner) <= 1.0:
@@ -551,37 +547,149 @@ static func _helmet_shape(stats: Dictionary) -> Dictionary:
 	return {"dims": dims, "pivot": Vector3(r.x, below, r.z), "cells": cells}
 
 
-## An exo frame's limb pad (ExoFrame): a sleeve of "height_vox" along the limb (Y) round a
-## hollow of "hollow_vox" [x, z] where the limb is, with walls "thickness_vox" thick on the
-## sides "walls" names ("+x", "-x", "front" = -Z, "back" = +Z); the other sides are open. The
-## hollow is the limb's space (like a helmet's head space): a round that reaches it, through an
-## open side or a hole, has met no armour. The pivot is the middle of the hollow.
+## A flat plate, width x height x thickness voxels, its strike face -Z. "curve_vox" bends it
+## round the body (its edges that far back, +Z, a smooth arc), "clip_vox" clips its corners
+## and "panel_lines" trims its border and runs a ridge down its middle in ACCENT (the exo
+## frame's torso pads; Captain, 2026-10-17: "give the armor a future marine look too").
+static func _plate_shape(stats: Dictionary) -> Dictionary:
+	var w := int(stats.get("width_vox", 25))
+	var h := int(stats.get("height_vox", 30))
+	var th := int(stats.get("thickness_vox", 2))
+	var curve := int(stats.get("curve_vox", 0))
+	var clip := int(stats.get("clip_vox", 0))
+	var panels := bool(stats.get("panel_lines", false))
+	var dims := Vector3i(w, h, th + curve)
+	if curve == 0 and clip == 0:
+		return {"dims": dims, "pivot": Vector3(dims) * 0.5, "cells": func(_c: Vector3i) -> int: return INTACT}
+	var cells := func(c: Vector3i) -> int:
+		var ex := mini(c.x, w - 1 - c.x)
+		var ey := mini(c.y, h - 1 - c.y)
+		if ex + ey < clip:
+			return EMPTY
+		var u := (c.x + 0.5 - w * 0.5) / (w * 0.5)
+		var z := c.z + 0.5 - curve * u * u
+		if z < 0.0 or z >= float(th):
+			return EMPTY
+		if panels and z < 1.0 and (ex + ey == clip or ex == 0 or ey == 0 or absf(u) < 0.07):
+			return ACCENT  # the strike face's trimmed border and centre ridge
+		return INTACT
+	return {"dims": dims, "pivot": Vector3(dims) * 0.5, "cells": cells}
+
+
+## An exo frame's limb pad (ExoFrame): a rounded sleeve of "height_vox" along the limb (Y) round
+## an elliptical hollow of "hollow_vox" [x, z] where the limb is, "thickness_vox" thick, over
+## the arcs "walls" names (quarters round the limb: "+x", "-x", "front" = -Z, "back" = +Z);
+## the rest is open. Its ends are rounded off. The hollow is the limb's space (like a helmet's
+## head space): a round that reaches it, through an open side or a hole, has met no armour.
+## The pivot is the middle of the hollow.
 static func _guard_shape(stats: Dictionary) -> Dictionary:
 	var hollow: Array = stats.get("hollow_vox", [12, 12])
 	var th := int(stats.get("thickness_vox", 2))
 	var h := int(stats.get("height_vox", 12))
 	var walls: Array = stats.get("walls", ["+x", "-x", "front", "back"])
+	var panels := bool(stats.get("panel_lines", false))
 	var hx := float(hollow[0]) * 0.5
 	var hz := float(hollow[1]) * 0.5
 	var dims := Vector3i(int(hollow[0]) + th * 2, h, int(hollow[1]) + th * 2)
 	var pivot := Vector3(dims.x * 0.5, h * 0.5, dims.z * 0.5)
 	var cells := func(c: Vector3i) -> int:
 		var d := Vector3(c.x + 0.5 - pivot.x, 0.0, c.z + 0.5 - pivot.z)
-		if absf(d.x) < hx and absf(d.z) < hz:
+		if (d.x / hx) ** 2 + (d.z / hz) ** 2 < 1.0:
 			return INTERIOR
-		if absf(d.x) >= hx + th - 1.0 and absf(d.z) >= hz + th - 1.0:
-			return EMPTY  # its outer corners chamfered: a pad, not a box
-		if (c.y == 0 or c.y == h - 1) and (absf(d.x) >= hx + th - 1.0 or absf(d.z) >= hz + th - 1.0):
-			return EMPTY  # and its outer edges stepped at the ends
-		if (d.x >= hx and "+x" in walls) or (d.x <= -hx and "-x" in walls) 				or (d.z <= -hz and "front" in walls) or (d.z >= hz and "back" in walls):
-			return INTACT
-		return EMPTY
+		var end := mini(c.y, h - 1 - c.y)  # rounded ends: thinner at the very rim
+		var reach := th - (1.0 if end == 0 else 0.0)
+		if (d.x / (hx + reach)) ** 2 + (d.z / (hz + reach)) ** 2 > 1.0:
+			return EMPTY
+		var side := guard_side(d)
+		if not side in walls:
+			return EMPTY
+		if panels and (d.x / (hx + reach - 1.0)) ** 2 + (d.z / (hz + reach - 1.0)) ** 2 > 1.0:  # the outer face
+			if end == 1 or (c.y % 7 == 3) or (side == "front" and absf(d.x) < 1.0):
+				return ACCENT  # trim at the ends, panel seams across, a ridge down the front
+		return INTACT
 	return {"dims": dims, "pivot": pivot, "cells": cells}
+
+
+## Which quarter round a guard pad's limb the offset `d` (x, z from its middle) is in.
+static func guard_side(d: Vector3) -> String:
+	if absf(d.x) >= absf(d.z):
+		return "+x" if d.x > 0.0 else "-x"
+	return "back" if d.z > 0.0 else "front"
 
 
 ## A face guard's half-width (x) and half-depth (z) round the jaw, voxels: the head's 0.22 m
 ## width and 0.12 m face inside a 3-voxel plate.
 const JAW_R := Vector2(14.5, 15.5)
+## Face guard heights (voxels from the dome's base, the eyes at about -3..0): the visor from the
+## brow (VISOR_TOP) down to VISOR_BOTTOM, the mandible below it to the chin (GUARD_LOW), the nape
+## guard round the back down to NAPE_LOW.
+const VISOR_TOP := 2.0
+## A metal brow plate from the visor's top up past the shell's brow opening (4.8, r.y * 0.3): no
+## skin between the brim and the visor.
+const BROW_TOP := 6.0
+const VISOR_BOTTOM := -5.0
+const GUARD_LOW := -16.0
+const NAPE_LOW := -16.0
+## The neck seal under the ring, to the bottom of the grid: half-width, half-depth (voxels) and
+## how far back its middle sits (the neck is behind the face).
+const NECK_R := Vector2(8.5, 8.5)
+const NECK_R_Z := 1.5
+
+
+## The shell above the dome's base on a face guard helmet (`v` as the plain shell gives it): the
+## visor's top over the face opening, a ridge down the crown, a brow plate and temple plates.
+static func _guard_dome_cell(d: Vector3, r: Vector3, v: int) -> int:
+	var front := d.z < -r.z * 0.45
+	if v != ACCENT and front and d.y < BROW_TOP:  # (the goggle band and brow sit inside the opening, round the face)
+		var e := (d.x / JAW_R.x) ** 2 + (d.z / JAW_R.y) ** 2
+		if e <= 1.0 and (d.x / (JAW_R.x - 2.0)) ** 2 + (d.z / (JAW_R.y - 2.0)) ** 2 > 1.0:  # 2 voxels thick
+			return VISOR if d.y < VISOR_TOP else INTACT  # the brow plate, in the shell's colour
+		if v == EMPTY and e > 1.0 and d.y < r.y * 0.3:
+			return INTACT  # the opening's edges, outside the band, closed: no skin at the temples
+		return v
+	if v != INTACT:
+		return v
+	if absf(d.x) < 1.5 and d.y > r.y * 0.45:
+		return ACCENT  # the crown ridge
+	if front and d.y >= r.y * 0.3 and d.y < r.y * 0.3 + 2.0:
+		return ACCENT  # the brow plate over the visor
+	if absf(d.x) > r.x - 2.5 and d.y > r.y * 0.1 and d.y < r.y * 0.45 and absf(d.z) < r.z * 0.45:
+		return ACCENT  # temple plates (comms)
+	return v
+
+
+## Below the dome's base on a face guard helmet: the ring round the head (visor, cheeks, nape,
+## mandible), `th` voxels thick, narrowing towards the chin, and under it a neck seal (NECK_R,
+## Captain 2026-10-17: "a neck seal of sorts", no skin showing between helmet and collar).
+static func _guard_ring_cell(d: Vector3, th: float) -> int:
+	if d.y < GUARD_LOW:
+		var e_neck := (d.x / NECK_R.x) ** 2 + ((d.z - NECK_R_Z) / NECK_R.y) ** 2
+		var e_neck_in := (d.x / (NECK_R.x - 2.0)) ** 2 + ((d.z - NECK_R_Z) / (NECK_R.y - 2.0)) ** 2
+		if e_neck <= 1.0:
+			return INTERIOR if e_neck_in <= 1.0 else ACCENT
+	var jaw := JAW_R * (1.0 - clampf((-d.y - 9.0) / 7.0, 0.0, 1.0) * 0.18)
+	var e_out := (d.x / jaw.x) ** 2 + (d.z / jaw.y) ** 2
+	var e_in := (d.x / (jaw.x - th)) ** 2 + (d.z / (jaw.y - th)) ** 2
+	if e_in <= 1.0:
+		return INTERIOR
+	var front := d.z <= -jaw.y * 0.55
+	if front and absf(d.x) < 4.5 and d.y >= GUARD_LOW + 1.0 and d.y < VISOR_BOTTOM - 2.0 \
+			and (d.x / (jaw.x + 3.0)) ** 2 + (d.z / (jaw.y + 3.0)) ** 2 <= 1.0 and e_out > 1.0:
+		# The respirator block standing proud of the mask, vented across its face.
+		var outer := (d.x / (jaw.x + 2.0)) ** 2 + (d.z / (jaw.y + 2.0)) ** 2 > 1.0
+		return ACCENT if outer and absf(d.x) < 3.5 and int(floor(d.y)) % 2 == 0 else FACEPLATE
+	if e_out > 1.0:
+		return EMPTY
+	if front:
+		if d.y >= VISOR_BOTTOM:
+			var thin := (d.x / (jaw.x - 2.0)) ** 2 + (d.z / (jaw.y - 2.0)) ** 2 > 1.0  # a visor is 2 voxels thick
+			if not thin:
+				return EMPTY
+			return VISOR
+		return FACEPLATE if d.y >= GUARD_LOW else EMPTY  # the mask, over the nose, mouth and chin
+	if d.z > jaw.y * 0.1:
+		return FACEPLATE if d.y >= NAPE_LOW else EMPTY  # the nape guard, round the back
+	return FACEPLATE if d.y >= GUARD_LOW else EMPTY  # cheek plates over the ears, down to the jaw line
 
 
 static func _superellipse(v: Vector3) -> float:
@@ -598,7 +706,8 @@ static func _get_mesher(p_item: ItemData, p_cover := Color(0, 0, 0, 0)) -> Voxel
 		palette.set_color(SCARRED, Color("c9c2ae"))
 		palette.set_color(INTERIOR, Color(0, 0, 0, 0))
 		palette.set_color(ACCENT, colour.darkened(0.35))
-		palette.set_color(VISOR, Color("4d6f80"))  # tinted polycarbonate
+		palette.set_color(VISOR, Color(p_item.stats.get("visor_color", "4d6f80")))  # tinted polycarbonate
+		palette.set_color(GLOW, Color(p_item.stats.get("glow_color", "37c8d8")))  # a lit seam
 		palette.set_color(FACEPLATE, Color(p_item.stats.get("plate_color", "3f4446")))  # a face guard's metal
 		var mesher := VoxelMesherCubes.new()
 		mesher.palette = palette

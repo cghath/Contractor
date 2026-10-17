@@ -105,7 +105,7 @@ func _test_pads() -> void:
 	var inv := player.inventory
 	var gear := player.get_node(^"Gear") as GearRig
 	var pads := gear.pads()
-	check(pads.size() == 10, "ten armour pads on the body (%s)" % ", ".join(PackedStringArray(pads.keys())))
+	check(pads.size() == 12, "twelve armour pads on the body (%s)" % ", ".join(PackedStringArray(pads.keys())))
 	var thigh: VoxelArmor = pads.get("thigh_r")
 	var spine: VoxelArmor = pads.get("spine")
 	if thigh == null or spine == null:
@@ -153,7 +153,7 @@ func _parts() -> Array:
 func _light_is(colour: Color) -> bool:
 	for n: Node in _parts():
 		var m := n as MeshInstance3D
-		if m and (m.mesh as BoxMesh).size.x < 0.03 and (m.material_override as StandardMaterial3D).albedo_color.is_equal_approx(colour):
+		if m and m.mesh is BoxMesh and (m.mesh as BoxMesh).size.x < 0.03 and (m.material_override as StandardMaterial3D).albedo_color.is_equal_approx(colour):
 			return true
 	return false
 

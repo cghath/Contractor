@@ -463,22 +463,25 @@ func _test_soft_armor() -> void:
 
 # --- Helmets ----------------------------------------------------------------------------------
 
-## The LX-3 Faceguard Helmet: metal cheek plates and a mandible over the mouth and chin on a
-## medium shell, the eyes left clear; it keeps spall off the face.
+## The LX-3 Visor Helmet: on a medium shell, a ring round the head below the rim - a black visor
+## over the eyes, cheek plates, a mandible over the mouth and chin, a nape guard at the back;
+## it keeps spall off the face and neck.
 func _test_face_guard() -> void:
-	print("LX-3 faceguard helmet")
+	print("LX-3 visor helmet")
 	var piece := _piece(&"helmet_lx3")
 	var mouth := piece.to_global(Vector3(0.0, -0.10, -0.175))
 	var eye := piece.to_global(Vector3(0.04, -0.02, -0.175))
 	var cheek := piece.to_global(Vector3(0.165, -0.08, -0.03))
+	var nape := piece.to_global(Vector3(0.0, -0.08, 0.175))
 	check(piece.trace(mouth, Vector3.BACK) != VoxelArmor.MISS, "the mandible covers the mouth")
 	check(piece.trace(cheek, Vector3.LEFT) != VoxelArmor.MISS, "a cheek plate covers the side of the face")
-	check(piece.trace(eye, Vector3.BACK) == VoxelArmor.MISS, "the eyes are left clear")
+	check(piece.trace(eye, Vector3.BACK) != VoxelArmor.MISS, "the visor covers the eyes")
+	check(piece.trace(nape, Vector3.FORWARD) != VoxelArmor.MISS, "the nape guard covers the back of the head")
 	check(piece.server_try_stop(mouth, Vector3.BACK, ItemDB.get_item(&"m17"), 10.0), "a pistol round at the mandible is stopped")
 	check(not piece.server_try_stop(piece.to_global(Vector3(0.03, -0.12, -0.175)), Vector3.BACK, _gun("556_m855"), 10.0), "a rifle round goes through it (IIIA)")
 	var dummy := await _dummy(["plate_carrier_light", "helmet_lx3"])
 	var covered := ArmorRules.spall_cover_of(dummy)
-	check("face" in covered, "it keeps spall off the face (%s)" % [covered])
+	check("face" in covered and "neck" in covered, "it keeps spall off the face and neck (%s)" % [covered])
 	dummy.queue_free()
 	piece.get_parent().queue_free()
 	await get_tree().process_frame

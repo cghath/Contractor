@@ -169,6 +169,14 @@ func pad_integrity(pad: String) -> float:
 	return minf(ArmorRules.integrity(ExoFrame.pad_state(inventory, pad)), piece.integrity())
 
 
+## Hard armour in the wearer's side's colours (Captain, 2026-10-17: "give it a US theme like
+## the respective faction that is using it"): its kit colour (VoxelArt's "gear": coyote for the
+## contractors' multicam, ranger green for woodland, black for urban...), a shade darker, the
+## way a painted shell reads beside fabric.
+func faction_armor_color() -> Color:
+	return Color(VoxelArt.spec(model.variant).gear).darkened(0.22)
+
+
 ## The worn exo frame's pads, by id.
 func pads() -> Dictionary:
 	return _pads
@@ -239,6 +247,8 @@ func _rebuild() -> void:
 				piece.transform = carrier_fit(String(slot).trim_prefix("plate_")) * piece.transform
 			if slot != &"helmet":  # a plate sits inside the carrier's pocket, under its fabric
 				piece.set_cover(Color(VoxelArt.spec(model.variant).gear) if carrier else Color(0, 0, 0, 0))
+			elif piece.item.stats.get("faction_color", false):
+				piece.set_cover(faction_armor_color())  # the LX-3 helmet's shell in the side's colour
 	for slot: StringName in MOUNTS:
 		_set_gear(slot, inventory.slots[slot], &"torso", rest_transform(slot), inventory.state_of(slot))
 	_fit_front_panel(carrier)
@@ -281,6 +291,7 @@ func _set_exo_pads() -> void:
 		piece.setup(pad.item, ExoFrame.SLOT, inventory, render_layers)
 		piece.name = "ExoPad_" + pad.id
 		piece.transform = pad.at
+		piece.set_cover(faction_armor_color())  # the side's own kit colour (chips show the steel)
 		_pads[pad.id] = piece
 		_chip_counts["pad:" + pad.id] = 0
 
