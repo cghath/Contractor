@@ -34,6 +34,7 @@ var _header: Label
 var _status: Label
 var _pages := {}  # page -> VBoxContainer (its rows)
 var _shop_type := ""
+var _shop_query := ""  # the shop's search box (kept across rebuilds)
 
 
 func _ready() -> void:
@@ -351,6 +352,17 @@ func _build_shop(rows: VBoxContainer, v: Dictionary) -> void:
 		_shop_type = SHOP_TYPES[i]
 		refresh())
 	rows.add_child(UiKit.row("Show", filter, 120.0))
+	# Captain, 2026-10-17: "a sell button and search feature in the shop". The search filters the
+	# lines as you type (no rebuild, so the box keeps focus): what's for sale and what you can sell.
+	var search := LineEdit.new()
+	search.placeholder_text = "Search items"
+	search.text = _shop_query
+	search.clear_button_enabled = true
+	rows.add_child(UiKit.row("Search", search, 120.0))
+	var searchable: Array[Control] = []
+	search.text_changed.connect(func(q: String) -> void:
+		_shop_query = q
+		_filter_shop(searchable))
 	var shown := 0
 	for entry: Dictionary in v.get("catalog", []):
 		var id := StringName(entry.get("id", ""))
@@ -362,9 +374,35 @@ func _build_shop(rows: VBoxContainer, v: Dictionary) -> void:
 		var buy5 := UiKit.button("Buy 5", func() -> void: BaseHub.request("buy", [String(id), 5]), "Buy five %s ($%d)" % [item.name, 5 * int(entry.price)])
 		var line := _line("%s  (%s)  $%d" % [item.name, item.type, int(entry.price)], [buy, buy5])
 		ItemInfo.apply(line.get_child(0), id)  # hover: what it is and how to use it (Captain, 2026-10-14: "item descriptions plus uses also needed")
+		line.set_meta(&"search", "%s %s %s" % [item.name, item.type, id])
+		searchable.append(line)
 		rows.add_child(line)
 	if shown == 0:
 		rows.add_child(UiKit.text("Nothing of that kind for sale."))
+	# Selling: what's in the company stash, at the shop's buying price (a damaged piece for less
+	# is priced when sold: Economy.server_sell).
+	var sell_rows := UiKit.section("Sell from the stash", rows)
+	var stock := BaseArmory.counts(v.get("stash", []))
+	var ids := stock.keys()
+	ids.sort()
+	var sellable := 0
+	for sid: String in ids:
+		var it := ItemDB.get_item(StringName(sid))
+		var each := Prices.sell_price(StringName(sid), 1, {})
+		if it == null or each <= 0 or (_shop_type != "" and String(it.type) != _shop_type):
+			continue
+		sellable += 1
+		var n := int(stock[sid])
+		var sell1 := UiKit.button("Sell", func() -> void: Economy.sell_from_stash(StringName(sid), 1), "Sell one %s ($%d)" % [it.name, each])
+		var sell_all := UiKit.button("Sell all", func() -> void: Economy.sell_from_stash(StringName(sid), mini(n, 50)), "Sell all %d %s (about $%d)" % [n, it.name, each * n])
+		var sline := _line("%s x%d  $%d each" % [it.name, n, each], [sell1, sell_all])
+		ItemInfo.apply(sline.get_child(0), StringName(sid))
+		sline.set_meta(&"search", "%s %s %s" % [it.name, it.type, sid])
+		searchable.append(sline)
+		sell_rows.add_child(sline)
+	if sellable == 0:
+		sell_rows.add_child(UiKit.hint("Nothing in the stash the shop buys."))
+	_filter_shop(searchable)
 	rows.add_child(UiKit.hint("Support calls (paid when called, from the contract's support budget first): " + ", ".join(
 		Prices.support_kinds().map(func(k: Variant) -> String: return "%s $%s" % [String(k), DebriefCalc.money(Prices.support_price(String(k)))]))))
 
@@ -380,6 +418,16 @@ func _build_armory(rows: VBoxContainer, v: Dictionary) -> void:
 
 
 ## One cut line per item (id -> count), each with its ItemInfo tooltip.
+## Shows only the shop lines whose name, type or id has every word of the search in it.
+func _filter_shop(lines: Array[Control]) -> void:
+	var words := _shop_query.to_lower().split(" ", false)
+	for line in lines:
+		if not is_instance_valid(line):
+			continue
+		var hay := String(line.get_meta(&"search", "")).to_lower()
+		line.visible = words.is_empty() or Array(words).all(func(w: String) -> bool: return hay.contains(w))
+
+
 func _add_item_lines(rows: VBoxContainer, counts: Dictionary) -> void:
 	var ids := counts.keys()
 	ids.sort()
