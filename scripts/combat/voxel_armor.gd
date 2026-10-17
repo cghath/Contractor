@@ -22,7 +22,7 @@ extends Area3D
 ## penetration's hole.
 
 const VOXEL_SIZE := 0.01
-enum { EMPTY, INTACT, SCARRED, INTERIOR, ACCENT, VISOR }
+enum { EMPTY, INTACT, SCARRED, INTERIOR, ACCENT, VISOR, FACEPLATE }
 const MISS := Vector3i(-1, -1, -1)
 ## Chip kinds, a chip's fifth entry. Chips saved before kinds existed ([x, y, z, radius])
 ## are holes, carved the old way.
@@ -498,11 +498,15 @@ static func _get_base(p_item: ItemData) -> Dictionary:
 
 ## Rounded-box shell (a superellipsoid, which fits a blocky head better than a sphere).
 ## The pivot is the centre of the dome's base, which sits at head-local y = 0.20 m.
+## "face_guard" (the LX-3 helmet; Captain, 2026-10-16: "face protection with metal plates like
+## modern systems on modern helmets"): metal cheek plates down from the side rails and a
+## mandible over the mouth and chin, the eyes left open between them.
 static func _helmet_shape(stats: Dictionary) -> Dictionary:
 	var tier: String = stats.get("tier", "medium")
 	var th := float(stats.get("thickness_vox", 2))
 	var r := Vector3(16, 14, 17) if tier == "light" else Vector3(17, 16, 18)
-	var below := 20 if tier == "heavy" else 0  # heavy: ear covers and a visor down to the chin
+	var guard := bool(stats.get("face_guard", false))
+	var below := 20 if tier == "heavy" else (16 if guard else 0)  # heavy: ear covers and a visor down to the chin
 	var dims := Vector3i(int(r.x * 2), int(r.y) + below, int(r.z * 2))
 	var inner := r - Vector3.ONE * th
 	var cells := func(c: Vector3i) -> int:
@@ -520,6 +524,15 @@ static func _helmet_shape(stats: Dictionary) -> Dictionary:
 					v = ACCENT  # NVG shroud
 				elif absf(d.x) > r.x - 3.0 and d.y > r.y * 0.2 and d.y < r.y * 0.35:
 					v = ACCENT  # side rails
+		elif guard:
+			var flat := Vector3(d.x, 0.0, d.z)
+			if _superellipse(flat / inner) <= 1.0:
+				v = INTERIOR
+			elif _superellipse(flat / r) <= 1.0:
+				if d.z > -r.z * 0.6 and d.z < r.z * 0.1 and d.y >= -14.0:
+					v = FACEPLATE  # cheek plates, down from the side rails over the ears
+				elif d.z <= -r.z * 0.6 and d.y >= -16.0 and d.y < -5.0:
+					v = FACEPLATE  # the mandible, over the mouth and chin (the eyes stay open)
 		else:
 			var flat := Vector3(d.x, 0.0, d.z)
 			if _superellipse(flat / inner) <= 1.0:
@@ -573,6 +586,7 @@ static func _get_mesher(p_item: ItemData, p_cover := Color(0, 0, 0, 0)) -> Voxel
 		palette.set_color(INTERIOR, Color(0, 0, 0, 0))
 		palette.set_color(ACCENT, colour.darkened(0.35))
 		palette.set_color(VISOR, Color("4d6f80"))  # tinted polycarbonate
+		palette.set_color(FACEPLATE, Color(p_item.stats.get("plate_color", "3f4446")))  # a face guard's metal
 		var mesher := VoxelMesherCubes.new()
 		mesher.palette = palette
 		mesher.color_mode = VoxelMesherCubes.COLOR_MESHER_PALETTE

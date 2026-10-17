@@ -13,7 +13,7 @@
 		"optic_pu_scope": 900, "optic_precision_scope": 3400, "suppressor_rifle": 1200,
 		"mag_556": 30, "mag_762": 45, "mag_9mm": 25, "rounds_556": 1, "rounds_762": 2, "rounds_9mm": 1,
 		"exo_frame_light": 6500, "plate_carrier_light": 450, "plate_carrier": 900, "plate_carrier_heavy": 1600,
-		"helmet_bump": 180, "helmet": 750, "helmet_heavy": 1300,
+		"helmet_bump": 180, "helmet": 750, "helmet_lx3": 1100, "helmet_heavy": 1300,
 		"plate_pe_l3": 650, "plate_ceramic_l4": 900, "plate_steel_l3": 300, "plate_side": 250,
 		"assault_pack": 180, "ruck_45": 320,
 		"ifak": 220, "trauma_kit": 650, "tourniquet": 35, "pressure_bandage": 12, "hemostatic_gauze": 45,
