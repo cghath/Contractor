@@ -138,10 +138,17 @@ only by a force that can actually retake it. Otherwise the rest of the map doesn
    site than the squad is thought to be (a defender left on it); QRF waves recalled on
    Consolidate; the HQ's pairs to its sites ask the commander (`request_men`, paid from
    reserves); hunts have a stop (`HUNT_STOP_S`, recalled teams aren't retargeted).
-   **Still to do**: the commander as an HVT contract target (`commander_name()` is ready);
-   outposts abandoned on Consolidate (garrisons have no squad to route); an enemy_command test
-   suite and missions_test's QRF checks updated to the 2:1 gate; HotZoneOps lines for
-   counterattacks seen coming (intel on the net).
+   Then: outposts and checkpoints abandoned on Consolidate (garrisons regrouped into a squad,
+   meta `left_post`, walk to the nearest base); the employer tips the squad off over its field
+   radio when a counterattack masses (`HotZoneOps._on_operation`, `TIP_CHANCE` 0.6,
+   `EnemyCommand.operation_started`).
+   Commander capture missions: a hostile HVT at the HQ (an hvt_capture contract there) IS the
+   commander (`_find_commander_hvt`, within `COMMANDER_HVT_M`); captured, delivered or dead,
+   the zone goes headless. HotZoneOps' QRF-base follow-up is now an hvt_capture at the HQ
+   ("their commander's there, take him alive"), raid as the fallback.
+   **Still to do**: in-situ interrogation of captured squad leads/commanders for intel and
+   missions (Captain's idea, parked: "lets not worry about interrogation yet"); an enemy_command
+   test suite and missions_test's QRF checks updated to the 2:1 gate.
 3. Vehicles in task forces (`VehicleQrf` technicals), mortars or air when they exist, named
    enemy commanders (wave 6).
 

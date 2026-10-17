@@ -15,6 +15,10 @@ extends Node
 ##   contract holds, at most MAX_FOLLOW_UPS a deployment and FOLLOW_UP_GAP_S apart. It needs
 ##   a field radio in the squad (Contracts.radio_contract_problem): without one it waits.
 ##   The enemy's commander killed (EnemyCommand.commander_down) sets one off too ("commander").
+##   The QRF base's follow-up is a commander capture at the HQ (hvt_capture): that HVT is the
+##   zone's commander (EnemyCommand), so taking him decapitates it.
+## - Tip-offs: when the enemy's commander masses a counterattack (EnemyCommand.operation_started)
+##   the employer warns the squad over its field radio, TIP_CHANCE of the time (no contract).
 ## - Hazard pay: staying longer pays more (Captain). The highest Pressure tier reached is
 ##   noted on the deployment ("hazard_tier") and every contract completed there pays
 ##   HAZARD_SHARE_PER_TIER of its pay per tier on top (DebriefCalc).
@@ -32,13 +36,14 @@ const FOLLOW_UP_GAP_S := 120.0
 const MAX_FOLLOW_UPS := 4
 const HAZARD_SHARE_PER_TIER := 0.05
 const SCAN_S := 2.0
+const TIP_CHANCE := 0.6
 ## What sets off a follow-up (a site type taken out, or "contract": one done), where it goes
 ## (site types, best first) and what it prefers to be (contract types; any that plays at the
 ## site when none of these does: the newer types plug in by themselves). "%s" in the line is
 ## the target site's name.
 const FOLLOW_UPS := {
-	"qrf_base": {"sites": ["hq", "outpost"], "types": ["raid"],
-		"line": "You hit their QRF. Nobody's coming to help the %s now: hit it."},
+	"qrf_base": {"sites": ["hq", "outpost"], "types": ["hvt_capture", "raid"],
+		"line": "You hit their QRF. Nobody's coming to help the %s now: their commander's there, take him alive."},
 	"comms": {"sites": ["hq", "outpost"], "types": ["intel_grab", "hvt_capture"],
 		"line": "Their net is down. Get into the %s and take what they can't radio out."},
 	"outpost": {"sites": ["qrf_base", "comms", "outpost"], "types": ["raid", "intel_grab"],
@@ -157,6 +162,17 @@ func _hook_command() -> void:
 	_command = level.get_node_or_null(^"EnemyCommand") as EnemyCommand if level else null
 	if _command and not _command.commander_down.is_connected(_on_commander_down):
 		_command.commander_down.connect(_on_commander_down)
+		_command.operation_started.connect(_on_operation)
+
+
+func _on_operation(op: Dictionary) -> void:
+	if op.kind != "counterattack" or Contracts.radio_contract_problem() != "" or randf() >= float(_knob("tip_chance", TIP_CHANCE)):
+		return
+	var m := level.call(&"get_module", String(op.get("target_id", ""))) as ZoneModule if level.has_method(&"get_module") else null
+	var employer := String(MissionRegistry.zone(String(Contracts.deployment().get("zone_id", ""))).get("faction", ""))
+	Contracts._notify_all("Radio, %s: Heads up, they're massing to retake the %s, coming from the %s. Dig in or move." % [
+		MissionRegistry.faction_name(employer), MissionRegistry.module_name(ZoneModules.base(m.type)) if m else "site",
+		RadioChatter.compass(op.target, op.rally)])
 
 
 func _on_commander_down(deputy: bool) -> void:

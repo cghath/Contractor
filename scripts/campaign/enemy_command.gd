@@ -31,12 +31,16 @@ extends Node
 ## - The HQ's pairs to its outposts and checkpoints (EnemyResponse._reinforce_sites) ask it too
 ##   (request_men) and are paid from the reserves; none once it consolidates.
 ## Kept simple to be extended (the rest of Phase 2b in the doc).
-## - Consolidate: past WITHDRAW_SHARE of all its men lost, hunters and task forces fall back on
-##   the HQ and QRF bases; no more hunts or probes, and only those sites are fought for.
+## - Consolidate: past WITHDRAW_SHARE of all its men lost, hunters, waves and task forces fall
+##   back on the HQ and QRF bases, and the outposts and checkpoints are abandoned (their
+##   garrisons walk to the nearest base: meta "left_post", no longer the site's garrison); no
+##   more hunts or probes, and only the bases are fought for.
 ## - Decapitation: the commander is the HQ's officer post 0 (commander_name: a contract can name
 ##   him). Killed, nobody decides for HEADLESS_S (task forces assembling hold where they are),
 ##   then the deputy (post 1) commands at DEPUTY_TICK_MULT the tick; both dead, nobody does.
-##   No HQ in the zone: an unseen commander, never killed.
+##   No HQ in the zone: an unseen commander, never killed. A hostile HVT at the HQ (an
+##   hvt_capture contract there: HotZoneOps sends one after the QRF base falls) IS the
+##   commander: captured (cuffed or surrendered), delivered or dead, the zone is headless.
 ## - Comms down (Alert.comms_down): the tick is COMMS_TICK_MULT slower, task forces take
 ##   COMMS_ASSEMBLE_MULT longer to assemble, probes don't report.
 ## - Its orders go out on the net (RadioChatter.order): a looted radio hears them.
@@ -47,6 +51,8 @@ extends Node
 
 ## Host: the commander was killed (decapitation; HotZoneOps answers it over the radio).
 signal commander_down(deputy: bool)
+## Host: an operation set out (counterattack, probe, reoccupy): HotZoneOps may tip the squad off.
+signal operation_started(op: Dictionary)
 
 const TICK_S := 30.0
 const HUNT_RATIO := 2.0
@@ -86,6 +92,8 @@ const PROBE_GIVE_UP_S := 600.0
 const PROBE_DECIDE_S := 120.0
 ## Decapitation and friction.
 const HEADLESS_S := 600.0
+## A hostile HVT this close to the HQ is the commander.
+const COMMANDER_HVT_M := 80.0
 const DEPUTY_TICK_MULT := 2.0
 const COMMS_TICK_MULT := 2.0
 const COMMS_ASSEMBLE_MULT := 2.0
@@ -115,6 +123,7 @@ var _reserve_tier := -1
 var _bases_start := -1
 var _bases_had := -1
 var _headless_until := INF
+var _commander_hvt := ""  # hvt_id of the HVT who is the commander, once seen
 var _last_probe := -INF
 var _probes := 0
 var _teams := 0
@@ -291,6 +300,11 @@ func _count_losses() -> void:
 ## The commander's name (the HQ's officer post 0), "" with no HQ: what a decapitation contract
 ## would target.
 func commander_name(post := 0) -> String:
+	if post == 0 and _find_commander_hvt():
+		var layer := PeopleLayer.find(self)
+		var s := layer.hvt(_commander_hvt) if layer else null
+		if s:
+			return String(s.name)
 	var hq := _hq_module()
 	return ("%s_H%d" % [hq.module_id, post + 1]).validate_node_name() if hq else ""
 
@@ -302,8 +316,28 @@ func _hq_module() -> ZoneModule:
 	return null
 
 
-## Whether officer post `post` of the HQ is dead (spawned and down, or fallen on an earlier visit).
+## Whether there's an HVT commander (a hostile HVT seen at the HQ; remembered once seen).
+func _find_commander_hvt() -> bool:
+	if _commander_hvt != "":
+		return true
+	var hq := _hq_module()
+	var layer := PeopleLayer.find(self)
+	if hq == null or layer == null:
+		return false
+	for s: Soldier in layer.people():
+		if Person.is_hvt(s) and String(Person.state(s).get("side", "")) == Person.HOSTILE and not s.vitals.is_dead() 				and s.global_position.distance_to(hq.global_position) <= COMMANDER_HVT_M:
+			_commander_hvt = String(Person.state(s).get("hvt_id", ""))
+			return _commander_hvt != ""
+	return false
+
+
+## Whether officer post `post` of the HQ is dead (spawned and down, or fallen on an earlier
+## visit). Post 0 with an HVT commander: whether he's captured, delivered or dead.
 func _officer_down(post: int) -> bool:
+	if post == 0 and _find_commander_hvt():
+		var layer := PeopleLayer.find(self)
+		var hvt := layer.hvt(_commander_hvt) if layer else null
+		return hvt == null or hvt.vitals.is_dead() or Person.is_captive(hvt) or People.is_delivered(_commander_hvt)
 	var hq := _hq_module()
 	var ai := level.get(&"ai") as Node
 	if hq == null or ai == null:
@@ -441,6 +475,7 @@ func _decide_lost(m: ZoneModule, probed := false) -> void:
 	operations.append({"kind": "counterattack", "target": m.global_position, "target_id": m.module_id, "state": "assembling",
 		"why": why, "at": now(), "rally": rally, "base": base.module_id, "squad": team.squad, "soldiers": team.soldiers,
 		"threat": threat})
+	operation_started.emit(operations.back())
 	print("[command] counterattack %s: %d men assembling at (%.0f, %.0f)" % [m.module_id, team.soldiers.size(), rally.x, rally.z])
 	_order("%s, assemble %s of %s. We take it back together." % [_callsign(base), RadioChatter.compass(m.global_position, rally),
 		_callsign(m)])
@@ -645,7 +680,42 @@ func _check_consolidate() -> void:
 			op.state = "called off"
 			op.why = "consolidating"
 			_send_home(op.squad, response._living(op.soldiers), op.get("base", ""), op.target)
+	_abandon_outposts()
 	_order("all stations, fall back on %s. Hold the bases." % RadioChatter.NET_CALLSIGN)
+
+
+## Consolidating: every outpost and checkpoint garrison still up walks to the nearest base.
+func _abandon_outposts() -> void:
+	var ai := level.get(&"ai") as Node
+	if ai == null:
+		return
+	for m: ZoneModule in level.call(&"modules"):
+		if m.type in HELD_AFTER_WITHDRAW or not (m.type in SITE_TYPES):
+			continue
+		var prefix := ("%s_H" % m.module_id).validate_node_name()
+		var leaving: Array = []
+		for n in ai.get_children():
+			var s := n as Soldier
+			if s and s.faction == &"hostile" and s.vitals.is_up() and not s.is_in_group(Soldier.DEAD_GROUP) 					and (String(s.name).begins_with(prefix) or String(s.get_meta(&"garrison_of", "")) == m.module_id):
+				leaving.append(s)
+		if leaving.is_empty():
+			continue
+		var base := _nearest_base(m.global_position)
+		if base == null:
+			return
+		_teams += 1
+		var squad := response._new_squad(("WD_%s_%d" % [m.module_id, _teams]).validate_node_name())
+		for s: Soldier in leaving:
+			s.set_meta(&"left_post", true)
+			s.remove_meta(&"garrison_of")
+			var brain := SquadAI.of(s)
+			if brain:
+				brain.guard = false
+				brain.squad = squad
+		_send_home(squad, leaving, base.module_id, m.global_position)
+		_record("abandon", m.global_position, "done", "%s: %d fall back on %s" % [m.module_id, leaving.size(), base.module_id],
+			{"target_id": m.module_id})
+		_handled[m.module_id] = true  # written off: no op when it reads as down
 
 
 ## Sends `living` of `squad` back to base `base_id` (else the nearest base to `from`).
