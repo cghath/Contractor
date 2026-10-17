@@ -305,6 +305,26 @@ repair it train ew pilots etc." Parsed into what this means to build:
   own `CharacterModel` variant or stand-in rig, which is real production cost beyond the damage-
   model question above. Not scoped further here; flagged as the reason this tier ships last.
 
+**Built, first playable slice (2026-10-17, `ExoMech`, branch `claude/heavy-exo-55eabf`):** the
+Atlas-pattern Walker (`exo_mech_heavy`) as the Captain decided above. What the slice is, and why:
+- **Not a new skeleton (open question 4, deferred):** the suit is built round the normal
+  `CharacterModel` rig, so hitboxes, wounds, ragdolls, poses and networking all keep working. Its
+  bulk is plates and chassis pieces on the human bones (power pack, hip ring, hydraulic leg
+  actuators, gauntlets, boots, head unit). A taller dedicated rig is still open if the Captain
+  wants the silhouette bigger than a human's.
+- **Plates:** fifteen `VoxelArmor` pads (`stats.pads`, reusing the LX-3's per-part pad system):
+  ceramic IV chest and belly plates (they crack), steel III++ everywhere else, the head unit's
+  visor III. Penetration reaches the pilot's real wounds. Painted in the wearer's camo.
+- **Worn, but only by climbing in:** the `exo` slot, so it travels with the soldier like any item
+  (state, saves, net), but `Inventory` never puts it on or takes it (no pick-up, no loot, no
+  stowing); `ExoMech.server_enter/server_exit` do, with timed animated clips. Left standing, it is
+  a frozen `WorldItem` with its plates as hit targets.
+- **Weapon:** the WG-50 Walker Gun (.50 BMG), pilot-only, kept on the suit between pilots (the
+  pilot's own rifle goes on its rack). Held low and ready at the hip; aimed from the shoulder.
+- **Movement:** 260 kg assist, fixed 0.75 pace, no sprint/jump/climb/prone, no vehicle seats.
+- **Not built (needs the Captain):** price, repair cost and pilot training (below); AI piloting;
+  climbing a dead pilot's suit off his body; a dedicated rig. Numbers are proposed.
+
 ### 2.3a Repair cost and pilot training (proposed, Captain's call — flagged as a worry, not a spec)
 
 Two separate asks, two very different costs to build:

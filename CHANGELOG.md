@@ -11,6 +11,34 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Heavy exo: the Atlas-pattern Walker, first playable slice (Captain, 2026-10-16/17)
+
+#### Added
+- `exo_mech_heavy`, the Atlas-pattern Walker (`ExoMech`, `scripts/combat/exo_mech.gd`;
+  docs/near_future_hardware.md 2.3): a heavy mech-class exo in the `exo` slot that is never picked
+  up or put on from the inventory. Climb in from the interaction menu where it stands (3 s: you're
+  put where it stood, facing its way, the hatch closing round you) and Climb out on yourself (the
+  hatch opens, the suit is left standing where you were, you step down in front of it). Both clips
+  are `CharacterModel.MECH_IN`/`MECH_OPEN`/`MECH_OUT`; the hatch (chest up, belly down, head unit
+  back) follows them on every peer (`ExoMech.HatchRig`).
+- Its armour is real `ArmorRules` armour (Captain's call over the doc's integrity pool): fifteen
+  `VoxelArmor` plates on the parts they cover (ceramic IV chest and belly; steel III++ head unit,
+  back, shoulders and caps, forearms, thighs and shins; a III visor), their chips and integrity in
+  the suit's state, like the LX-3's pads. A suit left standing is a `WorldItem` whose plates still
+  take hits (into its state's "pads"), and climbing back in brings every chip.
+- Real camo on armour: a `VoxelArmor` whose item says `"camo"` is painted in the wearer's camo
+  pattern (`VoxelArmor.set_camo`, VoxelArt's own pattern), chips and scars still showing metal.
+- Movement: it carries 260 kg (itself and 80 kg of kit); no sprint, jump, climb or prone; a fixed
+  0.75 walking pace; no vehicle seat takes it. Its actuators take rounds like the LX-3's struts;
+  disabled, the pilot carries all of it.
+- `wg50_walker`, the WG-50 Walker Gun: a .50 BMG heavy machine gun (belt_50bmg) only a pilot can
+  carry. It rides on the suit: climbing in puts it in your hands and your rifle on its rack.
+  Held low and ready at the hip (`GearRig.LOW_READY_*`), up to the shoulder to aim. Voxel model:
+  VoxelArt's "walker" style.
+- One stands open on the vehicle range with its gun. Neither is sold yet: their price, repair cost
+  and pilot training are the Captain's call (doc 2.3a).
+- `mech` suite (`tests/mech_test.gd`) and `tests/mech_shots.gd` (art review shots).
+
 ### Floating site-box lootboxes, scope PIP black flash (Captain, 2026-10-16 playtest of v0.4.26)
 
 #### Fixed

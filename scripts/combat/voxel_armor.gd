@@ -22,7 +22,9 @@ extends Area3D
 ## penetration's hole.
 
 const VOXEL_SIZE := 0.01
-enum { EMPTY, INTACT, SCARRED, INTERIOR, ACCENT, VISOR, FACEPLATE, GLOW }
+## CAMO_B..CAMO_D: a camo-painted piece's other pattern colours (paint_camo), only ever in the
+## copy that is meshed; the piece's own buffer keeps INTACT there.
+enum { EMPTY, INTACT, SCARRED, INTERIOR, ACCENT, VISOR, FACEPLATE, GLOW, CAMO_B, CAMO_C, CAMO_D }
 const MISS := Vector3i(-1, -1, -1)
 ## Chip kinds, a chip's fifth entry. Chips saved before kinds existed ([x, y, z, radius])
 ## are holes, carved the old way.
@@ -55,6 +57,12 @@ var inventory: Inventory
 ## plates and helmets, which work theirs out).
 var pad := ""
 var body_part: StringName = &""
+## A camo variant (VoxelArt.VARIANTS) painted over the intact surface of a piece whose item
+## says "camo" (the heavy exo's plates, ExoMech; Captain, 2026-10-16: "real camo, not a sci-fi
+## monochrome look"), or "" for its plain colour. Chips and scars show the bare metal as usual.
+var camo := ""
+## A heavy exo standing empty (ExoMech, a WorldItem): this pad's state lives in its "pads".
+var loose_suit: WorldItem
 
 var _base: Dictionary
 var _buffer: VoxelBuffer
@@ -89,14 +97,14 @@ func setup(p_item: ItemData, p_slot: StringName, p_inventory: Inventory, render_
 
 ## An undamaged mesh of the piece, positioned so its pivot is at the origin, under `cover`
 ## (alpha 0: none). Also used to show armor lying in the world, and an exo pad in first person.
-static func make_mesh_instance(p_item: ItemData, render_layers := 1, cover := Color(0, 0, 0, 0)) -> MeshInstance3D:
+static func make_mesh_instance(p_item: ItemData, render_layers := 1, cover := Color(0, 0, 0, 0), p_camo := "") -> MeshInstance3D:
 	var base := _get_base(p_item)
 	var mesh_instance := MeshInstance3D.new()
 	mesh_instance.material_override = _get_material()
 	mesh_instance.layers = render_layers
 	mesh_instance.scale = Vector3.ONE * VOXEL_SIZE
 	mesh_instance.position = -base.pivot * VOXEL_SIZE
-	mesh_instance.mesh = _get_mesher(p_item, cover).build_mesh(base.buffer, [])
+	mesh_instance.mesh = _get_mesher(p_item, cover, p_camo).build_mesh(paint_camo(base.buffer, p_item, p_camo), [])
 	return mesh_instance
 
 
@@ -105,8 +113,43 @@ func set_cover(colour: Color) -> void:
 	if colour == cover:
 		return
 	cover = colour
+	_remesh()
+
+
+## Paints the piece in `variant`'s camo (see camo), "" for its plain colour.
+func set_camo(variant: String) -> void:
+	if variant == camo:
+		return
+	camo = variant
+	_remesh()
+
+
+func _remesh() -> void:
 	if _mesh_instance:
-		_mesh_instance.mesh = _get_mesher(item, cover).build_mesh(_buffer, [])
+		_mesh_instance.mesh = _get_mesher(item, cover, camo).build_mesh(paint_camo(_buffer, item, camo), [])
+
+
+## `buffer` as it is meshed: for a piece whose item says "camo", a copy with its intact voxels
+## in `variant`'s camo pattern (VoxelArt's own, so the plates match the uniform's), else
+## `buffer` itself.
+static func paint_camo(buffer: VoxelBuffer, p_item: ItemData, variant: String) -> VoxelBuffer:
+	if variant == "" or not bool(p_item.stats.get("camo", false)):
+		return buffer
+	var out := VoxelBuffer.new()
+	out.set_channel_depth(VoxelBuffer.CHANNEL_COLOR, VoxelBuffer.DEPTH_8_BIT)
+	var size := buffer.get_size()
+	out.create(size.x, size.y, size.z)
+	out.copy_channel_from(buffer, VoxelBuffer.CHANNEL_COLOR)
+	var salt := absi(String(p_item.id).hash())
+	var paint := {VoxelArt.C.CAMO_B: CAMO_B, VoxelArt.C.CAMO_C: CAMO_C, VoxelArt.C.CAMO_D: CAMO_D}
+	for x in size.x:
+		for y in size.y:
+			for z in size.z:
+				if out.get_voxel(x, y, z, VoxelBuffer.CHANNEL_COLOR) == INTACT:
+					var c: int = paint.get(VoxelArt._camo(Vector3(x, y, z) * VOXEL_SIZE * 100.0, salt, variant), INTACT)
+					if c != INTACT:
+						out.set_voxel(c, x, y, z, VoxelBuffer.CHANNEL_COLOR)
+	return out
 
 
 static func size_m(p_item: ItemData) -> Vector3:
@@ -140,7 +183,7 @@ func apply_damage(chips: Array, shattered := false) -> void:
 				for z in _base.dims.z:
 					if _voxel_at(Vector3i(x, y, z)) == INTACT:
 						_set_voxel(Vector3i(x, y, z), SCARRED)
-	_mesh_instance.mesh = _get_mesher(item, cover).build_mesh(_buffer, [])
+	_remesh()
 
 
 ## Share of the piece's voxels still there, 1 (new) to 0.
@@ -218,6 +261,8 @@ func item_state() -> Dictionary:
 		return ExoFrame.pad_state(inventory, pad)
 	if inventory:
 		return inventory.state_of(slot)
+	if is_instance_valid(loose_suit):
+		return loose_suit.state.get("pads", {}).get(pad, {})
 	var loose := get_parent() as WorldItem
 	return loose.state if loose else _own_state
 
@@ -233,6 +278,9 @@ func wearer() -> Node3D:
 func _record_hit(new_chip: Array, changes: Dictionary) -> void:
 	if inventory:
 		inventory.add_armor_hit(slot, new_chip, changes, pad)
+		return
+	if is_instance_valid(loose_suit):
+		loose_suit.server_add_armor_hit(new_chip, changes, pad)
 		return
 	var loose := get_parent() as WorldItem
 	if loose:
@@ -590,6 +638,7 @@ static func _guard_shape(stats: Dictionary) -> Dictionary:
 	var h := int(stats.get("height_vox", 12))
 	var walls: Array = stats.get("walls", ["+x", "-x", "front", "back"])
 	var panels := bool(stats.get("panel_lines", false))
+	var visor: Array = stats.get("visor_band", [])  # [from, to] voxels up: a VISOR slit across the front (the heavy exo's head unit)
 	var hx := float(hollow[0]) * 0.5
 	var hz := float(hollow[1]) * 0.5
 	var dims := Vector3i(int(hollow[0]) + th * 2, h, int(hollow[1]) + th * 2)
@@ -605,6 +654,8 @@ static func _guard_shape(stats: Dictionary) -> Dictionary:
 		var side := guard_side(d)
 		if not side in walls:
 			return EMPTY
+		if visor.size() == 2 and side == "front" and c.y >= int(visor[0]) and c.y < int(visor[1]) and absf(d.x) < hx * 0.62:
+			return VISOR
 		if panels and (d.x / (hx + reach - 1.0)) ** 2 + (d.z / (hz + reach - 1.0)) ** 2 > 1.0:  # the outer face
 			if end == 1 or (c.y % 7 == 3) or (side == "front" and absf(d.x) < 1.0):
 				return ACCENT  # trim at the ends, panel seams across, a ridge down the front
@@ -712,11 +763,20 @@ static func _superellipse(v: Vector3) -> float:
 	return pow(absf(v.x), 4.0) + pow(absf(v.y), 4.0) + pow(absf(v.z), 4.0)
 
 
-static func _get_mesher(p_item: ItemData, p_cover := Color(0, 0, 0, 0)) -> VoxelMesherCubes:
-	var key := String(p_item.id) + (p_cover.to_html(false) if p_cover.a > 0.0 else "")
+static func _get_mesher(p_item: ItemData, p_cover := Color(0, 0, 0, 0), p_camo := "") -> VoxelMesherCubes:
+	if not bool(p_item.stats.get("camo", false)):
+		p_camo = ""
+	var key := String(p_item.id) + (p_cover.to_html(false) if p_cover.a > 0.0 else "") + ("|" + p_camo if p_camo != "" else "")
 	if not _meshers.has(key):
 		var colour := p_cover if p_cover.a > 0.0 else Color(p_item.stats.get("color", "4f5a45"))
+		# Camo paint on armour: the pattern's colours a shade darker than the cloth's (paint on
+		# steel and ceramic, not fabric), its panel seams darker again.
+		var pattern: Array = (VoxelArt.spec(p_camo).camo as Array).map(func(c: Variant) -> Color: return Color(c).darkened(0.12)) if p_camo != "" else []
+		if not pattern.is_empty():
+			colour = pattern[0]
 		var palette := VoxelColorPalette.new()
+		for i in pattern.size() - 1:
+			palette.set_color([CAMO_B, CAMO_C, CAMO_D][i], pattern[i + 1])
 		palette.set_color(EMPTY, Color(0, 0, 0, 0))
 		palette.set_color(INTACT, colour)
 		palette.set_color(SCARRED, Color("c9c2ae"))

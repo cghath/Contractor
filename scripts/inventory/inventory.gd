@@ -38,7 +38,8 @@ extends Node
 signal changed
 
 ## "launcher" (wave 5): an anti-armour launcher slung on the back (Launchers.SLOT; key 3).
-## "exo": a light exoskeleton frame worn over the rest (ExoFrame.SLOT).
+## "exo": a light exoskeleton frame worn over the rest (ExoFrame.SLOT), or the heavy exo its
+## pilot climbed into (ExoMech: only ever put on there by put_on, never taken).
 const SLOTS: Array[StringName] = [&"primary", &"sidearm", &"helmet", &"vest", &"backpack", &"plate_front", &"plate_back", &"plate_left", &"plate_right", &"launcher", &"exo"]
 const PLATE_SLOTS: Array[StringName] = [&"plate_front", &"plate_back", &"plate_left", &"plate_right"]
 const WEAPON_SLOTS: Array[StringName] = [&"primary", &"sidearm", &"launcher"]
@@ -316,6 +317,18 @@ func take(id: StringName, count := 1, state := {}) -> int:
 	if taken > 0:
 		_commit()
 	return taken
+
+
+## Host only. Puts `id` (with `state`, or its default) into the empty body `slot` with no
+## checks: a heavy exo climbed into and its gun (ExoMech.server_enter), a rifle back off its
+## rack. Returns whether it went on.
+func put_on(slot: StringName, id: StringName, state := {}) -> bool:
+	var item := ItemDB.get_item(id)
+	if item == null or slots.get(slot, &"x") != &"":
+		return false
+	_wear(slot, item, state)
+	_commit()
+	return true
 
 
 ## Host only. Empties the hands; returns what was held.
@@ -742,6 +755,10 @@ func entry_fit_problem(container: StringName, index: int) -> String:
 func fit_problem(item: ItemData) -> String:
 	if item.slot == &"":
 		return "%s isn't worn" % item.name
+	if ExoMech.is_mech(item):
+		return "Climb into it where it stands"
+	if ExoMech.mech_only(item) and not ExoMech.piloting(self):
+		return "Only a heavy exo's pilot can carry the %s" % item.name
 	if not item.is_plate():
 		return "" if slots.get(item.slot, &"x") == &"" else "Already wearing a %s" % item.slot
 	if slots[&"vest"] == &"":
@@ -1252,6 +1269,8 @@ func _wear(slot: StringName, item: ItemData, state: Dictionary) -> void:
 
 
 func _free_slot_for(item: ItemData) -> StringName:
+	if ExoMech.is_mech(item) or (ExoMech.mech_only(item) and not ExoMech.piloting(self)):
+		return &""  # a heavy exo is climbed into (put_on), its gun is only its pilot's
 	match item.slot:
 		&"":
 			return &""

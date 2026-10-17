@@ -64,6 +64,12 @@ const SHOULDER_POCKET := Vector3(0.09, 0.07, -0.11)
 const READY_POCKET := Vector3(0.11, 0.03, -0.11)
 const READY_DIP := 0.5
 const READY_TURN := 0.15
+## A heavy exo's gun (the WG-50, VoxelArt's "walker" style; Captain's ref: "a two-handed heavy
+## weapon held low and ready") at the ready: low at the hip, the butt back by the firing-side
+## hip, the muzzle a little down and in. Aiming it comes up to the shoulder like any rifle.
+const LOW_READY_POCKET := Vector3(0.17, -0.36, 0.02)
+const LOW_READY_DIP := 0.12
+const LOW_READY_TURN := 0.08
 const PISTOL_AIM := Vector3(0.0, 0.16, -0.44)
 const PISTOL_READY := Vector3(0.06, -0.12, -0.32)
 const PISTOL_READY_DIP := 0.45
@@ -259,6 +265,8 @@ func _rebuild() -> void:
 	var pack: StringName = inventory.slots[&"backpack"]
 	var pack_size := VoxelArt.size_m(VoxelArt.model_for(ItemDB.get_item(pack))) if pack != &"" else Vector3.ZERO
 	var spine := EXO_SPINE_DEPTH if inventory.slots.get(ExoFrame.SLOT, &"") != &"" else 0.0  # an exo's spine pack under it
+	if ExoMech.piloting(inventory):
+		spine = ExoMech.spine_depth(inventory)  # a heavy exo carries it on its power pack
 	_pack_rest = carrier_fit("back") * Transform3D(Basis.IDENTITY, Vector3(0, PACK_CENTRE_Y, 0.165 + spine + pack_size.z * 0.5))
 	_pack_pivot = carrier_fit("back") * Vector3(0, 0.3 + pack_size.y * 0.5, 0.165)
 	_set_gear(&"backpack", pack, &"torso", _pack_rest)
@@ -296,6 +304,7 @@ func _set_exo_pads() -> void:
 		piece.name = "ExoPad_" + pad.id
 		piece.transform = pad.at
 		piece.set_cover(faction_armor_color())  # the side's own kit colour (chips show the steel)
+		piece.set_camo(model.variant)  # a heavy exo's plates: painted in the side's camo (ExoMech)
 		_pads[pad.id] = piece
 		_chip_counts["pad:" + pad.id] = 0
 
@@ -310,7 +319,9 @@ func _set_exo_frame() -> void:
 	if key == _exo_key:
 		return
 	_exo_key = key
-	ExoFrame.dress(model, item, item != null and not ExoFrame.working(inventory), render_layers)
+	var mech := ExoMech.is_mech(item)  # the heavy exo's chassis (ExoMech), or the LX-3's struts
+	ExoFrame.dress(model, null if mech else item, item != null and not ExoFrame.working(inventory), render_layers)
+	ExoMech.dress(model, item if mech else null, item != null and not ExoFrame.working(inventory), render_layers, model.variant)
 
 
 ## MOLLE attachments on the worn carrier and pack, drawn as small boxes on their attach points
@@ -973,7 +984,10 @@ static func held_transform(art: String, aiming: bool, left: bool, twist := NAN) 
 	if art.begins_with("rifle"):
 		var basis := Basis.IDENTITY
 		var pocket := SHOULDER_POCKET
-		if not aiming:
+		if not aiming and VoxelArt._rifle_style(art) == "walker":
+			basis = Basis(Vector3.UP, LOW_READY_TURN * s) * Basis(Vector3.RIGHT, -LOW_READY_DIP)
+			pocket = LOW_READY_POCKET
+		elif not aiming:
 			basis = Basis(Vector3.UP, READY_TURN * s) * Basis(Vector3.RIGHT, -READY_DIP)
 			pocket = READY_POCKET
 		return Transform3D(basis, Basis(Vector3.UP, twist) * (pocket * Vector3(s, 1, 1)) - basis * VoxelArt.butt_point(art))

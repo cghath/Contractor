@@ -23,10 +23,13 @@ var state: Dictionary = {}:
 		state = value
 		if _armor:
 			_armor.apply_damage(state.get("chips", []), ArmorRules.is_shattered(state))
+		if _suit:
+			ExoMech.show_parked_damage(_suit, state)
 ## Stable id for persistence (see GameState). Also used as the node name.
 var uid := ""
 
 var _armor: VoxelArmor   # the piece shown, for a plate or helmet
+var _suit: Node3D        # a heavy exo left standing (ExoMech.parked_node)
 var _box: BoxShape3D
 
 
@@ -51,7 +54,15 @@ func _ready() -> void:
 	var item := ItemDB.get_item(item_id)
 	var is_armor := item.type == "plate" or item.slot == &"helmet"
 	var size := visual_size(item)
-	if is_armor:
+	if ExoMech.is_mech(item):
+		# A heavy exo stands where its pilot left it, open, facing the way he faced (ExoMech):
+		# never tumbling, its plates still armour a round can hit.
+		freeze = true
+		rotation = Vector3(0.0, float(state.get("yaw", rotation.y)), 0.0)
+		_suit = ExoMech.parked_node(item, state, self)
+		add_child(_suit)
+		size = ExoMech.PARKED_SIZE
+	elif is_armor:
 		# The real voxel piece, with any damage it carries; rounds hit it (see server_add_armor_hit).
 		size = VoxelArmor.size_m(item)
 		var piece := VoxelArmor.new()
@@ -77,6 +88,8 @@ func _ready() -> void:
 func action_point() -> Vector3:
 	if _box == null:
 		return global_position
+	if _suit:
+		return ExoMech.parked_point(self)  # at the open cockpit
 	var b := global_basis
 	var half := _box.size * 0.5
 	var up := absf(b.x.y) * half.x + absf(b.y.y) * half.y + absf(b.z.y) * half.z
@@ -87,12 +100,17 @@ func action_point() -> Vector3:
 ## chip, plus whatever else the hit changed (a ceramic plate's cracks and integrity). The new
 ## state replicates to every peer (Sync), redraws the damage, and is saved with the zone: a
 ## level-placed item becomes a dropped one, so it comes back damaged instead of new.
-func server_add_armor_hit(chip: Array, changes: Dictionary) -> void:
+func server_add_armor_hit(chip: Array, changes: Dictionary, pad := "") -> void:
 	var next := state.duplicate(true)  # a new Dictionary, so Sync sees the change
-	var chips: Array = next.get("chips", [])
+	var pads: Dictionary = next.get("pads", {})
+	var piece: Dictionary = pads.get(pad, {}) if pad != "" else next  # a parked heavy exo's plate (ExoMech): under "pads"
+	var chips: Array = piece.get("chips", [])
 	chips.append(chip)
-	next["chips"] = chips
-	next.merge(changes, true)
+	piece["chips"] = chips
+	piece.merge(changes, true)
+	if pad != "":
+		pads[pad] = piece
+		next["pads"] = pads
 	state = next
 	if uid == "":
 		return
@@ -105,6 +123,8 @@ func server_add_armor_hit(chip: Array, changes: Dictionary) -> void:
 
 func describe() -> String:
 	var item := ItemDB.get_item(item_id)
+	if ExoMech.is_mech(item):
+		return ExoMech.describe(item, state)
 	var verb := "Carry" if item.two_handed else "Take"
 	var amount := " x%d" % count if count > 1 else ""
 	var detail := ""

@@ -2,8 +2,8 @@ class_name VehicleRange
 extends CompoundLevel
 ## The vehicle range (wave 5 debug level, main menu "Host vehicle range"): flat ground with an
 ## M-ATV, a MaxxPro, a DShK technical and an AAV-7 parked by the spawn, their holds stocked
-## with belts, and a table of vehicle parts, fuel and an M110 to try repairs, refuelling and
-## shooting with. A row of concrete blocks and a sandbag wall down the range give the AI driver
+## with belts, a table of vehicle parts, fuel and an M110 to try repairs, refuelling and
+## shooting with, and an Atlas-pattern Walker (the heavy exo) standing open to climb into. A row of concrete blocks and a sandbag wall down the range give the AI driver
 ## something to steer round. No hostiles; the friendly squad fills in as anywhere (Mount > Get
 ## in). It saves under its own zone id, so wrecks stay until the save is reset.
 
@@ -29,6 +29,8 @@ const RANGE_LOOT := [
 	{"uid": "rng_rounds", "id": "rounds_556", "count": 120, "pos": Vector3(2, 0.5, 14)},
 	{"uid": "rng_m110", "id": "m110", "pos": Vector3(3, 0.5, 14)},
 	{"uid": "rng_mags762", "id": "mag_762", "count": 4, "pos": Vector3(4, 0.5, 14)},
+	# An Atlas-pattern Walker standing open, facing the spawn, its WG-50 on it (ExoMech).
+	{"uid": "rng_atlas", "id": "exo_mech_heavy", "pos": Vector3(8, 0.95, 15), "state": {"yaw": PI, "gun": {"id": "wg50_walker"}}},
 ]
 ## Obstacles down the range (from, to, material).
 const BLOCKS := [
@@ -70,7 +72,7 @@ func _on_hosted() -> void:
 	voxel_world.load_edits(GameState.voxel_edits)
 	for loot: Dictionary in RANGE_LOOT:
 		if not GameState.is_looted(loot.uid):
-			spawn_item(StringName(loot.id), loot.get("count", 1), loot.pos, loot.uid)
+			spawn_item(StringName(loot.id), loot.get("count", 1), loot.pos, loot.uid, (loot.get("state", {}) as Dictionary).duplicate(true))
 	for uid: String in GameState.dropped:
 		var d: Dictionary = GameState.dropped[uid]
 		spawn_item(StringName(d.id), int(d.count), Vector3(d.pos[0], d.pos[1], d.pos[2]), uid, GameState.from_json(d.get("state", {})))

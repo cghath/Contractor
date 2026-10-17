@@ -146,6 +146,14 @@ const PICK_UP_S := 0.6
 const EQUIP_S := 0.8
 const LOOT_S := 1.0
 const LOOT_ALL_S := 1.6
+## Climbing into a heavy exo (ExoMech.server_enter), opening it and stepping down out of it
+## (server_exit): the knees dip and the body rises as it steps up (or down), the hands on the
+## grab bars over the shoulders (MECH_GRAB, torso-local) while the hatch moves round it.
+const MECH_IN := &"mech_in"
+const MECH_OPEN := &"mech_open"
+const MECH_OUT := &"mech_out"
+const MECH_GRAB: Array[Vector3] = [Vector3(0.22, 0.66, -0.08), Vector3(-0.22, 0.66, -0.08)]
+const MECH_DIP := 0.16
 ## Picking up: the hand is at the item until this fraction of the clip, then stows it.
 const PICK_REACH_END := 0.55
 ## Equipping: the hand is at the `from` mount until EQUIP_FROM_END, at `to` until EQUIP_TO_END.
@@ -787,6 +795,14 @@ func carry_shown() -> Dictionary:
 ## The hand action playing now (an action_net id), or &"" for none.
 func action_shown() -> StringName:
 	return StringName(action_net.get("id", &"")) if _action_active() else &""
+
+
+## How far through the action playing now (0..1), or -1 with none.
+func action_progress() -> float:
+	if not _action_active():
+		return -1.0
+	var s := float(action_net.get("s", 0.0))
+	return clampf(_action_t / s, 0.0, 1.0) if s > 0.0 else 0.0
 
 
 ## The hands are on something other than a weapon: a casualty, or an action. GearRig slings
@@ -1481,6 +1497,12 @@ func _action_pose(mode: StringName) -> Dictionary:
 			var at := to_local(other.global_position) if other else Vector3(0, 0, -0.8)
 			_carry_reach = reach_pose(pose, at + Vector3(0, 0.25, 0), true, true, body)
 		return blend_pose(leaning, _carry_reach, k) if not _carry_reach.is_empty() else leaning
+	var clip := action_shown()
+	if clip == MECH_IN or clip == MECH_OUT:
+		# A step up into the suit (or down out of it): a dip at the knees, then up again.
+		var stepping := pose.duplicate()
+		stepping["hip"] = float(pose.get("hip", REST_POSE.hip)) - sin(clampf((action_progress() - 0.05) / 0.55, 0.0, 1.0) * PI) * MECH_DIP
+		return stepping
 	if _reaching.is_empty() or not _action_active():
 		return pose
 	var s := float(action_net.get("s", 0.0))
@@ -1715,6 +1737,9 @@ func _action_goals(held: Array) -> Array:
 				return [["stow", to], ["work", at - spread]]
 		TREAT:
 			return _treat_goals(StringName(action_net.get("tech", WORK)), at, t, s)
+		MECH_IN, MECH_OPEN, MECH_OUT:
+			if t < s * 0.85:
+				return [["mech", MECH_GRAB[0]], ["mech", MECH_GRAB[1]]]
 	return []
 
 

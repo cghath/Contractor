@@ -285,6 +285,9 @@ func step(delta: float) -> void:
 				jumped = true
 	else:
 		_lean_held = 0  # keys released while the mouse was free
+	if ExoMech.transitioning(body):
+		input = Vector2.ZERO  # climbing into or out of a heavy exo: it stands still for it
+		sprint = false
 	# Sprint: forward only (MovementRules.SPRINT_ARC_DEG), never aimed (the sprint key aimed is
 	# holding the breath by default), within the load tier (can_sprint).
 	is_sprinting = sprint and MovementRules.sprint_direction_ok(input) and not body.is_aiming and not down and not burdened \
@@ -470,7 +473,7 @@ func is_prone() -> bool:
 ## Jumping only from a standing stance, on the ground, hands free, not down, not critically
 ## loaded (MovementRules.can_jump_at), with the legs for it (jump_cost).
 func can_jump() -> bool:
-	return is_standing() and body.is_on_floor() and body.vitals.is_up() \
+	return is_standing() and body.is_on_floor() and body.vitals.is_up() and not ExoMech.piloting(body.inventory) \
 		and body.inventory.hands == &"" and body.carry_speed_mult() >= 1.0 \
 		and MovementRules.can_jump_at(body.load_tier()) and not _winded and stamina >= jump_cost()
 
@@ -494,6 +497,8 @@ func jump() -> void:
 ## working exo frame's legs reach higher (ExoFrame.climb_assist_m; Captain, 2026-10-16: over
 ## compound walls and onto roofs, "especially exo-equipped soldiers").
 func mantle_reach() -> float:
+	if ExoMech.piloting(body.inventory):
+		return 0.0  # a heavy exo doesn't climb (ExoMech)
 	var tier := body.load_tier()
 	if not MovementRules.can_jump_at(tier):
 		return 0.0
@@ -673,6 +678,8 @@ func set_stance(new_stance: int) -> bool:
 	new_stance = clampi(new_stance, Stance.PRONE, Stance.STAND_HIGH)
 	if body.vitals != null and not body.vitals.can_stand():
 		new_stance = Stance.PRONE
+	elif new_stance == Stance.PRONE and ExoMech.piloting(body.inventory):
+		return false  # a heavy exo kneels at most (ExoMech)
 	if new_stance == stance:
 		return true
 	if new_stance > stance and not has_room(new_stance):
@@ -843,7 +850,7 @@ func top_speed(sprinting: bool, down: bool, input := Vector2(0, -1)) -> float:
 		speed = minf(speed, WALK_SPEED) * ADS_SPEED_MULT * body.vitals.aim_mult(weapon != null and weapon.tags.has("rifle"))
 	if down:
 		speed = CRAWL_SPEED
-	return speed * body.load_mult * body.vitals.speed_mult() * body.carry_speed_mult()
+	return speed * body.load_mult * body.vitals.speed_mult() * body.carry_speed_mult() * ExoMech.speed_mult(body.inventory)  # a heavy exo walks at its own pace
 
 
 ## 0 (light) to 1 (a full load, a bulky item or a body on your shoulder counts too).
@@ -879,7 +886,8 @@ func next_velocity(current: Vector3, target: Vector3, delta: float, on_floor := 
 
 ## Sprinting needs legs stamina, sound legs and a load under OVERLOADED (MovementRules).
 func can_sprint() -> bool:
-	return not _winded and stamina > 0.0 and body.vitals.can_sprint() and MovementRules.can_sprint_at(body.load_tier())
+	return not _winded and stamina > 0.0 and body.vitals.can_sprint() and MovementRules.can_sprint_at(body.load_tier()) \
+		and not ExoMech.piloting(body.inventory)  # a heavy exo never runs
 
 
 ## Sprinting drains stamina (faster by load tier); otherwise it comes back (faster crouched or

@@ -537,6 +537,14 @@ This list covers what is built and in the game today (2026-10-12). Work still un
   guard, fragments-only visor). A set (frame and helmet) costs $51,500.
 - Climb order: AI squadmates climb walls and onto roofs on command (Move > 9); the LX-3 climbs
   1.3 m higher than bare legs.
+- Atlas-pattern Walker (first playable slice): a heavy mech-class exo you climb into where it
+  stands and climb out of to leave it standing (both animated: the chest hatch, belly plate and
+  head unit swing open and shut). Fifteen real armour plates where they're seen (ceramic IV chest
+  and belly, steel III++ head unit, back, shoulders, arms and legs), painted in the side's camo;
+  rounds that get through reach the pilot. It carries itself and 80 kg of kit, walks at three
+  quarters pace and never sprints, jumps, climbs or goes prone. Its WG-50 Walker Gun (.50 BMG,
+  pilot-only) rides on it and is held low and ready at the hip. A suit left standing, damaged or
+  disabled, can be shot and climbed into again. One stands on the vehicle range. Not sold yet.
 
 ## Inventory and gear
 

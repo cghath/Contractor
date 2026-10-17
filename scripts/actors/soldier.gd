@@ -1146,6 +1146,12 @@ func _server_use_medical() -> void:
 func _server_inventory_action(action: String, container: StringName, index: int, slot: StringName, target: StringName) -> void:
 	if not _from_owner() or not vitals.is_up():
 		return
+	if slot == ExoMech.SLOT and ExoMech.piloting(inventory) and action.ends_with("_slot"):
+		if action == "drop_slot" and not _is_busy():
+			_server_exit_mech()  # dropping a heavy exo is climbing out: it's left standing
+		elif action != "drop_slot":
+			_client_message.rpc_id(owner_peer(), "Climb out of the suit to leave it")
+		return
 	model.server_inventory_action(inventory, action, container, index, slot, target)  # the hand's way
 	match action:
 		"drop_slot":
@@ -1311,6 +1317,9 @@ func _server_interact(path: NodePath) -> void:
 	var item := get_node_or_null(path) as WorldItem
 	if item == null or item.is_queued_for_deletion():
 		return
+	if ExoMech.is_mech(ItemDB.get_item(item.item_id)):
+		_server_enter_mech(path)  # a heavy exo standing there: climb in
+		return
 	if item.global_position.distance_to(global_position) > INTERACT_RANGE + 1.5:
 		return
 	if Inventory.is_pack(ItemDB.get_item(item.item_id)) and inventory.slots[&"backpack"] != &"":
@@ -1329,6 +1338,52 @@ func _server_interact(path: NodePath) -> void:
 	_server_took(item, taken)
 
 
+## Heavy exo (ExoMech): climb into the suit standing at `path` (a WorldItem).
+@rpc("any_peer", "call_local", "reliable")
+func _server_enter_mech(path: NodePath) -> void:
+	if not _from_owner() or not vitals.is_up() or _is_busy():
+		return
+	var suit := get_node_or_null(path) as WorldItem
+	if suit == null or suit.is_queued_for_deletion() or not ExoMech.is_mech(ItemDB.get_item(suit.item_id)):
+		return
+	var why := ExoMech.server_enter(self, suit)
+	if why != "":
+		_client_message.rpc_id(owner_peer(), why)
+
+
+## Heavy exo: climb out, leaving it standing (ExoMech.server_exit).
+@rpc("any_peer", "call_local", "reliable")
+func _server_exit_mech() -> void:
+	if not _from_owner() or not vitals.is_up() or _is_busy():
+		return
+	var why := ExoMech.exit_problem(self)
+	if why != "":
+		_client_message.rpc_id(owner_peer(), why)
+		return
+	ExoMech.server_exit(self)
+
+
+## Host: this soldier is busy for `seconds` (no other request starts), and its owner sees `text`.
+func server_busy(seconds: float, text: String) -> void:
+	_server_busy_until = _now() + seconds
+	_client_busy.rpc_id(owner_peer(), seconds, text)
+
+
+## Host: puts this body at `pos` facing `yaw` (climbing into or out of a heavy exo): its owner
+## moves it, as its position is the owner's to send.
+func server_place(pos: Vector3, yaw: float) -> void:
+	_client_placed.rpc_id(owner_peer(), pos, yaw)
+
+
+@rpc("any_peer", "call_local", "reliable")
+func _client_placed(pos: Vector3, yaw: float) -> void:
+	if multiplayer.get_remote_sender_id() != 1:
+		return
+	global_position = pos
+	rotation.y = yaw
+	velocity = Vector3.ZERO
+
+
 ## Inventory screen: the nearby item at `path` dragged onto container `into` (a pouch too)
 ## goes in there, not on the body: a pack dragged into the worn pack is stowed (empty, rolled
 ## if it's as big), never swapped for it (audit A2-07). The same reach as picking it up. A
@@ -1345,6 +1400,9 @@ func _server_pick_up_into(path: NodePath, into: StringName) -> void:
 		return
 	var data := ItemDB.get_item(item.item_id)
 	if data == null:
+		return
+	if ExoMech.is_mech(data):
+		_client_message.rpc_id(owner_peer(), "Climb into it from the interaction menu")
 		return
 	if data.two_handed:
 		_server_interact(path)

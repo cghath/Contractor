@@ -668,6 +668,8 @@ func server_enter(soldier: Node, index := -1) -> bool:
 	if not multiplayer.is_server() or s == null or not is_instance_valid(s) or s.is_queued_for_deletion() or wrecked or is_burning():
 		return false
 	var body := not s.vitals.is_up()
+	if not body and ExoMech.piloting(s.inventory):
+		return false  # a heavy exo doesn't fit a seat: climb out first (ExoMech)
 	if index < 0:
 		index = _first_free_passenger() if body else _first_free_for(s)
 	if index < 0 or index >= _seat_nodes.size() or occupant(index) != null:

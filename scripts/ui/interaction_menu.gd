@@ -110,7 +110,8 @@ const INTERACTABLES := &"interactables"
 ## on a captive; never a squadmate or a civilian.
 const ACTIONS := {
 	ITEM: [
-		{"id": &"pick_up", "label": "Pick up", "request": &"_server_interact", "with": &"target"},
+		{"id": &"pick_up", "label": "Pick up", "needs": &"not_mech", "request": &"_server_interact", "with": &"target"},
+		{"id": &"enter_mech", "label": "Climb in", "needs": &"mech_suit", "request": &"_server_enter_mech", "with": &"target"},
 	],
 	DOWNED: [
 		{"id": &"put_down", "label": "Put down", "needs": &"moving_body", "request": &"_server_release_body", "with": &"none"},
@@ -153,6 +154,7 @@ const ACTIONS := {
 		{"id": &"check_wounds", "label": "Check wounds", "show": &"wounds"},
 		{"id": &"treat", "label": "Treat yourself", "needs": &"treatable", "submenu": &"treatments"},
 		{"id": &"drop_held", "label": "Drop held item", "needs": &"held_item", "request": &"_server_drop", "with": &"slot"},
+		{"id": &"exit_mech", "label": "Climb out", "needs": &"in_mech", "request": &"_server_exit_mech", "with": &"none"},
 		{"id": &"radio_contract", "label": "Radio for a contract", "needs": &"field_radio", "request": &"_server_radio_contract", "with": &"none", "group": MORE},
 		{"id": &"spoof_radio", "label": "Fake a contact report", "needs": &"enemy_net", "request": &"_server_spoof_radio", "with": &"none", "group": MORE},
 	],
@@ -436,6 +438,16 @@ static func _check(need: StringName, actor: Soldier, target: Node) -> String:
 			return "" if (target as Soldier).has_gear() else "Nothing left on them"
 		&"held_item":
 			return "" if actor.inventory.hands != &"" or actor.active_weapon() != null else _HIDE
+		&"not_mech":  # a heavy exo standing there is climbed into, not picked up (ExoMech)
+			return _HIDE if target is WorldItem and ExoMech.is_mech(ItemDB.get_item((target as WorldItem).item_id)) else ""
+		&"mech_suit":
+			if not (target is WorldItem and ExoMech.is_mech(ItemDB.get_item((target as WorldItem).item_id))):
+				return _HIDE
+			return ExoMech.enter_problem(actor, target, false)
+		&"in_mech":
+			if not ExoMech.piloting(actor.inventory):
+				return _HIDE
+			return ExoMech.exit_problem(actor)
 		&"field_radio":  # your own field radio (not a looted enemy set), in a hot zone
 			var lvl := CompoundLevel.current(actor)
 			var def: Variant = lvl.get(&"def") if lvl else null

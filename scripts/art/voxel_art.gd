@@ -183,6 +183,9 @@ static func hand_points(model: String) -> Dictionary:
 	var grip: Vector3
 	var support: Vector3
 	match model.get_slice(":", 0):
+		"rifle" when _rifle_style(model) == "walker":
+			grip = Vector3(WALKER_AXIS_X, 2, n * 0.807)  # its pistol grip, under the receiver's back end
+			support = Vector3(WALKER_AXIS_X, 2, n - 27.0)  # its vertical foregrip
 		"rifle":
 			grip = Vector3(1.5, 4, n * 0.68)     # pistol grip
 			# Under the handguard, no further than 0.52 m from the butt: as far out as the
@@ -208,7 +211,7 @@ static func sight_point(model: String) -> Vector3:
 		"rifle":
 			var art := _rifle_art(model)
 			var back := sight_back(art, spec.size.z) + (IRON_EYE_RELIEF if art == IRONS else 0.0)
-			return (Vector3(1.5, OPTIC_AXIS_Y, back) - centre) * VOXEL_SIZE
+			return (Vector3(_axis_x(model), OPTIC_AXIS_Y, back) - centre) * VOXEL_SIZE
 		"pistol":
 			return (Vector3(1, 7.0, 9.4) - centre) * VOXEL_SIZE  # rear sight notch
 	return Vector3.ZERO
@@ -220,7 +223,7 @@ static func butt_point(model: String) -> Vector3:
 	var spec := _spec(model)
 	var centre := Vector3(spec.size) * 0.5
 	if model.get_slice(":", 0) == "rifle":
-		return (Vector3(1.5, 7.7, spec.size.z) - centre) * VOXEL_SIZE
+		return (Vector3(_axis_x(model), 7.7, spec.size.z) - centre) * VOXEL_SIZE
 	return Vector3.ZERO
 
 
@@ -567,6 +570,7 @@ static func _spec(model: String) -> Dictionary:
 				"pk": out = _rifle_pkm(arg, art)
 				"m240": out = _rifle_m240(arg, art)
 				"m249": out = _rifle_m249(arg, art)
+				"walker": out = _rifle_walker(arg, art)
 				"bullpup": out = _rifle_bullpup(arg, art)
 				"carbine_short": out = _rifle_carbine_short(arg, art)
 				"piston_ar": out = _rifle_piston_ar(arg, art)
@@ -1260,6 +1264,54 @@ static func iron_boxes(n: float) -> Array:
 		_fb(2.0, 9.75, front, 2.25, 12.0, front + 0.5, C.GUN),
 		_fb(0.75, 9.75, front, 2.25, 10.0, front + 0.5, C.GUN),                     # the ears' foot, joining them to the post
 	]
+
+
+## The WG-50 Walker Gun (a heavy exo's own weapon, ExoMech; learned from the Captain's reference
+## art: a two-handed heavy weapon "sized beyond what a normal soldier could carry"): a .50 cal
+## with a long ventilated cooling jacket round a heavy barrel and a muzzle brake, a deep slab
+## receiver with a belt box hung on its left and a feed chute up into it, a vertical foregrip
+## and a pistol grip under it, and a stubby buffer stock. Wider than a rifle: its centre line
+## is WALKER_AXIS_X (hand_points, sight_point and butt_point follow it), its irons the rifles'
+## moved over to it.
+const WALKER_AXIS_X := 3.5
+
+
+static func _rifle_walker(length: int, art := IRONS) -> Dictionary:
+	var n := maxi(length, 40)
+	var f := func(t: float) -> float: return n * t
+	var shift := WALKER_AXIS_X - 1.5
+	var sight: Array = (iron_boxes(n) if art == IRONS else optic_boxes(art, sight_back(art, n))).map(
+		func(b: Array) -> Array: return [b[0] + Vector3(shift, 0, 0), b[1] + Vector3(shift, 0, 0)] + b.slice(2))
+	var boxes := sight + [
+		_fb(2.4, 7.2, 0, 4.6, 9.4, 3.0, C.GUN),                                 # muzzle brake
+		_fb(2.4, 7.0, 1.0, 4.6, 7.5, 2.0, C.EMPTY),                             # and its ports
+		_fb(2.9, 7.7, 0, 4.1, 8.9, f.call(0.45), C.GUN),                        # heavy barrel, on into the receiver
+		_fb(2.1, 6.6, f.call(0.08), 4.9, 10.0, f.call(0.4), C.GUN_LIGHT),       # cooling jacket
+		_fb(1.9, 6.4, f.call(0.08), 5.1, 10.2, f.call(0.08) + 1.0, C.GUN),      # its front collar
+		_fb(1.9, 6.4, f.call(0.4) - 1.0, 5.1, 10.2, f.call(0.4), C.GUN),        # and back collar
+		_fb(1.0, 3.5, f.call(0.38), 6.0, 10.5, f.call(0.82), C.GUN),            # slab receiver
+		_fb(0.8, 5.0, f.call(0.45), 1.0, 9.5, f.call(0.75), C.GUN_LIGHT),       # its side plate
+		_fb(2.0, 10.5, f.call(0.42), 5.0, 11.0, f.call(0.7), C.GUN_LIGHT),      # top cover
+		_fb(0.0, 0.5, f.call(0.42), 1.6, 6.0, f.call(0.6), C.GUN_LIGHT),       # belt box, on the left
+		_fb(0.0, 0.5, f.call(0.42), 1.6, 1.0, f.call(0.6), C.GUN),
+		_fb(0.3, 6.0, f.call(0.46), 1.2, 8.5, f.call(0.5), C.GUN),              # feed chute, up into the receiver
+		_fb(2.9, 0.5, n - 28.5, 4.1, 3.5, n - 25.5, C.GUN),                     # vertical foregrip
+		_fb(3.0, 2.3, f.call(0.75), 4.0, 3.5, f.call(0.79), C.GUN),             # trigger guard
+		_fb(2.9, 0.0, f.call(0.79), 4.1, 3.5, f.call(0.83), C.GUN),             # pistol grip
+		_fb(2.0, 4.0, f.call(0.82), 5.0, 9.0, n - 1.0, C.GUN_LIGHT),            # buffer stock
+		_fb(1.8, 3.5, n - 1.0, 5.2, 10.0, n, C.GUN),                            # butt pad
+	]
+	var z: float = f.call(0.11)
+	while z < f.call(0.37):  # vents down both sides of the jacket
+		boxes.append(_fb(2.0, 7.6, z, 2.3, 9.0, z + 1.0, C.EMPTY))
+		boxes.append(_fb(4.7, 7.6, z, 5.0, 9.0, z + 1.0, C.EMPTY))
+		z += 2.5
+	return {"size": Vector3i(7, 13, n), "sub": 4, "boxes": boxes}
+
+
+## A rifle model's centre line across (voxels): the WG-50's is wider than the rest.
+static func _axis_x(model: String) -> float:
+	return WALKER_AXIS_X if _rifle_style(model) == "walker" else 1.5
 
 
 ## An AK's irons (Captain, 2026-10-16, with a photo: "you should be able to see the front and
