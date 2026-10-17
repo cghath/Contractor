@@ -29,6 +29,7 @@ const MENU := {
 			{"key": "5", "label": "Take cover", "cmd": "take_cover"},
 			{"key": "6", "label": "Fall back", "cmd": "fall_back"},
 			{"key": "7", "label": "Garrison that building", "cmd": "garrison", "point": true},
+			{"key": "9", "label": "Climb up there (wall, roof)", "cmd": "climb", "point": true},
 			{"key": "8", "label": "Clear", "items": [  # Captain, 2026-10-16: stack, breach, clear; whole towns
 				{"key": "1", "label": "That building (quiet)", "cmd": "clear", "point": true},
 				{"key": "2", "label": "That building, flashbang first", "cmd": "clear:flash", "point": true},

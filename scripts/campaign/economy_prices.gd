@@ -81,6 +81,10 @@ static func repair_cost(item_id: StringName, state: Dictionary) -> int:
 	var price := price_of(item_id)
 	var lost := 1.0 - float(state.get("integrity", 1.0))
 	var chips := (state.get("chips", []) as Array).size()
+	var pads: Dictionary = state.get("pads", {})  # an exo frame's armour pads (ExoFrame): their share of it
+	for pad: Dictionary in pads.values():
+		lost += (1.0 - float(pad.get("integrity", 1.0))) / maxf(float(pads.size()), 1.0)
+		chips += (pad.get("chips", []) as Array).size()
 	var cost := price * lost * float(rules.get("share_per_integrity", 0.8)) + chips * float(rules.get("per_chip", 12))
 	return mini(ceili(cost), ceili(price * float(rules.get("max_share", 0.8))))
 

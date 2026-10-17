@@ -960,7 +960,7 @@ func _test_vehicle_guns() -> void:
 	var heard := Sfx.heard_count()
 	var shot := v.server_fire_gun(player, v.barrel_direction())
 	var ids := Sfx.heard_after(heard)
-	check(not shot.is_empty() and (&"shot_hmg" in ids or &"shot_hmg_far" in ids), "an M2 shot plays the heavy gun's report (%s)" % [ids])
+	check(not shot.is_empty() and (&"shot_m2" in ids or &"shot_m2_far" in ids), "an M2 shot plays the heavy gun's report (%s)" % [ids])
 	v.server_exit(player)
 	# The Black Hawk's door guns.
 	var heli := layer.server_spawn("uh60", Transform3D(Basis(), Vector3(30, 0, 40)), "", &"player", "test_door_guns")
@@ -976,7 +976,7 @@ func _test_vehicle_guns() -> void:
 	Sfx.listener_override = heli.global_position
 	heli.request_gun((foe.aim_point() - heli.gun_origin(3)).normalized())  # the seat's fire input (on the host)
 	ids = Sfx.heard_after(heard)
-	check(heli.cargo_hold.feed_rounds(&"rounds_762") == rounds - 1 and (&"shot_rifle" in ids or &"shot_rifle_far" in ids),
+	check(heli.cargo_hold.feed_rounds(&"rounds_762") == rounds - 1 and (&"shot_m240" in ids or &"shot_m240_far" in ids),
 		"its fire input fires the M240H out of the right door: a round from the hold, heard (%d left, %s)" % [heli.cargo_hold.feed_rounds(&"rounds_762"), ids])
 	await _seconds(0.3)
 	var hits := 0

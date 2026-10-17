@@ -38,7 +38,8 @@ extends Node
 signal changed
 
 ## "launcher" (wave 5): an anti-armour launcher slung on the back (Launchers.SLOT; key 3).
-const SLOTS: Array[StringName] = [&"primary", &"sidearm", &"helmet", &"vest", &"backpack", &"plate_front", &"plate_back", &"plate_left", &"plate_right", &"launcher"]
+## "exo": a light exoskeleton frame worn over the rest (ExoFrame.SLOT).
+const SLOTS: Array[StringName] = [&"primary", &"sidearm", &"helmet", &"vest", &"backpack", &"plate_front", &"plate_back", &"plate_left", &"plate_right", &"launcher", &"exo"]
 const PLATE_SLOTS: Array[StringName] = [&"plate_front", &"plate_back", &"plate_left", &"plate_right"]
 const WEAPON_SLOTS: Array[StringName] = [&"primary", &"sidearm", &"launcher"]
 ## Containers, in the order auto-stow fills them (and reloads search them).
@@ -598,21 +599,31 @@ func add_chip(slot: StringName, chip: Array) -> void:
 
 ## Host only. Records a hit on the armor in `slot`: its chip, plus whatever else the hit
 ## changed in the item's state (a ceramic plate's "cracks" and "integrity", see
-## ArmorRules.hit_changes), all in one update.
-func add_armor_hit(slot: StringName, chip: Array, changes: Dictionary) -> void:
+## ArmorRules.hit_changes), all in one update. `pad` names one of an exo frame's pads
+## (ExoFrame.pad_items): its state is kept in the frame's, under "pads".
+func add_armor_hit(slot: StringName, chip: Array, changes: Dictionary, pad := "") -> void:
 	if slots.get(slot, &"") == &"":
 		return
 	var state: Dictionary = slot_state.get(slot, {})
-	var chips: Array = state.get("chips", [])
+	var pads: Dictionary = state.get("pads", {})
+	var piece: Dictionary = pads.get(pad, {}) if pad != "" else state
+	var chips: Array = piece.get("chips", [])
 	chips.append(chip)
-	state["chips"] = chips
-	state.merge(changes, true)
+	piece["chips"] = chips
+	piece.merge(changes, true)
+	if pad != "":
+		pads[pad] = piece
+		state["pads"] = pads
 	slot_state[slot] = state
 	_commit()
 
 
-func chips_in(slot: StringName) -> Array:
-	return state_of(slot).get("chips", [])
+## The chips in the armor in `slot` (or in exo pad `pad`, see add_armor_hit).
+func chips_in(slot: StringName, pad := "") -> Array:
+	var state := state_of(slot)
+	if pad != "":
+		state = state.get("pads", {}).get(pad, {})
+	return state.get("chips", [])
 
 
 # --- Medical kits -----------------------------------------------------------------------

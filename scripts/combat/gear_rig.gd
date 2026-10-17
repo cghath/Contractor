@@ -103,6 +103,8 @@ const PACK_SWAY := [2.4, 0.35, 0.04, 1.0, 0.25, 0.32]  # freq, damping, reach, g
 const POUCH_SWAY := [4.0, 0.3, 0.012, 1.0, 0.0, 0.06]
 
 var _armor: Dictionary = {}        # slot -> VoxelArmor
+var _pads: Dictionary = {}         # exo pad id -> VoxelArmor (ExoFrame.pad_items)
+var _pads_for: StringName = &""    # the frame they were built for
 var _chip_counts: Dictionary = {}  # slot -> chips already applied to the mesh
 var _gear: Dictionary = {}    # key -> [item id, Node3D]
 var _held_key: StringName = &""  # which _gear entry is in the hands
@@ -154,7 +156,30 @@ func armor_rids() -> Array[RID]:
 	var rids: Array[RID] = []
 	for piece: VoxelArmor in _armor.values():
 		rids.append(piece.get_rid())
+	for piece: VoxelArmor in _pads.values():
+		rids.append(piece.get_rid())
 	return rids
+
+
+## Remaining fraction of exo pad `pad`'s protection (as armor_integrity), or -1 if none.
+func pad_integrity(pad: String) -> float:
+	var piece: VoxelArmor = _pads.get(pad)
+	if piece == null:
+		return -1.0
+	return minf(ArmorRules.integrity(ExoFrame.pad_state(inventory, pad)), piece.integrity())
+
+
+## Hard armour in the wearer's side's colours (Captain, 2026-10-17: "give it a US theme like
+## the respective faction that is using it"): its kit colour (VoxelArt's "gear": coyote for the
+## contractors' multicam, ranger green for woodland, black for urban...), a shade darker, the
+## way a painted shell reads beside fabric.
+func faction_armor_color() -> Color:
+	return Color(VoxelArt.spec(model.variant).gear).darkened(0.22)
+
+
+## The worn exo frame's pads, by id.
+func pads() -> Dictionary:
+	return _pads
 
 
 ## Remaining fraction of an armor slot's protection, or -1 if nothing is worn there: the
@@ -171,6 +196,15 @@ func armor_integrity(slot: StringName) -> float:
 ## left, a ceramic plate's cracks or "shattered"); "" with no armor.
 func armor_summary(separator := "  ") -> String:
 	var parts := PackedStringArray()
+	var frame := ExoFrame.summary(inventory)
+	if frame != "":
+		parts.append(frame)
+	if not _pads.is_empty():  # the weakest pad: "Pads III++ 71%"
+		var worst := 1.0
+		for pad: String in _pads:
+			worst = minf(worst, pad_integrity(pad))
+		var any: VoxelArmor = _pads.values()[0]
+		parts.append("Pads %s %s" % [ArmorRules.rating(any.item), ArmorRules.failed_text(any.item) if worst <= 0.0 else "%d%%" % roundi(worst * 100.0)])
 	for slot: StringName in ARMOR_SLOTS:
 		var integrity := armor_integrity(slot)
 		if integrity < 0.0:
@@ -213,12 +247,15 @@ func _rebuild() -> void:
 				piece.transform = carrier_fit(String(slot).trim_prefix("plate_")) * piece.transform
 			if slot != &"helmet":  # a plate sits inside the carrier's pocket, under its fabric
 				piece.set_cover(Color(VoxelArt.spec(model.variant).gear) if carrier else Color(0, 0, 0, 0))
+			elif piece.item.stats.get("faction_color", false):
+				piece.set_cover(faction_armor_color())  # the LX-3 helmet's shell in the side's colour
 	for slot: StringName in MOUNTS:
 		_set_gear(slot, inventory.slots[slot], &"torso", rest_transform(slot), inventory.state_of(slot))
 	_fit_front_panel(carrier)
 	var pack: StringName = inventory.slots[&"backpack"]
 	var pack_size := VoxelArt.size_m(VoxelArt.model_for(ItemDB.get_item(pack))) if pack != &"" else Vector3.ZERO
-	_pack_rest = carrier_fit("back") * Transform3D(Basis.IDENTITY, Vector3(0, PACK_CENTRE_Y, 0.165 + pack_size.z * 0.5))
+	var spine := EXO_SPINE_DEPTH if inventory.slots.get(ExoFrame.SLOT, &"") != &"" else 0.0  # an exo's spine pack under it
+	_pack_rest = carrier_fit("back") * Transform3D(Basis.IDENTITY, Vector3(0, PACK_CENTRE_Y, 0.165 + spine + pack_size.z * 0.5))
 	_pack_pivot = carrier_fit("back") * Vector3(0, 0.3 + pack_size.y * 0.5, 0.165)
 	_set_gear(&"backpack", pack, &"torso", _pack_rest)
 	var held := inventory.hands
@@ -227,7 +264,49 @@ func _rebuild() -> void:
 	_set_pouches()
 	_set_pack_straps(pack)
 	_set_name_tape(carrier)
+	_set_exo_pads()
 	_refresh_plate_damage()
+	_set_exo_frame()
+
+
+## The worn exo frame's armour pads (ExoFrame.pad_items): VoxelArmor pieces on the bones of
+## the parts they cover, rebuilt when the frame changes.
+func _set_exo_pads() -> void:
+	var frame := ExoFrame.worn(inventory)
+	var id: StringName = frame.id if frame else &""
+	if id == _pads_for:
+		return
+	_pads_for = id
+	for piece: VoxelArmor in _pads.values():
+		piece.queue_free()
+	_pads.clear()
+	for pad: Dictionary in ExoFrame.pad_items(frame):
+		var bone := model.part_node(pad.part)
+		if bone == null:
+			continue
+		var piece := VoxelArmor.new()
+		piece.pad = pad.id
+		piece.body_part = pad.part
+		bone.add_child(piece)
+		piece.setup(pad.item, ExoFrame.SLOT, inventory, render_layers)
+		piece.name = "ExoPad_" + pad.id
+		piece.transform = pad.at
+		piece.set_cover(faction_armor_color())  # the side's own kit colour (chips show the steel)
+		_pads[pad.id] = piece
+		_chip_counts["pad:" + pad.id] = 0
+
+
+## The light exo frame's struts on the body (ExoFrame.dress), rebuilt when it's put on, taken
+## off, or goes from working to disabled.
+const EXO_SPINE_DEPTH := 0.095  # the spine pack and its armour pad
+var _exo_key := ""
+func _set_exo_frame() -> void:
+	var item := ExoFrame.worn(inventory)
+	var key := "" if item == null else "%s:%s" % [item.id, ExoFrame.working(inventory)]
+	if key == _exo_key:
+		return
+	_exo_key = key
+	ExoFrame.dress(model, item, item != null and not ExoFrame.working(inventory), render_layers)
 
 
 ## MOLLE attachments on the worn carrier and pack, drawn as small boxes on their attach points
@@ -938,6 +1017,11 @@ func _refresh_plate_damage() -> void:
 		if chips.size() != _chip_counts.get(slot, -1):
 			_armor[slot].apply_damage(chips, ArmorRules.is_shattered(inventory.state_of(slot)))
 			_chip_counts[slot] = chips.size()
+	for pad: String in _pads:
+		var chips := inventory.chips_in(ExoFrame.SLOT, pad)
+		if chips.size() != _chip_counts.get("pad:" + pad, -1):
+			_pads[pad].apply_damage(chips, ArmorRules.is_shattered(ExoFrame.pad_state(inventory, pad)))
+			_chip_counts["pad:" + pad] = chips.size()
 
 
 ## `state`: the item's state, for a model that shows it (a rifle's optic, P0362).
@@ -976,6 +1060,10 @@ func _clear() -> void:
 	for piece: VoxelArmor in _armor.values():
 		piece.queue_free()
 	_armor.clear()
+	for piece: VoxelArmor in _pads.values():
+		piece.queue_free()
+	_pads.clear()
+	_pads_for = &""
 	for entry: Array in _gear.values():
 		entry[1].queue_free()
 	_gear.clear()

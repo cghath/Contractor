@@ -47,7 +47,7 @@ const HEARD_KEEP_S := 4.0
 const CLUSTER_M := 10.0
 ## Tactic orders by command string (command()): "<name>" acts on the point under the
 ## crosshair ("suppress:known" suppresses the densest known cluster instead).
-const TACTIC_COMMANDS: Array[String] = ["suppress", "bound", "garrison", "clear", "clear_town", "take_cover", "fall_back"]
+const TACTIC_COMMANDS: Array[String] = ["suppress", "bound", "garrison", "clear", "clear_town", "take_cover", "fall_back", "climb"]
 
 ## Spawn positions in the leader's space (x right, +z behind), per formation (the squad's
 ## first places; following uses formation slots, follow_point).
@@ -430,6 +430,22 @@ func order_bound(from: Soldier, point: Vector3, names := PackedStringArray()) ->
 	return ""
 
 
+## "Climb up there" (Captain, 2026-10-16: "jumping walls or on top of buildings to clear from
+## the top down or to avoid funneling in through the door of compounds"): the named units go to
+## `point` (a wall top or a roof), climbing the ledges in their way (SoldierMovement's mantle;
+## an exo frame reaches higher), and hold up there.
+func order_climb(from: Soldier, point: Vector3, names := PackedStringArray()) -> String:
+	leader = from
+	var units := _able(names)
+	if units.is_empty():
+		return "Nobody selected can"
+	var side := from.global_basis.x
+	side.y = 0.0
+	for i in units.size():
+		units[i].give_tactic({"kind": &"climb", "point": point + side.normalized() * (i - (units.size() - 1) / 2.0) * 1.0})
+	return ""
+
+
 ## "Garrison that building": the named units take the building at `point`, its window and door
 ## positions facing the threat first (the squad's densest known cluster, else away from the
 ## ordering player), the rest inside, and hold it.
@@ -597,6 +613,8 @@ func order_command(from: Soldier, cmd: String, point: Vector3, names := PackedSt
 			return order_suppress(from, Vector3.INF if arg == "known" else point, names)
 		"bound":
 			return order_bound(from, point, names)
+		"climb":
+			return order_climb(from, point, names)
 		"garrison":
 			return order_garrison(from, point, names)
 		"clear":

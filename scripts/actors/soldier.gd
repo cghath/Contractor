@@ -149,6 +149,9 @@ var want_crouch := false
 var want_aim := false
 ## AI stance intent: a SoldierMovement.Stance, or -1 to follow want_crouch.
 var want_stance := -1
+## AI intent: climb the ledge ahead now (SoldierMovement.try_mantle, the jump key's mantle);
+## cleared once tried.
+var want_mantle := false
 ## Owner-side: fire-selector position per weapon, keyed "slot:item id" ("semi", "auto").
 var _fire_modes := {}
 ## Host only: who is dragging or carrying this body while it is down.
@@ -808,7 +811,7 @@ func load_tier() -> int:
 
 
 func _on_inventory_changed() -> void:
-	load_kg = inventory.total_mass()
+	load_kg = maxf(inventory.total_mass() - ExoFrame.assist_kg(inventory), 0.0)  # a working exo frame carries some (ExoFrame)
 	load_mult = MovementRules.load_speed_mult(load_kg) * (BULKY_SPEED_MULT if inventory.hands != &"" else 1.0)
 	if active_weapon() == null:
 		for slot: StringName in [&"primary", &"sidearm"]:
@@ -912,6 +915,13 @@ func _server_squad_command(cmd: String, point: Vector3, names: PackedStringArray
 func server_squad_command(cmd: String, point: Vector3, names: PackedStringArray) -> void:
 	var squad := CompoundLevel.current(self).squad_for(faction)
 	if squad == null:
+		return
+	# Support calls (helicopters, AAVs) aren't fire-team orders - they name no squadmates, so the
+	# "a team lead orders his own team" narrowing below doesn't apply: a lone team lead (his own
+	# team's other members dead or not yet a member, e.g. a client who just joined) would have
+	# team_names come back empty and his own resupply/transport/extraction call silently dropped.
+	if cmd.begins_with("support:"):
+		_squad_command_as(squad, cmd, point, names)
 		return
 	var own_team := squad.human_team_lead_of(self)
 	if own_team >= 0:

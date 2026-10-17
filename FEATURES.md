@@ -520,6 +520,18 @@ This list covers what is built and in the game today (2026-10-12). Work still un
 - Vehicles and wrecks are saved with the zone.
 - Engine sound per vehicle class, rising with speed.
 - Helicopters have models, seats, cargo and damage. They aren't flyable yet.
+- VT-14 Petrel: a twin-ducted-rotor VTOL dropship that replaces the UH-60M Black Hawk for every
+  player-faction support call (resupply, transport, extraction, medevac, cargo); flies through the
+  same `Helicopter` flight model. Walk-in cabin, toggleable bay doors, folding boarding ramps, FFV
+  door seats for players and AI gunners. The UH-60 stays in the game as world content (rescue
+  wrecks). A bigger, higher-capacity second tier, the Razorback VTOL, has the same bay treatment.
+
+## Exosuits
+
+- LX-3 Assist Frame: a light infantry exoskeleton, its own `exo` slot worn over the vest, plates
+  and pack (armour unchanged). Working, it carries 30 kg of the load. A round into an arm, leg or
+  the spine pack from behind can strike its struts; worn down, it disables (no assist, full load
+  back on the legs, its status light red instead of green).
 
 ## Inventory and gear
 

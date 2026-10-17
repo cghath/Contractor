@@ -243,26 +243,42 @@ than an inventory item — new entry/exit flow, new seat kind, a wreck/destroyed
 a normal casualty, and it sidesteps the squad-member wound/medical model entirely while worn
 (no bleeding out in a mech, which may or may not be wanted).
 
-**C. Recommended: a worn item with a vehicle-style flat absorption layer in front of the normal
-wound model.** A soldier wearing the heavy exo gets a "suit integrity" pool (reusing
-`Ballistics.LEVELS` for what threat tiers it's rated against, the same ladder `ArmorRules`
-already uses) that absorbs hits the suit is rated for, like an aircraft zone's `hp_kj`, before
-anything reaches the wearer's real `Vitals`/`WoundModel` underneath. Once the pool is spent,
-hits start reaching the soldier's actual body as normal. This keeps the soldier a soldier
-(squad slot, medical model, casualty/revive flow unchanged) while giving the mech tier a damage
-model that matches its reference art's "integrated platform" read better than per-body-part
-plates would, without inventing a third damage system from scratch (it borrows the shape vehicle
-zones already use) or taking on option B's full entry/exit/wreck redesign.
+**C. A worn item with a vehicle-style flat absorption layer in front of the normal wound model.**
+A soldier wearing the heavy exo gets a "suit integrity" pool (reusing `Ballistics.LEVELS` for what
+threat tiers it's rated against, the same ladder `ArmorRules` already uses) that absorbs hits the
+suit is rated for, like an aircraft zone's `hp_kj`, before anything reaches the wearer's real
+`Vitals`/`WoundModel` underneath. This was this doc's original recommendation as the practical
+middle ground between A and B — **not what Captain picked; see Decided below.**
 
-**Tradeoff to flag for Captain explicitly, not resolved silently**: option C means a soldier in
-the heavy exo is deliberately far more absorbent than any plate carrier — that's the point of a
-mech-class unit, but it's a step outside "every mechanic serves the ACE3/KAT-grounded medical
-pillar" while worn, the same way a vehicle's armour already is. Needs Captain's sign-off on: (a)
-that power level being intentional and bounded (how big a pool, what it's rated against, can it be
-wedited/overwhelmed by massed fire the way a vehicle can), and (b) whether C's "soldier
-underneath, revealed once the suit fails" is preferred over B's "it's basically a vehicle" framing
-— C was chosen here as the practical middle ground, but B is the more mechanically honest fit to
-the reference art if Captain wants the heavier commitment.
+**Decided (Captain, 2026-10-16), overriding this doc's C recommendation**: closer to option A than
+either C or B, but not A as written off above either. Captain's own words: "based on references
+armor plates are where they are seen, well model is using our armor model so pilots can be wounded,
+shot through it eventually etc and it wont be invincible. also adds worrying about the cost to
+repair it train ew pilots etc." Parsed into what this means to build:
+
+- **Real `ArmorRules` per-part plates, not an abstracted pool.** Extend the existing per-body-part
+  coverage/penetration/wear-through math to the suit's own zones (torso, shoulders, limbs) instead
+  of a single flat absorption number — this is what option A actually costs when it isn't taken as
+  a shortcut (the "parallel per-zone coverage map for a non-human silhouette" A's writeup above
+  flagged as the expensive part): mapping real coverage zones to the reference art's actual plate
+  layout (torso plate, shoulder pauldrons, forearm/shin bracers — see the parts-breakdown reference,
+  2.4's image set), not a renamed vehicle-zone system and not one enormous plate.
+- **No invincibility.** A plate can be shot through same as any other plate carrier's: once a zone's
+  coverage is defeated (cracked/worn through, `ArmorRules`' existing penetration math), the round
+  reaches the wearer's real `Vitals`/`WoundModel` underneath, same mechanic as every other armor
+  tier in the game — not C's separate "pool empties, then normal rules start" abstraction. This
+  keeps the heavy exo inside "every mechanic serves the ACE3/KAT-grounded medical pillar" that C's
+  tradeoff note above worried it would step outside of; a thicker, bigger plate is still a plate.
+- **Engineering cost**: closer to what the doc estimated for option A than for C — the real work is
+  the per-zone coverage map matching the suit's silhouette (torso/shoulder/limb hitboxes sized and
+  placed for a non-human frame) and plausible plate ratings per zone (ceramic/steel/composite,
+  thickness implying mass and threat tier), not a new damage-model layer. Replan effort for this
+  tier against A's cost estimate, not C's.
+- **New scope, not previously in this doc**: Captain flagged "worrying about" repair cost and pilot
+  training/certification as ongoing friction for owning a heavy exo — described as a concern, not a
+  confirmed spec. This needs its own concrete proposal (e.g. a repair cost scaled by damage taken
+  through `Economy`/`Prices`, a training requirement gating which roster soldiers can equip it)
+  flagged back to Captain before building, not guessed at here. See open question 5 below.
 
 - **Movement**: slow and limited, not a speed buff — the reference art is "bigger, slower,
   heavily armored/armed," the opposite of the light exo. Propose a fixed speed multiplier
@@ -276,6 +292,31 @@ the reference art if Captain wants the heavier commitment.
   separate head, thick leg actuators) is not a human skeleton wearing gear — it likely needs its
   own `CharacterModel` variant or stand-in rig, which is real production cost beyond the damage-
   model question above. Not scoped further here; flagged as the reason this tier ships last.
+
+### 2.3a Repair cost and pilot training (proposed, Captain's call — flagged as a worry, not a spec)
+
+Two separate asks, two very different costs to build:
+
+- **Repair cost: close to free.** `Prices.repair_cost(item_id, state)` (`economy_prices.gd`) already
+  prices any item back to new from its `"integrity"` state (a share of its price for lost
+  integrity, a fee per `chips` entry, capped at a max share) — exactly what every plate and vest
+  already uses. Once the heavy exo's per-zone plates carry `"integrity"` state like any other armor
+  item (2.3's per-part `ArmorRules` work), they're repairable through the existing field-service/
+  shop flow for free; no new mechanic needed here, just making sure the new items' data entries have
+  sane `price`/`repair` numbers in `data/prices.json`.
+- **Pilot training/certification: genuinely new**, nothing in the roster system gates equipment by
+  who's allowed to wear it today. Three shapes, roughly rising in cost to build, Captain's call:
+  1. **Cash-gated only**: a one-time "certify" purchase per roster soldier (`Economy`), no new state
+     beyond a bool on the roster entry. Cheapest to build, weakest as a mechanic (no time pressure).
+  2. **Cash + time**: the same bool, but set after a timed base-side activity (mirrors how field
+     repairs are already timed jobs) — a soldier is "in training" for some in-game days before the
+     flag flips, during which they can't deploy.
+  3. **Tied to an existing roster stat** (if one already tracks experience/missions per soldier —
+     not confirmed, needs a quick check before promising this shape) rather than a bespoke flag:
+     reads as "only veterans get the mech," no new persistent state at all if such a stat exists.
+  Recommend starting from shape 2 (cash + time) as the middle ground — mirrors a pattern the game
+  already has (timed field-service jobs) rather than inventing a new one, and gives the cost real
+  teeth without a new stat system — but this is Captain's call, not decided here.
 
 ### 2.4 Naming (proposed, Captain's call to confirm or rename)
 
@@ -296,10 +337,14 @@ COD:AW's trademarked names and the real aircraft/exoskeleton names they might ot
 1. Unlock mechanism for the Razorback VTOL (cash buy, reputation milestone, story beat) — not
    blocking the base VTOL build.
 2. Razorback's nose weapon/sensor pod: ship as a stretch goal later, or fold into its first pass?
-3. Heavy exo damage model: confirm option C (worn item, vehicle-style absorption pool) over option
-   B (full `Vehicle` wrapper) — see 2.3's tradeoff.
+3. ~~Heavy exo damage model~~ **Decided (Captain, 2026-10-16): real `ArmorRules` per-part plates
+   mapped to the reference art, shootable through, no abstracted pool** — see 2.3.
 4. Heavy exo rig: new `CharacterModel` variant needed; not scoped in this doc, needs its own pass
    before that tier is buildable.
+5. **New**: repair cost and pilot training/certification for the heavy exo (Captain, 2026-10-16,
+   flagged as a worry alongside the damage-model answer, not a confirmed spec) — needs a concrete
+   mechanic proposed (not guessed at) before it's built: repair cost scaling, what gates a roster
+   soldier from being able to equip the suit, whether training costs time/cash/both.
 5. Proposed names in 2.4 — confirm, or Captain's own names (as he did for the Razorback).
 
 ## 4. What shipped this session
