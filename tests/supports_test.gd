@@ -74,6 +74,16 @@ func _ready() -> void:
 		await _run_host("--supports-host" in args)
 
 
+## Just over the middle of `h`'s first rotor zone (a UH-60's main rotor hub; the VT-14's wingtip
+## nacelle), where a rocket from above meets it.
+static func _rotor_aim(h: Vehicle) -> Vector3:
+	for z: Dictionary in h.spec.get("zones", []):
+		if String(z.zone) == "rotor":
+			var box := VehicleSpecs.box(z.box)
+			return box.get_center() + Vector3(0.0, box.size.y * 0.5 + 0.4, 0.0)
+	return Vector3(0.0, 4.6, -2.75)
+
+
 func check(condition: bool, what: String) -> void:
 	print("  [%s] %s" % ["ok" if condition else "FAIL", what])
 	if not condition:
@@ -946,7 +956,8 @@ func _test_insertion() -> void:
 	check(music != null and music.state == InfilMusic.State.PLAYING and music.heli_name == String(c.heli.name) and music.player.stream != null
 		and music.player.bus == InfilMusic.BUS, "lifted off with the player aboard: the infil music plays on the Music bus (%s)" % _music_state(music, c))
 	# Captain, 2026-10-14: the squad aboard showed "Waiting (briefing)" and wasn't drawn.
-	check(mates.all(func(m: Soldier) -> bool: return m.ai_status == "Aboard (UH-60M)"),
+	var aboard := "Aboard (%s)" % c.heli.short_name()  # the transport's own name (the VT-14 Petrel since it replaced the UH-60)
+	check(mates.all(func(m: Soldier) -> bool: return m.ai_status == aboard),
 		"the squad HUD says they're aboard (%s)" % ", ".join(mates.map(func(m: Soldier) -> String: return m.ai_status)))
 	check(mates.all(func(m: Soldier) -> bool: return m.model.is_visible_in_tree() and m.gear.is_visible_in_tree() and (m.model.render_layers & 1) != 0),
 		"and they're drawn in their seats (bodies visible, on the main render layer)")
@@ -1185,7 +1196,7 @@ func _test_shot_down() -> void:
 	for i in 4:
 		if h.is_down():
 			break
-		h.server_take_hit({"kind": Vehicle.HEAT, "penetration_mm": 400.0, "blast_kg": 0.5, "position": h.to_global(Vector3(0.0, 4.6, -2.75)),
+		h.server_take_hit({"kind": Vehicle.HEAT, "penetration_mm": 400.0, "blast_kg": 0.5, "position": h.to_global(_rotor_aim(h)),
 			"direction": -h.global_basis.y, "probe_m": 3.0, "shooter": null})
 	check(h.is_down() and h.zone_health(Vehicle.ZONE_ROTOR) <= 0.0, "a rocket kills the rotor: it goes down")
 	await _wait_for(func() -> bool: return h.flight_mode() == Helicopter.Mode.CRASHED, 40.0)
