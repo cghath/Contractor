@@ -72,7 +72,7 @@ func probe_report_order() -> void:
 	var observed: Array[bool] = []
 	var target := player.global_position
 	var observer := func(_report: Dictionary) -> void:
-		observed.append(not command.unconfirmed(target) and command.seen_now() >= 4.0 * EnemyCommand.SQUAD_MAN_CP)
+		observed.append(not command.unconfirmed(target) and command.seen_now() >= 4.0 * EnemyCommand.SQUAD_MAN_CP * 0.99)  # seen_now fades on a ms clock
 	alert.reported.connect(observer)
 	alert._receive({"kind": &"contact", "pos": target, "area": alert.area_of(target), "by": "", "seen": 4, "exo": 0})
 	alert.reported.disconnect(observer)
