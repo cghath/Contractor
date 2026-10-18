@@ -2072,6 +2072,21 @@ func _log_casualty(what: String) -> void:
 	SessionLog.note(line)
 
 
+## A named hunter squad (wave 6d) gets credit when it kills one of ours: every man it spawned
+## with carries its id (EnemyResponse._raise_hunters, meta "nemesis"); the one who last hurt us
+## (Harm.last, the same ledger _log_casualty reads) tells us which squad, if any.
+func _note_nemesis_kill() -> void:
+	if faction != &"friendly":
+		return
+	var by := Harm.last(self)
+	if String(by.get("path", "")) == "" or Soldier._now() - float(by.get("at", -1000.0)) >= 900.0:
+		return
+	var who := get_node_or_null(NodePath(String(by.get("path", ""))))
+	var id := String(who.get_meta(&"nemesis", "")) if who and who.has_meta(&"nemesis") else ""
+	if id != "":
+		Economy.server_nemesis_event(id, 1, false)
+
+
 func _on_went_down() -> void:
 	if not multiplayer.is_server():
 		return
@@ -2152,6 +2167,7 @@ func _on_died() -> void:
 	if not multiplayer.is_server():
 		return
 	_log_casualty("died")
+	_note_nemesis_kill()
 	_reload_n += 1  # a reload in progress dies with them
 	release_carried()
 	_drop_held()

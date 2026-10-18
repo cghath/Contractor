@@ -66,6 +66,7 @@ func _ready() -> void:
 	player = level.players.get_node(^"1")
 	player.set_physics_process(false)  # we drive it
 	await _frames(20)
+	await _test_nemesis_kill_attribution()
 	await _test_live_objectives()
 	await _test_objective_helper()
 	_test_ammo_readout()
@@ -462,6 +463,28 @@ func _test_reputation_core() -> void:
 	Economy.server_nemesis_event(String(n.id), 0, true)
 	check(Economy.nemesis("black_ridge").is_empty() and String(Economy.server_raise_nemesis("black_ridge").name) != "",
 		"its leader dead, it's finished; a new one can rise in its place")
+
+
+## Kill attribution (6d's open item): EnemyResponse tags every man it spawns for a named
+## hunter squad with its id (meta "nemesis"); one of them killing a friendly counts against it
+## (Soldier._note_nemesis_kill, off the same Harm ledger the session log reads). Needs a live
+## level (level.spawn_soldier), so it runs after one is up, not from _test_reputation_core.
+func _test_nemesis_kill_attribution() -> void:
+	print("Named hunter squad: kill attribution")
+	var n := Economy.server_raise_nemesis("black_ridge")
+	var hunter := _hostile("NemesisHunter", Vector3(400, 0.1, 400))
+	hunter.set_meta(&"nemesis", String(n.id))
+	var victim := level.spawn_soldier({"name": "NemesisVictim", "faction": "friendly", "variant": "multicam",
+		"pos": hunter.global_position + Vector3(2, 0, 0), "loadout": ["m4a1"], "combat": 0.5, "discipline": 0.5, "guard": true})
+	SquadAI.of(victim).process_mode = Node.PROCESS_MODE_DISABLED
+	await _frames(2)
+	Harm.note_hit(victim, hunter)
+	victim.vitals.server_hit(Vitals.HEAD, {"round_class": Vitals.FULL_POWER})
+	await _frames(3)
+	check(int(Economy.nemesis("black_ridge").kills) == 1, "a kill by its tagged men counts against it (%d)" % int(Economy.nemesis("black_ridge").kills))
+	hunter.queue_free()
+	victim.queue_free()
+	Economy.server_nemesis_event(String(n.id), 0, true)  # tidy up: done with this one too
 
 
 # --- The debrief ---------------------------------------------------------------------------

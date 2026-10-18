@@ -520,6 +520,15 @@ const PINNED_COVER_M := 6.0
 
 ## 0..1: aim error and reaction speed.
 @export var combat := 0.6
+## Friendlies only, detection and reaction speed only (never aim error): never slower to spot
+## or to react than EnemyResponse.HUNTER_COMBAT (0.7), win 6d's hunter squads and their named
+## nemesis version (0.7..0.95). Captain, 2026-10-18, live playtest of v0.4.41: "friendly ai need
+## a bit of a buff compared to new enemies. late reaction times" - a green recruit's own skill
+## (roster.gd _ai_stats: 0.3 + 0.6 x aim, as low as 0.45 at hire) was setting Spotting.spot_seconds
+## and _acquire's `react`, both skill-scaled, well below the hunters that recruit now has to face,
+## so the newer, tougher side always won the draw. Aim error (_aim_error_deg) stays on the real
+## skill: this buffs reflexes, not marksmanship.
+const FRIENDLY_REACT_FLOOR := 0.7
 ## 0..1: how firmly orders are kept under fire.
 @export var discipline := 0.6
 ## Hostiles: stay at the post instead of walking the patrol route.
@@ -781,6 +790,13 @@ func in_contact() -> bool:
 
 func _friendly() -> bool:
 	return body != null and body.faction == &"friendly"
+
+
+## `combat` for detection and reaction speed (Spotting.spot_seconds, _acquire's `react` and
+## _acq_hold_s): floored at FRIENDLY_REACT_FLOOR for friendlies so a green recruit reacts no
+## slower than the hunter tier he now faces. Aim error and first-shot offset keep the real skill.
+func _react_combat() -> float:
+	return maxf(combat, FRIENDLY_REACT_FLOOR) if _friendly() else combat
 
 
 ## An enemy medic able to work: not pinned or stunned.
@@ -1101,9 +1117,18 @@ func _choose_intent() -> void:
 				# (An ordered tactic is the newer order: Suppress plays out by fighting from here.)
 				scores[Intent.HOLD] = PLAYER_ORDER_SCORE if ordered.is_empty() else 0.5
 			Squad.Order.MOVE:
-				# A player's move order rules until it gets there; then it holds like 0.5 did.
-				var there := body.global_position.distance_to(_move_point) <= ARRIVE + 0.5
-				scores[Intent.MOVE_TO] = 0.5 if there or not ordered.is_empty() else PLAYER_ORDER_SCORE
+				# A player's move order rules until it gets there; then it becomes a real Hold
+				# (Captain, 2026-10-18: "running around" when ordered to stand somewhere - scoring
+				# an arrived move at 0.5, FOLLOW's own baseline, let squad tactics (TACTIC_SCORE
+				# 0.75), casualty care and escort pull it straight off the spot it was told to
+				# hold; a Hold's own PLAYER_ORDER_SCORE keeps it there the same way an explicit
+				# Hold order does).
+				if body.global_position.distance_to(_move_point) <= ARRIVE + 0.5:
+					order = Squad.Order.HOLD
+					_hold_point = _move_point
+					scores[Intent.HOLD] = PLAYER_ORDER_SCORE if ordered.is_empty() else 0.5
+				else:
+					scores[Intent.MOVE_TO] = 0.5 if not ordered.is_empty() else PLAYER_ORDER_SCORE
 		if escort_valid():
 			scores[Intent.ESCORT] = ESCORT_SCORE
 		elif escorting != null:
@@ -3408,7 +3433,7 @@ func _build_awareness(s: Soldier, leaves := 0.0) -> float:
 		if _preset == "":
 			_preset = Spotting.preset_of(body)
 		var suppressed := body.suppression >= SUPPRESSED
-		var t := Spotting.spot_seconds(body, s, _preset, combat, suppressed, Soldier._now(), leaves, not in_contact() and not suppressed)
+		var t := Spotting.spot_seconds(body, s, _preset, _react_combat(), suppressed, Soldier._now(), leaves, not in_contact() and not suppressed)
 		a = 1.0 if t <= SCAN_S * 0.5 else minf(a + SCAN_S / t, 1.0)
 		_aware[id] = a
 	return a
@@ -3603,15 +3628,16 @@ func _acquire(t: Soldier) -> void:
 	var to := t.aim_point() - body.camera.global_position
 	var swing_deg := rad_to_deg((-body.camera.global_basis.z).angle_to(to.normalized())) if to.length() > 0.01 else 0.0
 	var react: float
+	var react_combat := _react_combat()
 	if _acq_up:
-		react = lerpf(0.9, 0.25, combat)  # reaction time
-		_acq_hold_s = lerpf(TURN_HOLD_UNSKILLED_S, TURN_HOLD_SKILLED_S, combat) if swing_deg > TURN_HOLD_MIN_DEG else 0.0
+		react = lerpf(0.9, 0.25, react_combat)  # reaction time
+		_acq_hold_s = lerpf(TURN_HOLD_UNSKILLED_S, TURN_HOLD_SKILLED_S, react_combat) if swing_deg > TURN_HOLD_MIN_DEG else 0.0
 		var a := lerpf(CQB_ACQ_UNSKILLED_M, CQB_ACQ_SKILLED_M, combat) * (0.5 + minf(swing_deg, 120.0) / 120.0)
 		var up := CQB_HIGH_MULT if randf() < CQB_HIGH_SHARE else -1.0
 		_acq_offset = Vector2(a * randf_range(-0.7, 0.7), up * a * randf_range(0.4, 1.0))
 		_new_hold()
 	else:
-		react = lerpf(DEAD_CHECK_LOOK_UNSKILLED_S, DEAD_CHECK_LOOK_SKILLED_S, combat)
+		react = lerpf(DEAD_CHECK_LOOK_UNSKILLED_S, DEAD_CHECK_LOOK_SKILLED_S, react_combat)
 		_acq_hold_s = 0.0
 		_acq_offset = Vector2.ZERO
 	_acq_react_s = react

@@ -853,6 +853,10 @@ func _send_hunters(lkp: Vector3, radius: float) -> void:
 		hunters.back()["nemesis"] = String(nem.id)
 		(soldiers[0] as Soldier).person_name = String(nem.leader)
 		(soldiers[0] as Soldier).set_meta(&"nemesis_leader", String(nem.id))
+		# Kill attribution (6d's open item): every man in the named squad carries its id, so a
+		# friendly it kills counts against it (Soldier._note_nemesis_kill, Economy.server_nemesis_event).
+		for s: Soldier in soldiers:
+			s.set_meta(&"nemesis", String(nem.id))
 		Economy.server_nemesis_met(String(nem.id))
 		Contracts._notify_all("Word on the net: the %s are hunting you%s." % [nem.name, " again" if int(nem.encounters) > 0 else ""])
 	_join_push("hunters", hunters.back(), lkp)

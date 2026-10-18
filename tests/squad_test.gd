@@ -1072,7 +1072,13 @@ func _test_spotting() -> void:
 	ai._move_point = alpha.global_position
 	ai._choose_intent()
 	ai._choose_intent()
-	check(ai.intent == SquadAI.Intent.FIGHT, "and once there, he fights again (%s)" % ai.status_text())
+	# Captain, 2026-10-18 (live playtest, v0.4.41): "theyre running around when i order them to
+	# stand somewhere" - an arrived Move used to drop to FOLLOW's own 0.5, so it still fights
+	# where it stands (0.7 beats that), but squad tactics (TACTIC_SCORE 0.75), casualty care
+	# and escort could pull it off the spot anyway. An arrived Move is now a real Hold order
+	# (PLAYER_ORDER_SCORE 0.93), so it stays a Hold through the fight, not just a one-tick win.
+	check(ai.order == Squad.Order.HOLD and ai.fighting() and ai.intent == SquadAI.Intent.HOLD,
+		"and once there, it becomes a real Hold - still fights from the spot (%s)" % ai.status_text())
 	ai._move_point = move_was
 	ai.order = order_was
 	ai.morale = steady
