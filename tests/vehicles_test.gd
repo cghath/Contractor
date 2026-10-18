@@ -797,6 +797,8 @@ func _test_rounds() -> void:
 	await get_tree().process_frame
 	var bchest := (bed_rider.get_node(^"ChestHitbox/Shape") as Node3D).global_position
 	r = _shoot(shooter, bchest + Vector3(0, 6, 8), bchest, m4)
+	if r.result != "body":
+		print("  [info] open-bed shot: chest %s local %s, struck %s local %s, rider seated %d" % [bchest, tech.to_local(bchest), r.position, tech.to_local(r.position), tech.seat_of(bed_rider)])
 	check(r.result == "body" and not bed_rider.vitals.wound_list().is_empty(), "a passenger in the open bed can be shot from above and behind (%s)" % r.result)
 	tech.server_exit(bed_rider)
 	bed_rider.queue_free()

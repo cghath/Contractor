@@ -147,6 +147,9 @@ func probe_reserve_accounting() -> void:
 	command.commander_state = "commanding"
 	command.consolidated = false
 	command.caution = 0.0
+	command.seen_cp = 0.0
+	command._contacts.clear()
+	command._noise.clear()
 	command.operations.clear()
 	command.reserves = 3.0
 	var target := player.global_position
