@@ -178,7 +178,16 @@ func _ready() -> void:
 	response = level.get_node_or_null(^"EnemyResponse") as EnemyResponse if level else null
 	alert = level.get_node_or_null(^"Alert") as Alert if level else null
 	if alert:
+		# Ahead of EnemyResponse (added to the level before us, so connected first): a sighting
+		# has to be in the picture (_last_contact) before the QRF it raises asks approve(), or
+		# every contact reads as unconfirmed noise and the QRF is turned down for a probe.
+		var theirs := Callable(response, &"_on_reported") if response else Callable()
+		var reconnect := response != null and alert.reported.is_connected(theirs)
+		if reconnect:
+			alert.reported.disconnect(theirs)
 		alert.reported.connect(_on_reported)
+		if reconnect:
+			alert.reported.connect(theirs)
 
 
 static func of(from: Node) -> EnemyCommand:
