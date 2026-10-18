@@ -209,12 +209,13 @@ func server_call(kind: String, caller: Soldier, arg: String, point: Vector3) -> 
 ## it. `route` ([[x, z], ...]: the briefing's planned way in, plan_routes): its first point is
 ## where on the zone's edge it comes in. Returns whether it went; on false the caller puts the
 ## squad there on foot.
-static func server_insert(from: Node, at: Vector2, via: Variant = null, objective: Variant = null, route: Variant = null) -> bool:
+static func server_insert(from: Node, at: Vector2, via: Variant = null, objective: Variant = null, route: Variant = null, by_rope := false) -> bool:
 	var node := HeliSupports.of(from)
 	if node == null or not node.multiplayer.is_server() or not Supports.can_fly(node.level()):
 		return false
 	var pos := node.level().ground_point(Vector3(at.x, 0.0, at.y))
 	var call := HeliCall.new(node, "insertion", null, {"source": "grid", "pos": pos})
+	call.rope = by_rope
 	if via is Vector2:
 		var v: Vector2 = via
 		var by := Vector3(v.x, 0.0, v.y)
@@ -276,7 +277,8 @@ static func plan_insertions(from: Node, zone: Dictionary, contract: Dictionary) 
 ## point's "from" when that's on the way). The briefing's map and the map in flight draw it
 ## (MapView.insertion_routes); server_insert flies it. Returns the zone changed.
 ## Captain, 2026-10-14: it came in from the wrong side of the map and turned around.
-static func plan_routes(from: Node, zone: Dictionary) -> Dictionary:
+## `side`: the edge it comes in from (HeliRoute.SIDES; -1: the planner's pick).
+static func plan_routes(from: Node, zone: Dictionary, side := -1) -> Dictionary:
 	var lvl := CompoundLevel.current(from) if from and from.is_inside_tree() else null
 	if not (lvl is ZoneLevel):
 		return zone
@@ -289,7 +291,7 @@ static func plan_routes(from: Node, zone: Dictionary) -> Dictionary:
 		var lz := Vector3(float(p[0]), 0.0, float(p[1]))
 		var f: Variant = point.get("from")
 		var via: Variant = Vector3(float(f[0]), 0.0, float(f[1])) if f is Array and (f as Array).size() >= 2 else null
-		var plan := HeliRoute.plan(lvl, lz, via, posts)
+		var plan := HeliRoute.plan(lvl, lz, via, posts, side)
 		var line: Array[Vector3] = [plan.entry]
 		line.append_array(plan.points)
 		point["route"] = HeliRoute.to_xz(line)

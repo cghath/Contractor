@@ -57,12 +57,18 @@ static func inside(level: Node, inset := HeliSupports.SPAWN_INSET_M) -> Rect2:
 ## {"at": Vector3 (y 0), "watched": corridor points seen, "run": m to the LZ,
 ## "checked": [{"at": Vector2, "run", "watched"}] in the order tried}. `posts`: the watchers
 ## (DeadGround.watchers when empty). `min_run` (m): the shortest run in it takes (0 leaving).
-static func entry(level: Node, lz: Vector3, posts: Array[Vector3] = [], min_run := MIN_APPROACH_M, inset := HeliSupports.SPAWN_INSET_M) -> Dictionary:
+## The map's edges, in the order entry() walks them (`side` there and in plan()).
+const SIDES: Array[String] = ["north", "east", "south", "west"]
+
+
+static func entry(level: Node, lz: Vector3, posts: Array[Vector3] = [], min_run := MIN_APPROACH_M, inset := HeliSupports.SPAWN_INSET_M, only_side := -1) -> Dictionary:
 	var rect := inside(level, inset)
 	var p := Vector2(lz.x, lz.z).clamp(rect.position, rect.end)
 	var cands: Array = []  # [run, Vector2]
 	var corners := [rect.position, Vector2(rect.end.x, rect.position.y), rect.end, Vector2(rect.position.x, rect.end.y)]
 	for side in 4:
+		if only_side >= 0 and side != only_side:
+			continue  # Captain, 2026-10-17: the briefing picked the side it comes in from
 		var a: Vector2 = corners[side]
 		var b: Vector2 = corners[(side + 1) % 4]
 		var length := a.distance_to(b)
@@ -147,8 +153,8 @@ static func waypoints(start: Vector3, lz: Vector3, via: Variant = null) -> Array
 ## The whole plan into `lz` (Vector3) of `level`: {"entry": Vector3, "points": Array[Vector3]
 ## (flown in low by), "watched", "checked"} (see entry, waypoints). `via`: the planned insertion
 ## point (Vector3) or null.
-static func plan(level: Node, lz: Vector3, via: Variant = null, posts: Array[Vector3] = []) -> Dictionary:
-	var e := entry(level, lz, posts)
+static func plan(level: Node, lz: Vector3, via: Variant = null, posts: Array[Vector3] = [], side := -1) -> Dictionary:
+	var e := entry(level, lz, posts, MIN_APPROACH_M, HeliSupports.SPAWN_INSET_M, side)
 	return {"entry": e.at, "points": waypoints(e.at, lz, via), "watched": e.watched, "checked": e.checked, "run": e.run}
 
 

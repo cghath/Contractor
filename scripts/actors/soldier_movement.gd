@@ -146,6 +146,22 @@ const MANTLE_ONTO_M := 0.45
 const MANTLE_BASE_S := 0.35
 const MANTLE_PER_M_S := 0.4
 const MANTLE_STAMINA_PER_M := 1.2
+## On the move (Captain, 2026-10-17: "matle needs to be more fluid, not just when youre standing
+## still"): the ledge is looked for along the way it runs (when that's within MANTLE_RUN_DOT of
+## its facing), MANTLE_LOOK_S of its speed further out; it can start up to MANTLE_COYOTE_S after
+## leaving the ground (a jump into a wall), down to MANTLE_AIR_MIN_M above the feet then; the jump
+## key counts for MANTLE_BUFFER_S (pressed a step early); the climb is quicker the faster it came
+## (down to MANTLE_FAST of the time at MANTLE_FAST_MS), one curve rather than up-then-over, and it
+## carries MANTLE_CARRY of its speed on over the top.
+const MANTLE_RUN_DOT := 0.3
+const MANTLE_LOOK_S := 0.2
+const MANTLE_LOOK_MAX_M := 0.9
+const MANTLE_COYOTE_S := 0.35
+const MANTLE_AIR_MIN_M := 0.2
+const MANTLE_BUFFER_S := 0.3
+const MANTLE_FAST := 0.6
+const MANTLE_FAST_MS := 6.0
+const MANTLE_CARRY := 0.75
 ## The LX-3's leap (Captain, 2026-10-17: "make it so its a jump up there like i originally
 ## intended", "onto rooves to then clear down buildings, ergo we jump over the compound walls,
 ## not on top of them"): with a working exo frame the jump key at a ledge throws the body up in
@@ -204,7 +220,9 @@ var holding := false
 var last_over := false
 ## Owner-side: climbing a ledge now (mantle): the step moves the body along the climb.
 var mantling := false
-var _mantle := {}  # "from", "up", "to", "t", "s", "stance"
+var _mantle := {}  # "from", "up", "to", "t", "s", "stance", "carry", "dir"
+var _floor_at := -1000.0  # when it was last on the ground (a mantle just after leaving it)
+var _jump_buffer_until := -1000.0  # the jump key, pressed this long ago, still asks for a mantle
 var _collision: CollisionShape3D
 var _capsule: CapsuleShape3D
 var _shape_key := -99.0
@@ -236,6 +254,8 @@ func step(delta: float) -> void:
 			return
 		body.velocity += body.get_gravity() * delta
 	holding = false
+	if body.is_on_floor():
+		_floor_at = Soldier._now()
 	var down := not body.vitals.is_up()
 	if mantling:
 		_mantle_step(delta, down)
@@ -277,12 +297,17 @@ func step(delta: float) -> void:
 		sprint = Input.is_action_pressed(&"sprint")
 		hold = Input.is_action_pressed(&"hold_breath")
 		if Input.is_action_just_pressed(&"jump"):
+			_jump_buffer_until = Soldier._now() + MANTLE_BUFFER_S
 			if try_mantle():
 				update_pose(delta)
 				return
 			if can_jump():
 				jump()
 				jumped = true
+		elif Soldier._now() < _jump_buffer_until and try_mantle():  # pressed a step early, or a jump into the wall
+			_jump_buffer_until = -1000.0
+			update_pose(delta)
+			return
 	else:
 		_lean_held = 0  # keys released while the mouse was free
 	if ExoMech.transitioning(body):
@@ -510,7 +535,7 @@ func mantle_reach() -> float:
 ## Whether it can start a mantle now: on its feet (standing or crouched), on the ground, up,
 ## hands free, not winded, not riding.
 func can_mantle() -> bool:
-	return body.vitals.is_up() and body.is_on_floor() and stance != Stance.PRONE and not is_instance_valid(body.vehicle) \
+	return body.vitals.is_up() and (body.is_on_floor() or Soldier._now() - _floor_at < MANTLE_COYOTE_S) and stance != Stance.PRONE and not is_instance_valid(body.vehicle) \
 		and body.inventory.hands == &"" and body.carry_speed_mult() >= 1.0 and not _winded and mantle_reach() > 0.0
 
 
@@ -526,6 +551,11 @@ func find_ledge() -> Dictionary:
 	if fwd.length_squared() < 0.0001:
 		return {}
 	fwd = fwd.normalized()
+	var run := Vector3(body.velocity.x, 0.0, body.velocity.z)
+	if run.length() > 1.5 and run.normalized().dot(fwd) > MANTLE_RUN_DOT:
+		fwd = run.normalized()  # along the way it runs
+	var look := minf(run.length() * MANTLE_LOOK_S, MANTLE_LOOK_MAX_M)
+	var airborne := not body.is_on_floor()
 	var reach := mantle_reach()
 	var exclude: Array[RID] = [body.get_rid()]
 	# A wall ahead: something not walkable within reach, low down (so the top is a ledge).
@@ -534,7 +564,7 @@ func find_ledge() -> Dictionary:
 		if h > reach:
 			break
 		var from := feet + Vector3.UP * h
-		var hit := space.intersect_ray(PhysicsRayQueryParameters3D.create(from, from + fwd * (CAPSULE_RADIUS + MANTLE_REACH_M), MANTLE_MASK, exclude))
+		var hit := space.intersect_ray(PhysicsRayQueryParameters3D.create(from, from + fwd * (CAPSULE_RADIUS + MANTLE_REACH_M + look), MANTLE_MASK, exclude))
 		if not hit.is_empty() and (hit.normal as Vector3).y < 0.7:
 			wall_d = minf(wall_d, from.distance_to(hit.position))
 	if is_inf(wall_d):
@@ -546,7 +576,7 @@ func find_ledge() -> Dictionary:
 		return {}
 	var top: Vector3 = top_hit.position
 	var height := top.y - feet.y
-	if height < MANTLE_MIN_M or height > reach:
+	if height < (MANTLE_AIR_MIN_M if airborne else MANTLE_MIN_M) or height > reach:
 		return {}
 	if ExoFrame.working(body.inventory):
 		var vault := _leap_over(top, fwd, exclude)
@@ -629,10 +659,13 @@ func try_mantle() -> bool:
 	var leap := ExoFrame.working(body.inventory)
 	last_over = leap and ledge.get("over", false)
 	var seconds := MANTLE_BASE_S + MANTLE_PER_M_S * float(ledge.h)
+	var run := Vector3(body.velocity.x, 0.0, body.velocity.z)
+	seconds *= lerpf(1.0, MANTLE_FAST, clampf(run.length() / MANTLE_FAST_MS, 0.0, 1.0))
 	if leap:
 		seconds = LEAP_BASE_S + LEAP_PER_M_S * float(ledge.h) + (LEAP_OVER_S if ledge.get("over", false) else 0.0)
 	_mantle = {"from": feet, "up": Vector3(feet.x, top.y + 0.05, feet.z), "to": top + Vector3.UP * 0.02, "t": 0.0,
-		"s": seconds, "stance": int(ledge.stance), "leap": leap, "edge": ledge.get("edge", top)}
+		"s": seconds, "stance": int(ledge.stance), "leap": leap, "edge": ledge.get("edge", top),
+		"carry": run.length(), "dir": Vector3(top.x - feet.x, 0.0, top.z - feet.z).normalized()}
 	stamina -= cost
 	_settle_winded()
 	body.report_exertion()
@@ -661,6 +694,13 @@ func _mantle_step(delta: float, down: bool) -> void:
 			peak = Vector3(edge.x, 2.0 * (edge.y + LEAP_APEX_M) - 0.5 * (from.y + to.y), edge.z)
 		var u := 1.0 - t
 		body.global_position = from * (u * u) + peak * (2.0 * u * t) + to * (t * t)
+	elif float(_mantle.get("carry", 0.0)) > 1.5:
+		# On the move: one curve up and over (a control point over the take-off, a little above
+		# the top), eased, rather than straight up and then across.
+		var ctrl := Vector3(lerpf(from.x, to.x, 0.25), up.y + 0.15, lerpf(from.z, to.z, 0.25))
+		var e := smoothstep(0.0, 1.0, t)
+		var u := 1.0 - e
+		body.global_position = from * (u * u) + ctrl * (2.0 * u * e) + to * (e * e)
 	elif t < 0.6:
 		body.global_position = from.lerp(up, smoothstep(0.0, 1.0, t / 0.6))
 	else:
@@ -671,6 +711,8 @@ func _mantle_step(delta: float, down: bool) -> void:
 	if t >= 1.0:
 		mantling = false
 		set_stance(int(_mantle.stance))
+		# Over the top still going: most of the speed it came with, on the way it climbed.
+		body.velocity = (_mantle.get("dir", Vector3.ZERO) as Vector3) * float(_mantle.get("carry", 0.0)) * MANTLE_CARRY
 
 
 ## Changes stance if there's room (a taller stance needs headroom). Unmounts the weapon.

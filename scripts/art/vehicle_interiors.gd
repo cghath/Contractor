@@ -22,9 +22,14 @@ const P := VehicleArt.P
 
 ## How far below the eye a seat's cushion top sits (seated).
 const CUSHION_DROP := 0.72
+## Canvas troop seats (Cab.troop_seat): the sling this deep from the back and this wide each
+## side of the middle, the canvas back this tall over it.
+const TROOP_DEPTH := 0.5
+const TROOP_HALF := 0.21
+const TROOP_BACK_H := 0.62
 ## Each body's cabin floor (metres up in the vehicle's frame): the seats stand on it, and a seated
 ## rider's feet rest on it (Vehicle: CharacterModel.seated_pose, Captain, 2026-10-14).
-const FLOORS := {"matv": 1.0, "maxxpro": 1.2, "hilux": 0.75, "lc79": 0.85, "aav7": 1.0, "uh60": 0.62, "vtol_petrel": 0.6, "vtol_razorback": 1.0}
+const FLOORS := {"matv": 1.0, "maxxpro": 1.2, "hilux": 0.75, "lc79": 0.85, "aav7": 1.0, "uh60": 0.6, "vtol_petrel": 0.6, "vtol_razorback": 1.0}
 
 static var _seats := {}  # model -> Array of seat dictionaries (vehicles.json, "base" merged)
 static var _mutex := Mutex.new()
@@ -212,6 +217,38 @@ class Cab:
 		fit(e.x - wide, top, e.z + 0.2, e.x + wide, e.y - 0.12, e.z + 0.3, P.SEAT)
 		fit(e.x - 0.12, floor_y, e.z - 0.12, e.x + 0.12, top - 0.1, e.z + 0.12, P.PAINT_DARK)
 
+	## A canvas troop seat (Captain, 2026-10-17: rows of canvas seats on frames along the walls)
+	## for the seat whose eye is `e`, facing `face` degrees from the front (positive to the left,
+	## vehicles.json "face"; 0, +-90 or 180), its canvas back `back` metres behind the eye
+	## (vehicles.json "back"): a canvas sling on a tube frame standing on the floor, the canvas back
+	## hung from a top rail with two straps down it, and room under the seat (kit stowed there).
+	func troop_seat(e: Vector3, face: float, back: float, floor_y: float) -> void:
+		var top := VehicleInteriors.cushion_top(e.y, floor_y)
+		var rest := -back  # the backrest, along the seat's forward axis from the eye
+		var lip := rest + TROOP_DEPTH  # the seat's front edge
+		var w := TROOP_HALF
+		_local(e, face, -w, top - 0.04, rest, w, top, lip, P.SEAT)  # the canvas sling
+		_local(e, face, -w + 0.02, top + 0.04, rest - 0.03, w - 0.02, top + TROOP_BACK_H, rest, P.SEAT)  # canvas back
+		for sx: float in [-0.09, 0.09]:  # straps down the back
+			_local(e, face, sx - 0.02, top + 0.06, rest, sx + 0.02, top + TROOP_BACK_H - 0.04, rest + 0.012, P.BLACK)
+		var f := Basis(Vector3.UP, deg_to_rad(face))
+		var at := func(x: float, y: float, d: float) -> Vector3: return Vector3(e.x, 0.0, e.z) + f * Vector3(x, 0.0, -d) + Vector3(0.0, y, 0.0)
+		for sx: float in [-w, w]:
+			_bar(at.call(sx, top - 0.04, rest), at.call(sx, top - 0.04, lip), P.METAL)  # side rails
+			_bar(at.call(sx, floor_y, lip - 0.04), at.call(sx, top - 0.04, lip - 0.04), P.METAL)  # front legs
+			_bar(at.call(sx, floor_y, rest + 0.04), at.call(sx, top + TROOP_BACK_H, rest - 0.02), P.METAL)  # back post
+		_bar(at.call(-w, top - 0.04, lip), at.call(w, top - 0.04, lip), P.METAL)  # front rail
+		_bar(at.call(-w, top + TROOP_BACK_H, rest - 0.02), at.call(w, top + TROOP_BACK_H, rest - 0.02), P.METAL)  # top rail
+
+	## Fills the box x0..x1 (across the seat), y0..y1, d0..d1 (forward of the eye) of a seat at
+	## `e` facing `face` degrees: its corners turned, the box round them (square for the four
+	## right-angle faces it's used for).
+	func _local(e: Vector3, face: float, x0: float, y0: float, d0: float, x1: float, y1: float, d1: float, colour: int) -> void:
+		var f := Basis(Vector3.UP, deg_to_rad(face))
+		var a := f * Vector3(x0, 0.0, -d0)
+		var b := f * Vector3(x1, 0.0, -d1)
+		fit(e.x + minf(a.x, b.x), y0, e.z + minf(a.z, b.z), e.x + maxf(a.x, b.x), y1, e.z + maxf(a.z, b.z), colour)
+
 	## A driver's place: the dash across the cab (x0..x1) standing out from the front wall
 	## before the eye, with the instrument cluster, the radio stack and a steering wheel on its
 	## column (nearer than arm's length where the windscreen is close, as in the MaxxPro).
@@ -266,15 +303,18 @@ class Cab:
 	## for pilots.
 	func seats(floor_y: float, dash_x0: float, dash_x1: float) -> void:
 		for s: Dictionary in VehicleInteriors.seats_of(model):
-			if bool(s.get("open", false)) or String(s.get("stance", "sit")) == "stand":
-				continue
+			if bool(s.get("open", false)) or String(s.get("stance", "sit")) in ["stand", "kneel"] or bool(s.get("edge", false)):
+				continue  # an "edge" seat is the floor itself, at a door (Vehicle._seated_pose_for)
 			var e := eye(s)
 			match String(s.get("kind", "passenger")):
 				"driver":
 					dash(e, dash_x0, dash_x1)
 				"pilot":
 					cockpit(e, dash_x0, dash_x1, floor_y)
-			seat(e, floor_y)
+			if s.has("back"):
+				troop_seat(e, float(s.get("face", 0.0)), float(s.back), floor_y)
+			else:
+				seat(e, floor_y)
 
 
 # --- Seat data ------------------------------------------------------------------------------
@@ -427,22 +467,46 @@ static func _aav7(k: Cab) -> void:
 
 
 ## UH-60: the fuselage was drawn as a shell, but the upper deck's floor runs through the cabin's
-## ceiling. Cleared back to the shell from the cockpit's back to the aft cabin, then the
-## windscreen, overhead, cockpit door, gunner's and cabin door windows glazed. The door guns
-## stay solid (Captain, 2026-10-14: "clear guns on the blackhawk").
+## ceiling. Cleared back to the shell from the cockpit's back to the aft bulkhead (lower under
+## the cockpit's roof, full height in the cabin: VehicleArt.UH60_CABIN_TOP), then the
+## windscreen, overhead, cockpit door, gunner's and aft cabin windows glazed. The door guns stay
+## solid (Captain, 2026-10-14: "clear guns on the blackhawk"). Captain, 2026-10-17 (a roomy
+## cabin to stand and walk in): a flat grey floor, canvas troop seats along the walls aft of the
+## doors, one each side between the gunner and the door, a row of five against the aft bulkhead
+## (vehicles.json "back" and "face"), kit stowed under them, and a grab handle inside each
+## doorway's front edge (a boarder takes it: Vehicle, CharacterModel.BOARD).
 static func _uh60(k: Cab) -> void:
-	var cabin := VehicleArt.Section.new(0.5, 2.22, 1.18, 0.94, 0.3, 0.45)
-	k.carve_section(cabin, 2.45, 7.95, 0.62, 2.1, 0.13)
+	var top := VehicleArt.UH60_CABIN_TOP
+	var aft := VehicleArt.UH60_CABIN_END
+	var floor_y: float = FLOORS.uh60
+	var cabin := VehicleArt.Section.new(0.5, top, VehicleArt.UH60_HALF, VehicleArt.UH60_HALF - VehicleArt.UH60_LEAN, 0.3, 0.4)
+	k.carve_section(cabin, 2.45, 2.9, floor_y, 2.1, 0.13)
+	k.carve_section(cabin, 2.9, aft, floor_y, top - 0.12, 0.13)
+	k.bulkhead(aft, aft + 0.06, floor_y, top - 0.12, P.PAINT_DARK)
+	k.c.mbox(-1.15, floor_y - 0.05, 2.45, 1.15, floor_y, aft, P.METAL)  # the floor
+	for fz in 13:  # tie-down rails across it
+		var z := 3.0 + fz * 0.45
+		if z < aft - 0.1:
+			k.c.mbox(-1.05, floor_y - 0.05, z, 1.05, floor_y, z + 0.03, P.PAINT_DARK)
 	k.glaze(-1.0, 1.6, 0.9, 1.0, 2.18, 2.2, 2, true)
 	k.glaze(-0.55, 2.0, 2.1, 0.55, 2.4, 2.45, 1, false)
-	k.glaze_sides(1.45, 0.75, 0.78, 1.3, 2.14, 6.3)
+	k.glaze_sides(1.5, 0.75, 0.78, 1.3, 2.14, 2.5)
+	k.glaze_sides(1.5, 0.95, 1.5, 7.0, 2.05, 7.65)
 	# Each gunner's window (the fuselage narrows there, past the side glazing's reach):
 	# see-through within the window (visual only; it still stops rounds). Not the M240H, its mount
 	# and its ammo bag across it: Captain, 2026-10-14, "clear guns on the blackhawk" (they drew
 	# in the window's tinted glass, the gunner and the ground showing through the gun).
 	for side: float in [-1.0, 1.0]:
-		k.see_through(side * 0.75, 1.45, 2.95, side * 1.5, 2.08, 3.55, [P.GLASS, P.PAINT])
-	k.seats(FLOORS.uh60, -0.85, 0.85)
+		# The grab handle inside the doorway's front edge, and the frame's padding.
+		var hx := side * (VehicleArt.UH60_HALF - 0.22)
+		k._bar(Vector3(hx, floor_y + 0.75, VehicleArt.UH60_DOOR.x - 0.06), Vector3(hx, floor_y + 1.55, VehicleArt.UH60_DOOR.x - 0.06), P.BLACK)
+		# Kit stowed under the side seats: a bag and an ammo can.
+		k.fit(side * 0.95 - 0.16, floor_y, 7.05, side * 0.95 + 0.16, floor_y + 0.26, 7.45, P.SEAT)
+		k.fit(side * 0.95 - 0.08, floor_y, 7.6, side * 0.95 + 0.08, floor_y + 0.2, 7.9, P.PAINT_DARK)
+	k.seats(floor_y, -0.85, 0.85)
+	# More kit under the aft row (after the seats, so it only fills what they leave).
+	k.fit(-0.7, floor_y, aft - 0.42, -0.2, floor_y + 0.3, aft - 0.08, P.SEAT)
+	k.fit(0.25, floor_y, aft - 0.38, 0.55, floor_y + 0.22, aft - 0.1, P.PAINT_DARK)
 
 
 ## VT-14 Petrel (docs/near_future_hardware.md): the same shell-then-glaze approach as the UH-60,
@@ -471,6 +535,13 @@ static func _vtol_razorback(k: Cab) -> void:
 	var o: float = VehicleArt.RAZORBACK_NOSE_OFFSET
 	var cabin := VehicleArt.Section.new(0.95, 4.0, 2.2, 1.85, 0.35, 0.3)
 	k.carve_section(cabin, o - 7.0, o + 5.0, 1.0, 3.9, 0.16)
+	## A solid deck the length of the bay (Captain, 2026-10-17: "make sure it has a floor"), with
+	## tie-down rails across it every metre.
+	k.c.mbox(-2.0, 0.92, o - 7.0, 2.0, 1.0, o + 5.0, P.METAL)
+	var rz := o - 6.5
+	while rz < o + 5.0:
+		k.c.mbox(-1.9, 0.92, rz, 1.9, 1.0, rz + 0.06, P.PAINT_DARK)
+		rz += 1.0
 	k.glaze(-2.2, 2.2, o - 11.0, 2.2, 3.95, o - 7.4, 2, true)
 	k.glaze_sides(2.4, 1.6, 2.9, o - 6.7, 3.6, o - 5.1)  # crew windows
 	for wz: float in [o + 0.5, o + 2.2, o + 3.9]:  # cabin windows

@@ -160,6 +160,9 @@ func _run_host(wait_for_client: bool) -> void:
 		await _test_seats()
 	if _want("seated"):
 		await _test_seated()
+		await _test_boarding()
+		await _test_crew_and_belly_turret()
+		await _test_fast_rope()
 	if _want("cargo"):
 		await _test_cargo()
 	if _want("interaction"):
@@ -223,7 +226,7 @@ func _test_data() -> void:
 	check(counts.aav7 == {"driver": 1, "passenger": 22, "gunner": 1}, "AAV-7: 3 crew and 21 troops (%s)" % [counts.aav7])
 	check(counts.bradley == {"driver": 1, "gunner": 1, "passenger": 7}, "Bradley: 3 crew and 6 troops (%s)" % [counts.bradley])
 	check(VehicleSpecs.spec("abrams").seats.size() == 4, "Abrams: 4 crew")
-	check(counts.uh60 == {"pilot": 2, "gunner": 2, "passenger": 11}, "UH-60: 2 pilots, 2 door gunners and 11 passengers (%s)" % [counts.uh60])
+	check(counts.uh60 == {"pilot": 2, "gunner": 2, "passenger": 15}, "UH-60: 2 pilots, 2 door gunners, 11 passengers (4 benched, 4 kneeling, 3 standing) and 4 on the door sills (%s)" % [counts.uh60])
 	check(VehicleSpecs.round_tier(&"556_m855") == 0 and VehicleSpecs.round_tier(&"762x51_m80") == 0 and VehicleSpecs.round_tier(&"762x54r_lps") == 1
 		and VehicleSpecs.round_tier(&"50bmg_m33") == 2, "vehicle threat tiers: small arms 0, 7.62x54R 1, .50 BMG 2 (Captain: 7.62x54R and up)")
 
@@ -390,9 +393,147 @@ func _test_seats() -> void:
 	if heli:
 		heli.server_exit(player)
 		var pilot_door: Array = InteractionMenu.actions_for(player, heli.get_node(^"Point1")).map(func(a: Dictionary) -> String: return "%s (%s)" % [a.label, a.disabled])
-		check(pilot_door == ["Get in (Aircraft are flown by AI pilots)", "Check vehicle ()"],
+		check(pilot_door == ["Get in (Aircraft are flown by AI pilots)", "Open bay doors ()", "Check vehicle ()"],
 			"the pilot's door: one greyed Get in saying why, no 'Get in as pilot' (%s)" % [pilot_door])
 		heli.queue_free()
+
+
+## Captain, 2026-10-17: "that get anim is poor, it just floats up". Getting into a UH-60 cabin
+## seat from beside its door is a real move (CharacterModel.BOARD): up the step onto the sill, a
+## hand on the grab handle, in to the seat and down onto it; from far off (a mission's seating)
+## there's no clip.
+func _test_boarding() -> void:
+	print("Boarding")
+	var heli := layer.server_spawn("uh60", Transform3D(Basis(), Vector3(60, 0, 100)), "", &"player", "test_boarding")
+	await get_tree().physics_frame
+	if heli == null:
+		check(false, "spawned a UH-60 to board")
+		return
+	var seat := 13  # Bench 3: the aft bench's right half, in by the right door
+	await _seconds(1.0)  # down on its wheels
+	var s := _soldier("friendly", heli.to_global(Vector3(2.6, 0.1, -2.55)))
+	await get_tree().physics_frame
+	var sill_y := 0.6  # the cabin floor, in the helicopter's frame
+	check(heli.server_enter(s, seat) and StringName(s.model.action_net.get("id", &"")) == CharacterModel.BOARD,
+		"getting in beside the cabin door plays the boarding clip")
+	var lowest := INF
+	var highest := -INF
+	var gripped := false
+	var t0 := Soldier._now()
+	while s.model.action_seconds() < CharacterModel.BOARD_STEP_S + 0.1 and Soldier._now() - t0 < 5.0:
+		await get_tree().physics_frame
+		lowest = minf(lowest, heli.to_local(s.global_position).y)
+		highest = maxf(highest, heli.to_local(s.global_position).y)
+		gripped = gripped or s.model.board_grip != Vector3.ZERO
+	check(lowest < sill_y - 0.5 and highest > sill_y - 0.1,
+		"he steps up from the ground onto the cabin floor (%.2f to %.2f m, sill %.2f)" % [lowest, highest, sill_y])
+	check(gripped and s.model.is_boarding() and not s.model.is_seated(), "a hand on the grab handle, standing, not seated yet")
+	await _seconds(4.0)
+	var cushion: Variant = heli.seat_cushion(seat)
+	var hips := heli.to_local(s.model.torso.global_position)
+	check(s.model.is_seated() and not s.model.is_boarding() and cushion != null and hips.distance_to(cushion as Vector3) < 0.15,
+		"then he sits down on his seat (hips %s, cushion %s)" % [hips, cushion])
+	var far := _soldier("friendly", heli.to_global(Vector3(20, 0.1, 0)))
+	await get_tree().physics_frame
+	check(heli.server_enter(far, 4) and StringName(far.model.action_net.get("id", &"")) != CharacterModel.BOARD,
+		"put in from far off (a mission's seating): just seated, no clip")
+	heli.server_exit(s)
+	check(s.model.action_net.is_empty() or StringName(s.model.action_net.get("id", &"")) != CharacterModel.BOARD, "out again: no clip left playing")
+	heli.server_exit(far)
+	s.queue_free()
+	far.queue_free()
+	await _test_ffv_crouch(heli)
+	heli.queue_free()
+
+
+## Captain, 2026-10-17: hot drops by fast-rope (a rider to the door, down the rope to the ground
+## under it, out there), and the briefing's choice of the edge a helicopter comes in from.
+func _test_fast_rope() -> void:
+	print("Fast-rope and the way in")
+	var heli := layer.server_spawn("uh60", Transform3D(Basis(), level.ground_point(Vector3(60, 0, 100)) + Vector3.UP * 0.3), "", &"player", "test_rope")
+	await _seconds(1.0)
+	if heli == null:
+		check(false, "spawned a UH-60 to rope from")
+		return
+	var s := _soldier("friendly", heli.to_global(Vector3(20, 0.1, 0)))
+	await get_tree().physics_frame
+	heli.server_enter(s, 11)
+	heli.ropes_out = true
+	heli.server_fast_rope(s, -1.0)
+	await _seconds(0.3)
+	var rope := heli.get_node_or_null(^"Rope0") as Node3D
+	check(rope != null and rope.visible and bool(s.model.action_net.get("rope", false)), "the ropes are out and he's on his way down one")
+	var t0 := Soldier._now()
+	while heli.seat_of(s) >= 0 and Soldier._now() - t0 < 6.0:
+		await get_tree().physics_frame
+	var at := heli.to_local(s.global_position)  # the moment he's let go
+	check(heli.seat_of(s) < 0 and at.x < -1.4, "and is off the rope under the left door (%s; OPEN: let go high on the range)" % at)
+	heli.ropes_out = false
+	s.queue_free()
+	heli.queue_free()
+	var lz := Vector3(0, 0, 0)
+	var south := HeliRoute.entry(level, lz, [], 20.0, 0.0, 2)  # (the range is too small for the usual inset)
+	var north := HeliRoute.entry(level, lz, [], 20.0, 0.0, 0)
+	check((south.at as Vector3).z > 0.0 and (north.at as Vector3).z < 0.0, "a chosen side is where it comes in from (south %s, north %s)" % [south.at, north.at])
+
+
+## Captain, 2026-10-17: the helicopters show their pilots (drawn, at the controls); the Petrel's
+## gun is a belly turret worked from the co-pilot's seat, which doesn't turn with it.
+func _test_crew_and_belly_turret() -> void:
+	print("Crew and belly turret")
+	var uh := layer.server_spawn("uh60", Transform3D(Basis(), Vector3(-60, 0, 100)), "", &"player", "test_crew_uh60")
+	var pe := layer.server_spawn("vtol_petrel", Transform3D(Basis(), Vector3(-90, 0, 100)), "", &"player", "test_crew_petrel")
+	await get_tree().physics_frame
+	if uh == null or pe == null:
+		check(false, "spawned a UH-60 and a Petrel")
+		return
+	check(uh.get_node_or_null(^"Crew0") != null and uh.get_node_or_null(^"Crew1") != null, "the UH-60 shows both pilots")
+	check(pe.get_node_or_null(^"Crew0") != null and pe.get_node_or_null(^"Crew1") == null and pe.seat_kind(1) == Vehicle.GUNNER,
+		"the Petrel shows its pilot; the co-pilot's seat is the gunner's")
+	check(pe.gun_info().get("id", "") == "m2hb" and int(pe.gun_info().seat) == 1 and pe.turret != null, "its gun is a .50 cal belly turret, worked from seat 1")
+	var g := _soldier("friendly", pe.to_global(Vector3(-3, 0.1, -5.6)))
+	await get_tree().physics_frame
+	check(pe.server_enter(g, 1), "a gunner takes the co-pilot's seat")
+	var eye := pe.to_local(pe.seat_eye_point(1))
+	pe.turret.aim(1.0, -0.3)
+	for i in 60:
+		await get_tree().physics_frame
+	check(absf(pe.turret.yaw - 1.0) < 0.1 and pe.to_local(pe.seat_eye_point(1)).distance_to(eye) < 0.01,
+		"the turret turns (%.2f rad) under him; his seat stays put" % pe.turret.yaw)
+	pe.server_exit(g)
+	g.queue_free()
+	uh.queue_free()
+	pe.queue_free()
+
+
+## Captain, 2026-10-17: AI take the FFV door seats first; with the doors shut an FFV rider
+## crouches behind the door, and sits (on the sill, legs out, the UH-60's) as they open.
+func _test_ffv_crouch(heli: Vehicle) -> void:
+	heli.server_set_bay(false)
+	await _seconds(1.0)
+	var ai := _soldier("friendly", heli.to_global(Vector3(20, 0.1, 0)))
+	await get_tree().physics_frame
+	var ffv := 15
+	check(heli.server_enter(ai, ffv) and String(heli.spec.seats[heli.seat_of(ai)].get("ffv", "")) != "",
+		"an AI in an FFV door seat (%s)" % heli.seat_name(heli.seat_of(ai)))
+	await _seconds(0.3)
+	var crouched_y := heli.to_local(ai.model.torso.global_position).y
+	check(ai.model.is_boarding() and not ai.model.is_seated(), "doors shut: crouched behind the door, not sat in it")
+	heli.server_set_bay(true)
+	await _seconds(VehicleBay.PANEL_S + 0.4)
+	var hips := heli.to_local(ai.model.torso.global_position)
+	var cushion: Variant = heli.seat_cushion(heli.seat_of(ai))
+	check(ai.model.is_seated() and cushion != null and hips.distance_to(cushion as Vector3) < 0.15,
+		"doors open: sat on the sill (hips %s, from crouched at %.2f m)" % [hips, crouched_y])
+	var feet_y := heli.to_local(ai.model._shin_left.global_transform * Vector3(0, -(CharacterModel.LEG_LENGTH - CharacterModel.THIGH), 0)).y
+	check(feet_y < 0.6 - 0.2, "legs hanging off the edge (feet %.2f m, floor 0.6)" % feet_y)
+	# Captain, 2026-10-17: AI run out of the doors rather than appearing beside the hull.
+	heli.server_run_out(ai)
+	check(heli.seat_of(ai) >= 0 and bool(ai.model.action_net.get("out", false)), "told to get out: he runs for the door (still aboard)")
+	await _seconds(Vehicle.RUN_OUT_SIT_S + Vehicle.RUN_OUT_STEP_S + 1.5)
+	var at := heli.to_local(ai.global_position)
+	check(heli.seat_of(ai) < 0 and absf(at.x) > 1.6 and at.y < 0.2, "and is out on the ground at the foot of the step (%s)" % at)
+	ai.queue_free()
 
 
 ## Captain, 2026-10-14 (v0.4.0, inside a UH-60M): the riders stood in their seats, through each
@@ -414,14 +555,14 @@ func _test_seated() -> void:
 			continue
 		spawned.append(v)
 		var defs: Array = v.spec.seats
-		for i in mini(defs.size(), 15):
-			if String(defs[i].get("stance", "sit")) == "stand":
+		for i in mini(defs.size(), 15):  # not the UH-60's FFV door seats (crouched with its doors shut: _test_ffv_crouch)
+			if String(defs[i].get("stance", "sit")) in ["stand", "kneel"]:
 				continue
 			var s := _soldier("friendly", v.global_position + Vector3(4.0, 0.1, -2.0 + 0.5 * i))
 			riders.append(s)
 			await get_tree().physics_frame
 			v.server_enter(s, i)
-	await _seconds(1.5)  # settled on their springs, rifles in hands
+	await _seconds(4.0)  # boarded (Vehicle.BOARD_FROM_M: they start by the doors), settled on their springs, rifles in hands
 	for v in spawned:
 		var label := v.short_name()
 		var cushion_err := 0.0
@@ -478,7 +619,7 @@ func _test_seated() -> void:
 	# Out again: standing, no seat pose left on them.
 	var heli := spawned[0] if not spawned.is_empty() else null
 	if heli:
-		var out := heli.occupant(5)
+		var out := heli.occupant(11)  # the aft bench
 		heli.server_exit(out)
 		for i in 3:
 			await get_tree().process_frame

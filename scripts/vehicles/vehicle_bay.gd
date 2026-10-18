@@ -7,7 +7,12 @@ extends Node3D
 ## - "walls": boxes [x0, y0, z0, x1, y1, z1] that stand in for the solid cabin boxes, a hollow
 ##   shell (floor, walls with the door gaps, roof) players walk inside;
 ## - "doors": {"name", "box", "slide"}: a panel over each door gap, solid while shut; open, it
-##   slides by "slide" (m, the vehicle's frame) and stops blocking;
+##   slides by "slide" (m, the vehicle's frame) and stops blocking. Optional (Captain,
+##   2026-10-17: the UH-60's door "sits flush to the hull then pops out slightly past the hull
+##   1-2 cm and slides back", windows in it; the VTOLs' doors the same, after their own design):
+##   "roll_deg" tilts the panel about the vehicle's length to lie on a leaning flank, "pop" (m)
+##   is the step out it makes before the slide (POP_PART of the travel), and "windows"
+##   ([y0, z0, y1, z1], the vehicle's frame) are glass panes set in it;
 ## - "ramp": {"hinge": [y, z], "length", "half_width", "thick", "closed_deg", "open_deg"}: a
 ##   panel hinged across the vehicle at the floor's aft edge, up with the doors shut, down to
 ##   the ground with them open (degrees below level: negative is up);
@@ -30,6 +35,7 @@ extends Node3D
 ## lifts the vehicle, which shapes of the vehicle's own body there did (it rose 0.85 m).
 
 const PANEL_S := 0.8  ## doors slide and the ramp swings over this long
+const POP_PART := 0.2  ## a door's "pop" out takes this much of its travel, the slide the rest
 const STEP_S := 1.1  ## a boarding ramp slides out and angles down over this long (half each)
 const STEP_SLOT_DROP_M := 0.1  ## stowed, a boarding ramp sits this far under its sill
 const STEP_GRIP_EVERY_M := 0.3
@@ -49,13 +55,14 @@ var spec := {}
 var deck: AnimatableBody3D
 
 var open := false
-var _doors: Array = []  ## [{"shape", "mesh", "closed": Vector3, "slide": Vector3}]
+var _doors: Array = []  ## [{"shape", "mesh", "closed": Vector3, "slide": Vector3, "pop": Vector3}]
 var _ramp_shape: CollisionShape3D
 var _ramp_mesh: MeshInstance3D
 var _ramp_angle := 0.0
 var _cabin := AABB()
 var _blend := 0.0  ## 0 shut .. 1 open, eased towards `open`
 var _steps: Array = []  ## [{"shape", "mesh", "a", "b"}]
+var _ramp_blend := 0.0  ## the rear ramp: 0 up .. 1 down; down only with the bay open on the ground
 var _deploy := 0.0  ## boarding ramps: 0 stowed .. 0.5 slid out .. 1 down on the ground
 var _ramp_open_deg := NAN  ## the rear ramp's open angle, fitted to the ground (_fit_to_ground)
 var _check_left := 0.0
@@ -90,9 +97,17 @@ func build() -> void:
 	step_mat.metallic = 0.4
 	var grip_mat := StandardMaterial3D.new()
 	grip_mat.albedo_color = Color("2b2c2a")
+	var glass_mat := StandardMaterial3D.new()  # the doors' windows, like the hull's glass
+	glass_mat.albedo_color = Color("27343c")  # VehicleArt's P.GLASS
+	glass_mat.roughness = 0.15
+	glass_mat.metallic = 0.3
 	var steps: Array = spec.get("steps", [])
 	for i in steps.size():
 		var st: Dictionary = steps[i]
+		## "ramp": false (the UH-60's: Captain, 2026-10-17, no ramps with the mantle system): only
+		## the way in for boarding (Vehicle._board_path), nothing deploys.
+		if not bool(st.get("ramp", true)):
+			continue
 		var col := CollisionShape3D.new()
 		col.name = "BayStep%d" % i
 		var a := VehicleSpecs.vec(st.from)
@@ -130,8 +145,19 @@ func build() -> void:
 		mesh.mesh = bm
 		mesh.material_override = mat
 		mesh.position = aabb.get_center()
+		mesh.rotation.z = deg_to_rad(float(d.get("roll_deg", 0.0)))
+		for w: Array in d.get("windows", []):
+			var pane := MeshInstance3D.new()
+			pane.name = "Window"
+			var pm := BoxMesh.new()
+			pm.size = Vector3(aabb.size.x + 0.008, absf(float(w[2]) - float(w[0])), absf(float(w[3]) - float(w[1])))
+			pane.mesh = pm
+			pane.material_override = glass_mat
+			pane.position = Vector3(0.0, (float(w[0]) + float(w[2])) * 0.5, (float(w[1]) + float(w[3])) * 0.5) - Vector3(0.0, aabb.get_center().y, aabb.get_center().z)
+			mesh.add_child(pane)
 		add_child(mesh)
-		_doors.append({"shape": shape, "mesh": mesh, "closed": aabb.get_center(), "slide": VehicleSpecs.vec(d.get("slide"), Vector3.ZERO)})
+		_doors.append({"shape": shape, "mesh": mesh, "closed": aabb.get_center(), "slide": VehicleSpecs.vec(d.get("slide"), Vector3.ZERO),
+			"pop": VehicleSpecs.vec(d.get("pop"), Vector3.ZERO)})
 	var ramp: Dictionary = spec.get("ramp", {})
 	if not ramp.is_empty():
 		var length := float(ramp.get("length", 3.0))
@@ -198,6 +224,11 @@ func _process(delta: float) -> void:
 		if open and _blend == 0.0:
 			_fit_to_ground()
 		_blend = move_toward(_blend, want, delta / PANEL_S)
+		_pose_panels()
+	## Captain, 2026-10-17: doors opened in flight (to fire from them) leave the ramp up.
+	var ramp_want := 1.0 if open and landed() else 0.0
+	if _ramp_shape and _ramp_blend != ramp_want:
+		_ramp_blend = move_toward(_ramp_blend, ramp_want, delta / PANEL_S)
 		_pose_panels()
 	var deploy := 1.0 if open and landed() else 0.0
 	if _deploy != deploy and not _steps.is_empty():
@@ -274,15 +305,19 @@ func _pose_steps() -> void:
 
 func _pose_panels() -> void:
 	var t := smoothstep(0.0, 1.0, _blend)
+	var popped := smoothstep(0.0, 1.0, clampf(_blend / POP_PART, 0.0, 1.0))
+	var slid := smoothstep(0.0, 1.0, clampf((_blend - POP_PART) / (1.0 - POP_PART), 0.0, 1.0))
 	for d: Dictionary in _doors:
-		(d.mesh as MeshInstance3D).position = (d.closed as Vector3) + (d.slide as Vector3) * t
+		## Out "pop" first, then back along the rail; shutting, the other way round.
+		var pop: Vector3 = d.pop
+		(d.mesh as MeshInstance3D).position = (d.closed as Vector3) + pop * popped + (d.slide as Vector3) * (slid if pop != Vector3.ZERO else t)
 		(d.shape as CollisionShape3D).disabled = _blend > 0.05  # past the gap, it stops blocking
 	var ramp: Dictionary = spec.get("ramp", {})
 	if _ramp_shape:
 		var hinge: Array = ramp.get("hinge", [1.0, 5.0])
 		var length := float(ramp.get("length", 3.0))
 		var open_deg := _ramp_open_deg if not is_nan(_ramp_open_deg) else float(ramp.get("open_deg", 19.0))
-		_ramp_angle = deg_to_rad(lerpf(float(ramp.get("closed_deg", -17.0)), open_deg, t))
+		_ramp_angle = deg_to_rad(lerpf(float(ramp.get("closed_deg", -17.0)), open_deg, smoothstep(0.0, 1.0, _ramp_blend)))
 		var h := Vector3(0.0, float(hinge[0]), float(hinge[1]))
 		var dir := Vector3(0.0, -sin(_ramp_angle), cos(_ramp_angle))  # aft from the hinge, down by the angle
 		var xf := _slab(h, h + dir * length)
@@ -349,6 +384,12 @@ func nearest_free_seat(at: Vector3) -> int:
 			best_d = d
 			best = i
 	return best
+
+
+## How far open the doors are now, 0 shut to 1 open (eased, every peer): the FFV riders move
+## from crouched behind the door to sitting with it (Vehicle._ffv_crouch).
+func open_fraction() -> float:
+	return _blend
 
 
 ## Which side seat `seat` fires out of (-1 left, 1 right), or 0 when it isn't a fire-from-vehicle

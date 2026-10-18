@@ -82,6 +82,12 @@ var zone: Dictionary = {}
 ## Peer id -> true for each player who is ready.
 var ready_peers: Dictionary = {}
 var insertion_id := ""
+## A helicopter insertion's choices (Captain, 2026-10-17): the edge it comes in from
+## (HeliRoute.SIDES index; -1: the planner's pick, the nearest unwatched) and how it puts the
+## squad down ("land", or "rope": fast-roping from a hover, HeliCall).
+var approach := -1
+var drop := "land"
+const DROPS: Array[String] = ["land", "rope"]
 ## Picked support ids.
 var supports: Array = []
 ## The last started deployment's plan (every peer).
@@ -221,6 +227,14 @@ func request_insertion(id: String) -> void:
 	_server_insertion.rpc_id(1, id)
 
 
+func request_approach(side: int) -> void:
+	_server_approach.rpc_id(1, side)
+
+
+func request_drop(method: String) -> void:
+	_server_drop.rpc_id(1, method)
+
+
 func request_support(id: String, picked: bool) -> void:
 	_server_support.rpc_id(1, id, picked)
 
@@ -293,6 +307,25 @@ func server_set_insertion(id: String) -> bool:
 	if not insertion_points().any(func(p: Dictionary) -> bool: return String(p.get("id", "")) == id):
 		return false
 	insertion_id = id
+	_broadcast()
+	return true
+
+
+## Host: the side the helicopter comes in from: the insertions' routes planned again for it.
+func server_set_approach(side: int) -> bool:
+	if not multiplayer.is_server() or phase != Phase.BRIEFING or side < -1 or side > 3:
+		return false
+	approach = side
+	if CompoundLevel.current(self) is ZoneLevel:
+		zone = HeliSupports.plan_routes(self, zone, approach)
+	_broadcast()
+	return true
+
+
+func server_set_drop(method: String) -> bool:
+	if not multiplayer.is_server() or phase != Phase.BRIEFING or not method in DROPS:
+		return false
+	drop = method
 	_broadcast()
 	return true
 
@@ -420,7 +453,7 @@ func _default_flow() -> void:
 		var at := Vector2(float(p[0]), float(p[1]))
 		var via: Variant = _xz(point.get("from"))
 		var objective: Variant = _xz(point.get("objective"))
-		if String(point.get("method", "foot")) != HELI or not HeliSupports.server_insert(self, at, via, objective, point.get("route")):
+		if String(point.get("method", "foot")) != HELI or not HeliSupports.server_insert(self, at, via, objective, point.get("route"), drop == "rope"):
 			server_move_squad_to(at)
 	var extraction := MapNodes.extraction(self)
 	if extraction:
@@ -474,6 +507,18 @@ func _server_insertion(id: String) -> void:
 
 
 @rpc("any_peer", "call_local", "reliable")
+func _server_approach(side: int) -> void:
+	if multiplayer.is_server():
+		server_set_approach(side)
+
+
+@rpc("any_peer", "call_local", "reliable")
+func _server_drop(method: String) -> void:
+	if multiplayer.is_server():
+		server_set_drop(method)
+
+
+@rpc("any_peer", "call_local", "reliable")
 func _server_support(id: String, picked: bool) -> void:
 	if multiplayer.is_server():
 		server_set_support(id, picked)
@@ -491,7 +536,7 @@ func _sender() -> int:
 
 
 func _state() -> Dictionary:
-	return {"phase": phase, "contract": contract, "zone": zone, "ready": ready_peers.keys(), "insertion": insertion_id,
+	return {"phase": phase, "contract": contract, "zone": zone, "ready": ready_peers.keys(), "insertion": insertion_id, "approach": approach, "drop": drop,
 		"supports": supports, "plan": plan, "peers": session_peers()}
 
 
@@ -521,6 +566,8 @@ func _client_state(state: Dictionary) -> void:
 	for id: int in state.get("ready", []):
 		ready_peers[id] = true
 	insertion_id = String(state.get("insertion", ""))
+	approach = int(state.get("approach", -1))
+	drop = String(state.get("drop", "land"))
 	supports = state.get("supports", [])
 	plan = state.get("plan", {})
 	_peers = state.get("peers", [1])

@@ -489,34 +489,49 @@ class Canvas:
 ## the boom rising into a swept pylon with the tail rotor canted 20 degrees on its right, the
 ## wide stabilator low on the pylon, main wheels under the cockpit's rear on a shock strut and
 ## a long drag beam, and the tail wheel under the boom.
+## Captain, 2026-10-17 (a roomy cabin you can stand and walk in, riders on canvas troop seats,
+## wide open side doors): the cabin is wider (UH60_HALF) and taller (UH60_CABIN_TOP) than the
+## real one's 2.36 m by 1.37 m, longer aft (UH60_CABIN_END), its doors wider (UH60_DOOR), and the
+## upper deck, engines and rotor sit UH60_LIFT higher over it. The doors' panels are VehicleBay's.
+const UH60_CABIN_TOP := 2.62
+const UH60_HALF := 1.32
+const UH60_LEAN := 0.12
+const UH60_LIFT := UH60_CABIN_TOP - 2.22
+const UH60_CABIN_END := 8.9
+const UH60_DOOR := Vector2(4.0, 6.7)
+const UH60_DOOR_TOP := 2.38
+## The main gear and door guns stand this much further out than they did on the narrower hull.
+const UH60_WIDER := UH60_HALF - 1.18
+
+
 static func _uh60() -> Canvas:
 	var c := Canvas.new(Vector3i(96, 86, 316), 0.05)
 	var body := func(z: float) -> Section:
 		var bottom := 0.5
-		var top := 2.22
-		var hw := 1.18
-		var lean := 0.24  # the roof is this much narrower than the floor line on each side
+		var top := lerpf(2.22, UH60_CABIN_TOP, smoothstep(2.45, 2.9, z))  # up behind the cockpit
+		var hw := UH60_HALF
+		var lean := UH60_LEAN  # the roof is this much narrower than the floor line on each side
 		var rb := 0.3
-		var rt := 0.45
+		var rt := 0.4
 		if z < 2.4:  # nose, windscreen and cockpit
 			if z < 1.15:
 				top = lerpf(1.22, 1.62, sqrt(z / 1.15))
 			else:
 				top = lerpf(1.62, 2.22, 1.0 - pow(1.0 - clampf((z - 1.15) / 1.0, 0.0, 1.0), 2.0))
 			bottom = lerpf(0.85, 0.5, smoothstep(0.0, 2.0, z))
-			hw = lerpf(0.86, 1.18, sqrt(clampf(z / 2.4, 0.0, 1.0)))
-			lean = lerpf(0.5, 0.24, smoothstep(1.0, 2.3, z))
+			hw = lerpf(0.86, UH60_HALF, sqrt(clampf(z / 2.4, 0.0, 1.0)))
+			lean = lerpf(0.5, UH60_LEAN, smoothstep(1.0, 2.3, z))
 			rb = lerpf(0.5, 0.3, clampf(z / 2.0, 0.0, 1.0))
-			rt = lerpf(0.45, 0.45, clampf(z / 2.0, 0.0, 1.0))
-		elif z > 8.0:  # aft cabin sweeping up into the boom, then the boom tapering
-			var e := smoothstep(8.0, 10.8, z)
+			rt = 0.45
+		elif z > 8.6:  # aft cabin sweeping up into the boom, then the boom tapering
+			var e := smoothstep(8.6, 11.0, z)
 			var b := clampf((z - 10.8) / 3.4, 0.0, 1.0)
 			bottom = lerpf(0.5, 1.5, e) + 0.3 * b
-			top = lerpf(2.22, 2.2, e) - 0.1 * b
-			hw = lerpf(1.18, 0.44, e) - 0.14 * b
-			lean = lerpf(0.24, 0.06, e)
+			top = lerpf(UH60_CABIN_TOP, 2.2, e) - 0.1 * b
+			hw = lerpf(UH60_HALF, 0.44, e) - 0.14 * b
+			lean = lerpf(UH60_LEAN, 0.06, e)
 			rb = lerpf(0.3, 0.5, e)
-			rt = lerpf(0.45, 0.5, e)
+			rt = lerpf(0.4, 0.5, e)
 		var s := Section.new(bottom, top, hw, hw - lean, rb, rt)
 		if z < 0.6:  # round off the nose tip
 			s = s.scaled(maxf(sqrt(1.0 - pow(1.0 - z / 0.6, 2.0)), 0.25), (top + bottom) * 0.5 - 0.05)
@@ -525,57 +540,59 @@ static func _uh60() -> Canvas:
 		return s
 	c.mhull(0.0, 14.45, body, P.PAINT, 0.12)
 	# Upper deck: the cowl behind the cockpit, flat over the engines and gearbox, then a long
-	# fairing tapering down into the boom.
+	# fairing tapering down into the boom. All of it, engines and rotor included, UH60_LIFT up.
+	var up := UH60_LIFT
 	var deck := func(z: float) -> Section:
-		var top := 2.66
+		var top := 2.66 + up
 		var hw := 0.92
 		if z < 3.6:
 			var k := smoothstep(2.45, 3.6, z)
-			top = lerpf(2.2, 2.66, sqrt(k))
+			top = lerpf(2.2, 2.66 + up, sqrt(k))
 			hw = lerpf(0.6, 0.92, k)
 		elif z > 8.6:
 			var k := smoothstep(8.6, 11.6, z)
-			top = lerpf(2.66, 2.15, k)
+			top = lerpf(2.66 + up, 2.15, k)
 			hw = lerpf(0.92, 0.26, k)
 		return Section.new(1.9, top, hw, hw - 0.22, 0.0, 0.4)
 	c.mhull(2.45, 11.6, deck, P.PAINT, 0.12)
-	c.mskin(-0.7, 2.56, 6.3, 0.7, 2.7, 7.6, P.PAINT_DARK, P.PAINT)  # oil cooler exhaust
+	c.mskin(-0.7, 2.56 + up, 6.3, 0.7, 2.7 + up, 7.6, P.PAINT_DARK, P.PAINT)  # oil cooler exhaust
 	for gz: float in [6.45, 6.75, 7.05, 7.35]:
-		c.mskin(-0.5, 2.6, gz, 0.5, 2.7, gz + 0.1, P.BLACK, P.PAINT_DARK)
-	c.mbox(0.36, 2.5, 9.0, 0.56, 2.62, 9.2, P.BLACK)  # APU exhaust
+		c.mskin(-0.5, 2.6 + up, gz, 0.5, 2.7 + up, gz + 0.1, P.BLACK, P.PAINT_DARK)
+	c.mbox(0.36, 2.5 + up, 9.0, 0.56, 2.62 + up, 9.2, P.BLACK)  # APU exhaust
 	# Engine nacelles on the shoulders: round intakes forward, IR suppressors angled out aft.
 	for side: float in [-1.0, 1.0]:
 		var nx := side * 0.8
-		c.mbox(minf(side * 0.55, side * 1.0), 2.15, 4.2, maxf(side * 0.55, side * 1.0), 2.6, 7.6, P.PAINT)
+		var ny := 2.64 + up
+		c.mbox(minf(side * 0.55, side * 1.0), 2.15 + up, 4.2, maxf(side * 0.55, side * 1.0), 2.6 + up, 7.6, P.PAINT)
 		var nacelle := func(z: float) -> Vector4:
 			var r := 0.37 if z < 4.15 else 0.35
-			return Vector4(nx, 2.64, r, r)
+			return Vector4(nx, ny, r, r)
 		c.mloft(3.95, 7.75, nacelle, P.PAINT, 2.0)
-		var intake := func(_z: float) -> Vector4: return Vector4(nx, 2.64, 0.27, 0.27)
+		var intake := func(_z: float) -> Vector4: return Vector4(nx, ny, 0.27, 0.27)
 		c.mloft(3.95, 4.05, intake, P.BLACK, 2.0)
 		var spinner := func(z: float) -> Vector4:
 			var r := lerpf(0.04, 0.11, clampf((z - 3.9) / 0.15, 0.0, 1.0))
-			return Vector4(nx, 2.64, r, r)
+			return Vector4(nx, ny, r, r)
 		c.mloft(3.9, 4.05, spinner, P.METAL, 2.0)
 		for seam: float in [5.1, 6.45]:  # cowling seams
-			c.mskin(minf(side * 0.5, side * 1.2), 2.25, seam, maxf(side * 0.5, side * 1.2), 3.05, seam + 0.05, P.PAINT_DARK, P.PAINT)
+			c.mskin(minf(side * 0.5, side * 1.2), 2.25 + up, seam, maxf(side * 0.5, side * 1.2), 3.05 + up, seam + 0.05, P.PAINT_DARK, P.PAINT)
 		var hirss := func(z: float) -> Vector4:
-			return Vector4(side * (0.82 + (z - 7.6) * 0.32), 2.64, 0.24, 0.3)
+			return Vector4(side * (0.82 + (z - 7.6) * 0.32), ny, 0.24, 0.3)
 		c.mloft(7.6, 8.95, hirss, P.PAINT_DARK, 4.0)
 		for lz: float in [7.9, 8.2, 8.5]:
-			c.mskin(-1.5, 2.4, lz, 1.5, 2.96, lz + 0.05, P.BLACK, P.PAINT_DARK)
+			c.mskin(-1.5, 2.4 + up, lz, 1.5, 2.96 + up, lz + 0.05, P.BLACK, P.PAINT_DARK)
 		var outlet := func(z: float) -> Vector4:
-			return Vector4(side * (0.82 + (z - 7.6) * 0.32), 2.64, 0.18, 0.24)
+			return Vector4(side * (0.82 + (z - 7.6) * 0.32), ny, 0.18, 0.24)
 		c.mloft(8.9, 8.95, outlet, P.BLACK, 4.0)
 	# Main rotor mast, swashplate and hub; the blades turn on the MainRotor node.
-	c.mdisc(0.0, 5.25, 0.3, 2.64, 2.85, P.PAINT_DARK)
-	c.mdisc(0.0, 5.25, 0.17, 2.85, 3.62, P.METAL)
-	c.mdisc(0.0, 5.25, 0.4, 3.22, 3.3, P.METAL)
+	c.mdisc(0.0, 5.25, 0.3, 2.64 + up, 2.85 + up, P.PAINT_DARK)
+	c.mdisc(0.0, 5.25, 0.17, 2.85 + up, 3.62 + up, P.METAL)
+	c.mdisc(0.0, 5.25, 0.4, 3.22 + up, 3.3 + up, P.METAL)
 	for side: float in [-1.0, 1.0]:  # pitch links
-		c.mbox(side * 0.3 - 0.03, 3.3, 5.22, side * 0.3 + 0.03, 3.6, 5.28, P.METAL)
-		c.mbox(-0.03, 3.3, 5.25 + side * 0.3 - 0.03, 0.03, 3.6, 5.25 + side * 0.3 + 0.03, P.METAL)
-	c.mdisc(0.0, 5.25, 0.34, 3.58, 3.74, P.BLACK)
-	c.rotor("MainRotor", Vector3(0.0, 3.82, 5.25), 8.18, 0.53, 4, Vector3.UP)
+		c.mbox(side * 0.3 - 0.03, 3.3 + up, 5.22, side * 0.3 + 0.03, 3.6 + up, 5.28, P.METAL)
+		c.mbox(-0.03, 3.3 + up, 5.25 + side * 0.3 - 0.03, 0.03, 3.6 + up, 5.25 + side * 0.3 + 0.03, P.METAL)
+	c.mdisc(0.0, 5.25, 0.34, 3.58 + up, 3.74 + up, P.BLACK)
+	c.rotor("MainRotor", Vector3(0.0, 3.82 + up, 5.25), 8.18, 0.53, 4, Vector3.UP)
 	# Swept tail pylon with the gearbox fairing on top; tail rotor canted 20 degrees on its right.
 	var y := 1.5
 	while y < 4.15:
@@ -598,50 +615,50 @@ static func _uh60() -> Canvas:
 	c.mbox(-2.15, 1.4, 13.85, 2.15, 1.53, 14.3, P.PAINT)
 	c.mbox(-0.22, 1.36, 13.6, 0.22, 1.56, 14.9, P.PAINT)  # root fairing
 	# Glass: windscreen and overhead windows, cockpit door windows above and below, gunner's
-	# windows, the two windows in each sliding cabin door.
+	# windows, the window aft of each cabin door.
 	c.mskin(-1.0, 1.6, 1.05, 1.0, 2.18, 2.15, P.GLASS)
 	c.mskin(-0.55, 2.15, 2.1, 0.55, 2.3, 2.45, P.GLASS)
 	c.mskin(-0.04, 1.6, 1.1, 0.04, 2.3, 2.45, P.PAINT_DARK)  # centre post
+	var wide := UH60_WIDER
 	for side: float in [-1.0, 1.0]:
-		var ox := minf(side * 0.92, side * 1.4)
-		var ix := maxf(side * 0.92, side * 1.4)
+		var ox := minf(side * 0.92, side * 1.5)
+		var ix := maxf(side * 0.92, side * 1.5)
 		c.mskin(ox, 1.6, 1.05, ix, 2.3, 1.3, P.PAINT_DARK)  # windscreen side post
 		c.mskin(ox, 1.38, 1.3, ix, 2.14, 2.45, P.GLASS)  # cockpit door window
 		c.mskin(ox, 0.78, 1.55, ix, 1.3, 2.38, P.GLASS)  # lower door window
 		c.mskin(ox, 0.65, 2.48, ix, 2.18, 2.55, P.PAINT_DARK, P.PAINT)  # door rear edge
-		c.mskin(ox, 1.45, 2.95, ix, 2.08, 3.55, P.GLASS)  # gunner's window
+		c.mbox(minf(side * 0.9, side * 1.5), 1.35, 2.9, maxf(side * 0.9, side * 1.5), 2.12, 3.6, P.EMPTY)  # the gunner's open port (Captain, 2026-10-17)
 		c.mskin(ox, 1.4, 2.88, ix, 2.14, 2.95, P.PAINT_DARK, P.PAINT)
 		c.mskin(ox, 1.4, 3.55, ix, 2.14, 3.62, P.PAINT_DARK, P.PAINT)
-		# Sliding cabin door: outline, the rail it runs back on, windows and the step.
-		c.mskin(ox, 0.62, 4.3, ix, 2.15, 4.36, P.PAINT_DARK, P.PAINT)
-		c.mskin(ox, 0.62, 6.42, ix, 2.15, 6.48, P.PAINT_DARK, P.PAINT)
-		c.mskin(ox, 0.62, 4.3, ix, 0.68, 6.48, P.PAINT_DARK, P.PAINT)
-		c.mskin(ox, 2.13, 4.3, ix, 2.2, 7.4, P.BLACK, P.PAINT)
-		c.mskin(ox, 1.45, 4.55, ix, 1.98, 5.2, P.GLASS)
-		c.mskin(ox, 1.45, 5.6, ix, 1.98, 6.25, P.GLASS)
-		c.mbox(minf(side * 1.12, side * 1.3), 0.55, 4.6, maxf(side * 1.12, side * 1.3), 0.6, 5.3, P.METAL)
-		c.mskin(ox, 0.9, 7.55, ix, 1.85, 7.6, P.PAINT_DARK, P.PAINT)  # aft fuselage seam
+		# The wide cabin doorway (its sliding panel: VehicleBay, on the rail over it, running back
+		# along the cabin's side), its frame, the step under the sill and the grab handle inside
+		# its front edge (VehicleInteriors) that a boarder takes hold of.
+		var d0 := UH60_DOOR.x
+		var d1 := UH60_DOOR.y
+		c.mskin(ox, 0.6, d0 - 0.08, ix, UH60_DOOR_TOP + 0.08, d0, P.PAINT_DARK, P.PAINT)
+		c.mskin(ox, 0.6, d1, ix, UH60_DOOR_TOP + 0.08, d1 + 0.08, P.PAINT_DARK, P.PAINT)
+		c.mskin(ox, UH60_DOOR_TOP + 0.02, d0 - 0.08, ix, UH60_DOOR_TOP + 0.1, d1 + 2.8, P.BLACK, P.PAINT)  # rail
+		c.mbox(minf(side * 0.9, side * 1.5), 0.62, d0, maxf(side * 0.9, side * 1.5), UH60_DOOR_TOP, d1, P.EMPTY)
+		c.mbox(minf(side * 1.22, side * 1.4), 0.52, d0 + 0.6, maxf(side * 1.22, side * 1.4), 0.58, d0 + 1.4, P.METAL)  # step
+		c.mskin(ox, 1.5, 7.0, ix, 2.05, 7.65, P.GLASS)  # aft cabin window
+		c.mskin(ox, 0.9, 7.9, ix, 1.85, 7.95, P.PAINT_DARK, P.PAINT)  # aft fuselage seam
 		# Chaff and flare dispensers on the boom.
 		c.mbox(minf(side * 0.36, side * 0.54), 1.7, 10.4, maxf(side * 0.36, side * 0.54), 1.95, 10.9, P.PAINT_DARK)
-		# M240H on the gunner's window mount, barrel stowed forward.
-		var gx := side * 1.4
-		c.mbar(Vector3(side * 1.18, 1.6, 3.62), Vector3(gx, 1.76, 3.45), 0.06, P.METAL)
-		c.mbox(gx - 0.05, 1.75, 3.0, gx + 0.05, 1.89, 3.72, P.GUN)
-		c.mbox(gx - 0.04, 1.77, 3.72, gx + 0.04, 1.85, 3.95, P.GUN)
-		c.mbox(gx - 0.025, 1.8, 2.25, gx + 0.025, 1.84, 3.0, P.GUN)
-		c.mbox(gx - 0.035, 1.78, 2.2, gx + 0.035, 1.86, 2.3, P.GUN)
-		c.mbox(gx - 0.06, 1.58, 3.3, gx + 0.06, 1.75, 3.55, P.SEAT)  # ammo bag
+		# The M240H's pintle arm at the port's sill; the gun itself turns on it (DoorGun).
+		var gx := side * (1.32 + wide)
+		c.mbar(Vector3(side * (1.18 + wide), 1.45, 3.35), Vector3(gx, 1.66, 3.35), 0.06, P.METAL)
 		# Main gear: wheel under the cockpit's rear, shock strut up to the fuselage and the long
 		# drag beam running forward to the belly.
-		c.mbox(minf(side * 1.06, side * 1.24), 0.95, 3.9, maxf(side * 1.06, side * 1.24), 1.4, 4.4, P.PAINT_DARK)
-		c.mbar(Vector3(side * 1.18, 1.1, 4.12), Vector3(side * 1.24, 0.36, 4.05), 0.12, P.METAL)
-		c.mbar(Vector3(side * 0.92, 0.6, 2.25), Vector3(side * 1.22, 0.36, 4.05), 0.13, P.PAINT_DARK)
-		c.mwheel(minf(side * 1.27, side * 1.49), maxf(side * 1.27, side * 1.49), 0.33, 4.05, 0.33)
+		var gw := side * wide
+		c.mbox(minf(side * 1.06, side * 1.24) + gw, 0.95, 3.75, maxf(side * 1.06, side * 1.24) + gw, 1.4, 4.0, P.PAINT_DARK)
+		c.mbar(Vector3(side * 1.18 + gw, 1.1, 3.9), Vector3(side * 1.24 + gw, 0.36, 4.05), 0.12, P.METAL)
+		c.mbar(Vector3(side * 0.92 + gw, 0.6, 2.25), Vector3(side * 1.22 + gw, 0.36, 4.05), 0.13, P.PAINT_DARK)
+		c.mwheel(minf(side * 1.27, side * 1.49) + gw, maxf(side * 1.27, side * 1.49) + gw, 0.33, 4.05, 0.33)
 		# Pitot probes on the cockpit roof.
 		c.mbar(Vector3(side * 0.42, 2.2, 2.3), Vector3(side * 0.42, 2.4, 2.2), 0.04, P.METAL)
 		c.mbar(Vector3(side * 0.42, 2.4, 2.2), Vector3(side * 0.42, 2.4, 1.75), 0.04, P.METAL)
 		# Nav lights on the cabin's upper corners.
-		c.mbox(minf(side * 1.0, side * 1.08), 2.05, 3.7, maxf(side * 1.0, side * 1.08), 2.13, 3.82, P.LIGHT_RED if side < 0.0 else P.LIGHT_GREEN)
+		c.mbox(minf(side * 1.12, side * 1.22), 2.3, 3.62, maxf(side * 1.12, side * 1.22), 2.38, 3.74, P.LIGHT_RED if side < 0.0 else P.LIGHT_GREEN)
 	# Tail wheel on a trailing strut under the boom.
 	c.mbar(Vector3(0.0, 1.72, 12.25), Vector3(0.0, 0.34, 12.8), 0.1, P.METAL)
 	c.mbar(Vector3(0.0, 1.76, 13.15), Vector3(0.0, 0.36, 12.82), 0.07, P.METAL)
@@ -656,7 +673,7 @@ static func _uh60() -> Canvas:
 	c.mbox(-0.02, 0.32, 6.6, 0.02, 0.52, 6.9, P.PAINT_DARK)
 	c.mbar(Vector3(0.0, 2.35, 10.0), Vector3(0.0, 2.85, 10.6), 0.04, P.METAL)
 	c.mbox(-0.02, 2.05, 12.1, 0.02, 2.3, 12.45, P.PAINT_DARK)
-	c.mbox(-0.06, 2.62, 8.85, 0.06, 2.7, 8.97, P.LIGHT_RED)
+	c.mbox(-0.06, 2.62 + up, 8.85, 0.06, 2.7 + up, 8.97, P.LIGHT_RED)
 	c.mbox(-0.06, 0.44, 7.2, 0.06, 0.5, 7.32, P.LIGHT_RED)
 	for seam: float in [10.3, 11.6, 12.8]:
 		c.mskin(-1.0, 1.4, seam, 1.0, 2.35, seam + 0.05, P.PAINT_DARK, P.PAINT)
@@ -704,6 +721,15 @@ static func _vtol_petrel() -> Canvas:
 		return Section.new(bottom, top, hb, ht, 0.04, 0.03)
 	c.mhull(o - 7.4, o + 6.8, body, P.PAINT, 0.12)
 	c.mhull(o + 6.55, o + 6.8, body, P.PAINT_DARK)  # solid aft bulkhead: the shell is open-ended
+	# Belly turret under the cockpit (Captain, 2026-10-17: the co-pilot works it): a faceted
+	# housing on a ring, an M2 .50 cal out of its face (Captain: "a slower firing 50 cal"; the turret
+	# and gun turn: VehicleTurret).
+	c.mbox(-0.3, 0.42, o - 4.3, 0.3, 0.5, o - 3.7, P.METAL)  # the ring
+	c.mbox(-0.26, 0.16, o - 4.26, 0.26, 0.42, o - 3.74, P.PAINT_DARK)  # the housing
+	c.mbox(-0.2, 0.12, o - 4.2, 0.2, 0.16, o - 3.8, P.PAINT_DARK)
+	c.mbox(-0.07, 0.25, o - 4.4, 0.07, 0.4, o - 3.85, P.GUN)  # the gun's body in its slot
+	c.mbox(-0.035, 0.3, o - 5.0, 0.035, 0.36, o - 4.4, P.GUN)  # the barrel, its cooling jacket
+	c.mbox(-0.05, 0.29, o - 4.75, 0.05, 0.37, o - 4.4, P.GUN)
 	# Dorsal engine housing where the wing sits on top, angular, with chevron facets aft of it.
 	c.mbox(-0.85, 2.88, o - 2.2, 0.85, 3.3, o + 2.4, P.PAINT)
 	c.mskin(-0.85, 3.25, o - 2.2, 0.85, 3.31, o + 2.4, P.PAINT_DARK, P.PAINT)

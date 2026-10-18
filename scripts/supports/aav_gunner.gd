@@ -87,6 +87,10 @@ func _seat_step(seat: int, delta: float) -> void:
 	var main := seat == int(vehicle.gun_info().get("seat", -1))
 	if main:
 		vehicle.server_aim(dir)
+	else:
+		## A door gun (DoorGun) swings with its gunner: he turns and looks down the line of fire.
+		gunner.rotation.y = atan2(-exact.x, -exact.z)
+		gunner.model.look_pitch = asin(clampf(exact.y, -1.0, 1.0))
 	if not vehicle.gun_on(exact, VehicleTurret.ON_TARGET_DEG, -1 if main else seat):
 		return  # still turning onto it (a door gun: it went out of the arc)
 	if not main and not vehicle.door_arc_ok(seat, dir):

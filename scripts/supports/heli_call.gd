@@ -55,6 +55,14 @@ const ABORT_ZONE := 0.5
 const ABORT_WITHIN_M := 800.0
 ## Resupply: on the ground this long (s) once the pallet's down.
 const UNLOAD_S := 4.0
+## A hot drop waves off only with more than this many hostiles hitting it within this long (s).
+## Fast-rope insertion (Captain, 2026-10-17): the hover's height over the LZ (m), one man down
+## each ROPE_GAP_S (the doors in turn), and a short wait after the last before it goes.
+const ROPE_AGL_M := 12.0
+const ROPE_GAP_S := 0.9
+const ROPE_CLEAR_S := 1.5
+const HOT_DROP_SHOOTERS := 4
+const HOT_DROP_WINDOW_S := 20.0
 ## Pickup (transport): it waits this long for anyone to board before going home; AI squadmates
 ## this close to it are ordered in (again every BOARD_ORDER_S); once the destination's given it
 ## goes with whoever is aboard after BOARD_WAIT_S, or as soon as everyone near is in.
@@ -172,6 +180,14 @@ var route: Array[Vector3] = []
 var entry := Vector3.INF
 ## Insertion: the objective its dead-ground LZ was planned round (Vector3.INF: none).
 var objective := Vector3.INF
+## Insertion by fast-rope instead of landing (the briefing's drop choice).
+var rope := false
+var _rope_state := ""  # "" / "hover" (on its way to the hover) / "roping" / "done"
+var _rope_queue: Array = []
+var _rope_next := 0.0
+var _rope_side := -1.0
+## Host: hostiles who hit it: instance id -> [soldier, when] (_shooters_hitting).
+var _hitters := {}
 ## LZs it waved off (hot), newest last.
 var waved_off: Array[Vector3] = []
 ## Insertion: the briefing's insertion point (its LZ as planned): wave-offs stay near it.
@@ -311,6 +327,7 @@ func _spawn(lvl: Node, layer: VehicleLayer, start: Vector3, facing: Vector3) -> 
 	if heli == null:
 		return false
 	heli.server_rearm()  # Captain, 2026-10-15: its M240H door guns go up loaded
+	_crew_gun()
 	heli.support = kind
 	if kind == "insertion" and mark.has("pos"):
 		planned = mark.pos
@@ -449,7 +466,7 @@ func can_turn_back() -> bool:
 		return false
 	if stage != "leave" or rode_out or not is_instance_valid(heli) or heli.is_down():
 		return false
-	return (phase == Phase.LEAVING or phase == Phase.TAKEOFF) and heli.occupants().is_empty()
+	return (phase == Phase.LEAVING or phase == Phase.TAKEOFF) and _riders().is_empty()
 
 
 ## Transport: where to take the squad. Returns "" or why not.
@@ -471,7 +488,7 @@ func server_set_destination(where: Dictionary) -> String:
 
 ## Sends it home. Returns "" or why not.
 func server_cancel() -> String:
-	if not heli.occupants().is_empty() and heli.is_airborne():
+	if not _riders().is_empty() and heli.is_airborne():
 		return "Not with people aboard: give it a destination"
 	sup.server_radio(kind, "Copy, returning to base")
 	sup.server_clear_cooldown(kind)  # sent home: it can be called again at once (Captain, 2026-10-15)
@@ -562,6 +579,9 @@ func step(delta: float) -> void:
 func _step_inbound() -> void:
 	if heli.is_landed():
 		_on_landed()
+		return
+	if _rope_state != "":
+		_step_rope()
 		return
 	if mark.has("pos"):
 		if not route.is_empty():  # flying in low by the insertion point first
@@ -675,6 +695,8 @@ func _on_landed() -> void:
 
 func _step_ground() -> void:
 	if stage == "drop":
+		if heli.running_out():
+			return  # the squad still running out of the doors (Vehicle.server_run_out)
 		if _players_aboard() == 0:
 			if _empty_since < 0.0:
 				_empty_since = _t
@@ -693,12 +715,12 @@ func _step_ground() -> void:
 				_load_people(false)
 				_board(_transport_ai())
 			if dest.is_empty():
-				if _t > PICKUP_WAIT_S and heli.occupants().is_empty():
+				if _t > PICKUP_WAIT_S and _riders().is_empty():
 					sup.server_radio(kind, "Nobody's coming. Heading home")
 					_depart()
 				return
 			if _everyone_near_aboard() or Soldier._now() - _dest_at > BOARD_WAIT_S:
-				sup.server_radio(kind, "Lifting off, %d aboard" % heli.occupants().size())
+				sup.server_radio(kind, "Lifting off, %d aboard" % _riders().size())
 				stage = "carry"
 				_take_off()
 		"cargo":
@@ -932,12 +954,39 @@ func _load_items() -> void:
 			sup.server_radio(kind, "No room aboard for the %s" % data.name)
 
 
+## A main gun worked from inside (the Petrel's belly turret, from the co-pilot's seat: Captain,
+## 2026-10-17) gets its crewman: a support's crew (vehicle_crew, as the AAV's), not a squadmate,
+## who rides it out and goes with it (AavGunner fires it).
+func _crew_gun() -> void:
+	var seat := int(heli.gun_info().get("seat", -1))
+	var lvl := level() as CompoundLevel
+	if seat < 0 or heli.occupant(seat) != null or lvl == null:
+		return
+	var crew := lvl.spawn_soldier({"name": ("%s_Gunner" % String(HeliSupports.callsign(kind)).replace(" ", "")).validate_node_name(),
+		"faction": "friendly", "variant": "multicam", "pos": heli.global_position + Vector3.UP * 2.0,
+		"loadout": ["helmet", "m17", "mag_9mm"], "combat": 0.6, "discipline": 0.7, "guard": false})
+	if crew == null:
+		return
+	crew.set_meta(&"vehicle_crew", heli.vehicle_id)
+	heli.server_enter(crew, seat)
+	heli.tree_exiting.connect(func() -> void:
+		if is_instance_valid(crew) and not crew.is_queued_for_deletion():
+			crew.queue_free())
+
+
+## Who rides it, not its own crew (vehicle_crew).
+func _riders() -> Array:
+	return heli.occupants().filter(func(s: Soldier) -> bool: return not s.has_meta(&"vehicle_crew"))
+
+
 ## Everyone out but the players (with `players`, them too), the AI falling in on the commander.
 func _unload(players: bool) -> void:
 	var out := PackedStringArray()
 	for s: Soldier in heli.occupants():
+		if s.has_meta(&"vehicle_crew"):
+			continue  # the gun's crewman stays with it
 		if s.is_ai() or not s.vitals.is_up() or players:
-			heli.server_exit(s)
+			heli.server_run_out(s)  # AI run out of the doors (Vehicle.server_run_out); the rest step out
 			if s.is_ai() and s.vitals.is_up() and s.squad_slot >= 0:
 				out.append(String(s.name))
 	var from := _commander()
@@ -994,7 +1043,7 @@ func _evacuate() -> void:
 	var lvl := level() as CompoundLevel
 	for occupant: Variant in heli.occupants():
 		var s := occupant as Soldier
-		if s == null or not is_instance_valid(s):
+		if s == null or not is_instance_valid(s) or s.has_meta(&"vehicle_crew"):
 			continue
 		heli.server_exit(s)
 		if not s.is_ai():
@@ -1079,9 +1128,17 @@ func _fly_in() -> void:
 ## and the door everyone gets out of (Vehicle.exit_spot's "exit_away"); else it hooks back the
 ## way it came.
 func _land() -> void:
+	if rope and kind == "insertion" and stage == "drop":
+		## Fast-rope: to a hover ROPE_AGL_M over the LZ, no landing (_step_rope).
+		heli.server_fly_to(lz, ROPE_AGL_M)
+		_rope_state = "hover"
+		return
 	var threat := _known_threat()
+	## Hot (Helicopter.straight_plan): an insertion always (Captain, 2026-10-17: hot drops, no slow
+	## J-hook), any landing with a known threat about.
+	var hot := kind == "insertion" or threat != Vector3.INF
 	if threat == Vector3.INF:
-		heli.server_land_at(lz)
+		heli.server_land_at(lz, NAN, hot)
 		heli.remove_meta(&"exit_away")
 		return
 	var t := Vector2(threat.x - lz.x, threat.z - lz.z).normalized()
@@ -1089,7 +1146,7 @@ func _land() -> void:
 	var right := Vector2(t.y, -t.x)  # its nose this way: the threat on its right
 	var left := -right
 	var f := right if right.dot(natural) >= left.dot(natural) else left
-	heli.server_land_at(lz, atan2(-f.x, -f.y))
+	heli.server_land_at(lz, atan2(-f.x, -f.y), hot)
 	heli.set_meta(&"exit_away", threat)
 
 
@@ -1112,6 +1169,10 @@ func _known_threat() -> Vector3:
 func _hot_at_lz() -> Soldier:
 	if kind != "insertion" and kind != "extraction":
 		return null
+	## A hot drop presses on through some fire (Captain, 2026-10-17: "more than 4 shooters that are
+	## accurately hitting the heli" before it waves off): seen, or one or two shooting, isn't enough.
+	if kind == "insertion":
+		return _shooter if _shooters_hitting() > HOT_DROP_SHOOTERS else null
 	var close := DeadGround.hot_watcher(level(), lz)
 	if close:
 		return close
@@ -1302,7 +1363,7 @@ static func campaign_running(from: Node) -> bool:
 # --- Checks -----------------------------------------------------------------------------------------
 
 func _should_abort() -> bool:
-	if heli.occupants().size() > 0 or _flat(heli.global_position, lz) > ABORT_WITHIN_M:
+	if _riders().size() > 0 or _flat(heli.global_position, lz) > ABORT_WITHIN_M:
 		return false
 	if heli.zone_health(Vehicle.ZONE_HULL) < ABORT_HULL:
 		return true
@@ -1326,7 +1387,7 @@ func _everyone_near_aboard() -> bool:
 	for s: Soldier in _transport_ai():
 		if Vehicle.ride_of(s) != heli and _ordered.has(s.get_instance_id()):
 			return false
-	return not heli.occupants().is_empty()
+	return not _riders().is_empty()
 
 
 ## Extraction: every player and every AI squadmate the players chose to bring is aboard.
@@ -1451,6 +1512,8 @@ func _players_centre() -> Vector3:
 
 func _on_hit(_zone: StringName, hit: Dictionary) -> void:
 	var shooter: Variant = hit.get("shooter")
+	if is_instance_valid(shooter) and shooter is Soldier and (shooter as Soldier).faction == &"hostile":
+		_hitters[(shooter as Node).get_instance_id()] = [shooter, Soldier._now()]
 	var pos: Vector3 = hit.get("position", heli.global_position)
 	var dir: Vector3 = hit.get("direction", Vector3.ZERO)
 	_threat = (shooter as Node3D).global_position if is_instance_valid(shooter) and shooter is Node3D else pos - dir.normalized() * 150.0
@@ -1460,6 +1523,47 @@ func _on_hit(_zone: StringName, hit: Dictionary) -> void:
 	if Soldier._now() - _fire_radio_at > UNDER_FIRE_RADIO_S and not heli.is_down():
 		_fire_radio_at = Soldier._now()
 		sup.server_radio(kind, "Taking fire!")
+
+
+## Fast-rope insertion: hovering over the LZ, everyone aboard (but its crew) goes down the ropes,
+## one each ROPE_GAP_S by the doors in turn (Vehicle.server_fast_rope); once they're all down,
+## ropes in and away.
+func _step_rope() -> void:
+	match _rope_state:
+		"hover":
+			if heli.arrived():
+				_rope_state = "roping"
+				heli.ropes_out = true
+				_rope_queue = _riders().filter(func(s: Soldier) -> bool: return s.vitals.is_up())
+				_rope_next = 0.0
+				sup.server_radio(kind, "Ropes out at %s. Go, go, go!" % _grid(heli.global_position))
+				sup.server_music_stop()
+		"roping":
+			if not _rope_queue.is_empty():
+				if Soldier._now() >= _rope_next:
+					var s: Soldier = _rope_queue.pop_front()
+					if is_instance_valid(s) and heli.seat_of(s) >= 0:
+						heli.server_fast_rope(s, _rope_side)
+						_rope_side = -_rope_side
+					_rope_next = Soldier._now() + ROPE_GAP_S
+			elif not heli.running_out() and Soldier._now() >= _rope_next + ROPE_CLEAR_S:
+				_rope_state = "done"
+				heli.ropes_out = false
+				sup.server_radio(kind, "All off the ropes. Lifting")
+				stage = "leave"
+				_leave()
+
+
+## How many hostiles, still up, have hit it in the last HOT_DROP_WINDOW_S.
+func _shooters_hitting() -> int:
+	var n := 0
+	for id: int in _hitters.keys():
+		var e: Array = _hitters[id]
+		if not is_instance_valid(e[0]) or Soldier._now() - float(e[1]) > HOT_DROP_WINDOW_S:
+			_hitters.erase(id)
+		elif (e[0] as Soldier).vitals.is_up():
+			n += 1
+	return n
 
 
 func _on_down(_h: Helicopter) -> void:
