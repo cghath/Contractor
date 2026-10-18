@@ -57,6 +57,8 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   green, brightened, with grain and a vignette, inside the tube's field of view (40/45/50 deg
   by generation, Proposed), the unaided eye's dim view around it.
 - Test suite `nvg` (`tests/nvg_test.gd`), in `tools/run_tests.sh` and CI.
+- With day and night (S1): lowered, powered NVGs give back their share of the dark's penalty
+  to spotting (`Spotting.sight_x` scales darkness by `1 - Nvg.restores(observer)`).
 
 #### Not yet
 - No NVG model on the helmet (Captain's art side), no spare batteries or recharging, the NVG's
