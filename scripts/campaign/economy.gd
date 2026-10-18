@@ -246,8 +246,11 @@ func pay_mult(faction: String) -> float:
 ## A faction's heat (wave 6d, decided: "angering a faction builds heat, and high heat brings
 ## generic hunter teams into missions near that faction's territory"): 0..HEAT_MAX, raised by
 ## add_heat (Pressure: its men killed, its sites taken out), cooling "heat_cool_per_day".
+## Reading it never starts a campaign (state() would: the 6f bombers ask on a zone's first frame,
+## and a test zone hosted on its own quietly got a campaign and a board).
 func heat(faction: String) -> float:
-	return float((state().get("heat", {}) as Dictionary).get(faction, 0.0))
+	var s: Dictionary = Campaign.section(SECTION) if _is_host() else _remote
+	return float((s.get("heat", {}) as Dictionary).get(faction, 0.0))
 
 
 ## Host: `faction`'s heat rises by `amount` (kept within 0..HEAT_MAX).

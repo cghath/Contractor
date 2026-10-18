@@ -115,6 +115,8 @@ func marks(pos: Vector3) -> bool:
 
 ## Works the step out now (it also does so a few times a second on its own).
 func refresh() -> void:
+	if not is_inside_tree():
+		return  # objectives changed while the HUD is between levels (net: a restore on the way in); it refreshes once it's back
 	_step_left = STEP_S
 	var objs := _objectives()
 	if Objectives.chosen_oid != "" and not pickable(objs).any(func(o: Dictionary) -> bool: return String(o.oid) == Objectives.chosen_oid):

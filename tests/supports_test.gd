@@ -1028,8 +1028,11 @@ func _test_insertion_hot() -> void:
 	var briefing := MapNodes.briefing(level)
 	var marker: Array = briefing.insertion().get("pos", [])
 	var landed_at: Vector3 = c.heli.global_position if is_instance_valid(c.heli) else Vector3.INF
-	check(_landed(c) and c.wave_offs <= HeliCall.WAVE_OFF_MAX + 1 and sup.heard_line("best we've got"),
-		"close sentries: it waves off at most %d times, then puts down anyway (%d; radio: %s)" % [HeliCall.WAVE_OFF_MAX, c.wave_offs, sup.heard[-1] if not sup.heard.is_empty() else "nothing"])
+	# Captain, 2026-10-17: a hot drop presses on through some fire; only more than
+	# HeliCall.HOT_DROP_SHOOTERS accurately hitting it wave it off. Sentries that only see the LZ
+	# (these hold fire) don't.
+	check(_landed(c) and c.wave_offs == 0,
+		"close sentries that only watch: the hot drop presses on and puts down (%d wave-offs; radio: %s)" % [c.wave_offs, sup.heard[-1] if not sup.heard.is_empty() else "nothing"])
 	check(_landed(c) and _flat(landed_at, at3) <= HeliCall.INSERT_WAVE_OFF_M + LandingZone.ROTOR_CLEAR_M,
 		"near the insertion point it was given (%.0f m off, at most %.0f)" % [_flat(landed_at, at3), HeliCall.INSERT_WAVE_OFF_M + LandingZone.ROTOR_CLEAR_M])
 	check(marker.size() >= 2 and Vector2(float(marker[0]) - landed_at.x, float(marker[1]) - landed_at.z).length() <= 15.0,
@@ -1142,6 +1145,10 @@ func _watch_flight(c: HeliCall, seconds: float) -> Dictionary:
 	return out
 
 
+## A hot drop's last 200 m: straight in, give or take lining up on the LZ.
+const HOT_DROP_TURN_DEG := 45.0
+
+
 func _check_flight(c: HeliCall, flight: Dictionary) -> void:
 	check(int(flight.frames) > 30 and float(flight.min_agl) >= HeliFlight.INBOUND_LOW_M and float(flight.max_over) <= HeliFlight.INBOUND_HIGH_M,
 		"it flew in contour-low: %.1f-%.1f m over the ground (7-16 m; more only to climb over what stands taller or ground rising ahead)" % [
@@ -1150,7 +1157,13 @@ func _check_flight(c: HeliCall, flight: Dictionary) -> void:
 		"its airframe at least %.0f m clear of the ground and what stands on it until the final: %.1f m at the least (at %s)" % [
 		Helicopter.MIN_CLEAR_M, float(flight.min_clear), flight.clear_at])
 	check((flight.contacts as Array).is_empty(), "it touched nothing before touchdown (%s)" % ("; ".join(PackedStringArray(flight.contacts)) if not (flight.contacts as Array).is_empty() else "nothing"))
-	check(float(flight.turn_deg) >= 120.0, "a J-hook: it turned %.0f degrees in the last 200 m" % float(flight.turn_deg))
+	# Captain, 2026-10-17 ("hotdrops that dont do the slow j hook"): an insertion is a hot drop,
+	# straight in (Helicopter.straight_plan, HeliCall._land: "insertion" is always hot); every
+	# other landing with no threat about still flies the J-hook.
+	if c.kind == "insertion":
+		check(float(flight.turn_deg) <= HOT_DROP_TURN_DEG, "a hot drop: straight in, no J-hook (it turned %.0f degrees in the last 200 m, at most %.0f)" % [float(flight.turn_deg), HOT_DROP_TURN_DEG])
+	else:
+		check(float(flight.turn_deg) >= 120.0, "a J-hook: it turned %.0f degrees in the last 200 m" % float(flight.turn_deg))
 	check(float(flight.pre_hook_turn_deg) <= 120.0 and float(flight.ratio) <= 1.6,
 		"no turning back before the hook (at most %.0f degrees off the way it set off, 120 allowed), the way in %.2f times the straight line (1.6 allowed)" % [
 		float(flight.pre_hook_turn_deg), float(flight.ratio)])

@@ -356,6 +356,7 @@ func _mission(type: String) -> String:
 	var out: Dictionary
 	if heli:
 		out = await _extract_heli(squad, casualty)
+		Soldier.body_cap = Soldier.MAX_BODIES  # _extract_heli lifts it until its bodies are home
 	else:
 		out = await _extract(bring, done.get("cargo", []), left, deposit, stow)
 	Economy.week_paid.disconnect(on_week)
@@ -1159,6 +1160,10 @@ func _extract_heli(squad: Array, casualty: String) -> Dictionary:
 		i += 1
 		_put(_roster_soldier(mid), by_door + Vector3(-4.0 - 1.5 * i, 0, -3.0))
 	_put(hurt, player.global_position + Vector3(1.2, 0, 0))
+	await _frames(2)
+	# A ragdolled casualty lies where its ragdoll is, not where its capsule was put
+	# (Soldier.body_point, what a pick-up measures to): the player goes to it.
+	_put(player, hurt.body_point() + Vector3(-1.0, 0, 0))
 	if player.inventory.slots[&"primary"] == &"":  # (the raid left his rifle at its point: the spare from the pack)
 		for container: StringName in player.inventory.search_containers():
 			var at: int = (player.inventory.containers.get(container, []) as Array).find_custom(func(e: Dictionary) -> bool: return e.id == &"m4a1")
@@ -1185,6 +1190,11 @@ func _extract_heli(squad: Array, casualty: String) -> Dictionary:
 		_put(left, c.heli.global_position + Vector3(10.0, 0, 9.0))  # in the point, away from the doors: stays
 	await _frames(3)
 	var lifted := player.server_pick_up_body(hurt, Soldier.CARRY, 3.0)
+	# The body cap lifted until they're home: the step's own kills (a garrison streaming in by the
+	# waved-off LZ while the player carries the casualty over) would otherwise cull the oldest
+	# bodies (Soldier.server_enforce_body_cap), these among them, before the heli takes them (the
+	# caller puts the cap back).
+	Soldier.body_cap = Soldier.MAX_BODIES + 20
 	check(lifted, "the player picks up the casualty (%.1f m off; casualty up=%s wake in %.0f s (%s), carried by %s; player up=%s hands=%s carrying %s)" % [
 		hurt.body_point().distance_to(player.global_position), hurt.vitals.is_up(), hurt.vitals.wake_eta(), ", ".join(PackedStringArray(hurt.vitals.why_unconscious())),
 		hurt.carried_by.name if is_instance_valid(hurt.carried_by) else "nobody", player.vitals.is_up(), player.inventory.hands,
@@ -1193,9 +1203,10 @@ func _extract_heli(squad: Array, casualty: String) -> Dictionary:
 	_put(player, by_door + Vector3(-1.0, 0, 0))
 	var loaded := await _wait_until(func() -> bool:
 		var hold := c.heli.cargo_hold.entries().map(func(x: Dictionary) -> String: return String(x.id))
-		return Vehicle.ride_of(hurt) == c.heli and Vehicle.ride_of(loot) == c.heli and "m4a1" in hold, 15.0)
+		return Vehicle.ride_of(hurt) == c.heli and is_instance_valid(loot) and Vehicle.ride_of(loot) == c.heli and "m4a1" in hold, 15.0)
 	check(Vehicle.ride_of(hurt) == c.heli, "the carried casualty is loaded aboard (%s)" % _kit_text(hurt))
-	check(Vehicle.ride_of(loot) == c.heli and (left == null or Vehicle.ride_of(left) == null), "the dead hostile by the door is loaded; the one lying off in the point isn't")
+	check(is_instance_valid(loot) and Vehicle.ride_of(loot) == c.heli and (left == null or not is_instance_valid(left) or Vehicle.ride_of(left) == null),
+		"the dead hostile by the door is loaded; the one lying off in the point isn't")
 	check("m4a1" in c.heli.cargo_hold.entries().map(func(x: Dictionary) -> String: return String(x.id)), "the rifle set down in the point goes into the hold")
 	if not loaded:
 		return {"why": "the casualty, the body or the rifle wasn't loaded"}
