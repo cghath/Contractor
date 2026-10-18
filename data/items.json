@@ -703,6 +703,22 @@
 		{"id": "nvg_gen3", "name": "Gen 3 NVG Binocular", "type": "utility", "volume_l": 1.2, "mass_kg": 0.65, "tags": ["nvg", "head"],
 		 "stats": {"nvg_gen": 3, "restores": 0.9, "fov_deg": 50.0, "battery_h": 14.0, "_proposed": "restores, fov_deg and battery_h are Proposed (wave 7, S2)"},
 		 "desc": "Third-generation binocular night vision: the clearest, widest picture, both eyes.",
-		 "uses": ["Mount on your helmet (inventory), or press the NVG key (U) with a helmet on", "NVG key flips it down or up; lowered, it shows you the dark in green", "Gives back about 90% of what darkness takes from your sight", "Battery: about 14 hours lowered; flat, it shows nothing"]}
+		 "uses": ["Mount on your helmet (inventory), or press the NVG key (U) with a helmet on", "NVG key flips it down or up; lowered, it shows you the dark in green", "Gives back about 90% of what darkness takes from your sight", "Battery: about 14 hours lowered; flat, it shows nothing"]},
+		{"id": "grip_vertical", "name": "Vertical Foregrip", "type": "attachment", "volume_l": 0.2, "mass_kg": 0.12, "tags": ["grip"],
+		 "stats": {"short": "Grip", "mount": "underbarrel", "fits": ["rifle"], "recoil_mult": 0.8, "sway_mult": 0.85, "size_m": [0.03, 0.09, 0.04]},
+		 "desc": "A vertical foregrip for a railed rifle's handguard: a steadier hold on the gun.",
+		 "uses": ["Mount on a railed rifle from the inventory (right-click > Mount on <gun>)", "A fifth less recoil and a little less sway while aimed"]},
+		{"id": "light_weapon", "name": "Weapon Light", "type": "attachment", "volume_l": 0.15, "mass_kg": 0.15, "tags": ["light"],
+		 "stats": {"short": "Light", "mount": "side", "fits": ["rifle", "pistol"], "size_m": [0.03, 0.03, 0.12]},
+		 "desc": "A bright weapon-mounted flashlight for a rifle's or pistol's rail.",
+		 "uses": ["Mount on a rifle or pistol from the inventory (right-click > Mount on <gun>)", "L switches it on and off with the gun in hand (or right-click the gun > Switch on)", "Lights up what you aim at, but anyone it points at sees you much sooner"]},
+		{"id": "laser_visible", "name": "Visible Laser", "type": "attachment", "volume_l": 0.12, "mass_kg": 0.1, "tags": ["laser"],
+		 "stats": {"short": "Laser", "mount": "side", "beam": "visible", "fits": ["rifle", "pistol"], "size_m": [0.03, 0.03, 0.08]},
+		 "desc": "A red aiming laser for a rifle's or pistol's rail: a dot where the gun points.",
+		 "uses": ["Mount on a rifle or pistol from the inventory (right-click > Mount on <gun>)", "L switches it on and off with the gun in hand", "Shows where you point from the hip, but the beam gives you away"]},
+		{"id": "laser_ir", "name": "IR Laser Aiming Module", "type": "attachment", "volume_l": 0.25, "mass_kg": 0.2, "tags": ["laser"],
+		 "stats": {"short": "IR laser", "mount": "side", "beam": "ir", "fits": ["rifle"], "size_m": [0.04, 0.04, 0.1]},
+		 "desc": "An infrared aiming laser: its beam shows only through night vision.",
+		 "uses": ["Mount on a railed rifle from the inventory (right-click > Mount on <gun>)", "L switches it on and off with the gun in hand", "Invisible to the naked eye; night vision sees it"]}
 	]
 }

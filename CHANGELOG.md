@@ -62,6 +62,33 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 - No NVG model on the helmet (Captain's art side), no spare batteries or recharging, the NVG's
   mass isn't added to the helmet's, AI don't wear or use NVGs, IR illuminators and lasers
   later. A scope's picture isn't green through NVGs.
+### Modular weapon attachments: grips, lights and lasers (wave 7 S3; Captain: "Modular weapon attachments")
+
+#### Added
+- Four attachments in `data/items.json` (type `attachment`, `stats.mount`, `stats.fits` = the
+  weapon tags they fit; proposed prices in `data/prices.json`): Vertical Foregrip
+  (`grip_vertical`, underbarrel, railed rifles, $250: x0.8 recoil, x0.85 aimed sway), Weapon
+  Light (`light_weapon`, side, rifles and pistols, $350), Visible Laser (`laser_visible`, side,
+  rifles and pistols, $450), IR Laser Aiming Module (`laser_ir`, side, rifles, $1100).
+- `GunAttachments` (`scripts/combat/gun_attachments.gd`): the underbarrel and side mounts, next
+  to the optic (`Optics`) and the muzzle (`Suppressors`), which keep their modules. What's on a
+  gun lives in its item state (`state.underbarrel`, `state.side`, `state.side_on`), so it
+  travels with the gun (stowed, dropped, looted, saved) and replicates with the inventory.
+  `all_of(weapon, state)` gives every mount -> item id, optic and muzzle included. Host-side
+  inventory actions `mount_attachment`, `remove_attachment` (target = the mount) and
+  `toggle_attachment` (validated: the item is an attachment in your kit, the gun takes it);
+  in the inventory: right-click it > Mount on <gun>; right-click the gun > Switch on/off,
+  Remove. The mass and value of a gun include them.
+- The weapon-light key, L (`Controls.KEYS weapon_light`, proposed): the light or laser on the
+  gun in hand on or off. A light is a SpotLight3D along the aim, a visible laser a thin red beam
+  to what it hits (`scripts/combat/gun_light_rig.gd`, placeholder look, drawn on every peer from
+  the replicated state; no models on the gun yet). An IR laser draws only through night vision
+  (`ir_seen`, the hook for the NVG work; nothing sets it yet).
+- The AI spots a soldier with a light or visible laser on sooner (`Spotting.LIT` x0.4 with the
+  beam towards it, `LIT_SIDE` x0.75 otherwise; proposed).
+- Test suite `attachments` (in `tools/run_tests.sh` and CI): validation, the grip's kick and
+  sway, mass and value, stowing and drawing, save/load and replication, the light and lasers,
+  a suppressed shot, a 4x prism's zoom.
 
 ### Squad roles and the Vantage Group rival PMC, first slice (Captain, 2026-10-17)
 

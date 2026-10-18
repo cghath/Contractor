@@ -170,6 +170,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		var told := GunSight.zoom_step(body, 1 if event.is_action_pressed(&"zoom_in") else -1)
 		if told != "":
 			hud.flash(told)
+	elif event.is_action_pressed(&"weapon_light") and body.vitals.is_up():
+		# The light or laser on the gun in hand (GunAttachments; wave 7 S3): the host switches it.
+		body._server_inventory_action.rpc_id(1, "toggle_attachment", &"", -1, body.active_slot, &"")
 	elif event.is_action_pressed(&"pause"):
 		pause_menu.open()  # Escape: resume, return to base, main menu, quit
 	elif event.is_action_pressed(&"fire") and not captured:

@@ -38,7 +38,8 @@
 		"at4": 1800, "nlaw": 4000, "maaws": 3500, "smaw": 3000, "javelin_clu": 15000, "rpg7": 900,
 		"ffv551_round": 450, "ffv441_round": 350, "ffv502_round": 400, "smaw_hedp_round": 500, "smaw_ne_round": 600,
 		"javelin_missile": 12000, "pg7v_round": 300, "og7v_round": 250,
-		"exo_mech_heavy": 150000, "wg50_walker": 24000
+		"exo_mech_heavy": 150000, "wg50_walker": 24000,
+		"grip_vertical": 250, "light_weapon": 350, "laser_visible": 450, "laser_ir": 1100
 	},
 	"_launchers": "Wave 5 (V2) launchers and rounds, proposed: AT4 1800, NLAW 4000, rounds 200-600, Javelin missile 12000 (catalogue plan); the RPG-7 and its rounds are loot, sell-only. The Javelin is buyable until wave 6 gates it behind reputation.",
 	"_heavy_exo": "The HX-1 Assault Frame and its WG-50 (Captain's call, docs/near_future_hardware.md 2.3a, resolved 2026-10-17): priced for repair/salvage valuation (roughly 3x the LX-3 frame's cost, for the bigger chassis and its own weapon mount) but not_for_sale either way — it's issued, not bought, and certified onto a roster soldier (see roles.json / roster.gd hx1_certified) rather than equipped freely.",

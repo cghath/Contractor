@@ -52,6 +52,8 @@ const KEYS := {
 	# Flip the NVG on your helmet down or up (Nvg; wave 7, S2). N is the next objective, so U
 	# (proposed); with none mounted, it mounts the first NVG you carry.
 	&"nvg_toggle": [KEY_U],
+	# The light or laser on the gun in hand, on or off (GunAttachments; wave 7 S3). Proposed key.
+	&"weapon_light": [KEY_L],
 }
 ## Keys pressed with Shift held. An action without Shift still matches with it held, so
 ## PlayerInput checks these first.

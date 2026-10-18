@@ -129,7 +129,7 @@ func describe() -> String:
 	var amount := " x%d" % count if count > 1 else ""
 	var detail := ""
 	if state.has("rounds"):
-		var optic := Optics.label(item, state)  # what's on its rail (P0362)
+		var optic := GunAttachments.label_with_optic(item, state)  # what's on its rail (P0362), grip and light (S3)
 		detail = "  [%d rds%s]" % [int(state.rounds), ", " + optic if optic != "" else ""]
 	elif not state.get("molle", {}).is_empty():
 		detail = "  [%d attached]" % state.molle.size()  # a carrier keeps its pouches
