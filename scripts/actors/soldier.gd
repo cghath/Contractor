@@ -446,6 +446,7 @@ func _physics_process(delta: float) -> void:
 		return
 	if multiplayer.is_server():
 		_update_carried(delta)  # a player carrying or dragging someone: the host moves the casualty
+		_drain_nvg(delta)  # a lowered NVG's battery (wave 7, S2)
 	if not is_local():
 		return
 	if not vitals.is_up() and carried_by_pos != null:
@@ -1231,6 +1232,16 @@ func _server_inventory_action(action: String, container: StringName, index: int,
 				_client_message.rpc_id(owner_peer(), problem)
 		"remove_suppressor":
 			var problem := Suppressors.server_remove(inventory, slot, target)
+			if problem != "":
+				_client_message.rpc_id(owner_peer(), problem)
+		# NVGs (wave 7, S2): the NVG entry at `container`/`index` onto the worn helmet (the one
+		# it had goes into your containers), or the helmet's NVG off (into `target` if named).
+		"mount_nvg":
+			var problem := Nvg.server_mount(inventory, container, index)
+			if problem != "":
+				_client_message.rpc_id(owner_peer(), problem)
+		"remove_nvg":
+			var problem := Nvg.server_remove(inventory, target)
 			if problem != "":
 				_client_message.rpc_id(owner_peer(), problem)
 		# MOLLE: `target` (attach) and `slot` (detach, move, drop) name attach points of the
@@ -2844,3 +2855,57 @@ func _client_refused(text: String, id: StringName, state: Dictionary) -> void:
 		player_input.flash(text)
 	if _hud and is_instance_valid(_hud.inventory_screen):
 		_hud.inventory_screen.show_refusal(text, id, state)
+
+
+# --- NVGs (wave 7, S2) ------------------------------------------------------------------
+
+## Host: lowered seconds not yet charged to the NVG's battery (Nvg.DRAIN_STEP_S at a time).
+var _nvg_drain_s := 0.0
+
+
+## The NVG key: flips the helmet's NVG down or up; with none mounted, mounts the first one
+## carried and lowers it. The owner is told what happened, or why not.
+@rpc("any_peer", "call_local", "reliable")
+func _server_toggle_nvg() -> void:
+	if not _from_owner() or not vitals.is_up():
+		return
+	_client_message.rpc_id(owner_peer(), server_toggle_nvg())
+
+
+## Host only. What the NVG key does (see _server_toggle_nvg); returns the message for the owner.
+func server_toggle_nvg() -> String:
+	if inventory.slots.get(Nvg.HELMET, &"") == &"":
+		return "Put on a helmet first" if Nvg.first_carried(inventory).is_empty() else "Put on a helmet for the NVG first"
+	if Nvg.mounted_state(inventory).is_empty():
+		var at := Nvg.first_carried(inventory)
+		if at.is_empty():
+			return "No NVG on your helmet"
+		var problem := Nvg.server_mount(inventory, at[0], at[1], true)
+		if problem != "":
+			return problem
+		return "%s mounted and down" % Nvg.mounted(inventory).name + (" (battery flat)" if Nvg.seconds_left(inventory) <= 0.0 else "")
+	var down := not Nvg.is_lowered(self)
+	_nvg_flush()
+	Nvg.server_set_lowered(inventory, down)
+	if down and Nvg.seconds_left(inventory) <= 0.0:
+		return "NVG down: battery flat"
+	return "NVG down (%s)" % Nvg.label(inventory) if down else "NVG up"
+
+
+## Host: charges lowered time to the NVG's battery a step at a time (one commit each), at once
+## when it would run out sooner; tells the owner when it goes flat.
+func _drain_nvg(delta: float) -> void:
+	if not Nvg.is_lowered(self) or Nvg.seconds_left(inventory) <= 0.0:
+		_nvg_drain_s = 0.0
+		return
+	_nvg_drain_s += delta
+	if _nvg_drain_s >= Nvg.DRAIN_STEP_S or _nvg_drain_s >= Nvg.seconds_left(inventory):
+		if _nvg_flush() and multiplayer.has_multiplayer_peer():
+			_client_message.rpc_id(owner_peer(), "NVG battery flat")
+
+
+## Host: charges the lowered time gathered so far. True if that emptied the battery.
+func _nvg_flush() -> bool:
+	var spent := _nvg_drain_s
+	_nvg_drain_s = 0.0
+	return Nvg.server_drain(inventory, spent) if spent > 0.0 else false

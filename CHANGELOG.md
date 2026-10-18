@@ -11,6 +11,34 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### NVGs, first slice (wave 7, S2; Captain: "Day and night, weather, and NVGs")
+
+#### Added
+- Night vision goggles by generation (`data/items.json` `nvg_gen1`/`nvg_gen2`/`nvg_gen3`,
+  priced 3000/5500/9000 in `data/prices.json`): they mount on a worn helmet, and what's
+  mounted lives in the helmet's item state (`"nvg": {"id", "lowered", "battery_h"}`), so it
+  travels, saves and replicates with the helmet. Inventory: "Mount on <helmet>" on a carried
+  NVG, "Remove <NVG>" on the helmet.
+- The NVG key (`nvg_toggle`, U by default, rebindable; N is the next objective): flips the
+  NVG down or up (`Soldier._server_toggle_nvg`, host-side); with none mounted it mounts the
+  first one you carry and lowers it, and without a helmet it says to put one on.
+- `Nvg` (`scripts/combat/nvg.gd`): `restores(viewer)` (0..1, the share of the darkness
+  penalty to sight a lowered, powered NVG gives back; gen 1 0.6, gen 2 0.8, gen 3 0.9,
+  Proposed), `is_lowered`, `is_on`, `fov_of`, battery helpers, host mount/remove/lower/drain.
+  For day and night (S1) at integration: `dark *= 1.0 - Nvg.restores(viewer)` in spotting.
+- Battery: drains in real hours of lowered use (6/10/14 h by generation, Proposed), charged by
+  the host in 10 s steps; flat, the goggles stay down but show and restore nothing. Stowed, an
+  NVG keeps its charge.
+- `NvgView` (`scripts/combat/nvg_view.gd`): the wearer's own view through lowered, powered NVGs:
+  green, brightened, with grain and a vignette, inside the tube's field of view (40/45/50 deg
+  by generation, Proposed), the unaided eye's dim view around it.
+- Test suite `nvg` (`tests/nvg_test.gd`), in `tools/run_tests.sh` and CI.
+
+#### Not yet
+- No NVG model on the helmet (Captain's art side), no spare batteries or recharging, the NVG's
+  mass isn't added to the helmet's, AI don't wear or use NVGs, IR illuminators and lasers
+  later. A scope's picture isn't green through NVGs.
+
 ### Squad roles and the Vantage Group rival PMC, first slice (Captain, 2026-10-17)
 
 #### Added
