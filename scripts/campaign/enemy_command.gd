@@ -347,6 +347,16 @@ func refund_men(men: int) -> void:
 	reserves += maxi(men, 0)
 
 
+## Pay `men` for a later wave of a hunt approve() already let go (the second QRF wave of the
+## same launch): from the reserves within the spawn budget, nothing else asked (no ratio, no
+## operation slot, no record, no second order on the net). False with too little left.
+func reserve_men(men: int) -> bool:
+	if men <= 0 or available_cp() < men:
+		return false
+	_spend(men)
+	return true
+
+
 func _active_ops() -> int:
 	return operations.filter(func(o: Dictionary) -> bool:
 		return o.state in ["assembling", "attacking", "approved", "moving", "looking"]).size()
@@ -523,11 +533,16 @@ func _watch_command() -> void:
 
 # --- Decisions --------------------------------------------------------------------------------
 
-## EnemyResponse asks before a hunt (`kind` "qrf" or "hunters") toward `target`: true to go.
+## EnemyResponse asks before a hunt (`kind` "qrf" or "hunters") toward `target`: true to go,
+## `men` paid from the reserves and one operation recorded. Asked once per launch (a two-wave
+## QRF pays its second wave with reserve_men), and asked even when the reserves are short of a
+## team (`men` the team it wanted): the denial is recorded and a stale LKP still gets its probe.
 func approve(kind: String, target: Vector3, men: int) -> bool:
 	var threat := maxf(threat_cp(), 1.0)
 	var have := available_cp()
 	var why := "%.0f CP against %.1f (%.1f:1)" % [have, threat, have / threat]
+	if have < men:
+		why = "%d men wanted, %.0f to hand" % [men, have]
 	var ok := men > 0 and have >= men and have >= threat * applied_ratio(HUNT_RATIO) and _active_ops() < max_ops()
 	if not can_decide():
 		ok = false

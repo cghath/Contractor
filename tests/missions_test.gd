@@ -38,9 +38,6 @@ func _ready() -> void:
 		_finish()
 		return
 	player = level.players.get_node(^"1")
-	# This suite drives the response directly; independent strategic orders consume its
-	# spawn slots and reserves. Command decisions have their own audit_fixes coverage.
-	EnemyCommand.of(level).set_process(false)
 	player.set_physics_process(false)  # we drive it
 	await _frames(10)
 	await _test_deployment()
@@ -51,10 +48,18 @@ func _ready() -> void:
 	await _test_no_cuffs()
 	await _test_alert()
 	await _test_pressure()
+	await _test_command_qrf()
+	# These drive the response and the enemy's net by hand: EnemyCommand's own strategic orders
+	# (probes, counterattacks, guards, refills on its clock) would take their spawn slots and
+	# reserves, so it stands down around them. Everything else runs with it.
+	_command_on(false)
 	await _test_enemy_response()
 	await _test_radio_chatter()
+	_command_on(true)
 	await _test_field_radio()
+	_command_on(false)
 	await _test_hot_zone_ops()
+	_command_on(true)
 	await _test_hq_posts()
 	await _test_respawn_points()
 	_finish()
@@ -708,6 +713,56 @@ func _test_pressure() -> void:
 	await _frames(2)
 
 
+## End to end, EnemyCommand running on its own clock: a contact report in an engaged zone at
+## tier 2 launches the QRF; the commander approves it once (one operation for the whole launch,
+## however many waves the budget lets go), and the reserves pay exactly the men who spawned.
+func _test_command_qrf() -> void:
+	print("Enemy command: a QRF approved end to end")
+	var er := EnemyResponse.of(level)
+	var alert := Alert.of(level)
+	var pressure := Pressure.of(level)
+	var command := EnemyCommand.of(level)
+	check(command != null and command.is_processing(), "a hot zone has an enemy command, making its own decisions")
+	if er == null or alert == null or pressure == null or command == null or er.reinforcements == null:
+		return
+	_clear_waves()
+	await _frames(2)
+	_calm()
+	command.set_process(true)
+	command._tick = 0.0  # its next decision now, on its own clock
+	await _frames(2)
+	check(command.can_decide() and not command.consolidated and command._last_tick != INF, "the commander has decided at least once (%s)" % command.commander_state)
+	pressure.points = float(Pressure.TIERS[1])  # tier 2: a second wave if the budget has room
+	alert.zone_state = Alert.State.ALERTED  # on standby: the QRF goes at once
+	er._zone_was = Alert.State.ALERTED
+	er._turnout = false
+	er._qrf_due = INF
+	er._last_qrf = -INF
+	var lk := level.ground_point(player.global_position + Vector3(0, 0, -20))
+	var n := er.qrf_launches.size()
+	var before := command.reserves
+	alert._receive({"kind": &"contact", "pos": lk, "area": alert.area_of(lk), "by": ""})
+	var spent := before - command.reserves
+	var sent := er.qrf_launches.slice(n)
+	var spawned := 0
+	for l: Dictionary in sent:
+		spawned += (l.soldiers as Array).size()
+	var hunts := command.operations.filter(func(o: Dictionary) -> bool: return o.kind == "hunt:qrf")
+	check(not sent.is_empty() and spawned > 0 and hunts.size() == 1 and hunts[0].state == "approved",
+		"engaged: the commander approves the QRF, one operation for the launch (%d waves from %s, %d men; %s)"
+			% [sent.size(), sent.map(func(l: Dictionary) -> String: return l.from), spawned, hunts.map(func(o: Dictionary) -> String: return "%s: %s" % [o.state, o.why])])
+	check(is_equal_approx(spent, spawned), "the reserves pay exactly the men who spawned (%.0f spent, %d spawned)" % [spent, spawned])
+	command._tick = 0.0
+	await _frames(2)
+	hunts = command.operations.filter(func(o: Dictionary) -> bool: return o.kind == "hunt:qrf")
+	check(hunts.size() == 1, "and its next decision doesn't count the launch twice (%d QRF operations)" % hunts.size())
+	_clear_waves()
+	_calm()
+	er._last_qrf = -INF
+	er._zone_was = Alert.State.NORMAL
+	await _frames(2)
+
+
 ## Captain: patrols, checkpoints, the QRF from its bases, hunters at tier 3.
 func _test_enemy_response() -> void:
 	print("Enemy response")
@@ -1293,6 +1348,13 @@ func _calm() -> void:
 		command._contacts.clear()
 		command._noise.clear()
 		command._last_contact.clear()
+
+
+## EnemyCommand making its own decisions on its clock (true) or standing down (false).
+func _command_on(on: bool) -> void:
+	var command := EnemyCommand.of(level)
+	if command:
+		command.set_process(on)
 
 
 ## The reinforcement waves' soldiers gone (the alert test launched a QRF).
