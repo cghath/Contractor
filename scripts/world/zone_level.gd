@@ -123,6 +123,7 @@ func _ready() -> void:
 	add_child(ZoneCleanup.new())  # bodies and dropped loot go after ~6-7 min (blood on its own clock)
 	add_child(DynamicSim.new())  # far AI stops simulating until a player comes near (Captain, 2026-10-18)
 	add_child(SquadTrail.new())  # the trail the squad leaves, for enemy trackers (Captain, 2026-10-18)
+	add_child(Bombers.new())  # insurgent suicide bombers on foot (wave 6f)
 	add_child(IntelReveal.new())  # intel picked up gives away enemy sites on the map
 	if String(def.get("kind", "")) == "hot":
 		add_child(HotZoneOps.new())  # several contracts live, radio follow-ups, hazard pay

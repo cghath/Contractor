@@ -863,6 +863,27 @@ func _test_enemy_response() -> void:
 			trail.set_process(true)
 			looker.looking_until = -INF
 			er._set_route(looker.squad, er._living(looker.soldiers), looker.walk)
+	# Suicide bombers (wave 6f): no rifle, a heavy vest, straight at the squad; at TRIGGER_M he goes off.
+	var bombers := Bombers.of(level)
+	check(bombers != null, "the zone can send suicide bombers")
+	if bombers:
+		var far := bombers.server_send(level.ground_point(player.global_position + Vector3(40, 0, 0)))
+		check(far != null and far.inventory.slots.get(&"primary", &"") == &"" and far.inventory.slots.get(&"vest", &"") == &"plate_carrier_heavy",
+			"a bomber: no rifle, a bulky heavy vest (the tells)")
+		bombers.server_tick()
+		var squad_route: Array = (bombers.out[0].squad as Squad).patrol if not bombers.out.is_empty() else []
+		check(not squad_route.is_empty() and Vector2(squad_route[0].x - player.global_position.x, squad_route[0].z - player.global_position.z).length() < 1.0,
+			"he walks straight at the nearest of the squad")
+		var gone := bombers.detonated
+		far.global_position = player.global_position + Vector3(5, 0, 0)
+		bombers.server_tick()
+		check(bombers.detonated == gone + 1 and bombers.out.is_empty() and not far.vitals.is_up(), "within %d m he goes off" % int(Bombers.TRIGGER_M))
+		var shot := bombers.server_send(level.ground_point(player.global_position + Vector3(40, 0, 0)))
+		shot.vitals.server_damage(1000.0)
+		shot.global_position = player.global_position + Vector3(5, 0, 0)
+		bombers.server_tick()
+		check(bombers.detonated == gone + 1 and bombers.out.is_empty(), "shot down first, nothing goes off")
+		player.vitals.server_reset_health()
 	# The QRF.
 	_calm()
 	er._zone_was = Alert.State.NORMAL
