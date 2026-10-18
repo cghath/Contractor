@@ -937,7 +937,7 @@ func _unload(players: bool) -> void:
 	var out := PackedStringArray()
 	for s: Soldier in heli.occupants():
 		if s.is_ai() or not s.vitals.is_up() or players:
-			heli.server_exit(s)
+			heli.server_run_out(s)  # AI run out of the doors (Vehicle.server_run_out); the rest step out
 			if s.is_ai() and s.vitals.is_up() and s.squad_slot >= 0:
 				out.append(String(s.name))
 	var from := _commander()

@@ -525,6 +525,12 @@ This list covers what is built and in the game today (2026-10-12). Work still un
   same `Helicopter` flight model. Walk-in cabin, toggleable bay doors, folding boarding ramps, FFV
   door seats for players and AI gunners. The UH-60 stays in the game as world content (rescue
   wrecks). A bigger, higher-capacity second tier, the Razorback VTOL, has the same bay treatment.
+- UH-60M walk-in cabin, open floor plan: a 4-seat aft bench, 4 kneeling and 3 standing spots, and
+  2 riders per door sitting on the sill legs out who fire from it (AI take those first; with the
+  door shut they kneel behind it). Getting in from beside a door is a real move (door slides open,
+  step up with a hand on the grab handle, walk in, sit); AI getting out run out of the door.
+- Helicopter doors (UH-60, Petrel, Razorback) sit flush shut, pop out past the hull, slide back,
+  windows in each. The Razorback has 3 FFV door seats a side and an aft bay for two heavy exos.
 
 ## Exosuits
 

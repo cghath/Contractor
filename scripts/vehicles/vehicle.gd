@@ -185,6 +185,48 @@ const MAX_CARVES := 500
 ## Exits: how far out from the hull a soldier is put, and the space they need.
 const EXIT_GAP_M := 0.7
 const EXIT_GRACE_S := 0.6
+## Boarding (CharacterModel.BOARD; Captain, 2026-10-17: "that get anim is poor, it just floats
+## up"): someone getting into a walk-in bay's seat (a "bay" with "steps", the UH-60's cabin) from
+## within BOARD_FROM_M of its step steps up onto the sill with a hand on the grab handle by the
+## doorway, walks in to the seat at BOARD_WALK_MS and sits. Further off (put in by a mission, or
+## swapping seats) he's just seated. The host starts it (server_enter); every peer draws it from
+## the clip's clock (_board_pose).
+const BOARD_FROM_M := 5.0
+const BOARD_WALK_MS := 1.3
+## Where he stands at the foot of the step (m out from the sill, on the ground), where he stands
+## once up (m in from it), and how far in front of the seat he turns to sit down.
+const BOARD_OUT_M := 0.5
+const BOARD_IN_M := 0.35
+const BOARD_STAND_OFF_M := 0.3
+## The grab handle by the doorway, from the sill: in, up, and towards the front (m).
+const BOARD_HANDLE := Vector3(0.1, 1.2, 0.45)
+## An "edge" seat (Captain, 2026-10-17: the UH-60's door riders sit on the cabin floor facing
+## out, legs hanging off the edge): the hips this far up off the floor, the feet this far below it.
+const EDGE_HIP_UP := 0.07
+const EDGE_HANG_M := 0.5
+## A worn pack sits a rider off a seat's canvas back by its depth, but no further than this.
+const SEAT_PACK_MAX_M := 0.2
+var _door_guns := {}  # seat index -> DoorGun (seats with "door_gun")
+var _running_out := {}  # host: instance id -> [soldier, when he's out, the step's foot (vehicle frame)]
+## Captain, 2026-10-17: in an FFV seat with the doors shut a rider crouches behind the door,
+## facing out, and sits as it opens (VehicleBay.open_fraction): hips this high off the cabin
+## floor, this far back from the seat (an edge seat's: inboard of the sill), eye this high.
+const FFV_CROUCH_HIP := 0.5
+## Kneeling (Captain, 2026-10-17: "lefties ... left knee up, left foot on the ground, right knee in
+## the dirt; righties kneel right knee up, left knee in the dirt"): the hips this high off the
+## floor, the up foot this far ahead of them (its shin upright), the down foot this far behind
+## (the knee on the floor, the shin flat).
+const KNEEL_HIP := 0.5
+const KNEEL_UP_FOOT := 0.42
+const KNEEL_DOWN_FOOT := 0.45
+## Running out (Captain, 2026-10-17: AI "should run out instead of spawning out of the helis"):
+## up off the seat, a run to the door at RUN_OUT_MS, down off the sill, out at the step's foot.
+const RUN_OUT_MS := 3.0
+const RUN_OUT_SIT_S := 0.4
+const RUN_OUT_STEP_S := 0.45
+const FFV_CROUCH_BACK := 0.8  # an edge seat's: the hips this far in off the sill, the rifle inside the door
+const FFV_CROUCH_BACK_SEATED := 0.45  # a door seat's (the VTOLs'): this far in from it, turned to the door
+const FFV_CROUCH_EYE := 1.0
 ## Mounted guns: shots may arrive bunched up this much (network jitter) and still count.
 const GUN_BUNCH_S := 0.15
 ## A door gun's arc (door_arc_ok): how far outwards a shot must point (its dot with the side:
@@ -347,6 +389,12 @@ func setup(p_model: String, p_scheme := "", p_faction := &"player", id := "") ->
 		var eye := Vehicle.seat_eye(String(seat.get("stance", "sit")))
 		_seat_local.append(Transform3D(Basis(), VehicleSpecs.vec(seat.at) - Vector3(0, eye, 0)))
 		_seat_poses.append(_seated_pose_for(seat, eye))
+		if bool(seat.get("door_gun", false)):
+			var at := VehicleSpecs.vec(seat.get("gun_at", seat.at))
+			var gun := DoorGun.build(signf(at.x), Color(VehicleArt.SCHEMES.get(scheme, VehicleArt.SCHEMES["od"]).paint).darkened(0.3))
+			gun.position = at
+			add_child(gun)
+			_door_guns[_seat_poses.size() - 1] = gun
 	for i in (spec.get("points", []) as Array).size():
 		var p: Dictionary = spec.points[i]
 		add_child(VehicleActionPoint.new(self, String(p.kind), VehicleSpecs.vec(p.at), p.get("seats", []), -1, "Point%d" % i))
@@ -456,7 +504,14 @@ static func seat_eye(stance: String) -> float:
 
 
 static func seat_stance(stance: String) -> int:
-	return SoldierMovement.Stance.STAND_LOW if stance == "stand" else SoldierMovement.Stance.CROUCH_MID
+	match stance:
+		"stand":
+			return SoldierMovement.Stance.STAND_LOW
+		"upright":  # a standing spot in a cabin (Captain, 2026-10-17: "an actual standing pose")
+			return SoldierMovement.Stance.STAND_HIGH
+		"kneel":  # a spot on a cabin's open floor (the UH-60's: Captain, 2026-10-17)
+			return SoldierMovement.Stance.CROUCH_LOW
+	return SoldierMovement.Stance.CROUCH_MID
 
 
 ## The model's display name ("M-ATV").
@@ -575,15 +630,40 @@ func seat_eye_point(index: int) -> Vector3:
 ## (VehicleInteriors.FLOORS; an open seat's isn't drawn there: CharacterModel.SEAT_HEIGHT under
 ## the hips). Captain, 2026-10-14: the UH-60M's riders were posed standing in their seats.
 func _seated_pose_for(seat: Dictionary, eye: float) -> Dictionary:
-	if String(seat.get("stance", "sit")) == "stand":
+	if String(seat.get("stance", "sit")) in ["stand", "upright"]:
 		return {}
+	if String(seat.get("stance", "sit")) == "kneel":
+		## A kneeling spot on a cabin's floor: one knee up and one down (_kneel_feet, by hand).
+		var kdeck := VehicleSpecs.vec(seat.at).y - eye
+		kdeck = VehicleInteriors.floor_of(model) - kdeck if not is_nan(VehicleInteriors.floor_of(model)) else 0.0
+		return {"board": true, "kneel": true, "hip": kdeck + KNEEL_HIP, "hip_z": 0.0, "pitch": -0.08, "yaw": 0.0,
+			"floor": kdeck, "deck": kdeck}
 	var eye_y := VehicleSpecs.vec(seat.at).y
 	var origin_y := eye_y - eye
 	var floor_y := NAN if bool(seat.get("open", false)) else VehicleInteriors.floor_of(model)
 	var hip := VehicleInteriors.cushion_top(eye_y, floor_y) + CharacterModel.SEAT_HIP_UP - origin_y
 	var floor_rel := hip - CharacterModel.SEAT_HEIGHT if is_nan(floor_y) else floor_y - origin_y
+	## "edge": sitting on the cabin floor itself at a door, facing out ("face"), the legs over the
+	## sill and hanging (the feet EDGE_HANG_M under the floor, not on it).
+	if bool(seat.get("edge", false)) and not is_nan(floor_y):
+		hip = floor_y + EDGE_HIP_UP - origin_y
+		floor_rel = floor_y - EDGE_HANG_M - origin_y
 	var pose := CharacterModel.seated_pose(hip, floor_rel, StringName(seat.get("kind", "")) in [DRIVER, PILOT, GUNNER])
 	pose["ffv"] = String(seat.get("ffv", "")) != ""  # a fire-from-vehicle seat: the rifle in the hands, not between the knees
+	pose["deck"] = floor_rel if is_nan(floor_y) else floor_y - origin_y  # the cabin floor (an edge seat's feet hang under it)
+	pose["edge"] = bool(seat.get("edge", false))
+	## FFV: how far round from the seat's facing to face out of its door (the crouch behind it).
+	match String(seat.get("ffv", "")):
+		"left":
+			pose["out_turn"] = wrapf(PI / 2.0 - deg_to_rad(float(seat.get("face", 0.0))), -PI, PI)
+		"right":
+			pose["out_turn"] = wrapf(-PI / 2.0 - deg_to_rad(float(seat.get("face", 0.0))), -PI, PI)
+	## "back": a canvas back this far behind the seat's point (m): he sits back against it,
+	## nearly upright (CharacterModel.SEAT_BACKED_PITCH), his pack between (_place_occupants).
+	if seat.has("back"):
+		pose["back"] = float(seat.back)
+		pose["pitch"] = CharacterModel.SEAT_BACKED_PITCH
+		pose["hip_z"] = float(seat.back) - CharacterModel.SEAT_BACK_OUT
 	return pose
 
 
@@ -678,6 +758,7 @@ func server_enter(soldier: Node, index := -1) -> bool:
 	if k == PILOT and not s.is_ai():
 		return false  # aircraft are AI-flown only (Captain)
 	var other := Vehicle.ride_of(s)
+	var from_outside := other == null
 	if other and other != self:
 		other.server_exit(s)
 	elif other == self:
@@ -706,11 +787,267 @@ func server_enter(soldier: Node, index := -1) -> bool:
 		var people := PeopleLayer.find(s)
 		if people:
 			people.server_seat_in_vehicle(s, self, str(index))
+	if from_outside and not body:
+		_server_board(s, index)
 	_publish_state(true)
 	seats_changed.emit()
 	if not Person.is_person(s) and s.vitals.is_up() and s.faction == &"friendly":
 		_board_followers(s)
 	return true
+
+
+## Host: `s` just took seat `index` from outside: if it's a walk-in bay's seat and he's at its
+## step, play the boarding clip for every peer (BOARD_FROM_M).
+func _server_board(s: Soldier, index: int) -> void:
+	var step := _board_step(index)
+	if step < 0:
+		return
+	var st: Dictionary = spec.bay.steps[step]
+	var foot := global_transform * _board_foot(st)
+	var flat := Vector2(s.global_position.x - foot.x, s.global_position.z - foot.z)
+	if flat.length() > BOARD_FROM_M:
+		return
+	server_set_bay(true)  # he slides the cabin door open on his way up
+	var path := _board_path(st, index)
+	var walk := (path[1] as Vector3).distance_to(path[2]) / BOARD_WALK_MS
+	var total := CharacterModel.BOARD_STEP_S + walk + (0.0 if _seat_poses[index].is_empty() else CharacterModel.BOARD_SIT_S)
+	s.model.server_play(CharacterModel.BOARD, total)
+	var net := s.model.action_net.duplicate()
+	net["step"] = step
+	net["walk"] = walk
+	net["grip"] = CharacterModel.BOARD_STEP_S
+	s.model.action_net = net
+
+
+## The bay step seat `index` is boarded by: the one nearest the door point that lists it (or
+## nearest the seat), -1 with none.
+func _board_step(index: int) -> int:
+	var steps: Array = (spec.get("bay", {}) as Dictionary).get("steps", [])
+	if steps.is_empty() or not seat_kind(index) in [PASSENGER, GUNNER]:
+		return -1
+	var near := VehicleSpecs.vec(spec.seats[index].at)
+	for p: Dictionary in spec.get("points", []):
+		if String(p.get("kind", "")) == "door" and (p.get("seats", []) as Array).has(index):
+			near = VehicleSpecs.vec(p.at)
+			break
+	var best := -1
+	var best_d := INF
+	for k in steps.size():
+		var d := VehicleSpecs.vec(steps[k].from).distance_to(near)
+		if d < best_d:
+			best_d = d
+			best = k
+	return best
+
+
+## Where a boarder stands at the foot of bay step `st` (vehicle frame, on the ground).
+func _board_foot(st: Dictionary) -> Vector3:
+	var sill := VehicleSpecs.vec(st.from)
+	var ground := VehicleSpecs.vec(st.to)
+	var out := Vector3(ground.x - sill.x, 0, ground.z - sill.z).normalized()
+	return Vector3(sill.x, ground.y, sill.z) + out * BOARD_OUT_M
+
+
+## Boarding by step `st` into seat `index`, vehicle frame: [foot of the step, standing on the
+## sill, standing in front of the seat (on the floor), the way in (flat, unit)].
+func _board_path(st: Dictionary, index: int) -> Array:
+	var sill := VehicleSpecs.vec(st.from)
+	var foot := _board_foot(st)
+	var inward := Vector3(sill.x - foot.x, 0, sill.z - foot.z).normalized()
+	var up := sill + inward * BOARD_IN_M
+	var seat := _seat_at(index).origin
+	var face := Basis(Vector3.UP, deg_to_rad(float(spec.seats[index].get("face", 0.0)))) * Vector3.FORWARD
+	## A standing or kneeling spot: walk onto the spot itself (its origin is on the floor).
+	var stand_spot := _seat_poses[index].is_empty()
+	var front := seat if stand_spot else seat + face * BOARD_STAND_OFF_M
+	if not stand_spot:
+		front.y = seat_floor(index)
+	return [foot, up, front, inward]
+
+
+## Every peer: `s` boarding seat `index` (action_net BOARD): where his body goes (world) and the
+## pose to draw it in, {"origin", "pose", "eye"}, or {} if he isn't boarding (or it's done).
+## `seat_t`: the seat's world transform; `seat_yaw`: the way it faces (world yaw).
+func _board_pose(s: Soldier, index: int, seat_t: Transform3D, seat_yaw: float) -> Dictionary:
+	var net := s.model.action_net
+	if StringName(net.get("id", &"")) != CharacterModel.BOARD or not net.has("step") or not s.vitals.is_up():
+		return {}
+	var t := s.model.action_seconds()
+	var steps: Array = (spec.get("bay", {}) as Dictionary).get("steps", [])
+	var k := int(net.step)
+	if t < 0.0 or k < 0 or k >= steps.size():
+		return {}
+	var path := _board_path(steps[k], index)
+	var foot: Vector3 = global_transform * (path[0] as Vector3)
+	var up: Vector3 = global_transform * (path[1] as Vector3)
+	var front: Vector3 = global_transform * (path[2] as Vector3)
+	var local_in: Vector3 = path[3]
+	var inward: Vector3 = global_basis * local_in
+	var in_yaw := atan2(-inward.x, -inward.z)
+	var sill: Vector3 = global_transform * VehicleSpecs.vec(steps[k].from)
+	var step_s := CharacterModel.BOARD_STEP_S
+	var walk := float(net.get("walk", 0.0))
+	var sit_s := CharacterModel.BOARD_SIT_S
+	var stand_eye: float = SoldierMovement.STANCE_EYE[SoldierMovement.Stance.STAND_HIGH]
+	var pose := {"board": true, "hip": CharacterModel.LEG_LENGTH, "hip_z": 0.0, "pitch": 0.0, "yaw": 0.0}
+	## In through the left door (heading +x) the cabin's front is on his left: the left hand.
+	s.model.board_left = local_in.x > 0.0
+	s.model.board_grip = global_transform * (VehicleSpecs.vec(steps[k].from) 		+ Vector3(BOARD_HANDLE.x * signf(local_in.x), BOARD_HANDLE.y, -BOARD_HANDLE.z))
+	var origin: Vector3
+	var heading := in_yaw
+	var eye := stand_eye
+	if bool(net.get("out", false)):
+		return _run_out_pose(s, index, seat_t, seat_yaw, t, pose, path, sill)
+	if t < step_s:
+		## Up the step: the lead foot onto the sill, the push (leaning in, on the handle), the
+		## trailing foot up after it.
+		var u := t / step_s
+		origin = foot.lerp(up, smoothstep(0.25, 1.0, u))
+		var lead_at := sill + inward * 0.12
+		var lead := foot.lerp(lead_at, smoothstep(0.0, 0.35, u)) + Vector3.UP * 0.15 * sin(PI * clampf(u / 0.35, 0.0, 1.0))
+		var trail := foot.lerp(up, smoothstep(0.55, 0.95, u)) + Vector3.UP * 0.12 * sin(PI * clampf((u - 0.55) / 0.4, 0.0, 1.0))
+		pose["foot_r"] = _board_foot_at(lead, origin, inward)
+		pose["foot_l"] = _board_foot_at(trail, origin, inward)
+		pose["pitch"] = CharacterModel.BOARD_LEAN * smoothstep(0.15, 0.45, u) * (1.0 - smoothstep(0.65, 1.0, u))
+	elif t < step_s + walk:
+		## In to the seat, turning to sit as he gets there.
+		var u := (t - step_s) / maxf(walk, 0.01)
+		origin = up.lerp(front, u)
+		var stride := up.distance_to(front) * u / 0.55
+		var swing := 0.16 * sin(PI * stride)
+		pose["foot_l"] = Vector2(swing, 0.05 * maxf(sin(PI * stride), 0.0))
+		pose["foot_r"] = Vector2(-swing, 0.05 * maxf(-sin(PI * stride), 0.0))
+		heading = lerp_angle(in_yaw, seat_yaw, smoothstep(0.35, 1.0, u))
+	elif t < step_s + walk + sit_s and not _seat_poses[index].is_empty():
+		## Sitting down: drawn from the seat's own origin, from standing in front of it.
+		var u := (t - step_s - walk) / sit_s
+		origin = seat_t.origin
+		var seated: Dictionary = _seat_poses[index].duplicate()
+		seated["yaw"] = 0.0
+		var floor_rel := float(seated.floor)
+		pose["foot_l"] = Vector2(BOARD_STAND_OFF_M, floor_rel)
+		pose["foot_r"] = Vector2(BOARD_STAND_OFF_M, floor_rel)
+		pose["hip"] = floor_rel + CharacterModel.LEG_LENGTH
+		pose["hip_z"] = -BOARD_STAND_OFF_M
+		pose["sit"] = smoothstep(0.0, 1.0, u)
+		pose["into"] = seated
+		heading = seat_yaw
+		eye = lerpf(floor_rel + stand_eye, Vehicle.seat_eye("sit"), smoothstep(0.0, 1.0, u))
+	else:
+		return {}
+	pose["yaw"] = wrapf(heading - s.rotation.y, -PI, PI)
+	return {"origin": origin, "pose": pose, "eye": eye}
+
+
+## An FFV rider with the doors shut (FFV_CROUCH_*): crouched on the cabin floor behind the door,
+## facing out, drawn `open` (0..1, the doors' travel) of the way into his seated pose `seated`
+## (CharacterModel._boarding_bones' "into").
+static func _ffv_crouch(seated: Dictionary, open: float, lefty: bool) -> Dictionary:
+	var deck := float(seated.get("deck", seated.floor))
+	var back := FFV_CROUCH_BACK if bool(seated.get("edge", false)) else FFV_CROUCH_BACK_SEATED
+	## Kneeling, turned to face the door (an edge seat already does), easing round to the seat's
+	## way as he sits.
+	var pose := {"board": true, "hip": deck + KNEEL_HIP, "hip_z": back, "pitch": -0.12, "yaw": float(seated.yaw) + float(seated.get("out_turn", 0.0)),
+		"sit": smoothstep(0.0, 1.0, open), "into": seated}
+	_kneel_feet(pose, deck, back, lefty)
+	return pose
+
+
+## A kneeling pose's feet (`pose`'s "foot_l"/"foot_r", CharacterModel._boarding_bones): the
+## shooting side's knee up (its foot planted KNEEL_UP_FOOT ahead of the hips), the other knee on
+## the floor (its foot KNEEL_DOWN_FOOT behind). `deck`: the floor, `back`: how far the hips sit
+## back from the body's origin.
+static func _kneel_feet(pose: Dictionary, deck: float, back: float, lefty: bool) -> void:
+	var up := Vector2(-back + KNEEL_UP_FOOT, deck)
+	var down := Vector2(-back - KNEEL_DOWN_FOOT, deck + 0.04)
+	pose["foot_l"] = up if lefty else down
+	pose["foot_r"] = down if lefty else up
+
+
+## Every peer: `s` running out of seat `index` (action_net BOARD with "out"), `t` s in: up off
+## the seat, the run to the door turning to face out, down off the sill; held at the step's foot
+## until the host lets him out.
+func _run_out_pose(s: Soldier, index: int, seat_t: Transform3D, seat_yaw: float, t: float, pose: Dictionary, path: Array, sill: Vector3) -> Dictionary:
+	var foot: Vector3 = global_transform * (path[0] as Vector3)
+	var up: Vector3 = global_transform * (path[1] as Vector3)
+	var front: Vector3 = global_transform * (path[2] as Vector3)
+	var outward: Vector3 = -(global_basis * (path[3] as Vector3))
+	var out_yaw := atan2(-outward.x, -outward.z)
+	var stand_eye: float = SoldierMovement.STANCE_EYE[SoldierMovement.Stance.STAND_HIGH]
+	var sit_s := 0.0 if _seat_poses[index].is_empty() else RUN_OUT_SIT_S
+	var run := float(s.model.action_net.get("walk", 0.0))
+	var origin := foot
+	var heading := out_yaw
+	var eye := stand_eye
+	pose["foot_l"] = Vector2.ZERO
+	pose["foot_r"] = Vector2.ZERO
+	if t < sit_s:
+		var u := t / sit_s
+		origin = seat_t.origin
+		var seated: Dictionary = _seat_poses[index].duplicate()
+		seated["yaw"] = 0.0
+		var floor_rel := float(seated.floor)
+		pose["foot_l"] = Vector2(BOARD_STAND_OFF_M, floor_rel)
+		pose["foot_r"] = Vector2(BOARD_STAND_OFF_M, floor_rel)
+		pose["hip"] = floor_rel + CharacterModel.LEG_LENGTH
+		pose["hip_z"] = -BOARD_STAND_OFF_M
+		pose["sit"] = 1.0 - smoothstep(0.0, 1.0, u)
+		pose["into"] = seated
+		heading = seat_yaw
+		eye = lerpf(Vehicle.seat_eye("sit"), floor_rel + stand_eye, smoothstep(0.0, 1.0, u))
+	elif t < sit_s + run:
+		var u := (t - sit_s) / maxf(run, 0.01)
+		origin = front.lerp(up, u)
+		var stride := front.distance_to(up) * u / 0.8
+		var swing := 0.22 * sin(PI * stride)
+		pose["foot_l"] = Vector2(swing, 0.08 * maxf(sin(PI * stride), 0.0))
+		pose["foot_r"] = Vector2(-swing, 0.08 * maxf(-sin(PI * stride), 0.0))
+		pose["pitch"] = -0.18
+		heading = lerp_angle(seat_yaw, out_yaw, smoothstep(0.0, 0.35, u))
+	elif t < sit_s + run + RUN_OUT_STEP_S:
+		## Down off the sill: the lead foot to the ground, the body after it, the trailing foot last.
+		var u := (t - sit_s - run) / RUN_OUT_STEP_S
+		origin = up.lerp(foot, smoothstep(0.15, 0.85, u))
+		var lead := (sill + outward * 0.1).lerp(foot + outward * 0.25, smoothstep(0.0, 0.5, u)) + Vector3.UP * 0.12 * sin(PI * clampf(u / 0.5, 0.0, 1.0))
+		var trail := up.lerp(foot, smoothstep(0.45, 1.0, u)) + Vector3.UP * 0.1 * sin(PI * clampf((u - 0.45) / 0.55, 0.0, 1.0))
+		pose["foot_r"] = _board_foot_at(lead, origin, outward)
+		pose["foot_l"] = _board_foot_at(trail, origin, outward)
+		pose["pitch"] = -0.2
+	pose["yaw"] = wrapf(heading - s.rotation.y, -PI, PI)
+	return {"origin": origin, "pose": pose, "eye": eye}
+
+
+## Every peer: door gun `i`'s gunner `s` swings it to where he looks (his synced turn, less the
+## vehicle's; his look pitch), and his hands take its grips (`seated`'s "grip_l"/"grip_r").
+func _man_door_gun(i: int, s: Soldier, seated: Dictionary, veh_yaw: float) -> void:
+	var gun: DoorGun = _door_guns[i]
+	if not s.vitals.is_up():
+		gun.stow()
+		seated.erase("grip_l")
+		seated.erase("grip_r")
+		return
+	var out := PI / 2.0 if gun.side < 0.0 else -PI / 2.0
+	gun.aim(wrapf(s.rotation.y - veh_yaw - out, -PI, PI), s.model.look_pitch)
+	seated["grip_r"] = gun.grip(true)
+	seated["grip_l"] = gun.grip(false)
+
+
+## A foot at `at` (world) as CharacterModel's boarding foot: Vector2(forward of, up from) the
+## body's `origin`, forward being `inward`.
+static func _board_foot_at(at: Vector3, origin: Vector3, inward: Vector3) -> Vector2:
+	var d := at - origin
+	return Vector2(Vector2(d.x, d.z).dot(Vector2(inward.x, inward.z)), d.y)
+
+
+## How far a worn pack stands off a seated rider's back (m, at most SEAT_PACK_MAX_M), cached per
+## pack (GearRig.pack_depth sizes its model).
+static func _pack_off(s: Soldier) -> float:
+	var pack := String(s.inventory.slots.get(&"backpack", &"")) + "|" + String(s.inventory.slots.get(ExoFrame.SLOT, &""))
+	var cached: Array = s.get_meta(&"seat_pack", ["", 0.0])
+	if cached[0] != pack:
+		cached = [pack, minf(GearRig.pack_depth(s.inventory), SEAT_PACK_MAX_M)]
+		s.set_meta(&"seat_pack", cached)
+	return float(cached[1])
 
 
 ## Captain, 2026-10-15 (v0.4.11: HVTs and hostages wouldn't get into AAVs or M-ATVs): the people
@@ -767,28 +1104,58 @@ func _dismount_followers(leader: Soldier) -> void:
 
 func _first_free_passenger() -> int:
 	for i in _seat_nodes.size():
-		if occupant(i) == null and seat_kind(i) == PASSENGER:
+		if occupant(i) == null and seat_kind(i) == PASSENGER and not exo_seat(i):
+			return i
+	return -1
+
+
+## Whether seat `index` is a heavy exo's standing spot (seat "exo": the Razorback's aft bay,
+## Captain 2026-10-17: room for two heavy exos standing or kneeling). Nobody else is put there
+## by default; an HX-1 pilot rides only there (_first_free_exo).
+func exo_seat(index: int) -> bool:
+	return index >= 0 and index < (spec.get("seats", []) as Array).size() and bool(spec.seats[index].get("exo", false))
+
+
+## The first free heavy-exo spot, or -1.
+func _first_free_exo() -> int:
+	for i in _seat_nodes.size():
+		if occupant(i) == null and exo_seat(i):
+			return i
+	return -1
+
+
+## The first free fire-from-vehicle passenger seat (seat "ffv"), or -1.
+func _first_free_ffv() -> int:
+	for i in _seat_nodes.size():
+		if occupant(i) == null and seat_kind(i) == PASSENGER and String(spec.seats[i].get("ffv", "")) != "":
 			return i
 	return -1
 
 
 func _first_free_for(s: Soldier) -> int:
+	## Captain, 2026-10-17: AI fill a helicopter's fire-from-vehicle door seats (seat "ffv") first,
+	## so the doors are manned before anyone sits back in the cabin.
+	if s.is_ai() and _first_free_ffv() >= 0:
+		return _first_free_ffv()
 	var order: Array[StringName] = [PASSENGER, GUNNER, DRIVER, PILOT]
 	for k in order:
 		for i in _seat_nodes.size():
-			if occupant(i) == null and seat_kind(i) == k and (k != PILOT or s.is_ai()):
+			if occupant(i) == null and seat_kind(i) == k and (k != PILOT or s.is_ai()) and not exo_seat(i):
 				return i
 	return -1
 
 
 ## Host: take `soldier` out of the vehicle to a safe free spot beside it (by their seat's
 ## door first, then round the vehicle).
-func server_exit(soldier: Node) -> void:
+func server_exit(soldier: Node, at: Variant = null) -> void:
 	var s := soldier as Soldier
 	var index := seat_of(s)
 	if not multiplayer.is_server() or index < 0:
 		return
-	var spot := exit_spot(index, s)
+	_running_out.erase(s.get_instance_id())
+	var spot: Vector3 = at if at is Vector3 else exit_spot(index, s)
+	if StringName(s.model.action_net.get("id", &"")) == CharacterModel.BOARD:
+		s.model.action_net = {}  # out before he'd sat down
 	_seat_nodes[index] = null
 	_bodies.erase(s.get_instance_id())
 	_release(s)
@@ -805,6 +1172,50 @@ func server_exit(soldier: Node) -> void:
 	seats_changed.emit()
 	if not Person.is_person(s) and s.vitals.is_up() and s.faction == &"friendly":
 		_dismount_followers(s)
+
+
+## Host: AI `s` gets out by running out (RUN_OUT_*): from a walk-in bay's seat on the ground,
+## he plays the boarding move the other way (up, to the door, down off the sill) and is out at
+## the step's foot when it ends (_step_run_outs). Anyone else, anywhere else: server_exit.
+func server_run_out(s: Soldier) -> void:
+	var index := seat_of(s)
+	if index < 0 or not multiplayer.is_server():
+		return
+	var step := _board_step(index)
+	var flying: bool = has_method("is_airborne") and call("is_airborne")
+	if not s.is_ai() or not s.vitals.is_up() or step < 0 or wrecked or flying or is_instance_valid(s.carried_by):
+		server_exit(s)
+		return
+	if _running_out.has(s.get_instance_id()):
+		return
+	var path := _board_path(spec.bay.steps[step], index)
+	var run := (path[1] as Vector3).distance_to(path[2]) / RUN_OUT_MS
+	var total := (0.0 if _seat_poses[index].is_empty() else RUN_OUT_SIT_S) + run + RUN_OUT_STEP_S
+	server_set_bay(true)
+	s.model.server_play(CharacterModel.BOARD, total)
+	var net := s.model.action_net.duplicate()
+	net["step"] = step
+	net["walk"] = run
+	net["out"] = true
+	s.model.action_net = net
+	_running_out[s.get_instance_id()] = [s, Soldier._now() + total, path[0]]
+
+
+## Whether anyone is still running out.
+func running_out() -> bool:
+	return not _running_out.is_empty()
+
+
+## Host: the runners whose run is over (or cut short) get out at the step's foot.
+func _step_run_outs() -> void:
+	for id: int in _running_out.keys():
+		var e: Array = _running_out[id]
+		var s: Soldier = e[0] if is_instance_valid(e[0]) else null
+		if s == null or seat_of(s) < 0:
+			_running_out.erase(id)
+		elif Soldier._now() >= float(e[1]) or wrecked or not s.vitals.is_up():
+			_running_out.erase(id)
+			server_exit(s, global_transform * (e[2] as Vector3) + Vector3.UP * 0.05)
 
 
 ## Host: move `soldier` to seat `index` of this vehicle (they must be in it already).
@@ -1064,7 +1475,8 @@ func _place_occupants() -> void:
 		## left; a bench facing aft or outboard). Riders face it; the drawn body does even while
 		## a player looks round (the seat pose turns it back by the difference).
 		var face := deg_to_rad(float(seat_def.get("face", 0.0)))
-		s.global_position = t.origin
+		var boarding := _board_pose(s, i, t, veh_yaw + face)
+		s.global_position = t.origin if boarding.is_empty() else boarding.origin
 		s.velocity = Vector3.ZERO
 		if s.collision_layer != 0:
 			s.collision_layer = 0
@@ -1077,7 +1489,7 @@ func _place_occupants() -> void:
 		if s.is_multiplayer_authority():
 			# This peer drives the body: it faces the way it looks, turning with the vehicle.
 			var rel := face
-			if s.has_meta(&"seat_veh_yaw") and not s.is_ai():
+			if s.has_meta(&"seat_veh_yaw") and (not s.is_ai() or _door_guns.has(i)):
 				rel = wrapf(s.rotation.y - float(s.get_meta(&"seat_veh_yaw")), -PI, PI)
 				if StringName(seat_def.kind) != GUNNER:
 					rel = clampf(rel, -2.2, 2.2)
@@ -1090,12 +1502,30 @@ func _place_occupants() -> void:
 				s.movement.stance = stance
 				s.movement.mounted = false
 			if s.vitals.is_up():
-				s.head.position.y = SoldierMovement.STANCE_EYE[stance]
+				s.head.position.y = SoldierMovement.STANCE_EYE[stance] if boarding.is_empty() else float(boarding.eye)
+		if not boarding.is_empty():
+			s.seat_pose = boarding.pose
+			continue
 		var seated: Dictionary = _seat_poses[i] if i < _seat_poses.size() else {}
 		if not seated.is_empty():
 			# Every peer, from the synced turn; the gun's seat turns with its gunner (and the gun).
 			seated["yaw"] = 0.0 if i == _gun_seat else wrapf(veh_yaw + face - s.rotation.y, -PI, PI)
+			if seated.has("back"):
+				seated["hip_z"] = float(seated.back) - CharacterModel.SEAT_BACK_OUT - _pack_off(s)
+			if bool(seated.get("kneel", false)):
+				_kneel_feet(seated, float(seated.deck), 0.0, s.model.left_handed)
+			if _door_guns.has(i):
+				_man_door_gun(i, s, seated, veh_yaw)
+			if bool(seated.get("ffv", false)) and bay and s.vitals.is_up() and bay.open_fraction() < 1.0:
+				var crouch := _ffv_crouch(seated, bay.open_fraction(), s.model.left_handed)
+				s.seat_pose = crouch
+				if s.is_multiplayer_authority():
+					s.head.position.y = lerpf(float(seated.deck) + FFV_CROUCH_EYE, Vehicle.seat_eye("sit"), float(crouch.sit))
+				continue
 		s.seat_pose = seated
+	for i: int in _door_guns:
+		if occupant(i) == null or not occupant(i).vitals.is_up():
+			(_door_guns[i] as DoorGun).stow()
 	for id: int in _seen.keys():
 		if not now_seen.has(id):
 			var gone: Variant = _seen.get(id)
@@ -1109,6 +1539,8 @@ func _place_occupants() -> void:
 func _physics_process(delta: float) -> void:
 	if multiplayer.is_server():
 		_server_step(delta)
+		if not _running_out.is_empty():
+			_step_run_outs()
 	else:
 		_client_follow()
 		_client_turret(delta)

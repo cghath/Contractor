@@ -258,7 +258,7 @@ func server_order_dismount(from: Soldier, names: PackedStringArray) -> String:
 		_boarding.erase(s.get_instance_id())
 		var v := Vehicle.ride_of(s)
 		if v and s.is_ai():
-			v.server_exit(s)
+			v.server_run_out(s)  # out of a walk-in bay at a run (Vehicle.server_run_out)
 			picked.append(String(s.name))
 			out += 1
 	if out > 0:

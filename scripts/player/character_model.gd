@@ -282,7 +282,7 @@ const SEAT_HIP_BACK := 0.05
 ## hips this high above the floor where the floor isn't known (an open bed seat),
 const SEAT_HEIGHT := 0.5
 ## the feet this far forward of the hips and SEAT_SOLE_UP above the floor,
-const SEAT_FOOT := 0.38
+const SEAT_FOOT := 0.45  # Captain, 2026-10-17 (his photo): thighs level, shins straight down to the feet
 const SEAT_SOLE_UP := 0.01
 ## the knees turned out this far (radians, each side) so the rifle stands between them,
 const SEAT_KNEE_SPLAY := 0.14
@@ -295,6 +295,27 @@ const SEAT_HEAD_DROOP := 0.6
 ## thighs riding, forward on the wheel or stick at a station.
 const SEAT_LAP := Vector3(0.13, 0.1, -0.3)
 const SEAT_CONTROLS := Vector3(0.2, 0.3, -0.42)
+## A troop seat with a canvas back (vehicles.json "back"; Captain, 2026-10-17: riders sitting
+## naturally on the seats, packs on): sitting back against it, nearly upright, the hip joint
+## SEAT_BACK_OUT in front of the canvas (the carrier's back on it; a worn pack sits him forward
+## by its depth: Vehicle._place_occupants).
+const SEAT_BACKED_PITCH := -0.07
+const SEAT_BACK_OUT := 0.17
+
+## Boarding (Captain, 2026-10-17: "that get anim is poor, it just floats up"): action_net BOARD,
+## played by Vehicle (_board_pose) on every peer from the clip's clock. Walk to the door, then
+## BOARD_STEP_S stepping up onto the sill, a hand on the grab handle by the doorway; walk in to
+## the seat, turning to sit (Vehicle times it by the distance), and BOARD_SIT_S sitting down.
+const BOARD := &"board"
+const BOARD_STEP_S := 0.75
+const BOARD_SIT_S := 0.6
+## Stepping up, the upper body leans this far forward (radians, at the push).
+const BOARD_LEAN := -0.35
+## A standing body's hips sit this much under the straight leg (so a raised foot still reaches).
+const BOARD_HIP_SAG := 0.03
+## Where the grab handle is (world), and which hand takes it: set by Vehicle while boarding.
+var board_grip := Vector3.ZERO
+var board_left := false
 
 ## Colour scheme from VoxelArt.VARIANTS. Set before the node enters the tree.
 @export var variant := "multicam"
@@ -528,6 +549,8 @@ static func pose_bones(p: Dictionary, is_downed: bool) -> Dictionary:
 		var rest := rest_bones()
 		rest["root"] = Transform3D(Basis(Vector3.RIGHT, -PI / 2), Vector3(0, DOWNED_LIFT, 0))
 		return rest
+	if p.get("board", false):
+		return _boarding_bones(p)
 	if p.get("seated", false):
 		return _seated_bones(p)
 	var hip: float = p.get("hip", HIP.y)
@@ -594,6 +617,53 @@ static func _seated_bones(p: Dictionary) -> Dictionary:
 		"knee_l": _knee(leg.y),
 		"knee_r": _knee(leg.y),
 	}
+
+
+## pose_bones for a boarding pose (Vehicle._board_pose): standing on two feet placed anywhere
+## ("foot_l" and "foot_r": Vector2(forward of, and up from, the body's origin) of each sole),
+## the hips "hip" up (no higher than both legs reach), leaning on "pitch", turned "yaw", and
+## "sit" of the way into the seated pose "into" (both from the same origin).
+static func _boarding_bones(p: Dictionary) -> Dictionary:
+	var yaw: float = p.get("yaw", 0.0)
+	var feet: Array[Vector2] = [p.get("foot_l", Vector2.ZERO), p.get("foot_r", Vector2.ZERO)]
+	var hip: float = p.get("hip", LEG_LENGTH)
+	var hip_z: float = p.get("hip_z", 0.0)
+	for f in feet:
+		var reach := f.x + hip_z
+		hip = minf(hip, f.y + sqrt(maxf(LEG_LENGTH * LEG_LENGTH - reach * reach, 0.0)) - BOARD_HIP_SAG)
+	var root := Transform3D(Basis(Vector3.UP, yaw), Vector3.ZERO)
+	var torso_basis := Basis(Vector3.RIGHT, float(p.get("pitch", 0.0)))
+	var torso := Transform3D(torso_basis, Vector3(0, hip, hip_z))
+	var head_basis := Basis(Vector3.RIGHT, -_upper_body_pitch(root.basis * torso_basis, yaw))
+	var left := _leg_angles(maxf(hip - feet[0].y, 0.05), feet[0].x + hip_z)
+	var right := _leg_angles(maxf(hip - feet[1].y, 0.05), feet[1].x + hip_z)
+	var out := {
+		"root": root,
+		"torso": torso,
+		"head": torso * Transform3D(head_basis, HEAD_PIVOT),
+		"pelvis": Transform3D(Basis(), Vector3(0, hip, hip_z)),
+		"leg_l": Transform3D(Basis(Vector3.RIGHT, left.x), Vector3(-HIP.x, hip, hip_z)),
+		"leg_r": Transform3D(Basis(Vector3.RIGHT, right.x), Vector3(HIP.x, hip, hip_z)),
+		"knee_l": _knee(left.y),
+		"knee_r": _knee(right.y),
+	}
+	var sit: float = p.get("sit", 0.0)
+	if sit > 0.0 and p.has("into"):
+		var seated := pose_bones(p.into, false)  # a seat, or a kneeling spot (another of these)
+		for key: String in out:
+			out[key] = (out[key] as Transform3D).interpolate_with(seated[key], sit)
+	return out
+
+
+## Being placed by a vehicle's boarding clip (Vehicle._board_pose): drawn from its pose as is,
+## not eased, the legs where it puts them.
+func is_boarding() -> bool:
+	return bool(pose.get("board", false))
+
+
+## Seconds into the action playing now, or -1 with none.
+func action_seconds() -> float:
+	return _action_t if _action_active() else -1.0
 
 
 ## Whether the body is drawn seated (in a vehicle's seat).
@@ -1139,7 +1209,7 @@ func _process(frame_delta: float) -> void:
 	var limp := downed and not casualty and ragdolled()  # the physics moves it: no easing
 	## Seated: no easing either. The seat turns the drawn body against the body's own turn
 	## (a rider looking round), and eased the two would swing it about the seat.
-	var seated := is_seated() and not casualty
+	var seated := (is_seated() or is_boarding()) and not casualty
 	var blend := 1.0 if limp or seated else minf(delta * (ACTION_EASE if acting else POSE_EASE), 1.0)
 	if downed != _was_downed:
 		_was_downed = downed
@@ -1683,6 +1753,8 @@ func _held_goals() -> Array:
 ## Seated with nothing in the hands: on the thighs, or forward on the controls at a station
 ## (SEAT_LAP, SEAT_CONTROLS).
 func _seat_hands() -> Array:
+	if pose.has("grip_r") and pose.has("grip_l"):  # a door gunner on his gun's spade grips (DoorGun)
+		return [["seat", torso.to_local(pose.grip_r)], ["seat", torso.to_local(pose.grip_l)]]
 	var at: Vector3 = SEAT_CONTROLS if pose.get("station", false) else SEAT_LAP
 	var hips := Vector3(0, float(pose.get("hip", SEAT_HEIGHT)), float(pose.get("hip_z", SEAT_HIP_BACK)))
 	var root: Transform3D = _shown.root
@@ -1715,6 +1787,10 @@ func _action_goals(held: Array) -> Array:
 				return [["stow", to], ["work", at - spread]]
 		TREAT:
 			return _treat_goals(StringName(action_net.get("tech", WORK)), at, t, s)
+		BOARD:
+			if t < float(action_net.get("grip", 0.0)) and board_grip != Vector3.ZERO:
+				var grip := ["grip", torso.to_local(board_grip)]
+				return [held[0], grip] if board_left else [grip, held[1]]
 	return []
 
 

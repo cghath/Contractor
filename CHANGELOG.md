@@ -11,6 +11,43 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### UH-60 walk-in cabin, helicopter doors, FFV riders, boarding and running out (Captain, 2026-10-17)
+
+#### Changed
+- The UH-60M's cabin is a walk-in bay (`data/vehicles.json` "uh60" "bay": floor, walls, sliding
+  doors, a step at each door; `VehicleArt`/`VehicleInteriors` hull and cabin rebuilt wider and
+  taller), an open floor plan: only the 4-seat aft bench has seats; 4 kneeling spots (seat stance
+  "kneel") and 3 standing spots on the floor, and 2 fire-from-vehicle riders per door sitting on
+  the sill facing out, legs over the edge (seat "edge"; 19 seats: 2 pilots, 2 door gunners, 15
+  passengers).
+- Helicopter sliding doors (UH-60, Petrel, Razorback; `VehicleBay` door "roll_deg"/"pop"/"windows"):
+  shut, each lies flush on its hull's skin (tilted to the flank's lean); opening, it pops out 1.5 cm
+  past the hull, then slides back along its rail; each has windows after its airframe's design (the
+  UH-60's two, the VTOLs' cabin window row carried across).
+- FFV riders with the doors shut kneel behind the door facing out and move into their seat (the
+  UH-60's: onto the sill) as it opens (`Vehicle._ffv_crouch`, `VehicleBay.open_fraction`).
+- Kneeling (`Vehicle._kneel_feet`): the shooting side's knee up and its foot planted, the other knee
+  on the floor (a right-hander's right knee up, a left-hander's left).
+- AI take the FFV door seats first (`Vehicle._first_free_ffv`, also through `Helicopter.server_enter`).
+- The Razorback: 3 FFV door seats a side (was 2), and its aft row of seats cleared into an exo bay
+  with two standing spots (seat "exo", `Vehicle.exo_seat`/`_first_free_exo`; ~3 m headroom for the
+  HX-1's ~2.3 m). Nobody else is put there; letting an HX-1 pilot ride there is the heavy-exo
+  branch's to wire (its `server_enter` refuses suited pilots today).
+- Riders on a seat with a canvas back (vehicles.json seat "back") sit back against it, nearly
+  upright (`CharacterModel.SEAT_BACKED_PITCH`), their pack between them and the canvas
+  (`Vehicle._pack_off`, `GearRig.pack_depth`).
+- AI getting out of a walk-in bay on the ground run out (`Vehicle.server_run_out`, used by
+  `HeliCall._unload` and `VehicleLayer.server_order_dismount`): up off the seat, a run to the door,
+  down off the sill, out at the step's foot, instead of appearing beside the hull.
+
+#### Fixed
+- "That get anim is poor, it just floats up": getting into a bay seat from within
+  `Vehicle.BOARD_FROM_M` of its door plays `CharacterModel.BOARD` for every peer. The door slides
+  open, he steps up onto the sill (lead foot, push with a lean, trailing foot) with a hand on the
+  grab handle by the doorway, walks in to his seat turning to face it, and sits down
+  (`Vehicle._server_board`/`_board_pose`, `CharacterModel._boarding_bones`). Put in from far off
+  (a mission's seating) or swapping seats, he's just seated as before.
+
 ### Floating site-box lootboxes, scope PIP black flash (Captain, 2026-10-16 playtest of v0.4.26)
 
 #### Fixed

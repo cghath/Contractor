@@ -152,6 +152,16 @@ static func plate_rest_position(slot: StringName) -> Vector3:
 	return CharacterModel.TORSO_PIVOT + armor_transform(slot, null).origin
 
 
+## How far a worn pack (and an exo's spine pack under it) stands off the carrier's back (m): a
+## rider sits that much further off a seat's canvas back (Vehicle._pack_off).
+static func pack_depth(inventory: Inventory) -> float:
+	var depth := EXO_SPINE_DEPTH if inventory.slots.get(ExoFrame.SLOT, &"") != &"" else 0.0
+	var pack: StringName = inventory.slots.get(&"backpack", &"")
+	if pack != &"" and ItemDB.has_item(pack):
+		depth += VoxelArt.size_m(VoxelArt.model_for(ItemDB.get_item(pack))).z
+	return depth
+
+
 func armor_rids() -> Array[RID]:
 	var rids: Array[RID] = []
 	for piece: VoxelArmor in _armor.values():

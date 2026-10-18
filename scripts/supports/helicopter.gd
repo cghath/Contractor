@@ -562,6 +562,9 @@ func _lift_off_if_landed() -> void:
 
 ## The pilot seats are the helicopter's own crew (simulated): nobody takes them.
 func server_enter(soldier: Node, index := -1) -> bool:
+	var s := soldier as Soldier
+	if index < 0 and s and s.is_ai() and s.vitals.is_up():
+		index = _first_free_ffv()  # AI man the door seats first (Vehicle._first_free_for)
 	if index < 0:
 		index = _first_free_passenger()
 	if seat_kind(index) == Vehicle.PILOT:
@@ -571,13 +574,13 @@ func server_enter(soldier: Node, index := -1) -> bool:
 
 ## Nobody conscious gets out in the air (they'd be put on the ground below); the dead and
 ## a support's own unloading on the ground go as Vehicle does.
-func server_exit(soldier: Node) -> void:
+func server_exit(soldier: Node, at: Variant = null) -> void:
 	var s := soldier as Soldier
 	if s and s.vitals.is_up() and is_airborne() and height_agl() > 2.0 and not wrecked and not forced_exits:
 		if not s.is_ai():
 			_tell(s, "Not while we're flying")
 		return
-	super.server_exit(soldier)
+	super.server_exit(soldier, at)
 
 
 ## Bodies ahead only matter on the ground (a parked one being pushed); in the air there's nothing.
