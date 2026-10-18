@@ -1,20 +1,27 @@
 {
 	"_note": "PLACEHOLDER: replace names, wants and fears with your own lore. Used from Phase 4.",
+	"_tiers": "Wave 6a (2026-10-18): the five decided tiers (mission_brainstorm.md). pay_mult: what that faction pays at that tier (Proposed; docs/wave6_groundwork.md). Hostile offers no work.",
 	"reputation_tiers": [
-		{"id": "hostile", "min": -100},
-		{"id": "wary", "min": -30},
-		{"id": "neutral", "min": 0},
-		{"id": "trusted", "min": 30},
-		{"id": "allied", "min": 70}
+		{"id": "hostile", "name": "Hostile", "min": -100, "pay_mult": 0.9, "no_work": true},
+		{"id": "distrusted", "name": "Distrusted", "min": -30, "pay_mult": 0.9},
+		{"id": "neutral", "name": "Neutral", "min": 0, "pay_mult": 1.0},
+		{"id": "trusted", "name": "Trusted", "min": 30, "pay_mult": 1.15},
+		{"id": "allied", "name": "Allied", "min": 70, "pay_mult": 1.3}
 	],
+	"_rules": "Wave 6a, all Proposed: ripple (a share of any rep change goes to the faction's allies, the opposite to its enemies), decay (rep drifts toward neutral by decay_per_day once decay_grace_days pass without a job; allied_grace_days for an Allied faction), and side lockout (taking a faction's contract locks you out of its enemies' work for lockout_days, counted again from the debrief).",
+	"reputation_rules": {"ripple_ally": 0.25, "ripple_enemy": 0.25, "decay_per_day": 1, "decay_grace_days": 7, "allied_grace_days": 14, "lockout_days": 3},
 	"factions": [
 		{"id": "meridian", "name": "Meridian Logistics", "role": "employer",
-		 "wants": "Secure supply routes and recover lost cargo.", "fears": "Losing contracts to cheaper rivals.", "start_rep": 10},
+		 "wants": "Secure supply routes and recover lost cargo.", "fears": "Losing contracts to cheaper rivals.", "start_rep": 10,
+		 "allies": [], "enemies": ["black_ridge", "vantage_group"]},
 		{"id": "black_ridge", "name": "Black Ridge Militia", "role": "hostile", "nation": "insurgent",
-		 "wants": "Control the inland roads and tax every convoy.", "fears": "Outside contractors with air support.", "start_rep": -60},
+		 "wants": "Control the inland roads and tax every convoy.", "fears": "Outside contractors with air support.", "start_rep": -60,
+		 "allies": [], "enemies": ["meridian"]},
 		{"id": "salvage_union", "name": "Coastal Salvage Union", "role": "neutral",
-		 "wants": "First claim on every wreck.", "fears": "Being caught between the other two.", "start_rep": 0},
+		 "wants": "First claim on every wreck.", "fears": "Being caught between the other two.", "start_rep": 0,
+		 "allies": [], "enemies": []},
 		{"id": "vantage_group", "name": "Vantage Group", "role": "hostile", "nation": "pmc",
-		 "wants": "Undercut Meridian's contracts and hold the ground it's paid to take.", "fears": "A client who hires real competition instead of a militia.", "start_rep": -40}
+		 "wants": "Undercut Meridian's contracts and hold the ground it's paid to take.", "fears": "A client who hires real competition instead of a militia.", "start_rep": -40,
+		 "allies": [], "enemies": ["meridian"]}
 	]
 }

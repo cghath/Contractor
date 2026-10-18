@@ -86,6 +86,8 @@ const MENU := {
 				{"key": "4", "label": "Give me ammo", "cmd": "give_ammo"},
 				{"key": "5", "label": "Drop packs here", "cmd": "drop_packs"},
 				{"key": "6", "label": "Pick packs up", "cmd": "pick_packs"},
+				{"key": "7", "label": "Climb into the HX-1", "cmd": "exo_in"},
+				{"key": "8", "label": "Climb out of the suit", "cmd": "exo_out"},
 			]},
 			{"key": "7", "label": "Casualties", "items": [
 				{"key": "1", "label": "Treat that casualty", "cmd": "treat", "squadmate": true},

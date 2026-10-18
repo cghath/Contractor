@@ -13,6 +13,7 @@ const CONVOY := "convoy"
 const DEFEND := "defend"
 const RESCUE := "rescue"
 const RECON := "recon"
+const ESCORT := "escort"
 ## How far inside the zone's edge a route or an approach may reach (m).
 const EDGE_KEEP_M := 140.0
 
@@ -42,6 +43,8 @@ static func build(pick: RandomNumberGenerator, def: Dictionary, zone_id: String,
 			out.objectives = _defend(pick, def, module, half, knobs)
 		RESCUE:
 			out.objectives = _rescue(pick, def, module, half, knobs, target)
+		ESCORT:
+			out.objectives = _escort(pick, module, half, knobs, layout)
 		RECON:
 			var made := _recon(pick, def, options, half, knobs)
 			out.objectives = made.objectives
@@ -166,6 +169,46 @@ static func _rescue(pick: RandomNumberGenerator, def: Dictionary, module: Dictio
 			"text": "Find the downed %s crew (%d), treat or carry the wounded, and get at least %d of them to extraction" % ["Black Hawk", count, need]},
 		{"kind": Objectives.RESCUE_CREW, "site": "", "optional": true, "bonus_share": float(knobs.get("all_bonus_share", 0.15)), "params": all,
 			"text": "Bonus: bring out the whole crew"},
+	]
+
+
+# --- Client escort -----------------------------------------------------------------------------
+
+## A personal security detail (Captain, 2026-10-17: new mission types, real-world inspired; the
+## contractor's bread and butter): one friendly client waits at the module; the squad meets them
+## and gets them to extraction (a RESCUE_CREW of one, "need" 1, no wreck). An ambush team of
+## "ambush_men" sits "ambush_off_m" off the line from the client to the nearest extraction,
+## halfway; waves come after the client (MissionScenario aims them at the client) from
+## "first_wave_s". Bonus ("unhurt"): the client out without a wound.
+static func _escort(pick: RandomNumberGenerator, module: Dictionary, half: float, knobs: Dictionary, layout: Dictionary) -> Array:
+	var site := Vector2(float((module.pos as Array)[0]), float((module.pos as Array)[1]))
+	var exit := Vector2.ZERO
+	var best := INF
+	for e: Array in layout.get("extraction", []):
+		var p := Vector2(float(e[0]), float(e[1]))
+		if p.distance_to(site) < best:
+			best = p.distance_to(site)
+			exit = p
+	var along := exit - site
+	var side := Vector2(-along.y, along.x).normalized() * (1.0 if pick.randf() < 0.5 else -1.0)
+	var ambush := site + along * 0.5 + side * float(knobs.get("ambush_off_m", 35.0))
+	ambush = ambush.clamp(Vector2(-half + EDGE_KEEP_M, -half + EDGE_KEEP_M), Vector2(half - EDGE_KEEP_M, half - EDGE_KEEP_M))
+	var men: Array = knobs.get("ambush_men", [3, 5])
+	var who := Names.mission_person(pick, "client", "US", Names.MALE)  # (people bodies are male for now)
+	var wave: Array = knobs.get("first_wave_s", [240, 360])
+	var params := {"scenario": ESCORT, "pos": _v3(site), "crew": [{"hvt": "client_%d" % (pick.randi() % 100000), "name": who, "wound": "none"}],
+		"need": 1, "yaw": snappedf(pick.randf() * TAU, 0.01), "wreck": false, "label": "Client",
+		"ambush": _v3(ambush), "ambush_men": pick.randi_range(int(men[0]), int(men[1])),
+		"first_wave_s": snappedf(pick.randf_range(float(wave[0]), float(wave[1])), 15.0), "gap_s": float(knobs.get("gap_s", 180.0)),
+		"approach_m": float(knobs.get("approach_m", 240.0))}
+	var unhurt := params.duplicate(true)
+	unhurt["bonus_only"] = true
+	unhurt["unhurt"] = true
+	return [
+		{"kind": Objectives.RESCUE_CREW, "site": "", "params": params,
+			"text": "Meet the client, %s, at the %s and get them to extraction alive" % [who, MissionRegistry.module_name(String(module.type))]},
+		{"kind": Objectives.RESCUE_CREW, "site": "", "optional": true, "bonus_share": float(knobs.get("unhurt_bonus_share", 0.15)), "params": unhurt,
+			"text": "Bonus: the client out without a scratch"},
 	]
 
 

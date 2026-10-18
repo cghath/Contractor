@@ -47,6 +47,8 @@ const HEARD_KEEP_S := 4.0
 const CLUSTER_M := 10.0
 ## Tactic orders by command string (command()): "<name>" acts on the point under the
 ## crosshair ("suppress:known" suppresses the densest known cluster instead).
+## "Climb into the HX-1" looks for a parked suit this far from each unit (m).
+const EXO_FIND_M := 80.0
 const TACTIC_COMMANDS: Array[String] = ["suppress", "bound", "garrison", "clear", "clear_town", "take_cover", "fall_back", "climb", "flank", "assault"]
 
 ## Spawn positions in the leader's space (x right, +z behind), per formation (the squad's
@@ -690,7 +692,9 @@ func order_assault(from: Soldier, point: Vector3, names := PackedStringArray()) 
 ##  you magazines. launcher_out: shoulder launchers and look for targets for them.
 ##  treat:<name>: the selected (a medic first) treats that casualty. ccp: bring casualties to
 ##  `point`; ccp_me: to me; ccp_off: stop. drop_packs: packs off where they stand (lighter,
-##  faster); pick_packs: each goes back for his own.
+##  faster); pick_packs: each goes back for his own. exo_in: each selected walks to the nearest
+##  free HX-1 standing or lying within EXO_FIND_M (one each) and climbs in (ExoMech: certified
+##  only, on a campaign); exo_out: those piloting one climb out.
 func order_command(from: Soldier, cmd: String, point: Vector3, names := PackedStringArray()) -> String:
 	var parts := cmd.split(":", true, 1)
 	var arg := parts[1] if parts.size() > 1 else ""
@@ -750,6 +754,13 @@ func order_command(from: Soldier, cmd: String, point: Vector3, names := PackedSt
 			for ai: SquadAI in going:
 				ai.give_tactic({"kind": &"pick_pack"})
 			return "" if not going.is_empty() else "Nobody selected dropped a pack"
+		"exo_in":
+			return order_exo_in(from, names)
+		"exo_out":
+			var piloting := _able(names).filter(func(ai: SquadAI) -> bool: return ExoMech.exit_problem(ai.body) == "")
+			for ai: SquadAI in piloting:
+				ExoMech.server_exit(ai.body)
+			return "" if not piloting.is_empty() else "Nobody selected is in a suit"
 		"ccp":
 			ccp = point
 			hold_casualties = false
@@ -767,6 +778,37 @@ func order_command(from: Soldier, cmd: String, point: Vector3, names := PackedSt
 					ai._think_cd = 0.0  # carriers put them down now, not at their next think
 			return ""
 	return "?"
+
+
+## "Climb into the HX-1" (Captain, 2026-10-17/18: AI pilots for the heavy exo): each selected
+## unit that could climb into one (ExoMech.enter_problem, distance aside: certified on a
+## campaign, hands free, not in a suit or vehicle) takes the nearest free HX-1 parked within
+## EXO_FIND_M, one suit each, walks to it and climbs in (SquadAI "exo_in").
+func order_exo_in(from: Soldier, names: PackedStringArray) -> String:
+	leader = from
+	var suits: Array[WorldItem] = []
+	for node in get_tree().get_nodes_in_group(WorldItem.GROUP):
+		var w := node as WorldItem
+		if w and not w.is_queued_for_deletion() and ExoMech.is_mech(ItemDB.get_item(w.item_id)):
+			suits.append(w)
+	var why := "No HX-1 within %d m" % int(EXO_FIND_M)
+	var sent := 0
+	for ai: SquadAI in _able(names):
+		var best: WorldItem = null
+		for w in suits:
+			var d := ExoMech.parked_point(w).distance_to(ai.body.global_position)
+			if d <= EXO_FIND_M and (best == null or d < ExoMech.parked_point(best).distance_to(ai.body.global_position)):
+				best = w
+		if best == null:
+			continue
+		var problem := ExoMech.enter_problem(ai.body, best, false)
+		if problem != "":
+			why = "%s: %s" % [ai.body.display_name(), problem]
+			continue
+		suits.erase(best)
+		ai.give_tactic({"kind": &"exo_in", "uid": best.uid})
+		sent += 1
+	return "" if sent > 0 else why
 
 
 ## "Give me ammo": the nearest selected unit carrying magazines of `from`'s weapon (one not

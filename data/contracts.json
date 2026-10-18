@@ -62,6 +62,12 @@
 		 "modules": ["outpost", "checkpoint", "village", "compound", "qrf_base", "comms", "hq"], "base_pay": 36000, "days": 1, "enemy_count": [4, 8], "enemy_quality": [0.3, 0.65],
 		 "threat_pool": ["sniper", "ied", "qrf"],
 		 "scenario_knobs": {"sites": [3, 4], "observe_m": 75, "dwell_s": 8, "unseen_bonus_share": 0.25},
+		 "objectives": []},
+		{"type": "psd_escort", "name": "Client escort", "scenario": "escort", "own_waves": true,
+		 "brief": "Personal security detail. A client (an engineer, an aid official or a journalist) is waiting at a site in the zone. Meet them and get them to extraction alive: they follow the squad once met. Word has got out: expect an ambush set on the way to the extraction and more fighters coming after the client as you go. Bonus pay if the client comes out without a scratch.",
+		 "modules": ["village", "town", "compound"], "base_pay": 56000, "days": 1, "enemy_count": [6, 12], "enemy_quality": [0.35, 0.7],
+		 "threat_pool": ["sniper", "qrf", "ied"],
+		 "scenario_knobs": {"first_wave_s": [240, 360], "gap_s": 180, "approach_m": 240, "ambush_men": [3, 5], "ambush_off_m": 35, "unhurt_bonus_share": 0.15},
 		 "objectives": []}
 	],
 

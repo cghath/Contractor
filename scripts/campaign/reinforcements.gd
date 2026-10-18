@@ -298,6 +298,28 @@ func _route(squad: Squad, level: Node, from: Vector3, target := Vector3.INF) -> 
 	squad.patrol = route
 
 
+## Host: `wave` waits at `point` (a push's rally point, EnemyResponse) instead of heading in;
+## its retargeting stops until server_release.
+func server_hold_at(wave: Dictionary, point: Vector3) -> void:
+	wave["rally"] = point
+	var squad := wave.squad as Squad
+	if is_instance_valid(squad):
+		var route: Array[Vector3] = [_on_ground(point)]
+		squad.patrol = route
+
+
+## Host: a wave held at a rally point goes in (to where it would have been sent now).
+func server_release(wave: Dictionary) -> void:
+	if not wave.has("rally"):
+		return
+	var at: Vector3 = wave.rally
+	wave.erase("rally")
+	var level := MapNodes.level_of(self)
+	var squad := wave.squad as Squad
+	if level and is_instance_valid(squad):
+		_route(squad, level, at, wave.get("target", Vector3.INF))
+
+
 func _retarget_waves() -> void:
 	var level := MapNodes.level_of(self)
 	if level == null:
@@ -308,6 +330,8 @@ func _retarget_waves() -> void:
 		var target: Vector3 = wave.get("target", Vector3.INF)
 		if target.is_finite():
 			continue  # an objective's wave keeps going for it
+		if wave.has("rally"):
+			continue  # waiting at a rally point for the rest of a push (EnemyResponse, server_release)
 		if t - float(wave.get("sent_at", t)) > hunt_s:
 			continue  # done hunting: holds round the last spot it was sent to
 		var living: Array = wave.soldiers.filter(func(s: Variant) -> bool:

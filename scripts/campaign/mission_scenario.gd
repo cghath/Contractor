@@ -464,12 +464,20 @@ func _hold_tick(run: Dictionary, o: Dictionary, dt: float) -> void:
 
 # --- Downed crew rescue ------------------------------------------------------------------------
 
-## Host: the wreck (the UH-60 model, a wreck) and its crew, some of them hurt.
+## Host: the wreck (the UH-60 model, a wreck) and its crew, some of them hurt. A client escort
+## ("wreck": false) has no wreck, its one person labelled "Client", and its ambush team sent to
+## lie in wait off the route out ("ambush", "ambush_men").
 func _rescue_spawn(run: Dictionary, o: Dictionary) -> void:
 	var p: Dictionary = o.params
 	var site := _ground(_p3(p.pos))
 	var layer := level.get_node_or_null(^"Vehicles") as VehicleLayer if level else null
-	if layer:
+	if p.has("ambush"):
+		var r := _reinforcements()
+		var at := _ground(_p3(p.ambush))
+		if r:
+			run["ambush"] = r.server_send(at, 0, int(p.get("ambush_men", 4)), at)
+			print("[mission] escort ambush: %d at (%.0f, %.0f)" % [(run.ambush as Array).size(), at.x, at.z])
+	if layer and bool(p.get("wreck", true)):
 		var wreck := layer.server_spawn(WRECK_MODEL, Transform3D(Basis(Vector3.UP, float(p.get("yaw", 0.0))), site), "", &"friendly", "", {"wrecked": true})
 		if wreck:
 			wreck.set_meta(&"no_save", true)
@@ -483,7 +491,7 @@ func _rescue_spawn(run: Dictionary, o: Dictionary) -> void:
 		var a := TAU * float(i) / float(maxi(crew.size(), 1)) + float(p.get("yaw", 0.0))
 		var at := _ground(site + Vector3(cos(a), 0.0, sin(a)) * CREW_RING_M)
 		var s := people.server_spawn_person({"name": ("Person_" + String(c.hvt)).validate_node_name(), "kind": "hvt", "side": "friendly",
-			"label": "Crew (%s)" % String(c.name), "pos": at, "hvt_id": String(c.hvt)})
+			"label": "%s (%s)" % [String(p.get("label", "Crew")), String(c.name)], "pos": at, "hvt_id": String(c.hvt)})
 		if s == null:
 			continue
 		match String(c.get("wound", "none")):
@@ -500,9 +508,26 @@ func _rescue_tick(run: Dictionary, o: Dictionary, dt: float) -> void:
 	var p: Dictionary = o.params
 	run.t += dt
 	var pos := _p3(p.pos)
+	var escort := String(p.get("scenario", "")) == ScenarioGen.ESCORT
+	if escort:
+		var client: Soldier = (run.crew as Array)[0] if not (run.crew as Array).is_empty() and is_instance_valid(run.crew[0]) else null
+		if client:
+			pos = client.global_position  # the waves come after the client, wherever the squad has taken him
+			if client.vitals.injury() > 0.0:
+				_fail_unhurt(run)
 	while float(run.t) >= float(p.first_wave_s) + float(p.gap_s) * int(run.wave):
 		_send_wave(pos, int(run.wave), 3, float(p.get("yaw", 0.0)) + 0.7, float(p.approach_m))
 		run.wave += 1
+
+
+## A client escort's "out without a scratch" bonus fails the moment the client is hurt.
+func _fail_unhurt(run: Dictionary) -> void:
+	if bool(run.get("hurt", false)):
+		return
+	run["hurt"] = true
+	for o: Dictionary in Contracts.objectives.for_contract(String(run.cid)):
+		if o.kind == Objectives.RESCUE_CREW and bool((o.params as Dictionary).get("unhurt", false)) and o.state == Objectives.ACTIVE:
+			Contracts.objectives.server_set_state(String(o.oid), Objectives.FAILED, "the client was hurt")
 
 
 # --- Recon -------------------------------------------------------------------------------------

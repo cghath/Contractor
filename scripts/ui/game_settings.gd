@@ -25,6 +25,7 @@ const FPS_CAPS := [
 ]
 const ANTIALIASING := [
 	["off", "Off"], ["fxaa", "FXAA (cheap)"], ["msaa2", "MSAA 2x"], ["msaa4", "MSAA 4x"], ["msaa8", "MSAA 8x"],
+	["taa", "TAA (steadier far off)"], ["msaa4_taa", "MSAA 4x + TAA (sharpest far off)"],
 ]
 const SHADOWS := [
 	["off", "Off"], ["low", "Low"], ["medium", "Medium"], ["high", "High"],
@@ -32,12 +33,12 @@ const SHADOWS := [
 ## Shadow quality: the sun's shadow map size, how far its shadows reach (m), and soft edges.
 const SHADOW_LEVELS := {
 	"low": {"atlas": 2048, "reach_m": 120.0, "soft": RenderingServer.SHADOW_QUALITY_HARD},
-	"medium": {"atlas": 4096, "reach_m": 250.0, "soft": RenderingServer.SHADOW_QUALITY_SOFT_LOW},
-	"high": {"atlas": 8192, "reach_m": 400.0, "soft": RenderingServer.SHADOW_QUALITY_SOFT_MEDIUM},
+	"medium": {"atlas": 4096, "reach_m": 320.0, "soft": RenderingServer.SHADOW_QUALITY_SOFT_LOW},
+	"high": {"atlas": 8192, "reach_m": 500.0, "soft": RenderingServer.SHADOW_QUALITY_SOFT_MEDIUM},
 }
 const DEFAULTS := {
 	"video": {"window_mode": "windowed", "resolution": "1600x900", "vsync": true, "fps_cap": 0,
-		"render_scale": 1.0, "antialiasing": "fxaa", "shadows": "medium", "hfov": 90.0, "ui_scale": 1.0, "head_bob": true},
+		"render_scale": 1.0, "antialiasing": "msaa4_taa", "shadows": "medium", "hfov": 90.0, "ui_scale": 1.0, "head_bob": true},
 	# infil_music: Captain, 2026-10-14, temporary (InfilMusic: Ride of the Valkyries on helicopter insertions).
 	"audio": {"master": 0.8, "effects": 1.0, "voice": 1.0, "music": 0.8, "mute_unfocused": false, "infil_music": true},
 	"controls": {"mouse_sensitivity": 1.0, "aim_sensitivity": 0.75, "invert_y": false},
@@ -45,7 +46,7 @@ const DEFAULTS := {
 }
 ## Ranges for the sliders: [min, max, step].
 const RANGES := {
-	"render_scale": [0.5, 1.0, 0.05], "hfov": [70.0, 120.0, 1.0], "ui_scale": [0.75, 2.0, 0.05],
+	"render_scale": [0.5, 2.0, 0.05], "hfov": [70.0, 120.0, 1.0], "ui_scale": [0.75, 2.0, 0.05],
 	"master": [0.0, 1.0, 0.01], "effects": [0.0, 1.0, 0.01], "voice": [0.0, 1.0, 0.01], "music": [0.0, 1.0, 0.01],
 	"mouse_sensitivity": [0.2, 3.0, 0.05], "aim_sensitivity": [0.2, 1.5, 0.05],
 }
@@ -215,7 +216,8 @@ static func apply_video() -> void:
 	root.scaling_3d_scale = scale
 	var aa := String(get_value("video", "antialiasing"))
 	root.screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA if aa == "fxaa" else Viewport.SCREEN_SPACE_AA_DISABLED
-	root.msaa_3d = {"msaa2": Viewport.MSAA_2X, "msaa4": Viewport.MSAA_4X, "msaa8": Viewport.MSAA_8X}.get(aa, Viewport.MSAA_DISABLED)
+	root.msaa_3d = {"msaa2": Viewport.MSAA_2X, "msaa4": Viewport.MSAA_4X, "msaa4_taa": Viewport.MSAA_4X, "msaa8": Viewport.MSAA_8X}.get(aa, Viewport.MSAA_DISABLED)
+	root.use_taa = aa.ends_with("taa")  # Captain, 2026-10-18: enemies at 300 m (a few pixels tall) shimmered and broke up
 	apply_ui_scale()
 	if not root.size_changed.is_connected(apply_ui_scale):
 		root.size_changed.connect(apply_ui_scale)  # the auto scale follows the window size

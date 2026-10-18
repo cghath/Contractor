@@ -88,6 +88,18 @@ const COPSE_ROCKS := [1, 3]
 ## Woods' edge belt (Proposed): a thicket every WOOD_BELT_M round a wood's ragged edge, just
 ## inside it, so a wood's edge hides like a copse's.
 const WOOD_BELT_M := 3.5
+## Scrub belts out in the open (_scrub_belts; Proposed): per km2, length [min, max] (m), a bush
+## every BELT_STEP_M along it on alternate sides of the line, BELT_ROW_M off it, BELT_SIZE
+## [min, max] wide, a gentle bend (radians over its length), one BELT_GAP_M gap; at most
+## BELT_CAP of their own.
+const BELTS_PER_KM2 := 8.0
+const BELT_LEN_M := [50.0, 150.0]
+const BELT_STEP_M := 1.8
+const BELT_ROW_M := 0.9
+const BELT_SIZE := [1.6, 2.6]
+const BELT_BEND := 0.6
+const BELT_GAP_M := 8.0
+const BELT_CAP := 6000
 ## Captain, 2026-10-17: "wooded areas on maps are too small, too compacted per se. they need to
 ## sprawl a bit more". Woods are WOOD_SPRAWL times the preset's "wood_radius_m"; full density out
 ## to WOOD_CORE of the radius, thinning to WOOD_EDGE_DENSITY at the ragged edge (straggling
@@ -116,7 +128,8 @@ const FAR_GROUP_M := 24.0
 ## 7: denser copses with a thicket skirt and rocks, woods' edge belt (Captain, 2026-10-14).
 ## 8: ruins and wrecks off the roads, and the VALUABLE placement kind (Captain, 2026-10-16).
 ## 9: sprawling woods (WOOD_SPRAWL, thinning edges, outlier copses) (Captain, 2026-10-17).
-const LAYOUT_VERSION := 9
+## 10: scrub belts out in the open (_scrub_belts) (Captain, 2026-10-18).
+const LAYOUT_VERSION := 10
 ## Zones kept in memory (layouts), the newest of them also keep their built cell meshes, and
 ## files kept in the disk cache.
 const CACHE_ZONES := 4
@@ -484,6 +497,43 @@ func _lay_out_trees(area_km2: float) -> void:
 	_tree_limit = _cap_trees
 	_hedgerows(rng, _how_many(rng, float(_spec.get("hedgerows_per_km2", 0.0)) * area_km2))
 	_road_lines(rng, float(_spec.get("road_trees", 0.0)))
+	_scrub_belts(rng, _how_many(rng, float(_spec.get("belts_per_km2", BELTS_PER_KM2)) * area_km2))
+
+
+## Scrub belts (Captain, 2026-10-18: "we need to not have so many 300m sightlines"; the
+## tests/sightline_probe.gd baseline: 38% of eye-level 300 m lines clear over the campaign zones):
+## a staggered double row of thickets BELT_LEN_M [min, max] long, a bush every BELT_STEP_M,
+## curving gently, with one BELT_GAP_M gap to walk through, out in the open (scaled by
+## _open_weight, so a salt pan's middle stays open). Thickets are visual only (no collision, no
+## nav cost) and hide people (foliage_between), so they break up long lines for players and AI
+## alike. "belts_per_km2" per preset (BELTS_PER_KM2 without), on their own BELT_CAP on top of
+## the thicket cap, so the woods' and copses' skirts keep theirs.
+func _scrub_belts(rng: RandomNumberGenerator, count: int) -> void:
+	if count <= 0:
+		return
+	var cap := _cap_thickets
+	_cap_thickets = counts[Kind.THICKET] + BELT_CAP
+	var inner := _half - EDGE_KEEP_M
+	for n in count:
+		var at := Vector2(rng.randf_range(-inner, inner), rng.randf_range(-inner, inner))
+		if rng.randf() > _open_weight(at.x, at.y):
+			continue
+		var heading := rng.randf() * TAU
+		var bend := rng.randf_range(-1.0, 1.0) * BELT_BEND
+		var length := rng.randf_range(float(BELT_LEN_M[0]), float(BELT_LEN_M[1]))
+		var gap_at := rng.randf_range(0.2, 0.8) * length
+		var t := 0.0
+		var row := 0
+		while t < length:
+			var dir := Vector2.from_angle(heading + bend * (t / length - 0.5))
+			var side := Vector2(-dir.y, dir.x)
+			var off := (BELT_ROW_M if row % 2 == 0 else -BELT_ROW_M) + rng.randf_range(-0.4, 0.4)
+			var p := at + dir * (t - length * 0.5) + side * off
+			if absf(t - gap_at) > BELT_GAP_M * 0.5 and _open_weight(p.x, p.y) > 0.0:  # (never into a pan's open middle)
+				_try_bush(rng, p.x, p.y, Kind.THICKET, float(BELT_SIZE[0]), float(BELT_SIZE[1]))
+			row += 1
+			t += BELT_STEP_M * rng.randf_range(0.8, 1.15)
+	_cap_thickets = cap
 
 
 ## `v` rounded up or down by chance (so 0.4 a km2 still gives one now and then).

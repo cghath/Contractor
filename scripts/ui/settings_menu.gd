@@ -129,7 +129,7 @@ func _video_tab() -> Control:
 	page.add_child(_choice("Window size (windowed)", "video", "resolution", sizes))
 	page.add_child(_toggle("VSync (no tearing; caps the frame rate at the screen's)", "video", "vsync"))
 	page.add_child(_choice("Frame rate cap", "video", "fps_cap", GameSettings.FPS_CAPS))
-	page.add_child(_slider("Render scale (lower is faster, softer)", "video", "render_scale", func(v: float) -> String: return "%d%%" % roundi(v * 100.0)))
+	page.add_child(_slider("Render scale (lower is faster, softer; over 100% supersamples: sharper far off, slower)", "video", "render_scale", func(v: float) -> String: return "%d%%" % roundi(v * 100.0)))
 	page.add_child(_choice("Anti-aliasing", "video", "antialiasing", GameSettings.ANTIALIASING))
 	page.add_child(_choice("Shadows", "video", "shadows", GameSettings.SHADOWS))
 	page.add_child(_slider("Field of view (across, 16:9)", "video", "hfov", func(v: float) -> String: return "%d deg" % roundi(v)))

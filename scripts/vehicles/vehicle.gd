@@ -1317,7 +1317,7 @@ func server_fast_rope(s: Soldier, side: float) -> void:
 	net["drop"] = drop
 	s.model.action_net = net
 	var foot := global_transform.affine_inverse() * Vector3((global_transform * top).x, ground, (global_transform * top).z)
-	_running_out[s.get_instance_id()] = [s, Soldier._now() + total, foot]
+	_running_out[s.get_instance_id()] = [s, Soldier._now() + total, foot, step]
 
 
 ## The ground (or a roof) under a rope hanging from `at` (world): looked for straight down from
@@ -1372,7 +1372,10 @@ func running_out() -> bool:
 	return not _running_out.is_empty()
 
 
-## Host: the runners whose run is over (or cut short) get out at the step's foot.
+## Host: the runners whose run is over (or cut short) get out at the step's foot. A fast-roper
+## (a 4th entry: his bay step) gets out on the ground under the rope as it hangs NOW: the foot
+## worked out when he set off moved with the hovering aircraft, so any bob or drift let him go
+## metres up (2026-10-18: ~4.9 m on the range, R1745).
 func _step_run_outs() -> void:
 	for id: int in _running_out.keys():
 		var e: Array = _running_out[id]
@@ -1381,7 +1384,12 @@ func _step_run_outs() -> void:
 			_running_out.erase(id)
 		elif Soldier._now() >= float(e[1]) or wrecked or not s.vitals.is_up():
 			_running_out.erase(id)
-			server_exit(s, global_transform * (e[2] as Vector3) + Vector3.UP * 0.05)
+			var at: Vector3 = global_transform * (e[2] as Vector3)
+			var steps: Array = (spec.get("bay", {}) as Dictionary).get("steps", [])
+			if e.size() > 3 and int(e[3]) < steps.size():
+				var top := global_transform * _rope_top(steps[int(e[3])])
+				at = Vector3(top.x, _rope_ground(top), top.z)
+			server_exit(s, at + Vector3.UP * 0.05)
 
 
 ## Host: move `soldier` to seat `index` of this vehicle (they must be in it already).

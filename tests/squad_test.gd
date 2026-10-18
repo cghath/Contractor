@@ -34,6 +34,7 @@ func _ready() -> void:
 	_test_navigation()
 	await _test_follow()
 	await _test_formation_orders()
+	await _test_exo_pilot()
 	_test_distinct_cover()
 	await _test_senses()
 	await _test_buddy_carries_buddy()
@@ -193,6 +194,30 @@ func _test_formation_orders() -> void:
 		and squad.ordered_formation(1) == Squad.DYNAMIC and squad.ordered_spacing(0) == Squad.DYNAMIC, "the whole squad back to Dynamic clears team B's order")
 	_place(player, Vector3(0, 0.1, 12))
 	await _seconds(12.0)
+
+
+## AI pilots for the HX-1 (Captain, 2026-10-17/18): "Climb into the HX-1" sends a squadmate to
+## a parked suit and in; "Climb out of the suit" puts him back on his feet beside it.
+func _test_exo_pilot() -> void:
+	print("AI HX-1 pilot")
+	var echo := _ai("Echo")
+	var squad := level.squad_for(&"friendly")
+	check(squad.order_command(player, "exo_in", player.global_position, PackedStringArray(["Echo"])) != "", "no suit about: the order says so")
+	var uid := level.server_spawn_dropped(&"exo_mech_heavy", 1, echo.global_position + Vector3(9, ExoMech.PARKED_SIZE.y * 0.5, 0), {"open": false})
+	await _frames(3)
+	check(squad.order_command(player, "exo_in", player.global_position, PackedStringArray(["Echo"])) == "", "Climb into the HX-1: Echo goes")
+	var in_suit := await _wait_until(func() -> bool: return ExoMech.piloting(echo.inventory) and not ExoMech.transitioning(echo), 25.0)
+	check(in_suit, "walks to it and climbs in (%s)" % echo.ai_status)
+	check(squad.order_command(player, "exo_out", player.global_position, PackedStringArray(["Echo"])) == "", "Climb out of the suit")
+	var out := await _wait_until(func() -> bool: return not ExoMech.piloting(echo.inventory) and not ExoMech.transitioning(echo), 8.0)
+	check(out, "and he's out, the suit left standing")
+	for n in get_tree().get_nodes_in_group(WorldItem.GROUP):
+		var w := n as WorldItem
+		if w and (w.item_id == &"exo_mech_heavy" or w.uid == uid):
+			GameState.item_taken(w.uid)
+			w.queue_free()
+	_place(echo, player.global_position + Vector3(2, 0.1, -2))
+	await _frames(5)
 
 
 ## No two squadmates pick the same cover from the same spot (Captain, 2026-10-14: they bunched up).

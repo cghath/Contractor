@@ -153,6 +153,19 @@ const EVADE_S := 6.0
 const EVADE_WEAVE_MS := 9.0
 const EVADE_DROP_M := 4.0
 const EVADE_SPEED := 1.15
+## Flares (Captain, 2026-10-17): the dispensers on the boom (VehicleArt) fire a salvo of
+## FLARE_SALVO when a launcher round within FLARE_WARN_M is heading at the aircraft (within
+## FLARE_WARN_DEG of straight at it, or locked on it): the crew's missile warning. At most one
+## salvo every FLARE_GAP_S, FLARE_LOAD flares a sortie. A guided round locked on the aircraft
+## is pulled off onto the falling flares FLARE_DECOY of the time (one roll a round). Each flare
+## burns FLARE_BURN_S, falling behind. Proposed numbers.
+const FLARE_LOAD := 30
+const FLARE_SALVO := 6
+const FLARE_GAP_S := 3.0
+const FLARE_WARN_M := 450.0
+const FLARE_WARN_DEG := 20.0
+const FLARE_DECOY := 0.7
+const FLARE_BURN_S := 3.5
 
 ## Tests: every speed, acceleration and rate times this (1 in play).
 static var pace := 1.0
@@ -196,6 +209,12 @@ var _footprint: Array[Vector3] = []
 var _edge_walls_ignored := false
 var _evade_until := -1000.0
 var _evade_phase := 0.0
+## Flares (host: what's left this sortie, salvos fired; every peer: the salvos it has shown).
+var flares_left := FLARE_LOAD
+var _flare_salvos := 0
+var _flare_next := -1000.0
+var _flares_shown := 0
+var _decoy_rolled := {}  # host: launcher projectile id -> true (each guided round rolls once)
 
 
 ## A new helicopter of `p_model` (a "helicopter" kind in data/vehicles.json), ready for the tree.
@@ -709,7 +728,85 @@ func _ignore_edge_walls() -> void:
 func _physics_process(delta: float) -> void:
 	if multiplayer.is_server():
 		_spool(delta)
+		if is_airborne() and not is_down():
+			_watch_missiles()
 	super._physics_process(delta)
+
+
+# --- Flares ----------------------------------------------------------------------------------------
+
+## Host: a launcher round coming at the aircraft gets a salvo of flares; a guided one locked on
+## it rolls once to be decoyed onto them.
+func _watch_missiles() -> void:
+	var launchers := Launchers.of(self)
+	if launchers == null or launchers.projectiles.is_empty():
+		return
+	var cone := cos(deg_to_rad(FLARE_WARN_DEG))
+	for id: int in launchers.projectiles:
+		var p := launchers.projectiles[id] as LauncherProjectile
+		if p == null or not is_instance_valid(p):
+			continue
+		var to := global_position - p.global_position
+		var d := to.length()
+		var locked := p.target == self
+		if d > FLARE_WARN_M or d < 0.01 or (not locked and (p.velocity.length() < 1.0 or p.velocity.normalized().dot(to / d) < cone)):
+			continue
+		server_pop_flares()
+		if locked and p.guided() and not _decoy_rolled.has(id):
+			_decoy_rolled[id] = true
+			if randf() < FLARE_DECOY:
+				p.target = null  # it flies on to where the flares are falling (LauncherProjectile.aim_point)
+				p._last_aim = global_position + global_basis.z * 25.0 + Vector3.DOWN * 20.0
+				SessionLog.note("%s's flares pull a %s off it" % [name, Launchers.warhead_name(p.warhead)])
+
+
+## Host: a salvo of flares, if any are left and the last salvo is FLARE_GAP_S old; whether it fired.
+func server_pop_flares() -> bool:
+	if not multiplayer.is_server() or flares_left <= 0 or Soldier._now() < _flare_next:
+		return false
+	flares_left -= mini(FLARE_SALVO, flares_left)
+	_flare_salvos += 1
+	_flare_next = Soldier._now() + FLARE_GAP_S
+	_publish_flight()
+	return true
+
+
+## Every peer: a salvo of burning flares from the boom's dispensers, arcing out and falling
+## behind (visual only; the host decides what they decoy).
+func _show_flares() -> void:
+	var mesh := SphereMesh.new()
+	mesh.radius = 0.14
+	mesh.height = 0.28
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.albedo_color = Color(1.0, 0.85, 0.55)
+	mat.emission_enabled = true
+	mat.emission = Color(1.0, 0.7, 0.3)
+	mat.emission_energy_multiplier = 6.0
+	mesh.material = mat
+	var size := VehicleArt.size_m(model)
+	var from := global_transform * Vector3(0.0, size.y * 0.35, size.z * 0.3)
+	for i in FLARE_SALVO:
+		var side := -1.0 if i % 2 == 0 else 1.0
+		var flare := MeshInstance3D.new()
+		flare.mesh = mesh
+		flare.top_level = true
+		add_child(flare)
+		flare.global_position = from
+		var v := global_basis * Vector3(side * randf_range(6.0, 11.0), randf_range(-1.0, 3.0), randf_range(4.0, 10.0))
+		if i == 0:
+			var light := OmniLight3D.new()
+			light.light_color = Color(1.0, 0.75, 0.4)
+			light.light_energy = 4.0
+			light.omni_range = 25.0
+			flare.add_child(light)
+		var fly := func(t: float) -> void:
+			if is_instance_valid(flare):
+				flare.global_position = from + v * t + Vector3.DOWN * 2.5 * t * t
+				flare.scale = Vector3.ONE * (1.0 - 0.7 * t / FLARE_BURN_S)
+		var tween := flare.create_tween()
+		tween.tween_method(fly, 0.0, FLARE_BURN_S, FLARE_BURN_S)
+		tween.tween_callback(flare.queue_free)
 
 
 ## Nobody sits in the pilot seats: the engines run while the rotors turn (Sfx's engine sound).
@@ -722,6 +819,11 @@ func _process(delta: float) -> void:
 	var rpm := _rpm if multiplayer.is_server() else float(net_flight.get("rpm", 0.0))
 	if rpm > 1.0 and hull and is_instance_valid(hull.art):
 		VehicleArt.spin_rotors(hull.art, delta, rpm)
+	var salvos := _flare_salvos if multiplayer.is_server() else int(net_flight.get("flares", 0))
+	if salvos != _flares_shown:
+		_flares_shown = salvos
+		if salvos > 0 and is_airborne():
+			_show_flares()
 
 
 func _spool(delta: float) -> void:
@@ -1109,7 +1211,7 @@ func _crash() -> void:
 func _publish_flight() -> void:
 	if not multiplayer.is_server():
 		return
-	net_flight = {"mode": int(mode), "rpm": snappedf(_rpm, 1.0), "call": support}
+	net_flight = {"mode": int(mode), "rpm": snappedf(_rpm, 1.0), "call": support, "flares": _flare_salvos}
 
 
 ## Vehicle's save, plus the support it flies (a support in flight isn't kept: _ready).

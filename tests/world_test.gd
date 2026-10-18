@@ -1210,7 +1210,7 @@ func _test_presets() -> void:
 	for item in sh.items:
 		for road: Array in hot.roads:
 			off_roads = off_roads and Geometry2D.get_closest_point_to_segment(Vector2(item.pos.x, item.pos.z), Vector2(road[0][0], road[0][1]), Vector2(road[1][0], road[1][1])).distance_to(Vector2(item.pos.x, item.pos.z)) >= ZoneScatter.ROAD_KEEP_M - 0.01
-	check(hot.terrain == "rocky_ridge" and off_roads and sh.total() > 1500 and sh.total() < 22000 and th.max_slope_deg() < 42.0,
+	check(hot.terrain == "rocky_ridge" and off_roads and sh.total() > 1500 and sh.total() < 30000 and th.max_slope_deg() < 42.0,  # (budget raised from 22000 for the scrub belts, Captain 2026-10-18)
 		"hot zone on the ridge preset: %d scatter items off the roads, steepest %.0f degrees" % [sh.total(), th.max_slope_deg()])
 	ss.free()
 	sb2.free()

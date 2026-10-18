@@ -84,7 +84,7 @@ func _test_settings() -> void:
 	var off := not sun.shadow_enabled
 	GameSettings.set_value("video", "shadows", "high")
 	GameSettings.apply_sun(sun)
-	check(off and sun.shadow_enabled and is_equal_approx(sun.directional_shadow_max_distance, 400.0), "shadows off, then high (400 m)")
+	check(off and sun.shadow_enabled and is_equal_approx(sun.directional_shadow_max_distance, 500.0), "shadows off, then high (500 m)")
 	sun.free()
 	var on_key := func(action: StringName, key: Key) -> bool:
 		return InputMap.action_get_events(action).any(func(e: InputEvent) -> bool:

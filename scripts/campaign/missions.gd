@@ -298,6 +298,28 @@ static func tier_id(rep: int) -> String:
 	return String(tiers[tier_index(rep)].id) if not tiers.is_empty() else ""
 
 
+## The tier entry ({"id", "name", "min", "pay_mult", ...}) a reputation value is in; {} without tiers.
+static func tier_of(rep: int) -> Dictionary:
+	var tiers := reputation_tiers()
+	return tiers[tier_index(rep)] if not tiers.is_empty() else {}
+
+
+## The reputation rules (factions.json "reputation_rules", wave 6a): ripple, decay, lockout.
+static func reputation_rules() -> Dictionary:
+	if _factions.is_empty():
+		factions()
+	return _factions.get("reputation_rules", {})
+
+
+## The factions `faction_id` counts as allies or as enemies (factions.json "allies"/"enemies").
+static func allies_of(faction_id: String) -> Array:
+	return faction(faction_id).get("allies", [])
+
+
+static func enemies_of(faction_id: String) -> Array:
+	return faction(faction_id).get("enemies", [])
+
+
 ## The tier index of "neutral" (the tier a fresh faction stands in).
 static func neutral_tier() -> int:
 	var tiers := reputation_tiers()

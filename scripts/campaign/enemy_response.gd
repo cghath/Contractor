@@ -46,7 +46,46 @@ const QRF_TURNOUT_S := 180.0
 const LOOK_S := 600.0
 const LOOK_POINTS := 2
 const LOOK_RING_M := 30.0
-const LOOK_KINDS: Array[StringName] = [&"shot", &"blast", &"body", &"missed_checkin"]
+const LOOK_KINDS: Array[StringName] = [&"shot", &"blast", &"body", &"missed_checkin", &"signal"]
+## Trackers (Captain, 2026-10-18, inspired by S.O.G. Prairie Fire's): a hunter team, or a patrol
+## out on a look, that comes within TRACK_PICKUP_M of the squad's trail (SquadTrail) no older than
+## TRACK_COLD_S picks it up, fires TRACK_SIGNAL_SHOTS into the air (a "signal" report on the net:
+## a patrol comes to look) and follows it mark by mark, a step every TRACK_STEP_S. Where it turns
+## harder than TRACK_TURN_DEG they stop TRACK_TURN_PAUSE_S first (a dog-leg is where ambushes
+## are). A broken mark (a road, water) or a cold one loses the trail: back to searching.
+const TRACK_PICKUP_M := 40.0
+const TRACK_COLD_S := 600.0
+const TRACK_STEP_S := 4.0
+const TRACK_NEAR_M := 10.0
+const TRACK_TURN_DEG := 70.0
+const TRACK_TURN_PAUSE_S := 10.0
+const TRACK_SIGNAL_SHOTS := 3
+## One contact, one coordinated look (Captain, 2026-10-18: "enemies are getting swarmy ... they
+## need better coordination"). Every shot of a firefight used to pull the next-nearest patrol in
+## on its own, so pair after pair trickled at the squad from every side. Now a report within
+## LOOK_MERGE_M of a look already out feeds that look (its spot moves to the newest report);
+## with the zone alerted the look grows by one patrol at most every LOOK_ESCALATE_S, to LOOK_MAX
+## patrols (LOOK_MAX_HIGH from tier 2). Two or more on one look meet first at rally points
+## LOOK_RALLY_M short of the spot, LOOK_SPLIT_DEG apart round it and out of the squad's sight
+## where one can be found, and go in together once every one is there (LOOK_RALLIED_M) or
+## LOOK_RALLY_S has passed: a pincer at one moment, not a trickle.
+const LOOK_MERGE_M := 150.0
+const LOOK_ESCALATE_S := 60.0
+const LOOK_MAX := 2
+const LOOK_MAX_HIGH := 3
+const LOOK_RALLY_M := 110.0
+const LOOK_RALLY_S := 90.0
+const LOOK_RALLIED_M := 20.0
+const LOOK_SPLIT_DEG := 70.0
+## Pushes (Captain, 2026-10-18: "add the changes to the hotzone ai"): a hot zone's QRF waves and
+## hunter teams sent at one contact (within PUSH_MERGE_M) go in as one push. With two or more
+## groups on it, each that isn't already in close waits at its own rally point PUSH_RALLY_M short
+## of the spot (spread LOOK_SPLIT_DEG apart, out of sight where it can be), and all go in together
+## once every one is there (PUSH_RALLIED_M) or PUSH_RALLY_S has passed. Proposed.
+const PUSH_MERGE_M := 200.0
+const PUSH_RALLY_M := 150.0
+const PUSH_RALLY_S := 120.0
+const PUSH_RALLIED_M := 30.0
 ## One shared budget (Captain, 2026-10-16: "too many ai in hot zones spawning and coming for the
 ## player"): every living soldier the zone's answer has spawned (patrols, hunters, HQ pairs AND
 ## the QRF waves, which used to have a separate cap of their own, so up to 40 + 20 on top of the
@@ -116,6 +155,12 @@ var difficulty: int = 1
 ## Roaming patrols: {"k", "route" (Array[Vector3]), "squad", "soldiers", "pending", "second",
 ## "doubled", "lost", "last_pos"}.
 var patrols: Array[Dictionary] = []
+## Looks out: {"pos", "patrols" (patrol records), "added_at", "go_at"}; a record on its way to a
+## rally point has "look_rally" (the point).
+var looks: Array[Dictionary] = []
+## Pushes (hot zones' QRF waves and hunter teams on one contact): {"pos", "groups", "go_at"};
+## a group is {"kind": "wave" | "hunters", "ref" (the Reinforcements wave or the hunter team)}.
+var pushes: Array[Dictionary] = []
 var checkpoints_closed := false
 ## Every QRF launched: {"from" (module id), "at", "soldiers"}.
 var qrf_launches: Array[Dictionary] = []
@@ -291,11 +336,13 @@ func server_tick() -> void:
 			if m.type == "checkpoint":
 				alert.server_stand_to(m.module_id)
 	_tick_hunters(tier)
+	_tick_pushes()
 	if tier >= 4:
 		_reinforce_sites()
 
 
 func _tick_patrols(doubled: bool) -> void:
+	_tick_looks()
 	for record: Dictionary in patrols.duplicate():
 		if record.pending:
 			_try_patrol(record)
@@ -305,7 +352,11 @@ func _tick_patrols(doubled: bool) -> void:
 			record.last_pos = (living[0] as Soldier).global_position
 			if now() >= float(record.looking_until) and record.looking_until > -INF:
 				record.looking_until = -INF  # had a look: back to the route
+				record.erase("look_rally")
+				record.erase("trail_mark")
 				_set_route(record.squad, living, record.walk)
+			elif now() < float(record.looking_until) and not record.has("look_rally"):
+				_track(record, living)  # a patrol out looking can pick up the squad's trail
 		elif not record.lost:
 			record.lost = true  # nobody left to answer the radio
 			if pressure:
@@ -400,6 +451,8 @@ func _launch_qrf() -> void:
 		var soldiers := reinforcements.server_send(gate, 1 if tier >= 1 else 0, room)
 		VehicleQrf.server_mount(level, m, gate, lkp, soldiers)  # wave 5b (V4): some QRFs ride in a technical
 		qrf_launches.append({"from": m.module_id, "at": now(), "soldiers": soldiers})
+		if not soldiers.is_empty() and not reinforcements.waves.is_empty():
+			_join_push("wave", reinforcements.waves.back(), lkp)
 		_last_qrf = now()
 
 
@@ -418,17 +471,26 @@ func server_alert_extraction(pos: Vector3) -> void:
 	var tier := _tier()
 	if state >= Alert.State.ALERTED or tier >= 1:
 		_look_credit = maxf(_look_credit, 1.0)
-		_send_look(pos)  # the next-nearest free patrol converges too
+		_send_look(pos, true)  # the next-nearest free patrol joins the look: they rally, then go in together
 	if state >= Alert.State.ENGAGED or tier >= 2:
 		if now() - _last_qrf >= QRF_RELAUNCH_S:
 			_launch_qrf()  # still one QRF per QRF_RELAUNCH_S: reaching the LZ doesn't skip the gap
 
 
-## The nearest patrol out (not already looking) goes to look round `pos` for LOOK_S. With
-## officers dead the net is less coordinated (design: killed officers make patrols less
-## coordinated): only coordination()'s share of the looks gets ordered (every one at full, one
-## in five at the floor), evenly, not by chance.
-func _send_look(pos: Vector3) -> void:
+## The nearest patrol out (not already looking) goes to look round `pos` for LOOK_S, unless a
+## look is already out near it (LOOK_MERGE_M): that look takes the report and grows by a patrol
+## only as the LOOK_* rules allow (`more`: now, within its cap; extraction). With officers dead
+## the net is less coordinated (design: killed officers make patrols less coordinated): only
+## coordination()'s share of the looks gets ordered (every one at full, one in five at the
+## floor), evenly, not by chance.
+func _send_look(pos: Vector3, more := false) -> void:
+	var look := _look_near(pos)
+	if not look.is_empty():
+		look.pos = pos  # the newest report
+		if (look.patrols as Array).size() >= _look_max():
+			return
+		if not more and (_zone_state() < Alert.State.ALERTED or now() - float(look.added_at) < LOOK_ESCALATE_S):
+			return
 	_look_credit += coordination()
 	if _look_credit < 1.0 - 1e-6:
 		return
@@ -450,18 +512,251 @@ func _send_look(pos: Vector3) -> void:
 	if best.is_empty():
 		return
 	best.looking_until = now() + LOOK_S
+	if look.is_empty():
+		look = {"pos": pos, "patrols": [], "added_at": now(), "go_at": INF}
+		looks.append(look)
+	(look.patrols as Array).append(best)
+	look.added_at = now()
+	if (look.patrols as Array).size() == 1:
+		_look_in(best, best_living, pos)  # one patrol: straight there
+	else:
+		_rally_look(look)
+	look_sent.emit(pos)
+
+
+func _look_max() -> int:
+	return LOOK_MAX_HIGH if _tier() >= 2 else LOOK_MAX
+
+
+## The look out within LOOK_MERGE_M of `pos` with a patrol still on it, or {} (finished ones go).
+func _look_near(pos: Vector3) -> Dictionary:
+	for look: Dictionary in looks.duplicate():
+		look.patrols = (look.patrols as Array).filter(func(r: Dictionary) -> bool:
+			return not r.lost and now() < float(r.looking_until) and not _living(r.soldiers).is_empty())
+		if (look.patrols as Array).is_empty():
+			looks.erase(look)
+	var near: Dictionary = {}
+	var near_d := LOOK_MERGE_M
+	for look: Dictionary in looks:
+		var d := Vector2(pos.x - look.pos.x, pos.z - look.pos.z).length()
+		if d <= near_d:
+			near_d = d
+			near = look
+	return near
+
+
+## Patrol `record` searches round `pos`: the spot, then LOOK_POINTS round it LOOK_RING_M out.
+func _look_in(record: Dictionary, living: Array, pos: Vector3) -> void:
+	record.erase("look_rally")
 	var route: Array[Vector3] = [_ground(pos)]
 	var start := randf() * TAU
 	for k in LOOK_POINTS:
 		var a := start + TAU * k / LOOK_POINTS
 		route.append(_ground(pos + Vector3(cos(a), 0.0, sin(a)) * LOOK_RING_M))
-	_set_route(best.squad, best_living, route)
-	look_sent.emit(pos)
+	_set_route(record.squad, living, route)
+
+
+## A look with two or more patrols: each one not already in close (inside LOOK_RALLY_M of the
+## spot) goes to its own rally point first, the points LOOK_SPLIT_DEG apart round the spot on the
+## side each comes from, out of sight of the squad where a nearby bearing allows.
+func _rally_look(look: Dictionary) -> void:
+	var pos: Vector3 = look.pos
+	var taken: Array[float] = []
+	for record: Dictionary in look.patrols:
+		var living := _living(record.soldiers)
+		if living.is_empty():
+			continue
+		var at := (living[0] as Soldier).global_position
+		if Vector2(at.x - pos.x, at.z - pos.z).length() <= LOOK_RALLY_M and not record.has("look_rally"):
+			continue  # already in close: it carries on
+		var a := atan2(at.z - pos.z, at.x - pos.x)
+		for b: float in taken:
+			var off := wrapf(a - b, -PI, PI)
+			if absf(off) < deg_to_rad(LOOK_SPLIT_DEG):
+				a = b + (1.0 if off >= 0.0 else -1.0) * deg_to_rad(LOOK_SPLIT_DEG)
+		var rally := _rally_point(pos, a)
+		taken.append(atan2(rally.z - pos.z, rally.x - pos.x))
+		record.look_rally = rally
+		var route: Array[Vector3] = [rally]
+		_set_route(record.squad, living, route)
+	look.go_at = now() + LOOK_RALLY_S
+
+
+## A rally point LOOK_RALLY_M from `pos` on bearing `a` (radians, from +x toward +z), turned up
+## to 40 degrees either way to one no player or squadmate has a clear line to.
+func _rally_point(pos: Vector3, a: float, dist := LOOK_RALLY_M) -> Vector3:
+	var first := Vector3.INF
+	for step: float in [0.0, 20.0, -20.0, 40.0, -40.0]:
+		var b := a + deg_to_rad(step)
+		var p := _ground(pos + Vector3(cos(b), 0.0, sin(b)) * dist)
+		if not first.is_finite():
+			first = p
+		if _hidden(p):
+			return p
+	return first
+
+
+## No player or squadmate within SPAWN_UNSEEN_M has a clear line (world geometry) to `p`.
+func _hidden(p: Vector3) -> bool:
+	if not is_inside_tree():
+		return true
+	var world := level.get_world_3d()
+	for w: Soldier in _watchers():
+		if w.global_position.distance_to(p) > SPAWN_UNSEEN_M:
+			continue
+		if Throwables.clear_line(world, w.global_position + Vector3.UP * 1.6, p + Vector3.UP * 1.4):
+			return false
+	return true
+
+
+## Every patrol tick: a look whose rallying patrols are all at their points (or out of time)
+## sends them in together.
+func _tick_looks() -> void:
+	for look: Dictionary in looks:
+		var rallying := (look.patrols as Array).filter(func(r: Dictionary) -> bool:
+			return r.has("look_rally") and not r.lost and now() < float(r.looking_until))
+		if rallying.is_empty():
+			continue
+		var there := rallying.all(func(r: Dictionary) -> bool:
+			var living := _living(r.soldiers)
+			return living.is_empty() or (living[0] as Soldier).global_position.distance_to(r.look_rally) <= LOOK_RALLIED_M)
+		if there or now() >= float(look.go_at):
+			for r: Dictionary in rallying:
+				r.looking_until = maxf(float(r.looking_until), now() + LOOK_S * 0.5)  # time to look once in
+				_look_in(r, _living(r.soldiers), look.pos)
 
 
 func _on_tier_changed(_tier_now: int) -> void:
 	if multiplayer.is_server() and _started:
 		server_tick()
+
+
+# --- Trackers (host) ---------------------------------------------------------------------------
+
+## `group` (a hunter team or a patrol record: "squad", "soldiers") on the squad's trail: picks it
+## up near its lead, follows it; true while it's on it (its route set here), false otherwise.
+func _track(group: Dictionary, living: Array) -> bool:
+	var trail := SquadTrail.of(self)
+	if trail == null or living.is_empty() or group.get("recalled", false) or group.has("rally"):
+		return false
+	var lead: Soldier = living[0]
+	if not group.has("trail_mark"):
+		var i := trail.nearest(lead.global_position, TRACK_PICKUP_M, TRACK_COLD_S)
+		if i < 0:
+			return false
+		group["trail_mark"] = trail.marks[i]
+		group["track_next"] = 0.0
+		_signal(living, lead.global_position)
+		print("[response] %s picks up the squad's trail at (%.0f, %.0f)" % [String((group.squad as Node).name) if is_instance_valid(group.squad) else "?", lead.global_position.x, lead.global_position.z])
+	var idx := trail.marks.find(group.trail_mark)
+	if idx < 0:
+		group.erase("trail_mark")  # gone cold off the end of the record
+		return false
+	if now() < float(group.get("track_next", 0.0)):
+		return true
+	group.track_next = now() + TRACK_STEP_S
+	var mark: Dictionary = trail.marks[idx]
+	if Vector2(lead.global_position.x - mark.pos.x, lead.global_position.z - mark.pos.z).length() <= TRACK_NEAR_M:
+		var nxt := trail.lead(idx)
+		if nxt < 0:
+			group.erase("trail_mark")  # the trail ends here: the squad is close
+			return false
+		var m2: Dictionary = trail.marks[nxt]
+		if bool(m2.broken) or Soldier._now() - float(m2.t) > TRACK_COLD_S:  # (marks are on the game clock, not the alert's)
+			group.erase("trail_mark")  # a road, water, or gone cold: lost it
+			group["retarget_at"] = now()
+			var search: Array[Vector3] = _search_ring(m2.pos, LOOK_RING_M)
+			_set_route(group.squad, living, search)
+			return false
+		if trail.turn_at(nxt) > TRACK_TURN_DEG:
+			group.track_next = now() + TRACK_TURN_PAUSE_S  # a hard turn: careful, it's where they'd wait
+		group.trail_mark = m2
+		mark = m2
+	var route: Array[Vector3] = [_ground(mark.pos)]
+	_set_route(group.squad, living, route)
+	return true
+
+
+## Signal shots: one of `living` fires TRACK_SIGNAL_SHOTS into the air and the net hears of the
+## trail at `pos` (a "signal" report: a patrol comes to look).
+func _signal(living: Array, pos: Vector3) -> void:
+	var shooter: Soldier = living[0]
+	for k in TRACK_SIGNAL_SHOTS:
+		get_tree().create_timer(0.35 * k).timeout.connect(func() -> void:
+			if is_instance_valid(shooter) and shooter.vitals.is_up():
+				shooter._server_fire(shooter.global_position + Vector3.UP * 1.7, Vector3(0.05, 1.0, 0.0).normalized(), shooter.active_slot))
+	if alert:
+		alert._receive({"kind": &"signal", "pos": pos, "area": alert.area_of(pos), "by": ""})
+
+
+# --- Pushes (host) ------------------------------------------------------------------------------
+
+## `kind` "wave" (a Reinforcements wave record) or "hunters" (a hunter team) sent at `pos` joins
+## the push on it (a new one if none is within PUSH_MERGE_M); two or more on it rally first.
+func _join_push(kind: String, ref: Dictionary, pos: Vector3) -> void:
+	var push: Dictionary = {}
+	for p: Dictionary in pushes:
+		if Vector2(pos.x - p.pos.x, pos.z - p.pos.z).length() <= PUSH_MERGE_M:
+			push = p
+			break
+	if push.is_empty():
+		push = {"pos": pos, "groups": [], "go_at": INF}
+		pushes.append(push)
+	(push.groups as Array).append({"kind": kind, "ref": ref})
+	if (push.groups as Array).size() >= 2:
+		_rally_push(push)
+
+
+## Every group of `push` not already in close (inside PUSH_RALLY_M of the spot, not rallying)
+## waits at its own rally point; the push goes in by PUSH_RALLY_S from now at the latest.
+func _rally_push(push: Dictionary) -> void:
+	var pos: Vector3 = push.pos
+	var taken: Array[float] = []
+	for g: Dictionary in push.groups:
+		var ref: Dictionary = g.ref
+		var living := _living(ref.get("soldiers", []))
+		if living.is_empty():
+			continue
+		var at := (living[0] as Soldier).global_position
+		if Vector2(at.x - pos.x, at.z - pos.z).length() <= PUSH_RALLY_M and not ref.has("rally"):
+			continue  # already in close: it carries on
+		var a := atan2(at.z - pos.z, at.x - pos.x)
+		for b: float in taken:
+			var off := wrapf(a - b, -PI, PI)
+			if absf(off) < deg_to_rad(LOOK_SPLIT_DEG):
+				a = b + (1.0 if off >= 0.0 else -1.0) * deg_to_rad(LOOK_SPLIT_DEG)
+		var rally := _rally_point(pos, a, PUSH_RALLY_M)
+		taken.append(atan2(rally.z - pos.z, rally.x - pos.x))
+		if g.kind == "wave" and reinforcements:
+			reinforcements.server_hold_at(ref, rally)
+		else:
+			ref["rally"] = rally
+			var route: Array[Vector3] = [rally]
+			_set_route(ref.squad, living, route)
+	push.go_at = now() + PUSH_RALLY_S
+
+
+## Every tick: a push whose rallying groups are all at their points (or out of time) goes in
+## together; pushes with nobody left standing are dropped.
+func _tick_pushes() -> void:
+	for push: Dictionary in pushes.duplicate():
+		var alive := (push.groups as Array).filter(func(g: Dictionary) -> bool: return not _living(g.ref.get("soldiers", [])).is_empty())
+		if alive.is_empty():
+			pushes.erase(push)
+			continue
+		var rallying := alive.filter(func(g: Dictionary) -> bool: return (g.ref as Dictionary).has("rally"))
+		if rallying.is_empty():
+			continue
+		var there := rallying.all(func(g: Dictionary) -> bool:
+			return _living(g.ref.soldiers).any(func(s: Soldier) -> bool: return s.global_position.distance_to(g.ref.rally) <= PUSH_RALLIED_M))
+		if there or now() >= float(push.go_at):
+			for g: Dictionary in rallying:
+				if g.kind == "wave" and reinforcements:
+					reinforcements.server_release(g.ref)
+				else:
+					g.ref.erase("rally")
+					g.ref["retarget_at"] = now()  # straight back onto the last known position
+			print("[response] push on (%.0f, %.0f): %d groups go in together" % [push.pos.x, push.pos.z, rallying.size()])
 
 
 # --- Hunters (host) -----------------------------------------------------------------------------
@@ -475,7 +770,9 @@ func _tick_hunters(tier: int) -> void:
 		if living.is_empty():
 			continue
 		teams += 1
-		if not lk.is_empty() and now() >= float(team.retarget_at) and not team.get("recalled", false):  # EnemyCommand called it home
+		if _track(team, living):
+			pass  # on the squad's trail
+		elif not lk.is_empty() and now() >= float(team.retarget_at) and not team.get("recalled", false) and not team.has("rally"):  # EnemyCommand called it home; a push holds it at its rally point
 			team.retarget_at = now() + HUNTER_RETARGET_S / c
 			var route: Array[Vector3] = [_ground(lk.pos)]
 			route.append_array(_search_ring(lk.pos, float(lk.radius)))
@@ -526,6 +823,7 @@ func _send_hunters(lkp: Vector3, radius: float) -> void:
 		HUNTER_COMBAT, HUNTER_DISCIPLINE * c, "combat")
 	hunters.append({"k": _hunter_teams, "squad": squad, "soldiers": soldiers, "at": now(),
 		"retarget_at": now() + HUNTER_RETARGET_S / c, "smoked": false})
+	_join_push("hunters", hunters.back(), lkp)
 	print("[response] hunters %s: %d from (%.0f, %.0f), coordination %.1f" % [callsign, soldiers.size(), origin.x, origin.z, c])
 
 

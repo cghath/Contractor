@@ -75,9 +75,14 @@ const THINK_S := 0.5
 ## "assault" onto "point", "clear" (its "slot" in "op", SquadTactics.clear_op), "garrison"
 ## ("spot", "face", "port"), "cover" (the best cover near it), "break" (back to "point", smoke
 ## over open ground), "bound" (to "point" by bounding overwatch), "search" (to "point", looking),
-## "give_ammo" (to "who", hands over magazines), "pick_pack" (back for the pack it dropped). An ordered one that ends (cover, break, bound,
+## "give_ammo" (to "who", hands over magazines), "pick_pack" (back for the pack it dropped),
+## "exo_in" (to the HX-1 "uid" and into it). An ordered one that ends (cover, break, bound,
 ## clear, give_ammo) leaves the unit holding where it got to; a timed one ("until") just ends.
-const MOVING_TACTICS: Array[StringName] = [&"maneuver", &"assault", &"clear", &"garrison", &"cover", &"break", &"bound", &"search", &"give_ammo", &"pick_pack", &"climb"]
+## "Climb into the HX-1": he stands this far behind the suit's feet at its release, and steps
+## onto that spot from this close (nav stops short of a suit's bulk).
+const EXO_STAND_M := 0.75
+const EXO_SNAP_M := 2.5
+const MOVING_TACTICS: Array[StringName] = [&"maneuver", &"assault", &"clear", &"garrison", &"cover", &"break", &"bound", &"search", &"give_ammo", &"pick_pack", &"exo_in", &"climb"]
 ## Climb order (Squad.order_climb): up there once its feet are within CLIMB_UP_M below the
 ## spot and CLIMB_DONE_M of it; at the wall (CLIMB_AT_WALL_M of the spot) with no ledge it
 ## can climb for CLIMB_GIVE_UP_S, the order ends where it stands.
@@ -2865,6 +2870,8 @@ func _do_tactic(t: Dictionary) -> void:
 			_tactic_give_ammo(t)
 		&"pick_pack":
 			_tactic_pick_pack()
+		&"exo_in":
+			_tactic_exo_in(t)
 		&"climb":
 			_tactic_climb(t)
 
@@ -3008,9 +3015,43 @@ func _tactic_pick_pack() -> void:
 	ordered = {}  # back to what they were doing
 
 
+## "Climb into the HX-1" (Squad.order_exo_in): to the suit with uid "uid", then in
+## (ExoMech.server_enter, its own release-and-zip clip). Gone, taken, or he can't now (the
+## suit's own rules): the order ends. He holds still from the release until he's in (the suit
+## lets him go if he moves off), and the order ends once he's in.
+func _tactic_exo_in(t: Dictionary) -> void:
+	if ExoMech.piloting(body.inventory) and not ExoMech.transitioning(body):
+		ordered = {}  # in
+		return
+	if t.has("entering"):
+		_stop()  # still: the suit lets him go if he moves off mid-release
+		if not ExoMech.transitioning(body) and Soldier._now() > float(t.entering) + ExoMech.RELEASE_S + 1.0:
+			ordered = {}  # the climb-in didn't take
+		return
+	var suit := _world_item(String(t.get("uid", "")))
+	if suit == null or ExoMech.enter_problem(body, suit, false) != "":
+		ordered = {}
+		return
+	var at := ExoMech.parked_point(suit)
+	var feet := ExoMech.parked_feet(suit)
+	var back := Vector3(at.x - feet.x, 0.0, at.z - feet.z)
+	var stand := feet + (back.normalized() if back.length() > 0.05 else suit.global_basis.z) * EXO_STAND_M  # behind it, at the release
+	if _flat_distance(stand) > EXO_SNAP_M:
+		_go(stand, true)
+		return
+	_stop()
+	body.server_place(stand, suit.global_rotation.y)  # the last step onto the spot a player stands at, facing its back
+	t["entering"] = Soldier._now()
+	ExoMech.server_enter(body, suit)
+
+
 ## The very pack this unit dropped (dropped_pack's uid), lying in the world; null once it's gone.
 func _dropped_pack_item() -> WorldItem:
-	var uid := String(dropped_pack.get("uid", ""))
+	return _world_item(String(dropped_pack.get("uid", "")))
+
+
+## The world item with `uid`, not being freed; null if there's none.
+func _world_item(uid: String) -> WorldItem:
 	if uid == "":
 		return null
 	for node in get_tree().get_nodes_in_group(WorldItem.GROUP):
@@ -3287,6 +3328,8 @@ func _tactic_text() -> String:
 			return "Bringing ammo"
 		&"pick_pack":
 			return "Getting the pack"
+		&"exo_in":
+			return "Getting into the HX-1"
 	return "Following"
 
 

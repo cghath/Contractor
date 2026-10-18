@@ -467,8 +467,17 @@ func _test_fast_rope() -> void:
 	while heli.seat_of(s) >= 0 and Soldier._now() - t0 < 6.0:
 		await get_tree().physics_frame
 	var at := heli.to_local(s.global_position)  # the moment he's let go
-	check(heli.seat_of(s) < 0 and at.x < -1.4, "and is off the rope under the left door (%s; OPEN: let go high on the range)" % at)
+	var floor_y := level.ground_point(s.global_position).y
+	check(heli.seat_of(s) < 0 and at.x < -1.4 and absf(s.global_position.y - floor_y) < 1.0,
+		"and is off the rope under the left door, on the ground (%s, %.2f m over it)" % [at, s.global_position.y - floor_y])
 	heli.ropes_out = false
+	# Flares (Captain, 2026-10-17): a salvo from the dispensers, then a gap before the next.
+	var helo := heli as Helicopter
+	if helo:
+		var load0 := helo.flares_left
+		check(helo.server_pop_flares() and helo.flares_left == load0 - Helicopter.FLARE_SALVO and int(helo.net_flight.get("flares", 0)) == 1,
+			"flares: a salvo of %d, told to every peer" % Helicopter.FLARE_SALVO)
+		check(not helo.server_pop_flares() and helo.flares_left == load0 - Helicopter.FLARE_SALVO, "and not another inside %.0f s" % Helicopter.FLARE_GAP_S)
 	s.queue_free()
 	heli.queue_free()
 	var lz := Vector3(0, 0, 0)

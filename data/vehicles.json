@@ -388,10 +388,10 @@
 				{"name": "Passenger 9", "kind": "passenger", "at": [0.58, 1.7, 3.7], "stance": "sit", "exit": "right", "shown": true},
 				{"name": "Passenger 10", "kind": "passenger", "at": [-0.29, 1.7, 4.55], "stance": "sit", "exit": "left", "shown": true},
 				{"name": "Passenger 11", "kind": "passenger", "at": [0.29, 1.7, 4.55], "stance": "sit", "exit": "right", "shown": true},
-				{"name": "Left door seat 1", "kind": "passenger", "ffv": "left", "at": [-0.95, 1.7, -1.6], "stance": "sit", "exit": "left", "shown": true},
-				{"name": "Left door seat 2", "kind": "passenger", "ffv": "left", "at": [-0.95, 1.7, -0.3], "stance": "sit", "exit": "left", "shown": true},
-				{"name": "Right door seat 1", "kind": "passenger", "ffv": "right", "at": [0.95, 1.7, -1.6], "stance": "sit", "exit": "right", "shown": true},
-				{"name": "Right door seat 2", "kind": "passenger", "ffv": "right", "at": [0.95, 1.7, -0.3], "stance": "sit", "exit": "right", "shown": true}
+				{"name": "Left door seat 1", "kind": "passenger", "ffv": "left", "at": [-0.95, 1.7, -1.6], "stance": "sit", "exit": "left", "shown": true, "back": 0.25, "face": 90},
+				{"name": "Left door seat 2", "kind": "passenger", "ffv": "left", "at": [-0.95, 1.7, -0.3], "stance": "sit", "exit": "left", "shown": true, "back": 0.25, "face": 90},
+				{"name": "Right door seat 1", "kind": "passenger", "ffv": "right", "at": [0.95, 1.7, -1.6], "stance": "sit", "exit": "right", "shown": true, "back": 0.25, "face": -90},
+				{"name": "Right door seat 2", "kind": "passenger", "ffv": "right", "at": [0.95, 1.7, -0.3], "stance": "sit", "exit": "right", "shown": true, "back": 0.25, "face": -90}
 			],
 			"gun": {"weapon": "m2hb", "seat": 1, "at": [0.0, 0.32, -5.0], "remote": true},
 			"turret": {"pivot": [0.0, 0.1, -4.0], "radius": 0.34, "top": 0.5,

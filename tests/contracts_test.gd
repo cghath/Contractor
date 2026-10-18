@@ -50,6 +50,7 @@ func _ready() -> void:
 	_test_wages_and_floor()
 	_test_economy_balance()
 	_test_lapse()
+	_test_reputation_core()
 	_test_debrief_totals()
 	_test_civilians_void()
 	_test_save_reload()
@@ -126,9 +127,9 @@ func _test_generation() -> void:
 		if o.zone_kind == "hot":
 			hot += 1
 			hot_ok = hot_ok and o.employer == MissionRegistry.zone(o.zone_id).faction
-	check(seen.keys().size() == 9 and seen.has("raid") and seen.has("hvt_capture") and seen.has("hostage_rescue") and seen.has("intel_grab")
+	check(seen.keys().size() == 10 and seen.has("psd_escort") and seen.has("raid") and seen.has("hvt_capture") and seen.has("hostage_rescue") and seen.has("intel_grab")
 		and seen.has("convoy_ambush") and seen.has("defend_hold") and seen.has("crew_rescue") and seen.has("sabotage") and seen.has("recon"),
-		"Captain's first four mission types and the five of mission variety come up (%s)" % [seen.keys()])
+		"Captain's first four mission types, the five of mission variety and the client escort come up (%s)" % [seen.keys()])
 	check(hot > 30 and hot < 130 and hot_ok, "hot-zone contracts come up (%d of 300), each from the zone's own faction" % hot)
 	# A mission type added at runtime (Noah's types drop in the same way).
 	MissionRegistry.register_type({"type": "test_rescue", "name": "Hostage rescue", "module": "compound", "base_pay": 60000, "days": 1,
@@ -395,9 +396,54 @@ func _test_lapse() -> void:
 	check(Contracts.contract(cid).state == "accepted", "still held on its last day")
 	Economy.advance_days(1, "test")
 	check(Contracts.contract(cid).is_empty() and Contracts.history().back().cid == cid and Contracts.history().back().outcome == "lapsed"
-		and Economy.reputation(employer) == rep - 3, "a contract never deployed lapses and costs reputation (%+d)" % (Economy.reputation(employer) - rep))
+		and Economy.reputation(employer) <= rep - 3 and Economy.reputation(employer) >= rep - 3 - _decay_since(int((Economy.state().get("rep_jobs", {}) as Dictionary).get(employer, Economy.day())), Economy.day()), "a contract never deployed lapses and costs reputation (%+d, decay included)" % (Economy.reputation(employer) - rep))
 	check(Contracts.board().all(func(o: Dictionary) -> bool: return int(o.expires_day) >= Economy.day()) and Contracts.board().size() >= 6,
 		"old offers expired and the board refilled (%d)" % Contracts.board().size())
+
+
+## Days of reputation decay between a job on `job_day` and `today` (wave 6a rules).
+func _decay_since(job_day: int, today: int) -> int:
+	var rules := MissionRegistry.reputation_rules()
+	return maxi(today - job_day - int(rules.get("decay_grace_days", 7)), 0) * int(rules.get("decay_per_day", 0))
+
+
+## Wave 6a (2026-10-18; the decided rules in mission_brainstorm.md, Proposed numbers in
+## factions.json): the five tiers, ripple to allies and enemies, decay toward neutral, side
+## lockout, and pay by tier.
+func _test_reputation_core() -> void:
+	print("Reputation core (wave 6a)")
+	Contracts.new_full_campaign(12, 100000)
+	var ids := MissionRegistry.reputation_tiers().map(func(t: Dictionary) -> String: return String(t.id))
+	check(ids == ["hostile", "distrusted", "neutral", "trusted", "allied"], "five tiers: Hostile, Distrusted, Neutral, Trusted, Allied (%s)" % [ids])
+	# Ripple: Meridian's enemies are Black Ridge and Vantage.
+	var br := Economy.reputation("black_ridge")
+	var su := Economy.reputation("salvage_union")
+	Economy.change_reputation("meridian", 8, "test")
+	check(Economy.reputation("black_ridge") == br - 2 and Economy.reputation("salvage_union") == su,
+		"rep with Meridian rises: its enemy Black Ridge drops a quarter of it, the neutral Salvage Union doesn't move (%d, %d)" % [Economy.reputation("black_ridge") - br, Economy.reputation("salvage_union") - su])
+	var before := Economy.reputation("black_ridge")
+	Economy.change_reputation("meridian", 2, "test")
+	check(Economy.reputation("black_ridge") == before, "a small change ripples nothing")
+	# Pay by tier.
+	Economy.change_reputation("meridian", 40 - Economy.reputation("meridian"), "test", false)
+	check(is_equal_approx(Economy.pay_mult("meridian"), 1.15) and is_equal_approx(Economy.pay_mult("salvage_union"), 1.0),
+		"Trusted pays x1.15, Neutral x1.0 (%.2f, %.2f)" % [Economy.pay_mult("meridian"), Economy.pay_mult("salvage_union")])
+	# Hostile: no work.
+	check(Economy.work_problem("black_ridge").contains("Hostile"), "a Hostile faction won't hire the company (%s)" % Economy.work_problem("black_ridge"))
+	# Side lockout: a Meridian job locks out Vantage for lockout_days.
+	Economy.change_reputation("vantage_group", 10 - Economy.reputation("vantage_group"), "test", false)
+	check(Economy.work_problem("vantage_group") == "", "Vantage would hire us at Neutral")
+	Economy.note_job("meridian")
+	var days := int(MissionRegistry.reputation_rules().get("lockout_days", 3))
+	check(Economy.work_problem("vantage_group").contains("enemies"), "after a Meridian job, its enemy Vantage won't (%s)" % Economy.work_problem("vantage_group"))
+	Economy.advance_days(days + 1, "test")
+	Economy.note_job("salvage_union")  # (keeps nothing locked)
+	check(Economy.work_problem("vantage_group") == "", "%d days on, the lockout is over" % (days + 1))
+	# Decay: no job with Meridian for a while: it drifts toward neutral.
+	var m := Economy.reputation("meridian")
+	var grace := int(MissionRegistry.reputation_rules().get("decay_grace_days", 7))
+	Economy.advance_days(grace + 3, "test")
+	check(Economy.reputation("meridian") < m and Economy.reputation("meridian") > 0, "no work for Meridian in %d days: Trusted drifts toward neutral (%d -> %d)" % [grace + 3, m, Economy.reputation("meridian")])
 
 
 # --- The debrief ---------------------------------------------------------------------------

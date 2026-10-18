@@ -28,6 +28,11 @@ const LOD0_BUILD_M := 650.0
 const LOD0_PER_FRAME := 2
 ## Heights fade to 0 over this band inside the zone's edge.
 const EDGE_FADE_M := 160.0
+## Folds in the ground (Proposed; a preset's land "folds_m" / "folds_wavelength_m" overrides):
+## swells and hollows this high (m, noise amplitude) over this wavelength.
+const FOLDS_M := 2.6
+const FOLDS_WAVELENGTH_M := 90.0
+const FOLDS_FULL_RELIEF_M := 10.0
 ## Flat pads under modules and landing zones: this much beyond the footprint stays flat,
 ## then the ground blends back over PAD_BLEND_M.
 const PAD_MARGIN_M := 6.0
@@ -175,6 +180,18 @@ func generate(def: Dictionary, flat: Array) -> void:
 	detail.fractal_type = FastNoiseLite.FRACTAL_FBM
 	detail.fractal_octaves = 2
 	detail.frequency = 1.0 / float(land.get("detail_wavelength_m", 160.0))
+	# Folds (land "folds_m" over "folds_wavelength_m", FOLDS_M / FOLDS_WAVELENGTH_M without;
+	# Captain, 2026-10-18: "we need to not have so many 300m sightlines"): low swells and hollows
+	# a couple of metres high, too gentle to slow anyone, that make dead ground a man can drop
+	# into. They break up the long flat lines the bigger shapes leave (tests/sightline_probe.gd).
+	# A zone made nearly flat (its "relief_m" under FOLDS_FULL_RELIEF_M: test grounds) gets folds to
+	# match; a definition's own "folds_m" wins.
+	var folds_m := float(def.get("folds_m", float(land.get("folds_m", FOLDS_M)) * clampf(float(def.get("relief_m", 18.0)) / FOLDS_FULL_RELIEF_M, 0.0, 1.0)))
+	var folds := FastNoiseLite.new()
+	folds.seed = seed_value + 6
+	folds.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+	folds.fractal_type = FastNoiseLite.FRACTAL_NONE  # one smooth octave: gentle enough for landing zones (LandingZone.MAX_SLOPE_DEG)
+	folds.frequency = 1.0 / float(land.get("folds_wavelength_m", FOLDS_WAVELENGTH_M))
 	var berm_m := float((preset.get("wadi", {}) as Dictionary).get("berm_m", 0.0))
 	# The margin (land "margin"; Captain, 2026-10-14: the salt flats were a flat white plate
 	# meeting the sky): a low berm and flat-topped, two-tier mesas in a band inside the edge,
@@ -218,6 +235,8 @@ func generate(def: Dictionary, flat: Array) -> void:
 			var h := n * relief_m + offset
 			if detail_m > 0.0:
 				h += detail.get_noise_2d(x, z) * detail_m
+			if folds_m > 0.0:
+				h += folds.get_noise_2d(x, z) * folds_m
 			var carve := 0.0
 			var berm := 0.0
 			for w: Dictionary in wadis:

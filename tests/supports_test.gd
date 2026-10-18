@@ -19,7 +19,7 @@ extends Node
 ## Without arguments only the host's checks run. Each process prints SUPPORTS TEST
 ## PASSED/FAILED and exits with its failure count; the host exits when the client leaves.
 
-const DEF := {"id": "supports_test", "name": "Supports test", "kind": "hot", "size_m": 1280, "seed": 11, "relief_m": 2.0,
+const DEF := {"id": "supports_test", "name": "Supports test", "kind": "hot", "size_m": 1280, "seed": 11, "relief_m": 2.0, "folds_m": 0.0,
 	"modules": [], "insertion": [[0.0, 250.0]], "extraction": [[0.0, -420.0]]}
 ## Where the host's player stands; the wall, the ramp and the slab for the landing checks.
 const HOME := Vector3(0, 0, 250)

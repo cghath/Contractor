@@ -186,14 +186,81 @@ func take_run_expenses() -> Array:
 	return out
 
 
-func change_reputation(faction: String, delta: int, why := "") -> void:
+## Host: `faction`'s reputation moves by `delta`. With `ripple` (wave 6a, decided: "gaining rep
+## with a faction slightly raises it with that faction's allies and lowers it with its
+## enemies"), "ripple_ally" of it goes to its allies and the opposite "ripple_enemy" to its
+## enemies (whole points, toward zero: a small change ripples nothing), once: the ripple doesn't ripple again.
+func change_reputation(faction: String, delta: int, why := "", ripple := true) -> void:
 	if delta == 0 or faction == "":
 		return
 	var rep: Dictionary = _section().rep
 	rep[faction] = clampi(int(rep.get(faction, 0)) + delta, REP_MIN, REP_MAX)
 	if why != "":
 		print("[economy] reputation %s %+d (%s)" % [faction, delta, why])
+	if ripple:
+		var rules := MissionRegistry.reputation_rules()
+		for ally: String in MissionRegistry.allies_of(faction):
+			change_reputation(ally, int(delta * float(rules.get("ripple_ally", 0.0))), "", false)
+		for enemy: String in MissionRegistry.enemies_of(faction):
+			change_reputation(enemy, -int(delta * float(rules.get("ripple_enemy", 0.0))), "", false)
 	_commit()
+
+
+## Host: the squad worked for `faction` today (a contract signed or settled): its reputation
+## doesn't decay for a while, and its enemies won't hire the squad for "lockout_days" (wave 6a,
+## decided: side lockout).
+func note_job(faction: String) -> void:
+	if faction == "":
+		return
+	var s := _section()
+	var jobs: Dictionary = s.get("rep_jobs", {})
+	jobs[faction] = int(s.day)
+	s["rep_jobs"] = jobs
+	var locks: Dictionary = s.get("lockouts", {})
+	var until := int(s.day) + int(MissionRegistry.reputation_rules().get("lockout_days", 0))
+	for enemy: String in MissionRegistry.enemies_of(faction):
+		locks[enemy] = maxi(int(locks.get(enemy, 0)), until)
+	s["lockouts"] = locks
+	_commit()
+
+
+## Why `faction` won't hire the squad now ("" if it will): Hostile reputation, or locked out
+## for working for its enemies.
+func work_problem(faction: String) -> String:
+	if faction == "":
+		return ""
+	if bool(MissionRegistry.tier_of(reputation(faction)).get("no_work", false)):
+		return "%s won't work with the company (Hostile)" % MissionRegistry.faction(faction).get("name", faction)
+	var until := int((state().get("lockouts", {}) as Dictionary).get(faction, 0))
+	if day() <= until:
+		return "%s won't hire you while you work for their enemies (until day %d)" % [MissionRegistry.faction(faction).get("name", faction), until]
+	return ""
+
+
+## What `faction` pays at the squad's tier with it (the tier's "pay_mult", 1 without one).
+func pay_mult(faction: String) -> float:
+	return float(MissionRegistry.tier_of(reputation(faction)).get("pay_mult", 1.0)) if faction != "" else 1.0
+
+
+## Host, once a day: every faction the squad hasn't worked for in "decay_grace_days" (an Allied
+## one "allied_grace_days") drifts "decay_per_day" toward neutral (wave 6a, decided: rep decay).
+func _decay_reputation() -> void:
+	var s := _section()
+	var rules := MissionRegistry.reputation_rules()
+	var step := int(rules.get("decay_per_day", 0))
+	if step <= 0:
+		return
+	var rep: Dictionary = s.rep
+	var jobs: Dictionary = s.get("rep_jobs", {})
+	for f: String in rep.keys():
+		var r := int(rep[f])
+		if r == 0:
+			continue
+		var allied: bool = MissionRegistry.tier_of(r).get("id", "") == "allied"
+		var grace := int(rules.get("allied_grace_days" if allied else "decay_grace_days", 7))
+		var since := int(s.day) - int(jobs.get(f, MissionRegistry.setting_i("start_day", 1)))
+		if since > grace:
+			rep[f] = r - signi(r) * mini(step, absi(r))
 
 
 func change_locals(delta: int) -> void:
@@ -214,6 +281,7 @@ func advance_days(days: int, reason := "") -> void:
 		if (int(s.day) - MissionRegistry.setting_i("start_day", 1)) % week_days == 0:
 			s.week = int(s.week) + 1
 			pay_week()
+		_decay_reputation()
 	if reason != "":
 		print("[economy] %d day%s pass (%s): day %d" % [days, "" if days == 1 else "s", reason, int(s.day)])
 	_commit()

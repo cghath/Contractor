@@ -74,9 +74,9 @@ func check(condition: bool, what: String) -> void:
 
 func _test_generation() -> void:
 	print("Mission types in the zones")
-	var nine: Array[String] = ["raid", "hvt_capture", "hostage_rescue", "intel_grab", "convoy_ambush", "defend_hold", "crew_rescue", "sabotage", "recon"]
+	var nine: Array[String] = ["raid", "hvt_capture", "hostage_rescue", "intel_grab", "convoy_ambush", "defend_hold", "crew_rescue", "sabotage", "recon", "psd_escort"]
 	check(MissionRegistry.types() == nine,
-		"Captain's first four mission types, then mission variety's convoy ambush, hold the line, crew rescue, sabotage and recon (%s)" % [MissionRegistry.types()])
+		"Captain's first four mission types, then mission variety's convoy ambush, hold the line, crew rescue, sabotage and recon, and the client escort (%s)" % [MissionRegistry.types()])
 	var sound := true
 	var zones_ok := true
 	for z: Dictionary in MissionRegistry.zones():
@@ -772,6 +772,16 @@ func _test_enemy_response() -> void:
 		if not r.pending and not r.lost and not er._living(r.soldiers).is_empty():
 			looker = r
 			break
+	# Dynamic simulation (Captain, 2026-10-18): far from every player an AI sleeps, near it wakes.
+	if not looker.is_empty():
+		var walker: Soldier = er._living(looker.soldiers)[0]
+		var at := walker.global_position
+		var far: Array[Vector3] = [at + Vector3(DynamicSim.SLEEP_M + 400.0, 0, 0)]
+		var near: Array[Vector3] = [at + Vector3(DynamicSim.WAKE_M - 100.0, 0, 0)]
+		var between: Array[Vector3] = [at + Vector3((DynamicSim.SLEEP_M + DynamicSim.WAKE_M) * 0.5, 0, 0)]
+		check(DynamicSim.of(level) != null and DynamicSim.should_sleep(walker, far, false) and not DynamicSim.should_sleep(walker, near, true)
+			and DynamicSim.should_sleep(walker, between, true) and not DynamicSim.should_sleep(walker, between, false),
+			"dynamic sim: a patrol far from every player sleeps, wakes as one comes near (between the two it stays as it was)")
 	if not looker.is_empty():
 		for r: Dictionary in er.patrols:
 			r.looking_until = -INF
@@ -784,6 +794,71 @@ func _test_enemy_response() -> void:
 		alert.advance(EnemyResponse.LOOK_S + 1.0)
 		er.server_tick()
 		check(float(looking[0].looking_until) == -INF and (looking[0].squad as Squad).patrol == looking[0].walk, "after a look it goes back to its route")
+		# Captain, 2026-10-18 ("swarmy"): one contact, one look; more patrols rally, then go in together.
+		var free := er.patrols.filter(func(r: Dictionary) -> bool: return not r.pending and not r.lost and not er._living(r.soldiers).is_empty())
+		if free.size() >= 2:
+			for r: Dictionary in er.patrols:
+				r.looking_until = -INF
+				r.erase("look_rally")
+			er.looks.clear()
+			var was_state := alert.zone_state
+			var spot2 := (er._living(free[0].soldiers)[0] as Soldier).global_position + Vector3(0, 0, 300)
+			for i in 6:
+				alert._receive({"kind": &"shot", "pos": spot2 + Vector3(i * 3.0, 0, 0), "area": alert.area_of(spot2), "by": ""})
+			var on_it := er.patrols.filter(func(r: Dictionary) -> bool: return float(r.looking_until) > er.now())
+			check(on_it.size() == 1 and er.looks.size() == 1, "a burst of shots in one spot sends one patrol, not one per shot (%d)" % on_it.size())
+			alert.zone_state = Alert.State.ALERTED
+			if not er.looks.is_empty():
+				er.looks[0].added_at = er.now() - EnemyResponse.LOOK_ESCALATE_S - 1.0
+			alert._receive({"kind": &"shot", "pos": spot2, "area": alert.area_of(spot2), "by": ""})
+			on_it = er.patrols.filter(func(r: Dictionary) -> bool: return float(r.looking_until) > er.now())
+			var rallying := on_it.filter(func(r: Dictionary) -> bool: return r.has("look_rally"))
+			check(on_it.size() == 2 and not rallying.is_empty() and rallying.all(func(r: Dictionary) -> bool:
+					return (r.squad as Squad).patrol.size() == 1 and absf(Vector2(r.look_rally.x - spot2.x, r.look_rally.z - spot2.z).length() - EnemyResponse.LOOK_RALLY_M) < 3.0),
+				"alerted, a minute on: a second patrol joins, and they rally %d m short first" % int(EnemyResponse.LOOK_RALLY_M))
+			for r: Dictionary in rallying:
+				r.look_rally = (er._living(r.soldiers)[0] as Soldier).global_position  # say they're there
+			er._tick_looks()
+			check(on_it.all(func(r: Dictionary) -> bool: return not r.has("look_rally") and (r.squad as Squad).patrol.size() == 1 + EnemyResponse.LOOK_POINTS),
+				"all at their rally points: they go in together")
+			alert.zone_state = was_state
+			for r: Dictionary in er.patrols:
+				r.looking_until = -INF
+				r.erase("look_rally")
+				if not r.pending and is_instance_valid(r.squad):
+					er._set_route(r.squad, er._living(r.soldiers), r.walk)
+			er.looks.clear()
+		# Trackers (Captain, 2026-10-18; inspired by S.O.G. Prairie Fire's): a patrol out on a look
+		# that comes across the squad's trail signals, follows it mark by mark, and loses it on a road.
+		var trail := SquadTrail.of(level)
+		check(trail != null, "the zone keeps the squad's trail")
+		if trail and not looker.is_empty() and not er._living(looker.soldiers).is_empty():
+			var lead: Soldier = er._living(looker.soldiers)[0]
+			var start := lead.global_position
+			trail.set_process(false)  # (the squad's own live marks stay out of this one)
+			trail.marks.clear()
+			for i in 4:
+				trail.marks.append({"pos": start + Vector3(5.0 + 20.0 * i, 0, 0), "t": Soldier._now() - 60.0 + i, "broken": false})
+			trail.marks.append({"pos": start + Vector3(85.0, 0, 0), "t": Soldier._now() - 55.0, "broken": true})  # a road
+			looker.looking_until = er.now() + 120.0
+			var signals := alert.reports.size()
+			check(er._track(looker, er._living(looker.soldiers)) and looker.has("trail_mark")
+				and alert.reports.size() > signals and alert.reports.back().kind == &"signal",
+				"a patrol out looking picks up the trail beside it and fires signal shots (a report on the net)")
+			for step in 4:
+				if looker.get("trail_mark") == trail.marks[3]:
+					break
+				lead.global_position = looker.trail_mark.pos
+				looker.track_next = 0.0
+				er._track(looker, er._living(looker.soldiers))
+			check(looker.get("trail_mark") == trail.marks[3], "and follows it, mark by mark")
+			lead.global_position = looker.trail_mark.pos
+			looker.track_next = 0.0
+			check(not er._track(looker, er._living(looker.soldiers)) and not looker.has("trail_mark"), "where it crosses a road the prints stop: the trail is lost")
+			trail.marks.clear()
+			trail.set_process(true)
+			looker.looking_until = -INF
+			er._set_route(looker.squad, er._living(looker.soldiers), looker.walk)
 	# The QRF.
 	_calm()
 	er._zone_was = Alert.State.NORMAL
@@ -866,6 +941,20 @@ func _test_enemy_response() -> void:
 	check(hsquad != null and hsquad.patrol.any(func(p: Vector3) -> bool: return Vector2(p.x - lk.x, p.z - lk.z).length() < 2.0)
 		and hunters.all(func(s: Soldier) -> bool: return s.inventory.count_of(EnemyResponse.SMOKE) > 0),
 		"the hunters head for the last known position, carrying smoke")
+	# Captain, 2026-10-18 ("add the changes to the hotzone ai"): the QRF and the hunters on one
+	# contact are one push: they wait at their rally points and go in together.
+	var push: Dictionary = {}
+	for pu: Dictionary in er.pushes:
+		if (pu.groups as Array).any(func(g: Dictionary) -> bool: return g.ref == team):
+			push = pu
+	if not push.is_empty() and (push.groups as Array).size() >= 2:
+		var rallying := (push.groups as Array).filter(func(g: Dictionary) -> bool: return (g.ref as Dictionary).has("rally"))
+		check(not rallying.is_empty() and float(push.go_at) < INF, "the QRF and the hunters on one contact are one push: %d of %d groups wait at rally points" % [rallying.size(), (push.groups as Array).size()])
+		push.go_at = er.now() - 1.0
+		er._tick_pushes()
+		check((push.groups as Array).all(func(g: Dictionary) -> bool: return not (g.ref as Dictionary).has("rally")), "then go in together")
+	else:
+		check(not push.is_empty(), "the hunters join a push on the contact (%d groups)" % ((push.get("groups", []) as Array).size()))
 	# One shared budget (Captain, 2026-10-16: "too many ai in hot zones spawning and coming for the player").
 	check(er.alive_total() <= er.spawn_budget(),
 		"everything spawned (patrols, hunters, HQ pairs, QRF waves) within the shared budget (%d of %d)" % [er.alive_total(), er.spawn_budget()])
@@ -890,6 +979,8 @@ func _test_enemy_response() -> void:
 func _end_response(er: EnemyResponse, before: Array) -> void:
 	_free_new(before)
 	er.patrols.clear()
+	er.looks.clear()
+	er.pushes.clear()
 	er.hunters.clear()
 	er.reinforcement_pairs.clear()
 	er._started = false
@@ -1307,7 +1398,7 @@ func _drop_all(s: Soldier, id: StringName) -> void:
 
 # --- Mission variety: convoy, hold, crew rescue, sabotage, recon ----------------------------------
 
-const NEW_TYPES: Array[String] = ["convoy_ambush", "defend_hold", "crew_rescue", "sabotage", "recon"]
+const NEW_TYPES: Array[String] = ["convoy_ambush", "defend_hold", "crew_rescue", "sabotage", "recon", "psd_escort"]
 
 
 ## Deploys a new contract of `type` in the zone and returns {"cid", "why", "objectives"}.
@@ -1488,6 +1579,28 @@ func _test_scenarios() -> void:
 	check(Contracts.objectives.get_objective(main.oid).state == Objectives.FAILED, "two of the crew dead: the rescue fails (%s)" % Contracts.objectives.get_objective(main.oid).progress)
 	debrief = _end_deployment()
 	check(debrief.contracts[0].outcome != "completed" and int(debrief.contracts[0].pay) == 0, "debrief: no pay for a lost crew (%s)" % debrief.contracts[0].outcome)
+	await _clean_scenario(before)
+
+	# Client escort (Captain, 2026-10-17: real-world inspired): one client, no wreck, an ambush on
+	# the way out, waves after the client; the bonus for bringing them out unhurt.
+	var escort_waves := r.waves.size()
+	d = await _deploy_new("psd_escort")
+	main = _kind(d.objectives, Objectives.RESCUE_CREW)
+	var unhurt := _kind(d.objectives, Objectives.RESCUE_CREW, true)
+	run = scen.run_of(String(main.oid))
+	check(not main.is_empty() and (main.params.crew as Array).size() == 1 and int(main.params.need) == 1 and run.get("wreck") == null
+		and (run.crew as Array).size() == 1 and not unhurt.is_empty() and bool(unhurt.params.get("unhurt", false)),
+		"an escort: one client to bring out, no wreck, an unhurt bonus")
+	check(r.waves.size() > escort_waves and (run.get("ambush", []) as Array).size() >= 1, "an ambush team goes out to lie in wait (%d)" % (run.get("ambush", []) as Array).size())
+	var client: Soldier = run.crew[0]
+	check(level.people.hvt(String(main.params.crew[0].hvt)) == client and client.faction == Person.FACTION, "the client is a person of the friendly side")
+	client.vitals.server_hit(Vitals.FOREARM_L, {"round_class": Vitals.FRAGMENT, "superficial": true})
+	scen.server_advance(1.0)
+	check(Contracts.objectives.get_objective(unhurt.oid).state == Objectives.FAILED, "hurt on the way: the unhurt bonus is gone")
+	Contracts.server_hvt_delivered(String(main.params.crew[0].hvt), true)
+	check(Contracts.objectives.get_objective(main.oid).state == Objectives.DONE, "delivered alive: the escort is done")
+	debrief = _end_deployment()
+	check(debrief.contracts[0].outcome == "completed", "debrief: completed (%s)" % debrief.contracts[0].outcome)
 	await _clean_scenario(before)
 
 	# Recon: observe the sites; the bonus for never being spotted.

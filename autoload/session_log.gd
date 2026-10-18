@@ -454,6 +454,9 @@ func perf_line() -> String:
 	var text := "perf: frame %.1f ms avg, %.1f ms worst (%.0f fps); %d AI, %d player%s; %s; nav rebakes %d; %s" % [
 		avg * 1000.0, _perf_worst * 1000.0, 1.0 / maxf(avg, 0.0001), ai, players, "" if players == 1 else "s", modules, _rebakes,
 		memory_text()]
+	var sim: Node = level.get_node_or_null(^"DynamicSim") if level else null  # (untyped: an autoload compiles before the class cache)
+	if sim:
+		text += "; %d AI asleep (dynamic sim)" % int(sim.get(&"asleep"))
 	text += "; worst frame: %s" % costs_text(_worst_costs, _worst_engine)
 	_perf_frames = 0
 	_perf_sum = 0.0

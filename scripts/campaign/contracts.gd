@@ -352,6 +352,10 @@ func server_add_offer(c: Dictionary) -> String:
 
 func _add_offer(c: Dictionary) -> Dictionary:
 	var s := _s()
+	var mult := Economy.pay_mult(String(c.get("employer", "")))  # what they pay at the squad's tier with them (wave 6a)
+	if not is_equal_approx(mult, 1.0) and int(c.get("base_pay", 0)) > 0:
+		c.base_pay = maxi(500, roundi(int(c.base_pay) * mult / 500.0) * 500)
+		c["tier_pay_mult"] = mult
 	c.cid = "K%04d" % int(s.next_id)
 	c.uid = "%d-%s" % [int(s.get("tag", 0)), c.cid]  # unique across campaigns: the people and intel it places
 	s.next_id = int(s.next_id) + 1
@@ -415,7 +419,9 @@ func server_accept(cid: String, terms: Dictionary, peer_id := 1, over_cap := fal
 	elif not over_cap and (s.held as Array).size() >= MissionRegistry.setting_i("max_held", 4):
 		why = "The company can't hold more than %d contracts" % MissionRegistry.setting_i("max_held", 4)
 	else:
-		why = ContractGen.terms_problem(terms, Economy.reputation(String(c.employer)))
+		why = Economy.work_problem(String(c.get("employer", "")))  # Hostile, or locked out (wave 6a)
+		if why == "":
+			why = ContractGen.terms_problem(terms, Economy.reputation(String(c.employer)))
 	if why != "":
 		_notify(peer_id, why)
 		return why
@@ -429,6 +435,7 @@ func server_accept(cid: String, terms: Dictionary, peer_id := 1, over_cap := fal
 	(s.board as Array).erase(c)
 	(s.held as Array).append(c)
 	Economy.add_cash(int(deal.advance), "Advance: %s" % c.title)
+	Economy.note_job(String(c.get("employer", "")))  # its enemies won't hire the squad for a while
 	_notify_all("Contract signed: %s. Advance $%s paid." % [c.title, DebriefCalc.money(deal.advance)])
 	_commit()
 	_save()
@@ -758,6 +765,8 @@ func server_end_deployment(report: Dictionary) -> Dictionary:
 			Economy.add_cash(-int(line.clawback), "Advance clawed back (voided): %s" % line.title)
 	for f: String in debrief.rep:
 		Economy.change_reputation(f, int(debrief.rep[f]), "debrief")
+	for c: Dictionary in deployed:
+		Economy.note_job(String(c.get("employer", "")))  # the lockout counts again from the debrief
 	Economy.change_locals(int(debrief.locals))
 	for c: Dictionary in deployed:
 		var result: Dictionary = (debrief.contracts as Array).filter(func(l: Dictionary) -> bool: return l.cid == c.cid)[0]
