@@ -795,6 +795,10 @@ func _test_escort() -> void:
 	for a in escorts:
 		a.hold_fire = false
 	# Wounded: the escorts see to him, a medic is pulled to him and takes over.
+	var medic_at := NavigationServer3D.map_get_closest_point(hvt.get_world_3d().navigation_map, hvt.global_position + Vector3(18, 0, 0))
+	_place(medic, medic_at + Vector3.UP * 0.1)
+	await _frames(2)
+	check(medic.global_position.distance_to(hvt.global_position) > 8.0, "the medic starts away from the wounded HVT")
 	hvt.vitals.server_damage(70.0)
 	await _wait_until(func() -> bool: return not hvt.vitals.is_up(), 3.0)
 	# Remembered contact must not keep an escort on the escort intent: care beats
@@ -810,7 +814,12 @@ func _test_escort() -> void:
 	await _wait_until(func() -> bool: return is_instance_valid(hvt.care_by), 6.0)
 	var first: Soldier = hvt.care_by
 	check(first == e1 or first == e2, "down: an escort is on him first (%s)" % (first.name if first else "nobody"))
+	await _wait_until(func() -> bool: return SquadAI.of(medic).casualty == hvt, 5.0)
+	check(SquadAI.of(medic).care == SquadAI.Care.REACH and (hvt.care_by == e1 or hvt.care_by == e2),
+		"the escort keeps care while the medic is on the way")
 	await _wait_until(func() -> bool: return hvt.care_by == medic, 25.0)
+	check(hvt.care_by != medic or medic.global_position.distance_to(hvt.body_point()) <= SquadAI.CASUALTY_REACH + 0.25,
+		"the medic takes care over only after reaching the HVT's actual body")
 	check(hvt.care_by == medic and SquadAI.of(medic).casualty == hvt, "the medic is pulled to him and takes over (%s; medic: %s, intent %d, care %d, %.1f m, candidate %s, free %s, cares %s)" % [hvt.care_by.name if hvt.care_by else "nobody", medic.ai_status, SquadAI.of(medic).intent, SquadAI.of(medic).care, medic.global_position.distance_to(hvt.global_position), SquadAI.of(medic)._find_casualty(), SquadAI.of(medic)._free_for(hvt), SquadAI.of(medic)._cares_for(hvt)])
 	check(escorts.all(func(a: SquadAI) -> bool: return a.escorting == hvt), "his escorts stay on him")
 	squad.give_order(player, Squad.Order.FOLLOW, player.global_position, PackedStringArray(["Esc1"]))

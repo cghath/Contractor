@@ -1741,10 +1741,23 @@ func _do_care() -> void:
 	if care == Care.BODY:
 		_carry_body()
 		return
-	if not is_instance_valid(casualty) or casualty.is_queued_for_deletion() or casualty.vitals.is_dead() or casualty.care_by != body:
-		_end_care()  # gone, dead, or a medic took over
+	if not is_instance_valid(casualty) or casualty.is_queued_for_deletion() or casualty.vitals.is_dead():
+		_end_care()
 		_think_cd = 0.0
 		return
+	if casualty.care_by != body:
+		var carer := _carer_of(casualty)
+		if carer == null:
+			casualty.care_by = body
+		elif care == Care.REACH and Person.is_hvt(casualty) and _takes_over_hvt(casualty, carer):
+			# The escort keeps treating while the medic approaches. Claiming from afar
+			# made him abandon care before the medic was actually beside the HVT.
+			_care_reach(in_contact(), true)
+			return
+		else:
+			_end_care()  # someone else took over
+			_think_cd = 0.0
+			return
 	var contact := in_contact()
 	match care:
 		Care.REACH:
@@ -1796,7 +1809,9 @@ func _take_casualty(c: Soldier) -> void:
 	if care != Care.NONE:
 		_end_care()
 	casualty = c
-	c.care_by = body
+	var carer := _carer_of(c)
+	if carer == null or carer == body or not Person.is_hvt(c) or not _takes_over_hvt(c, carer):
+		c.care_by = body
 	_start_reach()
 	_smoke_used = false
 	_has_cover = false
@@ -1829,8 +1844,8 @@ func _reset_reach() -> void:
 ## casualty can't be reached alive yet), this unit holds, smokes and puts suppressive fire on
 ## the threat first. At the casualty: one lying in the open is dragged to cover, otherwise
 ## treatment starts.
-func _care_reach(contact: bool) -> void:
-	var d := _flat_distance(casualty.body_point())
+func _care_reach(contact: bool, handoff := false) -> void:
+	var d := body.global_position.distance_to(casualty.body_point()) if handoff else _flat_distance(casualty.body_point())
 	if body.carrying == casualty:
 		care = Care.CARRY
 		return
@@ -1852,6 +1867,8 @@ func _care_reach(contact: bool) -> void:
 	if d > CASUALTY_REACH:
 		return
 	_has_destination = false
+	if handoff:
+		casualty.care_by = body
 	# (Never lift someone another is treating: it cut the Captain's IV short, P0164.)
 	if exposed and not is_instance_valid(casualty.carried_by) and not casualty.vitals.is_healing():
 		var spot: Variant = find_drag_cover(body.global_position, 10.0)
