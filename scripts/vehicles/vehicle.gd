@@ -263,6 +263,8 @@ static var spall_rng := _random_rng()
 
 signal seats_changed
 signal damaged(zone: StringName, hit: Dictionary)
+## Host: hits on it do this much damage (HeliCall sets it from an air wing upgrade, HeliUpgrades).
+var damage_mult := 1.0
 ## The vehicle is lost: destroyed, or on fire (a fire always ends in a wreck). Once.
 signal destroyed(vehicle: Vehicle)
 ## The fire burned out and it is a wreck now.
@@ -1207,6 +1209,14 @@ func exo_seat(index: int) -> bool:
 func _first_free_exo() -> int:
 	for i in _seat_nodes.size():
 		if occupant(i) == null and exo_seat(i):
+			return i
+	return -1
+
+
+## The first free fire-from-vehicle passenger seat (seat "ffv"), or -1.
+func _first_free_ffv() -> int:
+	for i in _seat_nodes.size():
+		if occupant(i) == null and seat_kind(i) == PASSENGER and String(spec.seats[i].get("ffv", "")) != "":
 			return i
 	return -1
 
@@ -2271,7 +2281,7 @@ func _add_carves(ops: Array) -> void:
 
 
 func _apply_damage(zone: Dictionary, res: Dictionary, at: Vector3, hit: Dictionary) -> void:
-	var dmg := float(res.damage_kj)
+	var dmg := float(res.damage_kj) * damage_mult
 	if dmg > 0.0:
 		var z: StringName = zone.zone
 		_zones[z] = maxf(float(_zones.get(z, 1.0)) - dmg / maxf(float(zone.hp_kj), 0.1), 0.0)

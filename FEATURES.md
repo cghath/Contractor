@@ -536,6 +536,10 @@ This list covers what is built and in the game today (2026-10-12). Work still un
   the briefing picks the side the helicopter comes in from. Pilots shown at the controls; the
   Petrel's co-pilot works a .50 cal belly turret. Pilots break away when hit.
 - Mantling works on the move: run at a ledge and jump to climb it without stopping.
+- Air wing upgrades (base Motor pool page, one-time campaign purchases): the Razorback heavy-lift
+  VTOL ($120,000: transport, extraction and insertion fly it, more troops than the Petrel),
+  an armoured cabin kit ($40,000: hits on support aircraft do 30% less damage) and fast turnaround
+  crews ($25,000: support cooldowns 40% shorter).
 
 ## Exosuits
 

@@ -110,6 +110,11 @@ that carries more troops — a progression tier, not a second unrelated choice. 
   images are about the transport role only. Leave it as the real-world-fidelity CAS asset it is
   today; a near-future gunship would be a separate, later proposal if wanted.
 
+**Built (2026-10-17, branch claude/heli-upgrades):** the unlock is an air wing upgrade bought at
+the base's Motor pool page ($120,000, Proposed), `HeliUpgrades.model_for` picks the airframe per
+call: transport, extraction and insertion fly the Razorback once owned. Two smaller upgrades ride
+the same system (armoured cabin kit, fast turnaround crews); see CHANGELOG.
+
 ### 1.3 Flight model: keep it a helicopter, or change the propulsion feel?
 
 **Recommendation: keep today's `Helicopter` flight model for both VTOL tiers.** Reasons:

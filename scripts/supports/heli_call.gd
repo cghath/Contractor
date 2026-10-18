@@ -150,6 +150,8 @@ static var extract_wait_s := 180.0
 
 var sup: HeliSupports
 var kind := ""
+## The airframe it flies (HeliUpgrades.model_for: the Razorback once bought, for the kinds it serves).
+var model := HeliSupports.MODEL
 var caller: Soldier
 ## Where it's going: {"source": "grid", "pos": Vector3} or {} (looking for smoke).
 var mark := {}
@@ -222,6 +224,7 @@ var _music_at := -1  # insertion: Time.get_ticks_msec() when the infil music sta
 func _init(p_sup: HeliSupports, p_kind: String, p_caller: Soldier, p_mark: Dictionary) -> void:
 	sup = p_sup
 	kind = p_kind
+	model = HeliUpgrades.model_for(kind)
 	caller = p_caller
 	mark = p_mark if p_mark.has("pos") else {}
 	if kind == "insertion":
@@ -323,9 +326,10 @@ func _launch_from_edge(lvl: ZoneLevel, layer: VehicleLayer) -> bool:
 func _spawn(lvl: Node, layer: VehicleLayer, start: Vector3, facing: Vector3) -> bool:
 	start.y = LandingZone.terrain_y(lvl, start) + Helicopter.CRUISE_AGL_M
 	exit = Vector3(start.x, start.y, start.z)
-	heli = layer.server_spawn(HeliSupports.MODEL, Transform3D(Basis.looking_at(facing, Vector3.UP), start), "", &"player") as Helicopter
+	heli = layer.server_spawn(model, Transform3D(Basis.looking_at(facing, Vector3.UP), start), "", &"player") as Helicopter
 	if heli == null:
 		return false
+	heli.damage_mult = HeliUpgrades.damage_mult()  # an armoured cabin kit (air wing upgrade)
 	heli.server_rearm()  # Captain, 2026-10-15: its M240H door guns go up loaded
 	_crew_gun()
 	heli.support = kind
@@ -416,7 +420,7 @@ func _say(state: String, text: String) -> void:
 ## Picks the landing spot for `at` (LandingZone: the nearest safe spot within 100 m). An
 ## extraction's point moves there. Returns false when there's none.
 func _choose_lz(at: Vector3) -> bool:
-	var found := LandingZone.find(level(), at, _ignore(), LandingZone.SEARCH_M, LandingZone.clear_for(HeliSupports.MODEL))
+	var found := LandingZone.find(level(), at, _ignore(), LandingZone.SEARCH_M, LandingZone.clear_for(model))
 	if not found.ok:
 		return false
 	lz = found.spot
@@ -473,7 +477,7 @@ func can_turn_back() -> bool:
 func server_set_destination(where: Dictionary) -> String:
 	if not where.has("pos"):
 		return "Give me a grid for the drop-off: a marker on the map"
-	var found := LandingZone.find(level(), where.pos, _ignore(), LandingZone.SEARCH_M, LandingZone.clear_for(HeliSupports.MODEL))
+	var found := LandingZone.find(level(), where.pos, _ignore(), LandingZone.SEARCH_M, LandingZone.clear_for(model))
 	if not found.ok:
 		return "No safe LZ within %d m of %s: pick another" % [roundi(LandingZone.SEARCH_M), _grid(where.pos)]
 	dest = where
@@ -653,7 +657,7 @@ func _step_carry() -> void:
 		if cloud:
 			var at := level().ground_point(cloud.global_position)
 			sup.claimed[cloud.get_instance_id()] = self
-			var found := LandingZone.find(level(), at, _ignore(), LandingZone.SEARCH_M, LandingZone.clear_for(HeliSupports.MODEL))
+			var found := LandingZone.find(level(), at, _ignore(), LandingZone.SEARCH_M, LandingZone.clear_for(model))
 			if found.ok:
 				dest_lz = found.spot
 				lz = dest_lz

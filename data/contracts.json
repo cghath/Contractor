@@ -235,7 +235,7 @@
 		"salvage_base": 0.1,
 		"salvage_per_point": 0.1,
 		"salvage_max": 0.7,
-		"support_per_point": 5000,
+		"support_per_point": 23000,
 		"renegotiate_pay_per_step": 0.25,
 		"clean_bonus_share": 0.1,
 		"civilian_fine": 2500,

@@ -455,7 +455,6 @@ func _build_motor_pool(rows: VBoxContainer) -> void:
 	var pool: Array = node.pool if node else []
 	if pool.is_empty():
 		rows.add_child(UiKit.text("The company owns no vehicles."))
-		return
 	for e: Dictionary in pool:
 		var quote: Dictionary = e.get("quote", {})
 		var why := String(e.get("problem", ""))
@@ -477,6 +476,25 @@ func _build_motor_pool(rows: VBoxContainer) -> void:
 			service.tooltip_text = why if why != "" else "Ready: nothing to fix"
 		rows.add_child(_line("%s: %d%% damaged, %d L fuel%s" % [String(e.name), roundi(float(e.get("damage", 0.0)) * 100.0), roundi(float(e.get("fuel", 0.0))),
 			"" if why == "" else "  (%s)" % why], [service]))
+	_build_air_wing(UiKit.section("Air wing", rows))
+
+
+## The air wing's upgrades (HeliUpgrades, Captain 2026-10-17): each one's name, what it does
+## and its price, with Buy (Economy.buy_heli_upgrade: the host pays and records it) or Owned.
+func _build_air_wing(rows: VBoxContainer) -> void:
+	rows.add_child(UiKit.hint("One-time upgrades to the company's support aircraft. They apply to every support call from the next one on."))
+	for d: Dictionary in HeliUpgrades.defs():
+		var id := String(d.id)
+		var why := HeliUpgrades.problem(id)
+		var owned := HeliUpgrades.owned(id)
+		var buy := UiKit.button("Owned" if owned else "Buy: $%s" % DebriefCalc.money(int(d.get("cost", 0))), func() -> void:
+			Economy.buy_heli_upgrade(id)
+			get_tree().create_timer(0.5).timeout.connect(refresh), String(d.get("text", "")))
+		buy.name = "Upgrade_" + id.validate_node_name()
+		buy.disabled = why != ""
+		if why != "" and not owned:
+			buy.tooltip_text = why
+		rows.add_child(_line("%s: %s" % [String(d.get("name", id)), String(d.get("text", ""))], [buy]))
 
 
 ## The supply cage (feat/pallet-tagging, Pallets): the FOB's own stocks (fuel, parts, ammo,

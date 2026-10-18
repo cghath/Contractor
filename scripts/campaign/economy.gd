@@ -357,6 +357,23 @@ func server_pay_support(kind: String, cid := "") -> bool:
 	return false
 
 
+## Host: buys air wing upgrade `id` (HeliUpgrades: one-time, company-wide, kept in this
+## section's "heli_upgrades"). "" when bought, or why not.
+func server_buy_heli_upgrade(id: String) -> String:
+	var why := HeliUpgrades.problem(id)
+	if why != "":
+		return why
+	var d := HeliUpgrades.def(id)
+	if not spend(int(d.get("cost", 0)), "Air wing upgrade: %s" % String(d.get("name", id))):
+		return "Can't afford it"
+	var s := _section()
+	var owned: Array = s.get(HeliUpgrades.KEY, [])
+	owned.append(id)
+	s[HeliUpgrades.KEY] = owned
+	_commit()
+	return ""
+
+
 ## Host: items brought home (or bought) go to the base: stash_sink, or the base inbox.
 func bank_items(items: Array, why: String) -> void:
 	if items.is_empty():
@@ -460,6 +477,25 @@ func _sold(peer_id: int, item_id: StringName, got: int) -> void:
 func _rq_sell(item_id: String, count: int) -> void:
 	if multiplayer.is_server():
 		_sold(multiplayer.get_remote_sender_id(), StringName(item_id), BaseHub.server_sell_from_stash(StringName(item_id), clampi(count, 1, 50)))
+
+
+## Buys air wing upgrade `id` (HeliUpgrades); the result comes back as a notice.
+func buy_heli_upgrade(id: String) -> void:
+	if _is_host():
+		_heli_upgrade_bought(1, id, server_buy_heli_upgrade(id))
+	else:
+		_rq_heli_upgrade.rpc_id(1, id)
+
+
+func _heli_upgrade_bought(peer_id: int, id: String, why: String) -> void:
+	var upgrade_name := String(HeliUpgrades.def(id).get("name", id))
+	_notify(peer_id, ("Bought the %s" % upgrade_name) if why == "" else "%s: %s" % [upgrade_name, why])
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _rq_heli_upgrade(id: String) -> void:
+	if multiplayer.is_server():
+		_heli_upgrade_bought(multiplayer.get_remote_sender_id(), id, server_buy_heli_upgrade(id))
 
 
 func take_loan() -> void:
