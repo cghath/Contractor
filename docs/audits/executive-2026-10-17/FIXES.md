@@ -64,3 +64,34 @@ The only subsequent game-code change after R0036 is three stop-result guards in 
 The work branch stays local at the user's request. No remote push, publication or integration-branch update has occurred; validation uses the local runner.
 
 Old saves that already lost the original guard identity or the death record cannot reconstruct that missing history. The new ledger prevents future loss. Rendered play, microphone capture, exports and remote four-player play are outside this automated validation.
+
+## Review follow-up (October 18, 2026, cghath's side)
+
+Three independent code reviews of the fix branch (persistence and command; reserves, combat, AI
+and helicopter; navigation, tooling and tests) found the six findings fixed at the root and most
+fixture changes justified. They also found problems, now fixed on this branch:
+
+| Problem | Fix |
+| --- | --- |
+| **Blocker:** `tests.yml` used `${{ runner.temp }}` in a job's `env`, which GitHub rejects, so no CI job would start | The runner job's `CONTRACTOR_TEST_LOGS` moved into its two steps; the runner self-check reads the suite job only |
+| A two-base QRF approved per base, recorded two ops and could refuse its own second wave (tier 2, `MAX_OPS` 2) | Approved once per launch; later waves paid silently (`EnemyCommand.reserve_men`); short reserves still ask, so the denial is recorded and a stale-LKP hunter still probes |
+| While one medic walked in on an escort's HVT, every free medic converged on it | A pending handoff is marked on the HVT; others skip it; a downed or reassigned medic frees it |
+| Building answers depended on which scan height came first (raised structures with no entrance) | A building's ground is measured from its own floor, not the scan's reach; LRU eviction fixed |
+| Chunks baked from a module's proxy were never rebaked once its voxels were built; a breach on such a seam detoured | ZoneNav records proxy-baked chunks and rebakes them when the module is built; the seam test samples every 1.5 m on every floor, with breach and proxy/voxel cases |
+| The publish test's `! grep` "never" checks were ignored by `set -e`; it could reach real GitHub | `never()` fails the check (proved against a publisher that uploads to a public release); it requires the inert `gh` double, an unusable token and a fake tag |
+| `missions_test` turned the enemy commander off for the whole suite | Off only around hand-driven sections; a new end-to-end QRF launch with command on checks spent = spawned |
+| Probe scripts committed inside the project (Godot imports `docs/`) | Moved to `Contractor-test-logs/audit-2026-10-17-probes/`; reports only in the repo |
+
+Validation on the shared log counter (`Documents/Contractor-test-logs`): R0159 at `dc92b82` passed
+smoke, townperf, audit_fixes, missions, people, squad, spacing, casualty, medical, world, forest,
+contracts and roles. Town benchmark: average tick 17.65 ms, p95 25.79 ms, building scans 90 ms a
+second, engine step 0.89 ms (budgets 20 / 40 / 120); seams join after a breach and after proxy
+rebakes. Runner self-check S0143 and the CI suite parity check pass. The full 44-suite set is left to
+CI. On this machine `map` and `ui` fail even on untouched dev 38f5825 (R0146) and pass on CI.
+
+Still open: a breach on a seam can detour about 3 m while its module is streamed out; killed
+civilians and HVTs can still return after a reload once their body record is cleaned up (E-01's
+cause, people side); v0.4.10 to v0.4.36 saves may duplicate a garrison post once; Noah's "proxy
+navmesh while a town builds" (cccc0c7) never takes effect (`_structures_readable` is false until
+the world is built); dev's own CI is red on 15 suites at 38f5825, most of them fixtures this branch
+updates.
