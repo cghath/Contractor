@@ -19,6 +19,9 @@ var bodies: Array = []
 ## Vehicles in the zone, wrecks included (Vehicle.to_save), put back by VehicleLayer on load
 ## (wave 5). Rebuilt from the live vehicles (group "vehicles") on every save.
 var vehicles: Array = []
+## The zone's time of day and weather (DayNight.to_save: {"hour", "weather"}; wave 7). Empty:
+## the zone definition's.
+var sky: Dictionary = {}
 
 
 func new_uid() -> String:
@@ -67,6 +70,7 @@ func save_zone() -> bool:
 		"voxel_edits": voxel_edits,
 		"bodies": bodies,
 		"vehicles": vehicles,
+		"sky": sky,
 	}, "", true, true)  # full precision: item state (plate and helmet integrity) comes back exactly
 	if not write_safely(save_path(), text):
 		return false
@@ -83,6 +87,7 @@ func load_zone() -> void:
 	voxel_edits.clear()
 	bodies.clear()
 	vehicles.clear()
+	sky = {}
 	var zone := {}
 	for path: String in save_candidates(save_path()):
 		if not FileAccess.file_exists(path):
@@ -100,6 +105,7 @@ func load_zone() -> void:
 	voxel_edits = zone.voxel_edits
 	bodies = zone.bodies
 	vehicles = zone.get("vehicles", [])
+	sky = zone.get("sky", {})
 
 
 ## The previous good save, kept beside `path` by write_safely.
@@ -249,6 +255,10 @@ static func read_save(path: String) -> Dictionary:
 			out.vehicles.append(v)
 		else:
 			push_warning("GameState: %s: skipping a bad vehicle record" % path)
+	var sky_in: Variant = data.get("sky", {})  # saves from before wave 7 have none
+	if typeof(sky_in) == TYPE_DICTIONARY and is_number(sky_in.get("hour")) and is_finite(float(sky_in.hour)) \
+			and typeof(sky_in.get("weather")) == TYPE_STRING:  # an unknown weather reads as clear (DayNight)
+		out["sky"] = {"hour": float(sky_in.hour), "weather": String(sky_in.weather)}
 	return out
 
 

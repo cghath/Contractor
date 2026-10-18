@@ -177,6 +177,9 @@ static func zone_def(zone_id: String) -> Dictionary:
 		def["id"] = zone_id
 		def["name"] = String(raw.get("name", zone_id))
 		def["region"] = String(raw.get("region", ""))
+		for key: String in ["hour", "weather"]:  # the zone's time of day and weather (DayNight, wave 7 S1)
+			if raw.has(key):
+				def[key] = raw[key]
 		if not spec is String:
 			def.erase("terrain")  # generate() already chose one before it knew the name and region
 			var named: Variant = raw.get("terrain", spec.get("terrain", "") if spec is Dictionary else "")

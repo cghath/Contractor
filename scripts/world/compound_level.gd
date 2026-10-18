@@ -360,6 +360,7 @@ func _ready() -> void:
 	AavSupport.install(self)  # wave 5b (V4): the LHD or FOB origin, the AAV support, the motor pool
 	AlliedTroops.install(self)  # wave 6e: an allied rifle element through the support menu
 	add_child(GroundGuard.new())  # "GroundGuard": puts back on the ground anything lost below or past it
+	add_child(DayNight.new())  # "DayNight": time of day and weather, after _build_environment's lights (wave 7 S1)
 
 
 ## The playable area on the map, in metres on the ground plane (x along x, y along z): the
@@ -731,6 +732,8 @@ func _burst(pos: Vector3, colour: Color, size: float, life: float) -> void:
 func _on_hosted() -> void:
 	BodyVolume.warm(["", BodyVolume.FEMALE])  # hits are judged on the host: build both bodies' shapes before the first one
 	GameState.load_zone()
+	if DayNight.current():
+		DayNight.current().server_restore()  # the saved time and weather (wave 7 S1)
 	voxel_world.load_edits(GameState.voxel_edits)
 	for loot: Dictionary in starting_loot():
 		if not GameState.is_looted(loot.uid):
@@ -1126,6 +1129,11 @@ func _add_player(id: int) -> void:
 	(player as Soldier).vitals.went_down.connect(_on_soldier_down.bind(player))
 	BaseHub.server_player_added(self, player)  # campaign: their gear, the respawn pool (wave 4)
 	rebalance_squad()
+
+
+## Whether the weather grounds helicopters here now (Supports.can_fly; DayNight, wave 7 S1).
+func weather_grounds_aircraft() -> bool:
+	return DayNight.grounds_aircraft()
 
 
 ## Host: where the player of peer `id` comes in (the compound's gate; a zone's insertion).
