@@ -15,6 +15,7 @@ const GUNS := {
 	"svd": ["mag_svd", "762x54r_lps", "rounds_762x54r", "III++", "full_power"],
 	"m249": ["box_556", "556_m855", "rounds_556", "III++", "intermediate"],
 	"m240b": ["belt_762x51", "762x51_m80", "rounds_762", "III+", "full_power"],
+	"scar_h": ["mag_762", "762x51_m80", "rounds_762", "III+", "full_power"],
 	"m27": ["mag_556", "556_m855", "rounds_556", "III++", "intermediate"],
 	"hk416": ["mag_556", "556_m855", "rounds_556", "III++", "intermediate"],
 	"l85a2": ["mag_556", "556_m855", "rounds_556", "III++", "intermediate"],
@@ -23,9 +24,9 @@ const GUNS := {
 	"springfield_hs": ["mag_65cm", "65cm_eldm", "rounds_65cm", "III+", "full_power"],
 }
 ## Magazines and belts: capacity.
-const CAPACITY := {"mag_762x39": 30, "mag_545": 30, "mag_rpk40": 40, "mag_svd": 10, "belt_762x54r": 100, "box_556": 200, "belt_762x51": 100, "clip_762x54r": 5, "mag_65cm": 10}
+const CAPACITY := {"mag_762x39": 30, "mag_545": 30, "mag_rpk40": 40, "mag_svd": 10, "belt_762x54r": 100, "box_556": 200, "belt_762x51": 100, "clip_762x54r": 5, "mag_65cm": 10, "mag_762": 20}
 ## Guns fired and reloaded for real on the host player.
-const FIRED: Array[String] = ["akm", "ak74", "rpk", "pkm", "svd", "m249", "m240b", "mosin9130", "springfield_hs"]
+const FIRED: Array[String] = ["akm", "ak74", "rpk", "pkm", "svd", "m249", "m240b", "mosin9130", "springfield_hs", "scar_h"]
 const OPFOR: Array[String] = ["akm", "ak74", "rpk", "pkm", "svd"]
 
 var failures := 0
@@ -57,6 +58,8 @@ func _ready() -> void:
 	for id: String in FIRED:
 		await _test_fire_and_reload(id)
 	await _test_hostile_kits()
+	await _test_rival_pmc_kits()
+	await _test_rival_pmc_exo_gating()
 	_test_roles()
 	GameState.delete_save()
 	print("WEAPONS TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
@@ -263,6 +266,57 @@ func _test_roles() -> void:
 	print("Roles")
 	var ids := Roles.kit(Roles.AUTORIFLEMAN).map(func(p: Array) -> String: return String(p[0]))
 	check(ids.has("m249") and ids.has("box_556") and not ids.has("mag_556"), "the autorifleman's kit is an M249 and its boxes")
+	var hg_ids := Roles.kit(&"heavy_gunner").map(func(p: Array) -> String: return String(p[0]))
+	check(hg_ids.has("m240b") and hg_ids.has("belt_762x51"), "the heavy gunner's kit is an M240B and its belts")
+
+
+## CompoundLevel.rival_pmc_loadout: the Vantage Group rival PMC's own mix (M4s, SCAR-Hs, an
+## M240B and its ammo bearer), not Black Ridge's AKs, and the roles that go with it.
+func _test_rival_pmc_kits() -> void:
+	print("Vantage Group rival PMC carries modern gear")
+	var seen := {}
+	for i in CompoundLevel.PMC_MIX.size():
+		var kit := CompoundLevel.rival_pmc_loadout(i)
+		check(CompoundLevel.is_rival_pmc_kit(kit), "kit %d is a rival PMC kit" % i)
+		for id: String in ["m4a1", "scar_h", "m240b"]:
+			if kit.has(id):
+				seen[id] = true
+	check(seen.size() == 3, "the mix has the M4A1, SCAR-H and M240B (%s)" % ", ".join(seen.keys()))
+	check(not CompoundLevel.PMC_LOADOUT.has("akm") and CompoundLevel.PMC_LOADOUT.has("m4a1"), "the default PMC kit is an M4, not an AKM")
+	for i in CompoundLevel.PMC_MIX.size():
+		var s := level.spawn_soldier({"name": "WpnPmc%d" % i, "faction": "hostile", "variant": "urban",
+			"pos": Vector3(60 + i * 3, 0.1, 40), "loadout": CompoundLevel.rival_pmc_loadout(i), "combat": 0.5, "discipline": 0.5, "guard": true,
+			"role": CompoundLevel.rival_pmc_role(i)})
+		SquadAI.of(s).set_physics_process(false)
+		var gun := String(s.inventory.slots[&"primary"])
+		check(gun in ["m4a1", "scar_h", "m240b", "m110"], "rival PMC %d carries %s, not an AK-family gun" % [i, gun])
+		if gun == "m240b":
+			check(s.role == &"heavy_gunner", "the M240B carrier is cast as the heavy gunner")
+		s.queue_free()
+
+
+## Captain, 2026-10-17: "Vantage gets exo suits and heavy exo suits but only on higher diffs."
+## Below PMC_LX3_DIFFICULTY nobody wears exo gear; from it, everyone but the exo pilot slot
+## wears the LX-3; from PMC_HX1_DIFFICULTY that slot climbs straight into the HX-1 instead.
+func _test_rival_pmc_exo_gating() -> void:
+	print("Vantage's exo gear is difficulty-gated")
+	for i in CompoundLevel.PMC_MIX.size():
+		check(not CompoundLevel.rival_pmc_loadout(i, CompoundLevel.PMC_LX3_DIFFICULTY - 1).has("exo_frame_light"),
+			"kit %d below the LX-3 cutoff carries no exo frame" % i)
+	var lx3_kit := CompoundLevel.rival_pmc_loadout(0, CompoundLevel.PMC_LX3_DIFFICULTY)
+	check(lx3_kit.has("exo_frame_light") and lx3_kit.has("helmet_lx3") and not lx3_kit.has("helmet"),
+		"at the LX-3 cutoff, a normal slot wears the LX-3 frame and visor instead of a helmet (%s)" % [lx3_kit])
+	var pilot_kit := CompoundLevel.rival_pmc_loadout(CompoundLevel.PMC_EXO_PILOT_SLOT, CompoundLevel.PMC_HX1_DIFFICULTY - 1)
+	check(pilot_kit.has("exo_frame_light") and not pilot_kit.has("exo_mech_heavy"), "below the HX-1 cutoff the exo pilot slot wears the LX-3 like everyone else at this difficulty (%s)" % [pilot_kit])
+	check(CompoundLevel.rival_pmc_exo_at(CompoundLevel.PMC_EXO_PILOT_SLOT, CompoundLevel.PMC_HX1_DIFFICULTY - 1) == "",
+		"below the HX-1 cutoff nobody climbs into one")
+	var s := level.spawn_soldier({"name": "WpnPmcHx1", "faction": "hostile", "variant": "urban", "pos": Vector3(90, 0.1, 40),
+		"loadout": CompoundLevel.rival_pmc_loadout(CompoundLevel.PMC_EXO_PILOT_SLOT, CompoundLevel.PMC_HX1_DIFFICULTY), "combat": 0.5, "discipline": 0.5, "guard": true,
+		"exo": CompoundLevel.rival_pmc_exo_at(CompoundLevel.PMC_EXO_PILOT_SLOT, CompoundLevel.PMC_HX1_DIFFICULTY)})
+	SquadAI.of(s).set_physics_process(false)
+	check(ExoMech.piloting(s.inventory) and s.inventory.slots[&"primary"] == &"wg50_walker" and s.inventory.count_of(&"belt_50bmg") > 0,
+		"at the HX-1 cutoff the exo pilot climbs straight into the HX-1 with its Walker Gun (piloting %s, primary %s)" % [ExoMech.piloting(s.inventory), s.inventory.slots[&"primary"]])
+	s.queue_free()
 
 
 ## Tracers and the shot sound start at the muzzle, not the eye (Captain, 2026-10-16: "bullets

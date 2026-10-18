@@ -145,7 +145,7 @@ func server_show_roster() -> void:
 		var member := BaseHub.member(mid)
 		var pos := MUSTER_ORIGIN + MUSTER_STEP * (i % MUSTER_PER_ROW) + MUSTER_ROWS * (i / MUSTER_PER_ROW)
 		var stats := Roster.ai_stats(member)
-		var s := spawn_soldier({"name": String(member.callsign), "faction": "friendly", "variant": "multicam", "pos": pos,
+		var s := spawn_soldier({"name": String(member.callsign), "faction": "friendly", "variant": "tan", "pos": pos,
 			"loadout": [], "combat": stats.combat, "discipline": stats.discipline, "guard": false, "mode": "safe"})
 		s.role = StringName(member.role)
 		s.set_meta(&"roster_id", mid)

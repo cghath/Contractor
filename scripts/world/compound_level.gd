@@ -154,9 +154,13 @@ const HOSTILE_GUNS := {
 	"rpk": ["rpk", "mag_rpk40", "mag_rpk40", "mag_rpk40"],
 	"pkm": ["pkm", "belt_762x54r", "belt_762x54r"],
 	"svd": ["svd", "mag_svd", "mag_svd", "mag_svd", "mag_svd", "mag_svd"],
+	"ammo": ["akm", "mag_762x39", "mag_762x39", "belt_762x54r", "belt_762x54r"],  # the PKM's ammo bearer
 }
-## Who in a group of eight carries what: mostly AKs, a gunner, a marksman, a machine-gunner.
-const HOSTILE_MIX: Array[String] = ["akm", "ak74", "akm", "rpk", "ak74", "svd", "akm", "pkm"]
+## Who in a group of eight carries what: mostly AKs, a gunner (and its ammo bearer, Captain
+## 2026-10-17 "the new roles go to the factions too": Roles.HEAVY_GUNNER/AMMO_BEARER aren't
+## Vantage-only, SquadAI._maybe_resupply_gunner reads whichever belt ammo the gunner's own
+## weapon takes), a marksman, a machine-gunner.
+const HOSTILE_MIX: Array[String] = ["akm", "ak74", "akm", "rpk", "ak74", "svd", "ammo", "pkm"]
 const HOSTILE_LOADOUT := HOSTILE_BODY + HOSTILE_GUNS.akm + HOSTILE_TAIL
 
 
@@ -171,7 +175,118 @@ static func is_hostile_kit(kit: Array) -> bool:
 		if kit == hostile_loadout(i):
 			return true
 	return false
+
+
+## The AI role (Roles) to spawn the `index`-th hostile_loadout soldier with, Black Ridge's
+## counterpart to rival_pmc_role: "" for the AK riflemen, the marksman and the rest (the AI
+## casts by weapon already); the PKM carrier and his ammo bearer get the matching role so
+## SquadAI's casualty/medic-style bookkeeping can find them by role where that's handier, even
+## though the resupply behaviour itself only needs the weapon tags.
+static func hostile_role(index: int) -> String:
+	match HOSTILE_MIX[posmod(index, HOSTILE_MIX.size())]:
+		"pkm":
+			return "heavy_gunner"
+		"ammo":
+			return "ammo_bearer"
+		_:
+			return ""
 const HOSTILE_PATROL: Array[Vector3] = [Vector3(-12, 0, -2), Vector3(-12, 0, -16), Vector3(12, 0, -16), Vector3(12, 0, 0), Vector3(-4, 0, 2)]
+
+## The Vantage Group rival PMC (data/factions.json "vantage_group", CLAUDE.md squad-roles-pmc
+## bundle): a Western-pattern outfit, not the AKM-equipped Black Ridge militia. Same shape as
+## HOSTILE_BODY/HOSTILE_GUNS/HOSTILE_MIX above so the wiring at the call sites that pick between
+## the two (EnemyResponse.enemy_faction, Reinforcements.enemy_faction) is symmetrical.
+const PMC_FACTION := &"vantage_group"
+const PMC_BODY := ["plate_carrier", "plate_ceramic_l4", "helmet", "assault_pack"]
+## The LX-3-equipped body (near_future_hardware.md): the Visor Helmet and Assist Frame instead
+## of the normal helmet, same swap Roles.kit's lx3 argument makes for a player-facing role.
+const PMC_BODY_LX3 := ["plate_carrier", "plate_ceramic_l4", "helmet_lx3", "exo_frame_light", "assault_pack"]
+const PMC_TAIL := ["ifak", "frag_grenade"]
+const PMC_GUNS := {
+	"m4a1": ["m4a1", "mag_556", "mag_556", "mag_556", "mag_556"],
+	"scar_h": ["scar_h", "mag_762", "mag_762", "mag_762"],
+	"m240b": ["m240b", "belt_762x51", "belt_762x51"],
+	"ammo": ["m4a1", "mag_556", "mag_556", "belt_762x51", "belt_762x51", "belt_762x51"],  # ammo_bearer's own rifle plus the gunner's spares
+	"m110": ["m110", "mag_762", "mag_762", "mag_762"],
+}
+## Who in a group of eight carries what: mostly M4s, a battle rifle, the M240B pair (gunner,
+## then its ammo bearer right after so AI casting picks them up as neighbours), a marksman.
+const PMC_MIX: Array[String] = ["m4a1", "scar_h", "m4a1", "m240b", "ammo", "m4a1", "scar_h", "m110"]
+const PMC_LOADOUT := PMC_BODY + PMC_GUNS.m4a1 + PMC_TAIL
+## Exo gear by contract difficulty (Captain, 2026-10-17: "Vantage gets exo suits and heavy exo
+## suits but only on higher diffs"), the 1-5 rating ContractGen.rating gives a contract
+## (ZoneLevel._on_contract_live reads the live contract's true_rating). Cutoffs picked so exo
+## gear reads as an escalation, not Vantage's default look: LX-3 (a real but moderate edge —
+## speed, carry, Steel III++ pads) only once a mission is already hard (4-5); the HX-1 (a
+## armoured heavy-weapons platform, the far bigger threat jump) reserved for the hardest tier
+## alone (5), so running into a mech pilot stays a rare, serious escalation, not a mid-tier
+## nuisance.
+const PMC_LX3_DIFFICULTY := 4
+const PMC_HX1_DIFFICULTY := 5
+## Which mix index becomes the exo pilot when the difficulty allows it (one marksman slot: he
+## trades the M110 for the exo). exo_mech_heavy/wg50_walker can't go through the plain item-id
+## loadout list (Inventory._free_slot_for refuses a "mech" item and a "mech_only" weapon outside
+## ExoMech.server_enter's own flow on purpose: "never picked up or put on from the inventory");
+## equip_hx1 below does it the same way server_enter's end state would, with Inventory.put_on
+## (no checks) instead of the timed climb-in animation, which a freshly spawned hostile has no
+## reason to play out. First slice: spawns already in the suit, doesn't climb into one standing
+## in the world; see CHANGELOG.
+const PMC_EXO_PILOT_SLOT := 7
+
+
+## The Vantage Group kit for the `index`-th soldier of a team or wave (hostile_loadout's
+## counterpart): mostly M4s and SCAR-Hs, with an M240B gunner and the ammo bearer who resupplies
+## him (Roles.HEAVY_GUNNER / Roles.AMMO_BEARER; squad_ai.gd only reads the role it's spawned
+## with, not this gear list, so a mission setting "role" on these indices is what actually casts
+## them, same as ENEMY_MEDIC_EVERY does for "medic" today). `difficulty` (1-5) swaps the normal
+## helmet for the LX-3 frame from PMC_LX3_DIFFICULTY up; the exo pilot slot's own rifle is left
+## off (exo_pilot_at applies the HX-1 itself, not through this item list, see PMC_EXO_PILOT_SLOT).
+static func rival_pmc_loadout(index: int, difficulty := 1) -> Array:
+	if difficulty >= PMC_HX1_DIFFICULTY and posmod(index, PMC_MIX.size()) == PMC_EXO_PILOT_SLOT:
+		return PMC_BODY + PMC_TAIL  # the plain body, not the LX-3 one: equip_hx1 fills "exo" and "primary" itself
+	var body := PMC_BODY_LX3 if difficulty >= PMC_LX3_DIFFICULTY else PMC_BODY
+	return body + (PMC_GUNS[PMC_MIX[posmod(index, PMC_MIX.size())]] as Array) + PMC_TAIL
+
+
+## True when `index`'s rival_pmc_loadout soldier should climb straight into the HX-1 instead of
+## carrying a normal rifle (equip_hx1 does the rest, called from spawn_soldier's data via
+## spawn data's "exo": "hx1", the same way "role" casts an AI into Roles.HEAVY_GUNNER).
+static func rival_pmc_exo_at(index: int, difficulty: int) -> String:
+	return "hx1" if difficulty >= PMC_HX1_DIFFICULTY and posmod(index, PMC_MIX.size()) == PMC_EXO_PILOT_SLOT else ""
+
+
+## Host: puts `soldier` straight into the HX-1 Assault Frame and its WG-50 Walker Gun, as if
+## ExoMech.server_enter's climb-in had already finished (a freshly spawned hostile has no suit
+## standing in the world to climb into, and no reason to play out the 3.5 s animation): the same
+## end state through Inventory.put_on (ExoMech/ExoFrame read the exo slot reactively — piloting,
+## size, pad armour — so nothing else needs to be set by hand). The pilot's own rifle, if any,
+## comes off first (unused once suited: the suit hides his kit, ExoMech 2.3).
+static func equip_hx1(inv: Inventory) -> void:
+	inv.put_on(ExoFrame.SLOT, &"exo_mech_heavy")
+	inv.unequip(&"primary")
+	inv.put_on(&"primary", &"wg50_walker")
+	inv.take(&"belt_50bmg", 2)
+
+
+## True for PMC_LOADOUT and every kit rival_pmc_loadout hands out.
+static func is_rival_pmc_kit(kit: Array) -> bool:
+	for i in PMC_MIX.size():
+		if kit == rival_pmc_loadout(i):
+			return true
+	return false
+
+
+## The AI role (Roles) to spawn the `index`-th rival_pmc_loadout soldier with, so its
+## squad_ai.gd behaviour (the ammo bearer topping up its gunner) matches the gear it's holding;
+## "" (AI picks by weapon, as every other hostile does) for the rest of the mix.
+static func rival_pmc_role(index: int) -> String:
+	match PMC_MIX[posmod(index, PMC_MIX.size())]:
+		"m240b":
+			return "heavy_gunner"
+		"ammo":
+			return "ammo_bearer"
+		_:
+			return ""
 
 @onready var players: Node3D = $Players
 @onready var ai: Node3D = $AI
@@ -821,7 +936,7 @@ func _spawn_squadmate(slot: int, role: StringName, team: int) -> Soldier:
 	var wedge: Array = Squad.FORMATIONS["wedge"]
 	var pos := anchor.global_transform * (wedge[maxi(slot - 1, 0) % wedge.size()] as Vector3) if anchor \
 		else spawn_point(slot) + Vector3(0, 0, 3)
-	return spawn_soldier({"name": callsign, "faction": "friendly", "variant": "multicam", "pos": ground_point(pos), "loadout": [],
+	return spawn_soldier({"name": callsign, "faction": "friendly", "variant": "tan", "pos": ground_point(pos), "loadout": [],
 		"role": String(role), "team": team, "slot": slot, "combat": 0.5 + 0.03 * (slot % 5), "discipline": 0.6, "guard": false})
 
 
@@ -878,8 +993,15 @@ func _make_soldier(data: Dictionary) -> Node:
 		if soldier.faction == &"hostile" and is_hostile_kit(data.loadout):
 			for id: StringName in LauncherAI.insurgent_kit(self):  # wave 5: some carry an RPG-7
 				inventory.take(id)
-		if soldier.role != &"":
+		# A hostile's heavy_gunner/ammo_bearer role is cast purely for SquadAI (its weapon and
+		# ammo already come from its own loadout, hostile_loadout/rival_pmc_loadout); giving it
+		# the player-facing role kit too would just stack a second gun the slot can't take and
+		# ammo of the wrong caliber on top (Captain, 2026-10-17 "the new roles go to the factions
+		# too"). A hostile medic still gets its kit: that's the whole point of the role there.
+		if soldier.role != &"" and not (soldier.faction == &"hostile" and soldier.role in [Roles.HEAVY_GUNNER, Roles.AMMO_BEARER]):
 			Roles.apply_kit(inventory, soldier.role)
+		if String(data.get("exo", "")) == "hx1":
+			equip_hx1(inventory)
 		# What it started with, so what it's handed or picks up later can be told apart
 		# (_drop_extras, when a player takes its slot).
 		soldier.set_meta(&"start_gear", Roster.gear_counts(inventory.net_state))

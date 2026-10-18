@@ -58,7 +58,7 @@ const ITEM_MASK := 1 << 2
 ## Camo variants for players, picked from the peer id so every peer agrees. Never "urban": that's
 ## the enemy's (CompoundLevel hostiles), and a client's big random peer id landed on it (Captain,
 ## 2026-10-15: "buddy drawn in enemy blue-grey camo").
-const PLAYER_VARIANTS: Array[String] = ["multicam", "woodland", "desert"]
+const PLAYER_VARIANTS: Array[String] = ["multicam", "woodland", "desert", "tan"]
 ## Loading magazines from loose rounds (_server_load_mags): seconds per round (proposed:
 ## 1 s per 5 rounds), and how far you can move before it stops.
 const LOAD_ROUND_S := 0.2

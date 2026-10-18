@@ -17,10 +17,16 @@
 		"rifleman": {"name": "Rifleman", "short": "RFL",
 			"kit": [["knife", 1], ["pouch_utility", 1], ["m4a1", 1], ["mag_556", 6], ["at4", 2], ["ifak", 1], ["frag_grenade", 1], ["smoke_grenade", 1], ["flashbang", 1]]},
 		"anti_tank": {"name": "Anti-Tank", "short": "AT",
-			"kit": [["maaws", 1], ["ffv551_round", 2], ["ffv502_round", 1], ["m4a1", 1], ["mag_556", 5], ["ifak", 1], ["smoke_grenade", 1]]}
+			"kit": [["maaws", 1], ["ffv551_round", 2], ["ffv502_round", 1], ["m4a1", 1], ["mag_556", 5], ["ifak", 1], ["smoke_grenade", 1]]},
+		"heavy_gunner": {"name": "Heavy Gunner", "short": "HMG", "weapon_note": "M240B (weapon pack 1)",
+			"kit": [["pouch_utility", 1], ["m240b", 1], ["belt_762x51", 2], ["ifak", 1], ["frag_grenade", 1], ["smoke_grenade", 1]]},
+		"ammo_bearer": {"name": "Ammo Bearer", "short": "AB",
+			"kit": [["pouch_utility", 2], ["m4a1", 1], ["mag_556", 4], ["belt_762x51", 4], ["ifak", 1], ["smoke_grenade", 1]]}
 	},
 	"fire_teams": [
 		["team_leader", "autorifleman", "grenadier", "medic"],
 		["team_leader", "marksman", "rifleman", "medic"]
-	]
+	],
+	"_lx3_note": "LX-3 presets (near-future hardware doc, docs/near_future_hardware.md): any role in lx3_capable can be kitted with the LX-3 Assist Frame and Visor Helmet in place of the normal helmet (Roles.apply_kit(inv, role, true) / Roles.lx3_kit(role)). The soldier's stored role is unchanged (still 'medic', 'team_leader', ...), so squad_ai's role checks (Roles.MEDIC and so on) keep working; this only swaps what the kit puts in the inventory. Not wired into AI auto-fill (same as anti_tank): a mission, loadout screen or roster hire opts a soldier into it deliberately.",
+	"lx3_capable": ["team_leader", "medic", "rifleman", "autorifleman", "marksman", "heavy_gunner", "ammo_bearer"]
 }

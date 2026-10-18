@@ -49,12 +49,28 @@ const VARIANTS := {
 		"patch": "7a3b2e", "gear": "b29c74", "pack": "a38e68",
 	},
 	"urban": {
+		# Black Ridge Militia (Captain, 2026-10-17: "give the militia we typically face early game
+		# an orange marker on their uniform instead of the same red one that's on the PMC"): an
+		# orange patch, not Vantage's "black" scheme's dark red one, so the two hostile factions
+		# read apart at a glance.
 		"camo": ["5c6066", "3f4247", "7a7e84", "26282b"], "skin": "b07a52", "hair": "1f1a17",
-		"patch": "1f2a44", "gear": "34373b", "pack": "3a3d42",
+		"patch": "d9730d", "gear": "34373b", "pack": "3a3d42",
 	},
 	"dummy": {
 		"camo": ["f2c230", "f2c230", "e3b022", "f2c230"], "skin": "f2c230", "hair": "f2c230",
 		"patch": "222222", "gear": "8a7a58", "pack": "7a6c4e",
+	},
+	## Vantage Group (CLAUDE.md squad-roles-pmc bundle, Captain 2026-10-17: "black for enemy
+	## pmc"): flat black operator kit, not a camo pattern, so it reads apart from Black Ridge's
+	## grey urban camo at a glance.
+	"black": {
+		"camo": ["1a1a1a", "141414", "202020", "0d0d0d"], "skin": "b07a52", "hair": "1f1a17",
+		"patch": "5c1f1f", "gear": "232323", "pack": "1f1f1f",
+	},
+	## Captain, 2026-10-17: "tan for us". A flat coyote-tan kit, same shape as "black" above.
+	"tan": {
+		"camo": ["c9ba9c", "bfae8e", "d9ccae", "a89470"], "skin": "c8996f", "hair": "3b2a1d",
+		"patch": "3b4a6b", "gear": "a8977a", "pack": "9c8a68",
 	},
 }
 ## Plain clothes (civilians, HVTs and hostages: PersonLook.outfit) instead of a uniform:

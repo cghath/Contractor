@@ -49,6 +49,13 @@ const DEFAULTS := {
 ## Hostile kit when the level has none of its own (CompoundLevel.HOSTILE_LOADOUT).
 const LOADOUT := ["plate_carrier_light", "plate_pe_l3", "helmet_bump", "assault_pack", "akm",
 	"mag_762x39", "mag_762x39", "mag_762x39", "mag_762x39", "ifak", "frag_grenade"]
+## Which hostile faction this zone's reinforcement waves field (CLAUDE.md squad-roles-pmc
+## bundle): the level's own hostile mix by default, or CompoundLevel.PMC_FACTION for the
+## Vantage Group rival PMC. Mirrors EnemyResponse.enemy_faction for the same reason (a hot
+## zone's QRF waves go through EnemyResponse instead of here; a contract zone's through this).
+var enemy_faction: StringName = &"black_ridge"
+## See EnemyResponse.difficulty: the live contract's true_rating, for Vantage's exo gear.
+var difficulty: int = 1
 ## How many spots along the map's edges are tried for a wave; the one furthest from every
 ## player wins.
 const EDGE_TRIES := 24
@@ -206,9 +213,13 @@ func _send_wave(index: int, origin := Vector3.INF, extra_pairs := 0, cap := -1, 
 	var across := (Vector3(edge.x, 0, edge.z) - _players_centre(level)).normalized().cross(Vector3.UP)
 	for i in size:
 		var offset := across * PAIR_SPACING_M * (i - (size - 1) / 2.0)
+		var pmc := enemy_faction == CompoundLevel.PMC_FACTION
+		var kit: Array = (CompoundLevel.rival_pmc_loadout(index + i, difficulty) if pmc else CompoundLevel.hostile_loadout(index + i)) if loadout is Array and loadout == CompoundLevel.HOSTILE_LOADOUT else (loadout if loadout is Array else LOADOUT)
 		var s: Soldier = level.call(&"spawn_soldier", {"name": "R%d_%d" % [index + 1, i + 1], "faction": "hostile",
-			"variant": "urban", "pos": _on_ground(edge + offset), "loadout": CompoundLevel.hostile_loadout(index + i) if loadout is Array and loadout == CompoundLevel.HOSTILE_LOADOUT else (loadout if loadout is Array else LOADOUT),
-			"combat": minf(float(params.combat) + float(params.combat_step) * index, float(params.combat_max)), "discipline": 0.5, "guard": false, "mode": "aware"})
+			"variant": "black" if pmc else "urban", "pos": _on_ground(edge + offset), "loadout": kit,
+			"combat": minf(float(params.combat) + float(params.combat_step) * index, float(params.combat_max)), "discipline": 0.5, "guard": false, "mode": "aware",
+			"role": CompoundLevel.rival_pmc_role(index + i) if pmc else CompoundLevel.hostile_role(index + i),
+			"exo": CompoundLevel.rival_pmc_exo_at(index + i, difficulty) if pmc else ""})
 		if s == null:
 			continue
 		var brain := SquadAI.of(s)

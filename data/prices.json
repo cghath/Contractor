@@ -4,7 +4,7 @@
 	"default_by_type": {"weapon": 1500, "ammo": 40, "armor": 900, "plate": 700, "backpack": 250, "medical": 60,
 		"utility": 150, "optic": 800, "pouch": 30, "objective": 0, "salvage": 300, "misc": 50, "vehicle": 300, "launcher": 2000, "valuable": 1000},
 	"items": {
-		"m4a1": 1400, "mk18": 1700, "m110": 4200, "m17": 650,
+		"m4a1": 1400, "mk18": 1700, "m110": 4200, "scar_h": 3600, "m17": 650,
 		"akm": 900, "ak74": 950, "rpk": 1500, "pkm": 3600, "svd": 3800, "m249": 4500, "m240b": 5200, "m27": 2400, "hk416": 2200, "l85a2": 1500, "c8": 1500,
 		"mosin9130": 1300, "springfield_hs": 6500,
 		"mag_762x39": 20, "mag_545": 18, "mag_rpk40": 28, "mag_svd": 30, "belt_762x54r": 120, "box_556": 130, "belt_762x51": 110, "rounds_762x39": 1, "rounds_545": 1, "rounds_762x54r": 2,
