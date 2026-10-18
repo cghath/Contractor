@@ -113,6 +113,20 @@ static func assist_kg(inventory: Inventory) -> float:
 	return float(worn(inventory).stats.get("assist_kg", 0.0)) if working(inventory) else 0.0
 
 
+## Recoil multiplier: a working frame's arm struts damp a heavy-recoiling weapon a little
+## (CLAUDE.md squad-roles-pmc bundle, the new battle rifle's real recoil; "recoil_mult" on the
+## frame's own stats, else RECOIL_MULT), 1.0 with none worn or disabled. Read by
+## SoldierMovement.recoil_mult() the same way it already reads stance and mount multipliers, not
+## a parallel recoil system.
+const RECOIL_MULT := 0.85
+
+
+static func recoil_mult(inventory: Inventory) -> float:
+	if not working(inventory):
+		return 1.0
+	return float(worn(inventory).stats.get("recoil_mult", RECOIL_MULT))
+
+
 ## HUD text: "Frame 64%", "Frame DISABLED", or "".
 static func summary(inventory: Inventory) -> String:
 	var item := worn(inventory)

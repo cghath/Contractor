@@ -36,6 +36,8 @@ func _ready() -> void:
 	_test_menu_picker()
 	await _test_one_player()
 	_test_kits()
+	_test_lx3_presets()
+	await _test_ammo_bearer()
 	await _test_more_players()
 	await _test_stable_slots()
 	await _test_combat_modes()
@@ -65,7 +67,8 @@ func _test_assignment() -> void:
 	for team in 2:
 		var roles := layout.filter(func(s: Dictionary) -> bool: return s.team == team).map(func(s: Dictionary) -> StringName: return s.role)
 		check(roles.size() == 4 and roles.count(Roles.MEDIC) == 1, "fire team %s: four slots, one medic %s" % [Roles.TEAMS[team], roles])
-	check(Roles.ids().size() == 7 and Roles.has(&"grenadier") and Roles.has(&"autorifleman") and Roles.has(&"anti_tank"), "seven roles from data/roles.json")
+	check(Roles.ids().size() == 9 and Roles.has(&"grenadier") and Roles.has(&"autorifleman") and Roles.has(&"anti_tank")
+		and Roles.has(&"heavy_gunner") and Roles.has(&"ammo_bearer"), "nine roles from data/roles.json")
 	# Captain, 2026-10-12: an AT role for the squad (a Carl Gustaf and three rounds), and the
 	# rifleman's AT4 now that there are launchers.
 	var at_plan := Roles.assign([&"anti_tank"])
@@ -84,6 +87,18 @@ func _test_assignment() -> void:
 	Roles.apply_kit(rfl_inv, Roles.RIFLEMAN)
 	check(rfl_inv.slots[&"launcher"] == &"at4", "the rifleman carries an AT4 (%s)" % rfl_inv.slots[&"launcher"])
 	rfl_inv.free()
+	# Captain, 2026-10-17: a heavy gunner (M240B) and the ammo bearer who resupplies him, picked
+	# the same way anti_tank is (a converted slot, not in fire_teams).
+	var hg_plan := Roles.assign([&"heavy_gunner"])
+	check(hg_plan.slots[0] >= 0 and hg_plan.roles[hg_plan.slots[0]] == &"heavy_gunner", "a heavy gunner pick takes a slot (%s)" % [hg_plan.slots])
+	var hg_inv := Inventory.new()
+	Roles.apply_kit(hg_inv, &"heavy_gunner")
+	check(hg_inv.slots[&"primary"] == &"m240b" and hg_inv.count_of(&"belt_762x51") >= 1, "the heavy gunner kit: an M240B and spare belts (%s)" % hg_inv.slots[&"primary"])
+	hg_inv.free()
+	var ab_inv := Inventory.new()
+	Roles.apply_kit(ab_inv, &"ammo_bearer")
+	check(ab_inv.count_of(&"belt_762x51") >= 3, "the ammo bearer carries spare belts for the gunner (%d)" % ab_inv.count_of(&"belt_762x51"))
+	ab_inv.free()
 	for picks: Array in [[&"team_leader"], [&"medic"], [&"medic", &"medic"], [&"marksman", &"marksman"],
 			[&"team_leader", &"medic", &"marksman", &"grenadier"], [&"medic", &"medic", &"medic", &"rifleman"],
 			[&"marksman", &"marksman", &"marksman", &"marksman"]]:
@@ -167,6 +182,45 @@ func _test_kits() -> void:
 	for s: Soldier in _squad():
 		check(s.inventory.slots[&"vest"] == &"plate_carrier" and s.inventory.slots[&"helmet"] == &"helmet" and s.active_weapon() != null,
 			"%s (%s) wears the base kit and has a weapon" % [s.name, Roles.display_name(s.role)])
+
+
+## LX-3 presets (near-future hardware doc): any lx3_capable role's kit swaps the normal helmet
+## for the LX-3 Assist Frame and Visor Helmet, keeping the role id (and so squad_ai's role
+## checks) unchanged.
+func _test_lx3_presets() -> void:
+	print("LX-3 presets")
+	check(Roles.has_lx3(&"medic") and Roles.has_lx3(&"heavy_gunner") and not Roles.has_lx3(&"nonexistent_role"),
+		"medic and heavy_gunner have an LX-3 preset (%s)" % [Roles.lx3_capable()])
+	var normal := Inventory.new()
+	Roles.apply_kit(normal, Roles.MEDIC)
+	var lx3 := Inventory.new()
+	Roles.apply_kit(lx3, Roles.MEDIC, true)
+	check(normal.slots[&"helmet"] == &"helmet" and lx3.slots[&"helmet"] == &"helmet_lx3" and lx3.slots[&"exo"] == &"exo_frame_light",
+		"an LX-3 medic wears the LX-3 helmet and frame instead of the normal helmet (%s, %s)" % [lx3.slots[&"helmet"], lx3.slots[&"exo"]])
+	check(normal.slots[&"primary"] == lx3.slots[&"primary"] and normal.count_of(&"trauma_kit") == lx3.count_of(&"trauma_kit"),
+		"everything else in the kit is the same (%s vs %s)" % [normal.slots[&"primary"], lx3.slots[&"primary"]])
+	normal.free()
+	lx3.free()
+
+
+## SquadAI._maybe_resupply_gunner: an ammo bearer close to a heavy gunner who's run low hands
+## him a belt box, out of contact.
+func _test_ammo_bearer() -> void:
+	print("Ammo bearer resupplies the heavy gunner")
+	var gunner := level.spawn_soldier({"name": "TestGunner", "faction": "friendly", "variant": "multicam", "pos": Vector3(40, 0.1, 40),
+		"loadout": [], "role": "heavy_gunner", "combat": 0.5, "discipline": 0.5, "guard": true})
+	var bearer := level.spawn_soldier({"name": "TestBearer", "faction": "friendly", "variant": "multicam", "pos": Vector3(41, 0.1, 40),
+		"loadout": [], "role": "ammo_bearer", "combat": 0.5, "discipline": 0.5, "guard": true})
+	while gunner.inventory.remove_one(&"belt_762x51"):
+		pass  # strip the gunner down to whatever's loaded: no spares left
+	check(gunner.inventory.count_of(&"belt_762x51") == 0, "the gunner starts with no spare belts")
+	var before := bearer.inventory.count_of(&"belt_762x51")
+	check(before > 0, "the bearer carries spares to give (%d)" % before)
+	await _wait_for(func() -> bool: return gunner.inventory.count_of(&"belt_762x51") > 0, SquadAI.AMMO_RESUPPLY_COOLDOWN_S + 3.0)
+	check(gunner.inventory.count_of(&"belt_762x51") > 0 and bearer.inventory.count_of(&"belt_762x51") == before - 1,
+		"the bearer hands the gunner a belt box (gunner %d, bearer %d of %d)" % [gunner.inventory.count_of(&"belt_762x51"), bearer.inventory.count_of(&"belt_762x51"), before])
+	gunner.queue_free()
+	bearer.queue_free()
 
 
 func _test_more_players() -> void:

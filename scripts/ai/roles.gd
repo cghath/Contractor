@@ -16,6 +16,12 @@ const AUTORIFLEMAN := &"autorifleman"
 const GRENADIER := &"grenadier"
 const MARKSMAN := &"marksman"
 const RIFLEMAN := &"rifleman"
+const ANTI_TANK := &"anti_tank"
+## A belt-fed M240B and the bearer who follows him and tops up his belts (CLAUDE.md squad-roles
+## bundle): like anti_tank, not in fire_teams, filled by a player's pick or deliberate AI
+## casting (a mission's loadout, a roster hire), never AI auto-fill.
+const HEAVY_GUNNER := &"heavy_gunner"
+const AMMO_BEARER := &"ammo_bearer"
 ## Fire team names, by index (Soldier.fire_team).
 const TEAMS: Array[String] = ["A", "B"]
 ## Which slots a player whose role has no free slot takes first: the least specialised.
@@ -54,19 +60,41 @@ static func weapon_note(role: StringName) -> String:
 	return String(_roles().get(String(role), {}).get("weapon_note", ""))
 
 
-## The role's starting kit, base kit first, as [item id, count] pairs.
-static func kit(role: StringName) -> Array:
+## The role's starting kit, base kit first, as [item id, count] pairs. `lx3` (near-future
+## hardware doc): for a role in lx3_capable, drops the normal helmet and adds the LX-3 Assist
+## Frame and Visor Helmet instead, so AI (or a player) kitted this way carries exo gear without
+## the stored role itself changing (Roles.MEDIC and friends still match it).
+static func kit(role: StringName, lx3 := false) -> Array:
 	var out: Array = []
 	for pair: Array in _load().get("base_kit", []):
 		out.append([StringName(pair[0]), int(pair[1])])
 	for pair: Array in _roles().get(String(role), {}).get("kit", []):
 		out.append([StringName(pair[0]), int(pair[1])])
+	if lx3 and has_lx3(role):
+		out = out.filter(func(pair: Array) -> bool:
+			var item := ItemDB.get_item(pair[0])
+			return item == null or item.slot != &"helmet")
+		out.append([&"exo_frame_light", 1])
+		out.append([&"helmet_lx3", 1])
 	return out
 
 
-## Gives `inventory` the role's kit. Host only.
-static func apply_kit(inventory: Inventory, role: StringName) -> void:
-	for pair: Array in kit(role):
+## Every role id with an LX-3 preset (data/roles.json "lx3_capable").
+static func lx3_capable() -> Array[StringName]:
+	var out: Array[StringName] = []
+	for id: String in _load().get("lx3_capable", []):
+		out.append(StringName(id))
+	return out
+
+
+static func has_lx3(role: StringName) -> bool:
+	return lx3_capable().has(role)
+
+
+## Gives `inventory` the role's kit, LX-3 gear instead of a helmet if `lx3` and the role has a
+## preset for it. Host only.
+static func apply_kit(inventory: Inventory, role: StringName, lx3 := false) -> void:
+	for pair: Array in kit(role, lx3):
 		give(inventory, pair[0], pair[1])
 
 

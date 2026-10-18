@@ -11,6 +11,67 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Squad roles and the Vantage Group rival PMC, first slice (Captain, 2026-10-17)
+
+#### Added
+- LX-3 presets (`data/roles.json` `lx3_capable`, `Roles.kit`/`apply_kit`'s new `lx3` argument):
+  any existing role can be kitted with the LX-3 Assist Frame and Visor Helmet instead of the
+  normal helmet without its stored role changing, so squad_ai.gd's role checks (`Roles.MEDIC`
+  and so on) keep working. Not wired into AI auto-fill; a mission, loadout screen or roster hire
+  opts a soldier into it deliberately, the same boundary `anti_tank` already draws.
+- `heavy_gunner` (M240B) and `ammo_bearer` roles (`data/roles.json`): converted slots like
+  `anti_tank`, not added to `fire_teams`. `SquadAI._maybe_resupply_gunner` hands the nearest
+  belt-fed LMG carrier a box of whichever ammo his own weapon takes when he's run low and the
+  bearer is already close (mirrors the medic-follow conventions near `MEDIC_FAR_M`, generalised
+  by weapon tags (`lmg`, `belt`) rather than by role, so it serves Black Ridge's PKM gunner and
+  any autorifleman's M249 too, not only Vantage's M240B — Captain, 2026-10-17, "the new roles go
+  to the factions too"); it doesn't yet path to the gunner on its own. Black Ridge's own mix
+  (`CompoundLevel.HOSTILE_MIX`) gained a PKM ammo bearer alongside its existing gunner, cast the
+  same way (`hostile_role`, mirroring `rival_pmc_role`) at every spawn site (`EnemyResponse`,
+  `Reinforcements`, `ZoneLevel`'s garrisons). A hostile cast as `heavy_gunner`/`ammo_bearer`
+  skips the player-facing role kit (`CompoundLevel._make_soldier`): its own `hostile_loadout`/
+  `rival_pmc_loadout` entry already carries the right gun and caliber, so re-kitting it would
+  only stack a redundant weapon and the wrong ammo on top.
+- `scar_h`, the SCAR-H battle rifle (`data/items.json`, `data/prices.json`): semi-automatic
+  7.62x51, harder-hitting than the M4A1 with real recoil (`recoil_deg`). Renders through
+  `VoxelArt.model_for`'s existing data-driven rifle model, no art-script changes. `ExoFrame`
+  gained a `recoil_mult` (damps a working LX-3 wearer's recoil a little, read from
+  `SoldierMovement.recoil_mult`) so the new recoil has somewhere to hook into instead of a
+  parallel system; the heavy exo's own recoil interaction is left to its own branch.
+- The Vantage Group, a rival PMC faction (`data/factions.json` `vantage_group`): fields modern
+  gear (M4A1/SCAR-H riflemen, an M240B gunner and its ammo bearer) through
+  `CompoundLevel.rival_pmc_loadout`/`PMC_MIX`, parallel to the Black Ridge militia's
+  `hostile_loadout`. `EnemyResponse.enemy_faction`/`Reinforcements.enemy_faction` pick which
+  mix a zone's patrols, hunters and reinforcement waves field; `ZoneLevel._on_contract_live`
+  sets it from a live contract's `target`. Garrison spawns (`_spawn_queued_garrison`) and the
+  tutorial compound's `HOSTILES` are left on the Black Ridge mix for this slice.
+- Faction colours (Captain, 2026-10-17: "black for enemy pmc, tan for us"): new `VoxelArt` variants
+  `black` (Vantage) and `tan` (the player faction), and Black Ridge's `urban` variant's patch
+  colour changed from navy to orange ("give the militia we typically face early game an orange
+  marker on their uniform instead of the same red one that's on the PMC"). Every friendly AI
+  spawn site (`compound_level.gd`, `base_hub.gd`, `base_level.gd`, `aav_support.gd`,
+  `heli_call.gd`) now spawns `tan` instead of `multicam`; Vantage's spawns (`enemy_response.gd`,
+  `reinforcements.gd`) spawn `black` instead of `urban`. `Soldier.PLAYER_VARIANTS` gained `tan` too.
+  Fixed in passing: the plain Ballistic/Bump/Heavy helmets never actually had the `faction_color`
+  stat the LX-3 Visor Helmet already carried (`GearRig._rebuild`'s `set_cover`), so every
+  faction's basic helmet rendered in one fixed colour regardless of variant; added it to all
+  three (`data/items.json`) so helmets tint by side like the rest of the kit now does.
+- Vantage's exo gear, gated by the contract's real 1-5 difficulty rating (`true_rating`, read in
+  `ZoneLevel._on_contract_live`, not the briefing's `rated`, which can understate it): the LX-3
+  Assist Frame and Visor Helmet from `PMC_LX3_DIFFICULTY` (4) on every PMC soldier but the exo
+  pilot slot, which from `PMC_HX1_DIFFICULTY` (5) climbs straight into the HX-1 Assault Frame and
+  its Walker Gun instead (`CompoundLevel.equip_hx1`, via `Inventory.put_on`/`unequip` — the same
+  end state `ExoMech.server_enter`'s climb-in reaches, without playing out its 3.5 s animation,
+  which a freshly spawned hostile has no reason to do; `ExoMech`/`ExoFrame` read the exo slot
+  reactively, so piloting, size and pad armour all follow from the inventory state alone).
+  Cutoffs (Captain, 2026-10-17, "Vantage gets exo suits and heavy exo suits but only on higher
+  diffs"): LX-3 from a merely hard mission (a real but moderate edge); the HX-1 reserved for the
+  single hardest tier, so it reads as a serious escalation rather than a mid-tier nuisance. First
+  slice: the HX-1 pilot always spawns already suited; it doesn't climb into one standing in the
+  world, and `Reinforcements.difficulty` has the same hook as `EnemyResponse.difficulty` but
+  nothing sets it yet (contract zones' reinforcement waves, as opposed to hot zones' EnemyResponse,
+  aren't wired to a contract's rating in this slice).
+
 ### Heavy exo: the HX-1 Assault Frame, first playable slice (Captain, 2026-10-16/17)
 
 #### Added

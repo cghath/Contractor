@@ -994,7 +994,7 @@ func spread_mult() -> float:
 
 
 func recoil_mult() -> float:
-	return STANCE_RECOIL[stance] * (MOUNT_RECOIL_MULT if mounted else 1.0)
+	return STANCE_RECOIL[stance] * (MOUNT_RECOIL_MULT if mounted else 1.0) * ExoFrame.recoil_mult(body.inventory)
 
 
 ## View-model sway (yaw, roll in radians) left over from stopping.

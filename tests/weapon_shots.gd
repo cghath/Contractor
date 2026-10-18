@@ -6,7 +6,7 @@ extends Node3D
 ##   <voxel godot exe> --path . res://tests/weapon_shots.tscn -- <output folder>
 ## Saves sheet_top.png (all of them from above, labelled) and <id>_top.png / <id>_angle.png
 ## close-ups. weapons_test checks each model is one piece; this is for the eye.
-const GUNS := ["m249", "m240b", "l85a2", "pkm", "c8", "hk416", "mosin9130", "springfield_hs", "m4a1"]
+const GUNS := ["m249", "m240b", "l85a2", "pkm", "c8", "hk416", "mosin9130", "springfield_hs", "m4a1", "scar_h"]
 
 func _ready() -> void:
 	preload("res://tests/shot_window.gd").stay_out_of_the_way(self)

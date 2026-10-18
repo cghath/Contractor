@@ -306,6 +306,14 @@ const CASUALTY_REACH := 1.6
 ## Proposed: a fire team's medic further than this from a casualty counts as far, so the
 ## buddy or the other medic answers instead.
 const MEDIC_FAR_M := 40.0
+## Ammo bearer (new role, CLAUDE.md squad-roles-pmc bundle): close enough to hand belt boxes
+## across, and how often it checks (mirrors MEDIC_FAR_M/MEDIC_CALL_S for ammunition instead of
+## care). A bearer doesn't go looking for its gunner yet (first slice): it tops him up whenever
+## squad movement already has them this close, the way any buddy pair closes up on its own.
+const AMMO_RESUPPLY_M := 3.0
+const AMMO_RESUPPLY_COOLDOWN_S := 4.0
+## A gunner below this many spare belt boxes stowed is worth topping up.
+const GUNNER_LOW_BELTS := 1
 ## Proposed: under fire, smoke goes between a casualty in the open and the threat from this
 ## close to them.
 const SMOKE_RANGE_M := 25.0
@@ -637,6 +645,7 @@ var _fire_spot_at := -1000.0  # when he last looked for one
 var _asked_medic := false
 var _answered := false
 var _medic_called_at := -1000.0
+var _ammo_given_at := -1000.0
 var _reach_best := INF  # closest this unit got to its casualty on the way (Care.REACH)
 var _reach_progress_at := 0.0  # when it last got REACH_PROGRESS_M closer
 var _detour := Vector3.ZERO  # a sidestep around something in the way
@@ -1112,6 +1121,7 @@ func _choose_intent() -> void:
 	elif not contact and (care == Care.BODY or _find_body() != null):
 		scores[Intent.CASUALTY] = BODY_RECOVER_SCORE
 	_maybe_call_medic()
+	_maybe_resupply_gunner(Soldier._now())
 	_cover_medic = _medic_needs_cover()
 	if fighting():
 		scores[Intent.FIGHT] = 0.7
@@ -2651,6 +2661,49 @@ func _maybe_call_medic() -> void:
 	var callouts := Callouts.of(body)
 	if callouts:
 		callouts.medic_call(body)
+
+
+## Ammo bearer (new role): out of contact, hands a belt box of belt_762x51 across to the
+## nearest friendly heavy gunner within AMMO_RESUPPLY_M who's down to GUNNER_LOW_BELTS spare,
+## at most every AMMO_RESUPPLY_COOLDOWN_S. First slice: opportunistic (it doesn't path to the
+## gunner; normal formation/buddy movement is what brings them this close), the way scavenging
+## only happens when a unit is already near the body it wants.
+## Caliber-agnostic (Captain, 2026-10-17, "the new roles go to the factions too"): any belt-fed
+## LMG counts as a gunner to resupply, not only Roles.HEAVY_GUNNER's own M240B, so the same
+## ammo_bearer behaviour serves Black Ridge's PKM gunner and the autorifleman's M249 as well as
+## Vantage's M240B, with no per-faction special-casing here.
+func _maybe_resupply_gunner(now: float) -> void:
+	if body.role != Roles.AMMO_BEARER or in_contact() or now - _ammo_given_at < AMMO_RESUPPLY_COOLDOWN_S:
+		return
+	var gunner := _nearest_gunner()
+	if gunner == null or body.global_position.distance_to(gunner.global_position) > AMMO_RESUPPLY_M:
+		return
+	var ammo := StringName(ItemDB.get_item(gunner.inventory.slots.get(&"primary", &"")).stats.get("ammo", &""))
+	if ammo == &"" or body.inventory.count_of(ammo) <= 0 or gunner.inventory.count_of(ammo) > GUNNER_LOW_BELTS:
+		return
+	if not body.inventory.remove_one(ammo):
+		return
+	gunner.inventory.take(ammo, 1)
+	_ammo_given_at = now
+
+
+## The nearest same-squad soldier still up whose primary is a belt-fed LMG, or null.
+func _nearest_gunner() -> Soldier:
+	if squad == null:
+		return null
+	var best: Soldier = null
+	var best_d := INF
+	for s: Soldier in squad.members():
+		if s == body or not s.vitals.is_up():
+			continue
+		var weapon := ItemDB.get_item(s.inventory.slots.get(&"primary", &""))
+		if weapon == null or not weapon.tags.has("lmg") or not weapon.tags.has("belt"):
+			continue
+		var d := body.global_position.distance_to(s.global_position)
+		if d < best_d:
+			best_d = d
+			best = s
+	return best
 
 
 # --- Tactics ---------------------------------------------------------------

@@ -89,6 +89,9 @@ var _garrison_queue: Array[Dictionary] = []
 var _garrison_pending := {}
 var _garrison_nav_held := false
 var _next_stream := 0.0
+## Host: this zone's EnemyResponse (patrols, QRF waves, hunters), so _on_contract_live can set
+## its enemy_faction from a live contract's target (CLAUDE.md squad-roles-pmc bundle).
+var _enemy_response: EnemyResponse
 
 
 ## Sets the zone definition (ZoneDef). Call before adding the node to the tree.
@@ -113,7 +116,8 @@ func _ready() -> void:
 	# HotZoneOps (multi-contract radio follow-ups, hazard pay) and the debug overlay stay hot-only.
 	add_child(Alert.new())  # the enemy's alert: what they see, hear and report (4B part 3)
 	add_child(Pressure.new())  # what the squad has done here, long term
-	add_child(EnemyResponse.new())  # patrols, QRF waves, hunters: the enemy's answer
+	_enemy_response = EnemyResponse.new()
+	add_child(_enemy_response)  # patrols, QRF waves, hunters: the enemy's answer
 	add_child(RadioChatter.new())  # what a looted enemy radio lets the squad hear
 	add_child(UrbanDefence.new())  # towns fought from inside: reserves, falling back, relief (Captain, 2026-10-17)
 	add_child(ZoneCleanup.new())  # bodies and dropped loot go after ~6-7 min (blood on its own clock)
@@ -518,7 +522,17 @@ func garrison_size(module_id: String) -> int:
 func _on_contract_live(cid: String, _objectives: Array) -> void:
 	if not multiplayer.is_server():
 		return
-	var module := get_module(String(Contracts.contract(cid).get("module_id", "")))
+	var contract := Contracts.contract(cid)
+	# CLAUDE.md squad-roles-pmc bundle: a contract against the Vantage Group rival PMC switches
+	# this zone's reinforcement waves (EnemyResponse) to its gear; any other target leaves the
+	# zone's usual hostile mix alone (several contracts can be live in a hot zone; the last one
+	# whose target is the PMC wins, same simplification Alert and Pressure already make per zone).
+	if _enemy_response and String(contract.get("target", "")) == String(CompoundLevel.PMC_FACTION):
+		_enemy_response.enemy_faction = CompoundLevel.PMC_FACTION
+		# Vantage's exo gear is difficulty-gated (CompoundLevel.PMC_LX3_DIFFICULTY/HX1_DIFFICULTY):
+		# true_rating, the host's real 1-5 rating, not "rated" (the briefing, which can understate it).
+		_enemy_response.difficulty = int(contract.get("true_rating", contract.get("rated", 1)))
+	var module := get_module(String(contract.get("module_id", "")))
 	if module and _garrisoned.has(module.module_id):
 		_spawn_garrison(module)
 
@@ -581,7 +595,7 @@ func _spawn_queued_garrison() -> void:
 			var s := spawn_soldier({"name": _garrison_callsign(module, i), "faction": "hostile", "variant": "urban", "pos": pos,
 				"loadout": hostile_loadout(i) + ["enemy_radio"] if i % RADIO_EVERY == 0 else hostile_loadout(i), "combat": GARRISON_STATS.combat, "discipline": GARRISON_STATS.discipline, "guard": true,
 				"mode": alert.mode_at(pos) if alert else GARRISON_STATS.mode,
-				"role": "medic" if i % ENEMY_MEDIC_EVERY == ENEMY_MEDIC_EVERY - 1 else ""})
+				"role": "medic" if i % ENEMY_MEDIC_EVERY == ENEMY_MEDIC_EVERY - 1 else CompoundLevel.hostile_role(i)})
 			if s:
 				var look := module.global_basis * (q.get("face", Vector3.ZERO) as Vector3)  # a post's way out (towns)
 				s.rotation.y = post_yaw(module, pos) if look.length() < 0.1 else atan2(-look.x, -look.z)

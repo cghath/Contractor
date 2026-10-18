@@ -13,6 +13,8 @@
 		{"id": "black_ridge", "name": "Black Ridge Militia", "role": "hostile", "nation": "insurgent",
 		 "wants": "Control the inland roads and tax every convoy.", "fears": "Outside contractors with air support.", "start_rep": -60},
 		{"id": "salvage_union", "name": "Coastal Salvage Union", "role": "neutral",
-		 "wants": "First claim on every wreck.", "fears": "Being caught between the other two.", "start_rep": 0}
+		 "wants": "First claim on every wreck.", "fears": "Being caught between the other two.", "start_rep": 0},
+		{"id": "vantage_group", "name": "Vantage Group", "role": "hostile", "nation": "pmc",
+		 "wants": "Undercut Meridian's contracts and hold the ground it's paid to take.", "fears": "A client who hires real competition instead of a militia.", "start_rep": -40}
 	]
 }

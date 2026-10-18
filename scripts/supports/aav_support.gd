@@ -419,7 +419,7 @@ func _spawn(origin: Lhd, toward: Vector3, layer: VehicleLayer) -> Vehicle:
 		if v.seat_kind(i) == Vehicle.DRIVER or i == gun_seat:
 			var role := "Driver" if v.seat_kind(i) == Vehicle.DRIVER else "Gunner"
 			var crew := lvl.spawn_soldier({"name": ("AAV%d_%s" % [calls + 1, role]).validate_node_name(), "faction": "friendly",
-				"variant": "multicam", "pos": v.global_position + Vector3.UP * 3.0, "loadout": _cfg.get("crew_loadout", []),
+				"variant": "tan", "pos": v.global_position + Vector3.UP * 3.0, "loadout": _cfg.get("crew_loadout", []),
 				"combat": 0.55, "discipline": 0.7, "guard": false})
 			if crew == null:
 				continue

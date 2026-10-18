@@ -104,6 +104,15 @@ var level: Node3D
 var alert: Alert
 var pressure: Pressure
 var reinforcements: Reinforcements
+## Which hostile faction this zone's patrols, hunters and QRF waves field (CLAUDE.md
+## squad-roles-pmc bundle): CompoundLevel.HOSTILE_LOADOUT's Black Ridge AKs by default, or
+## CompoundLevel.PMC_FACTION for the Vantage Group rival PMC's M4/SCAR-H/M240B mix. A zone sets
+## this (zone_level.gd's _on_contract_live reads the live contract's "target") rather than every
+## spawn site guessing at it.
+var enemy_faction: StringName = &"black_ridge"
+## The live contract's true_rating (1-5, ZoneLevel._on_contract_live), for Vantage's exo gear
+## (CompoundLevel.PMC_LX3_DIFFICULTY/PMC_HX1_DIFFICULTY): 1 (no exo) unless a hard contract sets it.
+var difficulty: int = 1
 ## Roaming patrols: {"k", "route" (Array[Vector3]), "squad", "soldiers", "pending", "second",
 ## "doubled", "lost", "last_pos"}.
 var patrols: Array[Dictionary] = []
@@ -510,7 +519,7 @@ func _send_hunters(lkp: Vector3, radius: float) -> void:
 	var callsign := "HT%d" % _hunter_teams
 	var squad := _new_squad(callsign)
 	squad.patrol = route
-	var loadout: Array = CompoundLevel.HOSTILE_LOADOUT.duplicate()
+	var loadout: Array = (CompoundLevel.PMC_LOADOUT if enemy_faction == CompoundLevel.PMC_FACTION else CompoundLevel.HOSTILE_LOADOUT).duplicate()
 	for i in HUNTER_SMOKES:
 		loadout.append(String(SMOKE))
 	var soldiers := _spawn_team(squad, callsign, randi_range(HUNTER_SIZE.x, HUNTER_SIZE.y), origin, route[0], loadout,
@@ -708,12 +717,23 @@ func _spawn_team(squad: Squad, callsign: String, size: int, at: Vector3, toward:
 	for i in size:
 		var pos := _ground(at + across * TEAM_SPACING_M * (i - (size - 1) / 2.0))
 		var kit := loadout
+		var mix_i := callsign.hash() + i  # where in the mix this soldier starts
+		var role := "medic" if size >= TEAM_MEDIC_MIN and i == TEAM_MEDIC_INDEX else ""
 		if loadout.size() >= CompoundLevel.HOSTILE_LOADOUT.size() and loadout.slice(0, CompoundLevel.HOSTILE_LOADOUT.size()) == CompoundLevel.HOSTILE_LOADOUT:
 			# OPFOR: this team's mix of AKs, gunner and marksman (callsign picks where in the mix it starts)
-			kit = CompoundLevel.hostile_loadout(callsign.hash() + i) + loadout.slice(CompoundLevel.HOSTILE_LOADOUT.size())
+			kit = CompoundLevel.hostile_loadout(mix_i) + loadout.slice(CompoundLevel.HOSTILE_LOADOUT.size())
+			role = CompoundLevel.hostile_role(mix_i) if role == "" else role
+		var exo := ""
+		var variant := "urban"
+		if loadout.size() >= CompoundLevel.PMC_LOADOUT.size() and loadout.slice(0, CompoundLevel.PMC_LOADOUT.size()) == CompoundLevel.PMC_LOADOUT:
+			# Vantage Group: M4s, SCAR-Hs, and the M240B/ammo bearer pair (same mix idea as OPFOR above)
+			kit = CompoundLevel.rival_pmc_loadout(mix_i, difficulty) + loadout.slice(CompoundLevel.PMC_LOADOUT.size())
+			role = CompoundLevel.rival_pmc_role(mix_i) if role == "" else role
+			exo = CompoundLevel.rival_pmc_exo_at(mix_i, difficulty)
+			variant = "black"  # Captain, 2026-10-17: "black for enemy pmc"
 		var s: Soldier = level.call(&"spawn_soldier", {"name": "%s_%d" % [callsign, i + 1], "faction": "hostile",
-			"variant": "urban", "pos": pos, "loadout": kit, "combat": combat, "discipline": discipline,
-			"guard": false, "mode": mode, "role": "medic" if size >= TEAM_MEDIC_MIN and i == TEAM_MEDIC_INDEX else ""})
+			"variant": variant, "pos": pos, "loadout": kit, "combat": combat, "discipline": discipline,
+			"guard": false, "mode": mode, "role": role, "exo": exo})
 		if s == null:
 			continue
 		var brain := SquadAI.of(s)
