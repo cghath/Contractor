@@ -883,6 +883,14 @@ func _test_enemy_response() -> void:
 		shot.global_position = player.global_position + Vector3(5, 0, 0)
 		bombers.server_tick()
 		check(bombers.detonated == gone + 1 and bombers.out.is_empty(), "shot down first, nothing goes off")
+		# VBIEDs: a technical with one driver drives at the squad and goes off close in.
+		var truck := bombers.server_send_vbied(level.ground_point(player.global_position + Vector3(80, 0, 0)))
+		check(truck != null and bombers.vbieds.size() == 1 and truck.model == Bombers.VBIED_MODEL, "a VBIED: a technical with a driver sets out")
+		if truck and not bombers.vbieds.is_empty():
+			var off := bombers.detonated
+			truck.global_position = player.global_position + Vector3(9, 0.3, 0)
+			bombers.server_tick()
+			check(bombers.detonated == off + 1 and bombers.vbieds.is_empty(), "within %d m it goes off" % int(Bombers.VBIED_TRIGGER_M))
 		player.vitals.server_reset_health()
 	# The QRF.
 	_calm()

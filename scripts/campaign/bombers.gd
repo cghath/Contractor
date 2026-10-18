@@ -20,9 +20,21 @@ const SEND_M := [150.0, 250.0]
 const CHANCE_PER_CHECK := 0.1
 const CHECK_S := 30.0
 const KIT: Array[String] = ["plate_carrier_heavy", "assault_pack"]
+## VBIEDs (wave 6f): a technical (VBIED_MODEL) with one driver drives at the nearest of the squad
+## and goes off within VBIED_TRIGGER_M, a bigger blast (VBIED_BLAST_M carve and VBIED_FRAGS frag
+## bursts round it). Its driver down or the truck unable to drive first, nothing. VBIED_SHARE of
+## the bombers sent are VBIEDs. Proposed.
+const VBIED_MODEL := "technical"  # the unarmed pickup
+const VBIED_TRIGGER_M := 12.0
+const VBIED_BLAST_M := 3.5
+const VBIED_FRAGS := 3
+const VBIED_SPEED_KMH := 55.0
+const VBIED_SHARE := 0.3
 
 ## Host: bombers out: {"soldier", "squad"}; and how many went off (tests, the session log).
 var out: Array[Dictionary] = []
+## VBIEDs out: {"vehicle", "driver"}.
+var vbieds: Array[Dictionary] = []
 var detonated := 0
 var _tick := 0.0
 var _check := 0.0
@@ -55,6 +67,7 @@ func _process(delta: float) -> void:
 ## Host: every bomber out walks at the nearest of the squad; close enough, he goes off.
 func server_tick() -> void:
 	var targets := _targets()
+	_tick_vbieds(targets)
 	for b: Dictionary in out.duplicate():
 		var s: Soldier = b.soldier if is_instance_valid(b.soldier) else null
 		if s == null or not s.vitals.is_up():
@@ -104,6 +117,75 @@ func server_send(at: Vector3) -> Soldier:
 	return s
 
 
+## Host: a VBIED sets out from `at`, a technical with one driver. Returns the vehicle.
+func server_send_vbied(at: Vector3) -> Vehicle:
+	var lvl := get_parent() as CompoundLevel
+	var layer := lvl.get_node_or_null(^"Vehicles") as VehicleLayer if lvl else null
+	if layer == null:
+		return null
+	_n += 1
+	var v := layer.server_spawn(VBIED_MODEL, Transform3D(Basis(), at + Vector3.UP * 0.3), "", &"hostile", "")
+	if v == null:
+		return null
+	v.set_meta(&"no_save", true)
+	var driver: Soldier = lvl.spawn_soldier({"name": "VBIED%d_1" % _n, "faction": "hostile", "variant": "urban", "pos": at + Vector3(3, 0.1, 0),
+		"loadout": ["assault_pack"], "combat": 0.2, "discipline": 1.0, "guard": false, "mode": "safe"})
+	var seat := 0
+	var seats: Array = v.spec.get("seats", [])
+	for i in seats.size():
+		if String(seats[i].get("kind", "")) == "driver":
+			seat = i
+			break
+	if driver == null or not v.server_enter(driver, seat):
+		return v
+	vbieds.append({"vehicle": v, "driver": driver})
+	_last_sent = Soldier._now()
+	print("[bombers] a VBIED (%s) sets out from (%.0f, %.0f)" % [VBIED_MODEL, at.x, at.z])
+	return v
+
+
+func _tick_vbieds(targets: Array[Soldier]) -> void:
+	for b: Dictionary in vbieds.duplicate():
+		var v: Vehicle = b.vehicle if is_instance_valid(b.vehicle) else null
+		var d: Soldier = b.driver if is_instance_valid(b.driver) else null
+		if v == null or v.wrecked or not v.can_drive() or d == null or not d.vitals.is_up() or v.seat_of(d) < 0:
+			vbieds.erase(b)  # stopped in time
+			continue
+		var near: Soldier = null
+		var best := INF
+		for t in targets:
+			var dist := t.global_position.distance_to(v.global_position)
+			if dist < best:
+				best = dist
+				near = t
+		if near == null:
+			continue
+		if best <= VBIED_TRIGGER_M:
+			vbieds.erase(b)
+			_vbied_off(v, d)
+			continue
+		v.server_drive_to(near.global_position, VBIED_SPEED_KMH)
+
+
+func _vbied_off(v: Vehicle, driver: Soldier) -> void:
+	detonated += 1
+	var pos := v.global_position + Vector3.UP * 0.8
+	print("[bombers] the VBIED goes off at (%.0f, %.0f)" % [pos.x, pos.z])
+	var lvl := get_parent() as CompoundLevel
+	var charges := Charges.of(self)
+	if charges:
+		var id := charges.server_place_at(null, Transform3D(v.global_basis, pos), v)
+		if id != "":
+			charges._detonate(id)
+	if lvl:
+		lvl.server_blast(pos, VBIED_BLAST_M)
+		for k in VBIED_FRAGS:
+			var a := TAU * k / VBIED_FRAGS
+			Throwables.server_detonate(lvl, "frag", pos + Vector3(cos(a), 0.0, sin(a)) * 2.0)
+	if is_instance_valid(driver) and driver.vitals.is_up():
+		driver.vitals.server_damage(1000.0)
+
+
 func _go_off(b: Dictionary) -> void:
 	out.erase(b)
 	var s: Soldier = b.soldier
@@ -128,7 +210,7 @@ func _maybe_send() -> void:
 	var tier := pressure.tier() if pressure else 0
 	if tier < MIN_TIER and not Economy.hunting(String(response.enemy_faction)):
 		return
-	if Soldier._now() - _last_sent < GAP_S or not out.is_empty() or randf() > CHANCE_PER_CHECK:
+	if Soldier._now() - _last_sent < GAP_S or not out.is_empty() or not vbieds.is_empty() or randf() > CHANCE_PER_CHECK:
 		return
 	var targets := _targets()
 	if targets.is_empty():
@@ -138,7 +220,10 @@ func _maybe_send() -> void:
 		var a := randf() * TAU
 		var at := response._ground(centre + Vector3(cos(a), 0.0, sin(a)) * randf_range(float(SEND_M[0]), float(SEND_M[1])))
 		if response._hidden(at):
-			server_send(at)
+			if randf() < VBIED_SHARE:
+				server_send_vbied(at)
+			else:
+				server_send(at)
 			return
 
 
