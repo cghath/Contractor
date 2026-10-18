@@ -11,6 +11,31 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Controller support and co-op assists (wave 7, S4; Captain: "Controller support and optional help for new co-op players")
+
+#### Added
+- A full gamepad layout (Xbox names; `Controls.JOY_BUTTONS`, `JOY_AXES`), next to the keys:
+  move on the left stick, look on the right, RT fire, LT aim, A jump (the brake driving),
+  B crouch, X reload, Y hold for the interaction menu (the right stick moves its cursor; click
+  the right stick with Y held for yourself; downed, hold Y to give up), LB/RB lean, L3 sprint and
+  hold breath, D-pad up primary, right sidearm, left grenade, down prone, Start pause.
+- The pad wheel (`PadWheel`): hold View, point the right stick at a slice, let go: inventory,
+  map, medical menu, quick treat, fire mode, launcher, rest weapon, inspect, optic zoom in/out,
+  next objective, objectives list, vehicle view, get out, quick save. Stance adjust and
+  push-to-talk orders stay keyboard-only for now.
+- Right-stick look (`PlayerInput.update_pad`, `GameSettings.stick_look`): Controls tab rows for
+  stick sensitivity, a round deadzone (15%), a response curve (1.6) and invert, saved in
+  settings.cfg's new `gamepad` section; aiming, scopes, concussion and loaded sprinting slow it
+  as they slow the mouse; seated, it turns the view as the mouse does.
+- Co-op assists (`Assists` autoload), off by default and set by the host for the whole session
+  (the Controls tab's "Co-op assists" rows, greyed out on a client; sent to every client and to
+  late joiners; a client's request or anyone but the host's sync is refused):
+  `aim_slowdown` (the stick turns at 40% over an enemy within 4 deg and 200 m; never the
+  mouse) and `wound_hints` (a HUD line: your worst wound, where, what to use, whether you carry
+  it). Objective markers were already on the HUD (the player's own setting), so they're not an
+  assist.
+- `controller` test suite (`tests/controller_test.gd`), in `tools/run_tests.sh` and CI.
+
 ### Squad roles and the Vantage Group rival PMC, first slice (Captain, 2026-10-17)
 
 #### Added

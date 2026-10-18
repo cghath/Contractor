@@ -85,6 +85,16 @@ var _ghost: Node3D
 ## -12 dB flat was 28 dB up from a Master at 1%, R0911/R0913).
 const DEAF_CUTOFF_HZ := 600.0
 const DEAF_VOLUME_DB := -12.0
+## The gamepad (wave 7, S4): the hold-View wheel (PadWheel), the right stick's last raw
+## deflection (x right, y down), the stick's speed moving the interaction menu's cursor (px a
+## second at full deflection), and the assists' HUD line (Assists: wound hints), this far below
+## the middle of the screen.
+var pad_wheel: PadWheel
+var stick := Vector2.ZERO
+const PAD_CURSOR_SPEED := 600.0
+var assist_line: Label
+const ASSIST_LINE_Y := 150.0
+var _hint_left := 0.0
 
 
 func _ready() -> void:
@@ -117,6 +127,14 @@ func _ready() -> void:
 	hud.add_child(medical_menu)
 	hud.add_child(LauncherSight.new(body))  # anti-armour launchers: sight, lock, fire (wave 5)
 	hud.add_child(GunSight.new(body))  # rifle and pistol sights (P0362)
+	pad_wheel = PadWheel.new()
+	hud.add_child(pad_wheel)
+	assist_line = UiKit.hud_label("", &"HudSmallLabel")
+	assist_line.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	assist_line.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	assist_line.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	assist_line.position.y += ASSIST_LINE_Y
+	hud.add_child(assist_line)
 	body.loadout_changed.connect(_update_view_model)
 	_update_view_model()
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
@@ -277,6 +295,9 @@ func _spend_turn() -> void:
 
 func _process(delta: float) -> void:
 	advance_turn(delta)
+	if _captured():
+		update_pad(delta)
+	_update_assist_line(delta)
 	_check_nade()
 	_update_interaction(delta)
 	_update_voice()
@@ -294,6 +315,44 @@ func _process(delta: float) -> void:
 	body.camera.v_offset = randf_range(-1.0, 1.0) * _shake * 0.08
 	_update_hearing()
 	_update_bob(delta)
+
+
+## The gamepad's right stick each frame (while the game has the mouse): with View held it picks
+## a pad wheel slice; with the interaction menu open it moves the menu's cursor (the stick
+## picks a slice of its ring); otherwise it turns the view like the mouse does, through the
+## look settings (GameSettings.stick_look: deadzone, curve, invert), the same slowdowns
+## (concussion, a scope's zoom, sprinting loaded) and the aim slowdown assist (Assists).
+func update_pad(delta: float) -> void:
+	stick = Vector2(Input.get_action_raw_strength(&"look_right") - Input.get_action_raw_strength(&"look_left"),
+		Input.get_action_raw_strength(&"look_down") - Input.get_action_raw_strength(&"look_up"))
+	if pause_menu.is_open() or bug_report.is_open() or medical_menu.is_open() or hud.is_inventory_open() \
+			or (hud.map_screen != null and hud.map_screen.is_open()):
+		pad_wheel.update(false, Vector2.ZERO)
+		return
+	if pad_wheel.update(Input.is_action_pressed(&"pad_wheel") and not interaction.is_open(), stick):
+		return
+	var look := GameSettings.stick_look(stick)
+	if look == Vector2.ZERO:
+		return
+	if interaction.is_open():
+		interaction.move_cursor(look * PAD_CURSOR_SPEED * delta)
+		return
+	var mult := body.vitals.turn_mult() * GunSight.zoom_turn(body) * Assists.aim_slowdown_mult(body, body.camera)
+	if body.movement.is_sprinting:
+		mult *= lerpf(1.0, MovementRules.SPRINT_TURN_LOADED, MovementRules.load_fraction(body.load_kg))
+	var turn := GameSettings.stick_turn(look, body.is_aiming, delta, mult)
+	turn_view(-turn.x)
+	body.set_pitch(body.head.rotation.x - turn.y)
+
+
+## The assists' HUD line (Assists.wound_hint), refreshed a few times a second.
+func _update_assist_line(delta: float) -> void:
+	_hint_left -= delta
+	if _hint_left > 0.0:
+		return
+	_hint_left = 0.5
+	assist_line.text = Assists.wound_hint(body) if body.respawn_state != Soldier.RESPAWN_WAITING else ""
+	assist_line.visible = assist_line.text != ""
 
 
 ## The view and weapon move with the steps (HEAD_BOB, WEAPON_BOB), the weapon comes down to
