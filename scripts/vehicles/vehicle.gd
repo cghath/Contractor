@@ -1221,14 +1221,6 @@ func _first_free_ffv() -> int:
 	return -1
 
 
-## The first free fire-from-vehicle passenger seat (seat "ffv"), or -1.
-func _first_free_ffv() -> int:
-	for i in _seat_nodes.size():
-		if occupant(i) == null and seat_kind(i) == PASSENGER and String(spec.seats[i].get("ffv", "")) != "":
-			return i
-	return -1
-
-
 func _first_free_for(s: Soldier) -> int:
 	## Captain, 2026-10-17: AI fill a helicopter's fire-from-vehicle door seats (seat "ffv") first,
 	## so the doors are manned before anyone sits back in the cabin.
