@@ -43,12 +43,19 @@ const DEFAULTS := {
 	"audio": {"master": 0.8, "effects": 1.0, "voice": 1.0, "music": 0.8, "mute_unfocused": false, "infil_music": true},
 	"controls": {"mouse_sensitivity": 1.0, "aim_sensitivity": 0.75, "invert_y": false},
 	"hud": {"objective_markers": true, "objectives_expanded": true},
+	# The gamepad's right stick (wave 7, S4: stick_look). curve: the stick's travel to the power
+	# of this (1 straight, higher finer near the centre).
+	"gamepad": {"stick_sensitivity": 1.0, "stick_deadzone": 0.15, "stick_curve": 1.6, "stick_invert_y": false},
+	# Co-op assists (wave 7, S4; Assists): this machine's picks when it hosts. Off by default; a
+	# client follows its host's.
+	"assists": {"aim_slowdown": false, "wound_hints": false},
 }
 ## Ranges for the sliders: [min, max, step].
 const RANGES := {
 	"render_scale": [0.5, 2.0, 0.05], "hfov": [70.0, 120.0, 1.0], "ui_scale": [0.75, 2.0, 0.05],
 	"master": [0.0, 1.0, 0.01], "effects": [0.0, 1.0, 0.01], "voice": [0.0, 1.0, 0.01], "music": [0.0, 1.0, 0.01],
 	"mouse_sensitivity": [0.2, 3.0, 0.05], "aim_sensitivity": [0.2, 1.5, 0.05],
+	"stick_sensitivity": [0.2, 3.0, 0.05], "stick_deadzone": [0.0, 0.5, 0.01], "stick_curve": [1.0, 3.0, 0.1],
 }
 ## The UI scale (docs/ui_audit.md P1-7, "no automatic UI scale": on 1440p and 4K every screen
 ## was laid out for 1600x900 and its text was physically tiny). The window height over
@@ -325,6 +332,36 @@ static func mouse_turn(base: float, aiming: bool) -> float:
 
 static func invert_y() -> bool:
 	return bool(get_value("controls", "invert_y"))
+
+
+## The gamepad's full turn rate (radians a second) at sensitivity 1, the stick all the way over.
+const STICK_TURN_RATE := 3.0
+
+
+## The right stick's raw deflection (x right, y down; each -1..1) as look: zero inside the
+## deadzone (round, so diagonals aren't cut), then the travel past it rescaled to 0..1 and
+## raised to the curve setting, the same way round; y flipped with stick_invert_y. The result
+## times STICK_TURN_RATE and the sensitivity is radians a second.
+static func stick_look(raw: Vector2) -> Vector2:
+	var dead := float(get_value("gamepad", "stick_deadzone"))
+	var length := minf(raw.length(), 1.0)
+	if length <= dead or length <= 0.0:
+		return Vector2.ZERO
+	var travel := pow((length - dead) / maxf(1.0 - dead, 0.001), float(get_value("gamepad", "stick_curve")))
+	var out := raw.normalized() * travel
+	if bool(get_value("gamepad", "stick_invert_y")):
+		out.y = -out.y
+	return out
+
+
+## How far the stick turns the view this frame (radians, x yaw, y pitch: both "positive is
+## right / down" as on the stick), from its look (stick_look), with the sensitivity, the aim
+## sensitivity while aiming, and `mult` (concussion, scope, aim slowdown).
+static func stick_turn(look: Vector2, aiming: bool, delta: float, mult := 1.0) -> Vector2:
+	var rate := STICK_TURN_RATE * float(get_value("gamepad", "stick_sensitivity")) * mult
+	if aiming:
+		rate *= float(get_value("controls", "aim_sensitivity"))
+	return look * rate * delta
 
 
 # --- Key bindings -----------------------------------------------------------------------------

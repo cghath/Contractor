@@ -136,6 +136,15 @@ crosshair; scavenge the body under the crosshair; scavenge freely or don't scave
 9 Team (select fire team A or B, assign or select colour teams) and 0 Support. Mount and the support calls are
 listed but not built yet.
 
+A gamepad (Xbox layout) works beside the keys: left stick move, right stick look, RT fire, LT
+aim, A jump, B crouch, X reload, Y hold for the interaction menu (the right stick moves its
+cursor; click the right stick with Y held for yourself; downed, hold Y to give up), LB / RB
+lean, L3 sprint (aimed: hold breath), D-pad up primary, right sidearm, left grenade, down
+prone, Start pause. Hold View for the pad wheel (point the right stick, let go): inventory,
+map, medical menu, quick treat, fire mode, launcher, rest weapon, inspect, zoom, objectives,
+vehicle view, get out, quick save. Stick sensitivity, deadzone, curve and invert are on the
+Controls tab, with the co-op assists the host sets (aim slowdown on the stick, wound hints).
+
 Pick your role (team leader, medic, autorifleman, grenadier, marksman, rifleman) on the main menu before hosting or
 joining; AI squadmates fill the other roles, keeping one medic in each fire team.
 
