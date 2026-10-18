@@ -769,7 +769,7 @@ func _need_y(at: Vector3, dir: Vector2, left: float, agl: float, drop := 0.0) ->
 	var ground := terrain_y(at)
 	var want := ground + agl
 	var clear := MIN_CLEAR_M + CLEAR_MARGIN_M + drop
-	var over := OBSTACLE_CLEAR_M
+	var over := OBSTACLE_CLEAR_M + drop
 	if left < INF:
 		var slope := _target.y + maxf(left * GLIDE, HOVER_AGL_M)  # the glide slope up from the spot
 		want = maxf(ground + clampf(left * GLIDE, 0.0, agl), minf(want, slope))
