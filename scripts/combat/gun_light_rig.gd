@@ -56,7 +56,11 @@ func _process(_delta: float) -> void:
 		return
 	var weapon := soldier.active_weapon()
 	var state := soldier.inventory.state_of(soldier.active_slot)
-	var up := soldier.vitals.is_up() and weapon != null
+	if not state.get(GunAttachments.ON_KEY, false):  # nothing switched on: the cheap, common case
+		light.visible = false
+		laser.visible = false
+		return
+	var up :=soldier.vitals.is_up() and weapon != null
 	light.visible = up and GunAttachments.light_on(weapon, state)
 	var beam := GunAttachments.laser_beam(weapon, state) if up else ""
 	laser.visible = beam == "visible" or (beam == "ir" and ir_seen)
