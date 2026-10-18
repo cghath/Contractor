@@ -721,6 +721,15 @@ static func _vtol_petrel() -> Canvas:
 		return Section.new(bottom, top, hb, ht, 0.04, 0.03)
 	c.mhull(o - 7.4, o + 6.8, body, P.PAINT, 0.12)
 	c.mhull(o + 6.55, o + 6.8, body, P.PAINT_DARK)  # solid aft bulkhead: the shell is open-ended
+	# Belly turret under the cockpit (Captain, 2026-10-17: the co-pilot works it): a faceted
+	# housing on a ring, an M2 .50 cal out of its face (Captain: "a slower firing 50 cal"; the turret
+	# and gun turn: VehicleTurret).
+	c.mbox(-0.3, 0.42, o - 4.3, 0.3, 0.5, o - 3.7, P.METAL)  # the ring
+	c.mbox(-0.26, 0.16, o - 4.26, 0.26, 0.42, o - 3.74, P.PAINT_DARK)  # the housing
+	c.mbox(-0.2, 0.12, o - 4.2, 0.2, 0.16, o - 3.8, P.PAINT_DARK)
+	c.mbox(-0.07, 0.25, o - 4.4, 0.07, 0.4, o - 3.85, P.GUN)  # the gun's body in its slot
+	c.mbox(-0.035, 0.3, o - 5.0, 0.035, 0.36, o - 4.4, P.GUN)  # the barrel, its cooling jacket
+	c.mbox(-0.05, 0.29, o - 4.75, 0.05, 0.37, o - 4.4, P.GUN)
 	# Dorsal engine housing where the wing sits on top, angular, with chevron facets aft of it.
 	c.mbox(-0.85, 2.88, o - 2.2, 0.85, 3.3, o + 2.4, P.PAINT)
 	c.mskin(-0.85, 3.25, o - 2.2, 0.85, 3.31, o + 2.4, P.PAINT_DARK, P.PAINT)

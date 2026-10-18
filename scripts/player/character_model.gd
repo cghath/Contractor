@@ -603,7 +603,7 @@ static func _seated_bones(p: Dictionary) -> Dictionary:
 	var floor_y: float = p.get("floor", hip - SEAT_HEIGHT)
 	var yaw: float = p.get("yaw", 0.0)
 	var root := Transform3D(Basis(Vector3.UP, yaw), Vector3.ZERO)
-	var leg := _leg_angles(maxf(hip - floor_y - SEAT_SOLE_UP, 0.05), SEAT_FOOT)
+	var leg := _leg_angles(maxf(hip - floor_y - SEAT_SOLE_UP, 0.05), float(p.get("foot", SEAT_FOOT)))  # "foot": a sill rider's hang (Vehicle)
 	var torso_basis := Basis(Vector3.RIGHT, float(p.get("pitch", SEAT_PITCH)))
 	var torso := Transform3D(torso_basis, Vector3(0, hip, hip_z))
 	var head_basis := Basis(Vector3.RIGHT, -_upper_body_pitch(root.basis * torso_basis, yaw))
@@ -1788,6 +1788,8 @@ func _action_goals(held: Array) -> Array:
 		TREAT:
 			return _treat_goals(StringName(action_net.get("tech", WORK)), at, t, s)
 		BOARD:
+			if bool(action_net.get("rope", false)) and board_grip != Vector3.ZERO:  # both hands on the fast-rope
+				return [["grip", torso.to_local(board_grip)], ["grip", torso.to_local(board_grip + Vector3.DOWN * 0.28)]]
 			if t < float(action_net.get("grip", 0.0)) and board_grip != Vector3.ZERO:
 				var grip := ["grip", torso.to_local(board_grip)]
 				return [held[0], grip] if board_left else [grip, held[1]]

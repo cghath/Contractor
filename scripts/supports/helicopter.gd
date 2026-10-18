@@ -35,6 +35,8 @@ signal landed
 signal went_down(heli: Helicopter)
 ## It hit the ground falling: everyone aboard is dead, the cargo is gone.
 signal crashed(heli: Helicopter)
+## It was hit in the air and is breaking away (EVADE_S): HeliCall's radio.
+signal taking_fire(heli: Helicopter)
 
 enum Mode { PARKED, FLYING, LANDING, LANDED, CRASHING, CRASHED }
 
@@ -126,6 +128,32 @@ const CRASH_FAST_MS := 4.0
 ## Hit zones whose loss brings it down (with the hull: Vehicle destroys it at 0).
 const FATAL_ZONES: Array[StringName] = [Vehicle.ZONE_ROTOR, Vehicle.ZONE_ENGINE, Vehicle.ZONE_CREW]
 
+## VTOLs (data/vehicles.json "flight": "vtol"; Captain, 2026-10-17: "our vtols shouldnt fly like
+## helicopter but like vtols"): faster ("cruise_kmh", else VTOL_CRUISE_KMH), harder on the
+## accelerations (the tilting rotors), banked into their turns and nose about level instead of
+## tilted into the way they speed up, and no J-hook: a straight approach that slows to a hover
+## over the spot, then straight down (straight_plan).
+const VTOL_CRUISE_KMH := 320.0
+const VTOL_ACCEL_MS2 := 5.0
+const VTOL_DECEL_MS2 := 4.0
+const VTOL_MAX_TILT_DEG := 32.0
+## How much of a VTOL's speeding up or slowing tips its nose (the rest the rotors take).
+const VTOL_PITCH_SHARE := 0.25
+## Hot approach (Captain, 2026-10-17: "hotdrops that dont do the slow j hook", modern combat
+## landings): any helicopter, straight in low and fast, a hard flare at the end (HOT_DECEL_MS2,
+## the nose up) onto a short final, and down quickly (HOT_SINK_MS) - also every VTOL landing.
+const HOT_DECEL_MS2 := 3.6
+const SHORT_FINAL_M := 50.0
+const SHORT_FINAL_MS := 10.0
+const HOT_SINK_MS := 4.5
+## Taking fire in the air (Captain, 2026-10-17: "respond to fire like real combat pilots"): for
+## EVADE_S after a hit it jinks (a weave EVADE_WEAVE_MS across its track), drops EVADE_DROP_M
+## lower and pushes EVADE_SPEED faster; not on the last FINAL_LOW_M of an approach (committed).
+const EVADE_S := 6.0
+const EVADE_WEAVE_MS := 9.0
+const EVADE_DROP_M := 4.0
+const EVADE_SPEED := 1.15
+
 ## Tests: every speed, acceleration and rate times this (1 in play).
 static var pace := 1.0
 
@@ -163,6 +191,8 @@ var _path_left := 0.0
 ## Its footprint (_footprint_points), once the art it's read from is built.
 var _footprint: Array[Vector3] = []
 var _edge_walls_ignored := false
+var _evade_until := -1000.0
+var _evade_phase := 0.0
 
 
 ## A new helicopter of `p_model` (a "helicopter" kind in data/vehicles.json), ready for the tree.
@@ -173,6 +203,28 @@ static func make(p_model: String, p_scheme := "", p_faction := &"player", id := 
 
 
 ## The yaw of `n`'s nose (radians; 0 faces -z).
+## Whether it flies as a VTOL (see VTOL_*).
+func is_vtol() -> bool:
+	return String(spec.get("flight", "")) == "vtol"
+
+
+## Its cruise speed (km/h): the model's "cruise_kmh", else a VTOL's or a helicopter's.
+func cruise_kmh() -> float:
+	return float(spec.get("cruise_kmh", VTOL_CRUISE_KMH if is_vtol() else CRUISE_KMH))
+
+
+## How hard it slows on an approach (m/s2, at pace 1).
+func _decel() -> float:
+	if is_vtol():
+		return VTOL_DECEL_MS2
+	return HOT_DECEL_MS2 if has_meta(&"hot_landing") else DECEL_MS2
+
+
+## Whether it's breaking away from fire now (EVADE_S).
+func evading() -> bool:
+	return Soldier._now() < _evade_until
+
+
 static func yaw_of(n: Node3D) -> float:
 	var f := -n.global_basis.z
 	return atan2(-f.x, -f.z)
@@ -387,6 +439,26 @@ static func hook_plan(from: Vector3, spot: Vector3, final_dir := Vector2.ZERO) -
 	return {"points": points, "v": v, "final": f}
 
 
+## A straight-in approach (a VTOL's, or a hot landing): from `from` to a SHORT_FINAL_M final
+## along `final_dir` (or straight at the spot), slowing to SHORT_FINAL_MS on it, stopping over
+## `spot`. Same shape as hook_plan's {"points", "v", "final"}.
+static func straight_plan(from: Vector3, spot: Vector3, final_dir := Vector2.ZERO) -> Dictionary:
+	var l := Vector2(spot.x, spot.z)
+	var here := Vector2(from.x, from.z)
+	var f := final_dir.normalized() if final_dir.length() > 0.01 else (l - here).normalized()
+	if f.length() < 0.5:
+		f = Vector2(0.0, -1.0)
+	var points: Array[Vector2] = [here]
+	var v: Array[float] = [INF]
+	var fin := l - f * SHORT_FINAL_M
+	if here.distance_to(l) > SHORT_FINAL_M * 1.5:
+		points.append(fin)
+		v.append(SHORT_FINAL_MS)
+	points.append(l)
+	v.append(0.0)
+	return {"points": points, "v": v, "final": f}
+
+
 ## Seconds to fly a hook_plan `plan` (at pace 1), starting at `v0` m/s: accelerating and
 ## slowing as the autopilot does, plus the settle onto the spot. Divided by pace.
 static func plan_time_s(plan: Dictionary, v0 := CRUISE_KMH / 3.6) -> float:
@@ -462,7 +534,7 @@ func server_fly_to(point: Vector3, agl := CRUISE_AGL_M, speed_kmh := CRUISE_KMH,
 	_path.clear()
 	_target = point
 	_agl = agl
-	_speed = speed_kmh / 3.6
+	_speed = (cruise_kmh() if speed_kmh == CRUISE_KMH else speed_kmh) / 3.6
 	_arrive = arrive
 	_orbit = false
 	mode = Mode.FLYING
@@ -489,9 +561,13 @@ func server_orbit(centre: Vector3, radius: float, agl := CRUISE_AGL_M, speed_kmh
 ## the final, the flare, a hover and straight down, touch down (landed). Its nose at touchdown
 ## faces `heading` (radians) if given; else, sent to about the same spot while landing (an LZ
 ## recheck), it keeps the final it flies; else it hooks back toward where it comes from.
-func server_land_at(spot: Vector3, heading := NAN) -> void:
+func server_land_at(spot: Vector3, heading := NAN, hot := false) -> void:
 	if is_down():
 		return
+	if hot or is_vtol():
+		set_meta(&"hot_landing", true)
+	else:
+		remove_meta(&"hot_landing")
 	var replan := has_meta(&"landing") and not _path.is_empty() and Vector2(spot.x - _target.x, spot.z - _target.z).length() < HOOK_RADIUS_M * 2.0
 	_lift_off_if_landed()
 	var f := Vector2.ZERO
@@ -499,7 +575,7 @@ func server_land_at(spot: Vector3, heading := NAN) -> void:
 		f = Vector2(-sin(heading), -cos(heading))
 	elif replan:
 		f = _final_dir
-	var plan := Helicopter.hook_plan(global_position, spot, f)
+	var plan := Helicopter.straight_plan(global_position, spot, f) if has_meta(&"hot_landing") else Helicopter.hook_plan(global_position, spot, f)
 	_path = plan.points
 	_path_v = plan.v
 	_final_dir = plan.final
@@ -518,7 +594,7 @@ func server_land_at(spot: Vector3, heading := NAN) -> void:
 		_path_left += _path[i].distance_to(_path[i + 1])
 	_target = spot
 	_agl = CRUISE_AGL_M
-	_speed = CRUISE_KMH / 3.6
+	_speed = cruise_kmh() / 3.6
 	_arrive = true
 	_orbit = false
 	mode = Mode.FLYING
@@ -563,8 +639,8 @@ func _lift_off_if_landed() -> void:
 ## The pilot seats are the helicopter's own crew (simulated): nobody takes them.
 func server_enter(soldier: Node, index := -1) -> bool:
 	var s := soldier as Soldier
-	if index < 0 and s and s.is_ai() and s.vitals.is_up():
-		index = _first_free_ffv()  # AI man the door seats first (Vehicle._first_free_for)
+	if index < 0 and s and s.is_ai() and s.vitals.is_up() and not Person.is_person(s):
+		index = _first_free_ffv()  # AI fighters man the door seats first (Vehicle._first_free_for); not an HVT or a civilian
 	if index < 0:
 		index = _first_free_passenger()
 	if seat_kind(index) == Vehicle.PILOT:
@@ -576,7 +652,7 @@ func server_enter(soldier: Node, index := -1) -> bool:
 ## a support's own unloading on the ground go as Vehicle does.
 func server_exit(soldier: Node, at: Variant = null) -> void:
 	var s := soldier as Soldier
-	if s and s.vitals.is_up() and is_airborne() and height_agl() > 2.0 and not wrecked and not forced_exits:
+	if s and s.vitals.is_up() and at == null and is_airborne() and height_agl() > 2.0 and not wrecked and not forced_exits:
 		if not s.is_ai():
 			_tell(s, "Not while we're flying")
 		return
@@ -673,9 +749,13 @@ func _fly(delta: float) -> void:
 		if dist < OVER_SPOT_M * 3.0:
 			speed = minf(speed, dist * 0.8 * pace)
 	var v_h := Vector3(dir.x, 0.0, dir.y) * speed
+	var agl := _agl
+	if evading() and dist > FINAL_LOW_M:
+		v_h = _evade(v_h)
+		agl = maxf(_agl - EVADE_DROP_M, MIN_CLEAR_M + 2.0)
 	# Height: contour flight over what's below and ahead (Captain, 2026-10-14: 12-13 m up).
 	var vel_h := Vector3(linear_velocity.x, 0.0, linear_velocity.z)
-	var contour := _contour(pos, vel_h, _agl)
+	var contour := _contour(pos, vel_h, agl)
 	_steer(Vector3(v_h.x, _climb_to(contour.x, contour.y, pos.y), v_h.z), delta)
 	if vel_h.length() > 8.0 * pace:
 		_heading = atan2(-vel_h.x, -vel_h.z)
@@ -832,7 +912,7 @@ func _fly_hook(delta: float) -> void:
 	for k in range(_path_i + 1, _path.size()):
 		if k > _path_i + 1:
 			dist += _path[k - 1].distance_to(_path[k])
-		limit = minf(limit, sqrt(_path_v[k] * _path_v[k] + 2.0 * DECEL_MS2 * 0.95 * dist))
+		limit = minf(limit, sqrt(_path_v[k] * _path_v[k] + 2.0 * _decel() * 0.95 * dist))
 	_path_left = dist + here.distance_to(on)
 	var end := _path[-1]
 	var dir := (carrot - here).normalized() if carrot.distance_to(here) > 0.01 else Vector2.ZERO
@@ -840,10 +920,14 @@ func _fly_hook(delta: float) -> void:
 		dir = (end - here).normalized() if here.distance_to(end) > 0.01 else Vector2.ZERO
 		limit = minf(limit, here.distance_to(end) * 0.8)
 	var v_h := Vector3(dir.x, 0.0, dir.y) * limit * pace
+	var agl := _agl
+	if evading() and _path_left > FINAL_LOW_M:
+		v_h = _evade(v_h)
+		agl = maxf(_agl - EVADE_DROP_M, MIN_CLEAR_M + 2.0)
 	# Height: contour flight round the hook; on the final, down the glide slope to hover height
 	# over the spot (_need_y), clear of the ground and what stands on it until the last
 	# FINAL_LOW_M (Captain, 2026-10-14: the bump on infil).
-	var contour := _contour(pos, vel_h, _agl)
+	var contour := _contour(pos, vel_h, agl)
 	_steer(Vector3(v_h.x, _climb_to(contour.x, contour.y, pos.y), v_h.z), delta)
 	# Nose along the way it goes; slow on the final, round to the final's heading (no snap).
 	if vel_h.length() > 4.0 * pace:
@@ -862,7 +946,7 @@ func _land(delta: float) -> void:
 	var to := Vector3(_target.x - pos.x, 0.0, _target.z - pos.z)
 	var v_h := (to * 0.8 * pace).limit_length(3.0 * pace)
 	var agl := pos.y - ground_y(pos)
-	var sink := (LAND_SINK_MS if agl > 4.0 else TOUCH_SINK_MS) * pace
+	var sink := ((HOT_SINK_MS if has_meta(&"hot_landing") else LAND_SINK_MS) if agl > 4.0 else TOUCH_SINK_MS) * pace
 	_steer(Vector3(v_h.x, -sink, v_h.z), delta)
 	_attitude(Vector3.UP, delta)
 	if agl <= TOUCH_M:
@@ -900,7 +984,7 @@ func _fall(delta: float) -> void:
 func _steer(desired: Vector3, delta: float) -> void:
 	var dv := desired - linear_velocity
 	var p2 := pace * pace  # speeds go with pace, accelerations with its square
-	var dv_h := Vector3(dv.x, 0.0, dv.z).limit_length(ACCEL_MS2 * p2 * delta)
+	var dv_h := Vector3(dv.x, 0.0, dv.z).limit_length((VTOL_ACCEL_MS2 if is_vtol() else ACCEL_MS2) * p2 * delta)
 	var dv_y := clampf(dv.y, -VERTICAL_ACCEL_MS2 * p2 * delta, VERTICAL_ACCEL_MS2 * p2 * delta)
 	linear_velocity += dv_h + Vector3(0.0, dv_y, 0.0)
 	_accel = _accel.lerp(dv_h / maxf(delta, 0.001) / p2, minf(delta * 4.0 * pace, 1.0))
@@ -911,6 +995,11 @@ func _steer(desired: Vector3, delta: float) -> void:
 func _attitude(ground_up: Vector3, _delta: float) -> void:
 	var vel_h := Vector3(linear_velocity.x, 0.0, linear_velocity.z) / pace
 	var tilt := _accel + vel_h * DRAG_TILT
+	if is_vtol():
+		## Banked into the turn (the sideways part), the nose only VTOL_PITCH_SHARE of the rest.
+		var fwd := Vector3(-sin(_heading), 0.0, -cos(_heading))
+		var along := fwd * _accel.dot(fwd)
+		tilt = (_accel - along) + along * VTOL_PITCH_SHARE
 	var target := _basis_for(ground_up, tilt)
 	var dq := target.get_rotation_quaternion() * global_basis.get_rotation_quaternion().inverse()
 	if dq.w < 0.0:
@@ -928,7 +1017,7 @@ func _attitude(ground_up: Vector3, _delta: float) -> void:
 func _basis_for(up: Vector3, accel: Vector3) -> Basis:
 	var g := 9.8
 	var thrust := (up * g + accel)
-	var max_h := g * tan(deg_to_rad(MAX_TILT_DEG))
+	var max_h := g * tan(deg_to_rad(VTOL_MAX_TILT_DEG if is_vtol() else MAX_TILT_DEG))
 	var h := Vector3(thrust.x, 0.0, thrust.z)
 	if h.length() > max_h and up.is_equal_approx(Vector3.UP):
 		h = h.normalized() * max_h
@@ -948,10 +1037,22 @@ func _on_damaged(_zone: StringName, hit: Dictionary) -> void:
 		_last_shooter = shooter
 	if is_down():
 		return
+	if mode == Mode.FLYING and not evading():
+		_evade_phase = randf() * TAU
+		taking_fire.emit(self)
+	if mode == Mode.FLYING:
+		_evade_until = Soldier._now() + EVADE_S
 	for z in FATAL_ZONES:
 		if zone_health(z) <= 0.0:
 			_go_down()
 			return
+
+
+## Breaking away: the wanted velocity `v_h` faster and weaving across its track.
+func _evade(v_h: Vector3) -> Vector3:
+	var side := Vector3(-v_h.z, 0.0, v_h.x).normalized() if v_h.length() > 0.1 else Vector3.RIGHT
+	var weave := sin(Soldier._now() * 1.4 + _evade_phase) * EVADE_WEAVE_MS * pace
+	return v_h * EVADE_SPEED + side * weave
 
 
 ## Vehicle's fire (a destroyed hull, a fuel fire): in the air it falls.

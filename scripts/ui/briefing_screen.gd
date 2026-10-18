@@ -21,6 +21,8 @@ var _summary: Label
 var _objectives: Label
 var _intel: Label
 var _insertion: OptionButton
+var _approach: OptionButton
+var _drop: OptionButton
 var _supports: VBoxContainer
 var _players: Label
 var _ready_button: Button
@@ -67,6 +69,26 @@ func _ready() -> void:
 		if _briefing:
 			_briefing.request_insertion(String(_insertion.get_item_metadata(index))))
 	_box.add_child(_insertion)
+	## A helicopter insertion's way in and down (Captain, 2026-10-17).
+	_approach = OptionButton.new()
+	_approach.add_item("Helicopter comes in: planner's pick")
+	_approach.set_item_metadata(0, -1)
+	for i in HeliRoute.SIDES.size():
+		_approach.add_item("Helicopter comes in from the %s" % HeliRoute.SIDES[i])
+		_approach.set_item_metadata(i + 1, i)
+	_approach.item_selected.connect(func(index: int) -> void:
+		if _briefing:
+			_briefing.request_approach(int(_approach.get_item_metadata(index))))
+	_box.add_child(_approach)
+	_drop = OptionButton.new()
+	_drop.add_item("Helicopter lands (hot drop: in fast, out the doors)")
+	_drop.set_item_metadata(0, "land")
+	_drop.add_item("Fast-rope from the hover")
+	_drop.set_item_metadata(1, "rope")
+	_drop.item_selected.connect(func(index: int) -> void:
+		if _briefing:
+			_briefing.request_drop(String(_drop.get_item_metadata(index))))
+	_box.add_child(_drop)
 	_add_label("SUPPORTS (wave 5 builds them)", 13).modulate = Color(1, 1, 1, 0.6)
 	_supports = VBoxContainer.new()
 	_box.add_child(_supports)
@@ -112,6 +134,11 @@ func show_briefing(briefing: Briefing) -> void:
 		if String(point.get("id", "")) == briefing.insertion_id:
 			_insertion.select(_insertion.item_count - 1)
 	_insertion.tooltip_text = _insertion.text
+	var heli := String(briefing.insertion().get("method", "foot")) == Briefing.HELI
+	_approach.visible = heli
+	_drop.visible = heli
+	_approach.select(briefing.approach + 1)
+	_drop.select(maxi(Briefing.DROPS.find(briefing.drop), 0))
 	for child in _supports.get_children():
 		child.queue_free()
 	for id: String in briefing.available_supports():

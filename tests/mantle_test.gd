@@ -48,6 +48,7 @@ func _ready() -> void:
 	await _case("0.3 m kerb", 0.3, -1.0, false)
 	await _case("2.3 m wall", 2.3, -1.0, false)
 	await _case("1.0 m block under a roof", 1.0, 0.5, false)
+	await _running_mantle()
 	await _prone()
 	player.inventory.take(&"exo_frame_light")
 	await get_tree().physics_frame
@@ -119,6 +120,33 @@ func _stand_facing(ground: float) -> void:
 	player.movement.stamina = 1.0
 	await _wait_for(func() -> bool: return player.is_on_floor(), 2.0)
 	await _seconds(0.2)
+
+
+## Captain, 2026-10-17 ("matle needs to be more fluid, not just when youre standing still"):
+## running at the block, 1.6 m short of its face, it climbs on the move (the ledge looked for
+## further out at speed), quicker than from a stand, and goes on over the top still moving.
+func _running_mantle() -> void:
+	var ground := _course(1.0, -1.0)
+	await get_tree().physics_frame
+	await _stand_facing(ground)
+	player.global_position = AT + Vector3(0, ground + 0.05, 0.6)  # 1.6 m short of the face
+	player.velocity = Vector3(0, 0, -5.0)
+	var started := false
+	for i in 30:
+		await get_tree().physics_frame
+		player.velocity = Vector3(player.velocity.x, player.velocity.y, -5.0)  # still running at it
+		if player.movement.try_mantle():
+			started = true
+			break
+	check(started, "running at a 1.0 m block: it climbs on the move")
+	if not started:
+		return
+	var t0 := Time.get_ticks_msec()
+	await _wait_for(func() -> bool: return not player.movement.mantling, 3.0)
+	var took := (Time.get_ticks_msec() - t0) / 1000.0
+	check(took < SoldierMovement.MANTLE_BASE_S + SoldierMovement.MANTLE_PER_M_S + 0.05, "quicker than from a stand (%.2f s)" % took)
+	check(Vector2(player.velocity.x, player.velocity.z).length() > 2.0 and player.global_position.y > ground + 0.8,
+		"on top and still going (%.1f m/s)" % Vector2(player.velocity.x, player.velocity.z).length())
 
 
 func _case(label: String, h: float, roof: float, climbs: bool) -> void:

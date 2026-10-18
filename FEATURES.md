@@ -531,6 +531,11 @@ This list covers what is built and in the game today (2026-10-12). Work still un
   step up with a hand on the grab handle, walk in, sit); AI getting out run out of the door.
 - Helicopter doors (UH-60, Petrel, Razorback) sit flush shut, pop out past the hull, slide back,
   windows in each. The Razorback has 3 FFV door seats a side and an aft bay for two heavy exos.
+- VTOLs fly as VTOLs (banked turns, straight-in approach, vertical let-down). Insertions are hot
+  drops (fast straight approach, hard flare, out the doors at a run) or fast-rope from a hover;
+  the briefing picks the side the helicopter comes in from. Pilots shown at the controls; the
+  Petrel's co-pilot works a .50 cal belly turret. Pilots break away when hit.
+- Mantling works on the move: run at a ledge and jump to climb it without stopping.
 
 ## Exosuits
 

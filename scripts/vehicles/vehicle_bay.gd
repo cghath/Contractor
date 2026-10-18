@@ -104,6 +104,10 @@ func build() -> void:
 	var steps: Array = spec.get("steps", [])
 	for i in steps.size():
 		var st: Dictionary = steps[i]
+		## "ramp": false (the UH-60's: Captain, 2026-10-17, no ramps with the mantle system): only
+		## the way in for boarding (Vehicle._board_path), nothing deploys.
+		if not bool(st.get("ramp", true)):
+			continue
 		var col := CollisionShape3D.new()
 		col.name = "BayStep%d" % i
 		var a := VehicleSpecs.vec(st.from)

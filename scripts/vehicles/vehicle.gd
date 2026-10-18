@@ -203,10 +203,15 @@ const BOARD_HANDLE := Vector3(0.1, 1.2, 0.45)
 ## An "edge" seat (Captain, 2026-10-17: the UH-60's door riders sit on the cabin floor facing
 ## out, legs hanging off the edge): the hips this far up off the floor, the feet this far below it.
 const EDGE_HIP_UP := 0.07
-const EDGE_HANG_M := 0.5
+const EDGE_HANG_M := 0.84  # Captain, 2026-10-17: legs hanging down towards the ground, not out
+const EDGE_FOOT_M := 0.22  # the feet this far out past the hips (knees just bent)
 ## A worn pack sits a rider off a seat's canvas back by its depth, but no further than this.
 const SEAT_PACK_MAX_M := 0.2
 var _door_guns := {}  # seat index -> DoorGun (seats with "door_gun")
+var _crew: Array[Node3D] = []  # a helicopter's pilots, drawn (_build_crew)
+## Host: the fast-ropes are out (Helicopter insertions, HeliCall); every peer draws them (net_state "ropes").
+var ropes_out := false
+var _ropes: Array[MeshInstance3D] = []
 var _running_out := {}  # host: instance id -> [soldier, when he's out, the step's foot (vehicle frame)]
 ## Captain, 2026-10-17: in an FFV seat with the doors shut a rider crouches behind the door,
 ## facing out, and sits as it opens (VehicleBay.open_fraction): hips this high off the cabin
@@ -221,6 +226,13 @@ const KNEEL_UP_FOOT := 0.42
 const KNEEL_DOWN_FOOT := 0.45
 ## Running out (Captain, 2026-10-17: AI "should run out instead of spawning out of the helis"):
 ## up off the seat, a run to the door at RUN_OUT_MS, down off the sill, out at the step's foot.
+## Fast-roping (Captain, 2026-10-17: modern hot drops): from the seat to the door in
+## ROPE_TO_DOOR_S, then down the rope at ROPE_SLIDE_MS to the ground under the door.
+const ROPE_TO_DOOR_S := 0.6
+const ROPE_SLIDE_MS := 5.0
+## The ropes hang from this far out from the door's sill, from this high over the floor.
+const ROPE_OUT_M := 0.45
+const ROPE_TOP_M := 1.7
 const RUN_OUT_MS := 3.0
 const RUN_OUT_SIT_S := 0.4
 const RUN_OUT_STEP_S := 0.45
@@ -395,6 +407,8 @@ func setup(p_model: String, p_scheme := "", p_faction := &"player", id := "") ->
 			gun.position = at
 			add_child(gun)
 			_door_guns[_seat_poses.size() - 1] = gun
+	if kind == HELICOPTER:
+		_build_crew()
 	for i in (spec.get("points", []) as Array).size():
 		var p: Dictionary = spec.points[i]
 		add_child(VehicleActionPoint.new(self, String(p.kind), VehicleSpecs.vec(p.at), p.get("seats", []), -1, "Point%d" % i))
@@ -621,7 +635,13 @@ func seat_transform(seat: String) -> Transform3D:
 ## A seat's eye point in the world (the gunner's turns with the turret).
 func seat_eye_point(index: int) -> Vector3:
 	var at := VehicleSpecs.vec(spec.seats[index].at)
-	return global_transform * (turret.carry(at) if index == _gun_seat else at)
+	return global_transform * (turret.carry(at) if index == _gun_seat and not _gun_remote() else at)
+
+
+## The gun is worked from a seat that doesn't turn with it ("gun" "remote": the Petrel's belly
+## turret, from the co-pilot's seat).
+func _gun_remote() -> bool:
+	return bool((spec.get("gun", {}) as Dictionary).get("remote", false))
 
 
 ## The seated pose (CharacterModel.seated_pose) for a seat whose eye is `eye` above its body's
@@ -643,12 +663,16 @@ func _seated_pose_for(seat: Dictionary, eye: float) -> Dictionary:
 	var floor_y := NAN if bool(seat.get("open", false)) else VehicleInteriors.floor_of(model)
 	var hip := VehicleInteriors.cushion_top(eye_y, floor_y) + CharacterModel.SEAT_HIP_UP - origin_y
 	var floor_rel := hip - CharacterModel.SEAT_HEIGHT if is_nan(floor_y) else floor_y - origin_y
+	var edge_foot := 0.0
 	## "edge": sitting on the cabin floor itself at a door, facing out ("face"), the legs over the
 	## sill and hanging (the feet EDGE_HANG_M under the floor, not on it).
 	if bool(seat.get("edge", false)) and not is_nan(floor_y):
 		hip = floor_y + EDGE_HIP_UP - origin_y
 		floor_rel = floor_y - EDGE_HANG_M - origin_y
+		edge_foot = EDGE_FOOT_M
 	var pose := CharacterModel.seated_pose(hip, floor_rel, StringName(seat.get("kind", "")) in [DRIVER, PILOT, GUNNER])
+	if edge_foot > 0.0:
+		pose["foot"] = edge_foot
 	pose["ffv"] = String(seat.get("ffv", "")) != ""  # a fire-from-vehicle seat: the rifle in the hands, not between the knees
 	pose["deck"] = floor_rel if is_nan(floor_y) else floor_y - origin_y  # the cabin floor (an edge seat's feet hang under it)
 	pose["edge"] = bool(seat.get("edge", false))
@@ -688,7 +712,7 @@ func seat_floor(index: int) -> float:
 ## round with the ring.
 func _seat_at(index: int) -> Transform3D:
 	var t := _seat_local[index]
-	if index == _gun_seat:
+	if index == _gun_seat and not _gun_remote():
 		t.origin = turret.carry(t.origin)
 	return t
 
@@ -896,6 +920,8 @@ func _board_pose(s: Soldier, index: int, seat_t: Transform3D, seat_yaw: float) -
 	var origin: Vector3
 	var heading := in_yaw
 	var eye := stand_eye
+	if bool(net.get("rope", false)):
+		return _rope_pose(s, index, seat_t, t, pose, steps[k])
 	if bool(net.get("out", false)):
 		return _run_out_pose(s, index, seat_t, seat_yaw, t, pose, path, sill)
 	if t < step_s:
@@ -1017,6 +1043,37 @@ func _run_out_pose(s: Soldier, index: int, seat_t: Transform3D, seat_yaw: float,
 	return {"origin": origin, "pose": pose, "eye": eye}
 
 
+## Every peer: a helicopter's pilots, seen at the controls (Captain, 2026-10-17: "make sure it has
+## pilots"). The flying stays the helicopter's own (Helicopter: aircraft are AI-flown; nobody
+## takes the pilot seats), so they're drawn, not soldiers: a figure in flight kit seated at each
+## pilot seat, hands on the controls, gone with a wreck (HeliCall's crash survivors are the crew).
+func _build_crew() -> void:
+	for i in _seat_local.size():
+		if seat_kind(i) != PILOT or _seat_poses[i].is_empty():
+			continue
+		var pivot := Node3D.new()
+		pivot.name = "Crew%d" % i
+		pivot.transform = Transform3D(Basis(Vector3.UP, deg_to_rad(float(spec.seats[i].get("face", 0.0)))), _seat_local[i].origin)
+		add_child(pivot)
+		var inv := Inventory.new()
+		inv.name = "Inventory"
+		pivot.add_child(inv)
+		inv.take(&"helmet")
+		var model := CharacterModel.new()
+		model.name = "Model"
+		model.variant = "multicam"
+		pivot.add_child(model)
+		var rig := GearRig.new()
+		rig.name = "Gear"
+		rig.inventory = inv
+		rig.model = model
+		pivot.add_child(rig)
+		var pose: Dictionary = _seat_poses[i].duplicate()
+		pose["yaw"] = 0.0
+		model.pose = pose
+		_crew.append(pivot)
+
+
 ## Every peer: door gun `i`'s gunner `s` swings it to where he looks (his synced turn, less the
 ## vehicle's; his look pitch), and his hands take its grips (`seated`'s "grip_l"/"grip_r").
 func _man_door_gun(i: int, s: Soldier, seated: Dictionary, veh_yaw: float) -> void:
@@ -1030,6 +1087,34 @@ func _man_door_gun(i: int, s: Soldier, seated: Dictionary, veh_yaw: float) -> vo
 	gun.aim(wrapf(s.rotation.y - veh_yaw - out, -PI, PI), s.model.look_pitch)
 	seated["grip_r"] = gun.grip(true)
 	seated["grip_l"] = gun.grip(false)
+
+
+## Every peer: `s` going down the fast-rope from bay step `st` (action_net BOARD with "rope"),
+## `t` s in: up from the seat to the door, facing in on the rope; then the slide, hands on the
+## rope over his head, legs together and a little bent, down to the ground.
+func _rope_pose(s: Soldier, index: int, seat_t: Transform3D, t: float, pose: Dictionary, st: Dictionary) -> Dictionary:
+	var top: Vector3 = global_transform * _rope_top(st)
+	var sill := VehicleSpecs.vec(st.from)
+	var door: Vector3 = global_transform * (sill + Vector3(signf(sill.x) * 0.15, 0.0, 0.0))
+	var inward: Vector3 = global_basis * Vector3(-signf(sill.x), 0.0, 0.0)
+	var drop := float(s.model.action_net.get("drop", 5.0))
+	var hang := Vector3(top.x, 0.0, top.z) - inward * 0.25  # where he hangs, the rope at his face
+	var origin: Vector3
+	if t < ROPE_TO_DOOR_S:
+		var u := smoothstep(0.0, 1.0, t / ROPE_TO_DOOR_S)
+		var from := Vector3(seat_t.origin.x, door.y, seat_t.origin.z)
+		origin = from.lerp(Vector3(hang.x, door.y, hang.z), u)
+	else:
+		var u := clampf((t - ROPE_TO_DOOR_S) * ROPE_SLIDE_MS / maxf(drop, 0.01), 0.0, 1.0)
+		origin = Vector3(hang.x, lerpf(door.y, door.y - drop - (door.y - (top.y - ROPE_TOP_M)) , u), hang.z)
+	pose["foot_l"] = Vector2(0.05, 0.0)
+	pose["foot_r"] = Vector2(-0.05, 0.0)
+	pose["hip"] = CharacterModel.LEG_LENGTH - 0.08
+	pose["pitch"] = 0.05
+	s.model.board_grip = Vector3(top.x, origin.y + 2.0, top.z)
+	var heading := atan2(-inward.x, -inward.z)
+	pose["yaw"] = wrapf(heading - s.rotation.y, -PI, PI)
+	return {"origin": origin, "pose": pose, "eye": SoldierMovement.STANCE_EYE[SoldierMovement.Stance.STAND_HIGH]}
 
 
 ## A foot at `at` (world) as CharacterModel's boarding foot: Vector2(forward of, up from) the
@@ -1135,7 +1220,7 @@ func _first_free_ffv() -> int:
 func _first_free_for(s: Soldier) -> int:
 	## Captain, 2026-10-17: AI fill a helicopter's fire-from-vehicle door seats (seat "ffv") first,
 	## so the doors are manned before anyone sits back in the cabin.
-	if s.is_ai() and _first_free_ffv() >= 0:
+	if s.is_ai() and not Person.is_person(s) and _first_free_ffv() >= 0:
 		return _first_free_ffv()
 	var order: Array[StringName] = [PASSENGER, GUNNER, DRIVER, PILOT]
 	for k in order:
@@ -1199,6 +1284,77 @@ func server_run_out(s: Soldier) -> void:
 	net["out"] = true
 	s.model.action_net = net
 	_running_out[s.get_instance_id()] = [s, Soldier._now() + total, path[0]]
+
+
+## Host: `s` goes down a fast-rope from the door on `side` (-1 left, 1 right: the bay step on
+## that side) to the ground below it: to the door, then the slide (action_net BOARD with
+## "rope"), out at the rope's foot when it ends (_step_run_outs). Without a bay step there: out.
+func server_fast_rope(s: Soldier, side: float) -> void:
+	var index := seat_of(s)
+	if index < 0 or not multiplayer.is_server() or _running_out.has(s.get_instance_id()):
+		return
+	var steps: Array = (spec.get("bay", {}) as Dictionary).get("steps", [])
+	var step := -1
+	for k in steps.size():
+		if signf(VehicleSpecs.vec(steps[k].from).x) == signf(side):
+			step = k
+	if step < 0:
+		server_exit(s)
+		return
+	server_set_bay(true)
+	var top := _rope_top(steps[step])
+	var ground := _rope_ground(global_transform * top)
+	var drop := maxf((global_transform * top).y - ground - 1.7, 0.5)
+	var total := ROPE_TO_DOOR_S + drop / ROPE_SLIDE_MS
+	s.model.server_play(CharacterModel.BOARD, total)
+	var net := s.model.action_net.duplicate()
+	net["step"] = step
+	net["rope"] = true
+	net["drop"] = drop
+	s.model.action_net = net
+	var foot := global_transform.affine_inverse() * Vector3((global_transform * top).x, ground, (global_transform * top).z)
+	_running_out[s.get_instance_id()] = [s, Soldier._now() + total, foot]
+
+
+## The ground under a rope hanging at `at` (world): the level's (its own hull and bay aside).
+func _rope_ground(at: Vector3) -> float:
+	var lvl := level()
+	return lvl.ground_point(Vector3(at.x, 0.0, at.z)).y if lvl else at.y - 15.0
+
+
+## Where bay step `st`'s rope hangs from (the vehicle's frame): out past the sill, up the door.
+func _rope_top(st: Dictionary) -> Vector3:
+	var sill := VehicleSpecs.vec(st.from)
+	return sill + Vector3(signf(sill.x) * ROPE_OUT_M, ROPE_TOP_M, 0.0)
+
+
+## Every peer: the fast-ropes hang from each door to the ground while they're out.
+func _update_ropes() -> void:
+	var out := ropes_out if multiplayer.is_server() else bool(net_state.get("ropes", false))
+	if not out:
+		for r in _ropes:
+			r.visible = false
+		return
+	var steps: Array = (spec.get("bay", {}) as Dictionary).get("steps", [])
+	if _ropes.is_empty():
+		var mat := StandardMaterial3D.new()
+		mat.albedo_color = Color("3b3428")
+		mat.roughness = 1.0
+		for k in steps.size():
+			var r := MeshInstance3D.new()
+			r.name = "Rope%d" % k
+			var m := BoxMesh.new()
+			m.size = Vector3(0.045, 1.0, 0.045)
+			r.mesh = m
+			r.material_override = mat
+			add_child(r)
+			_ropes.append(r)
+	for k in mini(steps.size(), _ropes.size()):
+		var top := global_transform * _rope_top(steps[k])
+		var ground := _rope_ground(top)
+		var length := maxf(top.y - ground, 0.5)
+		_ropes[k].visible = true
+		_ropes[k].global_transform = Transform3D(Basis.from_scale(Vector3(1.0, length, 1.0)), Vector3(top.x, top.y - length * 0.5, top.z))
 
 
 ## Whether anyone is still running out.
@@ -1509,7 +1665,7 @@ func _place_occupants() -> void:
 		var seated: Dictionary = _seat_poses[i] if i < _seat_poses.size() else {}
 		if not seated.is_empty():
 			# Every peer, from the synced turn; the gun's seat turns with its gunner (and the gun).
-			seated["yaw"] = 0.0 if i == _gun_seat else wrapf(veh_yaw + face - s.rotation.y, -PI, PI)
+			seated["yaw"] = 0.0 if i == _gun_seat and not _gun_remote() else wrapf(veh_yaw + face - s.rotation.y, -PI, PI)
 			if seated.has("back"):
 				seated["hip_z"] = float(seated.back) - CharacterModel.SEAT_BACK_OUT - _pack_off(s)
 			if bool(seated.get("kneel", false)):
@@ -1553,6 +1709,10 @@ func _process(delta: float) -> void:
 	if not multiplayer.is_server():
 		_resolve_seats()
 		_client_follow()
+	_update_ropes()
+	if wrecked and not _crew.is_empty() and _crew[0].visible:
+		for c in _crew:
+			c.visible = false
 	_place_occupants()
 	if hull:
 		hull.pose_turret()
@@ -2002,7 +2162,7 @@ func _publish_state(now := false) -> void:
 	for z: StringName in _zones:
 		zones_out[String(z)] = snappedf(float(_zones[z]), 0.001)
 	net_state = {"seats": seats_out, "zones": zones_out, "fuel": snappedf(fuel, 0.1), "burning": snappedf(burning_s, 0.1),
-		"wrecked": wrecked, "battery": battery_ok, "salvaged": salvaged, "lost": _lost, "bay": bay != null and bay.open,
+		"wrecked": wrecked, "battery": battery_ok, "salvaged": salvaged, "lost": _lost, "bay": bay != null and bay.open, "ropes": ropes_out,
 		"speed": snappedf(linear_velocity.dot(-global_basis.z), 0.1) if is_inside_tree() else 0.0}
 
 

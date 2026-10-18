@@ -13,7 +13,30 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ### UH-60 walk-in cabin, helicopter doors, FFV riders, boarding and running out (Captain, 2026-10-17)
 
+#### Added
+- VTOL flight (`Helicopter.is_vtol`, data "flight": "vtol", "cruise_kmh"): the Petrel (320 km/h)
+  and Razorback (270) bank into turns with the nose about level, accelerate and slow harder, and
+  land by a straight approach to a hover then straight down: no J-hook.
+- Hot drops: every insertion, and any landing with a known threat, comes in on a straight, low,
+  fast approach with a hard flare and a quick let-down (`Helicopter.straight_plan`, `server_land_at`
+  "hot"); a hot drop waves off only with more than 4 hostiles hitting it in 20 s (`HeliCall
+  _shooters_hitting`). AI run out of the doors; it waits for them, then lifts.
+- Fast-rope insertion (briefing: "Fast-rope from the hover"): a hover 12 m over the LZ, ropes from
+  both doors, everyone down one at a time by the doors in turn, then away (`HeliCall._step_rope`,
+  `Vehicle.server_fast_rope`, ropes drawn on every peer).
+- The briefing picks the side a helicopter insertion comes in from (`Briefing.approach`,
+  `HeliRoute.entry`'s side), re-planning its route.
+- Pilots shown in the helicopters (drawn at the controls, `Vehicle._build_crew`).
+- The Petrel's gun is an M2 .50 belly turret worked from the co-pilot's seat (`"gun"` "remote": the
+  seat doesn't turn with it), crewed by a support crewman (`HeliCall._crew_gun`); its two door
+  gunners are gone.
+- Combat pilots: hit in flight, it jinks, drops lower and speeds up for a few seconds (`EVADE_*`).
+- Fluid mantle (`SoldierMovement`): the ledge looked for along the way it runs, a jump into a wall
+  or a press a step early counts, quicker on the move, one curve up and over, speed carried on.
+
 #### Changed
+- The UH-60 has no deploying boarding ramps (step "ramp": false: the mantle does it); sill riders'
+  legs hang down to the ground.
 - The UH-60M's cabin is a walk-in bay (`data/vehicles.json` "uh60" "bay": floor, walls, sliding
   doors, a step at each door; `VehicleArt`/`VehicleInteriors` hull and cabin rebuilt wider and
   taller), an open floor plan: only the 4-seat aft bench has seats; 4 kneeling spots (seat stance
