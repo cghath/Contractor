@@ -168,7 +168,7 @@ func host_forest_zone() -> void:
 static func forest_contract(def: Dictionary) -> Dictionary:
 	var at := {}
 	for m: Dictionary in def.get("modules", []):
-		at[String(m.type)] = [float(m.pos[0]), float(m.pos[1])]
+		at[ZoneModules.base(String(m.type))] = [float(m.pos[0]), float(m.pos[1])]
 	var objectives: Array = []
 	var enemies: Array = []
 	for step: Array in [["checkpoint", "Clear the checkpoint", "Take the road checkpoint in the clearing."],

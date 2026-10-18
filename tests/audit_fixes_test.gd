@@ -51,6 +51,7 @@ func _ready() -> void:
 	response.set_process(false)
 	level.get_node(^"ZoneCleanup").set_process(false)
 	await frames(4)
+	probe_report_order()
 	await probe_commander_registration()
 	probe_reserve_accounting()
 	await frames(3)
@@ -60,6 +61,20 @@ func _ready() -> void:
 	Campaign.reset_campaign()
 	print("AUDIT_FIXES TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
+
+func probe_report_order() -> void:
+	var alert := command.alert
+	command._last_contact.clear()
+	command._contacts.clear()
+	command.seen_cp = 0.0
+	var observed: Array[bool] = []
+	var target := player.global_position
+	var observer := func(_report: Dictionary) -> void:
+		observed.append(not command.unconfirmed(target) and command.seen_now() >= 4.0 * EnemyCommand.SQUAD_MAN_CP)
+	alert.reported.connect(observer)
+	alert._receive({"kind": &"contact", "pos": target, "area": alert.area_of(target), "by": "", "seen": 4, "exo": 0})
+	alert.reported.disconnect(observer)
+	check(observed == [true], "a first contact updates command before report listeners request a response")
 
 func probe_board_validation() -> void:
 	var offers := ContractGen.generate_board(1234, 1, {"meridian": 10, "black_ridge": -60, "salvage_union": 0}, 6)

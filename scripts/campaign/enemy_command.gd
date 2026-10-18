@@ -177,7 +177,7 @@ func _ready() -> void:
 	response = level.get_node_or_null(^"EnemyResponse") as EnemyResponse if level else null
 	alert = level.get_node_or_null(^"Alert") as Alert if level else null
 	if alert:
-		alert.reported.connect(_on_reported)
+		alert.report_received.connect(_on_reported)
 
 
 static func of(from: Node) -> EnemyCommand:
