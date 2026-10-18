@@ -2,16 +2,18 @@
 
 Fix branch: `codex/executive-audit-fixes`, based on v0.4.36 (`38f5825`).
 
+Local remediation and follow-up validation completed October 18, 2026. All six executive findings are implemented. The full run and subsequent focused checks are distinguished below.
+
 | Finding | Change | Verification |
 | --- | --- | --- |
-| E-01 | Corpses retain the original spawn id; a separate saved fallen-post ledger survives cleanup and extraction. Older callsign-labelled saves migrate on load. | `audit_fixes`, R0022 |
-| E-02 | Cleanup measures player proximity to `Soldier.body_point()`, preserving displaced visible bodies and carried bodies. | `audit_fixes`, R0022 |
-| E-03 | QRF waves and hunters reserve their planned actual headcount, respect remaining reserves and return unspawned allocations. Reinforcement pairs also return partial allocations. | `audit_fixes`, R0022 |
-| E-04 | HQ commanders register at spawn; death, cuffs, surrender and delivery before the first command tick cause headlessness. Discovery also recognizes dead commanders. | `audit_fixes`, R0022 |
-| E-05 | Crow's Pass uses Meridian as client; generation rejects hostile/unknown employers and excludes self-targeting. | `contracts`, R0016; `audit_fixes`, R0022 |
+| E-01 | Corpses retain the original spawn id; a separate saved fallen-post ledger survives cleanup and extraction. Older callsign-labelled saves migrate on load. | `audit_fixes`, R0036 |
+| E-02 | Cleanup measures player proximity to `Soldier.body_point()`, preserving displaced visible bodies and carried bodies. | `audit_fixes`, R0036 |
+| E-03 | QRF waves and hunters reserve their planned actual headcount, respect remaining reserves and return unspawned allocations. Reinforcement pairs also return partial allocations. | `audit_fixes`, R0036 |
+| E-04 | HQ commanders register at spawn; death, cuffs, surrender and delivery before the first command tick cause headlessness. Discovery also recognizes dead commanders. | `audit_fixes`, R0036 |
+| E-05 | Crow's Pass uses Meridian as client; generation rejects hostile/unknown employers and excludes self-targeting. | `contracts` and `audit_fixes`, R0036 |
 | E-06 | Draft publishing reads release state before mutations, refuses public releases and stops on failed or malformed reads. | Inert publisher checks, S0018 |
 
-CI now includes voice, compass and `audit_fixes`. A parity check fails if its matrix differs from the default local suites. Runner self-check fixtures and output retain numbered logs (S0021 passed).
+CI now includes all 44 local suites, including voice, compass and `audit_fixes`. A parity check fails if its matrix differs from the default local suites. Runner self-check fixtures and output retain numbered logs, and CI uploads those logs even on failure (S0030 passed). Remote CI was not run: the user requested that fixes stay local.
 
 Mission/world checks now recognize generated module variants and the intended back rows, outward-facing back streets, indoor defenders and elevated street posts. The pressure boundary handles clock rounding. Mission response checks release already-tested patrol slots before asserting an authorized QRF launch. Command behavior has separate regression coverage. Cache-spawner paths are relative during construction, and building queries wait for the first navigation synchronization.
 
@@ -21,17 +23,42 @@ Building probes index nearby navigation regions instead of searching the whole m
 
 Godot documents the distinction and cost of [vertex merging versus proximity edge connections](https://docs.godotengine.org/en/4.7/tutorials/navigation/navigation_optimizing_performance.html), and provides [region-specific closest-surface queries](https://docs.godotengine.org/en/4.7/classes/class_navigationserver3d.html#class-navigationserver3d-method-region-get-closest-point).
 
-| Measure | Earlier repeat, R0015 | Fixed, R0027 | Existing limit |
+| Measure | Earlier repeat, R0015 | Fixed, R0036 | Existing limit |
 | --- | --- | --- | --- |
-| Average physics tick | 21.66 ms | 17.98 ms | 20 ms |
-| 95th-percentile physics tick | 52.24 ms | 27.91 ms | 40 ms |
-| Building scans per second of combat | 137 ms | 77 ms | 120 ms |
-| Average engine step | 2.79 ms | 1.09 ms | 6 ms |
+| Average physics tick | 21.66 ms | 17.86 ms | 20 ms |
+| 95th-percentile physics tick | 52.24 ms | 29.09 ms | 40 ms |
+| Building scans per second of combat | 137 ms | 60 ms | 120 ms |
+| Average engine step | 2.79 ms | 1.19 ms | 6 ms |
 
-R0027 passed every benchmark check, including ragdoll settling and support, plus 50 unobstructed chunk-seam paths. Limits, actor counts and fight duration were preserved. Rare cold-scan spikes remain (349 ms worst tick in this run); passing these budgets does not establish hitch-free rendering on every frame.
+R0036 passed every benchmark check, including ragdoll settling and support, plus 50 unobstructed chunk-seam paths. Limits, 42 soldiers and the 900-tick fight duration were preserved. Rare spikes remain: the worst tick was 338 ms and the 99th percentile was 55.86 ms. Passing these budgets does not establish hitch-free rendering on every frame.
 
-## Final validation
+The optimization is scoped to individual zone regions, so it does not change a subsequent base map's settings. Squad checks matched the indexed query against the original navigation query on 27 surfaces across floors and tile boundaries.
 
-Full regression verification is in progress. R0022 passed the new audit regressions, missions and squad; R0016 passed smoke, contracts and both world peers. S0018 passed all five inert publishing cases; S0021 passed runner and CI coverage checks. Failed experiments and their logs are retained; the navigation batching, bounded path-query and disabled-solver experiments were removed.
+## Additional corrections
+
+- A late joiner's already-held casualty uses the held pose immediately instead of replaying the newly-downed slump.
+- A packed massive neck wound can advance to a clamp instead of repeatedly requesting ineffective gauze.
+- Escort care overrides escort-intent hysteresis. The escort retains care until the approaching medic reaches the actual body; the approach retains smoke, suppression and blocked-route handling.
+- The commander records a first sighting before the response requests permission to launch.
+- The experimental forest briefing recognizes generated compound and village variants.
+- Helicopter clearance includes the tilted airframe's offset and two metres of contour-lag allowance. The measured clearance requirement is unchanged; the harbour approach passed at 5.3 m.
+- A bullet that wounds a body before being stopped by a vehicle, soft armour or another body retains the earlier body-hit feedback. Trajectory, penetration and damage calculations are unchanged.
+
+Fixtures now aim close shots from the physical muzzle, wait for seated hitboxes, use the actual ragdoll position for treatment reach and give-up helper distance, distinguish penetration edits from downstream marks, respect the crouch hold and installed callout recordings, and use a genuine zone-edge foot extraction for recovery. The give-up fixture checks the actual helper/body distance without changing the game's 50 m rule.
+
+## Validation
+
+| Run | Result |
+| --- | --- |
+| [R0036 summary](<C:/Users/My Little Pony/.codex/visualizations/2026/10/13/01a1342e-614c-7411-8ee7-4e0451f2a59c/Contractor-audit-logs/2026-10-18/R0036-004857-FAIL-codex-executive-audit-fixes-e6a1ce3/summary.txt>), `e6a1ce3` | Full 44-suite run with unchanged game/test source: 43 passed; the vehicle host failed the passenger hit-reporting assertion. All audit regressions, protected body-position checks, support/flight checks and performance budgets passed. The selected list exactly matches the default suite set. |
+| [R0037 reproduction](<C:/Users/My Little Pony/.codex/visualizations/2026/10/13/01a1342e-614c-7411-8ee7-4e0451f2a59c/Contractor-audit-logs/2026-10-18/R0037-015504-FAIL-codex-executive-audit-fixes-3c48b3d/vehicles-host.log>), `3c48b3d` | Expected negative regression: both male and female targets were wounded, and the fresh armoured vehicle stopped the exiting round, but old feedback said `vehicle`. The rounds-only diagnostic omitted wreck setup, so its client wreck assertion is not a full-suite result. |
+| [R0038 summary](<C:/Users/My Little Pony/.codex/visualizations/2026/10/13/01a1342e-614c-7411-8ee7-4e0451f2a59c/Contractor-audit-logs/2026-10-18/R0038-015722-FAIL-codex-executive-audit-fixes-417dd83/summary.txt>), `417dd83` | Full vehicles (both peers, including the new regressions), net, weapons, materials, armour, anti-armour, people, sound and smoke passed after the feedback correction. Gameplay failed its give-up isolation fixture; nine of ten suites passed. |
+| [R0039 summary](<C:/Users/My Little Pony/.codex/visualizations/2026/10/13/01a1342e-614c-7411-8ee7-4e0451f2a59c/Contractor-audit-logs/2026-10-18/R0039-021306-PASS-codex-executive-audit-fixes-571d5cd/summary.txt>), `571d5cd` | Gameplay and smoke passed with the helper placed relative to the actual downed body. This final change is test-only; game code is unchanged from R0038. |
+| S0018 | All five inert publishing cases passed; no real release was changed. |
+| S0030 | Runner, CI parity and log-artifact configuration checks passed. |
+
+The only subsequent game-code change after R0036 is three stop-result guards in `Ballistics._trace`; the new vehicle regression covers both body types. All ten affected suite families have passing follow-up results across R0038/R0039. The entire 44-suite list has not been repeated after that feedback-only change; this is not a claim of one green full run at the final commit. Earlier diagnostic, failed and stopped runs remain in the retained log index.
+
+The work branch stays local at the user's request. No remote push, publication or integration-branch update has occurred; validation uses the local runner.
 
 Old saves that already lost the original guard identity or the death record cannot reconstruct that missing history. The new ledger prevents future loss. Rendered play, microphone capture, exports and remote four-player play are outside this automated validation.

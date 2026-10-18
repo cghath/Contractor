@@ -1,5 +1,7 @@
 # Contractor — executive audit of the new local commits
 
+**Remediation:** implementation and current validation are recorded in [FIXES.md](FIXES.md). The findings below describe the original audited commit.
+
 **October 17, 2026 · v0.4.36 · `dev` at `38f5825526761df877f01bc5a9483520f7f383ed`**
 
 ## Executive decision
