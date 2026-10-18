@@ -122,7 +122,11 @@ func _test_generation() -> void:
 		"the bonus phone is the one that HVT carries")
 	check(String(oa[0].params.person.label).begins_with("HVT (") and String(a.title).begins_with("HVT capture"), "they have a name (%s)" % oa[0].params.person.label)
 	var hvt_name := String(oa[0].params.person.name).split(" ")
-	check(hvt_name.size() == 2 and hvt_name[1] in Names.INSURGENT and hvt_name[0] in Names.LOCAL_FIRST["insurgent"][Names.MALE],
+	var nation := String(MissionRegistry.faction(String(a.target)).get("nation", "insurgent"))  # (wave 6b: targets aren't all the militia)
+	if not Names.POOLS.has(nation):
+		nation = "insurgent"
+	var firsts: Array = (Names.FIRST.get(nation, Names.LOCAL_FIRST.get(nation, Names.LOCAL_FIRST["insurgent"])) as Dictionary)[Names.MALE]
+	check(hvt_name.size() == 2 and hvt_name[1] in (Names.POOLS[nation] as Array) and hvt_name[0] in firsts,
 		"a real name from the target faction's people (%s)" % oa[0].params.person.name)
 	var nations := {}
 	var rng2 := RandomNumberGenerator.new()

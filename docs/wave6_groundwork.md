@@ -1,6 +1,13 @@
 # Wave 6 groundwork: factions
 
-**Status:** groundwork, 2026-10-18. Nothing here is built yet. Wave 6 is next once the Oct 18 open
+**Status (2026-10-18):** 6a built (tiers with pay by tier, Hostile offers no work, ripple, decay,
+side lockout: `Economy`, `Contracts`, `factions.json` "reputation_rules"). 6b started: enemy kits as
+data (`Kits`, `factions.json` "kits"), a placeholder regional army ("Federal Army", Eastern-bloc
+kit, woodland), contracts against any kitted faction switch the zone's patrols, hunters, QRF waves
+(which stayed Black Ridge's before) and, for data kits, garrisons; Black Ridge carries a captured
+M4 (Captain: factions known to field AR-pattern rifles use them). Still open in 6b: the real faction
+set (call 4 below), regional weapon art (Chinese, Iranian), a garrison already spawned before its
+contract went live keeps the militia kit. Groundwork below as written. Wave 6 is next once the Oct 18 open
 items are in (Captain, 2026-10-18). This page collects what's already decided, what the code already
 has to build on, the calls the Captain still has to make (each with a proposed answer, so a yes is
 enough), and a build order. The plan's own scope is in [build_plan.md](build_plan.md) (Wave 6) and

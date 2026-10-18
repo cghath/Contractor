@@ -10,18 +10,38 @@
 	],
 	"_rules": "Wave 6a, all Proposed: ripple (a share of any rep change goes to the faction's allies, the opposite to its enemies), decay (rep drifts toward neutral by decay_per_day once decay_grace_days pass without a job; allied_grace_days for an Allied faction), and side lockout (taking a faction's contract locks you out of its enemies' work for lockout_days, counted again from the debrief).",
 	"reputation_rules": {"ripple_ally": 0.25, "ripple_enemy": 0.25, "decay_per_day": 1, "decay_grace_days": 7, "allied_grace_days": 14, "lockout_days": 3},
+	"_kits": "Wave 6b (2026-10-18): what each enemy faction fields, by kit id (a faction's \"kit\"). body + one entry of guns by mix (a team, wave or garrison's i-th man gets mix[i % size]) + tail; roles casts a gun's carrier (Roles); variant is his camo (VoxelArt.VARIANTS). \"insurgent\" and \"pmc\" are Black Ridge's and Vantage's (CompoundLevel.hostile_loadout / rival_pmc_loadout, kept in code: Vantage's exo gear by difficulty lives there). Regional armies fight with what we have: the AK/PK/SVD family stands in until regional weapon art (Chinese, Iranian) lands.",
+	"kits": {
+		"eastern_army": {"variant": "woodland",
+			"body": ["plate_carrier", "plate_steel_l3", "helmet", "assault_pack"],
+			"tail": ["ifak", "frag_grenade", "smoke_grenade"],
+			"guns": {
+				"ak74": ["ak74", "mag_545", "mag_545", "mag_545", "mag_545", "mag_545"],
+				"rpk": ["rpk", "mag_rpk40", "mag_rpk40", "mag_rpk40", "mag_rpk40"],
+				"pkm": ["pkm", "belt_762x54r", "belt_762x54r", "belt_762x54r"],
+				"svd": ["svd", "mag_svd", "mag_svd", "mag_svd", "mag_svd", "mag_svd"],
+				"ammo": ["ak74", "mag_545", "mag_545", "mag_545", "belt_762x54r", "belt_762x54r"]
+			},
+			"mix": ["ak74", "ak74", "rpk", "ak74", "pkm", "ammo", "ak74", "svd"],
+			"roles": {"pkm": "heavy_gunner", "ammo": "ammo_bearer"},
+			"combat": 0.6, "discipline": 0.7}
+	},
 	"factions": [
 		{"id": "meridian", "name": "Meridian Logistics", "role": "employer",
 		 "wants": "Secure supply routes and recover lost cargo.", "fears": "Losing contracts to cheaper rivals.", "start_rep": 10,
-		 "allies": [], "enemies": ["black_ridge", "vantage_group"]},
+		 "allies": [], "enemies": ["black_ridge", "vantage_group", "federal_army"]},
 		{"id": "black_ridge", "name": "Black Ridge Militia", "role": "hostile", "nation": "insurgent",
 		 "wants": "Control the inland roads and tax every convoy.", "fears": "Outside contractors with air support.", "start_rep": -60,
-		 "allies": [], "enemies": ["meridian"]},
+		 "allies": [], "enemies": ["meridian", "federal_army"], "kit": "insurgent"},
 		{"id": "salvage_union", "name": "Coastal Salvage Union", "role": "neutral",
 		 "wants": "First claim on every wreck.", "fears": "Being caught between the other two.", "start_rep": 0,
 		 "allies": [], "enemies": []},
 		{"id": "vantage_group", "name": "Vantage Group", "role": "hostile", "nation": "pmc",
 		 "wants": "Undercut Meridian's contracts and hold the ground it's paid to take.", "fears": "A client who hires real competition instead of a militia.", "start_rep": -40,
-		 "allies": [], "enemies": ["meridian"]}
+		 "allies": [], "enemies": ["meridian"], "kit": "pmc"},
+		{"id": "federal_army", "name": "Federal Army", "role": "hostile", "nation": "RU", "kit": "eastern_army",
+		 "_note": "PLACEHOLDER name (wave 6b): a conventional army with Eastern-bloc gear, standing in for the regional armies until the Captain picks the faction set.",
+		 "wants": "Hold the border districts and push the militias out of the hills.", "fears": "Foreign contractors reporting what it does there.", "start_rep": -20,
+		 "allies": [], "enemies": ["meridian", "black_ridge"]}
 	]
 }

@@ -213,13 +213,13 @@ func _send_wave(index: int, origin := Vector3.INF, extra_pairs := 0, cap := -1, 
 	var across := (Vector3(edge.x, 0, edge.z) - _players_centre(level)).normalized().cross(Vector3.UP)
 	for i in size:
 		var offset := across * PAIR_SPACING_M * (i - (size - 1) / 2.0)
-		var pmc := enemy_faction == CompoundLevel.PMC_FACTION
-		var kit: Array = (CompoundLevel.rival_pmc_loadout(index + i, difficulty) if pmc else CompoundLevel.hostile_loadout(index + i)) if loadout is Array and loadout == CompoundLevel.HOSTILE_LOADOUT else (loadout if loadout is Array else LOADOUT)
+		var kit_id := Kits.kit_of(enemy_faction)  # Black Ridge's, Vantage's or a regional army's (wave 6b)
+		var kit: Array = Kits.loadout(kit_id, index + i, difficulty) if loadout is Array and loadout == CompoundLevel.HOSTILE_LOADOUT else (loadout if loadout is Array else LOADOUT)
 		var s: Soldier = level.call(&"spawn_soldier", {"name": "R%d_%d" % [index + 1, i + 1], "faction": "hostile",
-			"variant": "black" if pmc else "urban", "pos": _on_ground(edge + offset), "loadout": kit,
+			"variant": Kits.variant(kit_id), "pos": _on_ground(edge + offset), "loadout": kit,
 			"combat": minf(float(params.combat) + float(params.combat_step) * index, float(params.combat_max)), "discipline": 0.5, "guard": false, "mode": "aware",
-			"role": CompoundLevel.rival_pmc_role(index + i) if pmc else CompoundLevel.hostile_role(index + i),
-			"exo": CompoundLevel.rival_pmc_exo_at(index + i, difficulty) if pmc else ""})
+			"role": Kits.role(kit_id, index + i),
+			"exo": Kits.exo_at(kit_id, index + i, difficulty)})
 		if s == null:
 			continue
 		var brain := SquadAI.of(s)

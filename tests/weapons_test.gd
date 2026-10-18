@@ -58,6 +58,7 @@ func _ready() -> void:
 	for id: String in FIRED:
 		await _test_fire_and_reload(id)
 	await _test_hostile_kits()
+	_test_faction_kits()
 	await _test_rival_pmc_kits()
 	await _test_rival_pmc_exo_gating()
 	_test_roles()
@@ -240,6 +241,34 @@ func _test_fire_and_reload(id: String) -> void:
 	check(inv.rounds_in(&"primary") == cap, "reload from its own %s: %d loaded, spare %d -> %d" % [g[0], inv.rounds_in(&"primary"), spare, inv.spare_rounds(StringName(g[0]))])
 
 
+## Wave 6b (2026-10-18): each enemy faction fields its own kit (factions.json "kits"); Black
+## Ridge's and Vantage's come from their code tables unchanged; a regional army (Federal Army,
+## "eastern_army") from data, in its own camo.
+func _test_faction_kits() -> void:
+	print("Faction kits (wave 6b)")
+	check(Kits.kit_of("black_ridge") == Kits.INSURGENT and Kits.kit_of("vantage_group") == Kits.PMC and Kits.kit_of("federal_army") == "eastern_army",
+		"Black Ridge, Vantage and the Federal Army each have their kit")
+	var same := true
+	for i in 9:
+		same = same and Kits.loadout(Kits.INSURGENT, i) == CompoundLevel.hostile_loadout(i) and Kits.loadout(Kits.PMC, i, 3) == CompoundLevel.rival_pmc_loadout(i, 3)
+	check(same and Kits.variant(Kits.INSURGENT) == "urban" and Kits.variant(Kits.PMC) == "black", "the militia's and the PMC's kits are what they were")
+	var guns := {}
+	var roles := {}
+	for i in 8:
+		var kit := Kits.loadout("eastern_army", i)
+		check(kit.has("plate_carrier") and kit.has("plate_steel_l3") and kit.has("ifak"), "army kit %d: carrier, steel plate, IFAK" % i)
+		for g: String in ["ak74", "rpk", "pkm", "svd"]:
+			if kit.has(g):
+				guns[g] = true
+		if Kits.role("eastern_army", i) != "":
+			roles[Kits.role("eastern_army", i)] = true
+	check(guns.size() == 4 and roles.has("heavy_gunner") and roles.has("ammo_bearer") and Kits.variant("eastern_army") == "woodland",
+		"the army: AK-74s, an RPK, a PKM with its ammo bearer, an SVD, in woodland (%s)" % [guns.keys()])
+	var captured := range(CompoundLevel.HOSTILE_MIX.size()).any(func(i: int) -> bool: return CompoundLevel.hostile_loadout(i).has("m4a1"))
+	check(captured, "the militia fields a captured M4 (a faction known to use AR-pattern rifles uses them)")
+	check("federal_army" in MissionRegistry.enemies(), "the Federal Army is a faction the squad can be hired against")
+
+
 func _test_hostile_kits() -> void:
 	print("OPFOR carry AK-family guns")
 	var seen := {}
@@ -257,7 +286,7 @@ func _test_hostile_kits() -> void:
 		SquadAI.of(s).set_physics_process(false)
 		var gun := String(s.inventory.slots[&"primary"])
 		var ammo := StringName(ItemDB.get_item(StringName(gun)).stats.ammo)
-		check(gun in OPFOR and s.inventory.count_of(ammo) >= 1 and s.inventory.rounds_in(&"primary") > 0,
+		check((gun in OPFOR or gun == "m4a1") and s.inventory.count_of(ammo) >= 1 and s.inventory.rounds_in(&"primary") > 0,  # (one captured M4, 2026-10-18)
 			"hostile %d carries %s with %d spare %s, loaded" % [i, gun, s.inventory.count_of(ammo), ammo])
 		s.queue_free()
 

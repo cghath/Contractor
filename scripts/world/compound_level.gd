@@ -155,12 +155,13 @@ const HOSTILE_GUNS := {
 	"pkm": ["pkm", "belt_762x54r", "belt_762x54r"],
 	"svd": ["svd", "mag_svd", "mag_svd", "mag_svd", "mag_svd", "mag_svd"],
 	"ammo": ["akm", "mag_762x39", "mag_762x39", "belt_762x54r", "belt_762x54r"],  # the PKM's ammo bearer
+	"m4": ["m4a1", "mag_556", "mag_556", "mag_556"],  # captured (Captain, 2026-10-18: a faction known to field AR-pattern rifles uses them)
 }
-## Who in a group of eight carries what: mostly AKs, a gunner (and its ammo bearer, Captain
+## Who in a group of nine carries what: mostly AKs, a captured M4, a gunner (and its ammo bearer, Captain
 ## 2026-10-17 "the new roles go to the factions too": Roles.HEAVY_GUNNER/AMMO_BEARER aren't
 ## Vantage-only, SquadAI._maybe_resupply_gunner reads whichever belt ammo the gunner's own
 ## weapon takes), a marksman, a machine-gunner.
-const HOSTILE_MIX: Array[String] = ["akm", "ak74", "akm", "rpk", "ak74", "svd", "ammo", "pkm"]
+const HOSTILE_MIX: Array[String] = ["akm", "ak74", "akm", "rpk", "ak74", "svd", "ammo", "pkm", "m4"]
 const HOSTILE_LOADOUT := HOSTILE_BODY + HOSTILE_GUNS.akm + HOSTILE_TAIL
 
 

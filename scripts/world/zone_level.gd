@@ -529,11 +529,18 @@ func _on_contract_live(cid: String, _objectives: Array) -> void:
 	# this zone's reinforcement waves (EnemyResponse) to its gear; any other target leaves the
 	# zone's usual hostile mix alone (several contracts can be live in a hot zone; the last one
 	# whose target is the PMC wins, same simplification Alert and Pressure already make per zone).
-	if _enemy_response and String(contract.get("target", "")) == String(CompoundLevel.PMC_FACTION):
-		_enemy_response.enemy_faction = CompoundLevel.PMC_FACTION
+	# Wave 6b: any target faction with a kit of its own (Vantage, a regional army) does the same, and
+	# the QRF waves (Reinforcements) follow it too (they stayed Black Ridge's before).
+	var target := String(contract.get("target", ""))
+	if _enemy_response and target != "" and Kits.kit_of(target) != Kits.INSURGENT:
+		_enemy_response.enemy_faction = StringName(target)
 		# Vantage's exo gear is difficulty-gated (CompoundLevel.PMC_LX3_DIFFICULTY/HX1_DIFFICULTY):
 		# true_rating, the host's real 1-5 rating, not "rated" (the briefing, which can understate it).
 		_enemy_response.difficulty = int(contract.get("true_rating", contract.get("rated", 1)))
+		var waves := _enemy_response.reinforcements
+		if waves:
+			waves.enemy_faction = StringName(target)
+			waves.difficulty = _enemy_response.difficulty
 	var module := get_module(String(contract.get("module_id", "")))
 	if module and _garrisoned.has(module.module_id):
 		_spawn_garrison(module)
@@ -594,10 +601,14 @@ func _spawn_queued_garrison() -> void:
 		var i := int(q.i)
 		var pos: Vector3 = q.pos
 		if module and ai.get_node_or_null(NodePath(_garrison_callsign(module, i))) == null:
-			var s := spawn_soldier({"name": _garrison_callsign(module, i), "faction": "hostile", "variant": "urban", "pos": pos,
-				"loadout": hostile_loadout(i) + ["enemy_radio"] if i % RADIO_EVERY == 0 else hostile_loadout(i), "combat": GARRISON_STATS.combat, "discipline": GARRISON_STATS.discipline, "guard": true,
+			# Wave 6b: a regional army's (data kit's) garrisons wear and carry its kit.
+			var kit_id := Kits.kit_of(_enemy_response.enemy_faction) if _enemy_response else Kits.INSURGENT
+			var data_kit := Kits.is_data(kit_id)
+			var kit: Array = Kits.loadout(kit_id, i) if data_kit else hostile_loadout(i)
+			var s := spawn_soldier({"name": _garrison_callsign(module, i), "faction": "hostile", "variant": Kits.variant(kit_id) if data_kit else "urban", "pos": pos,
+				"loadout": kit + ["enemy_radio"] if i % RADIO_EVERY == 0 else kit, "combat": GARRISON_STATS.combat, "discipline": GARRISON_STATS.discipline, "guard": true,
 				"mode": alert.mode_at(pos) if alert else GARRISON_STATS.mode,
-				"role": "medic" if i % ENEMY_MEDIC_EVERY == ENEMY_MEDIC_EVERY - 1 else CompoundLevel.hostile_role(i)})
+				"role": "medic" if i % ENEMY_MEDIC_EVERY == ENEMY_MEDIC_EVERY - 1 else (Kits.role(kit_id, i) if data_kit else CompoundLevel.hostile_role(i))})
 			if s:
 				var look := module.global_basis * (q.get("face", Vector3.ZERO) as Vector3)  # a post's way out (towns)
 				s.rotation.y = post_yaw(module, pos) if look.length() < 0.1 else atan2(-look.x, -look.z)
