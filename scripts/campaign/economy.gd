@@ -266,6 +266,62 @@ func hunting(faction: String) -> bool:
 	return heat(faction) >= float(MissionRegistry.reputation_rules().get("heat_hunters", INF))
 
 
+## Named hunter squads (wave 6d, decided: "at the top end, persistent named hunter squads appear
+## that remember the player and come back"): one per faction at a time, raised once its heat
+## reaches "heat_named". {"id", "faction", "name", "leader", "encounters", "kills", "alive",
+## "raised_day"}. Each time it comes for the squad it's better (EnemyResponse: combat and
+## discipline by encounters); it's done when its leader dies.
+const NEMESIS_FIRST: Array[String] = ["Black", "Grey", "Red", "Iron", "Night", "Dust", "Ash", "Stone"]
+const NEMESIS_SECOND: Array[String] = ["Wolves", "Jackals", "Hounds", "Vipers", "Hawks", "Ravens", "Scorpions", "Lynxes"]
+
+
+## `faction`'s named hunter squad still in the field, or {}.
+func nemesis(faction: String) -> Dictionary:
+	for n: Dictionary in state().get("nemeses", []):
+		if String(n.faction) == faction and bool(n.alive):
+			return n
+	return {}
+
+
+## Host: `faction` raises a named hunter squad (if it has none in the field); returns it.
+func server_raise_nemesis(faction: String) -> Dictionary:
+	var have := nemesis(faction)
+	if not have.is_empty() or faction == "":
+		return have
+	var s := _section()
+	var list: Array = s.get("nemeses", [])
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash([faction, list.size(), int(s.day)])
+	var name := "%s %s" % [NEMESIS_FIRST[rng.randi() % NEMESIS_FIRST.size()], NEMESIS_SECOND[rng.randi() % NEMESIS_SECOND.size()]]
+	var nation := String(MissionRegistry.faction(faction).get("nation", "insurgent"))
+	var n := {"id": "N%d" % (list.size() + 1), "faction": faction, "name": name, "leader": Names.mission_person(rng, "hvt", nation),
+		"encounters": 0, "kills": 0, "alive": true, "raised_day": int(s.day)}
+	list.append(n)
+	s["nemeses"] = list
+	_commit()
+	print("[economy] %s raises a named hunter squad: the %s, led by %s" % [faction, name, n.leader])
+	return n
+
+
+## Host: named squad `id` came for the squad again (it learns: EnemyResponse reads "encounters").
+func server_nemesis_met(id: String) -> void:
+	for n: Dictionary in _section().get("nemeses", []):
+		if String(n.id) == id:
+			n.encounters = int(n.encounters) + 1
+	_commit()
+
+
+## Host: named squad `id` killed one of ours, or lost its leader (done for good).
+func server_nemesis_event(id: String, killed_ours := 0, leader_dead := false) -> void:
+	for n: Dictionary in _section().get("nemeses", []):
+		if String(n.id) == id:
+			n.kills = int(n.kills) + killed_ours
+			if leader_dead:
+				n.alive = false
+				print("[economy] the %s are finished: %s is dead" % [n.name, n.leader])
+	_commit()
+
+
 func _cool_heat() -> void:
 	var s := _section()
 	var h: Dictionary = s.get("heat", {})

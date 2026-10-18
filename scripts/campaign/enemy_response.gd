@@ -60,6 +60,11 @@ const TRACK_NEAR_M := 10.0
 const TRACK_TURN_DEG := 70.0
 const TRACK_TURN_PAUSE_S := 10.0
 const TRACK_SIGNAL_SHOTS := 3
+## Named hunter squads (wave 6d): this much better than a hunter team the first time, this much
+## more each time they come back, at most NEMESIS_SKILL_MAX; always a full HUNTER_SIZE.y. Proposed.
+const NEMESIS_SKILL := 0.1
+const NEMESIS_SKILL_PER_MEETING := 0.05
+const NEMESIS_SKILL_MAX := 0.95
 ## One contact, one coordinated look (Captain, 2026-10-18: "enemies are getting swarmy ... they
 ## need better coordination"). Every shot of a firefight used to pull the next-nearest patrol in
 ## on its own, so pair after pair trickled at the squad from every side. Now a report within
@@ -677,6 +682,18 @@ func _track(group: Dictionary, living: Array) -> bool:
 	return true
 
 
+## A named hunter squad's leader down: it's finished (Economy.server_nemesis_event), once.
+func _check_nemesis(team: Dictionary) -> void:
+	if not team.has("nemesis") or team.get("nemesis_done", false) or (team.soldiers as Array).is_empty():
+		return
+	var leader: Variant = team.soldiers[0]
+	if not is_instance_valid(leader) or (leader as Soldier).vitals.is_dead():
+		team["nemesis_done"] = true
+		Economy.server_nemesis_event(String(team.nemesis), 0, true)
+		var who := String((team.squad as Node).name) if is_instance_valid(team.squad) else "hunter squad"
+		Contracts._notify_all("Word on the net: the %s lost their leader." % who)
+
+
 ## Signal shots: one of `living` fires TRACK_SIGNAL_SHOTS into the air and the net hears of the
 ## trail at `pos` (a "signal" report: a patrol comes to look).
 func _signal(living: Array, pos: Vector3) -> void:
@@ -770,6 +787,7 @@ func _tick_hunters(tier: int) -> void:
 		if living.is_empty():
 			continue
 		teams += 1
+		_check_nemesis(team)
 		if _track(team, living):
 			pass  # on the squad's trail
 		elif not lk.is_empty() and now() >= float(team.retarget_at) and not team.get("recalled", false) and not team.has("rally"):  # EnemyCommand called it home; a push holds it at its rally point
@@ -815,16 +833,28 @@ func _send_hunters(lkp: Vector3, radius: float) -> void:
 		route.append(_ground(lkp - dir * off * FLANK_SHORT + side * off))
 	route.append(_ground(lkp))
 	route.append_array(_search_ring(lkp, radius))
-	var callsign := "HT%d" % _hunter_teams
+	# Wave 6d: past "heat_named" the faction's named hunter squad comes, better every time it does.
+	var nem: Dictionary = {}
+	if Economy.heat(String(enemy_faction)) >= float(MissionRegistry.reputation_rules().get("heat_named", INF)):
+		nem = Economy.server_raise_nemesis(String(enemy_faction))
+	var callsign := String(nem.name).replace(" ", "") if not nem.is_empty() else "HT%d" % _hunter_teams
+	var combat := minf(HUNTER_COMBAT + NEMESIS_SKILL + NEMESIS_SKILL_PER_MEETING * int(nem.encounters), NEMESIS_SKILL_MAX) if not nem.is_empty() else HUNTER_COMBAT
+	var discipline := minf(HUNTER_DISCIPLINE + NEMESIS_SKILL, 1.0) if not nem.is_empty() else HUNTER_DISCIPLINE
 	var squad := _new_squad(callsign)
 	squad.patrol = route
 	var loadout: Array = (CompoundLevel.PMC_LOADOUT if enemy_faction == CompoundLevel.PMC_FACTION else CompoundLevel.HOSTILE_LOADOUT).duplicate()
 	for i in HUNTER_SMOKES:
 		loadout.append(String(SMOKE))
-	var soldiers := _spawn_team(squad, callsign, randi_range(HUNTER_SIZE.x, HUNTER_SIZE.y), origin, route[0], loadout,
-		HUNTER_COMBAT, HUNTER_DISCIPLINE * c, "combat")
+	var soldiers := _spawn_team(squad, callsign, HUNTER_SIZE.y if not nem.is_empty() else randi_range(HUNTER_SIZE.x, HUNTER_SIZE.y), origin, route[0], loadout,
+		combat, discipline * c, "combat")
 	hunters.append({"k": _hunter_teams, "squad": squad, "soldiers": soldiers, "at": now(),
 		"retarget_at": now() + HUNTER_RETARGET_S / c, "smoked": false})
+	if not nem.is_empty() and not soldiers.is_empty():
+		hunters.back()["nemesis"] = String(nem.id)
+		(soldiers[0] as Soldier).person_name = String(nem.leader)
+		(soldiers[0] as Soldier).set_meta(&"nemesis_leader", String(nem.id))
+		Economy.server_nemesis_met(String(nem.id))
+		Contracts._notify_all("Word on the net: the %s are hunting you%s." % [nem.name, " again" if int(nem.encounters) > 0 else ""])
 	_join_push("hunters", hunters.back(), lkp)
 	print("[response] hunters %s: %d from (%.0f, %.0f), coordination %.1f" % [callsign, soldiers.size(), origin.x, origin.z, c])
 

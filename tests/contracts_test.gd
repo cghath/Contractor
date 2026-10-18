@@ -452,6 +452,16 @@ func _test_reputation_core() -> void:
 	Economy.advance_days(1, "test")
 	check(not Economy.hunting("black_ridge") and is_equal_approx(Economy.heat("black_ridge"), float(rules.heat_hunters) + 1.0 - float(rules.heat_cool_per_day)),
 		"a quiet day cools it below that (%.1f)" % Economy.heat("black_ridge"))
+	# Named hunter squads (wave 6d): one per faction at a time; it remembers; its leader's death ends it.
+	var n := Economy.server_raise_nemesis("black_ridge")
+	check(not n.is_empty() and String(n.name).split(" ").size() == 2 and String(n.leader) != "" and Economy.nemesis("black_ridge") == n
+		and Economy.server_raise_nemesis("black_ridge") == n, "Black Ridge raises one named hunter squad: the %s, led by %s" % [n.get("name", "?"), n.get("leader", "?")])
+	Economy.server_nemesis_met(String(n.id))
+	Economy.server_nemesis_met(String(n.id))
+	check(int(Economy.nemesis("black_ridge").encounters) == 2, "it remembers every time it came for the squad")
+	Economy.server_nemesis_event(String(n.id), 0, true)
+	check(Economy.nemesis("black_ridge").is_empty() and String(Economy.server_raise_nemesis("black_ridge").name) != "",
+		"its leader dead, it's finished; a new one can rise in its place")
 
 
 # --- The debrief ---------------------------------------------------------------------------
