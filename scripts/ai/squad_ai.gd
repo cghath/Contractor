@@ -404,6 +404,9 @@ const GRAB_CHANCE := 0.55
 const GRAB_SKILL := 0.25
 const GRAB_RETRY_S := 1.5
 const HVT_MEDIC_PULL := 0.25
+## Meta on a wounded HVT: the instance id of the medic walking in to take him over from his
+## escort (care_by stays the escort's until the medic is beside him; handoff_medic).
+const HANDOFF_META := &"medic_handoff"
 ## What makes a conscious HVT a casualty to see to: bleeding, airway and chest.
 const HVT_CARE_KINDS: Array[String] = ["arterial", "junctional", "venous", "internal", "airway", "tension", "chest"]
 ## Proposed: scavenging (Scavenge). Bodies within SCAVENGE_RANGE_M of the unit, and for
@@ -1605,6 +1608,8 @@ func _find_casualty() -> Soldier:
 			continue  # nothing this unit can do for a conscious HVT
 		if carer != null:
 			var carer_ai := SquadAI.of(carer)
+			if hvt and _handoff_by_other(s):
+				continue  # another medic is already walking in to take him over
 			if hvt and _takes_over_hvt(s, carer):
 				pass  # a medic takes a wounded HVT over from whoever has him
 			elif carer_ai == null or not carer_ai.wants_medic or medic_for(s, carer_ai.wanted) != body:
@@ -1749,6 +1754,7 @@ func _do_care() -> void:
 		var carer := _carer_of(casualty)
 		if carer == null:
 			casualty.care_by = body
+			_clear_handoff(casualty)
 		elif care == Care.REACH and Person.is_hvt(casualty) and _takes_over_hvt(casualty, carer):
 			# The escort keeps treating while the medic approaches. Claiming from afar
 			# made him abandon care before the medic was actually beside the HVT.
@@ -1792,6 +1798,8 @@ func _may_take(c: Soldier) -> bool:
 	var carer := _carer_of(c)
 	if carer == null or carer == body:
 		return true
+	if Person.is_hvt(c) and _handoff_by_other(c):
+		return false  # another medic is already walking in to take him over
 	if Person.is_hvt(c) and _takes_over_hvt(c, carer):
 		return true
 	var carer_ai := SquadAI.of(carer)
@@ -1799,9 +1807,41 @@ func _may_take(c: Soldier) -> bool:
 
 
 ## This unit (a free medic) takes wounded HVT `c` over from `carer`, who isn't a medic: the
-## escorts' care is a stopgap until a medic is there.
+## escorts' care is a stopgap until a medic is there. One medic walks in at a time: not while
+## another is already on his way to him (handoff_medic).
 func _takes_over_hvt(c: Soldier, carer: Soldier) -> bool:
+	return _may_hand_over(c, carer) and not _handoff_by_other(c)
+
+
+## This unit is a free medic who could take wounded HVT `c` over from non-medic `carer`.
+func _may_hand_over(c: Soldier, carer: Soldier) -> bool:
 	return body.role == Roles.MEDIC and carer != body and carer.role != Roles.MEDIC and _free_for(c) and _cares_for(c)
+
+
+## The medic walking in to take wounded HVT `c` over from his escort (still on his way, up, and
+## still after `c`), or null; a stale claim (he went down, gave up or took someone else) is
+## dropped.
+static func handoff_medic(c: Soldier) -> Soldier:
+	if c == null or not is_instance_valid(c) or not c.has_meta(HANDOFF_META):
+		return null
+	var medic := instance_from_id(int(c.get_meta(HANDOFF_META))) as Soldier
+	var ai := SquadAI.of(medic) if medic != null else null
+	if ai == null or medic.is_queued_for_deletion() or not medic.vitals.is_up() or ai.casualty != c or ai.care != Care.REACH:
+		c.remove_meta(HANDOFF_META)
+		return null
+	return medic
+
+
+## Another medic than this unit is walking in on wounded HVT `c`.
+func _handoff_by_other(c: Soldier) -> bool:
+	var medic := handoff_medic(c)
+	return medic != null and medic != body
+
+
+## Drops this unit's walking-in claim on `c` (arrived, or let him go).
+func _clear_handoff(c: Soldier) -> void:
+	if is_instance_valid(c) and c.has_meta(HANDOFF_META) and int(c.get_meta(HANDOFF_META)) == body.get_instance_id():
+		c.remove_meta(HANDOFF_META)
 
 
 ## Takes `c` on (from nobody, or from a carer who asked for a medic).
@@ -1810,7 +1850,12 @@ func _take_casualty(c: Soldier) -> void:
 		_end_care()
 	casualty = c
 	var carer := _carer_of(c)
-	if carer == null or carer == body or not Person.is_hvt(c) or not _takes_over_hvt(c, carer):
+	if carer != null and carer != body and Person.is_hvt(c) and _may_hand_over(c, carer):
+		# A medic for a wounded HVT his escort is treating: the escort keeps care_by until the
+		# medic is beside him (_care_reach), and other medics leave him to this one meanwhile
+		# (an order to treat him makes this one the medic walking in).
+		c.set_meta(HANDOFF_META, body.get_instance_id())
+	else:
 		c.care_by = body
 	_start_reach()
 	_smoke_used = false
@@ -1845,7 +1890,7 @@ func _reset_reach() -> void:
 ## the threat first. At the casualty: one lying in the open is dragged to cover, otherwise
 ## treatment starts.
 func _care_reach(contact: bool, handoff := false) -> void:
-	var d := body.global_position.distance_to(casualty.body_point()) if handoff else _flat_distance(casualty.body_point())
+	var d := _flat_distance(casualty.body_point())
 	if body.carrying == casualty:
 		care = Care.CARRY
 		return
@@ -1869,6 +1914,7 @@ func _care_reach(contact: bool, handoff := false) -> void:
 	_has_destination = false
 	if handoff:
 		casualty.care_by = body
+		_clear_handoff(casualty)
 	# (Never lift someone another is treating: it cut the Captain's IV short, P0164.)
 	if exposed and not is_instance_valid(casualty.carried_by) and not casualty.vitals.is_healing():
 		var spot: Variant = find_drag_cover(body.global_position, 10.0)
@@ -2117,6 +2163,7 @@ func _callouts_carrying(dead: bool) -> void:
 
 func _end_care() -> void:
 	if is_instance_valid(casualty):
+		_clear_handoff(casualty)
 		if body.carrying == casualty:
 			body.release_carried()
 		if casualty.care_by == body:
