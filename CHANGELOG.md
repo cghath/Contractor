@@ -11,6 +11,31 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Day and night, weather: wave 7 S1 MVP (Captain, 2026-10-18)
+
+#### Added
+- Time of day per zone (`DayNight`, `scripts/world/day_night.gd`, a "DayNight" node in every
+  level): a zone's `"hour"` (its data/missions.json entry or its definition; a deployed
+  contract's own `"hour"` wins), 08:30 without one, passing at an hour per ten minutes in a
+  contract zone (standing in the compound, the base and the range). The sun climbs and sets
+  with it; at night a dim blue moon lights the level from the other side, and the sky (the
+  procedural sky, or `zone_sky.gdshader` through its existing uniforms, no shader edit),
+  ambient, fill and haze darken. A level at its own default keeps the look it built.
+- Weather: `"weather"` the same way, one of clear, overcast, fog, rain, storm (`DayNight.WEATHER`,
+  a row of data each): thicker Environment fog, a greyer, dimmer sky, darker nights, rain as
+  GPU particles round the camera (not headless), slower spotting, a limit on how far anyone is
+  seen (fog 150 m, storm 250 m, rain 400 m), footsteps carrying less in rain and storms.
+- Darkness cuts AI spotting (`Spotting.sight_x`): `DayNight.darkness_at(pos)` (0 day .. 1 night)
+  slows the spot up to 4x and hides anyone past the night's sight (60 m at full dark, 600 m at
+  dusk) unless they fired in the last 1.5 s; one marked line is the hook for NVGs (wave 7 S2).
+- Storms ground helicopters: `DayNight.grounds_aircraft()` answers `Supports.can_fly` through
+  `CompoundLevel.weather_grounds_aircraft`, so the UH-60 supports refuse ("Helicopters are
+  grounded: the weather won't let them fly") and a heli insertion goes on foot.
+- Saved with the zone (`GameState.sky`, `"sky"` in the zone save; older saves have none) and
+  replicated: a client asks the host when its level loads, the host sends it every 10 s.
+- Dev keys (DevTools, the host): `;` moves the clock on 2 hours, `'` the next weather.
+- `daynight` test suite (tests/daynight_test.gd), in tools/run_tests.sh and CI.
+
 ### Squad roles and the Vantage Group rival PMC, first slice (Captain, 2026-10-17)
 
 #### Added
