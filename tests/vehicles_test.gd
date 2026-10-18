@@ -794,7 +794,10 @@ func _test_rounds() -> void:
 	var bed_rider := _soldier("friendly", tech.global_position + Vector3(2.5, 0.1, 1.0), "BedRider")
 	await get_tree().physics_frame
 	tech.server_enter(bed_rider, 2)
-	await get_tree().process_frame
+	# Boarding places the origin before the next body pose and physics-server sync.
+	# Aim after the sitting hitboxes have reached the seat, not at the old standing pose.
+	await _seconds(0.1)
+	check(tech.seat_of(bed_rider) == 2 and not bed_rider.seat_pose.is_empty(), "the open-bed passenger is seated before the shot")
 	var bchest := (bed_rider.get_node(^"ChestHitbox/Shape") as Node3D).global_position
 	r = _shoot(shooter, bchest + Vector3(0, 6, 8), bchest, m4)
 	if r.result != "body":
