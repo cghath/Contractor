@@ -436,9 +436,6 @@ func _launch_qrf() -> void:
 	if bases.is_empty():
 		return  # a destroyed QRF base sends no waves
 	var command := EnemyCommand.of(self)
-	if command and not command.approve("qrf", lkp):
-		_last_qrf = now()  # turned down: asked again after QRF_RELAUNCH_S, not every report
-		return
 	var from: Array[ZoneModule] = [bases[0]]
 	if tier >= 2:
 		var hq := _hq()
@@ -446,6 +443,7 @@ func _launch_qrf() -> void:
 			from.append(bases[1])
 		elif hq:
 			from.append(hq)
+	var approved := false  # the commander says yes once per launch: one operation, one "move out"
 	for m in from:
 		var gate := _unseen_gate(m, lkp)
 		if not gate.is_finite():
@@ -453,7 +451,23 @@ func _launch_qrf() -> void:
 		var room := _room()
 		if room < 2:
 			break  # the zone's answer is out in full already (SPAWN_BUDGET)
-		var soldiers := reinforcements.server_send(gate, 1 if tier >= 1 else 0, room)
+		var extra := 1 if tier >= 1 else 0
+		var wanted := reinforcements.next_wave_size(extra, room)
+		if wanted < 2:
+			break  # the reinforcements' own cap (max_alive)
+		var planned := reinforcements.next_wave_size(extra, mini(room, floori(command.available_cp()))) if command else wanted
+		if command and not approved:
+			# Asked even with the reserves short of a pair (for the wave it wanted): the denial is
+			# on record and an unconfirmed target still gets its probe.
+			if not command.approve("qrf", lkp, planned if planned >= 2 else wanted):
+				_last_qrf = now()  # turned down: asked again after QRF_RELAUNCH_S, not every report
+				break
+			approved = true
+		elif command and (planned < 2 or not command.reserve_men(planned)):
+			break  # this launch's later wave: paid quietly from what's left, or not sent
+		var soldiers := reinforcements.server_send(gate, extra, planned)
+		if command:
+			command.refund_men(planned - soldiers.size())
 		VehicleQrf.server_mount(level, m, gate, lkp, soldiers)  # wave 5b (V4): some QRFs ride in a technical
 		qrf_launches.append({"from": m.module_id, "at": now(), "soldiers": soldiers})
 		if not soldiers.is_empty() and not reinforcements.waves.is_empty():
@@ -815,12 +829,22 @@ func _tick_hunters(tier: int) -> void:
 ## next tick) while every way out is in sight.
 func _send_hunters(lkp: Vector3, radius: float) -> void:
 	var command := EnemyCommand.of(self)
-	if command and not command.approve("hunters", lkp):
-		_last_hunter = now()  # turned down: asked again after HUNTER_GAP_S
-		return
 	var c := coordination()
 	var origin := _hunter_origin(lkp)
 	if not origin.is_finite():
+		return
+	# Wave 6d: past "heat_named" the faction's named hunter squad comes, at full strength. Known
+	# before the team is sized, so the reserves approved and spent (audit E-03) are what it fields.
+	var named := Economy.heat(String(enemy_faction)) >= float(MissionRegistry.reputation_rules().get("heat_named", INF))
+	var count := mini(HUNTER_SIZE.y if named else randi_range(HUNTER_SIZE.x, HUNTER_SIZE.y), _room())
+	if command:
+		count = mini(count, floori(command.available_cp()))
+		# Asked even with the reserves short of a team (for the smallest one): the denial is on
+		# record and a stale LKP still gets its probe.
+		if not command.approve("hunters", lkp, maxi(count, HUNTER_SIZE.x)):
+			_last_hunter = now()  # turned down: asked again after HUNTER_GAP_S
+			return
+	if count < HUNTER_SIZE.x:
 		return
 	_hunter_teams += 1
 	_last_hunter = now()
@@ -833,10 +857,8 @@ func _send_hunters(lkp: Vector3, radius: float) -> void:
 		route.append(_ground(lkp - dir * off * FLANK_SHORT + side * off))
 	route.append(_ground(lkp))
 	route.append_array(_search_ring(lkp, radius))
-	# Wave 6d: past "heat_named" the faction's named hunter squad comes, better every time it does.
-	var nem: Dictionary = {}
-	if Economy.heat(String(enemy_faction)) >= float(MissionRegistry.reputation_rules().get("heat_named", INF)):
-		nem = Economy.server_raise_nemesis(String(enemy_faction))
+	# The named squad (raised only once the team is approved), better every time it comes.
+	var nem: Dictionary = Economy.server_raise_nemesis(String(enemy_faction)) if named else {}
 	var callsign := String(nem.name).replace(" ", "") if not nem.is_empty() else "HT%d" % _hunter_teams
 	var combat := minf(HUNTER_COMBAT + NEMESIS_SKILL + NEMESIS_SKILL_PER_MEETING * int(nem.encounters), NEMESIS_SKILL_MAX) if not nem.is_empty() else HUNTER_COMBAT
 	var discipline := minf(HUNTER_DISCIPLINE + NEMESIS_SKILL, 1.0) if not nem.is_empty() else HUNTER_DISCIPLINE
@@ -845,8 +867,10 @@ func _send_hunters(lkp: Vector3, radius: float) -> void:
 	var loadout: Array = (CompoundLevel.PMC_LOADOUT if enemy_faction == CompoundLevel.PMC_FACTION else CompoundLevel.HOSTILE_LOADOUT).duplicate()
 	for i in HUNTER_SMOKES:
 		loadout.append(String(SMOKE))
-	var soldiers := _spawn_team(squad, callsign, HUNTER_SIZE.y if not nem.is_empty() else randi_range(HUNTER_SIZE.x, HUNTER_SIZE.y), origin, route[0], loadout,
+	var soldiers := _spawn_team(squad, callsign, count, origin, route[0], loadout,
 		combat, discipline * c, "combat")
+	if command:
+		command.refund_men(count - soldiers.size())
 	hunters.append({"k": _hunter_teams, "squad": squad, "soldiers": soldiers, "at": now(),
 		"retarget_at": now() + HUNTER_RETARGET_S / c, "smoked": false})
 	if not nem.is_empty() and not soldiers.is_empty():
@@ -941,6 +965,8 @@ func _reinforce_sites() -> void:
 		squad.patrol = to_route
 		var soldiers := _spawn_team(squad, callsign, 2, from, to, CompoundLevel.HOSTILE_LOADOUT,
 			float(stats.combat), float(stats.discipline), alert.mode_at(from) if alert else "aware")
+		if command:
+			command.refund_men(2 - soldiers.size())
 		reinforcement_pairs.append({"k": k, "to": m.module_id, "squad": squad, "soldiers": soldiers, "at": now()})
 
 

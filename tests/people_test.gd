@@ -92,6 +92,7 @@ func _ready() -> void:
 	await _test_surrender()
 	await _test_scavenge_intel()
 	await _test_escort()
+	await _test_escort_two_medics()
 	await _test_ride_with_leader()
 	await _test_carried_owner_gone()
 	await _test_client()
@@ -795,17 +796,100 @@ func _test_escort() -> void:
 	for a in escorts:
 		a.hold_fire = false
 	# Wounded: the escorts see to him, a medic is pulled to him and takes over.
+	var medic_at := NavigationServer3D.map_get_closest_point(hvt.get_world_3d().navigation_map, hvt.global_position + Vector3(18, 0, 0))
+	_place(medic, medic_at + Vector3.UP * 0.1)
+	await _frames(2)
+	check(medic.global_position.distance_to(hvt.global_position) > 8.0, "the medic starts away from the wounded HVT")
 	hvt.vitals.server_damage(70.0)
 	await _wait_until(func() -> bool: return not hvt.vitals.is_up(), 3.0)
+	# Remembered contact must not keep an escort on the escort intent: care beats
+	# escorting, including the intent-switch hysteresis. No live shooter is needed.
+	var responder := SquadAI.of(SquadAI.responder_for(hvt))
+	if responder != null and responder.escorting == hvt:
+		responder._last_contact = Soldier._now()
+		responder.intent = SquadAI.Intent.ESCORT
+		responder._choose_intent()
+		check(responder.intent == SquadAI.Intent.CASUALTY, "remembered contact: an escort switches to his wounded HVT's care")
+	else:
+		check(false, "a wounded HVT has an escort responder")
 	await _wait_until(func() -> bool: return is_instance_valid(hvt.care_by), 6.0)
 	var first: Soldier = hvt.care_by
 	check(first == e1 or first == e2, "down: an escort is on him first (%s)" % (first.name if first else "nobody"))
+	await _wait_until(func() -> bool: return SquadAI.of(medic).casualty == hvt, 5.0)
+	check(SquadAI.of(medic).care == SquadAI.Care.REACH and (hvt.care_by == e1 or hvt.care_by == e2),
+		"the escort keeps care while the medic is on the way")
 	await _wait_until(func() -> bool: return hvt.care_by == medic, 25.0)
+	check(hvt.care_by != medic or medic.global_position.distance_to(hvt.body_point()) <= SquadAI.CASUALTY_REACH + 0.25,
+		"the medic takes care over only after reaching the HVT's actual body")
 	check(hvt.care_by == medic and SquadAI.of(medic).casualty == hvt, "the medic is pulled to him and takes over (%s; medic: %s, intent %d, care %d, %.1f m, candidate %s, free %s, cares %s)" % [hvt.care_by.name if hvt.care_by else "nobody", medic.ai_status, SquadAI.of(medic).intent, SquadAI.of(medic).care, medic.global_position.distance_to(hvt.global_position), SquadAI.of(medic)._find_casualty(), SquadAI.of(medic)._free_for(hvt), SquadAI.of(medic)._cares_for(hvt)])
 	check(escorts.all(func(a: SquadAI) -> bool: return a.escorting == hvt), "his escorts stay on him")
 	squad.give_order(player, Squad.Order.FOLLOW, player.global_position, PackedStringArray(["Esc1"]))
 	check(SquadAI.of(e1).escorting == null and SquadAI.of(e2).escorting == hvt, "a movement order takes a squadmate off the escort")
 	for s: Soldier in [e1, e2, medic, hvt]:
+		s.queue_free()
+	await _frames(3)
+
+
+## Review of the escort handoff (2026-10-18): while a medic walks in on a wounded HVT, his
+## escort keeps care_by; the other free medics must leave him to that one (before, every free
+## medic converged on him), and one takes over if the medic walking in goes down.
+func _test_escort_two_medics() -> void:
+	print("HVT escort: one medic walks in at a time")
+	for n in layer.people():
+		if Person.is_hvt(n) and not n.vitals.is_up():
+			n.queue_free()
+	await _frames(2)
+	var at := Vector3(-40, 0.1, 30)
+	_place(player, at + Vector3(0, 0, 6))
+	var e1 := _squadmate("Esc3", Roles.RIFLEMAN, at + Vector3(1.5, 0, 2))
+	var e2 := _squadmate("Esc4", Roles.RIFLEMAN, at + Vector3(-1.5, 0, 2))
+	var map := player.get_world_3d().navigation_map
+	var m1 := _squadmate("EscMedicA", Roles.MEDIC, NavigationServer3D.map_get_closest_point(map, at + Vector3(30, 0, 3)) + Vector3.UP * 0.1)
+	var m2 := _squadmate("EscMedicB", Roles.MEDIC, NavigationServer3D.map_get_closest_point(map, at + Vector3(30, 0, -3)) + Vector3.UP * 0.1)
+	var hvt := _person({"name": "HvtTestBanker", "kind": "hvt", "side": "hostile", "hvt_id": "hvt_test_banker",
+		"label": "HVT (the Banker)", "pos": at})
+	await _frames(3)
+	layer.server_surrender(hvt, "test")
+	var squad := level.squad_for(&"friendly")
+	check(squad.order_escort(player, String(hvt.name), PackedStringArray(["Esc3", "Esc4"])) and SquadAI.escorts_of(hvt).size() == 2,
+		"two escorts on a second HVT")
+	await _frames(2)
+	var medics: Array[Soldier] = [m1, m2]
+	check(medics.all(func(m: Soldier) -> bool: return m.global_position.distance_to(hvt.global_position) > 15.0),
+		"both medics start well away from him (%s m)" % [medics.map(func(m: Soldier) -> String: return "%.0f" % m.global_position.distance_to(hvt.global_position))])
+	hvt.vitals.server_damage(70.0)
+	await _wait_until(func() -> bool: return not hvt.vitals.is_up(), 3.0)
+	await _wait_until(func() -> bool: return hvt.care_by == e1 or hvt.care_by == e2, 6.0)
+	check(hvt.care_by == e1 or hvt.care_by == e2, "down: an escort is on him first")
+	var walking := func() -> Array:
+		return medics.filter(func(m: Soldier) -> bool: return SquadAI.of(m).casualty == hvt)
+	await _wait_until(func() -> bool: return not walking.call().is_empty(), 6.0)
+	var first: Array = walking.call()
+	var walker: Soldier = first[0] if first.size() == 1 else null
+	var claimed := walker != null and SquadAI.of(walker).care == SquadAI.Care.REACH and SquadAI.handoff_medic(hvt) == walker
+	var most := first.size()
+	var deadline := Time.get_ticks_msec() + 1500
+	while Time.get_ticks_msec() < deadline and (hvt.care_by == e1 or hvt.care_by == e2):
+		most = maxi(most, (walking.call() as Array).size())
+		await get_tree().process_frame
+	check(claimed and most == 1 and walking.call() == first,
+		"two free medics: only one walks in on the HVT, the other leaves him to him (at most %d at once; %s)" % [most, [first.map(func(m: Soldier) -> String: return m.name)]])
+	check(walker != null and SquadAI.of(walker).care == SquadAI.Care.REACH and (hvt.care_by == e1 or hvt.care_by == e2),
+		"the escort still treating while that medic is on his way")
+	if walker == null:
+		for s: Soldier in [e1, e2, m1, m2, hvt]:
+			s.queue_free()
+		await _frames(3)
+		return
+	var other: Soldier = m2 if walker == m1 else m1
+	walker.vitals.server_kill()
+	await _wait_until(func() -> bool: return SquadAI.of(other).casualty == hvt, 6.0)
+	check(SquadAI.of(other).casualty == hvt and SquadAI.handoff_medic(hvt) == other and (hvt.care_by == e1 or hvt.care_by == e2),
+		"the medic walking in goes down: the other medic takes the handoff on, the escort still treating")
+	await _wait_until(func() -> bool: return hvt.care_by == other, 30.0)
+	check(hvt.care_by == other and not hvt.has_meta(SquadAI.HANDOFF_META),
+		"and takes him over once he's there (%s, %.1f m)" % [hvt.care_by.name if hvt.care_by else "nobody", _flat(other.global_position, hvt.body_point())])
+	for s: Soldier in [e1, e2, m1, m2, hvt]:
 		s.queue_free()
 	await _frames(3)
 

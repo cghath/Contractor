@@ -48,10 +48,18 @@ func _ready() -> void:
 	await _test_no_cuffs()
 	await _test_alert()
 	await _test_pressure()
+	await _test_command_qrf()
+	# These drive the response and the enemy's net by hand: EnemyCommand's own strategic orders
+	# (probes, counterattacks, guards, refills on its clock) would take their spawn slots and
+	# reserves, so it stands down around them. Everything else runs with it.
+	_command_on(false)
 	await _test_enemy_response()
 	await _test_radio_chatter()
+	_command_on(true)
 	await _test_field_radio()
+	_command_on(false)
 	await _test_hot_zone_ops()
+	_command_on(true)
 	await _test_hq_posts()
 	await _test_respawn_points()
 	_finish()
@@ -600,7 +608,7 @@ func _test_alert() -> void:
 	check(alert != null and alert.zone_state == Alert.State.NORMAL, "a hot zone has an alert, calm to start")
 	if alert == null:
 		return
-	var site: ZoneModule = level.modules().filter(func(m: ZoneModule) -> bool: return m.type == "outpost")[0]
+	var site: ZoneModule = level.modules().filter(func(m: ZoneModule) -> bool: return ZoneModules.base(m.type) == "outpost")[0]
 	var spawn := func(n: String, at: Vector3) -> Soldier:
 		var s := level.spawn_soldier({"name": "%s_A%s" % [site.module_id, n], "faction": "hostile", "variant": "urban",
 			"pos": level.ground_point(at), "loadout": [], "combat": 0.5, "discipline": 0.5, "guard": true, "mode": alert.mode_at(at)})
@@ -677,7 +685,7 @@ func _test_pressure() -> void:
 	p0 = pressure.points
 	Alert.server_noise(player, player.global_position + Vector3(5, 0, 0), Alert.BLAST)
 	check(is_equal_approx(pressure.points - p0, Pressure.GAINS.explosion), "an explosion of ours: +1 (%.1f)" % (pressure.points - p0))
-	var site: ZoneModule = level.modules().filter(func(m: ZoneModule) -> bool: return m.type == "outpost")[0]
+	var site: ZoneModule = level.modules().filter(func(m: ZoneModule) -> bool: return ZoneModules.base(m.type) == "outpost")[0]
 	p0 = pressure.points
 	alert._receive({"kind": &"body", "pos": site.global_position, "area": site.module_id, "by": ""})
 	check(alert.zone_state == Alert.State.ALERTED and is_equal_approx(pressure.points - p0, Pressure.GAINS.alarm),
@@ -706,6 +714,56 @@ func _test_pressure() -> void:
 	check(tiers == [1, 2, 3, 4] and pressure.tier() == 4, "objectives done climb the tiers at 10, 20, 35 and 50 (%s)" % [tiers])
 	_free_new(before)
 	_calm()
+	await _frames(2)
+
+
+## End to end, EnemyCommand running on its own clock: a contact report in an engaged zone at
+## tier 2 launches the QRF; the commander approves it once (one operation for the whole launch,
+## however many waves the budget lets go), and the reserves pay exactly the men who spawned.
+func _test_command_qrf() -> void:
+	print("Enemy command: a QRF approved end to end")
+	var er := EnemyResponse.of(level)
+	var alert := Alert.of(level)
+	var pressure := Pressure.of(level)
+	var command := EnemyCommand.of(level)
+	check(command != null and command.is_processing(), "a hot zone has an enemy command, making its own decisions")
+	if er == null or alert == null or pressure == null or command == null or er.reinforcements == null:
+		return
+	_clear_waves()
+	await _frames(2)
+	_calm()
+	command.set_process(true)
+	command._tick = 0.0  # its next decision now, on its own clock
+	await _frames(2)
+	check(command.can_decide() and not command.consolidated and command._last_tick != INF, "the commander has decided at least once (%s)" % command.commander_state)
+	pressure.points = float(Pressure.TIERS[1])  # tier 2: a second wave if the budget has room
+	alert.zone_state = Alert.State.ALERTED  # on standby: the QRF goes at once
+	er._zone_was = Alert.State.ALERTED
+	er._turnout = false
+	er._qrf_due = INF
+	er._last_qrf = -INF
+	var lk := level.ground_point(player.global_position + Vector3(0, 0, -20))
+	var n := er.qrf_launches.size()
+	var before := command.reserves
+	alert._receive({"kind": &"contact", "pos": lk, "area": alert.area_of(lk), "by": ""})
+	var spent := before - command.reserves
+	var sent := er.qrf_launches.slice(n)
+	var spawned := 0
+	for l: Dictionary in sent:
+		spawned += (l.soldiers as Array).size()
+	var hunts := command.operations.filter(func(o: Dictionary) -> bool: return o.kind == "hunt:qrf")
+	check(not sent.is_empty() and spawned > 0 and hunts.size() == 1 and hunts[0].state == "approved",
+		"engaged: the commander approves the QRF, one operation for the launch (%d waves from %s, %d men; %s)"
+			% [sent.size(), sent.map(func(l: Dictionary) -> String: return l.from), spawned, hunts.map(func(o: Dictionary) -> String: return "%s: %s" % [o.state, o.why])])
+	check(is_equal_approx(spent, spawned), "the reserves pay exactly the men who spawned (%.0f spent, %d spawned)" % [spent, spawned])
+	command._tick = 0.0
+	await _frames(2)
+	hunts = command.operations.filter(func(o: Dictionary) -> bool: return o.kind == "hunt:qrf")
+	check(hunts.size() == 1, "and its next decision doesn't count the launch twice (%d QRF operations)" % hunts.size())
+	_clear_waves()
+	_calm()
+	er._last_qrf = -INF
+	er._zone_was = Alert.State.NORMAL
 	await _frames(2)
 
 
@@ -893,6 +951,13 @@ func _test_enemy_response() -> void:
 			check(bombers.detonated == off + 1 and bombers.vbieds.is_empty(), "within %d m it goes off" % int(Bombers.VBIED_TRIGGER_M))
 		player.vitals.server_reset_health()
 	# The QRF.
+	# Patrol behavior was checked above. Release those slots so this phase exercises
+	# an authorized launch, rather than the commander's correct refusal at a full budget.
+	for patrol: Dictionary in er.patrols:
+		for s: Soldier in er._living(patrol.soldiers):
+			s.queue_free()
+	er.patrols.clear()
+	await _frames(2)
 	_calm()
 	er._zone_was = Alert.State.NORMAL
 	er._qrf_due = INF
@@ -971,9 +1036,13 @@ func _test_enemy_response() -> void:
 	var hsquad := team.get("squad") as Squad
 	check(pressure.tier() == 3 and er.hunters.size() == 1 and hunters.size() >= EnemyResponse.HUNTER_SIZE.x and hunters.size() <= EnemyResponse.HUNTER_SIZE.y,
 		"tier 3: a hunter team of 4 to 6 sets out (%d)" % hunters.size())
-	check(hsquad != null and hsquad.patrol.any(func(p: Vector3) -> bool: return Vector2(p.x - lk.x, p.z - lk.z).length() < 2.0)
-		and hunters.all(func(s: Soldier) -> bool: return s.inventory.count_of(EnemyResponse.SMOKE) > 0),
-		"the hunters head for the last known position, carrying smoke")
+	# Heading for the last known position, or (with an earlier QRF wave still out on the same
+	# spot) rallying with it to go in together (_join_push / _rally_push): its route is then the
+	# rally point until the push goes.
+	var heading := hsquad != null and (hsquad.patrol.any(func(p: Vector3) -> bool: return Vector2(p.x - lk.x, p.z - lk.z).length() < 2.0)
+		or (team.has("rally") and hsquad.patrol.size() == 1))
+	check(heading and hunters.all(func(s: Soldier) -> bool: return s.inventory.count_of(EnemyResponse.SMOKE) > 0),
+		"the hunters head for the last known position (or rally with the push on it), carrying smoke (%s)" % ("rallying" if team.has("rally") else "%d route points" % (hsquad.patrol.size() if hsquad else -1)))
 	# Captain, 2026-10-18 ("add the changes to the hotzone ai"): the QRF and the hunters on one
 	# contact are one push: they wait at their rally points and go in together.
 	var push: Dictionary = {}
@@ -1037,7 +1106,7 @@ func _test_radio_chatter() -> void:
 	_drop_all(player, &"enemy_radio")
 	rc.server_tick()
 	check(not rc.tuned, "without an enemy radio the squad hears nothing of the enemy's net")
-	var site: ZoneModule = level.modules().filter(func(m: ZoneModule) -> bool: return m.type == "outpost")[0]
+	var site: ZoneModule = level.modules().filter(func(m: ZoneModule) -> bool: return ZoneModules.base(m.type) == "outpost")[0]
 	check(player.inventory.take(&"enemy_radio") == 1, "an enemy radio taken off a body")
 	rc.server_tick()
 	check(rc.tuned and not rc.lines.is_empty() and String(rc.lines.back().text).contains("radio check"), "taken: the squad is on the enemy's net")
@@ -1216,7 +1285,7 @@ func _test_hot_zone_ops() -> void:
 	check(ops.follow_ups.size() == n2 + 1 and ops.follow_ups.back().trigger == "comms", "and the employer radios what to hit while their net is down")
 	# The alert eases when the squad goes quiet, and the checkpoints with it.
 	_calm()
-	var outpost: ZoneModule = level.modules().filter(func(m: ZoneModule) -> bool: return m.type == "outpost")[0]
+	var outpost: ZoneModule = level.modules().filter(func(m: ZoneModule) -> bool: return ZoneModules.base(m.type) == "outpost")[0]
 	alert._receive({"kind": &"body", "pos": outpost.global_position, "area": outpost.module_id, "by": ""})
 	er.server_tick()
 	check(alert.zone_state == Alert.State.ALERTED and er.checkpoints_closed, "a body found: the zone alerted, checkpoints closed")
@@ -1396,6 +1465,24 @@ func _calm() -> void:
 		pressure._times_paid = 0
 		pressure._contact_last = -INF
 		pressure._long_paid = 0
+	var command := EnemyCommand.of(level)
+	if command:
+		command.operations.clear()
+		command.reserves = EnemyCommand.RESERVE_POOL[0]
+		command.commander_state = "commanding"
+		command.consolidated = false
+		command.caution = 0.0
+		command.seen_cp = 0.0
+		command._contacts.clear()
+		command._noise.clear()
+		command._last_contact.clear()
+
+
+## EnemyCommand making its own decisions on its clock (true) or standing down (false).
+func _command_on(on: bool) -> void:
+	var command := EnemyCommand.of(level)
+	if command:
+		command.set_process(on)
 
 
 ## The reinforcement waves' soldiers gone (the alert test launched a QRF).

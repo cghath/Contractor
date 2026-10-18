@@ -2113,6 +2113,8 @@ const LOOT_SLOT_ORDER: Array[StringName] = [&"vest", &"backpack", &"plate_front"
 var body_label := ""
 ## Host: a body's stable id in the zone save. Set when it dies (or is restored).
 var body_uid := ""
+## Stable placed post, independent of the display name or a restored corpse's node name.
+var spawn_id := ""
 ## A dead player's body carries a GearMarker (CompoundLevel.server_spawn_body).
 var has_gear_marker := false
 ## A player's respawn (_client_respawn) puts them at a spawn point; until this time the ragdoll
@@ -2323,7 +2325,7 @@ func server_leave_body() -> Soldier:
 ## Inventory.net_state: everything on it).
 func body_record() -> Dictionary:
 	var p := global_position
-	return {"uid": body_uid if body_uid != "" else GameState.new_uid(), "label": display_name(), "faction": String(faction),
+	return {"uid": body_uid if body_uid != "" else GameState.new_uid(), "spawn_id": spawn_id, "label": display_name(), "faction": String(faction),
 		"variant": model.variant, "body": model.body, "person_name": person_name, "nation": nation, "left": left_handed,
 		"role": String(role), "pos": [p.x, p.y, p.z], "rot_y": rotation.y,
 		"age_s": maxf(_now() - died_at, 0.0) if died_at >= 0.0 else 0.0, "marker": has_gear_marker,
@@ -2333,6 +2335,8 @@ func body_record() -> Dictionary:
 ## Host only. A dead soldier becomes a body (DEAD_GROUP), gear and all. Past the body cap the
 ## oldest body goes.
 func _server_become_body() -> void:
+	if faction == &"hostile":
+		GameState.post_fell(spawn_id)
 	care_by = null
 	died_at = _now()
 	if body_uid == "":

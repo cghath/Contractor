@@ -11,6 +11,62 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Executive audit fixes and their review (cghath's side, 2026-10-17 to 18)
+
+An outside audit of v0.4.36 (`docs/audits/executive-2026-10-17/REPORT.md`) found six defects;
+all six are fixed (`FIXES.md`), then reviewed, and the review's problems fixed too.
+
+#### Fixed
+
+- **Killed garrisons stay dead after a reload** (E-01): bodies keep their post's spawn id, and a
+  saved fallen-post ledger outlives corpse cleanup and extraction. Saves from before v0.4.10
+  (callsign labels) migrate; v0.4.10 to v0.4.36 saves may duplicate a post once.
+- **Cleanup never deletes the body a player stands beside** (E-02): it measures to where the body
+  lies (`Soldier.body_point()`).
+- **QRFs and hunters only spend the reserves they actually field** (E-03): the planned headcount is
+  reserved, unspawned heads are returned, and short reserves are refused. A launch from two bases
+  is approved once (one op, one radio order); later waves of it are paid silently. A shortage is
+  still recorded, and a hunter with a stale last-known position still sends a probe.
+- **A commander killed before command noticed him still leaves them headless** (E-04): HQ
+  commanders register at spawn; death, cuffs, surrender or delivery all count.
+- **Crow's Pass offers no contract from the enemy against itself** (E-05): Meridian is its client;
+  the generator rejects hostile or unknown employers.
+- **The draft-release helper can't touch a public release** (E-06): it reads the release state
+  first and refuses public releases or unreadable state. Its test now enforces its "never upload
+  or create" checks and can only reach an inert `gh` double.
+- **One medic at a time walks in on a wounded HVT**: while one takes over from the escort, other
+  medics leave it to him; if he goes down, another takes over.
+- A packed massive neck wound can be clamped; a late joiner sees an already-held casualty in the
+  held pose; an escort keeps caring for his HVT until a medic reaches the body; a bullet that
+  wounds someone before a vehicle, armour or another body stops it reports the body hit.
+- **CI**: the workflow is valid again (the runner job's log folder moved into its steps: GitHub
+  doesn't allow `runner.temp` in a job's `env`); CI runs all 44 local suites, including voice,
+  compass and audit_fixes, and a parity check fails if the lists differ.
+
+#### Changed
+
+- **Urban AI is cheaper**: building probes use a per-region index; building records are shared
+  across scan heights (a building's answer no longer depends on which scan came first); zone
+  navmesh chunks join by aligned vertices instead of proximity edges. A chunk baked from a
+  module's stand-in is rebaked once the module's voxels are built. Town benchmark: average tick
+  16.1 ms, p95 23.7 ms, building scans 58 ms a second (budgets 20 / 40 / 120; R0158).
+- Helicopter clearance planning includes the tilted airframe and 2 m for contour lag (the 5 m
+  clearance requirement is unchanged).
+- Test fixtures: generated module variants, real body positions for reach, physical muzzles,
+  seated-hitbox waits; the missions suite runs with the enemy commander on, except around the
+  sections that drive the response by hand.
+- The audit's probe scripts live outside the project (`Contractor-test-logs/audit-2026-10-17-probes/`);
+  only its reports are in the repo.
+
+#### Known gaps
+
+- While a module is streamed out, a breach on a chunk seam can detour about 3 m until its voxels are
+  rebuilt.
+- Killed civilians and HVTs can still walk again after a reload when their body record was cleaned
+  up (same cause as E-01, not yet fixed for people).
+- On cghath's machine `map` (extraction countdown) and `ui` (vehicle readout) fail even on dev
+  38f5825 (R0146); both pass on CI.
+
 ### Squad roles and the Vantage Group rival PMC, first slice (Captain, 2026-10-17)
 
 #### Added

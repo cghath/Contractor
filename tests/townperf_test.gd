@@ -114,6 +114,7 @@ func _ready() -> void:
 		if town.is_ready() and nav and nav.is_settled():
 			break
 	check(town.is_ready(), "the town (%s, %d boxes) streamed in" % [town.type, ZoneModules.boxes(town.type).size()])
+	_check_chunk_connections(nav, town)
 	# The garrison on the town's posts, the attackers 50 m out past the player.
 	var posts: Array = ZoneModules.GARRISON.get(town.type, [])
 	var hostiles: Array[Soldier] = []
@@ -167,6 +168,8 @@ func _ready() -> void:
 	check(_avg(_engine_ms) <= ENGINE_AVG_MS, "the engine's step averages %.2f ms (Proposed budget %.1f)" % [_avg(_engine_ms), ENGINE_AVG_MS])
 	check(awake <= AWAKE_RAGDOLLS_MAX, "%d ragdolls still simulating at the end (at most %d)" % [awake, AWAKE_RAGDOLLS_MAX])
 	_check_bodies_lie()
+	if nav:
+		await _check_breach_and_proxy_seams(nav, town)
 	_finish()
 
 
@@ -196,6 +199,195 @@ func _check_bodies_lie() -> void:
 			bad.append("%s %.2f m up%s" % [s.name, gap, " (frozen, no support)" if s.ragdoll.frozen and not s.ragdoll.has_support() else ""])
 	check(bodies >= DOWNED / 2 and high >= 1 and bad.is_empty(),
 		"%d bodies (%d up on floors or roofs) all lie on something %s" % [bodies, high, bad])
+
+
+## Chunk seams (review of the executive audit, 2026-10-18). ZoneNav's chunks join only where
+## their border vertices match (no proximity edge connections), so every seam between two
+## baked chunks in `area` is sampled every SEAM_STEP_M along it, on every floor over it (the
+## ground, upper floors, roofs): where the navmesh is open SEAM_REACH_M either side (both ends
+## on it, level, nothing between at knee and chest height), the path from one side to the other
+## must cross right there, no longer than SEAM_DETOUR times the straight line (a detour round
+## through the next stretch of seam is SEAM_STEP_M further each way). `around` (chunk -> true):
+## only the seams of those chunks. Returns {"tested", "broken": [text], "blocked": [samples with
+## a wall between their ends], "proxy": chunks in `area` baked from a proxy, "chunks"}.
+const SEAM_STEP_M := 1.5
+const SEAM_REACH_M := 0.75
+const SEAM_DETOUR := 1.3
+
+
+func _seam_paths(nav: ZoneNav, area: Rect2, around := {}) -> Dictionary:
+	var space := level.get_world_3d().direct_space_state
+	var out := {"tested": 0, "broken": [], "blocked": [], "proxy": 0, "chunks": 0}
+	for chunk: Vector2i in nav._regions:
+		var rect := nav._rect_of(chunk)
+		if not rect.intersects(area) or not _baked(nav, chunk):
+			continue
+		out.chunks += 1
+		if nav.baked_from_proxy(chunk):
+			out.proxy += 1
+		for dir: Vector2i in [Vector2i(1, 0), Vector2i(0, 1)]:
+			var other := chunk + dir
+			if (not around.is_empty() and not around.has(chunk) and not around.has(other)) or not _baked(nav, other):
+				continue
+			var normal := Vector3(dir.x, 0, dir.y)
+			var along := Vector3(dir.y, 0, dir.x)
+			var corner := Vector3(rect.end.x if dir.x == 1 else rect.position.x, 0, rect.end.y if dir.y == 1 else rect.position.y)
+			for k in int(ZoneNav.ZONE_CHUNK_M / SEAM_STEP_M):
+				var s := corner + along * (k + 0.5) * SEAM_STEP_M
+				var ground := level.ground_height(s.x, s.z)
+				for y: float in Buildings._surfaces(space, Vector3(s.x, ground + ZoneNav.HEADROOM_M, s.z), ground - 1.0, 12):
+					var r := _seam_sample(nav, Vector3(s.x, y, s.z), normal, chunk, other)
+					if r.is_empty():
+						continue
+					if r.has("blocked"):
+						(out.blocked as Array).append(r)
+						continue
+					out.tested += 1
+					if not r.ok:
+						(out.broken as Array).append("%s %s|%s (%s|%s): %s" % [str(Vector3(s.x, y, s.z)).replace(" ", ""), chunk, other,
+							"proxy" if nav.baked_from_proxy(chunk) else "voxels", "proxy" if nav.baked_from_proxy(other) else "voxels", r.why])
+	return out
+
+
+## One seam sample (see _seam_paths) at `s` (the seam, on a surface): {} where the navmesh isn't
+## open both sides, {"blocked", "a", "b", "s", "normal"} where a wall stands between, else
+## {"ok", "why", "a", "b"}.
+func _seam_sample(nav: ZoneNav, s: Vector3, normal: Vector3, chunk: Vector2i, other: Vector2i) -> Dictionary:
+	var world := level.get_world_3d()
+	var map := world.navigation_map
+	var pa := s - normal * SEAM_REACH_M
+	var pb := s + normal * SEAM_REACH_M
+	var a := NavigationServer3D.map_get_closest_point(map, pa + Vector3.UP * 0.1)
+	var b := NavigationServer3D.map_get_closest_point(map, pb + Vector3.UP * 0.1)
+	for p: Array in [[a, pa], [b, pb]]:
+		var q: Vector3 = p[0]
+		var want: Vector3 = p[1]
+		if Vector2(q.x - want.x, q.z - want.z).length() > 0.2 or q.y - want.y > 0.7 or want.y - q.y > 0.3:
+			return {}  # no navmesh here (a wall, a corner, a drop)
+	if absf(a.y - b.y) > 0.3 or nav._chunk_of(a) != chunk or nav._chunk_of(b) != other:
+		return {}
+	for h: float in [0.4, 1.2]:
+		if not Throwables.clear_line(world, a + Vector3.UP * h, b + Vector3.UP * h):
+			return {"blocked": true, "a": a, "b": b, "s": s, "normal": normal, "chunk": chunk, "other": other}
+	var path := NavigationServer3D.map_get_path(map, a, b, true)
+	var length := 0.0
+	for i in range(1, path.size()):
+		length += path[i - 1].distance_to(path[i])
+	if path.is_empty():
+		return {"ok": false, "why": "no path", "a": a, "b": b}
+	var end: Vector3 = path[-1]
+	if Vector2(end.x - b.x, end.z - b.z).length() > 0.15 or absf(end.y - b.y) > 0.3:
+		return {"ok": false, "why": "ends %.2f m short" % end.distance_to(b), "a": a, "b": b}
+	if length > SEAM_DETOUR * a.distance_to(b) + 0.1:
+		return {"ok": false, "why": "%.1f m round for %.1f m" % [length, a.distance_to(b)], "a": a, "b": b}
+	return {"ok": true, "why": "", "a": a, "b": b}
+
+
+func _baked(nav: ZoneNav, chunk: Vector2i) -> bool:
+	return nav.region_of(chunk) != null and nav.region_of(chunk).navigation_mesh != null
+
+
+## The town's seams once it and its navigation have settled (see _seam_paths).
+func _check_chunk_connections(nav: ZoneNav, town: ZoneModule) -> void:
+	var r := _seam_paths(nav, town.footprint().grow(ZoneNav.ZONE_CHUNK_M))
+	check(int(r.tested) >= 40 and (r.broken as Array).is_empty(),
+		"navigation crosses every chunk seam round the town where it's open, every %.1f m on every floor (%d samples, %d chunks, %d baked from a proxy; broken: %s)"
+		% [SEAM_STEP_M, r.tested, r.chunks, r.proxy, (r.broken as Array).slice(0, 8)])
+
+
+## After the fight: a breach blown in a wall standing along a chunk seam in the town, its
+## chunks rebaked; then the town streamed out, a chunk by the breach and one well away from it
+## baked again from the proxy (their neighbours keep their voxel bakes), and the town streamed
+## back in: once its voxels are built, both are baked from them again and every seam round
+## them joins, through the breach too.
+func _check_breach_and_proxy_seams(nav: ZoneNav, town: ZoneModule) -> void:
+	var area := town.footprint()
+	var space := level.get_world_3d().direct_space_state
+	var walls: Array = (_seam_paths(nav, area).blocked as Array).filter(func(w: Dictionary) -> bool:
+		var s: Vector3 = w.s
+		if not area.grow(-2.0).has_point(Vector2(s.x, s.z)) or s.y - level.ground_height(s.x, s.z) > 1.0:
+			return false  # the ground floor, inside the town
+		var hit := space.intersect_ray(PhysicsRayQueryParameters3D.create(w.a + Vector3.UP, w.b + Vector3.UP, Throwables.WORLD_MASK))
+		return not hit.is_empty() and absf((hit.normal as Vector3).dot(w.normal)) > 0.9)
+	if walls.is_empty():
+		check(false, "a wall standing along a chunk seam in the town to breach")
+		return
+	var w: Dictionary = walls[walls.size() / 2]
+	var hit := space.intersect_ray(PhysicsRayQueryParameters3D.create(w.a + Vector3.UP, w.b + Vector3.UP, Throwables.WORLD_MASK))
+	var at: Vector3 = hit.position
+	var rebakes := {}  # chunk -> rebakes since the breach
+	var built_rebakes := {}  # chunk -> rebakes once the town's voxels were built again
+	var count := func(c: Vector2i) -> void:
+		rebakes[c] = int(rebakes.get(c, 0)) + 1
+		if town.voxel_world and town.voxel_world.is_built():
+			built_rebakes[c] = int(built_rebakes.get(c, 0)) + 1
+	nav.rebaked.connect(count)
+	# A man-sized hole (a soldier needs 1.75 m of headroom and 0.5 m of width): three carves one
+	# over another, in the middle of the wall's thickness.
+	var middle := at - (hit.normal as Vector3) * 0.15
+	for up: float in [0.7, 1.3, 1.9]:
+		town.voxel_world.server_carve(Vector3(middle.x, (w.s as Vector3).y + up, middle.z), 0.8)
+	# (The voxels' collision comes in a few frames after the carve, maybe after the rebakes.)
+	for i in 600:
+		await get_tree().physics_frame
+		if rebakes.has(w.chunk) and rebakes.has(w.other) and nav.is_settled() and not _seam_sample(nav, w.s, w.normal, w.chunk, w.other).has("blocked"):
+			break
+	var through := _seam_sample(nav, w.s, w.normal, w.chunk, w.other)
+	var around := {w.chunk: true, w.other: true}
+	var after := _seam_paths(nav, area.grow(ZoneNav.ZONE_CHUNK_M), around)
+	check(rebakes.has(w.chunk) and rebakes.has(w.other) and through.get("ok", false) and (after.broken as Array).is_empty(),
+		"a breach blown at %s in a wall along the seam %s|%s: both rebaked (%d, %d), the path goes through it (%s), and their seams join (%d samples; broken: %s)"
+		% [str(at).replace(" ", ""), w.chunk, w.other, rebakes.get(w.chunk, 0), rebakes.get(w.other, 0),
+			"blocked" if through.has("blocked") else through.get("why", "no navmesh") if not through.get("ok", false) else "ok", after.tested, after.broken])
+	# The town streamed out: a chunk by the breach and one well away from it baked from the
+	# proxy (with the breach as its coarse cells), next to neighbours baked from the voxels.
+	var far := Vector2i(w.chunk)
+	for c: Vector2i in nav._regions:
+		if _baked(nav, c) and area.encloses(nav._rect_of(c)) and absi(c.x - w.chunk.x) + absi(c.y - w.chunk.y) > absi(far.x - w.chunk.x) + absi(far.y - w.chunk.y) \
+				and [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)].all(func(d: Vector2i) -> bool: return _baked(nav, c + d)):
+			far = c
+	var proxied: Array = [w.chunk, far] if far != w.chunk else [w.chunk]
+	print("townperf: breach by %s; the chunk away from it %s (%d chunks off)" % [w.chunk, far, absi(far.x - w.chunk.x) + absi(far.y - w.chunk.y)])
+	rebakes.clear()
+	built_rebakes.clear()
+	town.stream_out()
+	for c in proxied:
+		nav._request_rebake(c)
+	for i in 300:
+		await get_tree().physics_frame
+		if proxied.all(func(c: Vector2i) -> bool: return rebakes.has(c)):
+			break
+	var mixed := _seam_paths(nav, area.grow(ZoneNav.ZONE_CHUNK_M), {w.chunk: true, far: true})
+	var mixed_through := _seam_sample(nav, w.s, w.normal, w.chunk, w.other)
+	var hole := town.to_local(middle + Vector3.UP * ((w.s as Vector3).y + 1.3 - middle.y))
+	print("townperf: town streamed out, %s baked from its proxy (%s; town built: %s; the proxy's cells %s the breach): their seams %d samples, broken %s; through the breach: %s" % [
+		proxied, proxied.map(func(c: Vector2i) -> bool: return nav.baked_from_proxy(c)), town.is_ready(),
+		"fill" if town.proxy_boxes().any(func(bx: AABB) -> bool: return bx.has_point(hole)) else "keep open", mixed.tested, mixed.broken,
+		"blocked" if mixed_through.has("blocked") else mixed_through.get("why", "no navmesh") if not mixed_through.get("ok", false) else "ok"])
+	check(proxied.all(func(c: Vector2i) -> bool: return rebakes.has(c) and nav.baked_from_proxy(c)),
+		"streamed out, %s baked again from the town's proxy (%s)" % [proxied, rebakes])
+	# Back in (the zone streams it in round the player; if not yet, as it would).
+	for i in 120:
+		await get_tree().physics_frame
+		if town.is_streamed():
+			break
+	if not town.is_streamed():
+		level._stream_in(town)
+	var settled := false
+	for i in 1800:
+		await get_tree().physics_frame
+		if town.is_ready() and nav.is_settled() and proxied.all(func(c: Vector2i) -> bool: return not nav.baked_from_proxy(c)):
+			settled = true
+			break
+	var back := _seam_paths(nav, area.grow(ZoneNav.ZONE_CHUNK_M), {w.chunk: true, far: true})
+	var back_through := _seam_sample(nav, w.s, w.normal, w.chunk, w.other)
+	nav.rebaked.disconnect(count)
+	check(settled and proxied.all(func(c: Vector2i) -> bool: return int(built_rebakes.get(c, 0)) >= 1),
+		"streamed back in, once its voxels are built the chunks baked from its proxy are baked from them again (%s: %s rebakes since; proxy now %s)"
+		% [proxied, proxied.map(func(c: Vector2i) -> int: return int(built_rebakes.get(c, 0))), proxied.map(func(c: Vector2i) -> bool: return nav.baked_from_proxy(c))])
+	check(back_through.get("ok", false) and (back.broken as Array).is_empty() and int(back.tested) >= 10,
+		"and their seams join again, through the breach too (%s; %d samples; broken: %s)" % [
+			"blocked" if back_through.has("blocked") else back_through.get("why", "no navmesh") if not back_through.get("ok", false) else "ok", back.tested, back.broken])
 
 
 func _finish() -> void:

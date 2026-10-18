@@ -171,6 +171,7 @@ func _run_host(wait_for_client: bool) -> void:
 		await _test_charge()
 	if _want("rounds"):
 		await _test_rounds()
+		await _test_body_vehicle_feedback()
 	if _want("fragments"):
 		await _test_fragments()
 	if _want("damage_effects"):
@@ -944,13 +945,52 @@ func _test_rounds() -> void:
 	var bed_rider := _soldier("friendly", tech.global_position + Vector3(2.5, 0.1, 1.0), "BedRider")
 	await get_tree().physics_frame
 	tech.server_enter(bed_rider, 2)
-	await get_tree().process_frame
+	# Boarding places the origin before the next body pose and physics-server sync.
+	# Aim after the sitting hitboxes have reached the seat, not at the old standing pose.
+	await _seconds(0.1)
+	check(tech.seat_of(bed_rider) == 2 and not bed_rider.seat_pose.is_empty(), "the open-bed passenger is seated before the shot")
 	var bchest := (bed_rider.get_node(^"ChestHitbox/Shape") as Node3D).global_position
 	r = _shoot(shooter, bchest + Vector3(0, 6, 8), bchest, m4)
+	if r.result != "body":
+		print("  [info] open-bed shot: chest %s local %s, struck %s local %s, rider seated %d, wounds %d" % [bchest, tech.to_local(bchest), r.position, tech.to_local(r.position), tech.seat_of(bed_rider), bed_rider.vitals.wound_list().size()])
 	check(r.result == "body" and not bed_rider.vitals.wound_list().is_empty(), "a passenger in the open bed can be shot from above and behind (%s)" % r.result)
 	tech.server_exit(bed_rider)
 	bed_rider.queue_free()
 	shooter.queue_free()
+
+
+## A body pierced before an armoured vehicle is still the shooter's body hit. Use a fresh
+## hull and a full-power round so both body types reliably exit into a stopping backstop.
+func _test_body_vehicle_feedback() -> void:
+	print("A body before an armoured backstop")
+	var backstop := layer.server_spawn("aav7", Transform3D(Basis(), Vector3(32, 0, -20)), "", &"player", "feedback_backstop")
+	var shooter := _soldier("hostile", Vector3(-20, 0.1, -20), "FeedbackShooter")
+	await _seconds(0.25)
+	for body_type: String in VoxelArt.BODIES:
+		var victim := level.spawn_soldier({"name": "BeforeHull_" + body_type, "person_name": "Feedback " + body_type,
+			"faction": "friendly", "variant": "woodland", "body": body_type, "pos": Vector3(28, 0.1, -19),
+			"loadout": [], "combat": 0.5, "discipline": 0.5, "guard": true})
+		SquadAI.of(victim).process_mode = Node.PROCESS_MODE_DISABLED
+		victim.set_physics_process(false)
+		victim.rotation.y = PI / 2.0
+		await _seconds(0.1)
+		var at := backstop.global_transform * Vector3(-1.66, 1.8, 1.0) + Vector3(-2, 0, 0)
+		victim.global_position += at - CharacterModel.part_position(victim, Vitals.CHEST)
+		await _seconds(0.1)
+		await get_tree().physics_frame
+		var chest := CharacterModel.part_position(victim, Vitals.CHEST)
+		var marks := backstop.net_carves.size()
+		var hit := _shoot(shooter, chest + Vector3(-3, 0, 0), chest, ItemDB.get_item(&"m110"))
+		check(not victim.vitals.wound_list().is_empty(), "%s: the unarmoured body is wounded before the hull" % body_type)
+		check(backstop.net_carves.size() == marks + 1 and int(backstop.net_carves[-1][4]) == VehicleHull.SCUFF,
+			"%s: the round exits the body and the armoured backstop stops it" % body_type)
+		check(hit.result == "body" and (hit.position as Vector3).distance_to(chest) < 0.8,
+			"%s: feedback stays on the earlier body hit (%s)" % [body_type, hit.result])
+		victim.queue_free()
+		await get_tree().physics_frame
+	backstop.queue_free()
+	shooter.queue_free()
+	await get_tree().process_frame
 
 
 ## Grenade fragments meet a vehicle's hull where its voxels are: an open pickup bed lets them in

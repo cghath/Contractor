@@ -10,6 +10,13 @@ extends NavBuilder
 ##
 ## The grid's chunk centres fall on module origins (ZoneDef.GRID_M), so chunk edges run 6 m
 ## from each origin, as the compound's do, and stay clear of the doorways.
+##
+## Chunks join their neighbours only where their border vertices match (the regions' proximity
+## edge connections are off: they cost town fights milliseconds a tick, R0036). Chunks baked
+## from the same geometry match; a chunk baked from a module's proxy may not match one baked
+## from its voxels (a carved proxy is coarser: whole 0.5 m cells), so once a module's voxels
+## are built, every chunk last baked from its proxy is baked again from them (_proxied,
+## _on_structures_built; review of the executive audit, 2026-10-18).
 
 const ZONE_CHUNK_M := 12.0
 ## Proposed: how far around each player and each AI soldier the navigation is kept baked.
@@ -28,6 +35,9 @@ var _origin := Vector2.ZERO  # the grid's corner (x, z)
 var _wanted := {}  # Vector2i -> distance to the nearest soldier wanting it
 var _queue: Array[Vector2i] = []
 var _next_update := 0.0
+## Vector2i -> the ids of the modules whose proxy (not voxels) the chunk's last bake read.
+var _proxied := {}
+var _gathering: Array[String] = []  # while a chunk's geometry is gathered: the proxies read
 
 
 ## Host only. Starts the zone's navigation (chunks bake as soldiers come near).
@@ -47,10 +57,41 @@ static func build_zone(p_zone: ZoneLevel) -> ZoneNav:
 	return nav
 
 
-## Host only. Connects a module's voxel world's breaches to rebakes (while it's loaded).
+## Host only. Connects a module's voxel world's breaches to rebakes (while it's loaded), and
+## its voxels being built to rebaking the chunks baked from its proxy meanwhile.
 func watch(world: VoxelWorld) -> void:
 	if not world.breached.is_connected(rebake_area):
 		world.breached.connect(rebake_area.bind(world))
+	if not world.is_built():
+		world.structures_built.connect(_on_structures_built.bind(world.module_id), CONNECT_ONE_SHOT)
+
+
+## A module's voxels are built: every chunk whose last bake read that module's proxy is baked
+## again from the voxels, a few a frame (NavBuilder._process, REBAKE_BUDGET_MS). Until then the
+## proxy's bake stays, as a chunk's old bake does during any rebake.
+func _on_structures_built(module_id: String) -> void:
+	for chunk: Vector2i in _proxied:
+		if (_proxied[chunk] as Array).has(module_id) and _regions.has(chunk):
+			_waiting[chunk] = true
+	if not _waiting.is_empty():
+		set_process(true)
+
+
+## Which proxies the chunk's geometry was read from, kept in _proxied (see _on_structures_built).
+func _voxel_source(chunk: Vector2i) -> NavigationMeshSourceGeometryData3D:
+	_gathering = []
+	var source := super._voxel_source(chunk)
+	if source != null:
+		if _gathering.is_empty():
+			_proxied.erase(chunk)
+		else:
+			_proxied[chunk] = _gathering
+	return source
+
+
+## Whether the chunk's last bake read any module's proxy instead of its voxels.
+func baked_from_proxy(chunk: Vector2i) -> bool:
+	return _proxied.has(chunk)
 
 
 func _chunk_of(pos: Vector3) -> Vector2i:
@@ -118,6 +159,7 @@ func _add_structures(source: NavigationMeshSourceGeometryData3D, bounds: AABB) -
 			for box in module.proxy_boxes():  # with any breach made before it streamed out
 				if box.intersects(local):
 					source.add_faces(_box_faces(box.intersection(local.grow(0.01))), module.global_transform)
+			_gathering.append(module.module_id)
 		# Its stairs as ramps (the steps as voxels bake cut in two: BuildingGen.ramp_faces).
 		var ramps := ZoneModules.ramps(module.type)
 		if not ramps.is_empty():
@@ -159,6 +201,10 @@ func _physics_process(_delta: float) -> void:
 		if _regions.has(chunk) or not _wanted.has(chunk):
 			continue
 		var region := NavigationRegion3D.new()
+		# These chunks share a voxel grid and bake border: their matching vertices join
+		# directly. Skip costly proximity-edge matching only for these zone regions (a chunk
+		# baked from a proxy is baked again once the voxels are: see the class notes).
+		region.use_edge_connections = false
 		region.name = "Chunk_%d_%d" % [chunk.x, chunk.y]
 		add_child(region)
 		NavigationServer3D.region_set_use_async_iterations(region.get_rid(), false)
@@ -181,6 +227,7 @@ func _update_wanted() -> void:
 			_regions.erase(chunk)
 			_waiting.erase(chunk)
 			_again.erase(chunk)
+			_proxied.erase(chunk)
 	var missing: Array[Vector2i] = []
 	for chunk: Vector2i in near:
 		if not _regions.has(chunk):

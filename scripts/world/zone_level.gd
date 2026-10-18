@@ -327,7 +327,7 @@ func _build_environment() -> void:
 	add_child(cache_holder)
 	cache_spawner = MultiplayerSpawner.new()
 	cache_spawner.name = "CacheSpawner"
-	cache_spawner.spawn_path = cache_holder.get_path()
+	cache_spawner.spawn_path = NodePath("../" + String(cache_holder.name))
 	cache_spawner.spawn_function = _make_cache
 	add_child(cache_spawner)
 	var holder := Node3D.new()
@@ -562,10 +562,6 @@ func _spawn_garrison(module: ZoneModule) -> void:
 	if _garrisoned.has(module.module_id) and from >= want:
 		return
 	_garrisoned[module.module_id] = maxi(from, want)
-	var fallen := {}
-	for record: Dictionary in GameState.bodies:
-		if String(record.get("faction", "")) == "hostile":
-			fallen[String(record.get("label", ""))] = true
 	var spots: Array = ZoneModules.GARRISON.get(module.type, [])
 	var faces: Array = ZoneModules.GARRISON_FACE.get(module.type, [])  # the way a post looks out (towns)
 	if spots.is_empty():
@@ -573,7 +569,7 @@ func _spawn_garrison(module: ZoneModule) -> void:
 	var taken: Array[Vector3] = []
 	for i in range(from, want):
 		var callsign := _garrison_callsign(module, i)
-		if fallen.has(callsign) or ai.get_node_or_null(NodePath(callsign)) != null:
+		if GameState.post_is_fallen(callsign) or ai.get_node_or_null(NodePath(callsign)) != null:
 			continue
 		var pos := module.to_global(spots[i]) if i < spots.size() else _extra_post(module.to_global(spots[i % spots.size()]), taken)
 		var face: Vector3 = faces[i] if i < spots.size() and i < faces.size() else Vector3.ZERO

@@ -63,7 +63,9 @@ const CONTOUR_CLIMB := 0.6
 ## for the terrain following's lag. Proposed.
 const MIN_CLEAR_M := 5.0
 const FINAL_LOW_M := 40.0
-const CLEAR_MARGIN_M := 1.0
+# Braking on a descending approach needs this allowance in addition to the
+# tilted airframe's offset (harbour_yard's rise at pace 2 consumes over a metre).
+const CLEAR_MARGIN_M := 2.0
 ## The UH-60's main rotor radius (m) and, where the art isn't built, its hub and tail rotor
 ## (x, z from the origin, nose along -z) and the nose: its footprint (_footprint_points).
 const ROTOR_RADIUS_M := 8.18
@@ -889,9 +891,10 @@ func _contour(pos: Vector3, vel_h: Vector3, agl: float) -> Vector2:
 	var binding := 0.0
 	var now := 0.0
 	var next := 0.0
+	var drop := _airframe_drop()
 	for t: float in LOOKAHEAD_S:
 		var ahead := _ahead(pos, vel_h, speed * t)
-		var need := _need_y(ahead[0], ahead[1], ahead[2], agl)
+		var need := _need_y(ahead[0], ahead[1], ahead[2], agl, drop)
 		if t == 0.0:
 			now = need
 		elif t == 1.0:
@@ -954,11 +957,11 @@ func _ahead(pos: Vector3, vel_h: Vector3, s: float) -> Array:
 ## over the spot once that's below its cruise over the ground there (an LZ up on a rise doesn't
 ## hold it high all the way in), never below the ground's own slope down to it; in the last
 ## FINAL_LOW_M of the final the clearances taper to nothing at the spot (Captain, 2026-10-14).
-func _need_y(at: Vector3, dir: Vector2, left: float, agl: float) -> float:
+func _need_y(at: Vector3, dir: Vector2, left: float, agl: float, drop := 0.0) -> float:
 	var ground := terrain_y(at)
 	var want := ground + agl
-	var clear := MIN_CLEAR_M + CLEAR_MARGIN_M
-	var over := OBSTACLE_CLEAR_M
+	var clear := MIN_CLEAR_M + CLEAR_MARGIN_M + drop
+	var over := OBSTACLE_CLEAR_M + drop
 	if left < INF:
 		var slope := _target.y + maxf(left * GLIDE, HOVER_AGL_M)  # the glide slope up from the spot
 		want = maxf(ground + clampf(left * GLIDE, 0.0, agl), minf(want, slope))
@@ -970,6 +973,29 @@ func _need_y(at: Vector3, dir: Vector2, left: float, agl: float) -> float:
 	var hub_at := at + Vector3(-f.y * hub.x - f.x * hub.z, 0.0, f.x * hub.x - f.y * hub.z)
 	var side := Vector3(-f.y, 0.0, f.x) * ROTOR_REACH_M
 	return maxf(want, maxf(footprint_ground(at, f) + clear, obstacle_top(hub_at, side) + over))
+
+
+## Banking and braking can put wheels, hull or a rotor below the flight origin.
+## The planar footprint's ground clearance must include that actual vertical offset.
+func _airframe_drop() -> float:
+	var low := 0.0
+	for box: Array in spec.get("boxes", []):
+		for x: float in [float(box[0]), float(box[3])]:
+			for z: float in [float(box[2]), float(box[5])]:
+				low = minf(low, (global_basis * Vector3(x, float(box[1]), z)).y)
+	for wheel: Array in spec.get("wheels", []):
+		low = minf(low, (global_basis * Vector3(float(wheel[0]), 0.0, float(wheel[1]))).y)
+	if hull and is_instance_valid(hull.art):
+		var rotor := hull.art.get_node_or_null(^"MainRotor") as Node3D
+		if rotor:
+			for i in FOOTPRINT_RING:
+				var angle := TAU * float(i) / float(FOOTPRINT_RING)
+				var tip := rotor.global_position + (global_basis.x * cos(angle) + global_basis.z * sin(angle)) * ROTOR_RADIUS_M
+				low = minf(low, tip.y - global_position.y)
+		var tail := hull.art.get_node_or_null(^"TailRotor") as Node3D
+		if tail:
+			low = minf(low, tail.global_position.y - global_position.y - 1.7)
+	return -low
 
 
 ## The climb (m/s, + up) that takes it to `want_y` from `y`, following the ground's `rate`.

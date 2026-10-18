@@ -1111,7 +1111,7 @@ func _update_context() -> void:
 		return
 	var at := leader.global_position
 	var grid := Vector3(snappedf(at.x, TOWN_GRID_M), at.y, snappedf(at.z, TOWN_GRID_M))
-	var town := not Buildings.near(leader, grid, TOWN_M).is_empty()
+	var town := Buildings.has_near(leader, grid, TOWN_M)
 	var road := false
 	var level := CompoundLevel.current(leader)
 	var terrain: Variant = level.get(&"terrain") if level and &"terrain" in level else null

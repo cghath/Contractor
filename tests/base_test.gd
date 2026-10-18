@@ -1456,8 +1456,20 @@ func _test_contract_loop() -> void:
 	SquadAI.of(target).process_mode = Node.PROCESS_MODE_DISABLED
 	extraction = MapNodes.extraction(level)
 	extraction.countdown_s = 0.2
-	extraction.server_add_point(Vector2(player.global_position.x, player.global_position.z))
-	check(extraction.server_confirm() == "", "and extract with the squad")
+	# A grid beside the recovered member may be inland: that is a helicopter LZ.
+	# Bring everyone to a real walk-out point at the zone edge for this foot extraction.
+	var area := MapNodes.area_of(level)
+	var exit_at := Vector2(area.position.x + 10.0, area.get_center().y)
+	var ground := (level as ZoneLevel).ground_point(Vector3(exit_at.x, 0, exit_at.y))
+	player.global_position = ground
+	target.global_position = ground + Vector3(1, 0, 0)
+	if mate:
+		mate.global_position = ground + Vector3(-1, 0, 1)
+	await _frames(2)
+	var exit_id := extraction.server_add_point(exit_at)
+	check(bool(extraction.point_by_id(exit_id).get("foot", false)), "the recovery's walk-out point is at the zone edge")
+	var exit_why := extraction.server_confirm()
+	check(exit_why == "", "and extract with the squad (%s)" % exit_why)
 	home = await _wait_until(func() -> bool: return CompoundLevel.current(self) is BaseLevel, 20.0)
 	level = CompoundLevel.current(self)
 	check(home and String(BaseHub.member(lost).status) == Roster.READY and Contracts.history().any(func(h: Dictionary) -> bool: return h.cid == rid and h.outcome == "completed"),

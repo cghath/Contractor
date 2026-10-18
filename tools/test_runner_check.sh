@@ -8,8 +8,32 @@
 #   tools/test_runner_check.sh      (prints each case; exits non-zero if the runner misjudges one)
 set -u
 cd "$(dirname "$0")/.."
-dir="$(mktemp -d)"
-trap 'rm -rf "$dir"' EXIT
+. tools/run_log.sh
+check_root="$(run_log_parent)"
+[ -n "$check_root" ] || check_root="${RUNNER_TEMP:-/tmp}/contractor-test-logs"
+check_id="$(printf 'S%04d' "$(run_log_number "$check_root")")"
+check_day="$check_root/$(date +%Y-%m-%d)"
+check_time="$(date +%H%M%S)"
+dir="$check_day/$check_id-$check_time-RUNNING-runner-check-$(git rev-parse --short HEAD)"
+mkdir -p "$dir"
+# Normalize a Windows drive path for PATH/shebangs in the fake engine and exporter.
+dir="$(cd "$dir" && pwd)"
+exec 3>&1
+exec > >(tee "$dir/check.log") 2>&1
+log_pid=$!
+finish_check() {
+	code=$?
+	verdict=PASS
+	[ "$code" -eq 0 ] || verdict=FAIL
+	# Close tee before renaming its directory (Windows locks an open output file).
+	exec 1>&3 2>&3
+	wait "$log_pid"
+	mv "$dir" "${dir/RUNNING/$verdict}" || exit 1
+	echo "$check_id $(date +%Y-%m-%d) $check_time $verdict runner-check" >>"$check_root/index.txt"
+	echo "$check_id: $verdict (${dir/RUNNING/$verdict})"
+}
+trap finish_check EXIT
+bash tools/check_ci_suites.sh || exit 1
 fake="$dir/fake-engine.sh"
 cat >"$fake" <<'FAKE'
 #!/usr/bin/env bash
@@ -116,8 +140,10 @@ else
 	bad=1
 fi
 wf=.github/workflows/tests.yml
-logs_path="$(grep -m1 'CONTRACTOR_TEST_LOGS:' "$wf" | sed 's/.*CONTRACTOR_TEST_LOGS: *//')"
-if [ -n "$logs_path" ] && grep -A2 'if: always()' "$wf" | grep -q 'uses: actions/upload-artifact' && grep -qF "path: $logs_path" "$wf"; then
+# Only the suite job counts here: the runner job has its own CONTRACTOR_TEST_LOGS and upload.
+suite_job="$(sed -n '/^  suite:/,$p' "$wf")"
+logs_path="$(echo "$suite_job" | grep -m1 'CONTRACTOR_TEST_LOGS:' | sed 's/.*CONTRACTOR_TEST_LOGS: *//')"
+if [ -n "$logs_path" ] && echo "$suite_job" | grep -A2 'if: always()' | grep -q 'uses: actions/upload-artifact' && echo "$suite_job" | grep -qF "path: $logs_path"; then
 	echo "ok   $wf keeps CONTRACTOR_TEST_LOGS ($logs_path) as an artifact on every verdict"
 else
 	echo "BAD  $wf: the suite step must set CONTRACTOR_TEST_LOGS and an 'if: always()' upload-artifact step keep that path"
@@ -203,10 +229,14 @@ b="$(ls -d "$proj"/builds/contractor-*-B0005-exe_fail-*/ 2>/dev/null | head -1)"
 # is taken over instead of holding everyone up.
 cdir="$dir/counter"
 mkdir -p "$cdir"
+# Wait for these jobs by pid: a bare "wait" also waits for the tee behind this script's own
+# output (exec > >(tee ...)) on Linux's bash, which never ends, so CI hung here.
+numbering=()
 for k in $(seq 12); do
 	( . tools/run_log.sh; run_log_number "$cdir" >"$cdir/got-$k" ) &
+	numbering+=("$!")
 done
-wait
+wait "${numbering[@]}"
 got="$(cat "$cdir"/got-* | sort -n | tr '\n' ' ')"
 if [ "$got" = "$(seq 12 | tr '\n' ' ')" ] && [ "$(cat "$cdir/run_counter.txt")" = 12 ] && [ ! -d "$cdir/run_counter.lock" ]; then
 	echo "ok   12 runs numbered at once -> 1 to 12, none twice"
@@ -226,9 +256,10 @@ else
 fi
 mkdir "$cdir/run_counter.lock"  # a live lock: the run waits for it
 ( sleep 1; rmdir "$cdir/run_counter.lock" ) &
+releaser=$!
 start=$(date +%s)
 n="$(. tools/run_log.sh; run_log_number "$cdir")"
-wait
+wait "$releaser"
 if [ "$n" = 14 ] && [ $(( $(date +%s) - start )) -ge 1 ]; then
 	echo "ok   a live lock is waited for: 14 once it's let go"
 else

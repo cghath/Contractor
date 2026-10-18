@@ -49,6 +49,7 @@ func _ready() -> void:
 	await _test_doctrine_ranges()
 	await _test_dead_leave_squad()
 	await _test_buildings_per_world()
+	await _test_buildings_raised_any_order()
 	await _test_multi_storey()
 	await _test_human_team_lead()
 	GameState.delete_save()
@@ -676,6 +677,7 @@ func _test_buildings_per_world() -> void:
 	print("Buildings: one world's scans stay in it")
 	var inside := Vector3(-3, 0.1, -6)  # in the main building
 	var here := Buildings.at(player, inside)
+	check(Buildings.has_near(player, inside, 3.0), "formation presence scan finds the compound building")
 	var viewport := SubViewport.new()
 	viewport.own_world_3d = true
 	add_child(viewport)
@@ -689,10 +691,77 @@ func _test_buildings_per_world() -> void:
 	other.add_child(floor_region)
 	await _frames(4)
 	var there := Buildings.at(other, inside)
+	check(not Buildings.has_near(other, inside, 3.0), "presence scan rejects open ground in another world")
 	var again := Buildings.at(player, inside)
 	check(not here.is_empty() and there.is_empty() and not again.is_empty(),
 		"the main building is found in the compound (%d spots); an open floor at the same spot in another world has none (%d); the compound's is still found"
 		% [(here.get("spots", []) as Array).size(), (there.get("spots", []) as Array).size()])
+	viewport.queue_free()
+	await _frames(2)
+
+
+## Review of the executive audit (2026-10-18): a building made of the same spots is cached by
+## those spots alone, so its answer mustn't hang on the height the first scan came from. In a
+## world of its own: a closed room (walls round it, no way in) up on a 4 m platform, as a
+## watchtower's cabin or a container's top stands, is no building, scanned from 11.5 m up (whose
+## reach stops short of the ground) and from the ground, whichever comes first; the same room on
+## the ground is one.
+func _test_buildings_raised_any_order() -> void:
+	print("Buildings: a raised room's answer doesn't hang on which scan came first")
+	var viewport := SubViewport.new()
+	viewport.own_world_3d = true
+	add_child(viewport)
+	var other := Node3D.new()
+	viewport.add_child(other)
+	var solid := func(box: AABB) -> void:
+		var body := StaticBody3D.new()
+		body.collision_layer = Throwables.WORLD_MASK
+		body.position = box.get_center()
+		var shape := CollisionShape3D.new()
+		var cube := BoxShape3D.new()
+		cube.size = box.size
+		shape.shape = cube
+		body.add_child(shape)
+		other.add_child(body)
+	solid.call(AABB(Vector3(-30, -1, -30), Vector3(60, 1, 60)))  # the ground
+	var vertices := PackedVector3Array([Vector3(-8, 0, -8), Vector3(-8, 0, 8), Vector3(8, 0, 8), Vector3(8, 0, -8)])  # round the platform
+	for room: Vector3 in [Vector3(0, 4.0, 0), Vector3(14, 0.2, 0)]:  # each 6 x 6 m inside, its floor at room.y
+		solid.call(AABB(room + Vector3(-3.2, -0.2, -3.2), Vector3(6.4, 0.2, 6.4)))
+		for wall: AABB in [AABB(Vector3(-3.2, 0, -3.2), Vector3(6.4, 2, 0.2)), AABB(Vector3(-3.2, 0, 3.0), Vector3(6.4, 2, 0.2)),
+				AABB(Vector3(-3.2, 0, -3.0), Vector3(0.2, 2, 6.0)), AABB(Vector3(3.0, 0, -3.0), Vector3(0.2, 2, 6.0))]:
+			solid.call(AABB(room + wall.position, wall.size))
+		for corner: Vector3 in [Vector3(-2.5, 0, -2.5), Vector3(-2.5, 0, 2.5), Vector3(2.5, 0, 2.5), Vector3(2.5, 0, -2.5)]:
+			vertices.append(room + corner)
+	var mesh := NavigationMesh.new()
+	mesh.set_vertices(vertices)
+	for p in 3:
+		mesh.add_polygon(PackedInt32Array([p * 4, p * 4 + 1, p * 4 + 2, p * 4 + 3]))
+	var region := NavigationRegion3D.new()
+	region.navigation_mesh = mesh
+	other.add_child(region)
+	# Buildings answer nothing until this world's navigation map has synced with the region in it
+	# (Buildings.near), and the walls must be in the physics space: wait for both, not a fixed
+	# number of frames (4 frames was too few on CI's slower runners, so every scan found 0).
+	var map := other.get_world_3d().navigation_map
+	await _wait_until(func() -> bool: return NavigationServer3D.map_get_iteration_id(map) > 0 and NavigationServer3D.map_get_regions(map).size() > 0, 10.0)
+	await _physics_frames(2)
+	var found := func(at: Vector3) -> int: return Buildings.near(other, at, 6.0).size()
+	var high := Vector3(0, 11.5, 0)
+	var low := Vector3(0, 0.1, 0)
+	Buildings.forget()
+	var high_first: Array = [found.call(high), found.call(low)]
+	Buildings.forget()
+	var low_first: Array = [found.call(low), found.call(high)]
+	# (The scans did find the raised room's inside spots: only its height above the ground rules it out.)
+	var raised_spots := 0
+	for kept: Array in Buildings._cells.values():
+		raised_spots += (kept[2] as Array).filter(func(s: Vector3) -> bool: return absf(s.y - 4.0) < 0.1).size()
+	Buildings.forget()
+	var on_ground: int = found.call(Vector3(14, 0.3, 0))
+	check(raised_spots >= Buildings.MIN_SPOTS and high_first == [0, 0] and low_first == [0, 0] and on_ground == 1,
+		"a closed room up on a 4 m platform (%d inside spots) is no building from 11.5 m up or from the ground, either first (high then low %s, low then high %s); on the ground it is one (%d)"
+		% [raised_spots, high_first, low_first, on_ground])
+	Buildings.forget()
 	viewport.queue_free()
 	await _frames(2)
 
@@ -767,7 +836,21 @@ func _test_multi_storey() -> void:
 		% [built, solid, path.size(), path[-1].distance_to(roof_goal) if path.size() > 0 else INF, roof_goal.y])
 	# The scan: from the ground floor, three floors (the roof the top one), two stairs.
 	var front_room := STOREY_AT + Vector3(0, 0.1, b.size.y * 0.5 - 2.0)
+	check(Buildings.has_near(player, front_room, 3.0), "presence scan recognizes a multi-storey building before detailed queries")
 	var found := Buildings.nearest(player, front_room, 3.0)
+	var same_surfaces := true
+	var surface_samples := 0
+	Buildings._index_regions(map)
+	for y: float in [0.1, upper + 0.1, roof_y + 0.1]:
+		for x: float in [-6.0, -2.0, 2.0, 6.0]:
+			for z: float in [-6.0, -2.0, 2.0, 6.0]:
+				var p := STOREY_AT + Vector3(x, y, z)
+				var original := NavigationServer3D.map_get_closest_point(map, p)
+				if original.distance_to(p) < Buildings.REGION_MARGIN_M:
+					var indexed := Buildings._closest_nav_point(p)
+					same_surfaces = same_surfaces and indexed.is_finite() and absf(indexed.distance_to(p) - original.distance_to(p)) < 0.001
+					surface_samples += 1
+	check(same_surfaces and surface_samples >= 16, "indexed probes agree with the original map query across floors and tile boundaries (%d samples)" % surface_samples)
 	var floors: Array = found.get("floors", [])
 	var heights: Array = floors.map(func(f: Dictionary) -> String: return "%.2f%s" % [f.y, " roof" if f.roof else ""])
 	var stairs: Array = (found.get("stairs", []) as Array).map(func(s: Dictionary) -> String: return "%d-%d" % [s.from, s.to])

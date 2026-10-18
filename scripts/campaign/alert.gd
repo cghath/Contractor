@@ -55,6 +55,8 @@ const FIELD := "field"
 const SCAN_S := 2.0
 const COMMS_DOWN_SHARE := 0.5
 
+## Host: update the commander's intelligence before report-driven reactions run.
+signal report_received(report: Dictionary)
 ## Host: a report reached the enemy's radio net: {"kind", "pos", "area", "by", "time"}.
 signal reported(report: Dictionary)
 ## Host: an area's state (or "zone"'s) changed.
@@ -198,6 +200,9 @@ func _receive(report: Dictionary) -> void:
 	reports.append(r)
 	if r.kind in [&"contact", &"shot", &"blast", &"body"]:
 		lkp = {"pos": r.pos, "time": r.time}
+	# Record the commander's picture before listeners react to this report. A first
+	# sighting must already be confirmed when the response asks permission to launch.
+	report_received.emit(r)
 	_raise(String(r.area), int(RAISES.get(r.kind, State.SUSPICIOUS)), r.kind == &"contact", true)
 	reported.emit(r)
 

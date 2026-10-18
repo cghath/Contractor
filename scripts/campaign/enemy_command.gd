@@ -95,7 +95,6 @@ const HUNT_FRESH_S := 180.0
 ## Reserves (men), by Pressure tier.
 const RESERVE_POOL: Array[int] = [12, 16, 20, 26, 32]
 const REFILL_PER_MIN: Array[float] = [0.2, 0.3, 0.4, 0.6, 0.8]
-const HUNT_COST := {"qrf": 6, "hunters": 5}
 const HUNT_STOP_S := 900.0
 ## Probes.
 const PROBE_SIZE := 2
@@ -178,7 +177,7 @@ func _ready() -> void:
 	response = level.get_node_or_null(^"EnemyResponse") as EnemyResponse if level else null
 	alert = level.get_node_or_null(^"Alert") as Alert if level else null
 	if alert:
-		alert.reported.connect(_on_reported)
+		alert.report_received.connect(_on_reported)
 
 
 static func of(from: Node) -> EnemyCommand:
@@ -313,7 +312,7 @@ func threat_cp(at := Vector3.INF, radius := INF) -> float:
 ## The HQ asks before sending `men` out on its own errands (pairs to its sites): paid from the
 ## reserves; false with nobody in command, consolidating, or too little left.
 func request_men(men: int, why: String) -> bool:
-	var ok := can_decide() and not consolidated and available_cp() >= men
+	var ok := men > 0 and can_decide() and not consolidated and available_cp() >= men
 	if ok:
 		_spend(men)
 	_record("request", Vector3.INF, "approved" if ok else "denied", why)
@@ -341,6 +340,21 @@ func available_cp() -> float:
 
 func _spend(men: int) -> void:
 	reserves = maxf(reserves - men, 0.0)
+
+
+## Return an approved allocation that could not actually spawn.
+func refund_men(men: int) -> void:
+	reserves += maxi(men, 0)
+
+
+## Pay `men` for a later wave of a hunt approve() already let go (the second QRF wave of the
+## same launch): from the reserves within the spawn budget, nothing else asked (no ratio, no
+## operation slot, no record, no second order on the net). False with too little left.
+func reserve_men(men: int) -> bool:
+	if men <= 0 or available_cp() < men:
+		return false
+	_spend(men)
+	return true
 
 
 func _active_ops() -> int:
@@ -427,10 +441,16 @@ func _find_commander_hvt() -> bool:
 	if hq == null or layer == null:
 		return false
 	for s: Soldier in layer.people():
-		if Person.is_hvt(s) and String(Person.state(s).get("side", "")) == Person.HOSTILE and not s.vitals.is_dead() 				and s.global_position.distance_to(hq.global_position) <= COMMANDER_HVT_M:
+		if Person.is_hvt(s) and String(Person.state(s).get("side", "")) == Person.HOSTILE and s.global_position.distance_to(hq.global_position) <= COMMANDER_HVT_M:
 			_commander_hvt = String(Person.state(s).get("hvt_id", ""))
 			return _commander_hvt != ""
 	return false
+
+
+## PeopleLayer knows this identity at spawn, before the first command tick or a death.
+func register_commander(hvt_id: String) -> void:
+	if _commander_hvt == "" and hvt_id != "":
+		_commander_hvt = hvt_id
 
 
 ## The HVT commander's guards and fallback (see the header).
@@ -473,7 +493,7 @@ func _officer_down(post: int) -> bool:
 	if post == 0 and _find_commander_hvt():
 		var layer := PeopleLayer.find(self)
 		var hvt := layer.hvt(_commander_hvt) if layer else null
-		return hvt == null or hvt.vitals.is_dead() or Person.is_captive(hvt) or People.is_delivered(_commander_hvt)
+		return hvt == null or hvt.vitals.is_dead() or Person.is_captive(hvt) or bool(Person.state(hvt).get("delivered", false)) or People.is_delivered(_commander_hvt)
 	var hq := _hq_module()
 	var ai := level.get(&"ai") as Node
 	if hq == null or ai == null:
@@ -513,12 +533,17 @@ func _watch_command() -> void:
 
 # --- Decisions --------------------------------------------------------------------------------
 
-## EnemyResponse asks before a hunt (`kind` "qrf" or "hunters") toward `target`: true to go.
-func approve(kind: String, target: Vector3) -> bool:
+## EnemyResponse asks before a hunt (`kind` "qrf" or "hunters") toward `target`: true to go,
+## `men` paid from the reserves and one operation recorded. Asked once per launch (a two-wave
+## QRF pays its second wave with reserve_men), and asked even when the reserves are short of a
+## team (`men` the team it wanted): the denial is recorded and a stale LKP still gets its probe.
+func approve(kind: String, target: Vector3, men: int) -> bool:
 	var threat := maxf(threat_cp(), 1.0)
 	var have := available_cp()
 	var why := "%.0f CP against %.1f (%.1f:1)" % [have, threat, have / threat]
-	var ok := have >= threat * applied_ratio(HUNT_RATIO) and _active_ops() < max_ops()
+	if have < men:
+		why = "%d men wanted, %.0f to hand" % [men, have]
+	var ok := men > 0 and have >= men and have >= threat * applied_ratio(HUNT_RATIO) and _active_ops() < max_ops()
 	if not can_decide():
 		ok = false
 		why = "no commander"
@@ -536,7 +561,7 @@ func approve(kind: String, target: Vector3) -> bool:
 			_send_probe(target)
 	_record("hunt:" + kind, target, "approved" if ok else "denied", why)
 	if ok:
-		_spend(int(HUNT_COST.get(kind, 4)))
+		_spend(men)
 		_order("%s, move out %s side. Find them." % [_callsign_at(target, true), RadioChatter.compass(Vector3.ZERO, target)])
 	else:
 		print("[command] %s turned down: %s" % [kind, why])
@@ -647,6 +672,7 @@ func _contain(m: ZoneModule, why: String, say := true) -> void:
 
 ## `size` men from `gate` toward `to` (spawn budget and reserves paid): {"squad", "soldiers"}.
 func _send_team(callsign: String, size: int, gate: Vector3, to: Vector3) -> Dictionary:
+	size = mini(size, floori(available_cp()))
 	_teams += 1
 	var cs := ("%s_%d" % [callsign, _teams]).validate_node_name()
 	var squad := response._new_squad(cs)

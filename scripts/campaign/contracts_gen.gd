@@ -129,10 +129,14 @@ static func generate(rng: RandomNumberGenerator, ctx: Dictionary) -> Dictionary:
 	var employer: String = ctx.get("employer", "")
 	if employer == "":
 		employer = fixer.get("faction", zone.get("faction", employers[rng.randi() % employers.size()] if not employers.is_empty() else ""))
+	if not employers.has(employer):
+		employer = employers[rng.randi() % employers.size()] if not employers.is_empty() else ""
 	var enemies := MissionRegistry.enemies()
 	# Wave 6c: `ctx.target` (the faction war's own flashpoint offers, Contracts.server_refresh_board)
 	# names who the contract is against; left out, it's the usual fresh pick (kept pure and
-	# RNG-sequence-stable for every other caller, HotZoneOps included).
+	# RNG-sequence-stable for every other caller, HotZoneOps included). Never the employer itself
+	# (audit E-05).
+	enemies = enemies.filter(func(id: String) -> bool: return id != employer)
 	var target: String = String(ctx.get("target", ""))
 	if target == "" and not enemies.is_empty():
 		target = enemies[rng.randi() % enemies.size()]

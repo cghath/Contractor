@@ -393,6 +393,9 @@ func server_spawn_person(data: Dictionary) -> Soldier:
 	for id: String in d.get("intel", []):
 		server_give_intel(s, StringName(id), "HVT %s" % s.display_name())
 	if commander:
+		var command := EnemyCommand.of(self)
+		if command:
+			command.register_commander(String(st.hvt_id))
 		for id: String in COMMANDER_KIT:
 			s.inventory.take(StringName(id))  # worn: the carrier, its plates in it
 	return s
