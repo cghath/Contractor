@@ -94,6 +94,7 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 ### Controller support and co-op assists (wave 7, S4; Captain: "Controller support and optional help for new co-op players")
 
 #### Added
+- On the pad wheel too: the NVG flip (U) and the weapon light or laser (L) from S2 and S3.
 - A full gamepad layout (Xbox names; `Controls.JOY_BUTTONS`, `JOY_AXES`), next to the keys:
   move on the left stick, look on the right, RT fire, LT aim, A jump (the brake driving),
   B crouch, X reload, Y hold for the interaction menu (the right stick moves its cursor; click
