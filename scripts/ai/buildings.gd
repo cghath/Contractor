@@ -130,9 +130,13 @@ static var _cache := {}
 static var _cells := {}  # Vector3i (cell x, z, height band) -> [at, surfaces, spots] (_probe_cell)
 static var _built := {}  # a group's actual spots -> [built at, oldest probe, building]
 static var _links := {}  # [a, b] -> [at, linked]: _linked's answers
+## The index (_index_regions): Vector2i (a REGION_GRID_M square) -> the RIDs of the enabled
+## regions whose bounds reach it. RIDs, not nodes: it's made again whenever the map's
+## iteration or its count of regions changes, so a region freed since is never asked.
 static var _region_grid := {}
 static var _region_map := RID()
 static var _region_iteration := 0
+static var _region_count := -1
 ## Tests: how long scans have taken so far (usec, every world).
 static var spent_usec := 0
 ## The world and level the cached scans belong to (_scope); another one empties the cache.
@@ -163,6 +167,7 @@ static func near(from: Node3D, centre: Vector3, radius := SCAN_M, details := tru
 		_links.clear()
 		_region_grid.clear()
 		_region_iteration = 0
+		_region_count = -1
 		_cache_scope = scope
 	var key := "%s|%d,%d,%d,%d" % [scope, roundi(centre.x / 2.0), roundi(centre.y / 2.0), roundi(centre.z / 2.0), roundi(radius)]
 	if not details:
@@ -216,6 +221,7 @@ static func forget() -> void:
 	_links.clear()
 	_region_grid.clear()
 	_region_iteration = 0
+	_region_count = -1
 
 
 static func _scope(from: Node3D) -> String:
@@ -366,14 +372,19 @@ static func _probe_cell(world: World3D, map: RID, space: PhysicsDirectSpaceState
 	return [surfaces, here]
 
 
+## Indexes the map's regions (_region_grid) unless nothing changed since: the same map, its
+## iteration and its count of regions (a cheap guard: a region added or freed before the map's
+## next sync changes the count, not the iteration).
 static func _index_regions(map: RID) -> void:
 	var iteration := NavigationServer3D.map_get_iteration_id(map)
-	if map == _region_map and iteration == _region_iteration:
+	var regions := NavigationServer3D.map_get_regions(map)
+	if map == _region_map and iteration == _region_iteration and regions.size() == _region_count:
 		return
 	_region_map = map
 	_region_iteration = iteration
+	_region_count = regions.size()
 	_region_grid.clear()
-	for region: RID in NavigationServer3D.map_get_regions(map):
+	for region: RID in regions:
 		if not NavigationServer3D.region_get_enabled(region) or NavigationServer3D.region_get_iteration_id(region) == 0:
 			continue
 		var bounds := NavigationServer3D.region_get_bounds(region)
