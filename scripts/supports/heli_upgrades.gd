@@ -60,21 +60,25 @@ static func server_buy(id: String) -> String:
 	return Economy.server_buy_heli_upgrade(id)
 
 
-## The airframe a support call of `kind` flies: the owned upgrade's "model" whose "kinds" list it,
-## else HeliSupports.MODEL.
+## The airframe a support call of `kind` flies: the owned airframe upgrade whose "kinds" list it,
+## the latest in the list winning (UH-60 -> Petrel -> Razorback), else HeliSupports.MODEL.
 static func model_for(kind: String) -> String:
-	for d: Dictionary in defs():
-		if d.has("model") and (d.get("kinds", []) as Array).has(kind) and owned(String(d.id)):
-			return String(d.model)
-	return HeliSupports.MODEL
+	var d := _airframe(kind)
+	return String(d.model) if not d.is_empty() else HeliSupports.MODEL
 
 
 ## What a lost support helicopter of `kind` costs to replace, times the usual price.
 static func lost_mult(kind: String) -> float:
-	for d: Dictionary in defs():
+	return float(_airframe(kind).get("lost_mult", 1.0))
+
+
+static func _airframe(kind: String) -> Dictionary:
+	var all := defs()
+	for i in range(all.size() - 1, -1, -1):
+		var d: Dictionary = all[i]
 		if d.has("model") and (d.get("kinds", []) as Array).has(kind) and owned(String(d.id)):
-			return float(d.get("lost_mult", 1.0))
-	return 1.0
+			return d
+	return {}
 
 
 ## Damage a support helicopter takes, times (owned "damage_mult" upgrades multiply).

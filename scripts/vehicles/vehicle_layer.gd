@@ -303,3 +303,10 @@ func _physics_process(delta: float) -> void:
 ## Host (tests): squadmates still on their way to a vehicle.
 func boarding_count() -> int:
 	return _boarding.size()
+
+
+## Host: squadmates still on their way to `v` stop going (it's leaving without them).
+func server_cancel_boarding(v: Vehicle) -> void:
+	for id: int in _boarding.keys():
+		if (_boarding[id] as Dictionary).vehicle == v:
+			_boarding.erase(id)

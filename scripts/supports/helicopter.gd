@@ -168,6 +168,9 @@ var mode := Mode.PARKED
 
 ## Host: exits go even in the air (a support called off at once: tests).
 var forced_exits := false
+## Host: nobody gets in but its own crew (HeliCall: dropping off or leaving). Captain,
+## 2026-10-17: squadmates ran back in before it took off, and it left with them (or the player).
+var boarding_closed := false
 
 var _target := Vector3.ZERO     # FLYING: where to; LANDING: the spot
 var _arrive := true              # FLYING: stop over the target (else pass at speed)
@@ -639,6 +642,8 @@ func _lift_off_if_landed() -> void:
 ## The pilot seats are the helicopter's own crew (simulated): nobody takes them.
 func server_enter(soldier: Node, index := -1) -> bool:
 	var s := soldier as Soldier
+	if boarding_closed and not (s and s.has_meta(&"vehicle_crew")):
+		return false
 	if index < 0 and s and s.is_ai() and s.vitals.is_up() and not Person.is_person(s):
 		index = _first_free_ffv()  # AI fighters man the door seats first (Vehicle._first_free_for)
 	if index < 0:

@@ -32,11 +32,10 @@ signal radio_heard(text: String)
 const NODE_NAME := "HeliSupports"
 const DATA_PATH := "res://data/supports.json"
 const KINDS: Array[String] = ["resupply", "transport", "extraction", "medevac", "cargo"]
-## The player faction's transport (docs/near_future_hardware.md: replaces the Black Hawk). The
-## UH-60 model and data entry stay in the game (mission_scenario.gd's crew_rescue wreck, other
-## factions) - only the player's own support calls moved off it. The Razorback tier (bigger
-## capacity) is an air wing upgrade: HeliUpgrades.model_for picks the airframe per call.
-const MODEL := "vtol_petrel"
+## The player faction's stock transport (Captain, 2026-10-17: start on the UH-60, upgrade to the
+## Petrel, then the Petrel to the Razorback). The VTOLs are air wing upgrades:
+## HeliUpgrades.model_for picks the airframe per call.
+const MODEL := "uh60"
 ## Proposed: on a zone, helicopters appear this far inside the edge (its invisible wall) and
 ## leave by it; on a small map (the vehicle range) at least MIN_INBOUND_M from where they go.
 const SPAWN_INSET_M := 80.0

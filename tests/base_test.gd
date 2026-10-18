@@ -443,6 +443,15 @@ func _test_heli_upgrades() -> void:
 	check(HeliUpgrades.owned_ids().is_empty() and HeliUpgrades.model_for("transport") == HeliSupports.MODEL
 		and HeliUpgrades.damage_mult() == 1.0 and is_equal_approx(HeliSupports.cooldown_s("transport"), base_cd),
 		"a new company flies the stock air wing (%s, %d s transport cooldown)" % [HeliSupports.MODEL, roundi(base_cd)])
+	check(HeliSupports.MODEL == "uh60", "the stock air wing is the UH-60")
+	Economy.add_cash(500000 - Economy.cash(), "test: flush")
+	check(Economy.server_buy_heli_upgrade("razorback").begins_with("Needs the") and not HeliUpgrades.owned("razorback") and Economy.cash() == 500000,
+		"the Razorback needs the Petrel first: refused, nothing taken")
+	var petrel_cost := int(HeliUpgrades.def("petrel").cost)
+	check(Economy.server_buy_heli_upgrade("petrel") == "" and HeliUpgrades.owned("petrel") and Economy.cash() == 500000 - petrel_cost,
+		"bought the Petrel ($%s off the cash)" % DebriefCalc.money(petrel_cost))
+	check(HeliUpgrades.model_for("transport") == "vtol_petrel" and HeliUpgrades.model_for("resupply") == "vtol_petrel"
+		and HeliUpgrades.model_for("medevac") == "vtol_petrel", "every support call now flies the Petrel")
 	var cost := int(HeliUpgrades.def("razorback").cost)
 	Economy.add_cash(cost - 1 - Economy.cash(), "test: just short")
 	check(Economy.server_buy_heli_upgrade("razorback") == "Can't afford it" and not HeliUpgrades.owned("razorback") and Economy.cash() == cost - 1,
@@ -452,13 +461,13 @@ func _test_heli_upgrades() -> void:
 		"bought the Razorback ($%s off the cash)" % DebriefCalc.money(cost))
 	check(Economy.server_buy_heli_upgrade("razorback") == "Already owned" and Economy.cash() == 500000 - cost, "bought once: a second buy is refused, free")
 	check(HeliUpgrades.model_for("transport") == "vtol_razorback" and HeliUpgrades.model_for("extraction") == "vtol_razorback"
-		and HeliUpgrades.model_for("insertion") == "vtol_razorback" and HeliUpgrades.model_for("resupply") == HeliSupports.MODEL
-		and HeliUpgrades.model_for("medevac") == HeliSupports.MODEL and HeliCall.new(null, "transport", null, {}).model == "vtol_razorback",
-		"transport, extraction and insertion calls fly the Razorback; resupply and medevac stay on the %s" % HeliSupports.MODEL)
+		and HeliUpgrades.model_for("insertion") == "vtol_razorback" and HeliUpgrades.model_for("resupply") == "vtol_petrel"
+		and HeliUpgrades.model_for("medevac") == "vtol_petrel" and HeliCall.new(null, "transport", null, {}).model == "vtol_razorback",
+		"transport, extraction and insertion calls fly the Razorback; resupply and medevac stay on the Petrel")
 	var seats := func(m: String) -> int:
 		return (VehicleSpecs.spec(m).seats as Array).filter(func(st: Dictionary) -> bool: return String(st.kind) == "passenger").size()
-	check(seats.call("vtol_razorback") > seats.call(HeliSupports.MODEL), "and it carries more troops (%d passenger seats, not %d)" % [seats.call("vtol_razorback"), seats.call(HeliSupports.MODEL)])
-	check(HeliUpgrades.lost_mult("transport") > 1.0 and HeliUpgrades.lost_mult("resupply") == 1.0, "a lost Razorback costs more to replace; a lost Petrel the same")
+	check(seats.call("vtol_razorback") > seats.call("vtol_petrel"), "and it carries more troops (%d passenger seats, not %d)" % [seats.call("vtol_razorback"), seats.call("vtol_petrel")])
+	check(HeliUpgrades.lost_mult("transport") > 1.0 and HeliUpgrades.lost_mult("transport") > HeliUpgrades.lost_mult("resupply") and HeliUpgrades.lost_mult("resupply") > 1.0, "a lost Razorback costs more to replace than a lost Petrel, a Petrel more than a UH-60")
 	check(Economy.server_buy_heli_upgrade("armoured_cabin") == "" and Economy.server_buy_heli_upgrade("fast_turnaround") == "",
 		"the armoured cabin kit and fast turnaround bought")
 	check(is_equal_approx(HeliUpgrades.damage_mult(), float(HeliUpgrades.def("armoured_cabin").damage_mult))

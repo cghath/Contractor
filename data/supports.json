@@ -3,7 +3,9 @@
 	"cooldown_s": {"resupply": 600, "transport": 180, "extraction": 300, "medevac": 240, "cargo": 300},
 	"callsigns": {"resupply": "Mule 1-1", "transport": "Hawk 2-1", "extraction": "Exodus 3-1", "insertion": "Hawk 2-2", "medevac": "Dustoff 4-1", "cargo": "Packhorse 5-1"},
 	"upgrades": [
-		{"id": "razorback", "name": "Razorback heavy-lift VTOL", "cost": 120000, "model": "vtol_razorback", "kinds": ["transport", "extraction", "insertion"], "lost_mult": 1.8,
+		{"id": "petrel", "name": "VT-14 Petrel VTOL", "cost": 60000, "model": "vtol_petrel", "kinds": ["resupply", "transport", "extraction", "insertion", "medevac", "cargo"], "lost_mult": 1.3,
+			"text": "Every support call flies the Petrel instead of the UH-60: a faster VTOL that comes straight in, with a .50 cal belly turret on the co-pilot seat. A lost Petrel costs more to replace."},
+		{"id": "razorback", "name": "Razorback heavy-lift VTOL", "cost": 120000, "needs": "petrel", "model": "vtol_razorback", "kinds": ["transport", "extraction", "insertion"], "lost_mult": 1.8,
 			"text": "Transport, extraction and helicopter insertion fly the Razorback: more troops than the Petrel (and room for two heavy exos), and a heavier hull. Resupply, medevac and cargo stay on the Petrel. A lost Razorback costs more to replace."},
 		{"id": "armoured_cabin", "name": "Armoured cabin kit", "cost": 40000, "damage_mult": 0.7,
 			"text": "Spall liners and armoured crew seats on every support aircraft: hits do 30% less damage."},

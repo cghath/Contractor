@@ -85,6 +85,8 @@ const BOARD_DIRECT_M := 40.0
 ## leaves DROP_GRACE_S after the last one is out.
 const DROP_WAIT_S := 60.0
 const DROP_GRACE_S := 2.0
+## Leaving from the ground: it waits for the last one running out of its doors this long at most.
+const DEPART_CLEAR_S := 8.0
 ## Loading bodies and the carried (from a door, m), HVTs (from the helicopter) and items.
 const LOAD_REACH_M := 4.0
 const HVT_REACH_M := 25.0
@@ -219,6 +221,7 @@ var _late_seen := {}
 var _shooter: Soldier = null
 var _hot_seen := Vector3.INF  # where the last enemy who made an LZ hot was
 var _music_at := -1  # insertion: Time.get_ticks_msec() when the infil music started (-1: not yet)
+var _lift_when_clear := false  # _depart: on the ground until the last runner is out (_step_ground)
 
 
 func _init(p_sup: HeliSupports, p_kind: String, p_caller: Soldier, p_mark: Dictionary) -> void:
@@ -676,6 +679,7 @@ func _on_landed() -> void:
 		var briefing := MapNodes.briefing(sup) if kind == "insertion" else null
 		if briefing and briefing.is_deployed():
 			briefing.server_set_insertion_route([])  # down: the maps stop drawing its way in
+		_close_boarding()
 		_unload(false)
 		sup.server_radio(kind, "On the ground at %s. Out, out, out!" % _grid(heli.global_position))
 		if kind == "insertion":
@@ -698,6 +702,14 @@ func _on_landed() -> void:
 
 
 func _step_ground() -> void:
+	if _lift_when_clear:
+		if heli.running_out() and _t < DEPART_CLEAR_S:
+			return  # the last ones still running out of the doors
+		for s: Soldier in _riders():
+			heli.server_exit(s)  # a runner cut short, or anyone still sat: out, it doesn't take them
+		_lift_when_clear = false
+		_take_off()
+		return
 	if stage == "drop":
 		if heli.running_out():
 			return  # the squad still running out of the doors (Vehicle.server_run_out)
@@ -1061,11 +1073,28 @@ func _evacuate() -> void:
 			BaseHub.server_squadmate_leaving(s)
 		s.queue_free()
 
+## Captain, 2026-10-17: it lifted with the squad still running out (or run back in), so it
+## shuts its doors to boarders and waits on the ground for the last one out (DEPART_CLEAR_S at most).
 func _depart() -> void:
+	_close_boarding()
 	_unload(true)
 	stage = "leave"
 	sup.server_radio(kind, "Lifting off")
-	_take_off()
+	if phase == Phase.GROUND and heli.running_out():
+		_lift_when_clear = true
+		_t = 0.0
+	else:
+		_take_off()
+
+
+## Nobody else gets in (Helicopter.boarding_closed), and squadmates still on their way to it
+## (VehicleLayer "Get in" orders, which outlive a short flight) stop going.
+func _close_boarding() -> void:
+	heli.boarding_closed = true
+	var layer := VehicleLayer.of(level())
+	if layer:
+		layer.server_cancel_boarding(heli)
+	_ordered.clear()
 
 
 func _take_off() -> void:
@@ -1538,6 +1567,7 @@ func _step_rope() -> void:
 			if heli.arrived():
 				_rope_state = "roping"
 				heli.ropes_out = true
+				_close_boarding()
 				_rope_queue = _riders().filter(func(s: Soldier) -> bool: return s.vitals.is_up())
 				_rope_next = 0.0
 				sup.server_radio(kind, "Ropes out at %s. Go, go, go!" % _grid(heli.global_position))
