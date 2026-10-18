@@ -312,11 +312,19 @@ func _test_give_up() -> void:
 	player._server_give_up.rpc_id(1)
 	await _frames(2)
 	check(not player.vitals.is_up() and not player.vitals.is_dead(), "the host refuses a give-up asked too early")
-	buddy.global_position = Vector3(10, 0.1, 30 + Soldier.GIVE_UP_ALONE_M + 10.0)
+	# The ragdoll can rest away from the capsule. Put the helper beyond the actual
+	# body's radius, rather than a fixed world position measured from where it fell.
+	buddy.global_position = player.body_point() + Vector3(0, 0, Soldier.GIVE_UP_ALONE_M + 10.0)
+	buddy.velocity = Vector3.ZERO
 	await _frames(2)
-	check(not player.help_near() and player.can_give_up() and ("Hold [%s] to give up" % key) in Hud.give_up_text(player, 0.0),
-		"nobody within %.0f m: open at once, and the prompt says so" % Soldier.GIVE_UP_ALONE_M)
-	buddy.global_position = Vector3(14, 0.1, 30)
+	var helper_gap := buddy.body_point().distance_to(player.body_point())
+	var help := player.help_near()
+	var allowed := player.can_give_up()
+	var prompt := Hud.give_up_text(player, 0.0)
+	check(helper_gap > Soldier.GIVE_UP_ALONE_M and not help and allowed and ("Hold [%s] to give up" % key) in prompt,
+		"nobody within %.0f m: open at once, and the prompt says so (gap %.1f m, help %s, allowed %s, state %d, %s)" % [Soldier.GIVE_UP_ALONE_M, helper_gap, help, allowed, player.respawn_state, prompt.strip_edges()])
+	buddy.global_position = player.body_point() + Vector3(4, 0, 0)
+	buddy.velocity = Vector3.ZERO
 	buddy.vitals.server_damage(500.0)  # a squadmate who's down himself is no help
 	await _frames(3)
 	check(not buddy.vitals.is_up() and player.can_give_up(), "a downed squadmate beside him is no help: open")
