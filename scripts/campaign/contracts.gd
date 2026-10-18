@@ -330,6 +330,14 @@ func server_refresh_board() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash([int(s.seed), today, int(s.next_id)])
 	var board: Array = s.board
+	# Wave 6c: the faction war's own offer, once a hot zone it just took goes up (war_driven),
+	# same as the always-on safe job below - it doesn't wait its turn behind board_size.
+	for z: Dictionary in MissionRegistry.zones():
+		var zid := String(z.get("zone_id", ""))
+		if String(z.get("kind", "")) == "hot" and WorldSites.is_flashpoint(zid) \
+				and not board.any(func(c: Dictionary) -> bool: return c.get("zone_id", "") == zid and c.get("war_driven", false)):
+			_add_offer(ContractGen.generate(rng, {"day": today, "source": "board", "zone_id": zid, "target": WorldSites.holder(zid)}))
+			WorldSites.server_clear_flashpoint(zid)
 	if not board.any(func(c: Dictionary) -> bool: return c.source == "safe"):
 		_add_offer(ContractGen.generate(rng, {"day": today, "source": "safe"}))
 	var board_size := MissionRegistry.setting_i("board_size", 6)
@@ -771,6 +779,8 @@ func server_end_deployment(report: Dictionary) -> Dictionary:
 	for c: Dictionary in deployed:
 		var result: Dictionary = (debrief.contracts as Array).filter(func(l: Dictionary) -> bool: return l.cid == c.cid)[0]
 		_close(c, String(result.outcome))
+		if String(result.outcome) == "completed" and String(c.get("zone_kind", "")) == "hot":
+			WorldSites.server_contract_won(String(c.get("zone_id", "")), String(c.get("target", "")))  # wave 6c
 	# What came home goes to the base. In a campaign the people bring their own gear home
 	# (BaseHub), so the report says what else to bank ("bank": bodies and items set down).
 	Economy.bank_items(report.get("bank", report.get("items", [])), "carried out")

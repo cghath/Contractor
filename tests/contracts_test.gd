@@ -51,6 +51,7 @@ func _ready() -> void:
 	_test_economy_balance()
 	_test_lapse()
 	_test_reputation_core()
+	_test_world_sites()
 	_test_debrief_totals()
 	_test_civilians_void()
 	_test_save_reload()
@@ -463,6 +464,50 @@ func _test_reputation_core() -> void:
 	Economy.server_nemesis_event(String(n.id), 0, true)
 	check(Economy.nemesis("black_ridge").is_empty() and String(Economy.server_raise_nemesis("black_ridge").name) != "",
 		"its leader dead, it's finished; a new one can rise in its place")
+
+
+## Wave 6c: persistent world (a hot zone's holder and grip outlive a deployment) and the
+## faction war (a weak holder can lose the zone to one of its own listed enemies between
+## missions), plus the war-driven offer that follows (Contracts.server_refresh_board).
+func _test_world_sites() -> void:
+	print("World sites: persistent holder, the faction war, and its offer")
+	Campaign.section(WorldSites.SECTION).clear()
+	var zid := "pass_hot"
+	var h1 := WorldSites.holder(zid)
+	check(h1 != "" and WorldSites.holder(zid) == h1, "a zone's holder is seeded once and stays stable (%s)" % h1)
+	check(is_equal_approx(WorldSites.grip(zid), WorldSites.START_GRIP), "a fresh site starts at full grip (%.2f)" % WorldSites.grip(zid))
+	WorldSites.server_contract_won(zid, "nobody_holds_this")
+	check(is_equal_approx(WorldSites.grip(zid), WorldSites.START_GRIP), "a win against someone who doesn't hold it does nothing")
+	WorldSites.server_contract_won(zid, h1)
+	check(is_equal_approx(WorldSites.grip(zid), WorldSites.START_GRIP - WorldSites.WIN_GRIP_HIT), "a win against the actual holder knocks its grip down (%.2f)" % WorldSites.grip(zid))
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 99
+	WorldSites.server_advance_days(1, rng)
+	check(WorldSites.grip(zid) > WorldSites.START_GRIP - WorldSites.WIN_GRIP_HIT, "a quiet day repairs some of it back (%.2f)" % WorldSites.grip(zid))
+	# Push it to contested, with a known holder that has a real hostile rival (black_ridge's
+	# enemies include federal_army, the only other one that's also hostile-role), and keep it
+	# there (repair only gets one day's grace before the next contract would knock it down
+	# again) for up to 200 days: at 0.2/day, the faction war flipping it is a near-certainty.
+	# Checks the mechanism, not a coin flip.
+	h1 = "black_ridge"
+	var s := Campaign.section(WorldSites.SECTION)
+	rng.seed = 7
+	for _day in 200:
+		if String(s[zid].holder) != h1:
+			break
+		var site_d: Dictionary = s[zid]
+		site_d.holder = h1
+		site_d.grip = WorldSites.CONTESTED_GRIP
+		s[zid] = site_d
+		WorldSites.server_advance_days(1, rng)
+	var h2 := WorldSites.holder(zid)
+	check(h2 != h1 and h2 in MissionRegistry.enemies_of(h1), "weak and contested long enough, a listed rival takes it over (%s -> %s)" % [h1, h2])
+	check(WorldSites.is_flashpoint(zid), "and it's flagged a flashpoint")
+	Contracts.server_refresh_board()
+	var board: Array = Campaign.section(Contracts.SECTION).get("board", [])
+	var posted := board.filter(func(c: Dictionary) -> bool: return c.get("zone_id", "") == zid and c.get("war_driven", false))
+	check(posted.size() == 1 and String(posted[0].target) == h2, "and posts its own offer on the board, against the new holder (%s)" % [posted.map(func(c: Dictionary) -> String: return c.title)])
+	check(not WorldSites.is_flashpoint(zid), "clearing the flag once it has")
 
 
 ## Kill attribution (6d's open item): EnemyResponse tags every man it spawns for a named

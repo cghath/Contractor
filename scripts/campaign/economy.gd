@@ -371,6 +371,7 @@ func advance_days(days: int, reason := "") -> void:
 			pay_week()
 		_decay_reputation()
 		_cool_heat()
+	WorldSites.server_advance_days(days)  # wave 6c: the faction war and site repair/reoccupation
 	if reason != "":
 		print("[economy] %d day%s pass (%s): day %d" % [days, "" if days == 1 else "s", reason, int(s.day)])
 	_commit()

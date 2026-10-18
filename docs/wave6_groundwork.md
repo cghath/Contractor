@@ -7,8 +7,26 @@ kit, woodland), contracts against any kitted faction switch the zone's patrols, 
 (which stayed Black Ridge's before) and, for data kits, garrisons; Black Ridge carries a captured
 M4 (Captain: factions known to field AR-pattern rifles use them). Still open in 6b: the real faction
 set (call 4 below), regional weapon art (Chinese, Iranian), a garrison already spawned before its
-contract went live keeps the militia kit. Groundwork below as written. Wave 6 is next once the Oct 18 open
-items are in (Captain, 2026-10-18). This page collects what's already decided, what the code already
+contract went live keeps the militia kit. **6c built on today's placeholder faction set** (Captain,
+2026-10-18: build an MVP now rather than wait on call 4): `WorldSites` (new, `scripts/campaign/
+world_sites.gd`) tracks each hot zone's holder and how firm its grip is (0..1) across deployments
+(campaign section "world_sites", the same pattern as `EnemyCommand`'s own per-zone "caution"). A
+completed contract against the holder knocks its grip down (`server_contract_won`, hooked from
+`Contracts.server_end_deployment`); `Economy.advance_days` ticks it daily (`server_advance_days`):
+grip repairs on its own (reoccupation), but at or below `CONTESTED_GRIP` one of the holder's own
+`factions.json` "enemies" can take it over instead (the faction war - today that means Black Ridge
+and the Federal Army trading `pass_hot`/`ridge_hot`/`city_hot`), flagging a "flashpoint".
+`Contracts.server_refresh_board` posts a flashpoint's own war-driven offer (against the new
+holder, `ctx.target` forced, `"war_driven": true` on the result) the same way it always posts a
+safe job, then clears the flag; every other contract still picks its target the old way (a
+first attempt at weighting every hot-zone contract toward the tracked holder shifted
+`ContractGen.generate`'s RNG sequence enough to break missions_test.gd's seeded hot-zone/
+HotZoneOps checks, so that's out of this slice - only an explicit ctx.target names one). Not
+done: no UI shows a zone's holder or
+grip yet (debug-only via `WorldSites.holder`/`grip`); 6b's real faction set replacing the
+placeholder should just work once it lands, since this reads `MissionRegistry.enemies()`/
+`enemies_of()` live. 6e (allied troops) still open. Groundwork below as written. Wave 6 is next
+once the Oct 18 open items are in (Captain, 2026-10-18). This page collects what's already decided, what the code already
 has to build on, the calls the Captain still has to make (each with a proposed answer, so a yes is
 enough), and a build order. The plan's own scope is in [build_plan.md](build_plan.md) (Wave 6) and
 [ChrisPlan_handoff.md](ChrisPlan_handoff.md#wave-6-factions-blocked); the rules come from

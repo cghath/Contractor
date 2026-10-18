@@ -130,7 +130,12 @@ static func generate(rng: RandomNumberGenerator, ctx: Dictionary) -> Dictionary:
 	if employer == "":
 		employer = fixer.get("faction", zone.get("faction", employers[rng.randi() % employers.size()] if not employers.is_empty() else ""))
 	var enemies := MissionRegistry.enemies()
-	var target: String = enemies[rng.randi() % enemies.size()] if not enemies.is_empty() else ""
+	# Wave 6c: `ctx.target` (the faction war's own flashpoint offers, Contracts.server_refresh_board)
+	# names who the contract is against; left out, it's the usual fresh pick (kept pure and
+	# RNG-sequence-stable for every other caller, HotZoneOps included).
+	var target: String = String(ctx.get("target", ""))
+	if target == "" and not enemies.is_empty():
+		target = enemies[rng.randi() % enemies.size()]
 	# The real force.
 	var count_range: Array = def.get("enemy_count", [4, 8])
 	var quality_range: Array = def.get("enemy_quality", [0.3, 0.6])
@@ -185,10 +190,15 @@ static func generate(rng: RandomNumberGenerator, ctx: Dictionary) -> Dictionary:
 	var day := int(ctx.get("day", 1))
 	var mission := mission_target(rng, def, String(zone.get("zone_id", "")), target, at_module, ctx.get("avoid_modules", []))
 	var limit_min := int(def.get("time_limit_min", 0))
+	# Wave 6c: a flashpoint the faction war just handed to `target` says so up front.
+	var war_driven := hot and WorldSites.is_flashpoint(String(zone.get("zone_id", "")))
+	var brief := String(def.get("brief", ""))
+	if war_driven:
+		brief = "The %s just took %s off whoever had it. %s" % [MissionRegistry.faction_name(target), zone.get("name", ""), brief]
 	return {
 		"cid": "", "type": type_id, "title": "%s%s: %s" % [def.get("name", type_id), mission.title_extra, zone.get("name", "")],
-		"brief": String(def.get("brief", "")) + (" Time limit: %d min." % limit_min if limit_min > 0 else ""), "source": source, "fixer": fixer.get("fixer", ""),
-		"employer": employer, "target": target,
+		"brief": brief + (" Time limit: %d min." % limit_min if limit_min > 0 else ""), "source": source, "fixer": fixer.get("fixer", ""),
+		"employer": employer, "target": target, "war_driven": war_driven,
 		"zone_id": zone.get("zone_id", ""), "zone_name": zone.get("name", ""), "zone_kind": kind,
 		"region": zone.get("region", ""), "module": mission.module, "module_id": mission.module_id, "module_name": MissionRegistry.module_name(mission.module),
 		"rated": rated, "enemy_est": est_count, "quality_est": snappedf(est_quality, 0.01),
