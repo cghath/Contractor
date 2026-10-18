@@ -295,6 +295,7 @@ func assess() -> Dictionary:
 					sit.down += 1
 		var lead := squad.leader
 		sit.lead = lead if is_instance_valid(lead) and lead.vitals.is_up() else null
+		sit.human_lead = sit.lead != null and not (sit.lead as Soldier).is_ai()
 	if up.is_empty():
 		return sit
 	sit.up += up.size()
@@ -361,7 +362,12 @@ static func score(sit: Dictionary, d: Dictionary) -> Dictionary:
 			why[Option.SEARCH] = "lost them %.0f s ago %.0f m off: search where they were last seen" % [float(sit.age), range]
 		return {"scores": s, "why": why}
 	var order: int = sit.order
-	var free: bool = order != Squad.Order.HOLD and order != Squad.Order.MOVE  # following the lead, or a hostile squad
+	# Following the lead, or a hostile squad. Captain, 2026-10-17 ("ai are bunching up in
+	# engagements and aren't following me/my orders"): a squad a player leads doesn't flank,
+	# assault, clear, defend or break contact by itself (break contact packed them onto points
+	# behind where he'd been, held there while he moved on). It fights from its formation slots
+	# round him, so it moves with him, and takes those moves when he orders them (command menu).
+	var free: bool = order != Squad.Order.HOLD and order != Squad.Order.MOVE and not bool(sit.get("human_lead", false))
 	var known := maxi(int(sit.known), 1)
 	var ratio := float(up) / known
 	var outnumbered := clampf(float(known - up) / up, 0.0, 1.0)
