@@ -47,7 +47,7 @@ const HEARD_KEEP_S := 4.0
 const CLUSTER_M := 10.0
 ## Tactic orders by command string (command()): "<name>" acts on the point under the
 ## crosshair ("suppress:known" suppresses the densest known cluster instead).
-const TACTIC_COMMANDS: Array[String] = ["suppress", "bound", "garrison", "clear", "clear_town", "take_cover", "fall_back", "climb"]
+const TACTIC_COMMANDS: Array[String] = ["suppress", "bound", "garrison", "clear", "clear_town", "take_cover", "fall_back", "climb", "flank", "assault"]
 
 ## Spawn positions in the leader's space (x right, +z behind), per formation (the squad's
 ## first places; following uses formation slots, follow_point).
@@ -595,6 +595,92 @@ func order_fall_back(from: Soldier, point: Vector3, names := PackedStringArray()
 	return ""
 
 
+## Captain, 2026-10-17 ("add orders for those things"): a squad a player leads no longer flanks
+## or assaults by itself (SquadTactics.score), so he orders them. Their base of fire suppresses
+## for this long while the rest go.
+const ATTACK_BASE_S := 45.0
+## Assaulters spread this far apart across the position (not all onto one point).
+const ASSAULT_GAP_M := 3.0
+
+
+## Who an attack order is on: the known enemy cluster nearest `point` (within
+## ORDER_ENEMY_M of it), else `point` itself; Vector3.INF for the densest known cluster.
+const ORDER_ENEMY_M := 25.0
+
+
+func _order_enemy(point: Vector3) -> Vector3:
+	var found := clusters()
+	if not point.is_finite():
+		return found[0].centre if not found.is_empty() else Vector3.INF
+	for c: Dictionary in found:
+		if (c.centre as Vector3).distance_to(point) <= ORDER_ENEMY_M:
+			return c.centre
+	return point
+
+
+## The named units split for an attack on `enemy`: [base, moving]. With nobody named, the
+## squad's own split (SquadTactics.elements_ai: a fire team or buddy pairs go, the rest and the
+## autorifleman stay as the base); with some named (or nobody to spare), the named all go.
+func _attack_split(units: Array[SquadAI], enemy: Vector3, named: bool) -> Array:
+	if named:
+		return [[], units]
+	var split := SquadTactics.elements_ai(units, enemy)
+	if (split[1] as Array).is_empty():
+		return [[], units]
+	return split
+
+
+## "Flank": the base of fire suppresses the enemy at `point` (Vector3.INF: the densest known
+## cluster) while the rest work round it through cover on the side it sees least of
+## (SquadTactics.flank_route), each in his own lane, and fight from there.
+func order_flank(from: Soldier, point: Vector3, names := PackedStringArray()) -> String:
+	leader = from
+	var enemy := _order_enemy(point)
+	if not enemy.is_finite():
+		return "No known enemy to flank"
+	var units := _able(names)
+	if units.is_empty():
+		return "Nobody selected can"
+	var split := _attack_split(units, enemy, not names.is_empty())
+	var moving: Array = split[1]
+	var route := SquadTactics.flank_route(moving[0].body, SquadTactics._middle(moving), enemy, null, [])
+	if route.is_empty():
+		return "No way round found"
+	var lanes := SquadTactics.lanes(moving, route.route)
+	var aim := enemy + Vector3.UP
+	for ai: SquadAI in moving:
+		ai.give_tactic({"kind": &"maneuver", "route": lanes.get(ai, route.route), "aim": aim})
+	for ai: SquadAI in split[0]:
+		ai.give_tactic({"kind": &"base", "aim": aim, "until": Soldier._now() + ATTACK_BASE_S})
+	return ""
+
+
+## "Assault": the base of fire (the autorifleman and his buddy) keeps their heads down while the
+## rest bound onto the enemy at `point` (Vector3.INF: the densest known cluster), spread across it.
+func order_assault(from: Soldier, point: Vector3, names := PackedStringArray()) -> String:
+	leader = from
+	var enemy := _order_enemy(point)
+	if not enemy.is_finite():
+		return "No known enemy to assault"
+	var units := _able(names)
+	if units.is_empty():
+		return "Nobody selected can"
+	var base: Array = [] if not names.is_empty() else SquadTactics._gunners_and_buddies(units, enemy)
+	var going: Array = units.filter(func(ai: SquadAI) -> bool: return ai not in base)
+	if going.is_empty():
+		going = units
+		base = []
+	var map := from.get_world_3d().navigation_map
+	var across := Vector3(enemy.x - from.global_position.x, 0.0, enemy.z - from.global_position.z).normalized().cross(Vector3.UP)
+	var aim := enemy + Vector3.UP
+	for i in going.size():
+		var p := NavigationServer3D.map_get_closest_point(map, enemy + across * (i - (going.size() - 1) / 2.0) * ASSAULT_GAP_M)
+		(going[i] as SquadAI).give_tactic({"kind": &"assault", "point": p})
+	for ai: SquadAI in base:
+		ai.give_tactic({"kind": &"base", "aim": aim, "until": Soldier._now() + ATTACK_BASE_S})
+	return ""
+
+
 ## The command menu's orders (Captain, P0164 queue 12; thin wrappers over the tactics and the
 ## units' own skills), by command string. Returns "" when given, why not otherwise, or "?"
 ## for a command that isn't one of these (command() handles the rest).
@@ -613,6 +699,10 @@ func order_command(from: Soldier, cmd: String, point: Vector3, names := PackedSt
 			return order_suppress(from, Vector3.INF if arg == "known" else point, names)
 		"bound":
 			return order_bound(from, point, names)
+		"flank":
+			return order_flank(from, Vector3.INF if arg == "known" else point, names)
+		"assault":
+			return order_assault(from, Vector3.INF if arg == "known" else point, names)
 		"climb":
 			return order_climb(from, point, names)
 		"garrison":

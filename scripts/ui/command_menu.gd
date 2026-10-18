@@ -38,6 +38,13 @@ const MENU := {
 				{"key": "5", "label": "The town there, building by building", "cmd": "clear_town", "point": true},
 				{"key": "6", "label": "The town there, flashbangs", "cmd": "clear_town:flash", "point": true},
 			]},
+			## Captain, 2026-10-17: a squad he leads no longer flanks or assaults on its own.
+			{"key": "0", "label": "Attack", "items": [
+				{"key": "1", "label": "Flank the enemy there", "cmd": "flank", "point": true},
+				{"key": "2", "label": "Flank known enemy", "cmd": "flank:known"},
+				{"key": "3", "label": "Assault the enemy there", "cmd": "assault", "point": true},
+				{"key": "4", "label": "Assault known enemy", "cmd": "assault:known"},
+			]},
 		]},
 		{"key": "2", "label": "Target", "items": [
 			{"key": "1", "label": "Target that enemy", "cmd": "target", "aim": true},
