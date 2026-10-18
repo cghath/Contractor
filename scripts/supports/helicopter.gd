@@ -61,7 +61,9 @@ const CONTOUR_CLIMB := 0.6
 ## for the terrain following's lag. Proposed.
 const MIN_CLEAR_M := 5.0
 const FINAL_LOW_M := 40.0
-const CLEAR_MARGIN_M := 1.0
+# Braking on a descending approach needs this allowance in addition to the
+# tilted airframe's offset (harbour_yard's rise at pace 2 consumes over a metre).
+const CLEAR_MARGIN_M := 2.0
 ## The UH-60's main rotor radius (m) and, where the art isn't built, its hub and tail rotor
 ## (x, z from the origin, nose along -z) and the nose: its footprint (_footprint_points).
 const ROTOR_RADIUS_M := 8.18
