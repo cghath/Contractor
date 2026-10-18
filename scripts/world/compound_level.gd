@@ -358,6 +358,7 @@ func _ready() -> void:
 	add_child(Launchers.new())  # "Launchers": anti-armour rockets and missiles in flight (wave 5)
 	add_child(HeliSupports.new())  # "HeliSupports": Black Hawk resupply, transport, extraction (wave 5b V3)
 	AavSupport.install(self)  # wave 5b (V4): the LHD or FOB origin, the AAV support, the motor pool
+	AlliedTroops.install(self)  # wave 6e: an allied rifle element through the support menu
 	add_child(GroundGuard.new())  # "GroundGuard": puts back on the ground anything lost below or past it
 
 

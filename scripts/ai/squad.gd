@@ -270,7 +270,9 @@ func forget_stale() -> void:
 
 
 ## The squad's living AI soldiers, in squad-slot order (then by name). Dead bodies keep no
-## formation slot and take no orders.
+## formation slot and take no orders. Scoped to this Squad instance (SquadAI.squad == self,
+## the same scoping brains() already uses) so a second same-faction squad (wave 6e's allied
+## troops, their own Squad beside the player's) doesn't answer for each other's.
 func members() -> Array[Soldier]:
 	var out: Array[Soldier] = []
 	for n in get_tree().get_nodes_in_group(&"combatants"):
@@ -278,6 +280,9 @@ func members() -> Array[Soldier]:
 		if s and s.is_ai() and s.faction == faction and not s.is_queued_for_deletion() and not s.vitals.is_dead():
 			if s.has_meta(&"vehicle_crew"):
 				continue  # wave 5b: a support vehicle's AI crew (AavSupport) takes no squad orders
+			var ai := SquadAI.of(s)
+			if ai and ai.squad != self:
+				continue
 			out.append(s)
 	out.sort_custom(func(a: Soldier, b: Soldier) -> bool:
 		if a.squad_slot != b.squad_slot:

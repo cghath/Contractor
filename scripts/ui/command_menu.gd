@@ -186,6 +186,13 @@ const MENU := {
 				{"key": "6", "label": "Dismount", "cmd": "support:aav_dismount"},
 				{"key": "7", "label": "Return to base", "cmd": "support:aav_return"},
 			]},
+			{"key": "6", "label": "Allied troops", "items": [  # wave 6e: AlliedTroops, its own element
+				{"key": "1", "label": "Call an element", "cmd": "support:allied_call"},
+				{"key": "2", "label": "Move there", "cmd": "support:allied_move", "point": true},
+				{"key": "3", "label": "Hold", "cmd": "support:allied_hold"},
+				{"key": "4", "label": "Assault there", "cmd": "support:allied_assault", "point": true},
+				{"key": "5", "label": "Release", "cmd": "support:allied_release"},
+			]},
 		]},
 	],
 }

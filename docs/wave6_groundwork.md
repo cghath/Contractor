@@ -25,7 +25,14 @@ HotZoneOps checks, so that's out of this slice - only an explicit ctx.target nam
 done: no UI shows a zone's holder or
 grip yet (debug-only via `WorldSites.holder`/`grip`); 6b's real faction set replacing the
 placeholder should just work once it lands, since this reads `MissionRegistry.enemies()`/
-`enemies_of()` live. 6e (allied troops) still open. Groundwork below as written. Wave 6 is next
+`enemies_of()` live. **6e built too** (Captain, 2026-10-18: an MVP now, same call as 6c):
+`AlliedTroops` (new, `scripts/supports/allied_troops.gd`) - a friendly 8-man element through the
+support menu's "Allied troops" entry, its own `Squad` instance (not the player's), move/hold/
+assault orders only (`Squad.give_order`/`order_assault` reused), paid like the helis, a 20-minute
+cooldown, gated to Trusted standing with at least one deployment employer. This needed
+`Squad.members()` scoped to `SquadAI.squad == self` (it only filtered by faction before, which
+never mattered until a second friendly squad existed); fixed, matching `brains()`'s own scoping.
+Not done: the Allied-tier second element and the MRAP-mounted section. Groundwork below as written. Wave 6 is next
 once the Oct 18 open items are in (Captain, 2026-10-18). This page collects what's already decided, what the code already
 has to build on, the calls the Captain still has to make (each with a proposed answer, so a yes is
 enough), and a build order. The plan's own scope is in [build_plan.md](build_plan.md) (Wave 6) and

@@ -68,6 +68,7 @@ func _ready() -> void:
 	player.set_physics_process(false)  # we drive it
 	await _frames(20)
 	await _test_nemesis_kill_attribution()
+	await _test_allied_troops()
 	await _test_live_objectives()
 	await _test_objective_helper()
 	_test_ammo_readout()
@@ -530,6 +531,44 @@ func _test_nemesis_kill_attribution() -> void:
 	hunter.queue_free()
 	victim.queue_free()
 	Economy.server_nemesis_event(String(n.id), 0, true)  # tidy up: done with this one too
+
+
+## Wave 6e: allied troops. Its own Squad instance (faction "friendly" beside the player's own):
+## Squad.members()/brains() must answer for it alone, never the player's squad or vice versa
+## (the fix this slice needed - members() used to be scoped by faction only). Standing, cost
+## and cooldown gate the call; move/hold/assault reuse Squad's own order plumbing.
+func _test_allied_troops() -> void:
+	print("Allied troops: its own squad, standing, cost, cooldown, and its orders")
+	var allies := AlliedTroops.current(level)
+	check(allies != null, "installed on the level")
+	var own_before := level.squad_for(&"friendly").members().size()
+	check(allies.server_call(player) != "", "refused with no deployment to vouch for our standing")
+	# A fake deployment against an employer trusted enough (Trusted tier, rep >= 30).
+	var cs := Campaign.section(Contracts.SECTION)
+	var held_before: Array = cs.get("held", [])
+	var deployment_before: Dictionary = cs.get("deployment", {})
+	Economy.change_reputation("meridian", 40 - Economy.reputation("meridian"), "test", false)
+	cs.held = [{"cid": "TESTALLY1", "employer": "meridian"}]
+	cs.deployment = {"cids": ["TESTALLY1"]}
+	Economy.add_cash(Prices.support_price(AlliedTroops.PRICE_KIND) * 2, "test setup")  # whatever's left from earlier tests, cover the call for sure
+	var cash_before := Economy.cash()
+	check(allies.server_call(player) == "", "Trusted standing, paid: the call goes through")
+	check(Economy.cash() < cash_before, "and it's not free (%d -> %d)" % [cash_before, Economy.cash()])
+	check(allies.is_out() and allies.squad.members().size() == AlliedTroops.SIZE, "an element of its own size is out (%d)" % allies.squad.members().size())
+	check(level.squad_for(&"friendly").members().size() == own_before, "the player's own squad still counts only its own (%d)" % level.squad_for(&"friendly").members().size())
+	check(allies.server_call(player) != "", "refused: already out")
+	var far := player.global_position + Vector3(0, 0, -60)
+	allies.server_move(player, far)
+	var ally_ai := SquadAI.of(allies.squad.members()[0])
+	check(ally_ai.order == Squad.Order.MOVE and ally_ai._move_point.distance_to(far) < 10.0, "Move there sends the element, not the player's own squad")
+	allies.server_hold(player)
+	check(SquadAI.of(allies.squad.members()[0]).order == Squad.Order.HOLD, "Hold stops it")
+	check(allies.server_release(player) == "", "Release sends it home")
+	check(not allies.is_out() and allies.squad == null, "nothing's out any more")
+	check(allies.server_call(player) != "", "and the cooldown refuses another straight away")
+	cs.held = held_before
+	cs.deployment = deployment_before
+	Economy.add_cash(cash_before - Economy.cash(), "test cleanup")  # the call's cost shouldn't ride into the next test
 
 
 # --- The debrief ---------------------------------------------------------------------------
