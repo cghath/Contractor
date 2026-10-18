@@ -12,6 +12,7 @@ extends RefCounted
 ##       x camo against the zone's terrain (camo()) x foliage in the way (FOLIAGE_M)
 ##       x observer (suppressed, looking elsewhere) x skill (an unskilled soldier takes longer)
 ##   fired in the last FLASH_S: x FLASH (a suppressor gives away less: SUPPRESSED_FLASH)
+##   a weapon light or visible laser on: x LIT towards the observer, else x LIT_SIDE
 ##   closer than POINT_BLANK_M and in front: at once.
 ##   FOLIAGE_OPAQUE_M or more of scrub or tree crown on every line to them: not seen at all.
 ## Not seen, awareness fades over FADE_S. Hearing (below) adds to it. Night and NVGs wait for
@@ -35,6 +36,12 @@ const FLASH_S := 1.5
 const FLASH := 0.15
 const SUPPRESSED_FLASH := 0.6
 const POINT_BLANK_M := 4.0
+## A weapon light or visible laser that's on (GunAttachments.lit; wave 7 S3) gives its carrier
+## away: x LIT when it points at the observer (within LIT_TOWARDS_DEG of them), x LIT_SIDE
+## otherwise (the beam and the splash it throws). Proposed.
+const LIT := 0.4
+const LIT_SIDE := 0.75
+const LIT_TOWARDS_DEG := 45.0
 const FADE_S := 20.0
 ## Awareness from which the AI suspects someone is there (looks, searches).
 const SUSPECT := 0.35
@@ -193,7 +200,18 @@ static func spot_seconds(observer: Soldier, target: Soldier, preset: String, com
 	s *= lerpf(SKILL_SLOW, SKILL_FAST, clampf(combat, 0.0, 1.0))
 	if now - target.last_shot_at <= FLASH_S:
 		s *= SUPPRESSED_FLASH if target.last_shot_suppressed else FLASH
+	if GunAttachments.lit(target):
+		s *= lit_factor(observer, target)
 	return s
+
+
+## LIT or LIT_SIDE: is `target`'s beam (along its aim) pointing at `observer`?
+static func lit_factor(observer: Soldier, target: Soldier) -> float:
+	var aim := -target.camera.global_basis.z
+	var to := observer.camera.global_position - target.camera.global_position
+	if to.length_squared() < 0.0001 or aim.length_squared() < 0.0001:
+		return LIT
+	return LIT if rad_to_deg(aim.angle_to(to)) <= LIT_TOWARDS_DEG else LIT_SIDE
 
 
 ## How much `observer`'s optics shorten distance (1: none): its weapon's sight, and when

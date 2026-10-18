@@ -49,6 +49,8 @@ const KEYS := {
 	&"inspect": [KEY_I],
 	&"debug_hurt": [KEY_K],  # dev tools only (DevTools.on): hurt yourself to test going down and dying
 	&"voice_order": [KEY_T],  # hold: push-to-talk a squad order (VoiceOrder, voice_commands.gd)
+	# The light or laser on the gun in hand, on or off (GunAttachments; wave 7 S3). Proposed key.
+	&"weapon_light": [KEY_L],
 }
 ## Keys pressed with Shift held. An action without Shift still matches with it held, so
 ## PlayerInput checks these first.

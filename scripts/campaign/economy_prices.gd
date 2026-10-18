@@ -65,7 +65,7 @@ static func condition_of(state: Dictionary) -> float:
 ## field), by their condition.
 static func value_of(item_id: StringName, count := 1, state := {}) -> int:
 	var item: ItemData = ItemDB.get_item(item_id) if ItemDB.has_item(item_id) else null
-	var each := price_of(item_id) + Optics.extra_price(item, state) + Suppressors.extra_price(item, state) if item else price_of(item_id)  # a gun's optic/suppressor
+	var each := price_of(item_id) + Optics.extra_price(item, state) + Suppressors.extra_price(item, state) + GunAttachments.extra_price(item, state) if item else price_of(item_id)  # a gun's optic/suppressor
 	return roundi(each * count * condition_of(state))
 
 
