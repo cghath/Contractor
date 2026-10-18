@@ -122,7 +122,7 @@ static func _trace(shooter: CollisionObject3D, origin: Vector3, direction: Vecto
 				from = hit.position + direction * 0.01  # inside the box now: the ray carries on past it
 				continue
 			if took.stopped:
-				return {"result": "vehicle", "position": took.position, "normal": hit.normal}
+				return passed if not passed.is_empty() else {"result": "vehicle", "position": took.position, "normal": hit.normal}
 			lost_j += float(took.get("lost_j", 0.0))
 			# On from inside the box (where it met the hull, never short of the box's face).
 			from = hit.position + direction * maxf((took.position - hit.position).dot(direction), 0.0) + direction * 0.01
@@ -142,7 +142,7 @@ static func _trace(shooter: CollisionObject3D, origin: Vector3, direction: Vecto
 				energy = maxf(energy - lost_j, 0.0)
 			# Soft armor (the vest's aramid) can stop a round where no plate covers the body.
 			if VoxelArmor.soft_armor_stops(vitals.get_parent(), part, threat_level_at(weapon, armor_distance), round_class(weapon), armor_distance, direction, body_hit.position, energy):
-				return _result("plate", hit)
+				return passed if not passed.is_empty() else _result("plate", hit)
 			var hit_info := {
 				"round_class": round_class(weapon),
 				"position": body_hit.position,
@@ -170,7 +170,7 @@ static func _trace(shooter: CollisionObject3D, origin: Vector3, direction: Vecto
 			ExoFrame.server_round(vitals.get_parent(), part, hit_info)  # a strut in the way takes some of it (light exo)
 			vitals.server_hit(part, hit_info)
 			if not crosses:
-				return _result("body", hit)
+				return passed if not passed.is_empty() else _result("body", hit)
 			if passed.is_empty():
 				passed = _result("body", hit)  # what the shooter sees: he hit someone
 			lost_j += arriving * clampf(body_hit.depth / reach, TISSUE_LOSS.x, TISSUE_LOSS.y)
