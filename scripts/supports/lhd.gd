@@ -20,6 +20,9 @@ const NODE_NAME := "SupportOrigin"
 const SIDES := ["north", "south", "east", "west"]
 ## Swimming round the ship, an AAV keeps this far off its side (m, Proposed).
 const CLEAR_M := 25.0
+## An AAV launched or docking astern stays this far inside the zone's edge (m, Proposed: its
+## half-length and room to swing).
+const EDGE_CLEAR_M := 10.0
 ## Anchored offshore: the hull's shoreward side at least this far seaward of the shoreline at
 ## its nearest (m, Proposed: 150-250). Captain, 2026-10-14: on harbour_yard the LHD lay a few
 ## metres off the sand, "way too close to shore". A ship is moored at a quay or anchored out,
@@ -182,6 +185,14 @@ func launch_transform() -> Transform3D:
 	var at := stern + Vector3(astern.x, 0.0, astern.z).normalized() * gap
 	var terrain := _terrain()
 	var shore := -terrain.seaward() if terrain else -global_basis.x
+	if terrain:
+		# Never across the zone's edge walls (ZoneTerrain EdgeWalls): a narrow sea puts the ship
+		# out past the edge (ship_frame), and an AAV launched straddling the wall was thrown out
+		# of it upside down (2026-10-18: terrain folds moved the coast test zone's shoreline 8 m
+		# in, the LHD 8 m out, and the AAV floated at 173°). Pulled shoreward to EDGE_CLEAR_M in.
+		var past := at.dot(-shore) - (terrain.size_m * 0.5 - EDGE_CLEAR_M)
+		if past > 0.0:
+			at += shore * past
 	return Transform3D(Basis.looking_at(shore, Vector3.UP), Vector3(at.x, _sea_level() - 1.2, at.z))
 
 
