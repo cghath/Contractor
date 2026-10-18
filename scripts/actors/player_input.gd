@@ -117,6 +117,7 @@ func _ready() -> void:
 	hud.add_child(medical_menu)
 	hud.add_child(LauncherSight.new(body))  # anti-armour launchers: sight, lock, fire (wave 5)
 	hud.add_child(GunSight.new(body))  # rifle and pistol sights (P0362)
+	body.add_child(NvgView.new(body))  # the view through lowered NVGs (wave 7, S2)
 	body.loadout_changed.connect(_update_view_model)
 	_update_view_model()
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
@@ -223,6 +224,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			_start_placing()
 		else:
 			equip_nade()
+	elif event.is_action_pressed(&"nvg_toggle"):
+		body._server_toggle_nvg.rpc_id(1)  # the helmet's NVG down or up (wave 7, S2; Nvg)
 	elif event.is_action_pressed(&"reload"):
 		_try_reload()
 	elif event.is_action_pressed(&"quick_treat"):  # before H: H alone also matches with Shift held

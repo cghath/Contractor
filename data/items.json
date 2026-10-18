@@ -691,6 +691,18 @@
 		{"id": "smaw_ne_round", "name": "SMAW-NE thermobaric round (Mk80)", "type": "ammo", "volume_l": 5.5, "mass_kg": 6.0, "stack": 1, "tags": ["launcher_round", "explosive", "83mm"],
 		 "stats": {"warhead": "smaw_ne", "calibre": "83mm", "size_m": [0.11, 0.11, 0.7]},
 		 "desc": "A SMAW-NE thermobaric round: a big blast for rooms and bunkers.",
-		 "uses": ["Load into a SMAW (R with it up)", "Large blast, little fragmentation, no armour penetration"]}
+		 "uses": ["Load into a SMAW (R with it up)", "Large blast, little fragmentation, no armour penetration"]},
+		{"id": "nvg_gen1", "name": "Gen 1 NVG Monocular", "type": "utility", "volume_l": 0.8, "mass_kg": 0.5, "tags": ["nvg", "head"],
+		 "stats": {"nvg_gen": 1, "restores": 0.6, "fov_deg": 40.0, "battery_h": 6.0, "_proposed": "restores, fov_deg and battery_h are Proposed (wave 7, S2)"},
+		 "desc": "An old first-generation night vision monocular: a grainy green picture through a narrow tube.",
+		 "uses": ["Mount on your helmet (inventory), or press the NVG key (U) with a helmet on", "NVG key flips it down or up; lowered, it shows you the dark in green", "Gives back about 60% of what darkness takes from your sight", "Battery: about 6 hours lowered; flat, it shows nothing"]},
+		{"id": "nvg_gen2", "name": "Gen 2 NVG Monocular", "type": "utility", "volume_l": 0.8, "mass_kg": 0.45, "tags": ["nvg", "head"],
+		 "stats": {"nvg_gen": 2, "restores": 0.8, "fov_deg": 45.0, "battery_h": 10.0, "_proposed": "restores, fov_deg and battery_h are Proposed (wave 7, S2)"},
+		 "desc": "A second-generation night vision monocular: a clearer picture and a longer battery.",
+		 "uses": ["Mount on your helmet (inventory), or press the NVG key (U) with a helmet on", "NVG key flips it down or up; lowered, it shows you the dark in green", "Gives back about 80% of what darkness takes from your sight", "Battery: about 10 hours lowered; flat, it shows nothing"]},
+		{"id": "nvg_gen3", "name": "Gen 3 NVG Binocular", "type": "utility", "volume_l": 1.2, "mass_kg": 0.65, "tags": ["nvg", "head"],
+		 "stats": {"nvg_gen": 3, "restores": 0.9, "fov_deg": 50.0, "battery_h": 14.0, "_proposed": "restores, fov_deg and battery_h are Proposed (wave 7, S2)"},
+		 "desc": "Third-generation binocular night vision: the clearest, widest picture, both eyes.",
+		 "uses": ["Mount on your helmet (inventory), or press the NVG key (U) with a helmet on", "NVG key flips it down or up; lowered, it shows you the dark in green", "Gives back about 90% of what darkness takes from your sight", "Battery: about 14 hours lowered; flat, it shows nothing"]}
 	]
 }

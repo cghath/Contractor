@@ -26,6 +26,7 @@
 		"ear_protection": 120, "cpr": 0,
 		"pouch_mag_single": 25, "pouch_mag_double": 40, "pouch_pistol_mag": 30, "pouch_radio": 35, "pouch_binos": 40,
 		"pouch_utility": 35, "pouch_sustainment": 50, "pouch_ifak": 45, "aid_bag": 140, "pouch_tq": 15, "pouch_grenade": 25,
+		"nvg_gen1": 3000, "nvg_gen2": 5500, "nvg_gen3": 9000,
 		"knife": 80, "radio": 1800, "enemy_radio": 250, "binoculars": 300,
 		"frag_grenade": 90, "smoke_grenade": 40, "smoke_green": 45, "smoke_yellow": 45, "smoke_blue": 45, "smoke_purple": 45,
 		"flashbang": 70, "breaching_charge": 400,

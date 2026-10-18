@@ -49,6 +49,9 @@ const KEYS := {
 	&"inspect": [KEY_I],
 	&"debug_hurt": [KEY_K],  # dev tools only (DevTools.on): hurt yourself to test going down and dying
 	&"voice_order": [KEY_T],  # hold: push-to-talk a squad order (VoiceOrder, voice_commands.gd)
+	# Flip the NVG on your helmet down or up (Nvg; wave 7, S2). N is the next objective, so U
+	# (proposed); with none mounted, it mounts the first NVG you carry.
+	&"nvg_toggle": [KEY_U],
 }
 ## Keys pressed with Shift held. An action without Shift still matches with it held, so
 ## PlayerInput checks these first.

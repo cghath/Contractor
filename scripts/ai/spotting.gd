@@ -212,7 +212,8 @@ static func spot_seconds(observer: Soldier, target: Soldier, preset: String, com
 ## time to spot, or INF when they can't be seen at all there. `flashed`: they fired in the last
 ## FLASH_S (a muzzle flash shows at night, not through fog). `observer` may be null (tests).
 static func sight_x(observer: Soldier, eyes: Vector3, range_m: float, flashed := false) -> float:
-	var dark := DayNight.darkness_at(eyes)  # wave 7 S2 hook: dark *= 1.0 - Nvg.restores(observer)
+	# Lowered, powered NVGs give back part of what the dark takes (wave 7 S2).
+	var dark := DayNight.darkness_at(eyes) * (1.0 - Nvg.restores(observer))
 	if range_m > DayNight.sight_m(eyes):
 		return INF
 	if dark > 0.0 and not flashed and range_m > night_sight_m(dark):
