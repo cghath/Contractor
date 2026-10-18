@@ -140,8 +140,10 @@ else
 	bad=1
 fi
 wf=.github/workflows/tests.yml
-logs_path="$(grep -m1 'CONTRACTOR_TEST_LOGS:' "$wf" | sed 's/.*CONTRACTOR_TEST_LOGS: *//')"
-if [ -n "$logs_path" ] && grep -A2 'if: always()' "$wf" | grep -q 'uses: actions/upload-artifact' && grep -qF "path: $logs_path" "$wf"; then
+# Only the suite job counts here: the runner job has its own CONTRACTOR_TEST_LOGS and upload.
+suite_job="$(sed -n '/^  suite:/,$p' "$wf")"
+logs_path="$(echo "$suite_job" | grep -m1 'CONTRACTOR_TEST_LOGS:' | sed 's/.*CONTRACTOR_TEST_LOGS: *//')"
+if [ -n "$logs_path" ] && echo "$suite_job" | grep -A2 'if: always()' | grep -q 'uses: actions/upload-artifact' && echo "$suite_job" | grep -qF "path: $logs_path"; then
 	echo "ok   $wf keeps CONTRACTOR_TEST_LOGS ($logs_path) as an artifact on every verdict"
 else
 	echo "BAD  $wf: the suite step must set CONTRACTOR_TEST_LOGS and an 'if: always()' upload-artifact step keep that path"

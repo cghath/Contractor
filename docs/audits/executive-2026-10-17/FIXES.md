@@ -48,6 +48,8 @@ Fixtures now aim close shots from the physical muzzle, wait for seated hitboxes,
 
 ## Validation
 
+Run numbers in this file (R0012-R0039, S0014-S0030) come from the audit tool's own log parent (`.codex/.../Contractor-audit-logs`), not the shared `Documents/Contractor-test-logs` counter, where the same numbers name other runs. The follow-up review (October 18) cites shared-counter runs.
+
 | Run | Result |
 | --- | --- |
 | [R0036 summary](<C:/Users/My Little Pony/.codex/visualizations/2026/10/13/01a1342e-614c-7411-8ee7-4e0451f2a59c/Contractor-audit-logs/2026-10-18/R0036-004857-FAIL-codex-executive-audit-fixes-e6a1ce3/summary.txt>), `e6a1ce3` | Full 44-suite run with unchanged game/test source: 43 passed; the vehicle host failed the passenger hit-reporting assertion. All audit regressions, protected body-position checks, support/flight checks and performance budgets passed. The selected list exactly matches the default suite set. |

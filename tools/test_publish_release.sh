@@ -39,26 +39,38 @@ exit 0
 FAKE
 chmod +x "$keep/bin/gh" "$keep/bin/git"
 export PATH="$(cd "$keep/bin" && pwd):$PATH"
+# Never the real gh: if the double isn't the one found, stop before anything runs. No usable
+# credentials or config either, and a tag no real release can have.
+[ "$(command -v gh)" = "$(cd "$keep/bin" && pwd)/gh" ] || { echo "FAIL: gh isn't the inert double" >&2; exit 1; }
+export GH_TOKEN=inert-test GH_CONFIG_DIR="$keep/gh-config"
+tag=v0.0.0-inert-test
+# A call the case must not make fails the check (set -e ignores a negated grep).
+never() {
+	if grep -Eq "$1" "$keep/calls-$mode.log"; then
+		echo "FAIL: $mode made a call it must not: $1" >&2
+		exit 1
+	fi
+}
 touch "$keep/build.zip"
 for mode in public draft missing error malformed; do
 	export RELEASE_TEST_MODE="$mode"
 	status=0
-	bash tools/publish_release.sh v0.4.36 "$keep/build.zip" >"$keep/$mode.log" 2>&1 || status=$?
+	bash tools/publish_release.sh "$tag" "$keep/build.zip" >"$keep/$mode.log" 2>&1 || status=$?
 	case "$mode" in
 		public|error|malformed)
 			[ "$status" -ne 0 ]
 			[ -f "$keep/calls-$mode.log" ]
-			! grep -Eq '^release (upload|create)' "$keep/calls-$mode.log"
+			never '^release (upload|create)'
 			;;
 		draft)
 			[ "$status" -eq 0 ]
 			grep -q '^release upload .*--clobber$' "$keep/calls-$mode.log"
-			! grep -q '^release create' "$keep/calls-$mode.log"
+			never '^release create'
 			;;
 		missing)
 			[ "$status" -eq 0 ]
 			grep -q '^release create .*--draft' "$keep/calls-$mode.log"
-			! grep -q '^release upload' "$keep/calls-$mode.log"
+			never '^release upload'
 			;;
 	esac
 	echo "PASS: $mode" | tee -a "$keep/summary.txt"
