@@ -9,7 +9,12 @@ extends RefCounted
 ##   FrameCost.spent(&"nav", t)
 ## Systems so far: "ai" (SquadAI ticks), "nav" (gathering a chunk's geometry), "models" (a voxel
 ## model built: VoxelArt.mesh), "sfx" (a sound synthesised or waited for), "voxels" (structures
-## stamped).
+## stamped), "buildings" (Buildings.near's scans).
+## Some keys are parts of others, not more time on top: "buildings" is inside "ai" when an AI's
+## tick asked (most asks), and "building_probes" (the cells' probes), "building_groups" (spots
+## into groups, floors linked), "building_entrances", "building_ports" and "building_rooms" are
+## inside "buildings" (so inside "ai" too). Add up only the top-level ones ("ai", "nav", "sfx",
+## "voxels", "models", and "buildings" asked outside an AI tick) for a frame's counted total.
 
 static var on := false
 ## System -> microseconds spent since take() last ran.
