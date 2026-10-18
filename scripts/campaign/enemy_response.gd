@@ -784,7 +784,9 @@ func _tick_hunters(tier: int) -> void:
 						and brain.order_throw(SMOKE, s.global_position.lerp(s.threat_pos, SMOKE_SHARE)):
 					team.smoked = true
 					break
-	if tier < 3 or lk.is_empty() or teams >= (2 if tier >= 4 else 1) or now() - _last_hunter < HUNTER_GAP_S \
+	# Wave 6d: a faction with heat (Economy.hunting) sends its hunters from tier 1, in any zone it holds.
+	var hunted := tier >= 1 and Economy.hunting(String(enemy_faction))
+	if (tier < 3 and not hunted) or lk.is_empty() or teams >= (2 if tier >= 4 else 1) or now() - _last_hunter < HUNTER_GAP_S \
 			or HUNTER_SIZE.y > _room():
 		return
 	_send_hunters(lk.pos, float(lk.radius))

@@ -34,6 +34,7 @@ const SECTION := &"economy"
 const LEDGER_KEEP := 80
 const REP_MIN := -100
 const REP_MAX := 100
+const HEAT_MAX := 100.0
 
 ## Host: the weekly wage bill. The base agent sets it to its roster's wages: a Callable
 ## returning an int (the week's total) or an Array of {"what", "amount"}. Unset, the
@@ -242,6 +243,37 @@ func pay_mult(faction: String) -> float:
 	return float(MissionRegistry.tier_of(reputation(faction)).get("pay_mult", 1.0)) if faction != "" else 1.0
 
 
+## A faction's heat (wave 6d, decided: "angering a faction builds heat, and high heat brings
+## generic hunter teams into missions near that faction's territory"): 0..HEAT_MAX, raised by
+## add_heat (Pressure: its men killed, its sites taken out), cooling "heat_cool_per_day".
+func heat(faction: String) -> float:
+	return float((state().get("heat", {}) as Dictionary).get(faction, 0.0))
+
+
+## Host: `faction`'s heat rises by `amount` (kept within 0..HEAT_MAX).
+func add_heat(faction: String, amount: float) -> void:
+	if faction == "" or amount == 0.0:
+		return
+	var s := _section()
+	var h: Dictionary = s.get("heat", {})
+	h[faction] = clampf(float(h.get(faction, 0.0)) + amount, 0.0, HEAT_MAX)
+	s["heat"] = h
+	_commit()
+
+
+## Whether `faction` is angry enough to send hunters after the squad in any zone it holds.
+func hunting(faction: String) -> bool:
+	return heat(faction) >= float(MissionRegistry.reputation_rules().get("heat_hunters", INF))
+
+
+func _cool_heat() -> void:
+	var s := _section()
+	var h: Dictionary = s.get("heat", {})
+	var cool := float(MissionRegistry.reputation_rules().get("heat_cool_per_day", 0.0))
+	for f: String in h.keys():
+		h[f] = maxf(float(h[f]) - cool, 0.0)
+
+
 ## Host, once a day: every faction the squad hasn't worked for in "decay_grace_days" (an Allied
 ## one "allied_grace_days") drifts "decay_per_day" toward neutral (wave 6a, decided: rep decay).
 func _decay_reputation() -> void:
@@ -282,6 +314,7 @@ func advance_days(days: int, reason := "") -> void:
 			s.week = int(s.week) + 1
 			pay_week()
 		_decay_reputation()
+		_cool_heat()
 	if reason != "":
 		print("[economy] %d day%s pass (%s): day %d" % [days, "" if days == 1 else "s", reason, int(s.day)])
 	_commit()

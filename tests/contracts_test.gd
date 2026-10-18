@@ -444,6 +444,14 @@ func _test_reputation_core() -> void:
 	var grace := int(MissionRegistry.reputation_rules().get("decay_grace_days", 7))
 	Economy.advance_days(grace + 3, "test")
 	check(Economy.reputation("meridian") < m and Economy.reputation("meridian") > 0, "no work for Meridian in %d days: Trusted drifts toward neutral (%d -> %d)" % [grace + 3, m, Economy.reputation("meridian")])
+	# Heat (wave 6d): a faction's men killed and sites taken out make it angry; it cools by the day.
+	var rules := MissionRegistry.reputation_rules()
+	var h0 := Economy.heat("black_ridge")
+	Economy.add_heat("black_ridge", float(rules.heat_hunters) - h0 + 1.0)
+	check(Economy.hunting("black_ridge") and not Economy.hunting("salvage_union"), "past %d heat Black Ridge hunts the squad (%.1f)" % [int(rules.heat_hunters), Economy.heat("black_ridge")])
+	Economy.advance_days(1, "test")
+	check(not Economy.hunting("black_ridge") and is_equal_approx(Economy.heat("black_ridge"), float(rules.heat_hunters) + 1.0 - float(rules.heat_cool_per_day)),
+		"a quiet day cools it below that (%.1f)" % Economy.heat("black_ridge"))
 
 
 # --- The debrief ---------------------------------------------------------------------------

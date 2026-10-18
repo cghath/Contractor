@@ -8,8 +8,9 @@
 		{"id": "trusted", "name": "Trusted", "min": 30, "pay_mult": 1.15},
 		{"id": "allied", "name": "Allied", "min": 70, "pay_mult": 1.3}
 	],
-	"_rules": "Wave 6a, all Proposed: ripple (a share of any rep change goes to the faction's allies, the opposite to its enemies), decay (rep drifts toward neutral by decay_per_day once decay_grace_days pass without a job; allied_grace_days for an Allied faction), and side lockout (taking a faction's contract locks you out of its enemies' work for lockout_days, counted again from the debrief).",
-	"reputation_rules": {"ripple_ally": 0.25, "ripple_enemy": 0.25, "decay_per_day": 1, "decay_grace_days": 7, "allied_grace_days": 14, "lockout_days": 3},
+	"_rules": "Wave 6a, all Proposed (heat_*: wave 6d, a faction's anger: each of its men killed heat_kill, each of its sites taken out heat_site, cooling heat_cool_per_day; from heat_hunters its hunter teams come for the squad in any zone it holds, heat_named for named hunter squads, not built yet): ripple (a share of any rep change goes to the faction's allies, the opposite to its enemies), decay (rep drifts toward neutral by decay_per_day once decay_grace_days pass without a job; allied_grace_days for an Allied faction), and side lockout (taking a faction's contract locks you out of its enemies' work for lockout_days, counted again from the debrief).",
+	"reputation_rules": {"ripple_ally": 0.25, "ripple_enemy": 0.25, "decay_per_day": 1, "decay_grace_days": 7, "allied_grace_days": 14, "lockout_days": 3,
+		"heat_kill": 0.4, "heat_site": 4.0, "heat_cool_per_day": 2.0, "heat_hunters": 40.0, "heat_named": 80.0},
 	"_kits": "Wave 6b (2026-10-18): what each enemy faction fields, by kit id (a faction's \"kit\"). body + one entry of guns by mix (a team, wave or garrison's i-th man gets mix[i % size]) + tail; roles casts a gun's carrier (Roles); variant is his camo (VoxelArt.VARIANTS). \"insurgent\" and \"pmc\" are Black Ridge's and Vantage's (CompoundLevel.hostile_loadout / rival_pmc_loadout, kept in code: Vantage's exo gear by difficulty lives there). Regional armies fight with what we have: the AK/PK/SVD family stands in until regional weapon art (Chinese, Iranian) lands.",
 	"kits": {
 		"eastern_army": {"variant": "woodland",

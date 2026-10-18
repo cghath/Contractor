@@ -108,6 +108,7 @@ func server_add(why: String, times := 1.0) -> void:
 	var gain := float(GAINS.get(why, 0.0)) * times
 	if gain <= 0.0:
 		return
+	_heat(why, times)
 	if alert and alert.comms_down:
 		gain *= COMMS_DOWN_GAIN
 	if why != "time":
@@ -247,3 +248,14 @@ func _on_objectives() -> void:
 		if o.state == Objectives.DONE and not _done.has(oid):
 			_done[oid] = true
 			server_add("objective")
+
+
+## Wave 6d: the zone's enemy faction (EnemyResponse.enemy_faction) takes the squad's kills and
+## sites taken out as heat (Economy.add_heat; factions.json "heat_kill", "heat_site").
+func _heat(why: String, times: float) -> void:
+	if why != "kill" and why != "site_destroyed":
+		return
+	var response := level.get_node_or_null(^"EnemyResponse") if level else null
+	var faction := String(response.get(&"enemy_faction")) if response else "black_ridge"
+	var rules := MissionRegistry.reputation_rules()
+	Economy.add_heat(faction, float(rules.get("heat_kill" if why == "kill" else "heat_site", 0.0)) * times)
