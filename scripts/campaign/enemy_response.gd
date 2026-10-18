@@ -378,22 +378,28 @@ func _launch_qrf() -> void:
 			from.append(bases[1])
 		elif hq:
 			from.append(hq)
+	var approved := false  # the commander says yes once per launch: one operation, one "move out"
 	for m in from:
 		var gate := _unseen_gate(m, lkp)
 		if not gate.is_finite():
 			continue
 		var room := _room()
-		if command:
-			room = mini(room, floori(command.available_cp()))
 		if room < 2:
 			break  # the zone's answer is out in full already (SPAWN_BUDGET)
 		var extra := 1 if tier >= 1 else 0
-		var planned := reinforcements.next_wave_size(extra, room)
-		if planned < 2:
-			break
-		if command and not command.approve("qrf", lkp, planned):
-			_last_qrf = now()
-			break
+		var wanted := reinforcements.next_wave_size(extra, room)
+		if wanted < 2:
+			break  # the reinforcements' own cap (max_alive)
+		var planned := reinforcements.next_wave_size(extra, mini(room, floori(command.available_cp()))) if command else wanted
+		if command and not approved:
+			# Asked even with the reserves short of a pair (for the wave it wanted): the denial is
+			# on record and an unconfirmed target still gets its probe.
+			if not command.approve("qrf", lkp, planned if planned >= 2 else wanted):
+				_last_qrf = now()  # turned down: asked again after QRF_RELAUNCH_S, not every report
+				break
+			approved = true
+		elif command and (planned < 2 or not command.reserve_men(planned)):
+			break  # this launch's later wave: paid quietly from what's left, or not sent
 		var soldiers := reinforcements.server_send(gate, extra, planned)
 		if command:
 			command.refund_men(planned - soldiers.size())
@@ -504,10 +510,12 @@ func _send_hunters(lkp: Vector3, radius: float) -> void:
 	var count := mini(randi_range(HUNTER_SIZE.x, HUNTER_SIZE.y), _room())
 	if command:
 		count = mini(count, floori(command.available_cp()))
+		# Asked even with the reserves short of a team (for the smallest one): the denial is on
+		# record and a stale LKP still gets its probe.
+		if not command.approve("hunters", lkp, maxi(count, HUNTER_SIZE.x)):
+			_last_hunter = now()  # turned down: asked again after HUNTER_GAP_S
+			return
 	if count < HUNTER_SIZE.x:
-		return
-	if command and not command.approve("hunters", lkp, count):
-		_last_hunter = now()
 		return
 	_hunter_teams += 1
 	_last_hunter = now()

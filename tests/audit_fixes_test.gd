@@ -55,6 +55,8 @@ func _ready() -> void:
 	await probe_commander_registration()
 	probe_reserve_accounting()
 	await frames(3)
+	await probe_two_wave_qrf()
+	await probe_hunter_accounting()
 	await probe_urban_defence()
 	await probe_cleanup_persistence()
 	GameState.delete_save()
@@ -169,6 +171,9 @@ func probe_reserve_accounting() -> void:
 	var after := command.reserves
 	response._launch_qrf()
 	check(is_equal_approx(command.reserves, after) and r.hostiles_alive() - total == spawned, "insufficient reserves launch nobody and spend nothing")
+	var short := command.operations.filter(func(o: Dictionary) -> bool: return o.kind == "hunt:qrf")
+	check(short.size() == 1 and short[0].state == "denied",
+		"a QRF short of reserves still asks the commander: the denial is on record (%s)" % [short.map(func(o: Dictionary) -> String: return "%s: %s" % [o.state, o.why])])
 	command.reserves = 8.0
 	command.operations.clear()
 	check(command.approve("hunters", target, 4) and command.reserves == 4.0, "hunt authorizes its actual planned allocation")
@@ -177,6 +182,138 @@ func probe_reserve_accounting() -> void:
 	for w: Dictionary in r.waves:
 		for s: Soldier in w.soldiers:
 			s.queue_free()
+
+## A fresh, commanding EnemyCommand with `men` in reserve, a confirmed contact at the player and
+## a fresh LKP; the response's full (escalated) budget at the tier `points` buy.
+func _command_fixture(men: float, points: float) -> Vector3:
+	command.commander_state = "commanding"
+	command.consolidated = false
+	command.caution = 0.0
+	command.seen_cp = 0.0
+	command._contacts.clear()
+	command._noise.clear()
+	command._last_contact.clear()
+	command.operations.clear()
+	command._last_probe = -INF
+	command.reserves = men
+	var target := player.global_position
+	command._on_reported({"kind": &"contact", "pos": target, "seen": 1, "exo": 0})
+	command.alert.lkp = {"pos": target, "time": command.now(), "radius": 50.0}
+	var response := EnemyResponse.of(level)
+	response.pressure.points = points
+	response._started = true
+	response._started_at = response.now() - EnemyResponse.ESCALATE_S
+	response.reinforcements.params = Reinforcements.DEFAULTS.duplicate()
+	response.reinforcements.waves_sent = 0
+	return target
+
+
+func _ops(kind: String) -> Array:
+	return command.operations.filter(func(o: Dictionary) -> bool: return o.kind == kind)
+
+
+## Everything the response and command sent in these probes gone, and the fixture undone.
+func _clear_response(was_started: bool) -> void:
+	var response := EnemyResponse.of(level)
+	for w: Dictionary in response.reinforcements.waves:
+		for s: Variant in w.soldiers:
+			if is_instance_valid(s):
+				(s as Node).queue_free()
+	for team: Dictionary in response.hunters:
+		for s: Variant in team.soldiers:
+			if is_instance_valid(s):
+				(s as Node).queue_free()
+	for op: Dictionary in command.operations:
+		for s: Variant in op.get("soldiers", []):
+			if is_instance_valid(s):
+				(s as Node).queue_free()
+	response.hunters.clear()
+	command.operations.clear()
+	response.pressure.points = 0.0
+	response._started = was_started
+	level.ai_spawner.spawn_limit = 0
+	await frames(3)
+
+
+## Review of E-03: a tier-2 QRF from two bases (the QRF base, then the HQ standing in) is one
+## approval, one operation and one order; the second wave is paid quietly; spent = spawned; the
+## launch's own record doesn't fill both op slots; and men that failed to spawn go back.
+func probe_two_wave_qrf() -> void:
+	var response := EnemyResponse.of(level)
+	var r := response.reinforcements
+	var was_started := response._started
+	_command_fixture(20.0, 20.0)
+	var before := command.reserves
+	var launches := response.qrf_launches.size()
+	var alive := r.capped_alive()
+	response._launch_qrf()
+	var sent := response.qrf_launches.slice(launches)
+	var spawned := r.capped_alive() - alive
+	var from := sent.map(func(l: Dictionary) -> String: return l.from)
+	print("  tier %d: waves from %s, %d spawned, reserves %.0f -> %.0f" % [response._tier(), from, spawned, before, command.reserves])
+	check(response._tier() == 2 and from == ["audit_qrf", "audit_hq"] and sent.all(func(l: Dictionary) -> bool: return not (l.soldiers as Array).is_empty()),
+		"tier 2: both waves go, from the QRF base and the HQ (%s)" % [from])
+	var hunts := _ops("hunt:qrf")
+	check(hunts.size() == 1 and hunts[0].state == "approved" and command._active_ops() == 1,
+		"one launch, one approval: a single operation on record (%d, %d active)" % [hunts.size(), command._active_ops()])
+	check(spawned > 0 and is_equal_approx(before - command.reserves, spawned),
+		"both waves paid from the reserves, exactly what spawned (%.0f spent, %d spawned)" % [before - command.reserves, spawned])
+	check(command._send_probe(player.global_position) and _ops("probe").size() == 1,
+		"after a two-wave launch an op slot is still free: a probe goes")
+	await _clear_response(was_started)
+	# Men that fail to spawn go back to the reserves (the spawner refuses past its limit).
+	_command_fixture(20.0, 20.0)
+	before = command.reserves
+	launches = response.qrf_launches.size()
+	alive = r.capped_alive()
+	var planned := r.next_wave_size(1, mini(response._room(), floori(command.available_cp())))
+	level.ai_spawner.spawn_limit = 1
+	response._launch_qrf()
+	level.ai_spawner.spawn_limit = 0
+	spawned = r.capped_alive() - alive
+	sent = response.qrf_launches.slice(launches)
+	check(not sent.is_empty() and spawned < planned * sent.size() and is_equal_approx(before - command.reserves, spawned),
+		"a QRF whose men fail to spawn: the unspawned heads go back (%d of %d spawned, %.0f spent)" % [spawned, planned * sent.size(), before - command.reserves])
+	await _clear_response(was_started)
+
+
+## Review of E-03: hunters pay for the men who spawn, give back the rest, and with reserves too
+## short for a team still ask, so the denial is recorded and a stale LKP gets its probe.
+func probe_hunter_accounting() -> void:
+	var response := EnemyResponse.of(level)
+	var was_started := response._started
+	var zone_was := command.alert.zone_state
+	var target := _command_fixture(12.0, 0.0)
+	var before := command.reserves
+	response._send_hunters(target, 50.0)
+	var team: Dictionary = response.hunters.back() if not response.hunters.is_empty() else {}
+	var men := (team.get("soldiers", []) as Array).size()
+	var hunts := _ops("hunt:hunters")
+	check(men >= EnemyResponse.HUNTER_SIZE.x and hunts.size() == 1 and hunts[0].state == "approved" and is_equal_approx(before - command.reserves, men),
+		"hunters: approved once and paid for the %d who spawned (%.0f spent)" % [men, before - command.reserves])
+	await _clear_response(was_started)
+	target = _command_fixture(12.0, 0.0)
+	before = command.reserves
+	level.ai_spawner.spawn_limit = 1
+	response._send_hunters(target, 50.0)
+	level.ai_spawner.spawn_limit = 0
+	team = response.hunters.back() if not response.hunters.is_empty() else {}
+	men = (team.get("soldiers", []) as Array).size()
+	check(not team.is_empty() and men < EnemyResponse.HUNTER_SIZE.x and is_equal_approx(before - command.reserves, men),
+		"hunters whose men fail to spawn: the unspawned heads go back (%d spawned, %.0f spent)" % [men, before - command.reserves])
+	await _clear_response(was_started)
+	# Three in reserve (short of a team) and an LKP gone stale: asked anyway, a probe instead.
+	target = _command_fixture(3.0, 0.0)
+	command.alert.zone_state = Alert.State.ENGAGED
+	command.alert.lkp.time = command.now() - EnemyCommand.HUNT_FRESH_S - 1.0
+	var teams := response.hunters.size()
+	response._send_hunters(target, 50.0)
+	hunts = _ops("hunt:hunters")
+	check(response.hunters.size() == teams and hunts.size() == 1 and hunts[0].state == "denied" and _ops("probe").size() == 1,
+		"hunters short of reserves with a stale LKP: the denial is recorded and a probe goes instead (%s)" % [hunts.map(func(o: Dictionary) -> String: return o.why)])
+	command.alert.zone_state = zone_was
+	await _clear_response(was_started)
+
 
 func probe_cleanup_persistence() -> void:
 	var module := level.get_module("audit_compound")
