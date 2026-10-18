@@ -229,10 +229,14 @@ b="$(ls -d "$proj"/builds/contractor-*-B0005-exe_fail-*/ 2>/dev/null | head -1)"
 # is taken over instead of holding everyone up.
 cdir="$dir/counter"
 mkdir -p "$cdir"
+# Wait for these jobs by pid: a bare "wait" also waits for the tee behind this script's own
+# output (exec > >(tee ...)) on Linux's bash, which never ends, so CI hung here.
+numbering=()
 for k in $(seq 12); do
 	( . tools/run_log.sh; run_log_number "$cdir" >"$cdir/got-$k" ) &
+	numbering+=("$!")
 done
-wait
+wait "${numbering[@]}"
 got="$(cat "$cdir"/got-* | sort -n | tr '\n' ' ')"
 if [ "$got" = "$(seq 12 | tr '\n' ' ')" ] && [ "$(cat "$cdir/run_counter.txt")" = 12 ] && [ ! -d "$cdir/run_counter.lock" ]; then
 	echo "ok   12 runs numbered at once -> 1 to 12, none twice"
@@ -252,9 +256,10 @@ else
 fi
 mkdir "$cdir/run_counter.lock"  # a live lock: the run waits for it
 ( sleep 1; rmdir "$cdir/run_counter.lock" ) &
+releaser=$!
 start=$(date +%s)
 n="$(. tools/run_log.sh; run_log_number "$cdir")"
-wait
+wait "$releaser"
 if [ "$n" = 14 ] && [ $(( $(date +%s) - start )) -ge 1 ]; then
 	echo "ok   a live lock is waited for: 14 once it's let go"
 else

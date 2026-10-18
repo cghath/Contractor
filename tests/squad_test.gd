@@ -714,7 +714,12 @@ func _test_buildings_raised_any_order() -> void:
 	var region := NavigationRegion3D.new()
 	region.navigation_mesh = mesh
 	other.add_child(region)
-	await _frames(4)
+	# Buildings answer nothing until this world's navigation map has synced with the region in it
+	# (Buildings.near), and the walls must be in the physics space: wait for both, not a fixed
+	# number of frames (4 frames was too few on CI's slower runners, so every scan found 0).
+	var map := other.get_world_3d().navigation_map
+	await _wait_until(func() -> bool: return NavigationServer3D.map_get_iteration_id(map) > 0 and NavigationServer3D.map_get_regions(map).size() > 0, 10.0)
+	await _physics_frames(2)
 	var found := func(at: Vector3) -> int: return Buildings.near(other, at, 6.0).size()
 	var high := Vector3(0, 11.5, 0)
 	var low := Vector3(0, 0.1, 0)
