@@ -525,6 +525,10 @@ This list covers what is built and in the game today (2026-10-12). Work still un
   same `Helicopter` flight model. Walk-in cabin, toggleable bay doors, folding boarding ramps, FFV
   door seats for players and AI gunners. The UH-60 stays in the game as world content (rescue
   wrecks). A bigger, higher-capacity second tier, the Razorback VTOL, has the same bay treatment.
+- Air wing upgrades (base Motor pool page, one-time campaign purchases): the Razorback heavy-lift
+  VTOL ($120,000: transport, extraction and insertion fly it, more troops than the Petrel),
+  an armoured cabin kit ($40,000: hits on support aircraft do 30% less damage) and fast turnaround
+  crews ($25,000: support cooldowns 40% shorter).
 
 ## Exosuits
 

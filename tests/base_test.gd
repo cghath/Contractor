@@ -52,6 +52,7 @@ func _ready() -> void:
 	_test_hiring()
 	_test_callsigns()
 	_test_wages()
+	_test_heli_upgrades()
 	_test_growth()
 	_test_injuries_and_medbay()
 	_test_respawn_pool()
@@ -429,6 +430,43 @@ func _check_kit_pouches(m: Dictionary) -> void:
 	var counts := Roster.gear_counts(m.gear)
 	var missing := want.keys().filter(func(id: String) -> bool: return int(counts.get(id, 0)) < int(want[id]))
 	check(missing.is_empty(), "and all of the kit is counted, pouch contents too%s" % ("" if missing.is_empty() else " (short: %s)" % ", ".join(PackedStringArray(missing))))
+
+
+## Captain, 2026-10-17: "the upgrade system for the helicopters" (HeliUpgrades): one-time air
+## wing purchases, company-wide in the economy section: the Razorback for transport, extraction
+## and insertion, an armoured cabin kit, faster turnarounds. Paid from cash, kept by the save,
+## gone with a new campaign.
+func _test_heli_upgrades() -> void:
+	print("Air wing upgrades")
+	BaseHub.new_campaign(SEED)
+	var base_cd := float((HeliSupports.data().cooldown_s as Dictionary).transport)
+	check(HeliUpgrades.owned_ids().is_empty() and HeliUpgrades.model_for("transport") == HeliSupports.MODEL
+		and HeliUpgrades.damage_mult() == 1.0 and is_equal_approx(HeliSupports.cooldown_s("transport"), base_cd),
+		"a new company flies the stock air wing (%s, %d s transport cooldown)" % [HeliSupports.MODEL, roundi(base_cd)])
+	var cost := int(HeliUpgrades.def("razorback").cost)
+	Economy.add_cash(cost - 1 - Economy.cash(), "test: just short")
+	check(Economy.server_buy_heli_upgrade("razorback") == "Can't afford it" and not HeliUpgrades.owned("razorback") and Economy.cash() == cost - 1,
+		"$1 short of the Razorback: refused, nothing taken")
+	Economy.add_cash(500000 - Economy.cash(), "test: flush")
+	check(Economy.server_buy_heli_upgrade("razorback") == "" and HeliUpgrades.owned("razorback") and Economy.cash() == 500000 - cost,
+		"bought the Razorback ($%s off the cash)" % DebriefCalc.money(cost))
+	check(Economy.server_buy_heli_upgrade("razorback") == "Already owned" and Economy.cash() == 500000 - cost, "bought once: a second buy is refused, free")
+	check(HeliUpgrades.model_for("transport") == "vtol_razorback" and HeliUpgrades.model_for("extraction") == "vtol_razorback"
+		and HeliUpgrades.model_for("insertion") == "vtol_razorback" and HeliUpgrades.model_for("resupply") == HeliSupports.MODEL
+		and HeliUpgrades.model_for("medevac") == HeliSupports.MODEL and HeliCall.new(null, "transport", null, {}).model == "vtol_razorback",
+		"transport, extraction and insertion calls fly the Razorback; resupply and medevac stay on the %s" % HeliSupports.MODEL)
+	var seats := func(m: String) -> int:
+		return (VehicleSpecs.spec(m).seats as Array).filter(func(st: Dictionary) -> bool: return String(st.kind) == "passenger").size()
+	check(seats.call("vtol_razorback") > seats.call(HeliSupports.MODEL), "and it carries more troops (%d passenger seats, not %d)" % [seats.call("vtol_razorback"), seats.call(HeliSupports.MODEL)])
+	check(HeliUpgrades.lost_mult("transport") > 1.0 and HeliUpgrades.lost_mult("resupply") == 1.0, "a lost Razorback costs more to replace; a lost Petrel the same")
+	check(Economy.server_buy_heli_upgrade("armoured_cabin") == "" and Economy.server_buy_heli_upgrade("fast_turnaround") == "",
+		"the armoured cabin kit and fast turnaround bought")
+	check(is_equal_approx(HeliUpgrades.damage_mult(), float(HeliUpgrades.def("armoured_cabin").damage_mult))
+		and is_equal_approx(HeliSupports.cooldown_s("transport"), base_cd * float(HeliUpgrades.def("fast_turnaround").cooldown_mult)),
+		"hits do %d%% of the damage, cooldowns %d s" % [roundi(HeliUpgrades.damage_mult() * 100.0), roundi(HeliSupports.cooldown_s("transport"))])
+	check(Economy.server_buy_heli_upgrade("no_such") == "No such upgrade", "an unknown upgrade is refused")
+	BaseHub.new_campaign(SEED)
+	check(HeliUpgrades.owned_ids().is_empty() and HeliUpgrades.model_for("transport") == HeliSupports.MODEL, "a new campaign starts without them")
 
 
 func _test_wages() -> void:
@@ -968,6 +1006,9 @@ func _test_terminals(base: BaseLevel) -> void:
 	await get_tree().process_frame
 	service = ui._pages["motor_pool"].find_child("Service_" + hurt.validate_node_name(), true, false) as Button
 	check(service != null and not service.disabled, "and on at the sign")
+	var upgrade := ui._pages["motor_pool"].find_child("Upgrade_razorback", true, false) as Button
+	check(upgrade != null and (upgrade.text.begins_with("Buy: $") or upgrade.text == "Owned"),
+		"the Motor pool page lists the air wing upgrades with a Buy button (%s)" % (upgrade.text if upgrade else "none"))
 	player.global_transform = was
 	MotorPool.remove(hurt)
 	ui.close()

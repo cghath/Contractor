@@ -242,6 +242,10 @@ func _test_negotiation() -> void:
 	var d0 := ContractGen.deal(c, ContractGen.default_terms())
 	check(d0.pay_total == base and d0.advance == roundi(base * 0.3) and d0.completion == base - d0.advance and is_equal_approx(d0.salvage_share, 0.1)
 		and d0.support_budget == 0, "standard terms: the base pay, 30% advance, 10% salvage, no support budget")
+	# Captain, 2026-10-17: one point in support pays for a helicopter infil and its exfil.
+	var one := ContractGen.deal(c, {"pay_points": 0, "salvage_points": 0, "support_points": 1, "advance_share": 0.3})
+	check(int(one.support_budget) >= Prices.support_price("transport") + Prices.support_price("extraction"),
+		"one support point covers a helicopter infil and exfil ($%d for $%d + $%d)" % [int(one.support_budget), Prices.support_price("transport"), Prices.support_price("extraction")])
 	var pay := ContractGen.deal(c, {"pay_points": 4, "salvage_points": 0, "support_points": 0, "advance_share": 0.3})
 	var salvage := ContractGen.deal(c, {"pay_points": 0, "salvage_points": 4, "support_points": 0, "advance_share": 0.3})
 	var mixed := ContractGen.deal(c, {"pay_points": 2, "salvage_points": 2, "support_points": 0, "advance_share": 0.3})
@@ -258,9 +262,10 @@ func _test_negotiation() -> void:
 	var deal := ContractGen.deal(c, terms)
 	check(Contracts.server_accept(cid, terms) == "", "accepted on negotiated terms")
 	var held := Contracts.contract(cid)
-	check(held.state == "accepted" and Economy.cash() == before + deal.advance and int(held.support_left) == 5000
+	var per_point := MissionRegistry.setting_i("support_per_point", 23000)
+	check(held.state == "accepted" and Economy.cash() == before + deal.advance and int(held.support_left) == per_point
 		and not Contracts.board().any(func(o: Dictionary) -> bool: return o.cid == cid) and Contracts.held().any(func(o: Dictionary) -> bool: return o.cid == cid),
-		"signing pays the 30%% advance ($%d) and the contract moves to held, with a $5,000 support budget" % deal.advance)
+		"signing pays the 30%% advance ($%d) and the contract moves to held, with a $%d support budget" % [deal.advance, per_point])
 	check(Contracts.server_start_deployment([cid]) == "" and Contracts.is_deployed() and Contracts.objectives.list.size() == 2
 		and Contracts.objectives.active().size() == 2, "deployed: its two objectives are live")
 	var rep := Economy.reputation(String(held.employer))
@@ -598,8 +603,10 @@ func _test_shop() -> void:
 	var cid := _make_offer("raid", "compound_01")
 	Contracts.server_accept(cid, {"pay_points": 0, "salvage_points": 0, "support_points": 1, "advance_share": 0.3})
 	cash = Economy.cash()
-	check(Economy.server_pay_support("resupply", cid) and Contracts.support_left(cid) == 0 and Economy.cash() == cash - (Prices.support_price("resupply") - 5000),
-		"a resupply call: $5,000 from the support budget, the rest cash")
+	var budget := Contracts.support_left(cid)
+	check(Economy.server_pay_support("resupply", cid) and Economy.server_pay_support("extraction", cid) and Contracts.support_left(cid) == 0
+		and Economy.cash() == cash - (Prices.support_price("resupply") + Prices.support_price("extraction") - budget),
+		"a resupply and an extraction: the $%d support budget first, the rest from cash" % budget)
 
 
 func _test_intel_and_salvage() -> void:

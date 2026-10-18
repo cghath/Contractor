@@ -562,6 +562,9 @@ func _lift_off_if_landed() -> void:
 
 ## The pilot seats are the helicopter's own crew (simulated): nobody takes them.
 func server_enter(soldier: Node, index := -1) -> bool:
+	var s := soldier as Soldier
+	## (AI manning the door seats first, _first_free_ffv, is off here for now: it left a squadmate
+	## stranded in a stale seat on an extraction - supports R1723; R1727 passes without it.)
 	if index < 0:
 		index = _first_free_passenger()
 	if seat_kind(index) == Vehicle.PILOT:

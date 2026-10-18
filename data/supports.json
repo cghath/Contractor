@@ -1,7 +1,15 @@
 {
-	"_note": "Wave 5b V3, helicopter supports (HeliSupports, HeliCall). Everything here is Proposed. Prices are in data/prices.json \"supports\" (Economy.server_pay_support). cooldown_s: after a call, how long before that support can be called again. resupply: the pallet's load (HeliSupports.resupply_load): per_weapon gives, for every weapon the squad carries (players and squad AI, primary and sidearm), its magazines ([mags, loose rounds of that calibre]); fixed lists the rest as [item id, count]; pallet is the item it all sits on.",
+	"_note": "Wave 5b V3, helicopter supports (HeliSupports, HeliCall). Everything here is Proposed. upgrades: the air wing's one-time campaign purchases (HeliUpgrades), in the order the Motor pool page lists them. Prices are in data/prices.json \"supports\" (Economy.server_pay_support). cooldown_s: after a call, how long before that support can be called again. resupply: the pallet's load (HeliSupports.resupply_load): per_weapon gives, for every weapon the squad carries (players and squad AI, primary and sidearm), its magazines ([mags, loose rounds of that calibre]); fixed lists the rest as [item id, count]; pallet is the item it all sits on.",
 	"cooldown_s": {"resupply": 600, "transport": 180, "extraction": 300, "medevac": 240, "cargo": 300},
 	"callsigns": {"resupply": "Mule 1-1", "transport": "Hawk 2-1", "extraction": "Exodus 3-1", "insertion": "Hawk 2-2", "medevac": "Dustoff 4-1", "cargo": "Packhorse 5-1"},
+	"upgrades": [
+		{"id": "razorback", "name": "Razorback heavy-lift VTOL", "cost": 120000, "model": "vtol_razorback", "kinds": ["transport", "extraction", "insertion"], "lost_mult": 1.8,
+			"text": "Transport, extraction and helicopter insertion fly the Razorback: more troops than the Petrel (and room for two heavy exos), and a heavier hull. Resupply, medevac and cargo stay on the Petrel. A lost Razorback costs more to replace."},
+		{"id": "armoured_cabin", "name": "Armoured cabin kit", "cost": 40000, "damage_mult": 0.7,
+			"text": "Spall liners and armoured crew seats on every support aircraft: hits do 30% less damage."},
+		{"id": "fast_turnaround", "name": "Fast turnaround crews", "cost": 25000, "cooldown_mult": 0.6,
+			"text": "A second ground crew at the FOB refuels and rearms faster: every support can be called again 40% sooner."}
+	],
 	"smoke": {"resupply": ["green", "yellow"], "transport": ["green", "blue"], "extraction": ["purple"], "medevac": ["yellow", "green"], "cargo": ["green", "blue"]},
 	"resupply": {
 		"pallet": "supply_pallet",

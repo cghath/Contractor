@@ -11,6 +11,29 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Air wing upgrades: the Razorback and friends (Captain, 2026-10-17)
+
+#### Added
+- Helicopter upgrade system (`HeliUpgrades`, `data/supports.json` "upgrades"): one-time
+  company-wide purchases kept in the campaign save's economy section ("heli_upgrades"), bought
+  from the base's Motor pool page (new "Air wing" section, `BaseUI._build_air_wing`, through
+  `Economy.buy_heli_upgrade`/`server_buy_heli_upgrade`). Proposed prices, Captain's call:
+  - Razorback heavy-lift VTOL, $120,000: transport, extraction and helicopter insertion calls fly
+    `vtol_razorback` (more passenger seats than the Petrel; `HeliCall.model` from
+    `HeliUpgrades.model_for`, its landing zones sized for it); resupply, medevac and cargo stay
+    on the Petrel. A lost Razorback costs 1.8x the usual replacement. This is the "later unlock"
+    docs/near_future_hardware.md 1.2 planned, through the existing money path.
+  - Armoured cabin kit, $40,000: hits on a support aircraft do 30% less damage
+    (`Vehicle.damage_mult`, set by `HeliCall` at spawn).
+  - Fast turnaround crews, $25,000: every support's cooldown 40% shorter (`HeliSupports.cooldown_s`).
+  A new campaign starts without them; outside a campaign the stock air wing flies.
+- A contract's support budget is $23,000 a negotiation point (was $5,000; Captain, 2026-10-17:
+  "enough to cover one heli exfil and the infil with one point in support": a transport's $9,000
+  and an extraction's $14,000; `data/contracts.json` "support_per_point").
+- AI getting into a helicopter take its fire-from-vehicle door seats first (Captain, 2026-10-17;
+  `Vehicle._first_free_ffv`, through `Helicopter.server_enter` too, which picked the first cabin
+  seat before).
+
 ### Floating site-box lootboxes, scope PIP black flash (Captain, 2026-10-16 playtest of v0.4.26)
 
 #### Fixed

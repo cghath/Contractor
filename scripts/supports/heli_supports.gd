@@ -34,8 +34,8 @@ const DATA_PATH := "res://data/supports.json"
 const KINDS: Array[String] = ["resupply", "transport", "extraction", "medevac", "cargo"]
 ## The player faction's transport (docs/near_future_hardware.md: replaces the Black Hawk). The
 ## UH-60 model and data entry stay in the game (mission_scenario.gd's crew_rescue wreck, other
-## factions) - only the player's own support calls moved off it. A Razorback-tier upgrade (bigger
-## capacity, unlock-gated) is a later pass, not wired here yet.
+## factions) - only the player's own support calls moved off it. The Razorback tier (bigger
+## capacity) is an air wing upgrade: HeliUpgrades.model_for picks the airframe per call.
 const MODEL := "vtol_petrel"
 ## Proposed: on a zone, helicopters appear this far inside the edge (its invisible wall) and
 ## leave by it; on a small map (the vehicle range) at least MIN_INBOUND_M from where they go.
@@ -110,8 +110,10 @@ static func smoke_colours(kind: String) -> Array:
 	return (data().get("smoke", {}) as Dictionary).get(kind, [])
 
 
+## After a call of `kind`, how long before it can be called again (an owned "cooldown_mult"
+## air wing upgrade shortens it: HeliUpgrades).
 static func cooldown_s(kind: String) -> float:
-	return float((data().get("cooldown_s", {}) as Dictionary).get(kind, 0.0))
+	return float((data().get("cooldown_s", {}) as Dictionary).get(kind, 0.0)) * HeliUpgrades.cooldown_mult()
 
 
 func level() -> CompoundLevel:
@@ -332,7 +334,7 @@ func near_lz(caller: Soldier, avoid: Array[Vector3] = []) -> Dictionary:
 func server_lost(kind: String) -> void:
 	if kind in KINDS:
 		if not _lost.has(kind):
-			Economy.charge_run(Prices.lost_support_price(kind), "Lost helicopter (%s support): replacement" % kind)
+			Economy.charge_run(roundi(Prices.lost_support_price(kind) * HeliUpgrades.lost_mult(kind)), "Lost helicopter (%s support): replacement" % kind)
 		_lost[kind] = true
 
 
