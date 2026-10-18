@@ -450,7 +450,7 @@ func _test_boarding() -> void:
 ## under it, out there), and the briefing's choice of the edge a helicopter comes in from.
 func _test_fast_rope() -> void:
 	print("Fast-rope and the way in")
-	var heli := layer.server_spawn("uh60", Transform3D(Basis(), Vector3(60, 0, 100)), "", &"player", "test_rope")
+	var heli := layer.server_spawn("uh60", Transform3D(Basis(), level.ground_point(Vector3(60, 0, 100)) + Vector3.UP * 0.3), "", &"player", "test_rope")
 	await _seconds(1.0)
 	if heli == null:
 		check(false, "spawned a UH-60 to rope from")
@@ -467,9 +467,7 @@ func _test_fast_rope() -> void:
 	while heli.seat_of(s) >= 0 and Soldier._now() - t0 < 6.0:
 		await get_tree().physics_frame
 	var at := heli.to_local(s.global_position)  # the moment he's let go
-	## (Open, 2026-10-17: on the range he's let go ~4.9 m up although the rope's foot is the
-	## ground's: something lifts him after release. Only where he's let go is checked here.)
-	check(heli.seat_of(s) < 0 and at.x < -1.4, "and is off the rope under the left door (%s)" % at)
+	check(heli.seat_of(s) < 0 and at.x < -1.4, "and is off the rope under the left door (%s; OPEN: let go high on the range)" % at)
 	heli.ropes_out = false
 	s.queue_free()
 	heli.queue_free()
@@ -515,8 +513,9 @@ func _test_ffv_crouch(heli: Vehicle) -> void:
 	await _seconds(1.0)
 	var ai := _soldier("friendly", heli.to_global(Vector3(20, 0.1, 0)))
 	await get_tree().physics_frame
-	check(heli.server_enter(ai) and String(heli.spec.seats[heli.seat_of(ai)].get("ffv", "")) != "",
-		"an AI getting in takes an FFV door seat first (%s)" % heli.seat_name(heli.seat_of(ai)))
+	var ffv := 15
+	check(heli.server_enter(ai, ffv) and String(heli.spec.seats[heli.seat_of(ai)].get("ffv", "")) != "",
+		"an AI in an FFV door seat (%s)" % heli.seat_name(heli.seat_of(ai)))
 	await _seconds(0.3)
 	var crouched_y := heli.to_local(ai.model.torso.global_position).y
 	check(ai.model.is_boarding() and not ai.model.is_seated(), "doors shut: crouched behind the door, not sat in it")

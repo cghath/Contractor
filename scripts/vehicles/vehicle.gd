@@ -1316,8 +1316,14 @@ func server_fast_rope(s: Soldier, side: float) -> void:
 	_running_out[s.get_instance_id()] = [s, Soldier._now() + total, foot]
 
 
-## The ground under a rope hanging at `at` (world): the level's (its own hull and bay aside).
+## The ground (or a roof) under a rope hanging from `at` (world): looked for straight down from
+## the rope's top, under the rotor (a probe from higher met the rotor disc), its own hull aside.
 func _rope_ground(at: Vector3) -> float:
+	var space := get_world_3d().direct_space_state if is_inside_tree() else null
+	if space:
+		var hit := space.intersect_ray(PhysicsRayQueryParameters3D.create(at, at + Vector3.DOWN * 80.0, SoldierMovement.WORLD_MASK, [get_rid()]))
+		if not hit.is_empty():
+			return (hit.position as Vector3).y
 	var lvl := level()
 	return lvl.ground_point(Vector3(at.x, 0.0, at.z)).y if lvl else at.y - 15.0
 
