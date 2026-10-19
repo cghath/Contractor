@@ -243,6 +243,19 @@ func _build_squad(rows: VBoxContainer, v: Dictionary) -> void:
 	buttons.append(UiKit.button("Save campaign", func() -> void: BaseHub.request("save")))
 	var go := UiKit.section("Deploy", rows)
 	go.add_child(UiKit.button_row(buttons))
+	# A raid by helicopter (LZ-4): out without a contract to any zone, the flight paid.
+	var raid := UiKit.section("Raid (no contract)", rows)
+	raid.add_child(UiKit.text("Walk out through a crossing at the base's edge, or fly to any zone ($%d). No pay; you keep what comes home." % int(Prices.support_price("transport"))))
+	var pick := OptionButton.new()
+	var zone_ids: Array[String] = []
+	for z: Dictionary in MissionRegistry.zones():
+		zone_ids.append(String(z.zone_id))
+		pick.add_item(String(z.get("name", z.zone_id)))
+	var fly := UiKit.button("Fly out to raid", func() -> void:
+		if pick.selected >= 0:
+			BaseHub.request("raid_air", [zone_ids[pick.selected]]))
+	fly.disabled = not multiplayer.is_server()
+	raid.add_child(UiKit.button_row([pick, fly]))
 	# Base defence (LZ-6): hired guards on the wire, and any assault the heat has booked.
 	var defence := UiKit.section("Base defence", rows)
 	var g := int(v.get("guards", 0))

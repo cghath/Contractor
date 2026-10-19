@@ -1837,6 +1837,25 @@ func server_buy_defence(id: String) -> String:
 	return ""
 
 
+## Host (the ops desk, LZ-4: "pick 'Raid' at the ops desk for a heli insertion (paid)"): the squad
+## flies out to raid zone `zone_id` (any zone: the helicopter is the shortcut over the region map),
+## landing at its insertion point. The flight is the transport's price (Prices "transport"); the
+## raid's rules (RosterDeployment.RAID) as when walking out. Everyone ready first. Returns "" or why not.
+func server_raid_by_air(zone_id: String) -> String:
+	var def := MissionRegistry.zone_def(zone_id)
+	if def.is_empty() or zone_id == RegionMap.BASE:
+		return "No such zone to raid"
+	if not all_ready():
+		return WAITING_FOR + ", ".join(PackedStringArray(not_ready_names()))
+	var price := int(Prices.support_price("transport"))
+	if not BaseEconomy.try_spend(price, "Helicopter out to raid %s" % RegionMap.zone_name(zone_id)):
+		return "Can't afford the flight ($%d)" % price
+	var why := server_deploy({"zone_id": zone_id, "no_contract": true, "zone_kind": RosterDeployment.RAID, "level": {"level": "zone", "def": def}})
+	if why != "":
+		Economy.charge_run(-price, "Raid flight refunded")
+	return why
+
+
 ## Host (the ops desk): the company keeps `n` guards.
 func server_set_guards(n: int) -> String:
 	if n > max_guards():
@@ -2558,6 +2577,8 @@ func _server_request(action: String, args: Array) -> void:
 				server_advance_days(clampi(int(args[0]) if not args.is_empty() else 1, 1, 30))
 			"defence":
 				why = server_buy_defence(String(args[0])) if sender == 1 and not args.is_empty() else "Only the host can do that"
+			"raid_air":
+				why = server_raid_by_air(String(args[0])) if sender == 1 and not args.is_empty() else "Only the host can do that"
 			"squads":
 				why = server_set_company_squads(int(args[0]) if not args.is_empty() else 0) if sender == 1 else "Only the host can do that"
 			"fob_tier":

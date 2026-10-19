@@ -127,6 +127,7 @@ func _run() -> void:
 	_test_threats()
 	await _test_assault()
 	await _test_defences()
+	await _test_raid_by_air()
 	await _test_airframes()
 	await _test_crossings()
 
@@ -487,3 +488,20 @@ func _test_defences() -> void:
 		"and stands at its slot by the gate when the base is back up")
 	check(BaseHub.server_buy_defence("mg_pit") == "Already built", "a second one isn't sold")
 	await _wait_until(func() -> bool: return base.players.get_node_or_null(^"1") != null, 10.0)
+
+
+## LZ-4: a raid by helicopter from the ops desk: any zone, the flight paid, a raid's rules.
+func _test_raid_by_air() -> void:
+	print("Raid by air")
+	var funds := BaseEconomy.funds()
+	var why := BaseHub.server_raid_by_air("wadi_farm")
+	check(why == "" and BaseEconomy.funds() == funds - int(Prices.support_price("transport")), "flying out to raid Wadi Farm, the flight paid (%s)" % why)
+	await _wait_until(func() -> bool:
+		var l := CompoundLevel.current(self) as ZoneLevel
+		return l != null and String(l.def.id) == "wadi_farm" and not BaseHub.switch_pending(), 30.0)
+	var dep := RosterDeployment.active(BaseHub.roster())
+	check(String(dep.get("zone_kind", "")) == RosterDeployment.RAID and String(dep.get("zone_id", "")) == "wadi_farm", "a raid there")
+	BaseHub.server_end_deployment([])
+	await _wait_until(func() -> bool: return BaseHub.in_base() and not BaseHub.switch_pending(), 30.0)
+	var home := CompoundLevel.current(self) as BaseZoneLevel
+	await _wait_until(func() -> bool: return home != null and home.players.get_node_or_null(^"1") != null, 10.0)
