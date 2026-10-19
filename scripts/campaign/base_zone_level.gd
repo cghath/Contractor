@@ -19,6 +19,12 @@ const SIZE_M := 2304.0
 const REGION := "inland"
 ## Mixed into the campaign seed so the base's ground isn't any contract zone's.
 const SEED_SALT := 0x0F0B
+## The base's local area (docs/linked_zones.md LZ-5: "abandoned sites to scavenge, a village or two
+## of civilians"): these site types, LOCAL_REACH_M from the FOB, at least LOCAL_SPACING_M apart and
+## clear of the crossings. Nobody holds them (garrison_size). Proposed.
+const LOCAL_SITES: Array[String] = ["village", "village", "compound", "outpost"]
+const LOCAL_REACH_M := Vector2(400.0, 700.0)
+const LOCAL_SPACING_M := 260.0
 
 var fob: BaseFob
 
@@ -26,12 +32,38 @@ var fob: BaseFob
 ## The base zone's definition for a campaign seeded `campaign_seed` (normalized, with its crossings
 ## into the neighbouring zones: RegionMap, LZ-2): the same every visit.
 static func def_for(campaign_seed: int) -> Dictionary:
-	var def := ZoneDef.normalize({"id": ZONE_ID, "name": "FOB", "region": REGION, "kind": "base", "seed": absi(campaign_seed ^ SEED_SALT) % 1000000,
+	var seed := absi(campaign_seed ^ SEED_SALT) % 1000000
+	var def := ZoneDef.normalize({"id": ZONE_ID, "name": "FOB", "region": REGION, "kind": "base", "seed": seed,
 		"size_m": SIZE_M, "grow": false, "no_pallets": true,
-		"modules": [{"id": "fob", "type": "fob", "pos": [0, 0]}],
+		"modules": [{"id": "fob", "type": "fob", "pos": [0, 0]}] + _local_sites(seed),
 		"insertion": [[0.0, BaseFob.VEHICLE_PARK.end.y + 20.0]]})
 	def["crossings"] = RegionMap.crossings(RegionMap.BASE, def)
 	return def
+
+
+## The local area's sites (LOCAL_SITES) from `seed`, the same every time.
+static func _local_sites(seed: int) -> Array:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed * 7 + 11
+	var out: Array = []
+	var placed: Array[Vector2] = [Vector2.ZERO]
+	var keep_off: Array[Vector2] = []
+	var half := SIZE_M * 0.5
+	for side in 4:  # the crossings' sides, roughly: keep the edges' middles clear
+		keep_off.append([Vector2(0, -half), Vector2(0, half), Vector2(-half, 0), Vector2(half, 0)][side])
+	for type: String in LOCAL_SITES:
+		for attempt in 60:
+			var a := rng.randf() * TAU
+			var r := rng.randf_range(LOCAL_REACH_M.x, LOCAL_REACH_M.y)
+			var p := Vector2(cos(a), sin(a)) * r
+			if placed.any(func(q: Vector2) -> bool: return q.distance_to(p) < LOCAL_SPACING_M):
+				continue
+			if keep_off.any(func(q: Vector2) -> bool: return q.distance_to(p) < 450.0):
+				continue
+			placed.append(p)
+			out.append({"id": "%s_%d" % [type, out.size() + 1], "type": type, "pos": [p.x, p.y]})
+			break
+	return out
 
 
 func _ready() -> void:
@@ -49,6 +81,11 @@ func _ready() -> void:
 
 func is_base() -> bool:
 	return true
+
+
+## Nobody holds the base's local sites (LZ-5: threats come from heat, not garrisons).
+func garrison_size(_module_id: String) -> int:
+	return 0
 
 
 ## The FOB's terminals and muster line stand on the module's flattened pad from the start.
@@ -92,6 +129,8 @@ func _on_hosted() -> void:
 	super._on_hosted()
 	server_spawn_stash(BaseHub.stash())
 	server_show_roster()
+	if people:
+		people._spawn_civilians()  # the local villages' people (LZ-5)
 	var extraction := MapNodes.extraction(self)
 	if extraction:
 		extraction.server_open_crossings()  # the way out into the neighbouring zones (LZ-2)

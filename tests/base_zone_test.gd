@@ -87,6 +87,10 @@ func _run() -> void:
 	check(up and ids.all(func(mid: String) -> bool: return base.fob.holds(base.muster_soldier(mid).global_position)),
 		"the company's people stand at the muster line, inside the wire")
 	await get_tree().create_timer(3.0).timeout
+	var local: Array = (base.def.modules as Array).filter(func(m: Dictionary) -> bool: return String(m.type) != "fob")
+	check(local.size() == BaseZoneLevel.LOCAL_SITES.size(), "the base's local area: %s" % ", ".join(local.map(func(m: Dictionary) -> String: return String(m.id))))
+	var folk := base.find_children("*", "CharacterBody3D", true, false).filter(func(n: Node) -> bool: return n is Soldier and (n as Soldier).faction == Person.FACTION)
+	check(folk.size() > 0, "with villagers about (%d)" % folk.size())
 	var hostiles := base.ai.get_children().filter(func(n: Node) -> bool: return n is Soldier and (n as Soldier).faction == &"hostile")
 	check(hostiles.is_empty(), "nothing hostile in the base zone (%d)" % hostiles.size())
 	var laid := BaseArmory.counts(base.server_collect_stash())
