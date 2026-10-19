@@ -34,11 +34,11 @@ signal deployment_started(plan: Dictionary)
 
 enum Phase { IDLE, BRIEFING, DEPLOYED }
 
-## Player-faction supports (design doc). Transport and AAVs are hot zones only.
+## Player-faction supports (design doc). AAVs are hot zones only (transport flies anywhere: LZ-3).
 const SUPPORTS := {
 	"resupply": {"name": "Helicopter resupply", "hot_only": false},
 	"extraction": {"name": "Helicopter extraction", "hot_only": false},
-	"transport": {"name": "Helicopter transport", "hot_only": true},
+	"transport": {"name": "Helicopter transport", "hot_only": false},
 	"aav": {"name": "AAV", "hot_only": true},
 }
 ## A motor pool vehicle's support id (wave 5b): "pool:<MotorPool id>".

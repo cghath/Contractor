@@ -148,7 +148,8 @@ const MENU := {
 				{"key": "2", "label": "Pick up there", "cmd": "support:transport:here", "point": true},
 				{"key": "3", "label": "Pick up on smoke (green, blue)", "cmd": "support:transport:smoke"},
 				{"key": "4", "label": "Fly to my map marker", "cmd": "support:transport:dest"},
-				{"key": "5", "label": "Send it home", "cmd": "support:transport:cancel"},
+				{"key": "5", "label": "Fly us on to the next zone (toward my map marker)", "cmd": "support:transport:zone"},
+				{"key": "6", "label": "Send it home", "cmd": "support:transport:cancel"},
 			]},
 			{"key": "2", "label": "Resupply drop", "items": [
 				{"key": "1", "label": "At my map marker", "cmd": "support:resupply:marker"},

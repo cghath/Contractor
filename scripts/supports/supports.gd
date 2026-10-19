@@ -68,7 +68,7 @@ static func can_fly(level: Node) -> bool:
 	return not (level and level.has_method(&"weather_grounds_aircraft") and level.call(&"weather_grounds_aircraft"))
 
 
-## Whether `level` is a hot zone (transport is hot zones only).
+## Whether `level` is a hot zone.
 static func is_hot_zone(level: Node) -> bool:
 	return level != null and "def" in level and String((level.get(&"def") as Dictionary).get("kind", "")) == "hot"
 

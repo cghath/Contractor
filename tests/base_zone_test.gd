@@ -234,6 +234,10 @@ func _test_crossings() -> void:
 	zone = await _test_cross_on(zone, to)
 	if zone == null:
 		return
+	zone = await _test_fly_on(zone)
+	if zone == null:
+		return
+	to = String(zone.def.id)  # (home from where they flew to)
 	me = zone.players.get_node_or_null(^"1") as Soldier
 	var zx := MapNodes.extraction(zone)
 	await _wait_until(func() -> bool: return zx.is_active(), 5.0)
@@ -317,6 +321,56 @@ func _test_supply_line() -> void:
 	check(Objectives.here(placed[0], fake) and not Objectives.here(main_obj, fake) and String(placed[0].oid) == String(pending[0].oid),
 		"walked into the leg's zone it counts there, the first cache doesn't (same objective, placed)")
 	fake.free()
+
+
+## LZ-3, heli transport between zones: from `zone` the squad flies on to the base's other
+## neighbour (BaseHub.server_fly_on, as a transport told "zone" does): the deployment goes there,
+## half an hour passes, and they come in aboard a helicopter landing at its insertion LZ.
+## Returns the level there (on foot again), or null.
+func _test_fly_on(zone: ZoneLevel) -> ZoneLevel:
+	print("Flying on to another zone (LZ-3)")
+	var to := ""
+	for l: Dictionary in RegionMap.links(RegionMap.BASE):
+		if String(l.to) != String(zone.def.id):
+			to = String(l.to)
+			break
+	check(to != "", "the base has another neighbour to fly to")
+	if to == "":
+		return null
+	var me := zone.players.get_node(^"1") as Soldier
+	var k := 0
+	for n: Node in zone.ai.get_children():
+		if n is Soldier and (n as Soldier).has_meta(&"roster_id") and not (n as Soldier).vitals.is_dead():
+			(n as Soldier).global_position = me.global_position + Vector3(k * 1.5 - 1.0, 0, 1.5)  # aboard with him
+			k += 1
+	await get_tree().physics_frame
+	var hours_before := float(RosterDeployment.active(BaseHub.roster()).get("travel_h", 0.0))
+	var why := BaseHub.server_fly_on(to, Vector2(me.global_position.x, me.global_position.z))
+	check(why == "", "a transport flies the squad on to %s (%s)" % [to, why])
+	await _wait_until(func() -> bool:
+		var l := CompoundLevel.current(self) as ZoneLevel
+		return l != null and String(l.def.id) == to and not BaseHub.switch_pending(), 40.0)
+	var there := CompoundLevel.current(self) as ZoneLevel
+	var dep := RosterDeployment.active(BaseHub.roster())
+	check(there != null and String(there.def.id) == to and String(dep.get("zone_id", "")) == to
+		and absf(float(dep.get("travel_h", 0.0)) - hours_before - BaseHub.TRAVEL_AIR_H) < 0.01,
+		"in %s, half an hour on the clock (%.1f h travelled)" % [to, float(dep.get("travel_h", 0.0))])
+	if there == null:
+		return null
+	await _wait_until(func() -> bool: return there.players.get_node_or_null(^"1") != null, 10.0)
+	me = there.players.get_node_or_null(^"1") as Soldier
+	var aboard := await _wait_until(func() -> bool: return me != null and Vehicle.ride_of(me) is Helicopter, 8.0)
+	check(aboard, "flown in aboard a helicopter to its insertion LZ")
+	HeliSupports.of(there).server_dismiss_all()  # (the test walks on from here: everyone out, on the ground)
+	await get_tree().create_timer(0.5).timeout
+	if me:
+		me.global_position = there.ground_point(me.global_position)
+	for n: Node in there.ai.get_children():
+		var s := n as Soldier
+		if s and s.has_meta(&"roster_id"):
+			s.global_position = there.ground_point(s.global_position)
+	await get_tree().physics_frame
+	return there
 
 
 func _cheapest(pool: Array) -> Dictionary:

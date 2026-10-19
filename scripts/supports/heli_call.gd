@@ -159,6 +159,8 @@ var caller: Soldier
 var mark := {}
 ## Transport: where the squad wants to go ({} until given), and its landing spot.
 var dest := {}
+## Transport (LZ-3): the zone it flies the squad on to (server_set_zone), "" for a grid.
+var dest_zone := ""
 var dest_lz := Vector3.ZERO
 ## "pickup" (resupply, transport and extraction on their way), "carry" (transport with the
 ## squad aboard), "drop" (putting everyone out: transport, insertion, a dev extraction),
@@ -494,6 +496,41 @@ func server_set_destination(where: Dictionary) -> String:
 	return ""
 
 
+## Transport (docs/linked_zones.md section 4, "heli transport between zones"): fly the squad on to
+## zone `to`. Every player who is up must be aboard; then it lifts and the crossing happens in the
+## air (BaseHub.server_fly_on: about half an hour), the squad landing at that zone's insertion LZ.
+## Returns "" or why not.
+func server_set_zone(to: String) -> String:
+	if not wants_destination():
+		return "Land for the pickup first"
+	var waiting := MapNodes.players(sup).filter(func(p: Soldier) -> bool: return p.vitals.is_up() and Vehicle.ride_of(p) != heli)
+	if not waiting.is_empty():
+		return "Everyone aboard first: %s" % ", ".join(PackedStringArray(waiting.map(func(p: Soldier) -> String: return p.display_name())))
+	dest = {"zone": to}
+	dest_zone = to
+	_dest_at = Soldier._now()
+	sup.server_radio(kind, "Copy, flying you over to %s. About half an hour" % RegionMap.zone_name(to))
+	if stage == "carry" and phase == Phase.CARRY:
+		_fly_on()
+	return ""
+
+
+## The squad goes on to dest_zone (BaseHub.server_fly_on); this helicopter circles until the
+## level switches.
+func _fly_on() -> void:
+	var why := BaseHub.server_fly_on(dest_zone, Vector2(heli.global_position.x, heli.global_position.z))
+	if why != "":
+		sup.server_radio(kind, why)
+		dest_zone = ""
+		dest = {}
+		return
+	rode_out = true
+	going_home = true
+	phase = Phase.ENDED
+	_t = 0.0
+	heli.server_orbit(heli.global_position, HOME_ORBIT_M, HOME_ORBIT_AGL_M, Helicopter.CRUISE_KMH)
+
+
 ## Sends it home. Returns "" or why not.
 func server_cancel() -> String:
 	if not _riders().is_empty() and heli.is_airborne():
@@ -544,7 +581,9 @@ func step(delta: float) -> void:
 		Phase.TAKEOFF:
 			if heli.height_agl() > TAKEOFF_AGL_M or _t > TAKEOFF_S / Helicopter.pace + 2.0:
 				_t = 0.0
-				if stage == "carry":
+				if stage == "carry" and dest_zone != "":
+					_fly_on()
+				elif stage == "carry":
 					lz = dest_lz
 					_land()
 					phase = Phase.CARRY

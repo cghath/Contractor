@@ -450,8 +450,8 @@ func _test_refusals() -> void:
 	var before := _helicopters().size()
 	level.def["kind"] = "contract"
 	HeliSupports.free_calls = 0  # not a dev session (dev sessions fly transport anywhere)
-	var why := _call("support:transport:here", _ground(HOME + Vector3(0, 0, -60)))
-	check(why.contains("hot zones only"), "transport outside a hot zone: refused (%s)" % why)
+	var why := _call("support:transport:zone", _ground(HOME + Vector3(0, 0, -60)))
+	check(why.contains("Call a transport first"), "flying on to another zone with no transport out: refused (%s)" % why)
 	HeliSupports.free_calls = 1
 	level.def["kind"] = "hot"
 	(level as Object).set(&"storm", true)

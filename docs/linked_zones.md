@@ -246,6 +246,13 @@ and they come with the squad when it crosses.
   out follow too, the elements with the men still up. All of them arrive `BaseHub.FOLLOW_DELAY_S`
   (one game minute) after the squad, the elements where the squad came in. A crossing with every
   player aboard a vehicle takes 1 h instead of 2.
+- **Built (2026-10-19), heli transport between zones:** the command menu's transport entry has
+  "Fly us on to the next zone (toward my map marker)" (`support:transport:zone`). It goes to the
+  zone past the crossing nearest the marker (`HeliSupports.zone_toward`). With every player up
+  aboard, it lifts (`HeliCall.server_set_zone`), and the squad crosses in the air
+  (`BaseHub.server_fly_on`: half an hour, `TRAVEL_AIR_H`), those aboard going with it. They come
+  in aboard a helicopter landing at the zone's insertion LZ (`HeliSupports.server_insert`).
+  Transport is no longer hot-zones-only.
 
 ### 5. Co-op and host constraints
 

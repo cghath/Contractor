@@ -1,6 +1,7 @@
 class_name HeliSupports
 extends Node
-## The Black Hawk supports (wave 5b V3): resupply, transport (hot zones only) and extraction,
+## The Black Hawk supports (wave 5b V3): resupply, transport (anywhere since LZ-3, and on to
+## another zone: "zone") and extraction,
 ## called from the command menu's Support entry (0) through Supports, and the helicopter
 ## insertion a hot zone's briefing can pick. One node, "HeliSupports", in every level on every
 ## peer (CompoundLevel adds it), so its radio reaches every player; the calls themselves
@@ -225,6 +226,10 @@ func server_take_followers() -> Array:
 		var cond := c.heli.condition()
 		var tank := float(c.heli.spec.get("fuel_l", 1.0))
 		var after := float(cond.get("fuel", tank)) - CROSSING_KM * float(c.heli.spec.get("fuel_l_per_km", 2.0))
+		if c.dest_zone != "":  # the transport flying the squad over: it stays as it is to the switch
+			cond["fuel"] = maxf(after, 0.0)
+			airframes()[c.kind] = {"cond": cond}
+			continue
 		var zones: Dictionary = cond.get("zones", {})
 		var empty := c.heli.occupants().all(func(s: Soldier) -> bool: return s.has_meta(&"vehicle_crew"))
 		var follows := c.kind not in NO_FOLLOW and c.phase in [HeliCall.Phase.INBOUND, HeliCall.Phase.LOITER] and empty \
@@ -254,6 +259,24 @@ func server_follow_in(kinds: Array, by: Soldier) -> void:
 			call.server_dismiss()
 
 
+## The zone past the crossing on nearest `caller`'s newest map marker (LZ-3: where a transport
+## flies the squad), or "!" and why not.
+func zone_toward(caller: Soldier) -> String:
+	var marker: Variant = newest_marker(caller)
+	if marker == null:
+		return "!Put a marker on the map toward the zone you want, first (M, double-click)"
+	var extraction := MapNodes.extraction(self)
+	var best := ""
+	var best_d := INF
+	for p: Dictionary in extraction.points if extraction else []:
+		if String(p.get("source", "")) == "crossing" and String(p.get("to", "")) != "" and String(p.to) != RegionMap.BASE:
+			var d := (p.pos as Vector2).distance_to(marker)
+			if d < best_d:
+				best = String(p.to)
+				best_d = d
+	return best if best != "" else "!No zone lies that way to fly to"
+
+
 ## Host: whether `kind` was lost this op.
 func is_lost(kind: String) -> bool:
 	return _lost.has(kind)
@@ -279,6 +302,11 @@ func server_call(kind: String, caller: Soldier, arg: String, point: Vector3) -> 
 		if current == null:
 			return "No %s helicopter is out" % kind
 		return current.server_cancel()
+	if kind == "transport" and how == "zone":  # LZ-3: fly the squad on to the next zone toward the marker
+		if current == null:
+			return "Call a transport first"
+		var to := zone_toward(caller)
+		return current.server_set_zone(to) if not to.begins_with("!") else to.substr(1)
 	if current:
 		if kind == "transport" and (how == "dest" or current.wants_destination()):
 			var where := _resolve(caller, "marker" if how == "dest" else arg, point)
@@ -300,8 +328,6 @@ func server_call(kind: String, caller: Soldier, arg: String, point: Vector3) -> 
 		return grounded
 	if not Supports.can_fly(lvl):
 		return "Helicopters are grounded: the weather won't let them fly"
-	if kind == "transport" and not Supports.is_hot_zone(lvl) and not _free():  # dev sessions: anywhere, to try it
-		return "Helicopter transport flies in hot zones only"
 	var extraction := MapNodes.extraction(self)
 	if kind == "extraction" and (extraction == null or not extraction.is_active()) and not _free():
 		return "No deployment to extract from"
