@@ -200,7 +200,9 @@ func _count_dead() -> void:
 		var s := n as Soldier
 		if s and s.faction == &"hostile" and s.vitals.is_dead() and not _counted_dead.has(s.get_instance_id()):
 			_counted_dead[s.get_instance_id()] = true
-			fallen += 1
+			var by := Harm.last(s)
+			if by.is_empty() or Harm.by_company(by):
+				fallen += 1  # (only the company's kills, or unknown: never a rival team's or an ally's)
 	if fallen > 0:
 		server_add("kill", fallen)
 

@@ -37,15 +37,30 @@ static func note_hit(victim: Node, attacker: Node) -> void:
 
 
 ## Who `attacker` is, as the ledger records it: {"name", "faction", "player" (a human),
-## "peer" (their peer id, 0 for AI), "path"}. Empty name and faction for nobody.
+## "company" (is_company), "peer" (their peer id, 0 for AI), "path"}. Empty name and faction for
+## nobody.
 static func info_of(attacker: Node) -> Dictionary:
 	if attacker == null or not is_instance_valid(attacker):
-		return {"name": "", "faction": "", "player": false, "peer": 0, "path": ""}
+		return {"name": "", "faction": "", "player": false, "company": false, "peer": 0, "path": ""}
 	var s := attacker as Soldier
 	if s == null:
-		return {"name": String(attacker.name), "faction": "", "player": false, "peer": 0, "path": str(attacker.get_path())}
-	return {"name": s.display_name(), "faction": String(s.faction), "player": not s.is_ai(),
+		return {"name": String(attacker.name), "faction": "", "player": false, "company": false, "peer": 0, "path": str(attacker.get_path())}
+	return {"name": s.display_name(), "faction": String(s.faction), "player": not s.is_ai(), "company": is_company(s),
 		"peer": 0 if s.is_ai() else s.owner_peer(), "path": str(s.get_path())}
+
+
+## Whether `s` is the company's own (Captain, 2026-10-19: "casualties caused by rebels and enemies
+## dont affect the company, only ones we injure"): a player, or one of ours in the company's own
+## marks (squadmates, company squads, the company's support crews). Allied elements, friendly
+## factions' teams and rebels (their own marks: "allied", "rebel") and every enemy are not.
+static func is_company(s: Soldier) -> bool:
+	return s != null and s.faction == &"friendly" and (not s.is_ai() or s.iff == &"")
+
+
+## Whether a hit recorded as `info` (info_of) is the company's doing (an older record without
+## "company": a player's).
+static func by_company(info: Dictionary) -> bool:
+	return bool(info.get("company", info.get("player", false)))
 
 
 ## The latest attacker noted on `victim` ({} if none).

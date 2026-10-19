@@ -96,12 +96,13 @@ func summary() -> Dictionary:
 
 # --- Host: recording -----------------------------------------------------------------------
 
-## Host only (Harm.note_hit): `victim` was hit by `info` (Harm.info_of). A civilian hit by
-## the players' side is a casualty (WOUNDED, once per civilian).
+## Host only (Harm.note_hit): `victim` was hit by `info` (Harm.info_of). A civilian hit by the
+## company (Harm.by_company: players, our squadmates; not allies, rebels or enemies) is a casualty
+## (WOUNDED, once per civilian).
 func server_harmed(victim: Node, info: Dictionary) -> void:
 	if not multiplayer.is_server() or not Person.is_civilian(victim):
 		return
-	if String(info.get("faction", "")) != "friendly":
+	if not Harm.by_company(info):
 		return
 	server_civilian_casualty(victim as Soldier, info, false)
 
@@ -115,7 +116,7 @@ func server_civilian_casualty(victim: Soldier, info: Dictionary, killed: bool) -
 		return {}
 	var p := victim.global_position
 	var event := {"civilian": victim.display_name(), "uid": uid, "kind": kind, "shooter": String(info.get("name", "")),
-		"shooter_faction": String(info.get("faction", "")), "shooter_player": bool(info.get("player", false)),
+		"shooter_faction": String(info.get("faction", "")), "shooter_player": bool(info.get("player", false)), "shooter_company": Harm.by_company(info),
 		"shooter_peer": int(info.get("peer", 0)), "zone": GameState.zone_id, "pos": [p.x, p.z],
 		"time": int(Time.get_unix_time_from_system())}
 	casualties.append(event)

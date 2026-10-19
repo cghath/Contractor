@@ -191,6 +191,22 @@ func _test_casualties() -> void:
 	check(by_hostile.vitals.injury() > 0.0 and not People.casualties.any(func(e: Dictionary) -> bool: return e.civilian == by_hostile.display_name()),
 		"one hit by a hostile isn't")
 	check(_listener.casualties.size() == 1 and String(Harm.last(by_hostile).get("faction", "")) == "hostile", "the listener heard of it; the hostile's hit is noted as his")
+	# Captain, 2026-10-19: only the company's hits count, never an allied element's or a rebel's.
+	var ally := _soldier("AllyC", &"friendly", Vector3(20, 0.1, 27), ["m4a1", "mag_556"], false)
+	ally.iff = &"allied"
+	var by_ally := _person({"name": "CivByAlly", "kind": CIVILIAN, "pos": Vector3(20, 0.1, 32)})
+	_brain(by_ally).process_mode = Node.PROCESS_MODE_DISABLED
+	await _frames(3)
+	check(Harm.is_company(alpha) and Harm.is_company(player) and not Harm.is_company(ally) and not Harm.is_company(hostile),
+		"the company is the players and our own squad, not an allied element or the enemy")
+	_shoot(ally, by_ally)
+	await _frames(3)
+	check(by_ally.vitals.injury() > 0.0 and not People.casualties.any(func(e: Dictionary) -> bool: return e.civilian == by_ally.display_name()),
+		"one hit by an allied element isn't the company's casualty either")
+	by_ally.vitals.server_kill()
+	await _frames(2)
+	check(not People.casualties.any(func(e: Dictionary) -> bool: return e.civilian == by_ally.display_name()), "nor when he dies of it")
+	ally.queue_free()
 	victim.vitals.server_kill()
 	by_hostile.vitals.server_kill()
 	await _frames(3)

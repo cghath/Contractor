@@ -566,7 +566,7 @@ func _on_person_died(s: Soldier) -> void:
 	if not Person.is_civilian(s):
 		return
 	var harm := Harm.last(s)
-	if String(harm.get("faction", "")) == "friendly":
+	if Harm.by_company(harm):  # (only ours count: never an ally's, a rebel's or an enemy's)
 		People.server_civilian_casualty(s, harm, true)
 
 
