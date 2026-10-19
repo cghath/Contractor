@@ -616,6 +616,7 @@ func server_cross_on(to: String, to_crossing: String, extraction: Extraction, ai
 	var leg_h := TRAVEL_VEHICLE_H if riding > 0 and riding >= _carry.keys().filter(func(k: String) -> bool: return k.begins_with("p:")).size() else TRAVEL_FOOT_H
 	if by_air:
 		leg_h = TRAVEL_AIR_H
+	_travel_wound_s = minf(leg_h * TRAVEL_WOUND_S_PER_H, TRAVEL_WOUND_MAX_S)
 	var hours := float(dep.get("travel_h", 0.0)) + leg_h
 	var sky := DayNight.current()
 	var hour_now: float = sky.hour if sky else float(def.get("hour", 9.0))
@@ -920,6 +921,25 @@ func _apply_carry(key: String, s: Soldier) -> void:
 	_carry.erase(key)
 	s.inventory.net_state = (c.gear as Dictionary).duplicate(true)
 	s.vitals.server_restore(c.get("vitals", {}))
+	_travel_wounds(s)
+
+
+## Wounds on the way over (Captain, 2026-10-19: "tick, but capped"): TRAVEL_WOUND_S_PER_H of the
+## wound model's time for each hour the crossing took, at most TRAVEL_WOUND_MAX_S, and never past
+## going down or TRAVEL_BLOOD_FLOOR of the blood: a warning to treat before crossing, not a death
+## on the road. Proposed numbers.
+const TRAVEL_WOUND_S_PER_H := 90.0
+const TRAVEL_WOUND_MAX_S := 180.0
+const TRAVEL_BLOOD_FLOOR := 0.55
+var _travel_wound_s := 0.0
+
+
+func _travel_wounds(s: Soldier) -> void:
+	var left := _travel_wound_s
+	while left > 0.0 and s.vitals.is_up() and s.vitals.blood_fraction() > TRAVEL_BLOOD_FLOOR:
+		var step := minf(left, 5.0)
+		s.vitals.server_advance(step)
+		left -= step
 
 
 ## Host (Extraction, a crossing confirmed in the base zone; docs/linked_zones.md LZ-2): the squad

@@ -497,8 +497,9 @@ func _test_cross_on(zone: ZoneLevel, from_id: String) -> ZoneLevel:
 	await _wait_until(func() -> bool: return next.players.get_node_or_null(^"1") != null, 10.0)
 	await get_tree().create_timer(1.5).timeout
 	me = next.players.get_node_or_null(^"1") as Soldier
-	check(me != null and me.vitals.wound_list().size() == wounds_before and absf(me.vitals.blood_fraction() - blood_before) < 0.05,
-		"the player comes in as he went: %d wound(s), %.0f%% blood (were %d, %.0f%%)" % [me.vitals.wound_list().size() if me else -1,
+	check(me != null and me.vitals.wound_list().size() == wounds_before and me.vitals.is_up()
+		and me.vitals.blood_fraction() <= blood_before + 0.001 and me.vitals.blood_fraction() >= minf(blood_before, BaseHub.TRAVEL_BLOOD_FLOOR) - 0.05,
+		"the player comes in with his wounds, bled a little on the way but up (capped): %d wound(s), %.0f%% blood (were %d, %.0f%%)" % [me.vitals.wound_list().size() if me else -1,
 			(me.vitals.blood_fraction() if me else 0.0) * 100.0, wounds_before, blood_before * 100.0])
 	check(me != null and me.inventory.count_of(&"burn_dressing") == dressings_before, "with what he carried (%d burn dressings)" % dressings_before)
 	var came := mate_names.filter(func(n: String) -> bool: return next.ai.get_node_or_null(NodePath(n)) != null)
