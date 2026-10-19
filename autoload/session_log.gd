@@ -94,6 +94,7 @@ class _Catcher extends Logger:
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	if _wanted():
+		buffered = true  # a playtest: flushed every FLUSH_S, not every line (perf)
 		start(_find_parent())
 
 
@@ -285,6 +286,13 @@ func caught_message(message: String, error: bool) -> void:
 func _process(delta: float) -> void:
 	if session_id == "":
 		return
+	if _unflushed and Time.get_ticks_msec() - _flushed_at >= int(FLUSH_S * 1000.0):
+		_mutex.lock()
+		if _file:
+			_file.flush()
+		_flushed_at = Time.get_ticks_msec()
+		_unflushed = false
+		_mutex.unlock()
 	var now := Time.get_ticks_usec()
 	var frame_s := (now - _last_frame_usec) / 1000000.0
 	_last_frame_usec = now
@@ -360,13 +368,29 @@ func _notification(what: int) -> void:
 
 # --- Writing and dumps ------------------------------------------------------------------------
 
+## Lines go to the file as they come, but it's flushed to disk at most every FLUSH_S (_process),
+## or at once for an error, a crash or anything marked "!!" (perf, 2026-10-19: a flush per line
+## cost about a millisecond each, and a firefight logs a lot of lines on the main thread).
+const FLUSH_S := 0.5
+## Only a playtest's own session (_ready) is buffered; one a test opens (start) flushes each line,
+## since the tests read the file as they go.
+var buffered := false
+var _unflushed := false
+var _flushed_at := 0
+
+
 func _write(text: String) -> void:
 	_mutex.lock()
 	if _file and not _in_write:
 		_in_write = true
 		var line := "[%s] %s" % [_clock(), text]
 		_file.store_line(line)
-		_file.flush()
+		if not buffered or text.begins_with("!!") or text.begins_with("stderr") or Time.get_ticks_msec() - _flushed_at >= int(FLUSH_S * 1000.0):
+			_file.flush()
+			_flushed_at = Time.get_ticks_msec()
+			_unflushed = false
+		else:
+			_unflushed = true
 		_tail.append(line)
 		if _tail.size() > TAIL_LINES:
 			_tail.pop_front()

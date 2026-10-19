@@ -40,6 +40,7 @@ func _process(_delta: float) -> void:
 
 
 func _ready() -> void:
+	SquadAI.profiling = true
 	GameState.zone_id = "test_perf_timing"
 	Campaign.campaign_id = "test_perf_timing_campaign"
 	CompoundLevel.spawn_ai = false
@@ -110,6 +111,11 @@ func _ready() -> void:
 	_timing = false
 	_timing_nav = false
 	_report("AI per frame (%d SquadAI)" % _ais.size(), _ai_ms)
+	var parts := SquadAI.prof.keys()
+	parts.sort_custom(func(a: StringName, b: StringName) -> bool: return int(SquadAI.prof[a][0]) > int(SquadAI.prof[b][0]))
+	for part: StringName in parts:
+		var e: Array = SquadAI.prof[part]
+		print("timing: AI part %s: %.1f ms in all, %d calls, worst %.2f ms" % [part, int(e[0]) / 1000.0, int(e[1]), int(e[2]) / 1000.0])
 	var worst := _ai_ms.find(_ai_ms.max())
 	print("timing: the AI's worst frame is fight frame %d (%s)" % [worst, _worst_ai])
 	_report("ZoneNav per frame in the fight", _nav_ms)

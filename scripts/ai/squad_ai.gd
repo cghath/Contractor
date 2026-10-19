@@ -220,6 +220,9 @@ const STACK_M := 1.5
 ## VoxelWorld.MATERIALS) scores this much worse than cover that stops a round arriving with
 ## SOFT_COVER_TEST_J (an M855 at close range), so AI picks concrete when it has the choice.
 const SOFT_COVER_PENALTY := 6.0
+## How much better low cover you can shoot over scores in find_cover (it's the most a candidate's
+## score can drop, so a candidate already this much worse than the best is skipped unchecked).
+const COVER_LOW_BONUS := 3.0
 const SOFT_COVER_TEST_J := 1650.0
 ## A hostile out of sight of the enemy this long pushes one bound toward where it was seen, to
 ## cover (Captain, 2026-10-17: "enemies also feed the meat grinder too much... they need to be
@@ -714,6 +717,21 @@ static func of(s: Node) -> SquadAI:
 	return s.get_node_or_null(^"SquadAI") as SquadAI if s else null
 
 
+## Timing (tests/perf_timing.gd turns it on): microseconds spent in each part of the tick, summed
+## over every brain, and the most any one call took.
+static var profiling := false
+static var prof := {}
+
+
+static func _p(part: StringName, since: int) -> int:
+	var now := Time.get_ticks_usec()
+	if profiling:
+		var e: Array = prof.get(part, [0, 0, 0])
+		var took := now - since
+		prof[part] = [int(e[0]) + took, int(e[1]) + 1, maxi(int(e[2]), took)]
+	return now
+
+
 func _physics_process(delta: float) -> void:
 	var started := Time.get_ticks_usec()
 	_tick(delta)
@@ -745,16 +763,20 @@ func _tick(delta: float) -> void:
 		return
 	_grenade_cd -= delta
 	_cover_cd -= delta
+	var t := Time.get_ticks_usec()
 	_notice_fire(now)
+	t = _p(&"notice_fire", t)
 	if body.threat_time > _last_contact:
 		_last_contact = body.threat_time
 	if not _reports.is_empty():
 		_take_reports(now)
+	t = _p(&"reports", t)
 	_scan_cd -= delta
 	if _scan_cd <= 0.0:
 		_scan_cd = SCAN_S
 		var previous := target
 		target = _find_target()
+		t = _p(&"find_target", t)
 		if target != null and (target != previous or target.vitals.is_up() != _acq_up):
 			_acquire(target)  # reaction time, first-shot error, snap-aim hold (or a dead-check's look)
 			if target != previous and target.vitals.is_up():
@@ -763,6 +785,7 @@ func _tick(delta: float) -> void:
 					callouts.contact(body, target)
 				if body.faction == &"hostile":
 					Alert.server_sighting(body, target.global_position)  # hot zones: he'll radio it in (4B part 3)
+	t = _p(&"acquire", t)
 	if target != null and target.vitals.is_up():
 		_last_contact = now
 		body.threat_pos = target.global_position
@@ -774,16 +797,23 @@ func _tick(delta: float) -> void:
 				squad.note_enemy(target, target.global_position)
 	else:
 		_no_los_s += delta  # a body being dead-checked is no contact
+	t = _p(&"contact", t)
 	_think_cd -= delta
 	if _think_cd <= 0.0:
 		_think_cd = THINK_S
 		_update_morale(THINK_S)
+		t = _p(&"morale", t)
 		_choose_intent()
+		t = _p(&"choose_intent", t)
 	_act()
+	t = _p(&"act", t)
 	_steer(delta)
+	t = _p(&"steer", t)
 	_shoot()
+	t = _p(&"shoot", t)
 	_hold_crouch()
 	body.ai_status = status_text()
+	_p(&"status", t)
 
 
 ## Whether the level's briefing is open (players planning before the deployment starts).
@@ -2662,11 +2692,14 @@ func morale_target() -> float:
 
 
 func _update_morale(dt: float) -> void:
+	var t0 := Time.get_ticks_usec()
 	var t := morale_target()
+	t0 = _p(&"morale_target", t0)
 	morale = move_toward(morale, t, (MORALE_FALL_PER_S if t < morale else MORALE_RISE_PER_S) * dt)
 	var state := "broken" if morale < MORALE_BROKEN else ("shaken" if morale < MORALE_SHAKEN else "steady")
 	if state != _morale_state:
 		print("[tactics] %s %s (morale %.2f)" % [body.name, state, morale])
+		t0 = _p(&"morale_print", t0)
 		_morale_state = state
 		if state != "broken":
 			_fall_back_point = null
@@ -3598,6 +3631,7 @@ func find_cover(anchor: Vector3, leash: float) -> Variant:
 	var world := body.get_world_3d()
 	var best: Variant = null
 	var best_score := INF
+	var taken := _covers_taken()  # (once a search, not once a candidate: perf, in-fight AI)
 	for ring in COVER_RINGS:
 		if ring > leash + 0.1:
 			break
@@ -3605,13 +3639,17 @@ func find_cover(anchor: Vector3, leash: float) -> Variant:
 			var angle := TAU * k / 12.0 + ring
 			var p := anchor + Vector3(cos(angle), 0.0, sin(angle)) * ring
 			var q := NavigationServer3D.map_get_closest_point(map, p)
-			if Vector2(q.x - p.x, q.z - p.z).length() > 0.6 or not _cover_protects(q) or _cover_taken(q):
+			if Vector2(q.x - p.x, q.z - p.z).length() > 0.6:
 				continue
 			var score := _flat_distance(q) + q.distance_to(anchor) * 0.5
+			if score - COVER_LOW_BONUS >= best_score:
+				continue  # it can't win even as the best low cover: skip its raycasts and voxel trace
+			if taken.any(func(c: Vector3) -> bool: return c.distance_to(q) < COVER_GAP_M) or not _cover_protects(q):
+				continue
 			if not VoxelWorld.stops_round_in(body, body.threat_pos + Vector3.UP * 1.5, q + Vector3.UP * 0.9, SOFT_COVER_TEST_J):
 				score += SOFT_COVER_PENALTY  # only wood or sheet metal in the way: rounds come through
 			if Throwables.clear_line(world, q + Vector3.UP * 1.6, body.threat_pos + Vector3.UP * 1.2):
-				score -= 3.0  # low cover: you can stand up and return fire
+				score -= COVER_LOW_BONUS  # low cover: you can stand up and return fire
 			score += maxf(0.0, 6.0 - q.distance_to(body.threat_pos)) * 2.0
 			if score < best_score:
 				best = q
@@ -3661,6 +3699,16 @@ func find_drag_cover(anchor: Vector3, leash: float) -> Variant:
 
 func _cover_protects(point: Vector3) -> bool:
 	return not Throwables.clear_line(body.get_world_3d(), body.threat_pos + Vector3.UP * 1.5, point + Vector3.UP * 0.9)
+
+
+## The cover spots other soldiers hold now (find_cover checks its candidates against them).
+func _covers_taken() -> Array[Vector3]:
+	var out: Array[Vector3] = []
+	for n in get_tree().get_nodes_in_group(&"combatants"):
+		var other := SquadAI.of(n)
+		if other and other != self and other._has_cover:
+			out.append(other._cover_point)
+	return out
 
 
 func _cover_taken(point: Vector3) -> bool:
@@ -3872,7 +3920,10 @@ func _sights_on_body(foe: Soldier) -> bool:
 
 
 func _shoot() -> void:
-	if LauncherAI.think(self):
+	var tla := Time.get_ticks_usec()
+	var launched := LauncherAI.think(self)
+	_p(&"shoot_launcher", tla)
+	if launched:
 		return  # the launcher has them: vehicles, a group behind cover, an order (wave 5)
 	var now := Soldier._now()
 	var weapon := body.active_weapon()
@@ -3903,7 +3954,9 @@ func _shoot() -> void:
 	if now < _next_shot or now < _pause_until or now < body._busy_until or not _gate_open(foe, error, aim_at):
 		return
 	# Nothing of the world in the way (v0.4.6: rounds went into the compound wall in front of them).
+	var tl := Time.get_ticks_usec()
 	var line := _fire_line_state(aim_at, foe)
+	_p(&"shoot_fire_line", tl)
 	if line != FireLine.CLEAR:
 		if line == FireLine.STAND:
 			body.want_crouch = false  # on his feet the line is clear: up to fire over it
@@ -3928,7 +3981,9 @@ func _shoot() -> void:
 	var dir := body.ai_spread_direction(weapon)  # the AI keeps its own cone (Captain, P0362)
 	var extra := deg_to_rad(_aim_error_deg(foe != null))
 	dir = (dir + Vector3(randf_range(-1, 1), randf_range(-1, 1), randf_range(-1, 1)) * tan(extra) * 0.6).normalized()
+	var tf := Time.get_ticks_usec()
 	body._server_fire.rpc_id(1, body.camera.global_position, dir, body.active_slot)
+	_p(&"shoot_fire_round", tf)
 
 
 ## Whether a round from here would get to `aim` (FireLine.CLEAR), would only from his feet while

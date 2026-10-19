@@ -58,6 +58,7 @@ const KIT_META := &"launcher_ai_kits"
 ## What one soldier is doing with their launcher.
 class State extends RefCounted:
 	var next_scan := 0.0
+	var next_unstrap := 0.0  # (a packed launcher looked for at most every UNSTRAP_CHECK_S)
 	var cooldown_until := 0.0
 	var engaged := false
 	var kind := ""  # "vehicle", "group" or "order"
@@ -87,6 +88,9 @@ static func insurgent_kit(level: Node) -> Array[StringName]:
 ## What `s` is doing with their launcher (or why not), for status lines and tests.
 static func status(s: Soldier) -> String:
 	return _state(s).why if s and s.has_meta(META) else ""
+
+
+const UNSTRAP_CHECK_S := 1.0
 
 
 static func _state(s: Soldier) -> State:
@@ -163,7 +167,12 @@ static func think(ai: SquadAI) -> bool:
 	if body == null:
 		return false
 	if body.inventory.slots.get(Launchers.SLOT, &"") == &"":
-		unstrap_packed(body)
+		# Perf (in-fight AI, 2026-10-19): this ran every physics frame for every soldier and walks
+		# the carrier's attach points; once a second is soon enough to unstrap a packed launcher.
+		var idle := _state(body)
+		if Soldier._now() >= idle.next_unstrap:
+			idle.next_unstrap = Soldier._now() + UNSTRAP_CHECK_S
+			unstrap_packed(body)
 		return false
 	var st := _state(body)
 	var now := Soldier._now()
