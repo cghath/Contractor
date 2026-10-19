@@ -186,9 +186,10 @@ void fragment() {
 		col *= mix(1.0, 1.0 + (hash12(floor(p / 0.1) + 17.0) - 0.5) * 0.08, voxel_near);  // the 10 cm voxel grid up close
 	}
 
-	// Rock on steep faces, per pixel, with horizontal strata.
+	// Rock on steep faces, per pixel, with horizontal strata. Not on dug earth: GroundCuts gives a
+	// crater's or a pit's walls alpha below 1 (the coarse ground's is 1), so they stay soil.
 	float slope = 1.0 - clamp(w_nrm.y, 0.0, 1.0);
-	float rock = smoothstep(0.20, 0.34, slope + (mid - 0.5) * 0.12);
+	float rock = smoothstep(0.20, 0.34, slope + (mid - 0.5) * 0.12) * COLOR.a;
 	float strata = vnoise(vec2(w_pos.y * 1.7, p.x * 0.02 + p.y * 0.02));
 	vec3 rock_col = rock_colour * mix(0.78, 1.15, strata) * mix(0.92, 1.06, fine);
 	col = mix(col, rock_col, rock);

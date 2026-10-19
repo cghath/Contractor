@@ -42,8 +42,8 @@ const SCORCH_REACH := 1.35
 ## PIT_EDGE_M; each dig takes it to the next of PIT_STAGES_M (a prone scrape, kneeling, standing).
 ## Digging on from inside one, facing on, makes it a trench. Proposed.
 const PIT_HALF_W := 0.6
-const PIT_AHEAD_M := 1.2
-const PIT_BEHIND_M := 0.6
+const PIT_AHEAD_M := 0.7
+const PIT_BEHIND_M := 0.9
 const PIT_EDGE_M := 0.3
 const PIT_STAGES_M: Array[float] = [0.45, 0.9, 1.4]
 const SCORCH := Color("33281d")
@@ -352,8 +352,10 @@ func _append_tile(c: Vector2i, data: PackedFloat32Array, verts: PackedVector3Arr
 			var sx := -coarse_n.x / maxf(coarse_n.y, 0.05) + ddx
 			var sz := -coarse_n.z / maxf(coarse_n.y, 0.05) + ddz
 			normals.append(Vector3(-sx, 1.0, -sz).normalized())
-			var colour := base.lerp(dirt, float(earth.get(f, 0.0)) * 0.85)
-			colours.append(colour.lerp(SCORCH, float(scorch.get(f, 0.0))))
+			var dug := float(earth.get(f, 0.0))
+			var colour := base.lerp(dirt, dug * 0.85).lerp(SCORCH, float(scorch.get(f, 0.0)))
+			colour.a = 1.0 - dug  # dug earth: the ground shader paints no rock on it
+			colours.append(colour)
 	for b in FINE:
 		for a in FINE:
 			var p := first + a + b * n
