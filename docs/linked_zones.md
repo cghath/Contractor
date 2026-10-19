@@ -355,7 +355,9 @@ and they come with the squad when it crosses.
    destroy the cache in the contract's zone and one in a linked neighbour. The leg's objectives
    are listed from the start with no place (`params.pending`), go live once the squad walks into
    its zone (`Contracts.server_arrived`), and only count in their own zone (`Objectives.here`).
-   Still to come: a manhunt across zones and a convoy chase.
+   Second (2026-10-19): **manhunt**. Intel at a site here says where the HVT went; take him alive
+   in the linked zone next door (`"leg_objectives"` / `"leg_modules"` stand in for a leg's
+   objectives and modules). Still to come: a convoy chase.
 
 LZ-1 stands alone. LZ-2 needs LZ-1. LZ-3 and LZ-4 both need LZ-2 and can run side by side. LZ-5 needs
 LZ-1 and wave 6d's heat; LZ-6 needs LZ-5's attacks to matter; LZ-7 needs LZ-4. Split squads on a

@@ -335,6 +335,21 @@ func _test_supply_line() -> void:
 	check(Objectives.here(placed[0], fake) and not Objectives.here(main_obj, fake) and String(placed[0].oid) == String(pending[0].oid),
 		"walked into the leg's zone it counts there, the first cache doesn't (same objective, placed)")
 	fake.free()
+	# The manhunt: the intel here, the man next door (its own leg objectives).
+	var hunt := {}
+	for z: Dictionary in MissionRegistry.zones():
+		if String(z.get("kind", "")) != "contract":
+			continue
+		var rng := RandomNumberGenerator.new()
+		rng.seed = hash(String(z.zone_id) + "hunt")
+		var o := ContractGen.generate(rng, {"type": "manhunt", "zone_id": String(z.zone_id), "source": "safe"})
+		if not (o.get("legs", []) as Array).is_empty():
+			hunt = o
+			break
+	var hunt_leg: Dictionary = hunt.legs[0] if not hunt.is_empty() else {}
+	check(not hunt.is_empty() and String(hunt.objectives[0].kind) == Objectives.EXTRACT_ITEM
+		and String((hunt_leg.objectives as Array)[0].kind) == Objectives.DELIVER_HVT and (hunt_leg.objectives[0] as Dictionary).has("person"),
+		"a manhunt: the intel in %s, the man to take alive in %s" % [hunt.get("zone_name", "?"), hunt_leg.get("zone_name", "?")])
 
 
 ## LZ-3, heli transport between zones: from `zone` the squad flies on to the base's other

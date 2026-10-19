@@ -73,7 +73,13 @@
 		 "brief": "Hostiles move weapons along a line of caches across neighbouring zones. Destroy the cache here and the one in the next zone over: walk on through the crossing between them (docs/linked_zones.md LZ-7).",
 		 "modules": ["outpost", "compound", "village", "checkpoint"], "legs": 1,
 		 "base_pay": 72000, "days": 2, "enemy_count": [4, 9], "enemy_quality": [0.3, 0.65], "threat_pool": ["mg_nest", "ied", "qrf"],
-		 "objectives": [{"kind": "destroy_cache", "site": "cache", "text": "Destroy the {name}"}]}
+		 "objectives": [{"kind": "destroy_cache", "site": "cache", "text": "Destroy the {name}"}]},
+		{"type": "manhunt", "name": "Manhunt",
+		 "brief": "A hostile HVT has moved on. His people left intel behind at a site in this zone saying where: grab it, then follow him into the zone next door (walk on through the crossing between them), take him alive and bring him to extraction there (docs/linked_zones.md LZ-7).",
+		 "modules": ["compound", "village", "outpost", "checkpoint"], "legs": 1, "leg_modules": ["compound", "village", "town", "outpost"],
+		 "base_pay": 80000, "days": 2, "enemy_count": [4, 9], "enemy_quality": [0.35, 0.7], "threat_pool": ["sniper", "qrf", "ied"],
+		 "objectives": [{"kind": "extract_item", "site": "intel", "text": "Recover the {name}: it says where he went"}],
+		 "leg_objectives": [{"kind": "deliver_hvt", "site": "hvt", "text": "Capture {name} and bring them to extraction alive"}]}
 	],
 
 	"_modules": "Sites per module type, in metres from the module's origin on the ground (the zone module types of ZoneModules; the compound as CompoundLevel builds it). rect [x, z, w, d] (clear an area), pos [x, y, z], box [[x, y, z], [x, y, z]] (a cache: \"voxels\" is its solid count on the pristine module, \"auto\" counts it from the module's boxes). \"place\": an intel item the mission puts there; \"items\"/\"tags\": what counts as carried out; \"hvt\" + \"person\": a person the mission puts there (side hostile: an HVT to capture, friendly: a hostage); \"of_hvt\": an item the HVT of that site carries. \"civilians\": people going about their day there while a contract runs in the zone (\"routine\": points they walk between).",

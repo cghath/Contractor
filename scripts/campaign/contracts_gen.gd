@@ -289,21 +289,28 @@ static func mission_target(rng: RandomNumberGenerator, def: Dictionary, zone_id:
 ## A multi-zone contract's legs (docs/linked_zones.md LZ-7, call 13: "objectives over 2-3 linked
 ## zones"): for a type with "legs": n, n of `zone_id`'s neighbours on the region map (RegionMap;
 ## contract zones with a module the type plays in), each with its own target module and
-## objectives ({"zone_id", "zone_name", "module", "module_id", "objectives"}). [] for any other type.
+## objectives ({"zone_id", "zone_name", "module", "module_id", "objectives"}). A type's own
+## "leg_objectives" and "leg_modules" (a manhunt: the intel here, the man next door) stand in for
+## its "objectives" and "modules" there. [] for any other type.
 static func _legs(rng: RandomNumberGenerator, def: Dictionary, zone_id: String, target: String) -> Array:
 	var want := int(def.get("legs", 0))
 	if want <= 0 or zone_id == "":
 		return []
 	var pick := RandomNumberGenerator.new()
 	pick.seed = hash([rng.state, "legs"])
-	var allowed := MissionRegistry.type_modules(def)
+	var leg_def := def.duplicate(true)
+	if def.has("leg_objectives"):
+		leg_def["objectives"] = def.leg_objectives
+	if def.has("leg_modules"):
+		leg_def["modules"] = def.leg_modules
+	var allowed := MissionRegistry.type_modules(leg_def)
 	var options: Array = RegionMap.links(zone_id).map(func(l: Dictionary) -> String: return String(l.to)).filter(func(z: String) -> bool:
 		return z != RegionMap.BASE and String(MissionRegistry.zone(z).get("kind", "")) == "contract" \
 			and (MissionRegistry.zone_def(z).get("modules", []) as Array).any(func(m: Dictionary) -> bool: return ZoneModules.base(String(m.type)) in allowed))
 	var out: Array = []
 	while out.size() < want and not options.is_empty():
 		var z: String = options.pop_at(pick.randi() % options.size())
-		var m := mission_target(pick, def, z, target)
+		var m := mission_target(pick, leg_def, z, target)
 		out.append({"zone_id": z, "zone_name": String(MissionRegistry.zone(z).get("name", z)), "module": m.module, "module_id": m.module_id, "objectives": m.objectives})
 	return out
 
