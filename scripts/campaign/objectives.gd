@@ -146,6 +146,12 @@ static func leg_objectives(contract: Dictionary, k: int, origin: Vector3, pendin
 	return out
 
 
+## `objectives` less a multi-zone contract's legs not placed yet (LZ-7: what goes live in this
+## zone; a leg goes live when the squad walks into its own, Contracts.server_arrived).
+static func placed(objectives: Array) -> Array:
+	return objectives.filter(func(o: Dictionary) -> bool: return not (o.get("params", {}) as Dictionary).get("pending", false))
+
+
 ## Whether objective `o` plays in the level the session is in now (LZ-7: a leg in another zone
 ## waits for the squad to walk there).
 static func here(o: Dictionary, level: Node) -> bool:

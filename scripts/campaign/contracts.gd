@@ -206,7 +206,8 @@ func server_arrived(zone_id: String) -> void:
 				contract_returned.emit(cid, placed.filter(func(o: Dictionary) -> bool: return String(objectives.get_objective(String(o.oid)).get("state", "")) == Objectives.ACTIVE))
 			else:
 				(dep.live_legs as Array).append(key)
-				contract_live.emit(cid, placed)
+				# (a chase stopped before it got away: its leg is done, nothing to start)
+				contract_live.emit(cid, placed.filter(func(o: Dictionary) -> bool: return String(objectives.get_objective(String(o.oid)).get("state", "")) == Objectives.ACTIVE))
 				SessionLog.note("contract %s: its leg in %s is live" % [cid, zone_id])
 
 
@@ -583,7 +584,7 @@ func server_start_deployment(cids: Array = [], zone_id := "", origin := Vector3.
 	_commit()
 	deployment_started.emit(s.deployment)
 	for cid: String in live:
-		contract_live.emit(cid, live[cid])
+		contract_live.emit(cid, Objectives.placed(live[cid]))
 	return ""
 
 
@@ -694,7 +695,7 @@ func server_radio_contract(type_id := "", module_id := "", why := "") -> String:
 	if why != "":
 		_notify_all("Radio, %s: %s New contract: %s" % [MissionRegistry.faction_name(employer), why, c.title])
 	_commit()
-	contract_live.emit(c.cid, added)
+	contract_live.emit(c.cid, Objectives.placed(added))
 	return c.cid
 
 

@@ -206,6 +206,23 @@ func _hostiles_near(pos: Vector3, radius: float) -> int:
 
 func _mark(run: Dictionary, o: Dictionary, state: String, progress := "") -> void:
 	Contracts.objectives.server_set_state(String(run.oid), state, progress)
+	if String(o.get("kind", "")) == Objectives.CONVOY and not o.has("leg"):
+		_chase_after(String(run.cid), state)
+
+
+## A convoy chase (LZ-7, contracts.json "chase"): the convoy stopped here, its leg's convoy is
+## done too (nothing got away to chase); got away, the squad hears where it went.
+func _chase_after(cid: String, state: String) -> void:
+	var c := Contracts.contract(cid)
+	if not bool(MissionRegistry.type_def(String(c.get("type", ""))).get("chase", false)) or (c.get("legs", []) as Array).is_empty():
+		return
+	var leg: Dictionary = c.legs[0]
+	if state == Objectives.DONE:
+		for o: Dictionary in Contracts.objectives.list:
+			if String(o.cid) == cid and o.has("leg") and String(o.kind) == Objectives.CONVOY and String(o.state) == Objectives.ACTIVE:
+				Contracts.objectives.server_set_state(String(o.oid), Objectives.DONE, "stopped before it got away")
+	elif state == Objectives.FAILED:
+		Contracts._notify_all("The convoy got away into %s: chase it through the crossing." % String(leg.zone_name))
 
 
 func _progress(run: Dictionary, o: Dictionary) -> String:

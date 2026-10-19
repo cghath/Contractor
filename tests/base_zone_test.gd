@@ -326,6 +326,8 @@ func _test_supply_line() -> void:
 	check(pending.size() == (leg.objectives as Array).size() and pending.all(func(o: Dictionary) -> bool:
 		return o.params.get("pending", false) and (o.pos as Array).is_empty() and String(o.text).contains(String(leg.zone_name)) and o.cid == "sl1"),
 		"the leg is listed from the start, with no place yet, named by its zone")
+	check(Objectives.placed(objs).size() == objs.size() - pending.size() and not Objectives.placed(objs).any(func(o: Dictionary) -> bool: return o.has("leg")),
+		"and only what's placed goes live at the start (no leg's HVT or convoy in the first zone)")
 	var main_obj: Dictionary = objs[0]
 	var fake := ZoneLevel.new()
 	fake.def = {"id": String(c.zone_id), "crossings": [{}]}
@@ -350,6 +352,22 @@ func _test_supply_line() -> void:
 	check(not hunt.is_empty() and String(hunt.objectives[0].kind) == Objectives.EXTRACT_ITEM
 		and String((hunt_leg.objectives as Array)[0].kind) == Objectives.DELIVER_HVT and (hunt_leg.objectives[0] as Dictionary).has("person"),
 		"a manhunt: the intel in %s, the man to take alive in %s" % [hunt.get("zone_name", "?"), hunt_leg.get("zone_name", "?")])
+	# The convoy chase: here a bonus, the convoy next door the job (already rolling).
+	var chase := {}
+	for z: Dictionary in MissionRegistry.zones():
+		if String(z.get("kind", "")) != "contract":
+			continue
+		var rng := RandomNumberGenerator.new()
+		rng.seed = hash(String(z.zone_id) + "chase")
+		var o := ContractGen.generate(rng, {"type": "convoy_chase", "zone_id": String(z.zone_id), "source": "safe"})
+		if not (o.get("legs", []) as Array).is_empty():
+			chase = o
+			break
+	var here_convoy: Array = (chase.get("objectives", []) as Array).filter(func(o: Dictionary) -> bool: return String(o.kind) == Objectives.CONVOY)
+	var leg_convoy: Array = ((chase.legs[0].objectives if not chase.is_empty() else []) as Array).filter(func(o: Dictionary) -> bool: return String(o.kind) == Objectives.CONVOY)
+	check(not here_convoy.is_empty() and bool(here_convoy[0].get("optional", false)) and not leg_convoy.is_empty() and not bool(leg_convoy[0].get("optional", false))
+		and float(leg_convoy[0].params.depart_s) <= 90.0,
+		"a convoy chase: stopping it here a bonus, the one next door the job, rolling within %.0f s" % (float(leg_convoy[0].params.depart_s) if not leg_convoy.is_empty() else -1.0))
 
 
 ## LZ-3, heli transport between zones: from `zone` the squad flies on to the base's other

@@ -79,7 +79,14 @@
 		 "modules": ["compound", "village", "outpost", "checkpoint"], "legs": 1, "leg_modules": ["compound", "village", "town", "outpost"],
 		 "base_pay": 80000, "days": 2, "enemy_count": [4, 9], "enemy_quality": [0.35, 0.7], "threat_pool": ["sniper", "qrf", "ied"],
 		 "objectives": [{"kind": "extract_item", "site": "intel", "text": "Recover the {name}: it says where he went"}],
-		 "leg_objectives": [{"kind": "deliver_hvt", "site": "hvt", "text": "Capture {name} and bring them to extraction alive"}]}
+		 "leg_objectives": [{"kind": "deliver_hvt", "site": "hvt", "text": "Capture {name} and bring them to extraction alive"}]},
+		{"type": "convoy_chase", "name": "Convoy chase", "scenario": "convoy", "legs": 1, "chase": true,
+		 "brief": "An enemy convoy drives across the zone and on into the next. Stop it here for a bonus; if it gets away, chase it through the crossing and stop it there (already rolling when you arrive). Stopped here, the job is done (docs/linked_zones.md LZ-7).",
+		 "modules": ["outpost", "checkpoint", "village", "compound"], "base_pay": 70000, "days": 2, "enemy_count": [5, 10], "enemy_quality": [0.3, 0.7],
+		 "threat_pool": ["mg_nest", "armor", "qrf"],
+		 "scenario_knobs": {"road_offset_m": 80, "waypoint_m": 160, "trucks": [1, 2], "escorts": [1, 2], "depart_s": [420, 600], "speed_kmh": 28, "cargo_bonus_share": 0.1},
+		 "leg_scenario_knobs": {"road_offset_m": 80, "waypoint_m": 160, "trucks": [1, 2], "escorts": [1, 2], "depart_s": [45, 90], "speed_kmh": 28, "cargo_bonus_share": 0.1},
+		 "objectives": []}
 	],
 
 	"_modules": "Sites per module type, in metres from the module's origin on the ground (the zone module types of ZoneModules; the compound as CompoundLevel builds it). rect [x, z, w, d] (clear an area), pos [x, y, z], box [[x, y, z], [x, y, z]] (a cache: \"voxels\" is its solid count on the pristine module, \"auto\" counts it from the module's boxes). \"place\": an intel item the mission puts there; \"items\"/\"tags\": what counts as carried out; \"hvt\" + \"person\": a person the mission puts there (side hostile: an HVT to capture, friendly: a hostage); \"of_hvt\": an item the HVT of that site carries. \"civilians\": people going about their day there while a contract runs in the zone (\"routine\": points they walk between).",

@@ -198,6 +198,13 @@ static func generate(rng: RandomNumberGenerator, ctx: Dictionary) -> Dictionary:
 	var day := int(ctx.get("day", 1))
 	var mission := mission_target(rng, def, String(zone.get("zone_id", "")), target, at_module, ctx.get("avoid_modules", []))
 	var legs := _legs(rng, def, String(zone.get("zone_id", "")), target)
+	if def.get("chase", false) and not legs.is_empty():
+		# A chase (LZ-7): stopping it here is the bonus; got away, the job goes on next door.
+		for o: Dictionary in mission.objectives:
+			if String(o.get("kind", "")) == Objectives.CONVOY:
+				o["optional"] = true
+				o["bonus_share"] = 0.15
+				o["text"] = "Bonus: %s (got away, chase it into %s)" % [String(o.get("text", "")), String(legs[0].zone_name)]
 	var limit_min := int(def.get("time_limit_min", 0))
 	# Wave 6c: a flashpoint the faction war just handed to `target` says so up front.
 	var war_driven := hot and WorldSites.is_flashpoint(String(zone.get("zone_id", "")))
@@ -303,6 +310,8 @@ static func _legs(rng: RandomNumberGenerator, def: Dictionary, zone_id: String, 
 		leg_def["objectives"] = def.leg_objectives
 	if def.has("leg_modules"):
 		leg_def["modules"] = def.leg_modules
+	if def.has("leg_scenario_knobs"):
+		leg_def["scenario_knobs"] = def.leg_scenario_knobs
 	var allowed := MissionRegistry.type_modules(leg_def)
 	var options: Array = RegionMap.links(zone_id).map(func(l: Dictionary) -> String: return String(l.to)).filter(func(z: String) -> bool:
 		return z != RegionMap.BASE and String(MissionRegistry.zone(z).get("kind", "")) == "contract" \

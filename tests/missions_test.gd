@@ -88,9 +88,9 @@ func check(condition: bool, what: String) -> void:
 
 func _test_generation() -> void:
 	print("Mission types in the zones")
-	var nine: Array[String] = ["raid", "hvt_capture", "hostage_rescue", "intel_grab", "convoy_ambush", "defend_hold", "crew_rescue", "sabotage", "recon", "psd_escort", "supply_line", "manhunt"]
+	var nine: Array[String] = ["raid", "hvt_capture", "hostage_rescue", "intel_grab", "convoy_ambush", "defend_hold", "crew_rescue", "sabotage", "recon", "psd_escort", "supply_line", "manhunt", "convoy_chase"]
 	check(MissionRegistry.types() == nine,
-		"Captain's first four mission types, then mission variety's convoy ambush, hold the line, crew rescue, sabotage and recon, the client escort, the supply line and the manhunt (%s)" % [MissionRegistry.types()])
+		"Captain's first four mission types, then mission variety's convoy ambush, hold the line, crew rescue, sabotage and recon, the client escort, the supply line, the manhunt and the convoy chase (%s)" % [MissionRegistry.types()])
 	var sound := true
 	var zones_ok := true
 	for z: Dictionary in MissionRegistry.zones():
@@ -941,6 +941,7 @@ func _test_enemy_response() -> void:
 			er._set_route(looker.squad, er._living(looker.soldiers), looker.walk)
 	# Suicide bombers (wave 6f): no rifle, a heavy vest, straight at the squad; at TRIGGER_M he goes off.
 	var bombers := Bombers.of(level)
+	var unhurt := player.vitals.server_snapshot()  # (the bomber below goes off 5 m from him)
 	check(bombers != null, "the zone can send suicide bombers")
 	if bombers:
 		var far := bombers.server_send(level.ground_point(player.global_position + Vector3(40, 0, 0)))
@@ -963,6 +964,8 @@ func _test_enemy_response() -> void:
 		var truck := bombers.server_send_vbied(level.ground_point(player.global_position + Vector3(80, 0, 0)))
 		check(truck != null and bombers.vbieds.size() == 1 and truck.model == Bombers.VBIED_MODEL, "a VBIED: a technical with a driver sets out")
 		if truck and not bombers.vbieds.is_empty():
+			player.vitals.server_restore(unhurt)  # (up again: a VBIED only drives at the squad that's up)
+			await _frames(2)
 			var off := bombers.detonated
 			truck.global_position = player.global_position + Vector3(9, 0.3, 0)
 			bombers.server_tick()
