@@ -240,6 +240,11 @@ func _test_stance_and_carry() -> void:
 	check((-run.basis.z).y < (-ready.basis.z).y - 0.3, "on the move the rifle's carried muzzle-down (%.2f vs %.2f)" % [(-run.basis.z).y, (-ready.basis.z).y])
 	check(absf(reload.basis.x.y) > 0.4, "reloading it's rolled onto its side (%.2f)" % reload.basis.x.y)
 	check(aim.is_equal_approx(GearRig.held_transform(art, true, false)), "aiming, neither applies")
+	var kicked := GearRig.held_transform(art, true, false, NAN, 0.0, 0.0, 1.0)
+	var aimed := GearRig.held_transform(art, true, false)
+	check((-kicked.basis.z).y > (-aimed.basis.z).y + 0.05 and kicked.origin.z > aimed.origin.z, "a shot kicks the rifle back and its muzzle up")
+	var walled := GearRig.held_transform(art, false, false, NAN, 0.0, 0.0, 0.0, 1.0)
+	check((-walled.basis.z).y > (-ready.basis.z).y + 0.3 and walled.origin.z > ready.origin.z + 0.1, "against a wall the rifle comes back and tips up (compressed)")
 
 
 ## First person: not aiming or firing for a moment, the weapon eases down to the low ready.

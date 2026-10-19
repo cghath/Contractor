@@ -639,6 +639,29 @@ func _restore_bodies() -> void:
 @rpc("authority", "call_local", "unreliable")
 func show_tracer(origin: Vector3, end: Vector3, suppressed: bool, kind: int = Tracer.Kind.RED) -> void:
 	Tracer.spawn(self, origin, end, suppressed, kind)
+	_kick_shooter(origin)
+
+
+## The soldier whose shot left from `origin` (the nearest within KICK_FIND_M): their weapon kicks
+## (CharacterModel.kick), on every peer (the Captain's reference: recoil moves the weapon).
+const KICK_FIND_M := 1.6
+
+
+func _kick_shooter(origin: Vector3) -> void:
+	var best: Soldier = null
+	var best_d := KICK_FIND_M
+	for n: Node in get_tree().get_nodes_in_group(&"combatants"):
+		var s := n as Soldier
+		if s == null:
+			continue
+		var d := (s.global_position + Vector3.UP * 1.35).distance_to(origin)  # the muzzle's about shoulder height
+		if d < best_d:
+			best_d = d
+			best = s
+	if best:
+		var w := best.active_weapon()
+		var strength := clampf(float(w.stats.get("recoil_deg", 0.7)) / 0.7, 0.4, 2.0) if w else 1.0
+		best.model.kick(strength)
 
 
 @rpc("authority", "call_local", "unreliable")

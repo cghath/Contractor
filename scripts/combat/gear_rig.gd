@@ -72,7 +72,7 @@ const LOW_READY_DIP := 0.12
 const LOW_READY_TURN := 0.08
 const PISTOL_AIM := Vector3(0.0, 0.16, -0.44)
 ## On the move (the Captain's Star Citizen reference, 2026-10-18): jogging or sprinting the
-## rifle drops to a relaxed carry along the body, muzzle down, by the firing hip
+## rifle drops to a relaxed carry along the body, muzzle down, by the firing hip, two-handed
 ## (CharacterModel.run_carry blends it in). Reloading it rolls RELOAD_ROLL onto its side and
 ## comes in and up RELOAD_IN, the magazine well turned to the eye (CharacterModel.reload_roll).
 const RUN_POCKET := Vector3(0.13, -0.2, -0.06)
@@ -80,6 +80,18 @@ const RUN_DIP := 1.05
 const RUN_TURN := 0.35
 const RELOAD_ROLL := 0.75
 const RELOAD_IN := Vector3(-0.06, 0.07, -0.06)
+## A shot's kick at full strength: back into the shoulder and the muzzle up (radians).
+const KICK_BACK := 0.05
+const KICK_PITCH := 0.12
+## Close to a wall (the Captain's reference: stacked on a corner, the rifle compressed so the barrel
+## stays behind the wall line): within COMPRESS_REACH_M ahead of the chest the rifle comes back up
+## to COMPRESS_BACK and tips up COMPRESS_PITCH, fully at COMPRESS_MIN_M. Looked for every
+## COMPRESS_EVERY frames.
+const COMPRESS_REACH_M := 0.9
+const COMPRESS_MIN_M := 0.35
+const COMPRESS_BACK := 0.22
+const COMPRESS_PITCH := 0.6
+const COMPRESS_EVERY := 4
 const PISTOL_READY := Vector3(0.06, -0.12, -0.32)
 const PISTOL_READY_DIP := 0.45
 ## Seated in a vehicle (CharacterModel.is_seated; Captain, 2026-10-14: the UH-60M's riders held
@@ -1005,7 +1017,7 @@ func rest_transform(slot: StringName) -> Transform3D:
 ## Where a held weapon (VoxelArt model `art`) sits in hands_anchor space, aiming or at the
 ## ready, for the firing shoulder (see SHOULDER_POCKET), the upper body twisted by `twist`
 ## (CharacterModel.twist_shown; NAN: fully bladed).
-static func held_transform(art: String, aiming: bool, left: bool, twist := NAN, run := 0.0, reload := 0.0) -> Transform3D:
+static func held_transform(art: String, aiming: bool, left: bool, twist := NAN, run := 0.0, reload := 0.0, kick := 0.0, compress := 0.0) -> Transform3D:
 	var s := -1.0 if left else 1.0
 	if is_nan(twist):
 		twist = CharacterModel.blade_twist(left)
@@ -1025,6 +1037,12 @@ static func held_transform(art: String, aiming: bool, left: bool, twist := NAN, 
 		if reload > 0.0 and not aiming:
 			basis = basis * Basis(Vector3.BACK, RELOAD_ROLL * s * clampf(reload, 0.0, 1.0))
 			pocket += RELOAD_IN * clampf(reload, 0.0, 1.0)
+		if compress > 0.0:
+			basis = Basis(Vector3.RIGHT, COMPRESS_PITCH * clampf(compress, 0.0, 1.0)) * basis
+			pocket += Vector3(0.0, 0.04, COMPRESS_BACK) * clampf(compress, 0.0, 1.0)
+		if kick > 0.0:
+			basis = Basis(Vector3.RIGHT, KICK_PITCH * kick) * basis
+			pocket += Vector3(0.0, 0.0, KICK_BACK * kick)
 		return Transform3D(basis, Basis(Vector3.UP, twist) * (pocket * Vector3(s, 1, 1)) - basis * VoxelArt.butt_point(art))
 	if aiming:
 		return Transform3D(Basis.IDENTITY, PISTOL_AIM)
@@ -1051,13 +1069,43 @@ static func seated_transform(art: String, left: bool, room: float) -> Transform3
 func _hold_goal(art: String) -> Transform3D:
 	if model.is_seated() and not model.is_ffv():
 		return seated_transform(art, model.left_handed, model.seat_room())
-	return held_transform(art, model.aiming, model.left_handed, model.twist_shown(), model.run_carry(), model.reload_roll())
+	return held_transform(art, model.aiming, model.left_handed, model.twist_shown(), model.run_carry(), model.reload_roll(),
+		model.kick_shown(), _compress)
+
+
+## 0..1: how close a wall ahead has pushed the rifle back (_look_for_wall).
+var _compress := 0.0
+var _compress_n := 0
+
+
+## Every COMPRESS_EVERY frames: a ray ahead of the chest, level, for a wall within COMPRESS_REACH_M.
+func _look_for_wall(delta: float) -> void:
+	_compress_n += 1
+	if _compress_n >= COMPRESS_EVERY:
+		_compress_n = 0
+		var want := 0.0
+		if model.is_inside_tree() and not model.is_seated():
+			var fwd := -model.global_basis.z
+			fwd.y = 0.0
+			if fwd.length() > 0.01:
+				var from := model.torso.global_position + Vector3.UP * 0.25
+				var q := PhysicsRayQueryParameters3D.create(from, from + fwd.normalized() * COMPRESS_REACH_M, 1)
+				var hit := model.get_world_3d().direct_space_state.intersect_ray(q)
+				if not hit.is_empty():
+					var d := from.distance_to(hit.position)
+					want = clampf((COMPRESS_REACH_M - d) / (COMPRESS_REACH_M - COMPRESS_MIN_M), 0.0, 1.0)
+		_compress_want = want
+	_compress = move_toward(_compress, _compress_want, delta * 5.0)
+
+
+var _compress_want := 0.0
 
 
 ## Moves the weapon in the hands towards where it sits now (raised to aim, or at the ready).
 func _ease_held(delta: float) -> void:
 	if _held_key == &"" or _held_key == &"hands" or not _gear.has(_held_key):
 		return
+	_look_for_wall(delta)
 	var node: Node3D = _gear[_held_key][1]
 	var goal := _hold_goal(VoxelArt.model_for(ItemDB.get_item(_gear[_held_key][0])))
 	node.transform = node.transform.interpolate_with(goal, minf(delta * HOLD_EASE, 1.0))

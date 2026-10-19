@@ -42,6 +42,12 @@ const RELOAD_HAND_OUT := 0.4
 const RELOAD_HAND_IN := 0.62
 const RELOAD_HAND_BACK := 0.85
 const RELOAD_HAND_DROP := Vector3(0.02, -0.2, 0.06)
+## Each shot (Soldier.recoil_return growing) the view model kicks back VIEW_KICK_BACK (m) and its
+## muzzle up VIEW_KICK_PITCH (radians) x the weapon's recoil against a rifle's, settling at
+## VIEW_KICK_DECAY a second (aimed, a third of it: the stock's in the shoulder).
+const VIEW_KICK_BACK := 0.035
+const VIEW_KICK_PITCH := 0.09
+const VIEW_KICK_DECAY := 10.0
 const ADS_EYE := Vector3(0.0, 0.0, -0.19)
 const ADS_EYE_PISTOL := Vector3(0.0, 0.0, -0.5)
 ## Recoil settling back (Soldier.RECOIL_SETTLE), per second: most of it within a quarter second.
@@ -89,6 +95,9 @@ var _vm_base := HIP_VIEW   # the view model's place before its bob
 var _bob_w := 0.0          # 0..1: how much the steps move the view (not aiming, on the ground)
 var _sprint_w := 0.0       # 0..1: the weapon in its sprint carry
 var _low_w := 0.0          # 0..1: the weapon down at the low ready
+var _view_kick := 0.0      # 0..2: a shot's kick, settling
+var _vm_pitch := 0.0       # the view model's eased pitch, before the kick
+var _last_recoil := 0.0
 var _ready_hold := 0.0     # seconds before it eases down to the low ready
 var _reload_w := 0.0       # 0..1: the weapon rolled in to reload
 var _reload_from := 0.0    # Soldier._now() the reload started (its length: _reload_len)
@@ -403,7 +412,15 @@ func _physics_process(delta: float) -> void:
 		_try_fire()
 	var tilt := minf(minf(-0.7 if body.movement.mantling else 0.0, -CharacterModel.VIEW_LOWER_PITCH * body.model.view_lower()), SPRINT_TILT.x * _sprint_w)  # mantling: weapon down
 	tilt = minf(tilt, minf(LOW_READY_TILT.x * _low_w, RELOAD_TILT * _reload_w))
-	body.view_model.rotation.x = move_toward(body.view_model.rotation.x, tilt, delta * 6.0)
+	_vm_pitch = move_toward(_vm_pitch, tilt, delta * 6.0)
+	body.view_model.rotation.x = _vm_pitch
+	if body.recoil_return > _last_recoil + 0.0001:  # a shot: the weapon kicks
+		var w := body.active_weapon()
+		_view_kick = clampf(_view_kick + (clampf(float(w.stats.get("recoil_deg", 0.7)) / 0.7, 0.4, 2.0) if w else 1.0), 0.0, 2.0)
+	_last_recoil = body.recoil_return
+	_view_kick = move_toward(_view_kick, 0.0, delta * VIEW_KICK_DECAY)
+	var kick_k := _view_kick * (0.35 if body.is_aiming else 1.0)
+	body.view_model.rotation.x += VIEW_KICK_PITCH * kick_k
 	# Both hands on the casualty: no weapon in view; nor seated in a vehicle (no firing your own
 	# from a seat, and in first person it hid the cabin and poked through the dash), unless it's a
 	# fire-from-vehicle seat (VehicleBay: your own weapon up); nor dead, waiting to respawn.
@@ -663,7 +680,7 @@ func _update_aim(delta: float) -> void:
 	var side_v := Vector3(-1.0 if body.left_handed else 1.0, 1, 1)
 	var settle := LOW_READY_VIEW * side_v * _low_w + RELOAD_VIEW * side_v * _reload_w
 	_vm_base = _vm_base.lerp((aimed_view if body.is_aiming else hip_view) + lowered + pulled + settle, minf(delta * rate, 1.0))
-	body.view_model.position = _vm_base + weapon_bob()
+	body.view_model.position = _vm_base + weapon_bob() + Vector3(0.0, 0.0, VIEW_KICK_BACK * _view_kick * (0.35 if body.is_aiming else 1.0))
 
 
 ## How far a wall ahead pushes the weapon back now: 0 clear (past WALL_PULL_REACH_M from the eye)
@@ -849,9 +866,9 @@ func _update_reload_hand() -> void:
 	_support_arm.transform = Transform3D(_support_rest.basis, _support_rest.origin + offset)
 
 
-## Tests: the first-person carry weights now {"low", "reload", "sprint"} and the support hand's offset from rest.
+## Tests: the first-person carry weights now {"low", "reload", "sprint", "kick"} and the support hand's offset from rest.
 func view_carry() -> Dictionary:
-	return {"low": _low_w, "reload": _reload_w, "sprint": _sprint_w,
+	return {"low": _low_w, "reload": _reload_w, "sprint": _sprint_w, "kick": _view_kick,
 		"hand": _support_arm.transform.origin - _support_rest.origin if is_instance_valid(_support_arm) else Vector3.ZERO}
 
 

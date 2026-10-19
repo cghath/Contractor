@@ -399,9 +399,14 @@ var _was_prone := false
 var _stance_move := &""   # &"down" (going prone), &"up" (getting up), &"" none
 var _stance_t := 99.0
 ## The rifle's carry on the move (the same reference): jogging or sprinting, not aiming, it drops
-## muzzle-down along the body, one-handed (GearRig.held_transform's `run`). Eased 0..1.
+## muzzle-down along the body, both hands still on it (GearRig.held_transform's `run`; Captain,
+## 2026-10-18, v0.4.43: a one-handed carry looked wrong on the AI). Eased 0..1.
 const RUN_CARRY_EASE := 4.0
 var _run_carry := 0.0
+## A shot's kick (CharacterModel.kick, from every peer's tracer: CompoundLevel.show_tracer): the
+## held weapon jumps back and up by GearRig.KICK_* and settles over 1 / KICK_DECAY seconds.
+const KICK_DECAY := 9.0
+var _kick := 0.0
 ## Reloading: how far the weapon is rolled and brought in to work the magazine (GearRig), eased 0..1.
 const RELOAD_EASE := 7.0
 var _reload_w := 0.0
@@ -1825,6 +1830,17 @@ func _update_stance_move(delta: float) -> void:
 	var running := (_gait == JOG or _gait == SPRINT) and not aiming and not reloading and not downed and not is_seated()
 	_run_carry = move_toward(_run_carry, 1.0 if running else 0.0, delta * RUN_CARRY_EASE)
 	_reload_w = move_toward(_reload_w, 1.0 if reloading else 0.0, delta * RELOAD_EASE)
+	_kick = move_toward(_kick, 0.0, delta * KICK_DECAY)
+
+
+## A shot fired: the held weapon kicks (`strength` 0..2, the weapon's recoil against a rifle's).
+func kick(strength := 1.0) -> void:
+	_kick = clampf(maxf(_kick, 0.0) + strength, 0.0, 2.0)
+
+
+## 0..2: the weapon's kick now (GearRig).
+func kick_shown() -> float:
+	return _kick
 
 
 ## 0..1: the rifle's muzzle-down carry on the move (GearRig).
@@ -1912,8 +1928,6 @@ func _held_goals() -> Array:
 		support = _grip.lerp(_support, 0.35) + Vector3(0, -0.11 + sin(_time * 9.0) * 0.025, 0)
 	var firing := [key, torso.to_local(_held.to_global(_grip))]
 	var other := [key, torso.to_local(_held.to_global(support))]
-	if _run_carry > 0.5 and _held_weapon and not is_seated():
-		other = ["swing", null]  # on the move: carried one-handed, the support arm swings
 	return [other, firing] if left_handed and _held_weapon else [firing, other]
 
 
