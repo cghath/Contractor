@@ -1006,6 +1006,21 @@ func _log_open_breaks() -> void:
 ## Publishes net_state when it changed: at once when forced or when consciousness, arrest or
 ## death flags changed, otherwise at most every NET_INTERVAL_S. Countdowns alone don't count
 ## as a change (clients run them down themselves).
+## Host: this body's whole condition (the wound model, downed, the triage card), to carry into the
+## next zone (LZ-2 crossings); server_restore puts it on a fresh body there.
+func server_snapshot() -> Dictionary:
+	return {"model": _model.snapshot(), "downed": downed, "triage": _triage}
+
+
+func server_restore(snap: Dictionary) -> void:
+	if not multiplayer.is_server() or snap.is_empty():
+		return
+	_model.restore(snap.get("model", {}))
+	_triage = snap.get("triage", _triage)
+	downed = bool(snap.get("downed", false))
+	_publish(true)
+
+
 func _publish(force: bool) -> void:
 	var state := _model.to_net()
 	state["tg"] = String(_triage)

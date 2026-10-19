@@ -459,6 +459,11 @@ func base_level():
 static var base_zone_mode := -1
 ## Host: the crossing the next level the squad goes to puts them at (set_arrival; LZ-2).
 var _next_arrival := ""
+## Host (a crossing on, LZ-2): what each crosser brings into the next zone, put on their new body
+## there: "p:<peer>" / "m:<member id>" -> {"gear": inventory net_state, "vitals": Vitals.server_snapshot}.
+var _carry := {}
+## Host: the switch under way is a crossing on (no second briefing in the next zone).
+var _crossing_on := false
 
 
 ## Whether the base is the base zone (BaseZoneLevel) rather than BaseLevel.
@@ -485,6 +490,64 @@ func base_info() -> Dictionary:
 ## Host (Extraction, a crossing): the next level the squad goes to puts them at crossing `id`.
 func set_arrival(id: String) -> void:
 	_next_arrival = id
+
+
+## Host (Extraction, a crossing on mid-deployment; docs/linked_zones.md LZ-2): everyone at it walks
+## on into zone `to`, arriving at its crossing `to_crossing`, as they are: each player's and
+## squadmate's gear and wounds come with them (_carry), the zone left is saved as it stands (its
+## memory), the deployment and its contract go on. Returns "" or why not.
+func server_cross_on(to: String, to_crossing: String, extraction: Extraction) -> String:
+	var def := MissionRegistry.zone_def(to)
+	if def.is_empty():
+		return "Nothing lies that way"
+	var lvl := level()
+	var point := extraction.point_by_id(extraction.countdown_point) if extraction else {}
+	_carry.clear()
+	for p: Node in lvl.players.get_children():
+		var s := p as Soldier
+		if s and not s.is_queued_for_deletion() and not s.vitals.is_dead():
+			_carry["p:%d" % s.name.to_int()] = {"gear": s.inventory.net_state.duplicate(true), "vitals": s.vitals.server_snapshot()}
+	for n: Node in lvl.ai.get_children():
+		var s := n as Soldier
+		if s and s.has_meta(&"roster_id") and not s.vitals.is_dead() and not s.is_queued_for_deletion():
+			var mid := String(s.get_meta(&"roster_id"))
+			server_store_member_gear(mid, s.inventory.net_state)
+			_carry["m:" + mid] = {"gear": s.inventory.net_state.duplicate(true), "vitals": s.vitals.server_snapshot()}
+	GameState.save_zone()  # the zone keeps what's in it while it remembers (LZ-2's fade is next)
+	var dep := RosterDeployment.active(roster())
+	dep["zone_id"] = to
+	var arrive := def.duplicate(true)
+	arrive["arrive"] = to_crossing
+	# Travel time (call 7: 2 h a link on foot): the next zone's sky moves on by it, and the
+	# campaign's days turn over at each midnight passed.
+	var hours := float(dep.get("travel_h", 0.0)) + TRAVEL_FOOT_H
+	var sky := DayNight.current()
+	var hour_now: float = sky.hour if sky else float(def.get("hour", 9.0))
+	arrive["hour"] = fposmod(hour_now + TRAVEL_FOOT_H, 24.0)
+	if hour_now + TRAVEL_FOOT_H >= 24.0:
+		server_advance_days(1, "walking on to %s" % to)
+	dep["travel_h"] = hours
+	_fade_zone_save(to)
+	_crossing_on = true
+	SessionLog.note("crossing: the squad walks on from %s into %s (%d players, %d squadmates)" % [String(point.get("name", "?")), to,
+		_carry.keys().filter(func(k: String) -> bool: return k.begins_with("p:")).size(), _carry.keys().filter(func(k: String) -> bool: return k.begins_with("m:")).size()])
+	_changed_all()
+	server_switch_level({"level": "zone", "def": arrive}, zone_save_id(to))
+	return ""
+
+
+## Hours a crossing takes on foot (docs/linked_zones.md call 7; by vehicle and heli come with LZ-3).
+const TRAVEL_FOOT_H := 2.0
+
+
+## Host: what `key` ("p:<peer>" / "m:<member id>") carried across a crossing goes onto `s`.
+func _apply_carry(key: String, s: Soldier) -> void:
+	var c: Dictionary = _carry.get(key, {})
+	if c.is_empty():
+		return
+	_carry.erase(key)
+	s.inventory.net_state = (c.gear as Dictionary).duplicate(true)
+	s.vitals.server_restore(c.get("vitals", {}))
 
 
 ## Host (Extraction, a crossing confirmed in the base zone; docs/linked_zones.md LZ-2): the squad
@@ -612,8 +675,9 @@ func _do_switch() -> void:
 	fresh._on_hosted()
 	for id in multiplayer.get_peers():
 		fresh._on_peer_joined(id)
-	if not fresh.is_base() and RosterDeployment.is_running(roster()):
+	if not fresh.is_base() and RosterDeployment.is_running(roster()) and not _crossing_on:
 		_open_briefing(fresh)
+	_crossing_on = false
 	_queue_broadcast()
 	# Last on the same reliable channel as everything the new level spawned above: a client
 	# that gets this has all of that, so its loading screen can go (B-04).
@@ -1077,6 +1141,7 @@ func _apply_player_gear(peer: int, player: Soldier) -> void:
 	elif main.get("kit_due", false) and not Restock.is_blank(Restock.template_of(gear)):
 		main.erase("kit_due")  # they already have gear of their own: that wins
 	player.inventory.net_state = GameState.from_json(gear.duplicate(true))
+	_apply_carry("p:%d" % peer, player)  # came on through a crossing: as they were (LZ-2)
 	if fresh:
 		_changed(&"roster")
 	server_give_due_kit(player)
@@ -1192,9 +1257,36 @@ func server_deploy(options := {}) -> String:
 	prep["level"] = {}
 	_ready_peers.clear()  # back at the FOB everyone readies again for the next one
 	_changed_all()
-	set_aside_zone_save(zone_id)  # every contract finds the zone fresh (Captain, 2026-10-14)
+	_fade_zone_save(zone_id)  # zone memory (LZ-2): fresh after a week, emptier before that
 	server_switch_level(info, zone_save_id(zone_id))
 	return ""
+
+
+## Zone memory (docs/linked_zones.md 2b, call 5: "fades over a week"): a zone left this many
+## campaign days ago comes back fresh (its save set aside, never deleted); this many, without its
+## bodies and the gear lying about (the damage and cleared sites stay). The base never fades.
+const ZONE_FRESH_DAYS := 7
+const ZONE_LOOSE_DAYS := 3
+
+
+## Host: before zone `zone_id` loads, how much of it is remembered (ZONE_FRESH_DAYS,
+## ZONE_LOOSE_DAYS, from its save's "left_day"). A save without one (from before zone memory, or
+## an earlier campaign build) is set aside, as every contract's zone used to be.
+func _fade_zone_save(zone_id: String) -> void:
+	GameState.fade_loose = false
+	if zone_save_id(zone_id) == base_zone_id():
+		return
+	var path := "%s/%s.json" % [GameState.SAVE_DIR, zone_save_id(zone_id)]
+	if not FileAccess.file_exists(path):
+		return
+	var data: Variant = JSON.parse_string(FileAccess.get_file_as_string(path))
+	var stamped: bool = data is Dictionary and data.has("left_day") and int(data.left_day) >= 0
+	var age := day() - int(data.left_day) if stamped else ZONE_FRESH_DAYS
+	if age >= ZONE_FRESH_DAYS:
+		set_aside_zone_save(zone_id)
+	elif age >= ZONE_LOOSE_DAYS:
+		GameState.fade_loose = true
+		SessionLog.note("zone %s remembered from %d days ago: its bodies and loose gear are gone" % [zone_id, age])
 
 
 ## Host (server_deploy): the campaign's save of zone `zone_id`, with its backup and any
@@ -1302,6 +1394,7 @@ func server_spawn_roster_squadmate(lvl: CompoundLevel, slot: int, role: StringNa
 	s.role = role
 	s.set_meta(&"roster_id", mid)
 	s.inventory.net_state = GameState.from_json(m.get("gear", {}).duplicate(true))
+	_apply_carry("m:" + mid, s)  # came on through a crossing: as they were (LZ-2)
 	RosterDeployment.mark_spawned(roster(), mid)
 	_changed(&"roster")
 	return s

@@ -565,6 +565,27 @@ var blanket := false
 
 # --- Queries --------------------------------------------------------------------------
 
+## Everything this model holds (its script variables, its dice left out), deep-copied: carried with
+## a soldier into the next zone (docs/linked_zones.md LZ-2: "wounds, tourniquets and pain intact, no
+## free healing"). In memory, never JSON (typed keys stay typed). restore() puts it back.
+func snapshot() -> Dictionary:
+	var out := {}
+	for p: Dictionary in get_property_list():
+		if int(p.usage) & PROPERTY_USAGE_SCRIPT_VARIABLE == 0:
+			continue
+		var v: Variant = get(p.name)
+		if v is Object:
+			continue  # the dice (RandomNumberGenerator): a fresh body rolls its own
+		out[p.name] = v.duplicate(true) if (v is Dictionary or v is Array) else v
+	return out
+
+
+func restore(snap: Dictionary) -> void:
+	for key: String in snap:
+		var v: Variant = snap[key]
+		set(key, v.duplicate(true) if (v is Dictionary or v is Array) else v)
+
+
 func lost() -> float:
 	return 1.0 - blood
 

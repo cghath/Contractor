@@ -40,6 +40,9 @@ func post_is_fallen(spawn_id: String) -> bool:
 ## The zone's time of day and weather (DayNight.to_save: {"hour", "weather"}; wave 7). Empty:
 ## the zone definition's.
 var sky: Dictionary = {}
+## Host, set before a zone loads (BaseHub._fade_zone_save, LZ-2's zone memory): its save is old
+## enough that the bodies and the gear lying about have gone; the rest (damage, sites) stays.
+var fade_loose := false
 
 
 func new_uid() -> String:
@@ -93,6 +96,7 @@ func save_zone() -> bool:
 		"vehicles": vehicles,
 		"ground": ground,
 		"sky": sky,
+		"left_day": BaseHub.day() if BaseHub.campaign_running else -1,  # zone memory (LZ-2): it fades from here
 	}, "", true, true)  # full precision: item state (plate and helmet integrity) comes back exactly
 	if not write_safely(save_path(), text):
 		return false
@@ -132,6 +136,10 @@ func load_zone() -> void:
 	vehicles = zone.get("vehicles", [])
 	ground = zone.get("ground", {})
 	sky = zone.get("sky", {})
+	if fade_loose:
+		bodies.clear()  # gone in the days since (zone memory, LZ-2)
+		dropped.clear()
+	fade_loose = false
 
 
 ## The previous good save, kept beside `path` by write_safely.

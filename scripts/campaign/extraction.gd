@@ -336,6 +336,12 @@ func required() -> Dictionary:
 ## Captain, 2026-10-14: whether the squad may extract without `s` (after a warning): an AI
 ## squadmate, or a player who is down, or dead and waiting to respawn. A player who is up can
 ## walk to the point, so they're waited for.
+## Whether `point` is a crossing on into another zone during a deployment (not home to the base).
+func crossing_on(point: Dictionary) -> bool:
+	return String(point.get("source", "")) == "crossing" and String(point.get("to", "")) != RegionMap.BASE \
+		and BaseHub.deployment_running() and not BaseHub.in_base()
+
+
 static func can_leave_behind(s: Soldier) -> bool:
 	return s.is_ai() or not s.vitals.is_up() or s.respawn_state == Soldier.RESPAWN_WAITING
 
@@ -465,13 +471,13 @@ func _confirm_without(point: Dictionary) -> String:
 	for s: Soldier in need.players + need.ai:
 		if inside(point, s.body_point()):
 			players_in += 0 if s.is_ai() else 1
-		elif can_leave_behind(s):
+		elif can_leave_behind(s) and not (s.is_ai() and crossing_on(point)):  # (squadmates cross together, LZ-2)
 			leaving.append(_soldier_name(s))
 		else:
 			blockers.append(_soldier_name(s))
 	var why := ""
 	if not blockers.is_empty():
-		why = "Not everyone is at the extraction point. Waiting for: %s" % ", ".join(blockers)
+		why = "Not everyone is at the %s. Waiting for: %s" % ["crossing" if String(point.get("source", "")) == "crossing" else "extraction point", ", ".join(blockers)]
 	elif players_in == 0:
 		why = "Nobody is at the extraction point"
 	if why != "":
@@ -759,8 +765,20 @@ func _finish(point: Dictionary) -> void:
 			print("[crossing] out of the base refused: %s" % why)
 			_client_message.rpc(why)
 		return
+	if crossing_on(point):
+		# On into the next zone mid-deployment (LZ-2): everyone at the crossing, as they are.
+		state = State.ENDED
+		countdown_left = 0.0
+		_broadcast()
+		var why := BaseHub.server_cross_on(String(point.to), String(point.to_crossing), self)
+		if why != "":
+			state = State.ACTIVE
+			countdown_point = -1
+			_broadcast()
+			_client_message.rpc(why)
+		return
 	if String(point.get("source", "")) == "crossing":
-		BaseHub.set_arrival(String(point.to_crossing))  # home (or on) at the matching crossing
+		BaseHub.set_arrival(String(point.to_crossing))  # home at the matching crossing
 	state = State.ENDED
 	countdown_left = 0.0
 	var report := build_report(point)

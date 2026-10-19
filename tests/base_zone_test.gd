@@ -18,7 +18,7 @@ var level: CompoundLevel
 func _ready() -> void:
 	GameState.zone_id = "test_base_lz1" + tag
 	Campaign.campaign_id = "test_base_lz1" + tag  # never touch a real save
-	get_tree().create_timer(560.0).timeout.connect(func() -> void:
+	get_tree().create_timer(800.0).timeout.connect(func() -> void:
 		print("BASE_ZONE TEST FAILED (timed out)")
 		get_tree().quit(99))
 	GameState.delete_save()
@@ -110,6 +110,7 @@ func _run() -> void:
 	var back := BaseArmory.counts(base.server_collect_stash())
 	check(back == stash_out, "the stash came back once, not twice (%s)" % str(back.get(&"m17", 0)))
 	_test_region_map()
+	_test_zone_memory()
 	await _test_crossings()
 
 
@@ -157,6 +158,8 @@ func _test_crossings() -> void:
 	if out_point.is_empty():
 		return
 	var to := String(out_point.to)
+	var pick := BaseHub.server_pick(Roster.ids(BaseHub.roster())[0], true) if not Roster.ids(BaseHub.roster()).is_empty() else "no roster"
+	check(pick == "" or pick.contains("already"), "a squadmate picked to come along (%s)" % pick)
 	extraction.countdown_s = 0.5
 	var me := base.players.get_node(^"1") as Soldier
 	me.global_position = base.ground_point(Vector3(out_point.pos.x, 0, out_point.pos.y))
@@ -175,6 +178,10 @@ func _test_crossings() -> void:
 	var at := Vector2(float(back_c.pos[0]), float(back_c.pos[1])) if not back_c.is_empty() else Vector2.INF
 	check(me != null and Vector2(me.global_position.x, me.global_position.z).distance_to(at) < 25.0,
 		"arriving at its crossing from the base (%.0f m from it)" % (Vector2(me.global_position.x, me.global_position.z).distance_to(at) if me else INF))
+	zone = await _test_cross_on(zone, to)
+	if zone == null:
+		return
+	me = zone.players.get_node_or_null(^"1") as Soldier
 	var zx := MapNodes.extraction(zone)
 	await _wait_until(func() -> bool: return zx.is_active(), 5.0)
 	var home: Dictionary = {}
@@ -186,6 +193,11 @@ func _test_crossings() -> void:
 		return
 	zx.countdown_s = 0.5
 	me.global_position = zone.ground_point(Vector3(home.pos.x, 0, home.pos.y))
+	var k := 0
+	for n: Node in zone.ai.get_children():
+		if n is Soldier and (n as Soldier).has_meta(&"roster_id") and not (n as Soldier).vitals.is_dead():
+			(n as Soldier).global_position = me.global_position + Vector3(k * 1.5 - 1.0, 0, 1.5)  # the squad comes home too
+			k += 1
 	await get_tree().physics_frame
 	why = zx.server_confirm(1)
 	check(why == "", "walking home through it (%s)" % why)
@@ -208,3 +220,107 @@ func _cheapest(pool: Array) -> Dictionary:
 		if best.is_empty() or int(c.fee) < int(best.fee):
 			best = c
 	return best
+
+
+## LZ-2: on from `from_zone` into a neighbour that isn't the base and back, mid-deployment: the
+## squad crosses as it is (gear and wounds), the deployment and the zone it's in move with it, no
+## second briefing. Returns the level back in `from_id`.
+func _test_cross_on(zone: ZoneLevel, from_id: String) -> ZoneLevel:
+	print("Crossing on, zone to zone")
+	var zx := MapNodes.extraction(zone)
+	await _wait_until(func() -> bool: return zx.is_active(), 5.0)
+	var on: Dictionary = {}
+	for p: Dictionary in zx.points:
+		if String(p.get("source", "")) == "crossing" and String(p.get("to", "")) != RegionMap.BASE:
+			on = p
+	check(not on.is_empty(), "%s has crossings on into its other neighbours (%s)" % [from_id, on.get("name", "none")])
+	if on.is_empty():
+		return null
+	var me := zone.players.get_node(^"1") as Soldier
+	var mates := zone.ai.get_children().filter(func(n: Node) -> bool: return n is Soldier and (n as Soldier).has_meta(&"roster_id") and not (n as Soldier).vitals.is_dead())
+	# Hurt, with something extra on him: both come along.
+	me.vitals.server_hit(Vitals.UPPER_ARM_L, {"round_class": Vitals.PISTOL})
+	me.inventory.take(&"burn_dressing")
+	await get_tree().create_timer(0.3).timeout
+	var blood_before := me.vitals.blood_fraction()
+	var wounds_before := me.vitals.wound_list().size()
+	var dressings_before := me.inventory.count_of(&"burn_dressing")
+	var mate_names := mates.map(func(m: Node) -> String: return String(m.name))
+	var at := zone.ground_point(Vector3(on.pos.x, 0, on.pos.y))
+	me.global_position = at
+	for k in mates.size():
+		(mates[k] as Soldier).global_position = at + Vector3(k * 1.5 - 1.0, 0, 1.5)
+	await get_tree().physics_frame
+	zx.countdown_s = 0.5
+	var why := zx.server_confirm(1)
+	check(why == "", "everyone at the crossing on to %s confirms it (%s)" % [String(on.to), why])
+	var next_id := String(on.to)
+	await _wait_until(func() -> bool:
+		var l := CompoundLevel.current(self) as ZoneLevel
+		return l != null and String(l.def.id) == next_id and not BaseHub.switch_pending(), 40.0)
+	var next := CompoundLevel.current(self) as ZoneLevel
+	check(next != null and String(next.def.id) == next_id and RosterDeployment.is_running(BaseHub.roster())
+		and String(RosterDeployment.active(BaseHub.roster()).get("zone_id", "")) == next_id,
+		"the squad walks on into %s, still on the same deployment" % next_id)
+	if next == null:
+		return null
+	await _wait_until(func() -> bool: return next.players.get_node_or_null(^"1") != null, 10.0)
+	await get_tree().create_timer(1.5).timeout
+	me = next.players.get_node_or_null(^"1") as Soldier
+	check(me != null and me.vitals.wound_list().size() == wounds_before and absf(me.vitals.blood_fraction() - blood_before) < 0.05,
+		"the player comes in as he went: %d wound(s), %.0f%% blood (were %d, %.0f%%)" % [me.vitals.wound_list().size() if me else -1,
+			(me.vitals.blood_fraction() if me else 0.0) * 100.0, wounds_before, blood_before * 100.0])
+	check(me != null and me.inventory.count_of(&"burn_dressing") == dressings_before, "with what he carried (%d burn dressings)" % dressings_before)
+	var came := mate_names.filter(func(n: String) -> bool: return next.ai.get_node_or_null(NodePath(n)) != null)
+	check(came.size() == mate_names.size(), "and his squadmates with him (%s)" % ", ".join(came))
+	var briefing := MapNodes.briefing(next)
+	check(briefing == null or not briefing.is_open(), "no second briefing")
+	# And back the way they came.
+	var nx := MapNodes.extraction(next)
+	await _wait_until(func() -> bool: return nx.is_active(), 5.0)
+	var back := {}
+	for p: Dictionary in nx.points:
+		if String(p.get("to", "")) == from_id:
+			back = p
+	check(not back.is_empty(), "the crossing back to %s is there" % from_id)
+	if back.is_empty():
+		return null
+	var at2 := next.ground_point(Vector3(back.pos.x, 0, back.pos.y))
+	me.global_position = at2
+	for k in came.size():
+		(next.ai.get_node(NodePath(came[k])) as Soldier).global_position = at2 + Vector3(k * 1.5 - 1.0, 0, 1.5)
+	await get_tree().physics_frame
+	nx.countdown_s = 0.5
+	why = nx.server_confirm(1)
+	check(why == "", "and back (%s)" % why)
+	await _wait_until(func() -> bool:
+		var l := CompoundLevel.current(self) as ZoneLevel
+		return l != null and String(l.def.id) == from_id and not BaseHub.switch_pending(), 40.0)
+	var again := CompoundLevel.current(self) as ZoneLevel
+	check(again != null and String(again.def.id) == from_id, "back in %s" % from_id)
+	await _wait_until(func() -> bool: return again != null and again.players.get_node_or_null(^"1") != null, 10.0)
+	return again
+
+
+## LZ-2 zone memory (call 5): a zone left a day ago comes back as it was; after ZONE_LOOSE_DAYS
+## without its bodies and loose gear; after ZONE_FRESH_DAYS fresh (the save set aside, kept).
+func _test_zone_memory() -> void:
+	print("Zone memory")
+	BaseHub.server_advance_days(10, "the zone memory checks")  # (days to look back over)
+	var zid := "test_lz2_memory" + tag
+	var path := "%s/%s.json" % [GameState.SAVE_DIR, BaseHub.zone_save_id(zid)]
+	var write := func(age: int) -> void:
+		var f := FileAccess.open(path, FileAccess.WRITE)
+		f.store_string(JSON.stringify({"version": 1, "looted": [], "dropped": {}, "voxel_edits": [], "bodies": [], "fallen_posts": [],
+			"vehicles": [], "left_day": BaseHub.day() - age}))
+		f.close()
+	write.call(1)
+	BaseHub._fade_zone_save(zid)
+	check(FileAccess.file_exists(path) and not GameState.fade_loose, "a zone left a day ago is remembered as it was")
+	write.call(BaseHub.ZONE_LOOSE_DAYS + 1)
+	BaseHub._fade_zone_save(zid)
+	check(FileAccess.file_exists(path) and GameState.fade_loose, "after %d days its bodies and loose gear are gone" % (BaseHub.ZONE_LOOSE_DAYS + 1))
+	write.call(BaseHub.ZONE_FRESH_DAYS + 1)
+	BaseHub._fade_zone_save(zid)
+	check(not FileAccess.file_exists(path) and not GameState.kept_copies(path).is_empty(), "after %d days it's fresh, its save kept aside" % (BaseHub.ZONE_FRESH_DAYS + 1))
+	GameState.fade_loose = false
