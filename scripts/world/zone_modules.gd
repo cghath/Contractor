@@ -575,18 +575,42 @@ static func _crates(out: Array, corner: Vector3) -> void:
 ## An AA emplacement centred on `c` (x, z): a 3.6 m sandbag ring 0.8 m high, open to the east,
 ## round a twin-barrel gun on a steel mount (barrels to the north). The gun fills (-0.5, 0, -1.3)
 ## to (0.5, 1.3, 0.4) from the centre.
+## An AA emplacement (Captain, 2026-10-18: "the aa guns and such need a pass"): a sandbag ring in
+## two courses with a way in on +X, and in it a twin-barrelled 23 mm gun on its cruciform
+## outriggers (a ZU-23-2 pattern), barrels north over the bags, a seat each side, ammo boxes and
+## a sight, all steel voxels (a sabotage objective counts them: solid_voxels_in).
 static func _aa_site(out: Array, c: Vector2) -> void:
 	var S := VoxelWorld.Mat.SANDBAG
-	var at := Vector3(c.x, 0, c.y)
-	for b: Array in [[Vector3(-1.8, 0, -1.8), Vector3(1.8, 0.8, -1.4)], [Vector3(-1.8, 0, 1.4), Vector3(1.8, 0.8, 1.8)],
-			[Vector3(-1.8, 0, -1.4), Vector3(-1.4, 0.8, 1.4)], [Vector3(1.4, 0, -1.4), Vector3(1.8, 0.8, -0.6)],
-			[Vector3(1.4, 0, 0.6), Vector3(1.8, 0.8, 1.4)]]:
-		out.append([at + (b[0] as Vector3), at + (b[1] as Vector3), S])
 	var T := VoxelWorld.Mat.STEEL
-	out.append([at + Vector3(-0.3, 0, -0.3), at + Vector3(0.3, 0.9, 0.3), T])
-	out.append([at + Vector3(-0.5, 0.9, -0.4), at + Vector3(0.5, 1.3, 0.4), T])
-	out.append([at + Vector3(-0.25, 1.05, -1.3), at + Vector3(-0.15, 1.15, -0.4), T])
-	out.append([at + Vector3(0.15, 1.05, -1.3), at + Vector3(0.25, 1.15, -0.4), T])
+	var W := VoxelWorld.Mat.WOOD
+	var at := Vector3(c.x, 0, c.y)
+	# Sandbags: a lower course 0.6 high and 0.5 thick, an upper course inset 0.4 higher, both
+	# open on +X (the way in) between z -0.6 and 0.6.
+	for course: Array in [[0.0, 0.6, 2.0, 0.5], [0.6, 1.0, 1.9, 0.4]]:
+		var y0: float = course[0]
+		var y1: float = course[1]
+		var r: float = course[2]
+		var t: float = course[3]
+		out.append([at + Vector3(-r, y0, -r), at + Vector3(r, y1, -r + t), S])
+		out.append([at + Vector3(-r, y0, r - t), at + Vector3(r, y1, r), S])
+		out.append([at + Vector3(-r, y0, -r + t), at + Vector3(-r + t, y1, r - t), S])
+		out.append([at + Vector3(r - t, y0, -r + t), at + Vector3(r, y1, -0.6), S])
+		out.append([at + Vector3(r - t, y0, 0.6), at + Vector3(r, y1, r - t), S])
+	# The gun: outriggers, pedestal, cradle and seats.
+	out.append([at + Vector3(-1.2, 0, -0.1), at + Vector3(1.2, 0.15, 0.1), T])
+	out.append([at + Vector3(-0.1, 0, -1.2), at + Vector3(0.1, 0.15, 1.2), T])
+	out.append([at + Vector3(-0.3, 0.15, -0.3), at + Vector3(0.3, 0.6, 0.3), T])
+	out.append([at + Vector3(-0.45, 0.6, -0.5), at + Vector3(0.45, 0.9, 0.5), T])
+	for side: float in [-1.0, 1.0]:
+		var sx := 0.6 * side
+		out.append([at + Vector3(sx - 0.15, 0.55, 0.1), at + Vector3(sx + 0.15, 0.65, 0.4), W])  # seat
+		out.append([at + Vector3(sx - 0.15, 0.65, 0.35), at + Vector3(sx + 0.15, 0.95, 0.45), W])  # its back
+		var bx := 0.2 * side
+		out.append([at + Vector3(bx - 0.08, 0.9, -0.4), at + Vector3(bx + 0.08, 1.2, 0.45), T])  # receiver
+		out.append([at + Vector3(bx - 0.05, 1.0, -2.4), at + Vector3(bx + 0.05, 1.1, -0.4), T])  # barrel
+		out.append([at + Vector3(bx - 0.08, 0.97, -2.55), at + Vector3(bx + 0.08, 1.13, -2.4), T])  # flash hider
+		out.append([at + Vector3(bx + 0.1 * side - 0.12, 0.9, -0.1), at + Vector3(bx + 0.1 * side + 0.12, 1.15, 0.2), T])  # ammo box
+	out.append([at + Vector3(-0.06, 1.2, 0.0), at + Vector3(0.06, 1.4, 0.15), T])  # sight
 
 
 ## Solid voxels of a module type's pristine structure inside `box` (metres from its origin),

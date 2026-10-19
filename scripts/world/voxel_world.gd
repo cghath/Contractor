@@ -171,11 +171,7 @@ func _ready() -> void:
 	mesher.palette = palette
 	mesher.color_mode = VoxelMesherCubes.COLOR_MESHER_PALETTE
 	terrain.mesher = mesher
-	var material := StandardMaterial3D.new()
-	material.vertex_color_use_as_albedo = true
-	material.vertex_color_is_srgb = true  # palette colours are authored in sRGB
-	material.roughness = 0.9
-	terrain.material_override = material
+	terrain.material_override = surface_material()
 	terrain.bounds = bounds
 	terrain.max_view_distance = view_distance
 	terrain.collision_layer = 1
@@ -252,6 +248,54 @@ func _process(_delta: float) -> void:
 	FrameCost.spent(&"voxels", started)
 	print("[world] voxel structures built (%d boxes)" % _structures.size())
 	structures_built.emit()
+
+
+## The structures' look (Captain, 2026-10-18: "all of our buildings need a pass so they look
+## better"): the palette colour (sRGB) with each voxel a little lighter or darker than its
+## neighbours (VOXEL_JITTER) so a wall stops reading as one flat slab, and on the rougher, lighter
+## materials (sandbags, mud brick, block, plaster: brighter than COURSE_MIN_LUMA) a darker course
+## line every COURSE_VOXELS voxels up a wall. Shared by every voxel world.
+const VOXEL_JITTER := 0.13
+const COURSE_VOXELS := 2.0
+const COURSE_LINE := 0.12
+const COURSE_DARK := 0.86
+const COURSE_MIN_LUMA := 0.33
+static var _surface: ShaderMaterial
+
+
+static func surface_material() -> ShaderMaterial:
+	if _surface == null:
+		var shader := Shader.new()
+		shader.code = """
+shader_type spatial;
+render_mode diffuse_burley;
+uniform float jitter = %f;
+uniform float course_voxels = %f;
+uniform float course_line = %f;
+uniform float course_dark = %f;
+uniform float course_min_luma = %f;
+varying vec3 local_pos;
+varying vec3 local_normal;
+float hash(vec3 p) { return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }
+void vertex() {
+	local_pos = VERTEX;   // voxel units (the terrain is scaled by the voxel size)
+	local_normal = NORMAL;
+}
+void fragment() {
+	vec3 srgb = COLOR.rgb;
+	vec3 cell = floor(local_pos - local_normal * 0.5);
+	float k = 1.0 + (hash(cell) - 0.5) * jitter;
+	float luma = dot(srgb, vec3(0.299, 0.587, 0.114));
+	if (abs(local_normal.y) < 0.5 && luma > course_min_luma && fract(local_pos.y / course_voxels) < course_line) {
+		k *= course_dark;
+	}
+	ALBEDO = pow(clamp(srgb * k, 0.0, 1.0), vec3(2.2));
+	ROUGHNESS = 0.9;
+}
+""" % [VOXEL_JITTER, COURSE_VOXELS, COURSE_LINE, COURSE_DARK, COURSE_MIN_LUMA]
+		_surface = ShaderMaterial.new()
+		_surface.shader = shader
+	return _surface
 
 
 ## Host only. Removes a sphere of voxels of any material around a world-space point.
