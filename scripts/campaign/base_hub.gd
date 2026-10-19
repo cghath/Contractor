@@ -1770,6 +1770,25 @@ func guards() -> int:
 	return clampi(int(base().get("guards", 0)), 0, MAX_GUARDS)
 
 
+## Host (the ops desk): buys defence `id` (BaseFob.DEFENCES) for the FOB. The engineers put it up
+## at once: the base zone reloads with it. Returns "" or why not.
+func server_buy_defence(id: String) -> String:
+	if not BaseFob.DEFENCES.has(id):
+		return "No such defence"
+	var owned: Array = base().get("defences", [])
+	if id in owned:
+		return "Already built"
+	var d: Dictionary = BaseFob.DEFENCES[id]
+	if not BaseEconomy.try_spend(int(d.price), String(d.name)):
+		return "Can't afford the %s ($%d)" % [String(d.name), int(d.price)]
+	owned.append(id)
+	base()["defences"] = owned
+	_changed(&"base")
+	if level() is BaseZoneLevel:
+		server_switch_level(base_info(), base_zone_id())  # the engineers put it up
+	return ""
+
+
 ## Host (the ops desk): the company keeps `n` guards.
 func server_set_guards(n: int) -> String:
 	base()["guards"] = clampi(n, 0, MAX_GUARDS)
@@ -2487,6 +2506,8 @@ func _server_request(action: String, args: Array) -> void:
 				why = server_buy(StringName(args[0]), int(args[1]) if args.size() > 1 else 1, sender)
 			"rest":
 				server_advance_days(clampi(int(args[0]) if not args.is_empty() else 1, 1, 30))
+			"defence":
+				why = server_buy_defence(String(args[0])) if sender == 1 and not args.is_empty() else "Only the host can do that"
 			"guards":
 				why = server_set_guards(int(args[0]) if not args.is_empty() else 0) if sender == 1 else "Only the host can do that"
 			"deploy":
@@ -2534,7 +2555,7 @@ func build_view() -> Dictionary:
 		"stash": stash(), "prep": _prep(), "catalog": BaseEconomy.shop_catalog(), "held": held,
 		"daily_wages": Roster.daily_wages(roster()), "bill_in_days": Economy.days_to_bill(), "weekly_bill": int(Economy.weekly_bill().total),
 		"players": keys, "in_base": in_base(), "ready": _ready_peers.keys(),
-		"guards": guards(), "assault": base().get("assault", {}),
+		"guards": guards(), "assault": base().get("assault", {}), "defences": base().get("defences", []),
 	}
 
 

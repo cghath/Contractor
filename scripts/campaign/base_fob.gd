@@ -41,6 +41,44 @@ const HELIPAD := Rect2(30.0, -8.0, 16.0, 16.0)
 const VEHICLE_PARK := Rect2(-12.0, 27.0, 24.0, 18.0)
 const RANGE_LINE_X := -26.0
 const RANGE_END_X := -57.0
+## Defences the company can buy for the FOB (docs/linked_zones.md 1b / LZ-6, "bought at the ops
+## desk ... placed at set slots"): id -> {"name", "price", "slot": [x, z] FOB space (on the zones'
+## 12 m grid), "half": the module's half footprint}. Each is a small module of its own in the base
+## zone (ZoneModules type "fob_<id>": defence_boxes). Proposed prices.
+const DEFENCES := {
+	"tower_ne": {"name": "Watchtower (north-east corner)", "price": 12000, "slot": [24, -24], "half": [3, 3]},
+	"tower_sw": {"name": "Watchtower (south-west corner)", "price": 12000, "slot": [-24, 24], "half": [3, 3]},
+	"mg_pit": {"name": "MG pit covering the gate", "price": 6000, "slot": [12, 24], "half": [3, 3]},
+	"chicane": {"name": "HESCO chicane before the gate", "price": 4000, "slot": [0, 36], "half": [8, 3]},
+	"bunker": {"name": "Concrete bunker", "price": 15000, "slot": [-24, -24], "half": [4, 4]},
+}
+
+
+## A defence's voxel boxes, metres from its own origin.
+static func defence_boxes(id: String) -> Array:
+	var out: Array = []
+	var M := VoxelWorld.Mat
+	match id:
+		"tower_ne", "tower_sw":
+			ZoneModules._tower(out, Vector2(-1.3, -1.3), ["n", "s", "e", "w"])
+		"mg_pit":
+			out.append([Vector3(-1.6, 0, -1.6), Vector3(1.6, 0.9, -1.2), M.SANDBAG])
+			out.append([Vector3(-1.6, 0, -1.2), Vector3(-1.2, 0.9, 1.6), M.SANDBAG])
+			out.append([Vector3(1.2, 0, -1.2), Vector3(1.6, 0.9, 1.6), M.SANDBAG])  # open to the south: the way in
+		"chicane":
+			out.append([Vector3(-7.0, 0, -0.5), Vector3(-1.5, 2.2, 0.5), M.HESCO])
+			out.append([Vector3(1.5, 0, -2.5), Vector3(7.0, 2.2, -1.5), M.HESCO])
+		"bunker":
+			out.append([Vector3(-3.0, 0, -3.0), Vector3(3.0, 2.2, -2.6), M.CONCRETE])
+			out.append([Vector3(-3.0, 0, -2.6), Vector3(-2.6, 2.2, 3.0), M.CONCRETE])
+			out.append([Vector3(2.6, 0, -2.6), Vector3(3.0, 2.2, 3.0), M.CONCRETE])
+			out.append([Vector3(-2.6, 0, 2.6), Vector3(-0.6, 2.2, 3.0), M.CONCRETE])
+			out.append([Vector3(0.6, 0, 2.6), Vector3(2.6, 2.2, 3.0), M.CONCRETE])
+			out.append([Vector3(-3.0, 1.3, -3.0), Vector3(3.0, 1.5, -2.6), M.EMPTY])  # firing slit, north
+			out.append([Vector3(-3.0, 2.2, -3.0), Vector3(3.0, 2.5, 3.0), M.CONCRETE])
+	return out
+
+
 ## The module's half footprint (ZoneModules.HALF["fob"]): the wire and all of that.
 const MODULE_HALF := Vector2(60.0, 50.0)
 

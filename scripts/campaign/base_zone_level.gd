@@ -44,7 +44,7 @@ static func def_for(campaign_seed: int) -> Dictionary:
 	var seed := absi(campaign_seed ^ SEED_SALT) % 1000000
 	var def := ZoneDef.normalize({"id": ZONE_ID, "name": "FOB", "region": REGION, "kind": "base", "seed": seed,
 		"size_m": SIZE_M, "grow": false, "no_pallets": true,
-		"modules": [{"id": "fob", "type": "fob", "pos": [0, 0]}] + _local_sites(seed),
+		"modules": [{"id": "fob", "type": "fob", "pos": [0, 0]}] + _defences() + _local_sites(seed),
 		"insertion": [[0.0, BaseFob.VEHICLE_PARK.end.y + 20.0]]})
 	def["crossings"] = RegionMap.crossings(RegionMap.BASE, def)
 	_add_threats(def, seed)
@@ -93,6 +93,17 @@ static func _add_threats(def: Dictionary, seed: int) -> void:
 		patrols.append([[snappedf(out.x * half, 1.0), snappedf(out.y * half, 1.0)], [snappedf(near.x, 1.0), snappedf(near.y, 1.0)],
 			[snappedf(out.x * half * 0.6 + out.y * 200.0, 1.0), snappedf(out.y * half * 0.6 - out.x * 200.0, 1.0)]])
 	def["patrols"] = patrols
+
+
+## The defences the company has bought (BaseHub base "defences", BaseFob.DEFENCES), as modules at
+## their slots.
+static func _defences() -> Array:
+	var out: Array = []
+	for id: String in BaseHub.base().get("defences", []):
+		if BaseFob.DEFENCES.has(id):
+			var slot: Array = BaseFob.DEFENCES[id].slot
+			out.append({"id": "def_" + id, "type": "fob_" + id, "pos": [float(slot[0]), float(slot[1])]})
+	return out
 
 
 ## The local area's sites (LOCAL_SITES) from `seed`, the same every time.

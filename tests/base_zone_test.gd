@@ -126,6 +126,7 @@ func _run() -> void:
 	_test_zone_memory()
 	_test_threats()
 	await _test_assault()
+	await _test_defences()
 	await _test_airframes()
 	await _test_crossings()
 
@@ -454,3 +455,21 @@ func _test_assault() -> void:
 	BaseHub.server_set_guards(0)
 	heat.clear()
 	heat.merge(saved)
+
+
+## LZ-6: a defence bought at the ops desk goes up at its slot (the base reloads with it), paid for.
+func _test_defences() -> void:
+	print("Defences")
+	var funds := BaseEconomy.funds()
+	var why := BaseHub.server_buy_defence("mg_pit")
+	check(why == "" and BaseEconomy.funds() == funds - int(BaseFob.DEFENCES.mg_pit.price), "the MG pit is bought ($%d)" % int(BaseFob.DEFENCES.mg_pit.price))
+	await _wait_until(func() -> bool:
+		var l := CompoundLevel.current(self) as BaseZoneLevel
+		return BaseHub.in_base() and not BaseHub.switch_pending() and l != null and l.get_module("def_mg_pit") != null, 20.0)
+	var base := CompoundLevel.current(self) as BaseZoneLevel
+	var pit := base.get_module("def_mg_pit") if base else null
+	var slot: Array = BaseFob.DEFENCES.mg_pit.slot
+	check(pit != null and Vector2(pit.global_position.x, pit.global_position.z).distance_to(Vector2(base.fob.global_position.x + float(slot[0]), base.fob.global_position.z + float(slot[1]))) < 1.0,
+		"and stands at its slot by the gate when the base is back up")
+	check(BaseHub.server_buy_defence("mg_pit") == "Already built", "a second one isn't sold")
+	await _wait_until(func() -> bool: return base.players.get_node_or_null(^"1") != null, 10.0)

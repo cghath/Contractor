@@ -166,6 +166,10 @@ static func town_fallback(type: String) -> Array:
 
 
 static func has_type(type: String) -> bool:
+	if type.begins_with("fob_") and BaseFob.DEFENCES.has(type.trim_prefix("fob_")):
+		var d: Dictionary = BaseFob.DEFENCES[type.trim_prefix("fob_")]
+		HALF[type] = Vector2(float(d.half[0]), float(d.half[1]))  # a bought defence (BaseFob, LZ-6)
+		return true
 	if type.begins_with(TOWN):
 		return _town(type)
 	if GROWN in type:
@@ -307,6 +311,8 @@ static func boxes(type: String) -> Array:
 				_cache[type] = _comms()
 			"fob":
 				_cache[type] = BaseFob.module_boxes()
+			_ when type.begins_with("fob_") and has_type(type):
+				_cache[type] = BaseFob.defence_boxes(type.trim_prefix("fob_"))
 			_ when type.begins_with(TOWN) and _town(type):
 				pass
 			_ when GROWN in type and _grown(type):

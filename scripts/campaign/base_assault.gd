@@ -56,8 +56,10 @@ static func _resolve_offscreen(booked: Dictionary) -> String:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash([BaseHub.day(), String(booked.faction)])
 	var guards := BaseHub.guards()
-	var losses := 0 if guards >= 4 else maxi(LOSSES - guards / 2, 0)  # the guards hold the wire (LZ-6)
-	if guards > 0 and guards < 4:
+	var defences := (base.get("defences", []) as Array).size()
+	var cover := guards + defences  # the guards hold the wire, the defences with them (LZ-6)
+	var losses := 0 if cover >= 4 else maxi(LOSSES - cover / 2, 0)
+	if guards > 0 and cover < 4:
 		base["guards"] = guards - 1  # stretched thin: one of them falls
 	for k in mini(losses, stash.size()):
 		var i := rng.randi_range(0, stash.size() - 1)
@@ -70,9 +72,9 @@ static func _resolve_offscreen(booked: Dictionary) -> String:
 	base.erase("assault")
 	base["last_assault_day"] = BaseHub.day()
 	Economy.add_heat(String(booked.faction), -OFFSCREEN_COOL)
-	var held := "the guards (%d) held them off" % guards if guards > 0 else "the detail held them off"
+	var held := ("the guards (%d) held them off" % guards if guards > 0 else "the detail held them off") + (", %d defence(s) with them" % defences if defences > 0 else "")
 	var report := "Situation report: the FOB was hit while you were out: %s; lost at the wire: %s%s." % [held, ", ".join(lost) if not lost.is_empty() else "nothing",
-		", and a guard" if guards > 0 and guards < 4 else ""]
+		", and a guard" if guards > 0 and cover < 4 else ""]
 	Contracts._notify_all(report)
 	SessionLog.note("base assault resolved off-screen: %s" % ", ".join(lost))
 	return report

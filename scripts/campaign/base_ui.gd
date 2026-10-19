@@ -252,6 +252,15 @@ func _build_squad(rows: VBoxContainer, v: Dictionary) -> void:
 	var drop := UiKit.button("Stand one down", func() -> void: BaseHub.request("guards", [g - 1]))
 	drop.disabled = not multiplayer.is_server() or g <= 0
 	defence.add_child(UiKit.button_row([hire, drop]))
+	var owned: Array = v.get("defences", [])
+	for id: String in BaseFob.DEFENCES:
+		var d: Dictionary = BaseFob.DEFENCES[id]
+		if id in owned:
+			defence.add_child(UiKit.text("%s: built." % d.name))
+		else:
+			var buy := UiKit.button("Build %s ($%d)" % [d.name, int(d.price)], func() -> void: BaseHub.request("defence", [id]))
+			buy.disabled = not multiplayer.is_server()
+			defence.add_child(buy)
 	var booked: Dictionary = v.get("assault", {})
 	if not booked.is_empty():
 		defence.add_child(UiKit.text("Expect an assault on day %d (%s)." % [int(booked.day), String(booked.faction).capitalize()]))
