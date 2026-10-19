@@ -208,14 +208,14 @@ and they come with the squad when it crosses.
   the motor pool's vehicles:
   - **Fuel.** Each airframe carries its fuel from call to call. Loitering, flying to a call and
     following across a crossing all burn it (a crossing costs a link's flight; proposed in
-    `data/supports.json` per model). Low on fuel (proposed under 25%), it tells the squad it is
+    `data/supports.json` per model). Low on fuel (under 25%), it tells the squad it is
     going home: it finishes or refuses the current call and flies to the LHD or the FOB helipad to
-    refuel, unavailable until it's back (proposed: the flight back plus 20 game minutes). The further
+    refuel, unavailable until it's back (the flight back plus 20 game minutes). The further
     the squad is from the base on the graph, the less time a heli can spend with them.
   - **Damage.** Hits stay on the airframe after the call. A damaged heli flies with limits by what's
     hit: a hurt engine or rotor means no heavy loads (transport takes fewer, no pallet), no loiter,
     and it won't follow across a crossing; a fuel hit leaks (Vehicle's leak), shortening its range;
-    past a damage threshold (proposed: any zone under 40%) it refuses calls into hot LZs and returns
+    past a damage threshold (any zone under 40%) it refuses calls into hot LZs and returns
     for repair. Repairs happen at the base workshop over game hours to days by damage (the motor pool's
     `ready_day`), paid from the bank. A crash is still lost for the op and charged its replacement
     (`HeliSupports.server_lost`).
@@ -283,20 +283,20 @@ and they come with the squad when it crosses.
     off-screen, big assaults near enough go live and hold out for the squad.
 13. Contracts: can be left and returned to, plus new multi-zone contract types.
 14. Build order: the base as a zone first.
+15. Heli limits (Captain, 2026-10-19: "sounds good"): go home under 25% fuel; refuel takes the
+    flight back plus 20 game minutes; any damage zone under 40% stops hot-LZ calls and sends it to
+    repair; a damaged engine or rotor stops loiter, heavy loads and following across crossings.
 
 **Still open (proposed answers):**
 
-15. **Base zone size.** Proposed: 2304 m.
-16. **Heat thresholds for base threats.** Proposed: patrols at 30, probes at 50, assaults at 70; at
+16. **Base zone size.** Proposed: 2304 m.
+17. **Heat thresholds for base threats.** Proposed: patrols at 30, probes at 50, assaults at 70; at
     most one assault a week, warned a day ahead.
-17. **Crossing countdown.** Proposed: 20 s.
-18. **Followers' catch-up.** Proposed: supports on other orders arrive within 2 game minutes;
+18. **Crossing countdown.** Proposed: 20 s.
+19. **Followers' catch-up.** Proposed: supports on other orders arrive within 2 game minutes;
     allied elements more than a link away are released.
-19. **Hired squads.** Proposed: 4-8 men each, a squad leader from the roster or hired with them,
+20. **Hired squads.** Proposed: 4-8 men each, a squad leader from the roster or hired with them,
     wages at the roster's rates, up to 1 per FOB tier to start.
-20. **Heli limits.** Proposed: go home under 25% fuel; refuel takes the flight back plus 20 game
-    minutes; any damage zone under 40% stops hot-LZ calls and sends it to repair; a damaged engine or
-    rotor stops loiter, heavy loads and following across crossings.
 
 ## Build order (proposed)
 
