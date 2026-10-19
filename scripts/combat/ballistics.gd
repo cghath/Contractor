@@ -41,6 +41,12 @@ const SPENT_SUPERFICIAL_J := 120.0
 const EQUIVALENT_MAX_M := 2000.0
 ## Rounds passing this close to an AI soldier suppress it.
 const SUPPRESS_RADIUS := 2.5
+## By round (AI bar G-11): [radius m, amount factor]. Pistol rounds suppress less and closer, full
+## power ones further, a heavy round (HEAVY_CALIBRE_MM and up: .50, 14.5) a lot. The line runs to
+## where the round stopped, so rounds smacking into cover by a man suppress him too. Proposed.
+const SUPPRESS_BY_CLASS := {&"pistol": Vector2(1.5, 0.6), &"intermediate": Vector2(SUPPRESS_RADIUS, 1.0), &"full_power": Vector2(3.5, 1.3)}
+const SUPPRESS_HEAVY := Vector2(5.0, 1.8)
+const HEAVY_CALIBRE_MM := 12.0
 ## The game's armor and threat ladder, weakest first (NIJ names in the game's own order).
 ## FRAGMENT is below everything: any aramid layer stops it. ABOVE_IV defeats all body armor.
 const LEVELS: Array[StringName] = [&"FRAGMENT", &"IIA", &"II", &"IIIA", &"III", &"III+", &"III++", &"IV", &"ABOVE_IV"]
@@ -452,17 +458,27 @@ static func _result(kind: String, hit: Dictionary) -> Dictionary:
 ## Rounds that pass close to AI soldiers on the other side suppress them.
 static func fire(shooter: CollisionObject3D, origin: Vector3, direction: Vector3, weapon: ItemData) -> Dictionary:
 	var result := _trace(shooter, origin, direction, weapon)
-	report_near_misses(shooter, origin, result.position)
+	report_near_misses(shooter, origin, result.position, weapon)
 	return result
 
 
-static func report_near_misses(shooter: Node, from: Vector3, to: Vector3) -> void:
+## [radius, amount factor] `weapon`'s rounds suppress with (SUPPRESS_BY_CLASS).
+static func suppress_of(weapon: ItemData) -> Vector2:
+	if weapon == null:
+		return Vector2(SUPPRESS_RADIUS, 1.0)
+	if round_class(weapon) == Vitals.FULL_POWER and calibre_m(weapon) * 1000.0 >= HEAVY_CALIBRE_MM:
+		return SUPPRESS_HEAVY
+	return SUPPRESS_BY_CLASS.get(round_class(weapon), Vector2(SUPPRESS_RADIUS, 1.0))
+
+
+static func report_near_misses(shooter: Node, from: Vector3, to: Vector3, weapon: ItemData = null) -> void:
 	var faction: StringName = shooter.faction if shooter is Soldier else &""
+	var sup := suppress_of(weapon)
 	for n in shooter.get_tree().get_nodes_in_group(&"combatants"):
 		var s := n as Soldier
 		if s == null or s == shooter or not s.is_ai() or s.faction == faction or not s.vitals.is_up():
 			continue
 		var chest := s.global_position + Vector3.UP * 1.2
 		var d := Geometry3D.get_closest_point_to_segment(chest, from, to).distance_to(chest)
-		if d < SUPPRESS_RADIUS:
-			s.suppress_fire(0.12 + (SUPPRESS_RADIUS - d) * 0.08, from)
+		if d < sup.x:
+			s.suppress_fire((0.12 + (sup.x - d) * 0.08) * sup.y, from)

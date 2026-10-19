@@ -22,8 +22,11 @@ const INSURGENT := &"insurgent"
 const REGULAR := &"regular"
 const PMC := &"pmc"
 ## The weights no AI reads yet (see the class notes); the file's "_pending" lists the same.
-const PENDING: Array[String] = ["engage_m", "reaction", "aim_deg", "burst", "burst_pause", "cover_fire_s",
+const PENDING: Array[String] = ["engage_m", "reaction", "aim_deg", "cover_fire_s",
 	"frag_cooldown_s", "frag_wait_s", "morale_shaken", "morale_broken", "advance_after_s", "flank"]
+## The weights the AI reads now (AI bar G-15, one at a time): burst and burst_pause (SquadAI
+## burst_rounds and pause_mult, G-09). The file's "_wired" lists the same.
+const WIRED: Array[String] = ["burst", "burst_pause"]
 ## What a weight is when the file lacks it: the squad AI's numbers before doctrines (engage_m:
 ## a hostile's sight, SquadAI.SIGHT_RANGE).
 const FALLBACK := {"engage_m": 200.0, "reaction": 1.0, "aim_deg": 0.0, "burst": 1.0, "burst_pause": 1.0, "cover_fire_s": 5.0,

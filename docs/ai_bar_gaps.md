@@ -31,10 +31,10 @@ We learn from these mods and are inspired by how they behave. We take no code fr
 
 | # | Gap | Pri | Size |
 |---|---|---|---|
-| G-27 | Hostiles can't pick a target past 200 m | P0 | S |
-| G-01 | A squadmate sitting in a vehicle blocks casualty care for everyone | P0 | S |
-| G-02 | Every garrison and patrol in a zone is one hostile squad | P0 | M |
-| G-03 | Incoming fire tells the AI exactly where the shooter is | P0 | S |
+| G-27 | ~~Hostiles can't pick a target past 200 m~~ (done 2026-10-19: reach by weapon and optic) | P0 | S |
+| G-01 | ~~A squadmate sitting in a vehicle blocks casualty care for everyone~~ (done 2026-10-19) | P0 | S |
+| G-02 | ~~Every garrison and patrol in a zone is one hostile squad~~ (done 2026-10-19: a squad per site) | P0 | M |
+| G-03 | ~~Incoming fire tells the AI exactly where the shooter is~~ (done 2026-10-19) | P0 | S |
 | G-04 | The base of fire may be shooting into its own cover | P0 | S |
 | G-28 | A heard shot tells the AI who fired and which side he is on | P1 | S |
 | G-29 | Walls don't muffle shots or footsteps | P1 | M |
@@ -42,13 +42,13 @@ We learn from these mods and are inspired by how they behave. We take no code fr
 | G-06 | Assault and the flank's maneuver element run, they don't bound | P1 | M |
 | G-07 | No instant reaction to a near miss or a blast | P1 | M |
 | G-08 | A building clearance is dropped when contact goes quiet | P1 | S |
-| G-09 | The same bursts at every range | P1 | S |
+| G-09 | ~~The same bursts at every range~~ (done 2026-10-19) | P1 | S |
 | G-10 | The AI shoots the nearest enemy it sees, not the most dangerous | P1 | M |
-| G-11 | One small suppression radius for every round | P1 | S |
+| G-11 | ~~One small suppression radius for every round~~ (done 2026-10-19) | P1 | S |
 | G-12 | No cap on how many leave the fight for casualties | P1 | S |
 | G-13 | A carer stays with a casualty who is already stable | P1 | M |
 | G-14 | Smoke and bangs only on break contact, casualty reach or an order | P1 | M |
-| G-15 | Doctrine numbers still don't act (audit A3-07) | P1 | M |
+| G-15 | Doctrine numbers still don't act (audit A3-07; burst and burst_pause wired 2026-10-19) | P1 | M |
 | G-16 | The AI never judges which casualty is worst | P2 | S |
 | G-30 | ~~Only an AI medic can give CPR or shock a heart~~ (dropped, Captain 2026-10-19) | - | - |
 | G-17 | Positions are picked without terrain, height or a second threat | P2 | M |

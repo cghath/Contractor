@@ -533,6 +533,14 @@ const REACH_PER_POWER := 0.2
 const REACH_MAX_M := 700.0
 const REACH_PISTOL_M := 60.0
 const HOLDOVER_FROM_M := 150.0
+## Fire by range (AI bar G-09): full bursts inside BURST_CLOSE_M, short ones out to BURST_FAR_M,
+## single aimed shots past it; the pause between bursts grows PAUSE_PER_M a metre past
+## BURST_CLOSE_M, to PAUSE_MAX_MULT. Machine guns keep their bursts at every range. Doctrine's
+## burst and burst_pause scale both (G-15: insurgents long bursts, PMC controlled). Proposed.
+const BURST_CLOSE_M := 30.0
+const BURST_FAR_M := 150.0
+const PAUSE_PER_M := 1.0 / 150.0
+const PAUSE_MAX_MULT := 2.5
 const SQUAD_CONTACT_MEMORY_S := 20.0
 ## The lead still for LEAD_HALT_S (moved less than LEAD_MOVED_M): squadmates take a spot beside
 ## something solid within HALT_COVER_M of their slot, and watch outward.
@@ -3597,6 +3605,37 @@ func _find_target() -> Soldier:
 	return best if best != null else _dead_check
 
 
+## How many rounds the next burst is (G-09): by the weapon, the range, whether it's a point being
+## suppressed rather than a man, and doctrine `doctrine`'s burst factor.
+static func burst_rounds(weapon: ItemData, range_m: float, suppressing: bool, doctrine: StringName) -> int:
+	var auto: bool = weapon.stats.get("auto", false)
+	var band := Vector2i(1, 1)
+	if weapon.tags.has("lmg") or weapon.tags.has("hmg"):
+		band = Vector2i(4, 7) if range_m < BURST_FAR_M else Vector2i(3, 6)  # a gun's job is volume
+	elif suppressing:
+		band = Vector2i(2, 4) if auto else Vector2i(1, 3)
+	elif range_m < BURST_CLOSE_M:
+		band = Vector2i(3, 5) if auto else Vector2i(2, 3)
+	elif range_m < BURST_FAR_M:
+		band = Vector2i(2, 3) if auto else Vector2i(1, 2)
+	var n := randi_range(band.x, band.y)
+	if band.y > 1:
+		n = roundi(n * Doctrine.value(doctrine, "burst"))
+	return maxi(n, 1)
+
+
+## The pause after a burst, as a factor (G-09): longer the further out, and doctrine's burst_pause.
+static func pause_mult(range_m: float, doctrine: StringName) -> float:
+	return minf(1.0 + maxf(range_m - BURST_CLOSE_M, 0.0) * PAUSE_PER_M, PAUSE_MAX_MULT) * Doctrine.value(doctrine, "burst_pause")
+
+
+## This unit's doctrine id: its squad's, else its side's (Doctrine.default_for).
+func _doctrine_id() -> StringName:
+	if squad and squad.doctrine != &"":
+		return squad.doctrine
+	return Doctrine.default_for(body.faction)
+
+
 ## How far out `s` picks targets with the weapon in hand (G-27; see REACH_IRONS_M).
 static func reach_m(s: Soldier) -> float:
 	var weapon := s.active_weapon() if s.inventory else null
@@ -4035,14 +4074,15 @@ func _shoot() -> void:
 		return
 	var auto: bool = weapon.stats.get("auto", false)
 	_next_shot = now + 60.0 / float(weapon.stats.get("rpm", 600)) * (1.0 if auto else 1.6)
+	var range_m := body.camera.global_position.distance_to(aim_at)
 	if _burst_left <= 0:
-		_burst_left = randi_range(3, 5) if auto else randi_range(2, 3)
+		_burst_left = burst_rounds(weapon, range_m, foe == null, _doctrine_id())
 		_suppress_jitter = Vector3(randf_range(-1, 1), randf_range(-0.3, 0.5), randf_range(-1, 1)) * SUPPRESS_SPREAD_M
 		_start_burst(foe)  # (a dead-check: one deliberate round at a time)
 	_burst_left -= 1
 	if _burst_left <= 0:
 		_new_hold()  # the next burst's aim (the sights settle on it in the pause)
-		_pause_until = now + randf_range(0.5, 1.1) / lerpf(0.7, 1.3, combat)
+		_pause_until = now + randf_range(0.5, 1.1) / lerpf(0.7, 1.3, combat) * pause_mult(range_m, _doctrine_id())
 	var dir := body.ai_spread_direction(weapon)  # the AI keeps its own cone (Captain, P0362)
 	var extra := deg_to_rad(_aim_error_deg(foe != null))
 	dir = (dir + Vector3(randf_range(-1, 1), randf_range(-1, 1), randf_range(-1, 1)) * tan(extra) * 0.6).normalized()

@@ -608,10 +608,28 @@ func _test_doctrine_pending() -> void:
 	var unmarked: Array[String] = []
 	for id: StringName in Doctrine.ids():
 		for key: String in (file.doctrines[String(id)] as Dictionary):
-			if key != "name" and not (key in Doctrine.PENDING and key in pending):
+			if key != "name" and not (key in Doctrine.PENDING and key in pending) and not (key in Doctrine.WIRED and key in file.get("_wired", [])):
 				unmarked.append("%s.%s" % [id, key])
 	check(not Doctrine.ids().is_empty() and unmarked.is_empty() and pending.size() == Doctrine.PENDING.size() and String(file.get("_notes", "")).begins_with("PENDING"),
-		"every doctrine number is marked pending, in the code and the file (unmarked: %s)" % [unmarked])
+		"every doctrine number is marked pending or wired, in the code and the file (unmarked: %s)" % [unmarked])
+	# G-09: bursts by range; machine guns keep theirs; doctrine scales them.
+	var m4 := ItemDB.get_item(&"m4a1")
+	var close := SquadAI.burst_rounds(m4, 15.0, false, Doctrine.REGULAR)
+	var far := SquadAI.burst_rounds(m4, 250.0, false, Doctrine.REGULAR)
+	var mg := SquadAI.burst_rounds(ItemDB.get_item(&"m249"), 250.0, false, Doctrine.REGULAR)
+	check(close >= 3 and far == 1 and mg >= 3, "bursts by range: %d up close, %d far out; a machine gun still %d" % [close, far, mg])
+	check(SquadAI.pause_mult(250.0, Doctrine.REGULAR) > SquadAI.pause_mult(20.0, Doctrine.REGULAR) * 1.5, "and the pauses longer far out")
+	var ins := 0
+	var pmc_n := 0
+	for i in 40:
+		ins += SquadAI.burst_rounds(m4, 15.0, false, Doctrine.INSURGENT)
+		pmc_n += SquadAI.burst_rounds(m4, 15.0, false, Doctrine.PMC)
+	check(ins > pmc_n, "insurgents fire longer bursts than the PMC (%d to %d rounds in 40)" % [ins, pmc_n])
+	# G-11: suppression by round.
+	var pistol := Ballistics.suppress_of(ItemDB.get_item(&"m17"))
+	var rifle := Ballistics.suppress_of(m4)
+	var heavy := Ballistics.suppress_of(ItemDB.get_item(&"m240b"))
+	check(pistol.x < rifle.x and heavy.x > rifle.x and heavy.y > rifle.y, "suppression by round: pistol %.1f m, 5.56 %.1f m, 7.62 %.1f m (x%.1f)" % [pistol.x, rifle.x, heavy.x, heavy.y])
 	var sit := {"up": 6, "down": 1, "contact": true, "known": 3, "fresh": true, "stale": false, "cluster": {"centre": Vector3.ZERO},
 		"range": 80.0, "enemy_building": {}, "home_building": {}, "in_home": false, "suppression": 0.1, "morale": 0.9, "ammo": 0.9,
 		"cover": 0.6, "order": Squad.Order.FOLLOW, "weapons_free": true, "age": 1.0}
