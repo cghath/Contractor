@@ -63,6 +63,7 @@ func _ready() -> void:
 	await _test_hq_posts()
 	_test_zone_enemy()
 	await _test_rival_team()
+	await _test_roadside_ieds()
 	await _test_respawn_points()
 	_finish()
 
@@ -1396,6 +1397,52 @@ func _test_rival_team() -> void:
 				(s as Soldier).queue_free()
 	rival.races.erase(r)
 	rival.races.erase(r2)
+	await _frames(2)
+
+
+## Wave 6: a contract's "IEDs" threat is real: buried on the roads near its site, spotted by
+## someone moving carefully nearby, disarmed by a player crouched beside it, or set off.
+func _test_roadside_ieds() -> void:
+	print("IEDs on the roads")
+	var ieds := RoadsideIeds.of(level)
+	check(ieds != null, "every zone has them")
+	if ieds == null:
+		return
+	# The site with the most road near it.
+	var site := Vector3.INF
+	var best := 0
+	for m: ZoneModule in level.modules():
+		var n := ieds.road_spots(m.global_position).size()
+		if n > best:
+			best = n
+			site = m.global_position
+	var before := ieds.ieds.size()
+	var n := ieds.server_plant("TIED1", site) if site.is_finite() else 0
+	var mine := ieds.ieds.slice(before)
+	check(n >= RoadsideIeds.COUNT.x and n <= RoadsideIeds.COUNT.y and mine.size() == n
+		and mine.all(func(e: Dictionary) -> bool: return Charges.of(level).records.has(String(e.charge)) and not Charges.of(level)._due.has(String(e.charge))),
+		"%d IEDs buried on the roads near the site (devices placed, no fuse)" % n)
+	if mine.size() < 2:
+		return
+	var back := player.global_position
+	var e: Dictionary = mine[0]
+	player.global_position = level.ground_point(e.pos + Vector3(7.0, 0, 0))
+	player.velocity = Vector3.ZERO
+	ieds.server_step(0.2)
+	check(e.state == "spotted", "standing still 7 m off, the player spots it")
+	player.movement.stance = SoldierMovement.Stance.CROUCH_MID
+	player.global_position = level.ground_point(e.pos + Vector3(1.0, 0, 0))
+	ieds.server_step(RoadsideIeds.DISARM_S * 0.5)
+	check(e.state == "spotted" and float(e.disarm) > 0.0, "crouched beside it: disarming, not setting it off")
+	ieds.server_step(RoadsideIeds.DISARM_S)
+	check(e.state == "disarmed" and not Charges.of(level).records.has(String(e.charge)), "disarmed: the device is gone")
+	player.movement.stance = SoldierMovement.Stance.STAND_HIGH
+	player.global_position = back
+	var f: Dictionary = mine[1]
+	ieds.server_set_off(f, "test")
+	check(f.state == "off" and not Charges.of(level).records.has(String(f.charge)), "set off: it goes, the device with it")
+	for g: Dictionary in mine.slice(2):
+		ieds.server_disarm(g)
 	await _frames(2)
 
 
