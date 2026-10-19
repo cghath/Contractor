@@ -50,7 +50,7 @@ We learn from these mods and are inspired by how they behave. We take no code fr
 | G-14 | Smoke and bangs only on break contact, casualty reach or an order | P1 | M |
 | G-15 | Doctrine numbers still don't act (audit A3-07) | P1 | M |
 | G-16 | The AI never judges which casualty is worst | P2 | S |
-| G-30 | Only an AI medic can give CPR or shock a heart | P2 | S |
+| G-30 | ~~Only an AI medic can give CPR or shock a heart~~ (dropped, Captain 2026-10-19) | - | - |
 | G-17 | Positions are picked without terrain, height or a second threat | P2 | M |
 | G-18 | No first-contact drill (freeze, face, get down) | P2 | S |
 | G-19 | Nothing avoids ground that is being shot up | P2 | M |
@@ -59,7 +59,7 @@ We learn from these mods and are inspired by how they behave. We take no code fr
 | G-22 | A lost enemy is searched for where he was, not where he was going | P2 | S |
 | G-23 | Few visible reactions to being hit | P2 | M |
 | G-24 | No night, light, NVG, fog or weather in spotting | P2 | M |
-| G-25 | No enemy fire support: mortars, static guns | P3 | L |
+| G-25 | No enemy fire support: mortars, static guns; static weapon teams that move where they're needed | P1 | L |
 | G-26 | Patrols don't ambush; no mines | P3 | M |
 
 G-27 to G-30 were added from the critic's pass (the gaps are numbered in the order they were
@@ -67,8 +67,28 @@ found, not by priority).
 
 Suggested batches: the five P0s first (four are S; G-27 is a constant and a check). Then G-05, G-06 and G-07 together, since all
 three are how a unit moves and gets down under fire. G-12, G-13 and G-16 together as one casualty
-pass (G-30 with it). G-09, G-11 and G-15 together, as the numbers behind firing and suppression.
+pass. G-09, G-11 and G-15 together, as the numbers behind firing and suppression.
 G-28 and G-29 together, as one hearing pass.
+
+**Work order (2026-10-19, with the Captain's static weapon teams queued by what they build on):**
+1. The P0s: G-01, G-03, G-27, G-02 (written; G-04 done).
+2. G-09, G-11 and G-15: bursts by range, suppression by round, doctrine numbers. A gun team's
+   whole job is suppression, so the numbers behind it come first.
+3. G-17: picking positions with terrain, height and a second threat. "A gun on a hill" is this.
+4. **G-25, static weapon teams** (Captain: "queue it appropriately"). In parts:
+   a. the static weapon itself: a tripod HMG (M2 / DShK) that packs into loads two or three men
+      carry, sets up, and is crewed like a vehicle gun;
+   b. the AI team: moves the gun to high ground over the fight (G-17) and suppresses (G-09/G-11);
+      hostile, allied (the wave 6 weapons team) and rebel;
+   c. mortar teams: move until the target is in range, range in on Alert's last known position,
+      then fire for effect; stopped by their comms;
+   d. players: order a friendly team there (command menu, map orders, high command) and carry and
+      set up a gun themselves.
+5. G-05, G-06, G-07: getting down and bounding under fire.
+6. G-28 and G-29: the hearing pass.
+7. G-08, G-10, G-14: clearing, target choice, smoke and bangs.
+8. G-12, G-13, G-16: the casualty pass (G-30 dropped by the Captain).
+9. The P2s, then G-26.
 
 Working near other lanes: `squad_ai.gd`'s body carrying belongs to the coop-respawn worktree
 right now, so the casualty gaps (G-01, G-12, G-13, G-16) wait for it or keep clear of that code.
@@ -401,6 +421,8 @@ gap here.
   `vitals.gd:335`, `:543`.)
 - **Proposed work.** Captain's call, since medic-only was a design choice. Suggested: any AI may do
   CPR when no medic can reach the casualty within a set time; the defibrillator stays medic-only.
+- **Captain, 2026-10-19: not needed.** CPR and the defib stay medic-only among the AI; players keep
+  full medical ("full medical for players is a must").
   Fix the stale header in the same change.
 - **Size** S. **Priority** P2.
 
@@ -516,7 +538,17 @@ gap here.
   (`mission_brainstorm.md:175`); mortars are a contract threat weight (`contracts_gen.gd:41`).
 - **Proposed work.** A mortar team at some sites, fed by `Alert`'s last known position and its
   uncertainty (ranging rounds, then fire for effect), stopped by its comms. Static guns at posts.
-- **Size** L. **Priority** P3.
+- **Captain, 2026-10-19: "we also need static weapon teams that can move dynamically to where
+  they're needed."** So not only guns fixed at posts: crew-served weapons (a tripod HMG, a mortar)
+  as teams of two or three that pack the gun into loads, carry them, and set up again where the
+  fight needs them (a flank, a rooftop, a road the squad is on), the way VCOM's AI takes up static
+  guns and LAMBS moves its groups. Raised to P1, after the P0s.
+- **And (same night):** "mortars sent to reposition for targets to be in range, setting up a gun on
+  a hill to suppress the enemy etc should be options for the AI factions and players." So every
+  side gets it: hostile, allied and rebel AI move a mortar until the target is in its range and put
+  an HMG on high ground over the fight; players can order a friendly team to do the same (the
+  command menu / map orders) or carry and set up a gun themselves.
+- **Size** L. **Priority** P1.
 
 ### G-26: patrols don't ambush; no mines
 

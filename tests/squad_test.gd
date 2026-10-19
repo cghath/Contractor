@@ -40,6 +40,7 @@ func _ready() -> void:
 	await _test_buddy_carries_buddy()
 	await _test_contact()
 	_test_flash_stuns()
+	_test_fire_fix()
 	await _test_spotting()
 	await _test_fire_discipline()
 	await _test_no_fire_into_walls()
@@ -61,6 +62,38 @@ func check(condition: bool, what: String) -> void:
 	print("  [%s] %s" % ["ok" if condition else "FAIL", what])
 	if not condition:
 		failures += 1
+
+
+## AI bar G-03: rounds cracking past give the shooter's direction well and his range badly,
+## better as he keeps firing from the same spot; a blast is exact.
+func _test_fire_fix() -> void:
+	print("Fixing a shooter from his fire")
+	var alpha := _ai("Alpha")
+	var keep := [alpha.threat_pos, alpha.threat_time, alpha.threat_err, alpha.suppression]
+	var from := alpha.global_position + Vector3(0, 1.5, -200)
+	alpha.threat_err = 0.0
+	alpha.threat_time = -1000.0
+	alpha.suppress_fire(0.05, from)
+	var to := Vector3(alpha.threat_pos.x - alpha.global_position.x, 0, alpha.threat_pos.z - alpha.global_position.z)
+	var first := alpha.threat_err
+	check(first > 10.0 and to.normalized().dot(Vector3.FORWARD) > 0.97, "one crack: the right way, a rough range (+-%.0f m, %.0f m out)" % [first, to.length()])
+	for i in 6:
+		alpha.suppress_fire(0.0, from + Vector3(randf_range(-1, 1), 0, randf_range(-1, 1)))
+	check(alpha.threat_err < first * 0.5, "he keeps firing from there: placed better (+-%.0f m)" % alpha.threat_err)
+	alpha.suppress(0.0, from)
+	check(alpha.threat_err == 0.0 and alpha.threat_pos == from, "a blast: exact")
+	alpha.threat_pos = keep[0]
+	alpha.threat_time = keep[1]
+	alpha.threat_err = keep[2]
+	alpha.suppression = keep[3]
+	# G-27: the reach goes with the weapon and its optic; past HOLDOVER_FROM_M they hold over.
+	var m4 := ItemDB.get_item(&"m4a1")
+	var reach := SquadAI.reach_m(player)
+	print("    player reach %.0f m with %s" % [reach, player.active_weapon().id if player.active_weapon() else "nothing"])
+	check(reach >= SquadAI.REACH_IRONS_M and reach <= SquadAI.REACH_MAX_M, "a rifle's reach goes by its optic (%.0f m)" % reach)
+	var d300 := Ballistics.drop_m(m4, 300.0)
+	var d500 := Ballistics.drop_m(m4, 500.0)
+	check(absf(Ballistics.drop_m(m4, Ballistics.ZERO_M)) < 0.05 and d300 > 0.1 and d500 > d300, "the round drops past its zero (%.2f m at 300, %.2f m at 500)" % [d300, d500])
 
 
 func _test_roster() -> void:

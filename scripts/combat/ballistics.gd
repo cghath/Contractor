@@ -210,6 +210,16 @@ static func zeroed(direction: Vector3, weapon: ItemData) -> Vector3:
 	return direction.rotated(axis.normalized(), atan2(0.5 * -GRAVITY.y * t * t, zero))
 
 
+## How far below the line of sight `weapon`'s round falls `distance` metres out, zeroed as
+## `zeroed` does (0 at the zero; negative short of it): what the AI holds over by (G-27).
+static func drop_m(weapon: ItemData, distance: float) -> float:
+	var zero := float(weapon.stats.get("zero_m", ZERO_M)) if weapon else ZERO_M
+	var t0 := zero / maxf(_speed_at(weapon, zero * 0.5), 50.0)
+	var t := distance / maxf(_speed_at(weapon, distance * 0.5), 50.0)
+	var g := -GRAVITY.y
+	return 0.5 * g * t * t - distance * (0.5 * g * t0 * t0 / maxf(zero, 1.0))
+
+
 ## The round's speed `distance` metres out (velocity_at), or its class's usual without data.
 static func _speed_at(weapon: ItemData, distance: float) -> float:
 	var v := velocity_at(weapon, distance) if weapon else -1.0
@@ -455,4 +465,4 @@ static func report_near_misses(shooter: Node, from: Vector3, to: Vector3) -> voi
 		var chest := s.global_position + Vector3.UP * 1.2
 		var d := Geometry3D.get_closest_point_to_segment(chest, from, to).distance_to(chest)
 		if d < SUPPRESS_RADIUS:
-			s.suppress(0.12 + (SUPPRESS_RADIUS - d) * 0.08, from)
+			s.suppress_fire(0.12 + (SUPPRESS_RADIUS - d) * 0.08, from)

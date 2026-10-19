@@ -170,6 +170,11 @@ var suppression := 0.0
 ## Host only (AI): where incoming fire last came from, and when.
 var threat_pos := Vector3.ZERO
 var threat_time := -1000.0
+## Host only (AI): how far off threat_pos may be, metres (0: seen or a blast; rounds cracking past
+## only give a rough fix, suppress_fire; G-03).
+var threat_err := 0.0
+var _fire_from := Vector3.INF  # host (AI): where the last near miss really came from
+var _fire_reps := 0            # and how many in a row from about there: each one places him better
 ## A player asking for a medic (Captain, 2026-10-19: "an option to order medics to heal you ...
 ## you to request help"): when he last called (the command menu's "Medic!" or "Treat me", the voice
 ## order), host side; SquadAI.needs_help answers it for SquadAI.MEDIC_CALL_S. "Treat me" also names
@@ -252,7 +257,42 @@ func owner_peer() -> int:
 func suppress(amount: float, from: Vector3) -> void:
 	suppression = minf(suppression + amount, 1.0)
 	threat_pos = from
+	threat_err = 0.0
 	threat_time = _now()
+
+
+## Host only. A round cracked past (Ballistics.report_near_misses): it gives the direction well
+## and the range badly (AI bar G-03: Arma's AI "knows about" a shooter roughly from his fire).
+## The error grows with distance and shrinks as he keeps firing from about the same spot.
+## Proposed numbers: range off by up to FIRE_RANGE_ERR of the distance, sideways FIRE_SIDE_ERR.
+const FIRE_RANGE_ERR := 0.3
+const FIRE_SIDE_ERR := 0.08
+const FIRE_SAME_SPOT_M := 6.0
+func suppress_fire(amount: float, from: Vector3) -> void:
+	var now := _now()
+	if _fire_from.is_finite() and _fire_from.distance_to(from) < FIRE_SAME_SPOT_M and now - threat_time < 8.0:
+		_fire_reps = mini(_fire_reps + 1, 8)
+	else:
+		_fire_reps = 0
+	_fire_from = from
+	var seen := threat_err == 0.0 and now - threat_time < 1.0 and threat_pos.distance_to(from) < FIRE_SAME_SPOT_M
+	suppression = minf(suppression + amount, 1.0)
+	threat_time = now
+	if seen:
+		return  # he's in view (SquadAI keeps threat_pos on him): the crack adds nothing
+	var flat := Vector3(from.x - global_position.x, 0.0, from.z - global_position.z)
+	var d := flat.length()
+	if d < 1.0:
+		threat_pos = from
+		threat_err = 0.0
+		return
+	var dir := flat / d
+	var side := Vector3(-dir.z, 0.0, dir.x)
+	var shrink := 1.0 / (1.0 + _fire_reps * 0.5)
+	var r := d * FIRE_RANGE_ERR * shrink
+	var w := d * FIRE_SIDE_ERR * shrink
+	threat_err = maxf(r, w)
+	threat_pos = from + dir * randf_range(-r, r) + side * randf_range(-w, w)
 
 
 ## Host only. A flashbang went off in sight.

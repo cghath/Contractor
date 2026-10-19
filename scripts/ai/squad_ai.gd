@@ -512,6 +512,8 @@ const LOB_FRIEND_M := 1.0
 const HEAR_SHOT_M := 200.0
 const HEAR_SUPPRESSED_M := 40.0
 const HEARD_ERROR_PER_100M := 6.0
+## A frag goes only where the shooter is known to within this (seen, or his fire placed; G-03).
+const FRAG_MAX_ERR_M := 4.0
 const SHARE_CONTACT_M := 80.0
 ## Contact passed on (queue 17 part 3): seconds by voice, by radio beyond SHARE_CONTACT_M
 ## (both need a radio; proposed).
@@ -521,6 +523,16 @@ const RADIO := &"radio"
 ## Friendlies see this far (hostiles SIGHT_RANGE) and stay in contact this long after the last
 ## sign of the enemy (hostiles CONTACT_MEMORY_S).
 const SQUAD_SIGHT_RANGE := 300.0  # (was 120 m; Captain, 2026-10-13)
+## How far out a fighter picks targets (AI bar G-27): by the weapon in hand and its optic, so a
+## rifle with irons or a red dot doesn't snipe and a scoped one reaches past them. REACH_IRONS_M
+## (SIGHT_RANGE, as before) at 1x, REACH_PER_POWER more for each power of the optic's highest
+## magnification, to REACH_MAX_M; a pistol REACH_PISTOL_M. Past HOLDOVER_FROM_M the AI holds
+## over for the drop (Ballistics.drop_m), as well as its skill judges it. Proposed numbers.
+const REACH_IRONS_M := 300.0
+const REACH_PER_POWER := 0.2
+const REACH_MAX_M := 700.0
+const REACH_PISTOL_M := 60.0
+const HOLDOVER_FROM_M := 150.0
 const SQUAD_CONTACT_MEMORY_S := 20.0
 ## The lead still for LEAD_HALT_S (moved less than LEAD_MOVED_M): squadmates take a spot beside
 ## something solid within HALT_COVER_M of their slot, and watch outward.
@@ -789,6 +801,7 @@ func _tick(delta: float) -> void:
 	if target != null and target.vitals.is_up():
 		_last_contact = now
 		body.threat_pos = target.global_position
+		body.threat_err = 0.0
 		body.threat_time = now
 		_no_los_s = 0.0
 		if _scan_cd == SCAN_S:
@@ -1678,7 +1691,7 @@ const HOT_DOWN_M := 25.0
 func _free_for(c: Soldier) -> bool:
 	return _ready_done and body != null and body != c and body.vitals.is_up() and not body.is_queued_for_deletion() \
 		and (care == Care.NONE or care == Care.BODY or casualty == c) and not _skipping(c) \
-		and (not escort_valid() or c == escorting)
+		and (not escort_valid() or c == escorting) and not is_instance_valid(body.vehicle)  # seated: can't reach anyone (G-01)
 
 
 ## This unit couldn't reach `c` lately and leaves them to others for now.
@@ -3531,7 +3544,7 @@ func _find_target() -> Soldier:
 			and Spotting.foliage_m(_zone_scatter(), body, focus) < Spotting.FOLIAGE_OPAQUE_M:
 		return focus  # (deep in the leaves he's lost even when ordered: the search below takes over)
 	var best: Soldier = null
-	var best_dist := SQUAD_SIGHT_RANGE if _friendly() else SIGHT_RANGE
+	var best_dist := reach_m(body)  # (was SQUAD_SIGHT_RANGE / SIGHT_RANGE for all, 300 m)
 	var check: Soldier = null
 	var check_dist := DEAD_CHECK_M
 	var clearing := _clearing()
@@ -3582,6 +3595,18 @@ func _find_target() -> Soldier:
 	elif _dead_check != null and not _dead_check_valid(_dead_check):
 		_dead_check = null
 	return best if best != null else _dead_check
+
+
+## How far out `s` picks targets with the weapon in hand (G-27; see REACH_IRONS_M).
+static func reach_m(s: Soldier) -> float:
+	var weapon := s.active_weapon() if s.inventory else null
+	if weapon == null or weapon.type != "weapon":
+		return REACH_IRONS_M
+	if String(weapon.stats.get("sound", "")) == "pistol":
+		return REACH_PISTOL_M
+	var optic := GunSight.optic_of(s)
+	var power := float(optic.stats.get("magnification_max", optic.stats.get("magnification", 1.0))) if optic else 1.0
+	return minf(REACH_IRONS_M * (1.0 + REACH_PER_POWER * maxf(power - 1.0, 0.0)), REACH_MAX_M)
 
 
 ## One scan's worth of spotting `s` (in sight, `leaves` metres of foliage in the way):
@@ -3984,6 +4009,9 @@ func _shoot() -> void:
 	if aim_at == null:
 		_no_shot_since = -1.0
 		return
+	var far := body.camera.global_position.distance_to(aim_at)
+	if far > HOLDOVER_FROM_M:
+		aim_at += Vector3.UP * Ballistics.drop_m(weapon, far) * (0.8 + 0.2 * combat)  # held over, a little short when green (G-27)
 	var error := _aim_for_shot(aim_at, foe)
 	if body.want_crouch and _at_cover() and foe != null:
 		body.want_crouch = false  # stand up to shoot over cover
@@ -4280,6 +4308,8 @@ func _maybe_frag() -> void:
 	var d := body.global_position.distance_to(body.threat_pos)
 	if d < 8.0 or d > 25.0:
 		return
+	if body.threat_err > FRAG_MAX_ERR_M:
+		return  # only cracks overhead, the shooter never seen: no frag at a guess (G-03)
 	var from := body.camera.global_position + Vector3.UP * 0.2
 	if not _frag_safe(from, body.threat_pos):
 		return  # friendlies (or civilians, people wave 4) near the blast or under the arc

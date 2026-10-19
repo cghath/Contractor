@@ -203,8 +203,32 @@ func _receive(report: Dictionary) -> void:
 	# Record the commander's picture before listeners react to this report. A first
 	# sighting must already be confirmed when the response asks permission to launch.
 	report_received.emit(r)
+	if r.kind == &"contact":
+		_share_contact(r.pos)
 	_raise(String(r.area), int(RAISES.get(r.kind, State.SUSPICIOUS)), r.kind == &"contact", true)
 	reported.emit(r)
+
+
+## A contact report on the net (G-02): every hostile squad with a man within NET_SHARE_M of it
+## now knows of the nearest of the company there, as heard (a rough fix, not a sighting).
+const NET_SHARE_M := 500.0
+func _share_contact(pos: Vector3) -> void:
+	var who: Soldier = null
+	var best := SEEN_GROUP_M
+	var company := MapNodes.players(self)
+	company.append_array(MapNodes.squad_ai(self))
+	for p: Soldier in company:
+		if p.vitals.is_up() and p.global_position.distance_to(pos) <= best:
+			best = p.global_position.distance_to(pos)
+			who = p
+	if who == null:
+		return
+	var told := {}
+	for s: Soldier in _hostiles():
+		var ai := SquadAI.of(s)
+		if ai and ai.squad and not told.has(ai.squad) and s.global_position.distance_to(pos) <= NET_SHARE_M:
+			told[ai.squad] = true
+			ai.squad.note_enemy(who, pos, true)
 
 
 ## `area` rises to `to` (and its hostiles take up the mode); with `on_net` (a report that reached

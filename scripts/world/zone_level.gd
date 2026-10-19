@@ -67,6 +67,7 @@ const ENEMY_MEDIC_EVERY := 5
 var def: Dictionary = {}
 var terrain: ZoneTerrain
 var _posts := {}  # Host: module id -> GarrisonPost (its garrison holding inside its walls)
+var _site_squads := {}  # Host: module id -> Squad, its garrison's own (AI bar G-02)
 var scatter: ZoneScatter  # rocks, scrub and trees on it
 ## Spawns WorldCache nodes at the scatter's VALUABLE sites (WorldValuables): one per peer, the
 ## host's spawn (with its seeded loot) replicates to everyone, late joiners included.
@@ -708,6 +709,21 @@ func _post_garrison(module: ZoneModule, s: Soldier) -> void:
 	ai.post = p
 
 
+## Host: module `module_id`'s garrison's own squad (AI bar G-02: one hostile squad per site, as
+## patrols and hunters already have, so a tactic plans with that site's men and what they know;
+## the rest of the zone hears of a contact over the radio, Alert, with its delays).
+func site_squad(module_id: String) -> Squad:
+	var squad: Squad = _site_squads.get(module_id)
+	if squad == null or not is_instance_valid(squad):
+		squad = Squad.new()
+		squad.name = "Garrison_" + module_id.validate_node_name().replace("@", "_")
+		squad.faction = &"hostile"
+		squad.patrol = []  # garrisons hold their ground
+		add_child(squad)
+		_site_squads[module_id] = squad
+	return squad
+
+
 ## Host: module `module_id`'s garrison post, or null.
 func post_of(module_id: String) -> GarrisonPost:
 	return _posts.get(module_id)
@@ -739,6 +755,9 @@ func _spawn_queued_garrison() -> void:
 				"mode": alert.mode_at(pos) if alert else GARRISON_STATS.mode,
 				"role": "medic" if i % ENEMY_MEDIC_EVERY == ENEMY_MEDIC_EVERY - 1 else (Kits.role(kit_id, i) if data_kit else CompoundLevel.hostile_role(i))})
 			if s:
+				var brain := SquadAI.of(s)
+				if brain:
+					brain.squad = site_squad(module.module_id)  # its own squad, not the zone's (G-02)
 				_post_garrison(module, s)
 				var look := module.global_basis * (q.get("face", Vector3.ZERO) as Vector3)  # a post's way out (towns)
 				s.rotation.y = post_yaw(module, pos) if look.length() < 0.1 else atan2(-look.x, -look.z)
