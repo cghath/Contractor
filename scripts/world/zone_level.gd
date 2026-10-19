@@ -66,6 +66,7 @@ const ENEMY_MEDIC_EVERY := 5
 ## The zone definition (ZoneDef), set before the node enters the tree (configure()).
 var def: Dictionary = {}
 var terrain: ZoneTerrain
+var _posts := {}  # Host: module id -> GarrisonPost (its garrison holding inside its walls)
 var scatter: ZoneScatter  # rocks, scrub and trees on it
 ## Spawns WorldCache nodes at the scatter's VALUABLE sites (WorldValuables): one per peer, the
 ## host's spawn (with its seeded loot) replicates to everyone, late joiners included.
@@ -659,6 +660,27 @@ func _spawn_garrison(module: ZoneModule) -> void:
 		_pair_garrison(module)  # nobody to wait for: the ones still up pair as they are
 
 
+## Host: a walled site's garrison man joins its post (GarrisonPost: he holds inside its walls,
+## in ambush, until it breaks). Towns and villages fight their own way (UrbanDefence).
+func _post_garrison(module: ZoneModule, s: Soldier) -> void:
+	if not ZoneModules.base(module.type) in GarrisonPost.TYPES:
+		return
+	var ai := SquadAI.of(s)
+	if ai == null:
+		return
+	var p: GarrisonPost = _posts.get(module.module_id)
+	if p == null:
+		p = GarrisonPost.new(module.module_id, module.footprint())
+		_posts[module.module_id] = p
+	p.add(s)
+	ai.post = p
+
+
+## Host: module `module_id`'s garrison post, or null.
+func post_of(module_id: String) -> GarrisonPost:
+	return _posts.get(module_id)
+
+
 ## Host: how many of module `module_id`'s garrison are put in but still to come out.
 func garrison_pending(module_id: String) -> int:
 	return int(_garrison_pending.get(module_id, 0))
@@ -685,6 +707,7 @@ func _spawn_queued_garrison() -> void:
 				"mode": alert.mode_at(pos) if alert else GARRISON_STATS.mode,
 				"role": "medic" if i % ENEMY_MEDIC_EVERY == ENEMY_MEDIC_EVERY - 1 else (Kits.role(kit_id, i) if data_kit else CompoundLevel.hostile_role(i))})
 			if s:
+				_post_garrison(module, s)
 				var look := module.global_basis * (q.get("face", Vector3.ZERO) as Vector3)  # a post's way out (towns)
 				s.rotation.y = post_yaw(module, pos) if look.length() < 0.1 else atan2(-look.x, -look.z)
 		var left := garrison_pending(String(q.module_id)) - 1

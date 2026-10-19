@@ -643,6 +643,8 @@ var _reports := {}
 ## Morale (MORALE_*), and where this unit is falling back to (null: not worked out).
 var morale := 1.0
 var _fall_back_point: Variant = null
+## A site garrison's post (GarrisonPost: held, in ambush, until it breaks), or null.
+var post: GarrisonPost
 var _morale_state := "steady"
 var _no_los_s := 0.0
 var _burst_left := 0
@@ -978,6 +980,8 @@ func engaged() -> bool:
 func weapons_free() -> bool:
 	if hold_fire:
 		return false
+	if post:
+		return post.sprung  # a garrison holds its fire in ambush, then every man opens up (GarrisonPost)
 	if StringName(_tactic().get("kind", &"")) == &"suppress":
 		return true  # ordered to: whatever the combat mode
 	match combat_mode:
@@ -1146,6 +1150,13 @@ func _choose_intent() -> void:
 			set_escort(null)
 	else:
 		scores[Intent.PATROL] = 0.3
+		if post:
+			post.update(Soldier._now())
+			if post.fleeing:
+				if _fall_back_point == null:
+					_fall_back_point = post.flee_point(body.global_position)
+					_callout(&"tactic", "Get out! Fall back!")
+				scores[Intent.FALL_BACK] = 0.92  # a broken garrison runs: above fighting and care in contact
 		if Soldier._now() - _last_contact < INVESTIGATE_MEMORY_S or suspecting():
 			# Shaken (losses, suppression), it stays put in cover rather than searching the kill zone.
 			scores[Intent.INVESTIGATE] = 0.55 if morale >= MORALE_SHAKEN + 0.2 or suspecting() else 0.2
@@ -4264,6 +4275,8 @@ func _call_bound() -> void:
 # --- Steering -------------------------------------------------------------
 
 func _go(point: Vector3, run := false) -> void:
+	if post:
+		point = post.keep_in(point)  # a garrison stays inside its walls (GarrisonPost) until it breaks
 	_destination = point
 	_has_destination = true
 	_run = run or _flat_distance(point) > RUN_DISTANCE
