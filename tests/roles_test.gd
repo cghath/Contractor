@@ -473,8 +473,8 @@ func _test_team() -> void:
 	_menu(KEY_F4, [KEY_9, KEY_3, KEY_5])  # slot 4 to White
 	check(b.color_team == "" and a.color_team == "red", "White takes %s out of the red team" % b.name)
 	var mount: Array = CommandMenu.MENU["items"].filter(func(i: Dictionary) -> bool: return i["label"] == "Mount")
-	check(mount.size() == 1 and (mount[0]["items"] as Array).map(func(i: Dictionary) -> String: return i["cmd"]) == ["mount", "dismount", "take_gun"],
-		"Mount has Get in, Get out and Take the gun (wave 5 vehicles; Captain, 2026-10-15)")
+	check(mount.size() == 1 and (mount[0]["items"] as Array).map(func(i: Dictionary) -> String: return i["cmd"]) == ["mount", "dismount", "take_gun", "take_wheel", "drive_to", "convoy", "pickup", "drive_stop", "contact_dismount"],
+		"Mount has Get in, Get out and Take the gun (wave 5 vehicles; Captain, 2026-10-15), then the drivers' orders (SquadDrivers, 2026-10-19)")
 
 
 func _test_roster() -> void:
