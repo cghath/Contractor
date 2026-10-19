@@ -96,6 +96,8 @@ static func current(from: Node) -> AlliedTroops:
 
 
 func _cmd_call(who: Node, arg: String, _point: Vector3, _names: PackedStringArray) -> String:
+	if arg == "company":
+		return server_call(who as Soldier, false, "rifle", true)
 	return server_call(who as Soldier, false, arg if arg != "" else "rifle")
 
 
@@ -178,13 +180,29 @@ static func kit_for(employer: String) -> String:
 
 ## Host: `by` calls in an element of `kind` (KINDS). `dev`: free, ignores standing/cooldown and
 ## takes any empty slot (dev tools, tests). Returns "" when it's on its way, else why not.
-func server_call(by: Soldier, dev := false, kind := "rifle") -> String:
+## `company` (docs/linked_zones.md 1b / LZ-6, "hired player-faction squads you command"): one of
+## the company's own hired squads (BaseHub.company_squads), in its own kit and marks, paid by its
+## wages (no call price, no standing needed), under the same high command.
+func server_call(by: Soldier, dev := false, kind := "rifle", company := false) -> String:
 	if not multiplayer.is_server() or by == null:
 		return ""
 	if not KINDS.has(kind):
 		return "No such element"
 	var slot := -1
-	if dev:
+	if company:
+		var hired := BaseHub.company_squads()
+		var out_now := out().filter(func(e: Dictionary) -> bool: return e.get("company", false)).size()
+		if hired <= 0:
+			return "The company has no squads of its own yet (hire them at the ops desk)"
+		if out_now >= hired:
+			return "Every company squad is out (%d)" % hired
+		for i in MAX_ELEMENTS:
+			if elements[i] == null or not _alive(elements[i]):
+				slot = i
+				break
+		if slot < 0:
+			return "Every element is out"
+	elif dev:
 		for i in MAX_ELEMENTS:
 			if elements[i] == null or not _alive(elements[i]):
 				slot = i
@@ -199,12 +217,12 @@ func server_call(by: Soldier, dev := false, kind := "rifle") -> String:
 	var level := CompoundLevel.current(self)
 	if level == null:
 		return "No ally nearby"
-	if not dev and not Economy.server_pay_support(PRICE_KIND, _contract_id()):
+	if not dev and not company and not Economy.server_pay_support(PRICE_KIND, _contract_id()):
 		return "Can't afford an allied element ($%s)" % DebriefCalc.money(Prices.support_price(PRICE_KIND))
 	if elements[slot] != null:
 		_drop(slot, false)  # a wiped element still on the books
 	var employer := String(_best_standing().employer)
-	var kit := kit_for(employer)
+	var kit := kit_for(employer) if not company else DEFAULT_KIT
 	var spec: Dictionary = KINDS[kind]
 	var size := int(spec.size)
 	var k := Kits.data(kit)
@@ -217,7 +235,8 @@ func server_call(by: Soldier, dev := false, kind := "rifle") -> String:
 	level.add_child(sq)
 	for i in size:
 		var pos: Vector3 = level.call(&"ground_point", at + across * SPACING_M * (i - (size - 1) / 2.0))
-		var s: Soldier = level.call(&"spawn_soldier", {"name": "A%d_%d" % [slot + 1, i + 1], "faction": "friendly", "iff": "allied", "variant": Kits.variant(kit),
+		var s: Soldier = level.call(&"spawn_soldier", {"name": "A%d_%d" % [slot + 1, i + 1], "faction": "friendly", "iff": "" if company else "allied",
+			"variant": "tan" if company else Kits.variant(kit),
 			"pos": pos, "loadout": Kits.loadout(kit, i, 1, String(spec.mix)), "role": Kits.role(kit, i, String(spec.mix)),
 			"combat": float(k.get("combat", 0.6)), "discipline": float(k.get("discipline", 0.65)), "guard": false, "mode": "aware"})
 		if s == null:
@@ -225,11 +244,12 @@ func server_call(by: Soldier, dev := false, kind := "rifle") -> String:
 		var brain := SquadAI.of(s)
 		if brain:
 			brain.squad = sq
-	elements[slot] = {"id": slot + 1, "kind": kind, "squad": sq, "kit": kit, "employer": employer, "order": "move", "point": by.global_position}
+	elements[slot] = {"id": slot + 1, "kind": kind, "squad": sq, "kit": kit, "employer": "company" if company else employer, "order": "move",
+		"point": by.global_position, "company": company}
 	caller = by
 	calls += 1
 	sq.give_order(by, Squad.Order.MOVE, by.global_position)
-	last_message = "Allied %s inbound (element %d, %d men)" % [spec.label, slot + 1, sq.members().size()]
+	last_message = "%s %s inbound (element %d, %d men)" % ["Company" if company else "Allied", spec.label, slot + 1, sq.members().size()]
 	print("[allied] %s calls in element %d, a %s (%d men, %s) at (%.0f, %.0f)%s" % [by.name, slot + 1, spec.label, sq.members().size(), kit, at.x, at.z, " (dev)" if dev else ""])
 	_show_left = 0.0
 	return ""

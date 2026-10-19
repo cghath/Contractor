@@ -1756,7 +1756,29 @@ func _on_day_advanced(today: int, days: int) -> void:
 
 ## Host (Economy.wages_provider): the roster's wages for a week.
 func _weekly_wages() -> int:
-	return (Roster.daily_wages(roster()) + guards() * GUARD_DAILY_WAGE) * maxi(MissionRegistry.setting_i("week_days", 7), 1)
+	return (Roster.daily_wages(roster()) + guards() * GUARD_DAILY_WAGE + company_squads() * COMPANY_SQUAD_DAILY_WAGE) \
+		* maxi(MissionRegistry.setting_i("week_days", 7), 1)
+
+
+## Hired company squads (docs/linked_zones.md 1b / LZ-6; call 20: "4-8 men each ... wages at the
+## roster's rates, up to 1 per FOB tier to start"): how many the company keeps (BaseFob.TIERS
+## "squads" caps it), each COMPANY_SQUAD_DAILY_WAGE a day. Called in from the support menu
+## (AlliedTroops, company), under the host's high command. Proposed.
+const COMPANY_SQUAD_DAILY_WAGE := 800
+
+
+func company_squads() -> int:
+	return clampi(int(base().get("company_squads", 0)), 0, int(BaseFob.TIERS[fob_tier()].squads))
+
+
+## Host (the ops desk): the company keeps `n` squads of its own.
+func server_set_company_squads(n: int) -> String:
+	var cap := int(BaseFob.TIERS[fob_tier()].squads)
+	if n > cap:
+		return "The FOB keeps %d squad%s at tier %d: upgrade it for more" % [cap, "" if cap == 1 else "s", fob_tier()]
+	base()["company_squads"] = clampi(n, 0, cap)
+	_changed(&"base")
+	return ""
 
 
 ## Hired guards (docs/linked_zones.md 1b / LZ-6: "hired guards who man the base while the squad is
@@ -2536,6 +2558,8 @@ func _server_request(action: String, args: Array) -> void:
 				server_advance_days(clampi(int(args[0]) if not args.is_empty() else 1, 1, 30))
 			"defence":
 				why = server_buy_defence(String(args[0])) if sender == 1 and not args.is_empty() else "Only the host can do that"
+			"squads":
+				why = server_set_company_squads(int(args[0]) if not args.is_empty() else 0) if sender == 1 else "Only the host can do that"
 			"fob_tier":
 				why = server_upgrade_fob() if sender == 1 else "Only the host can do that"
 			"guards":
@@ -2586,6 +2610,7 @@ func build_view() -> Dictionary:
 		"daily_wages": Roster.daily_wages(roster()), "bill_in_days": Economy.days_to_bill(), "weekly_bill": int(Economy.weekly_bill().total),
 		"players": keys, "in_base": in_base(), "ready": _ready_peers.keys(),
 		"guards": guards(), "assault": base().get("assault", {}), "defences": base().get("defences", []), "fob_tier": fob_tier(), "max_guards": max_guards(),
+		"company_squads": company_squads(), "max_squads": int(BaseFob.TIERS[fob_tier()].squads),
 	}
 
 

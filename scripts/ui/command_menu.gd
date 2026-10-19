@@ -196,6 +196,7 @@ const MENU := {
 				{"key": "7", "label": "All: follow me", "cmd": "support:allied_follow"},
 				{"key": "8", "label": "All: fall back there", "cmd": "support:allied_fall_back", "point": true},
 				{"key": "9", "label": "Release all", "cmd": "support:allied_release"},
+				{"key": "0", "label": "Call a company squad (hired)", "cmd": "support:allied_call:company"},
 			]},
 		]},
 	],

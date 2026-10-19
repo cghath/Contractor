@@ -258,6 +258,14 @@ func _build_squad(rows: VBoxContainer, v: Dictionary) -> void:
 	var drop := UiKit.button("Stand one down", func() -> void: BaseHub.request("guards", [g - 1]))
 	drop.disabled = not multiplayer.is_server() or g <= 0
 	defence.add_child(UiKit.button_row([hire, drop]))
+	var sq := int(v.get("company_squads", 0))
+	var sq_cap := int(v.get("max_squads", 0))
+	defence.add_child(UiKit.text("Company squads: %d of %d (8 men, $%d a day each; call them from the support menu)." % [sq, sq_cap, BaseHub.COMPANY_SQUAD_DAILY_WAGE]))
+	var hire_sq := UiKit.button("Hire a squad", func() -> void: BaseHub.request("squads", [sq + 1]))
+	hire_sq.disabled = not multiplayer.is_server() or sq >= sq_cap
+	var drop_sq := UiKit.button("Let one go", func() -> void: BaseHub.request("squads", [sq - 1]))
+	drop_sq.disabled = not multiplayer.is_server() or sq <= 0
+	defence.add_child(UiKit.button_row([hire_sq, drop_sq]))
 	var owned: Array = v.get("defences", [])
 	for id: String in BaseFob.DEFENCES:
 		var d: Dictionary = BaseFob.DEFENCES[id]

@@ -444,7 +444,18 @@ func _test_assault() -> void:
 	# Hired guards (LZ-6): they stand on the wire, and hold an assault off-screen.
 	check(BaseHub.server_set_guards(5) != "" and BaseHub.guards() == 0, "tier 1 keeps no more than %d guards" % int(BaseFob.TIERS[1].guards))
 	check(BaseHub.server_buy_defence("bunker").contains("tier 2"), "and the bunker waits for tier 2")
+	check(BaseHub.server_set_company_squads(1) != "" and BaseHub.company_squads() == 0, "tier 1 keeps no company squad")
 	check(BaseHub.server_upgrade_fob() == "" and BaseHub.fob_tier() == 2 and BaseHub.max_guards() == 8, "the FOB goes up to tier 2")
+	check(BaseHub.server_set_company_squads(1) == "" and BaseHub.company_squads() == 1, "and keeps a company squad of its own")
+	var troops := AlliedTroops.current(base)
+	var me := base.players.get_node(^"1") as Soldier
+	var funds := BaseEconomy.funds()
+	var called := troops.server_call(me, false, "rifle", true) if troops else "no AlliedTroops"
+	var company_men := base.ai.get_children().filter(func(n: Node) -> bool: return n is Soldier and String(n.name).begins_with("A") and (n as Soldier).iff == &"")
+	check(called == "" and BaseEconomy.funds() == funds and company_men.size() >= 4,
+		"called in from the support menu, it comes free in the company's own marks (%s, %d men)" % [called, company_men.size()])
+	check(troops.server_call(me, false, "rifle", true).contains("out"), "and only as many as the company keeps")
+	troops.server_release(me)
 	BaseHub.server_set_guards(3)
 	await get_tree().create_timer(0.5).timeout
 	var posted := base.ai.get_children().filter(func(n: Node) -> bool: return n is Soldier and (n as Soldier).has_meta(&"base_guard") and not n.is_queued_for_deletion())
