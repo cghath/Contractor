@@ -55,7 +55,11 @@ static func _resolve_offscreen(booked: Dictionary) -> String:
 	var lost := PackedStringArray()
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash([BaseHub.day(), String(booked.faction)])
-	for k in mini(LOSSES, stash.size()):
+	var guards := BaseHub.guards()
+	var losses := 0 if guards >= 4 else maxi(LOSSES - guards / 2, 0)  # the guards hold the wire (LZ-6)
+	if guards > 0 and guards < 4:
+		base["guards"] = guards - 1  # stretched thin: one of them falls
+	for k in mini(losses, stash.size()):
 		var i := rng.randi_range(0, stash.size() - 1)
 		var e: Dictionary = stash[i]
 		var gone := ceili(int(e.get("count", 1)) * 0.5)
@@ -66,7 +70,9 @@ static func _resolve_offscreen(booked: Dictionary) -> String:
 	base.erase("assault")
 	base["last_assault_day"] = BaseHub.day()
 	Economy.add_heat(String(booked.faction), -OFFSCREEN_COOL)
-	var report := "Situation report: the FOB was hit while you were out. The detail held them off; lost at the wire: %s." % (", ".join(lost) if not lost.is_empty() else "nothing")
+	var held := "the guards (%d) held them off" % guards if guards > 0 else "the detail held them off"
+	var report := "Situation report: the FOB was hit while you were out: %s; lost at the wire: %s%s." % [held, ", ".join(lost) if not lost.is_empty() else "nothing",
+		", and a guard" if guards > 0 and guards < 4 else ""]
 	Contracts._notify_all(report)
 	SessionLog.note("base assault resolved off-screen: %s" % ", ".join(lost))
 	return report

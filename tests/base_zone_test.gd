@@ -440,5 +440,17 @@ func _test_assault() -> void:
 			(s as Soldier).vitals.server_kill()
 	await _wait_until(func() -> bool: return node.teams.is_empty(), 6.0)
 	check(node.teams.is_empty() and not base_sec.has("assault"), "beaten off, the booking's cleared")
+	# Hired guards (LZ-6): they stand on the wire, and hold an assault off-screen.
+	BaseHub.server_set_guards(3)
+	await get_tree().create_timer(0.5).timeout
+	var posted := base.ai.get_children().filter(func(n: Node) -> bool: return n is Soldier and (n as Soldier).has_meta(&"base_guard") and not n.is_queued_for_deletion())
+	check(posted.size() == 3 and posted.all(func(g: Soldier) -> bool: return base.fob.holds(g.global_position) or g.global_position.distance_to(base.fob.global_position) < 30.0),
+		"three guards hired stand on the wire (%d)" % posted.size())
+	BaseHub.server_set_guards(4)
+	base_sec["assault"] = {"faction": "black_ridge", "day": BaseHub.day()}
+	var before := BaseArmory.counts(BaseHub.stash())
+	var held := BaseAssault.server_day_passed(false)
+	check(held.contains("guards (4) held") and BaseArmory.counts(BaseHub.stash()) == before, "with four guards an assault while you're out costs nothing (%s)" % held)
+	BaseHub.server_set_guards(0)
 	heat.clear()
 	heat.merge(saved)

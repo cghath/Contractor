@@ -147,6 +147,31 @@ func _zone_enemy() -> String:
 	return t if t != "" else super._zone_enemy()
 
 
+## The guards' posts on the wire (FOB space): the gate and the corners, then along the sides.
+const GUARD_POSTS: Array[Vector3] = [Vector3(-4.5, 0.1, 17.5), Vector3(4.5, 0.1, 17.5), Vector3(-17.5, 0.1, -17.5), Vector3(17.5, 0.1, -17.5),
+	Vector3(-17.5, 0.1, 17.5), Vector3(17.5, 0.1, 17.5), Vector3(-17.5, 0.1, 0.0), Vector3(17.5, 0.1, 0.0)]
+const GUARD_KIT := ["plate_carrier", "plate_pe_l3", "plate_pe_l3", "helmet", "m4a1", "mag_556", "mag_556", "mag_556", "ifak"]
+
+
+## Host: the company's hired guards (BaseHub.guards) stand at their posts on the wire, as many as
+## it keeps: more are posted, the extra stand down.
+func server_post_guards() -> void:
+	if not multiplayer.is_server():
+		return
+	var want := BaseHub.guards()
+	for i in BaseHub.MAX_GUARDS:
+		var callsign := "Guard%d" % (i + 1)
+		var s := ai.get_node_or_null(NodePath(callsign)) as Soldier
+		if i < want and s == null:
+			s = spawn_soldier({"name": callsign, "faction": "friendly", "variant": "tan", "pos": ground_point(fob.to_global(GUARD_POSTS[i])),
+				"loadout": GUARD_KIT, "combat": 0.5, "discipline": 0.6, "guard": true, "mode": "aware"})
+			if s:
+				s.rotation.y = atan2(-GUARD_POSTS[i].x, -GUARD_POSTS[i].z) + PI  # looking out
+				s.set_meta(&"base_guard", true)
+		elif i >= want and s != null:
+			s.queue_free()
+
+
 ## Nobody holds the base's local sites (LZ-5: threats come from heat, not garrisons).
 func garrison_size(_module_id: String) -> int:
 	return 0
@@ -195,6 +220,7 @@ func _on_hosted() -> void:
 	server_show_roster()
 	if people:
 		people._spawn_civilians()  # the local villages' people (LZ-5)
+	server_post_guards()
 	var extraction := MapNodes.extraction(self)
 	if extraction:
 		extraction.server_open_crossings()  # the way out into the neighbouring zones (LZ-2)

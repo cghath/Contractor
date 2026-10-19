@@ -243,6 +243,18 @@ func _build_squad(rows: VBoxContainer, v: Dictionary) -> void:
 	buttons.append(UiKit.button("Save campaign", func() -> void: BaseHub.request("save")))
 	var go := UiKit.section("Deploy", rows)
 	go.add_child(UiKit.button_row(buttons))
+	# Base defence (LZ-6): hired guards on the wire, and any assault the heat has booked.
+	var defence := UiKit.section("Base defence", rows)
+	var g := int(v.get("guards", 0))
+	defence.add_child(UiKit.text("Guards on the wire: %d of %d ($%d a day each)." % [g, BaseHub.MAX_GUARDS, BaseHub.GUARD_DAILY_WAGE]))
+	var hire := UiKit.button("Hire a guard", func() -> void: BaseHub.request("guards", [g + 1]))
+	hire.disabled = not multiplayer.is_server() or g >= BaseHub.MAX_GUARDS
+	var drop := UiKit.button("Stand one down", func() -> void: BaseHub.request("guards", [g - 1]))
+	drop.disabled = not multiplayer.is_server() or g <= 0
+	defence.add_child(UiKit.button_row([hire, drop]))
+	var booked: Dictionary = v.get("assault", {})
+	if not booked.is_empty():
+		defence.add_child(UiKit.text("Expect an assault on day %d (%s)." % [int(booked.day), String(booked.faction).capitalize()]))
 	_add_restock_row(go)
 	go.add_child(UiKit.button_row([_loadouts_button()]))
 

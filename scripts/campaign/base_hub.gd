@@ -1756,7 +1756,28 @@ func _on_day_advanced(today: int, days: int) -> void:
 
 ## Host (Economy.wages_provider): the roster's wages for a week.
 func _weekly_wages() -> int:
-	return Roster.daily_wages(roster()) * maxi(MissionRegistry.setting_i("week_days", 7), 1)
+	return (Roster.daily_wages(roster()) + guards() * GUARD_DAILY_WAGE) * maxi(MissionRegistry.setting_i("week_days", 7), 1)
+
+
+## Hired guards (docs/linked_zones.md 1b / LZ-6: "hired guards who man the base while the squad is
+## out (wages, part of the weekly bill)"): how many, up to MAX_GUARDS, each GUARD_DAILY_WAGE a day.
+## They stand at the FOB's posts (BaseZoneLevel) and hold it off-screen (BaseAssault). Proposed.
+const MAX_GUARDS := 8
+const GUARD_DAILY_WAGE := 120
+
+
+func guards() -> int:
+	return clampi(int(base().get("guards", 0)), 0, MAX_GUARDS)
+
+
+## Host (the ops desk): the company keeps `n` guards.
+func server_set_guards(n: int) -> String:
+	base()["guards"] = clampi(n, 0, MAX_GUARDS)
+	_changed(&"base")
+	var lvl := level()
+	if lvl is BaseZoneLevel:
+		(lvl as BaseZoneLevel).server_post_guards()
+	return ""
 
 
 ## Host (Economy.purchase_sink and stash_sink): bought, salvaged or brought-out items go into
@@ -2466,6 +2487,8 @@ func _server_request(action: String, args: Array) -> void:
 				why = server_buy(StringName(args[0]), int(args[1]) if args.size() > 1 else 1, sender)
 			"rest":
 				server_advance_days(clampi(int(args[0]) if not args.is_empty() else 1, 1, 30))
+			"guards":
+				why = server_set_guards(int(args[0]) if not args.is_empty() else 0) if sender == 1 else "Only the host can do that"
 			"deploy":
 				why = server_deploy()
 			"prep":
@@ -2511,6 +2534,7 @@ func build_view() -> Dictionary:
 		"stash": stash(), "prep": _prep(), "catalog": BaseEconomy.shop_catalog(), "held": held,
 		"daily_wages": Roster.daily_wages(roster()), "bill_in_days": Economy.days_to_bill(), "weekly_bill": int(Economy.weekly_bill().total),
 		"players": keys, "in_base": in_base(), "ready": _ready_peers.keys(),
+		"guards": guards(), "assault": base().get("assault", {}),
 	}
 
 
