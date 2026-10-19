@@ -30,6 +30,23 @@ const PLATE_HEIGHT := 0.33
 const SIDE_PLATE_HEIGHT := 0.28
 ## Where a helmet's pivot (the centre of its dome base) sits, head-local.
 const HELMET_POSITION := Vector3(0, 0.2, 0)
+## Friend or foe at a glance (Captain, 2026-10-19: "we also need an easy way to discern friendly
+## and enemy troops in zones, enemies get orange/red armbands and dull red or roange markings on
+## helmets, friendlies blue and green"): a cloth band round both upper arms and a mark on the
+## helmet (a square on the crown and a patch on the back). [armband, helmet mark]: contractors
+## (players and their squad) blue, allied troops green; the militia (Black Ridge's "urban"
+## camo) orange, every other hostile side red, the helmet marks a duller shade. Proposed.
+const IFF := {
+	&"contractor": [Color("2f6bd6"), Color("2a4f8f")],
+	&"allied": [Color("3f9a3a"), Color("33692e")],
+	&"militia": [Color("e0661a"), Color("a0532a")],
+	&"hostile": [Color("c8281e"), Color("7e2a22")],
+}
+## The armband: how far below the shoulder pivot it sits (m), how tall, and how much wider
+## than the upper arm (0.12 m) it is.
+const ARMBAND_Y := -0.1
+const ARMBAND_H := 0.065
+const ARMBAND_W := 0.128
 ## A tourniquet's band and the red of medical pull tabs, as drawn on the carrier.
 const TQ_BAND := Color("1b1b1a")
 const MED_RED := Color("b3261e")
@@ -146,6 +163,7 @@ var _straps: Node3D              # the pack's shoulder straps (torso-local)
 var _carrier: ItemData          # the worn carrier (carrier_fit reads its depth and tier)
 var _straps_for := ""  # the pack and carrier they were built for
 var _tape: Node3D                 # the name tape on the carrier's loop panel
+var _armbands: Array[Node3D] = []  # the IFF armbands (_set_armbands), on the upper arms
 var _tape_key := ""              # carrier and text it shows
 var _pack_sway := GearSway.make(PACK_SWAY[0], PACK_SWAY[1], PACK_SWAY[2], PACK_SWAY[3], PACK_SWAY[4], PACK_SWAY[5])
 var _pouch_sway := GearSway.make(POUCH_SWAY[0], POUCH_SWAY[1], POUCH_SWAY[2], POUCH_SWAY[3], POUCH_SWAY[4], POUCH_SWAY[5])
@@ -163,6 +181,15 @@ func _ready() -> void:
 
 ## Where an armor piece sits. Plates sit on the carrier's faces, outside the 0.12 m-deep
 ## hitbox, strike face outward; the carrier sets how far out (heavy carriers are thicker).
+## The marks (IFF) a soldier on `faction` wears ([] for none): `iff` "allied" for allied troops.
+static func iff_of(faction: StringName, iff: StringName, variant: String) -> Array:
+	if faction == &"friendly":
+		return IFF[&"allied" if iff == &"allied" else &"contractor"]
+	if faction == &"hostile":
+		return IFF[&"militia" if variant == "urban" else &"hostile"]
+	return []
+
+
 static func armor_transform(slot: StringName, carrier: ItemData) -> Transform3D:
 	var depth: float = carrier.stats.get("plate_depth", 0.14) if carrier else 0.14
 	var side: float = carrier.stats.get("side_plate_x", 0.245) if carrier else 0.245
@@ -281,6 +308,8 @@ func _rebuild() -> void:
 			(model.head if slot == &"helmet" else model.torso).add_child(piece)
 			piece.setup(ItemDB.get_item(id), slot, inventory, render_layers)
 			_armor[slot] = piece
+			if slot == &"helmet":
+				_mark_helmet(piece)
 			_chip_counts[slot] = 0
 		if piece:
 			piece.transform = armor_transform(slot, carrier)
@@ -307,6 +336,7 @@ func _rebuild() -> void:
 	_set_pouches()
 	_set_pack_straps(pack)
 	_set_name_tape(carrier)
+	_set_armbands()
 	_set_exo_pads()
 	_refresh_plate_damage()
 	_set_exo_frame()
@@ -616,6 +646,40 @@ static func cummerbund_spot(tier: int, body: String, p: Dictionary, size: Vector
 	var mid := (a + b) * 0.5 + n * size.z * 0.5 * scale
 	var basis := Basis(Vector3.UP, atan2(-n.x, -n.y)).scaled(Vector3.ONE * scale)  # the pouch's front (-Z) along n
 	return Transform3D(basis, Vector3(mid.x, y, mid.y))
+
+
+## The IFF armbands (model.iff): a band of cloth round each upper arm, over the sleeve's patch.
+## Built once (the side doesn't change).
+func _set_armbands() -> void:
+	if not _armbands.is_empty() or model.iff.is_empty() or model.part_node(Vitals.UPPER_ARM_L) == null:
+		return
+	for part: StringName in [Vitals.UPPER_ARM_R, Vitals.UPPER_ARM_L]:
+		var band := _part_box(Vector3(ARMBAND_W, ARMBAND_H, ARMBAND_W), Vector3(0, ARMBAND_Y, 0), model.iff[0], render_layers)
+		band.name = "Armband"
+		model.part_node(part).add_child(band)
+		_armbands.append(band)
+
+
+## The IFF marks on a worn helmet (model.iff): a square on the crown and a patch on the back,
+## on the helmet piece itself, so they go with it.
+func _mark_helmet(piece: VoxelArmor) -> void:
+	if model.iff.is_empty():
+		return
+	var box := AABB()
+	for child: Node in piece.get_children():
+		if child is MeshInstance3D:
+			box = (child as MeshInstance3D).transform * (child as MeshInstance3D).get_aabb()
+			break
+	if box.size == Vector3.ZERO:
+		return
+	var colour: Color = model.iff[1]
+	var mid := box.get_center()
+	var crown := _part_box(Vector3(0.06, 0.008, 0.06), Vector3(mid.x, box.end.y - 0.002, mid.z), colour, render_layers)
+	crown.name = "HelmetMark"
+	piece.add_child(crown)
+	var back := _part_box(Vector3(0.07, 0.035, 0.008), Vector3(mid.x, mid.y + box.size.y * 0.15, box.end.z - 0.002), colour, render_layers)
+	back.name = "HelmetMark"
+	piece.add_child(back)
 
 
 ## The name tape: the soldier's surname (CharacterModel.name_tape) in dark capitals on the
@@ -1158,6 +1222,9 @@ func _box(item: ItemData) -> MeshInstance3D:
 
 
 func _clear() -> void:
+	for band: Node3D in _armbands:
+		band.queue_free()
+	_armbands.clear()
 	for piece: VoxelArmor in _armor.values():
 		piece.queue_free()
 	_armor.clear()

@@ -1010,6 +1010,7 @@ func _make_soldier(data: Dictionary) -> Node:
 	soldier.role = StringName(data.get("role", ""))
 	soldier.fire_team = int(data.get("team", -1))
 	soldier.squad_slot = int(data.get("slot", -1))
+	soldier.iff = StringName(data.get("iff", ""))
 	soldier.left_handed = bool(data.get("left", Handedness.roll_ai(String(data.name))))  # LEFT_SHARE of AI
 	if multiplayer.is_server():
 		soldier.person_name = String(data.get("person_name", ""))  # settled in spawn_soldier

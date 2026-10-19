@@ -137,6 +137,9 @@ var last_shot_suppressed := false
 
 ## "friendly" (players and their squad) or "hostile". Set before the body enters the tree.
 @export var faction := &"friendly"
+## Which friendly marks he wears (GearRig.iff_of): "allied" for allied troops (AlliedTroops),
+## "" for everyone else (his faction decides). Set before the body enters the tree.
+@export var iff := &""
 ## Camo for AI bodies (players get theirs from the peer id). Set before entering the tree.
 @export var variant := ""
 ## Body type for this soldier's model (VoxelArt.BODIES; "" is male). Set before entering the tree.
@@ -226,6 +229,7 @@ func _enter_tree() -> void:
 	else:
 		$Model.variant = PLAYER_VARIANTS[absi(name.to_int() - 1) % PLAYER_VARIANTS.size()]  # host gets the first
 	$Model.body = body if body != "" else VoxelArt.MALE
+	$Model.iff = GearRig.iff_of(faction, iff, $Model.variant)
 
 
 ## Human bodies are named after their peer id; AI bodies have any other name.
