@@ -66,6 +66,111 @@ all six are fixed (`FIXES.md`), then reviewed, and the review's problems fixed t
   up (same cause as E-01, not yet fixed for people).
 - On cghath's machine `map` (extraction countdown) and `ui` (vehicle readout) fail even on dev
   38f5825 (R0146); both pass on CI.
+### Day and night, weather: wave 7 S1 MVP (Captain, 2026-10-18)
+
+#### Added
+- Time of day per zone (`DayNight`, `scripts/world/day_night.gd`, a "DayNight" node in every
+  level): a zone's `"hour"` (its data/missions.json entry or its definition; a deployed
+  contract's own `"hour"` wins), 08:30 without one, passing at an hour per ten minutes in a
+  contract zone (standing in the compound, the base and the range). The sun climbs and sets
+  with it; at night a dim blue moon lights the level from the other side, and the sky (the
+  procedural sky, or `zone_sky.gdshader` through its existing uniforms, no shader edit),
+  ambient, fill and haze darken. A level at its own default keeps the look it built.
+- Weather: `"weather"` the same way, one of clear, overcast, fog, rain, storm (`DayNight.WEATHER`,
+  a row of data each): thicker Environment fog, a greyer, dimmer sky, darker nights, rain as
+  GPU particles round the camera (not headless), slower spotting, a limit on how far anyone is
+  seen (fog 150 m, storm 250 m, rain 400 m), footsteps carrying less in rain and storms.
+- Darkness cuts AI spotting (`Spotting.sight_x`): `DayNight.darkness_at(pos)` (0 day .. 1 night)
+  slows the spot up to 4x and hides anyone past the night's sight (60 m at full dark, 600 m at
+  dusk) unless they fired in the last 1.5 s; one marked line is the hook for NVGs (wave 7 S2).
+- Storms ground helicopters: `DayNight.grounds_aircraft()` answers `Supports.can_fly` through
+  `CompoundLevel.weather_grounds_aircraft`, so the UH-60 supports refuse ("Helicopters are
+  grounded: the weather won't let them fly") and a heli insertion goes on foot.
+- Saved with the zone (`GameState.sky`, `"sky"` in the zone save; older saves have none) and
+  replicated: a client asks the host when its level loads, the host sends it every 10 s.
+- Dev keys (DevTools, the host): `;` moves the clock on 2 hours, `'` the next weather.
+- `daynight` test suite (tests/daynight_test.gd), in tools/run_tests.sh and CI.
+### NVGs, first slice (wave 7, S2; Captain: "Day and night, weather, and NVGs")
+
+#### Added
+- Night vision goggles by generation (`data/items.json` `nvg_gen1`/`nvg_gen2`/`nvg_gen3`,
+  priced 3000/5500/9000 in `data/prices.json`): they mount on a worn helmet, and what's
+  mounted lives in the helmet's item state (`"nvg": {"id", "lowered", "battery_h"}`), so it
+  travels, saves and replicates with the helmet. Inventory: "Mount on <helmet>" on a carried
+  NVG, "Remove <NVG>" on the helmet.
+- The NVG key (`nvg_toggle`, U by default, rebindable; N is the next objective): flips the
+  NVG down or up (`Soldier._server_toggle_nvg`, host-side); with none mounted it mounts the
+  first one you carry and lowers it, and without a helmet it says to put one on.
+- `Nvg` (`scripts/combat/nvg.gd`): `restores(viewer)` (0..1, the share of the darkness
+  penalty to sight a lowered, powered NVG gives back; gen 1 0.6, gen 2 0.8, gen 3 0.9,
+  Proposed), `is_lowered`, `is_on`, `fov_of`, battery helpers, host mount/remove/lower/drain.
+  For day and night (S1) at integration: `dark *= 1.0 - Nvg.restores(viewer)` in spotting.
+- Battery: drains in real hours of lowered use (6/10/14 h by generation, Proposed), charged by
+  the host in 10 s steps; flat, the goggles stay down but show and restore nothing. Stowed, an
+  NVG keeps its charge.
+- `NvgView` (`scripts/combat/nvg_view.gd`): the wearer's own view through lowered, powered NVGs:
+  green, brightened, with grain and a vignette, inside the tube's field of view (40/45/50 deg
+  by generation, Proposed), the unaided eye's dim view around it.
+- Test suite `nvg` (`tests/nvg_test.gd`), in `tools/run_tests.sh` and CI.
+- With day and night (S1): lowered, powered NVGs give back their share of the dark's penalty
+  to spotting (`Spotting.sight_x` scales darkness by `1 - Nvg.restores(observer)`).
+
+#### Not yet
+- No NVG model on the helmet (Captain's art side), no spare batteries or recharging, the NVG's
+  mass isn't added to the helmet's, AI don't wear or use NVGs, IR illuminators and lasers
+  later. A scope's picture isn't green through NVGs.
+### Modular weapon attachments: grips, lights and lasers (wave 7 S3; Captain: "Modular weapon attachments")
+
+#### Added
+- Four attachments in `data/items.json` (type `attachment`, `stats.mount`, `stats.fits` = the
+  weapon tags they fit; proposed prices in `data/prices.json`): Vertical Foregrip
+  (`grip_vertical`, underbarrel, railed rifles, $250: x0.8 recoil, x0.85 aimed sway), Weapon
+  Light (`light_weapon`, side, rifles and pistols, $350), Visible Laser (`laser_visible`, side,
+  rifles and pistols, $450), IR Laser Aiming Module (`laser_ir`, side, rifles, $1100).
+- `GunAttachments` (`scripts/combat/gun_attachments.gd`): the underbarrel and side mounts, next
+  to the optic (`Optics`) and the muzzle (`Suppressors`), which keep their modules. What's on a
+  gun lives in its item state (`state.underbarrel`, `state.side`, `state.side_on`), so it
+  travels with the gun (stowed, dropped, looted, saved) and replicates with the inventory.
+  `all_of(weapon, state)` gives every mount -> item id, optic and muzzle included. Host-side
+  inventory actions `mount_attachment`, `remove_attachment` (target = the mount) and
+  `toggle_attachment` (validated: the item is an attachment in your kit, the gun takes it);
+  in the inventory: right-click it > Mount on <gun>; right-click the gun > Switch on/off,
+  Remove. The mass and value of a gun include them.
+- The weapon-light key, L (`Controls.KEYS weapon_light`, proposed): the light or laser on the
+  gun in hand on or off. A light is a SpotLight3D along the aim, a visible laser a thin red beam
+  to what it hits (`scripts/combat/gun_light_rig.gd`, placeholder look, drawn on every peer from
+  the replicated state; no models on the gun yet). An IR laser draws only through night vision
+  (`ir_seen`, the hook for the NVG work; nothing sets it yet).
+- The AI spots a soldier with a light or visible laser on sooner (`Spotting.LIT` x0.4 with the
+  beam towards it, `LIT_SIDE` x0.75 otherwise; proposed).
+- Test suite `attachments` (in `tools/run_tests.sh` and CI): validation, the grip's kick and
+  sway, mass and value, stowing and drawing, save/load and replication, the light and lasers,
+  a suppressed shot, a 4x prism's zoom.
+### Controller support and co-op assists (wave 7, S4; Captain: "Controller support and optional help for new co-op players")
+
+#### Added
+- On the pad wheel too: the NVG flip (U) and the weapon light or laser (L) from S2 and S3.
+- A full gamepad layout (Xbox names; `Controls.JOY_BUTTONS`, `JOY_AXES`), next to the keys:
+  move on the left stick, look on the right, RT fire, LT aim, A jump (the brake driving),
+  B crouch, X reload, Y hold for the interaction menu (the right stick moves its cursor; click
+  the right stick with Y held for yourself; downed, hold Y to give up), LB/RB lean, L3 sprint and
+  hold breath, D-pad up primary, right sidearm, left grenade, down prone, Start pause.
+- The pad wheel (`PadWheel`): hold View, point the right stick at a slice, let go: inventory,
+  map, medical menu, quick treat, fire mode, launcher, rest weapon, inspect, optic zoom in/out,
+  next objective, objectives list, vehicle view, get out, quick save. Stance adjust and
+  push-to-talk orders stay keyboard-only for now.
+- Right-stick look (`PlayerInput.update_pad`, `GameSettings.stick_look`): Controls tab rows for
+  stick sensitivity, a round deadzone (15%), a response curve (1.6) and invert, saved in
+  settings.cfg's new `gamepad` section; aiming, scopes, concussion and loaded sprinting slow it
+  as they slow the mouse; seated, it turns the view as the mouse does.
+- Co-op assists (`Assists` autoload), off by default and set by the host for the whole session
+  (the Controls tab's "Co-op assists" rows, greyed out on a client; sent to every client and to
+  late joiners; a client's request or anyone but the host's sync is refused):
+  `aim_slowdown` (the stick turns at 40% over an enemy within 4 deg and 200 m; never the
+  mouse) and `wound_hints` (a HUD line: your worst wound, where, what to use, whether you carry
+  it). Objective markers were already on the HUD (the player's own setting), so they're not an
+  assist.
+- `controller` test suite (`tests/controller_test.gd`), in `tools/run_tests.sh` and CI.
 
 ### Squad roles and the Vantage Group rival PMC, first slice (Captain, 2026-10-17)
 

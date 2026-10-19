@@ -210,7 +210,7 @@ static func sprint_direction_ok(input: Vector2) -> bool:
 static func weapon_mass(weapon: ItemData, state := {}) -> float:
 	if weapon == null:
 		return 0.0
-	return weapon.mass_kg + Optics.extra_mass(weapon, state) + Suppressors.extra_mass(weapon, state)
+	return weapon.mass_kg + Optics.extra_mass(weapon, state) + Suppressors.extra_mass(weapon, state) + GunAttachments.extra_mass(weapon, state)
 
 
 ## Seconds to aim a weapon of `kg`, with `arms` stamina (0..1) left.

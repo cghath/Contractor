@@ -49,6 +49,11 @@ const KEYS := {
 	&"inspect": [KEY_I],
 	&"debug_hurt": [KEY_K],  # dev tools only (DevTools.on): hurt yourself to test going down and dying
 	&"voice_order": [KEY_T],  # hold: push-to-talk a squad order (VoiceOrder, voice_commands.gd)
+	# Flip the NVG on your helmet down or up (Nvg; wave 7, S2). N is the next objective, so U
+	# (proposed); with none mounted, it mounts the first NVG you carry.
+	&"nvg_toggle": [KEY_U],
+	# The light or laser on the gun in hand, on or off (GunAttachments; wave 7 S3). Proposed key.
+	&"weapon_light": [KEY_L],
 }
 ## Keys pressed with Shift held. An action without Shift still matches with it held, so
 ## PlayerInput checks these first.
@@ -73,6 +78,55 @@ const LEFT_KEYS := [
 	[&"interact", KEY_CTRL, false],
 	[&"self_interact", KEY_ALT, true],
 ]
+## The gamepad layout (wave 7, S4; Xbox names), beside the keys and never in their place:
+## every on-foot and seated control is a button, a trigger or a stick here, or a slice of the
+## pad wheel (hold View: PadWheel, the right stick picks, letting go does it). The settings'
+## Keys list rebinds only keys; these stay as they are.
+const JOY_BUTTONS := {
+	&"jump": [JOY_BUTTON_A],  # also the brake, driving
+	&"crouch": [JOY_BUTTON_B],
+	&"reload": [JOY_BUTTON_X],
+	&"interact": [JOY_BUTTON_Y],  # hold: the interaction menu, the right stick picks
+	&"give_up": [JOY_BUTTON_Y],  # downed, hold Y (the interaction menu is shut while down)
+	&"self_interact": [JOY_BUTTON_RIGHT_STICK],  # Y held, click the right stick: yourself
+	&"lean_left": [JOY_BUTTON_LEFT_SHOULDER],
+	&"lean_right": [JOY_BUTTON_RIGHT_SHOULDER],
+	&"sprint": [JOY_BUTTON_LEFT_STICK],
+	&"hold_breath": [JOY_BUTTON_LEFT_STICK],  # aiming (no sprint while aiming)
+	&"weapon_primary": [JOY_BUTTON_DPAD_UP],
+	&"weapon_sidearm": [JOY_BUTTON_DPAD_RIGHT],
+	&"grenade": [JOY_BUTTON_DPAD_LEFT],
+	&"prone": [JOY_BUTTON_DPAD_DOWN],
+	&"pause": [JOY_BUTTON_START],
+	&"pad_wheel": [JOY_BUTTON_BACK],  # hold: the pad wheel (PadWheel)
+}
+## Stick and trigger directions: [axis, +1 or -1]. Look's deadzone and curve are the
+## settings' (GameSettings.stick_look), so its actions keep almost none of their own.
+const JOY_AXES := {
+	&"move_forward": [JOY_AXIS_LEFT_Y, -1.0],
+	&"move_back": [JOY_AXIS_LEFT_Y, 1.0],
+	&"move_left": [JOY_AXIS_LEFT_X, -1.0],
+	&"move_right": [JOY_AXIS_LEFT_X, 1.0],
+	&"look_left": [JOY_AXIS_RIGHT_X, -1.0],
+	&"look_right": [JOY_AXIS_RIGHT_X, 1.0],
+	&"look_up": [JOY_AXIS_RIGHT_Y, -1.0],
+	&"look_down": [JOY_AXIS_RIGHT_Y, 1.0],
+	&"aim": [JOY_AXIS_TRIGGER_LEFT, 1.0],
+	&"fire": [JOY_AXIS_TRIGGER_RIGHT, 1.0],
+}
+const LOOK_ACTIONS: Array[StringName] = [&"look_left", &"look_right", &"look_up", &"look_down"]
+## The pad wheel's slices (PadWheel), clockwise from the top: [action, label]. The rest of the
+## keyboard's controls, each pressed for a moment when picked.
+const PAD_WHEEL := [
+	[&"inventory", "Inventory"], [&"map", "Map"], [&"medical_menu", "Medical"], [&"quick_treat", "Quick treat"],
+	[&"fire_mode", "Fire mode"], [&"weapon_launcher", "Launcher"], [&"mount", "Rest weapon"], [&"inspect", "Inspect"],
+	[&"zoom_in", "Zoom in"], [&"zoom_out", "Zoom out"], [&"objectives_next", "Next objective"], [&"objectives_toggle", "Objectives list"],
+	[&"vehicle_view", "Vehicle view"], [&"get_out", "Get out"], [&"quick_save", "Quick save"],
+	[&"nvg_toggle", "NVG up/down"], [&"weapon_light", "Weapon light"],
+]
+## Not on the pad (keyboard only): the dev key, and the held keyboard modes with no pad
+## equivalent yet (stance adjust holds W/S/A/D; push-to-talk orders are typed or spoken).
+const PAD_EXEMPT: Array[StringName] = [&"debug_hurt", &"stance_adjust", &"voice_order"]
 
 
 func _enter_tree() -> void:
@@ -105,6 +159,29 @@ func _enter_tree() -> void:
 		var button := InputEventMouseButton.new()
 		button.button_index = BUTTONS[action]
 		InputMap.action_add_event(action, button)
+	for action: StringName in JOY_BUTTONS:
+		_ensure(action)
+		for pad_button: JoyButton in JOY_BUTTONS[action]:
+			var pad := InputEventJoypadButton.new()
+			pad.button_index = pad_button
+			InputMap.action_add_event(action, pad)
+	for action: StringName in JOY_AXES:
+		_ensure(action)
+		var motion := InputEventJoypadMotion.new()
+		motion.axis = JOY_AXES[action][0]
+		motion.axis_value = JOY_AXES[action][1]
+		InputMap.action_add_event(action, motion)
+	for action: StringName in LOOK_ACTIONS:
+		InputMap.action_set_deadzone(action, 0.01)  # the look deadzone is the setting's
+
+
+## Whether `action` can be done from a gamepad: a button or stick of its own, or a pad wheel slice.
+static func on_pad(action: StringName) -> bool:
+	if PAD_WHEEL.any(func(slice: Array) -> bool: return slice[0] == action):
+		return true
+	if not InputMap.has_action(action):
+		return false
+	return InputMap.action_get_events(action).any(func(e: InputEvent) -> bool: return e is InputEventJoypadButton or e is InputEventJoypadMotion)
 
 
 func _ensure(action: StringName) -> void:

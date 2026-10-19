@@ -37,6 +37,9 @@ func post_is_fallen(spawn_id: String) -> bool:
 	# Also accept in-memory legacy records (load_zone migrates these to the ledger).
 	return bodies.any(func(b: Dictionary) -> bool:
 		return b.get("faction", "") == "hostile" and String(b.get("spawn_id", b.get("label", ""))) == spawn_id)
+## The zone's time of day and weather (DayNight.to_save: {"hour", "weather"}; wave 7). Empty:
+## the zone definition's.
+var sky: Dictionary = {}
 
 
 func new_uid() -> String:
@@ -89,6 +92,7 @@ func save_zone() -> bool:
 		"fallen_posts": fallen_posts.keys(),
 		"vehicles": vehicles,
 		"ground": ground,
+		"sky": sky,
 	}, "", true, true)  # full precision: item state (plate and helmet integrity) comes back exactly
 	if not write_safely(save_path(), text):
 		return false
@@ -107,6 +111,7 @@ func load_zone() -> void:
 	fallen_posts.clear()
 	vehicles.clear()
 	ground = {}
+	sky = {}
 	var zone := {}
 	for path: String in save_candidates(save_path()):
 		if not FileAccess.file_exists(path):
@@ -126,6 +131,7 @@ func load_zone() -> void:
 	fallen_posts = zone.fallen_posts
 	vehicles = zone.get("vehicles", [])
 	ground = zone.get("ground", {})
+	sky = zone.get("sky", {})
 
 
 ## The previous good save, kept beside `path` by write_safely.
@@ -285,6 +291,10 @@ static func read_save(path: String) -> Dictionary:
 			out.vehicles.append(v)
 		else:
 			push_warning("GameState: %s: skipping a bad vehicle record" % path)
+	var sky_in: Variant = data.get("sky", {})  # saves from before wave 7 have none
+	if typeof(sky_in) == TYPE_DICTIONARY and is_number(sky_in.get("hour")) and is_finite(float(sky_in.hour)) \
+			and typeof(sky_in.get("weather")) == TYPE_STRING:  # an unknown weather reads as clear (DayNight)
+		out["sky"] = {"hour": float(sky_in.hour), "weather": String(sky_in.weather)}
 	return out
 
 

@@ -269,6 +269,7 @@ func _ready() -> void:
 	vitals.went_down.connect(_on_went_down)
 	_add_voxel_viewer()
 	_on_inventory_changed()
+	GunAttachments.rig(self)  # the weapon light and laser (wave 7 S3), drawn from the gun's state
 	$Sync.synchronized.connect(_on_synced)
 	print("[%s] %s spawned on peer %d (local: %s)" % ["ai" if is_ai() else "player", name, multiplayer.get_unique_id(), is_local()])
 
@@ -450,6 +451,7 @@ func _physics_process(delta: float) -> void:
 		return
 	if multiplayer.is_server():
 		_update_carried(delta)  # a player carrying or dragging someone: the host moves the casualty
+		_drain_nvg(delta)  # a lowered NVG's battery (wave 7, S2)
 	if not is_local():
 		return
 	if not vitals.is_up() and carried_by_pos != null:
@@ -677,7 +679,7 @@ func spread_deg_now(weapon: ItemData) -> float:
 	var shooter := SHOOTER_AIMED_DEG if is_aiming else SHOOTER_HIP_DEG
 	var horizontal := Vector2(velocity.x, velocity.z).length()
 	shooter += (SHOOTER_MOVE_AIMED_DEG if is_aiming else SHOOTER_MOVE_HIP_DEG) * clampf(horizontal / SoldierMovement.WALK_SPEED, 0.0, 1.5)
-	shooter += heat_now() * float(weapon.stats.get("recoil_deg", 0.6)) * SHOOTER_HEAT_DEG
+	shooter += heat_now() * float(weapon.stats.get("recoil_deg", 0.6)) * SHOOTER_HEAT_DEG * GunAttachments.recoil_mult(weapon, _state_of_weapon(weapon))
 	if not is_on_floor():
 		shooter += SHOOTER_AIR_DEG
 	else:
@@ -699,7 +701,7 @@ func aim_sway_deg(weapon: ItemData) -> float:
 	var moving := clampf(Vector2(velocity.x, velocity.z).length() / SoldierMovement.WALK_SPEED, 0.0, 1.5)
 	var tired := 1.0 - clampf(minf(movement.stamina, movement.arm_stamina), 0.0, 1.0)  # out of breath, or tired arms
 	return SWAY_DEG * movement.spread_mult() * (1.0 + SWAY_MOVE_MULT * moving) * (1.0 + SWAY_TIRED_MULT * tired) \
-		* vitals.sway_mult(weapon.tags.has("rifle"))
+		* vitals.sway_mult(weapon.tags.has("rifle")) * GunAttachments.sway_mult(weapon, _state_of_weapon(weapon))
 
 
 ## Breathing in the aim (MovementRules.BREATH_*), degrees at its widest: bigger with tired arms
@@ -707,7 +709,7 @@ func aim_sway_deg(weapon: ItemData) -> float:
 func breath_sway_deg(weapon: ItemData) -> float:
 	if not is_aiming or weapon == null:
 		return 0.0
-	return MovementRules.BREATH_SWAY_DEG * movement.spread_mult() * vitals.sway_mult(weapon.tags.has("rifle")) 		* (1.0 + MovementRules.BREATH_ARMS_GAIN * (1.0 - movement.arm_stamina) + MovementRules.BREATH_LEGS_GAIN * (1.0 - movement.stamina))
+	return MovementRules.BREATH_SWAY_DEG * movement.spread_mult() * vitals.sway_mult(weapon.tags.has("rifle")) * GunAttachments.sway_mult(weapon, _state_of_weapon(weapon)) 		* (1.0 + MovementRules.BREATH_ARMS_GAIN * (1.0 - movement.arm_stamina) + MovementRules.BREATH_LEGS_GAIN * (1.0 - movement.stamina))
 
 
 ## The sway's offset (pitch, yaw in radians) at time `t` seconds: a slow, wandering figure of
@@ -760,11 +762,25 @@ func view_yaw() -> float:
 func _kick(weapon: ItemData) -> void:
 	var kick := deg_to_rad(float(weapon.stats.get("recoil_deg", 0.6))) * (0.5 if is_aiming else 1.0)
 	kick *= movement.recoil_mult()  # stance and mounted weapon
+	kick *= GunAttachments.recoil_mult(weapon, _state_of_weapon(weapon))  # a grip (wave 7 S3)
 	set_pitch(head.rotation.x + kick)
 	rotate_y(randf_range(-0.35, 0.35) * kick)
 	recoil_return += kick * RECOIL_SETTLE
 	recoil_heat = heat_now() + 1.0
 	_heat_at = _now()
+
+
+## The item state of `weapon` as carried: the active slot's when that's it, else the first
+## weapon slot holding it (its attachments: GunAttachments). {} if it isn't carried.
+func _state_of_weapon(weapon: ItemData) -> Dictionary:
+	if weapon == null or inventory == null:
+		return {}
+	if inventory.slots.get(active_slot, &"") == weapon.id:
+		return inventory.state_of(active_slot)
+	for slot in Inventory.WEAPON_SLOTS:
+		if inventory.slots.get(slot, &"") == weapon.id:
+			return inventory.state_of(slot)
+	return {}
 
 
 ## How long reloading `weapon` takes this body: the weapon's time, slowed by wounds
@@ -1256,6 +1272,32 @@ func _server_inventory_action(action: String, container: StringName, index: int,
 				_client_message.rpc_id(owner_peer(), problem)
 		"remove_suppressor":
 			var problem := Suppressors.server_remove(inventory, slot, target)
+			if problem != "":
+				_client_message.rpc_id(owner_peer(), problem)
+		# NVGs (wave 7, S2): the NVG entry at `container`/`index` onto the worn helmet (the one
+		# it had goes into your containers), or the helmet's NVG off (into `target` if named).
+		"mount_nvg":
+			var problem := Nvg.server_mount(inventory, container, index)
+			if problem != "":
+				_client_message.rpc_id(owner_peer(), problem)
+		"remove_nvg":
+			var problem := Nvg.server_remove(inventory, target)
+			if problem != "":
+				_client_message.rpc_id(owner_peer(), problem)
+		# Grips, lights and lasers (wave 7 S3, GunAttachments): the entry at `container`/`index`
+		# onto the weapon in `slot` (what was on that mount goes into your containers), what's on
+		# mount `target` (underbarrel or side) of the weapon in `slot` off, or its light or laser
+		# switched on or off.
+		"mount_attachment":
+			var problem := GunAttachments.server_mount(inventory, container, index, slot)
+			if problem != "":
+				_client_message.rpc_id(owner_peer(), problem)
+		"remove_attachment":
+			var problem := GunAttachments.server_remove(inventory, slot, target)
+			if problem != "":
+				_client_message.rpc_id(owner_peer(), problem)
+		"toggle_attachment":
+			var problem := GunAttachments.server_toggle(inventory, slot)
 			if problem != "":
 				_client_message.rpc_id(owner_peer(), problem)
 		# MOLLE: `target` (attach) and `slot` (detach, move, drop) name attach points of the
@@ -2878,3 +2920,57 @@ func _client_refused(text: String, id: StringName, state: Dictionary) -> void:
 		player_input.flash(text)
 	if _hud and is_instance_valid(_hud.inventory_screen):
 		_hud.inventory_screen.show_refusal(text, id, state)
+
+
+# --- NVGs (wave 7, S2) ------------------------------------------------------------------
+
+## Host: lowered seconds not yet charged to the NVG's battery (Nvg.DRAIN_STEP_S at a time).
+var _nvg_drain_s := 0.0
+
+
+## The NVG key: flips the helmet's NVG down or up; with none mounted, mounts the first one
+## carried and lowers it. The owner is told what happened, or why not.
+@rpc("any_peer", "call_local", "reliable")
+func _server_toggle_nvg() -> void:
+	if not _from_owner() or not vitals.is_up():
+		return
+	_client_message.rpc_id(owner_peer(), server_toggle_nvg())
+
+
+## Host only. What the NVG key does (see _server_toggle_nvg); returns the message for the owner.
+func server_toggle_nvg() -> String:
+	if inventory.slots.get(Nvg.HELMET, &"") == &"":
+		return "Put on a helmet first" if Nvg.first_carried(inventory).is_empty() else "Put on a helmet for the NVG first"
+	if Nvg.mounted_state(inventory).is_empty():
+		var at := Nvg.first_carried(inventory)
+		if at.is_empty():
+			return "No NVG on your helmet"
+		var problem := Nvg.server_mount(inventory, at[0], at[1], true)
+		if problem != "":
+			return problem
+		return "%s mounted and down" % Nvg.mounted(inventory).name + (" (battery flat)" if Nvg.seconds_left(inventory) <= 0.0 else "")
+	var down := not Nvg.is_lowered(self)
+	_nvg_flush()
+	Nvg.server_set_lowered(inventory, down)
+	if down and Nvg.seconds_left(inventory) <= 0.0:
+		return "NVG down: battery flat"
+	return "NVG down (%s)" % Nvg.label(inventory) if down else "NVG up"
+
+
+## Host: charges lowered time to the NVG's battery a step at a time (one commit each), at once
+## when it would run out sooner; tells the owner when it goes flat.
+func _drain_nvg(delta: float) -> void:
+	if not Nvg.is_lowered(self) or Nvg.seconds_left(inventory) <= 0.0:
+		_nvg_drain_s = 0.0
+		return
+	_nvg_drain_s += delta
+	if _nvg_drain_s >= Nvg.DRAIN_STEP_S or _nvg_drain_s >= Nvg.seconds_left(inventory):
+		if _nvg_flush() and multiplayer.has_multiplayer_peer():
+			_client_message.rpc_id(owner_peer(), "NVG battery flat")
+
+
+## Host: charges the lowered time gathered so far. True if that emptied the battery.
+func _nvg_flush() -> bool:
+	var spent := _nvg_drain_s
+	_nvg_drain_s = 0.0
+	return Nvg.server_drain(inventory, spent) if spent > 0.0 else false

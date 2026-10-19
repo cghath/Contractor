@@ -747,6 +747,10 @@ func _actions_for(src: Dictionary) -> Array:
 					out.append(["Mount on " + ItemDB.get_item(inv.slots[gun]).name, _action.bind("mount_optic", c, i, gun, &"")])
 				if Suppressors.is_suppressor(item) and Suppressors.mount_problem(inv, c, i, gun) == "":
 					out.append(["Mount on " + ItemDB.get_item(inv.slots[gun]).name, _action.bind("mount_suppressor", c, i, gun, &"")])
+				if GunAttachments.is_attachment(item) and GunAttachments.mount_problem(inv, c, i, gun) == "":  # a grip, light or laser (wave 7 S3)
+					out.append(["Mount on " + ItemDB.get_item(inv.slots[gun]).name, _action.bind("mount_attachment", c, i, gun, &"")])
+			if Nvg.is_nvg(item) and Nvg.mount_problem(inv, c, i) == "":  # onto the helmet (wave 7, S2)
+				out.append(["Mount on " + ItemDB.get_item(inv.slots[Nvg.HELMET]).name, _action.bind("mount_nvg", c, i, &"", &"")])
 			var use := _medical_use(item)
 			if use.is_valid():
 				out.append(["Use", use])
@@ -772,6 +776,15 @@ func _actions_for(src: Dictionary) -> Array:
 			var mounted_sup := Suppressors.mounted(ItemDB.get_item(inv.slots[slot]), inv.state_of(slot))
 			if mounted_sup != null:
 				out.append(["Remove " + mounted_sup.name, _action.bind("remove_suppressor", &"", -1, slot, &"")])
+			for mount: StringName in GunAttachments.MOUNTS:  # a grip, light or laser (wave 7 S3)
+				var on_gun := GunAttachments.mounted(ItemDB.get_item(inv.slots[slot]), inv.state_of(slot), mount)
+				if on_gun != null:
+					if mount == GunAttachments.SIDE:
+						var lit := bool(inv.state_of(slot).get(GunAttachments.ON_KEY, false))
+						out.append([("Switch off " if lit else "Switch on ") + on_gun.name, _action.bind("toggle_attachment", &"", -1, slot, &"")])
+					out.append(["Remove " + on_gun.name, _action.bind("remove_attachment", &"", -1, slot, mount)])
+			if slot == Nvg.HELMET and Nvg.mounted(inv) != null:  # wave 7, S2
+				out.append(["Remove " + Nvg.mounted(inv).name, _action.bind("remove_nvg", &"", -1, slot, &"")])
 			var gear := ItemDB.get_item(inv.slots[slot])
 			if Inventory.is_attachable(gear) and inv.free_point_for(gear) != &"":  # a disposable launcher onto the pack's top
 				out.append(["Pack on top", _action.bind("attach_slot", &"", -1, slot, &"")])
@@ -1328,7 +1341,7 @@ static func _detail(item: ItemData, state: Dictionary) -> String:
 	if Inventory.is_kit(item):
 		return "  [%s]" % Inventory.kit_text(item, state)  # what's left in the kit
 	if state.has("rounds") and item.type == "weapon":
-		var optic := Optics.label(item, state)  # what's on its rail (P0362)
+		var optic := GunAttachments.label_with_optic(item, state)  # what's on its rail (P0362), grip and light (S3)
 		return "  [%d loaded%s]" % [int(state.rounds), ", " + optic if optic != "" else ""]
 	if Launchers.is_launcher(item):  # loaded with what, or empty (a fired disposable is gone)
 		var w := Launchers.loaded_warhead(item, state)

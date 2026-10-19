@@ -188,6 +188,25 @@ func _controls_tab() -> Control:
 	hand.add_child(picker)
 	page.add_child(hand)
 	page.add_child(ControlOptions.get_out_toggle())
+	# The gamepad's right stick (wave 7, S4; GameSettings.stick_look).
+	page.add_child(UiKit.heading("Gamepad"))
+	page.add_child(_slider("Stick look sensitivity", "gamepad", "stick_sensitivity", times))
+	page.add_child(_slider("Stick deadzone (ignored near the middle)", "gamepad", "stick_deadzone", func(v: float) -> String: return "%d%%" % roundi(v * 100.0)))
+	page.add_child(_slider("Stick response curve (higher: finer near the middle)", "gamepad", "stick_curve", func(v: float) -> String: return "%.1f" % v))
+	page.add_child(_toggle("Invert stick up and down", "gamepad", "stick_invert_y"))
+	page.add_child(UiKit.hint("Hold View for the pad wheel (the right stick picks); hold Y for the interaction menu."))
+	# Co-op assists (Assists): the host's picks, for the whole session.
+	page.add_child(UiKit.heading("Co-op assists (the host sets them)"))
+	for pair: Array in Assists.NAMES:
+		var key: String = pair[0]
+		var box := CheckBox.new()
+		box.text = pair[1]
+		box.button_pressed = Assists.is_on(key)
+		box.disabled = not Assists.can_set()
+		box.toggled.connect(func(on: bool) -> void: Assists.set_assist(key, on))
+		page.add_child(box)
+	if not Assists.can_set():
+		page.add_child(UiKit.hint("Set by the host for this session."))
 	return page.get_parent()
 
 

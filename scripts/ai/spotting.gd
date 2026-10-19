@@ -12,10 +12,15 @@ extends RefCounted
 ##       x camo against the zone's terrain (camo()) x foliage in the way (FOLIAGE_M)
 ##       x observer (suppressed, looking elsewhere) x skill (an unskilled soldier takes longer)
 ##   fired in the last FLASH_S: x FLASH (a suppressor gives away less: SUPPRESSED_FLASH)
+##   a weapon light or visible laser on: x LIT towards the observer, else x LIT_SIDE
 ##   closer than POINT_BLANK_M and in front: at once.
 ##   FOLIAGE_OPAQUE_M or more of scrub or tree crown on every line to them: not seen at all.
-## Not seen, awareness fades over FADE_S. Hearing (below) adds to it. Night and NVGs wait for
-## day and night (wave 7).
+## Not seen, awareness fades over FADE_S. Hearing (below) adds to it.
+## Night and weather (wave 7 S1, DayNight; sight_x): darkness (0 day .. 1 night) multiplies the
+## time to spot by 1 + NIGHT_SLOW x darkness and hides anyone further than the night's sight
+## (NIGHT_SIGHT_M at full dark, DUSK_SIGHT_M as it starts), unless they fired in the last
+## FLASH_S; the weather multiplies it by its spot_x and hides anyone past its sight_m (fog,
+## rain), flash or not. NVGs (wave 7 S2) take darkness away where the hook says.
 
 const BASE_S := 0.4
 const METRES_PER_S := 50.0
@@ -35,9 +40,19 @@ const FLASH_S := 1.5
 const FLASH := 0.15
 const SUPPRESSED_FLASH := 0.6
 const POINT_BLANK_M := 4.0
+## A weapon light or visible laser that's on (GunAttachments.lit; wave 7 S3) gives its carrier
+## away: x LIT when it points at the observer (within LIT_TOWARDS_DEG of them), x LIT_SIDE
+## otherwise (the beam and the splash it throws). Proposed.
+const LIT := 0.4
+const LIT_SIDE := 0.75
+const LIT_TOWARDS_DEG := 45.0
 const FADE_S := 20.0
 ## Awareness from which the AI suspects someone is there (looks, searches).
 const SUSPECT := 0.35
+## Night (wave 7 S1): see the class doc. Proposed.
+const NIGHT_SLOW := 3.0
+const NIGHT_SIGHT_M := 60.0
+const DUSK_SIGHT_M := 600.0
 
 ## Hearing (queue 17 part 2) adds awareness but never a full spot: at most HEARD_MAX.
 ## A heard shot adds HEARD_SHOT; footsteps HEARD_STEPS_PER_S while heard, out to
@@ -172,6 +187,13 @@ static func spot_seconds(observer: Soldier, target: Soldier, preset: String, com
 	if foliage >= FOLIAGE_OPAQUE_M:
 		return INF
 	var range_m := eyes.distance_to(target.aim_point())
+	# A muzzle flash, a weapon light or a visible laser shows in the dark past night sight (wave 7
+	# review, 2026-10-19: the light only sped spotting up within night sight, so it never gave
+	# anyone away at night, when it should most).
+	var shows := now - target.last_shot_at <= FLASH_S or GunAttachments.lit(target)
+	var light := sight_x(observer, eyes, range_m, shows)
+	if light == INF:
+		return INF
 	if range_m > OPTIC_FROM_M:
 		range_m = OPTIC_FROM_M + (range_m - OPTIC_FROM_M) / optic_x(observer, calm and not suppressed)
 	var s := BASE_S + range_m / METRES_PER_S
@@ -191,9 +213,39 @@ static func spot_seconds(observer: Soldier, target: Soldier, preset: String, com
 	if not in_view:
 		s *= OFF_VIEW
 	s *= lerpf(SKILL_SLOW, SKILL_FAST, clampf(combat, 0.0, 1.0))
+	s *= light
 	if now - target.last_shot_at <= FLASH_S:
 		s *= SUPPRESSED_FLASH if target.last_shot_suppressed else FLASH
+	if GunAttachments.lit(target):
+		s *= lit_factor(observer, target)
 	return s
+
+
+## Night and weather on spotting someone `range_m` from `eyes` (wave 7 S1): the factor on the
+## time to spot, or INF when they can't be seen at all there. `flashed`: they fired in the last
+## FLASH_S, or show a light or a visible laser (it shows at night, not through fog). `observer` may be null (tests).
+static func sight_x(observer: Soldier, eyes: Vector3, range_m: float, flashed := false) -> float:
+	# Lowered, powered NVGs give back part of what the dark takes (wave 7 S2).
+	var dark := DayNight.darkness_at(eyes) * (1.0 - Nvg.restores(observer))
+	if range_m > DayNight.sight_m(eyes):
+		return INF
+	if dark > 0.0 and not flashed and range_m > night_sight_m(dark):
+		return INF
+	return (1.0 + NIGHT_SLOW * dark) * DayNight.spot_x(eyes)
+
+
+## How far anyone is seen at all at darkness `dark` (0..1; INF in daylight).
+static func night_sight_m(dark: float) -> float:
+	return INF if dark <= 0.0 else lerpf(DUSK_SIGHT_M, NIGHT_SIGHT_M, sqrt(clampf(dark, 0.0, 1.0)))
+
+
+## LIT or LIT_SIDE: is `target`'s beam (along its aim) pointing at `observer`?
+static func lit_factor(observer: Soldier, target: Soldier) -> float:
+	var aim := -target.camera.global_basis.z
+	var to := observer.camera.global_position - target.camera.global_position
+	if to.length_squared() < 0.0001 or aim.length_squared() < 0.0001:
+		return LIT
+	return LIT if rad_to_deg(aim.angle_to(to)) <= LIT_TOWARDS_DEG else LIT_SIDE
 
 
 ## How much `observer`'s optics shorten distance (1: none): its weapon's sight, and when
@@ -222,9 +274,10 @@ static func footsteps_m(s: Soldier) -> float:
 	var speed := Vector2(s.velocity.x, s.velocity.z).length()
 	if speed < WALK_MPS or s.movement.is_prone():
 		return 0.0
+	var weather := DayNight.hearing_x()  # rain and storms cover footsteps (wave 7 S1)
 	if s.is_crouching():
-		return STEPS_CROUCH_M
-	return STEPS_RUN_M if speed >= RUN_MPS else STEPS_WALK_M
+		return STEPS_CROUCH_M * weather
+	return (STEPS_RUN_M if speed >= RUN_MPS else STEPS_WALK_M) * weather
 
 
 ## The terrain preset of the zone `node` is in ("plain" for the compound and the base).

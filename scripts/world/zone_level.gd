@@ -461,6 +461,8 @@ func _on_hosted() -> void:
 	# first hit in a zone used to build them mid-fight: 200-340 ms, tests/perf_timing.gd).
 	BodyVolume.warm_async(["", BodyVolume.FEMALE])
 	GameState.load_zone()
+	if DayNight.current():
+		DayNight.current().server_restore()  # the saved time and weather (wave 7 S1)
 	_logs = {}
 	for edit: Dictionary in GameState.voxel_edits:
 		if edit.has("w"):
