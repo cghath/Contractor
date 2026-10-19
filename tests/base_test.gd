@@ -1263,13 +1263,18 @@ func _test_zone_deployment() -> void:
 	var squad: Array = Roster.available_ids(BaseHub.roster()).slice(0, 1)
 	var def := ZoneDef.get_def("test")
 	var debrief: Object = Contracts.show_debrief()  # Captain, 2026-10-14: an open debrief doesn't hold anyone at the base
-	# Captain, 2026-10-14: every contract finds its zone fresh. The zone's save from an earlier
-	# deployment (the compound's from _test_deployment, bodies and all) is set aside, not loaded.
+	# Zone memory (docs/linked_zones.md call 5, replacing "every contract finds its zone fresh",
+	# 2026-10-14): a zone left a week ago comes back fresh. The zone's save from an earlier
+	# deployment (the compound's from _test_deployment, bodies and all), dated a week back, is set
+	# aside, not loaded.
 	var earlier_path := "%s/%s.json" % [GameState.SAVE_DIR, BaseHub.zone_save_id(ZONE + tag)]
 	var wide_path := "%s/%s.json" % [GameState.SAVE_DIR, BaseHub.zone_save_id(ZONE + "_wide" + tag)]
 	var earlier := FileAccess.get_file_as_string(earlier_path)
 	var earlier_data: Variant = JSON.parse_string(earlier) if earlier != "" else null
 	check(earlier_data is Dictionary and not (earlier_data.get("bodies", []) as Array).is_empty(), "the earlier deployment's zone save has bodies in it")
+	if earlier_data is Dictionary:
+		earlier_data["left_day"] = BaseHub.day() - BaseHub.ZONE_FRESH_DAYS  # left a week ago
+		earlier = JSON.stringify(earlier_data, "", true, true)
 	_write(wide_path, earlier)
 	var why := BaseHub.server_deploy({"level": {"level": "zone", "def": def}, "zone_id": ZONE + "_wide" + tag, "squad": squad, "no_contract": true})
 	var moved := await _wait_until(func() -> bool: return CompoundLevel.current(self) is ZoneLevel, 20.0)
@@ -1284,7 +1289,7 @@ func _test_zone_deployment() -> void:
 	check(get_tree().get_nodes_in_group(&"level").size() == 1, "and it is the session's one level")
 	await _frames(5)
 	check(GameState.bodies.is_empty() and get_tree().get_nodes_in_group(&"dead_bodies").is_empty(),
-		"a second deployment into the zone starts fresh: no bodies from the earlier one (%d)" % get_tree().get_nodes_in_group(&"dead_bodies").size())
+		"a deployment into a zone left a week ago starts fresh: no bodies from the earlier one (%d)" % get_tree().get_nodes_in_group(&"dead_bodies").size())
 	var set_aside := GameState.kept_copies(wide_path)
 	check(set_aside.size() == 1 and set_aside[0].contains("earlier-deployment") and FileAccess.get_file_as_string("%s/%s" % [GameState.SAVE_DIR, set_aside[0]]) == earlier,
 		"and the earlier save is set aside as it was, not deleted (%s)" % ", ".join(set_aside))
