@@ -1710,6 +1710,8 @@ func _server_remove_tourniquet(path: NodePath, part: StringName) -> void:
 ## casualty is (_treat_distance; not on yourself), and how it went (`outcome`: "started (4.0 s)",
 ## "done", "interrupted: why", "refused: why") (Captain, P0164 queue 7).
 func _log_care(target: Node, item_id: StringName, part: StringName, outcome: String) -> void:
+	if outcome == "done" and multiplayer.is_server() and faction == &"friendly":
+		RebelSupport.on_treated(self, target)  # a civilian treated: the locals notice (rebel support)
 	if SessionLog.session_id == "":
 		return
 	var at := ""
@@ -2422,6 +2424,7 @@ func body_record() -> Dictionary:
 func _server_become_body() -> void:
 	if faction == &"hostile":
 		GameState.post_fell(spawn_id)
+		RebelSupport.on_enemy_down(self)  # near a village, the locals notice (rebel support)
 	care_by = null
 	died_at = _now()
 	if body_uid == "":

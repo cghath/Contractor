@@ -134,6 +134,7 @@ func _ready() -> void:
 	Net.peer_left.connect(_on_peer_left)
 	Net.session_ended.connect(_on_session_ended)
 	Campaign.changed.connect(func(_name: StringName) -> void: _queue_broadcast())
+	People.civilian_casualty.connect(RebelSupport.on_civilian_casualty)  # the locals remember (rebel support)
 	Economy.changed.connect(_queue_broadcast)
 	Economy.day_advanced.connect(_on_day_advanced)
 	Contracts.contract_accepted.connect(_on_contract_accepted)
@@ -1626,6 +1627,7 @@ func server_deploy(options := {}) -> String:
 		return "Only the host deploys"
 	if RosterDeployment.is_running(roster()):
 		return "A deployment is already running"
+	RebelSupport.on_deployment_started()
 	_read_back_base()
 	var prep := _prep()
 	# Without a contract there's no briefing, so no extraction and no way home (P0331): refuse.
@@ -2094,6 +2096,10 @@ func server_advance_days(days: int, reason := "at the base") -> void:
 	if days > 0:
 		Economy.advance_days(days, reason)
 		BaseAssault.server_day_passed(not RosterDeployment.is_running(roster()))  # heat brings assaults on the base (LZ-5)
+		var week := day() / maxi(MissionRegistry.setting_i("week_days", 7), 1)
+		if week > int(base().get("rebel_week", week - 1)):
+			base()["rebel_week"] = week
+			RebelSupport.on_week()  # heat cools the locals on the company (rebel support)
 
 
 ## Host (Economy.day_advanced): `days` days passed, whatever moved the clock (resting, a
@@ -3035,6 +3041,7 @@ func build_view() -> Dictionary:
 		"daily_wages": Roster.daily_wages(roster()), "bill_in_days": Economy.days_to_bill(), "weekly_bill": int(Economy.weekly_bill().total),
 		"players": keys, "in_base": in_base(), "ready": _ready_peers.keys(),
 		"guards": guards(), "assault": base().get("assault", {}), "defences": base().get("defences", []), "fob_tier": fob_tier(), "max_guards": max_guards(),
+		"rebels": RebelSupport.view(), "favours": int(RebelSupport._s().get("favours", 0)),
 		"company_squads": company_squads(), "max_squads": int(BaseFob.TIERS[fob_tier()].squads),
 	}
 

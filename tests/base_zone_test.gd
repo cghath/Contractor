@@ -128,6 +128,7 @@ func _run() -> void:
 	var back := BaseArmory.counts(base.server_collect_stash())
 	check(back == stash_out, "the stash came back once, not twice (%s)" % str(back.get(&"m17", 0)))
 	_test_region_map()
+	_test_rebel_support()
 	_test_supply_line()
 	_test_zone_memory()
 	_test_threats()
@@ -297,6 +298,24 @@ func _test_crossings() -> void:
 	var at2 := Vector2(float(mine.pos[0]), float(mine.pos[1])) if not mine.is_empty() else Vector2.INF
 	check(me != null and Vector2(me.global_position.x, me.global_position.z).distance_to(at2) < 25.0,
 		"arriving at the base's crossing from %s, not the gate (%.0f m from it)" % [to, Vector2(me.global_position.x, me.global_position.z).distance_to(at2) if me else INF])
+
+
+## Rebel support part 1 (docs/rebel_support.md): support per region, its tiers and what they
+## unlock, and a civilian casualty costing it.
+func _test_rebel_support() -> void:
+	print("Rebel support")
+	var start := RebelSupport.support("inland")
+	check(is_equal_approx(start, RebelSupport.START) and RebelSupport.unlocked("inland").is_empty() and RebelSupport.region_here(self) == "inland",
+		"each region starts at %d with nothing on call; the base is inland" % int(RebelSupport.START))
+	RebelSupport.change("inland", 15.0, "test")
+	check(RebelSupport.tier("inland") == 1 and RebelSupport.unlocked("inland") == ["lookouts"] and is_equal_approx(RebelSupport.support("coast"), RebelSupport.START),
+		"at 25 inland: the Lookouts on call there, and the coast untouched")
+	RebelSupport.on_civilian_casualty({"shooter_player": true})
+	check(is_equal_approx(RebelSupport.support("inland"), start + 15.0 - RebelSupport.PER_CASUALTY) and RebelSupport.unlocked("inland").is_empty(),
+		"a civilian our side hurt costs %d, and back under the tier (%.0f)" % [int(RebelSupport.PER_CASUALTY), RebelSupport.support("inland")])
+	var v := RebelSupport.view()
+	check(v.size() == 2 and int(v[1].next) == 20, "the ops desk's Locals view: both regions, the next tier (%s)" % [v])
+	RebelSupport.change("inland", start - RebelSupport.support("inland"), "test reset")
 
 
 ## LZ-7: a supply line's cache here and its leg's in a neighbouring zone, listed from the start,

@@ -270,6 +270,13 @@ func _build_squad(rows: VBoxContainer, v: Dictionary) -> void:
 		map.queue_redraw())
 	raid.add_child(UiKit.hint("Region map: walk between linked zones through their crossings (2 h a link)."))
 	raid.add_child(map)
+	# The locals (rebel support, docs/rebel_support.md): their backing per region and what it unlocks.
+	var locals := UiKit.section("The locals (rebel support)", rows)
+	for r: Dictionary in v.get("rebels", []):
+		var calls := ", ".join(PackedStringArray((r.unlocked as Array).map(func(id: String) -> String: return String(RebelSupport.CALLIN_NAMES.get(id, id)))))
+		locals.add_child(UiKit.text("%s: %d of 100%s. %s" % [String(r.region).capitalize(), int(r.support),
+			"" if int(r.next) < 0 else " (next at %d)" % int(r.next), ("On call: " + calls) if calls != "" else "Nothing on call yet."]))
+	locals.add_child(UiKit.hint("Help the people (treat their hurt, clear the gunmen near their villages, their own jobs) and they back you; hurt them and they won't. Favours: %d." % int(v.get("favours", 0))))
 	# Base defence (LZ-6): hired guards on the wire, and any assault the heat has booked.
 	var defence := UiKit.section("Base defence", rows)
 	var g := int(v.get("guards", 0))
