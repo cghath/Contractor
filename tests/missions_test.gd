@@ -89,9 +89,9 @@ func check(condition: bool, what: String) -> void:
 
 func _test_generation() -> void:
 	print("Mission types in the zones")
-	var nine: Array[String] = ["raid", "hvt_capture", "hostage_rescue", "intel_grab", "convoy_ambush", "defend_hold", "crew_rescue", "sabotage", "recon", "psd_escort", "supply_line", "manhunt", "convoy_chase"]
+	var nine: Array[String] = ["raid", "hvt_capture", "hostage_rescue", "intel_grab", "convoy_ambush", "defend_hold", "crew_rescue", "sabotage", "recon", "psd_escort", "supply_line", "manhunt", "convoy_chase", "locals_checkpoint", "locals_missing", "locals_stores"]
 	check(MissionRegistry.types() == nine,
-		"Captain's first four mission types, then mission variety's convoy ambush, hold the line, crew rescue, sabotage and recon, the client escort, the supply line, the manhunt and the convoy chase (%s)" % [MissionRegistry.types()])
+		"Captain's first four mission types, then mission variety's convoy ambush, hold the line, crew rescue, sabotage and recon, the client escort, the supply line, the manhunt, the convoy chase and the locals' own three jobs (%s)" % [MissionRegistry.types()])
 	var sound := true
 	var zones_ok := true
 	for z: Dictionary in MissionRegistry.zones():

@@ -135,6 +135,7 @@ func _ready() -> void:
 	Net.session_ended.connect(_on_session_ended)
 	Campaign.changed.connect(func(_name: StringName) -> void: _queue_broadcast())
 	People.civilian_casualty.connect(RebelSupport.on_civilian_casualty)  # the locals remember (rebel support)
+	Contracts.contract_closed.connect(RebelSupport.on_contract_closed)  # their own jobs done (part 3)
 	Economy.changed.connect(_queue_broadcast)
 	Economy.day_advanced.connect(_on_day_advanced)
 	Contracts.contract_accepted.connect(_on_contract_accepted)

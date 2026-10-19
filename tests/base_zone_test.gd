@@ -136,6 +136,7 @@ func _run() -> void:
 	await _test_defences()
 	await _test_placed_defences()
 	await _test_rebel_calls()
+	_test_local_jobs()
 	await _test_raid_by_air()
 	await _test_airframes()
 	await _test_crossings()
@@ -773,6 +774,42 @@ func _test_rebel_calls() -> void:
 	if allies:
 		allies.server_release(me)
 	RebelSupport.change("inland", was - RebelSupport.support("inland"), "test reset")
+
+
+## Rebel support part 3: the locals' own jobs (on the board, paid in support and favours) and
+## supplies given to a villager.
+func _test_local_jobs() -> void:
+	print("The locals' jobs")
+	Contracts.server_refresh_board()
+	var mine: Array = Contracts.board().filter(func(c: Dictionary) -> bool: return String(c.get("source", "")) == "locals")
+	var others := Contracts.board().filter(func(c: Dictionary) -> bool: return String(c.get("source", "")) != "locals" and MissionRegistry.type_def(String(c.type)).has("locals"))
+	check(mine.size() == 1 and String(mine[0].type).begins_with("locals_") and others.is_empty(),
+		"one of the locals' jobs on the board, and none of theirs passed off as anyone else's (%s)" % [mine.map(func(c: Dictionary) -> String: return String(c.title))])
+	if mine.is_empty():
+		return
+	var region := RebelSupport.region_of(String(mine[0].zone_id))
+	var was := RebelSupport.support(region)
+	var fav := RebelSupport.favours()
+	var pay: Dictionary = MissionRegistry.type_def(String(mine[0].type)).locals
+	RebelSupport.on_contract_closed(mine[0], "completed")
+	check(is_equal_approx(RebelSupport.support(region), minf(was + float(pay.support), 100.0)) and RebelSupport.favours() == fav + int(pay.favours),
+		"done, it pays in support in %s (+%d) and favours (+%d)" % [region, int(pay.support), int(pay.favours)])
+	RebelSupport.on_contract_closed(mine[0], "failed")
+	check(RebelSupport.favours() == fav + int(pay.favours), "failed, it pays nothing")
+	RebelSupport.change(region, was - RebelSupport.support(region), "test reset")
+	var base := CompoundLevel.current(self) as BaseZoneLevel
+	var me := base.players.get_node_or_null(^"1") as Soldier if base else null
+	var villager: Soldier = null
+	for n in base.find_children("*", "CharacterBody3D", true, false) if base else []:
+		if n is Soldier and Person.is_civilian(n):
+			villager = n
+			break
+	if me and villager:
+		var inland := RebelSupport.support("inland")
+		var said := RebelSupport.server_given(me, villager, &"pressure_bandage")
+		check(is_equal_approx(RebelSupport.support("inland"), minf(inland + 1.0, 100.0)) and said.contains("remember"),
+			"a bandage given to a villager: they remember it (+1, %s)" % said)
+		RebelSupport.change("inland", inland - RebelSupport.support("inland"), "test reset")
 
 
 func _test_assault() -> void:

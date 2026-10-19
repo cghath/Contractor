@@ -379,8 +379,11 @@ func server_refresh_board() -> void:
 			WorldSites.server_clear_flashpoint(zid)
 	if not board.any(func(c: Dictionary) -> bool: return c.source == "safe"):
 		_add_offer(ContractGen.generate(rng, {"day": today, "source": "safe"}))
+	# One of the locals' own jobs at a time (rebel support part 3): paid in support and favours.
+	if not board.any(func(c: Dictionary) -> bool: return c.source == "locals"):
+		_add_offer(ContractGen.generate(rng, {"day": today, "source": "locals"}))
 	var board_size := MissionRegistry.setting_i("board_size", 6)
-	while board.filter(func(c: Dictionary) -> bool: return c.source not in ["fixer", "recovery"]).size() < board_size:
+	while board.filter(func(c: Dictionary) -> bool: return c.source not in ["fixer", "recovery", "locals"]).size() < board_size:
 		_add_offer(ContractGen.generate(rng, {"day": today, "source": "board"}))
 	for fixer: Dictionary in MissionRegistry.fixers():
 		if Economy.reputation(String(fixer.faction)) >= int(fixer.min_rep) \

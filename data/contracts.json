@@ -86,7 +86,19 @@
 		 "threat_pool": ["mg_nest", "armor", "qrf"],
 		 "scenario_knobs": {"road_offset_m": 80, "waypoint_m": 160, "trucks": [1, 2], "escorts": [1, 2], "depart_s": [420, 600], "speed_kmh": 28, "cargo_bonus_share": 0.1},
 		 "leg_scenario_knobs": {"road_offset_m": 80, "waypoint_m": 160, "trucks": [1, 2], "escorts": [1, 2], "depart_s": [45, 90], "speed_kmh": 28, "cargo_bonus_share": 0.1},
-		 "objectives": []}
+		 "objectives": []},
+		{"type": "locals_checkpoint", "name": "Locals: the checkpoint", "locals": {"support": 6, "favours": 2},
+		 "brief": "A checkpoint near the village taxes everyone who passes, and worse. The villagers want it gone: clear it. They pay what they can, and they'll remember.",
+		 "modules": ["checkpoint"], "base_pay": 6000, "days": 1, "enemy_count": [3, 6], "enemy_quality": [0.25, 0.5], "threat_pool": ["ied"],
+		 "objectives": [{"kind": "clear_area", "site": "area", "text": "Clear the {module}"}]},
+		{"type": "locals_missing", "name": "Locals: a missing villager", "locals": {"support": 8, "favours": 3},
+		 "brief": "Gunmen took a villager. Find them where they're held and bring them out alive. The family pays what it can; the village won't forget it.",
+		 "modules": ["compound", "outpost", "village"], "base_pay": 8000, "days": 1, "enemy_count": [3, 7], "enemy_quality": [0.3, 0.55], "threat_pool": ["ied", "qrf"],
+		 "objectives": [{"kind": "deliver_hvt", "site": "hostage", "text": "Bring {name} out alive"}]},
+		{"type": "locals_stores", "name": "Locals: the stolen stores", "locals": {"support": 5, "favours": 2},
+		 "brief": "Gunmen took the village's stores and keep them at a site nearby. Destroy what they keep there so they can't sell it back to them.",
+		 "modules": ["compound", "outpost", "checkpoint"], "base_pay": 6000, "days": 1, "enemy_count": [3, 7], "enemy_quality": [0.25, 0.55], "threat_pool": ["mg_nest", "ied"],
+		 "objectives": [{"kind": "destroy_cache", "site": "cache", "text": "Destroy the {name}"}]}
 	],
 
 	"_modules": "Sites per module type, in metres from the module's origin on the ground (the zone module types of ZoneModules; the compound as CompoundLevel builds it). rect [x, z, w, d] (clear an area), pos [x, y, z], box [[x, y, z], [x, y, z]] (a cache: \"voxels\" is its solid count on the pristine module, \"auto\" counts it from the module's boxes). \"place\": an intel item the mission puts there; \"items\"/\"tags\": what counts as carried out; \"hvt\" + \"person\": a person the mission puts there (side hostile: an HVT to capture, friendly: a hostage); \"of_hvt\": an item the HVT of that site carries. \"civilians\": people going about their day there while a contract runs in the zone (\"routine\": points they walk between).",

@@ -105,6 +105,9 @@ static func generate(rng: RandomNumberGenerator, ctx: Dictionary) -> Dictionary:
 	var kind: String = ctx.get("zone_kind", "contract" if safe or source == "fixer" or rng.randf() >= S("hot_zone_chance") else "hot")
 	var type_ids: Array = fixer.get("types", MissionRegistry.types()) if ctx.get("type", "") == "" else [ctx.type]
 	type_ids = type_ids.filter(func(t: String) -> bool: return not MissionRegistry.type_def(t).is_empty())
+	# The locals' own jobs (rebel support part 3: "locals") come only as theirs, and only theirs then.
+	var locals := source == "locals"
+	type_ids = type_ids.filter(func(t: String) -> bool: return MissionRegistry.type_def(t).has("locals") == locals)
 	var at_module := String(ctx.get("module_id", ""))
 	if at_module != "" and ctx.get("type", "") == "":
 		var at_type := HotZoneOps.module_type(String(ctx.get("zone_id", "")), at_module)
@@ -117,8 +120,8 @@ static func generate(rng: RandomNumberGenerator, ctx: Dictionary) -> Dictionary:
 		type_ids = MissionRegistry.types()
 	var type_id: String = type_ids[rng.randi() % type_ids.size()]
 	var def := MissionRegistry.type_def(type_id)
-	if def.has("legs"):
-		kind = "contract"  # a multi-zone contract walks between contract zones (LZ-7)
+	if def.has("legs") or def.has("locals"):
+		kind = "contract"  # a multi-zone contract walks between contract zones (LZ-7); the locals' jobs are in theirs
 	var zone := MissionRegistry.zone(ctx.get("zone_id", ""))
 	if zone.is_empty():
 		var options := MissionRegistry.zones_for(MissionRegistry.type_modules(def), kind)

@@ -2057,6 +2057,39 @@ func _server_release_body() -> void:
 
 
 ## Hands one unit of a stowed entry to a standing squadmate, if it fits on them.
+## A player asks a villager if they need help (rebel support part 3): one of their jobs goes on
+## the board (RebelSupport.server_ask).
+@rpc("any_peer", "call_local", "reliable")
+func _server_ask_locals(path: NodePath) -> void:
+	if not _from_owner() or not vitals.is_up():
+		return
+	var other := get_node_or_null(path) as Soldier
+	if other == null or not Person.is_civilian(other) or other.global_position.distance_to(global_position) > INTERACT_REACH + INTERACT_SLACK:
+		return
+	_client_message.rpc_id(owner_peer(), RebelSupport.server_ask(self, other))
+
+
+## A player gives a villager one stowed item (rebel support part 3): medical supplies count
+## (RebelSupport.server_given); anything else they hand back.
+@rpc("any_peer", "call_local", "reliable")
+func _server_give_locals(path: NodePath, container: StringName, index: int) -> void:
+	if not _from_owner() or not vitals.is_up():
+		return
+	var other := get_node_or_null(path) as Soldier
+	if other == null or not Person.is_civilian(other) or other.global_position.distance_to(global_position) > INTERACT_REACH + INTERACT_SLACK:
+		return
+	var list: Array = inventory.containers.get(container, [])
+	if index < 0 or index >= list.size():
+		return
+	var id := StringName(String((list[index] as Dictionary).get("id", "")))
+	var item := ItemDB.get_item(id) if ItemDB.has_item(id) else null
+	if item == null or item.type != "medical":
+		_client_message.rpc_id(owner_peer(), "They need medical supplies, not that")
+		return
+	inventory.remove_entry(container, index, 1)
+	_client_message.rpc_id(owner_peer(), RebelSupport.server_given(self, other, id))
+
+
 @rpc("any_peer", "call_local", "reliable")
 func _server_give_item(path: NodePath, container: StringName, index: int) -> void:
 	if not _from_owner() or not vitals.is_up():

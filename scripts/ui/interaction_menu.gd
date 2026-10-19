@@ -152,6 +152,9 @@ const ACTIONS := {
 		{"id": &"carry", "label": "Carry", "needs": &"carriable_person", "request": &"_server_carry_body", "with": &"target"},
 		{"id": &"treat", "label": "Treat", "needs": &"treatable", "submenu": &"treatments"},
 		{"id": &"check_condition", "label": "Check wounds", "needs": &"wounded", "show": &"condition", "group": MORE},
+		# Rebel support part 3, the village side (Captain: local jobs "both" ways).
+		{"id": &"ask_locals", "label": "Ask if they need help", "needs": &"villager", "request": &"_server_ask_locals", "with": &"target"},
+		{"id": &"give_locals", "label": "Give supplies", "needs": &"villager", "submenu": &"stowed_items", "request": &"_server_give_locals", "with": &"target_entry", "group": MORE},
 	],
 	SELF: [
 		{"id": &"put_down", "label": "Put down", "needs": &"moving_body", "request": &"_server_release_body", "with": &"none"},
@@ -421,6 +424,8 @@ static func part_report(target: Node, region: StringName, actor: Soldier = null)
 ## "" if the condition is met, _HIDE to leave the entry out, or why it's greyed out.
 static func _check(need: StringName, actor: Soldier, target: Node) -> String:
 	match need:
+		&"villager":  # a civilian, in a campaign (rebel support: the locals)
+			return "" if Person.is_civilian(target) and BaseHub.campaign_running else _HIDE
 		&"treatable":
 			if _is_enemy(actor, target) or treatments(actor, target).is_empty():
 				return _HIDE

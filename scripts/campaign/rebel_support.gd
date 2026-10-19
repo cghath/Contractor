@@ -153,6 +153,84 @@ static func on_enemy_down(body: Soldier) -> void:
 		change(region_here(lvl), PER_ENEMY_NEAR, "a gunman near a village down")
 
 
+## Contracts.contract_closed: one of the locals' own jobs done ("locals": {"support", "favours"},
+## contracts.json) raises their support in its region and pays its favours.
+static func on_contract_closed(contract: Dictionary, outcome: String) -> void:
+	var def := MissionRegistry.type_def(String(contract.get("type", "")))
+	if not def.has("locals") or outcome != "completed" or not BaseHub.campaign_running:
+		return
+	var pay: Dictionary = def.locals
+	add_favours(int(pay.get("favours", 0)))
+	change(region_of(String(contract.get("zone_id", ""))), float(pay.get("support", 0)), "their job done: %s" % String(contract.get("title", "")))
+
+
+## Host: favours the locals owe the company (paid by their jobs, spent on upgrades: part 4).
+static func add_favours(n: int) -> void:
+	if n == 0:
+		return
+	var s := _s()
+	s.favours = maxi(int(s.favours) + n, 0)
+	Campaign.mark_changed(SECTION)
+
+
+static func favours() -> int:
+	return int(_s().favours)
+
+
+## Host (a villager asked, Soldier._server_ask_locals): one of the locals' jobs in this zone goes
+## on the board, once a zone a day. Returns what the player hears.
+static func server_ask(by: Soldier, villager: Soldier) -> String:
+	if not BaseHub.campaign_running:
+		return "Not now"
+	var lvl := CompoundLevel.current(villager)
+	var def: Variant = lvl.get(&"def") if lvl else null
+	var zone_id := String((def as Dictionary).get("id", "")) if def is Dictionary else ""
+	if zone_id == "" or zone_id == RegionMap.BASE:
+		return "\"We're fine here, thank you\""
+	var s := _s()
+	var key := "%s:%d" % [zone_id, BaseHub.day()]
+	if not s.has("asked"):
+		s["asked"] = {}
+	if (s.asked as Dictionary).has(key):
+		return "\"We told your people already: it's on your board\""
+	s.asked[key] = true
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash([key, villager.name])
+	var job := ContractGen.generate(rng, {"day": BaseHub.day(), "source": "locals", "zone_id": zone_id})
+	Contracts._add_offer(job)
+	Contracts._commit()
+	Campaign.mark_changed(SECTION)
+	return "\"%s\" (on the contract board)" % String(job.get("brief", job.get("title", "")))
+
+
+## How much support the locals' gratitude for supplies can bring a region a day, and a favour
+## for every SUPPLIES_PER_FAVOUR given. Proposed.
+const SUPPLIES_DAY_CAP := 4.0
+const SUPPLIES_PER_FAVOUR := 3
+
+
+## Host (Soldier._server_give_locals): `by` gave villager `villager` one medical item `id`.
+## Returns what the player hears.
+static func server_given(by: Soldier, villager: Soldier, id: StringName) -> String:
+	if not BaseHub.campaign_running:
+		return "They thank you"
+	var region := region_here(villager)
+	var s := _s()
+	if int(s.get("given_day", -1)) != BaseHub.day():
+		s["given_day"] = BaseHub.day()
+		s["given"] = {}
+	var today := float((s.given as Dictionary).get(region, 0.0))
+	s["given_count"] = int(s.get("given_count", 0)) + 1
+	if int(s.given_count) % SUPPLIES_PER_FAVOUR == 0:
+		add_favours(1)
+	if today >= SUPPLIES_DAY_CAP:
+		Campaign.mark_changed(SECTION)
+		return "They thank you for the %s" % ItemDB.get_item(id).name
+	s.given[region] = today + 1.0
+	change(region, 1.0, "supplies given")
+	return "They thank you for the %s: the %s's locals remember it" % [ItemDB.get_item(id).name, region]
+
+
 ## BaseHub, a deployment starting: the per-deployment cap on gains from fighting resets.
 static func on_deployment_started() -> void:
 	_s().near_gain = 0.0
