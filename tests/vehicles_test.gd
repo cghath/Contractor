@@ -1896,6 +1896,16 @@ func _test_squad_drivers() -> void:
 	check(drivers.server_command(player, "drive_stop", Vector3.ZERO, PackedStringArray()) == "" and drivers.order_of(v) == SquadDrivers.Order.HOLD, "Stop the vehicles")
 	check(drivers.server_command(player, "contact_dismount", Vector3.ZERO, PackedStringArray()).ends_with("off") and not drivers.dismount_on_contact, "the contact drill can be turned off")
 	drivers.dismount_on_contact = true
+	# By road (RoadRoute): a long drive with a road near both ends goes along it.
+	var def := {"roads": [[[0, 0], [600, 0]], [[600, 0], [600, 600]], [[0, 0], [0, -400]]]}
+	var way := RoadRoute.route(def, Vector2(-40, 30), Vector2(630, 560))
+	var via_corner := way.size() > 0 and Array(way).any(func(p: Vector2) -> bool: return p.distance_to(Vector2(600, 0)) < 1.0)
+	check(via_corner and way[way.size() - 1].distance_to(Vector2(630, 560)) < 1.0 and way[0].distance_to(Vector2(0, 0)) < 45.0,
+		"by road: onto the road near the start, round the corner, off at the goal (%d points)" % way.size())
+	check(RoadRoute.route(def, Vector2(-40, 30), Vector2(60, 30)).is_empty(), "a short drive goes straight")
+	check(RoadRoute.route(def, Vector2(-40, 30), Vector2(300, 400)).is_empty(), "and so does one with no road near the goal")
+	check(RoadRoute.route({"roads": [[[0, 0], [0, 900]], [[0, 900], [900, 900]], [[900, 900], [900, 0]]]}, Vector2(0, -20), Vector2(900, -20)).is_empty(),
+		"or one the roads would take far round")
 	# A player at the wheel keeps it.
 	v.server_exit(rifle)
 	check(v.server_enter(player, 0), "a player takes the wheel")

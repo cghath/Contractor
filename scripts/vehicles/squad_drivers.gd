@@ -130,8 +130,25 @@ func server_drive_to(from: Soldier, point: Vector3) -> String:
 		point = lvl.call(&"ground_point", point)  # (a map order comes without a height)
 	for v in vs:
 		_give(v, Order.DRIVE, from, point)
-		v.server_drive_to(point)
+		go(v, point)
 	return ""
+
+
+## Host: `v` drives to `point`: by road when the zone's roads make a better way (RoadRoute; a long
+## drive with a road near both ends), else straight or by the navmesh (VehicleAI.drive_to).
+## Returns whether it took the roads.
+func go(v: Vehicle, point: Vector3) -> bool:
+	var lvl := CompoundLevel.current(self)
+	var def: Variant = lvl.get(&"def") if lvl else null
+	var way := RoadRoute.route(def, Vector2(v.global_position.x, v.global_position.z), Vector2(point.x, point.z)) if def is Dictionary else PackedVector2Array()
+	if way.is_empty() or not lvl.has_method(&"ground_point"):
+		v.server_drive_to(point)
+		return false
+	var path := PackedVector3Array()
+	for p: Vector2 in way:
+		path.append(lvl.call(&"ground_point", Vector3(p.x, 0.0, p.y)))
+	v.server_follow_path(path)
+	return true
 
 
 ## The squad's AI-driven vehicles follow the commander in a column.
@@ -159,7 +176,7 @@ func server_pickup(from: Soldier) -> String:
 		return "Nobody of ours is at the wheel"
 	for v: Vehicle in vs:
 		_give(v, Order.PICKUP, from, from.global_position)
-		v.server_drive_to(_stop_short(v, from.global_position, PICKUP_STOP_M))
+		go(v, _stop_short(v, from.global_position, PICKUP_STOP_M))
 	return ""
 
 
@@ -220,7 +237,8 @@ func _on_damaged(_zone: StringName, _hit: Dictionary, v: Vehicle) -> void:
 	_hit_at[v.get_instance_id()] = Soldier._now()
 
 
-## A point `gap` short of `target` on the way from `v` (where to stop to pick people up).
+## A point `gap` short of `target` on the way from `v` (where to stop to pick people up). (A
+## pickup by road comes in off its last road point the same way: VehicleAI stops at the end.)
 static func _stop_short(v: Vehicle, target: Vector3, gap: float) -> Vector3:
 	var d := target - v.global_position
 	d.y = 0.0
