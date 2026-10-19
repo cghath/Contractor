@@ -8,9 +8,14 @@ extends Node
 ## - the squad at the base (the base zone up, on the host: this node, in BaseZoneLevel) fights it
 ##   live: TEAMS teams of TEAM_SIZE come in from the edge and push onto the FOB; beaten, the
 ##   faction's heat cools by BEATEN_COOL;
-## - the squad out (a deployment running): it resolves off-screen. The FOB's own detail holds it,
-##   but up to LOSSES of the stash's piles are halved (taken or wrecked at the wire), the faction's
-##   heat cools by OFFSCREEN_COOL, and a situation report goes out.
+## - the squad out (a deployment running) within NEAR_LINKS of the base (call 12, "a big assault
+##   while the squad is within a few links goes live"): a situation report goes out (who, how
+##   many, how long the wire holds, return recommended) and the base holds out for hold_out_s();
+##   the squad crossing back in (the base zone up) fights it live as above, else when the time
+##   runs out it resolves off-screen with one pile more lost (server_tick_out);
+## - the squad further out: it resolves off-screen. The FOB's own detail holds it, but up to
+##   LOSSES of the stash's piles are halved (taken or wrecked at the wire), the faction's heat
+##   cools by OFFSCREEN_COOL, and a situation report goes out.
 ## The booking lives in the campaign's "base" section ("assault": {"faction", "day"};
 ## "last_assault_day"). Numbers Proposed.
 
@@ -23,6 +28,11 @@ const BEATEN_COOL := 25.0
 const OFFSCREEN_COOL := 10.0
 const LOSSES := 3
 const CHECK_S := 2.0
+const NEAR_LINKS := 2
+## How long the wire holds without the squad (s of play; 6x game time): HOLD_BASE_S, and
+## HOLD_PER_COVER_S more for each guard and defence. Proposed.
+const HOLD_BASE_S := 240.0
+const HOLD_PER_COVER_S := 60.0
 
 var teams: Array = []  # host: [[Soldier]] while the live assault runs
 var _check := 0.0
@@ -34,6 +44,11 @@ static func server_day_passed(at_base: bool) -> String:
 	var base := BaseHub.base()
 	var booked: Dictionary = base.get("assault", {})
 	if not booked.is_empty() and int(booked.day) <= BaseHub.day() and not at_base:
+		if booked.has("hold_left_s"):
+			return ""  # holding out already (server_tick_out)
+		var links := RegionMap.distance(String(RosterDeployment.active(BaseHub.roster()).get("zone_id", "")), RegionMap.BASE)
+		if links >= 0 and links <= NEAR_LINKS:
+			return _hold_out(booked, links)
 		return _resolve_offscreen(booked)
 	if booked.is_empty():
 		var hot := BaseZoneLevel.hottest()
@@ -48,8 +63,38 @@ static func server_day_passed(at_base: bool) -> String:
 	return ""
 
 
-## The squad was out on the day: the FOB's detail held, the wire paid for it.
-static func _resolve_offscreen(booked: Dictionary) -> String:
+## How long the wire holds without the squad (s).
+static func hold_out_s() -> float:
+	return HOLD_BASE_S + HOLD_PER_COVER_S * (BaseHub.guards() + (BaseHub.base().get("defences", []) as Array).size())
+
+
+## The squad is out but near (`links` away): the base holds out and the radio says so.
+static func _hold_out(booked: Dictionary, links: int) -> String:
+	booked["hold_left_s"] = hold_out_s()
+	var who := String(MissionRegistry.faction(String(booked.faction)).get("name", String(booked.faction).capitalize()))
+	var report := "Situation report: %s are hitting the FOB, about %d men. The %s can hold about %d minutes. You're %d link%s out: return recommended." % [
+		who, TEAMS * TEAM_SIZE, "guards (%d)" % BaseHub.guards() if BaseHub.guards() > 0 else "detail",
+		ceili(float(booked.hold_left_s) * 6.0 / 60.0), links, "" if links == 1 else "s"]
+	Contracts._notify_all(report)
+	SessionLog.note("base assault: holding out for %.0f s while the squad is %d link(s) away" % [float(booked.hold_left_s), links])
+	return report
+
+
+## Host (BaseHub, every `dt` while the squad is out): a base holding out runs down; when it's
+## out of time, it resolves off-screen, the worse for nobody coming. Returns the report or "".
+static func server_tick_out(dt: float) -> String:
+	var booked: Dictionary = BaseHub.base().get("assault", {})
+	if not booked.has("hold_left_s"):
+		return ""
+	booked.hold_left_s = float(booked.hold_left_s) - dt
+	if float(booked.hold_left_s) > 0.0:
+		return ""
+	return _resolve_offscreen(booked, 1)
+
+
+## The squad was out on the day: the FOB's detail held, the wire paid for it (`extra` piles
+## more when it held out waiting for them).
+static func _resolve_offscreen(booked: Dictionary, extra := 0) -> String:
 	var base := BaseHub.base()
 	var stash: Array = BaseHub.stash()
 	var lost := PackedStringArray()
@@ -58,7 +103,7 @@ static func _resolve_offscreen(booked: Dictionary) -> String:
 	var guards := BaseHub.guards()
 	var defences := (base.get("defences", []) as Array).size()
 	var cover := guards + defences  # the guards hold the wire, the defences with them (LZ-6)
-	var losses := 0 if cover >= 4 else maxi(LOSSES - cover / 2, 0)
+	var losses := (0 if cover >= 4 else maxi(LOSSES - cover / 2, 0)) + extra
 	if guards > 0 and cover < 4:
 		base["guards"] = guards - 1  # stretched thin: one of them falls
 	for k in mini(losses, stash.size()):
@@ -85,6 +130,7 @@ func server_check_due() -> void:
 	var booked: Dictionary = BaseHub.base().get("assault", {})
 	if booked.is_empty() or int(booked.day) > BaseHub.day() or not teams.is_empty():
 		return
+	booked.erase("hold_left_s")  # the squad came back to it in time
 	var level := get_parent() as BaseZoneLevel
 	var response := level.get_node_or_null(^"EnemyResponse") as EnemyResponse if level else null
 	if level == null or response == null:

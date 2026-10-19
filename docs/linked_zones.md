@@ -82,6 +82,9 @@ the push to build up the PMC and toward the endgame.
   strength (losses: guards, defences, stash items near the wire; never the FOB itself). A big
   assault while the squad is within a few links goes live: the host chooses to come back, and the
   base holds out until they cross in, or until a time limit runs out and it resolves off-screen.
+  Built (2026-10-19): within `BaseAssault.NEAR_LINKS` (2) links (`RegionMap.distance`) the base
+  holds out for `hold_out_s()` (4 min of play, plus 1 for each guard and defence). Crossing back
+  in fights it live; if time runs out it resolves off-screen with one pile more lost.
 - **Building up (decided: all of these).**
   - **Defences bought** at the ops desk (watchtowers, HESCO extensions, MG and mortar pits,
     sensors), placed at set slots or **freely** by the players with a placement tool (valid ground,

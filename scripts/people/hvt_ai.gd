@@ -115,6 +115,8 @@ func _decide() -> void:
 
 
 func hear(pos: Vector3) -> void:
+	if body == null:
+		return  # (not set up yet: spawned this frame, as on coming back into a contract's zone)
 	if pos.distance_to(body.global_position) <= CHAOS_NEAR_M:
 		_close_fire_at = Soldier._now()
 	super.hear(pos)

@@ -244,6 +244,7 @@ func _test_crossings() -> void:
 	var resume := BaseHub.resume_info()
 	check(not resume.is_empty() and String(resume.def.id) == to and String(resume.def.get("arrive", "")) == RegionMap.crossing_id(RegionMap.BASE),
 		"saved out in %s, a load would resume there, at the crossing they came in by" % to)
+	_test_assault_near()
 	zone = await _test_cross_on(zone, to)
 	if zone == null:
 		return
@@ -619,6 +620,29 @@ func _test_threats() -> void:
 
 ## LZ-5 (calls 12, 17): heat 70+ books an assault for tomorrow; out on the day, it resolves
 ## off-screen (the wire's piles pay); at the base, it comes in live and is beaten off.
+## LZ-5 (call 12): an assault due while the squad is out a link or two away holds out for them,
+## the radio says so, and runs out into the off-screen result if nobody comes.
+func _test_assault_near() -> void:
+	print("Assault while out nearby")
+	var near_zone := String(RegionMap.links(RegionMap.BASE)[0].to)
+	check(RegionMap.distance(near_zone, RegionMap.BASE) == 1 and RegionMap.distance(RegionMap.BASE, RegionMap.BASE) == 0,
+		"the region map knows how far a zone is from the base")
+	var dep := RosterDeployment.active(BaseHub.roster())
+	if dep.is_empty():
+		return
+	var was := String(dep.get("zone_id", ""))
+	dep["zone_id"] = near_zone
+	BaseHub.base()["assault"] = {"faction": "black_ridge", "day": BaseHub.day()}
+	var said := BaseAssault.server_day_passed(false)
+	var booked: Dictionary = BaseHub.base().get("assault", {})
+	check(said.contains("return recommended") and float(booked.get("hold_left_s", 0.0)) > 0.0,
+		"a link out, the base holds out for them and the radio says so (%s)" % said)
+	var stash_piles := BaseHub.stash().size()
+	BaseAssault.server_tick_out(float(booked.hold_left_s) + 1.0)
+	check(not BaseHub.base().has("assault") and BaseHub.stash().size() <= stash_piles, "nobody came: it resolves off-screen")
+	dep["zone_id"] = was
+
+
 func _test_assault() -> void:
 	print("Assaults on the base")
 	var heat: Dictionary = Campaign.section(&"economy").get("heat", {})

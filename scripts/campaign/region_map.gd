@@ -72,6 +72,25 @@ static func links(zone_id: String) -> Array:
 	return out
 
 
+## How many links apart zones `a` and `b` are on the region map (0 the same zone), -1 if not linked.
+static func distance(a: String, b: String) -> int:
+	if a == b:
+		return 0
+	var seen := {a: 0}
+	var frontier: Array[String] = [a]
+	while not frontier.is_empty():
+		var at: String = frontier.pop_front()
+		for l: Dictionary in links(at):
+			var to := String(l.to)
+			if seen.has(to):
+				continue
+			seen[to] = int(seen[at]) + 1
+			if to == b:
+				return int(seen[to])
+			frontier.append(to)
+	return -1
+
+
 ## The side opposite `side` (the other zone's edge of the same link).
 static func opposite(side: int) -> int:
 	return [1, 0, 3, 2][side]

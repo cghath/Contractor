@@ -1295,6 +1295,7 @@ func _process(delta: float) -> void:
 			_check_recovery_targets()
 			_seat_riders()
 			_land_followers()
+			BaseAssault.server_tick_out(STASH_POLL_S)  # the base holding out while the squad is near (LZ-5)
 		return
 	var now: Array = base_level().server_collect_stash()
 	if now != Roster.json_safe(stash()):
