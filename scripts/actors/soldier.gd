@@ -170,6 +170,11 @@ var suppression := 0.0
 ## Host only (AI): where incoming fire last came from, and when.
 var threat_pos := Vector3.ZERO
 var threat_time := -1000.0
+## A player asking for a medic (Captain, 2026-10-19: "an option to order medics to heal you ...
+## you to request help"): when he last called (the command menu's "Medic!" or "Treat me", the voice
+## order), host side; SquadAI.needs_help answers it for SquadAI.MEDIC_CALL_S. "Treat me" also names
+## who (meta "medic_pick").
+var medic_asked_at := -1000.0
 ## Host only. An AI soldier bled out or was killed (permadeath: it never gets up again). Its
 ## body stays in the world (DEAD_GROUP), gear and all, until the body cap removes it.
 signal died_for_good(soldier: Soldier)
@@ -1026,6 +1031,16 @@ func _squad_command_as(squad: Squad, cmd: String, point: Vector3, names: PackedS
 			var why := "No vehicles here" if drivers == null else drivers.server_command(self, cmd, point, names)
 			if why != "":
 				_client_message.rpc_id(owner_peer(), why)
+		"call_medic", "treat_me":  # a player asks for a medic, or tells a squadmate to treat him (SquadAI.needs_help)
+			if vitals.care_needed().is_empty():
+				_client_message.rpc_id(owner_peer(), "Nothing to treat")
+			else:
+				medic_asked_at = _now()
+				if cmd == "treat_me" and not names.is_empty():
+					set_meta(&"medic_pick", String(names[0]))
+				elif has_meta(&"medic_pick"):
+					remove_meta(&"medic_pick")
+				_client_message.rpc_id(owner_peer(), "Medic!" if cmd == "call_medic" or names.is_empty() else "%s, patch me up" % String(names[0]))
 		"fire_launcher":  # wave 5: a squadmate with a launcher fires at the vehicle there, or the spot
 			if LauncherAI.order_squad(squad, self, point, names) == "":
 				_client_message.rpc_id(owner_peer(), "Nobody selected has a loaded launcher or rounds")

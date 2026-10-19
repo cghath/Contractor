@@ -38,6 +38,7 @@ const VOCAB: Array[Dictionary] = [
 	{"phrases": ["throw smoke", "smoke there", "pop smoke"], "keys": ["6", "1"]},
 	{"phrases": ["throw frag", "frag out", "throw grenade", "grenade there"], "keys": ["6", "2"]},
 	{"phrases": ["heal up", "treat yourself"], "keys": ["6", "5"]},
+	{"phrases": ["medic", "i need a medic", "patch me up", "call a medic"], "keys": ["5", "3"]},
 	{"phrases": ["go safe", "safe mode"], "keys": ["7", "1"]},
 	{"phrases": ["go aware", "aware mode"], "keys": ["7", "2"]},
 	{"phrases": ["go combat", "combat mode"], "keys": ["7", "3"]},

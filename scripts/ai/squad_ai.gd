@@ -1541,16 +1541,38 @@ func _do_reload() -> void:
 # --- Casualty care --------------------------------------------------------
 
 ## Whether `s` needs someone else's help: unconscious (downed, players too), or conscious
-## and calling for a medic. The dead are bodies, not casualties.
+## and calling for a medic (a player: player_wants_care). The dead are bodies, not casualties.
 static func needs_help(s: Soldier) -> bool:
 	if s == null or not is_instance_valid(s) or s.is_queued_for_deletion() or s.vitals.is_dead():
 		return false
 	if s.vitals.downed:
 		return true
+	if not s.is_ai():
+		return player_wants_care(s)
 	if Person.is_hvt(s):
 		return s.vitals.care_needed().any(func(t: Dictionary) -> bool: return String(t.kind) in HVT_CARE_KINDS)
 	var ai := SquadAI.of(s)
 	return ai != null and ai.asking_for_medic()
+
+
+## A conscious player wants a squadmate's care (Captain, 2026-10-19): he called for a medic or
+## told one to treat him in the last MEDIC_CALL_S (Soldier.medic_asked_at), or, on its own, he has
+## a wound he carries nothing to treat (out of a firefight; in one, only massive bleeding).
+static func player_wants_care(s: Soldier) -> bool:
+	var tasks := s.vitals.care_needed()
+	if tasks.is_empty():
+		return false
+	if Soldier._now() - s.medic_asked_at < MEDIC_CALL_S:
+		return true
+	var lvl := CompoundLevel.current(s)
+	var squad := lvl.squad_for(s.faction) if lvl else null
+	var engaged := squad != null and squad.is_engaged()
+	for t: Dictionary in tasks:
+		if engaged and String(t.kind) not in UNDER_FIRE_KINDS:
+			continue
+		if not Vitals.task_items(t).any(func(id: StringName) -> bool: return s.inventory.count_of(id) > 0):
+			return true  # nothing of his own for it: a squadmate comes
+	return false
 
 
 ## This unit called "Medic!" within the last MEDIC_CALL_S and still needs care.
@@ -1680,6 +1702,12 @@ func _may_use(id: StringName) -> bool:
 	return body.role == Roles.MEDIC or not (ItemDB.has_item(id) and ItemDB.get_item(id).stats.get("medic_only", false))
 
 
+## A player told this one to treat him ("Treat me", Soldier.medic_asked_at / meta "medic_pick")
+## in the last MEDIC_CALL_S.
+func _picked_for(c: Soldier) -> bool:
+	return c != null and not c.is_ai() and Soldier._now() - c.medic_asked_at < MEDIC_CALL_S and String(c.get_meta(&"medic_pick", "")) == String(body.name)
+
+
 ## The casualty this unit should answer now, or null: one it is the responder for, or (a
 ## medic) one whose carer asked for a medic with something this medic carries. A medic
 ## prefers casualties in its own fire team.
@@ -1693,6 +1721,15 @@ func _find_casualty() -> Soldier:
 			continue
 		if not _friendly() and (in_contact() or Soldier._now() - _last_contact < HOSTILE_CARE_HOT_S) 				and SquadAI.of(s) != null and SquadAI.of(s).squad != squad 				and not (_enemy_medic_free() and body.global_position.distance_to(s.global_position) <= HOSTILE_MEDIC_REACH_M):
 			continue  # the enemy in a fight: only its own team's casualties (a medic: anyone close)
+		# A player told one of us to treat him ("Treat me"): while that's fresh, that one goes
+		# and the rest leave him to it (whoever was on him already too).
+		var pick := String(s.get_meta(&"medic_pick", "")) if not s.is_ai() and Soldier._now() - s.medic_asked_at < MEDIC_CALL_S else ""
+		if _picked_for(s):
+			return s
+		if pick != "":
+			var picked := body.get_parent().get_node_or_null(NodePath(pick)) as Soldier if body.get_parent() else null
+			if picked and picked.vitals.is_up():
+				continue
 		var carer := _carer_of(s)
 		if carer == body:
 			return s
@@ -1845,8 +1882,8 @@ func _do_care() -> void:
 		return
 	if casualty.care_by != body:
 		var carer := _carer_of(casualty)
-		if carer == null:
-			casualty.care_by = body
+		if carer == null or _picked_for(casualty):
+			casualty.care_by = body  # (a player's "Treat me" pick takes him over from whoever had him)
 			_clear_handoff(casualty)
 		elif care == Care.REACH and Person.is_hvt(casualty) and _takes_over_hvt(casualty, carer):
 			# The escort keeps treating while the medic approaches. Claiming from afar
@@ -1889,7 +1926,7 @@ func _may_take(c: Soldier) -> bool:
 	if not needs_help(c):
 		return false
 	var carer := _carer_of(c)
-	if carer == null or carer == body:
+	if carer == null or carer == body or _picked_for(c):
 		return true
 	if Person.is_hvt(c) and _handoff_by_other(c):
 		return false  # another medic is already walking in to take him over

@@ -79,6 +79,9 @@ const MENU := {
 		{"key": "5", "label": "Status", "items": [
 			{"key": "1", "label": "Report status", "cmd": "report"},
 			{"key": "2", "label": "Report enemy position (radio)", "cmd": "radio_report"},
+			## Captain, 2026-10-19: ask for a medic, or tell the selected squadmate to treat you.
+			{"key": "3", "label": "Medic! (call for help)", "cmd": "call_medic"},
+			{"key": "4", "label": "Treat me (the one selected)", "cmd": "treat_me"},
 		]},
 		{"key": "6", "label": "Action", "items": [
 			{"key": "1", "label": "Throw smoke there", "cmd": "throw_smoke", "point": true},

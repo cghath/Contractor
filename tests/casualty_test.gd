@@ -92,6 +92,7 @@ func _ready() -> void:
 	await _test_player_and_enemy_bodies()
 	await _test_body_persistence()
 	await _test_downed_player()
+	await _test_player_asks_medic()
 	await _test_ragdolls()
 	GameState.delete_save()
 	print("CASUALTY TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
@@ -1259,6 +1260,55 @@ func _test_downed_player() -> void:
 		"squadmates treat a downed player like anyone else (%s, by %s; stopped %s, %d tourniquets used, on %s; %s %.1f m off, %s)" % [_wound_kinds(player),
 		_name(carer) if carer else "nobody", stopped, used, player.vitals.tourniquets(), carer.ai_status if carer else "-",
 		_flat(carer.global_position, player.body_point()) if carer else -1.0, player.vitals.condition_text()])
+	player.vitals.server_reset_health()
+
+
+## A conscious player and the medics (Captain, 2026-10-19: "an option to order medics to heal you
+## if you dont have medical items or them do it automatically / you to request help").
+func _test_player_asks_medic() -> void:
+	print("A player asks for a medic")
+	_place(player, Vector3(-6, 0.1, 6))
+	player.vitals.server_reset_health()
+	await _seconds(1.0)
+	var squad := level.squad_for(&"friendly")
+	player.vitals.server_hit(Vitals.UPPER_ARM_L, {"round_class": Vitals.PISTOL})
+	await _seconds(0.3)
+	var tasks := player.vitals.care_needed()
+	var has_kit := tasks.all(func(t: Dictionary) -> bool: return Vitals.task_items(t).any(func(id: StringName) -> bool: return player.inventory.count_of(id) > 0))
+	check(not tasks.is_empty() and (not has_kit or not SquadAI.needs_help(player)), "a wound he has the kit for: nobody comes unasked (%s)" % [_kinds(tasks)])
+	player._squad_command_as(squad, "call_medic", player.global_position, PackedStringArray())
+	check(SquadAI.needs_help(player), "\"Medic!\" from the command menu: he needs help now")
+	var helped := await _wait_until(func() -> bool: return player.vitals.care_needed().is_empty(), 40.0)
+	var by: Soldier = player.care_by if is_instance_valid(player.care_by) else null
+	check(helped, "and a squadmate comes and treats him (%s, by %s)" % [player.vitals.condition_text(), _name(by) if by else "?"])
+	# Nothing of his own: they come by themselves.
+	player.vitals.server_reset_health()
+	for id: StringName in [&"pressure_bandage", &"hemostatic_gauze", &"ifak", &"tourniquet"]:
+		while player.inventory.count_of(id) > 0 and player.inventory.remove_one(id):
+			pass
+	player.medic_asked_at = -1000.0
+	player.vitals.server_hit(Vitals.UPPER_ARM_R, {"round_class": Vitals.PISTOL})
+	await _seconds(0.3)
+	check(SquadAI.needs_help(player), "with nothing to treat it himself, he needs help without asking")
+	helped = await _wait_until(func() -> bool: return player.vitals.care_needed().is_empty(), 40.0)
+	check(helped, "and they come on their own")
+	# Treat me: the one selected comes.
+	player.vitals.server_reset_health()
+	var pick: Soldier = null
+	for m: Soldier in squad.members():
+		if m.role != Roles.MEDIC and m.vitals.is_up():
+			pick = m
+			break
+	player.vitals.server_hit(Vitals.UPPER_ARM_L, {"round_class": Vitals.PISTOL})
+	await _seconds(0.3)
+	check(not player.vitals.care_needed().is_empty(), "(hurt again, for the next one)")
+	if pick:
+		player._squad_command_as(squad, "treat_me", player.global_position, PackedStringArray([String(pick.name)]))
+		var came := await _wait_until(func() -> bool: return player.care_by == pick or SquadAI.of(pick).casualty == player, 20.0)
+		check(came and (player.care_by == pick or SquadAI.of(pick).casualty == player),
+			"Treat me, with %s selected: he's the one who comes (%s; %s: %s, items %s, needs %s)" % [pick.name, _name(player.care_by) if is_instance_valid(player.care_by) else "nobody now",
+				pick.name, _care_of(pick), _items_of(pick), _kinds(player.vitals.care_needed())] + " [find %s, needs_help %s, pick %s, asked %.1f s ago, intent %d]" % [
+				_name(SquadAI.of(pick)._find_casualty()), SquadAI.needs_help(player), player.get_meta(&"medic_pick", "-"), Soldier._now() - player.medic_asked_at, SquadAI.of(pick).intent])
 	player.vitals.server_reset_health()
 
 
