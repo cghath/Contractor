@@ -170,6 +170,9 @@ func _test_crossings() -> void:
 	var zone := CompoundLevel.current(self) as ZoneLevel
 	check(zone != null and not zone is BaseZoneLevel and String(zone.def.id) == to and RosterDeployment.is_running(BaseHub.roster()),
 		"the squad is in %s, on a deployment" % to)
+	var dep := RosterDeployment.active(BaseHub.roster())
+	check(String(dep.get("zone_kind", "")) == RosterDeployment.RAID and int(dep.get("respawns_free", 0)) == 2,
+		"out without a contract it's a raid: 2 free respawns (%s, %d)" % [dep.get("zone_kind", "?"), int(dep.get("respawns_free", 0))])
 	if zone == null or zone is BaseZoneLevel:
 		return
 	await _wait_until(func() -> bool: return zone.players.get_node_or_null(^"1") != null, 10.0)
@@ -191,6 +194,10 @@ func _test_crossings() -> void:
 	check(not home.is_empty(), "and the way home is a crossing there (%s)" % home.get("name", "none"))
 	if home.is_empty():
 		return
+	# What the raid hit costs standing when it comes home (LZ-4).
+	var hit_dep := RosterDeployment.active(BaseHub.roster())
+	hit_dep["raid_hits"] = {"black_ridge": {"kills": 20, "sites": 1}}
+	var rep_before := Economy.reputation("black_ridge")
 	zx.countdown_s = 0.5
 	me.global_position = zone.ground_point(Vector3(home.pos.x, 0, home.pos.y))
 	var k := 0
@@ -204,6 +211,9 @@ func _test_crossings() -> void:
 	await _wait_until(func() -> bool: return BaseHub.in_base() and not BaseHub.switch_pending(), 40.0)
 	base = CompoundLevel.current(self) as BaseZoneLevel
 	check(base != null and not RosterDeployment.is_running(BaseHub.roster()), "back at the base zone, the deployment over")
+	var lost := rep_before - Economy.reputation("black_ridge")
+	check(lost > 0,  # (-4 for this raid; the day turning over drifts standing a little too)
+		"the raid cost standing with the faction it hit (%d)" % lost)
 	if base == null:
 		return
 	await _wait_until(func() -> bool: return base.players.get_node_or_null(^"1") != null, 10.0)

@@ -4,7 +4,8 @@ extends RefCounted
 ## player, the respawn pool, and what happens to everyone at extraction. Pure functions on the
 ## roster section (Roster); the running deployment is its "deployment" entry:
 ## - "active": true while it runs.
-## - "zone_kind": "contract" or "hot"; "zone_id": the zone's save id; "scene": the level.
+## - "zone_kind": "contract", "hot" or "raid" (out without a contract: docs/linked_zones.md LZ-4);
+##   "zone_id": the zone's save id; "scene": the level.
 ## - "contract": what the economy handed over when the contract was accepted (opaque here).
 ## - "squad": member ids picked at the base, in pick order (the AI that may deploy).
 ## - "spawned": member id -> true for each one who went into the zone as an AI squadmate.
@@ -19,12 +20,16 @@ extends RefCounted
 
 const CONTRACT := "contract"
 const HOT := "hot"
-## Respawns free per deployment (Captain): 4 in a contract zone, 8 in a hot zone; past them,
-## each one is bought (BaseEconomy.respawn_price).
-const FREE_RESPAWNS := {CONTRACT: 4, HOT: 8}
+## A raid (docs/linked_zones.md LZ-4, call 8: "lean and risky"): out without a contract to
+## scavenge and hit sites; no pay or salvage share, supports from the bank, standing and heat for
+## what's hit, all that comes home kept.
+const RAID := "raid"
+## Respawns free per deployment (Captain): 4 in a contract zone, 8 in a hot zone, 2 on a raid;
+## past them, each one is bought (BaseEconomy.respawn_price).
+const FREE_RESPAWNS := {CONTRACT: 4, HOT: 8, RAID: 2}
 ## Proposed: campaign days a deployment takes, by zone kind (design doc: missions advance
 ## the clock).
-const DAYS := {CONTRACT: 1, HOT: 2}
+const DAYS := {CONTRACT: 1, HOT: 2, RAID: 1}
 
 ## Outcomes for resolve().
 const EXTRACTED := "extracted"
@@ -172,7 +177,7 @@ static func resolve(data: Dictionary, outcomes: Dictionary, rng: RandomNumberGen
 	var report := {"extracted": [], "mia": [], "dead": [], "injured": {}, "players_left": [], "respawns_used": int(dep.get("respawns_used", 0)),
 		"respawns_bought": int(dep.get("respawns_bought", 0)), "zone_id": String(dep.get("zone_id", "")),
 		"zone_kind": String(dep.get("zone_kind", CONTRACT))}
-	var what := "a %s zone" % ("hot" if report.zone_kind == HOT else "contract")
+	var what := "a raid" if report.zone_kind == RAID else "a %s zone" % ("hot" if report.zone_kind == HOT else "contract")
 	var member_outcomes: Dictionary = outcomes.get("members", {})
 	for mid: String in member_outcomes:
 		var m := Roster.get_member(data, mid)

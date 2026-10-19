@@ -513,7 +513,8 @@ func server_cross_on(to: String, to_crossing: String, extraction: Extraction) ->
 			var mid := String(s.get_meta(&"roster_id"))
 			server_store_member_gear(mid, s.inventory.net_state)
 			_carry["m:" + mid] = {"gear": s.inventory.net_state.duplicate(true), "vitals": s.vitals.server_snapshot()}
-	GameState.save_zone()  # the zone keeps what's in it while it remembers (LZ-2's fade is next)
+	_tally_raid(lvl)  # what the raid hit here, before the zone goes (LZ-4)
+	GameState.save_zone()  # the zone keeps what's in it while it remembers (zone memory)
 	var dep := RosterDeployment.active(roster())
 	dep["zone_id"] = to
 	var arrive := def.duplicate(true)
@@ -534,6 +535,42 @@ func server_cross_on(to: String, to_crossing: String, extraction: Extraction) ->
 	_changed_all()
 	server_switch_level({"level": "zone", "def": arrive}, zone_save_id(to))
 	return ""
+
+
+## A raid's cost in standing (docs/linked_zones.md call 8: "a faction's sites cost standing with
+## it and its allies"): with the zone's enemy faction, RAID_REP_PER_KILLS kills cost a point and
+## each site taken out RAID_REP_PER_SITE (its allies follow through Economy.change_reputation's
+## ripple). Heat comes from the kills and sites already (Pressure). Proposed.
+const RAID_REP_PER_KILLS := 10
+const RAID_REP_PER_SITE := 2
+
+
+## Host: on a raid, what was hit in `lvl` (its Pressure's kills and sites down, against its enemy
+## faction) is added to the deployment's "raid_hits" (faction -> {"kills", "sites"}), zone by zone.
+func _tally_raid(lvl: CompoundLevel) -> void:
+	var dep := RosterDeployment.active(roster())
+	if String(dep.get("zone_kind", "")) != RosterDeployment.RAID or lvl == null:
+		return
+	var pressure := lvl.get_node_or_null(^"Pressure")
+	var response := lvl.get_node_or_null(^"EnemyResponse")
+	if pressure == null:
+		return
+	var faction := String(response.get(&"enemy_faction")) if response else "black_ridge"
+	if not dep.has("raid_hits"):
+		dep["raid_hits"] = {}
+	var hits: Dictionary = dep.raid_hits.get(faction, {"kills": 0, "sites": 0})
+	hits["kills"] = int(hits.kills) + (pressure.get(&"_counted_dead") as Dictionary).size()
+	hits["sites"] = int(hits.sites) + (pressure.get(&"_down") as Dictionary).size()
+	dep.raid_hits[faction] = hits
+
+
+## Host, a raid's end: the standing it cost (RAID_REP_PER_KILLS, RAID_REP_PER_SITE).
+func _settle_raid(dep: Dictionary) -> void:
+	for faction: String in dep.get("raid_hits", {}):
+		var hits: Dictionary = dep.raid_hits[faction]
+		var cost := int(hits.kills) / RAID_REP_PER_KILLS + int(hits.sites) * RAID_REP_PER_SITE
+		if cost > 0:
+			Economy.change_reputation(faction, -cost, "raid: %d killed, %d sites" % [int(hits.kills), int(hits.sites)])
 
 
 ## Hours a crossing takes on foot (docs/linked_zones.md call 7; by vehicle and heli come with LZ-3).
@@ -563,7 +600,7 @@ func server_cross_from_base(to: String, to_crossing: String) -> String:
 	var options := {"crossing": true, "zone_id": to}
 	if contract.is_empty() or String(contract.get("zone_id", "")) != to:
 		options["no_contract"] = true
-		options["zone_kind"] = String(MissionRegistry.zone(to).get("kind", RosterDeployment.CONTRACT))
+		options["zone_kind"] = RosterDeployment.RAID  # out without a contract: a raid (LZ-4)
 	var arrive := def.duplicate(true)
 	arrive["arrive"] = to_crossing
 	options["level"] = {"level": "zone", "def": arrive}
@@ -1473,6 +1510,8 @@ func end_deployment(report: Dictionary) -> void:
 	if not campaign_running or not multiplayer.is_server() or not RosterDeployment.is_running(roster()):
 		return
 	var lvl := level()
+	_tally_raid(lvl)  # (a raid's last zone; LZ-4)
+	_settle_raid(RosterDeployment.active(roster()))
 	var extracted: Array = []
 	for record: Dictionary in (report.get("players", []) as Array) + (report.get("squad", []) as Array):
 		var parent: Node = lvl.players if int(record.get("peer", 0)) != 0 else lvl.ai
