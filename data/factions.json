@@ -11,6 +11,7 @@
 	"_rules": "Wave 6a, all Proposed (heat_*: wave 6d, a faction's anger: each of its men killed heat_kill, each of its sites taken out heat_site, cooling heat_cool_per_day; from heat_hunters its hunter teams come for the squad in any zone it holds, heat_named for named hunter squads, not built yet): ripple (a share of any rep change goes to the faction's allies, the opposite to its enemies), decay (rep drifts toward neutral by decay_per_day once decay_grace_days pass without a job; allied_grace_days for an Allied faction), and side lockout (taking a faction's contract locks you out of its enemies' work for lockout_days, counted again from the debrief).",
 	"reputation_rules": {"ripple_ally": 0.25, "ripple_enemy": 0.25, "decay_per_day": 1, "decay_grace_days": 7, "allied_grace_days": 14, "lockout_days": 3,
 		"heat_kill": 0.4, "heat_site": 4.0, "heat_cool_per_day": 2.0, "heat_hunters": 40.0, "heat_named": 80.0},
+	"_quartermaster": "Wave 6 (call #1): an allied employer's quartermaster sells the squad its kit cheaper at Trusted and its armour at Allied (Quartermaster); each tier's items and discount, the higher tier's list including the lower's. Proposed numbers.",
 	"_kits": "Wave 6b (2026-10-18): what each enemy faction fields, by kit id (a faction's \"kit\"). body + one entry of guns by mix (a team, wave or garrison's i-th man gets mix[i % size]) + tail; roles casts a gun's carrier (Roles); variant is his camo (VoxelArt.VARIANTS). \"insurgent\" and \"pmc\" are Black Ridge's and Vantage's (CompoundLevel.hostile_loadout / rival_pmc_loadout, kept in code: Vantage's exo gear by difficulty lives there). Regional armies fight with what we have: the AK/PK/SVD family stands in until regional weapon art (Chinese, Iranian) lands. A kit's \"nation\" names its men (Names) over the faction's. Allied kits (\"side\": \"friendly\", wave 6e) dress AlliedTroops by employer; \"mixes\" holds other element types (the MG + AT weapons team).",
 	"kits": {
 		"concord_ru": {"variant": "woodland", "nation": "RU",
@@ -117,13 +118,16 @@
 		 "wants": "Hold the border districts and push the militias out of the hills.", "fears": "Foreign contractors reporting what it does there.", "start_rep": -20,
 		 "allies": [], "enemies": ["meridian", "black_ridge", "us_forces", "uk_forces", "ca_forces"]},
 		{"id": "us_forces", "name": "US Forces", "role": "employer", "nation": "US", "kit": "allied_us",
+		 "quartermaster": {"trusted": {"discount": 0.15, "items": ["m4a1", "mag_556", "m249", "box_556", "m240b", "belt_762x51", "at4", "optic_lpvo", "plate_ceramic_l4", "helmet"]}, "allied": {"discount": 0.25, "items": ["m4a1", "mag_556", "m249", "box_556", "m240b", "belt_762x51", "at4", "optic_lpvo", "plate_ceramic_l4", "helmet", "plate_carrier_heavy", "helmet_heavy"]}},
 		 "_note": "Wave 6b: an allied employer with its own contracts; its standing ripples to the UK and Canada (allies).",
 		 "wants": "Contractors who can go where its own troops can't be seen.", "fears": "A contractor's mess on the evening news.", "start_rep": 0,
 		 "allies": ["uk_forces", "ca_forces"], "enemies": ["eastern_concord", "black_ridge"]},
 		{"id": "uk_forces", "name": "UK Forces", "role": "employer", "nation": "UK", "kit": "allied_uk",
+		 "quartermaster": {"trusted": {"discount": 0.15, "items": ["l85a2", "mag_556", "m249", "box_556", "m240b", "belt_762x51", "at4", "optic_lpvo", "plate_ceramic_l4", "helmet"]}, "allied": {"discount": 0.25, "items": ["l85a2", "mag_556", "m249", "box_556", "m240b", "belt_762x51", "at4", "optic_lpvo", "plate_ceramic_l4", "helmet", "plate_carrier_heavy", "helmet_heavy"]}},
 		 "wants": "Quiet recovery work and eyes on the coast.", "fears": "Being dragged into somebody else's war.", "start_rep": 0,
 		 "allies": ["us_forces", "ca_forces"], "enemies": ["eastern_concord", "black_ridge"]},
 		{"id": "ca_forces", "name": "Canadian Forces", "role": "employer", "nation": "CA", "kit": "allied_ca",
+		 "quartermaster": {"trusted": {"discount": 0.15, "items": ["c8", "mag_556", "m249", "box_556", "m240b", "belt_762x51", "at4", "optic_lpvo", "plate_ceramic_l4", "helmet"]}, "allied": {"discount": 0.25, "items": ["c8", "mag_556", "m249", "box_556", "m240b", "belt_762x51", "at4", "optic_lpvo", "plate_ceramic_l4", "helmet", "plate_carrier_heavy", "helmet_heavy"]}},
 		 "wants": "Aid convoys through and its people brought home.", "fears": "Losing an aid team in the hills.", "start_rep": 0,
 		 "allies": ["us_forces", "uk_forces"], "enemies": ["eastern_concord", "black_ridge"]}
 	]

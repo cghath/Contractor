@@ -819,6 +819,24 @@ func _test_shop() -> void:
 	var fixed := Economy.server_repair(&"plate_ceramic_l4", state)
 	check(fixed == ItemDB.get_item(&"plate_ceramic_l4").default_state() and Economy.cash() == cash - 384, "repaired, as new")
 	check(Prices.sell_price(&"m4a1") == 560 and Economy.server_sell(&"m4a1") == 560, "selling back fetches 40%")
+	# Wave 6 call #1: allied quartermasters. Neutral: the base shop's prices, no heavy armour.
+	var us0 := Economy.reputation("us_forces")
+	var uk0 := Economy.reputation("uk_forces")
+	check(Quartermaster.price(&"m4a1") == 1400 and not Quartermaster.sells(&"plate_carrier_heavy") and not Prices.for_sale(&"plate_carrier_heavy")
+		and not &"plate_carrier_heavy" in Quartermaster.catalog(), "Neutral with the allies: list prices, and no heavy armour anywhere")
+	Economy.change_reputation("us_forces", 35 - Economy.reputation("us_forces"), "test", false)
+	check(Quartermaster.price(&"m4a1") == 1190 and Quartermaster.seller_text(&"m4a1").begins_with("US Forces, Trusted -15")
+		and Quartermaster.price(&"l85a2") == 1500 and not Quartermaster.sells(&"plate_carrier_heavy"),
+		"Trusted with the US: its kit 15%% off (M4 $%d, %s), not the UK's rifle, and still no heavy armour" % [Quartermaster.price(&"m4a1"), Quartermaster.seller_text(&"m4a1")])
+	Economy.change_reputation("us_forces", 75 - Economy.reputation("us_forces"), "test", false)
+	cash = Economy.cash()
+	check(Quartermaster.price(&"m4a1") == 1050 and Quartermaster.sells(&"plate_carrier_heavy") and &"plate_carrier_heavy" in Quartermaster.catalog()
+		and Quartermaster.price(&"plate_carrier_heavy") == 1200 and BaseEconomy.item_price(&"plate_carrier_heavy") == 1200,
+		"Allied: 25%% off, and the heavy carrier is for sale from its quartermaster ($%d)" % Quartermaster.price(&"plate_carrier_heavy"))
+	check(Economy.server_buy(&"plate_carrier_heavy", 1) and Economy.cash() == cash - 1200, "and buying it charges the quartermaster's price")
+	Economy.take_unbanked()
+	Economy.change_reputation("us_forces", us0 - Economy.reputation("us_forces"), "test cleanup", false)
+	Economy.change_reputation("uk_forces", uk0 - Economy.reputation("uk_forces"), "test cleanup", false)
 	# Every item in data/items.json has a price of its own; CPR (an action, not an item) isn't sold.
 	var unpriced: Array = ItemDB.all_ids().filter(func(id: StringName) -> bool: return not (Prices.data().items as Dictionary).has(String(id)))
 	check(unpriced.is_empty() and Prices.price_of(&"io_kit") == 150 and Prices.price_of(&"surgery_kit_5") == 900

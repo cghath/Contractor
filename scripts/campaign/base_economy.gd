@@ -27,13 +27,13 @@ static func charge(amount: int, reason: String) -> void:
 
 ## The shop's price for one (0: not sold).
 static func item_price(id: StringName) -> int:
-	return Prices.price_of(id) if Prices.for_sale(id) else 0
+	return Quartermaster.price(id)  # the base shop's, or an allied quartermaster's (wave 6)
 
 
 ## What the shop terminal sells: [{"id", "price"}].
 static func shop_catalog() -> Array:
 	var out: Array = []
-	for id: StringName in Prices.shop_items():
+	for id: StringName in Quartermaster.catalog():
 		var price := item_price(id)
 		if price > 0:
 			out.append({"id": String(id), "price": price})

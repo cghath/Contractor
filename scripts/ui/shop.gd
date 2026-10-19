@@ -77,12 +77,13 @@ func refresh() -> void:
 	var keep := _list.get_selected_items()
 	_ids.clear()
 	_list.clear()
-	for id: StringName in Prices.shop_items():
+	for id: StringName in Quartermaster.catalog():  # the base shop plus what allied quartermasters sell us (wave 6)
 		var item := ItemDB.get_item(id)
 		if type != null and item.type != type:
 			continue
 		_ids.append(id)
-		_list.add_item("%s  (%s)  $%s" % [item.name, item.type, DebriefCalc.money(Prices.price_of(id))])
+		var seller := Quartermaster.seller_text(id)
+		_list.add_item("%s  (%s)  $%s%s" % [item.name, item.type, DebriefCalc.money(Quartermaster.price(id)), "   [%s]" % seller if seller != "" else ""])
 		_list.set_item_tooltip(_list.item_count - 1, ItemInfo.tooltip(id))  # hover: what it is and how to use it (Captain, 2026-10-14: "item descriptions plus uses also needed")
 	if not keep.is_empty() and keep[0] < _list.item_count:
 		_list.select(keep[0])

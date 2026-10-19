@@ -35,9 +35,10 @@ static func price_of(item_id: StringName) -> int:
 	return int((data().get("default_by_type", {}) as Dictionary).get(item.type, 0))
 
 
-## Whether the base shop sells `item_id` (objective items and loot-only items it doesn't).
+## Whether the base shop sells `item_id` (objective items and loot-only items it doesn't, nor
+## what only an allied quartermaster sells: "allied_only", Quartermaster).
 static func for_sale(item_id: StringName) -> bool:
-	return ItemDB.has_item(item_id) and not String(item_id) in data().get("not_for_sale", []) and price_of(item_id) > 0
+	return ItemDB.has_item(item_id) and not String(item_id) in data().get("not_for_sale", []) and not String(item_id) in data().get("allied_only", []) 		and price_of(item_id) > 0
 
 
 ## Every item the shop sells, grouped by type then by name.
