@@ -120,6 +120,18 @@ static func crossings(zone_id: String, def: Dictionary) -> Array:
 	return out
 
 
+## The side of `zone_id` that faces the base on the grid ("north", "south", "west", "east": the
+## larger of the two offsets), or "" for the base itself or a zone not on the map. Supports come
+## in from there (docs/linked_zones.md section 4: "the edge facing the base on the graph").
+static func side_toward_base(zone_id: String) -> String:
+	if zone_id == BASE or not layout().has(zone_id) or not layout().has(BASE):
+		return ""
+	var d: Vector2i = layout()[BASE] - layout()[zone_id]
+	if absi(d.x) >= absi(d.y):
+		return "east" if d.x > 0 else "west"
+	return "south" if d.y > 0 else "north"
+
+
 ## The crossing `id` of `def`, or {}.
 static func crossing_of(def: Dictionary, id: String) -> Dictionary:
 	for c: Dictionary in def.get("crossings", []):

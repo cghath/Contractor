@@ -474,7 +474,8 @@ func _test_ground_guard() -> void:
 	check(absf(guy.global_position.y - (h + 2.0)) < 0.2 and guy.movement.holding,
 		"spawned where the ground's chunk has no collision yet, he waits there (y %.1f, ground %.1f)" % [guy.global_position.y, h])
 	ground.collision_layer = 1
-	await _wait_for(func() -> bool: return guy.is_on_floor(), 3.0)
+	# Down and settled on it (a slow runner reported on-floor with him still a metre up, mid-settle).
+	await _wait_for(func() -> bool: return guy.is_on_floor() and absf(guy.global_position.y - h) < 0.6, 6.0)
 	check(guy.is_on_floor() and absf(guy.global_position.y - h) < 0.6 and not guy.movement.holding,
 		"once it's there he lands on it (y %.1f, ground %.1f)" % [guy.global_position.y, h])
 	var guard := level.get_node(^"GroundGuard") as GroundGuard

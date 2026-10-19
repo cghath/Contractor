@@ -38,6 +38,13 @@ func _ready() -> void:
 	super._ready()
 	var m := get_module("fob")
 	fob = BaseFob.make(self, m.global_position if m else Vector3.ZERO, true)
+	# Supports come and go from the helipad here (docs/linked_zones.md section 4, LZ-3).
+	var pad := Marker3D.new()
+	pad.name = "HelipadOrigin"
+	var c := BaseFob.HELIPAD.get_center()
+	pad.position = Vector3(c.x, 0.2, c.y)
+	fob.add_child(pad)
+	Supports.register_origin(&"fob", pad)
 
 
 func is_base() -> bool:

@@ -517,8 +517,7 @@ func server_cross_on(to: String, to_crossing: String, extraction: Extraction) ->
 	GameState.save_zone()  # the zone keeps what's in it while it remembers (zone memory)
 	var dep := RosterDeployment.active(roster())
 	dep["zone_id"] = to
-	var arrive := def.duplicate(true)
-	arrive["arrive"] = to_crossing
+	var arrive := _arrive_def(def, to, to_crossing)
 	# Travel time (call 7: 2 h a link on foot): the next zone's sky moves on by it, and the
 	# campaign's days turn over at each midnight passed.
 	var hours := float(dep.get("travel_h", 0.0)) + TRAVEL_FOOT_H
@@ -577,6 +576,18 @@ func _settle_raid(dep: Dictionary) -> void:
 const TRAVEL_FOOT_H := 2.0
 
 
+## Zone `to`'s def for walking in at its crossing `to_crossing` (LZ-2): "arrive" set, and its
+## supports coming in from the base's side of it on the region map ("fob_side"; docs/linked_zones.md
+## section 4), unless the zone names its own.
+func _arrive_def(def: Dictionary, to: String, to_crossing: String) -> Dictionary:
+	var out := def.duplicate(true)
+	out["arrive"] = to_crossing
+	var side := RegionMap.side_toward_base(to)
+	if side != "" and not def.has("fob_side"):
+		out["fob_side"] = side
+	return out
+
+
 ## Host: what `key` ("p:<peer>" / "m:<member id>") carried across a crossing goes onto `s`.
 func _apply_carry(key: String, s: Soldier) -> void:
 	var c: Dictionary = _carry.get(key, {})
@@ -601,15 +612,12 @@ func server_cross_from_base(to: String, to_crossing: String) -> String:
 	if contract.is_empty() or String(contract.get("zone_id", "")) != to:
 		options["no_contract"] = true
 		options["zone_kind"] = RosterDeployment.RAID  # out without a contract: a raid (LZ-4)
-	var arrive := def.duplicate(true)
-	arrive["arrive"] = to_crossing
+	var arrive := _arrive_def(def, to, to_crossing)
 	options["level"] = {"level": "zone", "def": arrive}
 	if not contract.is_empty() and String(contract.get("zone_id", "")) == to:
 		var prepped: Dictionary = prep.get("level", {})
 		if prepped.has("def"):
-			var with_arrive: Dictionary = (prepped.def as Dictionary).duplicate(true)
-			with_arrive["arrive"] = to_crossing
-			options["level"] = {"level": "zone", "def": with_arrive}
+			options["level"] = {"level": "zone", "def": _arrive_def(prepped.def, to, to_crossing)}
 	SessionLog.note("crossing: the squad walks out of the base into %s" % to)
 	return server_deploy(options)
 

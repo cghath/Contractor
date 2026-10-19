@@ -70,6 +70,15 @@ func _run() -> void:
 	check(m != null and base.fob != null and base.fob.global_position.distance_to(m.global_position) < 0.01, "the FOB is its \"fob\" module")
 	var terminals := base.fob.get_children().filter(func(n: Node) -> bool: return n is BaseTerminal)
 	check(terminals.size() == BaseFob.TERMINALS.size(), "with all %d terminals in it" % terminals.size())
+	var origin := Supports.origin_for(base, &"heli")
+	var pad := base.fob.to_global(Vector3(BaseFob.HELIPAD.get_center().x, 0, BaseFob.HELIPAD.get_center().y))
+	check(Vector2(origin.origin.x, origin.origin.z).distance_to(Vector2(pad.x, pad.z)) < 2.0,
+		"support helicopters come and go from the helipad (%.0f m off it)" % Vector2(origin.origin.x, origin.origin.z).distance_to(Vector2(pad.x, pad.z)))
+	var facing_ok := true
+	for l: Dictionary in RegionMap.links(RegionMap.BASE):
+		var side := String(BaseHub._arrive_def(MissionRegistry.zone_def(String(l.to)), String(l.to), "x").get("fob_side", ""))
+		facing_ok = facing_ok and side == RegionMap.SIDE_NAMES[RegionMap.opposite(int(l.side))]
+	check(facing_ok, "a zone beside the base has its supports come from the base's side")
 	var me := base.players.get_node_or_null(^"1") as Soldier
 	await _wait_until(func() -> bool: return base.players.get_node_or_null(^"1") != null, 5.0)
 	me = base.players.get_node_or_null(^"1") as Soldier
