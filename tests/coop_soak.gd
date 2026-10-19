@@ -94,6 +94,16 @@ var late := false
 ## first contract (up to wait_human_s) and waits for them at the extraction as long as it takes
 ## (up to HUMAN_EXTRACT_S); nothing here ever targets them (no planned knock-out, no give-up).
 var human := false
+## Bots join a human-hosted game (tools/coop_soak.sh --join): there is no bot host writing
+## phase.json; each client runs its own phases (_join_phase): at the base it readies up, in a
+## zone it follows the host's player (peer 1), readies up in the briefing, and never takes a
+## contract or confirms an extraction (the human does). It quits at its duration, or when the
+## host is gone for good.
+var join := false
+var _join_level := 0
+var _join_cycle := 0
+var _join_ready_at := -INF
+const JOIN_READY_GAP_S := 5.0
 var wait_human_s := 600.0
 const HUMAN_EXTRACT_S := 1200.0
 ## Time at the FOB between contracts once the human is back (the debrief, kitting up).
@@ -139,6 +149,7 @@ func _ready() -> void:
 	reconnects = "--soak-reconnect" in args
 	late = "--soak-late" in args
 	human = "--soak-human" in args
+	join = "--soak-join" in args
 	wait_human_s = float(_arg(args, "--soak-wait-human", "600"))
 	_t0 = Recorder.now()
 	var peer_dir := run_dir.path_join("host" if role == "host" else "client%d" % bot)
@@ -1215,11 +1226,13 @@ func _client_main() -> void:
 	var done := {}  # what this bot did, by "cycle:phase"
 	while true:
 		await _sleep(0.25)
-		var p := _read_json(run_dir.path_join("phase.json"))
+		var p := _join_phase() if join else _read_json(run_dir.path_join("phase.json"))
 		if not p.is_empty():
 			_phase = p
 		if bool(_phase.get("quit", false)):
 			break
+		if join:
+			_join_tick()
 		if _rejoining:
 			continue
 		if not _online():
@@ -1244,8 +1257,38 @@ func _client_main() -> void:
 			continue
 		done[key] = true
 		_client_phase(cycle, ph)
-	_say("the host says quit")
+	_say("time's up: leaving the game" if join else "the host says quit")
 	_finish(0 if _failures.is_empty() else 1)
+
+
+## Join mode: this bot's phase from where it is (no bot host to say): "base" at the base, else
+## "follow" behind the host's player (peer 1); "quit" past its duration. The cycle steps on each
+## level change, so a phase's one-time work runs again in each new place.
+func _join_phase() -> Dictionary:
+	if Recorder.now() - _t0 > duration_s:
+		return {"quit": true}
+	var lvl := _level()
+	var id := lvl.get_instance_id() if lvl else 0
+	if id != _join_level:
+		_join_level = id
+		_join_cycle += 1
+	if lvl == null:
+		return {"phase": "wait", "cycle": _join_cycle}
+	if _in_base():
+		return {"phase": "base", "cycle": _join_cycle}
+	return {"phase": "follow", "cycle": _join_cycle, "leader": 1, "down": {}}
+
+
+## Join mode, every quarter second: ready at the FOB (the ready-up button), ready in the briefing.
+func _join_tick() -> void:
+	if Recorder.now() - _join_ready_at < JOIN_READY_GAP_S:
+		return
+	_join_ready_at = Recorder.now()
+	if _in_base():
+		BaseHub.request("ready", [true])
+	var briefing := MapNodes.briefing(_level()) if _level() else null
+	if briefing and briefing.is_open():
+		briefing.request_set_ready(true)
 
 
 func _join() -> bool:

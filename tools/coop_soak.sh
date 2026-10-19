@@ -28,6 +28,13 @@
 #   GODOT=... tools/coop_soak.sh --human                 # 120 min, bots from the newest build's commit
 # then in the game: Join someone's session, host address 127.0.0.1 (another PC: this one's LAN IP).
 #
+# Bots JOIN a game a human hosts (--join ADDR[:PORT]; Captain, 2026-10-14: "bots must join a
+# human-hosted game"): no bot host; 2 bot clients join the human's session at ADDR (port 24680 by
+# default, the game's own), follow the host's player, ready up at the FOB and in the briefing,
+# and never take contracts or confirm extractions themselves (the human does):
+#   GODOT=... tools/coop_soak.sh --join 127.0.0.1           # host first: start the build, Host
+#   GODOT=... tools/coop_soak.sh --join 192.168.1.20:24680 --clients 3
+#
 # --build DIR|newest|none: run the bots from the commit a build in B:\Contractor\builds was made
 # from (its BUILD.txt), so they run the same game code the build does (a build's pack leaves
 # tests/ out, so the bots run in the editor on a checkout of that commit: a worktree
@@ -50,11 +57,12 @@ if [ -z "$PYTHON" ]; then
 		if "$p" -c "import sys" >/dev/null 2>&1; then PYTHON="$p"; break; fi
 	done
 fi
-MINUTES=10 MODE=lossy LATENCY=100 JITTER=30 LOSS=1.5 CLIENTS=3 PORT=25400 LATE=1 TAG="" HUMAN=0 BUILD="" WAIT_HUMAN=600
+MINUTES=10 MODE=lossy LATENCY=100 JITTER=30 LOSS=1.5 CLIENTS=3 PORT=25400 LATE=1 TAG="" HUMAN=0 BUILD="" WAIT_HUMAN=600 JOIN=""
 ALL_ARGS=("$@")
 while [ $# -gt 0 ]; do
 	case "$1" in
 		--human) HUMAN=1 ;;
+		--join) JOIN="$2"; shift ;;
 		--build) BUILD="$2"; shift ;;
 		--wait-human) WAIT_HUMAN="$2"; shift ;;
 		--minutes) MINUTES="$2"; shift ;;
@@ -70,6 +78,10 @@ while [ $# -gt 0 ]; do
 	esac
 	shift
 done
+if [ -n "$JOIN" ]; then
+	HUMAN=1  # the same play-along defaults; the human hosts
+	case "$JOIN" in *:*) PORT="${JOIN##*:}"; JOIN="${JOIN%:*}"; ALL_ARGS+=(--port "$PORT") ;; esac
+fi
 if [ "$HUMAN" = 1 ]; then
 	# Defaults for playing along, unless given: 120 min, 2 bots, the game's port, a direct link.
 	printf '%s\n' "${ALL_ARGS[@]}" | grep -qx -- --minutes || MINUTES=120
@@ -81,7 +93,7 @@ fi
 if [ -n "$BUILD" ] && [ "$BUILD" != none ]; then
 	builds="${CONTRACTOR_BUILDS:-/b/Contractor/builds}"
 	if [ "$BUILD" = newest ]; then
-		BUILD="$(ls -1d "$builds"/contractor-* 2>/dev/null | sort | tail -1)"
+		BUILD="$(ls -1d "$builds"/contractor-*/ 2>/dev/null | sort | tail -1)"; BUILD="${BUILD%/}"  # (folders only: a build's .zip sorts after it)
 	fi
 	[ -f "$BUILD/BUILD.txt" ] || { echo "no BUILD.txt in '$BUILD'"; exit 2; }
 	sha="$(grep -oE 'commit [0-9a-f]{7,40}' "$BUILD/BUILD.txt" | head -1 | cut -d' ' -f2)"
@@ -159,7 +171,9 @@ run="$day/$run_id-$start_time-RUNNING-$tail_name"
 mkdir -p "$run/host" "$run/sessions"
 win() { cygpath -m "$1" 2>/dev/null || echo "$1"; }
 echo "co-op soak $run_id: $MINUTES min, $MODE, $CLIENTS clients, logs in $run"
-if [ "$HUMAN" = 1 ]; then
+if [ -n "$JOIN" ]; then
+	echo "BOTS JOIN YOU: host a session in the game first (port $PORT); $CLIENTS bots join $JOIN:$PORT, follow you, and ready up with you. Ctrl+C here takes them out."
+elif [ "$HUMAN" = 1 ]; then
 	ips="$(ipconfig 2>/dev/null | grep -aE 'IPv4' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | tr '\n' ' ')"
 	echo "PLAY ALONG: start the game build, Join someone's session, host address 127.0.0.1 (from another PC: one of $ips), port $PORT."
 	echo "The bots wait up to $WAIT_HUMAN s for you before the first contract, and for you at each extraction. Ctrl+C here ends the session."
@@ -209,6 +223,31 @@ if grep -qE 'SCRIPT ERROR|Parse Error' "$run/import.log"; then
 	echo "import failed: see $run/import.log"
 fi
 
+if [ -n "$JOIN" ]; then
+	# No bot host: the clients join the human's game and run on their own (coop_soak.gd, join).
+	for n in $(seq 1 "$CLIENTS"); do
+		instance "client$n" "$PORT" --soak-role client --soak-bot "$n" --soak-duration "$DURATION" --soak-human --soak-join --soak-address "$JOIN"
+		sleep 3
+	done
+	deadline=$(( $(date +%s) + DURATION + 600 ))
+	while [ "$(date +%s)" -lt "$deadline" ]; do
+		alive=0
+		for pid in "${pids[@]}"; do kill -0 "$pid" 2>/dev/null && alive=1; done
+		[ "$alive" = 0 ] && break
+		sleep 5
+	done
+	cleanup
+	verdict=PASS
+	for n in $(seq 1 "$CLIENTS"); do
+		[ "$(cat "$run/client$n/exit_code" 2>/dev/null)" = 0 ] || verdict=FAIL
+	done
+	final="$day/$run_id-$start_time-$verdict-$tail_name"
+	mv "$run" "$final" 2>/dev/null && run="$final"
+	echo "$run_id $(date +%Y-%m-%d) $start_time $verdict $tail_name script: tools/coop_soak.sh --join ($MINUTES min, $CLIENTS bots)" >>"$parent/index.txt"
+	echo "bots-join session $run_id over: $verdict (bots' logs in $run/client*/bot.log)"
+	[ "$verdict" = PASS ]
+	exit $?
+fi
 human_args=()
 [ "$HUMAN" = 1 ] && human_args=(--soak-human --soak-wait-human "$WAIT_HUMAN")
 instance host "$PORT" --soak-role host --soak-bot 0 --soak-duration "$DURATION" --soak-expect $(( LATE == 1 && CLIENTS == 3 ? 2 : CLIENTS )) "${human_args[@]}"
