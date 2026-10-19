@@ -231,6 +231,67 @@ static func server_given(by: Soldier, villager: Soldier, id: StringName) -> Stri
 	return "They thank you for the %s: the %s's locals remember it" % [ItemDB.get_item(id).name, region]
 
 
+## Upgrades (part 4; Captain: paid with "both and materials"): each call-in has two levels, each
+## level costing favours, cash and materials (salvage from the stash) together. What a level does
+## is RebelCalls' (UPGRADE_TEXT says it). Proposed costs.
+const UPGRADE_COSTS: Array[Dictionary] = [
+	{"favours": 3, "cash": 5000, "materials": 2},
+	{"favours": 6, "cash": 12000, "materials": 4},
+]
+const MAX_LEVEL := 2
+const UPGRADE_TEXT := {
+	"lookouts": ["they watch further out", "further still, and report more often"],
+	"diversion": ["they keep it up longer", "longer still"],
+	"fighters": ["two more fighters come", "two more again"],
+	"vehicle_drop": ["a vehicle sooner again", "two vehicles at a time"],
+	"mortar": ["two more rounds", "two more again, and they fall tighter"],
+}
+
+
+static func level(id: String) -> int:
+	return int((_s().upgrades as Dictionary).get(id, 0))
+
+
+## The salvage in the stash (the materials upgrades take): item ids of type "salvage" -> count.
+static func materials_in_stash() -> Dictionary:
+	var out := {}
+	for id: String in BaseArmory.counts(BaseHub.stash()):
+		var item := ItemDB.get_item(StringName(id)) if ItemDB.has_item(StringName(id)) else null
+		if item and item.type == "salvage":
+			out[id] = int(BaseArmory.counts(BaseHub.stash())[id])
+	return out
+
+
+## Host (the ops desk): call-in `id` goes up a level. Returns "" or why not.
+static func server_upgrade(id: String) -> String:
+	if not CALLINS.has(id):
+		return "No such call-in"
+	var lv := level(id)
+	if lv >= MAX_LEVEL:
+		return "%s is as good as it gets" % String(CALLIN_NAMES[id])
+	var cost: Dictionary = UPGRADE_COSTS[lv]
+	if favours() < int(cost.favours):
+		return "The locals owe you %d favour%s; this takes %d" % [favours(), "" if favours() == 1 else "s", int(cost.favours)]
+	var mats := materials_in_stash()
+	var have := 0
+	for k: String in mats:
+		have += int(mats[k])
+	if have < int(cost.materials):
+		return "It takes %d salvage (scrap, parts, electronics) from the stash; there's %d" % [int(cost.materials), have]
+	if not BaseEconomy.try_spend(int(cost.cash), "Rebel %s upgrade" % String(CALLIN_NAMES[id]).to_lower()):
+		return "Can't afford it ($%d)" % int(cost.cash)
+	var left := int(cost.materials)
+	for k: String in mats:
+		if left <= 0:
+			break
+		left -= BaseHub.server_take_from_stash(StringName(k), mini(left, int(mats[k])))
+	add_favours(-int(cost.favours))
+	_s().upgrades[id] = lv + 1
+	Campaign.mark_changed(SECTION)
+	SessionLog.note("rebel upgrade: %s to level %d" % [id, lv + 1])
+	return ""
+
+
 ## BaseHub, a deployment starting: the per-deployment cap on gains from fighting resets.
 static func on_deployment_started() -> void:
 	_s().near_gain = 0.0
@@ -253,3 +314,8 @@ static func view() -> Array:
 		out.append({"region": r, "support": snappedf(support(r), 0.1), "tier": t, "next": TIERS[t] if t < TIERS.size() else -1,
 			"unlocked": unlocked(r)})
 	return out
+
+
+## For the ops desk (every peer): each call-in's level, [{"id", "level"}].
+static func upgrades_view() -> Array:
+	return CALLINS.keys().map(func(id: String) -> Dictionary: return {"id": id, "level": level(id)})

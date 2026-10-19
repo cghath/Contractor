@@ -137,6 +137,7 @@ func _run() -> void:
 	await _test_placed_defences()
 	await _test_rebel_calls()
 	_test_local_jobs()
+	await _test_rebel_upgrades()
 	await _test_raid_by_air()
 	await _test_airframes()
 	await _test_crossings()
@@ -810,6 +811,29 @@ func _test_local_jobs() -> void:
 		check(is_equal_approx(RebelSupport.support("inland"), minf(inland + 1.0, 100.0)) and said.contains("remember"),
 			"a bandage given to a villager: they remember it (+1, %s)" % said)
 		RebelSupport.change("inland", inland - RebelSupport.support("inland"), "test reset")
+
+
+## Rebel support part 4: upgrades take favours, cash and salvage from the stash together.
+func _test_rebel_upgrades() -> void:
+	print("Rebel upgrades")
+	var base := CompoundLevel.current(self) as BaseZoneLevel
+	if base == null:
+		return
+	RebelSupport.add_favours(-RebelSupport.favours())
+	check(RebelSupport.server_upgrade("mortar").contains("favour"), "no favours owed: no upgrade")
+	RebelSupport.add_favours(3)
+	BaseEconomy.credit(20000, "test: upgrade money")
+	for id: String in RebelSupport.materials_in_stash():
+		BaseHub.server_take_from_stash(StringName(id), 99)
+	check(RebelSupport.server_upgrade("mortar").contains("salvage"), "no salvage in the stash: no upgrade")
+	base.server_spawn_dropped(&"scrap_copper", 2, base.fob.to_global(BaseFob.DELIVERY + Vector3(1.0, 0.0, 1.0)))
+	await get_tree().create_timer(1.0).timeout
+	var cash := BaseEconomy.funds()
+	var why := RebelSupport.server_upgrade("mortar")
+	await get_tree().create_timer(0.5).timeout
+	check(why == "" and RebelSupport.level("mortar") == 1 and RebelSupport.favours() == 0 and BaseEconomy.funds() == cash - int(RebelSupport.UPGRADE_COSTS[0].cash)
+		and int(RebelSupport.materials_in_stash().get("scrap_copper", 0)) == 0,
+		"with favours, cash and salvage: the mortar's level 1, all three spent (%s)" % why)
 
 
 func _test_assault() -> void:

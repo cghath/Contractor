@@ -2983,6 +2983,8 @@ func _server_request(action: String, args: Array) -> void:
 				server_advance_days(clampi(int(args[0]) if not args.is_empty() else 1, 1, 30))
 			"defence":
 				why = server_buy_defence(String(args[0])) if sender == 1 and not args.is_empty() else "Only the host can do that"
+			"rebel_upgrade":
+				why = RebelSupport.server_upgrade(String(args[0])) if sender == 1 and not args.is_empty() else "Only the host can do that"
 			"buy_vehicle":
 				why = server_buy_vehicle(String(args[0])) if sender == 1 and not args.is_empty() else "Only the host can do that"
 			"place_defence":
@@ -3042,7 +3044,7 @@ func build_view() -> Dictionary:
 		"daily_wages": Roster.daily_wages(roster()), "bill_in_days": Economy.days_to_bill(), "weekly_bill": int(Economy.weekly_bill().total),
 		"players": keys, "in_base": in_base(), "ready": _ready_peers.keys(),
 		"guards": guards(), "assault": base().get("assault", {}), "defences": base().get("defences", []), "fob_tier": fob_tier(), "max_guards": max_guards(),
-		"rebels": RebelSupport.view(), "favours": int(RebelSupport._s().get("favours", 0)),
+		"rebels": RebelSupport.view(), "favours": int(RebelSupport._s().get("favours", 0)), "rebel_upgrades": RebelSupport.upgrades_view(),
 		"company_squads": company_squads(), "max_squads": int(BaseFob.TIERS[fob_tier()].squads),
 	}
 

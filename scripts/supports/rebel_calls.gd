@@ -78,30 +78,35 @@ func server_call(id: String, by: Soldier, point: Vector3) -> String:
 	var lvl := CompoundLevel.current(self)
 	var hot := Supports.is_hot_zone(lvl)
 	var weaker := HOT_WEAKER if hot else 1.0
+	var lv := RebelSupport.level(id)  # (part 4: the upgrades)
 	if point.is_finite() and lvl.has_method(&"ground_point"):
 		point = lvl.call(&"ground_point", point)
 	var why := ""
 	match id:
 		"lookouts":
-			_lookout = {"by": by, "until": Soldier._now() + LOOKOUT_S, "next": 0.0, "reach": LOOKOUT_M * weaker}
+			_lookout = {"by": by, "until": Soldier._now() + LOOKOUT_S, "next": 0.0, "reach": LOOKOUT_M * weaker * [1.0, 1.4, 1.8][lv],
+				"every": LOOKOUT_EVERY_S if lv < 2 else 20.0}
 		"diversion":
 			if not point.is_finite():
 				return "Mark where they should open fire"
-			_diversion = {"at": point, "until": Soldier._now() + DIVERSION_S, "next": 0.0, "reach": DIVERSION_M * weaker}
+			_diversion = {"at": point, "until": Soldier._now() + DIVERSION_S * [1.0, 1.5, 2.0][lv], "next": 0.0, "reach": DIVERSION_M * weaker}
 		"fighters":
-			why = _send_fighters(by, maxi(roundi(FIGHTERS * weaker), 2))
+			why = _send_fighters(by, maxi(roundi((FIGHTERS + 2 * lv) * weaker), 2))
 		"vehicle_drop":
-			why = _drop_vehicle(point if point.is_finite() else by.global_position + by.global_basis.z * -8.0)
+			var at := point if point.is_finite() else by.global_position + by.global_basis.z * -8.0
+			why = _drop_vehicle(at)
+			if why == "" and lv >= 2:
+				_drop_vehicle(at + by.global_basis.x * 7.0)  # two at a time
 		"mortar":
 			if not point.is_finite():
 				return "Mark where the rounds should fall"
-			var rounds := maxi(roundi(MORTAR_ROUNDS * weaker), 1)
+			var rounds := maxi(roundi((MORTAR_ROUNDS + 2 * lv) * weaker), 1)
 			for k in rounds:
-				_mortar.append({"at": point, "when": Soldier._now() + MORTAR_WARN_S + k * MORTAR_GAP_S})
+				_mortar.append({"at": point, "when": Soldier._now() + MORTAR_WARN_S + k * MORTAR_GAP_S, "spread": MORTAR_SPREAD_M * (0.6 if lv >= 2 else 1.0)})
 			Contracts._notify_all("Rebel mortar: %d rounds on the mark in %d s. Get clear." % [rounds, int(MORTAR_WARN_S)])
 	if why != "":
 		return why
-	_set_cooldown(id, COOLDOWN_S[id] * (HOT_COOLDOWN if hot else 1.0))
+	_set_cooldown(id, COOLDOWN_S[id] * (HOT_COOLDOWN if hot else 1.0) * (0.7 if id == "vehicle_drop" and lv >= 1 else 1.0))
 	SessionLog.note("rebels: %s for %s in the %s%s" % [id, by.name, region, " (hot zone: weaker)" if hot else ""])
 	if id != "mortar":
 		Contracts._notify_all("The rebels: %s%s." % [String(RebelSupport.CALLIN_NAMES[id]), " (thinly, in a hot zone)" if hot else ""])
@@ -174,7 +179,7 @@ func _physics_process(_delta: float) -> void:
 		if now > float(_lookout.until) or not is_instance_valid(_lookout.by):
 			_lookout = {}
 		elif now >= float(_lookout.next):
-			_lookout.next = now + LOOKOUT_EVERY_S
+			_lookout.next = now + float(_lookout.get("every", LOOKOUT_EVERY_S))
 			_lookouts_report(_lookout.by, float(_lookout.reach))
 	if not _diversion.is_empty():
 		if now > float(_diversion.until):
@@ -185,7 +190,7 @@ func _physics_process(_delta: float) -> void:
 	for r: Dictionary in _mortar.duplicate():
 		if now >= float(r.when):
 			_mortar.erase(r)
-			_mortar_round(r.at)
+			_mortar_round(r.at, float(r.get("spread", MORTAR_SPREAD_M)))
 
 
 ## The lookouts' report: every hostile up within `reach` of `by` tagged for the squad.
@@ -213,11 +218,11 @@ func _diversion_tick(at: Vector3, reach: float) -> void:
 			s.threat_time = Soldier._now()
 
 
-func _mortar_round(at: Vector3) -> void:
+func _mortar_round(at: Vector3, spread := MORTAR_SPREAD_M) -> void:
 	var lvl := CompoundLevel.current(self)
 	if lvl == null:
 		return
-	var p := at + Vector3(_rng.randf_range(-MORTAR_SPREAD_M, MORTAR_SPREAD_M), 0.0, _rng.randf_range(-MORTAR_SPREAD_M, MORTAR_SPREAD_M))
+	var p := at + Vector3(_rng.randf_range(-spread, spread), 0.0, _rng.randf_range(-spread, spread))
 	if lvl.has_method(&"ground_point"):
 		p = lvl.call(&"ground_point", p)
 	Throwables.server_detonate(lvl, "frag", p)

@@ -277,6 +277,18 @@ func _build_squad(rows: VBoxContainer, v: Dictionary) -> void:
 		locals.add_child(UiKit.text("%s: %d of 100%s. %s" % [String(r.region).capitalize(), int(r.support),
 			"" if int(r.next) < 0 else " (next at %d)" % int(r.next), ("On call: " + calls) if calls != "" else "Nothing on call yet."]))
 	locals.add_child(UiKit.hint("Help the people (treat their hurt, clear the gunmen near their villages, their own jobs) and they back you; hurt them and they won't. Favours: %d." % int(v.get("favours", 0))))
+	# Part 4: upgrades, paid with favours, cash and salvage from the stash together.
+	for u: Dictionary in v.get("rebel_upgrades", []):
+		var id := String(u.id)
+		var lv := int(u.level)
+		if lv >= RebelSupport.MAX_LEVEL:
+			locals.add_child(UiKit.text("%s: fully upgraded." % String(RebelSupport.CALLIN_NAMES[id])))
+			continue
+		var cost: Dictionary = RebelSupport.UPGRADE_COSTS[lv]
+		var up := UiKit.button("Upgrade %s: %s (%d favours, $%d, %d salvage)" % [String(RebelSupport.CALLIN_NAMES[id]), String(RebelSupport.UPGRADE_TEXT[id][lv]),
+			int(cost.favours), int(cost.cash), int(cost.materials)], func() -> void: BaseHub.request("rebel_upgrade", [id]))
+		up.disabled = not multiplayer.is_server()
+		locals.add_child(up)
 	# Base defence (LZ-6): hired guards on the wire, and any assault the heat has booked.
 	var defence := UiKit.section("Base defence", rows)
 	var g := int(v.get("guards", 0))
