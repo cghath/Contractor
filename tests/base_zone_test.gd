@@ -125,6 +125,7 @@ func _run() -> void:
 	_test_region_map()
 	_test_zone_memory()
 	_test_threats()
+	await _test_assault()
 	await _test_airframes()
 	await _test_crossings()
 
@@ -402,5 +403,42 @@ func _test_threats() -> void:
 	routes = BaseZoneLevel.def_for(seed).get("patrols", [])
 	var near := routes.any(func(r: Array) -> bool: return r.any(func(p: Array) -> bool: return Vector2(float(p[0]), float(p[1])).length() <= BaseFob.MODULE_HALF.x + BaseZoneLevel.PROBE_M))
 	check(routes.size() == 3 and near, "heat 55: two patrols and a probe that comes up to the wire (%d routes)" % routes.size())
+	heat.clear()
+	heat.merge(saved)
+
+
+## LZ-5 (calls 12, 17): heat 70+ books an assault for tomorrow; out on the day, it resolves
+## off-screen (the wire's piles pay); at the base, it comes in live and is beaten off.
+func _test_assault() -> void:
+	print("Assaults on the base")
+	var heat: Dictionary = Campaign.section(&"economy").get("heat", {})
+	var saved := heat.duplicate()
+	var base_sec := BaseHub.base()
+	base_sec.erase("assault")
+	base_sec.erase("last_assault_day")
+	heat.clear()
+	Economy.add_heat("black_ridge", 75.0)
+	var warn := BaseAssault.server_day_passed(true)
+	var booked: Dictionary = base_sec.get("assault", {})
+	check(not booked.is_empty() and int(booked.day) == BaseHub.day() + 1 and warn.contains("tomorrow"), "heat 75: an assault on the FOB is booked for tomorrow, with a warning (%s)" % warn)
+	var piles_before := BaseArmory.counts(BaseHub.stash())
+	Economy.advance_days(1, "the assault check")
+	var report := BaseAssault.server_day_passed(false)
+	var piles_after := BaseArmory.counts(BaseHub.stash())
+	check(report.contains("Situation report") and not base_sec.has("assault") and piles_after != piles_before,
+		"out on the day: it resolves off-screen, a situation report, some stash lost at the wire")
+	base_sec["assault"] = {"faction": "black_ridge", "day": BaseHub.day()}
+	var base := CompoundLevel.current(self) as BaseZoneLevel
+	var node := base.get_node_or_null(NodePath(BaseAssault.NODE_NAME)) as BaseAssault
+	node.server_check_due()
+	var attackers: Array = []
+	for men: Array in node.teams:
+		attackers.append_array(men)
+	check(attackers.size() >= 4, "at the base on the day it comes in live (%d men)" % attackers.size())
+	for s: Variant in attackers:
+		if is_instance_valid(s):
+			(s as Soldier).vitals.server_kill()
+	await _wait_until(func() -> bool: return node.teams.is_empty(), 6.0)
+	check(node.teams.is_empty() and not base_sec.has("assault"), "beaten off, the booking's cleared")
 	heat.clear()
 	heat.merge(saved)

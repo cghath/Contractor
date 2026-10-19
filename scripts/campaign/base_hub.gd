@@ -1739,6 +1739,7 @@ func server_write_off_member(mid: String) -> bool:
 func server_advance_days(days: int, reason := "at the base") -> void:
 	if days > 0:
 		Economy.advance_days(days, reason)
+		BaseAssault.server_day_passed(not RosterDeployment.is_running(roster()))  # heat brings assaults on the base (LZ-5)
 
 
 ## Host (Economy.day_advanced): `days` days passed, whatever moved the clock (resting, a

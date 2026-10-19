@@ -131,6 +131,9 @@ func _ready() -> void:
 	pad.position = Vector3(c.x, 0.2, c.y)
 	fob.add_child(pad)
 	Supports.register_origin(&"fob", pad)
+	var assault := BaseAssault.new()
+	assault.name = BaseAssault.NODE_NAME
+	add_child(assault)  # an assault booked for today comes in (LZ-5)
 
 
 func is_base() -> bool:
