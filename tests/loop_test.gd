@@ -1253,7 +1253,8 @@ func _field_counts_heli(heli: Helicopter) -> Dictionary:
 	var seen := {}
 	for n: Node in get_tree().get_nodes_in_group(&"combatants") + get_tree().get_nodes_in_group(Soldier.DEAD_GROUP):
 		var s := n as Soldier
-		if s == null or seen.has(s) or s.is_queued_for_deletion() or not s.vitals.is_dead() or s.has_meta(&"vehicle_crew") or Vehicle.ride_of(s) == heli:
+		# (A dead vehicle crewman is salvage like any body: Contracts.report_from_level only skips living crew.)
+		if s == null or seen.has(s) or s.is_queued_for_deletion() or not s.vitals.is_dead() or Vehicle.ride_of(s) == heli:
 			continue
 		seen[s] = true
 		add.call(Contracts.inventory_items(s.inventory))
@@ -1278,7 +1279,7 @@ func _field_counts(lz: Vector2) -> Dictionary:
 	var seen := {}
 	for n: Node in get_tree().get_nodes_in_group(&"combatants") + get_tree().get_nodes_in_group(Soldier.DEAD_GROUP):
 		var s := n as Soldier
-		if s == null or seen.has(s) or s.is_queued_for_deletion() or not s.vitals.is_dead() or s.has_meta(&"vehicle_crew"):
+		if s == null or seen.has(s) or s.is_queued_for_deletion() or not s.vitals.is_dead():  # dead crew too (report_from_level)
 			continue
 		seen[s] = true
 		var at := s.body_point()
