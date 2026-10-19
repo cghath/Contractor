@@ -308,7 +308,8 @@ and they come with the squad when it crosses.
    transport everywhere. Helis are limited by damage and fuel: airframes keep both between
    calls, refuel and repair at the base (section 4).
 10. Split squads: later, with dedicated servers; plan the state for it now.
-11. Save while out: resume in the zone, at the last crossing.
+11. Save while out: resume in the zone, at the last crossing. (Built: gear and wounds kept,
+    `BaseHub._note_resume` / `_apply_resume`.)
 12. Base attacked while out: a situation report with a return recommendation; small probes resolve
     off-screen, big assaults near enough go live and hold out for the squad.
 13. Contracts: can be left and returned to, plus new multi-zone contract types.

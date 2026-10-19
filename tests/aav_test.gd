@@ -545,8 +545,8 @@ func _test_motor_pool() -> void:
 	var zone := {"id": COAST_ZONE, "name": "Coast", "kind": "contract", "insertion_points": [{"id": "beach", "name": "Beach", "pos": [beach.x, beach.z], "method": "foot"}]}
 	briefing.server_open({"id": "test", "title": "Test job"}, zone)
 	var ids := briefing.available_supports()
-	check(ids.has(Briefing.POOL_PREFIX + hurt) and briefing.support_name(Briefing.POOL_PREFIX + hurt).contains("M-ATV") and ids.has("aav") and not ids.has("transport"),
-		"the briefing offers the pool's M-ATV, and AAVs on a coastal contract zone (%s)" % [ids])
+	check(ids.has(Briefing.POOL_PREFIX + hurt) and briefing.support_name(Briefing.POOL_PREFIX + hurt).contains("M-ATV") and ids.has("aav") and ids.has("transport"),
+		"the briefing offers the pool's M-ATV, AAVs on a coastal contract zone, and transport (anywhere since LZ-3) (%s)" % [ids])
 	check(briefing.server_set_support(Briefing.POOL_PREFIX + hurt, true) and briefing.server_start(true), "picked; the deployment starts")
 	await _frames(3)
 	var brought := level.get_node(^"Vehicles").find("pool_" + hurt) as Vehicle

@@ -226,8 +226,21 @@ func _test_crossings() -> void:
 	var at := Vector2(float(back_c.pos[0]), float(back_c.pos[1])) if not back_c.is_empty() else Vector2.INF
 	check(me != null and Vector2(me.global_position.x, me.global_position.z).distance_to(at) < 25.0,
 		"arriving at its crossing from the base (%.0f m from it)" % (Vector2(me.global_position.x, me.global_position.z).distance_to(at) if me else INF))
-	# Saved while out (LZ-4, call 11): the deployment remembers where to resume.
+	# Saved while out (LZ-4, call 11): the deployment remembers where to resume, wounds and all.
+	var whole := me.vitals.server_snapshot()
+	me.vitals.server_hit(Vitals.UPPER_ARM_R, {"round_class": Vitals.PISTOL})
+	await get_tree().create_timer(0.3).timeout
 	BaseHub.server_save()
+	var kept: Dictionary = (RosterDeployment.active(BaseHub.roster()).get("resume", {}) as Dictionary).get("vitals", {})
+	var my_snap: Variant = str_to_var(String(kept.get("pk:" + BaseHub.player_key(1), "")))
+	var before_wounds := me.vitals.wound_list().size()
+	check(my_snap is Dictionary and (my_snap as Dictionary).has("model") and before_wounds > 0, "and each one's wounds (%d kept)" % kept.size())
+	# What a resumed spawn does with them: onto a body, then gone from the save.
+	if my_snap is Dictionary:
+		BaseHub._apply_resume("pk:" + BaseHub.player_key(1), me)
+		check(me.vitals.wound_list().size() == before_wounds and not kept.has("pk:" + BaseHub.player_key(1)),
+			"put back on the body as they were, once (%d wounds)" % me.vitals.wound_list().size())
+	me.vitals.server_restore(whole)  # (whole again for the rest of the walk)
 	var resume := BaseHub.resume_info()
 	check(not resume.is_empty() and String(resume.def.id) == to and String(resume.def.get("arrive", "")) == RegionMap.crossing_id(RegionMap.BASE),
 		"saved out in %s, a load would resume there, at the crossing they came in by" % to)

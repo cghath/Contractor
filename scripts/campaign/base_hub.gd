@@ -260,7 +260,9 @@ func server_save() -> bool:
 ## Host, saving while out (docs/linked_zones.md call 11: "resume where you were"): the deployment
 ## remembers the zone it's in and the crossing it came in by ("resume"), the zone is saved as it
 ## stands, and everyone's gear goes onto their records (players' main characters, squadmates'),
-## so loading puts the squad back there (resume_info). Wounds aren't kept yet: they come back whole.
+## so loading puts the squad back there (resume_info), each with their wounds as they were
+## ("vitals": Vitals.server_snapshot as var_to_str text, by "pk:<player key>" and "m:<member id>",
+## put back as they spawn: _apply_resume).
 func _note_resume() -> void:
 	if not RosterDeployment.is_running(roster()) or in_base():
 		return
@@ -268,7 +270,8 @@ func _note_resume() -> void:
 	if lvl == null:
 		return
 	var dep := RosterDeployment.active(roster())
-	dep["resume"] = {"zone_id": String(lvl.def.get("id", dep.get("zone_id", ""))), "arrive": String(dep.get("last_crossing", ""))}
+	var vitals := {}
+	dep["resume"] = {"zone_id": String(lvl.def.get("id", dep.get("zone_id", ""))), "arrive": String(dep.get("last_crossing", "")), "vitals": vitals}
 	GameState.save_zone()
 	for p: Node in lvl.players.get_children():
 		var s := p as Soldier
@@ -276,10 +279,24 @@ func _note_resume() -> void:
 			var main := Roster.main_character(roster(), player_key(s.name.to_int()))
 			if not main.is_empty():
 				main["gear"] = Roster.json_safe(s.inventory.net_state.duplicate(true))
+			vitals["pk:" + player_key(s.name.to_int())] = var_to_str(s.vitals.server_snapshot())
 	for n: Node in lvl.ai.get_children():
 		var s := n as Soldier
 		if s and s.has_meta(&"roster_id") and not s.vitals.is_dead():
 			server_store_member_gear(String(s.get_meta(&"roster_id")), s.inventory.net_state)
+			vitals["m:" + String(s.get_meta(&"roster_id"))] = var_to_str(s.vitals.server_snapshot())
+
+
+## Host: a body spawning in a resumed deployment (`key` "pk:<player key>" or "m:<member id>")
+## gets the wounds it was saved with (_note_resume), once.
+func _apply_resume(key: String, s: Soldier) -> void:
+	var saved: Dictionary = (RosterDeployment.active(roster()).get("resume", {}) as Dictionary).get("vitals", {})
+	if not saved.has(key):
+		return
+	var snap: Variant = str_to_var(String(saved[key]))
+	saved.erase(key)
+	if snap is Dictionary:
+		s.vitals.server_restore(snap)
 
 
 ## The level a resumed deployment loads into (resume above), or {} for none.
@@ -1504,6 +1521,7 @@ func _apply_player_gear(peer: int, player: Soldier) -> void:
 		main.erase("kit_due")  # they already have gear of their own: that wins
 	player.inventory.net_state = GameState.from_json(gear.duplicate(true))
 	_apply_carry("p:%d" % peer, player)  # came on through a crossing: as they were (LZ-2)
+	_apply_resume("pk:" + player_key(peer), player)  # a saved deployment resumed: wounds as saved (LZ-4)
 	if fresh:
 		_changed(&"roster")
 	server_give_due_kit(player)
@@ -1757,6 +1775,7 @@ func server_spawn_roster_squadmate(lvl: CompoundLevel, slot: int, role: StringNa
 	s.set_meta(&"roster_id", mid)
 	s.inventory.net_state = GameState.from_json(m.get("gear", {}).duplicate(true))
 	_apply_carry("m:" + mid, s)  # came on through a crossing: as they were (LZ-2)
+	_apply_resume("m:" + mid, s)  # a saved deployment resumed: wounds as saved (LZ-4)
 	RosterDeployment.mark_spawned(roster(), mid)
 	_changed(&"roster")
 	return s

@@ -405,6 +405,8 @@ static func target_pos(o: Dictionary, sit: Dictionary) -> Vector3:
 	if where.has(String(o.get("oid", ""))):
 		return where[String(o.oid)]
 	var p: Array = o.get("pos", [0, 0, 0])
+	if p.size() < 3:
+		return Vector3.ZERO  # (a leg not placed yet: LZ-7)
 	return Vector3(float(p[0]), float(p[1]), float(p[2]))
 
 
@@ -438,16 +440,24 @@ static func _lz_target(lz: Dictionary) -> Dictionary:
 	return {"pos": lz.pos, "label": n if n != "" else "LZ", "extract": true, "hide_m": float(lz.get("radius", Extraction.RADIUS_M)) * 0.5}
 
 
+## The deployment's objectives that play in this level (Objectives.here) and have a place.
+func _here() -> Array:
+	var lvl := CompoundLevel.current(self) if is_inside_tree() else null
+	return Contracts.objectives.list.filter(func(o: Dictionary) -> bool:
+		return Objectives.here(o, lvl) and (o.get("pos", []) as Array).size() >= 3)
+
+
 static func _flat(a: Vector3, b: Vector3) -> float:
 	return Vector2(a.x - b.x, a.z - b.z).length()
 
 
 # --- The situation (this peer's view of the level) ------------------------------------------
 
-## The objectives the step is worked from: the deployment's, else the briefing's stand-ins.
+## The objectives the step is worked from: the deployment's in this zone (LZ-7: a leg in another
+## zone has no place here), else the briefing's stand-ins.
 func _objectives() -> Array:
 	if not Contracts.objectives.list.is_empty():
-		return Contracts.objectives.list
+		return _here()
 	var briefing := MapNodes.briefing(self)
 	if briefing == null or not briefing.is_deployed():
 		return []
@@ -480,7 +490,7 @@ func situation() -> Dictionary:
 			continue
 		carried.append_array(Contracts.inventory_items(s.inventory))
 	var layer := PeopleLayer.find(self)
-	for o: Dictionary in Contracts.objectives.list:
+	for o: Dictionary in _here():
 		var cid := String(o.get("cid", ""))
 		if not sit.sites.has(cid):
 			sit.sites[cid] = _site_name_of(cid)
