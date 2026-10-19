@@ -358,6 +358,7 @@ func _ready() -> void:
 	add_child(Launchers.new())  # "Launchers": anti-armour rockets and missiles in flight (wave 5)
 	add_child(HeliSupports.new())  # "HeliSupports": Black Hawk resupply, transport, extraction (wave 5b V3)
 	AavSupport.install(self)  # wave 5b (V4): the LHD or FOB origin, the AAV support, the motor pool
+	Digging.of(self)  # every peer: dug berms come to it (Digging)
 	AlliedTroops.install(self)  # wave 6e: an allied rifle element through the support menu
 	add_child(GroundGuard.new())  # "GroundGuard": puts back on the ground anything lost below or past it
 
@@ -555,6 +556,9 @@ func voxel_worlds() -> Array[VoxelWorld]:
 func server_blast(pos: Vector3, radius_m: float) -> void:
 	for world in voxel_worlds():
 		world.server_blast(pos, radius_m)
+	var digging := get_node_or_null(Digging.NODE_NAME) as Digging
+	if digging:
+		digging.server_blast(pos, radius_m)  # dug berms wear down (Digging)
 
 
 ## Host only.

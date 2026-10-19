@@ -192,6 +192,9 @@ func server_blast(pos: Vector3, radius_m: float) -> void:
 	for module in _modules:
 		if module.voxel_world and module.distance_to(pos) <= radius_m + 1.0:
 			module.voxel_world.server_blast(pos, radius_m)
+	var digging := get_node_or_null(Digging.NODE_NAME) as Digging
+	if digging:
+		digging.server_blast(pos, radius_m)  # dug berms wear down (Digging)
 
 
 func modules() -> Array[ZoneModule]:

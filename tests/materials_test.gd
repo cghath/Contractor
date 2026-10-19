@@ -129,6 +129,29 @@ func _test_thin_walls() -> void:
 		world.server_mark(Vector3(10.55, 1.25, 14.0), Vector3(0, 0, -1), VoxelWorld.Mat.MUD_BRICK)
 	check(world.material_at(mud_at) == VoxelWorld.Mat.EMPTY and world.material_at(mud_at + Vector3(0.2, 0, 0)) == VoxelWorld.Mat.MUD_BRICK,
 		"%d rounds stopped in the same spot chip that mud-brick voxel out, only that one" % int(VoxelWorld.CHIPS_TO_BREAK[VoxelWorld.Mat.MUD_BRICK]))
+	# Captain, 2026-10-19: e-tool fighting positions (Digging): 20 s kneeling, then a dirt berm in
+	# the ground's colour that stops rounds; blasts wear it down.
+	var dig := Digging.of(level)
+	player.global_position = Vector3(-8.0, 0.1, 15.0)
+	player.rotation.y = 0.0
+	check(Digging.problem(player) != "", "no e-tool, no digging")
+	player.inventory.take(Digging.ITEM)
+	await get_tree().physics_frame
+	var berms := dig.records.size()
+	check(dig.server_start(player) == "", "with an e-tool he starts digging")
+	var key := player.get_instance_id()
+	if dig._digs.has(key):
+		dig._digs[key].started = float(dig._digs[key].started) - Digging.DIG_S  # (skip the 20 s)
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	check(dig.records.size() == berms + 1, "%d s later a berm stands in front of him" % int(Digging.DIG_S))
+	await get_tree().physics_frame
+	var shot := _fire(Vector3(-8.0, 0.35, 10.0), Vector3(-8.0, 0.35, 15.0), &"m4a1")
+	check(shot.result == "world", "it stops a rifle round (%s)" % shot.result)
+	for i in Digging.HITS:
+		dig.server_blast(Vector3(-8.0, 0.3, 13.5), 1.0)
+	check(dig.records.size() == berms, "%d blasts flatten it" % Digging.HITS)
+	player.inventory.remove_one(Digging.ITEM)
 	var pistol := _fire(Vector3(18.65, 1.35, -3), Vector3(18.65, 1.35, -9), &"m17")
 	check(pistol.result == "body" and not inside.vitals.wound_list().is_empty(), "a 9 mm through one plank wall hits a man inside (%s)" % pistol.result)
 	var container := _fire(Vector3(-17.25, 1.35, 3), Vector3(-17.25, 1.35, 11), &"m17")
