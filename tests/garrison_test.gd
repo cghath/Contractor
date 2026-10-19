@@ -87,6 +87,7 @@ func _run() -> void:
 	for k in 6:
 		squad.append(level.spawn_soldier({"name": "Friend%d" % k, "faction": "friendly", "variant": "multicam", "guard": false,
 			"pos": watch + Vector3(k * 2.0 - 5.0, 0, -60.0), "combat": 0.5, "discipline": 0.5, "loadout": ["m4a1", "mag_556"]}))
+		SquadAI.of(squad[-1]).hold_fire = true  # counted, not fighting: on a slow runner they shot the survivors before the check (CI)
 	await _wait_for(func() -> bool: return post.fleeing, 5.0)
 	check(post.fleeing, "down to %d of %d against six, the garrison breaks" % [post.alive().size(), post.start])
 	await get_tree().create_timer(6.0).timeout
