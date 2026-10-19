@@ -66,6 +66,7 @@ func _ready() -> void:
 	await _test_rival_team()
 	await _test_roadside_ieds()
 	_test_enemy_drones()
+	_test_strongbox()
 	await _test_respawn_points()
 	_finish()
 
@@ -1378,7 +1379,7 @@ func _test_rival_team() -> void:
 			far = m
 	var r := {"cid": "TRIVAL1", "title": "the test job", "site": far.global_position, "go_at": INF, "squad": null, "soldiers": [], "held": 0.0, "state": "pending"}
 	rival.races.append(r)
-	check(rival.server_send(r) and (r.soldiers as Array).size() == RivalTeam.SIZE
+	check(rival.server_send(r) and (r.soldiers as Array).size() == RivalTeam.SIZE and (r.soldiers[0] as Soldier).inventory.count_of(RivalTeam.LEDGER) == 1
 		and (r.soldiers as Array).all(func(s: Soldier) -> bool: return s.model.variant == "black"), "the team comes in: %d men in Vantage black" % (r.soldiers as Array).size())
 	for s: Soldier in r.soldiers:
 		s.global_position = level.ground_point(far.global_position + Vector3(randf_range(-5, 5), 0, randf_range(-5, 5)))
@@ -1481,6 +1482,27 @@ func _test_enemy_drones() -> void:
 	player.inventory.remove_one(EnemyDrones.JAMMER)
 	drones.drones.erase(id)
 	drones.drones.erase(id2)
+
+
+## Wave 6, keys: the HQ's strongbox stays shut to anyone without its key, and opens (for good)
+## for whoever carries it; valuables, contraband and intel inside.
+func _test_strongbox() -> void:
+	print("Keys: the HQ strongbox")
+	var box: WorldCache = null
+	for n: Node in level.find_children("*", "WorldCache", true, false):
+		if (n as WorldCache).key_id == WorldValuables.STRONGBOX_KEY:
+			box = n
+			break
+	check(box != null and box.display_name() == WorldValuables.STRONGBOX_LABEL, "the HQ has a strongbox")
+	if box == null:
+		return
+	var ids := box.cargo_hold.entries().map(func(e: Dictionary) -> String: return String(e.id))
+	check("gold_bars" in ids and ids.any(func(id: String) -> bool: return Fixers.is_contraband(StringName(id))), "valuables and contraband inside (%s)" % [ids])
+	player.inventory.remove_one(WorldValuables.STRONGBOX_KEY)
+	check(box.is_locked() and box.lock_problem(player).contains("Locked") and box.server_open_for(player) != "" and box.is_locked(), "without the key it stays shut")
+	check(player.inventory.take(WorldValuables.STRONGBOX_KEY) == 1 and box.server_open_for(player) == "" and not box.is_locked(), "the officer's key opens it")
+	player.inventory.remove_one(WorldValuables.STRONGBOX_KEY)
+	check(box.lock_problem(player) == "", "and it stays open")
 
 
 func _test_hq_posts() -> void:

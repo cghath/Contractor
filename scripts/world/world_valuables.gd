@@ -49,6 +49,18 @@ const SITE_BOX_OFFSETS: Array[Vector3] = [Vector3(0.8, 0.0, 0.5), Vector3(-0.8, 
 ## one of these anchors has to come back down by the same amount or it floats at the WorldItem's
 ## drop height instead of resting on the floor (Captain, 2026-10-16: "lootboxes float").
 const LOOT_ANCHOR_LIFT_M := 0.5
+## Wave 6 (item catalogue: contraband at "smuggler compounds, checkpoints, caches"): at these
+## sites a common box find is contraband instead, CONTRABAND_PCT of the time (by the box's id, no
+## RNG drawn: every other roll stays as it was).
+const CONTRABAND_ITEMS: Array[String] = ["smuggled_cigarettes", "captagon", "counterfeit_dollars", "unregistered_weapons"]
+const CONTRABAND_TYPES: Array[String] = ["checkpoint", "compound", "hq"]
+const CONTRABAND_PCT := 40
+## Wave 6 (keys): every HQ has a locked strongbox, opened by the key its officer carries
+## (ZoneLevel's garrison: the HQ's first post); valuables, contraband and intel inside, and half
+## the time a Vantage ledger (story intel, it opens a lead).
+const STRONGBOX_KEY := &"hq_strongbox_key"
+const STRONGBOX_LABEL := "Strongbox"
+const STRONGBOX_OFFSET := Vector3(0.0, 0.0, 1.0)
 ## Sites worth more trouble: weighted toward more boxes.
 const IMPORTANT_TYPES: Array[String] = ["hq", "qrf_base", "compound"]
 
@@ -106,7 +118,26 @@ static func server_spawn_site_boxes(level: ZoneLevel) -> void:
 			var cache := level.cache_spawner.spawn({"uid": "%s_valbox%d" % [module.module_id, k],
 				"pos": module.to_global(floor_spot + SITE_BOX_OFFSETS[k]), "yaw": 0.0, "label": "Cache"}) as WorldCache
 			if cache:
-				cache.server_seed(_roll_site_box(rng))
+				var contents := _roll_site_box(rng)
+				var box_id := "%s_valbox%d" % [module.module_id, k]
+				if (module.type in CONTRABAND_TYPES or ZoneModules.base(module.type) in CONTRABAND_TYPES) and contents.size() == 1 						and String(contents[0].id) not in RARE_GUNS and posmod(hash("contraband:" + box_id), 100) < CONTRABAND_PCT:
+					contents = [{"id": CONTRABAND_ITEMS[posmod(hash("contraband_kind:" + box_id), CONTRABAND_ITEMS.size())], "count": 1}]
+				cache.server_seed(contents)
+		if module.type == "hq":
+			var box := level.cache_spawner.spawn({"uid": "%s_strongbox" % module.module_id, "key": String(STRONGBOX_KEY), "label": STRONGBOX_LABEL,
+				"pos": module.to_global((spots[0] as Dictionary).pos - Vector3(0, LOOT_ANCHOR_LIFT_M, 0) + STRONGBOX_OFFSET), "yaw": 0.0}) as WorldCache
+			if box:
+				box.server_seed(strongbox_contents(module.module_id))
+
+
+## An HQ strongbox's contents (by the module id: the same HQ always holds the same).
+static func strongbox_contents(module_id: String) -> Array:
+	var h := hash("strongbox:" + module_id)
+	var items: Array = [{"id": "gold_bars", "count": 2}, {"id": CONTRABAND_ITEMS[posmod(h, CONTRABAND_ITEMS.size() - 1)], "count": 1},
+		{"id": INTEL_ITEMS[posmod(h >> 4, INTEL_ITEMS.size())], "count": 1}, {"id": "cash_bundle", "count": 3}]
+	if posmod(h >> 8, 2) == 0:
+		items.append({"id": "vantage_ledger", "count": 1})
+	return items
 
 
 ## How many boxes a site gets: weighted toward 1-2, a point more (capped at 4) for an

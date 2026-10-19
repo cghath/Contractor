@@ -26,10 +26,16 @@ var cargo_hold: VehicleCargo
 var wrecked := false  # never true: a cache doesn't burn or get wrecked; kept for the loot interface
 var uid := ""
 var _label := "Cache"
+## Wave 6 (keys): the item that opens it ("" for none: an open box). A locked box (an HQ's
+## strongbox) opens for whoever carries its key; once opened it stays open (`unlocked`,
+## replicated with the hold).
+var key_id: StringName = &""
+var unlocked := false
 
 
-func _init(label := "Cache") -> void:
+func _init(label := "Cache", key := &"") -> void:
 	_label = label
+	key_id = key
 	name = "WorldCache"
 	collision_layer = 1
 	collision_mask = 0
@@ -43,6 +49,8 @@ func _ready() -> void:
 	var config := SceneReplicationConfig.new()
 	config.add_property(^"Cargo:net_state")
 	config.property_set_replication_mode(^"Cargo:net_state", SceneReplicationConfig.REPLICATION_MODE_ON_CHANGE)
+	config.add_property(^".:unlocked")
+	config.property_set_replication_mode(^".:unlocked", SceneReplicationConfig.REPLICATION_MODE_ON_CHANGE)
 	var sync := MultiplayerSynchronizer.new()
 	sync.name = "Sync"
 	sync.replication_config = config
@@ -90,8 +98,31 @@ func action_point() -> Vector3:
 
 func interaction_actions(actor: Node) -> Array[Dictionary]:
 	var me := self
-	return [{"id": &"loot", "label": "Loot", "disabled": "", "target": self,
+	var why := lock_problem(actor as Soldier)
+	return [{"id": &"loot", "label": "Unlock and loot" if is_locked() and why == "" else "Loot", "disabled": why, "target": self,
 		"call": func() -> void: (actor as Soldier)._hud.open_loot(me)}]
+
+
+func is_locked() -> bool:
+	return key_id != &"" and not unlocked
+
+
+## Why `actor` can't get into it ("" when they can: it's open, or they carry its key).
+func lock_problem(actor: Soldier) -> String:
+	if not is_locked() or actor == null:
+		return ""
+	if actor.inventory.count_of(key_id) > 0 or actor.inventory.slots.values().has(key_id) or actor.inventory.hands == key_id:
+		return ""
+	return "Locked: it needs the %s" % (ItemDB.get_item(key_id).name if ItemDB.has_item(key_id) else String(key_id))
+
+
+## Host: `actor` gets into it: opens it with its key if it's locked. Returns why not ("" when in).
+func server_open_for(actor: Soldier) -> String:
+	var why := lock_problem(actor)
+	if why == "" and is_locked():
+		unlocked = true
+		print("[cache] %s opens %s with the %s" % [actor.display_name(), display_name(), key_id])
+	return why
 
 
 ## Host only (WorldValuables, right after the spawner places it): stows `items`

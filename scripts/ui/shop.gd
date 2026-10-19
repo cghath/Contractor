@@ -12,6 +12,8 @@ var _filter: OptionButton
 var _list: ItemList
 var _count: SpinBox
 var _notice: Label
+var _contra: ItemList
+var _contra_ids: Array[StringName] = []
 ## The picked item's one-line summary (ItemInfo), under the list.
 var _info: Label
 var _ids: Array[StringName] = []
@@ -48,6 +50,12 @@ func _ready() -> void:
 	_count.max_value = 100
 	_count.tooltip_text = "How many to buy"
 	box.add_child(UiKit.button_row([_count, UiKit.button("Buy", buy_selected), UiKit.button("Close", close)]))
+	# Wave 6: contraband in the stash, and what the fixer who buys it pays (Fixers).
+	box.add_child(UiKit.heading("Contraband in the stash"))
+	_contra = UiKit.list(60.0)
+	UiKit.fit_height(_contra, 90.0, 100.0)
+	box.add_child(_contra)
+	box.add_child(UiKit.button_row([UiKit.button("Sell one to the fixer", sell_contraband_selected)]))
 	box.add_child(UiKit.hint("Support calls (paid when called, from the contract's support budget first): " + ", ".join(
 		Prices.support_kinds().map(func(k: Variant) -> String: return "%s $%s" % [String(k), DebriefCalc.money(Prices.support_price(String(k)))]))))
 	_notice = UiKit.text("")
@@ -87,6 +95,39 @@ func refresh() -> void:
 		_list.set_item_tooltip(_list.item_count - 1, ItemInfo.tooltip(id))  # hover: what it is and how to use it (Captain, 2026-10-14: "item descriptions plus uses also needed")
 	if not keep.is_empty() and keep[0] < _list.item_count:
 		_list.select(keep[0])
+	_refresh_contraband()
+
+
+## The stash's contraband and the fixer's offer for each (wave 6).
+func _refresh_contraband() -> void:
+	if _contra == null:
+		return
+	_contra_ids.clear()
+	_contra.clear()
+	var fixer := Fixers.buyer()
+	var counts := BaseArmory.counts(BaseHub.stash())
+	for id: String in counts:
+		if not Fixers.is_contraband(StringName(id)) or int(counts[id]) <= 0:
+			continue
+		_contra_ids.append(StringName(id))
+		var offer := "%s pays $%s each" % [String(fixer.fixer), DebriefCalc.money(Fixers.offer(StringName(id)))] if not fixer.is_empty() else "no fixer will deal with us"
+		_contra.add_item("%s x%d   %s (at the base: $%s, and lawful employers think less of us)" % [ItemDB.get_item(StringName(id)).name, int(counts[id]), offer,
+			DebriefCalc.money(Prices.sell_price(StringName(id)))])
+	if _contra_ids.is_empty():
+		_contra.add_item("None: contraband turns up at checkpoints, compounds and HQs")
+
+
+## Contraband listed now (tests).
+func contraband_listed() -> Array[StringName]:
+	return _contra_ids
+
+
+func sell_contraband_selected() -> void:
+	var picked := _contra.get_selected_items()
+	if picked.is_empty() or picked[0] >= _contra_ids.size():
+		_notice.text = "Pick some contraband to sell"
+		return
+	Economy.sell_contraband(_contra_ids[picked[0]], 1)
 
 
 ## Items listed now (tests).

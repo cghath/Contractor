@@ -442,7 +442,7 @@ func _exit_tree() -> void:
 
 ## The CacheSpawner's spawn_function: a WorldCache at `data` ("uid", "pos", "yaw", "label").
 func _make_cache(data: Dictionary) -> Node:
-	var cache := WorldCache.new(String(data.get("label", "Cache")))
+	var cache := WorldCache.new(String(data.get("label", "Cache")), StringName(data.get("key", "")))
 	cache.name = String(data.uid)
 	cache.uid = String(data.uid)
 	cache.position = data.pos
@@ -636,6 +636,8 @@ func _spawn_queued_garrison() -> void:
 			var kit_id := Kits.kit_of(_enemy_response.enemy_faction) if _enemy_response else Kits.INSURGENT
 			var data_kit := Kits.is_data(kit_id)
 			var kit: Array = Kits.loadout(kit_id, i) if data_kit else hostile_loadout(i)
+			if module.type == "hq" and i == 0:
+				kit = kit + [String(WorldValuables.STRONGBOX_KEY)]  # wave 6: the HQ's officer carries its strongbox key
 			var s := spawn_soldier({"name": _garrison_callsign(module, i), "faction": "hostile", "variant": Kits.variant(kit_id) if data_kit else "urban", "pos": pos,
 				"loadout": kit + ["enemy_radio"] if i % RADIO_EVERY == 0 else kit, "combat": GARRISON_STATS.combat, "discipline": GARRISON_STATS.discipline, "guard": true,
 				"mode": alert.mode_at(pos) if alert else GARRISON_STATS.mode,

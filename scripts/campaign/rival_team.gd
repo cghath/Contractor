@@ -28,6 +28,8 @@ const SECURE_S := 60.0
 const COMBAT := 0.7
 const DISCIPLINE := 0.8
 const TICK_S := 0.5
+## What the team's leader carries: evidence of what Vantage is doing out here (story intel).
+const LEDGER := &"vantage_ledger"
 
 ## Tests: 1 always races, 0 never; -1 by CHANCE_PCT.
 static var forced := -1
@@ -91,6 +93,8 @@ func server_send(r: Dictionary) -> bool:
 	r.squad = squad
 	r.soldiers = response._spawn_team(squad, callsign, SIZE, edge, r.site, CompoundLevel.PMC_LOADOUT.duplicate(), COMBAT, DISCIPLINE, "combat")
 	r.state = "out"
+	if not (r.soldiers as Array).is_empty():
+		(r.soldiers[0] as Soldier).inventory.take(LEDGER)  # its leader's field ledger: story intel (a lead)
 	Contracts._notify_all("Word on the net: a Vantage Group team is going for %s. Get there first." % r.title)
 	print("[rival] %s: %d Vantage men from (%.0f, %.0f) for %s" % [callsign, (r.soldiers as Array).size(), edge.x, edge.z, r.cid])
 	return true

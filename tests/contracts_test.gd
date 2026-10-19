@@ -837,6 +837,27 @@ func _test_shop() -> void:
 	Economy.take_unbanked()
 	Economy.change_reputation("us_forces", us0 - Economy.reputation("us_forces"), "test cleanup", false)
 	Economy.change_reputation("uk_forces", uk0 - Economy.reputation("uk_forces"), "test cleanup", false)
+	# Wave 6, contraband: never in the shop; the shady fixer pays full price and likes it; sold at
+	# the base it fetches the usual share and lawful employers think less of the company.
+	check(Fixers.is_contraband(&"captagon") and not Prices.for_sale(&"captagon") and not Quartermaster.sells(&"captagon") and not Fixers.is_contraband(&"gold_bars"),
+		"contraband isn't sold anywhere")
+	var su0 := Economy.reputation("salvage_union")
+	var mer0 := Economy.reputation("meridian")
+	var fixer := Fixers.buyer()
+	check(String(fixer.get("fixer", "")) == "Mama Rook" and Fixers.offer(&"captagon") == Prices.price_of(&"captagon"), "Mama Rook buys it at full price ($%d)" % Fixers.offer(&"captagon"))
+	BaseArmory.add(BaseHub.stash(), &"captagon", 2)
+	cash = Economy.cash()
+	check(Fixers.server_sell(&"captagon", 1) == Prices.price_of(&"captagon") and Economy.cash() == cash + Prices.price_of(&"captagon")
+		and Economy.reputation("salvage_union") == su0 + 1 and int(BaseArmory.counts(BaseHub.stash()).get("captagon", 0)) == 1,
+		"sold to her: paid in full, the Salvage Union thinks better of us, one left in the stash")
+	check(BaseHub.server_sell_from_stash(&"captagon", 1) == Prices.sell_price(&"captagon") and Economy.reputation("meridian") == mer0 - 1,
+		"sold at the base: %d%%, and Meridian (lawful) thinks less of us" % roundi(Prices.data().sell_ratio * 100.0))
+	Economy.change_reputation("salvage_union", -40 - Economy.reputation("salvage_union"), "test", false)
+	check(Fixers.buyer().is_empty() and Fixers.offer(&"captagon") == 0, "with the Salvage Union against us, nobody buys it")
+	Economy.change_reputation("salvage_union", su0 - Economy.reputation("salvage_union"), "test cleanup", false)
+	Economy.change_reputation("meridian", mer0 - Economy.reputation("meridian"), "test cleanup", false)
+	for fid: String in ["us_forces", "uk_forces", "ca_forces"]:
+		Economy.change_reputation(fid, ({"us_forces": us0, "uk_forces": uk0}.get(fid, Economy.reputation(fid) + 1) as int) - Economy.reputation(fid), "test cleanup", false)
 	# Every item in data/items.json has a price of its own; CPR (an action, not an item) isn't sold.
 	var unpriced: Array = ItemDB.all_ids().filter(func(id: StringName) -> bool: return not (Prices.data().items as Dictionary).has(String(id)))
 	check(unpriced.is_empty() and Prices.price_of(&"io_kit") == 150 and Prices.price_of(&"surgery_kit_5") == 900

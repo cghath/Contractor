@@ -2641,6 +2641,11 @@ func _loot_target(path: NodePath) -> Node:
 		if not bool(node.call(&"in_reach", self)):
 			_client_message.rpc_id(owner_peer(), "Too far away")
 			return null
+		if node is WorldCache:  # wave 6: a locked box opens only with its key
+			var why := (node as WorldCache).server_open_for(self)
+			if why != "":
+				_client_message.rpc_id(owner_peer(), why)
+				return null
 		return node
 	return null
 

@@ -1648,6 +1648,17 @@ func server_add_to_stash(id: StringName, count := 1, state := {}) -> void:
 ## Economy.server_sell prices it, a damaged piece for less). At the hub the armory's items go
 ## (_apply_stash); elsewhere the stash list. Returns what it fetched, 0 if none was there.
 func server_sell_from_stash(id: StringName, count := 1) -> int:
+	var took := server_take_from_stash(id, count)
+	if took <= 0:
+		return 0
+	var got := Economy.server_sell(id, took)
+	Fixers.server_sold_at_base(id)  # contraband sold openly: lawful employers notice (wave 6)
+	return got
+
+
+## Host: takes up to `count` of `id` out of the company stash (the armory's at the hub, else the
+## stash list). Returns how many it took.
+func server_take_from_stash(id: StringName, count := 1) -> int:
 	var lvl := level() as BaseLevel
 	var took := 0
 	if lvl and campaign_running:
@@ -1658,11 +1669,9 @@ func server_sell_from_stash(id: StringName, count := 1) -> int:
 			_apply_stash(lvl, before, pool)
 	else:
 		took = BaseArmory.remove(stash(), id, count)
-	if took <= 0:
-		return 0
-	var got := Economy.server_sell(id, took)
-	_changed(&"base")
-	return got
+	if took > 0:
+		_changed(&"base")
+	return took
 
 
 ## Host: puts a member in or out of the squad picked for the next deployment.

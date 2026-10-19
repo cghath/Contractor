@@ -195,7 +195,8 @@
 
 	"fixers": [
 		{"fixer": "Halloran", "faction": "meridian", "min_rep": 20, "pay_mult": 1.6, "types": ["hvt_capture", "intel_grab", "recon", "crew_rescue"]},
-		{"fixer": "Mama Rook", "faction": "salvage_union", "min_rep": 15, "pay_mult": 1.5, "types": ["raid", "intel_grab", "sabotage", "convoy_ambush"]}
+		{"fixer": "Mama Rook", "faction": "salvage_union", "min_rep": 15, "pay_mult": 1.5, "types": ["raid", "intel_grab", "sabotage", "convoy_ambush"],
+		 "buys": "contraband", "buy_mult": 1.0, "buy_rep": 1}
 	],
 
 	"threats": {
