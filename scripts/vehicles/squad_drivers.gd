@@ -125,6 +125,9 @@ func server_drive_to(from: Soldier, point: Vector3) -> String:
 	var vs := _targets(from)
 	if vs.is_empty():
 		return "Nobody of ours is at the wheel"
+	var lvl := CompoundLevel.current(self)
+	if lvl and lvl.has_method(&"ground_point"):
+		point = lvl.call(&"ground_point", point)  # (a map order comes without a height)
 	for v in vs:
 		_give(v, Order.DRIVE, from, point)
 		v.server_drive_to(point)

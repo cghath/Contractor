@@ -415,6 +415,8 @@ func _open_menu(screen_pos: Vector2) -> void:
 	if marker_at(screen_pos) != 0:
 		_hover_id = marker_at(screen_pos)
 		_menu.add_item("Delete marker", 3)
+	if _our_drivers():
+		_menu.add_item("Our drivers: drive here (%s)" % MapGrid.grid_ref(_menu_at, area), 4)  # SquadDrivers' drive_to
 	_add_allied_orders()
 	_menu.position = Vector2i(get_screen_position() + screen_pos)
 	_menu.reset_size()
@@ -433,6 +435,23 @@ func _on_menu(id: int) -> void:
 		3:
 			if _hover_id != 0:
 				MapNodes.markers(self).request_remove(_hover_id)
+		4:
+			var me := MapNodes.local_player(self)
+			if me:
+				me._server_squad_command.rpc_id(1, "drive_to", Vector3(_menu_at.x, 0.0, _menu_at.y), PackedStringArray())
+
+
+## Whether one of our squad's AI has the wheel of a ground vehicle here (SquadDrivers; every peer
+## sees who sits where).
+func _our_drivers() -> bool:
+	var vl := VehicleLayer.of(level) if level else null
+	if vl == null:
+		return false
+	for v: Vehicle in vl.vehicles():
+		var d := v.driver()
+		if d and d.is_ai() and d.faction == &"friendly" and d.iff != &"allied":  # (an allied element's men take the high command's orders)
+			return true
+	return false
 
 
 ## The host's high command on the map (wave 6e, Captain 2026-10-18: "map orders"): a submenu per
