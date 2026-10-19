@@ -40,6 +40,12 @@ const ROUTE_WIDTH := 1.5
 const ROUTE_DASH_PX := 7.0
 const SQUAD_COLOUR := Color(0.35, 0.6, 1.0)
 const SELF_COLOUR := Color(0.2, 1.0, 1.0)
+## Allied elements (wave 6e, AlliedTroops): their men, a label at the element's middle and a thin
+## line to where it was last ordered.
+const ALLIED_COLOUR := Color(0.45, 0.85, 0.5)
+## The map orders the host gives an allied element (AlliedTroops.server_order), menu text first.
+const ALLIED_MAP_ORDERS := [["Move here", "move"], ["Defend here", "defend"], ["Assault here", "assault"], ["Flank here", "flank"],
+	["Fall back here", "fall_back"], ["Hold where it is", "hold"], ["Release", "release"]]
 const GEAR_COLOUR := Color("ffd166")
 const GRID_MINOR := Color(0, 0, 0, 0.22)
 const GRID_MAJOR := Color(0, 0, 0, 0.5)
@@ -53,7 +59,7 @@ const LABEL_MAX_PX := 230.0
 const LABEL_GAP_PX := 8.0
 const SYMBOL_PX := 9.0  # half the box a symbol keeps clear of labels
 ## What a label's symbol is, most important first: which keeps the best spot.
-const LABEL_PRIORITY := {"self": 9, "objective": 8, "insert_chosen": 7, "extract": 6, "intel": 5, "marker": 4, "insert": 3, "player": 3, "gear": 2, "squad": 1}
+const LABEL_PRIORITY := {"self": 9, "objective": 8, "insert_chosen": 7, "extract": 6, "intel": 5, "marker": 4, "insert": 3, "player": 3, "allied": 2, "gear": 2, "squad": 1}
 
 ## The level shown (anything with map_area()).
 var level: Node
@@ -81,6 +87,8 @@ var _text: LineEdit
 var _text_at := Vector2.ZERO
 var _menu: PopupMenu
 var _menu_at := Vector2.ZERO
+## The right-click menu's allied-order submenus, rebuilt each time it opens.
+var _allied_menus: Array[PopupMenu] = []
 var _fitted := false  # showing the whole area (fit), until zoomed or panned
 ## The zone picture being made on a worker thread (-1: none).
 var _render_task := -1
@@ -407,6 +415,7 @@ func _open_menu(screen_pos: Vector2) -> void:
 	if marker_at(screen_pos) != 0:
 		_hover_id = marker_at(screen_pos)
 		_menu.add_item("Delete marker", 3)
+	_add_allied_orders()
 	_menu.position = Vector2i(get_screen_position() + screen_pos)
 	_menu.reset_size()
 	_menu.popup()
@@ -424,6 +433,78 @@ func _on_menu(id: int) -> void:
 		3:
 			if _hover_id != 0:
 				MapNodes.markers(self).request_remove(_hover_id)
+
+
+## The host's high command on the map (wave 6e, Captain 2026-10-18: "map orders"): a submenu per
+## allied element out, and one for all of them, with the orders for the clicked spot.
+func _add_allied_orders() -> void:
+	for sub_menu in _allied_menus:
+		sub_menu.queue_free()
+	_allied_menus.clear()
+	var allies := AlliedTroops.current(level) if level else null
+	if allies == null or not allies.local_commands() or allies.shown.is_empty():
+		return
+	_menu.add_separator("Allied troops (%s)" % MapGrid.grid_ref(_menu_at, area))
+	var targets: Array = allies.shown.map(func(e: Dictionary) -> Array: return [String(e.label), str(e.id)])
+	if targets.size() > 1:
+		targets.append(["All allied elements", "all"])
+	for t: Array in targets:
+		var sub_menu := PopupMenu.new()
+		for i in ALLIED_MAP_ORDERS.size():
+			sub_menu.add_item(ALLIED_MAP_ORDERS[i][0], i)
+		sub_menu.id_pressed.connect(func(i: int) -> void: send_allied_order(String(ALLIED_MAP_ORDERS[i][1]), String(t[1]), _menu_at))
+		_menu.add_child(sub_menu)
+		_menu.add_submenu_node_item(String(t[0]), sub_menu)
+		_allied_menus.append(sub_menu)
+
+
+## Sends the host's `order` for allied element `target` ("1", "2", "all") at map point `at`.
+func send_allied_order(order: String, target: String, at: Vector2) -> void:
+	var me := MapNodes.local_player(self)
+	if me == null:
+		return
+	var cmd := "support:allied_%s:%s" % [order, target]
+	me._server_squad_command.rpc_id(1, cmd, Vector3(at.x, 0.0, at.y), PackedStringArray())
+
+
+## The allied elements out (AlliedTroops.shown, on every peer): [{"id", "label", "men":
+## [Vector2], "up": int, "centre": Vector2, "order", "point": Vector2 (INF for none)}].
+static func allied_points(from: Node) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	var level := MapNodes.level_of(from)
+	var allies := AlliedTroops.current(level) if level else null
+	var ai := level.get_node_or_null(^"AI") if level else null
+	if allies == null or ai == null:
+		return out
+	for e: Dictionary in allies.shown:
+		var men: Array[Vector2] = []
+		var sum := Vector2.ZERO
+		for n: String in e.names:
+			var s := ai.get_node_or_null(NodePath(n)) as Soldier
+			if s and not s.is_queued_for_deletion() and s.vitals.is_up():
+				var p := Vector2(s.global_position.x, s.global_position.z)
+				men.append(p)
+				sum += p
+		if men.is_empty():
+			continue
+		out.append({"id": int(e.id), "label": "%s (%d/%d): %s" % [e.label, men.size(), (e.names as PackedStringArray).size(), String(e.order).replace("_", " ")],
+			"men": men, "up": men.size(), "centre": sum / men.size(), "order": String(e.order), "point": e.point})
+	return out
+
+
+func _draw_allied() -> void:
+	for e: Dictionary in allied_points(self):
+		for p: Vector2 in e.men:
+			var s := map_to_screen(p)
+			draw_rect(Rect2(s - Vector2(3.5, 3.5), Vector2(7, 7)), ALLIED_COLOUR)
+		var c := map_to_screen(e.centre)
+		var to: Vector2 = e.point
+		if to.is_finite() and e.order not in ["hold", "follow"] and to.distance_to(e.centre) > 5.0:
+			var t := map_to_screen(to)
+			draw_dashed_line(c, t, ALLIED_COLOUR, ROUTE_WIDTH, ROUTE_DASH_PX)
+			draw_line(t + Vector2(-5, -5), t + Vector2(5, 5), ALLIED_COLOUR, 2.0)
+			draw_line(t + Vector2(-5, 5), t + Vector2(5, -5), ALLIED_COLOUR, 2.0)
+		_label(c, String(e.label), ALLIED_COLOUR, "allied", 12)
 
 
 ## During the briefing, clicking an insertion candidate picks it.
@@ -467,6 +548,7 @@ func _draw() -> void:
 	_draw_markers()
 	_draw_gear_markers()
 	_draw_squad()
+	_draw_allied()
 	if _line.size() >= 2:
 		_polyline(_line, MapMarkers.colour_value(marker_colour), 2.0)
 	_layout_labels(map_rect)

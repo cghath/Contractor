@@ -712,7 +712,15 @@ func _flush() -> void:
 
 
 func _public() -> Dictionary:
-	return _section().duplicate(true)
+	var out := _section().duplicate(true)
+	out["world_sites"] = WorldSites.rows()  # wave 6c: who holds each hot zone, for every peer's board
+	return out
+
+
+## Who holds each hot zone and how firmly (WorldSites.rows()): the host's own, every other peer's
+## from the last sync.
+func world_sites() -> Array:
+	return WorldSites.rows() if _is_host() else (_remote.get("world_sites", []) as Array)
 
 
 func _on_peer_joined(id: int) -> void:

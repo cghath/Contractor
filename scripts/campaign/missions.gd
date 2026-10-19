@@ -237,11 +237,44 @@ static func factions() -> Array:
 	return _factions.get("factions", [])
 
 
+## Faction ids that were renamed, old -> new (wave 6b, 2026-10-18: the "federal_army"
+## placeholder became the Eastern Concord Forces). faction() still answers for an old id, and
+## migrate_faction_keys() carries a save's per-faction entries over.
+const RENAMED_FACTIONS := {"federal_army": "eastern_concord"}
+
+
 static func faction(faction_id: String) -> Dictionary:
+	faction_id = String(RENAMED_FACTIONS.get(faction_id, faction_id))
 	for f: Dictionary in factions():
 		if f.id == faction_id:
 			return f
 	return {}
+
+
+## Renames old faction ids (RENAMED_FACTIONS) in a campaign section, in place: keys of every
+## dictionary it holds (Economy's "rep", "heat", ...) and "faction"/"holder" values of the
+## dictionaries it holds or lists (WorldSites' sites, Economy's nemeses). True when anything
+## moved. Campaign.load_campaign runs it over every section once, as a save loads.
+static func migrate_faction_keys(section: Dictionary) -> bool:
+	var moved := false
+	for v: Variant in section.values():
+		var entries: Array = (v as Array) if v is Array else [v]
+		for e: Variant in entries:
+			if not e is Dictionary:
+				continue
+			var d: Dictionary = e
+			for old: String in RENAMED_FACTIONS:
+				var now: String = RENAMED_FACTIONS[old]
+				if d.has(old):
+					if not d.has(now):
+						d[now] = d[old]
+					d.erase(old)
+					moved = true
+				for field: String in ["faction", "holder"]:
+					if d.get(field) is String and d[field] == old:
+						d[field] = now
+						moved = true
+	return moved
 
 
 static func faction_ids() -> Array[String]:

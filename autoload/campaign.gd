@@ -140,6 +140,8 @@ func load_campaign() -> bool:
 		push_warning("Campaign: " + load_notice)
 	_sections = GameState.from_json(data.sections)
 	for key: String in _sections:
+		MissionRegistry.migrate_faction_keys(_sections[key])  # a save from before a faction was renamed (wave 6b)
+	for key: String in _sections:
 		changed.emit(StringName(key))
 	return true
 

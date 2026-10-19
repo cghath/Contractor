@@ -3,7 +3,7 @@ extends RefCounted
 ## Wave 6c: persistent world + the faction war between missions (design doc
 ## "mission_brainstorm.md"; build order in docs/wave6_groundwork.md #3). Proposed scope: the
 ## real faction set (that doc's call #4) is still a placeholder, so this runs on whatever
-## factions.json has today (Black Ridge, the Federal Army placeholder, ...) rather than waiting
+## factions.json has today (Black Ridge, the Eastern Concord Forces, ...; the placeholder set until wave 6b's call 4 landed) rather than waiting
 ## on it.
 ##
 ## A hot zone's current holder and how firm its grip is (0..1) persist across deployments in
@@ -59,6 +59,35 @@ static func grip(zone_id: String) -> float:
 
 static func is_flashpoint(zone_id: String) -> bool:
 	return bool(site(zone_id).get("flashpoint", false))
+
+
+## Grip at or above this reads as "firm" on the board.
+const FIRM_GRIP := 0.7
+
+
+## Every hot zone's holder and grip, for the contract board (wave 6c, the zone UI): [{"zone_id",
+## "name", "holder", "holder_name", "grip", "state" ("firm", "holding", "contested"),
+## "flashpoint"}], in zones.json order. Host: from the campaign (seeding any not asked yet);
+## Economy's sync carries it to every other peer (Economy._public, "world_sites").
+static func rows() -> Array:
+	var out: Array = []
+	for z: Dictionary in MissionRegistry.data().get("zones", []):  # raw: zones() would build every layout
+		if String(z.get("kind", "")) != "hot":
+			continue
+		var zid := String(z.zone_id)
+		var s := site(zid)
+		var g := float(s.get("grip", START_GRIP))
+		out.append({"zone_id": zid, "name": String(z.get("name", zid)), "holder": String(s.get("holder", "")),
+			"holder_name": MissionRegistry.faction_name(String(s.get("holder", ""))), "grip": g,
+			"state": "contested" if g <= CONTESTED_GRIP else ("firm" if g >= FIRM_GRIP else "holding"),
+			"flashpoint": bool(s.get("flashpoint", false))})
+	return out
+
+
+## One row of rows() as a line of text.
+static func row_text(r: Dictionary) -> String:
+	return "%s: %s, grip %d%% (%s)%s" % [r.name, r.holder_name if String(r.holder) != "" else "nobody", roundi(float(r.grip) * 100.0),
+		r.state, ", flashpoint: a war job is up" if bool(r.flashpoint) else ""]
 
 
 ## ContractGen, once a flashpoint job has gone on the board (its title/brief say so).

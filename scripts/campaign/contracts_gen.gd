@@ -268,7 +268,7 @@ static func mission_target(rng: RandomNumberGenerator, def: Dictionary, zone_id:
 		var name := String(site.get("name", ""))
 		if not person.is_empty():
 			if person_name == "":
-				person_name = Names.mission_person(pick, "hostage" if friendly else "hvt", Names.faction_nation(target))
+				person_name = Names.mission_person(pick, "hostage" if friendly else "hvt", Names.faction_nation(target, zone_id if zone_id != "" else "none"))
 			name = person_name
 		if site.has("person"):
 			o["person"] = {"name": person_name, "label": "%s (%s)" % ["Hostage" if friendly else "HVT", person_name]}

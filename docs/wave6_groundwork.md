@@ -5,8 +5,7 @@ side lockout: `Economy`, `Contracts`, `factions.json` "reputation_rules"). 6b st
 data (`Kits`, `factions.json` "kits"), a placeholder regional army ("Federal Army", Eastern-bloc
 kit, woodland), contracts against any kitted faction switch the zone's patrols, hunters, QRF waves
 (which stayed Black Ridge's before) and, for data kits, garrisons; Black Ridge carries a captured
-M4 (Captain: factions known to field AR-pattern rifles use them). Still open in 6b: the real faction
-set (call 4 below), regional weapon art (Chinese, Iranian), a garrison already spawned before its
+M4 (Captain: factions known to field AR-pattern rifles use them). Still open in 6b: regional weapon art (Chinese, Iranian), a garrison already spawned before its
 contract went live keeps the militia kit. **6c built on today's placeholder faction set** (Captain,
 2026-10-18: build an MVP now rather than wait on call 4): `WorldSites` (new, `scripts/campaign/
 world_sites.gd`) tracks each hot zone's holder and how firm its grip is (0..1) across deployments
@@ -32,7 +31,20 @@ assault orders only (`Squad.give_order`/`order_assault` reused), paid like the h
 cooldown, gated to Trusted standing with at least one deployment employer. This needed
 `Squad.members()` scoped to `SquadAI.squad == self` (it only filtered by faction before, which
 never mattered until a second friendly squad existed); fixed, matching `brains()`'s own scoping.
-Not done: the Allied-tier second element and the MRAP-mounted section. Groundwork below as written. Wave 6 is next
+**6e second slice (2026-10-18, Captain: "high command system for the host/1st player to be able to
+order these squads to do general things, and map orders", plus the Allied-tier second element and
+the weapons team):** up to two elements out at once by the best standing with a deployment employer
+(Trusted one, Allied two), each slot with its own 20-minute cooldown; a rifle squad (8) or a weapons
+team (4: M240B, ammo bearer, two AT4s; the allied kits' `"mixes"`), in the kit of the employer that
+lends it (Meridian, a company, lends US kit). The high command is the host player's alone: the
+support menu's Allied troops entry gives general orders to every element (move, hold, assault, flank,
+follow me, fall back, release all), and the map's right-click menu has a submenu per element (and
+one for all) with map orders at the clicked spot (move, defend, assault, flank, fall back, hold,
+release). Every peer's map draws the elements, labels them with their order and size, and dashes a
+line to where they were sent (`AlliedTroops.shown`, sent by the host). The contract board shows
+each hot zone's holder and grip (firm / holding / contested, and a flashpoint's war job:
+`WorldSites.rows()`, carried to clients in Economy's sync). Not done: the MRAP-mounted section.
+Groundwork below as written. Wave 6 is next
 once the Oct 18 open items are in (Captain, 2026-10-18). This page collects what's already decided, what the code already
 has to build on, the calls the Captain still has to make (each with a proposed answer, so a yes is
 enough), and a build order. The plan's own scope is in [build_plan.md](build_plan.md) (Wave 6) and
@@ -101,6 +113,16 @@ enough), and a build order. The plan's own scope is in [build_plan.md](build_pla
    (rival PMC); the US, UK and Canada as the allied employers (their own boards, rippling together);
    Black Ridge as the insurgents; one conventional army with Russian / Chinese / Iranian kit by region
    under an original name; the Salvage Union stays neutral. All company and unit names original.
+   **Decided (Captain, 2026-10-18): as proposed; the army is the Eastern Concord Forces.** Built:
+   `factions.json` `eastern_concord` (was the `federal_army` placeholder; `MissionRegistry.
+   RENAMED_FACTIONS` resolves the old id and `Campaign.load_campaign` moves an old save's standing,
+   heat, nemeses and held zones over), its kit by region (`regional_kits`: inland `concord_ru`,
+   coast `concord_ir`; `zone_kits`: the Old Quarter `concord_cn`; `Kits.kit_of(faction, zone)`, the
+   zone being played by default) with its men named from the kit's nation (`Names.faction_nation`);
+   `us_forces`, `uk_forces`, `ca_forces` as employers (allies of each other, so standing ripples
+   between them), each with an allied kit (`allied_us`/`allied_uk`/`allied_ca`: M4, L85A2, C8) that
+   dresses the allied troops they lend. "Their own boards" is their own contracts on the one board
+   (the employer is on every offer); a board per employer is not built.
 5. **Side lockout length.** Proposed: the current deployment plus 3 campaign days.
 6. **Decay.** Proposed: 1 point a campaign day toward Neutral after 5 days without a job; Allied
    floors at Trusted while the squad works for them at least once a week.
