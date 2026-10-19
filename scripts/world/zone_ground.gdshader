@@ -51,6 +51,26 @@ vec4 hex_cell(vec2 p) {
 	return dot(h.xy, h.xy) < dot(h.zw, h.zw) ? vec4(h.xy, hc.xy) : vec4(h.zw, hc.zw + 0.5);
 }
 
+// Cellular noise: distance to the nearest of a jittered point per cell (x), and that cell's id hash (y).
+vec2 cells(vec2 p) {
+	vec2 i = floor(p);
+	vec2 f = fract(p);
+	float best = 8.0;
+	float id = 0.0;
+	for (int y = -1; y <= 1; y++) {
+		for (int x = -1; x <= 1; x++) {
+			vec2 g = vec2(float(x), float(y));
+			vec2 o = vec2(hash12(i + g), hash12(i + g + 19.7));
+			float d = length(g + o - f);
+			if (d < best) {
+				best = d;
+				id = hash12(i + g + 7.3);
+			}
+		}
+	}
+	return vec2(best, id);
+}
+
 // How far from the centre of its hex cell an offset is: 0.5 on the rim.
 float hex_rim(vec2 h) {
 	h = abs(h);
@@ -99,7 +119,7 @@ void fragment() {
 	col = mix(col, dry_colour, smoothstep(0.45, 0.85, macro) * 0.45 * macro_strength);
 	col = mix(col, earth_colour * 0.85, smoothstep(0.30, 0.05, macro) * 0.55 * macro_strength);
 	col = mix(col, earth_colour, smoothstep(0.58, 0.88, mid) * 0.45);
-	col *= mix(0.74, 1.14, macro) * mix(0.86, 1.08, mid);
+	col *= mix(0.84, 1.08, macro) * mix(0.90, 1.06, mid);  // (softer: the big smooth blotches read as smears, Captain 2026-10-18)
 	col *= mix(1.0, mix(0.80, 1.12, fine), near);
 	col *= mix(1.0, mix(0.84, 1.10, grain), close);
 
@@ -129,6 +149,41 @@ void fragment() {
 			}
 			col *= mix(1.0, 0.80, on * track_near * track_strength);
 		}
+	}
+
+	// Near detail, in the buildings' voxel style (Captain, 2026-10-18: the ground "read smooth and
+	// smeary" and "the ground art style needs to match the buildings"): the ground is made of
+	// square blocks near the camera, the way the walls are made of voxels. Within ~110 m it's
+	// quantized to BLOCK_M blocks, each a touch lighter or darker than its neighbours (as a voxel
+	// wall's are), the grass clumps and bare soil patches snapped to that grid (blocky edges),
+	// square stones on a 10 cm grid within ~25 m, and within ~12 m the 10 cm voxel grid itself.
+	const float BLOCK_M = 0.25;
+	float grassy = smoothstep(0.0, 0.05, base.g - base.r * 0.92);
+	float mid_near = 1.0 - smoothstep(60.0, 110.0, dist);
+	if (mid_near > 0.0) {
+		vec2 bid = floor(p / BLOCK_M);
+		vec2 bp = (bid + 0.5) * BLOCK_M;        // the block's centre: everything below is constant over a block
+		vec2 bq = mat2(vec2(0.8, -0.6), vec2(0.6, 0.8)) * bp;
+		vec2 c1 = cells(bq / 1.6 + 3.1);
+		vec2 c2 = cells(bp / 0.75 + 9.4);
+		float clump = step(c1.x, 0.38) * step(0.35, c1.y);
+		float bare = step(c2.x, 0.30) * step(0.70, c2.y);
+		vec3 grass_col = col * vec3(0.84, 0.94, 0.78) * mix(0.9, 1.05, c1.y);
+		vec3 soil_col = mix(col, earth_colour, 0.7) * mix(0.95, 1.12, c2.y);
+		col = mix(col, grass_col, clump * grassy * mid_near * 0.85);
+		col = mix(col, soil_col, bare * mid_near * mix(0.35, 0.8, grassy));
+		col *= mix(1.0, 1.0 + (hash12(bid + seed_offset) - 0.5) * 0.14, mid_near);  // each block its own shade, like a voxel
+	}
+	float speck_near = 1.0 - smoothstep(14.0, 26.0, dist);
+	if (speck_near > 0.0) {
+		vec2 sg = floor(p / 0.1);
+		float sp = step(0.94, hash12(sg + seed_offset));
+		float light = step(0.5, hash12(sg + 41.0));
+		col *= mix(1.0, mix(0.66, 1.28, light), sp * speck_near * mix(1.0, 0.55, grassy));  // square stones
+	}
+	float voxel_near = 1.0 - smoothstep(6.0, 12.0, dist);
+	if (voxel_near > 0.0) {
+		col *= mix(1.0, 1.0 + (hash12(floor(p / 0.1) + 17.0) - 0.5) * 0.08, voxel_near);  // the 10 cm voxel grid up close
 	}
 
 	// Rock on steep faces, per pixel, with horizontal strata.

@@ -116,6 +116,19 @@ func _test_thin_walls() -> void:
 		_fire(Vector3(17.05, 1.35, -3), Vector3(17.05, 1.35, -6), &"m4a1")
 	check(world.material_at(Vector3(17.05, 1.35, -7.05)) == VoxelWorld.Mat.EMPTY and world.material_at(Vector3(17.25, 1.35, -7.05)) == VoxelWorld.Mat.WOOD,
 		"%d rounds through one plank break that voxel out, and only that one" % VoxelWorld.HOLES_TO_BREAK[VoxelWorld.Mat.WOOD])
+	# Captain, 2026-10-18 ("easier voxel damage for ... mud buildings too"): a mud-brick wall
+	# stops a 9 mm, but rounds stopped in the same voxel chip it out (CHIPS_TO_BREAK).
+	var lo := Vector3i(world.terrain.to_local(Vector3(10.0, 0.5, 14.0)).floor())  # a mud-brick block stamped in at runtime
+	world._tool.value = VoxelWorld.Mat.MUD_BRICK
+	world._tool.do_box(lo, lo + Vector3i(9, 14, 5))
+	var mud_at := Vector3(10.55, 1.25, 14.05)
+	var mud := VoxelWorld.MATERIALS[VoxelWorld.Mat.MUD_BRICK] as Dictionary
+	check(world.material_at(mud_at) == VoxelWorld.Mat.MUD_BRICK and float(mud.loss_j_per_m) * 0.2 > 550.0 and float(mud.loss_j_per_m) * 0.3 > 3600.0,
+		"mud brick: a 9 mm stops in 4 cm of it, a 7.62x54R in 26 cm (not concrete's stop-everything any more)")
+	for i in int(VoxelWorld.CHIPS_TO_BREAK[VoxelWorld.Mat.MUD_BRICK]):
+		world.server_mark(Vector3(10.55, 1.25, 14.0), Vector3(0, 0, -1), VoxelWorld.Mat.MUD_BRICK)
+	check(world.material_at(mud_at) == VoxelWorld.Mat.EMPTY and world.material_at(mud_at + Vector3(0.2, 0, 0)) == VoxelWorld.Mat.MUD_BRICK,
+		"%d rounds stopped in the same spot chip that mud-brick voxel out, only that one" % int(VoxelWorld.CHIPS_TO_BREAK[VoxelWorld.Mat.MUD_BRICK]))
 	var pistol := _fire(Vector3(18.65, 1.35, -3), Vector3(18.65, 1.35, -9), &"m17")
 	check(pistol.result == "body" and not inside.vitals.wound_list().is_empty(), "a 9 mm through one plank wall hits a man inside (%s)" % pistol.result)
 	var container := _fire(Vector3(-17.25, 1.35, 3), Vector3(-17.25, 1.35, 11), &"m17")

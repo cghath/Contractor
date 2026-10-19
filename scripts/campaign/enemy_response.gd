@@ -157,6 +157,8 @@ var enemy_faction: StringName = &"black_ridge"
 ## The live contract's true_rating (1-5, ZoneLevel._on_contract_live), for Vantage's exo gear
 ## (CompoundLevel.PMC_LX3_DIFFICULTY/PMC_HX1_DIFFICULTY): 1 (no exo) unless a hard contract sets it.
 var difficulty: int = 1
+## The deployment's difficulty scale (ZoneLevel.difficulty_scale): hunter teams are this share.
+var scale := 1.0
 ## Roaming patrols: {"k", "route" (Array[Vector3]), "squad", "soldiers", "pending", "second",
 ## "doubled", "lost", "last_pos"}.
 var patrols: Array[Dictionary] = []
@@ -837,6 +839,7 @@ func _send_hunters(lkp: Vector3, radius: float) -> void:
 	# before the team is sized, so the reserves approved and spent (audit E-03) are what it fields.
 	var named := Economy.heat(String(enemy_faction)) >= float(MissionRegistry.reputation_rules().get("heat_named", INF))
 	var count := mini(HUNTER_SIZE.y if named else randi_range(HUNTER_SIZE.x, HUNTER_SIZE.y), _room())
+	count = maxi(roundi(count * scale), mini(count, 2))  # by difficulty (ZoneLevel.difficulty_scale)
 	if command:
 		count = mini(count, floori(command.available_cp()))
 		# Asked even with the reserves short of a team (for the smallest one): the denial is on

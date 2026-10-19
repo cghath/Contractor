@@ -91,7 +91,9 @@ func server_send(r: Dictionary) -> bool:
 	var route: Array[Vector3] = [r.site]
 	squad.patrol = route
 	r.squad = squad
-	r.soldiers = response._spawn_team(squad, callsign, SIZE, edge, r.site, CompoundLevel.PMC_LOADOUT.duplicate(), COMBAT, DISCIPLINE, "combat")
+	var rating := int(Contracts.contract(String(r.cid)).get("true_rating", 0))
+	var size := SIZE if rating <= 0 else clampi(2 + rating, 3, SIZE)  # by difficulty: 3 at 1-star, 6 at 4-star and up
+	r.soldiers = response._spawn_team(squad, callsign, size, edge, r.site, CompoundLevel.PMC_LOADOUT.duplicate(), COMBAT, DISCIPLINE, "combat")
 	r.state = "out"
 	if not (r.soldiers as Array).is_empty():
 		(r.soldiers[0] as Soldier).inventory.take(LEDGER)  # its leader's field ledger: story intel (a lead)

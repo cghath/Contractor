@@ -67,7 +67,18 @@ const MATERIALS := {
 	Mat.STEEL: {"name": "steel", "loss_j_per_m": INF, "blast": 0.15, "mark": Color("b9bcbf")},
 	Mat.SHEET_METAL: {"name": "sheet metal", "loss_j_per_m": 1500.0, "blast": 1.0, "mark": Color("1d2022")},
 	Mat.SANDBAG: {"name": "sandbags", "loss_j_per_m": 12000.0, "blast": 0.6, "mark": Color("54472f")},
+	# Captain, 2026-10-18 ("reintroduce easier voxel damage for wooden buildings, maybe mud
+	# buildings too"): mud brick and plaster were falling back to concrete (stop everything,
+	# never break). Mud brick soaks a round in about 25 cm (a 7.62x54R gets through a thin wall)
+	# and crumbles to blasts; plaster less; thatch and tarp next to nothing.
+	Mat.MUD_BRICK: {"name": "mud brick", "loss_j_per_m": 14000.0, "blast": 0.8, "mark": Color("5a4630")},
+	Mat.PLASTER: {"name": "plaster", "loss_j_per_m": 6000.0, "blast": 0.9, "mark": Color("8a8478")},
+	Mat.THATCH: {"name": "thatch", "loss_j_per_m": 800.0, "blast": 1.0, "mark": Color("4a3c20")},
+	Mat.TARP: {"name": "tarp", "loss_j_per_m": 200.0, "blast": 1.0, "mark": Color("2a3a44")},
 }
+## Rounds stopped in a surface voxel of these materials chip it, and it breaks out after this
+## many (mud and plaster crumble under fire; server_mark).
+const CHIPS_TO_BREAK := {Mat.MUD_BRICK: 5, Mat.PLASTER: 4}
 ## Impact marks: a stopped round leaves a small crack or chip on the surface (MARK_SIZE_M
 ## across, nothing carved), kept in the edit log like any other edit. The host records at
 ## most MARKS_PER_VOXEL in one surface voxel (sustained fire on one spot doesn't grow the
@@ -83,7 +94,7 @@ const MAX_MARKS := 8192
 const HOLE_DECAL_SCALE := 2.5
 const HOLE_EXIT_SCALE := {Mat.WOOD: 1.6, Mat.SHEET_METAL: 1.15}
 const HOLE_MARKS_PER_VOXEL := 16
-const HOLES_TO_BREAK := {Mat.WOOD: 10, Mat.SHEET_METAL: 16}
+const HOLES_TO_BREAK := {Mat.WOOD: 4, Mat.SHEET_METAL: 16, Mat.MUD_BRICK: 3, Mat.PLASTER: 3, Mat.THATCH: 2, Mat.TARP: 1}  # wood was 10 (Captain, 2026-10-18: easier)
 ## Rim colour of a bullet hole by material (the core is near black).
 const HOLE_RIM := {Mat.WOOD: Color("c9a877"), Mat.SHEET_METAL: Color("b8bcc0")}
 ## trace_round: a round walks at most WALK_MAX_M through solid voxels (deeper counts as
@@ -369,6 +380,8 @@ func server_mark(world_position: Vector3, normal: Vector3, mat: int) -> bool:
 		return false
 	_server_edit({"op": "mark", "p": [snappedf(p.x, 0.001), snappedf(p.y, 0.001), snappedf(p.z, 0.001)],
 		"n": [snappedf(n.x, 0.001), snappedf(n.y, 0.001), snappedf(n.z, 0.001)], "m": mat})
+	if CHIPS_TO_BREAK.has(mat) and (_mark_cells.get(_mark_cell(p, n), []) as Array).size() >= int(CHIPS_TO_BREAK[mat]):
+		server_holes([Vector3i((p - n * 0.5).floor())])  # chipped through: the voxel crumbles out
 	return true
 
 

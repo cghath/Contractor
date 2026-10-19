@@ -120,6 +120,7 @@ func _ready() -> void:
 	add_child(_enemy_response)  # patrols, QRF waves, hunters: the enemy's answer
 	if multiplayer.is_server():
 		_set_enemy_faction(_zone_enemy())  # wave 6b: whose kit the garrisons wear from the first spawn
+		_apply_difficulty_scale()
 	add_child(RadioChatter.new())  # what a looted enemy radio lets the squad hear
 	add_child(UrbanDefence.new())  # towns fought from inside: reserves, falling back, relief (Captain, 2026-10-17)
 	add_child(ZoneCleanup.new())  # bodies and dropped loot go after ~6-7 min (blood on its own clock)
@@ -513,9 +514,34 @@ func _spawn_ai() -> void:
 ## How many hostiles hold module `module_id`: the true enemy count (Contracts.enemy_force)
 ## of a deployed contract that targets it (the most, if several do), else the module's own
 ## posts (ZoneModules.GARRISON: 4). An understated briefing really bites.
+## How much of the zone's enemy a deployment meets, by its contracts' true rating (Captain,
+## 2026-10-18: "fighting like 16 dudes at once in a 2 difficulty mission?"): DIFFICULTY_SCALE
+## by the highest true_rating of this deployment's contracts here, no lower than
+## HOT_ZONE_MIN_SCALE in a hot zone (its fights are meant to be big). 1.0 with no contract
+## (tests, free roam). Scales the other sites' garrisons (the contract's own target keeps its
+## briefed count), the wave cap (Reinforcements.scale), hunter teams (EnemyResponse.scale) and a
+## rival team (RivalTeam).
+const DIFFICULTY_SCALE: Array[float] = [1.0, 0.45, 0.6, 0.75, 0.9, 1.0]
+const HOT_ZONE_MIN_SCALE := 0.75
+
+
+func difficulty_scale() -> float:
+	var rating := 0
+	var zid := GameState.zone_id
+	var cids: Array = Contracts.deployment().get("cids", [])
+	for c: Dictionary in Contracts.held():
+		if String(c.get("cid", "")) in cids and String(c.get("zone_id", zid)) == zid:
+			rating = maxi(rating, int(c.get("true_rating", c.get("rated", 0))))
+	if rating <= 0:
+		return 1.0
+	var s: float = DIFFICULTY_SCALE[clampi(rating, 0, DIFFICULTY_SCALE.size() - 1)]
+	return maxf(s, HOT_ZONE_MIN_SCALE) if String(def.get("kind", "")) == "hot" else s
+
+
 func garrison_size(module_id: String) -> int:
 	var module := get_module(module_id)
 	var n: int = (ZoneModules.GARRISON.get(module.type, []) as Array).size() if module else 0
+	n = maxi(mini(n, 2), ceili(n * difficulty_scale()))  # the other sites by difficulty (the target keeps its briefed count, below)
 	var target := -1
 	for cid: String in Contracts.deployment().get("cids", []):
 		if String(Contracts.contract(cid).get("module_id", "")) == module_id:
@@ -537,6 +563,7 @@ func _on_contract_live(cid: String, _objectives: Array) -> void:
 	# whose target is the PMC wins, same simplification Alert and Pressure already make per zone).
 	# Wave 6b: any target faction with a kit of its own (Vantage, a regional army) does the same, and
 	# the QRF waves (Reinforcements) follow it too (they stayed Black Ridge's before).
+	_apply_difficulty_scale()
 	var target := String(contract.get("target", ""))
 	if _enemy_response and target != "" and Kits.kit_of(target) != Kits.INSURGENT:
 		# Vantage's exo gear is difficulty-gated (CompoundLevel.PMC_LX3_DIFFICULTY/HX1_DIFFICULTY):
@@ -559,6 +586,17 @@ func _set_enemy_faction(faction: String, difficulty := -1) -> void:
 	if waves:
 		waves.enemy_faction = StringName(faction)
 		waves.difficulty = _enemy_response.difficulty
+	_apply_difficulty_scale()
+
+
+## Host: the deployment's difficulty scale onto the waves' cap and the hunters.
+func _apply_difficulty_scale() -> void:
+	if _enemy_response == null:
+		return
+	var s := difficulty_scale()
+	_enemy_response.scale = s
+	if _enemy_response.reinforcements:
+		_enemy_response.reinforcements.scale = s
 
 
 ## Wave 6b's open item ("a garrison already spawned before its contract went live keeps the

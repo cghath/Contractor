@@ -56,6 +56,8 @@ const LOADOUT := ["plate_carrier_light", "plate_pe_l3", "helmet_bump", "assault_
 var enemy_faction: StringName = &"black_ridge"
 ## See EnemyResponse.difficulty: the live contract's true_rating, for Vantage's exo gear.
 var difficulty: int = 1
+## The deployment's difficulty scale (ZoneLevel.difficulty_scale): the max_alive cap is this share of params'.
+var scale := 1.0
 ## How many spots along the map's edges are tried for a wave; the one furthest from every
 ## player wins.
 const EDGE_TRIES := 24
@@ -195,7 +197,7 @@ func next_wave_size(extra_pairs := 0, cap := -1) -> int:
 
 
 func _wave_count(index: int, extra_pairs: int, cap: int) -> int:
-	var size := mini(wave_size(index, params) + 2 * extra_pairs, maxi(int(params.max_alive) - capped_alive(), 0))
+	var size := mini(wave_size(index, params) + 2 * extra_pairs, maxi(maxi(roundi(int(params.max_alive) * scale), 6) - capped_alive(), 0))
 	if cap >= 0:
 		size = mini(size, cap)
 	return size - size % 2

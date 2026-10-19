@@ -22,7 +22,7 @@ const TYPES: Array[String] = ["compound", "outpost", "village", "checkpoint", "h
 ## (Static vars, not consts: a generated town ("town#<seed>", BuildingGen.town) adds its own
 ## entries the first time it's asked for: _town.)
 static var HALF := {
-	"compound": Vector2(21.0, 21.0),
+	"compound": Vector2(31.0, 31.0),  # the zone's own compound (_compound), 60 x 60 m inside (was the test compound's 40 x 40)
 	"outpost": Vector2(11.0, 11.0),
 	"village": Vector2(20.0, 14.0),
 	"checkpoint": Vector2(14.0, 10.0),
@@ -210,7 +210,7 @@ const GROWN := "+"
 const GROW := {
 	"outpost": {"count": [2, 3], "types": ["warehouse", "house", "police"]},
 	"village": {"count": [1, 6], "types": ["house", "house", "house", "shop"]},
-	"compound": {"count": [1, 2], "types": ["house", "warehouse"]},
+	# (A compound grows none: Captain, 2026-10-18, "there shouldnt be houses around them typically".)
 }
 const GROW_GAP_M := 3.0
 const GROW_LOOT_MAX := 6
@@ -289,7 +289,7 @@ static func boxes(type: String) -> Array:
 	if not _cache.has(type):
 		match type:
 			"compound":
-				_cache[type] = CompoundLevel.structure_boxes()
+				_cache[type] = _compound()
 			"outpost":
 				_cache[type] = _outpost()
 			"village":
@@ -467,6 +467,74 @@ static func _checkpoint() -> Array:
 ## command building (two rooms: the commander's office and the radio room with the intel),
 ## a plank barracks, watchtowers at two corners, sandbags at the gate, a weapons cache in the
 ## east yard and an AA site in the west yard.
+## A militia compound (zones; the test level keeps CompoundLevel.structure_boxes). Captain,
+## 2026-10-18: "further improve the compounds, there shouldnt be houses around them typically.
+## and the interior should make sense, maybe a small barracks tent, a small armory tent, a
+## generator or two etc", "make them a bit bigger too, theyre way small". A 60 x 60 m mud-brick
+## perimeter (gate south, sandbags covering it), watchtowers on two corners, the command building
+## in the middle (the objective), a barracks tent with cots and an armory tent with weapon racks
+## (tarp over wooden frames), the store shed (intel) and supply crates (the cache), two
+## generators and their fuel drums, a shipping container, and low walls to fight from. The
+## mission spots (SITES, GARRISON, LOOT) stand where the test compound had them, all inside.
+static func _compound() -> Array:
+	var out: Array = []
+	var M := VoxelWorld.Mat
+	var B := M.MUD_BRICK
+	var h := 30.0
+	var t := 0.6
+	out.append([Vector3(-h, 0, -h), Vector3(h, 2.6, -h + t), B])
+	out.append([Vector3(-h, 0, -h + t), Vector3(-h + t, 2.6, h), B])
+	out.append([Vector3(h - t, 0, -h + t), Vector3(h, 2.6, h), B])
+	out.append([Vector3(-h + t, 0, h - t), Vector3(-2.5, 2.6, h), B])
+	out.append([Vector3(2.5, 0, h - t), Vector3(h - t, 2.6, h), B])
+	_tower(out, Vector2(25.2, -27.6), ["n", "e"])
+	_tower(out, Vector2(-27.6, 25.2), ["s", "w"])
+	out.append([Vector3(-6.5, 0, 25.4), Vector3(-3.5, 1.1, 25.9), M.SANDBAG])  # covering the gate
+	out.append([Vector3(3.5, 0, 25.4), Vector3(6.5, 1.1, 25.9), M.SANDBAG])
+	# The command building, 10 x 8 m (as the test compound's: the objective is in it).
+	var P := M.PAINTED
+	var w := 0.3
+	out.append([Vector3(-5, 0, -12), Vector3(5, 3, -12 + w), P])
+	out.append([Vector3(-5, 0, -12), Vector3(-5 + w, 3, -4), P])
+	out.append([Vector3(5 - w, 0, -12), Vector3(5, 3, -4), P])
+	out.append([Vector3(-5, 0, -4 - w), Vector3(-0.6, 3, -4), P])
+	out.append([Vector3(0.6, 0, -4 - w), Vector3(5, 3, -4), P])
+	out.append([Vector3(-0.6, 2.2, -4 - w), Vector3(0.6, 3, -4), P])
+	out.append([Vector3(-5, 3, -12), Vector3(5, 3.2, -4), M.CONCRETE])  # its roof
+	# Barracks tent, 10 x 6 m (north-west): tarp walls and roof on a frame, a door south, cots.
+	_room(out, Vector2(-24, -24), Vector2(-14, -18), 2.2, 0.1, M.TARP, [["s", -19.6, -18.4]], M.TARP, 0.1)
+	for k in 4:
+		var x := -23.2 + k * 2.3
+		out.append([Vector3(x, 0, -23.4), Vector3(x + 0.8, 0.45, -21.5), M.WOOD])
+	# Armory tent, 6 x 5 m (north-east): weapon racks along the back, ammo crates.
+	_room(out, Vector2(8, -24), Vector2(14, -19), 2.2, 0.1, M.TARP, [["s", 10.4, 11.6]], M.TARP, 0.1)
+	out.append([Vector3(8.4, 0, -23.7), Vector3(13.6, 1.6, -23.4), M.WOOD])
+	out.append([Vector3(8.4, 0, -22.4), Vector3(9.6, 0.6, -21.6), M.WOOD])
+	out.append([Vector3(12.4, 0, -22.4), Vector3(13.6, 0.6, -21.6), M.WOOD])
+	# The store shed (intel) and the supply crates (the cache), as the test compound's.
+	var W := M.WOOD
+	out.append([Vector3(-13, 0, -11), Vector3(-12, 1, -10), W])
+	out.append([Vector3(-12, 0, -11), Vector3(-11, 1, -10), W])
+	out.append([Vector3(-12.5, 1, -11), Vector3(-11.5, 2, -10), W])
+	for box: Array in CompoundLevel.SHED:
+		out.append([box[0], box[1], W if box[2] == "wood" else M.SHEET_METAL])
+	# Two generators and their fuel drums (east), a shipping container (west).
+	for gx: float in [10.0, 12.6]:
+		out.append([Vector3(gx, 0, 6.0), Vector3(gx + 1.4, 1.0, 6.9), M.STEEL])
+		out.append([Vector3(gx + 0.5, 1.0, 6.2), Vector3(gx + 0.7, 1.5, 6.4), M.STEEL])  # its exhaust
+	for d: Vector2 in [Vector2(15.4, 6.0), Vector2(16.2, 6.0), Vector2(15.8, 6.8)]:
+		out.append([Vector3(d.x, 0, d.y), Vector3(d.x + 0.6, 0.9, d.y + 0.6), M.STEEL])
+	for box: Array in CompoundLevel.CONTAINER:
+		out.append([box[0], box[1], M.SHEET_METAL])
+	# Low walls to fight from (the test compound's), and sandbag positions by the towers.
+	out.append([Vector3(-9, 0, 6), Vector3(-6, 1.1, 6.4), M.SANDBAG])
+	out.append([Vector3(6, 0, 3), Vector3(9, 1.1, 3.4), M.CONCRETE])
+	out.append([Vector3(-1.5, 0, 10), Vector3(1.5, 1.1, 10.4), M.CONCRETE])
+	out.append([Vector3(20, 0, -24), Vector3(23, 1.1, -23.5), M.SANDBAG])
+	out.append([Vector3(-24, 0, 20), Vector3(-23.5, 1.1, 23), M.SANDBAG])
+	return out
+
+
 static func _hq() -> Array:
 	var out: Array = []
 	var M := VoxelWorld.Mat

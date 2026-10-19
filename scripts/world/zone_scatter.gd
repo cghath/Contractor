@@ -1220,6 +1220,10 @@ func build_visuals() -> void:
 	_material = _shared_material_once()
 	_build_far()
 	set_process(true)
+	if int(_spec.get("tufts_per_km2", 0)) > 0:  # grass near the camera (GrassCarpet), where this ground has tufts at all
+		var carpet := GrassCarpet.new()
+		carpet.setup(self, _terrain, _meshes["tuft"], _material, _colours(colours.get("tuft", colours.get("scrub", ["6f7040"]))))
+		add_child(carpet)
 
 
 ## The material every scatter MultiMesh draws with, made once a game (Captain, 2026-10-14:
