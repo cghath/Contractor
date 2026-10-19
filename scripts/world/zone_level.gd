@@ -501,6 +501,9 @@ func _on_hosted() -> void:
 	if spawn_ai:
 		_spawn_ai()
 	_update_streaming()
+	if BaseHub.deployment_running():
+		BaseHub.server_land_people(self)  # HVTs and hostages who walked on with the squad (LZ-2)
+		Contracts.server_arrived(String(def.get("id", "")))  # a multi-zone contract's leg here goes live (LZ-7)
 	if BaseHub.deployment_running() and not def.get("crossings", []).is_empty():
 		var extraction := MapNodes.extraction(self)
 		if extraction:
@@ -582,7 +585,7 @@ func garrison_size(module_id: String) -> int:
 
 ## Host: a contract went live; its target module may already hold its first garrison (it
 ## streamed in before the briefing), so it's topped up to the true count.
-func _on_contract_live(cid: String, _objectives: Array) -> void:
+func _on_contract_live(cid: String, objectives: Array) -> void:
 	if not multiplayer.is_server():
 		return
 	var contract := Contracts.contract(cid)
@@ -598,7 +601,10 @@ func _on_contract_live(cid: String, _objectives: Array) -> void:
 		# Vantage's exo gear is difficulty-gated (CompoundLevel.PMC_LX3_DIFFICULTY/HX1_DIFFICULTY):
 		# true_rating, the host's real 1-5 rating, not "rated" (the briefing, which can understate it).
 		_set_enemy_faction(target, int(contract.get("true_rating", contract.get("rated", 1))))
-	var module := get_module(String(contract.get("module_id", "")))
+	var module_id := String(contract.get("module_id", ""))
+	if not objectives.is_empty() and (objectives[0] as Dictionary).has("leg"):  # a multi-zone contract's leg here (LZ-7)
+		module_id = String(contract.legs[int(objectives[0].leg)].module_id)
+	var module := get_module(module_id)
 	if module and _garrisoned.has(module.module_id):
 		_spawn_garrison(module)
 

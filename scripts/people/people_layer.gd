@@ -474,6 +474,54 @@ static func is_intel(id: StringName) -> bool:
 	return item != null and item.type == "intel"
 
 
+# --- Host: across a crossing (docs/linked_zones.md LZ-2) ----------------------------------
+
+## Host only. The HVTs and hostages going on with the squad through a crossing at `centre`: within
+## `radius` of it, or carried or led by someone who is. Returns each one's record (for
+## server_bring_in in the next zone), and their bodies leave this zone, so it's saved without
+## them. The dead stay where they fell.
+func server_take_across(centre: Vector2, radius: float) -> Array:
+	var out: Array = []
+	for s in people():
+		var st := state_of(s)
+		if Person.kind_of(s) != Person.HVT or bool(st.get("delivered", false)) or s.vitals.is_dead():
+			continue
+		var by: Soldier = s.carried_by if is_instance_valid(s.carried_by) else null
+		if by == null and String(st.get("led_by", "")) != "":
+			by = level.get_node_or_null(NodePath(String(st.led_by))) as Soldier
+		var at := by.global_position if by else s.global_position
+		if Vector2(at.x, at.z).distance_to(centre) > radius:
+			continue
+		out.append({"name": String(s.name), "kind": String(st.get("kind", Person.HVT)), "side": String(st.get("side", Person.HOSTILE)),
+			"label": s.display_name(), "hvt_id": String(st.get("hvt_id", s.name)), "cuffed": bool(st.get("cuffed", false)),
+			"surrendered": bool(st.get("surrendered", false)), "led": by != null,
+			"gear": s.inventory.net_state.duplicate(true), "vitals": s.vitals.server_snapshot()})
+		if is_instance_valid(s.carried_by):
+			s.carried_by.release_carried()
+		states.erase(key_of(s))
+		s.queue_free()
+	return out
+
+
+## Host only. People who came across a crossing (server_take_across) arrive by `at` as they left:
+## cuffed or given up or neither, hurt as they were, with what they carried, and following
+## `leader` if someone was leading or carrying them.
+func server_bring_in(records: Array, at: Vector3, leader: Soldier) -> void:
+	var lvl := level as CompoundLevel
+	for i in records.size():
+		var r: Dictionary = records[i]
+		if hvt(String(r.hvt_id)) != null:
+			continue
+		var pos := at + Vector3(2.0 + i * 1.2, 0.0, 2.0)
+		var s := server_spawn_person({"name": String(r.name), "kind": String(r.kind), "side": String(r.side), "label": String(r.label),
+			"pos": lvl.above_ground(pos) if lvl else pos, "hvt_id": String(r.hvt_id)})
+		s.inventory.net_state = (r.gear as Dictionary).duplicate(true)
+		s.vitals.server_restore(r.get("vitals", {}))
+		server_set_state(s, {"cuffed": bool(r.cuffed), "surrendered": bool(r.surrendered)})
+		if leader and bool(r.get("led", false)):
+			server_set_state(s, {"led_by": key_of(leader), "order": "follow"})
+
+
 # --- Host: state ---------------------------------------------------------------------------
 
 ## Host only. Merges `changes` into `s`'s state and sends it to every peer.

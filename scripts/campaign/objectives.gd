@@ -116,13 +116,47 @@ static func from_contract(contract: Dictionary, origin := Vector3.ZERO) -> Array
 				site["module_id"] = String(contract.module_id)
 		if t.has("time_limit_s"):
 			site["time_limit_s"] = float(t.time_limit_s)
+		if contract.has("zone_id"):
+			site["zone_id"] = String(contract.zone_id)  # where it plays (a multi-zone contract's legs: LZ-7)
 		var obj := {
 			"oid": oid, "cid": contract.get("cid", ""), "kind": t.get("kind", ""),
 			"text": t.get("text", ""), "state": ACTIVE, "optional": bool(t.get("optional", false)),
 			"bonus_share": float(t.get("bonus_share", 0.0)), "progress": "", "params": site, "pos": site_pos(site),
 		}
 		out.append(obj)
+	for k in (contract.get("legs", []) as Array).size():
+		out.append_array(leg_objectives(contract, k, Vector3.ZERO, true))
 	return out
+
+
+## A multi-zone contract's leg `k` (LZ-7) as objectives: in its own zone at `origin` (its module's),
+## or, `pending`, listed with no place yet (the squad hasn't been there), named by its zone.
+static func leg_objectives(contract: Dictionary, k: int, origin: Vector3, pending: bool) -> Array:
+	var leg: Dictionary = contract.legs[k]
+	var as_contract := {"cid": "%s_l%d" % [contract.get("cid", "c"), k + 1], "uid": "%s_l%d" % [contract.get("uid", contract.get("cid", "")), k + 1],
+		"module": leg.module, "module_id": leg.module_id, "objectives": leg.objectives, "zone_id": leg.zone_id}
+	var out: Array = from_contract(as_contract, origin)
+	for obj: Dictionary in out:
+		obj["cid"] = contract.get("cid", "")
+		obj["leg"] = k
+		obj["text"] = "%s (in %s)" % [obj.text, String(leg.zone_name)]
+		if pending:
+			obj.params["pending"] = true
+			obj["pos"] = []
+	return out
+
+
+## Whether objective `o` plays in the level the session is in now (LZ-7: a leg in another zone
+## waits for the squad to walk there).
+static func here(o: Dictionary, level: Node) -> bool:
+	var params: Dictionary = o.get("params", {})
+	if params.get("pending", false):
+		return false
+	var zid := String(params.get("zone_id", ""))
+	if zid == "" or level == null:
+		return true
+	var def: Variant = level.get(&"def")
+	return not def is Dictionary or String((def as Dictionary).get("id", "")) == zid or ((def as Dictionary).get("crossings", []) as Array).is_empty()
 
 
 ## A site's HVT id made a contract's own (each contract has its own person); `uid` "" keeps it.
@@ -191,8 +225,11 @@ func contract_done(cid: String) -> bool:
 ## Map markers for the map agent: {"oid", "pos": Vector3, "text", "state", "kind", "optional"}.
 func markers() -> Array:
 	var out: Array = []
+	var level := get_tree().get_first_node_in_group(&"level") if is_inside_tree() else null
 	for o: Dictionary in list:
 		var p: Array = o.get("pos", [0, 0, 0])
+		if p.size() < 3 or not here(o, level):
+			continue  # (a leg in another zone, LZ-7: no place on this map)
 		out.append({"oid": o.oid, "pos": Vector3(float(p[0]), float(p[1]), float(p[2])), "text": o.text, "state": o.state,
 			"kind": o.kind, "optional": o.optional})
 	return out
@@ -215,6 +252,18 @@ func server_begin(objectives: Array) -> void:
 	_first_poll.clear()
 	_cache_off.clear()
 	_started.clear()
+	_commit()
+
+
+## Host: objectives that stand in for ones already listed (by "oid": a leg placed once the squad
+## walked into its zone, LZ-7) take their places, keeping how far they got.
+func server_replace(objectives: Array) -> void:
+	for n: Dictionary in objectives:
+		for i in list.size():
+			if String(list[i].oid) == String(n.oid):
+				var keep := String(list[i].state)
+				list[i] = n.duplicate(true)
+				list[i].state = keep
 	_commit()
 
 
@@ -350,7 +399,7 @@ func server_deployment_ending() -> void:
 ## Host: a cache was destroyed (by whatever means the caller saw).
 func server_cache_destroyed(cache_id: String) -> void:
 	for o: Dictionary in active():
-		if o.kind == DESTROY_CACHE and String(o.params.get("cache", cache_id)) == cache_id:
+		if o.kind == DESTROY_CACHE and String(o.params.get("cache", cache_id)) == cache_id and here(o, CompoundLevel.current(self)):
 			server_set_state(o.oid, DONE)
 
 
@@ -360,7 +409,7 @@ func server_cache_destroyed(cache_id: String) -> void:
 ## cache counts as destroyed (server_charge_blast). Returns whether the charge was placed.
 func server_place_charge(soldier: Soldier, oid: String) -> bool:
 	var o := get_objective(oid)
-	if o.is_empty() or o.kind != DESTROY_CACHE or o.state != ACTIVE or soldier == null:
+	if o.is_empty() or o.kind != DESTROY_CACHE or o.state != ACTIVE or soldier == null or not here(o, CompoundLevel.current(self)):
 		return false
 	var box := _box_of(o)
 	var centre := box.get_center()
@@ -379,9 +428,10 @@ func server_place_charge(soldier: Soldier, oid: String) -> bool:
 ## is destroyed.
 func server_charge_blast(pos: Vector3) -> void:
 	var kill := MissionRegistry.setting_f("charge_kill_m", 1.0)
+	var level := CompoundLevel.current(self)
 	for o: Dictionary in active():
-		if o.kind != DESTROY_CACHE:
-			continue
+		if o.kind != DESTROY_CACHE or not here(o, level):
+			continue  # (a leg's cache in another zone, LZ-7)
 		var box := _box_of(o)
 		var nearest := pos.clamp(box.position, box.end)
 		if nearest.distance_to(pos) <= kill:
@@ -406,6 +456,8 @@ func _process(delta: float) -> void:
 	if level == null:
 		return
 	for o: Dictionary in active():
+		if not here(o, level):
+			continue  # a leg in another zone (LZ-7)
 		match o.kind:
 			CLEAR_AREA:
 				_check_clear(o)

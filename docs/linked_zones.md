@@ -137,6 +137,11 @@ Anyone not at the crossing stays behind in that zone's save.
 **Left behind.** A squadmate left in another zone waits there while it remembers; they count as MIA
 only if the squad goes home without them (extraction's rule). A downed player respawns with the
 squad in their own kit (Captain, 2026-10-14).
+Built (2026-10-19): HVTs and hostages within the crossing, or led or carried by someone in it,
+cross with the squad as they were (`PeopleLayer.server_take_across` / `server_bring_in`). A
+squadmate left at a crossing on (second confirm) goes into the deployment's `"away"`. They wait
+at that spot when the squad comes back (`BaseHub._spawn_away`) and follow once a player reaches
+them. If the deployment ends first, they go MIA in that zone, with the recovery contract there.
 
 **Travel time (decided: hours per link).** On foot 2 game hours per link, by vehicle 1 hour, a heli
 hop about 30 minutes. Wounds, bleeding and fatigue tick over that time, so the downed need a medic
@@ -317,7 +322,11 @@ and they come with the squad when it crosses.
 6. **LZ-6 Building up the company.** Defences (slots, then free placement), hired guards, hired
    squads under high command, FOB tiers unlocking the endgame.
 7. **LZ-7 Multi-zone contract types**, and the neighbour's terrain pre-generated if LZ-1's load
-   numbers need it.
+   numbers need it. First type built (2026-10-19): **supply line** (contracts.json `"legs": 1`):
+   destroy the cache in the contract's zone and one in a linked neighbour. The leg's objectives
+   are listed from the start with no place (`params.pending`), go live once the squad walks into
+   its zone (`Contracts.server_arrived`), and only count in their own zone (`Objectives.here`).
+   Still to come: a manhunt across zones and a convoy chase.
 
 LZ-1 stands alone. LZ-2 needs LZ-1. LZ-3 and LZ-4 both need LZ-2 and can run side by side. LZ-5 needs
 LZ-1 and wave 6d's heat; LZ-6 needs LZ-5's attacks to matter; LZ-7 needs LZ-4. Split squads on a

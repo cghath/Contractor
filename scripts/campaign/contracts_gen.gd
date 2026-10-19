@@ -111,10 +111,14 @@ static func generate(rng: RandomNumberGenerator, ctx: Dictionary) -> Dictionary:
 		var fits := type_ids.filter(func(t: String) -> bool: return ZoneModules.base(at_type) in MissionRegistry.type_modules(MissionRegistry.type_def(t)))
 		if not fits.is_empty():
 			type_ids = fits
+	if String(MissionRegistry.zone(String(ctx.get("zone_id", ""))).get("kind", "")) == "hot":
+		type_ids = type_ids.filter(func(t: String) -> bool: return not MissionRegistry.type_def(t).has("legs"))  # (multi-zone: contract zones only)
 	if type_ids.is_empty():
 		type_ids = MissionRegistry.types()
 	var type_id: String = type_ids[rng.randi() % type_ids.size()]
 	var def := MissionRegistry.type_def(type_id)
+	if def.has("legs"):
+		kind = "contract"  # a multi-zone contract walks between contract zones (LZ-7)
 	var zone := MissionRegistry.zone(ctx.get("zone_id", ""))
 	if zone.is_empty():
 		var options := MissionRegistry.zones_for(MissionRegistry.type_modules(def), kind)
@@ -193,6 +197,7 @@ static func generate(rng: RandomNumberGenerator, ctx: Dictionary) -> Dictionary:
 	var base_pay := maxi(step, roundi(float(def.get("base_pay", 40000)) * pay_mult / step) * step)
 	var day := int(ctx.get("day", 1))
 	var mission := mission_target(rng, def, String(zone.get("zone_id", "")), target, at_module, ctx.get("avoid_modules", []))
+	var legs := _legs(rng, def, String(zone.get("zone_id", "")), target)
 	var limit_min := int(def.get("time_limit_min", 0))
 	# Wave 6c: a flashpoint the faction war just handed to `target` says so up front.
 	var war_driven := hot and WorldSites.is_flashpoint(String(zone.get("zone_id", "")))
@@ -200,7 +205,7 @@ static func generate(rng: RandomNumberGenerator, ctx: Dictionary) -> Dictionary:
 	if war_driven:
 		brief = "The %s just took %s off whoever had it. %s" % [MissionRegistry.faction_name(target), zone.get("name", ""), brief]
 	return {
-		"cid": "", "type": type_id, "title": "%s%s: %s" % [def.get("name", type_id), mission.title_extra, zone.get("name", "")],
+		"cid": "", "type": type_id, "title": "%s%s: %s" % [def.get("name", type_id), mission.title_extra, zone.get("name", "") + "".join(legs.map(func(l: Dictionary) -> String: return " and " + String(l.zone_name)))],
 		"brief": brief + (" Time limit: %d min." % limit_min if limit_min > 0 else ""), "source": source, "fixer": fixer.get("fixer", ""),
 		"employer": employer, "target": target, "war_driven": war_driven,
 		"zone_id": zone.get("zone_id", ""), "zone_name": zone.get("name", ""), "zone_kind": kind,
@@ -211,7 +216,7 @@ static func generate(rng: RandomNumberGenerator, ctx: Dictionary) -> Dictionary:
 		"threats": threats, "understated": understated, "revealed": false, "renegotiated": false,
 		"clawback": clawback,
 		"base_pay": base_pay, "days": int(def.get("days", 1)) + (1 if hot else 0),
-		"objectives": mission.objectives,
+		"objectives": mission.objectives, "legs": legs,
 		"offered_day": day, "expires_day": day + MissionRegistry.setting_i("offer_days", 5),
 		"state": "offered",
 	}
@@ -279,6 +284,28 @@ static func mission_target(rng: RandomNumberGenerator, def: Dictionary, zone_id:
 			o["time_limit_s"] = limit_s
 		objectives.append(o)
 	return {"module": module_type, "module_id": module_id, "objectives": objectives, "title_extra": title_extra}
+
+
+## A multi-zone contract's legs (docs/linked_zones.md LZ-7, call 13: "objectives over 2-3 linked
+## zones"): for a type with "legs": n, n of `zone_id`'s neighbours on the region map (RegionMap;
+## contract zones with a module the type plays in), each with its own target module and
+## objectives ({"zone_id", "zone_name", "module", "module_id", "objectives"}). [] for any other type.
+static func _legs(rng: RandomNumberGenerator, def: Dictionary, zone_id: String, target: String) -> Array:
+	var want := int(def.get("legs", 0))
+	if want <= 0 or zone_id == "":
+		return []
+	var pick := RandomNumberGenerator.new()
+	pick.seed = hash([rng.state, "legs"])
+	var allowed := MissionRegistry.type_modules(def)
+	var options: Array = RegionMap.links(zone_id).map(func(l: Dictionary) -> String: return String(l.to)).filter(func(z: String) -> bool:
+		return z != RegionMap.BASE and String(MissionRegistry.zone(z).get("kind", "")) == "contract" \
+			and (MissionRegistry.zone_def(z).get("modules", []) as Array).any(func(m: Dictionary) -> bool: return ZoneModules.base(String(m.type)) in allowed))
+	var out: Array = []
+	while out.size() < want and not options.is_empty():
+		var z: String = options.pop_at(pick.randi() % options.size())
+		var m := mission_target(pick, def, z, target)
+		out.append({"zone_id": z, "zone_name": String(MissionRegistry.zone(z).get("name", z)), "module": m.module, "module_id": m.module_id, "objectives": m.objectives})
+	return out
 
 
 ## The clawback terms (data/contracts.json "clawback_terms"): {term: {"weight", "pay_mult"}}.

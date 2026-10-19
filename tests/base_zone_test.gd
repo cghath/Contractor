@@ -15,6 +15,11 @@ var tag := OS.get_environment("CONTRACTOR_TEST_TAG")
 var level: CompoundLevel
 
 
+## The squadmate left in another zone at a crossing (_test_cross_on), and that zone.
+var _left_mid := ""
+var _left_zone := ""
+
+
 func _ready() -> void:
 	GameState.zone_id = "test_base_lz1" + tag
 	Campaign.campaign_id = "test_base_lz1" + tag  # never touch a real save
@@ -123,6 +128,7 @@ func _run() -> void:
 	var back := BaseArmory.counts(base.server_collect_stash())
 	check(back == stash_out, "the stash came back once, not twice (%s)" % str(back.get(&"m17", 0)))
 	_test_region_map()
+	_test_supply_line()
 	_test_zone_memory()
 	_test_threats()
 	await _test_assault()
@@ -234,6 +240,12 @@ func _test_crossings() -> void:
 	await _wait_until(func() -> bool: return BaseHub.in_base() and not BaseHub.switch_pending(), 40.0)
 	base = CompoundLevel.current(self) as BaseZoneLevel
 	check(base != null and not RosterDeployment.is_running(BaseHub.roster()), "back at the base zone, the deployment over")
+	if _left_mid != "":
+		var lm := BaseHub.member(_left_mid)
+		var recover := Contracts.board().filter(func(c: Dictionary) -> bool: return String(c.get("recover_mid", "")) == _left_mid)
+		check(String(lm.get("status", "")) == Roster.MIA and String(lm.get("mia_zone", "")) == _left_zone
+			and not recover.is_empty() and String(recover[0].zone_id) == _left_zone,
+			"never fetched, they're missing in %s, a recovery contract there (%s, %s)" % [_left_zone, lm.get("status", "?"), lm.get("mia_zone", "?")])
 	var lost := rep_before - Economy.reputation("black_ridge")
 	check(lost > 0,  # (-4 for this raid; the day turning over drifts standing a little too)
 		"the raid cost standing with the faction it hit (%d)" % lost)
@@ -245,6 +257,45 @@ func _test_crossings() -> void:
 	var at2 := Vector2(float(mine.pos[0]), float(mine.pos[1])) if not mine.is_empty() else Vector2.INF
 	check(me != null and Vector2(me.global_position.x, me.global_position.z).distance_to(at2) < 25.0,
 		"arriving at the base's crossing from %s, not the gate (%.0f m from it)" % [to, Vector2(me.global_position.x, me.global_position.z).distance_to(at2) if me else INF])
+
+
+## LZ-7: a supply line's cache here and its leg's in a neighbouring zone, listed from the start,
+## the leg checked only once the squad is in its zone and placed there.
+func _test_supply_line() -> void:
+	print("Supply line (LZ-7)")
+	var c := {}
+	for z: Dictionary in MissionRegistry.zones():
+		if String(z.get("kind", "")) != "contract":
+			continue
+		var rng := RandomNumberGenerator.new()
+		rng.seed = hash(String(z.zone_id))
+		var o := ContractGen.generate(rng, {"type": "supply_line", "zone_id": String(z.zone_id), "source": "safe"})
+		if not (o.get("legs", []) as Array).is_empty():
+			c = o
+			break
+	check(not c.is_empty(), "a supply line generates with a leg in a neighbouring zone")
+	if c.is_empty():
+		return
+	var leg: Dictionary = c.legs[0]
+	var linked := RegionMap.links(String(c.zone_id)).any(func(l: Dictionary) -> bool: return String(l.to) == String(leg.zone_id))
+	check(linked and String(leg.zone_id) != String(c.zone_id) and String(leg.module_id) != "" and not (leg.objectives as Array).is_empty(),
+		"its leg is next door, at a module of its own (%s, %s in %s)" % [c.title, leg.module_id, leg.zone_id])
+	check(String(c.title).contains(String(leg.zone_name)), "and the title names both zones (%s)" % c.title)
+	c["cid"] = "sl1"
+	var objs := Objectives.from_contract(c)
+	var pending := objs.filter(func(o: Dictionary) -> bool: return o.has("leg"))
+	check(pending.size() == (leg.objectives as Array).size() and pending.all(func(o: Dictionary) -> bool:
+		return o.params.get("pending", false) and (o.pos as Array).is_empty() and String(o.text).contains(String(leg.zone_name)) and o.cid == "sl1"),
+		"the leg is listed from the start, with no place yet, named by its zone")
+	var main_obj: Dictionary = objs[0]
+	var fake := ZoneLevel.new()
+	fake.def = {"id": String(c.zone_id), "crossings": [{}]}
+	check(Objectives.here(main_obj, fake) and not Objectives.here(pending[0], fake), "in the contract's zone its cache counts, the leg's doesn't")
+	var placed := Objectives.leg_objectives(c, 0, Vector3(100, 0, 0), false)
+	fake.def = {"id": String(leg.zone_id), "crossings": [{}]}
+	check(Objectives.here(placed[0], fake) and not Objectives.here(main_obj, fake) and String(placed[0].oid) == String(pending[0].oid),
+		"walked into the leg's zone it counts there, the first cache doesn't (same objective, placed)")
+	fake.free()
 
 
 func _cheapest(pool: Array) -> Dictionary:
@@ -283,6 +334,12 @@ func _test_cross_on(zone: ZoneLevel, from_id: String) -> ZoneLevel:
 	me.global_position = at
 	for k in mates.size():
 		(mates[k] as Soldier).global_position = at + Vector3(k * 1.5 - 1.0, 0, 1.5)
+	# A captured HVT, cuffed and led by the player: he comes along (LZ-2).
+	var layer := zone.get_node(^"People") as PeopleLayer
+	var captive := layer.server_spawn_person({"name": "Person_xing_hvt", "kind": "hvt", "side": Person.HOSTILE, "label": "HVT (Crossing)",
+		"pos": at + Vector3(0, 0, -2.0), "hvt_id": "xing_hvt"})
+	layer.server_set_state(captive, {"cuffed": true, "surrendered": true})
+	layer.server_lead(me, captive)
 	await get_tree().physics_frame
 	# A helicopter lost and a cooldown running: both go on with the deployment (LZ-3).
 	var helis := HeliSupports.of(zone)
@@ -314,6 +371,11 @@ func _test_cross_on(zone: ZoneLevel, from_id: String) -> ZoneLevel:
 		"the lost helicopter and the cooldown come along (%.0f s left)" % (helis_next.cooldown_left("resupply") if helis_next else 0.0))
 	var briefing := MapNodes.briefing(next)
 	check(briefing == null or not briefing.is_open(), "no second briefing")
+	var layer2 := next.get_node_or_null(^"People") as PeopleLayer
+	var hvt2: Soldier = layer2.hvt("xing_hvt") if layer2 else null
+	check(hvt2 != null and bool(layer2.state_of(hvt2).get("cuffed", false)) and String(layer2.state_of(hvt2).get("led_by", "")) == layer2.key_of(me)
+		and hvt2.global_position.distance_to(me.global_position) < 8.0,
+		"the cuffed HVT he led comes along, still cuffed and following him")
 	# And back the way they came.
 	var nx := MapNodes.extraction(next)
 	await _wait_until(func() -> bool: return nx.is_active(), 5.0)
@@ -326,17 +388,38 @@ func _test_cross_on(zone: ZoneLevel, from_id: String) -> ZoneLevel:
 		return null
 	var at2 := next.ground_point(Vector3(back.pos.x, 0, back.pos.y))
 	me.global_position = at2
+	if hvt2:
+		hvt2.global_position = at2 + Vector3(0, 0, -2.0)
+	# The first squadmate stays behind in this zone (LZ-2: left at the crossing, they wait here).
 	for k in came.size():
-		(next.ai.get_node(NodePath(came[k])) as Soldier).global_position = at2 + Vector3(k * 1.5 - 1.0, 0, 1.5)
+		var mate := next.ai.get_node(NodePath(came[k])) as Soldier
+		mate.global_position = at2 + Vector3(k * 1.5 - 1.0, 0, 1.5) if k > 0 else next.ground_point(at2 + Vector3(0, 0, 150.0))
+		if k == 0:
+			_left_mid = String(mate.get_meta(&"roster_id"))
+			_left_zone = next_id
+			var brain := SquadAI.of(mate)
+			if brain:
+				brain.order = Squad.Order.HOLD
 	await get_tree().physics_frame
 	nx.countdown_s = 0.5
 	why = nx.server_confirm(1)
+	if _left_mid != "":
+		check(why.begins_with("Leaving behind"), "a squadmate away from the crossing: warned first (%s)" % why)
+		why = nx.server_confirm(1)
 	check(why == "", "and back (%s)" % why)
 	await _wait_until(func() -> bool:
 		var l := CompoundLevel.current(self) as ZoneLevel
 		return l != null and String(l.def.id) == from_id and not BaseHub.switch_pending(), 40.0)
 	var again := CompoundLevel.current(self) as ZoneLevel
 	check(again != null and String(again.def.id) == from_id, "back in %s" % from_id)
+	if _left_mid != "":
+		var away: Dictionary = RosterDeployment.active(BaseHub.roster()).get("away", {}).get(_left_mid, {})
+		var callsign := String(BaseHub.member(_left_mid).callsign)
+		check(String(away.get("zone_id", "")) == _left_zone and again.ai.get_node_or_null(NodePath(callsign)) == null,
+			"the squadmate left at the crossing stays in %s, not with the squad (%s)" % [_left_zone, away.get("zone_id", "none")])
+	var layer3 := again.get_node_or_null(^"People") as PeopleLayer if again else null
+	var hvts_back: Array = layer3.people().filter(func(s: Soldier) -> bool: return String(layer3.state_of(s).get("hvt_id", "")) == "xing_hvt") if layer3 else []
+	check(hvts_back.size() == 1, "and back with them, once (%d)" % hvts_back.size())
 	await _wait_until(func() -> bool: return again != null and again.players.get_node_or_null(^"1") != null, 10.0)
 	return again
 

@@ -172,6 +172,25 @@ func support_left(cid: String) -> int:
 ## a module the zone no longer has, or one of another type: heal_module_id points it at a module
 ## of its type first, so the markers never fall back to the zone's centre (Captain, 2026-10-15:
 ## HVT, bonus and "Hostiles at" markers ~400 m off the village).
+## Host, a zone up mid-deployment (ZoneLevel, LZ-7): the legs of live contracts that play in
+## `zone_id` get their places (their module's in this level), and go live like any objectives
+## (contract_live: people, intel).
+func server_arrived(zone_id: String) -> void:
+	if not _is_host() or (_s().deployment as Dictionary).is_empty():
+		return
+	for cid: String in _s().deployment.get("cids", []):
+		var c := contract(cid)
+		var legs: Array = c.get("legs", [])
+		for k in legs.size():
+			if String(legs[k].zone_id) != zone_id:
+				continue
+			var leg_c := {"module_id": String(legs[k].module_id)}
+			var placed := Objectives.leg_objectives(c, k, module_origin(leg_c), false)
+			objectives.server_replace(placed)
+			contract_live.emit(cid, placed)
+			SessionLog.note("contract %s: its leg in %s is live" % [cid, zone_id])
+
+
 func module_origin(c: Dictionary, fallback := Vector3.ZERO) -> Vector3:
 	var lvl := CompoundLevel.current(self) if is_inside_tree() else null
 	if lvl and lvl.has_method(&"get_module"):

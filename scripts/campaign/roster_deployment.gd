@@ -97,7 +97,7 @@ static func member_for_slot(data: Dictionary, role: StringName, present: Diction
 	var free: Array[String] = []
 	for mid: Variant in dep.squad:
 		var m := Roster.get_member(data, String(mid))
-		if not m.is_empty() and Roster.is_available(m) and not present.has(String(mid)) and not dep.get("fallen", {}).has(String(mid)):
+		if not m.is_empty() and Roster.is_available(m) and not present.has(String(mid)) and not dep.get("fallen", {}).has(String(mid)) 				and not dep.get("away", {}).has(String(mid)):  # (left in another zone, LZ-2: BaseHub.server_cross_on)
 			free.append(String(mid))
 	for mid in free:
 		if StringName(Roster.get_member(data, mid).role) == role:
@@ -194,7 +194,7 @@ static func resolve(data: Dictionary, outcomes: Dictionary, rng: RandomNumberGen
 			LEFT_BEHIND:
 				m["status"] = Roster.MIA
 				m["gear"] = Roster.json_safe(o.get("gear", m.gear))
-				m["mia_zone"] = report.zone_id
+				m["mia_zone"] = String(o.get("zone_id", report.zone_id))  # (left in another zone on the way: LZ-2)
 				m["mia_pos"] = o.get("pos", [])
 				Roster.add_history(m, day, "Missing in action in %s" % report.zone_id)
 				report.mia.append(mid)

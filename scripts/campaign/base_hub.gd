@@ -505,6 +505,9 @@ var _next_arrival := ""
 var _carry := {}
 ## Host: the switch under way is a crossing on (no second briefing in the next zone).
 var _crossing_on := false
+## The HVTs and hostages walking on with the squad (PeopleLayer.server_take_across), brought in
+## when the next zone is up (server_land_people).
+var _carry_people: Array = []
 
 
 ## Whether the base is the base zone (BaseZoneLevel) rather than BaseLevel.
@@ -553,7 +556,12 @@ func server_cross_on(to: String, to_crossing: String, extraction: Extraction) ->
 		if s and s.has_meta(&"roster_id") and not s.vitals.is_dead() and not s.is_queued_for_deletion():
 			var mid := String(s.get_meta(&"roster_id"))
 			server_store_member_gear(mid, s.inventory.net_state)
+			if extraction and not point.is_empty() and not extraction.inside(point, s.body_point()):
+				_leave_in_zone(s, String((lvl.get(&"def") as Dictionary).get("id", "")))  # left at the crossing: they wait here
+				continue
 			_carry["m:" + mid] = {"gear": s.inventory.net_state.duplicate(true), "vitals": s.vitals.server_snapshot()}
+	var people := lvl.get_node_or_null(^"People") as PeopleLayer
+	_carry_people = people.server_take_across(point.pos, float(point.get("radius", Extraction.RADIUS_M)) * 2.0) 		if people and point.get("pos") is Vector2 else []
 	_tally_raid(lvl)  # what the raid hit here, before the zone goes (LZ-4)
 	GameState.save_zone()  # the zone keeps what's in it while it remembers (zone memory)
 	var dep := RosterDeployment.active(roster())
@@ -642,6 +650,62 @@ func carried_support_limits() -> Dictionary:
 
 
 ## Host: what `key` ("p:<peer>" / "m:<member id>") carried across a crossing goes onto `s`.
+## Host (server_cross_on): squadmate `s`, left at the crossing (Extraction's second confirm),
+## stays in zone `zone_id` while the squad walks on: the deployment's "away" keeps where they
+## are, their gear and their wounds. They wait there (_spawn_away) until the squad comes back for
+## them; if the deployment ends first they're left behind (MIA there, a recovery contract).
+func _leave_in_zone(s: Soldier, zone_id: String) -> void:
+	var dep := RosterDeployment.active(roster())
+	var mid := String(s.get_meta(&"roster_id"))
+	var p := s.global_position
+	if not dep.has("away"):
+		dep["away"] = {}
+	dep.away[mid] = {"zone_id": zone_id, "pos": [p.x, p.y, p.z], "gear": Roster.json_safe(s.inventory.net_state.duplicate(true)),
+		"vitals": s.vitals.server_snapshot()}
+	SessionLog.note("crossing: %s stays behind in %s" % [String(s.name), zone_id])
+
+
+## Host, a zone up mid-deployment: squadmates left here at a crossing (_leave_in_zone) wait
+## where they were, hurt as they were, until a player reaches them (_check_recovery_targets:
+## then they follow and are back with the squad).
+func _spawn_away(lvl: CompoundLevel) -> void:
+	var dep := RosterDeployment.active(roster())
+	var zone_id := String(lvl.get(&"def").get("id", "")) if lvl.get(&"def") is Dictionary else ""
+	for mid: String in dep.get("away", {}):
+		var a: Dictionary = dep.away[mid]
+		var m := member(mid)
+		if String(a.zone_id) != zone_id or m.is_empty() or lvl.ai.get_node_or_null(NodePath(String(m.callsign))):
+			continue
+		var stats := Roster.ai_stats(m)
+		var data := {"name": String(m.callsign), "faction": "friendly", "variant": "tan", "pos": Vector3(float(a.pos[0]), float(a.pos[1]) + 0.1, float(a.pos[2])),
+			"loadout": [], "role": "", "team": 0, "slot": -1, "combat": stats.combat, "discipline": stats.discipline, "guard": true}
+		data.merge(Roster.identity(m))
+		var s: Soldier = lvl.spawn_soldier(data)
+		s.role = StringName(m.get("role", Roles.RIFLEMAN))
+		s.set_meta(&"roster_id", mid)
+		s.set_meta(&"recovery", true)
+		s.set_meta(&"away", true)
+		s.inventory.net_state = GameState.from_json((a.gear as Dictionary).duplicate(true))
+		s.vitals.server_restore(a.get("vitals", {}))
+		var brain := SquadAI.of(s)
+		if brain:
+			brain.order = Squad.Order.HOLD
+
+
+## Host, a zone up after a crossing on (ZoneLevel): the HVTs and hostages who came along arrive
+## by the host's player, following whoever led them; squadmates left here earlier are waiting.
+func server_land_people(lvl: CompoundLevel) -> void:
+	_spawn_away(lvl)
+	if _carry_people.is_empty():
+		return
+	var people := lvl.get_node_or_null(^"People") as PeopleLayer
+	var me := lvl.players.get_node_or_null(^"1") as Soldier
+	if people:
+		people.server_bring_in(_carry_people, me.global_position if me else Vector3.ZERO, me)
+		SessionLog.note("crossing: %d HVT(s)/hostage(s) came along" % _carry_people.size())
+	_carry_people = []
+
+
 func _apply_carry(key: String, s: Soldier) -> void:
 	var c: Dictionary = _carry.get(key, {})
 	if c.is_empty():
@@ -1543,6 +1607,8 @@ func _check_recovery_targets() -> void:
 		for p: Node in lvl.players.get_children():
 			if p is Soldier and (p as Soldier).global_position.distance_to(s.global_position) <= FOUND_M:
 				s.set_meta(&"found", true)
+				if s.has_meta(&"away"):  # left at a crossing, back with the squad (LZ-2)
+					RosterDeployment.active(roster()).get("away", {}).erase(String(s.get_meta(&"roster_id")))
 				var brain := SquadAI.of(s)
 				if brain:
 					brain.on_order(Squad.Order.FOLLOW, s.global_position, 0, 1)
@@ -1669,6 +1735,11 @@ func server_end_deployment(extracted: Array, return_to_base := true, advance_day
 	for mid: String in dep.spawned:
 		var s: Soldier = bodies.get(mid)
 		var o := {}
+		var away: Dictionary = dep.get("away", {}).get(mid, {})
+		if s == null and not away.is_empty() and not dep.get("fallen", {}).has(mid):
+			# Left in another zone at a crossing and never fetched (LZ-2): missing there.
+			outcomes.members[mid] = {"state": RosterDeployment.LEFT_BEHIND, "gear": away.gear, "pos": away.pos, "zone_id": away.zone_id}
+			continue
 		if dep.get("fallen", {}).has(mid) or s == null or s.vitals.is_dead():
 			o["state"] = RosterDeployment.KILLED
 		else:
@@ -1692,7 +1763,7 @@ func server_end_deployment(extracted: Array, return_to_base := true, advance_day
 	for mid: String in report.mia:
 		var m := member(mid)
 		BaseEconomy.request_recovery_contract({"mid": mid, "name": m.name, "callsign": m.callsign, "role": m.role,
-			"zone_id": report.zone_id, "day": day(), "pos": m.get("mia_pos", [])})
+			"zone_id": String(m.get("mia_zone", report.zone_id)), "day": day(), "pos": m.get("mia_pos", [])})
 	GameState.save_zone()  # the zone keeps its bodies, loot and damage
 	if advance_days:
 		server_advance_days(int(RosterDeployment.DAYS.get(report.zone_kind, 1)))

@@ -68,7 +68,12 @@
 		 "modules": ["village", "town", "compound"], "base_pay": 56000, "days": 1, "enemy_count": [6, 12], "enemy_quality": [0.35, 0.7],
 		 "threat_pool": ["sniper", "qrf", "ied"],
 		 "scenario_knobs": {"first_wave_s": [240, 360], "gap_s": 180, "approach_m": 240, "ambush_men": [3, 5], "ambush_off_m": 35, "unhurt_bonus_share": 0.15},
-		 "objectives": []}
+		 "objectives": []},
+		{"type": "supply_line", "name": "Supply line",
+		 "brief": "Hostiles move weapons along a line of caches across neighbouring zones. Destroy the cache here and the one in the next zone over: walk on through the crossing between them (docs/linked_zones.md LZ-7).",
+		 "modules": ["outpost", "compound", "village", "checkpoint"], "legs": 1,
+		 "base_pay": 72000, "days": 2, "enemy_count": [4, 9], "enemy_quality": [0.3, 0.65], "threat_pool": ["mg_nest", "ied", "qrf"],
+		 "objectives": [{"kind": "destroy_cache", "site": "cache", "text": "Destroy the {name}"}]}
 	],
 
 	"_modules": "Sites per module type, in metres from the module's origin on the ground (the zone module types of ZoneModules; the compound as CompoundLevel builds it). rect [x, z, w, d] (clear an area), pos [x, y, z], box [[x, y, z], [x, y, z]] (a cache: \"voxels\" is its solid count on the pristine module, \"auto\" counts it from the module's boxes). \"place\": an intel item the mission puts there; \"items\"/\"tags\": what counts as carried out; \"hvt\" + \"person\": a person the mission puts there (side hostile: an HVT to capture, friendly: a hostage); \"of_hvt\": an item the HVT of that site carries. \"civilians\": people going about their day there while a contract runs in the zone (\"routine\": points they walk between).",
