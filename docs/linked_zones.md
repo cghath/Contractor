@@ -1,315 +1,296 @@
 # Linked zones: the base as a zone, edge transitions, raids
 
-**Status:** design proposal, 2026-10-18, for the Captain's sign-off. Nothing built yet.
+**Status:** design, 2026-10-18/19. Most calls decided by the Captain (six rounds of questions,
+2026-10-19 CDT); the few still open carry proposed answers. Nothing built yet.
 
 The Captain's direction (2026-10-18): "the player base needs to be in a zone of its own, one that
 can be explored", "raid style excursions should be a thing", "similar to stalker you can go zone
-to zone via entries and exits, all the while able to use your supports".
+to zone via entries and exits, all the while able to use your supports". And on the base zone
+(2026-10-19): "we also get possible hostile patrols or attacks as we cause them issues, causing the
+player to need to build up his pmc. this will incentivize moving towards end game".
 
 The idea learns from STALKER's zone transitions: a region is a set of separate maps, each loaded on
 its own, joined by marked crossing points at their edges. Walking into one loads the next map and
-puts you at its matching entry; whatever you carry comes with you; the map you left keeps its
-state. It feels like one world while each piece stays small enough to run well. Contractor already
+puts you at its matching entry; what you carry comes with you; the map you left keeps its state for
+a while. It feels like one world while each piece stays small enough to run well. Contractor already
 has most of the pieces: zones are separate levels made from a definition, the session swaps levels
 for every peer, zones save per id, and extraction already knows the zone's edge.
-
-This page sets out what's in the code to build on, the design, the calls the Captain still has to
-make (each with a proposed answer, so a yes is enough) and a build order.
 
 ## Already in the code to build on
 
 | Piece | Where | What it gives linked zones |
 |---|---|---|
-| The base hub | `BaseLevel` (a `CompoundLevel`, 39 m HESCO square, terminals, armory stash on the floor, muster line) | The FOB's contents; it becomes the core of the base zone |
+| The base hub | `BaseLevel` (a `CompoundLevel`, 39 m HESCO square, terminals, armory stash on the floor, muster line) | The FOB's contents; the core of the base zone |
 | The campaign's base state | `BaseHub` (roster, hiring, base sections; `server_deploy`, `server_end_deployment`) | Prep, squad picks and the settle-up on return stay its job |
-| Level swap for the whole session | `BaseHub.server_switch_level` → `LevelSwitch.load_level`, waits for peers (`SWITCH_WAIT_S`), late joiners follow the host's level | A zone crossing is a level swap with a destination entry |
-| Zones from a definition | `ZoneDef` (`generate`, `generate_hot`, `normalize`, `insertion`/`extraction` lists, `EDGE_POINT_IN_M`), `ZoneLevel.configure(def)` | Edge points already exist; a link is one more list in the def |
-| Per-zone saves | `GameState` (`zone_id`, `looted`, `dropped`, `voxel_edits`, `bodies`, `fallen_posts`, `vehicles`), `BaseHub.zone_save_id` (`<campaign>__<zone>`), `base_zone_id()` = `fob` | A zone you leave can be written and put back when you return |
-| Zones fresh each contract | `BaseHub.set_aside_zone_save` (Captain, 2026-10-14; never deleted) | The rule that decides when a linked zone is fresh (call 4) |
-| Edge exits | `Extraction` (`edge_reach`, `at_edge`, foot points within `EDGE_EXFIL_M`, `server_drive_out` at `VEHICLE_OUT_M`, the two-confirm leave-behind rule) | A crossing is an edge exit that leads somewhere instead of ending the deployment |
-| The report of what got out | `Contracts.report_from_level`, `Extraction` report (players, squad, left_behind, bodies, items, driven_out, vehicles) | Exactly the cargo list of a crossing |
-| Regions and travel | `data/contracts.json` `regions` (coast: 1 travel day, base `lhd`; inland: 2, base `fob`), `contracts_debrief.gd` adds `travel_days` | The region map and the clock cost of moving |
-| Support origins | `Supports.origin_for` (registered `lhd`/`fob` origin, else the map edge nearest the squad), `Lhd.install` (LHD on coastal zones, FOB marker on the "fob_side" inland) | Where helis, the AAV and allied troops come from in any zone |
-| Supports in the zone | `HeliSupports`/`HeliCall` (resupply, transport, extraction), `AavSupport`, `AlliedTroops` (two elements, cooldowns, host high command), `MotorPool` (`server_bring`, `server_return`, "out" zone) | What has to carry over or be re-called across a crossing |
-| Streaming | `ZoneLevel` modules in at 260 m, out at 340 m, one per 0.25 s; virtualization designed (`docs/virtualization.md`) | Keeps a big base zone and bigger linked zones affordable |
+| Level swap for the session | `BaseHub.server_switch_level` → `LevelSwitch.load_level`, waits for peers (`SWITCH_WAIT_S`), late joiners follow the host | A crossing is a level swap with a destination entry |
+| Zones from a definition | `ZoneDef` (`generate`, `generate_hot`, `normalize`, `insertion`/`extraction`, `EDGE_POINT_IN_M`), `ZoneLevel.configure(def)` | Edge points exist; a link is one more list in the def |
+| Per-zone saves | `GameState` (`looted`, `dropped`, `voxel_edits`, `bodies`, `fallen_posts`, `vehicles`), `BaseHub.zone_save_id`, `base_zone_id()` = `fob` | A zone you leave is written and put back when you return |
+| Zones fresh each contract | `BaseHub.set_aside_zone_save` (Captain, 2026-10-14; set aside, never deleted) | Replaced by the week-long fade (call 5) |
+| Edge exits | `Extraction` (`edge_reach`, foot points within `EDGE_EXFIL_M`, `server_drive_out`, the two-confirm leave-behind rule) | A crossing is an edge exit that leads somewhere |
+| The report of what got out | `Contracts.report_from_level`, the extraction report | The cargo list of a crossing |
+| Regions and travel | `data/contracts.json` `regions` (coast 1 travel day, base `lhd`; inland 2, base `fob`), `contracts_debrief.gd` | The region map and the clock |
+| Support origins | `Supports.origin_for`, `Lhd.install` (LHD offshore, FOB marker on `fob_side`) | Where supports come from in any zone |
+| Supports in the zone | `HeliSupports`/`HeliCall`, `AavSupport`, `AlliedTroops` (elements, cooldowns, host high command, map orders), `MotorPool` | What crosses with the squad; the high command tools hired squads reuse |
+| Enemy memory | `WorldSites` (holder, grip), `EnemyCommand` (caution per zone), heat (wave 6d) | What drives attacks on the base and reoccupation |
+| Streaming | `ZoneLevel` modules in at 260 m / out at 340 m; virtualization designed (`docs/virtualization.md`) | Keeps a big base zone affordable |
 
 ## Design
 
 ### 1. The base zone
 
-The base stops being a 39 m box and becomes a zone of its own: a `ZoneLevel` with the FOB built in
-it as a module, explorable out to its edges.
+The base stops being a 39 m box and becomes a full zone: a `ZoneLevel` with the FOB built in it
+as a module, explorable out to its edges, and a place the enemy comes to as the company makes
+trouble for them.
 
-- **Size and ground.** A contract-sized zone (proposed 1536 m square, `ZoneDef.normalize` as any
-  other), terrain from its region's preset (inland FOB: the region's preset; coast: a coastal
-  lowland with the LHD offshore, `Lhd.install` already places it). Seeded from the campaign seed, so
-  every campaign has its own base ground and it never changes within one.
+- **Size and ground (decided: a full contract-size zone).** 1920-2304 m (proposed 2304 m), seeded
+  from the campaign seed, on its region's terrain (coast: with the LHD offshore, `Lhd.install`
+  already places it). It never changes within a campaign.
 - **What it holds.**
-  - The FOB compound at the centre: today's `BaseLevel._build_structures` moved into a `fob` module
-    type (`ZoneModules`), at its current size first, bigger later (wave 7 world pass: barracks,
-    helipad, range). Terminals, armory stash, muster line, motor pool and stores stay where they are
-    inside it, so nothing about the hub screens moves.
-  - A helipad and a vehicle park outside the wire (where helis land for insertion, where motor-pool
-    vehicles stand ready to drive out).
-  - A firing range and a driving loop (test kit and vehicles before a contract).
-  - Around the FOB, a quiet ring (proposed 400 m: no hostiles ever) and beyond it the **local
-    area**: a village or two of civilians (the Salvage Union's people, traders), a few abandoned
-    sites with low-grade scavenging (need-based scavenging already exists), and rare low-threat
-    hostiles past 600 m (bandits, a stray patrol: proposed off by default, call 2).
-  - Exits at its edges into the region's other zones (section 2).
-- **How it wraps BaseLevel.** `BaseLevel` today is a `CompoundLevel`; the base zone is a `ZoneLevel`.
-  Proposed: a new `BaseZoneLevel extends ZoneLevel` that does what `BaseLevel` does in its
-  `_on_hosted` (spawn the stash, show the roster, call `BaseHub.server_level_ready`) and keeps its
-  public face (`server_spawn_stash`, `server_collect_stash`, `server_deliver`, `server_show_roster`,
-  `server_read_muster_gear`, `muster_soldier`), with the FOB module's origin as the offset for
-  `MUSTER_ORIGIN`, `DELIVERY` and `TERMINALS`. `BaseHub` asks `level() is BaseLevel` in places; those
-  become a small `is_base()` check that both answer. `BaseLevel` stays as the fallback (and for the
-  suites that load it) until phase 1 is proven, then goes.
-- **The stash outside the armory.** Today "anything left lying in the hub counts as stash". In a
-  1.5 km zone that would bank a rifle dropped in a field. Proposed: only items inside the FOB's wire
-  count as stash; items elsewhere in the base zone stay where they lie in the base zone's save, like
-  any zone.
-- **Hub screens.** Unchanged: the terminals still open `BaseUI` pages. The ops desk gains the
-  **region map** (section 2) and the raid launch (section 3). The contract board is unchanged.
-  Deploying by helicopter from the base (today's way) stays: the briefing and insertion choice work
-  as now. Walking or driving out of a base exit is the new, second way.
-- **Saves.** The base zone uses the save it already has a name for (`base_zone_id()` = `fob`), and
-  is never set aside (`set_aside_zone_save` already refuses the FOB's). Its voxel edits, dropped
-  items, parked vehicles and bodies persist for the campaign.
+  - The FOB compound: today's `BaseLevel._build_structures` as a `fob` module type
+    (`ZoneModules`), at today's size first. Terminals, stash, muster line, motor pool and stores keep
+    their places inside it, so the hub screens don't move. It grows with base upgrades (section 1b).
+  - Outside the wire: a helipad, a vehicle park, a firing range and a driving loop.
+  - The local area: abandoned sites to scavenge (need-based scavenging and the compound loot boxes),
+    a village or two of civilians, roads and trails to the edge crossings.
+  - Crossings at its edges into the neighbouring zones (section 2).
+- **How it wraps BaseLevel.** A new `BaseZoneLevel extends ZoneLevel` does what `BaseLevel._on_hosted`
+  does (spawn the stash, show the roster, `BaseHub.server_level_ready`) and keeps its public face
+  (`server_spawn_stash`, `server_collect_stash`, `server_deliver`, `server_show_roster`,
+  `server_read_muster_gear`, `muster_soldier`), with `MUSTER_ORIGIN`, `DELIVERY` and `TERMINALS`
+  offset by the FOB module's origin. `BaseHub`'s four `is BaseLevel` checks become an `is_base()`
+  both answer. `BaseLevel` stays as the fallback for the suites until phase 1 is proven.
+- **The stash.** Only items inside the FOB's wire count as stash; items elsewhere in the base zone
+  lie where they were dropped, in the base zone's save.
+- **Hub screens.** Unchanged; the ops desk adds the region map (section 2), raid launch (section 3),
+  base defence and the company's hired squads (section 1b). Deploying by heli from the base stays.
+- **Saves.** The base zone keeps the save it already has a name for (`fob`) and is never set aside.
+
+### 1b. Threats to the base and building up the company (decided)
+
+The base area is quiet while nobody is after you. Trouble you cause brings trouble home, which is
+the push to build up the PMC and toward the endgame.
+
+- **Hostiles near the base.** None inside 400 m of the wire in normal times. Past 600 m, bandits or
+  strays, as an option (off by default). Beyond that, everything comes from heat.
+- **Heat-driven tiers.** Heat with a faction (wave 6d) brings, in order: patrols into the far base
+  area; probes on the wire; then a full assault, a "defend the base" event the company is warned
+  about a day ahead (on the board and the radio). Proposed thresholds: patrols from heat 30,
+  probes from 50, assaults from 70, no more than one assault a week.
+- **Attacks while the squad is out (decided: a mixture, by the situation).** The radio sends a
+  **situation report**: who is attacking, in what strength, what the defences and guards can hold,
+  and whether returning is recommended. Small probes resolve off-screen from the defences and guard
+  strength (losses: guards, defences, stash items near the wire; never the FOB itself). A big
+  assault while the squad is within a few links goes live: the host chooses to come back, and the
+  base holds out until they cross in, or until a time limit runs out and it resolves off-screen.
+- **Building up (decided: all of these).**
+  - **Defences bought** at the ops desk (watchtowers, HESCO extensions, MG and mortar pits,
+    sensors), placed at set slots or **freely** by the players with a placement tool (valid ground,
+    inside the base's build area).
+  - **Hired guards** who man the base while the squad is out (wages, part of the weekly bill).
+  - **Hired player-faction squads you command** (decided; inspired by Arma 3's Platoon Commander
+    mod): whole AI squads hired into the company, each with its own leader, gear and wages, ordered
+    through the host's high command and map orders (the `AlliedTroops` tools: their own `Squad`,
+    general orders, map orders). They can guard the base, come on deployments and raids, or be sent
+    on their own tasks. This is the company-owned version of allied troops, and the road to the hero
+    squad leaders and wave 8's player-built faction.
+  - **Base upgrades unlock the endgame**: FOB tiers (bigger wire, more defence slots, more squads)
+    unlock hot zones, better supports and the player-built faction (wave 8).
 
 ### 2. Zone links
 
-**The region map.** Each region (coast, inland) becomes a small graph of zones, kept in
-`data/contracts.json` beside the zones:
+**The region map (decided: every zone linked, neighbours by geography).** Each zone sits on a fixed
+region layout (`data/contracts.json` gets a grid position per zone) and links to its 2-4 nearest
+neighbours, so you can walk anywhere but far zones take many crossings; heli transport is the
+shortcut. All 22 contract zones and 5 hot zones join the graph, the base zone in its region. Coast
+and inland join where they meet on the layout. Links are made from the layout, not hand-written:
 
 ```
-"links": [
-  {"a": "fob", "a_edge": "north", "b": "wadi_farm",   "b_edge": "south", "travel_min": 20},
-  {"a": "fob", "a_edge": "east",  "b": "red_mesa",    "b_edge": "west",  "travel_min": 30},
-  {"a": "red_mesa", "a_edge": "north", "b": "pass_hot", "b_edge": "south", "travel_min": 40}
-]
+"links": [{"a": "fob", "a_edge": "north", "b": "wadi_farm", "b_edge": "south"}, ...]
 ```
 
-Proposed shape: the base zone in the middle, 2-4 contract zones linked to it, hot zones linked one
-step further out (you cross a contract zone to reach one on foot, or fly straight there). The coast
-and inland regions link to each other through one crossing each way (the travel_days between them
-stays). The ops desk and the map screen draw the graph: each zone, its kind, its holder and grip
-(`WorldSites.rows()`, already sent to clients), what's known of it, and the crossings.
+The ops desk and the map screen draw the graph: each zone, its kind, holder and grip
+(`WorldSites.rows()`), what's known of it, and the crossings.
 
-**Crossing points.** Each link puts one **crossing** on each zone's edge: a named point
-(`ZoneDef` "crossings": `[{"id", "to", "to_crossing", "pos": [x, z]}]`, placed by `_ensure_edge`'s
-rules, `EDGE_POINT_IN_M` inside the edge on the named side, on a road or trail end when one reaches
-that side). On the ground it's a marked track or road end with a sign, a gap in the fence, a dry
-ford; on the map, an icon with the destination's name. A zone's crossings are also its foot
-extraction points (they already are edge points); not every edge point is a crossing.
+**Crossing points.** Each link puts one **crossing** on each zone's edge (`ZoneDef` "crossings":
+`[{"id", "to", "to_crossing", "pos": [x, z]}]`, `EDGE_POINT_IN_M` inside the named side, on a road
+or trail end when one reaches it): a marked track, a fence gap, a ford, with the destination's name
+on the map. Crossings are also foot extraction points.
 
-**Crossing.** It runs through `Extraction`'s rules, with a destination instead of a debrief:
+**Crossing.** It runs on `Extraction`'s rules, with a destination instead of a debrief:
 
-1. A player inside a crossing confirms "Move to <zone>" (any player, the co-op rule of
-   2026-10-14). The same check as extraction runs: everyone up and elsewhere blocks; the downed and
-   the dead outside it, and squadmates away from it, warn on the first confirm, and a second within
-   `LEAVE_CONFIRM_S` goes without them (they stay in the zone being left: section "left behind").
-2. A short countdown (proposed 20 s, not extraction's 90: nobody has to come to you).
-   Vehicles: driving into the crossing with the squad aboard is the confirm, as `server_drive_out`.
-3. The host writes the zone being left (`GameState.save_zone`), builds the cargo report
-   (`report_from_level`'s list: players, squad, bodies carried, HVTs, items, vehicles in the
-   crossing), and calls `server_switch_level` with the destination's level info and a new
-   `"arrive": {"crossing": id, "cargo": report}`.
-4. The destination loads (its save, or fresh: call 4), spawns everyone at its matching crossing
-   (players spread as `SPAWN_SPREAD_M`, vehicles on the road behind them), in the kit and condition
-   they left with, and its supports origin, enemy response and objectives come up as on insertion.
+1. Any player inside a crossing confirms "Move to <zone>". Everyone up and elsewhere blocks; the
+   downed, the dead and squadmates away from it warn on the first confirm, and a second within
+   `LEAVE_CONFIRM_S` goes without them. Driving into it with the squad aboard is the confirm.
+2. A short countdown (proposed 20 s).
+3. The host writes the zone being left, builds the cargo report, and calls `server_switch_level`
+   with the destination and `"arrive": {"crossing": id, "cargo": report}`.
+4. The destination loads (its save if it still remembers, section 2b) and everyone appears at its
+   matching crossing in the kit and condition they left with.
 
-**What crosses with you.**
+**What crosses (decided: everyone and everything in the crossing).** Players; AI squadmates with
+their `Inventory` and `Vitals` saves (wounds, tourniquets and pain intact, no free healing); carried
+bodies; cuffed HVTs and rescued hostages; everything carried, on MOLLE and in pouches; vehicles
+driven in (motor-pool `out` moves to the new zone; captured vehicles become the new zone's); items
+set down in the crossing if a vehicle is there to take them. Supports follow too (section 4).
+Anyone not at the crossing stays behind in that zone's save.
 
-| Thing | Crosses? | How |
-|---|---|---|
-| Players | Yes | Their gear, as `server_switch_level` already keeps it |
-| AI squadmates in the crossing | Yes | Their `Inventory` and `Vitals` saves, as the roster does on deploy |
-| Downed or wounded (carried in, or walking) | Yes | `Vitals` saved whole: the bleed, tourniquets and pain go with them; no free healing on the way |
-| Bodies carried in | Yes | As `body_record`, put down beside the carrier |
-| Cuffed HVTs, rescued hostages | Yes | The HVT record; a contract HVT counts at the contract's extraction only |
-| Items carried, on MOLLE, in pouches | Yes | They're on the soldier |
-| Items set down in the crossing | Yes, if a vehicle is there to take them | Otherwise they stay (no carrying a stash across by hand dropping) |
-| Motor-pool vehicles in the crossing | Yes | `Vehicle.to_save` with the pool id; `MotorPool` "out" moves to the new zone |
-| Other vehicles (captured technicals) | Yes, if the squad drives them | Same, as a zone vehicle in the new zone's save |
-| Helicopters | No | They don't cross edges; they're re-called (section 4) |
-| Allied elements | Yes if ordered "follow me" and inside 150 m of the crossing | Else they stay and RTB (section 4) |
-| Squadmates and players left behind | No | They stay in the zone left, as the extraction leave-behind rule; their zone's save keeps them |
+**Left behind.** A squadmate left in another zone waits there while it remembers; they count as MIA
+only if the squad goes home without them (extraction's rule). A downed player respawns with the
+squad in their own kit (Captain, 2026-10-14).
 
-**Left behind across zones.** A squadmate left in another zone is not MIA yet: they wait where
-they were (the zone save keeps them, as recovery targets already do), and going back for them is a
-crossing away. They count as MIA only if the squad goes home without them (extraction's rule,
-unchanged). A player left downed in another zone respawns with the squad (respawn in own kit,
-Captain 2026-10-14); their body isn't left behind, the same as today.
+**Travel time (decided: hours per link).** On foot 2 game hours per link, by vehicle 1 hour, a heli
+hop about 30 minutes. Wounds, bleeding and fatigue tick over that time, so the downed need a medic
+before they cross. Three or four links on foot cost about a campaign day: when the clock passes
+midnight, `Economy.advance_days(1)` runs as at the base (wages, recovery, the board, WorldSites
+ticks). The real-time cost is the load behind the loading screen.
 
-**Travel time.** Crossing costs campaign time, not real time: each link's `travel_min` (proposed
-20-40 game minutes) moves the in-game clock on (time of day, when wave 7 has one), and bleeding,
-pain and fatigue tick over that span on the way (the downed need a medic before they cross, or
-arrive worse). It never advances campaign days by itself; days still pass at the debrief and the
-base, as now. Real-time cost is the load: a few seconds behind the loading screen.
+### 2b. Zone memory (decided: fades over a week)
 
-**Saves while out.** Today a campaign loaded mid-deployment ends that deployment at the base. With
-crossings, the host's quick save and quit while out writes the current zone and every zone the
-excursion has touched; loading one resumes in the zone the squad was in, at the crossing they last
-came through (proposed; call 7).
+A zone you leave remembers you, then fades back to fresh. This replaces "fresh each contract"
+(2026-10-14):
+
+- Bodies and dropped gear clear after 2-3 campaign days.
+- Voxel damage and cleared sites last 7 days; meanwhile the enemy reoccupies through `WorldSites`
+  grip and `EnemyCommand` reserves, so a site you cleared yesterday may be manned again.
+- After 7 days the zone is fresh: its save is set aside (`GameState.set_aside`, never deleted).
+- The base zone never fades. World-site state (holder, grip, caution) is the campaign's and
+  persists as now.
+
+Each zone save gets a `"left_day"`; the fade runs on load and in `Economy.advance_days`.
 
 ### 3. Raid-style excursions
 
-A **raid** is going out without a contract: leaving the base (by an exit, by vehicle, or by a heli
-insertion at a cost) into the region's linked zones to scavenge, hit sites for loot and intel, and
-come back.
+A **raid** is going out without a contract to scavenge, hit sites for loot and intel, and come back.
 
-- **Launching.** Walk or drive out of a base exit, or pick "Raid" at the ops desk (heli insertion
-  into any linked zone, paid: the transport price). The squad pick, ready-up and loadout work as
-  for a contract (`server_deploy` with `no_contract`, which already exists for debug, made real with a
-  `zone_kind` of `"raid"`); the roster's deployment record is made so the squad's casualties,
-  respawns and MIA rules all apply.
-- **What's out there.** The linked zones as generated, with their garrisons, patrols and
-  compound loot (rarity loot boxes and intel boxes are on the 2026-10-16 list). No objectives, no
-  pay, no employer, no support budget from a contract.
-- **Risk.**
-  - Respawns: half a contract zone's (proposed 2), bought past that.
-  - Supports are paid in full from the company's bank (no contract budget to draw on).
-  - Hitting a faction's sites on a raid raises heat with them and costs standing, as killing their
-    men on a contract against them does; hitting your employer's friends costs more.
-  - The enemy's response is the zone's own (`EnemyResponse`, `EnemyCommand` reserves); raiding the
-    same zone again soon finds it alert (`caution` already persists per zone).
-- **Extraction.** Home is the base: walk or drive back through a crossing into the base zone and
-  through the FOB's gate, or call the heli to extract from anywhere (paid). Arriving inside the
-  wire ends the raid: a short debrief (no pay, no salvage share since nobody else owns it: the squad
-  keeps everything carried in), reputation and heat changes, casualties settled by
-  `BaseHub.server_end_deployment`.
-- **What you keep.** Everything that comes home: all items, vehicles taken, intel (turned in or sold
-  at the debrief as now). Nothing is kept if the squad never comes home: a wiped raid is MIA for
-  everyone left, and their gear is in the zone they fell in, to recover (recovery contracts already
-  exist).
-- **Raids and contracts together.** A contract's deployment can also cross zones: a contract zone
-  linked to its neighbours lets the squad leave it on foot and come back, and still finish it. The
-  contract's clock keeps running, its objectives stay live only in its own zone, and it ends at its
-  extraction or when the squad gets home. A raid can't start while a contract deployment runs; it
-  *is* the deployment then.
+- **Launching.** Walk or drive out of a base crossing, or pick "Raid" at the ops desk for a heli
+  insertion (paid). Squad pick, ready-up and loadout as for a contract: `server_deploy` with a
+  `zone_kind` of `"raid"` (today's debug `no_contract` path made real), so casualties, respawns and
+  MIA rules all apply.
+- **Rules (decided: lean and risky).** 2 free respawns, bought past that; supports paid from the
+  bank; no pay or salvage share; heat and standing change for what you hit (a faction's sites cost
+  standing with it and its allies); zones raided again soon are alert (`caution` persists).
+- **Extraction.** Home is the base: cross back into the base zone and in through the wire, or call
+  the heli from anywhere (paid). A short debrief on arrival: intel to turn in or sell, reputation and
+  heat, casualties through `BaseHub.server_end_deployment`.
+- **What you keep (decided: all that comes home).** Everything carried, driven or flown home. A wiped
+  raid leaves its gear on the bodies in that zone, recoverable while the zone remembers (about a
+  week, section 2b; recovery contracts already exist).
+- **Raids and contracts.** A raid can't start during a contract deployment; that deployment can cross
+  zones itself (section 3b).
 
-### 4. Supports across zones
+### 3b. Contracts across zones (decided: both)
 
-Supports come from the company, not from the zone, so they're available in every zone the squad
-is in, including the base zone's local area and on raids.
+- Any contract lets the squad leave its zone and come back. Its objectives stay live in their own
+  zone, its clock runs, and it ends at its extraction or when the squad gets home.
+- New contract types spread their objectives over 2-3 linked zones (a convoy chase, a manhunt that
+  moves, a supply line to cut at several points). They're added to `data/contracts.json` like the
+  mission-variety types, with each objective naming its zone.
 
-- **Origins.** `Supports.origin_for` already picks the LHD, else the FOB marker, else the nearest
-  edge. Proposed: in a linked zone the FOB origin sits on the edge facing the base on the region
-  graph (the side its link to the base, or to the next zone toward the base, comes in), not
-  `fob_side`. In the base zone itself the origin is the FOB's helipad: helis lift from there.
-- **Helicopters.** They don't follow across an edge. A heli on a call when the squad crosses
-  finishes or aborts that call (resupply: lands and leaves; transport: drops the squad where it is)
-  and the next call in the new zone comes from its origin, as now. Cooldowns and "lost this op"
-  carry across (they're the deployment's, not the zone's). New: **transport between zones** — the
-  transport call can take a destination on the region map instead of a map marker: the heli lands,
-  the squad boards, and the crossing happens in the air (the loading screen), landing at the
-  destination's insertion LZ. That's the fast way across the graph, paid per flight. Transport is
-  still hot-zones-only today (Captain); proposed: zone-to-zone transport allowed anywhere, local
-  transport inside a zone stays hot-only (call 5).
-- **The AAV.** It's a vehicle: with the squad aboard and driven into a crossing it crosses like any
-  motor-pool vehicle. Left behind under AI crew, it's ordered home: it drives to the nearest edge
-  toward the base and is gone, then re-callable in the new zone (its cooldown, not a new price).
-  Ordered "follow" when the squad crosses on foot, it crosses with them (proposed).
-- **Allied troops.** An element on "follow me" within 150 m of the crossing when it fires crosses
-  and arrives behind the squad (its `Squad` saved as its members' records). Any other element stays
-  in its zone and RTBs: it's released, and its slot's cooldown starts. The host's high command
-  (support-menu orders, map orders) works the same in every zone. Called fresh in a new zone they
-  come from that zone's origin.
-- **Motor pool.** Vehicles taken out of the base zone's vehicle park drive across like anything
-  else; `MotorPool` "out" holds the zone id they're in now, and `server_reconcile` already handles a
-  vehicle whose zone isn't loaded.
+### 4. Supports across zones (decided: everything follows)
+
+Supports come from the company, so they're usable in every zone, including the base area and raids,
+and they come with the squad when it crosses.
+
+- **Origins.** In a linked zone the support origin (`Supports.origin_for`) sits on the edge facing
+  the base on the graph, instead of `fob_side`. In the base zone it's the FOB's helipad.
+- **Helicopters.** A heli that is airborne or loitering when the squad crosses arrives over the new
+  zone a minute after them (re-made by `HeliSupports` from its call's state at the entry edge). One
+  that is landing or lifting off finishes that first. Cooldowns and "lost this op" carry across (they
+  belong to the deployment).
+- **Heli transport (decided: between zones, and local transport everywhere).** The transport call
+  can take a zone on the region map: the squad boards, the crossing happens in the air (about 30 game
+  minutes), and it lands at the destination's insertion LZ. Paid per flight. Transport inside a zone
+  is no longer hot-zones-only.
+- **The AAV, motor-pool vehicles and allied elements** cross with the squad: those in the crossing
+  ride across; the AAV and allied elements out on other orders arrive at the same crossing shortly
+  after, keeping their orders (proposed: within 2 minutes of game time; elements more than a link's
+  travel away are released instead). The host's high command and map orders work the same in every
+  zone. Hired company squads follow the same rules.
 
 ### 5. Co-op and host constraints
 
-- **One zone at a time for the session.** All peers are in the same level, always: a crossing
-  moves everyone, as `server_switch_level` does today. Splitting the squad across zones would mean
-  the host simulating two levels at once (or a dedicated server); out of scope (call 6). That's why
-  crossing needs the whole squad at the point, with the leave-behind confirm for those who aren't.
-- **Who can confirm.** Any player inside the crossing, as extraction (Captain, 2026-10-14).
-- **Late joiners.** A client joining while the squad is out joins in the zone the host is in
-  (LevelSwitch's handshake already sends the host's level). They spawn at the last crossing used,
-  in their own kit.
-- **A player who drops out mid-zone.** Their character stays as today; if a crossing happens while
-  they're gone they move with the squad (their stand-in or body as the leave-behind rule says).
-- **Bots never host.** A human hosts (2026-10-14), so the host is always a player inside the squad.
-- **Switch timeouts.** A peer slow to load holds the switch up to `SWITCH_WAIT_S`, then the switch
-  goes without them and they catch up (B-04), the same as deploying.
+- **One zone at a time for now (decided: split squads later, with dedicated servers).** All peers
+  are in the same level; a crossing moves everyone, which is why it needs the whole squad at the
+  point. Plan for a split now: keep zone state in its save and the excursion's zone list, not in "the
+  one live level", so a dedicated server can later hold two zones at once.
+- **Who confirms.** Any player inside the crossing (2026-10-14).
+- **Late joiners** join the zone the host is in (LevelSwitch's handshake already sends it), at the
+  last crossing used, in their own kit. Bots never host (2026-10-14).
+- **Switch timeouts.** A slow peer holds the switch up to `SWITCH_WAIT_S`, then catches up (B-04).
+- **Saving while out (decided: resume where you were).** The host's quick save and quit writes the
+  current zone and the excursion's state (its zone list, supports out, clock); loading resumes in the
+  zone the squad was in, at the last crossing they came through. Today a mid-deployment load ends the
+  deployment at the base; that changes for both raids and contracts.
 
 ### 6. Performance and streaming
 
-- **Load times.** A crossing is a level swap: terrain heights, collision and the coarse meshes
-  (`generate_ms`). Today that's measured per zone; proposed target: under 5 s for a contract zone and
-  under 10 s for a hot zone on the Captain's machine, measured in phase 1 before anything is built
-  on top. If it's over, pre-generating the neighbour's terrain on a thread while the squad walks to
-  the crossing is the fix (the definition is known as soon as they're in its edge band).
-- **Zone saves grow.** A zone revisited many times keeps bodies and items. Bodies already leave a
-  zone's save after a while (`fallen_posts` keeps what fell); proposed: dropped items past 3
-  campaign days outside a building decay out, and bodies leave after 2.
-- **The base zone.** Its FOB module is always streamed (it's where the host spawns); its local area
-  streams like any zone. With nothing hostile near the FOB, its cost is the terrain and a few
-  civilians: lighter than a contract zone.
-- **Virtualization.** Linked zones don't need it to work: only one zone is ever live. When it lands
-  (`docs/virtualization.md`), profiles are what lets a zone you left keep moving (a patrol that was
-  hunting you has gone further when you come back) and what the faction simulation moves between
-  linked zones. Until then a zone left is frozen as saved.
+- **Load times.** A crossing is a level swap (terrain, collision, coarse meshes: `generate_ms`).
+  Proposed target: under 5 s for a contract zone, 10 s for a hot zone on the Captain's machine,
+  measured in phase 1. If it's over, pre-generate the neighbour's terrain on a thread while the squad
+  is in the crossing's edge band (the definition is known by then).
+- **Saves.** The week-long fade (section 2b) keeps saves from growing without end.
+- **The base zone.** The FOB module always streams; the rest streams like any zone. During an
+  assault it costs what a contract zone does.
+- **Virtualization.** Not needed for crossings, since one zone is live at a time. When it lands
+  (`docs/virtualization.md`), profiles make a zone you left keep moving, carry patrols toward the
+  base, and are what a dedicated server would run for a second zone.
 
-## Calls for the Captain (proposed answers)
+## Calls for the Captain
 
-1. **Base zone size and look.** Proposed: a 1536 m zone on the region's terrain, the FOB at its
-   centre at today's size first (bigger in the wave 7 world pass), helipad, vehicle park and range
-   outside the wire, one or two civilian villages in the local area.
-2. **Hostiles near the base.** Proposed: none inside 400 m ever; past 600 m, bandits and strays off
-   by default, switched on later as an option (or by heat: a faction you've angered probes the base
-   area; never attacks the FOB itself, as the LHD is never attacked).
-3. **The region map.** Proposed: the base in the middle, 2-4 contract zones linked to it, hot zones
-   one step further; one link between coast and inland. Today's 22 contract zones stay on the board;
-   the linked set is the ones nearest the base (the rest are fly-in only).
-4. **Fresh or remembered.** Today every contract finds its zone fresh (Captain, 2026-10-14).
-   Proposed: within one deployment or raid a zone is remembered (cross out and back and it's as you
-   left it: that's the point of linked zones); a new deployment or raid finds it fresh as now, except
-   the base zone and the world-site state (`WorldSites` holder and grip, `EnemyCommand` caution),
-   which already persist. Saves are set aside, never deleted, as now.
-5. **Heli transport between zones.** Proposed: allowed from any zone (paid per flight, the transport
-   price), landing at the destination's insertion LZ; transport within a zone stays hot-zones only.
-6. **Split squads.** Proposed: no. The whole session is in one zone; those who don't come are left
-   behind (two confirms), as at extraction.
-7. **Saving while out.** Proposed: quick save and quit while out resumes in the zone the squad was
-   in, at its last crossing (today a mid-deployment load ends the deployment at the base). Needs the
-   campaign to keep the excursion's zone list; the "fresh each contract" rule still applies on the
-   next one.
-8. **Raid rules.** Proposed: 2 free respawns, supports paid from the bank, no pay or salvage share,
-   keep everything brought home, heat and standing changes for what you hit, a short debrief on
-   arrival inside the wire.
-9. **Crossing time.** Proposed: 20-40 game minutes per link (moves the time of day, wounds tick over
-   it), no campaign days; a 20 s countdown at the crossing.
-10. **Contract zones crossed out of.** Proposed: yes, a contract's squad can leave its zone and come
-    back; its objectives stay live in its own zone, its clock runs, it ends at its extraction or on
-    reaching home.
+**Decided (Captain, 2026-10-19 CDT):**
+
+1. Base zone: a full contract-size zone with scavenging and a local area; hostile patrols and attacks
+   as the company causes trouble, pushing it to build up toward the endgame.
+2. Hostiles near the base: none close in normal times, far strays as an option, and the base can be
+   attacked (defend-the-base events), escalating in heat-driven tiers.
+3. Building up: bought defences (set slots and free placement), hired guards, base upgrades that
+   unlock the endgame, and hired player-faction squads under the host's high command (inspired by
+   Platoon Commander).
+4. Region map: every zone linked to its 2-4 geographic neighbours; heli transport is the shortcut.
+5. Zone memory: fades over a week (bodies and gear 2-3 days, damage and cleared sites 7 days with
+   reoccupation, then fresh).
+6. Crossing cargo: everyone and everything in the crossing.
+7. Travel time: 2 h per link on foot, 1 h by vehicle, about 30 min by heli; can add up to days.
+8. Raids: lean and risky; keep all that comes home.
+9. Supports: everything follows, a loitering heli included; heli transport between zones and local
+   transport everywhere.
+10. Split squads: later, with dedicated servers; plan the state for it now.
+11. Save while out: resume in the zone, at the last crossing.
+12. Base attacked while out: a situation report with a return recommendation; small probes resolve
+    off-screen, big assaults near enough go live and hold out for the squad.
+13. Contracts: can be left and returned to, plus new multi-zone contract types.
+14. Build order: the base as a zone first.
+
+**Still open (proposed answers):**
+
+15. **Base zone size.** Proposed: 2304 m.
+16. **Heat thresholds for base threats.** Proposed: patrols at 30, probes at 50, assaults at 70; at
+    most one assault a week, warned a day ahead.
+17. **Crossing countdown.** Proposed: 20 s.
+18. **Followers' catch-up.** Proposed: supports on other orders arrive within 2 game minutes;
+    allied elements more than a link away are released.
+19. **Hired squads.** Proposed: 4-8 men each, a squad leader from the roster or hired with them,
+    wages at the roster's rates, up to 1 per FOB tier to start.
 
 ## Build order (proposed)
 
-1. **LZ-1 The base as a zone.** `fob` module type from `BaseLevel._build_structures`;
-   `BaseZoneLevel` with BaseLevel's public face; `BaseHub` checks `is_base()`; the base zone's
-   definition from the campaign seed; helipad and vehicle park. Deploying is unchanged (heli from the
-   ops desk). Measure load time here. Suites: the base and campaign suites, smoke.
-2. **LZ-2 Crossings and the region map.** `"links"` in contracts.json, `"crossings"` in `ZoneDef`,
-   the crossing as an `Extraction` point kind with a destination; `server_switch_level` with
-   `"arrive"`; cargo carried across (players, squad, carried bodies and HVTs, vehicles); zones
-   remembered within one deployment (call 4); the map and ops desk draw the graph. Base ↔ one
-   contract zone first, then the rest.
-3. **LZ-3 Supports across zones.** Origins facing the base on the graph, cooldowns and losses kept
-   per deployment across crossings, the AAV and allied elements following on "follow", heli
-   transport between zones.
-4. **LZ-4 Raids.** The `"raid"` deployment kind, launching on foot/vehicle/heli, its respawns and
-   paid supports, the raid debrief on arrival home, heat and standing for what was hit.
-5. **LZ-5 The base's local area.** Villages, scavenging sites, the range and driving loop; hostiles
-   past 600 m behind an option (call 2).
-6. **LZ-6 Saving while out and polish.** Resume in the zone the squad was in (call 7), save decay
-   for revisited zones, the neighbour's terrain pre-generated while walking to a crossing if the
-   phase 1 load numbers need it.
+1. **LZ-1 The base as a zone.** `fob` module type; `BaseZoneLevel` with BaseLevel's public face;
+   `is_base()`; the base zone from the campaign seed; helipad, vehicle park, range. Deploying is
+   unchanged. Measure load time.
+2. **LZ-2 Crossings and the region map.** The region layout and links, `"crossings"` in `ZoneDef`,
+   the crossing as an `Extraction` point kind, `server_switch_level` with `"arrive"`, cargo across,
+   travel hours on the clock, zone memory and its week-long fade. Base ↔ one zone first, then all.
+3. **LZ-3 Supports across zones.** Origins facing the base, followers crossing (heli, AAV, allied
+   elements, vehicles), cooldowns per deployment, heli transport between zones and everywhere.
+4. **LZ-4 Raids and contracts across zones.** The `"raid"` kind, its rules and debrief; contracts
+   left and returned to; save and resume while out.
+5. **LZ-5 The base's local area and its threats.** Scavenging sites and villages; heat-driven
+   patrols, probes and assaults; the situation report; off-screen resolution.
+6. **LZ-6 Building up the company.** Defences (slots, then free placement), hired guards, hired
+   squads under high command, FOB tiers unlocking the endgame.
+7. **LZ-7 Multi-zone contract types**, and the neighbour's terrain pre-generated if LZ-1's load
+   numbers need it.
 
-LZ-1 stands alone. LZ-2 needs LZ-1 (the base is where the links start). LZ-3 and LZ-4 both need
-LZ-2 and can run side by side (supports files vs. the deployment and debrief). LZ-5 needs only
-LZ-1 and can run any time after it. Virtualization (`docs/virtualization.md`) is separate; it
-makes left zones live later but nothing here waits on it.
+LZ-1 stands alone. LZ-2 needs LZ-1. LZ-3 and LZ-4 both need LZ-2 and can run side by side. LZ-5 needs
+LZ-1 and wave 6d's heat; LZ-6 needs LZ-5's attacks to matter; LZ-7 needs LZ-4. Split squads on a
+dedicated server and virtualization are separate and wait on nothing here.
