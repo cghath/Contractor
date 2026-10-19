@@ -22,6 +22,7 @@ const LEVEL_SCENES := {
 	"compound": "res://scenes/levels/compound.tscn",
 	"zone": "res://scenes/levels/zone.tscn",
 	"base": "res://scenes/levels/base_fob.tscn",
+	"base_zone": "res://scenes/levels/base_zone.tscn",  # the base as a zone (BaseZoneLevel, LZ-1)
 	"range": "res://scenes/levels/vehicle_range.tscn",  # wave 5: the vehicle range (VehicleRange)
 }
 ## Long enough for a client to generate a zone (about a second) while connecting.
@@ -101,7 +102,7 @@ static func load_level(parent: Node, info: Dictionary, fresh := false) -> Compou
 	var kind := String(info.get("level", "compound"))
 	var level := (load(scene_for(info)) as PackedScene).instantiate() as CompoundLevel
 	if level is ZoneLevel:
-		(level as ZoneLevel).configure(info.get("def", {}))
+		(level as ZoneLevel).configure(info.get("def", {}))  # (BaseZoneLevel too)
 	var index := 0
 	if current:
 		index = current.get_index()
