@@ -42,6 +42,11 @@ const IFF := {
 	&"militia": [Color("e0661a"), Color("a0532a")],
 	&"hostile": [Color("c8281e"), Color("7e2a22")],
 }
+## Small gear's cost (2026-10-19 perf probe: a 40-man fight on screen was ~15k draw calls, every
+## soldier ~40 meshes each drawn again per shadow pass): pouches, pack straps, the name tape,
+## armbands and helmet marks cast no shadow and aren't drawn past SMALL_GEAR_M (a few pixels
+## there). The body, carrier, pack, helmet and weapons keep theirs.
+const SMALL_GEAR_M := 45.0
 ## The armband: how far below the shoulder pivot it sits (m), how tall, and how much wider
 ## than the upper arm (0.12 m) it is.
 const ARMBAND_Y := -0.1
@@ -337,6 +342,8 @@ func _rebuild() -> void:
 	_set_pack_straps(pack)
 	_set_name_tape(carrier)
 	_set_armbands()
+	for small: Node in [_pouches, _straps, _tape] + _armbands:
+		_small_detail(small)
 	_set_exo_pads()
 	_refresh_plate_damage()
 	_set_exo_frame()
@@ -648,6 +655,19 @@ static func cummerbund_spot(tier: int, body: String, p: Dictionary, size: Vector
 	return Transform3D(basis, Vector3(mid.x, y, mid.y))
 
 
+## Small gear (SMALL_GEAR_M): every mesh under `node` casts no shadow and fades out past it.
+static func _small_detail(node: Node) -> void:
+	if node == null or not is_instance_valid(node):
+		return
+	if node is GeometryInstance3D:
+		var g := node as GeometryInstance3D
+		g.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		g.visibility_range_end = SMALL_GEAR_M
+		g.visibility_range_end_margin = 4.0
+	for child in node.get_children():
+		_small_detail(child)
+
+
 ## The IFF armbands (model.iff): a band of cloth round each upper arm, over the sleeve's patch.
 ## Built once (the side doesn't change).
 func _set_armbands() -> void:
@@ -680,6 +700,8 @@ func _mark_helmet(piece: VoxelArmor) -> void:
 	var back := _part_box(Vector3(0.07, 0.035, 0.008), Vector3(mid.x, mid.y + box.size.y * 0.15, box.end.z - 0.002), colour, render_layers)
 	back.name = "HelmetMark"
 	piece.add_child(back)
+	_small_detail(crown)
+	_small_detail(back)
 
 
 ## The name tape: the soldier's surname (CharacterModel.name_tape) in dark capitals on the
@@ -896,6 +918,7 @@ func _process(delta: float) -> void:
 	if not _tape_key.ends_with("|" + model.name_tape):  # the name arrives after the body is built
 		var vest: StringName = inventory.slots[&"vest"]
 		_set_name_tape(ItemDB.get_item(vest) if vest != &"" else null)
+		_small_detail(_tape)
 	if model.left_handed != _left_shown:
 		_left_shown = model.left_handed  # the slung weapons move to the other side
 		for slot: StringName in MOUNTS:

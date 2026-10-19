@@ -108,6 +108,8 @@ const BOUNDS := AABB(Vector3(-220, -8, -220), Vector3(440, 56, 440))
 ## away on this 0.1-scaled terrain); the terrain's max_view_distance caps it in voxels. Must
 ## reach every corner of the bounds from anywhere players go.
 const VIEW_DISTANCE := 640
+## Voxels a mesh block spans (VoxelTerrain: 16 or 32). 32 is 3.2 m: an eighth as many blocks to draw.
+const MESH_BLOCK := 32
 ## Breach detection (host, after every carve, see _check_breaches). A soldier (NavBuilder's
 ## agent: radius 0.25 m, height 1.75 m) fits through where a column that used to be wall
 ## has clear columns BREACH_HALF_WIDTH either side (0.5 m wide in all), clear from
@@ -183,8 +185,9 @@ func _ready() -> void:
 	mesher.color_mode = VoxelMesherCubes.COLOR_MESHER_PALETTE
 	terrain.mesher = mesher
 	terrain.material_override = surface_material()
-	terrain.bounds = bounds
+	terrain.bounds = aligned(bounds, MESH_BLOCK)  # whole mesh blocks: a block past the edge has no data (VoxelTerrain asserts)
 	terrain.max_view_distance = view_distance
+	terrain.mesh_block_size = MESH_BLOCK  # (perf, 2026-10-19: 16-voxel blocks made a town thousands of draws, each again per shadow cascade)
 	terrain.collision_layer = 1
 	add_child(terrain)
 	_tool = terrain.get_voxel_tool()
@@ -194,6 +197,13 @@ func _ready() -> void:
 	terrain.add_child(_mark_mesh)  # in the terrain's space: voxel units
 	_hole_mesh = _make_mark_mesh(_hole_texture(), "BulletHoles")
 	terrain.add_child(_hole_mesh)
+
+
+## `box` (voxels) grown out to whole blocks of `size` voxels.
+static func aligned(box: AABB, size: int) -> AABB:
+	var lo := (box.position / size).floor() * size
+	var hi := (box.end / size).ceil() * size
+	return AABB(lo, hi - lo)
 
 
 ## Adds a solid box, in metres, relative to this node. Call before structures are built.
