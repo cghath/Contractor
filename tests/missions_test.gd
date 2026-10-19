@@ -25,6 +25,7 @@ func _ready() -> void:
 	CompoundLevel.spawn_ai = false
 	Contracts.auto_show_debrief = false
 	HotZoneOps.enabled = false  # one contract at a time below; _test_hot_zone_ops turns it on
+	EnemyDrones.enabled = false  # none on their own (wave 6): _test_enemy_drones sends its own
 	GameState.delete_save()
 	Campaign.reset_campaign()
 	_test_generation()
@@ -64,6 +65,7 @@ func _ready() -> void:
 	_test_zone_enemy()
 	await _test_rival_team()
 	await _test_roadside_ieds()
+	_test_enemy_drones()
 	await _test_respawn_points()
 	_finish()
 
@@ -1444,6 +1446,41 @@ func _test_roadside_ieds() -> void:
 	for g: Dictionary in mine.slice(2):
 		ieds.server_disarm(g)
 	await _frames(2)
+
+
+## Wave 6: the enemy's recon drones: up from the HQ, over the squad, reporting it to the net;
+## two rounds bring one down, a jammer in the squad cuts its link.
+func _test_enemy_drones() -> void:
+	print("Enemy recon drones and the jammer")
+	var drones := EnemyDrones.of(level)
+	var alert := Alert.of(level)
+	check(drones != null and alert != null, "a hot zone has them")
+	if drones == null or alert == null:
+		return
+	var id := drones.server_launch(player.global_position + Vector3(300, 0, 0))
+	check(id > 0 and drones.drones[id].pos.y > player.global_position.y + 30.0, "a drone goes up, high over the ground")
+	var reports := alert.reports.size()
+	for k in 40:
+		drones.server_fly(id, 1.0)
+	check(Vector2(drones.drones[id].pos.x - player.global_position.x, drones.drones[id].pos.z - player.global_position.z).length() <= EnemyDrones.SEE_M
+		and alert.reports.size() > reports and String(alert.reports[-1].get("by", "")) == "drone",
+		"it flies to the squad and reports it to the enemy's net (%d reports)" % (alert.reports.size() - reports))
+	var body: Node = drones.drones[id].body
+	check(body != null and body.has_meta(&"on_bullet"), "it can be shot (a body rounds hit)")
+	for k in EnemyDrones.HITS:
+		(body.get_meta(&"on_bullet") as Callable).call(drones.drones[id].pos, player)
+	check(String(drones.drones[id].state) == "falling", "%d hits: it comes down" % EnemyDrones.HITS)
+	for k in 20:
+		drones.server_fly(id, 1.0)
+	check(String(drones.drones[id].state) == "gone", "and crashes")
+	var id2 := drones.server_launch(player.global_position + Vector3(100, 0, 0))
+	check(player.inventory.take(EnemyDrones.JAMMER) == 1, "the player carries a jammer")
+	for k in 10:
+		drones.server_fly(id2, 1.0)
+	check(String(drones.drones[id2].state) in ["falling", "gone"], "a jammer in the squad: its link is cut and it falls")
+	player.inventory.remove_one(EnemyDrones.JAMMER)
+	drones.drones.erase(id)
+	drones.drones.erase(id2)
 
 
 func _test_hq_posts() -> void:

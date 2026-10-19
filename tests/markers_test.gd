@@ -15,6 +15,7 @@ func _ready() -> void:
 	CompoundLevel.spawn_ai = false
 	Contracts.auto_show_debrief = false
 	HotZoneOps.enabled = false
+	EnemyDrones.enabled = false  # (wave 6: no recon drones reporting mid-test)
 	GameState.delete_save()
 	Campaign.reset_campaign()
 	var main: Node = load("res://scenes/main.tscn").instantiate()

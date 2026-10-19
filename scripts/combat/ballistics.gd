@@ -113,6 +113,10 @@ static func _trace(shooter: CollisionObject3D, origin: Vector3, direction: Vecto
 			# not be met by a ray starting on its face.
 			from = hit.position - direction * 0.002
 			continue
+		# Wave 6: a small target that takes a round its own way (EnemyDrones: a drone's body).
+		if collider is Node and (collider as Node).has_meta(&"on_bullet"):
+			((collider as Node).get_meta(&"on_bullet") as Callable).call(hit.position, shooter)
+			return passed if not passed.is_empty() else {"result": "vehicle", "position": hit.position, "normal": hit.normal}
 		var vehicle := Vehicle.find_on(collider)
 		if vehicle:
 			# Vehicles (wave 5): the hull's armour decides (Vehicle.server_take_hit). A round that
