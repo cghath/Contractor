@@ -44,6 +44,11 @@ signal contract_closed(contract: Dictionary, outcome: String)
 ## Host: a contract's objectives went live in the zone (the deployment started, or a radio
 ## contract came in): PeopleLayer puts what they need there (the HVT, the hostage, intel).
 signal contract_live(cid: String, objectives: Array)
+## Host: the squad came back into a zone where a live contract's objectives are (docs/linked_zones.md
+## 3b: "any contract lets the squad leave its zone and come back"): `objectives` are those still
+## active there, and PeopleLayer puts back what they need (the HVT, the hostage, intel not taken).
+## Scenario runs (MissionScenario) don't restart.
+signal contract_returned(cid: String, objectives: Array)
 
 const SECTION := &"contracts"
 const HISTORY_KEEP := 40
@@ -178,8 +183,17 @@ func support_left(cid: String) -> int:
 func server_arrived(zone_id: String) -> void:
 	if not _is_host() or (_s().deployment as Dictionary).is_empty():
 		return
-	for cid: String in _s().deployment.get("cids", []):
+	var dep: Dictionary = _s().deployment
+	if not dep.has("live_legs"):
+		dep["live_legs"] = []
+	for cid: String in dep.get("cids", []):
 		var c := contract(cid)
+		if String(c.get("zone_id", "")) == zone_id:
+			var back := objectives.list.filter(func(o: Dictionary) -> bool:
+				return String(o.cid) == cid and not o.has("leg") and String(o.state) == Objectives.ACTIVE)
+			if not back.is_empty():
+				contract_returned.emit(cid, back)
+				SessionLog.note("contract %s: the squad is back in its zone (%d objectives open)" % [cid, back.size()])
 		var legs: Array = c.get("legs", [])
 		for k in legs.size():
 			if String(legs[k].zone_id) != zone_id:
@@ -187,8 +201,13 @@ func server_arrived(zone_id: String) -> void:
 			var leg_c := {"module_id": String(legs[k].module_id)}
 			var placed := Objectives.leg_objectives(c, k, module_origin(leg_c), false)
 			objectives.server_replace(placed)
-			contract_live.emit(cid, placed)
-			SessionLog.note("contract %s: its leg in %s is live" % [cid, zone_id])
+			var key := "%s:%d" % [cid, k]
+			if key in dep.live_legs:
+				contract_returned.emit(cid, placed.filter(func(o: Dictionary) -> bool: return String(objectives.get_objective(String(o.oid)).get("state", "")) == Objectives.ACTIVE))
+			else:
+				(dep.live_legs as Array).append(key)
+				contract_live.emit(cid, placed)
+				SessionLog.note("contract %s: its leg in %s is live" % [cid, zone_id])
 
 
 func module_origin(c: Dictionary, fallback := Vector3.ZERO) -> Vector3:

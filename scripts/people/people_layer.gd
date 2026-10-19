@@ -166,6 +166,7 @@ func _ready() -> void:
 	VoxelArt.warm(art)
 	Net.hosted.connect(_on_hosted)
 	Contracts.contract_live.connect(_on_contract_live)
+	Contracts.contract_returned.connect(_on_contract_live)  # back in a contract's zone: its people again (LZ-4)
 	Net.peer_joined.connect(_on_peer_joined)
 
 

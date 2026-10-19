@@ -247,6 +247,18 @@ func _test_deployment() -> void:
 	check(hvt != null and Person.side_of(hvt) == Person.HOSTILE and hvt.inventory.count_of(&"intel_phone") == 1
 		and hvt.global_position.distance_to(_v(hvt_o.pos)) < 1.0, "the HVT is where the contract says, with their phone (%s)" % (hvt.display_name() if hvt else "none"))
 	check(hostage != null and Person.side_of(hostage) == Person.FRIENDLY, "the hostage is held there (%s)" % (hostage.display_name() if hostage else "none"))
+	# LZ-4 (docs/linked_zones.md 3b): the squad leaves the zone and comes back; the HVT isn't in
+	# the zone's save, so arriving again puts him back where the contract says, once.
+	if hvt:
+		hvt.queue_free()
+		await _frames(2)
+	Contracts.server_arrived(ZONE)
+	Contracts.server_arrived(ZONE)
+	await _frames(2)
+	var again := people.people().filter(func(s: Soldier) -> bool: return String(people.state_of(s).get("hvt_id", "")) == String(hvt_o.params.hvt))
+	check(again.size() == 1 and (again[0] as Soldier).global_position.distance_to(_v(hvt_o.pos)) < 1.0,
+		"back in the contract's zone, the HVT is there again, once (%d)" % again.size())
+	hvt = people.hvt(String(hvt_o.params.hvt))
 	var laptop := _item(String(intel_o.params.intel_ids[0]))
 	check(laptop != null and laptop.item_id == &"intel_laptop", "the laptop is placed")
 	var civilians := people.people().filter(func(s: Soldier) -> bool: return Person.is_civilian(s))

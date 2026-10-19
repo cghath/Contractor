@@ -196,6 +196,11 @@ A **raid** is going out without a contract to scavenge, hit sites for loot and i
 - New contract types spread their objectives over 2-3 linked zones (a convoy chase, a manhunt that
   moves, a supply line to cut at several points). They're added to `data/contracts.json` like the
   mission-variety types, with each objective naming its zone.
+- Built (2026-10-19): objectives count only in their own zone (`Objectives.here`). Coming back
+  into a live contract's zone (`Contracts.server_arrived`, `contract_returned`) puts back the
+  people its open objectives need (the HVT, the hostage) and intel not yet taken, without
+  restarting scenario runs. A leg's zone goes live on the first entry and is put back the same
+  way after that.
 
 ### 4. Supports across zones (decided: everything follows)
 
