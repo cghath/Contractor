@@ -118,12 +118,15 @@ func _ready() -> void:
 	add_child(Pressure.new())  # what the squad has done here, long term
 	_enemy_response = EnemyResponse.new()
 	add_child(_enemy_response)  # patrols, QRF waves, hunters: the enemy's answer
+	if multiplayer.is_server():
+		_set_enemy_faction(_zone_enemy())  # wave 6b: whose kit the garrisons wear from the first spawn
 	add_child(RadioChatter.new())  # what a looted enemy radio lets the squad hear
 	add_child(UrbanDefence.new())  # towns fought from inside: reserves, falling back, relief (Captain, 2026-10-17)
 	add_child(ZoneCleanup.new())  # bodies and dropped loot go after ~6-7 min (blood on its own clock)
 	add_child(DynamicSim.new())  # far AI stops simulating until a player comes near (Captain, 2026-10-18)
 	add_child(SquadTrail.new())  # the trail the squad leaves, for enemy trackers (Captain, 2026-10-18)
 	add_child(Bombers.new())  # insurgent suicide bombers on foot (wave 6f)
+	add_child(RivalTeam.new())  # a rival PMC racing the squad to some contracts' sites (wave 6)
 	add_child(IntelReveal.new())  # intel picked up gives away enemy sites on the map
 	if String(def.get("kind", "")) == "hot":
 		add_child(HotZoneOps.new())  # several contracts live, radio follow-ups, hazard pay
@@ -534,17 +537,46 @@ func _on_contract_live(cid: String, _objectives: Array) -> void:
 	# the QRF waves (Reinforcements) follow it too (they stayed Black Ridge's before).
 	var target := String(contract.get("target", ""))
 	if _enemy_response and target != "" and Kits.kit_of(target) != Kits.INSURGENT:
-		_enemy_response.enemy_faction = StringName(target)
 		# Vantage's exo gear is difficulty-gated (CompoundLevel.PMC_LX3_DIFFICULTY/HX1_DIFFICULTY):
 		# true_rating, the host's real 1-5 rating, not "rated" (the briefing, which can understate it).
-		_enemy_response.difficulty = int(contract.get("true_rating", contract.get("rated", 1)))
-		var waves := _enemy_response.reinforcements
-		if waves:
-			waves.enemy_faction = StringName(target)
-			waves.difficulty = _enemy_response.difficulty
+		_set_enemy_faction(target, int(contract.get("true_rating", contract.get("rated", 1))))
 	var module := get_module(String(contract.get("module_id", "")))
 	if module and _garrisoned.has(module.module_id):
 		_spawn_garrison(module)
+
+
+## Host: whose men this zone's patrols, waves, hunters and garrisons are (and their kit), with
+## the difficulty that gates a PMC's exo gear. "" leaves the zone's usual Black Ridge mix.
+func _set_enemy_faction(faction: String, difficulty := -1) -> void:
+	if _enemy_response == null or faction == "":
+		return
+	_enemy_response.enemy_faction = StringName(faction)
+	if difficulty > 0:
+		_enemy_response.difficulty = difficulty
+	var waves := _enemy_response.reinforcements
+	if waves:
+		waves.enemy_faction = StringName(faction)
+		waves.difficulty = _enemy_response.difficulty
+
+
+## Wave 6b's open item ("a garrison already spawned before its contract went live keeps the
+## militia kit"): who the zone's enemy is as it loads, before any contract goes live. A held
+## contract of this deployment in this zone against a kitted faction (the first one), else a hot
+## zone's holder (WorldSites, the persistent world: only read, never seeded here, so a test zone
+## hosted on its own writes no campaign), else "" (Black Ridge, as before).
+func _zone_enemy() -> String:
+	var zid := GameState.zone_id
+	var cids: Array = Contracts.deployment().get("cids", [])
+	for c: Dictionary in Contracts.held():
+		var target := String(c.get("target", ""))
+		if String(c.get("cid", "")) in cids and String(c.get("zone_id", "")) == zid and target != "" and Kits.kit_of(target, zid) != Kits.INSURGENT:
+			return target
+	if String(def.get("kind", "")) == "hot":
+		var site: Dictionary = Campaign.section(WorldSites.SECTION).get(zid, {})
+		var holder := String(site.get("holder", ""))
+		if holder != "" and Kits.kit_of(holder, zid) != Kits.INSURGENT:
+			return holder
+	return ""
 
 
 ## Host only. A module's hostiles (garrison_size of them: the module's posts, then extra posts

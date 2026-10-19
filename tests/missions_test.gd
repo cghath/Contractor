@@ -61,6 +61,8 @@ func _ready() -> void:
 	await _test_hot_zone_ops()
 	_command_on(true)
 	await _test_hq_posts()
+	_test_zone_enemy()
+	await _test_rival_team()
 	await _test_respawn_points()
 	_finish()
 
@@ -1321,6 +1323,82 @@ func _test_hot_zone_ops() -> void:
 
 ## Captain (2026-10-12): the HQ's corner towers have their parapets on their outer sides, and
 ## garrison posts face out of their site: the gate guards stand behind the sandbags, facing the gate.
+## Wave 6b's open item: the zone knows whose men it holds as it loads (ZoneLevel._zone_enemy),
+## so a garrison spawned before any contract goes live already wears that faction's kit: a
+## deployment contract's kitted target first, else a hot zone's holder (only read, never seeded).
+func _test_zone_enemy() -> void:
+	print("Whose kit the zone's garrisons wear before a contract goes live")
+	var zl := level as ZoneLevel
+	if zl == null:
+		check(false, "a zone level")
+		return
+	var zid := GameState.zone_id  # the zone's save id (a test id here, never a real save)
+	var cs := Campaign.section(Contracts.SECTION)
+	var held_before: Array = cs.get("held", [])
+	var dep_before: Dictionary = cs.get("deployment", {})
+	var ws := Campaign.section(WorldSites.SECTION)
+	var site_before: Variant = ws.get(zid)
+	cs.held = []
+	cs.deployment = {"cids": []}
+	ws[zid] = {"holder": "black_ridge", "grip": 0.8, "flashpoint": false}
+	check(zl._zone_enemy() == "", "held by Black Ridge: the usual militia mix")
+	ws[zid] = {"holder": "eastern_concord", "grip": 0.8, "flashpoint": false}
+	check(zl._zone_enemy() == "eastern_concord", "held by the Eastern Concord Forces: their kit from the first spawn")
+	cs.held = [{"cid": "TZE1", "zone_id": zid, "target": "vantage_group"}]
+	cs.deployment = {"cids": ["TZE1"]}
+	check(zl._zone_enemy() == "vantage_group", "a deployment contract against Vantage wins over the holder")
+	cs.held = held_before
+	cs.deployment = dep_before
+	if site_before == null:
+		ws.erase(zid)
+	else:
+		ws[zid] = site_before
+
+
+## Wave 6: a rival PMC team races the squad to a contract's site. Comes in Vantage's black kit,
+## takes the site if it holds it a minute uncontested (the contract fails), and is beaten once
+## all its men are down. Which contracts draw one is fixed by the contract id.
+func _test_rival_team() -> void:
+	print("Rival contractors: a Vantage team racing for the site")
+	var rival := RivalTeam.of(level)
+	check(rival != null, "every zone has one")
+	if rival == null:
+		return
+	var some := range(200).filter(func(i: int) -> bool: return RivalTeam.races_on({"cid": "C%d" % i, "type": "intel_grab", "target": "black_ridge"}))
+	check(some.size() > 20 and some.size() < 100 and not RivalTeam.races_on({"cid": "C1", "type": "intel_grab", "target": RivalTeam.RIVAL})
+		and not RivalTeam.races_on({"cid": "C1", "type": "defend_hold", "target": "black_ridge"}) and RivalTeam.races_on({"cid": "C%d" % some[0], "type": "intel_grab", "target": "black_ridge"}),
+		"about %d%% of race-type contracts draw one (%d of 200), always the same ones; never against Vantage itself or on a hold job" % [RivalTeam.CHANCE_PCT, some.size()])
+	# The site furthest from the players, so nobody contests it.
+	var far: ZoneModule = null
+	for m: ZoneModule in level.modules():
+		if far == null or _flat_m(m.global_position, player.global_position) > _flat_m(far.global_position, player.global_position):
+			far = m
+	var r := {"cid": "TRIVAL1", "title": "the test job", "site": far.global_position, "go_at": INF, "squad": null, "soldiers": [], "held": 0.0, "state": "pending"}
+	rival.races.append(r)
+	check(rival.server_send(r) and (r.soldiers as Array).size() == RivalTeam.SIZE
+		and (r.soldiers as Array).all(func(s: Soldier) -> bool: return s.model.variant == "black"), "the team comes in: %d men in Vantage black" % (r.soldiers as Array).size())
+	for s: Soldier in r.soldiers:
+		s.global_position = level.ground_point(far.global_position + Vector3(randf_range(-5, 5), 0, randf_range(-5, 5)))
+	rival.server_step(r, RivalTeam.SECURE_S * 0.5)
+	check(r.state == "out" and float(r.held) > 0.0, "on the site, nobody near: they start securing it")
+	rival.server_step(r, RivalTeam.SECURE_S)
+	check(r.state == "won", "held a minute: Vantage got there first")
+	var r2 := {"cid": "TRIVAL2", "title": "another", "site": far.global_position, "go_at": INF, "squad": null, "soldiers": [], "held": 0.0, "state": "pending"}
+	rival.races.append(r2)
+	rival.server_send(r2)
+	for s: Soldier in r2.soldiers:
+		s.vitals.server_kill()
+	rival.server_step(r2, 1.0)
+	check(r2.state == "beaten", "all its men down: beaten, the job goes on")
+	for rr: Dictionary in [r, r2]:
+		for s: Variant in rr.soldiers:
+			if is_instance_valid(s):
+				(s as Soldier).queue_free()
+	rival.races.erase(r)
+	rival.races.erase(r2)
+	await _frames(2)
+
+
 func _test_hq_posts() -> void:
 	print("HQ posts")
 	var towers := {"ne": Vector2(15.2, -17.6), "sw": Vector2(-17.6, 15.2)}
