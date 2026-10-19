@@ -908,13 +908,23 @@ func _server_fire(origin: Vector3, direction: Vector3, slot: StringName) -> void
 
 ## A command from the command menu (CommandMenu) for the named squadmates (all if empty).
 ## Any player can command the friendly squad; that makes them its lead.
-## Self-interaction "Dig a fighting position" (Digging): the host starts the dig.
+## Self-interaction "Build cover in front" (Digging.COVER): the host starts the dig.
 @rpc("any_peer", "call_local", "reliable")
 func _server_dig() -> void:
+	_start_dig(Digging.COVER)
+
+
+## Self-interaction "Dig a foxhole" (Digging.HOLE).
+@rpc("any_peer", "call_local", "reliable")
+func _server_dig_hole() -> void:
+	_start_dig(Digging.HOLE)
+
+
+func _start_dig(kind: StringName) -> void:
 	if not _from_owner():
 		return
 	var digging := Digging.of(self)
-	var why := digging.server_start(self) if digging else "Not here"
+	var why := digging.server_start(self, kind) if digging else "Not here"
 	if why != "":
 		_client_message.rpc_id(owner_peer(), why)
 

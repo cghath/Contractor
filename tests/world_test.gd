@@ -510,9 +510,8 @@ func _test_craters() -> void:
 	var dig := Digging.of(level)
 	var post := level.get_module("outpost_n")
 	var dug_posts := dig.cut_ops.filter(func(op: Dictionary) -> bool:
-		return op.kind == "pit" and Vector2(float(op.x) - post.global_position.x, float(op.z) - post.global_position.z).length() < 40.0)
-	check(dug_posts.size() >= 2 and dig.records.size() >= dug_posts.size(),
-		"the enemy's outpost starts dug in (%d pits, %d berms in the zone)" % [dug_posts.size(), dig.records.size()])
+		return op.kind == "mound" and Vector2(float(op.x) - post.global_position.x, float(op.z) - post.global_position.z).length() < 40.0)
+	check(dug_posts.size() >= 2, "the enemy's outpost starts dug in (%d parapets round it)" % dug_posts.size())
 	var before := dig.cut_ops.size()
 	level.server_blast(Vector3(at.x, was + 0.1, at.z), 1.6)
 	await get_tree().physics_frame
@@ -546,7 +545,7 @@ func _test_craters() -> void:
 	ai._held_since -= SquadAI.DIG_IN_AFTER_S
 	await _wait_for(func() -> bool: return dig.digging(digger), 3.0)
 	check(dig.digging(digger), "a squadmate holding a spot digs in there (%s)" % ai.status_text() if ai.has_method(&"status_text") else "a squadmate holding a spot digs in there")
-	for k in 2:
+	for k in Digging.COVER_STAGES_M.size():
 		var key := digger.get_instance_id()
 		if dig._digs.has(key):
 			dig._digs[key].started = float(dig._digs[key].started) - Digging.DIG_S  # (skip the 20 s)
@@ -556,8 +555,10 @@ func _test_craters() -> void:
 		await _wait_for(func() -> bool: return dig.digging(digger), 2.0)
 	var p := digger.global_position
 	var down := t.cuts.dug_depth(p.x, p.z) if t.cuts else 0.0
-	check(down >= SquadAI.AI_DIG_TO_M - 0.15 and not dig.digging(digger),
-		"down to kneeling depth, and no further (%.2f m)" % down)
+	var cover := Digging.cover_at(t, ai._hold_point, ai._dig_way)
+	check(cover >= SquadAI.AI_COVER_TO_M - 0.15 and down < 0.05 and not dig.digging(digger),
+		"cover built to kneeling height in front of him (%.2f m), the ground under him untouched (%.2f m down) [%s, %s, held %.1f s, %.2f m off the spot]" % [
+			cover, down, Digging.problem(digger), ai.status_text(), Soldier._now() - ai._held_since, ai._flat_distance(ai._hold_point)])
 	digger.queue_free()
 
 
@@ -586,7 +587,7 @@ func _test_reload() -> void:
 	var crater := level.insertion_points()[0] + CRATER_FROM_INSERTION
 	var t := level.terrain
 	await get_tree().physics_frame
-	check(t.height_at(crater.x, crater.z) < t.plane_height(crater.x, crater.z) - 0.4 and Digging.of(level).records.size() >= 2,
+	check(t.height_at(crater.x, crater.z) < t.plane_height(crater.x, crater.z) - 0.4 and Digging.of(level).records.size() >= 1,
 		"the crater and the berms are back after the reload (%d berms, %d cuts)" % [Digging.of(level).records.size(), Digging.of(level).cut_ops.size()])
 	var m := await _go_to_module("compound")
 	check(m.voxel_world.holes_through(m.to_global(SHED_WALL)) == 1 and m.voxel_world.marks_near(m.to_global(Vector3(-2.95, 1.35, -4.0)), 0.05) == 1,

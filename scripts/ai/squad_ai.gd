@@ -183,11 +183,12 @@ const SUPPRESSED := 0.5
 const PINNED := 0.85
 const HYSTERESIS := 0.1
 const ARRIVE := 0.7
-## Digging in (dig phase 4, Captain 2026-10-19: "AI dig in"): a friendly soldier holding a spot,
-## out of contact, for DIG_IN_AFTER_S digs a hole there (Digging), down to AI_DIG_TO_M (the
-## kneeling stage), facing where the threat last came from. Contact stops it. Proposed.
+## Digging in (dig phase 4, Captain 2026-10-19: "AI dig in", and "they dont bore down when they
+## build cover in front of them"): a friendly soldier holding a spot, out of contact, for
+## DIG_IN_AFTER_S builds cover in front of it (Digging.COVER) up to AI_COVER_TO_M (kneeling
+## height), facing where the threat last came from. Contact stops it. Proposed.
 const DIG_IN_AFTER_S := 12.0
-const AI_DIG_TO_M := 0.9
+const AI_COVER_TO_M := 0.75
 const RUN_DISTANCE := 5.0
 const WAYPOINT_REACH := 0.45
 ## Points more than this above or below a unit are on another floor (F-01): distances to them
@@ -618,6 +619,7 @@ var _drag_contact_at := 0.0
 var _has_cover := false
 var _hold_point := Vector3.ZERO
 var _held_since := -1.0  # when he got to _hold_point (Soldier._now()), -1 while away from it
+var _dig_way := Vector3.ZERO  # the way his cover at _hold_point faces (_dig_in)
 var _move_point := Vector3.ZERO
 ## Where a casualty carried under a move order is laid down (null until worked out).
 var _lay_spot: Variant = null
@@ -4424,14 +4426,18 @@ func _dig_in() -> void:
 	if dig == null or dig.digging(body):
 		return
 	var t := terrain as ZoneTerrain
-	var p := body.global_position
-	if t.cuts and t.cuts.dug_depth(p.x, p.z) >= AI_DIG_TO_M - 0.1:
+	# His cover goes in front of the spot he holds, facing the threat if there is one, else the way
+	# his first dig there faced (he looks about between digs).
+	var way := body.threat_pos - _hold_point if body.threat_pos != Vector3.ZERO else _dig_way
+	way.y = 0.0
+	if way.length() < 0.1:
+		way = Digging.facing(body)
+	way = way.normalized()
+	_face(_hold_point + way * 5.0)
+	if Digging.cover_at(t, _hold_point, way) >= AI_COVER_TO_M - 0.1 or Digging.problem(body) != "":
 		return
-	if Digging.problem(body) != "":
-		return
-	if body.threat_pos != Vector3.ZERO:
-		_face(body.threat_pos)
-	if dig.server_start(body) == "":
+	if dig.server_start(body, Digging.COVER, _hold_point, way) == "":
+		_dig_way = way
 		_callout(&"dig_in", "Digging in!")
 
 

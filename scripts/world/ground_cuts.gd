@@ -39,13 +39,22 @@ const LIP_SHARE := 0.25
 const SCORCH_REACH := 1.35
 ## A dug pit (Digging, dig phase 3: foxholes and trenches): PIT_HALF_W across and PIT_AHEAD_M /
 ## PIT_BEHIND_M along the way the digger faces from where he kneels, its walls sloping in over
-## PIT_EDGE_M; each dig takes it to the next of PIT_STAGES_M (a prone scrape, kneeling, standing).
+## PIT_EDGE_M; each dig takes it to the next of PIT_STAGES_M (a prone scrape, then chest-deep).
 ## Digging on from inside one, facing on, makes it a trench. Proposed.
 const PIT_HALF_W := 0.6
 const PIT_AHEAD_M := 0.7
 const PIT_BEHIND_M := 0.9
 const PIT_EDGE_M := 0.3
-const PIT_STAGES_M: Array[float] = [0.45, 0.9, 1.4]
+const PIT_STAGES_M: Array[float] = [0.4, 0.8]  # a scrape to fire from lying down, then chest-deep standing (a fighting hole, not a pit)
+## The spoil from a pit (Captain, 2026-10-19: the block berms "need to flow with the terrain
+## better"): a parapet raised in the ground itself, so it follows the slope and takes the ground's
+## shading: a crescent MOUND_R_M in front of the digger, MOUND_HALF_T_M either side of that line,
+## over MOUND_ARC_DEG either side of ahead (tapering off over MOUND_TAPER_DEG past it), rounded
+## over the top. It never fills a dug hole. Its height comes with the dig (Digging.spoil_height).
+const MOUND_R_M := 1.5
+const MOUND_HALF_T_M := 0.9
+const MOUND_ARC_DEG := 60.0
+const MOUND_TAPER_DEG := 20.0
 const SCORCH := Color("33281d")
 const SCORCH_MAX := 0.7
 ## Ground this scorched or dug grows no grass (bare).
@@ -100,6 +109,8 @@ func apply(op: Dictionary) -> bool:
 			return _crater(float(op.x), float(op.z), float(op.r), float(op.depth))
 		"pit":
 			return _pit(float(op.x), float(op.z), float(op.yaw), float(op.depth))
+		"mound":
+			return _mound(float(op.x), float(op.z), float(op.yaw), float(op.h))
 	return false
 
 
@@ -179,6 +190,45 @@ func _pit(x: float, z: float, yaw: float, depth: float) -> bool:
 			if want < float(delta.get(f, 0.0)):
 				delta[f] = maxf(want, -MAX_DEPTH_M)
 			earth[f] = 1.0
+	_rebuild_around(area)
+	version += 1
+	return true
+
+
+## A spoil mound op: in front of (pos), facing `yaw`, `h` high at its crest.
+static func mound_op(pos: Vector3, yaw: float, h: float) -> Dictionary:
+	return {"kind": "mound", "x": pos.x, "z": pos.z, "yaw": yaw, "h": h}
+
+
+func _mound(x: float, z: float, yaw: float, h: float) -> bool:
+	var reach := MOUND_R_M + MOUND_HALF_T_M + 0.3
+	var area := Rect2(x - reach, z - reach, reach * 2.0, reach * 2.0)
+	if not _cut_area(area):
+		return false
+	var fwd := Vector2(-sin(yaw), -cos(yaw))
+	var side := Vector2(fwd.y, -fwd.x)
+	var arc := deg_to_rad(MOUND_ARC_DEG)
+	var taper := deg_to_rad(MOUND_TAPER_DEG)
+	var lo := _fine_index(area.position.x, area.position.y)
+	var hi := _fine_index(area.end.x, area.end.y) + Vector2i.ONE
+	for fj in range(lo.y, hi.y + 1):
+		for fi in range(lo.x, hi.x + 1):
+			var f := Vector2i(fi, fj)
+			var v := _fine_pos(f) - Vector2(x, z)
+			var across := absf(v.length() - MOUND_R_M) / MOUND_HALF_T_M
+			if across >= 1.0:
+				continue
+			var a := absf(atan2(v.dot(side), v.dot(fwd)))
+			var ends := 1.0 - smoothstep(arc - taper, arc + taper, a)
+			if ends <= 0.0:
+				continue
+			var was := float(delta.get(f, 0.0))
+			if was < -0.05:
+				continue  # never into a hole
+			var want := h * (0.5 + 0.5 * cos(PI * across)) * ends
+			if want > was:
+				delta[f] = want
+				earth[f] = maxf(float(earth.get(f, 0.0)), clampf(want / maxf(h, 0.01) * 1.2, 0.0, 1.0))
 	_rebuild_around(area)
 	version += 1
 	return true

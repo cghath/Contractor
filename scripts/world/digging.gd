@@ -9,19 +9,23 @@ extends Node
 ## camera. It stops rounds (its collision is world: Ballistics stops there, as at a wall) and
 ## blasts wear it down (server_blast, from the level's own: HITS of them flatten it).
 ##
-## In a zone (a ZoneTerrain under him) a dig also cuts a hole where he kneels (dig phase 3,
-## "real foxholes and trenches": GroundCuts.pit_op): each dig takes it a stage deeper (a prone
-## scrape, then kneeling, then standing: GroundCuts.PIT_STAGES_M), digging on from inside one
-## makes it a trench, and only the first dig at a spot throws up the berm in front (the spoil).
-## Elsewhere (the test compound) a dig is a berm alone. (A trench runs sideways, along the
-## berms: step aside a pit's width and dig again, and the new berm joins the last; a dig within
-## SPOIL_APART_M of an earlier one deepens it, no new berm.)
+## In a zone (a ZoneTerrain under him) the berm is the ground itself (GroundCuts mound: it
+## follows the slope and takes the ground's look; Captain, 2026-10-19: "they need to flow with the
+## terrain better"), and a foxhole cuts the pit where he kneels (dig phase 3: GroundCuts.pit_op),
+## a stage deeper each dig (GroundCuts.PIT_STAGES_M); stepping aside and digging again runs it
+## into a trench, the parapets merging. Elsewhere (the test compound) a dig is a block berm.
 ##
 ## AI digs in too (dig phase 4): a friendly soldier holding a spot (SquadAI HOLD, out of
-## contact) digs down to the kneeling stage there; AI carry the e-tool on the pack (not an item:
-## Proposed, so every kit needn't change), players need the item. The enemy's outposts and
-## checkpoints are dug in before the squad arrives (server_prepare: PREPARED_PER_SITE pits with
-## their berms round each, facing out).
+## contact) builds cover in front of it, to kneeling height; AI carry the e-tool on the pack (not
+## an item: Proposed, so every kit needn't change), players need the item. The enemy's outposts
+## and checkpoints have their parapets up before the squad arrives (server_prepare:
+## PREPARED_PER_SITE round each, facing out).
+##
+## Two digs (Captain, 2026-10-19: "ideally they dont bore down when they build cover in front of
+## them"): COVER (the menu's "Build cover in front") only raises the parapet in front, a stage
+## higher each time (COVER_STAGES_M: prone, then kneeling), the ground under him untouched; HOLE
+## ("Dig a foxhole") cuts the pit under him, with its spoil in front. AI and the enemy's outposts
+## build cover. In the test compound (no terrain) either is a block berm.
 ##
 ## Blasts cut the ground too (dig phase 2, "explosion craters"): a blast on or near the ground
 ## of a zone (one with a ZoneTerrain) leaves a crater (GroundCuts.crater_op) you can take cover
@@ -29,7 +33,7 @@ extends Node
 ##
 ## Host authoritative: the host keeps the berms (records) and the cuts (cut_ops) and sends each
 ## to every peer; a late joiner asks for them all once its level is up (_ask_all). Every peer
-## builds the same from them. Not saved with the zone yet (they last the deployment). Numbers
+## builds the same from them; both go in the zone save (to_save, GameState.ground). Numbers
 ## Proposed. One node per level ("Digging").
 
 const NODE_NAME := "Digging"
@@ -44,13 +48,25 @@ const ARC_DEG := 110.0
 const LAYERS := 3
 const DEPTH := 2
 const HITS := 3
-const SPOIL_APART_M := 1.0
+## A foxhole's spoil lip (GroundCuts mound): SPOIL_BASE_M plus SPOIL_PER_M a metre dug (about
+## 0.3 m: standing in the hole he fires over it, chest-deep in cover). Proposed.
+const SPOIL_BASE_M := 0.25
+const SPOIL_PER_M := 0.1
+const COVER := &"cover"
+const HOLE := &"hole"
+## The parapet "Build cover in front" raises, one stage a dig (Captain, 2026-10-19: "they dont
+## need to dig a high wall and a deep hole, they still need to be able to effectively fight", "it
+## just needs to provide great cover and a good firing position"): low enough to fire over lying
+## down, then kneeling, never a wall. Proposed.
+const COVER_STAGES_M: Array[float] = [0.4, 0.75]
+## How far round where the crest would be cover_height looks (along his facing, to the sides).
+const CREST_REACH_M := Vector2(0.4, 0.3)
 ## Enemy sites dug in at the start (server_prepare): how many positions round each, how far
-## outside its footprint, and how deep. Proposed.
+## outside its footprint, and how high their parapets. Proposed.
 const PREPARED_TYPES: Array[String] = ["outpost", "checkpoint"]
 const PREPARED_PER_SITE := 3
 const PREPARED_OUT_M := 4.0
-const PREPARED_DEPTH_M := 0.9
+const PREPARED_COVER_M := 0.75
 const BLAST_REACH_M := 1.5
 ## A blast cuts a crater when it goes off at most this high over the ground (or its radius, if more).
 const CRATER_FROM_M := 0.8
@@ -84,7 +100,7 @@ func _ready() -> void:
 
 
 ## Why `s` can't dig here and now ("" when they can).
-static func problem(s: Soldier) -> String:
+static func problem(s: Soldier, kind := COVER) -> String:
 	if not s.is_ai() and s.inventory.count_of(ITEM) <= 0 and not s.inventory.slots.values().has(ITEM):
 		return "You have no e-tool"
 	if not s.vitals.is_up() or Vehicle.ride_of(s) != null or s.carry_mode != &"":
@@ -96,23 +112,65 @@ static func problem(s: Soldier) -> String:
 		var p := s.global_position
 		if p.y - terrain.height_at(p.x, p.z) > 0.4:
 			return "Dig on open ground"
-		var dug := terrain.cuts.dug_depth(p.x, p.z) if terrain.cuts else 0.0
-		if GroundCuts.next_stage(dug) == 0.0:
-			return "This hole is as deep as it goes"
+		if kind == HOLE:
+			var dug := terrain.cuts.dug_depth(p.x, p.z) if terrain.cuts else 0.0
+			if GroundCuts.next_stage(dug) == 0.0:
+				return "This hole is as deep as it goes"
+		elif next_cover(cover_height(terrain, s)) == 0.0:
+			return "This cover is as high as it goes"
+	elif kind == HOLE:
+		return "Foxholes need open ground"
 	return ""
 
 
+## How high the parapet in front of `s` stands now (a zone's ground over the ground as it was,
+## at the crest of where his cover would go).
+static func cover_height(terrain: ZoneTerrain, s: Soldier) -> float:
+	return cover_at(terrain, s.global_position, facing(s))
+
+
+## The flat way `s` faces.
+static func facing(s: Soldier) -> Vector3:
+	var fwd := -s.global_basis.z
+	fwd.y = 0.0
+	return fwd.normalized() if fwd.length() > 0.01 else Vector3.FORWARD
+
+
+## How high the parapet stands in front of `pos`, facing `fwd` (flat, normalized).
+static func cover_at(terrain: ZoneTerrain, pos: Vector3, fwd: Vector3) -> float:
+	var side := Vector3(-fwd.z, 0.0, fwd.x)
+	var best := -INF
+	# The crest's highest round where it would be (a man shuffles on his spot, and one point between
+	# the fine grid's vertices reads low): CREST_REACH_M along his facing and to the sides.
+	for i in range(-2, 3):
+		for j in range(-2, 3):
+			var q := pos + fwd * (GroundCuts.MOUND_R_M + i * CREST_REACH_M.x * 0.5) + side * (j * CREST_REACH_M.y * 0.5)
+			best = maxf(best, terrain.height_at(q.x, q.z) - terrain.plane_height(q.x, q.z))
+	return best
+
+
+## The next COVER_STAGES_M past `height`, or 0 when it's as high as it goes.
+static func next_cover(height: float) -> float:
+	for h in COVER_STAGES_M:
+		if h > height + 0.15:
+			return h
+	return 0.0
+
+
 ## Host: `s` starts digging where they stand, facing the way they look. Returns "" or why not.
-func server_start(s: Soldier) -> String:
+## `at` (AI holding a spot): dig there, not where he stands; `fwd`: facing that way, not his own.
+func server_start(s: Soldier, kind := COVER, at := Vector3.INF, fwd := Vector3.ZERO) -> String:
 	if not multiplayer.is_server():
 		return ""
-	var why := problem(s)
+	var why := problem(s, kind)
 	if why != "":
 		return why
 	if _digs.has(s.get_instance_id()):
 		return "Already digging"
 	var serial := s.model.server_play(CharacterModel.LOOT, DIG_S, Vector3(0, 0.1, -0.6), &"", &"", true)
-	_digs[s.get_instance_id()] = {"soldier": s, "from": s.global_position, "started": Soldier._now(), "serial": serial}
+	var way := fwd if fwd.length() > 0.01 else facing(s)  # fixed now: he looks about while he digs
+	_digs[s.get_instance_id()] = {"soldier": s, "from": s.global_position, "started": Soldier._now(), "serial": serial, "kind": kind,
+		"at": at if at.is_finite() else s.global_position, "fwd": way}
 	print("[dig] %s digs in" % s.display_name())
 	return ""
 
@@ -136,6 +194,11 @@ func _server_restore(saved: Dictionary) -> void:
 		_client_add.rpc(rec)
 	for op: Dictionary in saved.get("cuts", []):
 		_client_cut.rpc(op)
+
+
+## How high the spoil parapet in front of a hole `depth` deep stands (a zone's GroundCuts mound).
+static func spoil_height(depth: float) -> float:
+	return SPOIL_BASE_M + depth * SPOIL_PER_M
 
 
 ## Whether `s` is digging now (host).
@@ -177,8 +240,7 @@ func server_prepare(level: ZoneLevel) -> void:
 				continue
 			p.y = level.terrain.height_at(p.x, p.z)
 			var yaw := atan2(-out.x, -out.z)
-			_client_cut.rpc(GroundCuts.pit_op(p, yaw, PREPARED_DEPTH_M))
-			server_add(Vector3(p.x, level.terrain.plane_height(p.x, p.z), p.z), yaw)
+			_client_cut.rpc(GroundCuts.mound_op(p, yaw, PREPARED_COVER_M))
 
 
 func _physics_process(_delta: float) -> void:
@@ -194,23 +256,25 @@ func _physics_process(_delta: float) -> void:
 			continue
 		if Soldier._now() - float(d.started) >= DIG_S:
 			_digs.erase(key)
-			var fwd := -s.global_basis.z
-			fwd.y = 0.0
-			fwd = fwd.normalized() if fwd.length() > 0.01 else Vector3.FORWARD
+			var fwd: Vector3 = d.fwd
 			var yaw := atan2(-fwd.x, -fwd.z)
 			var terrain := _terrain()
 			if terrain == null:
 				server_add(s.global_position, yaw)
 			else:
-				var p := s.global_position
-				var dug := terrain.cuts.dug_depth(p.x, p.z) if terrain.cuts else 0.0
-				var depth := GroundCuts.next_stage(dug)
-				if depth > 0.0:
-					_client_cut.rpc(GroundCuts.pit_op(p, yaw, depth))
-				# The spoil: a berm in front, unless one is near there already (a hole being deepened).
-				if not records.values().any(func(r: Dictionary) -> bool: return (r.pos as Vector3).distance_to(p) < SPOIL_APART_M):
-					server_add(Vector3(p.x, terrain.plane_height(p.x, p.z), p.z), yaw)
-				print("[dig] %s has dug in (%.2f m down)" % [s.display_name(), depth])
+				var p: Vector3 = d.at
+				if StringName(d.get("kind", COVER)) == HOLE:
+					var dug := terrain.cuts.dug_depth(p.x, p.z) if terrain.cuts else 0.0
+					var depth := GroundCuts.next_stage(dug)
+					if depth > 0.0:
+						_client_cut.rpc(GroundCuts.pit_op(p, yaw, depth))
+						_client_cut.rpc(GroundCuts.mound_op(p, yaw, spoil_height(depth)))  # the spoil, in front: higher as the hole goes down
+					print("[dig] %s has dug a foxhole (%.2f m down)" % [s.display_name(), depth])
+				else:
+					var h := next_cover(cover_at(terrain, p, fwd))
+					if h > 0.0:
+						_client_cut.rpc(GroundCuts.mound_op(p, yaw, h))
+					print("[dig] %s has built cover (%.2f m high)" % [s.display_name(), h])
 				continue
 			print("[dig] %s has dug a fighting position" % s.display_name())
 
