@@ -46,11 +46,20 @@ const RANGE_END_X := -57.0
 ## 12 m grid), "half": the module's half footprint}. Each is a small module of its own in the base
 ## zone (ZoneModules type "fob_<id>": defence_boxes). Proposed prices.
 const DEFENCES := {
-	"tower_ne": {"name": "Watchtower (north-east corner)", "price": 12000, "slot": [24, -24], "half": [3, 3]},
-	"tower_sw": {"name": "Watchtower (south-west corner)", "price": 12000, "slot": [-24, 24], "half": [3, 3]},
-	"mg_pit": {"name": "MG pit covering the gate", "price": 6000, "slot": [12, 24], "half": [3, 3]},
-	"chicane": {"name": "HESCO chicane before the gate", "price": 4000, "slot": [0, 36], "half": [8, 3]},
-	"bunker": {"name": "Concrete bunker", "price": 15000, "slot": [-24, -24], "half": [4, 4]},
+	"tower_ne": {"name": "Watchtower (north-east corner)", "price": 12000, "slot": [24, -24], "half": [3, 3], "tier": 2},
+	"tower_sw": {"name": "Watchtower (south-west corner)", "price": 12000, "slot": [-24, 24], "half": [3, 3], "tier": 2},
+	"mg_pit": {"name": "MG pit covering the gate", "price": 6000, "slot": [12, 24], "half": [3, 3], "tier": 1},
+	"chicane": {"name": "HESCO chicane before the gate", "price": 4000, "slot": [0, 36], "half": [8, 3], "tier": 1},
+	"bunker": {"name": "Concrete bunker", "price": 15000, "slot": [-24, -24], "half": [4, 4], "tier": 2},
+}
+## FOB tiers (docs/linked_zones.md 1b: "FOB tiers (bigger wire, more defence slots, more squads)
+## unlock hot zones, better supports and the player-built faction"): tier -> {"price" to reach it,
+## "guards" the most it keeps, "squads" hired company squads (LZ-6's next part)}. The company
+## starts at 1. Proposed.
+const TIERS := {
+	1: {"price": 0, "guards": 4, "squads": 0},
+	2: {"price": 40000, "guards": 8, "squads": 1},
+	3: {"price": 120000, "guards": 8, "squads": 2},
 }
 
 

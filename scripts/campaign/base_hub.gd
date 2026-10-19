@@ -1767,7 +1767,31 @@ const GUARD_DAILY_WAGE := 120
 
 
 func guards() -> int:
-	return clampi(int(base().get("guards", 0)), 0, MAX_GUARDS)
+	return clampi(int(base().get("guards", 0)), 0, max_guards())
+
+
+## The FOB's tier (BaseFob.TIERS), 1 to start.
+func fob_tier() -> int:
+	return clampi(int(base().get("fob_tier", 1)), 1, BaseFob.TIERS.size())
+
+
+## The most guards this tier keeps (MAX_GUARDS at the top).
+func max_guards() -> int:
+	return mini(int(BaseFob.TIERS[fob_tier()].guards), MAX_GUARDS)
+
+
+## Host (the ops desk): the FOB goes up a tier. Returns "" or why not.
+func server_upgrade_fob() -> String:
+	var next := fob_tier() + 1
+	if not BaseFob.TIERS.has(next):
+		return "The FOB is as big as it gets"
+	var price := int(BaseFob.TIERS[next].price)
+	if not BaseEconomy.try_spend(price, "FOB upgrade to tier %d" % next):
+		return "Can't afford the upgrade ($%d)" % price
+	base()["fob_tier"] = next
+	_changed(&"base")
+	SessionLog.note("FOB upgraded to tier %d" % next)
+	return ""
 
 
 ## Host (the ops desk): buys defence `id` (BaseFob.DEFENCES) for the FOB. The engineers put it up
@@ -1779,6 +1803,8 @@ func server_buy_defence(id: String) -> String:
 	if id in owned:
 		return "Already built"
 	var d: Dictionary = BaseFob.DEFENCES[id]
+	if int(d.get("tier", 1)) > fob_tier():
+		return "The %s needs the FOB at tier %d" % [String(d.name), int(d.tier)]
 	if not BaseEconomy.try_spend(int(d.price), String(d.name)):
 		return "Can't afford the %s ($%d)" % [String(d.name), int(d.price)]
 	owned.append(id)
@@ -1791,7 +1817,9 @@ func server_buy_defence(id: String) -> String:
 
 ## Host (the ops desk): the company keeps `n` guards.
 func server_set_guards(n: int) -> String:
-	base()["guards"] = clampi(n, 0, MAX_GUARDS)
+	if n > max_guards():
+		return "The FOB keeps %d guards at tier %d: upgrade it for more" % [max_guards(), fob_tier()]
+	base()["guards"] = clampi(n, 0, max_guards())
 	_changed(&"base")
 	var lvl := level()
 	if lvl is BaseZoneLevel:
@@ -2508,6 +2536,8 @@ func _server_request(action: String, args: Array) -> void:
 				server_advance_days(clampi(int(args[0]) if not args.is_empty() else 1, 1, 30))
 			"defence":
 				why = server_buy_defence(String(args[0])) if sender == 1 and not args.is_empty() else "Only the host can do that"
+			"fob_tier":
+				why = server_upgrade_fob() if sender == 1 else "Only the host can do that"
 			"guards":
 				why = server_set_guards(int(args[0]) if not args.is_empty() else 0) if sender == 1 else "Only the host can do that"
 			"deploy":
@@ -2555,7 +2585,7 @@ func build_view() -> Dictionary:
 		"stash": stash(), "prep": _prep(), "catalog": BaseEconomy.shop_catalog(), "held": held,
 		"daily_wages": Roster.daily_wages(roster()), "bill_in_days": Economy.days_to_bill(), "weekly_bill": int(Economy.weekly_bill().total),
 		"players": keys, "in_base": in_base(), "ready": _ready_peers.keys(),
-		"guards": guards(), "assault": base().get("assault", {}), "defences": base().get("defences", []),
+		"guards": guards(), "assault": base().get("assault", {}), "defences": base().get("defences", []), "fob_tier": fob_tier(), "max_guards": max_guards(),
 	}
 
 

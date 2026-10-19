@@ -442,6 +442,9 @@ func _test_assault() -> void:
 	await _wait_until(func() -> bool: return node.teams.is_empty(), 6.0)
 	check(node.teams.is_empty() and not base_sec.has("assault"), "beaten off, the booking's cleared")
 	# Hired guards (LZ-6): they stand on the wire, and hold an assault off-screen.
+	check(BaseHub.server_set_guards(5) != "" and BaseHub.guards() == 0, "tier 1 keeps no more than %d guards" % int(BaseFob.TIERS[1].guards))
+	check(BaseHub.server_buy_defence("bunker").contains("tier 2"), "and the bunker waits for tier 2")
+	check(BaseHub.server_upgrade_fob() == "" and BaseHub.fob_tier() == 2 and BaseHub.max_guards() == 8, "the FOB goes up to tier 2")
 	BaseHub.server_set_guards(3)
 	await get_tree().create_timer(0.5).timeout
 	var posted := base.ai.get_children().filter(func(n: Node) -> bool: return n is Soldier and (n as Soldier).has_meta(&"base_guard") and not n.is_queued_for_deletion())

@@ -246,9 +246,15 @@ func _build_squad(rows: VBoxContainer, v: Dictionary) -> void:
 	# Base defence (LZ-6): hired guards on the wire, and any assault the heat has booked.
 	var defence := UiKit.section("Base defence", rows)
 	var g := int(v.get("guards", 0))
-	defence.add_child(UiKit.text("Guards on the wire: %d of %d ($%d a day each)." % [g, BaseHub.MAX_GUARDS, BaseHub.GUARD_DAILY_WAGE]))
+	var tier := int(v.get("fob_tier", 1))
+	var cap := int(v.get("max_guards", BaseHub.MAX_GUARDS))
+	defence.add_child(UiKit.text("FOB tier %d. Guards on the wire: %d of %d ($%d a day each)." % [tier, g, cap, BaseHub.GUARD_DAILY_WAGE]))
+	if BaseFob.TIERS.has(tier + 1):
+		var up := UiKit.button("Upgrade the FOB to tier %d ($%d)" % [tier + 1, int(BaseFob.TIERS[tier + 1].price)], func() -> void: BaseHub.request("fob_tier"))
+		up.disabled = not multiplayer.is_server()
+		defence.add_child(up)
 	var hire := UiKit.button("Hire a guard", func() -> void: BaseHub.request("guards", [g + 1]))
-	hire.disabled = not multiplayer.is_server() or g >= BaseHub.MAX_GUARDS
+	hire.disabled = not multiplayer.is_server() or g >= cap
 	var drop := UiKit.button("Stand one down", func() -> void: BaseHub.request("guards", [g - 1]))
 	drop.disabled = not multiplayer.is_server() or g <= 0
 	defence.add_child(UiKit.button_row([hire, drop]))
@@ -258,8 +264,9 @@ func _build_squad(rows: VBoxContainer, v: Dictionary) -> void:
 		if id in owned:
 			defence.add_child(UiKit.text("%s: built." % d.name))
 		else:
-			var buy := UiKit.button("Build %s ($%d)" % [d.name, int(d.price)], func() -> void: BaseHub.request("defence", [id]))
-			buy.disabled = not multiplayer.is_server()
+			var buy := UiKit.button("Build %s ($%d)" % [d.name, int(d.price)] + ("" if int(d.get("tier", 1)) <= tier else " (tier %d)" % int(d.tier)),
+				func() -> void: BaseHub.request("defence", [id]))
+			buy.disabled = not multiplayer.is_server() or int(d.get("tier", 1)) > tier
 			defence.add_child(buy)
 	var booked: Dictionary = v.get("assault", {})
 	if not booked.is_empty():
