@@ -45,7 +45,8 @@ const SELF_COLOUR := Color(0.2, 1.0, 1.0)
 const ALLIED_COLOUR := Color(0.45, 0.85, 0.5)
 ## The map orders the host gives an allied element (AlliedTroops.server_order), menu text first.
 const ALLIED_MAP_ORDERS := [["Move here", "move"], ["Defend here", "defend"], ["Assault here", "assault"], ["Flank here", "flank"],
-	["Fall back here", "fall_back"], ["Hold where it is", "hold"], ["Release", "release"]]
+	["Fall back here", "fall_back"], ["Hold where it is", "hold"], ["Mount the vehicle here", "mount"], ["Drive here", "drive"],
+	["Dismount", "dismount"], ["Release", "release"]]
 const GEAR_COLOUR := Color("ffd166")
 const GRID_MINOR := Color(0, 0, 0, 0.22)
 const GRID_MAJOR := Color(0, 0, 0, 0.5)

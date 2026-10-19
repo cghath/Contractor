@@ -17,6 +17,8 @@ extends Node
 ##                     squad is engaged (Squad.is_engaged) or that was hit (Vehicle.damaged) in
 ##                     the last CONTACT_S stops, and its AI passengers (not the driver or the
 ##                     gunner) get out and fight.
+## The host's high command gives an allied or company element the same (AlliedTroops "mount",
+## "drive", "dismount": server_squad_mount / server_squad_drive / server_squad_dismount, any Squad).
 ## One node, "SquadDrivers", under each level's VehicleLayer. Host only. Proposed numbers.
 
 const NODE_NAME := "SquadDrivers"
@@ -28,6 +30,9 @@ const PICKUP_STOP_M := 9.0
 const CONTACT_S := 6.0
 ## Who takes the wheel when nobody's named: earliest first (a gunner's role last).
 const DRIVER_ROLES: Array[StringName] = [Roles.RIFLEMAN, Roles.MARKSMAN, Roles.GRENADIER, Roles.TEAM_LEADER, Roles.AUTORIFLEMAN]
+## An element told to mount (the high command, from the map) takes the vehicle within this of
+## the point given.
+const ELEMENT_PICK_M := 40.0
 
 enum Order { NONE, DRIVE, CONVOY, PICKUP, HOLD }
 
@@ -196,12 +201,71 @@ func order_of(v: Vehicle) -> int:
 	return int((orders.get(v.get_instance_id(), {}) as Dictionary).get("order", Order.NONE))
 
 
+# --- An element's vehicles (the host's high command, AlliedTroops) ------------------------------
+
+## Host: `squad` (an element) takes the vehicle near `point`: one of it at the wheel, the rest in
+## the other seats (VehicleLayer.server_board, walking over to it). Returns "" or why not.
+func server_squad_mount(by: Soldier, squad: Squad, point: Vector3) -> String:
+	var v := layer().vehicle_near(point, ELEMENT_PICK_M)
+	if v == null or v.kind == Vehicle.HELICOPTER:
+		return "no vehicle there"
+	var d := v.driver()
+	if d and not d.is_ai():
+		return "a player is driving it"
+	var team: Array[Soldier] = squad.members().filter(func(s: Soldier) -> bool: return s.is_ai() and s.vitals.is_up())
+	if team.is_empty():
+		return "nobody up"
+	var sent := 0
+	if d == null:
+		var wheel := pick_driver(team)
+		if wheel and layer().server_board(by, wheel, v, v.driver_seat()):
+			team.erase(wheel)
+			sent += 1
+	for s: Soldier in team:  # (more than it seats: the rest find no seat at the door, and stay)
+		if layer().server_board(by, s, v, -1):
+			sent += 1
+	return "" if sent > 0 else "nobody could get in"
+
+
+## Host: the vehicles `squad` (an element) drives go to `point`.
+func server_squad_drive(by: Soldier, squad: Squad, point: Vector3) -> String:
+	var vs := driven_by(squad)
+	if vs.is_empty():
+		return "nobody of it at a wheel"
+	for v in vs:
+		_give(v, Order.DRIVE, by, point, squad)
+		go(v, point)
+	return ""
+
+
+## Host: `squad` (an element) gets out of whatever it rides and holds there.
+func server_squad_dismount(by: Soldier, squad: Squad) -> String:
+	var out := 0
+	var at := Vector3.ZERO
+	for s: Soldier in squad.members():
+		var v := Vehicle.ride_of(s)
+		if v and s.is_ai():
+			orders.erase(v.get_instance_id())
+			v.server_stop()
+			v.server_run_out(s)
+			at = v.global_position
+			out += 1
+	if out == 0:
+		return "nobody of it in a vehicle"
+	squad.give_order(by, Squad.Order.HOLD, at)
+	return ""
+
+
 # --- Who drives what ---------------------------------------------------------------------------
 
 ## The squad's ground vehicles with one of its AI at the wheel.
 func driven(from: Soldier) -> Array[Vehicle]:
+	return driven_by(_squad(from))
+
+
+## The ground vehicles with one of `squad`'s AI at the wheel.
+func driven_by(squad: Squad) -> Array[Vehicle]:
 	var out: Array[Vehicle] = []
-	var squad := _squad(from)
 	if squad == null:
 		return out
 	var members := squad.members()
@@ -227,8 +291,8 @@ func _squad(from: Soldier) -> Squad:
 	return lvl.squad_for(from.faction) if lvl and from else null
 
 
-func _give(v: Vehicle, order: int, by: Soldier, point: Vector3) -> void:
-	orders[v.get_instance_id()] = {"vehicle": v, "order": order, "by": by, "point": point}
+func _give(v: Vehicle, order: int, by: Soldier, point: Vector3, squad: Squad = null) -> void:
+	orders[v.get_instance_id()] = {"vehicle": v, "order": order, "by": by, "point": point, "squad": squad if squad else _squad(by)}
 	if not v.damaged.is_connected(_on_damaged.bind(v)):
 		v.damaged.connect(_on_damaged.bind(v))
 
@@ -262,8 +326,8 @@ func _physics_process(delta: float) -> void:
 		if v == null or v.wrecked or by == null or d == null or not d.is_ai() or not d.vitals.is_up():
 			orders.erase(id)  # no AI at the wheel any more: the order goes with him
 			continue
-		if dismount_on_contact and int(o.order) != Order.HOLD and _in_contact(v, by):
-			_contact_drill(v, by)
+		if dismount_on_contact and int(o.order) != Order.HOLD and _in_contact(v, o):
+			_contact_drill(v, o)
 			continue
 		match int(o.order):
 			Order.CONVOY:
@@ -272,21 +336,29 @@ func _physics_process(delta: float) -> void:
 				_step_pickup(v, o, by)
 
 
-func _in_contact(v: Vehicle, by: Soldier) -> bool:
-	var squad := _squad(by)
+func _in_contact(v: Vehicle, o: Dictionary) -> bool:
+	var squad: Squad = o.get("squad") if is_instance_valid(o.get("squad")) else null
 	return (squad != null and squad.is_engaged()) or Soldier._now() - float(_hit_at.get(v.get_instance_id(), -INF)) < CONTACT_S
 
 
 ## Contact: the vehicle stops and its AI passengers get out and fight (driver and gunner stay).
-func _contact_drill(v: Vehicle, by: Soldier) -> void:
+func _contact_drill(v: Vehicle, o: Dictionary) -> void:
+	var by: Soldier = o.by
+	var squad: Squad = o.get("squad") if is_instance_valid(o.get("squad")) else null
 	v.server_stop()
-	orders[v.get_instance_id()]["order"] = Order.HOLD
+	o["order"] = Order.HOLD
 	var out := PackedStringArray()
 	for s: Soldier in v.occupants():
 		if s.is_ai() and s.vitals.is_up() and s != v.driver() and s != v.gunner():
 			out.append(String(s.name))
 	if not out.is_empty():
-		layer().server_order_dismount(by, out)
+		if squad == _squad(by):
+			layer().server_order_dismount(by, out)
+		elif squad:
+			for s: Soldier in v.occupants():
+				if String(s.name) in out:
+					v.server_run_out(s)
+			squad.give_order(by, Squad.Order.HOLD, v.global_position)  # an element: out and holding round its vehicle
 	if by.owner_connected():
 		by._client_message.rpc_id(by.owner_peer(), "Contact: %s stops%s" % [v.display_name(), ", the squad's out" if not out.is_empty() else ""])
 

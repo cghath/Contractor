@@ -42,7 +42,7 @@ const MAX_ELEMENTS := 2
 const DEFAULT_KIT := "allied_us"
 const SPACING_M := 2.5
 ## The high command's orders (server_order()).
-const ORDERS := ["move", "hold", "defend", "assault", "flank", "follow", "regroup", "fall_back"]
+const ORDERS := ["move", "hold", "defend", "assault", "flank", "follow", "regroup", "fall_back", "mount", "drive", "dismount"]
 ## How often the host re-sends `shown` with fresh order points for the map, in seconds.
 const SHOW_EVERY_S := 2.0
 
@@ -293,7 +293,9 @@ func server_call(by: Soldier, dev := false, kind := "rifle", company := false, a
 ##  a real Hold, SquadAI._choose_intent). hold: stop and fight where it stands. assault / flank:
 ##  the attack drills the player's own squad uses (Squad.order_assault / order_flank) on the
 ##  enemy at `point`. follow: follow the host. regroup: come to the host and hold there.
-##  fall_back: break contact back to `point` (Squad.order_fall_back).
+##  fall_back: break contact back to `point` (Squad.order_fall_back). mount: take the vehicle
+##  near `point` (one at the wheel, the rest aboard); drive: its vehicles go to `point`, by road
+##  when that's better; dismount: out and holding there (SquadDrivers, the squad's drivers' tools).
 func server_order(by: Soldier, order: String, point: Vector3, target := "") -> String:
 	var why := _commandable(by)
 	if why != "":
@@ -327,6 +329,16 @@ func server_order(by: Soldier, order: String, point: Vector3, target := "") -> S
 				r = sq.order_flank(by, at)
 			"fall_back":
 				r = sq.order_fall_back(by, at)
+			"mount", "drive", "dismount":
+				var drivers := SquadDrivers.of(self)
+				if drivers == null:
+					r = "no vehicles here"
+				elif order == "mount":
+					r = drivers.server_squad_mount(by, sq, at)
+				elif order == "drive":
+					r = drivers.server_squad_drive(by, sq, at)
+				else:
+					r = drivers.server_squad_dismount(by, sq)
 			_:
 				r = "Order not given"
 		if r != "":

@@ -315,7 +315,9 @@ come pick the players up. Builds on V1's AI drivers following a path (scripts/ve
 high command (allied elements) can use the same orders. Part 1 built (2026-10-19,
 `scripts/vehicles/squad_drivers.gd`, the command menu's Mount entries 4-9): take the wheel,
 drive there, follow me in a column, come pick us up, stop, and dismount on contact (default on).
-Still to come: map orders for the drivers, the high command's elements driving, and road following.
+Part 2 (same day): the map's "Our drivers: drive here"; by road when the zone's roads make the
+better way (`scripts/vehicles/road_route.gd`); and the host's high command gives an element
+"Mount the vehicle here", "Drive here" and "Dismount" from the map (AlliedTroops, SquadDrivers).
 
 ### Wave 7: art, world and weapons
 

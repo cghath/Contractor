@@ -1896,6 +1896,37 @@ func _test_squad_drivers() -> void:
 	check(drivers.server_command(player, "drive_stop", Vector3.ZERO, PackedStringArray()) == "" and drivers.order_of(v) == SquadDrivers.Order.HOLD, "Stop the vehicles")
 	check(drivers.server_command(player, "contact_dismount", Vector3.ZERO, PackedStringArray()).ends_with("off") and not drivers.dismount_on_contact, "the contact drill can be turned off")
 	drivers.dismount_on_contact = true
+	# The high command's elements (AlliedTroops "mount", "drive", "dismount") use the same tools.
+	for s: Soldier in v.occupants():
+		v.server_exit(s)
+	for s: Soldier in [medic, rifle, walker]:
+		s.global_position = Vector3(40, 0.1, 40) + Vector3(randf() * 4.0, 0, 0)  # (clear of its way: a bump is a hit, and a hit is contact)
+	await _reset(v, Vector3(-12, 0, 6))
+	var element := Squad.new()
+	element.name = "TestElement"
+	element.faction = &"friendly"
+	level.add_child(element)
+	var door2 := layer._nearest_door(v, v.global_position - v.global_basis.x * 4.0)
+	var men: Array[Soldier] = []
+	for k in 2:
+		var man := _soldier("friendly", door2 + Vector3(0, 0.1, 0.6 * k), "Elem%d" % k)
+		man.role = Roles.RIFLEMAN
+		SquadAI.of(man).squad = element
+		men.append(man)
+	await get_tree().physics_frame
+	why = drivers.server_squad_mount(player, element, v.global_position + Vector3(-8, 0, 0))
+	check(why == "" and v.driver() in men and men.all(func(m: Soldier) -> bool: return v.seat_of(m) >= 0),
+		"an element told to mount the vehicle 8 m off: one at the wheel, the other aboard (%s)" % why)
+	drivers._hit_at.clear()  # (the hit staged above is still inside CONTACT_S: it would stop this drive too)
+	why = drivers.server_squad_drive(player, element, Vector3(-12, 0, -20))
+	await _wait_for(func() -> bool: return v.ai.status == "arrived", 30.0)
+	check(why == "" and v.ai.status == "arrived", "and drives where the high command says (%s, order %d)" % [v.ai.status, drivers.order_of(v)])
+	why = drivers.server_squad_dismount(player, element)
+	await get_tree().physics_frame
+	check(why == "" and men.all(func(m: Soldier) -> bool: return v.seat_of(m) < 0), "and gets out on the word (%s)" % why)
+	for m in men:
+		m.queue_free()
+	element.queue_free()
 	# By road (RoadRoute): a long drive with a road near both ends goes along it.
 	var def := {"roads": [[[0, 0], [600, 0]], [[600, 0], [600, 600]], [[0, 0], [0, -400]]]}
 	var way := RoadRoute.route(def, Vector2(-40, 30), Vector2(630, 560))

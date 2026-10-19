@@ -222,10 +222,10 @@ func server_order_mount(from: Soldier, point: Vector3, names: PackedStringArray,
 	return "" if sent > 0 else "Nobody to send"
 
 
-## Host: the vehicle (not a wreck) nearest `point` within MOUNT_PICK_M, or null.
-func vehicle_near(point: Vector3) -> Vehicle:
+## Host: the vehicle (not a wreck) nearest `point` within `within` (MOUNT_PICK_M), or null.
+func vehicle_near(point: Vector3, within := MOUNT_PICK_M) -> Vehicle:
 	var best: Vehicle = null
-	var best_d := MOUNT_PICK_M
+	var best_d := within
 	for v in vehicles():
 		var d := v.global_position.distance_to(point)
 		if not v.wrecked and d < best_d:
