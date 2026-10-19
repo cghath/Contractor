@@ -689,6 +689,9 @@ var _cover_medic := false  # a squadmate nearby is out reaching or dragging a ca
 var _fire_line := {}  # the last line-of-fire check (_fire_line): {"at", "from", "to", "state"}
 var _no_shot_since := -1.0  # when this unit last found it had a mark but no line of fire (-1: it has one)
 var _fire_spot: Variant = null  # where a base of fire / Suppress unit moves to get its shot (_find_fire_spot)
+var _overwatch_taken: Variant = null  # the plan's high ground last taken up (_take_overwatch)
+## Men of a base of fire on high ground stand this far round its spot (G-17). Proposed.
+const OVERWATCH_SPREAD_M := 3.0
 var _fire_spot_aim := Vector3.INF  # the aim that spot was found for
 var _fire_spot_stand := false  # the line there is from his feet, not a crouch
 var _fire_spot_at := -1000.0  # when he last looked for one
@@ -4216,6 +4219,8 @@ func _fire_spot_taken(point: Vector3) -> bool:
 ## reloading, a moving tactic), a foe in sight or being pinned leave it be for now.
 func _keep_to_fire_spot() -> void:
 	if _fire_spot == null:
+		_take_overwatch()
+	if _fire_spot == null:
 		return
 	var aim: Vector3 = _tactic().get("aim", Vector3.INF)
 	var kind := StringName(_tactic().get("kind", &""))
@@ -4231,6 +4236,32 @@ func _keep_to_fire_spot() -> void:
 	else:
 		_has_destination = false
 		body.want_crouch = not _fire_spot_stand
+
+
+## A base of fire whose plan found it high ground (SquadTactics.overwatch_spot, G-17) takes it
+## as its fire position, each man a few metres apart round it. A friendly holding on an order
+## stays where he was put.
+func _take_overwatch() -> void:
+	var t := _tactic()
+	var spot: Variant = t.get("spot")
+	if StringName(t.get("kind", &"")) != &"base" or not (spot is Vector3) or (_friendly() and order != Squad.Order.FOLLOW):
+		return
+	var aim: Vector3 = t.get("aim", Vector3.INF)
+	if not aim.is_finite() or (_overwatch_taken is Vector3 and (_overwatch_taken as Vector3).distance_to(spot) < 1.0):
+		return  # this one's been given already (he got there, or gave it up)
+	_overwatch_taken = spot
+	var map := body.get_world_3d().navigation_map
+	var turn := absi(String(body.name).hash()) % 8
+	for i in 8:
+		var angle := TAU * float((turn + i) % 8) / 8.0
+		var q := NavigationServer3D.map_get_closest_point(map, (spot as Vector3) + Vector3(cos(angle), 0.0, sin(angle)) * OVERWATCH_SPREAD_M)
+		if _fire_spot_taken(q) or not _fire_line_from(q + Vector3.UP * FIRE_EYE_STAND_M, aim, FIRE_LINE_SLACK_M):
+			continue
+		_fire_spot = q
+		_fire_spot_aim = aim
+		_fire_spot_stand = not _fire_line_from(q + Vector3.UP * FIRE_EYE_CROUCH_M, aim, FIRE_LINE_SLACK_M)
+		print("[tactics] %s: base of fire to high ground at (%.0f, %.0f), %.0f m up on the enemy" % [body.name, q.x, q.z, q.y - aim.y])
+		return
 
 
 ## Status words for a unit with a mark and no line of fire (_shoot), or "" for none.

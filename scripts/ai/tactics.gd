@@ -92,6 +92,23 @@ const FLANK_FAR_M := 45.0
 const PLAN_SNAP_M := 4.0
 ## Following its lead, the squad's tactical moves stay this close to him.
 const FOLLOW_LEASH_M := 30.0
+## Overwatch (AI bar G-17: LAMBS and VCOM score hills for it): the base of fire looks round its
+## middle on OVERWATCH_RINGS for a spot with a line on the enemy, scoring height over him
+## (OVERWATCH_HEIGHT_W a metre, to OVERWATCH_HEIGHT_MAX_M), the walk (OVERWATCH_WALK_W a metre)
+## and being in sight of another known group (OVERWATCH_EXPOSED within OVERWATCH_OTHERS_M); it
+## moves only for one OVERWATCH_GAIN better than where it is, and never into the enemy's lap
+## (nearer him than OVERWATCH_NEAREST of the range). A flank's end point likes height too
+## (FLANK_HEIGHT_W a metre, to FLANK_HEIGHT_MAX). Proposed.
+const OVERWATCH_RINGS: Array[float] = [12.0, 24.0, 36.0]
+const OVERWATCH_HEIGHT_W := 0.8
+const OVERWATCH_HEIGHT_MAX_M := 12.0
+const OVERWATCH_WALK_W := 0.08
+const OVERWATCH_EXPOSED := 1.5
+const OVERWATCH_OTHERS_M := 250.0
+const OVERWATCH_GAIN := 2.0
+const OVERWATCH_NEAREST := 0.6
+const FLANK_HEIGHT_W := 0.05
+const FLANK_HEIGHT_MAX := 0.5
 ## Proposed (Captain, 2026-10-14: they bunched up): the maneuver element's men each take their
 ## own lane round the flank, this far apart side by side, instead of all running to one point.
 const LANE_GAP_M := 5.0
@@ -476,7 +493,7 @@ func _flank(units: Array[SquadAI], enemy: Vector3, aim: Vector3, id: String, now
 		if ai in plan.moving:
 			ai.set_task({"kind": &"maneuver", "route": (plan.get("lanes", {}) as Dictionary).get(ai, plan.route), "aim": aim, "id": id})
 		else:
-			ai.set_task({"kind": &"base", "aim": aim, "id": id})
+			ai.set_task({"kind": &"base", "aim": aim, "id": id, "spot": plan.get("base_spot")})
 
 
 ## The drill's plan for `units` against `enemy`: {"enemy", "names", "base", "moving", "route",
@@ -488,15 +505,17 @@ func _draw_flank(units: Array[SquadAI], enemy: Vector3, now: float) -> Dictionar
 	var moving: Array = split[1].filter(func(ai: SquadAI) -> bool: return ai.order == Squad.Order.FOLLOW or not ai._friendly())
 	base.append_array(split[1].filter(func(ai: SquadAI) -> bool: return ai not in moving))
 	var lead: Soldier = situation.lead
-	var route := {} if moving.is_empty() else flank_route(moving[0].body, _middle(moving), enemy, lead, _other_clusters())
+	var others := _other_clusters()
+	var route := {} if moving.is_empty() else flank_route(moving[0].body, _middle(moving), enemy, lead, others)
 	if route.is_empty():
 		base.append_array(moving)
 		moving = []
 		_no_flank = {"enemy": enemy, "at": now}
 	_plan_at = now
 	var path: Array = route.get("route", [])
+	var base_spot: Variant = overwatch_spot(base[0].body, _middle(base), enemy, others, lead) if not base.is_empty() else null
 	return {"enemy": enemy, "names": names, "base": base, "moving": moving, "route": path, "side": route.get("side", ""),
-		"lanes": lanes(moving, path)}
+		"lanes": lanes(moving, path), "base_spot": base_spot}
 
 
 ## Each of `units` its own lane along `route`: the route moved sideways (across its start to end)
@@ -699,6 +718,8 @@ static func flank_route(node: Node3D, from: Vector3, enemy: Vector3, lead: Soldi
 			if Throwables.clear_line(world, enemy + Vector3.UP * 1.5, q + Vector3.UP):
 				cost += 1.0  # the enemy sees that spot
 			route.append(q)
+		if route.size() == 2:
+			cost -= clampf((route[1].y - enemy.y) * FLANK_HEIGHT_W, 0.0, FLANK_HEIGHT_MAX)  # the high side (G-17)
 		if route.size() < 2:
 			continue
 		for e: Vector3 in others:
@@ -708,6 +729,42 @@ static func flank_route(node: Node3D, from: Vector3, enemy: Vector3, lead: Soldi
 			best_cost = cost
 			best = {"side": "right" if (route[1] - enemy).dot(right) > 0.0 else "left", "route": route}
 	return best
+
+
+## A base of fire's spot round `from` against `enemy` (see OVERWATCH_RINGS): high ground with a
+## line on him, a short walk, out of other groups' sight; null to stay where it is.
+static func overwatch_spot(node: Node3D, from: Vector3, enemy: Vector3, others: Array, lead: Soldier = null) -> Variant:
+	var world := node.get_world_3d()
+	var map := world.navigation_map
+	var here := NavigationServer3D.map_get_closest_point(map, from)
+	var range := Vector2(from.x - enemy.x, from.z - enemy.z).length()
+	var best: Variant = null
+	var best_score := overwatch_score(world, here, from, enemy, others) - OVERWATCH_GAIN
+	for ring in OVERWATCH_RINGS:
+		for k in 12:
+			var angle := TAU * k / 12.0 + ring
+			var p := from + Vector3(cos(angle), 0.0, sin(angle)) * ring
+			if lead != null:
+				p = _leashed(p, lead.global_position, FOLLOW_LEASH_M)
+			var q := NavigationServer3D.map_get_closest_point(map, p)
+			if Vector2(q.x - p.x, q.z - p.z).length() > PLAN_SNAP_M * 0.5 or Vector2(q.x - enemy.x, q.z - enemy.z).length() < range * OVERWATCH_NEAREST:
+				continue
+			var s := overwatch_score(world, q, from, enemy, others)
+			if s < best_score:
+				best = q
+				best_score = s
+	return best
+
+
+## How good `q` is to fire on `enemy` from (lower is better; INF with no line on him).
+static func overwatch_score(world: World3D, q: Vector3, from: Vector3, enemy: Vector3, others: Array) -> float:
+	if not Throwables.clear_line(world, q + Vector3.UP * 1.6, enemy + Vector3.UP * 1.2):
+		return INF
+	var s := Vector2(q.x - from.x, q.z - from.z).length() * OVERWATCH_WALK_W - clampf(q.y - enemy.y, 0.0, OVERWATCH_HEIGHT_MAX_M) * OVERWATCH_HEIGHT_W
+	for e: Vector3 in others:
+		if e.distance_to(q) < OVERWATCH_OTHERS_M and Throwables.clear_line(world, q + Vector3.UP * 1.6, e + Vector3.UP * 1.2):
+			s += OVERWATCH_EXPOSED
+	return s
 
 
 ## Garrisoning building `b` against a threat at `threat`: its ports facing the threat first

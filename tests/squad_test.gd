@@ -94,6 +94,14 @@ func _test_fire_fix() -> void:
 	var d300 := Ballistics.drop_m(m4, 300.0)
 	var d500 := Ballistics.drop_m(m4, 500.0)
 	check(absf(Ballistics.drop_m(m4, Ballistics.ZERO_M)) < 0.05 and d300 > 0.1 and d500 > d300, "the round drops past its zero (%.2f m at 300, %.2f m at 500)" % [d300, d500])
+	# G-17: high ground with a line scores better than low; out of another group's sight better still.
+	var world := player.get_world_3d()
+	var up_high := player.global_position + Vector3(0, 40, 0)
+	var enemy := up_high + Vector3(0, -6, -60)
+	var low := SquadTactics.overwatch_score(world, enemy + Vector3(0, 0, 50), up_high, enemy, [])
+	var high := SquadTactics.overwatch_score(world, up_high, up_high, enemy, [])
+	var seen := SquadTactics.overwatch_score(world, up_high, up_high, enemy, [up_high + Vector3(40, 0, 0)])
+	check(high < low and seen > high, "overwatch: height over him scores (%.1f high, %.1f level, %.1f in another group's sight)" % [high, low, seen])
 
 
 func _test_roster() -> void:

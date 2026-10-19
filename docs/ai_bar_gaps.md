@@ -51,7 +51,7 @@ We learn from these mods and are inspired by how they behave. We take no code fr
 | G-15 | Doctrine numbers still don't act (audit A3-07; burst and burst_pause wired 2026-10-19) | P1 | M |
 | G-16 | The AI never judges which casualty is worst | P2 | S |
 | G-30 | ~~Only an AI medic can give CPR or shock a heart~~ (dropped, Captain 2026-10-19) | - | - |
-| G-17 | Positions are picked without terrain, height or a second threat | P2 | M |
+| G-17 | Positions are picked without terrain, height or a second threat (part done 2026-10-19: base of fire takes high ground, flanks like height; cover against a second threat still to do) | P2 | M |
 | G-18 | No first-contact drill (freeze, face, get down) | P2 | S |
 | G-19 | Nothing avoids ground that is being shot up | P2 | M |
 | G-20 | Infantry don't react to armour | P2 | M |
