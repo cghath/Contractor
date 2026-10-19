@@ -500,6 +500,8 @@ func _on_hosted() -> void:
 	_restore_bodies()
 	if spawn_ai:
 		_spawn_ai()
+	if not is_base():
+		add_child(FactionSkirmish.new())  # now and then a faction at war with the holder hits one of its sites (wave 6)
 	_update_streaming()
 	if BaseHub.deployment_running():
 		BaseHub.server_land_people(self)  # HVTs and hostages who walked on with the squad (LZ-2)

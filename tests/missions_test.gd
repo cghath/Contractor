@@ -64,6 +64,7 @@ func _ready() -> void:
 	await _test_hq_posts()
 	_test_zone_enemy()
 	await _test_rival_team()
+	await _test_faction_skirmish()
 	await _test_roadside_ieds()
 	_test_enemy_drones()
 	_test_strongbox()
@@ -1201,6 +1202,34 @@ func _test_field_radio() -> void:
 		player.inventory.take(&"radio", had)
 	Contracts.server_end_deployment({})
 	Contracts.server_finish_debrief()
+	await _frames(2)
+
+
+## Wave 6, factions fight each other in the field (FactionSkirmish): a team of a faction at war
+## with the zone's holder hits one of its sites away from the squad, under the rival tag.
+func _test_faction_skirmish() -> void:
+	print("Faction skirmish")
+	var sk := FactionSkirmish.of(level)
+	check(sk != null, "a zone has the skirmishes")
+	if sk == null:
+		return
+	var holder := FactionSkirmish.holder_of(level)
+	var rivals: Array = MissionRegistry.enemies_of(holder)
+	check(not rivals.is_empty(), "the holder (%s) has enemies of its own (%s)" % [holder, rivals])
+	if rivals.is_empty():
+		return
+	var why := sk.server_start(String(rivals[0]))
+	await _frames(3)
+	var men: Array = sk.team.filter(func(s: Variant) -> bool: return is_instance_valid(s))
+	var target_xz := Vector2(float(sk.last.get("at", [0, 0])[0]), float(sk.last.get("at", [0, 0])[1]))
+	var side := FactionSkirmish.side_of(String(rivals[0]))
+	check(why == "" and men.size() == FactionSkirmish.TEAM and men.all(func(s: Soldier) -> bool: return s.faction == side and s.faction != &"hostile"),
+		"%s come in, %d of them, as %s (by the company's standing with them; %s)" % [rivals[0], men.size(), side, why])
+	check(target_xz.distance_to(Vector2(player.global_position.x, player.global_position.z)) >= FactionSkirmish.AWAY_M,
+		"at a site of the holder's away from the squad (%s, %.0f m off)" % [sk.last.get("site", "?"), target_xz.distance_to(Vector2(player.global_position.x, player.global_position.z))])
+	for s: Soldier in men:
+		s.queue_free()
+	sk.team.clear()
 	await _frames(2)
 
 
