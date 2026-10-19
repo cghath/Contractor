@@ -1,7 +1,7 @@
 # Linked zones: the base as a zone, edge transitions, raids
 
-**Status:** design, 2026-10-18/19. Most calls decided by the Captain (six rounds of questions,
-2026-10-19 CDT); the few still open carry proposed answers. Nothing built yet.
+**Status:** design, 2026-10-18/19. All calls decided by the Captain (six rounds of questions on
+2026-10-19 CDT, then the last five accepted as proposed). Nothing built yet.
 
 The Captain's direction (2026-10-18): "the player base needs to be in a zone of its own, one that
 can be explored", "raid style excursions should be a thing", "similar to stalker you can go zone
@@ -42,7 +42,7 @@ The base stops being a 39 m box and becomes a full zone: a `ZoneLevel` with the 
 as a module, explorable out to its edges, and a place the enemy comes to as the company makes
 trouble for them.
 
-- **Size and ground (decided: a full contract-size zone).** 1920-2304 m (proposed 2304 m), seeded
+- **Size and ground (decided: a full contract-size zone).** 2304 m (call 16), seeded
   from the campaign seed, on its region's terrain (coast: with the LHD offshore, `Lhd.install`
   already places it). It never changes within a campaign.
 - **What it holds.**
@@ -74,7 +74,7 @@ the push to build up the PMC and toward the endgame.
   strays, as an option (off by default). Beyond that, everything comes from heat.
 - **Heat-driven tiers.** Heat with a faction (wave 6d) brings, in order: patrols into the far base
   area; probes on the wire; then a full assault, a "defend the base" event the company is warned
-  about a day ahead (on the board and the radio). Proposed thresholds: patrols from heat 30,
+  about a day ahead (on the board and the radio). Thresholds (call 17): patrols from heat 30,
   probes from 50, assaults from 70, no more than one assault a week.
 - **Attacks while the squad is out (decided: a mixture, by the situation).** The radio sends a
   **situation report**: who is attacking, in what strength, what the defences and guards can hold,
@@ -121,7 +121,7 @@ on the map. Crossings are also foot extraction points.
 1. Any player inside a crossing confirms "Move to <zone>". Everyone up and elsewhere blocks; the
    downed, the dead and squadmates away from it warn on the first confirm, and a second within
    `LEAVE_CONFIRM_S` goes without them. Driving into it with the squad aboard is the confirm.
-2. A short countdown (proposed 20 s).
+2. A short countdown (20 s).
 3. The host writes the zone being left, builds the cargo report, and calls `server_switch_level`
    with the destination and `"arrive": {"crossing": id, "cargo": report}`.
 4. The destination loads (its save if it still remembers, section 2b) and everyone appears at its
@@ -225,7 +225,7 @@ and they come with the squad when it crosses.
     refuels or is repaired.
 - **The AAV, motor-pool vehicles and allied elements** cross with the squad: those in the crossing
   ride across; the AAV and allied elements out on other orders arrive at the same crossing shortly
-  after, keeping their orders (proposed: within 2 minutes of game time; elements more than a link's
+  after, keeping their orders (within 2 minutes of game time; elements more than a link's
   travel away are released instead). The host's high command and map orders work the same in every
   zone. Hired company squads follow the same rules.
 
@@ -287,15 +287,15 @@ and they come with the squad when it crosses.
     flight back plus 20 game minutes; any damage zone under 40% stops hot-LZ calls and sends it to
     repair; a damaged engine or rotor stops loiter, heavy loads and following across crossings.
 
-**Still open (proposed answers):**
+**Accepted as proposed (Captain, 2026-10-19: "Accept all five remaining proposed answers as decided"):**
 
-16. **Base zone size.** Proposed: 2304 m.
-17. **Heat thresholds for base threats.** Proposed: patrols at 30, probes at 50, assaults at 70; at
+16. Base zone size: 2304 m.
+17. Heat thresholds for base threats: patrols at 30, probes at 50, assaults at 70; at
     most one assault a week, warned a day ahead.
-18. **Crossing countdown.** Proposed: 20 s.
-19. **Followers' catch-up.** Proposed: supports on other orders arrive within 2 game minutes;
+18. Crossing countdown: 20 s.
+19. Followers' catch-up: supports on other orders arrive within 2 game minutes;
     allied elements more than a link away are released.
-20. **Hired squads.** Proposed: 4-8 men each, a squad leader from the roster or hired with them,
+20. Hired squads: 4-8 men each, a squad leader from the roster or hired with them,
     wages at the roster's rates, up to 1 per FOB tier to start.
 
 ## Build order (proposed)
