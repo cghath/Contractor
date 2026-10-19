@@ -114,6 +114,32 @@ func is_out() -> bool:
 	return not out().is_empty()
 
 
+## Host (BaseHub, the squad crossing on): the elements out follow it (call 19: they're within a
+## link); each one's kind, whether it's the company's, and how many are still up.
+func server_take_followers() -> Array:
+	var out_now: Array = []
+	for e: Dictionary in out():
+		var up := (e.squad as Squad).members().filter(func(s: Soldier) -> bool: return s.vitals.is_up()).size()
+		out_now.append({"kind": String(e.kind), "company": bool(e.get("company", false)), "up": up})
+	return out_now
+
+
+## Host, the squad's new zone: elements that followed come in at `at` (where the squad arrived),
+## free, as many as were still up, following `by`.
+func server_follow_in(followers: Array, by: Soldier, at: Vector3) -> void:
+	for f: Dictionary in followers:
+		var before := out().size()
+		if server_call(by, true, String(f.kind), bool(f.company), at) != "" or out().size() == before:
+			continue
+		var e: Dictionary = out().back()
+		var members := (e.squad as Squad).members()
+		for i in range(int(f.up), members.size()):
+			(members[i] as Soldier).queue_free()  # (only those still up came along)
+		(e.squad as Squad).give_order(by, Squad.Order.FOLLOW, by.global_position)
+		e["order"] = "follow"
+		last_message = "Element %d followed you over" % int(e.id)
+
+
 ## The elements out now (host), lowest id first.
 func out() -> Array:
 	return elements.filter(func(e: Variant) -> bool: return e != null and _alive(e))
@@ -183,7 +209,10 @@ static func kit_for(employer: String) -> String:
 ## `company` (docs/linked_zones.md 1b / LZ-6, "hired player-faction squads you command"): one of
 ## the company's own hired squads (BaseHub.company_squads), in its own kit and marks, paid by its
 ## wages (no call price, no standing needed), under the same high command.
-func server_call(by: Soldier, dev := false, kind := "rifle", company := false) -> String:
+##
+## `at_point` (a Vector3): they come in there instead of from the support origin (following the
+## squad across a crossing, BaseHub: they arrive where it did).
+func server_call(by: Soldier, dev := false, kind := "rifle", company := false, at_point: Variant = null) -> String:
 	if not multiplayer.is_server() or by == null:
 		return ""
 	if not KINDS.has(kind):
@@ -227,6 +256,8 @@ func server_call(by: Soldier, dev := false, kind := "rifle", company := false) -
 	var size := int(spec.size)
 	var k := Kits.data(kit)
 	var origin := Supports.origin_for(level, &"allied", by.global_position, 1.0)  # on foot: ground level, not a helicopter's altitude
+	if at_point is Vector3:
+		origin = Transform3D(Basis.IDENTITY, at_point)
 	var at := origin.origin
 	var across := origin.basis.x
 	var sq := Squad.new()

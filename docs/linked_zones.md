@@ -239,6 +239,13 @@ and they come with the squad when it crosses.
   after, keeping their orders (within 2 minutes of game time; elements more than a link's
   travel away are released instead). The host's high command and map orders work the same in every
   zone. Hired company squads follow the same rules.
+- **Built (2026-10-19):** at a crossing on, helicopters inbound or loitering with only their crew
+  aboard follow (`HeliSupports.server_take_followers` / `server_follow_in`). The crossing burns
+  `CROSSING_KM` of fuel, and an engine or rotor under `FOLLOW_MIN` (0.75) sends the heli home
+  instead. Extraction and insertion calls never follow. The AAV and the allied or company elements
+  out follow too, the elements with the men still up. All of them arrive `BaseHub.FOLLOW_DELAY_S`
+  (one game minute) after the squad, the elements where the squad came in. A crossing with every
+  player aboard a vehicle takes 1 h instead of 2.
 
 ### 5. Co-op and host constraints
 

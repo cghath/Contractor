@@ -512,6 +512,13 @@ var _carry_people: Array = []
 ## riders to be seated in the next zone (_seat_riders).
 var _carry_vehicles: Array = []
 var _seating: Array = []
+## The supports following the squad on (_take_supports_across): {"helis": [kinds], "allied":
+## [...], "aav": condition}, brought in FOLLOW_DELAY_S after it arrives (call 19: within 2 game
+## minutes; one game minute at the zones' 6x clock), where it arrived (_arrived_at).
+var _followers := {}
+var _followers_at_ms := -1
+var _arrived_at := Vector3.ZERO
+const FOLLOW_DELAY_S := 10.0
 const SEAT_WAIT_S := 15.0
 
 
@@ -566,6 +573,7 @@ func server_cross_on(to: String, to_crossing: String, extraction: Extraction) ->
 				continue
 			_carry["m:" + mid] = {"gear": s.inventory.net_state.duplicate(true), "vitals": s.vitals.server_snapshot()}
 	_carry_vehicles = _take_vehicles_across(lvl, point)
+	_followers = _take_supports_across(lvl)
 	var people := lvl.get_node_or_null(^"People") as PeopleLayer
 	_carry_people = people.server_take_across(point.pos, float(point.get("radius", Extraction.RADIUS_M)) * 2.0) 		if people and point.get("pos") is Vector2 else []
 	_tally_raid(lvl)  # what the raid hit here, before the zone goes (LZ-4)
@@ -579,11 +587,16 @@ func server_cross_on(to: String, to_crossing: String, extraction: Extraction) ->
 	dep["support_limits"] = helis.limits() if helis else {}  # cooldowns and losses go on with the deployment (LZ-3)
 	# Travel time (call 7: 2 h a link on foot): the next zone's sky moves on by it, and the
 	# campaign's days turn over at each midnight passed.
-	var hours := float(dep.get("travel_h", 0.0)) + TRAVEL_FOOT_H
+	# (call 7: 1 h a link by vehicle when every player drove over, else 2 h on foot)
+	var riding := 0
+	for c: Dictionary in _carry_vehicles:
+		riding += (c.seats as Dictionary).values().filter(func(k: String) -> bool: return k.begins_with("p:")).size()
+	var leg_h := TRAVEL_VEHICLE_H if riding > 0 and riding >= _carry.keys().filter(func(k: String) -> bool: return k.begins_with("p:")).size() else TRAVEL_FOOT_H
+	var hours := float(dep.get("travel_h", 0.0)) + leg_h
 	var sky := DayNight.current()
 	var hour_now: float = sky.hour if sky else float(def.get("hour", 9.0))
-	arrive["hour"] = fposmod(hour_now + TRAVEL_FOOT_H, 24.0)
-	if hour_now + TRAVEL_FOOT_H >= 24.0:
+	arrive["hour"] = fposmod(hour_now + leg_h, 24.0)
+	if hour_now + leg_h >= 24.0:
 		server_advance_days(1, "walking on to %s" % to)
 	dep["travel_h"] = hours
 	_fade_zone_save(to)
@@ -633,6 +646,7 @@ func _settle_raid(dep: Dictionary) -> void:
 
 ## Hours a crossing takes on foot (docs/linked_zones.md call 7; by vehicle and heli come with LZ-3).
 const TRAVEL_FOOT_H := 2.0
+const TRAVEL_VEHICLE_H := 1.0
 
 
 ## Zone `to`'s def for walking in at its crossing `to_crossing` (LZ-2): "arrive" set, and its
@@ -731,6 +745,45 @@ func _take_vehicles_across(lvl: CompoundLevel, point: Dictionary) -> Array:
 	return out
 
 
+## Host (server_cross_on): the supports out with the squad follow it (docs/linked_zones.md section
+## 4: helicopters airborne and empty, the AAV, allied elements).
+func _take_supports_across(lvl: CompoundLevel) -> Dictionary:
+	var out := {}
+	var helis := HeliSupports.of(lvl)
+	var allied := AlliedTroops.current(lvl)
+	var aav := AavSupport.of(lvl)
+	if helis:
+		out["helis"] = helis.server_take_followers()
+	if allied:
+		out["allied"] = allied.server_take_followers()
+	if aav:
+		out["aav"] = aav.server_take_follower()
+	return out
+
+
+## Host (_process): the followers come in once FOLLOW_DELAY_S has passed since the squad arrived.
+func _land_followers() -> void:
+	if _followers_at_ms < 0 or Time.get_ticks_msec() < _followers_at_ms:
+		return
+	_followers_at_ms = -1
+	var lvl := level()
+	var host := lvl.players.get_node_or_null(^"1") as Soldier if lvl else null
+	if host == null:
+		_followers = {}
+		return
+	var helis := HeliSupports.of(lvl)
+	var allied := AlliedTroops.current(lvl)
+	var aav := AavSupport.of(lvl)
+	if helis and not (_followers.get("helis", []) as Array).is_empty():
+		helis.server_follow_in(_followers.helis, host)
+	if allied and not (_followers.get("allied", []) as Array).is_empty():
+		allied.server_follow_in(_followers.allied, host, _arrived_at)
+	if aav:
+		aav.server_follow_in(_followers.get("aav", {}), host)
+	SessionLog.note("crossing: supports followed (%s)" % str(_followers))
+	_followers = {}
+
+
 ## Host, a zone up after a crossing on: the vehicles that drove on with the squad are parked by the
 ## host's player, as they were, their riders seated again as they arrive (_seat_riders).
 func _land_vehicles(lvl: CompoundLevel, at: Vector3) -> void:
@@ -790,6 +843,10 @@ func _seat_riders() -> void:
 ## vehicles that drove on are parked by them.
 func server_land_people(lvl: CompoundLevel) -> void:
 	_spawn_away(lvl)
+	if not _followers.is_empty():
+		var first := lvl.players.get_node_or_null(^"1") as Soldier
+		_arrived_at = first.global_position if first else Vector3.ZERO
+		_followers_at_ms = Time.get_ticks_msec() + int(FOLLOW_DELAY_S * 1000.0)
 	if not _carry_vehicles.is_empty():
 		var host := lvl.players.get_node_or_null(^"1") as Soldier
 		_land_vehicles(lvl, host.global_position if host else Vector3.ZERO)
@@ -1184,6 +1241,7 @@ func _process(delta: float) -> void:
 		if RosterDeployment.is_running(roster()):
 			_check_recovery_targets()
 			_seat_riders()
+			_land_followers()
 		return
 	var now: Array = base_level().server_collect_stash()
 	if now != Roster.json_safe(stash()):

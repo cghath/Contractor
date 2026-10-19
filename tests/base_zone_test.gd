@@ -372,6 +372,13 @@ func _test_cross_on(zone: ZoneLevel, from_id: String) -> ZoneLevel:
 	# A helicopter lost and a cooldown running: both go on with the deployment (LZ-3).
 	var helis := HeliSupports.of(zone)
 	helis.server_restore_limits({"cooldown": {"resupply": 300.0}, "lost": ["transport"]})
+	# A medevac helicopter on its way and an allied element out: both follow (LZ-3, call 19).
+	var medevac := HeliCall.new(helis, "medevac", me, {"source": "smoke"})
+	var flying := medevac.server_launch()
+	if flying:
+		helis.calls.append(medevac)
+	var troops := AlliedTroops.current(zone)
+	var allied_called := troops.server_call(me, true, "rifle") if troops else "no AlliedTroops"
 	zx.countdown_s = 0.5
 	var why := zx.server_confirm(1)
 	check(why == "", "everyone at the crossing on to %s confirms it (%s)" % [String(on.to), why])
@@ -399,6 +406,15 @@ func _test_cross_on(zone: ZoneLevel, from_id: String) -> ZoneLevel:
 		"the lost helicopter and the cooldown come along (%.0f s left)" % (helis_next.cooldown_left("resupply") if helis_next else 0.0))
 	var briefing := MapNodes.briefing(next)
 	check(briefing == null or not briefing.is_open(), "no second briefing")
+	# The followers, a game minute after the squad (BaseHub.FOLLOW_DELAY_S).
+	await get_tree().create_timer(BaseHub.FOLLOW_DELAY_S + 3.0).timeout
+	var helis_followed := HeliSupports.of(next)
+	var troops2 := AlliedTroops.current(next)
+	check(flying and helis_followed != null and helis_followed.active("medevac") != null,
+		"the medevac helicopter on its way follows the squad over (%s)" % ("launched" if flying else "didn't launch"))
+	check(allied_called == "" and troops2 != null and troops2.out().size() == 1
+		and (troops2.out()[0].squad as Squad).members().any(func(s: Soldier) -> bool: return s.global_position.distance_to(me.global_position) < 60.0),
+		"and the allied element out comes in where the squad did (%s, %d out)" % [allied_called, troops2.out().size() if troops2 else -1])
 	var vl2 := next.get_node_or_null(^"Vehicles") as VehicleLayer
 	await _wait_until(func() -> bool: return vl2 != null and vl2.find(truck_id) != null and Vehicle.ride_of(me) == vl2.find(truck_id), 6.0)
 	var truck2: Vehicle = vl2.find(truck_id) if vl2 else null

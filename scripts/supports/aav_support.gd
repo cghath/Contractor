@@ -205,6 +205,25 @@ func server_call(by: Soldier, dev := false) -> String:
 	return ""
 
 
+## Host (BaseHub, the squad crossing on): the AAV out (not going home) follows it; returns its
+## condition (damage, fuel), or {} for none.
+func server_take_follower() -> Dictionary:
+	var v := current()
+	if v == null or lost or order == RETURN or v.wrecked:
+		return {}
+	return v.condition()
+
+
+## Host, the squad's new zone: the AAV that followed comes in from this zone's origin to `by`,
+## free, in the condition it left with.
+func server_follow_in(cond: Dictionary, by: Soldier) -> void:
+	if cond.is_empty() or lost or is_out() or by == null:
+		return
+	if server_call(by, true) == "" and current():
+		current().apply_condition(cond)
+		_tell(by, "The AAV followed you over")
+
+
 ## Host: the AAV goes to `point` (swimming if it's water) and holds there.
 func server_move(by: Soldier, point: Vector3) -> String:
 	var why := _commandable(by)

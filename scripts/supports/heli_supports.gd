@@ -205,6 +205,55 @@ static func airframe_back(kind: String, heli: Vehicle, flight_back_s := 60.0) ->
 	airframes()[kind] = a
 
 
+## Following the squad across a crossing (docs/linked_zones.md section 4; calls 9 and 15): a link's
+## flight burns CROSSING_KM of fuel; an engine or rotor under FOLLOW_MIN can't make it. Proposed.
+const CROSSING_KM := 3.0
+const FOLLOW_MIN := 0.75
+## Kinds that never follow (an extraction or insertion is about the zone it was called in).
+const NO_FOLLOW: Array[String] = ["extraction", "insertion"]
+
+
+## Host (BaseHub, the squad crossing on): every call here ends. Helicopters airborne with nobody
+## but their crew aboard (inbound or loitering) follow the squad, their airframe keeping its
+## state less the crossing's fuel; any other goes home as usual (airframe_back), as does one with
+## a hurt engine or rotor, or too little fuel left after the crossing. Returns the kinds that follow.
+func server_take_followers() -> Array:
+	var out: Array = []
+	for c in calls:
+		if c.is_over() or not is_instance_valid(c.heli):
+			continue
+		var cond := c.heli.condition()
+		var tank := float(c.heli.spec.get("fuel_l", 1.0))
+		var after := float(cond.get("fuel", tank)) - CROSSING_KM * float(c.heli.spec.get("fuel_l_per_km", 2.0))
+		var zones: Dictionary = cond.get("zones", {})
+		var empty := c.heli.occupants().all(func(s: Soldier) -> bool: return s.has_meta(&"vehicle_crew"))
+		var follows := c.kind not in NO_FOLLOW and c.phase in [HeliCall.Phase.INBOUND, HeliCall.Phase.LOITER] and empty \
+			and float(zones.get("engine", 1.0)) >= FOLLOW_MIN and float(zones.get("rotor", 1.0)) >= FOLLOW_MIN and after >= tank * LOW_FUEL
+		if follows:
+			cond["fuel"] = after
+			airframes()[c.kind] = {"cond": cond}
+			out.append(c.kind)
+		elif c.kind != "insertion":
+			airframe_back(c.kind, c.heli)
+		c.server_dismiss()
+	return out
+
+
+## Host, the squad's new zone (BaseHub, a minute after the crossing): the helicopters that followed
+## (server_take_followers) come in over it from its support origin and loiter for `by`'s smoke,
+## free (the call was paid in the zone before).
+func server_follow_in(kinds: Array, by: Soldier) -> void:
+	for kind: String in kinds:
+		if active(kind) or is_lost(kind) or by == null or not Supports.can_fly(level()):
+			continue
+		var call := HeliCall.new(self, kind, by, {"source": "smoke"})
+		if call.server_launch():
+			calls.append(call)
+			server_radio(kind, "Followed you over. On station, waiting for your smoke.")
+		elif is_instance_valid(call.heli):
+			call.server_dismiss()
+
+
 ## Host: whether `kind` was lost this op.
 func is_lost(kind: String) -> bool:
 	return _lost.has(kind)
