@@ -25,6 +25,15 @@ const SEED_SALT := 0x0F0B
 const LOCAL_SITES: Array[String] = ["village", "village", "compound", "outpost"]
 const LOCAL_REACH_M := Vector2(400.0, 700.0)
 const LOCAL_SPACING_M := 260.0
+## Threats to the base (docs/linked_zones.md 1b, call 17): with a faction's heat (Economy.heat) at
+## PATROL_HEAT or more its patrols roam the far base area (no nearer than QUIET_M to the wire); at
+## PROBE_HEAT or more one probes the wire (comes within PROBE_M of it). Assaults (ASSAULT_HEAT,
+## a day's warning) come separately. Proposed numbers from the doc's call 17.
+const PATROL_HEAT := 30.0
+const PROBE_HEAT := 50.0
+const ASSAULT_HEAT := 70.0
+const QUIET_M := 600.0
+const PROBE_M := 120.0
 
 var fob: BaseFob
 
@@ -38,7 +47,52 @@ static func def_for(campaign_seed: int) -> Dictionary:
 		"modules": [{"id": "fob", "type": "fob", "pos": [0, 0]}] + _local_sites(seed),
 		"insertion": [[0.0, BaseFob.VEHICLE_PARK.end.y + 20.0]]})
 	def["crossings"] = RegionMap.crossings(RegionMap.BASE, def)
+	_add_threats(def, seed)
 	return def
+
+
+## The faction hottest against the company (Economy.heat over every faction with heat), and its
+## heat: ["", 0] with none.
+static func hottest() -> Array:
+	var best := ""
+	var most := 0.0
+	var s := Campaign.section(&"economy")
+	for faction: String in (s.get("heat", {}) as Dictionary):
+		var h := Economy.heat(faction)
+		if h > most:
+			best = faction
+			most = h
+	return [best, most]
+
+
+## Heat's patrols and probes into the base zone's def (PATROL_HEAT, PROBE_HEAT): its "patrols"
+## routes and "threat_faction" (whose men walk them: _zone_enemy).
+static func _add_threats(def: Dictionary, seed: int) -> void:
+	var hot := hottest()
+	var faction := String(hot[0])
+	var heat := float(hot[1])
+	if faction == "" or heat < PATROL_HEAT:
+		return
+	def["threat_faction"] = faction
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed * 13 + int(heat)
+	var half := SIZE_M * 0.5 - 120.0
+	var patrols: Array = []
+	for k in (2 if heat >= PROBE_HEAT else 1):  # roaming the far area, round the base
+		var route: Array = []
+		var a0 := rng.randf() * TAU
+		for i in 5:
+			var a := a0 + i * TAU / 5.0
+			var r := rng.randf_range(QUIET_M + 60.0, half)
+			route.append([snappedf(cos(a) * r, 1.0), snappedf(sin(a) * r, 1.0)])
+		patrols.append(route)
+	if heat >= PROBE_HEAT:  # a probe: in from the far area to look at the wire, and out again
+		var a := rng.randf() * TAU
+		var out := Vector2(cos(a), sin(a))
+		var near := out * (BaseFob.MODULE_HALF.x + PROBE_M * 0.5)
+		patrols.append([[snappedf(out.x * half, 1.0), snappedf(out.y * half, 1.0)], [snappedf(near.x, 1.0), snappedf(near.y, 1.0)],
+			[snappedf(out.x * half * 0.6 + out.y * 200.0, 1.0), snappedf(out.y * half * 0.6 - out.x * 200.0, 1.0)]])
+	def["patrols"] = patrols
 
 
 ## The local area's sites (LOCAL_SITES) from `seed`, the same every time.
@@ -81,6 +135,13 @@ func _ready() -> void:
 
 func is_base() -> bool:
 	return true
+
+
+## Whose men come at the base: the faction hottest against the company (_add_threats), else the
+## usual.
+func _zone_enemy() -> String:
+	var t := String(def.get("threat_faction", ""))
+	return t if t != "" else super._zone_enemy()
 
 
 ## Nobody holds the base's local sites (LZ-5: threats come from heat, not garrisons).

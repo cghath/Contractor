@@ -124,6 +124,7 @@ func _run() -> void:
 	check(back == stash_out, "the stash came back once, not twice (%s)" % str(back.get(&"m17", 0)))
 	_test_region_map()
 	_test_zone_memory()
+	_test_threats()
 	await _test_airframes()
 	await _test_crossings()
 
@@ -380,3 +381,26 @@ func _test_airframes() -> void:
 	check(float(HeliSupports.airframe("cargo").cond.fuel) >= float(heli.spec.get("fuel_l", 1.0)) * 0.99, "and comes back full")
 	heli.queue_free()
 	HeliSupports.airframes().clear()
+
+
+## LZ-5 (call 17): heat brings the enemy to the base: patrols in the far area from 30, a probe on
+## the wire from 50; none with the company quiet.
+func _test_threats() -> void:
+	print("Threats to the base")
+	var seed := Contracts.campaign_seed()
+	var heat: Dictionary = Campaign.section(&"economy").get("heat", {})
+	var saved := heat.duplicate()
+	heat.clear()
+	check(not BaseZoneLevel.def_for(seed).has("patrols") or (BaseZoneLevel.def_for(seed).patrols as Array).is_empty(), "quiet: nobody comes near the base")
+	Economy.add_heat("black_ridge", 35.0)
+	var def := BaseZoneLevel.def_for(seed)
+	var routes: Array = def.get("patrols", [])
+	var far := routes.all(func(r: Array) -> bool: return r.all(func(p: Array) -> bool: return Vector2(float(p[0]), float(p[1])).length() >= BaseZoneLevel.QUIET_M))
+	check(routes.size() == 1 and far and String(def.get("threat_faction", "")) == "black_ridge",
+		"heat 35: a Black Ridge patrol roams the far base area (%d route(s))" % routes.size())
+	Economy.add_heat("black_ridge", 20.0)
+	routes = BaseZoneLevel.def_for(seed).get("patrols", [])
+	var near := routes.any(func(r: Array) -> bool: return r.any(func(p: Array) -> bool: return Vector2(float(p[0]), float(p[1])).length() <= BaseFob.MODULE_HALF.x + BaseZoneLevel.PROBE_M))
+	check(routes.size() == 3 and near, "heat 55: two patrols and a probe that comes up to the wire (%d routes)" % routes.size())
+	heat.clear()
+	heat.merge(saved)
