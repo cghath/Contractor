@@ -857,6 +857,9 @@ func _extract(bring: Array, cargo: Array, left: String, deposit: bool, stow: Arr
 			_put(body, at + Vector3(3.0, 0, -2.0))
 		deposited_ok = deposited_ok and body != null
 	await _seconds(1.0)  # the people layer delivers HVTs and banks intel at the landing zone
+	# Anyone _kill_hostile hasn't put down yet (a patrol the objective brought in just now) falls
+	# before the field is counted: one falling after it is salvage the count missed (R1878).
+	await _wait_until(func() -> bool: return _hostiles_up_near(at, INF) == 0, 5.0)
 	var field := _field_counts(lz)
 	for o: Dictionary in Contracts.objectives.list:
 		print("    objective before extraction: %s" % Objectives.line(o))
@@ -1282,9 +1285,10 @@ func _field_counts(lz: Vector2) -> Dictionary:
 		if s == null or seen.has(s) or s.is_queued_for_deletion() or not s.vitals.is_dead():  # dead crew too (report_from_level)
 			continue
 		seen[s] = true
-		var at := s.body_point()
-		if Vector2(at.x, at.z).distance_to(lz) > Extraction.RADIUS_M:
-			add.call(Contracts.inventory_items(s.inventory))
+		# Every body counts, at the point or not: extraction banks only the bodies brought to it
+		# (report_from_level), so one that fell by the LZ (a garrison man running for it, since
+		# GarrisonPost) is left behind and is salvage.
+		add.call(Contracts.inventory_items(s.inventory))
 	return out
 
 
