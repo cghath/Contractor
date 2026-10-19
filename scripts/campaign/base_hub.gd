@@ -229,7 +229,9 @@ func load_or_new() -> void:
 	Contracts.ensure_campaign()
 	_hook_economy(true)
 	var dep := RosterDeployment.active(roster())
-	if not dep.is_empty():
+	if not dep.is_empty() and not resume_info().is_empty():
+		SessionLog.note("campaign loaded mid-deployment: resuming in %s" % String(dep.resume.zone_id))  # (LZ-4: prepare_session goes back there)
+	elif not dep.is_empty():
 		# Saved mid-deployment and not ended: everyone who went is back as they left the base.
 		for mid: String in dep.squad:
 			var m := member(mid)
@@ -251,7 +253,46 @@ func server_save() -> bool:
 		push_warning("BaseHub: no campaign loaded; not saving over %s" % Campaign.save_path())
 		return false
 	_read_back_base()
+	_note_resume()
 	return Campaign.save_campaign()
+
+
+## Host, saving while out (docs/linked_zones.md call 11: "resume where you were"): the deployment
+## remembers the zone it's in and the crossing it came in by ("resume"), the zone is saved as it
+## stands, and everyone's gear goes onto their records (players' main characters, squadmates'),
+## so loading puts the squad back there (resume_info). Wounds aren't kept yet: they come back whole.
+func _note_resume() -> void:
+	if not RosterDeployment.is_running(roster()) or in_base():
+		return
+	var lvl := level() as ZoneLevel
+	if lvl == null:
+		return
+	var dep := RosterDeployment.active(roster())
+	dep["resume"] = {"zone_id": String(lvl.def.get("id", dep.get("zone_id", ""))), "arrive": String(dep.get("last_crossing", ""))}
+	GameState.save_zone()
+	for p: Node in lvl.players.get_children():
+		var s := p as Soldier
+		if s and not s.vitals.is_dead():
+			var main := Roster.main_character(roster(), player_key(s.name.to_int()))
+			if not main.is_empty():
+				main["gear"] = Roster.json_safe(s.inventory.net_state.duplicate(true))
+	for n: Node in lvl.ai.get_children():
+		var s := n as Soldier
+		if s and s.has_meta(&"roster_id") and not s.vitals.is_dead():
+			server_store_member_gear(String(s.get_meta(&"roster_id")), s.inventory.net_state)
+
+
+## The level a resumed deployment loads into (resume above), or {} for none.
+func resume_info() -> Dictionary:
+	var dep := RosterDeployment.active(roster())
+	var r: Dictionary = dep.get("resume", {})
+	var def := MissionRegistry.zone_def(String(r.get("zone_id", "")))
+	if r.is_empty() or def.is_empty():
+		return {}
+	var info_def := def.duplicate(true)
+	if String(r.get("arrive", "")) != "":
+		info_def = _arrive_def(def, String(r.zone_id), String(r.arrive))
+	return {"level": "zone", "def": info_def}
 
 
 ## Host: what to tell the player after server_save returned `saved`.
@@ -517,6 +558,8 @@ func server_cross_on(to: String, to_crossing: String, extraction: Extraction) ->
 	GameState.save_zone()  # the zone keeps what's in it while it remembers (zone memory)
 	var dep := RosterDeployment.active(roster())
 	dep["zone_id"] = to
+	dep["last_crossing"] = to_crossing
+	dep.erase("resume")
 	var arrive := _arrive_def(def, to, to_crossing)
 	var helis := lvl.get_node_or_null(NodePath(HeliSupports.NODE_NAME)) as HeliSupports
 	dep["support_limits"] = helis.limits() if helis else {}  # cooldowns and losses go on with the deployment (LZ-3)
@@ -629,7 +672,10 @@ func server_cross_from_base(to: String, to_crossing: String) -> String:
 		if prepped.has("def"):
 			options["level"] = {"level": "zone", "def": _arrive_def(prepped.def, to, to_crossing)}
 	SessionLog.note("crossing: the squad walks out of the base into %s" % to)
-	return server_deploy(options)
+	var why := server_deploy(options)
+	if why == "":
+		RosterDeployment.active(roster())["last_crossing"] = to_crossing  # (a save while out resumes here)
+	return why
 
 
 ## A deployment is running and this is the host.
@@ -651,6 +697,11 @@ func prepare_session() -> void:
 		_zone_before = GameState.zone_id
 	campaign_running = true
 	load_or_new()
+	var resume := resume_info()
+	if not resume.is_empty():
+		GameState.zone_id = zone_save_id(String(resume.def.id))  # back where the squad was (LZ-4)
+		_swap_level(resume)
+		return
 	GameState.zone_id = base_zone_id()
 	if not in_base():
 		_swap_level(base_info())

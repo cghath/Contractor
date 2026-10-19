@@ -199,6 +199,11 @@ func _test_crossings() -> void:
 	var at := Vector2(float(back_c.pos[0]), float(back_c.pos[1])) if not back_c.is_empty() else Vector2.INF
 	check(me != null and Vector2(me.global_position.x, me.global_position.z).distance_to(at) < 25.0,
 		"arriving at its crossing from the base (%.0f m from it)" % (Vector2(me.global_position.x, me.global_position.z).distance_to(at) if me else INF))
+	# Saved while out (LZ-4, call 11): the deployment remembers where to resume.
+	BaseHub.server_save()
+	var resume := BaseHub.resume_info()
+	check(not resume.is_empty() and String(resume.def.id) == to and String(resume.def.get("arrive", "")) == RegionMap.crossing_id(RegionMap.BASE),
+		"saved out in %s, a load would resume there, at the crossing they came in by" % to)
 	zone = await _test_cross_on(zone, to)
 	if zone == null:
 		return
