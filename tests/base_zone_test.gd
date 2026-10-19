@@ -695,6 +695,11 @@ func _test_placed_defences() -> void:
 	check(why == "" and BaseEconomy.funds() < funds and placed_mod.size() == 1,
 		"placed (snapped to the grid), paid for, and standing there when the base comes back (%s)" % why)
 	check(BaseFob.placement_problem("mg_pit", spot, BaseHub.base().get("defences", [])).contains("another defence"), "and nothing else goes on top of it")
+	# Mortar pits count double on the wire; sensors count for nothing there but watch.
+	check(BaseFob.defence_cover(["mortar_pit", "sensor", "mg_pit"]) == 3, "a mortar pit counts double, a sensor not at all (%d)" % BaseFob.defence_cover(["mortar_pit", "sensor", "mg_pit"]))
+	var line := BaseFob.sensor_report(Vector3.ZERO, [Vector3(0, 0, -250), Vector3(10, 0, -240), Vector3(900, 0, 0)])
+	check(line.contains("2 contacts") and line.contains("north"), "sensors report what's close, and which way (%s)" % line)
+	check(BaseFob.sensor_report(Vector3.ZERO, [Vector3(900, 0, 0)]) == "", "and nothing for what's far off")
 
 
 func _test_assault() -> void:

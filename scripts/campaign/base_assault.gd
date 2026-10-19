@@ -65,7 +65,7 @@ static func server_day_passed(at_base: bool) -> String:
 
 ## How long the wire holds without the squad (s).
 static func hold_out_s() -> float:
-	return HOLD_BASE_S + HOLD_PER_COVER_S * (BaseHub.guards() + (BaseHub.base().get("defences", []) as Array).size())
+	return HOLD_BASE_S + HOLD_PER_COVER_S * (BaseHub.guards() + BaseFob.defence_cover(BaseHub.base().get("defences", [])))
 
 
 ## The squad is out but near (`links` away): the base holds out and the radio says so.
@@ -101,7 +101,7 @@ static func _resolve_offscreen(booked: Dictionary, extra := 0) -> String:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash([BaseHub.day(), String(booked.faction)])
 	var guards := BaseHub.guards()
-	var defences := (base.get("defences", []) as Array).size()
+	var defences := BaseFob.defence_cover(base.get("defences", []))
 	var cover := guards + defences  # the guards hold the wire, the defences with them (LZ-6)
 	var losses := (0 if cover >= 4 else maxi(LOSSES - cover / 2, 0)) + extra
 	if guards > 0 and cover < 4:

@@ -92,6 +92,9 @@ the push to build up the PMC and toward the endgame.
     `DefencePlacer`, a see-through block on the zones' 12 m grid (defences are modules), green or
     red by `BaseFob.placement_problem` (inside `BUILD_HALF`, off the helipad, vehicle park and
     range, clear of other defences, at most `MAX_PLACED` of a kind). Enter builds it, Esc cancels.
+    Mortar pits count double on the wire (`"cover"`, `BaseFob.defence_cover`). Sensors count for
+    nothing there but report hostiles within `SENSOR_M` (300 m) on the radio, with direction and
+    range (`BaseFob.sensor_report`).
   - **Hired guards** who man the base while the squad is out (wages, part of the weekly bill).
   - **Hired player-faction squads you command** (decided; inspired by Arma 3's Platoon Commander
     mod): whole AI squads hired into the company, each with its own leader, gear and wages, ordered

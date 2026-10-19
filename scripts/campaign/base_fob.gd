@@ -51,7 +51,15 @@ const DEFENCES := {
 	"mg_pit": {"name": "MG pit covering the gate", "price": 6000, "slot": [12, 24], "half": [3, 3], "tier": 1},
 	"chicane": {"name": "HESCO chicane before the gate", "price": 4000, "slot": [0, 36], "half": [8, 3], "tier": 1},
 	"bunker": {"name": "Concrete bunker", "price": 15000, "slot": [-24, -24], "half": [4, 4], "tier": 2},
+	# (docs/linked_zones.md 1b: "MG and mortar pits, sensors"; "cover": how much it counts for when
+	# the wire holds without the squad, BaseAssault; 1 if not given. Sensors watch: sensor_report.)
+	"mortar_pit": {"name": "Mortar pit", "price": 18000, "slot": [0, -36], "half": [3, 3], "tier": 2, "cover": 2},
+	"sensor": {"name": "Ground sensors on the approaches", "price": 5000, "slot": [36, 36], "half": [1, 1], "tier": 1, "cover": 0},
 }
+## Sensors (a "sensor" defence): hostiles this close to the FOB are reported on the radio, at most
+## every SENSOR_GAP_S. Proposed.
+const SENSOR_M := 300.0
+const SENSOR_GAP_S := 60.0
 ## FOB tiers (docs/linked_zones.md 1b: "FOB tiers (bigger wire, more defence slots, more squads)
 ## unlock hot zones, better supports and the player-built faction"): tier -> {"price" to reach it,
 ## "guards" the most it keeps, "squads" hired company squads (LZ-6's next part)}. The company
@@ -110,6 +118,39 @@ static func placement_problem(id: String, at: Vector2, defences: Array) -> Strin
 	return ""
 
 
+## How much `defences` (BaseHub base "defences") count for holding the wire (each its "cover").
+static func defence_cover(defences: Array) -> int:
+	var n := 0
+	for d: Dictionary in defence_places(defences):
+		n += int(DEFENCES[d.id].get("cover", 1))
+	return n
+
+
+## Whether any sensor is built.
+static func has_sensors(defences: Array) -> bool:
+	return defence_places(defences).any(func(d: Dictionary) -> bool: return String(d.id) == "sensor")
+
+
+## The sensors' line for hostiles at `contacts` (positions) around a FOB at `centre`, or "".
+static func sensor_report(centre: Vector3, contacts: Array) -> String:
+	var near := contacts.filter(func(p: Vector3) -> bool: return Vector2(p.x - centre.x, p.z - centre.z).length() <= SENSOR_M)
+	if near.is_empty():
+		return ""
+	var mid := Vector3.ZERO
+	for p: Vector3 in near:
+		mid += p
+	mid /= near.size()
+	return "Sensors: %d contact%s %s of the wire, %d m out" % [near.size(), "" if near.size() == 1 else "s",
+		_compass(Vector2(mid.x - centre.x, mid.z - centre.z)),
+		roundi(Vector2(mid.x - centre.x, mid.z - centre.z).length())]
+
+
+static func _compass(d: Vector2) -> String:
+	var names := ["north", "north-east", "east", "south-east", "south", "south-west", "west", "north-west"]
+	var a := fposmod(atan2(d.x, -d.y), TAU)  # 0 = north (-z), clockwise
+	return names[int(round(a / (TAU / 8.0))) % 8]
+
+
 ## A defence's voxel boxes, metres from its own origin.
 static func defence_boxes(id: String) -> Array:
 	var out: Array = []
@@ -124,6 +165,15 @@ static func defence_boxes(id: String) -> Array:
 		"chicane":
 			out.append([Vector3(-7.0, 0, -0.5), Vector3(-1.5, 2.2, 0.5), M.HESCO])
 			out.append([Vector3(1.5, 0, -2.5), Vector3(7.0, 2.2, -1.5), M.HESCO])
+		"mortar_pit":
+			out.append([Vector3(-2.6, 0, -2.6), Vector3(2.6, 0.8, -2.2), M.SANDBAG])
+			out.append([Vector3(-2.6, 0, 2.2), Vector3(-0.6, 0.8, 2.6), M.SANDBAG])
+			out.append([Vector3(0.6, 0, 2.2), Vector3(2.6, 0.8, 2.6), M.SANDBAG])  # the way in, south
+			out.append([Vector3(-2.6, 0, -2.2), Vector3(-2.2, 0.8, 2.2), M.SANDBAG])
+			out.append([Vector3(2.2, 0, -2.2), Vector3(2.6, 0.8, 2.2), M.SANDBAG])
+			out.append([Vector3(-0.3, 0, -0.3), Vector3(0.3, 0.9, 0.3), M.CONCRETE])  # the tube's base plate
+		"sensor":
+			out.append([Vector3(-0.15, 0, -0.15), Vector3(0.15, 1.4, 0.15), M.CONCRETE])  # the mast
 		"bunker":
 			out.append([Vector3(-3.0, 0, -3.0), Vector3(3.0, 2.2, -2.6), M.CONCRETE])
 			out.append([Vector3(-3.0, 0, -2.6), Vector3(-2.6, 2.2, 3.0), M.CONCRETE])

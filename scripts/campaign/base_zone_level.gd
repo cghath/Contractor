@@ -153,6 +153,31 @@ func is_base() -> bool:
 	return true
 
 
+## Host: the sensors (a "sensor" defence, LZ-6) report hostiles near the wire on the radio.
+var _sensor_check := 0.0
+var _sensor_said_at := -INF
+
+
+func _physics_process(delta: float) -> void:
+	if not multiplayer.is_server() or fob == null:
+		return
+	_sensor_check -= delta
+	if _sensor_check > 0.0:
+		return
+	_sensor_check = 3.0
+	if Soldier._now() - _sensor_said_at < BaseFob.SENSOR_GAP_S or not BaseFob.has_sensors(BaseHub.base().get("defences", [])):
+		return
+	var contacts: Array = []
+	for node in get_tree().get_nodes_in_group(&"combatants"):
+		var s := node as Soldier
+		if s and s.faction == &"hostile" and s.vitals.is_up() and not s.is_queued_for_deletion():
+			contacts.append(s.global_position)
+	var line := BaseFob.sensor_report(fob.global_position, contacts)
+	if line != "":
+		_sensor_said_at = Soldier._now()
+		Contracts._notify_all(line)
+
+
 ## Whose men come at the base: the faction hottest against the company (_add_threats), else the
 ## usual.
 func _zone_enemy() -> String:
