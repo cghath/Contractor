@@ -270,6 +270,9 @@ func _test_cross_on(zone: ZoneLevel, from_id: String) -> ZoneLevel:
 	for k in mates.size():
 		(mates[k] as Soldier).global_position = at + Vector3(k * 1.5 - 1.0, 0, 1.5)
 	await get_tree().physics_frame
+	# A helicopter lost and a cooldown running: both go on with the deployment (LZ-3).
+	var helis := HeliSupports.of(zone)
+	helis.server_restore_limits({"cooldown": {"resupply": 300.0}, "lost": ["transport"]})
 	zx.countdown_s = 0.5
 	var why := zx.server_confirm(1)
 	check(why == "", "everyone at the crossing on to %s confirms it (%s)" % [String(on.to), why])
@@ -292,6 +295,9 @@ func _test_cross_on(zone: ZoneLevel, from_id: String) -> ZoneLevel:
 	check(me != null and me.inventory.count_of(&"burn_dressing") == dressings_before, "with what he carried (%d burn dressings)" % dressings_before)
 	var came := mate_names.filter(func(n: String) -> bool: return next.ai.get_node_or_null(NodePath(n)) != null)
 	check(came.size() == mate_names.size(), "and his squadmates with him (%s)" % ", ".join(came))
+	var helis_next := HeliSupports.of(next)
+	check(helis_next != null and helis_next.is_lost("transport") and helis_next.cooldown_left("resupply") > 200.0,
+		"the lost helicopter and the cooldown come along (%.0f s left)" % (helis_next.cooldown_left("resupply") if helis_next else 0.0))
 	var briefing := MapNodes.briefing(next)
 	check(briefing == null or not briefing.is_open(), "no second briefing")
 	# And back the way they came.

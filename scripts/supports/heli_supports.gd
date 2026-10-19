@@ -73,6 +73,26 @@ func _init() -> void:
 func _ready() -> void:
 	HeliSupports.register_all()
 	add_child(InfilMusic.new())  # Captain, 2026-10-14: temporary infil music
+	if multiplayer.is_server():
+		server_restore_limits(BaseHub.carried_support_limits())  # crossed on from another zone (LZ-3)
+
+
+## Host: the cooldowns and losses as the deployment carries them across a crossing (docs/
+## linked_zones.md section 4: "cooldowns and 'lost this op' carry across (they belong to the
+## deployment)"): {"cooldown": {kind: seconds left}, "lost": [kind]}.
+func limits() -> Dictionary:
+	var left := {}
+	for kind: String in _cooldown_until:
+		if cooldown_left(kind) > 0.0:
+			left[kind] = cooldown_left(kind)
+	return {"cooldown": left, "lost": _lost.keys()}
+
+
+func server_restore_limits(saved: Dictionary) -> void:
+	for kind: String in saved.get("cooldown", {}):
+		_cooldown_until[kind] = Soldier._now() + float(saved.cooldown[kind])
+	for kind: String in saved.get("lost", []):
+		_lost[kind] = true
 
 
 ## The level's HeliSupports node (or null).

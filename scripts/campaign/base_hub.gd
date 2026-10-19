@@ -518,6 +518,8 @@ func server_cross_on(to: String, to_crossing: String, extraction: Extraction) ->
 	var dep := RosterDeployment.active(roster())
 	dep["zone_id"] = to
 	var arrive := _arrive_def(def, to, to_crossing)
+	var helis := lvl.get_node_or_null(NodePath(HeliSupports.NODE_NAME)) as HeliSupports
+	dep["support_limits"] = helis.limits() if helis else {}  # cooldowns and losses go on with the deployment (LZ-3)
 	# Travel time (call 7: 2 h a link on foot): the next zone's sky moves on by it, and the
 	# campaign's days turn over at each midnight passed.
 	var hours := float(dep.get("travel_h", 0.0)) + TRAVEL_FOOT_H
@@ -586,6 +588,14 @@ func _arrive_def(def: Dictionary, to: String, to_crossing: String) -> Dictionary
 	if side != "" and not def.has("fob_side"):
 		out["fob_side"] = side
 	return out
+
+
+## Host: the support helicopters' cooldowns and losses the running deployment carried across a
+## crossing (HeliSupports.limits; LZ-3), {} with none.
+func carried_support_limits() -> Dictionary:
+	if not campaign_running or not RosterDeployment.is_running(roster()):
+		return {}
+	return RosterDeployment.active(roster()).get("support_limits", {})
 
 
 ## Host: what `key` ("p:<peer>" / "m:<member id>") carried across a crossing goes onto `s`.
