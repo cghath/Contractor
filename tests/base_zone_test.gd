@@ -165,6 +165,27 @@ func _test_region_map() -> void:
 		return d <= ZoneDef.EDGE_POINT_IN_M + 1.0 or base_def.get("sea_side", -1) == side)
 	check(crossings.size() == RegionMap.links(RegionMap.BASE).size() and crossings.size() >= 2 and on_edge,
 		"the base zone has a crossing on each linked edge (%s)" % ", ".join(crossings.map(func(c: Dictionary) -> String: return String(c.name))))
+	# The region map on the ops desk: every zone a cell, a click picks the zone under it.
+	var view := RegionMapView.new()
+	view.size = Vector2(900, view.custom_minimum_size.y)
+	var some := String(RegionMap.links(RegionMap.BASE)[0].to)
+	var picked := [""]
+	view.zone_picked.connect(func(id: String) -> void: picked[0] = id)
+	var click := InputEventMouseButton.new()
+	click.button_index = MOUSE_BUTTON_LEFT
+	click.pressed = true
+	click.position = view.cell_rect(RegionMap.layout()[some]).get_center()
+	view._gui_input(click)
+	var rects := RegionMap.layout().values().map(func(c: Vector2i) -> Rect2: return view.cell_rect(c))
+	var apart := true
+	for i in rects.size():
+		for j in range(i + 1, rects.size()):
+			apart = apart and not (rects[i] as Rect2).intersects(rects[j])
+	check(picked[0] == some and view.selected == some and apart and view.zone_at(view.cell_rect(RegionMap.layout()[RegionMap.BASE]).get_center()) == RegionMap.BASE,
+		"the ops desk's region map: each zone its own cell, a click picks it (%s)" % picked[0])
+	var marks := BaseUI.region_marks({"held": [{"zone_id": "a"}], "prep": {"contract": {"zone_id": "b", "legs": [{"zone_id": "c"}]}}})
+	check(marks == {"a": "held", "b": "prep", "c": "leg"}, "marking the contracts held, the one in prep and its next zone (%s)" % marks)
+	view.free()
 
 
 ## LZ-2: out of the base through a crossing into the next zone, arriving at its matching crossing;
@@ -340,6 +361,13 @@ func _test_cross_on(zone: ZoneLevel, from_id: String) -> ZoneLevel:
 		"pos": at + Vector3(0, 0, -2.0), "hvt_id": "xing_hvt"})
 	layer.server_set_state(captive, {"cuffed": true, "surrendered": true})
 	layer.server_lead(me, captive)
+	# And he's at the wheel of a vehicle in the crossing: it drives on with him (LZ-2).
+	var vl := zone.get_node(^"Vehicles") as VehicleLayer
+	var truck := vl.server_spawn("matv", Transform3D(Basis.IDENTITY, zone.above_ground(at + Vector3(4.0, 0, 0)) + Vector3(0, 0.6, 0)))
+	await get_tree().physics_frame
+	truck.server_set_fuel(37.0)
+	var truck_id := truck.vehicle_id
+	truck.server_enter(me, 0)
 	await get_tree().physics_frame
 	# A helicopter lost and a cooldown running: both go on with the deployment (LZ-3).
 	var helis := HeliSupports.of(zone)
@@ -371,10 +399,19 @@ func _test_cross_on(zone: ZoneLevel, from_id: String) -> ZoneLevel:
 		"the lost helicopter and the cooldown come along (%.0f s left)" % (helis_next.cooldown_left("resupply") if helis_next else 0.0))
 	var briefing := MapNodes.briefing(next)
 	check(briefing == null or not briefing.is_open(), "no second briefing")
+	var vl2 := next.get_node_or_null(^"Vehicles") as VehicleLayer
+	await _wait_until(func() -> bool: return vl2 != null and vl2.find(truck_id) != null and Vehicle.ride_of(me) == vl2.find(truck_id), 6.0)
+	var truck2: Vehicle = vl2.find(truck_id) if vl2 else null
+	check(truck2 != null and absf(truck2.fuel - 37.0) < 0.5 and Vehicle.ride_of(me) == truck2,
+		"the vehicle he drove in drives on with him, fuel as it was (%.0f l), him back at the wheel" % (truck2.fuel if truck2 else -1.0))
+	check(not is_instance_valid(zone) or zone.get_node(^"Vehicles").find(truck_id) == null, "and isn't left in the zone behind")
+	if truck2 and Vehicle.ride_of(me) == truck2:
+		truck2.server_exit(me)
+		await get_tree().physics_frame
 	var layer2 := next.get_node_or_null(^"People") as PeopleLayer
 	var hvt2: Soldier = layer2.hvt("xing_hvt") if layer2 else null
 	check(hvt2 != null and bool(layer2.state_of(hvt2).get("cuffed", false)) and String(layer2.state_of(hvt2).get("led_by", "")) == layer2.key_of(me)
-		and hvt2.global_position.distance_to(me.global_position) < 8.0,
+		and hvt2.global_position.distance_to(me.global_position) < 20.0,
 		"the cuffed HVT he led comes along, still cuffed and following him")
 	# And back the way they came.
 	var nx := MapNodes.extraction(next)

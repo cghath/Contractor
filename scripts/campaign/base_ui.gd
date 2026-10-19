@@ -256,6 +256,20 @@ func _build_squad(rows: VBoxContainer, v: Dictionary) -> void:
 			BaseHub.request("raid_air", [zone_ids[pick.selected]]))
 	fly.disabled = not multiplayer.is_server()
 	raid.add_child(UiKit.button_row([pick, fly]))
+	# The region map (LZ-2): the zones, their crossings, and where the contracts are. A click picks
+	# the zone to fly to.
+	var map := RegionMapView.new()
+	map.marks = region_marks(v)
+	map.selected = zone_ids[pick.selected] if pick.selected >= 0 and pick.selected < zone_ids.size() else ""
+	map.zone_picked.connect(func(id: String) -> void:
+		var i := zone_ids.find(id)
+		if i >= 0:
+			pick.select(i))
+	pick.item_selected.connect(func(i: int) -> void:
+		map.selected = zone_ids[i]
+		map.queue_redraw())
+	raid.add_child(UiKit.hint("Region map: walk between linked zones through their crossings (2 h a link)."))
+	raid.add_child(map)
 	# Base defence (LZ-6): hired guards on the wire, and any assault the heat has booked.
 	var defence := UiKit.section("Base defence", rows)
 	var g := int(v.get("guards", 0))
@@ -299,6 +313,21 @@ func _build_squad(rows: VBoxContainer, v: Dictionary) -> void:
 ## S0743 (restock left the medic short silently): what someone's last restock couldn't give
 ## them (Roster.restock_short_of), under their row until a restock fills them (deploying
 ## without it keeps it: Roster.record_loadout).
+## The region map's marks from the view: the zone of the contract in prep (and its other zones,
+## LZ-7) and those of the contracts held.
+static func region_marks(v: Dictionary) -> Dictionary:
+	var marks := {}
+	for c: Dictionary in v.get("held", []):
+		if String(c.get("zone_id", "")) != "":
+			marks[String(c.zone_id)] = "held"
+	var contract: Dictionary = (v.get("prep", {}) as Dictionary).get("contract", {})
+	for leg: Dictionary in contract.get("legs", []):
+		marks[String(leg.get("zone_id", ""))] = "leg"
+	if String(contract.get("zone_id", "")) != "":
+		marks[String(contract.zone_id)] = "prep"
+	return marks
+
+
 func _add_short_line(rows: VBoxContainer, who: String, person: Dictionary) -> void:
 	var short := Roster.restock_short_of(person)
 	if short.is_empty():

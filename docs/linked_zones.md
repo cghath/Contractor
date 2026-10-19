@@ -142,6 +142,12 @@ cross with the squad as they were (`PeopleLayer.server_take_across` / `server_br
 squadmate left at a crossing on (second confirm) goes into the deployment's `"away"`. They wait
 at that spot when the squad comes back (`BaseHub._spawn_away`) and follow once a player reaches
 them. If the deployment ends first, they go MIA in that zone, with the recovery contract there.
+Vehicles in a crossing on that are the motor pool's, or carry one of the squad, drive on with
+it. Their damage, fuel, cargo and riders' seats are kept (`BaseHub._take_vehicles_across` /
+`_land_vehicles` / `_seat_riders`). A vehicle in a crossing on no longer counts as "at the edge",
+so it never drives the squad out home by mistake. The ops desk shows the region map
+(`RegionMapView`): zones, links, the base, hot zones and where the contracts are. Clicking a
+zone picks it for the raid flight.
 
 **Travel time (decided: hours per link).** On foot 2 game hours per link, by vehicle 1 hour, a heli
 hop about 30 minutes. Wounds, bleeding and fatigue tick over that time, so the downed need a medic

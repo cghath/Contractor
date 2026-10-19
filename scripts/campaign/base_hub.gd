@@ -508,6 +508,11 @@ var _crossing_on := false
 ## The HVTs and hostages walking on with the squad (PeopleLayer.server_take_across), brought in
 ## when the next zone is up (server_land_people).
 var _carry_people: Array = []
+## The squad's vehicles driving on with it (_take_vehicles_across), and those waiting for their
+## riders to be seated in the next zone (_seat_riders).
+var _carry_vehicles: Array = []
+var _seating: Array = []
+const SEAT_WAIT_S := 15.0
 
 
 ## Whether the base is the base zone (BaseZoneLevel) rather than BaseLevel.
@@ -560,6 +565,7 @@ func server_cross_on(to: String, to_crossing: String, extraction: Extraction) ->
 				_leave_in_zone(s, String((lvl.get(&"def") as Dictionary).get("id", "")))  # left at the crossing: they wait here
 				continue
 			_carry["m:" + mid] = {"gear": s.inventory.net_state.duplicate(true), "vitals": s.vitals.server_snapshot()}
+	_carry_vehicles = _take_vehicles_across(lvl, point)
 	var people := lvl.get_node_or_null(^"People") as PeopleLayer
 	_carry_people = people.server_take_across(point.pos, float(point.get("radius", Extraction.RADIUS_M)) * 2.0) 		if people and point.get("pos") is Vector2 else []
 	_tally_raid(lvl)  # what the raid hit here, before the zone goes (LZ-4)
@@ -692,10 +698,101 @@ func _spawn_away(lvl: CompoundLevel) -> void:
 			brain.order = Squad.Order.HOLD
 
 
+## Host (server_cross_on): the squad's vehicles in the crossing (docs/linked_zones.md "what
+## crosses": vehicles driven in): a motor-pool vehicle, or any vehicle with one of the squad
+## aboard, not a wreck or a support's. Each one's state (damage, fuel, cargo, its pool id) and who
+## sits where ("p:<peer>", "m:<member id>") is kept, and it leaves this zone (not saved in it).
+func _take_vehicles_across(lvl: CompoundLevel, point: Dictionary) -> Array:
+	var out: Array = []
+	var layer := lvl.get_node_or_null(^"Vehicles") as VehicleLayer
+	if layer == null or not point.get("pos") is Vector2:
+		return out
+	for v: Vehicle in layer.vehicles():
+		if v.wrecked or v.is_burning() or v.kind == Vehicle.HELICOPTER or v.has_meta(&"support") or not Extraction.inside(point, v.global_position):
+			continue
+		var seats := {}
+		for s: Soldier in v.occupants():
+			if not s.vitals.is_dead() and not s.is_ai():
+				seats[str(v.seat_of(s))] = "p:%d" % s.name.to_int()
+			elif not s.vitals.is_dead() and s.has_meta(&"roster_id"):
+				seats[str(v.seat_of(s))] = "m:" + String(s.get_meta(&"roster_id"))
+		if seats.is_empty() and MotorPool.pool_id(v) == "":
+			continue  # nobody of ours aboard and not the company's: it stays
+		var rec := v.to_save()
+		rec.erase("pos")
+		rec.erase("rot")
+		rec.erase("bodies")
+		out.append({"model": v.model, "scheme": v.scheme, "faction": String(v.faction), "id": v.vehicle_id, "record": rec,
+			"pool_id": MotorPool.pool_id(v), "seats": seats})
+		for s: Soldier in v.occupants():
+			v.server_exit(s)
+		v.set_meta(&"no_save", true)
+		v.queue_free()
+	return out
+
+
+## Host, a zone up after a crossing on: the vehicles that drove on with the squad are parked by the
+## host's player, as they were, their riders seated again as they arrive (_seat_riders).
+func _land_vehicles(lvl: CompoundLevel, at: Vector3) -> void:
+	var layer := lvl.get_node_or_null(^"Vehicles") as VehicleLayer
+	if layer == null:
+		_carry_vehicles = []
+		return
+	var centre := Vector3.ZERO
+	var dir := (centre - at)
+	dir.y = 0.0
+	dir = dir.normalized() if dir.length() > 1.0 else Vector3.FORWARD
+	var side := dir.cross(Vector3.UP)
+	for i in _carry_vehicles.size():
+		var c: Dictionary = _carry_vehicles[i]
+		var pos := lvl.above_ground(at + dir * 10.0 + side * (float(i) - (_carry_vehicles.size() - 1) * 0.5) * 7.0) + Vector3(0, 0.6, 0)
+		var xform := Transform3D(Basis.looking_at(dir, Vector3.UP), pos)
+		var v := layer.server_spawn(String(c.model), xform, String(c.scheme), StringName(String(c.faction)), String(c.id), c.record)
+		if v == null:
+			continue
+		if String(c.pool_id) != "":
+			v.set_meta(&"pool_id", String(c.pool_id))
+			v.set_meta(&"no_save", true)
+		var ext := MapNodes.extraction(lvl)
+		if ext:
+			ext.mark_driven_in(v)  # it came in with the squad: it can drive them out again
+		_seating.append({"vehicle": v, "seats": (c.seats as Dictionary).duplicate(), "until": Time.get_ticks_msec() + int(SEAT_WAIT_S * 1000.0)})
+	SessionLog.note("crossing: %d vehicle(s) drove on with the squad" % _carry_vehicles.size())
+	_carry_vehicles = []
+
+
+## Host (_process): riders of vehicles that drove on get back in their seats once they're in the
+## zone (players spawn as they load in, squadmates as the squad fills), for up to SEAT_WAIT_S.
+func _seat_riders() -> void:
+	var lvl := level()
+	for w: Dictionary in _seating.duplicate():
+		var v := w.vehicle as Vehicle
+		if lvl == null or not is_instance_valid(v) or Time.get_ticks_msec() > int(w.until):
+			_seating.erase(w)
+			continue
+		for seat: String in (w.seats as Dictionary).keys():
+			var key := String(w.seats[seat])
+			var s: Soldier = null
+			if key.begins_with("p:"):
+				s = lvl.players.get_node_or_null(NodePath(key.substr(2))) as Soldier
+			else:
+				for n: Node in lvl.ai.get_children():
+					if n is Soldier and String(n.get_meta(&"roster_id", "")) == key.substr(2):
+						s = n
+			if s and not s.vitals.is_dead() and Vehicle.ride_of(s) == null and v.server_enter(s, int(seat)):
+				w.seats.erase(seat)
+		if (w.seats as Dictionary).is_empty():
+			_seating.erase(w)
+
+
 ## Host, a zone up after a crossing on (ZoneLevel): the HVTs and hostages who came along arrive
-## by the host's player, following whoever led them; squadmates left here earlier are waiting.
+## by the host's player, following whoever led them; squadmates left here earlier are waiting;
+## vehicles that drove on are parked by them.
 func server_land_people(lvl: CompoundLevel) -> void:
 	_spawn_away(lvl)
+	if not _carry_vehicles.is_empty():
+		var host := lvl.players.get_node_or_null(^"1") as Soldier
+		_land_vehicles(lvl, host.global_position if host else Vector3.ZERO)
 	if _carry_people.is_empty():
 		return
 	var people := lvl.get_node_or_null(^"People") as PeopleLayer
@@ -1086,6 +1183,7 @@ func _process(delta: float) -> void:
 	if not in_base():
 		if RosterDeployment.is_running(roster()):
 			_check_recovery_targets()
+			_seat_riders()
 		return
 	var now: Array = base_level().server_collect_stash()
 	if now != Roster.json_safe(stash()):
@@ -2745,7 +2843,8 @@ func build_view() -> Dictionary:
 	var held: Array = []
 	for c: Dictionary in Contracts.held():
 		if c.get("state") == Contracts.ACCEPTED:
-			held.append({"cid": String(c.cid), "title": String(c.get("title", "")), "deadline_day": int(c.get("deadline_day", 0))})
+			held.append({"cid": String(c.cid), "title": String(c.get("title", "")), "deadline_day": int(c.get("deadline_day", 0)),
+				"zone_id": String(c.get("zone_id", ""))})
 	return {
 		"day": day(), "funds": BaseEconomy.funds(),
 		"roster": roster(), "hiring": {"pool": Hiring.pool(hiring(), day()), "refreshed_day": int(hiring().get("refreshed_day", 1))},

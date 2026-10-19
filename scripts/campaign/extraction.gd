@@ -538,7 +538,22 @@ func vehicle_at_edge(v: Vehicle) -> bool:
 ## Whether soldier `s` sits in a vehicle that can drive out and is at the edge.
 func aboard_at_edge(s: Soldier) -> bool:
 	var v := Vehicle.ride_of(s) if s else null
-	return v != null and can_drive_out(v) and vehicle_at_edge(v)
+	return v != null and can_drive_out(v) and vehicle_at_edge(v) and crossing_at(v.global_position).is_empty()
+
+
+## Host: vehicle `v` came into the zone with the squad (a crossing, BaseHub._land_vehicles): it
+## can drive them out at the edge as one driven in.
+func mark_driven_in(v: Vehicle) -> void:
+	_driven_in[v.get_instance_id()] = true
+
+
+## The crossing on into another zone (crossing_on) that `pos` is in, or {}. A vehicle there drives
+## on with the squad when it confirms (BaseHub.server_cross_on), not out of the deployment.
+func crossing_at(pos: Vector3) -> Dictionary:
+	for point: Dictionary in points:
+		if String(point.get("source", "")) == "crossing" and crossing_on(point) and inside(point, pos):
+			return point
+	return {}
 
 
 ## Host. Who's needed and not aboard at the edge: {"blockers": [name] (players up: they can get
