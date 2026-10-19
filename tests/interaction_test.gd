@@ -73,11 +73,12 @@ func check(condition: bool, what: String) -> void:
 
 func _test_key_bindings() -> void:
 	print("Key bindings")
-	var interact := InputMap.action_get_events(&"interact")
+	# The keyboard's bindings (wave 7's controller adds a pad button to each action too).
+	var interact := InputMap.action_get_events(&"interact").filter(func(e: InputEvent) -> bool: return e is InputEventKey)
 	check(interact.size() == 1 and interact[0] is InputEventKey and interact[0].physical_keycode == KEY_CTRL
 		and interact[0].location == KEY_LOCATION_LEFT, "interact is Left Ctrl")
 	check(not _bound(&"interact", KEY_E), "E no longer interacts")
-	var self_events := InputMap.action_get_events(&"self_interact")
+	var self_events := InputMap.action_get_events(&"self_interact").filter(func(e: InputEvent) -> bool: return e is InputEventKey)
 	check(self_events.size() == 1 and self_events[0].physical_keycode == KEY_ALT and self_events[0].location == KEY_LOCATION_LEFT
 		and self_events[0].ctrl_pressed, "self_interact is Left Ctrl + Left Alt")
 	check(not _bound(&"crouch", KEY_CTRL), "Ctrl no longer crouches (it would while interacting)")
