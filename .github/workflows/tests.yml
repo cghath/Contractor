@@ -49,7 +49,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [smoke, gameplay, squad, spacing, net, levelswitch, wounds, armor, exo, mech, movement, mantle, interaction, roles, medical, logistics, casualty, materials, animations, scavenge, contracts, people, map, base, world, missions, vehicles, antiarmor, session_log, supports, heliflight, bay, aav, sound, loop, ui, loadout, weapons, forest, townperf, markers, pallets, voice, compass, audit_fixes, garrison, daynight, nvg, attachments, controller]
+        suite: [smoke, gameplay, squad, spacing, net, levelswitch, wounds, armor, exo, mech, movement, mantle, interaction, roles, medical, logistics, casualty, materials, animations, scavenge, contracts, people, map, base, world, missions, vehicles, antiarmor, session_log, supports, heliflight, bay, aav, sound, loop, ui, loadout, weapons, forest, townperf, markers, pallets, voice, compass, audit_fixes, garrison, daynight, nvg, attachments, controller, base_zone]
     steps:
       - uses: actions/checkout@v4
 

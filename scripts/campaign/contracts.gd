@@ -1231,6 +1231,11 @@ func _is_host() -> bool:
 	return not multiplayer.has_multiplayer_peer() or multiplayer.is_server()
 
 
+## The campaign's seed (new_campaign): the base zone's ground comes from it.
+func campaign_seed() -> int:
+	return int(_s().get("seed", 0))
+
+
 func _s() -> Dictionary:
 	var s := Campaign.section(SECTION)
 	if s.is_empty():

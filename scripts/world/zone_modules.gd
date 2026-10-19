@@ -16,7 +16,9 @@ extends RefCounted
 ## add "hq" (the enemy HQ: a HESCO-walled base with a command building, barracks and
 ## watchtowers), "qrf_base" (barracks and a vehicle shed: its QRF answers alarms) and "comms" (a
 ## radio mast on a steel lattice behind HESCO: destroyed, enemy reports slow down).
-const TYPES: Array[String] = ["compound", "outpost", "village", "checkpoint", "hq", "qrf_base", "comms"]
+## "fob" is the company's own (BaseFob.module_boxes: the base zone, docs/linked_zones.md LZ-1): no
+## garrison, loot or named points.
+const TYPES: Array[String] = ["compound", "outpost", "village", "checkpoint", "hq", "qrf_base", "comms", "fob"]
 
 ## Half the footprint in metres (x, z): the pad under it and its voxel bounds.
 ## (Static vars, not consts: a generated town ("town#<seed>", BuildingGen.town) adds its own
@@ -29,6 +31,7 @@ static var HALF := {
 	"hq": Vector2(22.0, 22.0),
 	"qrf_base": Vector2(17.0, 13.0),
 	"comms": Vector2(9.0, 9.0),
+	"fob": BaseFob.MODULE_HALF,
 }
 ## Voxel bounds reach this far above the ground (m) and this far below it.
 const TOP_M := 4.8
@@ -302,6 +305,8 @@ static func boxes(type: String) -> Array:
 				_cache[type] = _qrf_base()
 			"comms":
 				_cache[type] = _comms()
+			"fob":
+				_cache[type] = BaseFob.module_boxes()
 			_ when type.begins_with(TOWN) and _town(type):
 				pass
 			_ when GROWN in type and _grown(type):

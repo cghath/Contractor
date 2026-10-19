@@ -506,6 +506,17 @@ func spawn_point(index: int) -> Vector3:
 
 # --- Level API shared with ZoneLevel (wave 4) -------------------------------------------------
 
+## Whether this is the company's base (BaseLevel, BaseZoneLevel): BaseHub reads the stash and the
+## muster line back from it and keeps contracts' screens out of it.
+func is_base() -> bool:
+	return false
+
+
+## A base: whether its FOB is up for the muster line (BaseLevel waits for its voxels).
+func fob_ready() -> bool:
+	return true
+
+
 ## What a joining client must load to play this level (LevelSwitch sends it on join).
 func level_info() -> Dictionary:
 	return {"level": "compound"}

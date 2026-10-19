@@ -956,7 +956,7 @@ func _test_stand_in_own_kit(player: Soldier, key: String) -> void:
 func _test_terminals(base: BaseLevel) -> void:
 	print("Terminals and the base screen")
 	var player: Soldier = level.players.get_node(^"1")
-	var board: BaseTerminal = base.get_node_or_null(^"Terminal_hiring")
+	var board: BaseTerminal = base.fob.get_node_or_null(^"Terminal_hiring")
 	var actions := InteractionMenu.actions_for(player, board) if board else []
 	check(actions.size() == 1 and String(actions[0].label) == "Use Hiring board" and actions[0].has("call"), "the hiring board offers Use in the interaction menu")
 	if actions.is_empty():
@@ -993,14 +993,14 @@ func _test_terminals(base: BaseLevel) -> void:
 	check(boards.size() == 1 and aside and held and ui.is_open() and ui.page == "squad",
 		"the contract board: the base screen steps aside, the board keeps the mouse, and the screen is back when it closes")
 	## The motor pool's sign opens its own page (audit P2-23: it was only an interaction ring).
-	var pool: Dictionary = InteractionMenu.actions_for(player, base.get_node(^"Terminal_motor_pool"))[0]
+	var pool: Dictionary = InteractionMenu.actions_for(player, base.fob.get_node(^"Terminal_motor_pool"))[0]
 	check(String(pool.label) == "Use Motor pool" and String(pool.disabled) == "" and pool.has("call"), "the motor pool offers Use in the interaction menu")
 	InteractionMenu.perform(player, pool)
 	check(ui.is_open() and ui.page == "motor_pool" and ui._pages["motor_pool"].get_child_count() > 0, "and opens the base screen on its page")
 	## Service is on only at the motor pool's sign (review of ui/base-hub: the page is a tab on
 	## every terminal's screen, and the host refused bookings from the ops desk unseen).
 	var hurt := MotorPool.add("matv", "", {"zones": {"hull": 0.5}, "fuel": 300.0})
-	var sign: Node3D = base.get_node(^"Terminal_motor_pool")
+	var sign: Node3D = base.fob.get_node(^"Terminal_motor_pool")
 	var was := player.global_transform
 	player.global_position = sign.global_position + Vector3(30, 0, 0)
 	await get_tree().process_frame

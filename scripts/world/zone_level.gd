@@ -463,6 +463,7 @@ func _on_hosted() -> void:
 	GameState.load_zone()
 	if DayNight.current():
 		DayNight.current().server_restore()  # the saved time and weather (wave 7 S1)
+	_zone_loaded()
 	_logs = {}
 	for edit: Dictionary in GameState.voxel_edits:
 		if edit.has("w"):
@@ -489,6 +490,12 @@ func _on_hosted() -> void:
 	if spawn_ai:
 		_spawn_ai()
 	_update_streaming()
+
+
+## Host, right after the zone's save is loaded (before anything in it is put back): a subclass's
+## chance to adjust it (BaseZoneLevel: what lay inside the wire is the stash's).
+func _zone_loaded() -> void:
+	pass
 
 
 ## The test compound's starting loot, laid out in rows in front of the default insertion

@@ -444,7 +444,34 @@ func level() -> CompoundLevel:
 
 
 func in_base() -> bool:
-	return level() is BaseLevel
+	var l := level()
+	return l != null and l.is_base()
+
+
+## The base level (BaseLevel or BaseZoneLevel, both with the FOB's public face), or null outside it.
+func base_level():
+	return level() if in_base() else null
+
+
+## Which base to play (docs/linked_zones.md LZ-1): -1 the base zone except under a test scene (the
+## suites keep BaseLevel until the base zone is proven, BaseLevel the fallback), 0 BaseLevel, 1 the
+## base zone.
+static var base_zone_mode := -1
+
+
+## Whether the base is the base zone (BaseZoneLevel) rather than BaseLevel.
+func base_as_zone() -> bool:
+	if base_zone_mode >= 0:
+		return base_zone_mode == 1
+	var scene := get_tree().current_scene
+	return scene == null or not scene.scene_file_path.begins_with("res://tests/")
+
+
+## The level_info() the base is played from.
+func base_info() -> Dictionary:
+	if base_as_zone():
+		return {"level": "base_zone", "def": ZoneDef.normalize(BaseZoneLevel.def_for(Contracts.campaign_seed()))}
+	return {"level": "base"}
 
 
 ## A deployment is running and this is the host.
@@ -468,7 +495,7 @@ func prepare_session() -> void:
 	load_or_new()
 	GameState.zone_id = base_zone_id()
 	if not in_base():
-		_swap_level({"level": "base"})
+		_swap_level(base_info())
 
 
 ## This machine leaves campaign mode outside a session (hosting or joining failed, or a plain
@@ -526,6 +553,8 @@ func _do_switch() -> void:
 	# What players picked up or dropped at the hub while the switch waited counts (the stash
 	# poll stops while it waits, and server_deploy read the hub back before it).
 	_read_back_base()
+	if level() is BaseZoneLevel and campaign_running:
+		GameState.save_zone()  # the base zone keeps what lies outside the wire (its "fob" save, never set aside)
 	var info := _switch_to
 	_switch_to = {}
 	if _switch_zone != "":
@@ -543,7 +572,7 @@ func _do_switch() -> void:
 	fresh._on_hosted()
 	for id in multiplayer.get_peers():
 		fresh._on_peer_joined(id)
-	if not (fresh is BaseLevel) and RosterDeployment.is_running(roster()):
+	if not fresh.is_base() and RosterDeployment.is_running(roster()):
 		_open_briefing(fresh)
 	_queue_broadcast()
 	# Last on the same reliable channel as everything the new level spawned above: a client
@@ -659,7 +688,7 @@ func _size_reinforcements(cid: String) -> void:
 @rpc("authority", "call_remote", "reliable")
 func _client_hold_sync() -> void:
 	var lvl := level()
-	var me := lvl.players.get_node_or_null(str(multiplayer.get_unique_id())) if lvl else null
+	var me: Node = lvl.players.get_node_or_null(str(multiplayer.get_unique_id())) if lvl else null
 	var sync := me.get_node_or_null(^"Sync") as MultiplayerSynchronizer if me else null
 	if sync:
 		sync.public_visibility = false
@@ -738,7 +767,7 @@ func _hide_loading() -> void:
 ## debrief still up from the last deployment doesn't hold this player at it (Captain,
 ## 2026-10-14). Back at the base the debrief stays: that's where it's read.
 func _close_screens_for(fresh: CompoundLevel) -> void:
-	if fresh != null and not (fresh is BaseLevel):
+	if fresh != null and not fresh.is_base():
 		Contracts.close_screens()
 
 
@@ -760,11 +789,11 @@ func server_level_ready(_level: CompoundLevel) -> void:
 ## Host: reads the hub back into the campaign: the stash from its world items, the muster
 ## line's gear, and each player's gear onto their main character.
 func _read_back_base() -> void:
-	var lvl := level() as BaseLevel
+	var lvl = base_level()
 	if lvl == null or not campaign_running:
 		return
 	base()["stash"] = lvl.server_collect_stash()
-	var gear := lvl.server_read_muster_gear()
+	var gear: Dictionary = lvl.server_read_muster_gear()
 	for mid: String in gear:
 		server_store_member_gear(mid, gear[mid])
 	for p: Node in lvl.players.get_children():
@@ -784,7 +813,7 @@ func _process(delta: float) -> void:
 		if RosterDeployment.is_running(roster()):
 			_check_recovery_targets()
 		return
-	var now := (level() as BaseLevel).server_collect_stash()
+	var now: Array = base_level().server_collect_stash()
 	if now != Roster.json_safe(stash()):
 		base()["stash"] = now
 		_changed(&"base")
@@ -844,7 +873,7 @@ func _server_hello(key: String) -> void:
 	_profiles[peer] = k
 	SessionLog.note("player joined: Player %d plays profile %s (%d players)" % [peer, k, _player_count()])
 	var lvl := level()
-	var p := lvl.players.get_node_or_null(str(peer)) as Soldier if lvl else null
+	var p: Soldier = lvl.players.get_node_or_null(str(peer)) as Soldier if lvl else null
 	if p and campaign_running:
 		_apply_player_gear(peer, p)
 	_queue_broadcast()
@@ -929,7 +958,7 @@ func _on_peer_left(id: int) -> void:
 	if not multiplayer.is_server() or not campaign_running:
 		return
 	var lvl := level()
-	var p := lvl.players.get_node_or_null(str(id)) as Soldier if lvl else null
+	var p: Soldier = lvl.players.get_node_or_null(str(id)) as Soldier if lvl else null
 	SessionLog.note("player left: Player %d (profile %s)%s" % [id, player_key(id),
 		"" if p == null else ", %s" % p.vitals.condition_text()])
 	if p and _gear_applied.has(id):
@@ -1220,7 +1249,7 @@ func server_spawn_roster_squadmate(lvl: CompoundLevel, slot: int, role: StringNa
 					lvl.rebalance_squad())
 		return null
 	var m := member(mid)
-	var squad := lvl.squad_for(&"friendly")
+	var squad: Squad = lvl.squad_for(&"friendly")
 	var anchor: Node3D = squad.leader if squad and is_instance_valid(squad.leader) else null
 	var wedge: Array = Squad.FORMATIONS["wedge"]
 	var pos: Vector3 = anchor.global_transform * (wedge[maxi(slot - 1, 0) % wedge.size()] as Vector3) if anchor \
@@ -1229,7 +1258,7 @@ func server_spawn_roster_squadmate(lvl: CompoundLevel, slot: int, role: StringNa
 	var data := {"name": String(m.callsign), "faction": "friendly", "variant": "tan", "pos": pos, "loadout": [],
 		"role": "", "team": team, "slot": slot, "combat": stats.combat, "discipline": stats.discipline, "guard": false}
 	data.merge(Roster.identity(m))  # the same person every deployment: name tape, nationality, hand, body
-	var s := lvl.spawn_soldier(data)
+	var s: Soldier = lvl.spawn_soldier(data)
 	s.role = role
 	s.set_meta(&"roster_id", mid)
 	s.inventory.net_state = GameState.from_json(m.get("gear", {}).duplicate(true))
@@ -1253,7 +1282,7 @@ func _spawn_recovery_targets(lvl: CompoundLevel) -> void:
 		var data := {"name": String(m.callsign), "faction": "friendly", "variant": "tan", "pos": Vector3(float(p[0]), float(p[1]) + 0.1, float(p[2])),
 			"loadout": [], "role": "", "team": 0, "slot": -1, "combat": stats.combat, "discipline": stats.discipline, "guard": true}
 		data.merge(Roster.identity(m))
-		var s := lvl.spawn_soldier(data)
+		var s: Soldier = lvl.spawn_soldier(data)
 		s.role = StringName(m.get("role", Roles.RIFLEMAN))
 		s.set_meta(&"roster_id", mid)
 		s.set_meta(&"recovery", true)
@@ -1431,7 +1460,7 @@ func server_end_deployment(extracted: Array, return_to_base := true, advance_day
 		note.emit(save_note(false))  # the host's player hears it (audit A1-04)
 	deployment_ended.emit(report)
 	if return_to_base:
-		server_switch_level({"level": "base"}, base_zone_id())
+		server_switch_level(base_info(), base_zone_id())
 	return report
 
 
@@ -1457,14 +1486,14 @@ func server_revert_deployment() -> String:
 	_before_deploy = {}
 	Contracts.objectives.server_clear()
 	_changed_all()
-	server_switch_level({"level": "base"}, base_zone_id())
+	server_switch_level(base_info(), base_zone_id())
 	return ""
 
 
 ## Host: everyone goes back to the hub (after server_end_deployment(..., false) and a debrief).
 func server_return_to_base() -> void:
 	SessionLog.note("Return to Base: everyone goes back to the hub")
-	server_switch_level({"level": "base"}, base_zone_id())
+	server_switch_level(base_info(), base_zone_id())
 
 
 ## Host (debug, and a stand-in for the map's extraction): ends the deployment with everyone
@@ -1583,7 +1612,7 @@ func server_release(mid: String) -> String:
 	var m := member(mid)
 	if m.is_empty() or not Roster.is_available(m):
 		return "Only someone fit and at the base can be let go"
-	var lvl := level() as BaseLevel
+	var lvl = base_level()
 	var s: Soldier = lvl.muster_soldier(mid) if lvl else null
 	var gear: Dictionary = s.inventory.net_state if s else m.get("gear", {})
 	_stash_gear(GameState.from_json(gear.duplicate(true)))
@@ -1636,7 +1665,7 @@ func server_buy(id: StringName, count := 1, peer := 1) -> String:
 ## Host: an item joins the stash: delivered to the armory counter at the hub, or straight into
 ## the stash list anywhere else.
 func server_add_to_stash(id: StringName, count := 1, state := {}) -> void:
-	var lvl := level() as BaseLevel
+	var lvl = base_level()
 	if lvl and campaign_running:
 		lvl.server_deliver(id, count, state)
 	else:
@@ -1659,10 +1688,10 @@ func server_sell_from_stash(id: StringName, count := 1) -> int:
 ## Host: takes up to `count` of `id` out of the company stash (the armory's at the hub, else the
 ## stash list). Returns how many it took.
 func server_take_from_stash(id: StringName, count := 1) -> int:
-	var lvl := level() as BaseLevel
+	var lvl = base_level()
 	var took := 0
 	if lvl and campaign_running:
-		var before := lvl.server_collect_stash()
+		var before: Array = lvl.server_collect_stash()
 		var pool: Array = before.duplicate(true)
 		took = BaseArmory.remove(pool, id, count)
 		if took > 0:
@@ -1709,8 +1738,8 @@ func server_set_role(mid: String, role: StringName) -> String:
 		return "No such role"
 	m["role"] = String(role)
 	Roster.add_history(m, day(), "Now a %s" % Roles.display_name(role))
-	var lvl := level() as BaseLevel
-	var s := lvl.muster_soldier(mid) if lvl else null
+	var lvl = base_level()
+	var s: Soldier = lvl.muster_soldier(mid) if lvl else null
 	if s:
 		s.role = role
 	_changed(&"roster")
@@ -1736,8 +1765,8 @@ func server_certify_hx1(mid: String) -> String:
 
 
 func _refresh_muster() -> void:
-	var lvl := level() as BaseLevel
-	if lvl and campaign_running and lvl.voxel_world.is_built():
+	var lvl = base_level()
+	if lvl and campaign_running and lvl.fob_ready():
 		lvl.server_show_roster()
 
 
@@ -1773,10 +1802,10 @@ func _record_loadouts(dep: Dictionary) -> void:
 ## medics who aren't restocking now (_medic_needs): a medic draws first, anyone else leaves
 ## them their share.
 func server_restock_player(peer: int) -> String:
-	var lvl := level() as BaseLevel
+	var lvl = base_level()
 	if lvl == null or not campaign_running or RosterDeployment.is_running(roster()):
 		return "Only at the base"
-	var s := lvl.players.get_node_or_null(NodePath(str(peer))) as Soldier
+	var s: Soldier = lvl.players.get_node_or_null(NodePath(str(peer))) as Soldier
 	if s == null or not s.vitals.is_up():
 		return "You can't kit up now"
 	var main := Roster.main_character(roster(), player_key(peer))
@@ -1814,7 +1843,7 @@ func server_restock_squad() -> String:
 	var mids := _restock_squad_ids()
 	var none := PackedStringArray()
 	var here: Array[String] = []
-	var lvl := level() as BaseLevel
+	var lvl = base_level()
 	for mid: Variant in mids:
 		if lvl.muster_soldier(String(mid)) == null:
 			continue  # not here: missing, dead, recovering
@@ -1841,7 +1870,7 @@ func _restock_squad_ids() -> Array:
 ## of round them too (Restock.fair_shares), so whoever restocks first doesn't take a medic's
 ## share (review of S0736: a rifleman player restocked just before the medic player and took
 ## the last knife; Restock squad before a client medic took his tourniquets).
-func _medic_needs(lvl: BaseLevel, skip_mids: Array, skip_key := "") -> Array[Dictionary]:
+func _medic_needs(lvl, skip_mids: Array, skip_key := "") -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	for p: Node in lvl.players.get_children():
 		var peer := p.name.to_int()
@@ -1856,7 +1885,7 @@ func _medic_needs(lvl: BaseLevel, skip_mids: Array, skip_key := "") -> Array[Dic
 				out.append(need)
 	for mid: Variant in _restock_squad_ids():
 		var m := member(String(mid))
-		var s := lvl.muster_soldier(String(mid))
+		var s: Soldier = lvl.muster_soldier(String(mid))
 		if s == null or String(mid) in skip_mids or StringName(m.get("role", "")) != Roles.MEDIC:
 			continue
 		var need := Restock.needs(Roster.loadout_of(m), Roster.json_safe(s.inventory.net_state))
@@ -1870,7 +1899,7 @@ func _medic_needs(lvl: BaseLevel, skip_mids: Array, skip_key := "") -> Array[Dic
 ## one line each (Restock.report_text).
 func _restock_members(mids: Array[String]) -> PackedStringArray:
 	var lines := PackedStringArray()
-	var lvl := level() as BaseLevel
+	var lvl = base_level()
 	if lvl == null or not campaign_running or RosterDeployment.is_running(roster()):
 		return lines
 	var people: Array = []
@@ -1899,8 +1928,8 @@ func _restock_members(mids: Array[String]) -> PackedStringArray:
 ## for all of them and the medics not restocking (`medic_needs`, _medic_needs) is shared
 ## (Restock.fair_shares: the medics restocking, then those needs, then the rest), and the
 ## armory's world items follow. Returns each one's Restock.build result with its report ("text").
-func _restock_bodies(lvl: BaseLevel, people: Array, medic_needs: Array[Dictionary] = []) -> Array:
-	var before := lvl.server_collect_stash()
+func _restock_bodies(lvl, people: Array, medic_needs: Array[Dictionary] = []) -> Array:
+	var before: Array = lvl.server_collect_stash()
 	var pool: Array = before.duplicate(true)
 	for p: Dictionary in people:
 		var own := Inventory.new()
@@ -1958,7 +1987,7 @@ func _restock_bodies(lvl: BaseLevel, people: Array, medic_needs: Array[Dictionar
 ## Host: makes the hub's world items `after` where they were `before` (both stash entries):
 ## what went is taken off the armory's items, what came back (old kit, pouches or an optic
 ## swapped off) is put down at the armory counter.
-func _apply_stash(lvl: BaseLevel, before: Array, after: Array) -> void:
+func _apply_stash(lvl, before: Array, after: Array) -> void:
 	var had := Restock.stash_units(before)
 	var now := Restock.stash_units(after)
 	var gone := {}
@@ -2009,7 +2038,7 @@ const STANDING_OPS: Array[String] = ["save", "standing_role", "copy_standing", "
 ## {"who", "name", "role", "person" (roster entry), "soldier", "peer" (players; 0 for a member)},
 ## or {} if they aren't standing here.
 func loadout_person(who: String) -> Dictionary:
-	var lvl := level() as BaseLevel
+	var lvl = base_level()
 	if lvl == null:
 		return {}
 	if who.begins_with("player:"):
@@ -2021,7 +2050,7 @@ func loadout_person(who: String) -> Dictionary:
 				return {"who": who, "name": key, "role": StringName(main.get("role", Roles.RIFLEMAN)), "person": main, "soldier": p, "peer": peer}
 		return {}
 	var m := member(who)
-	var s := lvl.muster_soldier(who)
+	var s: Soldier = lvl.muster_soldier(who)
 	if m.is_empty() or s == null:
 		return {}
 	return {"who": who, "name": String(m.callsign), "role": StringName(m.get("role", Roles.RIFLEMAN)), "person": m, "soldier": s, "peer": 0}
@@ -2036,11 +2065,11 @@ static func may_change_loadout(sender: int, a: Dictionary) -> bool:
 ## Host: the loadout menu's request `op` on `who` from player `sender` (docs/loadout_menu.md,
 ## Network). Returns what happened, or why not.
 func server_loadout(sender: int, who: String, op: String, p: Dictionary) -> String:
-	var lvl := level() as BaseLevel
+	var lvl = base_level()
 	if lvl == null or not campaign_running or RosterDeployment.is_running(roster()):
 		return "Only at the base"
 	if op == "sync":
-		var gear := lvl.server_read_muster_gear()
+		var gear: Dictionary = lvl.server_read_muster_gear()
 		for mid: String in gear:
 			server_store_member_gear(mid, gear[mid])
 		_changed(&"roster")
@@ -2127,8 +2156,8 @@ func server_loadout(sender: int, who: String, op: String, p: Dictionary) -> Stri
 
 ## Host: `people` (loadout_person entries with their edited "template") rebuilt from the hub's
 ## stash together; their bodies, roster gear and the armory follow. One short_text each.
-func _loadout_apply(lvl: BaseLevel, people: Array) -> PackedStringArray:
-	var before := lvl.server_collect_stash()
+func _loadout_apply(lvl, people: Array) -> PackedStringArray:
+	var before: Array = lvl.server_collect_stash()
 	var pool: Array = before.duplicate(true)
 	var jobs: Array = people.map(func(a: Dictionary) -> Dictionary:
 		return {"gear": Roster.json_safe((a.soldier as Soldier).inventory.net_state), "template": a.template})
@@ -2420,7 +2449,7 @@ static func missing_cost(missing: Dictionary) -> Dictionary:
 
 ## Host: buys what `a`'s last edit was short of (only `only_id` when given), then redoes the
 ## edit. Returns what happened, or why not.
-func _server_buy_missing(lvl: BaseLevel, sender: int, a: Dictionary, only_id := "") -> String:
+func _server_buy_missing(lvl, sender: int, a: Dictionary, only_id := "") -> String:
 	var missing: Dictionary = a.person.get("edit_missing", {})
 	if missing.is_empty() or not _edit_wants.has(a.who):
 		return "Nothing missing to buy"
