@@ -596,6 +596,11 @@ func driver() -> Soldier:
 	return occupant(_first_seat(DRIVER))
 
 
+## The driver's seat's index (-1 for none).
+func driver_seat() -> int:
+	return _first_seat(DRIVER)
+
+
 ## Whether its engine runs (Sfx's engine sound, every peer): someone drives. Helicopter: its rotors turn.
 func engine_running() -> bool:
 	return driver() != null

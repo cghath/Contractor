@@ -44,6 +44,9 @@ func _ready() -> void:
 	spawner.spawn_path = NodePath("..")
 	spawner.spawn_function = _make
 	add_child(spawner)
+	var drivers := SquadDrivers.new()
+	drivers.name = SquadDrivers.NODE_NAME
+	add_child(drivers)  # the squad's AI at the wheel (wave 6, queued 2026-10-19)
 
 
 ## The vehicles node of the level `from` is in (or null).
@@ -219,6 +222,36 @@ func server_order_mount(from: Soldier, point: Vector3, names: PackedStringArray,
 	return "" if sent > 0 else "Nobody to send"
 
 
+## Host: the vehicle (not a wreck) nearest `point` within MOUNT_PICK_M, or null.
+func vehicle_near(point: Vector3) -> Vehicle:
+	var best: Vehicle = null
+	var best_d := MOUNT_PICK_M
+	for v in vehicles():
+		var d := v.global_position.distance_to(point)
+		if not v.wrecked and d < best_d:
+			best = v
+			best_d = d
+	return best
+
+
+## Host: squadmate `s` gets into seat `seat` (-1 any) of `v`: at once when he's aboard (he moves
+## over) or by a door, else he walks to the nearest door first (ordered by `from`) and gets in
+## there. Returns whether he's in or on his way.
+func server_board(from: Soldier, s: Soldier, v: Vehicle, seat := -1) -> bool:
+	if Vehicle.ride_of(s) == v:
+		return v.server_switch(s, seat) if seat >= 0 else true
+	var door := _nearest_door(v, s.global_position)
+	if s.global_position.distance_to(door) <= BOARD_REACH_M:
+		return (seat >= 0 and v.server_enter(s, seat)) or (seat < 0 and v.server_enter(s))
+	var lvl := get_parent() as CompoundLevel
+	var squad := lvl.squad_for(from.faction) if lvl else null
+	if squad == null:
+		return false
+	squad.give_order(from, Squad.Order.MOVE, door, PackedStringArray([String(s.name)]))
+	_boarding[s.get_instance_id()] = {"soldier": s, "vehicle": v, "until": Soldier._now() + BOARD_TIMEOUT_S, "seat": seat}
+	return true
+
+
 ## Who of `team` (AI squadmates) takes a vehicle's gun: by GUNNER_ROLES, never a medic, or null.
 ## `told` (the "Take the gun" order): the medic too, when he's the only one told.
 static func pick_gunner(team: Array[Soldier], told := false) -> Soldier:
@@ -240,8 +273,9 @@ static func pick_gunner(team: Array[Soldier], told := false) -> Soldier:
 
 ## Whether a squadmate is on the way to `v`'s gun seat.
 func _gun_claimed(v: Vehicle) -> bool:
+	var gun_seat := int(v.gun_info().get("seat", -1))
 	for b: Dictionary in _boarding.values():
-		if b.vehicle == v and int(b.get("seat", -1)) >= 0:
+		if b.vehicle == v and int(b.get("seat", -1)) >= 0 and int(b.get("seat", -1)) == gun_seat:
 			return true
 	return false
 

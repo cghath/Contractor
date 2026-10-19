@@ -312,7 +312,10 @@ and story items (item catalogue plan).
 the wheel (and the gun) of the player's ground vehicles on command: "get in and drive", "drive
 to here" on the map, follow the lead vehicle in a convoy, stop and dismount on contact, and
 come pick the players up. Builds on V1's AI drivers following a path (scripts/vehicles); the
-high command (allied elements) can use the same orders. Not started.
+high command (allied elements) can use the same orders. Part 1 built (2026-10-19,
+`scripts/vehicles/squad_drivers.gd`, the command menu's Mount entries 4-9): take the wheel,
+drive there, follow me in a column, come pick us up, stop, and dismount on contact (default on).
+Still to come: map orders for the drivers, the high command's elements driving, and road following.
 
 ### Wave 7: art, world and weapons
 

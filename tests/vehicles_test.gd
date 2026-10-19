@@ -194,6 +194,7 @@ func _run_host(wait_for_client: bool) -> void:
 		await _test_save_reload()
 	if _want("ai_driver"):
 		await _test_ai_driver()
+		await _test_squad_drivers()
 	if _want("ragdoll_and_run_over"):
 		await _test_ragdoll_and_run_over()
 	if not wait_for_client:
@@ -1833,6 +1834,78 @@ func _test_ai_driver() -> void:
 	v.server_exit(ai_driver)
 	ai_driver.queue_free()
 	await _reset(aav, Vector3(13, 0, 6))
+	await _reset(v, Vector3(-12, 0, 6))
+
+
+## The squad's AI at the wheel (SquadDrivers; Captain, 2026-10-19): take the wheel, drive there,
+## a column behind the commander, come pick us up, the contact drill, stop.
+func _test_squad_drivers() -> void:
+	print("Squad drivers")
+	var drivers := SquadDrivers.of(level)
+	check(drivers != null, "every level's vehicles have the squad's drivers")
+	if drivers == null:
+		return
+	var v := _vehicle("range_matv")
+	await _reset(v, Vector3(-12, 0, 6))
+	var door := layer._nearest_door(v, v.global_position - v.global_basis.x * 4.0)
+	var medic := _soldier("friendly", door + Vector3(0, 0.1, 0), "DrvMedic")
+	medic.role = Roles.MEDIC
+	var rifle := _soldier("friendly", door + Vector3(0, 0.1, 0.5), "DrvRifle")
+	rifle.role = Roles.RIFLEMAN
+	await get_tree().physics_frame
+	player.global_position = v.global_position + Vector3(0, 0.1, 14)
+	var why := drivers.server_command(player, "take_wheel", v.global_position, PackedStringArray(["DrvMedic", "DrvRifle"]))
+	await _wait_for(func() -> bool: return v.driver() != null, 10.0)
+	check(why == "" and v.driver() == rifle, "Take the wheel: the rifleman drives, not the medic (%s, %s)" % [why, v.driver().name if v.driver() else "nobody"])
+	check(drivers.server_command(player, "take_wheel", v.global_position, PackedStringArray()).contains("already has the wheel"), "and once he has it, nobody else is sent")
+	# Drive there: the commander on foot sends every vehicle the squad drives.
+	var goal := Vector3(-12, 0, -20)
+	why = drivers.server_command(player, "drive_to", goal, PackedStringArray())
+	await _wait_for(func() -> bool: return v.ai.status == "arrived", 30.0)
+	var d := Vector2(v.global_position.x - goal.x, v.global_position.z - goal.z).length()
+	check(why == "" and v.ai.status == "arrived" and d < VehicleAI.ARRIVE_M + 2.0, "Drive there: it goes and stops (%.1f m off, %s)" % [d, why])
+	# Pick us up: it comes to the commander, stops short, and a squadmate on foot gets in.
+	player.global_position = Vector3(10, 0.1, 4)
+	var walker := _soldier("friendly", player.global_position + Vector3(2, 0, 2), "DrvWalker")
+	await get_tree().physics_frame
+	why = drivers.server_command(player, "pickup", Vector3.ZERO, PackedStringArray())
+	await _wait_for(func() -> bool: return drivers.order_of(v) == SquadDrivers.Order.HOLD, 30.0)
+	var gap := Vector2(v.global_position.x - player.global_position.x, v.global_position.z - player.global_position.z).length()
+	check(why == "" and drivers.order_of(v) == SquadDrivers.Order.HOLD and gap < SquadDrivers.PICKUP_STOP_M + 7.0,
+		"Come pick us up: it pulls up %.0f m from him (%s)" % [gap, why])
+	await _wait_for(func() -> bool: return v.seat_of(walker) >= 0 or layer.boarding_count() > 0, 5.0)
+	check(v.seat_of(walker) >= 0 or layer.boarding_count() > 0, "and the squadmates on foot are sent to get in (%d on their way)" % layer.boarding_count())
+	layer.server_cancel_boarding(v)
+	if v.seat_of(walker) < 0:
+		v.server_enter(walker)  # (the range has no navmesh to walk them over: seat him for the contact drill)
+	# Contact: under orders and hit, it stops and the passengers get out; the driver stays.
+	drivers.server_command(player, "drive_to", Vector3(-12, 0, -20), PackedStringArray())
+	await _seconds(1.0)
+	v.damaged.emit(&"hull", {})
+	await _wait_for(func() -> bool: return drivers.order_of(v) == SquadDrivers.Order.HOLD and v.seat_of(walker) < 0, 6.0)
+	check(drivers.order_of(v) == SquadDrivers.Order.HOLD and v.seat_of(walker) < 0 and v.driver() == rifle,
+		"hit on the move: it stops, the squadmate in the back gets out, the driver stays")
+	# A column behind the commander (on foot).
+	player.global_position = Vector3(-30, 0.1, -10)
+	await _seconds(0.5)
+	why = drivers.server_command(player, "convoy", Vector3.ZERO, PackedStringArray())
+	var near_enough := SquadDrivers.CONVOY_GAP_M + SquadDrivers.CONVOY_HOLD_M + 8.0  # (and the M-ATV's own length)
+	await _wait_for(func() -> bool: return v.global_position.distance_to(player.global_position) < near_enough and v.linear_velocity.length() < 0.8, 30.0)
+	gap = v.global_position.distance_to(player.global_position)
+	check(why == "" and gap < near_enough and gap > 10.0, "Follow me: it comes up behind him and waits, not on top of him (%.0f m)" % gap)
+	check(drivers.server_command(player, "drive_stop", Vector3.ZERO, PackedStringArray()) == "" and drivers.order_of(v) == SquadDrivers.Order.HOLD, "Stop the vehicles")
+	check(drivers.server_command(player, "contact_dismount", Vector3.ZERO, PackedStringArray()).ends_with("off") and not drivers.dismount_on_contact, "the contact drill can be turned off")
+	drivers.dismount_on_contact = true
+	# A player at the wheel keeps it.
+	v.server_exit(rifle)
+	check(v.server_enter(player, 0), "a player takes the wheel")
+	check(drivers.server_command(player, "take_wheel", v.global_position, PackedStringArray(["DrvRifle"])) == "A player is driving it", "and nobody's sent to take it from him")
+	v.server_exit(player)
+	for s: Soldier in [medic, rifle, walker]:
+		if v.seat_of(s) >= 0:
+			v.server_exit(s)
+		s.queue_free()
+	player.global_position = Vector3(0, 0.1, 10)
 	await _reset(v, Vector3(-12, 0, 6))
 
 

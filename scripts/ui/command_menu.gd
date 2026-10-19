@@ -68,6 +68,13 @@ const MENU := {
 			{"key": "2", "label": "Get out", "cmd": "dismount"},
 			## Captain, 2026-10-15: a selected squadmate mans that vehicle's gun.
 			{"key": "3", "label": "Take the gun", "cmd": "take_gun", "point": true},
+			## Captain, 2026-10-19: the squad's AI drives (SquadDrivers).
+			{"key": "4", "label": "Take the wheel", "cmd": "take_wheel", "point": true},
+			{"key": "5", "label": "Drive there", "cmd": "drive_to", "point": true},
+			{"key": "6", "label": "Follow me (column)", "cmd": "convoy"},
+			{"key": "7", "label": "Come pick us up", "cmd": "pickup"},
+			{"key": "8", "label": "Stop the vehicles", "cmd": "drive_stop"},
+			{"key": "9", "label": "Dismount on contact (on/off)", "cmd": "contact_dismount"},
 		]},
 		{"key": "5", "label": "Status", "items": [
 			{"key": "1", "label": "Report status", "cmd": "report"},
