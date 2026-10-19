@@ -455,9 +455,32 @@ func server_confirm(by_peer := 0) -> String:
 			_client_message.rpc(HELI_ONLY_TEXT)
 		SessionLog.note("extraction: confirm at %s refused (a helicopter LZ, not at the zone edge)" % point.name)
 		return HELI_ONLY_TEXT
+	if crossing_on(point):
+		var in_tow := _hvts_near(point)
+		if not in_tow.is_empty():
+			# (LZ-2: people the squad escorts don't cross into another zone yet.)
+			var refused := "%s can't come on into another zone yet: extract or go home with them first" % ", ".join(in_tow)
+			_client_message.rpc(refused)
+			return refused
 	if not missing_at(point).is_empty():
 		return _confirm_without(point)
 	return _start_countdown(point)
+
+
+## The HVTs and hostages in or by `point` (Extraction.HVT_GROUP), by name.
+func _hvts_near(point: Dictionary) -> PackedStringArray:
+	var out := PackedStringArray()
+	for node in get_tree().get_nodes_in_group(HVT_GROUP):
+		var n := node as Node3D
+		if n == null or n.is_queued_for_deletion():
+			continue
+		var vitals := n.get_node_or_null(^"Vitals") as Vitals
+		if vitals and vitals.is_dead():
+			continue
+		var at := Vector2(n.global_position.x, n.global_position.z)
+		if at.distance_to(point.pos) <= float(point.get("radius", RADIUS_M)) * 2.0:
+			out.append(String(n.get(&"display_name") if n.get(&"display_name") is String else n.name))
+	return out
 
 
 ## Host. Not everyone needed is inside `point`. Players who are up and elsewhere block; the
