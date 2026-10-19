@@ -182,6 +182,14 @@ const MENU := {
 				{"key": "4", "label": "Near us: the pilot picks an LZ", "cmd": "support:medevac:near"},
 				{"key": "5", "label": "Send it home", "cmd": "support:medevac:cancel"},
 			]},
+			## The locals' call-ins (RebelCalls; rebel support): free, by their support in the region.
+			{"key": "9", "label": "Rebels", "items": [
+				{"key": "1", "label": "Lookouts (they mark the gunmen near you)", "cmd": "support:rebel_lookouts"},
+				{"key": "2", "label": "Diversion: open fire there", "cmd": "support:rebel_diversion", "point": true},
+				{"key": "3", "label": "Rebel fighters", "cmd": "support:rebel_fighters"},
+				{"key": "4", "label": "Vehicle drop there", "cmd": "support:rebel_vehicle_drop", "point": true},
+				{"key": "5", "label": "Mortar there", "cmd": "support:rebel_mortar", "point": true},
+			]},
 			{"key": "7", "label": "Cargo run (loot home)", "items": [  # Captain, 2026-10-16: a chopper to send loot back to base
 				{"key": "1", "label": "At my map marker", "cmd": "support:cargo:marker"},
 				{"key": "2", "label": "There", "cmd": "support:cargo:here", "point": true},
@@ -197,7 +205,7 @@ const MENU := {
 				{"key": "6", "label": "Dismount", "cmd": "support:aav_dismount"},
 				{"key": "7", "label": "Return to base", "cmd": "support:aav_return"},
 			]},
-			{"key": "6", "label": "Allied troops", "items": [  # wave 6e: AlliedTroops; orders go to every element (the host's high command; one at a time: right click the map)
+			{"key": "8", "label": "Allied troops", "items": [  # wave 6e: AlliedTroops; orders go to every element (the host's high command; one at a time: right click the map)
 				{"key": "1", "label": "Call a rifle squad", "cmd": "support:allied_call:rifle"},
 				{"key": "2", "label": "Call a weapons team (MG + AT)", "cmd": "support:allied_call:weapons"},
 				{"key": "3", "label": "All: move there", "cmd": "support:allied_move", "point": true},

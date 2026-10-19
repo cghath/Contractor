@@ -89,6 +89,15 @@ func server_tag(by: Soldier, target: Soldier) -> String:
 	return "Tagged" if fresh else "Tag refreshed"
 
 
+## Host: `target` tagged on someone else's word (RebelCalls' lookouts: no radio, no line of
+## sight of ours), for TAG_S.
+func server_tag_reported(target: Soldier) -> void:
+	if not multiplayer.is_server() or target == null or not target.vitals.is_up():
+		return
+	_until[String(target.name)] = Soldier._now() + TAG_S
+	_send()
+
+
 ## The AI squadmates of `by`'s squad learn where `target` is.
 func _tell_squad(by: Soldier, target: Soldier) -> void:
 	var lvl := CompoundLevel.current(self)

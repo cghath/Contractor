@@ -212,7 +212,10 @@ static func kit_for(employer: String) -> String:
 ##
 ## `at_point` (a Vector3): they come in there instead of from the support origin (following the
 ## squad across a crossing, BaseHub: they arrive where it did).
-func server_call(by: Soldier, dev := false, kind := "rifle", company := false, at_point: Variant = null) -> String:
+##
+## `rebel` (RebelCalls: the locals' fighters): free, in local kit (AKs, the woodland look) and
+## the rebels' own marks ("rebel": never the company's for its casualties, Harm.is_company).
+func server_call(by: Soldier, dev := false, kind := "rifle", company := false, at_point: Variant = null, rebel := false) -> String:
 	if not multiplayer.is_server() or by == null:
 		return ""
 	if not KINDS.has(kind):
@@ -266,16 +269,16 @@ func server_call(by: Soldier, dev := false, kind := "rifle", company := false, a
 	level.add_child(sq)
 	for i in size:
 		var pos: Vector3 = level.call(&"ground_point", at + across * SPACING_M * (i - (size - 1) / 2.0))
-		var s: Soldier = level.call(&"spawn_soldier", {"name": "A%d_%d" % [slot + 1, i + 1], "faction": "friendly", "iff": "" if company else "allied",
-			"variant": "tan" if company else Kits.variant(kit),
-			"pos": pos, "loadout": Kits.loadout(kit, i, 1, String(spec.mix)), "role": Kits.role(kit, i, String(spec.mix)),
+		var s: Soldier = level.call(&"spawn_soldier", {"name": "A%d_%d" % [slot + 1, i + 1], "faction": "friendly", "iff": "rebel" if rebel else ("" if company else "allied"),
+			"variant": "woodland" if rebel else ("tan" if company else Kits.variant(kit)),
+			"pos": pos, "loadout": CompoundLevel.hostile_loadout(i) if rebel else Kits.loadout(kit, i, 1, String(spec.mix)), "role": Kits.role(kit, i, String(spec.mix)),
 			"combat": float(k.get("combat", 0.6)), "discipline": float(k.get("discipline", 0.65)), "guard": false, "mode": "aware"})
 		if s == null:
 			continue
 		var brain := SquadAI.of(s)
 		if brain:
 			brain.squad = sq
-	elements[slot] = {"id": slot + 1, "kind": kind, "squad": sq, "kit": kit, "employer": "company" if company else employer, "order": "move",
+	elements[slot] = {"id": slot + 1, "kind": kind, "squad": sq, "kit": kit, "employer": "rebels" if rebel else ("company" if company else employer), "order": "move",
 		"point": by.global_position, "company": company}
 	caller = by
 	calls += 1

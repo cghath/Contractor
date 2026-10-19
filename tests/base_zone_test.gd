@@ -135,6 +135,7 @@ func _run() -> void:
 	await _test_assault()
 	await _test_defences()
 	await _test_placed_defences()
+	await _test_rebel_calls()
 	await _test_raid_by_air()
 	await _test_airframes()
 	await _test_crossings()
@@ -426,9 +427,11 @@ func _test_fly_on(zone: ZoneLevel) -> ZoneLevel:
 		return null
 	await _wait_until(func() -> bool: return there.players.get_node_or_null(^"1") != null, 10.0)
 	me = there.players.get_node_or_null(^"1") as Soldier
-	var aboard := await _wait_until(func() -> bool: return me != null and Vehicle.ride_of(me) is Helicopter, 8.0)
+	var aboard := await _wait_until(func() -> bool: return me != null and Vehicle.ride_of(me) is Helicopter, 25.0)  # (CI runs slower)
 	check(aboard, "flown in aboard a helicopter to its insertion LZ")
 	HeliSupports.of(there).server_dismiss_all()  # (the test walks on from here: everyone out, on the ground)
+	await get_tree().create_timer(1.5).timeout
+	HeliSupports.of(there).server_dismiss_all()  # (one launched late doesn't board him after all)
 	await get_tree().create_timer(0.5).timeout
 	if me:
 		me.global_position = there.ground_point(me.global_position)
@@ -731,6 +734,43 @@ func _test_placed_defences() -> void:
 	var line := BaseFob.sensor_report(Vector3.ZERO, [Vector3(0, 0, -250), Vector3(10, 0, -240), Vector3(900, 0, 0)])
 	check(line.contains("2 contacts") and line.contains("north"), "sensors report what's close, and which way (%s)" % line)
 	check(BaseFob.sensor_report(Vector3.ZERO, [Vector3(900, 0, 0)]) == "", "and nothing for what's far off")
+
+
+## Rebel support part 2 (RebelCalls): the call-ins, by the region's support, with cooldowns.
+func _test_rebel_calls() -> void:
+	print("Rebel call-ins")
+	var base := CompoundLevel.current(self) as BaseZoneLevel
+	var calls := RebelCalls.of(base)
+	var me := base.players.get_node_or_null(^"1") as Soldier if base else null
+	check(calls != null and me != null, "every level has the rebels' call-ins")
+	if calls == null or me == null:
+		return
+	var was := RebelSupport.support("inland")
+	check(calls.server_call("lookouts", me, Vector3.INF).contains("won't"), "below the tier: the locals won't")
+	RebelSupport.change("inland", 85.0 - was, "test")
+	check(calls.server_call("lookouts", me, Vector3.INF) == "", "at 85 inland: the lookouts watch")
+	check(calls.server_call("lookouts", me, Vector3.INF).contains("again in"), "and not again until their cooldown's out")
+	var spot := me.global_position + Vector3(10, 0, 10)
+	var layer := VehicleLayer.of(base)
+	var before := layer.vehicles().filter(func(v: Vehicle) -> bool: return v.model == RebelCalls.VEHICLE).size()
+	check(calls.server_call("vehicle_drop", me, spot) == "" and layer.vehicles().filter(func(v: Vehicle) -> bool: return v.model == RebelCalls.VEHICLE).size() == before + 1,
+		"a vehicle drop leaves a technical where marked")
+	check(calls.server_call("mortar", me, Vector3.INF) != "", "the mortar needs a mark")
+	check(calls.server_call("mortar", me, me.global_position + Vector3(0, 0, 80)) == "" and calls._mortar.size() == RebelCalls.MORTAR_ROUNDS,
+		"and with one, %d rounds on it after the warning" % RebelCalls.MORTAR_ROUNDS)
+	calls._mortar.clear()
+	check(calls.server_call("diversion", me, me.global_position + Vector3(0, 0, 200)) == "" and not calls._diversion.is_empty(), "a diversion opens fire where marked")
+	var allies := AlliedTroops.current(base)
+	var out_before := allies.out().size() if allies else 0
+	var why := calls.server_call("fighters", me, Vector3.INF)
+	await get_tree().create_timer(0.5).timeout
+	var e: Dictionary = allies.out().back() if allies and allies.out().size() > out_before else {}
+	var men: Array = (e.squad as Squad).members() if not e.is_empty() else []
+	check(why == "" and men.size() == RebelCalls.FIGHTERS and men.all(func(m: Soldier) -> bool: return m.iff == &"rebel" and not Harm.is_company(m)),
+		"rebel fighters come under the high command, in their own marks (never the company's: %d, %s)" % [men.size(), why])
+	if allies:
+		allies.server_release(me)
+	RebelSupport.change("inland", was - RebelSupport.support("inland"), "test reset")
 
 
 func _test_assault() -> void:
