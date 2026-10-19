@@ -147,6 +147,64 @@ func active(kind: String) -> HeliCall:
 	return null
 
 
+# --- Airframes (LZ-3; docs/linked_zones.md section 4, call 15) ----------------------------------
+# Each support's helicopter is one airframe the company keeps (BaseHub base "airframes": kind ->
+# {"cond": Vehicle.condition, "ready_at": Soldier._now() it's back from refuelling, "repair_day":
+# the campaign day it's out of the workshop}): a call puts its condition on the helicopter it
+# flies (_spawn) and the helicopter leaving writes it back (airframe_back). Under LOW_FUEL of its
+# tank it goes home to refuel (the flight back plus REFUEL_S); any damage zone under REPAIR_BELOW
+# sends it to the workshop for REPAIR_DAYS_PER of missing health (at least a day). Lost, the
+# replacement (charged as before) is a fresh airframe.
+const LOW_FUEL := 0.25
+const REFUEL_S := 200.0  # 20 game minutes at the zones' 6x clock (DayNight)
+const REPAIR_BELOW := 0.4
+const REPAIR_DAYS_PER := 4.0
+
+
+static func airframes() -> Dictionary:
+	var base := BaseHub.base()
+	if not base.has("airframes"):
+		base["airframes"] = {}
+	return base.airframes
+
+
+static func airframe(kind: String) -> Dictionary:
+	return airframes().get(kind, {})
+
+
+## Host: why `kind`'s airframe can't fly a call now, or "".
+static func airframe_problem(kind: String) -> String:
+	var a := airframe(kind)
+	if a.is_empty():
+		return ""
+	if int(a.get("repair_day", -1)) > BaseHub.day():
+		return "%s helicopter is in the workshop until day %d" % [kind.capitalize(), int(a.repair_day)]
+	var back := float(a.get("ready_at", -1.0)) - Soldier._now()
+	if back > 0.0:
+		return "%s helicopter is refuelling: back in %d s" % [kind.capitalize(), ceili(back)]
+	return ""
+
+
+## Host: `heli` (flying `kind`) is leaving or done: its condition goes back on the airframe, which
+## goes to refuel or to the workshop if it needs to.
+static func airframe_back(kind: String, heli: Vehicle, flight_back_s := 60.0) -> void:
+	if heli == null or not is_instance_valid(heli) or kind == "insertion":
+		return
+	var c := heli.condition()
+	var a := {"cond": c}
+	var worst := 1.0
+	for z: String in c.zones:
+		worst = minf(worst, float(c.zones[z]))
+	if worst < REPAIR_BELOW:
+		a["repair_day"] = BaseHub.day() + maxi(ceili((1.0 - worst) * REPAIR_DAYS_PER), 1)
+		a["cond"] = {}  # repaired by then: whole again
+	elif float(c.fuel) < float(heli.spec.get("fuel_l", 1.0)) * LOW_FUEL:
+		a["ready_at"] = Soldier._now() + flight_back_s + REFUEL_S
+		c["fuel"] = float(heli.spec.get("fuel_l", c.fuel))  # refuelled by then
+		c["leak"] = 0.0
+	airframes()[kind] = a
+
+
 ## Host: whether `kind` was lost this op.
 func is_lost(kind: String) -> bool:
 	return _lost.has(kind)
@@ -188,6 +246,9 @@ func server_call(kind: String, caller: Soldier, arg: String, point: Vector3) -> 
 		return "Call a transport first"
 	if is_lost(kind):
 		return "No helicopter left for %s: it was lost this op" % kind
+	var grounded := airframe_problem(kind) if not _free() else ""
+	if grounded != "":
+		return grounded
 	if not Supports.can_fly(lvl):
 		return "Helicopters are grounded: the weather won't let them fly"
 	if kind == "transport" and not Supports.is_hot_zone(lvl) and not _free():  # dev sessions: anywhere, to try it
@@ -354,6 +415,7 @@ func near_lz(caller: Soldier, avoid: Array[Vector3] = []) -> Dictionary:
 ## Host: a call's helicopter went down: that support is lost for the rest of the op.
 func server_lost(kind: String) -> void:
 	if kind in KINDS:
+		airframes().erase(kind)  # its replacement is a fresh airframe
 		if not _lost.has(kind):
 			Economy.charge_run(roundi(Prices.lost_support_price(kind) * HeliUpgrades.lost_mult(kind)), "Lost helicopter (%s support): replacement" % kind)
 		_lost[kind] = true
@@ -554,8 +616,16 @@ static func readout(from: Node) -> String:
 	for kind: String in KINDS:
 		if node.is_lost(kind):
 			lines.append("  %s: lost this op" % kind)
+		elif airframe_problem(kind) != "":
+			lines.append("  " + airframe_problem(kind))
 		elif node.cooldown_left(kind) > 0.0:
 			lines.append("  %s: cooldown %d s" % [kind, ceili(node.cooldown_left(kind))])
+		elif not (airframe(kind).get("cond", {}) as Dictionary).is_empty():
+			var c: Dictionary = airframe(kind).cond
+			var worst := 1.0
+			for z: String in c.get("zones", {}):
+				worst = minf(worst, float(c.zones[z]))
+			lines.append("  %s: fuel %d L, worst damage zone %d%%" % [kind, roundi(float(c.get("fuel", 0.0))), roundi(worst * 100.0)])
 	if lines.is_empty():
 		return ""
 	return "Helicopter supports:\n" + "\n".join(lines)

@@ -120,6 +120,7 @@ func _run() -> void:
 	check(back == stash_out, "the stash came back once, not twice (%s)" % str(back.get(&"m17", 0)))
 	_test_region_map()
 	_test_zone_memory()
+	await _test_airframes()
 	await _test_crossings()
 
 
@@ -349,3 +350,29 @@ func _test_zone_memory() -> void:
 	BaseHub._fade_zone_save(zid)
 	check(not FileAccess.file_exists(path) and not GameState.kept_copies(path).is_empty(), "after %d days it's fresh, its save kept aside" % (BaseHub.ZONE_FRESH_DAYS + 1))
 	GameState.fade_loose = false
+
+
+## LZ-3 (call 15): a support helicopter's airframe keeps its fuel and damage; badly damaged it's
+## in the workshop for days, nearly dry it's refuelling for a while, and calls wait for it.
+func _test_airframes() -> void:
+	print("Airframes")
+	var base := CompoundLevel.current(self) as BaseZoneLevel
+	var layer := base.get_node_or_null(^"Vehicles") as VehicleLayer
+	if layer == null:
+		check(false, "the base zone has a vehicle layer")
+		return
+	var at := base.fob.to_global(Vector3(BaseFob.HELIPAD.get_center().x, 0.5, BaseFob.HELIPAD.get_center().y))
+	var heli := layer.server_spawn(HeliSupports.MODEL, Transform3D(Basis.IDENTITY, at), "", &"player") as Vehicle
+	await get_tree().physics_frame
+	heli._zones[Vehicle.ZONE_HULL] = 0.3
+	HeliSupports.airframe_back("resupply", heli)
+	var why := HeliSupports.airframe_problem("resupply")
+	check(why.contains("workshop"), "a helicopter back badly shot up goes to the workshop (%s)" % why)
+	heli._zones[Vehicle.ZONE_HULL] = 1.0
+	heli.fuel = float(heli.spec.get("fuel_l", 1000.0)) * 0.1
+	HeliSupports.airframe_back("cargo", heli, 5.0)
+	why = HeliSupports.airframe_problem("cargo")
+	check(why.contains("refuelling"), "one back nearly dry is refuelling for a while (%s)" % why)
+	check(float(HeliSupports.airframe("cargo").cond.fuel) >= float(heli.spec.get("fuel_l", 1.0)) * 0.99, "and comes back full")
+	heli.queue_free()
+	HeliSupports.airframes().clear()

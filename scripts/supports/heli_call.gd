@@ -333,6 +333,7 @@ func _spawn(lvl: Node, layer: VehicleLayer, start: Vector3, facing: Vector3) -> 
 	if heli == null:
 		return false
 	heli.damage_mult = HeliUpgrades.damage_mult()  # an armoured cabin kit (air wing upgrade)
+	heli.apply_condition(HeliSupports.airframe(kind).get("cond", {}))  # the company's airframe as it was left (LZ-3)
 	heli.server_rearm()  # Captain, 2026-10-15: its M240H door guns go up loaded
 	_crew_gun()
 	heli.support = kind
@@ -579,6 +580,7 @@ func step(delta: float) -> void:
 					_evacuate()
 				elif kind == "cargo":
 					_bank_cargo()
+				HeliSupports.airframe_back(kind, heli)  # its fuel and damage stay with the airframe (LZ-3)
 				heli.queue_free()
 				phase = Phase.GONE
 

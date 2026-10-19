@@ -3064,6 +3064,28 @@ func readout(seat: int) -> String:
 
 ## JSON-safe state for the zone save and the motor pool (model, scheme, transform, damage,
 ## cargo, wrecked); from_save restores it.
+## The airframe's condition, without where it is or who's in it (LZ-3: a support helicopter keeps
+## it between calls and zones, Airframes): damage zones, fuel, a fuel leak, the holes in it.
+func condition() -> Dictionary:
+	var zones_out := {}
+	for z: StringName in _zones:
+		zones_out[String(z)] = float(_zones[z])
+	return {"zones": zones_out, "fuel": fuel, "leak": _leak, "carves": net_carves.duplicate(true)}
+
+
+## Host: puts a saved condition() back on this vehicle.
+func apply_condition(c: Dictionary) -> void:
+	if c.is_empty():
+		return
+	var zones_in: Dictionary = c.get("zones", {})
+	for z: Variant in zones_in:
+		_zones[StringName(String(z))] = clampf(float(zones_in[z]), 0.0, 1.0)
+	fuel = clampf(float(c.get("fuel", fuel)), 0.0, float(spec.get("fuel_l", fuel)))
+	_leak = maxf(float(c.get("leak", 0.0)), 0.0)
+	if c.has("carves"):
+		net_carves = (c.carves as Array).duplicate(true)
+
+
 func to_save() -> Dictionary:
 	var p := global_position if is_inside_tree() else _spawn_xform.origin
 	var q := (global_basis if is_inside_tree() else _spawn_xform.basis).get_rotation_quaternion()
