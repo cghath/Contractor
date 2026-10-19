@@ -74,11 +74,12 @@ killing civilians, below tier 20.
 3. **Local tasks** on the board.
 4. **Favours and upgrades.**
 
-## Calls for the Captain
+## Calls (decided, Captain 2026-10-19)
 
-1. **Per region, or one support for the whole map?** Proposed: per region.
-2. **The call-ins and their tiers** as in the table above?
-3. **Upgrades paid in favours** from local tasks, or in cash? Proposed: favours.
-4. **Local tasks:** on the contract board, or picked up by talking to someone in a village?
-   Proposed: the board first, village talk later.
-5. **Hot zones:** no rebel call-ins there?
+1. Per region (coast, inland).
+2. The call-ins and tiers as in the table.
+3. Upgrades take favours, cash and materials (salvage or supplies) together.
+4. Local tasks both ways from the start: "Locals:" jobs on the board, and picked up by talking to
+   someone in a village.
+5. Hot zones: the call-ins work there too, but weaker (longer cooldowns, fewer fighters, fewer
+   mortar rounds).
