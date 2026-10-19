@@ -201,6 +201,28 @@ and they come with the squad when it crosses.
   can take a zone on the region map: the squad boards, the crossing happens in the air (about 30 game
   minutes), and it lands at the destination's insertion LZ. Paid per flight. Transport inside a zone
   is no longer hot-zones-only.
+- **Helis are limited by damage and fuel (Captain, 2026-10-19).** Every support heli is already a
+  `Vehicle` with zone damage, fuel and fire (`Helicopter`, `HeliUpgrades.damage_mult`); today each
+  call is a fresh airframe and only a crash counts ("lost this op"). With helis following the squad
+  across zones, each airframe becomes a record that keeps its state between calls and crossings, like
+  the motor pool's vehicles:
+  - **Fuel.** Each airframe carries its fuel from call to call. Loitering, flying to a call and
+    following across a crossing all burn it (a crossing costs a link's flight; proposed in
+    `data/supports.json` per model). Low on fuel (proposed under 25%), it tells the squad it is
+    going home: it finishes or refuses the current call and flies to the LHD or the FOB helipad to
+    refuel, unavailable until it's back (proposed: the flight back plus 20 game minutes). The further
+    the squad is from the base on the graph, the less time a heli can spend with them.
+  - **Damage.** Hits stay on the airframe after the call. A damaged heli flies with limits by what's
+    hit: a hurt engine or rotor means no heavy loads (transport takes fewer, no pallet), no loiter,
+    and it won't follow across a crossing; a fuel hit leaks (Vehicle's leak), shortening its range;
+    past a damage threshold (proposed: any zone under 40%) it refuses calls into hot LZs and returns
+    for repair. Repairs happen at the base workshop over game hours to days by damage (the motor pool's
+    `ready_day`), paid from the bank. A crash is still lost for the op and charged its replacement
+    (`HeliSupports.server_lost`).
+  - **Status in the support menu and on the radio:** each airframe's fuel, damage and whether it's
+    available, refuelling or in repair, so the squad knows what it can call before it calls.
+  - **More airframes** (bought, or by employer tier) are how the company keeps cover up while one
+    refuels or is repaired.
 - **The AAV, motor-pool vehicles and allied elements** cross with the squad: those in the crossing
   ride across; the AAV and allied elements out on other orders arrive at the same crossing shortly
   after, keeping their orders (proposed: within 2 minutes of game time; elements more than a link's
@@ -253,7 +275,8 @@ and they come with the squad when it crosses.
 7. Travel time: 2 h per link on foot, 1 h by vehicle, about 30 min by heli; can add up to days.
 8. Raids: lean and risky; keep all that comes home.
 9. Supports: everything follows, a loitering heli included; heli transport between zones and local
-   transport everywhere.
+   transport everywhere. Helis are limited by damage and fuel: airframes keep both between
+   calls, refuel and repair at the base (section 4).
 10. Split squads: later, with dedicated servers; plan the state for it now.
 11. Save while out: resume in the zone, at the last crossing.
 12. Base attacked while out: a situation report with a return recommendation; small probes resolve
@@ -271,6 +294,9 @@ and they come with the squad when it crosses.
     allied elements more than a link away are released.
 19. **Hired squads.** Proposed: 4-8 men each, a squad leader from the roster or hired with them,
     wages at the roster's rates, up to 1 per FOB tier to start.
+20. **Heli limits.** Proposed: go home under 25% fuel; refuel takes the flight back plus 20 game
+    minutes; any damage zone under 40% stops hot-LZ calls and sends it to repair; a damaged engine or
+    rotor stops loiter, heavy loads and following across crossings.
 
 ## Build order (proposed)
 
@@ -281,7 +307,9 @@ and they come with the squad when it crosses.
    the crossing as an `Extraction` point kind, `server_switch_level` with `"arrive"`, cargo across,
    travel hours on the clock, zone memory and its week-long fade. Base ↔ one zone first, then all.
 3. **LZ-3 Supports across zones.** Origins facing the base, followers crossing (heli, AAV, allied
-   elements, vehicles), cooldowns per deployment, heli transport between zones and everywhere.
+   elements, vehicles), cooldowns per deployment, heli transport between zones and everywhere. Heli airframe
+   records with fuel and damage kept between calls, refuel and repair at the base, status in the
+   support menu.
 4. **LZ-4 Raids and contracts across zones.** The `"raid"` kind, its rules and debrief; contracts
    left and returned to; save and resume while out.
 5. **LZ-5 The base's local area and its threats.** Scavenging sites and villages; heat-driven
