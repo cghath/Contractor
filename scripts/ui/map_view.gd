@@ -566,6 +566,7 @@ func _draw() -> void:
 	_draw_insertion()
 	_draw_extraction()
 	_draw_markers()
+	_draw_tags()
 	_draw_gear_markers()
 	_draw_squad()
 	_draw_allied()
@@ -748,6 +749,17 @@ func _draw_markers() -> void:
 			draw_arc(s, 6.0 if hover else 5.0, 0.0, TAU, 16, Color.WHITE if hover else Color(0, 0, 0, 0.6), 1.0)
 		if String(marker.text) != "":
 			_label(s, String(marker.text), colour, "intel" if marker.channel == "intel" else "marker")
+
+
+## Enemies tagged by radio (EnemyTags): a red diamond where each one is now.
+func _draw_tags() -> void:
+	var tags := EnemyTags.of(level) if level else null
+	if tags == null:
+		return
+	for p: Vector2 in tags.map_points():
+		var s := map_to_screen(p)
+		draw_colored_polygon(PackedVector2Array([s + Vector2(0, -6), s + Vector2(6, 0), s + Vector2(0, 6), s + Vector2(-6, 0)]), EnemyTags.MARK_COLOUR)
+		draw_polyline(PackedVector2Array([s + Vector2(0, -6), s + Vector2(6, 0), s + Vector2(0, 6), s + Vector2(-6, 0), s + Vector2(0, -6)]), Color(0, 0, 0, 0.7), 1.0)
 
 
 ## Dead players' gear on the map (their bodies with a GearMarker): [{"pos": Vector2, "text"}].

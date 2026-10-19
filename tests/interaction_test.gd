@@ -60,6 +60,7 @@ func _ready() -> void:
 	await _test_downed_enemy()  # last: the hostile ends up a prisoner
 	await _test_loot_window()
 	await _test_grenade_equip()
+	await _test_enemy_tags()
 	GameState.delete_save()
 	print("INTERACTION TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
@@ -654,6 +655,39 @@ func _place_player() -> void:
 	player.rotation = Vector3.ZERO
 	player.head.rotation = Vector3.ZERO
 	player.velocity = Vector3.ZERO
+
+
+## Tagging an enemy by radio (EnemyTags; Captain, 2026-10-16, GR Wildlands style): a mark over
+## him for every player and on the map, the squad told; no radio, no tag; gone once he's down.
+func _test_enemy_tags() -> void:
+	print("Enemy tags")
+	var tags := EnemyTags.of(level)
+	check(tags != null, "every level has the radio net for tags")
+	if tags == null:
+		return
+	var foe := _spawn_ai("TagFoe", &"hostile", player.global_position + Vector3(0, 0, -20), ["m4a1"])
+	await _frames(3)
+	while player.inventory.count_of(&"radio") > 0 and player.inventory.remove_one(&"radio"):
+		pass
+	check(tags.server_tag(player, foe).contains("radio"), "no radio: nobody hears it")
+	player.inventory.take(&"radio")
+	var why := tags.server_tag(player, foe)
+	await _frames(2)
+	check(why == "Tagged" and tags.is_tagged("TagFoe") and tags.tags.has("TagFoe") and foe.get_node_or_null(^"TagMark") is Label3D,
+		"with a radio: tagged, and a mark over him for everyone (%s)" % why)
+	check(tags.map_points().size() == 1 and (tags.map_points()[0] as Vector2).distance_to(Vector2(foe.global_position.x, foe.global_position.z)) < 0.5, "and on the map")
+	var far := _spawn_ai("TagFar", &"hostile", player.global_position + Vector3(0, 0, -EnemyTags.TAG_RANGE_M - 50.0), ["m4a1"])
+	await _frames(2)
+	far.global_position = player.global_position + Vector3(0, 0, -EnemyTags.TAG_RANGE_M - 50.0)  # (the spawn keeps to the map)
+	await _seconds(EnemyTags.COOLDOWN_S + 0.1)
+	var far_why := tags.server_tag(player, far)
+	check(far_why != "" and not far_why.begins_with("Tag") and not tags.is_tagged("TagFar"),
+		"one he can't make out (out of sight, or past %d m): no tag (%s, %.0f m)" % [int(EnemyTags.TAG_RANGE_M), far_why, far.global_position.distance_to(player.global_position)])
+	foe.vitals.server_damage(1000.0)
+	await _seconds(0.7)
+	check(not tags.is_tagged("TagFoe") and foe.get_node_or_null(^"TagMark") == null, "down, his tag goes")
+	foe.queue_free()
+	far.queue_free()
 
 
 func _spawn_ai(callsign: String, faction: StringName, pos: Vector3, loadout: Array) -> Soldier:

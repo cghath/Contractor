@@ -283,6 +283,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			equip_nade()
 	elif event.is_action_pressed(&"nvg_toggle"):
 		body._server_toggle_nvg.rpc_id(1)  # the helmet's NVG down or up (wave 7, S2; Nvg)
+	elif event.is_action_pressed(&"tag_enemy"):
+		_tag_enemy()
 	elif event.is_action_pressed(&"reload"):
 		_try_reload()
 	elif event.is_action_pressed(&"quick_treat"):  # before H: H alone also matches with Shift held
@@ -546,6 +548,26 @@ func _hide_shouldered() -> void:
 
 
 ## Where the crosshair meets the world (up to 150 m), or null.
+## Tags the enemy under the crosshair for the squad (EnemyTags; the host checks the radio, the
+## range and that he can be seen).
+func _tag_enemy() -> void:
+	var from := body.camera.global_position
+	var exclude: Array[RID] = [body.get_rid()]
+	for child in body.get_children():
+		if child is Area3D:
+			exclude.append(child.get_rid())
+	var q := PhysicsRayQueryParameters3D.create(from, from - body.camera.global_basis.z * EnemyTags.TAG_RANGE_M, 0xFFFFFFFF, exclude)
+	q.collide_with_areas = true
+	var hit := body.get_world_3d().direct_space_state.intersect_ray(q)
+	var node: Node = hit.get("collider") if not hit.is_empty() else null
+	while node and not node is Soldier:
+		node = node.get_parent()
+	if node == null:
+		hud.flash("Look at an enemy to tag him")
+		return
+	body._server_tag_enemy.rpc_id(1, (node as Soldier).name)
+
+
 func crosshair_ground() -> Variant:
 	var from := body.camera.global_position
 	var hit := body.get_world_3d().direct_space_state.intersect_ray(

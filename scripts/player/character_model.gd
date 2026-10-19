@@ -143,6 +143,11 @@ const EQUIP := &"equip"
 const LOOT := &"loot"
 const TREAT := &"treat"
 const PICK_UP_S := 0.6
+## Keying the radio (EnemyTags: a tag passed on): the left hand up to the radio on the carrier's
+## left front for the clip, the right staying on the weapon.
+const RADIO := &"radio"
+const RADIO_S := 1.0
+const RADIO_AT := Vector3(-0.12, 0.38, -0.22)
 const EQUIP_S := 0.8
 const LOOT_S := 1.0
 const LOOT_ALL_S := 1.6
@@ -1971,6 +1976,9 @@ func _action_goals(held: Array) -> Array:
 				return [["stow", to], ["work", at - spread]]
 		TREAT:
 			return _treat_goals(StringName(action_net.get("tech", WORK)), at, t, s)
+		RADIO:
+			if t < s * 0.85:
+				return [held[0], ["radio", RADIO_AT]]
 		MECH_RELEASE:
 			if t < s * 0.75:
 				return [["release", at], held[1]]  # the manual release on its back

@@ -360,6 +360,7 @@ func _ready() -> void:
 	AavSupport.install(self)  # wave 5b (V4): the LHD or FOB origin, the AAV support, the motor pool
 	Digging.of(self)  # every peer: dug berms come to it (Digging)
 	AlliedTroops.install(self)  # wave 6e: an allied rifle element through the support menu
+	EnemyTags.install(self)  # tagging enemies for the squad by radio (Captain, 2026-10-16)
 	add_child(GroundGuard.new())  # "GroundGuard": puts back on the ground anything lost below or past it
 	add_child(DayNight.new())  # "DayNight": time of day and weather, after _build_environment's lights (wave 7 S1)
 

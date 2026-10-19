@@ -978,6 +978,19 @@ func server_squad_command(cmd: String, point: Vector3, names: PackedStringArray)
 	_squad_command_as(squad, cmd, point, names)
 
 
+## A player tags the enemy named `target_name` (PlayerInput, the Tag key; EnemyTags).
+@rpc("any_peer", "call_local", "reliable")
+func _server_tag_enemy(target_name: String) -> void:
+	if not multiplayer.is_server() or multiplayer.get_remote_sender_id() not in [0, owner_peer()] or not vitals.is_up():
+		return
+	var tags := EnemyTags.of(self)
+	var lvl := CompoundLevel.current(self)
+	var target := lvl.ai.get_node_or_null(NodePath(target_name)) as Soldier if lvl else null
+	var why := tags.server_tag(self, target) if tags else "No radio net here"
+	if why != "":
+		_client_message.rpc_id(owner_peer(), why)
+
+
 func _squad_command_as(squad: Squad, cmd: String, point: Vector3, names: PackedStringArray) -> void:
 	var ordered_why := squad.order_command(self, cmd, point, names)  # the command menu's orders (queue 12)
 	if ordered_why != "?":
