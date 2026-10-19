@@ -402,7 +402,7 @@ func missing_at(point: Dictionary) -> PackedStringArray:
 ## The first point with the whole squad inside (a foot point first), or {}.
 func point_with_squad() -> Dictionary:
 	var found := {}
-	for point: Dictionary in shown_points():
+	for point: Dictionary in _pickable_points():
 		if missing_at(point).is_empty():
 			if point.get("foot", true):
 				return point
@@ -653,7 +653,7 @@ func _point_for_call() -> Dictionary:
 	var need := required()
 	var best := {}
 	var best_n := 0
-	for point: Dictionary in shown_points():
+	for point: Dictionary in _pickable_points():
 		var n := 0
 		for s: Soldier in need.players + need.ai:
 			n += 1 if inside(point, s.body_point()) else 0
@@ -1023,10 +1023,19 @@ func server_set_heli_point(id: int) -> void:
 	_broadcast()
 
 
+## The points a call can pick by itself (point_with_squad, _point_for_call, _nearest_point): never
+## a crossing (LZ-2: crossing into another zone is something a player standing in it confirms;
+## the CI base run's host call fell back to the nearest point, a crossing, and walked the squad
+## on instead of out), unless there are only crossings.
+func _pickable_points() -> Array:
+	var out := shown_points().filter(func(p: Dictionary) -> bool: return String(p.get("source", "")) != "crossing")
+	return out if not out.is_empty() else shown_points()
+
+
 func _nearest_point() -> Dictionary:
 	var me := MapNodes.players(self)
 	var from := Vector2(me[0].global_position.x, me[0].global_position.z) if not me.is_empty() else Vector2.ZERO
-	var shown := shown_points()
+	var shown := _pickable_points()
 	var best: Dictionary = shown[0]
 	for p: Dictionary in shown:
 		if from.distance_to(p.pos) < from.distance_to(best.pos):
