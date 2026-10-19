@@ -61,6 +61,7 @@ func _ready() -> void:
 	await _test_loot_window()
 	await _test_grenade_equip()
 	await _test_enemy_tags()
+	await _test_tutorial()
 	GameState.delete_save()
 	print("INTERACTION TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
@@ -688,6 +689,51 @@ func _test_enemy_tags() -> void:
 	check(not tags.is_tagged("TagFoe") and foe.get_node_or_null(^"TagMark") == null, "down, his tag goes")
 	foe.queue_free()
 	far.queue_free()
+
+
+## The tutorial (TutorialGuide; Captain, 2026-10-14): the kit and the target, steps ticking off
+## on what the player does, Page Down skipping, the end.
+func _test_tutorial() -> void:
+	print("Tutorial")
+	var g := TutorialGuide.start(level)
+	await _frames(4)
+	var target := level.ai.get_node_or_null(NodePath(TutorialGuide.TARGET)) as Soldier
+	check(g != null and target != null and target.faction == &"hostile" and player.inventory.count_of(&"radio") > 0 and player.inventory.count_of(&"frag_grenade") > 0,
+		"it hands out a radio and grenades, and stands a target across the yard")
+	if g == null:
+		return
+	check(g.step == 0 and g._keys.text.contains("W"), "step 1 shows the keys as bound (%s)" % g._keys.text)
+	player.global_position += Vector3(TutorialGuide.MOVE_M + 1.0, 0, 0)
+	await _seconds(0.5)
+	check(g.step == 1 and g.done == 1, "walking a few metres ticks it off")
+	var sprint := InputEventAction.new()
+	sprint.action = &"sprint"
+	sprint.pressed = true
+	g._input(sprint)
+	check(g.step == 2 and g.done == 2, "pressing the step's key ticks it off")
+	var skip := InputEventKey.new()
+	skip.physical_keycode = TutorialGuide.SKIP_KEY
+	skip.pressed = true
+	g._input(skip)
+	check(g.step == 3 and g.done == 2, "Page Down skips a step without counting it")
+	var tag_step := -1
+	for i in TutorialGuide.STEPS.size():
+		if String((TutorialGuide.STEPS[i] as Dictionary).get("check", "")) == "_tagged":
+			tag_step = i
+	g.step = tag_step
+	g._show()
+	var tags := EnemyTags.of(level)
+	if tags and target:
+		tags._until[TutorialGuide.TARGET] = Soldier._now() + 30.0  # (tagged: EnemyTags' own checks are their test's)
+		tags._send()
+	await _seconds(0.5)
+	check(g.step == tag_step + 1, "tagging the target ticks off the tag step")
+	g.step = TutorialGuide.STEPS.size()
+	g._show()
+	check(g._title.text.begins_with("Tutorial: done"), "and the end says what to do next")
+	g.queue_free()
+	if target:
+		target.queue_free()
 
 
 func _spawn_ai(callsign: String, faction: StringName, pos: Vector3, loadout: Array) -> Soldier:

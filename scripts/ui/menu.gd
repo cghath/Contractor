@@ -65,6 +65,7 @@ func _ready() -> void:
 	you.add_child(ControlOptions.get_out_toggle())  # the get-out key (an option, saved)
 	you.add_child(_button("Settings", func() -> void: settings_menu.open()))
 	var play := UiKit.section("Play", left)
+	play.add_child(_button("Tutorial (new here? start with this)", host_tutorial))
 	play.add_child(_button("Play (host a session)", _plain_host))
 	play.add_child(_hint("Solo play is a session nobody else has joined."))
 	play.add_child(_button("Play the test contract (briefing, extraction)", host_with_briefing))
@@ -107,6 +108,22 @@ func host() -> void:
 		_status.text = "Port %d is busy: is another copy of the game already hosting? Join it instead." % Net.port()
 	else:
 		_status.text = "Could not host on port %d (%s)." % [Net.port(), error_string(err)]
+
+
+const TUTORIAL_ZONE := "tutorial"
+const PLAIN_ZONE := "compound_01"  # (GameState's own default: the plain session's compound)
+
+
+## The tutorial (TutorialGuide): a solo session on the compound, under a save of its own
+## ("tutorial", fresh each time) so the plain session's compound is untouched.
+func host_tutorial() -> void:
+	BaseHub.cancel_session()
+	_clean_test_session()
+	GameState.zone_id = TUTORIAL_ZONE
+	GameState.delete_save()
+	host()
+	if Net.is_hosting():
+		get_tree().create_timer(1.0).timeout.connect(func() -> void: TutorialGuide.start(self))
 
 
 ## Hosts the compound as a stand-in contract (W13 test path): the briefing on the map, then
@@ -214,6 +231,8 @@ func _on_join_failed() -> void:
 func _plain_host() -> void:
 	BaseHub.cancel_session()  # never a leftover campaign
 	_clean_test_session()
+	if GameState.zone_id == TUTORIAL_ZONE:
+		GameState.zone_id = PLAIN_ZONE  # (back from the tutorial: the plain session's own compound)
 	host()
 
 
