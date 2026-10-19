@@ -19,9 +19,12 @@ extends Vehicle
 ##   the flare, and settles.
 ## - LANDING: straight down over a spot, slowing for the touchdown; LANDED: on the ground,
 ##   held still (frozen) with the rotors turning, until server_take_off.
-## - CRASHING: a rotor, engine or crew kill (or a fire) in the air: no lift, spinning, falling.
-##   On impact everyone aboard dies and the cargo is lost (Captain: a support is lost with its
-##   passengers and cargo), and it burns into a wreck (Vehicle's fire).
+## - CRASHING: a rotor, engine or crew kill (or a fire) in the air: it autorotates down, spinning,
+##   sinking no faster than AUTOROTATE_SINK_MS. A crash landing (Captain, 2026-10-18: "the crash
+##   landing infil, which just happens if your heli gets shot with an RPG"; it used to kill
+##   everyone aboard): on impact everyone aboard is thrown out hurt (a fall of CRASH_FALL_M
+##   metres each, a CRASH_HARD_SHARE of them a hard one of CRASH_HARD_FALL_M), the cargo stays
+##   in the wreck, and it catches fire CRASH_FIRE_DELAY_S later (time to drag the hurt clear).
 ## Gravity is off while it flies under power and on when it's parked or falling.
 ##
 ## Every peer: the rotors turn at net_flight's rpm (VehicleArt.spin_rotors). Replicated
@@ -127,6 +130,17 @@ const SPOOL_S := 5.0
 ## ground is the crash.
 const CRASH_SPIN_RAD_S := 2.2
 const CRASH_FAST_MS := 4.0
+## The crash landing (Proposed): sinking no faster than this (autorotation) with the tail rotor
+## gone the spin stays, with it working only AUTOROTATE_SPIN_SHARE of it; forward speed bleeds
+## off at AUTOROTATE_SLOW a second.
+const AUTOROTATE_SINK_MS := 9.0
+const AUTOROTATE_SPIN_SHARE := 0.35
+const AUTOROTATE_SLOW := 0.35
+const CRASH_FALL_M := Vector2(3.0, 6.0)
+const CRASH_HARD_SHARE := 0.12
+const CRASH_HARD_FALL_M := 10.0
+const CRASH_FIRE_DELAY_S := 25.0
+const CRASH_THROW_M := 3.5
 ## Hit zones whose loss brings it down (with the hull: Vehicle destroys it at 0).
 const FATAL_ZONES: Array[StringName] = [Vehicle.ZONE_ROTOR, Vehicle.ZONE_ENGINE, Vehicle.ZONE_CREW]
 
@@ -1108,7 +1122,13 @@ func _touch_down() -> void:
 
 func _fall(delta: float) -> void:
 	gravity_scale = 1.0
-	angular_velocity = angular_velocity.lerp(Vector3.UP * CRASH_SPIN_RAD_S * _spin_sign + global_basis.x * 0.3, minf(delta * 2.0, 1.0))
+	var spin := CRASH_SPIN_RAD_S * (1.0 if zone_health(Vehicle.ZONE_ROTOR) <= 0.0 else AUTOROTATE_SPIN_SHARE)
+	angular_velocity = angular_velocity.lerp(Vector3.UP * spin * _spin_sign + global_basis.x * 0.15, minf(delta * 2.0, 1.0))
+	# Autorotation: the sink held to AUTOROTATE_SINK_MS, the forward speed bleeding off.
+	var v := linear_velocity
+	v.y = maxf(v.y, -AUTOROTATE_SINK_MS * pace)
+	var flat := Vector3(v.x, 0.0, v.z) * maxf(1.0 - AUTOROTATE_SLOW * delta, 0.0)
+	linear_velocity = Vector3(flat.x, v.y, flat.z)
 	if height_agl() < 1.2 or (get_contact_count() > 0 and linear_velocity.length() < CRASH_FAST_MS * 3.0):
 		_crash()
 
@@ -1213,23 +1233,39 @@ func _go_down() -> void:
 		went_down.emit(self)
 
 
-## Hit the ground falling: everyone aboard is dead, the cargo with them, and it burns.
+## Hit the ground autorotating: a crash landing. Everyone aboard is thrown clear, hurt (a fall of
+## CRASH_FALL_M, a CRASH_HARD_SHARE of them CRASH_HARD_FALL_M), the cargo stays in the wreck, and it
+## burns CRASH_FIRE_DELAY_S later.
 func _crash() -> void:
 	mode = Mode.CRASHED
 	gravity_scale = 1.0
 	angular_velocity *= 0.2
-	for s: Soldier in occupants():
+	linear_velocity *= 0.2
+	var shooter: Node = _last_shooter if is_instance_valid(_last_shooter) else null
+	var aboard := occupants()
+	for i in aboard.size():
+		var s := aboard[i] as Soldier
+		if s == null:
+			continue
+		var a := TAU * i / maxf(aboard.size(), 1.0) + randf() * 0.4
+		var spot: Vector3 = level().call(&"ground_point", global_position + Vector3(cos(a), 0.0, sin(a)) * CRASH_THROW_M) \
+			if level() and level().has_method(&"ground_point") else global_position + Vector3(cos(a), 0.0, sin(a)) * CRASH_THROW_M
+		server_exit(s, spot)
 		if not s.vitals.is_dead():
-			Harm.note_hit(s, _last_shooter if is_instance_valid(_last_shooter) else null)
-			s.vitals.server_kill()
-	if cargo_hold:
-		cargo_hold.clear_all()
+			Harm.note_hit(s, shooter)
+			var hard := randf() < CRASH_HARD_SHARE
+			s.vitals.server_fall(CRASH_HARD_FALL_M if hard else randf_range(CRASH_FALL_M.x, CRASH_FALL_M.y))
 	for z in Vehicle.ZONES:
 		_zones[z] = minf(float(_zones[z]), 0.1)
-	server_start_fire()
+	var tree := get_tree()
+	if tree:
+		tree.create_timer(CRASH_FIRE_DELAY_S).timeout.connect(func() -> void:
+			if is_instance_valid(self) and is_inside_tree():
+				server_start_fire())
 	_publish_flight()
 	_publish_state(true)
 	crashed.emit(self)
+	print("[heli] %s crash-lands at (%.0f, %.0f): %d aboard thrown clear" % [name, global_position.x, global_position.z, aboard.size()])
 
 
 # --- Replication and saving ----------------------------------------------------------------------

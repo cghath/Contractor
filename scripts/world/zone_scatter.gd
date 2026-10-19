@@ -41,7 +41,8 @@ const CAP_THICKETS := 11000  # sprawling woods take more (2026-10-17; was 8000):
 ## keep their 3000 trees, round 4's 0.6 of 5000; copses get the most of the rest).
 const WOODS_SHARE := 0.5
 const COPSES_SHARE := 0.8
-## Most items with collision (large rocks and trees) in a zone.
+## Most items with collision in a zone, rocks and props (trees are always solid since 2026-10-18:
+## the Captain's "hitboxes of trees", some trunks past the cap were walk- and shoot-through).
 const CAP_SOLID := 9800  # (was 6800, then 8800; the extra trees)
 ## Man-made clutter (Captain, 2026-10-16: "the terrains need more objects too"): crates and
 ## debris, sparser than rocks/scrub and only near a road or a pad ("props_near_m"), not out in
@@ -129,7 +130,7 @@ const FAR_GROUP_M := 24.0
 ## 8: ruins and wrecks off the roads, and the VALUABLE placement kind (Captain, 2026-10-16).
 ## 9: sprawling woods (WOOD_SPRAWL, thinning edges, outlier copses) (Captain, 2026-10-17).
 ## 10: scrub belts out in the open (_scrub_belts) (Captain, 2026-10-18).
-const LAYOUT_VERSION := 10
+const LAYOUT_VERSION := 11  # 11: every tree solid (2026-10-18), old caches re-roll
 ## Zones kept in memory (layouts), the newest of them also keep their built cell meshes, and
 ## files kept in the disk cache.
 const CACHE_ZONES := 4
@@ -759,7 +760,7 @@ func _try_tree(rng: RandomNumberGenerator, x: float, z: float, lo: float, hi: fl
 	if _terrain.normal_at(x, z).y < TREE_UP:
 		return false
 	_add({"kind": Kind.TREE, "pos": Vector3(x, h, z), "yaw": yaw, "size": Vector3(s, s, s),
-		"colour": _crowns[int(tint * _crowns.size()) % _crowns.size()], "solid": solid_count < _cap_solid})
+		"colour": _crowns[int(tint * _crowns.size()) % _crowns.size()], "solid": true})  # every trunk blocks (Captain, 2026-10-18: tree hitboxes; past the solid cap some didn't)
 	var g := Vector2i(floori(x / TREE_GAP_M), floori(z / TREE_GAP_M))
 	if not _tree_grid.has(g):
 		_tree_grid[g] = []
@@ -1160,11 +1161,19 @@ func _cell_off_line(cx: int, cz: int, a: Vector2, b: Vector2) -> bool:
 func _solid_half(item: Dictionary) -> Vector3:
 	var s: Vector3 = item.size
 	if item.kind == Kind.TREE:
-		return Vector3(0.3 * s.x, 1.5 * s.y, 0.3 * s.x)
+		return Vector3(TRUNK_HALF * s.x, TRUNK_TALL * 0.5 * s.y, TRUNK_HALF * s.x)
 	return Vector3(maxf(s.x, s.z) * 0.5, s.y * 0.5, maxf(s.x, s.z) * 0.5)
 
 
 # --- Collision -------------------------------------------------------------------------------
+
+## A tree's collision is its drawn trunk (_trunk_mesh: 2.6 tall, 0.38 wide at the foot and 0.28 at
+## the top, x the tree's size): a cylinder TRUNK_HALF round and TRUNK_TALL high. It was 0.3 round
+## and 3.0 high, half again as wide as the trunk drawn (Captain, 2026-10-18: "the hitboxes of
+## trees": stopped by, and shots stopping on, the air beside a trunk).
+const TRUNK_HALF := 0.17
+const TRUNK_TALL := 2.6
+
 
 ## One static body per cell holding every solid item's shape in it (large rocks and trunks).
 func build_collision() -> void:
@@ -1184,10 +1193,10 @@ func build_collision() -> void:
 			var s: Vector3 = item.size
 			if item.kind == Kind.TREE:
 				var cylinder := CylinderShape3D.new()
-				cylinder.radius = 0.3 * s.x
-				cylinder.height = 3.0 * s.y
+				cylinder.radius = TRUNK_HALF * s.x
+				cylinder.height = TRUNK_TALL * s.y
 				shape.shape = cylinder
-				shape.position = (item.pos as Vector3) + Vector3(0, 1.5 * s.y, 0)
+				shape.position = (item.pos as Vector3) + Vector3(0, TRUNK_TALL * 0.5 * s.y, 0)
 			else:
 				var box := BoxShape3D.new()
 				box.size = Vector3(s.x * 0.9, s.y, s.z * 0.9)

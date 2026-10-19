@@ -1213,9 +1213,13 @@ func _test_shot_down() -> void:
 			"direction": -h.global_basis.y, "probe_m": 3.0, "shooter": null})
 	check(h.is_down() and h.zone_health(Vehicle.ZONE_ROTOR) <= 0.0, "a rocket kills the rotor: it goes down")
 	await _wait_for(func() -> bool: return h.flight_mode() == Helicopter.Mode.CRASHED, 40.0)
-	check(h.flight_mode() == Helicopter.Mode.CRASHED and h.is_burning() and h.height_agl() < 3.0, "it crashes and burns")
-	check(mates.all(func(m: Soldier) -> bool: return m.vitals.is_dead()) and h.cargo_hold.entries().is_empty(),
-		"everyone aboard is dead and the cargo lost (Captain) (%s)" % _mates_state(h))
+	check(h.flight_mode() == Helicopter.Mode.CRASHED and h.height_agl() < 3.0, "it crash-lands")
+	# Captain, 2026-10-18 (the crash-landing infil): survivable. Everyone aboard thrown clear, hurt,
+	# most of them alive; the cargo stays in the wreck; the fire comes CRASH_FIRE_DELAY_S later.
+	var alive := mates.filter(func(m: Soldier) -> bool: return not m.vitals.is_dead()).size()
+	check(mates.all(func(m: Soldier) -> bool: return Vehicle.ride_of(m) == null and m.vitals.injury() > 0.0) and alive * 2 >= mates.size()
+		and not h.cargo_hold.entries().is_empty() and not h.is_burning(),
+		"a crash landing: everyone thrown clear and hurt, %d of %d alive, the cargo in the wreck, no fire yet (%s)" % [alive, mates.size(), _mates_state(h)])
 	check(sup.is_lost("transport") and sup.heard_line("Mayday"), "the transport is lost: mayday")
 	var why := _call("support:transport:here", _ground(HOME + Vector3(0, 0, -60)))
 	check(why.contains("lost"), "and gone for the rest of the op (%s)" % why)
