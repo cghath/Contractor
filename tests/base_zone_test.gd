@@ -429,16 +429,18 @@ func _test_fly_on(zone: ZoneLevel) -> ZoneLevel:
 	me = there.players.get_node_or_null(^"1") as Soldier
 	var aboard := await _wait_until(func() -> bool: return me != null and Vehicle.ride_of(me) is Helicopter, 25.0)  # (CI runs slower)
 	check(aboard, "flown in aboard a helicopter to its insertion LZ")
-	HeliSupports.of(there).server_dismiss_all()  # (the test walks on from here: everyone out, on the ground)
+	var down_to_earth := func() -> void:
+		HeliSupports.of(there).server_dismiss_all()  # (the test walks on from here: everyone out, on the ground)
+		if me:
+			me.global_position = there.ground_point(me.global_position)  # (at once: not a fall from the air)
+			me.velocity = Vector3.ZERO
+		for n: Node in there.ai.get_children():
+			var s := n as Soldier
+			if s and s.has_meta(&"roster_id"):
+				s.global_position = there.ground_point(s.global_position)
+	down_to_earth.call()
 	await get_tree().create_timer(1.5).timeout
-	HeliSupports.of(there).server_dismiss_all()  # (one launched late doesn't board him after all)
-	await get_tree().create_timer(0.5).timeout
-	if me:
-		me.global_position = there.ground_point(me.global_position)
-	for n: Node in there.ai.get_children():
-		var s := n as Soldier
-		if s and s.has_meta(&"roster_id"):
-			s.global_position = there.ground_point(s.global_position)
+	down_to_earth.call()  # (one launched late doesn't board him after all)
 	await get_tree().physics_frame
 	return there
 
