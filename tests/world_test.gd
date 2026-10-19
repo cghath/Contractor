@@ -26,7 +26,10 @@ const SHED_WALL := Vector3(17.05, 1.35, -7.05)
 ## A breach blown in the shed's south wall, and a spot of that wall left standing.
 const SHED_BREACH := Vector3(17.9, 1.2, -10.95)
 const SHED_INTACT := Vector3(16.6, 1.2, -10.95)
-const LIVE_MARK := Vector3(0.0, 1.2, 19.7)
+const LIVE_MARK := Vector3(8.0, 1.2, 29.4)  # the zone compound's south wall, inside (ZoneModules._compound: 60 x 60 m, 0.6 m mud brick)
+## Dig phase 2: a crater on open ground this far from the first insertion point (host), and a
+## berm next to it; the late joiner checks it gets both.
+const CRATER_FROM_INSERTION := Vector3(18, 0, 14)
 
 var failures := 0
 var level: ZoneLevel
@@ -95,6 +98,7 @@ func _run_host(wait_for_client: bool) -> void:
 	await _test_frag_and_body()
 	await _test_ai_path()
 	await _test_ground_guard()
+	await _test_craters()
 	await _test_reload()
 	_test_budget(mem_before)
 	if not wait_for_client:
@@ -153,8 +157,8 @@ func _test_generation(mem_before: float) -> void:
 		worst = maxf(worst, absf(hit.get("position", Vector3.INF).y - t.height_at(x, z)) if not hit.is_empty() else INF)
 	check(worst < 0.01, "the ground's collision matches its heights (worst %.4f m)" % worst)
 	check(not level.get_module("compound").is_streamed(), "modules far from the player start streamed out, as proxies")
-	var proxy_hit := space.intersect_ray(PhysicsRayQueryParameters3D.create(Vector3(8, 1.3, 30) + _origin("compound"), Vector3(8, 1.3, -30) + _origin("compound"), 1))
-	check(not proxy_hit.is_empty() and absf(proxy_hit.position.z - _origin("compound").z - 20.0) < 0.2,
+	var proxy_hit := space.intersect_ray(PhysicsRayQueryParameters3D.create(Vector3(8, 1.3, 40) + _origin("compound"), Vector3(8, 1.3, -40) + _origin("compound"), 1))
+	check(not proxy_hit.is_empty() and absf(proxy_hit.position.z - _origin("compound").z - 30.0) < 0.2,
 		"a streamed-out module's proxy still stops sight lines and rounds at its walls")
 
 
@@ -421,7 +425,7 @@ func _test_ai_path() -> void:
 	var end := path[path.size() - 1] if not path.is_empty() else Vector3.INF
 	check(not path.is_empty() and Vector2(end.x - target.x, end.z - target.z).length() < 0.6,
 		"a path from the hillside to the building's floor (%d points, ends %.2f m from it)" % [path.size(), Vector2(end.x - target.x, end.z - target.z).length() if not path.is_empty() else INF])
-	var gate := m.to_global(Vector3(0, 0, 20))
+	var gate := m.to_global(Vector3(0, 0, 30))
 	var via_gate := false
 	for p in path:
 		via_gate = via_gate or Vector2(p.x - gate.x, p.z - gate.z).length() < 2.5
@@ -495,6 +499,68 @@ func _test_ground_guard() -> void:
 
 
 ## Saved, then hosted again from the save: module edits and bodies come back.
+## Dig phase 2 (GroundCuts): a blast on open ground leaves a crater with real depth: the height
+## lookups and the collision follow the bowl, the coarse ground has a hole there, the lip stands
+## above the old ground, and a blast high in the air cuts nothing.
+func _test_craters() -> void:
+	print("Craters")
+	var t := level.terrain
+	var at := level.insertion_points()[0] + CRATER_FROM_INSERTION
+	var was := t.height_at(at.x, at.z)
+	var dig := Digging.of(level)
+	var post := level.get_module("outpost_n")
+	var dug_posts := dig.cut_ops.filter(func(op: Dictionary) -> bool:
+		return op.kind == "pit" and Vector2(float(op.x) - post.global_position.x, float(op.z) - post.global_position.z).length() < 40.0)
+	check(dug_posts.size() >= 2 and dig.records.size() >= dug_posts.size(),
+		"the enemy's outpost starts dug in (%d pits, %d berms in the zone)" % [dug_posts.size(), dig.records.size()])
+	var before := dig.cut_ops.size()
+	level.server_blast(Vector3(at.x, was + 0.1, at.z), 1.6)
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	var now := t.height_at(at.x, at.z)
+	check(dig.cut_ops.size() == before + 1 and now < was - 0.4,
+		"a charge on open ground leaves a crater (%.2f m deep)" % (was - now))
+	var q := PhysicsRayQueryParameters3D.create(Vector3(at.x, was + 10.0, at.z), Vector3(at.x, was - 10.0, at.z))
+	var hit := level.get_world_3d().direct_space_state.intersect_ray(q)
+	check(not hit.is_empty() and absf(float(hit.position.y) - now) < 0.05,
+		"the collision follows the bowl (hit at %s, ground %.2f)" % [hit.get("position", "nothing"), now])
+	var r := 1.6 * GroundCuts.CRATER_SCALE
+	var lip := Vector3(at.x + r * 1.3, 0, at.z)
+	check(t.height_at(lip.x, lip.z) > t.plane_height(lip.x, lip.z) + 0.02, "with a lip of earth thrown up round it")
+	var far := Vector3(at.x + 40.0, 0, at.z)
+	check(is_equal_approx(t.height_at(far.x, far.z), t.plane_height(far.x, far.z)), "and the ground away from it untouched")
+	var high := Vector3(at.x - 30.0, 0, at.z)
+	level.server_blast(Vector3(high.x, t.height_at(high.x, high.z) + 12.0, high.z), 1.6)
+	check(dig.cut_ops.size() == before + 1, "an air burst 12 m up cuts nothing")
+	var berms := dig.records.size()
+	dig.server_add(level.ground_point(at + Vector3(-6, 0, 0)), 0.0)
+	check(dig.records.size() == berms + 1, "and a berm next to it (for the reload and the late joiner)")
+	# Dig phase 4: a squadmate told to hold a spot digs in there once he's been there a while.
+	var spot := level.ground_point(at + Vector3(10, 0, -8))
+	var digger := level.spawn_soldier({"name": "Digger", "faction": "friendly", "variant": "multicam", "pos": spot,
+		"combat": 0.5, "discipline": 0.5, "guard": false, "loadout": ["m4a1", "mag_556"]})
+	await get_tree().create_timer(0.5).timeout
+	level.squad_for(&"friendly").give_order(player, Squad.Order.HOLD, spot, PackedStringArray(["Digger"]))
+	var ai := SquadAI.of(digger)
+	await _wait_for(func() -> bool: return ai._held_since >= 0.0, 5.0)
+	ai._held_since -= SquadAI.DIG_IN_AFTER_S
+	await _wait_for(func() -> bool: return dig.digging(digger), 3.0)
+	check(dig.digging(digger), "a squadmate holding a spot digs in there (%s)" % ai.status_text() if ai.has_method(&"status_text") else "a squadmate holding a spot digs in there")
+	for k in 2:
+		var key := digger.get_instance_id()
+		if dig._digs.has(key):
+			dig._digs[key].started = float(dig._digs[key].started) - Digging.DIG_S  # (skip the 20 s)
+		await get_tree().physics_frame
+		await get_tree().physics_frame
+		ai._held_since -= SquadAI.DIG_IN_AFTER_S
+		await _wait_for(func() -> bool: return dig.digging(digger), 2.0)
+	var p := digger.global_position
+	var down := t.cuts.dug_depth(p.x, p.z) if t.cuts else 0.0
+	check(down >= SquadAI.AI_DIG_TO_M - 0.15 and not dig.digging(digger),
+		"down to kneeling depth, and no further (%.2f m)" % down)
+	digger.queue_free()
+
+
 func _test_reload() -> void:
 	print("Saving and reloading the zone")
 	GameState.save_zone()
@@ -517,6 +583,11 @@ func _test_reload() -> void:
 	check(bodies.size() == 1 and (bodies[0] as Soldier).global_position.distance_to(_body_pos) < 0.6, "the body in the shack is back where it lay")
 	check(level.items.get_node_or_null(^"village_e_ifak") == null and level.items.get_node_or_null(^"village_e_mags") != null,
 		"the IFAK taken from the village stays taken; the rest of its loot is back")
+	var crater := level.insertion_points()[0] + CRATER_FROM_INSERTION
+	var t := level.terrain
+	await get_tree().physics_frame
+	check(t.height_at(crater.x, crater.z) < t.plane_height(crater.x, crater.z) - 0.4 and Digging.of(level).records.size() >= 2,
+		"the crater and the berms are back after the reload (%d berms, %d cuts)" % [Digging.of(level).records.size(), Digging.of(level).cut_ops.size()])
 	var m := await _go_to_module("compound")
 	check(m.voxel_world.holes_through(m.to_global(SHED_WALL)) == 1 and m.voxel_world.marks_near(m.to_global(Vector3(-2.95, 1.35, -4.0)), 0.05) == 1,
 		"after the reload the compound module has its bullet holes and mark")
@@ -549,7 +620,7 @@ func _on_client_joined(id: int) -> void:
 		player.global_position = level.ground_point(m.global_position + Vector3(0, 0, 30))
 		await _wait_for(func() -> bool: return m.is_ready(), 5.0)
 		await _wait_for_collision(m)
-	m.voxel_world.server_mark(m.to_global(LIVE_MARK), Vector3.BACK, VoxelWorld.Mat.CONCRETE)
+	m.voxel_world.server_mark(m.to_global(LIVE_MARK), Vector3.BACK, VoxelWorld.Mat.MUD_BRICK)
 	print("[host] live mark for peer %d" % id)
 
 
@@ -568,7 +639,9 @@ func _digest() -> Dictionary:
 	var modules := {}
 	for m in level.modules():
 		modules[m.module_id] = [m.type, m.global_position]
-	return {"terrain": level.terrain.checksum(), "modules": modules, "map": level.map_area()}
+	var crater := level.insertion_points()[0] + CRATER_FROM_INSERTION
+	return {"terrain": level.terrain.checksum(), "modules": modules, "map": level.map_area(),
+		"crater": snappedf(level.terrain.height_at(crater.x, crater.z), 0.001), "berms": Digging.of(level).records.size()}
 
 
 # --- Client -----------------------------------------------------------------------------------
@@ -598,6 +671,10 @@ func _run_client(address: String) -> void:
 	check(_host_digest.get("terrain") == mine.terrain and _host_digest.get("map") == mine.map,
 		"the same terrain from the seed as the host's (checksum %d)" % mine.terrain)
 	check(str(_host_digest.get("modules")) == str(mine.modules), "the same modules in the same places (%d)" % (mine.modules as Dictionary).size())
+	await _wait_for(func() -> bool: return _digest().crater == _host_digest.get("crater") and _digest().berms == _host_digest.get("berms"), 5.0)
+	mine = _digest()
+	check(mine.crater == _host_digest.get("crater") and int(mine.berms) >= 1,
+		"the late joiner gets the host's crater (ground %.2f, host's %s) and berms (%d, host's %s)" % [mine.crater, _host_digest.get("crater"), mine.berms, _host_digest.get("berms")])
 	var my_name := str(multiplayer.get_unique_id())
 	await _wait_for(func() -> bool: return level.players.get_node_or_null(my_name) != null, 10.0)
 	var me := level.players.get_node_or_null(my_name) as Soldier

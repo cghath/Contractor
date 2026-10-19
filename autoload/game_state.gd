@@ -21,6 +21,9 @@ var fallen_posts: Dictionary = {}
 ## Vehicles in the zone, wrecks included (Vehicle.to_save), put back by VehicleLayer on load
 ## (wave 5). Rebuilt from the live vehicles (group "vehicles") on every save.
 var vehicles: Array = []
+## The ground as dug and blasted (Digging.to_save: {"cuts", "berms"}), put back by Digging on
+## load ({} for a zone never saved). Rebuilt from the level's Digging on every save.
+var ground: Dictionary = {}
 
 
 func post_fell(spawn_id: String) -> void:
@@ -75,6 +78,8 @@ func save_zone() -> bool:
 	for node in get_tree().get_nodes_in_group(&"vehicles"):
 		if node.has_method(&"to_save") and not node.is_queued_for_deletion():
 			vehicles.append(node.to_save())
+	var digging := get_tree().get_first_node_in_group(&"digging")
+	ground = digging.to_save() if digging and digging.has_method(&"to_save") else {}
 	var text := JSON.stringify({
 		"version": SAVE_VERSION,
 		"looted": looted.keys(),
@@ -83,6 +88,7 @@ func save_zone() -> bool:
 		"bodies": bodies,
 		"fallen_posts": fallen_posts.keys(),
 		"vehicles": vehicles,
+		"ground": ground,
 	}, "", true, true)  # full precision: item state (plate and helmet integrity) comes back exactly
 	if not write_safely(save_path(), text):
 		return false
@@ -100,6 +106,7 @@ func load_zone() -> void:
 	bodies.clear()
 	fallen_posts.clear()
 	vehicles.clear()
+	ground = {}
 	var zone := {}
 	for path: String in save_candidates(save_path()):
 		if not FileAccess.file_exists(path):
@@ -118,6 +125,7 @@ func load_zone() -> void:
 	bodies = zone.bodies
 	fallen_posts = zone.fallen_posts
 	vehicles = zone.get("vehicles", [])
+	ground = zone.get("ground", {})
 
 
 ## The previous good save, kept beside `path` by write_safely.

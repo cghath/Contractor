@@ -308,6 +308,12 @@ types and what limits the allied-troop support menu.
 Items: enemy and allied gear by region, contraband for fixers, drones and the jammer, IEDs, keys
 and story items (item catalogue plan).
 
+**Queued (Captain, 2026-10-19): the squad's AI drives the squad's vehicles.** Squadmates take
+the wheel (and the gun) of the player's ground vehicles on command: "get in and drive", "drive
+to here" on the map, follow the lead vehicle in a convoy, stop and dismount on contact, and
+come pick the players up. Builds on V1's AI drivers following a path (scripts/vehicles); the
+high command (allied elements) can use the same orders. Not started.
+
 ### Wave 7: art, world and weapons
 
 The rest of Noah's asset pack as it lands (characters, gear, weapons, environment),

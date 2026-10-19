@@ -121,6 +121,9 @@ var _visuals_built := false
 var _material: ShaderMaterial
 var _lod0 := {}  # Vector2i chunk -> its finest MeshInstance3D
 var _lod1 := {}  # Vector2i chunk -> its middle MeshInstance3D
+var _chunk_shapes := {}  # Vector2i chunk -> its HeightMapShape3D (GroundCuts blanks samples in it)
+## The cuts in the ground (craters, dug holes: GroundCuts), or null while there are none.
+var cuts: GroundCuts
 
 
 ## Builds the heights from the zone definition (ZoneDef): seed, size, relief, terrain preset
@@ -442,6 +445,13 @@ func _h(i: int, j: int) -> float:
 ## Captain, 2026-10-14: the LHD now anchors out there on a narrow sea, so the water's depth
 ## past the edge has to be the seabed's, not a dry 0.
 func height_at(x: float, z: float) -> float:
+	if cuts and cuts.cut.has(cuts.cell_of(x, z)):
+		return cuts.cut_height(x, z)
+	return plane_height(x, z)
+
+
+## The ground's height at (x, z) as generated, before any cuts (GroundCuts builds on it).
+func plane_height(x: float, z: float) -> float:
 	var gx := (x + _half) / CELL_M
 	var gz := (z + _half) / CELL_M
 	if gx < 0.0 or gz < 0.0 or gx > points - 1 or gz > points - 1:
@@ -550,6 +560,7 @@ func build_collision() -> void:
 				for i in CHUNK_CELLS + 1:
 					data[i + j * (CHUNK_CELLS + 1)] = _h(cx * CHUNK_CELLS + i, cz * CHUNK_CELLS + j)
 			shape.map_data = data
+			_chunk_shapes[Vector2i(cx, cz)] = shape
 			var node := CollisionShape3D.new()
 			node.shape = shape
 			node.scale = Vector3(CELL_M, 1.0, CELL_M)
@@ -573,6 +584,40 @@ func build_collision() -> void:
 
 
 # --- Visuals ---------------------------------------------------------------------------------
+
+## GroundCuts: blanks grid samples `samples` (Vector2i) in the coarse collision (a NaN sample
+## is a hole: the triangles touching it go), in every chunk that has them.
+func blank_samples(samples: Array[Vector2i]) -> void:
+	var edits := {}  # chunk -> PackedFloat32Array
+	for s in samples:
+		for dz in [0, -1]:
+			for dx in [0, -1]:
+				var c := Vector2i(s.x / CHUNK_CELLS + dx, s.y / CHUNK_CELLS + dz)
+				var li := s.x - c.x * CHUNK_CELLS
+				var lj := s.y - c.y * CHUNK_CELLS
+				if li < 0 or lj < 0 or li > CHUNK_CELLS or lj > CHUNK_CELLS or not _chunk_shapes.has(c):
+					continue
+				var data: PackedFloat32Array = edits[c] if edits.has(c) else (_chunk_shapes[c] as HeightMapShape3D).map_data
+				data[li + lj * (CHUNK_CELLS + 1)] = NAN
+				edits[c] = data  # a packed array is a value: put the changed one back
+	for c: Vector2i in edits:
+		(_chunk_shapes[c] as HeightMapShape3D).map_data = edits[c]
+
+
+## GroundCuts: rebuilds chunk `c`'s finest mesh (if built) without the cells drawn fine.
+func rebuild_fine_chunk(c: Vector2i) -> void:
+	if _lod0.has(c):
+		(_lod0[c] as MeshInstance3D).mesh = _chunk_mesh(c.x, c.y, LOD_STEPS[0], SKIRT_M[0])
+
+
+## A grid vertex's colour and normal, as the coarse mesh has them (GroundCuts matches them).
+func vertex_colour(i: int, j: int) -> Color:
+	return _ground_colour(i, j, vertex_normal(i, j))
+
+
+func vertex_normal(i: int, j: int) -> Vector3:
+	return Vector3(_h(i - 1, j) - _h(i + 1, j), 2.0 * CELL_M, _h(i, j - 1) - _h(i, j + 1)).normalized()
+
 
 ## The ground's mesh: every chunk at the two coarse levels of detail, and the apron. The
 ## finest level is built as the camera comes near (LOD0_BUILD_M, LOD0_PER_FRAME a frame):
@@ -678,6 +723,8 @@ func _chunk_mesh(cx: int, cz: int, step: int, skirt: float) -> ArrayMesh:
 			_add_vertex(verts, normals, colours, i0 + a * step, j0 + b * step, 0.0)
 	for b in n:
 		for a in n:
+			if step == 1 and cuts and cuts.covers(Vector2i(i0 + a, j0 + b)):
+				continue  # drawn fine (GroundCuts)
 			var p := a + b * (n + 1)
 			indices.append_array([p, p + 1, p + n + 1, p + 1, p + n + 2, p + n + 1])  # clockwise from above
 	# Skirts: each edge's vertices again, lowered, joined to the edge.
@@ -714,7 +761,7 @@ func _chunk_mesh(cx: int, cz: int, step: int, skirt: float) -> ArrayMesh:
 func _add_vertex(verts: PackedVector3Array, normals: PackedVector3Array, colours: PackedColorArray, i: int, j: int, drop: float) -> void:
 	var v := _vertex(i, j)
 	verts.append(v - Vector3(0, drop, 0))
-	var n := Vector3(_h(i - 1, j) - _h(i + 1, j), 2.0 * CELL_M, _h(i, j - 1) - _h(i, j + 1)).normalized()
+	var n := vertex_normal(i, j)
 	normals.append(n)
 	colours.append(_ground_colour(i, j, n))
 

@@ -183,6 +183,11 @@ const SUPPRESSED := 0.5
 const PINNED := 0.85
 const HYSTERESIS := 0.1
 const ARRIVE := 0.7
+## Digging in (dig phase 4, Captain 2026-10-19: "AI dig in"): a friendly soldier holding a spot,
+## out of contact, for DIG_IN_AFTER_S digs a hole there (Digging), down to AI_DIG_TO_M (the
+## kneeling stage), facing where the threat last came from. Contact stops it. Proposed.
+const DIG_IN_AFTER_S := 12.0
+const AI_DIG_TO_M := 0.9
 const RUN_DISTANCE := 5.0
 const WAYPOINT_REACH := 0.45
 ## Points more than this above or below a unit are on another floor (F-01): distances to them
@@ -612,6 +617,7 @@ var _drag_moved_at := 0.0
 var _drag_contact_at := 0.0
 var _has_cover := false
 var _hold_point := Vector3.ZERO
+var _held_since := -1.0  # when he got to _hold_point (Soldier._now()), -1 while away from it
 var _move_point := Vector3.ZERO
 ## Where a casualty carried under a move order is laid down (null until worked out).
 var _lay_spot: Variant = null
@@ -1056,7 +1062,9 @@ func status_text() -> String:
 				return "Treating self"
 			return "Being treated" if _being_treated() else "Patching up"
 		Intent.HOLD:
-			return "Holding"
+			var level := CompoundLevel.current(body)
+			var d := level.get_node_or_null(Digging.NODE_NAME) as Digging if level else null
+			return "Digging in" if d and d.digging(body) else "Holding"
 		Intent.ESCORT:
 			return ("Going after %s" if _react_at >= 0.0 else "Escorting %s") % _name_of(escorting)
 		Intent.MOVE_TO:
@@ -1219,9 +1227,11 @@ func _act() -> void:
 					_face(body.global_position + _outward(spot))  # halted: watch out from the lead
 		Intent.HOLD:
 			if fighting():
+				_stop_digging()
 				_fight(_hold_point, 4.0)
 			else:
 				_go(_hold_point, false)
+				_dig_in()
 		Intent.MOVE_TO:
 			_go(_move_point, true)
 			if body.global_position.distance_to(_move_point) <= ARRIVE + 0.5:
@@ -4381,6 +4391,43 @@ func _lies_at(spot: Vector3) -> bool:
 
 ## Flat distance to `point` (the baked navmesh sits a little above the ground, so 3D distances
 ## never quite close), or the 3D distance when it's on another floor (FLOOR_DY_M).
+## HOLD, out of contact: digs in at the hold point once he's been there DIG_IN_AFTER_S (see
+## DIG_IN_AFTER_S). Friendly AI in a zone only (the enemy's sites come dug: Digging.server_prepare).
+func _dig_in() -> void:
+	if not _friendly() or not body.is_ai() or _flat_distance(_hold_point) > ARRIVE + 0.3:
+		_held_since = -1.0
+		return
+	var now := Soldier._now()
+	if _held_since < 0.0:
+		_held_since = now
+		return
+	if now - _held_since < DIG_IN_AFTER_S:
+		return
+	var level := CompoundLevel.current(body)
+	var terrain: Variant = level.get(&"terrain") if level else null
+	if not terrain is ZoneTerrain:
+		return
+	var dig := Digging.of(body)
+	if dig == null or dig.digging(body):
+		return
+	var t := terrain as ZoneTerrain
+	var p := body.global_position
+	if t.cuts and t.cuts.dug_depth(p.x, p.z) >= AI_DIG_TO_M - 0.1:
+		return
+	if Digging.problem(body) != "":
+		return
+	if body.threat_pos != Vector3.ZERO:
+		_face(body.threat_pos)
+	if dig.server_start(body) == "":
+		_callout(&"dig_in", "Digging in!")
+
+
+func _stop_digging() -> void:
+	var dig := Digging.of(body)
+	if dig and dig.digging(body):
+		dig.server_stop(body)
+
+
 func _flat_distance(point: Vector3) -> float:
 	var flat := Vector2(body.global_position.x - point.x, body.global_position.z - point.z).length()
 	return flat if absf(body.global_position.y - point.y) < FLOOR_DY_M else body.global_position.distance_to(point)

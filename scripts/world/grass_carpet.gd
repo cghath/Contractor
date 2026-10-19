@@ -6,7 +6,8 @@ extends MultiMeshInstance3D
 ## carpet of small tufts only round the camera: one every SPACING_M on a grid (jittered by the
 ## cell, so it stays put as you move), out to RADIUS_M, thinning over the last EDGE_SHARE of it
 ## so there's no edge. Re-laid when the camera has moved SNAP_M. Off roads and pads, out of the
-## water, off steep ground, in the scatter's tuft colours. Visual only: no collision, no sight
+## water, off steep ground, out of craters and dug earth (GroundCuts.bare; re-laid when the
+## ground is cut), in the scatter's tuft colours. Visual only: no collision, no sight
 ## blocking. Never on a headless server (ZoneLevel adds it with the visuals).
 
 const RADIUS_M := 28.0
@@ -20,6 +21,7 @@ var _scatter: ZoneScatter
 var _terrain: ZoneTerrain
 var _centre := Vector2(INF, INF)
 var _colours: Array[Color] = []
+var _cut_seen := 0  # GroundCuts.version the carpet was laid for
 
 
 func setup(scatter: ZoneScatter, terrain: ZoneTerrain, mesh: Mesh, material: Material, colours: Array[Color]) -> void:
@@ -40,8 +42,10 @@ func _process(_delta: float) -> void:
 	if camera == null or _terrain == null:
 		return
 	var at := Vector2(camera.global_position.x, camera.global_position.z)
-	if at.distance_to(_centre) < SNAP_M:
+	var cut_now := _terrain.cuts.version if _terrain.cuts else 0
+	if at.distance_to(_centre) < SNAP_M and cut_now == _cut_seen:
 		return
+	_cut_seen = cut_now
 	_centre = (at / SNAP_M).round() * SNAP_M
 	lay(_centre)
 
@@ -70,6 +74,8 @@ func lay(centre: Vector2) -> int:
 			if _terrain.sea_side >= 0 and h < _terrain.sea_level + 0.4:
 				continue
 			if _terrain.normal_at(x, z).y < MIN_UP:
+				continue
+			if _terrain.cuts and _terrain.cuts.bare(x, z):
 				continue
 			var s := lerpf(SIZE.x, SIZE.y, fposmod(h1 * 3.97, 1.0))
 			var basis := Basis(Vector3.UP, h1 * TAU).scaled(Vector3(s, s * lerpf(0.8, 1.4, fposmod(h1 * 5.3, 1.0)), s))
