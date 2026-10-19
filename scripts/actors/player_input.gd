@@ -23,6 +23,25 @@ const HEAD_SWAY := 0.008
 const WEAPON_BOB := Vector2(0.012, 0.012)
 const SPRINT_VIEW := Vector3(-0.03, -0.05, 0.05)
 const SPRINT_TILT := Vector3(-0.5, 0.35, 0.25)
+## The Captain's Star Citizen reference (2026-10-18, B:/Contractor-refs/captures/2026-10-18):
+## not aiming or firing for LOW_READY_AFTER_S, the weapon eases down to a low ready (LOW_READY_VIEW
+## down and in, LOW_READY_TILT: muzzle down, turned in) and comes straight back up to fire or aim;
+## jogging it takes JOG_CARRY of the sprint carry. Reloading it rolls onto its side (RELOAD_TILT:
+## muzzle down a little, turned, rolled RELOAD_ROLL), comes in RELOAD_VIEW, and the support hand
+## goes to the magazine well, pulls the magazine down out of view, brings the new one up and goes
+## back to the handguard (RELOAD_HAND_*, shares of the reload).
+const LOW_READY_AFTER_S := 1.5
+const LOW_READY_VIEW := Vector3(-0.03, -0.05, 0.02)
+const LOW_READY_TILT := Vector2(-0.28, 0.06)
+const JOG_CARRY := 0.45
+const RELOAD_VIEW := Vector3(-0.05, 0.04, 0.04)
+const RELOAD_TILT := -0.3
+const RELOAD_ROLL := 0.75
+const RELOAD_HAND_TO := 0.2
+const RELOAD_HAND_OUT := 0.4
+const RELOAD_HAND_IN := 0.62
+const RELOAD_HAND_BACK := 0.85
+const RELOAD_HAND_DROP := Vector3(0.02, -0.2, 0.06)
 const ADS_EYE := Vector3(0.0, 0.0, -0.19)
 const ADS_EYE_PISTOL := Vector3(0.0, 0.0, -0.5)
 ## Recoil settling back (Soldier.RECOIL_SETTLE), per second: most of it within a quarter second.
@@ -69,6 +88,14 @@ var _shake := 0.0
 var _vm_base := HIP_VIEW   # the view model's place before its bob
 var _bob_w := 0.0          # 0..1: how much the steps move the view (not aiming, on the ground)
 var _sprint_w := 0.0       # 0..1: the weapon in its sprint carry
+var _low_w := 0.0          # 0..1: the weapon down at the low ready
+var _ready_hold := 0.0     # seconds before it eases down to the low ready
+var _reload_w := 0.0       # 0..1: the weapon rolled in to reload
+var _reload_from := 0.0    # Soldier._now() the reload started (its length: _reload_len)
+var _reload_len := 1.0
+var _support_arm: Node3D   # the support hand's view forearm, and where it rests
+var _support_rest := Transform3D.IDENTITY
+var _magwell := Vector3.ZERO  # view-model space: the support palm's offset to the magazine well
 var _deaf := false
 ## Placing a breaching charge (Charges): the ghost follows the view until Fire commits it.
 var placing := false
@@ -302,7 +329,8 @@ func _update_bob(delta: float) -> void:
 	var walking := body.is_on_floor() and body.vitals.is_up() and not is_instance_valid(body.vehicle) and body.carry_mode == &""
 	var w := body.model.gait_weight() if walking and not body.is_aiming else 0.0
 	_bob_w = move_toward(_bob_w, w, delta * 4.0)
-	_sprint_w = move_toward(_sprint_w, 1.0 if body.movement.is_sprinting and walking else 0.0, delta * 5.0)
+	var jogging := walking and not body.is_aiming and body.model.gait() == CharacterModel.JOG
+	_sprint_w = move_toward(_sprint_w, 1.0 if body.movement.is_sprinting and walking else (JOG_CARRY if jogging else 0.0), delta * 5.0)
 	var pace := clampf(body.model.gait_speed() / SoldierMovement.SPRINT_SPEED, 0.0, 1.0) * _bob_w
 	var phase := TAU * body.model.gait_phase()
 	if GameSettings.head_bob():
@@ -373,7 +401,8 @@ func _physics_process(delta: float) -> void:
 		_update_focus()
 		_update_aim(delta)
 		_try_fire()
-	var tilt := minf(minf(-0.7 if body.is_reloading or body.movement.mantling else 0.0, -CharacterModel.VIEW_LOWER_PITCH * body.model.view_lower()), SPRINT_TILT.x * _sprint_w)  # mantling: weapon down
+	var tilt := minf(minf(-0.7 if body.movement.mantling else 0.0, -CharacterModel.VIEW_LOWER_PITCH * body.model.view_lower()), SPRINT_TILT.x * _sprint_w)  # mantling: weapon down
+	tilt = minf(tilt, minf(LOW_READY_TILT.x * _low_w, RELOAD_TILT * _reload_w))
 	body.view_model.rotation.x = move_toward(body.view_model.rotation.x, tilt, delta * 6.0)
 	# Both hands on the casualty: no weapon in view; nor seated in a vehicle (no firing your own
 	# from a seat, and in first person it hid the cabin and poked through the dash), unless it's a
@@ -388,8 +417,9 @@ func _physics_process(delta: float) -> void:
 	# Settle sway after a stop (W3, SoldierMovement.weapon_sway).
 	var sway := body.movement.weapon_sway()
 	var side := -1.0 if body.left_handed else 1.0
-	body.view_model.rotation.y = sway.x + SPRINT_TILT.y * side * _sprint_w
-	body.view_model.rotation.z = sway.y + SPRINT_TILT.z * side * _sprint_w
+	body.view_model.rotation.y = sway.x + SPRINT_TILT.y * side * _sprint_w + LOW_READY_TILT.y * side * _low_w
+	body.view_model.rotation.z = sway.y + SPRINT_TILT.z * side * _sprint_w + RELOAD_ROLL * side * _reload_w
+	_update_reload_hand()
 	hud.update_status(body)
 
 
@@ -623,7 +653,16 @@ func _update_aim(delta: float) -> void:
 	var lowered := CharacterModel.VIEW_LOWER_OFFSET * body.model.view_lower()  # ducks while the hands are busy
 	wall_pull = move_toward(wall_pull, wall_pull_at(), delta * 6.0)
 	var pulled := MovementRules.WALL_PULL_BACK * Vector3(-1.0 if body.left_handed else 1.0, 1, 1) * wall_pull  # a wall ahead: weapon back
-	_vm_base = _vm_base.lerp((aimed_view if body.is_aiming else hip_view) + lowered + pulled, minf(delta * rate, 1.0))
+	if body.is_aiming or Input.is_action_pressed(&"fire") or body.is_reloading or nade_up:
+		_ready_hold = LOW_READY_AFTER_S
+	else:
+		_ready_hold = maxf(_ready_hold - delta, 0.0)
+	var low := _ready_hold <= 0.0 and _sprint_w < 0.2
+	_low_w = move_toward(_low_w, 1.0 if low else 0.0, delta * (2.5 if low else 10.0))  # down slowly, up at once
+	_reload_w = move_toward(_reload_w, 1.0 if body.is_reloading else 0.0, delta * 7.0)
+	var side_v := Vector3(-1.0 if body.left_handed else 1.0, 1, 1)
+	var settle := LOW_READY_VIEW * side_v * _low_w + RELOAD_VIEW * side_v * _reload_w
+	_vm_base = _vm_base.lerp((aimed_view if body.is_aiming else hip_view) + lowered + pulled + settle, minf(delta * rate, 1.0))
 	body.view_model.position = _vm_base + weapon_bob()
 
 
@@ -657,6 +696,8 @@ func _try_reload() -> void:
 		hud.flash("No spare magazines")
 		return
 	body._busy_until = now + body.reload_seconds(weapon)
+	_reload_from = now
+	_reload_len = maxf(body.reload_seconds(weapon), 0.1)
 	body.is_reloading = true
 	body._server_reload.rpc_id(1, body.active_slot)
 
@@ -781,6 +822,37 @@ func _update_view_model() -> void:
 		forearm.transform = Transform3D(basis.scaled(Vector3.ONE * palm.distance_to(elbow) / CharacterModel.FOREARM), elbow)
 		ExoFrame.dress_view_forearm(forearm, frame, (hand[1] == VIEW_FIRING_ELBOW) != body.left_handed, GearRig.armor_color_for(body.model.variant))
 		body.view_model.add_child(forearm)
+		if hand[1] == VIEW_SUPPORT_ELBOW:
+			_support_arm = forearm
+			_support_rest = forearm.transform
+			_magwell = (points.grip as Vector3).lerp(points.support, 0.35) + Vector3(0, -0.07, 0) - palm
+
+
+## Reloading in first person: the support hand to the magazine well, the magazine down out of
+## view, the new one up, the hand back to the handguard (RELOAD_HAND_*).
+func _update_reload_hand() -> void:
+	if not is_instance_valid(_support_arm):
+		return
+	var offset := Vector3.ZERO
+	if body.is_reloading:
+		var u := clampf((Soldier._now() - _reload_from) / _reload_len, 0.0, 1.0)
+		if u < RELOAD_HAND_TO:
+			offset = _magwell * smoothstep(0.0, RELOAD_HAND_TO, u)
+		elif u < RELOAD_HAND_OUT:
+			offset = _magwell + RELOAD_HAND_DROP * smoothstep(RELOAD_HAND_TO, RELOAD_HAND_OUT, u)
+		elif u < RELOAD_HAND_IN:
+			offset = _magwell + RELOAD_HAND_DROP * (1.0 - smoothstep(RELOAD_HAND_OUT, RELOAD_HAND_IN, u))
+		elif u < RELOAD_HAND_BACK:
+			offset = _magwell
+		else:
+			offset = _magwell * (1.0 - smoothstep(RELOAD_HAND_BACK, 1.0, u))
+	_support_arm.transform = Transform3D(_support_rest.basis, _support_rest.origin + offset)
+
+
+## Tests: the first-person carry weights now {"low", "reload", "sprint"} and the support hand's offset from rest.
+func view_carry() -> Dictionary:
+	return {"low": _low_w, "reload": _reload_w, "sprint": _sprint_w,
+		"hand": _support_arm.transform.origin - _support_rest.origin if is_instance_valid(_support_arm) else Vector3.ZERO}
 
 
 ## The held grenade in first person: the throwables' own voxel art and a forearm and hand

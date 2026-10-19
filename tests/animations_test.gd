@@ -58,6 +58,8 @@ func _ready() -> void:
 	_test_seated_bones()
 	_test_world_scale()
 	_test_locomotion()
+	_test_stance_and_carry()
+	await _test_view_low_ready()
 	await _test_carry()
 	await _test_drag()
 	await _test_put_down()
@@ -198,6 +200,60 @@ func _test_locomotion() -> void:
 ## Walks a fresh model `speed` m/s along `dir` (its own space; it faces -Z) in `stance` for
 ## 4 s, by hand at 60 frames a second, and reports its cycle, how many times a foot was put
 ## down in the last 2.5 s, and the furthest a planted foot moved.
+## The Captain's Star Citizen reference (2026-10-18, B:/Contractor-refs/captures/2026-10-18):
+## going prone is a move (the hands out to the floor), so is getting up (pushing off it); on the
+## move the rifle is carried muzzle-down; reloading it rolls onto its side.
+func _test_stance_and_carry() -> void:
+	print("Stance moves, the carry on the move, the reload roll")
+	var holder := Node3D.new()
+	holder.position = Vector3(420, 0, 420)
+	add_child(holder)
+	var model := CharacterModel.new()
+	model.lod = false
+	holder.add_child(model)
+	model.set_process(false)
+	var dt := 1.0 / 60.0
+	model.pose = SoldierMovement.pose_for(SoldierMovement.Stance.STAND_HIGH, 0, 0.0)
+	for i in 10:
+		model._process(dt)
+	model.pose = SoldierMovement.pose_for(SoldierMovement.Stance.PRONE, 0, 0.0)
+	model._process(dt)
+	check(model.stance_move().get("kind", &"") == &"down", "going prone: a move, not a snap")
+	for i in 12:
+		model._process(dt)
+	var hands := model._stance_hands()
+	var floor_y := holder.global_position.y
+	check(hands.size() == 2 and hands.all(func(h: Array) -> bool: return absf(model.torso.to_global(h[1]).y - floor_y) < 0.12),
+		"the hands go out to the floor and take the weight (a dive)")
+	for i in 45:
+		model._process(dt)
+	check(model.stance_move().is_empty(), "then it lies prone")
+	model.pose = SoldierMovement.pose_for(SoldierMovement.Stance.STAND_HIGH, 0, 0.0)
+	model._process(dt)
+	check(model.stance_move().get("kind", &"") == &"up" and not model._stance_hands().is_empty(), "getting up: it pushes off the floor")
+	holder.queue_free()
+	var art := VoxelArt.model_for(ItemDB.get_item(&"m4a1"))
+	var ready := GearRig.held_transform(art, false, false)
+	var run := GearRig.held_transform(art, false, false, NAN, 1.0)
+	var reload := GearRig.held_transform(art, false, false, NAN, 0.0, 1.0)
+	var aim := GearRig.held_transform(art, true, false, NAN, 1.0, 1.0)
+	check((-run.basis.z).y < (-ready.basis.z).y - 0.3, "on the move the rifle's carried muzzle-down (%.2f vs %.2f)" % [(-run.basis.z).y, (-ready.basis.z).y])
+	check(absf(reload.basis.x.y) > 0.4, "reloading it's rolled onto its side (%.2f)" % reload.basis.x.y)
+	check(aim.is_equal_approx(GearRig.held_transform(art, true, false)), "aiming, neither applies")
+
+
+## First person: not aiming or firing for a moment, the weapon eases down to the low ready.
+func _test_view_low_ready() -> void:
+	print("First person: the low ready")
+	var pi := player.player_input
+	if pi == null:
+		check(false, "the player's input")
+		return
+	player.is_aiming = false
+	await _seconds(PlayerInput.LOW_READY_AFTER_S + 1.0)
+	check(float(pi.view_carry().low) > 0.8, "idle: the weapon at the low ready (%.2f)" % float(pi.view_carry().low))
+
+
 func _walk_model(stance: int, speed: float, dir: Vector3, body: String) -> Dictionary:
 	var holder := Node3D.new()
 	holder.position = Vector3(400, 0, 400)

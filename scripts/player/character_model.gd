@@ -378,6 +378,33 @@ const SLUMP_EASE := 2.6
 var _flinch_side := 1.0
 ## The stance to show (keys as in REST_POSE). Set every frame by the body that owns it.
 var pose: Dictionary = REST_POSE.duplicate()
+
+## Captain, 2026-10-18 (his Star Citizen reference, B:/Contractor-refs/captures/2026-10-18): stance
+## changes as moves, not pose snaps. Going prone the hands go out to the floor ahead and take the
+## weight (a dive); getting up they push off it. STANCE_MOVE_S long, the hands on the floor over
+## the STANCE_PLANT_* share of it, HANDS_AHEAD in front of the hips and HANDS_APART across.
+const STANCE_MOVE_S := 0.7
+const STANCE_PLANT_DOWN := Vector2(0.05, 0.75)
+const STANCE_PLANT_UP := Vector2(0.0, 0.6)
+const HANDS_AHEAD := 0.5
+const HANDS_APART := 0.22
+## Hands go to the floor only while the shoulders are this low over it (m): higher, the arms
+## couldn't reach (getting up, the body rises out of the push).
+const PLANT_REACH := 0.8
+## Getting up goes through a kneel (RISE_KNEEL, hands on the floor) for the first RISE_KNEEL_SHARE
+## of the move, then stands: easing straight from prone to standing pivoted him up like a plank.
+const RISE_KNEEL := {"hip": 0.42, "hip_x": 0.0, "hip_z": 0.12, "pitch": -0.75, "roll": 0.0, "prone": false, "prone_roll": 0.0}
+const RISE_KNEEL_SHARE := 0.45
+var _was_prone := false
+var _stance_move := &""   # &"down" (going prone), &"up" (getting up), &"" none
+var _stance_t := 99.0
+## The rifle's carry on the move (the same reference): jogging or sprinting, not aiming, it drops
+## muzzle-down along the body, one-handed (GearRig.held_transform's `run`). Eased 0..1.
+const RUN_CARRY_EASE := 4.0
+var _run_carry := 0.0
+## Reloading: how far the weapon is rolled and brought in to work the magazine (GearRig), eased 0..1.
+const RELOAD_EASE := 7.0
+var _reload_w := 0.0
 ## Replicated (the body's ServerSync; set on the host by server_carry): {"mode": CARRY,
 ## DRAG, CARRIED or DRAGGED, "with": the other body's node path}, or {} for neither.
 var carry_net: Dictionary = {}
@@ -1244,6 +1271,7 @@ func _process(frame_delta: float) -> void:
 	else:
 		_carry_t += delta
 	_update_action(delta)
+	_update_stance_move(delta)
 	if _draw_t >= 0.0:
 		_draw_t += delta
 		if _draw_t > DRAW_S:
@@ -1778,6 +1806,67 @@ func _place_shoulders(delta: float) -> void:
 		_upper[i].position = _upper[i].position.move_toward(goal, delta * 0.8)
 
 
+## The stance move (STANCE_MOVE_S) on a prone change, and the eased carry and reload weights.
+func _update_stance_move(delta: float) -> void:
+	var prone := bool(pose.get("prone", false))
+	if prone != _was_prone:
+		_was_prone = prone
+		_stance_move = &"down" if prone else &"up"
+		_stance_t = 0.0
+		if downed or is_seated():
+			_stance_move = &""  # a casualty falling, or a seat: not a move of his own
+	else:
+		_stance_t += delta
+	var m := stance_move()
+	if not m.is_empty() and m.kind == &"up" and float(m.u) < RISE_KNEEL_SHARE:
+		var kneel := RISE_KNEEL.duplicate()
+		kneel["yaw"] = pose.get("yaw", 0.0)
+		pose = kneel  # (the body sets `pose` again every frame: this only holds while it lasts)
+	var running := (_gait == JOG or _gait == SPRINT) and not aiming and not reloading and not downed and not is_seated()
+	_run_carry = move_toward(_run_carry, 1.0 if running else 0.0, delta * RUN_CARRY_EASE)
+	_reload_w = move_toward(_reload_w, 1.0 if reloading else 0.0, delta * RELOAD_EASE)
+
+
+## 0..1: the rifle's muzzle-down carry on the move (GearRig).
+func run_carry() -> float:
+	return _run_carry
+
+
+## 0..1: the weapon rolled in to work the magazine (GearRig).
+func reload_roll() -> float:
+	return _reload_w
+
+
+## The stance move under way: {"kind": &"down"/&"up", "u": 0..1}, or {} for none.
+func stance_move() -> Dictionary:
+	if _stance_move == &"" or _stance_t >= STANCE_MOVE_S:
+		return {}
+	return {"kind": _stance_move, "u": _stance_t / STANCE_MOVE_S}
+
+
+## The hands on the floor for a stance move ([right, left] goals), or [] when they aren't.
+func _stance_hands() -> Array:
+	var m := stance_move()
+	if m.is_empty():
+		return []
+	var window: Vector2 = STANCE_PLANT_DOWN if m.kind == &"down" else STANCE_PLANT_UP
+	if float(m.u) < window.x or float(m.u) > window.y:
+		return []
+	if torso.to_global(shoulder()).y - global_position.y > PLANT_REACH * global_basis.get_scale().y:
+		return []  # the shoulders too high over the floor to put the hands down
+	var fwd := -global_basis.z
+	fwd.y = 0.0
+	fwd = fwd.normalized() if fwd.length() > 0.01 else Vector3.FORWARD
+	var across := fwd.cross(Vector3.UP).normalized()
+	var floor_at := global_position + fwd * HANDS_AHEAD * global_basis.get_scale().x
+	var out: Array = []
+	for side: float in [1.0, -1.0]:
+		var p := floor_at + across * HANDS_APART * side
+		p.y = global_position.y + 0.04
+		out.append(["plant", torso.to_local(p)])
+	return out
+
+
 ## [[goal key, torso-local point or null to swing], ...] for the right and left hand.
 func _arm_goals(carry: Dictionary) -> Array:
 	var mode: StringName = carry.get("mode", &"")
@@ -1798,6 +1887,9 @@ func _arm_goals(carry: Dictionary) -> Array:
 		var straps := drag_hand_points()
 		return [["drag", _torso_point(straps[0])], ["drag", _torso_point(straps[1])]]
 	var held := _held_goals()
+	var planted := _stance_hands()
+	if not planted.is_empty():
+		return planted
 	if _action_active():
 		var acting := _action_goals(held)
 		if not acting.is_empty():
@@ -1820,6 +1912,8 @@ func _held_goals() -> Array:
 		support = _grip.lerp(_support, 0.35) + Vector3(0, -0.11 + sin(_time * 9.0) * 0.025, 0)
 	var firing := [key, torso.to_local(_held.to_global(_grip))]
 	var other := [key, torso.to_local(_held.to_global(support))]
+	if _run_carry > 0.5 and _held_weapon and not is_seated():
+		other = ["swing", null]  # on the move: carried one-handed, the support arm swings
 	return [other, firing] if left_handed and _held_weapon else [firing, other]
 
 

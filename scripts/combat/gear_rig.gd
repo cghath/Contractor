@@ -71,6 +71,15 @@ const LOW_READY_POCKET := Vector3(0.17, -0.36, 0.02)
 const LOW_READY_DIP := 0.12
 const LOW_READY_TURN := 0.08
 const PISTOL_AIM := Vector3(0.0, 0.16, -0.44)
+## On the move (the Captain's Star Citizen reference, 2026-10-18): jogging or sprinting the
+## rifle drops to a relaxed carry along the body, muzzle down, by the firing hip
+## (CharacterModel.run_carry blends it in). Reloading it rolls RELOAD_ROLL onto its side and
+## comes in and up RELOAD_IN, the magazine well turned to the eye (CharacterModel.reload_roll).
+const RUN_POCKET := Vector3(0.13, -0.2, -0.06)
+const RUN_DIP := 1.05
+const RUN_TURN := 0.35
+const RELOAD_ROLL := 0.75
+const RELOAD_IN := Vector3(-0.06, 0.07, -0.06)
 const PISTOL_READY := Vector3(0.06, -0.12, -0.32)
 const PISTOL_READY_DIP := 0.45
 ## Seated in a vehicle (CharacterModel.is_seated; Captain, 2026-10-14: the UH-60M's riders held
@@ -996,7 +1005,7 @@ func rest_transform(slot: StringName) -> Transform3D:
 ## Where a held weapon (VoxelArt model `art`) sits in hands_anchor space, aiming or at the
 ## ready, for the firing shoulder (see SHOULDER_POCKET), the upper body twisted by `twist`
 ## (CharacterModel.twist_shown; NAN: fully bladed).
-static func held_transform(art: String, aiming: bool, left: bool, twist := NAN) -> Transform3D:
+static func held_transform(art: String, aiming: bool, left: bool, twist := NAN, run := 0.0, reload := 0.0) -> Transform3D:
 	var s := -1.0 if left else 1.0
 	if is_nan(twist):
 		twist = CharacterModel.blade_twist(left)
@@ -1009,6 +1018,13 @@ static func held_transform(art: String, aiming: bool, left: bool, twist := NAN) 
 		elif not aiming:
 			basis = Basis(Vector3.UP, READY_TURN * s) * Basis(Vector3.RIGHT, -READY_DIP)
 			pocket = READY_POCKET
+			if run > 0.0:
+				var carried := Basis(Vector3.UP, RUN_TURN * s) * Basis(Vector3.RIGHT, -RUN_DIP)
+				basis = basis.slerp(carried, clampf(run, 0.0, 1.0))
+				pocket = pocket.lerp(RUN_POCKET, clampf(run, 0.0, 1.0))
+		if reload > 0.0 and not aiming:
+			basis = basis * Basis(Vector3.BACK, RELOAD_ROLL * s * clampf(reload, 0.0, 1.0))
+			pocket += RELOAD_IN * clampf(reload, 0.0, 1.0)
 		return Transform3D(basis, Basis(Vector3.UP, twist) * (pocket * Vector3(s, 1, 1)) - basis * VoxelArt.butt_point(art))
 	if aiming:
 		return Transform3D(Basis.IDENTITY, PISTOL_AIM)
@@ -1035,7 +1051,7 @@ static func seated_transform(art: String, left: bool, room: float) -> Transform3
 func _hold_goal(art: String) -> Transform3D:
 	if model.is_seated() and not model.is_ffv():
 		return seated_transform(art, model.left_handed, model.seat_room())
-	return held_transform(art, model.aiming, model.left_handed, model.twist_shown())
+	return held_transform(art, model.aiming, model.left_handed, model.twist_shown(), model.run_carry(), model.reload_roll())
 
 
 ## Moves the weapon in the hands towards where it sits now (raised to aim, or at the ready).
