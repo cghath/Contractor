@@ -186,6 +186,7 @@ static func zone_def(zone_id: String) -> Dictionary:
 			if String(named) != "":
 				def["terrain"] = String(named)
 		def = ZoneDef.normalize(def)  # the terrain preset follows the name and region
+		def["crossings"] = RegionMap.crossings(zone_id, def)  # its edges into the neighbouring zones (LZ-2)
 	_zone_defs[zone_id] = def
 	return def
 

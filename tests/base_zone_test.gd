@@ -18,7 +18,7 @@ var level: CompoundLevel
 func _ready() -> void:
 	GameState.zone_id = "test_base_lz1" + tag
 	Campaign.campaign_id = "test_base_lz1" + tag  # never touch a real save
-	get_tree().create_timer(400.0).timeout.connect(func() -> void:
+	get_tree().create_timer(560.0).timeout.connect(func() -> void:
 		print("BASE_ZONE TEST FAILED (timed out)")
 		get_tree().quit(99))
 	GameState.delete_save()
@@ -64,7 +64,7 @@ func _run() -> void:
 	check(String(base.def.id) == BaseZoneLevel.ZONE_ID and float(base.def.size_m) == BaseZoneLevel.SIZE_M and String(base.def.get("region", "")) == BaseZoneLevel.REGION,
 		"2304 m, its id \"fob\", in the FOB's region (%s, %.0f m)" % [base.def.id, float(base.def.size_m)])
 	check(base.generate_ms < LOAD_BUDGET_MS, "it loads within %.0f s (%.0f ms)" % [LOAD_BUDGET_MS / 1000.0, base.generate_ms])
-	var again := ZoneDef.normalize(BaseZoneLevel.def_for(Contracts.campaign_seed()))
+	var again := BaseZoneLevel.def_for(Contracts.campaign_seed())
 	check(again.hash() == base.def.hash(), "the same base zone from the same campaign seed")
 	var m := base.get_module("fob")
 	check(m != null and base.fob != null and base.fob.global_position.distance_to(m.global_position) < 0.01, "the FOB is its \"fob\" module")
@@ -97,7 +97,7 @@ func _run() -> void:
 	await _wait_until(func() -> bool: return not BaseHub.in_base() and not BaseHub.switch_pending(), 30.0)
 	check(not BaseHub.in_base(), "and the session moves to the zone")
 	var stash_out := BaseArmory.counts(BaseHub.stash())
-	BaseHub.server_return_to_base()
+	BaseHub.server_end_deployment([])  # ended, and everyone home
 	await _wait_until(func() -> bool: return BaseHub.in_base() and not BaseHub.switch_pending(), 30.0)
 	base = CompoundLevel.current(self) as BaseZoneLevel
 	check(base != null, "back at the base zone")
@@ -109,6 +109,97 @@ func _run() -> void:
 	check(outside_back.size() == 1, "the IFAKs dropped outside the wire are still there (%d)" % outside_back.size())
 	var back := BaseArmory.counts(base.server_collect_stash())
 	check(back == stash_out, "the stash came back once, not twice (%s)" % str(back.get(&"m17", 0)))
+	_test_region_map()
+	await _test_crossings()
+
+
+## LZ-2: every zone on the region grid, linked to 2-4 neighbours both ways, a crossing on the
+## edge facing each.
+func _test_region_map() -> void:
+	print("The region map")
+	var layout := RegionMap.layout()
+	var zones := MissionRegistry.data().get("zones", []) as Array
+	check(layout.size() == zones.size() + 1 and layout.has(RegionMap.BASE), "every zone and the base on the region grid (%d)" % layout.size())
+	var counts_ok := true
+	var both_ways := true
+	for id: String in layout:
+		var links := RegionMap.links(id)
+		counts_ok = counts_ok and links.size() >= 1 and links.size() <= 4
+		for l: Dictionary in links:
+			both_ways = both_ways and RegionMap.links(String(l.to)).any(func(b: Dictionary) -> bool:
+				return String(b.to) == id and int(b.side) == RegionMap.opposite(int(l.side)))
+	check(counts_ok, "each zone links to 1-4 neighbours")
+	check(both_ways, "every link runs both ways, edge to opposite edge")
+	var base_def := BaseZoneLevel.def_for(Contracts.campaign_seed())
+	var crossings: Array = base_def.get("crossings", [])
+	var half := float(base_def.size_m) * 0.5
+	var on_edge := crossings.all(func(c: Dictionary) -> bool:
+		var p := Vector2(float(c.pos[0]), float(c.pos[1]))
+		var side := int(c.side)
+		var d: float = [p.y + half, half - p.y, p.x + half, half - p.x][side]
+		return d <= ZoneDef.EDGE_POINT_IN_M + 1.0 or base_def.get("sea_side", -1) == side)
+	check(crossings.size() == RegionMap.links(RegionMap.BASE).size() and crossings.size() >= 2 and on_edge,
+		"the base zone has a crossing on each linked edge (%s)" % ", ".join(crossings.map(func(c: Dictionary) -> String: return String(c.name))))
+
+
+## LZ-2: out of the base through a crossing into the next zone, arriving at its matching crossing;
+## and back home through that zone's crossing to the base, arriving at the base's.
+func _test_crossings() -> void:
+	print("Crossings")
+	var base := CompoundLevel.current(self) as BaseZoneLevel
+	var extraction := MapNodes.extraction(base)
+	var out_point: Dictionary = {}
+	for p: Dictionary in extraction.points:
+		if String(p.get("source", "")) == "crossing":
+			out_point = p
+			break
+	check(extraction.is_active() and not out_point.is_empty(), "the base zone's crossings are open (%s)" % out_point.get("name", "none"))
+	if out_point.is_empty():
+		return
+	var to := String(out_point.to)
+	extraction.countdown_s = 0.5
+	var me := base.players.get_node(^"1") as Soldier
+	me.global_position = base.ground_point(Vector3(out_point.pos.x, 0, out_point.pos.y))
+	await get_tree().physics_frame
+	var why := extraction.server_confirm(1)
+	check(why == "", "standing in it, the player confirms the crossing (%s)" % why)
+	await _wait_until(func() -> bool: return not BaseHub.in_base() and not BaseHub.switch_pending() and CompoundLevel.current(self) is ZoneLevel, 40.0)
+	var zone := CompoundLevel.current(self) as ZoneLevel
+	check(zone != null and not zone is BaseZoneLevel and String(zone.def.id) == to and RosterDeployment.is_running(BaseHub.roster()),
+		"the squad is in %s, on a deployment" % to)
+	if zone == null or zone is BaseZoneLevel:
+		return
+	await _wait_until(func() -> bool: return zone.players.get_node_or_null(^"1") != null, 10.0)
+	me = zone.players.get_node_or_null(^"1") as Soldier
+	var back_c := RegionMap.crossing_of(zone.def, RegionMap.crossing_id(RegionMap.BASE))
+	var at := Vector2(float(back_c.pos[0]), float(back_c.pos[1])) if not back_c.is_empty() else Vector2.INF
+	check(me != null and Vector2(me.global_position.x, me.global_position.z).distance_to(at) < 25.0,
+		"arriving at its crossing from the base (%.0f m from it)" % (Vector2(me.global_position.x, me.global_position.z).distance_to(at) if me else INF))
+	var zx := MapNodes.extraction(zone)
+	await _wait_until(func() -> bool: return zx.is_active(), 5.0)
+	var home: Dictionary = {}
+	for p: Dictionary in zx.points:
+		if String(p.get("to", "")) == RegionMap.BASE:
+			home = p
+	check(not home.is_empty(), "and the way home is a crossing there (%s)" % home.get("name", "none"))
+	if home.is_empty():
+		return
+	zx.countdown_s = 0.5
+	me.global_position = zone.ground_point(Vector3(home.pos.x, 0, home.pos.y))
+	await get_tree().physics_frame
+	why = zx.server_confirm(1)
+	check(why == "", "walking home through it (%s)" % why)
+	await _wait_until(func() -> bool: return BaseHub.in_base() and not BaseHub.switch_pending(), 40.0)
+	base = CompoundLevel.current(self) as BaseZoneLevel
+	check(base != null and not RosterDeployment.is_running(BaseHub.roster()), "back at the base zone, the deployment over")
+	if base == null:
+		return
+	await _wait_until(func() -> bool: return base.players.get_node_or_null(^"1") != null, 10.0)
+	me = base.players.get_node_or_null(^"1") as Soldier
+	var mine := RegionMap.crossing_of(base.def, RegionMap.crossing_id(to))
+	var at2 := Vector2(float(mine.pos[0]), float(mine.pos[1])) if not mine.is_empty() else Vector2.INF
+	check(me != null and Vector2(me.global_position.x, me.global_position.z).distance_to(at2) < 25.0,
+		"arriving at the base's crossing from %s, not the gate (%.0f m from it)" % [to, Vector2(me.global_position.x, me.global_position.z).distance_to(at2) if me else INF])
 
 
 func _cheapest(pool: Array) -> Dictionary:

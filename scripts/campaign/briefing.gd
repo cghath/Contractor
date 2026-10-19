@@ -453,7 +453,11 @@ func _default_flow() -> void:
 		var at := Vector2(float(p[0]), float(p[1]))
 		var via: Variant = _xz(point.get("from"))
 		var objective: Variant = _xz(point.get("objective"))
-		if String(point.get("method", "foot")) != HELI or not HeliSupports.server_insert(self, at, via, objective, point.get("route"), drop == "rope"):
+		var level := MapNodes.level_of(self)
+		var walked_in := level != null and level.get(&"def") is Dictionary and String((level.get(&"def") as Dictionary).get("arrive", "")) != ""
+		if walked_in:
+			pass  # came in through a crossing (LZ-2): the squad starts there, not at the insertion point
+		elif String(point.get("method", "foot")) != HELI or not HeliSupports.server_insert(self, at, via, objective, point.get("route"), drop == "rope"):
 			server_move_squad_to(at)
 	var extraction := MapNodes.extraction(self)
 	if extraction:

@@ -457,6 +457,8 @@ func base_level():
 ## suites keep BaseLevel until the base zone is proven, BaseLevel the fallback), 0 BaseLevel, 1 the
 ## base zone.
 static var base_zone_mode := -1
+## Host: the crossing the next level the squad goes to puts them at (set_arrival; LZ-2).
+var _next_arrival := ""
 
 
 ## Whether the base is the base zone (BaseZoneLevel) rather than BaseLevel.
@@ -467,11 +469,49 @@ func base_as_zone() -> bool:
 	return scene == null or not scene.scene_file_path.begins_with("res://tests/")
 
 
-## The level_info() the base is played from.
+## The level_info() the base is played from (come home through a crossing: arriving at it,
+## set_arrival).
 func base_info() -> Dictionary:
+	var arrive := _next_arrival
+	_next_arrival = ""
 	if base_as_zone():
-		return {"level": "base_zone", "def": ZoneDef.normalize(BaseZoneLevel.def_for(Contracts.campaign_seed()))}
+		var def := BaseZoneLevel.def_for(Contracts.campaign_seed())
+		if arrive != "":
+			def["arrive"] = arrive
+		return {"level": "base_zone", "def": def}
 	return {"level": "base"}
+
+
+## Host (Extraction, a crossing): the next level the squad goes to puts them at crossing `id`.
+func set_arrival(id: String) -> void:
+	_next_arrival = id
+
+
+## Host (Extraction, a crossing confirmed in the base zone; docs/linked_zones.md LZ-2): the squad
+## walks out into zone `to`, arriving at its crossing `to_crossing`: a deployment there, with the
+## prepped contract if it's for that zone, else none (a raid's rules come with LZ-4). Standing in
+## the crossing together is the ready-up. Returns "" or why not.
+func server_cross_from_base(to: String, to_crossing: String) -> String:
+	var def := MissionRegistry.zone_def(to)
+	if def.is_empty():
+		return "Nothing lies that way"
+	var prep := _prep()
+	var contract: Dictionary = prep.get("contract", {})
+	var options := {"crossing": true, "zone_id": to}
+	if contract.is_empty() or String(contract.get("zone_id", "")) != to:
+		options["no_contract"] = true
+		options["zone_kind"] = String(MissionRegistry.zone(to).get("kind", RosterDeployment.CONTRACT))
+	var arrive := def.duplicate(true)
+	arrive["arrive"] = to_crossing
+	options["level"] = {"level": "zone", "def": arrive}
+	if not contract.is_empty() and String(contract.get("zone_id", "")) == to:
+		var prepped: Dictionary = prep.get("level", {})
+		if prepped.has("def"):
+			var with_arrive: Dictionary = (prepped.def as Dictionary).duplicate(true)
+			with_arrive["arrive"] = to_crossing
+			options["level"] = {"level": "zone", "def": with_arrive}
+	SessionLog.note("crossing: the squad walks out of the base into %s" % to)
+	return server_deploy(options)
 
 
 ## A deployment is running and this is the host.
@@ -1125,7 +1165,7 @@ func server_deploy(options := {}) -> String:
 	# Without a contract there's no briefing, so no extraction and no way home (P0331): refuse.
 	if (prep.get("contract", {}) as Dictionary).is_empty() and not options.get("no_contract", false):
 		return NO_CONTRACT
-	if not all_ready():
+	if not all_ready() and not options.get("crossing", false):  # walking out through a crossing together is the ready-up (LZ-2)
 		return WAITING_FOR + ", ".join(PackedStringArray(not_ready_names()))
 	var info: Dictionary = options.get("level", prep.get("level", {}))
 	var scene := String(options.get("scene", prep.get("scene", "")))

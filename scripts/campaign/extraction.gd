@@ -63,6 +63,8 @@ const RADIUS_M := 20.0
 ## Exfil takes time (Captain, 2026-10-16: "exfil heli isnt instant, it takes time, as any support"):
 ## the ride is this long out once it's called. Was 10 s.
 const COUNTDOWN_S := 90.0
+## A crossing's countdown (docs/linked_zones.md call 18): walking on into the next zone (LZ-2).
+const CROSSING_COUNTDOWN_S := 20.0
 const SMOKE_COLOUR := "purple"
 ## Captain, 2026-10-14: how long a "Leaving behind" warning stands; a second confirm within it
 ## extracts without those named.
@@ -199,8 +201,37 @@ func server_begin(plan: Dictionary) -> void:
 		var p: Array = preset.get("pos", [])
 		if p.size() >= 2:
 			_add_point(Vector2(float(p[0]), float(p[1])), "zone", String(preset.get("name", "")), float(preset.get("radius", RADIUS_M)))
+	_add_crossings()
 	SessionLog.note("extraction open: contract %s, %d preset points" % [String(plan.get("contract", {}).get("id", "none")), points.size()])
 	_broadcast()
+
+
+## Host: the level's crossings into the neighbouring zones (docs/linked_zones.md LZ-2: its def's
+## "crossings", RegionMap) as points ("crossing" source, "to" the zone it leads to), always foot
+## points: the squad stands in one and confirms, as at an extraction point, and walks on into
+## that zone (_finish: from the base a deployment starts there; into the base it ends).
+func _add_crossings() -> void:
+	var level := get_parent()
+	var def: Variant = level.get(&"def") if level else null
+	if not def is Dictionary:
+		return
+	for c: Dictionary in (def as Dictionary).get("crossings", []):
+		var id := _add_point(Vector2(float(c.pos[0]), float(c.pos[1])), "crossing", String(c.name), float(c.get("radius", RegionMap.RADIUS_M)))
+		var point: Dictionary = points[-1]
+		point["name"] = String(c.name)  # never "(helicopter)": a crossing is walked (or driven)
+		point["foot"] = true
+		point["to"] = String(c.to)
+		point["crossing"] = String(c.id)
+		point["to_crossing"] = String(c.to_crossing)
+		assert(int(point.id) == id)
+
+
+## Host, the base zone (no deployment): its crossings open, so the squad can walk out into the
+## neighbouring zones (LZ-2).
+func server_open_crossings() -> void:
+	if not multiplayer.is_server() or is_active():
+		return
+	server_begin({})
 
 
 ## Host only. Ends extraction without a report (the deployment was called off).
@@ -296,6 +327,8 @@ func server_set_bring(mate: String, bring: bool) -> void:
 func required() -> Dictionary:
 	var ai := MapNodes.squad_ai(self).filter(func(s: Soldier) -> bool:
 		return not leave.has(String(s.name)) and not left_at_call.has(_soldier_name(s)))
+	if BaseHub.in_base():
+		ai = []  # at the base (a crossing out, LZ-2) the muster line isn't the squad: it deploys with them
 	var players := MapNodes.players(self).filter(func(s: Soldier) -> bool: return not left_at_call.has(_soldier_name(s)))
 	return {"players": players, "ai": ai}
 
@@ -620,9 +653,13 @@ func _start_countdown(point: Dictionary) -> String:
 	SessionLog.note("extraction called at %s: %.0f s countdown" % [point.name, countdown_s])
 	state = State.COUNTDOWN
 	countdown_point = int(point.id)
-	countdown_left = countdown_s
+	var crossing := String(point.get("source", "")) == "crossing"
+	countdown_left = minf(countdown_s, CROSSING_COUNTDOWN_S) if crossing else countdown_s
 	_last_whole = -1
 	_broadcast()
+	if crossing:
+		_client_message.rpc("Moving %s in %d s: stay inside the crossing" % [String(point.name).to_lower(), ceili(countdown_left)])
+		return ""
 	_client_message.rpc("Exfil inbound to %s, ETA %d s: hold inside the point" % [point.name, ceili(countdown_s)])
 	# get_parent(), not EnemyResponse.of(self)/CompoundLevel.current(self): those find the level
 	# by "first node in the level group", which can grab a stale or wrong one during a rapid
@@ -710,6 +747,20 @@ func _run_countdown(delta: float) -> void:
 
 ## Host. The squad is out: the report goes to the economy and everyone hears it.
 func _finish(point: Dictionary) -> void:
+	if String(point.get("source", "")) == "crossing" and BaseHub.in_base():
+		# From the base (LZ-2): out through the crossing, a deployment into the zone it leads to.
+		state = State.ACTIVE
+		countdown_point = -1
+		countdown_left = 0.0
+		_broadcast()
+		var why := BaseHub.server_cross_from_base(String(point.to), String(point.to_crossing))
+		if why != "":
+			SessionLog.note("crossing out of the base refused: %s" % why)
+			print("[crossing] out of the base refused: %s" % why)
+			_client_message.rpc(why)
+		return
+	if String(point.get("source", "")) == "crossing":
+		BaseHub.set_arrival(String(point.to_crossing))  # home (or on) at the matching crossing
 	state = State.ENDED
 	countdown_left = 0.0
 	var report := build_report(point)
@@ -945,7 +996,7 @@ func _nearest_point() -> Dictionary:
 ## Host. A new point; one of `source` ("grid", "smoke") replaces the last of it, except point
 ## `keep` (the helicopter's LZ: see SOURCES).
 func _add_point(pos: Vector2, source: String, point_name: String, radius: float, keep := -1) -> int:
-	if source != "zone":
+	if source != "zone" and source != "crossing":
 		points = points.filter(func(p: Dictionary) -> bool: return p.source != source or (keep > 0 and int(p.id) == keep))
 	var id := _next_id
 	_next_id += 1
@@ -962,11 +1013,11 @@ func _add_point(pos: Vector2, source: String, point_name: String, radius: float,
 func _keep_newest() -> void:
 	var newest := {}
 	for p: Dictionary in points:
-		if p.source != "zone":
+		if p.source != "zone" and p.source != "crossing":
 			newest[p.source] = maxi(int(newest.get(p.source, 0)), int(p.id))
 	var before := points.size()
 	points = points.filter(func(p: Dictionary) -> bool:
-		return p.source == "zone" or int(p.id) == int(newest[p.source]) or int(p.id) == countdown_point)
+		return p.source == "zone" or p.source == "crossing" or int(p.id) == int(newest[p.source]) or int(p.id) == countdown_point)
 	if points.size() != before:
 		SessionLog.note("extraction: %d older point(s) dropped after the helicopter call" % (before - points.size()))
 

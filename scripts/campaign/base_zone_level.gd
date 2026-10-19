@@ -23,12 +23,15 @@ const SEED_SALT := 0x0F0B
 var fob: BaseFob
 
 
-## The base zone's definition for a campaign seeded `campaign_seed`: the same every visit.
+## The base zone's definition for a campaign seeded `campaign_seed` (normalized, with its crossings
+## into the neighbouring zones: RegionMap, LZ-2): the same every visit.
 static func def_for(campaign_seed: int) -> Dictionary:
-	return {"id": ZONE_ID, "name": "FOB", "region": REGION, "kind": "base", "seed": absi(campaign_seed ^ SEED_SALT) % 1000000,
+	var def := ZoneDef.normalize({"id": ZONE_ID, "name": "FOB", "region": REGION, "kind": "base", "seed": absi(campaign_seed ^ SEED_SALT) % 1000000,
 		"size_m": SIZE_M, "grow": false, "no_pallets": true,
 		"modules": [{"id": "fob", "type": "fob", "pos": [0, 0]}],
-		"insertion": [[0.0, BaseFob.VEHICLE_PARK.end.y + 20.0]]}
+		"insertion": [[0.0, BaseFob.VEHICLE_PARK.end.y + 20.0]]})
+	def["crossings"] = RegionMap.crossings(RegionMap.BASE, def)
+	return def
 
 
 func _ready() -> void:
@@ -55,9 +58,12 @@ func next_spawn_point() -> Vector3:
 	return spawn_point(_spawn_index)
 
 
-## Players come in (and respawn) inside the FOB's gate, not at the zone's insertion point.
+## Players come in (and respawn) inside the FOB's gate, not at the zone's insertion point; coming
+## home through a crossing (def "arrive", LZ-2), at that crossing.
 func spawn_point(index: int) -> Vector3:
-	return fob.spawn_point(index) if fob else super.spawn_point(index)
+	if String(def.get("arrive", "")) != "" or fob == null:
+		return super.spawn_point(index)
+	return fob.spawn_point(index)
 
 
 func _player_start(_id: int) -> Vector3:
@@ -79,6 +85,9 @@ func _on_hosted() -> void:
 	super._on_hosted()
 	server_spawn_stash(BaseHub.stash())
 	server_show_roster()
+	var extraction := MapNodes.extraction(self)
+	if extraction:
+		extraction.server_open_crossings()  # the way out into the neighbouring zones (LZ-2)
 	BaseHub.server_level_ready(self)
 
 

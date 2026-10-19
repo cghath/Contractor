@@ -4409,7 +4409,7 @@ func _lies_at(spot: Vector3) -> bool:
 ## HOLD, out of contact: digs in at the hold point once he's been there DIG_IN_AFTER_S (see
 ## DIG_IN_AFTER_S). Friendly AI in a zone only (the enemy's sites come dug: Digging.server_prepare).
 func _dig_in() -> void:
-	if not _friendly() or not body.is_ai() or _flat_distance(_hold_point) > ARRIVE + 0.3:
+	if not _friendly() or not body.is_ai() or _flat_distance(_hold_point) > ARRIVE + 0.3 or BaseHub.in_base():  # (the muster line holds too)
 		_held_since = -1.0
 		return
 	var now := Soldier._now()

@@ -154,10 +154,21 @@ func map_area() -> Rect2:
 	return Rect2(-half, -half, terrain.size_m, terrain.size_m)
 
 
-## Around the default insertion point: eight spots, two rows of four SPAWN_SPREAD_M apart.
+## Around the default insertion point (or the crossing the squad came in by: entry_point): eight
+## spots, two rows of four SPAWN_SPREAD_M apart.
 func spawn_point(index: int) -> Vector3:
 	var k := posmod(index, 8)
-	return ground_point(insertion_points()[0] + Vector3((k % 4 - 1.5) * SPAWN_SPREAD_M, 0, (k / 4) * SPAWN_SPREAD_M))
+	return ground_point(entry_point() + Vector3((k % 4 - 1.5) * SPAWN_SPREAD_M, 0, (k / 4) * SPAWN_SPREAD_M))
+
+
+## Where the squad comes in: the crossing named by the def's "arrive" (LZ-2: walked in from the
+## neighbouring zone, a few metres inside it), else the default insertion point.
+func entry_point() -> Vector3:
+	var c := RegionMap.crossing_of(def, String(def.get("arrive", "")))
+	if not c.is_empty():
+		var p := Vector3(float(c.pos[0]), 0.0, float(c.pos[1]))
+		return p - p.normalized() * 8.0 if p.length() > 8.0 else p
+	return insertion_points()[0]
 
 
 ## Where player `id` starts: worked out the same on the host and on that player's own peer
@@ -490,6 +501,10 @@ func _on_hosted() -> void:
 	if spawn_ai:
 		_spawn_ai()
 	_update_streaming()
+	if BaseHub.deployment_running() and not def.get("crossings", []).is_empty():
+		var extraction := MapNodes.extraction(self)
+		if extraction:
+			extraction.server_open_crossings()  # the ways on and home (LZ-2), with or without a contract's briefing
 
 
 ## Host, right after the zone's save is loaded (before anything in it is put back): a subclass's
