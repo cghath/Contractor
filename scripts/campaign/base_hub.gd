@@ -2175,6 +2175,23 @@ func server_buy_defence(id: String) -> String:
 	return ""
 
 
+## Host (the motor pool page, wave 6 call #1): the company buys a `model` from the allied
+## quartermaster with the best deal (Quartermaster.vehicle_deals) into its motor pool. "" or why not.
+func server_buy_vehicle(model: String) -> String:
+	var deal := {}
+	for d: Dictionary in Quartermaster.vehicle_deals():
+		if String(d.model) == model:
+			deal = d
+	if deal.is_empty():
+		return "Nobody sells the company that yet (an allied quartermaster, at Trusted or better)"
+	if not BaseEconomy.try_spend(int(deal.price), "%s from %s" % [String(deal.name), String(MissionRegistry.faction(String(deal.faction)).get("name", deal.faction))]):
+		return "Can't afford the %s ($%d)" % [String(deal.name), int(deal.price)]
+	var id := MotorPool.add(model)
+	SessionLog.note("vehicle bought: %s (%s) for $%d" % [model, id, int(deal.price)])
+	_changed(&"base")
+	return ""
+
+
 ## Host (DefencePlacer, LZ-6): defence `id` built where a player placed it, `at` (zone metres,
 ## snapped to the zones' grid), paid as at its slot; the base reloads with it. "" or why not.
 func server_place_defence(id: String, at: Vector2) -> String:
@@ -2214,7 +2231,7 @@ func server_raid_by_air(zone_id: String) -> String:
 		return "Can't afford the flight ($%d)" % price
 	var why := server_deploy({"zone_id": zone_id, "no_contract": true, "zone_kind": RosterDeployment.RAID, "level": {"level": "zone", "def": def}})
 	if why != "":
-		Economy.charge_run(-price, "Raid flight refunded")
+		BaseEconomy.credit(price, "Raid flight refunded")  # (charge_run ignores a negative amount: the refund never landed)
 	return why
 
 
@@ -2939,6 +2956,8 @@ func _server_request(action: String, args: Array) -> void:
 				server_advance_days(clampi(int(args[0]) if not args.is_empty() else 1, 1, 30))
 			"defence":
 				why = server_buy_defence(String(args[0])) if sender == 1 and not args.is_empty() else "Only the host can do that"
+			"buy_vehicle":
+				why = server_buy_vehicle(String(args[0])) if sender == 1 and not args.is_empty() else "Only the host can do that"
 			"place_defence":
 				why = server_place_defence(String(args[0]), Vector2(float(args[1]), float(args[2]))) if sender == 1 and args.size() >= 3 else "Only the host can do that"
 			"raid_air":

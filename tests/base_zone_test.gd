@@ -695,6 +695,17 @@ func _test_placed_defences() -> void:
 	check(why == "" and BaseEconomy.funds() < funds and placed_mod.size() == 1,
 		"placed (snapped to the grid), paid for, and standing there when the base comes back (%s)" % why)
 	check(BaseFob.placement_problem("mg_pit", spot, BaseHub.base().get("defences", [])).contains("another defence"), "and nothing else goes on top of it")
+	# Vehicles from an allied quartermaster into the motor pool (wave 6 call #1: MRAPs at Trusted).
+	var us0 := Economy.reputation("us_forces")
+	check(BaseHub.server_buy_vehicle("matv") != "", "no M-ATV for sale before the company stands Trusted with an allied force")
+	Economy.change_reputation("us_forces", 35 - us0, "test", false)
+	BaseEconomy.credit(100000, "test: funds for an M-ATV")
+	var pool_before := MotorPool.list().size()
+	var cash0 := BaseEconomy.funds()
+	var bought := BaseHub.server_buy_vehicle("matv")
+	check(bought == "" and MotorPool.list().size() == pool_before + 1 and String(MotorPool.list().back().model) == "matv" and BaseEconomy.funds() < cash0,
+		"Trusted with the US: an M-ATV bought into the motor pool (%s)" % bought)
+	Economy.change_reputation("us_forces", us0 - Economy.reputation("us_forces"), "test cleanup", false)
 	# Mortar pits count double on the wire; sensors count for nothing there but watch.
 	check(BaseFob.defence_cover(["mortar_pit", "sensor", "mg_pit"]) == 3, "a mortar pit counts double, a sensor not at all (%d)" % BaseFob.defence_cover(["mortar_pit", "sensor", "mg_pit"]))
 	var line := BaseFob.sensor_report(Vector3.ZERO, [Vector3(0, 0, -250), Vector3(10, 0, -240), Vector3(900, 0, 0)])

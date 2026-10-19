@@ -824,7 +824,11 @@ func _test_shop() -> void:
 	var uk0 := Economy.reputation("uk_forces")
 	check(Quartermaster.price(&"m4a1") == 1400 and not Quartermaster.sells(&"plate_carrier_heavy") and not Prices.for_sale(&"plate_carrier_heavy")
 		and not &"plate_carrier_heavy" in Quartermaster.catalog(), "Neutral with the allies: list prices, and no heavy armour anywhere")
+	check(Quartermaster.vehicle_deals().is_empty(), "and no vehicles for sale")
 	Economy.change_reputation("us_forces", 35 - Economy.reputation("us_forces"), "test", false)
+	var deals := Quartermaster.vehicle_deals()
+	check(deals.size() == 1 and String(deals[0].model) == "matv" and int(deals[0].price) == roundi(Quartermaster.vehicle_price("matv") * 0.85),
+		"Trusted with the US: an M-ATV for the motor pool, 15%% off ($%d)" % (int(deals[0].price) if not deals.is_empty() else -1))
 	check(Quartermaster.price(&"m4a1") == 1190 and Quartermaster.seller_text(&"m4a1").begins_with("US Forces, Trusted -15")
 		and Quartermaster.price(&"l85a2") == 1500 and not Quartermaster.sells(&"plate_carrier_heavy"),
 		"Trusted with the US: its kit 15%% off (M4 $%d, %s), not the UK's rifle, and still no heavy armour" % [Quartermaster.price(&"m4a1"), Quartermaster.seller_text(&"m4a1")])
@@ -834,6 +838,8 @@ func _test_shop() -> void:
 		and Quartermaster.price(&"plate_carrier_heavy") == 1200 and BaseEconomy.item_price(&"plate_carrier_heavy") == 1200,
 		"Allied: 25%% off, and the heavy carrier is for sale from its quartermaster ($%d)" % Quartermaster.price(&"plate_carrier_heavy"))
 	check(Economy.server_buy(&"plate_carrier_heavy", 1) and Economy.cash() == cash - 1200, "and buying it charges the quartermaster's price")
+	var models := Quartermaster.vehicle_deals().map(func(d: Dictionary) -> String: return String(d.model))
+	check(models == ["matv", "maxxpro"], "Allied: the MaxxPro too (%s)" % [models])
 	Economy.take_unbanked()
 	Economy.change_reputation("us_forces", us0 - Economy.reputation("us_forces"), "test cleanup", false)
 	Economy.change_reputation("uk_forces", uk0 - Economy.reputation("uk_forces"), "test cleanup", false)

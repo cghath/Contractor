@@ -11,7 +11,40 @@ extends RefCounted
 ## quartermaster deal at today's standing, whichever is lower. Economy.server_buy and the base
 ## terminal (BaseEconomy.item_price) both go through it, so the shop UI and the terminal agree.
 ## Standing is read through Economy.reputation, so it works on every peer.
-## MRAPs (also Trusted in call #1) need vehicles the company owns, which aren't built: not here.
+## Vehicles (call #1: MRAPs from Trusted): a tier's "vehicles" are models the quartermaster sells
+## into the company's motor pool (vehicle_deals; prices.json "vehicles", less the tier's discount).
+
+
+## What a vehicle `model` costs before any discount (prices.json "vehicles"), 0 if it isn't sold.
+static func vehicle_price(model: String) -> int:
+	return int((Prices.data().get("vehicles", {}) as Dictionary).get(model, 0))
+
+
+## The vehicles the company can buy at today's standing: [{"model", "name", "faction",
+## "tier_id", "price"}], the best deal per model, cheapest first.
+static func vehicle_deals() -> Array:
+	var best := {}
+	var tiers := MissionRegistry.reputation_tiers()
+	for f: String in MissionRegistry.faction_ids():
+		var qm := of(f)
+		if qm.is_empty():
+			continue
+		var tier := MissionRegistry.tier_index(Economy.reputation(f))
+		for i in tiers.size():
+			var entry: Dictionary = qm.get(String(tiers[i].id), {})
+			if entry.is_empty() or i > tier:
+				continue
+			for model: String in entry.get("vehicles", []):
+				var base := vehicle_price(model)
+				if base <= 0 or not VehicleSpecs.has_model(model):
+					continue
+				var price := maxi(1, roundi(base * (1.0 - float(entry.get("discount", 0.0)))))
+				if not best.has(model) or price < int(best[model].price):
+					best[model] = {"model": model, "name": String(VehicleSpecs.spec(model).get("name", model)), "faction": f,
+						"tier_id": String(tiers[i].id), "price": price}
+	var out: Array = best.values()
+	out.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return int(a.price) < int(b.price))
+	return out
 
 
 ## factions.json "quartermaster" of `faction` ({} for none).

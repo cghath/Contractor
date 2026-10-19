@@ -540,6 +540,19 @@ const AWAY_FROM_POOL := "Service is booked at the motor pool's sign"
 ## checks the asker is at the motor pool terminal, which only the base has).
 func _build_motor_pool(rows: VBoxContainer) -> void:
 	rows.add_child(UiKit.hint("The company's vehicles. Take one on a deployment from the briefing's supports; one left in a zone or destroyed there is gone from the pool. Service is booked at the motor pool's sign."))
+	# Wave 6 call #1: allied quartermasters sell MRAPs from Trusted (Quartermaster.vehicle_deals).
+	var buy := UiKit.section("Buy vehicles (allied quartermasters)", rows)
+	var deals := Quartermaster.vehicle_deals()
+	if deals.is_empty():
+		buy.add_child(UiKit.hint("Nobody sells the company vehicles yet: stand Trusted with an allied force (US, UK, Canadian) for an M-ATV."))
+	for d: Dictionary in deals:
+		var model := String(d.model)
+		var b := UiKit.button("Buy a %s ($%s, %s)" % [String(d.name), DebriefCalc.money(int(d.price)), String(MissionRegistry.faction(String(d.faction)).get("name", d.faction))],
+			func() -> void:
+				BaseHub.request("buy_vehicle", [model])
+				get_tree().create_timer(0.5).timeout.connect(refresh))
+		b.disabled = not multiplayer.is_server()
+		buy.add_child(b)
 	var node := MotorPoolNode.of(self)
 	var pool: Array = node.pool if node else []
 	if pool.is_empty():
