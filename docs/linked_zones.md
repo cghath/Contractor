@@ -88,7 +88,10 @@ the push to build up the PMC and toward the endgame.
 - **Building up (decided: all of these).**
   - **Defences bought** at the ops desk (watchtowers, HESCO extensions, MG and mortar pits,
     sensors), placed at set slots or **freely** by the players with a placement tool (valid ground,
-    inside the base's build area).
+    inside the base's build area). Built (2026-10-19): "Place it yourself" at the ops desk opens
+    `DefencePlacer`, a see-through block on the zones' 12 m grid (defences are modules), green or
+    red by `BaseFob.placement_problem` (inside `BUILD_HALF`, off the helipad, vehicle park and
+    range, clear of other defences, at most `MAX_PLACED` of a kind). Enter builds it, Esc cancels.
   - **Hired guards** who man the base while the squad is out (wages, part of the weekly bill).
   - **Hired player-faction squads you command** (decided; inspired by Arma 3's Platoon Commander
     mod): whole AI squads hired into the company, each with its own leader, gear and wages, ordered

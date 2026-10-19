@@ -63,6 +63,53 @@ const TIERS := {
 }
 
 
+## Placing defences yourself (DefencePlacer, LZ-6): within BUILD_HALF of the FOB's centre (its
+## module sits at the zone's origin, so FOB and zone metres agree), on the zones' grid, at most
+## MAX_PLACED of each kind besides its slot. Proposed.
+const BUILD_HALF := 96.0
+const MAX_PLACED := 3
+
+
+## The base's defences as {"id", "pos": [x, z]} (BaseHub base "defences": an id is built at its
+## slot, a {"id", "pos"} where it was placed).
+static func defence_places(defences: Array) -> Array:
+	var out: Array = []
+	for e: Variant in defences:
+		if e is String and DEFENCES.has(e):
+			out.append({"id": e, "pos": DEFENCES[e].slot, "placed": false})
+		elif e is Dictionary and DEFENCES.has(String(e.get("id", ""))):
+			out.append({"id": String(e.id), "pos": e.pos, "placed": true})
+	return out
+
+
+## Why defence `id` can't stand at `at` (zone metres, its centre) among `defences` (as BaseHub
+## keeps them), or "": inside the build area, clear of the helipad, the vehicle park, the range
+## and every other defence, and not more than MAX_PLACED of a kind placed.
+static func placement_problem(id: String, at: Vector2, defences: Array) -> String:
+	if not DEFENCES.has(id):
+		return "No such defence"
+	var half := Vector2(float(DEFENCES[id].half[0]), float(DEFENCES[id].half[1]))
+	var rect := Rect2(at - half, half * 2.0)
+	if absf(at.x) + half.x > BUILD_HALF or absf(at.y) + half.y > BUILD_HALF:
+		return "outside the base's build area"
+	var range_rect := Rect2(RANGE_END_X, -8.0, RANGE_LINE_X - RANGE_END_X, 16.0)
+	for keep: Array in [[HELIPAD, "the helipad"], [VEHICLE_PARK, "the vehicle park"], [range_rect, "the range"]]:
+		if rect.grow(-0.01).intersects(keep[0]):
+			return "that's %s" % keep[1]
+	var placed := 0
+	for e: Variant in defences:
+		if e is Dictionary and String(e.get("id", "")) == id:
+			placed += 1
+	if placed >= MAX_PLACED:
+		return "%d placed already" % MAX_PLACED
+	for d: Dictionary in defence_places(defences):
+		var dh := Vector2(float(DEFENCES[d.id].half[0]), float(DEFENCES[d.id].half[1]))
+		var other := Rect2(Vector2(float(d.pos[0]), float(d.pos[1])) - dh, dh * 2.0)
+		if rect.grow(-0.01).intersects(other):
+			return "another defence stands there"
+	return ""
+
+
 ## A defence's voxel boxes, metres from its own origin.
 static func defence_boxes(id: String) -> Array:
 	var out: Array = []

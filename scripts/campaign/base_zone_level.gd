@@ -99,10 +99,12 @@ static func _add_threats(def: Dictionary, seed: int) -> void:
 ## their slots.
 static func _defences() -> Array:
 	var out: Array = []
-	for id: String in BaseHub.base().get("defences", []):
-		if BaseFob.DEFENCES.has(id):
-			var slot: Array = BaseFob.DEFENCES[id].slot
-			out.append({"id": "def_" + id, "type": "fob_" + id, "pos": [float(slot[0]), float(slot[1])]})
+	var n := 0
+	for d: Dictionary in BaseFob.defence_places(BaseHub.base().get("defences", [])):
+		n += 1
+		# (a slot's module keeps the id it always had: the zone save's damage is by module)
+		var mid := "def_%s_p%d" % [d.id, n] if d.placed else "def_" + String(d.id)
+		out.append({"id": mid, "type": "fob_" + String(d.id), "pos": [float(d.pos[0]), float(d.pos[1])]})
 	return out
 
 

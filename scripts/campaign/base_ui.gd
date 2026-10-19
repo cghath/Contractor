@@ -296,13 +296,24 @@ func _build_squad(rows: VBoxContainer, v: Dictionary) -> void:
 	var owned: Array = v.get("defences", [])
 	for id: String in BaseFob.DEFENCES:
 		var d: Dictionary = BaseFob.DEFENCES[id]
+		var locked := int(d.get("tier", 1)) > tier
+		var placed := owned.filter(func(e: Variant) -> bool: return e is Dictionary and String(e.get("id", "")) == id).size()
+		var row: Array[Control] = []
 		if id in owned:
-			defence.add_child(UiKit.text("%s: built." % d.name))
+			defence.add_child(UiKit.text("%s: built at its slot%s." % [d.name, "" if placed == 0 else ", %d placed" % placed]))
 		else:
-			var buy := UiKit.button("Build %s ($%d)" % [d.name, int(d.price)] + ("" if int(d.get("tier", 1)) <= tier else " (tier %d)" % int(d.tier)),
+			var buy := UiKit.button("Build %s ($%d)" % [d.name, int(d.price)] + ("" if not locked else " (tier %d)" % int(d.tier)),
 				func() -> void: BaseHub.request("defence", [id]))
-			buy.disabled = not multiplayer.is_server() or int(d.get("tier", 1)) > tier
-			defence.add_child(buy)
+			buy.disabled = not multiplayer.is_server() or locked
+			row.append(buy)
+		# LZ-6: or put one where you want it (DefencePlacer), up to BaseFob.MAX_PLACED of a kind.
+		var place_it := func() -> void:
+			close()
+			DefencePlacer.start(self, id)
+		var place := UiKit.button("Place it yourself", place_it, "Walk the base: a block shows where it goes; Enter builds it there ($%d), Esc puts it away" % int(d.price))
+		place.disabled = not multiplayer.is_server() or locked or placed >= BaseFob.MAX_PLACED or not BaseHub.in_base()
+		row.append(place)
+		defence.add_child(UiKit.button_row(row))
 	var booked: Dictionary = v.get("assault", {})
 	if not booked.is_empty():
 		defence.add_child(UiKit.text("Expect an assault on day %d (%s)." % [int(booked.day), String(booked.faction).capitalize()]))

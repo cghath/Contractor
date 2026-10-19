@@ -2158,6 +2158,10 @@ func server_buy_defence(id: String) -> String:
 	var owned: Array = base().get("defences", [])
 	if id in owned:
 		return "Already built"
+	var clash := BaseFob.placement_problem(id, Vector2(float(BaseFob.DEFENCES[id].slot[0]), float(BaseFob.DEFENCES[id].slot[1])) if BaseFob.DEFENCES.has(id) else Vector2.ZERO,
+		owned.filter(func(e: Variant) -> bool: return e is Dictionary))
+	if BaseFob.DEFENCES.has(id) and clash == "another defence stands there":
+		return "One you placed stands on its slot"
 	var d: Dictionary = BaseFob.DEFENCES[id]
 	if int(d.get("tier", 1)) > fob_tier():
 		return "The %s needs the FOB at tier %d" % [String(d.name), int(d.tier)]
@@ -2166,6 +2170,30 @@ func server_buy_defence(id: String) -> String:
 	owned.append(id)
 	base()["defences"] = owned
 	_changed(&"base")
+	if level() is BaseZoneLevel:
+		server_switch_level(base_info(), base_zone_id())  # the engineers put it up
+	return ""
+
+
+## Host (DefencePlacer, LZ-6): defence `id` built where a player placed it, `at` (zone metres,
+## snapped to the zones' grid), paid as at its slot; the base reloads with it. "" or why not.
+func server_place_defence(id: String, at: Vector2) -> String:
+	if not BaseFob.DEFENCES.has(id):
+		return "No such defence"
+	var d: Dictionary = BaseFob.DEFENCES[id]
+	if int(d.get("tier", 1)) > fob_tier():
+		return "The %s needs the FOB at tier %d" % [String(d.name), int(d.tier)]
+	at = Vector2(snappedf(at.x, ZoneDef.GRID_M), snappedf(at.y, ZoneDef.GRID_M))
+	var owned: Array = base().get("defences", [])
+	var why := BaseFob.placement_problem(id, at, owned)
+	if why != "":
+		return "Can't build it there: %s" % why
+	if not BaseEconomy.try_spend(int(d.price), String(d.name)):
+		return "Can't afford the %s ($%d)" % [String(d.name), int(d.price)]
+	owned.append({"id": id, "pos": [at.x, at.y]})
+	base()["defences"] = owned
+	_changed(&"base")
+	SessionLog.note("defence placed: %s at (%.0f, %.0f)" % [id, at.x, at.y])
 	if level() is BaseZoneLevel:
 		server_switch_level(base_info(), base_zone_id())  # the engineers put it up
 	return ""
@@ -2911,6 +2939,8 @@ func _server_request(action: String, args: Array) -> void:
 				server_advance_days(clampi(int(args[0]) if not args.is_empty() else 1, 1, 30))
 			"defence":
 				why = server_buy_defence(String(args[0])) if sender == 1 and not args.is_empty() else "Only the host can do that"
+			"place_defence":
+				why = server_place_defence(String(args[0]), Vector2(float(args[1]), float(args[2]))) if sender == 1 and args.size() >= 3 else "Only the host can do that"
 			"raid_air":
 				why = server_raid_by_air(String(args[0])) if sender == 1 and not args.is_empty() else "Only the host can do that"
 			"squads":

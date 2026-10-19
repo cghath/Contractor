@@ -133,6 +133,7 @@ func _run() -> void:
 	_test_threats()
 	await _test_assault()
 	await _test_defences()
+	await _test_placed_defences()
 	await _test_raid_by_air()
 	await _test_airframes()
 	await _test_crossings()
@@ -674,6 +675,26 @@ func _test_assault_near() -> void:
 	BaseAssault.server_tick_out(float(booked.hold_left_s) + 1.0)
 	check(not BaseHub.base().has("assault") and BaseHub.stash().size() <= stash_piles, "nobody came: it resolves off-screen")
 	dep["zone_id"] = was
+
+
+## LZ-6: defences placed by the players: on the grid, in the build area, clear of the pads and of
+## each other; paid, and the base comes back with them.
+func _test_placed_defences() -> void:
+	print("Placed defences (LZ-6)")
+	var owned: Array = BaseHub.base().get("defences", [])
+	check(BaseFob.placement_problem("mg_pit", Vector2(200, 0), owned).contains("build area"), "outside the build area: no")
+	check(BaseFob.placement_problem("mg_pit", BaseFob.HELIPAD.get_center(), owned).contains("helipad"), "on the helipad: no")
+	var spot := Vector2(-48, -48)
+	check(BaseFob.placement_problem("mg_pit", spot, owned) == "", "a clear cell: yes")
+	var funds := BaseEconomy.funds()
+	var why := BaseHub.server_place_defence("mg_pit", spot + Vector2(3, -4))
+	await _wait_until(func() -> bool: return BaseHub.in_base() and not BaseHub.switch_pending() and CompoundLevel.current(self) is BaseZoneLevel, 40.0)
+	var base := CompoundLevel.current(self) as BaseZoneLevel
+	var placed_mod := (base.def.modules as Array).filter(func(m: Dictionary) -> bool:
+		return String(m.type) == "fob_mg_pit" and Vector2(float(m.pos[0]), float(m.pos[1])) == spot) if base else []
+	check(why == "" and BaseEconomy.funds() < funds and placed_mod.size() == 1,
+		"placed (snapped to the grid), paid for, and standing there when the base comes back (%s)" % why)
+	check(BaseFob.placement_problem("mg_pit", spot, BaseHub.base().get("defences", [])).contains("another defence"), "and nothing else goes on top of it")
 
 
 func _test_assault() -> void:
