@@ -474,10 +474,15 @@ func _test_ground_guard() -> void:
 	check(absf(guy.global_position.y - (h + 2.0)) < 0.2 and guy.movement.holding,
 		"spawned where the ground's chunk has no collision yet, he waits there (y %.1f, ground %.1f)" % [guy.global_position.y, h])
 	ground.collision_layer = 1
-	# Down and settled on it (a slow runner reported on-floor with him still a metre up, mid-settle).
-	await _wait_for(func() -> bool: return guy.is_on_floor() and absf(guy.global_position.y - h) < 0.6, 6.0)
-	check(guy.is_on_floor() and absf(guy.global_position.y - h) < 0.6 and not guy.movement.holding,
-		"once it's there he lands on it (y %.1f, ground %.1f)" % [guy.global_position.y, h])
+	await _wait_for(func() -> bool: return guy.is_on_floor() and not guy.movement.holding, 6.0)
+	# He lands on whatever is under him: the ground, or (a slow runner) a rock the scatter's
+	# collision streamed in after the spot was picked (CI, a metre up). Either way he stopped
+	# holding and stands on it.
+	var under := guy.get_world_3d().direct_space_state.intersect_ray(PhysicsRayQueryParameters3D.create(
+		guy.global_position + Vector3.UP * 0.5, guy.global_position + Vector3.DOWN * 3.0, 1, [guy.get_rid()]))
+	var on := not under.is_empty() and absf(float(under.position.y) - guy.global_position.y) < 0.3
+	check(guy.is_on_floor() and on and not guy.movement.holding,
+		"once it's there he lands on it (y %.1f, ground %.1f, on %s)" % [guy.global_position.y, h, under.get("collider", "nothing")])
 	var guard := level.get_node(^"GroundGuard") as GroundGuard
 	guy.global_position = Vector3(centre.x, h - 20.0, centre.y)
 	await get_tree().physics_frame
