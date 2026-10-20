@@ -125,14 +125,15 @@ A mortar team is a gunner and an assistant (plus a third man for the 82 mm), the
 4. Part d: the player's side: buying, carrying and setting up, the command menu and map orders.
 5. The DShK and the 82 mm: the same work for the other side's weapons.
 
-## Calls for the Captain
+## The Captain's calls (2026-10-19)
 
-1. **Weapons first:** the M2 and DShK, the M224 60 mm and 82 mm mortars (proposed). A grenade
-   launcher (Mk19, AGS-17) later?
-2. **Weights:** real weights (an M2 is 38 kg plus a 20 kg tripod: a two-man carry that slows you
-   down) or lighter for play?
-3. **Mortar ranges:** our zones are 1.5-4 km across, so real ranges (60 mm to 3.5 km, 82 mm to
-   4 km) reach almost anywhere and moving into range would hardly happen. Proposed: ranges fitted
-   to the zones (60 mm 80-1200 m, 82 mm 100-1800 m), so teams really do move into range.
-4. **Player mortar aiming:** a map mark with the firing solution worked out (proposed), or manual
-   range and charge tables?
+1. **Weapons first: as proposed.** The M2 and DShK, the M224 60 mm and 82 mm mortars; grenade
+   launchers (Mk19, AGS-17) later.
+2. **Weights: real.** An M2 is 38 kg plus a 20 kg tripod: a two-man carry that slows you down.
+3. **Mortar ranges: real.** 60 mm about 70-3,500 m, 82 mm about 85-4,000 m. On our zones a mortar
+   reaches most of the map, so it moves mainly for the minimum range, for a hot zone's 4 km, and to
+   get out of the enemy's sight or counter-fire; its spread grows with range, so a closer spot is
+   still a better one.
+4. **Player mortar aiming: manual tables.** No worked-out solution: the player reads the range
+   (and the height difference) off the map, looks up elevation and charge in the weapon's firing
+   table (shown in-game, like a real one), and sets them on the mortar. AI crews work it out.
