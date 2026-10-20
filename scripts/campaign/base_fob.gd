@@ -194,17 +194,25 @@ var level: CompoundLevel
 var wire_only := false
 ## Host: member id -> the Soldier standing for them at the muster line.
 var _muster := {}
+## Where things stand, if not the FOB's own (make's `p_layout`; the LHD's: LhdLayout.fob_layout),
+## all in this node's space: "terminals" (as TERMINALS), "spawns" (as BASE_SPAWNS), "muster_origin",
+## "muster_step", "muster_rows", "muster_per_row", "muster_max", "muster_facing" (y, radians: which
+## way the line faces), and "holds" (a Rect2 on x, z: what counts as inside; the wire's square if not
+## given). The armory floor (BaseArmory's slots) is the same everywhere.
+var layout := {}
 
 
-## Puts a FOB into `p_level` at `origin` (its terminals with it). Every peer.
-static func make(p_level: CompoundLevel, origin: Vector3, p_wire_only: bool) -> BaseFob:
+## Puts a FOB into `p_level` at `origin` (its terminals with it), laid out as `p_layout` says
+## (layout; {}: the FOB's own). Every peer.
+static func make(p_level: CompoundLevel, origin: Vector3, p_wire_only: bool, p_layout := {}) -> BaseFob:
 	var fob := BaseFob.new()
 	fob.name = "Fob"
 	fob.level = p_level
 	fob.wire_only = p_wire_only
+	fob.layout = p_layout
 	fob.position = origin
 	p_level.add_child(fob)
-	for t: Array in TERMINALS:
+	for t: Array in fob.lay("terminals", TERMINALS):
 		var terminal := BaseTerminal.new(t[0])
 		terminal.position = t[1]
 		terminal.rotation_degrees.y = t[2]
@@ -212,14 +220,22 @@ static func make(p_level: CompoundLevel, origin: Vector3, p_wire_only: bool) -> 
 	return fob
 
 
+## The layout's `key` (layout), else `fallback` (the FOB's own).
+func lay(key: String, fallback: Variant) -> Variant:
+	return layout.get(key, fallback)
+
+
 ## The i-th spawn point inside the gate (level space).
 func spawn_point(i: int) -> Vector3:
-	return to_global(BASE_SPAWNS[i % BASE_SPAWNS.size()])
+	var spawns: Array = lay("spawns", BASE_SPAWNS)
+	return to_global(spawns[i % spawns.size()])
 
 
-## Whether `p` (level space) is inside the wire.
+## Whether `p` (level space) is inside the wire (or the layout's "holds").
 func holds(p: Vector3) -> bool:
 	var q := to_local(p)
+	if layout.has("holds"):
+		return (layout.holds as Rect2).has_point(Vector2(q.x, q.z))
 	return absf(q.x) < PERIMETER_HALF and absf(q.z) < PERIMETER_HALF
 
 
@@ -277,19 +293,20 @@ func server_show_roster() -> void:
 				BaseHub.server_store_member_gear(mid, s.inventory.net_state)
 				s.queue_free()
 			_muster.erase(mid)
-	for i in mini(wanted.size(), MUSTER_MAX):
+	var per_row := int(lay("muster_per_row", MUSTER_PER_ROW))
+	for i in mini(wanted.size(), int(lay("muster_max", MUSTER_MAX))):
 		var mid: String = wanted[i]
 		if _muster.has(mid):
 			continue
 		var member := BaseHub.member(mid)
-		var pos := to_global(MUSTER_ORIGIN + MUSTER_STEP * (i % MUSTER_PER_ROW) + MUSTER_ROWS * (i / MUSTER_PER_ROW))
+		var pos: Vector3 = to_global(lay("muster_origin", MUSTER_ORIGIN) + lay("muster_step", MUSTER_STEP) * (i % per_row) + lay("muster_rows", MUSTER_ROWS) * (i / per_row))
 		var stats := Roster.ai_stats(member)
 		var s := level.spawn_soldier({"name": String(member.callsign), "faction": "friendly", "variant": Soldier.COMPANY_VARIANT, "pos": pos,
 			"loadout": [], "combat": stats.combat, "discipline": stats.discipline, "guard": false, "mode": "safe"})
 		s.role = StringName(member.role)
 		s.set_meta(&"roster_id", mid)
 		s.inventory.net_state = GameState.from_json(member.get("gear", {}))
-		s.rotation.y = PI + rotation.y  # facing the yard
+		s.rotation.y = float(lay("muster_facing", PI)) + rotation.y  # facing the yard
 		var brain := SquadAI.of(s)
 		if brain:
 			brain.order = Squad.Order.HOLD  # where they stand (SquadAI holds at its spawn point)

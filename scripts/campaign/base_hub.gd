@@ -140,6 +140,9 @@ func _ready() -> void:
 	Economy.day_advanced.connect(_on_day_advanced)
 	Contracts.contract_accepted.connect(_on_contract_accepted)
 	Contracts.contract_closed.connect(_on_contract_closed)
+	Contracts.contract_closed.connect(ZoneControl.on_contract_closed)  # a seize-and-hold won moves home (docs/lhd_home.md)
+	Economy.day_advanced.connect(ZoneControl.on_day_advanced)  # the liaison's offer comes back
+	view_changed.connect(ZoneControl.on_view_changed)  # clients: the region map follows home
 
 
 # --- Campaign state -------------------------------------------------------------------------
@@ -184,6 +187,7 @@ func new_campaign(hiring_seed := -1) -> void:
 	_set_aside_old_saves()
 	Campaign.reset_campaign()  # its files are aside by now: this only empties it in memory
 	Contracts.new_full_campaign()
+	ZoneControl.server_start(lhd_home_on_new())  # home: aboard the LHD (docs/lhd_home.md)
 	var b := base()
 	b["started"] = true
 	b["stash"] = []
@@ -229,6 +233,7 @@ func load_or_new() -> void:
 			base().erase(key)
 		base()["started"] = true
 	Contracts.ensure_campaign()
+	ZoneControl.server_loaded()  # a save from before zone control keeps its FOB
 	_hook_economy(true)
 	var dep := RosterDeployment.active(roster())
 	if not dep.is_empty() and not resume_info().is_empty():
@@ -519,6 +524,9 @@ func base_level():
 ## suites keep BaseLevel until the base zone is proven, BaseLevel the fallback), 0 BaseLevel, 1 the
 ## base zone.
 static var base_zone_mode := -1
+## Whether a new campaign starts aboard the LHD (docs/lhd_home.md; ZoneControl.home): -1 yes except
+## under a test scene (the suites keep their base, as base_zone_mode), 0 no (the FOB, as before), 1 yes.
+static var lhd_home_mode := -1
 ## Host: the crossing the next level the squad goes to puts them at (set_arrival; LZ-2).
 var _next_arrival := ""
 ## Host (a crossing on, LZ-2): what each crosser brings into the next zone, put on their new body
@@ -551,11 +559,26 @@ func base_as_zone() -> bool:
 	return scene == null or not scene.scene_file_path.begins_with("res://tests/")
 
 
-## The level_info() the base is played from (come home through a crossing: arriving at it,
-## set_arrival).
+## Whether a campaign started now starts aboard the LHD (lhd_home_mode).
+func lhd_home_on_new() -> bool:
+	if lhd_home_mode >= 0:
+		return lhd_home_mode == 1
+	var scene := get_tree().current_scene
+	return scene == null or not scene.scene_file_path.begins_with("res://tests/")
+
+
+## Whether home is the LHD (ZoneControl.home): until a zone is taken for the FOB.
+func home_is_lhd() -> bool:
+	return ZoneControl.home_is_lhd()
+
+
+## The level_info() the base is played from: the LHD while it's home (LhdLevel), else the base
+## (come home through a crossing: arriving at it, set_arrival).
 func base_info() -> Dictionary:
 	var arrive := _next_arrival
 	_next_arrival = ""
+	if home_is_lhd():
+		return {"level": "lhd"}
 	if base_as_zone():
 		var def := BaseZoneLevel.def_for(Contracts.campaign_seed())
 		if arrive != "":
@@ -1249,7 +1272,7 @@ func _show_loading(kind: String) -> void:
 	var shade := UiKit.dim(0.94)
 	UiKit.apply(shade)
 	_loading.add_child(shade)
-	var label := UiKit.title("Loading %s..." % {"base": "the base", "zone": "the zone"}.get(kind, "the level"))
+	var label := UiKit.title("Loading %s..." % {"base": "the base", "zone": "the zone", "base_zone": "the base", "lhd": "the LHD"}.get(kind, "the level"))
 	label.name = "Label"
 	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -1321,6 +1344,7 @@ func _process(delta: float) -> void:
 			_seat_riders()
 			_land_followers()
 			BaseAssault.server_tick_out(STASH_POLL_S)  # the base holding out while the squad is near (LZ-5)
+			ZoneControl.server_scan(level())  # HQ and QRF bases down flip the zone (docs/lhd_home.md)
 		return
 	var now: Array = base_level().server_collect_stash()
 	if now != Roster.json_safe(stash()):
@@ -2193,11 +2217,17 @@ func server_upgrade_fob() -> String:
 	return ""
 
 
+## Aboard the LHD (docs/lhd_home.md): the ship is never attacked; defences come with a FOB ashore.
+const NO_DEFENCES_ABOARD := "The LHD needs no defences: they come with a FOB ashore (take a zone)"
+
+
 ## Host (the ops desk): buys defence `id` (BaseFob.DEFENCES) for the FOB. The engineers put it up
 ## at once: the base zone reloads with it. Returns "" or why not.
 func server_buy_defence(id: String) -> String:
 	if not BaseFob.DEFENCES.has(id):
 		return "No such defence"
+	if home_is_lhd():
+		return NO_DEFENCES_ABOARD
 	var owned: Array = base().get("defences", [])
 	if id in owned:
 		return "Already built"
@@ -2240,6 +2270,8 @@ func server_buy_vehicle(model: String) -> String:
 func server_place_defence(id: String, at: Vector2) -> String:
 	if not BaseFob.DEFENCES.has(id):
 		return "No such defence"
+	if home_is_lhd():
+		return NO_DEFENCES_ABOARD
 	var d: Dictionary = BaseFob.DEFENCES[id]
 	if int(d.get("tier", 1)) > fob_tier():
 		return "The %s needs the FOB at tier %d" % [String(d.name), int(d.tier)]
@@ -3062,6 +3094,8 @@ func build_view() -> Dictionary:
 		"guards": guards(), "assault": base().get("assault", {}), "defences": base().get("defences", []), "fob_tier": fob_tier(), "max_guards": max_guards(),
 		"rebels": RebelSupport.view(), "favours": int(RebelSupport._s().get("favours", 0)), "rebel_upgrades": RebelSupport.upgrades_view(),
 		"company_squads": company_squads(), "max_squads": int(BaseFob.TIERS[fob_tier()].squads),
+		"home": ZoneControl.home(), "zone_control": ZoneControl.view(),  # docs/lhd_home.md
+		"pool_models": MotorPool.view().map(func(v: Dictionary) -> String: return String(v.model)),  # the LHD's vehicle park
 	}
 
 

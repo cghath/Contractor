@@ -48,6 +48,7 @@ static func layout() -> Dictionary:
 					_layout[ids[k]] = cell
 					k += 1
 		x0 += cols
+	ZoneControl.apply_to_layout(_layout)  # the base's cell follows home (none aboard the LHD; docs/lhd_home.md)
 	return _layout
 
 
