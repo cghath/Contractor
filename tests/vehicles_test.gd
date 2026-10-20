@@ -186,6 +186,7 @@ func _run_host(wait_for_client: bool) -> void:
 		await _test_gun_team()
 		await _test_mortar_team()
 		await _test_weapons_team_orders()
+		await _test_armour_reaction()
 	if _want("chase_camera"):
 		await _test_chase_camera()
 	if _want("turret"):
@@ -1348,6 +1349,32 @@ func _test_weapons_team_orders() -> void:
 		"Pack up and follow: packed, the loads back in their hands, the team done (%s, %s)" % [a.inventory.hands, b.inventory.hands])
 	for s: Soldier in [a, b]:
 		s.queue_free()
+	await _seconds(0.3)
+
+
+## AI bar G-20: a rifleman who sees crewed enemy armour takes it as his threat (to fight from
+## cover against it); an empty one is no threat.
+func _test_armour_reaction() -> void:
+	print("Infantry against armour")
+	var at := level.ground_point(Vector3(60, 0, -40))
+	var ifv := layer.server_spawn("bradley", Transform3D(Basis(), at), "", &"hostile", "test_hostile_ifv")
+	await _seconds(0.5)
+	var rifleman := _soldier("friendly", level.ground_point(Vector3(60, 0, 60)) + Vector3(0, 0.1, 0), "ArmourWatcher")
+	await _seconds(0.3)
+	var ai := SquadAI.of(rifleman)
+	ai._armour_at = -1000.0
+	ai._watch_armour()
+	check(rifleman.threat_pos.distance_to(ifv.global_position) > 5.0, "an empty IFV is no threat")
+	var crew := _soldier("hostile", at + Vector3(3, 0.1, 0), "IfvCrew")
+	check(ifv.server_enter(crew, 0), "a hostile gets in it")
+	ai._armour_at = -1000.0
+	ai._watch_armour()
+	check(rifleman.threat_pos.distance_to(ifv.global_position) < 1.0 and ai.in_contact(), "crewed, %.0f m off in sight: it's his threat (%.1f m)" % [
+		rifleman.global_position.distance_to(ifv.global_position), rifleman.threat_pos.distance_to(ifv.global_position)])
+	ifv.server_exit(crew)
+	crew.queue_free()
+	rifleman.queue_free()
+	ifv.queue_free()
 	await _seconds(0.3)
 
 

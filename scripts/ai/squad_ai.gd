@@ -568,6 +568,17 @@ const DRILL_S := Vector2(1.0, 2.5)
 ## is kept IMPACT_KEEP_S (IMPACT_MAX of them, the level's), and a cover spot within IMPACT_NEAR_M
 ## of one an enemy's round struck scores IMPACT_PENALTY worse (find_cover: so bounds and cover
 ## moves go round it). Proposed.
+## Armour (AI bar G-20; LAMBS hides from a tank within 450 m): enemy armour (ARMOUR_CLASSES, crewed)
+## in sight within ARMOUR_HIDE_M is a threat a rifle can't answer: it becomes his threat point (so
+## he fights from cover against it), and within ARMOUR_SMOKE_M with no launcher near him
+## (ARMOUR_AT_NEAR_M) he smokes it. The launcher men go for it (LauncherAI). Checked every
+## ARMOUR_CHECK_S. Proposed.
+const ARMOUR_CLASSES: Array[String] = ["ifv", "mbt"]
+const ARMOUR_HIDE_M := 450.0
+const ARMOUR_SMOKE_M := 150.0
+const ARMOUR_AT_NEAR_M := 40.0
+const ARMOUR_CHECK_S := 2.0
+var _armour_at := -1000.0
 const IMPACT_KEEP_S := 15.0
 const IMPACT_MAX := 64
 const IMPACT_NEAR_M := 3.0
@@ -1444,6 +1455,7 @@ func _act() -> void:
 			_do_fall_back()
 		Intent.TACTIC:
 			_do_tactic(_tactic())
+	_watch_armour()  # (G-20: enemy armour in sight is a threat to hide from)
 	_contact_drill()  # (G-18: the first moments of a contact, before the plan)
 	_keep_to_fire_spot()  # a base of fire with no line of fire: to where it has one
 	_apply_combat_mode()
@@ -3872,6 +3884,58 @@ func _auto_stance() -> int:
 	if hidden or body.global_position.distance_to(threat) >= PRONE_OPEN_M:
 		return SoldierMovement.Stance.PRONE
 	return -1
+
+
+## Enemy armour in sight (see ARMOUR_CLASSES): his threat, and smoke when it's close.
+func _watch_armour() -> void:
+	var now := Soldier._now()
+	if now - _armour_at < ARMOUR_CHECK_S or Vehicle.ride_of(body) != null or not body.vitals.is_up():
+		return
+	_armour_at = now
+	var v := _enemy_armour()
+	if v == null:
+		return
+	var at := v.global_position + Vector3.UP * 1.5
+	body.threat_pos = v.global_position
+	body.threat_err = 0.0
+	body.threat_time = now
+	_last_contact = now
+	if Launchers.launcher_of(body) != null:
+		return  # LauncherAI has him on it
+	if body.global_position.distance_to(at) <= ARMOUR_SMOKE_M and not _launcher_near():
+		_screen_toward_threat(_cover_point if _has_cover else at)
+
+
+## The nearest crewed enemy armour in sight within ARMOUR_HIDE_M, or null.
+func _enemy_armour() -> Vehicle:
+	var best: Vehicle = null
+	var best_d := ARMOUR_HIDE_M
+	var eye := body.camera.global_position
+	for n in get_tree().get_nodes_in_group(Vehicle.GROUP):
+		var v := n as Vehicle
+		if v == null or v.wrecked or not String(v.spec.get("class", "")) in ARMOUR_CLASSES:
+			continue
+		var d := eye.distance_to(v.global_position)
+		if d >= best_d:
+			continue
+		var crewed := false
+		for s: Soldier in v.occupants():
+			if is_instance_valid(s) and s.vitals.is_up() and s.faction != body.faction:
+				crewed = true
+				break
+		if crewed and Throwables.clear_line(body.get_world_3d(), eye, v.global_position + Vector3.UP * 1.5):
+			best = v
+			best_d = d
+	return best
+
+
+func _launcher_near() -> bool:
+	if squad == null:
+		return false
+	for m in squad.members():
+		if m.global_position.distance_to(body.global_position) <= ARMOUR_AT_NEAR_M and Launchers.launcher_of(m) != null:
+			return true
+	return false
 
 
 ## The first-contact drill (see DRILL_S): stop, face the threat, get down.

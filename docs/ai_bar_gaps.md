@@ -54,7 +54,7 @@ We learn from these mods and are inspired by how they behave. We take no code fr
 | G-17 | Positions are picked without terrain, height or a second threat (part done 2026-10-19: base of fire takes high ground, flanks like height, folds count as cover, gun teams pick defilade against every known enemy; riflemen's cover against a second threat still to do) | P2 | M |
 | G-18 | ~~No first-contact drill (freeze, face, get down)~~ (done 2026-10-20) | P2 | S |
 | G-19 | ~~Nothing avoids ground that is being shot up~~ (done 2026-10-20: cover choice, so bounds and moves too) | P2 | M |
-| G-20 | Infantry don't react to armour | P2 | M |
+| G-20 | ~~Infantry don't react to armour~~ (done 2026-10-20, first pass: crewed IFVs and tanks in sight are a threat to take cover from, smoke when close with no launcher near) | P2 | M |
 | G-21 | ~~Every flank is the same close hook~~ (done 2026-10-20: the other side next time, sometimes wide) | P2 | S |
 | G-22 | ~~A lost enemy is searched for where he was, not where he was going~~ (done 2026-10-20) | P2 | S |
 | G-23 | Few visible reactions to being hit | P2 | M |
