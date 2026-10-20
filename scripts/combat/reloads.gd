@@ -256,6 +256,84 @@ static func keys(fam: StringName, empty: bool) -> Array:
 	]
 
 
+## How the weapon's own moving parts go through a reload of `fam` (weapon detail pass,
+## 2026-10-20; VoxelArt tags them, VoxelArt.part_motion says how far): "bolt" (0 home, 1 back:
+## the AR's carrier and the L85's handle locked back on an empty magazine until the catch or the
+## release lets them go, the AK's handle racked, a belt-fed charged, a bolt-action drawn back, a
+## pistol's slide locked back), "lift" (a bolt-action's handle turned up) and "cover" (a
+## belt-fed's feed cover, 1 open). Each is [[share, value], ...], eased between like the keys;
+## a part not named stays home.
+static func parts(fam: StringName, empty: bool) -> Dictionary:
+	match fam:
+		AK:
+			return {"bolt": [[0.71, 0.0], [0.76, 1.0], [0.79, 0.0]]} if empty else {}
+		BULLPUP:
+			return {"bolt": [[0.0, 1.0], [0.67, 1.0], [0.71, 0.0]]} if empty else {}
+		BELT:
+			var out := {"cover": [[0.24, 0.0], [0.3, 1.0], [0.82, 1.0], [0.86, 0.0]]}
+			if empty:
+				out["bolt"] = [[0.08, 0.0], [0.14, 1.0], [0.18, 0.0]]  # charged: the handle goes home, the bolt stays back on the sear
+			return out
+		BOLT:
+			return {"lift": [[0.1, 0.0], [0.16, 1.0], [0.84, 1.0], [0.88, 0.0]], "bolt": [[0.16, 0.0], [0.22, 1.0], [0.78, 1.0], [0.84, 0.0]]}
+		BOLT_MAG:
+			return {"lift": [[0.6, 0.0], [0.66, 1.0], [0.78, 1.0], [0.81, 0.0]], "bolt": [[0.66, 0.0], [0.72, 1.0], [0.78, 0.0]]} if empty else {}
+		PISTOL:
+			return {"bolt": [[0.0, 1.0], [0.77, 1.0], [0.8, 0.0]]} if empty else {}
+	return {"bolt": [[0.0, 1.0], [0.69, 1.0], [0.72, 0.0]]} if empty else {}  # AR: the catch slapped, the carrier slams home
+
+
+## A part's value at share `u` of its track (parts): eased between points, held past the ends.
+static func track(points: Array, u: float) -> float:
+	if points.is_empty():
+		return 0.0
+	if u <= float(points[0][0]):
+		return float(points[0][1])
+	for i in range(1, points.size()):
+		var b: Array = points[i]
+		if u < float(b[0]):
+			var a: Array = points[i - 1]
+			var w := smoothstep(0.0, 1.0, (u - float(a[0])) / maxf(float(b[0]) - float(a[0]), 0.0001))
+			return lerpf(float(a[1]), float(b[1]), w)
+	return float(points[-1][1])
+
+
+## The sounds of a reload of `fam` (weapon detail pass, 2026-10-20: one "reload" sound played at
+## the start before), on the keys' beats: [[share, sound id (data/sounds.json), volume dB], ...]
+## in order. The magazine coming out and going in, the bolt drawn back and slamming home (a
+## catch slapped, a release pressed, a handle let go), a feed cover flipped open and slammed
+## shut, a belt laid on the tray, a clip's rounds stripped in.
+static func beats(fam: StringName, empty: bool) -> Array:
+	match fam:
+		AK:
+			if empty:
+				return [[0.4, &"reload_mag_out", 0.0], [0.54, &"reload_mag_in", 0.0], [0.76, &"reload_bolt_back", 0.0], [0.79, &"reload_bolt_fwd", 0.0]]
+			return [[0.18, &"reload_mag_out", 0.0], [0.68, &"reload_mag_in", 0.0]]
+		BULLPUP:
+			if empty:
+				return [[0.1, &"reload_mag_out", 0.0], [0.58, &"reload_mag_in", 0.0], [0.71, &"reload_bolt_fwd", 0.0], [0.83, &"reload_bolt_fwd", -9.0]]
+			return [[0.25, &"reload_mag_out", 0.0], [0.72, &"reload_mag_in", 0.0]]
+		BELT:
+			var out: Array = []
+			if empty:
+				out.append_array([[0.14, &"reload_bolt_back", 0.0], [0.18, &"reload_bolt_fwd", -4.0]])
+			out.append_array([[0.29, &"reload_cover_open", 0.0], [0.46, &"reload_mag_out", 0.0], [0.7, &"reload_mag_in", 0.0],
+				[0.79, &"reload_belt", 0.0], [0.86, &"reload_cover_close", 0.0]])
+			return out
+		BOLT:
+			return [[0.16, &"reload_bolt_back", -3.0], [0.22, &"reload_bolt_back", 0.0], [0.6, &"reload_clip", 0.0], [0.88, &"reload_bolt_fwd", 0.0]]
+		BOLT_MAG:
+			if empty:
+				return [[0.06, &"reload_mag_out", 0.0], [0.56, &"reload_mag_in", 0.0], [0.72, &"reload_bolt_back", 0.0], [0.81, &"reload_bolt_fwd", 0.0]]
+		PISTOL:
+			if empty:
+				return [[0.06, &"reload_mag_out", -3.0], [0.56, &"reload_mag_in", -3.0], [0.8, &"reload_bolt_fwd", -3.0]]
+			return [[0.2, &"reload_mag_out", -3.0], [0.66, &"reload_mag_in", -3.0]]
+	if empty:
+		return [[0.06, &"reload_mag_out", 0.0], [0.56, &"reload_mag_in", 0.0], [0.72, &"reload_bolt_fwd", 0.0]]
+	return [[0.2, &"reload_mag_out", 0.0], [0.66, &"reload_mag_in", 0.0]]
+
+
 ## The pose at share `u` of a reload with keys `ks`: {"anchor_a", "anchor_b", "w" (0..1 from a
 ## to b, eased), "hand_a", "hand_b", "pos", "rot", "old", "new", "tip", "since" (the share the
 ## current key began at)}.

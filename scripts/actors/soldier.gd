@@ -108,6 +108,16 @@ const MAX_BODIES := 12
 var active_slot: StringName = &"primary"
 ## Owner-driven, replicated so others see the reload pose.
 var is_reloading := false
+## Every peer: the reload under way (weapon detail pass, 2026-10-20: peers didn't know its
+## progress, so the third-person hand only cycled at the magazine and one sound played at the
+## start). The host tells every peer when one begins (_reload_began); each times it from then on
+## its own clock: the weapon reloaded, empty or not, its length, when it began here, and its
+## sounds still to play on the keys' beats (Reloads.beats).
+var reload_item: StringName = &""
+var reload_empty := false
+var reload_len := 1.0
+var reload_from := -100.0
+var _reload_beats: Array = []
 ## Owner-driven (players: the aim key; AI: SquadAI), replicated so everyone sees the rifle
 ## shouldered.
 var is_aiming := false
@@ -461,6 +471,7 @@ func _process(_delta: float) -> void:
 	# Runs on every peer: active_slot, inventory and head rotation are replicated.
 	model.look_pitch = head.rotation.x
 	model.reloading = is_reloading
+	_reload_tick()
 	model.aiming = is_aiming
 	model.left_handed = left_handed
 	model.name_tape = person_name.to_upper()
@@ -1159,9 +1170,10 @@ func _server_reload(slot: StringName) -> void:
 	var id: StringName = inventory.slots.get(slot, &"")
 	if id == &"":
 		return
-	var seconds := reload_seconds(ItemDB.get_item(id), inventory.rounds_in(slot) <= 0)
+	var empty := inventory.rounds_in(slot) <= 0
+	var seconds := reload_seconds(ItemDB.get_item(id), empty)
 	_server_busy_until = _now() + seconds
-	Sfx.server_play(&"reload", global_position + Vector3.UP)
+	_reload_began.rpc(id, empty, seconds)  # every peer: its keys and its sounds on their beats
 	_reload_n += 1
 	var n := _reload_n
 	var rev := inventory.slot_revision(slot)
@@ -1173,6 +1185,56 @@ func _server_reload(slot: StringName) -> void:
 	if is_inside_tree() and n == _reload_n and vitals.is_up() and inventory.slots.get(slot, &"") == id \
 			and inventory.slot_revision(slot) == rev:
 		inventory.reload(slot)
+
+
+## Every peer: the host says a reload of `item` began (_server_reload), so this peer plays it
+## from now (begin_reload_local). A player's own body already began it when the key went down
+## (PlayerInput), so its sounds aren't late by the trip to the host and back.
+@rpc("any_peer", "call_local", "reliable")
+func _reload_began(item: StringName, empty: bool, seconds: float) -> void:
+	if multiplayer.get_remote_sender_id() != 1:
+		return
+	if is_local() and reload_item == item and _now() - reload_from < 1.0:
+		return
+	begin_reload_local(item, empty, seconds)
+
+
+## A reload of `item` (empty or not, `seconds` long) begins here now: the third-person model's
+## keys (CharacterModel.reload_keys) and the sounds on their beats (Reloads.beats).
+func begin_reload_local(item: StringName, empty: bool, seconds: float) -> void:
+	var weapon := ItemDB.get_item(item)
+	if weapon == null:
+		return
+	var fam := Reloads.family(weapon)
+	reload_item = item
+	reload_empty = empty
+	reload_len = maxf(seconds, 0.1)
+	reload_from = _now()
+	_reload_beats = Reloads.beats(fam, empty)
+	model.reload_keys = Reloads.keys(fam, empty)
+	model.reload_len = reload_len
+
+
+## 0..1 through the reload under way, or -1 for none (it ended, the body went down, or the weapon
+## in hand isn't the one being reloaded any more).
+func reload_share() -> float:
+	var u := (_now() - reload_from) / reload_len
+	if u < 0.0 or u > 1.0 or reload_item == &"" or not vitals.is_up() or inventory.slots.get(active_slot, &"") != reload_item:
+		return -1.0
+	return u
+
+
+## Every frame on every peer: the third-person model follows the reload's keys, and each beat's
+## sound plays as its share comes (from the chest, where the hands work).
+func _reload_tick() -> void:
+	var u := reload_share()
+	model.reload_u = u
+	if u < 0.0:
+		_reload_beats.clear()
+		return
+	while not _reload_beats.is_empty() and u >= float(_reload_beats[0][0]):
+		var beat: Array = _reload_beats.pop_front()
+		Sfx.play_at(beat[1], global_position + Vector3.UP, float(beat[2]))
 
 
 ## Loads the carried part-used and empty magazines of the same calibre from loose

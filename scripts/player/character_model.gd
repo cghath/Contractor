@@ -381,6 +381,16 @@ var iff: Array = []
 var name_tape := ""
 ## While true the left hand works the magazine well instead of the support point.
 var reloading := false
+## The reload under way, from Soldier (weapon detail pass, 2026-10-20: the host tells every peer
+## when one begins, so the hand and the magazine follow the same keys as first person): its
+## Reloads.keys, its share so far (-1: none known, the hand just works the magazine) and its
+## length (s).
+var reload_keys: Array = []
+var reload_u := -1.0
+var reload_len := 1.0
+## Reloading in third person, the support hand's pouch: below and behind its place on the
+## handguard (in the held weapon's space), like first person's (PlayerInput.RELOAD_POUCH).
+const RELOAD_POUCH := Vector3(-0.1, -0.3, 0.2)
 ## Lying face down, head forward (see lay_down). Overrides `pose`.
 var downed := false
 var _flinch := 0.0      # a hit's jolt, decaying (flinch)
@@ -457,6 +467,13 @@ var _support := Vector3.ZERO  # left hand, in _held's local space
 ## "mag", in _held's local space: behind the grip on the L85), found once per weapon.
 var _reload_mag := Vector3.ZERO
 var _reload_mag_of := 0
+var _reload_pts := {}  # all the held weapon's VoxelArt.reload_points
+## While a reload's keys play, the held weapon is drawn without its magazine and the magazines are
+## parts of their own (VoxelArt.MAG): the weapon so drawn, its own mesh to put back, the old
+## magazine and the new.
+var _split_held: MeshInstance3D
+var _split_whole: Mesh
+var _mag_parts: Array[Node3D] = []
 var _last_position: Vector3
 var _move_dt := 0.0  # time since the body last moved (MOVE_WINDOW_S)
 var _speed := 0.0
@@ -922,6 +939,7 @@ func set_held(node: Node3D, grip: Vector3, support: Vector3, weapon := true) -> 
 		_reload_mag_of = node.get_instance_id()
 		var points := VoxelArt.reload_points(String(node.get_meta(&"voxel_model", ""))) if node.has_meta(&"voxel_model") else {}
 		_reload_mag = points.get("mag", grip.lerp(support, 0.35) + Vector3(0, -0.07, 0))
+		_reload_pts = points
 
 
 func clear_held() -> void:
@@ -1294,6 +1312,7 @@ func _process(frame_delta: float) -> void:
 		_speed = _move.length()
 		_move_dt = 0.0
 	_time += delta
+	_pose_reload_mags()
 	var carry_key := "%s/%s/%s" % [carry_net.get("mode", ""), carry_net.get("phase", ""), carry_net.get("n", 0)]
 	if carry_key != _carry_key:
 		_carry_key = carry_key
@@ -1949,12 +1968,78 @@ func _held_goals() -> Array:
 	var support := _support
 	if is_seated() and not is_ffv() and _held_weapon:
 		support = _grip + Vector3(0, 0.03, 0.11)  # the rifle stood up: the support hand over the firing hand
-	if reloading:
+	if reloading and reload_u >= 0.0 and not reload_keys.is_empty() and _held_weapon:
+		# The reload's keys, as in first person: the hand between the weapon's parts and the pouch.
+		var at := Reloads.sample(reload_keys, reload_u)
+		support = (_reload_anchor(at.anchor_a) + (at.hand_a as Vector3)).lerp(_reload_anchor(at.anchor_b) + (at.hand_b as Vector3), at.w)
+	elif reloading:
 		# The hand goes to the magazine and works it: out, down to the pouch and back up.
 		support = _reload_mag + Vector3(0, -0.06 + sin(_time * 4.0) * 0.06, 0)
 	var firing := [key, torso.to_local(_held.to_global(_grip))]
 	var other := [key, torso.to_local(_held.to_global(support))]
 	return [other, firing] if left_handed and _held_weapon else [firing, other]
+
+
+## Where reload anchor `anchor` (Reloads) is in the held weapon's space: its rest on the
+## handguard, the pouch, or a part of the weapon (VoxelArt.reload_points).
+func _reload_anchor(anchor: StringName) -> Vector3:
+	match anchor:
+		&"rest":
+			return _support
+		&"pouch":
+			return _support + RELOAD_POUCH
+	return _reload_pts.get(String(anchor), _reload_mag)
+
+
+## The magazines in third person, while a reload's keys play: the held weapon drawn without its
+## magazine, the old one in it, in the hand, falling free or gone, the new one in the hand or in
+## (as PlayerInput does in first person). Not on a weapon whose mesh is its own (carved by hits).
+func _pose_reload_mags() -> void:
+	var on := reloading and reload_u >= 0.0 and not reload_keys.is_empty() and _held_weapon and is_instance_valid(_held) and _held.has_meta(&"voxel_model")
+	var mesh_node: MeshInstance3D = _held.get_child(0) as MeshInstance3D if on and _held.get_child_count() > 0 else null
+	if mesh_node != _split_held:
+		_end_split()
+	if mesh_node == null:
+		return
+	var model := String(_held.get_meta(&"voxel_model"))
+	var variant := String(_held.get_meta(&"voxel_variant", ""))
+	if _split_held == null:
+		if not VoxelArt.has_magazine(model) or mesh_node.mesh != VoxelArt.mesh(model, variant):
+			return
+		_split_held = mesh_node
+		_split_whole = mesh_node.mesh
+		mesh_node.mesh = VoxelArt.mesh(VoxelArt.WITHOUT_MAG + model, variant)
+		for i in 2:
+			var mag := VoxelArt.instance(VoxelArt.MAG + model, variant, mesh_node.layers)
+			mag.name = "ReloadMagazine"
+			(mag.get_child(0) as MeshInstance3D).cast_shadow = mesh_node.cast_shadow
+			_held.add_child(mag)
+			_mag_parts.append(mag)
+	var at := Reloads.sample(reload_keys, reload_u)
+	var support: Vector3 = (_reload_anchor(at.anchor_a) + (at.hand_a as Vector3)).lerp(_reload_anchor(at.anchor_b) + (at.hand_b as Vector3), at.w)
+	var held := support - _reload_mag  # the magazine where the hand holds it
+	var dropped := maxf(reload_u - float(at.since), 0.0) * reload_len
+	var old: Node3D = _mag_parts[0]
+	var new: Node3D = _mag_parts[1]
+	old.visible = at.old != &"out" and at.new != &"in"
+	match at.old:
+		&"hand": old.transform = Transform3D(Basis(Vector3.RIGHT, float(at.tip)), held)
+		&"drop": old.transform = Transform3D(Basis(Vector3.RIGHT, -3.0 * dropped), Vector3(0.0, -4.9 * dropped * dropped, 0.03 * dropped))
+		_: old.transform = Transform3D.IDENTITY
+	new.visible = at.new != &"out"
+	new.transform = Transform3D(Basis(Vector3.RIGHT, float(at.tip)), held) if at.new == &"hand" else Transform3D.IDENTITY
+
+
+## The held weapon whole again, its magazine parts gone (a reload ended, or the weapon changed).
+func _end_split() -> void:
+	if is_instance_valid(_split_held) and _split_whole != null:
+		_split_held.mesh = _split_whole
+	for mag in _mag_parts:
+		if is_instance_valid(mag):
+			mag.queue_free()
+	_mag_parts.clear()
+	_split_held = null
+	_split_whole = null
 
 
 ## Seated with nothing in the hands: on the thighs, or forward on the controls at a station

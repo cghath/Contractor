@@ -145,6 +145,10 @@ var _reload_pos := Vector3.ZERO  # its weapon offset and turn this frame (Reload
 var _reload_rot := Vector3.ZERO
 var _mag_old: Node3D  # the magazine in the weapon (VoxelArt.MAG), and the fresh one in hand
 var _mag_new: Node3D
+var _bolt_part: Node3D  # the weapon's sliding action (VoxelArt.BOLT) and feed cover (COVER), drawn apart
+var _cover_part: Node3D
+var _part_motion := {}  # VoxelArt.part_motion of the weapon in view
+var _reload_parts := {}  # Reloads.parts of the reload under way
 var _deaf := false
 ## Placing a breaching charge (Charges): the ghost follows the view until Fire commits it.
 var placing := false
@@ -927,6 +931,8 @@ func _try_reload() -> void:
 	_reload_from = now
 	_reload_len = maxf(body.reload_seconds(weapon, empty), 0.1)
 	_reload_keys = Reloads.keys(Reloads.family(weapon), empty)
+	_reload_parts = Reloads.parts(Reloads.family(weapon), empty)
+	body.begin_reload_local(weapon.id, empty, _reload_len)  # its sounds, on the keys' beats, heard now
 	body.is_reloading = true
 	body._server_reload.rpc_id(1, body.active_slot)
 
@@ -1027,6 +1033,8 @@ func _update_view_model() -> void:
 		child.queue_free()
 	_mag_old = null
 	_mag_new = null
+	_bolt_part = null
+	_cover_part = null
 	_reload_points = {}
 	if nade_up:
 		_build_nade_view()
@@ -1037,8 +1045,22 @@ func _update_view_model() -> void:
 		body.view_model.add_child(LauncherSight.view_node(weapon))  # placeholder launcher (wave 5)
 		return
 	var model := art
+	var moving := VoxelArt.moving_parts(model)
+	if VoxelArt.has_magazine(model) or not moving.is_empty():
+		# The weapon in its parts (weapon detail pass, 2026-10-20): what stays put, and what a reload
+		# moves on its own: the magazine, the action (charging handle, carrier, bolt, slide), the
+		# feed cover. Each part keeps the weapon's pivot, so at rest they sit as one.
+		body.view_model.add_child(VoxelArt.instance(VoxelArt.FIXED + model, body.model.variant, VIEW_MODEL_LAYER))
+		if moving.has(VoxelArt.BOLT_TAG):
+			_bolt_part = VoxelArt.instance(VoxelArt.BOLT + model, body.model.variant, VIEW_MODEL_LAYER)
+			_bolt_part.name = "ViewBolt"
+			body.view_model.add_child(_bolt_part)
+		if moving.has(VoxelArt.COVER_TAG):
+			_cover_part = VoxelArt.instance(VoxelArt.COVER + model, body.model.variant, VIEW_MODEL_LAYER)
+			_cover_part.name = "ViewFeedCover"
+			body.view_model.add_child(_cover_part)
+		_part_motion = VoxelArt.part_motion(model)
 	if VoxelArt.has_magazine(model):
-		body.view_model.add_child(VoxelArt.instance(VoxelArt.WITHOUT_MAG + model, body.model.variant, VIEW_MODEL_LAYER))
 		_mag_old = VoxelArt.instance(VoxelArt.MAG + model, body.model.variant, VIEW_MODEL_LAYER)
 		_mag_old.name = "ViewMagazine"
 		_mag_new = VoxelArt.instance(VoxelArt.MAG + model, body.model.variant, VIEW_MODEL_LAYER)
@@ -1046,7 +1068,7 @@ func _update_view_model() -> void:
 		_mag_new.visible = false
 		body.view_model.add_child(_mag_old)
 		body.view_model.add_child(_mag_new)
-	else:
+	elif moving.is_empty():
 		body.view_model.add_child(VoxelArt.instance(model, body.model.variant, VIEW_MODEL_LAYER))
 	_reload_points = VoxelArt.reload_points(model)
 	var points := VoxelArt.hand_points(model)
@@ -1093,6 +1115,9 @@ func _update_reload_hand() -> void:
 		new_state = at.new
 		tip = at.tip
 		dropped = maxf(u - float(at.since), 0.0) * _reload_len
+		_pose_parts(u)
+	else:
+		_pose_parts(-1.0)
 	_support_arm.transform = Transform3D(_support_rest.basis, _support_rest.origin + hand)
 	# The magazines: in the weapon, carried (where the hand holds it), falling free, or gone.
 	var held := hand - _reload_anchor(&"mag")
@@ -1110,6 +1135,27 @@ func _update_reload_hand() -> void:
 		_mag_new.transform = Transform3D(Basis(Vector3.RIGHT, tip), held) if new_state == &"hand" else Transform3D.IDENTITY
 		if new_state == &"in" and is_instance_valid(_mag_old):
 			_mag_old.visible = false  # the fresh one's in its place
+
+
+## The weapon's moving parts at share `u` of the reload under way (Reloads.parts; below 0, none:
+## all home): the action slid back along the bore (and a bolt-action's handle turned up round
+## it), the feed cover turned up on its front hinge.
+func _pose_parts(u: float) -> void:
+	var at := func(part: String) -> float: return Reloads.track(_reload_parts.get(part, []), u) if u >= 0.0 else 0.0
+	if is_instance_valid(_bolt_part):
+		var axis: Vector3 = _part_motion.get("axis", Vector3.ZERO)
+		var turn := Basis(Vector3.BACK, float(_part_motion.get("lift", 0.0)) * at.call("lift"))
+		_bolt_part.transform = Transform3D(turn, axis - turn * axis + Vector3(0.0, 0.0, float(_part_motion.get("travel", 0.0)) * at.call("bolt")))
+	if is_instance_valid(_cover_part):
+		var hinge: Vector3 = _part_motion.get("hinge", Vector3.ZERO)
+		var lift := Basis(Vector3.RIGHT, -float(_part_motion.get("open", 0.0)) * at.call("cover"))
+		_cover_part.transform = Transform3D(lift, hinge - lift * hinge)
+
+
+## Tests: the action's travel back (m) and the feed cover's angle (rad) in first person now.
+func view_parts() -> Dictionary:
+	return {"bolt": _bolt_part.position.z if is_instance_valid(_bolt_part) else -1.0,
+		"cover": -_cover_part.transform.basis.get_euler().x if is_instance_valid(_cover_part) else -1.0}
 
 
 ## Where reload anchor `anchor` (Reloads) puts the support forearm, from its rest: a point on the
